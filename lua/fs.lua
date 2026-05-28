@@ -29,7 +29,6 @@ EVENTFD
 FILE I/O
 	f:[try_]read(buf, len) -> readlen|0           read data from file
 	f:readn(buf, n)                               read exactly n bytes
-	f:readall([maxlen]) -> buf, len               read until EOF
 	f:write(s | buf,len)                          write data to file
 	f:sync()                                      sync kernel write buffer to disk
 	f:seek([whence] [, offset]) -> pos            get/set the file pointer
@@ -213,11 +212,6 @@ f:readn(buf, len) -> true
 
 	Read data from file until len is read.
 	Raises on EOF or I/O error.
-
-f:readall([maxlen]) -> buf, len
-
-	Read until EOF into a buffer.
-	Raises if maxlen is exceeded (default: 16 MB).
 
 f:write(s | buf,len) -> true
 
@@ -1129,7 +1123,7 @@ function hardlink(link_path, target_path, sync)
 	if sync ~= false then
 		sync_dir(dirname(link_path))
 	end
-	log('note', 'fs', 'mkhlink', 'link:   %s\ntarget:  %s', link_path, target_path)
+	log('note', 'fs', 'hardlink', 'link:   %s\ntarget:  %s', link_path, target_path)
 	return link_path
 end
 
@@ -1902,16 +1896,13 @@ end
 
 --hi-level APIs --------------------------------------------------------------
 
-function file.readall(f, maxlen)
-	return pbuffer{f = f}:readall(maxlen):ref()
-end
-
 function load_tobuffer(file, maxlen)
-	local f, err = open(file)
-	if not f then return nil, err end
-	local buf, len = f:readall(maxlen)
-	f:close()
-	return buf, len
+	return with_owner(function()
+		local f, err = open(file)
+		if not f then return nil, err end
+		local buf, len = pbuffer{f = f}:readall(maxlen):ref()
+		return buf, len
+	end)
 end
 
 function load(file, maxlen) --load a file into a string, nil if not found.

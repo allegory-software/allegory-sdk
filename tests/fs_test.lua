@@ -121,9 +121,11 @@ end
 function test.async_pipe_close_wakes_waiter_before_onclose()
 	checked_run(function()
 		local rf, wf = pipe{async = true}
-		local th, read_n, read_err, cancel_ok, cancel_err
+		local th, read_ok, read_err, cancel_ok, cancel_err
 		th = thread(function()
-			read_n, read_err = rf:try_read(u8a(1), 1)
+			read_ok, read_err = lua_pcall(function()
+				rf:try_read(u8a(1), 1)
+			end)
 		end, 'pipe reader')
 		rf:onclose(function()
 			cancel_ok, cancel_err = th:try_cancel()
@@ -131,8 +133,8 @@ function test.async_pipe_close_wakes_waiter_before_onclose()
 		resume(th)
 		rf:close()
 		wf:close()
-		assert(read_n == nil)
-		assert(read_err == 'closed')
+		assert(read_ok == false)
+		assert(read_err == CLOSED)
 		assert(cancel_ok == nil)
 		assert(cancel_err == 'thread not waiting')
 	end)
@@ -154,9 +156,9 @@ function test.async_pipe_thread_cancel_read_closes_pipe()
 		assert(read_err == CANCEL)
 
 		assert(rf:closed())
-		local n, err = rf:try_read(buf, 1)
-		assert(n == nil)
-		assert(err == 'closed')
+		local ok, err = catch('closed', rf.try_read, rf, buf, 1)
+		assert(not ok)
+		assert(err == CLOSED)
 		wf:close()
 	end)
 end
@@ -241,9 +243,9 @@ function test.open_modes()
 	local f = open(testfile)
 	f:close()
 	assert(f:closed())
-	local ok, err = f:try_read(u8a(1), 1)
+	local ok, err = catch('closed', f.try_read, f, u8a(1), 1)
 	assert(not ok)
-	assert(err == 'closed')
+	assert(err == CLOSED)
 
 	rmfile(testfile)
 end
@@ -972,60 +974,7 @@ function test.ls_is_file()
 	assert(tostring(err):find'not_dir')
 end
 
---readall, readn, skip -------------------------------------------------------
-
-function test.readall()
-	local testfile = 'fs_test_readall'
-	--non-empty file
-	local f = open(testfile, 'w')
-	f:write('hello world')
-	f:close()
-	local f = open(testfile)
-	local buf, len = f:readall()
-	assert(len == 11)
-	assert(str(buf, len) == 'hello world')
-	f:close()
-	--empty file
-	local f = open(testfile, 'w')
-	f:close()
-	local f = open(testfile)
-	local buf, len = f:readall()
-	assert(len == 0)
-	assert(str(buf, len) == '')
-	f:close()
-	rmfile(testfile)
-end
-
-function test.readall_empty()
-	local testfile = 'fs_test_readall_empty'
-	local f = open(testfile, 'w')
-	f:close()
-	local f = open(testfile)
-	local buf, len = f:readall()
-	assert(len == 0)
-	assert(str(buf, len) == '')
-	f:close()
-	rmfile(testfile)
-end
-
-function test.readall_maxlen_exact()
-	local testfile = 'fs_test_readall_maxlen_exact'
-	save(testfile, 'abc')
-	local f = open(testfile)
-	local buf, len = f:readall(3)
-	assert(len == 3)
-	assert(str(buf, len) == 'abc')
-	f:close()
-	save(testfile, 'abcd')
-	local f = open(testfile)
-	local ok, err = pcall(function()
-		f:readall(3)
-	end)
-	f:close()
-	rmfile(testfile)
-	assert(not ok)
-	assert(tostring(err):find'file_too_big')
-end
+--readn, skip ----------------------------------------------------------------
 
 function test.readn()
 	local testfile = 'fs_test_readn'
@@ -1533,6 +1482,7 @@ mkdir'fs_test'
 chdir'fs_test'
 
 local name = rawget(_G, 'FS_TEST') or ...
+local failed = false
 if not name or name == 'fs_test' then
 	--run all tests in the order in which they appear in the code.
 	local n,m = 0, 0
@@ -1549,6 +1499,7 @@ if not name or name == 'fs_test' then
 		end
 	end
 	print(string.format('ok: %d, failed: %d', m, n))
+	failed = n > 0
 elseif test[name] then
 	test[name](select(2, ...))
 else
@@ -1558,3 +1509,4 @@ end
 assert(basename(cwd()) == 'fs_test')
 chdir'..'
 rm_rf'fs_test'
+if failed then os.exit(1) end

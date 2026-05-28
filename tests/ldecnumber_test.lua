@@ -11,3 +11,4 @@ assert(balance:isinfinite() == false)
 assert(balance:isnan() == false)
 
 assert(balance:tostring() == '0.14')
+print'ldecnumber ok'

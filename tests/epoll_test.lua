@@ -595,7 +595,7 @@ function test.cancel_epollable_reentrant_sibling_cancel_returns_not_waiting()
 		local send_val, send_err
 		local recv_ok, recv_err, sibling_cancel_ok, sibling_cancel_err
 		local send_th = thread(function()
-			send_val, send_err = suspend()
+			send_val, send_err = try_suspend()
 		end)
 		local recv_th = thread(function()
 			recv_ok, recv_err = lua_pcall(suspend)
@@ -614,8 +614,8 @@ function test.cancel_epollable_reentrant_sibling_cancel_returns_not_waiting()
 		assert_cancel(recv_ok, recv_err)
 		assert(sibling_cancel_ok == nil)
 		assert(tostring(sibling_cancel_err):find('thread not waiting', 1, true))
-		assert(send_val == nil)
-		assert(send_err == 'closed')
+		assert(send_val == false)
+		assert(send_err == CLOSED)
 		assert(recv_th:status() == 'dead')
 		assert(send_th:status() == 'dead')
 	end)
@@ -812,11 +812,13 @@ end
 
 function test.nested_resume_restores_poll_thread()
 	checked_run(function()
+		local parent = currentthread()
 		local grandchild
 		local child = thread(function()
 			grandchild = thread(function()
 				suspend()
-			end):setowner()
+			end)
+			grandchild:setowner(parent)
 			resume(grandchild)
 		end)
 
@@ -1111,3 +1113,4 @@ for _, k in ipairs(tests_to_run) do
 	end
 end
 print(('ok: %d, failed: %d'):format(n_ok, n_fail))
+if n_fail == 0 then print'epoll ok' end

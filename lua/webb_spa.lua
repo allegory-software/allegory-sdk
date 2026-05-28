@@ -300,4 +300,3 @@ function spa_action()
 end
 
 action[config('root_action', 'en')] = spa_action
-

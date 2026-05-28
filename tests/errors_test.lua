@@ -138,10 +138,6 @@ end
 -- errno handling separates recoverable/user-facing errno strings from fatal
 -- usage/kernel-contract errors that should crash immediately.
 do
-	local v, err = try_errno(nil, 'custom')
-	assert(v == nil)
-	assert(err == 'custom')
-
 	local v, err = try_errno(nil, 2) --ENOENT
 	assert(v == nil)
 	assert(err == 'not_found')

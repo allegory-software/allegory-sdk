@@ -273,3 +273,4 @@ local function test_all()
 end
 
 test_all()
+print'pthread ok'

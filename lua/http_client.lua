@@ -435,6 +435,7 @@ function req:recv_body_chunk()
 		http.gz = gzip_state{op = 'decompress'}
 		tcp:onclose(function()
 			http.gz:free()
+			http.gz = nil
 		end)
 	elseif http.gzb_needs_reset then
 		http.gz.b:reset()
@@ -561,41 +562,43 @@ function client:target(req)
 	return target
 end
 
+function client:connect(req)
+	local target = req.target
+	local tcp = connect(target.host,
+		target.secure and 443 or 80,
+		req.connect_timeout,
+		target.client_ip
+	)
+	if self.debug.stream then
+		tcp:debug_stream'http'
+	end
+	if target.secure then
+		local tls_host = addr_parse(target.host) --strip port for SNI
+		tcp = client_stcp(tcp, tls_host, req.tls_options)
+	end
+	local http = http_conn(tcp)
+	tcp:setowner(target)
+	return http
+end
+
 function client:get_conn(req)
 	local target = req.target
 	local http, err = target.conn_pool:get(req.start_clock + req.wait_timeout)
-	if not http and err == 'create' then
-		local tcp, err = try_connect(target.host,
-			target.secure and 443 or 80,
-			req.connect_timeout,
-			target.client_ip
-		)
-		if not tcp then
-			target.conn_pool:cancel()
-			check_net(nil, nil, err)
-		end
-		if self.debug.stream then
-			tcp:debug_stream'http'
-		end
-		if target.secure then
-			local tls_host = addr_parse(target.host) --strip port for SNI
-			local stcp, err = try_client_stcp(tcp, tls_host, req.tls_options)
-			if not stcp then
-				target.conn_pool:cancel()
-				tcp:try_close()
-				check_net(nil, nil, err)
-			else
-				tcp = stcp
-			end
-		end
-		http = http_conn(tcp)
-		tcp:setowner(target)
-		target.conn_pool:put(http)
+	if http then return http end
+	if err ~= 'create' then
+		check_net(nil, false, err)
+	end
+	local ok, http = try_with_owner(self.connect, self, req)
+	if ok then
 		http.tcp:onclose(function()
 			target.conn_pool:pull(http)
 		end)
+		target.conn_pool:put(http)
+		return http
+	else
+		target.conn_pool:cancel()
+		check_net(nil, false, http) --http=err
 	end
-	return check_net(nil, http, err)
 end
 
 --cookie storage -------------------------------------------------------------
@@ -798,17 +801,21 @@ function client:fetch(arg1, body) --opt | url,body
 	local max_retries = req.max_retries or default_max_retries
 	local req_opt = req
 	while 1 do
-		local req, err = catch('net', client._fetch, client, req_opt, body)
-		if req then
+		local ok, req = catch('net', self._fetch, self, req_opt, body)
+		if ok then
 			return req.response_body, req
 		end
 		retries = retries + 1
 		if retries >= max_retries then
-			error(err)
+			error(req) --req=err
 		end
 	end
 end
-client.try_fetch = make_try('io protocol content', client.fetch)
+function client:try_fetch(...)
+	local ok, body, req = catch('net protocol', self.fetch, self, ...)
+	if not ok then return nil, body end
+	return body or '', req
+end
 
 --global fetch ---------------------------------------------------------------
 

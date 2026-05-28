@@ -1606,6 +1606,5 @@ errmsg("x <- 'a'  x <- 'b'", 'already defined')
 --errmsg("'a' -", "near '-'")
 
 
-print"OK"
-
+print'lpeglabel ok'
 

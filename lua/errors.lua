@@ -187,7 +187,6 @@ end
 cdef'char *strerror(int errnum);'
 
 local errno_msgs = {
-	--fs & proc
 	[  1] = 'access_denied', --EPERM
 	[  2] = 'not_found', --ENOENT, _open_osfhandle(), _fdopen(), open(), mkdir(),
 	                     --rmdir(), opendir(), rename(), unlink()
@@ -199,6 +198,7 @@ local errno_msgs = {
 	[ 12] = 'out_of_mem', --ENOMEM, mmap()
 	[ 13] = 'access_denied', --EACCES, open(), mkdir(), unlink(), rmdir()
 	[ 14] = 'bad_address', --EFAULT, syscall got an invalid pointer (fatal)
+	[ 16] = 'device_busy', --EBUSY, rmdir() of mount point, flock() races
 	[ 17] = 'already_exists', --EEXIST, open(), mkdir(), mkfifo(), rename()
 	[ 18] = 'cross_device', --EXDEV, rename()
 	[ 19] = 'no_device', --ENODEV, block device disappeared (fatal)
@@ -218,12 +218,13 @@ local errno_msgs = {
 	[ 40] = 'too_many_symlinks', --ELOOP, open(), stat() (too many symlinks in path)
 	[ 95] = 'not_supported', --EOPNOTSUPP, fallocate(), accept()
 	[122] = 'disk_quota', --EDQUOT, write(), open(), mkdir()
-	--sock
+	--socket errors
 	[ 64] = 'network_missing', --ENONET, accept()
 	[ 71] = 'protocol_error', --EPROTO, accept()
 	[ 88] = 'not_socket', --ENOTSOCK, socket operation on non-socket (fatal)
 	[ 90] = 'message_too_long', --EMSGSIZE, send(), sendto(); datagram exceeds PMTU
 	[ 92] = 'protocol_not_available', --ENOPROTOOPT, accept()
+	[ 97] = 'address_family_not_supported', --EAFNOSUPPORT, socket(), connect() with wrong family (fatal)
 	[ 98] = 'address_already_in_use', --EADDRINUSE, bind()
 	[ 99] = 'address_not_available', --EADDRNOTAVAIL, bind(), connect()
 	[100] = 'network_down', --ENETDOWN, connect(), send()
@@ -231,6 +232,7 @@ local errno_msgs = {
 	[103] = 'connection_aborted', --ECONNABORTED, accept()
 	[104] = 'connection_reset', --ECONNRESET, recv(), send(); peer sent RST
 	[105] = 'no_buffer_space', --ENOBUFS, send(), sendto()
+	[106] = 'already_connected', --EISCONN, connect() on already-connected socket (fatal)
 	[107] = 'not_connected', --ENOTCONN, send(), recv(), shutdown() (fatal)
 	[110] = 'timeout', --ETIMEDOUT, connect(), recv(); peer is unresponsive
 	[111] = 'connection_refused', --ECONNREFUSED, connect()
@@ -240,22 +242,27 @@ local errno_msgs = {
 	[115] = 'in_progress', --EINPROGRESS, connect() (handled in scheduler)
 }
 
-function try_errno(ret, err, ...)
+local fatal_errno = {
+	invalid_argument    = true, --EINVAL
+	bad_address         = true, --EFAULT
+	bad_file            = true, --EBADF
+	not_socket          = true, --ENOTSOCK
+	invalid_seek        = true, --ESPIPE
+	no_device           = true, --ENODEV
+	too_many_fds        = true, --EMFILE
+	read_only           = true, --EROFS
+	not_implemented     = true, --ENOSYS
+	not_connected       = true, --ENOTCONN
+	already_in_progress = true, --EALREADY
+	already_connected   = true, --EISCONN
+	address_family_not_supported = true, --EAFNOSUPPORT
+}
+
+function try_errno(ret, err)
 	if ret then return ret end
-	if type(err) == 'string' then return ret, err end
 	err = err or errno()
 	local s = errno_msgs[err]
-	assert(s ~= 'invalid_argument', s)
-	assert(s ~= 'bad_address', s)
-	assert(s ~= 'bad_file', s)
-	assert(s ~= 'not_socket', s)
-	assert(s ~= 'invalid_seek', s)
-	assert(s ~= 'no_device', s)
-	assert(s ~= 'too_many_fds', s)
-	assert(s ~= 'read_only', s)
-	assert(s ~= 'not_implemented', s)
-	assert(s ~= 'not_connected', s)
-	assert(s ~= 'already_in_progress', s)
+	assert(not fatal_errno[s], s)
 	return ret, s or str(C.strerror(err)) or 'errno#'..err
 end
 function check_errno(...)

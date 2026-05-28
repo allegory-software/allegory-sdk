@@ -128,3 +128,4 @@ run(function()
 
 
 end)
+print'schema ok'

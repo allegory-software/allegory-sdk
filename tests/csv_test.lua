@@ -95,11 +95,12 @@ newline!]])
 
 
 if errors == 0 then
-  io.stdout:write("Passed\n")
+	io.stdout:write("Passed\n")
+	print'csv ok'
 elseif errors == 1 then
-  io.stdout:write("1 error\n")
+	io.stdout:write("1 error\n")
 else
-  io.stdout:write(("%d errors\n"):format(errors))
+	io.stdout:write(("%d errors\n"):format(errors))
 end
 
 os.exit(errors)

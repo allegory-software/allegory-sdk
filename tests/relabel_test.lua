@@ -1161,4 +1161,4 @@ assert(eval("98-76*54/32") == 37.125)
 assert(eval("1+") == 4)
 --> syntax error: expected a term after the operator (at index 3)
 
-print("OK")
+print'relabel ok'

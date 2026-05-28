@@ -18,9 +18,9 @@ ALLOC/FREE
 	pb:set(str)                          use a string as the underlying buffer
 	pb:set(cdata, size)                  use a cdata as the underlying buffer
 	pb:reserve(size) -> p, size          allocate memory for writing
-	pb:free()                            free buffer memory now (not on gc)
+	pb:free()                            free buffer memory now (instead of on gc)
 PUSH
-	pb:commit(size)                      commit written memory got with reserve()
+	pb:commit(size) -> pb                commit written memory got with reserve()
 	pb:put([str|num|obj], ...)           push values to buffer
 	pb:putf(format, ...)                 push printf message
 	pb:putcdata(cdata, size)             push cdata value
@@ -28,18 +28,20 @@ PUSH
 	pb:put_{u8,i8,...}(x)                push (u)int8/16/32/64 LE/BE, float32/64
 	pb:encode(o)                         push Lua value (binary serialization)
 	pb:fill(n, [c])                      push repeat bytes
+	pb:put_value(msg, [maxlen]) -> pb    push length-prefixed encoded Lua value
 DIRECT ACCESS
 	#pb                                  buffer written (commited) size
 	pb:ref() -> p, size                  get buffer and written (commited) size
-	pb:get_{u8,i8,...}_at(x, offset)     read binary integer at offset
-	pb:set_{u8,i8,...}_at(x, offset)     write binary integer at offset
+	pb:get_{u8,i8,...}_at(offset) -> x   read binary integer at offset
+	pb:set_{u8,i8,...}_at(offset, x)     write binary integer at offset
 	pb:tostring() -> s                   convert buffer to string
 PULL
 	pb:get([n]) -> s                     pull n bytes (or all) to string
-	pb:get_{u8,i8,...}(x)                pull binary integer
+	pb:get_{u8,i8,...}() -> x            pull binary integer
 	pb:decode() -> t                     pull Lua value (pushed with encode())
+	pb:get_value([maxlen]) -> msg        read length-prefixed encoded Lua value
 	pb:getto(term, [i], [j]) -> s|nil    pull terminated string (term between i,j)
-	pb:reset()                           pb:skip(#pb)
+	pb:reset() -> pb                     pb:skip(#pb)
 READAHEAD
 	pb:have(n) -> true | false           fill buffer to n bytes or more, up to eof
 	pb:load(n) -> pb                     fill buffer to n bytes or more, up to eof
@@ -102,12 +104,16 @@ function pb:putcdata (...) self.b:putcdata (...); return self end
 function pb:set      (...) self.b:set      (...); return self end
 function pb:reset    ()    self.b:reset    ()   ; return self end
 function pb:encode   (o)   self.b:encode   (o)  ; return self end
-function pb:free     ()    self.b:free     ()   ; return self end
 function pb:commit   (n)   self.b:commit   (n)  ; return self end
 function pb:tostring ()    return self.b:tostring () end
 function pb:__len    ()    return #self.b end
 function pb:reserve  (n)   return self.b:reserve(n) end
 function pb:ref      ()    return self.b:ref() end
+function pb:free     ()
+	if not self.b then return end
+	self.b:free()
+	self.b = nil
+end
 
 function pb:putdata(data, len)
 	if isstr(data) then
@@ -323,4 +329,24 @@ function pb:flush()
 	local p, len = self:ref()
 	self.f:write(p, len)
 	self:reset()
+end
+
+pb.max_message_size = 16 * 1024^2
+
+function pb:put_value(msg, maxlen)
+	self:reserve(4)
+	self:commit(4)
+	self:encode(msg)
+	local len = #self - 4
+	maxlen = maxlen or pb.max_message_size
+	self:checkp(len <= maxlen, 'message too long: %d', len)
+	self:set_u32_at(0, len)
+	return self
+end
+
+function pb:get_value(maxlen)
+	local len = self:need(4):get_u32()
+	maxlen = maxlen or pb.max_message_size
+	self:checkp(len <= maxlen, 'message too long: %d', len)
+	return self:need(len):decode()
 end

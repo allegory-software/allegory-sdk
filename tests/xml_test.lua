@@ -55,3 +55,5 @@ assert(s == [[
 </html>
 !EOF
 ]])
+
+print'xml ok'

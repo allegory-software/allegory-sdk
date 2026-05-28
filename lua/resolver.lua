@@ -521,7 +521,7 @@ local function schedule(rs, ns)
 				break
 			end
 			ns.udp:setexpires(min_expires)
-			local len, err = ns.udp:try_recv(buf, sz)
+			local len, err = ns.udp:recv(buf, sz)
 			rs:dbg(ns, nil, 'RECV', len, err)
 			if not len then
 				for qid, q in pairs(ns.queue) do
@@ -556,7 +556,8 @@ local function schedule(rs, ns)
 end
 
 function resolver(opt)
-	local rs = update({}, rs, opt)
+	local owner = _check_owner(opt and opt.owner)
+	local rs = _own(owner, update({}, rs, opt))
 
 	if not rs.debug then
 		rs.dbg  = noop
@@ -575,7 +576,7 @@ function resolver(opt)
 			addr = ns
 		end
 		if not addr:find':%d+$' then addr = addr..':53' end
-		local udp = udp()
+		local udp = udp{owner = rs}
 		udp:connect(addr)
 		local ns = {addr = addr, udp = udp, tcp_only = tcp_only, queue = {}}
 		ns.scheduler = thread(function()
@@ -730,6 +731,7 @@ function try_resolve(host, type, timeout)
 		hosts6  = config'hosts6',
 		servers = config'ns',
 		debug   = config'resolver_debug',
+		owner   = mainthread(),
 	}
 	return rs:try_resolve(host, type, timeout)
 end

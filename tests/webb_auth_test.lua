@@ -180,4 +180,6 @@ end) --pcall
 if not ok then
 	err = tostring(err):gsub('/home/cosmin/sdk/bin/..', 'sdk')
 	pr(err)
+else
+	print'webb_auth ok'
 end

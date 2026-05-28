@@ -57,3 +57,5 @@ soaptest[[<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
 			</ns1:serviceA>
 		</soap:Body>
 	</soap:Envelope>]]
+
+print'xml_parse ok'

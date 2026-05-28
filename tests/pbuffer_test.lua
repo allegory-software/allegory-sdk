@@ -115,6 +115,40 @@ function test.file_readall()
 	b:free(); f:close(); rmfile(testfile)
 end
 
+function test.file_readall_empty()
+	mkfile('')
+	local f = open(testfile)
+	local b = pbuffer{f = f}
+	assert(b:readall() == b)
+	local p, len = b:ref()
+	assert(len == 0)
+	assert(str(p, len) == '')
+	b:free(); f:close(); rmfile(testfile)
+end
+
+function test.file_readall_maxlen_exact()
+	mkfile('abc')
+	local f = open(testfile)
+	local b = pbuffer{f = f}
+	assert(b:readall(3) == b)
+	local p, len = b:ref()
+	assert(len == 3)
+	assert(str(p, len) == 'abc')
+	b:free(); f:close(); rmfile(testfile)
+end
+
+function test.file_readall_maxlen_exceeded()
+	mkfile('abcd')
+	local f = open(testfile)
+	local b = pbuffer{f = f}
+	local ok, err = pcall(function()
+		b:readall(3)
+	end)
+	assert(not ok)
+	assert(tostring(err):find'file_too_big')
+	b:free(); f:close(); rmfile(testfile)
+end
+
 -- flush: write buffer to file
 function test.file_flush()
 	local f = open(testfile, 'w')
@@ -330,10 +364,13 @@ function test.sock_flush()
 	checked_run(function()
 		local port = nextport()
 		local server = listen('127.0.0.1:'..port)
-		local got_buf, got_len
+		local got
 		resume(sthread(function()
 			local cs = server:accept()
-			got_buf, got_len = cs:recvall()
+			local b = pbuffer{f = cs}
+			local p, len = b:readall():ref()
+			got = str(p, len)
+			b:free()
 			cs:close()
 			server:close()
 		end, 'server'))
@@ -344,7 +381,44 @@ function test.sock_flush()
 		assert(#b == 0)
 		b:free(); s:close()
 		wait(0.05)
-		assert(got_buf and str(got_buf, got_len) == 'hello world')
+		assert(got == 'hello world')
+	end)
+end
+
+function test.sock_readall()
+	checked_run(function()
+		local port = nextport()
+		local server = listen('127.0.0.1:'..port)
+		resume(sthread(function()
+			local s = connect('127.0.0.1:'..port)
+			s:send'hello '
+			s:send'world'
+			s:close()
+		end, 'client'))
+		local cs = server:accept()
+		local b = pbuffer{f = cs}
+		local p, len = b:readall():ref()
+		assert(str(p, len) == 'hello world')
+		b:free(); cs:close(); server:close()
+	end)
+end
+
+function test.sock_readall_partial_error()
+	checked_run(function()
+		local port = nextport()
+		local server = listen('127.0.0.1:'..port)
+		local s = connect('127.0.0.1:'..port)
+		s:send'partial'
+		local cs = server:accept()
+		cs:settimeout(0.05, 'r')
+		local b = pbuffer{f = cs}
+		local ok, err = pcall(function()
+			b:readall()
+		end)
+		assert(not ok)
+		assert(tostring(err):find'timeout')
+		s:close()
+		b:free(); cs:close(); server:close()
 	end)
 end
 
@@ -499,6 +573,75 @@ function test.sock_close()
 	end)
 end
 
+-- put_value / get_value round-trip over socket
+function test.sock_put_get_value()
+	checked_run(function()
+		local port = nextport()
+		local server = listen('127.0.0.1:'..port)
+		resume(sthread(function()
+			local s = connect('127.0.0.1:'..port)
+			local wb = pbuffer{f = s}
+			wb:put_value{kind = 'hello', n = 42, list = {'a', 'b'}}
+			wb:flush()
+			wb:put_value'next'
+			wb:flush()
+			local rb = pbuffer{f = s}
+			local reply = rb:get_value()
+			assert(reply.ok == true)
+			assert(reply.count == 2)
+			wb:free(); rb:free(); s:close()
+		end, 'client'))
+		local cs = server:accept()
+		local rb = pbuffer{f = cs}
+		local msg = rb:get_value()
+		assert(msg.kind == 'hello')
+		assert(msg.n == 42)
+		assert(msg.list[1] == 'a')
+		assert(msg.list[2] == 'b')
+		assert(rb:get_value() == 'next')
+		local wb = pbuffer{f = cs}
+		wb:put_value{ok = true, count = 2}
+		wb:flush()
+		rb:free(); wb:free(); cs:close(); server:close()
+		wait(0.05) --let client finish and check its assertions
+	end)
+end
+
+-- put_value: message too long raises before any I/O
+function test.sock_put_value_maxlen()
+	checked_run(function()
+		local s = tcp()
+		local wb = pbuffer{f = s}
+		local ok, err = catch('protocol', wb.put_value, wb, 'abcd', 3)
+		assert(not ok)
+		assert(iserror(err, 'protocol'))
+		assert(err.message:find('message too long', 1, true))
+		s:close()
+	end)
+end
+
+-- get_value: message too long raises after reading length
+function test.sock_get_value_maxlen()
+	checked_run(function()
+		local port = nextport()
+		local server = listen('127.0.0.1:'..port)
+		resume(sthread(function()
+			local s = connect('127.0.0.1:'..port)
+			local wb = pbuffer{f = s}
+			wb:put_value'abcd'
+			wb:flush()
+			s:close()
+		end, 'client'))
+		local cs = server:accept()
+		local rb = pbuffer{f = cs}
+		local ok, err = catch('protocol', rb.get_value, rb, 3)
+		assert(not ok)
+		assert(iserror(err, 'protocol'))
+		assert(err.message:find('message too long', 1, true))
+		rb:free(); cs:close(); server:close()
+	end)
+end
+
 -- == runner =================================================================
 
 chdir(os.getenv'HOME')
@@ -529,3 +672,4 @@ print(('ok: %d, failed: %d'):format(n_ok, n_fail))
 assert(basename(cwd()) == 'pbuffer_test')
 chdir'..'
 rm_rf'pbuffer_test'
+if n_fail == 0 then print'pbuffer ok' end

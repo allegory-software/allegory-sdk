@@ -432,8 +432,8 @@ function os_thread(func, ...)
 		require'os_thread'
 
 		local function pass(ok, ...)
-			local retvals = _os_thread_serialize_args(pack(ok, ...))
-			rawset(_G, '__ret', retvals) --is this the only way to get them out?
+			local ok_retvals = _os_thread_serialize_args(pack(ok, ...))
+			rawset(_G, '__ret', ok_retvals) --is this the only way to get them out?
 		end
 	   local function worker()
 	   	local t = _os_thread_deserialize_args(args)
@@ -463,11 +463,11 @@ function thread:try_join()
 	self.args = nil --release args
 	--get the return values of worker function
 	self.state:getglobal'__ret'
-	local retvals = self.state:get()
+	local ok_retvals = self.state:get()
 	self.state:close()
-	retvals = _os_thread_deserialize_args(retvals)
+	ok_retvals = _os_thread_deserialize_args(ok_retvals)
 	_disown(self)
-	return true, unpack(retvals)
+	return unpack(ok_retvals)
 end
 function thread:join()
 	return select(2, assert(self:try_join()))

@@ -10,7 +10,6 @@ CLIENT
 	websocket_connect(url, [opt]) -> ws        connect to ws:// or wss://
 	- url                                      ws://host[:port][/path] or wss://...
 	- headers                                  extra request headers ({k=v})
-	- subprotocols                             list of acceptable subprotocols
 	- tls_options                              passed to sock_bearssl
 	- connect_timeout                          connect timeout in seconds
 	- handshake_timeout                        handshake send+recv timeout (default 5)
@@ -19,27 +18,25 @@ CLIENT
 
 SERVER
 	websocket_upgrade(req, [opt]) -> ws        upgrade an http_server request
-	- subprotocols                             list of acceptable subprotocols
 	- max_message_size                         inbound message size limit (16M)
 	- max_frame_size                           inbound frame size limit (16M)
 
 WS OBJECT
-	ws.subprotocol -> str|nil                  negotiated subprotocol
 	ws.headers     -> {k=v}                    response (client) / request (server) headers
 	ws.tcp         -> tcp|stcp                 the underlying socket
-	ws:[try_]send(s, ['text'|'binary'])        send a message (text default)
-	ws:[try_]recv() -> s, kind                 receive next data message
-	                | nil, code, reason        clean close from peer or local
-	ws:[try_]close([code], [reason])           send Close, drain peer Close, shutdown
-	ws:[try_]ping([payload])                   send a Ping (pong handled inside recv)
-	ws:[try_]send_chunk(s, [kind], [fin])      streaming send: first call sets kind,
+	ws:send(s, ['text'|'binary'])              send a message (text default)
+	ws:recv() -> s, kind                       receive next data message
+	          | nil, code, reason              clean close from peer or local
+	ws:close([code], [reason])                 send Close, drain peer Close, shutdown
+	ws:ping([payload])                         send a Ping (pong handled inside recv)
+	ws:send_chunk(s, [kind], [fin])            streaming send: first call sets kind,
 	                                           subsequent calls use continuation;
 	                                           pass fin=true on last chunk
-	ws:[try_]recv_chunk() -> s, kind, fin      streaming recv: returns each frame's
-	                      | nil, code, reason  payload (controls handled inline)
+	ws:recv_chunk() -> s, kind, fin            streaming recv: returns each frame's
+	                | nil, code, reason        payload (controls handled inline)
 
 CLOSE CODES (RFC 6455 7.4)
-	1000 normal closure        1007 invalid frame payload data (bad UTF-8)
+	1000 normal closure        1007 invalid frame payload data
 	1001 going away            1008 policy violation
 	1002 protocol error        1009 message too big
 	1003 unsupported data      1011 internal error
@@ -83,44 +80,12 @@ local function ws_accept(key)
 	return base64_encode(sha1(key..WS_GUID))
 end
 
---strict UTF-8 validator (RFC 3629) ------------------------------------------
-
-local function valid_utf8(s)
-	local p = cast(u8p, s)
-	local n = #s
-	local i = 0
-	while i < n do
-		local c = p[i]
-		if c < 0x80 then
-			i = i + 1
-		elseif c < 0xC2 then
-			return false
-		elseif c < 0xE0 then
-			if i + 1 >= n then return false end
-			if band(p[i+1], 0xC0) ~= 0x80 then return false end
-			i = i + 2
-		elseif c < 0xF0 then
-			if i + 2 >= n then return false end
-			local b1 = p[i+1]
-			if band(b1, 0xC0) ~= 0x80 then return false end
-			if band(p[i+2], 0xC0) ~= 0x80 then return false end
-			if c == 0xE0 and b1 < 0xA0 then return false end --overlong
-			if c == 0xED and b1 >= 0xA0 then return false end --surrogate
-			i = i + 3
-		elseif c < 0xF5 then
-			if i + 3 >= n then return false end
-			local b1 = p[i+1]
-			if band(b1, 0xC0) ~= 0x80 then return false end
-			if band(p[i+2], 0xC0) ~= 0x80 then return false end
-			if band(p[i+3], 0xC0) ~= 0x80 then return false end
-			if c == 0xF0 and b1 < 0x90 then return false end --overlong
-			if c == 0xF4 and b1 >= 0x90 then return false end --> U+10FFFF
-			i = i + 4
-		else
-			return false
-		end
+local function valid_ws_key(key)
+	if not key or not key:find'^[A-Za-z0-9+/]+=?=?$' then
+		return false
 	end
-	return true
+	local _, len = base64_decode_tobuffer(key)
+	return len == 16
 end
 
 local function valid_close_code(code)
@@ -247,7 +212,6 @@ local function parse_close_payload(self, payload)
 	local code = byte(payload, 1) * 256 + byte(payload, 2)
 	local reason = payload:sub(3)
 	self.tcp:checkp(valid_close_code(code), 'invalid close code')
-	self.tcp:checkp(valid_utf8(reason), 'invalid utf8 in close reason')
 	return code, reason
 end
 
@@ -308,9 +272,6 @@ function ws:recv()
 			msg[#msg + 1] = read_payload(self, plen, mask)
 			if fin then
 				local s = #msg == 1 and msg[1] or concat(msg)
-				if msg_kind == 'text' then
-					self.tcp:checkp(valid_utf8(s), 'invalid utf8 in text message')
-				end
 				return s, msg_kind
 			end
 		end
@@ -366,8 +327,14 @@ function ws:recv_chunk()
 				self.tcp:checkp(not self.recv_in_progress, 'data frame inside message')
 				kind = (opcode == OP_TEXT) and 'text' or 'binary'
 				self.recv_in_progress = fin and nil or kind
+				self.recv_total = 0
 			end
-			if fin then self.recv_in_progress = nil end
+			self.recv_total = self.recv_total + plen
+			self.tcp:checkp(self.recv_total <= self.max_message_size, 'message too big')
+			if fin then
+				self.recv_in_progress = nil
+				self.recv_total = nil
+			end
 			local payload = read_payload(self, plen, mask)
 			return payload, kind, fin
 		end
@@ -387,17 +354,14 @@ function ws:close(code, reason)
 		write_close_frame(self, code, reason)
 		if not self.peer_closed then
 			self.tcp:settimeout(self.close_timeout)
-			pcall(function()
-				while not self.peer_closed do
-					local _, opcode, plen, mask = read_frame_header(self)
-					local payload = read_payload(self, plen, mask)
-					if opcode == OP_CLOSE then
-						handle_peer_close(self, payload)
-					end
-					--ignore data/ping frames during close handshake
+			while not self.peer_closed do
+				local _, opcode, plen, mask = read_frame_header(self)
+				local payload = read_payload(self, plen, mask)
+				if opcode == OP_CLOSE then
+					handle_peer_close(self, payload)
 				end
-			end)
-			self.tcp:settimeout(nil)
+				--ignore data/ping frames during close handshake
+			end
 		end
 	end
 	if self.is_client then
@@ -405,18 +369,14 @@ function ws:close(code, reason)
 	end
 end
 
-ws.try_send       = make_try('io protocol content',ws.send)
-ws.try_recv       = make_try('io protocol content',ws.recv)
-ws.try_send_chunk = make_try('io protocol content',ws.send_chunk)
-ws.try_recv_chunk = make_try('io protocol content',ws.recv_chunk)
-ws.try_ping       = make_try('io protocol content',ws.ping)
-ws.try_close      = make_try('io protocol content',ws.close)
-
 --server-side upgrade --------------------------------------------------------
 
 function websocket_upgrade(req, opt)
 	opt = opt or empty
 	local h = req.headers
+	if req.method ~= 'GET' then
+		error{type = 'http_response', status = 405, content = 'Expected GET\n'}
+	end
 	if not (h.upgrade and h.upgrade:lower() == 'websocket') then
 		error{type = 'http_response', status = 400, content = 'Expected Upgrade: websocket\n'}
 	end
@@ -429,30 +389,14 @@ function websocket_upgrade(req, opt)
 			content = 'Unsupported WebSocket version\n'}
 	end
 	local key = h['sec-websocket-key']
-	if not key then
-		error{type = 'http_response', status = 400, content = 'Missing Sec-WebSocket-Key\n'}
-	end
-	--subprotocol negotiation: server picks first offered protocol that's also in opt.subprotocols
-	local chosen
-	if opt.subprotocols then
-		local offered = h['sec-websocket-protocol']
-		if offered then
-			for p in offered:gmatch'[^,%s]+' do
-				for _, a in ipairs(opt.subprotocols) do
-					if a == p then chosen = a; break end
-				end
-				if chosen then break end
-			end
-		end
+	if not valid_ws_key(key) then
+		error{type = 'http_response', status = 400, content = 'Invalid Sec-WebSocket-Key\n'}
 	end
 	local wb = req.tcp.wb
 	wb:put'HTTP/1.1 101 Switching Protocols\r\n'
 	wb:put'Upgrade: websocket\r\n'
 	wb:put'Connection: Upgrade\r\n'
 	wb:put('Sec-WebSocket-Accept: '..ws_accept(key)..'\r\n')
-	if chosen then
-		wb:put('Sec-WebSocket-Protocol: '..chosen..'\r\n')
-	end
 	wb:put'\r\n'
 	wb:flush()
 	--prevent http_server from sending/closing further on this conn
@@ -464,7 +408,6 @@ function websocket_upgrade(req, opt)
 		wb  = req.tcp.wb,
 		is_server = true,
 		is_client = false,
-		subprotocol = chosen,
 		headers = h,
 		max_message_size = opt.max_message_size or ws.max_message_size,
 		max_frame_size   = opt.max_frame_size   or ws.max_frame_size,
@@ -472,7 +415,7 @@ function websocket_upgrade(req, opt)
 	--auto-close on handler return if app didn't already close
 	req:onfinish(function()
 		if not self.closed_sent then
-			pcall(self.close, self, 1001, 'going away')
+			self:close(1001, 'going away')
 		end
 	end)
 	return self
@@ -488,6 +431,7 @@ function websocket_connect(url_s, opt)
 	local secure = scheme == 'wss'
 	local port = tonumber(u.port) or (secure and 443 or 80)
 	local tcp = connect(u.host, port, opt.connect_timeout)
+
 	if secure then
 		tcp = client_stcp(tcp, u.host, opt.tls_options)
 	end
@@ -511,9 +455,6 @@ function websocket_connect(url_s, opt)
 	wb:put'Connection: Upgrade\r\n'
 	wb:put('Sec-WebSocket-Key: '..key..'\r\n')
 	wb:put'Sec-WebSocket-Version: 13\r\n'
-	if opt.subprotocols then
-		wb:put('Sec-WebSocket-Protocol: '..concat(opt.subprotocols, ', ')..'\r\n')
-	end
 	if opt.headers then
 		for k, v in pairs(opt.headers) do
 			wb:put(k..': '..tostring(v)..'\r\n')
@@ -544,7 +485,6 @@ function websocket_connect(url_s, opt)
 		wb  = wb,
 		is_server = false,
 		is_client = true,
-		subprotocol = resp['sec-websocket-protocol'],
 		headers = resp,
 		max_message_size = opt.max_message_size or ws.max_message_size,
 		max_frame_size   = opt.max_frame_size   or ws.max_frame_size,

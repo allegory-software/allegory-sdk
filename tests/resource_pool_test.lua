@@ -164,5 +164,5 @@ run(function()
 		assert(err == 'timeout') -- pool is full (n=2=limit)
 	end
 
-	print'respool ok'
+	print'resource_pool ok'
 end)

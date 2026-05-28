@@ -4,12 +4,12 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 API
-	[try_]client_stcp(tcp, host, opt) -> cstcp   create a secure client socket
+	client_stcp(tcp, host, opt) -> cstcp         create a secure client socket
 	[try_]server_stcp(tcp, opt) -> sstcp         create a secure server socket
-	- sstcp:[try_]accept([opt], [timeout]) -> cstcp   accept a TLS client connection
-	- - cstcp:[try_]recv(buf, sz) -> n|0         receive decrypted bytes, sz > 0
-	- - cstcp:recvn(buf, sz) -> true            receive exactly sz decrypted bytes
-	- - cstcp:recvall([maxlen]) -> buf, len     receive until close_notify
+	- sstcp:try_accept([opt], [timeout]) -> ctcp | nil,err
+	- sstcp:tls_accept(ctcp, [opt]) -> cstcp     run TLS handshake on accepted TCP
+	- - cstcp:recv(buf, sz) -> n|0               receive decrypted bytes, sz > 0
+	- - cstcp:recvn(buf, sz) -> true             receive exactly sz decrypted bytes
 	- - cstcp:send(buf, [sz]) -> true            send bytes (encrypted)
 	- - cstcp:send_close_notify()
 	- - cstcp:[try_]close()                      close with SSL shutdown
@@ -1007,31 +1007,29 @@ end
 local _szp = new'size_t[1]' -- shared; safe because reads are captured before yields
 
 -- Drive the engine until `target` state bits are set.
--- Returns true, or nil+err on error/closed.
+-- Returns the reached engine state. TCP/TLS I/O errors raise.
 local function engine_run(self, target)
 	local eng = self.eng
 	local tcp = self.tcp
 	while true do
 		local state = tonumber(C.br_ssl_engine_current_state(eng))
 		if band(state, target) ~= 0 then
-			return true
+			return state
 		end
 		if band(state, BR_SSL_CLOSED) ~= 0 then
 			local e = tonumber(eng.err)
-			return nil, ssl_engine_error(e)
+			self:check_net(false, ssl_engine_error(e))
 		end
 		if band(state, BR_SSL_SENDREC) ~= 0 then
 			local buf = C.br_ssl_engine_sendrec_buf(eng, _szp)
 			local n = tonumber(_szp[0])
-			local ok, err = tcp:try_send(buf, n)
-			if not ok then return nil, err end
+			tcp:send(buf, n)
 			C.br_ssl_engine_sendrec_ack(eng, n)
 		elseif band(state, BR_SSL_RECVREC) ~= 0 then
 			local buf = C.br_ssl_engine_recvrec_buf(eng, _szp)
 			local n = tonumber(_szp[0])
-			local len, err = tcp:try_recv(buf, n)
-			if not len then return nil, err end
-			if len == 0 then return nil, 'ssl_unexpected_eof' end
+			local len = tcp:recv(buf, n)
+			self:check_net(len > 0, 'ssl_unexpected_eof')
 			C.br_ssl_engine_recvrec_ack(eng, len)
 		else
 			error'ssl_stall'
@@ -1107,33 +1105,22 @@ end
 
 local client_stcp = merge({type = 'client_tls_socket'}, stcp)
 
-local function wrap_client_stcp(tcp, eng, keepalive)
-	local s = object(client_stcp, {
-		tcp        = tcp,
-		eng        = eng,
-		_keepalive = keepalive,
-	})
-	tcp.stcp = s --cross-ref
-	return s
-end
-
-function _G.try_client_stcp(tcp, host, opt)
+function _G.client_stcp(tcp, host, opt)
 	opt = opt or empty
 	local owner = _check_owner(opt.owner)
 	local sc, eng, keepalive = make_client_ctx(opt)
 	assert(C.br_ssl_client_reset(sc, host, 0) ~= 0, 'ssl_client_reset_failed')
-	local s = wrap_client_stcp(tcp, eng, keepalive)
-	live(s, 'tcp=%s', tcp)
-	local ok, err = engine_run(s, bor(BR_SSL_SENDAPP, BR_SSL_RECVAPP))
-	if not ok then
-		live(s, nil)
-		return nil, err
-	end
-	_own(owner, s)
+	local s = _own(owner, object(client_stcp, {
+		tcp = tcp,
+		eng = eng,
+		_keepalive = keepalive,
+	}))
+	tcp.stcp = s --cross-ref
 	tcp:setowner(s)
+	engine_run(s, bor(BR_SSL_SENDAPP, BR_SSL_RECVAPP))
+	live(s, 'tcp=%s', tcp)
 	return s
 end
-_G.client_stcp = make_raising(_G.try_client_stcp)
 
 function client_stcp:send_close_notify()
 	if not self.eng then return end
@@ -1161,13 +1148,14 @@ function client_stcp:send_close_notify()
 	end
 end
 
-function client_stcp:try_recv(buf, sz)
+function client_stcp:recv(buf, sz)
 	assert(sz and sz > 0, 'recv size must be > 0')
 	self:check_closed()
-	local ok, err = engine_run(self, BR_SSL_RECVAPP)
-	if not ok then
+	local state = engine_run(self, bor(BR_SSL_RECVAPP, BR_SSL_CLOSED))
+	if band(state, BR_SSL_RECVAPP) == 0 then
+		local err = ssl_engine_error(tonumber(self.eng.err))
 		if err == 'eof' then return 0 end
-		return nil, err
+		self:check_net(false, err)
 	end
 	local app_buf = C.br_ssl_engine_recvapp_buf(self.eng, _szp)
 	local n = min(sz, tonumber(_szp[0]))
@@ -1175,6 +1163,7 @@ function client_stcp:try_recv(buf, sz)
 	C.br_ssl_engine_recvapp_ack(self.eng, n)
 	return n
 end
+client_stcp.read  = client_stcp.recv --for pbuffer
 
 function client_stcp:send(buf, sz)
 	self:check_closed()
@@ -1183,7 +1172,7 @@ function client_stcp:send(buf, sz)
 	local bp = cast(u8p, buf)
 	local sent = 0
 	while sent < sz do
-		self:check_net(engine_run(self, BR_SSL_SENDAPP))
+		engine_run(self, BR_SSL_SENDAPP)
 		local app_buf = C.br_ssl_engine_sendapp_buf(self.eng, _szp)
 		local n = min(sz - sent, tonumber(_szp[0]))
 		copy(app_buf, bp + sent, n)
@@ -1191,19 +1180,15 @@ function client_stcp:send(buf, sz)
 		C.br_ssl_engine_flush(self.eng, 0)
 		sent = sent + n
 	end
-	-- drain encrypted output to TCP; ignore EOF (data already accepted)
-	self:check_net(engine_run(self, bor(BR_SSL_SENDAPP, BR_SSL_RECVAPP)))
+	-- drain encrypted output to TCP.
+	engine_run(self, bor(BR_SSL_SENDAPP, BR_SSL_RECVAPP))
 	return true
 end
+client_stcp.write = client_stcp.send --for pbuffer
 
-client_stcp.close       = make_raising(client_stcp.try_close)
-client_stcp.recv        = make_raising(client_stcp.try_recv)
-client_stcp.recvall     = tcp_class.recvall
-client_stcp.recvn       = tcp_class.recvn
-client_stcp.readn       = client_stcp.recvn
-client_stcp.try_read    = client_stcp.try_recv
-client_stcp.read        = client_stcp.recv
-client_stcp.write       = client_stcp.send
+--copy hi-level API since it's based entirely on send/recv.
+client_stcp.recvn = tcp_class.recvn
+client_stcp.readn = tcp_class.recvn
 
 -- Server (listening) socket -------------------------------------------------
 
@@ -1253,32 +1238,33 @@ function _G.try_server_stcp(tcp, opt)
 end
 _G.server_stcp = make_raising(_G.try_server_stcp)
 
-function server_stcp:try_accept(opt, timeout)
+function server_stcp:try_accept(...)
+	return self.tcp:try_accept(...)
+end
+function server_stcp:tls_accept(ctcp, opt)
 	self:check_closed()
-	local ctcp, err, retry = self.tcp:try_accept(opt, timeout)
-	if not ctcp then return nil, err, retry end
 
 	local sc, eng, keepalive = make_server_ctx(
 		self._chain, self._chain_n, self._sk, self._kt, self._issuer_kt, self._cache)
+
 	assert(C.br_ssl_server_reset(sc) ~= 0, 'ssl_server_reset_failed')
 
-	local s = wrap_client_stcp(ctcp, eng, keepalive)
-	s.listen_socket = self
-	local ok, err = engine_run(s, bor(BR_SSL_SENDAPP, BR_SSL_RECVAPP))
-	if not ok then
-		s:try_close()
-		return nil, err, true --retriable
-	end
-
-	_own(self, s)
+	local s = _own(ctcp.owner, object(client_stcp, {
+		tcp = ctcp,
+		eng = eng,
+		_keepalive = keepalive,
+		listen_socket = self,
+	}, opt))
+	ctcp.stcp = s --cross-ref
 	ctcp:setowner(s)
+
+	engine_run(s, bor(BR_SSL_SENDAPP, BR_SSL_RECVAPP))
+
+	local sn = eng.server_name
+	s.server_name = sn[0] ~= 0 and str(sn) or nil
 
 	live(s, 'accepted %s.%d tcp=%s clients:%d',
 		self, ctcp.i, ctcp, self.tcp._sockets_n)
 
-	local sn = sc.eng.server_name
-	s.server_name = sn[0] ~= 0 and str(sn) or nil
-
 	return s
 end
-server_stcp.accept = make_raising(server_stcp.try_accept)

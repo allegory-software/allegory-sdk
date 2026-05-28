@@ -14,7 +14,7 @@ EXEC/KILL/PROCESS INFO
 	[try_]exec_luafile(opt | script_file,...) -> p  spawn a process running a Lua script
 	[try_]exec_lua(opt | script_code, ...)          spawn a process running Lua code
 	p.pid                                           process ID
-	p:[try_]kill([signal=SIGTERM])                  kill process
+	p:kill([signal=SIGTERM]) -> ok | nil,err        kill process
 	p:status() -> status                            active, finished, killed, forgotten
 	p:wait_until([expires]) -> code | nil,status    wait for a process to finish
 	p:wait([timeout]) -> code | nil,status          wait for a process to finish
@@ -22,7 +22,7 @@ EXEC/KILL/PROCESS INFO
 	p:forget()                                      close process handles
 	p:try_close()                                   kill(9) and forget
 	p:info() -> t                                   parse /proc/PID/stat
-	[try_]kill(pid, [signal=SIGTERM])               kill a process
+	kill(pid, [signal=SIGTERM]) -> ok | nil,err     kill a process
 	proc_info([pid]) -> t                           parse /proc/PID/stat
 ENV VARS
 	env(k) -> v                                get env. var
@@ -427,34 +427,23 @@ function proc:forget()
 	if pid then live(self, nil) end
 end
 
-function try_kill(pid, sig)
-	return try_errno(C.kill(pid, sig or SIGTERM) == 0)
-end
 function kill(pid, sig)
-	sig = sig or SIGTERM
-	local ok, err = try_kill(pid, sig)
-	check('proc', 'kill', ok, 'pid=%d sig=%d: %s', pid, sig, err)
+	return try_errno(C.kill(pid, sig or SIGTERM) == 0)
 end
 
 getpid = C.getpid
 
-function proc:try_kill(sig)
+function proc:kill(sig)
 	if not self.pid then
 		return false, 'forgotten'
 	elseif self:status() == 'killed' then
 		return true, 'already_killed'
 	end
-	return try_kill(self.pid, sig)
-end
-function proc:kill(sig)
-	sig = sig or SIGTERM
-	local ok, err = self:try_kill(sig)
-	check('proc', 'kill', ok, 'pid=%d sig=%d: %s', self.pid, sig, err)
-	return ok, err
+	return kill(self.pid, sig)
 end
 
 function proc:try_close()
-	self:try_kill(9)
+	self:kill(9)
 	self:forget()
 end
 
@@ -767,7 +756,8 @@ local function wrap(f)
 		local p, err = f(...)
 		if p then return p end
 		local t = ...; local cmd = istab(t) and t.cmd or t
-		check('proc', 'exec', nil, '%s: %s', cmdline_quote_cmd(cmd), err)
+		local cmd = cmdline_quote_cmd(cmd)
+		check_for('proc', cmd, nil, err)
 	end
 end
 exec          = wrap(try_exec)

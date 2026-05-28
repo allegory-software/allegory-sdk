@@ -169,3 +169,5 @@ test('a/b',    'a/b',   '.'        ) --0 updirs + empty
 test('a/b/',   'a/b',   './'       ) --0 updirs + empty + endsep
 test('a/b',    'a/c/d', '../../b'  ) --2 updirs + non-empty
 test('a/b/',   'a/c/d', '../../b/' ) --2 updirs + non-empty + endsep
+
+print'path ok'

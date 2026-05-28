@@ -520,22 +520,28 @@ function http_server(...)
 		push(self.listen_sockets, tcp)
 
 		local function accept_connection()
-			local ctcp, err = tcp:try_accept(nil, 5)
+			local ctcp, err = tcp:try_accept()
 			if not ctcp then --transient error
 				logerror(tcp, 'accept', '%s', err)
+				return
 			end
-			ctcp:setopt('tcp_nodelay', true)
-			if self.debug.tracebacks then
-				ctcp.tracebacks = true
-			end
-			if self.debug.stream then
-				ctcp:debug_stream'http'
-			end
-			local recv_buffer_size = ctcp:getopt'so_rcvbuf' --usually 128k
+			--ctcp is currently owned by the listening thread, so no raising calls
+			--here or we kill the thread: move ctcp to accept thread and do it there.
 			resume(thread(function()
+				ctcp:setowner(currentthread())
+				ctcp:setopt('tcp_nodelay', true)
+				if tcp.istlssocket then
+					ctcp = tcp:tls_accept(ctcp, {
+						tracebacks = self.debug.tracebacks,
+					})
+				end
+				if self.debug.stream then
+					ctcp:debug_stream'http'
+				end
+				local recv_buffer_size = ctcp:getopt'so_rcvbuf' --usually 128k
 				ctcp.rb = pbuffer{
 					f = ctcp,
-					readahead = recv_buffer_size,
+					readahead 	= recv_buffer_size,
 					lineterm = '\r\n',
 					linesize = 8192,
 				} --read buffer

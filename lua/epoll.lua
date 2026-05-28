@@ -40,6 +40,10 @@ THREAD SETS
 	threadset() -> ts
 	- ts:thread(fn, [fmt, ...]) -> th
 	- ts:join() -> all_ok, first_err
+	with_threads(f(spawn, join))           threadset sugar with auto-join
+		spawn(f[, fmt, ...])                spawn a thread
+		join() -> all_ok, first_err         join spawned threads
+	end)
 SCHEDULER
 	[try_]start()               keep polling until all threads finish
 	stop()                      stop polling
@@ -969,6 +973,25 @@ function threadset()
 		return all_ok, first_err
 	end
 	return ts
+end
+
+function with_threads(f)
+	local ts = _own(currentowner(), threadset())
+	local function join()
+		return ts:join()
+	end
+	local function spawn(...)
+		local th = ts:thread(...)
+		th:setowner(ts)
+		resume(th)
+		return th
+	end
+	local ok, err = pcall(f, spawn, join)
+	if ok then
+		ok, err = ts:join()
+	end
+	ts:try_close()
+	if not ok then error(err, 0) end
 end
 
 --poll loop -----------------------------------------------------------------

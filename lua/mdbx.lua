@@ -64,6 +64,8 @@ CURSORS
 
 ]]
 
+if not ... then require'mdbx_test'; return end
+
 require'glue'
 require'fs'
 
@@ -706,36 +708,4 @@ function Db:table_exists(table_name)
 	if not table_name then return true end --main table always exists.
 	if self.dbis[table_name] then return true end --opened thus exists
 	return self:get_raw(nil, table_name, #table_name) ~= nil
-end
-
--- test ----------------------------------------------------------------------
-
-if not ... then
-
-local function self_test()
-	local db = mdbx_open(homedir()..'/testdb')
-
-	db:begin'w'
-	db:open_table('users', 'w')
-	db:commit()
-
-	db:begin'w'
-	local s = _('%03x %d foo bar', 32, 3141592)
-	local k = i32a(1, 123456789)
-	assert(db:try_put_raw('users', cast(u8p, k), sizeof(k), s, #s))
-	db:commit()
-
-	db:begin()
-	for ok,cur,k,k_sz,v,v_sz in db:each_raw'users' do
-		assert(cast(i32p, k)[0] == 123456789)
-		assert(str(v, v_sz) == s)
-	end
-	db:commit()
-
-	db:close()
-	pr'mdbx ok'
-end
-
-self_test()
-
 end

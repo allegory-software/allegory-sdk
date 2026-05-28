@@ -25,24 +25,35 @@ end
 
 local BUF = new'char[65536]'
 
-local _terr
-
-local function sthread(f, name)
-	return thread(function(...)
-		local ok, err = pcall(f, ...)
-		if not ok then _terr = _terr and (_terr..'\n'..tostring(err)) or tostring(err) end
-	end, name):setowner()
+local function with_threads(f)
+	local ts = _own(currentowner(), threadset())
+	local function join()
+		local ok, err = ts:join()
+		if not ok then error(err, 0) end
+	end
+	local function spawn(f, name)
+		local th = ts:thread(f, name)
+		th:setowner(ts)
+		resume(th)
+		return th
+	end
+	local ok, err = pcall(f, spawn, join)
+	if ok then
+		ok, err = pcall(join)
+	end
+	ts:try_close()
+	if not ok then error(err, 0) end
 end
 
 local function checked_run(f)
-	_terr = nil
+	local terr
 	run(function(...)
-		local ok, err = pcall(f, ...)
+		local ok, err = pcall(with_threads, f)
 		if not ok then
-			_terr = _terr and (_terr..'\n'..tostring(err)) or tostring(err)
+			terr = tostring(err)
 		end
 	end)
-	if _terr then error(_terr, 2) end
+	if terr then error(terr, 2) end
 end
 
 -- [1] Address ----------------------------------------------------------------
@@ -81,23 +92,23 @@ end
 -- [2] TCP Connection Lifecycle -------------------------------------------------
 
 function test.tcp_connect_send_recv_close()
-	checked_run(function()
+	checked_run(function(spawn, join)
 		local port = nextport()
 		local server = mkserver(port)
 		local got
-		resume(sthread(function()
+		spawn(function()
 			local cs = server:accept()
 			local n = cs:recv(BUF, 64)
 			got = str(BUF, n)
 			cs:close()
 			server:close()
-		end, 'server'))
-		resume(sthread(function()
+		end, 'server')
+		spawn(function()
 			local s = mkclient(port)
 			s:send'hello'
 			s:close()
-		end, 'client'))
-		wait(0.1)
+		end, 'client')
+		join()
 		assert(got == 'hello')
 	end)
 end
@@ -111,14 +122,14 @@ function test.tcp_connect_refused()
 end
 
 function test.tcp_remote_local_addr()
-	checked_run(function()
+	checked_run(function(spawn)
 		local port = nextport()
 		local server = mkserver(port)
-		resume(sthread(function()
+		spawn(function()
 			local s = mkclient(port)
 			s:send'x'
 			s:close()
-		end, 'client'))
+		end, 'client')
 		local cs = server:accept()
 		assert(cs:remote_addr():ip() == '127.0.0.1')
 		assert(str(BUF, cs:recv(BUF, 1)) == 'x')
@@ -136,14 +147,14 @@ function test.tcp_issocket()
 end
 
 function test.tcp_closed()
-	checked_run(function()
+	checked_run(function(spawn)
 		local port = nextport()
 		local server = mkserver(port)
-		resume(sthread(function()
+		spawn(function()
 			local cs = server:accept()
 			cs:close()
 			server:close()
-		end, 'server'))
+		end, 'server')
 		local s = mkclient(port)
 		assert(not s:closed())
 		s:close()
@@ -154,13 +165,13 @@ end
 function test.tcp_unix_socket()
 	local path = '/tmp/sock_test_unix.sock'
 	os.remove(path)
-	checked_run(function()
+	checked_run(function(spawn)
 		local server = listen('unix:'..path)
-		resume(sthread(function()
+		spawn(function()
 			local s = connect('unix:'..path)
 			s:send'unix-hello'
 			s:close()
-		end, 'client'))
+		end, 'client')
 		local cs = server:accept()
 		local n = cs:recv(BUF, 64)
 		assert(str(BUF, n) == 'unix-hello')
@@ -172,59 +183,33 @@ end
 
 -- [3] TCP Server Operations ----------------------------------------------------
 
-function test.tcp_server_onaccept()
-	checked_run(function()
-		local port = nextport()
-		local accepted = 0
-		local server = tcp()
-		server:setopt('so_reuseaddr', true)
-		resume(sthread(function()
-			server:listen('127.0.0.1', port, nil, function(srv, cs)
-				accepted = accepted + 1
-				cs:recv(BUF, 64)
-				-- cs closed by listen's wrapper
-			end)
-		end, 'server'))
-		for i = 1, 3 do
-			resume(sthread(function()
-				local s = mkclient(port)
-				s:send'x'
-				s:close()
-			end, 'client'..i))
-		end
-		wait(0.1)
-		server:close()
-		assert(accepted == 3)
-	end)
-end
-
 function test.tcp_server_multiple_clients()
-	checked_run(function()
+	checked_run(function(spawn, join)
 		local port = nextport()
 		local server = mkserver(port)
 		local results = {}
-		resume(sthread(function()
-			local ts = threadset()
-			for i = 1, 3 do
-				local cs = server:accept()
-				resume(ts:thread(function()
-					local buf = new'char[64]'
-					local n = cs:recv(buf, 64)
-					results[#results+1] = str(buf, n)
-					cs:close()
-				end, 'handler'..i))
-			end
-			ts:join()
+		spawn(function()
+			with_threads(function(spawn_handler)
+				for i = 1, 3 do
+					local cs = server:accept()
+					spawn_handler(function()
+						local buf = new'char[64]'
+						local n = cs:recv(buf, 64)
+						results[#results+1] = str(buf, n)
+						cs:close()
+					end, 'handler'..i)
+				end
+			end)
 			server:close()
-		end, 'server'))
+		end, 'server')
 		for i = 1, 3 do
-			resume(sthread(function()
+			spawn(function()
 				local s = mkclient(port)
 				s:send('msg'..i)
 				s:close()
-			end, 'client'..i))
+			end, 'client'..i)
 		end
-		wait(0.1)
+		join()
 		table.sort(results)
 		assert(#results == 3)
 	end)
@@ -233,16 +218,16 @@ end
 -- [4] Full-Duplex TCP Communication --------------------------------------------
 
 function test.tcp_recvn()
-	checked_run(function()
+	checked_run(function(spawn)
 		local port = nextport()
 		local server = mkserver(port)
-		resume(sthread(function()
+		spawn(function()
 			local s = mkclient(port)
 			s:send'he'
 			wait(0.01)
 			s:send'llo'
 			s:close()
-		end, 'client'))
+		end, 'client')
 		local cs = server:accept()
 		local buf = new'char[5]'
 		cs:recvn(buf, 5)
@@ -252,80 +237,42 @@ function test.tcp_recvn()
 	end)
 end
 
-function test.tcp_recvall()
-	checked_run(function()
-		local port = nextport()
-		local server = mkserver(port)
-		resume(sthread(function()
-			local s = mkclient(port)
-			s:send'hello '
-			s:send'world'
-			s:close() -- FIN triggers recvall EOF
-		end, 'client'))
-		local cs = server:accept()
-		local buf, len = cs:recvall()
-		assert(buf and str(buf, len) == 'hello world')
-		cs:close()
-		server:close()
-	end)
-end
-
-function test.tcp_recvall_partial_error()
-	checked_run(function()
-		local port = nextport()
-		local server = mkserver(port)
-		resume(sthread(function()
-			local s = mkclient(port)
-			s:send'partial' -- send some bytes then stop (no close)
-			wait(0.2)       -- outlast the server's timeout
-			s:close()
-		end, 'client'))
-		local cs = server:accept()
-		cs:settimeout(0.05, 'r') -- short recv deadline
-		local ok, err = pcall(cs.recvall, cs)
-		assert(not ok)
-		assert(tostring(err):find'timeout')
-		cs:close()
-		server:close()
-	end)
-end
-
 function test.tcp_fullduplex()
-	checked_run(function()
+	checked_run(function(spawn, join)
 		local port = nextport()
 		local server = mkserver(port)
 		local sbuf = new'char[64]'
-		resume(sthread(function()
+		spawn(function()
 			local s = mkclient(port)
-			resume(sthread(function()
+			spawn(function()
 				s:send'ping'
-			end, 'cwrite'))
+			end, 'cwrite')
 			local cbuf = new'char[64]'
 			local n = s:recv(cbuf, 64)
 			assert(str(cbuf, n) == 'pong')
 			s:close()
-		end, 'client'))
+		end, 'client')
 		local cs = server:accept()
-		resume(sthread(function()
+		spawn(function()
 			cs:send'pong'
-		end, 'swrite'))
+		end, 'swrite')
 		local n = cs:recv(sbuf, 64)
 		assert(str(sbuf, n) == 'ping')
-		wait(0.1)
+		join()
 		cs:close()
 		server:close()
 	end)
 end
 
 function test.tcp_shutdown()
-	checked_run(function()
+	checked_run(function(spawn)
 		local port = nextport()
 		local server = mkserver(port)
-		resume(sthread(function()
+		spawn(function()
 			local s = mkclient(port)
 			s:shutdown('w')
 			s:close()
-		end, 'client'))
+		end, 'client')
 		local cs = server:accept()
 		local n = cs:recv(BUF, 64)
 		assert(n == 0) -- shutdown('w') sends FIN
@@ -335,17 +282,17 @@ function test.tcp_shutdown()
 end
 
 function test.tcp_large_transfer()
-	checked_run(function()
+	checked_run(function(spawn)
 		local port = nextport()
 		local server = mkserver(port)
 		local SIZE = 256 * 1024
-		resume(sthread(function()
+		spawn(function()
 			local s = mkclient(port)
 			local buf = new('char[?]', SIZE)
 			fill(buf, SIZE, 0x41)
 			s:send(buf, SIZE)
 			s:close()
-		end, 'client'))
+		end, 'client')
 		local cs = server:accept()
 		local buf = new('char[?]', SIZE)
 		local received = 0
@@ -363,16 +310,16 @@ end
 -- [5] UDP Datagram Communication -----------------------------------------------
 
 function test.udp_sendto_recvnext()
-	checked_run(function()
+	checked_run(function(spawn)
 		local port = nextport()
 		local server = udp()
 		server:bind('127.0.0.1', port)
-		resume(sthread(function()
+		spawn(function()
 			local s = udp()
 			s:bind('127.0.0.1', 0)
 			s:sendto('127.0.0.1', port, 'udp-hello')
 			s:close()
-		end, 'client'))
+		end, 'client')
 		local buf = new'char[256]'
 		local n, sa = server:recvnext(buf, 256)
 		assert(str(buf, n) == 'udp-hello')
@@ -381,16 +328,16 @@ function test.udp_sendto_recvnext()
 end
 
 function test.udp_connected_mode()
-	checked_run(function()
+	checked_run(function(spawn)
 		local port = nextport()
 		local server = udp()
 		server:bind('127.0.0.1', port)
-		resume(sthread(function()
+		spawn(function()
 			local s = udp()
 			s:connect('127.0.0.1', port)
 			s:send'udp-connected'
 			s:close()
-		end, 'client'))
+		end, 'client')
 		local buf = new'char[256]'
 		local n = server:recv(buf, 256)
 		assert(str(buf, n) == 'udp-connected')
@@ -399,18 +346,18 @@ function test.udp_connected_mode()
 end
 
 function test.udp_connected_send_returns_len()
-	checked_run(function()
+	checked_run(function(spawn)
 		local port = nextport()
 		local server = udp()
 		server:bind('127.0.0.1', port)
-		resume(sthread(function()
+		spawn(function()
 			local s = udp()
 			s:connect('127.0.0.1', port)
-			local n, err = s:try_send'udp'
+			local n, err = s:send'udp'
 			assert(n == 3)
 			assert(err == nil)
 			s:close()
-		end, 'client'))
+		end, 'client')
 		local buf = new'char[256]'
 		local n = server:recv(buf, 256)
 		assert(str(buf, n) == 'udp')
@@ -419,21 +366,21 @@ function test.udp_connected_send_returns_len()
 end
 
 function test.udp_connected_zero_len_datagram()
-	checked_run(function()
+	checked_run(function(spawn)
 		local port = nextport()
 		local server = udp()
 		server:bind('127.0.0.1', port)
 		server:settimeout(0.2, 'r')
-		resume(sthread(function()
+		spawn(function()
 			local s = udp()
 			s:connect('127.0.0.1', port)
-			local n, err = s:try_send('', 0)
+			local n, err = s:send('', 0)
 			assert(n == 0)
 			assert(err == nil)
 			s:close()
-		end, 'client'))
+		end, 'client')
 		local buf = new'char[1]'
-		local n, err = server:try_recv(buf, 1)
+		local n, err = server:recv(buf, 1)
 		assert(n == 0)
 		assert(err == nil)
 		server:close()
@@ -441,19 +388,19 @@ function test.udp_connected_zero_len_datagram()
 end
 
 function test.udp_zero_len_recv_asserts()
-	checked_run(function()
+	checked_run(function(spawn)
 		local port = nextport()
 		local server = udp()
 		server:bind('127.0.0.1', port)
 		server:settimeout(0.2, 'r')
-		resume(sthread(function()
+		spawn(function()
 			local s = udp()
 			s:connect('127.0.0.1', port)
 			s:send'x'
 			s:close()
-		end, 'client'))
+		end, 'client')
 		local buf = new'char[1]'
-		local ok, err = pcall(server.try_recv, server, buf, 0)
+		local ok, err = pcall(server.recv, server, buf, 0)
 		assert(not ok and tostring(err):find('recv size must be > 0', 1, true))
 		local n = server:recv(buf, 1)
 		assert(str(buf, n) == 'x')
@@ -462,20 +409,20 @@ function test.udp_zero_len_recv_asserts()
 end
 
 function test.udp_recv_truncated()
-	checked_run(function()
+	checked_run(function(spawn)
 		local port = nextport()
 		local server = udp()
 		server:bind('127.0.0.1', port)
 		server:settimeout(0.2, 'r')
-		resume(sthread(function()
+		spawn(function()
 			local s = udp()
 			s:connect('127.0.0.1', port)
 			s:send'abcdef'
 			s:send'ok'
 			s:close()
-		end, 'client'))
+		end, 'client')
 		local buf = new'char[3]'
-		local n, err = server:try_recv(buf, 3)
+		local n, err = server:recv(buf, 3)
 		assert(n == nil)
 		assert(err == 'message_too_long')
 		local n = server:recv(buf, 3)
@@ -485,21 +432,21 @@ function test.udp_recv_truncated()
 end
 
 function test.udp_recvnext_truncated()
-	checked_run(function()
+	checked_run(function(spawn)
 		local port = nextport()
 		local client_port = nextport()
 		local server = udp()
 		server:bind('127.0.0.1', port)
 		server:settimeout(0.2, 'r')
-		resume(sthread(function()
+		spawn(function()
 			local s = udp()
 			s:bind('127.0.0.1', client_port)
 			s:sendto('127.0.0.1', port, 'abcdef')
 			s:sendto('127.0.0.1', port, 'ok')
 			s:close()
-		end, 'client'))
+		end, 'client')
 		local buf = new'char[3]'
-		local n, err = server:try_recvnext(buf, 3)
+		local n, err = server:recvnext(buf, 3)
 		assert(n == nil)
 		assert(err == 'message_too_long')
 		local n, sa = server:recvnext(buf, 3)
@@ -510,17 +457,17 @@ function test.udp_recvnext_truncated()
 end
 
 function test.udp_recvnext_source_addr()
-	checked_run(function()
+	checked_run(function(spawn)
 		local port = nextport()
 		local client_port = nextport()
 		local server = udp()
 		server:bind('127.0.0.1', port)
-		resume(sthread(function()
+		spawn(function()
 			local s = udp()
 			s:bind('127.0.0.1', client_port)
 			s:sendto('127.0.0.1', port, 'probe')
 			s:close()
-		end, 'client'))
+		end, 'client')
 		local buf = new'char[256]'
 		local n, sa = server:recvnext(buf, 256)
 		assert(str(buf, n) == 'probe')
@@ -610,19 +557,20 @@ end
 -- [7] Timeout and Deadline Enforcement -----------------------------------------
 
 function test.timeout_recv()
-	checked_run(function()
+	checked_run(function(spawn)
 		local port = nextport()
 		local server = mkserver(port)
-		resume(sthread(function()
+		spawn(function()
 			local s = mkclient(port)
 			wait(0.2) -- don't send anything
 			s:close()
-		end, 'client'))
+		end, 'client')
 		local cs = server:accept()
 		cs:settimeout(0.05, 'r')
 		local buf = new'char[256]'
-		local n, err = cs:try_recv(buf, 256)
-		assert(err == 'timeout')
+		local ok, err = catch('net', cs.recv, cs, buf, 256)
+		assert(not ok)
+		assert(iserror(err, 'net', 'timeout'))
 		cs:close()
 		server:close()
 	end)
@@ -649,7 +597,7 @@ function test.socket_thread_cancel_recv_closes_socket()
 		local th = thread(function()
 			cs = server:accept()
 			recv_ok, recv_err = lua_pcall(function()
-				cs:try_recv(BUF, 64)
+				cs:recv(BUF, 64)
 			end)
 		end, 'recv waiter')
 		resume(th)
@@ -661,9 +609,9 @@ function test.socket_thread_cancel_recv_closes_socket()
 		assert(recv_err == CANCEL)
 
 		assert(cs:closed())
-		local n, err = cs:try_recv(BUF, 64)
-		assert(n == nil)
-		assert(err == 'closed')
+		local ok, err = catch('closed', cs.recv, cs, BUF, 64)
+		assert(not ok)
+		assert(iserror(err, 'closed'))
 		s:close()
 		server:close()
 	end)
@@ -675,10 +623,12 @@ function test.error_ops_on_closed_socket()
 	checked_run(function()
 		local s = tcp()
 		s:close()
-		local ok, err = s:try_recv(BUF, 64)
-		assert(not ok and err == 'closed')
-		local ok, err = s:try_send'x'
-		assert(not ok and err == 'closed')
+		local ok, err = catch('closed', s.recv, s, BUF, 64)
+		assert(not ok)
+		assert(iserror(err, 'closed'))
+		local ok, err = catch('closed', s.send, s, 'x')
+		assert(not ok)
+		assert(iserror(err, 'closed'))
 		local ok, err = catch('closed', s.bind, s, '127.0.0.1', 0)
 		assert(not ok)
 		assert(iserror(err, 'closed'))
@@ -712,50 +662,48 @@ function test.error_bind_conflict()
 end
 
 function test.error_zero_len_send()
-	checked_run(function()
+	checked_run(function(spawn)
 		local port = nextport()
 		local server = mkserver(port)
-		resume(sthread(function()
+		spawn(function()
 			local cs = server:accept()
 			cs:close()
 			server:close()
-		end, 'server'))
+		end, 'server')
 		local s = mkclient(port)
-		local ok = s:try_send('', 0) -- zero-length send is a no-op
-		assert(ok)
+		s:send('', 0) -- zero-length send is a no-op
 		s:close()
 	end)
 end
 
 function test.error_recv_eof()
-	checked_run(function()
+	checked_run(function(spawn)
 		local port = nextport()
 		local server = mkserver(port)
 		-- client thread: connect then immediately close (sends FIN)
-		resume(sthread(function()
+		spawn(function()
 			local s = mkclient(port)
 			s:close()
-		end, 'client'))
+		end, 'client')
 		-- outer thread accepts and recvs sequentially
 		local cs = server:accept()
-		local n, err = cs:try_recv(BUF, 64)
+		local n = cs:recv(BUF, 64)
 		assert(n == 0) -- EOF
-		assert(err == nil)
 		cs:close()
 		server:close()
 	end)
 end
 
 function test.error_recvn_eof()
-	checked_run(function()
+	checked_run(function(spawn)
 		local port = nextport()
 		local server = mkserver(port)
 		-- client sends only 2 bytes then closes
-		resume(sthread(function()
+		spawn(function()
 			local s = mkclient(port)
 			s:send'hi'
 			s:close()
-		end, 'client'))
+		end, 'client')
 		-- outer thread accepts and tries to recv 10 bytes (gets EOF after 2)
 		local cs = server:accept()
 		local buf = new'char[10]'
@@ -769,57 +717,57 @@ function test.error_recvn_eof()
 end
 
 function test.close_while_blocked_recv()
-	checked_run(function()
+	checked_run(function(spawn)
 		local port = nextport()
 		local server = mkserver(port)
 		local s = mkclient(port)
 		local cs
 		local recv_n, recv_err
-		resume(sthread(function()
+		spawn(function()
 			cs = server:accept()
-			recv_n, recv_err = cs:try_recv(BUF, 64)
-		end, 'server'))
+			recv_n, recv_err = lua_pcall(function()
+				cs:recv(BUF, 64)
+			end)
+		end, 'server')
 		wait(0.02) -- let server thread reach the blocking recv
 		cs:close()  -- cancel_wait_io fires
 		s:close()
 		server:close()
-		assert(recv_n == nil)
-		assert(recv_err == 'closed')
+		assert(recv_n == false)
+		assert(recv_err == CLOSED)
 	end)
 end
 
 -- [9] Threading and Concurrency ------------------------------------------------
 
 function test.concurrent_server_clients()
-	checked_run(function()
+	checked_run(function(spawn, join)
 		local port = nextport()
 		local server = mkserver(port)
 		local N = 10
 		local received = 0
-		resume(sthread(function()
-			local hts = threadset()
-			for i = 1, N do
-				local cs = server:accept()
-				resume(hts:thread(function()
-					local buf = new'char[64]'
-					local n = cs:recv(buf, 64)
-					received = received + n
-					cs:close()
-				end, 'h'..i))
-			end
-			hts:join()
+		spawn(function()
+			with_threads(function(spawn_handler)
+				for i = 1, N do
+					local cs = server:accept()
+					spawn_handler(function()
+						local buf = new'char[64]'
+						local n = cs:recv(buf, 64)
+						received = received + n
+						cs:close()
+					end, 'h'..i)
+				end
+			end)
 			server:close()
-		end, 'server'))
-		local ts = threadset()
+		end, 'server')
 		for i = 1, N do
-			resume(ts:thread(function()
+			spawn(function()
 				local s = mkclient(port)
 				s:send'x'
 				s:close()
-			end, 'c'..i))
+			end, 'c'..i)
 		end
-		ts:join()
-		wait(0.05) -- let handler threads finish receiving
+		join()
 		assert(received == N)
 	end)
 end
@@ -827,53 +775,53 @@ end
 -- [10] Mixed Protocol Scenarios ------------------------------------------------
 
 function test.tcp_and_udp_same_port()
-	checked_run(function()
+	checked_run(function(spawn, join)
 		local port = nextport()
 		-- TCP and UDP can share the same port number
 		local tcp_got, udp_got
 		local tserver = mkserver(port)
 		local userver = udp()
 		userver:bind('127.0.0.1', port)
-		resume(sthread(function()
+		spawn(function()
 			local cs = tserver:accept()
 			local buf = new'char[64]'
 			local n = cs:recv(buf, 64)
 			tcp_got = str(buf, n)
 			cs:close()
 			tserver:close()
-		end, 'tcp-server'))
-		resume(sthread(function()
+		end, 'tcp-server')
+		spawn(function()
 			local buf = new'char[64]'
 			local n = userver:recv(buf, 64)
 			udp_got = str(buf, n)
 			userver:close()
-		end, 'udp-server'))
-		resume(sthread(function()
+		end, 'udp-server')
+		spawn(function()
 			local s = mkclient(port)
 			s:send'tcp-msg'
 			s:close()
-		end, 'tcp-client'))
-		resume(sthread(function()
+		end, 'tcp-client')
+		spawn(function()
 			local s = udp()
 			s:connect('127.0.0.1', port)
 			s:send'udp-msg'
 			s:close()
-		end, 'udp-client'))
-		wait(0.1) -- let server threads receive
+		end, 'udp-client')
+		join()
 		assert(tcp_got == 'tcp-msg')
 		assert(udp_got == 'udp-msg')
 	end)
 end
 
 function test.ipv4_and_ipv6_loopback()
-	checked_run(function()
+	checked_run(function(spawn)
 		local port = nextport()
 		local got4, got6
 		-- IPv4 server
 		local s4 = listen('127.0.0.1', port)
-		resume(sthread(function()
+		spawn(function()
 			local c = connect('127.0.0.1', port); c:send'v4'; c:close()
-		end, 'c4'))
+		end, 'c4')
 		local cs4 = s4:accept()
 		local buf4 = new'char[64]'
 		got4 = str(buf4, cs4:recv(buf4, 64))
@@ -882,9 +830,9 @@ function test.ipv4_and_ipv6_loopback()
 		local port6 = nextport()
 		local ok6, s6 = pcall(listen, '[::1]', port6)
 		if ok6 then
-			resume(sthread(function()
+			spawn(function()
 				local c = connect('[::1]', port6); c:send'v6'; c:close()
-			end, 'c6'))
+			end, 'c6')
 			local cs6 = s6:accept()
 			local buf6 = new'char[64]'
 			got6 = str(buf6, cs6:recv(buf6, 64))
@@ -921,3 +869,4 @@ for _, k in ipairs(tests_to_run) do
 	end
 end
 print(('ok: %d, failed: %d'):format(n_ok, n_fail))
+if n_fail == 0 then print'sock ok' end

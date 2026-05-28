@@ -4,7 +4,7 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 API
-	setowner(res, [owner])             set owner of res (nil for mainthread())
+	setowner(res, owner)               set owner of res
 	currentowner([thread]) -> owner    get (current) thread's current owner
 	setcurrentowner(owner, [thread])   set (current) thread's current owner
 	try_with_owner(f, ...) -> ok, ...  run f within a scope owner
@@ -28,7 +28,7 @@ RATIONALE
 
 	Threads free up their owned objects when the thread finishes, including
 	when an error is raised inside the thread which is the primary motivation
-	for having an ownership model. With automatic cleanup, errors can now be
+	for having an ownership system. With automatic cleanup, errors can now be
 	raised freely in user code without worrying about leaks.
 
 CONSTRAINTS
@@ -53,6 +53,19 @@ CONSTRAINTS
 	Also, on step 2, be careful not to call into things that might try to
 	close the owner, otherwise _close_owned(owner) will raise. Yielding
 	increases that risk greatly, so just don't yield before _disown()!
+
+OWNERSHIP GAPS
+
+	Sometimes a resource is acquired under a long-lived owner before being
+	handed over to its rightful owner whose lifetime matches that of the
+	resource (case in point: try_accept()). Inside that gap, raising errors
+	will cause a leak: the resource is still owned by the long-lived owner.
+
+	Possible fixes:
+	1) create the owner before acquiring the resource and assign it directly.
+	2) own the resource temporarily by wrapping the raising code in with_owner().
+	3) pcall and free the resource on error (conceptually same as owning it).
+	4) don't care, if you know it's ok to leak the resource into currentowner().
 
 ]]
 
@@ -124,7 +137,7 @@ local function _do_own(owner, res)
 end
 
 function setowner(res, owner)
-	owner = owner or mainthread()
+	assert(owner, 'owner required')
 	if res.owner == owner then return end
 	assert(res.try_close, 'resource has no try_close method')
 	_check_owner(owner)

@@ -114,6 +114,5 @@ test_example()
 test_heapify()
 test_remove()
 test_replace()
-if os.getenv'AUTO' then return end
-benchmark()
+if not os.getenv'AUTO' then benchmark() end
 print'heap ok'

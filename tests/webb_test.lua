@@ -138,3 +138,4 @@ else
 	print(('ok: %d, failed: %d'):format(n_ok, n_fail))
 	assert(n_fail == 0)
 end
+print'webb ok'

@@ -408,20 +408,23 @@ function test.pool_waitlist_full()
 		-- 1 connection allowed, 0 waiters allowed, 3 concurrent requests
 		for i = 1, 3 do
 			resume(ts:thread(function()
-					local body, req = cl:fetch{
-						url = POOL_FULL_BASE..'/delay/1',
+				local ok, body, req = catch('net', cl.fetch, cl, {
+					url = POOL_FULL_BASE..'/delay/1',
 					max_conn = 1,
 					max_waiting_threads = 0,
 					headers_timeout = 10,
-				}
-				assert(req.status == 200)
-				ok_count = ok_count + 1
+				})
+				if ok then
+					assert(req.status == 200)
+					ok_count = ok_count + 1
+				else
+					assert(iserror(body, 'net', 'timeout'))
+					fail_count = fail_count + 1
+				end
 			end, 'pool-full-'..i))
 		end
 		local all_ok, err = ts:join()
-		if not all_ok then
-			fail_count = 1
-		end
+		assert(all_ok, tostring(err))
 		assert(ok_count >= 1, 'at least one request should succeed')
 		assert(fail_count >= 1, 'at least one request should fail from pool limit')
 	end)
@@ -688,3 +691,5 @@ end
 print(('ok: %d, failed: %d'):format(n_ok, n_fail))
 mainthread():close()
 logging.printlive()
+if n_fail == 0 then print'http_client ok' end
+if n_fail > 0 then os.exit(1) end

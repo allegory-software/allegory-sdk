@@ -8,17 +8,9 @@ ERROR REPORTING & OWNERSHIP
 - own: zip
 - own: mdbx
 
-- rethink try_*() vs raising variants:
-	- try(connect, host) looks weird vs try_connect()
-		- try(s.connect, s, host) looks even weirder
-	- conn = assert(connect()) is meh...
-
 - remove check()
+- review fcall, fpcall, pcall, lua_pcall, xpcall
 
-- remove fcall, fpcall
-- review use of pcall vs lua_pcall vs xpcall
-
-- remove usage of unbuffered read, readn and send (only use buffers).
 
 LOGGING
 ------------------------------------------------------------------------------
@@ -54,7 +46,7 @@ LEVERAGE AI
 	* check/fix API doc inconsistencies, omissions, misleading or wrong phrases.
 * debugging
 	* check where args are mutated on public APIs
-	* check where raising errors can leak resources
+	* check where raising errors after acquiring resources can leak them
 	* check where invariants are violated
 * refactoring
 	* find footguns and surprising behavior

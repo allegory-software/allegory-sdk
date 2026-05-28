@@ -102,4 +102,5 @@ if not ... then
 	test_sleep(0.001, 0.001)
 	test_sleep(0.2, 0.02)
 	test_sleep(2, 0.2)
+	print 'time ok'
 end

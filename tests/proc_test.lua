@@ -62,6 +62,13 @@ function test.exec_fail_closes()
 	owner:try_close()
 end
 
+function test.exec_error()
+	local ok, err = pcall(exec, '/definitely/not/here')
+	assert(not ok)
+	assert(iserror(err, 'proc'))
+	assert(err.message == 'not_found', tostring(err))
+end
+
 function test.kill()
 	local luajit = exefile()
 

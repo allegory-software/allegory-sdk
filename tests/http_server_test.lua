@@ -41,7 +41,7 @@ local server = http_server{
 			print(s)
 		end
 		if req.uri == '/favicon.ico' then
-			raise('http_response', {status = 404})
+			error{type = 'http_response', status = 404}
 		end
 		local out = req:send_headers()
 		req:send_body_chunk(('hello '):rep(1000)):finish()
@@ -52,3 +52,4 @@ local server = http_server{
 
 start()
 server:stop()
+print'http_server ok'

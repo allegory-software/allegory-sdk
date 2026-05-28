@@ -125,7 +125,7 @@ end
 do
 	local root = new_root()
 	local res
-	local ok, e = catch_all(function()
+	local ok, e = try(function()
 		with_owner(function()
 			res = _own(currentowner(), test_res())
 			error(newerror{type = 'io', message = 'x'})

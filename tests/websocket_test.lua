@@ -44,10 +44,6 @@ local server = http_server{
 			local ws = websocket_upgrade(req)
 			ws:send('hi')
 			ws:close(1000, 'bye')
-		elseif req.uri == '/proto' then
-			local ws = websocket_upgrade(req, {subprotocols = {'foo', 'bar'}})
-			ws:send(ws.subprotocol or '<none>')
-			ws:close()
 		elseif req.uri == '/pinger' then
 			local ws = websocket_upgrade(req)
 			ws:ping('ping?')
@@ -123,6 +119,19 @@ run(function()
 		ws:close()
 	end)
 
+	test('recv_chunk enforces message limit', function()
+		local ws = websocket_connect(url'/echo-chunked', {max_message_size = 5})
+		ws:send_chunk('abc', 'text')
+		ws:send_chunk('def', nil, true)
+		local s, k, fin = ws:recv_chunk()
+		assert(s == 'abc' and k == 'text' and fin == false)
+		local ok, err = catch('protocol', ws.recv_chunk, ws)
+		assert(not ok)
+		assert(iserror(err, 'protocol'))
+		assert(err.message == 'message too big')
+		ws:try_close_socket()
+	end)
+
 	test('peer-initiated close with code/reason', function()
 		local ws = websocket_connect(url'/closer')
 		assert(ws:recv() == 'hi')
@@ -130,18 +139,6 @@ run(function()
 		assert(m == nil, 'expected nil msg')
 		assert(code == 1000, 'got code '..tostring(code))
 		assert(reason == 'bye', 'got reason '..tostring(reason))
-	end)
-
-	test('subprotocol negotiation', function()
-		local ws = websocket_connect(url'/proto', {subprotocols = {'bar', 'baz'}})
-		assert(ws.subprotocol == 'bar', 'subprotocol='..tostring(ws.subprotocol))
-		assert(ws:recv() == 'bar')
-	end)
-
-	test('subprotocol with no overlap returns nil', function()
-		local ws = websocket_connect(url'/proto', {subprotocols = {'baz', 'qux'}})
-		assert(ws.subprotocol == nil, 'subprotocol='..tostring(ws.subprotocol))
-		assert(ws:recv() == '<none>')
 	end)
 
 	test('ping is replied with pong (handled inside recv)', function()
@@ -154,18 +151,19 @@ run(function()
 		assert(m == 'foo', 'got '..tostring(m))
 	end)
 
-	test('invalid utf-8 in text frame closes connection', function()
+	test('text payload is not utf-8 validated', function()
 		local ws = websocket_connect(url'/echo')
-		ws:send('\xff\xfe', 'text')  --invalid utf-8
-		local m, err = ws:try_recv()
-		assert(m == nil, 'expected close/error')
-		assert(err ~= nil, 'expected an error or close code')
-		--server abrupt-closes on protocol error; we accept either a clean
-		--close code or an io/protocol error object.
+		local s = '\xff\xfe'
+		ws:send(s, 'text')
+		local m, k = ws:recv()
+		assert(m == s)
+		assert(k == 'text')
+		ws:close()
 	end)
 
 	server:stop()
 end)
 
 print(string.format('---\n%d ok, %d fail', n_ok, n_fail))
+if n_fail == 0 then print'websocket ok' end
 os.exit(n_fail > 0 and 1 or 0)

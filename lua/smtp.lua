@@ -3,11 +3,11 @@
 	Async SMTP(s) client.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	[try_]smtp_connect{host=, port=, tls=, user=, pass=} -> c
-	c:[try_]sendmail{from=, to=, headers=, message=} -> c
+	smtp_connect{host=, port=, tls=, user=, pass=} -> c
+	c:sendmail{from=, to=, headers=, message=} -> true
 	c:close() -> c
 
-	[try_]sendmail(multipart|multipart_opt)   connect, send an mail, disconnect
+	sendmail(multipart|multipart_opt) -> true  connect, send mail, disconnect
 
 CONFIG
 
@@ -144,9 +144,16 @@ end
 local function strip_name(email)
 	return email:match'<(.-)>' or email
 end
-function try_sendmail(opt)
 
-	local smtp, err = try_smtp_connect{
+local function strip_names(emails)
+	if isstr(emails) then
+		return strip_name(emails)
+	end
+	return imap(emails, strip_name)
+end
+
+function sendmail(opt)
+	local smtp = smtp_connect{
 		debug = config'smtp_debug' and index(collect(words(config'smtp_debug'))),
 		host  = config'smtp_host',
 		port  = config'smtp_port',
@@ -154,21 +161,13 @@ function try_sendmail(opt)
 		user  = config'smtp_user',
 		pass  = config'smtp_pass',
 	}
-	if not smtp then return nil, err end
 
-	req = multipart_mail(update({}, opt))
+	local req = multipart_mail(update({}, opt))
 	req.from = strip_name(opt.from)
-	req.to   = strip_name(opt.to)
+	req.to   = strip_names(opt.to)
 
-	local ok, err = smtp:try_sendmail(req)
-	if not ok then return nil, err end
-
-	local ok, err = smtp:close()
-	if not ok then return nil, err end
+	smtp:sendmail(req)
+	smtp:close()
 
 	return true
-end
-function sendmail(opt)
-	local ok, err = try_sendmail(opt)
-	check('smtp', 'sendmail', ok, 'from: %s\n  to: %s\n%s', opt.from, opt.to, err or '')
 end
