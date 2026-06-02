@@ -250,13 +250,31 @@ function test.wait_queue_push_skips_cancelled_waiter()
 		local got2
 		local t1 = sthread(function()
 			ok1 = lua_pcall(function() q:pull() end)
-		end, 'p1')
-		resume(t1)
-		resume(sthread(function() got2 = q:pull() end, 'p2'))
-		t1:cancel() --leaves dead entry at head of waiters list
-		assert(ok1 == false)
-		q:push('to-p2') --must skip dead t1 and resume p2
-		assert(got2 == 'to-p2')
+			end, 'p1')
+			resume(t1)
+			resume(sthread(function() got2 = q:pull() end, 'p2'))
+			t1:cancel()
+			assert(ok1 == false)
+			q:push('to-p2')
+			assert(got2 == 'to-p2')
+		end)
+	end
+
+function test.wait_queue_cancel_releases_waiter()
+	checked_run(function()
+		local q = wait_queue(8)
+		local refs = setmetatable({}, {__mode = 'v'})
+		do
+			local t = sthread(function()
+				lua_pcall(function() q:pull() end)
+			end, 'puller')
+			refs[1] = t
+			resume(t)
+			t:cancel()
+		end
+		collectgarbage()
+		assert(refs[1] == nil)
+		assert(q:try_push('x'))
 	end)
 end
 

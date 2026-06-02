@@ -270,28 +270,28 @@ function logging:toserver_stop() end
 
 function logging:listen(host, port)
 
-	assert(not self.clients)
+	assert(not self.listen_stop)
 
 	require'sock'
 	require'pbuffer'
 
 	local listen_tcp = listen(host, port)
-	self.clients = {}
+	listen_tcp:onclose(function()
+		assert(not next(listen_tcp.sockets))
+		self.listen_stop = nil
+		listen_tcp = nil
+	end)
 
 	local function handle_connection(ctcp)
 		local rb = pbuffer{f = ctcp}
 		local wb = pbuffer{f = ctcp}
-		local sendq = wait_queue(1)
-		local client = {tcp = ctcp, sendq = sendq, vars = {}}
-		add(self.clients, client)
-		currentthread():onfinish(function()
-			remove_value(self.clients, client)
-		end)
+		ctcp.sendq = wait_queue(1)
+		ctcp.vars = {}
 		local ts = threadset()
 		--send thread
 		resume(ts:thread(function()
 			while 1 do
-				wb:put_value(sendq:pull()):flush()
+				wb:put_value(ctcp.sendq:pull()):flush()
 			end
 		end, 'logging-srv-send'))
 		--recv loop
@@ -299,14 +299,14 @@ function logging:listen(host, port)
 			while 1 do
 				local msg = rb:get_value()
 				if istab(msg) then
-					if msg.deploy  then client.deploy  = msg.deploy  end
-					if msg.machine then client.machine = msg.machine end
-					if msg.env     then client.env     = msg.env     end
+					if msg.deploy  then ctcp.deploy  = msg.deploy  end
+					if msg.machine then ctcp.machine = msg.machine end
+					if msg.env     then ctcp.env     = msg.env     end
 					if msg.event == 'set' then
-						client.vars[msg.k] = msg.v
-						self.onvar(self, client, msg)
+						ctcp.vars[msg.k] = msg.v
+						self.onvar(self, ctcp, msg)
 					else
-						self.onlog(self, client, msg)
+						self.onlog(self, ctcp, msg)
 					end
 				end
 			end
@@ -330,13 +330,11 @@ function logging:listen(host, port)
 			end
 		end
 	end, 'logging-srv-listen %s', listen_tcp)
+	listen_tcp:setowner(accept_thread)
 	resume(accept_thread)
 
 	function self:listen_stop()
-		if not self.clients then return end
-		accept_thread:cancel()
-		assert(#self.clients == 0)
-		self.clients = nil
+		if listen_tcp then accept_thread:cancel() end
 	end
 
 	function self:rpc_call(client, cmd, ...)
@@ -344,15 +342,13 @@ function logging:listen(host, port)
 	end
 
 	function self:rpc_broadcast(cmd, ...)
-		for _,c in ipairs(self.clients) do
+		for c in pairs(listen_tcp.sockets) do
 			self:rpc_call(c, cmd, ...)
 		end
 	end
 
 	return self
 end
-
-function logging:listen_stop() end
 
 logging.filter = {}
 

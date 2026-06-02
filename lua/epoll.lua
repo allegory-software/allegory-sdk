@@ -608,6 +608,13 @@ function wait_queue(size)
 			end
 		end
 	end
+	local function suspend_waiter(waiters)
+		local t = currentthread()
+		add(waiters, t)
+		local ok, err = try_suspend()
+		remove_value(waiters, t)
+		if not ok then error(err, 0) end
+	end
 	function q:try_push(v)
 		local ok, err = push(self, v)
 		if ok then wake_one(pull_waiters) end
@@ -620,15 +627,13 @@ function wait_queue(size)
 	end
 	function q:push(v)
 		while q:full() do
-			add(push_waiters, currentthread())
-			suspend()
+			suspend_waiter(push_waiters)
 		end
 		return self:try_push(v)
 	end
 	function q:pull()
 		while q:empty() do
-			add(pull_waiters, currentthread())
-			suspend()
+			suspend_waiter(pull_waiters)
 		end
 		return self:try_pull()
 	end

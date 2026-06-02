@@ -31,10 +31,11 @@ TCP
 	tcp:[try_]connect(addr, [port])        connect
 	tcp:send(s|buf, [len], [flags])        send bytes to connected address
 	tcp:recv(buf, len, [flags]) -> len|0   receive bytes
-	tcp:[try_]listen(addr, [port], [backlog])                put socket in listening mode
-	tcp:[try_]accept([opt], [timeout]) -> ctcp | nil,err     accept a client connection
-	tcp:recvn(buf, n) -> true              receive n bytes
-	tcp:remote_addr() -> sa                get connected/accepted sockaddr
+	tcp:[try_]listen(addr, [port], [backlog])    put socket in listening mode
+	tcp:[try_]accept([opt], [timeout]) -> ctcp | nil,err
+	tcp.sockets -> {ctcp=true}               live accepted client sockets
+	tcp:recvn(buf, n) -> true                receive n bytes
+	tcp:remote_addr() -> sa                  get connected/accepted sockaddr
 	tcp:shutdown(['r'|'w'|'rw'])           send FIN
 UDP
 	udp([family='ip', ][opt]) -> udp       make a SOCK_DGRAM socket
@@ -128,6 +129,7 @@ tcp:[try_]accept([opt], [timeout]) -> ctcp | nil,err
 
 	Accept a client connection. Timeout is to limit TLS handshake for sock_bearssl.
 	nil,err results are retryable accept errors; other errors are raised.
+	Listening sockets track live accepted sockets in tcp.sockets.
 
 tcp:recvn(buf, len) -> true
 
@@ -509,16 +511,16 @@ local function socket_try_close(self, cancel_thread)
 	local ps = self.listen_socket
 	if ps then
 		ps._sockets_n = ps._sockets_n - 1
-		ps._sockets[self] = nil
+		ps.sockets[self] = nil
 	end
-	if self._sockets then --close all accepted sockets if any.
-		for s in pairs(self._sockets) do
+	if self.sockets then --close all accepted sockets if any.
+		for s in pairs(self.sockets) do
 			s:try_close()
 		end
 		assert(self._sockets_n == 0)
 	end
 	live(self, nil, 'r:%d w:%d%s', self.r, self.w,
-		self._sockets and ' clients:'..self._sockets_n or '')
+		self.sockets and ' clients:'..self._sockets_n or '')
 	_epoll_cancel(self, cancel_thread) --raise into waiting I/O threads.
 	if self._onclose then
 		self:_onclose()
@@ -592,7 +594,7 @@ function tcp:try_accept(opt, timeout)
 	if not ok then C.close(fd); error(owner_or_err, 0) end
 	local s = _make_socket(owner_or_err, fd, tcp, self.family, opt)
 	self._sockets_n = self._sockets_n + 1
-	self._sockets[s] = true
+	self.sockets[s] = true
 	self.next_i = (self.next_i or 0) + 1
 	s.i = self.next_i
 	live(s, 'accepted %s.%d %s fd=%d clients:%d',
@@ -816,7 +818,7 @@ function tcp:try_listen(addr, port, backlog)
 	backlog = clamp(backlog or 1/0, 0, 0x7fffffff)
 	self:check_net(try_errno(C.listen(self.fd, backlog) == 0))
 	liveadd(self, 'listen=%s', local_addr)
-	self._sockets = {} --live client connections: {socket->true}
+	self.sockets = {} --live client connections: {socket->true}
 	self._sockets_n = 0 --live client connection count
 	return true
 end

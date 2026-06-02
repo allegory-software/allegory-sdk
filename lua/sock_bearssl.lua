@@ -7,6 +7,7 @@ API
 	client_stcp(tcp, host, opt) -> cstcp         create a secure client socket
 	[try_]server_stcp(tcp, opt) -> sstcp         create a secure server socket
 	- sstcp:try_accept([opt], [timeout]) -> ctcp | nil,err
+	- sstcp.sockets -> {cstcp=true}              live accepted TLS sockets
 	- sstcp:tls_accept(ctcp, [opt]) -> cstcp     run TLS handshake on accepted TCP
 	- - cstcp:recv(buf, sz) -> n|0               receive decrypted bytes, sz > 0
 	- - cstcp:recvn(buf, sz) -> true             receive exactly sz decrypted bytes
@@ -1081,7 +1082,16 @@ end
 function stcp:try_close()
 	if self._closed then return true end
 	self._closed = true --close barrier
+	if self.sockets then --server TLS socket: close all accepted TLS sockets.
+		for s in pairs(self.sockets) do
+			s:try_close()
+		end
+	end
 	local ok, err = self.tcp:try_close()
+	local ps = self.listen_socket
+	if ps then
+		ps.sockets[self] = nil
+	end
 	_disown(self)
 	self._keepalive = nil
 	live(self, nil)
@@ -1226,6 +1236,7 @@ function _G.try_server_stcp(tcp, opt)
 	local issuer_kt = opt.cert_issuer_rsa and BR_KEYTYPE_RSA or BR_KEYTYPE_EC
 	local s = _own(owner, object(server_stcp, {
 		tcp = tcp,
+		sockets = {},
 		_chain = chain, _chain_n = chain_n,
 		_sk = sk, _kt = kt, _issuer_kt = issuer_kt,
 		_cache = cache,
@@ -1262,6 +1273,7 @@ function server_stcp:tls_accept(ctcp, opt)
 
 	local sn = eng.server_name
 	s.server_name = sn[0] ~= 0 and str(sn) or nil
+	self.sockets[s] = true
 
 	live(s, 'accepted %s.%d tcp=%s clients:%d',
 		self, ctcp.i, ctcp, self.tcp._sockets_n)

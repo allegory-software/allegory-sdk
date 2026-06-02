@@ -2,6 +2,7 @@ require'glue'
 require'logging'
 require'sock'
 require'fs'
+require'pbuffer'
 
 local test = setmetatable({}, {__newindex = function(t, k, v)
 	rawset(t, k, v); rawset(t, #t+1, k)
@@ -20,6 +21,23 @@ local function checked_run(f)
 end
 
 local PORT = 11999
+
+local function connect_raw_logging_client(server, port)
+	local connected = wait_job()
+	local client
+	function server:onvar(c, e)
+		if e.k == 'raw-client' then
+			client = c
+			runafter(0, function() connected:try_resume() end)
+		end
+	end
+	local peer = connect('127.0.0.1', port)
+	local wb = pbuffer{f = peer}
+	wb:put_value{event = 'set', k = 'raw-client', v = true}:flush()
+	connected:wait(2)
+	assert(client)
+	return peer, client
+end
 
 -- Client/server -------------------------------------------------------------
 
@@ -58,8 +76,10 @@ function test.client_server_var()
 		local server = logging.new()
 		server.quiet = true
 		local done = wait_job()
+		local server_client
 		function server:onvar(client, e)
 			if e.k == 'mykey' then
+				server_client = client
 				runafter(0, function() done:try_resume() end)
 			end
 		end
@@ -71,8 +91,7 @@ function test.client_server_var()
 		client.logvar('mykey', 'myval')
 
 		done:wait(2)
-		assert(#server.clients == 1)
-		assert(server.clients[1].vars.mykey == 'myval')
+		assert(server_client.vars.mykey == 'myval')
 
 		client:toserver_stop()
 		server:listen_stop()
@@ -84,7 +103,9 @@ function test.server_rpc_to_client()
 		local server = logging.new()
 		server.quiet = true
 		local connected = wait_job()
+		local server_client
 		function server:onvar(client, e)
+			server_client = client
 			runafter(0, function() connected:try_resume() end)
 		end
 		server:listen('127.0.0.1', PORT)
@@ -99,7 +120,7 @@ function test.server_rpc_to_client()
 		client:toserver('127.0.0.1', PORT)
 
 		connected:wait(2) --wait until a client is registered
-		server:rpc_call(server.clients[1], 'set_test', 42)
+		server:rpc_call(server_client, 'set_test', 42)
 
 		rpc_done:wait(2)
 		assert(client.test_val == 42)
@@ -110,30 +131,23 @@ function test.server_rpc_to_client()
 	end)
 end
 
-function test.server_rpc_send_timeout_removes_client()
+function test.server_rpc_send_timeout_closes_client()
 	checked_run(function()
 		local server = logging.new()
 		server.quiet = true
 		server:listen('127.0.0.1', PORT)
 
-		local peer = connect('127.0.0.1', PORT)
-		wait(.05)
-		assert(#server.clients == 1, 'client not registered')
-
-		local client = server.clients[1]
-		local ctcp = client.tcp
+		local peer, ctcp = connect_raw_logging_client(server, PORT)
 		ctcp:setopt('so_sndbuf', 4096)
 		ctcp:settimeout(.05, 'w')
 
-		server:rpc_call(client, 'probe', ('x'):rep(8 * 1024^2))
+		server:rpc_call(ctcp, 'probe', ('x'):rep(8 * 1024^2))
 		wait(.2)
 
-		local nclients = #server.clients
 		local closed = ctcp:closed()
 		server:listen_stop()
 		peer:try_close()
 
-		assert(nclients == 0, 'stale client after RPC send timeout')
 		assert(closed, 'client TCP remains open after RPC send timeout')
 	end)
 end
@@ -144,12 +158,8 @@ function test.server_rpc_call_does_not_block_when_queue_is_full()
 		server.quiet = true
 		server:listen('127.0.0.1', PORT)
 
-		local peer = connect('127.0.0.1', PORT)
-		wait(.05)
-		assert(#server.clients == 1, 'client not registered')
-
-		local client = server.clients[1]
-		client.tcp:setopt('so_sndbuf', 4096)
+		local peer, client = connect_raw_logging_client(server, PORT)
+		client:setopt('so_sndbuf', 4096)
 		server:rpc_call(client, 'probe', ('x'):rep(8 * 1024^2))
 		server:rpc_call(client, 'queued')
 
@@ -167,8 +177,10 @@ function test.client_reconnects_after_idle_disconnect()
 		local server = logging.new()
 		server.quiet = true
 		local connected = wait_job()
+		local latest_client
 		function server:onvar(client, e)
 			if e.k == 'probe' then
+				latest_client = client
 				runafter(0, function() connected:try_resume() end)
 			end
 		end
@@ -180,12 +192,11 @@ function test.client_reconnects_after_idle_disconnect()
 		client:toserver('127.0.0.1', PORT, nil, .05)
 
 		connected:wait(2)
-		local old_tcp = server.clients[1].tcp
+		local old_tcp = latest_client
 		old_tcp:close()
 		connected:wait(2)
 
-		assert(#server.clients == 1)
-		assert(server.clients[1].tcp ~= old_tcp)
+		assert(latest_client ~= old_tcp)
 
 		client:toserver_stop()
 		server:listen_stop()
