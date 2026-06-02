@@ -138,6 +138,60 @@ function test.server_rpc_send_timeout_removes_client()
 	end)
 end
 
+function test.server_rpc_call_does_not_block_when_queue_is_full()
+	checked_run(function()
+		local server = logging.new()
+		server.quiet = true
+		server:listen('127.0.0.1', PORT)
+
+		local peer = connect('127.0.0.1', PORT)
+		wait(.05)
+		assert(#server.clients == 1, 'client not registered')
+
+		local client = server.clients[1]
+		client.tcp:setopt('so_sndbuf', 4096)
+		server:rpc_call(client, 'probe', ('x'):rep(8 * 1024^2))
+		server:rpc_call(client, 'queued')
+
+		local ok, err = server:rpc_call(client, 'full')
+		assert(not ok and err == 'full')
+
+		peer:close()
+		wait(.05)
+		server:listen_stop()
+	end)
+end
+
+function test.client_reconnects_after_idle_disconnect()
+	checked_run(function()
+		local server = logging.new()
+		server.quiet = true
+		local connected = wait_job()
+		function server:onvar(client, e)
+			if e.k == 'probe' then
+				runafter(0, function() connected:try_resume() end)
+			end
+		end
+		server:listen('127.0.0.1', PORT)
+
+		local client = logging.new()
+		client.quiet = true
+		client.logvar('probe', true)
+		client:toserver('127.0.0.1', PORT, nil, .05)
+
+		connected:wait(2)
+		local old_tcp = server.clients[1].tcp
+		old_tcp:close()
+		connected:wait(2)
+
+		assert(#server.clients == 1)
+		assert(server.clients[1].tcp ~= old_tcp)
+
+		client:toserver_stop()
+		server:listen_stop()
+	end)
+end
+
 -- File logging --------------------------------------------------------------
 
 local function tmp_logfile()

@@ -194,17 +194,18 @@ function logging:toserver(host, port, queue_size, timeout)
 	local sendq = wait_queue(queue_size or 1/0)
 	local pending_msg
 
-	local send_thread = thread(function()
+	local toserver_thread = thread(function()
 		while 1 do
-			try_with_owner(function()
+			catch_with_owner('net protocol closed', function()
 
 				local tcp = connect(host, port, timeout)
 				local wb = pbuffer{f = tcp}
 				local rb = pbuffer{f = tcp}
 				self.liveadd(tcp, 'logging')
 
-				--create RPC thread
-				resume(thread(function()
+				local ts = threadset()
+				--recv RPCs
+				resume(ts:thread(function()
 					while 1 do
 						local cmd_args = rb:get_value()
 						if istab(cmd_args) then
@@ -219,27 +220,30 @@ function logging:toserver(host, port, queue_size, timeout)
 					end
 				end, 'logging-rpc'))
 
-				--send current var states.
-				for k,v in pairs(self.vars) do
-					wb:put_value(logvar_message(self, k, v)):flush()
-				end
+				resume(ts:thread(function()
+					--send current var states.
+					for k,v in pairs(self.vars) do
+						wb:put_value(logvar_message(self, k, v)):flush()
+					end
 
-				--send log messages as they come.
-				while 1 do
-					local msg = pending_msg or sendq:pull()
-					wb:put_value(msg)
-					pending_msg = msg --if flush fails, we'll retry this
-					wb:flush()
-					pending_msg = nil
-				end
+					--send log messages as they come.
+					while 1 do
+						local msg = pending_msg or sendq:pull()
+						wb:put_value(msg)
+						pending_msg = msg --if flush fails, we'll retry this
+						wb:flush()
+						pending_msg = nil
+					end
+				end, 'logging-send'))
 
+				assert(ts:wait())
 			end)
 			--wait for network/peer to come back before attempting to reconnect
 			--because connect can fail without delay and we don't want to busy-loop.
 			wait(timeout)
 		end
-	end, 'logging-send')
-	resume(send_thread)
+	end, 'logging-toserver')
+	resume(toserver_thread)
 
 	function self:logtoserver(msg)
 		if not sendq:try_push(msg) then
@@ -249,7 +253,7 @@ function logging:toserver(host, port, queue_size, timeout)
 	end
 
 	function self:toserver_stop()
-		send_thread:cancel()
+		toserver_thread:cancel()
 		self.logtoserver = nil
 	end
 
@@ -327,7 +331,7 @@ function logging:listen(host, port)
 	end
 
 	function self:rpc_call(client, cmd, ...)
-		client.sendq:push{cmd, ...}
+		return client.sendq:try_push{cmd, ...}
 	end
 
 	function self:rpc_broadcast(cmd, ...)
