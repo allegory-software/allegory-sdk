@@ -1,6 +1,6 @@
 -- This is a generated file. DO NOT EDIT!
 
-assert(require("jit").version == "LuaJIT 2.1.1772649449", "LuaJIT core/library version mismatch")
+assert(require("jit").version == "LuaJIT 2.1.1780393537", "LuaJIT core/library version mismatch")
 
 return {
 
