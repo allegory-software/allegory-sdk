@@ -78,18 +78,20 @@ end
 
 function logging:tofile(logfile, max_size, queue_size)
 
+	assert(not self.logtofile)
+
 	require'fs'
 	require'queue'
 
 	local logfile0 = logfile:gsub('(%.[^%.]+)$', '0%1')
 	if logfile0 == logfile then logfile0 = logfile..'0' end
 
-	local save_wait_job
+	local save_thread, save_wait_job
 	local f, size
 
 	local function open_logfile()
 		if f then return end
-		f = open(logfile, 'a')
+		f = open{path = logfile, mode = 'a', owner = save_thread}
 		size = f:attr'size'
 	end
 
@@ -125,7 +127,7 @@ function logging:tofile(logfile, max_size, queue_size)
 		return ok
 	end
 
-	local queue_size = queue_size or logging.queue_size
+	local queue_size = queue_size or self.queue_size
 	local queue = queue(queue_size or 1/0)
 
 	function self:logtofile(s)
@@ -135,7 +137,7 @@ function logging:tofile(logfile, max_size, queue_size)
 		end
 	end
 
-	resume(thread(function()
+	save_thread = thread(function()
 		while self.logtofile do
 			local s = queue:peek()
 			if s then
@@ -152,7 +154,8 @@ function logging:tofile(logfile, max_size, queue_size)
 				save_wait_job = nil
 			end
 		end
-	end, 'logging-save'))
+	end, 'logging-save')
+	resume(save_thread)
 
 	function self:tofile_flush()
 		if not self.logtofile then return end
@@ -186,11 +189,13 @@ local logvar_message --fw. decl.
 
 function logging:toserver(host, port, queue_size, timeout)
 
+	assert(not self.logtoserver)
+
 	require'sock'
 	require'pbuffer'
 
-	timeout = timeout or logging.timeout
-	local queue_size = queue_size or logging.queue_size
+	timeout = timeout or self.timeout
+	local queue_size = queue_size or self.queue_size
 	local sendq = wait_queue(queue_size or 1/0)
 	local pending_msg
 
@@ -253,6 +258,7 @@ function logging:toserver(host, port, queue_size, timeout)
 	end
 
 	function self:toserver_stop()
+		if not self.logtoserver then return end
 		toserver_thread:cancel()
 		self.logtoserver = nil
 	end
@@ -264,12 +270,13 @@ function logging:toserver_stop() end
 
 function logging:listen(host, port)
 
+	assert(not self.clients)
+
 	require'sock'
 	require'pbuffer'
 
-	self.clients = {}
-
 	local listen_tcp = listen(host, port)
+	self.clients = {}
 
 	local function handle_connection(ctcp)
 		local rb = pbuffer{f = ctcp}
@@ -326,8 +333,10 @@ function logging:listen(host, port)
 	resume(accept_thread)
 
 	function self:listen_stop()
+		if not self.clients then return end
 		accept_thread:cancel()
 		assert(#self.clients == 0)
+		self.clients = nil
 	end
 
 	function self:rpc_call(client, cmd, ...)
