@@ -157,7 +157,7 @@ do
 	close_root(root)
 end
 
---with_owner: CANCEL restores currentowner but leaves scope for owner cleanup
+--with_owner: CANCEL restores currentowner and re-raises
 do
 	local root = new_root()
 	local res
@@ -170,11 +170,8 @@ do
 	assert(ok == false)
 	assert(e == CANCEL)
 	assert(currentowner() == root)
-	assert(res.owner)
-	assert(res.owner.owner == root)
-	assert(live_owned(root) == 1)
+	assert(not res.owner)
 	close_root(root)
-	assert(res.owner == nil)
 end
 
 assert(currentowner() == mainthread())

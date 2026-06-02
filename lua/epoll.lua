@@ -37,9 +37,11 @@ THREADS
 	th:[try_]cancel()                      cancel what the thread is waiting on
 	error(CANCEL)                          cancel current thread
 THREAD SETS
-	threadset() -> ts
+	threadset() -> ts                         flow control for started threads
 	- ts:thread(fn, [fmt, ...]) -> th
-	- ts:join() -> all_ok, first_err
+	- ts:wait() -> ok, err                    wait for first thread to finish
+	- ts:join() -> all_ok, first_err          wait for all threads to finish
+	- child errors are returned by wait()/join(), not logged
 	with_threads(f(spawn, join))           threadset sugar with auto-join
 		spawn(f[, fmt, ...])                spawn a thread
 		join() -> all_ok, first_err         join spawned threads
@@ -57,6 +59,11 @@ WAIT JOBS
 	- wj:cancel()               resume with CANCEL error
 	wait_until(t) -> ...        wait until clock() value
 	wait(s) -> ...              wait for s seconds
+WAIT QUEUE
+	wait_queue(size) -> q       bounded queue with blocking push and pull
+	- q:push(v)                 blocks if full; wakes one pull waiter on success
+	- q:pull() -> v             blocks if empty; wakes one push waiter on success
+	- q:try_push(v) / q:try_pull() -> v|nil   non-blocking variants
 TIMERS
 	timer(fn, [name]) -> tm     create a timer that runs fn
 	- tm:setexpires(t)          run timer fn at clock t
@@ -584,6 +591,50 @@ function wait(timeout)
 	return wait_job():wait(timeout)
 end
 
+--blocking queue -------------------------------------------------------------
+
+function wait_queue(size)
+	require'queue'
+	local q = queue(size)
+	local push, pull = q.push, q.pull
+	local pull_waiters = {}
+	local push_waiters = {}
+	local function wake_one(waiters)
+		while #waiters > 0 do
+			local t = remove(waiters, 1)
+			if t.waiting == true then
+				t:resume()
+				return
+			end
+		end
+	end
+	function q:try_push(v)
+		local ok, err = push(self, v)
+		if ok then wake_one(pull_waiters) end
+		return ok, err
+	end
+	function q:try_pull()
+		local v = pull(self)
+		if v ~= nil then wake_one(push_waiters) end
+		return v
+	end
+	function q:push(v)
+		while q:full() do
+			add(push_waiters, currentthread())
+			suspend()
+		end
+		return self:try_push(v)
+	end
+	function q:pull()
+		while q:empty() do
+			add(pull_waiters, currentthread())
+			suspend()
+		end
+		return self:try_pull()
+	end
+	return q
+end
+
 --lightweight timers that run in the main thread -----------------------------
 
 local tm = {type = 'timer', debug_prefix = 'R'}
@@ -945,53 +996,59 @@ function threadset()
 	local n = 0
 	local all_ok = true
 	local first_err
-	local join_thread
+	local wait_ok, wait_err
+	local waiter, wait_all
+	local function wait(all)
+		assert(not waiter, 'threadset already waiting')
+		if all and n == 0 or not all and wait_ok ~= nil then return end
+		assert(n ~= 0, 'threadset empty')
+		waiter, wait_all = currentthread(), all
+		local ok, err = try_suspend()
+		waiter, wait_all = nil
+		if not ok then error(err, 0) end
+	end
 	function ts:thread(f, ...)
 		return thread(function(...)
 			n = n + 1
-			local ok, err = log_error(pcall(f, ...))
-			if not ok then
-				if all_ok then
-					all_ok = false
-					first_err = err
-				end
+			local ok, err = pcall(f, ...)
+			if not ok and all_ok then
+				all_ok = false
+				first_err = err
 			end
 			n = n - 1
-			if n == 0 and join_thread then
-				return finish_in(join_thread)
+			if wait_ok == nil then
+				wait_ok, wait_err = ok, err
+			end
+			if waiter and (not wait_all or n == 0) then
+				return finish_in(waiter)
 			end
 		end, ...)
 	end
+	function ts:wait()
+		wait(false)
+		return wait_ok, wait_err
+	end
 	function ts:join()
-		if n ~= 0 then
-			assert(not join_thread, 'threadset already joining')
-			join_thread = currentthread()
-			local ok, err = try_suspend()
-			join_thread = nil
-			if not ok then error(err, 0) end
-		end
+		wait(true)
 		return all_ok, first_err
 	end
 	return ts
 end
 
 function with_threads(f)
-	local ts = _own(currentowner(), threadset())
-	local function join()
-		return ts:join()
-	end
-	local function spawn(...)
-		local th = ts:thread(...)
-		th:setowner(ts)
-		resume(th)
-		return th
-	end
-	local ok, err = pcall(f, spawn, join)
-	if ok then
-		ok, err = ts:join()
-	end
-	ts:try_close()
-	if not ok then error(err, 0) end
+	with_owner(function()
+		local ts = threadset()
+		local function join()
+			return ts:join()
+		end
+		local function spawn(...)
+			local th = ts:thread(...)
+			resume(th)
+			return th
+		end
+		f(spawn, join)
+		assert(join())
+	end)
 end
 
 --poll loop -----------------------------------------------------------------

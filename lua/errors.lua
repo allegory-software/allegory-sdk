@@ -19,7 +19,7 @@ RAISING ERRORS
 CATCHING ERRORS
 	catch([errtypes], f, ...) -> true,... | false,e   pcall and catch table errors
 	try(f, ...) -> true,... | false,e             catch all table errors
-	iserror(e, [type], [message]) -> t|f          check if e is an error object
+	iserror(e, [types], [message]) -> t|f         check if e is an error object
 
 RATIONALE
 
@@ -111,9 +111,12 @@ local error_mt = {
 function newerror(e, ...)
 	return setmetatable(e, error_mt)
 end
-function iserror(e, errtype, message)
+local errtypes_table = memoize(function(errtypes)
+	return index(collect(words(errtypes)))
+end)
+function iserror(e, errtypes, message)
 	return getmetatable(e) == error_mt
-		and (not errtype or e.type == errtype)
+		and (not errtypes or errtypes_table(errtypes)[e.type])
 		and (not message or e.message == message)
 end
 
@@ -121,16 +124,13 @@ end
 CANCEL = newerror{type = 'cancel'}
 CLOSED = newerror{type = 'closed'}
 
-local errtypes_table = memoize(function(errtypes)
-	return index(collect(words(errtypes)))
-end)
 local function return_catch(errtypes, ok, ...)
 	if ok then return true, ... end
 	local e = ...
 	if e == CANCEL or type(e) == 'string' then --can't catch these
 		error(e, 2)
 	end
-	if iserror(e) and (not errtypes or errtypes_table(errtypes)[e.type]) then
+	if iserror(e, errtypes) then
 		return false, e --caught
 	end
 	error(e)

@@ -114,6 +114,152 @@ function test.wait_timeout_returns_timeout()
 	end)
 end
 
+-- Wait queue ----------------------------------------------------------------
+
+function test.wait_queue_try_push_pull()
+	checked_run(function()
+		local q = wait_queue(3)
+		assert(q:try_push('a'))
+		assert(q:try_push('b'))
+		assert(q:try_pull() == 'a')
+		assert(q:try_pull() == 'b')
+		assert(q:try_pull() == nil)
+	end)
+end
+
+function test.wait_queue_try_push_full()
+	checked_run(function()
+		local q = wait_queue(2)
+		assert(q:try_push(1))
+		assert(q:try_push(2))
+		local ok, err = q:try_push(3)
+		assert(not ok)
+		assert(err == 'full')
+	end)
+end
+
+function test.wait_queue_try_push_wakes_puller()
+	checked_run(function()
+		local q = wait_queue(1)
+		local got
+		resume(sthread(function()
+			got = q:pull()
+		end, 'puller'))
+		assert(got == nil)
+		assert(q:try_push('x'))
+		assert(got == 'x')
+	end)
+end
+
+function test.wait_queue_try_pull_wakes_pusher()
+	checked_run(function()
+		local q = wait_queue(1)
+		assert(q:push('x'))
+		local pushed = false
+		resume(sthread(function()
+			q:push('y')
+			pushed = true
+		end, 'pusher'))
+		assert(not pushed)
+		assert(q:try_pull() == 'x')
+		assert(pushed)
+		assert(q:try_pull() == 'y')
+	end)
+end
+
+function test.wait_queue_push_blocks_then_wakes()
+	checked_run(function()
+		local q = wait_queue(2)
+		assert(q:push(1))
+		assert(q:push(2))
+		local pushed = false
+		resume(sthread(function()
+			q:push(3) --blocks: queue is full
+			pushed = true
+		end, 'pusher'))
+		assert(not pushed) --pusher is suspended
+		assert(q:pull() == 1) --makes room, wakes pusher
+		assert(pushed)
+		assert(q:pull() == 2)
+		assert(q:pull() == 3)
+	end)
+end
+
+function test.wait_queue_push_cancel()
+	checked_run(function()
+		local q = wait_queue(1)
+		assert(q:push('x'))
+		local ok, err
+		local t = sthread(function()
+			ok, err = lua_pcall(function() q:push('y') end)
+		end, 'pusher')
+		resume(t)
+		t:cancel()
+		assert(ok == false)
+		assert(err == CANCEL)
+	end)
+end
+
+function test.wait_queue_pull_blocks_then_wakes()
+	checked_run(function()
+		local q = wait_queue(8)
+		local got
+		resume(sthread(function()
+			got = q:pull()
+		end, 'puller'))
+		assert(got == nil) --puller is suspended
+		q:push('hello')
+		assert(got == 'hello')
+	end)
+end
+
+function test.wait_queue_multiple_waiters_fifo()
+	checked_run(function()
+		local q = wait_queue(8)
+		local got = {}
+		resume(sthread(function() got[1] = q:pull() end, 'p1'))
+		resume(sthread(function() got[2] = q:pull() end, 'p2'))
+		resume(sthread(function() got[3] = q:pull() end, 'p3'))
+		q:push('x')
+		q:push('y')
+		q:push('z')
+		assert(got[1] == 'x')
+		assert(got[2] == 'y')
+		assert(got[3] == 'z')
+	end)
+end
+
+function test.wait_queue_pull_cancel()
+	checked_run(function()
+		local q = wait_queue(8)
+		local ok, err
+		local t = sthread(function()
+			ok, err = lua_pcall(function() q:pull() end)
+		end, 'puller')
+		resume(t)
+		t:cancel()
+		assert(ok == false)
+		assert(err == CANCEL)
+	end)
+end
+
+function test.wait_queue_push_skips_cancelled_waiter()
+	checked_run(function()
+		local q = wait_queue(8)
+		local ok1
+		local got2
+		local t1 = sthread(function()
+			ok1 = lua_pcall(function() q:pull() end)
+		end, 'p1')
+		resume(t1)
+		resume(sthread(function() got2 = q:pull() end, 'p2'))
+		t1:cancel() --leaves dead entry at head of waiters list
+		assert(ok1 == false)
+		q:push('to-p2') --must skip dead t1 and resume p2
+		assert(got2 == 'to-p2')
+	end)
+end
+
 -- Timers --------------------------------------------------------------------
 
 function test.runat_fires()
@@ -914,6 +1060,53 @@ function test.threadset_join_resumes_waiter()
 	end)
 	assert(joined)
 	assert(child:status() == 'dead')
+end
+
+function test.threadset_wait_resumes_on_child_finish()
+	checked_run(function()
+		local ts = threadset()
+		local child = ts:thread(function()
+			wait(0)
+		end)
+		resume(child)
+		local ok, err = ts:wait()
+		assert(ok)
+		assert(err == nil)
+		assert(ts:join())
+	end)
+end
+
+function test.threadset_wait_preserves_finished_child_error()
+	local logs = capture_log(function()
+		checked_run(function()
+			local ts = threadset()
+			local child = ts:thread(function()
+				error'boom'
+			end)
+			resume(child)
+			local ok, err = ts:wait()
+			assert(not ok)
+			assert(tostring(err):find('boom', 1, true))
+		end)
+	end)
+	assert(not logs_contain(logs, 'boom'))
+end
+
+function test.with_threads_closes_children_on_error()
+	checked_run(function()
+		local child
+		local ok, err = pcall(function()
+			with_threads(function(spawn)
+				child = spawn(function()
+					wait(10)
+				end)
+				error'boom'
+			end)
+		end)
+		assert(not ok)
+		assert(tostring(err):find('boom', 1, true))
+		assert(child:status() == 'dead')
+	end)
 end
 
 function test.threadset_child_finishes_before_join()

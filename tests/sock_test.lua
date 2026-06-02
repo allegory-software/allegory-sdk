@@ -26,23 +26,20 @@ end
 local BUF = new'char[65536]'
 
 local function with_threads(f)
-	local ts = _own(currentowner(), threadset())
-	local function join()
-		local ok, err = ts:join()
-		if not ok then error(err, 0) end
-	end
-	local function spawn(f, name)
-		local th = ts:thread(f, name)
-		th:setowner(ts)
-		resume(th)
-		return th
-	end
-	local ok, err = pcall(f, spawn, join)
-	if ok then
-		ok, err = pcall(join)
-	end
-	ts:try_close()
-	if not ok then error(err, 0) end
+	with_owner(function()
+		local ts = threadset()
+		local function join()
+			local ok, err = ts:join()
+			if not ok then error(err, 0) end
+		end
+		local function spawn(f, name)
+			local th = ts:thread(f, name)
+			resume(th)
+			return th
+		end
+		f(spawn, join)
+		join()
+	end)
 end
 
 local function checked_run(f)

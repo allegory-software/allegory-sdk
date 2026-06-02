@@ -1997,7 +1997,7 @@ function touch(file, mtime, sync) --create file or update its mtime.
 	log('note', 'fs', 'touch', '%s to %s', file, date('%d-%m-%Y %H:%M', mtime))
 end
 
---8 syscalls to increment a number safely, maybe you need a DB :)
+--8 syscalls and many allocs to increment a number safely, maybe you need a DB :)
 function gen_id(name, start)
 	local next_id_file = varpath('next_'..name)
 	local f = open(next_id_file, 'rw')

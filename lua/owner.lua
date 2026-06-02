@@ -7,8 +7,10 @@ API
 	setowner(res, owner)               set owner of res
 	currentowner([thread]) -> owner    get (current) thread's current owner
 	setcurrentowner(owner, [thread])   set (current) thread's current owner
-	try_with_owner(f, ...) -> ok, ...  run f within a scope owner
 	with_owner(f, ...) -> ...          run f within a scope owner (re-raises errors)
+	- pcall_with_owner(f, ...) -> ok, ...              pcall variant
+	- catch_with_owner(errtypes, f, ...) -> ok, ...    catch variant
+	- try_with_owner(f, ...) -> ok, ...                try variant
 
 INTEGRATION API
 	_check_owner(owner) -> vowner  check/get owner before creating res (raises!)
@@ -180,25 +182,37 @@ local function scope_try_close(scope)
 	setcurrentowner(prev_owner)
 	_disown(scope)
 end
-local function return_try_with_owner(scope, ok, ...)
-	if ... == CANCEL then
-		setcurrentowner(scope.owner)
-		error(..., 0) --let scope's owner close it
-	else
-		scope:try_close()
-		return ok, ...
-	end
-end
-function try_with_owner(f, ...)
+local function _with_owner(f, ...)
 	local prev_owner = currentowner()
 	local scope = _own(_check_owner(prev_owner), {
 		try_close = scope_try_close,
 	})
 	setcurrentowner(scope)
-	return return_try_with_owner(scope, pcall(f, ...))
+	return scope, pcall(f, ...)
 end
-function with_owner(f, ...)
-	return unpcall(try_with_owner(f, ...))
+local function return_pcall_with_owner(scope, ok, ...)
+	scope:try_close()
+	return ok, ...
+end
+function pcall_with_owner(...)
+	return return_pcall_with_owner(_with_owner(...))
+end
+local function return_catch_with_owner(errtypes, scope, ok, ...)
+	scope:try_close()
+	local err = ...
+	if not ok and (err == CANCEL or not iserror(err, errtypes)) then
+		error(err, 0)
+	end
+	return ok, ...
+end
+function catch_with_owner(errtypes, ...)
+	return return_catch_with_owner(errtypes, _with_owner(...))
+end
+function try_with_owner(...)
+	return return_catch_with_owner(nil, _with_owner(...))
+end
+function with_owner(...)
+	return unpcall(return_catch_with_owner(nil, _with_owner(...)))
 end
 
 --stubs if not using epoll.lua

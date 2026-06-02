@@ -21,8 +21,8 @@ CONFIG
 	logging.debug             log `debug` messages to stderr (false)
 	logging.flush             flush stderr after each message (false)
 	logging.max_disk_size     max disk size occupied by logging (16M)
-	logging.queue_size        queue size for when the server is slow (10000)
-	logging.timeout           timeout (5)
+	logging.queue_size        queue size for when the server is slow (1000)
+	logging.timeout           timeout (2)
 	logging.filter.NAME = true    filter out debug messages of specific module/event
 	logging.censor.name <- f(severity, module, ev, msg)  |set a function for censoring secrets in logs
 	logging:logtostderr(line)
@@ -46,6 +46,8 @@ LOGGING API
 
 ]]
 
+if not ... then require'logging_test'; return end
+
 require'glue'
 local reflect = require'reflect'
 
@@ -58,10 +60,11 @@ logging = {
 	verbose = false,
 	debug = false,
 	flush = false, --too slow (but you can tail)
+	autosync = false,
 	censor = {},
 	max_disk_size = 16 * 1024^2,
 	queue_size = 1000,
-	timeout = 5,
+	timeout = 2,
 	vars = {
 		profiler_started = false,
 		jit_on = jit.status(),
@@ -70,7 +73,7 @@ logging = {
 
 function logging:logtostderr(entry)
 	io.stderr:write(entry:sub(17))
-	io.stderr:flush()
+	if self.flush then io.stderr:flush() end
 end
 
 function logging:tofile(logfile, max_size, queue_size)
@@ -81,6 +84,7 @@ function logging:tofile(logfile, max_size, queue_size)
 	local logfile0 = logfile:gsub('(%.[^%.]+)$', '0%1')
 	if logfile0 == logfile then logfile0 = logfile..'0' end
 
+	local save_wait_job
 	local f, size
 
 	local function open_logfile()
@@ -102,8 +106,8 @@ function logging:tofile(logfile, max_size, queue_size)
 
 	local function save_message(s)
 		open_logfile()
-		rotate_logfile(#s + 1)
-		size = size + #s + 1
+		rotate_logfile(#s)
+		size = size + #s
 		f:write(s)
 		if self.autosync then f:sync() end
 		return true
@@ -153,9 +157,10 @@ function logging:tofile(logfile, max_size, queue_size)
 	function self:tofile_flush()
 		if not self.logtofile then return end
 		while 1 do
-			local s = queue:pull()
+			local s = queue:peek()
 			if not s then break end
 			if not try_save_message(s) then break end
+			queue:pull()
 		end
 	end
 
@@ -182,53 +187,26 @@ local logvar_message --fw. decl.
 function logging:toserver(host, port, queue_size, timeout)
 
 	require'sock'
-	require'queue'
-	require'mess'
+	require'pbuffer'
 
 	timeout = timeout or logging.timeout
+	local queue_size = queue_size or logging.queue_size
+	local sendq = wait_queue(queue_size or 1/0)
+	local pending_msg
 
-	local chan
-	local reconn_wait_job
-	local stop
+	local send_thread = thread(function()
+		while 1 do
+			try_with_owner(function()
 
-	local function check_io(ret, ...)
-		if ret then return ret, ... end
-		if chan then chan:try_close() end
-		chan = nil
-	end
+				local tcp = connect(host, port, timeout)
+				local wb = pbuffer{f = tcp}
+				local rb = pbuffer{f = tcp}
+				self.liveadd(tcp, 'logging')
 
-	local function connect()
-		if chan then return chan end
-		while not stop do
-
-			local exp = clock() + timeout
-
-			--wait _before_ reconnecting (instead of after) because ssh tunnels
-			--accept connections even after the other end is no longer listening.
-			--also because 'connection_refused' error comes instantly on Linux.
-			if not stop and exp > clock() + 0.2 then
-				reconn_wait_job = wait_job()
-				reconn_wait_job:wait_until(exp)
-				reconn_wait_job = nil
-			end
-
-			local tcp = tcp()
-
-			chan = try_mess_connect(tcp, host, port, timeout)
-
-			if chan then
-
-				--send current var states.
-				for k,v in pairs(self.vars) do
-					chan:send(logvar_message(self, k, v))
-				end
-
-				--create RPC thread/loop
-				self.liveadd(chan.tcp, 'logging')
+				--create RPC thread
 				resume(thread(function()
-					while not stop do
-						local cmd_args = check_io(chan:try_recv())
-						if not cmd_args then break end
+					while 1 do
+						local cmd_args = rb:get_value()
 						if istab(cmd_args) then
 							local cmd = cmd_args[1]
 							local f = self.rpc[cmd]
@@ -239,60 +217,129 @@ function logging:toserver(host, port, queue_size, timeout)
 							end
 						end
 					end
-				end, 'logging-rpc %s', chan.tcp))
+				end, 'logging-rpc'))
 
-				return true
-			end
-
-		end
-		return false
-	end
-
-	local queue_size = queue_size or logging.queue_size
-	local queue = queue(queue_size or 1/0)
-	local send_wait_job
-
-	resume(thread(function()
-		while not stop do
-			try_with_owner(function()
-				connect()
-				while not stop do
-					local msg = queue:peek()
-					if msg then
-						chan:send(msg)
-						queue:pull()
-					else
-						send_wait_job = wait_job()
-						send_wait_job:wait(.2)
-						send_wait_job = nil
-					end
+				--send current var states.
+				for k,v in pairs(self.vars) do
+					wb:put_value(logvar_message(self, k, v)):flush()
 				end
+
+				--send log messages as they come.
+				while 1 do
+					local msg = pending_msg or sendq:pull()
+					wb:put_value(msg)
+					pending_msg = msg --if flush fails, we'll retry this
+					wb:flush()
+					pending_msg = nil
+				end
+
 			end)
+			--wait for network/peer to come back before attempting to reconnect
+			--because connect can fail without delay and we don't want to busy-loop.
+			wait(timeout)
 		end
-		self.logtoserver = nil
-	end, 'logging-send'))
+	end, 'logging-send')
+	resume(send_thread)
 
 	function self:logtoserver(msg)
-		if not queue:push(msg) then
-			queue:pull()
-			queue:push(msg)
+		if not sendq:try_push(msg) then
+			sendq:try_pull() --drop one to make room
+			sendq:try_push(msg)
 		end
 	end
 
 	function self:toserver_stop()
-		stop = true
-		check_io()
-		if send_wait_job then
-			send_wait_job:resume()
-		elseif reconn_wait_job then
-			reconn_wait_job:resume()
-		end
+		send_thread:cancel()
+		self.logtoserver = nil
 	end
 
 	return self
 end
 
 function logging:toserver_stop() end
+
+function logging:listen(host, port)
+
+	require'sock'
+	require'pbuffer'
+
+	self.clients = {}
+
+	local listen_tcp = listen(host, port)
+
+	local function handle_connection(ctcp)
+		local rb = pbuffer{f = ctcp}
+		local wb = pbuffer{f = ctcp}
+		local sendq = wait_queue(1)
+		local client = {tcp = ctcp, sendq = sendq, vars = {}}
+		add(self.clients, client)
+		currentthread():onfinish(function()
+			remove_value(self.clients, client)
+		end)
+		local ts = threadset()
+		--send thread
+		resume(ts:thread(function()
+			while 1 do
+				wb:put_value(sendq:pull()):flush()
+			end
+		end, 'logging-srv-send'))
+		--recv loop
+		resume(ts:thread(function()
+			while 1 do
+				local msg = rb:get_value()
+				if istab(msg) then
+					if msg.deploy  then client.deploy  = msg.deploy  end
+					if msg.machine then client.machine = msg.machine end
+					if msg.env     then client.env     = msg.env     end
+					if msg.event == 'set' then
+						client.vars[msg.k] = msg.v
+						self.onvar(self, client, msg)
+					else
+						self.onlog(self, client, msg)
+					end
+				end
+			end
+		end, 'logging-srv-recv'))
+		--wait until any one of the I/O threads finishes. this is needed because
+		--if one thread breaks on timeout, the other one doesn't and we'd be stuck
+		--with a half-broken connection.
+		assert(ts:wait())
+	end
+	local accept_thread = thread(function()
+		while 1 do
+			local ctcp, err = listen_tcp:try_accept()
+			if not ctcp then
+				self.log('ERROR', 'log', 'accept', '%s', err)
+			else
+				resume(thread(function()
+					ctcp:setowner(currentowner())
+					--the catch is only to mute these error types.
+					catch('net protocol closed', handle_connection, ctcp)
+				end, 'logging-srv-session %s', ctcp))
+			end
+		end
+	end, 'logging-srv-listen %s', listen_tcp)
+	resume(accept_thread)
+
+	function self:listen_stop()
+		accept_thread:cancel()
+		assert(#self.clients == 0)
+	end
+
+	function self:rpc_call(client, cmd, ...)
+		client.sendq:push{cmd, ...}
+	end
+
+	function self:rpc_broadcast(cmd, ...)
+		for _,c in ipairs(self.clients) do
+			self:rpc_call(c, cmd, ...)
+		end
+	end
+
+	return self
+end
+
+function logging:listen_stop() end
 
 logging.filter = {}
 
@@ -434,6 +481,18 @@ local severity_symbol = {
 	warn  = 'W',
 	ERROR = 'E',
 }
+
+function logging:onlog(client, e) --stub
+	local prefix = client.deploy or '?'
+	io.stderr:write(_('%s %s %-1s %-6s %-8s %s\n',
+		prefix, date('%Y-%m-%d %H:%M:%S', e.time),
+		severity_symbol[e.severity] or e.severity or '',
+		e.module or '', (e.event or ''):sub(1, 8),
+		e.message or ''))
+	if self.flush then io.stderr:flush() end
+end
+
+function logging:onvar(client, e) end --stub
 
 local function log(self, severity, module, event, fmt, ...)
 	if severity == '' and self.filter[module  ] then return end
@@ -641,17 +700,13 @@ local profiler_lines
 function logging.start_profiler(mode)
 	if profiler_lines then return end
 	local p = require'jit.p'
-	local io_open = io.open
-	profiler_lines = {}
-	function io.open()
-		local f = {close = noop}
-		function f:write(s)
-			add(profiler_lines, s)
-		end
-		return f
+	local lines = {}
+	local out = {close = noop}
+	function out:write(s)
+		add(lines, s)
 	end
-	p.start(mode, true)
-	io.open = io_open
+	p.start(mode, out)
+	profiler_lines = lines
 	logging.log('note', 'log', 'prof_start', 'profiler started %s', mode or '')
 	logging.logvar('profiler_started', true)
 	logging.logvar('profiler_output', 'Recording...')
@@ -706,40 +761,3 @@ _G.live         = logging.live
 _G.liveadd      = logging.liveadd
 _G.logarg       = logging.arg
 _G.logargs      = logging.args
-
-
-if not ... then
-
-	if os.getenv'AUTO' then return end
-
-	require'sock'
-
-	local log = _G.log
-
-	resume(thread(function()
-		wait(5)
-		logging:toserver_stop()
-		print'told to stop'
-	end, 'test'))
-
-	run(function()
-
-		logging.debug = true
-
-		logging:tofile('test.log', 64000)
-		logging:toserver('127.0.0.1', 1234, 998, 1)
-
-		for i=1,1000 do
-			log('note', 'test-m', 'test-ev', 'foo %d bar', i)
-		end
-
-		local s1 = tcp()
-		local s2 = tcp()
-		local t1 = thread(function() end, 't1')
-		local t2 = thread(function() end, 't2')
-
-		log('', 'test-m', 'test-ev', '%s %s %s %s\nanother thing', s1, s2, t1, t2)
-
-	end)
-
-end

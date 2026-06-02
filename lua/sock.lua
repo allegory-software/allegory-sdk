@@ -178,7 +178,6 @@ require'glue'
 require'ipv6'
 require'epoll'
 require'owner'
-require'pbuffer'
 
 assert(Linux, 'platform not Linux')
 
