@@ -32,6 +32,13 @@ local function put_string(db, tab, k, v)
 	assert(db:try_put_raw(tab, k, #k, v, #v))
 end
 
+local function assert_plain_error(f, msg)
+	local ok, err = pcall(f)
+	assert(not ok)
+	assert(not iserror(err, 'db'))
+	assert(tostring(err):find(msg, 1, true), tostring(err))
+end
+
 local function table_exists(file, tab)
 	local db = mdbx_open(file)
 	db:begin()
@@ -163,6 +170,78 @@ function test.atomic_aborts_unclosed_nested_write_txn_on_error()
 	end)
 end
 
+function test.rename_created_table_in_top_level_txn_asserts()
+	with_db('rename_created_table_in_top_level_txn_asserts', function(db)
+		db:begin'w'
+		put_string(db, 't', 'k', 'v')
+		assert_plain_error(function()
+			db:try_rename_table('t', 'u')
+		end, 'created in current transaction')
+		db:abort()
+	end)
+end
+
+function test.rename_existing_table_in_top_level_txn()
+	with_db('rename_existing_table_in_top_level_txn', function(db)
+		db:begin'w'
+		put_string(db, 't', 'k', 'v')
+		db:commit()
+		db:begin'w'
+		assert(db:try_rename_table('t', 'u'))
+		db:commit()
+		db:begin()
+		assert(not db:table_exists't')
+		assert(db:table_exists'u')
+		local ok, v, v_sz = db:get_raw('u', 'k', 1)
+		assert(ok)
+		assert(ffi.string(v, v_sz) == 'v')
+		db:commit()
+	end)
+end
+
+function test.rename_inherited_table_in_nested_txn_asserts()
+	with_db('rename_inherited_table_in_nested_txn_asserts', function(db)
+		db:begin'w'
+		put_string(db, 't', 'k', 'v')
+		db:commit()
+		db:begin'w'
+		db:begin'w'
+		assert_plain_error(function()
+			db:try_rename_table('t', 'u')
+		end, 'rename table in nested transaction')
+		db:abort()
+		db:abort()
+	end)
+end
+
+function test.rename_created_table_in_nested_txn_asserts()
+	with_db('rename_created_table_in_nested_txn_asserts', function(db)
+		db:begin'w'
+		db:begin'w'
+		put_string(db, 't', 'k', 'v')
+		assert_plain_error(function()
+			db:try_rename_table('t', 'u')
+		end, 'rename table in nested transaction')
+		db:abort()
+		db:abort()
+	end)
+end
+
+function test.drop_table_in_nested_txn_asserts()
+	with_db('drop_table_in_nested_txn_asserts', function(db)
+		db:begin'w'
+		put_string(db, 't', 'k', 'v')
+		db:commit()
+		db:begin'w'
+		db:begin'w'
+		assert_plain_error(function()
+			db:try_drop_table't'
+		end, 'drop table in nested transaction')
+		db:abort()
+		db:abort()
+	end)
+end
+
 function test.cursor_get_raw_accepts_cursor_op()
 	with_db('cursor_get_raw_accepts_cursor_op', function(db)
 		db:begin'w'
@@ -203,6 +282,17 @@ function test.each_raw_missing_table_is_empty()
 	end)
 end
 
+function test.raw_ops_without_txn_assert()
+	with_db('raw_ops_without_txn_assert', function(db)
+		assert_plain_error(function()
+			db:get_raw('t', 'k', 1)
+		end, 'not in transaction')
+		assert_plain_error(function()
+			db:table_exists't'
+		end, 'not in transaction')
+	end)
+end
+
 function test.write_in_readonly_txn_raises()
 	with_db('write_in_readonly_txn_raises', function(db)
 		db:begin'w'
@@ -210,16 +300,37 @@ function test.write_in_readonly_txn_raises()
 		db:commit()
 
 		db:begin()
-		local ok, err = pcall(function()
+		assert_plain_error(function()
 			db:try_put_raw('t', 'k2', 2, 'v2', 2)
-		end)
-		assert(not ok)
-		assert(iserror(err, 'db'))
-		assert(err.target == db)
-		assert(tostring(err):find('Permission denied', 1, true)
-			or tostring(err):find('EACCESS', 1, true))
+		end, 'not in write transaction')
 		db:commit()
 	end)
+end
+
+function test.cursor_after_txn_asserts()
+	with_db('cursor_after_txn_asserts', function(db)
+		db:begin'w'
+		put_string(db, 't', 'k', 'v')
+		local cur = db:cursor('t')
+		assert(cur:first_raw())
+		db:commit()
+		assert_plain_error(function()
+			cur:next_raw()
+		end, 'cursor closed')
+	end)
+end
+
+function test.begin_write_on_readonly_db_asserts()
+	local file = test_file('begin_write_on_readonly_db_asserts')
+	cleanup(file)
+	local db = mdbx_open(file)
+	db:close()
+	db = mdbx_open(file, {readonly = true})
+	assert_plain_error(function()
+		db:begin'w'
+	end, 'read-only database')
+	db:close()
+	cleanup(file)
 end
 
 function test.delete_missing_db_returns_not_found()

@@ -17,6 +17,12 @@ MDBX->LUA
  * write ops and errors are logged, except raw CRUD ops which are to be used
    to implement structured CRUD ops and have those be logged.
 
+LIMITATIONS
+
+	* drop_table() is allowed only in top-level write transactions.
+	* rename_table() is allowed only in top-level write transactions and only
+	  for tables that existed before the current write transaction began.
+
 DATABASES
 	[try_]mdbx_open(file_path, [opt]) -> db[,err],created   open/create a database
 		opt.max_readers    64                max read txns across all processes
@@ -37,8 +43,8 @@ TRANSACTIONS
 TABLES
 	db:dbi(table_name|dbi, ['r'|'w'|'c']) -> dbi  open/create table
 	db:[try_]table_stat(table_name|dbi) -> MDBX_stat    get storage metrics on table (shared buffer)
-	db:[try_]rename_table (table_name|dbi)  rename table
-	db:[try_]drop_table   (table_name|dbi)  drop table
+	db:[try_]rename_table (table_name|dbi)  rename table (top-level txn; committed tables only)
+	db:[try_]drop_table   (table_name|dbi)  drop table (top-level txn only)
 	db:[try_]clear_table  (table_name|dbi)  delete all records
 	db:each_table() -> iter() -> table_name
 	db:table_count() -> n
@@ -74,8 +80,8 @@ require'mdbx_h'
 local C = ffi.load'mdbx'
 
 local
-	isnum, isstr, bor, num, assert =
-	isnum, isstr, bor, num, assert
+	isnum, isstr, bor, band, num, assert =
+	isnum, isstr, bor, bit.band, num, assert
 
 mdbx = C
 
@@ -86,6 +92,8 @@ local curp = new'MDBX_cursor*[1]'
 local key = new'MDBX_val'
 local val = new'MDBX_val'
 local seqbuf = u64a(1)
+local dbi_flagsp = new'unsigned[1]'
+local dbi_statep = new'unsigned[1]'
 
 -- databases -----------------------------------------------------------------
 
@@ -230,10 +238,25 @@ txn-level and env-level dbis/dbim.
 local dbis_freelist = {}
 local dbim_freelist = {}
 
+local function check_txn(self)
+	assert(self.txn, 'not in transaction')
+end
+
+local function check_wtxn(self)
+	assert(self.txn and self.txn ~= self._ro_txn, 'not in write transaction')
+end
+
+local function table_state(self, dbi)
+	self:checkz(C.mdbx_dbi_flags_ex(self.txn, dbi, dbi_flagsp, dbi_statep),
+		't_flags')
+	return dbi_statep[0]
+end
+
 local function local_dbis(self)
 	local dbis = self.dbis
 	local dbim = self.dbim
-	local txn = assert(self.txn)
+	local txn = self.txn
+	check_txn(self)
 	if getmetatable(dbis).txn ~= txn then --not local, create
 		local parent_dbis = dbis
 		local parent_dbim = dbim
@@ -285,6 +308,7 @@ function Db:begin(mode)
 		end
 		self.txn = ro_txn
 	elseif mode == 'w' then
+		assert(not self.readonly, 'read-only database')
 		assert(not self.txn or self.txn ~= self._ro_txn, 'begin() in r/o transaction')
 		self:checkz(C.mdbx_txn_begin_ex(self.env, self.txn, 0, txnp, nil), 'txn_begin')
 		self.txn = txnp[0]
@@ -294,6 +318,7 @@ function Db:begin(mode)
 end
 
 function Db:commit()
+	check_txn(self)
 	if self.txn == self._ro_txn then
 		self:checkz(C.mdbx_txn_reset(self.txn), 'txn_commit')
 		self.txn = nil
@@ -311,6 +336,7 @@ function Db:commit()
 end
 
 function Db:abort()
+	check_txn(self)
 	if self.txn == self._ro_txn then
 		self:checkz(C.mdbx_txn_reset(self.txn), 'txn_abort')
 		self.txn = nil
@@ -352,8 +378,9 @@ end
 
 function Db:try_open_table(name, mode, schema, flags)
 	assert(not name or isstr(name))
-	assert(not self.dbis[name or false])
 	local create_flag = mode == 'w' or mode == 'c'
+	if create_flag then check_wtxn(self) else check_txn(self) end
+	assert(not self.dbis[name or false])
 	flags = flags or 0
 	local created = false
 	local ok, err = self:tryz(C.mdbx_dbi_open(self.txn, name or nil, flags, dbip),
@@ -412,9 +439,13 @@ end
 function Db:try_rename_table(tab, new_table_name)
 	assert(tab)
 	assert(isstr(new_table_name))
+	check_wtxn(self)
 	local dbi = isnum(tab) and tab or self:dbi(tab)
 	local old_table_name = isnum(tab) and (dbi and self.dbis[dbi] or '?') or tab
 	if not dbi then return nil, 'not_found', old_table_name end
+	assert(not ptr(self.txn._parent), 'cannot rename table in nested transaction')
+	assert(band(table_state(self, dbi), C.MDBX_DBI_CREAT) == 0,
+		'cannot rename table created in current transaction')
 	local ok, err = self:tryz(C.mdbx_dbi_rename(self.txn, dbi, new_table_name),
 		't_rename')
 	if not ok then return nil, err, old_table_name end
@@ -433,6 +464,8 @@ end
 
 function Db:try_drop_table(tab)
 	assert(tab)
+	check_wtxn(self)
+	assert(not ptr(self.txn._parent), 'cannot drop table in nested transaction')
 	local dbi = isnum(tab) and tab or self:dbi(tab)
 	if not dbi then return nil, 'not_found' end
 	self:checkz(C.mdbx_drop(self.txn, dbi, 1), 't_drop')
@@ -454,6 +487,7 @@ function Db:drop_table(tab)
 end
 
 function Db:try_clear_table(tab)
+	check_wtxn(self)
 	local dbi = isnum(tab) and tab or self:dbi(tab)
 	if not dbi then return nil, 'not_found' end
 	local ok, err = self:tryz(C.mdbx_drop(self.txn, dbi, 0), 't_clear')
@@ -475,6 +509,7 @@ end
 local stat = new'MDBX_stat'
 local stat_sz = sizeof(stat)
 function Db:try_table_stat(tab)
+	check_txn(self)
 	local dbi = isnum(tab) and tab or self:dbi(tab)
 	if not dbi then return nil, 'table_not_found' end
 	self:checkz(C.mdbx_dbi_stat(self.txn, dbi, stat, stat_sz), 't_stat')
@@ -493,6 +528,7 @@ end
 -- table data ----------------------------------------------------------------
 
 function Db:get_raw(tab, k, k_sz, v, v_sz)
+	check_txn(self)
 	local dbi = isnum(tab) and tab or self:dbi(tab)
 	if not dbi then return nil, 'table_not_found' end
 	key.data = k
@@ -503,6 +539,7 @@ function Db:get_raw(tab, k, k_sz, v, v_sz)
 end
 
 function Db:try_put_raw(tab, k, k_sz, v, v_sz, flags)
+	check_wtxn(self)
 	local dbi = isnum(tab) and tab or self:dbi(tab, 'w')
 	key.data = k
 	key.size = k_sz
@@ -524,6 +561,7 @@ function Db:try_update_raw(tab, k, k_sz, v, v_sz, flags)
 end
 
 function Db:try_del_raw(tab, k, k_sz, v, v_sz)
+	check_wtxn(self)
 	local dbi = isnum(tab) and tab or self:dbi(tab)
 	if not dbi then return nil, 'table_not_found' end
 	key.data = k
@@ -539,6 +577,7 @@ function Db:try_del_raw(tab, k, k_sz, v, v_sz)
 end
 
 function Db:gen_id(tab)
+	check_wtxn(self)
 	local dbi = isnum(tab) and tab or self:dbi(tab, 'w')
 	local rc = C.mdbx_dbi_sequence(self.txn, dbi, seqbuf, 1)
 	assert(rc ~= -1, 'overflow')
@@ -569,6 +608,7 @@ local Cur = {}; mdbx_cursor = Cur
 --NOTE: cursors created with db:cursor() are reused, so never use a cursor
 --beyond transaction boundaries or you might end up using an unrelated cursor.
 function Db:try_cursor(tab, mode)
+	if mode == 'w' then check_wtxn(self) else check_txn(self) end
 	local dbi = isnum(tab) and tab or self:dbi(tab, mode)
 	if not dbi then return nil, 'not_found' end
 	local cur
@@ -608,7 +648,12 @@ function Cur:dbi()
 	return repl(C.mdbx_cursor_dbi(self.c), 0xffffffff)
 end
 
+local function check_cursor(self)
+	assert(not self:closed(), 'cursor closed')
+end
+
 local function cursor_get(self, flags)
+	check_cursor(self)
 	local rc = C.mdbx_cursor_get(self.c, key, val, flags)
 	if rc == 0 or rc == -1 then
 		return true, key.data, num(key.size),
@@ -645,6 +690,8 @@ function Cur:get_raw(k, k_sz, op)
 end
 
 function Cur:put_raw(k, k_sz, v, v_sz, flags)
+	check_cursor(self)
+	check_wtxn(self.db)
 	key.data = k
 	key.size = k_sz
 	val.data = v
@@ -655,6 +702,8 @@ function Cur:put_raw(k, k_sz, v, v_sz, flags)
 end
 
 function Cur:set_raw(v, v_sz)
+	check_cursor(self)
+	check_wtxn(self.db)
 	local ok, err = self.db:tryz(C.mdbx_cursor_get(self.c, key, val, C.MDBX_GET_CURRENT),
 		'cursor_set')
 	if not ok then
@@ -671,6 +720,8 @@ function Cur:set_raw(v, v_sz)
 end
 
 function Cur:del(flags)
+	check_cursor(self)
+	check_wtxn(self.db)
 	return self.db:checkz(C.mdbx_cursor_del(self.c, flags or 0), 'cursor_del')
 end
 
@@ -710,6 +761,7 @@ function Db:table_count()
 	return num(self:table_stat().entries)
 end
 function Db:table_exists(table_name)
+	check_txn(self)
 	if not table_name then return true end --main table always exists.
 	if self.dbis[table_name] then return true end --opened thus exists
 	return self:get_raw(nil, table_name, #table_name) ~= nil
