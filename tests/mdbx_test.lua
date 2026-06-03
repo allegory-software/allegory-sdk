@@ -290,6 +290,20 @@ function test.create_table_clears_cached_table()
 	end)
 end
 
+function test.update_missing_table_does_not_create_table()
+	with_db('update_missing_table_does_not_create_table', function(db)
+		db:begin'w'
+		local ok, err = db:try_update_raw('t', 'k', 1, 'v', 1)
+		assert(not ok)
+		assert(err == 'not_found')
+		assert(not db:table_exists't')
+		db:commit()
+		db:begin()
+		assert(not db:table_exists't')
+		db:commit()
+	end)
+end
+
 function test.cursor_get_raw_accepts_cursor_op()
 	with_db('cursor_get_raw_accepts_cursor_op', function(db)
 		db:begin'w'
@@ -302,6 +316,39 @@ function test.cursor_get_raw_accepts_cursor_op()
 		assert(ffi.string(v, v_sz) == '1')
 		cur:close()
 		db:commit()
+	end)
+end
+
+function test.cursor_get_pair_raw_uses_explicit_value()
+	with_db('cursor_get_pair_raw_uses_explicit_value', function(db)
+		db:begin'w'
+		db:create_table('d', nil, mdbx.MDBX_DUPSORT)
+		assert(db:try_put_raw('d', 'k', 1, 'a', 1))
+		assert(db:try_put_raw('d', 'k', 1, 'b', 1))
+		assert(db:try_put_raw('d', 'x', 1, 'q', 1))
+		local cur = db:cursor('d')
+		local ok, v, v_sz = cur:get_pair_raw('k', 1, 'b', 1)
+		assert(ok)
+		assert(ffi.string(v, v_sz) == 'b')
+		db:abort()
+	end)
+end
+
+function test.move_key_rejects_dupsort_table()
+	with_db('move_key_rejects_dupsort_table', function(db)
+		db:begin'w'
+		db:create_table('d', nil, mdbx.MDBX_DUPSORT)
+		assert(db:try_put_raw('d', 'k', 1, 'a', 1))
+		assert(db:try_put_raw('d', 'k', 1, 'b', 1))
+		assert_plain_error(function()
+			db:try_move_key_raw('d', 'k', 1, 'j', 1)
+		end, 'cannot move key in DUPSORT table')
+		local vals = {}
+		for cur, k, k_sz, v, v_sz in db:each_raw('d') do
+			vals[#vals+1] = ffi.string(k, k_sz)..'='..ffi.string(v, v_sz)
+		end
+		assert(table.concat(vals, ',') == 'k=a,k=b')
+		db:abort()
 	end)
 end
 

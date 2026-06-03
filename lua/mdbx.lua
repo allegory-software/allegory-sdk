@@ -31,7 +31,8 @@ DATABASES
 		opt.readonly       false             open in r/o mode
 		opt.file_mode      0660
 		opt.flags                            see MDBX_env_flags
-	db:close()                              close db
+	db:[try_]close()                        close db (idempotent)
+	db:closed() -> t|f                     check if db is closed
 	db:max_key_size() -> n                  get max key size in bytes
 	mdbx_delete(file_path, [flags]) -> true | nil,'not_found'   delete a database
 TRANSACTIONS
@@ -45,29 +46,32 @@ TABLES
 	dbi 1                                  main table
 	db:dbi(table_name|dbi, ['r'|'w'|'c']) -> dbi  open/create table
 	db:[try_]table_stat(table_name|dbi) -> MDBX_stat    get storage metrics on table (shared buffer)
-	db:[try_]rename_table (table_name|dbi)  rename table (top-level txn; committed tables only)
+	db:[try_]rename_table (table_name|dbi, new_table_name)  rename table (top-level txn; committed tables only)
 	db:[try_]drop_table   (table_name|dbi)  drop table (top-level txn only)
 	db:[try_]clear_table  (table_name|dbi)  delete all records
+	db:create_table       (table_name, ...) -> dbi, created  open or recreate (clear) table
 	db:each_table() -> iter() -> table_name
 	db:table_count() -> n
 	db:table_exists(table_name) -> t|f
 CRUD
 	db:get_raw         (table_name|dbi, k, k_sz) -> true, v, v_sz | nil,err
-	db:try_put_raw     (table_name|dbi, k, k_sz, v, v_sz, [flags])
-	db:try_insert_raw  (table_name|dbi, k, k_sz, v, v_sz, [flags]) -> true | nil,'exists'
+	db:try_put_raw     (table_name|dbi, k, k_sz, v, v_sz, [flags]) -> true | nil,'exists',cur_v,cur_v_sz | nil,err
+	db:try_insert_raw  (table_name|dbi, k, k_sz, v, v_sz, [flags]) -> true | nil,'exists',cur_v,cur_v_sz
 	db:try_update_raw  (table_name|dbi, k, k_sz, v, v_sz, [flags]) -> true | nil,'not_found'
 	db:try_del_raw     (table_name|dbi, k, k_sz, [v], [v_sz]) -> true|nil,err
-	db:gen_id          (table_name|dbi) -> n     next sequence
+	db:gen_id          (table_name|dbi) -> n     gen unique increasing id
 	db:try_move_key_raw(table_name|dbi, k, k_sz, new_k, new_k_sz) -> true | nil,err
 	db:each_raw(table_name[, 'w']) -> iter() -> cur, k, k_sz, v, v_sz   missing table is empty
 CURSORS
 	db:cursor(table_name|dbi[, 'w']) -> cur
-	cur:close()
+	cur:close()                             close cursor (idempotent)
+	cur:closed() -> t|f                    check if cursor is closed
 	cur:dbi() -> dbi
 	cur:{first|last|next|prev|current}_raw() -> true, k, k_sz, v, v_sz | nil,err
 	cur:each[_reverse]_raw() -> iter() -> true, k, k_sz, v, v_sz
-	cur:get_raw (k, k_sz[, op]) -> true, v, v_sz | nil,err
-	cur:put_raw (k, k_sz, v, v_sz, [flags]) -> true | nil,'exists'|'not_found'
+	cur:get_raw      (k, k_sz, [op]) -> true, v, v_sz | nil,err
+	cur:get_pair_raw (k, k_sz, v, v_sz, [op]) -> true, v, v_sz | nil,err
+	cur:put_raw (k, k_sz, v, v_sz, [flags]) -> true | nil,'exists',cur_v,cur_v_sz | nil,'not_found'
 	cur:set_raw (v, v_sz) -> true | nil,'not_found'
 	cur:del     ([flags])
 
@@ -95,8 +99,6 @@ local curp = new'MDBX_cursor*[1]'
 local key = new'MDBX_val'
 local val = new'MDBX_val'
 local seqbuf = u64a(1)
-local dbi_flagsp = new'unsigned[1]'
-local dbi_statep = new'unsigned[1]'
 
 -- databases -----------------------------------------------------------------
 
@@ -208,7 +210,12 @@ function Db:close()
 	_disown(self)
 end
 
+function Db:closed()
+	return not self.env
+end
+
 function Db:try_close()
+	if not self.env then return true end
 	self:close()
 	return true
 end
@@ -251,10 +258,15 @@ local function check_wtxn(self)
 	assert(self.txn and self.txn ~= self._ro_txn, 'not in write transaction')
 end
 
-local function table_state(self, dbi)
-	self:checkz(C.mdbx_dbi_flags_ex(self.txn, dbi, dbi_flagsp, dbi_statep),
-		't_flags')
-	return dbi_statep[0]
+do
+local dbi_flags = new'unsigned[1]'
+local dbi_state = new'unsigned[1]'
+function Db:table_state(tab)
+	local dbi = isnum(tab) and tab or self:dbi(tab)
+	if not dbi then return nil, 'table_not_found' end
+	self:checkz(C.mdbx_dbi_flags_ex(self.txn, dbi, dbi_flags, dbi_state), 't_flags')
+	return dbi_state[0], dbi_flags[0]
+end
 end
 
 local function local_dbis(self)
@@ -300,6 +312,7 @@ end
 -- transactions --------------------------------------------------------------
 
 function Db:begin(mode)
+	assert(self.env, 'closed')
 	if not mode or mode == 'r' then
 		assert(not self.txn, 'in transaction')
 		local ro_txn = self._ro_txn
@@ -461,7 +474,7 @@ function Db:try_rename_table(tab, new_table_name)
 	local old_table_name = isnum(tab) and (dbi and self.dbis[dbi] or '?') or tab
 	if not dbi then return nil, 'not_found', old_table_name end
 	assert(not ptr(self.txn._parent), 'cannot rename table in nested transaction')
-	assert(band(table_state(self, dbi), C.MDBX_DBI_CREAT) == 0,
+	assert(band(self:table_state(dbi), C.MDBX_DBI_CREAT) == 0,
 		'cannot rename table created in current transaction')
 	local ok, err = self:tryz(C.mdbx_dbi_rename(self.txn, dbi, new_table_name),
 		't_rename')
@@ -582,8 +595,15 @@ function Db:try_insert_raw(tab, k, k_sz, v, v_sz, flags)
 end
 
 function Db:try_update_raw(tab, k, k_sz, v, v_sz, flags)
-	return self:try_put_raw(tab, k, k_sz, v, v_sz,
-		bor(flags or 0, C.MDBX_CURRENT))
+	check_wtxn(self)
+	local dbi = isnum(tab) and tab or self:dbi(tab)
+	if not dbi then return nil, 'not_found' end
+	key.data = k
+	key.size = k_sz
+	val.data = v
+	val.size = v_sz
+	return self:tryz(C.mdbx_put(self.txn, dbi, key, val,
+		bor(flags or 0, C.MDBX_CURRENT)), 'put')
 end
 
 function Db:try_del_raw(tab, k, k_sz, v, v_sz)
@@ -614,16 +634,20 @@ function Db:gen_id(tab)
 end
 
 function Db:try_move_key_raw(tab, k1, k1_sz, k2, k2_sz)
-	local ok, v, v_sz = self:get_raw(tab, k1, k1_sz)
+	check_wtxn(self)
+	local dbi = isnum(tab) and tab or self:dbi(tab)
+	local _, flags = self:table_state(dbi)
+	assert(band(flags, C.MDBX_DUPSORT) == 0, 'cannot move key in DUPSORT table')
+	local ok, v, v_sz = self:get_raw(dbi, k1, k1_sz)
 	if not ok then
 		return nil, v
 	end
-	--NOTE: calling put before del because del invaldates the v pointer.
-	local ok, err = self:try_insert_raw(tab, k2, k2_sz, v, v_sz)
+	--NOTE: calling put before del because del invalidates the v pointer.
+	local ok, err = self:try_insert_raw(dbi, k2, k2_sz, v, v_sz)
 	if not ok then
 		return nil, err
 	end
-	assert(self:try_del_raw(tab, k1, k1_sz))
+	assert(self:try_del_raw(dbi, k1, k1_sz))
 	return true
 end
 
@@ -663,19 +687,21 @@ function Db:cursor(tab, mode)
 end
 
 function Cur:close()
-	self.db:checkz(C.mdbx_cursor_unbind(self.c), 'cursor_close')
+	if self:closed() then return end
+	return self.db:checkz(C.mdbx_cursor_unbind(self.c), 'cursor_close')
 end
 
 function Cur:closed()
-	return not ptr(C.mdbx_cursor_txn(self.c))
-end
-
-function Cur:dbi()
-	return repl(C.mdbx_cursor_dbi(self.c), 0xffffffff)
+	return not self.c or not ptr(C.mdbx_cursor_txn(self.c))
 end
 
 local function check_cursor(self)
 	assert(not self:closed(), 'cursor closed')
+end
+
+function Cur:dbi()
+	check_cursor(self)
+	return repl(C.mdbx_cursor_dbi(self.c), 0xffffffff)
 end
 
 local function cursor_get(self, flags)
@@ -711,6 +737,16 @@ function Cur:get_raw(k, k_sz, op)
 	key.data = k
 	key.size = k_sz
 	local ok, err_or_k, _, v, v_sz = cursor_get(self, op or C.MDBX_SET_KEY)
+	if not ok then return ok, err_or_k end
+	return true, v, v_sz
+end
+
+function Cur:get_pair_raw(k, k_sz, v, v_sz, op)
+	key.data = k
+	key.size = k_sz
+	val.data = v
+	val.size = v_sz
+	local ok, err_or_k, _, v, v_sz = cursor_get(self, op or C.MDBX_GET_BOTH)
 	if not ok then return ok, err_or_k end
 	return true, v, v_sz
 end
