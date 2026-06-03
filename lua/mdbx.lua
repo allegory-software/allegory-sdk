@@ -288,13 +288,20 @@ local function local_dbis(self)
 	return dbis
 end
 
-local function local_dbis_discard(self, commited)
+local function local_dbis_discard(self, commited, parent)
 	if getmetatable(self.dbis).txn == self.txn then --local, (promote and) discard
 		local dbis = self.dbis
 		local dbim = self.dbim
 		local parent_dbis = getmetatable(dbis).__index
 		local parent_dbim = getmetatable(dbim).__index
-		if commited then --promote created dbis to parent txn
+		if commited and parent and getmetatable(parent_dbis).txn ~= parent then
+			--enclosing write txn has no local maps yet: hand this layer to it
+			--instead of promoting to env, so a later parent abort discards it.
+			getmetatable(dbis).txn = parent
+			getmetatable(dbim).txn = parent
+			return
+		end
+		if commited then --promote created dbis to parent txn (env if top-level)
 			update(parent_dbis, dbis)
 			update(parent_dbim, dbim)
 		end
@@ -348,7 +355,7 @@ function Db:commit()
 			self.txn = parent
 			self:checkz(rc, 'txn_commit')
 		end
-		local_dbis_discard(self, true)
+		local_dbis_discard(self, true, parent)
 		self.txn = parent
 	end
 end
@@ -636,6 +643,7 @@ end
 function Db:try_move_key_raw(tab, k1, k1_sz, k2, k2_sz)
 	check_wtxn(self)
 	local dbi = isnum(tab) and tab or self:dbi(tab)
+	if not dbi then return nil, 'table_not_found' end
 	local _, flags = self:table_state(dbi)
 	assert(band(flags, C.MDBX_DUPSORT) == 0, 'cannot move key in DUPSORT table')
 	local ok, v, v_sz = self:get_raw(dbi, k1, k1_sz)

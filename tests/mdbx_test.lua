@@ -170,6 +170,23 @@ function test.atomic_aborts_unclosed_nested_write_txn_on_error()
 	end)
 end
 
+function test.nested_created_table_cache_discarded_on_parent_abort()
+	with_db('nested_created_table_cache_discarded_on_parent_abort', function(db)
+		db:begin'w'
+		db:begin'w'
+		put_string(db, 't', 'k', 'v')
+		db:commit()
+		assert(db:table_exists't')
+		db:abort()
+		db:begin()
+		assert(not db:table_exists't')
+		local ok, err = db:get_raw('t', 'k', 1)
+		assert(not ok)
+		assert(err == 'table_not_found')
+		db:commit()
+	end)
+end
+
 function test.rename_created_table_in_top_level_txn_asserts()
 	with_db('rename_created_table_in_top_level_txn_asserts', function(db)
 		db:begin'w'
