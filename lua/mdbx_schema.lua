@@ -591,8 +591,8 @@ function Db:load_table_schema(table_name)
 	if table_name == '$schema' then return end
 	if not self:table_exists'$schema' then return end
 	local k = table_name
-	local v, v_len = self:get_raw('$schema', k, #k)
-	if not v then return end
+	local ok, v, v_len = self:get_raw('$schema', k, #k)
+	if not ok then return end
 	local schema = eval(str(v, v_len))
 	--reconstruct schema from stored table schema.
 	assertf(schema.format == 1,
@@ -943,7 +943,7 @@ function Db:try_add_index(val_table, ix)
 end
 function Db:add_index(val_table, cols)
 	local ok, err, ix_name = self:try_add_index(val_table, cols)
-	return check('db', 'i_add', ok, '%s: %s', ix_name, err)
+	return self:check('i_add', ok, '%s: %s', ix_name, err)
 end
 
 function Db:try_drop_index(ix_name)
@@ -970,7 +970,7 @@ function Db:try_drop_index(ix_name)
 end
 function Db:drop_index(ix_name)
 	local ok, err = self:try_drop_index(ix_name)
-	return check('db', 'i_drop', ok, '%s: %s', ix_name, err)
+	return self:check('i_drop', ok, '%s: %s', ix_name, err)
 end
 
 ------------------------------------------------------------------------------
@@ -1166,7 +1166,9 @@ local function decode_kv(self, schema, k, k_sz, v, v_sz, val_cols)
 		local t_dbi     = assert(self.dbis[val_table])
 		local t_schema  = assert(schema.val_schema)
 		local k, k_sz = v, v_sz
-		v, v_sz = assert(self:get_raw(t_dbi, k, k_sz))
+		local ok
+		ok, v, v_sz = self:get_raw(t_dbi, k, k_sz)
+		assert(ok, v)
 		i0 = decode_key(t_schema, k, k_sz, t, as, i0)
 		schema = t_schema
 	else
@@ -1188,24 +1190,24 @@ function Db:is_null(tab, col, ...) --returns is_null, [reason]
 	local dbi, schema = self:dbi_schema(tab)
 	if not dbi then return true, schema end
 	local f, vi = val_field(schema, col)
-	local v, v_sz = get_raw_by_pk(self, dbi, schema, ...)
-	if not v then return true, v_sz end
+	local ok, v, v_sz = get_raw_by_pk(self, dbi, schema, ...)
+	if not ok then return true, v end
 	return C.schema_val_is_null(schema._st, vi-1, v, v_sz) ~= 0
 end
 
 function Db:exists(tab, ...) --returns record_exists, table_exists
 	local dbi, schema = self:dbi_schema(tab)
 	if not dbi then return false, false end
-	local v = get_raw_by_pk(self, dbi, schema, ...)
-	if not v then return false, true end
+	local ok = get_raw_by_pk(self, dbi, schema, ...)
+	if not ok then return false, true end
 	return true, true
 end
 
 function Db:try_get(tab, val_cols, ...)
 	local dbi, schema = self:dbi_schema(tab)
 	if not dbi then return false, schema end
-	local v, v_sz = get_raw_by_pk(self, dbi, schema, ...)
-	if not v then return false, v_sz end
+	local ok, v, v_sz = get_raw_by_pk(self, dbi, schema, ...)
+	if not ok then return false, v end
 	return decode_kv(self, schema, nil, nil, v, v_sz, val_cols)
 end
 
@@ -1240,9 +1242,9 @@ local function try_put(self, flags, op, tab, cols, ...)
 	local in_sub
 	if op == 'update' or op == 'upsert' or schema.ix_schemas or schema.fks then
 		local cur = self:cursor(dbi, 'w')
-		local v0, v0_sz = cur:get_raw(k, k_sz)
+		local ok, v0, v0_sz = cur:get_raw(k, k_sz)
 		local v_sz
-		if v0 then
+		if ok then
 			if op == 'insert' then
 				cur:close()
 				return nil, 'exists'
@@ -1322,7 +1324,7 @@ end
 function Db:put(tab, ...)
 	local ret, err = try_put(self, nil, 'put', tab, ...)
 	if ret then return ret end
-	check('db', 'put', ret, '%s: %s', self:table_name(tab), err)
+	self:check('put', ret, '%s: %s', self:table_name(tab), err)
 end
 function Db:try_insert(tab, ...)
 	return try_put(self, mdbx.MDBX_NOOVERWRITE, 'insert', tab, ...)
@@ -1330,7 +1332,7 @@ end
 function Db:insert(tab, ...)
 	local ret, err = try_put(self, mdbx.MDBX_NOOVERWRITE, 'insert', tab, ...)
 	if ret then return ret end
-	check('db', 'insert', false, '%s: %s', self:table_name(tab), err)
+	self:check('insert', false, '%s: %s', self:table_name(tab), err)
 end
 function Db:try_update(tab, ...)
 	return try_put(self, mdbx.MDBX_CURRENT, 'update', tab, ...)
@@ -1338,12 +1340,12 @@ end
 function Db:update(tab, ...)
 	local ret, err = try_put(self, mdbx.MDBX_CURRENT, 'update', tab, ...)
 	if ret then return ret end
-	check('db', 'update', false, '%s: %s', self:table_name(tab), err)
+	self:check('update', false, '%s: %s', self:table_name(tab), err)
 end
 function Db:upsert(tab, ...)
 	local ret, err = try_put(self, nil, 'upsert', tab, ...)
 	if ret then return ret end
-	check('db', 'upsert', false, '%s: %s', self:table_name(tab), err)
+	self:check('upsert', false, '%s: %s', self:table_name(tab), err)
 end
 
 function Db:try_del(tab, ...)
@@ -1363,7 +1365,7 @@ end
 function Db:del(tab, ...)
 	local ok, err = self:try_del(tab, ...)
 	if ok then return end
-	check('db', 'del', false, '%s: %s', self:table_name(tab), err)
+	self:check('del', false, '%s: %s', self:table_name(tab), err)
 end
 
 function Db:del_exact(tab, cols, ...)
@@ -1387,7 +1389,7 @@ end
 function Db:must_del_exact(tab, ...)
 	local ok, err = self:del_exact(tab, ...)
 	if ok then return end
-	check('db', 'del_exact', false, '%s: %s', self:table_name(tab), err)
+	self:check('del_exact', false, '%s: %s', self:table_name(tab), err)
 end
 
 function Db:try_put_records(tab, cols, records)
@@ -1418,7 +1420,7 @@ end
 
 local function check_cur(self, op, ok, ...)
 	if ok then return ... end
-	check('db', op, false, '%s: %s', self.schema.name, (...))
+	self.db:check(op, false, '%s: %s', self.schema.name, (...))
 end
 
 local db_try_cursor = Db.try_cursor
@@ -1458,8 +1460,8 @@ function Cur:try_get(val_cols, ...)
 	local schema = assert(self.schema)
 	local k, k_buf_sz = key_rec_buffer(schema.key_fields.max_rec_size)
 	local k_sz = encode_key(self, schema, nil, k, k_buf_sz, schema.key_cols, nil, ...)
-	local v, v_sz = self:get_raw(k, k_sz)
-	if not v then return false end
+	local ok, v, v_sz = self:get_raw(k, k_sz)
+	if not ok then return false end
 	return decode_kv(self.db, schema, nil, nil, v, v_sz, val_cols)
 end
 function Cur:get(...)

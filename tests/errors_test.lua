@@ -18,7 +18,8 @@ end
 -- tostring() gives enough context for logs and uncaught errors.
 do
 	local target = {type = 'conn', debug_prefix = 'C'}
-	local e = newerror{target = target, type = 'net', message = _('%s:%d', 'host', 80)}
+	local e = newerror{target = target, type = 'net', event = 'connect',
+		message = _('%s:%d', 'host', 80)}
 
 	assert(iserror(e, 'net', 'host:80'))
 	assert(not iserror(e, 'io'))
@@ -28,6 +29,7 @@ do
 
 	local s = tostring(e)
 	assert_contains(s, 'host:80')
+	assert_contains(s, 'connect')
 	assert_contains(s, 'conn')
 	assert_contains(s, ':')
 
@@ -83,7 +85,7 @@ end
 do
 	local target = {type = 'file', error_type = 'fs', debug_prefix = 'f'}
 
-	local f = make_raising(function(self, x)
+	local f = make_raising('read', function(self, x)
 		assert(self == target)
 		return true, 'kept', x
 	end)
@@ -93,35 +95,48 @@ do
 	assert(b == 'arg')
 
 	local e = raises(function()
-		make_raising(function()
+		make_raising('read', function()
 			return nil, 'boom'
 		end)(target)
 	end)
 	assert(iserror(e, 'fs', 'boom'))
 	assert(e.target == target)
+	assert(e.event == 'read')
 
 	local orig = newerror{type = 'protocol', message = 'bad frame'}
 	raises_same(orig, function()
-		make_raising('net', function()
+		make_raising('net', 'read', function()
 			return nil, orig
 		end)(target)
 	end)
 	raises_same(orig, function()
-		check_fs(target, false, orig)
+		check_fs(target, 'read', false, orig)
 	end)
 	raises_same(orig, function()
-		check_for('net', target, false, orig)
+		check_for('net', target, 'read', false, orig)
 	end)
 
 	raises_same(CLOSED, function()
-		make_raising('net', function()
+		make_raising('net', 'read', function()
 			return nil, 'closed'
 		end)(target)
 	end)
 
-	local checks = {
+	local op_checks = {
 		{check_fs, 'fs'},
 		{check_net, 'net'},
+	}
+	for _, t in ipairs(op_checks) do
+		local check, errtype = t[1], t[2]
+		local e = raises(function()
+			check(target, 'read', false, 'bad %s', 'input')
+		end)
+		assert(iserror(e, errtype, 'bad input'))
+		assert(e.target == target)
+		assert(e.event == 'read')
+	end
+
+	local checks = {
 		{checkp, 'protocol'},
 		{checknp, 'data'},
 	}
@@ -132,11 +147,11 @@ do
 		end)
 		assert(iserror(e, errtype, 'bad input'))
 		assert(e.target == target)
+		assert(e.event == nil)
 	end
 end
 
--- errno handling separates recoverable/user-facing errno strings from fatal
--- usage/kernel-contract errors that should crash immediately.
+-- errno handling maps errno to string errors; check_errno() raises.
 do
 	local v, err = try_errno(nil, 2) --ENOENT
 	assert(v == nil)
@@ -144,10 +159,9 @@ do
 
 	assert(try_errno(true, 22) == true) --successful ret wins over errno arg.
 
-	local e = raises(function()
-		try_errno(nil, 22) --EINVAL
-	end)
-	assert_contains(e, 'invalid_argument')
+	local v, err = try_errno(nil, 22) --EINVAL
+	assert(v == nil)
+	assert(err == 'invalid_argument')
 
 	local e = raises(function()
 		check_errno(nil, 2)

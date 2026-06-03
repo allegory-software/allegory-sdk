@@ -443,7 +443,7 @@ local function ns_query(rs, ns, q)
 	--generate a request with a random id.
 	local now = clock()
 	q.expires = now + q.timeout
-	q.id = check_net(q, gen_qid(rs, ns, now))
+	q.id = check_net(q, 'query_id', gen_qid(rs, ns, now))
 	qi = qi + 1
 	q.i = qi
 	q.s = request_str(q)
@@ -470,13 +470,13 @@ local function ns_query(rs, ns, q)
 	local buf, len
 	if not ns.scheduler_running then
 		rs:dbgr(ns, q, ns.scheduler)
-		buf, len = check_net(q, transfer(ns.scheduler))
+		buf, len = check_net(q, 'transfer', transfer(ns.scheduler))
 	elseif q.result then
 		rs:dbg(ns, q, 'EARLY', len)
-		buf, len = check_net(q, unpack(q.result))
+		buf, len = check_net(q, 'transfer', unpack(q.result))
 	else
 		rs:dbgs(ns, q)
-		buf, len = check_net(q, suspend())
+		buf, len = check_net(q, 'transfer', suspend())
 	end
 
 	if is_truncated(q, buf, len) then
@@ -649,7 +649,7 @@ function rs.try_query(rs, qname, qtype, timeout)
 	return suspend() -- the first thread to finish will resume us.
 end
 function rs:query(...)
-	return check_net(nil, self:try_query(...))
+	return check_net(nil, 'query', self:try_query(...))
 end
 
 local function hex4(s)
@@ -689,7 +689,7 @@ function rs:try_lookup(name, type, timeout)
 	return filter_answers(type, self:try_query(name, type, timeout))
 end
 function rs:lookup(...)
-	return check_net(nil, self:try_lookup(...))
+	return check_net(nil, 'lookup', self:try_lookup(...))
 end
 function rs:try_reverse_lookup(addr, timeout)
 	local s = arpa_str(addr)
@@ -697,7 +697,7 @@ function rs:try_reverse_lookup(addr, timeout)
 	return filter_answers('PTR', self:try_query(s, 'PTR', timeout))
 end
 function rs:reverse_lookup(...)
-	return check_net(nil, self:try_reverse_lookup(...))
+	return check_net(nil, 'reverse_lookup', self:try_reverse_lookup(...))
 end
 
 local function static_resolve(self, host, type)
@@ -718,7 +718,7 @@ function rs:try_resolve(host, type, timeout)
 	return self:try_lookup(host, type, timeout)
 end
 function rs:resolve(...)
-	return check_net(nil, self:try_resolve(...))
+	return check_net(nil, 'resolve', self:try_resolve(...))
 end
 
 --global resolver ------------------------------------------------------------
@@ -737,7 +737,7 @@ function try_resolve(host, type, timeout)
 end
 
 function resolve(...)
-	return check_net(nil, try_resolve(...))
+	return check_net(nil, 'resolve', try_resolve(...))
 end
 
 --self-test ------------------------------------------------------------------

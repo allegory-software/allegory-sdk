@@ -586,7 +586,7 @@ function client:get_conn(req)
 	local http, err = target.conn_pool:get(req.start_clock + req.wait_timeout)
 	if http then return http end
 	if err ~= 'create' then
-		check_net(nil, false, err)
+		check_net(nil, 'connect', false, err)
 	end
 	local ok, http = try_with_owner(self.connect, self, req)
 	if ok then
@@ -597,7 +597,7 @@ function client:get_conn(req)
 		return http
 	else
 		target.conn_pool:cancel()
-		check_net(nil, false, http) --http=err
+		check_net(nil, 'connect', false, http) --http=err
 	end
 end
 

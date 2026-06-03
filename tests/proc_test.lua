@@ -59,6 +59,26 @@ function test.exec_fail_closes()
 			assert(not res)
 		end
 	end
+
+	local noexec = 'proc_test_noexec'
+	save(noexec, '#!/bin/sh\nexit 0\n')
+	chmod(noexec, tonumber('600', 8))
+	local ok, err = pcall(try_exec, {
+		cmd = abspath(noexec),
+		stdin = true,
+		stdout = true,
+		stderr = true,
+		owner = owner,
+	})
+	rmfile(noexec)
+	assert(not ok)
+	assert(iserror(err, 'proc'))
+	assert(err.message == 'access_denied', tostring(err))
+	if owner.owns then
+		for i,res in ipairs(owner.owns) do
+			assert(not res)
+		end
+	end
 	owner:try_close()
 end
 
@@ -67,6 +87,27 @@ function test.exec_error()
 	assert(not ok)
 	assert(iserror(err, 'proc'))
 	assert(err.message == 'not_found', tostring(err))
+end
+
+function test.kill_errors()
+	local ok, err = kill(999999999)
+	assert(not ok)
+	assert(err == 'no_such_process')
+
+	local ok, err = pcall(kill, getpid(), 999999)
+	assert(not ok)
+	assert(iserror(err, 'proc'))
+	assert(err.message == 'invalid_argument', tostring(err))
+end
+
+function test.external_reap()
+	local p = exec{exefile(), '-e', 'os.exit(7)'}
+	local status = new'int[1]'
+	assert(C.waitpid(p.pid, status, 0) == p.pid)
+	local ok, err = pcall(p.exit_code, p)
+	assert(not ok)
+	assert(iserror(err, 'proc'))
+	p:forget()
 end
 
 function test.kill()

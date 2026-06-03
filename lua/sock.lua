@@ -357,11 +357,11 @@ function try_sockaddr(...)
 end
 function sockaddrs(s, ...)
 	local sas, err = try_sockaddrs(s, ...)
-	return check_net(s, sas, '%s: %s', err or 'invalid address', s)
+	return check_net(s, 'addr', sas, '%s: %s', err or 'invalid address', s)
 end
 function sockaddr(s, ...)
 	local sa, err = try_sockaddr(s, ...)
-	return check_net(s, sa, '%s: %s', err or 'invalid address', s)
+	return check_net(s, 'addr', sa, '%s: %s', err or 'invalid address', s)
 end
 
 local sa = {}
@@ -489,7 +489,7 @@ local function create_socket(st, family, class, opt)
 		family == 'unix' and AF_UNIX  or
 		assert(false)
 	local fd = C.socket(af, bor(st, SOCK_NONBLOCK, SOCK_CLOEXEC), 0)
-	check_errno(fd ~= -1)
+	check_net(nil, 'socket', try_errno(fd ~= -1))
 	return _make_socket(owner, fd, class, family, opt)
 end
 local function create_tcp(family, opt)
@@ -535,7 +535,7 @@ function socket:_try_cancel_io(cancel_thread)
 	if self.fd == -1 then return nil, 'thread not waiting' end
 	return socket_try_close(self, cancel_thread)
 end
-socket.close = make_raising(socket.try_close)
+socket.close = make_raising('close', socket.try_close)
 
 function socket:closed()
 	return self.fd == -1
@@ -586,7 +586,7 @@ function tcp:try_accept(opt, timeout)
 		or err == 'network_unreachable' --routing changed?
 		or err == 'connection_aborted' --client disconnected before accept completed
 	if not fd then
-		self:check_net(retriable, err)
+		self:check_net('accept', retriable, err)
 		return nil, err
 	end
 	--must check owner after socket_accept() returns because it's async.
@@ -606,7 +606,7 @@ function tcp:try_accept(opt, timeout)
 	end
 	return s
 end
-tcp.accept = make_raising(tcp.try_accept)
+tcp.accept = make_raising('accept', tcp.try_accept)
 end --accept scope
 
 local MSG_NOSIGNAL = 0x4000
@@ -623,7 +623,7 @@ function tcp:send(buf, sz, flags)
 	local left = sz
 	while true do
 		local n, err = socket_send(self, buf, left, flags)
-		self:check_net(n, err)
+		self:check_net('send', n, err)
 		left = left - n
 		if left == 0 then return end
 		if isstr(buf) then --only creating a buffer on a rare second pass.
@@ -648,16 +648,16 @@ local udp_io_actionable_errors = {
 	no_buffer_space = true, --send buffer full
 }
 
-local function udp_io_error(self, err)
+local function udp_io_error(self, event, err)
 	if udp_io_actionable_errors[err] then return nil, err end
-	self:check_net(false, err)
+	self:check_net(event, false, err)
 end
 
 function udp:send(buf, sz, flags)
 	self:check_closed()
 	sz = sz or #buf
 	local len, err = socket_send(self, buf, sz, flags)
-	if not len then return udp_io_error(self, err) end
+	if not len then return udp_io_error(self, 'send', err) end
 	return len
 end
 udp.write = udp.send --for pbuffer
@@ -671,7 +671,7 @@ function tcp:recv(buf, sz, flags)
 	assert(sz and sz > 0, 'recv size must be > 0')
 	self:check_closed()
 	local n, err = socket_recv(self, buf, sz, flags)
-	self:check_net(n, err)
+	self:check_net('recv', n, err)
 	return n
 end
 tcp.read = tcp.recv --for pbuffer
@@ -687,7 +687,7 @@ function udp:sendto(addr, port, buf, len, flags)
 	local sa, err = try_sockaddr(addr, port, resolve_timeout)
 	if not sa then return nil, err end
 	local len, err = socket_sendto(self, sa, buf, len, flags)
-	if not len then return udp_io_error(self, err) end
+	if not len then return udp_io_error(self, 'sendto', err) end
 	return len
 end
 
@@ -719,7 +719,7 @@ function udp:recv(buf, sz, flags)
 	self:check_closed()
 	assert(sz and sz > 0, 'recv size must be > 0')
 	local len, err = socket_recvmsg(self, buf, sz, flags)
-	if not len then return udp_io_error(self, err) end
+	if not len then return udp_io_error(self, 'recv', err) end
 	if recvmsg_truncated() then return nil, 'message_too_long' end
 	return len
 end
@@ -727,7 +727,7 @@ function udp:recvnext(buf, len, flags)
 	self:check_closed()
 	assert(len and len > 0, 'recv size must be > 0')
 	local len, err = socket_recvmsg(self, buf, len, flags, src_buf)
-	if not len then return udp_io_error(self, err) end
+	if not len then return udp_io_error(self, 'recv', err) end
 	if recvmsg_truncated() then return nil, 'message_too_long' end
 	assert(recv_msg.msg_namelen <= src_buf_len) --source address not truncated
 	return len, src_buf
@@ -748,14 +748,14 @@ function socket:try_bind(addr, port)
 		self.family == 'ip6' and '[::]:'..(port or 0)
 		or nil
 	local sa, err = try_sockaddr(addr, port)
-	self:check_net(sa, err or 'invalid address')
+	self:check_net('bind', sa, err or 'invalid address')
 	local ok, err = try_errno(C.bind(self.fd, sa, sa:size()) == 0)
 	if not ok and err == 'address_already_in_use' then return false, err end
-	self:check_net(ok, err)
+	self:check_net('bind', ok, err)
 	return true
 end
 function socket:bind(addr, port)
-	self:check_net(self:try_bind(addr, port))
+	self:check_net('bind', self:try_bind(addr, port))
 	return self
 end
 
@@ -763,7 +763,7 @@ function socket:local_addr()
 	self:check_closed()
 	local sa = sockaddr_ct()
 	local nbuf = new('int[1]', sizeof(sa))
-	self:check_net(try_errno(C.getsockname(self.fd, sa, nbuf) == 0))
+	self:check_net('local_addr', try_errno(C.getsockname(self.fd, sa, nbuf) == 0))
 	return sa
 end
 
@@ -791,13 +791,13 @@ function tcp:try_connect(addr, port)
 	local ok, err = socket_connect(self, sa)
 	if not ok then
 		if connect_actionable_errors[err] then return false, err end
-		self:check_net(false, err)
+		self:check_net('connect', false, err)
 	end
 	self._remote_addr = sa
 	live(self, 'connected %s', sa:tostring())
 	return true
 end
-tcp.connect = make_raising(tcp.try_connect)
+tcp.connect = make_raising('connect', tcp.try_connect)
 
 --UDP connect is very different in the kernel (no handshake) but API-wise
 --it's the same except UDP socket is reusable after failed connect.
@@ -816,14 +816,14 @@ function tcp:try_listen(addr, port, backlog)
 	local local_addr = self:local_addr()
 	log('', 'tcp', 'listen?', '%-4s %s', self, local_addr)
 	backlog = clamp(backlog or 1/0, 0, 0x7fffffff)
-	self:check_net(try_errno(C.listen(self.fd, backlog) == 0))
+	self:check_net('listen', try_errno(C.listen(self.fd, backlog) == 0))
 	liveadd(self, 'listen=%s', local_addr)
 	self.sockets = {} --live client connections: {socket->true}
 	self._sockets_n = 0 --live client connection count
 	return true
 end
 function tcp:listen(...)
-	self:check_net(self:try_listen(...))
+	self:check_net('listen', self:try_listen(...))
 	return self
 end
 
@@ -842,7 +842,7 @@ function tcp:shutdown(which)
 		or (not which or which == 'rw') and 2) == 0
 	if ok then return true end
 	if errno() == ENOTCONN then return true end --peer closed first.
-	check_errno(ok, errno())
+	self:check_net('shutdown', try_errno(ok, errno()))
 end
 
 do --getopt() & setopt() -----------------------------------------------------
@@ -1039,7 +1039,7 @@ function socket:getopt(k) --can't wrap with make_raising because it returns fals
 	self:check_closed()
 	local opt, level = parse_opt(k)
 	local get = assertf(get_opt[k], 'write-only socket option: %s', k)
-	check_errno(C.getsockopt(self.fd, level, opt, buf.c, szbuf) == 0)
+	self:check_net('getopt', try_errno(C.getsockopt(self.fd, level, opt, buf.c, szbuf) == 0))
 	return get(buf, szbuf[0])
 end
 
@@ -1048,7 +1048,7 @@ function socket:setopt(k, v)
 	local opt, level = parse_opt(k)
 	local set = assertf(set_opt[k], 'read-only socket option: %s', k)
 	local buf, sz = set(v)
-	check_errno(C.setsockopt(self.fd, level, opt, buf, sz) == 0)
+	self:check_net('setopt', try_errno(C.setsockopt(self.fd, level, opt, buf, sz) == 0))
 end
 
 end --getopt/setopt decl. scope
@@ -1108,7 +1108,7 @@ function try_connect(addr, port, timeout, client_ip)
 	return self
 end
 function connect(...)
-	return check_net(nil, try_connect(...))
+	return check_net(nil, 'connect', try_connect(...))
 end
 
 function listen(addr, port, backlog)
@@ -1133,7 +1133,7 @@ function tcp:recvn(buf, sz)
 	if sz == 0 then return true end
 	while sz > 0 do
 		local len = self:recv(buf, sz)
-		self:check_net(len > 0, 'eof')
+		self:check_net('recv', len > 0, 'eof')
 		if sz - len == 0 then return true end
 		buf = cast(u8p, buf) + len
 		sz  = sz  - len

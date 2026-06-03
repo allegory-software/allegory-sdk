@@ -8,7 +8,6 @@ ERROR REPORTING & OWNERSHIP
 - own: zip
 - own: mdbx
 
-- remove check()
 - review fcall, fpcall, pcall, lua_pcall, xpcall
 
 
@@ -101,6 +100,7 @@ TOPICS
 	3) centralization of sources
 	4) translation UI
 	5) language switching UI
+
 SOURCES OF TEXT
 	- DONE Lua & JS code: S()  -> source code parser
 	- DONE manually adding entries to S_texts() for dynamic strings

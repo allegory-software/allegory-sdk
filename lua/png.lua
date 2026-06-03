@@ -873,7 +873,7 @@ end
 function png_load(file)
 	local img, bmp = try_png_load(file)
 	--TODO: distinguish between I/O errors (retriable) and content errors.
-	check_for('png', file, img, bmp) --bmp=err
+	check_for('png', file, 'load', img, bmp) --bmp=err
 	return img, bmp
 end
 
@@ -898,6 +898,6 @@ end
 function png_save(bmp, file)
 	local ok, err = try_png_save(file)
 	--TODO: distinguish between I/O errors (retriable) and content errors.
-	check_for('png', file, ok, err)
+	check_for('png', file, 'save', ok, err)
 end
 ]]

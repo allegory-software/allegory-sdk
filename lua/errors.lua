@@ -6,16 +6,18 @@ CREATING ERRORS
 	newerror(e) -> e                              make an error object
 	CANCEL                                        static error that try/catch can't catch
 	CLOSED                                        static error for "self is closed"
+	e.addtraceback -> true                        add traceback (see pcall override in glue)
 RAISING ERRORS
-	check_for (errtype, target, ret, fmt, ...) -> ret  raise typed error if not ret
-	check_fs  (target, ret, fmt, ...) -> ret      check_for with 'fs' errtype
-	check_net (target, ret, fmt, ...) -> ret      check_for with 'net' errtype
+	check_for (errtype, target, event, ret, fmt, ...) -> ret  raise typed error
+	check_fs  (target, event, ret, fmt, ...) -> ret  check_for with 'fs' errtype
+	check_net (target, event, ret, fmt, ...) -> ret  check_for with 'net' errtype
 	checkp    (target, ret, fmt, ...) -> ret      check_for with 'protocol' errtype
 	checknp   (target, ret, fmt, ...) -> ret      check_for with 'data' errtype
-	check(errtype, event, v, fmt, ...) -> v       assert + log + raise structured error
-	try_errno(ret, err) -> ret | nil,err          map errno and raise on usage errors
+	try_errno(ret, err) -> ret | nil,err          map errno to string errors
 	check_errno(ret, err) -> ret                  assert(try_errno(ret, err))
-	make_raising([errtype], f) -> f               turn nil,err-returning f into raising
+	make_raising([errtype], event, f) -> f        turn nil,err-returning f into raising
+	target.error_type                             default errtype for check_for()
+	target.tracebacks                             add traceback to errors on target
 CATCHING ERRORS
 	catch([errtypes], f, ...) -> true,... | false,e   pcall and catch table errors
 	try(f, ...) -> true,... | false,e             catch all table errors
@@ -80,9 +82,9 @@ continue using the same owner/resource. For straight-line library code, prefer
 raising APIs and let the owner tree handle cleanup; don't add try_* variants
 just to avoid stack unwinding.
 
-make_raising(f) uses target.error_type for the raised error type. Pass an
-explicit errtype only when the error type is a property of the operation
-instead of the target object.
+make_raising(event, f) uses target.error_type for the raised error type. Pass
+an explicit errtype only when the error type is a property of the operation
+instead of the target object: make_raising(errtype, event, f).
 
 TRACEBACKS
 
@@ -105,7 +107,7 @@ local error_mt = {
 	--this is for Lua's uncaught handler that expects tostring(e) -> s.
 	__tostring = function(e)
 		return catany(' ', e.target and logarg(e.target)..':',
-			e.traceback or e.message or e.type)
+			e.event and e.event..':', e.traceback or e.message or e.type)
 	end,
 }
 function newerror(e, ...)
@@ -145,40 +147,32 @@ function try(f, ...)
 	return catch(nil, f, ...)
 end
 
-local function error_for(errtype, target, s, ...)
+local function error_for(errtype, target, event, s, ...)
 	errtype = errtype or (target and target.error_type)
 	assert(type(errtype) == 'string')
+	assert(event == nil or type(event) == 'string')
 	s = ... ~= nil and _(s, ...) or s
-	return newerror{type = errtype, target = target, message = s,
-		addtraceback = target and target.tracebacks}
+	return newerror{type = errtype, target = target, event = event, message = s,
+		addtraceback = istab(target) and target.tracebacks}
 end
 
-local function return_raising(target, errtype, ret, err, ...)
+local function return_raising(target, errtype, event, ret, err, ...)
 	if ret then return ret, err, ... end
 	if iserror(err) then error(err) end --pass-through structured errors
 	if err == 'closed' then error(CLOSED) end --convert 'closed' to CLOSED error
-	local e = error_for(errtype, target, err, ...)
-	e.actionable = true --nil,err errors are actionable, so flag them as such.
+	local e = error_for(errtype, target, event, err, ...)
 	error(e)
 end
-function make_raising(errtype, f)
-	if type(errtype) == 'function' then --make_raising(f)
-		errtype, f = nil, errtype
+function make_raising(errtype, event, f)
+	if type(event) == 'function' then --make_raising(event, f)
+		event, f = errtype, event
+		errtype = nil
 	end
+	assert(type(event) == 'string')
 	assert(type(f) == 'function')
 	return function(target, ...)
-		return return_raising(target, errtype, f(target, ...))
+		return return_raising(target, errtype, event, f(target, ...))
 	end
-end
-
-function check(errtype, event, v, ...)
-	if v then return v end
-	assert(type(errtype) == 'string')
-	assert(type(event) == 'string')
-	local e = error_for(errtype, nil, ...)
-	log('ERROR', e.type, event, '%s', e.message)
-	e.logged = true
-	error(e)
 end
 
 --errno unified messages -----------------------------------------------------
@@ -242,15 +236,14 @@ local errno_msgs = {
 	[115] = 'in_progress', --EINPROGRESS, connect() (handled in scheduler)
 }
 
-local fatal_errno = {
+--TODO: find a way to set addtraceback on typed errors made out of these.
+local usage_errors = {
 	invalid_argument    = true, --EINVAL
 	bad_address         = true, --EFAULT
 	bad_file            = true, --EBADF
 	not_socket          = true, --ENOTSOCK
 	invalid_seek        = true, --ESPIPE
-	no_device           = true, --ENODEV
 	too_many_fds        = true, --EMFILE
-	read_only           = true, --EROFS
 	not_implemented     = true, --ENOSYS
 	not_connected       = true, --ENOTCONN
 	already_in_progress = true, --EALREADY
@@ -262,19 +255,18 @@ function try_errno(ret, err)
 	if ret then return ret end
 	err = err or errno()
 	local s = errno_msgs[err]
-	assert(not fatal_errno[s], s)
 	return ret, s or str(C.strerror(err)) or 'errno#'..err
 end
 function check_errno(...)
 	return assert(try_errno(...))
 end
 
-function check_for(errtype, target, ret, s, ...)
+function check_for(errtype, target, event, ret, s, ...)
 	if ret then return ret, s, ... end
 	if iserror(s) then error(s) end
-	return error(error_for(errtype, target, s, ...))
+	return error(error_for(errtype, target, event, s, ...))
 end
 function check_fs  (target, ...) return check_for('fs'      , target, ...) end
 function check_net (target, ...) return check_for('net'     , target, ...) end
-function checkp    (target, ...) return check_for('protocol', target, ...) end
-function checknp   (target, ...) return check_for('data'    , target, ...) end
+function checkp    (target, ret, ...) return check_for('protocol', target, nil, ret, ...) end
+function checknp   (target, ret, ...) return check_for('data'    , target, nil, ret, ...) end

@@ -295,7 +295,8 @@ local function _exec(t, env, dir, stdin, stdout, stderr, autokill, owner)
 		if ret then return ret end
 		local ret, err = try_errno(ret, err)
 		self:try_close()
-		return ret, err
+		if err == 'not_found' or err == 'not_dir' then return nil, err end
+		return check_for('proc', cmd, 'exec', ret, err)
 	end
 
 	--see https://stackoverflow.com/questions/1584956/how-to-handle-execvp-errors-after-fork
@@ -428,7 +429,9 @@ function proc:forget()
 end
 
 function kill(pid, sig)
-	return try_errno(C.kill(pid, sig or SIGTERM) == 0)
+	local ok, err = try_errno(C.kill(pid, sig or SIGTERM) == 0)
+	if err == 'no_such_process' then return false, err end
+	return check_for('proc', 'pid#'..pid, 'kill', ok, err)
 end
 
 getpid = C.getpid
@@ -443,7 +446,9 @@ function proc:kill(sig)
 end
 
 function proc:try_close()
-	self:kill(9)
+	if self.pid then
+		C.kill(self.pid, 9)
+	end
 	self:forget()
 end
 
@@ -461,9 +466,7 @@ function proc:exit_code()
 	repeat
 		pid = C.waitpid(self.pid, status, WNOHANG)
 	until not (pid < 0 and errno() == EINTR)
-	if pid < 0 then
-		return try_errno()
-	end
+	check_for('proc', self, 'wait', try_errno(pid >= 0))
 	if pid == 0 then
 		return nil, 'active'
 	end
@@ -757,7 +760,7 @@ local function wrap(f)
 		if p then return p end
 		local t = ...; local cmd = istab(t) and t.cmd or t
 		local cmd = cmdline_quote_cmd(cmd)
-		check_for('proc', cmd, nil, err)
+		check_for('proc', cmd, 'exec', nil, err)
 	end
 end
 exec          = wrap(try_exec)

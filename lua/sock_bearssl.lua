@@ -1019,7 +1019,7 @@ local function engine_run(self, target)
 		end
 		if band(state, BR_SSL_CLOSED) ~= 0 then
 			local e = tonumber(eng.err)
-			self:check_net(false, ssl_engine_error(e))
+			self:check_net('ssl_engine', false, ssl_engine_error(e))
 		end
 		if band(state, BR_SSL_SENDREC) ~= 0 then
 			local buf = C.br_ssl_engine_sendrec_buf(eng, _szp)
@@ -1030,7 +1030,7 @@ local function engine_run(self, target)
 			local buf = C.br_ssl_engine_recvrec_buf(eng, _szp)
 			local n = tonumber(_szp[0])
 			local len = tcp:recv(buf, n)
-			self:check_net(len > 0, 'ssl_unexpected_eof')
+			self:check_net('ssl_recv', len > 0, 'ssl_unexpected_eof')
 			C.br_ssl_engine_recvrec_ack(eng, len)
 		else
 			error'ssl_stall'
@@ -1101,7 +1101,7 @@ function stcp:try_close()
 	end
 	return ok, err
 end
-stcp.close = make_raising(stcp.try_close)
+stcp.close = make_raising('close', stcp.try_close)
 
 function stcp:closed()
 	return self._closed
@@ -1148,7 +1148,7 @@ function client_stcp:send_close_notify()
 			local buf = C.br_ssl_engine_recvrec_buf(eng, _szp)
 			local n = tonumber(_szp[0])
 			local len = self.tcp:recv(buf, n)
-			self:check_net(len > 0, 'ssl_unexpected_eof')
+			self:check_net('ssl_close', len > 0, 'ssl_unexpected_eof')
 			C.br_ssl_engine_recvrec_ack(eng, len)
 		elseif band(state, BR_SSL_CLOSED) ~= 0 then
 			return
@@ -1165,7 +1165,7 @@ function client_stcp:recv(buf, sz)
 	if band(state, BR_SSL_RECVAPP) == 0 then
 		local err = ssl_engine_error(tonumber(self.eng.err))
 		if err == 'eof' then return 0 end
-		self:check_net(false, err)
+		self:check_net('ssl_recv', false, err)
 	end
 	local app_buf = C.br_ssl_engine_recvapp_buf(self.eng, _szp)
 	local n = min(sz, tonumber(_szp[0]))
@@ -1247,7 +1247,7 @@ function _G.try_server_stcp(tcp, opt)
 	live(s, 'tcp=%s', tcp)
 	return s
 end
-_G.server_stcp = make_raising(_G.try_server_stcp)
+_G.server_stcp = make_raising('server_stcp', _G.try_server_stcp)
 
 function server_stcp:try_accept(...)
 	return self.tcp:try_accept(...)
