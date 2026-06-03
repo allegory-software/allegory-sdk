@@ -13,6 +13,7 @@ MDBX->LUA
  * current transaction is implicit since we can't use parallel transactions.
  * tables can be referenced by name everywhere (no need to use DBIs).
  * tables are auto-created on write ops and auto-opened in r/o mode on read ops.
+ * DBI 1 is the main table; nil is not a table.
  * APIs raise on unexpected errors; expected states return nil,err where documented.
  * write ops and errors are logged, except raw CRUD ops which are to be used
    to implement structured CRUD ops and have those be logged.
@@ -41,6 +42,7 @@ TRANSACTIONS
 	db:atomic(['w',], fn, ...) -> ...       run fn in transaction
 		fn(...) -> ...
 TABLES
+	dbi 1                                  main table
 	db:dbi(table_name|dbi, ['r'|'w'|'c']) -> dbi  open/create table
 	db:[try_]table_stat(table_name|dbi) -> MDBX_stat    get storage metrics on table (shared buffer)
 	db:[try_]rename_table (table_name|dbi)  rename table (top-level txn; committed tables only)
@@ -84,6 +86,7 @@ local
 	isnum, isstr, bor, bit.band, num, assert
 
 mdbx = C
+local MAIN_DBI = 1
 
 local envp = new'MDBX_env*[1]'
 local txnp = new'MDBX_txn*[1]'
@@ -165,6 +168,7 @@ function try_mdbx_open(file, opt)
 		_cursors = {},
 		type = 'DB',
 	}))
+	self.env_dbis[MAIN_DBI] = '<main>'
 	self.dbis = self.env_dbis
 	self.dbim = self.env_dbim
 	live(self, file)
@@ -182,6 +186,7 @@ function mdbx_open(file, opt)
 end
 
 function Db:close()
+	if not self.env then return end
 	while self.txn do
 		self:abort()
 	end
@@ -373,14 +378,21 @@ end
 -- tables --------------------------------------------------------------------
 
 function Db:table_name(tab)
-	return not tab and '<main>' or isstr(tab) and tab or self.dbis[tab]
+	assert(tab, 'table expected')
+	if tab == MAIN_DBI then return '<main>' end
+	return isstr(tab) and tab or self.dbis[tab]
 end
 
 function Db:try_open_table(name, mode, schema, flags)
-	assert(not name or isstr(name))
+	assert(isstr(name))
 	local create_flag = mode == 'w' or mode == 'c'
 	if create_flag then check_wtxn(self) else check_txn(self) end
-	assert(not self.dbis[name or false])
+	local dbi = self.dbis[name]
+	if mode == 'c' and dbi then
+		self:clear_table(dbi)
+		return dbi, false
+	end
+	assert(not dbi)
 	flags = flags or 0
 	local created = false
 	local ok, err = self:tryz(C.mdbx_dbi_open(self.txn, name or nil, flags, dbip),
@@ -394,8 +406,8 @@ function Db:try_open_table(name, mode, schema, flags)
 	local dbi = dbip[0]
 	--created dbis are local to the txn so we must create local dbis/dbim maps.
 	local dbis = created and local_dbis(self) or self.env_dbis
-	dbis[name or false] = dbi
-	dbis[dbi] = name or false
+	dbis[name] = dbi
+	dbis[dbi] = name
 	if mode == 'c' and not created then
 		self:clear_table(dbi)
 	end
@@ -411,9 +423,14 @@ function Db:open_table(tab, mode, schema, flags, ...)
 end
 
 function Db:dbi(tab, mode)
-	if isnum(tab) then return tab end --tab is dbi
-	local dbi = self.dbis[tab or false]
+	if isnum(tab) then
+		if mode == 'c' then self:clear_table(tab) end
+		return tab
+	end --tab is dbi
+	assert(tab, 'table expected')
+	local dbi = self.dbis[tab]
 	if dbi then
+		if mode == 'c' then self:clear_table(dbi) end
 		return dbi, self.dbim[dbi], tab
 	end
 	local schema = self.schema and self.schema.tables[tab]
@@ -449,10 +466,19 @@ function Db:try_rename_table(tab, new_table_name)
 	local ok, err = self:tryz(C.mdbx_dbi_rename(self.txn, dbi, new_table_name),
 		't_rename')
 	if not ok then return nil, err, old_table_name end
+	--MDBX invalidates the old DBI on rename. Keep the new name/schema txn-local
+	--so commit promotes it and abort discards it, and remove the old env cache
+	--so abort can reopen the restored old table instead of reusing a stale DBI.
+	local schema = self.dbim[dbi]
 	local dbis = local_dbis(self)
+	local dbim = self.dbim
 	dbis[old_table_name] = false
 	dbis[dbi] = new_table_name
 	dbis[new_table_name] = dbi
+	dbim[dbi] = schema
+	self.env_dbis[old_table_name] = nil
+	self.env_dbis[dbi] = nil
+	self.env_dbim[dbi] = nil
 	log('note', 'db', 't_rename', '%s -> %s', old_table_name, new_table_name)
 	return true, nil, old_table_name
 end
@@ -527,7 +553,7 @@ end
 
 -- table data ----------------------------------------------------------------
 
-function Db:get_raw(tab, k, k_sz, v, v_sz)
+function Db:get_raw(tab, k, k_sz)
 	check_txn(self)
 	local dbi = isnum(tab) and tab or self:dbi(tab)
 	if not dbi then return nil, 'table_not_found' end
@@ -753,16 +779,17 @@ local function next_table(self)
 	return str(k, k_sz)
 end
 function Db:each_table()
-	local cur = self:cursor()
+	local cur = self:cursor(MAIN_DBI)
 	return next_table, cur
 end
 end
 function Db:table_count()
-	return num(self:table_stat().entries)
+	return num(self:table_stat(MAIN_DBI).entries)
 end
 function Db:table_exists(table_name)
 	check_txn(self)
-	if not table_name then return true end --main table always exists.
+	assert(table_name, 'table expected')
+	if table_name == MAIN_DBI then return true end --main table always exists.
 	if self.dbis[table_name] then return true end --opened thus exists
-	return self:get_raw(nil, table_name, #table_name) ~= nil
+	return self:get_raw(MAIN_DBI, table_name, #table_name) ~= nil
 end

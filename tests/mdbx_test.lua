@@ -199,6 +199,24 @@ function test.rename_existing_table_in_top_level_txn()
 	end)
 end
 
+function test.rename_abort_reopens_old_table()
+	with_db('rename_abort_reopens_old_table', function(db)
+		db:begin'w'
+		put_string(db, 't', 'k', 'v')
+		db:commit()
+		db:begin'w'
+		assert(db:try_rename_table('t', 'u'))
+		db:abort()
+		db:begin()
+		assert(db:table_exists't')
+		assert(not db:table_exists'u')
+		local ok, v, v_sz = db:get_raw('t', 'k', 1)
+		assert(ok)
+		assert(ffi.string(v, v_sz) == 'v')
+		db:commit()
+	end)
+end
+
 function test.rename_inherited_table_in_nested_txn_asserts()
 	with_db('rename_inherited_table_in_nested_txn_asserts', function(db)
 		db:begin'w'
@@ -242,6 +260,36 @@ function test.drop_table_in_nested_txn_asserts()
 	end)
 end
 
+function test.dbi_c_clears_cached_table()
+	with_db('dbi_c_clears_cached_table', function(db)
+		db:begin'w'
+		put_string(db, 't', 'k', 'v')
+		db:commit()
+		db:begin'w'
+		assert(db:dbi't')
+		assert(db:dbi('t', 'c'))
+		local ok, err = db:get_raw('t', 'k', 1)
+		assert(not ok)
+		assert(err == 'not_found')
+		db:abort()
+	end)
+end
+
+function test.create_table_clears_cached_table()
+	with_db('create_table_clears_cached_table', function(db)
+		db:begin'w'
+		put_string(db, 't', 'k', 'v')
+		db:commit()
+		db:begin'w'
+		assert(db:dbi't')
+		assert(db:create_table't')
+		local ok, err = db:get_raw('t', 'k', 1)
+		assert(not ok)
+		assert(err == 'not_found')
+		db:abort()
+	end)
+end
+
 function test.cursor_get_raw_accepts_cursor_op()
 	with_db('cursor_get_raw_accepts_cursor_op', function(db)
 		db:begin'w'
@@ -279,6 +327,36 @@ function test.each_raw_missing_table_is_empty()
 		assert(n == 0)
 		assert(not db:table_exists'missing')
 		db:commit()
+	end)
+end
+
+function test.nil_is_not_main_table()
+	with_db('nil_is_not_main_table', function(db)
+		db:begin'w'
+		assert_plain_error(function()
+			db:dbi(nil)
+		end, 'table expected')
+		assert_plain_error(function()
+			db:table_exists(nil)
+		end, 'table expected')
+		assert_plain_error(function()
+			db:try_put_raw(nil, 'x', 1, 'y', 1)
+		end, 'table expected')
+		db:abort()
+	end)
+end
+
+function test.main_table_is_dbi_1()
+	with_db('main_table_is_dbi_1', function(db)
+		db:begin'w'
+		assert(db:dbi(1) == 1)
+		assert(db:table_name(1) == '<main>')
+		assert(db:table_exists(1))
+		assert(db:try_put_raw(1, 'x', 1, 'y', 1))
+		local ok, v, v_sz = db:get_raw(1, 'x', 1)
+		assert(ok)
+		assert(ffi.string(v, v_sz) == 'y')
+		db:abort()
 	end)
 end
 
