@@ -1,5 +1,3 @@
-//go@ plink -batch root@m1 sdk/c/mdbx_schema/build
-//go@ c:/tools/plink -batch -i c:/users/woods/.ssh/id_ed25519.ppk root@172.20.10.3 sdk/c/mdbx_schema/build
 /*
 
 	Schema encoding and decoding for LMDB/LibMDBX.
@@ -111,7 +109,7 @@ int schema_get_key(schema_table* tbl, int col_i,
 	u8** pp
 );
 int schema_val_is_null(schema_table* tbl, int col_i,
-	void* rec, int rec_size
+	const void* rec, int rec_size
 );
 int schema_get_val(schema_table* tbl, int col_i,
 	void* rec, int rec_size,
@@ -278,11 +276,11 @@ INLINE void invert_bits(void* d, void* s, int len) {
 		((u8*)d)[i] = ~((u8*)s)[i];
 }
 
-INLINE int is_null(int col_i, void* rec, int rec_size) {
+INLINE int is_null(int col_i, const void* rec, int rec_size) {
 	int byte_i = col_i >> 3;
 	int bit_i  = col_i & 7;
 	int mask   = 1 << bit_i;
-	u8* p = rec;
+	const u8* p = rec;
 	assert(byte_i < rec_size);
 	return (p[byte_i] & mask) != 0;
 }
@@ -411,7 +409,7 @@ INLINE int get_val_len(schema_table* tbl, int col_i, schema_col* col,
 }
 
 int schema_val_is_null(schema_table* tbl, int col_i,
-	void* rec, int rec_size
+	const void* rec, int rec_size
 ) {
 	assert(get_val_col(tbl, col_i));
 	return is_null(col_i, rec, rec_size);

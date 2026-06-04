@@ -24,16 +24,16 @@
 API, extends mdbx.lua MANAGED API
 
 	db:put             (table_name|dbi, [cols], keysvals...)
-	db:[try_]insert    (table_name|dbi, [cols], keysvals...) -> true | nil,'exists'
-	db:[try_]update    (table_name|dbi, [cols], keysvals...) -> true | nil,'not_found'
+	db:[try_]insert    (table_name|dbi, [cols], keysvals...) -> true | false,'exists'
+	db:[try_]update    (table_name|dbi, [cols], keysvals...) -> true | false,'not_found'
 	db:upsert          (table_name|dbi, [cols], keysvals...)
 	db:[try_]put_records(table_name|dbi, [cols, ]{keysvals1,...})
 	db:is_null         (table_name|dbi, col, keys...) -> is_null, [reason]
 	db:exists          (table_name|dbi, keys...) -> record_exists, table_exists
 	db:[must_]get      (table_name|dbi, [val_cols], keys...) -> vals...
 	db:try_get         (table_name|dbi, [val_cols], keys...) -> true, vals... | false
-	db:[try_]del       (table_name|dbi, keys...) -> true | nil,err
-	db:[try_]del_exact (table_name|dbi, [cols], keysvals...) -> true | nil,err
+	db:[try_]del       (table_name|dbi, keys...) -> true | false,err
+	db:[try_]del_exact (table_name|dbi, [cols], keysvals...) -> true | false,err
 
 	cur:{first|last|next|prev|current}([cols]) -> keysvals...
 	cur:[must_]get ([val_cols], keys...) -> vals...
@@ -53,6 +53,7 @@ API, extends mdbx.lua MANAGED API
 TODO:
 	- non-unique indexes with multiple rows
 	- signal data truncation on CRUD ops
+	- fixed-size padded array key fields
 	- allow \0 and null in key cols -- big problem: wasting half of max key size!
 		- but allows indexing on nullable cols.
 	- range lookup cursor
@@ -66,7 +67,7 @@ TODO:
 
 require'mdbx'
 require'utf8proc'
-require'cjson' -- for null
+require'json' -- for null
 require'schema'
 local C = ffi.load'mdbx_schema' --see src/c/mdbx_schema/mdbx_schema.c
 
@@ -127,7 +128,7 @@ typedef struct schema_table {
 } schema_table;
 
 int schema_val_is_null(schema_table* tbl, int col_i,
-	void* rec, int rec_size
+	const void* rec, int rec_size
 );
 
 int schema_get_key(schema_table* tbl, int col_i,
@@ -251,8 +252,8 @@ function Db:layout_table_schema(schema)
 	sort(val_fields, function(f1, f2)
 		--elem_size fits in 8 bit; field index fits in 16 bit; 8+16 = 24 bits,
 		--so any bit from bit 25+ can be used for extra conditions.
-		local i1 = (f1.maxlen and 2^26 or 0) + (2^8-1 - f1.elem_size) * 2^16 + f1.col_pos
-		local i2 = (f2.maxlen and 2^26 or 0) + (2^8-1 - f2.elem_size) * 2^16 + f2.col_pos
+		local i1 = (f1.maxlen and not f1.padded and 2^26 or 0) + (2^8-1 - f1.elem_size) * 2^16 + f1.col_pos
+		local i2 = (f2.maxlen and not f2.padded and 2^26 or 0) + (2^8-1 - f2.elem_size) * 2^16 + f2.col_pos
 		return i1 < i2
 	end)
 	for i,f in ipairs(val_fields) do
@@ -458,45 +459,15 @@ function Db:compile_table_schema(schema)
 			if f.maxlen then --array
 				function f.get_val_len(val) return #val end
 				if f.mdbx_type == 'utf8' then --utf8 strings
-					local ai_ci = f.mdbx_collation == 'utf8_ai_ci'
-					if ai_ci then
-						local desc = f.descending
-						local maxlen = f.maxlen
-						function f.encode(buf, val)
-							local len = min(maxlen, len or #s) --truncate
-							local sp
-							if ai_ci then
-								sp, len = encode_ai_ci(s, len)
-							else
-								sp = cast(u8p, s)
-							end
-							if desc then
-								local dp = getp(buf)
-								for i = 0, len-1 do
-									dp[i] = enc(sp[i], true)
-								end
-							else
-								rawset(buf, rec_sz, sp, len)
-							end
-						end
-						function f.decode(p, len)
-							local p, p_len = rawget(buf, rec_sz)
-							local len = min(p_len, out_len or 1/0) --truncate
-							local out = out and cast(u8p, out) or u8a(len)
-							local dp = getp(buf)
-							for i = 0, len-1 do
-								out[i] = dec(dp[i])
-							end
-							return out, len
-						end
-					else --raw utf8
-						function f.encode(buf, val, len)
-							assertf(typeof(val) == 'string', 'invalid val type: %s', typeof(val))
-							copy(buf, val, len)
-						end
-						function f.decode(p, len)
-							return str(p, len)
-						end
+					--ai_ci collation is not implemented yet.
+					assertf(f.mdbx_collation ~= 'utf8_ai_ci',
+						'utf8_ai_ci collation not implemented: %s.%s', schema.name, f.col)
+					function f.encode(buf, val, len)
+						assertf(typeof(val) == 'string', 'invalid val type: %s', typeof(val))
+						copy(buf, val, len)
+					end
+					function f.decode(p, len)
+						return str(p, len)
 					end
 				else --array
 					function f.encode(buf, val, len)
@@ -509,6 +480,7 @@ function Db:compile_table_schema(schema)
 						return buf, len
 					end
 					function f.decode(p, len)
+						local p = cast(elemp_ct, p)
 						local t = {}
 						for i = 1, len do
 							t[i] = p[i-1]
@@ -652,6 +624,7 @@ end
 function Db:validate_schema(stored_schema, paper_schema)
 
 	local errs = {}
+	local table_name = paper_schema.name or stored_schema.name
 
 	--compare table attributes
 	cmp_keys(paper_schema, stored_schema, {
@@ -670,7 +643,7 @@ function Db:validate_schema(stored_schema, paper_schema)
 				'col', 'col_pos', 'mdbx_type', 'maxlen', 'padded', 'not_null',
 				'elem_size', 'descending', 'mdbx_collation',
 				'fixed_offset', 'offset',
-			}, errs, '%s.%s.%s', table_name, F, k)
+			}, errs, '%s.%s.%s', table_name, 'fields', k)
 		end
 	end
 
@@ -688,7 +661,7 @@ function Db:validate_schema(stored_schema, paper_schema)
 	end
 
 	if #errs > 0 then
-		return nil, fmt('schema mismatch for table: %s:\n\t%s',
+		return false, fmt('schema mismatch for table: %s:\n\t%s',
 			table_name, cat(errs, '\n\t'))
 	end
 
@@ -697,10 +670,6 @@ end
 
 local try_open_table_raw = Db.try_open_table
 function Db:try_open_table(tab, mode, paper_schema, flags)
-
-	if not tab then --opening the unnamed root table
-		return try_open_table_raw(self, mode, nil, flags)
-	end
 
 	local table_name = tab
 	paper_schema = paper_schema or attrs_find(self, 'schema', 'tables', table_name)
@@ -906,7 +875,7 @@ function Db:compile_index_schema(ix_schema)
 				return
 			end
 
-			self:must_del_raw(ix_dbi, xk0, xk0_sz)
+			assert(self:try_del_raw(ix_dbi, xk0, xk0_sz))
 		end
 
 		local ret, err = self:try_insert_raw(ix_dbi, xk, xk_sz, k, k_sz)
@@ -1046,6 +1015,7 @@ local pp = new'u8*[1]'
 function encode_key(self, schema, autoinc_f, rec, rec_buf_sz, cols, as, ...)
 	if #schema.key_fields == 0 then return 0 end
 	local encode_int_key = schema.encode_int_key
+	local autoinc_v
 	pp[0] = rec
 	for ki,f in ipairs(schema.key_fields) do
 		local val = select_col(cols, as, f.col, ...)
@@ -1054,12 +1024,13 @@ function encode_key(self, schema, autoinc_f, rec, rec_buf_sz, cols, as, ...)
 		end
 		if val == nil and f == autoinc_f then
 			val = self:gen_id(schema.name)
+			autoinc_v = val
 		end
 		if val == nil then
 			error(fmt('null key: %s.%s', schema.name, f.col), 2)
 		end
 		if encode_int_key then
-			return encode_int_key(rec, rec_buf_sz, val)
+			return encode_int_key(rec, rec_buf_sz, val), autoinc_v
 		else
 			local len = f.get_val_len(val)
 			len = min(len, f.maxlen or 1) --truncate
@@ -1067,7 +1038,7 @@ function encode_key(self, schema, autoinc_f, rec, rec_buf_sz, cols, as, ...)
 			C.schema_key_add(schema._st, ki-1, rec, rec_buf_sz, len, pp)
 		end
 	end
-	return pp[0] - rec
+	return pp[0] - rec, autoinc_v
 end
 end
 
@@ -1236,7 +1207,7 @@ local function try_put(self, flags, op, tab, cols, ...)
 	local k, k_buf_sz = key_rec_buffer(schema.key_fields.max_rec_size)
 	local v, v_buf_sz = val_rec_buffer(schema.val_fields.max_rec_size)
 	local autoinc_f = op == 'insert' and schema.autoinc_field
-	local k_sz = encode_key(self, schema, autoinc_f, k, k_buf_sz, cols, as, ...)
+	local k_sz, autoinc_v = encode_key(self, schema, autoinc_f, k, k_buf_sz, cols, as, ...)
 	local ret, err
 	local sub_tx = schema.ix_schemas
 	local in_sub
@@ -1247,23 +1218,26 @@ local function try_put(self, flags, op, tab, cols, ...)
 		if ok then
 			if op == 'insert' then
 				cur:close()
-				return nil, 'exists'
+				return false, 'exists'
 			end
 			--next mdbx put command will invalidate v0 so we need to save it.
 			local v0_unstable = v0
 			v0, v0_sz = put_v0_buffer(v0_sz)
 			copy(v0, v0_unstable, v0_sz)
 			if op == 'update' or op == 'upsert' then --decode v0 and override it.
-				local all_cols = schema.cols
+				local val_cols = schema.val_cols
 				local t = {}
-				decode_val(schema, v0, v0_sz, t, all_cols, '[]')
+				decode_val(schema, v0, v0_sz, t, val_cols, '{}')
 				for i=1,#cols do
-					local v = select_col(cols, as, cols[i], ...)
-					if v ~= nil then --when updating, nil means skip, null means null.
-						t[i] = v
+					local col = cols[i]
+					if val_cols[col] then --only value cols can be updated
+						local v = select_col(cols, as, col, ...)
+						if v ~= nil then --nil means skip, null means null.
+							t[col] = v
+						end
 					end
 				end
-				v_sz = encode_val(self, schema, v, v_buf_sz, all_cols, '[]', t)
+				v_sz = encode_val(self, schema, v, v_buf_sz, val_cols, '{}', t)
 			else --update all cols so no need to decode v0
 				v_sz = encode_val(self, schema, v, v_buf_sz, cols, as, ...)
 			end
@@ -1272,7 +1246,7 @@ local function try_put(self, flags, op, tab, cols, ...)
 					local ok, err = fk:check(self, k, k_sz, v, v_sz)
 					if not ok then
 						cur:close()
-						return nil, err
+						return false, err
 					end
 				end
 			end
@@ -1281,7 +1255,7 @@ local function try_put(self, flags, op, tab, cols, ...)
 			cur:close()
 		elseif op == 'update' then --update but existing row not found
 			cur:close()
-			return nil, v0_sz
+			return false, v0
 		else --put, insert, or upsert new record
 			cur:close()
 			v_sz = encode_val(self, schema, v, v_buf_sz, cols, as, ...)
@@ -1289,7 +1263,7 @@ local function try_put(self, flags, op, tab, cols, ...)
 				for _,fk in ipairs(schema.fks) do
 					local ok, err = fk:check(self, k, k_sz, v, v_sz)
 					if not ok then
-						return nil, err
+						return false, err
 					end
 				end
 			end
@@ -1297,7 +1271,7 @@ local function try_put(self, flags, op, tab, cols, ...)
 			local ret, err = self:try_put_raw(dbi, k, k_sz, v, v_sz, flags)
 			if not ret then
 				if in_sub then self:abort() end
-				return nil, err
+				return false, err
 			end
 		end
 		if schema.ix_schemas then
@@ -1305,7 +1279,7 @@ local function try_put(self, flags, op, tab, cols, ...)
 				local ok, err = ix_schema:update(self, k, k_sz, v, v_sz, v0, v0_sz)
 				if not ok then
 					if in_sub then self:abort() end
-					return nil, err
+					return false, err
 				end
 			end
 			self:commit()
@@ -1313,7 +1287,7 @@ local function try_put(self, flags, op, tab, cols, ...)
 	else --put or insert with no indexes to update or fks to check.
 		local v_sz = encode_val(self, schema, v, v_buf_sz, cols, as, ...)
 		local ret, err = self:try_put_raw(dbi, k, k_sz, v, v_sz, flags)
-		if not ret then return nil, err end
+		if not ret then return false, err end
 	end
 	log('note', 'db', op, '%s %s', schema.name, cols[S])
 	return true, autoinc_v
@@ -1330,9 +1304,9 @@ function Db:try_insert(tab, ...)
 	return try_put(self, mdbx.MDBX_NOOVERWRITE, 'insert', tab, ...)
 end
 function Db:insert(tab, ...)
-	local ret, err = try_put(self, mdbx.MDBX_NOOVERWRITE, 'insert', tab, ...)
-	if ret then return ret end
-	self:check('insert', false, '%s: %s', self:table_name(tab), err)
+	local ret, autoinc_v = try_put(self, mdbx.MDBX_NOOVERWRITE, 'insert', tab, ...)
+	if ret then return autoinc_v end
+	self:check('insert', false, '%s: %s', self:table_name(tab), autoinc_v)
 end
 function Db:try_update(tab, ...)
 	return try_put(self, mdbx.MDBX_CURRENT, 'update', tab, ...)
@@ -1350,11 +1324,11 @@ end
 
 function Db:try_del(tab, ...)
 	local dbi, schema = self:dbi_schema(tab)
-	if not dbi then return nil, schema end
+	if not dbi then return false, schema end
 	local k, k_buf_sz = key_rec_buffer(schema.key_fields.max_rec_size)
 	local k_sz = encode_key(self, schema, nil, k, k_buf_sz, schema.key_cols, nil, ...)
 	local ok, err = self:try_del_raw(dbi, k, k_sz)
-	if not ok then return nil, err end
+	if not ok then return false, err end
 	if schema.ix_schemas then
 		for _,ix_schema in ipairs(schema.ix_schemas) do
 			ix_schema:del(k, k_sz)
@@ -1370,7 +1344,7 @@ end
 
 function Db:del_exact(tab, cols, ...)
 	local dbi, schema = self:dbi_schema(tab)
-	if not dbi then return nil, schema end
+	if not dbi then return false, schema end
 	local cols, as = cols_list(cols)
 	cols = cols or schema.cols
 	local k, k_buf_sz = key_rec_buffer(schema.key_fields.max_rec_size)
@@ -1378,7 +1352,7 @@ function Db:del_exact(tab, cols, ...)
 	local k_sz = encode_key(self, schema, nil, k, k_buf_sz, cols, as, ...)
 	local v_sz = encode_val(self, schema     , v, v_buf_sz, cols, as, ...)
 	local ok, err = self:try_del_raw(dbi, k, k_sz, v, v_sz)
-	if not ok then return nil, err end
+	if not ok then return false, err end
 	if schema.ix_schemas then
 		for _,ix_schema in ipairs(schema.ix_schemas) do
 			ix_schema:del(k, k_sz, v, v_sz)
@@ -1406,7 +1380,7 @@ function Db:try_put_records(tab, cols, records)
 		local v_sz = encode_val(self, schema     , v, v_buf_sz, cols, as, vals)
 		local ok, err = self:try_put_raw(dbi, k, k_sz, v, v_sz)
 		if not ok then
-			return nil, err
+			return false, err
 		end
 	end
 	return true
@@ -1435,8 +1409,8 @@ for _,OP in ipairs{'first', 'last', 'next', 'prev', 'current'} do
 	local op_raw = Cur[OP..'_raw']
 	local function try_op(self, val_cols)
 		local schema = assert(self.schema)
-		local k, k_sz, v, v_sz = op_raw(self)
-		if not k then return false end
+		local ok, k, k_sz, v, v_sz = op_raw(self)
+		if not ok then return false end
 		return decode_kv(self.db, schema, k, k_sz, v, v_sz, val_cols)
 	end
 	local function do_op(self, val_cols)
@@ -1476,12 +1450,12 @@ function Cur:update(val_cols, ...)
 	local val_cols, as = cols_list(val_cols)
 	val_cols = val_cols or schema.val_cols
 	local v, v_buf_sz = val_rec_buffer(schema.val_fields.max_rec_size)
-	local k, k_sz, v0, v0_sz = self:current_raw()
-	if not k then return nil, 'not_found' end
+	local ok, k, k_sz, v0, v0_sz = self:current_raw()
+	if not ok then return false, 'not_found' end
 	assert(v_buf_sz >= v0_sz)
 	copy(v, v0, v0_sz)
 	local v_sz = encode_val(self, schema, v, v_buf_sz, val_cols, as, ...)
-	self:set_raw(v, v_sz)
+	return self:set_raw(v, v_sz)
 end
 
 local function cur_each_pass(cur, ok, ...)
@@ -1514,10 +1488,12 @@ end
 function Db:try_each_reverse(tbl_name, val_cols, mode, t)
 	local cur = self:try_cursor(tbl_name, mode)
 	if not cur then return noop end
+	cur.val_cols = val_cols
 	return cur_each_try_prev, cur, 'start'
 end
 function Db:each_reverse(tbl_name, val_cols, mode, t)
 	local cur = self:cursor(tbl_name, mode)
+	cur.val_cols = val_cols
 	return cur_each_try_prev, cur, 'start'
 end
 
