@@ -147,7 +147,7 @@ function try(f, ...)
 	return catch(nil, f, ...)
 end
 
-local function error_for(errtype, target, event, s, ...)
+function error_for(errtype, target, event, s, ...)
 	errtype = errtype or (target and target.error_type)
 	assert(type(errtype) == 'string')
 	assert(event == nil or type(event) == 'string')

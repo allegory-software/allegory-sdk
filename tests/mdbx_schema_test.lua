@@ -357,10 +357,17 @@ function test.single_varsize_value()
 	end)
 end
 
---values longer than maxlen are truncated on write.
-function test.value_truncation()
-	with_db('value_truncation', function(db)
+--field validation errors raise structured field errors.
+function test.truncation_errors()
+	with_db('truncation_errors', function(db)
 		db:begin'w'
+		local function check_err(err, event, tab, col, msg)
+			assert(iserror(err, 'field'), tostring(err))
+			assert(err.event == event, tostring(err.event))
+			assert(err.table == tab, tostring(err.table))
+			assert(err.col == col, tostring(err.col))
+			assert(err.message == msg, tostring(err.message))
+		end
 		db:create_table('t', {
 			name = 't',
 			fields = {
@@ -369,8 +376,95 @@ function test.value_truncation()
 			},
 			pk = {'id'},
 		})
-		db:insert('t', '{}', {id = 1, s = 'abcdefgh'})
-		assert(db:get('t', 's', 1) == 'abcd', S(db:get('t','s',1)))
+		local ok, err = pcall(function()
+			db:insert('t', '{}', {id = 1, s = 'abcdefgh'})
+		end)
+		assert(not ok)
+		check_err(err, 'insert', 't', 's', 'too_long: 8 > 4')
+
+		db:create_table('tk', {
+			name = 'tk',
+			fields = {
+				{col = 'k', mdbx_type = 'utf8', maxlen = 4, not_null = true},
+				{col = 'v', mdbx_type = 'utf8', maxlen = 4},
+			},
+			pk = {'k'},
+		})
+		ok, err = pcall(function()
+			db:insert('tk', '{}', {k = 'abcde', v = 'x'})
+		end)
+		assert(not ok)
+		check_err(err, 'insert', 'tk', 'k', 'too_long: 5 > 4')
+		db:insert('tk', '{}', {k = 'abcd', v = 'x'})
+		ok, err = pcall(function()
+			db:get('tk', 'v', 'abcde')
+		end)
+		assert(not ok)
+		check_err(err, 'get', 'tk', 'k', 'too_long: 5 > 4')
+
+		ok, err = pcall(function()
+			db:insert('tk', '{}', {v = 'x'})
+		end)
+		assert(not ok)
+		check_err(err, 'insert', 'tk', 'k', 'null_key')
+
+		db:create_table('tv', {
+			name = 'tv',
+			fields = {
+				{col = 'id', mdbx_type = 'u32', not_null = true},
+				{col = 'v' , mdbx_type = 'utf8', maxlen = 4, not_null = true},
+			},
+			pk = {'id'},
+		})
+		ok, err = pcall(function()
+			db:insert('tv', '{}', {id = 1})
+		end)
+		assert(not ok)
+		check_err(err, 'insert', 'tv', 'v', 'not_null')
+		db:commit()
+	end)
+end
+
+--nozero is a persisted field contract; declared fields reject zero elements.
+function test.nozero_field()
+	with_db_reopen('nozero_field', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id', mdbx_type = 'u32' , not_null = true},
+				{col = 's' , mdbx_type = 'utf8', maxlen = 8, nozero = true},
+				{col = 'a' , mdbx_type = 'u8'  , maxlen = 4, nozero = true},
+			},
+			pk = {'id'},
+		})
+		db:insert('t', '{}', {id = 1, s = 'abc', a = {1,2,3}})
+		db:commit()
+	end, function(db)
+		db:begin'w'
+		local function check_err(err, event, col, msg)
+			assert(iserror(err, 'field'), tostring(err))
+			assert(err.event == event, tostring(err.event))
+			assert(err.table == 't', tostring(err.table))
+			assert(err.col == col, tostring(err.col))
+			assert(err.message == msg, tostring(err.message))
+		end
+		local r = db:get('t', '{s a}', 1)
+		assert(r.s == 'abc', S(r.s))
+		assert(valeq(r.a, {1,2,3}), S(r.a))
+
+		local ok, err = pcall(function()
+			db:insert('t', '{}', {id = 2, s = 'a\0b', a = {1,2}})
+		end)
+		assert(not ok)
+		check_err(err, 'insert', 's', 'zero')
+
+		ok, err = pcall(function()
+			db:insert('t', '{}', {id = 3, s = 'abc', a = {1,0,2}})
+		end)
+		assert(not ok)
+		check_err(err, 'insert', 'a', 'zero')
+
 		db:commit()
 	end)
 end
@@ -612,29 +706,6 @@ function test.delete()
 	end)
 end
 
---del_exact removes a row, and returns false,'not_found' for a missing one.
-function test.del_exact()
-	with_db('del_exact', function(db)
-		db:begin'w'
-		db:create_table('t', {
-			name = 't',
-			fields = {
-				{col = 'id', mdbx_type = 'u32', not_null = true},
-				{col = 'v' , mdbx_type = 'i32'},
-			},
-			pk = {'id'},
-		})
-		db:insert('t', '{}', {id = 1, v = 10})
-		db:insert('t', '{}', {id = 2, v = 20})
-		db:del_exact('t', '{}', {id = 1, v = 10})
-		assert(not db:exists('t', 1))
-		assert(db:exists('t', 2))
-		local ok, err = db:del_exact('t', '{}', {id = 1, v = 10})
-		assert(ok == false and err == 'not_found', ('%s,%s'):format(S(ok), S(err)))
-		db:commit()
-	end)
-end
-
 -- cursors -------------------------------------------------------------------
 
 --reverse iteration must honor the requested val_cols (regression: the reverse
@@ -654,8 +725,9 @@ function test.each_reverse_val_cols()
 		db:insert('t', '{}', {id = 1, a = 10, b = 'x'})
 		db:insert('t', '{}', {id = 2, a = 20, b = 'y'})
 		db:insert('t', '{}', {id = 3, a = 30, b = 'z'})
+		--each_reverse returns key cols + requested val cols: (cur, id, b)
 		local got = {}
-		for cur, b in db:each_reverse('t', 'b') do add(got, b) end
+		for cur, id, b in db:each_reverse('t', 'b') do add(got, b) end
 		assert(#got == 3 and got[1] == 'z' and got[2] == 'y' and got[3] == 'x',
 			cat(imap(got, tostring), ','))
 		db:commit()
@@ -677,15 +749,20 @@ function test.cursor_update()
 		})
 		db:insert('t', '{}', {id = 1, a = 10, b = 'x'})
 		db:insert('t', '{}', {id = 2, a = 20, b = 'y'})
+		--full update (all val cols)
 		local cur = db:cursor('t', 'w')
 		assert(cur:try_get(nil, 2)) --position on id=2
-		local ok = cur:update('{a b}', {a = 99, b = 'YY'})
-		assert(ok == true, S(ok))
+		assert(cur:update('{a b}', {a = 99, b = 'YY'}) == true)
 		cur:close()
 		local g = db:get('t', '{a b}', 2)
 		assert(num(g.a) == 99 and g.b == 'YY', ('%s,%s'):format(S(g.a), S(g.b)))
-		local g1 = db:get('t', '{a b}', 1) --row 1 unchanged
-		assert(num(g1.a) == 10 and g1.b == 'x')
+		--partial update preserves the unlisted col
+		cur = db:cursor('t', 'w')
+		assert(cur:try_get(nil, 1)) --position on id=1
+		assert(cur:update('b', 'ZZ') == true)
+		cur:close()
+		g = db:get('t', '{a b}', 1)
+		assert(num(g.a) == 10 and g.b == 'ZZ', ('%s,%s'):format(S(g.a), S(g.b)))
 		db:commit()
 	end)
 end
@@ -740,6 +817,249 @@ function test.validate_schema()
 	end, debug.traceback)
 	cleanup(file)
 	assert(ok, err)
+end
+
+-- indexes -------------------------------------------------------------------
+
+--unique index: dup detection on create, dup insert rejected, lookup through
+--the index, delete frees the key, drop allows dups again.
+function test.unique_index()
+	with_db('unique_index', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id'   , mdbx_type = 'u32' , not_null = true},
+				{col = 'email', mdbx_type = 'utf8', maxlen = 16, not_null = true},
+				{col = 'name' , mdbx_type = 'utf8', maxlen = 16},
+			},
+			pk = {'id'},
+		})
+		db:insert('t', '{}', {id = 1, email = 'a@x', name = 'A'})
+		db:insert('t', '{}', {id = 2, email = 'b@x', name = 'B'})
+		db:insert('t', '{}', {id = 3, email = 'a@x', name = 'C'}) --dup email of id 1
+
+		--adding a unique index fails while a duplicate exists
+		local ok, err, ix_tbl = db:try_add_index('t', {'email', is_unique = true})
+		assert(ok == false and err == 'duplicate_key', ('%s,%s'):format(S(ok), S(err)))
+		assert(not db:table_exists(ix_tbl))
+
+		--remove the dup, then it builds
+		db:del('t', 3)
+		assert(db:try_add_index('t', {'email', is_unique = true}))
+		assert(db:table_exists(ix_tbl))
+
+		--inserting a row with an existing email now fails (and rolls back)
+		assert(db:try_insert('t', '{}', {id = 4, email = 'a@x', name = 'D'}) == false)
+		assert(not db:exists('t', 4))
+
+		--lookup through the index
+		local r = db:must_get(ix_tbl, '{}', 'b@x')
+		assert(num(r.id) == 2 and r.name == 'B', S(r.name))
+
+		--delete frees the unique index key (reinsert with same email works)
+		db:del('t', 1)
+		assert(db:try_insert('t', '{}', {id = 5, email = 'a@x', name = 'E'}))
+
+		--drop the index: duplicates allowed again
+		db:drop_index(ix_tbl)
+		assert(db:try_insert('t', '{}', {id = 6, email = 'a@x', name = 'F'}))
+		db:commit()
+	end)
+end
+
+--non-unique (DUPSORT) index: multiple rows per index key, iteration walks all
+--of them in (key, pk) order, and delete removes only the deleted row's entry.
+function test.non_unique_index()
+	with_db('non_unique_index', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id'  , mdbx_type = 'u32' , not_null = true},
+				{col = 'cat' , mdbx_type = 'utf8', maxlen = 8, not_null = true},
+				{col = 'name', mdbx_type = 'utf8', maxlen = 8},
+			},
+			pk = {'id'},
+		})
+		db:insert('t', '{}', {id = 1, cat = 'a', name = 'one'})
+		db:insert('t', '{}', {id = 2, cat = 'a', name = 'two'})
+		db:insert('t', '{}', {id = 3, cat = 'b', name = 'three'})
+		db:insert('t', '{}', {id = 4, cat = 'a', name = 'four'})
+
+		local ok, err, ix_tbl = db:try_add_index('t', {'cat'})
+		assert(ok, S(err))
+
+		--iterate: cat 'a' rows (ids 1,2,4) then cat 'b' (id 3)
+		local names = {}
+		for cur, t in db:each(ix_tbl, '{}') do add(names, t.name) end
+		assert(#names == 4 and names[1] == 'one' and names[2] == 'two'
+			and names[3] == 'four' and names[4] == 'three', cat(names, ','))
+
+		--delete a row in cat 'a': only its index entry is removed
+		db:del('t', 2)
+		names = {}
+		for cur, t in db:each(ix_tbl, '{}') do add(names, t.name) end
+		assert(#names == 3 and names[1] == 'one' and names[2] == 'four'
+			and names[3] == 'three', cat(names, ','))
+
+		--update a row's indexed value: it moves index groups
+		db:update('t', '{}', {id = 1, cat = 'b'})
+		names = {}
+		for cur, t in db:each(ix_tbl, '{}') do add(names, t.name) end
+		--now cat 'a': id 4 (four); cat 'b': ids 1,3 (one, three)
+		assert(#names == 3 and names[1] == 'four' and names[2] == 'one'
+			and names[3] == 'three', cat(names, ','))
+		db:commit()
+	end)
+end
+
+--a write opens a sub-txn only when the table has a unique index (the only
+--thing that can soft-fail and need a rollback); no index / non-unique don't.
+function test.subtxn_only_for_unique_index()
+	with_db('subtxn_only_for_unique_index', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id'   , mdbx_type = 'u32' , not_null = true},
+				{col = 'cat'  , mdbx_type = 'utf8', maxlen = 8 , not_null = true},
+				{col = 'email', mdbx_type = 'utf8', maxlen = 16, not_null = true},
+			},
+			pk = {'id'},
+		})
+		local function count_begins(f)
+			local n = 0
+			local real = db.begin
+			db.begin = function(self, ...) n = n + 1; return real(self, ...) end
+			f()
+			db.begin = nil
+			return n
+		end
+		--no index: no sub-txn
+		assert(count_begins(function()
+			db:insert('t', '{}', {id = 1, cat = 'a', email = 'a@x'}) end) == 0)
+		--non-unique index: still no sub-txn
+		db:try_add_index('t', {'cat'})
+		assert(count_begins(function()
+			db:insert('t', '{}', {id = 2, cat = 'a', email = 'b@x'}) end) == 0)
+		--unique index: one sub-txn
+		db:try_add_index('t', {'email', is_unique = true})
+		assert(count_begins(function()
+			db:insert('t', '{}', {id = 3, cat = 'a', email = 'c@x'}) end) == 1)
+		db:commit()
+	end)
+end
+
+--cursor update of an indexed column must maintain the index (non-unique).
+function test.cursor_update_maintains_index()
+	with_db('cursor_update_maintains_index', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id'  , mdbx_type = 'u32' , not_null = true},
+				{col = 'cat' , mdbx_type = 'utf8', maxlen = 8, not_null = true},
+				{col = 'name', mdbx_type = 'utf8', maxlen = 8},
+			},
+			pk = {'id'},
+		})
+		db:insert('t', '{}', {id = 1, cat = 'a', name = 'one'})
+		db:insert('t', '{}', {id = 2, cat = 'b', name = 'two'})
+		local _,_,ix = db:try_add_index('t', {'cat'})
+		local cur = db:cursor('t', 'w')
+		assert(cur:try_get(nil, 1))
+		assert(cur:update('cat', 'b')) --move id 1 from cat 'a' to cat 'b'
+		cur:close()
+		local names = {}
+		for c, t in db:each(ix, '{}') do add(names, t.name) end
+		assert(#names == 2 and names[1] == 'one' and names[2] == 'two', cat(names, ','))
+		db:commit()
+	end)
+end
+
+--cursor update on a unique-indexed table (delegates to db:update; the user's
+--cursor must survive the delegated write).
+function test.cursor_update_unique_index()
+	with_db('cursor_update_unique_index', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id'   , mdbx_type = 'u32' , not_null = true},
+				{col = 'email', mdbx_type = 'utf8', maxlen = 16, not_null = true},
+			},
+			pk = {'id'},
+		})
+		db:insert('t', '{}', {id = 1, email = 'a@x'})
+		db:insert('t', '{}', {id = 2, email = 'b@x'})
+		local _,_,ix = db:try_add_index('t', {'email', is_unique = true})
+		local cur = db:cursor('t', 'w')
+		assert(cur:try_get(nil, 1))
+		assert(cur:update('email', 'c@x'))
+		cur:close()
+		assert(num(db:must_get(ix, '{}', 'c@x').id) == 1)
+		assert(not db:try_get(ix, nil, 'a@x')) --old index key gone
+		db:commit()
+	end)
+end
+
+--updating an indexed column for every row mid-iteration: the iterating cursor
+--must survive the per-row delegated writes and the index must end consistent.
+function test.cursor_update_during_iteration()
+	with_db('cursor_update_during_iteration', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id' , mdbx_type = 'u32' , not_null = true},
+				{col = 'tag', mdbx_type = 'utf8', maxlen = 8, not_null = true},
+			},
+			pk = {'id'},
+		})
+		for i = 1, 4 do db:insert('t', '{}', {id = i, tag = 'a'}) end
+		local _,_,ix = db:try_add_index('t', {'tag'})
+		for cur, id in db:each('t') do
+			cur:update('tag', 'b'..num(id))
+		end
+		local tags = {}
+		for cur, t in db:each('t', '{tag}') do add(tags, t.tag) end
+		assert(#tags == 4 and tags[1] == 'b1' and tags[2] == 'b2'
+			and tags[3] == 'b3' and tags[4] == 'b4', cat(tags, ','))
+		local n = 0
+		for cur, t in db:each(ix, '{}') do n = n + 1 end
+		assert(n == 4, n)
+		db:commit()
+	end)
+end
+
+--put replaces the whole row: a partial put drops the columns it doesn't list
+--(unlike update, which preserves them).
+function test.put_replaces()
+	with_db('put_replaces', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id', mdbx_type = 'u32', not_null = true},
+				{col = 'a' , mdbx_type = 'i32'},
+				{col = 'b' , mdbx_type = 'utf8', maxlen = 8},
+			},
+			pk = {'id'},
+		})
+		db:put('t', '{}', {id = 1, a = 10, b = 'x'})
+		--partial put on an existing row replaces it: unlisted 'b' becomes null
+		db:put('t', '{}', {id = 1, a = 20})
+		local g = db:get('t', '{a b}', 1)
+		assert(num(g.a) == 20 and g.b == nil, ('%s,%s'):format(S(g.a), S(g.b)))
+		assert(db:is_null('t', 'b', 1) == true)
+		--contrast: update preserves the unlisted column
+		db:put('t', '{}', {id = 1, a = 30, b = 'y'})
+		db:update('t', '{}', {id = 1, a = 40})
+		g = db:get('t', '{a b}', 1)
+		assert(num(g.a) == 40 and g.b == 'y', ('%s,%s'):format(S(g.a), S(g.b)))
+		db:commit()
+	end)
 end
 
 ------------------------------------------------------------------------------
