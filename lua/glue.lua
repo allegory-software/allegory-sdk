@@ -62,15 +62,14 @@ ARRAYS
 	pop(t) -> v                    remove(t)
 	clear                        = table.clear
 	sort(t, [cmp]) -> t          = table.sort but returns the table
-	extend(dt, t1, ...) -> dt      extend an array with contents of other arrays
+	extend[_sparse](dt, t1, ...) -> dt   extend array with other array(s) (reads t1.n!)
 	append(dt, v1, ...) -> dt      append non-nil values to an array
 	popn(dt, n) -> v1, ...         remove n values from the end and return them
 	remove_value(t, v) -> i|nil    find and remove value from array
 	shift(t, i, n) -> t            shift array elements
-	slice(t, [i], [j]) -> t        slice an array
-	imap(t, field|f,...) -> t      map f over ipairs of t or pluck field
-	indexof(v, t, [eq], [i], [j]) -> i   scan array for value
-	cmp'KEY1[>] ...' -> f          create a cmp function for sort and binsearch
+	imap[_sparse](t, [field|f,...]) -> t     map f over ipairs of t or pluck field
+	indexof(v, t, [eq], [i], [j]) -> i       scan array for value
+	cmp'KEY1[>] ...' -> f                    create a cmp function for sort and binsearch
 	binsearch(v, t, [cmp], [i], [j]) -> i    bin search in sorted array
 	binsearch_insert(t, v, [cmp]) -> t       order-preserving insert in sorted array
 	sortedarray([sa]) -> sa        stay-sorted array with fast search
@@ -870,9 +869,20 @@ function extend(dt,...)
 	for j=1,select('#',...) do
 		local t=select(j,...)
 		if t then
+			local j = #dt
+			local n = #t
+			for i=1,n do dt[j+i] = t[i] end
+		end
+	end
+	return dt
+end
+function extend_sparse(dt,...)
+	for j=1,select('#',...) do
+		local t=select(j,...)
+		if t then
 			local j = dt.n or #dt
 			local n = t.n or #t
-			for i=1,n do dt[j+i]=t[i] end
+			for i=1,n do dt[j+i] = t[i] end
 			if t.n or dt.n then dt.n = j+n end --adding a sparse array makes dt sparse.
 		end
 	end
@@ -941,20 +951,6 @@ function shift(t, i, n)
 	return t
 end
 
-local clamp = clamp
-function slice(t, i, j) --TODO: not used. use it or scrape it.
-	local n = t.n or #t
-	i = i or 1
-	j = j or n
-	if i < 0 then i = n + i + 1 end
-	if j < 0 then j = n + j + 1 end
-	i = clamp(i, 1, n)
-	j = clamp(j, 1, n)
-	local dt = {}
-	for i=i,j do dt[i] = t[i] end
-	return dt
-end
-
 --map `f(k, v, ...) -> v1` over t or extract a column from a list of records.
 --if f is not a function, then the values of t must be themselves tables,
 --in which case f is a key to pluck from those tables. Plucked functions
@@ -983,13 +979,13 @@ end
 --map `f(v, ...) -> v1` over t or extract a column from a list of records.
 --same plucking semantics as map() but applied on lists.
 function imap(t, f, ...)
-	local dt = {n = t.n}
-	local n = t.n or #t
+	local dt = {}
+	local n = #t
 	if type(f) == 'function' then
 		for i=1,n do
 			dt[i] = f(t[i], ...)
 		end
-	else
+	elseif f ~= nil then
 		for i=1,n do
 			local v = t[i]
 			local sel = v[f]
@@ -999,6 +995,33 @@ function imap(t, f, ...)
 				dt[i] = sel
 			end
 		end
+	else
+		extend(dt, t)
+	end
+	return dt
+end
+
+--map `f(v, ...) -> v1` over t or extract a column from a list of records.
+--same plucking semantics as map() but applied on lists.
+function imap_sparse(t, f, ...)
+	local dt = {n = t.n}
+	local n = t.n or #t
+	if type(f) == 'function' then
+		for i=1,n do
+			dt[i] = f(t[i], ...)
+		end
+	elseif f ~= nil then
+		for i=1,n do
+			local v = t[i]
+			local sel = v[f]
+			if type(sel) == 'function' then --method to apply
+				dt[i] = sel(v, ...)
+			else --field to pluck
+				dt[i] = sel
+			end
+		end
+	else
+		for i=1,n do dt[i] = t[i] end
 	end
 	return dt
 end

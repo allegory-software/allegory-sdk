@@ -1876,7 +1876,7 @@ function scandir(arg, dive)
 	if isstr(arg) then
 		return scandir1(arg, dive)
 	elseif istab(arg) then
-		local i, n = 1, arg.n or #arg
+		local i, n = 1, #arg
 		local iter = scandir1(arg[i], dive)
 		return function()
 			::again::

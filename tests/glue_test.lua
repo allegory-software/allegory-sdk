@@ -135,9 +135,10 @@ assert(t3 ~= t4)
 --lists ----------------------------------------------------------------------
 
 test(extend({5,6,8}, {1,2}, {'b','x'}), {5,6,8,1,2,'b','x'})
-test(extend({n=0}, pack(nil)), {n=1})
-test(extend({n=2, 1, 2}, {n=2, 3, nil}), {n=4, 1, 2, 3}) --sparse arrays with n
+test(extend_sparse({n=0}, pack(nil)), {n=1})
+test(extend_sparse({n=2, 1, 2}, {n=2, 3, nil}), {n=4, 1, 2, 3}) --sparse arrays with n
 test(extend({1,2}, false, {3}), {1,2,3}) --false arg skipped
+test(extend({1,2}, {3,4,n='x'}), {1,2,3,4}) --map+array arg: uses #t, ignores 'n' string key
 
 test(append({1,2,3}, 5,6), {1,2,3,5,6})
 test(append({1}, 'a', nil, 'b'), {1, 'a', 'b'}) --skips nils without holes
@@ -845,14 +846,6 @@ test(last({1,2,3}), 3)
 test(last({5}), 5)
 test(last({}), nil)
 
---slice
-test(slice({1,2,3,4,5}, 2, 4), {[2]=2,[3]=3,[4]=4})
-test(slice({1,2,3,4,5}, -3, -1), {[3]=3,[4]=4,[5]=5})
-test(slice({1,2,3}, 1, 3), {1,2,3})
-test(slice({}, 1, 1), {})
-test(slice({10,20,30}, 1, 100), {10,20,30}) --beyond bounds
-test(slice({10,20,30}, -100, 100), {10,20,30}) --beyond bounds
-
 --binsearch_insert
 local t = {1,3,5,7}
 binsearch_insert(t, 4)
@@ -898,7 +891,11 @@ do --method plucking
 	local function mk(n) return {val = function(self) return self._v end, _v = n} end
 	test(imap({mk(1), mk(2)}, 'val'), {1, 2})
 end
-test(imap({1, nil, 3, n=3}, function(v) return (v or 0) + 1 end), {2, 1, 4, n=3}) --sparse
+test(imap_sparse({1, nil, 3, n=3}, function(v) return (v or 0) + 1 end), {2, 1, 4, n=3}) --sparse
+test(imap({10, 20, 30, n='x', k=1}, function(v) return v + 1 end), {11, 21, 31}) --map+array: uses #t, ignores string keys
+test(imap({1, 2, 3}), {1, 2, 3}) --clone (no f)
+test(imap_sparse({1, 2, 3, n=3}), {1, 2, 3, n=3}) --sparse clone (no f)
+test(imap_sparse({1, nil, 3, n=3}), {1, nil, 3, n=3}) --sparse clone preserves holes
 
 --tables (additional) --------------------------------------------------------
 
