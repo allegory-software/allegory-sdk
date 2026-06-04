@@ -127,7 +127,7 @@ function test.varsize_key_single()
 			db:create_table(name, {
 				name = name,
 				fields = {
-					{col = 's', mdbx_type = 'utf8', maxlen = 100, not_null = true},
+					{col = 's', mdbx_type = 'utf8', maxlen = 100, nozero = true, not_null = true},
 					{col = 'v', mdbx_type = 'utf8', maxlen = 100},
 				},
 				pk = {'s', desc = {desc}},
@@ -162,8 +162,8 @@ function test.varsize_key_composite()
 			db:create_table(name, {
 				name = name,
 				fields = {
-					{col = 's1', mdbx_type = 'utf8', maxlen = 100, not_null = true},
-					{col = 's2', mdbx_type = 'utf8', maxlen = 100, not_null = true},
+					{col = 's1', mdbx_type = 'utf8', maxlen = 100, nozero = true, not_null = true},
+					{col = 's2', mdbx_type = 'utf8', maxlen = 100, nozero = true, not_null = true},
 					{col = 's3', mdbx_type = 'utf8', maxlen = 100},
 					{col = 's4', mdbx_type = 'utf8', maxlen = 100},
 				},
@@ -385,7 +385,7 @@ function test.truncation_errors()
 		db:create_table('tk', {
 			name = 'tk',
 			fields = {
-				{col = 'k', mdbx_type = 'utf8', maxlen = 4, not_null = true},
+				{col = 'k', mdbx_type = 'utf8', maxlen = 4, nozero = true, not_null = true},
 				{col = 'v', mdbx_type = 'utf8', maxlen = 4},
 			},
 			pk = {'k'},
@@ -547,7 +547,7 @@ function test.composite_mixed_keys()
 			name = 't',
 			fields = {
 				{col = 'a', mdbx_type = 'u32' , not_null = true},
-				{col = 'b', mdbx_type = 'utf8', maxlen = 8, not_null = true},
+				{col = 'b', mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
 				{col = 'v', mdbx_type = 'utf8', maxlen = 8},
 			},
 			pk = {'a', 'b'},
@@ -573,26 +573,36 @@ function test.composite_mixed_keys()
 	end)
 end
 
---varsize keys are 0-terminated, so they are NOT 8-bit clean: an embedded \0
---truncates the key. this pins that documented limitation.
-function test.key_embedded_zero_truncation()
-	with_db('key_embedded_zero_truncation', function(db)
+--varsize keys must be declared nozero, so embedded \0 errors instead of
+--truncating to a different key.
+function test.key_embedded_zero_error()
+	with_db('key_embedded_zero_error', function(db)
 		db:begin'w'
 		db:create_table('t', {
 			name = 't',
 			fields = {
-				{col = 'k', mdbx_type = 'utf8', maxlen = 16, not_null = true},
+				{col = 'k', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
 				{col = 'v', mdbx_type = 'utf8', maxlen = 8},
 			},
 			pk = {'k'},
 		})
-		db:insert('t', '{}', {k = 'a\0b', v = 'first'})
-		--stored key is 'a'; lookups by 'a' or any 'a\0...' hit the same record.
-		assert(db:get('t', 'v', 'a') == 'first')
-		assert(db:get('t', 'v', 'a\0c') == 'first')
+		local ok, err = pcall(function()
+			db:insert('t', '{}', {k = 'a\0b', v = 'first'})
+		end)
+		assert(not ok)
+		assert(iserror(err, 'field'), tostring(err))
+		assert(err.event == 'insert' and err.table == 't' and err.col == 'k'
+			and err.message == 'zero', tostring(err))
+		ok, err = pcall(function()
+			db:get('t', 'v', 'a\0c')
+		end)
+		assert(not ok)
+		assert(iserror(err, 'field'), tostring(err))
+		assert(err.event == 'get' and err.table == 't' and err.col == 'k'
+			and err.message == 'zero', tostring(err))
 		local n = 0
-		for cur, k in db:each('t') do n = n + 1; assert(k == 'a', S(k)) end
-		assert(n == 1)
+		for cur, k in db:each('t') do n = n + 1 end
+		assert(n == 0)
 		db:commit()
 	end)
 end
@@ -819,6 +829,54 @@ function test.validate_schema()
 	assert(ok, err)
 end
 
+-- keyability rules ----------------------------------------------------------
+
+function test.keyability_rules()
+	with_db('keyability_rules', function(db)
+		db:begin'w'
+		local ok, err = pcall(function()
+			db:create_table('bad_pk', {
+				name = 'bad_pk',
+				fields = {
+					{col = 's', mdbx_type = 'utf8', maxlen = 8, not_null = true},
+				},
+				pk = {'s'},
+			})
+		end)
+		assert(not ok)
+		assert(tostring(err):find('varsize key col must be nozero', 1, true), tostring(err))
+
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id', mdbx_type = 'u32' , not_null = true},
+				{col = 's' , mdbx_type = 'utf8', maxlen = 8},
+				{col = 'nz', mdbx_type = 'utf8', maxlen = 8, nozero = true},
+			},
+			pk = {'id'},
+		})
+		db:insert('t', '{}', {id = 1, s = 'a', nz = 'a'})
+		db:insert('t', '{}', {id = 2, s = 'b', nz = 'b'})
+
+		ok, err = pcall(function()
+			db:try_add_index('t', {'s'})
+		end)
+		assert(not ok)
+		assert(tostring(err):find('varsize key col must be nozero', 1, true), tostring(err))
+
+		ok, err = pcall(function()
+			db:try_add_index('t', {'nz', is_unique = true})
+		end)
+		assert(not ok)
+		assert(tostring(err):find('unique index', 1, true), tostring(err))
+		assert(tostring(err):find('must be not_null', 1, true), tostring(err))
+
+		ok, err = db:try_add_index('t', {'nz'})
+		assert(ok, tostring(err))
+		db:commit()
+	end)
+end
+
 -- indexes -------------------------------------------------------------------
 
 --unique index: dup detection on create, dup insert rejected, lookup through
@@ -830,7 +888,7 @@ function test.unique_index()
 			name = 't',
 			fields = {
 				{col = 'id'   , mdbx_type = 'u32' , not_null = true},
-				{col = 'email', mdbx_type = 'utf8', maxlen = 16, not_null = true},
+				{col = 'email', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
 				{col = 'name' , mdbx_type = 'utf8', maxlen = 16},
 			},
 			pk = {'id'},
@@ -877,7 +935,7 @@ function test.non_unique_index()
 			name = 't',
 			fields = {
 				{col = 'id'  , mdbx_type = 'u32' , not_null = true},
-				{col = 'cat' , mdbx_type = 'utf8', maxlen = 8, not_null = true},
+				{col = 'cat' , mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
 				{col = 'name', mdbx_type = 'utf8', maxlen = 8},
 			},
 			pk = {'id'},
@@ -914,6 +972,96 @@ function test.non_unique_index()
 	end)
 end
 
+--nullable non-unique indexes encode null as an ordered index key value and
+--maintain entries across update/delete.
+function test.nullable_non_unique_index()
+	with_db('nullable_non_unique_index', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id', mdbx_type = 'u32' , not_null = true},
+				{col = 's' , mdbx_type = 'utf8', maxlen = 8, nozero = true},
+				{col = 'n' , mdbx_type = 'i32'},
+			},
+			pk = {'id'},
+		})
+		db:insert('t', '{}', {id = 1, s = nil, n = nil})
+		db:insert('t', '{}', {id = 2, s = 'b', n = 0})
+		db:insert('t', '{}', {id = 3, s = '', n = -1})
+		db:insert('t', '{}', {id = 4, s = nil, n = 5})
+
+		local ok, err, ix_s = db:try_add_index('t', {'s'})
+		assert(ok, tostring(err))
+		local function ids(ix)
+			local t = {}
+			for cur, r in db:each(ix, '{}') do add(t, num(r.id)) end
+			return t
+		end
+		assert(valeq(ids(ix_s), {1,4,3,2}), cat(ids(ix_s), ','))
+		local r = db:must_get(ix_s, '{}', null)
+		assert(num(r.id) == 1 and r.s == nil, S(r.id))
+		r = db:must_get(ix_s, '{}', '')
+		assert(num(r.id) == 3 and r.s == '', S(r.id))
+
+		db:update('t', '{}', {id = 1, s = 'c'})
+		assert(valeq(ids(ix_s), {4,3,2,1}), cat(ids(ix_s), ','))
+		db:del('t', 4)
+		assert(valeq(ids(ix_s), {3,2,1}), cat(ids(ix_s), ','))
+
+		local _,_,ix_n = db:try_add_index('t', {'n'})
+		assert(valeq(ids(ix_n), {1,3,2}), cat(ids(ix_n), ','))
+		r = db:must_get(ix_n, '{}', null)
+		assert(num(r.id) == 1 and r.n == nil, S(r.id))
+		r = db:must_get(ix_n, '{}', -1)
+		assert(num(r.id) == 3 and num(r.n) == -1, S(r.id))
+		db:commit()
+	end)
+end
+
+--composite nullable indexes must walk nullable key fields correctly, and
+--descending nullable keys put nulls after non-null values.
+function test.nullable_composite_index()
+	with_db('nullable_composite_index', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id', mdbx_type = 'u32' , not_null = true},
+				{col = 's' , mdbx_type = 'utf8', maxlen = 8, nozero = true},
+				{col = 'n' , mdbx_type = 'i32'},
+			},
+			pk = {'id'},
+		})
+		db:insert('t', '{}', {id = 1, s = nil, n = nil})
+		db:insert('t', '{}', {id = 2, s = nil, n = 1})
+		db:insert('t', '{}', {id = 3, s = '' , n = nil})
+		db:insert('t', '{}', {id = 4, s = 'a', n = -1})
+		db:insert('t', '{}', {id = 5, s = 'a', n = nil})
+
+		local function ids(ix)
+			local t = {}
+			for cur, r in db:each(ix, '{}') do add(t, num(r.id)) end
+			return t
+		end
+
+		local ok, err, ix = db:try_add_index('t', {'s', 'n'})
+		assert(ok, tostring(err))
+		assert(valeq(ids(ix), {1,2,3,5,4}), cat(ids(ix), ','))
+		local r = db:must_get(ix, '{}', null, null)
+		assert(num(r.id) == 1, S(r.id))
+		r = db:must_get(ix, '{}', 'a', null)
+		assert(num(r.id) == 5, S(r.id))
+
+		ok, err, ix = db:try_add_index('t', {'s', desc = {true}})
+		assert(ok, tostring(err))
+		assert(valeq(ids(ix), {4,5,3,1,2}), cat(ids(ix), ','))
+		r = db:must_get(ix, '{}', null)
+		assert(num(r.id) == 1 and r.s == nil, S(r.id))
+		db:commit()
+	end)
+end
+
 --a write opens a sub-txn only when the table has a unique index (the only
 --thing that can soft-fail and need a rollback); no index / non-unique don't.
 function test.subtxn_only_for_unique_index()
@@ -923,8 +1071,8 @@ function test.subtxn_only_for_unique_index()
 			name = 't',
 			fields = {
 				{col = 'id'   , mdbx_type = 'u32' , not_null = true},
-				{col = 'cat'  , mdbx_type = 'utf8', maxlen = 8 , not_null = true},
-				{col = 'email', mdbx_type = 'utf8', maxlen = 16, not_null = true},
+				{col = 'cat'  , mdbx_type = 'utf8', maxlen = 8 , nozero = true, not_null = true},
+				{col = 'email', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
 			},
 			pk = {'id'},
 		})
@@ -959,7 +1107,7 @@ function test.cursor_update_maintains_index()
 			name = 't',
 			fields = {
 				{col = 'id'  , mdbx_type = 'u32' , not_null = true},
-				{col = 'cat' , mdbx_type = 'utf8', maxlen = 8, not_null = true},
+				{col = 'cat' , mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
 				{col = 'name', mdbx_type = 'utf8', maxlen = 8},
 			},
 			pk = {'id'},
@@ -987,7 +1135,7 @@ function test.cursor_update_unique_index()
 			name = 't',
 			fields = {
 				{col = 'id'   , mdbx_type = 'u32' , not_null = true},
-				{col = 'email', mdbx_type = 'utf8', maxlen = 16, not_null = true},
+				{col = 'email', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
 			},
 			pk = {'id'},
 		})
@@ -1013,7 +1161,7 @@ function test.cursor_update_during_iteration()
 			name = 't',
 			fields = {
 				{col = 'id' , mdbx_type = 'u32' , not_null = true},
-				{col = 'tag', mdbx_type = 'utf8', maxlen = 8, not_null = true},
+				{col = 'tag', mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
 			},
 			pk = {'id'},
 		})

@@ -50,11 +50,7 @@ API, extends mdbx.lua MANAGED API
 
 
 TODO:
-	- non-unique indexes with multiple rows
-	- signal data truncation on CRUD ops
 	- fixed-size padded array key fields
-	- allow \0 and null in key cols -- big problem: wasting half of max key size!
-		- but allows indexing on nullable cols.
 	- range lookup cursor
 	- mdbx_env_chk()
 	- table migration:
@@ -114,6 +110,7 @@ typedef struct schema_col {
 	int   len; // for varsize cols it means max len.
 	bool8 fixed_size; // fixed size array (padded) or varsize.
 	bool8 descending; // for key cols
+	bool8 nullable; // for key cols
 	u8    type; // schema_col_type
 	u8    elem_size_shift; // computed
 	bool8 fixed_offset; // computed: decides what the .offset field means
@@ -219,7 +216,12 @@ function Db:layout_table_schema(schema)
 	for i,col in ipairs(schema.pk) do
 		local f = assertf(schema.fields[col],
 			'pk col unknown: `%s` for table: %s', col, table_name)
-		assertf(f.not_null, 'pk col must be not_null: %s.%s', table_name, col)
+		if not schema.is_index or not schema.dup_keys then
+			assertf(f.not_null, 'key col must be not_null: %s.%s', table_name, col)
+		end
+		if f.maxlen and not f.padded then
+			assertf(f.nozero, 'varsize key col must be nozero: %s.%s', table_name, col)
+		end
 		add(key_fields, f)
 		f.key_index = #key_fields
 		if schema.pk.desc then
@@ -267,7 +269,9 @@ function Db:layout_table_schema(schema)
 	--store u32 and u64 simple keys in little-endian and use fast comparator.
 	if #key_fields == 1 then
 		local f = key_fields[1]
-		if not f.descending and (f.mdbx_type == 'u32' or f.mdbx_type == 'u64') then
+		if f.not_null and not f.descending
+			and (f.mdbx_type == 'u32' or f.mdbx_type == 'u64')
+		then
 			schema.int_key = f.mdbx_type
 		end
 	end
@@ -291,6 +295,9 @@ function Db:layout_table_schema(schema)
 		local max_rec_size = 0
 		for _,f in ipairs(fields) do
 			local maxlen = f.maxlen and f.maxlen + (f.padded and 0 or 1) or 1
+			if is_key and not f.not_null then
+				maxlen = maxlen + 1
+			end
 			max_rec_size = max_rec_size + maxlen * f.elem_size
 		end
 
@@ -341,7 +348,11 @@ function Db:layout_table_schema(schema)
 				f.offset = cur_offset
 			end
 			if kv_index <= fixsize_n then --advance current offset while size is known.
-				cur_offset = cur_offset + f.elem_size * (f.maxlen or 1)
+				local maxlen = f.maxlen or 1
+				if is_key and not f.not_null then
+					maxlen = maxlen + 1
+				end
+				cur_offset = cur_offset + f.elem_size * maxlen
 			end
 			if is_val and not f.fixed_offset then
 				local dot_index = kv_index - fixsize_n - 2 --field's index in d.o.t.
@@ -455,6 +466,7 @@ function Db:compile_table_schema(schema)
 			sc.len = f.maxlen or 1
 			sc.fixed_size = f.maxlen and not f.padded and 0 or 1
 			sc.descending = f.descending and 1 or 0
+			sc.nullable = f.not_null and 0 or 1
 			sc.elem_size_shift = log2(f.elem_size)
 			sc.fixed_offset = f.fixed_offset and 1 or 0
 			sc.offset = f.offset or 0
@@ -801,8 +813,10 @@ function Db:index_schema(val_schema, cols)
 	for _,col in ipairs(cols) do
 		local f = assertf(val_schema.fields[col],
 			'index: %s unknown field %s.%s', ix_name, val_schema.name, col)
-		assertf(f.not_null, 'index %s col must be non_null: %s.%s',
-			ix_name, val_schema.name, col)
+		if cols.is_unique then
+			assertf(f.not_null, 'unique index %s col must be not_null: %s.%s',
+				ix_name, val_schema.name, col)
+		end
 		local f = {
 			col = f.col,
 			mdbx_type = f.mdbx_type,
@@ -1085,9 +1099,12 @@ function encode_key(self, schema, event, autoinc_f, rec, rec_buf_sz, cols, as, .
 			autoinc_v = val
 		end
 		if val == nil then
-			self:check_col(event, schema.name, f.col, false, 'null_key')
-		end
-		if encode_int_key then
+			if schema.is_index and schema.dup_keys and not f.not_null then
+				C.schema_key_add(schema._st, ki-1, rec, rec_buf_sz, -1, pp)
+			else
+				self:check_col(event, schema.name, f.col, false, 'null_key')
+			end
+		elseif encode_int_key then
 			return encode_int_key(rec, rec_buf_sz, val), autoinc_v
 		else
 			local len = f.get_val_len(val)
