@@ -295,10 +295,10 @@ function Db:layout_table_schema(schema)
 		local max_rec_size = 0
 		for _,f in ipairs(fields) do
 			local maxlen = f.maxlen and f.maxlen + (f.padded and 0 or 1) or 1
-			if is_key and not f.not_null then
-				maxlen = maxlen + 1
-			end
 			max_rec_size = max_rec_size + maxlen * f.elem_size
+			if is_key and not f.not_null then
+				max_rec_size = max_rec_size + 1
+			end
 		end
 
 		if is_key then
@@ -350,7 +350,7 @@ function Db:layout_table_schema(schema)
 			if kv_index <= fixsize_n then --advance current offset while size is known.
 				local maxlen = f.maxlen or 1
 				if is_key and not f.not_null then
-					maxlen = maxlen + 1
+					cur_offset = cur_offset + 1
 				end
 				cur_offset = cur_offset + f.elem_size * maxlen
 			end

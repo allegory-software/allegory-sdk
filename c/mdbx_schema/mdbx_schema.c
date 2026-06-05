@@ -327,19 +327,8 @@ static int scan_end(schema_col* col, void* p, int len, int encoded) {
 	return len;
 }
 
-INLINE int key_null_marker_size(schema_col* col) {
-	return col->nullable ? 1 << col->elem_size_shift : 0;
-}
-
-INLINE void key_set_not_null(schema_col* col, void* p) {
-	memset(p, 0, key_null_marker_size(col));
-	*(u8*)p = 1;
-}
-
 INLINE int key_is_null(schema_col* col, void* p) {
-	if (!col->nullable)
-		return 0;
-	return *(u8*)p == (col->descending ? 0xff : 0);
+	return col->nullable && *(u8*)p == (col->descending ? 0xff : 0);
 }
 
 INLINE int get_dyn_offset(schema_table* tbl, schema_col* col,
@@ -365,14 +354,13 @@ INLINE int get_key_mem_size(schema_table* tbl, schema_col* col,
 	void *p
 ) {
 	int ss = col->elem_size_shift;
-	int marker_size = key_null_marker_size(col);
 	if (col->fixed_size) {
-		return (col->len << ss) + marker_size;
+		return (col->len << ss) + col->nullable;
 	} else if (key_is_null(col, p)) {
-		return marker_size;
+		return col->nullable;
 	} else {
-		return ((scan_end(col, p + marker_size, col->len, 1) + 1) << ss)
-			+ marker_size; // 0-terminated
+		return ((scan_end(col, p + col->nullable, col->len, 1) + 1) << ss)
+			+ col->nullable; // 0-terminated
 	}
 }
 
@@ -407,7 +395,7 @@ INLINE int get_key_len(schema_table* tbl, int col_i, schema_col* col,
 	} else { // varsize key col
 		if (key_is_null(col, p))
 			return -1;
-		return scan_end(col, p + key_null_marker_size(col), col->len, 1);
+		return scan_end(col, p + col->nullable, col->len, 1);
 	}
 }
 
@@ -456,7 +444,7 @@ int schema_get_key(schema_table* tbl, int col_i,
 	}
 	int in_size = in_len << ss;
 	assert(out_size >= in_size);
-	void* in = p + key_null_marker_size(col);
+	void* in = p + col->nullable;
 	*pout = in;
 	if (col->descending) { // invert bits
 		invert_bits(out, in, in_size);
@@ -596,12 +584,11 @@ void schema_key_add(schema_table* tbl, int col_i,
 	schema_col* col = get_key_col(tbl, col_i);
 	int ss = col->elem_size_shift;
 	void* p = *pp;
-	int marker_size = key_null_marker_size(col);
-	void* data = p + marker_size;
+	void* data = p + col->nullable;
 
 	if (val_len == -1) { // null key
 		assert(col->nullable);
-		int mem_size = col->fixed_size ? ((col->len << ss) + marker_size) : marker_size;
+		int mem_size = col->fixed_size ? ((col->len << ss) + col->nullable) : col->nullable;
 		assert(p + mem_size <= rec + rec_buf_size);
 		memset(p, 0, mem_size);
 		if (col->descending)
@@ -618,12 +605,12 @@ void schema_key_add(schema_table* tbl, int col_i,
 
 	// figure out mem_size (size of this value in memory) and check it.
 	int payload_mem_size = col->fixed_size ? col->len << ss : val_size + (1 << ss);
-	int mem_size = payload_mem_size + marker_size;
+	int mem_size = payload_mem_size + col->nullable;
 	assert(p + mem_size <= rec + rec_buf_size);
 
 	if (col->nullable) {
 		memmove(data, p, val_size);
-		key_set_not_null(col, p);
+		*(u8*)p = 1;
 	}
 
 	// zero-pad (fixed_size), or write terminator (varsize).
