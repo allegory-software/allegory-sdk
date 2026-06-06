@@ -87,13 +87,24 @@ local
 mdbx = C
 local MAIN_DBI = 1
 
-local envp = new'MDBX_env*[1]'
-local txnp = new'MDBX_txn*[1]'
-local dbip = new'MDBX_dbi[1]'
-local curp = new'MDBX_cursor*[1]'
-local key = new'MDBX_val'
-local val = new'MDBX_val'
-local seqbuf = u64a(1)
+-- log level -----------------------------------------------------------------
+
+--set libmdbx's runtime log level (process-global). level names:
+--  fatal < error < warn < notice < verbose < debug < trace < extra
+--for levels finer than 'notice', build mdbx with MDBX_DEBUG>0 (now is 0).
+local mdbx_log_levels = {
+	fatal   = C.MDBX_LOG_FATAL  , error = C.MDBX_LOG_ERROR  ,
+	warn    = C.MDBX_LOG_WARN   , notice = C.MDBX_LOG_NOTICE,
+	verbose = C.MDBX_LOG_VERBOSE, debug  = C.MDBX_LOG_DEBUG ,
+	trace   = C.MDBX_LOG_TRACE  , extra  = C.MDBX_LOG_EXTRA ,
+}
+local mdbx_logger_dontchange = ffi.cast('MDBX_debug_func *', -1)
+function mdbx_set_log_level(level)
+	local lvl = mdbx_log_levels[level]
+	assert(lvl, 'invalid mdbx log level: '..tostring(level))
+	C.mdbx_setup_debug(lvl, C.MDBX_DBG_DONTCHANGE, mdbx_logger_dontchange)
+end
+mdbx_set_log_level'warn' --mdbx default is 'notice', needlesly chatty.
 
 -- databases -----------------------------------------------------------------
 
@@ -126,6 +137,7 @@ local mdbx_open_error = {
 	[C.MDBX_BUSY] = 'busy',
 }
 
+local envp = new'MDBX_env*[1]'
 function try_mdbx_open(file, opt)
 	opt = opt or empty
 	local owner = _check_owner(opt.owner)
@@ -227,65 +239,31 @@ function mdbx_delete(file, flags)
 	return assert(Db.tryz(file, 'db_delete', rc))
 end
 
---set libmdbx's runtime log level (process-global). level names:
---  fatal < error < warn < notice < verbose < debug < trace < extra
---for levels finer than 'notice', build mdbx with MDBX_DEBUG>0 (now is 0).
-local mdbx_log_levels = {
-	fatal   = C.MDBX_LOG_FATAL  , error = C.MDBX_LOG_ERROR  ,
-	warn    = C.MDBX_LOG_WARN   , notice = C.MDBX_LOG_NOTICE,
-	verbose = C.MDBX_LOG_VERBOSE, debug  = C.MDBX_LOG_DEBUG ,
-	trace   = C.MDBX_LOG_TRACE  , extra  = C.MDBX_LOG_EXTRA ,
-}
-local mdbx_logger_dontchange = ffi.cast('MDBX_debug_func *', -1)
-function mdbx_set_log_level(level)
-	local lvl = mdbx_log_levels[level]
-	assert(lvl, 'invalid mdbx log level: '..tostring(level))
-	C.mdbx_setup_debug(lvl, C.MDBX_DBG_DONTCHANGE, mdbx_logger_dontchange)
-end
-mdbx_set_log_level'warn' --mdbx default is 'notice', needlesly chatty.
+--dbi cache ------------------------------------------------------------------
 
 --[[
 In mdbx all ops are transactional including table create/rename/drop. DBIs
-however are global with the exception of DBIs of created tables which are
-local to the txn that created them and are automatically discarded on abort
-and promoted to the parent txn on commit and become global on top txn commit.
-Since we don't want to work with DBIs in Lua but only with table names we need
-to keep a table_name->dbi mapping for opened tables. We _could_ not do this
-and open tables every time to get the DBI but 1) we also need to keep a
-dbi->schema mapping, and 2) mdbx_open does some array scans which become
-O(n^2) on repeat ops.
-So we keep the mapping in Lua and we match DBI lifetime semantics by creating
-txn-local dbis/dbim tables when tables are created or renamed. Dropped DBIs
-are invalidated globally and we match that by removing them from both
-txn-level and env-level dbis/dbim.
+however are global with the exception of DBIs of tables opened in sub-txns and
+DBIs of created tables, which are local to the txn that created them and are
+automatically discarded on abort and promoted to the parent txn on commit and
+become global on top txn commit. Since we don't want to work with DBIs in Lua
+but only with table names we need to keep a table_name->dbi mapping for opened
+tables. We _could_ not do this and open tables every time to get the DBI but
+1) we also need to keep metadata (schema) for each DBI, and 2) mdbx_open does
+some array scans which become O(n^2) on repeat ops. So we keep the mapping
+in Lua and we match DBI lifetime semantics by creating txn-local dbis/dbim
+tables when tables are opened in a sub-txn or created or renamed (in any txn).
+Dropped DBIs are invalidated globally and we match that by removing them from
+both txn-level and env-level dbis/dbim.
 ]]
+
 local dbis_freelist = {}
 local dbim_freelist = {}
-
-local function check_txn(self)
-	assert(self.txn, 'not in transaction')
-end
-
-local function check_wtxn(self)
-	assert(self.txn and self.txn ~= self._ro_txn, 'not in write transaction')
-end
-
-do
-local dbi_flags = new'unsigned[1]'
-local dbi_state = new'unsigned[1]'
-function Db:try_dbi_flags(tab)
-	local dbi = isnum(tab) and tab or self:dbi(tab)
-	if not dbi then return nil, 'table_not_found' end
-	self:checkz('t_flags', C.mdbx_dbi_flags_ex(self.txn, dbi, dbi_flags, dbi_state))
-	return dbi_state[0], dbi_flags[0]
-end
-end
 
 local function local_dbis(self)
 	local dbis = self.dbis
 	local dbim = self.dbim
 	local txn = self.txn
-	check_txn(self)
 	if getmetatable(dbis).txn ~= txn then --not local, create
 		local parent_dbis = dbis
 		local parent_dbim = dbim
@@ -330,6 +308,15 @@ end
 
 -- transactions --------------------------------------------------------------
 
+local function check_txn(self)
+	assert(self.txn, 'not in transaction')
+end
+
+local function check_wtxn(self)
+	assert(self.txn and self.txn ~= self._ro_txn, 'not in write transaction')
+end
+
+local txnp = new'MDBX_txn*[1]'
 function Db:begin(mode)
 	assert(self.env, 'closed')
 	if not mode or mode == 'r' then
@@ -415,6 +402,7 @@ function Db:table_name(tab)
 	return isstr(tab) and tab or self.dbis[tab]
 end
 
+local dbip = new'MDBX_dbi[1]'
 function Db:try_open_table(name, mode, schema, flags)
 	assert(isstr(name))
 	local create_flag = mode == 'w' or mode == 'c'
@@ -433,8 +421,10 @@ function Db:try_open_table(name, mode, schema, flags)
 	self:checkz('t_open', C.mdbx_dbi_open(self.txn,
 		name or nil, created and bor(flags, C.MDBX_CREATE) or flags, dbip))
 	local dbi = dbip[0]
-	--created dbis are local to the txn so we must create local dbis/dbim maps.
-	local dbis = created and local_dbis(self) or self.env_dbis
+	--created dbis, and dbis opened in a nested txn, are local to the txn so we
+	--must create local dbis/dbim maps. only a top-level open is env-scoped.
+	local nested = ptr(self.txn._parent) ~= nil
+	local dbis = (created or nested) and local_dbis(self) or self.env_dbis
 	dbis[name] = dbi
 	dbis[dbi] = name
 	if mode == 'c' and not created then
@@ -454,13 +444,13 @@ end
 function Db:dbi(tab, mode)
 	if isnum(tab) then
 		if mode == 'c' then self:clear_table(tab) end
-		return tab
+		return tab, self.dbim[tab]
 	end --tab is dbi
 	assert(tab, 'table expected')
 	local dbi = self.dbis[tab]
 	if dbi then
 		if mode == 'c' then self:clear_table(dbi) end
-		return dbi, self.dbim[dbi], tab
+		return dbi, self.dbim[dbi]
 	end
 	local schema = self.schema and self.schema.tables[tab]
 	local created
@@ -472,14 +462,15 @@ function Db:dbi(tab, mode)
 	if not dbi then
 		return nil, created
 	else
-		return dbi, schema, tab
+		return dbi, schema
 	end
 end
 
-function Db:dbi_schema(tab, mode)
-	local dbi, schema, name = self:dbi(tab, mode)
-	if dbi then assertf(schema, 'no schema for table: %s', name) end
-	return dbi, schema
+function Db:localize_dbi(tab, mode)
+	local dbi, inherited = self:dbi(tab, mode)
+	if not dbi then return nil, inherited end
+	local_dbis(self)
+	return dbi, rawget(self.dbim, dbi), inherited
 end
 
 function Db:try_rename_table(tab, new_table_name)
@@ -575,7 +566,21 @@ function Db:table_entries(tab)
 	return num(self:table_stat(tab).entries)
 end
 
+do
+local dbi_flags = new'unsigned[1]'
+local dbi_state = new'unsigned[1]'
+function Db:try_dbi_flags(tab)
+	local dbi = isnum(tab) and tab or self:dbi(tab)
+	if not dbi then return nil, 'table_not_found' end
+	self:checkz('t_flags', C.mdbx_dbi_flags_ex(self.txn, dbi, dbi_flags, dbi_state))
+	return dbi_state[0], dbi_flags[0]
+end
+end
+
 -- table data ----------------------------------------------------------------
+
+local key = new'MDBX_val'
+local val = new'MDBX_val'
 
 function Db:get_raw(tab, k, k_sz)
 	check_txn(self)
@@ -633,6 +638,7 @@ function Db:try_del_raw(tab, k, k_sz, v, v_sz)
 	return self:tryz('del', C.mdbx_del(self.txn, dbi, key, vp))
 end
 
+local seqbuf = u64a(1)
 function Db:gen_id(tab)
 	check_wtxn(self)
 	local dbi = isnum(tab) and tab or self:dbi(tab, 'w')
@@ -669,6 +675,7 @@ local Cur = {}; mdbx_cursor = Cur
 
 --NOTE: cursors created with db:cursor() are reused, so never use a cursor
 --beyond transaction boundaries or you might end up using an unrelated cursor.
+local curp = new'MDBX_cursor*[1]'
 function Db:try_cursor(tab, mode)
 	if mode == 'w' then check_wtxn(self) else check_txn(self) end
 	local dbi = isnum(tab) and tab or self:dbi(tab, mode)
