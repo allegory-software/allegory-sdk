@@ -187,14 +187,17 @@ function test.nested_created_table_cache_discarded_on_parent_abort()
 	end)
 end
 
-function test.rename_created_table_in_top_level_txn_asserts()
-	with_db('rename_created_table_in_top_level_txn_asserts', function(db)
+function test.rename_created_table_in_top_level_txn()
+	with_db('rename_created_table_in_top_level_txn', function(db)
 		db:begin'w'
 		put_string(db, 't', 'k', 'v')
-		assert_plain_error(function()
-			db:try_rename_table('t', 'u')
-		end, 'created in current transaction')
-		db:abort()
+		assert(db:try_rename_table('t', 'u')) --created in this txn, renamed in it
+		db:commit()
+		db:begin()
+		assert(not db:table_exists't' and db:table_exists'u')
+		local ok, v, v_sz = db:get_raw('u', 'k', 1)
+		assert(ok and ffi.string(v, v_sz) == 'v')
+		db:commit()
 	end)
 end
 
@@ -234,46 +237,71 @@ function test.rename_abort_reopens_old_table()
 	end)
 end
 
-function test.rename_inherited_table_in_nested_txn_asserts()
-	with_db('rename_inherited_table_in_nested_txn_asserts', function(db)
+function test.rename_inherited_table_in_nested_txn()
+	with_db('rename_inherited_table_in_nested_txn', function(db)
 		db:begin'w'
 		put_string(db, 't', 'k', 'v')
 		db:commit()
-		db:begin'w'
-		db:begin'w'
-		assert_plain_error(function()
-			db:try_rename_table('t', 'u')
-		end, 'rename table in nested transaction')
-		db:abort()
-		db:abort()
+		db:begin'w'  --outer
+		db:begin'w'  --nested
+		assert(db:try_rename_table('t', 'u'))
+		db:commit()  --nested
+		db:commit()  --outer
+		db:begin()
+		assert(not db:table_exists't' and db:table_exists'u')
+		local ok, v, v_sz = db:get_raw('u', 'k', 1)
+		assert(ok and ffi.string(v, v_sz) == 'v')
+		db:commit()
 	end)
 end
 
-function test.rename_created_table_in_nested_txn_asserts()
-	with_db('rename_created_table_in_nested_txn_asserts', function(db)
-		db:begin'w'
-		db:begin'w'
-		put_string(db, 't', 'k', 'v')
-		assert_plain_error(function()
-			db:try_rename_table('t', 'u')
-		end, 'rename table in nested transaction')
-		db:abort()
-		db:abort()
-	end)
-end
-
-function test.drop_table_in_nested_txn_asserts()
-	with_db('drop_table_in_nested_txn_asserts', function(db)
+--nested rename rolls back with the nested txn (outer keeps the old table).
+function test.rename_in_nested_txn_abort()
+	with_db('rename_in_nested_txn_abort', function(db)
 		db:begin'w'
 		put_string(db, 't', 'k', 'v')
 		db:commit()
+		db:begin'w'  --outer
+		db:begin'w'  --nested
+		assert(db:try_rename_table('t', 'u'))
+		db:abort()   --nested discarded
+		assert(db:table_exists't' and not db:table_exists'u', 'nested rename not rolled back')
+		db:commit()  --outer
+		db:begin()
+		assert(db:table_exists't' and not db:table_exists'u')
+		db:commit()
+	end)
+end
+
+function test.rename_created_table_in_nested_txn()
+	with_db('rename_created_table_in_nested_txn', function(db)
+		db:begin'w'  --outer
+		db:begin'w'  --nested
+		put_string(db, 't', 'k', 'v')
+		assert(db:try_rename_table('t', 'u'))
+		db:commit()  --nested
+		db:commit()  --outer
+		db:begin()
+		assert(not db:table_exists't' and db:table_exists'u')
+		local ok, v, v_sz = db:get_raw('u', 'k', 1)
+		assert(ok and ffi.string(v, v_sz) == 'v')
+		db:commit()
+	end)
+end
+
+function test.drop_table_in_nested_txn()
+	with_db('drop_table_in_nested_txn', function(db)
 		db:begin'w'
-		db:begin'w'
-		assert_plain_error(function()
-			db:try_drop_table't'
-		end, 'drop table in nested transaction')
-		db:abort()
-		db:abort()
+		put_string(db, 't', 'k', 'v')
+		db:commit()
+		db:begin'w'  --outer
+		db:begin'w'  --nested
+		assert(db:try_drop_table't')
+		db:commit()  --nested
+		db:commit()  --outer
+		db:begin()
+		assert(not db:table_exists't')
+		db:commit()
 	end)
 end
 

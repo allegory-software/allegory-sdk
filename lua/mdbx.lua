@@ -18,12 +18,6 @@ MDBX->LUA
    to implement structured CRUD ops and have those be logged.
  * use DBI 1 to read the main table.
 
-LIMITATIONS
-
-	* drop_table() is allowed only in top-level write transactions.
-	* rename_table() is allowed only in top-level write transactions and only
-	  for tables that existed before the current write transaction began.
-
 DATABASES
 	[try_]mdbx_open(file_path, [opt]) -> db,[err],created   open/create a database
 		opt.max_readers    64                max read txns across all processes
@@ -32,7 +26,7 @@ DATABASES
 		opt.file_mode      0660
 		opt.flags                            see MDBX_env_flags
 	db:[try_]close()                        close db (idempotent)
-	db:closed() -> t|f                     check if db is closed
+	db:closed() -> t|f                      check if db is closed
 	db:max_key_size() -> n                  get max key size in bytes
 	mdbx_delete(file_path, [flags]) -> true | false,'not_found'   delete a database
 TRANSACTIONS
@@ -41,18 +35,17 @@ TRANSACTIONS
 	db:abort()                              abort transaction
 	db.txn                                  current txn (or nil)
 	db:atomic(['w',], fn, ...) -> ...       run fn in transaction
-		fn(...) -> ...
 TABLES
-	dbi 1                                  main table
-	db:dbi(table_name|dbi, ['r'|'w'|'c']) -> dbi  open/create table
-	db:[try_]table_stat(table_name|dbi) -> MDBX_stat    get storage metrics on table (shared buffer)
-	db:[try_]rename_table (table_name|dbi, new_table_name)  rename table (top-level txn; committed tables only)
-	db:[try_]drop_table   (table_name|dbi)  drop table (top-level txn only)
-	db:[try_]clear_table  (table_name|dbi)  delete all records
-	db:create_table       (table_name, ...) -> dbi, created  open or recreate (clear) table
-	db:each_table() -> iter() -> table_name
-	db:table_count() -> n
-	db:table_exists(table_name) -> t|f
+	db:dbi(table_name|dbi, ['r'|'w'|'c']) -> dbi              open/create table
+	db:[try_]rename_table (table_name|dbi, new_table_name)    rename table
+	db:[try_]drop_table   (table_name|dbi)                    drop table
+	db:[try_]clear_table  (table_name|dbi)                    delete all records
+	db:create_table       (table_name, ...) -> dbi, created   open or recreate (clear) table
+	db:each_table() -> iter() -> table_name                   iterate table names
+	db:table_count() -> n                                     get number of tables
+	db:table_exists(table_name) -> t|f                        check if table exists
+	db:[try_]table_stat(table_name|dbi) -> MDBX_stat          get table stats (shared buffer)
+	db:try_dbi_flags(table_name|dbi) -> dbi_state, dbi_flags  get DBI state and flags
 CRUD
 	db:get_raw         (table_name|dbi, k, k_sz) -> true, v, v_sz | false,err
 	db:try_put_raw     (table_name|dbi, k, k_sz, v, v_sz, [flags]) -> true | false,'exists',cur_v,cur_v_sz | false,'not_found'
@@ -74,6 +67,8 @@ CURSORS
 	cur:put_raw (k, k_sz, v, v_sz, [flags]) -> true | false,'exists',cur_v,cur_v_sz | false,'not_found'
 	cur:set_raw (v, v_sz) -> true | false,'not_found'
 	cur:del     ([flags])
+DEBUG
+	mdbx_set_log_level(level)              set MDBX log level (now is 'warn')
 
 ]]
 
@@ -232,6 +227,23 @@ function mdbx_delete(file, flags)
 	return assert(Db.tryz(file, 'db_delete', rc))
 end
 
+--set libmdbx's runtime log level (process-global). level names:
+--  fatal < error < warn < notice < verbose < debug < trace < extra
+--for levels finer than 'notice', build mdbx with MDBX_DEBUG>0 (now is 0).
+local mdbx_log_levels = {
+	fatal   = C.MDBX_LOG_FATAL  , error = C.MDBX_LOG_ERROR  ,
+	warn    = C.MDBX_LOG_WARN   , notice = C.MDBX_LOG_NOTICE,
+	verbose = C.MDBX_LOG_VERBOSE, debug  = C.MDBX_LOG_DEBUG ,
+	trace   = C.MDBX_LOG_TRACE  , extra  = C.MDBX_LOG_EXTRA ,
+}
+local mdbx_logger_dontchange = ffi.cast('MDBX_debug_func *', -1)
+function mdbx_set_log_level(level)
+	local lvl = mdbx_log_levels[level]
+	assert(lvl, 'invalid mdbx log level: '..tostring(level))
+	C.mdbx_setup_debug(lvl, C.MDBX_DBG_DONTCHANGE, mdbx_logger_dontchange)
+end
+mdbx_set_log_level'warn' --mdbx default is 'notice', needlesly chatty.
+
 --[[
 In mdbx all ops are transactional including table create/rename/drop. DBIs
 however are global with the exception of DBIs of created tables which are
@@ -261,7 +273,7 @@ end
 do
 local dbi_flags = new'unsigned[1]'
 local dbi_state = new'unsigned[1]'
-function Db:table_state(tab)
+function Db:try_dbi_flags(tab)
 	local dbi = isnum(tab) and tab or self:dbi(tab)
 	if not dbi then return nil, 'table_not_found' end
 	self:checkz('t_flags', C.mdbx_dbi_flags_ex(self.txn, dbi, dbi_flags, dbi_state))
@@ -414,15 +426,12 @@ function Db:try_open_table(name, mode, schema, flags)
 	end
 	assert(not dbi)
 	flags = flags or 0
-	local created = false
-	local ok, err = self:tryz('t_open',
-		C.mdbx_dbi_open(self.txn, name or nil, flags, dbip))
-	if not ok then
-		if not create_flag then return nil, err end
-		self:checkz('t_open',
-			C.mdbx_dbi_open(self.txn, name or nil, bor(flags, C.MDBX_CREATE), dbip))
-		created = true
+	local created = not self:table_exists(name)
+	if created and not create_flag then
+		return nil, 'not_found'
 	end
+	self:checkz('t_open', C.mdbx_dbi_open(self.txn,
+		name or nil, created and bor(flags, C.MDBX_CREATE) or flags, dbip))
 	local dbi = dbip[0]
 	--created dbis are local to the txn so we must create local dbis/dbim maps.
 	local dbis = created and local_dbis(self) or self.env_dbis
@@ -480,9 +489,6 @@ function Db:try_rename_table(tab, new_table_name)
 	local dbi = isnum(tab) and tab or self:dbi(tab)
 	local old_table_name = isnum(tab) and (dbi and self.dbis[dbi] or '?') or tab
 	if not dbi then return false, 'not_found', old_table_name end
-	assert(not ptr(self.txn._parent), 'cannot rename table in nested transaction')
-	assert(band(self:table_state(dbi), C.MDBX_DBI_CREAT) == 0,
-		'cannot rename table created in current transaction')
 	local ok, err = self:tryz('t_rename',
 		C.mdbx_dbi_rename(self.txn, dbi, new_table_name))
 	if not ok then return false, err, old_table_name end
@@ -511,7 +517,6 @@ end
 function Db:try_drop_table(tab)
 	assert(tab)
 	check_wtxn(self)
-	assert(not ptr(self.txn._parent), 'cannot drop table in nested transaction')
 	local dbi = isnum(tab) and tab or self:dbi(tab)
 	if not dbi then return false, 'not_found' end
 	self:checkz('t_drop', C.mdbx_drop(self.txn, dbi, 1))
@@ -551,7 +556,6 @@ function Db:create_table(tbl_name, ...)
 	return self:open_table(tbl_name, 'c', ...)
 end
 
--- Returned by table_stat(); overwritten by the next table_stat() call.
 local stat = new'MDBX_stat'
 local stat_sz = sizeof(stat)
 function Db:try_table_stat(tab)
@@ -644,7 +648,7 @@ function Db:try_move_key_raw(tab, k1, k1_sz, k2, k2_sz)
 	check_wtxn(self)
 	local dbi = isnum(tab) and tab or self:dbi(tab)
 	if not dbi then return false, 'table_not_found' end
-	local _, flags = self:table_state(dbi)
+	local _, flags = self:try_dbi_flags(dbi)
 	assert(band(flags, C.MDBX_DUPSORT) == 0, 'cannot move key in DUPSORT table')
 	local ok, v, v_sz = self:get_raw(dbi, k1, k1_sz)
 	if not ok then
