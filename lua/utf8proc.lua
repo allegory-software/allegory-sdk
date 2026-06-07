@@ -273,29 +273,3 @@ utf8_NFC             = C.utf8proc_NFC
 utf8_NFKD            = C.utf8proc_NFKD
 utf8_NFKC            = C.utf8proc_NFKC
 utf8_NFKC_Casefold   = C.utf8proc_NFKC_Casefold
-
---args:   out_sz = nil          allocate out
---args:   out_sz = false        don't allocate, return min out_sz
---return: out = nil, sz < 0     failed, sz is UTF8_ERROR_*
---return: out = nil, sz > 0     buffer to small, sz is min out_sz
-function utf8_map(s, sz, opt, out, out_sz)
-	sz = sz or #s
-	local len --length in codepoints
-	if not out_sz then
-		len = utf8_decompose(s, sz, nil, 0, opt)
-		if len < 0 then return nil, len end --error
-		local min_out_sz = 4 * len + 1
-		if out_sz == false then return nil, min_out_sz end --out_sz requested
-		out_sz = min_out_sz
-		out = u8a(out_sz)
-	end
-	local out_len = shr(out_sz, 2)
-	local len = utf8_decompose(s, sz, out, out_len, opt)
-	if len < 0 then return nil, len end --error
-	local min_out_sz = 4 * len + 1
-	if len > out_len then return nil, min_out_sz end --buffer too small
-	if out_sz < min_out_sz then return nil, min_out_sz end
-	local sz = utf8_reencode(out, len, opt)
-	if sz < 0 then return nil, sz end --error
-	return out, sz
-end
