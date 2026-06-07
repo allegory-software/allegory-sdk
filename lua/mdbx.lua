@@ -171,7 +171,7 @@ function try_mdbx_open(file, opt)
 		file = file,
 		env = env,
 		env_dbis = setmetatable({}, {}), --{dbi->name, name->dbi}
-		env_dbim = setmetatable({}, {}), --{dbi->schema}, see mdbx_schema.lua
+		env_meta = setmetatable({}, {}), --{name->schema}, see mdbx_schema.lua
 		readonly = opt.readonly,
 		_ro_txn = nil,
 		_cursors = {},
@@ -179,7 +179,7 @@ function try_mdbx_open(file, opt)
 	}))
 	self.env_dbis[MAIN_DBI] = '<main>'
 	self.dbis = self.env_dbis
-	self.dbim = self.env_dbim
+	self.meta = self.env_meta
 	live(self, file)
 	log(create and 'note' or '', 'db', create and 'db_create' or 'db_open', '%s', file)
 	return self, nil, create
@@ -212,7 +212,7 @@ function Db:close()
 	self:checkz('db_close', C.mdbx_env_close_ex(self.env, 0))
 	live(self, nil)
 	self.dbis = nil
-	self.dbim = nil
+	self.meta = nil
 	self.env = nil
 	_disown(self)
 end
@@ -242,67 +242,82 @@ end
 --dbi cache ------------------------------------------------------------------
 
 --[[
-In mdbx all ops are transactional including table create/rename/drop. DBIs
-however are global with the exception of DBIs of tables opened in sub-txns and
-DBIs of created tables, which are local to the txn that created them and are
-automatically discarded on abort and promoted to the parent txn on commit and
-become global on top txn commit. Since we don't want to work with DBIs in Lua
-but only with table names we need to keep a table_name->dbi mapping for opened
-tables. We _could_ not do this and open tables every time to get the DBI but
-1) we also need to keep metadata (schema) for each DBI, and 2) mdbx_open does
-some array scans which become O(n^2) on repeat ops. So we keep the mapping
-in Lua and we match DBI lifetime semantics by creating txn-local dbis/dbim
-tables when tables are opened in a sub-txn or created or renamed (in any txn).
-Dropped DBIs are invalidated globally and we match that by removing them from
-both txn-level and env-level dbis/dbim.
+In mdbx all ops are transactional including table create/rename/drop.
+
+DBIs however are weird:
+
+ - DBIs of tables opened in a top-level txn are GLOBAL (env-scoped).
+ - DBIs of tables opened in a nested txn are LOCAL to that txn.
+ - DBIs of created tables are LOCAL to the txn in which they were created.
+ - LOCAL DBIs are automatically discarded on abort and promoted to the parent
+   txn on commit and become GLOBAL when top txn is committed.
+ - DBIs are lost immediately from all transaction levels on drop and rename.
+
+Since we don't want to work with DBIs in Lua but only with table names we need
+to keep a table_name->dbi mapping for opened tables. We _could_ not do this
+and open tables every time to get the DBI but 1) we also need to keep metadata
+(schema) for each table, and 2) mdbx_open does some array scans which become
+O(n^2) on repeat ops. So we keep the mapping in Lua. meta is keyed by table
+name so that we can recover the schema when the DBI is lost.
 ]]
 
 local dbis_freelist = {}
-local dbim_freelist = {}
+local meta_freelist = {}
 
 local function local_dbis(self)
 	local dbis = self.dbis
-	local dbim = self.dbim
+	local meta = self.meta
 	local txn = self.txn
 	if getmetatable(dbis).txn ~= txn then --not local, create
 		local parent_dbis = dbis
-		local parent_dbim = dbim
+		local parent_meta = meta
 		dbis = pop(dbis_freelist) or setmetatable({}, {})
-		dbim = pop(dbim_freelist) or setmetatable({}, {})
+		meta = pop(meta_freelist) or setmetatable({}, {})
 		getmetatable(dbis).__index = parent_dbis
-		getmetatable(dbim).__index = parent_dbim
+		getmetatable(meta).__index = parent_meta
 		getmetatable(dbis).txn = txn
 		self.dbis = dbis
-		self.dbim = dbim
+		self.meta = meta
 	end
 	return dbis
 end
 
-local function local_dbis_discard(self, commited, parent)
-	if getmetatable(self.dbis).txn == self.txn then --local, (promote and) discard
-		local dbis = self.dbis
-		local dbim = self.dbim
-		local parent_dbis = getmetatable(dbis).__index
-		local parent_dbim = getmetatable(dbim).__index
-		if commited and parent and getmetatable(parent_dbis).txn ~= parent then
-			--enclosing write txn has no local maps yet: hand this layer to it
-			--instead of promoting to env, so a later parent abort discards it.
-			getmetatable(dbis).txn = parent
-			getmetatable(dbim).txn = parent
-			return
-		end
-		if commited then --promote created dbis to parent txn (env if top-level)
-			update(parent_dbis, dbis)
-			update(parent_dbim, dbim)
-		end
-		clear(dbis)
-		clear(dbim)
-		clear(getmetatable(dbis))
-		clear(getmetatable(dbim))
-		push(dbis_freelist, dbis)
-		push(dbim_freelist, dbim)
-		self.dbis = parent_dbis
-		self.dbim = parent_dbim
+local function local_dbis_discard(self, committed, parent)
+	if getmetatable(self.dbis).txn ~= self.txn then --not local, nothing to do.
+		return
+	end
+	--local, (promote and) discard
+	local dbis = self.dbis
+	local meta = self.meta
+	local parent_dbis = getmetatable(dbis).__index
+	local parent_meta = getmetatable(meta).__index
+	if committed and parent and getmetatable(parent_dbis).txn ~= parent then
+		--parent txn has no local maps: hand this layer to it as-is.
+		getmetatable(dbis).txn = parent
+		getmetatable(meta).txn = parent
+		return
+	end
+	if committed then --promote created dbis to parent txn (env if top-level)
+		update(parent_dbis, dbis)
+		update(parent_meta, meta)
+	end
+	clear(dbis)
+	clear(meta)
+	clear(getmetatable(dbis))
+	clear(getmetatable(meta))
+	push(dbis_freelist, dbis)
+	push(meta_freelist, meta)
+	self.dbis = parent_dbis
+	self.meta = parent_meta
+end
+
+--dbi was lost from drop or rename: remove it from all layers.
+local function invalidate_dbi(self, dbi, name)
+	local dbis = self.dbis
+	while dbis do
+		dbis[dbi] = nil
+		dbis[name] = nil
+		dbis = getmetatable(dbis).__index
 	end
 end
 
@@ -422,7 +437,7 @@ function Db:try_open_table(name, mode, schema, flags)
 		name or nil, created and bor(flags, C.MDBX_CREATE) or flags, dbip))
 	local dbi = dbip[0]
 	--created dbis, and dbis opened in a nested txn, are local to the txn so we
-	--must create local dbis/dbim maps. only a top-level open is env-scoped.
+	--must create local dbis/meta maps. only a top-level open is env-scoped.
 	local nested = ptr(self.txn._parent) ~= nil
 	local dbis = (created or nested) and local_dbis(self) or self.env_dbis
 	dbis[name] = dbi
@@ -444,15 +459,18 @@ end
 function Db:dbi(tab, mode)
 	if isnum(tab) then
 		if mode == 'c' then self:clear_table(tab) end
-		return tab, self.dbim[tab]
+		local name = self.dbis[tab]
+		return tab, name and self.meta[name]
 	end --tab is dbi
 	assert(tab, 'table expected')
 	local dbi = self.dbis[tab]
 	if dbi then
 		if mode == 'c' then self:clear_table(dbi) end
-		return dbi, self.dbim[dbi]
+		return dbi, self.meta[tab]
 	end
-	local schema = self.schema and self.schema.tables[tab]
+	--look for schema in self.meta[tab] first because the table might have
+	--been opened before but its DBI was lost, but its schema remained.
+	local schema = self.meta[tab] or self.schema and self.schema.tables[tab]
 	local created
 	if mode == 'w' or mode == 'c' then
 		dbi, created, schema = self:open_table(tab, mode, schema)
@@ -469,8 +487,9 @@ end
 function Db:localize_dbi(tab, mode)
 	local dbi, inherited = self:dbi(tab, mode)
 	if not dbi then return nil, inherited end
+	local name = assert(self:table_name(tab))
 	local_dbis(self)
-	return dbi, rawget(self.dbim, dbi), inherited
+	return dbi, rawget(self.meta, name)
 end
 
 function Db:try_rename_table(tab, new_table_name)
@@ -484,18 +503,16 @@ function Db:try_rename_table(tab, new_table_name)
 		C.mdbx_dbi_rename(self.txn, dbi, new_table_name))
 	if not ok then return false, err, old_table_name end
 	--MDBX invalidates the old DBI on rename. Keep the new name/schema txn-local
-	--so commit promotes it and abort discards it, and remove the old env cache
-	--so abort can reopen the restored old table instead of reusing a stale DBI.
-	local schema = self.dbim[dbi]
+	--so commit promotes it and abort discards it. The old name's parent schema
+	--stays cached so abort can recover it with a newly opened DBI.
+	local schema = self.meta[old_table_name]
 	local dbis = local_dbis(self)
-	local dbim = self.dbim
-	dbis[old_table_name] = false
+	local meta = self.meta
+	invalidate_dbi(self, dbi, old_table_name)
 	dbis[dbi] = new_table_name
 	dbis[new_table_name] = dbi
-	dbim[dbi] = schema
-	self.env_dbis[old_table_name] = nil
-	self.env_dbis[dbi] = nil
-	self.env_dbim[dbi] = nil
+	meta[old_table_name] = false
+	meta[new_table_name] = schema or false
 	log('note', 'db', 't_rename', '%s -> %s', old_table_name, new_table_name)
 	return true, nil, old_table_name
 end
@@ -512,13 +529,9 @@ function Db:try_drop_table(tab)
 	if not dbi then return false, 'not_found' end
 	self:checkz('t_drop', C.mdbx_drop(self.txn, dbi, 1))
 	local name = assert(self.dbis[dbi])
-	self.dbis[dbi]  = nil
-	self.dbis[name] = nil
-	self.dbim[dbi] = nil
-	--dropped dbis are discarded globally by mdbx.
-	self.env_dbis[dbi]  = nil
-	self.env_dbis[name] = nil
-	self.env_dbim[dbi] = nil
+	local_dbis(self)
+	invalidate_dbi(self, dbi, name)
+	self.meta[name] = false
 	log('note', 'db', 't_drop', '%s', name)
 	return true
 end
