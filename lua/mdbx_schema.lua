@@ -1,38 +1,37 @@
---go@ plink -t root@m1 sdk/bin/debian12/luajit sdk/tests/mdbx_schema_test.lua
---go@ plink -t root@m1 sdk/bin/debian12/luajit sp2/sp.lua -v install forealz
 --[[
 
 	mdbx_schema: structured data and multi-key indexing for mdbx.
 	Written by Cosmin Apreutsei. Public Domain.
 
 	Data types:
-		- ints: 8, 16, 32, 64 bit, signed/unsigned
-		- floats: 32 and 64 bit
-		- arrays: fixed-size and variable-size
-		- nullable values
+	- ints: 8, 16, 32, 64 bit, signed/unsigned
+	- floats: 32 and 64 bit
+	- arrays: fixed-size and variable-size
 
 	Keys:
-		- composite keys with per-field ascending/descending order
-		- utf-8 ai_ci collation
+	- composite keys with per-field ascending/descending order
+	- utf-8 ai_ci collation
 
 	Limitations:
-		- keys are not nullable
-		- varsize keys are 0-terminated so they are not 8-bit clean!
-		- indexed columns are not nullable and varsize ones are not 8-bit clean!
-		- schema layouting errors are non-recoverable.
+	- only varsize columns with `nozero` (no embedded \0) can be used in indexes.
+	- only columns with `not_null` can be used in primary key and unique indexes.
+	- primary keys are immutable.
+	- utf8_ai_ci can only be used for index keys.
+	- fks: only to pk columns, no "restrict", no "onupdate" (pk is immutable).
+	- schema layouting errors are non-recoverable.
 
 API, extends mdbx.lua MANAGED API
 
-	db:put             (table_name|dbi, [cols], keysvals...)
-	db:[try_]insert    (table_name|dbi, [cols], keysvals...) -> true | false,'exists'
-	db:[try_]update    (table_name|dbi, [cols], keysvals...) -> true | false,'not_found'
-	db:upsert          (table_name|dbi, [cols], keysvals...)
+	db:put              (table_name|dbi, [cols], keysvals...)
+	db:[try_]insert     (table_name|dbi, [cols], keysvals...) -> true | false,'exists'
+	db:[try_]update     (table_name|dbi, [cols], keysvals...) -> true | false,'not_found'
+	db:upsert           (table_name|dbi, [cols], keysvals...)
+	db:is_null          (table_name|dbi, col, keys...) -> is_null, [reason]
+	db:exists           (table_name|dbi, keys...) -> record_exists, table_exists
+	db:[must_]get       (table_name|dbi, [val_cols], keys...) -> vals...
+	db:try_get          (table_name|dbi, [val_cols], keys...) -> true, vals... | false
+	db:[try_]del        (table_name|dbi, keys...) -> true | false,'not_found'
 	db:[try_]put_records(table_name|dbi, [cols, ]{keysvals1,...})
-	db:is_null         (table_name|dbi, col, keys...) -> is_null, [reason]
-	db:exists          (table_name|dbi, keys...) -> record_exists, table_exists
-	db:[must_]get      (table_name|dbi, [val_cols], keys...) -> vals...
-	db:try_get         (table_name|dbi, [val_cols], keys...) -> true, vals... | false
-	db:[try_]del       (table_name|dbi, keys...) -> true | false,err
 
 	cur:{first|last|next|prev|current}([cols]) -> keysvals...
 	cur:[must_]get ([val_cols], keys...) -> vals...
@@ -47,16 +46,6 @@ API, extends mdbx.lua MANAGED API
 		'col1 ...'    |   col1_val,...        |  keycol1_val,..., col1_val,...
 		'[col1 ...]'  |  {col1_val,...}       | {keycol1_val,..., col1_val,...}
 		'{col1 ...}'  |  {col1=col1_val,...}  | {keycol1=keycol1_val,col1=col1_val}
-
-
-TODO:
-	- fixed-size padded array key fields
-	- range lookup cursor
-	- mdbx_env_chk()
-	- table migration:
-		- copy all records to tmp table, delete old table, rename tmp table.
-			- copy existing fields by name, use aka mapping to find old field.
-				- copy using raw pointers into decoded values and encoded values.
 
 ]]
 
@@ -1978,6 +1967,9 @@ function Db:try_put_records(tab, cols, records)
 		cols, records = '[]', cols
 	end
 	local dbi, schema = self:dbi_schema(tab, 'w')
+	assert(not schema.ix_schemas)
+	assert(not schema.fks)
+	assert(not schema.ref_fks)
 	local cols, as = cols_list(cols)
 	cols = cols or schema.cols
 	local k, k_buf_sz = key_rec_buffer(schema.key_fields.max_rec_size)
@@ -2008,7 +2000,7 @@ local db_try_cursor = Db.try_cursor
 function Db:try_cursor(tab, mode)
 	local cur, err = db_try_cursor(self, tab, mode)
 	if not cur then return nil, err end
-	cur.schema = self.dbim[cur:dbi()]
+	cur.schema = self.meta[assert(self.dbis[cur:dbi()])]
 	return cur
 end
 
@@ -2063,6 +2055,7 @@ function Cur:update(val_cols, ...)
 	if not ok then
 		return false, 'not_found'
 	end
+	local kk = cur_k_buffer(k_sz); copy(kk, k, k_sz)
 	--decode the current value, override the given cols, then re-encode.
 	local val_cols = schema.val_cols
 	local t = {}
@@ -2075,13 +2068,18 @@ function Cur:update(val_cols, ...)
 		end
 	end
 	local v_sz = encode_val(self, schema, 'c_update', v, v_buf_sz, val_cols, '{}', t)
+	local db = self.db
+	if schema.fks then
+		--fk.cols may include pk cols; decode key into t (k is still valid pre-write).
+		decode_key(schema, k, k_sz, t, '{}')
+		local ok, err = check_fks(db, schema, schema.cols, '{}', false, t)
+		if not ok then return false, err end
+	end
 	if not schema.ix_schemas then
-		assert(self:set_raw(v, v_sz))
+		assert(self:put_raw(kk, k_sz, v, v_sz, mdbx.MDBX_CURRENT))
 	else
 		--check would-be unique index violations so we can return before updating.
-		--copy k and v0 first: mdbx invalidates get-pointers on the next write.
-		local db = self.db
-		local kk = cur_k_buffer(k_sz); copy(kk, k, k_sz)
+		--copy v0 first: mdbx invalidates get-pointers on the next write.
 		local v0c = cur_v0_buffer(v0_sz); copy(v0c, v0, v0_sz)
 		for _, ix_schema in ipairs(schema.ix_schemas) do
 			if not ix_schema.dup_keys then
@@ -2089,7 +2087,7 @@ function Cur:update(val_cols, ...)
 				if not ok then return false, err end
 			end
 		end
-		assert(self:set_raw(v, v_sz))
+		assert(self:put_raw(kk, k_sz, v, v_sz, mdbx.MDBX_CURRENT))
 		for _, ix_schema in ipairs(schema.ix_schemas) do
 			assert(ix_schema:update(db, kk, k_sz, v, v_sz, v0c, v0_sz))
 		end
@@ -2138,7 +2136,7 @@ end
 
 --schema sync'ing ------------------------------------------------------------
 
-local MS = {engime = 'mdbx'}
+local MS = {engine = 'mdbx'}
 
 function mdbx_schema()
 	return schema.new(update({}, MS))
