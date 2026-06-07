@@ -1,5 +1,3 @@
---go@ plink -t root@m1 sdk/bin/debian12/luajit sdk/tests/mdbx_schema_test.lua
-
 require'mdbx_schema'
 
 local test = setmetatable({}, {__newindex = function(t, k, v)
@@ -57,6 +55,67 @@ end
 local function S(v) --printable form for assert messages.
 	if istab(v) then return '{'..cat(imap(v, tostring), ',')..'}' end
 	return tostring(v)
+end
+
+--schema-graph consistency invariants, checked against the persisted $schema
+--catalog (reloaded fresh). meant to catch DDL that leaves the schema in a
+--half-updated state. invariants:
+--  * catalog <-> $schema: every live table has a $schema row and vice-versa;
+--  * an index table exists iff referenced by its val_table's `ixs` or a `fk.ix`;
+--  * a table's live ix_schemas == its `ixs` names U its fks' `fk.ix` names;
+--  * fk <-> ref_fks are bidirectionally consistent (and ref_table matches).
+local function assert_consistent(db, ctx)
+	ctx = ctx and (ctx..': ') or ''
+	local function E(cond, msg) assert(cond, ctx..msg) end
+	local tables = {} --live tables from the catalog, minus the $schema meta table.
+	for name in db:each_table() do
+		if name ~= '$schema' then tables[name] = true end
+	end
+	if db:table_exists'$schema' then --every $schema row must map to a live table.
+		for _, k, k_sz in db:each_raw'$schema' do
+			local tname = str(k, k_sz)
+			E(tables[tname], '$schema row with no table: '..tname)
+		end
+	end
+	for name in pairs(tables) do
+		local is_ix = name:find('/', 1, true) ~= nil
+		local sch = db:load_table_schema(name)
+		E(sch, 'table with no $schema: '..name)
+		if is_ix then
+			E(sch.is_index, 'index $schema not is_index: '..name)
+			local vt = sch.val_table
+			E(vt and tables[vt], 'index val_table missing: '..name)
+			local v = db:load_table_schema(vt)
+			local ref = v.ixs and v.ixs[name] and true or false
+			if not ref and v.fks then
+				for _, fk in pairs(v.fks) do if fk.ix == name then ref = true; break end end
+			end
+			E(ref, 'orphan index table (no ixs/fk.ix ref): '..name)
+		else
+			local expect = {} --expected live indexes = ixs U fk.ix.
+			if sch.ixs then for n in pairs(sch.ixs) do expect[n] = true end end
+			if sch.fks then for _, fk in pairs(sch.fks) do expect[fk.ix] = true end end
+			for n in pairs(expect) do E(tables[n], 'missing index table: '..n..' (for '..name..')') end
+			local live = {}
+			for _, ix in ipairs(sch.ix_schemas or {}) do live[ix.name] = true end
+			for n in pairs(expect) do E(live[n], 'index not in ix_schemas: '..n) end
+			for n in pairs(live) do E(expect[n], 'extra ix_schema not in ixs/fks: '..n) end
+			if sch.fks then --forward: each fk has a reverse ref on its parent.
+				for fkn, fk in pairs(sch.fks) do
+					local p = db:load_table_schema(fk.ref_table)
+					E(p, 'fk parent missing: '..fk.ref_table..' (fk '..fkn..')')
+					E(p.ref_fks and p.ref_fks[name..'/'..fkn], 'fk has no reverse ref: '..name..'/'..fkn)
+				end
+			end
+			if sch.ref_fks then --back: each reverse ref maps to a live child fk.
+				for key, r in pairs(sch.ref_fks) do
+					local c = db:load_table_schema(r.table)
+					E(c and c.fks and c.fks[r.fk], 'dangling ref_fks: '..key)
+					E(c.fks[r.fk].ref_table == name, 'ref_fks target mismatch: '..key)
+				end
+			end
+		end
+	end
 end
 
 -- numeric keys and values ---------------------------------------------------
@@ -380,7 +439,7 @@ function test.truncation_errors()
 			db:insert('t', '{}', {id = 1, s = 'abcdefgh'})
 		end)
 		assert(not ok)
-		check_err(err, 'insert', 't', 's', 'too_long: 8 > 4')
+		check_err(err, 'insert', 't', 's', 'too_long')
 
 		db:create_table('tk', {
 			name = 'tk',
@@ -394,13 +453,13 @@ function test.truncation_errors()
 			db:insert('tk', '{}', {k = 'abcde', v = 'x'})
 		end)
 		assert(not ok)
-		check_err(err, 'insert', 'tk', 'k', 'too_long: 5 > 4')
+		check_err(err, 'insert', 'tk', 'k', 'too_long')
 		db:insert('tk', '{}', {k = 'abcd', v = 'x'})
 		ok, err = pcall(function()
 			db:get('tk', 'v', 'abcde')
 		end)
 		assert(not ok)
-		check_err(err, 'get', 'tk', 'k', 'too_long: 5 > 4')
+		check_err(err, 'get', 'tk', 'k', 'too_long')
 
 		ok, err = pcall(function()
 			db:insert('tk', '{}', {v = 'x'})
@@ -607,25 +666,28 @@ function test.key_embedded_zero_error()
 	end)
 end
 
---utf8_ai_ci collation is not implemented yet: declaring it must fail fast at
---table creation (compile) with a clear message, not corrupt or crash later.
-function test.ai_ci_collation_not_implemented()
-	with_db('ai_ci_collation_not_implemented', function(db)
+function test.ai_ci_collation()
+	local file = test_file('ai_ci_collation'); cleanup(file)
+	local ok, err = xpcall(function()
+		local db = mdbx_open(file)
 		db:begin'w'
-		local ok, err = pcall(function()
-			db:create_table('t', {
-				name = 't',
-				fields = {
-					{col = 'id', mdbx_type = 'u32', not_null = true},
-					{col = 's' , mdbx_type = 'utf8', maxlen = 16, mdbx_collation = 'utf8_ai_ci'},
-				},
-				pk = {'id'},
-			})
-		end)
-		assert(not ok)
-		assert(tostring(err):find('utf8_ai_ci collation not implemented', 1, true), tostring(err))
-		db:abort()
-	end)
+		--ai_ci unique index: case/accent collision is rejected.
+		db:create_table('u', {name = 'u', fields = {
+			{col = 'id'   , mdbx_type = 'u32', not_null = true},
+			{col = 'email', mdbx_type = 'utf8', maxlen = 32, nozero = true, not_null = true,
+				mdbx_collation = 'utf8_ai_ci'},
+		}, pk = {'id'}})
+		db:add_index('u', {'email', is_unique = true})
+		db:insert('u', '{}', {id = 1, email = 'José@x'})
+		assert(db:try_insert('u', '{}', {id = 2, email = 'JOSE@X'}) == false) --folds equal
+		assert(num((db:must_get('u/u/email', '{}', 'jose@x')).id) == 1) --ai_ci index lookup
+		db:commit(); db:close()
+		--persists across reopen: ai_ci index folding still works.
+		db = mdbx_open(file); db:begin'w'
+		assert(db:try_insert('u', '{}', {id = 3, email = 'JOSÉ@X'}) == false) --folds equal
+		db:commit(); db:close()
+	end, debug.traceback)
+	cleanup(file); assert(ok, err)
 end
 
 -- update / upsert -----------------------------------------------------------
@@ -773,6 +835,30 @@ function test.cursor_update()
 		cur:close()
 		g = db:get('t', '{a b}', 1)
 		assert(num(g.a) == 10 and g.b == 'ZZ', ('%s,%s'):format(S(g.a), S(g.b)))
+		db:commit()
+	end)
+end
+
+function test.update_shrinking_varsize_preserves_key()
+	with_db_reopen('update_shrinking_varsize_preserves_key', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 's' , mdbx_type = 'utf8', maxlen = 8},
+		}, pk = {'id'}})
+		db:insert('t', '{}', {id = 1, s = 'aa'})
+		db:insert('t', '{}', {id = 2, s = 'aa'})
+		db:update('t', '{}', {id = 1, s = 'b'})
+		local cur = db:cursor('t', 'w')
+		assert(cur:try_get(nil, 2))
+		assert(cur:update('s', 'b'))
+		cur:close()
+		db:commit()
+	end, function(db)
+		db:begin'r'
+		assert(db:get('t', 's', 1) == 'b')
+		assert(db:get('t', 's', 2) == 'b')
+		assert(not db:exists('t', 4))
 		db:commit()
 	end)
 end
@@ -1099,6 +1185,268 @@ function test.subtxn_only_for_unique_index()
 	end)
 end
 
+--a later unique-index failure rolls back the row and an earlier non-unique index
+--update, closes the sub-txn, and leaves the outer transaction usable.
+function test.try_put_multi_index_rollback()
+	with_db('try_put_multi_index_rollback', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id'   , mdbx_type = 'u32' , not_null = true},
+				{col = 'cat'  , mdbx_type = 'utf8', maxlen = 8 , nozero = true, not_null = true},
+				{col = 'email', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
+			},
+			pk = {'id'},
+		})
+		local _,_,ix_cat = db:try_add_index('t', {'cat'})
+		local _,_,ix_email = db:try_add_index('t', {'email', is_unique = true})
+		db:insert('t', '{}', {id = 1, cat = 'a', email = 'a@x'})
+		db:insert('t', '{}', {id = 2, cat = 'b', email = 'b@x'})
+		local outer_txn = db.txn
+
+		local ok, err = db:try_update('t', '{}', {id = 2, cat = 'c', email = 'a@x'})
+		assert(ok == false and err == 'exists', ('%s,%s'):format(S(ok), S(err)))
+		assert(db.txn == outer_txn, 'failed update left a sub-txn open')
+		local r = db:get('t', '{cat email}', 2)
+		assert(r.cat == 'b' and r.email == 'b@x', ('%s,%s'):format(S(r.cat), S(r.email)))
+		assert(not db:try_get(ix_cat, nil, 'c'))
+		assert(num((db:must_get(ix_cat, '{}', 'b')).id) == 2)
+		assert(num((db:must_get(ix_email, '{}', 'a@x')).id) == 1)
+		assert(num((db:must_get(ix_email, '{}', 'b@x')).id) == 2)
+
+		db:insert('t', '{}', {id = 3, cat = 'c', email = 'c@x'})
+		assert(db.txn == outer_txn and db:exists('t', 3))
+		db:commit()
+	end)
+end
+
+--unique conflicts are atomic for update, replacement put, and both upsert
+--branches (existing and new rows).
+function test.try_put_unique_conflict_matrix()
+	with_db('try_put_unique_conflict_matrix', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id'   , mdbx_type = 'u32' , not_null = true},
+				{col = 'email', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
+				{col = 'name' , mdbx_type = 'utf8', maxlen = 16},
+			},
+			pk = {'id'},
+		})
+		local _,_,ix = db:try_add_index('t', {'email', is_unique = true})
+		db:insert('t', '{}', {id = 1, email = 'a@x', name = 'A'})
+		db:insert('t', '{}', {id = 2, email = 'b@x', name = 'B'})
+
+		local function assert_unchanged()
+			local r = db:get('t', '{email name}', 2)
+			assert(r.email == 'b@x' and r.name == 'B', ('%s,%s'):format(S(r.email), S(r.name)))
+			assert(num((db:must_get(ix, '{}', 'a@x')).id) == 1)
+			assert(num((db:must_get(ix, '{}', 'b@x')).id) == 2)
+		end
+
+		local ok, err = db:try_update('t', '{}', {id = 2, email = 'a@x', name = 'U'})
+		assert(ok == false and err == 'exists')
+		assert_unchanged()
+
+		ok, err = db:try_put('t', '{}', {id = 2, email = 'a@x', name = 'P'})
+		assert(ok == false and err == 'exists')
+		assert_unchanged()
+
+		ok = pcall(db.upsert, db, 't', '{}', {id = 2, email = 'a@x', name = 'UE'})
+		assert(not ok)
+		assert_unchanged()
+
+		ok = pcall(db.upsert, db, 't', '{}', {id = 3, email = 'a@x', name = 'UN'})
+		assert(not ok and not db:exists('t', 3))
+		assert_unchanged()
+		db:commit()
+	end)
+end
+
+--put replaces an indexed, fk-constrained row and maintains every index; a
+--replacement with an invalid fk is rejected without changing row or indexes.
+function test.try_put_indexes_and_fks()
+	with_db('try_put_indexes_and_fks', function(db)
+		db:begin'w'
+		db:create_table('parent', {
+			name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}},
+			pk = {'id'},
+		})
+		db:create_table('child', {
+			name = 'child',
+			fields = {
+				{col = 'id'   , mdbx_type = 'u32' , not_null = true},
+				{col = 'pid'  , mdbx_type = 'u32' , not_null = true},
+				{col = 'cat'  , mdbx_type = 'utf8', maxlen = 8 , nozero = true, not_null = true},
+				{col = 'email', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
+				{col = 'name' , mdbx_type = 'utf8', maxlen = 16},
+			},
+			pk = {'id'},
+		})
+		local _,_,ix_cat = db:try_add_index('child', {'cat'})
+		local _,_,ix_email = db:try_add_index('child', {'email', is_unique = true})
+		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		local ix_pid = 'child/i/pid'
+		db:insert('parent', '{}', {id = 1})
+		db:insert('parent', '{}', {id = 2})
+		db:insert('child', '{}', {id = 10, pid = 1, cat = 'a', email = 'a@x', name = 'A'})
+
+		assert(db:try_put('child', '{}', {id = 10, pid = 2, cat = 'b', email = 'b@x'}))
+		local r = db:get('child', '{pid cat email name}', 10)
+		assert(num(r.pid) == 2 and r.cat == 'b' and r.email == 'b@x' and r.name == nil)
+		assert(not db:try_get(ix_pid, nil, 1) and num((db:must_get(ix_pid, '{}', 2)).id) == 10)
+		assert(not db:try_get(ix_cat, nil, 'a') and num((db:must_get(ix_cat, '{}', 'b')).id) == 10)
+		assert(not db:try_get(ix_email, nil, 'a@x')
+			and num((db:must_get(ix_email, '{}', 'b@x')).id) == 10)
+
+		local ok, err = db:try_put('child', '{}',
+			{id = 10, pid = 99, cat = 'c', email = 'c@x', name = 'C'})
+		assert(ok == false and err:find('fk', 1, true), ('%s,%s'):format(S(ok), S(err)))
+		r = db:get('child', '{pid cat email name}', 10)
+		assert(num(r.pid) == 2 and r.cat == 'b' and r.email == 'b@x' and r.name == nil)
+		assert(not db:try_get(ix_pid, nil, 99) and num((db:must_get(ix_pid, '{}', 2)).id) == 10)
+		assert(not db:try_get(ix_cat, nil, 'c') and num((db:must_get(ix_cat, '{}', 'b')).id) == 10)
+		assert(not db:try_get(ix_email, nil, 'c@x')
+			and num((db:must_get(ix_email, '{}', 'b@x')).id) == 10)
+		db:commit()
+	end)
+end
+
+--updating only a non-indexed value takes the unchanged-key path for every index:
+--the row changes but no index record is deleted or inserted.
+function test.try_put_unchanged_index_keys()
+	with_db('try_put_unchanged_index_keys', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id'   , mdbx_type = 'u32' , not_null = true},
+				{col = 'cat'  , mdbx_type = 'utf8', maxlen = 8 , nozero = true, not_null = true},
+				{col = 'email', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
+				{col = 'name' , mdbx_type = 'utf8', maxlen = 16},
+			},
+			pk = {'id'},
+		})
+		local _,_,ix_cat = db:try_add_index('t', {'cat'})
+		local _,_,ix_email = db:try_add_index('t', {'email', is_unique = true})
+		db:insert('t', '{}', {id = 1, cat = 'a', email = 'a@x', name = 'A'})
+		local cat_dbi = db:dbi(ix_cat)
+		local email_dbi = db:dbi(ix_email)
+		local index_writes = 0
+		local try_del_raw = db.try_del_raw
+		local try_put_raw = db.try_put_raw
+		db.try_del_raw = function(self, tab, ...)
+			if tab == cat_dbi or tab == email_dbi then index_writes = index_writes + 1 end
+			return try_del_raw(self, tab, ...)
+		end
+		db.try_put_raw = function(self, tab, ...)
+			if tab == cat_dbi or tab == email_dbi then index_writes = index_writes + 1 end
+			return try_put_raw(self, tab, ...)
+		end
+		db:update('t', '{}', {id = 1, name = 'AA'})
+		db.try_del_raw = nil
+		db.try_put_raw = nil
+
+		assert(index_writes == 0, index_writes)
+		assert(db:get('t', 'name', 1) == 'AA')
+		assert(num((db:must_get(ix_cat, '{}', 'a')).id) == 1)
+		assert(num((db:must_get(ix_email, '{}', 'a@x')).id) == 1)
+		db:commit()
+	end)
+end
+
+--slow-path early exits on a uniquely-indexed table close their sub-txn and
+--leave the outer transaction and original row usable.
+function test.try_put_slow_path_early_exits()
+	with_db('try_put_slow_path_early_exits', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id'   , mdbx_type = 'u32' , not_null = true},
+				{col = 'email', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
+			},
+			pk = {'id'},
+		})
+		db:add_index('t', {'email', is_unique = true})
+		db:insert('t', '{}', {id = 1, email = 'a@x'})
+		local outer_txn = db.txn
+
+		local ok, err = db:try_insert('t', '{}', {id = 1, email = 'b@x'})
+		assert(ok == false and err == 'exists' and db.txn == outer_txn)
+		assert(db:get('t', 'email', 1) == 'a@x')
+
+		ok, err = db:try_update('t', '{}', {id = 99, email = 'z@x'})
+		assert(ok == false and err == 'not_found' and db.txn == outer_txn)
+
+		db:insert('t', '{}', {id = 2, email = 'b@x'})
+		assert(db.txn == outer_txn and db:exists('t', 2))
+		db:commit()
+	end)
+end
+
+--update, put, and both upsert branches accept scalar, positional-table, and
+--named-table column formats with the corresponding merge/replacement semantics.
+function test.try_put_cols_formats()
+	with_db('try_put_cols_formats', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'k', mdbx_type = 'u32', not_null = true},
+				{col = 'a', mdbx_type = 'u32'},
+				{col = 'b', mdbx_type = 'u32'},
+				{col = 'c', mdbx_type = 'u32'},
+			},
+			pk = {'k'},
+		})
+		local function assert_row(k, a, b, c)
+			local r = db:get('t', '{a b c}', k)
+			local function eq(v, n)
+				return n == nil and v == nil or v ~= nil and num(v) == n
+			end
+			assert(eq(r.a, a) and eq(r.b, b) and eq(r.c, c),
+				('%s: %s,%s,%s'):format(k, S(r.a), S(r.b), S(r.c)))
+		end
+		db:insert('t', '{}', {k = 1, a = 10, b = 11, c = 12})
+		db:insert('t', '{}', {k = 2, a = 20, b = 21, c = 22})
+		db:insert('t', '{}', {k = 3, a = 30, b = 31, c = 32})
+
+		db:update('t', 'k a', 1, 101)
+		db:update('t', '[k b]', {2, 202})
+		db:update('t', '{k c}', {k = 3, c = 303})
+		assert_row(1, 101, 11, 12)
+		assert_row(2, 20, 202, 22)
+		assert_row(3, 30, 31, 303)
+
+		db:put('t', 'k a', 4, 401)
+		db:put('t', '[k a b]', {5, 501, 502})
+		db:put('t', '{k c}', {k = 6, c = 603})
+		assert_row(4, 401, nil, nil)
+		assert_row(5, 501, 502, nil)
+		assert_row(6, nil, nil, 603)
+
+		db:upsert('t', 'k b', 1, 102)
+		db:upsert('t', '[k c]', {2, 203})
+		db:upsert('t', '{k a}', {k = 3, a = 301})
+		assert_row(1, 101, 102, 12)
+		assert_row(2, 20, 202, 203)
+		assert_row(3, 301, 31, 303)
+
+		db:upsert('t', 'k a b c', 7, 701, 702, 703)
+		db:upsert('t', '[k a b c]', {8, 801, 802, 803})
+		db:upsert('t', '{}', {k = 9, a = 901, b = 902, c = 903})
+		assert_row(7, 701, 702, 703)
+		assert_row(8, 801, 802, 803)
+		assert_row(9, 901, 902, 903)
+		db:commit()
+	end)
+end
+
 --cursor update of an indexed column must maintain the index (non-unique).
 function test.cursor_update_maintains_index()
 	with_db('cursor_update_maintains_index', function(db)
@@ -1206,6 +1554,2206 @@ function test.put_replaces()
 		db:update('t', '{}', {id = 1, a = 40})
 		g = db:get('t', '{a b}', 1)
 		assert(num(g.a) == 40 and g.b == 'y', ('%s,%s'):format(S(g.a), S(g.b)))
+		db:commit()
+	end)
+end
+
+-- rename --------------------------------------------------------------------
+
+--rename updates the in-memory name and the $schema row (no orphan), survives a
+--reopen.
+function test.rename_table()
+	local file = test_file('rename_table'); cleanup(file)
+	local ok, err = xpcall(function()
+		local db = mdbx_open(file)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id', mdbx_type = 'u32', not_null = true},
+				{col = 'v' , mdbx_type = 'i32'},
+			},
+			pk = {'id'},
+		})
+		db:insert('t', '{}', {id = 1, v = 10})
+		db:commit()
+		db:begin'w'; db:rename_table('t', 'u'); db:commit()
+		db:begin'r'
+		assert(not db:table_exists't' and db:table_exists'u')
+		assert(num(db:get('u', 'v', 1)) == 10)
+		local _, sch = db:dbi_schema'u'
+		assert(sch.name == 'u', sch.name)
+		assert(not db:get_raw('$schema', 't', 1)) --no orphan
+		assert(db:get_raw('$schema', 'u', 1))
+		db:commit(); db:close()
+		db = mdbx_open(file) --reopen: u loads, t gone
+		db:begin'r'
+		assert(db:table_exists'u' and not db:table_exists't')
+		assert(num(db:get('u', 'v', 1)) == 10)
+		db:commit(); db:close()
+	end, debug.traceback)
+	cleanup(file)
+	assert(ok, err)
+end
+
+--renaming an indexed table renames its index tables and fixes their
+--back-references; the index stays queryable and survives a reopen.
+function test.rename_indexed_table()
+	local file = test_file('rename_indexed_table'); cleanup(file)
+	local ok, err = xpcall(function()
+		local db = mdbx_open(file)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id' , mdbx_type = 'u32', not_null = true},
+				{col = 'cat', mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
+			},
+			pk = {'id'},
+		})
+		db:insert('t', '{}', {id = 1, cat = 'a'})
+		db:insert('t', '{}', {id = 2, cat = 'a'})
+		db:try_add_index('t', {'cat'})
+		db:commit()
+		db:begin'w'; db:rename_table('t', 'u'); db:commit()
+		db:begin'r'
+		assert(db:table_exists'u/i/cat' and not db:table_exists't/i/cat')
+		local _, sch = db:dbi_schema'u'
+		assert(sch.ix_schemas[1].name == 'u/i/cat', sch.ix_schemas[1].name)
+		assert(sch.ix_schemas[1].val_table == 'u', sch.ix_schemas[1].val_table)
+		local n = 0; for c, t in db:each('u/i/cat', '{}') do n = n + 1 end
+		assert(n == 2, n)
+		db:commit(); db:close()
+		db = mdbx_open(file) --reopen: u + its index load and work
+		db:begin'r'
+		local _, sch = db:dbi_schema'u'
+		assert(sch.ix_schemas and sch.ix_schemas[1].name == 'u/i/cat')
+		local n = 0; for c, t in db:each('u/i/cat', '{}') do n = n + 1 end
+		assert(n == 2, n)
+		db:commit(); db:close()
+	end, debug.traceback)
+	cleanup(file)
+	assert(ok, err)
+end
+
+-- foreign keys --------------------------------------------------------------
+
+--fk registration: add_fk records the fk on the child schema and it survives
+--a reopen; drop_fk removes it. (no enforcement yet -- step 1.)
+function test.fk_registration()
+	local file = test_file('fk_registration'); cleanup(file)
+	local ok, err = xpcall(function()
+		local db = mdbx_open(file)
+		db:begin'w'
+		db:create_table('parent', {
+			name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}},
+			pk = {'id'},
+		})
+		db:create_table('child', {
+			name = 'child',
+			fields = {
+				{col = 'id' , mdbx_type = 'u32', not_null = true},
+				{col = 'pid', mdbx_type = 'u32', not_null = true},
+			},
+			pk = {'id'},
+		})
+		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}, ondelete = 'cascade'}
+		local _, sch = db:dbi_schema'child'
+		assert(sch.fks and sch.fks.child_pid_fk, 'fk not registered')
+		db:commit(); db:close()
+		db = mdbx_open(file) --reopen: fk persists
+		db:begin'r'
+		local _, sch = db:dbi_schema'child'
+		local fk = sch.fks and sch.fks.child_pid_fk
+		assert(fk, 'fk not persisted')
+		assert(fk.table == 'child' and fk.ref_table == 'parent'
+			and fk.cols[1] == 'pid' and fk.ref_cols[1] == 'id'
+			and fk.ondelete == 'cascade', pp(fk))
+		db:commit(); db:close()
+		db = mdbx_open(file) --drop_fk removes it
+		db:begin'w'
+		db:drop_fk{name = 'child_pid_fk', table = 'child'}
+		assert(not (select(2, db:dbi_schema'child').fks or empty).child_pid_fk)
+		db:commit(); db:close()
+		db = mdbx_open(file)
+		db:begin'r'
+		assert(not (select(2, db:dbi_schema'child').fks or empty).child_pid_fk)
+		db:commit(); db:close()
+	end, debug.traceback)
+	cleanup(file)
+	assert(ok, err)
+end
+
+--fk insert/update check: a child row must reference an existing parent; a null
+--(nullable) fk col skips the check. (step 2.)
+function test.fk_insert_check()
+	with_db('fk_insert_check', function(db)
+		db:begin'w'
+		db:create_table('parent', {
+			name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}},
+			pk = {'id'},
+		})
+		db:create_table('child', {
+			name = 'child',
+			fields = {
+				{col = 'id' , mdbx_type = 'u32', not_null = true},
+				{col = 'pid', mdbx_type = 'u32', not_null = true}, --required fk
+				{col = 'opt', mdbx_type = 'u32'},                  --nullable fk
+			},
+			pk = {'id'},
+		})
+		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}, ondelete = 'cascade'}
+		db:add_fk{name = 'child_opt_fk', table = 'child', cols = {'opt'},
+			ref_table = 'parent', ref_cols = {'id'}, ondelete = 'set null'}
+		db:insert('parent', '{}', {id = 1})
+
+		--insert referencing an existing parent -> ok
+		db:insert('child', '{}', {id = 10, pid = 1})
+		assert(db:exists('child', 10))
+		--insert referencing a missing parent -> rejected, not written
+		local ok, err = db:try_insert('child', '{}', {id = 11, pid = 99})
+		assert(ok == false and err:find('fk', 1, true), ('%s,%s'):format(S(ok), S(err)))
+		assert(not db:exists('child', 11))
+		--update to a missing parent -> rejected, unchanged
+		local ok2, err2 = db:try_update('child', '{}', {id = 10, pid = 99})
+		assert(ok2 == false and err2:find('fk', 1, true), S(err2))
+		assert(num(db:get('child', 'pid', 10)) == 1)
+		--update to another existing parent -> ok
+		db:insert('parent', '{}', {id = 2})
+		db:update('child', '{}', {id = 10, pid = 2})
+		assert(num(db:get('child', 'pid', 10)) == 2)
+
+		--nullable fk: null skips the check
+		db:insert('child', '{}', {id = 20, pid = 1, opt = null})
+		assert(db:exists('child', 20))
+		--nullable fk: a non-null missing parent is still rejected
+		assert(db:try_insert('child', '{}', {id = 21, pid = 1, opt = 99}) == false)
+		--nullable fk: a non-null existing parent is accepted
+		db:insert('child', '{}', {id = 22, pid = 1, opt = 2})
+		assert(db:exists('child', 22))
+		db:commit()
+	end)
+end
+
+--partial update of a composite fk checks the merged row, not only the supplied
+--columns: changing (a,b) from (1,1) to the nonexistent (2,1) must be rejected.
+function test.fk_partial_composite_update()
+	with_db('fk_partial_composite_update', function(db)
+		db:begin'w'
+		db:create_table('parent', {
+			name = 'parent',
+			fields = {
+				{col = 'a', mdbx_type = 'u32', not_null = true},
+				{col = 'b', mdbx_type = 'u32', not_null = true},
+			},
+			pk = {'a', 'b'},
+		})
+		db:create_table('child', {
+			name = 'child',
+			fields = {
+				{col = 'id', mdbx_type = 'u32', not_null = true},
+				{col = 'a' , mdbx_type = 'u32', not_null = true},
+				{col = 'b' , mdbx_type = 'u32', not_null = true},
+			},
+			pk = {'id'},
+		})
+		db:add_fk{name = 'child_ab_fk', table = 'child', cols = {'a', 'b'},
+			ref_table = 'parent', ref_cols = {'a', 'b'}}
+		db:insert('parent', '{}', {a = 1, b = 1})
+		db:insert('parent', '{}', {a = 2, b = 2})
+		db:insert('child', '{}', {id = 10, a = 1, b = 1})
+
+		local ok, err = db:try_update('child', '{}', {id = 10, a = 2})
+		assert(ok == false and err:find('fk', 1, true), ('%s,%s'):format(S(ok), S(err)))
+		local r = db:get('child', '{a b}', 10)
+		assert(num(r.a) == 1 and num(r.b) == 1, ('%s,%s'):format(S(r.a), S(r.b)))
+		db:commit()
+	end)
+end
+
+--an fk whose cols include a pk col: the fk-owned index must decode those cols
+--from the key record (pk cols live in the key), not the value. here 'a' is the
+--child's pk (key) and 'b' is a plain value col, so the index decode is mixed.
+function test.fk_on_pk_col()
+	with_db('fk_on_pk_col', function(db)
+		db:begin'w'
+		db:create_table('parent', {
+			name = 'parent',
+			fields = {
+				{col = 'a', mdbx_type = 'u32', not_null = true},
+				{col = 'b', mdbx_type = 'u32', not_null = true},
+			},
+			pk = {'a', 'b'},
+		})
+		db:create_table('child', {
+			name = 'child',
+			fields = {
+				{col = 'a', mdbx_type = 'u32', not_null = true}, --pk + fk col (key)
+				{col = 'b', mdbx_type = 'u32', not_null = true}, --plain fk col (value)
+			},
+			pk = {'a'},
+		})
+		db:insert('parent', '{}', {a = 1, b = 5})
+		db:insert('parent', '{}', {a = 2, b = 6})
+		--existing valid child row before the fk exists.
+		db:insert('child', '{}', {a = 1, b = 5})
+
+		--try_add_fk validates existing rows by decoding the fk cols ('a' from the
+		--key, 'b' from the value) and probing the parent.
+		assert(db:try_add_fk{name = 'child_ab_fk', table = 'child', cols = {'a', 'b'},
+			ref_table = 'parent', ref_cols = {'a', 'b'}, ondelete = 'cascade'})
+
+		--enforcement after the fk exists.
+		db:insert('child', '{}', {a = 2, b = 6})                       --parent (2,6) ok
+		local ok, err = db:try_insert('child', '{}', {a = 3, b = 9})   --no parent (3,9)
+		assert(ok == false and err:find('fk', 1, true), ('%s,%s'):format(S(ok), S(err)))
+		assert(not db:exists('child', 3))
+
+		--ondelete cascade reaches the child through the fk-owned index whose key
+		--cols are decoded back to the child's pk.
+		db:del('parent', 1, 5)
+		assert(not db:exists('child', 1), 'cascade should remove child a=1')
+		assert(db:exists('child', 2))
+		db:commit()
+	end)
+end
+
+--fk check uses a column's default when it isn't given on a full write (insert).
+function test.fk_default_check()
+	with_db('fk_default_check', function(db)
+		db:begin'w'
+		db:create_table('parent', {
+			name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}},
+			pk = {'id'},
+		})
+		db:create_table('child', {
+			name = 'child',
+			fields = {
+				{col = 'id'  , mdbx_type = 'u32', not_null = true},
+				{col = 'dpid', mdbx_type = 'u32', mdbx_default = 7}, --defaults to parent 7
+			},
+			pk = {'id'},
+		})
+		db:add_fk{name = 'child_dpid_fk', table = 'child', cols = {'dpid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		--insert without dpid -> default 7 -> parent 7 missing -> rejected
+		local ok, err = db:try_insert('child', '{}', {id = 1})
+		assert(ok == false and err:find('fk', 1, true), ('%s,%s'):format(S(ok), S(err)))
+		assert(not db:exists('child', 1))
+		--with parent 7 present, the defaulted fk is accepted
+		db:insert('parent', '{}', {id = 7})
+		db:insert('child', '{}', {id = 2})
+		assert(num(db:get('child', 'dpid', 2)) == 7)
+		db:commit()
+	end)
+end
+
+--fk delete enforcement (NO ACTION, the default): a parent row a child references
+--can't be deleted; an unreferenced parent deletes; once the child is gone the
+--parent deletes too. (step 3.)
+function test.fk_delete_no_action()
+	with_db('fk_delete_no_action', function(db)
+		db:begin'w'
+		db:create_table('parent', {
+			name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}},
+			pk = {'id'},
+		})
+		db:create_table('child', {
+			name = 'child',
+			fields = {
+				{col = 'id' , mdbx_type = 'u32', not_null = true},
+				{col = 'pid', mdbx_type = 'u32', not_null = true},
+			},
+			pk = {'id'},
+		})
+		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}} --restrict (default)
+		db:insert('parent', '{}', {id = 1})
+		db:insert('parent', '{}', {id = 2})
+		db:insert('child', '{}', {id = 10, pid = 1})
+		--deleting a referenced parent is rejected
+		local ok, err = db:try_del('parent', 1)
+		assert(ok == false and err:find('fk', 1, true), ('%s,%s'):format(S(ok), S(err)))
+		assert(db:exists('parent', 1))
+		--an unreferenced parent deletes fine
+		assert(db:try_del('parent', 2))
+		assert(not db:exists('parent', 2))
+		--once the child is gone, the parent deletes
+		db:del('child', 10)
+		assert(db:try_del('parent', 1))
+		assert(not db:exists('parent', 1))
+		db:commit()
+	end)
+end
+
+--add_fk reuses a compatible existing index; otherwise it creates an fk-owned
+--index that lives in ix_schemas but not in `ixs` (the user-declared list).
+function test.fk_index_reuse()
+	with_db('fk_index_reuse', function(db)
+		db:begin'w'
+		db:create_table('parent', {
+			name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}},
+			pk = {'id'},
+		})
+		db:create_table('child', {
+			name = 'child',
+			fields = {
+				{col = 'id' , mdbx_type = 'u32', not_null = true},
+				{col = 'pid', mdbx_type = 'u32', not_null = true}, --reuse path
+				{col = 'qid', mdbx_type = 'u32', not_null = true}, --create path
+			},
+			pk = {'id'},
+		})
+		--pre-existing user index on pid -> reused by the fk.
+		db:add_index('child', {'pid'})
+		assert(db:table_exists'child/i/pid')
+		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		local _, sch = db:dbi_schema'child'
+		assert(sch.fks.child_pid_fk.ix == 'child/i/pid', S(sch.fks.child_pid_fk.ix))
+		assert(sch.ixs and sch.ixs['child/i/pid'], 'reused index stays user-owned')
+		--no index on qid -> fk creates an fk-owned one (table exists, not in ixs).
+		db:add_fk{name = 'child_qid_fk', table = 'child', cols = {'qid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		local _, sch = db:dbi_schema'child'
+		assert(sch.fks.child_qid_fk.ix == 'child/i/qid', S(sch.fks.child_qid_fk.ix))
+		assert(db:table_exists'child/i/qid', 'fk-owned index table exists')
+		assert(not (sch.ixs and sch.ixs['child/i/qid']), 'fk-owned index not in ixs')
+		db:commit()
+	end)
+end
+
+--drop_index on an index a fk reused removes it from `ixs` but keeps the table
+--(now fk-owned), and delete enforcement keeps working.
+function test.fk_drop_index_kept_by_fk()
+	with_db('fk_drop_index_kept_by_fk', function(db)
+		db:begin'w'
+		db:create_table('parent', {
+			name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}},
+			pk = {'id'},
+		})
+		db:create_table('child', {
+			name = 'child',
+			fields = {
+				{col = 'id' , mdbx_type = 'u32', not_null = true},
+				{col = 'pid', mdbx_type = 'u32', not_null = true},
+			},
+			pk = {'id'},
+		})
+		db:add_index('child', {'pid'})
+		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		db:insert('parent', '{}', {id = 1})
+		db:insert('child', '{}', {id = 10, pid = 1})
+		--drop the user index: table survives because the fk still uses it.
+		db:drop_index'child/i/pid'
+		assert(db:table_exists'child/i/pid', 'fk-used index survives drop_index')
+		local _, sch = db:dbi_schema'child'
+		assert(not (sch.ixs and sch.ixs['child/i/pid']), 'removed from ixs')
+		--enforcement still works via the now-fk-owned index.
+		assert(db:try_del('parent', 1) == false)
+		db:commit()
+	end)
+end
+
+--dropping a parent untangles referencing children: their fks are removed but
+--the child tables and rows survive.
+function test.fk_drop_table_untangle()
+	with_db('fk_drop_table_untangle', function(db)
+		db:begin'w'
+		db:create_table('parent', {
+			name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}},
+			pk = {'id'},
+		})
+		db:create_table('child', {
+			name = 'child',
+			fields = {
+				{col = 'id' , mdbx_type = 'u32', not_null = true},
+				{col = 'pid', mdbx_type = 'u32', not_null = true},
+			},
+			pk = {'id'},
+		})
+		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		db:insert('parent', '{}', {id = 1})
+		db:insert('child', '{}', {id = 10, pid = 1})
+		db:drop_table'parent'
+		assert(not db:table_exists'parent')
+		--child + its row survive; the fk is gone.
+		assert(db:table_exists'child' and db:exists('child', 10))
+		local _, sch = db:dbi_schema'child'
+		assert(not (sch.fks and sch.fks.child_pid_fk), 'child fk untangled')
+		db:commit()
+	end)
+end
+
+--drop_fk drops an fk-owned index but leaves a reused user index alone.
+function test.fk_drop_fk_releases_index()
+	with_db('fk_drop_fk_releases_index', function(db)
+		db:begin'w'
+		db:create_table('parent', {
+			name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}},
+			pk = {'id'},
+		})
+		db:create_table('child', {
+			name = 'child',
+			fields = {
+				{col = 'id' , mdbx_type = 'u32', not_null = true},
+				{col = 'pid', mdbx_type = 'u32', not_null = true}, --fk-owned index
+				{col = 'qid', mdbx_type = 'u32', not_null = true}, --reused user index
+			},
+			pk = {'id'},
+		})
+		db:add_index('child', {'qid'})
+		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		db:add_fk{name = 'child_qid_fk', table = 'child', cols = {'qid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		assert(db:table_exists'child/i/pid' and db:table_exists'child/i/qid')
+		--drop the fk-owned one: its index table goes away.
+		db:drop_fk{name = 'child_pid_fk', table = 'child'}
+		assert(not db:table_exists'child/i/pid', 'fk-owned index dropped')
+		--drop the reused one: the user index survives.
+		db:drop_fk{name = 'child_qid_fk', table = 'child'}
+		assert(db:table_exists'child/i/qid', 'reused user index survives')
+		local _, sch = db:dbi_schema'child'
+		assert(sch.ixs and sch.ixs['child/i/qid'])
+		db:commit()
+	end)
+end
+
+--an fk-owned index round-trips: on reopen it re-attaches to ix_schemas via the
+--fk (not via `ixs`) and still enforces deletes.
+function test.fk_owned_index_reopen()
+	with_db_reopen('fk_owned_index_reopen', function(db)
+		db:begin'w'
+		db:create_table('parent', {
+			name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}},
+			pk = {'id'},
+		})
+		db:create_table('child', {
+			name = 'child',
+			fields = {
+				{col = 'id' , mdbx_type = 'u32', not_null = true},
+				{col = 'pid', mdbx_type = 'u32', not_null = true},
+			},
+			pk = {'id'},
+		})
+		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		db:insert('parent', '{}', {id = 1})
+		db:insert('child', '{}', {id = 10, pid = 1})
+		db:commit()
+	end, function(db)
+		db:begin'w'
+		local _, sch = db:dbi_schema'child'
+		assert(sch.fks.child_pid_fk.ix == 'child/i/pid')
+		assert(not (sch.ixs and sch.ixs['child/i/pid']), 'fk-owned index not in ixs')
+		local present
+		for _, ix in ipairs(sch.ix_schemas or empty) do
+			if ix.name == 'child/i/pid' then present = true end
+		end
+		assert(present, 'fk-owned index re-attaches to ix_schemas on reopen')
+		assert(db:try_del('parent', 1) == false) --still enforces
+		db:commit()
+	end)
+end
+
+--cascade delete: removing a parent removes referencing children, recursively.
+function test.fk_delete_cascade()
+	with_db('fk_delete_cascade', function(db)
+		db:begin'w'
+		db:create_table('a', {name = 'a',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
+		db:create_table('b', {name = 'b', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'aid', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:create_table('c', {name = 'c', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'bid', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:add_fk{name = 'b_aid_fk', table = 'b', cols = {'aid'},
+			ref_table = 'a', ref_cols = {'id'}, ondelete = 'cascade'}
+		db:add_fk{name = 'c_bid_fk', table = 'c', cols = {'bid'},
+			ref_table = 'b', ref_cols = {'id'}, ondelete = 'cascade'}
+		db:insert('a', '{}', {id = 1}); db:insert('a', '{}', {id = 2})
+		db:insert('b', '{}', {id = 10, aid = 1}); db:insert('b', '{}', {id = 11, aid = 1})
+		db:insert('b', '{}', {id = 12, aid = 2})
+		db:insert('c', '{}', {id = 100, bid = 10}); db:insert('c', '{}', {id = 101, bid = 10})
+		db:insert('c', '{}', {id = 102, bid = 12})
+		--delete a=1 -> cascades to b 10,11 -> cascades to c 100,101
+		db:del('a', 1)
+		assert(not db:exists('a', 1))
+		assert(not db:exists('b', 10) and not db:exists('b', 11))
+		assert(not db:exists('c', 100) and not db:exists('c', 101))
+		--rows under a=2 are untouched
+		assert(db:exists('a', 2) and db:exists('b', 12) and db:exists('c', 102))
+		db:commit()
+	end)
+end
+
+--set-null delete: removing a parent nulls referencing children's fk cols; the
+--child rows survive.
+function test.fk_delete_set_null()
+	with_db('fk_delete_set_null', function(db)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'pid', mdbx_type = 'u32'}, --nullable fk col
+		}, pk = {'id'}})
+		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}, ondelete = 'set null'}
+		db:insert('parent', '{}', {id = 1}); db:insert('parent', '{}', {id = 2})
+		db:insert('child', '{}', {id = 10, pid = 1}); db:insert('child', '{}', {id = 11, pid = 1})
+		db:insert('child', '{}', {id = 12, pid = 2})
+		db:del('parent', 1)
+		assert(not db:exists('parent', 1))
+		--children survive with pid nulled
+		assert(db:exists('child', 10) and db:exists('child', 11))
+		assert(db:is_null('child', 'pid', 10) and db:is_null('child', 'pid', 11))
+		--child under parent 2 untouched
+		assert(num(db:get('child', 'pid', 12)) == 2)
+		db:commit()
+	end)
+end
+
+--a cascade that hits a deeper NO ACTION (a still-referenced row) fails and rolls
+--back fully (no partial deletes).
+function test.fk_delete_cascade_atomic()
+	with_db('fk_delete_cascade_atomic', function(db)
+		db:begin'w'
+		db:create_table('a', {name = 'a',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
+		db:create_table('b', {name = 'b', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'aid', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:create_table('c', {name = 'c', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'bid', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:add_fk{name = 'b_aid_fk', table = 'b', cols = {'aid'},
+			ref_table = 'a', ref_cols = {'id'}, ondelete = 'cascade'}
+		db:add_fk{name = 'c_bid_fk', table = 'c', cols = {'bid'},
+			ref_table = 'b', ref_cols = {'id'}} --no action (default)
+		db:insert('a', '{}', {id = 1})
+		db:insert('b', '{}', {id = 10, aid = 1}); db:insert('b', '{}', {id = 11, aid = 1})
+		db:insert('c', '{}', {id = 100, bid = 11}) --c references b=11
+		--cascade removes b 10,11 but c still references b=11 -> whole op fails and
+		--the cascaded removal of b=10 is rolled back.
+		local ok, err = db:try_del('a', 1)
+		assert(ok == false and err:find('fk', 1, true), ('%s,%s'):format(S(ok), S(err)))
+		assert(db:exists('a', 1))
+		assert(db:exists('b', 10) and db:exists('b', 11))
+		assert(db:exists('c', 100))
+		db:commit()
+	end)
+end
+
+--an all-cascade reference cycle (rows mutually referencing) deletes whole and
+--terminates: delete-first removes each row's fk edges as it goes, so the
+--recursion can't revisit an already-deleted row. (cycle safety.)
+function test.fk_delete_cascade_cycle()
+	with_db('fk_delete_cascade_cycle', function(db)
+		db:begin'w'
+		db:create_table('a', {name = 'a', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'bid', mdbx_type = 'u32'}, --nullable so the cycle can be formed
+		}, pk = {'id'}})
+		db:create_table('b', {name = 'b', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'aid', mdbx_type = 'u32'},
+		}, pk = {'id'}})
+		db:add_fk{name = 'a_bid_fk', table = 'a', cols = {'bid'},
+			ref_table = 'b', ref_cols = {'id'}, ondelete = 'cascade'}
+		db:add_fk{name = 'b_aid_fk', table = 'b', cols = {'aid'},
+			ref_table = 'a', ref_cols = {'id'}, ondelete = 'cascade'}
+		db:insert('a', '{}', {id = 1})            --bid null for now
+		db:insert('b', '{}', {id = 2, aid = 1})   --b2 -> a1
+		db:update('a', '{}', {id = 1, bid = 2})   --close the cycle: a1 -> b2
+		--deleting either side removes the whole cycle (and must terminate).
+		db:del('a', 1)
+		assert(not db:exists('a', 1) and not db:exists('b', 2))
+		db:commit()
+	end)
+end
+
+--rename maintains fk cross-refs: renaming a child moves its fk index and
+--retargets each parent's reverse ref; renaming a parent retargets each child's
+--ref_table. all of it persists across reopen and keeps enforcing. (step 5.)
+function test.fk_rename_table()
+	local file = test_file('fk_rename_table'); cleanup(file)
+	local ok, err = xpcall(function()
+		local db = mdbx_open(file)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'pid', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		db:insert('parent', '{}', {id = 1})
+		db:insert('child', '{}', {id = 10, pid = 1})
+		db:commit()
+		--rename in a fresh txn: mdbx forbids renaming a table created in this txn.
+		db:begin'w'
+		db:rename_table('child', 'kid')
+		db:rename_table('parent', 'mom')
+		db:commit(); db:close()
+		--reopen: renamed fk metadata persists and still enforces.
+		db = mdbx_open(file)
+		db:begin'w'
+		assert(db:table_exists'kid' and db:table_exists'mom')
+		assert(db:table_exists'kid/i/pid' and not db:table_exists'child/i/pid')
+		local _, ksch = db:dbi_schema'kid'
+		local fk = ksch.fks.child_pid_fk
+		assert(fk.table == 'kid' and fk.ref_table == 'mom' and fk.ix == 'kid/i/pid', pp(fk))
+		assert(db:try_del('mom', 1) == false)                       --referenced by kid 10
+		assert(db:try_insert('kid', '{}', {id = 11, pid = 99}) == false) --missing parent
+		db:insert('mom', '{}', {id = 2})
+		db:insert('kid', '{}', {id = 12, pid = 2})                  --references renamed parent
+		db:del('kid', 10); db:del('kid', 12)
+		assert(db:try_del('mom', 1))                                --no longer referenced
+		db:commit(); db:close()
+	end, debug.traceback)
+	cleanup(file)
+	assert(ok, err)
+end
+
+--DDL consistency: a freshly built schema (tables + unique index + fk) is
+--consistent in memory and after reopen.
+function test.ddl_consistency_baseline()
+	local file = test_file('ddl_consistency_baseline'); cleanup(file)
+	local ok, err = xpcall(function()
+		local db = mdbx_open(file)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id'   , mdbx_type = 'u32' , not_null = true},
+			{col = 'pid'  , mdbx_type = 'u32' , not_null = true},
+			{col = 'email', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
+		}, pk = {'id'}})
+		db:add_index('child', {'email', is_unique = true})
+		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}, ondelete = 'cascade'}
+		assert_consistent(db, 'built')
+		db:commit(); db:close()
+		db = mdbx_open(file); db:begin'r'
+		assert_consistent(db, 'reopened')
+		db:commit(); db:close()
+	end, debug.traceback)
+	cleanup(file); assert(ok, err)
+end
+
+--DDL consistency: dropping a child (fk untangle) then the parent leaves no orphan
+--index/fk-index tables and no dangling ref_fks, in memory and after reopen.
+function test.ddl_drop_table_consistency()
+	local file = test_file('ddl_drop_table_consistency'); cleanup(file)
+	local ok, err = xpcall(function()
+		local db = mdbx_open(file)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id'   , mdbx_type = 'u32' , not_null = true},
+			{col = 'pid'  , mdbx_type = 'u32' , not_null = true},
+			{col = 'email', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
+		}, pk = {'id'}})
+		db:add_index('child', {'email', is_unique = true})
+		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		db:commit()
+		db:begin'w'
+		db:drop_table'child'
+		assert(not db:table_exists'child' and not db:table_exists'child/u/email')
+		assert_consistent(db, 'after drop child')
+		db:commit(); db:close()
+		db = mdbx_open(file); db:begin'w'
+		assert_consistent(db, 'reopen after drop child')
+		db:drop_table'parent'
+		assert_consistent(db, 'after drop parent')
+		db:commit(); db:close()
+		db = mdbx_open(file); db:begin'r'
+		assert_consistent(db, 'final reopen')
+		db:commit(); db:close()
+	end, debug.traceback)
+	cleanup(file); assert(ok, err)
+end
+
+--DDL consistency: drop_index on a fk-reused index keeps the table (now fk-owned);
+--dropping the fk then releases it; consistent throughout and after reopen.
+function test.ddl_drop_index_consistency()
+	local file = test_file('ddl_drop_index_consistency'); cleanup(file)
+	local ok, err = xpcall(function()
+		local db = mdbx_open(file)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'pid', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:add_index('child', {'pid'})
+		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		db:commit()
+		db:begin'w'
+		db:drop_index'child/i/pid'                --kept: the fk still uses it
+		assert(db:table_exists'child/i/pid')
+		assert_consistent(db, 'after drop_index (fk-kept)')
+		db:drop_fk{name = 'child_pid_fk', table = 'child'}
+		assert(not db:table_exists'child/i/pid')  --now released
+		assert_consistent(db, 'after drop_fk')
+		db:commit(); db:close()
+		db = mdbx_open(file); db:begin'r'
+		assert_consistent(db, 'reopen')
+		db:commit(); db:close()
+	end, debug.traceback)
+	cleanup(file); assert(ok, err)
+end
+
+--DDL consistency: renaming a child then its parent keeps fk cross-refs and index
+--tables consistent, in memory and after reopen.
+function test.ddl_rename_consistency()
+	local file = test_file('ddl_rename_consistency'); cleanup(file)
+	local ok, err = xpcall(function()
+		local db = mdbx_open(file)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id'   , mdbx_type = 'u32' , not_null = true},
+			{col = 'pid'  , mdbx_type = 'u32' , not_null = true},
+			{col = 'email', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
+		}, pk = {'id'}})
+		db:add_index('child', {'email', is_unique = true})
+		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		db:commit()
+		db:begin'w'
+		db:rename_table('child', 'kid')
+		db:rename_table('parent', 'mom')
+		assert_consistent(db, 'after rename')
+		db:commit(); db:close()
+		db = mdbx_open(file); db:begin'r'
+		assert_consistent(db, 'reopen after rename')
+		db:commit(); db:close()
+	end, debug.traceback)
+	cleanup(file); assert(ok, err)
+end
+
+--DDL consistency: a table + index created in an aborted txn leave no trace (no
+--table, index, or $schema row) and a consistent catalog after reopen.
+function test.ddl_abort_rollback()
+	local file = test_file('ddl_abort_rollback'); cleanup(file)
+	local ok, err = xpcall(function()
+		local db = mdbx_open(file)
+		db:begin'w' --seed a committed table so the catalog isn't empty.
+		db:create_table('keep', {name = 'keep',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
+		db:commit()
+		db:begin'w' --create + index, then abort.
+		db:create_table('temp', {name = 'temp', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'val', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:add_index('temp', {'val'})
+		db:abort(); db:close()
+		db = mdbx_open(file); db:begin'r'
+		assert(db:table_exists'keep')
+		assert(not db:table_exists'temp', 'aborted table leaked')
+		assert(not db:table_exists'temp/i/val', 'aborted index leaked')
+		assert_consistent(db, 'after abort')
+		db:commit(); db:close()
+	end, debug.traceback)
+	cleanup(file); assert(ok, err)
+end
+
+--aborted table/column renames discard their transaction-owned schema graph;
+--the same open db immediately sees the original names and fk cross-references.
+function test.ddl_abort_rename_cached()
+	with_db('ddl_abort_rename_cached', function(db)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'pid', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		db:insert('parent', '{}', {id = 1})
+		db:insert('child', '{}', {id = 10, pid = 1})
+		db:commit()
+
+		db:begin'w'
+		db:rename_table('child', 'kid')
+		db:abort()
+
+		db:begin'w'
+		assert(db:table_exists'child' and not db:table_exists'kid')
+		local _, ps = db:dbi_schema'parent'
+		local _, cs1 = db:dbi_schema'child'
+		assert(ps.ref_fks['child/child_pid_fk'] and not ps.ref_fks['kid/child_pid_fk'])
+		assert(cs1.name == 'child' and cs1.fks.child_pid_fk.table == 'child')
+		assert(db:try_del('parent', 1) == false)
+		assert_consistent(db, 'after aborted table rename')
+		db:commit()
+
+		db:begin'w'
+		db:rename_column('child', 'pid', 'parent_id')
+		db:abort()
+
+		db:begin'w'
+		local _, cs2 = db:dbi_schema'child'
+		assert(cs2.fields.pid and not cs2.fields.parent_id)
+		assert(db:table_exists'child/i/pid' and not db:table_exists'child/i/parent_id')
+		assert(db:try_insert('child', '{}', {id = 11, pid = 99}) == false)
+		assert_consistent(db, 'after aborted column rename')
+		db:commit()
+	end)
+end
+
+--aborted index add/drop restores both the physical index and the cached table
+--schema without reopening the database.
+function test.ddl_abort_index_cached()
+	with_db('ddl_abort_index_cached', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'val', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:insert('t', '{}', {id = 1, val = 10})
+		db:commit()
+
+		db:begin'w'
+		local _, _, ix = db:try_add_index('t', {'val'})
+		db:abort()
+
+		db:begin'w'
+		local _, ts = db:dbi_schema't'
+		assert(not db:table_exists(ix) and not ts.ixs and not ts.ix_schemas)
+		assert_consistent(db, 'after aborted index add')
+		db:add_index('t', {'val'})
+		db:commit()
+
+		db:begin'w'
+		db:drop_index(ix)
+		db:abort()
+
+		db:begin'w'
+		local _, ts2 = db:dbi_schema't'
+		assert(db:table_exists(ix) and ts2.ixs[ix] and #ts2.ix_schemas == 1)
+		db:insert('t', '{}', {id = 2, val = 20})
+		assert(num((db:must_get(ix, '{}', 20)).id) == 2)
+		assert_consistent(db, 'after aborted index drop')
+		db:commit()
+	end)
+end
+
+--aborted fk add/drop and parent drop restore child/parent metadata and the
+--fk-owned index in the same open database.
+function test.ddl_abort_fk_cached()
+	with_db('ddl_abort_fk_cached', function(db)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'pid', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:insert('parent', '{}', {id = 1})
+		db:insert('child', '{}', {id = 10, pid = 1})
+		db:commit()
+		local function fk()
+			return {name = 'child_pid_fk', table = 'child', cols = {'pid'},
+				ref_table = 'parent', ref_cols = {'id'}}
+		end
+
+		db:begin'w'
+		db:add_fk(fk())
+		db:abort()
+
+		db:begin'w'
+		local _, ps = db:dbi_schema'parent'
+		local _, cs = db:dbi_schema'child'
+		assert(not ps.ref_fks and not cs.fks and not db:table_exists'child/i/pid')
+		assert_consistent(db, 'after aborted fk add')
+		db:add_fk(fk())
+		db:commit()
+
+		db:begin'w'
+		db:drop_fk(fk())
+		db:abort()
+
+		db:begin'w'
+		local _, ps2 = db:dbi_schema'parent'
+		local _, cs2 = db:dbi_schema'child'
+		assert(ps2.ref_fks['child/child_pid_fk'] and cs2.fks.child_pid_fk)
+		assert(db:table_exists'child/i/pid')
+		assert(db:try_del('parent', 1) == false)
+		assert_consistent(db, 'after aborted fk drop')
+		db:commit()
+
+		db:begin'w'
+		db:drop_table'parent'
+		db:abort()
+
+		db:begin'w'
+		local _, ps3 = db:dbi_schema'parent'
+		local _, cs3 = db:dbi_schema'child'
+		assert(ps3.ref_fks['child/child_pid_fk'] and cs3.fks.child_pid_fk)
+		assert(db:table_exists'child/i/pid')
+		assert(db:try_del('parent', 1) == false)
+		assert_consistent(db, 'after aborted parent drop')
+		db:commit()
+	end)
+end
+
+--extract_schema rebuilds a schema object from the catalog: data tables only
+--(index/meta tables excluded), with fields, pk and fks intact.
+function test.extract_schema()
+	with_db('extract_schema', function(db)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id'   , mdbx_type = 'u32' , not_null = true},
+			{col = 'pid'  , mdbx_type = 'u32' , not_null = true},
+			{col = 'email', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
+		}, pk = {'id'}})
+		db:add_index('child', {'email', is_unique = true})
+		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		local sc = db:extract_schema()
+		--data tables present; index/meta tables excluded.
+		assert(sc.tables.parent and sc.tables.child, 'data tables missing')
+		for name in pairs(sc.tables) do
+			assert(not name:find('/', 1, true) and name ~= '$schema',
+				'non-data table leaked into extract: '..name)
+		end
+		--fields, pk and fks survive the round-trip.
+		local c = sc.tables.child
+		assert(c.fields.email and c.fields.pid and c.fields.id, 'fields missing')
+		assert(c.pk[1] == 'id', S(c.pk))
+		assert(c.fks and c.fks.child_pid_fk
+			and c.fks.child_pid_fk.ref_table == 'parent', 'fk missing in extract')
+		db:commit()
+	end)
+end
+
+--transactions: commit persists across reopen.
+function test.txn_commit_persists()
+	local file = test_file('txn_commit_persists'); cleanup(file)
+	local ok, err = xpcall(function()
+		local db = mdbx_open(file)
+		db:begin'w'
+		db:create_table('kv', {name = 'kv', fields = {
+			{col = 'k', mdbx_type = 'u32', not_null = true},
+			{col = 'v', mdbx_type = 'u32', not_null = true},
+		}, pk = {'k'}})
+		db:insert('kv', '{}', {k = 1, v = 10})
+		db:commit(); db:close()
+		db = mdbx_open(file); db:begin'r'
+		assert(db:exists('kv', 1) and num(db:get('kv', 'v', 1)) == 10)
+		db:commit(); db:close()
+	end, debug.traceback)
+	cleanup(file); assert(ok, err)
+end
+
+--transactions: abort discards the txn's writes; prior committed data survives.
+function test.txn_abort_discards()
+	local file = test_file('txn_abort_discards'); cleanup(file)
+	local ok, err = xpcall(function()
+		local db = mdbx_open(file)
+		db:begin'w'
+		db:create_table('kv', {name = 'kv', fields = {
+			{col = 'k', mdbx_type = 'u32', not_null = true},
+			{col = 'v', mdbx_type = 'u32', not_null = true},
+		}, pk = {'k'}})
+		db:insert('kv', '{}', {k = 1, v = 10})
+		db:commit()
+		db:begin'w'
+		db:insert('kv', '{}', {k = 2, v = 20})
+		db:abort(); db:close()
+		db = mdbx_open(file); db:begin'r'
+		assert(db:exists('kv', 1), 'committed row lost')
+		assert(not db:exists('kv', 2), 'aborted row survived')
+		db:commit(); db:close()
+	end, debug.traceback)
+	cleanup(file); assert(ok, err)
+end
+
+--transactions: aborting a nested txn discards only its writes; the outer txn
+--continues and its commit persists.
+function test.txn_nested_abort()
+	local file = test_file('txn_nested_abort'); cleanup(file)
+	local ok, err = xpcall(function()
+		local db = mdbx_open(file)
+		db:begin'w'
+		db:create_table('kv', {name = 'kv', fields = {
+			{col = 'k', mdbx_type = 'u32', not_null = true},
+			{col = 'v', mdbx_type = 'u32', not_null = true},
+		}, pk = {'k'}})
+		db:commit()
+		db:begin'w'                       --outer
+		db:insert('kv', '{}', {k = 1, v = 10})
+		db:begin'w'                       --nested
+		db:insert('kv', '{}', {k = 2, v = 20})
+		db:abort()                        --nested discarded
+		assert(db:exists('kv', 1) and not db:exists('kv', 2), 'nested abort wrong')
+		db:commit()                       --outer persists k=1
+		db:close()
+		db = mdbx_open(file); db:begin'r'
+		assert(db:exists('kv', 1) and not db:exists('kv', 2))
+		db:commit(); db:close()
+	end, debug.traceback)
+	cleanup(file); assert(ok, err)
+end
+
+--transactions: committing a nested txn merges into the outer; only the outer
+--commit makes it durable.
+function test.txn_nested_commit()
+	local file = test_file('txn_nested_commit'); cleanup(file)
+	local ok, err = xpcall(function()
+		local db = mdbx_open(file)
+		db:begin'w'
+		db:create_table('kv', {name = 'kv', fields = {
+			{col = 'k', mdbx_type = 'u32', not_null = true},
+			{col = 'v', mdbx_type = 'u32', not_null = true},
+		}, pk = {'k'}})
+		db:commit()
+		db:begin'w'                       --outer
+		db:insert('kv', '{}', {k = 1, v = 10})
+		db:begin'w'                       --nested
+		db:insert('kv', '{}', {k = 2, v = 20})
+		db:commit()                       --nested merges into outer
+		db:commit()                       --outer persists both
+		db:close()
+		db = mdbx_open(file); db:begin'r'
+		assert(db:exists('kv', 1) and db:exists('kv', 2))
+		db:commit(); db:close()
+	end, debug.traceback)
+	cleanup(file); assert(ok, err)
+end
+
+--atomic(): commits on success.
+function test.atomic_commit()
+	local file = test_file('atomic_commit'); cleanup(file)
+	local ok, err = xpcall(function()
+		local db = mdbx_open(file)
+		db:atomic('w', function()
+			db:create_table('kv', {name = 'kv', fields = {
+				{col = 'k', mdbx_type = 'u32', not_null = true},
+				{col = 'v', mdbx_type = 'u32', not_null = true},
+			}, pk = {'k'}})
+			db:insert('kv', '{}', {k = 1, v = 10})
+		end)
+		db:close()
+		db = mdbx_open(file); db:begin'r'
+		assert(db:exists('kv', 1) and num(db:get('kv', 'v', 1)) == 10)
+		db:commit(); db:close()
+	end, debug.traceback)
+	cleanup(file); assert(ok, err)
+end
+
+--atomic(): an error inside aborts the whole block and re-raises; prior committed
+--data is untouched.
+function test.atomic_rollback_on_error()
+	local file = test_file('atomic_rollback_on_error'); cleanup(file)
+	local ok, err = xpcall(function()
+		local db = mdbx_open(file)
+		db:begin'w'
+		db:create_table('kv', {name = 'kv', fields = {
+			{col = 'k', mdbx_type = 'u32', not_null = true},
+			{col = 'v', mdbx_type = 'u32', not_null = true},
+		}, pk = {'k'}})
+		db:insert('kv', '{}', {k = 1, v = 10})
+		db:commit()
+		local aok = pcall(db.atomic, db, 'w', function()
+			db:insert('kv', '{}', {k = 2, v = 20})
+			error'boom'
+		end)
+		assert(not aok, 'atomic should re-raise the error')
+		db:close()
+		db = mdbx_open(file); db:begin'r'
+		assert(db:exists('kv', 1), 'committed row lost')
+		assert(not db:exists('kv', 2), 'atomic-aborted row survived')
+		db:commit(); db:close()
+	end, debug.traceback)
+	cleanup(file); assert(ok, err)
+end
+
+--autoinc: an auto_increment pk left unset gets a generated id (returned by
+--insert), increasing by 1, persisted as a sequence across reopen (no reuse of
+--deleted ids).
+function test.autoinc()
+	local file = test_file('autoinc'); cleanup(file)
+	local ok, err = xpcall(function()
+		local db = mdbx_open(file)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true, auto_increment = true},
+			{col = 'v' , mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		local id0 = num(db:insert('t', '{}', {v = 10}))
+		local id1 = num(db:insert('t', '{}', {v = 11}))
+		assert(id1 == id0 + 1, ('%d,%d'):format(id0, id1))
+		db:del('t', id0)
+		db:commit(); db:close()
+		db = mdbx_open(file); db:begin'w' --seq persists -> next id continues
+		local id2 = num(db:insert('t', '{}', {v = 12}))
+		assert(id2 == id1 + 1, ('%d,%d'):format(id1, id2))
+		assert(db:exists('t', id1) and db:exists('t', id2) and not db:exists('t', id0))
+		db:commit(); db:close()
+	end, debug.traceback)
+	cleanup(file); assert(ok, err)
+end
+
+--cursor navigation: first/next walk ascending, last/prev walk descending, and
+--current returns the positioned row.
+function test.cursor_navigation()
+	with_db('cursor_navigation', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'k', mdbx_type = 'u32', not_null = true},
+			{col = 'v', mdbx_type = 'u32', not_null = true},
+		}, pk = {'k'}})
+		for i = 1, 5 do db:insert('t', '{}', {k = i, v = i * 10}) end
+		local cur = db:cursor('t')
+		local fwd = {}
+		local k = cur:first()
+		while k do add(fwd, num(k)); k = cur:next() end
+		assert(#fwd == 5 and fwd[1] == 1 and fwd[5] == 5, cat(imap(fwd, tostring), ','))
+		local bwd = {}
+		k = cur:last()
+		while k do add(bwd, num(k)); k = cur:prev() end
+		assert(#bwd == 5 and bwd[1] == 5 and bwd[5] == 1, cat(imap(bwd, tostring), ','))
+		cur:first()
+		local ck, cv = cur:current()
+		assert(num(ck) == 1 and num(cv) == 10, ('%s,%s'):format(S(ck), S(cv)))
+		cur:close()
+		db:commit()
+	end)
+end
+
+--cols-format matrix: insert and get accept all four cols formats
+--(nil/'a b'/'[a b]'/'{a b}') with matching value shapes.
+function test.cols_format_matrix()
+	with_db('cols_format_matrix', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'k', mdbx_type = 'u32', not_null = true},
+			{col = 'a', mdbx_type = 'u32', not_null = true},
+			{col = 'b', mdbx_type = 'u32', not_null = true},
+		}, pk = {'k'}})
+		db:insert('t', nil      , 1, 10, 100)            --positional scalars (all cols)
+		db:insert('t', 'k a b'  , 2, 20, 200)            --positional scalars (listed)
+		db:insert('t', '[k a b]', {3, 30, 300})          --positional table
+		db:insert('t', '{}'     , {k = 4, a = 40, b = 400}) --named table
+		assert(num(db:get('t', 'a', 1)) == 10)                       --single scalar
+		local a, b = db:get('t', 'a b', 4); assert(num(a) == 40 and num(b) == 400) --scalars
+		local r = db:get('t', '[a b]', 3); assert(num(r[1]) == 30 and num(r[2]) == 300) --pos table
+		local g = db:get('t', '{a b}', 2); assert(num(g.a) == 20 and num(g.b) == 200) --named table
+		db:commit()
+	end)
+end
+
+--get/exists edges: exists returns (record_exists, table_exists); try_get
+--hits/misses; must_get raises on miss.
+function test.get_and_exists_edges()
+	with_db('get_and_exists_edges', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'k', mdbx_type = 'u32', not_null = true},
+			{col = 'v', mdbx_type = 'u32', not_null = true},
+		}, pk = {'k'}})
+		db:insert('t', '{}', {k = 1, v = 10})
+		local rec, tab = db:exists('t', 1)
+		assert(rec == true and tab, 'present row')
+		local rec2, tab2 = db:exists('t', 99)
+		assert(not rec2 and tab2, 'missing row, present table')
+		local rec3, tab3 = db:exists('nope', 1)
+		assert(not rec3 and not tab3, 'missing table')
+		assert(db:try_get('t', 'v', 1), 'try_get hit')
+		assert(db:try_get('t', 'v', 99) == false, 'try_get miss')
+		assert(num(db:must_get('t', 'v', 1)) == 10)
+		assert(not pcall(db.must_get, db, 't', 'v', 99), 'must_get miss should raise')
+		db:commit()
+	end)
+end
+
+--put_records: batch insert of positional-table rows.
+function test.put_records()
+	with_db('put_records', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'k', mdbx_type = 'u32', not_null = true},
+			{col = 'v', mdbx_type = 'u32', not_null = true},
+		}, pk = {'k'}})
+		db:put_records('t', '[]', {{1, 10}, {2, 20}, {3, 30}})
+		assert(db:exists('t', 1) and db:exists('t', 2) and db:exists('t', 3))
+		assert(num(db:get('t', 'v', 2)) == 20 and num(db:get('t', 'v', 3)) == 30)
+		db:commit()
+	end)
+end
+
+--float special values round-trip bit-exactly as f32 and f64 values:
+--+inf, -inf, NaN, and signed zeros (-0.0 vs +0.0).
+function test.float_specials()
+	with_db('float_specials', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'a' , mdbx_type = 'f32'},
+			{col = 'b' , mdbx_type = 'f64'},
+		}, pk = {'id'}})
+		local huge = math.huge
+		local cases = {
+			{1,  huge,  huge},
+			{2, -huge, -huge},
+			{3,  0/0 ,  0/0 }, --NaN
+			{4, -0.0 , -0.0 },
+			{5,  0.0 ,  0.0 },
+		}
+		for _, c in ipairs(cases) do db:insert('t', '{}', {id = c[1], a = c[2], b = c[3]}) end
+		local function chk(id, exp)
+			local a = num(db:get('t', 'a', id))
+			local b = num(db:get('t', 'b', id))
+			if exp ~= exp then --NaN: the only value not equal to itself
+				assert(a ~= a and b ~= b, 'NaN lost at id '..id)
+			elseif exp == 0 then --distinguish -0 from +0 via 1/x (-inf vs +inf)
+				assert(a == 0 and b == 0 and 1/a == 1/exp and 1/b == 1/exp,
+					'signed zero lost at id '..id)
+			else
+				assert(a == exp and b == exp, 'value lost at id '..id)
+			end
+		end
+		chk(1, huge); chk(2, -huge); chk(3, 0/0); chk(4, -0.0); chk(5, 0.0)
+		db:commit()
+	end)
+end
+
+--float keys order correctly, including the infinities: cursor walk is ascending
+--from -inf to +inf across negatives and positives.
+function test.float_key_ordering()
+	with_db('float_key_ordering', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'k', mdbx_type = 'f64', not_null = true},
+			{col = 'v', mdbx_type = 'u32', not_null = true},
+		}, pk = {'k'}})
+		local huge = math.huge
+		local ks = {huge, -huge, -1.5, 0.0, 1.5, -100, 100}
+		for i, k in ipairs(ks) do db:insert('t', '{}', {k = k, v = i}) end
+		local got = {}
+		local cur = db:cursor('t')
+		local k = cur:first()
+		while k do add(got, num(k)); k = cur:next() end
+		cur:close()
+		local exp = {-huge, -100, -1.5, 0, 1.5, 100, huge}
+		assert(#got == #exp, #got..' rows')
+		for i = 1, #exp do
+			assert(got[i] == exp[i], i..': '..tostring(got[i])..' ~= '..tostring(exp[i]))
+		end
+		db:commit()
+	end)
+end
+
+--null vs default vs unset: an unset nullable col reads null; an unset col with a
+--default reads the default (not null); update can set a col to null and back.
+function test.null_vs_default()
+	with_db('null_vs_default', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'opt', mdbx_type = 'u32'},                  --nullable, no default
+			{col = 'def', mdbx_type = 'u32', mdbx_default = 7}, --nullable with default
+		}, pk = {'id'}})
+		db:insert('t', '{}', {id = 1}) --neither opt nor def given
+		assert(db:is_null('t', 'opt', 1) == true , 'unset nullable -> null')
+		assert(db:is_null('t', 'def', 1) == false, 'unset-with-default -> not null')
+		assert(num(db:get('t', 'def', 1)) == 7   , 'default applied')
+		db:insert('t', '{}', {id = 2, opt = null, def = 9}) --explicit null / value
+		assert(db:is_null('t', 'opt', 2) == true)
+		assert(num(db:get('t', 'def', 2)) == 9)
+		db:insert('t', '{}', {id = 3, opt = 5})
+		assert(db:is_null('t', 'opt', 3) == false and num(db:get('t', 'opt', 3)) == 5)
+		db:update('t', '{}', {id = 3, opt = null}) --set to null
+		assert(db:is_null('t', 'opt', 3) == true)
+		db:update('t', '{}', {id = 3, opt = 8})    --and back
+		assert(db:is_null('t', 'opt', 3) == false and num(db:get('t', 'opt', 3)) == 8)
+		db:commit()
+	end)
+end
+
+--error returns: insert on an existing pk -> 'exists' (no overwrite); update/del
+--on a missing pk -> 'not_found'.
+function test.error_returns()
+	with_db('error_returns', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'k', mdbx_type = 'u32', not_null = true},
+			{col = 'v', mdbx_type = 'u32', not_null = true},
+		}, pk = {'k'}})
+		db:insert('t', '{}', {k = 1, v = 10})
+		local ok, err = db:try_insert('t', '{}', {k = 1, v = 99})
+		assert(ok == false and err == 'exists', ('%s,%s'):format(S(ok), S(err)))
+		assert(num(db:get('t', 'v', 1)) == 10, 'failed insert must not overwrite')
+		local ok2, err2 = db:try_update('t', '{}', {k = 2, v = 20})
+		assert(ok2 == false and err2 == 'not_found', ('%s,%s'):format(S(ok2), S(err2)))
+		local ok3, err3 = db:try_del('t', 99)
+		assert(ok3 == false and err3 == 'not_found', ('%s,%s'):format(S(ok3), S(err3)))
+		db:commit()
+	end)
+end
+
+--rename a table (with a unique index and an fk) in the very txn it was created
+--in: the schema rename machinery (index renames, fk cross-refs) handles a
+--current-txn table now that the base rename limitation is lifted.
+function test.schema_rename_created_in_same_txn()
+	with_db('schema_rename_created_in_same_txn', function(db)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id'   , mdbx_type = 'u32' , not_null = true},
+			{col = 'pid'  , mdbx_type = 'u32' , not_null = true},
+			{col = 'email', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
+		}, pk = {'id'}})
+		db:add_index('child', {'email', is_unique = true})
+		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		db:rename_table('child', 'kid') --no commit in between
+		assert(db:table_exists'kid' and db:table_exists'kid/u/email'
+			and not db:table_exists'child' and not db:table_exists'child/u/email')
+		assert_consistent(db, 'after same-txn rename')
+		--enforcement intact through the renamed table
+		db:insert('parent', '{}', {id = 1})
+		db:insert('kid', '{}', {id = 10, pid = 1, email = 'a@x'})
+		assert(db:try_insert('kid', '{}', {id = 11, pid = 99, email = 'b@x'}) == false) --fk
+		assert(db:try_del('parent', 1) == false) --referenced by kid 10
+		db:commit()
+	end)
+end
+
+--rename a plain value column and a pk column: data is reachable by the new names
+--(no rewrite), old names are gone, and it persists across reopen.
+function test.rename_column_basic()
+	local file = test_file('rename_column_basic'); cleanup(file)
+	local ok, err = xpcall(function()
+		local db = mdbx_open(file)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id'   , mdbx_type = 'u32' , not_null = true},
+			{col = 'title', mdbx_type = 'utf8', maxlen = 16},
+		}, pk = {'id'}})
+		db:insert('t', '{}', {id = 1, title = 'hi'})
+		db:rename_column('t', 'title', 'name') --value column
+		db:rename_column('t', 'id', 'key')     --pk column
+		assert(db:get('t', 'name', 1) == 'hi', 'value by new name')
+		assert(not pcall(db.get, db, 't', 'title', 1), 'old name should be gone')
+		db:insert('t', '{}', {key = 2, name = 'yo'}) --write by new names
+		assert(db:get('t', 'name', 2) == 'yo')
+		db:del('t', 1); assert(not db:exists('t', 1))
+		db:commit(); db:close()
+		db = mdbx_open(file); db:begin'r' --persists
+		assert(db:get('t', 'name', 2) == 'yo')
+		local _, sch = db:dbi_schema't'
+		assert(sch.fields.key and sch.fields.name and not sch.fields.id and not sch.fields.title)
+		db:commit(); db:close()
+	end, debug.traceback)
+	cleanup(file); assert(ok, err)
+end
+
+--rename an indexed column: the index table (name embeds the column) is renamed,
+--the index data is intact, lookups + uniqueness work by the new name, consistent.
+function test.rename_column_indexed()
+	local file = test_file('rename_column_indexed'); cleanup(file)
+	local ok, err = xpcall(function()
+		local db = mdbx_open(file)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id'   , mdbx_type = 'u32' , not_null = true},
+			{col = 'email', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
+			{col = 'age'  , mdbx_type = 'u32' , not_null = true},
+		}, pk = {'id'}})
+		db:add_index('t', {'email', is_unique = true})
+		db:add_index('t', {'age'}) --non-unique
+		db:insert('t', '{}', {id = 1, email = 'a@x', age = 30})
+		db:commit(); db:close()
+		db = mdbx_open(file); db:begin'w' --rename loaded schema definitions
+		db:rename_column('t', 'email', 'mail')
+		db:rename_column('t', 'age', 'years')
+		assert(db:table_exists't/u/mail' and not db:table_exists't/u/email')
+		assert(db:table_exists't/i/years' and not db:table_exists't/i/age')
+		assert_consistent(db, 'after rename indexed')
+		--unique still enforced on the renamed column
+		assert(db:try_insert('t', '{}', {id = 2, mail = 'a@x', years = 9}) == false)
+		--lookup via the renamed index table
+		local r = db:must_get('t/u/mail', '{}', 'a@x')
+		assert(num(r.id) == 1, S(r.id))
+		db:commit(); db:close()
+		db = mdbx_open(file); db:begin'w' --persists + still enforces
+		assert_consistent(db, 'reopen')
+		local _, sch = db:dbi_schema't'
+		assert(sch.ixs['t/u/mail'][1] == 'mail')
+		assert(sch.ixs['t/i/years'][1] == 'years')
+		assert(db:try_insert('t', '{}', {id = 3, mail = 'a@x', years = 9}) == false)
+		assert(num((db:must_get('t/u/mail', '{}', 'a@x')).id) == 1)
+		db:commit(); db:close()
+	end, debug.traceback)
+	cleanup(file); assert(ok, err)
+end
+
+--rename a child's fk column and a parent's referenced pk column: the fk index is
+--renamed, fk.cols/ref_cols follow, and enforcement keeps working, across reopen.
+function test.rename_column_fk()
+	local file = test_file('rename_column_fk'); cleanup(file)
+	local ok, err = xpcall(function()
+		local db = mdbx_open(file)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent',
+			fields = {{col = 'uid', mdbx_type = 'u32', not_null = true}}, pk = {'uid'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'pid', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'uid'}}
+		db:insert('parent', '{}', {uid = 1})
+		db:insert('child', '{}', {id = 10, pid = 1})
+		db:rename_column('child', 'pid', 'parent_id') --child fk column
+		db:rename_column('parent', 'uid', 'user_id')  --parent referenced pk column
+		assert(db:table_exists'child/i/parent_id' and not db:table_exists'child/i/pid')
+		assert_consistent(db, 'after rename fk cols')
+		local _, csch = db:dbi_schema'child'
+		assert(csch.fks.child_pid_fk.cols[1] == 'parent_id', S(csch.fks.child_pid_fk.cols))
+		assert(csch.fks.child_pid_fk.ref_cols[1] == 'user_id', S(csch.fks.child_pid_fk.ref_cols))
+		--enforcement by the new names
+		assert(db:try_insert('child', '{}', {id = 11, parent_id = 99}) == false) --missing parent
+		db:insert('child', '{}', {id = 12, parent_id = 1})                        --ok
+		assert(db:try_del('parent', 1) == false)                                  --referenced
+		db:commit(); db:close()
+		db = mdbx_open(file); db:begin'w' --persists + still enforces
+		assert_consistent(db, 'reopen')
+		assert(db:try_del('parent', 1) == false)
+		assert(db:try_insert('child', '{}', {id = 13, parent_id = 99}) == false)
+		db:commit(); db:close()
+	end, debug.traceback)
+	cleanup(file); assert(ok, err)
+end
+
+--try_add_fk validates existing data: a child row referencing a missing parent
+--makes it fail (nothing added); fixing the data lets it succeed.
+function test.try_add_fk_rejects_invalid_data()
+	with_db('try_add_fk_rejects_invalid_data', function(db)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'pid', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:insert('parent', '{}', {id = 1})
+		db:insert('child', '{}', {id = 10, pid = 1})   --valid
+		db:insert('child', '{}', {id = 11, pid = 99})  --references missing parent
+		local fk = {name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		local ok, err = db:try_add_fk(fk)
+		assert(ok == false and err:find('fk', 1, true), ('%s,%s'):format(S(ok), S(err)))
+		local _, sch = db:dbi_schema'child'
+		assert(not (sch.fks and sch.fks.child_pid_fk), 'fk must not be added on failure')
+		assert(not db:table_exists'child/i/pid', 'fk index must not be created on failure')
+		--checked add_fk raises on the same bad data
+		assert(not pcall(db.add_fk, db, fk))
+		--fix the offending row -> now it adds, with the enforcement index.
+		db:del('child', 11)
+		assert(db:try_add_fk(fk))
+		assert(db:table_exists'child/i/pid')
+		assert(db:try_insert('child', '{}', {id = 12, pid = 99}) == false) --enforced now
+		db:commit()
+	end)
+end
+
+--add_fk validates the complete definition before creating its enforcement index
+--or changing either table's schema graph.
+function test.try_add_fk_validates_definition()
+	with_db('try_add_fk_validates_definition', function(db)
+		db:begin'w'
+		db:create_table('parent_num', {name = 'parent_num',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
+		db:create_table('parent_text', {name = 'parent_text',
+			fields = {{col = 'code', mdbx_type = 'utf8', maxlen = 8,
+				nozero = true, not_null = true}}, pk = {'code'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id'        , mdbx_type = 'u32' , not_null = true},
+			{col = 'pid'       , mdbx_type = 'u32' , not_null = true},
+			{col = 'pid_i32'   , mdbx_type = 'i32'},
+			{col = 'code'      , mdbx_type = 'utf8', maxlen = 8, nozero = true},
+			{col = 'raw_ai'    , mdbx_type = 'utf8', maxlen = 8, nozero = true,
+				mdbx_collation = 'utf8_ai_ci'},
+			{col = 'short_code', mdbx_type = 'utf8', maxlen = 4, nozero = true},
+			{col = 'padded'    , mdbx_type = 'utf8', maxlen = 8, padded = true},
+			{col = 'zero'      , mdbx_type = 'utf8', maxlen = 8},
+		}, pk = {'id'}})
+
+		local function invalid(fk, msg)
+			local ok, err = pcall(db.try_add_fk, db, fk)
+			assert(not ok and tostring(err):find(msg, 1, true), tostring(err))
+			local _, child = db:dbi_schema'child'
+			assert(not child.fks, 'invalid fk changed child schema')
+			for name in db:each_table() do
+				assert(not name:starts'child/', 'invalid fk created index: '..name)
+			end
+			for _, name in ipairs{'parent_num', 'parent_text'} do
+				local _, parent = db:dbi_schema(name)
+				assert(not parent.ref_fks, 'invalid fk changed parent schema')
+			end
+		end
+		local function fk(cols, ref_table, ref_cols, ondelete)
+			return {name = 'bad_fk', table = 'child', cols = cols,
+				ref_table = ref_table, ref_cols = ref_cols, ondelete = ondelete}
+		end
+
+		invalid(fk({}, 'parent_num', {'id'}), 'no columns')
+		invalid(fk({'pid', 'pid_i32'}, 'parent_num', {'id'}), 'column count mismatch')
+		invalid(fk({'pid'}, 'parent_num', {'nope'}), 'ref column must be pk column')
+		invalid(fk({'pid_i32'}, 'parent_num', {'id'}), 'mdbx_type mismatch')
+		invalid(fk({'short_code'}, 'parent_text', {'code'}), 'maxlen mismatch')
+		invalid(fk({'padded'}, 'parent_text', {'code'}), 'padded mismatch')
+		invalid(fk({'zero'}, 'parent_text', {'code'}), 'nozero mismatch')
+		invalid(fk({'raw_ai'}, 'parent_text', {'code'}), 'mdbx_collation mismatch')
+		invalid(fk({'pid'}, 'parent_num', {'id'}, 'restrict'), 'invalid ondelete')
+		invalid(fk({'pid'}, 'parent_num', {'id'}, 'set null'),
+			'set null column must be nullable')
+
+		assert(db:try_add_fk{
+			name = 'child_code_fk', table = 'child', cols = {'code'},
+			ref_table = 'parent_text', ref_cols = {'code'}, ondelete = 'set null',
+		})
+		assert(db:table_exists'child/i/code')
+		db:commit()
+	end)
+end
+
+--try_add_fk skips rows with null fk cols (MATCH SIMPLE), so existing nulls don't
+--block adding the fk.
+function test.try_add_fk_skips_null()
+	with_db('try_add_fk_skips_null', function(db)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'pid', mdbx_type = 'u32'}, --nullable fk col
+		}, pk = {'id'}})
+		db:insert('parent', '{}', {id = 1})
+		db:insert('child', '{}', {id = 10, pid = 1})
+		db:insert('child', '{}', {id = 11, pid = null}) --null -> skipped by the check
+		assert(db:try_add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}})
+		assert(db:is_null('child', 'pid', 11))
+		db:commit()
+	end)
+end
+
+--MATCH SIMPLE on a composite fk skips validation when any component is null,
+--both while adding the fk over existing rows and on later merged-row updates.
+function test.composite_fk_match_simple()
+	with_db('composite_fk_match_simple', function(db)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent', fields = {
+			{col = 'a', mdbx_type = 'u32', not_null = true},
+			{col = 'b', mdbx_type = 'u32', not_null = true},
+		}, pk = {'a', 'b'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'a' , mdbx_type = 'u32'},
+			{col = 'b' , mdbx_type = 'u32'},
+		}, pk = {'id'}})
+		db:insert('parent', '{}', {a = 1, b = 1})
+		db:insert('child', '{}', {id = 10, a = 1, b = 1})
+		db:insert('child', '{}', {id = 11, a = null, b = 99})
+		db:insert('child', '{}', {id = 12, a = 99, b = null})
+		db:insert('child', '{}', {id = 13, a = null, b = null})
+		assert(db:try_add_fk{name = 'child_ab_fk', table = 'child', cols = {'a', 'b'},
+			ref_table = 'parent', ref_cols = {'a', 'b'}})
+
+		db:insert('child', '{}', {id = 14, a = null, b = 99})
+		db:insert('child', '{}', {id = 15, a = 99, b = null})
+		assert(db:try_insert('child', '{}', {id = 16, a = 99, b = 99}) == false)
+		db:update('child', '{}', {id = 10, a = null})
+		db:update('child', '{}', {id = 10, b = 99})
+		local ok, err = db:try_update('child', '{}', {id = 10, a = 99})
+		assert(ok == false and err:find('fk', 1, true), ('%s,%s'):format(S(ok), S(err)))
+		assert(db:is_null('child', 'a', 10) and num(db:get('child', 'b', 10)) == 99)
+		db:commit()
+	end)
+end
+
+--add_fk takes ownership of its definition table: it records the selected
+--supporting index on that table and installs the same object in the live schema.
+function test.add_fk_owns_definition()
+	with_db('add_fk_owns_definition', function(db)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'pid', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		local fk = {name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		assert(not fk.ix)
+		assert(db:try_add_fk(fk))
+		local _, child = db:dbi_schema'child'
+		assert(fk.ix == 'child/i/pid')
+		assert(child.fks.child_pid_fk == fk)
+		db:commit()
+	end)
+end
+
+--ai_ci values retain their original text while generated index keys fold
+--composed/decomposed accents and case, and reject invalid UTF-8.
+function test.ai_ci_encoding_edges()
+	with_db('ai_ci_encoding_edges', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 's' , mdbx_type = 'utf8', maxlen = 16,
+				nozero = true, not_null = true, mdbx_collation = 'utf8_ai_ci'},
+		}, pk = {'id'}})
+		db:add_index('t', {'s'})
+		db:insert('t', '{}', {id = 1, s = ''})
+		db:insert('t', '{}', {id = 2, s = 'É'})
+		db:insert('t', '{}', {id = 3, s = 'é'})
+		db:insert('t', '{}', {id = 4, s = 'Straße'})
+		assert(db:get('t', 's', 1) == '')
+		assert(db:get('t', 's', 2) == 'É')
+		assert(db:get('t', 's', 3) == 'é')
+		assert(db:get('t', 's', 4) == 'Straße')
+		assert(num((db:must_get('t/i/s', '{}', 'STRASSE')).id) == 4)
+
+		local ok = pcall(db.get, db, 't/i/s', '{}', string.char(0xff))
+		assert(not ok, 'invalid UTF-8 was accepted')
+
+		db:create_table('short', {name = 'short', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 's' , mdbx_type = 'utf8', maxlen = 2,
+				nozero = true, not_null = true, mdbx_collation = 'utf8_ai_ci'},
+		}, pk = {'id'}})
+		db:add_index('short', {'s'})
+		db:insert('short', '{}', {id = 1, s = 'É'})
+		assert(num((db:must_get('short/i/s', '{}', 'E')).id) == 1)
+		ok = pcall(db.insert, db, 'short', '{}', {id = 2, s = 'abc'})
+		assert(not ok, 'maxlen was checked after folding instead of on input')
+
+		db:create_table('key', {name = 'key', fields = {
+			{col = 's' , mdbx_type = 'utf8', maxlen = 16,
+				nozero = true, not_null = true, mdbx_collation = 'utf8_ai_ci'},
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+		}, pk = {'s'}})
+		db:insert('key', '{}', {s = 'É', id = 1})
+		assert(db:get('key', 'id', 'E') == nil)
+		db:add_index('key', {'s'})
+		assert(num((db:must_get('key/i/s', '{}', 'E')).id) == 1)
+		db:insert('key', '{}', {s = 'E', id = 2})
+		assert(num(db:get('key', 'id', 'É')) == 1)
+		assert(num(db:get('key', 'id', 'E')) == 2)
+		db:commit()
+	end)
+end
+
+--encode_ai_ci retries decomposition when the first sizing result consumes the
+--whole UTF-32 buffer, leaving the spare byte required by utf8proc_reencode().
+function test.ai_ci_decompose_retry()
+	with_db('ai_ci_decompose_retry', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 's' , mdbx_type = 'utf8', maxlen = 16,
+				nozero = true, not_null = true, mdbx_collation = 'utf8_ai_ci'},
+		}, pk = {'id'}})
+		db:add_index('t', {'s'})
+		local _, schema = db:dbi_schema't/i/s'
+		local real_decompose = utf8_decompose
+		local calls = 0
+		utf8_decompose = function(s, len, out, cap, opt)
+			calls = calls + 1
+			if calls == 1 then return cap end
+			return real_decompose(s, len, out, cap, opt)
+		end
+		local buf = new'u8[16]'
+		local ok, len = pcall(schema.fields.s.encode, db, 'insert', buf, 'É')
+		utf8_decompose = real_decompose
+		assert(ok, len)
+		assert(calls == 2 and len == 1 and str(buf, len) == 'e')
+		db:abort()
+	end)
+end
+
+--the 3x physical-capacity factor must remain valid for the utf8proc Unicode
+--data linked into this build.
+function test.ai_ci_max_expansion_factor()
+	local C = ffi.load'utf8proc'
+	local inp = new'u8[4]'
+	local out = new'i32[256]'
+	local opt = bor(UTF8_DECOMPOSE, UTF8_CASEFOLD, UTF8_STRIPMARK)
+	local reaches_limit
+	for cp = 0, 0x10ffff do
+		if C.utf8proc_codepoint_valid(cp) then
+			local inp_len = num(utf8_encode_char(cp, inp))
+			local n = num(utf8_decompose(inp, inp_len, out, 256, opt))
+			assertf(n >= 0 and n < 256, 'U+%04X: decompose returned %d', cp, n)
+			local out_len = num(utf8_reencode(out, n, opt))
+			assertf(out_len <= inp_len * 3,
+				'U+%04X: ai_ci expansion %d -> %d exceeds 3x',
+				cp, inp_len, out_len)
+			if out_len == inp_len * 3 then reaches_limit = true end
+		end
+	end
+	assert(reaches_limit, 'ai_ci expansion scan did not exercise the 3x limit')
+end
+
+--maxlen limits input bytes; values retain their original text while generated
+--index keys have 3x capacity for the worst-case folded form.
+function test.ai_ci_folded_maxlen()
+	with_db_reopen('ai_ci_folded_maxlen', function(db)
+		db:begin'w'
+		db:create_table('val', {name = 'val', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 's' , mdbx_type = 'utf8', maxlen = 3,
+				nozero = true, not_null = true, mdbx_collation = 'utf8_ai_ci'},
+			{col = 'n' , mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:add_index('val', {'s', is_unique = true})
+		db:insert('val', '{}', {id = 1, s = '각', n = 1})
+		db:update('val', '{id n}', {id = 1, n = 2})
+		local s = db:get('val', 's', 1)
+		assert(s == '각' and #s == 3, ('%q (%d)'):format(s, #s))
+		assert(num(db:get('val', 'n', 1)) == 2)
+		assert(num((db:must_get('val/u/s', '{}', '각')).id) == 1)
+		local ok = pcall(db.get, db, 'val/u/s', '{}', 'abcd')
+		assert(not ok)
+		db:commit()
+	end, function(db)
+		db:begin'r'
+		local s = db:get('val', 's', 1)
+		assert(s == '각' and #s == 3, ('%q (%d)'):format(s, #s))
+		assert(num(db:get('val', 'n', 1)) == 2)
+		assert(num((db:must_get('val/u/s', '{}', '각')).id) == 1)
+		db:commit()
+	end)
+end
+
+--compiled field codecs must use the Db passed at runtime: a reusable paper
+--schema must not retain the first database on which it was compiled.
+function test.schema_codec_uses_runtime_db()
+	local file1 = test_file('schema_codec_uses_runtime_db_1')
+	local file2 = test_file('schema_codec_uses_runtime_db_2')
+	cleanup(file1)
+	cleanup(file2)
+	local schema = {name = 't', fields = {
+		{col = 'id', mdbx_type = 'u32', not_null = true},
+		{col = 's' , mdbx_type = 'utf8', maxlen = 2},
+	}, pk = {'id'}}
+	local db1, db2
+	local ok, err = xpcall(function()
+		db1 = mdbx_open(file1)
+		db1:begin'w'
+		db1:create_table('t', schema)
+		db1:commit()
+		db1:close()
+
+		db2 = mdbx_open(file2)
+		db2:begin'w'
+		db2:create_table('t', schema)
+		local write_ok, write_err = pcall(db2.insert, db2, 't', '{}',
+			{id = 1, s = 'abc'})
+		assert(not write_ok and iserror(write_err, 'field'), tostring(write_err))
+		assert(write_err.target == db2, 'codec retained the first database')
+		db2:abort()
+		db2:close()
+	end, debug.traceback)
+	if db1 and db1.env then db1:close() end
+	if db2 and db2.env then db2:close() end
+	cleanup(file1)
+	cleanup(file2)
+	assert(ok, err)
+end
+
+--an index is a public table: after reopen it must be loadable directly, before
+--its value table has populated the index's transient val_schema reference.
+function test.direct_index_open_after_reopen()
+	with_db_reopen('direct_index_open_after_reopen', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'v' , mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:add_index('t', {'v'})
+		db:insert('t', '{}', {id = 1, v = 10})
+		db:commit()
+	end, function(db)
+		db:begin'r'
+		local r = db:must_get('t/i/v', '{}', 10)
+		assert(num(r.id) == 1)
+		db:commit()
+	end)
+end
+
+--building an fk index randomly decodes two variable-size child-pk fields through
+--the same scratch buffer, including a descending field, plus one value field.
+function test.mixed_index_descending_pk_decode()
+	with_db('mixed_index_descending_pk_decode', function(db)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent', fields = {
+			{col = 'a', mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
+			{col = 'c', mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
+			{col = 'b', mdbx_type = 'u32', not_null = true},
+		}, pk = {'a', 'c', 'b'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'x', mdbx_type = 'u32', not_null = true},
+			{col = 'a', mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
+			{col = 'c', mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
+			{col = 'b', mdbx_type = 'u32', not_null = true},
+		}, pk = {'x', 'a', 'c', desc = {false, true, false}}})
+		db:insert('parent', '{}', {a = 'aa', c = 'cc', b = 1})
+		db:insert('parent', '{}', {a = 'bb', c = 'dd', b = 2})
+		db:insert('child', '{}', {x = 10, a = 'aa', c = 'cc', b = 1})
+		db:insert('child', '{}', {x = 20, a = 'bb', c = 'dd', b = 2})
+		db:add_fk{name = 'child_parent_fk', table = 'child', cols = {'a', 'c', 'b'},
+			ref_table = 'parent', ref_cols = {'a', 'c', 'b'}, ondelete = 'cascade'}
+
+		local r = db:must_get('child/i/a-c-b', '{}', 'aa', 'cc', 1)
+		assert(num(r.x) == 10 and r.a == 'aa' and r.c == 'cc' and num(r.b) == 1)
+		r = db:must_get('child/i/a-c-b', '{}', 'bb', 'dd', 2)
+		assert(num(r.x) == 20 and r.a == 'bb' and r.c == 'dd' and num(r.b) == 2)
+		db:del('parent', 'aa', 'cc', 1)
+		assert(not db:exists('child', 10, 'aa', 'cc'))
+		assert(db:exists('child', 20, 'bb', 'dd'))
+		db:commit()
+	end)
+end
+
+--replacement put and new-row upsert are full writes: an omitted fk column takes
+--its default for both storage and FK validation.
+function test.fk_default_full_write_operations()
+	with_db('fk_default_full_write_operations', function(db)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'pid', mdbx_type = 'u32', mdbx_default = 7},
+		}, pk = {'id'}})
+		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		db:insert('parent', '{}', {id = 8})
+		db:insert('child', '{}', {id = 1, pid = 8})
+
+		local ok, err = db:try_put('child', '{}', {id = 1})
+		assert(ok == false and err:find('fk', 1, true), ('%s,%s'):format(S(ok), S(err)))
+		assert(num(db:get('child', 'pid', 1)) == 8)
+		ok = pcall(db.upsert, db, 'child', '{}', {id = 2})
+		assert(not ok and not db:exists('child', 2))
+
+		db:insert('parent', '{}', {id = 7})
+		db:put('child', '{}', {id = 1})
+		db:upsert('child', '{}', {id = 2})
+		assert(num(db:get('child', 'pid', 1)) == 7)
+		assert(num(db:get('child', 'pid', 2)) == 7)
+		db:commit()
+	end)
+end
+
+--a real libmdbx commit failure must discard transaction-local DBIs/schema,
+--restore a nested transaction's parent, and clear a failed top-level txn.
+function test.txn_commit_failure_discards_local_state()
+	with_db('txn_commit_failure_discards_local_state', function(db)
+		db:begin'w'
+		db:create_table('keep', {name = 'keep',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
+		db:commit()
+
+		db:begin'w'
+		local outer_txn = db.txn
+		db:insert('keep', '{}', {id = 1})
+		db:begin'w'
+		db:create_table('temp', {name = 'temp', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'v' , mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:add_index('temp', {'v'})
+		assert(mdbx.mdbx_txn_break(db.txn) == 0)
+		assert(not pcall(db.commit, db))
+		assert(db.txn == outer_txn)
+		assert(not db:table_exists'temp' and not db:table_exists'temp/i/v')
+		db:insert('keep', '{}', {id = 2})
+		db:commit()
+
+		db:begin'w'
+		db:create_table('temp2', {name = 'temp2',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
+		assert(mdbx.mdbx_txn_break(db.txn) == 0)
+		assert(not pcall(db.commit, db))
+		assert(db.txn == nil)
+
+		db:begin'r'
+		assert(db:exists('keep', 1) and db:exists('keep', 2))
+		assert(not db:table_exists'temp' and not db:table_exists'temp/i/v')
+		assert(not db:table_exists'temp2')
+		assert_consistent(db)
+		db:commit()
+	end)
+end
+
+--a failed unique-index build must restore the outer txn and leave no schema
+--state behind; dropping the last unique index must also clear has_unique_ix.
+function test.index_build_failure_state()
+	with_db('index_build_failure_state', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id'   , mdbx_type = 'u32', not_null = true},
+			{col = 'cat'  , mdbx_type = 'u32', not_null = true},
+			{col = 'email', mdbx_type = 'utf8', maxlen = 16,
+				nozero = true, not_null = true},
+		}, pk = {'id'}})
+		db:insert('t', '{}', {id = 1, cat = 1, email = 'same'})
+		db:insert('t', '{}', {id = 2, cat = 2, email = 'same'})
+		local outer_txn = db.txn
+		local ok, err, ix_u = db:try_add_index('t', {'email', is_unique = true})
+		assert(ok == false and err == 'duplicate_key')
+		assert(db.txn == outer_txn, 'failed index build left a sub-txn open')
+		local _, schema = db:dbi_schema't'
+		assert(not db:table_exists(ix_u))
+		assert(not (schema.ixs and schema.ixs[ix_u]))
+		assert(not schema.ix_schemas and not schema.has_unique_ix)
+
+		db:del('t', 2)
+		local _, _, ix_n = db:try_add_index('t', {'cat'})
+		assert(db:try_add_index('t', {'email', is_unique = true}))
+		local _, schema2 = db:dbi_schema't'
+		assert(schema2.has_unique_ix)
+		db:drop_index(ix_u)
+		local _, schema3 = db:dbi_schema't'
+		assert(db:table_exists(ix_n) and not schema3.has_unique_ix)
+
+		local begins = 0
+		local real_begin = db.begin
+		db.begin = function(self, ...)
+			begins = begins + 1
+			return real_begin(self, ...)
+		end
+		db:insert('t', '{}', {id = 3, cat = 3, email = 'other'})
+		db.begin = nil
+		assert(begins == 0, begins)
+		db:commit()
+	end)
+end
+
+--every explicit write-column form must reject names outside the table schema;
+--silently ignoring a typo turns a malformed write into a different valid write.
+function test.unknown_write_columns_rejected()
+	with_db('unknown_write_columns_rejected', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'v' , mdbx_type = 'u32'},
+		}, pk = {'id'}})
+		db:insert('t', '{}', {id = 1, v = 10})
+		local accepted = {}
+		local function rejected(name, f)
+			if pcall(f) then add(accepted, name) end
+		end
+		rejected('scalar insert', function()
+			db:insert('t', 'id typo', 2, 20)
+		end)
+		rejected('named insert', function()
+			db:insert('t', '{}', {id = 3, typo = 30})
+		end)
+		rejected('update', function()
+			db:update('t', 'id typo', 1, 40)
+		end)
+		local cur = db:cursor('t', 'w')
+		assert(cur:first())
+		rejected('cursor update', function()
+			assert(cur:update('typo', 50))
+		end)
+		cur:close()
+		rejected('put_records', function()
+			db:put_records('t', '[id typo]', {{4, 60}})
+		end)
+		assert(#accepted == 0, 'accepted unknown columns: '..cat(accepted, ', '))
+		db:commit()
+	end)
+end
+
+--two fks on the same columns share one enforcement index. Cascades run before
+--NO ACTION checks, and the index remains until its final fk owner is removed.
+function test.shared_fk_index_lifetime_and_delete_order()
+	with_db('shared_fk_index_lifetime_and_delete_order', function(db)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'pid', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:add_fk{name = 'keep', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		db:add_fk{name = 'cascade', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}, ondelete = 'cascade'}
+		local _, schema = db:dbi_schema'child'
+		assert(schema.fks.keep.ix == 'child/i/pid')
+		assert(schema.fks.cascade.ix == 'child/i/pid')
+		assert(#schema.ix_schemas == 1)
+
+		db:insert('parent', '{}', {id = 1})
+		db:insert('child', '{}', {id = 10, pid = 1})
+		db:del('parent', 1)
+		assert(not db:exists('child', 10))
+
+		db:insert('parent', '{}', {id = 2})
+		db:insert('child', '{}', {id = 20, pid = 2})
+		db:drop_fk{name = 'cascade', table = 'child'}
+		assert(db:table_exists'child/i/pid')
+		assert(db:try_del('parent', 2) == false)
+		db:drop_fk{name = 'keep', table = 'child'}
+		assert(not db:table_exists'child/i/pid')
+		assert(db:try_del('parent', 2))
+		assert(db:exists('child', 20))
+		assert_consistent(db)
+		db:commit()
+	end)
+end
+
+--renaming a self-referencing table must update both sides of the fk and keep
+--its cascade path and supporting index usable.
+function test.self_referencing_fk_rename()
+	with_db('self_referencing_fk_rename', function(db)
+		db:begin'w'
+		db:create_table('node', {name = 'node', fields = {
+			{col = 'id'       , mdbx_type = 'u32', not_null = true},
+			{col = 'parent_id', mdbx_type = 'u32'},
+		}, pk = {'id'}})
+		db:add_fk{name = 'parent_fk', table = 'node', cols = {'parent_id'},
+			ref_table = 'node', ref_cols = {'id'}, ondelete = 'cascade'}
+		db:insert('node', '{}', {id = 1, parent_id = null})
+		db:insert('node', '{}', {id = 2, parent_id = 1})
+		db:rename_table('node', 'item')
+
+		local _, schema = db:dbi_schema'item'
+		local fk = schema.fks.parent_fk
+		assert(fk.table == 'item' and fk.ref_table == 'item')
+		assert(fk.ix == 'item/i/parent_id')
+		assert(schema.ref_fks['item/parent_fk'])
+		assert(db:table_exists'item/i/parent_id')
+		db:del('item', 1)
+		assert(not db:exists('item', 1) and not db:exists('item', 2))
+		assert_consistent(db)
+		db:commit()
+	end)
+end
+
+--dropping a self-referencing table must not try to reopen the table after its
+--DBI has already been dropped while untangling its own reverse reference.
+function test.self_referencing_table_drop()
+	with_db('self_referencing_table_drop', function(db)
+		db:begin'w'
+		db:create_table('node', {name = 'node', fields = {
+			{col = 'id'       , mdbx_type = 'u32', not_null = true},
+			{col = 'parent_id', mdbx_type = 'u32'},
+		}, pk = {'id'}})
+		db:add_fk{name = 'parent_fk', table = 'node', cols = {'parent_id'},
+			ref_table = 'node', ref_cols = {'id'}, ondelete = 'cascade'}
+		db:commit()
+		db:begin'w'
+		db:rename_table('node', 'item')
+		db:commit()
+		db:begin'w'
+		db:drop_table'item'
+		assert(not db:table_exists'item')
+		assert(not db:table_exists'item/i/parent_id')
+		assert_consistent(db)
+		db:commit()
+	end)
+end
+
+--column rename targets must obey the same field-name grammar as initial schema
+--layout; aborting each rejected rename must leave the cached schema unchanged.
+function test.rename_column_validates_new_name()
+	with_db('rename_column_validates_new_name', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'v' , mdbx_type = 'u32'},
+		}, pk = {'id'}})
+		db:commit()
+
+		local accepted = {}
+		for _, new_col in ipairs{'', 'Bad', 'bad-name'} do
+			db:begin'w'
+			if pcall(db.rename_column, db, 't', 'v', new_col) then
+				add(accepted, new_col)
+			end
+			db:abort()
+			db:begin'r'
+			local _, schema = db:dbi_schema't'
+			assert(schema.fields.v and not schema.fields[new_col])
+			db:commit()
+		end
+		assert(#accepted == 0, 'accepted invalid names: '..cat(accepted, ', '))
+	end)
+end
+
+--if a later index rename collides, aborting the DDL transaction must restore
+--all earlier index renames, schema names, and index data.
+function test.rename_column_failure_rolls_back()
+	with_db('rename_column_failure_rolls_back', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'a' , mdbx_type = 'u32', not_null = true},
+			{col = 'b' , mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:add_index('t', {'a'})
+		db:add_index('t', {'a', 'b'})
+		db:insert('t', '{}', {id = 1, a = 10, b = 20})
+		db:commit()
+
+		db:begin'w'
+		db:create_table't/i/x-b'
+		local ok = pcall(db.rename_column, db, 't', 'a', 'x')
+		assert(not ok, 'rename unexpectedly bypassed the index-name collision')
+		db:abort()
+
+		db:begin'r'
+		local _, schema = db:dbi_schema't'
+		assert(schema.fields.a and not schema.fields.x)
+		assert(db:table_exists't/i/a' and db:table_exists't/i/a-b')
+		assert(not db:table_exists't/i/x' and not db:table_exists't/i/x-b')
+		assert(num((db:must_get('t/i/a', '{}', 10)).id) == 1)
+		assert(num((db:must_get('t/i/a-b', '{}', 10, 20)).id) == 1)
+		assert_consistent(db)
 		db:commit()
 	end)
 end
