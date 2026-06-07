@@ -305,6 +305,54 @@ function test.drop_table_in_nested_txn()
 	end)
 end
 
+function test.drop_in_nested_txn_abort_reopens_parent_dbi()
+	with_db('drop_in_nested_txn_abort_reopens_parent_dbi', function(db)
+		local file = db.file
+		db:begin'w'
+		put_string(db, 't', 'k', 'v')
+		db:commit()
+		db:close()
+
+		db = mdbx_open(file)
+		db:begin'w'
+		db:begin'w'
+		assert(db:get_raw('t', 'k', 1))
+		db:commit()
+		db:begin'w'
+		assert(db:try_drop_table't')
+		db:abort()
+		local ok, v, v_sz = db:get_raw('t', 'k', 1)
+		assert(ok and ffi.string(v, v_sz) == 'v')
+		db:commit()
+		db:close()
+	end)
+end
+
+--Known libmdbx bug in v0.14.2-192-gf002e443: child drop+abort restores a
+--parent-created table as empty. Kept out of the default suite until fixed;
+--run explicitly with: mdbx_test.lua drop_created_table_in_nested_txn_abort
+rawset(test, 'drop_created_table_in_nested_txn_abort', function()
+	with_db('drop_created_table_in_nested_txn_abort', function(db)
+		db:begin'w'
+		put_string(db, 't', 'k', 'v')
+		db:begin'w'
+		assert(db:try_drop_table't')
+		db:abort()
+
+		assert(db:table_exists't')
+		local ok, v, v_sz = db:get_raw('t', 'k', 1)
+		assert(ok and ffi.string(v, v_sz) == 'v',
+			'child drop+abort lost the parent-created table row')
+
+		db:commit()
+		db:begin()
+		local ok, v, v_sz = db:get_raw('t', 'k', 1)
+		assert(ok and ffi.string(v, v_sz) == 'v',
+			'parent commit persisted the restored table without its row')
+		db:commit()
+	end)
+end)
+
 function test.dbi_c_clears_cached_table()
 	with_db('dbi_c_clears_cached_table', function(db)
 		db:begin'w'
