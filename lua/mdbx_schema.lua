@@ -1715,6 +1715,91 @@ function Db:must_get(...)
 	return must_ok(self:try_get(...))
 end
 
+--check that every fk's referenced row exists for the selected values. on a full
+--write (insert/put) an unset col takes its default. a nil/null fk col means "no
+--reference" so the fk is skipped ("MATCH SIMPLE": any null col skips checking).
+local fk_key_buffer = buffer()
+local function check_fks(self, schema, cols, as, full, ...)
+	for fk_name, fk in pairs(schema.fks) do
+		local vals = {}
+		local skip = false
+		local n = #fk.cols
+		for i = 1, n do
+			local col = fk.cols[i]
+			local val = select_col(cols, as, col, ...)
+			if val == nil and full then --full write: an unset col takes its default
+				val = resolve_null_val(schema, schema.fields[col])
+			end
+			if val == nil or val == null then skip = true; break end
+			vals[i] = val
+		end
+		if not skip then
+			local ref_dbi, ref_schema = self:dbi_schema(fk.ref_table)
+			assertf(ref_dbi, 'fk %s: ref table missing: %s', fk_name, fk.ref_table)
+			local pk, pk_buf_sz = fk_key_buffer(ref_schema.key_fields.max_rec_size)
+			local pk_sz = encode_key(self, ref_schema, 'get', nil, pk, pk_buf_sz,
+				ref_schema.key_cols, nil, unpack(vals, 1, n))
+			if not self:get_raw(ref_dbi, pk, pk_sz) then
+				return false, fmt('fk %s: no parent row in %s', fk_name, fk.ref_table)
+			end
+		end
+	end
+	return true
+end
+local del_fk_key_buffer = buffer()
+--probe a child's fk index for the first row referencing the deleted parent pk
+--(`...`); returns get_raw's (ok, v, v_sz) where v is the child's encoded pk. the
+--key is re-encoded on every call because a recursive cascade reuses the buffer.
+local function first_referencing_child(self, child_schema, fk, ...)
+	local ix_dbi, ix_schema = self:dbi_schema(fk.ix)
+	local xk, xk_buf_sz = del_fk_key_buffer(ix_schema.key_fields.max_rec_size)
+	local xk_sz = encode_key(self, ix_schema, 'get', nil, xk, xk_buf_sz,
+		ix_schema.key_cols, nil, ...)
+	return self:get_raw(ix_dbi, xk, xk_sz)
+end
+--apply the referential actions of fks that reference this (parent) table after
+--its row was deleted. `...` are the parent pk values (fk.cols order == ref pk
+--order). two passes so a sibling cascade that clears a reference is honored
+--before we check it: pass 1 cascades/nulls (each drains by re-probing -- a delete
+--/null removes the child's entry at this key, a cascade also recurses), pass 2
+--does the NO ACTION (default) checks -- reject if anything still references us.
+local function enforce_del_fks(self, schema, ...)
+	for _, ref in pairs(schema.ref_fks) do
+		local _, child_schema = self:dbi_schema(ref.table)
+		local fk = child_schema.fks[ref.fk]
+		if fk.ondelete == 'cascade' then
+			local n = #child_schema.key_fields
+			while true do
+				local ok, v, v_sz = first_referencing_child(self, child_schema, fk, ...)
+				if not ok then break end
+				local pk = {}
+				decode_key(child_schema, v, v_sz, pk, nil)
+				local ok, err = self:try_del(ref.table, unpack(pk, 1, n))
+				if not ok then return false, err end
+			end
+		elseif fk.ondelete == 'set null' then
+			while true do
+				local ok, v, v_sz = first_referencing_child(self, child_schema, fk, ...)
+				if not ok then break end
+				local rec = {}
+				decode_key(child_schema, v, v_sz, rec, '{}')
+				for _, col in ipairs(fk.cols) do rec[col] = null end
+				local ok, err = self:try_update(ref.table, '{}', rec)
+				if not ok then return false, err end
+			end
+		end
+	end
+	for _, ref in pairs(schema.ref_fks) do --no action (default): reject if referenced
+		local _, child_schema = self:dbi_schema(ref.table)
+		local fk = child_schema.fks[ref.fk]
+		if fk.ondelete ~= 'cascade' and fk.ondelete ~= 'set null' then
+			if first_referencing_child(self, child_schema, fk, ...) then
+				return false, fmt('fk %s: referenced by %s', fk.name, ref.table)
+			end
+		end
+	end
+	return true
+end
 local put_v0_buffer = buffer()
 local function try_put(self, flags, op, tab, cols, ...)
 	local dbi, schema = self:dbi_schema(tab, 'w')
@@ -1755,19 +1840,27 @@ local function try_put(self, flags, op, tab, cols, ...)
 					end
 				end
 				v_sz = encode_val(self, schema, op, v, v_buf_sz, val_cols, '{}', t)
+				if schema.fks then
+					for _, f in ipairs(schema.key_fields) do
+						t[f.col] = select_col(cols, as, f.col, ...)
+					end
+					local ok, err = check_fks(self, schema, schema.cols, '{}', false, t)
+					if not ok then
+						cur:close(); if in_sub then self:abort() end
+						return false, err
+					end
+				end
 			else --update all cols so no need to decode v0
 				v_sz = encode_val(self, schema, op, v, v_buf_sz, cols, as, ...)
-			end
-			if schema.fks then
-				for _,fk in ipairs(schema.fks) do
-					local ok, err = fk:check(self, k, k_sz, v, v_sz)
+				if schema.fks then
+					local ok, err = check_fks(self, schema, cols, as, true, ...)
 					if not ok then
 						cur:close(); if in_sub then self:abort() end
 						return false, err
 					end
 				end
 			end
-			assert(cur:set_raw(v, v_sz)) --overwrite at the positioned cursor (no 2nd lookup)
+			assert(cur:put_raw(k, k_sz, v, v_sz, mdbx.MDBX_CURRENT))
 		elseif op == 'update' then --update but existing row not found
 			cur:close(); if in_sub then self:abort() end
 			return false, v0
@@ -1775,12 +1868,11 @@ local function try_put(self, flags, op, tab, cols, ...)
 			v0, v0_sz = nil --no previous value (v0 currently holds the get_raw err)
 			v_sz = encode_val(self, schema, op, v, v_buf_sz, cols, as, ...)
 			if schema.fks then
-				for _,fk in ipairs(schema.fks) do
-					local ok, err = fk:check(self, k, k_sz, v, v_sz)
-					if not ok then
-						cur:close(); if in_sub then self:abort() end
-						return false, err
-					end
+				--new row: full write (missing value means take default value).
+				local ok, err = check_fks(self, schema, cols, as, true, ...)
+				if not ok then
+					cur:close(); if in_sub then self:abort() end
+					return false, err
 				end
 			end
 			local ret, err = cur:put_raw(k, k_sz, v, v_sz, flags)
