@@ -869,6 +869,7 @@ function Db:index_schema(val_schema, cols)
 			padded = f.padded,
 			nozero = f.nozero,
 			not_null = f.not_null,
+			mdbx_collation = f.mdbx_collation,
 		}
 		add(ix_fields, f)
 	end
