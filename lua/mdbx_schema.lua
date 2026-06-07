@@ -1204,7 +1204,8 @@ local function select_col(cols, as, col, ...)
 		local t = ...
 		return t[col]
 	else
-		local i = assert(cols[col])
+		local i = cols[col]
+		if not i then return end
 		if as == '[]' then
 			local t = ...
 			return t[i]
@@ -1446,13 +1447,13 @@ local function try_put(self, flags, op, tab, cols, ...)
 		local in_sub = schema.has_unique_ix
 		if in_sub then self:begin'w' end
 		local cur = self:cursor(dbi, 'w') --created in the sub-txn so its writes belong to it
-		local ok, v0, v0_sz = cur:get_raw(k, k_sz)
+		--insert skips the get: v0=nil by definition, NOOVERWRITE detects exists
+		local found, v0, v0_sz
+		if op ~= 'insert' then
+			found, v0, v0_sz = cur:get_raw(k, k_sz)
+		end
 		local v_sz
-		if ok then
-			if op == 'insert' then
-				cur:close(); if in_sub then self:abort() end
-				return false, 'exists'
-			end
+		if found then
 			--next mdbx put command will invalidate v0 so we need to save it.
 			local v0_unstable = v0
 			v0 = put_v0_buffer(v0_sz) --keep v0_sz: buffer() returns capacity, not size
