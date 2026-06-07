@@ -175,12 +175,23 @@ local schema_col_types = {
 	utf8   = C.schema_col_type_u8,
 }
 
+local function encoded_maxlen(schema, f)
+	local maxlen = f.maxlen
+	if schema.is_index and maxlen
+		and f.mdbx_type == 'utf8' and f.mdbx_collation == 'utf8_ai_ci'
+	then
+		return maxlen * 3
+	end
+	return maxlen
+end
+
 --fw. decl.
 local cols_list
 local encode_key
 local encode_val
 local decode_key
 local decode_val
+local decode_ix_col --decode one index col (key or val field) into a positional slot.
 
 --schema processing ----------------------------------------------------------
 
@@ -294,7 +305,8 @@ function Db:layout_table_schema(schema)
 		--compute max row size, just the data (which is what it is for keys).
 		local max_rec_size = 0
 		for _,f in ipairs(fields) do
-			local maxlen = f.maxlen and f.maxlen + (f.padded and 0 or 1) or 1
+			local maxlen = encoded_maxlen(schema, f)
+			maxlen = maxlen and maxlen + (f.padded and 0 or 1) or 1
 			max_rec_size = max_rec_size + maxlen * f.elem_size
 			if is_key and not f.not_null then
 				max_rec_size = max_rec_size + 1
@@ -348,7 +360,7 @@ function Db:layout_table_schema(schema)
 				f.offset = cur_offset
 			end
 			if kv_index <= fixsize_n then --advance current offset while size is known.
-				local maxlen = f.maxlen or 1
+				local maxlen = encoded_maxlen(schema, f) or 1
 				if is_key and not f.not_null then
 					cur_offset = cur_offset + 1
 				end
@@ -376,15 +388,21 @@ end
 
 local S = function() end
 
-local buf = buffer(); buf(256)
-local map_opt = bor(UTF8_DECOMPOSE, UTF8_CASEFOLD, UTF8_STRIPMARK)
+--fold a utf8 string to its ai_ci collation key: NFD-decompose + casefold +
+--stripmark, reencoded to utf8. lossy. returns (ptr, byte_len) into a reused
+--buffer that holds int32 codepoints during decompose, then the utf8 bytes.
+local ai_ci_buf = buffer(i32a)
+local ai_ci_opt = bor(UTF8_DECOMPOSE, UTF8_CASEFOLD, UTF8_STRIPMARK)
 local function encode_ai_ci(s, len)
-	local out, out_sz = buf()
-	local out, sz = utf8_map(s, len, map_opt, out, out_sz)
-	if not out and sz > 0 then --buffer to small, reallocate and retry
-		out, out_sz = buf(sz)
-		out, sz = utf8_map(s, len, map_opt, out, out_sz)
+	local out, cap = ai_ci_buf(len + 1) --floor guess; the global buffer only grows
+	local n = num(utf8_decompose(s, len, out, cap, ai_ci_opt))
+	assertf(n >= 0, 'utf8_ai_ci: invalid utf8 (%d)', n)
+	if n >= cap then --too small for the codepoints + utf8proc_reencode's nul terminator
+		out, cap = ai_ci_buf(n + 1)
+		n = utf8_decompose(s, len, out, cap, ai_ci_opt)
 	end
+	local sz = num(utf8_reencode(out, n, ai_ci_opt)) --in place: int32 cps -> utf8 bytes
+	assertf(sz >= 0, 'utf8_ai_ci: reencode failed (%d)', sz)
 	return out, sz
 end
 
@@ -463,7 +481,7 @@ function Db:compile_table_schema(schema)
 			--setup C schema.
 			local sc = fields._sc[kv_index-1]
 			sc.type = is_key and int_schema_col_type or schema_col_types[f.mdbx_type]
-			sc.len = f.maxlen or 1
+			sc.len = encoded_maxlen(schema, f) or 1
 			sc.fixed_size = f.maxlen and not f.padded and 0 or 1
 			sc.descending = f.descending and 1 or 0
 			sc.nullable = f.not_null and 0 or 1
@@ -476,34 +494,61 @@ function Db:compile_table_schema(schema)
 			local elemp_ct = ctype(elem_ct..'*')
 			local elem_size = f.elem_size
 			if f.maxlen then --array
-				function f.get_val_len(val) return #val end
-				if f.mdbx_type == 'utf8' then --utf8 strings
-					--ai_ci collation is not implemented yet.
-					assertf(f.mdbx_collation ~= 'utf8_ai_ci',
-						'utf8_ai_ci collation not implemented: %s.%s', schema.name, f.col)
-					function f.encode(db, event, buf, val, len)
-						assertf(typeof(val) == 'string', 'invalid val type: %s', typeof(val))
-						if f.nozero and val:find('\0', 1, true) then
+				local maxlen = f.maxlen
+				local nozero = f.nozero
+				if schema.is_index and is_key
+					and f.mdbx_collation == 'utf8_ai_ci'
+				then
+					local physical_maxlen = encoded_maxlen(schema, f)
+					function f.encode(db, event, buf, val)
+						assertf(typeof(val) == 'string')
+						local len = #val
+						if len > maxlen then
+							db:check_col(event, schema.name, f.col, false, 'too_long')
+						end
+						local p, len = encode_ai_ci(val, len)
+						assert(len <= physical_maxlen)
+						if nozero and val:find('\0', 1, true) then
+							db:check_col(event, schema.name, f.col, false, 'zero')
+						end
+						copy(buf, p, len)
+						return len
+					end
+					function f.decode(p, len)
+						return str(p, len)
+					end
+				elseif f.mdbx_type == 'utf8' then --raw utf8 strings
+					function f.encode(db, event, buf, val)
+						assertf(typeof(val) == 'string')
+						local len = #val
+						if len > maxlen then
+							db:check_col(event, schema.name, f.col, false, 'too_long')
+						end
+						if nozero and val:find('\0', 1, true) then
 							db:check_col(event, schema.name, f.col, false, 'zero')
 						end
 						copy(buf, val, len)
+						return len
 					end
 					function f.decode(p, len)
 						return str(p, len)
 					end
 				else --array
-					function f.encode(db, event, buf, val, len)
-						assertf(typeof(val) == 'table', 'invalid val type: %s for %s.%s',
-							typeof(val), schema.name, f.col)
+					function f.encode(db, event, buf, val)
+						assertf(typeof(val) == 'table')
+						local len = #val
+						if len > maxlen then
+							db:check_col(event, schema.name, f.col, false, 'too_long')
+						end
 						local buf = cast(elemp_ct, buf)
 						for i = 1, len do
 							local v = val[i]
-							if f.nozero and v == 0 then
+							if nozero and v == 0 then
 								db:check_col(event, schema.name, f.col, false, 'zero')
 							end
 							buf[i-1] = v
 						end
-						return buf, len
+						return len
 					end
 					function f.decode(p, len)
 						local p = cast(elemp_ct, p)
@@ -515,9 +560,9 @@ function Db:compile_table_schema(schema)
 					end
 				end
 			else --scalar
-				function f.get_val_len() return 1 end
 				function f.encode(db, event, buf, val)
 					cast(elemp_ct, buf)[0] = val
+					return 1
 				end
 				function f.decode(p)
 					return cast(elemp_ct, p)[0]
@@ -1107,12 +1152,7 @@ function encode_key(self, schema, event, autoinc_f, rec, rec_buf_sz, cols, as, .
 		elseif encode_int_key then
 			return encode_int_key(rec, rec_buf_sz, val), autoinc_v
 		else
-			local len = f.get_val_len(val)
-			if f.maxlen and len > f.maxlen then
-				self:check_col(event, schema.name, f.col, false,
-					fmt('too_long: %d > %d', len, f.maxlen))
-			end
-			f.encode(self, event, pp[0], val, len)
+			local len = f.encode(self, event, pp[0], val)
 			C.schema_key_add(schema._st, ki-1, rec, rec_buf_sz, len, pp)
 		end
 	end
@@ -1133,17 +1173,7 @@ function encode_val(self, schema, event, rec, rec_buf_sz, cols, as, ...)
 		if val == nil and f.not_null then
 			self:check_col(event, schema.name, f.col, false, 'not_null')
 		end
-		local len
-		if val ~= nil then
-			len = f.get_val_len(val)
-			if f.maxlen and len > f.maxlen then
-				self:check_col(event, schema.name, f.col, false,
-					fmt('too_long: %d > %d', len, f.maxlen))
-			end
-			f.encode(self, event, pp[0], val, len)
-		else
-			len = -1
-		end
+		local len = val ~= nil and f.encode(self, event, pp[0], val) or -1
 		C.schema_val_add(schema._st, vi-1, rec, rec_buf_sz, len, pp)
 	end
 	return pp[0] - rec
