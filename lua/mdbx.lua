@@ -52,7 +52,7 @@ CRUD
 	db:try_insert_raw  (table_name|dbi, k, k_sz, v, v_sz, [flags]) -> true | false,'exists',cur_v,cur_v_sz
 	db:try_update_raw  (table_name|dbi, k, k_sz, v, v_sz, [flags]) -> true | false,'not_found'
 	db:try_del_raw     (table_name|dbi, k, k_sz, [v], [v_sz]) -> true|false,err
-	db:gen_id          (table_name|dbi) -> n     gen unique increasing id
+	db:seq             (table_name|dbi, increment) -> n     get/increment sequence
 	db:try_move_key_raw(table_name|dbi, k, k_sz, new_k, new_k_sz) -> true | false,err
 	db:each_raw(table_name[, 'w']) -> iter() -> cur, k, k_sz, v, v_sz   missing table is empty
 CURSORS
@@ -65,7 +65,6 @@ CURSORS
 	cur:get_raw      (k, k_sz, [op]) -> true, v, v_sz | false,err
 	cur:get_pair_raw (k, k_sz, v, v_sz, [op]) -> true, v, v_sz | false,err
 	cur:put_raw (k, k_sz, v, v_sz, [flags]) -> true | false,'exists',cur_v,cur_v_sz | false,'not_found'
-	cur:set_raw (v, v_sz) -> true | false,'not_found'
 	cur:del     ([flags])
 DEBUG
 	mdbx_set_log_level(level)              set MDBX log level (now is 'warn')
@@ -652,14 +651,14 @@ function Db:try_del_raw(tab, k, k_sz, v, v_sz)
 end
 
 local seqbuf = u64a(1)
-function Db:gen_id(tab)
+function Db:seq(tab, increment)
 	check_wtxn(self)
 	local dbi = isnum(tab) and tab or self:dbi(tab, 'w')
-	local rc = C.mdbx_dbi_sequence(self.txn, dbi, seqbuf, 1)
+	local rc = C.mdbx_dbi_sequence(self.txn, dbi, seqbuf, assert(increment))
 	assert(rc ~= -1, 'overflow')
-	self:checkz('gen_id', rc)
+	self:checkz('seq', rc)
 	local seq = num(seqbuf[0])
-	log('note', 'db', 'gen_id', '%s: %d', self:table_name(tab), seq)
+	log('note', 'db', 'seq', '%s: %d', self:table_name(tab), seq)
 	return seq
 end
 
@@ -793,24 +792,6 @@ function Cur:put_raw(k, k_sz, v, v_sz, flags)
 	local rc = C.mdbx_cursor_put(self.c, key, val, flags or 0)
 	if rc == C.MDBX_KEYEXIST then return false, 'exists', val.data, num(val.size) end
 	return self.db:tryz('cursor_put', rc)
-end
-
-function Cur:set_raw(v, v_sz)
-	check_cursor(self)
-	check_wtxn(self.db)
-	local ok, err = self.db:tryz('cursor_set',
-		C.mdbx_cursor_get(self.c, key, val, C.MDBX_GET_CURRENT))
-	if not ok then
-		return false, err
-	end
-	val.data = v
-	val.size = v_sz
-	ok, err = self.db:tryz('cursor_set',
-		C.mdbx_cursor_put(self.c, key, val, C.MDBX_CURRENT))
-	if not ok then
-		return false, err
-	end
-	return true
 end
 
 function Cur:del(flags)
