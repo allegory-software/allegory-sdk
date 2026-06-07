@@ -608,6 +608,8 @@ function Db:save_table_schema(schema)
 				padded = f.padded,
 				nozero = f.nozero,
 				not_null = f.not_null,
+				mdbx_default = f.mdbx_default,
+				auto_increment = f.auto_increment,
 				--computed attributes
 				elem_size = f.elem_size, --for validating custom types in the future.
 				descending = f.descending,
@@ -626,6 +628,25 @@ function Db:save_table_schema(schema)
 				is_unique = ix.is_unique,
 				desc = ix.desc and imap(ix.desc),
 			}, ix)
+		end
+	end
+	if schema.fks then
+		t.fks = {}
+		for fk_name, fk in pairs(schema.fks) do
+			t.fks[fk_name] = {
+				name = fk.name,
+				cols = imap(fk.cols),
+				ref_table = fk.ref_table,
+				ref_cols = imap(fk.ref_cols),
+				ondelete = fk.ondelete,
+				ix = fk.ix,
+			}
+		end
+	end
+	if schema.ref_fks then --reverse refs (parent side): {key -> {table, fk}}.
+		t.ref_fks = {}
+		for k, ref in pairs(schema.ref_fks) do
+			t.ref_fks[k] = {table = ref.table, fk = ref.fk}
 		end
 	end
 	local k = schema.name
@@ -649,6 +670,7 @@ function Db:load_table_schema(table_name)
 		schema.fields[f.col_pos] = f
 		schema.fields[f.col] = f
 		f.key_index = i
+		if f.auto_increment then schema.autoinc_field = f end
 	end
 	for i,f in ipairs(schema.val_fields) do
 		schema.fields[f.col_pos] = f
@@ -667,7 +689,58 @@ function Db:load_table_schema(table_name)
 			add(schema.ix_schemas, ix_schema)
 		end
 	end
+	if schema.fks then --child table: re-attach fk-enforcement indexes to ix_schemas.
+		for _, fk in pairs(schema.fks) do
+			fk.table = table_name
+			--an fk-owned index isn't in `ixs`; attach it to ix_schemas (the live,
+			--maintained list) unless a user index or another fk already added it.
+			if fk.ix and not (schema.ixs and schema.ixs[fk.ix]) then
+				schema.ix_schemas = schema.ix_schemas or {}
+				local present
+				for _, ix_schema in ipairs(schema.ix_schemas) do
+					if ix_schema.name == fk.ix then present = true; break end
+				end
+				if not present then
+					local ix_schema = assertf(self:load_table_schema(fk.ix),
+						'schema missing for fk index: %s', fk.ix)
+					ix_schema.val_schema = schema
+					binsearch_insert(schema.ix_schemas, ix_schema, function(t, i, s)
+						return t[i].name < s.name
+					end)
+				end
+			end
+		end
+	end
 	return schema
+end
+
+function Db:reload_table_schema(name)
+	local schema = assertf(self:load_table_schema(name),
+		'no stored schema for table: %s', name)
+	if not schema.is_index then
+		self:compile_table_schema(schema)
+		for _, ix_schema in ipairs(schema.ix_schemas or empty) do
+			self:compile_table_schema(ix_schema)
+			self.meta[ix_schema.name] = ix_schema
+		end
+	end
+	return schema
+end
+
+function Db:dbi_schema(tab, mode)
+	local name = self:table_name(tab)
+	local dbi, schema
+	if mode == 'ddl' then
+		dbi, schema = self:localize_dbi(tab, 'w')
+		if dbi and not schema then
+			schema = self:reload_table_schema(name)
+			self.meta[name] = schema
+		end
+	else
+		dbi, schema = self:dbi(tab, mode)
+	end
+	if dbi then assertf(schema, 'no schema for table: %s', name) end
+	return dbi, schema
 end
 
 function Db:try_drop_table_schema(table_name)
@@ -746,7 +819,8 @@ local try_open_table_raw = Db.try_open_table
 function Db:try_open_table(tab, mode, paper_schema, flags)
 
 	local table_name = tab
-	paper_schema = paper_schema or attrs_find(self, 'schema', 'tables', table_name)
+	paper_schema = paper_schema or self.meta[table_name]
+		or self.schema and self.schema.tables[table_name]
 
 	local stored_schema = self:load_table_schema(table_name)
 	if stored_schema and not paper_schema then
@@ -786,17 +860,15 @@ function Db:try_open_table(tab, mode, paper_schema, flags)
 	end
 
 	if schema then
-		self.dbim[dbi] = schema
+		self.meta[table_name] = schema
 		if created and not stored_schema then
 			self:save_table_schema(schema)
 		end
-		if schema.ix_schemas then
-			for _,ix_schema in ipairs(schema.ix_schemas) do
-				local dbi, err, errs = self:try_open_table(ix_schema.name, mode, ix_schema)
-				if not dbi then
-					if sub_tx then self:abort() end
-					return nil, err, errs
-				end
+		for _,ix_schema in ipairs(schema.ix_schemas or empty) do
+			local dbi, err, errs = self:try_open_table(ix_schema.name, mode, ix_schema)
+			if not dbi then
+				if sub_tx then self:abort() end
+				return nil, err, errs
 			end
 		end
 	end
@@ -1141,7 +1213,7 @@ function encode_key(self, schema, event, autoinc_f, rec, rec_buf_sz, cols, as, .
 			val = resolve_null_val(schema, f)
 		end
 		if val == nil and f == autoinc_f then
-			val = self:gen_id(schema.name)
+			val = self:seq(schema.name, 1)
 			autoinc_v = val
 		end
 		if val == nil then
