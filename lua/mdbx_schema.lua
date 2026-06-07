@@ -1098,27 +1098,37 @@ function Db:compile_index_schema(ix_schema)
 
 end
 
-function Db:try_add_index(val_table, ix)
-	local val_dbi, val_schema = self:dbi_schema(val_table, 'w')
-	local ix_schema = self:index_schema(val_schema, ix)
-	if val_schema.ixs and val_schema.ixs[ix_schema.name] then
-		return false, 'exists', ix_schema.name
-	end
+--create the index table, populate it from existing rows, and attach it to the
+--live ix_schemas list. shared by try_add_index (user index, also registered in
+--`ixs`) and add_fk (fk-enforcement index, not in `ixs`).
+local function build_index(self, val_schema, ix_schema)
 	self:compile_table_schema(ix_schema)
 	self:begin'w'
 	local ok, err = ix_schema:try_create(self)
 	if not ok then
 		self:abort()
-		return false, err, ix_schema.name
+		return false, err
 	end
-	attr(val_schema, 'ixs')[ix_schema.name] = ix
-	local ix_schemas = attr(val_schema, 'ix_schemas')
-	binsearch_insert(val_schema.ix_schemas, ix_schema, function(ix_schemas, i, ix_schema)
-		return ix_schemas[i].name < ix_schema.name
+	binsearch_insert(attr(val_schema, 'ix_schemas'), ix_schema, function(t, i, s)
+		return t[i].name < s.name
 	end)
 	val_schema.has_unique_ix = has_unique_ix(val_schema)
 	self:save_table_schema(val_schema)
 	self:commit()
+	return true
+end
+function Db:try_add_index(val_table, ix)
+	local val_dbi, val_schema = self:dbi_schema(val_table, 'ddl')
+	local ix_schema = self:index_schema(val_schema, ix)
+	if val_schema.ixs and val_schema.ixs[ix_schema.name] then
+		return false, 'exists', ix_schema.name
+	end
+	attr(val_schema, 'ixs')[ix_schema.name] = ix
+	local ok, err = build_index(self, val_schema, ix_schema)
+	if not ok then
+		val_schema.ixs[ix_schema.name] = nil
+		return false, err, ix_schema.name
+	end
 	return true, nil, ix_schema.name
 end
 function Db:add_index(val_table, cols)
@@ -1126,26 +1136,40 @@ function Db:add_index(val_table, cols)
 	return self:check('i_add', ok, '%s: %s', ix_name, err)
 end
 
+--drop an index table and detach it from the live ix_schemas list, but only when
+--nothing references it anymore: an index lives as long as it's in `ixs` (user-
+--declared) or some fk uses it (fk.ix == name).
+local function release_index_if_unreferenced(self, schema, ix_name)
+	if schema.ixs and schema.ixs[ix_name] then return end
+	if schema.fks then
+		for _, fk in pairs(schema.fks) do
+			if fk.ix == ix_name then return end
+		end
+	end
+	local ix_i
+	for i, ix_schema in ipairs(schema.ix_schemas or empty) do
+		if ix_schema.name == ix_name then
+			ix_i = i
+			break
+		end
+	end
+	self:try_drop_table(ix_name)
+	if ix_i then
+		remove(schema.ix_schemas, ix_i)
+		if #schema.ix_schemas == 0 then schema.ix_schemas = nil end
+	end
+	schema.has_unique_ix = has_unique_ix(schema)
+end
+
 function Db:try_drop_index(ix_name)
 	local val_table = assert(ix_name:match'^[^/]+')
-	local val_dbi, val_schema = self:dbi_schema(val_table)
+	local val_dbi, val_schema = self:dbi_schema(val_table, 'ddl')
 	if not val_dbi or (not (val_schema.ixs and val_schema.ixs[ix_name])) then
 		return false, 'not_found'
 	end
 	val_schema.ixs[ix_name] = nil
-	local n = #val_schema.ix_schemas
-	for i, ix_schema in ipairs(val_schema.ix_schemas) do
-		if ix_name == ix_schema.name then
-			remove(val_schema.ix_schemas, i)
-			break
-		end
-	end
-	assert(#val_schema.ix_schemas == n - 1)
-	if #val_schema.ix_schemas == 0 then
-		val_schema.ix_schemas = nil
-	end
-	val_schema.has_unique_ix = has_unique_ix(val_schema)
-	self:try_drop_table(ix_name)
+	--keep the index table + ix_schemas entry if a fk still uses it (now fk-owned).
+	release_index_if_unreferenced(self, val_schema, ix_name)
 	self:save_table_schema(val_schema)
 	return true
 end
