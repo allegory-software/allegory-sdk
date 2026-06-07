@@ -1931,9 +1931,9 @@ function Db:upsert(tab, ...)
 end
 
 local del_v0_buffer = buffer()
-function Db:try_del(tab, ...)
-	local dbi, schema = self:dbi_schema(tab)
-	if not dbi then return false, schema end
+--delete a row and maintain its indexes (no fk enforcement). dbi/schema are
+--passed in so the caller can wrap fk enforcement + this in one sub-txn.
+local function try_del_row(self, dbi, schema, ...)
 	local k, k_buf_sz = key_rec_buffer(schema.key_fields.max_rec_size)
 	local k_sz = encode_key(self, schema, 'del', nil, k, k_buf_sz, schema.key_cols, nil, ...)
 	if not schema.ix_schemas then
@@ -1949,6 +1949,23 @@ function Db:try_del(tab, ...)
 		ix_schema:del(self, k, k_sz, v0, v0_sz)
 	end
 	return true
+end
+function Db:try_del(tab, ...)
+	local dbi, schema = self:dbi_schema(tab)
+	if not dbi then return false, schema end
+	if not schema.ref_fks then --no referencing fks: plain row delete.
+		return try_del_row(self, dbi, schema, ...)
+	end
+	--atomic, delete-first: remove our row (and its fk edges) before applying
+	--referential actions. delete-first gives NO ACTION semantics (the reject check
+	--sees the post-cascade state) and makes cascade cycles terminate -- a deleted
+	--row is gone from every index, so the recursion can't revisit it. roll back on
+	--any failure (incl. a still-referenced NO ACTION row).
+	self:begin'w'
+	local ok, err = try_del_row(self, dbi, schema, ...)
+	if ok then ok, err = enforce_del_fks(self, schema, ...) end
+	if ok then self:commit() else self:abort() end
+	return ok, err
 end
 function Db:del(tab, ...)
 	local ok, err = self:try_del(tab, ...)
