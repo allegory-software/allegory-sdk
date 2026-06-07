@@ -912,6 +912,7 @@ end
 local ix1_key_rec_buffer = buffer()
 local ix2_key_rec_buffer = buffer()
 local ix_val_rec_buffer = buffer()
+local ix_pk_col_buf = buffer()
 
 local function ix_cols(cols)
 	local t = {}
@@ -960,7 +961,6 @@ end
 function Db:compile_index_schema(ix_schema)
 
 	assert(ix_schema.is_index)
-	local ix_name = ix_schema.name
 
 	local val_table = assert(ix_schema.val_table)
 	local val_schema = assert(ix_schema.val_schema)
@@ -971,6 +971,29 @@ function Db:compile_index_schema(ix_schema)
 	--default val_cols for index tables are the val_cols of the val_table.
 	ix_schema.val_cols = val_schema.val_cols
 
+	--an index col may be a pk col of the val_table (e.g. composite-pk fk). for the
+	--common val-only case, decode_val handles everything. for the mixed case, decode
+	--each col individually into the right positional slot (dt[i] for cols[i]):
+	--val cols via schema_get_val, pk cols via schema_get_key with pp=nil (random
+	--access mode -- skips the sequential-scan optimisation, but avoids a separate
+	--buffer and stays with the cheap integer-keyed dt arrays throughout).
+	local has_pk_col = false
+	for _, col in ipairs(cols) do
+		if val_schema.fields[col].key_index then has_pk_col = true; break end
+	end
+	local function decode_ix_into(k, k_sz, v, v_sz, out_dt)
+		if not has_pk_col then
+			decode_val(val_schema, v, v_sz, out_dt, cols, '[]')
+			return
+		end
+		local kb, kb_sz = ix_pk_col_buf(val_schema.key_fields.max_rec_size)
+		for i, col in ipairs(cols) do
+			out_dt[i] = decode_ix_col(val_schema, val_schema.fields[col],
+				k, k_sz, v, v_sz, kb, kb_sz)
+		end
+	end
+	local dt0 = {}
+
 	--create index methods
 
 	function ix_schema.try_create(ix_schema, self)
@@ -978,7 +1001,7 @@ function Db:compile_index_schema(ix_schema)
 		local xk, xk_buf_sz = ix1_key_rec_buffer(ix_schema.key_fields.max_rec_size)
 		local xv, xv_buf_sz = ix_val_rec_buffer(val_schema.key_fields.max_rec_size)
 		for cur, k, k_sz, v, v_sz in self:each_raw(val_table) do
-			local vn = decode_val(val_schema, v, v_sz, dt, cols, '[]')
+			decode_ix_into(k, k_sz, v, v_sz, dt)
 			local xk_sz = encode_key(self, ix_schema, 'i_add', nil, xk, xk_buf_sz, cols, '[]', dt)
 			assert(k_sz <= xv_buf_sz, k_sz)
 			copy(xv, k, k_sz)
@@ -995,10 +1018,9 @@ function Db:compile_index_schema(ix_schema)
 		return true
 	end
 
-	local dt0 = {}
 	function ix_schema.update(ix_schema, self, k, k_sz, v, v_sz, v0, v0_sz)
 
-		local ix_dbi = self:dbi(ix_name, 'w')
+		local ix_dbi = self:dbi(ix_schema.name, 'w') --live name: survives rename
 		local dup = ix_schema.dup_keys
 
 		--[[ cases to cover:
@@ -1013,17 +1035,17 @@ function Db:compile_index_schema(ix_schema)
 			+  B -> Y    +  Y -> B  record inserted: add index
 		]]
 
-		--derive index key from v
+		--derive index key from v (key cols come from k, val cols from v)
 		local xk, xk_buf_sz = ix1_key_rec_buffer(ix_schema.key_fields.max_rec_size)
-		local vn = decode_val(val_schema, v, v_sz, dt, cols, '[]')
+		decode_ix_into(k, k_sz, v, v_sz, dt)
 		local xk_sz = encode_key(self, ix_schema, 'i_update', nil, xk, xk_buf_sz, cols, '[]', dt)
 		clear(dt)
 
 		if v0 then --record updated: remove the old index record
 
-			--derive old index key from v0 to compare with the new one.
+			--derive old index key from v0 (pk k is unchanged; only the val record differs).
 			local xk0, xk0_buf_sz = ix2_key_rec_buffer(ix_schema.key_fields.max_rec_size)
-			local vn = decode_val(val_schema, v0, v0_sz, dt0, cols, '[]')
+			decode_ix_into(k, k_sz, v0, v0_sz, dt0)
 			local xk0_sz = encode_key(self, ix_schema, 'i_update', nil, xk0, xk0_buf_sz, cols, '[]', dt0)
 			clear(dt0)
 
@@ -1047,9 +1069,9 @@ function Db:compile_index_schema(ix_schema)
 	end
 
 	function ix_schema.del(ix_schema, self, k, k_sz, v0, v0_sz)
-		local ix_dbi = self:dbi(ix_name, 'w')
+		local ix_dbi = self:dbi(ix_schema.name, 'w')
 		local xk0, xk0_buf_sz = ix2_key_rec_buffer(ix_schema.key_fields.max_rec_size)
-		decode_val(val_schema, v0, v0_sz, dt0, cols, '[]')
+		decode_ix_into(k, k_sz, v0, v0_sz, dt0)
 		local xk0_sz = encode_key(self, ix_schema, 'i_del', nil, xk0, xk0_buf_sz, cols, '[]', dt0)
 		clear(dt0)
 		if ix_schema.dup_keys then --remove the exact (key, pk) pair.
@@ -1064,10 +1086,10 @@ function Db:compile_index_schema(ix_schema)
 	--before writing, so the write can't soft-fail and need a rollback.
 	function ix_schema.check_unique(ix_schema, self, k, k_sz, v, v_sz)
 		local xk, xk_buf_sz = ix1_key_rec_buffer(ix_schema.key_fields.max_rec_size)
-		decode_val(val_schema, v, v_sz, dt, cols, '[]')
+		decode_ix_into(k, k_sz, v, v_sz, dt)
 		local xk_sz = encode_key(self, ix_schema, 'i_check', nil, xk, xk_buf_sz, cols, '[]', dt)
 		clear(dt)
-		local ok, pk, pk_sz = self:get_raw(self:dbi(ix_name), xk, xk_sz)
+		local ok, pk, pk_sz = self:get_raw(self:dbi(ix_schema.name), xk, xk_sz)
 		if ok and (pk_sz ~= k_sz or memcmp(pk, k, k_sz) ~= 0) then
 			return false, 'exists' --index key belongs to a different row
 		end
@@ -1302,6 +1324,24 @@ function decode_val(schema, rec, rec_sz, t, cols, as, i0)
 		end
 	end
 	return i0 + n
+end
+
+--decode one index col from the appropriate record into a decoded value. f must be
+--a field of val_schema; key fields are read from k/k_sz, val fields from v/v_sz.
+--kb/kb_sz is a scratch buffer for key col decode (for descending key inversion).
+function decode_ix_col(val_schema, f, k, k_sz, v, v_sz, kb, kb_sz)
+	local len
+	if f.key_index then
+		len = C.schema_get_key(val_schema._st, f.key_index-1,
+			k, k_sz, kb, kb_sz, pout, nil) --nil=random access (not sequential scan)
+	else
+		len = C.schema_get_val(val_schema._st, f.val_index-1, v, v_sz, pout)
+	end
+	if len ~= -1 then
+		return f.decode(pout[0], len)
+	else
+		return nil
+	end
 end
 end
 
