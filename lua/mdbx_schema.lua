@@ -878,31 +878,107 @@ function Db:try_open_table(tab, mode, paper_schema, flags)
 	return dbi, created, schema
 end
 
-local try_drop_table = Db.try_drop_table
+local try_drop_table_raw = Db.try_drop_table
 function Db:try_drop_table(tab)
-	local dbi, schema, name = self:dbi(tab)
-	if not dbi then return nil, schema end
-	assert(name)
-	assert(try_drop_table(self, dbi))
-	self:try_drop_table_schema(name)
-	if schema and schema.ix_schemas then
-		for _,ix_schema in ipairs(schema.ix_schemas) do
-			self:try_drop_table(ix_schema.name)
+	local dbi, schema = self:dbi(tab)
+	if not dbi then return false, schema end
+	local name = assert(self:table_name(tab))
+	if schema then
+		dbi, schema = self:dbi_schema(name, 'ddl')
+	end
+	assert(try_drop_table_raw(self, dbi))
+	if not schema then return true end --raw table
+	--as a child: drop the reverse refs our fks hold on their parents.
+	if schema.fks then
+		for _, fk in pairs(schema.fks) do
+			local _, ref_schema = self:dbi_schema(fk.ref_table, 'ddl')
+			if ref_schema and ref_schema.ref_fks then
+				ref_schema.ref_fks[name..'/'..fk.name] = nil
+				self:save_table_schema(ref_schema)
+			end
 		end
 	end
+	--as a parent: untangle children referencing us (drop their fks, keep them).
+	if schema.ref_fks then
+		for _, ref in pairs(schema.ref_fks) do
+			local _, child_schema = self:dbi_schema(ref.table, 'ddl')
+			local cfk = child_schema and child_schema.fks and child_schema.fks[ref.fk]
+			if cfk then self:detach_fk(child_schema, cfk) end
+		end
+	end
+	for _,ix_schema in ipairs(schema.ix_schemas or empty) do
+		self:try_drop_table(ix_schema.name)
+	end
+	self:try_drop_table_schema(name)
 	return true
 end
 
-local try_rename_table = Db.try_rename_table
+local try_rename_table_raw = Db.try_rename_table
+--rename an index table to new_ix: rename the dbi, move its $schema row, and fix
+--its back-references (name, val_table) and the val_schema.ixs map. val_table is
+--taken from val_schema.name, so this works both when the table itself was renamed
+--(name already updated) and when only the index names change (column rename).
+local function rename_index(self, val_schema, ix_schema, new_ix)
+	local old_ix = ix_schema.name
+	assert(try_rename_table_raw(self, old_ix, new_ix))
+	self:try_drop_table_schema(old_ix)
+	ix_schema.name = new_ix
+	ix_schema.val_table = val_schema.name
+	self:save_table_schema(ix_schema)
+	if val_schema.ixs and val_schema.ixs[old_ix] ~= nil then --user index: rekey ixs.
+		val_schema.ixs[new_ix] = val_schema.ixs[old_ix]
+		val_schema.ixs[old_ix] = nil
+	end --fk-owned indexes aren't in `ixs`; only their ix_schema.name (set above).
+end
 function Db:try_rename_table(tab, new_table_name)
 	local dbi, schema = self:dbi(tab)
-	if not dbi then return nil, schema end
-	local ok, err = try_rename_table(self, dbi, new_table_name)
-	if not ok then return nil, err end
+	if not dbi then return false, schema end
+	local name = self:table_name(tab)
 	if schema then
-		local k1 = schema.name
-		local k2 = new_table_name
-		assert(self:try_move_key_raw('$schema', k1, #k1, k2, #k2))
+		dbi, schema = self:dbi_schema(name, 'ddl')
+	end
+	local ok, err = try_rename_table_raw(self, dbi, new_table_name)
+	if not ok then return false, err end
+	if schema then
+		local old_name = schema.name
+		schema.name = new_table_name --set first: rename_index derives val_table from it
+		--index table names embed the table name (tbl/u-or-i/cols), so rename each.
+		for _, ix_schema in ipairs(schema.ix_schemas or empty) do
+			rename_index(self, schema, ix_schema,
+				new_table_name .. ix_schema.name:sub(#old_name + 1))
+		end
+		--fk references embed table names; fix them after the index rename above.
+		if schema.fks then --as a child: its fk.table/fk.ix and each parent's reverse ref.
+			for _, fk in pairs(schema.fks) do
+				fk.table = new_table_name
+				fk.ix = new_table_name .. fk.ix:sub(#old_name + 1) --index moved with us
+				local self_ref = fk.ref_table == old_name
+				if self_ref then fk.ref_table = new_table_name end
+				local ref_schema = self_ref and schema
+					or select(2, self:dbi_schema(fk.ref_table, 'ddl'))
+				if ref_schema and ref_schema.ref_fks then
+					ref_schema.ref_fks[old_name..'/'..fk.name] = nil
+					ref_schema.ref_fks[new_table_name..'/'..fk.name] =
+						{table = new_table_name, fk = fk.name}
+					if not self_ref then self:save_table_schema(ref_schema) end
+				end
+			end
+		end
+		if schema.ref_fks then --as a parent: each referencing child points back to us.
+			for _, ref in pairs(schema.ref_fks) do
+				if ref.table ~= new_table_name then --self-refs handled in the fks loop
+					local _, child_schema = self:dbi_schema(ref.table, 'ddl')
+					local cfk = child_schema and child_schema.fks
+						and child_schema.fks[ref.fk]
+					if cfk then
+						cfk.ref_table = new_table_name
+						self:save_table_schema(child_schema)
+					end
+				end
+			end
+		end
+		self:try_drop_table_schema(old_name)
+		self:save_table_schema(schema)
 	end
 	return true
 end
