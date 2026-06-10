@@ -12,61 +12,64 @@ MDBX->LUA
  * extendable, see mdbx_schema.lua which adds column schema to keys and values.
  * current transaction is implicit since we can't use parallel transactions.
  * tables can be referenced by name everywhere (no need to use DBIs).
- * tables are auto-created on write ops and auto-opened in r/o mode on read ops.
+ * tables must be created explicitly and are auto-opened on data ops.
  * APIs raise on unexpected errors; expected states return nil,err or false,err.
- * write ops and errors are logged, except raw CRUD ops which are to be used
-   to implement structured CRUD ops and have those be logged.
+   * 'db'-type errors are raised on unexpected mdbx errors.
+   * 'schema'-type errors are raised on schema-caused errors on table ops and
+	  the txn is aborted.
+ * table ops are logged.
  * use DBI 1 to read the main table.
 
 DATABASES
 	[try_]mdbx_open(file_path, [opt]) -> db,[err],created   open/create a database
-		opt.max_readers    64                max read txns across all processes
-		opt.max_tables     4K                max tables that can be opened
-		opt.readonly       false             open in r/o mode
-		opt.file_mode      0660
-		opt.flags                            see MDBX_env_flags
-	db:[try_]close()                        close db (idempotent)
-	db:closed() -> t|f                      check if db is closed
-	db:max_key_size() -> n                  get max key size in bytes
-	mdbx_delete(file_path, [flags]) -> true | false,'not_found'   delete a database
+	- opt.max_readers    64                    max read txns across all processes
+	- opt.max_tables     4K                    max tables that can be opened
+	- opt.readonly       false                 open in r/o mode
+	- opt.file_mode      0660                  perms for file creation
+	- opt.flags                                see MDBX_env_flags
+	db:[try_]close()                           close db (idempotent)
+	db:closed() -> t|f                         check if db is closed
+	db:max_key_size() -> n                     get max key size in bytes
+	mdbx_delete(file_path, [flags])            delete a database
 TRANSACTIONS
-	db:begin(['w'|'r'])                     begin transaction
-	db:commit()                             commit transaction
-	db:abort()                              abort transaction
-	db.txn                                  current txn (or nil)
-	db:atomic(['w',], fn, ...) -> ...       run fn in transaction
+	db:begin(['w'|'r'])                        begin transaction
+	db:commit()                                commit transaction
+	db:abort()                                 abort transaction
+	db.txn                                     current txn (nil if none)
+	db:atomic(['w',], fn, ...) -> ...          run fn in transaction
 TABLES
-	db:dbi(table_name|dbi, ['r'|'w'|'c']) -> dbi              open/create table
-	db:rename_table_raw     (table_name|dbi, new_table_name)  rename table
-	db:drop_table_raw       (table_name|dbi)                  raw drop
-	db:clear_table_raw      (table_name|dbi)                  delete all records
-	db:each_table() -> iter() -> table_name                   iterate table names
-	db:table_count() -> n                                     get number of tables
-	db:table_exists(table_name) -> t|f                        check if table exists
-	db:table_stat(table_name|dbi) -> MDBX_stat                get table stats (shared buffer)
-	db:dbi_flags(table_name|dbi) -> dbi_state, dbi_flags      get DBI state and flags
+	db:[try_]dbi_raw(table|dbi) -> dbi         open existing table (once)
+	db:create_table_raw(name, [flags]) -> dbi  create table
+	db:rename_table_raw(table|dbi, new_name)   rename table
+	db:drop_table_raw(table|dbi)               raw drop
+	db:clear_table_raw(table|dbi)              delete all records
+	db:each_table() -> iter() -> name          iterate table names
+	db:table_count() -> n                      get number of tables
+	db:table_exists(name) -> t|f               check if table exists
+	db:table_stat(name|dbi) -> MDBX_stat       get table stats (shared buffer)
+	db:dbi_flags(name|dbi) -> dbi_state, dbi_flags  get DBI state and flags
 CRUD
-	db:get_raw         (table_name|dbi, k, k_sz) -> true, v, v_sz | false,err
-	db:try_put_raw     (table_name|dbi, k, k_sz, v, v_sz, [flags]) -> true | false,'already_exists',cur_v,cur_v_sz | false,'not_found'
-	db:try_insert_raw  (table_name|dbi, k, k_sz, v, v_sz, [flags]) -> true | false,'already_exists',cur_v,cur_v_sz
-	db:try_update_raw  (table_name|dbi, k, k_sz, v, v_sz, [flags]) -> true | false,'not_found'
-	db:try_del_raw     (table_name|dbi, k, k_sz, [v], [v_sz]) -> true|false,err
-	db:seq             (table_name|dbi, increment) -> n     get/increment sequence
-	db:try_move_key_raw(table_name|dbi, k, k_sz, new_k, new_k_sz) -> true | false,err
-	db:each_raw(table_name[, 'w']) -> iter() -> cur, k, k_sz, v, v_sz   missing table is empty
+	db:get_raw         (table|dbi, k, k_sz) -> true, v, v_sz | false,err
+	db:try_put_raw     (table|dbi, k, k_sz, v, v_sz, [flags]) -> true | false,'already_exists',cur_v,cur_v_sz | false,'not_found'
+	db:try_insert_raw  (table|dbi, k, k_sz, v, v_sz, [flags]) -> true | false,'already_exists',cur_v,cur_v_sz
+	db:try_update_raw  (table|dbi, k, k_sz, v, v_sz, [flags]) -> true | false,'not_found'
+	db:try_del_raw     (table|dbi, k, k_sz, [v], [v_sz]) -> true | false,'not_found'
+	db:seq             (table|dbi, increment) -> n     get/increment sequence
+	db:try_move_key_raw(table|dbi, k, k_sz, new_k, new_k_sz) -> true | false,err
+	db:each_raw(table[, 'w']) -> iter() -> cur, k, k_sz, v, v_sz
 CURSORS
-	db:[try_]cursor(table_name|dbi[, 'w']) -> cur      create cursor
-	cur:close()                                        close cursor
-	cur:closed() -> t|f                                check if cursor is closed
-	cur:dbi() -> dbi
+	db:[try_]cursor(table|dbi[, 'w']) -> cur   create cursor
+	cur:close()                                close cursor
+	cur:closed() -> t|f                        check if cursor is closed
+	cur:dbi() -> dbi|nil                       get cursor's dbi
 	cur:{first|last|next|prev|current}_raw() -> true, k, k_sz, v, v_sz | false,err
 	cur:each[_reverse]_raw() -> iter() -> true, k, k_sz, v, v_sz
 	cur:get_raw      (k, k_sz, [op]) -> true, v, v_sz | false,err
 	cur:get_pair_raw (k, k_sz, v, v_sz, [op]) -> true, v, v_sz | false,err
 	cur:try_put_raw  (k, k_sz, v, v_sz, [flags]) -> true | false,'already_exists',cur_v,cur_v_sz | false,'not_found'
-	cur:del     ([flags])
+	cur:del([flags])
 DEBUG
-	mdbx_set_log_level(level)              set MDBX log level (now is 'warn')
+	mdbx_set_log_level(level)               set MDBX log level (now is 'warn')
 
 ]]
 
@@ -107,10 +110,6 @@ mdbx_set_log_level'warn' --mdbx default is 'notice', needlesly chatty.
 -- databases -----------------------------------------------------------------
 
 local Db = {}; mdbx_db = Db
-
-function Db:check(...)
-	return check_for('db', self, ...)
-end
 
 function Db:check_schema(event, tab, col, ret, ...)
 	if ret then return ret, ... end
@@ -177,15 +176,15 @@ function try_mdbx_open(file, opt)
 		file = file,
 		env = env,
 		env_dbis = setmetatable({}, {}), --{dbi->name, name->dbi}
-		env_meta = setmetatable({}, {}), --{name->schema}, see mdbx_schema.lua
 		readonly = opt.readonly,
 		_ro_txn = nil,
 		_cursors = {},
 		type = 'DB',
+		schema = {tables = {}}, --schema object (see schema.lua)
+		live_schema = {}, --{table_name->table_schema}
 	}))
 	self.env_dbis[MAIN_DBI] = '<main>'
 	self.dbis = self.env_dbis
-	self.meta = self.env_meta
 	live(self, file)
 	log(create and 'note' or '', 'db', create and 'db_create' or 'db_open', '%s', file)
 	return self, nil, create
@@ -218,7 +217,6 @@ function Db:close()
 	self:checkz('db_close', C.mdbx_env_close_ex(self.env, 0))
 	live(self, nil)
 	self.dbis = nil
-	self.meta = nil
 	self.env = nil
 	_disown(self)
 end
@@ -248,42 +246,45 @@ end
 --dbi cache ------------------------------------------------------------------
 
 --[[
+
 In mdbx all ops are transactional including table create/rename/drop.
 
 DBIs however are weird:
 
- - DBIs of tables opened in a top-level txn are GLOBAL (env-scoped).
- - DBIs of tables opened in a nested txn are LOCAL to that txn.
- - DBIs of created tables are LOCAL to the txn in which they were created.
- - LOCAL DBIs are automatically discarded on abort and promoted to the parent
-   txn on commit and become GLOBAL when top txn is committed.
- - DBIs are lost immediately from all transaction levels on drop and rename.
+ - DBIs of tables OPENED in a TOP txn are GLOBAL (env-scoped).
+ - DBIs of tables OPENED in a NESTED txn are LOCAL to that txn.
+ - DBIs of CREATED tables are LOCAL to the txn in which they were created.
+ - LOCAL DBIs are automatically DISCARDED on abort and PROMOTED to the parent
+   txn on commit and become GLOBAL when the TOP txn is committed.
+ - DBIs are DISCARDED immediately from ALL txn levels on DROP and RENAME.
 
 Since we don't want to work with DBIs in Lua but only with table names we need
-to keep a table_name->dbi mapping for opened tables. We _could_ not do this
-and open tables every time to get the DBI but 1) we also need to keep metadata
-(schema) for each table, and 2) mdbx_open does some array scans which become
-O(n^2) on repeat ops. So we keep the mapping in Lua. meta is keyed by table
-name so that we can recover the schema when the DBI is lost.
+to keep a TABLE_NAME->DBI mapping for opened tables. We _could_ not do this
+and open tables every time to get the DBI but mdbx_open does some array scans
+which become O(n^2) on repeat ops. So we keep the mapping in Lua.
+
+Here's the invariants around these mappings (it's not pretty):
+
+- Txns create their own dbis layers but only lazily when needed: table
+  open in nested txn or table create/drop/rename in any txn (table open in a
+  top txn always puts the DBI in the global env_dbis directly). The new layer
+  inherits the current layer. A top txn inherits env_dbis.
+- On commit, layer contents are promoted (copied over) to the parent layer.
+- On both commit and abort the layer is discarded.
+
 ]]
 
 local dbis_freelist = {}
-local meta_freelist = {}
 
 local function local_dbis(self)
 	local dbis = self.dbis
-	local meta = self.meta
 	local txn = self.txn
 	if getmetatable(dbis).txn ~= txn then --not local, create
 		local parent_dbis = dbis
-		local parent_meta = meta
 		dbis = pop(dbis_freelist) or setmetatable({}, {})
-		meta = pop(meta_freelist) or setmetatable({}, {})
 		getmetatable(dbis).__index = parent_dbis
-		getmetatable(meta).__index = parent_meta
 		getmetatable(dbis).txn = txn
 		self.dbis = dbis
-		self.meta = meta
 	end
 	return dbis
 end
@@ -294,27 +295,19 @@ local function local_dbis_discard(self, committed, parent)
 	end
 	--local, (promote and) discard
 	local dbis = self.dbis
-	local meta = self.meta
 	local parent_dbis = getmetatable(dbis).__index
-	local parent_meta = getmetatable(meta).__index
 	if committed and parent and getmetatable(parent_dbis).txn ~= parent then
 		--parent txn has no local maps: hand this layer to it as-is.
 		getmetatable(dbis).txn = parent
-		getmetatable(meta).txn = parent
 		return
 	end
-	if committed then --promote created dbis to parent txn (env if top-level)
+	if committed then --promote created dbis to parent txn (env if top-level).
 		update(parent_dbis, dbis)
-		update(parent_meta, meta)
 	end
 	clear(dbis)
-	clear(meta)
 	clear(getmetatable(dbis))
-	clear(getmetatable(meta))
 	push(dbis_freelist, dbis)
-	push(meta_freelist, meta)
 	self.dbis = parent_dbis
-	self.meta = parent_meta
 end
 
 --dbi was lost from drop or rename: remove it from all layers.
@@ -368,15 +361,16 @@ function Db:commit()
 		self:checkz('txn_commit', C.mdbx_txn_reset(self.txn))
 		self.txn = nil
 	else
-		local parent = ptr(self.txn._parent)
+		local parent = ptr(self.txn.parent)
 		local rc = C.mdbx_txn_commit_ex(self.txn, nil)
 		if rc ~= 0 then
 			local_dbis_discard(self)
 			self.txn = parent
 			self:checkz('txn_commit', rc)
+		else
+			local_dbis_discard(self, true, parent)
+			self.txn = parent
 		end
-		local_dbis_discard(self, true, parent)
-		self.txn = parent
 	end
 end
 
@@ -386,7 +380,7 @@ function Db:abort()
 		self:checkz('txn_abort', C.mdbx_txn_reset(self.txn))
 		self.txn = nil
 	else
-		local parent = ptr(self.txn._parent)
+		local parent = ptr(self.txn.parent)
 		self:checkz('txn_abort', C.mdbx_txn_abort(self.txn))
 		local_dbis_discard(self)
 		self.txn = parent
@@ -424,99 +418,62 @@ function Db:table_name(tab)
 end
 
 local dbip = new'MDBX_dbi[1]'
-function Db:open_table_raw(name, mode, schema, flags)
-	assert(isstr(name))
-	mode = mode or 'r'
-	local create_flag = mode == 'w' or mode == 'c'
-	if create_flag then check_wtxn(self) else check_txn(self) end
-	local dbi = self.dbis[name]
-	if mode == 'c' and dbi then
-		self:clear_table_raw(dbi)
-		return dbi, false
-	end
-	assert(not dbi)
-	flags = flags or 0
-	local exists = self:table_exists(name)
-	if not exists and not create_flag then
-		return nil, 'not_found'
-	end
-	self:checkz('t_open', C.mdbx_dbi_open(self.txn,
-		name, not exists and bor(flags, C.MDBX_CREATE) or flags, dbip))
-	local dbi = dbip[0]
-	--created dbis, and dbis opened in a nested txn, are local to the txn so we
-	--must create local dbis/meta maps. only a top-level open is env-scoped.
-	local nested = ptr(self.txn._parent) ~= nil
-	local dbis = (not exists or nested) and local_dbis(self) or self.env_dbis
-	dbis[name] = dbi
-	dbis[dbi] = name
-	if mode == 'c' and exists then
-		self:clear_table_raw(dbi)
-	end
-	if not exists then
-		log('note', 'db', 't_create', '%s', name)
-	end
-	return dbi, not exists
-end
-Db.open_table = Db.open_table_raw
-
-function Db:create_table(name, ...)
-	return self:open_table(name, 'c', ...)
-end
-
-function Db:dbi(tab, mode)
-	mode = mode or 'r'
-	if isnum(tab) then --tab=dbi
-		if mode == 'c' then self:clear_table_raw(tab) end
-		local name = self.dbis[tab]
-		return tab, name and self.meta[name]
-	end
-	assert(tab, 'table expected')
+local typeof, assert = typeof, assert
+function Db:try_dbi_raw(tab, flags) --tab=name|dbi
+	if typeof(tab) == 'number' then return tab end --tab=dbi
 	local dbi = self.dbis[tab]
-	if dbi then
-		if mode == 'c' then self:clear_table_raw(dbi) end
-		return dbi, self.meta[tab]
-	end
-	--look for schema in self.meta[tab] first because the table might have
-	--been opened before but its DBI was lost, but its schema remained.
-	local schema = self.meta[tab] or self.schema and self.schema.tables[tab]
-	local dbi, created, schema = self:open_table(tab, mode, schema)
-	if not dbi then
-		return nil, created
-	else
-		return dbi, schema
-	end
+	if dbi then return dbi end
+	assert(typeof(tab) == 'string', 'dbi: table expected')
+	check_txn(self)
+	local ok, err = self:tryz('t_open',
+		C.mdbx_dbi_open(self.txn, tab, flags or 0, dbip))
+	if not ok then return nil, err end
+	local dbi = dbip[0]
+	--DBIs opened in a nested txn are local to the txn, so we must create local
+	--dbis/meta maps. only a top-level open is env-scoped.
+	local nested_txn = self.txn.parent ~= nil
+	local dbis = nested_txn and local_dbis(self) or self.env_dbis
+	dbis[tab] = dbi
+	dbis[dbi] = tab
+	return dbi
+end
+function Db:dbi_raw(tab, flags)
+	local dbi, err = self:try_dbi_raw(tab, flags)
+	return self:check_schema('t_open', self:table_name(tab), nil, dbi, err)
 end
 
-function Db:localize_dbi(tab)
-	local dbi, inherited = self:dbi(tab)
-	if not dbi then return nil, inherited end
-	local name = assert(self:table_name(tab))
-	local_dbis(self)
-	return dbi, rawget(self.meta, name)
+function Db:create_table_raw(tab, create_flags)
+	assert(typeof(tab) == 'string', 'create_table: table name expected')
+	check_wtxn(self)
+	local exists = self:table_exists(tab)
+	self:check_schema('t_create', tab, nil, not exists, 'already_exists')
+	--created DBIs are local to the txn, so create local dbis maps.
+	local dbis = local_dbis(self)
+	local flags = bor(C.MDBX_CREATE, create_flags or 0)
+	self:checkz('t_create', C.mdbx_dbi_open(self.txn, tab, flags, dbip))
+	local dbi = dbip[0]
+	dbis[tab] = dbi
+	dbis[dbi] = tab
+	log('note', 'db', 't_create', '%s', tab)
+	return dbi
 end
 
 function Db:rename_table_raw(tab, new_table_name)
 	assert(tab)
 	assert(isstr(new_table_name))
 	check_wtxn(self)
-	local dbi = isnum(tab) and tab or self:dbi(tab)
-	local old_table_name = isnum(tab) and (dbi and self.dbis[dbi] or '?') or tab
-	self:check_schema('t_rename', old_table_name, nil, dbi, 'not_found')
+	local dbi = self:try_dbi_raw(tab)
+	local old_table_name = self:table_name(tab)
 	local rc = C.mdbx_dbi_rename(self.txn, dbi, new_table_name)
 	self:check_schema('t_rename', old_table_name, nil,
 		rc ~= C.MDBX_KEYEXIST, 'already_exists')
 	self:checkz('t_rename', rc)
-	--MDBX invalidates the old DBI on rename. Keep the new name/schema txn-local
-	--so commit promotes it and abort discards it. The old name's parent schema
-	--stays cached so abort can recover it with a newly opened DBI.
-	local schema = self.meta[old_table_name]
+	--MDBX invalidates the old DBI on rename. Keep the new name txn-local
+	--so commit promotes it and abort discards it.
 	local dbis = local_dbis(self)
-	local meta = self.meta
 	invalidate_dbi(self, dbi, old_table_name)
 	dbis[dbi] = new_table_name
 	dbis[new_table_name] = dbi
-	meta[old_table_name] = false
-	meta[new_table_name] = schema or false
 	log('note', 'db', 't_rename', '%s -> %s', old_table_name, new_table_name)
 	return true
 end
@@ -524,20 +481,19 @@ end
 function Db:drop_table_raw(tab)
 	assert(tab)
 	check_wtxn(self)
-	local dbi = isnum(tab) and tab or self:dbi(tab)
+	local dbi = isnum(tab) and tab or self:try_dbi_raw(tab)
 	if not dbi then return false, 'not_found' end
 	self:checkz('t_drop', C.mdbx_drop(self.txn, dbi, 1))
 	local name = assert(self.dbis[dbi])
 	local_dbis(self)
 	invalidate_dbi(self, dbi, name)
-	self.meta[name] = false
 	log('note', 'db', 't_drop', '%s', name)
 	return true
 end
 
 function Db:clear_table_raw(tab)
 	check_wtxn(self)
-	local dbi = isnum(tab) and tab or self:dbi(tab)
+	local dbi = isnum(tab) and tab or self:try_dbi_raw(tab)
 	if not dbi then return false, 'not_found' end
 	self:checkz('t_clear', C.mdbx_drop(self.txn, dbi, 0))
 	log('note', 'db', 't_clear', '%s', self:table_name(tab))
@@ -548,8 +504,7 @@ local stat = new'MDBX_stat'
 local stat_sz = sizeof(stat)
 function Db:table_stat(tab)
 	check_txn(self)
-	local dbi = isnum(tab) and tab or self:dbi(tab)
-	self:check_schema('t_stat', self:table_name(tab), nil, dbi, 'not_found')
+	local dbi = isnum(tab) and tab or self:dbi_raw(tab)
 	self:checkz('t_stat', C.mdbx_dbi_stat(self.txn, dbi, stat, stat_sz))
 	return stat
 end
@@ -562,8 +517,7 @@ do
 local dbi_flags = new'unsigned[1]'
 local dbi_state = new'unsigned[1]'
 function Db:dbi_flags(tab)
-	local dbi = isnum(tab) and tab or self:dbi(tab)
-	self:check_schema('t_flags', self:table_name(tab), nil, dbi, 'not_found')
+	local dbi = isnum(tab) and tab or self:dbi_raw(tab)
 	self:checkz('t_flags', C.mdbx_dbi_flags_ex(self.txn, dbi, dbi_flags, dbi_state))
 	return dbi_state[0], dbi_flags[0]
 end
@@ -576,8 +530,7 @@ local val = new'MDBX_val'
 
 function Db:get_raw(tab, k, k_sz)
 	check_txn(self)
-	local dbi = isnum(tab) and tab or self:dbi(tab)
-	if not dbi then return false, 'table_not_found' end
+	local dbi = isnum(tab) and tab or self:dbi_raw(tab)
 	key.data = k
 	key.size = k_sz
 	local rc = C.mdbx_get(self.txn, dbi, key, val)
@@ -587,7 +540,7 @@ end
 
 function Db:try_put_raw(tab, k, k_sz, v, v_sz, flags)
 	check_wtxn(self)
-	local dbi = isnum(tab) and tab or self:dbi(tab, 'w')
+	local dbi = isnum(tab) and tab or self:dbi_raw(tab)
 	key.data = k
 	key.size = k_sz
 	val.data = v
@@ -606,8 +559,7 @@ end
 
 function Db:try_update_raw(tab, k, k_sz, v, v_sz, flags)
 	check_wtxn(self)
-	local dbi = isnum(tab) and tab or self:dbi(tab)
-	if not dbi then return false, 'table_not_found' end
+	local dbi = isnum(tab) and tab or self:dbi_raw(tab)
 	key.data = k
 	key.size = k_sz
 	val.data = v
@@ -618,8 +570,7 @@ end
 
 function Db:try_del_raw(tab, k, k_sz, v, v_sz)
 	check_wtxn(self)
-	local dbi = isnum(tab) and tab or self:dbi(tab)
-	if not dbi then return false, 'table_not_found' end
+	local dbi = isnum(tab) and tab or self:dbi_raw(tab)
 	key.data = k
 	key.size = k_sz
 	local vp = val
@@ -635,10 +586,12 @@ end
 local seqbuf = u64a(1)
 function Db:seq(tab, increment)
 	check_wtxn(self)
-	local dbi = isnum(tab) and tab or self:dbi(tab, 'w')
+	local dbi = isnum(tab) and tab or self:dbi_raw(tab)
 	local rc = C.mdbx_dbi_sequence(self.txn, dbi, seqbuf, assert(increment))
-	self:check('seq', rc ~= -1, 'overflow')
-	self:checkz('seq', rc)
+	if rc < 0 then
+		self:check_schema('seq', self:table_name(tab), nil, rc ~= -1, 'overflow')
+		self:checkz('seq', rc)
+	end
 	local seq = num(seqbuf[0])
 	log('note', 'db', 'seq', '%s: %d', self:table_name(tab), seq)
 	return seq
@@ -646,8 +599,7 @@ end
 
 function Db:try_move_key_raw(tab, k1, k1_sz, k2, k2_sz)
 	check_wtxn(self)
-	local dbi = isnum(tab) and tab or self:dbi(tab)
-	if not dbi then return false, 'table_not_found' end
+	local dbi = isnum(tab) and tab or self:dbi_raw(tab)
 	local _, flags = self:dbi_flags(dbi)
 	assert(band(flags, C.MDBX_DUPSORT) == 0, 'cannot move key in DUPSORT table')
 	local ok, v, v_sz = self:get_raw(dbi, k1, k1_sz)
@@ -672,8 +624,7 @@ local Cur = {}; mdbx_cursor = Cur
 local curp = new'MDBX_cursor*[1]'
 function Db:try_cursor(tab, mode)
 	if mode == 'w' then check_wtxn(self) else check_txn(self) end
-	local dbi = isnum(tab) and tab or self:dbi(tab, mode)
-	if not dbi then return nil, 'not_found' end
+	local dbi = isnum(tab) and tab or self:dbi_raw(tab)
 	local cur
 	local t = self._cursors
 	for i = #t,1,-1 do --find an unbound cursor
@@ -794,10 +745,7 @@ local function each_raw_next(self)
 	return self, k, k_sz, v, v_sz
 end
 function Db:each_raw(tab, mode)
-	local cur = self:try_cursor(tab, mode)
-	if not cur then
-		return noop
-	end
+	local cur = self:cursor(tab, mode)
 	return each_raw_next, cur
 end
 

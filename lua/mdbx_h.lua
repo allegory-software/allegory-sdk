@@ -51,8 +51,8 @@ struct MDBX_txn {
   size_t n_dbi;
   size_t owner;
 
-  MDBX_txn *_parent;
-  MDBX_txn *_nested;
+  MDBX_txn *parent;
+  MDBX_txn *nested;
 };
 
 enum MDBX_constants {

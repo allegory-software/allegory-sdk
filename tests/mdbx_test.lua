@@ -29,6 +29,9 @@ local function with_db(name, f)
 end
 
 local function put_string(db, tab, k, v)
+	if not db:table_exists(tab) then
+		db:create_table_raw(tab)
+	end
 	assert(db:try_put_raw(tab, k, #k, v, #v))
 end
 
@@ -180,9 +183,8 @@ function test.nested_created_table_cache_discarded_on_parent_abort()
 		db:abort()
 		db:begin()
 		assert(not db:table_exists't')
-		local ok, err = db:get_raw('t', 'k', 1)
-		assert(not ok)
-		assert(err == 'table_not_found')
+		local dbi, err = db:try_dbi_raw't'
+		assert(not dbi and err == 'not_found')
 		db:commit()
 	end)
 end
@@ -353,44 +355,42 @@ rawset(test, 'drop_created_table_in_nested_txn_abort', function()
 	end)
 end)
 
-function test.dbi_c_clears_cached_table()
-	with_db('dbi_c_clears_cached_table', function(db)
-		db:begin'w'
-		put_string(db, 't', 'k', 'v')
+function test.try_dbi_missing_table()
+	with_db('try_dbi_missing_table', function(db)
+		db:begin()
+		local dbi, err = db:try_dbi_raw'missing'
+		assert(not dbi and err == 'not_found')
 		db:commit()
-		db:begin'w'
-		assert(db:dbi't')
-		assert(db:dbi('t', 'c'))
-		local ok, err = db:get_raw('t', 'k', 1)
-		assert(not ok)
-		assert(err == 'not_found')
-		db:abort()
 	end)
 end
 
-function test.create_table_clears_cached_table()
-	with_db('create_table_clears_cached_table', function(db)
+function test.create_table_existing_raises_and_preserves_table()
+	with_db('create_table_existing_raises_and_preserves_table', function(db)
 		db:begin'w'
 		put_string(db, 't', 'k', 'v')
 		db:commit()
 		db:begin'w'
-		assert(db:dbi't')
-		assert(db:create_table't')
-		local ok, err = db:get_raw('t', 'k', 1)
-		assert(not ok)
-		assert(err == 'not_found')
-		db:abort()
+		local ok, e = catch('schema', db.create_table_raw, db, 't')
+		assert(not ok and iserror(e, 'schema'), tostring(e))
+		assert(e.event == 't_create' and e.table == 't', tostring(e))
+		assert(e.message == 'already_exists', tostring(e.message))
+		assert(not db.txn)
+		db:begin()
+		local found, v, v_sz = db:get_raw('t', 'k', 1)
+		assert(found and ffi.string(v, v_sz) == 'v')
+		db:commit()
 	end)
 end
 
 function test.update_missing_table_does_not_create_table()
 	with_db('update_missing_table_does_not_create_table', function(db)
 		db:begin'w'
-		local ok, err = db:try_update_raw('t', 'k', 1, 'v', 1)
-		assert(not ok)
-		assert(err == 'table_not_found')
-		assert(not db:table_exists't')
-		db:commit()
+		local ok, e = catch('schema',
+			db.try_update_raw, db, 't', 'k', 1, 'v', 1)
+		assert(not ok and iserror(e, 'schema'), tostring(e))
+		assert(e.event == 't_open' and e.table == 't', tostring(e))
+		assert(e.message == 'not_found', tostring(e.message))
+		assert(not db.txn)
 		db:begin()
 		assert(not db:table_exists't')
 		db:commit()
@@ -415,7 +415,7 @@ end
 function test.cursor_get_pair_raw_uses_explicit_value()
 	with_db('cursor_get_pair_raw_uses_explicit_value', function(db)
 		db:begin'w'
-		db:create_table('d', nil, mdbx.MDBX_DUPSORT)
+		db:create_table_raw('d', mdbx.MDBX_DUPSORT)
 		assert(db:try_put_raw('d', 'k', 1, 'a', 1))
 		assert(db:try_put_raw('d', 'k', 1, 'b', 1))
 		assert(db:try_put_raw('d', 'x', 1, 'q', 1))
@@ -430,7 +430,7 @@ end
 function test.move_key_rejects_dupsort_table()
 	with_db('move_key_rejects_dupsort_table', function(db)
 		db:begin'w'
-		db:create_table('d', nil, mdbx.MDBX_DUPSORT)
+		db:create_table_raw('d', mdbx.MDBX_DUPSORT)
 		assert(db:try_put_raw('d', 'k', 1, 'a', 1))
 		assert(db:try_put_raw('d', 'k', 1, 'b', 1))
 		assert_plain_error(function()
@@ -457,16 +457,16 @@ function test.cursor_del_returns_true()
 	end)
 end
 
-function test.each_raw_missing_table_is_empty()
-	with_db('each_raw_missing_table_is_empty', function(db)
+function test.each_raw_missing_table_raises()
+	with_db('each_raw_missing_table_raises', function(db)
 		db:begin()
-		local n = 0
-		for cur, k, k_sz, v, v_sz in db:each_raw('missing') do
-			n = n + 1
-		end
-		assert(n == 0)
-		assert(not db:table_exists'missing')
-		db:commit()
+		local ok, e = catch('schema', function()
+			for _ in db:each_raw('missing') do end
+		end)
+		assert(not ok and iserror(e, 'schema'), tostring(e))
+		assert(e.event == 't_open' and e.table == 'missing', tostring(e))
+		assert(e.message == 'not_found', tostring(e.message))
+		assert(not db.txn)
 	end)
 end
 
@@ -474,7 +474,7 @@ function test.nil_is_not_main_table()
 	with_db('nil_is_not_main_table', function(db)
 		db:begin'w'
 		assert_plain_error(function()
-			db:dbi(nil)
+			db:dbi_raw(nil)
 		end, 'table expected')
 		assert_plain_error(function()
 			db:table_exists(nil)
@@ -489,7 +489,7 @@ end
 function test.main_table_is_dbi_1()
 	with_db('main_table_is_dbi_1', function(db)
 		db:begin'w'
-		assert(db:dbi(1) == 1)
+		assert(db:dbi_raw(1) == 1)
 		assert(db:table_name(1) == '<main>')
 		assert(db:table_exists(1))
 		assert(db:try_put_raw(1, 'x', 1, 'y', 1))
