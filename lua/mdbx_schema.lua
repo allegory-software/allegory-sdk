@@ -809,13 +809,17 @@ function Db:try_dbi(tab)
 		if schema then
 			schema.name = name
 			self:compile_table_schema(schema)
-			--open indexes now just to check for errors.
-			for _,ix_schema in ipairs(schema.ix_schemas or empty) do
-				self:dbi(ix_schema.name)
-			end
 		end
-		self.live_schema[name] = schema or true
 	end
+	local dbi, err = self:try_dbi_raw(tab, table_flags(schema))
+	if not dbi then return nil, err end
+	if schema then
+		--open indexes now just to check for errors.
+		for _,ix_schema in ipairs(schema.ix_schemas or empty) do
+			self:dbi(ix_schema.name)
+		end
+	end
+	self.live_schema[name] = schema or true
 	return dbi
 end
 function Db:dbi(tab)
