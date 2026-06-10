@@ -933,28 +933,53 @@ function test.validate_schema()
 
 		--matching paper schema -> validates ok
 		db = mdbx_open(file)
-		db:begin()
-		assert(db:open_table('t', nil, {
+		db.schema.tables.t = {
 			name = 't',
 			fields = {
 				{col = 'id', mdbx_type = 'u32', not_null = true},
 				{col = 'v' , mdbx_type = 'i32'},
 			},
 			pk = {'id'},
-		}))
+		}
+		db:begin()
+		assert(db:dbi('t'))
 		db:commit(); db:close()
+
+		--an existing raw table cannot be adopted by supplying a paper schema.
+		db = mdbx_open(file)
+		db:begin'w'
+		db:create_table_raw('raw', 0)
+		db:commit(); db:close()
+
+		db = mdbx_open(file)
+		db.schema.tables.raw = {
+			name = 'raw',
+			fields = {
+				{col = 'id', mdbx_type = 'utf8', maxlen = 8,
+					nozero = true, not_null = true},
+			},
+			pk = {'id'},
+		}
+		db:begin()
+		local ok, e = catch('schema', db.dbi, db, 'raw')
+		assert(not ok and iserror(e, 'schema'), tostring(e))
+		assert(e.event == 't_open' and e.table == 'raw', tostring(e))
+		assert(e.message == 'trying to open a raw table with a schema', tostring(e.message))
+		assert(db.txn == nil)
+		db:close()
 
 		--diverging paper schema (v: i32 -> utf8) -> schema error + abort
 		db = mdbx_open(file)
-		db:begin()
-		local ok, e = catch('schema', db.open_table, db, 't', nil, {
+		db.schema.tables.t = {
 			name = 't',
 			fields = {
 				{col = 'id', mdbx_type = 'u32', not_null = true},
 				{col = 'v' , mdbx_type = 'utf8', maxlen = 8},
 			},
 			pk = {'id'},
-		})
+		}
+		db:begin()
+		ok, e = catch('schema', db.dbi, db, 't')
 		assert(not ok and iserror(e, 'schema'), tostring(e))
 		assert(e.event == 't_open' and e.table == 't', tostring(e))
 		assert(e.message:find('schema mismatch', 1, true), tostring(e.message))

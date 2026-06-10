@@ -636,6 +636,9 @@ function Db:save_table_schema(schema)
 	end
 	local k = schema.name
 	local v = pp(t, false)
+	if not self:table_exists'$schema' then
+		self:create_table_raw'$schema'
+	end
 	assert(self:try_put_raw('$schema', k, #k, v, #v))
 end
 
@@ -777,13 +780,18 @@ function Db:validate_table_schema(stored_schema, paper_schema)
 	self:check_schema('t_open', table_name, nil, ok, err)
 end
 
+local function table_flags(schema)
+	if not schema then return 0 end
+	return bor(
+		schema.int_key and mdbx.MDBX_INTEGERKEY or 0,
+		schema.dup_keys and mdbx.MDBX_DUPSORT or 0
+	)
+end
 local typeof, assert = typeof, assert
 function Db:try_dbi(tab)
 	if typeof(tab) == 'number' then return tab end --tab=dbi
 	local dbi = self.dbis[tab]
 	if dbi then return dbi end
-	local dbi, err = self:try_dbi_raw(tab)
-	if not dbi then return nil, err end
 	local name = self:table_name(tab)
 	local schema = self.live_schema[name]
 	if not schema then
@@ -845,13 +853,11 @@ function Db:create_table(name, schema)
 	assert(not schema.fks)
 	assert(not self.schema.tables[name])
 	self:compile_table_schema(schema)
-	local create_flags = bor(
-		schema.int_key and mdbx.MDBX_INTEGERKEY or 0,
-		schema.dup_keys and mdbx.MDBX_DUPSORT or 0
-	)
-	local dbi = self:create_table_raw(name, create_flags)
+	local dbi = self:create_table_raw(name, table_flags(schema))
 	self:save_table_schema(schema)
-	self.live_schema[name] = self:load_table_schema(name)
+	local schema = self:load_table_schema(name)
+	self:compile_table_schema(schema)
+	self.live_schema[name] = schema
 	return dbi
 end
 
