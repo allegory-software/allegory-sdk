@@ -947,7 +947,7 @@ function test.validate_schema()
 			pk = {'id'},
 		}
 		db:begin()
-		assert(db:dbi('t'))
+		assert(db:dbi_schema('t'))
 		db:commit(); db:close()
 
 		--an existing raw table cannot be adopted by supplying a paper schema.
@@ -967,7 +967,7 @@ function test.validate_schema()
 			pk = {'id'},
 		}
 		db:begin()
-		local ok, e = catch('schema', db.dbi, db, 'raw')
+		local ok, e = catch('schema', db.dbi_schema, db, 'raw')
 		assert(not ok and iserror(e, 'schema'), tostring(e))
 		assert(e.event == 't_open' and e.table == 'raw', tostring(e))
 		assert(e.message == 'trying to open a raw table with a schema', tostring(e.message))
@@ -986,7 +986,7 @@ function test.validate_schema()
 			pk = {'id'},
 		}
 		db:begin()
-		ok, e = catch('schema', db.dbi, db, 't')
+		ok, e = catch('schema', db.dbi_schema, db, 't')
 		assert(not ok and iserror(e, 'schema'), tostring(e))
 		assert(e.event == 't_open' and e.table == 't', tostring(e))
 		assert(e.message:find('schema mismatch', 1, true), tostring(e.message))
@@ -1425,8 +1425,8 @@ function test.try_put_unchanged_index_keys()
 		local _,_,ix_cat = db:add_index('t', {'cat'})
 		local _,_,ix_email = db:add_index('t', {'email', is_unique = true})
 		db:insert('t', '{}', {id = 1, cat = 'a', email = 'a@x', name = 'A'})
-		local cat_dbi = db:dbi(ix_cat)
-		local email_dbi = db:dbi(ix_email)
+		local cat_dbi = db:dbi_schema(ix_cat)
+		local email_dbi = db:dbi_schema(ix_email)
 		local index_writes = 0
 		local try_del_raw = db.try_del_raw
 		local try_put_raw = db.try_put_raw
@@ -2222,10 +2222,13 @@ function test.fk_default_check()
 		local ok, err = try_mutation(db, db.insert, 'child', '{}', {id = 1})
 		assert(ok == false and is_row_error(err, 'fk'), ('%s,%s'):format(S(ok), S(err)))
 		assert(not db:exists('child', 1))
+		--explicit null skips both the default and the fk check.
+		db:insert('child', '{}', {id = 2, dpid = null})
+		assert(db:is_null('child', 'dpid', 2))
 		--with parent 7 present, the defaulted fk is accepted
 		db:insert('parent', '{}', {id = 7})
-		db:insert('child', '{}', {id = 2})
-		assert(num(db:get('child', 'dpid', 2)) == 7)
+		db:insert('child', '{}', {id = 3})
+		assert(num(db:get('child', 'dpid', 3)) == 7)
 		db:commit()
 	end)
 end
@@ -3221,6 +3224,28 @@ function test.cursor_navigation()
 	end)
 end
 
+function test.cursor_must_not_found()
+	with_db('cursor_must_not_found', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}},
+			pk = {'id'}})
+		db:commit()
+
+		local function check(method, event, ...)
+			db:begin'r'
+			local cur = db:cursor't'
+			local ok, err = catch('row field', cur[method], cur, ...)
+			assert(not ok)
+			check_row_error(err, event, 't', 'not_found')
+			assert(db.txn == nil)
+		end
+		check('must_first', 'first')
+		check('must_current', 'current')
+		check('must_get', 'c_get', nil, 1)
+	end)
+end
+
 --cols-format matrix: insert and get accept all four cols formats
 --(nil/'a b'/'[a b]'/'{a b}') with matching value shapes.
 function test.cols_format_matrix()
@@ -3262,8 +3287,17 @@ function test.get_and_exists_edges()
 		assert(db:try_get('t', 'v', 1), 'try_get hit')
 		assert(db:try_get('t', 'v', 99) == false, 'try_get miss')
 		assert(num(db:must_get('t', 'v', 1)) == 10)
-		assert(not pcall(db.must_get, db, 't', 'v', 99), 'must_get miss should raise')
-		db:commit()
+		local ok, err = catch('row field', db.must_get, db, 't', 'v', 99)
+		assert(not ok)
+		check_row_error(err, 'get', 't', 'not_found')
+		assert(db.txn == nil)
+
+		db:begin'r'
+		local ok, err = catch('schema', db.must_get, db, 'nope', nil, 1)
+		assert(not ok and iserror(err, 'schema'), tostring(err))
+		assert(err.event == 't_open' and err.table == 'nope'
+			and err.message == 'not_found', tostring(err))
+		assert(db.txn == nil)
 	end)
 end
 
@@ -3378,12 +3412,14 @@ function test.null_vs_default()
 		db:insert('t', '{}', {id = 2, opt = null, def = 9}) --explicit null / value
 		assert(db:is_null('t', 'opt', 2) == true)
 		assert(num(db:get('t', 'def', 2)) == 9)
-		db:insert('t', '{}', {id = 3, opt = 5})
-		assert(db:is_null('t', 'opt', 3) == false and num(db:get('t', 'opt', 3)) == 5)
-		db:update('t', '{}', {id = 3, opt = null}) --set to null
-		assert(db:is_null('t', 'opt', 3) == true)
-		db:update('t', '{}', {id = 3, opt = 8})    --and back
-		assert(db:is_null('t', 'opt', 3) == false and num(db:get('t', 'opt', 3)) == 8)
+		db:insert('t', '{}', {id = 3, def = null})
+		assert(db:is_null('t', 'def', 3) == true, 'explicit null bypasses default')
+		db:insert('t', '{}', {id = 4, opt = 5})
+		assert(db:is_null('t', 'opt', 4) == false and num(db:get('t', 'opt', 4)) == 5)
+		db:update('t', '{}', {id = 4, opt = null}) --set to null
+		assert(db:is_null('t', 'opt', 4) == true)
+		db:update('t', '{}', {id = 4, opt = 8})    --and back
+		assert(db:is_null('t', 'opt', 4) == false and num(db:get('t', 'opt', 4)) == 8)
 		db:commit()
 	end)
 end
@@ -3954,8 +3990,12 @@ function test.direct_index_open_after_reopen()
 		db:commit()
 	end, function(db)
 		db:begin'r'
-		local r = db:must_get('t/i/v', '{}', 10)
+		local cur = db:cursor('t/i/v')
+		local r = cur:first('{}')
 		assert(num(r.id) == 1)
+		cur:close()
+		local cur, err = db:try_cursor'missing'
+		assert(not cur and err == 'not_found')
 		db:commit()
 	end)
 end

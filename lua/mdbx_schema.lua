@@ -25,7 +25,7 @@ TABLES
 	1) raw tables without a schema, to be used only with raw methods.
 	2) tables with a static declared-in-code paper schema (see schema.lua).
 	can only be created/restructured via sync_schema() and when opened the
-	on-disk schema must match the paper schema or dbi() raises. this is how
+	on-disk schema must match the paper schema or dbi_schema() raises. this is how
 	you get declarative schemas with automatic schema migration.
 	3) tables without a paper schema, created with create_table() and
 	restructured manually via DDL ops, since there's no blueprint to sync to.
@@ -67,7 +67,7 @@ STATE
 		- layouting/compiling add many fields to it but *not* mutable state
 		so it is seen as global-shared (DDL is forbidden on paper schemas).
 	db.live_schema[table_name] -> paper_schema | stored_schema
-		- live schema cache managed by dbi() and DDL ops; transactional.
+		- live schema cache managed by dbi_schema() and DDL ops; transactional.
 
 PIPELINE
 	open existing table -> resolve schema + open raw
@@ -893,18 +893,15 @@ function Db:try_dbi(tab)
 		return try_open(self, tab)
 	end
 end
-function Db:dbi(tab)
-	local dbi, err = self:try_dbi(tab)
-	return self:check_schema('t_open', self:table_name(tab), nil, dbi, err)
-end
 function Db:try_dbi_schema(tab)
 	local dbi, err = self:try_dbi(tab)
 	if not dbi then return nil, err end
 	return dbi, assert(self:table_schema(tab), 'table has no schema')
 end
 function Db:dbi_schema(tab)
-	local dbi, schema = self:try_dbi_schema(tab)
-	return self:check_schema('t_open', self:table_name(tab), nil, dbi, schema)
+	local dbi = self:check_schema('t_open', self:table_name(tab), nil,
+		self:try_dbi(tab))
+	return dbi, assert(self:table_schema(tab), 'table has no schema')
 end
 
 function Db:without_schema(fn)
@@ -1235,7 +1232,7 @@ function Db:compile_index_schema(ix_schema)
 			if cur then
 				cur:del_raw()
 			else
-				ix_dbi = self:dbi(ix_schema.name) --live name: survives rename
+				ix_dbi = self:dbi_schema(ix_schema.name) --live name: survives rename
 				if dup then --remove the exact (old key, pk) pair from the dupsort index.
 					assert(self:try_del_raw(ix_dbi, xk0, xk0_sz, k, k_sz))
 				else --remove the unique key.
@@ -1248,7 +1245,7 @@ function Db:compile_index_schema(ix_schema)
 			return cur:try_put_raw(xk, xk_sz, k, k_sz,
 				not dup and mdbx.MDBX_NOOVERWRITE or nil)
 		end
-		ix_dbi = ix_dbi or self:dbi(ix_schema.name)
+		ix_dbi = ix_dbi or self:dbi_schema(ix_schema.name)
 		if dup then --add the (key, pk) pair (duplicates allowed).
 			return self:try_put_raw(ix_dbi, xk, xk_sz, k, k_sz)
 		else --add the unique key; an existing key is a unique violation.
@@ -1257,7 +1254,7 @@ function Db:compile_index_schema(ix_schema)
 	end
 
 	function ix_schema.del(ix_schema, self, k, k_sz, v0, v0_sz)
-		local ix_dbi = self:dbi(ix_schema.name)
+		local ix_dbi = self:dbi_schema(ix_schema.name)
 		local xk0, xk0_buf_sz = ix2_key_rec_buffer(ix_schema.key_fields.max_rec_size)
 		decode_ix_into(k, k_sz, v0, v0_sz, dt0)
 		local xk0_sz = encode_key(self, ix_schema, 'i_del', nil, xk0, xk0_buf_sz, cols, '[]', dt0)
@@ -1705,8 +1702,10 @@ function encode_val(self, schema, event, rec, rec_buf_sz, cols, as, ...)
 	C.schema_val_add_start(schema._st, rec, rec_buf_sz, pp)
 	for vi,f in ipairs(schema.val_fields) do
 		local val = select_col(cols, as, f.col, ...)
-		if val == nil or val == null then
+		if val == nil then
 			val = resolve_null_val(schema, f)
+		elseif val == null then
+			val = nil
 		end
 		if val == nil and f.not_null then
 			self:check_col(event, schema.name, f.col, false, 'not_null')
@@ -1884,17 +1883,16 @@ local function skip_ok(ok, ...)
 	if not ok then return end
 	return ...
 end
-local function must_ok(ok, ...)
-	assert(ok, ...)
-	return ...
-end
 
 function Db:get(...)
 	return skip_ok(self:try_get(...))
 end
 
-function Db:must_get(...)
-	return must_ok(self:try_get(...))
+function Db:must_get(tab, val_cols, ...)
+	local dbi, schema = self:dbi_schema(tab)
+	local ok, v, v_sz = get_raw_by_pk(self, dbi, schema, ...)
+	self:check_row('get', schema.name, ok, v)
+	return skip_ok(decode_kv(self, schema, nil, nil, v, v_sz, val_cols))
 end
 
 --check that every fk's referenced row exists for the selected values. on a full
@@ -2153,22 +2151,17 @@ end
 
 --cursors --------------------------------------------------------------------
 
-local function check_cur(self, op, ok, ...)
-	if ok then return ... end
-	self.db:check_row(op, self.schema.name, nil, false, (...))
-end
-
 function Db:try_cursor(tab)
-	local cur, err = self:try_cursor_raw(tab)
-	if not cur then return nil, err end
-	cur.schema = assert(self:table_schema(cur:dbi()))
+	local dbi, schema = self:try_dbi_schema(tab)
+	if not dbi then return nil, schema end
+	local cur = self:try_cursor_raw(dbi)
+	cur.schema = schema
 	return cur
 end
 function Db:cursor(tab)
-	local cur, err = self:cursor_raw(tab)
-	if not cur then return nil, err end
-	cur.schema = assert(self:table_schema(cur:dbi()))
-	return cur
+	local cur, err = self:try_cursor(tab)
+	if cur then return cur end
+	return self:check_schema('cursor', self:table_name(tab), nil, false, err)
 end
 
 for _,OP in ipairs{'first', 'last', 'next', 'prev', 'current'} do
@@ -2176,14 +2169,15 @@ for _,OP in ipairs{'first', 'last', 'next', 'prev', 'current'} do
 	local function try_op(self, val_cols)
 		local schema = assert(self.schema)
 		local ok, k, k_sz, v, v_sz = op_raw(self)
-		if not ok then return false end
+		if not ok then return false, k end
 		return decode_kv(self.db, schema, k, k_sz, v, v_sz, val_cols)
 	end
 	local function do_op(self, val_cols)
 		return skip_ok(try_op(self, val_cols))
 	end
 	local function must_op(self, val_cols)
-		return check_cur(self, OP, try_op(self, val_cols))
+		return self.db:check_row(OP, self.schema.name,
+			try_op(self, val_cols))
 	end
 	Cur['try_'..OP] = try_op
 	Cur[OP] = do_op
@@ -2202,14 +2196,15 @@ function Cur:try_get(val_cols, ...)
 	local k_sz = encode_key(self.db, schema, 'c_get', nil,
 		k, k_buf_sz, schema.key_cols, nil, ...)
 	local ok, v, v_sz = self:get_raw(k, k_sz)
-	if not ok then return false end
+	if not ok then return false, v end
 	return decode_kv(self.db, schema, nil, nil, v, v_sz, val_cols)
 end
 function Cur:get(...)
 	return skip_ok(self:try_get(...))
 end
 function Cur:must_get(...)
-	return check_cur(self, 'c_get', self:try_get(...))
+	return self.db:check_row('c_get', self.schema.name,
+		self:try_get(...))
 end
 
 function Cur:is_null(col)
@@ -2287,7 +2282,7 @@ function Cur:update(...)
 end
 
 local function cur_each_pass(cur, ok, ...)
-	if not ok then return end
+	if not ok then cur:close(); return end
 	return cur, ...
 end
 local function cur_each_try_next(self, k0)
