@@ -254,6 +254,10 @@ function schema:format_ix_name(tbl_name, cols, unique)
 	return _(self.ix_name_format, unique and 'uk' or 'ix', tbl_name, cat(cols, '_'))
 end
 
+function schema:format_fk_name(tbl_name, cols)
+	return _(self.fk_name_format, tbl_name, cat(cols, '_'))
+end
+
 local function add_ix(self, tbl, cols, unique)
 	local t = attr(tbl, 'ixs')
 	local k = self:format_ix_name(tbl.name, cols, unique)
@@ -271,7 +275,8 @@ end
 
 local function add_fk(self, tbl, cols, ref_tbl_name, ondelete, onupdate, fld)
 	local fks = attr(tbl, 'fks')
-	local k = _(self.fk_name_format, tbl.name, cat(cols, '_'))
+	local k = self:format_fk_name(
+		tbl.name, cols, ref_tbl_name, ondelete, onupdate)
 	assertf(not fks[k], 'duplicate fk `%s`', k)
 	ref_tbl_name = ref_tbl_name or assert(#cols == 1 and cols[1])
 	local cols = check_cols('fk', tbl, cols)
