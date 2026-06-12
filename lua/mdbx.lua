@@ -466,7 +466,6 @@ function Db:rename_table_raw(tab, new_table_name)
 	dbis[dbi] = new_table_name
 	dbis[new_table_name] = dbi
 	log('note', 'db', 't_rename', '%s -> %s', old_table_name, new_table_name)
-	return true
 end
 
 function Db:drop_table_raw(tab)
