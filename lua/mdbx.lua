@@ -6,7 +6,7 @@
 	libmdbx is a fast mmap-based MVCC key-value store in 40 KLOC of C.
 	libmdbx provides ACID with serializable semantics, good for read-heavy loads.
 
-MDBX->LUA
+C->LUA
 
  * safe API (no use-after-free), uses our terminology (env -> db, DBI -> table).
  * extendable, see mdbx_schema.lua which adds column schema to keys and values.
@@ -21,7 +21,7 @@ MDBX->LUA
  * use DBI 1 to read the main table.
 
 DATABASES
-	[try_]mdbx_open(file_path, [opt]) -> db,[err],created   open/create a database
+	mdbx_open(file_path, [opt]) -> db,[err],created   open/create a database
 	- opt.max_readers    64                    max read txns across all processes
 	- opt.max_tables     4K                    max tables that can be opened
 	- opt.readonly       false                 open in r/o mode
@@ -56,9 +56,9 @@ CRUD
 	db:try_del_raw     (table|dbi, k, k_sz, [v], [v_sz]) -> true | false,'not_found'
 	db:seq             (table|dbi, increment) -> n     get/increment sequence
 	db:try_move_key_raw(table|dbi, k, k_sz, new_k, new_k_sz) -> true | false,err
-	db:each_raw(table[, 'w']) -> iter() -> cur, k, k_sz, v, v_sz
+	db:each_raw(table) -> iter() -> cur, k, k_sz, v, v_sz
 CURSORS
-	db:[try_]cursor(table|dbi[, 'w']) -> cur   create cursor
+	db:[try_]cursor_raw(table|dbi) -> cur      create cursor
 	cur:close()                                close cursor
 	cur:closed() -> t|f                        check if cursor is closed
 	cur:dbi() -> dbi|nil                       get cursor's dbi
@@ -67,7 +67,7 @@ CURSORS
 	cur:get_raw      (k, k_sz, [op]) -> true, v, v_sz | false,err
 	cur:get_pair_raw (k, k_sz, v, v_sz, [op]) -> true, v, v_sz | false,err
 	cur:try_put_raw  (k, k_sz, v, v_sz, [flags]) -> true | false,'already_exists',cur_v,cur_v_sz | false,'not_found'
-	cur:del([flags])
+	cur:del_raw([flags])
 DEBUG
 	mdbx_set_log_level(level)               set MDBX log level (now is 'warn')
 
@@ -143,7 +143,7 @@ local mdbx_open_error = {
 }
 
 local envp = new'MDBX_env*[1]'
-function try_mdbx_open(file, opt)
+function mdbx_open(file, opt)
 	opt = opt or empty
 	local owner = _check_owner(opt.owner)
 	local create = not opt.readonly and not exists(file)
@@ -164,13 +164,14 @@ function try_mdbx_open(file, opt)
 	check_open(C.mdbx_env_set_option(env, C.MDBX_opt_max_db, opt.max_tables or 4096))
 	local flags = bor(C.MDBX_NOSUBDIR, opt.readonly and C.MDBX_RDONLY or 0, opt.flags or 0)
 	local rc = C.mdbx_env_open(env, file, flags, perms)
+	local event = create and 'db_create' or 'db_open'
 	if rc ~= 0 then
 		local err = mdbx_open_error[rc]
 		if err then
 			C.mdbx_env_close_ex(env, 1)
-			return nil, err, create
+			local ok = err == 'not_found' and not create
+			return check_for('db', file, event, ok or nil, err)
 		end
-		assert(Db.tryz(file, 'db_open', rc))
 	end
 	local self = _own(owner, object(Db, {
 		file = file,
@@ -180,23 +181,13 @@ function try_mdbx_open(file, opt)
 		_ro_txn = nil,
 		_cursors = {},
 		type = 'DB',
-		schema = {tables = {}}, --schema object (see schema.lua)
 		live_schema = {}, --{table_name->table_schema}
 	}))
 	self.env_dbis[MAIN_DBI] = '<main>'
 	self.dbis = self.env_dbis
 	live(self, file)
-	log(create and 'note' or '', 'db', create and 'db_create' or 'db_open', '%s', file)
+	log(create and 'note' or '', 'db', event, '%s', file)
 	return self, nil, create
-end
-
-function mdbx_open(file, opt)
-	local db, err, create = try_mdbx_open(file, opt)
-	if not db then
-		check_for('db', file, create and 'db_create' or 'db_open', false,
-			'%s: %s', file, err)
-	end
-	return db, create
 end
 
 function Db:close()
@@ -355,6 +346,8 @@ function Db:begin(mode)
 	end
 end
 
+Db._wtxn_end = noop --stub
+
 function Db:commit()
 	check_txn(self)
 	if self.txn == self._ro_txn then
@@ -363,14 +356,11 @@ function Db:commit()
 	else
 		local parent = ptr(self.txn.parent)
 		local rc = C.mdbx_txn_commit_ex(self.txn, nil)
-		if rc ~= 0 then
-			local_dbis_discard(self)
-			self.txn = parent
-			self:checkz('txn_commit', rc)
-		else
-			local_dbis_discard(self, true, parent)
-			self.txn = parent
-		end
+		local committed = rc == 0
+		local_dbis_discard(self, committed, parent)
+		self:_wtxn_end(committed, parent)
+		self.txn = parent
+		self:checkz('txn_commit', rc)
 	end
 end
 
@@ -383,6 +373,7 @@ function Db:abort()
 		local parent = ptr(self.txn.parent)
 		self:checkz('txn_abort', C.mdbx_txn_abort(self.txn))
 		local_dbis_discard(self)
+		self:_wtxn_end(false, parent)
 		self.txn = parent
 	end
 end
@@ -426,7 +417,7 @@ function Db:try_dbi_raw(tab, flags) --tab=name|dbi
 	assert(typeof(tab) == 'string', 'dbi: table expected')
 	check_txn(self)
 	local ok, err = self:tryz('t_open',
-		C.mdbx_dbi_open(self.txn, tab, flags or 0, dbip))
+		C.mdbx_dbi_open(self.txn, tab, flags or C.MDBX_DB_ACCEDE, dbip))
 	if not ok then return nil, err end
 	local dbi = dbip[0]
 	--DBIs opened in a nested txn are local to the txn, so we must create local
@@ -459,10 +450,11 @@ function Db:create_table_raw(tab, create_flags)
 end
 
 function Db:rename_table_raw(tab, new_table_name)
-	assert(tab)
+	local old_table_name = self:table_name(tab)
 	assert(isstr(new_table_name))
 	check_wtxn(self)
-	local dbi = self:try_dbi_raw(tab)
+	local dbi, err = self:try_dbi_raw(tab)
+	self:check_schema('t_rename', old_table_name, nil, dbi, err)
 	local old_table_name = self:table_name(tab)
 	local rc = C.mdbx_dbi_rename(self.txn, dbi, new_table_name)
 	self:check_schema('t_rename', old_table_name, nil,
@@ -619,11 +611,10 @@ end
 
 local Cur = {}; mdbx_cursor = Cur
 
---NOTE: cursors created with db:cursor() are reused, so never use a cursor
+--NOTE: cursors created with db:cursor_raw() are reused, so never use a cursor
 --beyond transaction boundaries or you might end up using an unrelated cursor.
 local curp = new'MDBX_cursor*[1]'
-function Db:try_cursor(tab, mode)
-	if mode == 'w' then check_wtxn(self) else check_txn(self) end
+function Db:try_cursor_raw(tab)
 	local dbi = isnum(tab) and tab or self:dbi_raw(tab)
 	local cur
 	local t = self._cursors
@@ -644,8 +635,8 @@ function Db:try_cursor(tab, mode)
 	return cur
 end
 
-function Db:cursor(tab, mode)
-	local cur, err = self:try_cursor(tab, mode)
+function Db:cursor_raw(tab)
+	local cur, err = self:try_cursor_raw(tab)
 	if cur then return cur end
 	self:check_schema('cursor', self:table_name(tab), nil, false, err)
 end
@@ -730,7 +721,7 @@ function Cur:try_put_raw(k, k_sz, v, v_sz, flags)
 	return self.db:tryz('cursor_put', rc)
 end
 
-function Cur:del(flags)
+function Cur:del_raw(flags)
 	check_cursor(self)
 	check_wtxn(self.db)
 	self.db:checkz('cursor_del', C.mdbx_cursor_del(self.c, flags or 0))
@@ -744,8 +735,8 @@ local function each_raw_next(self)
 	end
 	return self, k, k_sz, v, v_sz
 end
-function Db:each_raw(tab, mode)
-	local cur = self:cursor(tab, mode)
+function Db:each_raw(tab)
+	local cur = self:cursor_raw(tab)
 	return each_raw_next, cur
 end
 
@@ -761,7 +752,7 @@ local function next_table(self)
 	return str(k, k_sz)
 end
 function Db:each_table()
-	local cur = self:cursor(MAIN_DBI)
+	local cur = self:cursor_raw(MAIN_DBI)
 	return next_table, cur
 end
 end
