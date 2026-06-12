@@ -981,6 +981,7 @@ function Db:drop_table(tab)
 			if ref_schema and ref_schema.ref_fks then
 				touch_schema(self, ref_schema.name)
 				ref_schema.ref_fks[name..'/'..fk.name] = nil
+				if not next(ref_schema.ref_fks) then ref_schema.ref_fks = nil end
 				self:save_table_schema(ref_schema)
 			end
 		end
@@ -1330,6 +1331,12 @@ function Db:add_index(val_table, ix)
 		'index exists: %s', ix_schema.name)
 	touch_schema(self, val_schema.name)
 	attr(val_schema, 'ixs')[ix_schema.name] = ix
+	for _, live_ix_schema in ipairs(val_schema.ix_schemas or empty) do
+		if live_ix_schema.name == ix_schema.name then
+			self:save_table_schema(val_schema)
+			return true, nil, ix_schema.name
+		end
+	end
 	build_index(self, 'i_add', val_schema, ix_schema)
 	return true, nil, ix_schema.name
 end
@@ -1367,6 +1374,7 @@ function Db:drop_index(ix_name)
 		'index not found: %s', ix_name)
 	touch_schema(self, val_schema.name)
 	val_schema.ixs[ix_name] = nil
+	if not next(val_schema.ixs) then val_schema.ixs = nil end
 	--keep the index table + ix_schemas entry if a fk still uses it (now fk-owned).
 	release_index_if_unreferenced(self, val_schema, ix_name)
 	self:save_table_schema(val_schema)
@@ -1487,6 +1495,7 @@ function Db:drop_fk(fk)
 	if ref_schema and ref_schema.ref_fks then
 		touch_schema(self, ref_schema.name)
 		ref_schema.ref_fks[stored.table..'/'..stored.name] = nil
+		if not next(ref_schema.ref_fks) then ref_schema.ref_fks = nil end
 		self:save_table_schema(ref_schema)
 	end
 	return true

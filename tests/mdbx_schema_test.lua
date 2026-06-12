@@ -1095,6 +1095,30 @@ function test.unique_index()
 	end)
 end
 
+function test.drop_last_index_clears_index_state()
+	with_db_reopen('drop_last_index_clears_index_state', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id', mdbx_type = 'u32', not_null = true},
+				{col = 'v' , mdbx_type = 'u32'},
+			},
+			pk = {'id'},
+		})
+		local _, _, ix = db:add_index('t', {'v'})
+		db:drop_index(ix)
+		local _, schema = db:dbi_schema't'
+		assert(not schema.ixs and not schema.ix_schemas)
+		db:commit()
+	end, function(db)
+		db:begin'r'
+		local _, schema = db:dbi_schema't'
+		assert(not schema.ixs and not schema.ix_schemas)
+		db:commit()
+	end)
+end
+
 --non-unique (DUPSORT) index: multiple rows per index key, iteration walks all
 --of them in (key, pk) order, and delete removes only the deleted row's entry.
 function test.non_unique_index()
@@ -2063,6 +2087,39 @@ function test.fk_registration()
 	assert(ok, err)
 end
 
+function test.fk_removal_clears_reverse_refs()
+	with_db_reopen('fk_removal_clears_reverse_refs', function(db)
+		db:begin'w'
+		for i = 1, 2 do
+			db:create_table('parent'..i, {
+				name = 'parent'..i,
+				fields = {{col = 'id', mdbx_type = 'u32', not_null = true}},
+				pk = {'id'},
+			})
+			db:create_table('child'..i, {
+				name = 'child'..i,
+				fields = {
+					{col = 'id' , mdbx_type = 'u32', not_null = true},
+					{col = 'pid', mdbx_type = 'u32', not_null = true},
+				},
+				pk = {'id'},
+			})
+			db:add_fk{name = 'parent_fk', table = 'child'..i, cols = {'pid'},
+				ref_table = 'parent'..i, ref_cols = {'id'}}
+		end
+		db:drop_fk{name = 'parent_fk', table = 'child1'}
+		db:drop_table'child2'
+		assert(not select(2, db:dbi_schema'parent1').ref_fks)
+		assert(not select(2, db:dbi_schema'parent2').ref_fks)
+		db:commit()
+	end, function(db)
+		db:begin'r'
+		assert(not select(2, db:dbi_schema'parent1').ref_fks)
+		assert(not select(2, db:dbi_schema'parent2').ref_fks)
+		db:commit()
+	end)
+end
+
 --fk insert/update check: a child row must reference an existing parent; a null
 --(nullable) fk col skips the check. (step 2.)
 function test.fk_insert_check()
@@ -2340,6 +2397,48 @@ function test.fk_drop_index_kept_by_fk()
 		assert(not (sch.ixs and sch.ixs['child/i/pid']), 'removed from ixs')
 		--enforcement still works via the now-fk-owned index.
 		assert(try_mutation(db, db.del, 'parent', 1) == false)
+		db:commit()
+	end)
+end
+
+--re-adding a user index retained for an fk restores its `ixs` declaration
+--without rebuilding or duplicating the existing physical index.
+function test.fk_retained_index_readd()
+	with_db('fk_retained_index_readd', function(db)
+		db:begin'w'
+		db:create_table('parent', {
+			name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}},
+			pk = {'id'},
+		})
+		db:create_table('child', {
+			name = 'child',
+			fields = {
+				{col = 'id' , mdbx_type = 'u32', not_null = true},
+				{col = 'pid', mdbx_type = 'u32', not_null = true},
+			},
+			pk = {'id'},
+		})
+		local _, _, ix = db:add_index('child', {'pid'})
+		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		db:insert('parent', '{}', {id = 1})
+		db:insert('child', '{}', {id = 10, pid = 1})
+		db:drop_index(ix)
+
+		local _, _, readded_ix = db:add_index('child', {'pid'})
+		assert(readded_ix == ix)
+		local _, schema = db:dbi_schema'child'
+		assert(schema.ixs and schema.ixs[ix])
+		assert(#schema.ix_schemas == 1)
+		assert(schema.fks.child_pid_fk.ix == ix)
+		assert(num((db:must_get(ix, '{}', 1)).id) == 10)
+
+		db:drop_fk{name = 'child_pid_fk', table = 'child'}
+		assert(db:table_exists(ix), 're-added user index survives fk drop')
+		db:drop_index(ix)
+		assert(not db:table_exists(ix), 'index drops after its final owner')
+		assert_consistent(db)
 		db:commit()
 	end)
 end
