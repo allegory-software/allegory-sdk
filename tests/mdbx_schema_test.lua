@@ -1567,6 +1567,46 @@ function test.cursor_update_maintains_index()
 	end)
 end
 
+function test.cursor_is_null()
+	with_db('cursor_is_null', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id'  , mdbx_type = 'u32' , not_null = true},
+				{col = 'tag' , mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
+				{col = 'note', mdbx_type = 'utf8', maxlen = 8},
+			},
+			pk = {'id'},
+		})
+		db:insert('t', '{}', {id = 1, tag = 'a', note = null})
+		db:insert('t', '{}', {id = 2, tag = 'b', note = 'two'})
+		local _,_,ix = db:add_index('t', {'tag'})
+
+		local cur = db:cursor('t')
+		local is_null, err = cur:is_null'note'
+		assert(is_null and err == 'not_found')
+		assert(cur:try_get(nil, 1))
+		assert(cur:is_null'note')
+		assert(cur:try_get(nil, 2))
+		assert(not cur:is_null'note')
+		cur:close()
+
+		cur = db:cursor(ix)
+		assert(cur:first())
+		assert(cur:is_null'note')
+		assert(cur:next())
+		assert(not cur:is_null'note')
+		cur:close()
+
+		assert(db:is_null(ix, 'note', 'a'))
+		assert(not db:is_null(ix, 'note', 'b'))
+		local is_null, err = db:is_null(ix, 'note', 'missing')
+		assert(is_null and err == 'not_found')
+		db:commit()
+	end)
+end
+
 function test.cursor_update_through_index()
 	with_db('cursor_update_through_index', function(db)
 		db:begin'w'

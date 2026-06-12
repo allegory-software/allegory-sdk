@@ -47,6 +47,7 @@ CRUD
 CURSORS
 	db:[try_]cursor (table|dbi) -> cur      create cursor
 	cur:{first|last|next|prev|current}([cols]) -> keysvals...
+	cur:is_null     (col) -> is_null, [reason]
 	cur:[must_]get  ([val_cols], keys...) -> vals...
 	cur:try_get     ([val_cols], keys...) -> true, vals... | false
 	cur:update      ([val_cols], vals...)
@@ -1841,9 +1842,15 @@ end
 function Db:is_null(tab, col, ...) --returns is_null, [reason]
 	local dbi, schema = self:try_dbi_schema(tab)
 	if not dbi then return true, schema end
-	local f, vi = val_field(schema, col)
-	local ok, v, v_sz = get_raw_by_pk(self, dbi, schema, ...)
+	local tab_schema = schema
+	if schema.is_index then schema = assert(schema.val_schema) end
+	local _, vi = val_field(schema, col)
+	local ok, v, v_sz = get_raw_by_pk(self, dbi, tab_schema, ...)
 	if not ok then return true, v end
+	if tab_schema.is_index then
+		ok, v, v_sz = self:get_raw(assert(self.dbis[schema.name]), v, v_sz)
+		assert(ok, v)
+	end
 	return C.schema_val_is_null(schema._st, vi-1, v, v_sz) ~= 0
 end
 
@@ -2193,6 +2200,20 @@ function Cur:get(...)
 end
 function Cur:must_get(...)
 	return check_cur(self, 'c_get', self:try_get(...))
+end
+
+function Cur:is_null(col)
+	local schema = assert(self.schema)
+	local is_index = schema.is_index
+	if is_index then schema = assert(schema.val_schema) end
+	local _, vi = val_field(schema, col)
+	local ok, k, _, v, v_sz = self:current_raw()
+	if not ok then return true, k end
+	if is_index then
+		ok, v, v_sz = self.db:get_raw(assert(self.db.dbis[schema.name]), v, v_sz)
+		assert(ok, v)
+	end
+	return C.schema_val_is_null(schema._st, vi-1, v, v_sz) ~= 0
 end
 
 local cur_v0_buffer = buffer() --stable copy of a cursor's old value across writes
