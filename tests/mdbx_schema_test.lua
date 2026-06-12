@@ -1567,6 +1567,37 @@ function test.cursor_update_maintains_index()
 	end)
 end
 
+function test.cursor_update_through_index()
+	with_db('cursor_update_through_index', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id'  , mdbx_type = 'u32' , not_null = true},
+				{col = 'cat' , mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
+				{col = 'name', mdbx_type = 'utf8', maxlen = 8},
+			},
+			pk = {'id'},
+		})
+		db:insert('t', '{}', {id = 1, cat = 'a', name = 'one'})
+		db:insert('t', '{}', {id = 2, cat = 'b', name = 'two'})
+		local _,_,ix = db:add_index('t', {'cat'})
+
+		local cur = db:cursor(ix)
+		local id = cur:first()
+		assert(num(id) == 1)
+		assert(cur:update('name', 'uno'))
+		assert(cur:update('cat', 'c'))
+		cur:close()
+
+		assert(db:get('t', 'name', 1) == 'uno')
+		assert(db:get('t', 'cat', 1) == 'c')
+		assert(not db:try_get(ix, nil, 'a'))
+		assert(num(db:must_get(ix, '{}', 'c').id) == 1)
+		db:commit()
+	end)
+end
+
 --cursor updates maintain unique indexes, and atomic() rolls back a conflict
 --detected after the base row was changed.
 function test.cursor_update_unique_index()

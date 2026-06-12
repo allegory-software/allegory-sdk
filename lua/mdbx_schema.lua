@@ -2198,6 +2198,18 @@ end
 local cur_v0_buffer = buffer() --stable copy of a cursor's old value across writes
 function Cur:update(val_cols, ...)
 	local schema = assert(self.schema)
+	if schema.is_index then
+		local ok, _, _, k, k_sz = self:current_raw()
+		if not ok then
+			self.db:check_row('c_update', schema.name, false, 'not_found')
+		end
+		local cur = self.db:cursor(schema.val_table)
+		local ok, err = cur:get_raw(k, k_sz)
+		self.db:check_row('c_update', schema.val_table, ok, err)
+		cur:update(val_cols, ...)
+		cur:close()
+		return true
+	end
 	local cols, as = cols_list(val_cols)
 	check_cols(schema, cols, as == '{}' and (...))
 	cols = cols or schema.val_cols
