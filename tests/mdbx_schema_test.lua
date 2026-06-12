@@ -933,6 +933,7 @@ function test.validate_schema()
 
 		--matching paper schema -> validates ok
 		db = mdbx_open(file)
+		db.schema = {tables = {}}
 		db.schema.tables.t = {
 			name = 't',
 			fields = {
@@ -952,6 +953,7 @@ function test.validate_schema()
 		db:commit(); db:close()
 
 		db = mdbx_open(file)
+		db.schema = {tables = {}}
 		db.schema.tables.raw = {
 			name = 'raw',
 			fields = {
@@ -970,6 +972,7 @@ function test.validate_schema()
 
 		--diverging paper schema (v: i32 -> utf8) -> schema error + abort
 		db = mdbx_open(file)
+		db.schema = {tables = {}}
 		db.schema.tables.t = {
 			name = 't',
 			fields = {
@@ -1730,7 +1733,7 @@ function test.table_ddl_expected_errors()
 		db:begin'w'
 		assert(db:table_exists't' and db:table_exists'u')
 
-		assert(db:drop_table't' == nil)
+		assert(db:drop_table't' == true)
 		ok, err = db:drop_table't'
 		assert(ok == nil and err == 'not_found')
 		db:commit()
@@ -3668,7 +3671,7 @@ function test.ddl_does_not_mutate_paper_schema()
 	local ok, err = xpcall(function()
 		db = mdbx_open(file)
 		db:begin'w'
-		db:create_table('existing', {fields = {
+		db:create_table('existing', {name = 'existing', fields = {
 			{col = 'id', mdbx_type = 'u32', not_null = true},
 			{col = 'v' , mdbx_type = 'u32'},
 		}, pk = {'id'}})
@@ -3676,22 +3679,25 @@ function test.ddl_does_not_mutate_paper_schema()
 		db:close()
 
 		db = mdbx_open(file)
-		local new_schema = {fields = {
+		local new_schema = {name = 'new', fields = {
 			{col = 'id', mdbx_type = 'u32', not_null = true},
 			{col = 'v' , mdbx_type = 'u32'},
 		}, pk = {'id'}}
-		local existing_schema = {fields = {
+		local existing_schema = {name = 'existing', fields = {
 			{col = 'id', mdbx_type = 'u32', not_null = true},
 			{col = 'v' , mdbx_type = 'u32'},
 		}, pk = {'id'}}
 		local new_v = new_schema.fields[2]
 		local existing_v = existing_schema.fields[2]
+		db.schema = {tables = {existing = existing_schema}}
 
 		db:begin'w'
 		db:create_table('new', new_schema)
-		db:open_table('existing', 'w', existing_schema)
-		db:rename_column('new', 'v', 'new_v')
-		db:rename_column('existing', 'v', 'existing_v')
+		db:dbi_schema'existing'
+		db:without_schema(function()
+			db:rename_column('new', 'v', 'new_v')
+			db:rename_column('existing', 'v', 'existing_v')
+		end)
 		assert(new_v.col == 'v' and existing_v.col == 'v',
 			fmt('new=%s existing=%s', new_v.col, existing_v.col))
 		db:abort()
@@ -3910,6 +3916,23 @@ function test.unknown_write_columns_rejected()
 	end)
 end
 
+function test.unknown_read_columns_rejected()
+	with_db('unknown_read_columns_rejected', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'v' , mdbx_type = 'u32'},
+		}, pk = {'id'}})
+		db:insert('t', '{}', {id = 1, v = 10})
+		assert(not pcall(db.get, db, 't', 'typo', 1))
+		local cur = db:cursor't'
+		assert(cur:first())
+		assert(not pcall(cur.current, cur, 'typo'))
+		cur:close()
+		db:commit()
+	end)
+end
+
 --two fks on the same columns share one enforcement index. Cascades run before
 --NO ACTION checks, and the index remains until its final fk owner is removed.
 function test.shared_fk_index_lifetime_and_delete_order()
@@ -4047,7 +4070,7 @@ function test.rename_column_failure_rolls_back()
 		db:commit()
 
 		db:begin'w'
-		db:create_table't/i/x-b'
+		db:create_table_raw't/i/x-b'
 		local ok, err = catch('schema', db.rename_column, db, 't', 'a', 'x')
 		assert(not ok, 'rename unexpectedly bypassed the index-name collision')
 		assert(iserror(err, 'schema'), tostring(err))

@@ -3,16 +3,16 @@
 	mdbx_schema: structured data and multi-key indexing for mdbx.
 	Written by Cosmin Apreutsei. Public Domain.
 
-	Data types:
+DATA TYPES
 	- ints: 8, 16, 32, 64 bit, signed/unsigned
 	- floats: 32 and 64 bit
 	- arrays: fixed-size and variable-size
 
-	Keys:
+KEYS
 	- composite keys with per-field ascending/descending order
 	- utf-8 ai_ci collation
 
-	Limitations:
+LIMITATIONS
 	- only varsize columns with `nozero` (no embedded \0) can be used in indexes.
 	- only columns with `not_null` can be used in primary key and unique indexes.
 	- primary keys are immutable.
@@ -20,32 +20,64 @@
 	- fks: only to pk columns, no "restrict", no "onupdate" (pk is immutable).
 	- schema layouting errors are non-recoverable.
 
-API, extends mdbx.lua MANAGED API
+TABLES
+	There can be 3 types of tables in the same database:
+	1) raw tables without a schema, to be used only with raw methods.
+	2) tables with a static declared-in-code paper schema (see schema.lua).
+	can only be created/restructured via sync_schema() and when opened the
+	on-disk schema must match the paper schema or dbi() raises. this is how
+	you get declarative schemas with automatic schema migration.
+	3) tables without a paper schema, created with create_table() and
+	restructured manually via DDL ops, since there's no blueprint to sync to.
 
-	db:put        (table_name|dbi, [cols], keysvals...)
-	db:insert     (table_name|dbi, [cols], keysvals...) -> generated_id
-	db:update     (table_name|dbi, [cols], keysvals...)
-	db:upsert     (table_name|dbi, [cols], keysvals...)
-	db:is_null    (table_name|dbi, col, keys...) -> is_null, [reason]
-	db:exists     (table_name|dbi, keys...) -> record_exists, table_exists
-	db:[must_]get (table_name|dbi, [val_cols], keys...) -> vals...
-	db:try_get    (table_name|dbi, [val_cols], keys...) -> true, vals... | false
-	db:del        (table_name|dbi, keys...)
-	db:put_records(table_name|dbi, [cols, ]{keysvals1,...})
+API, extends API from mdbx.lua:
 
+CRUD
+	db:put          (table|dbi, [cols], keysvals...)
+	db:insert       (table|dbi, [cols], keysvals...) -> generated_id
+	db:update       (table|dbi, [cols], keysvals...)
+	db:upsert       (table|dbi, [cols], keysvals...)
+	db:is_null      (table|dbi, col, keys...) -> is_null, [reason]
+	db:exists       (table|dbi, keys...) -> record_exists, table_exists
+	db:[must_]get   (table|dbi, [val_cols], keys...) -> vals...
+	db:try_get      (table|dbi, [val_cols], keys...) -> true, vals... | false
+	db:del          (table|dbi, keys...)
+	db:put_records  (table|dbi, [cols, ]{keysvals1,...})
+	db:try_each     (table|dbi, [cols]) -> cur, keysvals...
+CURSORS
+	db:[try_]cursor (table|dbi) -> cur      create cursor
 	cur:{first|last|next|prev|current}([cols]) -> keysvals...
-	cur:[must_]get ([val_cols], keys...) -> vals...
-	cur:try_get    ([val_cols], keys...) -> true, vals... | false
-	cur:update     ([val_cols], vals...)
+	cur:[must_]get  ([val_cols], keys...) -> vals...
+	cur:try_get     ([val_cols], keys...) -> true, vals... | false
+	cur:update      ([val_cols], vals...)
 
-	db:try_each    (tbl_name|dbi, [cols]) -> cur, keysvals...
+COLUMS LISTS & IN/OUT VALUES FORMATS
 
-		cols format   |  vals...              | keysvals...
-		--------------+-----------------------+------------
-		nil           |   col1_val,...        |  keycol1_val,..., col1_val,...
-		'col1 ...'    |   col1_val,...        |  keycol1_val,..., col1_val,...
-		'[col1 ...]'  |  {col1_val,...}       | {keycol1_val,..., col1_val,...}
-		'{col1 ...}'  |  {col1=col1_val,...}  | {keycol1=keycol1_val,col1=col1_val}
+	cols format   |  vals...              | keysvals...
+	--------------+-----------------------+------------
+	nil           |  col1_val,...         | keycol1_val,..., col1_val,...
+	'col1 ...'    |  col1_val,...         | keycol1_val,..., col1_val,...
+	'[col1 ...]'  |  {col1_val,...}       | {keycol1_val,..., col1_val,...}
+	'{col1 ...}'  |  {col1=col1_val,...}  | {keycol1=keycol1_val,col1=col1_val}
+
+STATE
+	db.schema.tables[table_name] -> paper_schema
+		- db.schema itself is a schema object, see schema.lua.
+		- layouting/compiling add many fields to it but *not* mutable state
+		so it is seen as global-shared (DDL is forbidden on paper schemas).
+	db.live_schema[table_name] -> paper_schema | stored_schema
+		- live schema cache managed by dbi() and DDL ops; transactional.
+
+PIPELINE
+	open existing table -> resolve schema + open raw
+	resolve schema ->
+		load stored schema (already layouted); must be present
+		look up paper schema and layout it (which also layouts its indexes)
+		if both present, compare and use paper schema as live schema
+		if paper schema missing, use stored schema as live schema
+		compile live schema (which compiles its indexes and fks)
+		register live schema in live cache along with its indexes
+
 
 ]]
 
@@ -362,7 +394,7 @@ function Db:layout_table_schema(schema)
 			end
 		end
 
-	end
+	end --for fields in key_fields, val_fields
 
 	--create and layout index table schemas.
 	if schema.ixs then
@@ -373,6 +405,9 @@ function Db:layout_table_schema(schema)
 			add(schema.ix_schemas, ix_schema)
 		end
 	end
+
+	--TODO: fks
+
 end
 
 local S = function() end
@@ -398,10 +433,10 @@ end
 --create encoders and decoders for a layouted schema.
 function Db:compile_table_schema(schema)
 
+	assert(schema.layouted)
+
 	if schema.compiled then return end
 	schema.compiled = true
-
-	self:layout_table_schema(schema)
 
 	local key_fields = schema.key_fields
 	local val_fields = schema.val_fields
@@ -562,6 +597,10 @@ function Db:compile_table_schema(schema)
 
 	if schema.is_index then
 		self:compile_index_schema(schema)
+	elseif schema.ix_schemas then --compile indexes
+		for _, ix_schema in ipairs(schema.ix_schemas) do
+			self:compile_table_schema(ix_schema)
+		end
 	end
 
 end
@@ -668,37 +707,40 @@ function Db:load_table_schema(table_name)
 	schema.pk = imap(schema.key_fields, 'col')
 	schema.pk.desc = imap(schema.key_fields, 'descending')
 	schema.layouted = true --layouted but not compiled
+
+	--load indexes and fks
 	if schema.ixs or schema.fks then
 		schema.ix_schemas = {} --live ix list from both
-	end
-	if schema.ixs then
-		for ix_name in sortedpairs(schema.ixs) do
-			local ix_schema = assertf(self:load_table_schema(ix_name),
-					'schema missing for table: %s ', ix_name)
-			ix_schema.val_schema = schema
-			add(schema.ix_schemas, ix_schema)
+		if schema.ixs then
+			for ix_name in sortedpairs(schema.ixs) do
+				local ix_schema = assertf(self:load_table_schema(ix_name),
+						'schema missing for table: %s ', ix_name)
+				ix_schema.val_schema = schema
+				add(schema.ix_schemas, ix_schema)
+			end
 		end
-	end
-	if schema.fks then --child table: re-attach fk-enforcement indexes to ix_schemas.
-		for _, fk in pairs(schema.fks) do
-			fk.table = table_name
-			--an fk-owned index isn't in `ixs`; attach it to ix_schemas (the live,
-			--maintained list) unless a user index or another fk already added it.
-			if fk.ix and not (schema.ixs and schema.ixs[fk.ix]) then
-				local present
-				for _, ix_schema in ipairs(schema.ix_schemas) do
-					if ix_schema.name == fk.ix then present = true; break end
-				end
-				if not present then
-					local ix_schema = assertf(self:load_table_schema(fk.ix),
-						'schema missing for fk index: %s', fk.ix)
-					ix_schema.val_schema = schema
-					binsearch_insert(schema.ix_schemas, ix_schema, function(t, i, s)
-						return t[i].name < s.name
-					end)
+		if schema.fks then --child table: re-attach fk indexes to ix_schemas.
+			for _, fk in pairs(schema.fks) do
+				fk.table = table_name
+				--an fk-owned index isn't in `ixs`; attach it to ix_schemas (the live,
+				--maintained list) unless a user index or another fk already added it.
+				if fk.ix and not (schema.ixs and schema.ixs[fk.ix]) then
+					local present
+					for _, ix_schema in ipairs(schema.ix_schemas) do
+						if ix_schema.name == fk.ix then present = true; break end
+					end
+					if not present then
+						local ix_schema = assertf(self:load_table_schema(fk.ix),
+							'schema missing for fk index: %s', fk.ix)
+						ix_schema.val_schema = schema
+						add(schema.ix_schemas, ix_schema)
+					end
 				end
 			end
 		end
+		sort(schema.ix_schemas, function(s1, s2)
+			return s1.name < s2.name
+		end)
 	end
 	return schema
 end
@@ -780,6 +822,41 @@ function Db:validate_table_schema(stored_schema, paper_schema)
 	self:check_schema('t_open', table_name, nil, ok, err)
 end
 
+local function load_live_schema(self, name)
+	local schema = self.live_schema[name]
+	if schema ~= nil then return schema or nil end
+	local paper_schema = self.schema and self.schema.tables[name]
+	local stored_schema = self:load_table_schema(name)
+	if paper_schema and stored_schema then --schemas must match exactly
+		self:layout_table_schema(paper_schema)
+		self:validate_table_schema(stored_schema, paper_schema)
+	elseif paper_schema then --raw table
+		self:check_schema('t_open', name, nil, false,
+			'trying to open a raw table with a schema')
+	elseif stored_schema then --lost paper schema, use stored
+		paper_schema = stored_schema
+	end
+	schema = paper_schema
+	if schema then
+		self:compile_table_schema(schema)
+		self.live_schema[name] = schema
+		for _,ix_schema in ipairs(schema.ix_schemas or empty) do
+			self.live_schema[ix_schema.name] = ix_schema
+		end
+	else
+		self.live_schema[name] = false
+	end
+	return schema or nil
+end
+function Db:table_schema(tab)
+	local name = self:table_name(tab)
+	if name:has'/' then --index: resolve base schema first which resolves the index
+		load_live_schema(self, name:match'^([^/]+)/')
+		return self.live_schema[name] or nil
+	end
+	return load_live_schema(self, name)
+end
+
 local function table_flags(schema)
 	if not schema then return 0 end
 	return bor(
@@ -787,95 +864,124 @@ local function table_flags(schema)
 		schema.dup_keys and mdbx.MDBX_DUPSORT or 0
 	)
 end
-local typeof, assert = typeof, assert
+
+local function try_open(self, tab)
+	local dbi, err = self:try_dbi_raw(tab)
+	if not dbi then return nil, err end
+	local schema = self:table_schema(tab)
+	if schema then
+		--open indexes now just to check for errors.
+		for _,ix_schema in ipairs(schema.ix_schemas or empty) do
+			try_open(self, ix_schema.name)
+		end
+	end
+	return dbi
+end
 function Db:try_dbi(tab)
 	if typeof(tab) == 'number' then return tab end --tab=dbi
 	local dbi = self.dbis[tab]
 	if dbi then return dbi end
-	local name = self:table_name(tab)
-	local schema = self.live_schema[name]
-	if not schema then
-		local paper_schema = self.schema.tables[name]
-		local stored_schema = self:load_table_schema(name)
-		if paper_schema and stored_schema then --schemas must match exactly
-			self:validate_table_schema(stored_schema, paper_schema)
-		elseif paper_schema then --raw table
-			self:check_schema('t_open', name, nil, false,
-				'trying to open a raw table with a schema')
-		elseif stored_schema then --lost paper schema
-			paper_schema = stored_schema
-		end
-		schema = paper_schema
-		if schema then
-			schema.name = name
-			self:compile_table_schema(schema)
-		end
+	if tab:has'/' then --index: open base schema first which opens the index
+		local base_tab = tab:match'^([^/]+)/'
+		local dbi, err = try_open(self, base_tab)
+		if not dbi then return nil, err end
+		local dbi = self.dbis[tab]
+		if not dbi then return nil, 'not_found' end
+		return dbi
+	else
+		return try_open(self, tab)
 	end
-	local dbi, err = self:try_dbi_raw(tab, table_flags(schema))
-	if not dbi then return nil, err end
-	if schema then
-		--open indexes now just to check for errors.
-		for _,ix_schema in ipairs(schema.ix_schemas or empty) do
-			self:dbi(ix_schema.name)
-		end
-	end
-	self.live_schema[name] = schema or true
-	return dbi
 end
 function Db:dbi(tab)
 	local dbi, err = self:try_dbi(tab)
 	return self:check_schema('t_open', self:table_name(tab), nil, dbi, err)
 end
+function Db:try_dbi_schema(tab)
+	local dbi, err = self:try_dbi(tab)
+	if not dbi then return nil, err end
+	return dbi, assert(self:table_schema(tab), 'table has no schema')
+end
 function Db:dbi_schema(tab)
-	local dbi = self:dbi(tab)
-	return dbi, self.live_schema[self:table_name(tab)]
+	local dbi, schema = self:try_dbi_schema(tab)
+	return self:check_schema('t_open', self:table_name(tab), nil, dbi, schema)
 end
 
 function Db:without_schema(fn)
-	if self._in_without_schema then
+	if not self.schema or self._in_without_schema then
 		fn()
 		return
 	end
+	assert(self.txn, 'not in transaction')
 	local real_live_schema = self.live_schema
 	local real_schema = self.schema
 	self.live_schema = {}
-	self.schema = {tables = {}}
+	self.schema = nil
 	self._in_without_schema = true
 	local ok, err = pcall(fn)
 	self._in_without_schema = false
-	for k in pairs(self.live_schema) do --invalidate changed before restoring.
-		real_live_schema[k] = nil
+	for name in pairs(self.dirty_schema or empty) do
+		--invalidate changed schemas before restoring because those schemas
+		--could've been stored schemas from tables without a paper schema that
+		--must now be reloaded.
+		real_live_schema[name] = nil
 	end
 	self.schema = real_schema
 	self.live_schema = real_live_schema
 	assert(ok, err)
 end
 
+local function touch_schema(self, name)
+	--DDL ops only work on tables without a paper schema because paper schema
+	--is immutable and can't be reloaded. that's why sync_schema() wraps DDL
+	--in without_schema() so DDL ops can only see and mutate stored schemas.
+	assert(not self.schema or not self.schema.tables[name])
+	--DDL dirties up live schemas so we mark them and clear them on txn end.
+	self.dirty_schema = self.dirty_schema or {}
+	self.dirty_schema[name] = true
+end
+
+function Db:_wtxn_end(commit, parent)
+	if commit and parent then return end --promote dirty marks
+	if not self.dirty_schema then return end
+	for name in pairs(self.dirty_schema) do
+		self.live_schema[name] = nil
+	end
+	if not parent then
+		self.dirty_schema = nil
+	end
+end
+
 function Db:create_table(name, schema)
 	assert(schema)
 	assert(not schema.ixs)
 	assert(not schema.fks)
-	assert(not self.schema.tables[name])
+	touch_schema(self, name)
+	self:layout_table_schema(schema)
 	self:compile_table_schema(schema)
 	local dbi = self:create_table_raw(name, table_flags(schema))
 	self:save_table_schema(schema)
 	local schema = self:load_table_schema(name)
 	self:compile_table_schema(schema)
 	self.live_schema[name] = schema
+	for _,ix_schema in ipairs(schema.ix_schemas or empty) do
+		self.live_schema[ix_schema.name] = ix_schema
+	end
 	return dbi
 end
 
 function Db:drop_table(tab)
 	local name = self:table_name(tab)
-	assert(not self.schema.tables[name])
-	self:drop_table_raw(name)
-	local schema = self.live_schema[name]
-	if not schema then return end
+	local dbi, err = self:try_dbi_raw(name)
+	if not dbi then return nil, err end
+	local schema = self:table_schema(name)
+	if not schema then return self:drop_table_raw(dbi) end
+	touch_schema(self, name)
 	--as a child: drop the reverse refs our fks hold on their parents.
 	if schema.fks then
 		for _, fk in pairs(schema.fks) do
 			local _, ref_schema = self:dbi_schema(fk.ref_table)
 			if ref_schema and ref_schema.ref_fks then
+				touch_schema(self, ref_schema.name)
 				ref_schema.ref_fks[name..'/'..fk.name] = nil
 				self:save_table_schema(ref_schema)
 			end
@@ -892,6 +998,7 @@ function Db:drop_table(tab)
 	for _,ix_schema in ipairs(schema.ix_schemas or empty) do
 		self:drop_table(ix_schema.name)
 	end
+	assert(self:drop_table_raw(dbi))
 	self:drop_table_schema(name)
 	self.live_schema[name] = nil
 	return true
@@ -903,11 +1010,15 @@ end
 --(name already updated) and when only the index names change (column rename).
 local function rename_index(self, val_schema, ix_schema, new_ix)
 	local old_ix = ix_schema.name
+	touch_schema(self, old_ix)
+	touch_schema(self, new_ix)
 	self:rename_table_raw(old_ix, new_ix)
 	self:drop_table_schema(old_ix)
+	self.live_schema[old_ix] = nil
 	ix_schema.name = new_ix
 	ix_schema.val_table = val_schema.name
 	self:save_table_schema(ix_schema)
+	self.live_schema[new_ix] = ix_schema
 	if val_schema.ixs and val_schema.ixs[old_ix] ~= nil then --user index: rekey ixs.
 		val_schema.ixs[new_ix] = val_schema.ixs[old_ix]
 		val_schema.ixs[old_ix] = nil
@@ -915,12 +1026,17 @@ local function rename_index(self, val_schema, ix_schema, new_ix)
 end
 function Db:rename_table(tab, new_name)
 	local old_name = self:table_name(tab)
-	assert(not self.schema.tables[old_name])
-	assert(not self.schema.tables[new_name])
+	touch_schema(self, old_name)
+	touch_schema(self, new_name)
+	local schema = self:table_schema(old_name)
 	self:rename_table_raw(old_name, new_name)
-	local schema = self.live_schema[old_name]
-	if not schema then return end
+	self.live_schema[old_name] = nil
+	if not schema then
+		self.live_schema[new_name] = false
+		return
+	end
 	schema.name = new_name --set first: rename_index derives val_table from it
+	self.live_schema[new_name] = schema
 	--index table names embed the table name (tbl/u-or-i/cols), so rename each.
 	for _, ix_schema in ipairs(schema.ix_schemas or empty) do
 		rename_index(self, schema, ix_schema,
@@ -936,6 +1052,7 @@ function Db:rename_table(tab, new_name)
 			local ref_schema = self_ref and schema
 				or select(2, self:dbi_schema(fk.ref_table))
 			if ref_schema and ref_schema.ref_fks then
+				touch_schema(self, ref_schema.name)
 				ref_schema.ref_fks[old_name..'/'..fk.name] = nil
 				ref_schema.ref_fks[new_name..'/'..fk.name] =
 					{table = new_name, fk = fk.name}
@@ -950,6 +1067,7 @@ function Db:rename_table(tab, new_name)
 				local cfk = child_schema and child_schema.fks
 					and child_schema.fks[ref.fk]
 				if cfk then
+					touch_schema(self, child_schema.name)
 					cfk.ref_table = new_name
 					self:save_table_schema(child_schema)
 				end
@@ -1016,7 +1134,7 @@ function Db:compile_index_schema(ix_schema)
 	assert(ix_schema.is_index)
 
 	local val_table = assert(ix_schema.val_table)
-	local val_schema = assert(ix_schema.val_schema)
+	local val_schema = assert(ix_schema.val_schema) --base table is layouted
 
 	local cols = cols_list(cat(ix_schema.pk, ' '))
 	local dt = {}
@@ -1050,7 +1168,12 @@ function Db:compile_index_schema(ix_schema)
 	--create index methods
 
 	function ix_schema.try_create(ix_schema, self, event)
-		local ix_dbi = self:create_table(ix_schema.name, ix_schema)
+		local name = ix_schema.name
+		touch_schema(self, name)
+		self:layout_table_schema(ix_schema)
+		self:compile_table_schema(ix_schema)
+		local ix_dbi = self:create_table_raw(name, table_flags(ix_schema))
+		self:save_table_schema(ix_schema)
 		local xk, xk_buf_sz = ix1_key_rec_buffer(ix_schema.key_fields.max_rec_size)
 		local xv, xv_buf_sz = ix_val_rec_buffer(val_schema.key_fields.max_rec_size)
 		for cur, k, k_sz, v, v_sz in self:each_raw(val_table) do
@@ -1141,6 +1264,7 @@ end
 --live ix_schemas list. shared by add_index (user index, also registered in
 --`ixs`) and add_fk (fk-enforcement index, not in `ixs`).
 local function build_index(self, event, val_schema, ix_schema)
+	self:layout_table_schema(ix_schema)
 	self:compile_table_schema(ix_schema)
 	local op = {type = 'schema', event = event, table = val_schema.name}
 	local ok, err = ix_schema:try_create(self, op)
@@ -1149,10 +1273,11 @@ local function build_index(self, event, val_schema, ix_schema)
 		return t[i].name < s.name
 	end)
 	self:save_table_schema(val_schema)
+	self.live_schema[ix_schema.name] = ix_schema
 end
 
 function Db:add_index(val_table, ix)
-	local val_dbi, val_schema = self:dbi_schema(val_table)
+	local val_dbi, val_schema = self:try_dbi_schema(val_table)
 	self:check_schema('i_add', self:table_name(val_table), nil,
 		val_dbi, 'not_found')
 	local ix_name = format_ix_name(val_schema.name, ix, ix.is_unique)
@@ -1195,6 +1320,7 @@ function Db:add_index(val_table, ix)
 	self:check_schema('i_add', val_schema.name, nil,
 		not (val_schema.ixs and val_schema.ixs[ix_schema.name]),
 		'index exists: %s', ix_schema.name)
+	touch_schema(self, val_schema.name)
 	attr(val_schema, 'ixs')[ix_schema.name] = ix
 	build_index(self, 'i_add', val_schema, ix_schema)
 	return true, nil, ix_schema.name
@@ -1226,88 +1352,16 @@ end
 
 function Db:drop_index(ix_name)
 	local val_table = assert(ix_name:match'^[^/]+')
-	local val_dbi, val_schema = self:dbi_schema(val_table)
+	local val_dbi, val_schema = self:try_dbi_schema(val_table)
 	self:check_schema('i_drop', val_table, nil, val_dbi, 'not_found')
 	self:check_schema('i_drop', val_table, nil,
 		val_schema.ixs and val_schema.ixs[ix_name],
 		'index not found: %s', ix_name)
+	touch_schema(self, val_schema.name)
 	val_schema.ixs[ix_name] = nil
 	--keep the index table + ix_schemas entry if a fk still uses it (now fk-owned).
 	release_index_if_unreferenced(self, val_schema, ix_name)
 	self:save_table_schema(val_schema)
-	return true
-end
-
---rename a column. encoding is positional (col_pos + offsets), so no row or index
---data is rewritten; this only updates names: the field, the pk, the dependent
---index/fk-index tables (whose names embed the column), the fks that use the
---column, and the (descriptive) ref_cols of children when a pk column is renamed.
-local function rename_in_list(list, old, new) --returns true if `old` was present
-	for i = 1, #list do
-		if list[i] == old then list[i] = new; return true end
-	end
-end
-function Db:rename_column(tab, old_col, new_col)
-	local dbi, schema = self:dbi_schema(tab)
-	local table_name = self:table_name(tab)
-	self:check_schema('c_rename', table_name, old_col, dbi, 'not_found')
-	local f = schema.fields[old_col]
-	self:check_schema('c_rename', schema.name, old_col, f, 'not_found')
-	self:check_schema('c_rename', schema.name, new_col,
-		isstr(new_col) and #new_col > 0 and not new_col:find'[^a-z0-9_]',
-		'invalid field name: %s.%s', schema.name, new_col)
-	self:check_schema('c_rename', schema.name, new_col,
-		not schema.fields[new_col], 'column exists: %s.%s', schema.name, new_col)
-	local in_pk = schema.pk and rename_in_list(schema.pk, old_col, new_col)
-	f.col = new_col
-	schema.fields[new_col] = f
-	schema.fields[old_col] = nil
-	--indexes containing the column: their names embed it, so rename the tables.
-	local renamed_ix = {} --old index name -> new index name (for fk.ix fixup)
-	for _, ix in ipairs(schema.ix_schemas or empty) do
-		if rename_in_list(ix.pk, old_col, new_col) then
-			local xf = ix.fields[old_col] --the index's own field copy
-			if xf then
-				xf.col = new_col
-				ix.fields[new_col] = xf
-				ix.fields[old_col] = nil
-			end
-			local old_ix = ix.name
-			local new_ix = format_ix_name(schema.name, ix.pk, not ix.dup_keys)
-			local ix_def = schema.ixs and schema.ixs[old_ix]
-			if ix_def and ix_def ~= ix.pk then
-				assert(rename_in_list(ix_def, old_col, new_col))
-			end
-			rename_index(self, schema, ix, new_ix)
-			renamed_ix[old_ix] = new_ix
-		end
-	end
-	--fks using the column (child side): update cols and the fk index name.
-	if schema.fks then
-		for _, fk in pairs(schema.fks) do
-			rename_in_list(fk.cols, old_col, new_col)
-			fk.ix = renamed_ix[fk.ix] or fk.ix
-		end
-	end
-	--this table is a parent and a pk column changed: fix children's ref_cols.
-	if in_pk and schema.ref_fks then
-		for _, ref in pairs(schema.ref_fks) do
-			local _, child = self:dbi_schema(ref.table)
-			local cfk = child and child.fks and child.fks[ref.fk]
-			if cfk and cfk.ref_cols and rename_in_list(cfk.ref_cols, old_col, new_col) then
-				self:save_table_schema(child)
-			end
-		end
-	end
-	--rebuild name-derived state (col lists, C schema): the table first, then every
-	--index, since each index's val_cols references the table's (now rebuilt) list.
-	schema.compiled = nil
-	self:compile_table_schema(schema)
-	for _, ix in ipairs(schema.ix_schemas or empty) do
-		ix.compiled = nil
-		self:compile_table_schema(ix)
-	end
-	self:save_table_schema(schema)
 	return true
 end
 
@@ -1345,7 +1399,7 @@ local function check_existing_fk(self, event, schema, fk)
 end
 function Db:add_fk(fk)
 	local event = {type = 'schema', event = 'fk_add', table = fk.table}
-	local dbi, schema = self:dbi_schema(fk.table)
+	local dbi, schema = self:try_dbi_schema(fk.table)
 	self:check_schema('fk_add', fk.table, nil, dbi,
 		'fk %s: table missing: %s', fk.name, fk.table)
 	self:check_schema('fk_add', fk.table, nil,
@@ -1353,7 +1407,7 @@ function Db:add_fk(fk)
 		'fk already exists: %s', fk.name)
 	self:check_schema('fk_add', fk.table, nil, fk.cols and #fk.cols > 0,
 		'fk %s: no columns', fk.name)
-	local ref_dbi, ref_schema = self:dbi_schema(fk.ref_table)
+	local ref_dbi, ref_schema = self:try_dbi_schema(fk.ref_table)
 	self:check_schema('fk_add', fk.table, nil, ref_dbi,
 		'fk %s: ref table missing: %s', fk.name, fk.ref_table)
 	self:check_schema('fk_add', fk.table, nil,
@@ -1393,8 +1447,12 @@ function Db:add_fk(fk)
 	local uq = format_ix_name(fk.table, fk.cols, true)
 	local nu = format_ix_name(fk.table, fk.cols, false)
 	for _, ix_schema in ipairs(schema.ix_schemas or empty) do
-		if ix_schema.name == uq or ix_schema.name == nu then fk.ix = ix_schema.name; break end
+		if ix_schema.name == uq or ix_schema.name == nu then
+			fk.ix = ix_schema.name
+			break
+		end
 	end
+	touch_schema(self, schema.name)
 	if not fk.ix then
 		local ix_schema = self:index_schema(schema, fk.cols)
 		build_index(self, 'fk_add', schema, ix_schema)
@@ -1403,13 +1461,14 @@ function Db:add_fk(fk)
 	attr(schema, 'fks')[fk.name] = fk
 	self:save_table_schema(schema)
 	--register the reverse ref on the parent for delete-time enforcement.
+	touch_schema(self, ref_schema.name)
 	attr(ref_schema, 'ref_fks')[fk.table..'/'..fk.name] = {table = fk.table, fk = fk.name}
 	self:save_table_schema(ref_schema)
 	return true
 end
 
 function Db:drop_fk(fk)
-	local dbi, schema = self:dbi_schema(fk.table)
+	local dbi, schema = self:try_dbi_schema(fk.table)
 	self:check_schema('fk_drop', fk.table, nil, dbi, 'not_found')
 	local stored = schema.fks and schema.fks[fk.name]
 	self:check_schema('fk_drop', fk.table, nil, stored,
@@ -1418,6 +1477,7 @@ function Db:drop_fk(fk)
 	--remove the reverse ref from the parent.
 	local _, ref_schema = self:dbi_schema(stored.ref_table)
 	if ref_schema and ref_schema.ref_fks then
+		touch_schema(self, ref_schema.name)
 		ref_schema.ref_fks[stored.table..'/'..stored.name] = nil
 		self:save_table_schema(ref_schema)
 	end
@@ -1427,10 +1487,90 @@ end
 --remove a fk from its (child) table and release its enforcement index. used by
 --drop_fk and by drop_table when untangling a dropped parent's children.
 function Db:detach_fk(schema, fk)
+	touch_schema(self, schema.name)
 	schema.fks[fk.name] = nil
 	if not next(schema.fks) then schema.fks = nil end
 	release_index_if_unreferenced(self, schema, fk.ix)
 	self:save_table_schema(schema)
+end
+
+--renaming a column ----------------------------------------------------------
+
+--rename a column. encoding is positional (col_pos + offsets), so no row or index
+--data is rewritten; this only updates names: the field, the pk, the dependent
+--index/fk-index tables (whose names embed the column), the fks that use the
+--column, and the (descriptive) ref_cols of children when a pk column is renamed.
+local function rename_in_list(list, old, new) --returns true if `old` was present
+	for i = 1, #list do
+		if list[i] == old then list[i] = new; return true end
+	end
+end
+function Db:rename_column(tab, old_col, new_col)
+	local dbi, schema = self:try_dbi_schema(tab)
+	local table_name = self:table_name(tab)
+	self:check_schema('c_rename', table_name, old_col, dbi, 'not_found')
+	local f = schema.fields[old_col]
+	self:check_schema('c_rename', schema.name, old_col, f, 'not_found')
+	self:check_schema('c_rename', schema.name, new_col,
+		isstr(new_col) and #new_col > 0 and not new_col:find'[^a-z0-9_]',
+		'invalid field name: %s.%s', schema.name, new_col)
+	self:check_schema('c_rename', schema.name, new_col,
+		not schema.fields[new_col], 'column exists: %s.%s', schema.name, new_col)
+	touch_schema(self, schema.name)
+	local in_pk = schema.pk and rename_in_list(schema.pk, old_col, new_col)
+	f.col = new_col
+	schema.fields[new_col] = f
+	schema.fields[old_col] = nil
+	--indexes containing the column: their names embed it, so rename the tables.
+	local renamed_ix = {} --old index name -> new index name (for fk.ix fixup)
+	for _, ix in ipairs(schema.ix_schemas or empty) do
+		if rename_in_list(ix.pk, old_col, new_col) then
+			local xf = ix.fields[old_col] --the index's own field copy
+			if xf then
+				xf.col = new_col
+				ix.fields[new_col] = xf
+				ix.fields[old_col] = nil
+			end
+			local old_ix = ix.name
+			local new_ix = format_ix_name(schema.name, ix.pk, not ix.dup_keys)
+			local ix_def = schema.ixs and schema.ixs[old_ix]
+			if ix_def and ix_def ~= ix.pk then
+				assert(rename_in_list(ix_def, old_col, new_col))
+			end
+			rename_index(self, schema, ix, new_ix)
+			renamed_ix[old_ix] = new_ix
+		end
+	end
+	--fks using the column (child side): update cols and the fk index name.
+	if schema.fks then
+		for _, fk in pairs(schema.fks) do
+			rename_in_list(fk.cols, old_col, new_col)
+			fk.ix = renamed_ix[fk.ix] or fk.ix
+		end
+	end
+	--this table is a parent and a pk column changed: fix children's ref_cols.
+	if in_pk and schema.ref_fks then
+		for _, ref in pairs(schema.ref_fks) do
+			local _, child = self:dbi_schema(ref.table)
+			local cfk = child and child.fks and child.fks[ref.fk]
+			if cfk and cfk.ref_cols then
+				touch_schema(self, child.name)
+				if rename_in_list(cfk.ref_cols, old_col, new_col) then
+					self:save_table_schema(child)
+				end
+			end
+		end
+	end
+	--rebuild name-derived state (col lists, C schema): the table first, then every
+	--index, since each index's val_cols references the table's (now rebuilt) list.
+	schema.compiled = nil
+	self:compile_table_schema(schema)
+	for _, ix in ipairs(schema.ix_schemas or empty) do
+		ix.compiled = nil
+		self:compile_table_schema(ix)
+	end
+	self:save_table_schema(schema)
+	return true
 end
 
 --encoding and decoding ------------------------------------------------------
@@ -1474,6 +1614,20 @@ function cols_list(cols)
 	if cols == '{}' then return nil, '{}' end
 	local as = cols:starts'[' and '[]' or cols:starts '{' and '{}' or nil
 	return m_cols_list(cols), as
+end
+
+local function check_cols(schema, cols, vals)
+	if cols then
+		for _,col in ipairs(cols) do
+			assertf(schema.fields[col], 'unknown field: %s.%s', schema.name, col)
+		end
+	elseif vals then
+		for col in pairs(vals) do
+			if isstr(col) then
+				assertf(schema.fields[col], 'unknown field: %s.%s', schema.name, col)
+			end
+		end
+	end
 end
 
 local function select_col(cols, as, col, ...)
@@ -1632,12 +1786,14 @@ end
 local function decode_kv(self, schema, k, k_sz, v, v_sz, val_cols)
 	local i0 = 1
 	local t = {}
-	local val_cols, as = cols_list(val_cols)
-	val_cols = val_cols or schema.val_cols
+	local as
 	if schema.is_index then
 		local val_table = assert(schema.val_table)
 		local t_dbi     = assert(self.dbis[val_table])
 		local t_schema  = assert(schema.val_schema)
+		val_cols, as = cols_list(val_cols)
+		check_cols(t_schema, val_cols)
+		val_cols = val_cols or t_schema.val_cols
 		local k, k_sz = v, v_sz
 		local ok
 		ok, v, v_sz = self:get_raw(t_dbi, k, k_sz)
@@ -1645,6 +1801,9 @@ local function decode_kv(self, schema, k, k_sz, v, v_sz, val_cols)
 		i0 = decode_key(t_schema, k, k_sz, t, as, i0)
 		schema = t_schema
 	else
+		val_cols, as = cols_list(val_cols)
+		check_cols(schema, val_cols)
+		val_cols = val_cols or schema.val_cols
 		if k then --if k is given it is decoded before v.
 			i0 = decode_key(schema, k, k_sz, t, as, i0)
 		end
@@ -1680,7 +1839,7 @@ function Db:check_col(event, tab, col, ret, ...)
 end
 
 function Db:is_null(tab, col, ...) --returns is_null, [reason]
-	local dbi, schema = self:dbi_schema(tab)
+	local dbi, schema = self:try_dbi_schema(tab)
 	if not dbi then return true, schema end
 	local f, vi = val_field(schema, col)
 	local ok, v, v_sz = get_raw_by_pk(self, dbi, schema, ...)
@@ -1689,7 +1848,7 @@ function Db:is_null(tab, col, ...) --returns is_null, [reason]
 end
 
 function Db:exists(tab, ...) --returns record_exists, table_exists
-	local dbi, schema = self:dbi_schema(tab)
+	local dbi, schema = self:try_dbi_schema(tab)
 	if not dbi then return false, false end
 	local ok = get_raw_by_pk(self, dbi, schema, ...)
 	if not ok then return false, true end
@@ -1697,7 +1856,7 @@ function Db:exists(tab, ...) --returns record_exists, table_exists
 end
 
 function Db:try_get(tab, val_cols, ...)
-	local dbi, schema = self:dbi_schema(tab)
+	local dbi, schema = self:try_dbi_schema(tab)
 	if not dbi then return false, schema end
 	local ok, v, v_sz = get_raw_by_pk(self, dbi, schema, ...)
 	if not ok then return false, v end
@@ -1806,15 +1965,16 @@ local function enforce_del_fks(self, schema, ...)
 end
 local put_v0_buffer = buffer()
 local function put(self, flags, op, tab, cols, ...)
-	local dbi, schema = self:dbi_schema(tab, 'w')
+	local dbi, schema = self:dbi_schema(tab)
 	local cols, as = cols_list(cols)
+	check_cols(schema, cols, as == '{}' and (...))
 	cols = cols or schema.cols
 	local k, k_buf_sz = key_rec_buffer(schema.key_fields.max_rec_size)
 	local v, v_buf_sz = val_rec_buffer(schema.val_fields.max_rec_size)
 	local autoinc_f = op == 'insert' and schema.autoinc_field
 	local k_sz, autoinc_v = encode_key(self, schema, op, autoinc_f, k, k_buf_sz, cols, as, ...)
 	if op == 'update' or op == 'upsert' or schema.ix_schemas or schema.fks then
-		local cur = self:cursor(dbi, 'w')
+		local cur = self:cursor(dbi)
 		--insert skips the get: v0=nil by definition, NOOVERWRITE detects exists
 		local found, v0, v0_sz
 		if op ~= 'insert' then
@@ -1916,7 +2076,7 @@ local function del_row(self, dbi, schema, ...)
 	end
 end
 function Db:del(tab, ...)
-	local dbi, schema = self:dbi_schema(tab, 'w')
+	local dbi, schema = self:try_dbi_schema(tab)
 	self:check_row('del', self:table_name(tab), dbi, schema)
 	del_row(self, dbi, schema, ...)
 	if schema.ref_fks then
@@ -1928,15 +2088,17 @@ function Db:put_records(tab, cols, records)
 	if istab(cols) then
 		cols, records = '[]', cols
 	end
-	local dbi, schema = self:dbi_schema(tab, 'w')
+	local dbi, schema = self:dbi_schema(tab)
 	assert(not schema.ix_schemas)
 	assert(not schema.fks)
 	assert(not schema.ref_fks)
 	local cols, as = cols_list(cols)
+	check_cols(schema, cols)
 	cols = cols or schema.cols
 	local k, k_buf_sz = key_rec_buffer(schema.key_fields.max_rec_size)
 	local v, v_buf_sz = val_rec_buffer(schema.val_fields.max_rec_size)
 	for _,vals in ipairs(records) do
+		if as == '{}' then check_cols(schema, nil, vals) end
 		local k_sz = encode_key(self, schema, 'put_rec', nil, k, k_buf_sz, cols, as, vals)
 		local v_sz = encode_val(self, schema, 'put_rec', v, v_buf_sz, cols, as, vals)
 		local ok, err = self:try_put_raw(dbi, k, k_sz, v, v_sz)
@@ -1952,11 +2114,16 @@ local function check_cur(self, op, ok, ...)
 	self.db:check_row(op, self.schema.name, nil, false, (...))
 end
 
-local db_try_cursor = Db.try_cursor
-function Db:try_cursor(tab, mode)
-	local cur, err = db_try_cursor(self, tab, mode)
+function Db:try_cursor(tab)
+	local cur, err = self:try_cursor_raw(tab)
 	if not cur then return nil, err end
-	cur.schema = self.live_schema[assert(self.dbis[cur:dbi()])]
+	cur.schema = assert(self:table_schema(cur:dbi()))
+	return cur
+end
+function Db:cursor(tab)
+	local cur, err = self:cursor_raw(tab)
+	if not cur then return nil, err end
+	cur.schema = assert(self:table_schema(cur:dbi()))
 	return cur
 end
 
@@ -2006,6 +2173,7 @@ local cur_v0_buffer = buffer() --stable copy of a cursor's old value across writ
 function Cur:update(val_cols, ...)
 	local schema = assert(self.schema)
 	local cols, as = cols_list(val_cols)
+	check_cols(schema, cols, as == '{}' and (...))
 	cols = cols or schema.val_cols
 	local v, v_buf_sz = val_rec_buffer(schema.val_fields.max_rec_size)
 	local ok, k, k_sz, v0, v0_sz = self:current_raw()
@@ -2043,6 +2211,11 @@ function Cur:update(val_cols, ...)
 		end
 	end
 	return true
+end
+
+function Cur:del()
+	--TODO: check fks!
+	self:del_raw()
 end
 
 local function cur_each_pass(cur, ok, ...)
@@ -2134,7 +2307,7 @@ function Db:sync_schema(src, opt)
 	local src_sc =
 		schema.isschema(src) and src
 		or inherits(src, mdbx_db) and src:extract_schema()
-		or assertf(false, 'schema or mdbx_db expected, got %s', type(src))
+		or assertf(false, 'schema or mdbx_db expected, got %s', typeof(src))
 	local function P(...)
 		pr(fmt(...))
 	end
@@ -2142,6 +2315,7 @@ function Db:sync_schema(src, opt)
 		local stored_sc = self:extract_schema()
 		local diff = schema.diff(stored_sc, src_sc)
 		diff:pp()
+		if opt.dry then return end
 		if diff.tables then
 			if diff.tables.add then
 				for tbl_name, tbl in sortedpairs(diff.tables.add) do
@@ -2185,7 +2359,7 @@ function Db:sync_schema(src, opt)
 			end
 		end
 	end
-	self:without_schema(function()
-		self:atomic(opt.dry and 'r' or 'w', sync)
+	self:atomic(opt.dry and 'r' or 'w', function()
+		self:without_schema(sync)
 	end)
 end
