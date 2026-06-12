@@ -57,7 +57,6 @@ CRUD
 	db:seq             (table|dbi, increment) -> n     get/increment sequence
 	db:try_move_key_raw(table|dbi, k, k_sz, new_k, new_k_sz) -> true | false,err
 	db:each_raw(table) -> iter() -> cur, k, k_sz, v, v_sz
-CURSORS
 	db:[try_]cursor_raw(table|dbi) -> cur      create cursor
 	cur:close()                                close cursor
 	cur:closed() -> t|f                        check if cursor is closed
