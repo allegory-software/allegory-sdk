@@ -795,8 +795,8 @@ end
 
 -- delete --------------------------------------------------------------------
 
---del removes a row by pk, leaving others intact; deleting a missing row
---returns false,'not_found'.
+--del removes a row by pk, leaving others intact; deleting a missing row is a
+--successful no-op.
 function test.delete()
 	with_db('delete', function(db)
 		db:begin'w'
@@ -811,18 +811,22 @@ function test.delete()
 		db:insert('t', '{}', {id = 1, v = 'a'})
 		db:insert('t', '{}', {id = 2, v = 'b'})
 		db:insert('t', '{}', {id = 3, v = 'c'})
-		db:del('t', 2)
+		assert(db:del('t', 2) == true)
 		assert(not db:exists('t', 2))
 		assert(db:exists('t', 1) and db:exists('t', 3))
 		assert(db:get('t', 'v', 2) == nil)
 		local ids = {}
 		for cur, id in db:each('t') do add(ids, num(id)) end
 		assert(#ids == 2 and ids[1] == 1 and ids[2] == 3)
-		--deleting a missing row -> false,'not_found'
-		local ok, err = try_mutation(db, db.del, 't', 2)
-		assert(not ok)
-		check_row_error(err, 'del', 't', 'not_found')
+		assert(db:del('t', 2) == false)
 		db:commit()
+
+		db:begin'w'
+		local ok, err = catch('schema', db.del, db, 'missing', 1)
+		assert(not ok and iserror(err, 'schema'), tostring(err))
+		assert(err.event == 't_open' and err.table == 'missing', tostring(err))
+		assert(err.message == 'not_found', tostring(err.message))
+		assert(not db.txn)
 	end)
 end
 
@@ -1631,6 +1635,143 @@ function test.cursor_update_during_iteration()
 		local n = 0
 		for cur, t in db:each(ix, '{}') do n = n + 1 end
 		assert(n == 4, n)
+		db:commit()
+	end)
+end
+
+function test.cursor_delete_maintains_indexes()
+	with_db('cursor_delete_maintains_indexes', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id' , mdbx_type = 'u32' , not_null = true},
+				{col = 'tag', mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
+			},
+			pk = {'id'},
+		})
+		db:insert('t', '{}', {id = 1, tag = 'a'})
+		db:insert('t', '{}', {id = 2, tag = 'a'})
+		db:insert('t', '{}', {id = 3, tag = 'b'})
+		local _,_,ix = db:add_index('t', {'tag'})
+
+		local cur = db:cursor('t')
+		assert(cur:try_get(nil, 3))
+		cur:del()
+		cur:close()
+		assert(not db:exists('t', 3))
+		assert(not db:try_get(ix, nil, 'b'))
+
+		cur = db:cursor(ix)
+		local id = cur:first()
+		assert(num(id) == 1, id)
+		cur:del()
+		cur:close()
+		assert(not db:exists('t', 1))
+		assert(num(db:must_get(ix, '{}', 'a').id) == 2)
+
+		local ok, err = catch('row field', db.atomic, db, 'w', function()
+			db:cursor('t'):del()
+		end)
+		assert(not ok)
+		check_row_error(err, 'c_del', 't', 'not_found')
+		db:commit()
+	end)
+end
+
+function test.cursor_delete_during_iteration()
+	with_db('cursor_delete_during_iteration', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id' , mdbx_type = 'u32' , not_null = true},
+				{col = 'tag', mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
+			},
+			pk = {'id'},
+		})
+		for i = 1, 4 do db:insert('t', '{}', {id = i, tag = 'a'}) end
+		local _,_,ix = db:add_index('t', {'tag'})
+
+		local n = 0
+		for cur in db:each('t') do
+			assert(cur:del())
+			n = n + 1
+		end
+		assert(n == 4, n)
+		assert(not db:try_get(ix, nil, 'a'))
+
+		for i = 1, 4 do db:insert('t', '{}', {id = i, tag = 'a'}) end
+		n = 0
+		for cur in db:each(ix) do
+			assert(cur:del())
+			n = n + 1
+		end
+		assert(n == 4, n)
+		for i = 1, 4 do assert(not db:exists('t', i)) end
+		db:commit()
+	end)
+end
+
+function test.cursor_delete_enforces_fks()
+	with_db('cursor_delete_enforces_fks', function(db)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'pid', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		db:insert('parent', '{}', {id = 1})
+		db:insert('child', '{}', {id = 10, pid = 1})
+
+		local ok, err = catch('row field', db.atomic, db, 'w', function()
+			local cur = db:cursor('parent')
+			assert(cur:try_get(nil, 1))
+			cur:del()
+		end)
+		assert(not ok)
+		check_row_error(err, 'del', 'parent')
+		assert(db:exists('parent', 1))
+		assert(db:exists('child', 10))
+		db:commit()
+	end)
+end
+
+function test.delete_through_indexes()
+	with_db('delete_through_indexes', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id'   , mdbx_type = 'u32' , not_null = true},
+				{col = 'part' , mdbx_type = 'u32' , not_null = true},
+				{col = 'cat'  , mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
+				{col = 'grp'  , mdbx_type = 'u32' , not_null = true},
+				{col = 'email', mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
+			},
+			pk = {'id', 'part'},
+		})
+		db:insert('t', '{}', {id = 1, part = 1, cat = 'a', grp = 7, email = 'a@x'})
+		db:insert('t', '{}', {id = 2, part = 1, cat = 'a', grp = 7, email = 'b@x'})
+		db:insert('t', '{}', {id = 3, part = 1, cat = 'b', grp = 8, email = 'c@x'})
+		local _,_,ix = db:add_index('t', {'cat', 'grp'})
+		local _,_,ux = db:add_index('t', {'email', is_unique = true})
+
+		assert(db:del(ux, 'c@x') == true)
+		assert(db:del(ux, 'c@x') == false)
+		assert(not db:exists('t', 3, 1))
+		assert(not db:try_get(ix, nil, 'b', 8))
+
+		local ok, err = pcall(db.del, db, ix, 'a', 7)
+		assert(not ok)
+		assert(tostring(err):find('cannot delete through non-unique index', 1, true),
+			tostring(err))
+		assert(db:exists('t', 1, 1))
+		assert(db:exists('t', 2, 1))
+		assert(num(db:must_get(ix, '{}', 'a', 7).id) == 1)
 		db:commit()
 	end)
 end
@@ -3171,9 +3312,8 @@ function test.atomic_row_errors()
 		local ok2, err2 = try_mutation(db, db.update, 't', '{}', {k = 2, v = 20})
 		assert(not ok2)
 		check_row_error(err2, 'update', 't', 'not_found')
-		local ok3, err3 = try_mutation(db, db.del, 't', 99)
-		assert(not ok3)
-		check_row_error(err3, 'del', 't', 'not_found')
+		local ok3, deleted = try_mutation(db, db.del, 't', 99)
+		assert(ok3 and deleted == false)
 		assert(db.txn, 'atomic row errors aborted the surrounding transaction')
 		db:commit()
 	end)

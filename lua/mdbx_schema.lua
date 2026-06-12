@@ -41,7 +41,7 @@ CRUD
 	db:exists       (table|dbi, keys...) -> record_exists, table_exists
 	db:[must_]get   (table|dbi, [val_cols], keys...) -> vals...
 	db:try_get      (table|dbi, [val_cols], keys...) -> true, vals... | false
-	db:del          (table|dbi, keys...)
+	db:del          (table|unique_index|dbi, keys...) -> row_deleted
 	db:put_records  (table|dbi, [cols, ]{keysvals1,...})
 	db:try_each     (table|dbi, [cols]) -> cur, keysvals...
 CURSORS
@@ -2057,31 +2057,58 @@ function Db:upsert(tab, ...)
 end
 
 local del_v0_buffer = buffer()
-local function del_row(self, dbi, schema, ...)
-	local k, k_buf_sz = key_rec_buffer(schema.key_fields.max_rec_size)
-	local k_sz = encode_key(self, schema, 'del', nil, k, k_buf_sz, schema.key_cols, nil, ...)
-	if not schema.ix_schemas then
-		local ok, err = self:try_del_raw(dbi, k, k_sz)
-		self:check_row('del', schema.name, ok, err)
-		return
+local cur_k_buffer = buffer() --stable copy of a cursor's key across writes
+function Cur:del()
+	local schema = assert(self.schema)
+	local ok, k, k_sz, v, v_sz = self:current_raw()
+	if not ok then
+		self.db:check_row('c_del', schema.name, false, 'not_found')
 	end
-	--indexed: read the row value first to recompute its index keys, then delete
-	--the row and remove its index entries.
-	local ok, v0, v0_sz = self:get_raw(dbi, k, k_sz)
-	self:check_row('del', schema.name, ok, v0)
-	local v0u = v0; v0 = del_v0_buffer(v0_sz); copy(v0, v0u, v0_sz)
-	assert(self:try_del_raw(dbi, k, k_sz))
-	for _,ix_schema in ipairs(schema.ix_schemas) do
-		ix_schema:del(self, k, k_sz, v0, v0_sz)
+	if schema.is_index then
+		k, k_sz = v, v_sz --cursor's v is base row's pk
+		schema = assert(schema.val_schema)
 	end
-end
-function Db:del(tab, ...)
-	local dbi, schema = self:try_dbi_schema(tab)
-	self:check_row('del', self:table_name(tab), dbi, schema)
-	del_row(self, dbi, schema, ...)
+	local db = self.db
+	local kk = cur_k_buffer(k_sz); copy(kk, k, k_sz)
+	local cur = self
+	if cur.schema.is_index then
+		cur = db:cursor(schema.name)
+		ok, v, v_sz = cur:get_raw(kk, k_sz)
+		db:check_row('del', schema.name, ok, v)
+	end
+	if schema.ix_schemas then
+		local v0u = v; v = del_v0_buffer(v_sz); copy(v, v0u, v_sz)
+	end
+	cur:del_raw()
+	for _,ix_schema in ipairs(schema.ix_schemas or empty) do
+		ix_schema:del(db, kk, k_sz, v, v_sz)
+	end
 	if schema.ref_fks then
-		enforce_del_fks(self, schema, ...)
+		local pk = {}
+		decode_key(schema, kk, k_sz, pk, nil)
+		enforce_del_fks(db, schema, unpack(pk, 1, #schema.key_fields))
 	end
+	if cur ~= self then cur:close() end
+	return true
+end
+
+function Db:del(tab, ...)
+	local dbi, schema = self:dbi_schema(tab)
+	assertf(not (schema.is_index and schema.dup_keys),
+		'cannot delete through non-unique index: %s', schema.name)
+	local k, k_buf_sz = key_rec_buffer(schema.key_fields.max_rec_size)
+	local k_sz = encode_key(self, schema, 'del', nil,
+		k, k_buf_sz, schema.key_cols, nil, ...)
+	local cur = self:cursor(dbi)
+	local ok, err = cur:get_raw(k, k_sz)
+	if not ok then
+		assert(err == 'not_found') --the only error
+		cur:close()
+		return false
+	end
+	cur:del()
+	cur:close()
+	return true
 end
 
 function Db:put_records(tab, cols, records)
@@ -2168,7 +2195,6 @@ function Cur:must_get(...)
 	return check_cur(self, 'c_get', self:try_get(...))
 end
 
-local cur_k_buffer  = buffer() --stable copy of a cursor's key across writes
 local cur_v0_buffer = buffer() --stable copy of a cursor's old value across writes
 function Cur:update(val_cols, ...)
 	local schema = assert(self.schema)
@@ -2211,11 +2237,6 @@ function Cur:update(val_cols, ...)
 		end
 	end
 	return true
-end
-
-function Cur:del()
-	--TODO: check fks!
-	self:del_raw()
 end
 
 local function cur_each_pass(cur, ok, ...)
