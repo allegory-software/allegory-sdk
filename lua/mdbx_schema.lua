@@ -1196,9 +1196,9 @@ function Db:compile_index_schema(ix_schema)
 		return true
 	end
 
-	function ix_schema.update(ix_schema, self, k, k_sz, v, v_sz, v0, v0_sz)
+	function ix_schema.update(ix_schema, self, k, k_sz, v, v_sz, v0, v0_sz, cur)
 
-		local ix_dbi = self:dbi(ix_schema.name) --live name: survives rename
+		local ix_dbi
 		local dup = ix_schema.dup_keys
 
 		--[[ cases to cover:
@@ -1232,13 +1232,23 @@ function Db:compile_index_schema(ix_schema)
 				return true
 			end
 
-			if dup then --remove the exact (old key, pk) pair from the dupsort index.
-				assert(self:try_del_raw(ix_dbi, xk0, xk0_sz, k, k_sz))
-			else --remove the unique key.
-				assert(self:try_del_raw(ix_dbi, xk0, xk0_sz))
+			if cur then
+				cur:del_raw()
+			else
+				ix_dbi = self:dbi(ix_schema.name) --live name: survives rename
+				if dup then --remove the exact (old key, pk) pair from the dupsort index.
+					assert(self:try_del_raw(ix_dbi, xk0, xk0_sz, k, k_sz))
+				else --remove the unique key.
+					assert(self:try_del_raw(ix_dbi, xk0, xk0_sz))
+				end
 			end
 		end
 
+		if cur then
+			return cur:try_put_raw(xk, xk_sz, k, k_sz,
+				not dup and mdbx.MDBX_NOOVERWRITE or nil)
+		end
+		ix_dbi = ix_dbi or self:dbi(ix_schema.name)
 		if dup then --add the (key, pk) pair (duplicates allowed).
 			return self:try_put_raw(ix_dbi, xk, xk_sz, k, k_sz)
 		else --add the unique key; an existing key is a unique violation.
@@ -2217,7 +2227,7 @@ function Cur:is_null(col)
 end
 
 local cur_v0_buffer = buffer() --stable copy of a cursor's old value across writes
-function Cur:update(val_cols, ...)
+local function cur_update(self, ix_cur, val_cols, ...)
 	local schema = assert(self.schema)
 	if schema.is_index then
 		local ok, _, _, k, k_sz = self:current_raw()
@@ -2227,7 +2237,7 @@ function Cur:update(val_cols, ...)
 		local cur = self.db:cursor(schema.val_table)
 		local ok, err = cur:get_raw(k, k_sz)
 		self.db:check_row('c_update', schema.val_table, ok, err)
-		cur:update(val_cols, ...)
+		cur_update(cur, self, val_cols, ...)
 		cur:close()
 		return true
 	end
@@ -2265,11 +2275,15 @@ function Cur:update(val_cols, ...)
 		local v0c = cur_v0_buffer(v0_sz); copy(v0c, v0, v0_sz)
 		assert(self:try_put_raw(kk, k_sz, v, v_sz, mdbx.MDBX_CURRENT))
 		for _, ix_schema in ipairs(schema.ix_schemas) do
-			local ok, err = ix_schema:update(db, kk, k_sz, v, v_sz, v0c, v0_sz)
+			local cur = ix_cur and ix_cur.schema == ix_schema and ix_cur or nil
+			local ok, err = ix_schema:update(db, kk, k_sz, v, v_sz, v0c, v0_sz, cur)
 			db:check_row('c_update', schema.name, ok, err)
 		end
 	end
 	return true
+end
+function Cur:update(...)
+	return cur_update(self, nil, ...)
 end
 
 local function cur_each_pass(cur, ok, ...)

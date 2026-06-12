@@ -1615,25 +1615,46 @@ function test.cursor_update_through_index()
 			fields = {
 				{col = 'id'  , mdbx_type = 'u32' , not_null = true},
 				{col = 'cat' , mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
-				{col = 'name', mdbx_type = 'utf8', maxlen = 8},
+				{col = 'name', mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
 			},
 			pk = {'id'},
 		})
 		db:insert('t', '{}', {id = 1, cat = 'a', name = 'one'})
 		db:insert('t', '{}', {id = 2, cat = 'b', name = 'two'})
 		local _,_,ix = db:add_index('t', {'cat'})
+		local _,_,ux = db:add_index('t', {'name', is_unique = true})
 
 		local cur = db:cursor(ix)
 		local id = cur:first()
 		assert(num(id) == 1)
 		assert(cur:update('name', 'uno'))
 		assert(cur:update('cat', 'c'))
+		local rec = cur:current('{}')
+		assert(num(rec.id) == 1 and rec.cat == 'c')
 		cur:close()
 
 		assert(db:get('t', 'name', 1) == 'uno')
 		assert(db:get('t', 'cat', 1) == 'c')
 		assert(not db:try_get(ix, nil, 'a'))
 		assert(num(db:must_get(ix, '{}', 'c').id) == 1)
+
+		cur = db:cursor(ux)
+		assert(cur:try_get(nil, 'two'))
+		assert(cur:update('name', 'dos'))
+		rec = cur:current('{}')
+		assert(num(rec.id) == 2 and rec.name == 'dos')
+		cur:close()
+		assert(not db:try_get(ux, nil, 'two'))
+		assert(num(db:must_get(ux, '{}', 'dos').id) == 2)
+
+		local ok, err = catch('row field', db.atomic, db, 'w', function()
+			local cur = db:cursor(ux)
+			assert(cur:try_get(nil, 'dos'))
+			cur:update('name', 'uno')
+		end)
+		assert(not ok)
+		check_row_error(err, 'c_update', 't', 'already_exists')
+		assert(db:get('t', 'name', 2) == 'dos')
 		db:commit()
 	end)
 end
