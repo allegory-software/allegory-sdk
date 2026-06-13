@@ -215,10 +215,24 @@ local decode_key
 local decode_val
 local decode_ix_col --decode one index col (key or val field) into a positional slot.
 
+local function table_flags(schema)
+	if not schema then return 0 end
+	return bor(
+		schema.int_key and mdbx.MDBX_INTEGERKEY or 0,
+		schema.dup_keys and mdbx.MDBX_DUPSORT or 0
+	)
+end
+
 --schema processing ----------------------------------------------------------
 
+local index_schema, compile_index_schema --fw. decl.
+
+local function valid_col_name(col)
+	return isstr(col) and #col > 0 and not col:find'[^a-z0-9_]'
+end
+
 --create an optimal physical column layout based on a table schema.
-function Db:layout_table_schema(schema)
+local function layout_table_schema(schema)
 
 	if schema.layouted then return end
 	schema.layouted = true
@@ -227,15 +241,15 @@ function Db:layout_table_schema(schema)
 
 	--index fields by name, typecheck, check for inconsistencies.
 	for i,f in ipairs(schema.fields) do
-		assertf(isstr(f.col) and #f.col > 0 and not f.col:find'[^a-z0-9_]',
+		assertf(valid_col_name(f.col),
 			'invalid field name: %s.%s', table_name, f.col)
 		assertf(not schema.fields[f.col],
 			'duplicate field name: %s.%s', table_name, f.col)
 		schema.fields[f.col] = f
 		f.col_pos = i
+		assertf(schema_col_types[f.mdbx_type] ~= nil,
+			'unknown type: %s for field: %s.%s', f.mdbx_type, table_name, f.col)
 		local elem_ct = col_ct[f.mdbx_type] or f.mdbx_type
-		local ok, elem_ct = lua_pcall(ctype, elem_ct)
-		assertf(ok, 'unknown type: %s for field: %s.%s', f.mdbx_type, table_name, f.col)
 		f.elem_size = sizeof(elem_ct)
 		assertf(f.elem_size < 2^8) --must fit 8 bit (see sort below)
 	end
@@ -336,7 +350,7 @@ function Db:layout_table_schema(schema)
 		end
 
 		if is_key then
-			local db_max_key_size = self:max_key_size()
+			local db_max_key_size = mdbx_max_key_size(table_flags(schema))
 			assertf(max_rec_size <= db_max_key_size,
 				'pk too big: %d bytes (max is %d bytes)',
 					max_rec_size, db_max_key_size)
@@ -401,8 +415,8 @@ function Db:layout_table_schema(schema)
 	if schema.ixs then
 		schema.ix_schemas = {} --{schema1,...}
 		for ix_name, ix in sortedpairs(schema.ixs) do
-			local ix_schema = self:index_schema(schema, ix)
-			self:layout_table_schema(ix_schema)
+			local ix_schema = index_schema(schema, ix)
+			layout_table_schema(ix_schema)
 			add(schema.ix_schemas, ix_schema)
 		end
 	end
@@ -432,7 +446,7 @@ local function encode_ai_ci(s, len)
 end
 
 --create encoders and decoders for a layouted schema.
-function Db:compile_table_schema(schema)
+local function compile_table_schema(schema)
 
 	assert(schema.layouted)
 
@@ -597,10 +611,10 @@ function Db:compile_table_schema(schema)
 	end --for fields in key_fields, val_fields
 
 	if schema.is_index then
-		self:compile_index_schema(schema)
+		compile_index_schema(schema)
 	elseif schema.ix_schemas then --compile indexes
 		for _, ix_schema in ipairs(schema.ix_schemas) do
-			self:compile_table_schema(ix_schema)
+			compile_table_schema(ix_schema)
 		end
 	end
 
@@ -828,7 +842,7 @@ local function load_live_schema(self, name)
 	local paper_schema = self.schema and self.schema.tables[name]
 	local stored_schema = self:load_table_schema(name)
 	if paper_schema and stored_schema then --schemas must match exactly
-		self:layout_table_schema(paper_schema)
+		layout_table_schema(paper_schema)
 		self:validate_table_schema(stored_schema, paper_schema)
 	elseif paper_schema then --raw table
 		self:check_schema('t_open', name, nil, false,
@@ -838,7 +852,7 @@ local function load_live_schema(self, name)
 	end
 	schema = paper_schema
 	if schema then
-		self:compile_table_schema(schema)
+		compile_table_schema(schema)
 		self.live_schema[name] = schema
 		for _,ix_schema in ipairs(schema.ix_schemas or empty) do
 			self.live_schema[ix_schema.name] = ix_schema
@@ -855,14 +869,6 @@ function Db:table_schema(tab)
 		return self.live_schema[name] or nil
 	end
 	return load_live_schema(self, name)
-end
-
-local function table_flags(schema)
-	if not schema then return 0 end
-	return bor(
-		schema.int_key and mdbx.MDBX_INTEGERKEY or 0,
-		schema.dup_keys and mdbx.MDBX_DUPSORT or 0
-	)
 end
 
 local function try_open(self, tab)
@@ -953,12 +959,12 @@ function Db:create_table(name, schema)
 	assert(not schema.ixs)
 	assert(not schema.fks)
 	touch_schema(self, name)
-	self:layout_table_schema(schema)
-	self:compile_table_schema(schema)
+	layout_table_schema(schema)
+	compile_table_schema(schema)
 	local dbi = self:create_table_raw(name, table_flags(schema))
 	self:save_table_schema(schema)
 	local schema = self:load_table_schema(name)
-	self:compile_table_schema(schema)
+	compile_table_schema(schema)
 	self.live_schema[name] = schema
 	for _,ix_schema in ipairs(schema.ix_schemas or empty) do
 		self.live_schema[ix_schema.name] = ix_schema
@@ -968,10 +974,8 @@ end
 
 function Db:drop_table(tab)
 	local name = self:table_name(tab)
-	local dbi, err = self:try_dbi_raw(name)
-	if not dbi then return nil, err end
-	local schema = self:table_schema(name)
-	if not schema then return self:drop_table_raw(dbi) end
+	local dbi, schema = self:try_dbi_schema(name)
+	if not dbi then return nil, schema end --schema=err
 	touch_schema(self, name)
 	--as a child: drop the reverse refs our fks hold on their parents.
 	if schema.fks then
@@ -1094,7 +1098,7 @@ local function format_ix_name(tbl_name, cols, unique)
 	return _('%s/%s/%s', tbl_name, unique and 'u' or 'i', cat(ix_cols(cols), '-'))
 end
 
-function Db:index_schema(val_schema, cols)
+--[[local]] function index_schema(val_schema, cols)
 	local ix_name = format_ix_name(val_schema.name, cols, cols.is_unique)
 	local ix_fields = {}
 	for _,col in ipairs(cols) do
@@ -1127,7 +1131,7 @@ function Db:index_schema(val_schema, cols)
 	return ix_schema
 end
 
-function Db:compile_index_schema(ix_schema)
+--[[local]] function compile_index_schema(ix_schema)
 
 	assert(ix_schema.is_index)
 
@@ -1168,8 +1172,8 @@ function Db:compile_index_schema(ix_schema)
 	function ix_schema.try_create(ix_schema, self, event)
 		local name = ix_schema.name
 		touch_schema(self, name)
-		self:layout_table_schema(ix_schema)
-		self:compile_table_schema(ix_schema)
+		layout_table_schema(ix_schema)
+		compile_table_schema(ix_schema)
 		local ix_dbi = self:create_table_raw(name, table_flags(ix_schema))
 		self:save_table_schema(ix_schema)
 		local xk, xk_buf_sz = ix1_key_rec_buffer(ix_schema.key_fields.max_rec_size)
@@ -1272,8 +1276,8 @@ end
 --live ix_schemas list. shared by add_index (user index, also registered in
 --`ixs`) and add_fk (fk-enforcement index, not in `ixs`).
 local function build_index(self, event, val_schema, ix_schema)
-	self:layout_table_schema(ix_schema)
-	self:compile_table_schema(ix_schema)
+	layout_table_schema(ix_schema)
+	compile_table_schema(ix_schema)
 	local op = {type = 'schema', event = event, table = val_schema.name}
 	local ok, err = ix_schema:try_create(self, op)
 	self:check_schema(event, val_schema.name, nil, ok, err)
@@ -1319,12 +1323,12 @@ function Db:add_index(val_table, ix)
 		max_rec_size = max_rec_size + maxlen * f.elem_size
 			+ (not ix.is_unique and not f.not_null and 1 or 0)
 	end
-	local db_max_key_size = self:max_key_size()
+	local ix_schema = index_schema(val_schema, ix)
+	local db_max_key_size = mdbx_max_key_size(table_flags(ix_schema))
 	self:check_schema('i_add', val_schema.name, nil,
 		max_rec_size <= db_max_key_size,
 		'pk too big: %d bytes (max is %d bytes)',
 		max_rec_size, db_max_key_size)
-	local ix_schema = self:index_schema(val_schema, ix)
 	self:check_schema('i_add', val_schema.name, nil,
 		not (val_schema.ixs and val_schema.ixs[ix_schema.name]),
 		'index exists: %s', ix_schema.name)
@@ -1475,7 +1479,7 @@ function Db:add_fk(fk)
 	end
 	touch_schema(self, schema.name)
 	if not fk.ix then
-		local ix_schema = self:index_schema(schema, fk.cols)
+		local ix_schema = index_schema(schema, fk.cols)
 		build_index(self, 'fk_add', schema, ix_schema)
 		fk.ix = ix_schema.name
 	end
@@ -1536,7 +1540,7 @@ function Db:rename_column(tab, old_col, new_col)
 	local f = schema.fields[old_col]
 	self:check_schema('c_rename', schema.name, old_col, f, 'not_found')
 	self:check_schema('c_rename', schema.name, new_col,
-		isstr(new_col) and #new_col > 0 and not new_col:find'[^a-z0-9_]',
+		valid_col_name(new_col),
 		'invalid field name: %s.%s', schema.name, new_col)
 	self:check_schema('c_rename', schema.name, new_col,
 		not schema.fields[new_col], 'column exists: %s.%s', schema.name, new_col)
@@ -1601,10 +1605,10 @@ function Db:rename_column(tab, old_col, new_col)
 	--rebuild name-derived state (col lists, C schema): the table first, then every
 	--index, since each index's val_cols references the table's (now rebuilt) list.
 	schema.compiled = nil
-	self:compile_table_schema(schema)
+	compile_table_schema(schema)
 	for _, ix in ipairs(schema.ix_schemas or empty) do
 		ix.compiled = nil
-		self:compile_table_schema(ix)
+		compile_table_schema(ix)
 	end
 	self:save_table_schema(schema)
 	return true
@@ -2380,7 +2384,7 @@ end
 
 function Db:layout_schema()
 	for table_name, table_schema in sortedpairs(self.schema.tables) do
-		self:layout_table_schema(table_schema)
+		layout_table_schema(table_schema)
 	end
 end
 
