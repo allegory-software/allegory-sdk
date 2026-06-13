@@ -29,7 +29,7 @@ DATABASES
 	- opt.flags                                see MDBX_env_flags
 	db:[try_]close()                           close db (idempotent)
 	db:closed() -> t|f                         check if db is closed
-	db:max_key_size() -> n                     get max key size in bytes
+	mdbx_max_key_size([table_flags]) -> n      get max key size in bytes
 	mdbx_delete(file_path, [flags])            delete a database
 TRANSACTIONS
 	db:begin(['w'|'r'])                        begin transaction
@@ -142,6 +142,7 @@ local mdbx_open_error = {
 }
 
 local envp = new'MDBX_env*[1]'
+local MDBX_PAGE_SIZE = 4096
 function mdbx_open(file, opt)
 	opt = opt or empty
 	local owner = _check_owner(opt.owner)
@@ -158,7 +159,8 @@ function mdbx_open(file, opt)
 			assert(Db.tryz(file, 'db_open', rc))
 		end
 	end
-	check_open(C.mdbx_env_set_geometry(env, 0, -1, 1024e9, -1, -1, -1))
+	check_open(C.mdbx_env_set_geometry(
+		env, 0, -1, 1024e9, -1, -1, MDBX_PAGE_SIZE))
 	check_open(C.mdbx_env_set_option(env, C.MDBX_opt_max_readers, opt.max_readers or 64))
 	check_open(C.mdbx_env_set_option(env, C.MDBX_opt_max_db, opt.max_tables or 4096))
 	local flags = bor(C.MDBX_NOSUBDIR, opt.readonly and C.MDBX_RDONLY or 0, opt.flags or 0)
@@ -221,10 +223,11 @@ function Db:try_close()
 	return true
 end
 
-function Db:max_key_size()
-	local rc = C.mdbx_env_get_maxkeysize_ex(self.env, C.MDBX_DB_DEFAULTS)
+function mdbx_max_key_size(flags)
+	local rc = C.mdbx_limits_keysize_max(
+		MDBX_PAGE_SIZE, flags or C.MDBX_DB_DEFAULTS)
 	assert(rc ~= -1)
-	return rc
+	return num(rc)
 end
 
 function mdbx_delete(file, flags)
