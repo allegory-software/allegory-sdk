@@ -578,9 +578,10 @@ end
 
 local seqbuf = u64a(1)
 function Db:seq(tab, increment)
+	assert(increment, 'seq: increment required')
 	check_wtxn(self)
 	local dbi = isnum(tab) and tab or self:dbi_raw(tab)
-	local rc = C.mdbx_dbi_sequence(self.txn, dbi, seqbuf, assert(increment))
+	local rc = C.mdbx_dbi_sequence(self.txn, dbi, seqbuf, increment)
 	if rc < 0 then
 		self:check_schema('seq', self:table_name(tab), nil, rc ~= -1, 'overflow')
 		self:checkz('seq', rc)
