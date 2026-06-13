@@ -2372,7 +2372,33 @@ MS.relevant_field_attrs = {
 	maxlen=1,
 	padded=1,
 	nozero=1,
+	not_null=1,
+	auto_increment=1,
+	mdbx_collation=1,
+	mdbx_default=1,
 }
+
+MS.index_field_attrs = {
+	mdbx_type=1,
+	maxlen=1,
+	padded=1,
+	nozero=1,
+	not_null=1,
+	mdbx_collation=1,
+}
+
+MS.fk_field_attrs = {
+	mdbx_type=1,
+	maxlen=1,
+	padded=1,
+	nozero=1,
+	not_null=1,
+	mdbx_collation=1,
+}
+
+MS.supports_fks = true
+MS.indexes_store_pk = true
+MS.fk_indexes_store_pk = true
 
 function MS:format_ix_name(tbl_name, cols, unique)
 	return format_ix_name(tbl_name, cols, unique)
