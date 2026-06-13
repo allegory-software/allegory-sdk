@@ -124,7 +124,8 @@ local function assert_consistent(db, ctx)
 				for fkn, fk in pairs(sch.fks) do
 					local p = db:load_table_schema(fk.ref_table)
 					E(p, 'fk parent missing: '..fk.ref_table..' (fk '..fkn..')')
-					E(p.ref_fks and p.ref_fks[name..'/'..fkn], 'fk has no reverse ref: '..name..'/'..fkn)
+					E(p.ref_fks and p.ref_fks[name..'/'..fkn],
+						'fk has no reverse ref: '..name..'/'..fkn)
 				end
 			end
 			if sch.ref_fks then --back: each reverse ref maps to a live child fk.
@@ -1402,7 +1403,7 @@ function test.try_put_indexes_and_fks()
 		})
 		local _,_,ix_cat = db:add_index('child', {'cat'})
 		local _,_,ix_email = db:add_index('child', {'email', is_unique = true})
-		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
 		local ix_pid = 'child/i/pid'
 		db:insert('parent', '{}', {id = 1})
@@ -1838,7 +1839,7 @@ function test.cursor_delete_enforces_fks()
 			{col = 'id' , mdbx_type = 'u32', not_null = true},
 			{col = 'pid', mdbx_type = 'u32', not_null = true},
 		}, pk = {'id'}})
-		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
 		db:insert('parent', '{}', {id = 1})
 		db:insert('child', '{}', {id = 10, pid = 1})
@@ -2059,28 +2060,28 @@ function test.fk_registration()
 			},
 			pk = {'id'},
 		})
-		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}, ondelete = 'cascade'}
 		local _, sch = db:dbi_schema'child'
-		assert(sch.fks and sch.fks.child_pid_fk, 'fk not registered')
+		assert(sch.fks and sch.fks['pid'], 'fk not registered')
 		db:commit(); db:close()
 		db = mdbx_open(file) --reopen: fk persists
 		db:begin'r'
 		local _, sch = db:dbi_schema'child'
-		local fk = sch.fks and sch.fks.child_pid_fk
+		local fk = sch.fks and sch.fks['pid']
 		assert(fk, 'fk not persisted')
-		assert(fk.table == 'child' and fk.ref_table == 'parent'
+		assert(fk.name == nil and fk.table == 'child' and fk.ref_table == 'parent'
 			and fk.cols[1] == 'pid' and fk.ref_cols[1] == 'id'
 			and fk.ondelete == 'cascade', pp(fk))
 		db:commit(); db:close()
 		db = mdbx_open(file) --drop_fk removes it
 		db:begin'w'
-		db:drop_fk{name = 'child_pid_fk', table = 'child'}
-		assert(not (select(2, db:dbi_schema'child').fks or empty).child_pid_fk)
+		db:drop_fk('child', 'pid')
+		assert(not (select(2, db:dbi_schema'child').fks or empty)['pid'])
 		db:commit(); db:close()
 		db = mdbx_open(file)
 		db:begin'r'
-		assert(not (select(2, db:dbi_schema'child').fks or empty).child_pid_fk)
+		assert(not (select(2, db:dbi_schema'child').fks or empty)['pid'])
 		db:commit(); db:close()
 	end, debug.traceback)
 	cleanup(file)
@@ -2104,10 +2105,10 @@ function test.fk_removal_clears_reverse_refs()
 				},
 				pk = {'id'},
 			})
-			db:add_fk{name = 'parent_fk', table = 'child'..i, cols = {'pid'},
+			db:add_fk{table = 'child'..i, cols = {'pid'},
 				ref_table = 'parent'..i, ref_cols = {'id'}}
 		end
-		db:drop_fk{name = 'parent_fk', table = 'child1'}
+		db:drop_fk('child1', 'pid')
 		db:drop_table'child2'
 		assert(not select(2, db:dbi_schema'parent1').ref_fks)
 		assert(not select(2, db:dbi_schema'parent2').ref_fks)
@@ -2139,9 +2140,9 @@ function test.fk_insert_check()
 			},
 			pk = {'id'},
 		})
-		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}, ondelete = 'cascade'}
-		db:add_fk{name = 'child_opt_fk', table = 'child', cols = {'opt'},
+		db:add_fk{table = 'child', cols = {'opt'},
 			ref_table = 'parent', ref_cols = {'id'}, ondelete = 'set null'}
 		db:insert('parent', '{}', {id = 1})
 
@@ -2195,7 +2196,7 @@ function test.fk_partial_composite_update()
 			},
 			pk = {'id'},
 		})
-		db:add_fk{name = 'child_ab_fk', table = 'child', cols = {'a', 'b'},
+		db:add_fk{table = 'child', cols = {'a', 'b'},
 			ref_table = 'parent', ref_cols = {'a', 'b'}}
 		db:insert('parent', '{}', {a = 1, b = 1})
 		db:insert('parent', '{}', {a = 2, b = 2})
@@ -2238,7 +2239,7 @@ function test.fk_on_pk_col()
 
 		--add_fk validates existing rows by decoding the fk cols ('a' from the
 		--key, 'b' from the value) and probing the parent.
-		assert(db:add_fk{name = 'child_ab_fk', table = 'child', cols = {'a', 'b'},
+		assert(db:add_fk{table = 'child', cols = {'a', 'b'},
 			ref_table = 'parent', ref_cols = {'a', 'b'}, ondelete = 'cascade'})
 
 		--enforcement after the fk exists.
@@ -2273,7 +2274,7 @@ function test.fk_default_check()
 			},
 			pk = {'id'},
 		})
-		db:add_fk{name = 'child_dpid_fk', table = 'child', cols = {'dpid'},
+		db:add_fk{table = 'child', cols = {'dpid'},
 			ref_table = 'parent', ref_cols = {'id'}}
 		--insert without dpid -> default 7 -> parent 7 missing -> rejected
 		local ok, err = try_mutation(db, db.insert, 'child', '{}', {id = 1})
@@ -2309,7 +2310,7 @@ function test.fk_delete_no_action()
 			},
 			pk = {'id'},
 		})
-		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}} --restrict (default)
 		db:insert('parent', '{}', {id = 1})
 		db:insert('parent', '{}', {id = 2})
@@ -2351,16 +2352,16 @@ function test.fk_index_reuse()
 		--pre-existing user index on pid -> reused by the fk.
 		db:add_index('child', {'pid'})
 		assert(db:table_exists'child/i/pid')
-		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
 		local _, sch = db:dbi_schema'child'
-		assert(sch.fks.child_pid_fk.ix == 'child/i/pid', S(sch.fks.child_pid_fk.ix))
+		assert(sch.fks['pid'].ix == 'child/i/pid', S(sch.fks['pid'].ix))
 		assert(sch.ixs and sch.ixs['child/i/pid'], 'reused index stays user-owned')
 		--no index on qid -> fk creates an fk-owned one (table exists, not in ixs).
-		db:add_fk{name = 'child_qid_fk', table = 'child', cols = {'qid'},
+		db:add_fk{table = 'child', cols = {'qid'},
 			ref_table = 'parent', ref_cols = {'id'}}
 		local _, sch = db:dbi_schema'child'
-		assert(sch.fks.child_qid_fk.ix == 'child/i/qid', S(sch.fks.child_qid_fk.ix))
+		assert(sch.fks['qid'].ix == 'child/i/qid', S(sch.fks['qid'].ix))
 		assert(db:table_exists'child/i/qid', 'fk-owned index table exists')
 		assert(not (sch.ixs and sch.ixs['child/i/qid']), 'fk-owned index not in ixs')
 		db:commit()
@@ -2386,7 +2387,7 @@ function test.fk_drop_index_kept_by_fk()
 			pk = {'id'},
 		})
 		db:add_index('child', {'pid'})
-		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
 		db:insert('parent', '{}', {id = 1})
 		db:insert('child', '{}', {id = 10, pid = 1})
@@ -2420,7 +2421,7 @@ function test.fk_retained_index_readd()
 			pk = {'id'},
 		})
 		local _, _, ix = db:add_index('child', {'pid'})
-		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
 		db:insert('parent', '{}', {id = 1})
 		db:insert('child', '{}', {id = 10, pid = 1})
@@ -2431,10 +2432,10 @@ function test.fk_retained_index_readd()
 		local _, schema = db:dbi_schema'child'
 		assert(schema.ixs and schema.ixs[ix])
 		assert(#schema.ix_schemas == 1)
-		assert(schema.fks.child_pid_fk.ix == ix)
+		assert(schema.fks['pid'].ix == ix)
 		assert(num((db:must_get(ix, '{}', 1)).id) == 10)
 
-		db:drop_fk{name = 'child_pid_fk', table = 'child'}
+		db:drop_fk('child', 'pid')
 		assert(db:table_exists(ix), 're-added user index survives fk drop')
 		db:drop_index(ix)
 		assert(not db:table_exists(ix), 'index drops after its final owner')
@@ -2461,7 +2462,7 @@ function test.fk_drop_table_untangle()
 			},
 			pk = {'id'},
 		})
-		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
 		db:insert('parent', '{}', {id = 1})
 		db:insert('child', '{}', {id = 10, pid = 1})
@@ -2470,7 +2471,7 @@ function test.fk_drop_table_untangle()
 		--child + its row survive; the fk is gone.
 		assert(db:table_exists'child' and db:exists('child', 10))
 		local _, sch = db:dbi_schema'child'
-		assert(not (sch.fks and sch.fks.child_pid_fk), 'child fk untangled')
+		assert(not (sch.fks and sch.fks['pid']), 'child fk untangled')
 		db:commit()
 	end)
 end
@@ -2494,16 +2495,16 @@ function test.fk_drop_fk_releases_index()
 			pk = {'id'},
 		})
 		db:add_index('child', {'qid'})
-		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
-		db:add_fk{name = 'child_qid_fk', table = 'child', cols = {'qid'},
+		db:add_fk{table = 'child', cols = {'qid'},
 			ref_table = 'parent', ref_cols = {'id'}}
 		assert(db:table_exists'child/i/pid' and db:table_exists'child/i/qid')
 		--drop the fk-owned one: its index table goes away.
-		db:drop_fk{name = 'child_pid_fk', table = 'child'}
+		db:drop_fk('child', 'pid')
 		assert(not db:table_exists'child/i/pid', 'fk-owned index dropped')
 		--drop the reused one: the user index survives.
-		db:drop_fk{name = 'child_qid_fk', table = 'child'}
+		db:drop_fk('child', 'qid')
 		assert(db:table_exists'child/i/qid', 'reused user index survives')
 		local _, sch = db:dbi_schema'child'
 		assert(sch.ixs and sch.ixs['child/i/qid'])
@@ -2529,7 +2530,7 @@ function test.fk_owned_index_reopen()
 			},
 			pk = {'id'},
 		})
-		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
 		db:insert('parent', '{}', {id = 1})
 		db:insert('child', '{}', {id = 10, pid = 1})
@@ -2537,7 +2538,7 @@ function test.fk_owned_index_reopen()
 	end, function(db)
 		db:begin'w'
 		local _, sch = db:dbi_schema'child'
-		assert(sch.fks.child_pid_fk.ix == 'child/i/pid')
+		assert(sch.fks['pid'].ix == 'child/i/pid')
 		assert(not (sch.ixs and sch.ixs['child/i/pid']), 'fk-owned index not in ixs')
 		local present
 		for _, ix in ipairs(sch.ix_schemas or empty) do
@@ -2563,9 +2564,9 @@ function test.fk_delete_cascade()
 			{col = 'id' , mdbx_type = 'u32', not_null = true},
 			{col = 'bid', mdbx_type = 'u32', not_null = true},
 		}, pk = {'id'}})
-		db:add_fk{name = 'b_aid_fk', table = 'b', cols = {'aid'},
+		db:add_fk{table = 'b', cols = {'aid'},
 			ref_table = 'a', ref_cols = {'id'}, ondelete = 'cascade'}
-		db:add_fk{name = 'c_bid_fk', table = 'c', cols = {'bid'},
+		db:add_fk{table = 'c', cols = {'bid'},
 			ref_table = 'b', ref_cols = {'id'}, ondelete = 'cascade'}
 		db:insert('a', '{}', {id = 1}); db:insert('a', '{}', {id = 2})
 		db:insert('b', '{}', {id = 10, aid = 1}); db:insert('b', '{}', {id = 11, aid = 1})
@@ -2594,7 +2595,7 @@ function test.fk_delete_set_null()
 			{col = 'id' , mdbx_type = 'u32', not_null = true},
 			{col = 'pid', mdbx_type = 'u32'}, --nullable fk col
 		}, pk = {'id'}})
-		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}, ondelete = 'set null'}
 		db:insert('parent', '{}', {id = 1}); db:insert('parent', '{}', {id = 2})
 		db:insert('child', '{}', {id = 10, pid = 1}); db:insert('child', '{}', {id = 11, pid = 1})
@@ -2625,9 +2626,9 @@ function test.fk_delete_cascade_atomic()
 			{col = 'id' , mdbx_type = 'u32', not_null = true},
 			{col = 'bid', mdbx_type = 'u32', not_null = true},
 		}, pk = {'id'}})
-		db:add_fk{name = 'b_aid_fk', table = 'b', cols = {'aid'},
+		db:add_fk{table = 'b', cols = {'aid'},
 			ref_table = 'a', ref_cols = {'id'}, ondelete = 'cascade'}
-		db:add_fk{name = 'c_bid_fk', table = 'c', cols = {'bid'},
+		db:add_fk{table = 'c', cols = {'bid'},
 			ref_table = 'b', ref_cols = {'id'}} --no action (default)
 		db:insert('a', '{}', {id = 1})
 		db:insert('b', '{}', {id = 10, aid = 1}); db:insert('b', '{}', {id = 11, aid = 1})
@@ -2657,9 +2658,9 @@ function test.fk_delete_cascade_cycle()
 			{col = 'id' , mdbx_type = 'u32', not_null = true},
 			{col = 'aid', mdbx_type = 'u32'},
 		}, pk = {'id'}})
-		db:add_fk{name = 'a_bid_fk', table = 'a', cols = {'bid'},
+		db:add_fk{table = 'a', cols = {'bid'},
 			ref_table = 'b', ref_cols = {'id'}, ondelete = 'cascade'}
-		db:add_fk{name = 'b_aid_fk', table = 'b', cols = {'aid'},
+		db:add_fk{table = 'b', cols = {'aid'},
 			ref_table = 'a', ref_cols = {'id'}, ondelete = 'cascade'}
 		db:insert('a', '{}', {id = 1})            --bid null for now
 		db:insert('b', '{}', {id = 2, aid = 1})   --b2 -> a1
@@ -2685,7 +2686,7 @@ function test.fk_rename_table()
 			{col = 'id' , mdbx_type = 'u32', not_null = true},
 			{col = 'pid', mdbx_type = 'u32', not_null = true},
 		}, pk = {'id'}})
-		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
 		db:insert('parent', '{}', {id = 1})
 		db:insert('child', '{}', {id = 10, pid = 1})
@@ -2701,7 +2702,7 @@ function test.fk_rename_table()
 		assert(db:table_exists'kid' and db:table_exists'mom')
 		assert(db:table_exists'kid/i/pid' and not db:table_exists'child/i/pid')
 		local _, ksch = db:dbi_schema'kid'
-		local fk = ksch.fks.child_pid_fk
+		local fk = ksch.fks['pid']
 		assert(fk.table == 'kid' and fk.ref_table == 'mom' and fk.ix == 'kid/i/pid', pp(fk))
 		assert(try_mutation(db, db.del, 'mom', 1) == false)                       --referenced by kid 10
 		assert(try_mutation(db, db.insert, 'kid', '{}', {id = 11, pid = 99}) == false) --missing parent
@@ -2730,7 +2731,7 @@ function test.ddl_consistency_baseline()
 			{col = 'email', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
 		}, pk = {'id'}})
 		db:add_index('child', {'email', is_unique = true})
-		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}, ondelete = 'cascade'}
 		assert_consistent(db, 'built')
 		db:commit(); db:close()
@@ -2756,7 +2757,7 @@ function test.ddl_drop_table_consistency()
 			{col = 'email', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
 		}, pk = {'id'}})
 		db:add_index('child', {'email', is_unique = true})
-		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
 		db:commit()
 		db:begin'w'
@@ -2790,14 +2791,14 @@ function test.ddl_drop_index_consistency()
 			{col = 'pid', mdbx_type = 'u32', not_null = true},
 		}, pk = {'id'}})
 		db:add_index('child', {'pid'})
-		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
 		db:commit()
 		db:begin'w'
 		db:drop_index'child/i/pid'                --kept: the fk still uses it
 		assert(db:table_exists'child/i/pid')
 		assert_consistent(db, 'after drop_index (fk-kept)')
-		db:drop_fk{name = 'child_pid_fk', table = 'child'}
+		db:drop_fk('child', 'pid')
 		assert(not db:table_exists'child/i/pid')  --now released
 		assert_consistent(db, 'after drop_fk')
 		db:commit(); db:close()
@@ -2823,7 +2824,7 @@ function test.ddl_rename_consistency()
 			{col = 'email', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
 		}, pk = {'id'}})
 		db:add_index('child', {'email', is_unique = true})
-		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
 		db:commit()
 		db:begin'w'
@@ -2946,7 +2947,7 @@ function test.ddl_abort_rename_cached()
 			{col = 'id' , mdbx_type = 'u32', not_null = true},
 			{col = 'pid', mdbx_type = 'u32', not_null = true},
 		}, pk = {'id'}})
-		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
 		db:insert('parent', '{}', {id = 1})
 		db:insert('child', '{}', {id = 10, pid = 1})
@@ -2960,8 +2961,8 @@ function test.ddl_abort_rename_cached()
 		assert(db:table_exists'child' and not db:table_exists'kid')
 		local _, ps = db:dbi_schema'parent'
 		local _, cs1 = db:dbi_schema'child'
-		assert(ps.ref_fks['child/child_pid_fk'] and not ps.ref_fks['kid/child_pid_fk'])
-		assert(cs1.name == 'child' and cs1.fks.child_pid_fk.table == 'child')
+		assert(ps.ref_fks['child/pid'] and not ps.ref_fks['kid/pid'])
+		assert(cs1.name == 'child' and cs1.fks['pid'].table == 'child')
 		assert(try_mutation(db, db.del, 'parent', 1) == false)
 		assert_consistent(db, 'after aborted table rename')
 		db:commit()
@@ -3032,7 +3033,7 @@ function test.ddl_abort_fk_cached()
 		db:insert('child', '{}', {id = 10, pid = 1})
 		db:commit()
 		local function fk()
-			return {name = 'child_pid_fk', table = 'child', cols = {'pid'},
+			return {table = 'child', cols = {'pid'},
 				ref_table = 'parent', ref_cols = {'id'}}
 		end
 
@@ -3049,13 +3050,13 @@ function test.ddl_abort_fk_cached()
 		db:commit()
 
 		db:begin'w'
-		db:drop_fk(fk())
+		db:drop_fk('child', 'pid')
 		db:abort()
 
 		db:begin'w'
 		local _, ps2 = db:dbi_schema'parent'
 		local _, cs2 = db:dbi_schema'child'
-		assert(ps2.ref_fks['child/child_pid_fk'] and cs2.fks.child_pid_fk)
+		assert(ps2.ref_fks['child/pid'] and cs2.fks['pid'])
 		assert(db:table_exists'child/i/pid')
 		assert(try_mutation(db, db.del, 'parent', 1) == false)
 		assert_consistent(db, 'after aborted fk drop')
@@ -3068,7 +3069,7 @@ function test.ddl_abort_fk_cached()
 		db:begin'w'
 		local _, ps3 = db:dbi_schema'parent'
 		local _, cs3 = db:dbi_schema'child'
-		assert(ps3.ref_fks['child/child_pid_fk'] and cs3.fks.child_pid_fk)
+		assert(ps3.ref_fks['child/pid'] and cs3.fks['pid'])
 		assert(db:table_exists'child/i/pid')
 		assert(try_mutation(db, db.del, 'parent', 1) == false)
 		assert_consistent(db, 'after aborted parent drop')
@@ -3089,7 +3090,7 @@ function test.extract_schema()
 			{col = 'email', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
 		}, pk = {'id'}})
 		db:add_index('child', {'email', is_unique = true})
-		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
 		local sc = db:extract_schema()
 		--data tables present; index/meta tables excluded.
@@ -3102,8 +3103,8 @@ function test.extract_schema()
 		local c = sc.tables.child
 		assert(c.fields.email and c.fields.pid and c.fields.id, 'fields missing')
 		assert(c.pk[1] == 'id', S(c.pk))
-		assert(c.fks and c.fks.child_pid_fk
-			and c.fks.child_pid_fk.ref_table == 'parent', 'fk missing in extract')
+		assert(c.fks and c.fks['pid']
+			and c.fks['pid'].ref_table == 'parent', 'fk missing in extract')
 		db:commit()
 	end)
 end
@@ -3560,7 +3561,7 @@ function test.schema_rename_created_in_same_txn()
 			{col = 'email', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
 		}, pk = {'id'}})
 		db:add_index('child', {'email', is_unique = true})
-		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
 		db:rename_table('child', 'kid') --no commit in between
 		assert(db:table_exists'kid' and db:table_exists'kid/u/email'
@@ -3657,7 +3658,8 @@ function test.rename_column_fk()
 			{col = 'id' , mdbx_type = 'u32', not_null = true},
 			{col = 'pid', mdbx_type = 'u32', not_null = true},
 		}, pk = {'id'}})
-		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		db:add_index('child', {'pid'})
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'uid'}}
 		db:insert('parent', '{}', {uid = 1})
 		db:insert('child', '{}', {id = 10, pid = 1})
@@ -3665,9 +3667,12 @@ function test.rename_column_fk()
 		db:rename_column('parent', 'uid', 'user_id')  --parent referenced pk column
 		assert(db:table_exists'child/i/parent_id' and not db:table_exists'child/i/pid')
 		assert_consistent(db, 'after rename fk cols')
+		local _, psch = db:dbi_schema'parent'
 		local _, csch = db:dbi_schema'child'
-		assert(csch.fks.child_pid_fk.cols[1] == 'parent_id', S(csch.fks.child_pid_fk.cols))
-		assert(csch.fks.child_pid_fk.ref_cols[1] == 'user_id', S(csch.fks.child_pid_fk.ref_cols))
+		assert(not csch.fks.pid and csch.fks.parent_id)
+		assert(not psch.ref_fks['child/pid'] and psch.ref_fks['child/parent_id'])
+		assert(csch.fks.parent_id.cols[1] == 'parent_id', S(csch.fks.parent_id.cols))
+		assert(csch.fks.parent_id.ref_cols[1] == 'user_id', S(csch.fks.parent_id.ref_cols))
 		--enforcement by the new names
 		assert(try_mutation(db, db.insert, 'child', '{}', {id = 11, parent_id = 99}) == false) --missing parent
 		db:insert('child', '{}', {id = 12, parent_id = 1})                        --ok
@@ -3696,13 +3701,13 @@ function test.add_fk_rejects_invalid_data()
 		db:insert('parent', '{}', {id = 1})
 		db:insert('child', '{}', {id = 10, pid = 1})   --valid
 		db:insert('child', '{}', {id = 11, pid = 99})  --references missing parent
-		local fk = {name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		local fk = {table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
 		local ok, err = try_schema(db, db.add_fk, fk)
 		assert(not ok and iserror(err, 'schema'), tostring(err))
 		assert(err.message:find('fk', 1, true), tostring(err.message))
 		local _, sch = db:dbi_schema'child'
-		assert(not (sch.fks and sch.fks.child_pid_fk), 'fk must not be added on failure')
+		assert(not (sch.fks and sch.fks['pid']), 'fk must not be added on failure')
 		assert(not db:table_exists'child/i/pid', 'fk index must not be created on failure')
 		--fix the offending row -> now it adds, with the enforcement index.
 		db:del('child', 11)
@@ -3754,7 +3759,7 @@ function test.add_fk_validates_definition()
 			end
 		end
 		local function fk(cols, ref_table, ref_cols, ondelete)
-			return {name = 'bad_fk', table = 'child', cols = cols,
+			return {table = 'child', cols = cols,
 				ref_table = ref_table, ref_cols = ref_cols, ondelete = ondelete}
 		end
 
@@ -3771,8 +3776,7 @@ function test.add_fk_validates_definition()
 		invalid(fk({'pid'}, 'parent_num', {'id'}, 'set null'),
 			'set null column must be nullable')
 
-		assert(db:add_fk{
-			name = 'child_code_fk', table = 'child', cols = {'code'},
+		assert(db:add_fk{table = 'child', cols = {'code'},
 			ref_table = 'parent_text', ref_cols = {'code'}, ondelete = 'set null',
 		})
 		assert(db:table_exists'child/i/code')
@@ -3794,7 +3798,7 @@ function test.add_fk_skips_null()
 		db:insert('parent', '{}', {id = 1})
 		db:insert('child', '{}', {id = 10, pid = 1})
 		db:insert('child', '{}', {id = 11, pid = null}) --null -> skipped by the check
-		assert(db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		assert(db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}})
 		assert(db:is_null('child', 'pid', 11))
 		db:commit()
@@ -3820,7 +3824,7 @@ function test.composite_fk_match_simple()
 		db:insert('child', '{}', {id = 11, a = null, b = 99})
 		db:insert('child', '{}', {id = 12, a = 99, b = null})
 		db:insert('child', '{}', {id = 13, a = null, b = null})
-		assert(db:add_fk{name = 'child_ab_fk', table = 'child', cols = {'a', 'b'},
+		assert(db:add_fk{table = 'child', cols = {'a', 'b'},
 			ref_table = 'parent', ref_cols = {'a', 'b'}})
 
 		db:insert('child', '{}', {id = 14, a = null, b = 99})
@@ -3846,13 +3850,13 @@ function test.add_fk_owns_definition()
 			{col = 'id' , mdbx_type = 'u32', not_null = true},
 			{col = 'pid', mdbx_type = 'u32', not_null = true},
 		}, pk = {'id'}})
-		local fk = {name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		local fk = {table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
 		assert(not fk.ix)
 		assert(db:add_fk(fk))
 		local _, child = db:dbi_schema'child'
-		assert(fk.ix == 'child/i/pid')
-		assert(child.fks.child_pid_fk == fk)
+		assert(fk.name == nil and fk.ix == 'child/i/pid')
+		assert(child.fks['pid'] == fk)
 		db:commit()
 	end)
 end
@@ -4119,7 +4123,7 @@ function test.mixed_index_descending_pk_decode()
 		db:insert('parent', '{}', {a = 'bb', c = 'dd', b = 2})
 		db:insert('child', '{}', {x = 10, a = 'aa', c = 'cc', b = 1})
 		db:insert('child', '{}', {x = 20, a = 'bb', c = 'dd', b = 2})
-		db:add_fk{name = 'child_parent_fk', table = 'child', cols = {'a', 'c', 'b'},
+		db:add_fk{table = 'child', cols = {'a', 'c', 'b'},
 			ref_table = 'parent', ref_cols = {'a', 'c', 'b'}, ondelete = 'cascade'}
 
 		local r = db:must_get('child/i/a-c-b', '{}', 'aa', 'cc', 1)
@@ -4144,7 +4148,7 @@ function test.fk_default_full_write_operations()
 			{col = 'id' , mdbx_type = 'u32', not_null = true},
 			{col = 'pid', mdbx_type = 'u32', mdbx_default = 7},
 		}, pk = {'id'}})
-		db:add_fk{name = 'child_pid_fk', table = 'child', cols = {'pid'},
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
 		db:insert('parent', '{}', {id = 8})
 		db:insert('child', '{}', {id = 1, pid = 8})
@@ -4304,10 +4308,9 @@ function test.unknown_read_columns_rejected()
 	end)
 end
 
---two fks on the same columns share one enforcement index. Cascades run before
---NO ACTION checks, and the index remains until its final fk owner is removed.
-function test.shared_fk_index_lifetime_and_delete_order()
-	with_db('shared_fk_index_lifetime_and_delete_order', function(db)
+--an ordered child-column list identifies one fk, regardless of parent/action.
+function test.duplicate_fk_columns_rejected()
+	with_db('duplicate_fk_columns_rejected', function(db)
 		db:begin'w'
 		db:create_table('parent', {name = 'parent',
 			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
@@ -4315,29 +4318,24 @@ function test.shared_fk_index_lifetime_and_delete_order()
 			{col = 'id' , mdbx_type = 'u32', not_null = true},
 			{col = 'pid', mdbx_type = 'u32', not_null = true},
 		}, pk = {'id'}})
-		db:add_fk{name = 'keep', table = 'child', cols = {'pid'},
+		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
-		db:add_fk{name = 'cascade', table = 'child', cols = {'pid'},
+		local ok, err = try_schema(db, db.add_fk, {
+			table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}, ondelete = 'cascade'}
+		)
+		assert(not ok and err.message == 'fk already exists: pid', tostring(err))
 		local _, schema = db:dbi_schema'child'
-		assert(schema.fks.keep.ix == 'child/i/pid')
-		assert(schema.fks.cascade.ix == 'child/i/pid')
+		assert(schema.fks['pid'].ix == 'child/i/pid')
 		assert(#schema.ix_schemas == 1)
 
 		db:insert('parent', '{}', {id = 1})
 		db:insert('child', '{}', {id = 10, pid = 1})
-		db:del('parent', 1)
-		assert(not db:exists('child', 10))
-
-		db:insert('parent', '{}', {id = 2})
-		db:insert('child', '{}', {id = 20, pid = 2})
-		db:drop_fk{name = 'cascade', table = 'child'}
-		assert(db:table_exists'child/i/pid')
-		assert(try_mutation(db, db.del, 'parent', 2) == false)
-		db:drop_fk{name = 'keep', table = 'child'}
+		assert(try_mutation(db, db.del, 'parent', 1) == false)
+		db:drop_fk('child', 'pid')
 		assert(not db:table_exists'child/i/pid')
-		assert(try_mutation(db, db.del, 'parent', 2))
-		assert(db:exists('child', 20))
+		assert(try_mutation(db, db.del, 'parent', 1))
+		assert(db:exists('child', 10))
 		assert_consistent(db)
 		db:commit()
 	end)
@@ -4352,18 +4350,19 @@ function test.self_referencing_fk_rename()
 			{col = 'id'       , mdbx_type = 'u32', not_null = true},
 			{col = 'parent_id', mdbx_type = 'u32'},
 		}, pk = {'id'}})
-		db:add_fk{name = 'parent_fk', table = 'node', cols = {'parent_id'},
+		db:add_fk{table = 'node', cols = {'parent_id'},
 			ref_table = 'node', ref_cols = {'id'}, ondelete = 'cascade'}
 		db:insert('node', '{}', {id = 1, parent_id = null})
 		db:insert('node', '{}', {id = 2, parent_id = 1})
+		db:rename_column('node', 'parent_id', 'owner_id')
 		db:rename_table('node', 'item')
 
 		local _, schema = db:dbi_schema'item'
-		local fk = schema.fks.parent_fk
+		local fk = schema.fks.owner_id
 		assert(fk.table == 'item' and fk.ref_table == 'item')
-		assert(fk.ix == 'item/i/parent_id')
-		assert(schema.ref_fks['item/parent_fk'])
-		assert(db:table_exists'item/i/parent_id')
+		assert(fk.ix == 'item/i/owner_id')
+		assert(schema.ref_fks['item/owner_id'])
+		assert(db:table_exists'item/i/owner_id')
 		db:del('item', 1)
 		assert(not db:exists('item', 1) and not db:exists('item', 2))
 		assert_consistent(db)
@@ -4380,7 +4379,7 @@ function test.self_referencing_table_drop()
 			{col = 'id'       , mdbx_type = 'u32', not_null = true},
 			{col = 'parent_id', mdbx_type = 'u32'},
 		}, pk = {'id'}})
-		db:add_fk{name = 'parent_fk', table = 'node', cols = {'parent_id'},
+		db:add_fk{table = 'node', cols = {'parent_id'},
 			ref_table = 'node', ref_cols = {'id'}, ondelete = 'cascade'}
 		db:commit()
 		db:begin'w'

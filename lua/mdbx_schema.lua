@@ -659,7 +659,6 @@ function Db:save_table_schema(schema)
 		t.fks = {}
 		for fk_name, fk in pairs(schema.fks) do
 			t.fks[fk_name] = {
-				name = fk.name,
 				cols = imap(fk.cols),
 				ref_table = fk.ref_table,
 				ref_cols = imap(fk.ref_cols),
@@ -976,11 +975,11 @@ function Db:drop_table(tab)
 	touch_schema(self, name)
 	--as a child: drop the reverse refs our fks hold on their parents.
 	if schema.fks then
-		for _, fk in pairs(schema.fks) do
+		for fk_name, fk in pairs(schema.fks) do
 			local _, ref_schema = self:dbi_schema(fk.ref_table)
 			if ref_schema and ref_schema.ref_fks then
 				touch_schema(self, ref_schema.name)
-				ref_schema.ref_fks[name..'/'..fk.name] = nil
+				ref_schema.ref_fks[name..'/'..fk_name] = nil
 				if not next(ref_schema.ref_fks) then ref_schema.ref_fks = nil end
 				self:save_table_schema(ref_schema)
 			end
@@ -991,7 +990,7 @@ function Db:drop_table(tab)
 		for _, ref in pairs(schema.ref_fks) do
 			local _, child_schema = self:dbi_schema(ref.table)
 			local cfk = child_schema and child_schema.fks and child_schema.fks[ref.fk]
-			if cfk then self:detach_fk(child_schema, cfk) end
+			if cfk then self:detach_fk(child_schema, ref.fk, cfk) end
 		end
 	end
 	for _,ix_schema in ipairs(schema.ix_schemas or empty) do
@@ -1043,7 +1042,7 @@ function Db:rename_table(tab, new_name)
 	end
 	--fk references embed table names; fix them after the index rename above.
 	if schema.fks then --as a child: its fk.table/fk.ix and each parent's reverse ref.
-		for _, fk in pairs(schema.fks) do
+		for fk_name, fk in pairs(schema.fks) do
 			fk.table = new_name
 			fk.ix = new_name .. fk.ix:sub(#old_name + 1) --index moved with us
 			local self_ref = fk.ref_table == old_name
@@ -1052,9 +1051,9 @@ function Db:rename_table(tab, new_name)
 				or select(2, self:dbi_schema(fk.ref_table))
 			if ref_schema and ref_schema.ref_fks then
 				touch_schema(self, ref_schema.name)
-				ref_schema.ref_fks[old_name..'/'..fk.name] = nil
-				ref_schema.ref_fks[new_name..'/'..fk.name] =
-					{table = new_name, fk = fk.name}
+				ref_schema.ref_fks[old_name..'/'..fk_name] = nil
+				ref_schema.ref_fks[new_name..'/'..fk_name] =
+					{table = new_name, fk = fk_name}
 				if not self_ref then self:save_table_schema(ref_schema) end
 			end
 		end
@@ -1233,7 +1232,7 @@ function Db:compile_index_schema(ix_schema)
 			if cur then
 				cur:del_raw()
 			else
-				ix_dbi = self:dbi_schema(ix_schema.name) --live name: survives rename
+				ix_dbi = self:dbi_raw(ix_schema.name) --live name: survives rename
 				if dup then --remove the exact (old key, pk) pair from the dupsort index.
 					assert(self:try_del_raw(ix_dbi, xk0, xk0_sz, k, k_sz))
 				else --remove the unique key.
@@ -1246,7 +1245,7 @@ function Db:compile_index_schema(ix_schema)
 			return cur:try_put_raw(xk, xk_sz, k, k_sz,
 				not dup and mdbx.MDBX_NOOVERWRITE or nil)
 		end
-		ix_dbi = ix_dbi or self:dbi_schema(ix_schema.name)
+		ix_dbi = ix_dbi or self:dbi_raw(ix_schema.name)
 		if dup then --add the (key, pk) pair (duplicates allowed).
 			return self:try_put_raw(ix_dbi, xk, xk_sz, k, k_sz)
 		else --add the unique key; an existing key is a unique violation.
@@ -1255,7 +1254,7 @@ function Db:compile_index_schema(ix_schema)
 	end
 
 	function ix_schema.del(ix_schema, self, k, k_sz, v0, v0_sz)
-		local ix_dbi = self:dbi_schema(ix_schema.name)
+		local ix_dbi = self:dbi_raw(ix_schema.name)
 		local xk0, xk0_buf_sz = ix2_key_rec_buffer(ix_schema.key_fields.max_rec_size)
 		decode_ix_into(k, k_sz, v0, v0_sz, dt0)
 		local xk0_sz = encode_key(self, ix_schema, 'i_del', nil, xk0, xk0_buf_sz, cols, '[]', dt0)
@@ -1384,12 +1383,15 @@ end
 --foreign keys ---------------------------------------------------------------
 
 --register a foreign key (child.cols -> ref_table.pk) on the child table.
---fk shape is schema.lua's: {name, table, cols, ref_table, ref_cols, ondelete}.
+--input shape is schema.lua's fk definition without a caller-supplied name.
+local function format_fk_name(cols)
+	return cat(cols, '-')
+end
 local add_fk_key_buffer = buffer()
 --check that existing rows satisfy the fk: every child row whose fk cols are all
 --non-null must reference an existing parent row (MATCH SIMPLE: a row with any
 --null fk col is skipped). mirrors how add_index validates existing data.
-local function check_existing_fk(self, event, schema, fk)
+local function check_existing_fk(self, event, schema, fk_name, fk)
 	local ref_dbi, ref_schema = self:dbi_schema(fk.ref_table)
 	local n = #fk.cols
 	for cur, rec in self:each(fk.table, '{}') do
@@ -1407,7 +1409,7 @@ local function check_existing_fk(self, event, schema, fk)
 			if not self:get_raw(ref_dbi, pk, pk_sz) then
 				cur:close()
 				return false, fmt('fk %s: existing row references missing %s',
-					fk.name, fk.ref_table)
+					fk_name, fk.ref_table)
 			end
 		end
 	end
@@ -1417,45 +1419,48 @@ function Db:add_fk(fk)
 	local event = {type = 'schema', event = 'fk_add', table = fk.table}
 	local dbi, schema = self:try_dbi_schema(fk.table)
 	self:check_schema('fk_add', fk.table, nil, dbi,
-		'fk %s: table missing: %s', fk.name, fk.table)
-	self:check_schema('fk_add', fk.table, nil,
-		not (schema.fks and schema.fks[fk.name]),
-		'fk already exists: %s', fk.name)
+		'table missing: %s', fk.table)
 	self:check_schema('fk_add', fk.table, nil, fk.cols and #fk.cols > 0,
-		'fk %s: no columns', fk.name)
-	local ref_dbi, ref_schema = self:try_dbi_schema(fk.ref_table)
-	self:check_schema('fk_add', fk.table, nil, ref_dbi,
-		'fk %s: ref table missing: %s', fk.name, fk.ref_table)
-	self:check_schema('fk_add', fk.table, nil,
-		fk.ref_cols and #fk.cols == #fk.ref_cols and #fk.ref_cols == #ref_schema.pk,
-		'fk %s: column count mismatch', fk.name)
+		'fk has no columns')
 	self:check_schema('fk_add', fk.table, nil,
 		fk.ondelete == nil or fk.ondelete == 'cascade' or fk.ondelete == 'set null',
-		'fk %s: invalid ondelete: %s', fk.name, fk.ondelete)
+		'invalid ondelete: %s', fk.ondelete)
+	local fk_name = format_fk_name(fk.cols)
+	self:check_schema('fk_add', fk.table, nil,
+		not (schema.fks and schema.fks[fk_name]),
+		'fk already exists: %s', fk_name)
+	local ref_dbi, ref_schema = self:try_dbi_schema(fk.ref_table)
+	self:check_schema('fk_add', fk.table, nil, ref_dbi,
+		'fk %s: ref table missing: %s', fk_name, fk.ref_table)
+	self:check_schema('fk_add', fk.table, nil,
+		fk.ref_cols and #fk.cols == #fk.ref_cols and #fk.ref_cols == #ref_schema.pk,
+		'fk %s: column count mismatch', fk_name)
 	local seen = {}
 	for i, col in ipairs(fk.cols) do
 		local f = schema.fields[col]
 		self:check_schema('fk_add', fk.table, col, f,
-			'fk %s: unknown column: %s.%s', fk.name, fk.table, col)
+			'fk %s: unknown column: %s.%s', fk_name, fk.table, col)
 		self:check_schema('fk_add', fk.table, col, not seen[col],
-			'fk %s: duplicate column: %s.%s', fk.name, fk.table, col)
+			'fk %s: duplicate column: %s.%s', fk_name, fk.table, col)
 		seen[col] = true
 		local ref_col = fk.ref_cols[i]
 		self:check_schema('fk_add', fk.table, col, ref_col == ref_schema.pk[i],
-			'fk %s: ref column must be pk column %s.%s', fk.name, fk.ref_table, ref_schema.pk[i])
+			'fk %s: ref column must be pk column %s.%s',
+			fk_name, fk.ref_table, ref_schema.pk[i])
 		local ref_f = ref_schema.fields[ref_col]
 		for _, k in ipairs{'mdbx_type', 'maxlen', 'padded', 'nozero', 'mdbx_collation'} do
 			self:check_schema('fk_add', fk.table, col, f[k] == ref_f[k],
 				'fk %s: incompatible fields %s.%s and %s.%s: %s mismatch',
-				fk.name, fk.table, col, fk.ref_table, ref_col, k)
+				fk_name, fk.table, col, fk.ref_table, ref_col, k)
 		end
 		if fk.ondelete == 'set null' then
 			self:check_schema('fk_add', fk.table, col, not f.not_null,
-				'fk %s: set null column must be nullable: %s.%s', fk.name, fk.table, col)
+				'fk %s: set null column must be nullable: %s.%s',
+				fk_name, fk.table, col)
 		end
 	end
 	--reject if existing data already violates the fk (before any change).
-	local ok, err = check_existing_fk(self, event, schema, fk)
+	local ok, err = check_existing_fk(self, event, schema, fk_name, fk)
 	self:check_schema('fk_add', fk.table, nil, ok, err)
 	--ensure an index on fk.cols for parent-side delete enforcement: reuse a
 	--compatible existing index (user- or fk-owned), else create an fk-owned one
@@ -1474,27 +1479,29 @@ function Db:add_fk(fk)
 		build_index(self, 'fk_add', schema, ix_schema)
 		fk.ix = ix_schema.name
 	end
-	attr(schema, 'fks')[fk.name] = fk
+	fk.name = nil
+	attr(schema, 'fks')[fk_name] = fk
 	self:save_table_schema(schema)
 	--register the reverse ref on the parent for delete-time enforcement.
 	touch_schema(self, ref_schema.name)
-	attr(ref_schema, 'ref_fks')[fk.table..'/'..fk.name] = {table = fk.table, fk = fk.name}
+	attr(ref_schema, 'ref_fks')[fk.table..'/'..fk_name] =
+		{table = fk.table, fk = fk_name}
 	self:save_table_schema(ref_schema)
 	return true
 end
 
-function Db:drop_fk(fk)
-	local dbi, schema = self:try_dbi_schema(fk.table)
-	self:check_schema('fk_drop', fk.table, nil, dbi, 'not_found')
-	local stored = schema.fks and schema.fks[fk.name]
-	self:check_schema('fk_drop', fk.table, nil, stored,
-		'fk not found: %s', fk.name)
-	self:detach_fk(schema, stored)
+function Db:drop_fk(table_name, fk_name)
+	local dbi, schema = self:try_dbi_schema(table_name)
+	self:check_schema('fk_drop', table_name, nil, dbi, 'not_found')
+	local stored = schema.fks and schema.fks[fk_name]
+	self:check_schema('fk_drop', table_name, nil, stored,
+		'fk not found: %s', fk_name)
+	self:detach_fk(schema, fk_name, stored)
 	--remove the reverse ref from the parent.
 	local _, ref_schema = self:dbi_schema(stored.ref_table)
 	if ref_schema and ref_schema.ref_fks then
 		touch_schema(self, ref_schema.name)
-		ref_schema.ref_fks[stored.table..'/'..stored.name] = nil
+		ref_schema.ref_fks[stored.table..'/'..fk_name] = nil
 		if not next(ref_schema.ref_fks) then ref_schema.ref_fks = nil end
 		self:save_table_schema(ref_schema)
 	end
@@ -1503,9 +1510,9 @@ end
 
 --remove a fk from its (child) table and release its enforcement index. used by
 --drop_fk and by drop_table when untangling a dropped parent's children.
-function Db:detach_fk(schema, fk)
+function Db:detach_fk(schema, fk_name, fk)
 	touch_schema(self, schema.name)
-	schema.fks[fk.name] = nil
+	schema.fks[fk_name] = nil
 	if not next(schema.fks) then schema.fks = nil end
 	release_index_if_unreferenced(self, schema, fk.ix)
 	self:save_table_schema(schema)
@@ -1558,12 +1565,25 @@ function Db:rename_column(tab, old_col, new_col)
 			renamed_ix[old_ix] = new_ix
 		end
 	end
-	--fks using the column (child side): update cols and the fk index name.
+	--fks using the column (child side): update cols, identity and parent reverse ref.
 	if schema.fks then
-		for _, fk in pairs(schema.fks) do
+		local fks = {}
+		for fk_name, fk in pairs(schema.fks) do
 			rename_in_list(fk.cols, old_col, new_col)
+			local new_fk_name = format_fk_name(fk.cols)
+			if new_fk_name ~= fk_name then
+				local ref_schema = fk.ref_table == schema.name and schema
+					or select(2, self:dbi_schema(fk.ref_table))
+				touch_schema(self, ref_schema.name)
+				ref_schema.ref_fks[schema.name..'/'..fk_name] = nil
+				ref_schema.ref_fks[schema.name..'/'..new_fk_name] =
+					{table = schema.name, fk = new_fk_name}
+				if ref_schema ~= schema then self:save_table_schema(ref_schema) end
+			end
 			fk.ix = renamed_ix[fk.ix] or fk.ix
+			fks[new_fk_name] = fk
 		end
+		schema.fks = fks
 	end
 	--this table is a parent and a pk column changed: fix children's ref_cols.
 	if in_pk and schema.ref_fks then
@@ -1939,8 +1959,7 @@ local del_fk_key_buffer = buffer()
 --probe a child's fk index for the first row referencing the deleted parent pk
 --(`...`); returns get_raw's (ok, v, v_sz) where v is the child's encoded pk. the
 --key is re-encoded on every call because a recursive cascade reuses the buffer.
-local function first_referencing_child(self, child_schema, fk, ...)
-	local ix_dbi, ix_schema = self:dbi_schema(fk.ix)
+local function first_referencing_child(self, ix_dbi, ix_schema, ...)
 	local xk, xk_buf_sz = del_fk_key_buffer(ix_schema.key_fields.max_rec_size)
 	local xk_sz = encode_key(self, ix_schema, 'get', nil, xk, xk_buf_sz,
 		ix_schema.key_cols, nil, ...)
@@ -1957,17 +1976,21 @@ local function enforce_del_fks(self, schema, ...)
 		local _, child_schema = self:dbi_schema(ref.table)
 		local fk = child_schema.fks[ref.fk]
 		if fk.ondelete == 'cascade' then
+			local ix_dbi, ix_schema = self:dbi_schema(fk.ix)
 			local n = #child_schema.key_fields
 			while true do
-				local ok, v, v_sz = first_referencing_child(self, child_schema, fk, ...)
+				local ok, v, v_sz =
+					first_referencing_child(self, ix_dbi, ix_schema, ...)
 				if not ok then break end
 				local pk = {}
 				decode_key(child_schema, v, v_sz, pk, nil)
 				self:del(ref.table, unpack(pk, 1, n))
 			end
 		elseif fk.ondelete == 'set null' then
+			local ix_dbi, ix_schema = self:dbi_schema(fk.ix)
 			while true do
-				local ok, v, v_sz = first_referencing_child(self, child_schema, fk, ...)
+				local ok, v, v_sz =
+					first_referencing_child(self, ix_dbi, ix_schema, ...)
 				if not ok then break end
 				local rec = {}
 				decode_key(child_schema, v, v_sz, rec, '{}')
@@ -1980,9 +2003,10 @@ local function enforce_del_fks(self, schema, ...)
 		local _, child_schema = self:dbi_schema(ref.table)
 		local fk = child_schema.fks[ref.fk]
 		if fk.ondelete ~= 'cascade' and fk.ondelete ~= 'set null' then
-			if first_referencing_child(self, child_schema, fk, ...) then
+			local ix_dbi, ix_schema = self:dbi_schema(fk.ix)
+			if first_referencing_child(self, ix_dbi, ix_schema, ...) then
 				self:check_row('del', schema.name, false,
-					fmt('fk %s: referenced by %s', fk.name, ref.table))
+					fmt('fk %s: referenced by %s', ref.fk, ref.table))
 			end
 		end
 	end
@@ -2348,6 +2372,10 @@ MS.relevant_field_attrs = {
 
 function MS:format_ix_name(tbl_name, cols, unique)
 	return format_ix_name(tbl_name, cols, unique)
+end
+
+function MS:format_fk_name(tbl_name, cols, ref_table, ondelete)
+	return format_fk_name(cols)
 end
 
 function Db:layout_schema()
