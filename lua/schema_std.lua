@@ -123,7 +123,7 @@ return function()
 	types.u52       = types.uint52
 
 	types.double    = {type = 'number' , align = 'right', size = 8, mysql_type = 'double', tarantool_type = 'number', mdbx_type = 'f64'}
-	types.float     = {type = 'number' , align = 'right', size = 4, mysql_type = 'float' , tarantool_type = 'number', mdbx_type = 'float' }
+	types.float     = {type = 'number' , align = 'right', size = 4, mysql_type = 'float' , tarantool_type = 'number', mdbx_type = 'f32' }
 
 	types.f32       = types.float
 	types.f64       = types.double
