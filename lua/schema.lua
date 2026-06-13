@@ -87,9 +87,32 @@ API
 	schema.diff(sc1, sc2) -> diff`  find out what changed between `sc1` and `sc2`
 	diff:pp()`                      pretty print a schema diff
 
+INTEGRATION WITH DB ENGINES
+
+Pass these engine capabilities and diff rules to `schema.new()`:
+
+	engine                     engine name used for engine-specific attributes.
+	relevant_field_attrs       {attr->true}: attributes included in field diffs.
+	supports_fks               include foreign keys in schema diffs.
+	supports_checks            include checks in schema diffs.
+	supports_triggers          include triggers in schema diffs.
+	supports_procs             include procedures in schema diffs.
+	index_field_attrs          {attr->true}: field changes that require indexes
+	                           containing the field to be dropped and recreated.
+	fk_field_attrs             {attr->true}: field changes that require foreign
+	                           keys using the field at either endpoint to be
+	                           dropped and recreated.
+	indexes_store_pk           indexes store or otherwise depend on the encoded
+	                           base-table PK, so PK changes rebuild all indexes.
+	fk_indexes_store_pk        FK enforcement indexes store or otherwise depend
+	                           on the encoded child-table PK, so child PK changes
+	                           rebuild all foreign keys on the table.
+
+
 ]=]
 
 --if not ... then require'schema_test'; return end
+if not ... then require'schema_diff_test'; return end
 
 require'glue'
 
@@ -685,6 +708,100 @@ local function diff_tables(self, t1, t0, sc0)
 	return d
 end
 
+local function field_change_affects(d, col, attrs)
+	local fd = d and d.fields and d.fields.update and d.fields.update[col]
+	if not fd then return false end
+	for attr in pairs(fd.changed) do
+		if attrs[attr] then return true end
+	end
+	return false
+end
+
+local function cols_change_affects(d, cols, attrs)
+	for _, col in ipairs(cols or empty) do
+		if field_change_affects(d, col, attrs) then return true end
+	end
+	return false
+end
+
+local function pk_change_affects(d, attrs)
+	return d and (
+		d.remove_pk or d.add_pk
+		or cols_change_affects(d, d.old.pk, attrs)
+	) or false
+end
+
+local function table_update(self, name, old, new)
+	local updates = self.tables and self.tables.update
+	local d = updates and updates[name]
+	if d then return d end
+	self.tables = self.tables or {}
+	self.tables.update = self.tables.update or {}
+	d = {old = old, new = new}
+	self.tables.update[name] = d
+	return d
+end
+
+local function replace_dependency(d, kind, name, old, new)
+	local deps = attr(d, kind)
+	attr(deps, 'remove')[name] = old
+	attr(deps, 'add')[name] = new
+end
+
+local function expand_index_dependencies(self, sc0, sc1)
+	local attrs = sc0.index_field_attrs
+	if not attrs then return end
+	local updates = self.tables and self.tables.update or empty
+
+	for tbl_name, old_tbl in pairs(sc0.tables) do
+		local new_tbl = sc1.tables[tbl_name]
+		local d = new_tbl and updates[tbl_name]
+		if d then
+			local pk_changed =
+				sc0.indexes_store_pk and pk_change_affects(d, attrs)
+			for ix_name, old_ix in pairs(old_tbl.ixs or empty) do
+				local new_ix = new_tbl.ixs and new_tbl.ixs[ix_name]
+				if new_ix and (
+					pk_changed or cols_change_affects(d, old_ix, attrs)
+				) then
+					replace_dependency(d, 'ixs', ix_name, old_ix, new_ix)
+				end
+			end
+		end
+	end
+end
+
+local function expand_fk_dependencies(self, sc0, sc1)
+	local attrs = sc0.fk_field_attrs
+	if not sc0.supports_fks or not attrs then return end
+	local updates = self.tables and self.tables.update or empty
+
+	for child_name, old_child in pairs(sc0.tables) do
+		local new_child = sc1.tables[child_name]
+		if new_child then
+			for fk_name, old_fk in pairs(old_child.fks or empty) do
+				local new_fk = new_child.fks and new_child.fks[fk_name]
+				if new_fk then
+					local child_d = updates[child_name]
+					local parent_d = updates[old_fk.ref_table]
+					local affected =
+						cols_change_affects(child_d, old_fk.cols, attrs)
+						or cols_change_affects(parent_d, old_fk.ref_cols, attrs)
+						or parent_d and (parent_d.remove_pk or parent_d.add_pk)
+						or sc0.fk_indexes_store_pk
+							and pk_change_affects(child_d, attrs)
+					if affected then
+						child_d = table_update(
+							self, child_name, old_child, new_child)
+						replace_dependency(
+							child_d, 'fks', fk_name, old_fk, new_fk)
+					end
+				end
+			end
+		end
+	end
+end
+
 local diff = {is_diff = true}
 
 function schema.diff(sc0, sc1) --sync sc0 to sc1.
@@ -692,8 +809,15 @@ function schema.diff(sc0, sc1) --sync sc0 to sc1.
 	sc0:check_refs()
 	sc1:check_refs()
 	local self = {engine = sc0.engine, __index = diff, old_schema = sc0, new_schema = sc1}
+
+	--Diff schema objects.
 	self.tables = diff_maps(self, sc1.tables, sc0.tables, diff_tables, nil, sc0, true)
 	self.procs  = diff_maps(self, sc1.procs , sc0.procs , diff_procs , nil, sc0, sc0.supports_procs)
+
+	--Recreate dependencies invalidated by field and primary-key changes.
+	expand_index_dependencies(self, sc0, sc1)
+	expand_fk_dependencies(self, sc0, sc1)
+
 	return setmetatable(self, self)
 end
 
