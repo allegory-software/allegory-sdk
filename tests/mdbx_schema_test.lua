@@ -2076,7 +2076,7 @@ function test.fk_registration()
 		local _, sch = db:dbi_schema'child'
 		local fk = sch.fks and sch.fks['pid']
 		assert(fk, 'fk not persisted')
-		assert(fk.name == nil and fk.table == 'child' and fk.ref_table == 'parent'
+		assert(fk.name == 'pid' and fk.table == 'child' and fk.ref_table == 'parent'
 			and fk.cols[1] == 'pid' and fk.ref_cols[1] == 'id'
 			and fk.ondelete == 'cascade', pp(fk))
 		db:commit(); db:close()
@@ -3908,7 +3908,7 @@ function test.add_fk_owns_definition()
 		assert(not fk.index)
 		assert(db:add_fk(fk))
 		local _, child = db:dbi_schema'child'
-		assert(fk.name == nil and fk.index.name == 'child/pid')
+		assert(fk.name == 'pid' and fk.index.name == 'child/pid')
 		assert(child.fks['pid'] == fk)
 		local ok, v, v_sz = db:get_raw('$schema', 'child', #'child')
 		assert(ok)

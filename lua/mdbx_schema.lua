@@ -70,7 +70,7 @@ STATE
 		- all index schemas shared by ixs and fks (runtime).
 	index_schema.val_schema -> table_schema
 		- used by index lookup (runtime).
-	table_schema.ref_fks[table_name/fk_name] -> {table, fk} (stored) | fk (runtime).
+	table_schema.ref_fks[table_name/fk_name] -> fk (runtime) | {table, fk} (stored).
 		- reverse fk declarations used by fk enforcement.
 	fk.index -> index_schema
 		- used by fk enforcement (runtime).
@@ -711,10 +711,10 @@ function Db:save_table_schema(schema)
 			}
 		end
 	end
-	if schema.ref_fks then --reverse refs (parent side): {key -> {table, fk}}.
+	if schema.ref_fks then --reverse refs (parent side): {key -> fk (runtime) | {table, fk} (stored)}.
 		t.ref_fks = {}
-		for k, ref in pairs(schema.ref_fks) do
-			t.ref_fks[k] = {table = ref.table, fk = ref.fk}
+		for k, fk in pairs(schema.ref_fks) do
+			t.ref_fks[k] = {table = fk.table, fk = fk.name}
 		end
 	end
 	local k = schema.name
@@ -774,7 +774,8 @@ function Db:load_table_schema(table_name)
 		end
 
 		--bind foreign keys to their indexes.
-		for _, fk in pairs(schema.fks or empty) do
+		for fk_name, fk in pairs(schema.fks or empty) do
+			fk.name = fk_name
 			fk.table = table_name
 			fk.onupdate = 'cascade' --N/A, for schema diff only
 			fk.index = load_index(format_ix_name(table_name, fk.cols))
@@ -888,6 +889,10 @@ local function load_live_schema(self, name)
 		self.live_schema[name] = schema
 		for _,ix_schema in ipairs(schema.indexes or empty) do
 			self.live_schema[ix_schema.name] = ix_schema
+		end
+		for k, stored in pairs(schema.ref_fks or empty) do
+			local child = load_live_schema(self, stored.table)
+			schema.ref_fks[k] = child.fks[stored.fk]
 		end
 	else
 		self.live_schema[name] = false
@@ -1071,9 +1076,9 @@ local function check_alter_dependencies(self, old_schema, new_schema)
 		schema.pk_change_affects(
 			old_schema, new_schema, MS.fk_field_attrs)
 	if ref_pk_changed then
-		for _, ref in pairs(old_schema.ref_fks or empty) do
+		for _, fk in pairs(old_schema.ref_fks or empty) do
 			self:check_schema('t_alter', old_schema.name, col, false,
-				'primary key referenced by fk: %s/%s', ref.table, ref.fk)
+				'primary key referenced by fk: %s/%s', fk.table, fk.name)
 		end
 	end
 end
@@ -1220,10 +1225,9 @@ function Db:drop_table(tab)
 	end
 	--as a parent: untangle children referencing us (drop their fks, keep them).
 	if schema.ref_fks then
-		for _, ref in pairs(schema.ref_fks) do
-			local _, child_schema = self:dbi_schema(ref.table)
-			local cfk = child_schema and child_schema.fks and child_schema.fks[ref.fk]
-			if cfk then self:detach_fk(child_schema, ref.fk, cfk) end
+		for _, fk in pairs(schema.ref_fks) do
+			local _, child_schema = self:dbi_schema(fk.table)
+			if child_schema then self:detach_fk(child_schema, fk.name, fk) end
 		end
 	end
 	for _,ix_schema in ipairs(schema.indexes or empty) do
@@ -1262,6 +1266,9 @@ function Db:rename_table(tab, new_name)
 	touch_schema(self, old_name)
 	touch_schema(self, new_name)
 	local schema = self:table_schema(old_name)
+	for _, fk in pairs(schema and schema.fks or empty) do
+		if fk.ref_table ~= old_name then self:dbi_schema(fk.ref_table) end
+	end
 	self:rename_table_raw(old_name, new_name)
 	self.live_schema[old_name] = nil
 	if not schema then
@@ -1286,21 +1293,18 @@ function Db:rename_table(tab, new_name)
 			if ref_schema and ref_schema.ref_fks then
 				touch_schema(self, ref_schema.name)
 				ref_schema.ref_fks[old_name..'/'..fk_name] = nil
-				ref_schema.ref_fks[new_name..'/'..fk_name] =
-					{table = new_name, fk = fk_name}
+				ref_schema.ref_fks[new_name..'/'..fk_name] = fk
 				if not self_ref then self:save_table_schema(ref_schema) end
 			end
 		end
 	end
 	if schema.ref_fks then --as a parent: each referencing child points back to us.
-		for _, ref in pairs(schema.ref_fks) do
-			if ref.table ~= new_name then --self-refs handled in the fks loop
-				local _, child_schema = self:dbi_schema(ref.table)
-				local cfk = child_schema and child_schema.fks
-					and child_schema.fks[ref.fk]
-				if cfk then
+		for _, fk in pairs(schema.ref_fks) do
+			if fk.table ~= new_name then --self-refs handled in the fks loop
+				local _, child_schema = self:dbi_schema(fk.table)
+				if child_schema then
 					touch_schema(self, child_schema.name)
-					cfk.ref_table = new_name
+					fk.ref_table = new_name
 					self:save_table_schema(child_schema)
 				end
 			end
@@ -1702,7 +1706,7 @@ function Db:add_fk(fk)
 
 	--install the fk and its index.
 	touch_schema(self, schema.name)
-	fk.name = nil
+	fk.name = fk_name
 	local ix_name = format_ix_name(schema.name, fk.cols)
 	local ix_schema = schema.indexes and schema.indexes[ix_name]
 	if not ix_schema then
@@ -1715,8 +1719,7 @@ function Db:add_fk(fk)
 
 	--register the reverse ref on the parent for delete-time enforcement.
 	touch_schema(self, ref_schema.name)
-	attr(ref_schema, 'ref_fks')[fk.table..'/'..fk_name] =
-		{table = fk.table, fk = fk_name}
+	attr(ref_schema, 'ref_fks')[fk.table..'/'..fk_name] = fk
 	self:save_table_schema(ref_schema)
 	return true
 end
@@ -1727,9 +1730,9 @@ function Db:drop_fk(table_name, fk_name)
 	local stored = schema.fks and schema.fks[fk_name]
 	self:check_schema('fk_drop', table_name, nil, stored,
 		'fk not found: %s', fk_name)
-	self:detach_fk(schema, fk_name, stored)
-	--remove the reverse ref from the parent.
+	--load parent before detach so ref_fks relinking can find stored in child.fks.
 	local _, ref_schema = self:dbi_schema(stored.ref_table)
+	self:detach_fk(schema, fk_name, stored)
 	if ref_schema and ref_schema.ref_fks then
 		touch_schema(self, ref_schema.name)
 		ref_schema.ref_fks[stored.table..'/'..fk_name] = nil
@@ -1811,8 +1814,8 @@ function Db:rename_column(tab, old_col, new_col)
 					or select(2, self:dbi_schema(fk.ref_table))
 				touch_schema(self, ref_schema.name)
 				ref_schema.ref_fks[schema.name..'/'..fk_name] = nil
-				ref_schema.ref_fks[schema.name..'/'..new_fk_name] =
-					{table = schema.name, fk = new_fk_name}
+				fk.name = new_fk_name
+				ref_schema.ref_fks[schema.name..'/'..new_fk_name] = fk
 				if ref_schema ~= schema then self:save_table_schema(ref_schema) end
 			end
 			fks[new_fk_name] = fk
@@ -1821,12 +1824,11 @@ function Db:rename_column(tab, old_col, new_col)
 	end
 	--this table is a parent and a pk column changed: fix children's ref_cols.
 	if in_pk and schema.ref_fks then
-		for _, ref in pairs(schema.ref_fks) do
-			local _, child = self:dbi_schema(ref.table)
-			local cfk = child and child.fks and child.fks[ref.fk]
-			if cfk and cfk.ref_cols then
+		for _, fk in pairs(schema.ref_fks) do
+			local _, child = self:dbi_schema(fk.table)
+			if child and fk.ref_cols then
 				touch_schema(self, child.name)
-				if rename_in_list(cfk.ref_cols, old_col, new_col) then
+				if rename_in_list(fk.ref_cols, old_col, new_col) then
 					self:save_table_schema(child)
 				end
 			end
@@ -2213,44 +2215,38 @@ end
 --/null removes the child's entry at this key, a cascade also recurses), pass 2
 --does the NO ACTION (default) checks -- reject if anything still references us.
 local function enforce_del_fks(self, schema, ...)
-	for _, ref in pairs(schema.ref_fks) do
-		local _, child_schema = self:dbi_schema(ref.table)
-		local fk = child_schema.fks[ref.fk]
+	for _, fk in pairs(schema.ref_fks) do
+		local child_schema = fk.index.val_schema
 		if fk.ondelete == 'cascade' then
-			local ix_schema = assert(fk.index)
-			local ix_dbi = self:dbi_raw(ix_schema.name)
+			local ix_dbi = self:dbi_raw(fk.index.name)
 			local n = #child_schema.key_fields
 			while true do
 				local ok, v, v_sz =
-					first_referencing_child(self, ix_dbi, ix_schema, ...)
+					first_referencing_child(self, ix_dbi, fk.index, ...)
 				if not ok then break end
 				local pk = {}
 				decode_key(child_schema, v, v_sz, pk, nil)
-				self:del(ref.table, unpack(pk, 1, n))
+				self:del(fk.table, unpack(pk, 1, n))
 			end
 		elseif fk.ondelete == 'set null' then
-			local ix_schema = assert(fk.index)
-			local ix_dbi = self:dbi_raw(ix_schema.name)
+			local ix_dbi = self:dbi_raw(fk.index.name)
 			while true do
 				local ok, v, v_sz =
-					first_referencing_child(self, ix_dbi, ix_schema, ...)
+					first_referencing_child(self, ix_dbi, fk.index, ...)
 				if not ok then break end
 				local rec = {}
 				decode_key(child_schema, v, v_sz, rec, '{}')
 				for _, col in ipairs(fk.cols) do rec[col] = null end
-				self:update(ref.table, '{}', rec)
+				self:update(fk.table, '{}', rec)
 			end
 		end
 	end
-	for _, ref in pairs(schema.ref_fks) do --no action (default): reject if referenced
-		local _, child_schema = self:dbi_schema(ref.table)
-		local fk = child_schema.fks[ref.fk]
+	for _, fk in pairs(schema.ref_fks) do --no action (default): reject if referenced
 		if fk.ondelete ~= 'cascade' and fk.ondelete ~= 'set null' then
-			local ix_schema = assert(fk.index)
-			local ix_dbi = self:dbi_raw(ix_schema.name)
-			if first_referencing_child(self, ix_dbi, ix_schema, ...) then
+			local ix_dbi = self:dbi_raw(fk.index.name)
+			if first_referencing_child(self, ix_dbi, fk.index, ...) then
 				self:check_row('del', schema.name, false,
-					fmt('fk %s: referenced by %s', ref.fk, ref.table))
+					fmt('fk %s: referenced by %s', fk.name, fk.table))
 			end
 		end
 	end
