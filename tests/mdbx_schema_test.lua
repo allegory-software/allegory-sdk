@@ -81,8 +81,8 @@ end
 --catalog (reloaded fresh). meant to catch DDL that leaves the schema in a
 --half-updated state. invariants:
 --  * catalog <-> $schema: every live table has a $schema row and vice-versa;
---  * an index table exists iff referenced by its val_table's `ixs` or a `fk.ix`;
---  * a table's live ix_schemas == its `ixs` names U its fks' `fk.ix` names;
+--  * every index table is in its value table's runtime index graph;
+--  * runtime indexes cover every `ixs` declaration and fk index link;
 --  * fk <-> ref_fks are bidirectionally consistent (and ref_table matches).
 local function assert_consistent(db, ctx)
 	ctx = ctx and (ctx..': ') or ''
@@ -106,20 +106,26 @@ local function assert_consistent(db, ctx)
 			local vt = sch.val_table
 			E(vt and tables[vt], 'index val_table missing: '..name)
 			local v = db:load_table_schema(vt)
-			local ref = v.ixs and v.ixs[name] and true or false
-			if not ref and v.fks then
-				for _, fk in pairs(v.fks) do if fk.ix == name then ref = true; break end end
-			end
-			E(ref, 'orphan index table (no ixs/fk.ix ref): '..name)
+			E(v.indexes and v.indexes[name],
+				'index missing from value table runtime graph: '..name)
 		else
-			local expect = {} --expected live indexes = ixs U fk.ix.
-			if sch.ixs then for n in pairs(sch.ixs) do expect[n] = true end end
-			if sch.fks then for _, fk in pairs(sch.fks) do expect[fk.ix] = true end end
-			for n in pairs(expect) do E(tables[n], 'missing index table: '..n..' (for '..name..')') end
 			local live = {}
-			for _, ix in ipairs(sch.ix_schemas or {}) do live[ix.name] = true end
-			for n in pairs(expect) do E(live[n], 'index not in ix_schemas: '..n) end
-			for n in pairs(live) do E(expect[n], 'extra ix_schema not in ixs/fks: '..n) end
+			for _, ix in ipairs(sch.indexes or {}) do
+				E(ix.val_table == name, 'index val_table mismatch: '..ix.name)
+				E(sch.indexes[ix.name] == ix, 'index missing from name map: '..ix.name)
+				E(tables[ix.name], 'missing index table: '..ix.name..' (for '..name..')')
+				E(not live[ix.name], 'duplicate runtime index: '..ix.name)
+				live[ix.name] = true
+			end
+			for ix_name in pairs(sch.ixs or {}) do
+				E(live[ix_name], 'declared index missing from runtime graph: '..ix_name)
+			end
+			for fk_name, fk in pairs(sch.fks or {}) do
+				E(fk.index and live[fk.index.name],
+					'fk index missing from runtime graph: '..name..'/'..fk_name)
+				E(sch.indexes[fk.index.name] == fk.index,
+					'fk index differs from runtime name map: '..name..'/'..fk_name)
+			end
 			if sch.fks then --forward: each fk has a reverse ref on its parent.
 				for fkn, fk in pairs(sch.fks) do
 					local p = db:load_table_schema(fk.ref_table)
@@ -727,7 +733,7 @@ function test.ai_ci_collation()
 		db:add_index('u', {'email', is_unique = true})
 		db:insert('u', '{}', {id = 1, email = 'José@x'})
 		assert(try_mutation(db, db.insert, 'u', '{}', {id = 2, email = 'JOSE@X'}) == false) --folds equal
-		assert(num((db:must_get('u/u/email', '{}', 'jose@x')).id) == 1) --ai_ci index lookup
+		assert(num((db:must_get('u/email', '{}', 'jose@x')).id) == 1) --ai_ci index lookup
 		db:commit(); db:close()
 		--persists across reopen: ai_ci index folding still works.
 		db = mdbx_open(file); db:begin'w'
@@ -1065,7 +1071,7 @@ function test.unique_index()
 		db:insert('t', '{}', {id = 3, email = 'a@x', name = 'C'}) --dup email of id 1
 
 		--adding a unique index fails while a duplicate exists
-		local ix_tbl = 't/u/email'
+		local ix_tbl = 't/email'
 		local ok, err = try_schema(db, db.add_index,
 			't', {'email', is_unique = true})
 		assert(not ok and iserror(err, 'schema'), tostring(err))
@@ -1110,12 +1116,12 @@ function test.drop_last_index_clears_index_state()
 		local _, _, ix = db:add_index('t', {'v'})
 		db:drop_index(ix)
 		local _, schema = db:dbi_schema't'
-		assert(not schema.ixs and not schema.ix_schemas)
+		assert(not schema.ixs and not schema.indexes)
 		db:commit()
 	end, function(db)
 		db:begin'r'
 		local _, schema = db:dbi_schema't'
-		assert(not schema.ixs and not schema.ix_schemas)
+		assert(not schema.ixs and not schema.indexes)
 		db:commit()
 	end)
 end
@@ -1405,7 +1411,7 @@ function test.try_put_indexes_and_fks()
 		local _,_,ix_email = db:add_index('child', {'email', is_unique = true})
 		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
-		local ix_pid = 'child/i/pid'
+		local ix_pid = 'child/pid'
 		db:insert('parent', '{}', {id = 1})
 		db:insert('parent', '{}', {id = 2})
 		db:insert('child', '{}', {id = 10, pid = 1, cat = 'a', email = 'a@x', name = 'A'})
@@ -2019,18 +2025,18 @@ function test.rename_indexed_table()
 		db:commit()
 		db:begin'w'; db:rename_table('t', 'u'); db:commit()
 		db:begin'r'
-		assert(db:table_exists'u/i/cat' and not db:table_exists't/i/cat')
+		assert(db:table_exists'u/cat' and not db:table_exists't/cat')
 		local _, sch = db:dbi_schema'u'
-		assert(sch.ix_schemas[1].name == 'u/i/cat', sch.ix_schemas[1].name)
-		assert(sch.ix_schemas[1].val_table == 'u', sch.ix_schemas[1].val_table)
-		local n = 0; for c, t in db:each('u/i/cat', '{}') do n = n + 1 end
+		assert(sch.indexes[1].name == 'u/cat', sch.indexes[1].name)
+		assert(sch.indexes[1].val_table == 'u', sch.indexes[1].val_table)
+		local n = 0; for c, t in db:each('u/cat', '{}') do n = n + 1 end
 		assert(n == 2, n)
 		db:commit(); db:close()
 		db = mdbx_open(file) --reopen: u + its index load and work
 		db:begin'r'
 		local _, sch = db:dbi_schema'u'
-		assert(sch.ix_schemas and sch.ix_schemas[1].name == 'u/i/cat')
-		local n = 0; for c, t in db:each('u/i/cat', '{}') do n = n + 1 end
+		assert(sch.indexes and sch.indexes[1].name == 'u/cat')
+		local n = 0; for c, t in db:each('u/cat', '{}') do n = n + 1 end
 		assert(n == 2, n)
 		db:commit(); db:close()
 	end, debug.traceback)
@@ -2331,9 +2337,9 @@ function test.fk_delete_no_action()
 end
 
 --add_fk reuses a compatible existing index; otherwise it creates an fk-owned
---index that lives in ix_schemas but not in `ixs` (the user-declared list).
+--index that lives in indexes but not in `ixs` (the user-declared list).
 function test.fk_index_reuse()
-	with_db('fk_index_reuse', function(db)
+	with_db_reopen('fk_index_reuse', function(db)
 		db:begin'w'
 		db:create_table('parent', {
 			name = 'parent',
@@ -2344,26 +2350,72 @@ function test.fk_index_reuse()
 			name = 'child',
 			fields = {
 				{col = 'id' , mdbx_type = 'u32', not_null = true},
-				{col = 'pid', mdbx_type = 'u32', not_null = true}, --reuse path
-				{col = 'qid', mdbx_type = 'u32', not_null = true}, --create path
+				{col = 'pid', mdbx_type = 'u32', not_null = true},
+				{col = 'qid', mdbx_type = 'u32', not_null = true},
+				{col = 'rid', mdbx_type = 'u32', not_null = true},
 			},
 			pk = {'id'},
 		})
-		--pre-existing user index on pid -> reused by the fk.
+
+		--reuse non-unique and unique user indexes.
 		db:add_index('child', {'pid'})
-		assert(db:table_exists'child/i/pid')
+		db:add_index('child', {'rid', is_unique = true})
+		assert(db:table_exists'child/pid')
 		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
+		db:add_fk{table = 'child', cols = {'rid'},
+			ref_table = 'parent', ref_cols = {'id'}}
 		local _, sch = db:dbi_schema'child'
-		assert(sch.fks['pid'].ix == 'child/i/pid', S(sch.fks['pid'].ix))
-		assert(sch.ixs and sch.ixs['child/i/pid'], 'reused index stays user-owned')
-		--no index on qid -> fk creates an fk-owned one (table exists, not in ixs).
+		assert(sch.fks['pid'].index.name == 'child/pid', sch.fks['pid'].index.name)
+		assert(sch.fks['rid'].index.name == 'child/rid', sch.fks['rid'].index.name)
+		assert(sch.ixs and sch.ixs['child/pid'], 'reused index stays user-owned')
+
+		--create an FK-owned index when no user index matches.
 		db:add_fk{table = 'child', cols = {'qid'},
 			ref_table = 'parent', ref_cols = {'id'}}
 		local _, sch = db:dbi_schema'child'
-		assert(sch.fks['qid'].ix == 'child/i/qid', S(sch.fks['qid'].ix))
-		assert(db:table_exists'child/i/qid', 'fk-owned index table exists')
-		assert(not (sch.ixs and sch.ixs['child/i/qid']), 'fk-owned index not in ixs')
+		assert(sch.fks['qid'].index.name == 'child/qid', sch.fks['qid'].index.name)
+		assert(db:table_exists'child/qid', 'fk-owned index table exists')
+		assert(not (sch.ixs and sch.ixs['child/qid']), 'fk-owned index not in ixs')
+		db:commit()
+	end, function(db)
+		db:begin'r'
+		local _, schema = db:dbi_schema'child'
+		assert(schema.fks.pid.index.name == 'child/pid')
+		assert(schema.fks.rid.index.name == 'child/rid')
+		assert(schema.fks.qid.index.name == 'child/qid')
+		db:commit()
+	end)
+end
+
+--dropping a reused unique index keeps its physical table for the fk and
+--downgrades the runtime and stored schema to non-unique.
+function test.fk_drop_unique_index_downgrades_for_fk()
+	with_db_reopen('fk_drop_unique_index_downgrades_for_fk', function(db)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}},
+			pk = {'id'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'pid', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:add_index('child', {'pid', is_unique = true})
+		db:add_fk{table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		local _, schema = db:dbi_schema'child'
+		local index = schema.fks.pid.index
+		assert(index.name == 'child/pid' and index.is_unique)
+
+		db:drop_index'child/pid'
+		assert(schema.fks.pid.index == index and not index.is_unique)
+		assert(db:table_exists'child/pid')
+		db:commit()
+	end, function(db)
+		db:begin'r'
+		local _, schema = db:dbi_schema'child'
+		assert(schema.fks.pid.index.name == 'child/pid')
+		assert(not schema.fks.pid.index.is_unique)
 		db:commit()
 	end)
 end
@@ -2392,10 +2444,10 @@ function test.fk_drop_index_kept_by_fk()
 		db:insert('parent', '{}', {id = 1})
 		db:insert('child', '{}', {id = 10, pid = 1})
 		--drop the user index: table survives because the fk still uses it.
-		db:drop_index'child/i/pid'
-		assert(db:table_exists'child/i/pid', 'fk-used index survives drop_index')
+		db:drop_index'child/pid'
+		assert(db:table_exists'child/pid', 'fk-used index survives drop_index')
 		local _, sch = db:dbi_schema'child'
-		assert(not (sch.ixs and sch.ixs['child/i/pid']), 'removed from ixs')
+		assert(not (sch.ixs and sch.ixs['child/pid']), 'removed from ixs')
 		--enforcement still works via the now-fk-owned index.
 		assert(try_mutation(db, db.del, 'parent', 1) == false)
 		db:commit()
@@ -2431,8 +2483,8 @@ function test.fk_retained_index_readd()
 		assert(readded_ix == ix)
 		local _, schema = db:dbi_schema'child'
 		assert(schema.ixs and schema.ixs[ix])
-		assert(#schema.ix_schemas == 1)
-		assert(schema.fks['pid'].ix == ix)
+		assert(#schema.indexes == 1)
+		assert(schema.fks['pid'].index.name == ix)
 		assert(num((db:must_get(ix, '{}', 1)).id) == 10)
 
 		db:drop_fk('child', 'pid')
@@ -2499,20 +2551,20 @@ function test.fk_drop_fk_releases_index()
 			ref_table = 'parent', ref_cols = {'id'}}
 		db:add_fk{table = 'child', cols = {'qid'},
 			ref_table = 'parent', ref_cols = {'id'}}
-		assert(db:table_exists'child/i/pid' and db:table_exists'child/i/qid')
+		assert(db:table_exists'child/pid' and db:table_exists'child/qid')
 		--drop the fk-owned one: its index table goes away.
 		db:drop_fk('child', 'pid')
-		assert(not db:table_exists'child/i/pid', 'fk-owned index dropped')
+		assert(not db:table_exists'child/pid', 'fk-owned index dropped')
 		--drop the reused one: the user index survives.
 		db:drop_fk('child', 'qid')
-		assert(db:table_exists'child/i/qid', 'reused user index survives')
+		assert(db:table_exists'child/qid', 'reused user index survives')
 		local _, sch = db:dbi_schema'child'
-		assert(sch.ixs and sch.ixs['child/i/qid'])
+		assert(sch.ixs and sch.ixs['child/qid'])
 		db:commit()
 	end)
 end
 
---an fk-owned index round-trips: on reopen it re-attaches to ix_schemas via the
+--an fk-owned index round-trips: on reopen it re-attaches to indexes via the
 --fk (not via `ixs`) and still enforces deletes.
 function test.fk_owned_index_reopen()
 	with_db_reopen('fk_owned_index_reopen', function(db)
@@ -2538,13 +2590,13 @@ function test.fk_owned_index_reopen()
 	end, function(db)
 		db:begin'w'
 		local _, sch = db:dbi_schema'child'
-		assert(sch.fks['pid'].ix == 'child/i/pid')
-		assert(not (sch.ixs and sch.ixs['child/i/pid']), 'fk-owned index not in ixs')
+		assert(sch.fks['pid'].index.name == 'child/pid')
+		assert(not (sch.ixs and sch.ixs['child/pid']), 'fk-owned index not in ixs')
 		local present
-		for _, ix in ipairs(sch.ix_schemas or empty) do
-			if ix.name == 'child/i/pid' then present = true end
+		for _, ix in ipairs(sch.indexes or empty) do
+			if ix.name == 'child/pid' then present = true end
 		end
-		assert(present, 'fk-owned index re-attaches to ix_schemas on reopen')
+		assert(present, 'fk-owned index re-attaches to indexes on reopen')
 		assert(try_mutation(db, db.del, 'parent', 1) == false) --still enforces
 		db:commit()
 	end)
@@ -2700,10 +2752,11 @@ function test.fk_rename_table()
 		db = mdbx_open(file)
 		db:begin'w'
 		assert(db:table_exists'kid' and db:table_exists'mom')
-		assert(db:table_exists'kid/i/pid' and not db:table_exists'child/i/pid')
+		assert(db:table_exists'kid/pid' and not db:table_exists'child/pid')
 		local _, ksch = db:dbi_schema'kid'
 		local fk = ksch.fks['pid']
-		assert(fk.table == 'kid' and fk.ref_table == 'mom' and fk.ix == 'kid/i/pid', pp(fk))
+		assert(fk.table == 'kid' and fk.ref_table == 'mom'
+			and fk.index.name == 'kid/pid', pp(fk))
 		assert(try_mutation(db, db.del, 'mom', 1) == false)                       --referenced by kid 10
 		assert(try_mutation(db, db.insert, 'kid', '{}', {id = 11, pid = 99}) == false) --missing parent
 		db:insert('mom', '{}', {id = 2})
@@ -2762,7 +2815,7 @@ function test.ddl_drop_table_consistency()
 		db:commit()
 		db:begin'w'
 		db:drop_table'child'
-		assert(not db:table_exists'child' and not db:table_exists'child/u/email')
+		assert(not db:table_exists'child' and not db:table_exists'child/email')
 		assert_consistent(db, 'after drop child')
 		db:commit(); db:close()
 		db = mdbx_open(file); db:begin'w'
@@ -2795,11 +2848,11 @@ function test.ddl_drop_index_consistency()
 			ref_table = 'parent', ref_cols = {'id'}}
 		db:commit()
 		db:begin'w'
-		db:drop_index'child/i/pid'                --kept: the fk still uses it
-		assert(db:table_exists'child/i/pid')
+		db:drop_index'child/pid'                --kept: the fk still uses it
+		assert(db:table_exists'child/pid')
 		assert_consistent(db, 'after drop_index (fk-kept)')
 		db:drop_fk('child', 'pid')
-		assert(not db:table_exists'child/i/pid')  --now released
+		assert(not db:table_exists'child/pid')  --now released
 		assert_consistent(db, 'after drop_fk')
 		db:commit(); db:close()
 		db = mdbx_open(file); db:begin'r'
@@ -2859,7 +2912,7 @@ function test.ddl_abort_rollback()
 		db = mdbx_open(file); db:begin'r'
 		assert(db:table_exists'keep')
 		assert(not db:table_exists'temp', 'aborted table leaked')
-		assert(not db:table_exists'temp/i/val', 'aborted index leaked')
+		assert(not db:table_exists'temp/val', 'aborted index leaked')
 		assert_consistent(db, 'after abort')
 		db:commit(); db:close()
 	end, debug.traceback)
@@ -2880,7 +2933,7 @@ function test.ddl_errors_abort_transaction()
 
 		db:begin'w'
 		db:insert('t', '{}', {id = 2, v = 20})
-		local ok, err = catch('schema', db.drop_index, db, 't/i/missing')
+		local ok, err = catch('schema', db.drop_index, db, 't/missing')
 		assert(not ok and iserror(err, 'schema'), tostring(err))
 		assert(err.event == 'i_drop' and err.table == 't', tostring(err))
 		assert(db.txn == nil, 'direct DDL failure did not abort the transaction')
@@ -2888,7 +2941,7 @@ function test.ddl_errors_abort_transaction()
 		db:begin'w'
 		assert(not db:exists('t', 2))
 		local outer_txn = db.txn
-		ok, err = try_schema(db, db.drop_index, 't/i/missing')
+		ok, err = try_schema(db, db.drop_index, 't/missing')
 		assert(not ok and iserror(err, 'schema'), tostring(err))
 		assert(db.txn == outer_txn, 'atomic DDL failure changed the outer txn')
 		db:insert('t', '{}', {id = 3, v = 30})
@@ -2918,8 +2971,8 @@ function test.ddl_index_build_field_failure()
 		assert(err.message:find('invalid utf8', 1, true), tostring(err.message))
 		assert(db.txn == outer_txn)
 		local _, schema = db:dbi_schema't'
-		assert(not schema.ixs and not schema.ix_schemas)
-		assert(not db:table_exists't/i/s')
+		assert(not schema.ixs and not schema.indexes)
+		assert(not db:table_exists't/s')
 
 		db:del('t', 1)
 		local begins = 0
@@ -2931,7 +2984,7 @@ function test.ddl_index_build_field_failure()
 		db:add_index('t', {'s'})
 		db.begin = nil
 		assert(begins == 0, begins)
-		assert(db:table_exists't/i/s')
+		assert(db:table_exists't/s')
 		db:commit()
 	end)
 end
@@ -2974,7 +3027,7 @@ function test.ddl_abort_rename_cached()
 		db:begin'w'
 		local _, cs2 = db:dbi_schema'child'
 		assert(cs2.fields.pid and not cs2.fields.parent_id)
-		assert(db:table_exists'child/i/pid' and not db:table_exists'child/i/parent_id')
+		assert(db:table_exists'child/pid' and not db:table_exists'child/parent_id')
 		assert(try_mutation(db, db.insert, 'child', '{}', {id = 11, pid = 99}) == false)
 		assert_consistent(db, 'after aborted column rename')
 		db:commit()
@@ -2999,7 +3052,7 @@ function test.ddl_abort_index_cached()
 
 		db:begin'w'
 		local _, ts = db:dbi_schema't'
-		assert(not db:table_exists(ix) and not ts.ixs and not ts.ix_schemas)
+		assert(not db:table_exists(ix) and not ts.ixs and not ts.indexes)
 		assert_consistent(db, 'after aborted index add')
 		db:add_index('t', {'val'})
 		db:commit()
@@ -3010,7 +3063,7 @@ function test.ddl_abort_index_cached()
 
 		db:begin'w'
 		local _, ts2 = db:dbi_schema't'
-		assert(db:table_exists(ix) and ts2.ixs[ix] and #ts2.ix_schemas == 1)
+		assert(db:table_exists(ix) and ts2.ixs[ix] and #ts2.indexes == 1)
 		db:insert('t', '{}', {id = 2, val = 20})
 		assert(num((db:must_get(ix, '{}', 20)).id) == 2)
 		assert_consistent(db, 'after aborted index drop')
@@ -3044,7 +3097,7 @@ function test.ddl_abort_fk_cached()
 		db:begin'w'
 		local _, ps = db:dbi_schema'parent'
 		local _, cs = db:dbi_schema'child'
-		assert(not ps.ref_fks and not cs.fks and not db:table_exists'child/i/pid')
+		assert(not ps.ref_fks and not cs.fks and not db:table_exists'child/pid')
 		assert_consistent(db, 'after aborted fk add')
 		db:add_fk(fk())
 		db:commit()
@@ -3057,7 +3110,7 @@ function test.ddl_abort_fk_cached()
 		local _, ps2 = db:dbi_schema'parent'
 		local _, cs2 = db:dbi_schema'child'
 		assert(ps2.ref_fks['child/pid'] and cs2.fks['pid'])
-		assert(db:table_exists'child/i/pid')
+		assert(db:table_exists'child/pid')
 		assert(try_mutation(db, db.del, 'parent', 1) == false)
 		assert_consistent(db, 'after aborted fk drop')
 		db:commit()
@@ -3070,7 +3123,7 @@ function test.ddl_abort_fk_cached()
 		local _, ps3 = db:dbi_schema'parent'
 		local _, cs3 = db:dbi_schema'child'
 		assert(ps3.ref_fks['child/pid'] and cs3.fks['pid'])
-		assert(db:table_exists'child/i/pid')
+		assert(db:table_exists'child/pid')
 		assert(try_mutation(db, db.del, 'parent', 1) == false)
 		assert_consistent(db, 'after aborted parent drop')
 		db:commit()
@@ -3564,8 +3617,8 @@ function test.schema_rename_created_in_same_txn()
 		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
 		db:rename_table('child', 'kid') --no commit in between
-		assert(db:table_exists'kid' and db:table_exists'kid/u/email'
-			and not db:table_exists'child' and not db:table_exists'child/u/email')
+		assert(db:table_exists'kid' and db:table_exists'kid/email'
+			and not db:table_exists'child' and not db:table_exists'child/email')
 		assert_consistent(db, 'after same-txn rename')
 		--enforcement intact through the renamed table
 		db:insert('parent', '{}', {id = 1})
@@ -3624,22 +3677,22 @@ function test.rename_column_indexed()
 		db = mdbx_open(file); db:begin'w' --rename loaded schema definitions
 		db:rename_column('t', 'email', 'mail')
 		db:rename_column('t', 'age', 'years')
-		assert(db:table_exists't/u/mail' and not db:table_exists't/u/email')
-		assert(db:table_exists't/i/years' and not db:table_exists't/i/age')
+		assert(db:table_exists't/mail' and not db:table_exists't/email')
+		assert(db:table_exists't/years' and not db:table_exists't/age')
 		assert_consistent(db, 'after rename indexed')
 		--unique still enforced on the renamed column
 		assert(try_mutation(db, db.insert, 't', '{}', {id = 2, mail = 'a@x', years = 9}) == false)
 		--lookup via the renamed index table
-		local r = db:must_get('t/u/mail', '{}', 'a@x')
+		local r = db:must_get('t/mail', '{}', 'a@x')
 		assert(num(r.id) == 1, S(r.id))
 		db:commit(); db:close()
 		db = mdbx_open(file); db:begin'w' --persists + still enforces
 		assert_consistent(db, 'reopen')
 		local _, sch = db:dbi_schema't'
-		assert(sch.ixs['t/u/mail'][1] == 'mail')
-		assert(sch.ixs['t/i/years'][1] == 'years')
+		assert(sch.ixs['t/mail'][1] == 'mail')
+		assert(sch.ixs['t/years'][1] == 'years')
 		assert(try_mutation(db, db.insert, 't', '{}', {id = 3, mail = 'a@x', years = 9}) == false)
-		assert(num((db:must_get('t/u/mail', '{}', 'a@x')).id) == 1)
+		assert(num((db:must_get('t/mail', '{}', 'a@x')).id) == 1)
 		db:commit(); db:close()
 	end, debug.traceback)
 	cleanup(file); assert(ok, err)
@@ -3665,7 +3718,7 @@ function test.rename_column_fk()
 		db:insert('child', '{}', {id = 10, pid = 1})
 		db:rename_column('child', 'pid', 'parent_id') --child fk column
 		db:rename_column('parent', 'uid', 'user_id')  --parent referenced pk column
-		assert(db:table_exists'child/i/parent_id' and not db:table_exists'child/i/pid')
+		assert(db:table_exists'child/parent_id' and not db:table_exists'child/pid')
 		assert_consistent(db, 'after rename fk cols')
 		local _, psch = db:dbi_schema'parent'
 		local _, csch = db:dbi_schema'child'
@@ -3708,11 +3761,11 @@ function test.add_fk_rejects_invalid_data()
 		assert(err.message:find('fk', 1, true), tostring(err.message))
 		local _, sch = db:dbi_schema'child'
 		assert(not (sch.fks and sch.fks['pid']), 'fk must not be added on failure')
-		assert(not db:table_exists'child/i/pid', 'fk index must not be created on failure')
+		assert(not db:table_exists'child/pid', 'fk index must not be created on failure')
 		--fix the offending row -> now it adds, with the enforcement index.
 		db:del('child', 11)
 		assert(db:add_fk(fk))
-		assert(db:table_exists'child/i/pid')
+		assert(db:table_exists'child/pid')
 		assert(try_mutation(db, db.insert, 'child', '{}', {id = 12, pid = 99}) == false) --enforced now
 		db:commit()
 	end)
@@ -3779,7 +3832,7 @@ function test.add_fk_validates_definition()
 		assert(db:add_fk{table = 'child', cols = {'code'},
 			ref_table = 'parent_text', ref_cols = {'code'}, ondelete = 'set null',
 		})
-		assert(db:table_exists'child/i/code')
+		assert(db:table_exists'child/code')
 		db:commit()
 	end)
 end
@@ -3839,8 +3892,8 @@ function test.composite_fk_match_simple()
 	end)
 end
 
---add_fk takes ownership of its definition table: it records the selected
---supporting index on that table and installs the same object in the live schema.
+--add_fk takes ownership of its definition table and resolves a transient index
+--link, but the persisted FK definition contains only semantic attributes.
 function test.add_fk_owns_definition()
 	with_db('add_fk_owns_definition', function(db)
 		db:begin'w'
@@ -3852,11 +3905,15 @@ function test.add_fk_owns_definition()
 		}, pk = {'id'}})
 		local fk = {table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
-		assert(not fk.ix)
+		assert(not fk.index)
 		assert(db:add_fk(fk))
 		local _, child = db:dbi_schema'child'
-		assert(fk.name == nil and fk.ix == 'child/i/pid')
+		assert(fk.name == nil and fk.index.name == 'child/pid')
 		assert(child.fks['pid'] == fk)
+		local ok, v, v_sz = db:get_raw('$schema', 'child', #'child')
+		assert(ok)
+		local stored = eval(str(v, v_sz))
+		assert(stored.fks.pid.index == nil)
 		db:commit()
 	end)
 end
@@ -3880,10 +3937,10 @@ function test.ai_ci_encoding_edges()
 		assert(db:get('t', 's', 2) == 'É')
 		assert(db:get('t', 's', 3) == 'é')
 		assert(db:get('t', 's', 4) == 'Straße')
-		assert(num((db:must_get('t/i/s', '{}', 'STRASSE')).id) == 4)
+		assert(num((db:must_get('t/s', '{}', 'STRASSE')).id) == 4)
 
 		local ok, err = try_mutation(db, db.get,
-			't/i/s', '{}', string.char(0xff))
+			't/s', '{}', string.char(0xff))
 		assert(not ok and iserror(err, 'field'), tostring(err))
 
 		db:create_table('short', {name = 'short', fields = {
@@ -3893,7 +3950,7 @@ function test.ai_ci_encoding_edges()
 		}, pk = {'id'}})
 		db:add_index('short', {'s'})
 		db:insert('short', '{}', {id = 1, s = 'É'})
-		assert(num((db:must_get('short/i/s', '{}', 'E')).id) == 1)
+		assert(num((db:must_get('short/s', '{}', 'E')).id) == 1)
 		ok, err = try_mutation(db, db.insert, 'short', '{}', {id = 2, s = 'abc'})
 		assert(not ok and iserror(err, 'field'),
 			'maxlen was checked after folding instead of on input')
@@ -3906,7 +3963,7 @@ function test.ai_ci_encoding_edges()
 		db:insert('key', '{}', {s = 'É', id = 1})
 		assert(db:get('key', 'id', 'E') == nil)
 		db:add_index('key', {'s'})
-		assert(num((db:must_get('key/i/s', '{}', 'E')).id) == 1)
+		assert(num((db:must_get('key/s', '{}', 'E')).id) == 1)
 		db:insert('key', '{}', {s = 'E', id = 2})
 		assert(num(db:get('key', 'id', 'É')) == 1)
 		assert(num(db:get('key', 'id', 'E')) == 2)
@@ -3925,7 +3982,7 @@ function test.ai_ci_decompose_retry()
 				nozero = true, not_null = true, mdbx_collation = 'utf8_ai_ci'},
 		}, pk = {'id'}})
 		db:add_index('t', {'s'})
-		local _, schema = db:dbi_schema't/i/s'
+		local _, schema = db:dbi_schema't/s'
 		local real_decompose = utf8_decompose
 		local calls = 0
 		utf8_decompose = function(s, len, out, cap, opt)
@@ -3982,8 +4039,8 @@ function test.ai_ci_folded_maxlen()
 		local s = db:get('val', 's', 1)
 		assert(s == '각' and #s == 3, ('%q (%d)'):format(s, #s))
 		assert(num(db:get('val', 'n', 1)) == 2)
-		assert(num((db:must_get('val/u/s', '{}', '각')).id) == 1)
-		local ok, err = try_mutation(db, db.get, 'val/u/s', '{}', 'abcd')
+		assert(num((db:must_get('val/s', '{}', '각')).id) == 1)
+		local ok, err = try_mutation(db, db.get, 'val/s', '{}', 'abcd')
 		assert(not ok and iserror(err, 'field'), tostring(err))
 		db:commit()
 	end, function(db)
@@ -3991,7 +4048,7 @@ function test.ai_ci_folded_maxlen()
 		local s = db:get('val', 's', 1)
 		assert(s == '각' and #s == 3, ('%q (%d)'):format(s, #s))
 		assert(num(db:get('val', 'n', 1)) == 2)
-		assert(num((db:must_get('val/u/s', '{}', '각')).id) == 1)
+		assert(num((db:must_get('val/s', '{}', '각')).id) == 1)
 		db:commit()
 	end)
 end
@@ -4093,7 +4150,7 @@ function test.direct_index_open_after_reopen()
 		db:commit()
 	end, function(db)
 		db:begin'r'
-		local cur = db:cursor('t/i/v')
+		local cur = db:cursor('t/v')
 		local r = cur:first('{}')
 		assert(num(r.id) == 1)
 		cur:close()
@@ -4126,9 +4183,9 @@ function test.mixed_index_descending_pk_decode()
 		db:add_fk{table = 'child', cols = {'a', 'c', 'b'},
 			ref_table = 'parent', ref_cols = {'a', 'c', 'b'}, ondelete = 'cascade'}
 
-		local r = db:must_get('child/i/a-c-b', '{}', 'aa', 'cc', 1)
+		local r = db:must_get('child/a-c-b', '{}', 'aa', 'cc', 1)
 		assert(num(r.x) == 10 and r.a == 'aa' and r.c == 'cc' and num(r.b) == 1)
-		r = db:must_get('child/i/a-c-b', '{}', 'bb', 'dd', 2)
+		r = db:must_get('child/a-c-b', '{}', 'bb', 'dd', 2)
 		assert(num(r.x) == 20 and r.a == 'bb' and r.c == 'dd' and num(r.b) == 2)
 		db:del('parent', 'aa', 'cc', 1)
 		assert(not db:exists('child', 10, 'aa', 'cc'))
@@ -4190,7 +4247,7 @@ function test.txn_commit_failure_discards_local_state()
 		assert(mdbx.mdbx_txn_break(db.txn) == 0)
 		assert(not pcall(db.commit, db))
 		assert(db.txn == outer_txn)
-		assert(not db:table_exists'temp' and not db:table_exists'temp/i/v')
+		assert(not db:table_exists'temp' and not db:table_exists'temp/v')
 		db:insert('keep', '{}', {id = 2})
 		db:commit()
 
@@ -4203,7 +4260,7 @@ function test.txn_commit_failure_discards_local_state()
 
 		db:begin'r'
 		assert(db:exists('keep', 1) and db:exists('keep', 2))
-		assert(not db:table_exists'temp' and not db:table_exists'temp/i/v')
+		assert(not db:table_exists'temp' and not db:table_exists'temp/v')
 		assert(not db:table_exists'temp2')
 		assert_consistent(db)
 		db:commit()
@@ -4224,7 +4281,7 @@ function test.index_build_failure_state()
 		db:insert('t', '{}', {id = 1, cat = 1, email = 'same'})
 		db:insert('t', '{}', {id = 2, cat = 2, email = 'same'})
 		local outer_txn = db.txn
-		local ix_u = 't/u/email'
+		local ix_u = 't/email'
 		local ok, err = try_schema(db, db.add_index,
 			't', {'email', is_unique = true})
 		assert(not ok and iserror(err, 'schema'), tostring(err))
@@ -4233,7 +4290,7 @@ function test.index_build_failure_state()
 		local _, schema = db:dbi_schema't'
 		assert(not db:table_exists(ix_u))
 		assert(not (schema.ixs and schema.ixs[ix_u]))
-		assert(not schema.ix_schemas)
+		assert(not schema.indexes)
 
 		db:del('t', 2)
 		local _, _, ix_n = db:add_index('t', {'cat'})
@@ -4326,14 +4383,14 @@ function test.duplicate_fk_columns_rejected()
 		)
 		assert(not ok and err.message == 'fk already exists: pid', tostring(err))
 		local _, schema = db:dbi_schema'child'
-		assert(schema.fks['pid'].ix == 'child/i/pid')
-		assert(#schema.ix_schemas == 1)
+		assert(schema.fks['pid'].index.name == 'child/pid')
+		assert(#schema.indexes == 1)
 
 		db:insert('parent', '{}', {id = 1})
 		db:insert('child', '{}', {id = 10, pid = 1})
 		assert(try_mutation(db, db.del, 'parent', 1) == false)
 		db:drop_fk('child', 'pid')
-		assert(not db:table_exists'child/i/pid')
+		assert(not db:table_exists'child/pid')
 		assert(try_mutation(db, db.del, 'parent', 1))
 		assert(db:exists('child', 10))
 		assert_consistent(db)
@@ -4360,9 +4417,9 @@ function test.self_referencing_fk_rename()
 		local _, schema = db:dbi_schema'item'
 		local fk = schema.fks.owner_id
 		assert(fk.table == 'item' and fk.ref_table == 'item')
-		assert(fk.ix == 'item/i/owner_id')
+		assert(fk.index.name == 'item/owner_id')
 		assert(schema.ref_fks['item/owner_id'])
-		assert(db:table_exists'item/i/owner_id')
+		assert(db:table_exists'item/owner_id')
 		db:del('item', 1)
 		assert(not db:exists('item', 1) and not db:exists('item', 2))
 		assert_consistent(db)
@@ -4388,7 +4445,7 @@ function test.self_referencing_table_drop()
 		db:begin'w'
 		db:drop_table'item'
 		assert(not db:table_exists'item')
-		assert(not db:table_exists'item/i/parent_id')
+		assert(not db:table_exists'item/parent_id')
 		assert_consistent(db)
 		db:commit()
 	end)
@@ -4440,7 +4497,7 @@ function test.rename_column_failure_rolls_back()
 		db:commit()
 
 		db:begin'w'
-		db:create_table_raw't/i/x-b'
+		db:create_table_raw't/x-b'
 		local ok, err = catch('schema', db.rename_column, db, 't', 'a', 'x')
 		assert(not ok, 'rename unexpectedly bypassed the index-name collision')
 		assert(iserror(err, 'schema'), tostring(err))
@@ -4449,11 +4506,191 @@ function test.rename_column_failure_rolls_back()
 		db:begin'r'
 		local _, schema = db:dbi_schema't'
 		assert(schema.fields.a and not schema.fields.x)
-		assert(db:table_exists't/i/a' and db:table_exists't/i/a-b')
-		assert(not db:table_exists't/i/x' and not db:table_exists't/i/x-b')
-		assert(num((db:must_get('t/i/a', '{}', 10)).id) == 1)
-		assert(num((db:must_get('t/i/a-b', '{}', 10, 20)).id) == 1)
+		assert(db:table_exists't/a' and db:table_exists't/a-b')
+		assert(not db:table_exists't/x' and not db:table_exists't/x-b')
+		assert(num((db:must_get('t/a', '{}', 10)).id) == 1)
+		assert(num((db:must_get('t/a-b', '{}', 10, 20)).id) == 1)
 		assert_consistent(db)
+		db:commit()
+	end)
+end
+
+--value-only restructuring rewrites records in place: explicit nulls remain
+--null instead of taking a changed default, while added columns take defaults.
+function test.alter_table_values_in_place()
+	with_db_reopen('alter_table_values_in_place', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'v' , mdbx_type = 'u32', mdbx_default = 7},
+		}, pk = {'id'}})
+		db:insert('t', '{}', {id = 1, v = null})
+		db:insert('t', '{}', {id = 2})
+		local dbi = db:dbi_raw't'
+		db:alter_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'v' , mdbx_type = 'u32', mdbx_default = 9},
+			{col = 'x' , mdbx_type = 'u32', mdbx_default = 5},
+		}, pk = {'id'}})
+		assert(db:dbi_raw't' == dbi, 'value-only alter replaced the DBI')
+		assert(db:is_null('t', 'v', 1) == true)
+		assert(num(db:get('t', 'v', 2)) == 7)
+		assert(num(db:get('t', 'x', 1)) == 5)
+		assert(num(db:get('t', 'x', 2)) == 5)
+		db:commit()
+	end, function(db)
+		db:begin'r'
+		assert(db:is_null('t', 'v', 1) == true)
+		assert(num(db:get('t', 'v', 2)) == 7)
+		assert(num(db:get('t', 'x', 1)) == 5)
+		db:commit()
+	end)
+end
+
+--changing the PK encoding rewrites through a temporary DBI and preserves the
+--table sequence, so autoincrement continues after the existing rows.
+function test.alter_table_rewrites_keys()
+	with_db_reopen('alter_table_rewrites_keys', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true,
+				auto_increment = true},
+			{col = 'v' , mdbx_type = 'u32'},
+		}, pk = {'id'}})
+		local id0 = num(db:insert('t', '{}', {v = 10}))
+		local id1 = num(db:insert('t', '{}', {v = 20}))
+		db:alter_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u64', not_null = true,
+				auto_increment = true},
+			{col = 'v' , mdbx_type = 'u32'},
+		}, pk = {'id'}})
+		assert(num(db:get('t', 'v', id0)) == 10)
+		assert(num(db:get('t', 'v', id1)) == 20)
+		local id2 = num(db:insert('t', '{}', {v = 30}))
+		assert(id2 == id1 + 1, ('%d,%d'):format(id1, id2))
+		db:commit()
+	end, function(db)
+		db:begin'r'
+		local _, schema = db:dbi_schema't'
+		assert(schema.fields.id.mdbx_type == 'u64')
+		assert(num(db:get('t', 'v', 0)) == 10)
+		assert(num(db:get('t', 'v', 1)) == 20)
+		assert(num(db:get('t', 'v', 2)) == 30)
+		db:commit()
+	end)
+end
+
+--surviving user and FK indexes keep their physical data but get fresh runtime
+--schemas that decode the altered base-table value layout.
+function test.alter_table_rebinds_indexes()
+	with_db('alter_table_rebinds_indexes', function(db)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'pid', mdbx_type = 'u32', not_null = true},
+			{col = 'tag', mdbx_type = 'u32', not_null = true},
+			{col = 'v'  , mdbx_type = 'u32'},
+		}, pk = {'id'}})
+		local _, _, ix = db:add_index('child', {'tag'})
+		db:add_fk{table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		db:insert('parent', '{}', {id = 1})
+		db:insert('child', '{}', {id = 10, pid = 1, tag = 3, v = 20})
+
+		db:alter_table('child', {name = 'child', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'pid', mdbx_type = 'u32', not_null = true},
+			{col = 'tag', mdbx_type = 'u32', not_null = true},
+			{col = 'v'  , mdbx_type = 'u32'},
+			{col = 'x'  , mdbx_type = 'u32', mdbx_default = 7},
+		}, pk = {'id'}})
+
+		db:update('child', '{v}', {id = 10, v = 30})
+		local row = db:must_get(ix, '{}', 3)
+		assert(num(row.v) == 30 and num(row.x) == 7)
+		db:insert('child', '{}', {id = 11, pid = 1, tag = 4, v = 40})
+		assert(num((db:must_get(ix, '{}', 4)).x) == 7)
+		assert(try_mutation(db, db.insert, 'child', '{}',
+			{id = 12, pid = 99, tag = 5}) == false)
+		assert(try_mutation(db, db.del, 'parent', 1) == false)
+		assert_consistent(db)
+		db:commit()
+	end)
+end
+
+--alter_table is only the base-table primitive: dependencies whose encoding is
+--affected must be removed by the schema-diff executor before calling it.
+function test.alter_table_refuses_dependencies()
+	with_db('alter_table_refuses_dependencies', function(db)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'pid', mdbx_type = 'u32', not_null = true},
+			{col = 'tag', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:add_index('child', {'tag'})
+		db:add_fk{table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+
+		local function refused(tab, schema, col)
+			local ok, err = try_schema(db, db.alter_table, tab, schema)
+			assert(not ok and iserror(err, 'schema'), tostring(err))
+			assert(err.event == 't_alter' and err.table == tab, tostring(err))
+			assert(err.col == col, tostring(err.col))
+		end
+
+		refused('child', {name = 'child', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'pid', mdbx_type = 'u32', not_null = true},
+			{col = 'tag', mdbx_type = 'u64', not_null = true},
+		}, pk = {'id'}}, 'tag')
+		refused('child', {name = 'child', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'pid', mdbx_type = 'u64', not_null = true},
+			{col = 'tag', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}}, 'pid')
+		refused('parent', {name = 'parent', fields = {
+			{col = 'id', mdbx_type = 'u64', not_null = true},
+		}, pk = {'id'}}, 'id')
+		db:commit()
+	end)
+end
+
+--a converted-key collision aborts the alter transaction and leaves the old
+--table, schema, and rows intact.
+function test.alter_table_key_collision_rolls_back()
+	with_db('alter_table_key_collision_rolls_back', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'f64', not_null = true},
+			{col = 'v' , mdbx_type = 'u32'},
+		}, pk = {'id'}})
+		db:insert('t', '{}', {id = 1.2, v = 12})
+		db:insert('t', '{}', {id = 1.8, v = 18})
+
+		local ok, err = try_schema(db, db.alter_table, 't', {
+			name = 't',
+			fields = {
+				{col = 'id', mdbx_type = 'u32', not_null = true},
+				{col = 'v' , mdbx_type = 'u32'},
+			},
+			pk = {'id'},
+		})
+		assert(not ok and iserror(err, 'schema'), tostring(err))
+		assert(err.event == 't_alter' and err.table == 't', tostring(err))
+		local _, schema = db:dbi_schema't'
+		assert(schema.fields.id.mdbx_type == 'f64')
+		assert(num(db:get('t', 'v', 1.2)) == 12)
+		assert(num(db:get('t', 'v', 1.8)) == 18)
+		for name in db:each_table() do
+			assert(not name:starts'$alter/', name)
+		end
 		db:commit()
 	end)
 end
