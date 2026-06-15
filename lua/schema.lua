@@ -89,10 +89,12 @@ API
 
 INTEGRATION WITH DB ENGINES
 
-Pass these engine capabilities and diff rules to `schema.new()`:
-
+API
+	schema.cols_change_affects(old_tbl, new_tbl, cols, attrs) -> changed, col
+	schema.pk_change_affects(old_tbl, new_tbl, attrs) -> changed, col
+schema.new() options:
 	engine                     engine name used for engine-specific attributes.
-	relevant_field_attrs       {attr->true}: attributes included in field diffs.
+	diff_field_attrs           {attr->true}: attributes included in field diffs.
 	supports_fks               include foreign keys in schema diffs.
 	supports_checks            include checks in schema diffs.
 	supports_triggers          include triggers in schema diffs.
@@ -107,7 +109,6 @@ Pass these engine capabilities and diff rules to `schema.new()`:
 	fk_indexes_store_pk        FK enforcement indexes store or otherwise depend
 	                           on the encoded child-table PK, so child PK changes
 	                           rebuild all foreign keys on the table.
-
 
 ]=]
 
@@ -560,6 +561,46 @@ local function map_fields(flds)
 	return t
 end
 
+local function table_field(tbl, col)
+	local f = tbl.fields[col]
+	if f then return f end
+	for _, f in ipairs(tbl.fields) do
+		if f.col == col then return f end
+	end
+end
+
+local function field_change_affects(old_tbl, new_tbl, col, attrs)
+	local old_f = table_field(old_tbl, col)
+	local new_f = table_field(new_tbl, col)
+	if not old_f or not new_f then return true end
+	for attr in pairs(attrs) do
+		if old_f[attr] ~= new_f[attr] then return true end
+	end
+	return false
+end
+
+function schema.cols_change_affects(old_tbl, new_tbl, cols, attrs)
+	for _, col in ipairs(cols or empty) do
+		if field_change_affects(old_tbl, new_tbl, col, attrs) then
+			return true, col
+		end
+	end
+	return false
+end
+
+function schema.pk_change_affects(old_tbl, new_tbl, attrs)
+	if #old_tbl.pk ~= #new_tbl.pk then return true end
+	for i, old_col in ipairs(old_tbl.pk) do
+		if old_col ~= new_tbl.pk[i]
+			or (old_tbl.pk.desc and old_tbl.pk.desc[i] or false)
+				~= (new_tbl.pk.desc and new_tbl.pk.desc[i] or false)
+		then
+			return true, old_col
+		end
+	end
+	return schema.cols_change_affects(old_tbl, new_tbl, old_tbl.pk, attrs)
+end
+
 local function diff_maps(self, t1, t0, diff_vals, map, sc0, supported) --sync t0 to t1.
 	if not supported then return nil end
 	t1 = t1 and (map and map(t1) or t1) or empty
@@ -632,7 +673,9 @@ local function diff_arrays(a1, a0)
 	return false
 end
 local function diff_ixs(self, c1, c0)
-	return diff_arrays(c1, c0) or diff_arrays(c1.desc, c0.desc)
+	return diff_arrays(c1, c0)
+		or diff_arrays(c1.desc, c0.desc)
+		or (c1.is_unique or false) ~= (c0.is_unique or false)
 end
 
 local function not_eq(_, a, b) return a ~= b end
@@ -648,7 +691,7 @@ local function diff_keys(self, t1, t0, keys)
 end
 
 local function diff_fields(self, f1, f0, sc0)
-	return diff_keys(self, f1, f0, assert(sc0.relevant_field_attrs))
+	return diff_keys(self, f1, f0, assert(sc0.diff_field_attrs))
 end
 
 local function diff_fks(self, fk1, fk0)
@@ -708,29 +751,6 @@ local function diff_tables(self, t1, t0, sc0)
 	return d
 end
 
-local function field_change_affects(d, col, attrs)
-	local fd = d and d.fields and d.fields.update and d.fields.update[col]
-	if not fd then return false end
-	for attr in pairs(fd.changed) do
-		if attrs[attr] then return true end
-	end
-	return false
-end
-
-local function cols_change_affects(d, cols, attrs)
-	for _, col in ipairs(cols or empty) do
-		if field_change_affects(d, col, attrs) then return true end
-	end
-	return false
-end
-
-local function pk_change_affects(d, attrs)
-	return d and (
-		d.remove_pk or d.add_pk
-		or cols_change_affects(d, d.old.pk, attrs)
-	) or false
-end
-
 local function table_update(self, name, old, new)
 	local updates = self.tables and self.tables.update
 	local d = updates and updates[name]
@@ -758,11 +778,14 @@ local function expand_index_dependencies(self, sc0, sc1)
 		local d = new_tbl and updates[tbl_name]
 		if d then
 			local pk_changed =
-				sc0.indexes_store_pk and pk_change_affects(d, attrs)
+				sc0.indexes_store_pk
+				and schema.pk_change_affects(old_tbl, new_tbl, attrs)
 			for ix_name, old_ix in pairs(old_tbl.ixs or empty) do
 				local new_ix = new_tbl.ixs and new_tbl.ixs[ix_name]
 				if new_ix and (
-					pk_changed or cols_change_affects(d, old_ix, attrs)
+					pk_changed
+					or schema.cols_change_affects(
+						old_tbl, new_tbl, old_ix, attrs)
 				) then
 					replace_dependency(d, 'ixs', ix_name, old_ix, new_ix)
 				end
@@ -784,12 +807,21 @@ local function expand_fk_dependencies(self, sc0, sc1)
 				if new_fk then
 					local child_d = updates[child_name]
 					local parent_d = updates[old_fk.ref_table]
-					local affected =
-						cols_change_affects(child_d, old_fk.cols, attrs)
-						or cols_change_affects(parent_d, old_fk.ref_cols, attrs)
-						or parent_d and (parent_d.remove_pk or parent_d.add_pk)
+					local affected = child_d and (
+						schema.cols_change_affects(
+							old_child, new_child, old_fk.cols, attrs)
 						or sc0.fk_indexes_store_pk
-							and pk_change_affects(child_d, attrs)
+							and schema.pk_change_affects(
+								old_child, new_child, attrs)
+					)
+					if not affected and parent_d then
+						affected =
+							schema.cols_change_affects(
+								parent_d.old, parent_d.new,
+								old_fk.ref_cols, attrs)
+							or schema.pk_change_affects(
+								parent_d.old, parent_d.new, attrs)
+					end
 					if affected then
 						child_d = table_update(
 							self, child_name, old_child, new_child)

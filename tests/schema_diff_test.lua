@@ -3,7 +3,7 @@ require'schema'
 local opt = {
 	engine = 'test',
 	supports_fks = true,
-	relevant_field_attrs = {
+	diff_field_attrs = {
 		col=1,
 		col_pos=1,
 		type=1,
@@ -109,6 +109,18 @@ do
 	local d = schema.diff(old, new)
 	assert_replaced(d.tables.update.child, 'ixs', 'child_note')
 	assert_replaced(d.tables.update.child, 'fks', 'parent_id')
+end
+
+--Changing uniqueness replaces an index even when its canonical name is stable.
+do
+	local old = test_schema('u32', 'u32')
+	local new = test_schema('u32', 'u32')
+	new.tables.child.ixs.child_note.is_unique = true
+	local d = schema.diff(old, new)
+	assert_replaced(d.tables.update.child, 'ixs', 'child_note')
+
+	d = schema.diff(new, old)
+	assert_replaced(d.tables.update.child, 'ixs', 'child_note')
 end
 
 print'schema_diff ok'
