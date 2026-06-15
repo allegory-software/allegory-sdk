@@ -135,10 +135,11 @@ local function assert_consistent(db, ctx)
 				end
 			end
 			if sch.ref_fks then --back: each reverse ref maps to a live child fk.
-				for key, r in pairs(sch.ref_fks) do
-					local c = db:load_table_schema(r.table)
-					E(c and c.fks and c.fks[r.fk], 'dangling ref_fks: '..key)
-					E(c.fks[r.fk].ref_table == name, 'ref_fks target mismatch: '..key)
+				for key in pairs(sch.ref_fks) do
+					local tbl, fk_name = key:match'^([^/]+)/(.+)$'
+					local c = db:load_table_schema(tbl)
+					E(c and c.fks and c.fks[fk_name], 'dangling ref_fks: '..key)
+					E(c.fks[fk_name].ref_table == name, 'ref_fks target mismatch: '..key)
 				end
 			end
 		end

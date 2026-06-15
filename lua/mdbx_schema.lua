@@ -70,7 +70,7 @@ STATE
 		- all index schemas shared by ixs and fks (runtime).
 	index_schema.val_schema -> table_schema
 		- used by index lookup (runtime).
-	table_schema.ref_fks[table_name/fk_name] -> fk (runtime) | {table, fk} (stored).
+	table_schema.ref_fks[table_name/fk_name] -> fk (runtime) | true (stored).
 		- reverse fk declarations used by fk enforcement.
 	fk.index -> index_schema
 		- used by fk enforcement (runtime).
@@ -711,10 +711,10 @@ function Db:save_table_schema(schema)
 			}
 		end
 	end
-	if schema.ref_fks then --reverse refs (parent side): {key -> fk (runtime) | {table, fk} (stored)}.
+	if schema.ref_fks then --reverse refs (parent side): {key -> fk (runtime) | true (stored)}.
 		t.ref_fks = {}
-		for k, fk in pairs(schema.ref_fks) do
-			t.ref_fks[k] = {table = fk.table, fk = fk.name}
+		for k in pairs(schema.ref_fks) do
+			t.ref_fks[k] = true
 		end
 	end
 	local k = schema.name
@@ -886,13 +886,14 @@ local function load_live_schema(self, name)
 	schema = paper_schema
 	if schema then
 		compile_table_schema(schema)
+		--setting live_schema now prevents cycles on recursive load_live_schema().
 		self.live_schema[name] = schema
 		for _,ix_schema in ipairs(schema.indexes or empty) do
 			self.live_schema[ix_schema.name] = ix_schema
 		end
-		for k, stored in pairs(schema.ref_fks or empty) do
-			local child = load_live_schema(self, stored.table)
-			schema.ref_fks[k] = child.fks[stored.fk]
+		for k in pairs(schema.ref_fks or empty) do
+			local tbl, fk_name = k:match'^([^/]+)/(.+)$'
+			schema.ref_fks[k] = load_live_schema(self, tbl).fks[fk_name]
 		end
 	else
 		self.live_schema[name] = false
