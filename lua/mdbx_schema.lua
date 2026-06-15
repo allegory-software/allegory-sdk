@@ -64,22 +64,22 @@ COLUMS LISTS & IN/OUT VALUES FORMATS
 STATE
 	db.schema.tables[table_name] -> paper_schema
 		- db.schema itself is a schema object, see schema.lua.
-		- layouting and compiling add many fields to it but *not* mutable state
+		- layouting and compiling add many fields to it but *not* mutable state.
 		so it is seen as global-shared (DDL is forbidden on paper schemas).
-	table_schema.indexes -> {index_schema1,...,[index_name]=index_schema}
+	table_schema.indexes -> {ix_schema1,...,[ix_name]=ix_schema}
 		- all index schemas shared by ixs and fks (runtime).
 	index_schema.val_schema -> table_schema
 		- used by index lookup (runtime).
-	table_schema.ref_fks[table_name/fk_name] -> {table, fk}
-		- reverse fk declarations used by fk enforcement (stored).
+	table_schema.ref_fks[table_name/fk_name] -> {table, fk} (stored) | fk (runtime).
+		- reverse fk declarations used by fk enforcement.
 	fk.index -> index_schema
 		- used by fk enforcement (runtime).
 	db.live_schema[table_name|index_name] -> paper_schema | stored_schema
+	db.dirty_schema[table_name|index_name] -> true
 		- live schema cache managed by dbi_schema() and DDL ops (transactional).
-	db.dirty_schema[name] -> true
-		- table/index schemas to invalidate when the write transaction ends.
+		- dirty_schema is used to invalidate DDL-modified schemas on txn end.
 
-SCHEMA LOADING
+SCHEMA LOADING STEPS
 	- load stored schema (already layouted); must be present.
 	- look up paper schema and layout it (which also layouts its indexes).
 	- if both present, compare and use paper schema as live schema.
