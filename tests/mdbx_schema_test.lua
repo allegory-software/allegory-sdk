@@ -720,6 +720,95 @@ function test.key_embedded_zero_error()
 	end)
 end
 
+--padded fixed-size array as a key field: round-trip, ordering, and reopen.
+function test.padded_array_key()
+	with_db_reopen('padded_array_key', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'a', mdbx_type = 'u8', maxlen = 4, padded = true, not_null = true},
+				{col = 'v', mdbx_type = 'u32'},
+			},
+			pk = {'a'},
+		})
+		db:insert('t', '{}', {a = {1,2,3,4}, v = 10})
+		db:insert('t', '{}', {a = {1,0,0,0}, v = 20})
+		db:insert('t', '{}', {a = {1,2,0,0}, v = 30})
+		db:commit()
+	end, function(db)
+		db:begin'r'
+		assert(num(db:get('t', 'v', {1,2,3,4})) == 10)
+		assert(num(db:get('t', 'v', {1,0,0,0})) == 20)
+		assert(num(db:get('t', 'v', {1,2,0,0})) == 30)
+		local exp = {{1,0,0,0}, {1,2,0,0}, {1,2,3,4}}
+		local i = 0
+		for cur, a, v in db:each('t') do
+			i = i + 1
+			assert(valeq(a, exp[i]), S(a)..' ~= '..S(exp[i]))
+		end
+		assert(i == 3)
+		db:commit()
+	end)
+end
+
+--composite key with a u16 padded array + scalar, asc and desc: exercises
+--byte-swap encoding on multi-byte padded array key fields.
+function test.padded_array_key_composite()
+	with_db('padded_array_key_composite', function(db)
+		db:begin'w'
+		for order in words'asc desc' do
+			local name = 'pk2:'..order
+			local desc = order == 'desc'
+			db:create_table(name, {
+				name = name,
+				fields = {
+					{col = 'a', mdbx_type = 'u16', maxlen = 2, padded = true, not_null = true},
+					{col = 'b', mdbx_type = 'u32', not_null = true},
+					{col = 'v', mdbx_type = 'u32'},
+				},
+				pk = {'a', 'b', desc = {desc, false}},
+			})
+			local rows = {
+				{a = {1,0}, b = 1, v = 10},
+				{a = {1,2}, b = 1, v = 20},
+				{a = {1,0}, b = 5, v = 30},
+				{a = {2,0}, b = 1, v = 40},
+			}
+			for _, r in ipairs(rows) do
+				db:insert(name, '{}', r)
+			end
+			local exp
+			if not desc then
+				exp = {
+					{{1,0}, 1, 10},
+					{{1,0}, 5, 30},
+					{{1,2}, 1, 20},
+					{{2,0}, 1, 40},
+				}
+			else
+				exp = {
+					{{2,0}, 1, 40},
+					{{1,2}, 1, 20},
+					{{1,0}, 1, 10},
+					{{1,0}, 5, 30},
+				}
+			end
+			local i = 0
+			for cur, a, b, v in db:each(name) do
+				i = i + 1
+				assert(valeq(a, exp[i][1]), name..' a['..i..']: '..S(a)..' ~= '..S(exp[i][1]))
+				assert(num(b) == exp[i][2], name..' b['..i..']: '..S(b)..' ~= '..S(exp[i][2]))
+			end
+			assert(i == #exp, name..' count: '..i..' ~= '..#exp)
+			--point lookup through composite key
+			local r = db:get(name, 'v', {1,2}, 1)
+			assert(num(r) == 20, S(r))
+		end
+		db:commit()
+	end)
+end
+
 function test.ai_ci_collation()
 	local file = test_file('ai_ci_collation'); cleanup(file)
 	local ok, err = xpcall(function()
