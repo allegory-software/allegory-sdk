@@ -6,19 +6,18 @@
 	libmdbx is a fast mmap-based MVCC key-value store in 40 KLOC of C.
 	libmdbx provides ACID with serializable semantics, good for read-heavy loads.
 
-C->LUA
-
- * safe API (no use-after-free), uses our terminology (env -> db, DBI -> table).
- * extendable, see mdbx_schema.lua which adds column schema to keys and values.
- * current transaction is implicit since we can't use parallel transactions.
- * tables can be referenced by name everywhere (no need to use DBIs).
- * tables must be created explicitly and are auto-opened on data ops.
- * APIs raise on unexpected errors; expected states return nil,err or false,err.
-   * 'db'-type errors are raised on unexpected mdbx errors.
-   * 'schema'-type errors are raised on schema-caused errors on table ops and
-	  the txn is aborted.
- * table ops are logged.
- * use DBI 1 to read the main table.
+BINDING
+	- safe API (no use-after-free), uses our terminology (env -> db, DBI -> table).
+	- extendable, see mdbx_schema.lua which adds column schema to keys and values.
+	- current transaction is implicit since we can't use parallel transactions.
+	- tables can be referenced by name everywhere (no need to use DBIs).
+	- tables must be created explicitly and are auto-opened on data ops.
+	- APIs raise on unexpected errors; expected states return nil,err or false,err.
+	- 'db'-type errors are raised on unexpected mdbx errors.
+	- 'schema'-type errors are raised on schema-caused errors on table ops and
+	the txn is aborted.
+	- table ops are logged.
+	- use DBI 1 to read the main table.
 
 DATABASES
 	mdbx_open(file_path, [opt]) -> db,[err],created   open/create a database
@@ -66,7 +65,8 @@ CRUD
 	cur:find_ge_raw  (k, k_sz) -> true, k, k_sz, v, v_sz | false,err
 	cur:find_le_raw  (k, k_sz) -> true, k, k_sz, v, v_sz | false,err
 	cur:find_dup_raw     (k, k_sz, v, v_sz) -> true, v, v_sz | false,err
-	cur:get_multiple_raw (k, k_sz) -> true, v_ptr, v_sz | false,'not_found'
+	cur:get_multiple_raw     (k, k_sz) -> true, v_ptr, v_sz | false,'not_found'
+	cur:current_multiple_raw()     -> true, v_ptr, v_sz | false,'not_found'
 	cur:next_multiple_raw()        -> true, v_ptr, v_sz | false,'not_found'
 	cur:each[_reverse]_raw() -> iter() -> true, k, k_sz, v, v_sz
 	cur:each_from[_last]_raw(k, k_sz) -> iter() -> cur, k, k_sz, v, v_sz
@@ -92,7 +92,7 @@ local
 mdbx = C
 local MAIN_DBI = 1
 
--- log level -----------------------------------------------------------------
+--log level -----------------------------------------------------------------
 
 --set libmdbx's runtime log level (process-global). level names:
 --  fatal < error < warn < notice < verbose < debug < trace < extra
@@ -111,7 +111,7 @@ function mdbx_set_log_level(level)
 end
 mdbx_set_log_level'warn' --mdbx default is 'notice', needlesly chatty.
 
--- databases -----------------------------------------------------------------
+--databases ------------------------------------------------------------------
 
 local Db = {}; mdbx_db = Db
 
@@ -318,7 +318,7 @@ local function invalidate_dbi(self, dbi, name)
 	end
 end
 
--- transactions --------------------------------------------------------------
+--transactions ---------------------------------------------------------------
 
 local function check_txn(self)
 	assert(self.txn, 'not in transaction')
@@ -407,7 +407,7 @@ function Db:atomic(mode, f, ...)
 end
 end
 
--- tables --------------------------------------------------------------------
+--tables ---------------------------------------------------------------------
 
 function Db:table_name(tab)
 	assert(tab, 'table expected')
@@ -519,7 +519,7 @@ function Db:dbi_flags(tab)
 end
 end
 
--- table data ----------------------------------------------------------------
+--table data -----------------------------------------------------------------
 
 local key = new'MDBX_val'
 local val = new'MDBX_val'
@@ -594,7 +594,7 @@ function Db:seq(tab, increment)
 	return seq
 end
 
--- cursors -------------------------------------------------------------------
+--cursors --------------------------------------------------------------------
 
 local Cur = {}; mdbx_cursor = Cur
 
@@ -752,6 +752,14 @@ function Cur:next_multiple_raw()
 	return self.db:tryz('cursor_get', rc)
 end
 
+function Cur:current_multiple_raw()
+	check_cursor(self)
+	local rc = C.mdbx_cursor_get(self.c, key, val, C.MDBX_GET_MULTIPLE)
+	if rc == 0 then return true, val.data, num(val.size) end
+	if rc == C.MDBX_ENODATA then return false, 'not_found' end
+	return self.db:tryz('cursor_get', rc)
+end
+
 function Cur:try_put_raw(k, k_sz, v, v_sz, flags)
 	check_cursor(self)
 	check_wtxn(self.db)
@@ -785,7 +793,7 @@ function Db:each_raw(tab)
 	return each_raw_next, cur
 end
 
--- table catalog -------------------------------------------------------------
+--table catalog --------------------------------------------------------------
 
 do
 local function next_table(self)
