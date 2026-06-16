@@ -290,7 +290,7 @@ function test.varsize_key_composite()
 			end
 			assertf(i == #t, '%s: row count %d ~= %d', name, i, #t)
 			--spot-check a point lookup of dyn-offset vals.
-			local s3, s4 = db:get(name, 's3 s4', 'xx', 'y')
+			local s3, s4 = db:find(name, 's3 s4', 'xx', 'y')
 			assert(s3 == 'z' and s4 == 'zz')
 		end
 		end
@@ -317,7 +317,7 @@ function test.padded_array_value()
 			pk = {'id'},
 		})
 		db:insert('t', '{}', {id = 1, s1 = 'hello', a = {10,20,30,40}, s2 = 'world'})
-		local r = db:get('t', '{s1 a s2}', 1)
+		local r = db:find('t', '{s1 a s2}', 1)
 		assert(r.s1 == 'hello', S(r.s1))
 		assert(r.s2 == 'world', S(r.s2))
 		assert(valeq(r.a, {10,20,30,40}), S(r.a))
@@ -340,9 +340,9 @@ function test.varsize_array_value()
 		db:insert('t', '{}', {id = 1, a = {100, 200, 300}})
 		db:insert('t', '{}', {id = 2, a = {}})
 		db:insert('t', '{}', {id = 3, a = {1,2,3,4}})
-		assert(valeq(db:get('t', 'a', 1), {100,200,300}), S(db:get('t','a',1)))
-		assert(valeq(db:get('t', 'a', 2), {}), S(db:get('t','a',2)))
-		assert(valeq(db:get('t', 'a', 3), {1,2,3,4}), S(db:get('t','a',3)))
+		assert(valeq(db:find('t', 'a', 1), {100,200,300}), S(db:find('t','a',1)))
+		assert(valeq(db:find('t', 'a', 2), {}), S(db:find('t','a',2)))
+		assert(valeq(db:find('t', 'a', 3), {1,2,3,4}), S(db:find('t','a',3)))
 		db:commit()
 	end)
 end
@@ -361,9 +361,9 @@ function test.nullable_scalar_value()
 		})
 		db:insert('t', '{}', {id = 1, num = -7})
 		db:insert('t', '{}', {id = 2, num = nil})
-		assert(db:get('t', 'num', 1) == -7)
+		assert(db:find('t', 'num', 1) == -7)
 		assert(db:is_null('t', 'num', 1) == false)
-		assert(db:get('t', 'num', 2) == nil)
+		assert(db:find('t', 'num', 2) == nil)
 		assert(db:is_null('t', 'num', 2) == true)
 		db:commit()
 	end)
@@ -393,7 +393,7 @@ function test.mixed_layout_nulls()
 		}
 		for _,r in ipairs(rows) do db:insert('t', '{}', r) end
 		for _,r in ipairs(rows) do
-			local g = db:get('t', '{num s1 s2 s3}', r.id)
+			local g = db:find('t', '{num s1 s2 s3}', r.id)
 			for _,col in ipairs{'num','s1','s2','s3'} do
 				assertf(valeq(g[col], r[col]), 'id=%d %s: %s ~= %s',
 					r.id, col, S(g[col]), S(r[col]))
@@ -438,8 +438,8 @@ function test.single_varsize_value()
 		})
 		db:insert('t', '{}', {id = 1, s = ''})
 		db:insert('t', '{}', {id = 2, s = 'hi'})
-		assert(db:get('t', 's', 1) == '')
-		assert(db:get('t', 's', 2) == 'hi')
+		assert(db:find('t', 's', 1) == '')
+		assert(db:find('t', 's', 2) == 'hi')
 		db:commit()
 	end)
 end
@@ -481,7 +481,7 @@ function test.truncation_errors()
 		assert(not ok)
 		check_err(err, 'insert', 'tk', 'k', 'too_long')
 		db:insert('tk', '{}', {k = 'abcd', v = 'x'})
-		ok, err = try_mutation(db, db.get, 'tk', 'v', 'abcde')
+		ok, err = try_mutation(db, db.find, 'tk', 'v', 'abcde')
 		assert(not ok)
 		check_err(err, 'get', 'tk', 'k', 'too_long')
 
@@ -537,7 +537,7 @@ function test.direct_mutation_errors_abort_transaction()
 
 		db:begin'r'
 		assert(not db:exists('t', 'two'))
-		ok, err = catch('field', db.get, db, 't', 'v', 'oversize')
+		ok, err = catch('field', db.find, db, 't', 'v', 'oversize')
 		assert(not ok and iserror(err, 'field'), tostring(err))
 		assert(db.txn == nil)
 	end)
@@ -567,7 +567,7 @@ function test.nozero_field()
 			assert(err.col == col, tostring(err.col))
 			assert(err.message == msg, tostring(err.message))
 		end
-		local r = db:get('t', '{s a}', 1)
+		local r = db:find('t', '{s a}', 1)
 		assert(r.s == 'abc', S(r.s))
 		assert(valeq(r.a, {1,2,3}), S(r.a))
 
@@ -604,7 +604,7 @@ function test.reopen_roundtrip()
 		db:commit()
 	end, function(db)
 		db:begin'r'
-		local r = db:get('t', '{num a s}', 1)
+		local r = db:find('t', '{num a s}', 1)
 		assert(r.num == -3, S(r.num))
 		assert(valeq(r.a, {7,8,9}), S(r.a))
 		assert(r.s == 'hello', S(r.s))
@@ -684,7 +684,7 @@ function test.composite_mixed_keys()
 				'row %d: (%s,%s)', i, S(a), S(b))
 		end
 		assert(i == #rows)
-		assert(db:get('t', 'v', 1, 'aa') == '1aa')
+		assert(db:find('t', 'v', 1, 'aa') == '1aa')
 		db:commit()
 	end)
 end
@@ -708,7 +708,7 @@ function test.key_embedded_zero_error()
 		assert(iserror(err, 'field'), tostring(err))
 		assert(err.event == 'insert' and err.table == 't' and err.col == 'k'
 			and err.message == 'zero', tostring(err))
-		ok, err = try_mutation(db, db.get, 't', 'v', 'a\0c')
+		ok, err = try_mutation(db, db.find, 't', 'v', 'a\0c')
 		assert(not ok)
 		assert(iserror(err, 'field'), tostring(err))
 		assert(err.event == 'get' and err.table == 't' and err.col == 'k'
@@ -738,9 +738,9 @@ function test.padded_array_key()
 		db:commit()
 	end, function(db)
 		db:begin'r'
-		assert(num(db:get('t', 'v', {1,2,3,4})) == 10)
-		assert(num(db:get('t', 'v', {1,0,0,0})) == 20)
-		assert(num(db:get('t', 'v', {1,2,0,0})) == 30)
+		assert(num(db:find('t', 'v', {1,2,3,4})) == 10)
+		assert(num(db:find('t', 'v', {1,0,0,0})) == 20)
+		assert(num(db:find('t', 'v', {1,2,0,0})) == 30)
 		local exp = {{1,0,0,0}, {1,2,0,0}, {1,2,3,4}}
 		local i = 0
 		for cur, a, v in db:each('t') do
@@ -802,7 +802,7 @@ function test.padded_array_key_composite()
 			end
 			assert(i == #exp, name..' count: '..i..' ~= '..#exp)
 			--point lookup through composite key
-			local r = db:get(name, 'v', {1,2}, 1)
+			local r = db:find(name, 'v', {1,2}, 1)
 			assert(num(r) == 20, S(r))
 		end
 		db:commit()
@@ -823,7 +823,7 @@ function test.ai_ci_collation()
 		db:add_index('u', {'email', is_unique = true})
 		db:insert('u', '{}', {id = 1, email = 'José@x'})
 		assert(try_mutation(db, db.insert, 'u', '{}', {id = 2, email = 'JOSE@X'}) == false) --folds equal
-		assert(num((db:must_get('u/email', '{}', 'jose@x')).id) == 1) --ai_ci index lookup
+		assert(num((db:must_find('u/email', '{}', 'jose@x')).id) == 1) --ai_ci index lookup
 		db:commit(); db:close()
 		--persists across reopen: ai_ci index folding still works.
 		db = mdbx_open(file); db:begin'w'
@@ -855,20 +855,20 @@ function test.update_and_upsert()
 
 		--partial update preserves unlisted cols
 		db:update('t', '{}', {id = 1, a = 20})
-		local g = db:get('t', '{a b c}', 1)
+		local g = db:find('t', '{a b c}', 1)
 		assert(num(g.a) == 20 and g.b == 'x' and num(g.c) == 5,
 			('%s,%s,%s'):format(S(g.a), S(g.b), S(g.c)))
 
 		--update multiple cols (name mapping must be correct, not positional)
 		db:update('t', '{}', {id = 1, b = 'y', c = 9})
-		g = db:get('t', '{a b c}', 1)
+		g = db:find('t', '{a b c}', 1)
 		assert(num(g.a) == 20 and g.b == 'y' and num(g.c) == 9)
 
 		--null sets a value to null; nil would skip
 		db:update('t', '{}', {id = 1, a = null})
-		assert(db:get('t', 'a', 1) == nil)
+		assert(db:find('t', 'a', 1) == nil)
 		assert(db:is_null('t', 'a', 1) == true)
-		g = db:get('t', '{b c}', 1)
+		g = db:find('t', '{b c}', 1)
 		assert(g.b == 'y' and num(g.c) == 9) --others preserved
 
 		--update a missing row -> false,'not_found'
@@ -878,12 +878,12 @@ function test.update_and_upsert()
 
 		--upsert inserts when missing
 		db:upsert('t', '{}', {id = 2, a = 7, b = 'u', c = 1})
-		g = db:get('t', '{a b c}', 2)
+		g = db:find('t', '{a b c}', 2)
 		assert(num(g.a) == 7 and g.b == 'u' and num(g.c) == 1)
 
 		--upsert updates when existing (partial preserve)
 		db:upsert('t', '{}', {id = 2, b = 'uu'})
-		g = db:get('t', '{a b c}', 2)
+		g = db:find('t', '{a b c}', 2)
 		assert(num(g.a) == 7 and g.b == 'uu' and num(g.c) == 1)
 
 		db:commit()
@@ -911,7 +911,7 @@ function test.delete()
 		assert(db:del('t', 2) == true)
 		assert(not db:exists('t', 2))
 		assert(db:exists('t', 1) and db:exists('t', 3))
-		assert(db:get('t', 'v', 2) == nil)
+		assert(db:find('t', 'v', 2) == nil)
 		local ids = {}
 		for cur, id in db:each('t') do add(ids, num(id)) end
 		assert(#ids == 2 and ids[1] == 1 and ids[2] == 3)
@@ -972,17 +972,17 @@ function test.cursor_update()
 		db:insert('t', '{}', {id = 2, a = 20, b = 'y'})
 		--full update (all val cols)
 		local cur = db:cursor('t', 'w')
-		assert(cur:try_get(nil, 2)) --position on id=2
+		assert(cur:try_find(nil, 2)) --position on id=2
 		assert(cur:update('{a b}', {a = 99, b = 'YY'}) == true)
 		cur:close()
-		local g = db:get('t', '{a b}', 2)
+		local g = db:find('t', '{a b}', 2)
 		assert(num(g.a) == 99 and g.b == 'YY', ('%s,%s'):format(S(g.a), S(g.b)))
 		--partial update preserves the unlisted col
 		cur = db:cursor('t', 'w')
-		assert(cur:try_get(nil, 1)) --position on id=1
+		assert(cur:try_find(nil, 1)) --position on id=1
 		assert(cur:update('b', 'ZZ') == true)
 		cur:close()
-		g = db:get('t', '{a b}', 1)
+		g = db:find('t', '{a b}', 1)
 		assert(num(g.a) == 10 and g.b == 'ZZ', ('%s,%s'):format(S(g.a), S(g.b)))
 		db:commit()
 	end)
@@ -999,14 +999,14 @@ function test.update_shrinking_varsize_preserves_key()
 		db:insert('t', '{}', {id = 2, s = 'aa'})
 		db:update('t', '{}', {id = 1, s = 'b'})
 		local cur = db:cursor('t', 'w')
-		assert(cur:try_get(nil, 2))
+		assert(cur:try_find(nil, 2))
 		assert(cur:update('s', 'b'))
 		cur:close()
 		db:commit()
 	end, function(db)
 		db:begin'r'
-		assert(db:get('t', 's', 1) == 'b')
-		assert(db:get('t', 's', 2) == 'b')
+		assert(db:find('t', 's', 1) == 'b')
+		assert(db:find('t', 's', 2) == 'b')
 		assert(not db:exists('t', 4))
 		db:commit()
 	end)
@@ -1178,7 +1178,7 @@ function test.unique_index()
 		assert(not db:exists('t', 4))
 
 		--lookup through the index
-		local r = db:must_get(ix_tbl, '{}', 'b@x')
+		local r = db:must_find(ix_tbl, '{}', 'b@x')
 		assert(num(r.id) == 2 and r.name == 'B', S(r.name))
 
 		--delete frees the unique index key (reinsert with same email works)
@@ -1289,9 +1289,9 @@ function test.nullable_non_unique_index()
 			return t
 		end
 		assert(valeq(ids(ix_s), {1,4,3,2}), cat(ids(ix_s), ','))
-		local r = db:must_get(ix_s, '{}', null)
+		local r = db:must_find(ix_s, '{}', null)
 		assert(num(r.id) == 1 and r.s == nil, S(r.id))
-		r = db:must_get(ix_s, '{}', '')
+		r = db:must_find(ix_s, '{}', '')
 		assert(num(r.id) == 3 and r.s == '', S(r.id))
 
 		db:update('t', '{}', {id = 1, s = 'c'})
@@ -1301,9 +1301,9 @@ function test.nullable_non_unique_index()
 
 		local _,_,ix_n = db:add_index('t', {'n'})
 		assert(valeq(ids(ix_n), {1,3,2}), cat(ids(ix_n), ','))
-		r = db:must_get(ix_n, '{}', null)
+		r = db:must_find(ix_n, '{}', null)
 		assert(num(r.id) == 1 and r.n == nil, S(r.id))
-		r = db:must_get(ix_n, '{}', -1)
+		r = db:must_find(ix_n, '{}', -1)
 		assert(num(r.id) == 3 and num(r.n) == -1, S(r.id))
 		db:commit()
 	end)
@@ -1338,15 +1338,15 @@ function test.nullable_composite_index()
 		local ok, err, ix = db:add_index('t', {'s', 'n'})
 		assert(ok, tostring(err))
 		assert(valeq(ids(ix), {1,2,3,5,4}), cat(ids(ix), ','))
-		local r = db:must_get(ix, '{}', null, null)
+		local r = db:must_find(ix, '{}', null, null)
 		assert(num(r.id) == 1, S(r.id))
-		r = db:must_get(ix, '{}', 'a', null)
+		r = db:must_find(ix, '{}', 'a', null)
 		assert(num(r.id) == 5, S(r.id))
 
 		ok, err, ix = db:add_index('t', {'s', desc = {true}})
 		assert(ok, tostring(err))
 		assert(valeq(ids(ix), {4,5,3,1,2}), cat(ids(ix), ','))
-		r = db:must_get(ix, '{}', null)
+		r = db:must_find(ix, '{}', null)
 		assert(num(r.id) == 1 and r.s == nil, S(r.id))
 		db:commit()
 	end)
@@ -1413,12 +1413,12 @@ function test.try_put_multi_index_rollback()
 		assert(not ok)
 		check_row_error(err, 'update', 't', 'already_exists')
 		assert(db.txn == outer_txn, 'failed atomic update changed the outer txn')
-		local r = db:get('t', '{cat email}', 2)
+		local r = db:find('t', '{cat email}', 2)
 		assert(r.cat == 'b' and r.email == 'b@x', ('%s,%s'):format(S(r.cat), S(r.email)))
-		assert(not db:try_get(ix_cat, nil, 'c'))
-		assert(num((db:must_get(ix_cat, '{}', 'b')).id) == 2)
-		assert(num((db:must_get(ix_email, '{}', 'a@x')).id) == 1)
-		assert(num((db:must_get(ix_email, '{}', 'b@x')).id) == 2)
+		assert(not db:try_find(ix_cat, nil, 'c'))
+		assert(num((db:must_find(ix_cat, '{}', 'b')).id) == 2)
+		assert(num((db:must_find(ix_email, '{}', 'a@x')).id) == 1)
+		assert(num((db:must_find(ix_email, '{}', 'b@x')).id) == 2)
 
 		db:insert('t', '{}', {id = 3, cat = 'c', email = 'c@x'})
 		assert(db.txn == outer_txn and db:exists('t', 3))
@@ -1445,10 +1445,10 @@ function test.try_put_unique_conflict_matrix()
 		db:insert('t', '{}', {id = 2, email = 'b@x', name = 'B'})
 
 		local function assert_unchanged()
-			local r = db:get('t', '{email name}', 2)
+			local r = db:find('t', '{email name}', 2)
 			assert(r.email == 'b@x' and r.name == 'B', ('%s,%s'):format(S(r.email), S(r.name)))
-			assert(num((db:must_get(ix, '{}', 'a@x')).id) == 1)
-			assert(num((db:must_get(ix, '{}', 'b@x')).id) == 2)
+			assert(num((db:must_find(ix, '{}', 'a@x')).id) == 1)
+			assert(num((db:must_find(ix, '{}', 'b@x')).id) == 2)
 		end
 
 		local ok, err = try_mutation(db, db.update, 't', '{}', {id = 2, email = 'a@x', name = 'U'})
@@ -1507,23 +1507,23 @@ function test.try_put_indexes_and_fks()
 		db:insert('child', '{}', {id = 10, pid = 1, cat = 'a', email = 'a@x', name = 'A'})
 
 		assert(try_mutation(db, db.put, 'child', '{}', {id = 10, pid = 2, cat = 'b', email = 'b@x'}))
-		local r = db:get('child', '{pid cat email name}', 10)
+		local r = db:find('child', '{pid cat email name}', 10)
 		assert(num(r.pid) == 2 and r.cat == 'b' and r.email == 'b@x' and r.name == nil)
-		assert(not db:try_get(ix_pid, nil, 1) and num((db:must_get(ix_pid, '{}', 2)).id) == 10)
-		assert(not db:try_get(ix_cat, nil, 'a') and num((db:must_get(ix_cat, '{}', 'b')).id) == 10)
-		assert(not db:try_get(ix_email, nil, 'a@x')
-			and num((db:must_get(ix_email, '{}', 'b@x')).id) == 10)
+		assert(not db:try_find(ix_pid, nil, 1) and num((db:must_find(ix_pid, '{}', 2)).id) == 10)
+		assert(not db:try_find(ix_cat, nil, 'a') and num((db:must_find(ix_cat, '{}', 'b')).id) == 10)
+		assert(not db:try_find(ix_email, nil, 'a@x')
+			and num((db:must_find(ix_email, '{}', 'b@x')).id) == 10)
 
 		local ok, err = try_mutation(db, db.put, 'child', '{}',
 			{id = 10, pid = 99, cat = 'c', email = 'c@x', name = 'C'})
 		assert(not ok and iserror(err, 'row') and err.message:find('fk', 1, true),
 			tostring(err))
-		r = db:get('child', '{pid cat email name}', 10)
+		r = db:find('child', '{pid cat email name}', 10)
 		assert(num(r.pid) == 2 and r.cat == 'b' and r.email == 'b@x' and r.name == nil)
-		assert(not db:try_get(ix_pid, nil, 99) and num((db:must_get(ix_pid, '{}', 2)).id) == 10)
-		assert(not db:try_get(ix_cat, nil, 'c') and num((db:must_get(ix_cat, '{}', 'b')).id) == 10)
-		assert(not db:try_get(ix_email, nil, 'c@x')
-			and num((db:must_get(ix_email, '{}', 'b@x')).id) == 10)
+		assert(not db:try_find(ix_pid, nil, 99) and num((db:must_find(ix_pid, '{}', 2)).id) == 10)
+		assert(not db:try_find(ix_cat, nil, 'c') and num((db:must_find(ix_cat, '{}', 'b')).id) == 10)
+		assert(not db:try_find(ix_email, nil, 'c@x')
+			and num((db:must_find(ix_email, '{}', 'b@x')).id) == 10)
 		db:commit()
 	end)
 end
@@ -1564,9 +1564,9 @@ function test.try_put_unchanged_index_keys()
 		db.try_put_raw = nil
 
 		assert(index_writes == 0, index_writes)
-		assert(db:get('t', 'name', 1) == 'AA')
-		assert(num((db:must_get(ix_cat, '{}', 'a')).id) == 1)
-		assert(num((db:must_get(ix_email, '{}', 'a@x')).id) == 1)
+		assert(db:find('t', 'name', 1) == 'AA')
+		assert(num((db:must_find(ix_cat, '{}', 'a')).id) == 1)
+		assert(num((db:must_find(ix_email, '{}', 'a@x')).id) == 1)
 		db:commit()
 	end)
 end
@@ -1591,7 +1591,7 @@ function test.try_put_slow_path_early_exits()
 		local ok, err = try_mutation(db, db.insert, 't', '{}', {id = 1, email = 'b@x'})
 		assert(not ok and db.txn == outer_txn)
 		check_row_error(err, 'insert', 't', 'already_exists')
-		assert(db:get('t', 'email', 1) == 'a@x')
+		assert(db:find('t', 'email', 1) == 'a@x')
 
 		ok, err = try_mutation(db, db.update, 't', '{}', {id = 99, email = 'z@x'})
 		assert(not ok and db.txn == outer_txn)
@@ -1619,7 +1619,7 @@ function test.try_put_cols_formats()
 			pk = {'k'},
 		})
 		local function assert_row(k, a, b, c)
-			local r = db:get('t', '{a b c}', k)
+			local r = db:find('t', '{a b c}', k)
 			local function eq(v, n)
 				return n == nil and v == nil or v ~= nil and num(v) == n
 			end
@@ -1678,7 +1678,7 @@ function test.cursor_update_maintains_index()
 		db:insert('t', '{}', {id = 2, cat = 'b', name = 'two'})
 		local _,_,ix = db:add_index('t', {'cat'})
 		local cur = db:cursor('t', 'w')
-		assert(cur:try_get(nil, 1))
+		assert(cur:try_find(nil, 1))
 		assert(cur:update('cat', 'b')) --move id 1 from cat 'a' to cat 'b'
 		cur:close()
 		local names = {}
@@ -1707,9 +1707,9 @@ function test.cursor_is_null()
 		local cur = db:cursor('t')
 		local is_null, err = cur:is_null'note'
 		assert(is_null and err == 'not_found')
-		assert(cur:try_get(nil, 1))
+		assert(cur:try_find(nil, 1))
 		assert(cur:is_null'note')
-		assert(cur:try_get(nil, 2))
+		assert(cur:try_find(nil, 2))
 		assert(not cur:is_null'note')
 		cur:close()
 
@@ -1754,28 +1754,28 @@ function test.cursor_update_through_index()
 		assert(num(rec.id) == 1 and rec.cat == 'c')
 		cur:close()
 
-		assert(db:get('t', 'name', 1) == 'uno')
-		assert(db:get('t', 'cat', 1) == 'c')
-		assert(not db:try_get(ix, nil, 'a'))
-		assert(num(db:must_get(ix, '{}', 'c').id) == 1)
+		assert(db:find('t', 'name', 1) == 'uno')
+		assert(db:find('t', 'cat', 1) == 'c')
+		assert(not db:try_find(ix, nil, 'a'))
+		assert(num(db:must_find(ix, '{}', 'c').id) == 1)
 
 		cur = db:cursor(ux)
-		assert(cur:try_get(nil, 'two'))
+		assert(cur:try_find(nil, 'two'))
 		assert(cur:update('name', 'dos'))
 		rec = cur:current('{}')
 		assert(num(rec.id) == 2 and rec.name == 'dos')
 		cur:close()
-		assert(not db:try_get(ux, nil, 'two'))
-		assert(num(db:must_get(ux, '{}', 'dos').id) == 2)
+		assert(not db:try_find(ux, nil, 'two'))
+		assert(num(db:must_find(ux, '{}', 'dos').id) == 2)
 
 		local ok, err = catch('row field', db.atomic, db, 'w', function()
 			local cur = db:cursor(ux)
-			assert(cur:try_get(nil, 'dos'))
+			assert(cur:try_find(nil, 'dos'))
 			cur:update('name', 'uno')
 		end)
 		assert(not ok)
 		check_row_error(err, 'c_update', 't', 'already_exists')
-		assert(db:get('t', 'name', 2) == 'dos')
+		assert(db:find('t', 'name', 2) == 'dos')
 		db:commit()
 	end)
 end
@@ -1797,22 +1797,22 @@ function test.cursor_update_unique_index()
 		db:insert('t', '{}', {id = 2, email = 'b@x'})
 		local _,_,ix = db:add_index('t', {'email', is_unique = true})
 		local cur = db:cursor('t', 'w')
-		assert(cur:try_get(nil, 1))
+		assert(cur:try_find(nil, 1))
 		assert(cur:update('email', 'c@x'))
 		cur:close()
-		assert(num(db:must_get(ix, '{}', 'c@x').id) == 1)
-		assert(not db:try_get(ix, nil, 'a@x')) --old index key gone
+		assert(num(db:must_find(ix, '{}', 'c@x').id) == 1)
+		assert(not db:try_find(ix, nil, 'a@x')) --old index key gone
 
 		local ok, err = catch('row field', db.atomic, db, 'w', function()
 			local cur = db:cursor('t', 'w')
-			assert(cur:try_get(nil, 2))
+			assert(cur:try_find(nil, 2))
 			cur:update('email', 'c@x')
 		end)
 		assert(not ok)
 		check_row_error(err, 'c_update', 't', 'already_exists')
-		assert(db:get('t', 'email', 2) == 'b@x')
-		assert(num(db:must_get(ix, '{}', 'c@x').id) == 1)
-		assert(num(db:must_get(ix, '{}', 'b@x').id) == 2)
+		assert(db:find('t', 'email', 2) == 'b@x')
+		assert(num(db:must_find(ix, '{}', 'c@x').id) == 1)
+		assert(num(db:must_find(ix, '{}', 'b@x').id) == 2)
 
 		ok, err = catch('row field', db.atomic, db, 'w', function()
 			db:cursor('t', 'w'):update('email', 'd@x')
@@ -1869,11 +1869,11 @@ function test.cursor_delete_maintains_indexes()
 		local _,_,ix = db:add_index('t', {'tag'})
 
 		local cur = db:cursor('t')
-		assert(cur:try_get(nil, 3))
+		assert(cur:try_find(nil, 3))
 		cur:del()
 		cur:close()
 		assert(not db:exists('t', 3))
-		assert(not db:try_get(ix, nil, 'b'))
+		assert(not db:try_find(ix, nil, 'b'))
 
 		cur = db:cursor(ix)
 		local id = cur:first()
@@ -1881,7 +1881,7 @@ function test.cursor_delete_maintains_indexes()
 		cur:del()
 		cur:close()
 		assert(not db:exists('t', 1))
-		assert(num(db:must_get(ix, '{}', 'a').id) == 2)
+		assert(num(db:must_find(ix, '{}', 'a').id) == 2)
 
 		local ok, err = catch('row field', db.atomic, db, 'w', function()
 			db:cursor('t'):del()
@@ -1912,7 +1912,7 @@ function test.cursor_delete_during_iteration()
 			n = n + 1
 		end
 		assert(n == 4, n)
-		assert(not db:try_get(ix, nil, 'a'))
+		assert(not db:try_find(ix, nil, 'a'))
 
 		for i = 1, 4 do db:insert('t', '{}', {id = i, tag = 'a'}) end
 		n = 0
@@ -1942,7 +1942,7 @@ function test.cursor_delete_enforces_fks()
 
 		local ok, err = catch('row field', db.atomic, db, 'w', function()
 			local cur = db:cursor('parent')
-			assert(cur:try_get(nil, 1))
+			assert(cur:try_find(nil, 1))
 			cur:del()
 		end)
 		assert(not ok)
@@ -1976,7 +1976,7 @@ function test.delete_through_indexes()
 		assert(db:del(ux, 'c@x') == true)
 		assert(db:del(ux, 'c@x') == false)
 		assert(not db:exists('t', 3, 1))
-		assert(not db:try_get(ix, nil, 'b', 8))
+		assert(not db:try_find(ix, nil, 'b', 8))
 
 		local ok, err = pcall(db.del, db, ix, 'a', 7)
 		assert(not ok)
@@ -1984,7 +1984,7 @@ function test.delete_through_indexes()
 			tostring(err))
 		assert(db:exists('t', 1, 1))
 		assert(db:exists('t', 2, 1))
-		assert(num(db:must_get(ix, '{}', 'a', 7).id) == 1)
+		assert(num(db:must_find(ix, '{}', 'a', 7).id) == 1)
 		db:commit()
 	end)
 end
@@ -2006,13 +2006,13 @@ function test.put_replaces()
 		db:put('t', '{}', {id = 1, a = 10, b = 'x'})
 		--partial put on an existing row replaces it: unlisted 'b' becomes null
 		db:put('t', '{}', {id = 1, a = 20})
-		local g = db:get('t', '{a b}', 1)
+		local g = db:find('t', '{a b}', 1)
 		assert(num(g.a) == 20 and g.b == nil, ('%s,%s'):format(S(g.a), S(g.b)))
 		assert(db:is_null('t', 'b', 1) == true)
 		--contrast: update preserves the unlisted column
 		db:put('t', '{}', {id = 1, a = 30, b = 'y'})
 		db:update('t', '{}', {id = 1, a = 40})
-		g = db:get('t', '{a b}', 1)
+		g = db:find('t', '{a b}', 1)
 		assert(num(g.a) == 40 and g.b == 'y', ('%s,%s'):format(S(g.a), S(g.b)))
 		db:commit()
 	end)
@@ -2040,16 +2040,16 @@ function test.rename_table()
 		db:begin'w'; db:rename_table('t', 'u'); db:commit()
 		db:begin'r'
 		assert(not db:table_exists't' and db:table_exists'u')
-		assert(num(db:get('u', 'v', 1)) == 10)
+		assert(num(db:find('u', 'v', 1)) == 10)
 		local _, sch = db:dbi_schema'u'
 		assert(sch.name == 'u', sch.name)
-		assert(not db:get_raw('$schema', 't', 1)) --no orphan
-		assert(db:get_raw('$schema', 'u', 1))
+		assert(not db:find_raw('$schema', 't', 1)) --no orphan
+		assert(db:find_raw('$schema', 'u', 1))
 		db:commit(); db:close()
 		db = mdbx_open(file) --reopen: u loads, t gone
 		db:begin'r'
 		assert(db:table_exists'u' and not db:table_exists't')
-		assert(num(db:get('u', 'v', 1)) == 10)
+		assert(num(db:find('u', 'v', 1)) == 10)
 		db:commit(); db:close()
 	end, debug.traceback)
 	cleanup(file)
@@ -2075,7 +2075,7 @@ function test.table_ddl_expected_errors()
 
 		ok, err = catch('schema', db.rename_table, db, 'missing', 'x')
 		assert(not ok and iserror(err, 'schema'), tostring(err))
-		assert(err.event == 't_rename' and err.table == 'missing', tostring(err))
+		assert(err.table == 'missing', tostring(err))
 		assert(db.txn == nil)
 
 		db:begin'w'
@@ -2252,11 +2252,11 @@ function test.fk_insert_check()
 		--update to a missing parent -> rejected, unchanged
 		local ok2, err2 = try_mutation(db, db.update, 'child', '{}', {id = 10, pid = 99})
 		assert(ok2 == false and is_row_error(err2, 'fk'), S(err2))
-		assert(num(db:get('child', 'pid', 10)) == 1)
+		assert(num(db:find('child', 'pid', 10)) == 1)
 		--update to another existing parent -> ok
 		db:insert('parent', '{}', {id = 2})
 		db:update('child', '{}', {id = 10, pid = 2})
-		assert(num(db:get('child', 'pid', 10)) == 2)
+		assert(num(db:find('child', 'pid', 10)) == 2)
 
 		--nullable fk: null skips the check
 		db:insert('child', '{}', {id = 20, pid = 1, opt = null})
@@ -2300,7 +2300,7 @@ function test.fk_partial_composite_update()
 
 		local ok, err = try_mutation(db, db.update, 'child', '{}', {id = 10, a = 2})
 		assert(ok == false and is_row_error(err, 'fk'), ('%s,%s'):format(S(ok), S(err)))
-		local r = db:get('child', '{a b}', 10)
+		local r = db:find('child', '{a b}', 10)
 		assert(num(r.a) == 1 and num(r.b) == 1, ('%s,%s'):format(S(r.a), S(r.b)))
 		db:commit()
 	end)
@@ -2382,7 +2382,7 @@ function test.fk_default_check()
 		--with parent 7 present, the defaulted fk is accepted
 		db:insert('parent', '{}', {id = 7})
 		db:insert('child', '{}', {id = 3})
-		assert(num(db:get('child', 'dpid', 3)) == 7)
+		assert(num(db:find('child', 'dpid', 3)) == 7)
 		db:commit()
 	end)
 end
@@ -2575,7 +2575,7 @@ function test.fk_retained_index_readd()
 		assert(schema.ixs and schema.ixs[ix])
 		assert(#schema.indexes == 1)
 		assert(schema.fks['pid'].index.name == ix)
-		assert(num((db:must_get(ix, '{}', 1)).id) == 10)
+		assert(num((db:must_find(ix, '{}', 1)).id) == 10)
 
 		db:drop_fk('child', 'pid')
 		assert(db:table_exists(ix), 're-added user index survives fk drop')
@@ -2748,7 +2748,7 @@ function test.fk_delete_set_null()
 		assert(db:exists('child', 10) and db:exists('child', 11))
 		assert(db:is_null('child', 'pid', 10) and db:is_null('child', 'pid', 11))
 		--child under parent 2 untouched
-		assert(num(db:get('child', 'pid', 12)) == 2)
+		assert(num(db:find('child', 'pid', 12)) == 2)
 		db:commit()
 	end)
 end
@@ -3155,7 +3155,7 @@ function test.ddl_abort_index_cached()
 		local _, ts2 = db:dbi_schema't'
 		assert(db:table_exists(ix) and ts2.ixs[ix] and #ts2.indexes == 1)
 		db:insert('t', '{}', {id = 2, val = 20})
-		assert(num((db:must_get(ix, '{}', 20)).id) == 2)
+		assert(num((db:must_find(ix, '{}', 20)).id) == 2)
 		assert_consistent(db, 'after aborted index drop')
 		db:commit()
 	end)
@@ -3265,7 +3265,7 @@ function test.txn_commit_persists()
 		db:insert('kv', '{}', {k = 1, v = 10})
 		db:commit(); db:close()
 		db = mdbx_open(file); db:begin'r'
-		assert(db:exists('kv', 1) and num(db:get('kv', 'v', 1)) == 10)
+		assert(db:exists('kv', 1) and num(db:find('kv', 'v', 1)) == 10)
 		db:commit(); db:close()
 	end, debug.traceback)
 	cleanup(file); assert(ok, err)
@@ -3361,7 +3361,7 @@ function test.atomic_commit()
 		end)
 		db:close()
 		db = mdbx_open(file); db:begin'r'
-		assert(db:exists('kv', 1) and num(db:get('kv', 'v', 1)) == 10)
+		assert(db:exists('kv', 1) and num(db:find('kv', 'v', 1)) == 10)
 		db:commit(); db:close()
 	end, debug.traceback)
 	cleanup(file); assert(ok, err)
@@ -3485,7 +3485,7 @@ function test.cursor_must_not_found()
 		end
 		check('must_first', 'first')
 		check('must_current', 'current')
-		check('must_get', 'c_get', nil, 1)
+		check('must_find', 'c_get', nil, 1)
 	end)
 end
 
@@ -3503,40 +3503,38 @@ function test.cols_format_matrix()
 		db:insert('t', 'k a b'  , 2, 20, 200)            --positional scalars (listed)
 		db:insert('t', '[k a b]', {3, 30, 300})          --positional table
 		db:insert('t', '{}'     , {k = 4, a = 40, b = 400}) --named table
-		assert(num(db:get('t', 'a', 1)) == 10)                       --single scalar
-		local a, b = db:get('t', 'a b', 4); assert(num(a) == 40 and num(b) == 400) --scalars
-		local r = db:get('t', '[a b]', 3); assert(num(r[1]) == 30 and num(r[2]) == 300) --pos table
-		local g = db:get('t', '{a b}', 2); assert(num(g.a) == 20 and num(g.b) == 200) --named table
+		assert(num(db:find('t', 'a', 1)) == 10)                       --single scalar
+		local a, b = db:find('t', 'a b', 4); assert(num(a) == 40 and num(b) == 400) --scalars
+		local r = db:find('t', '[a b]', 3); assert(num(r[1]) == 30 and num(r[2]) == 300) --pos table
+		local g = db:find('t', '{a b}', 2); assert(num(g.a) == 20 and num(g.b) == 200) --named table
 		db:commit()
 	end)
 end
 
---get/exists edges: exists returns (record_exists, table_exists); try_get
---hits/misses; must_get raises on miss.
-function test.get_and_exists_edges()
-	with_db('get_and_exists_edges', function(db)
+--find/exists edges: exists returns record_exists; try_find
+--hits/misses; must_find raises on miss.
+function test.find_and_exists_edges()
+	with_db('find_and_exists_edges', function(db)
 		db:begin'w'
 		db:create_table('t', {name = 't', fields = {
 			{col = 'k', mdbx_type = 'u32', not_null = true},
 			{col = 'v', mdbx_type = 'u32', not_null = true},
 		}, pk = {'k'}})
 		db:insert('t', '{}', {k = 1, v = 10})
-		local rec, tab = db:exists('t', 1)
-		assert(rec == true and tab, 'present row')
-		local rec2, tab2 = db:exists('t', 99)
-		assert(not rec2 and tab2, 'missing row, present table')
-		local rec3, tab3 = db:exists('nope', 1)
-		assert(not rec3 and not tab3, 'missing table')
-		assert(db:try_get('t', 'v', 1), 'try_get hit')
-		assert(db:try_get('t', 'v', 99) == false, 'try_get miss')
-		assert(num(db:must_get('t', 'v', 1)) == 10)
-		local ok, err = catch('row field', db.must_get, db, 't', 'v', 99)
+		local rec = db:exists('t', 1)
+		assert(rec == true, 'present row')
+		local rec2 = db:exists('t', 99)
+		assert(not rec2, 'missing row, present table')
+		assert(db:try_find('t', 'v', 1), 'try_find hit')
+		assert(db:try_find('t', 'v', 99) == false, 'try_find miss')
+		assert(num(db:must_find('t', 'v', 1)) == 10)
+		local ok, err = catch('row field', db.must_find, db, 't', 'v', 99)
 		assert(not ok)
 		check_row_error(err, 'get', 't', 'not_found')
 		assert(db.txn == nil)
 
 		db:begin'r'
-		local ok, err = catch('schema', db.must_get, db, 'nope', nil, 1)
+		local ok, err = catch('schema', db.must_find, db, 'nope', nil, 1)
 		assert(not ok and iserror(err, 'schema'), tostring(err))
 		assert(err.event == 't_open' and err.table == 'nope'
 			and err.message == 'not_found', tostring(err))
@@ -3554,7 +3552,7 @@ function test.put_records()
 		}, pk = {'k'}})
 		db:put_records('t', '[]', {{1, 10}, {2, 20}, {3, 30}})
 		assert(db:exists('t', 1) and db:exists('t', 2) and db:exists('t', 3))
-		assert(num(db:get('t', 'v', 2)) == 20 and num(db:get('t', 'v', 3)) == 30)
+		assert(num(db:find('t', 'v', 2)) == 20 and num(db:find('t', 'v', 3)) == 30)
 		db:commit()
 	end)
 end
@@ -3596,8 +3594,8 @@ function test.float_specials()
 		}
 		for _, c in ipairs(cases) do db:insert('t', '{}', {id = c[1], a = c[2], b = c[3]}) end
 		local function chk(id, exp)
-			local a = num(db:get('t', 'a', id))
-			local b = num(db:get('t', 'b', id))
+			local a = num(db:find('t', 'a', id))
+			local b = num(db:find('t', 'b', id))
 			if exp ~= exp then --NaN: the only value not equal to itself
 				assert(a ~= a and b ~= b, 'NaN lost at id '..id)
 			elseif exp == 0 then --distinguish -0 from +0 via 1/x (-inf vs +inf)
@@ -3651,18 +3649,18 @@ function test.null_vs_default()
 		db:insert('t', '{}', {id = 1}) --neither opt nor def given
 		assert(db:is_null('t', 'opt', 1) == true , 'unset nullable -> null')
 		assert(db:is_null('t', 'def', 1) == false, 'unset-with-default -> not null')
-		assert(num(db:get('t', 'def', 1)) == 7   , 'default applied')
+		assert(num(db:find('t', 'def', 1)) == 7   , 'default applied')
 		db:insert('t', '{}', {id = 2, opt = null, def = 9}) --explicit null / value
 		assert(db:is_null('t', 'opt', 2) == true)
-		assert(num(db:get('t', 'def', 2)) == 9)
+		assert(num(db:find('t', 'def', 2)) == 9)
 		db:insert('t', '{}', {id = 3, def = null})
 		assert(db:is_null('t', 'def', 3) == true, 'explicit null bypasses default')
 		db:insert('t', '{}', {id = 4, opt = 5})
-		assert(db:is_null('t', 'opt', 4) == false and num(db:get('t', 'opt', 4)) == 5)
+		assert(db:is_null('t', 'opt', 4) == false and num(db:find('t', 'opt', 4)) == 5)
 		db:update('t', '{}', {id = 4, opt = null}) --set to null
 		assert(db:is_null('t', 'opt', 4) == true)
 		db:update('t', '{}', {id = 4, opt = 8})    --and back
-		assert(db:is_null('t', 'opt', 4) == false and num(db:get('t', 'opt', 4)) == 8)
+		assert(db:is_null('t', 'opt', 4) == false and num(db:find('t', 'opt', 4)) == 8)
 		db:commit()
 	end)
 end
@@ -3679,7 +3677,7 @@ function test.atomic_row_errors()
 		local ok, err = try_mutation(db, db.insert, 't', '{}', {k = 1, v = 99})
 		assert(not ok)
 		check_row_error(err, 'insert', 't', 'already_exists')
-		assert(num(db:get('t', 'v', 1)) == 10, 'failed insert must not overwrite')
+		assert(num(db:find('t', 'v', 1)) == 10, 'failed insert must not overwrite')
 		local ok2, err2 = try_mutation(db, db.update, 't', '{}', {k = 2, v = 20})
 		assert(not ok2)
 		check_row_error(err2, 'update', 't', 'not_found')
@@ -3733,14 +3731,14 @@ function test.rename_column_basic()
 		db:insert('t', '{}', {id = 1, title = 'hi'})
 		db:rename_column('t', 'title', 'name') --value column
 		db:rename_column('t', 'id', 'key')     --pk column
-		assert(db:get('t', 'name', 1) == 'hi', 'value by new name')
-		assert(not pcall(db.get, db, 't', 'title', 1), 'old name should be gone')
+		assert(db:find('t', 'name', 1) == 'hi', 'value by new name')
+		assert(not pcall(db.find, db, 't', 'title', 1), 'old name should be gone')
 		db:insert('t', '{}', {key = 2, name = 'yo'}) --write by new names
-		assert(db:get('t', 'name', 2) == 'yo')
+		assert(db:find('t', 'name', 2) == 'yo')
 		db:del('t', 1); assert(not db:exists('t', 1))
 		db:commit(); db:close()
 		db = mdbx_open(file); db:begin'r' --persists
-		assert(db:get('t', 'name', 2) == 'yo')
+		assert(db:find('t', 'name', 2) == 'yo')
 		local _, sch = db:dbi_schema't'
 		assert(sch.fields.key and sch.fields.name and not sch.fields.id and not sch.fields.title)
 		db:commit(); db:close()
@@ -3773,7 +3771,7 @@ function test.rename_column_indexed()
 		--unique still enforced on the renamed column
 		assert(try_mutation(db, db.insert, 't', '{}', {id = 2, mail = 'a@x', years = 9}) == false)
 		--lookup via the renamed index table
-		local r = db:must_get('t/mail', '{}', 'a@x')
+		local r = db:must_find('t/mail', '{}', 'a@x')
 		assert(num(r.id) == 1, S(r.id))
 		db:commit(); db:close()
 		db = mdbx_open(file); db:begin'w' --persists + still enforces
@@ -3782,7 +3780,7 @@ function test.rename_column_indexed()
 		assert(sch.ixs['t/mail'][1] == 'mail')
 		assert(sch.ixs['t/years'][1] == 'years')
 		assert(try_mutation(db, db.insert, 't', '{}', {id = 3, mail = 'a@x', years = 9}) == false)
-		assert(num((db:must_get('t/mail', '{}', 'a@x')).id) == 1)
+		assert(num((db:must_find('t/mail', '{}', 'a@x')).id) == 1)
 		db:commit(); db:close()
 	end, debug.traceback)
 	cleanup(file); assert(ok, err)
@@ -3883,7 +3881,7 @@ function test.add_fk_validates_definition()
 			{col = 'raw_ai'    , mdbx_type = 'utf8', maxlen = 8, nozero = true,
 				mdbx_collation = 'utf8_ai_ci'},
 			{col = 'short_code', mdbx_type = 'utf8', maxlen = 4, nozero = true},
-			{col = 'padded'    , mdbx_type = 'utf8', maxlen = 8, padded = true},
+			{col = 'padded'    , mdbx_type = 'utf8', maxlen = 8, padded = true, nozero = true},
 			{col = 'zero'      , mdbx_type = 'utf8', maxlen = 8},
 		}, pk = {'id'}})
 
@@ -3977,7 +3975,7 @@ function test.composite_fk_match_simple()
 		db:update('child', '{}', {id = 10, b = 99})
 		local ok, err = try_mutation(db, db.update, 'child', '{}', {id = 10, a = 99})
 		assert(ok == false and is_row_error(err, 'fk'), ('%s,%s'):format(S(ok), S(err)))
-		assert(db:is_null('child', 'a', 10) and num(db:get('child', 'b', 10)) == 99)
+		assert(db:is_null('child', 'a', 10) and num(db:find('child', 'b', 10)) == 99)
 		db:commit()
 	end)
 end
@@ -4000,7 +3998,7 @@ function test.add_fk_owns_definition()
 		local _, child = db:dbi_schema'child'
 		assert(fk.name == 'pid' and fk.index.name == 'child/pid')
 		assert(child.fks['pid'] == fk)
-		local ok, v, v_sz = db:get_raw('$schema', 'child', #'child')
+		local ok, v, v_sz = db:find_raw('$schema', 'child', #'child')
 		assert(ok)
 		local stored = eval(str(v, v_sz))
 		assert(stored.fks.pid.index == nil)
@@ -4023,13 +4021,13 @@ function test.ai_ci_encoding_edges()
 		db:insert('t', '{}', {id = 2, s = 'É'})
 		db:insert('t', '{}', {id = 3, s = 'é'})
 		db:insert('t', '{}', {id = 4, s = 'Straße'})
-		assert(db:get('t', 's', 1) == '')
-		assert(db:get('t', 's', 2) == 'É')
-		assert(db:get('t', 's', 3) == 'é')
-		assert(db:get('t', 's', 4) == 'Straße')
-		assert(num((db:must_get('t/s', '{}', 'STRASSE')).id) == 4)
+		assert(db:find('t', 's', 1) == '')
+		assert(db:find('t', 's', 2) == 'É')
+		assert(db:find('t', 's', 3) == 'é')
+		assert(db:find('t', 's', 4) == 'Straße')
+		assert(num((db:must_find('t/s', '{}', 'STRASSE')).id) == 4)
 
-		local ok, err = try_mutation(db, db.get,
+		local ok, err = try_mutation(db, db.find,
 			't/s', '{}', string.char(0xff))
 		assert(not ok and iserror(err, 'field'), tostring(err))
 
@@ -4040,7 +4038,7 @@ function test.ai_ci_encoding_edges()
 		}, pk = {'id'}})
 		db:add_index('short', {'s'})
 		db:insert('short', '{}', {id = 1, s = 'É'})
-		assert(num((db:must_get('short/s', '{}', 'E')).id) == 1)
+		assert(num((db:must_find('short/s', '{}', 'E')).id) == 1)
 		ok, err = try_mutation(db, db.insert, 'short', '{}', {id = 2, s = 'abc'})
 		assert(not ok and iserror(err, 'field'),
 			'maxlen was checked after folding instead of on input')
@@ -4051,12 +4049,12 @@ function test.ai_ci_encoding_edges()
 			{col = 'id', mdbx_type = 'u32', not_null = true},
 		}, pk = {'s'}})
 		db:insert('key', '{}', {s = 'É', id = 1})
-		assert(db:get('key', 'id', 'E') == nil)
+		assert(db:find('key', 'id', 'E') == nil)
 		db:add_index('key', {'s'})
-		assert(num((db:must_get('key/s', '{}', 'E')).id) == 1)
+		assert(num((db:must_find('key/s', '{}', 'E')).id) == 1)
 		db:insert('key', '{}', {s = 'E', id = 2})
-		assert(num(db:get('key', 'id', 'É')) == 1)
-		assert(num(db:get('key', 'id', 'E')) == 2)
+		assert(num(db:find('key', 'id', 'É')) == 1)
+		assert(num(db:find('key', 'id', 'E')) == 2)
 		db:commit()
 	end)
 end
@@ -4126,19 +4124,19 @@ function test.ai_ci_folded_maxlen()
 		db:add_index('val', {'s', is_unique = true})
 		db:insert('val', '{}', {id = 1, s = '각', n = 1})
 		db:update('val', '{id n}', {id = 1, n = 2})
-		local s = db:get('val', 's', 1)
+		local s = db:find('val', 's', 1)
 		assert(s == '각' and #s == 3, ('%q (%d)'):format(s, #s))
-		assert(num(db:get('val', 'n', 1)) == 2)
-		assert(num((db:must_get('val/s', '{}', '각')).id) == 1)
-		local ok, err = try_mutation(db, db.get, 'val/s', '{}', 'abcd')
+		assert(num(db:find('val', 'n', 1)) == 2)
+		assert(num((db:must_find('val/s', '{}', '각')).id) == 1)
+		local ok, err = try_mutation(db, db.find, 'val/s', '{}', 'abcd')
 		assert(not ok and iserror(err, 'field'), tostring(err))
 		db:commit()
 	end, function(db)
 		db:begin'r'
-		local s = db:get('val', 's', 1)
+		local s = db:find('val', 's', 1)
 		assert(s == '각' and #s == 3, ('%q (%d)'):format(s, #s))
-		assert(num(db:get('val', 'n', 1)) == 2)
-		assert(num((db:must_get('val/s', '{}', '각')).id) == 1)
+		assert(num(db:find('val', 'n', 1)) == 2)
+		assert(num((db:must_find('val/s', '{}', '각')).id) == 1)
 		db:commit()
 	end)
 end
@@ -4244,8 +4242,7 @@ function test.direct_index_open_after_reopen()
 		local r = cur:first('{}')
 		assert(num(r.id) == 1)
 		cur:close()
-		local cur, err = db:try_cursor'missing'
-		assert(not cur and err == 'not_found')
+		assert(not db:table_exists'missing')
 		db:commit()
 	end)
 end
@@ -4273,9 +4270,9 @@ function test.mixed_index_descending_pk_decode()
 		db:add_fk{table = 'child', cols = {'a', 'c', 'b'},
 			ref_table = 'parent', ref_cols = {'a', 'c', 'b'}, ondelete = 'cascade'}
 
-		local r = db:must_get('child/a-c-b', '{}', 'aa', 'cc', 1)
+		local r = db:must_find('child/a-c-b', '{}', 'aa', 'cc', 1)
 		assert(num(r.x) == 10 and r.a == 'aa' and r.c == 'cc' and num(r.b) == 1)
-		r = db:must_get('child/a-c-b', '{}', 'bb', 'dd', 2)
+		r = db:must_find('child/a-c-b', '{}', 'bb', 'dd', 2)
 		assert(num(r.x) == 20 and r.a == 'bb' and r.c == 'dd' and num(r.b) == 2)
 		db:del('parent', 'aa', 'cc', 1)
 		assert(not db:exists('child', 10, 'aa', 'cc'))
@@ -4302,7 +4299,7 @@ function test.fk_default_full_write_operations()
 
 		local ok, err = try_mutation(db, db.put, 'child', '{}', {id = 1})
 		assert(ok == false and is_row_error(err, 'fk'), ('%s,%s'):format(S(ok), S(err)))
-		assert(num(db:get('child', 'pid', 1)) == 8)
+		assert(num(db:find('child', 'pid', 1)) == 8)
 		ok, err = try_mutation(db, db.upsert, 'child', '{}', {id = 2})
 		assert(not ok and not db:exists('child', 2))
 		assert(is_row_error(err, 'fk'), tostring(err))
@@ -4310,8 +4307,8 @@ function test.fk_default_full_write_operations()
 		db:insert('parent', '{}', {id = 7})
 		db:put('child', '{}', {id = 1})
 		db:upsert('child', '{}', {id = 2})
-		assert(num(db:get('child', 'pid', 1)) == 7)
-		assert(num(db:get('child', 'pid', 2)) == 7)
+		assert(num(db:find('child', 'pid', 1)) == 7)
+		assert(num(db:find('child', 'pid', 2)) == 7)
 		db:commit()
 	end)
 end
@@ -4446,7 +4443,7 @@ function test.unknown_read_columns_rejected()
 			{col = 'v' , mdbx_type = 'u32'},
 		}, pk = {'id'}})
 		db:insert('t', '{}', {id = 1, v = 10})
-		assert(not pcall(db.get, db, 't', 'typo', 1))
+		assert(not pcall(db.find, db, 't', 'typo', 1))
 		local cur = db:cursor't'
 		assert(cur:first())
 		assert(not pcall(cur.current, cur, 'typo'))
@@ -4598,8 +4595,8 @@ function test.rename_column_failure_rolls_back()
 		assert(schema.fields.a and not schema.fields.x)
 		assert(db:table_exists't/a' and db:table_exists't/a-b')
 		assert(not db:table_exists't/x' and not db:table_exists't/x-b')
-		assert(num((db:must_get('t/a', '{}', 10)).id) == 1)
-		assert(num((db:must_get('t/a-b', '{}', 10, 20)).id) == 1)
+		assert(num((db:must_find('t/a', '{}', 10)).id) == 1)
+		assert(num((db:must_find('t/a-b', '{}', 10, 20)).id) == 1)
 		assert_consistent(db)
 		db:commit()
 	end)
@@ -4624,15 +4621,15 @@ function test.alter_table_values_in_place()
 		}, pk = {'id'}})
 		assert(db:dbi_raw't' == dbi, 'value-only alter replaced the DBI')
 		assert(db:is_null('t', 'v', 1) == true)
-		assert(num(db:get('t', 'v', 2)) == 7)
-		assert(num(db:get('t', 'x', 1)) == 5)
-		assert(num(db:get('t', 'x', 2)) == 5)
+		assert(num(db:find('t', 'v', 2)) == 7)
+		assert(num(db:find('t', 'x', 1)) == 5)
+		assert(num(db:find('t', 'x', 2)) == 5)
 		db:commit()
 	end, function(db)
 		db:begin'r'
 		assert(db:is_null('t', 'v', 1) == true)
-		assert(num(db:get('t', 'v', 2)) == 7)
-		assert(num(db:get('t', 'x', 1)) == 5)
+		assert(num(db:find('t', 'v', 2)) == 7)
+		assert(num(db:find('t', 'x', 1)) == 5)
 		db:commit()
 	end)
 end
@@ -4654,8 +4651,8 @@ function test.alter_table_rewrites_keys()
 				auto_increment = true},
 			{col = 'v' , mdbx_type = 'u32'},
 		}, pk = {'id'}})
-		assert(num(db:get('t', 'v', id0)) == 10)
-		assert(num(db:get('t', 'v', id1)) == 20)
+		assert(num(db:find('t', 'v', id0)) == 10)
+		assert(num(db:find('t', 'v', id1)) == 20)
 		local id2 = num(db:insert('t', '{}', {v = 30}))
 		assert(id2 == id1 + 1, ('%d,%d'):format(id1, id2))
 		db:commit()
@@ -4663,9 +4660,9 @@ function test.alter_table_rewrites_keys()
 		db:begin'r'
 		local _, schema = db:dbi_schema't'
 		assert(schema.fields.id.mdbx_type == 'u64')
-		assert(num(db:get('t', 'v', 0)) == 10)
-		assert(num(db:get('t', 'v', 1)) == 20)
-		assert(num(db:get('t', 'v', 2)) == 30)
+		assert(num(db:find('t', 'v', 0)) == 10)
+		assert(num(db:find('t', 'v', 1)) == 20)
+		assert(num(db:find('t', 'v', 2)) == 30)
 		db:commit()
 	end)
 end
@@ -4699,10 +4696,10 @@ function test.alter_table_rebinds_indexes()
 		}, pk = {'id'}})
 
 		db:update('child', '{v}', {id = 10, v = 30})
-		local row = db:must_get(ix, '{}', 3)
+		local row = db:must_find(ix, '{}', 3)
 		assert(num(row.v) == 30 and num(row.x) == 7)
 		db:insert('child', '{}', {id = 11, pid = 1, tag = 4, v = 40})
-		assert(num((db:must_get(ix, '{}', 4)).x) == 7)
+		assert(num((db:must_find(ix, '{}', 4)).x) == 7)
 		assert(try_mutation(db, db.insert, 'child', '{}',
 			{id = 12, pid = 99, tag = 5}) == false)
 		assert(try_mutation(db, db.del, 'parent', 1) == false)
@@ -4776,12 +4773,207 @@ function test.alter_table_key_collision_rolls_back()
 		assert(err.event == 't_alter' and err.table == 't', tostring(err))
 		local _, schema = db:dbi_schema't'
 		assert(schema.fields.id.mdbx_type == 'f64')
-		assert(num(db:get('t', 'v', 1.2)) == 12)
-		assert(num(db:get('t', 'v', 1.8)) == 18)
+		assert(num(db:find('t', 'v', 1.2)) == 12)
+		assert(num(db:find('t', 'v', 1.8)) == 18)
 		for name in db:each_table() do
 			assert(not name:starts'$alter/', name)
 		end
 		db:commit()
+	end)
+end
+
+-- prefix scans --------------------------------------------------------------
+
+local function make_3col_table(db, name)
+	db:create_table(name, {
+		fields = {
+			{col = 's1', mdbx_type = 'utf8', maxlen = 50, nozero = true, not_null = true},
+			{col = 's2', mdbx_type = 'utf8', maxlen = 50, nozero = true, not_null = true},
+			{col = 's3', mdbx_type = 'utf8', maxlen = 50, nozero = true, not_null = true},
+			{col = 'v',  mdbx_type = 'utf8', maxlen = 50},
+		},
+		pk = {'s1', 's2', 's3'},
+	})
+	db:put(name, nil, 'a', 'x', '1', 'ax1')
+	db:put(name, nil, 'a', 'x', '2', 'ax2')
+	db:put(name, nil, 'a', 'y', '1', 'ay1')
+	db:put(name, nil, 'b', 'x', '1', 'bx1')
+	db:put(name, nil, 'b', 'x', '2', 'bx2')
+	db:put(name, nil, 'c', 'z', '1', 'cz1')
+end
+
+function test.find_prefix_exact_match()
+	with_db('find_prefix_exact_match', function(db)
+		db:begin'w'
+		make_3col_table(db, 't')
+		db:commit()
+		db:begin()
+		local cur = db:cursor('t')
+		local s1, s2, s3, v = cur:find_prefix(nil, 'b', 'x')
+		assert(s1 == 'b' and s2 == 'x' and s3 == '1' and v == 'bx1', S(s1,s2,s3,v))
+		cur:close()
+		db:commit()
+	end)
+end
+
+function test.find_prefix_one_col_lands_on_first_match()
+	with_db('find_prefix_one_col_lands_on_first_match', function(db)
+		db:begin'w'
+		make_3col_table(db, 't')
+		db:commit()
+		db:begin()
+		local cur = db:cursor('t')
+		local s1, s2, s3, v = cur:find_prefix(nil, 'a')
+		assert(s1 == 'a' and s2 == 'x' and s3 == '1' and v == 'ax1', S(s1,s2,s3,v))
+		cur:close()
+		db:commit()
+	end)
+end
+
+function test.find_prefix_between_keys_is_not_found()
+	with_db('find_prefix_between_keys_is_not_found', function(db)
+		db:begin'w'
+		make_3col_table(db, 't')
+		db:commit()
+		db:begin()
+		local cur = db:cursor('t')
+		-- 'a','w' is between 'a','x' and nothing — 'w' < 'x' so first key >= prefix
+		-- is ('a','x','1') but its prefix ('a','x') != ('a','w')
+		local ok, err = cur:try_find_prefix(nil, 'a', 'w')
+		assert(not ok and err == 'not_found', S(ok, err))
+		cur:close()
+		db:commit()
+	end)
+end
+
+function test.find_prefix_past_last_is_not_found()
+	with_db('find_prefix_past_last_is_not_found', function(db)
+		db:begin'w'
+		make_3col_table(db, 't')
+		db:commit()
+		db:begin()
+		local cur = db:cursor('t')
+		local ok, err = cur:try_find_prefix(nil, 'z')
+		assert(not ok and err == 'not_found', S(ok, err))
+		cur:close()
+		db:commit()
+	end)
+end
+
+function test.each_prefix_first_col()
+	with_db('each_prefix_first_col', function(db)
+		db:begin'w'
+		make_3col_table(db, 't')
+		db:commit()
+		db:begin()
+		local cur = db:cursor('t')
+		local rows = {}
+		for _, s1, s2, s3 in cur:each_prefix(nil, 'a') do
+			rows[#rows+1] = s2..s3
+		end
+		cur:close()
+		db:commit()
+		assert(table.concat(rows, ',') == 'x1,x2,y1', table.concat(rows, ','))
+	end)
+end
+
+function test.each_prefix_two_cols()
+	with_db('each_prefix_two_cols', function(db)
+		db:begin'w'
+		make_3col_table(db, 't')
+		db:commit()
+		db:begin()
+		local cur = db:cursor('t')
+		local rows = {}
+		for _, s1, s2, s3 in cur:each_prefix(nil, 'a', 'x') do
+			rows[#rows+1] = s3
+		end
+		cur:close()
+		db:commit()
+		assert(table.concat(rows, ',') == '1,2', table.concat(rows, ','))
+	end)
+end
+
+function test.each_prefix_no_match()
+	with_db('each_prefix_no_match', function(db)
+		db:begin'w'
+		make_3col_table(db, 't')
+		db:commit()
+		db:begin()
+		local cur = db:cursor('t')
+		local count = 0
+		for _ in cur:each_prefix(nil, 'z') do count = count + 1 end
+		cur:close()
+		db:commit()
+		assert(count == 0)
+	end)
+end
+
+function test.db_each_prefix_auto_cursor()
+	with_db('db_each_prefix_auto_cursor', function(db)
+		db:begin'w'
+		make_3col_table(db, 't')
+		db:commit()
+		db:begin()
+		local rows = {}
+		for _, s1, s2, s3 in db:each_prefix('t', nil, 'b') do
+			rows[#rows+1] = s2..s3
+		end
+		db:commit()
+		assert(table.concat(rows, ',') == 'x1,x2', table.concat(rows, ','))
+	end)
+end
+
+function test.each_prefix_cursor_reuse()
+	with_db('each_prefix_cursor_reuse', function(db)
+		db:begin'w'
+		make_3col_table(db, 't')
+		db:commit()
+		db:begin()
+		local cur = db:cursor('t')
+		local result = {}
+		for _, prefix in ipairs{'a', 'b', 'c', 'z'} do
+			local rows = {}
+			for _, s1, s2, s3 in cur:each_prefix(nil, prefix) do
+				rows[#rows+1] = s2..s3
+			end
+			result[prefix] = table.concat(rows, ',')
+		end
+		cur:close()
+		db:commit()
+		assert(result['a'] == 'x1,x2,y1', result['a'])
+		assert(result['b'] == 'x1,x2',    result['b'])
+		assert(result['c'] == 'z1',        result['c'])
+		assert(result['z'] == '',          result['z'])
+	end)
+end
+
+function test.each_prefix_numeric_composite_pk()
+	with_db('each_prefix_numeric_composite_pk', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			fields = {
+				{col = 'pid', mdbx_type = 'u32', not_null = true},
+				{col = 'cid', mdbx_type = 'u32', not_null = true},
+				{col = 'v',   mdbx_type = 'utf8', maxlen = 20},
+			},
+			pk = {'pid', 'cid'},
+		})
+		db:put('t', '{}', {pid=1, cid=1, v='a'})
+		db:put('t', '{}', {pid=1, cid=2, v='b'})
+		db:put('t', '{}', {pid=2, cid=1, v='c'})
+		db:put('t', '{}', {pid=2, cid=2, v='d'})
+		db:put('t', '{}', {pid=3, cid=1, v='e'})
+		db:commit()
+		db:begin()
+		local cur = db:cursor('t')
+		local vals = {}
+		for _, pid, cid, v in cur:each_prefix(nil, 2) do
+			vals[#vals+1] = v
+		end
+		cur:close()
+		db:commit()
+		assert(table.concat(vals, ',') == 'c,d', table.concat(vals, ','))
 	end)
 end
 

@@ -25,32 +25,38 @@ TABLES
 	1) raw tables without a schema, to be used only with raw methods.
 	2) tables with a static declared-in-code paper schema (see schema.lua).
 	can only be created/restructured via sync_schema() and when opened the
-	on-disk schema must match the paper schema or dbi_schema() raises. this is how
-	you get declarative schemas with automatic schema migration.
+	on-disk schema must match the paper schema or dbi_schema() raises.
+	this is how you get declarative schemas with automatic schema migration.
 	3) tables without a paper schema, created with create_table() and
 	restructured manually via DDL ops, since there's no blueprint to sync to.
 
 API, extends API from mdbx.lua:
 
 CRUD
-	db:put          (table|dbi, [cols], keysvals...)
-	db:insert       (table|dbi, [cols], keysvals...) -> generated_id
-	db:update       (table|dbi, [cols], keysvals...)
-	db:upsert       (table|dbi, [cols], keysvals...)
-	db:is_null      (table|dbi, col, keys...) -> is_null, [reason]
-	db:exists       (table|dbi, keys...) -> record_exists, table_exists
-	db:[must_]get   (table|dbi, [val_cols], keys...) -> vals...
-	db:try_get      (table|dbi, [val_cols], keys...) -> true, vals... | false
-	db:del          (table|unique_index|dbi, keys...) -> row_deleted
-	db:put_records  (table|dbi, [cols, ]{keysvals1,...})
-	db:try_each     (table|dbi, [cols]) -> cur, keysvals...
+	db:put          (name|dbi, [cols], keysvals...)
+	db:insert       (name|dbi, [cols], keysvals...) -> generated_id
+	db:update       (name|dbi, [cols], keysvals...)
+	db:upsert       (name|dbi, [cols], keysvals...)
+	db:is_null      (name|dbi, col, keys...) -> is_null, [reason]
+	db:exists       (name|dbi, keys...) -> record_exists
+	db:[must_]find  (name|dbi, [val_cols], keys...) -> vals...
+	db:try_find     (name|dbi, [val_cols], keys...) -> true, vals... | false,err
+	db:del          (name|unique_index|dbi, keys...) -> row_deleted
+	db:put_records  (name|dbi, [cols, ]{keysvals1,...})
+	db:each         (name|dbi, [cols]) -> iter() -> cur, keysvals...
+	db:each_prefix  (name|dbi, [val_cols], pk_val1, ...) -> iter() -> cur, keysvals...
+	db:each_dup     (ix_name|dbi, [val_cols], ix_key_vals...) -> iter() -> cur, keysvals...
 CURSORS
-	db:[try_]cursor (table|dbi) -> cur      create cursor
-	cur:{first|last|next|prev|current}([cols]) -> keysvals...
+	db:cursor       (name|dbi) -> cur      create cursor
+	cur:[must_][try_]{first|last|next|prev|current}([val_cols]) -> keysvals...
 	cur:is_null     (col) -> is_null, [reason]
-	cur:[must_]get  ([val_cols], keys...) -> vals...
-	cur:try_get     ([val_cols], keys...) -> true, vals... | false
+	cur:[must_]find ([val_cols], keys...) -> vals...
+	cur:try_find    ([val_cols], keys...) -> true, vals... | false,err
 	cur:update      ([val_cols], vals...)
+	cur:[must_|try_]move (op, [val_cols]) -> keysvals... | false,err
+	cur:[try_]find_prefix ([val_cols], pk_val1, ...) -> keysvals... | false,err
+	cur:each_prefix ([val_cols], pk_val1, ...) -> iter() -> cur, keysvals...
+	cur:each_dup    ([val_cols], ix_key_vals...) -> iter() -> cur, keysvals...
 
 COLUMS LISTS & IN/OUT VALUES FORMATS
 
@@ -226,6 +232,7 @@ end
 --fw. decl.
 local cols_list
 local encode_key
+local encode_key_prefix
 local encode_val
 local decode_key
 local decode_val
@@ -236,8 +243,10 @@ local MS
 local function table_flags(schema)
 	if not schema then return 0 end
 	return bor(
-		schema.int_key and mdbx.MDBX_INTEGERKEY or 0,
-		schema.is_index and mdbx.MDBX_DUPSORT or 0
+		schema.int_key       and mdbx.MDBX_INTEGERKEY or 0,
+		schema.is_index      and mdbx.MDBX_DUPSORT    or 0,
+		schema.dup_fixedsize and mdbx.MDBX_DUPFIXED   or 0,
+		schema.dup_fixedsize and schema.val_schema.int_key and mdbx.MDBX_INTEGERDUP or 0
 	)
 end
 
@@ -729,7 +738,7 @@ function Db:load_table_schema(table_name)
 	if table_name == '$schema' then return end
 	if not self:table_exists'$schema' then return end
 	local k = table_name
-	local ok, v, v_len = self:get_raw('$schema', k, #k)
+	local ok, v, v_len = self:find_raw('$schema', k, #k)
 	if not ok then return end
 	local schema = eval(str(v, v_len))
 	--reconstruct schema from stored table schema.
@@ -1379,6 +1388,17 @@ end
 	--default val_cols for index tables are the val_cols of the val_table.
 	ix_schema.val_cols = val_schema.val_cols
 
+	--dup values (base table pks) have fixed size when the pk is fixed-size.
+	--used for MDBX_DUPFIXED/INTEGERDUP flags (table_flags) and bulk iteration (each_dup).
+	local dup_fixed = val_schema.int_key and true
+	if not dup_fixed then
+		dup_fixed = true
+		for _, f in ipairs(val_schema.key_fields) do
+			if f.maxlen and not f.padded then dup_fixed = false; break end
+		end
+	end
+	ix_schema.dup_fixedsize = dup_fixed and val_schema.key_fields.max_rec_size or nil
+
 	--an index col may be a pk col of the val_table (e.g. composite-pk fk). for the
 	--common val-only case, decode_val handles everything. for the mixed case, decode
 	--each col individually into the right positional slot (dt[i] for cols[i]):
@@ -1465,7 +1485,7 @@ end
 			end
 
 			if cur then
-				cur:del_raw()
+				cur:try_del_raw()
 			else
 				ix_dbi = self:dbi_raw(ix_schema.name) --live name: survives rename
 				assert(self:try_del_raw(ix_dbi, xk0, xk0_sz, k, k_sz))
@@ -1532,9 +1552,7 @@ local function validate_unique_index(self, ix_schema)
 end
 
 function Db:add_index(val_table, ix)
-	local val_dbi, val_schema = self:try_dbi_schema(val_table)
-	self:check_schema('i_add', self:table_name(val_table), nil,
-		val_dbi, 'not_found')
+	local val_dbi, val_schema = self:dbi_schema(val_table)
 	local ix_name = format_ix_name(val_schema.name, ix)
 	self:check_schema('i_add', val_schema.name, nil, #ix > 0,
 		'index has no columns: %s', ix_name)
@@ -1596,8 +1614,7 @@ end
 
 function Db:drop_index(ix_name)
 	local val_table = assert(ix_name:match'^[^/]+')
-	local val_dbi, val_schema = self:try_dbi_schema(val_table)
-	self:check_schema('i_drop', val_table, nil, val_dbi, 'not_found')
+	local val_dbi, val_schema = self:dbi_schema(val_table)
 	self:check_schema('i_drop', val_table, nil,
 		val_schema.ixs and val_schema.ixs[ix_name],
 		'index not found: %s', ix_name)
@@ -1645,7 +1662,7 @@ local function check_existing_fk(self, event, schema, fk_name, fk)
 			local pk, pk_buf_sz = add_fk_key_buffer(ref_schema.key_fields.max_rec_size)
 			local pk_sz = encode_key(self, ref_schema, event, nil, pk, pk_buf_sz,
 				ref_schema.key_cols, nil, unpack(vals, 1, n))
-			if not self:get_raw(ref_dbi, pk, pk_sz) then
+			if not self:find_raw(ref_dbi, pk, pk_sz) then
 				cur:close()
 				return false, fmt('fk %s: existing row references missing %s',
 					fk_name, fk.ref_table)
@@ -1656,9 +1673,7 @@ local function check_existing_fk(self, event, schema, fk_name, fk)
 end
 function Db:add_fk(fk)
 	local event = {type = 'schema', event = 'fk_add', table = fk.table}
-	local dbi, schema = self:try_dbi_schema(fk.table)
-	self:check_schema('fk_add', fk.table, nil, dbi,
-		'table missing: %s', fk.table)
+	local dbi, schema = self:dbi_schema(fk.table)
 	self:check_schema('fk_add', fk.table, nil, fk.cols and #fk.cols > 0,
 		'fk has no columns')
 	self:check_schema('fk_add', fk.table, nil,
@@ -1690,7 +1705,7 @@ function Db:add_fk(fk)
 			'fk %s: ref column must be pk column %s.%s',
 			fk_name, fk.ref_table, ref_schema.pk[i])
 		local ref_f = ref_schema.fields[ref_col]
-		for k in pairs(field_type_attrs) do
+		for k in sortedpairs(field_type_attrs) do
 			self:check_schema('fk_add', fk.table, col, f[k] == ref_f[k],
 				'fk %s: incompatible fields %s.%s and %s.%s: %s mismatch',
 				fk_name, fk.table, col, fk.ref_table, ref_col, k)
@@ -1726,8 +1741,7 @@ function Db:add_fk(fk)
 end
 
 function Db:drop_fk(table_name, fk_name)
-	local dbi, schema = self:try_dbi_schema(table_name)
-	self:check_schema('fk_drop', table_name, nil, dbi, 'not_found')
+	local dbi, schema = self:dbi_schema(table_name)
 	local stored = schema.fks and schema.fks[fk_name]
 	self:check_schema('fk_drop', table_name, nil, stored,
 		'fk not found: %s', fk_name)
@@ -1768,9 +1782,7 @@ local function rename_in_list(list, old, new) --returns true if `old` was presen
 	end
 end
 function Db:rename_column(tab, old_col, new_col)
-	local dbi, schema = self:try_dbi_schema(tab)
-	local table_name = self:table_name(tab)
-	self:check_schema('c_rename', table_name, old_col, dbi, 'not_found')
+	local dbi, schema = self:dbi_schema(tab)
 	local f = schema.fields[old_col]
 	self:check_schema('c_rename', schema.name, old_col, f, 'not_found')
 	self:check_schema('c_rename', schema.name, new_col,
@@ -1930,7 +1942,11 @@ end
 
 do
 local pp = new'u8*[1]'
-function encode_key(self, schema, event, autoinc_f, rec, rec_buf_sz, cols, as, ...)
+
+--[[local]] function encode_key(
+	self, schema, event, autoinc_f,
+	rec, rec_buf_sz, cols, as, ...
+)
 	if #schema.key_fields == 0 then return 0 end
 	local encode_int_key = schema.encode_int_key
 	local autoinc_v
@@ -1958,6 +1974,34 @@ function encode_key(self, schema, event, autoinc_f, rec, rec_buf_sz, cols, as, .
 		end
 	end
 	return pp[0] - rec, autoinc_v
+end
+
+--[[local]] function encode_key_prefix(
+	self, schema, event,
+	rec, rec_buf_sz, n, ...
+)
+	pp[0] = rec
+	if schema.encode_int_key then
+		return schema.encode_int_key(rec, rec_buf_sz, (select(1, ...)))
+	end
+	for ki = 1, n do
+		local f = schema.key_fields[ki]
+		local val = select(ki, ...)
+		if val == nil or val == null then
+			val = resolve_null_val(schema, f)
+		end
+		if val == nil then
+			if not f.not_null then
+				C.schema_key_add(schema._st, ki-1, rec, rec_buf_sz, -1, pp)
+			else
+				self:check_col(event, schema.name, f.col, false, 'null_key')
+			end
+		else
+			local len = f.encode(self, event, pp[0], val)
+			C.schema_key_add(schema._st, ki-1, rec, rec_buf_sz, len, pp)
+		end
+	end
+	return pp[0] - rec
 end
 end
 
@@ -2063,7 +2107,7 @@ end
 local function get_raw_by_pk(self, dbi, schema, ...)
 	local k, k_buf_sz = key_rec_buffer(schema.key_fields.max_rec_size)
 	local k_sz = encode_key(self, schema, 'get', nil, k, k_buf_sz, schema.key_cols, nil, ...)
-	return self:get_raw(dbi, k, k_sz)
+	return self:find_raw(dbi, k, k_sz)
 end
 
 local function decode_kv(self, schema, k, k_sz, v, v_sz, val_cols)
@@ -2079,7 +2123,7 @@ local function decode_kv(self, schema, k, k_sz, v, v_sz, val_cols)
 		val_cols = val_cols or t_schema.val_cols
 		local k, k_sz = v, v_sz
 		local ok
-		ok, v, v_sz = self:get_raw(t_dbi, k, k_sz)
+		ok, v, v_sz = self:find_raw(t_dbi, k, k_sz)
 		assert(ok, v)
 		i0 = decode_key(t_schema, k, k_sz, t, as, i0)
 		schema = t_schema
@@ -2122,33 +2166,30 @@ function Db:check_col(event, tab, col, ret, ...)
 end
 
 function Db:is_null(tab, col, ...) --returns is_null, [reason]
-	local dbi, schema = self:try_dbi_schema(tab)
-	if not dbi then return true, schema end
+	local dbi, schema = self:dbi_schema(tab)
 	local tab_schema = schema
 	if schema.is_index then schema = assert(schema.val_schema) end
 	local _, vi = val_field(schema, col)
 	local ok, v, v_sz = get_raw_by_pk(self, dbi, tab_schema, ...)
-	if not ok then return true, v end
+	if not ok then return true, 'not_found' end
 	if tab_schema.is_index then
-		ok, v, v_sz = self:get_raw(assert(self.dbis[schema.name]), v, v_sz)
+		ok, v, v_sz = self:find_raw(assert(self.dbis[schema.name]), v, v_sz)
 		assert(ok, v)
 	end
 	return C.schema_val_is_null(schema._st, vi-1, v, v_sz) ~= 0
 end
 
-function Db:exists(tab, ...) --returns record_exists, table_exists
-	local dbi, schema = self:try_dbi_schema(tab)
-	if not dbi then return false, false end
+function Db:exists(tab, ...)
+	local dbi, schema = self:dbi_schema(tab)
 	local ok = get_raw_by_pk(self, dbi, schema, ...)
 	if not ok then return false, true end
 	return true, true
 end
 
-function Db:try_get(tab, val_cols, ...)
-	local dbi, schema = self:try_dbi_schema(tab)
-	if not dbi then return false, schema end
+function Db:try_find(tab, val_cols, ...)
+	local dbi, schema = self:dbi_schema(tab)
 	local ok, v, v_sz = get_raw_by_pk(self, dbi, schema, ...)
-	if not ok then return false, v end
+	if not ok then return false, v end --v=err
 	return decode_kv(self, schema, nil, nil, v, v_sz, val_cols)
 end
 
@@ -2157,11 +2198,11 @@ local function skip_ok(ok, ...)
 	return ...
 end
 
-function Db:get(...)
-	return skip_ok(self:try_get(...))
+function Db:find(...)
+	return skip_ok(self:try_find(...))
 end
 
-function Db:must_get(tab, val_cols, ...)
+function Db:must_find(tab, val_cols, ...)
 	local dbi, schema = self:dbi_schema(tab)
 	local ok, v, v_sz = get_raw_by_pk(self, dbi, schema, ...)
 	self:check_row('get', schema.name, ok, v)
@@ -2192,7 +2233,7 @@ local function check_fks(self, event, schema, cols, as, full, ...)
 			local pk, pk_buf_sz = fk_key_buffer(ref_schema.key_fields.max_rec_size)
 			local pk_sz = encode_key(self, ref_schema, 'get', nil, pk, pk_buf_sz,
 				ref_schema.key_cols, nil, unpack(vals, 1, n))
-			if not self:get_raw(ref_dbi, pk, pk_sz) then
+			if not self:find_raw(ref_dbi, pk, pk_sz) then
 				self:check_row(event, schema.name, false,
 					fmt('fk %s: no parent row in %s', fk_name, fk.ref_table))
 			end
@@ -2201,13 +2242,13 @@ local function check_fks(self, event, schema, cols, as, full, ...)
 end
 local del_fk_key_buffer = buffer()
 --probe a child's fk index for the first row referencing the deleted parent pk
---(`...`); returns get_raw's (ok, v, v_sz) where v is the child's encoded pk. the
+--(`...`); returns find_raw's (ok, v, v_sz) where v is the child's encoded pk. the
 --key is re-encoded on every call because a recursive cascade reuses the buffer.
 local function first_referencing_child(self, ix_dbi, ix_schema, ...)
 	local xk, xk_buf_sz = del_fk_key_buffer(ix_schema.key_fields.max_rec_size)
 	local xk_sz = encode_key(self, ix_schema, 'get', nil, xk, xk_buf_sz,
 		ix_schema.key_cols, nil, ...)
-	return self:get_raw(ix_dbi, xk, xk_sz)
+	return self:find_raw(ix_dbi, xk, xk_sz)
 end
 --apply the referential actions of fks that reference this (parent) table after
 --its row was deleted. `...` are the parent pk values (fk.cols order == ref pk
@@ -2267,7 +2308,7 @@ local function put(self, flags, op, tab, cols, ...)
 		--insert skips the get: v0=nil by definition, NOOVERWRITE detects exists
 		local found, v0, v0_sz
 		if op ~= 'insert' then
-			found, v0, v0_sz = cur:get_raw(k, k_sz)
+			found, v0, v0_sz = cur:find_raw(k, k_sz)
 		end
 		local v_sz
 		if found then
@@ -2305,7 +2346,7 @@ local function put(self, flags, op, tab, cols, ...)
 		elseif op == 'update' then --update but existing row not found
 			self:check_row(op, schema.name, false, v0)
 		else --put, insert, or upsert new record
-			v0, v0_sz = nil --no previous value (v0 currently holds the get_raw err)
+			v0, v0_sz = nil --no previous value (v0 currently holds the find_raw err)
 			v_sz = encode_val(self, schema, op, v, v_buf_sz, cols, as, ...)
 			if schema.fks then
 				--new row: full write (missing value means take default value).
@@ -2362,13 +2403,13 @@ function Cur:del()
 	local cur = self
 	if cur.schema.is_index then
 		cur = db:cursor(schema.name)
-		ok, v, v_sz = cur:get_raw(kk, k_sz)
+		ok, v, v_sz = cur:find_raw(kk, k_sz)
 		db:check_row('del', schema.name, ok, v)
 	end
 	if schema.indexes then
 		local v0u = v; v = del_v0_buffer(v_sz); copy(v, v0u, v_sz)
 	end
-	cur:del_raw()
+	cur:try_del_raw()
 	for _,ix_schema in ipairs(schema.indexes or empty) do
 		ix_schema:del(db, kk, k_sz, v, v_sz)
 	end
@@ -2389,7 +2430,7 @@ function Db:del(tab, ...)
 	local k_sz = encode_key(self, schema, 'del', nil,
 		k, k_buf_sz, schema.key_cols, nil, ...)
 	local cur = self:cursor(dbi)
-	local ok, err = cur:get_raw(k, k_sz)
+	local ok, err = cur:find_raw(k, k_sz)
 	if not ok then
 		assert(err == 'not_found') --the only error
 		cur:close()
@@ -2425,17 +2466,17 @@ end
 
 --cursors --------------------------------------------------------------------
 
-function Db:try_cursor(tab)
-	local dbi, schema = self:try_dbi_schema(tab)
-	if not dbi then return nil, schema end
-	local cur = self:try_cursor_raw(dbi)
+function Db:cursor(tab)
+	local dbi, schema = self:dbi_schema(tab)
+	local cur = self:cursor_raw(dbi)
 	cur.schema = schema
 	return cur
 end
-function Db:cursor(tab)
-	local cur, err = self:try_cursor(tab)
-	if cur then return cur end
-	return self:check_schema('cursor', self:table_name(tab), nil, false, err)
+
+local db_cursor_close = Cur.close
+function Cur:close()
+	db_cursor_close(self)
+	self.schema = nil
 end
 
 for _,OP in ipairs{'first', 'last', 'next', 'prev', 'current'} do
@@ -2457,28 +2498,61 @@ for _,OP in ipairs{'first', 'last', 'next', 'prev', 'current'} do
 	Cur[OP] = do_op
 	Cur['must_'..OP] = must_op
 end
-
-local db_cursor_close = Cur.close
-function Cur:close()
-	db_cursor_close(self)
-	self.schema = nil
+function Cur:try_move(op, val_cols)
+	local schema = assert(self.schema)
+	local ok, k, k_sz, v, v_sz = self:move_raw(op)
+	if not ok then return false, k end
+	return decode_kv(self.db, schema, k, k_sz, v, v_sz, val_cols)
+end
+function Cur:move(op, val_cols)
+	return skip_ok(self:try_move(op, val_cols))
+end
+function Cur:must_move(op, val_cols)
+	return self.db:check_row('move', self.schema.name,
+		self:try_move(op, val_cols))
 end
 
-function Cur:try_get(val_cols, ...)
+function Cur:try_find(val_cols, ...)
 	local schema = assert(self.schema)
 	local k, k_buf_sz = key_rec_buffer(schema.key_fields.max_rec_size)
 	local k_sz = encode_key(self.db, schema, 'c_get', nil,
 		k, k_buf_sz, schema.key_cols, nil, ...)
-	local ok, v, v_sz = self:get_raw(k, k_sz)
+	local ok, v, v_sz = self:find_raw(k, k_sz)
 	if not ok then return false, v end
 	return decode_kv(self.db, schema, nil, nil, v, v_sz, val_cols)
 end
-function Cur:get(...)
-	return skip_ok(self:try_get(...))
+function Cur:find(...)
+	return skip_ok(self:try_find(...))
 end
-function Cur:must_get(...)
+function Cur:must_find(...)
 	return self.db:check_row('c_get', self.schema.name,
-		self:try_get(...))
+		self:try_find(...))
+end
+local function cur_each_pass(cur, ok, ...)
+	if not ok then cur:close(); return end
+	return cur, ...
+end
+local function cur_each_try_next(self, k0)
+	if k0 == 'start' then
+		return cur_each_pass(self, self:try_first(self.val_cols))
+	end
+	return cur_each_pass(self, self:try_next(self.val_cols))
+end
+local function cur_each_try_prev(self, k0)
+	if k0 == 'start' then
+		return cur_each_pass(self, self:try_last(self.val_cols))
+	end
+	return cur_each_pass(self, self:try_prev(self.val_cols))
+end
+function Db:each(tbl_name, val_cols, mode, t)
+	local cur = self:cursor(tbl_name, mode)
+	cur.val_cols = val_cols
+	return cur_each_try_next, cur, 'start'
+end
+function Db:each_reverse(tbl_name, val_cols, mode, t)
+	local cur = self:cursor(tbl_name, mode)
+	cur.val_cols = val_cols
+	return cur_each_try_prev, cur, 'start'
 end
 
 function Cur:is_null(col)
@@ -2489,10 +2563,126 @@ function Cur:is_null(col)
 	local ok, k, _, v, v_sz = self:current_raw()
 	if not ok then return true, k end
 	if is_index then
-		ok, v, v_sz = self.db:get_raw(assert(self.db.dbis[schema.name]), v, v_sz)
+		ok, v, v_sz = self.db:find_raw(assert(self.db.dbis[schema.name]), v, v_sz)
 		assert(ok, v)
 	end
 	return C.schema_val_is_null(schema._st, vi-1, v, v_sz) ~= 0
+end
+
+function Cur:try_find_prefix(val_cols, ...)
+	local schema = assert(self.schema)
+	local n = select('#', ...)
+	assert(n >= 1 and n <= #schema.key_fields)
+	local k, k_buf_sz = key_rec_buffer(schema.key_fields.max_rec_size)
+	local k_sz = encode_key_prefix(self.db, schema, 'c_seek', k, k_buf_sz, n, ...)
+	local ok, k2, k2_sz, v, v_sz = self:find_ge_raw(k, k_sz)
+	if not ok or k2_sz < k_sz or memcmp(k2, k, k_sz) ~= 0 then
+		return false, 'not_found'
+	end
+	return decode_kv(self.db, schema, k2, k2_sz, v, v_sz, val_cols)
+end
+function Cur:find_prefix(...)
+	return skip_ok(self:try_find_prefix(...))
+end
+local function prefix_next(self, ctrl)
+	local ok, k, k_sz, v, v_sz
+	if ctrl == nil then
+		ok, k, k_sz, v, v_sz = self:current_raw()
+	else
+		ok, k, k_sz, v, v_sz = self:next_raw()
+	end
+	local psz = self.prefix_sz
+	if not ok or k_sz < psz or memcmp(k, self.prefix_str, psz) ~= 0 then
+		self.prefix_str = nil; self.prefix_sz = nil
+		if self.prefix_close then self.prefix_close = nil; self:close() end
+		return
+	end
+	return self, select(2, decode_kv(self.db, self.schema, k, k_sz, v, v_sz, self.val_cols))
+end
+local function prefix_seek(self, schema, val_cols, n, ...)
+	local k, k_buf_sz = key_rec_buffer(schema.key_fields.max_rec_size)
+	local k_sz = encode_key_prefix(self.db, schema, 'c_seek', k, k_buf_sz, n, ...)
+	if not self:find_ge_raw(k, k_sz) then return false end
+	self.prefix_str = str(k, k_sz)
+	self.prefix_sz = k_sz
+	self.val_cols = val_cols
+	return true
+end
+function Cur:each_prefix(val_cols, ...)
+	local schema = assert(self.schema)
+	local n = select('#', ...)
+	assert(n >= 1 and n <= #schema.key_fields)
+	if not prefix_seek(self, schema, val_cols, n, ...) then return noop end
+	return prefix_next, self
+end
+function Db:each_prefix(tbl_name, val_cols, ...)
+	local cur = self:cursor(tbl_name)
+	local schema = assert(cur.schema)
+	local n = select('#', ...)
+	assert(n >= 1 and n <= #schema.key_fields)
+	if not prefix_seek(cur, schema, val_cols, n, ...) then
+		cur:close(); return noop
+	end
+	cur.prefix_close = true
+	return prefix_next, cur
+end
+
+local function each_dup(db, cur, ix_schema, val_cols, close_cur, ...)
+	assert(ix_schema.is_index)
+	local xk, xk_buf_sz = key_rec_buffer(ix_schema.key_fields.max_rec_size)
+	local xk_sz = encode_key(db, ix_schema, 'each_dup', nil,
+		xk, xk_buf_sz, ix_schema.key_cols, nil, ...)
+	local fixedsize = ix_schema.dup_fixedsize
+	if fixedsize then
+		local ok, v, v_sz = cur:get_multiple_raw(xk, xk_sz)
+		if not ok then
+			if close_cur then cur:close() end
+			return noop
+		end
+		local v_o = 0
+		return function()
+			if v_o >= v_sz then
+				ok, v, v_sz = cur:next_multiple_raw()
+				if not ok then
+					if close_cur then cur:close() end
+					return
+				end
+				v_o = 0
+			end
+			local pk = v + v_o
+			v_o = v_o + fixedsize
+			return cur, select(2, decode_kv(db, ix_schema,
+				nil, nil, pk, fixedsize, val_cols))
+		end
+	else
+		if not cur:find_raw(xk, xk_sz) then
+			if close_cur then cur:close() end
+			return noop
+		end
+		local first = true
+		return function()
+			local ok, _, _, v, v_sz
+			if first then
+				first = false
+				ok, _, _, v, v_sz = cur:current_raw()
+			else
+				ok, _, _, v, v_sz = cur:move_raw(mdbx.MDBX_NEXT_DUP)
+			end
+			if not ok then
+				if close_cur then cur:close() end
+				return
+			end
+			return cur, select(2, decode_kv(db, ix_schema,
+				nil, nil, v, v_sz, val_cols))
+		end
+	end
+end
+function Db:each_dup(ix_name, val_cols, ...)
+	local dbi, ix_schema = self:dbi_schema(ix_name)
+	return each_dup(self, self:cursor_raw(dbi), ix_schema, val_cols, true, ...)
+end
+function Cur:each_dup(val_cols, ...)
+	return each_dup(self.db, self, assert(self.schema), val_cols, false, ...)
 end
 
 local cur_v0_buffer = buffer() --stable copy of a cursor's old value across writes
@@ -2504,7 +2694,7 @@ local function cur_update(self, ix_cur, val_cols, ...)
 			self.db:check_row('c_update', schema.name, false, 'not_found')
 		end
 		local cur = self.db:cursor(schema.val_table)
-		local ok, err = cur:get_raw(k, k_sz)
+		local ok, err = cur:find_raw(k, k_sz)
 		self.db:check_row('c_update', schema.val_table, ok, err)
 		cur_update(cur, self, val_cols, ...)
 		cur:close()
@@ -2553,45 +2743,6 @@ local function cur_update(self, ix_cur, val_cols, ...)
 end
 function Cur:update(...)
 	return cur_update(self, nil, ...)
-end
-
-local function cur_each_pass(cur, ok, ...)
-	if not ok then cur:close(); return end
-	return cur, ...
-end
-local function cur_each_try_next(self, k0)
-	if k0 == 'start' then
-		return cur_each_pass(self, self:try_first(self.val_cols))
-	end
-	return cur_each_pass(self, self:try_next(self.val_cols))
-end
-local function cur_each_try_prev(self, k0)
-	if k0 == 'start' then
-		return cur_each_pass(self, self:try_last(self.val_cols))
-	end
-	return cur_each_pass(self, self:try_prev(self.val_cols))
-end
-function Db:try_each(tbl_name, val_cols, mode, t)
-	local cur = self:try_cursor(tbl_name, mode)
-	if not cur then return noop end
-	cur.val_cols = val_cols
-	return cur_each_try_next, cur, 'start'
-end
-function Db:each(tbl_name, val_cols, mode, t)
-	local cur = self:cursor(tbl_name, mode)
-	cur.val_cols = val_cols
-	return cur_each_try_next, cur, 'start'
-end
-function Db:try_each_reverse(tbl_name, val_cols, mode, t)
-	local cur = self:try_cursor(tbl_name, mode)
-	if not cur then return noop end
-	cur.val_cols = val_cols
-	return cur_each_try_prev, cur, 'start'
-end
-function Db:each_reverse(tbl_name, val_cols, mode, t)
-	local cur = self:cursor(tbl_name, mode)
-	cur.val_cols = val_cols
-	return cur_each_try_prev, cur, 'start'
 end
 
 --schema sync'ing ------------------------------------------------------------
