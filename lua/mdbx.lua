@@ -38,37 +38,42 @@ TRANSACTIONS
 	db.txn                                     current txn (nil if none)
 	db:atomic(['w',], fn, ...) -> ...          run fn in transaction
 TABLES
-	db:[try_]dbi_raw(table|dbi) -> dbi         open existing table (once)
+	db:[try_]dbi_raw(name|dbi) -> dbi          open existing table (once)
 	db:create_table_raw(name, [flags]) -> dbi  create table
-	db:rename_table_raw(table|dbi, new_name)   rename table
-	db:drop_table_raw(table|dbi)               raw drop
-	db:clear_table_raw(table|dbi)              delete all records
+	db:rename_table_raw(name|dbi, new_name)    rename table
+	db:drop_table_raw(name|dbi)                raw drop
+	db:clear_table_raw(name|dbi)               delete all records
 	db:each_table() -> iter() -> name          iterate table names
 	db:table_count() -> n                      get number of tables
 	db:table_exists(name) -> t|f               check if table exists
 	db:table_stat(name|dbi) -> MDBX_stat       get table stats (shared buffer)
 	db:dbi_flags(name|dbi) -> dbi_state, dbi_flags  get DBI state and flags
 CRUD
-	db:get_raw         (table|dbi, k, k_sz) -> true, v, v_sz | false,err
-	db:try_put_raw     (table|dbi, k, k_sz, v, v_sz, [flags]) -> true | false,'already_exists',cur_v,cur_v_sz | false,'not_found'
-	db:try_insert_raw  (table|dbi, k, k_sz, v, v_sz, [flags]) -> true | false,'already_exists',cur_v,cur_v_sz
-	db:try_update_raw  (table|dbi, k, k_sz, v, v_sz, [flags]) -> true | false,'not_found'
-	db:try_del_raw     (table|dbi, k, k_sz, [v], [v_sz]) -> true | false,'not_found'
-	db:seq             (table|dbi, increment) -> n     get/increment sequence
-	db:try_move_key_raw(table|dbi, k, k_sz, new_k, new_k_sz) -> true | false,err
-	db:each_raw(table) -> iter() -> cur, k, k_sz, v, v_sz
-	db:[try_]cursor_raw(table|dbi) -> cur      create cursor
+	db:find_raw        (name|dbi, k, k_sz) -> true, v, v_sz | false,err
+	db:try_put_raw     (name|dbi, k, k_sz, v, v_sz, [flags]) -> true | false,'already_exists',cur_v,cur_v_sz | false,'not_found'
+	db:try_insert_raw  (name|dbi, k, k_sz, v, v_sz, [flags]) -> true | false,'already_exists',cur_v,cur_v_sz
+	db:try_update_raw  (name|dbi, k, k_sz, v, v_sz, [flags]) -> true | false,'not_found'
+	db:try_del_raw     (name|dbi, k, k_sz, [v], [v_sz]) -> true | false,'not_found'
+	db:seq             (name|dbi, increment) -> n   get/increment sequence
+	db:each_raw(name|dbi) -> iter() -> cur, k, k_sz, v, v_sz
+	db:cursor_raw(name|dbi) -> cur             create cursor
 	cur:close()                                close cursor
 	cur:closed() -> t|f                        check if cursor is closed
 	cur:dbi() -> dbi|nil                       get cursor's dbi
 	cur:{first|last|next|prev|current}_raw() -> true, k, k_sz, v, v_sz | false,err
+	cur:move_raw                        (op) -> true, k, k_sz, v, v_sz | false,err
+	cur:find_raw     (k, k_sz) -> true, v, v_sz | false,err
+	cur:find_ge_raw  (k, k_sz) -> true, k, k_sz, v, v_sz | false,err
+	cur:find_le_raw  (k, k_sz) -> true, k, k_sz, v, v_sz | false,err
+	cur:find_dup_raw     (k, k_sz, v, v_sz) -> true, v, v_sz | false,err
+	cur:get_multiple_raw (k, k_sz) -> true, v_ptr, v_sz | false,'not_found'
+	cur:next_multiple_raw()        -> true, v_ptr, v_sz | false,'not_found'
 	cur:each[_reverse]_raw() -> iter() -> true, k, k_sz, v, v_sz
-	cur:get_raw      (k, k_sz, [op]) -> true, v, v_sz | false,err
-	cur:get_pair_raw (k, k_sz, v, v_sz, [op]) -> true, v, v_sz | false,err
+	cur:each_from[_last]_raw(k, k_sz) -> iter() -> cur, k, k_sz, v, v_sz
 	cur:try_put_raw  (k, k_sz, v, v_sz, [flags]) -> true | false,'already_exists',cur_v,cur_v_sz | false,'not_found'
-	cur:del_raw([flags])
+	cur:try_del_raw([flags]) -> true | false,'not_found'
 DEBUG
-	mdbx_set_log_level(level)               set MDBX log level (now is 'warn')
+	mdbx_set_log_level(level)                  set MDBX log level (now is 'warn')
 
 ]]
 
@@ -452,11 +457,9 @@ function Db:create_table_raw(tab, create_flags)
 end
 
 function Db:rename_table_raw(tab, new_table_name)
-	local old_table_name = self:table_name(tab)
 	assert(isstr(new_table_name))
 	check_wtxn(self)
-	local dbi, err = self:try_dbi_raw(tab)
-	self:check_schema('t_rename', old_table_name, nil, dbi, err)
+	local dbi = self:dbi_raw(tab)
 	local old_table_name = self:table_name(tab)
 	local rc = C.mdbx_dbi_rename(self.txn, dbi, new_table_name)
 	self:check_schema('t_rename', old_table_name, nil,
@@ -474,7 +477,7 @@ end
 function Db:drop_table_raw(tab)
 	assert(tab)
 	check_wtxn(self)
-	local dbi = isnum(tab) and tab or self:try_dbi_raw(tab)
+	local dbi = self:try_dbi_raw(tab)
 	if not dbi then return false, 'not_found' end
 	self:checkz('t_drop', C.mdbx_drop(self.txn, dbi, 1))
 	local name = assert(self.dbis[dbi])
@@ -486,7 +489,7 @@ end
 
 function Db:clear_table_raw(tab)
 	check_wtxn(self)
-	local dbi = isnum(tab) and tab or self:try_dbi_raw(tab)
+	local dbi = self:try_dbi_raw(tab)
 	if not dbi then return false, 'not_found' end
 	self:checkz('t_clear', C.mdbx_drop(self.txn, dbi, 0))
 	log('note', 'db', 't_clear', '%s', self:table_name(tab))
@@ -521,7 +524,7 @@ end
 local key = new'MDBX_val'
 local val = new'MDBX_val'
 
-function Db:get_raw(tab, k, k_sz)
+function Db:find_raw(tab, k, k_sz)
 	check_txn(self)
 	local dbi = isnum(tab) and tab or self:dbi_raw(tab)
 	key.data = k
@@ -591,24 +594,6 @@ function Db:seq(tab, increment)
 	return seq
 end
 
-function Db:try_move_key_raw(tab, k1, k1_sz, k2, k2_sz)
-	check_wtxn(self)
-	local dbi = isnum(tab) and tab or self:dbi_raw(tab)
-	local _, flags = self:dbi_flags(dbi)
-	assert(band(flags, C.MDBX_DUPSORT) == 0, 'cannot move key in DUPSORT table')
-	local ok, v, v_sz = self:get_raw(dbi, k1, k1_sz)
-	if not ok then
-		return false, v
-	end
-	--NOTE: calling put before del because del invalidates the v pointer.
-	local ok, err = self:try_insert_raw(dbi, k2, k2_sz, v, v_sz)
-	if not ok then
-		return false, err
-	end
-	assert(self:try_del_raw(dbi, k1, k1_sz))
-	return true
-end
-
 -- cursors -------------------------------------------------------------------
 
 local Cur = {}; mdbx_cursor = Cur
@@ -616,7 +601,7 @@ local Cur = {}; mdbx_cursor = Cur
 --NOTE: cursors created with db:cursor_raw() are reused, so never use a cursor
 --beyond transaction boundaries or you might end up using an unrelated cursor.
 local curp = new'MDBX_cursor*[1]'
-function Db:try_cursor_raw(tab)
+function Db:cursor_raw(tab)
 	local dbi = isnum(tab) and tab or self:dbi_raw(tab)
 	local cur
 	local t = self._cursors
@@ -635,12 +620,6 @@ function Db:try_cursor_raw(tab)
 		add(self._cursors, cur)
 	end
 	return cur
-end
-
-function Db:cursor_raw(tab)
-	local cur, err = self:try_cursor_raw(tab)
-	if cur then return cur end
-	self:check_schema('cursor', self:table_name(tab), nil, false, err)
 end
 
 function Cur:close()
@@ -671,16 +650,41 @@ local function cursor_get(self, flags)
 	if rc == C.MDBX_ENODATA then return false, 'not_found' end
 	return self.db:tryz('cursor_get', rc)
 end
+Cur.move_raw = cursor_get
 
 local function cursor_each_next(self, k0)
-	if k0 == 'start' then return cursor_get(self, C.MDBX_FIRST) end
-	return cursor_get(self, C.MDBX_NEXT)
+	local ok, k, k_sz, v, v_sz = cursor_get(self,
+		k0 == 'start' and C.MDBX_FIRST or C.MDBX_NEXT)
+	if ok then return true, k, k_sz, v, v_sz end
 end
 
 local function cursor_each_prev(self, k0)
-	if k0 == 'start' then return cursor_get(self, C.MDBX_LAST) end
-	return cursor_get(self, C.MDBX_PREV)
+	local ok, k, k_sz, v, v_sz = cursor_get(self,
+		k0 == 'start' and C.MDBX_LAST or C.MDBX_PREV)
+	if ok then return true, k, k_sz, v, v_sz end
 end
+
+local function cursor_from_next(self, ctrl)
+	local ok, k, k_sz, v, v_sz
+	if ctrl == nil then
+		ok, k, k_sz, v, v_sz = cursor_get(self, C.MDBX_GET_CURRENT)
+	else
+		ok, k, k_sz, v, v_sz = cursor_get(self, C.MDBX_NEXT)
+	end
+	if ok then return self, k, k_sz, v, v_sz end
+end
+
+local function cursor_from_prev(self, ctrl)
+	local ok, k, k_sz, v, v_sz
+	if ctrl == nil then
+		ok, k, k_sz, v, v_sz = cursor_get(self, C.MDBX_GET_CURRENT)
+	else
+		ok, k, k_sz, v, v_sz = cursor_get(self, C.MDBX_PREV)
+	end
+	if ok then return self, k, k_sz, v, v_sz end
+end
+
+local function cursor_empty() end
 
 function Cur:first_raw   () return cursor_get(self, C.MDBX_FIRST) end
 function Cur:last_raw    () return cursor_get(self, C.MDBX_LAST) end
@@ -691,22 +695,61 @@ function Cur:current_raw () return cursor_get(self, C.MDBX_GET_CURRENT) end
 function Cur:each_raw         () return cursor_each_next, self, 'start' end
 function Cur:each_reverse_raw () return cursor_each_prev, self, 'start' end
 
-function Cur:get_raw(k, k_sz, op)
+function Cur:find_ge_raw(k, k_sz)
+	key.data = k; key.size = k_sz
+	return cursor_get(self, C.MDBX_SET_RANGE)
+end
+
+function Cur:find_le_raw(k, k_sz)
+	key.data = k; key.size = k_sz
+	return cursor_get(self, C.MDBX_TO_KEY_LESSER_OR_EQUAL)
+end
+
+function Cur:each_from_raw(k, k_sz)
+	key.data = k; key.size = k_sz
+	if not cursor_get(self, C.MDBX_SET_RANGE) then return cursor_empty end
+	return cursor_from_next, self
+end
+
+function Cur:each_from_last_raw(k, k_sz)
+	key.data = k; key.size = k_sz
+	if not cursor_get(self, C.MDBX_TO_KEY_LESSER_OR_EQUAL) then return cursor_empty end
+	return cursor_from_prev, self
+end
+
+function Cur:find_raw(k, k_sz)
 	key.data = k
 	key.size = k_sz
-	local ok, err_or_k, _, v, v_sz = cursor_get(self, op or C.MDBX_SET_KEY)
+	local ok, err_or_k, _, v, v_sz = cursor_get(self, C.MDBX_SET_KEY)
 	if not ok then return ok, err_or_k end
 	return true, v, v_sz
 end
 
-function Cur:get_pair_raw(k, k_sz, v, v_sz, op)
+function Cur:find_dup_raw(k, k_sz, v, v_sz)
 	key.data = k
 	key.size = k_sz
 	val.data = v
 	val.size = v_sz
-	local ok, err_or_k, _, v, v_sz = cursor_get(self, op or C.MDBX_GET_BOTH)
+	local ok, err_or_k, _, v, v_sz = cursor_get(self, C.MDBX_GET_BOTH)
 	if not ok then return ok, err_or_k end
 	return true, v, v_sz
+end
+
+function Cur:get_multiple_raw(k, k_sz)
+	check_cursor(self)
+	key.data = k; key.size = k_sz
+	local rc = C.mdbx_cursor_get(self.c, key, val, C.MDBX_SEEK_AND_GET_MULTIPLE)
+	if rc == 0 then return true, val.data, num(val.size) end
+	if rc == C.MDBX_ENODATA then return false, 'not_found' end
+	return self.db:tryz('cursor_get', rc)
+end
+
+function Cur:next_multiple_raw()
+	check_cursor(self)
+	local rc = C.mdbx_cursor_get(self.c, key, val, C.MDBX_NEXT_MULTIPLE)
+	if rc == 0 then return true, val.data, num(val.size) end
+	if rc == C.MDBX_ENODATA then return false, 'not_found' end
+	return self.db:tryz('cursor_get', rc)
 end
 
 function Cur:try_put_raw(k, k_sz, v, v_sz, flags)
@@ -723,7 +766,7 @@ function Cur:try_put_raw(k, k_sz, v, v_sz, flags)
 	return self.db:tryz('cursor_put', rc)
 end
 
-function Cur:del_raw(flags)
+function Cur:try_del_raw(flags)
 	check_cursor(self)
 	check_wtxn(self.db)
 	self.db:checkz('cursor_del', C.mdbx_cursor_del(self.c, flags or 0))
@@ -766,5 +809,5 @@ function Db:table_exists(table_name)
 	assert(table_name, 'table expected')
 	if table_name == MAIN_DBI then return true end --main table always exists.
 	if self.dbis[table_name] then return true end --opened thus exists
-	return (self:get_raw(MAIN_DBI, table_name, #table_name))
+	return (self:find_raw(MAIN_DBI, table_name, #table_name))
 end

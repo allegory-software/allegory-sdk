@@ -197,7 +197,7 @@ function test.rename_created_table_in_top_level_txn()
 		db:commit()
 		db:begin()
 		assert(not db:table_exists't' and db:table_exists'u')
-		local ok, v, v_sz = db:get_raw('u', 'k', 1)
+		local ok, v, v_sz = db:find_raw('u', 'k', 1)
 		assert(ok and ffi.string(v, v_sz) == 'v')
 		db:commit()
 	end)
@@ -214,7 +214,7 @@ function test.rename_existing_table_in_top_level_txn()
 		db:begin()
 		assert(not db:table_exists't')
 		assert(db:table_exists'u')
-		local ok, v, v_sz = db:get_raw('u', 'k', 1)
+		local ok, v, v_sz = db:find_raw('u', 'k', 1)
 		assert(ok)
 		assert(ffi.string(v, v_sz) == 'v')
 		db:commit()
@@ -232,7 +232,7 @@ function test.rename_abort_reopens_old_table()
 		db:begin()
 		assert(db:table_exists't')
 		assert(not db:table_exists'u')
-		local ok, v, v_sz = db:get_raw('t', 'k', 1)
+		local ok, v, v_sz = db:find_raw('t', 'k', 1)
 		assert(ok)
 		assert(ffi.string(v, v_sz) == 'v')
 		db:commit()
@@ -251,7 +251,7 @@ function test.rename_inherited_table_in_nested_txn()
 		db:commit()  --outer
 		db:begin()
 		assert(not db:table_exists't' and db:table_exists'u')
-		local ok, v, v_sz = db:get_raw('u', 'k', 1)
+		local ok, v, v_sz = db:find_raw('u', 'k', 1)
 		assert(ok and ffi.string(v, v_sz) == 'v')
 		db:commit()
 	end)
@@ -285,7 +285,7 @@ function test.rename_created_table_in_nested_txn()
 		db:commit()  --outer
 		db:begin()
 		assert(not db:table_exists't' and db:table_exists'u')
-		local ok, v, v_sz = db:get_raw('u', 'k', 1)
+		local ok, v, v_sz = db:find_raw('u', 'k', 1)
 		assert(ok and ffi.string(v, v_sz) == 'v')
 		db:commit()
 	end)
@@ -318,12 +318,12 @@ function test.drop_in_nested_txn_abort_reopens_parent_dbi()
 		db = mdbx_open(file)
 		db:begin'w'
 		db:begin'w'
-		assert(db:get_raw('t', 'k', 1))
+		assert(db:find_raw('t', 'k', 1))
 		db:commit()
 		db:begin'w'
 		assert(db:drop_table_raw't')
 		db:abort()
-		local ok, v, v_sz = db:get_raw('t', 'k', 1)
+		local ok, v, v_sz = db:find_raw('t', 'k', 1)
 		assert(ok and ffi.string(v, v_sz) == 'v')
 		db:commit()
 		db:close()
@@ -342,13 +342,13 @@ rawset(test, 'drop_created_table_in_nested_txn_abort', function()
 		db:abort()
 
 		assert(db:table_exists't')
-		local ok, v, v_sz = db:get_raw('t', 'k', 1)
+		local ok, v, v_sz = db:find_raw('t', 'k', 1)
 		assert(ok and ffi.string(v, v_sz) == 'v',
 			'child drop+abort lost the parent-created table row')
 
 		db:commit()
 		db:begin()
-		local ok, v, v_sz = db:get_raw('t', 'k', 1)
+		local ok, v, v_sz = db:find_raw('t', 'k', 1)
 		assert(ok and ffi.string(v, v_sz) == 'v',
 			'parent commit persisted the restored table without its row')
 		db:commit()
@@ -376,7 +376,7 @@ function test.create_table_existing_raises_and_preserves_table()
 		assert(e.message == 'already_exists', tostring(e.message))
 		assert(not db.txn)
 		db:begin()
-		local found, v, v_sz = db:get_raw('t', 'k', 1)
+		local found, v, v_sz = db:find_raw('t', 'k', 1)
 		assert(found and ffi.string(v, v_sz) == 'v')
 		db:commit()
 	end)
@@ -397,50 +397,17 @@ function test.update_missing_table_does_not_create_table()
 	end)
 end
 
-function test.cursor_get_raw_accepts_cursor_op()
-	with_db('cursor_get_raw_accepts_cursor_op', function(db)
-		db:begin'w'
-		put_string(db, 't', 'a', '1')
-		db:commit()
-		db:begin()
-		local cur = db:cursor_raw('t')
-		local ok, v, v_sz = cur:get_raw('a', 1, mdbx.MDBX_SET)
-		assert(ok)
-		assert(ffi.string(v, v_sz) == '1')
-		cur:close()
-		db:commit()
-	end)
-end
-
-function test.cursor_get_pair_raw_uses_explicit_value()
-	with_db('cursor_get_pair_raw_uses_explicit_value', function(db)
+function test.cursor_find_dup_raw()
+	with_db('cursor_find_dup_raw', function(db)
 		db:begin'w'
 		db:create_table_raw('d', mdbx.MDBX_DUPSORT)
 		assert(db:try_put_raw('d', 'k', 1, 'a', 1))
 		assert(db:try_put_raw('d', 'k', 1, 'b', 1))
 		assert(db:try_put_raw('d', 'x', 1, 'q', 1))
 		local cur = db:cursor_raw('d')
-		local ok, v, v_sz = cur:get_pair_raw('k', 1, 'b', 1)
+		local ok, v, v_sz = cur:find_dup_raw('k', 1, 'b', 1)
 		assert(ok)
 		assert(ffi.string(v, v_sz) == 'b')
-		db:abort()
-	end)
-end
-
-function test.move_key_rejects_dupsort_table()
-	with_db('move_key_rejects_dupsort_table', function(db)
-		db:begin'w'
-		db:create_table_raw('d', mdbx.MDBX_DUPSORT)
-		assert(db:try_put_raw('d', 'k', 1, 'a', 1))
-		assert(db:try_put_raw('d', 'k', 1, 'b', 1))
-		assert_plain_error(function()
-			db:try_move_key_raw('d', 'k', 1, 'j', 1)
-		end, 'cannot move key in DUPSORT table')
-		local vals = {}
-		for cur, k, k_sz, v, v_sz in db:each_raw('d') do
-			vals[#vals+1] = ffi.string(k, k_sz)..'='..ffi.string(v, v_sz)
-		end
-		assert(table.concat(vals, ',') == 'k=a,k=b')
 		db:abort()
 	end)
 end
@@ -450,8 +417,8 @@ function test.cursor_del_returns_true()
 		db:begin'w'
 		put_string(db, 't', 'a', '1')
 		local cur = db:cursor_raw('t', 'w')
-		assert(cur:get_raw('a', 1))
-		cur:del_raw()
+		assert(cur:find_raw('a', 1))
+		cur:try_del_raw()
 		cur:close()
 		db:commit()
 	end)
@@ -493,7 +460,7 @@ function test.main_table_is_dbi_1()
 		assert(db:table_name(1) == '<main>')
 		assert(db:table_exists(1))
 		assert(db:try_put_raw(1, 'x', 1, 'y', 1))
-		local ok, v, v_sz = db:get_raw(1, 'x', 1)
+		local ok, v, v_sz = db:find_raw(1, 'x', 1)
 		assert(ok)
 		assert(ffi.string(v, v_sz) == 'y')
 		db:abort()
@@ -503,7 +470,7 @@ end
 function test.raw_ops_without_txn_assert()
 	with_db('raw_ops_without_txn_assert', function(db)
 		assert_plain_error(function()
-			db:get_raw('t', 'k', 1)
+			db:find_raw('t', 'k', 1)
 		end, 'not in transaction')
 		assert_plain_error(function()
 			db:table_exists't'
@@ -570,6 +537,342 @@ function test.delete_open_db_raises()
 	db:close()
 	cleanup(file)
 	assert(not ok)
+end
+
+-- find_ge_raw ----------------------------------------------------------------
+
+function test.find_ge_raw_exact_match()
+	with_db('find_ge_raw_exact_match', function(db)
+		db:begin'w'
+		put_string(db, 't', 'b', '2')
+		put_string(db, 't', 'd', '4')
+		db:commit()
+		db:begin()
+		local cur = db:cursor_raw('t')
+		local ok, k, k_sz, v, v_sz = cur:find_ge_raw('b', 1)
+		assert(ok)
+		assert(ffi.string(k, k_sz) == 'b')
+		assert(ffi.string(v, v_sz) == '2')
+		cur:close()
+		db:commit()
+	end)
+end
+
+function test.find_ge_raw_between_keys()
+	with_db('find_ge_raw_between_keys', function(db)
+		db:begin'w'
+		put_string(db, 't', 'a', '1')
+		put_string(db, 't', 'c', '3')
+		db:commit()
+		db:begin()
+		local cur = db:cursor_raw('t')
+		local ok, k, k_sz, v, v_sz = cur:find_ge_raw('b', 1)
+		assert(ok)
+		assert(ffi.string(k, k_sz) == 'c')
+		assert(ffi.string(v, v_sz) == '3')
+		cur:close()
+		db:commit()
+	end)
+end
+
+function test.find_ge_raw_past_last()
+	with_db('find_ge_raw_past_last', function(db)
+		db:begin'w'
+		put_string(db, 't', 'a', '1')
+		db:commit()
+		db:begin()
+		local cur = db:cursor_raw('t')
+		local ok, err = cur:find_ge_raw('z', 1)
+		assert(not ok and err == 'not_found')
+		cur:close()
+		db:commit()
+	end)
+end
+
+-- each_from_raw --------------------------------------------------------------
+
+function test.each_from_raw_from_middle()
+	with_db('each_from_raw_from_middle', function(db)
+		db:begin'w'
+		put_string(db, 't', 'a', '1')
+		put_string(db, 't', 'c', '3')
+		put_string(db, 't', 'e', '5')
+		db:commit()
+		db:begin()
+		local cur = db:cursor_raw('t')
+		local keys = {}
+		for _, k, k_sz in cur:each_from_raw('c', 1) do
+			keys[#keys+1] = ffi.string(k, k_sz)
+		end
+		cur:close()
+		db:commit()
+		assert(table.concat(keys, ',') == 'c,e', table.concat(keys, ','))
+	end)
+end
+
+function test.each_from_raw_before_first()
+	with_db('each_from_raw_before_first', function(db)
+		db:begin'w'
+		put_string(db, 't', 'b', '2')
+		put_string(db, 't', 'd', '4')
+		db:commit()
+		db:begin()
+		local cur = db:cursor_raw('t')
+		local keys = {}
+		for _, k, k_sz in cur:each_from_raw('a', 1) do
+			keys[#keys+1] = ffi.string(k, k_sz)
+		end
+		cur:close()
+		db:commit()
+		assert(table.concat(keys, ',') == 'b,d', table.concat(keys, ','))
+	end)
+end
+
+function test.each_from_raw_past_last()
+	with_db('each_from_raw_past_last', function(db)
+		db:begin'w'
+		put_string(db, 't', 'a', '1')
+		db:commit()
+		db:begin()
+		local cur = db:cursor_raw('t')
+		local count = 0
+		for _ in cur:each_from_raw('z', 1) do count = count + 1 end
+		cur:close()
+		db:commit()
+		assert(count == 0)
+	end)
+end
+
+-- each_from_last_raw ------------------------------------------------------
+
+function test.each_from_last_raw_from_middle()
+	with_db('each_from_last_raw_from_middle', function(db)
+		db:begin'w'
+		put_string(db, 't', 'a', '1')
+		put_string(db, 't', 'c', '3')
+		put_string(db, 't', 'e', '5')
+		db:commit()
+		db:begin()
+		local cur = db:cursor_raw('t')
+		local keys = {}
+		for _, k, k_sz in cur:each_from_last_raw('c', 1) do
+			keys[#keys+1] = ffi.string(k, k_sz)
+		end
+		cur:close()
+		db:commit()
+		assert(table.concat(keys, ',') == 'c,a', table.concat(keys, ','))
+	end)
+end
+
+function test.each_from_last_raw_between_keys()
+	with_db('each_from_last_raw_between_keys', function(db)
+		db:begin'w'
+		put_string(db, 't', 'a', '1')
+		put_string(db, 't', 'c', '3')
+		put_string(db, 't', 'e', '5')
+		db:commit()
+		db:begin()
+		local cur = db:cursor_raw('t')
+		local keys = {}
+		for _, k, k_sz in cur:each_from_last_raw('d', 1) do
+			keys[#keys+1] = ffi.string(k, k_sz)
+		end
+		cur:close()
+		db:commit()
+		assert(table.concat(keys, ',') == 'c,a', table.concat(keys, ','))
+	end)
+end
+
+function test.each_from_last_raw_before_first()
+	with_db('each_from_last_raw_before_first', function(db)
+		db:begin'w'
+		put_string(db, 't', 'b', '2')
+		db:commit()
+		db:begin()
+		local cur = db:cursor_raw('t')
+		local count = 0
+		for _ in cur:each_from_last_raw('a', 1) do count = count + 1 end
+		cur:close()
+		db:commit()
+		assert(count == 0)
+	end)
+end
+
+-- cursor navigation ----------------------------------------------------------
+
+function test.cursor_navigation()
+	with_db('cursor_navigation', function(db)
+		db:begin'w'
+		put_string(db, 't', 'a', '1')
+		put_string(db, 't', 'b', '2')
+		put_string(db, 't', 'c', '3')
+		db:commit()
+		db:begin()
+		local cur = db:cursor_raw('t')
+		local ok, k, k_sz
+		ok, k, k_sz = cur:first_raw()
+		assert(ok and ffi.string(k, k_sz) == 'a')
+		ok, k, k_sz = cur:next_raw()
+		assert(ok and ffi.string(k, k_sz) == 'b')
+		ok, k, k_sz = cur:current_raw()
+		assert(ok and ffi.string(k, k_sz) == 'b')
+		ok, k, k_sz = cur:prev_raw()
+		assert(ok and ffi.string(k, k_sz) == 'a')
+		ok, k, k_sz = cur:last_raw()
+		assert(ok and ffi.string(k, k_sz) == 'c')
+		local ok2, err = cur:next_raw()
+		assert(not ok2 and err == 'not_found')
+		cur:close()
+		db:commit()
+	end)
+end
+
+function test.cur_each_raw()
+	with_db('cur_each_raw', function(db)
+		db:begin'w'
+		put_string(db, 't', 'a', '1')
+		put_string(db, 't', 'b', '2')
+		put_string(db, 't', 'c', '3')
+		db:commit()
+		db:begin()
+		local cur = db:cursor_raw('t')
+		local keys = {}
+		for _, k, k_sz in cur:each_raw() do
+			keys[#keys+1] = ffi.string(k, k_sz)
+		end
+		cur:close()
+		db:commit()
+		assert(table.concat(keys, ',') == 'a,b,c', table.concat(keys, ','))
+	end)
+end
+
+function test.cur_each_reverse_raw()
+	with_db('cur_each_reverse_raw', function(db)
+		db:begin'w'
+		put_string(db, 't', 'a', '1')
+		put_string(db, 't', 'b', '2')
+		put_string(db, 't', 'c', '3')
+		db:commit()
+		db:begin()
+		local cur = db:cursor_raw('t')
+		local keys = {}
+		for _, k, k_sz in cur:each_reverse_raw() do
+			keys[#keys+1] = ffi.string(k, k_sz)
+		end
+		cur:close()
+		db:commit()
+		assert(table.concat(keys, ',') == 'c,b,a', table.concat(keys, ','))
+	end)
+end
+
+-- CRUD -----------------------------------------------------------------------
+
+function test.try_insert_raw_conflict()
+	with_db('try_insert_raw_conflict', function(db)
+		db:begin'w'
+		put_string(db, 't', 'k', 'v1')
+		local ok, err, v, v_sz = db:try_insert_raw('t', 'k', 1, 'v2', 2)
+		assert(not ok and err == 'already_exists')
+		assert(ffi.string(v, v_sz) == 'v1')
+		db:abort()
+	end)
+end
+
+function test.try_update_raw()
+	with_db('try_update_raw', function(db)
+		db:begin'w'
+		put_string(db, 't', 'k', 'old')
+		assert(db:try_update_raw('t', 'k', 1, 'new', 3))
+		local ok, v, v_sz = db:find_raw('t', 'k', 1)
+		assert(ok and ffi.string(v, v_sz) == 'new')
+		db:abort()
+	end)
+end
+
+function test.try_update_raw_missing()
+	with_db('try_update_raw_missing', function(db)
+		db:begin'w'
+		db:create_table_raw('t')
+		local ok, err = db:try_update_raw('t', 'k', 1, 'v', 1)
+		assert(not ok and err == 'not_found')
+		db:abort()
+	end)
+end
+
+function test.try_del_raw()
+	with_db('try_del_raw', function(db)
+		db:begin'w'
+		put_string(db, 't', 'k', 'v')
+		assert(db:try_del_raw('t', 'k', 1))
+		local ok = db:find_raw('t', 'k', 1)
+		assert(not ok)
+		db:abort()
+	end)
+end
+
+function test.try_del_raw_missing()
+	with_db('try_del_raw_missing', function(db)
+		db:begin'w'
+		db:create_table_raw('t')
+		local ok, err = db:try_del_raw('t', 'k', 1)
+		assert(not ok and err == 'not_found')
+		db:abort()
+	end)
+end
+
+function test.cursor_try_put_raw_conflict()
+	with_db('cursor_try_put_raw_conflict', function(db)
+		db:begin'w'
+		put_string(db, 't', 'k', 'v1')
+		local cur = db:cursor_raw('t')
+		cur:find_raw('k', 1)
+		local ok, err, v, v_sz = cur:try_put_raw('k', 1, 'v2', 2, mdbx.MDBX_NOOVERWRITE)
+		assert(not ok and err == 'already_exists')
+		assert(ffi.string(v, v_sz) == 'v1')
+		db:abort()
+	end)
+end
+
+-- table ops ------------------------------------------------------------------
+
+function test.clear_table_raw()
+	with_db('clear_table_raw', function(db)
+		db:begin'w'
+		put_string(db, 't', 'a', '1')
+		put_string(db, 't', 'b', '2')
+		db:clear_table_raw('t')
+		local ok = db:find_raw('t', 'a', 1)
+		assert(not ok)
+		assert(db:table_exists't')
+		db:commit()
+	end)
+end
+
+function test.each_table()
+	with_db('each_table', function(db)
+		db:begin'w'
+		put_string(db, 'alpha', 'k', 'v')
+		put_string(db, 'beta',  'k', 'v')
+		put_string(db, 'gamma', 'k', 'v')
+		db:commit()
+		db:begin()
+		local names = {}
+		for name in db:each_table() do names[#names+1] = name end
+		db:commit()
+		assert(table.concat(names, ',') == 'alpha,beta,gamma', table.concat(names, ','))
+	end)
+end
+
+function test.table_count()
+	with_db('table_count', function(db)
+		db:begin'w'
+		put_string(db, 'a', 'k', 'v')
+		put_string(db, 'b', 'k', 'v')
+		db:commit()
+		db:begin()
+		assert(db:table_count() == 2)
+		db:commit()
+	end)
 end
 
 local name = ...
