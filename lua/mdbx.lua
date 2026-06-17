@@ -623,6 +623,10 @@ function Db:cursor_raw(tab)
 	return cur
 end
 
+function is_mdbx_cursor(c)
+	return istab(c) and rawget(c, '__index') == Cur
+end
+
 function Cur:close()
 	if self:closed() then return end
 	self.db:checkz('cursor_close', C.mdbx_cursor_unbind(self.c))
