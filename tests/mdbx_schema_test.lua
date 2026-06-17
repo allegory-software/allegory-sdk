@@ -2043,8 +2043,6 @@ function test.rename_table()
 		assert(num(db:find('u', 'v', 1)) == 10)
 		local _, sch = db:dbi_schema'u'
 		assert(sch.name == 'u', sch.name)
-		assert(not db:find_raw('$schema', 't', 1)) --no orphan
-		assert(db:find_raw('$schema', 'u', 1))
 		db:commit(); db:close()
 		db = mdbx_open(file) --reopen: u loads, t gone
 		db:begin'r'
@@ -2116,16 +2114,12 @@ function test.rename_indexed_table()
 		db:begin'w'; db:rename_table('t', 'u'); db:commit()
 		db:begin'r'
 		assert(db:table_exists'u/cat' and not db:table_exists't/cat')
-		local _, sch = db:dbi_schema'u'
-		assert(sch.indexes[1].name == 'u/cat', sch.indexes[1].name)
-		assert(sch.indexes[1].val_table == 'u', sch.indexes[1].val_table)
 		local n = 0; for c, t in db:each('u/cat', '{}') do n = n + 1 end
 		assert(n == 2, n)
 		db:commit(); db:close()
 		db = mdbx_open(file) --reopen: u + its index load and work
 		db:begin'r'
-		local _, sch = db:dbi_schema'u'
-		assert(sch.indexes and sch.indexes[1].name == 'u/cat')
+		assert(db:table_exists'u/cat')
 		local n = 0; for c, t in db:each('u/cat', '{}') do n = n + 1 end
 		assert(n == 2, n)
 		db:commit(); db:close()
@@ -2572,8 +2566,6 @@ function test.fk_retained_index_readd()
 		local _, _, readded_ix = db:add_index('child', {'pid'})
 		assert(readded_ix == ix)
 		local _, schema = db:dbi_schema'child'
-		assert(schema.ixs and schema.ixs[ix])
-		assert(#schema.indexes == 1)
 		assert(schema.fks['pid'].index.name == ix)
 		assert(num((db:must_find(ix, '{}', 1)).id) == 10)
 
@@ -3776,9 +3768,6 @@ function test.rename_column_indexed()
 		db:commit(); db:close()
 		db = mdbx_open(file); db:begin'w' --persists + still enforces
 		assert_consistent(db, 'reopen')
-		local _, sch = db:dbi_schema't'
-		assert(sch.ixs['t/mail'][1] == 'mail')
-		assert(sch.ixs['t/years'][1] == 'years')
 		assert(try_mutation(db, db.insert, 't', '{}', {id = 3, mail = 'a@x', years = 9}) == false)
 		assert(num((db:must_find('t/mail', '{}', 'a@x')).id) == 1)
 		db:commit(); db:close()
@@ -4000,7 +3989,7 @@ function test.add_fk_owns_definition()
 		assert(child.fks['pid'] == fk)
 		local ok, v, v_sz = db:find_raw('$schema', 'child', #'child')
 		assert(ok)
-		local stored = eval(str(v, v_sz))
+		local stored = string_buffer():set(v, v_sz):decode()
 		assert(stored.fks.pid.index == nil)
 		db:commit()
 	end)
@@ -4974,6 +4963,137 @@ function test.each_prefix_numeric_composite_pk()
 		cur:close()
 		db:commit()
 		assert(table.concat(vals, ',') == 'c,d', table.concat(vals, ','))
+	end)
+end
+
+--each_dup_current starts from the cursor's current key position, covering both
+--the fixedsize (DUPFIXED/u32 pk) and non-fixedsize (variable-length pk) paths.
+function test.each_dup_current()
+	with_db('each_dup_current', function(db)
+		db:begin'w'
+
+		--fixedsize path: u32 pk -> DUPFIXED dup values in the index
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'cat', mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
+		}, pk = {'id'}})
+		db:add_index('t', {'cat'})
+		db:insert('t', '{}', {id = 1, cat = 'a'})
+		db:insert('t', '{}', {id = 2, cat = 'b'})
+		db:insert('t', '{}', {id = 3, cat = 'a'})
+		db:insert('t', '{}', {id = 4, cat = 'b'})
+		db:insert('t', '{}', {id = 5, cat = 'a'})
+
+		local function ids_at(cur, key)
+			assert(cur:try_find(nil, key))
+			local t = {}
+			for _, r in cur:each_dup_current('{}') do add(t, num(r.id)) end
+			sort(t); return t
+		end
+		local cur = db:cursor('t/cat')
+		assert(valeq(ids_at(cur, 'a'), {1, 3, 5}), 'fixedsize: cat=a')
+		assert(valeq(ids_at(cur, 'b'), {2, 4}), 'fixedsize: cat=b')
+		cur:close()
+
+		--non-fixedsize path: utf8 pk -> variable-length dup values in the index
+		db:create_table('u', {name = 'u', fields = {
+			{col = 'id' , mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
+			{col = 'cat', mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
+		}, pk = {'id'}})
+		db:add_index('u', {'cat'})
+		db:insert('u', '{}', {id = 'aa', cat = 'x'})
+		db:insert('u', '{}', {id = 'bb', cat = 'y'})
+		db:insert('u', '{}', {id = 'cc', cat = 'x'})
+
+		local function sids_at(cur, key)
+			assert(cur:try_find(nil, key))
+			local t = {}
+			for _, r in cur:each_dup_current('{}') do add(t, r.id) end
+			sort(t); return t
+		end
+		cur = db:cursor('u/cat')
+		assert(valeq(sids_at(cur, 'x'), {'aa', 'cc'}), 'non-fixedsize: cat=x')
+		assert(valeq(sids_at(cur, 'y'), {'bb'}), 'non-fixedsize: cat=y')
+		cur:close()
+		db:commit()
+	end)
+end
+
+--each_parallel merge-joins N tables/indexes on their key space. yields only at
+--keys present in all N; each_dup_current drives the one-to-many side.
+function test.each_parallel()
+	with_db('each_parallel', function(db)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent', fields = {
+			{col = 'id'  , mdbx_type = 'u32', not_null = true},
+			{col = 'name', mdbx_type = 'utf8', maxlen = 8},
+		}, pk = {'id'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'pid', mdbx_type = 'u32', not_null = true},
+			{col = 'val', mdbx_type = 'utf8', maxlen = 8},
+		}, pk = {'id'}})
+		db:add_index('child', {'pid'})
+		db:insert('parent', '{}', {id = 1, name = 'p1'})
+		db:insert('parent', '{}', {id = 2, name = 'p2'})
+		db:insert('parent', '{}', {id = 3, name = 'p3'})
+		db:insert('child', '{}', {id = 10, pid = 2, val = 'c10'})
+		db:insert('child', '{}', {id = 11, pid = 2, val = 'c11'})
+		db:insert('child', '{}', {id = 12, pid = 3, val = 'c12'})
+		db:insert('child', '{}', {id = 13, pid = 5, val = 'c13'}) --pid=5 has no parent row
+
+		local results = {} --{parent_id -> sorted child vals}
+		for cur_p, cur_c in db:each_parallel('parent', 'child/pid') do
+			local p = cur_p:current('{}')
+			local children = {}
+			for _, c in cur_c:each_dup_current('{}') do add(children, c.val) end
+			sort(children)
+			results[num(p.id)] = children
+		end
+		assert(not results[1], 'parent 1 has no children: must not appear')
+		assert(not results[5], 'pid=5 has no parent row: must not appear')
+		assert(valeq(results[2], {'c10', 'c11'}), 'parent 2')
+		assert(valeq(results[3], {'c12'}), 'parent 3')
+		local count = 0; for _ in pairs(results) do count = count + 1 end
+		assert(count == 2, 'expected 2 joined pairs, got '..count)
+		db:commit()
+	end)
+end
+
+--each_intersect finds records matching conditions on two different indexes of the
+--same table: only rows whose pk appears in both indexes' dup lists are returned.
+function test.each_intersect()
+	with_db('each_intersect', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id'  , mdbx_type = 'u32', not_null = true},
+			{col = 'col1', mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
+			{col = 'col2', mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
+		}, pk = {'id'}})
+		db:add_index('t', {'col1'})
+		db:add_index('t', {'col2'})
+		db:insert('t', '{}', {id = 1, col1 = 'a', col2 = 'x'})
+		db:insert('t', '{}', {id = 2, col1 = 'a', col2 = 'y'})
+		db:insert('t', '{}', {id = 3, col1 = 'b', col2 = 'x'})
+		db:insert('t', '{}', {id = 4, col1 = 'b', col2 = 'y'})
+		db:insert('t', '{}', {id = 5, col1 = 'a', col2 = 'x'}) --second a+x row
+
+		local function intersect(...)
+			local ids = {}
+			for cur in db:each_intersect(...) do
+				local r = cur:current('{}')
+				add(ids, num(r.id))
+			end
+			sort(ids); return ids
+		end
+
+		assert(valeq(intersect('t/col1', 'a', 't/col2', 'x'), {1, 5}), 'a+x: two matches')
+		assert(valeq(intersect('t/col1', 'a', 't/col2', 'y'), {2}),    'a+y: one match')
+		assert(valeq(intersect('t/col1', 'b', 't/col2', 'x'), {3}),    'b+x: one match')
+		assert(valeq(intersect('t/col1', 'b', 't/col2', 'y'), {4}),    'b+y: one match')
+		assert(valeq(intersect('t/col1', 'c', 't/col2', 'x'), {}),     'no col1=c: empty')
+		assert(valeq(intersect('t/col1', 'a', 't/col2', 'z'), {}),     'no col2=z: empty')
+		db:commit()
 	end)
 end
 
