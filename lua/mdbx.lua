@@ -64,10 +64,11 @@ CRUD
 	cur:find_raw     (k, k_sz) -> true, v, v_sz | false,err
 	cur:find_ge_raw  (k, k_sz) -> true, k, k_sz, v, v_sz | false,err
 	cur:find_le_raw  (k, k_sz) -> true, k, k_sz, v, v_sz | false,err
-	cur:find_dup_raw     (k, k_sz, v, v_sz) -> true, v, v_sz | false,err
-	cur:get_multiple_raw     (k, k_sz) -> true, v_ptr, v_sz | false,'not_found'
-	cur:current_multiple_raw()     -> true, v_ptr, v_sz | false,'not_found'
-	cur:next_multiple_raw()        -> true, v_ptr, v_sz | false,'not_found'
+	cur:find_dup_raw    (k, k_sz, v, v_sz) -> true, v, v_sz | false,err
+	cur:find_dup_ge_raw (k, k_sz, v, v_sz) -> true, v, v_sz | false,err
+	cur:find_multiple_raw    (k, k_sz) -> true, v_ptr, v_sz | false,'not_found'
+	cur:current_multiple_raw ()        -> true, v_ptr, v_sz | false,'not_found'
+	cur:next_multiple_raw    ()        -> true, v_ptr, v_sz | false,'not_found'
 	cur:each[_reverse]_raw() -> iter() -> true, k, k_sz, v, v_sz
 	cur:each_from[_last]_raw(k, k_sz) -> iter() -> cur, k, k_sz, v, v_sz
 	cur:try_put_raw  (k, k_sz, v, v_sz, [flags]) -> true | false,'already_exists',cur_v,cur_v_sz | false,'not_found'
@@ -735,7 +736,17 @@ function Cur:find_dup_raw(k, k_sz, v, v_sz)
 	return true, v, v_sz
 end
 
-function Cur:get_multiple_raw(k, k_sz)
+function Cur:find_dup_ge_raw(k, k_sz, v, v_sz)
+	key.data = k
+	key.size = k_sz
+	val.data = v
+	val.size = v_sz
+	local ok, err_or_k, _, v, v_sz = cursor_get(self, C.MDBX_GET_BOTH_RANGE)
+	if not ok then return ok, err_or_k end
+	return true, v, v_sz
+end
+
+function Cur:find_multiple_raw(k, k_sz)
 	check_cursor(self)
 	key.data = k; key.size = k_sz
 	local rc = C.mdbx_cursor_get(self.c, key, val, C.MDBX_SEEK_AND_GET_MULTIPLE)
