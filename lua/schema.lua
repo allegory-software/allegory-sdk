@@ -37,7 +37,7 @@ databases with different engines.
 ## Usage
 
 See `schema_std.lua` for type definitions and `lang_schema()` in lang.lua
-and `auth_schema()` in `webb_auth.lua` for examples of table definitions.
+and `auth_schema()` in `webb_auth_mdbx.lua` for examples of table definitions.
 
 ### How this works / caveats
 
