@@ -330,10 +330,7 @@ function test.drop_in_nested_txn_abort_reopens_parent_dbi()
 	end)
 end
 
---Known libmdbx bug in v0.14.2-192-gf002e443: child drop+abort restores a
---parent-created table as empty. Kept out of the default suite until fixed;
---run explicitly with: mdbx_test.lua drop_created_table_in_nested_txn_abort
-rawset(test, 'drop_created_table_in_nested_txn_abort', function()
+function test.drop_created_table_in_nested_txn_abort()
 	with_db('drop_created_table_in_nested_txn_abort', function(db)
 		db:begin'w'
 		put_string(db, 't', 'k', 'v')
@@ -353,7 +350,7 @@ rawset(test, 'drop_created_table_in_nested_txn_abort', function()
 			'parent commit persisted the restored table without its row')
 		db:commit()
 	end)
-end)
+end
 
 function test.try_dbi_missing_table()
 	with_db('try_dbi_missing_table', function(db)
