@@ -4259,9 +4259,9 @@ function test.mixed_index_descending_pk_decode()
 		db:add_fk{table = 'child', cols = {'a', 'c', 'b'},
 			ref_table = 'parent', ref_cols = {'a', 'c', 'b'}, ondelete = 'cascade'}
 
-		local r = db:must_find('child/a-c-b', '{}', 'aa', 'cc', 1)
+		local r = db:must_find('child/a,c,b', '{}', 'aa', 'cc', 1)
 		assert(num(r.x) == 10 and r.a == 'aa' and r.c == 'cc' and num(r.b) == 1)
-		r = db:must_find('child/a-c-b', '{}', 'bb', 'dd', 2)
+		r = db:must_find('child/a,c,b', '{}', 'bb', 'dd', 2)
 		assert(num(r.x) == 20 and r.a == 'bb' and r.c == 'dd' and num(r.b) == 2)
 		db:del('parent', 'aa', 'cc', 1)
 		assert(not db:exists('child', 10, 'aa', 'cc'))
@@ -4573,7 +4573,7 @@ function test.rename_column_failure_rolls_back()
 		db:commit()
 
 		db:begin'w'
-		db:create_table_raw't/x-b'
+		db:create_table_raw't/x,b'
 		local ok, err = catch('schema', db.rename_column, db, 't', 'a', 'x')
 		assert(not ok, 'rename unexpectedly bypassed the index-name collision')
 		assert(iserror(err, 'schema'), tostring(err))
@@ -4582,10 +4582,10 @@ function test.rename_column_failure_rolls_back()
 		db:begin'r'
 		local _, schema = db:dbi_schema't'
 		assert(schema.fields.a and not schema.fields.x)
-		assert(db:table_exists't/a' and db:table_exists't/a-b')
-		assert(not db:table_exists't/x' and not db:table_exists't/x-b')
+		assert(db:table_exists't/a' and db:table_exists't/a,b')
+		assert(not db:table_exists't/x' and not db:table_exists't/x,b')
 		assert(num((db:must_find('t/a', '{}', 10)).id) == 1)
-		assert(num((db:must_find('t/a-b', '{}', 10, 20)).id) == 1)
+		assert(num((db:must_find('t/a,b', '{}', 10, 20)).id) == 1)
 		assert_consistent(db)
 		db:commit()
 	end)
