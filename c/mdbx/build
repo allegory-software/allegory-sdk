@@ -2,7 +2,7 @@
 cd "${0%build}" || exit 1
 
 cd src
-git checkout stable
+# git checkout stable
 
 C="
 -fvisibility=hidden
