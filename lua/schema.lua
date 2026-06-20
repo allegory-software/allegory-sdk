@@ -370,6 +370,27 @@ do
 		function env.proc         (...) self:add_proc     (...) end
 		function env.add_cols     (...) self:add_cols     (...) end
 
+		for _, event in ipairs{
+			'before_insert', 'after_insert',
+			'before_update', 'after_update',
+			'before_delete', 'after_delete',
+		} do
+			env[event] = function(arg1, arg2)
+				if isstr(arg1) then --standalone: before_insert('usr', fn)
+					local tbl = assertf(self.tables[arg1],
+						'unknown table for trigger: %s', arg1)
+					add(attr(attr(tbl, 'triggers'), event), assertf(isfunc(arg2),
+						'function expected for %s.%s', arg1, event))
+				else --inline: before_insert(fn) -- returns a table-level flag
+					local fn = assertf(isfunc(arg1) and arg1,
+						'function expected for trigger %s', event)
+					return function(sc, tbl)
+						add(attr(attr(tbl, 'triggers'), event), fn)
+					end
+				end
+			end
+		end
+
 		return self
 	end
 end
