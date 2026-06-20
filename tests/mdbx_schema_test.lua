@@ -5181,6 +5181,194 @@ function test.each_or()
 	end)
 end
 
+-- triggers ------------------------------------------------------------------
+
+--create a paper schema table with the given triggers. the table is created in
+--a committed atomic (so _wtxn_end clears live_schema['t']). db.schema is set
+--so the next dbi_schema() picks up the paper schema (with triggers) as the
+--live schema, not the stored schema. this exercises the real paper-schema path:
+--stored-schema tables (create_table without a paper schema) cannot use triggers.
+local function trigger_table(db, triggers)
+	local spec = {
+		name = 't',
+		fields = {
+			{col = 'id',  mdbx_type = 'u32',  not_null = true},
+			{col = 'val', mdbx_type = 'utf8', maxlen = 16},
+		},
+		pk = {'id'},
+		triggers = triggers,
+	}
+	local sc = mdbx_schema()
+	sc.tables['t'] = spec
+	db.schema = sc
+	--without_schema hides db.schema from touch_schema's assertion, clears
+	--live_schema['t'] on return; next dbi_schema() loads the paper schema.
+	db:atomic('w', function()
+		db:without_schema(function() db:create_table('t', spec) end)
+	end)
+end
+
+--all six events fire; before_insert and before_update can mutate NEW and the
+--stored value reflects the mutation; after fires with the final stored values.
+function test.triggers_events()
+	with_db('triggers_events', function(db)
+		local log = {}
+		trigger_table(db, {
+			before_insert = {function(db, new)
+				log[#log+1] = {'bi', new.val}
+				new.val = new.val and new.val:upper()
+			end},
+			after_insert = {function(db, new)
+				log[#log+1] = {'ai', new.val}
+			end},
+			before_update = {function(db, old, new)
+				log[#log+1] = {'bu', old.val, new.val}
+				new.val = new.val and new.val:upper()
+			end},
+			after_update = {function(db, old, new)
+				log[#log+1] = {'au', old.val, new.val}
+			end},
+			before_delete = {function(db, old)
+				log[#log+1] = {'bd', old.val}
+			end},
+			after_delete = {function(db, old)
+				log[#log+1] = {'ad', old.val}
+			end},
+		})
+		db:begin'w'
+		db:insert('t', '{}', {id = 1, val = 'hello'})
+		db:update('t', '{}', {id = 1, val = 'world'})
+		db:del('t', 1)
+		assert(log[1][1] == 'bi' and log[1][2] == 'hello', log[1][2])
+		assert(log[2][1] == 'ai' and log[2][2] == 'HELLO', log[2][2]) --sees mutation
+		assert(log[3][1] == 'bu' and log[3][2] == 'HELLO' and log[3][3] == 'world')
+		assert(log[4][1] == 'au' and log[4][2] == 'HELLO' and log[4][3] == 'WORLD')
+		assert(log[5][1] == 'bd' and log[5][2] == 'WORLD')
+		assert(log[6][1] == 'ad' and log[6][2] == 'WORLD')
+		db:commit()
+	end)
+end
+
+--multiple triggers per event fire in declaration order.
+function test.triggers_order()
+	with_db('triggers_order', function(db)
+		local log = {}
+		trigger_table(db, {
+			after_insert = {
+				function(db, new) log[#log+1] = 1 end,
+				function(db, new) log[#log+1] = 2 end,
+				function(db, new) log[#log+1] = 3 end,
+			},
+		})
+		db:begin'w'
+		db:insert('t', '{}', {id = 1, val = 'x'})
+		assert(log[1] == 1 and log[2] == 2 and log[3] == 3, cat(imap(log, tostring), ','))
+		db:commit()
+	end)
+end
+
+--before trigger raise: write never happens.
+--after trigger raise: write happens inside the txn but rolls back.
+--after the first test, live_schema['t'] IS the paper schema; switching triggers
+--is done by updating db.schema.tables['t'].triggers (same object).
+function test.triggers_raise_aborts()
+	with_db('triggers_raise_aborts', function(db)
+		trigger_table(db, {
+			before_insert = {function(db, new) error('before blocked') end},
+		})
+		local ok, err = pcall(db.atomic, db, 'w', function()
+			db:insert('t', '{}', {id = 1, val = 'x'})
+		end)
+		assert(not ok and tostring(err):find('before blocked', 1, true), tostring(err))
+		db:atomic('r', function() assert(not db:exists('t', 1)) end)
+		db.schema.tables['t'].triggers = {
+			after_insert = {function(db, new) error('after blocked') end},
+		}
+		ok, err = pcall(db.atomic, db, 'w', function()
+			db:insert('t', '{}', {id = 2, val = 'y'})
+		end)
+		assert(not ok and tostring(err):find('after blocked', 1, true), tostring(err))
+		db:atomic('r', function() assert(not db:exists('t', 2)) end)
+	end)
+end
+
+--after triggers receive a live db handle and can issue writes in the same txn.
+function test.triggers_after_db_write()
+	with_db('triggers_after_db_write', function(db)
+		local nlog = 0
+		trigger_table(db, {
+			after_insert = {function(db, new)
+				nlog = nlog + 1
+				db:insert('log', '{}', {id = nlog, msg = new.val})
+			end},
+			after_delete = {function(db, old)
+				nlog = nlog + 1
+				db:insert('log', '{}', {id = nlog, msg = 'del:'..tostring(old.val)})
+			end},
+		})
+		db:atomic('w', function()
+			db:create_table('log', {
+				name = 'log',
+				fields = {
+					{col = 'id',  mdbx_type = 'u32',  not_null = true},
+					{col = 'msg', mdbx_type = 'utf8', maxlen = 32},
+				},
+				pk = {'id'},
+			})
+		end)
+		db:begin'w'
+		db:insert('t', '{}', {id = 1, val = 'a'})
+		db:insert('t', '{}', {id = 2, val = 'b'})
+		db:del('t', 1)
+		assert(db:find('log', 'msg', 1) == 'a')
+		assert(db:find('log', 'msg', 2) == 'b')
+		assert(db:find('log', 'msg', 3) == 'del:a')
+		db:commit()
+	end)
+end
+
+--recursive after-trigger writes are stopped at max_trigger_depth; txn rolls back.
+function test.triggers_depth_limit()
+	with_db('triggers_depth_limit', function(db)
+		trigger_table(db, {
+			after_insert = {function(db, new)
+				db:insert('t', '{}', {id = num(new.id) + 1, val = 'r'})
+			end},
+		})
+		local ok, err = pcall(db.atomic, db, 'w', function()
+			db:insert('t', '{}', {id = 1, val = 'start'})
+		end)
+		assert(not ok and tostring(err):find('max depth', 1, true), tostring(err))
+		db:atomic('r', function() assert(not db:exists('t', 1)) end)
+	end)
+end
+
+--before/after_update trigger fires correctly via cursor update.
+function test.triggers_cursor_update()
+	with_db('triggers_cursor_update', function(db)
+		local log = {}
+		trigger_table(db, {
+			before_update = {function(db, old, new)
+				log[#log+1] = {'before', old.val, new.val}
+			end},
+			after_update = {function(db, old, new)
+				log[#log+1] = {'after', old.val, new.val}
+			end},
+		})
+		db:begin'w'
+		db:insert('t', '{}', {id = 1, val = 'a'})
+		local cur = db:cursor('t')
+		assert(cur:try_find(nil, 1))
+		cur:update('val', 'b')
+		cur:close()
+		assert(#log == 2, #log)
+		assert(log[1][1] == 'before' and log[1][2] == 'a' and log[1][3] == 'b')
+		assert(log[2][1] == 'after'  and log[2][2] == 'a' and log[2][3] == 'b')
+		assert(db:find('t', 'val', 1) == 'b')
+		db:commit()
+	end)
+end
+
 ------------------------------------------------------------------------------
 
 local name = ...

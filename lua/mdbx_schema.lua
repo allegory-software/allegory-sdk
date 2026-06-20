@@ -3,13 +3,17 @@
 	mdbx_schema: structured data and multi-key indexing for mdbx.
 	Written by Cosmin Apreutsei. Public Domain.
 
-DATA TYPES
-	- ints: 8, 16, 32, 64 bit, signed/unsigned
-	- floats: 32 and 64 bit
-	- arrays: fixed-size (zero-padded) and variable-size
-KEYS
-	- composite keys with per-field ascending/descending order
-	- utf-8 ai_ci indexes
+FEATURES
+	- scalars: 8, 16, 32, 64 bit int, signed/unsigned; 32 and 64 bit floats.
+	- arrays: fixed-size (zero-padded) and variable-size.
+	- table/index keys: composite, with per-field ascending/descending order.
+	- null support (nulls come first in keys).
+	- indexes: unique or non-unique, utf-8 ai_ci, nullable columns for non-unique.
+	- foreign keys: cascade or set-null on delete; enforced on insert/update.
+	- triggers: Lua functions in paper schema fired before/after insert/update/delete.
+	- auto-increment primary keys.
+	- automatic schema migration: paper schema diff executes DDL ops.
+	- schema validation on table open: stored schema must match paper schema.
 LIMITATIONS
 	- varsize columns must have `nozero` (no embedded \0) to used in indexes.
 	- columns must have `not_null` to used in primary key and unique indexes.
@@ -2405,6 +2409,31 @@ end
 
 --DML / UPDATE ---------------------------------------------------------------
 
+local max_trigger_depth = 16
+
+local function fire_triggers(schema, event, db, ...)
+	local evlist = schema.triggers[event]
+	if not evlist then return end
+	local depth = (db._trigger_depth or 0) + 1
+	assertf(depth <= max_trigger_depth,
+		'trigger max depth %d exceeded: %s.%s', max_trigger_depth, schema.name, event)
+	db._trigger_depth = depth
+	local ok, err = true
+	for _, fn in ipairs(evlist) do
+		ok, err = pcall(fn, db, ...)
+		if not ok then break end
+	end
+	db._trigger_depth = depth - 1
+	if not ok then error(err, 0) end
+end
+
+local function decode_row(schema, k, k_sz, v, v_sz)
+	local t = {}
+	decode_key(schema, k, k_sz, t, '{}')
+	decode_val(schema, v, v_sz, t, schema.val_cols, '{}')
+	return t
+end
+
 --check that every fk's referenced row exists for the selected values. on a full
 --write (insert/put) an unset col takes its default. a nil/null fk col means "no
 --reference" so the fk is skipped ("MATCH SIMPLE": any null col skips checking).
@@ -2525,10 +2554,18 @@ local function cur_update(self, ix_cur, val_cols, ...)
 		end
 	end
 	local db = self.db
+	local old_t
+	if schema.triggers then
+		decode_key(schema, k, k_sz, t, '{}')
+		old_t = decode_row(schema, k, k_sz, v0, v0_sz)
+		fire_triggers(schema, 'before_update', db, old_t, t)
+	end
 	local v_sz = encode_val(db, schema, 'c_update', v, v_buf_sz, val_cols, '{}', t)
 	if schema.fks then
 		--fk.cols may include pk cols; decode key into t (k is still valid pre-write).
-		decode_key(schema, k, k_sz, t, '{}')
+		if not schema.triggers then
+			decode_key(schema, k, k_sz, t, '{}')
+		end
 		check_fks(db, 'c_update', schema, schema.cols, '{}', false, t)
 	end
 	if not schema.indexes then
@@ -2542,6 +2579,9 @@ local function cur_update(self, ix_cur, val_cols, ...)
 			local ok, err = ix_schema:update(db, kk, k_sz, v, v_sz, v0c, v0_sz, cur)
 			db:check_row('c_update', schema.name, ok, err)
 		end
+	end
+	if schema.triggers then
+		fire_triggers(schema, 'after_update', db, old_t, t)
 	end
 	return true
 end
@@ -2557,7 +2597,7 @@ local function put(self, flags, op, tab, cols, ...)
 	local v, v_buf_sz = val_rec_buffer(schema.val_fields.max_rec_size)
 	local autoinc_f = op == 'insert' and schema.autoinc_field
 	local k_sz, autoinc_v = encode_key(self, schema, op, autoinc_f, k, k_buf_sz, cols, as, ...)
-	if op == 'update' or op == 'upsert' or schema.indexes or schema.fks then
+	if op == 'update' or op == 'upsert' or schema.indexes or schema.fks or schema.triggers then
 		local cur = self:cursor(dbi)
 		--insert skips the get: v0=nil by definition, NOOVERWRITE detects exists
 		local found, v0, v0_sz
@@ -2565,6 +2605,7 @@ local function put(self, flags, op, tab, cols, ...)
 			found, v0, v0_sz = cur:find_raw(k, k_sz)
 		end
 		local v_sz
+		local old_t, new_t --for triggers
 		if found then
 			--next mdbx put command will invalidate v0 so we need to save it.
 			local v0_unstable = v0
@@ -2583,10 +2624,18 @@ local function put(self, flags, op, tab, cols, ...)
 						end
 					end
 				end
+				if schema.triggers then
+					decode_key(schema, k, k_sz, t, '{}')
+					old_t = decode_row(schema, k, k_sz, v0, v0_sz)
+					fire_triggers(schema, 'before_update', self, old_t, t)
+					new_t = t
+				end
 				v_sz = encode_val(self, schema, op, v, v_buf_sz, val_cols, '{}', t)
 				if schema.fks then
-					for _, f in ipairs(schema.key_fields) do
-						t[f.col] = select_col(cols, as, f.col, ...)
+					if not schema.triggers then --pk not yet in t
+						for _, f in ipairs(schema.key_fields) do
+							t[f.col] = select_col(cols, as, f.col, ...)
+						end
 					end
 					check_fks(self, op, schema, schema.cols, '{}', false, t)
 				end
@@ -2602,7 +2651,14 @@ local function put(self, flags, op, tab, cols, ...)
 		else --put, insert, or upsert new record
 			v0, v0_sz = nil --no previous value (v0 currently holds the find_raw err)
 			v_sz = encode_val(self, schema, op, v, v_buf_sz, cols, as, ...)
-			if schema.fks then
+			if schema.triggers then
+				new_t = decode_row(schema, k, k_sz, v, v_sz)
+				fire_triggers(schema, 'before_insert', self, new_t)
+				v_sz = encode_val(self, schema, op, v, v_buf_sz, schema.val_cols, '{}', new_t)
+				if schema.fks then
+					check_fks(self, op, schema, schema.cols, '{}', true, new_t)
+				end
+			elseif schema.fks then
 				--new row: full write (missing value means take default value).
 				check_fks(self, op, schema, cols, as, true, ...)
 			end
@@ -2614,6 +2670,13 @@ local function put(self, flags, op, tab, cols, ...)
 			for _, ix_schema in ipairs(schema.indexes) do
 				local ok, err = ix_schema:update(self, k, k_sz, v, v_sz, v0, v0_sz)
 				self:check_row(op, schema.name, ok, err)
+			end
+		end
+		if new_t then
+			if old_t then
+				fire_triggers(schema, 'after_update', self, old_t, new_t)
+			else
+				fire_triggers(schema, 'after_insert', self, new_t)
 			end
 		end
 	else --put or insert with no indexes to update or fks to check.
@@ -2658,8 +2721,13 @@ function Cur:del()
 		ok, v, v_sz = cur:find_raw(kk, k_sz)
 		db:check_row('del', schema.name, ok, v)
 	end
-	if schema.indexes then
+	if schema.indexes or schema.triggers then
 		local v0u = v; v = v0_buffer(v_sz); copy(v, v0u, v_sz)
+	end
+	local old_t
+	if schema.triggers then
+		old_t = decode_row(schema, kk, k_sz, v, v_sz)
+		fire_triggers(schema, 'before_delete', db, old_t)
 	end
 	cur:try_del_raw()
 	for _,ix_schema in ipairs(schema.indexes or empty) do
@@ -2671,6 +2739,9 @@ function Cur:del()
 		enforce_del_fks(db, schema, unpack(pk, 1, #schema.key_fields))
 	end
 	if cur ~= self then cur:close() end
+	if schema.triggers then
+		fire_triggers(schema, 'after_delete', db, old_t)
+	end
 	return true
 end
 function Db:del(tab, ...)
