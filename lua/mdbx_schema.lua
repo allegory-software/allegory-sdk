@@ -8,10 +8,11 @@ FEATURES
 	- arrays: fixed-size (zero-padded) and variable-size.
 	- table/index keys: composite, with per-field ascending/descending order.
 	- null support (nulls come first in keys).
+	- auto-increment primary keys.
 	- indexes: unique or non-unique, utf-8 ai_ci, nullable columns for non-unique.
 	- foreign keys: cascade or set-null on delete; enforced on insert/update.
 	- triggers: Lua functions in paper schema fired before/after insert/update/delete.
-	- auto-increment primary keys.
+	- computed columns (stored) via Lua functions in paper schema.
 	- automatic schema migration: paper schema diff executes DDL ops.
 	- schema validation on table open: stored schema must match paper schema.
 LIMITATIONS
@@ -442,7 +443,7 @@ local function encode_val(self, schema, event, rec, rec_buf_sz, cols, as, ...)
 		elseif val == null then
 			val = nil
 		end
-		if val == nil and f.not_null then
+		if val == nil and f.not_null and not f.generate then
 			self:check_col(event, schema.name, f.col, false, 'not_null')
 		end
 		local len = val ~= nil and f.encode(self, event, pp[0], val) or -1
@@ -677,6 +678,12 @@ local function layout_table_schema(schema)
 
 	schema.key_fields = key_fields
 	schema.val_fields = val_fields
+
+	local has_generated = false
+	for _, f in ipairs(val_fields) do
+		if f.generate then has_generated = true; break end
+	end
+	schema.has_generated = has_generated or nil
 
 	--store u32 and u64 simple keys in little-endian and use fast comparator.
 	if #key_fields == 1 then
@@ -2434,6 +2441,14 @@ local function decode_row(schema, k, k_sz, v, v_sz)
 	return t
 end
 
+local function apply_generated(db, schema, new_t)
+	for _, f in ipairs(schema.val_fields) do
+		if f.generate then
+			new_t[f.col] = f.generate(db, new_t)
+		end
+	end
+end
+
 --check that every fk's referenced row exists for the selected values. on a full
 --write (insert/put) an unset col takes its default. a nil/null fk col means "no
 --reference" so the fk is skipped ("MATCH SIMPLE": any null col skips checking).
@@ -2555,15 +2570,20 @@ local function cur_update(self, ix_cur, val_cols, ...)
 	end
 	local db = self.db
 	local old_t
-	if schema.triggers then
+	if schema.triggers or schema.has_generated then
 		decode_key(schema, k, k_sz, t, '{}')
-		old_t = decode_row(schema, k, k_sz, v0, v0_sz)
-		fire_triggers(schema, 'before_update', db, old_t, t)
+		if schema.triggers then
+			old_t = decode_row(schema, k, k_sz, v0, v0_sz)
+			fire_triggers(schema, 'before_update', db, old_t, t)
+		end
+		if schema.has_generated then
+			apply_generated(db, schema, t)
+		end
 	end
 	local v_sz = encode_val(db, schema, 'c_update', v, v_buf_sz, val_cols, '{}', t)
 	if schema.fks then
 		--fk.cols may include pk cols; decode key into t (k is still valid pre-write).
-		if not schema.triggers then
+		if not schema.triggers and not schema.has_generated then
 			decode_key(schema, k, k_sz, t, '{}')
 		end
 		check_fks(db, 'c_update', schema, schema.cols, '{}', false, t)
@@ -2597,7 +2617,7 @@ local function put(self, flags, op, tab, cols, ...)
 	local v, v_buf_sz = val_rec_buffer(schema.val_fields.max_rec_size)
 	local autoinc_f = op == 'insert' and schema.autoinc_field
 	local k_sz, autoinc_v = encode_key(self, schema, op, autoinc_f, k, k_buf_sz, cols, as, ...)
-	if op == 'update' or op == 'upsert' or schema.indexes or schema.fks or schema.triggers then
+	if op == 'update' or op == 'upsert' or schema.indexes or schema.fks or schema.triggers or schema.has_generated then
 		local cur = self:cursor(dbi)
 		--insert skips the get: v0=nil by definition, NOOVERWRITE detects exists
 		local found, v0, v0_sz
@@ -2624,15 +2644,20 @@ local function put(self, flags, op, tab, cols, ...)
 						end
 					end
 				end
-				if schema.triggers then
+				if schema.triggers or schema.has_generated then
 					decode_key(schema, k, k_sz, t, '{}')
-					old_t = decode_row(schema, k, k_sz, v0, v0_sz)
-					fire_triggers(schema, 'before_update', self, old_t, t)
+					if schema.triggers then
+						old_t = decode_row(schema, k, k_sz, v0, v0_sz)
+						fire_triggers(schema, 'before_update', self, old_t, t)
+					end
+					if schema.has_generated then
+						apply_generated(self, schema, t)
+					end
 					new_t = t
 				end
 				v_sz = encode_val(self, schema, op, v, v_buf_sz, val_cols, '{}', t)
 				if schema.fks then
-					if not schema.triggers then --pk not yet in t
+					if not schema.triggers and not schema.has_generated then --pk not yet in t
 						for _, f in ipairs(schema.key_fields) do
 							t[f.col] = select_col(cols, as, f.col, ...)
 						end
@@ -2651,9 +2676,14 @@ local function put(self, flags, op, tab, cols, ...)
 		else --put, insert, or upsert new record
 			v0, v0_sz = nil --no previous value (v0 currently holds the find_raw err)
 			v_sz = encode_val(self, schema, op, v, v_buf_sz, cols, as, ...)
-			if schema.triggers then
+			if schema.triggers or schema.has_generated then
 				new_t = decode_row(schema, k, k_sz, v, v_sz)
-				fire_triggers(schema, 'before_insert', self, new_t)
+				if schema.triggers then
+					fire_triggers(schema, 'before_insert', self, new_t)
+				end
+				if schema.has_generated then
+					apply_generated(self, schema, new_t)
+				end
 				v_sz = encode_val(self, schema, op, v, v_buf_sz, schema.val_cols, '{}', new_t)
 				if schema.fks then
 					check_fks(self, op, schema, schema.cols, '{}', true, new_t)
@@ -2672,7 +2702,7 @@ local function put(self, flags, op, tab, cols, ...)
 				self:check_row(op, schema.name, ok, err)
 			end
 		end
-		if new_t then
+		if schema.triggers and new_t then
 			if old_t then
 				fire_triggers(schema, 'after_update', self, old_t, new_t)
 			else

@@ -523,6 +523,13 @@ function schema.env.aka(old_names)
 	end
 end
 
+function schema.env.as(fn)
+	assertf(isfunc(fn), 'function expected for as()')
+	return function(self, tbl, fld)
+		fld.generate = fn
+	end
+end
+
 local function trigger_pos(tgs, when, op)
 	local i = 1
 	for _,tg in pairs(tgs) do

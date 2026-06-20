@@ -5369,6 +5369,95 @@ function test.triggers_cursor_update()
 	end)
 end
 
+-- generated columns ---------------------------------------------------------
+
+--create a paper schema table with a generated column 'upper' = val:upper().
+local function gen_table(db, gen_fn)
+	local spec = {
+		name = 't',
+		fields = {
+			{col = 'id',    mdbx_type = 'u32',  not_null = true},
+			{col = 'val',   mdbx_type = 'utf8', maxlen = 32},
+			{col = 'upper', mdbx_type = 'utf8', maxlen = 32,
+			 generate = gen_fn},
+		},
+		pk = {'id'},
+	}
+	local sc = mdbx_schema()
+	sc.tables['t'] = spec
+	db.schema = sc
+	db:atomic('w', function()
+		db:without_schema(function() db:create_table('t', spec) end)
+	end)
+end
+
+local function upper(db, new) return new.val and new.val:upper() end
+
+--generated column is computed on insert; stored value is the computed result.
+function test.generated_col_insert()
+	with_db('generated_col_insert', function(db)
+		gen_table(db, upper)
+		db:begin'w'
+		db:insert('t', 'id val', 1, 'hello')
+		db:insert('t', 'id val', 2, 'world')
+		assert(db:find('t', 'upper', 1) == 'HELLO')
+		assert(db:find('t', 'upper', 2) == 'WORLD')
+		db:commit()
+	end)
+end
+
+--generated column recomputes on update (db:update and cur:update).
+function test.generated_col_update()
+	with_db('generated_col_update', function(db)
+		gen_table(db, upper)
+		db:begin'w'
+		db:insert('t', 'id val', 1, 'hello')
+		db:update('t', 'id val', 1, 'changed')
+		assert(db:find('t', 'upper', 1) == 'CHANGED')
+		local cur = db:cursor('t')
+		assert(cur:try_find(nil, 1))
+		cur:update('val', 'cursor')
+		cur:close()
+		assert(db:find('t', 'upper', 1) == 'CURSOR')
+		db:commit()
+	end)
+end
+
+--plain ix on a generated column (expression index): insert and update
+--maintain the index; lookup through the index returns the correct row.
+function test.generated_col_with_index()
+	with_db('generated_col_with_index', function(db)
+		local spec = {
+			name = 't',
+			fields = {
+				{col = 'id',    mdbx_type = 'u32',  not_null = true},
+				{col = 'email', mdbx_type = 'utf8', maxlen = 64, nozero = true, not_null = true},
+				{col = 'lower', mdbx_type = 'utf8', maxlen = 64, nozero = true, not_null = true,
+				 generate = function(db, new) return new.email:lower() end},
+			},
+			pk = {'id'},
+			ixs = {['t/lower'] = {'lower', is_unique = true}},
+		}
+		local sc = mdbx_schema()
+		sc.tables['t'] = spec
+		db.schema = sc
+		db:atomic('w', function()
+			db:without_schema(function()
+				db:create_table('t', {name='t', fields=spec.fields, pk=spec.pk})
+				db:add_index('t', {'lower', is_unique = true})
+			end)
+		end)
+		db:begin'w'
+		db:insert('t', 'id email', 1, 'Alice@X.com')
+		db:insert('t', 'id email', 2, 'Bob@X.com')
+		db:update('t', 'id email', 2, 'Carol@X.com')
+		assert(num(db:must_find('t/lower', '{}', 'alice@x.com').id) == 1)
+		assert(num(db:must_find('t/lower', '{}', 'carol@x.com').id) == 2)
+		assert(not db:try_find('t/lower', nil, 'bob@x.com'))
+		db:commit()
+	end)
+end
+
 ------------------------------------------------------------------------------
 
 local name = ...
