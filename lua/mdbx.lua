@@ -63,8 +63,10 @@ UPDATE
 QUERY
 	db:find_raw              (name|dbi, k, k_sz)  -> true, v, v_sz | false,err
 	db:each_raw              (name|dbi) -> iter() -> cur, k, k_sz, v, v_sz
+	cur:move_raw             (op, k,k_sz, v,v_sz) -> true | false,err  (k,v optional)
+	cur:move_raw_kv          (op, k,k_sz, v,v_sz) -> true, k, k_sz, v, v_sz | false,err
+	cur:move_raw_v           (op, k,k_sz, v,v_sz) -> true, v, v_sz | false,err
 	cur:{first|last|next|prev|current}_raw()      -> true, k, k_sz, v, v_sz | false,err
-	cur:move_raw             (op)                 -> true, k, k_sz, v, v_sz | false,err
 	cur:find_raw             (k, k_sz)            -> true, v, v_sz | false,err
 	cur:find_ge_raw          (k, k_sz)            -> true, k, k_sz, v, v_sz | false,err
 	cur:find_le_raw          (k, k_sz)            -> true, k, k_sz, v, v_sz | false,err
@@ -645,112 +647,109 @@ function Cur:dbi()
 	return repl(C.mdbx_cursor_dbi(self.c), 0xffffffff)
 end
 
-local function cursor_get_kv(self, flags)
+function Cur:move_raw(op, k, k_sz, v, v_sz)
 	check_cursor(self)
-	local rc = C.mdbx_cursor_get(self.c, key, val, flags)
+	if k then key.data = k; key.size = k_sz end
+	if v then val.data = v; val.size = v_sz end
+	local rc = C.mdbx_cursor_get(self.c, key, val, op)
+	if rc == 0 or rc == -1 then return true end
+	if rc == C.MDBX_ENODATA then return false, 'not_found' end
+	return self.db:tryz('c_get', rc)
+end
+function Cur:move_raw_kv(op, k, k_sz, v, v_sz)
+	check_cursor(self)
+	if k then key.data = k; key.size = k_sz end
+	if v then val.data = v; val.size = v_sz end
+	local rc = C.mdbx_cursor_get(self.c, key, val, op)
 	if rc == 0 or rc == -1 then
-		return true,
-			key.data, num(key.size),
-			val.data, num(val.size)
+		return true, key.data, num(key.size), val.data, num(val.size)
 	end
 	if rc == C.MDBX_ENODATA then return false, 'not_found' end
 	return self.db:tryz('c_get', rc)
 end
-local function cursor_get_v(self, flags)
-	local ok, k, k_sz, v, v_sz = cursor_get_kv(self, flags)
-	if not ok then return ok, k end
-	return ok, v, v_sz
+function Cur:move_raw_v(op, k, k_sz, v, v_sz)
+	check_cursor(self)
+	if k then key.data = k; key.size = k_sz end
+	if v then val.data = v; val.size = v_sz end
+	local rc = C.mdbx_cursor_get(self.c, key, val, op)
+	if rc == 0 or rc == -1 then return true, val.data, num(val.size) end
+	if rc == C.MDBX_ENODATA then return false, 'not_found' end
+	return self.db:tryz('c_get', rc)
 end
-Cur.move_raw = cursor_get_kv
 
 local function cursor_each_next(self, k0)
-	local ok, k, k_sz, v, v_sz = cursor_get_kv(self,
+	local ok, k, k_sz, v, v_sz = self:move_raw_kv(
 		k0 == 'start' and C.MDBX_FIRST or C.MDBX_NEXT)
 	if ok then return true, k, k_sz, v, v_sz end
 end
 
 local function cursor_each_prev(self, k0)
-	local ok, k, k_sz, v, v_sz = cursor_get_kv(self,
+	local ok, k, k_sz, v, v_sz = self:move_raw_kv(
 		k0 == 'start' and C.MDBX_LAST or C.MDBX_PREV)
 	if ok then return true, k, k_sz, v, v_sz end
 end
 
 local function cursor_from_next(self, ok)
-	local ok, k, k_sz, v, v_sz = cursor_get_kv(self,
+	local ok, k, k_sz, v, v_sz = self:move_raw_kv(
 		ok ~= nil and C.MDBX_NEXT or C.MDBX_GET_CURRENT)
 	if ok then return self, k, k_sz, v, v_sz end
 end
 
 local function cursor_from_prev(self, ok)
-	local ok, k, k_sz, v, v_sz = cursor_get_kv(self,
+	local ok, k, k_sz, v, v_sz = self:move_raw_kv(
 		ok ~= nil and C.MDBX_PREV or C.MDBX_GET_CURRENT)
 	if ok then return self, k, k_sz, v, v_sz end
 end
 
-function Cur:first_raw   () return cursor_get_kv(self, C.MDBX_FIRST) end
-function Cur:last_raw    () return cursor_get_kv(self, C.MDBX_LAST) end
-function Cur:next_raw    () return cursor_get_kv(self, C.MDBX_NEXT) end
-function Cur:prev_raw    () return cursor_get_kv(self, C.MDBX_PREV) end
-function Cur:current_raw () return cursor_get_kv(self, C.MDBX_GET_CURRENT) end
+function Cur:first_raw   () return self:move_raw_kv(C.MDBX_FIRST) end
+function Cur:last_raw    () return self:move_raw_kv(C.MDBX_LAST) end
+function Cur:next_raw    () return self:move_raw_kv(C.MDBX_NEXT) end
+function Cur:prev_raw    () return self:move_raw_kv(C.MDBX_PREV) end
+function Cur:current_raw () return self:move_raw_kv(C.MDBX_GET_CURRENT) end
 
 function Cur:each_raw         () return cursor_each_next, self, 'start' end
 function Cur:each_reverse_raw () return cursor_each_prev, self, 'start' end
 
 function Cur:find_ge_raw(k, k_sz)
-	key.data = k; key.size = k_sz
-	return cursor_get_kv(self, C.MDBX_SET_RANGE)
+	return self:move_raw_kv(C.MDBX_SET_RANGE, k, k_sz)
 end
 
 function Cur:find_le_raw(k, k_sz)
-	key.data = k; key.size = k_sz
-	return cursor_get_kv(self, C.MDBX_TO_KEY_LESSER_OR_EQUAL)
+	return self:move_raw_kv(C.MDBX_TO_KEY_LESSER_OR_EQUAL, k, k_sz)
 end
 
 function Cur:each_from_raw(k, k_sz)
-	key.data = k; key.size = k_sz
-	if not cursor_get_kv(self, C.MDBX_SET_RANGE) then return noop end
+	if not self:move_raw(C.MDBX_SET_RANGE, k, k_sz) then return noop end
 	return cursor_from_next, self
 end
 
 function Cur:each_from_last_raw(k, k_sz)
-	key.data = k; key.size = k_sz
-	if not cursor_get_kv(self, C.MDBX_TO_KEY_LESSER_OR_EQUAL) then return noop end
+	if not self:move_raw(C.MDBX_TO_KEY_LESSER_OR_EQUAL, k, k_sz) then return noop end
 	return cursor_from_prev, self
 end
 
 function Cur:find_raw(k, k_sz)
-	key.data = k
-	key.size = k_sz
-	return cursor_get_v(self, C.MDBX_SET_KEY)
+	return self:move_raw_v(C.MDBX_SET_KEY, k, k_sz)
 end
 
 function Cur:find_dup_raw(k, k_sz, v, v_sz)
-	key.data = k
-	key.size = k_sz
-	val.data = v
-	val.size = v_sz
-	return cursor_get_v(self, C.MDBX_GET_BOTH)
+	return self:move_raw_v(C.MDBX_GET_BOTH, k, k_sz, v, v_sz)
 end
 
 function Cur:find_dup_ge_raw(k, k_sz, v, v_sz)
-	key.data = k
-	key.size = k_sz
-	val.data = v
-	val.size = v_sz
-	return cursor_get_v(self, C.MDBX_GET_BOTH_RANGE)
+	return self:move_raw_v(C.MDBX_GET_BOTH_RANGE, k, k_sz, v, v_sz)
 end
 
 function Cur:find_multiple_raw(k, k_sz)
-	key.data = k; key.size = k_sz
-	return cursor_get_v(self, C.MDBX_SEEK_AND_GET_MULTIPLE)
+	return self:move_raw_v(C.MDBX_SEEK_AND_GET_MULTIPLE, k, k_sz)
 end
 
 function Cur:next_multiple_raw()
-	return cursor_get_v(self, C.MDBX_NEXT_MULTIPLE)
+	return self:move_raw_v(C.MDBX_NEXT_MULTIPLE)
 end
 
 function Cur:current_multiple_raw()
-	return cursor_get_v(self, C.MDBX_GET_MULTIPLE)
+	return self:move_raw_v(C.MDBX_GET_MULTIPLE)
 end
 
 function Cur:try_put_raw(k, k_sz, v, v_sz, flags)
@@ -774,7 +773,7 @@ function Cur:try_del_raw(flags)
 end
 
 local function each_raw_next(self)
-	local ok, k, k_sz, v, v_sz = cursor_get_kv(self, C.MDBX_NEXT)
+	local ok, k, k_sz, v, v_sz = self:move_raw_kv(C.MDBX_NEXT)
 	if not ok then
 		self:close()
 		return
@@ -790,7 +789,7 @@ end
 
 do
 local function next_table(self)
-	local ok, k, k_sz = cursor_get_kv(self, C.MDBX_NEXT)
+	local ok, k, k_sz = self:move_raw_kv(C.MDBX_NEXT)
 	if not ok then
 		self:close()
 		return

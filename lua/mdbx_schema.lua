@@ -428,6 +428,7 @@ local function encode_key_prefix(
 	end
 	return pp[0] - rec
 end
+mdbx_encode_key_prefix = encode_key_prefix
 
 local function encode_val(self, schema, event, rec, rec_buf_sz, cols, as, ...)
 	if #schema.val_fields == 0 then return 0 end
@@ -2538,7 +2539,7 @@ local function cur_update(self, ix_cur, val_cols, ...)
 			self.db:check_row('c_update', schema.name, false, 'not_found')
 		end
 		local cur = self.db:cursor(schema.val_table)
-		local ok, err = cur:find_raw(k, k_sz)
+		local ok, err = cur:move_raw(C.MDBX_SET_KEY, k, k_sz)
 		self.db:check_row('c_update', schema.val_table, ok, err)
 		cur_update(cur, self, val_cols, ...)
 		cur:close()
@@ -2618,7 +2619,7 @@ local function put(self, flags, op, tab, cols, ...)
 		--insert skips the get: v0=nil by definition, NOOVERWRITE detects exists
 		local found, v0, v0_sz
 		if op ~= 'insert' then
-			found, v0, v0_sz = cur:find_raw(k, k_sz)
+			found, v0, v0_sz = cur:move_raw_v(C.MDBX_SET_KEY, k, k_sz)
 		end
 		local v_sz
 		local old_t, new_t --for triggers
@@ -2744,7 +2745,7 @@ function Cur:del()
 	local cur = self
 	if cur.schema.is_index then
 		cur = db:cursor(schema.name)
-		ok, v, v_sz = cur:find_raw(kk, k_sz)
+		ok, v, v_sz = cur:move_raw_v(C.MDBX_SET_KEY, kk, k_sz)
 		db:check_row('del', schema.name, ok, v)
 	end
 	if schema.indexes or schema.triggers then
@@ -2778,7 +2779,7 @@ function Db:del(tab, ...)
 	local k_sz = encode_key(self, schema, 'del', nil,
 		k, k_buf_sz, schema.key_cols, nil, ...)
 	local cur = self:cursor(dbi)
-	local ok, err = cur:find_raw(k, k_sz)
+	local ok, err = cur:move_raw(C.MDBX_SET_KEY, k, k_sz)
 	if not ok then
 		assert(err == 'not_found') --the only error
 		cur:close()
@@ -2822,7 +2823,7 @@ end
 
 function Cur:try_move(op, val_cols)
 	local schema = assert(self.schema)
-	local ok, k, k_sz, v, v_sz = self:move_raw(op)
+	local ok, k, k_sz, v, v_sz = self:move_raw_kv(op)
 	if not ok then return false, k end
 	return decode_kv(self.db, schema, k, k_sz, v, v_sz, val_cols)
 end
@@ -2895,7 +2896,7 @@ function Cur:try_find(val_cols, ...)
 	local k, k_buf_sz = key_rec_buffer, MDBX_MAX_KEY_SIZE
 	local k_sz = encode_key(self.db, schema, 'c_get', nil,
 		k, k_buf_sz, schema.key_cols, nil, ...)
-	local ok, v, v_sz = self:find_raw(k, k_sz)
+	local ok, v, v_sz = self:move_raw_v(C.MDBX_SET_KEY, k, k_sz)
 	if not ok then return false, v end
 	return decode_kv(self.db, schema, nil, nil, v, v_sz, val_cols)
 end
@@ -3039,15 +3040,10 @@ local function each_dup_cur(db, cur, ix_schema, val_cols, close_cur)
 				nil, nil, pk, fixedsize, val_cols))
 		end
 	else
-		local first = true
+		local op = C.MDBX_GET_CURRENT
 		return function()
-			local ok, _, _, v, v_sz
-			if first then
-				first = false
-				ok, _, _, v, v_sz = cur:current_raw()
-			else
-				ok, _, _, v, v_sz = cur:move_raw(C.MDBX_NEXT_DUP)
-			end
+			local ok, v, v_sz = cur:move_raw_v(op)
+			op = C.MDBX_NEXT_DUP
 			if not ok then
 				if close_cur then cur:close() end
 				return
@@ -3086,19 +3082,14 @@ local function each_dup(db, cur, ix_schema, val_cols, close_cur, ...)
 				nil, nil, pk, fixedsize, val_cols))
 		end
 	else
-		if not cur:find_raw(xk, xk_sz) then
+		if not cur:move_raw(C.MDBX_SET_KEY, xk, xk_sz) then
 			if close_cur then cur:close() end
 			return noop
 		end
-		local first = true
+		local op = C.MDBX_GET_CURRENT
 		return function()
-			local ok, _, _, v, v_sz
-			if first then
-				first = false
-				ok, _, _, v, v_sz = cur:current_raw()
-			else
-				ok, _, _, v, v_sz = cur:move_raw(C.MDBX_NEXT_DUP)
-			end
+			local ok, v, v_sz = cur:move_raw_v(op)
+			op = C.MDBX_NEXT_DUP
 			if not ok then
 				if close_cur then cur:close() end
 				return
@@ -3118,3 +3109,4 @@ end
 function Cur:each_dup_current(val_cols)
 	return each_dup_cur(self.db, self, assert(self.schema), val_cols, false)
 end
+
