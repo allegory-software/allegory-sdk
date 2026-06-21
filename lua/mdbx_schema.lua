@@ -1338,16 +1338,40 @@ function Db:without_schema(fn)
 	assert(self.txn, 'not in transaction')
 	local real_live_schema = self.live_schema
 	local real_schema = self.schema
+	--without_schema() temporarily replaces self.live_schema. If fn runs DDL and
+	--then aborts, _wtxn_end() clears self.dirty_schema while self.live_schema is
+	--the temporary table. Without a local reference to that dirty table, the
+	--names changed by the aborted DDL are lost, and restoring real_live_schema
+	--can bring back schema objects mutated by the aborted transaction.
+	local dirty_schema = self.dirty_schema
+	local new_dirty_schema = not dirty_schema
+	dirty_schema = dirty_schema or {}
+	self.dirty_schema = dirty_schema
 	self.live_schema = {}
 	self.schema = nil
 	self._in_without_schema = true
 	local ok, err = pcall(fn)
 	self._in_without_schema = false
-	for name in pairs(self.dirty_schema or empty) do
+	for name in pairs(dirty_schema) do
 		--invalidate changed schemas before restoring because those schemas
 		--could've been stored schemas from tables without a paper schema that
 		--must now be reloaded.
 		real_live_schema[name] = nil
+	end
+	--If fn aborted and then opened a new write txn, touch_schema() could have
+	--created a new dirty table; invalidate real_live_schema from that table too.
+	local current_dirty_schema = self.dirty_schema
+	if current_dirty_schema and current_dirty_schema ~= dirty_schema then
+		for name in pairs(current_dirty_schema) do
+			real_live_schema[name] = nil
+		end
+	end
+	--Do not leave behind the empty dirty table that we created only to keep a
+	--stable local reference for touch_schema().
+	if new_dirty_schema and current_dirty_schema == dirty_schema
+		and not next(dirty_schema)
+	then
+		self.dirty_schema = nil
 	end
 	self.schema = real_schema
 	self.live_schema = real_live_schema
@@ -3109,4 +3133,3 @@ end
 function Cur:each_dup_current(val_cols)
 	return each_dup_cur(self.db, self, assert(self.schema), val_cols, false)
 end
-

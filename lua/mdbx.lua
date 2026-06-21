@@ -119,6 +119,7 @@ mdbx_set_log_level'warn' --mdbx default is 'notice', needlesly chatty.
 --databases ------------------------------------------------------------------
 
 local Db = {}; mdbx_db = Db
+local fatal_db_error
 
 function Db:check_schema(event, tab, col, ret, ...)
 	if ret then return ret, ... end
@@ -133,11 +134,12 @@ function Db:tryz(event, rc, fmt, ...)
 	if rc == 0 then return true end
 	if rc == C.MDBX_NOTFOUND then return false, 'not_found' end
 	local err = fmt and _(fmt, ...) or str(C.mdbx_strerror(rc))
+	fatal_db_error(self)
 	check_for('db', self, event, false, err)
 end
 
-function Db:checkz(...)
-	assert(self:tryz(...))
+function Db:checkz(event, rc, ...)
+	return self:check_schema(event, nil, nil, self:tryz(event, rc, ...))
 end
 
 local mdbx_open_error = {
@@ -321,6 +323,35 @@ local function invalidate_dbi(self, dbi, name)
 		dbis[name] = nil
 		dbis = getmetatable(dbis).__index
 	end
+end
+
+local function abort_all_txns(self)
+	while self.txn do
+		if self.txn == self._ro_txn then
+			C.mdbx_txn_reset(self.txn)
+			self.txn = nil
+		else
+			local parent = ptr(self.txn.parent)
+			C.mdbx_txn_abort(self.txn)
+			local_dbis_discard(self)
+			self:_wtxn_end(false, parent)
+			self.txn = parent
+		end
+	end
+end
+
+function fatal_db_error(self)
+	if type(self) ~= 'table' then return end
+	abort_all_txns(self)
+	local env_dbis = self.env_dbis
+	for dbi in pairs(env_dbis) do
+		if isnum(dbi) and dbi ~= MAIN_DBI then
+			C.mdbx_dbi_close(self.env, dbi)
+		end
+	end
+	clear(env_dbis)
+	env_dbis[MAIN_DBI] = '<main>'
+	self.dbis = env_dbis
 end
 
 --transactions ---------------------------------------------------------------
