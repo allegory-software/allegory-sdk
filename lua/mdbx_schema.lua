@@ -2789,6 +2789,7 @@ function Db:del(tab, ...)
 	return true
 end
 
+--fast bulk put but can't have indexes or fks. for initializing new tables.
 function Db:put_records(tab, cols, records)
 	if istab(cols) then
 		cols, records = '[]', cols
