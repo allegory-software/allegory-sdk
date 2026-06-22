@@ -873,6 +873,15 @@ local function compile_table_schema(schema)
 		function schema.key_gt(k1, k1_sz, k2, k2_sz)
 			return decode_int_key(k1, k1_sz) > decode_int_key(k2, k2_sz)
 		end
+		function schema.key_ge(k1, k1_sz, k2, k2_sz)
+			return decode_int_key(k1, k1_sz) >= decode_int_key(k2, k2_sz)
+		end
+		function schema.key_lt(k1, k1_sz, k2, k2_sz)
+			return decode_int_key(k1, k1_sz) < decode_int_key(k2, k2_sz)
+		end
+		function schema.key_le(k1, k1_sz, k2, k2_sz)
+			return decode_int_key(k1, k1_sz) <= decode_int_key(k2, k2_sz)
+		end
 		function schema.key_eq(k1, k1_sz, k2, k2_sz)
 			return decode_int_key(k1, k1_sz) == decode_int_key(k2, k2_sz)
 		end
@@ -881,6 +890,21 @@ local function compile_table_schema(schema)
 			local sz = min(k1_sz, k2_sz)
 			local r = memcmp(k1, k2, sz)
 			return r > 0 or (r == 0 and k1_sz > k2_sz)
+		end
+		function schema.key_ge(k1, k1_sz, k2, k2_sz)
+			local sz = min(k1_sz, k2_sz)
+			local r = memcmp(k1, k2, sz)
+			return r > 0 or (r == 0 and k1_sz >= k2_sz)
+		end
+		function schema.key_lt(k1, k1_sz, k2, k2_sz)
+			local sz = min(k1_sz, k2_sz)
+			local r = memcmp(k1, k2, sz)
+			return r < 0 or (r == 0 and k1_sz < k2_sz)
+		end
+		function schema.key_le(k1, k1_sz, k2, k2_sz)
+			local sz = min(k1_sz, k2_sz)
+			local r = memcmp(k1, k2, sz)
+			return r < 0 or (r == 0 and k1_sz <= k2_sz)
 		end
 		function schema.key_eq(k1, k1_sz, k2, k2_sz)
 			if k1_sz ~= k2_sz then return false end

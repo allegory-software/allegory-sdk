@@ -4213,6 +4213,34 @@ function test.ddl_does_not_mutate_paper_schema()
 	assert(ok, err)
 end
 
+--if without_schema() aborts after DDL changed the temporary live schema, the
+--saved live_schema table must be invalidated before it is restored.
+function test.without_schema_abort_invalidates_saved_cache()
+	with_db('without_schema_abort_invalidates_saved_cache', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'v' , mdbx_type = 'u32'},
+		}, pk = {'id'}})
+		db:commit()
+
+		db.schema = mdbx_schema()
+		db:begin'w'
+		local _, before = db:dbi_schema't'
+		assert(before.fields.v and not before.fields.v2)
+		db:without_schema(function()
+			db:rename_column('t', 'v', 'v2')
+			db:abort()
+		end)
+		assert(db.txn == nil)
+
+		db:begin'w'
+		local _, after = db:dbi_schema't'
+		assert(after.fields.v and not after.fields.v2)
+		db:commit()
+	end)
+end
+
 --an index is a public table: after reopen it must be loadable directly, before
 --its value table has populated the index's transient val_schema reference.
 function test.direct_index_open_after_reopen()
@@ -4303,7 +4331,7 @@ function test.fk_default_full_write_operations()
 end
 
 --a real libmdbx commit failure must discard transaction-local DBIs/schema,
---restore a nested transaction's parent, and clear a failed top-level txn.
+--abort all transaction levels, and clear a failed top-level txn.
 function test.txn_commit_failure_discards_local_state()
 	with_db('txn_commit_failure_discards_local_state', function(db)
 		db:begin'w'
@@ -4312,7 +4340,6 @@ function test.txn_commit_failure_discards_local_state()
 		db:commit()
 
 		db:begin'w'
-		local outer_txn = db.txn
 		db:insert('keep', '{}', {id = 1})
 		db:begin'w'
 		db:create_table('temp', {name = 'temp', fields = {
@@ -4322,7 +4349,8 @@ function test.txn_commit_failure_discards_local_state()
 		db:add_index('temp', {'v'})
 		assert(mdbx.mdbx_txn_break(db.txn) == 0)
 		assert(not pcall(db.commit, db))
-		assert(db.txn == outer_txn)
+		assert(db.txn == nil)
+		db:begin'w'
 		assert(not db:table_exists'temp' and not db:table_exists'temp/v')
 		db:insert('keep', '{}', {id = 2})
 		db:commit()
@@ -4335,7 +4363,7 @@ function test.txn_commit_failure_discards_local_state()
 		assert(db.txn == nil)
 
 		db:begin'r'
-		assert(db:exists('keep', 1) and db:exists('keep', 2))
+		assert(not db:exists('keep', 1) and db:exists('keep', 2))
 		assert(not db:table_exists'temp' and not db:table_exists'temp/v')
 		assert(not db:table_exists'temp2')
 		assert_consistent(db)
