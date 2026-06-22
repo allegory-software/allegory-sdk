@@ -23,22 +23,32 @@ sessions/started_at, events/session_id, events/kind.
 
 ## Items And Nodes
 
-A node is opened with `:open() -> next_fn`. Calling `next_fn()` returns the next
-item, or `nil` when the node is exhausted. A node instance is single-use:
-`:open()` may be called once. A plan runs inside a read transaction the caller
-has open.
+A node is opened with `:open()`. After opening, `node:next()` returns `true`
+when the node has advanced to the next item, or `nil` when exhausted. A node
+instance is single-use: `:open()` may be called once. A plan runs inside a read
+transaction the caller has open.
+
+For PK and PK tuple nodes, `open()` also sets `node:get_pk([name]) -> true, ptr,
+sz | nil` on the node instance. `get_pk()` returns the raw encoded PK bytes for
+the current item as a pointer into MDBX-managed memory, valid until the next
+`node:next()` call. For a single-PK stream, `name` is optional or the stream's
+member name. For a PK tuple stream, `name` selects a tuple member; omitting it
+selects the node's current output member. `get_pk()` returns `nil` when that
+member is absent in the current item, such as the unmatched side of a left join.
+It is separate from `node:next()` so that pass-through nodes (limit, filter skip
+paths) can advance without reading the PK bytes at all.
 
 Primitive node names describe their physical execution. The query builder (below)
 lowers to these nodes, and a plan can be built from them directly; either way the
 plan is validated before it runs, and an invalid plan raises.
 
-A stream is the sequence of items returned by one opened node. The stream name
+A stream is the sequence of items produced by one opened node. The stream name
 comes from the item type:
 
-- **PK stream** -- returns PK items; one raw primary-key value for one table.
-- **PK tuple stream** -- returns PK tuple items; PKs for more than one table.
-- **cursor stream** -- returns cursor bundles; cursors positioned on rows.
-- **value stream** -- returns value items; decoded output values.
+- **PK stream** -- one PK per item, for one table.
+- **PK tuple stream** -- one PK per table per item, for more than one table.
+- **cursor stream** -- cursor bundles; cursors positioned on rows.
+- **value stream** -- decoded output values.
 
 A value item has a **value shape**: the ordered list of output names. The item is
 keyed by those names. Two value streams are compatible when they have the same
@@ -52,10 +62,12 @@ A PK stream belongs to one table. A PK tuple stream carries PKs for more than on
 table. Later nodes identify a tuple member by name. The default name is the table
 name. If the same table appears twice, the caller supplies different names.
 
-Some PK nodes also keep a **source cursor**. This is the cursor that produced the
-current PK. A source cursor lets `fetch` read columns already present in an index
-entry. A node that keeps only PK bytes can be fetched; its cursor bundle opens
-the base table for non-PK columns.
+Index-backed PK nodes keep a **source cursor** (`node.cursor`) -- the index
+cursor positioned on the current entry after each `node:next()` call. It stays
+valid until the next `node:next()` call. `fetch` uses it for covered reads (columns
+already in the index entry, without opening the base table); write paths use it
+for cursor-positioned updates. PK nodes without an index cursor (`pk_scan`,
+`pk_get`) have `node.cursor = nil`.
 
 
 ## Storage Model
@@ -142,12 +154,12 @@ Lua `nil` marks an omitted argument or an unbounded range side.
 Examples:
 
 ```lua
-pk_seek('t/a', null)              -- a IS NULL
-pk_seek('t/a,b', null, 3)         -- a IS NULL AND b = 3
-pk_range('t/a', nil, {10})        -- unbounded low
-pk_range('t/a', {null}, {10})     -- low bound is DB NULL
-pk_range('t/a', {null}, nil, {lo_open = true}) -- a IS NOT NULL
-pk_range('t/a,b', {null, 0}, {null, 9})
+db:pk_seek('t/a', null)              -- a IS NULL
+db:pk_seek('t/a,b', null, 3)         -- a IS NULL AND b = 3
+db:pk_range('t/a', nil, {10})        -- unbounded low
+db:pk_range('t/a', {null}, {10})     -- low bound is DB NULL
+db:pk_range('t/a', {null}, nil, {lo_open = true}) -- a IS NOT NULL
+db:pk_range('t/a,b', {null, 0}, {null, 9})
 ```
 
 The schema encoder validates whether null is legal for each key column.
@@ -178,10 +190,10 @@ PK streams come sorted:
 - **pk-order**: ascending by raw table PK.
 - **ix-order**: index-key order, with PK order inside each duplicate key.
 
-`pk_seek(users/status, 'active')` is pk-order because all output PKs come from one
-index key, and MDBX stores that duplicate PK list in PK order.
+`db:pk_seek('users/status', 'active')` is pk-order because all output PKs come from
+one index key, and MDBX stores that duplicate PK list in PK order.
 
-`pk_range('users/status', {'a'}, {'z'})` is ix-order because it returns all PKs for
+`db:pk_range('users/status', {'a'}, {'z'})` is ix-order because it returns all PKs for
 `status = 'a'`, then all PKs for `status = 'b'`, and so on. Each duplicate list is
 PK-sorted. The whole output can still place a smaller PK after a larger PK.
 
@@ -222,9 +234,11 @@ is one exact index lookup performed for one driver PK.
 `pk_and`, `pk_or`, and `pk_except` are merge nodes. They require both inputs to be
 pk-order from beginning to end and unique by table PK.
 
-`pk_sort(node)` collects a PK stream, sorts by PK, removes duplicates, and returns
-a pk-order stream. Use it to convert ix-order or probe output back to the pk-order
-required by merge nodes.
+`pk_sort(node)` materialises a PK stream into memory, sorts by PK, removes
+duplicates, and returns a pk-order stream. Use it when the input is ix-order
+(`pk_range`, `pk_prefix`, `pk_join_seek`) or may contain repeated PKs
+(`pk_join_seek` fan-out), and the result must feed a merge node or any node
+that requires pk-order.
 
 `pk_hash_filter(driver, set_source, mode)` builds an in-memory set of raw PK bytes
 from `set_source`, then scans `driver`. With `mode = 'in'`, it emits driver PKs
@@ -238,9 +252,9 @@ still ix-order and needs `pk_sort` before the next merge node.
 Example:
 
 ```lua
-pk_hash_filter(
-	pk_range('users/score', {80}, {100}),
-	pk_seek('users/status', 'active'),
+db:pk_hash_filter(
+	db:pk_range('users/score', {80}, {100}),
+	db:pk_seek('users/status', 'active'),
 	'in')
 ```
 
@@ -254,9 +268,9 @@ This keeps the driver's order and supports `ORDER BY ... LIMIT`.
 Example:
 
 ```lua
-limit(
-	pk_and_probe(
-		pk_range('users/score', nil, nil, {desc = true}),
+db:limit(
+	db:pk_and_probe(
+		db:pk_range('users/score', nil, nil, {desc = true}),
 		{ix = 'users/status', key = 'active'}),
 	20)
 ```
@@ -286,9 +300,9 @@ member as a PK stream.
 Example:
 
 ```lua
-pk_sort(
-	pk_project(
-		pk_join_merge(pk_scan('users'), 'sessions/user_id'),
+db:pk_sort(
+	db:pk_project(
+		db:pk_join_merge(db:pk_scan('users'), 'sessions/user_id'),
 		'users'))
 ```
 
@@ -314,8 +328,8 @@ Parent-to-child joins have separate physical nodes:
 It requires the driver to be ordered by the parent PK used by the FK.
 
 ```lua
-pk_join_merge(
-	pk_scan('users'),
+db:pk_join_merge(
+	db:pk_scan('users'),
 	'sessions/user_id')
 ```
 
@@ -357,9 +371,9 @@ is missing is kept with the parent member absent.
 Example:
 
 ```lua
-pk_parent_lookup(
-	limit(
-		pk_range('sessions/started_at,user_id', nil, nil, {desc = true}),
+db:pk_parent_lookup(
+	db:limit(
+		db:pk_range('sessions/started_at,user_id', nil, nil, {desc = true}),
 		20),
 	'sessions/user_id')
 ```
@@ -386,17 +400,16 @@ PK member names as cursor names. PK nodes are enough for filtering, joining,
 counting, and sorting by PK. Cursor bundles add row access: following nodes can
 read non-PK columns through positioned cursors.
 
-Each cursor bundle keeps the PK and any source cursor supplied by the PK node.
-When a following node asks for a column that a source cursor can decode, the
-bundle reads it through that cursor -- a covered read. For other columns, the
-bundle opens the base table by PK.
+Each cursor bundle takes `node:get_pk(name)` as the PK bytes and `node.cursor`
+as the source cursor. When a following node asks for a column that the source
+cursor can decode, the bundle reads it through that cursor -- a covered read.
+For other columns, the bundle opens the base table by PK.
 
-Each PK node records whether it preserves source cursors. `pk_sort`, `pk_and`,
-`pk_or`, and `pk_except` keep PK bytes and drop source cursors. `pk_hash_filter`
-and `pk_and_probe` keep the driver source.
+`pk_sort`, `pk_and`, `pk_or`, and `pk_except` have `node.cursor = nil` (no source
+cursor). `pk_hash_filter` and `pk_and_probe` inherit `node.cursor` from the driver.
 
 Cursor positioning: a returned cursor bundle stays valid only until the next
-`next_fn()` call; the invariant is in `mdbx_query_validators.md`.
+`node:next()` call; the invariant is in `mdbx_query_validators.md`.
 
 Cursor joins consume cursor streams. They run an inner function once per outer
 cursor bundle. The inner function receives the outer bundle and returns a node.
@@ -598,7 +611,7 @@ so `explain(query)` can be snapshotted and diffed in a test. Hand-built node tre
 stay first-class; the builder just writes them for you.
 
 ```lua
-from'users'
+db:from'users'
 	:eq('status', 'active')
 	:join'sessions'
 	:order_by'users.id'
@@ -608,11 +621,11 @@ from'users'
 It lowers to:
 
 ```lua
-select(
-	fetch(
-		pk_join_merge(
-			pk_seek('users/status', 'active'),  -- driver, in users.id order
-			'sessions/user_id')),               -- merge: driver is in join-key order
+db:select(
+	db:fetch(
+		db:pk_join_merge(
+			db:pk_seek('users/status', 'active'),  -- driver, in users.id order
+			'sessions/user_id')),                  -- merge: driver is in join-key order
 	{
 		{name = 'id',         cursor = 'users',    column = 'id'},
 		{name = 'started_at', cursor = 'sessions', column = 'started_at'},
@@ -642,7 +655,7 @@ Sources and joins:
   join (the unmatched member reads as Lua `nil`); `as` also sets the alias.
 
 ```lua
-from'users u'
+db:from'users u'
 	:join('sessions s', {from = 'u'})
 	:left_join('events e', {from = 's'})
 	:select{'u.id uid', 's.started_at', 'e.kind'}
@@ -685,12 +698,12 @@ clean scope through nesting:
 
 ```lua
 -- marker: outer'member.col' refers to the enclosing query
-from'users u':where_exists(
-	from'sessions':eq('user_id', outer'u.id'):gt('started_at', t))
+db:from'users u':where_exists(
+	db:from'sessions':eq('user_id', outer'u.id'):gt('started_at', t))
 
 -- closure: o is the enclosing query, so nested EXISTS can each name their level
-from'users u':where_exists(function(o)
-	return from'sessions':eq('user_id', o'u.id'):gt('started_at', t) end)
+db:from'users u':where_exists(function(o)
+	return db:from'sessions':eq('user_id', o'u.id'):gt('started_at', t) end)
 ```
 
 Matching `u.id` against the FK column still uses the child FK index, so the
@@ -713,7 +726,7 @@ Grouping and aggregation:
   with a `value_filter` after the aggregate.
 
 ```lua
-from'users'
+db:from'users'
 	:group_by'status'
 	:agg{
 		{name = 'n',   op = 'count'},
@@ -737,9 +750,9 @@ Set operations:
   operations: compose `pk_and` / `pk_except`, or filter with `:in_` / `:not_in`.
 
 ```lua
-union{
-	from'users':eq('status', 'active'):select{'users.id', 'users.score'},
-	from'users':ge('score', 90)      :select{'users.id', 'users.score'},
+db:union{
+	db:from'users':eq('status', 'active'):select{'users.id', 'users.score'},
+	db:from'users':ge('score', 90)      :select{'users.id', 'users.score'},
 }
 ```
 
