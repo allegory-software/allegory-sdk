@@ -3,8 +3,8 @@
 	libmdbx binding.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	libmdbx is a fast mmap-based MVCC key-value store in 40 KLOC of C.
-	libmdbx provides ACID with serializable semantics, good for read-heavy loads.
+	libmdbx is a fast mmap-based MVCC key-value store in 40 KLOC of C code.
+	libmdbx provides ACID with SERIALIZABLE semantics, good for read-heavy loads.
 
 BINDING
 	- safe API (no use-after-free), uses our terminology (env -> db, DBI -> table).
@@ -13,9 +13,9 @@ BINDING
 	- tables can be referenced by name everywhere (no need to use DBIs).
 	- tables must be created explicitly and are auto-opened on data ops.
 	- APIs raise on unexpected errors; expected states return nil,err or false,err.
-	- 'db'-type errors are raised on unexpected mdbx errors.
+	- 'db'-type errors are raised on unexpected mdbx errors and *all txns* are aborted.
 	- 'schema'-type errors are raised on schema-caused errors on table ops and
-	the txn is aborted.
+	the current txn is aborted.
 	- table ops are logged.
 	- use DBI 1 to read the main table.
 
@@ -97,7 +97,7 @@ local
 mdbx = C
 local MAIN_DBI = 1
 
---log level -----------------------------------------------------------------
+--DEBUGGING ------------------------------------------------------------------
 
 --set libmdbx's runtime log level (process-global). level names:
 --  fatal < error < warn < notice < verbose < debug < trace < extra
@@ -116,7 +116,7 @@ function mdbx_set_log_level(level)
 end
 mdbx_set_log_level'warn' --mdbx default is 'notice', needlesly chatty.
 
---databases ------------------------------------------------------------------
+--DATABASES ------------------------------------------------------------------
 
 local Db = {}; mdbx_db = Db
 local fatal_db_error
@@ -248,7 +248,7 @@ function mdbx_delete(file, flags)
 	return assert(Db.tryz(file, 'db_delete', rc))
 end
 
---dbi cache ------------------------------------------------------------------
+--DBI CACHE ------------------------------------------------------------------
 
 --[[
 
@@ -354,7 +354,7 @@ function fatal_db_error(self)
 	self.dbis = env_dbis
 end
 
---transactions ---------------------------------------------------------------
+--TRANSACTIONS ---------------------------------------------------------------
 
 local function check_txn(self)
 	assert(self.txn, 'not in transaction')
@@ -443,7 +443,7 @@ function Db:atomic(mode, f, ...)
 end
 end
 
---tables ---------------------------------------------------------------------
+--TABLES ---------------------------------------------------------------------
 
 function Db:table_name(tab)
 	assert(tab, 'table expected')
@@ -553,7 +553,7 @@ function Db:dbi_flags(tab)
 end
 end
 
---table data -----------------------------------------------------------------
+--TABLE DATA -----------------------------------------------------------------
 
 local key = new'MDBX_val'
 local val = new'MDBX_val'
@@ -628,7 +628,7 @@ function Db:seq(tab, increment)
 	return seq
 end
 
---cursors --------------------------------------------------------------------
+--CURSORS --------------------------------------------------------------------
 
 local Cur = {}; mdbx_cursor = Cur
 
@@ -816,7 +816,7 @@ function Db:each_raw(tab)
 	return each_raw_next, cur
 end
 
---table catalog --------------------------------------------------------------
+--TABLE CATALOG --------------------------------------------------------------
 
 do
 local function next_table(self)

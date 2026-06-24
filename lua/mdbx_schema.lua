@@ -9,16 +9,16 @@ FEATURES
 	- table/index keys: composite, with per-field ascending/descending order.
 	- null support (nulls come first in keys).
 	- auto-increment primary keys.
-	- indexes: unique or non-unique, utf-8 ai_ci, nullable columns for non-unique.
+	- indexes: unique and non-unique, utf-8 ai_ci, nullable columns for non-unique.
 	- foreign keys: cascade or set-null on delete; enforced on insert/update.
 	- triggers: Lua functions in paper schema fired before/after insert/update/delete.
 	- computed columns (stored) via Lua functions in paper schema.
 	- automatic schema migration: paper schema diff executes DDL ops.
 	- schema validation on table open: stored schema must match paper schema.
 LIMITATIONS
-	- varsize columns must have `nozero` (no embedded \0) to used in indexes.
-	- columns must have `not_null` to used in primary key and unique indexes.
-	- primary keys are immutable.
+	- varsize columns must have `nozero` (no embedded \0) to be used in indexes.
+	- columns must have `not_null` to be used in primary keys and unique indexes.
+	- primary keys are immutable!
 	- utf8_ai_ci can only be used for index keys.
 	- fks: only to pk columns, no "restrict", no "onupdate" (pk is immutable).
 	- schema layouting errors are non-recoverable.
@@ -160,7 +160,7 @@ local MS = {}
 
 MDBX_MAX_KEY_SIZE = mdbx_max_key_size()
 
---error handling -------------------------------------------------------------
+--ERROR HANDLING -------------------------------------------------------------
 
 function Db:check_row(event, tab, ret, ...)
 	if ret then return ret, ... end
@@ -182,7 +182,7 @@ function Db:check_col(event, tab, col, ret, ...)
 	error(e)
 end
 
---DML global shared buffers --------------------------------------------------
+--DML GLOBAL SHARED BUFFERS --------------------------------------------------
 
 local key_rec_buffer = u8a(MDBX_MAX_KEY_SIZE)
 local val_rec_buffer = buffer()
@@ -557,7 +557,7 @@ local function decode_kv(self, schema, k, k_sz, v, v_sz, val_cols)
 	end
 end
 
---schema layouting and compilation -------------------------------------------
+--SCHEMA LAYOUTING AND COMPILATION -------------------------------------------
 
 local format_ix_name, format_fk_name, index_schema, compile_index_schema --fw. decl.
 
@@ -1271,7 +1271,7 @@ local function try_validate_table_schema(stored_schema, paper_schema)
 	return true
 end
 
---dbi open & schema cache loading --------------------------------------------
+--DBI OPEN & SCHEMA CACHE LOADING --------------------------------------------
 
 local function load_live_schema(self, name)
 	local schema = self.live_schema[name]
@@ -1352,7 +1352,7 @@ function Db:dbi_schema(tab)
 	return dbi, assert(self:table_schema(tab), 'table has no schema')
 end
 
---schema cache invalidation --------------------------------------------------
+--SCHEMA CACHE INVALIDATION --------------------------------------------------
 
 function Db:without_schema(fn)
 	if not self.schema or self._in_without_schema then
@@ -1423,7 +1423,7 @@ function Db:_wtxn_end(commit, parent)
 	end
 end
 
---DDL / create table ---------------------------------------------------------
+--DDL / CREATE TABLE ---------------------------------------------------------
 
 --paper schema field attrs (the rest are computed by layout).
 local paper_field_attrs = update({
@@ -1469,7 +1469,7 @@ function Db:create_table(name, src_schema)
 	return dbi
 end
 
---DDL / alter table ----------------------------------------------------------
+--DDL / ALTER TABLE ----------------------------------------------------------
 
 local function check_alter_dependencies(self, old_schema, new_schema)
 
@@ -1670,7 +1670,7 @@ function Db:drop_table(tab)
 	return true
 end
 
---DDL / rename table ---------------------------------------------------------
+--DDL / RENAME TABLE ---------------------------------------------------------
 
 --rename an index table to new_ix: rename the dbi, move its $schema row, and fix
 --its back-references (name, val_table) and the val_schema.ixs map. val_table is
@@ -1747,7 +1747,7 @@ function Db:rename_table(tab, new_name)
 	self:save_table_schema(schema)
 end
 
---DDL / rename column --------------------------------------------------------
+--DDL / RENAME COLUMN --------------------------------------------------------
 
 --rename a column. encoding is positional (col_pos + offsets), so no row or index
 --data is rewritten; this only updates names: the field, the pk, the dependent
@@ -1836,7 +1836,7 @@ function Db:rename_column(tab, old_col, new_col)
 	return true
 end
 
---indexes --------------------------------------------------------------------
+--INDEXES --------------------------------------------------------------------
 
 local ix1_key_rec_buffer = u8a(MDBX_MAX_KEY_SIZE)
 local ix2_key_rec_buffer = u8a(MDBX_MAX_KEY_SIZE)
@@ -2146,7 +2146,7 @@ function Db:drop_index(ix_name)
 	return true
 end
 
---DDL / foreign keys ---------------------------------------------------------
+--DDL / FOREIGN KEYS ---------------------------------------------------------
 
 --register a foreign key (child.cols -> ref_table.pk) on the child table.
 --input shape is schema.lua's fk definition without a caller-supplied name.
