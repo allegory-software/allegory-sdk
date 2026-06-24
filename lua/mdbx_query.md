@@ -1,773 +1,515 @@
-# mdbx_query Architecture
+# mdbx_query
 
-`mdbx_query` executes query plans over `mdbx_schema` tables and indexes. The
-caller builds the plan explicitly.
+Query engine over `mdbx_schema` tables and indexes. The caller builds the plan
+explicitly out of **nodes** that implement a specific algorithm that produces
+an iterator of **items**. Filters and joins work at the PK level: only rows
+that remain after filtering are decoded.
 
-The main design goal is to keep costs visible. A node should make it clear when
-it scans an index, opens base-table rows, sorts, builds a hash table, keeps input
-order, or performs one lookup per input item.
+Example schema used in examples (PK = primary key, -> = foreign key):
 
-The second goal is to do as much work as possible before loading base-table rows.
-Filters and joins should use primary keys and indexes while that is still enough;
-full row decoding should happen only for rows that survive.
+	users    (id PK, status, score)
+	sessions (id PK, user_id -> users.id, started_at)
+	events   (id PK, session_id -> sessions.id, kind)
 
-Example schema (`PK` means primary key; arrows show foreign keys, or FKs):
+Indexes: users/status, users/score, sessions/user_id, sessions/started_at,
+events/session_id, events/kind.
 
-    users   (id PK, status, score)
-    sessions(id PK, user_id -> users.id, started_at)
-    events  (id PK, session_id -> sessions.id, kind)
 
-Indexes used in examples: users/status, users/score, sessions/user_id,
-sessions/started_at, events/session_id, events/kind.
+## STORAGE MODEL
 
+Base table:  B-tree keyed by row PK; value = encoded row.
+Index:       MDBX DUPSORT B-tree; key = encoded indexed value; duplicates = PKs
+             of rows with that value, sorted as raw bytes.
 
-## Items And Nodes
+	users/status: 'active' -> [2, 5, 9],  'banned' -> [1, 3]
 
-A node is opened with `:open()`. After opening, `node:next()` returns `true`
-when the node has advanced to the next item, or `nil` when exhausted. A node
-instance is single-use: `:open()` may be called once. A plan runs inside a read
-transaction the caller has open.
+Indexed operations:
 
-For PK and PK tuple nodes, `open()` also sets `node:get_pk([name]) -> true, ptr,
-sz | nil` on the node instance. `get_pk()` returns the raw encoded PK bytes for
-the current item as a pointer into MDBX-managed memory, valid until the next
-`node:next()` call. For a single-PK stream, `name` is optional or the stream's
-member name. For a PK tuple stream, `name` selects a tuple member; omitting it
-selects the node's current output member. `get_pk()` returns `nil` when that
-member is absent in the current item, such as the unmatched side of a left join.
-It is separate from `node:next()` so that pass-through nodes (limit, filter skip
-paths) can advance without reading the PK bytes at all.
+	exact key, key range, distinct keys, `GET_BOTH(key, pk)` pair test,
+	duplicate count, first/last key.
 
-Primitive node names describe their physical execution. The query builder (below)
-lowers to these nodes, and a plan can be built from them directly; either way the
-plan is validated before it runs, and an invalid plan raises.
+Iteration order:
 
-A stream is the sequence of items produced by one opened node. The stream name
-comes from the item type:
+	pk-order   raw table PK order, which gives schema-defined PK order.
+	ix-order   index-key order, PK-sorted within each duplicate key.
 
-- **PK stream** -- one PK per item, for one table.
-- **PK tuple stream** -- one PK per table per item, for more than one table.
-- **cursor stream** -- cursor bundles; cursors positioned on rows.
-- **value stream** -- decoded output values.
+ix-order ~= pk-order:
 
-A value item has a **value shape**: the ordered list of output names. The item is
-keyed by those names. Two value streams are compatible when they have the same
-output names in the same order.
+	- iterate on one index key => pk-order: all PKs come from one dup list.
+	- iterate an index range => ix-order: smaller PKs can appear after larger ones.
 
-Two value items with the same shape are equal when every output value for that
-shape is equal. Database null is the `null` sentinel; Lua `nil` means the output
-is absent.
+		users/status: active -> [2,5,9],  banned -> [1,3]
+		users/status full scan: 2, 5, 9, 1, 3  -- not pk-order; 1 appears after 2
 
-A PK stream belongs to one table. A PK tuple stream carries PKs for more than one
-table. Later nodes identify a tuple member by name. The default name is the table
-name. If the same table appears twice, the caller supplies different names.
+	Why this matters: merge nodes require inputs in pk-order, so ix-order
+	inputs need to be sorted first.
 
-Index-backed PK nodes keep a **source cursor** (`node.cursor`) -- the index
-cursor positioned on the current entry after each `node:next()` call. It stays
-valid until the next `node:next()` call. `fetch` uses it for covered reads (columns
-already in the index entry, without opening the base table); write paths use it
-for cursor-positioned updates. PK nodes without an index cursor (`pk_scan`,
-`pk_get`) have `node.cursor = nil`.
+Iterating in reverse can only reverse the order of the whole scan, so:
 
+	(a ASC, b DESC) -> (a DESC, b ASC)
 
-## Storage Model
 
-A base table is a B-tree keyed by the row's primary key. The stored value is the
-encoded row.
+## NODES
 
-An index is a separate MDBX DUPSORT B-tree. The index key is the encoded
-indexed value. The duplicate values under that key are the primary keys of rows
-with that indexed value. MDBX keeps those duplicate PKs sorted as raw bytes.
+**access nodes**: no inputs; read the db directly; produce a PK stream.
+**merge nodes**: two or more sorted inputs on a shared key space; O(n+m) sorted merge.
+**probe nodes**: driver + index; cross to a different key space; any driver order.
+**pipeline nodes**: single input; filter, sort, or project a PK stream.
 
-Example:
+All four layers operate on raw PK bytes. Above them: `fetch` opens cursors,
+`select` decodes values.
 
-    users/status index:
-      'active' -> [2, 5, 9]
-      'banned' -> [1, 3]
 
-This enables indexed reads for:
+## ACCESS NODES
 
-- exact index key: position on one key and scan that key's sorted PK list.
-- index range: position on a low key and scan until a high key.
-- distinct index keys: scan keys while skipping each key's PK list.
-- exact pair test: `GET_BOTH(key, pk)` tests one `(key, pk)` pair.
-- duplicate count: count PKs under one exact key.
-- endpoint: read the first or last index key.
+No inputs. Read base tables and indexes; produce a PK stream.
 
-A read is **covered** by an index when the requested column values are available
-from the index key or PK. A covered read uses the index cursor only.
+	pk_get(base, pk...)                             pk-order    exact base-table PK lookup
+	pk_seek(ix, key...)                             pk-order    exact index key; all PKs at that key
+	pk_prefix(ix, prefix...)                        ix-order    leading-column prefix scan
+	pk_range(base|ix [, op, val... [, op, val...] [, opts]])  pk|ix-ord  key range scan
+	fk_parent_scan(fk_ix)                           pk-order    FK index distinct keys as parent PKs
 
+**pk_get** vs **pk_range**: targets one known PK with MDBX_SET_KEY; returns nil
+cleanly for a missing row. `pk_range` with lo=hi works but uses MDBX_SET_RANGE and
+adds range-check overhead.
 
-## Access Nodes
+**pk_seek** vs **pk_range**: `pk_range` with lo=hi would work (a single key group
+is always PK-ordered) but uses MDBX_SET_RANGE, which lands at the next key when
+the target is absent and requires a follow-up equality check to detect a miss.
+`pk_seek` uses MDBX_SET_KEY and fails cleanly. Use `pk_seek` for an exact value,
+`pk_range` for a span.
 
-Access nodes create the first PK or value streams in a plan.
+**pk_prefix** vs **pk_range**: `pk_prefix` fixes k < n leading columns of a
+composite index; `pk_range` requires all n columns for each bound. For a 2-column
+index, `pk_range` needs explicit lo/hi for both columns; `pk_prefix` stops after
+the first and uses MDBX prefix matching for the rest.
 
-| Node                         | Reads              | Returns        | Order          |
-|------------------------------|--------------------|----------------|----------------|
-| `pk_get(table, pk...)`       | base-table key     | one PK item    | PK asc         |
-| `pk_scan(table)`             | base-table keys    | PK items       | PK asc         |
-| `pk_seek(ix, key...)`        | one index key      | PK items       | PK asc         |
-| `pk_prefix(ix, prefix...)`   | index key prefix   | PK items       | index key, PK  |
-| `pk_range(ix, lo, hi, opts)` | index key range    | PK items       | index key, PK  |
-| `fk_parent_scan(ix)`         | FK index keys      | parent PKs     | parent PK asc  |
-| `ix_distinct_keys(ix, len)`  | index keys         | index values   | index value    |
+	pk_prefix('sessions/user_id,started_at', uid)  -- all sessions for uid, any started_at
+	-- pk_range can't express this without knowing the min/max of started_at
 
-`pk_get(table, pk...)` reads one table PK. It returns zero or one PK item.
+**fk_parent_scan** vs **pk_range** on the same FK index: `pk_range` iterates child
+PKs (dups). `fk_parent_scan` iterates distinct index keys as parent PKs -- dups are
+never visited. Use to ask "which parents have at least one child?" without
+iterating children.
 
-`pk_scan(table)` scans the base-table B-tree keys and returns all PKs. This is
-the PK source for plans where every table row is a candidate.
+	fk_parent_scan('sessions/user_id')  -- user PKs {1,2,4}
+	pk_range('sessions/user_id')        -- session PKs {11,12,13,14,15}
 
-`pk_seek(ix, key...)` positions on one complete index key. It returns the PKs
-stored under that key. Because MDBX keeps duplicates sorted, the output is in
-PK order.
+**pk_range** bounds use comparison operators followed by one value per key column.
+`opts`: `desc` (reverse scan).
 
-`pk_prefix(ix, prefix...)` scans a composite index by a leading equality prefix.
-For index `(a,b)`, `pk_prefix('t/a,b', 1)` means `a = 1` for all `b`.
+	pk_range('t/a', '>=', 10, '<=', 20)        -- 10 <= a <= 20
+	pk_range('t/a,b', '>=', 1, 10, '<=', 1, 20)  -- a = 1, 10 <= b <= 20
+	pk_range('t/a', '<=', 10)                  -- a <= 10
+	pk_range('t/a')                            -- whole index
+	pk_range('t/a', {desc=true})               -- whole index, reversed
 
-`pk_range(ix, lo, hi, opts)` scans an index range. `nil` marks an unbounded low
-or high bound. Every bounded side is an array with one value per index key
-column. `opts.lo_open` excludes `lo`; `opts.hi_open` excludes `hi`. `opts.desc`
-scans backward. Range output is in index-key order. Both bounds `nil` scans the
-whole index.
+**pk_prefix** `prefix...` must cover at least one but strictly fewer than all key
+columns (full key -> `pk_seek`).
 
-For index `(a)`, use one-element bounds: `pk_range('t/a', {10}, {20})`. For
-index `(a,b)`, `pk_range('t/a,b', {1, 10}, {1, 20})` scans from key `(1,10)`
-through key `(1,20)` in encoded key order.
+	pk_prefix('t/a,b', 'foo')    -- a = 'foo' for all b
 
-If an indexed column value is itself an array, that value is one element inside
-the bound array.
 
-`fk_parent_scan(child_fk_index)` scans distinct child FK index keys and returns
-the referenced parent PKs. It skips FK keys with null components. This is for
-existence queries such as "users with at least one session".
+### NULL KEYS
 
-`ix_distinct_keys(ix, prefix_len)` returns index values. This is the node for
-`SELECT DISTINCT col` queries. Use `fk_parent_scan` for distinct parent
-PKs from an FK index.
+`nil` = omitted argument or unbounded range side. `null` = DB null value.
 
+	pk_seek('t/a', null)                                -- a IS NULL
+	pk_seek('t/a,b', null, 3)                           -- a IS NULL AND b = 3
+	pk_range('t/a', '>=', null, '<=', 10)               -- null <= a <= 10
+	pk_range('t/a', '>', null)                          -- a IS NOT NULL (a > null)
+	pk_range('t/a,b', '>=', null, 0, '<=', null, 9)    -- a IS NULL, 0 <= b <= 9
 
-## Null Keys
+`mdbx_schema` sorts null before non-null. `a IS NOT NULL` = the range `a > null`,
+usable with index order when `a` is the first key column not already fixed by
+equality. `b IS NOT NULL` without fixed `a`: use an index with `b` in that
+position, or scan and filter.
 
-Index-backed access nodes pass the database null sentinel to the schema encoder.
-Lua `nil` marks an omitted argument or an unbounded range side.
 
-Examples:
+## MERGE NODES
 
-```lua
-db:pk_seek('t/a', null)              -- a IS NULL
-db:pk_seek('t/a,b', null, 3)         -- a IS NULL AND b = 3
-db:pk_range('t/a', nil, {10})        -- unbounded low
-db:pk_range('t/a', {null}, {10})     -- low bound is DB NULL
-db:pk_range('t/a', {null}, nil, {lo_open = true}) -- a IS NOT NULL
-db:pk_range('t/a,b', {null, 0}, {null, 9})
-```
+Two or more inputs with the same `merge_sig`. Converge by sorted merge O(n+m);
+inputs must be in merge_key order. Inherit `merge_cmp`/`merge_sig` from input 1
+and compose as inputs to further merge nodes.
 
-The schema encoder validates whether null is legal for each key column.
-`mdbx_schema` sorts null before non-null in index keys. Range comparisons use the
-encoded order.
+	merge_union(['union'|'full'|'union_all',] node, node...)   union; flat PK stream
+	merge_except(a, b)                     difference (a minus b); flat PK stream
+	merge_join(node [, db.left(node)]...)  intersection / left-join; PK tuple stream
 
-Because null sorts first, `a IS NOT NULL` is the key range `a > null`. This can
-use index order when `a` is the first key column not already fixed by equality.
-In a composite index `(a,b)`, that covers `a IS NOT NULL` and `a = 1 AND b IS
-NOT NULL`. For `b IS NOT NULL` without fixed `a`, use an index with `b` in that
-position or scan and filter.
+**merge_union** vs **merge_join**: both combine multiple PK streams; `merge_union`
+deduplicates into a single flat PK stream (one member). `merge_join` produces a PK
+tuple stream (multiple members, cross-product per key group).
 
-For FK parent scans, a null FK component means the referenced parent is absent,
-so the key is skipped.
+	merge_union(pk_seek('users/status','active'), pk_seek('users/status','banned'))
+	-- all non-guest users in PK order; one flat stream
 
+**merge_except** vs **pk_hash_filter 'not_in'**: both subtract a set from a stream.
+`merge_except` requires sorted inputs and uses no memory; `pk_hash_filter`
+materialises the set but accepts any input order.
 
-## Order
+	merge_except(pk_range('users'), pk_seek('users/status','active'))  -- non-active users
 
-Every PK stream has an order description. The full form is a list of ordered
-keys, including direction:
+**merge_join** vs **probe nodes**: `merge_join` requires driver already in
+parent-PK order and scans both inputs in lockstep O(n+m). Probe nodes accept any
+driver order at the cost of one index seek per row. `merge_join` is the
+parent-to-child join when the driver is already sorted; pass `pk_range(fk_ix)` as
+the second input.
 
-    users.pk asc
-    users.status asc, users.pk asc
-    sessions.user_id asc, sessions.started_at desc, sessions.pk asc
+	merge_join(pk_seek('users/status','active'), pk_range('sessions/user_id'))
+	-- active users x their sessions; driver must be in user-PK order
 
-PK streams come sorted:
+**merge_union** mode (optional leading string, default `'union'`):
 
-- **pk-order**: ascending by raw table PK.
-- **ix-order**: index-key order, with PK order inside each duplicate key.
+	'union'      dedup; PK from the first input at each merge_key
+	'full'       dedup; PK from all inputs at each merge_key
+	'union_all'  no dedup; advance only the yielding input each step
 
-`db:pk_seek('users/status', 'active')` is pk-order because all output PKs come from
-one index key, and MDBX stores that duplicate PK list in PK order.
+`merge_union` and `merge_except` require unique inputs (one PK per `next_group`).
+`merge_join` works with non-unique inputs (cross-product per `next_group`).
 
-`db:pk_range('users/status', {'a'}, {'z'})` is ix-order because it returns all PKs for
-`status = 'a'`, then all PKs for `status = 'b'`, and so on. Each duplicate list is
-PK-sorted. The whole output can still place a smaller PK after a larger PK.
 
-Example:
+## PROBE NODES
 
-    users/status:
-      active -> [2, 5, 9]
-      banned -> [1, 3]
+Driver + index. Output crosses key spaces: driver is in one PK space, output adds
+another. Driver can be any order. `fk` is a FK index name (e.g.
+`'sessions/user_id'`); any index with key encoding compatible with the driver's
+PKs works.
 
-The full index scan returns `2, 5, 9, 1, 3`. `pk-order` requires `1` before `2`.
+	pk_join_seek(driver, fk)       driver order    one FK seek per driver PK; O(n log m)
+	pk_join_hash(driver, fk)       FK index order  materialise driver into hash; scan FK index; O(n+m)
+	pk_parent_lookup(child, fk)    child order     reverse direction: child PK -> parent PK
 
-Merge nodes require this distinction. A merge intersection assumes both inputs
-move forward in the same order. If one input can produce a smaller PK after a
-larger one, the merge can miss matches.
+**pk_join_seek** vs **merge_join**: `merge_join` requires sorted driver and advances
+both inputs together; `pk_join_seek` does one MDBX_SET_KEY seek per driver row.
+Use `pk_join_seek` when the driver is small, unsorted, or driver order must be
+preserved in the output.
 
-Direction is separate from the key list. `opts.desc` scans the same B-tree
-backward. Mixed direction inside a composite key, such as `a ASC, b DESC`
-is done through key encoding.
+	pk_join_seek(pk_seek('users/status','active'), 'sessions/user_id')
+	-- active users and their sessions in status-index order, not user-PK order
 
+**pk_join_hash** vs **pk_join_seek**: `pk_join_seek` preserves driver order, one
+seek per row. `pk_join_hash` materialises all driver PKs into a hash set then
+scans the FK index once, producing FK-index order. Use when the driver is large,
+unordered, and FK-order output is acceptable. Equivalent to
+`merge_join(pk_sort(driver), pk_range(fk))` but avoids the O(n log n) sort cost.
 
-## Single-table Combine Nodes
+**pk_parent_lookup** vs **pk_join_***: only node that goes child->parent. Reads
+the FK column from the child's source cursor (covered read -- no base-table open)
+and probes the parent table by PK. Child order preserved.
 
-These nodes combine PK streams for the same table.
+	pk_parent_lookup(
+		pk_range('sessions/started_at,user_id', {desc=true}),
+		'sessions/user_id')
+	-- last sessions with their users in started_at order;
+	-- user_id is in the index key: no base-table open needed
 
-For hash and probe nodes, the **driver** is the input scanned from beginning to
-end. Driver order means the output has the same order as that input. A **probe**
-is one exact index lookup performed for one driver PK.
+`opts.left = true`: left join; rows with null FK or missing parent emitted once
+with parent member absent. `pk_join_hash` appends unmatched rows after matched
+rows, unordered; others preserve stated order.
 
-| Node                                | Needs           | Returns      | Order        |
-|-------------------------------------|-----------------|--------------|--------------|
-| `pk_and(a, b)`                      | same table, PK  | intersection | pk-order     |
-| `pk_or(a, b)`                       | same table, PK  | union        | pk-order     |
-| `pk_except(a, b)`                   | same table, PK  | difference   | pk-order     |
-| `pk_sort(node)`                     | same table      | deduped PKs  | pk-order     |
-| `pk_hash_filter(driver, set, mode)` | same table      | driver PKs   | driver order |
-| `pk_and_probe(driver, probes...)`   | driver + probes | driver PKs   | driver order |
+Works for any column equi-join `t1.a = t2.b` when the probed table has an index
+on `b` and both sides encode the value identically (same types, widths, sign,
+direction, collation). FK is the common case where schema guarantees this.
 
-`pk_and`, `pk_or`, and `pk_except` are merge nodes. They require both inputs to be
-pk-order from beginning to end and unique by table PK.
+**Chained joins** (`users -> sessions -> events`): `merge_join(pk_range('users'),
+pk_range('sessions/user_id'))` outputs sessions in FK index order (user_id asc,
+session PK asc) -- not session-PK order. Joining events onto sessions therefore
+needs `pk_join_seek` or `pk_join_hash` for the second step.
 
-`pk_sort(node)` materialises a PK stream into memory, sorts by PK, removes
-duplicates, and returns a pk-order stream. Use it when the input is ix-order
-(`pk_range`, `pk_prefix`, `pk_join_seek`) or may contain repeated PKs
-(`pk_join_seek` fan-out), and the result must feed a merge node or any node
-that requires pk-order.
 
-`pk_hash_filter(driver, set_source, mode)` builds an in-memory set of raw PK bytes
-from `set_source`, then scans `driver`. With `mode = 'in'`, it emits driver PKs
-that are present in the set. With `mode = 'not_in'`, it emits driver PKs that are
-absent from the set. It reads only PK streams.
+## PIPELINE NODES
 
-`pk_hash_filter` keeps the driver's order. If the driver is pk-order, the
-result can be passed to merge nodes. If the driver is ix-order, the result is
-still ix-order and needs `pk_sort` before the next merge node.
+Single input. Filter, sort, or project within the PK layer.
 
-Example:
+	pk_sort(node)                      pk-order    dedup + sort; materialises O(n) memory
+	pk_hash_filter(driver, set, mode)  driver      filter by set membership; mode 'in'|'not_in'
+	pk_and_probe(driver, probes...)    driver      filter by index presence; ANDed GET_BOTH per probe
+	pk_project(tuple_stream, member)   pk-order    extract one member from a PK tuple stream
 
-```lua
-db:pk_hash_filter(
-	db:pk_range('users/score', {80}, {100}),
-	db:pk_seek('users/status', 'active'),
-	'in')
-```
+**pk_sort** — the only node that converts ix-order to pk-order. Required before
+any merge node fed by an index range. `node.cursor = nil` after sort.
 
-This scans score order, keeps users whose PK is in the active-status set, and
-returns them in score order.
+	merge_join(pk_sort(pk_range('users/score')), pk_range('sessions/user_id'))
+	-- pk_sort is required: pk_range on an index is ix-order
 
-`pk_and_probe(driver, probes...)` scans the driver and performs one exact index
-pair test per probe for each driver PK. The exact pair test is `GET_BOTH(key, pk)`.
-This keeps the driver's order and supports `ORDER BY ... LIMIT`.
+**pk_hash_filter** vs **merge nodes**: merge nodes require sorted inputs with
+compatible `merge_sig`. `pk_hash_filter` accepts any two PK streams regardless of
+order or key-space. The set is materialised into memory; the driver is streamed.
 
-Example:
+	pk_hash_filter(
+		pk_range('users/score', '>=', 80, '<=', 100),   -- driver: ix-order fine
+		pk_seek('users/status', 'active'),   -- set: materialised
+		'in')
 
-```lua
-db:limit(
-	db:pk_and_probe(
-		db:pk_range('users/score', nil, nil, {desc = true}),
-		{ix = 'users/status', key = 'active'}),
-	20)
-```
+**pk_and_probe** vs **pk_hash_filter**: `pk_hash_filter` materialises the set
+(O(n) memory). `pk_and_probe` tests each driver PK directly against an index via
+GET_BOTH -- O(1) memory, one seek per probe per driver row. Use to preserve driver
+order for ORDER BY + LIMIT without materialisation.
 
-This returns the top-scoring active users by scanning score order and stopping
-after 20 matches.
+	pk_and_probe(
+		pk_range('users/score', {desc=true}),  -- score order preserved
+		{ix='users/status', key='active'})                -- no set materialised
 
+**pk_project** vs **pk_join_***: probe nodes add a member to a stream; `pk_project`
+removes all but one, returning a flat PK stream for feeding back into merge or
+pipeline nodes.
 
-## Duplicate Behavior
+Source cursors: `pk_hash_filter` and `pk_and_probe` inherit `node.cursor` from
+the driver. `pk_sort` has `node.cursor = nil`.
 
-Duplicate behavior says whether a stream can return the same PK or value item
-more than once. Access nodes, `pk_and`, `pk_or`, `pk_except`, and `pk_sort` are
-unique by table PK; `pk_hash_filter`, `pk_and_probe`, filters, `limit`, `select`,
-and `value_sort` inherit their input; distinct and aggregate nodes emit one item
-per key; parent-to-child joins may repeat a parent PK. The per-node table is in
-`mdbx_query_validators.md`.
 
-PK tuple streams track duplicate behavior per tuple member. In `users ->
-sessions`, a user with three sessions yields three tuple items. The users PK
-repeats; the sessions PK can still be unique.
 
-Nodes that accept PK tuple streams, such as `fetch` and parent-to-child joins,
-can consume them directly. The merge nodes (`pk_and`, `pk_or`, `pk_except`)
-consume PK streams. Use `pk_project(tuple_stream, name)` to extract one named tuple
-member as a PK stream.
 
-Example:
+## DUPLICATE BEHAVIOR
 
-```lua
-db:pk_sort(
-	db:pk_project(
-		db:pk_join_merge(db:pk_scan('users'), 'sessions/user_id'),
-		'users'))
-```
+	access nodes, merge nodes, pk_sort   unique by table PK
+	pk_hash_filter, pk_and_probe, filters, limit,
+		select, value_sort                              inherit from input
+	distinct nodes, aggregate nodes                   unique by key
+	parent-to-child joins                             parent PK may repeat
 
-This returns unique user PKs from a tuple stream where each user may appear once
-per session.
+PK tuple streams track uniqueness per member. Full rules in `mdbx_query_validators.md`.
 
+	pk_project(tuple_stream, name) -> PK stream    extract one named member from a PK tuple
 
-## Join Nodes
+	-- unique user PKs from a join where each user repeats once per session
+	db:pk_sort(
+		db:pk_project(
+			db:merge_join(db:pk_range('users'), db:pk_range('sessions/user_id')),
+			'users'))
 
-A parent-to-child FK join starts with parent PKs and uses a child FK index to find
-matching child PKs.
 
-Parent-to-child joins have separate physical nodes:
 
-| Node                              | Work                       | Requires     |
-|-----------------------------------|----------------------------|--------------|
-| `pk_join_merge(driver, fk)`       | merge driver with FK index | parent order |
-| `pk_join_seek(driver, fk)`        | seek FK per driver PK      | any order    |
-| `pk_join_hash(driver, fk)`        | hash driver, scan FK index | memory       |
-| `pk_join_sort_merge(driver, fk)`  | sort driver, then merge    | sort memory  |
+## CURSOR AND VALUE NODES
 
-`pk_join_merge(driver, fk)` walks the driver PKs and child FK index together.
-It requires the driver to be ordered by the parent PK used by the FK.
+	fetch(node) -> cursor stream
 
-```lua
-db:pk_join_merge(
-	db:pk_scan('users'),
-	'sessions/user_id')
-```
+Turns PK or PK tuple stream into cursor bundles keyed by member name. Uses source
+cursor for covered columns; opens base table by PK for others.
 
-`pk_join_seek(driver, fk)` scans the driver and seeks the child FK index once per
-driver PK. It keeps driver order.
+`pk_sort`, merge nodes, `pk_join_sort_merge` have `node.cursor = nil`;
+`fetch` then always opens the base table for non-PK columns.
 
-`pk_join_hash(driver, fk)` materializes the driver in a hash table keyed by parent
-PK, then scans the child FK index. It uses memory instead of driver order.
+A cursor bundle stays valid until the next `next()` call.
 
-`pk_join_sort_merge(driver, fk)` materializes the driver, sorts it by parent PK,
-then merges with the child FK index.
+**Cursor joins** -- `outer` is a cursor stream; `inner` is a Lua function called
+once per outer bundle, returning a node. Outer bundle stays positioned while inner
+node is open.
 
-Each parent-to-child join returns a PK tuple stream carrying the input PK members
-plus the matching child PK.
+	semi_join(outer, inner)    -> cursor stream   keep outer when inner() node returns >= 1 item
+	anti_join(outer, inner)    -> cursor stream   keep outer when inner() node returns 0 items
+	nested_join(outer, inner)  -> cursor stream   one bundle per inner bundle; outer+inner cursors merged
 
-Each join is inner by default. With `opts.left = true` it is a left join: a driver
-row with no match is emitted once, with the matched member absent (its columns
-read as Lua `nil`). `pk_join_merge`, `pk_join_seek`, `pk_join_sort_merge`, and
-`pk_parent_lookup` place each unmatched driver row in their stated order;
-`pk_join_hash` emits unmatched driver rows, in no particular order, after the
-matched ones.
+`nested_join`: inner node must return cursor bundles; inner member names must not
+duplicate outer member names.
 
-A chained join chooses a physical node at each step. In
-`users -> sessions -> events`, the first join returns sessions grouped by user.
-Merge with `events/session_id` needs session PK order. The next join uses
-`pk_join_sort_merge`, `pk_join_hash`, or `pk_join_seek`.
+**Filters**:
 
-Child-to-parent lookup is a separate node:
+	cursor_filter(input, fn) -> cursor stream   keep bundles where fn(bundle) is true
+	value_filter(input, fn)  -> value stream    keep items where fn(item) is true
 
-```text
-pk_parent_lookup(child_node, fk_name, opts)
-```
+Both preserve input order and duplicate behavior.
 
-It scans child PKs, reads the FK value from the child's source cursor, probes the
-parent table by PK, and returns a PK tuple containing child and parent PKs. It
-keeps child order. With `opts.left`, a child whose FK is null or whose parent row
-is missing is kept with the parent member absent.
+	limit(input, n, [offset]) -> same type   at most n items after skipping offset; preserves everything
 
-Example:
+**Select**:
 
-```lua
-db:pk_parent_lookup(
-	db:limit(
-		db:pk_range('sessions/started_at,user_id', nil, nil, {desc = true}),
-		20),
-	'sessions/user_id')
-```
+	select(input, outputs) -> value stream   cursor stream -> value stream
 
-When the session index contains both `started_at` and `user_id`, the child source
-cursor supplies the FK value for the parent lookup. If the child source cursor
-does not contain the FK columns, fetch the child row before looking up the parent.
+`outputs`: list of `{name=, cursor=, column=}` or `{name=, fn=}`.
+`fn` receives the cursor bundle. `select` preserves input order and duplicates.
 
-The joins above match a parent PK against a child FK index. The same four
-strategies join any two tables on indexed columns `t1.a = t2.b` when the probed
-table has an index on the join column(s); the driver supplies the join value (its
-PK, its index key via the source cursor, or a fetch); and the two sides share an
-encoded key signature -- same column types, widths, sign, direction, and
-collation -- so equal values produce equal key bytes. The signature match is what
-lets a value from one side seek the index on the other. An FK join is the case
-where the join value is the parent PK and the child FK index is built with that
-signature, so the match is guaranteed.
+**Key function** used by distinct, sort, and aggregate nodes:
 
+	key_fn(item) -> {part, ...}
 
-## Cursor And Value Nodes
+`item` is a cursor bundle (cursor streams) or a value item (value streams).
+Returns a non-empty array. Use `null` for a DB null part; `nil` is invalid.
+All items from one node must return the same part count.
 
-`fetch` turns PK items or PK tuple items into cursor bundles. The bundle keeps the
-PK member names as cursor names. PK nodes are enough for filtering, joining,
-counting, and sorting by PK. Cursor bundles add row access: following nodes can
-read non-PK columns through positioned cursors.
+**Distinct**:
 
-Each cursor bundle takes `node:get_pk(name)` as the PK bytes and `node.cursor`
-as the source cursor. When a following node asks for a column that the source
-cursor can decode, the bundle reads it through that cursor -- a covered read.
-For other columns, the bundle opens the base table by PK.
+	stream_distinct(input, key_fn) -> same type   requires equal keys adjacent; input order
+	hash_distinct(input, key_fn)   -> same type   any order; stores seen keys in memory
 
-`pk_sort`, `pk_and`, `pk_or`, and `pk_except` have `node.cursor = nil` (no source
-cursor). `pk_hash_filter` and `pk_and_probe` inherit `node.cursor` from the driver.
+**Sort**:
 
-Cursor positioning: a returned cursor bundle stays valid only until the next
-`node:next()` call; the invariant is in `mdbx_query_validators.md`.
+	value_sort(input, key_fn, opts) -> value stream
 
-Cursor joins consume cursor streams. They run an inner function once per outer
-cursor bundle. The inner function receives the outer bundle and returns a node.
-The outer bundle stays positioned while the inner node is open.
+`opts`: per-part direction list, e.g. `{'asc', 'desc'}`; default ascending.
 
-| Node                                | Inner result   | Returns             |
-|-------------------------------------|----------------|---------------------|
-| `semi_join(outer, inner)`           | any item       | outer bundle        |
-| `anti_join(outer, inner)`           | any item       | outer bundle        |
-| `nested_join(outer, inner)`         | cursor bundle  | combined bundle     |
+**Aggregate**:
 
-`semi_join` returns the outer cursor bundle when the inner node returns at least
-one item. It stops the inner node after the first item.
+	group_cursor(input, key_fn, opts)      cursor stream -> cursor stream   one bundle per group; requires group order
+	stream_aggregate(input, key_fn, agg)   cursor stream -> value stream    one value per group; requires group order
+	hash_aggregate(input, key_fn, agg)     value stream  -> value stream    any input order; materialises
 
-`anti_join` returns the outer cursor bundle when the inner node returns no items.
-It stops the inner node after the first item if one exists.
+`opts.which = 'first' | 'last'`: which row from the group `group_cursor` returns.
+Omitting `key_fn`: one grand-total group; `stream_aggregate` then needs no order.
 
-`nested_join` returns one cursor bundle for each inner cursor bundle. The returned
-bundle contains the outer cursors and the inner cursors. Outer order is preserved;
-inner order is preserved inside each outer item.
+`agg` for `stream_aggregate` (reads cursor bundle columns):
 
-Filter nodes keep input items whose predicate returns true.
+	{name='n',     op='count'}
+	{name='total', op='sum',    cursor='users', column='score'}
+	{name='names', op='concat', cursor='users', column='name', sep=','}
+	{name='k',     op='key',    part=1}          -- part N of key_fn result
 
-| Node                            | Input         | Predicate sees | Returns       |
-|---------------------------------|---------------|----------------|---------------|
-| `cursor_filter(input, fn)`      | cursor stream | cursor bundle  | cursor bundle |
-| `value_filter(input, fn)`       | value stream  | value item     | value item    |
+`agg` for `hash_aggregate` (reads value item fields by name):
 
-`cursor_filter` preserves input order and duplicate behavior. Its predicate reads
-from the current cursor bundle. The bundle stays positioned while the predicate
-runs.
+	{name='total', op='sum',    input='score'}
+	{name='names', op='concat', input='name', sep=','}
 
-`value_filter` preserves input order and duplicate behavior. Its predicate reads
-from a decoded value item.
+Aggregate ops: `count`, `sum`, `avg`, `min`, `max`, `concat`, `key`.
+`sum`/`avg`/`min`/`max`/`concat` skip null and absent inputs.
+`count` without a column counts every row.
+Output fields = `agg` names in order.
 
-Filter predicates are Lua functions. They keep an item only when they return
-true.
+**Union**:
 
-`limit(input, n, offset)` returns at most `n` items from the input stream, after
-skipping the first `offset` items (`offset` defaults to 0). It preserves input
-item type, order, and duplicate behavior.
+	union_all(inputs...)      value streams -> value stream   keeps duplicates; argument order
+	union_distinct(inputs...)  value streams -> value stream  first-seen per distinct item
 
-`select(input, outputs)` consumes cursor bundles and returns value items.
+All inputs must have the same fields in the same order.
 
-```lua
-outputs = {
-	{name = 'id', cursor = 'users', column = 'id'},
-	{name = 'x', fn = compute_x},
-}
-```
 
-| Output spec         | Value source                      |
-|---------------------|-----------------------------------|
-| `cursor` + `column` | read through the cursor bundle    |
-| `fn`                | called with the cursor bundle     |
+## PER-ITEM NODE OPENING
 
-The bundle chooses a covered read or base-table lookup. Value items are keyed by
-output name. `select` preserves order and duplicates.
+Nodes that open a child node per outer item (`semi_join`, `anti_join`,
+`nested_join`) build a new node instance per item; each gets one `open()` call.
 
-`key_fn(item)` returns a non-empty key array: one part for a single key, more for
-a composite key. Use the `null` sentinel for a DB null part; a `nil` part is
-invalid; every item from one node returns the same part count. Per-node use of
-the parts and the full rules are in `mdbx_query_validators.md`.
 
-`stream_distinct` and `hash_distinct` keep the first item for each key.
+## NON-GOALS
 
-| Node                             | Input                  | Order       |
-|----------------------------------|------------------------|-------------|
-| `stream_distinct(input, key_fn)` | cursor or value stream | input order |
-| `hash_distinct(input, key_fn)`   | cursor or value stream | input order |
+Window functions, query caching, prepared statements.
 
-`stream_distinct` requires equal keys to be adjacent in the input stream.
-`hash_distinct` accepts any input order and stores seen keys in memory.
 
-`value_sort(input, key_fn, opts)` consumes a value stream, sorts value items by
-key parts, and returns value items. `opts` gives per-part direction (`asc` /
-`desc`, default ascending). Duplicate behavior is unchanged.
+## METADATA HELPERS
 
-`group_cursor`, `stream_aggregate`, and `hash_aggregate` group input items by
-`key_fn`.
+One MDBX stat call, cursor seek, or duplicate count each; no maintained statistics.
 
-| Node                                   | Input         | Requires    | Returns       |
-|----------------------------------------|---------------|-------------|---------------|
-| `group_cursor(input, key_fn, opts)`    | cursor stream | group order | cursor bundle |
-| `stream_aggregate(input, key_fn, agg)` | cursor stream | group order | value item    |
-| `hash_aggregate(input, key_fn, agg)`   | value stream  | memory      | value item    |
+	pk_exists(table, pk)    -> bool    base-table key lookup; complete PK
+	ix_exists(ix, key)      -> bool    index key lookup; complete key
+	ix_count(ix, key)       -> n       MDBX duplicate count; complete key only; no prefix/range
+	ix_min(ix, prefix)      -> key     first key matching prefix; nil prefix = first key overall
+	ix_max(ix, prefix)      -> key     last key matching prefix; nil prefix = last key overall
+	explain(node)           -> t       item type, members, order, uniqueness, source cursor, work; no DB read
 
-`group_cursor` returns one cursor bundle per group. `opts.which` is `first` or
-`last` and chooses which row in the group is returned.
+------------------------------------------------------------------------------
 
-`stream_aggregate` returns one value item per group. Equal group keys must be
-adjacent in the input stream.
+A read is **covered** by an index when all requested column values are in the
+index key or PK -- no base-table open needed.
 
-`hash_aggregate` accepts any input order and stores aggregate state in memory.
 
-For `group_cursor`, `stream_aggregate`, and `hash_aggregate`, `key_fn` returns
-the group key. Omitting `key_fn` makes one group over all input -- a grand total;
-`stream_aggregate` then needs no input order, and `group_cursor` returns the
-first or last row overall.
+------------------------------------------------------------------------------
 
-`agg` is an output list, like `select`'s `outputs`, but each entry aggregates
-over the group:
+## QUERY BUILDER
 
-```lua
-agg = {
-	{name = 'n',     op = 'count'},                             -- count(*)
-	{name = 'total', op = 'sum',    cursor = 'users', column = 'score'},
-	{name = 'hi',    op = 'max',    cursor = 'users', column = 'score'},
-	{name = 'names', op = 'concat', cursor = 'users', column = 'name', sep = ','},
-	{name = 'k',     op = 'key',    part = 1},                   -- a group-key part
-}
-```
+A composable expression that lowers to a tree of the nodes above. Same query +
+same schema always produces the same nodes; join order is preserved as written.
+Plan changes only when you change the query or the indexes, never from data.
+`explain(query)` can be snapshotted and diffed in tests.
+Hand-built node trees are fully supported; the builder just writes them for you.
 
-| op       | Value                                                       |
-|----------|-------------------------------------------------------------|
-| `count`  | row count; with a column, the non-null count                |
-| `sum`    | sum of the column                                           |
-| `avg`    | average of the column                                       |
-| `min`    | least column value                                          |
-| `max`    | greatest column value                                       |
-| `concat` | column values joined by `sep` (default `,`), in group order |
-| `key`    | group-key part `part`                                       |
+	db:from('table' | 'table alias')     start query; member name = alias or table name
 
-`sum`, `avg`, `min`, `max`, and `concat` skip null and absent inputs; `count`
-without a column counts every row. `stream_aggregate` reads each input column
-through the cursor bundle (`cursor` + `column`, or `fn`); `hash_aggregate` reads
-a value-item field (`input = output_name`). The output value shape is the `agg`
-names in order.
+	:join('table' [, opts])              inner join along an FK from an existing member
+	:inner_join(...), :left_join(...)     explicit inner / left
+	opts: from=member, on=fk, index=ix, left=bool, as=alias
 
-Union nodes consume value streams.
+FK direction determines the node: parent->child -> `pk_join_*` or `merge_join`;
+child->parent -> `pk_parent_lookup`. For parent-to-child, strategy is chosen from
+driver order: already in parent-PK order -> `merge_join(driver, pk_range(fk))`;
+keep driver order -> `pk_join_seek`; unordered -> `pk_join_hash` or
+`merge_join(pk_sort(driver), pk_range(fk))` (for left joins, hash appends
+unmatched rows after matched; sort_merge keeps FK index order).
 
-| Node                         | Input         | Returns     |
-|------------------------------|---------------|-------------|
-| `union_all(inputs...)`       | value streams | value items |
-| `union_distinct(inputs...)`  | value streams | value items |
+	db:from'users u'
+		:join('sessions s', {from='u'})
+		:left_join('events e', {from='s'})
 
-`union_all` reads each input in argument order and keeps duplicates.
+Example lowering:
 
-`union_distinct` reads each input in argument order and emits the first item for
-each distinct value item. It uses value-item equality and stores seen values in
-memory.
+	db:from'users':eq('status','active'):join'sessions':order_by'users.id'
+		:select{'users.id','sessions.started_at'}
 
-`pk_or` is the PK-stream deduped union.
+lowers to:
 
+	db:select(
+		db:fetch(
+			db:merge_join(
+				db:pk_seek('users/status', 'active'),   -- pk-order = users.id order
+				db:pk_range('sessions/user_id'))),
+		{{name='id', cursor='users', column='id'},
+		 {name='started_at', cursor='sessions', column='started_at'}})
 
-## Per-item Node Opening
+FILTERS (chained = ANDed):
 
-Nodes that run another node per input item build a new node instance for each
-item. Each node instance gets one `:open()` call.
+	:eq/:ne/:lt/:le/:gt/:ge(col, val)   comparison
+	:between(col, lo, hi)               range
+	:where(col [,op], val)              op: =, <>, <, <=, >, >=
+	:is_null(col) / :is_not_null(col)   null-first key range
+	:like(col, pattern)                 SQL LIKE; literal prefix on indexed col folds to pk_range
+	:in_(col, values|query)             pk_hash_filter 'in'  (in is a Lua keyword, hence in_)
+	:not_in(col, values|query)          pk_hash_filter 'not_in'
+	:where_exists(query|fn)             semi_join (correlated) or run-once (uncorrelated)
+	:where_not_exists(query|fn)         anti_join
+	:where_has(table [,fn])             correlated FK existence; no fn -> may use fk_parent_scan
+	:where_hasnt(table [,fn])           correlated FK non-existence
+	:or_where(col [,op], val)           OR (AND binds tighter); folds to merge_union on indexed col
+	:filter(fn)                         arbitrary Lua predicate; always residual
 
+On indexed columns of the access table: `:eq` folds to `pk_seek`/`pk_prefix`,
+ranges to `pk_range`, full PK equality to `pk_get`. Multiple indexed predicates
+use one index (equality preferred, or pinned); the rest are residual
+`cursor_filter` (before `fetch` when covered) or `value_filter`.
 
-## Non-goals
+Correlate an existence test explicitly -- never by column-name matching:
 
-Window functions; full outer join; query caching; prepared statements.
+	-- marker: outer'member.col' refers to the enclosing query's current row
+	db:from'users u':where_exists(
+		db:from'sessions':eq('user_id', outer'u.id'):gt('started_at', t))
 
+	-- closure: o is the enclosing query; use for clean scope across nesting
+	db:from'users u':where_exists(function(o)
+		return db:from'sessions':eq('user_id', o'u.id'):gt('started_at', t) end)
 
-## Metadata Helpers
+Both forms use the child FK index; cost equals a plain FK existence check.
 
-Metadata helpers return scalar values for the caller.
+ORDER / LIMIT / DISTINCT:
 
-Single-operation helpers use one MDBX stat call, one cursor seek, or one
-duplicate count. They do not need maintained query statistics.
+	:order_by(col, ...)    'col' or 'col desc'; uses existing index order when available, else value_sort
+	:limit(n) / :offset(n) pushed into driving scan when it already yields the needed order
+	:distinct(cols)         stream_distinct (input grouped) or hash_distinct
 
-| Helper                 | Operation source          | Scope             |
-|------------------------|---------------------------|-------------------|
-| `pk_exists(table, pk)` | base-table key lookup     | complete PK       |
-| `ix_exists(ix, key)`   | index key lookup          | complete key      |
-| `ix_count(ix, key)`    | MDBX duplicate count      | complete key      |
-| `ix_min(ix, prefix)`   | seek first matching key   | leading prefix    |
-| `ix_max(ix, prefix)`   | seek last matching key    | leading prefix    |
-| `explain(node)`        | node and schema metadata  | no DB read        |
-
-`ix_count(ix, key)` works only for a complete index key. It uses the MDBX
-duplicate count for the cursor positioned on that key.
-
-`ix_min(ix, prefix)` and `ix_max(ix, prefix)` read endpoints. With an empty
-prefix, they read the first or last key in the whole index. With a prefix, they
-seek to an endpoint and verify that the returned key still has the prefix.
-
-`explain(node)` returns schema and node data: item type, tuple member names,
-order, duplicate behavior, source-cursor behavior, and whether the node scans,
-seeks, sorts, hashes, or opens base rows.
-
-
-## Query Builder
-
-A query is a chained, composable expression that lowers to a tree of the
-primitive nodes above. Each method returns a new query, so a partial query is a
-value you can hold, reuse, and extend, or pass to another as a subquery. Nothing
-reads data until a terminal lowers the chain to a node and runs it: `:select` /
-`:agg` produce a value stream (iterate with `:rows` or `:first`), while `:count` /
-`:exists` return a scalar.
-
-Lowering is a deterministic, pure function of the query and the schema: the same
-query over the same indexes always produces the same nodes, and joins keep the
-order you wrote (they are never reordered). A plan changes only when you edit the
-query or add, drop, or pin an index -- never from data changing underneath you --
-so `explain(query)` can be snapshotted and diffed in a test. Hand-built node trees
-stay first-class; the builder just writes them for you.
-
-```lua
-db:from'users'
-	:eq('status', 'active')
-	:join'sessions'
-	:order_by'users.id'
-	:select{'users.id', 'sessions.started_at'}
-```
-
-It lowers to:
-
-```lua
-db:select(
-	db:fetch(
-		db:pk_join_merge(
-			db:pk_seek('users/status', 'active'),  -- driver, in users.id order
-			'sessions/user_id')),                  -- merge: driver is in join-key order
-	{
-		{name = 'id',         cursor = 'users',    column = 'id'},
-		{name = 'started_at', cursor = 'sessions', column = 'started_at'},
-	})
-```
-
-`pk_join_merge` is chosen because `pk_seek` returns one index key's PKs in
-users.id order, the join key; filter users by a score range instead and the
-driver arrives in index order, so the choice becomes `pk_join_seek` or
-`pk_join_sort_merge` -- from order alone, not row counts.
-
-Sources and joins:
-
-- `from('table')` or `from('table alias')` roots the query; the member is the
-  alias or the table name, and `member.column` references a column downstream.
-- `:join('table' [, opts])`, `:inner_join(...)`, and `:left_join(...)` add a table
-  reached by an FK from a member already in the query (`:join` is inner); the
-  table string may carry an alias (`'sessions s'`). The schema's FK direction
-  picks the node: parent-to-child -> a `pk_join_*` node, child-to-parent ->
-  `pk_parent_lookup`. For parent-to-child the strategy follows the driver's order
-  (an `explain` fact, not a row count): driver already in join-key order ->
-  `pk_join_merge`; keep driver order -> `pk_join_seek`; unordered ->
-  `pk_join_sort_merge` if a later step needs the order, else `pk_join_hash`.
-- join `opts`: `from` names the member to attach to (defaults to the previous
-  one), so one table can fan out to several; `on` selects the FK when more than
-  one connects the tables; `index` pins the child index; `left = true` is the left
-  join (the unmatched member reads as Lua `nil`); `as` also sets the alias.
-
-```lua
-db:from'users u'
-	:join('sessions s', {from = 'u'})
-	:left_join('events e', {from = 's'})
-	:select{'u.id uid', 's.started_at', 'e.kind'}
-```
-
-Filters (chained filters are ANDed):
-
-- `:eq` / `:ne` / `:lt` / `:le` / `:gt` / `:ge` `(col, val)` and
-  `:between(col, lo, hi)` are the comparisons; `:where(col [, op], val)` is the
-  general form (`op` is `=`, `<>`, `<`, `<=`, `>`, `>=`). On an indexed column of
-  the access table, `:eq` folds to `pk_seek` / `pk_prefix`, ranges and `:between`
-  to `pk_range`, and equality on the full PK to `pk_get`; anything else is a
-  residual `cursor_filter` (before `fetch` when covered) or `value_filter`.
-- `:is_null(col)` / `:is_not_null(col)` use the null-first key range.
-- `:like(col, pattern)` matches SQL `LIKE`; a literal prefix on an indexed column
-  (`'foo%'`) folds to a `pk_range`, otherwise it is residual.
-- `:in_(col, values | query)` / `:not_in(col, values | query)` test membership in
-  a value list or an uncorrelated subquery (the set is built once) -> a
-  `pk_hash_filter` `in` / `not_in` (`in` is a Lua keyword, hence `in_`).
-- `:where_exists(query)` / `:where_not_exists(query)` test for a matching row. The
-  subquery runs once unless it references the outer row -- explicitly, never by
-  magic -- with a marker `outer'member.col'` or a closure parameter (see below).
-  A correlated subquery lowers to `semi_join` / `anti_join`, run per outer row and
-  stopped at the first match.
-- `:where_has(table [, fn])` / `:where_hasnt(table [, fn])` are the named form of
-  the common case: correlated existence along the FK between the current member
-  and `table`, with `fn` filtering the child query. They lower to `semi_join` /
-  `anti_join`; `:where_has` with no `fn` can use `fk_parent_scan`.
-- `:or_where(col [, op], val)` ORs an alternative, with AND binding tighter (SQL
-  precedence); it folds to `pk_or` when the OR is over one indexed column, else
-  residual. Use `union` to OR across access paths.
-- `:filter(fn)` is an arbitrary Lua predicate -- always residual.
-- several indexed predicates on one table use one index (equality preferred over
-  range, or the pinned one) with the rest residual; compose `pk_and` / `pk_or`
-  nodes directly for a multi-index plan.
-- an FK existence test (parents that have a child) can lower to `fk_parent_scan`.
-
-Correlate an existence test explicitly -- a marker for one level, a closure for
-clean scope through nesting:
-
-```lua
--- marker: outer'member.col' refers to the enclosing query
-db:from'users u':where_exists(
-	db:from'sessions':eq('user_id', outer'u.id'):gt('started_at', t))
-
--- closure: o is the enclosing query, so nested EXISTS can each name their level
-db:from'users u':where_exists(function(o)
-	return db:from'sessions':eq('user_id', o'u.id'):gt('started_at', t) end)
-```
-
-Matching `u.id` against the FK column still uses the child FK index, so the
-correlated form costs the same as an FK existence check -- just written out.
-
-Order, limit, distinct:
-
-- `:order_by(col, ...)` takes `'col'` or `'col desc'` per key; uses index order
-  when the access path or a merge join already yields it, else adds `value_sort`.
-- `:limit(n)` and `:offset(n)` (or `:limit(n, offset)`) cap the result; a limit is
-  pushed into the driving scan when that scan already yields the requested order.
-- `:distinct(cols)` lowers to `stream_distinct` (input already grouped) or
-  `hash_distinct`.
-
-Grouping and aggregation:
-
-- `:group_by(cols)` with `:agg{...}` lowers to `group_cursor`, `stream_aggregate`,
-  or `hash_aggregate` (see `agg`, above); `:agg{...}` with no `:group_by` is a
-  grand total. `:having(col [, op], val)` or `:having(fn)` filters grouped rows
-  with a `value_filter` after the aggregate.
-
-```lua
-db:from'users'
-	:group_by'status'
-	:agg{
-		{name = 'n',   op = 'count'},
-		{name = 'avg', op = 'avg', col = 'score'},
-	}
-```
-
-Projection:
-
-- `:select{outputs}` returns a value stream; an output is `'member.column'`, or
-  `'member.column alias'` (also `... as alias`) to rename, or `{name=, fn=}` for a
-  computed value (`fn` gets the cursor bundle). PK and cursor streams flow through
-  filters and joins unchanged; `:select` lowers to a `fetch` of just the needed
-  columns, as late as possible, plus `select`.
-- `:agg{...}` returns the aggregate value stream (see Grouping).
-
-Set operations:
-
-- `union{q, ...}` / `union_all{q, ...}` combine value queries of the same shape
-  -> `union_distinct` / `union_all`. Intersection and difference are PK
-  operations: compose `pk_and` / `pk_except`, or filter with `:in_` / `:not_in`.
-
-```lua
-db:union{
-	db:from'users':eq('status', 'active'):select{'users.id', 'users.score'},
-	db:from'users':ge('score', 90)      :select{'users.id', 'users.score'},
-}
-```
-
-Control:
-
-- `:use_index(member, ix)` forces an index; `:no_index(member [, ix])` forbids one
-  or all.
-- `:use_counts()` lets lowering break the seek-versus-scan and drive-side ties
-  with MDBX's free counts (table and index entry counts, exact-key counts); no
-  histograms or maintained statistics. Off by default, so a plan stays a pure
-  function of query and schema unless you ask.
-
-Terminals:
-
-- `:rows()` iterates the value items; `:first()` returns the first item or `nil`;
-  `:count()` returns a row count (`ix_count` or a table entry count when exact,
-  else a `count` aggregate); `:exists()` returns whether any row matches.
-- `explain(query)` lowers the chain and reports the nodes without reading data.
+GROUP / AGGREGATE:
+
+	:group_by(cols)              with :agg{...} -> group_cursor / stream_aggregate / hash_aggregate
+	:agg{...}                    without :group_by -> grand total
+	:having(col [,op], val|fn)   value_filter after aggregate
+
+PROJECTION:
+
+	:select{outputs}   -> value stream; 'member.col', 'member.col alias', or {name=,fn=}
+	:agg{...}          -> value stream
+
+SET OPERATIONS:
+
+	union{q,...}       union_distinct over value queries with the same fields
+	union_all{q,...}   union_all
+
+CONTROL:
+
+	:use_index(member, ix)    force index
+	:no_index(member [,ix])   forbid index (all if ix omitted)
+	:use_counts()             let lowering use MDBX entry counts to break ties (default off;
+								keeps plan as pure function of query+schema when off)
+
+TERMINALS:
+
+	:rows()    iterate value items
+	:first()   first value item or nil
+	:count()   row count (exact via ix_count or table stat when possible, else count aggregate)
+	:exists()  true if any row matches
+
+	explain(query)   lower and report nodes; no DB reads

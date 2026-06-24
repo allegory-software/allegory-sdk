@@ -28,10 +28,13 @@ end
 local function collect_pks(node, name, schema)
 	node:open()
 	local t = {}
-	while node:next() do
-		local p, sz = get_pk(node, name)
-		t[#t+1] = tonumber(schema.decode_int_key(p, sz))
+	while node:next_group() do
+		repeat
+			local p, sz = get_pk(node, name)
+			t[#t+1] = tonumber(schema.decode_int_key(p, sz))
+		until not node:next_pk()
 	end
+	node:close()
 	return t
 end
 
@@ -111,16 +114,16 @@ end
 
 ------------------------------------------------------------------------------
 
-function test.explain_pk_scan()
-	with_db('explain_pk_scan', function(db)
+function test.explain_pk_range()
+	with_db('explain_pk_range', function(db)
 		db:atomic('r', function()
-			local e = db:pk_scan('users'):explain()
-			assert(e.kind == 'pk_scan', e.kind)
+			local e = db:pk_range('users'):explain()
+			assert(e.kind == 'pk_range', e.kind)
 			assert(e.item == 'pk', e.item)
 			assert(#e.members == 1 and e.members[1] == 'users', S(e.members))
-			assert(e.order[1] == 'users.pk asc', e.order[1])
+			assert(e.order[1] == 'users.id asc', e.order[1])
 			assert(e.unique == true)
-			assert(e.source == 'pk_bytes', e.source)
+			assert(e.source == 'cursor', e.source)
 		end)
 	end)
 end
@@ -143,9 +146,9 @@ function test.resolve_errors()
 	with_db('resolve_errors', function(db)
 		db:atomic('r', function()
 			--unknown table.
-			assert(not pcall(db.pk_scan, db, 'nope'))
-			--index where a base table is expected.
-			assert(not pcall(db.pk_scan, db, 'users/status'))
+			assert(not pcall(db.pk_range, db, 'nope'))
+			--wrong bound arg count.
+			assert(not pcall(db.pk_range, db, 'users', 1))
 			--wrong pk arity.
 			assert(not pcall(db.pk_get, db, 'users'))
 			assert(not pcall(db.pk_get, db, 'users', 1, 2))
@@ -167,8 +170,9 @@ function test.pk_seek_exec()
 			--seek missing key -> nil immediately
 			local n = db:pk_seek('users/status', 'missing')
 			n:open()
-			assert(n:next() == nil)
+			assert(n:next_group() == nil)
 			assert(n:get_pk('users') == nil)
+			n:close()
 		end)
 	end)
 end
@@ -180,26 +184,28 @@ function test.pk_get_exec()
 			--existing PK returns it
 			local node = db:pk_get('users', 3)
 			node:open()
-			assert(node:next() == true)
+			assert(node:next_group() == true)
 			local p, sz = get_pk(node, 'users')
 			assert(tonumber(schema.decode_int_key(p, sz)) == 3)
 			--exhausted after one item
-			assert(node:next() == nil)
+			assert(node:next_group() == nil)
 			assert(node:get_pk('users') == nil)
+			node:close()
 			--missing PK returns nil
 			local n = db:pk_get('users', 999)
 			n:open()
-			assert(n:next() == nil)
+			assert(n:next_group() == nil)
 			assert(n:get_pk('users') == nil)
+			n:close()
 		end)
 	end)
 end
 
-function test.pk_scan_exec()
-	with_db('pk_scan_exec', function(db)
+function test.pk_range_base_exec()
+	with_db('pk_range_base_exec', function(db)
 		db:atomic('r', function()
 			local schema = db:table_schema('users')
-			local pks = collect_pks(db:pk_scan('users'), 'users', schema)
+			local pks = collect_pks(db:pk_range('users'), 'users', schema)
 			assert(#pks == 5, 'expected 5 pks, got '..#pks)
 			for i, pk in ipairs(pks) do
 				assert(pk == i, 'expected pk '..i..', got '..tostring(pk))
@@ -221,8 +227,9 @@ function test.pk_prefix_exec()
 			--prefix user_id=3 -> no sessions (user 3 has none)
 			local n = db:pk_prefix('sessions/user_id,started_at', 3)
 			n:open()
-			assert(n:next() == nil)
+			assert(n:next_group() == nil)
 			assert(n:get_pk('sessions') == nil)
+			n:close()
 			--wrong arity: full key (2 cols) not allowed; need 1..n-1
 			assert(not pcall(db.pk_prefix, db, 'sessions/user_id,started_at', 1, 1000))
 			--wrong arity: zero cols not allowed
@@ -248,30 +255,30 @@ function test.fk_parent_scan_exec()
 	end)
 end
 
-function test.pk_and_exec()
-	with_db('pk_and_exec', function(db)
+function test.merge_join_and_exec()
+	with_db('merge_join_and_exec', function(db)
 		db:atomic('r', function()
 			local schema = db:table_schema('users')
 			local function pks(node)
 				return collect_pks(node, 'users', schema)
 			end
-			local t = pks(db:pk_and(
-				db:pk_scan('users'),
+			local t = pks(db:merge_join(
+				db:pk_range('users'),
 				db:pk_seek('users/status', 'active')))
 			assert(cat(t, ',') == '1,2,4', S(t))
-			t = pks(db:pk_and(
+			t = pks(db:merge_join(
 				db:pk_seek('users/status', 'active'),
 				db:pk_seek('users/status', 'banned')))
 			assert(#t == 0, S(t))
-			assert(not pcall(db.pk_and, db,
-				db:pk_scan('users'),
-				db:pk_range('users/score', {70}, {95})))
+			assert(not pcall(db.merge_join, db,
+				db:pk_range('users'),
+				db:pk_range('users/score', '>=', 70, '<=', 95)))
 		end)
 	end)
 end
 
-function test.pk_join_merge_exec()
-	with_db('pk_join_merge_exec', function(db)
+function test.merge_join_exec()
+	with_db('merge_join_exec', function(db)
 		db:atomic('r', function()
 			local user_schema = db:table_schema('users')
 			local session_schema = db:table_schema('sessions')
@@ -281,30 +288,57 @@ function test.pk_join_merge_exec()
 			local function decode_session(p, sz)
 				return tonumber(session_schema.decode_int_key(p, sz))
 			end
-			local node = db:pk_join_merge(db:pk_scan('users'), 'sessions/user_id')
+			local node = db:merge_join(
+				db:pk_range('users'),
+				db:pk_range('sessions/user_id'))
 			node:open()
 			local tuples = {}
 			while node:next() do
 				local up, up_sz = get_pk(node, 'users')
 				local sp, sp_sz = get_pk(node, 'sessions')
-				local dp, dp_sz = get_pk(node)
-				assert(decode_session(dp, dp_sz) == decode_session(sp, sp_sz))
 				tuples[#tuples+1] = decode_user(up, up_sz)..':'..decode_session(sp, sp_sz)
 			end
+			node:close()
 			assert(cat(tuples, ',') == '1:11,1:12,1:13,2:14,4:15', S(tuples))
 
-			local left = db:pk_join_merge(
-				db:pk_scan('users'), 'sessions/user_id', {left = true})
+			local left = db:merge_join(
+				db:pk_range('users'),
+				db.left(db:pk_range('sessions/user_id')))
 			left:open()
 			local missing = {}
 			while left:next() do
 				local up, up_sz = get_pk(left, 'users')
 				if not left:get_pk('sessions') then
-					assert(left:get_pk() == nil)
 					missing[#missing+1] = decode_user(up, up_sz)
 				end
 			end
+			left:close()
 			assert(cat(missing, ',') == '3,5', S(missing))
+		end)
+	end)
+end
+
+function test.merge_join_reset_group()
+	with_db('merge_join_reset_group', function(db)
+		db:atomic('r', function()
+			local event_schema = db:table_schema('events')
+			local function decode_event(p, sz)
+				return tonumber(event_schema.decode_int_key(p, sz))
+			end
+			--self-join on events/kind: cross-product of event PKs per kind group.
+			--'click':{22} x {22} = 1 pair; 'open':{21,23} x {21,23} = 4 pairs.
+			local node = db:merge_join(
+				db:pk_range('events/kind'),
+				db:pk_range('events/kind'))
+			node:open()
+			local lefts = {}
+			while node:next() do
+				local p, sz = get_pk(node, 'events')
+				lefts[#lefts+1] = decode_event(p, sz)
+			end
+			node:close()
+			--left PKs: 22 (click group), then 21,21,23,23 (open group)
+			assert(cat(lefts, ',') == '22,21,21,23,23', S(lefts))
 		end)
 	end)
 end
@@ -321,15 +355,72 @@ function test.pk_range_exec()
 				for i = 1, #a do if a[i] ~= b[i] then return false end end
 				return true
 			end
-			assert(eq(pks(db:pk_range('users/score', {70}, {95})), {4,1,2}))
-			assert(eq(pks(db:pk_range('users/score', {70}, {95}, {desc=true})), {2,1,4}))
-			assert(eq(pks(db:pk_range('users/score', {70}, {95}, {lo_open=true})), {1,2}))
-			assert(eq(pks(db:pk_range('users/score', {70}, {95}, {hi_open=true})), {4,1}))
-			assert(eq(pks(db:pk_range('users/score', nil, nil)), {3,5,4,1,2}))
-			assert(eq(pks(db:pk_range('users/score', nil, nil, {desc=true})), {2,1,4,5,3}))
-			assert(eq(pks(db:pk_range('users/score', {null}, {null})), {}))
-			assert(eq(pks(db:pk_range('users/score', {null}, nil, {lo_open=true})), {3,5,4,1,2}))
-			assert(not pcall(db.pk_range, db, 'users/score', {95}, {70}))
+			assert(eq(pks(db:pk_range('users/score', '>=', 70, '<=', 95)), {4,1,2}))
+			assert(eq(pks(db:pk_range('users/score', '>=', 70, '<=', 95, {desc=true})), {2,1,4}))
+			assert(eq(pks(db:pk_range('users/score', '>', 70, '<=', 95)), {1,2}))
+			assert(eq(pks(db:pk_range('users/score', '>=', 70, '<', 95)), {4,1}))
+			assert(eq(pks(db:pk_range('users/score')), {3,5,4,1,2}))
+			assert(eq(pks(db:pk_range('users/score', {desc=true})), {2,1,4,5,3}))
+			assert(eq(pks(db:pk_range('users/score', '>=', null, '<=', null)), {}))
+			assert(eq(pks(db:pk_range('users/score', '>', null)), {3,5,4,1,2}))
+			assert(not pcall(db.pk_range, db, 'users/score', '>=', 95, '<=', 70))
+		end)
+	end)
+end
+
+function test.merge_union_or_exec()
+	with_db('merge_union_or_exec', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local function pks(node)
+				return collect_pks(node, 'users', schema)
+			end
+			--active OR banned = all 5 users in pk order
+			local t = pks(db:merge_union(
+				db:pk_seek('users/status', 'active'),
+				db:pk_seek('users/status', 'banned')))
+			assert(cat(t, ',') == '1,2,3,4,5', S(t))
+			--dedup: active OR active = just active
+			t = pks(db:merge_union(
+				db:pk_seek('users/status', 'active'),
+				db:pk_seek('users/status', 'active')))
+			assert(cat(t, ',') == '1,2,4', S(t))
+			--one side empty: active OR missing = just active
+			t = pks(db:merge_union(
+				db:pk_seek('users/status', 'active'),
+				db:pk_seek('users/status', 'missing')))
+			assert(cat(t, ',') == '1,2,4', S(t))
+		end)
+	end)
+end
+
+function test.merge_except_exec()
+	with_db('merge_except_exec', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local function pks(node)
+				return collect_pks(node, 'users', schema)
+			end
+			--all users except active = banned {3,5}
+			local t = pks(db:merge_except(
+				db:pk_range('users'),
+				db:pk_seek('users/status', 'active')))
+			assert(cat(t, ',') == '3,5', S(t))
+			--active except banned = active {1,2,4}
+			t = pks(db:merge_except(
+				db:pk_seek('users/status', 'active'),
+				db:pk_seek('users/status', 'banned')))
+			assert(cat(t, ',') == '1,2,4', S(t))
+			--except self = empty
+			t = pks(db:merge_except(
+				db:pk_seek('users/status', 'active'),
+				db:pk_seek('users/status', 'active')))
+			assert(#t == 0, S(t))
+			--except empty = unchanged
+			t = pks(db:merge_except(
+				db:pk_seek('users/status', 'active'),
+				db:pk_seek('users/status', 'missing')))
+			assert(cat(t, ',') == '1,2,4', S(t))
 		end)
 	end)
 end
