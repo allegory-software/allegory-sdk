@@ -25,13 +25,36 @@ local function get_pk(node, name)
 	return p, sz
 end
 
+local schema_C = ffi.load'mdbx_schema'
+local pk_out = u8a(MDBX_MAX_KEY_SIZE)
+local pk_pout = new'const u8*[1]'
+local pk_pp = new'const u8*[1]'
+
+local function decode_pk(schema, p, sz)
+	assert(schema and #schema.key_fields == 1, 'single-column pk schema required')
+	local f = schema.key_fields[1]
+	pk_pp[0] = p
+	local len = schema_C.schema_get_key(schema._st, 0,
+		p, sz, pk_out, MDBX_MAX_KEY_SIZE, pk_pout, pk_pp)
+	assert(len ~= -1, 'expected non-null pk')
+	return tonumber(f.decode(pk_pout[0], len))
+end
+
+local function pk_id(node, name, schema)
+	if node.get_cols then
+		local ok, id = node:get_cols(name)
+		if ok then return tonumber(id) end
+	end
+	local p, sz = get_pk(node, name)
+	return decode_pk(schema, p, sz)
+end
+
 local function collect_pks(node, name, schema)
 	node:open()
 	local t = {}
 	while node:next_group() do
 		repeat
-			local p, sz = get_pk(node, name)
-			t[#t+1] = tonumber(schema.decode_int_key(p, sz))
+			t[#t+1] = pk_id(node, name, schema)
 		until not node:next_pk()
 	end
 	node:close()
@@ -180,13 +203,11 @@ end
 function test.pk_get_exec()
 	with_db('pk_get_exec', function(db)
 		db:atomic('r', function()
-			local schema = db:table_schema('users')
 			--existing PK returns it
 			local node = db:pk_get('users', 3)
 			node:open()
 			assert(node:next_group() == true)
-			local p, sz = get_pk(node, 'users')
-			assert(tonumber(schema.decode_int_key(p, sz)) == 3)
+			assert(pk_id(node, 'users') == 3)
 			--exhausted after one item
 			assert(node:next_group() == nil)
 			assert(node:get_pk('users') == nil)
@@ -280,23 +301,13 @@ end
 function test.merge_join_exec()
 	with_db('merge_join_exec', function(db)
 		db:atomic('r', function()
-			local user_schema = db:table_schema('users')
-			local session_schema = db:table_schema('sessions')
-			local function decode_user(p, sz)
-				return tonumber(user_schema.decode_int_key(p, sz))
-			end
-			local function decode_session(p, sz)
-				return tonumber(session_schema.decode_int_key(p, sz))
-			end
 			local node = db:merge_join(
 				db:pk_range('users'),
 				db:pk_range('sessions/user_id'))
 			node:open()
 			local tuples = {}
 			while node:next() do
-				local up, up_sz = get_pk(node, 'users')
-				local sp, sp_sz = get_pk(node, 'sessions')
-				tuples[#tuples+1] = decode_user(up, up_sz)..':'..decode_session(sp, sp_sz)
+				tuples[#tuples+1] = pk_id(node, 'users')..':'..pk_id(node, 'sessions')
 			end
 			node:close()
 			assert(cat(tuples, ',') == '1:11,1:12,1:13,2:14,4:15', S(tuples))
@@ -307,9 +318,8 @@ function test.merge_join_exec()
 			left:open()
 			local missing = {}
 			while left:next() do
-				local up, up_sz = get_pk(left, 'users')
 				if not left:get_pk('sessions') then
-					missing[#missing+1] = decode_user(up, up_sz)
+					missing[#missing+1] = pk_id(left, 'users')
 				end
 			end
 			left:close()
@@ -321,10 +331,6 @@ end
 function test.merge_join_reset_group()
 	with_db('merge_join_reset_group', function(db)
 		db:atomic('r', function()
-			local event_schema = db:table_schema('events')
-			local function decode_event(p, sz)
-				return tonumber(event_schema.decode_int_key(p, sz))
-			end
 			--self-join on events/kind: cross-product of event PKs per kind group.
 			--'click':{22} x {22} = 1 pair; 'open':{21,23} x {21,23} = 4 pairs.
 			local node = db:merge_join(
@@ -333,8 +339,7 @@ function test.merge_join_reset_group()
 			node:open()
 			local lefts = {}
 			while node:next() do
-				local p, sz = get_pk(node, 'events')
-				lefts[#lefts+1] = decode_event(p, sz)
+				lefts[#lefts+1] = pk_id(node, 'events')
 			end
 			node:close()
 			--left PKs: 22 (click group), then 21,21,23,23 (open group)
@@ -421,6 +426,354 @@ function test.merge_except_exec()
 				db:pk_seek('users/status', 'active'),
 				db:pk_seek('users/status', 'missing')))
 			assert(cat(t, ',') == '1,2,4', S(t))
+		end)
+	end)
+end
+
+function test.pk_join_seek_exec()
+	with_db('pk_join_seek_exec', function(db)
+		db:atomic('r', function()
+			-- active users (1,2,4) + their sessions; driver order preserved
+			local node = db:pk_join_seek(db:pk_seek('users/status', 'active'), 'sessions/user_id')
+			node:open()
+			local tuples = {}
+			while node:next() do
+				tuples[#tuples+1] = pk_id(node, 'users')..':'..pk_id(node, 'sessions')
+			end
+			node:close()
+			-- user 1 has sessions 11,12,13; user 2 has 14; user 4 has 15
+			assert(cat(tuples, ',') == '1:11,1:12,1:13,2:14,4:15', S(tuples))
+			-- user with no children: user 3 has no sessions
+			local node2 = db:pk_join_seek(db:pk_get('users', 3), 'sessions/user_id')
+			node2:open()
+			assert(node2:next() == nil)
+			node2:close()
+			-- error: driver member must match parent table
+			assert(not pcall(db.pk_join_seek, db, db:pk_range('sessions'), 'sessions/user_id'))
+			-- error: not a FK index
+			assert(not pcall(db.pk_join_seek, db, db:pk_range('users'), 'users/status'))
+		end)
+	end)
+end
+
+function test.pk_join_hash_exec()
+	with_db('pk_join_hash_exec', function(db)
+		db:atomic('r', function()
+			-- driver in score order (users 4,1,2); output in FK-index order (user PK asc)
+			local node = db:pk_join_hash(
+				db:pk_range('users/score', '>=', 70),
+				'sessions/user_id')
+			node:open()
+			local tuples = {}
+			while node:next() do
+				tuples[#tuples+1] = pk_id(node, 'users')..':'..pk_id(node, 'sessions')
+			end
+			node:close()
+			-- FK index order: user 1 first (not user 4 which led in score order)
+			assert(cat(tuples, ',') == '1:11,1:12,1:13,2:14,4:15', S(tuples))
+			-- driver with no matches: user 3 has no sessions
+			local node2 = db:pk_join_hash(db:pk_get('users', 3), 'sessions/user_id')
+			node2:open()
+			assert(node2:next() == nil)
+			node2:close()
+		end)
+	end)
+end
+
+function test.pk_parent_lookup_exec()
+	with_db('pk_parent_lookup_exec', function(db)
+		db:atomic('r', function()
+			-- all sessions -> their users; sessions in PK order 11..15
+			local node = db:pk_parent_lookup(db:pk_range('sessions'), 'sessions/user_id')
+			node:open()
+			local tuples = {}
+			while node:next() do
+				tuples[#tuples+1] = pk_id(node, 'sessions')..':'..pk_id(node, 'users')
+			end
+			node:close()
+			assert(cat(tuples, ',') == '11:1,12:1,13:1,14:2,15:4', S(tuples))
+			-- covered read: user_id is in sessions/user_id,started_at index key
+			local node2 = db:pk_parent_lookup(
+				db:pk_prefix('sessions/user_id,started_at', 1),
+				'sessions/user_id')
+			node2:open()
+			local t2 = {}
+			while node2:next() do
+				t2[#t2+1] = pk_id(node2, 'sessions')..':'..pk_id(node2, 'users')
+			end
+			node2:close()
+			-- sessions 11,12,13 (user 1's sessions in started_at order) -> user 1
+			assert(cat(t2, ',') == '11:1,12:1,13:1', S(t2))
+			-- left join: events -> sessions (event 23 -> session 14 -> user 2; events 21,22 -> session 11)
+			local node3 = db:pk_parent_lookup(db:pk_range('events'), 'events/session_id')
+			node3:open()
+			local t3 = {}
+			while node3:next() do
+				t3[#t3+1] = pk_id(node3, 'events')..':'..pk_id(node3, 'sessions')
+			end
+			node3:close()
+			assert(cat(t3, ',') == '21:11,22:11,23:14', S(t3))
+			-- error: driver member must match child table
+			assert(not pcall(db.pk_parent_lookup, db, db:pk_range('users'), 'sessions/user_id'))
+		end)
+	end)
+end
+
+function test.pk_hash_filter_exec()
+	with_db('pk_hash_filter_exec', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local function pks(node)
+				return collect_pks(node, 'users', schema)
+			end
+			-- 'in': score >= 70 (ix-order: u4,u1,u2) intersect active (u1,u2,u4) = u4,u1,u2
+			local t = pks(db:pk_hash_filter(
+				db:pk_range('users/score', '>=', 70),
+				db:pk_seek('users/status', 'active'),
+				'in'))
+			assert(cat(t, ',') == '4,1,2', S(t))
+			-- 'not_in': all scores (ix-order: u3,u5,u4,u1,u2) minus active (u1,u2,u4) = u3,u5
+			t = pks(db:pk_hash_filter(
+				db:pk_range('users/score'),
+				db:pk_seek('users/status', 'active'),
+				'not_in'))
+			assert(cat(t, ',') == '3,5', S(t))
+			-- 'in' with empty set: nothing passes
+			t = pks(db:pk_hash_filter(
+				db:pk_range('users/score'),
+				db:pk_seek('users/status', 'missing'),
+				'in'))
+			assert(#t == 0, S(t))
+			-- 'not_in' with full set: nothing passes
+			t = pks(db:pk_hash_filter(
+				db:pk_seek('users/status', 'active'),
+				db:pk_range('users'),
+				'not_in'))
+			assert(#t == 0, S(t))
+		end)
+	end)
+end
+
+function test.limit_exec()
+	with_db('limit_exec', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local function pks(node)
+				return collect_pks(node, 'users', schema)
+			end
+			assert(cat(pks(db:limit(db:pk_range('users'), 3)),    ',') == '1,2,3',   'limit 3')
+			assert(cat(pks(db:limit(db:pk_range('users'), 3, 2)), ',') == '3,4,5',   'limit 3 offset 2')
+			assert(    pks(db:limit(db:pk_range('users'), 0))     [1]  == nil,        'limit 0')
+			assert(cat(pks(db:limit(db:pk_range('users'), 10)),   ',') == '1,2,3,4,5','limit > count')
+		end)
+	end)
+end
+
+function test.nested_join_exec()
+	with_db('nested_join_exec', function(db)
+		db:atomic('r', function()
+			local function run(driver)
+				local node = db:nested_join(driver, function(outer)
+					local uid = pk_id(outer, 'users')
+					return db:pk_seek('sessions/user_id', uid)
+				end)
+				node:open()
+				local tuples = {}
+				while node:next() do
+					tuples[#tuples+1] = pk_id(node, 'users')..':'..pk_id(node, 'sessions')
+				end
+				node:close()
+				return tuples
+			end
+			-- active users (1,2,4) x their sessions
+			local t = run(db:pk_seek('users/status', 'active'))
+			assert(cat(t, ',') == '1:11,1:12,1:13,2:14,4:15', S(t))
+			-- all users: users 3 and 5 have no sessions and are skipped
+			t = run(db:pk_range('users'))
+			assert(cat(t, ',') == '1:11,1:12,1:13,2:14,4:15', S(t))
+			-- members extended with inner members after first iteration
+			local node = db:nested_join(
+				db:pk_seek('users/status', 'active'),
+				function(outer)
+					return db:pk_seek('sessions/user_id', pk_id(outer, 'users'))
+				end)
+			node:open()
+			node:next()
+			assert(#node.members == 2 and node.members[1] == 'users' and node.members[2] == 'sessions',
+				S(node.members))
+			node:close()
+		end)
+	end)
+end
+
+function test.anti_join_exec()
+	with_db('anti_join_exec', function(db)
+		db:atomic('r', function()
+			local function pks(node)
+				return collect_pks(node, 'users')
+			end
+			-- keep users with NO sessions (users 3 and 5 have none)
+			local t = pks(db:anti_join(
+				db:pk_range('users'),
+				function(outer)
+					local uid = pk_id(outer, 'users')
+					return db:pk_seek('sessions/user_id', uid)
+				end))
+			assert(cat(t, ',') == '3,5', S(t))
+			-- inner always empty: all outer items pass
+			t = pks(db:anti_join(
+				db:pk_seek('users/status', 'active'),
+				function(outer) return db:pk_seek('sessions/user_id', 999) end))
+			assert(cat(t, ',') == '1,2,4', S(t))
+		end)
+	end)
+end
+
+function test.semi_join_exec()
+	with_db('semi_join_exec', function(db)
+		db:atomic('r', function()
+			local function pks(node)
+				return collect_pks(node, 'users')
+			end
+			-- keep users that have at least one session (users 1,2,4 do; 3,5 don't)
+			local t = pks(db:semi_join(
+				db:pk_range('users'),
+				function(outer)
+					local uid = pk_id(outer, 'users')
+					return db:pk_seek('sessions/user_id', uid)
+				end))
+			assert(cat(t, ',') == '1,2,4', S(t))
+			-- inner always empty: no outer items pass
+			t = pks(db:semi_join(
+				db:pk_range('users'),
+				function(outer) return db:pk_seek('sessions/user_id', 999) end))
+			assert(#t == 0, S(t))
+		end)
+	end)
+end
+
+function test.pk_group_exec()
+	with_db('pk_group_exec', function(db)
+		db:atomic('r', function()
+			local function uid_key(n)
+				local ok, _, uid = n:get_cols('sessions', 'user_id')
+				return {uid}
+			end
+			-- sessions/user_id order: user 1 -> {11,12,13}, user 2 -> {14}, user 4 -> {15}
+			-- first item per group: 11, 14, 15
+			local node = db:pk_group(db:pk_range('sessions/user_id'), uid_key)
+			node:open()
+			local firsts = {}
+			while node:next_group() do
+				firsts[#firsts+1] = pk_id(node, 'sessions')
+				-- intentionally skip next_pk to test group-skip in next_group
+			end
+			node:close()
+			assert(cat(firsts, ',') == '11,14,15', S(firsts))
+			-- full group iteration via next_pk: all sessions per user group
+			node = db:pk_group(db:pk_range('sessions/user_id'), uid_key)
+			node:open()
+			local groups = {}
+			while node:next_group() do
+				local grp = {pk_id(node, 'sessions')}
+				while node:next_pk() do
+					grp[#grp+1] = pk_id(node, 'sessions')
+				end
+				groups[#groups+1] = cat(grp, ',')
+			end
+			node:close()
+			assert(cat(groups, '|') == '11,12,13|14|15', cat(groups, '|'))
+		end)
+	end)
+end
+
+function test.pk_filter_exec()
+	with_db('pk_filter_exec', function(db)
+		db:atomic('r', function()
+			local function pks(node)
+				return collect_pks(node, 'users')
+			end
+			-- keep users with id <= 3 using get_pk in the predicate
+			local t = pks(db:pk_filter(
+				db:pk_range('users'),
+				function(node)
+					local ok = node:get_pk('users')
+					return ok and pk_id(node, 'users') <= 3
+				end))
+			assert(cat(t, ',') == '1,2,3', S(t))
+			-- always-true: all active users pass through unchanged
+			t = pks(db:pk_filter(
+				db:pk_seek('users/status', 'active'),
+				function() return true end))
+			assert(cat(t, ',') == '1,2,4', S(t))
+			-- always-false: empty result
+			t = pks(db:pk_filter(
+				db:pk_range('users'),
+				function() return false end))
+			assert(#t == 0, S(t))
+		end)
+	end)
+end
+
+function test.pk_project_exec()
+	with_db('pk_project_exec', function(db)
+		db:atomic('r', function()
+			local user_schema    = db:table_schema('users')
+			local session_schema = db:table_schema('sessions')
+			-- project 'users': one entry per (user,session) pair; user 1 repeats 3 times
+			local t = collect_pks(
+				db:pk_project(
+					db:merge_join(db:pk_range('users'), db:pk_range('sessions/user_id')),
+					'users'),
+				'users', user_schema)
+			assert(cat(t, ',') == '1,1,1,2,4', S(t))
+			-- project 'sessions': session PKs in session-PK order
+			t = collect_pks(
+				db:pk_project(
+					db:merge_join(db:pk_range('users'), db:pk_range('sessions/user_id')),
+					'sessions'),
+				'sessions', session_schema)
+			assert(cat(t, ',') == '11,12,13,14,15', S(t))
+			-- left join: projecting 'sessions' skips absent members (users 3 and 5 have none)
+			t = collect_pks(
+				db:pk_project(
+					db:merge_join(db:pk_range('users'), db.left(db:pk_range('sessions/user_id'))),
+					'sessions'),
+				'sessions', session_schema)
+			assert(cat(t, ',') == '11,12,13,14,15', S(t))
+			-- error: member not present in input
+			assert(not pcall(db.pk_project, db, db:pk_range('users'), 'sessions'))
+		end)
+	end)
+end
+
+function test.pk_and_probe_exec()
+	with_db('pk_and_probe_exec', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local function pks(node)
+				return collect_pks(node, 'users', schema)
+			end
+			-- single probe: score desc (u2,u1,u4,u5,u3), keep only active (1,2,4) -> 2,1,4
+			local t = pks(db:pk_and_probe(
+				db:pk_range('users/score', {desc=true}),
+				{ix='users/status', key='active'}))
+			assert(cat(t, ',') == '2,1,4', S(t))
+			-- two probes: all users (pk order), keep active (1,2,4) AND score=80 (user 1 only)
+			t = pks(db:pk_and_probe(
+				db:pk_range('users'),
+				{ix='users/status', key='active'},
+				{ix='users/score', key=80}))
+			assert(cat(t, ',') == '1', S(t))
+			-- no match: active users probed against banned key -> empty
+			t = pks(db:pk_and_probe(
+				db:pk_seek('users/status', 'active'),
+				{ix='users/status', key='banned'}))
+			assert(#t == 0, S(t))
+			-- error: not an index
+			assert(not pcall(db.pk_and_probe, db, db:pk_range('users'), {ix='users', key=1}))
+			-- error: no probes
+			assert(not pcall(db.pk_and_probe, db, db:pk_range('users')))
 		end)
 	end)
 end
