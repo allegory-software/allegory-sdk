@@ -189,6 +189,7 @@ local key_decode_buffer = u8a(MDBX_MAX_KEY_SIZE)
 local val_rec_buffer = buffer()
 local v0_buffer = buffer()
 local fk_key_buffer = u8a(MDBX_MAX_KEY_SIZE)
+local put_k_buffer = u8a(MDBX_MAX_KEY_SIZE)
 mdbx_key_rec_buffer = key_rec_buffer
 
 --ROW ENCODING & DECODING ----------------------------------------------------
@@ -2635,6 +2636,7 @@ local function put(self, flags, op, tab, cols, ...)
 					end
 				end
 				if schema.triggers or schema.has_generated then
+					local kk = put_k_buffer; copy(kk, k, k_sz); k = kk
 					decode_key(schema, k, k_sz, t, '{}')
 					if schema.triggers then
 						old_t = decode_row(schema, k, k_sz, v0, v0_sz)
@@ -2667,6 +2669,7 @@ local function put(self, flags, op, tab, cols, ...)
 			v0, v0_sz = nil --no previous value (v0 currently holds the find_raw err)
 			v_sz = encode_val(self, schema, op, v, v_buf_sz, cols, as, ...)
 			if schema.triggers or schema.has_generated then
+				local kk = put_k_buffer; copy(kk, k, k_sz); k = kk
 				new_t = decode_row(schema, k, k_sz, v, v_sz)
 				if schema.triggers then
 					fire_triggers(schema, 'before_insert', self, new_t)

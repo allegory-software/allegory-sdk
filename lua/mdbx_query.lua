@@ -1837,7 +1837,7 @@ function Db.pk_sort:__call(db, input)
 			repeat
 				local _, p, p_sz = input:get_pk()
 				local s = str(p, p_sz)
-				if not pks[s] then pks[s] = {p = u8a(p_sz), sz = p_sz}; pks[#pks+1] = pks[s] end
+				if not pks[s] then local pk = u8a(p_sz); copy(pk, p, p_sz); pks[s] = {p = pk, sz = p_sz}; pks[#pks+1] = pks[s] end
 			until not input:next_pk()
 		end
 		input:close()
@@ -2508,4 +2508,684 @@ function Db.union_distinct:__call(db, ...)
 		end
 	end
 	return node
+end
+
+
+--QUERY BUILDER ----------------------------------------------------------------
+
+-- outer(ref): correlated-subquery value sentinel; ref = 'alias.col' or 'col'.
+local outer_mt = {}
+local function outer(ref) return setmetatable({_ref = ref}, outer_mt) end
+mdbx_outer = outer
+local function is_outer(v) return getmetatable(v) == outer_mt end
+
+local Q = {}; Q.__index = Q
+
+local function qnew(db, from_spec)
+	local tbl, alias = from_spec:match'^(%S+)%s+(%S+)$'
+	if not tbl then tbl = from_spec; alias = tbl end
+	return setmetatable({
+		_db    = db,
+		_from  = {tbl = tbl, alias = alias},
+		_al    = {[alias] = tbl},   -- alias -> table_name
+		_joins = {},
+		_filt  = {},
+		_order = nil,
+		_lim   = nil,
+		_off   = nil,
+		_sel   = nil,
+		_grp   = nil,
+		_agg   = nil,
+		_hav   = nil,
+		_dist  = nil,
+		_hints = {},
+	}, Q)
+end
+
+function Db:from(spec) return qnew(self, spec) end
+
+--filter methods
+
+local function addf(q, f) q._filt[#q._filt+1] = f; return q end
+
+function Q:eq(col, v)          return addf(self, {k='eq',    col=col, v=v}) end
+function Q:ne(col, v)          return addf(self, {k='ne',    col=col, v=v}) end
+function Q:lt(col, v)          return addf(self, {k='lt',    col=col, v=v}) end
+function Q:le(col, v)          return addf(self, {k='le',    col=col, v=v}) end
+function Q:gt(col, v)          return addf(self, {k='gt',    col=col, v=v}) end
+function Q:ge(col, v)          return addf(self, {k='ge',    col=col, v=v}) end
+function Q:is_null(col)        return addf(self, {k='null',  col=col}) end
+function Q:is_not_null(col)    return addf(self, {k='ntnull',col=col}) end
+function Q:filter(fn)          return addf(self, {k='fn',    fn=fn}) end
+function Q:in_(col, set)       return addf(self, {k='in',    col=col, set=set}) end
+function Q:not_in(col, set)    return addf(self, {k='nin',   col=col, set=set}) end
+function Q:where_exists(q2)    return addf(self, {k='ex',    q2=q2}) end
+function Q:where_not_exists(q2)return addf(self, {k='nex',   q2=q2}) end
+function Q:where_has(tbl, fn)  return addf(self, {k='has',   tbl=tbl, fn=fn}) end
+function Q:where_hasnt(tbl, fn)return addf(self, {k='hasnt', tbl=tbl, fn=fn}) end
+
+function Q:between(col, lo, hi)
+	return addf(self, {k='range', col=col, lo_op='>=', lo=lo, hi_op='<=', hi=hi})
+end
+
+local opk = {['=']='eq',['<>']='ne',['<']='lt',['<=']='le',['>']='gt',['>=']='ge'}
+function Q:where(col, op_or_v, v)
+	if v == nil then return self:eq(col, op_or_v) end
+	return addf(self, {k=assertf(opk[op_or_v],'where: bad op %q',op_or_v), col=col, v=v})
+end
+
+--join methods
+
+local function addjoin(q, spec, opts, left0)
+	local tbl, alias = spec:match'^(%S+)%s+(%S+)$'
+	if not tbl then tbl = spec; alias = tbl end
+	local alias2 = (opts and opts.as) or alias
+	q._al[alias2] = tbl
+	q._joins[#q._joins+1] = {
+		tbl        = tbl,
+		alias      = alias2,
+		left       = (opts and opts.left) or left0 or false,
+		from_alias = opts and opts.from,
+		fk_hint    = opts and opts.on,
+		ix_hint    = opts and opts.index,
+	}
+	return q
+end
+
+function Q:join(spec, opts)       return addjoin(self, spec, opts, false) end
+function Q:inner_join(spec, opts) return addjoin(self, spec, opts, false) end
+function Q:left_join(spec, opts)  return addjoin(self, spec, opts, true) end
+
+function Q:nested_join(fn)
+	self._joins[#self._joins+1] = {nested = true, fn = fn}
+	return self
+end
+
+--order / paging / projection
+
+function Q:order_by(...)
+	self._order = self._order or {}
+	local args = {...}
+	if type(args[1]) == 'table' and not args[2] then args = args[1] end
+	for _, s in ipairs(args) do
+		local col, d = s:match'^(.-)%s+(asc|desc)$'
+		if not col then col = s; d = 'asc' end
+		self._order[#self._order+1] = {col = col, desc = d == 'desc'}
+	end
+	return self
+end
+
+function Q:limit(n)    self._lim = n; return self end
+function Q:offset(n)   self._off = n; return self end
+
+function Q:distinct(cols)
+	self._dist = type(cols) == 'table' and cols or {cols}
+	return self
+end
+
+function Q:group_by(...)
+	local args = {...}
+	if type(args[1]) == 'table' and not args[2] then args = args[1] end
+	self._grp = args
+	return self
+end
+
+function Q:agg(spec)    self._agg = spec; return self end
+function Q:select(spec) self._sel = spec; return self end
+
+function Q:having(col, op_or_v, v)
+	self._hav = self._hav or {}
+	if v == nil then
+		self._hav[#self._hav+1] = {col = col, op = '=', v = op_or_v}
+	else
+		self._hav[#self._hav+1] = {col = col, op = op_or_v, v = v}
+	end
+	return self
+end
+
+function Q:use_index(member, ix)
+	local sname = self._al[member] or member
+	self._hints[sname] = self._hints[sname] or {}
+	self._hints[sname].use = ix
+	return self
+end
+
+function Q:no_index(member, ix)
+	local sname = self._al[member] or member
+	local h = self._hints[sname] or {}
+	if ix then h.no = h.no or {}; h.no[ix] = true
+	else h.no_all = true end
+	self._hints[sname] = h
+	return self
+end
+
+--lowering helpers
+
+-- resolve 'alias.col' or bare 'col' to (schema_name, bare_col)
+local function qrcol(q, col)
+	local alias, c = col:match'^([^.]+)%.(.+)$'
+	if alias then return q._al[alias] or alias, c end
+	return q._from.tbl, col
+end
+
+-- translate one output spec item: 'alias.col [name]' -> 'sname.col [name]'
+local function qtrans1(q, s)
+	s = s:match'^%s*(.-)%s*$'
+	local mcol, name = s:match'^(%S+)%s+(%S+)$'
+	if not mcol then mcol = s end
+	local alias, c = mcol:match'^([^.]+)%.(.+)$'
+	if not alias then return s end
+	local sname = q._al[alias] or alias
+	local t = sname..'.'..c
+	return name and t..' '..name or t
+end
+
+-- translate a select spec (string or list) using the alias map
+local function qtrans_sel(q, sel)
+	if isstr(sel) then
+		local parts = {}
+		for s in sel:gmatch('[^,]+') do parts[#parts+1] = qtrans1(q, s) end
+		return cat(parts, ',')
+	end
+	local out = {}
+	for _, s in ipairs(sel) do
+		out[#out+1] = isstr(s) and qtrans1(q, s) or s
+	end
+	return out
+end
+
+-- translate order-by col spec to value-sort field spec
+local function qtrans_order(q, o)
+	local alias, c = o.col:match'^([^.]+)%.(.+)$'
+	local col = alias and (q._al[alias] or alias)..'.'..c or o.col
+	return col..(o.desc and ' desc' or '')
+end
+
+-- try to find an index plan for ix_schema given member filters mf.
+-- mf: list of filter specs with _col (bare col name) pre-set.
+-- is_pk: true when ix_schema is the base table (produces pk_get instead of pk_seek).
+-- returns plan table or nil; plan.consumed = {filter_index -> true}
+local function try_ix_plan(ix_schema, mf, is_pk)
+	local kc = ix_schema.key_cols
+	local n  = #kc
+	local eq    = {}   -- col -> {v, fi}
+	local lo_by = {}   -- col -> {op, v, fi}
+	local hi_by = {}   -- col -> {op, v, fi}
+	for i, f in ipairs(mf) do
+		local col = f._col
+		if not col then goto continue end
+		local k = f.k
+		if k == 'eq' and not is_outer(f.v) then
+			if not eq[col] then eq[col] = {v=f.v, fi=i} end
+		elseif k == 'null' then
+			if not eq[col] then eq[col] = {v=null, fi=i} end
+		elseif (k == 'gt' or k == 'ge') and not is_outer(f.v) then
+			if not lo_by[col] then lo_by[col] = {op=k=='ge' and '>=' or '>', v=f.v, fi=i} end
+		elseif (k == 'lt' or k == 'le') and not is_outer(f.v) then
+			if not hi_by[col] then hi_by[col] = {op=k=='le' and '<=' or '<', v=f.v, fi=i} end
+		elseif k == 'range' and not is_outer(f.lo) and not is_outer(f.hi) then
+			if not lo_by[col] then lo_by[col] = {op=f.lo_op, v=f.lo, fi=i} end
+			if not hi_by[col] then hi_by[col] = {op=f.hi_op, v=f.hi, fi=i} end
+		elseif k == 'ntnull' then
+			if not lo_by[col] then lo_by[col] = {op='>', v=null, fi=i} end
+		end
+		::continue::
+	end
+	local depth = 0; local eq_vals = {}; local consumed = {}
+	for _, col in ipairs(kc) do
+		if eq[col] then
+			depth = depth + 1
+			eq_vals[#eq_vals+1] = eq[col].v
+			consumed[eq[col].fi] = true
+		else break end
+	end
+	if depth == n then
+		return {kind=is_pk and 'pk_get' or 'pk_seek', ix=ix_schema.name,
+		        vals=eq_vals, consumed=consumed, score=n*20+10}
+	end
+	local nc = kc[depth+1]
+	local lo = lo_by[nc]; local hi = hi_by[nc]
+	if lo or hi then
+		if lo then consumed[lo.fi] = true end
+		if hi then consumed[hi.fi] = true end
+		return {kind='pk_range', ix=ix_schema.name, eq_vals=eq_vals,
+		        lo_op=lo and lo.op, lo=lo and lo.v,
+		        hi_op=hi and hi.op, hi=hi and hi.v,
+		        consumed=consumed, score=depth*20+5}
+	end
+	if depth > 0 then
+		return {kind='pk_prefix', ix=ix_schema.name, vals=eq_vals,
+		        consumed=consumed, score=depth*20}
+	end
+	return nil
+end
+
+-- build the access node for the from-table member.
+-- mf: filters for this member with _col set.
+-- returns: node, consumed (set: filter_index -> true)
+local function build_access(db, schema, mf, hints)
+	local h = hints[schema.name]
+	local best
+	if h and h.use then
+		local ix_s = assertf(db:table_schema(h.use), 'use_index: unknown %q', h.use)
+		best = assertf(try_ix_plan(ix_s, mf, false),
+			'use_index: %q matches no filter for %s', h.use, schema.name)
+	else
+		local no_all = h and h.no_all
+		if not no_all then
+			local p = try_ix_plan(schema, mf, true)
+			if p then best = p end
+		end
+		for _, ix_s in ipairs(schema.indexes or empty) do
+			local skip = no_all or (h and h.no and h.no[ix_s.name])
+			if not skip then
+				local p = try_ix_plan(ix_s, mf, false)
+				if p and (not best or p.score > best.score) then best = p end
+			end
+		end
+	end
+	if best then
+		local kind = best.kind
+		if kind == 'pk_get' then
+			return db:pk_get(schema.name, unpack(best.vals)), best.consumed
+		elseif kind == 'pk_seek' then
+			return db:pk_seek(best.ix, unpack(best.vals)), best.consumed
+		elseif kind == 'pk_prefix' then
+			return db:pk_prefix(best.ix, unpack(best.vals)), best.consumed
+		else  -- pk_range
+			local args = {}
+			if best.lo_op then
+				args[#args+1] = best.lo_op
+				for _, v in ipairs(best.eq_vals) do args[#args+1] = v end
+				args[#args+1] = best.lo
+			end
+			if best.hi_op then
+				args[#args+1] = best.hi_op
+				for _, v in ipairs(best.eq_vals) do args[#args+1] = v end
+				args[#args+1] = best.hi
+			end
+			return db:pk_range(best.ix, unpack(args)), best.consumed
+		end
+	end
+	return db:pk_range(schema.name), {}   -- full scan
+end
+
+-- build a pk_filter predicate from a residual filter spec
+local function mk_pkfn(f)
+	local sn, col, k = f._sname, f._col, f.k
+	if k == 'fn' then return f.fn end
+	if k == 'eq' then
+		local v = f.v
+		return function(node) local ok, g = node:get_cols(sn, {col}); return ok and g == v end
+	elseif k == 'ne' then
+		local v = f.v
+		return function(node) local ok, g = node:get_cols(sn, {col}); return ok and g ~= v end
+	elseif k == 'lt' then
+		local v = f.v
+		return function(node) local ok, g = node:get_cols(sn, {col}); return ok and g ~= null and g < v end
+	elseif k == 'le' then
+		local v = f.v
+		return function(node) local ok, g = node:get_cols(sn, {col}); return ok and g ~= null and g <= v end
+	elseif k == 'gt' then
+		local v = f.v
+		return function(node) local ok, g = node:get_cols(sn, {col}); return ok and g ~= null and g > v end
+	elseif k == 'ge' then
+		local v = f.v
+		return function(node) local ok, g = node:get_cols(sn, {col}); return ok and g ~= null and g >= v end
+	elseif k == 'null' then
+		return function(node) local ok, g = node:get_cols(sn, {col}); return ok and g == null end
+	elseif k == 'ntnull' then
+		return function(node) local ok, g = node:get_cols(sn, {col}); return ok and g ~= null end
+	elseif k == 'range' then
+		local lo, hi, lo_op, hi_op = f.lo, f.hi, f.lo_op, f.hi_op
+		return function(node)
+			local ok, g = node:get_cols(sn, {col})
+			if not ok or g == null then return false end
+			local lo_ok = lo_op == '>=' and g >= lo or g > lo
+			local hi_ok = hi_op == '<=' and g <= hi or g < hi
+			return lo_ok and hi_ok
+		end
+	elseif k == 'in' then
+		local lut = {}; for _, v in ipairs(f.set) do lut[v] = true end
+		return function(node) local ok, g = node:get_cols(sn, {col}); return ok and lut[g] ~= nil end
+	elseif k == 'nin' then
+		local lut = {}; for _, v in ipairs(f.set) do lut[v] = true end
+		return function(node) local ok, g = node:get_cols(sn, {col}); return ok and lut[g] == nil end
+	end
+	assertf(false, 'mk_pkfn: unhandled filter kind %q', k)
+end
+
+-- categorize filters by member; resolve alias.col; set _sname/_col on each filter.
+-- returns: by_member ({sname -> list}), cross (fn/exists/has filters)
+local function prep_filters(q, filt)
+	local by_member = {}
+	local cross = {}
+	for _, f in ipairs(filt) do
+		local k = f.k
+		if k == 'fn' or k == 'ex' or k == 'nex' or k == 'has' or k == 'hasnt' then
+			cross[#cross+1] = f
+		else
+			local sn, col = qrcol(q, f.col)
+			f._sname = sn; f._col = col
+			by_member[sn] = by_member[sn] or {}
+			by_member[sn][#by_member[sn]+1] = f
+		end
+	end
+	return by_member, cross
+end
+
+-- find FK between from_sname and to_sname.
+-- hint: optional FK name or FK index name to pin the choice.
+-- returns: 'child_to_parent' | 'parent_to_child', fk_ix_name
+local function qfind_fk(db, from_sname, to_sname, hint)
+	local from_s = db:table_schema(from_sname)
+	if from_s and from_s.fks then
+		for fname, fk in pairs(from_s.fks) do
+			if fk.ref_table == to_sname then
+				if not hint or hint == fname or hint == fk.index.name then
+					return 'child_to_parent', fk.index.name
+				end
+			end
+		end
+	end
+	local to_s = db:table_schema(to_sname)
+	if to_s and to_s.fks then
+		for fname, fk in pairs(to_s.fks) do
+			if fk.ref_table == from_sname then
+				if not hint or hint == fname or hint == fk.index.name then
+					return 'parent_to_child', fk.index.name
+				end
+			end
+		end
+	end
+	assertf(false, 'join: no FK between %s and %s', from_sname, to_sname)
+end
+
+-- lower an exists/not_exists filter
+local function lower_ex_filter(db, node, f, outer_q)
+	local want = f.k == 'ex'
+	local q2   = f.q2
+	local function apply(inner_fn)
+		if want then return db:semi_join(node, inner_fn)
+		else return db:anti_join(node, inner_fn) end
+	end
+	if type(q2) == 'function' then
+		local fn = q2
+		return apply(function(on)
+			local proxy = setmetatable({}, {__call = function(_, ref)
+				local sn, c = qrcol(outer_q, ref)
+				local ok, v = on:get_cols(sn, {c}); return v
+			end})
+			local built = fn(proxy)
+			return (type(built) == 'table' and built._lower) and built:_lower() or built
+		end)
+	end
+	local has_sent = false
+	for _, f2 in ipairs(q2._filt) do
+		if is_outer(f2.v) or is_outer(f2.lo) or is_outer(f2.hi) then has_sent = true; break end
+	end
+	local function res(on, v)
+		if not is_outer(v) then return v end
+		local sn, c = qrcol(outer_q, v._ref)
+		local ok, rv = on:get_cols(sn, {c}); return rv
+	end
+	if has_sent then
+		return apply(function(on)
+			local from_spec = q2._from.tbl
+			if q2._from.alias ~= q2._from.tbl then from_spec = from_spec..' '..q2._from.alias end
+			local rq = qnew(q2._db, from_spec)
+			rq._al = q2._al; rq._joins = q2._joins; rq._order = q2._order
+			rq._lim = q2._lim; rq._off = q2._off; rq._sel = q2._sel; rq._hints = q2._hints
+			for _, f2 in ipairs(q2._filt) do
+				local cf = {}; for k2, v2 in pairs(f2) do cf[k2] = v2 end
+				cf.v = res(on, cf.v); cf.lo = res(on, cf.lo); cf.hi = res(on, cf.hi)
+				rq._filt[#rq._filt+1] = cf
+			end
+			return rq:_lower()
+		end)
+	else
+		return apply(function(_) return q2:_lower() end)
+	end
+end
+
+-- pk-level key function for pk_group / stream_aggregate
+local function make_key_fn(grp_cols)
+	return function(node)
+		local parts = {}
+		for _, gc in ipairs(grp_cols) do
+			local ok, v = node:get_cols(gc.sn, {gc.col})
+			parts[#parts+1] = (ok and v ~= nil) and v or null
+		end
+		return parts
+	end
+end
+
+--main lowering pass
+
+function Q:_lower()
+	local db   = self._db
+	local q    = self
+	local from_s = assertf(db:table_schema(q._from.tbl), 'from: unknown table %s', q._from.tbl)
+	assertf(not from_s.is_index, 'from: index not allowed: %s', q._from.tbl)
+
+	local by_member, cross = prep_filters(q, q._filt)
+
+	-- access node
+	local mf = by_member[q._from.tbl] or {}
+	local node, consumed = build_access(db, from_s, mf, q._hints)
+
+	-- residual from-member filters
+	for i, f in ipairs(mf) do
+		if not consumed[i] then node = db:pk_filter(node, mk_pkfn(f)) end
+	end
+
+	-- joins
+	local acc = {q._from.tbl}
+	for _, j in ipairs(q._joins) do
+		if j.nested then
+			node = db:nested_join(node, function(on)
+				local r = j.fn(on)
+				return (type(r) == 'table' and r._lower) and r:_lower() or r
+			end)
+		else
+			local join_tbl = j.tbl
+			assertf(db:table_schema(join_tbl), 'join: unknown table %s', join_tbl)
+			local from_sname
+			if j.from_alias then
+				from_sname = q._al[j.from_alias] or j.from_alias
+			else
+				for _, sn in ipairs(acc) do
+					if pcall(qfind_fk, db, sn, join_tbl, j.fk_hint or j.ix_hint) then
+						from_sname = sn; break
+					end
+				end
+			end
+			assertf(from_sname, 'join: no FK from accumulated members to %s', join_tbl)
+			local dir, fk_ix = qfind_fk(db, from_sname, join_tbl, j.fk_hint or j.ix_hint)
+			if #acc == 1 then
+				if dir == 'child_to_parent' then
+					node = db:pk_parent_lookup(node, fk_ix, j.left and {left=true} or nil)
+				else
+					assertf(not j.left, 'left join parent->child not yet supported')
+					node = db:pk_join_seek(node, fk_ix)
+				end
+			else
+				local fsn, jtbl, fk_cap, dir_cap, left_cap =
+					from_sname, join_tbl, fk_ix, dir, j.left
+				node = db:nested_join(node, function(on)
+					local drv2 = db:pk_project(on, fsn)
+					local joined
+					if dir_cap == 'child_to_parent' then
+						joined = db:pk_parent_lookup(drv2, fk_cap, left_cap and {left=true} or nil)
+					else
+						assertf(not left_cap, 'left join parent->child not yet supported')
+						joined = db:pk_join_seek(drv2, fk_cap)
+					end
+					return db:pk_project(joined, jtbl)
+				end)
+			end
+			for _, f in ipairs(by_member[join_tbl] or empty) do
+				node = db:pk_filter(node, mk_pkfn(f))
+			end
+			acc[#acc+1] = join_tbl
+		end
+	end
+
+	-- cross-member filters
+	for _, f in ipairs(cross) do
+		local k = f.k
+		if k == 'fn' then
+			node = db:pk_filter(node, f.fn)
+		elseif k == 'ex' or k == 'nex' then
+			node = lower_ex_filter(db, node, f, q)
+		elseif k == 'has' or k == 'hasnt' then
+			local fk_tbl = f.tbl
+			local dir2, fk_ix2 = qfind_fk(db, q._from.tbl, fk_tbl, nil)
+			assertf(dir2 == 'parent_to_child',
+				'where_has: %s must have FK to %s', fk_tbl, q._from.tbl)
+			if f.fn then
+				local want = k == 'has'
+				local fsn_cap, fk_cap2 = q._from.tbl, fk_ix2
+				local ufn = f.fn
+				local function inner_fn(on)
+					local r = ufn(on)
+					if type(r) == 'table' and r._lower then return r:_lower() end
+					return db:pk_project(db:pk_join_seek(db:pk_project(on, fsn_cap), fk_cap2), fk_tbl)
+				end
+				if want then node = db:semi_join(node, inner_fn)
+				else node = db:anti_join(node, inner_fn) end
+			else
+				node = db:pk_hash_filter(node, db:fk_parent_scan(fk_ix2),
+					k == 'has' and 'in' or 'not_in')
+			end
+		end
+	end
+
+	-- PK-level limit when no order_by and no aggregate
+	if q._lim and not q._order and not q._agg then
+		node = db:limit(node, q._lim, q._off)
+	end
+
+	-- aggregate
+	local vnode
+	if q._agg then
+		local tagg = {}
+		for _, a in ipairs(q._agg) do
+			local ta = {}; for ak, av in pairs(a) do ta[ak] = av end
+			if ta.member then ta.member = q._al[ta.member] or ta.member end
+			tagg[#tagg+1] = ta
+		end
+		if q._grp then
+			local grp_cols = {}
+			for _, c in ipairs(q._grp) do
+				local sn, col = qrcol(q, c)
+				grp_cols[#grp_cols+1] = {sn=sn, col=col}
+			end
+			local key_fn = make_key_fn(grp_cols)
+			local full_agg = {}
+			for i, gc in ipairs(grp_cols) do
+				full_agg[#full_agg+1] = {name=gc.col, op='key', part=i}
+			end
+			for _, a in ipairs(tagg) do full_agg[#full_agg+1] = a end
+			vnode = db:stream_aggregate(db:pk_group(node, key_fn), key_fn, full_agg)
+		else
+			vnode = db:stream_aggregate(node, nil, tagg)
+		end
+	elseif q._sel then
+		vnode = db:select(node, qtrans_sel(q, q._sel))
+	else
+		return node   -- no select/agg: PK node for count/exists
+	end
+
+	-- having
+	if q._hav then
+		for _, h in ipairs(q._hav) do
+			local hv, hop, hcol = h.v, h.op, h.col
+			local fn
+			if     hop == '='  then fn = function(r) return r[hcol] == hv end
+			elseif hop == '<>' then fn = function(r) return r[hcol] ~= hv end
+			elseif hop == '<'  then fn = function(r) return r[hcol] <  hv end
+			elseif hop == '<=' then fn = function(r) return r[hcol] <= hv end
+			elseif hop == '>'  then fn = function(r) return r[hcol] >  hv end
+			elseif hop == '>=' then fn = function(r) return r[hcol] >= hv end
+			end
+			vnode = db:value_filter(vnode, fn)
+		end
+	end
+
+	-- distinct
+	if q._dist then
+		local dc = q._dist
+		vnode = db:hash_distinct(vnode, function(r)
+			local parts = {}
+			for _, c in ipairs(dc) do parts[#parts+1] = r[c] ~= nil and r[c] or null end
+			return parts
+		end)
+	end
+
+	-- order_by -> value_sort; value-level limit
+	if q._order then
+		local spec_parts = {}
+		for _, o in ipairs(q._order) do spec_parts[#spec_parts+1] = qtrans_order(q, o) end
+		vnode = db:value_sort(vnode, cat(spec_parts, ','))
+		if q._lim then vnode = db:limit(vnode, q._lim, q._off) end
+	end
+
+	return vnode
+end
+
+--terminals
+
+function Q:rows()
+	local node = self:_lower()
+	node:open()
+	local closed = false
+	local function close() if not closed then node:close(); closed = true end end
+	if node.item == 'value' then
+		return function()
+			local r = node:next_row()
+			if not r then close() end
+			return r
+		end
+	else
+		return function()
+			local ok = node:next_pk() or node:next_group()
+			if not ok then close() end
+			return ok and node or nil
+		end
+	end
+end
+
+function Q:first()
+	local node = self:_lower()
+	node:open()
+	local r
+	if node.item == 'value' then r = node:next_row()
+	else r = node:next_group() and node or nil end
+	node:close()
+	return r
+end
+
+function Q:count()
+	local node = self:_lower()
+	node:open()
+	local n = 0
+	if node.item == 'value' then
+		while node:next_row() do n = n + 1 end
+	else
+		while node:next_group() do
+			n = n + 1
+			while node:next_pk() do n = n + 1 end
+		end
+	end
+	node:close()
+	return n
+end
+
+function Q:exists()
+	local node = self:_lower()
+	node:open()
+	local found = node.item == 'value' and node:next_row() ~= nil or node:next_group() ~= nil
+	node:close()
+	return found
 end
