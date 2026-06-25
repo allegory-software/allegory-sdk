@@ -185,6 +185,7 @@ end
 --DML GLOBAL SHARED BUFFERS --------------------------------------------------
 
 local key_rec_buffer = u8a(MDBX_MAX_KEY_SIZE)
+local key_decode_buffer = u8a(MDBX_MAX_KEY_SIZE)
 local val_rec_buffer = buffer()
 local v0_buffer = buffer()
 local fk_key_buffer = u8a(MDBX_MAX_KEY_SIZE)
@@ -372,7 +373,6 @@ local function encode_key(
 	rec, rec_buf_sz, cols, as, ...
 )
 	if #schema.key_fields == 0 then return 0 end
-	local encode_int_key = schema.encode_int_key
 	local autoinc_v
 	pp[0] = rec
 	for ki,f in ipairs(schema.key_fields) do
@@ -390,8 +390,6 @@ local function encode_key(
 			else
 				self:check_col(event, schema.name, f.col, false, 'null_key')
 			end
-		elseif encode_int_key then
-			return encode_int_key(rec, rec_buf_sz, val), autoinc_v
 		else
 			local len = f.encode(self, event, pp[0], val)
 			C.schema_key_add(schema._st, ki-1, rec, rec_buf_sz, len, pp)
@@ -406,9 +404,6 @@ local function encode_key_prefix(
 	rec, rec_buf_sz, n, ...
 )
 	pp[0] = rec
-	if schema.encode_int_key then
-		return schema.encode_int_key(rec, rec_buf_sz, (select(1, ...)))
-	end
 	for ki = 1, n do
 		local f = schema.key_fields[ki]
 		local val = select(ki, ...)
@@ -455,31 +450,23 @@ local pp = new'const u8*[1]'
 local function decode_key(schema, rec, rec_sz, t, as, i0)
 	i0 = i0 or 1
 	local key_fields = schema.key_fields
-	local decode_int_key = schema.decode_int_key
-	if decode_int_key then
-		local v = decode_int_key(rec, rec_sz)
-		local k = as == '{}' and key_fields[1].col or 1
-		t[k] = v
-		return i0 + 1
-	else
-		local out, out_sz = key_rec_buffer, MDBX_MAX_KEY_SIZE
-		pp[0] = rec
-		local n = #key_fields
-		for i=1,n do
-			local f = key_fields[i]
-			local len = C.schema_get_key(schema._st, i-1,
-				rec, rec_sz,
-				out, out_sz,
-				pout, pp)
-			local k = as == '{}' and f.col or i0 + i - 1
-			if len ~= -1 then
-				t[k] = f.decode(pout[0], len)
-			else
-				t[k] = nil
-			end
+	local out, out_sz = key_decode_buffer, MDBX_MAX_KEY_SIZE
+	pp[0] = rec
+	local n = #key_fields
+	for i=1,n do
+		local f = key_fields[i]
+		local len = C.schema_get_key(schema._st, i-1,
+			rec, rec_sz,
+			out, out_sz,
+			pout, pp)
+		local k = as == '{}' and f.col or i0 + i - 1
+		if len ~= -1 then
+			t[k] = f.decode(pout[0], len)
+		else
+			t[k] = nil
 		end
-		return i0 + n
 	end
+	return i0 + n
 end
 
 local function decode_val(schema, rec, rec_sz, t, cols, as, i0)
@@ -587,10 +574,8 @@ end
 local function table_flags(schema)
 	if not schema then return 0 end
 	return bor(
-		schema.int_key       and C.MDBX_INTEGERKEY or 0,
 		schema.is_index      and C.MDBX_DUPSORT    or 0,
-		schema.dup_fixedsize and C.MDBX_DUPFIXED   or 0,
-		schema.dup_fixedsize and schema.val_schema.int_key and C.MDBX_INTEGERDUP or 0
+		schema.dup_fixedsize and C.MDBX_DUPFIXED   or 0
 	)
 end
 
@@ -681,16 +666,6 @@ local function layout_table_schema(schema)
 		if f.generate then has_generated = true; break end
 	end
 	schema.has_generated = has_generated or nil
-
-	--store u32 and u64 simple keys in little-endian and use fast comparator.
-	if #key_fields == 1 then
-		local f = key_fields[1]
-		if f.not_null and not f.descending
-			and (f.mdbx_type == 'u32' or f.mdbx_type == 'u64')
-		then
-			schema.int_key = f.mdbx_type
-		end
-	end
 
 	--compute key and val column layout.
 	for _,fields in ipairs{key_fields, val_fields} do
@@ -830,6 +805,41 @@ local function encode_ai_ci(s, len)
 end
 
 --create encoders and decoders for a layouted schema.
+local function key_gt(k1, k1_sz, k2, k2_sz)
+	local sz = min(k1_sz, k2_sz)
+	local r = memcmp(k1, k2, sz)
+	return r > 0 or (r == 0 and k1_sz > k2_sz)
+end
+
+local function key_ge(k1, k1_sz, k2, k2_sz)
+	local sz = min(k1_sz, k2_sz)
+	local r = memcmp(k1, k2, sz)
+	return r > 0 or (r == 0 and k1_sz >= k2_sz)
+end
+
+local function key_lt(k1, k1_sz, k2, k2_sz)
+	local sz = min(k1_sz, k2_sz)
+	local r = memcmp(k1, k2, sz)
+	return r < 0 or (r == 0 and k1_sz < k2_sz)
+end
+
+local function key_le(k1, k1_sz, k2, k2_sz)
+	local sz = min(k1_sz, k2_sz)
+	local r = memcmp(k1, k2, sz)
+	return r < 0 or (r == 0 and k1_sz <= k2_sz)
+end
+
+local function key_eq(k1, k1_sz, k2, k2_sz)
+	if k1_sz ~= k2_sz then return false end
+	return memcmp(k1, k2, k1_sz) == 0
+end
+
+Db.key_gt = key_gt
+Db.key_ge = key_ge
+Db.key_lt = key_lt
+Db.key_le = key_le
+Db.key_eq = key_eq
+
 local function compile_table_schema(schema)
 
 	assert(schema.layouted)
@@ -851,66 +861,6 @@ local function compile_table_schema(schema)
 	schema.    cols[S] = cat(schema.    cols, ',')
 	schema.key_cols[S] = cat(schema.key_cols, ',')
 	schema.val_cols[S] = cat(schema.val_cols, ',')
-
-	--generate key record decoders and encoders for u32/u64 keys
-	--stored in little endian.
-	if schema.int_key then
-		local f = key_fields[1]
-		local elem_size = f.elem_size
-		local elemp_ct = elem_size == 4 and u32p or u64p
-		function schema.encode_int_key(rec, rec_buf_sz, val)
-			assert(rec_buf_sz >= elem_size)
-			cast(elemp_ct, rec)[0] = val
-			return elem_size
-		end
-		function schema.decode_int_key(rec, rec_sz)
-			assert(rec_sz == elem_size)
-			return cast(elemp_ct, rec)[0]
-		end
-		--integer keys are little-endian; memcmp gives wrong order across byte
-		--boundaries, so compare numerically.
-		local decode_int_key = schema.decode_int_key
-		function schema.key_gt(k1, k1_sz, k2, k2_sz)
-			return decode_int_key(k1, k1_sz) > decode_int_key(k2, k2_sz)
-		end
-		function schema.key_ge(k1, k1_sz, k2, k2_sz)
-			return decode_int_key(k1, k1_sz) >= decode_int_key(k2, k2_sz)
-		end
-		function schema.key_lt(k1, k1_sz, k2, k2_sz)
-			return decode_int_key(k1, k1_sz) < decode_int_key(k2, k2_sz)
-		end
-		function schema.key_le(k1, k1_sz, k2, k2_sz)
-			return decode_int_key(k1, k1_sz) <= decode_int_key(k2, k2_sz)
-		end
-		function schema.key_eq(k1, k1_sz, k2, k2_sz)
-			return decode_int_key(k1, k1_sz) == decode_int_key(k2, k2_sz)
-		end
-	else
-		function schema.key_gt(k1, k1_sz, k2, k2_sz)
-			local sz = min(k1_sz, k2_sz)
-			local r = memcmp(k1, k2, sz)
-			return r > 0 or (r == 0 and k1_sz > k2_sz)
-		end
-		function schema.key_ge(k1, k1_sz, k2, k2_sz)
-			local sz = min(k1_sz, k2_sz)
-			local r = memcmp(k1, k2, sz)
-			return r > 0 or (r == 0 and k1_sz >= k2_sz)
-		end
-		function schema.key_lt(k1, k1_sz, k2, k2_sz)
-			local sz = min(k1_sz, k2_sz)
-			local r = memcmp(k1, k2, sz)
-			return r < 0 or (r == 0 and k1_sz < k2_sz)
-		end
-		function schema.key_le(k1, k1_sz, k2, k2_sz)
-			local sz = min(k1_sz, k2_sz)
-			local r = memcmp(k1, k2, sz)
-			return r < 0 or (r == 0 and k1_sz <= k2_sz)
-		end
-		function schema.key_eq(k1, k1_sz, k2, k2_sz)
-			if k1_sz ~= k2_sz then return false end
-			return memcmp(k1, k2, k1_sz) == 0
-		end
-	end
 
 	--compute key signature to check tables for raw key compatibility.
 	for _, f in ipairs(key_fields) do
@@ -937,11 +887,6 @@ local function compile_table_schema(schema)
 	val_fields._sc = sc_val_cols
 	schema._st = st
 
-	local int_schema_col_type = schema.int_key and (
-			schema.int_key == 'u32' and C.schema_col_type_u32_le or
-			schema.int_key == 'u64' and C.schema_col_type_u64_le
-		)
-
 	--setup C schema and create field getters and setters.
 	for _,fields in ipairs{key_fields, val_fields} do
 
@@ -951,7 +896,7 @@ local function compile_table_schema(schema)
 
 			--setup C schema.
 			local sc = fields._sc[kv_index-1]
-			sc.type = is_key and int_schema_col_type or schema_col_types[f.mdbx_type]
+			sc.type = schema_col_types[f.mdbx_type]
 			sc.len = encoded_maxlen(schema, f) or 1
 			sc.fixed_size = f.maxlen and not f.padded and 0 or 1
 			sc.descending = f.descending and 1 or 0
@@ -1065,7 +1010,6 @@ function Db:save_table_schema(schema)
 	local t = {
 		format = 1, --layout format (the only one we have, implemented here)
 		dyn_offset_size = schema.dyn_offset_size,
-		int_key = schema.int_key,
 		key_fields = {max_rec_size = schema.key_fields.max_rec_size},
 		val_fields = {max_rec_size = schema.val_fields.max_rec_size},
 		is_unique = schema.is_unique,
@@ -1227,7 +1171,7 @@ local function try_validate_table_schema(stored_schema, paper_schema)
 
 	--compare table attributes
 	cmp_keys(paper_schema, stored_schema, {
-		'dyn_offset_size', 'int_key', 'is_index', 'val_table',
+		'dyn_offset_size', 'is_index', 'val_table',
 	}, errs, '%s', table_name)
 
 	--compare field lists
@@ -1550,13 +1494,14 @@ local function alter_values_in_place(self, dbi, old_schema, new_schema, event)
 	local ok, k, k_sz, v, v_sz = cur:first_raw()
 	local rec = {}
 	while ok do
+		local kk = alter_key_rec_buffer; copy(kk, k, k_sz)
 		decode_val_with_null(old_schema, v, v_sz, rec)
 		local nv, nv_buf_sz =
 			val_rec_buffer(new_schema.val_fields.max_rec_size)
 		local nv_sz = encode_val(
 			self, new_schema, event, nv, nv_buf_sz,
 			new_schema.val_cols, '{}', rec)
-		assert(cur:try_put_raw(k, k_sz, nv, nv_sz, C.MDBX_CURRENT))
+		assert(cur:try_put_raw(kk, k_sz, nv, nv_sz, C.MDBX_CURRENT))
 		ok, k, k_sz, v, v_sz = cur:next_raw()
 	end
 	cur:close()
@@ -1900,12 +1845,12 @@ end
 	ix_schema.val_cols = val_schema.val_cols
 
 	--dup values (base table pks) have fixed size when the pk is fixed-size.
-	--used for MDBX_DUPFIXED/INTEGERDUP flags (table_flags) and bulk iteration (each_dup).
-	local dup_fixed = val_schema.int_key and true
-	if not dup_fixed then
-		dup_fixed = true
-		for _, f in ipairs(val_schema.key_fields) do
-			if f.maxlen and not f.padded then dup_fixed = false; break end
+	--used for the MDBX_DUPFIXED flag (table_flags) and bulk iteration (each_dup).
+	local dup_fixed = true
+	for _, f in ipairs(val_schema.key_fields) do
+		if f.maxlen and not f.padded then
+			dup_fixed = false
+			break
 		end
 	end
 	ix_schema.dup_fixedsize = dup_fixed and val_schema.key_fields.max_rec_size or nil

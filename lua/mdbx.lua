@@ -261,7 +261,9 @@ DBIs however are weird:
  - DBIs of CREATED tables are LOCAL to the txn in which they were created.
  - LOCAL DBIs are automatically DISCARDED on abort and PROMOTED to the parent
    txn on commit and become GLOBAL when the TOP txn is committed.
- - DBIs are DISCARDED immediately from ALL txn levels on DROP and RENAME.
+ - DBIs are DISCARDED immediately from ALL txn levels on DROP.
+ - DBIs are not lost by mdbx on RENAME but we still have to invalidate our cache
+   because name->DBI and DBI->name mappings change transactionally.
 
 Since we don't want to work with DBIs in Lua but only with table names we need
 to keep a TABLE_NAME->DBI mapping for opened tables. We _could_ not do this
