@@ -557,8 +557,8 @@ end
 
 --TABLE DATA -----------------------------------------------------------------
 
-local key = new'MDBX_val'
-local val = new'MDBX_val'
+local key = MDBX_val()
+local val = MDBX_val()
 
 function Db:find_raw(tab, k, k_sz)
 	check_txn(self)
@@ -678,6 +678,14 @@ end
 function Cur:dbi()
 	check_cursor(self)
 	return repl(C.mdbx_cursor_dbi(self.c), 0xffffffff)
+end
+
+function Cur:move_raw_into(op, key, val)
+	check_cursor(self)
+	local rc = C.mdbx_cursor_get(self.c, key, val, op)
+	if rc == 0 or rc == -1 then return true end
+	if rc == C.MDBX_ENODATA then return false, 'not_found' end
+	return self.db:tryz('c_get', rc)
 end
 
 function Cur:move_raw(op, k, k_sz, v, v_sz)
