@@ -3,4 +3,4 @@ cd "${0%build}" || exit 1
 
 gcc -shared -o ../../bin/libmdbx_schema.so \
 	-O2 -fPIC -fno-strict-aliasing -Wall -Winline -I. -I../mdbx/src mdbx_schema.c \
-	-s -static-libgcc
+	-s -static-libgcc -lmdbx -L../../bin

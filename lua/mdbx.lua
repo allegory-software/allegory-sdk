@@ -668,7 +668,7 @@ function Cur:close()
 end
 
 function Cur:closed()
-	return not self.c or not ptr(C.mdbx_cursor_txn(self.c))
+	return not self.c or C.mdbx_cursor_txn(self.c) == nil
 end
 
 local function check_cursor(self)

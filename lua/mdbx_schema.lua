@@ -160,6 +160,12 @@ local MS = {}
 
 MDBX_MAX_KEY_SIZE = mdbx_max_key_size()
 
+--little optimization to avoid allocating a pointer on each cur:closed() check.
+cdef'int mdbx_cursor_has_txn(const MDBX_cursor *cursor)'
+function Cur:closed()
+	return not (self.c and C.mdbx_cursor_has_txn(self.c) == 1)
+end
+
 --ERROR HANDLING -------------------------------------------------------------
 
 function Db:check_row(event, tab, ret, ...)

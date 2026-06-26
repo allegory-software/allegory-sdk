@@ -44,6 +44,10 @@ typedef uint64_t u64;
 typedef float    f32;
 typedef double   f64;
 
+int mdbx_cursor_has_txn(const MDBX_cursor *cursor) {
+	return mdbx_cursor_txn(cursor) != 0;
+}
+
 // API -----------------------------------------------------------------------
 
 typedef enum schema_col_type {
@@ -488,94 +492,6 @@ INLINE void set_next_dyn_offset(schema_table* tbl, int col_i,
 		return;
 	set_dyn_offset(tbl, next_col, p + mem_size - rec, rec, rec_size);
 }
-
-/*
-INLINE void* get_next_ptr(schema_table* tbl, int is_key, schema_col* col,
-	schema_col* next_col,
-	void* rec, int rec_size,
-	void* p
-) {
-	if (next_col->fixed_offset) {
-		return rec + next_col->offset;
-	} else if (is_key) { // key col at dyn. offset
-		return p + get_key_mem_size(tbl, col, p);
-	} else { // val col at dyn. offset
-		return rec + get_dyn_offset(tbl, next_col, rec, rec_size);
-	}
-}
-
-INLINE void resize_varsize(
-	schema_table* tbl, int is_key, int col_i, schema_col* col,
-	void* rec, int cur_rec_size, int rec_buf_size,
-	void* p,
-	int mem_size
-) {
-	schema_col* next_col = try_get_col(tbl, is_key, col_i+1);
-	if (!next_col)
-		return;
-	void* next_p = get_next_ptr(tbl, is_key, col, next_col, rec, rec_buf_size, p);
-	void* new_next_p = p + mem_size;
-	int next_mem_size = rec + cur_rec_size - next_p;
-	memmove(new_next_p, next_p, next_mem_size);
-	int shift_size = new_next_p - next_p; // positive means grow.
-	if (!is_key) {
-		// shift all dyn. offsets from next_col on.
-		for (int i = col_i+1; i < tbl->n_val_cols; i++) {
-			schema_col* col = &tbl->val_cols[i];
-			int offset = get_dyn_offset(tbl, col, rec, rec_buf_size);
-			set_dyn_offset(tbl, col, offset + shift_size, rec, rec_buf_size);
-		}
-	}
-}
-
-void schema_set_val(schema_table* tbl, int col_i,
-	void* rec, int cur_rec_size, int rec_buf_size,
-	void* in, int in_len,
-	u8** pp, int add
-) {
-	schema_col* col = get_val_col(tbl, col_i);
-	int ss = col->elem_size_shift;
-
-	if (!in)
-		assert(!in_len);
-
-	set_null(col_i, !in, rec, rec_buf_size);
-
-	void* p = pp && *pp ? *pp : get_val_ptr(tbl, col_i, col, rec, rec_buf_size);
-
-	int copy_len = (col->len < in_len ? col->len : in_len); // truncate input
-	int copy_size = copy_len << ss;
-
-	// figure out mem_size (size of this value in memory) and check it.
-	int mem_size;
-	if (col->fixed_size) {
-		mem_size = col->len << ss;
-	} else {
-		mem_size = copy_size;
-	}
-	assert(p + mem_size <= rec + rec_buf_size);
-
-	// adjust rec before copying the data.
-	if (col->fixed_size) {
-		// fixed_size: zero-pad
-		memset(p + copy_size, 0, mem_size - copy_size);
-	} else {
-		if (!add) {
-			// varsize val set: resize (shrink or lengthen).
-			resize_varsize(tbl, 0, col_i, col, rec, cur_rec_size, rec_buf_size, p, mem_size);
-		} else {
-			// varsize val add: set offset of next col for next add.
-			set_next_dyn_offset(tbl, col_i, p, mem_size, rec, rec_buf_size);
-		}
-	}
-
-	// finally copy the value.
-	memmove(p, in, copy_size);
-
-	if (pp)
-		*pp = p + mem_size;
-}
-*/
 
 void schema_key_add(schema_table* tbl, int col_i,
 	void* rec, int rec_buf_size, int val_len,
