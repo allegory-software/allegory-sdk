@@ -566,7 +566,7 @@ function Db:find_raw(tab, k, k_sz)
 	key.data = k
 	key.size = k_sz
 	local rc = C.mdbx_get(self.txn, dbi, key, val)
-	if rc == 0 then return true, val.data, num(val.size) end
+	if rc == 0 then return true, val.data, val.size end
 	return self:tryz('find', rc)
 end
 
@@ -579,7 +579,7 @@ function Db:try_put_raw(tab, k, k_sz, v, v_sz, flags)
 	val.size = v_sz
 	local rc = C.mdbx_put(self.txn, dbi, key, val, flags or 0)
 	if rc == C.MDBX_KEYEXIST then
-		return false, 'already_exists', val.data, num(val.size)
+		return false, 'already_exists', val.data, val.size
 	end
 	return self:tryz('put', rc)
 end
@@ -695,7 +695,7 @@ function Cur:move_raw_kv(op, k, k_sz, v, v_sz)
 	if v then val.data = v; val.size = v_sz end
 	local rc = C.mdbx_cursor_get(self.c, key, val, op)
 	if rc == 0 or rc == -1 then
-		return true, key.data, num(key.size), val.data, num(val.size)
+		return true, key.data, key.size, val.data, val.size
 	end
 	if rc == C.MDBX_ENODATA then return false, 'not_found' end
 	return self.db:tryz('c_get', rc)
@@ -705,7 +705,7 @@ function Cur:move_raw_v(op, k, k_sz, v, v_sz)
 	if k then key.data = k; key.size = k_sz end
 	if v then val.data = v; val.size = v_sz end
 	local rc = C.mdbx_cursor_get(self.c, key, val, op)
-	if rc == 0 or rc == -1 then return true, val.data, num(val.size) end
+	if rc == 0 or rc == -1 then return true, val.data, val.size end
 	if rc == C.MDBX_ENODATA then return false, 'not_found' end
 	return self.db:tryz('c_get', rc)
 end
@@ -794,7 +794,7 @@ function Cur:try_put_raw(k, k_sz, v, v_sz, flags)
 	val.size = v_sz
 	local rc = C.mdbx_cursor_put(self.c, key, val, flags or 0)
 	if rc == C.MDBX_KEYEXIST then
-		return false, 'already_exists', val.data, num(val.size)
+		return false, 'already_exists', val.data, val.size
 	end
 	return self.db:tryz('c_put', rc)
 end

@@ -1,4 +1,6 @@
 local ffi = require'ffi'
+assert(ffi.abi'64bit')
+assert(ffi.abi'le')
 ffi.cdef[[
 typedef unsigned int mode_t;
 typedef int pid_t;
@@ -7,7 +9,10 @@ typedef struct { real_pthread_t _; } pthread_t;
 
 struct MDBX_val {
 	const uint8_t* data;
-	size_t size;
+	// this split avoids allocating a boxed uint64 on access.
+	// this is safe: we'll never put > 4 GB values into the db.
+	uint32_t size;
+	uint32_t size_hi;
 };
 
 typedef int mdbx_filehandle_t;
