@@ -8,8 +8,13 @@ typedef unsigned long int real_pthread_t;
 typedef struct { real_pthread_t _; } pthread_t;
 
 struct MDBX_val {
-	const uint8_t* data;
-	// this split avoids allocating a boxed uint64 on access.
+	// const data allows assigning a Lua string to data without a cast.
+	// noconst version allows copy() to work. const is dumb.
+	union {
+		const uint8_t* data;
+		uint8_t* data_noconst;
+	};
+	// this split avoids allocating a boxed uint64 on access to size.
 	// this is safe: we'll never put > 4 GB values into the db.
 	uint32_t size;
 	uint32_t size_hi;
