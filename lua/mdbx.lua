@@ -557,6 +557,8 @@ end
 
 --TABLE DATA -----------------------------------------------------------------
 
+MDBX_val = ctype'MDBX_val'
+
 local key = MDBX_val()
 local val = MDBX_val()
 
@@ -687,7 +689,6 @@ function Cur:move_raw_into(op, key, val)
 	if rc == C.MDBX_ENODATA then return false, 'not_found' end
 	return self.db:tryz('c_get', rc)
 end
-
 function Cur:move_raw(op, k, k_sz, v, v_sz)
 	check_cursor(self)
 	if k then key.data = k; key.size = k_sz end
@@ -828,7 +829,6 @@ end
 
 --TABLE CATALOG --------------------------------------------------------------
 
-do
 local function next_table(self)
 	local ok, k, k_sz = self:move_raw_kv(C.MDBX_NEXT)
 	if not ok then
@@ -840,7 +840,6 @@ end
 function Db:each_table()
 	local cur = self:cursor_raw(MAIN_DBI)
 	return next_table, cur
-end
 end
 function Db:table_count()
 	return num(self:table_stat(MAIN_DBI).entries)
