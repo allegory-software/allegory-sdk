@@ -7,6 +7,7 @@ typedef int pid_t;
 typedef unsigned long int real_pthread_t;
 typedef struct { real_pthread_t _; } pthread_t;
 
+// we're defining MDBX_val for ffi use to minimize ffi allocations in hot paths.
 struct MDBX_val {
 	// const data allows assigning a Lua string to data without a cast.
 	// noconst version allows copy() to work. const is dumb.
@@ -14,7 +15,7 @@ struct MDBX_val {
 		const uint8_t* data;
 		uint8_t* data_noconst;
 	};
-	// this split avoids allocating a boxed uint64 on access to size.
+	// this split avoids allocating a boxed uint64 when reading size.
 	// this is safe: we'll never put > 4 GB values into the db.
 	uint32_t size;
 	uint32_t size_hi;

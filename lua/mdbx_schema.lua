@@ -4,7 +4,7 @@
 	Written by Cosmin Apreutsei. Public Domain.
 
 FEATURES
-	- scalars: 8, 16, 32, 64 bit int, signed/unsigned; 32 and 64 bit floats.
+	- scalars: 8, 16, 32, 64 bit int, signed/unsigned; 32 and 64 bit floats, bool.
 	- arrays: fixed-size (zero-padded) and variable-size.
 	- table/index keys: composite, with per-field ascending/descending order.
 	- null support (nulls come first in keys).
@@ -98,7 +98,7 @@ SCHEMA SPEC (create_table, alter_table)
 	schema_spec: {
 		fields = {
 			{
-				col=name, mdbx_type='u32|i32|u64|i64|u8|i8|u16|i16|f32|f64|utf8|bin',
+				col=name, mdbx_type='u32|i32|u64|i64|u8|i8|u16|i16|f32|f64|utf8|bool',
 				[not_null=true], [maxlen=N], [nozero=true], [padded=true]
 			}, ...
 		},
@@ -281,6 +281,7 @@ void schema_val_add(schema_table* tbl, int col_i,
 
 local col_ct = {
 	utf8 = 'u8',
+	bool = 'u8',
 }
 
 local schema_col_types = {
@@ -295,6 +296,7 @@ local schema_col_types = {
 	f32    = C.schema_col_type_f32,
 	f64    = C.schema_col_type_f64,
 	utf8   = C.schema_col_type_u8,
+	bool   = C.schema_col_type_u8,
 }
 
 local function key_field(schema, col)
@@ -545,10 +547,15 @@ local function decode_kv(self, schema, k, k_sz, v, v_sz, val_cols)
 	end
 	i0 = decode_val(schema, v, v_sz, t, val_cols, as, i0)
 	if as then
-		return true, t, i0-1
+		return t, i0-1
 	else
-		return true, unpack(t, 1, i0-1)
+		return unpack(t, 1, i0-1)
 	end
+end
+
+function Db:decode_kv(tab, ...)
+	local schema = assert(self:table_schema(tab), 'table has no schema')
+	return decode_kv(self, schema, ...)
 end
 
 --SCHEMA LAYOUTING AND COMPILATION -------------------------------------------
@@ -598,7 +605,7 @@ local function layout_table_schema(schema)
 	for i,f in ipairs(schema.fields) do
 		assertf(valid_col_name(f.col),
 			'invalid field name: %s.%s', table_name, f.col)
-		assertf(not schema.fields[f.col],
+		assertf(not schema.fields[f.col] or schema.fields[f.col] == f,
 			'duplicate field name: %s.%s', table_name, f.col)
 		schema.fields[f.col] = f
 		f.col_pos = i
@@ -811,42 +818,6 @@ local function encode_ai_ci(s, len)
 	return out, sz
 end
 
---create encoders and decoders for a layouted schema.
-local function key_gt(k1, k1_sz, k2, k2_sz)
-	local sz = min(k1_sz, k2_sz)
-	local r = memcmp(k1, k2, sz)
-	return r > 0 or (r == 0 and k1_sz > k2_sz)
-end
-
-local function key_ge(k1, k1_sz, k2, k2_sz)
-	local sz = min(k1_sz, k2_sz)
-	local r = memcmp(k1, k2, sz)
-	return r > 0 or (r == 0 and k1_sz >= k2_sz)
-end
-
-local function key_lt(k1, k1_sz, k2, k2_sz)
-	local sz = min(k1_sz, k2_sz)
-	local r = memcmp(k1, k2, sz)
-	return r < 0 or (r == 0 and k1_sz < k2_sz)
-end
-
-local function key_le(k1, k1_sz, k2, k2_sz)
-	local sz = min(k1_sz, k2_sz)
-	local r = memcmp(k1, k2, sz)
-	return r < 0 or (r == 0 and k1_sz <= k2_sz)
-end
-
-local function key_eq(k1, k1_sz, k2, k2_sz)
-	if k1_sz ~= k2_sz then return false end
-	return memcmp(k1, k2, k1_sz) == 0
-end
-
-Db.key_gt = key_gt
-Db.key_ge = key_ge
-Db.key_lt = key_lt
-Db.key_le = key_le
-Db.key_eq = key_eq
-
 local function compile_table_schema(schema)
 
 	assert(schema.layouted)
@@ -985,6 +956,14 @@ local function compile_table_schema(schema)
 						end
 						return t
 					end
+				end
+			elseif f.mdbx_type == 'bool' then
+				function f.encode(db, event, buf, val)
+					cast(elemp_ct, buf)[0] = val and 1 or 0
+					return 1
+				end
+				function f.decode(p)
+					return cast(elemp_ct, p)[0] == 1
 				end
 			else --scalar
 				function f.encode(db, event, buf, val)
@@ -2823,11 +2802,22 @@ local function skip_ok(ok, ...)
 	return ...
 end
 
+function Cur:decode_kv(k, k_sz, v, v_sz, val_cols)
+	return decode_kv(self.db, self.schema, k, k_sz, v, v_sz, val_cols)
+end
+function Cur:decode_kv_rec(key_rec, val_rec, val_cols)
+	--NOTE: this creates two boxed pointers. impossible to fix with this ffi.
+	return decode_kv(self.db, self.schema,
+		key_rec.data, key_rec.size,
+		val_rec.data, val_rec.size,
+		val_cols)
+end
+
 function Cur:try_move(op, val_cols)
 	local schema = assert(self.schema)
 	local ok, k, k_sz, v, v_sz = self:move_raw_kv(op)
 	if not ok then return false, k end
-	return decode_kv(self.db, schema, k, k_sz, v, v_sz, val_cols)
+	return true, decode_kv(self.db, schema, k, k_sz, v, v_sz, val_cols)
 end
 function Cur:move(op, val_cols)
 	return skip_ok(self:try_move(op, val_cols))
@@ -2836,6 +2826,11 @@ function Cur:must_move(op, val_cols)
 	return self.db:check_row('move', self.schema.name,
 		self:try_move(op, val_cols))
 end
+
+--generate for each OP in {first,last,next,prev,current}:
+--  try_OP(val_cols) -> false,err | true,k,v...  (OP_raw + decode_kv)
+--  OP(val_cols)     -> k,v... | nil              (skip_ok of try_OP)
+--  must_OP(val_cols)-> k,v...                    (error on miss)
 --TODO: these should be based on try_move
 for _,OP in ipairs{'first', 'last', 'next', 'prev', 'current'} do
 	local op_raw = Cur[OP..'_raw']
@@ -2843,7 +2838,7 @@ for _,OP in ipairs{'first', 'last', 'next', 'prev', 'current'} do
 		local schema = assert(self.schema)
 		local ok, k, k_sz, v, v_sz = op_raw(self)
 		if not ok then return false, k end
-		return decode_kv(self.db, schema, k, k_sz, v, v_sz, val_cols)
+		return true, decode_kv(self.db, schema, k, k_sz, v, v_sz, val_cols)
 	end
 	local function do_op(self, val_cols)
 		return skip_ok(try_op(self, val_cols))
@@ -2900,7 +2895,7 @@ function Cur:try_find(val_cols, ...)
 		k, k_buf_sz, schema.key_cols, nil, ...)
 	local ok, v, v_sz = self:move_raw_v(C.MDBX_SET_KEY, k, k_sz)
 	if not ok then return false, v end
-	return decode_kv(self.db, schema, nil, nil, v, v_sz, val_cols)
+	return true, decode_kv(self.db, schema, nil, nil, v, v_sz, val_cols)
 end
 function Cur:find(...)
 	return skip_ok(self:try_find(...))
@@ -2913,7 +2908,7 @@ function Db:try_find(tab, val_cols, ...)
 	local dbi, schema = self:dbi_schema(tab)
 	local ok, v, v_sz = find_raw_by_pk(self, dbi, schema, ...)
 	if not ok then return false, v end --v=err
-	return decode_kv(self, schema, nil, nil, v, v_sz, val_cols)
+	return true, decode_kv(self, schema, nil, nil, v, v_sz, val_cols)
 end
 function Db:find(...)
 	return skip_ok(self:try_find(...))
@@ -2922,7 +2917,7 @@ function Db:must_find(tab, val_cols, ...)
 	local dbi, schema = self:dbi_schema(tab)
 	local ok, v, v_sz = find_raw_by_pk(self, dbi, schema, ...)
 	self:check_row('get', schema.name, ok, v)
-	return skip_ok(decode_kv(self, schema, nil, nil, v, v_sz, val_cols))
+	return decode_kv(self, schema, nil, nil, v, v_sz, val_cols)
 end
 
 function Db:exists(tab, ...)
@@ -2969,7 +2964,7 @@ function Cur:try_find_prefix(val_cols, ...)
 	if not ok or k2_sz < k_sz or memcmp(k2, k, k_sz) ~= 0 then
 		return false, 'not_found'
 	end
-	return decode_kv(self.db, schema, k2, k2_sz, v, v_sz, val_cols)
+	return true, decode_kv(self.db, schema, k2, k2_sz, v, v_sz, val_cols)
 end
 function Cur:find_prefix(...)
 	return skip_ok(self:try_find_prefix(...))
@@ -2987,7 +2982,7 @@ local function prefix_next(self, ctrl)
 		if self.prefix_close then self.prefix_close = nil; self:close() end
 		return
 	end
-	return self, select(2, decode_kv(self.db, self.schema, k, k_sz, v, v_sz, self.val_cols))
+	return self, decode_kv(self.db, self.schema, k, k_sz, v, v_sz, self.val_cols)
 end
 local function prefix_seek(self, schema, val_cols, n, ...)
 	local k, k_buf_sz = key_rec_buffer, MDBX_MAX_KEY_SIZE
@@ -3038,8 +3033,7 @@ local function each_dup_cur(db, cur, ix_schema, val_cols, close_cur)
 			end
 			local pk = v + v_o
 			v_o = v_o + fixedsize
-			return cur, select(2, decode_kv(db, ix_schema,
-				nil, nil, pk, fixedsize, val_cols))
+			return cur, decode_kv(db, ix_schema, nil, nil, pk, fixedsize, val_cols)
 		end
 	else
 		local op = C.MDBX_GET_CURRENT
@@ -3050,8 +3044,7 @@ local function each_dup_cur(db, cur, ix_schema, val_cols, close_cur)
 				if close_cur then cur:close() end
 				return
 			end
-			return cur, select(2, decode_kv(db, ix_schema,
-				nil, nil, v, v_sz, val_cols))
+			return cur, decode_kv(db, ix_schema, nil, nil, v, v_sz, val_cols)
 		end
 	end
 end
@@ -3080,8 +3073,7 @@ local function each_dup(db, cur, ix_schema, val_cols, close_cur, ...)
 			end
 			local pk = v + v_o
 			v_o = v_o + fixedsize
-			return cur, select(2, decode_kv(db, ix_schema,
-				nil, nil, pk, fixedsize, val_cols))
+			return cur, decode_kv(db, ix_schema, nil, nil, pk, fixedsize, val_cols)
 		end
 	else
 		if not cur:move_raw(C.MDBX_SET_KEY, xk, xk_sz) then
@@ -3096,8 +3088,7 @@ local function each_dup(db, cur, ix_schema, val_cols, close_cur, ...)
 				if close_cur then cur:close() end
 				return
 			end
-			return cur, select(2, decode_kv(db, ix_schema,
-				nil, nil, v, v_sz, val_cols))
+			return cur, decode_kv(db, ix_schema, nil, nil, v, v_sz, val_cols)
 		end
 	end
 end

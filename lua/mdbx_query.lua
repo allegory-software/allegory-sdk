@@ -64,11 +64,6 @@ require'mdbx_schema'
 
 local C  = C
 local Db = mdbx_db
-local key_gt = Db.key_gt
-local key_ge = Db.key_ge
-local key_lt = Db.key_lt
-local key_le = Db.key_le
-local key_eq = Db.key_eq
 
 --schema resolution ----------------------------------------------------------
 
@@ -131,6 +126,10 @@ Db.query_node.close       = noop
 function Db.query_node:skip_to(target, target_sz)
 	return self:next_group()
 end
+function Db.query_node:next_item()
+	if not self._ni_started then self._ni_started = true; return self:next_group() end
+	return self:next_pk() or self:next_group()
+end
 
 function Db.query_node:explain()
 	return {
@@ -147,8 +146,19 @@ end
 
 --ACCESS NODES ---------------------------------------------------------------
 
-local function key_cmp(a, a_sz, b, b_sz)
-	return key_eq(a, a_sz, b, b_sz) and 0 or key_gt(a, a_sz, b, b_sz) and 1 or -1
+local memcmp = memcmp
+local function key_cmp(k1, n1, k2, n2)
+	if n1 < n2 then return -1 end
+	if n1 > n2 then return  1 end
+	return memcmp(k1, k2, n1)
+end
+local function key_ge(k1, n1, k2, n2) return key_cmp(k1, n1, k2, n2) >= 0 end
+local function key_le(k1, n1, k2, n2) return key_cmp(k1, n1, k2, n2) <= 0 end
+local function key_lt(k1, n1, k2, n2) return key_cmp(k1, n1, k2, n2)  < 0 end
+local function key_gt(k1, n1, k2, n2) return key_cmp(k1, n1, k2, n2)  > 0 end
+
+local function key_eq(k1, n1, k2, n2)
+	return n1 == n2 and memcmp(k1, k2, n1) == 0
 end
 
 -- pk_get: single base-table PK lookup; returns zero or one PK item.
@@ -182,6 +192,8 @@ function Db.pk_get:__call(db, tab, ...)
 		function node:close() if cur_alive then cur:close(); cur_alive = false end end
 		local done = false
 		local has_pk
+		local pk_val = MDBX_val(); pk_val.data = pk_key; pk_val.size = sz
+		local val_rec = MDBX_val()
 		function node:get_pk(name)
 			if has_pk and (name == nil or name == schema.name) then
 				return true, pk_key, sz
@@ -190,12 +202,12 @@ function Db.pk_get:__call(db, tab, ...)
 		function node:get_cols(member, cols)
 			if not has_pk then return end
 			if member ~= nil and member ~= schema.name then return end
-			return cur:try_current(cols)
+			return true, cur:decode_kv_rec(pk_val, val_rec, cols)
 		end
 		function node:next_group()
 			if done then has_pk = nil; return end
 			done = true
-			has_pk = cur:move_raw(C.MDBX_SET_KEY, pk_key, sz)
+			has_pk = cur:move_raw_into(C.MDBX_SET_KEY, pk_val, val_rec)
 			if not has_pk then return end
 			return true
 		end
@@ -243,24 +255,28 @@ function Db.pk_seek:__call(db, ix_name, ...)
 				cur_alive = false
 			end
 		end
-		local has_pk, pk, pk_sz
-		function node:get_pk(name)
-			if has_pk and (name == nil or name == val_schema.name) then
-				return true, pk, pk_sz
-			end
-		end
-		function node:get_cols(member, cols)
-			if not has_pk then return end
-			if member ~= nil and member ~= val_schema.name then return end
-			if not base_cur then base_cur = db:cursor_raw(base_dbi); base_cur.schema = val_schema end
-			if not base_cur:move_raw(C.MDBX_SET_KEY, pk, pk_sz) then return end
-			return base_cur:try_current(cols)
-		end
-		function node:merge_key() return pk, pk_sz end
+		local has_pk
 		local fixedsize = schema.dup_fixedsize
 		if fixedsize then
 			--DUPFIXED: bulk pk iteration via MDBX_GET_MULTIPLE / MDBX_NEXT_MULTIPLE.
 			--merge_key = pk value; each dup is a separate group; next_pk = noop.
+			local pk, pk_sz
+			local base_pk_rec = MDBX_val()
+			local base_val_rec = MDBX_val()
+			function node:get_pk(name)
+				if has_pk and (name == nil or name == val_schema.name) then
+					return true, pk, pk_sz
+				end
+			end
+			function node:get_cols(member, cols)
+				if not has_pk then return end
+				if member ~= nil and member ~= val_schema.name then return end
+				if not base_cur then base_cur = db:cursor_raw(base_dbi); base_cur.schema = val_schema end
+				base_pk_rec.data = pk; base_pk_rec.size = pk_sz
+				if not base_cur:move_raw_into(C.MDBX_SET_KEY, base_pk_rec, base_val_rec) then return end
+				return true, base_cur:decode_kv_rec(base_pk_rec, base_val_rec, cols)
+			end
+			function node:merge_key() return pk, pk_sz end
 			local ok, v, v_sz, v_o
 			local first = true
 			function node:next_group()
@@ -283,25 +299,37 @@ function Db.pk_seek:__call(db, ix_name, ...)
 		else
 			--non-DUPFIXED: one dup at a time.
 			--merge_key = pk value; each dup is a separate group; next_pk = noop.
+			local ix_rec = MDBX_val(); ix_rec.data = ix_key; ix_rec.size = sz
+			local pk_rec = MDBX_val()
+			local base_val_rec = MDBX_val()
+			function node:get_pk(name)
+				if has_pk and (name == nil or name == val_schema.name) then
+					return true, pk_rec.data, pk_rec.size
+				end
+			end
+			function node:get_cols(member, cols)
+				if not has_pk then return end
+				if member ~= nil and member ~= val_schema.name then return end
+				if not base_cur then base_cur = db:cursor_raw(base_dbi); base_cur.schema = val_schema end
+				if not base_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, base_val_rec) then return end
+				return true, base_cur:decode_kv_rec(pk_rec, base_val_rec, cols)
+			end
+			function node:merge_key() return pk_rec.data, pk_rec.size end
 			local first = true
 			function node:next_group()
-				local ok2, v, v_sz
 				if first then
 					first = false
-					if not cur:move_raw(C.MDBX_SET_KEY, ix_key, sz) then has_pk = nil; return end
-					ok2, v, v_sz = cur:move_raw_v(C.MDBX_GET_CURRENT)
+					if not cur:move_raw_into(C.MDBX_SET_KEY, ix_rec, pk_rec) then has_pk = nil; return end
 				else
-					ok2, v, v_sz = cur:move_raw_v(C.MDBX_NEXT_DUP)
+					if not cur:move_raw_into(C.MDBX_NEXT_DUP, nil, pk_rec) then has_pk = nil; return end
 				end
-				if not ok2 then has_pk = nil; return end
-				has_pk, pk, pk_sz = true, v, v_sz
+				has_pk = true
 				return true
 			end
 			function node:skip_to(target, target_sz)
-				local ok2, v, v_sz = cur:find_dup_ge_raw(ix_key, sz, target, target_sz)
-				if not ok2 then has_pk = nil; return end
-				has_pk, pk, pk_sz = true, v, v_sz
-				op = C.MDBX_NEXT_DUP
+				pk_rec.data = target; pk_rec.size = target_sz
+				if not cur:move_raw_into(C.MDBX_GET_BOTH_RANGE, ix_rec, pk_rec) then has_pk = nil; return end
+				has_pk = true
 				return true
 			end
 		end
@@ -386,11 +414,12 @@ function Db.pk_range:__call(db, name, ...)
 			end
 		end
 		local has_pk
-		local cur_mk, cur_mk_sz  --current merge_key (always the MDBX key)
-		local cur_pk, cur_pk_sz  --current pk: dup for index, key for base table
+		local mk_rec = MDBX_val()
+		local pk_rec = is_index and MDBX_val() or mk_rec
+		local base_val_rec = is_index and MDBX_val() or nil
 		function node:get_pk(name)
 			if has_pk and (name == nil or name == member_schema.name) then
-				return true, cur_pk, cur_pk_sz
+				return true, pk_rec.data, pk_rec.size
 			end
 		end
 		function node:get_cols(member, cols)
@@ -398,57 +427,43 @@ function Db.pk_range:__call(db, name, ...)
 			if member ~= nil and member ~= member_schema.name then return end
 			if is_index then
 				if not base_cur then base_cur = db:cursor_raw(base_dbi); base_cur.schema = member_schema end
-				if not base_cur:move_raw(C.MDBX_SET_KEY, cur_pk, cur_pk_sz) then return end
-				return base_cur:try_current(cols)
+				if not base_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, base_val_rec) then return end
+				return true, base_cur:decode_kv_rec(pk_rec, base_val_rec, cols)
 			else
 				return cur:try_current(cols)
 			end
 		end
-		function node:merge_key() return cur_mk, cur_mk_sz end
+		function node:merge_key() return mk_rec.data, mk_rec.size end
 		local cmp_hi = hi_open and key_ge or key_gt
 		local cmp_lo = lo_open and key_le or key_lt
-		local function set_current(k, k_sz, v, v_sz)
-			cur_mk, cur_mk_sz = k, k_sz
-			if is_index then
-				cur_pk, cur_pk_sz = v, v_sz
-			else
-				cur_pk, cur_pk_sz = k, k_sz
-			end
-			has_pk = true
-		end
-		local ok, k, k_sz, v, v_sz
+		local adv_val = is_index and pk_rec or nil
 		if not desc then
 			if lo_key then
-				ok, k, k_sz, v, v_sz = cur:move_raw_kv(C.MDBX_SET_RANGE, lo_key, lo_sz)
-				if not ok then return end
-				if lo_open and key_eq(k, k_sz, lo_key, lo_sz) then
-					ok, k, k_sz, v, v_sz = cur:move_raw_kv(C.MDBX_NEXT_NODUP)
-					if not ok then return end
+				mk_rec.data = lo_key; mk_rec.size = lo_sz
+				if not cur:move_raw_into(C.MDBX_SET_RANGE, mk_rec, adv_val) then return end
+				if lo_open and key_eq(mk_rec.data, mk_rec.size, lo_key, lo_sz) then
+					if not cur:move_raw_into(C.MDBX_NEXT_NODUP, mk_rec, adv_val) then return end
 				end
 			else
-				ok, k, k_sz, v, v_sz = cur:move_raw_kv(C.MDBX_FIRST)
-				if not ok then return end
+				if not cur:move_raw_into(C.MDBX_FIRST, mk_rec, adv_val) then return end
 			end
-			if hi_key and cmp_hi(k, k_sz, hi_key, hi_sz) then return end
+			if hi_key and cmp_hi(mk_rec.data, mk_rec.size, hi_key, hi_sz) then return end
 		else
 			if hi_key then
-				ok, k, k_sz, v, v_sz = cur:move_raw_kv(C.MDBX_TO_KEY_LESSER_OR_EQUAL, hi_key, hi_sz)
-				if not ok then return end
-				local skip = hi_open and key_eq(k, k_sz, hi_key, hi_sz)
+				mk_rec.data = hi_key; mk_rec.size = hi_sz
+				if not cur:move_raw_into(C.MDBX_TO_KEY_LESSER_OR_EQUAL, mk_rec, adv_val) then return end
+				local skip = hi_open and key_eq(mk_rec.data, mk_rec.size, hi_key, hi_sz)
 				if skip then
-					ok, k, k_sz, v, v_sz = cur:move_raw_kv(C.MDBX_PREV_NODUP)
-					if not ok then return end
+					if not cur:move_raw_into(C.MDBX_PREV_NODUP, mk_rec, adv_val) then return end
 				elseif is_index then
-					ok, k, k_sz, v, v_sz = cur:move_raw_kv(C.MDBX_LAST_DUP)
-					if not ok then return end
+					if not cur:move_raw_into(C.MDBX_LAST_DUP, mk_rec, pk_rec) then return end
 				end
 			else
-				ok, k, k_sz, v, v_sz = cur:move_raw_kv(C.MDBX_LAST)
-				if not ok then return end
+				if not cur:move_raw_into(C.MDBX_LAST, mk_rec, adv_val) then return end
 			end
-			if lo_key and cmp_lo(k, k_sz, lo_key, lo_sz) then return end
+			if lo_key and cmp_lo(mk_rec.data, mk_rec.size, lo_key, lo_sz) then return end
 		end
-		set_current(k, k_sz, v, v_sz)
+		has_pk = true
 		local first    = true
 		local adv_group = desc and (is_index and C.MDBX_PREV_NODUP or C.MDBX_PREV)
 		                       or  (is_index and C.MDBX_NEXT_NODUP or C.MDBX_NEXT)
@@ -458,36 +473,32 @@ function Db.pk_range:__call(db, name, ...)
 		local cmp_bnd  = desc and cmp_lo  or cmp_hi
 		function node:next_group()
 			if first then first = false; return true end
-			local ok2, k2, k2_sz, v2, v2_sz = cur:move_raw_kv(adv_group)
-			if not ok2 then has_pk = nil; return end
-			if bnd_key and cmp_bnd(k2, k2_sz, bnd_key, bnd_sz) then
+			if not cur:move_raw_into(adv_group, mk_rec, adv_val) then has_pk = nil; return end
+			if bnd_key and cmp_bnd(mk_rec.data, mk_rec.size, bnd_key, bnd_sz) then
 				has_pk = nil; return
 			end
-			set_current(k2, k2_sz, v2, v2_sz)
+			has_pk = true
 			return true
 		end
 		if is_index then
 			function node:next_pk()
-				local ok2, k2, k2_sz, v2, v2_sz = cur:move_raw_kv(adv_pk)
-				if not ok2 then has_pk = nil; return end
-				set_current(k2, k2_sz, v2, v2_sz)
+				if not cur:move_raw_into(adv_pk, mk_rec, pk_rec) then has_pk = nil; return end
 				return true
 			end
 		end
 		if not desc then
 			function node:skip_to(target, target_sz)
-				local ok2, k2, k2_sz, v2, v2_sz = cur:move_raw_kv(C.MDBX_SET_RANGE, target, target_sz)
-				if not ok2 then has_pk = nil; return end
-				if hi_key and cmp_hi(k2, k2_sz, hi_key, hi_sz) then has_pk = nil; return end
-				set_current(k2, k2_sz, v2, v2_sz)
+				mk_rec.data = target; mk_rec.size = target_sz
+				if not cur:move_raw_into(C.MDBX_SET_RANGE, mk_rec, adv_val) then has_pk = nil; return end
+				if hi_key and cmp_hi(mk_rec.data, mk_rec.size, hi_key, hi_sz) then has_pk = nil; return end
+				has_pk = true
 				first = false
 				return true
 			end
 			if is_index then
 				function node:reset_group()
-					local ok2, k2, k2_sz, v2, v2_sz = cur:move_raw_kv(C.MDBX_SET_KEY, cur_mk, cur_mk_sz)
-					if not ok2 then return end
-					set_current(k2, k2_sz, v2, v2_sz)
+					if not cur:move_raw_into(C.MDBX_SET_KEY, mk_rec, pk_rec) then return end
+					has_pk = true
 					return true
 				end
 			end
@@ -545,60 +556,52 @@ function Db.pk_prefix:__call(db, ix_name, ...)
 			end
 		end
 		local has_pk
-		local cur_mk, cur_mk_sz
-		local cur_pk, cur_pk_sz
+		local mk_rec = MDBX_val()
+		local pk_rec = MDBX_val()
+		local base_val_rec = MDBX_val()
 		function node:get_pk(name)
 			if has_pk and (name == nil or name == val_schema.name) then
-				return true, cur_pk, cur_pk_sz
+				return true, pk_rec.data, pk_rec.size
 			end
 		end
 		function node:get_cols(member, cols)
 			if not has_pk then return end
 			if member ~= nil and member ~= val_schema.name then return end
 			if not base_cur then base_cur = db:cursor_raw(base_dbi); base_cur.schema = val_schema end
-			if not base_cur:move_raw(C.MDBX_SET_KEY, cur_pk, cur_pk_sz) then return end
-			return base_cur:try_current(cols)
+			if not base_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, base_val_rec) then return end
+			return true, base_cur:decode_kv_rec(pk_rec, base_val_rec, cols)
 		end
-		function node:merge_key() return cur_mk, cur_mk_sz end
-		local ok, k, k_sz, v, v_sz = cur:move_raw_kv(C.MDBX_SET_RANGE, ix_key, sz)
-		if not ok or k_sz < sz or memcmp(k, ix_key, sz) ~= 0 then return end
-		cur_mk, cur_mk_sz = k, k_sz
-		cur_pk, cur_pk_sz = v, v_sz
+		function node:merge_key() return mk_rec.data, mk_rec.size end
+		mk_rec.data = ix_key; mk_rec.size = sz
+		if not cur:move_raw_into(C.MDBX_SET_RANGE, mk_rec, pk_rec) then return end
+		if mk_rec.size < sz or memcmp(mk_rec.data, ix_key, sz) ~= 0 then return end
 		has_pk = true
 		local first = true
 		function node:next_group()
 			if first then first = false; return true end
-			local ok3, k3, k3_sz, v3, v3_sz = cur:move_raw_kv(C.MDBX_NEXT_NODUP)
-			if not ok3 or k3_sz < sz or memcmp(k3, ix_key, sz) ~= 0 then
+			if not cur:move_raw_into(C.MDBX_NEXT_NODUP, mk_rec, pk_rec) then has_pk = nil; return end
+			if mk_rec.size < sz or memcmp(mk_rec.data, ix_key, sz) ~= 0 then
 				has_pk = nil; return
 			end
-			cur_mk, cur_mk_sz = k3, k3_sz
-			cur_pk, cur_pk_sz = v3, v3_sz
 			has_pk = true
 			return true
 		end
 		function node:next_pk()
-			local ok2, v2, v2_sz = cur:move_raw_v(C.MDBX_NEXT_DUP)
-			if not ok2 then has_pk = nil; return end
-			cur_pk, cur_pk_sz = v2, v2_sz
+			if not cur:move_raw_into(C.MDBX_NEXT_DUP, nil, pk_rec) then has_pk = nil; return end
 			return true
 		end
 		function node:skip_to(target, target_sz)
-			local ok2, k2, k2_sz, v2, v2_sz = cur:move_raw_kv(C.MDBX_SET_RANGE, target, target_sz)
-			if not ok2 or k2_sz < sz or memcmp(k2, ix_key, sz) ~= 0 then
+			mk_rec.data = target; mk_rec.size = target_sz
+			if not cur:move_raw_into(C.MDBX_SET_RANGE, mk_rec, pk_rec) then has_pk = nil; return end
+			if mk_rec.size < sz or memcmp(mk_rec.data, ix_key, sz) ~= 0 then
 				has_pk = nil; return
 			end
-			cur_mk, cur_mk_sz = k2, k2_sz
-			cur_pk, cur_pk_sz = v2, v2_sz
 			has_pk = true
 			first = false
 			return true
 		end
 		function node:reset_group()
-			local ok2, k2, k2_sz, v2, v2_sz = cur:move_raw_kv(C.MDBX_SET_KEY, cur_mk, cur_mk_sz)
-			if not ok2 then return end
-			cur_mk, cur_mk_sz = k2, k2_sz
-			cur_pk, cur_pk_sz = v2, v2_sz
+			if not cur:move_raw_into(C.MDBX_SET_KEY, mk_rec, pk_rec) then return end
 			has_pk = true
 			return true
 		end
@@ -647,21 +650,23 @@ function Db.fk_parent_scan:__call(db, ix_name)
 		local cur_alive = true
 		function node:close() if cur_alive then cur:close(); cur_alive = false end end
 		local op = C.MDBX_FIRST
-		local has_pk, pk, pk_sz
+		local has_pk
+		local pk_rec = MDBX_val()
 		function node:get_pk(name)
 			if has_pk and (name == nil or name == parent_schema.name) then
-				return true, pk, pk_sz
+				return true, pk_rec.data, pk_rec.size
 			end
 		end
-		function node:merge_key() return pk, pk_sz end
+		function node:merge_key() return pk_rec.data, pk_rec.size end
 		function node:skip_to(target, target_sz)
-			has_pk, pk, pk_sz = cur:move_raw_kv(C.MDBX_SET_RANGE, target, target_sz)
+			pk_rec.data = target; pk_rec.size = target_sz
+			has_pk = cur:move_raw_into(C.MDBX_SET_RANGE, pk_rec, nil)
 			op = C.MDBX_NEXT_NODUP
 			if not has_pk then return end
 			return true
 		end
 		function node:next_group()
-			has_pk, pk, pk_sz = cur:move_raw_kv(op)
+			has_pk = cur:move_raw_into(op, pk_rec, nil)
 			op = C.MDBX_NEXT_NODUP
 			if not has_pk then return end
 			return true
@@ -1088,48 +1093,43 @@ function Db.pk_join_seek:__call(db, driver, fk_name)
 			end
 		end
 		local parent_pk, parent_pk_sz
-		local child_pk, child_pk_sz
+		local child_pk_rec = MDBX_val()
+		local child_val_rec = MDBX_val()
+		local parent_pk_tmp = MDBX_val()
 		local has_pair = false
 		local in_match = false
 		function node:merge_key() return parent_pk, parent_pk_sz end
 		function node:get_pk(name)
 			if not has_pair then return end
 			if name == nil or name == parent_schema.name then return true, parent_pk, parent_pk_sz
-			elseif name == child_schema.name then return true, child_pk, child_pk_sz end
+			elseif name == child_schema.name then return true, child_pk_rec.data, child_pk_rec.size end
 		end
 		function node:get_cols(member, cols)
 			if not has_pair then return end
 			if member == parent_schema.name then return driver:get_cols(member, cols) end
 			if member == child_schema.name then
 				if not child_cur then child_cur = db:cursor_raw(child_dbi); child_cur.schema = child_schema end
-				if not child_cur:move_raw(C.MDBX_SET_KEY, child_pk, child_pk_sz) then return end
-				return child_cur:try_current(cols)
+				if not child_cur:move_raw_into(C.MDBX_SET_KEY, child_pk_rec, child_val_rec) then return end
+				return true, child_cur:decode_kv_rec(child_pk_rec, child_val_rec, cols)
 			end
 		end
 		function node:next_group() return node:next() end
-		local driver_started = false
-		local function driver_next()
-			if not driver_started then driver_started = true; return driver:next_group() end
-			return driver:next_pk() or driver:next_group()
-		end
 		function node:next()
 			has_pair = false
 			while true do
 				if in_match then
-					local ok, v, v_sz = fk_cur:move_raw_v(C.MDBX_NEXT_DUP)
-					if ok then child_pk, child_pk_sz = v, v_sz; has_pair = true; return true end
-					in_match = false
-				end
-				if not driver_next() then return end
-				local _, p, p_sz = driver:get_pk()
-				parent_pk, parent_pk_sz = p, p_sz
-				if fk_cur:move_raw(C.MDBX_SET_KEY, parent_pk, parent_pk_sz) then
-					local ok3, v3, v3_sz = fk_cur:move_raw_v(C.MDBX_GET_CURRENT)
-					if ok3 then
-						child_pk, child_pk_sz = v3, v3_sz
-						in_match = true
+					if fk_cur:move_raw_into(C.MDBX_NEXT_DUP, nil, child_pk_rec) then
 						has_pair = true; return true
 					end
+					in_match = false
+				end
+				if not driver:next_item() then return end
+				local _, p, p_sz = driver:get_pk()
+				parent_pk, parent_pk_sz = p, p_sz
+				parent_pk_tmp.data = p; parent_pk_tmp.size = p_sz
+				if fk_cur:move_raw_into(C.MDBX_SET_KEY, parent_pk_tmp, child_pk_rec) then
+					in_match = true
+					has_pair = true; return true
 				end
 			end
 		end
@@ -1165,11 +1165,9 @@ function Db.pk_join_hash:__call(db, driver, fk_name)
 	function node:open()
 		driver:open()
 		local driver_set = {}
-		while driver:next_group() do
-			repeat
-				local _, p, p_sz = driver:get_pk()
-				driver_set[str(p, p_sz)] = true
-			until not driver:next_pk()
+		while driver:next_item() do
+			local _, p, p_sz = driver:get_pk()
+			driver_set[str(p, p_sz)] = true
 		end
 		driver:close()
 		local fk_dbi     = assert(db:try_dbi(fk_schema.name))
@@ -1187,25 +1185,27 @@ function Db.pk_join_hash:__call(db, driver, fk_name)
 				cur_alive = false
 			end
 		end
-		local parent_pk, parent_pk_sz
-		local child_pk, child_pk_sz
+		local mk_rec = MDBX_val()
+		local pk_rec = MDBX_val()
+		local parent_val_rec = MDBX_val()
+		local child_val_rec = MDBX_val()
 		local has_pair = false
-		function node:merge_key() return parent_pk, parent_pk_sz end
+		function node:merge_key() return mk_rec.data, mk_rec.size end
 		function node:get_pk(name)
 			if not has_pair then return end
-			if name == nil or name == parent_schema.name then return true, parent_pk, parent_pk_sz
-			elseif name == child_schema.name then return true, child_pk, child_pk_sz end
+			if name == nil or name == parent_schema.name then return true, mk_rec.data, mk_rec.size
+			elseif name == child_schema.name then return true, pk_rec.data, pk_rec.size end
 		end
 		function node:get_cols(member, cols)
 			if not has_pair then return end
 			if member == parent_schema.name then
 				if not parent_cur then parent_cur = db:cursor_raw(parent_dbi); parent_cur.schema = parent_schema end
-				if not parent_cur:move_raw(C.MDBX_SET_KEY, parent_pk, parent_pk_sz) then return end
-				return parent_cur:try_current(cols)
+				if not parent_cur:move_raw_into(C.MDBX_SET_KEY, mk_rec, parent_val_rec) then return end
+				return true, parent_cur:decode_kv_rec(mk_rec, parent_val_rec, cols)
 			elseif member == child_schema.name then
 				if not child_cur then child_cur = db:cursor_raw(child_dbi); child_cur.schema = child_schema end
-				if not child_cur:move_raw(C.MDBX_SET_KEY, child_pk, child_pk_sz) then return end
-				return child_cur:try_current(cols)
+				if not child_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, child_val_rec) then return end
+				return true, child_cur:decode_kv_rec(pk_rec, child_val_rec, cols)
 			end
 		end
 		local in_match = false
@@ -1215,20 +1215,14 @@ function Db.pk_join_hash:__call(db, driver, fk_name)
 			has_pair = false
 			while true do
 				if in_match then
-					local ok, k, k_sz, v, v_sz = fk_cur:move_raw_kv(C.MDBX_NEXT_DUP)
-					if ok then
-						parent_pk, parent_pk_sz = k, k_sz
-						child_pk, child_pk_sz = v, v_sz
+					if fk_cur:move_raw_into(C.MDBX_NEXT_DUP, mk_rec, pk_rec) then
 						has_pair = true; return true
 					end
 					in_match = false
 				end
-				local ok, k, k_sz, v, v_sz = fk_cur:move_raw_kv(op)
+				if not fk_cur:move_raw_into(op, mk_rec, pk_rec) then return end
 				op = C.MDBX_NEXT_NODUP
-				if not ok then return end
-				if driver_set[str(k, k_sz)] then
-					parent_pk, parent_pk_sz = k, k_sz
-					child_pk, child_pk_sz = v, v_sz
+				if driver_set[str(mk_rec.data, mk_rec.size)] then
 					in_match = true
 					has_pair = true; return true
 				end
@@ -1269,11 +1263,9 @@ function Db.pk_hash_filter:__call(db, driver, set_node, mode)
 	function node:open()
 		set_node:open()
 		local pk_set = {}
-		while set_node:next_group() do
-			repeat
-				local _, p, p_sz = set_node:get_pk()
-				pk_set[str(p, p_sz)] = true
-			until not set_node:next_pk()
+		while set_node:next_item() do
+			local _, p, p_sz = set_node:get_pk()
+			pk_set[str(p, p_sz)] = true
 		end
 		set_node:close()
 		driver:open()
@@ -1292,15 +1284,10 @@ function Db.pk_hash_filter:__call(db, driver, set_node, mode)
 		function node:merge_key() return driver:merge_key() end
 		local want_in = mode == 'in'
 		function node:next_group() return node:next() end
-		local driver_started = false
-		local function driver_next()
-			if not driver_started then driver_started = true; return driver:next_group() end
-			return driver:next_pk() or driver:next_group()
-		end
 		function node:next()
 			has_pk = false
 			while true do
-				if not driver_next() then return end
+				if not driver:next_item() then return end
 				local _, p, p_sz = driver:get_pk()
 				if (pk_set[str(p, p_sz)] ~= nil) == want_in then
 					cur_pk, cur_pk_sz = p, p_sz
@@ -1354,6 +1341,8 @@ function Db.pk_parent_lookup:__call(db, driver, fk_name, opts)
 		end
 		local child_pk, child_pk_sz
 		local parent_pk, parent_pk_sz
+		local parent_key_rec = MDBX_val()
+		local parent_val_rec = MDBX_val()
 		local has_child  = false
 		local has_parent = false
 		local fk_row = {}
@@ -1367,20 +1356,16 @@ function Db.pk_parent_lookup:__call(db, driver, fk_name, opts)
 			if not has_child then return end
 			if member == child_schema.name then return driver:get_cols(member, cols) end
 			if member == parent_schema.name and has_parent then
-				if not parent_cur:move_raw(C.MDBX_SET_KEY, parent_pk, parent_pk_sz) then return end
-				return parent_cur:try_current(cols)
+				parent_key_rec.data = parent_pk; parent_key_rec.size = parent_pk_sz
+				if not parent_cur:move_raw_into(C.MDBX_SET_KEY, parent_key_rec, parent_val_rec) then return end
+				return true, parent_cur:decode_kv_rec(parent_key_rec, parent_val_rec, cols)
 			end
 		end
 		function node:next_group() return node:next() end
-		local driver_started = false
-		local function driver_next()
-			if not driver_started then driver_started = true; return driver:next_group() end
-			return driver:next_pk() or driver:next_group()
-		end
 		function node:next()
 			has_child = false; has_parent = false
 			while true do
-				if not driver_next() then return end
+				if not driver:next_item() then return end
 				local _, cp, cp_sz = driver:get_pk()
 				child_pk, child_pk_sz = cp, cp_sz
 				local fv = {driver:get_cols(child_schema.name, fk_cols)}
@@ -1389,7 +1374,8 @@ function Db.pk_parent_lookup:__call(db, driver, fk_name, opts)
 					local pp_sz = mdbx_encode_key(db, parent_schema, 'pk_parent_lookup',
 						nil, mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
 						parent_schema.key_cols, '{}', fk_row)
-					if parent_cur:move_raw(C.MDBX_SET_KEY, mdbx_key_rec_buffer, pp_sz) then
+					parent_key_rec.data = mdbx_key_rec_buffer; parent_key_rec.size = pp_sz
+					if parent_cur:move_raw_into(C.MDBX_SET_KEY, parent_key_rec, nil) then
 						local ppk = u8a(pp_sz); copy(ppk, mdbx_key_rec_buffer, pp_sz)
 						parent_pk, parent_pk_sz = ppk, pp_sz
 						has_child = true; has_parent = true; return true
@@ -1435,15 +1421,10 @@ function Db.pk_filter:__call(db, input, fn)
 		end
 		function node:merge_key() return input:merge_key() end
 		function node:next_group() return node:next() end
-		local input_started = false
-		local function input_next()
-			if not input_started then input_started = true; return input:next_group() end
-			return input:next_pk() or input:next_group()
-		end
 		function node:next()
 			while true do
 				has_pk = false
-				if not input_next() then return end
+				if not input:next_item() then return end
 				has_pk = true
 				if fn(node) then return true end
 			end
@@ -1477,15 +1458,10 @@ local function make_existence_join(self, db, outer, inner_fn, want_inner)
 		end
 		function node:merge_key() return outer:merge_key() end
 		function node:next_group() return node:next() end
-		local outer_started = false
-		local function outer_next()
-			if not outer_started then outer_started = true; return outer:next_group() end
-			return outer:next_pk() or outer:next_group()
-		end
 		function node:next()
 			has_pk = false
 			while true do
-				if not outer_next() then return end
+				if not outer:next_item() then return end
 				has_pk = true
 				local inner = inner_fn(node)
 				inner:open()
@@ -1556,11 +1532,6 @@ function Db.nested_join:__call(db, outer, inner_fn)
 		end
 		function node:merge_key() return outer:merge_key() end
 		function node:next_group() return node:next() end
-		local outer_started = false
-		local function outer_next()
-			if not outer_started then outer_started = true; return outer:next_group() end
-			return outer:next_pk() or outer:next_group()
-		end
 		function node:next()
 			has_pk = false
 			while true do
@@ -1570,7 +1541,7 @@ function Db.nested_join:__call(db, outer, inner_fn)
 					end
 					cur_inner:close(); cur_inner = nil
 				end
-				if not outer_next() then return end
+				if not outer:next_item() then return end
 				has_pk = true
 				local inner = inner_fn(node)
 				if not inner_members_set then
@@ -1634,16 +1605,11 @@ function Db.limit:__call(db, input, n, offset)
 			end
 			function node:merge_key() return input:merge_key() end
 			function node:next_group() return node:next() end
-			local input_started = false
-			local function input_next()
-				if not input_started then input_started = true; return input:next_group() end
-				return input:next_pk() or input:next_group()
-			end
 			function node:next()
 				has_pk = false
 				if count >= n then return end
 				while true do
-					if not input_next() then return end
+					if not input:next_item() then return end
 					if skipped < offset then skipped = skipped + 1
 					else count = count + 1; has_pk = true; return true end
 				end
@@ -1651,6 +1617,12 @@ function Db.limit:__call(db, input, n, offset)
 		end
 	end
 	return node
+end
+
+local function keys_eq(a, b)
+	if #a ~= #b then return false end
+	for i = 1, #a do if a[i] ~= b[i] then return false end end
+	return true
 end
 
 -- pk_group: group consecutive input items by key_fn; yield first item per group via next_group(),
@@ -1683,21 +1655,12 @@ function Db.pk_group:__call(db, input, key_fn, opts)
 		input:open()
 		function node:close() input:close() end
 		local done    = false
-		local started = false
 		local has_current = false
 		local cur_key = nil
 		local peeked  = false  -- input is at first item of next group (detected by next_pk)
 		local function adv()
 			if done then return false end
-			local ok
-			if not started then started = true; ok = input:next_group()
-			else ok = input:next_pk() or input:next_group() end
-			if not ok then done = true; return false end
-			return true
-		end
-		local function keys_eq(a, b)
-			if #a ~= #b then return false end
-			for i = 1, #a do if a[i] ~= b[i] then return false end end
+			if not input:next_item() then done = true; return false end
 			return true
 		end
 		function node:get_pk(name)
@@ -1788,15 +1751,10 @@ function Db.pk_project:__call(db, input, member_name)
 		end
 		function node:merge_key() return cur_pk, cur_pk_sz end
 		function node:next_group() return node:next() end
-		local input_started = false
-		local function input_next()
-			if not input_started then input_started = true; return input:next_group() end
-			return input:next_pk() or input:next_group()
-		end
 		function node:next()
 			has_pk = false
 			while true do
-				if not input_next() then return end
+				if not input:next_item() then return end
 				local ok, p, p_sz = input:get_pk(member_name)
 				if ok then
 					cur_pk, cur_pk_sz = p, p_sz
@@ -1833,21 +1791,21 @@ function Db.pk_sort:__call(db, input)
 	function node:open()
 		input:open()
 		local pks = {}
-		while input:next_group() do
-			repeat
-				local _, p, p_sz = input:get_pk()
-				local s = str(p, p_sz)
-				if not pks[s] then local pk = u8a(p_sz); copy(pk, p, p_sz); pks[s] = {p = pk, sz = p_sz}; pks[#pks+1] = pks[s] end
-			until not input:next_pk()
+		while input:next_item() do
+			local _, p, p_sz = input:get_pk()
+			local s = str(p, p_sz)
+			if not pks[s] then local pk = u8a(p_sz); copy(pk, p, p_sz); pks[s] = {p = pk, sz = p_sz}; pks[#pks+1] = pks[s] end
 		end
 		input:close()
 		table.sort(pks, function(a, b)
-				return key_gt(b.p, b.sz, a.p, a.sz)
+				return key_lt(a.p, a.sz, b.p, b.sz)
 		end)
 		local base_dbi = assert(db:try_dbi(member_name))
 		local base_cur
 		local i = 0
 		local cur_pk, cur_pk_sz
+		local cur_pk_rec = MDBX_val()
+		local base_val_rec = MDBX_val()
 		local has_pk = false
 		function node:close()
 			if base_cur then base_cur:close(); base_cur = nil end
@@ -1861,8 +1819,8 @@ function Db.pk_sort:__call(db, input)
 			if not has_pk then return end
 			if member ~= nil and member ~= member_name then return end
 			if not base_cur then base_cur = db:cursor_raw(base_dbi); base_cur.schema = schema end
-			if not base_cur:move_raw(C.MDBX_SET_KEY, cur_pk, cur_pk_sz) then return end
-			return base_cur:try_current(cols)
+			if not base_cur:move_raw_into(C.MDBX_SET_KEY, cur_pk_rec, base_val_rec) then return end
+			return true, base_cur:decode_kv_rec(cur_pk_rec, base_val_rec, cols)
 		end
 		function node:merge_key() return cur_pk, cur_pk_sz end
 		function node:next_group()
@@ -1870,6 +1828,7 @@ function Db.pk_sort:__call(db, input)
 			local entry = pks[i]
 			if not entry then has_pk = false; return end
 			cur_pk, cur_pk_sz = entry.p, entry.sz
+			cur_pk_rec.data = entry.p; cur_pk_rec.size = entry.sz
 			has_pk = true
 			return true
 		end
@@ -1943,21 +1902,16 @@ function Db.pk_and_probe:__call(db, driver, ...)
 		end
 		function node:merge_key() return driver:merge_key() end
 		function node:next_group() return node:next() end
-		local driver_started = false
-		local function driver_next()
-			if not driver_started then driver_started = true; return driver:next_group() end
-			return driver:next_pk() or driver:next_group()
-		end
 		function node:next()
 			has_pk = false
 			while true do
-				if not driver_next() then return end
+				if not driver:next_item() then return end
 				local _, p, p_sz = driver:get_pk()
 				local pass = true
 				for i, probe in ipairs(probes) do
 					local ok, v, v_sz = probe_curs[i]:find_dup_ge_raw(
 						probe.key, probe.key_sz, p, p_sz)
-					if not ok or v_sz ~= p_sz or memcmp(v, p, p_sz) ~= 0 then
+					if not ok or not key_eq(v, v_sz, p, p_sz) then
 						pass = false; break
 					end
 				end
@@ -2060,13 +2014,8 @@ function Db.select:__call(db, input, outputs)
 	function node:open()
 		input:open()
 		function node:close() input:close() end
-		local input_started = false
-		local function input_next()
-			if not input_started then input_started = true; return input:next_group() end
-			return input:next_pk() or input:next_group()
-		end
 		function node:next_row()
-			if not input_next() then return end
+			if not input:next_item() then return end
 			local rec = {}
 			for _, o in ipairs(parsed) do
 				if o.fn then
@@ -2080,12 +2029,6 @@ function Db.select:__call(db, input, outputs)
 		end
 	end
 	return node
-end
-
-local function keys_eq(a, b)
-	if #a ~= #b then return false end
-	for i = 1, #a do if a[i] ~= b[i] then return false end end
-	return true
 end
 
 -- stream_distinct: dedup adjacent value records by key_fn; requires input in group order.
@@ -2226,6 +2169,34 @@ function Db.value_sort:__call(db, input, spec)
 	return node
 end
 
+local function agg_init(agg)
+	local acc = {}
+	for _, a in ipairs(agg) do
+		if     a.op == 'count'  then acc[a.name] = 0
+		elseif a.op == 'avg'    then acc[a.name] = {sum = 0, n = 0}
+		elseif a.op == 'concat' then acc[a.name] = {}
+		else                         acc[a.name] = nil
+		end
+	end
+	return acc
+end
+
+local function agg_finalize(agg, acc)
+	local rec = {}
+	for _, a in ipairs(agg) do
+		if a.op == 'avg' then
+			local s = acc[a.name]
+			rec[a.name] = s.n > 0 and s.sum / s.n or nil
+		elseif a.op == 'concat' then
+			local t = acc[a.name]
+			rec[a.name] = #t > 0 and table.concat(t, a.sep or ',') or nil
+		else
+			rec[a.name] = acc[a.name]
+		end
+	end
+	return rec
+end
+
 -- stream_aggregate: one value record per group from a PK stream; requires group order.
 -- key_fn(node) -> {part,...}: group key at PK level; nil = grand total (one output record).
 -- agg: list of {name=, op=, [member=, col=, sep=, part=]}.
@@ -2249,17 +2220,6 @@ function Db.stream_aggregate:__call(db, input, key_fn, agg)
 		input:open()
 		function node:close() input:close() end
 		local done = false
-		local function init_acc()
-			local acc = {}
-			for _, a in ipairs(agg) do
-				if     a.op == 'count'  then acc[a.name] = 0
-				elseif a.op == 'avg'    then acc[a.name] = {sum = 0, n = 0}
-				elseif a.op == 'concat' then acc[a.name] = {}
-				else                         acc[a.name] = nil
-				end
-			end
-			return acc
-		end
 		local function accumulate(acc, key)
 			for _, a in ipairs(agg) do
 				if a.op == 'count' then
@@ -2285,39 +2245,22 @@ function Db.stream_aggregate:__call(db, input, key_fn, agg)
 				end
 			end
 		end
-		local function finalize(acc)
-			local rec = {}
-			for _, a in ipairs(agg) do
-				if a.op == 'avg' then
-					local s = acc[a.name]
-					rec[a.name] = s.n > 0 and s.sum / s.n or nil
-				elseif a.op == 'concat' then
-					local t = acc[a.name]
-					rec[a.name] = #t > 0 and table.concat(t, a.sep or ',') or nil
-				else
-					rec[a.name] = acc[a.name]
-				end
-			end
-			return rec
-		end
 		if not key_fn then
 			function node:next_row()
 				if done then return end; done = true
-				local acc = init_acc()
-				while input:next_group() do
-					repeat accumulate(acc, nil) until not input:next_pk()
-				end
-				return finalize(acc)
+				local acc = agg_init(agg)
+				while input:next_item() do accumulate(acc, nil) end
+				return agg_finalize(agg, acc)
 			end
 		else
 			function node:next_row()
 				if done then return end
 				if not input:next_group() then done = true; return end
 				local key = key_fn(input)
-				local acc = init_acc()
+				local acc = agg_init(agg)
 				accumulate(acc, key)
 				while input:next_pk() do accumulate(acc, key) end
-				return finalize(acc)
+				return agg_finalize(agg, acc)
 			end
 		end
 	end
@@ -2345,17 +2288,6 @@ function Db.hash_aggregate:__call(db, input, key_fn, agg)
 	local node = object(self, {members = input.members, unique = true})
 	function node:open()
 		input:open()
-		local function init_acc()
-			local acc = {}
-			for _, a in ipairs(agg) do
-				if     a.op == 'count'  then acc[a.name] = 0
-				elseif a.op == 'avg'    then acc[a.name] = {sum = 0, n = 0}
-				elseif a.op == 'concat' then acc[a.name] = {}
-				else                         acc[a.name] = nil
-				end
-			end
-			return acc
-		end
 		local function accumulate(acc, rec, key)
 			for _, a in ipairs(agg) do
 				if a.op == 'count' then
@@ -2381,21 +2313,6 @@ function Db.hash_aggregate:__call(db, input, key_fn, agg)
 				end
 			end
 		end
-		local function finalize(acc)
-			local rec = {}
-			for _, a in ipairs(agg) do
-				if a.op == 'avg' then
-					local s = acc[a.name]
-					rec[a.name] = s.n > 0 and s.sum / s.n or nil
-				elseif a.op == 'concat' then
-					local t = acc[a.name]
-					rec[a.name] = #t > 0 and table.concat(t, a.sep or ',') or nil
-				else
-					rec[a.name] = acc[a.name]
-				end
-			end
-			return rec
-		end
 		local group_list = {}
 		local group_map  = {}
 		local tuple_space = key_fn and tuples() or nil
@@ -2410,7 +2327,7 @@ function Db.hash_aggregate:__call(db, input, key_fn, agg)
 			end
 			local acc = group_map[t]
 			if not acc then
-				acc = init_acc()
+				acc = agg_init(agg)
 				group_map[t] = acc
 				group_list[#group_list+1] = {acc, key}
 			end
@@ -2419,7 +2336,7 @@ function Db.hash_aggregate:__call(db, input, key_fn, agg)
 		end
 		input:close()
 		local output = {}
-		for _, g in ipairs(group_list) do output[#output+1] = finalize(g[1]) end
+		for _, g in ipairs(group_list) do output[#output+1] = agg_finalize(agg, g[1]) end
 		local i = 0
 		function node:close() end
 		function node:next_row() i = i + 1; return output[i] end

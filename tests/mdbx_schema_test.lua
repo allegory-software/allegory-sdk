@@ -202,6 +202,41 @@ function test.numeric_keys_and_values()
 	end)
 end
 
+--bool key + two bool vals, asc and desc. checks round-trip (false/true) and ordering.
+function test.bool_keys_and_values()
+	with_db('bool_keys_and_values', function(db)
+		db:begin'w'
+		local vals = {false, true}
+		for order in words'asc desc' do
+			local name = 'bool:'..order
+			local desc = order == 'desc'
+			db:create_table(name, {
+				name = name,
+				fields = {
+					{col = 'k' , mdbx_type = 'bool', not_null = true},
+					{col = 'v1', mdbx_type = 'bool'},
+					{col = 'v2', mdbx_type = 'bool'},
+				},
+				pk = {'k', desc = {desc}},
+			})
+			local recs = imap(vals, function(v) return {v, v, v} end)
+			db:put_records(name, '[k v1 v2]', recs)
+
+			local exp = extend({}, vals)
+			if desc then reverse(exp) end
+			local i = 0
+			for cur, k, v1, v2 in db:each(name) do
+				i = i + 1
+				assertf(k  == exp[i], '%s.k[%d]: %s ~= %s' , name, i, S(k ), S(exp[i]))
+				assertf(v1 == exp[i], '%s.v1[%d]: %s ~= %s', name, i, S(v1), S(exp[i]))
+				assertf(v2 == exp[i], '%s.v2[%d]: %s ~= %s', name, i, S(v2), S(exp[i]))
+			end
+			assertf(i == #exp, '%s: row count %d ~= %d', name, i, #exp)
+		end
+		db:commit()
+	end)
+end
+
 -- varsize keys --------------------------------------------------------------
 
 --single utf8 varsize key + varsize val at a fixed offset, asc and desc.
