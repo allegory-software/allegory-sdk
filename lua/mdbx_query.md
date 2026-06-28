@@ -371,24 +371,12 @@ PK tuple streams track uniqueness per member. Full rules in `mdbx_query_validato
 Window functions, query caching, prepared statements.
 
 
-## METADATA HELPERS
-
-One MDBX stat call, cursor seek, or duplicate count each; no maintained statistics.
-
-	pk_exists(table, pk)    -> bool    base-table key lookup; complete PK
-	ix_exists(ix, key)      -> bool    index key lookup; complete key
-	ix_count(ix, key)       -> n       MDBX duplicate count; complete key only; no prefix/range
-	ix_min(ix, prefix)      -> key     first key matching prefix; nil prefix = first key overall
-	ix_max(ix, prefix)      -> key     last key matching prefix; nil prefix = last key overall
-	explain(node)           -> t       item type, members, order, uniqueness, source cursor, work; no DB read
-
-
 ## QUERY BUILDER
 
 A composable expression that lowers to a tree of the nodes above. Same query +
 same schema always produces the same nodes; join order is preserved as written.
 Plan changes only when you change the query or the indexes, never from data.
-`explain(query)` can be snapshotted and diffed in tests.
+Lower with `:_lower()` and call `node:explain()` to get a plan tree for snapshotting or diffing in tests.
 Hand-built node trees are fully supported; the builder just writes them for you.
 
 	db:from('table' | 'table alias')     start query; member name = alias or table name
@@ -504,5 +492,3 @@ TERMINALS:
 	:first()   first value record or nil
 	:count()   row count (exact via ix_count or table stat when possible, else count aggregate)
 	:exists()  true if any row matches
-
-	explain(query)   lower and report nodes; no DB reads
