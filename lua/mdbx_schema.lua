@@ -77,7 +77,7 @@ QUERY
 	cur:is_null             (col) -> is_null, [reason]
 	cur:each_prefix         ([val_cols], pk_val1, ...) -> iter() -> cur, keysvals...
 	cur:each_dup            ([val_cols], keys...) -> iter() -> cur, keysvals...
-	cur:each_dup_current    ([val_cols]) -> iter() -> cur, keysvals...
+	cur:each_current_dup    ([val_cols]) -> iter() -> cur, keysvals...
 
 COLUMS LISTS & IN/OUT VALUES FORMATS
 
@@ -3026,11 +3026,12 @@ function Db:each_prefix(tbl_name, val_cols, ...)
 	return prefix_next, cur
 end
 
-local function each_dup_cur(db, cur, ix_schema, val_cols, close_cur)
+local function each_dup_from(db, cur, ix_schema, val_cols, close_cur, xk, xk_sz)
 	assert(ix_schema.is_index)
 	local fixedsize = ix_schema.dup_fixedsize
 	if fixedsize then
-		local ok, v, v_sz = cur:current_multiple_raw()
+		local op = xk and C.MDBX_SEEK_AND_GET_MULTIPLE or C.MDBX_GET_MULTIPLE
+		local ok, v, v_sz = cur:move_raw_v(op, xk, xk_sz)
 		if not ok then
 			if close_cur then cur:close() end
 			return noop
@@ -3038,7 +3039,7 @@ local function each_dup_cur(db, cur, ix_schema, val_cols, close_cur)
 		local v_o = 0
 		return function()
 			if v_o >= v_sz then
-				ok, v, v_sz = cur:next_multiple_raw()
+				ok, v, v_sz = cur:move_raw_v(C.MDBX_NEXT_MULTIPLE)
 				if not ok then
 					if close_cur then cur:close() end
 					return
@@ -3050,6 +3051,10 @@ local function each_dup_cur(db, cur, ix_schema, val_cols, close_cur)
 			return cur, decode_kv(db, ix_schema, nil, nil, pk, fixedsize, val_cols)
 		end
 	else
+		if xk and not cur:move_raw(C.MDBX_SET_KEY, xk, xk_sz) then
+			if close_cur then cur:close() end
+			return noop
+		end
 		local op = C.MDBX_GET_CURRENT
 		return function()
 			local ok, v, v_sz = cur:move_raw_v(op)
@@ -3062,49 +3067,12 @@ local function each_dup_cur(db, cur, ix_schema, val_cols, close_cur)
 		end
 	end
 end
-
 local function each_dup(db, cur, ix_schema, val_cols, close_cur, ...)
 	assert(ix_schema.is_index)
 	local xk, xk_buf_sz = key_rec_buffer, MDBX_MAX_KEY_SIZE
 	local xk_sz = encode_key(db, ix_schema, 'each_dup', nil,
 		xk, xk_buf_sz, ix_schema.key_cols, nil, ...)
-	local fixedsize = ix_schema.dup_fixedsize
-	if fixedsize then
-		local ok, v, v_sz = cur:find_multiple_raw(xk, xk_sz)
-		if not ok then
-			if close_cur then cur:close() end
-			return noop
-		end
-		local v_o = 0
-		return function()
-			if v_o >= v_sz then
-				ok, v, v_sz = cur:next_multiple_raw()
-				if not ok then
-					if close_cur then cur:close() end
-					return
-				end
-				v_o = 0
-			end
-			local pk = v + v_o
-			v_o = v_o + fixedsize
-			return cur, decode_kv(db, ix_schema, nil, nil, pk, fixedsize, val_cols)
-		end
-	else
-		if not cur:move_raw(C.MDBX_SET_KEY, xk, xk_sz) then
-			if close_cur then cur:close() end
-			return noop
-		end
-		local op = C.MDBX_GET_CURRENT
-		return function()
-			local ok, v, v_sz = cur:move_raw_v(op)
-			op = C.MDBX_NEXT_DUP
-			if not ok then
-				if close_cur then cur:close() end
-				return
-			end
-			return cur, decode_kv(db, ix_schema, nil, nil, v, v_sz, val_cols)
-		end
-	end
+	return each_dup_from(db, cur, ix_schema, val_cols, close_cur, xk, xk_sz)
 end
 function Cur:each_dup(val_cols, ...)
 	return each_dup(self.db, self, assert(self.schema), val_cols, false, ...)
@@ -3113,6 +3081,6 @@ function Db:each_dup(ix_name, val_cols, ...)
 	local dbi, ix_schema = self:dbi_schema(ix_name)
 	return each_dup(self, self:cursor_raw(dbi), ix_schema, val_cols, true, ...)
 end
-function Cur:each_dup_current(val_cols)
-	return each_dup_cur(self.db, self, assert(self.schema), val_cols, false)
+function Cur:each_current_dup(val_cols)
+	return each_dup_from(self.db, self, assert(self.schema), val_cols, false)
 end

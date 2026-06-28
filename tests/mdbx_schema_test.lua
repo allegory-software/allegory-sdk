@@ -4932,10 +4932,10 @@ function test.each_prefix_numeric_composite_pk()
 	end)
 end
 
---each_dup_current starts from the cursor's current key position, covering both
+--each_current_dup starts from the cursor's current key position, covering both
 --the fixedsize (DUPFIXED/u32 pk) and non-fixedsize (variable-length pk) paths.
-function test.each_dup_current()
-	with_db('each_dup_current', function(db)
+function test.each_current_dup()
+	with_db('each_current_dup', function(db)
 		db:begin'w'
 
 		--fixedsize path: u32 pk -> DUPFIXED dup values in the index
@@ -4953,7 +4953,7 @@ function test.each_dup_current()
 		local function ids_at(cur, key)
 			assert(cur:try_find(nil, key))
 			local t = {}
-			for _, r in cur:each_dup_current('{}') do add(t, num(r.id)) end
+			for _, r in cur:each_current_dup('{}') do add(t, num(r.id)) end
 			sort(t); return t
 		end
 		local cur = db:cursor('t/cat')
@@ -4974,7 +4974,7 @@ function test.each_dup_current()
 		local function sids_at(cur, key)
 			assert(cur:try_find(nil, key))
 			local t = {}
-			for _, r in cur:each_dup_current('{}') do add(t, r.id) end
+			for _, r in cur:each_current_dup('{}') do add(t, r.id) end
 			sort(t); return t
 		end
 		cur = db:cursor('u/cat')
