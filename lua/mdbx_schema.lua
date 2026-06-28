@@ -2828,10 +2828,9 @@ function Cur:must_move(op, val_cols)
 end
 
 --generate for each OP in {first,last,next,prev,current}:
---  try_OP(val_cols) -> false,err | true,k,v...  (OP_raw + decode_kv)
---  OP(val_cols)     -> k,v... | nil              (skip_ok of try_OP)
+--  try_OP(val_cols) -> false,err | true,k,v...   (OP_raw + decode_kv)
+--  OP(val_cols)     -> k,v... | nil              (try_OP without ok retval)
 --  must_OP(val_cols)-> k,v...                    (error on miss)
---TODO: these should be based on try_move
 for _,OP in ipairs{'first', 'last', 'next', 'prev', 'current'} do
 	local op_raw = Cur[OP..'_raw']
 	local function try_op(self, val_cols)
@@ -2856,18 +2855,13 @@ local function cur_each_pass(cur, ok, ...)
 	if not ok then cur:close(); return end
 	return cur, ...
 end
---TODO: these should collapse with try_move
 local function cur_each_try_next(self, k0)
-	if k0 == 'start' then
-		return cur_each_pass(self, self:try_first(self.val_cols))
-	end
-	return cur_each_pass(self, self:try_next(self.val_cols))
+	return cur_each_pass(self, self:try_move(
+		k0 == 'start' and C.MDBX_FIRST or C.MDBX_NEXT, self.val_cols))
 end
 local function cur_each_try_prev(self, k0)
-	if k0 == 'start' then
-		return cur_each_pass(self, self:try_last(self.val_cols))
-	end
-	return cur_each_pass(self, self:try_prev(self.val_cols))
+	return cur_each_pass(self, self:try_move(
+		k0 == 'start' and C.MDBX_LAST or C.MDBX_PREV, self.val_cols))
 end
 function Db:each(tbl_name, val_cols, mode, t)
 	local cur = self:cursor(tbl_name, mode)
