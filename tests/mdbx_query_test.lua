@@ -20,7 +20,7 @@ local function S(v) --printable form for assert messages.
 end
 
 local function get_pk(node, name)
-	local ok, p, sz = node:get_pk(name)
+	local ok, p, sz = node:pk(name)
 	assert(ok, 'expected current pk')
 	return p, sz
 end
@@ -40,10 +40,10 @@ local function decode_pk(schema, p, sz)
 	return tonumber(f.decode(pk_pout[0], len))
 end
 
-local function pk_id(node, name, schema)
-	if node.get_cols then
-		local ok, id = node:get_cols(name)
-		if ok then return tonumber(id) end
+local function pk_id(node, name, db_or_schema)
+	local schema = db_or_schema
+	if db_or_schema and db_or_schema.table_schema then
+		schema = db_or_schema:table_schema(name)
 	end
 	local p, sz = get_pk(node, name)
 	return decode_pk(schema, p, sz)
@@ -194,7 +194,7 @@ function test.pk_seek_exec()
 			local n = db:pk_seek('users/status', 'missing')
 			n:open()
 			assert(n:next_group() == nil)
-			assert(n:get_pk('users') == nil)
+			assert(n:pk('users') == nil)
 			n:close()
 		end)
 	end)
@@ -207,16 +207,16 @@ function test.pk_get_exec()
 			local node = db:pk_get('users', 3)
 			node:open()
 			assert(node:next_group() == true)
-			assert(pk_id(node, 'users') == 3)
+			assert(pk_id(node, 'users', db) == 3)
 			--exhausted after one item
 			assert(node:next_group() == nil)
-			assert(node:get_pk('users') == nil)
+			assert(node:pk('users') == nil)
 			node:close()
 			--missing PK returns nil
 			local n = db:pk_get('users', 999)
 			n:open()
 			assert(n:next_group() == nil)
-			assert(n:get_pk('users') == nil)
+			assert(n:pk('users') == nil)
 			n:close()
 		end)
 	end)
@@ -249,7 +249,7 @@ function test.pk_prefix_exec()
 			local n = db:pk_prefix('sessions/user_id,started_at', 3)
 			n:open()
 			assert(n:next_group() == nil)
-			assert(n:get_pk('sessions') == nil)
+			assert(n:pk('sessions') == nil)
 			n:close()
 			--wrong arity: full key (2 cols) not allowed; need 1..n-1
 			assert(not pcall(db.pk_prefix, db, 'sessions/user_id,started_at', 1, 1000))
@@ -307,7 +307,7 @@ function test.merge_join_exec()
 			node:open()
 			local tuples = {}
 			while node:next() do
-				tuples[#tuples+1] = pk_id(node, 'users')..':'..pk_id(node, 'sessions')
+				tuples[#tuples+1] = pk_id(node, 'users', db)..':'..pk_id(node, 'sessions', db)
 			end
 			node:close()
 			assert(cat(tuples, ',') == '1:11,1:12,1:13,2:14,4:15', S(tuples))
@@ -318,8 +318,8 @@ function test.merge_join_exec()
 			left:open()
 			local missing = {}
 			while left:next() do
-				if not left:get_pk('sessions') then
-					missing[#missing+1] = pk_id(left, 'users')
+				if not left:pk('sessions') then
+					missing[#missing+1] = pk_id(left, 'users', db)
 				end
 			end
 			left:close()
@@ -339,7 +339,7 @@ function test.merge_join_reset_group()
 			node:open()
 			local lefts = {}
 			while node:next() do
-				lefts[#lefts+1] = pk_id(node, 'events')
+				lefts[#lefts+1] = pk_id(node, 'events', db)
 			end
 			node:close()
 			--left PKs: 22 (click group), then 21,21,23,23 (open group)
@@ -438,7 +438,7 @@ function test.pk_join_seek_exec()
 			node:open()
 			local tuples = {}
 			while node:next() do
-				tuples[#tuples+1] = pk_id(node, 'users')..':'..pk_id(node, 'sessions')
+				tuples[#tuples+1] = pk_id(node, 'users', db)..':'..pk_id(node, 'sessions', db)
 			end
 			node:close()
 			-- user 1 has sessions 11,12,13; user 2 has 14; user 4 has 15
@@ -466,7 +466,7 @@ function test.pk_join_hash_exec()
 			node:open()
 			local tuples = {}
 			while node:next() do
-				tuples[#tuples+1] = pk_id(node, 'users')..':'..pk_id(node, 'sessions')
+				tuples[#tuples+1] = pk_id(node, 'users', db)..':'..pk_id(node, 'sessions', db)
 			end
 			node:close()
 			-- FK index order: user 1 first (not user 4 which led in score order)
@@ -488,7 +488,7 @@ function test.pk_parent_lookup_exec()
 			node:open()
 			local tuples = {}
 			while node:next() do
-				tuples[#tuples+1] = pk_id(node, 'sessions')..':'..pk_id(node, 'users')
+				tuples[#tuples+1] = pk_id(node, 'sessions', db)..':'..pk_id(node, 'users', db)
 			end
 			node:close()
 			assert(cat(tuples, ',') == '11:1,12:1,13:1,14:2,15:4', S(tuples))
@@ -499,7 +499,7 @@ function test.pk_parent_lookup_exec()
 			node2:open()
 			local t2 = {}
 			while node2:next() do
-				t2[#t2+1] = pk_id(node2, 'sessions')..':'..pk_id(node2, 'users')
+				t2[#t2+1] = pk_id(node2, 'sessions', db)..':'..pk_id(node2, 'users', db)
 			end
 			node2:close()
 			-- sessions 11,12,13 (user 1's sessions in started_at order) -> user 1
@@ -509,7 +509,7 @@ function test.pk_parent_lookup_exec()
 			node3:open()
 			local t3 = {}
 			while node3:next() do
-				t3[#t3+1] = pk_id(node3, 'events')..':'..pk_id(node3, 'sessions')
+				t3[#t3+1] = pk_id(node3, 'events', db)..':'..pk_id(node3, 'sessions', db)
 			end
 			node3:close()
 			assert(cat(t3, ',') == '21:11,22:11,23:14', S(t3))
@@ -574,13 +574,13 @@ function test.nested_join_exec()
 		db:atomic('r', function()
 			local function run(driver)
 				local node = db:nested_join(driver, function(outer)
-					local uid = pk_id(outer, 'users')
+					local uid = pk_id(outer, 'users', db)
 					return db:pk_seek('sessions/user_id', uid)
 				end)
 				node:open()
 				local tuples = {}
 				while node:next() do
-					tuples[#tuples+1] = pk_id(node, 'users')..':'..pk_id(node, 'sessions')
+					tuples[#tuples+1] = pk_id(node, 'users', db)..':'..pk_id(node, 'sessions', db)
 				end
 				node:close()
 				return tuples
@@ -595,7 +595,7 @@ function test.nested_join_exec()
 			local node = db:nested_join(
 				db:pk_seek('users/status', 'active'),
 				function(outer)
-					return db:pk_seek('sessions/user_id', pk_id(outer, 'users'))
+					return db:pk_seek('sessions/user_id', pk_id(outer, 'users', db))
 				end)
 			node:open()
 			node:next()
@@ -610,13 +610,13 @@ function test.anti_join_exec()
 	with_db('anti_join_exec', function(db)
 		db:atomic('r', function()
 			local function pks(node)
-				return collect_pks(node, 'users')
+				return collect_pks(node, 'users', db)
 			end
 			-- keep users with NO sessions (users 3 and 5 have none)
 			local t = pks(db:anti_join(
 				db:pk_range('users'),
 				function(outer)
-					local uid = pk_id(outer, 'users')
+					local uid = pk_id(outer, 'users', db)
 					return db:pk_seek('sessions/user_id', uid)
 				end))
 			assert(cat(t, ',') == '3,5', S(t))
@@ -633,13 +633,13 @@ function test.semi_join_exec()
 	with_db('semi_join_exec', function(db)
 		db:atomic('r', function()
 			local function pks(node)
-				return collect_pks(node, 'users')
+				return collect_pks(node, 'users', db)
 			end
 			-- keep users that have at least one session (users 1,2,4 do; 3,5 don't)
 			local t = pks(db:semi_join(
 				db:pk_range('users'),
 				function(outer)
-					local uid = pk_id(outer, 'users')
+					local uid = pk_id(outer, 'users', db)
 					return db:pk_seek('sessions/user_id', uid)
 				end))
 			assert(cat(t, ',') == '1,2,4', S(t))
@@ -656,7 +656,7 @@ function test.pk_group_exec()
 	with_db('pk_group_exec', function(db)
 		db:atomic('r', function()
 			local function uid_key(n)
-				local ok, _, uid = n:get_cols('sessions', 'user_id')
+				local uid = n:col('sessions', 'user_id')
 				return {uid}
 			end
 			-- sessions/user_id order: user 1 -> {11,12,13}, user 2 -> {14}, user 4 -> {15}
@@ -665,7 +665,7 @@ function test.pk_group_exec()
 			node:open()
 			local firsts = {}
 			while node:next_group() do
-				firsts[#firsts+1] = pk_id(node, 'sessions')
+				firsts[#firsts+1] = pk_id(node, 'sessions', db)
 				-- intentionally skip next_pk to test group-skip in next_group
 			end
 			node:close()
@@ -675,9 +675,9 @@ function test.pk_group_exec()
 			node:open()
 			local groups = {}
 			while node:next_group() do
-				local grp = {pk_id(node, 'sessions')}
+				local grp = {pk_id(node, 'sessions', db)}
 				while node:next_pk() do
-					grp[#grp+1] = pk_id(node, 'sessions')
+					grp[#grp+1] = pk_id(node, 'sessions', db)
 				end
 				groups[#groups+1] = cat(grp, ',')
 			end
@@ -691,14 +691,14 @@ function test.pk_filter_exec()
 	with_db('pk_filter_exec', function(db)
 		db:atomic('r', function()
 			local function pks(node)
-				return collect_pks(node, 'users')
+				return collect_pks(node, 'users', db)
 			end
 			-- keep users with id <= 3 using get_pk in the predicate
 			local t = pks(db:pk_filter(
 				db:pk_range('users'),
 				function(node)
-					local ok = node:get_pk('users')
-					return ok and pk_id(node, 'users') <= 3
+					local ok = node:pk('users')
+					return ok and pk_id(node, 'users', db) <= 3
 				end))
 			assert(cat(t, ',') == '1,2,3', S(t))
 			-- always-true: all active users pass through unchanged
@@ -774,6 +774,44 @@ function test.pk_and_probe_exec()
 			assert(not pcall(db.pk_and_probe, db, db:pk_range('users'), {ix='users', key=1}))
 			-- error: no probes
 			assert(not pcall(db.pk_and_probe, db, db:pk_range('users')))
+		end)
+	end)
+end
+
+function test.select_exec()
+	with_db('select_exec', function(db)
+		db:atomic('r', function()
+			-- base table: read value columns (status, score) via pk_range.
+			-- bug: decode_kv prepends key cols (id) before val cols, so select
+			-- captures id instead of the requested val col.
+			local function collect_recs(node)
+				node:open()
+				local t = {}
+				local rec = node:next_row()
+				while rec do t[#t+1] = rec; rec = node:next_row() end
+				node:close()
+				return t
+			end
+			local recs = collect_recs(db:select(db:pk_range('users'), 'users.status, users.score'))
+			assert(#recs == 5, 'expected 5, got '..#recs)
+			assert(recs[1]['users.status'] == 'active',
+				'user 1 status: expected active, got '..tostring(recs[1]['users.status']))
+			assert(recs[1]['users.score'] == 80,
+				'user 1 score: expected 80, got '..tostring(recs[1]['users.score']))
+			assert(recs[3]['users.status'] == 'banned',
+				'user 3 status: expected banned, got '..tostring(recs[3]['users.status']))
+			-- index scan: read user_id from sessions/user_id index.
+			-- covered read: user_id is in the index key, so no base table seek needed.
+			-- bug: same decode_kv issue returns session id instead of user_id.
+			recs = collect_recs(db:select(db:pk_range('sessions/user_id'), 'sessions.user_id'))
+			-- sessions/user_id order: user 1 (sessions 11,12,13), user 2 (14), user 4 (15)
+			assert(#recs == 5, 'expected 5, got '..#recs)
+			assert(recs[1]['sessions.user_id'] == 1,
+				'session 11 user_id: expected 1, got '..tostring(recs[1]['sessions.user_id']))
+			assert(recs[4]['sessions.user_id'] == 2,
+				'session 14 user_id: expected 2, got '..tostring(recs[4]['sessions.user_id']))
+			assert(recs[5]['sessions.user_id'] == 4,
+				'session 15 user_id: expected 4, got '..tostring(recs[5]['sessions.user_id']))
 		end)
 	end)
 end
