@@ -52,8 +52,8 @@ Reverse iteration reverses the entire scan:
   in the same key space.
 **value nodes**: decode a PK stream into value records; operate on value records.
 
-Access, merge, probe, and transform nodes work on raw PK bytes. Each node
-exposes `get_cols(member, cols)` to read decoded column values on demand;
+Access, merge, probe, and transform nodes work on raw PK bytes.
+`get_col(member, col) -> val | nil` reads decoded column values on demand.
 base-table cursors open lazily per member and only when the requested columns
 are not present in the index. Value nodes produce Lua value records.
 
@@ -210,7 +210,7 @@ One primary input. Transform a PK stream without crossing key spaces. Preserve
 or filter items; produce a PK stream (or value stream for `pk_group` +
 `stream_aggregate`).
 
-`fn` callbacks receive the node itself; use `node:get_cols(member, cols)` to
+`fn` callbacks receive the node itself; use `node:col(member, col)` to
 read column values. Correlated inner queries in `semi_join`, `anti_join`, and
 `nested_join` are called once per item and receive the outer node.
 
