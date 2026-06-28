@@ -53,34 +53,34 @@ CURSORS
 	cur:closed() -> t|f                        check if cursor is closed
 	cur:dbi() -> dbi|nil                       get cursor's dbi
 UPDATE
-	db:try_put_raw    (name|dbi, k, k_sz, v, v_sz, [flags]) -> true | false,'not_found' | false,'already_exists',cur_v,cur_v_sz
-	db:try_insert_raw (name|dbi, k, k_sz, v, v_sz, [flags]) -> true | false,'already_exists',cur_v,cur_v_sz
-	db:try_update_raw (name|dbi, k, k_sz, v, v_sz, [flags]) -> true | false,'not_found'
-	db:try_del_raw    (name|dbi, k, k_sz, [v], [v_sz]) -> true | false,'not_found'
-	cur:try_put_raw   (k, k_sz, v, v_sz, [flags]) -> true | false,'not_found' | false,'already_exists',cur_v,cur_v_sz
+	db:try_put_raw    (name|dbi, k,k_sz, v,v_sz, [flags]) -> true | false,'not_found' | false,'already_exists',cur_v,cur_v_sz
+	db:try_insert_raw (name|dbi, k,k_sz, v,v_sz, [flags]) -> true | false,'already_exists',cur_v,cur_v_sz
+	db:try_update_raw (name|dbi, k,k_sz, v,v_sz, [flags]) -> true | false,'not_found'
+	db:try_del_raw    (name|dbi, k,k_sz, [v], [v_sz]) -> true | false,'not_found'
+	cur:try_put_raw   (k,k_sz, v,v_sz, [flags]) -> true | false,'not_found' | false,'already_exists',cur_v,cur_v_sz
 	cur:try_del_raw   ([flags]) -> true | false,'not_found'
 	db:seq            (name|dbi, increment) -> n   get/increment sequence
 QUERY
-	db:find_raw              (name|dbi, k, k_sz)  -> true, v, v_sz | false,err
-	db:each_raw              (name|dbi) -> iter() -> cur, k, k_sz, v, v_sz
-	cur:move_raw             (op, k,k_sz, v,v_sz) -> true | false,err  (k,v optional)
-	cur:move_raw_kv          (op, k,k_sz, v,v_sz) -> true, k, k_sz, v, v_sz | false,err
-	cur:move_raw_v           (op, k,k_sz, v,v_sz) -> true, v, v_sz | false,err
+	db:find_raw              (name|dbi, k,k_sz)   -> true, v,v_sz | false,err
+	db:each_raw              (name|dbi) -> iter() -> cur, k,k_sz, v,v_sz
+	cur:move_raw             (op, [k],[k_sz], [v],[v_sz]) -> true | false,err  (k,v optional)
+	cur:move_raw_kv          (op, [k],[k_sz], [v],[v_sz]) -> true, k,k_sz, v,v_sz | false,err
+	cur:move_raw_v           (op, [k],[k_sz], [v],[v_sz]) -> true, v,v_sz | false,err
 	cur:first_raw            () -> true, k, k_sz, v, v_sz | false,err
 	cur:last_raw             () -> true, k, k_sz, v, v_sz | false,err
 	cur:next_raw             () -> true, k, k_sz, v, v_sz | false,err
 	cur:prev_raw             () -> true, k, k_sz, v, v_sz | false,err
 	cur:current_raw          () -> true, k, k_sz, v, v_sz | false,err
-	cur:find_raw             (k, k_sz)            -> true, v, v_sz | false,err
-	cur:find_ge_raw          (k, k_sz)            -> true, k, k_sz, v, v_sz | false,err
-	cur:find_le_raw          (k, k_sz)            -> true, k, k_sz, v, v_sz | false,err
-	cur:find_dup_raw         (k, k_sz, v, v_sz)   -> true, v, v_sz | false,err
-	cur:find_dup_ge_raw      (k, k_sz, v, v_sz)   -> true, v, v_sz | false,err
-	cur:find_multiple_raw    (k, k_sz)            -> true, v_ptr, v_sz | false,'not_found'
-	cur:current_multiple_raw ()                   -> true, v_ptr, v_sz | false,'not_found'
-	cur:next_multiple_raw    ()                   -> true, v_ptr, v_sz | false,'not_found'
-	cur:each[_reverse]_raw   ()        -> iter()  -> true, k, k_sz, v, v_sz
-	cur:each_from[_last]_raw (k, k_sz) -> iter()  -> cur, k, k_sz, v, v_sz
+	cur:find_raw             (k,k_sz)             -> true, v,v_sz | false,err
+	cur:find_ge_raw          (k,k_sz)             -> true, k,k_sz, v,v_sz | false,err
+	cur:find_le_raw          (k,k_sz)             -> true, k,k_sz, v,v_sz | false,err
+	cur:find_dup_raw         (k,k_sz, v,v_sz)     -> true, v,v_sz | false,err
+	cur:find_dup_ge_raw      (k,k_sz, v,v_sz)     -> true, v,v_sz | false,err
+	cur:find_multiple_raw    (k,k_sz)             -> true, v,v_sz | false,'not_found'
+	cur:current_multiple_raw ()                   -> true, v,v_sz | false,'not_found'
+	cur:next_multiple_raw    ()                   -> true, v,v_sz | false,'not_found'
+	cur:each[_reverse]_raw   ()       -> iter()   -> true, k,k_sz, v,v_sz
+	cur:each_from[_last]_raw (k,k_sz) -> iter()   -> cur, k,k_sz, v,v_sz
 DEBUG
 	mdbx_set_log_level(level)                  set MDBX log level (now is 'warn')
 
