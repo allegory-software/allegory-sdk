@@ -50,34 +50,34 @@ DDL
 	db:extract_schema ()                            extract stored schema as a schema object
 	db:schema_diff    ()                            compute diff between paper and stored schemas (read-only)
 CURSORS
-	db:cursor       (name|dbi) -> cur      create cursor
+	db:cursor         (name|dbi) -> cur      create cursor
 UPDATE
-	db:put          (name|dbi, [cols], keysvals...)
-	db:insert       (name|dbi, [cols], keysvals...) -> generated_id
-	db:update       (name|dbi, [cols], keysvals...)
-	db:upsert       (name|dbi, [cols], keysvals...)
-	db:del          (name|uk_name|dbi, keys...) -> row_deleted
-	db:put_records  (name|dbi, [cols, ]{keysvals1,...})
-	cur:update      ([val_cols], vals...)
-	cur:del         ()         delete current row (cascades to indexes/fks)
+	db:insert         (name|dbi, [cols], keysvals...) -> seq  insert
+	db:update         (name|dbi, [cols], keysvals...)         update (must exist)
+	db:upsert         (name|dbi, [cols], keysvals...)         insert or partial update
+	db:del            (name|uk_name|dbi, keys...) -> deleted  delete
+	db:put_records    (name|dbi, [cols, ]{keysvals1,...})     bulk put
+	cur:update        ([val_cols], vals...)                   partial update current
+	cur:del           ()                                      delete current
 QUERY
-	db:[must_]find  (name|dbi, [val_cols], keys...) -> vals...
-	db:try_find     (name|dbi, [val_cols], keys...) -> true, vals... | false,err
-	db:is_null      (name|dbi, col, keys...) -> is_null, [reason]
-	db:exists       (name|dbi, keys...) -> record_exists
-	db:each         (name|dbi, [cols]) -> iter() -> cur, keysvals...
-	db:each_reverse (name|dbi, [cols]) -> iter() -> cur, keysvals...    reverse key order
-	db:each_prefix  (name|dbi, [val_cols], pk_val1, ...) -> iter() -> cur, keysvals...
-	db:each_dup     (ix_name|dbi, [val_cols], ix_key_vals...) -> iter() -> cur, keysvals...
-	cur:[must_][try_]{first|last|next|prev|current}([val_cols]) -> keysvals...
-	cur:is_null     (col) -> is_null, [reason]
-	cur:[must_]find ([val_cols], keys...) -> vals...
-	cur:try_find    ([val_cols], keys...) -> true, vals... | false,err
-	cur:[must_|try_]move (op, [val_cols]) -> keysvals... | false,err
-	cur:[try_]find_prefix ([val_cols], pk_val1, ...) -> keysvals... | false,err
-	cur:each_prefix ([val_cols], pk_val1, ...) -> iter() -> cur, keysvals...
-	cur:each_dup         ([val_cols], ix_key_vals...) -> iter() -> cur, keysvals...
-	cur:each_dup_current ([val_cols]) -> iter() -> cur, keysvals...
+	db:[must_|try_]find     (name|dbi, [val_cols], keys...) -> vals...
+	db:is_null              (name|dbi, col, keys...) -> is_null, [reason]
+	db:exists               (name|dbi, keys...) -> record_exists
+	db:each[_reverse]       (name|dbi, [val_cols]) -> iter() -> cur, keysvals...
+	db:each_prefix          (name|dbi, [val_cols], pk_val1, ...) -> iter() -> cur, keysvals...
+	db:each_dup       (ix_name|ix_dbi, [val_cols], keys...) -> iter() -> cur, keysvals...
+	cur:[must_|try_]move    (op, [val_cols]) -> keysvals...
+	cur:[must_|try_]first   ([val_cols]) -> keysvals...
+	cur:[must_|try_]last    ([val_cols]) -> keysvals...
+	cur:[must_|try_]next    ([val_cols]) -> keysvals...
+	cur:[must_|try_]prev    ([val_cols]) -> keysvals...
+	cur:[must_|try_]current ([val_cols]) -> keysvals...
+	cur:[must_|try_]find    ([val_cols], keys...) -> vals...
+	cur:[try_]find_prefix   ([val_cols], pk_val1, ...) -> keysvals...
+	cur:is_null             (col) -> is_null, [reason]
+	cur:each_prefix         ([val_cols], pk_val1, ...) -> iter() -> cur, keysvals...
+	cur:each_dup            ([val_cols], keys...) -> iter() -> cur, keysvals...
+	cur:each_dup_current    ([val_cols]) -> iter() -> cur, keysvals...
 
 COLUMS LISTS & IN/OUT VALUES FORMATS
 
@@ -556,6 +556,45 @@ end
 function Db:decode_kv(tab, ...)
 	local schema = assert(self:table_schema(tab), 'table has no schema')
 	return decode_kv(self, schema, ...)
+end
+
+function Cur:decode_kv(k, k_sz, v, v_sz, val_cols)
+	return decode_kv(self.db, self.schema, k, k_sz, v, v_sz, val_cols)
+end
+
+-- Compile a single-column decoder for use in hot iteration loops.
+-- ix_key: MDBX_val holding the index key (nil when schema is a base table).
+-- pk: MDBX_val holding the base table pk (dup value when schema is an index).
+-- get_base_val() -> data, sz; called lazily when a val field is needed.
+-- Returns f() -> decoded value for the current cursor position.
+function Db:compile_col(schema, col, ix_key, pk, get_base_val)
+	local out, out_sz = key_decode_buffer, MDBX_MAX_KEY_SIZE
+	local ix_f = schema.is_index and schema.fields[col]
+	if ix_f then
+		local st, ki, decode = schema._st, ix_f.key_index-1, ix_f.decode
+		return function()
+			local len = C.schema_get_key(st, ki, ix_key.data, ix_key.size,
+				out, out_sz, pout, nil)
+			return len ~= -1 and decode(pout[0], len) or nil
+		end
+	end
+	local base_schema = schema.val_schema or schema
+	local base_f = base_schema.fields[col]
+	if base_f.key_index then
+		local st, ki, decode = base_schema._st, base_f.key_index-1, base_f.decode
+		return function()
+			local len = C.schema_get_key(st, ki, pk.data, pk.size,
+				out, out_sz, pout, nil)
+			return len ~= -1 and decode(pout[0], len) or nil
+		end
+	else
+		local st, vi, decode = base_schema._st, base_f.val_index-1, base_f.decode
+		return function()
+			local v, v_sz = get_base_val()
+			local len = C.schema_get_val(st, vi, v, v_sz, pout)
+			return len ~= -1 and decode(pout[0], len) or nil
+		end
+	end
 end
 
 --SCHEMA LAYOUTING AND COMPILATION -------------------------------------------
@@ -2509,7 +2548,17 @@ local function enforce_del_fks(self, schema, ...)
 		end
 	end
 end
+
+local function update_indexes(self, event, schema, k, k_sz, v, v_sz, v0, v0_sz, ix_cur)
+	for _, ix_schema in ipairs(schema.indexes) do
+		local cur = ix_cur and ix_cur.schema == ix_schema and ix_cur or nil
+		local ok, err = ix_schema:update(self, k, k_sz, v, v_sz, v0, v0_sz, cur)
+		self:check_row(event, schema.name, ok, err)
+	end
+end
+
 local cur_k_buffer = u8a(MDBX_MAX_KEY_SIZE) --stable copy of a cursor's key across writes
+
 local function cur_update(self, ix_cur, val_cols, ...)
 	local schema = assert(self.schema)
 	if schema.is_index then
@@ -2570,11 +2619,7 @@ local function cur_update(self, ix_cur, val_cols, ...)
 		--copy v0 first: mdbx invalidates get-pointers on the next write.
 		local v0c = v0_buffer(v0_sz); copy(v0c, v0, v0_sz)
 		assert(self:try_put_raw(kk, k_sz, v, v_sz, C.MDBX_CURRENT))
-		for _, ix_schema in ipairs(schema.indexes) do
-			local cur = ix_cur and ix_cur.schema == ix_schema and ix_cur or nil
-			local ok, err = ix_schema:update(db, kk, k_sz, v, v_sz, v0c, v0_sz, cur)
-			db:check_row('c_update', schema.name, ok, err)
-		end
+		update_indexes(db, 'c_update', schema, kk, k_sz, v, v_sz, v0c, v0_sz, ix_cur)
 	end
 	if schema.triggers then
 		fire_triggers(schema, 'after_update', db, old_t, t)
@@ -2607,50 +2652,43 @@ local function put(self, flags, op, tab, cols, ...)
 			local v0_unstable = v0
 			v0 = v0_buffer(v0_sz) --keep v0_sz: buffer() returns capacity, not size
 			copy(v0, v0_unstable, v0_sz)
-			if op == 'update' or op == 'upsert' then --decode v0 and override it.
-				local val_cols = schema.val_cols
-				local t = {}
-				decode_val(schema, v0, v0_sz, t, val_cols, '{}')
-				for i=1,#cols do
-					local col = cols[i]
-					if val_cols[col] then --only value cols can be updated
-						local v = select_col(cols, as, col, ...)
-						if v ~= nil then --nil means skip, null means null.
-							t[col] = v
-						end
+			local val_cols = schema.val_cols
+			local t = {}
+			decode_val(schema, v0, v0_sz, t, val_cols, '{}')
+			for i=1,#cols do
+				local col = cols[i]
+				if val_cols[col] then --only value cols can be updated
+					local v = select_col(cols, as, col, ...)
+					if v ~= nil then --nil means skip, null means null.
+						t[col] = v
 					end
 				end
-				if schema.triggers or schema.has_generated then
-					local kk = put_k_buffer; copy(kk, k, k_sz); k = kk
-					decode_key(schema, k, k_sz, t, '{}')
-					if schema.triggers then
-						old_t = decode_row(schema, k, k_sz, v0, v0_sz)
-						fire_triggers(schema, 'before_update', self, old_t, t)
-					end
-					if schema.has_generated then
-						apply_generated(self, schema, t)
-					end
-					new_t = t
+			end
+			if schema.triggers or schema.has_generated then
+				local kk = put_k_buffer; copy(kk, k, k_sz); k = kk
+				decode_key(schema, k, k_sz, t, '{}')
+				if schema.triggers then
+					old_t = decode_row(schema, k, k_sz, v0, v0_sz)
+					fire_triggers(schema, 'before_update', self, old_t, t)
 				end
-				v_sz = encode_val(self, schema, op, v, v_buf_sz, val_cols, '{}', t)
-				if schema.fks then
-					if not schema.triggers and not schema.has_generated then --pk not yet in t
-						for _, f in ipairs(schema.key_fields) do
-							t[f.col] = select_col(cols, as, f.col, ...)
-						end
+				if schema.has_generated then
+					apply_generated(self, schema, t)
+				end
+				new_t = t
+			end
+			v_sz = encode_val(self, schema, op, v, v_buf_sz, val_cols, '{}', t)
+			if schema.fks then
+				if not schema.triggers and not schema.has_generated then --pk not yet in t
+					for _, f in ipairs(schema.key_fields) do
+						t[f.col] = select_col(cols, as, f.col, ...)
 					end
-					check_fks(self, op, schema, schema.cols, '{}', false, t)
 				end
-			else --update all cols so no need to decode v0
-				v_sz = encode_val(self, schema, op, v, v_buf_sz, cols, as, ...)
-				if schema.fks then
-					check_fks(self, op, schema, cols, as, true, ...)
-				end
+				check_fks(self, op, schema, schema.cols, '{}', false, t)
 			end
 			assert(cur:try_put_raw(k, k_sz, v, v_sz, C.MDBX_CURRENT))
 		elseif op == 'update' then --update but existing row not found
 			self:check_row(op, schema.name, false, v0)
-		else --put, insert, or upsert new record
+		else --insert or upsert new record
 			v0, v0_sz = nil --no previous value (v0 currently holds the find_raw err)
 			v_sz = encode_val(self, schema, op, v, v_buf_sz, cols, as, ...)
 			if schema.triggers or schema.has_generated then
@@ -2675,10 +2713,7 @@ local function put(self, flags, op, tab, cols, ...)
 		end
 		cur:close()
 		if schema.indexes then
-			for _, ix_schema in ipairs(schema.indexes) do
-				local ok, err = ix_schema:update(self, k, k_sz, v, v_sz, v0, v0_sz)
-				self:check_row(op, schema.name, ok, err)
-			end
+			update_indexes(self, op, schema, k, k_sz, v, v_sz, v0, v0_sz)
 		end
 		if schema.triggers and new_t then
 			if old_t then
@@ -2687,17 +2722,13 @@ local function put(self, flags, op, tab, cols, ...)
 				fire_triggers(schema, 'after_insert', self, new_t)
 			end
 		end
-	else --put or insert with no indexes to update or fks to check.
+	else --insert with no indexes to update or fks to check.
 		local v_sz = encode_val(self, schema, op, v, v_buf_sz, cols, as, ...)
 		local ret, err = self:try_put_raw(dbi, k, k_sz, v, v_sz, flags)
 		self:check_row(op, schema.name, ret, err)
 	end
 	log('note', 'db', op, '%s %s', schema.name, cols[S])
 	return autoinc_v
-end
-function Db:put(tab, ...)
-	put(self, nil, 'put', tab, ...)
-	return true
 end
 function Db:insert(tab, ...)
 	return put(self, C.MDBX_NOOVERWRITE, 'insert', tab, ...)
@@ -2800,17 +2831,6 @@ end
 local function skip_ok(ok, ...)
 	if not ok then return end
 	return ...
-end
-
-function Cur:decode_kv(k, k_sz, v, v_sz, val_cols)
-	return decode_kv(self.db, self.schema, k, k_sz, v, v_sz, val_cols)
-end
-function Cur:decode_kv_rec(key_rec, val_rec, val_cols)
-	--NOTE: this creates two boxed pointers. impossible to fix with this ffi.
-	return decode_kv(self.db, self.schema,
-		key_rec.data, key_rec.size,
-		val_rec.data, val_rec.size,
-		val_cols)
 end
 
 function Cur:try_move(op, val_cols)

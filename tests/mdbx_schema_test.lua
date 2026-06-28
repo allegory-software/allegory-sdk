@@ -1461,8 +1461,8 @@ function test.try_put_multi_index_rollback()
 	end)
 end
 
---unique conflicts are atomic for update, replacement put, and both upsert
---branches (existing and new rows).
+--unique conflicts are atomic for update and both upsert branches (existing and
+--new rows).
 function test.try_put_unique_conflict_matrix()
 	with_db('try_put_unique_conflict_matrix', function(db)
 		db:begin'w'
@@ -1491,11 +1491,6 @@ function test.try_put_unique_conflict_matrix()
 		check_row_error(err, 'update', 't', 'already_exists')
 		assert_unchanged()
 
-		ok, err = try_mutation(db, db.put, 't', '{}', {id = 2, email = 'a@x', name = 'P'})
-		assert(not ok)
-		check_row_error(err, 'put', 't', 'already_exists')
-		assert_unchanged()
-
 		ok, err = try_mutation(db, db.upsert,
 			't', '{}', {id = 2, email = 'a@x', name = 'UE'})
 		assert(not ok)
@@ -1507,58 +1502,6 @@ function test.try_put_unique_conflict_matrix()
 		assert(not ok and not db:exists('t', 3))
 		check_row_error(err, 'upsert', 't', 'already_exists')
 		assert_unchanged()
-		db:commit()
-	end)
-end
-
---put replaces an indexed, fk-constrained row and maintains every index; a
---replacement with an invalid fk is rejected without changing row or indexes.
-function test.try_put_indexes_and_fks()
-	with_db('try_put_indexes_and_fks', function(db)
-		db:begin'w'
-		db:create_table('parent', {
-			name = 'parent',
-			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}},
-			pk = {'id'},
-		})
-		db:create_table('child', {
-			name = 'child',
-			fields = {
-				{col = 'id'   , mdbx_type = 'u32' , not_null = true},
-				{col = 'pid'  , mdbx_type = 'u32' , not_null = true},
-				{col = 'cat'  , mdbx_type = 'utf8', maxlen = 8 , nozero = true, not_null = true},
-				{col = 'email', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
-				{col = 'name' , mdbx_type = 'utf8', maxlen = 16},
-			},
-			pk = {'id'},
-		})
-		local _,_,ix_cat = db:add_index('child', {'cat'})
-		local _,_,ix_email = db:add_index('child', {'email', is_unique = true})
-		db:add_fk{table = 'child', cols = {'pid'},
-			ref_table = 'parent', ref_cols = {'id'}}
-		local ix_pid = 'child/pid'
-		db:insert('parent', '{}', {id = 1})
-		db:insert('parent', '{}', {id = 2})
-		db:insert('child', '{}', {id = 10, pid = 1, cat = 'a', email = 'a@x', name = 'A'})
-
-		assert(try_mutation(db, db.put, 'child', '{}', {id = 10, pid = 2, cat = 'b', email = 'b@x'}))
-		local r = db:find('child', '{pid cat email name}', 10)
-		assert(num(r.pid) == 2 and r.cat == 'b' and r.email == 'b@x' and r.name == nil)
-		assert(not db:try_find(ix_pid, nil, 1) and num((db:must_find(ix_pid, '{}', 2)).id) == 10)
-		assert(not db:try_find(ix_cat, nil, 'a') and num((db:must_find(ix_cat, '{}', 'b')).id) == 10)
-		assert(not db:try_find(ix_email, nil, 'a@x')
-			and num((db:must_find(ix_email, '{}', 'b@x')).id) == 10)
-
-		local ok, err = try_mutation(db, db.put, 'child', '{}',
-			{id = 10, pid = 99, cat = 'c', email = 'c@x', name = 'C'})
-		assert(not ok and iserror(err, 'row') and err.message:find('fk', 1, true),
-			tostring(err))
-		r = db:find('child', '{pid cat email name}', 10)
-		assert(num(r.pid) == 2 and r.cat == 'b' and r.email == 'b@x' and r.name == nil)
-		assert(not db:try_find(ix_pid, nil, 99) and num((db:must_find(ix_pid, '{}', 2)).id) == 10)
-		assert(not db:try_find(ix_cat, nil, 'c') and num((db:must_find(ix_cat, '{}', 'b')).id) == 10)
-		assert(not db:try_find(ix_email, nil, 'c@x')
-			and num((db:must_find(ix_email, '{}', 'b@x')).id) == 10)
 		db:commit()
 	end)
 end
@@ -1638,8 +1581,8 @@ function test.try_put_slow_path_early_exits()
 	end)
 end
 
---update, put, and both upsert branches accept scalar, positional-table, and
---named-table column formats with the corresponding merge/replacement semantics.
+--update and both upsert branches accept scalar, positional-table, and
+--named-table column formats with the corresponding merge semantics.
 function test.try_put_cols_formats()
 	with_db('try_put_cols_formats', function(db)
 		db:begin'w'
@@ -1671,13 +1614,6 @@ function test.try_put_cols_formats()
 		assert_row(1, 101, 11, 12)
 		assert_row(2, 20, 202, 22)
 		assert_row(3, 30, 31, 303)
-
-		db:put('t', 'k a', 4, 401)
-		db:put('t', '[k a b]', {5, 501, 502})
-		db:put('t', '{k c}', {k = 6, c = 603})
-		assert_row(4, 401, nil, nil)
-		assert_row(5, 501, 502, nil)
-		assert_row(6, nil, nil, 603)
 
 		db:upsert('t', 'k b', 1, 102)
 		db:upsert('t', '[k c]', {2, 203})
@@ -2020,35 +1956,6 @@ function test.delete_through_indexes()
 		assert(db:exists('t', 1, 1))
 		assert(db:exists('t', 2, 1))
 		assert(num(db:must_find(ix, '{}', 'a', 7).id) == 1)
-		db:commit()
-	end)
-end
-
---put replaces the whole row: a partial put drops the columns it doesn't list
---(unlike update, which preserves them).
-function test.put_replaces()
-	with_db('put_replaces', function(db)
-		db:begin'w'
-		db:create_table('t', {
-			name = 't',
-			fields = {
-				{col = 'id', mdbx_type = 'u32', not_null = true},
-				{col = 'a' , mdbx_type = 'i32'},
-				{col = 'b' , mdbx_type = 'utf8', maxlen = 8},
-			},
-			pk = {'id'},
-		})
-		db:put('t', '{}', {id = 1, a = 10, b = 'x'})
-		--partial put on an existing row replaces it: unlisted 'b' becomes null
-		db:put('t', '{}', {id = 1, a = 20})
-		local g = db:find('t', '{a b}', 1)
-		assert(num(g.a) == 20 and g.b == nil, ('%s,%s'):format(S(g.a), S(g.b)))
-		assert(db:is_null('t', 'b', 1) == true)
-		--contrast: update preserves the unlisted column
-		db:put('t', '{}', {id = 1, a = 30, b = 'y'})
-		db:update('t', '{}', {id = 1, a = 40})
-		g = db:find('t', '{a b}', 1)
-		assert(num(g.a) == 40 and g.b == 'y', ('%s,%s'):format(S(g.a), S(g.b)))
 		db:commit()
 	end)
 end
@@ -4333,8 +4240,8 @@ function test.mixed_index_descending_pk_decode()
 	end)
 end
 
---replacement put and new-row upsert are full writes: an omitted fk column takes
---its default for both storage and FK validation.
+--new-row upsert is a full write: an omitted fk column takes its default for both
+--storage and FK validation.
 function test.fk_default_full_write_operations()
 	with_db('fk_default_full_write_operations', function(db)
 		db:begin'w'
@@ -4349,17 +4256,13 @@ function test.fk_default_full_write_operations()
 		db:insert('parent', '{}', {id = 8})
 		db:insert('child', '{}', {id = 1, pid = 8})
 
-		local ok, err = try_mutation(db, db.put, 'child', '{}', {id = 1})
-		assert(ok == false and is_row_error(err, 'fk'), ('%s,%s'):format(S(ok), S(err)))
-		assert(num(db:find('child', 'pid', 1)) == 8)
-		ok, err = try_mutation(db, db.upsert, 'child', '{}', {id = 2})
+		local ok, err = try_mutation(db, db.upsert, 'child', '{}', {id = 2})
 		assert(not ok and not db:exists('child', 2))
 		assert(is_row_error(err, 'fk'), tostring(err))
 
 		db:insert('parent', '{}', {id = 7})
-		db:put('child', '{}', {id = 1})
 		db:upsert('child', '{}', {id = 2})
-		assert(num(db:find('child', 'pid', 1)) == 7)
+		assert(num(db:find('child', 'pid', 1)) == 8)
 		assert(num(db:find('child', 'pid', 2)) == 7)
 		db:commit()
 	end)
@@ -4846,12 +4749,12 @@ local function make_3col_table(db, name)
 		},
 		pk = {'s1', 's2', 's3'},
 	})
-	db:put(name, nil, 'a', 'x', '1', 'ax1')
-	db:put(name, nil, 'a', 'x', '2', 'ax2')
-	db:put(name, nil, 'a', 'y', '1', 'ay1')
-	db:put(name, nil, 'b', 'x', '1', 'bx1')
-	db:put(name, nil, 'b', 'x', '2', 'bx2')
-	db:put(name, nil, 'c', 'z', '1', 'cz1')
+	db:insert(name, nil, 'a', 'x', '1', 'ax1')
+	db:insert(name, nil, 'a', 'x', '2', 'ax2')
+	db:insert(name, nil, 'a', 'y', '1', 'ay1')
+	db:insert(name, nil, 'b', 'x', '1', 'bx1')
+	db:insert(name, nil, 'b', 'x', '2', 'bx2')
+	db:insert(name, nil, 'c', 'z', '1', 'cz1')
 end
 
 function test.find_prefix_exact_match()
@@ -5011,11 +4914,11 @@ function test.each_prefix_numeric_composite_pk()
 			},
 			pk = {'pid', 'cid'},
 		})
-		db:put('t', '{}', {pid=1, cid=1, v='a'})
-		db:put('t', '{}', {pid=1, cid=2, v='b'})
-		db:put('t', '{}', {pid=2, cid=1, v='c'})
-		db:put('t', '{}', {pid=2, cid=2, v='d'})
-		db:put('t', '{}', {pid=3, cid=1, v='e'})
+		db:insert('t', '{}', {pid=1, cid=1, v='a'})
+		db:insert('t', '{}', {pid=1, cid=2, v='b'})
+		db:insert('t', '{}', {pid=2, cid=1, v='c'})
+		db:insert('t', '{}', {pid=2, cid=2, v='d'})
+		db:insert('t', '{}', {pid=3, cid=1, v='e'})
 		db:commit()
 		db:begin()
 		local cur = db:cursor('t')
