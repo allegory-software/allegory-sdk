@@ -200,11 +200,12 @@ end
 function Db.query_node:col(member, col)
 	local cache = self._col_cache
 	if not cache then cache = {}; self._col_cache = cache end
-	local key = (member or '') .. '\0' .. col
-	local f = cache[key]
+	local mc = cache[member or false]
+	if not mc then mc = {}; cache[member or false] = mc end
+	local f = mc[col]
 	if not f then
 		f = self:compile_col(member, col)
-		cache[key] = f
+		mc[col] = f
 	end
 	return f()
 end
