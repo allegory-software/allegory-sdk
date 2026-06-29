@@ -22,9 +22,9 @@ ORDER / LIMIT / DISTINCT
 FILTERS
 	:eq/:ne/:lt/:le/:gt/:ge(col, val)   comparison
 	:between(col, lo, hi)               range
-	:where(col [,op], val)              op: =, <>, <, <=, >, >=
+	:where(col [,op], val)              op: ==, ~=, <, <=, >, >=
 	:is_null(col) / :is_not_null(col)   null-first key range
-	:like(col, pattern)                 SQL LIKE; literal prefix on indexed col folds to pk_range
+	:starts(col, prefix)                prefix match; folds to pk_range on indexed col
 	:in_(col, values|query)             pk_hash_filter 'in'  (in is a Lua keyword)
 	:not_in(col, values|query)          pk_hash_filter 'not_in'
 	:where_exists(query|fn)             semi_join (correlated) or run-once (uncorrelated)
@@ -41,8 +41,8 @@ PROJECTION
 	:select{outputs}   -> value stream; 'member.col', 'member.col alias', or {name=,fn=}
 	:agg{...}          -> value stream
 SET OPERATIONS
-	union{q,...}       union_distinct over value queries with the same fields
-	union_all{q,...}   union_all
+	db:union{q,...}           union_distinct over value queries with the same fields
+	db:union_all{q,...}       union_all
 CONTROL
 	:use_index(member, ix)    force index
 	:no_index(member [,ix])   forbid index (all if ix omitted)
@@ -53,8 +53,6 @@ TERMINALS
 	:first()   first value record or nil
 	:count()   row count (exact via ix_count or table stat when possible, else count aggregate)
 	:exists()  true if any row matches
-DEBUGGING
-	explain(query)   lower and report nodes; no DB reads
 
 NODE API ---------------------------------------------------------------------
 
@@ -64,21 +62,25 @@ NODE API ---------------------------------------------------------------------
 
 NODE INTERFACE
 
+	All nodes share a single iteration protocol based on next_group()/next_item().
+	Value nodes (item = 'value') extend it with :row() and compile_col.
+
 	Iteration is two-level: merge-key groups and PKs within a group.
 
 	For a base-table node, each row is its own group (one PK per group).
 	For an index node (DUPSORT), each distinct index key is a group; the
 	duplicate list under that key is the PK list within the group.
+	For a value node, each record is its own group; next_pk is always noop.
 
 		node:merge_key() -> k, k_sz   current merge key (index key or base PK).
 		node.merge_cmp()              schema-aware comparator for merge_key bytes.
 		node.merge_sig                key-encoding signature; must match across
 		                              inputs to a merge node.
 
-		node:next_group() -> true|nil  advance to first PK of the next group.
+		node:next_group() -> true|nil  advance to next group (or next value record).
 		node:next_pk()    -> true|nil  advance to next PK within the current group.
-		                               noop (always nil) on base-table nodes and
-		                               on pk_seek, where each PK is its own group.
+		                               noop on base-table nodes, pk_seek, and all
+		                               value nodes (each record is its own group).
 		node:reset_group()             rewind to the first PK of the current group.
 
 	The next_group / next_pk split exists for merge_join: convergence uses
@@ -99,12 +101,25 @@ NODE INTERFACE
 
 	Returns the current PK bytes (or nil when not positioned). The optional
 	member filters by member: in a left join, you'll get nil if the joined member
-	didn't match on current row.
+	didn't match on current row. Value nodes return nil (no PK bytes).
+
+		node:compile_col(member, col) -> fn | nil
+
+	Returns a zero-arg closure that decodes and returns column col for the named
+	member, or nil when the column is absent. PK nodes decode from raw MDBX bytes
+	via a cursor. Value nodes return a closure over :row() using the output alias
+	from the select spec; pass-through value nodes forward to their input.
 
 		node:col(member, col) -> v | nil
 
-	Decodes and returns the value of a single column for the named member.
-	Returns nil when the column is absent or the member does not match.
+	Convenience: calls compile_col, caches the closure, invokes it. Returns nil
+	when the column is absent or the member does not match.
+
+		node:row() -> row   (value nodes only)
+
+	Returns the current decoded Lua row (a table). Valid after next_group()
+	returns true; nil when not positioned. Pass-through nodes delegate to their
+	input with no intermediate store; producing nodes keep an internal slot.
 
 ]]
 
@@ -158,6 +173,12 @@ local function check_driver_member(driver, schema, op)
 		'%s: driver member must be %s', op, schema.name)
 end
 
+-- Used by pk_join_seek and pk_parent_lookup which accept multi-member drivers.
+-- pk_join_hash keeps check_driver_member (single-member only; not called from join chains).
+local function driver_has_member(driver, name)
+	for _, m in ipairs(driver.members) do if m == name then return true end end
+end
+
 --NODE BASE CLASS ------------------------------------------------------------
 
 --a node kind is `Db.<kind> = object(Db.query_node)` with a `:__call(db, ...)`
@@ -193,7 +214,7 @@ function Db.query_node:next_item()
 end
 
 function Db.query_node:explain()
-	return {
+	local t = {
 		kind    = self.kind,
 		item    = self.item,
 		members = self.members and {unpack(self.members)} or nil,
@@ -203,15 +224,21 @@ function Db.query_node:explain()
 		source  = self.source,
 		work    = self.work,
 	}
+	if self.inputs then
+		t.inputs = imap(self.inputs, function(n) return n:explain() end)
+	end
+	return t
 end
 
 --ACCESS NODES ---------------------------------------------------------------
 
-local memcmp = memcmp
+local memcmp, min = memcmp, min
 local function key_cmp(k1, n1, k2, n2)
+	local c = memcmp(k1, k2, min(n1, n2))
+	if c ~= 0 then return c end
 	if n1 < n2 then return -1 end
 	if n1 > n2 then return  1 end
-	return memcmp(k1, k2, n1)
+	return 0
 end
 local function key_ge(k1, n1, k2, n2) return key_cmp(k1, n1, k2, n2) >= 0 end
 local function key_le(k1, n1, k2, n2) return key_cmp(k1, n1, k2, n2) <= 0 end
@@ -770,6 +797,104 @@ function Db.fk_parent_scan:__call(db, ix_name)
 	return node
 end
 
+-- pk_group_first: distinct index key scan; yields one PK per group via NEXT_NODUP.
+-- next_pk() is noop: only the first PK of each distinct index key is exposed.
+-- With prefix values, scans only keys whose first nk columns equal the given values.
+-- Usage: db:pk_group_first(ix_name [, val...])
+Db.pk_group_first = object(Db.query_node, {
+	kind   = 'pk_group_first',
+	item   = 'pk',
+	unique = true,
+	source = 'index cursor',
+	work   = 'index distinct key scan; first PK per group',
+})
+function Db.pk_group_first:__call(db, ix_name, ...)
+	local schema = resolve(db, ix_name)
+	check_index(schema, 'pk_group_first', ix_name)
+	local nk = select('#', ...)
+	local nkey = #schema.key_fields
+	assertf(nk < nkey,
+		'pk_group_first: %s needs 0..%d prefix column(s), got %d', schema.name, nkey - 1, nk)
+	local val_schema = schema.val_schema
+	local order = {}
+	for _, f in ipairs(schema.key_fields) do
+		order[#order+1] = {col = val_schema.name..'.'..f.col, dir = 'asc'}
+	end
+	local ix_key, sz
+	if nk > 0 then
+		sz = mdbx_encode_key_prefix(db, schema, 'prefix',
+			mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE, nk, ...)
+		ix_key = u8a(sz); copy(ix_key, mdbx_key_rec_buffer, sz)
+	end
+	local node = object(self, {
+		members = {val_schema.name},
+		order   = order,
+	})
+	function node:open()
+		local dbi = assert(db:try_dbi(schema.name))
+		local cur = db:cursor_raw(dbi)
+		local base_dbi = assert(db:try_dbi(val_schema.name))
+		local base_cur
+		local cur_alive = true
+		function node:close()
+			if cur_alive then
+				cur:close()
+				if base_cur then base_cur:close() end
+				cur_alive = false
+			end
+		end
+		local has_pk
+		local mk_rec = MDBX_val()
+		local pk_rec = MDBX_val()
+		local base_val_rec = MDBX_val()
+		local base_seeked = false
+		local function get_base_val()
+			if not base_seeked then
+				if not base_cur then base_cur = db:cursor_raw(base_dbi); base_cur.schema = val_schema end
+				base_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, base_val_rec)
+				base_seeked = true
+			end
+			return base_val_rec.data, base_val_rec.size
+		end
+		function node:pk(name)
+			if has_pk and (name == nil or name == val_schema.name) then
+				return true, pk_rec.data, pk_rec.size
+			end
+		end
+		function node:compile_col(member, col)
+			return db:compile_col(schema, col, mk_rec, pk_rec, get_base_val)
+		end
+		function node:merge_key() return mk_rec.data, mk_rec.size end
+		if ix_key then
+			mk_rec.data = ix_key; mk_rec.size = sz
+			if not cur:move_raw_into(C.MDBX_SET_RANGE, mk_rec, pk_rec) then return end
+			if mk_rec.size < sz or memcmp(mk_rec.data, ix_key, sz) ~= 0 then return end
+			has_pk = true
+			local first = true
+			function node:next_group()
+				if first then first = false; return true end
+				if not cur:move_raw_into(C.MDBX_NEXT_NODUP, mk_rec, pk_rec) then has_pk = nil; return end
+				if mk_rec.size < sz or memcmp(mk_rec.data, ix_key, sz) ~= 0 then
+					has_pk = nil; return
+				end
+				has_pk = true; base_seeked = false
+				return true
+			end
+		else
+			local op = C.MDBX_FIRST
+			function node:next_group()
+				if not cur:move_raw_into(op, mk_rec, pk_rec) then has_pk = nil; return end
+				op = C.MDBX_NEXT_NODUP
+				has_pk = true; base_seeked = false
+				return true
+			end
+		end
+	end
+	node.merge_cmp = key_cmp
+	node.merge_sig = schema.key_sig
+	return node
+end
+
 --MERGE NODES ----------------------------------------------------------------
 
 -- Marks a node as optional (left outer) in db:merge_join.
@@ -813,12 +938,12 @@ function Db.merge_join:__call(db, ...)
 		end
 	end
 	local node = object(self, {members = members, order = #order > 0 and order or nil})
+	node.inputs = inputs
 	node.merge_cmp = inputs[1].merge_cmp
 	node.merge_sig = inputs[1].merge_sig
 	function node:open()
 		for i = 1, n do inputs[i]:open() end
 		function node:close() for i = 1, n do inputs[i]:close() end end
-		function node:next_group() return node:next() end
 		local mk    = {}
 		local mk_sz = {}
 		for i = 1, n do
@@ -827,39 +952,7 @@ function Db.merge_join:__call(db, ...)
 		local matched = any_optional and {} or nil
 		local yielded = false
 		function node:merge_key() return mk[1], mk_sz[1] end
-		function node:skip_to(target, target_sz)
-			for i = 1, n do
-				if mk[i] ~= nil and merge_cmp(mk[i], mk_sz[i], target, target_sz) < 0 then
-					if inputs[i]:skip_to(target, target_sz) then mk[i], mk_sz[i] = inputs[i]:merge_key()
-					else mk[i] = nil end
-				end
-			end
-			yielded = false
-			return node:next()
-		end
-		function node:pk(name)
-			if not yielded then return end
-			for i = 1, n do
-				if not matched or not optional[i] or matched[i] then
-					local ok, p, sz = inputs[i]:pk(name)
-					if ok then return true, p, sz end
-				end
-			end
-		end
-		function node:compile_col(member, col)
-			for i = 1, n do
-				for _, m in ipairs(inputs[i].members) do
-					if m == member then
-						local inner = inputs[i]:compile_col(member, col)
-						if matched and optional[i] then
-							return function() return matched[i] and inner() or nil end
-						end
-						return inner
-					end
-				end
-			end
-		end
-		function node:next()
+		local function advance()
 			if yielded then
 				local any_matched = not matched
 				if matched then
@@ -942,6 +1035,39 @@ function Db.merge_join:__call(db, ...)
 				end
 			end
 		end
+		node.next_group = advance
+		function node:skip_to(target, target_sz)
+			for i = 1, n do
+				if mk[i] ~= nil and merge_cmp(mk[i], mk_sz[i], target, target_sz) < 0 then
+					if inputs[i]:skip_to(target, target_sz) then mk[i], mk_sz[i] = inputs[i]:merge_key()
+					else mk[i] = nil end
+				end
+			end
+			yielded = false
+			return advance()
+		end
+		function node:pk(name)
+			if not yielded then return end
+			for i = 1, n do
+				if not matched or not optional[i] or matched[i] then
+					local ok, p, sz = inputs[i]:pk(name)
+					if ok then return true, p, sz end
+				end
+			end
+		end
+		function node:compile_col(member, col)
+			for i = 1, n do
+				for _, m in ipairs(inputs[i].members) do
+					if m == member then
+						local inner = inputs[i]:compile_col(member, col)
+						if matched and optional[i] then
+							return function() return matched[i] and inner() or nil end
+						end
+						return inner
+					end
+				end
+			end
+		end
 	end
 	return node
 end
@@ -981,12 +1107,12 @@ function Db.merge_union:__call(db, mode, ...)
 		end
 	end
 	local node = object(self, {members = members, order = inputs[1].order})
+	node.inputs = inputs
 	node.merge_cmp = merge_cmp
 	node.merge_sig = inputs[1].merge_sig
 	function node:open()
 		for i = 1, n do inputs[i]:open() end
 		function node:close() for i = 1, n do inputs[i]:close() end end
-		function node:next_group() return node:next() end
 		local mk    = {}
 		local mk_sz = {}
 		for i = 1, n do
@@ -996,46 +1122,7 @@ function Db.merge_union:__call(db, mode, ...)
 		local yielded = false
 		local cur_i
 		function node:merge_key() return inputs[cur_i]:merge_key() end
-		function node:skip_to(target, target_sz)
-			for i = 1, n do
-				if mk[i] ~= nil and merge_cmp(mk[i], mk_sz[i], target, target_sz) < 0 then
-					if inputs[i]:skip_to(target, target_sz) then mk[i], mk_sz[i] = inputs[i]:merge_key()
-					else mk[i] = nil end
-				end
-			end
-			yielded = false
-			return node:next()
-		end
-		function node:pk(name)
-			if not yielded then return end
-			if mode == 'full' then
-				for i = 1, n do
-					if to_adv[i] then
-						local ok, p, sz = inputs[i]:pk(name)
-						if ok then return true, p, sz end
-					end
-				end
-			else
-				return inputs[cur_i]:pk(name)
-			end
-		end
-		function node:compile_col(member, col)
-			if mode == 'full' then
-				for i = 1, n do
-					for _, m in ipairs(inputs[i].members) do
-						if m == member then
-							local inner = inputs[i]:compile_col(member, col)
-							return function() return to_adv[i] and inner() or nil end
-						end
-					end
-				end
-			else
-				local closures = {}
-				for i = 1, n do closures[i] = inputs[i]:compile_col(member, col) end
-				return function() return closures[cur_i]() end
-			end
-		end
-		function node:next()
+		local function advance()
 			if yielded then
 				if mode == 'union_all' then
 					if inputs[cur_i]:next_group() then mk[cur_i], mk_sz[cur_i] = inputs[cur_i]:merge_key()
@@ -1071,6 +1158,46 @@ function Db.merge_union:__call(db, mode, ...)
 			yielded = true
 			return true
 		end
+		node.next_group = advance
+		function node:skip_to(target, target_sz)
+			for i = 1, n do
+				if mk[i] ~= nil and merge_cmp(mk[i], mk_sz[i], target, target_sz) < 0 then
+					if inputs[i]:skip_to(target, target_sz) then mk[i], mk_sz[i] = inputs[i]:merge_key()
+					else mk[i] = nil end
+				end
+			end
+			yielded = false
+			return advance()
+		end
+		function node:pk(name)
+			if not yielded then return end
+			if mode == 'full' then
+				for i = 1, n do
+					if to_adv[i] then
+						local ok, p, sz = inputs[i]:pk(name)
+						if ok then return true, p, sz end
+					end
+				end
+			else
+				return inputs[cur_i]:pk(name)
+			end
+		end
+		function node:compile_col(member, col)
+			if mode == 'full' then
+				for i = 1, n do
+					for _, m in ipairs(inputs[i].members) do
+						if m == member then
+							local inner = inputs[i]:compile_col(member, col)
+							return function() return to_adv[i] and inner() or nil end
+						end
+					end
+				end
+			else
+				local closures = {}
+				for i = 1, n do closures[i] = inputs[i]:compile_col(member, col) end
+				return function() return closures[cur_i]() end
+			end
+		end
 	end
 	return node
 end
@@ -1091,33 +1218,18 @@ function Db.merge_except:__call(db, a, b)
 	check_merge_compat({a, b}, 2, 'merge_except')
 	local merge_cmp = a.merge_cmp
 	local node = object(self, {members = a.members, order = a.order})
+	node.inputs = {a, b}
 	node.merge_cmp = merge_cmp
 	node.merge_sig = a.merge_sig
 	function node:open()
 		a:open(); b:open()
 		function node:close() a:close(); b:close() end
-		function node:next_group() return node:next() end
 		local mk1, mk1_sz, mk2, mk2_sz
 		if a:next_group() then mk1, mk1_sz = a:merge_key() end
 		if b:next_group() then mk2, mk2_sz = b:merge_key() end
 		local yielded = false
 		function node:merge_key() return a:merge_key() end
-		function node:skip_to(target, target_sz)
-			if mk1 ~= nil and merge_cmp(mk1, mk1_sz, target, target_sz) < 0 then
-				if a:skip_to(target, target_sz) then mk1, mk1_sz = a:merge_key() else mk1 = nil end
-			end
-			if mk2 ~= nil and merge_cmp(mk2, mk2_sz, target, target_sz) < 0 then
-				if b:skip_to(target, target_sz) then mk2, mk2_sz = b:merge_key() else mk2 = nil end
-			end
-			yielded = false
-			return node:next()
-		end
-		function node:pk(name)
-			if not yielded then return end
-			return a:pk(name)
-		end
-		node.compile_col = a.compile_col
-		function node:next()
+		local function advance()
 			if yielded then
 				if a:next_group() then mk1, mk1_sz = a:merge_key() else mk1 = nil end
 			end
@@ -1136,6 +1248,22 @@ function Db.merge_except:__call(db, a, b)
 				end
 			end
 		end
+		node.next_group = advance
+		function node:skip_to(target, target_sz)
+			if mk1 ~= nil and merge_cmp(mk1, mk1_sz, target, target_sz) < 0 then
+				if a:skip_to(target, target_sz) then mk1, mk1_sz = a:merge_key() else mk1 = nil end
+			end
+			if mk2 ~= nil and merge_cmp(mk2, mk2_sz, target, target_sz) < 0 then
+				if b:skip_to(target, target_sz) then mk2, mk2_sz = b:merge_key() else mk2 = nil end
+			end
+			yielded = false
+			return advance()
+		end
+		function node:pk(name)
+			if not yielded then return end
+			return a:pk(name)
+		end
+		node.compile_col = a.compile_col
 	end
 	return node
 end
@@ -1166,11 +1294,16 @@ function Db.pk_join_seek:__call(db, driver, fk_name)
 	check_index(fk_schema, 'pk_join_seek', fk_name)
 	local child_schema = fk_schema.val_schema
 	local _, parent_schema = find_fk(db, child_schema, fk_schema, 'pk_join_seek', fk_name)
-	check_driver_member(driver, parent_schema, 'pk_join_seek')
+	-- driver may carry multiple members (chained joins); child is the one new member we add.
+	assertf(driver_has_member(driver, parent_schema.name), 'pk_join_seek: driver must have member %s', parent_schema.name)
+	local members = {}
+	for _, m in ipairs(driver.members) do members[#members+1] = m end
+	members[#members+1] = child_schema.name
 	local node = object(self, {
-		members = {parent_schema.name, child_schema.name},
+		members = members,
 		order   = driver.order,
 	})
+	node.inputs = {driver}
 	node.merge_cmp = driver.merge_cmp
 	node.merge_sig = driver.merge_sig
 	function node:open()
@@ -1205,18 +1338,17 @@ function Db.pk_join_seek:__call(db, driver, fk_name)
 		function node:merge_key() return parent_pk, parent_pk_sz end
 		function node:pk(name)
 			if not has_pair then return end
-			if name == nil or name == parent_schema.name then return true, parent_pk, parent_pk_sz
-			elseif name == child_schema.name then return true, child_pk_rec.data, child_pk_rec.size end
+			-- child is the only member this node owns; everything else delegates upstream.
+			if name == child_schema.name then return true, child_pk_rec.data, child_pk_rec.size end
+			return driver:pk(name)
 		end
 		function node:compile_col(member, col)
-			if member == parent_schema.name then
-				return driver:compile_col(member, col)
-			elseif member == child_schema.name then
+			if member == child_schema.name then
 				return db:compile_col(child_schema, col, nil, child_pk_rec, get_child_val)
 			end
+			return driver:compile_col(member, col)
 		end
-		function node:next_group() return node:next() end
-		function node:next()
+		function node:next_group()
 			has_pair = false
 			while true do
 				if in_match then
@@ -1226,7 +1358,7 @@ function Db.pk_join_seek:__call(db, driver, fk_name)
 					in_match = false
 				end
 				if not driver:next_item() then return end
-				local _, p, p_sz = driver:pk()
+				local _, p, p_sz = driver:pk(parent_schema.name)
 				parent_pk, parent_pk_sz = p, p_sz
 				parent_pk_tmp.data = p; parent_pk_tmp.size = p_sz
 				if fk_cur:move_raw_into(C.MDBX_SET_KEY, parent_pk_tmp, child_pk_rec) then
@@ -1262,6 +1394,7 @@ function Db.pk_join_hash:__call(db, driver, fk_name)
 		order   = {{col = parent_schema.name..'.pk', dir = 'asc'},
 		           {col = child_schema.name..'.pk',  dir = 'asc'}},
 	})
+	node.inputs = {driver}
 	node.merge_cmp = key_cmp
 	node.merge_sig = parent_schema.key_sig
 	function node:open()
@@ -1325,8 +1458,7 @@ function Db.pk_join_hash:__call(db, driver, fk_name)
 		end
 		local in_match = false
 		local op = C.MDBX_FIRST
-		function node:next_group() return node:next() end
-		function node:next()
+		function node:next_group()
 			has_pair = false
 			while true do
 				if in_match then
@@ -1375,6 +1507,7 @@ function Db.pk_hash_filter:__call(db, driver, set_node, mode)
 		order   = driver.order,
 		unique  = driver.unique,
 	})
+	node.inputs = {driver, set_node}
 	node.merge_cmp = driver.merge_cmp
 	node.merge_sig = driver.merge_sig
 	function node:open()
@@ -1397,8 +1530,7 @@ function Db.pk_hash_filter:__call(db, driver, set_node, mode)
 		node.compile_col = driver.compile_col
 		function node:merge_key() return driver:merge_key() end
 		local want_in = mode == 'in'
-		function node:next_group() return node:next() end
-		function node:next()
+		function node:next_group()
 			has_pk = false
 			while true do
 				if not driver:next_item() then return end
@@ -1434,12 +1566,17 @@ function Db.pk_parent_lookup:__call(db, driver, fk_name, opts)
 	check_index(fk_schema, 'pk_parent_lookup', fk_name)
 	local child_schema = fk_schema.val_schema
 	local fk, parent_schema = find_fk(db, child_schema, fk_schema, 'pk_parent_lookup', fk_name)
-	check_driver_member(driver, child_schema, 'pk_parent_lookup')
+	-- driver may carry multiple members (chained joins); parent is the one new member we add.
+	assertf(driver_has_member(driver, child_schema.name), 'pk_parent_lookup: driver must have member %s', child_schema.name)
 	local left_join = opts.left
+	local members = {}
+	for _, m in ipairs(driver.members) do members[#members+1] = m end
+	members[#members+1] = parent_schema.name
 	local node = object(self, {
-		members = {child_schema.name, parent_schema.name},
+		members = members,
 		order   = driver.order,
 	})
+	node.inputs = {driver}
 	node.merge_cmp = driver.merge_cmp
 	node.merge_sig = driver.merge_sig
 	function node:open()
@@ -1473,23 +1610,25 @@ function Db.pk_parent_lookup:__call(db, driver, fk_name, opts)
 		function node:merge_key() return child_pk, child_pk_sz end
 		function node:pk(name)
 			if not has_child then return end
-			if name == nil or name == child_schema.name then return true, child_pk, child_pk_sz end
-			if name == parent_schema.name and has_parent then return true, parent_pk, parent_pk_sz end
+			-- parent is the only member this node owns; everything else delegates upstream.
+			if name == parent_schema.name then
+				if has_parent then return true, parent_pk, parent_pk_sz end
+				return -- left-join: child present but parent absent
+			end
+			return driver:pk(name)
 		end
 		function node:compile_col(member, col)
-			if member == child_schema.name then
-				return driver:compile_col(member, col)
-			elseif member == parent_schema.name then
+			if member == parent_schema.name then
 				local inner = db:compile_col(parent_schema, col, nil, parent_key_rec, get_parent_val)
 				return function() return has_parent and inner() or nil end
 			end
+			return driver:compile_col(member, col)
 		end
-		function node:next_group() return node:next() end
-		function node:next()
+		function node:next_group()
 			has_child = false; has_parent = false
 			while true do
 				if not driver:next_item() then return end
-				local _, cp, cp_sz = driver:pk()
+				local _, cp, cp_sz = driver:pk(child_schema.name)
 				child_pk, child_pk_sz = cp, cp_sz
 				for i, ref_col in ipairs(fk.ref_cols) do fk_row[ref_col] = fk_fns[i]() end
 				local pp_sz = mdbx_encode_key(db, parent_schema, 'pk_parent_lookup',
@@ -1527,6 +1666,7 @@ function Db.pk_filter:__call(db, input, fn)
 		unique  = input.unique,
 		item    = input.item,
 	})
+	node.inputs = {input}
 	node.merge_cmp = input.merge_cmp
 	node.merge_sig = input.merge_sig
 	function node:open()
@@ -1539,8 +1679,7 @@ function Db.pk_filter:__call(db, input, fn)
 		end
 		node.compile_col = input.compile_col
 		function node:merge_key() return input:merge_key() end
-		function node:next_group() return node:next() end
-		function node:next()
+		function node:next_group()
 			while true do
 				has_pk = false
 				if not input:next_item() then return end
@@ -1561,6 +1700,7 @@ local function make_existence_join(self, db, outer, inner_fn, want_inner)
 		unique  = outer.unique,
 		item    = outer.item,
 	})
+	node.inputs = {outer}
 	node.merge_cmp = outer.merge_cmp
 	node.merge_sig = outer.merge_sig
 	function node:open()
@@ -1573,8 +1713,7 @@ local function make_existence_join(self, db, outer, inner_fn, want_inner)
 		end
 		node.compile_col = outer.compile_col
 		function node:merge_key() return outer:merge_key() end
-		function node:next_group() return node:next() end
-		function node:next()
+		function node:next_group()
 			has_pk = false
 			while true do
 				if not outer:next_item() then return end
@@ -1622,6 +1761,7 @@ function Db.nested_join:__call(db, outer, inner_fn)
 		unique  = false,
 		item    = 'pk_tuple',
 	})
+	node.inputs = {outer}
 	node.merge_cmp = outer.merge_cmp
 	node.merge_sig = outer.merge_sig
 	function node:open()
@@ -1656,8 +1796,7 @@ function Db.nested_join:__call(db, outer, inner_fn)
 			end
 		end
 		function node:merge_key() return outer:merge_key() end
-		function node:next_group() return node:next() end
-		function node:next()
+		function node:next_group()
 			has_pk = false
 			while true do
 				if cur_inner ~= nil then
@@ -1701,39 +1840,32 @@ function Db.limit:__call(db, input, n, offset)
 		unique  = input.unique,
 		item    = input.item,
 	})
+	node.inputs = {input}
 	node.merge_cmp = input.merge_cmp
 	node.merge_sig = input.merge_sig
 	function node:open()
 		input:open()
 		function node:close() input:close() end
+		node.compile_col = input.compile_col
+		function node:row() return input:row() end
+		local has_item = false
+		function node:pk(name)
+			if not has_item then return end
+			return input:pk(name)
+		end
+		function node:merge_key() return input:merge_key() end
 		local count   = 0
 		local skipped = 0
-		if input.item == 'value' then
-			function node:next_row()
-				if count >= n then return end
-				while true do
-					local rec = input:next_row()
-					if not rec then return end
-					if skipped < offset then skipped = skipped + 1
-					else count = count + 1; return rec end
-				end
-			end
-		else
-			local has_pk = false
-			function node:pk(name)
-				if not has_pk then return end
-				return input:pk(name)
-			end
-			node.compile_col = input.compile_col
-			function node:merge_key() return input:merge_key() end
-			function node:next_group() return node:next() end
-			function node:next()
-				has_pk = false
-				if count >= n then return end
-				while true do
-					if not input:next_item() then return end
-					if skipped < offset then skipped = skipped + 1
-					else count = count + 1; has_pk = true; return true end
+		function node:next_group()
+			has_item = false
+			if count >= n then return end
+			while true do
+				if not input:next_item() then return end
+				if skipped < offset then skipped = skipped + 1
+				else
+					count = count + 1
+					has_item = true
+					return true
 				end
 			end
 		end
@@ -1771,6 +1903,7 @@ function Db.pk_group:__call(db, input, key_fn, opts)
 		unique  = input.unique,
 		item    = input.item,
 	})
+	node.inputs = {input}
 	node.merge_cmp = input.merge_cmp
 	node.merge_sig = input.merge_sig
 	function node:open()
@@ -1851,6 +1984,7 @@ function Db.pk_project:__call(db, input, member_name)
 		members = {member_name},
 		order   = #order > 0 and order or nil,
 	})
+	node.inputs = {input}
 	node.merge_cmp = key_cmp
 	node.merge_sig = schema.key_sig
 	function node:open()
@@ -1865,8 +1999,7 @@ function Db.pk_project:__call(db, input, member_name)
 		end
 		node.compile_col = input.compile_col
 		function node:merge_key() return cur_pk, cur_pk_sz end
-		function node:next_group() return node:next() end
-		function node:next()
+		function node:next_group()
 			has_pk = false
 			while true do
 				if not input:next_item() then return end
@@ -1901,6 +2034,7 @@ function Db.pk_sort:__call(db, input)
 		members = {member_name},
 		order   = {{col = member_name..'.pk', dir = 'asc'}},
 	})
+	node.inputs = {input}
 	node.merge_cmp = key_cmp
 	node.merge_sig = schema.key_sig
 	function node:open()
@@ -1992,6 +2126,7 @@ function Db.pk_and_probe:__call(db, driver, ...)
 		order   = driver.order,
 		unique  = driver.unique,
 	})
+	node.inputs = {driver}
 	node.merge_cmp = driver.merge_cmp
 	node.merge_sig = driver.merge_sig
 	function node:open()
@@ -2018,8 +2153,7 @@ function Db.pk_and_probe:__call(db, driver, ...)
 		end
 		node.compile_col = driver.compile_col
 		function node:merge_key() return driver:merge_key() end
-		function node:next_group() return node:next() end
-		function node:next()
+		function node:next_group()
 			has_pk = false
 			while true do
 				if not driver:next_item() then return end
@@ -2044,6 +2178,16 @@ function Db.pk_and_probe:__call(db, driver, ...)
 end
 
 --VALUE NODES ----------------------------------------------------------------
+
+-- col_map: {member..':'..col -> alias} for compile_col on producing value nodes.
+-- fn-based and synthetic (count, key) outputs have no member/col and are omitted.
+local function build_col_map(fields)
+	local m = {}
+	for _, f in ipairs(fields) do
+		if f.member and f.col then m[f.member..':'..f.col] = f.name end
+	end
+	return m
+end
 
 local function parse_col_spec(s)
 	--'member.col' or 'member.col alias'; returns {name=, member=, col=}
@@ -2095,14 +2239,16 @@ function Db.value_filter:__call(db, input, fn)
 		order   = input.order,
 		unique  = input.unique,
 	})
+	node.inputs = {input}
+	function node:row() return input:row() end
+	function node:compile_col(m, c) return input:compile_col(m, c) end
 	function node:open()
 		input:open()
 		function node:close() input:close() end
-		function node:next_row()
+		function node:next_group()
 			while true do
-				local rec = input:next_row()
-				if not rec then return end
-				if fn(rec) then return rec end
+				if not input:next_group() then return end
+				if fn(input:row()) then return true end
 			end
 		end
 	end
@@ -2128,6 +2274,13 @@ function Db.select:__call(db, input, outputs)
 		order   = input.order,
 		unique  = input.unique,
 	})
+	node.inputs = {input}
+	local col_map = build_col_map(parsed)
+	function node:row() return node._row end
+	function node:compile_col(member, col)
+		local name = col_map[member..':'..col]
+		if name then return function() return node._row[name] end end
+	end
 	function node:open()
 		input:open()
 		local getters = {}
@@ -2141,15 +2294,14 @@ function Db.select:__call(db, input, outputs)
 			end
 			names[i] = o.name
 		end
+		local ngetters = #getters
 		function node:close() input:close() end
-		function node:next_row()
+		function node:next_group()
 			if not input:next_item() then return end
 			local rec = {}
-			for i, get in ipairs(getters) do
-				local name = names[i]
-				rec[name] = get()
-			end
-			return rec
+			for i = 1, ngetters do rec[names[i]] = getters[i]() end
+			node._row = rec
+			return true
 		end
 	end
 	return node
@@ -2173,18 +2325,20 @@ function Db.stream_distinct:__call(db, input, key_fn)
 		order   = input.order,
 		unique  = true,
 	})
+	node.inputs = {input}
+	function node:row() return input:row() end
+	function node:compile_col(m, c) return input:compile_col(m, c) end
 	function node:open()
 		input:open()
 		function node:close() input:close() end
 		local prev_key
-		function node:next_row()
+		function node:next_group()
 			while true do
-				local rec = input:next_row()
-				if not rec then return end
-				local k = key_fn(rec)
+				if not input:next_group() then return end
+				local k = key_fn(input:row())
 				if not prev_key or not keys_eq(k, prev_key) then
 					prev_key = k
-					return rec
+					return true
 				end
 			end
 		end
@@ -2210,28 +2364,31 @@ function Db.hash_distinct:__call(db, input, key_fn)
 		order   = input.order,
 		unique  = true,
 	})
+	node.inputs = {input}
+	function node:row() return input:row() end
+	function node:compile_col(m, c) return input:compile_col(m, c) end
 	function node:open()
 		input:open()
 		function node:close() input:close() end
 		local tuple = tuples()
 		local seen = {}
-		function node:next_row()
+		function node:next_group()
 			while true do
-				local rec = input:next_row()
-				if not rec then return end
-				local t = tuple(unpack(key_fn(rec)))
-				if not seen[t] then
-					seen[t] = true
-					return rec
-				end
+				if not input:next_group() then return end
+				local t = tuple(unpack(key_fn(input:row())))
+				if not seen[t] then seen[t] = true; return true end
 			end
 		end
 	end
 	return node
 end
 
--- value_sort: materialise and sort value records.
--- spec: 'field [asc|desc], ...' string, or a comparator fn(a, b) -> bool.
+-- value_sort: materialise and sort by field values; accepts PK or value input.
+-- For value input: collects rows, sorts, serves via next_group()/:row().
+-- For PK input (single-member only): collects pks + decoded sort values, sorts by
+-- those values, serves as a PK node with compile_col via a fresh base cursor.
+-- spec: 'field [asc|desc], ...' where field is bare alias for value input or
+--   'member.col' for pk input; or a comparator fn(a, b) -> bool (value input only).
 -- null sorts before non-null in asc, after in desc.
 -- Usage: db:value_sort(input, spec)
 Db.value_sort = object(Db.query_node, {
@@ -2239,61 +2396,161 @@ Db.value_sort = object(Db.query_node, {
 	item   = 'value',
 	unique = false,
 	source = 'pass-through',
-	work   = 'materialise and sort value records',
+	work   = 'materialise and sort by field values',
 })
 function Db.value_sort:__call(db, input, spec)
-	check_value_node(input, 'value_sort', 1)
-	local cmp
+	check_node(input, 'value_sort', 1)
+	local is_pk = input.item ~= 'value'
 	if type(spec) == 'function' then
-		cmp = spec
-	else
+		assertf(not is_pk, 'value_sort: comparator function not supported for pk input')
+	end
+	assertf(not is_pk or isstr(spec), 'value_sort: arg 2: string expected for pk input')
+	assertf(not is_pk or #input.members == 1, 'value_sort: pk input must be single-member')
+
+	-- parse spec into parts; for pk input extract member+col for compile_col
+	local parts
+	if type(spec) ~= 'function' then
 		assertf(isstr(spec), 'value_sort: arg 2: string or comparator function expected')
-		local parts = {}
+		parts = {}
+		local default_member = is_pk and input.members[1] or nil
 		for s in spec:gmatch('[^,]+') do
 			s = s:match('^%s*(.-)%s*$')
 			local field, dir = s:match('^(%S+)%s+(%S+)$')
 			if not field then field = s end
 			dir = dir or 'asc'
 			assertf(dir == 'asc' or dir == 'desc', 'value_sort: invalid direction %q in %q', dir, spec)
-			parts[#parts+1] = {field = field, desc = dir == 'desc'}
+			local member, col = field:match('^([^.]+)%.(.+)$')
+			parts[#parts+1] = {field=field, member=member or default_member, col=col or field, desc=dir=='desc'}
 		end
 		assertf(#parts >= 1, 'value_sort: empty spec')
-		cmp = function(a, b)
-			for _, p in ipairs(parts) do
-				local av, bv = a[p.field], b[p.field]
+	end
+
+	-- null-aware comparator over a parallel vals array {a_vals, b_vals}
+	local function make_cmp(get_vals)
+		return function(a, b)
+			local av_list, bv_list = get_vals(a), get_vals(b)
+			for i, p in ipairs(parts) do
+				local av, bv = av_list[i], bv_list[i]
 				if av ~= bv then
-					local a_null, b_null = av == null, bv == null
+					local a_null, b_null = av == null or av == nil, bv == null or bv == nil
 					if a_null ~= b_null then
-						return p.desc and b_null or a_null
+						return p.desc and b_null or not p.desc and a_null
 					end
-					return p.desc and av > bv or av < bv
+					return p.desc and av > bv or not p.desc and av < bv
 				end
 			end
 			return false
 		end
 	end
-	local node = object(self, {
-		members = input.members,
-		unique  = input.unique,
-	})
-	function node:open()
-		input:open()
-		local recs = {}
-		while 1 do
-			local rec = input:next_row()
-			if not rec then break end
-			recs[#recs+1] = rec
+
+	if is_pk then
+		-- PK path: output is still a PK node; compile_col serves via fresh cursor.
+		local member_name = input.members[1]
+		local schema = resolve(db, member_name)
+		local node = object(self, {
+			members = {member_name},
+			order   = input.order,
+			unique  = input.unique,
+			item    = input.item,
+		})
+		node.inputs = {input}
+		function node:open()
+			input:open()
+			local decoders = {}
+			for _, p in ipairs(parts) do
+				decoders[#decoders+1] = input:compile_col(p.member, p.col)
+			end
+			local entries = {}
+			while input:next_item() do
+				local _, p, p_sz = input:pk()
+				local pk = u8a(p_sz); copy(pk, p, p_sz)
+				local vals = {}
+				for i, dec in ipairs(decoders) do vals[i] = dec() end
+				entries[#entries+1] = {p=pk, sz=p_sz, vals=vals}
+			end
+			input:close()
+			local cmp = make_cmp(function(e) return e.vals end)
+			sort(entries, cmp)
+			local base_dbi = assert(db:try_dbi(member_name))
+			local base_cur
+			local cur_pk_rec = MDBX_val()
+			local base_val_rec = MDBX_val()
+			local base_seeked = false
+			local has_pk = false
+			local idx = 0
+			local function get_base_val()
+				if not base_seeked then
+					if not base_cur then base_cur = db:cursor_raw(base_dbi); base_cur.schema = schema end
+					base_cur:move_raw_into(C.MDBX_SET_KEY, cur_pk_rec, base_val_rec)
+					base_seeked = true
+				end
+				return base_val_rec.data, base_val_rec.size
+			end
+			function node:close()
+				if base_cur then base_cur:close(); base_cur = nil end
+			end
+			function node:pk(name)
+				if not has_pk then return end
+				if name == nil or name == member_name then
+					return true, cur_pk_rec.data, cur_pk_rec.size
+				end
+			end
+			function node:compile_col(member, col)
+				return db:compile_col(schema, col, nil, cur_pk_rec, get_base_val)
+			end
+			function node:next_group()
+				idx = idx + 1
+				local e = entries[idx]
+				if not e then has_pk = false; return end
+				cur_pk_rec.data = e.p; cur_pk_rec.size = e.sz
+				has_pk = true; base_seeked = false
+				return true
+			end
 		end
-		input:close()
-		sort(recs, cmp)
-		local i = 0
-		function node:close() end
-		function node:next_row()
-			i = i + 1
-			return recs[i]
+		return node
+	else
+		-- value path: collect rows, sort, serve via next_group()/:row().
+		local node = object(self, {
+			members = input.members,
+			unique  = input.unique,
+		})
+		node.inputs = {input}
+		function node:row() return node._row end
+		local cmp
+		if type(spec) == 'function' then
+			cmp = spec
+		else
+			cmp = function(a, b)
+				for _, p in ipairs(parts) do
+					local av, bv = a[p.field], b[p.field]
+					if av ~= bv then
+						local a_null, b_null = av == null or av == nil, bv == null or bv == nil
+						if a_null ~= b_null then
+							return p.desc and b_null or not p.desc and a_null
+						end
+						return p.desc and av > bv or not p.desc and av < bv
+					end
+				end
+				return false
+			end
 		end
+		function node:open()
+			input:open()
+			local recs = {}
+			while input:next_group() do recs[#recs+1] = input:row() end
+			input:close()
+			sort(recs, cmp)
+			local i = 0
+			function node:close() end
+			function node:next_group()
+				i = i + 1
+				if not recs[i] then return end
+				node._row = recs[i]
+				return true
+			end
+		end
+		return node
 	end
-	return node
 end
 
 local function agg_init(agg)
@@ -2342,7 +2599,16 @@ function Db.stream_aggregate:__call(db, input, key_fn, agg)
 		'stream_aggregate: arg 2: function or nil expected')
 	assertf(type(agg) == 'table' and #agg >= 1,
 		'stream_aggregate: arg 3: non-empty agg list expected')
+	local fields = {}
+	for _, a in ipairs(agg) do fields[#fields+1] = {name=a.name, member=a.member, col=a.col} end
 	local node = object(self, {members = input.members, unique = true})
+	node.inputs = {input}
+	local col_map = build_col_map(fields)
+	function node:row() return node._row end
+	function node:compile_col(member, col)
+		local name = col_map[member..':'..col]
+		if name then return function() return node._row[name] end end
+	end
 	function node:open()
 		input:open()
 		function node:close() input:close() end
@@ -2373,21 +2639,23 @@ function Db.stream_aggregate:__call(db, input, key_fn, agg)
 			end
 		end
 		if not key_fn then
-			function node:next_row()
+			function node:next_group()
 				if done then return end; done = true
 				local acc = agg_init(agg)
 				while input:next_item() do accumulate(acc, nil) end
-				return agg_finalize(agg, acc)
+				node._row = agg_finalize(agg, acc)
+				return true
 			end
 		else
-			function node:next_row()
+			function node:next_group()
 				if done then return end
 				if not input:next_group() then done = true; return end
 				local key = key_fn(input)
 				local acc = agg_init(agg)
 				accumulate(acc, key)
 				while input:next_pk() do accumulate(acc, key) end
-				return agg_finalize(agg, acc)
+				node._row = agg_finalize(agg, acc)
+				return true
 			end
 		end
 	end
@@ -2413,6 +2681,8 @@ function Db.hash_aggregate:__call(db, input, key_fn, agg)
 	assertf(type(agg) == 'table' and #agg >= 1,
 		'hash_aggregate: arg 3: non-empty agg list expected')
 	local node = object(self, {members = input.members, unique = true})
+	node.inputs = {input}
+	function node:row() return node._row end
 	function node:open()
 		input:open()
 		local function accumulate(acc, rec, key)
@@ -2443,8 +2713,8 @@ function Db.hash_aggregate:__call(db, input, key_fn, agg)
 		local group_list = {}
 		local group_map  = {}
 		local tuple_space = key_fn and tuples() or nil
-		local rec = input:next_row()
-		while rec do
+		while input:next_group() do
+			local rec = input:row()
 			local key, t
 			if key_fn then
 				key = key_fn(rec)
@@ -2456,17 +2726,21 @@ function Db.hash_aggregate:__call(db, input, key_fn, agg)
 			if not acc then
 				acc = agg_init(agg)
 				group_map[t] = acc
-				group_list[#group_list+1] = {acc, key}
+				group_list[#group_list+1] = acc
 			end
 			accumulate(acc, rec, key)
-			rec = input:next_row()
 		end
 		input:close()
 		local output = {}
-		for _, g in ipairs(group_list) do output[#output+1] = agg_finalize(agg, g[1]) end
+		for _, g in ipairs(group_list) do output[#output+1] = agg_finalize(agg, g) end
 		local i = 0
 		function node:close() end
-		function node:next_row() i = i + 1; return output[i] end
+		function node:next_group()
+			i = i + 1
+			if not output[i] then return end
+			node._row = output[i]
+			return true
+		end
 	end
 	return node
 end
@@ -2484,20 +2758,30 @@ function Db.union_all:__call(db, ...)
 	local n = select('#', ...)
 	assertf(n >= 2, 'union_all: need at least 2 inputs, got %d', n)
 	local inputs = {}
-	for i = 1, n do
-		local inp = (select(i, ...))
-		check_value_node(inp, 'union_all', i)
-		inputs[i] = inp
+	for j = 1, n do
+		local inp = (select(j, ...))
+		check_value_node(inp, 'union_all', j)
+		inputs[j] = inp
 	end
 	local node = object(self, {members = inputs[1].members})
+	node.inputs = inputs
+	local cur_i = 1
+	function node:row() return inputs[cur_i]:row() end
+	function node:compile_col(member, col)
+		local cls = {}
+		for j = 1, n do cls[j] = inputs[j]:compile_col(member, col) end
+		return function() return cls[cur_i] and cls[cur_i]() end
+	end
 	function node:open()
-		for i = 1, n do inputs[i]:open() end
-		function node:close() for i = 1, n do inputs[i]:close() end end
+		for j = 1, n do inputs[j]:open() end
+		function node:close() for j = 1, n do inputs[j]:close() end end
 		local i = 1
-		function node:next_row()
+		function node:next_group()
 			while i <= n do
-				local rec = inputs[i]:next_row()
-				if rec then return rec end
+				if inputs[i]:next_group() then
+					cur_i = i
+					return true
+				end
 				i = i + 1
 			end
 		end
@@ -2518,33 +2802,42 @@ function Db.union_distinct:__call(db, ...)
 	local n = select('#', ...)
 	assertf(n >= 2, 'union_distinct: need at least 2 inputs, got %d', n)
 	local inputs = {}
-	for i = 1, n do
-		local inp = (select(i, ...))
-		check_value_node(inp, 'union_distinct', i)
-		inputs[i] = inp
+	for j = 1, n do
+		local inp = (select(j, ...))
+		check_value_node(inp, 'union_distinct', j)
+		inputs[j] = inp
 	end
 	local node = object(self, {members = inputs[1].members, unique = true})
+	node.inputs = inputs
+	local cur_i = 1
+	function node:row() return inputs[cur_i]:row() end
+	function node:compile_col(member, col)
+		local cls = {}
+		for j = 1, n do cls[j] = inputs[j]:compile_col(member, col) end
+		return function() return cls[cur_i] and cls[cur_i]() end
+	end
 	function node:open()
-		for i = 1, n do inputs[i]:open() end
-		function node:close() for i = 1, n do inputs[i]:close() end end
+		for j = 1, n do inputs[j]:open() end
+		function node:close() for j = 1, n do inputs[j]:close() end end
 		local seen = {}
-		local tuple_space
-		local fields
+		local tuple_space = tuples()
+		-- key list discovered from first row; sorted for deterministic tuple encoding.
+		local key_list = nil
 		local i = 1
-		function node:next_row()
+		function node:next_group()
 			while i <= n do
-				local rec = inputs[i]:next_row()
-				if rec then
-					if not fields then
-						fields = {}
-						for k in pairs(rec) do fields[#fields+1] = k end
-						sort(fields)
-						tuple_space = tuples()
+				if inputs[i]:next_group() then
+					cur_i = i
+					local rec = inputs[i]:row()
+					if not key_list then
+						key_list = {}
+						for k in pairs(rec) do key_list[#key_list+1] = k end
+						sort(key_list)
 					end
 					local vals = {}
-					for j, f in ipairs(fields) do vals[j] = rec[f] end
+					for _, k in ipairs(key_list) do vals[#vals+1] = rec[k] end
 					local t = tuple_space(unpack(vals))
-					if not seen[t] then seen[t] = true; return rec end
+					if not seen[t] then seen[t] = true; return true end
 				else
 					i = i + 1
 				end
@@ -2592,14 +2885,15 @@ function Db:from(spec) return qnew(self, spec) end
 
 local function addf(q, f) q._filt[#q._filt+1] = f; return q end
 
-function Q:eq(col, v)          return addf(self, {k='eq',    col=col, v=v}) end
-function Q:ne(col, v)          return addf(self, {k='ne',    col=col, v=v}) end
-function Q:lt(col, v)          return addf(self, {k='lt',    col=col, v=v}) end
-function Q:le(col, v)          return addf(self, {k='le',    col=col, v=v}) end
-function Q:gt(col, v)          return addf(self, {k='gt',    col=col, v=v}) end
-function Q:ge(col, v)          return addf(self, {k='ge',    col=col, v=v}) end
+function Q:eq(col, v)          return addf(self, {k='==',    col=col, v=v}) end
+function Q:ne(col, v)          return addf(self, {k='~=',    col=col, v=v}) end
+function Q:lt(col, v)          return addf(self, {k='<',     col=col, v=v}) end
+function Q:le(col, v)          return addf(self, {k='<=',    col=col, v=v}) end
+function Q:gt(col, v)          return addf(self, {k='>',     col=col, v=v}) end
+function Q:ge(col, v)          return addf(self, {k='>=',    col=col, v=v}) end
 function Q:is_null(col)        return addf(self, {k='null',  col=col}) end
 function Q:is_not_null(col)    return addf(self, {k='ntnull',col=col}) end
+function Q:starts(col, prefix) return addf(self, {k='starts',col=col, prefix=prefix}) end
 function Q:filter(fn)          return addf(self, {k='fn',    fn=fn}) end
 function Q:in_(col, set)       return addf(self, {k='in',    col=col, set=set}) end
 function Q:not_in(col, set)    return addf(self, {k='nin',   col=col, set=set}) end
@@ -2612,10 +2906,30 @@ function Q:between(col, lo, hi)
 	return addf(self, {k='range', col=col, lo_op='>=', lo=lo, hi_op='<=', hi=hi})
 end
 
-local opk = {['=']='eq',['<>']='ne',['<']='lt',['<=']='le',['>']='gt',['>=']='ge'}
+local cmp = {
+	['=='] = function(a, b) return a == b end,
+	['~='] = function(a, b) return a ~= b end,
+	['<' ] = function(a, b) return a <  b end,
+	['<='] = function(a, b) return a <= b end,
+	['>' ] = function(a, b) return a >  b end,
+	['>='] = function(a, b) return a >= b end,
+}
+
 function Q:where(col, op_or_v, v)
 	if v == nil then return self:eq(col, op_or_v) end
-	return addf(self, {k=assertf(opk[op_or_v],'where: bad op %q',op_or_v), col=col, v=v})
+	assertf(cmp[op_or_v], 'where: bad op %q', op_or_v)
+	return addf(self, {k=op_or_v, col=col, v=v})
+end
+
+function Q:or_where(col, op_or_v, v)
+	local sub
+	if v == nil then
+		sub = {k='==', col=col, v=op_or_v}
+	else
+		assertf(cmp[op_or_v], 'or_where: bad op %q', op_or_v)
+		sub = {k=op_or_v, col=col, v=v}
+	end
+	return addf(self, {k='or', sub=sub})
 end
 
 --join methods
@@ -2680,8 +2994,9 @@ function Q:select(spec) self._sel = spec; return self end
 function Q:having(col, op_or_v, v)
 	self._hav = self._hav or {}
 	if v == nil then
-		self._hav[#self._hav+1] = {col = col, op = '=', v = op_or_v}
+		self._hav[#self._hav+1] = {col = col, op = '==', v = op_or_v}
 	else
+		assertf(cmp[op_or_v], 'having: bad op %q', op_or_v)
 		self._hav[#self._hav+1] = {col = col, op = op_or_v, v = v}
 	end
 	return self
@@ -2702,6 +3017,8 @@ function Q:no_index(member, ix)
 	self._hints[sname] = h
 	return self
 end
+
+function Q:use_counts() self._use_counts = true; return self end
 
 --lowering helpers
 
@@ -2745,6 +3062,47 @@ local function qtrans_order(q, o)
 	return col..(o.desc and ' desc' or '')
 end
 
+-- true when node.order is a prefix match (or exact) of q._order in the same direction.
+local function order_matches(node, q)
+	local have = node.order
+	if not have then return false end
+	local want = q._order
+	if #want > #have then return false end
+	for i, o in ipairs(want) do
+		local spec = qtrans_order(q, o)
+		local col, dir = spec:match('^(.+) (desc)$')
+		if not col then col, dir = spec, 'asc' end
+		local h = have[i]
+		if h.col ~= col or h.dir ~= dir then return false end
+	end
+	return true
+end
+
+-- true when the value stream is already in group order for the distinct columns,
+-- meaning stream_distinct can be used instead of hash_distinct (O(1) vs O(n) memory).
+-- Compares output column names against physical column names in vnode.order; only
+-- correct when columns are not aliased in select, but safely falls back otherwise.
+local function dist_grouped(vnode, q)
+	local have = vnode.order
+	if not have then return false end
+	local dc = q._dist
+	if #dc > #have then return false end
+	for i, c in ipairs(dc) do
+		if have[i].col ~= c then return false end
+	end
+	return true
+end
+
+-- Increment the last non-0xFF byte of a string to get a strict upper prefix bound.
+-- Returns nil when all bytes are 0xFF (no finite upper bound exists).
+-- Used by starts() to fold a prefix filter into a pk_range hi bound.
+local function next_prefix(s)
+	local i = #s
+	while i >= 1 and s:byte(i) == 255 do i = i - 1 end
+	if i < 1 then return nil end
+	return s:sub(1, i-1) .. string.char(s:byte(i) + 1)
+end
+
 -- try to find an index plan for ix_schema given member filters mf.
 -- mf: list of filter specs with _col (bare col name) pre-set.
 -- is_pk: true when ix_schema is the base table (produces pk_get instead of pk_seek).
@@ -2759,19 +3117,25 @@ local function try_ix_plan(ix_schema, mf, is_pk)
 		local col = f._col
 		if not col then goto continue end
 		local k = f.k
-		if k == 'eq' and not is_outer(f.v) then
+		if k == '==' and not is_outer(f.v) then
 			if not eq[col] then eq[col] = {v=f.v, fi=i} end
 		elseif k == 'null' then
 			if not eq[col] then eq[col] = {v=null, fi=i} end
-		elseif (k == 'gt' or k == 'ge') and not is_outer(f.v) then
-			if not lo_by[col] then lo_by[col] = {op=k=='ge' and '>=' or '>', v=f.v, fi=i} end
-		elseif (k == 'lt' or k == 'le') and not is_outer(f.v) then
-			if not hi_by[col] then hi_by[col] = {op=k=='le' and '<=' or '<', v=f.v, fi=i} end
+		elseif (k == '>' or k == '>=') and not is_outer(f.v) then
+			if not lo_by[col] then lo_by[col] = {op=k, v=f.v, fi=i} end
+		elseif (k == '<' or k == '<=') and not is_outer(f.v) then
+			if not hi_by[col] then hi_by[col] = {op=k, v=f.v, fi=i} end
 		elseif k == 'range' and not is_outer(f.lo) and not is_outer(f.hi) then
 			if not lo_by[col] then lo_by[col] = {op=f.lo_op, v=f.lo, fi=i} end
 			if not hi_by[col] then hi_by[col] = {op=f.hi_op, v=f.hi, fi=i} end
 		elseif k == 'ntnull' then
 			if not lo_by[col] then lo_by[col] = {op='>', v=null, fi=i} end
+		elseif k == 'starts' then
+			if not lo_by[col] then lo_by[col] = {op='>=', v=f.prefix, fi=i} end
+			if not hi_by[col] then
+				local hi = next_prefix(f.prefix)
+				if hi then hi_by[col] = {op='<', v=hi, fi=i} end
+			end
 		end
 		::continue::
 	end
@@ -2807,7 +3171,7 @@ end
 -- build the access node for the from-table member.
 -- mf: filters for this member with _col set.
 -- returns: node, consumed (set: filter_index -> true)
-local function build_access(db, schema, mf, hints)
+local function build_access(db, schema, mf, hints, use_counts)
 	local h = hints[schema.name]
 	local best
 	if h and h.use then
@@ -2824,7 +3188,12 @@ local function build_access(db, schema, mf, hints)
 			local skip = no_all or (h and h.no and h.no[ix_s.name])
 			if not skip then
 				local p = try_ix_plan(ix_s, mf, false)
-				if p and (not best or p.score > best.score) then best = p end
+				if p then
+					local better = not best or p.score > best.score
+						or (use_counts and p.score == best.score
+							and db:table_entries(p.ix) < db:table_entries(best.ix))
+					if better then best = p end
+				end
 			end
 		end
 	end
@@ -2855,58 +3224,62 @@ local function build_access(db, schema, mf, hints)
 end
 
 -- build a pk_filter predicate from a residual filter spec
-local function mk_pkfn(f)
+local function mk_pkfn(db, f)
 	local sn, col, k = f._sname, f._col, f.k
 	if k == 'fn' then return f.fn end
-	if k == 'eq' then
+	if k == '==' or k == '~=' then
+		local fn, v = cmp[k], f.v
+		return function(node) return fn(node:col(sn, col), v) end
+	end
+	local fn = cmp[k]
+	if fn then
 		local v = f.v
-		return function(node) return node:col(sn, col) == v end
-	elseif k == 'ne' then
-		local v = f.v
-		return function(node) return node:col(sn, col) ~= v end
-	elseif k == 'lt' then
-		local v = f.v
-		return function(node) local g = node:col(sn, col); return g ~= nil and g ~= null and g < v end
-	elseif k == 'le' then
-		local v = f.v
-		return function(node) local g = node:col(sn, col); return g ~= nil and g ~= null and g <= v end
-	elseif k == 'gt' then
-		local v = f.v
-		return function(node) local g = node:col(sn, col); return g ~= nil and g ~= null and g > v end
-	elseif k == 'ge' then
-		local v = f.v
-		return function(node) local g = node:col(sn, col); return g ~= nil and g ~= null and g >= v end
-	elseif k == 'null' then
-		return function(node) return node:col(sn, col) == null end
+		return function(node) local g = node:col(sn, col); return g ~= nil and g ~= null and fn(g, v) end
+	end
+	if k == 'null' then
+		return function(node) local v = node:col(sn, col); return v == nil or v == null end
 	elseif k == 'ntnull' then
 		return function(node) local g = node:col(sn, col); return g ~= nil and g ~= null end
 	elseif k == 'range' then
-		local lo, hi, lo_op, hi_op = f.lo, f.hi, f.lo_op, f.hi_op
+		local lo, hi, lo_fn, hi_fn = f.lo, f.hi, cmp[f.lo_op], cmp[f.hi_op]
 		return function(node)
 			local g = node:col(sn, col)
 			if g == nil or g == null then return false end
-			local lo_ok = lo_op == '>=' and g >= lo or g > lo
-			local hi_ok = hi_op == '<=' and g <= hi or g < hi
-			return lo_ok and hi_ok
+			return lo_fn(g, lo) and hi_fn(g, hi)
 		end
-	elseif k == 'in' then
+	elseif k == 'in' or k == 'nin' then
+		local mt = db:table_schema(sn).fields[col].mdbx_type
+		assertf(mt ~= 'i64' and mt ~= 'u64',
+			'list-based in_/not_in on boxed %s column %s.%s', mt, sn, col)
 		local lut = {}; for _, v in ipairs(f.set) do lut[v] = true end
-		return function(node) return lut[node:col(sn, col)] ~= nil end
-	elseif k == 'nin' then
-		local lut = {}; for _, v in ipairs(f.set) do lut[v] = true end
-		return function(node) return lut[node:col(sn, col)] == nil end
+		if k == 'in' then
+			return function(node) return lut[node:col(sn, col)] ~= nil end
+		else
+			return function(node) return lut[node:col(sn, col)] == nil end
+		end
+	elseif k == 'starts' then
+		local prefix, n = f.prefix, #f.prefix
+		return function(node)
+			local v = node:col(sn, col)
+			return type(v) == 'string' and v:sub(1, n) == prefix
+		end
 	end
 	assertf(false, 'mk_pkfn: unhandled filter kind %q', k)
 end
 
 -- categorize filters by member; resolve alias.col; set _sname/_col on each filter.
--- returns: by_member ({sname -> list}), cross (fn/exists/has filters)
+-- returns: by_member ({sname -> list}), cross (fn/exists/has filters), or_conds (or_where filters)
 local function prep_filters(q, filt)
 	local by_member = {}
 	local cross = {}
+	local or_conds = {}
 	for _, f in ipairs(filt) do
 		local k = f.k
-		if k == 'fn' or k == 'ex' or k == 'nex' or k == 'has' or k == 'hasnt' then
+		if k == 'or' then
+			local sn, col = qrcol(q, f.sub.col)
+			f.sub._sname = sn; f.sub._col = col
+			or_conds[#or_conds+1] = f.sub
+		elseif k == 'fn' or k == 'ex' or k == 'nex' or k == 'has' or k == 'hasnt' then
 			cross[#cross+1] = f
 		else
 			local sn, col = qrcol(q, f.col)
@@ -2915,7 +3288,7 @@ local function prep_filters(q, filt)
 			by_member[sn][#by_member[sn]+1] = f
 		end
 	end
-	return by_member, cross
+	return by_member, cross, or_conds
 end
 
 -- find FK between from_sname and to_sname.
@@ -2979,7 +3352,7 @@ local function lower_ex_filter(db, node, f, outer_q)
 			if q2._from.alias ~= q2._from.tbl then from_spec = from_spec..' '..q2._from.alias end
 			local rq = qnew(q2._db, from_spec)
 			rq._al = q2._al; rq._joins = q2._joins; rq._order = q2._order
-			rq._lim = q2._lim; rq._off = q2._off; rq._sel = q2._sel; rq._hints = q2._hints
+			rq._lim = q2._lim; rq._off = q2._off; rq._sel = q2._sel; rq._hints = q2._hints; rq._use_counts = q2._use_counts
 			for _, f2 in ipairs(q2._filt) do
 				local cf = {}; for k2, v2 in pairs(f2) do cf[k2] = v2 end
 				cf.v = res(on, cf.v); cf.lo = res(on, cf.lo); cf.hi = res(on, cf.hi)
@@ -3004,26 +3377,172 @@ local function make_key_fn(grp_cols)
 	end
 end
 
---main lowering pass
+--[[
+Lowering pass: translate the builder's logical description into a physical
+node tree. The output is either a PK stream (no select/agg; used by
+count/exists) or a value stream.
 
+All steps before select/agg operate on raw PK bytes. Column values are
+decoded lazily via compile_col only when needed, so rows that are filtered
+away at PK level never incur a base-table read.
+
+Steps in order:
+
+  1. ACCESS (from-table)
+     One index drives the scan; build_access scores all candidates against
+     the current AND filters and picks the best. Equality folds to pk_seek or
+     pk_get; range to pk_range with lo/hi bounds; leading-key prefix to
+     pk_prefix; no match -> full pk_range scan. Filters the index absorbed
+     are marked consumed; the rest become step-2 predicates.
+
+  2. RESIDUAL AND FILTERS
+     Conditions not consumed by the access node (non-indexed col, second
+     index col when first was used for range, outer-ref value) are applied
+     here as pk_filter predicates wrapping the access node.
+
+  3. OR CONDITIONS
+     OR requires independent branches because each branch may use a different
+     index. The main AND branch (steps 1-2) is one branch; each or_where
+     condition is another. merge_union deduplicates in PK order. Any branch
+     in ix-order is normalised first with pk_sort, because merge_union
+     requires all inputs to share the same merge_sig. Joins and cross filters
+     (steps 4-5) are applied to the merged, deduplicated stream.
+
+  4. JOINS
+     Each join adds a member. FK direction determines the node:
+       child->parent: pk_parent_lookup (one base-table seek per row)
+       parent->child: pk_join_seek (one FK-index seek per row)
+     First join: applied directly to the flat PK stream.
+     Later joins: the driver is a multi-member tuple (item='pk_tuple'), so
+     pk_project extracts the FK-bearing member into a flat PK stream before
+     joining, then pk_project strips it back to just the child table.
+     acc tracks all accumulated members so FK discovery can find the right
+     side of the relation when from= is not specified.
+     Filters on a joined table are applied immediately after its join, while
+     the cursor for that member is still positioned.
+
+  5. CROSS-MEMBER FILTERS
+     Applied after all joins so every member is in scope.
+     fn: pk_filter with the user predicate.
+     ex/nex: semi/anti join. Correlated per row when the inner query
+     references an outer column; otherwise the inner query runs once.
+     has/hasnt without fn: materialise the set of parent-PKs-with-children
+     via fk_parent_scan, then filter the driver by membership (pk_hash_filter,
+     O(n+m)). With fn: semi/anti join; the user fn shapes the inner query.
+
+  6. PK-LEVEL LIMIT
+     Without order_by, limit stops the scan early at PK level.
+     Also applied when order_ok (see step 2): the access node already delivers
+     rows in query order, so value_sort is skipped and limit terminates early.
+     Otherwise deferred to step 9.
+
+  7. AGGREGATE / SELECT  (PK stream -> value stream)
+     Without select or agg, return the PK node; count/exists needs no decode.
+     agg + group_by: pk_group collapses consecutive same-key rows (requires
+     group order), then stream_aggregate reads each group via next_pk.
+     agg only: grand-total stream_aggregate over the whole stream.
+     select: db:select decodes the requested columns into value records.
+
+  8. HAVING
+     Post-aggregate value_filter; must see value records, not PKs.
+
+  9. DISTINCT, ORDER, VALUE-LEVEL LIMIT
+     hash_distinct before sort (fewer records to sort), value_sort materialises
+     the full stream, limit takes the top n. Skipped entirely when order_ok.
+]]
 function Q:_lower()
 	local db   = self._db
 	local q    = self
 	local from_s = assertf(db:table_schema(q._from.tbl), 'from: unknown table %s', q._from.tbl)
 	assertf(not from_s.is_index, 'from: index not allowed: %s', q._from.tbl)
 
-	local by_member, cross = prep_filters(q, q._filt)
+	local by_member, cross, or_conds = prep_filters(q, q._filt)
 
-	-- access node
+	-- 1. ACCESS: build_access scores all indexes against the AND filters and
+	--    picks the best; consumed marks which filter entries it absorbed.
 	local mf = by_member[q._from.tbl] or {}
-	local node, consumed = build_access(db, from_s, mf, q._hints)
+	local node, consumed = build_access(db, from_s, mf, q._hints, q._use_counts)
 
-	-- residual from-member filters
+	-- order_ok: access node already delivers rows in q._order; value_sort is skipped
+	-- and limit is applied at PK level (step 6) for early termination.
+	-- Requires: no or_conds (merge_union reorders to PK), no joins (change order),
+	-- no agg/distinct/having (need full materialization before reducing).
+	local order_ok = q._order and q._lim
+		and not q._agg and not q._dist and not q._hav
+		and #q._joins == 0 and #or_conds == 0
+		and order_matches(node, q)
+
+	-- 2. RESIDUAL AND FILTERS: conditions the access node could not encode.
+	-- pk_and_probe: when order_ok, equality filters fully covered by a secondary
+	-- index become probes instead of pk_filter predicates; the driver's natural
+	-- order is preserved and limit (step 6) can then terminate the scan early.
+	local probe_consumed = {}
+	if order_ok then
+		local rmf, rfi = {}, {}
+		for i, f in ipairs(mf) do
+			if not consumed[i] then rmf[#rmf+1] = f; rfi[#rfi+1] = i end
+		end
+		local used = {}
+		local probes = {}
+		for _, ix_s in ipairs(from_s.indexes or empty) do
+			local p = try_ix_plan(ix_s, rmf, false)
+			if p and p.kind == 'pk_seek' then
+				local conflict = false
+				for ri in pairs(p.consumed) do if used[ri] then conflict = true; break end end
+				if not conflict then
+					probes[#probes+1] = {ix = ix_s.name, key = p.vals}
+					for ri in pairs(p.consumed) do used[ri] = true end
+				end
+			end
+		end
+		if #probes > 0 then
+			for ri in pairs(used) do probe_consumed[rfi[ri]] = true end
+			node = db:pk_and_probe(node, unpack(probes))
+		end
+	end
 	for i, f in ipairs(mf) do
-		if not consumed[i] then node = db:pk_filter(node, mk_pkfn(f)) end
+		if not consumed[i] and not probe_consumed[i] then
+			-- query-based in_/not_in: materialise subquery PKs into a hash and filter
+			-- driver by membership; the col is the PK col and the subquery must be in
+			-- the same PK key space. For FK use cases use where_exists instead.
+			if (f.k == 'in' or f.k == 'nin') and f.set._lower then
+				node = db:pk_hash_filter(node, f.set:_lower(), f.k == 'in' and 'in' or 'not_in')
+			else
+				node = db:pk_filter(node, mk_pkfn(db, f))
+			end
+		end
 	end
 
-	-- joins
+	-- 3. OR CONDITIONS: each branch gets its own access node (and its own
+	--    index). All branches must be in PK order (same merge_sig) before
+	--    merge_union; pk_sort normalises any ix-order branch.
+	if #or_conds > 0 then
+		local has_and = false
+		for _, f in ipairs(q._filt) do if f.k ~= 'or' then has_and = true; break end end
+		assertf(has_and, 'or_where: at least one :where filter required before :or_where')
+		for _, oc in ipairs(or_conds) do
+			assertf(oc._sname == q._from.tbl,
+				'or_where: column must be on the from-table %s', q._from.tbl)
+		end
+		if node.merge_sig ~= from_s.key_sig then node = db:pk_sort(node) end
+		local nodes = {node}
+		for _, oc in ipairs(or_conds) do
+			local or_node, or_consumed = build_access(db, from_s, {oc}, {}, q._use_counts)
+			if not or_consumed[1] then
+				or_node = db:pk_filter(or_node, mk_pkfn(db, oc))
+			end
+			if or_node.merge_sig ~= from_s.key_sig then
+				or_node = db:pk_sort(or_node)
+			end
+			nodes[#nodes+1] = or_node
+		end
+		node = db:merge_union(unpack(nodes))
+	end
+
+	-- 4. JOINS: acc tracks accumulated members for FK auto-discovery.
+	--    Strategy: child->parent -> pk_parent_lookup; parent->child -> pk_join_seek.
+	--    Both nodes accept multi-member drivers, so join chains of any length lower
+	--    the same way: each step appends one new member to the running node.
 	local acc = {q._from.tbl}
 	for _, j in ipairs(q._joins) do
 		if j.nested then
@@ -3046,36 +3565,24 @@ function Q:_lower()
 			end
 			assertf(from_sname, 'join: no FK from accumulated members to %s', join_tbl)
 			local dir, fk_ix = qfind_fk(db, from_sname, join_tbl, j.fk_hint or j.ix_hint)
-			if #acc == 1 then
-				if dir == 'child_to_parent' then
-					node = db:pk_parent_lookup(node, fk_ix, j.left and {left=true} or nil)
-				else
-					assertf(not j.left, 'left join parent->child not yet supported')
-					node = db:pk_join_seek(node, fk_ix)
-				end
+			-- pk_join_seek and pk_parent_lookup now accept multi-member drivers
+			-- (they carry the full member list from prior joins), so chains of 3+
+			-- tables lower identically to a 2-table join -- no nested_join wrapper needed.
+			if dir == 'child_to_parent' then
+				node = db:pk_parent_lookup(node, fk_ix, j.left and {left=true} or nil)
 			else
-				local fsn, jtbl, fk_cap, dir_cap, left_cap =
-					from_sname, join_tbl, fk_ix, dir, j.left
-				node = db:nested_join(node, function(on)
-					local drv2 = db:pk_project(on, fsn)
-					local joined
-					if dir_cap == 'child_to_parent' then
-						joined = db:pk_parent_lookup(drv2, fk_cap, left_cap and {left=true} or nil)
-					else
-						assertf(not left_cap, 'left join parent->child not yet supported')
-						joined = db:pk_join_seek(drv2, fk_cap)
-					end
-					return db:pk_project(joined, jtbl)
-				end)
+				assertf(not j.left, 'left join parent->child not yet supported')
+				node = db:pk_join_seek(node, fk_ix)
 			end
+			-- apply join-table filters immediately; the join cursor is still positioned.
 			for _, f in ipairs(by_member[join_tbl] or empty) do
-				node = db:pk_filter(node, mk_pkfn(f))
+				node = db:pk_filter(node, mk_pkfn(db, f))
 			end
 			acc[#acc+1] = join_tbl
 		end
 	end
 
-	-- cross-member filters
+	-- 5. CROSS-MEMBER FILTERS: applied after all joins so every member is in scope.
 	for _, f in ipairs(cross) do
 		local k = f.k
 		if k == 'fn' then
@@ -3088,6 +3595,7 @@ function Q:_lower()
 			assertf(dir2 == 'parent_to_child',
 				'where_has: %s must have FK to %s', fk_tbl, q._from.tbl)
 			if f.fn then
+				-- user fn shapes the inner query; evaluate correlated per outer row.
 				local want = k == 'has'
 				local fsn_cap, fk_cap2 = q._from.tbl, fk_ix2
 				local ufn = f.fn
@@ -3099,18 +3607,23 @@ function Q:_lower()
 				if want then node = db:semi_join(node, inner_fn)
 				else node = db:anti_join(node, inner_fn) end
 			else
+				-- materialise the set of parents-with-children once via fk_parent_scan,
+				-- then filter the driver by membership; O(n+m), no per-row index seek.
 				node = db:pk_hash_filter(node, db:fk_parent_scan(fk_ix2),
 					k == 'has' and 'in' or 'not_in')
 			end
 		end
 	end
 
-	-- PK-level limit when no order_by and no aggregate
-	if q._lim and not q._order and not q._agg then
+	-- 6. PK-LEVEL LIMIT: without order_by the stream order is stable; limit
+	--    stops the scan early. Also applied when order_ok (rows already in order).
+	--    Otherwise deferred to step 9.
+	if q._lim and not q._agg and (not q._order or order_ok) then
 		node = db:limit(node, q._lim, q._off)
 	end
 
-	-- aggregate
+	-- 7. AGGREGATE / SELECT: transition from PK stream to value stream.
+	--    Without either, return the PK node; count/exists needs no value decode.
 	local vnode
 	if q._agg then
 		local tagg = {}
@@ -3120,6 +3633,8 @@ function Q:_lower()
 			tagg[#tagg+1] = ta
 		end
 		if q._grp then
+			-- group_by requires group order: pk_group collapses consecutive same-key
+			-- rows, stream_aggregate reads all rows per group via next_pk.
 			local grp_cols = {}
 			for _, c in ipairs(q._grp) do
 				local sn, col = qrcol(q, c)
@@ -3131,44 +3646,75 @@ function Q:_lower()
 				full_agg[#full_agg+1] = {name=gc.col, op='key', part=i}
 			end
 			for _, a in ipairs(tagg) do full_agg[#full_agg+1] = a end
-			vnode = db:stream_aggregate(db:pk_group(node, key_fn), key_fn, full_agg)
+
+			-- pk_group_first: when no filters/joins narrow the scan and tagg is empty,
+			-- the index cursor groups natively via NEXT_NODUP (O(n groups) base reads).
+			local grp_ix
+			if #tagg == 0 and #mf == 0 and #or_conds == 0 and #cross == 0 and #q._joins == 0 then
+				local n = #grp_cols
+				for _, ix_s in ipairs(from_s.indexes or empty) do
+					if #ix_s.key_fields == n then
+						local match = true
+						for i, kf in ipairs(ix_s.key_fields) do
+							if kf.col ~= grp_cols[i].col then match = false; break end
+						end
+						if match then grp_ix = ix_s.name; break end
+					end
+				end
+			end
+			if grp_ix then
+				vnode = db:stream_aggregate(db:pk_group_first(grp_ix), key_fn, full_agg)
+			else
+				vnode = db:stream_aggregate(db:pk_group(node, key_fn), key_fn, full_agg)
+			end
 		else
 			vnode = db:stream_aggregate(node, nil, tagg)
 		end
 	elseif q._sel then
 		vnode = db:select(node, qtrans_sel(q, q._sel))
 	else
-		return node   -- no select/agg: PK node for count/exists
+		-- order_by/limit without select: value_sort handles pk input directly.
+		-- distinct and having require a value stream and must be paired with select.
+		assertf(not q._dist, 'distinct requires select')
+		assertf(not q._hav, 'having requires select')
+		if q._order and not order_ok then
+			local spec_parts = {}
+			for _, o in ipairs(q._order) do spec_parts[#spec_parts+1] = qtrans_order(q, o) end
+			node = db:value_sort(node, cat(spec_parts, ','))
+			if q._lim then node = db:limit(node, q._lim, q._off) end
+		end
+		return node
 	end
 
-	-- having
+	-- 8. HAVING: post-aggregate predicate; must see value records, not PKs.
 	if q._hav then
 		for _, h in ipairs(q._hav) do
-			local hv, hop, hcol = h.v, h.op, h.col
-			local fn
-			if     hop == '='  then fn = function(r) return r[hcol] == hv end
-			elseif hop == '<>' then fn = function(r) return r[hcol] ~= hv end
-			elseif hop == '<'  then fn = function(r) return r[hcol] <  hv end
-			elseif hop == '<=' then fn = function(r) return r[hcol] <= hv end
-			elseif hop == '>'  then fn = function(r) return r[hcol] >  hv end
-			elseif hop == '>=' then fn = function(r) return r[hcol] >= hv end
-			end
-			vnode = db:value_filter(vnode, fn)
+			local hv, fn, hcol = h.v, cmp[h.op], h.col
+			vnode = db:value_filter(vnode, function(r) return fn(r[hcol], hv) end)
 		end
 	end
 
-	-- distinct
+	-- 9. DISTINCT, ORDER, VALUE-LEVEL LIMIT.
+	--    Distinct before sort so value_sort operates on fewer records.
+	--    stream_distinct when the value stream is already grouped by the distinct cols;
+	--    hash_distinct otherwise (O(n) memory).
 	if q._dist then
 		local dc = q._dist
-		vnode = db:hash_distinct(vnode, function(r)
+		local key_fn = function(r)
 			local parts = {}
 			for _, c in ipairs(dc) do parts[#parts+1] = r[c] ~= nil and r[c] or null end
 			return parts
-		end)
+		end
+		if dist_grouped(vnode, q) then
+			vnode = db:stream_distinct(vnode, key_fn)
+		else
+			vnode = db:hash_distinct(vnode, key_fn)
+		end
 	end
 
-	-- order_by -> value_sort; value-level limit
-	if q._order then
+	-- value_sort materialises the full stream; limit takes the top n.
+	-- Skipped when order_ok: limit was already applied at PK level in step 6.
+	if q._order and not order_ok then
 		local spec_parts = {}
 		for _, o in ipairs(q._order) do spec_parts[#spec_parts+1] = qtrans_order(q, o) end
 		vnode = db:value_sort(vnode, cat(spec_parts, ','))
@@ -3187,9 +3733,8 @@ function Q:rows()
 	local function close() if not closed then node:close(); closed = true end end
 	if node.item == 'value' then
 		return function()
-			local r = node:next_row()
-			if not r then close() end
-			return r
+			if not node:next_group() then close(); return end
+			return node:row()
 		end
 	else
 		return function()
@@ -3204,7 +3749,7 @@ function Q:first()
 	local node = self:_lower()
 	node:open()
 	local r
-	if node.item == 'value' then r = node:next_row()
+	if node.item == 'value' then r = node:next_group() and node:row() or nil
 	else r = node:next_group() and node or nil end
 	node:close()
 	return r
@@ -3215,7 +3760,7 @@ function Q:count()
 	node:open()
 	local n = 0
 	if node.item == 'value' then
-		while node:next_row() do n = n + 1 end
+		while node:next_group() do n = n + 1 end
 	else
 		while node:next_group() do
 			n = n + 1
@@ -3229,7 +3774,7 @@ end
 function Q:exists()
 	local node = self:_lower()
 	node:open()
-	local found = node.item == 'value' and node:next_row() ~= nil or node:next_group() ~= nil
+	local found = node:next_group() ~= nil
 	node:close()
 	return found
 end

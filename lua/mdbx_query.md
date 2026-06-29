@@ -366,11 +366,6 @@ PK tuple streams track uniqueness per member. Full rules in `mdbx_query_validato
 			'users'))
 
 
-## NON-GOALS
-
-Window functions, query caching, prepared statements.
-
-
 ## QUERY BUILDER
 
 A composable expression that lowers to a tree of the nodes above. Same query +
@@ -420,9 +415,9 @@ FILTERS (chained = ANDed):
 
 	:eq/:ne/:lt/:le/:gt/:ge(col, val)   comparison
 	:between(col, lo, hi)               range
-	:where(col [,op], val)              op: =, <>, <, <=, >, >=
+	:where(col [,op], val)              op: ==, ~=, <, <=, >, >=
 	:is_null(col) / :is_not_null(col)   null-first key range
-	:like(col, pattern)                 SQL LIKE; literal prefix on indexed col folds to pk_range
+	:starts(col, prefix)                prefix match; folds to pk_range on indexed col
 	:in_(col, values|query)             pk_hash_filter 'in'  (in is a Lua keyword)
 	:not_in(col, values|query)          pk_hash_filter 'not_in'
 	:where_exists(query|fn)             semi_join (correlated) or run-once (uncorrelated)
@@ -464,10 +459,10 @@ GROUP / AGGREGATE:
 	:agg{...}                    without :group_by -> grand total
 	:having(col [,op], val|fn)   value_filter after aggregate
 
-When `:group_by(col)` is the leading column of an index and no earlier filter has
-already narrowed the scan, the builder lowers to `pk_group_first(ix) +
-stream_aggregate` instead of `pk_group(pk_range(ix)) + stream_aggregate`. This
-visits O(n groups) rows rather than O(n rows).
+When the `:group_by` columns exactly match all key columns of an index (in order),
+no filter has narrowed the scan, and `:agg{}` is empty, the builder lowers to
+`pk_group_first(ix) + stream_aggregate` instead of `pk_group(pk_range(ix)) +
+stream_aggregate`. This visits O(n groups) rows rather than O(n rows).
 
 PROJECTION:
 

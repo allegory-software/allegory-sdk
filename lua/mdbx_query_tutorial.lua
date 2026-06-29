@@ -131,6 +131,8 @@ Full scan with select and terminals.
 
 db:from('post') scans the post table from first to last row.
 :select('post.id, post.title') picks which columns appear in each result.
+Without an alias the output key is the full 'member.col' string.
+See column_alias for how to use shorter names.
 
 Terminals run the query:
   :rows()   -- iterator, yields one record per row
@@ -140,11 +142,11 @@ Terminals run the query:
 ]]
 	db:atomic('r', function()
 		local rows = rows_of(db:from('post'):select('post.id, post.title'))
-		pr(#rows)           -- 5
-		pr(rows[1].id)      -- 1
-		pr(rows[1].title)   -- Lua intro
+		pr(#rows)                   -- 5
+		pr(rows[1]['post.id'])      -- 1
+		pr(rows[1]['post.title'])   -- Lua intro
 
-		pr(db:from('post'):select('post.id'):first().id)  -- 1
+		pr(db:from('post'):select('post.id'):first()['post.id'])  -- 1
 		pr(db:from('post'):count())   -- 5
 		pr(db:from('post'):exists())  -- true
 	end)
@@ -171,7 +173,7 @@ function tutorial.equality_filters()
 Equality filters: :eq / :where / :ne.
 
 :eq(col, v) and :where(col, v) keep rows where col equals v.
-:where(col, op, v) also accepts op: =  <>  <  <=  >  >=
+:where(col, op, v) also accepts op: ==  ~=  <  <=  >  >=
 :ne(col, v) keeps rows where col differs from v.
 
 When the column has an index, :eq uses it for a fast exact lookup.
@@ -179,12 +181,12 @@ When there is no index the whole table is scanned and each row checked.
 col can be 'post.status' (qualified) or just 'status' (assumes the from table).
 ]]
 	db:atomic('r', function()
-		for r in db:from('post'):eq('status', 'published'):select('post.id'):rows() do
+		for r in db:from('post'):eq('status', 'published'):select('post.id id'):rows() do
 			pr(r.id)     -- 2, 3
 		end
 
-		-- :where with explicit op is identical to :eq for '='
-		for r in db:from('post'):where('status', '=', 'published'):select('post.id'):rows() do
+		-- :where with explicit op is identical to :eq for '=='
+		for r in db:from('post'):where('status', '==', 'published'):select('post.id id'):rows() do
 			pr(r.id)     -- 2, 3
 		end
 
@@ -206,12 +208,12 @@ Null sorts before all non-null values in ascending order.
 ]]
 	db:atomic('r', function()
 		-- posts with score >= 50
-		for r in db:from('post'):ge('score', 50):select('post.id, post.score'):rows() do
+		for r in db:from('post'):ge('score', 50):select('post.id id, post.score score'):rows() do
 			pr(r.id, r.score)   -- 2  50 / 3  80
 		end
 
 		-- posts with 10 <= score <= 50
-		for r in db:from('post'):between('score', 10, 50):select('post.id, post.score'):rows() do
+		for r in db:from('post'):between('score', 10, 50):select('post.id id, post.score score'):rows() do
 			pr(r.id, r.score)   -- 1  10 / 2  50 / 5  20
 		end
 	end)
@@ -228,7 +230,7 @@ Null sorts before non-null in ascending order.
 ]]
 	db:atomic('r', function()
 		-- only Galaxies (post 4) has no score
-		for r in db:from('post'):is_null('score'):select('post.id'):rows() do
+		for r in db:from('post'):is_null('score'):select('post.id id'):rows() do
 			pr(r.id)    -- 4
 		end
 
@@ -247,11 +249,11 @@ Set membership: :in_ / :not_in.
 Neither uses an index; both scan the whole table.
 ]]
 	db:atomic('r', function()
-		for r in db:from('post'):in_('status', {'draft', 'archived'}):select('post.id'):rows() do
+		for r in db:from('post'):in_('status', {'draft', 'archived'}):select('post.id id'):rows() do
 			pr(r.id)    -- 1, 4, 5
 		end
 
-		for r in db:from('post'):not_in('status', {'published', 'archived'}):select('post.id'):rows() do
+		for r in db:from('post'):not_in('status', {'published', 'archived'}):select('post.id id'):rows() do
 			pr(r.id)    -- 1, 5
 		end
 	end)
@@ -267,12 +269,12 @@ one of the filters and applies the rest as row-by-row checks on top.
 ]]
 	db:atomic('r', function()
 		-- status index used for 'published'; score is a residual check
-		for r in db:from('post'):eq('status', 'published'):ge('score', 60):select('post.id'):rows() do
+		for r in db:from('post'):eq('status', 'published'):ge('score', 60):select('post.id id'):rows() do
 			pr(r.id)    -- 3   (score 80, published)
 		end
 
 		-- no score index; both are residual
-		for r in db:from('post'):ge('score', 10):le('score', 30):select('post.id'):rows() do
+		for r in db:from('post'):ge('score', 10):le('score', 30):select('post.id id'):rows() do
 			pr(r.id)    -- 1  5   (scores 10, 20)
 		end
 	end)
@@ -284,20 +286,18 @@ function tutorial.custom_predicate()
 Custom predicate: :filter(fn).
 
 :filter(fn) runs a Lua function on each row. fn receives a cursor node
-positioned on the current row. Call node:get_cols(member, {col, ...}) to
-read values; it returns true followed by the column values (or null).
-  local ok, score = node:get_cols('post', {'score'})
-For multiple columns:
-  local ok, score, status = node:get_cols('post', {'score', 'status'})
+positioned on the current row. Call node:col(member, col) to read a
+single column value; returns nil when the column is absent or null.
+  local score = node:col('post', 'score')
 ]]
 	db:atomic('r', function()
 		local rows = rows_of(
 			db:from('post')
 				:filter(function(node)
-					local ok, score = node:get_cols('post', {'score'})
-					return ok and score ~= null and score > 15 and score < 60
+					local score = node:col('post', 'score')
+					return score ~= nil and score ~= null and score > 15 and score < 60
 				end)
-				:select('post.id, post.score'))
+				:select('post.id id, post.score score'))
 		for _, r in ipairs(rows) do
 			pr(r.id, r.score)   -- 2  50 / 5  20
 		end
@@ -314,7 +314,7 @@ All column references in filters and select must use the alias.
 Aliases are required when the same table appears more than once in a query.
 ]]
 	db:atomic('r', function()
-		for r in db:from('post p'):eq('p.status', 'published'):select('p.id'):rows() do
+		for r in db:from('post p'):eq('p.status', 'published'):select('p.id id'):rows() do
 			pr(r.id)    -- 2, 3
 		end
 	end)
@@ -402,13 +402,13 @@ Multiple columns: :order_by('score desc', 'id asc').
 ]]
 	db:atomic('r', function()
 		-- score desc: highest first; null sorts last
-		local rows = rows_of(db:from('post'):select('post.id, post.score'):order_by('score desc'))
+		local rows = rows_of(db:from('post'):select('post.id id, post.score score'):order_by('score desc'))
 		pr(rows[1].id)      -- 3   (score 80)
 		pr(rows[1].score)   -- 80
 
 		-- multi-column: status asc, then id asc
 		local rows2 = rows_of(
-			db:from('post'):select('post.id, post.status')
+			db:from('post'):select('post.id id, post.status status')
 				:order_by('status asc', 'id asc'))
 		pr(rows2[1].status)    -- archived
 		pr(rows2[1].id)        -- 4
@@ -427,16 +427,16 @@ With :order_by, all matching rows are collected and sorted first; then
 ]]
 	db:atomic('r', function()
 		-- first 2 rows in PK order
-		local rows = rows_of(db:from('post'):select('post.id'):limit(2))
+		local rows = rows_of(db:from('post'):select('post.id id'):limit(2))
 		pr(rows[1].id, rows[2].id)    -- 1  2
 
 		-- skip 1, take 2
-		local rows2 = rows_of(db:from('post'):select('post.id'):limit(2):offset(1))
+		local rows2 = rows_of(db:from('post'):select('post.id id'):limit(2):offset(1))
 		pr(rows2[1].id, rows2[2].id)  -- 2  3
 
 		-- sort then window
 		local rows3 = rows_of(
-			db:from('post'):select('post.id, post.score')
+			db:from('post'):select('post.id id, post.score score')
 				:order_by('score desc'):limit(2))
 		pr(rows3[1].id, rows3[2].id)  -- 3  2   (scores 80, 50)
 	end)
@@ -454,7 +454,7 @@ All matching rows are read and de-duplicated in memory.
 ]]
 	db:atomic('r', function()
 		local rows = rows_of(
-			db:from('post'):select('post.status'):distinct({'status'}))
+			db:from('post'):select('post.status status'):distinct({'status'}))
 		pr(#rows)    -- 3   (archived, draft, published)
 	end)
 end
@@ -470,12 +470,12 @@ The child table must have an FK pointing to the driving table.
 ]]
 	db:atomic('r', function()
 		-- categories that have at least one post
-		for r in db:from('category'):where_has('post'):select('category.id'):rows() do
+		for r in db:from('category'):where_has('post'):select('category.id id'):rows() do
 			pr(r.id)    -- 1, 2
 		end
 
 		-- categories with no posts
-		for r in db:from('category'):where_hasnt('post'):select('category.id'):rows() do
+		for r in db:from('category'):where_hasnt('post'):select('category.id id'):rows() do
 			pr(r.id)    -- 3
 		end
 	end)
@@ -487,16 +487,16 @@ function tutorial.where_has_with_predicate()
 where_has with a predicate function.
 
 Passing a function to :where_has lets you add conditions on the child rows.
-fn receives the outer row as a cursor node; call node:get_cols to read values.
-Return a query scoped to the child table.
+fn receives the outer row as a cursor node; call node:col(member, col) to
+read a single column value. Return a query scoped to the child table.
 The outer row is kept when at least one inner row matches.
 ]]
 	db:atomic('r', function()
 		-- categories that have at least one published post
 		for r in db:from('category'):where_has('post', function(on)
-			local _, cat_id = on:get_cols('category', {'id'})
+			local cat_id = on:col('category', 'id')
 			return db:from('post'):eq('category', cat_id):eq('status', 'published')
-		end):select('category.id'):rows() do
+		end):select('category.id id'):rows() do
 			pr(r.id)    -- 1, 2
 		end
 	end)
@@ -544,7 +544,7 @@ Use a from alias when the inner and outer queries use the same table name.
 				db:from('post')
 					:eq('category', mdbx_outer'c.id')
 					:eq('status', 'published'))
-			:select('category.id')
+			:select('category.id id')
 			:rows() do
 			pr(r.id)    -- 1, 2
 		end
@@ -568,7 +568,7 @@ make mdbx_outer ambiguous.
 					:eq('category', o'c.id')
 					:eq('status', 'published')
 			end)
-			:select('category.id')
+			:select('category.id id')
 			:rows() do
 			pr(r.id)    -- 1, 2
 		end
@@ -589,7 +589,7 @@ Both correlated and uncorrelated forms work the same as :where_exists.
 				db:from('post')
 					:eq('category', mdbx_outer'c.id')
 					:eq('status', 'published'))
-			:select('category.id')
+			:select('category.id id')
 			:rows() do
 			pr(r.id)    -- 3   (art has no published posts)
 		end
@@ -659,7 +659,7 @@ Having: :having.
 
 :having(col [, op], v) filters the aggregate output.
 col is the 'name' from :agg, not a 'table.col' reference.
-Default op is '='. Supported ops: =  <>  <  <=  >  >=
+Default op is '=='. Supported ops: ==  ~=  <  <=  >  >=
 ]]
 	db:atomic('r', function()
 		local rows = rows_of(
@@ -698,7 +698,7 @@ Computed select columns.
 
 :select accepts a mix of 'table.col [alias]' strings and {name=, fn=} tables
 for values computed in Lua. fn receives a cursor node; call
-node:get_cols('post', {'col'}) to read values.
+node:col(member, col) to read a single column value.
 Returning nil omits the field from the record entirely (not set, not null).
 ]]
 	db:atomic('r', function()
@@ -707,8 +707,8 @@ Returning nil omits the field from the record entirely (not set, not null).
 				'post.id',
 				'post.score',
 				{name='double', fn=function(node)
-					local ok, s = node:get_cols('post', {'score'})
-					return (ok and s ~= null) and s * 2 or nil
+					local s = node:col('post', 'score')
+					return (s ~= nil and s ~= null) and s * 2 or nil
 				end},
 			})
 		pr(rows[1].double)    -- 20    (score 10 * 2)
@@ -730,13 +730,13 @@ Use it when you need a specific related row per driver row, such as
 	db:atomic('r', function()
 		local rows = rows_of(
 			db:from('category'):nested_join(function(on)
-				local _, cat_id = on:get_cols('category', {'id'})
+				local cat_id = on:col('category', 'id')
 				return db:from('post')
 					:eq('category', cat_id)
 					:is_not_null('score')
 					:order_by('score desc')
 					:limit(1)
-			end):select('category.name, post.title, post.score'))
+			end):select('category.name, post.title, post.score score'))
 		pr(#rows)              -- 2   (art has no posts with scores)
 		pr(rows[1].score)      -- 50  (tech: MDBX guide)
 		pr(rows[2].score)      -- 80  (science: Black holes)
@@ -760,7 +760,7 @@ Index names are generated from the schema as 'table/col1,col2'.
 		for r in db:from('post')
 			:eq('category', 1)
 			:use_index('post', 'post/category')
-			:select('post.id')
+			:select('post.id id')
 			:rows() do
 			pr(r.id)    -- 1, 2
 		end
