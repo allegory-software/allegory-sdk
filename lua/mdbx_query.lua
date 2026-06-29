@@ -57,7 +57,8 @@ TERMINALS
 NODE API ---------------------------------------------------------------------
 
 	db:<node>(args...) -> node    build a plan node (see mdbx_query.md).
-	node:open()                   prepare the node for execution (single use).
+	node:open()                   start a run; may be called again after close().
+	node:close()                  end a run; required before re-opening; idempotent.
 	node:explain() -> t           node metadata, no row reads.
 
 NODE INTERFACE
@@ -106,20 +107,18 @@ NODE INTERFACE
 		node:compile_col(member, col) -> fn | nil
 
 	Returns a zero-arg closure that decodes and returns column col for the named
-	member, or nil when the column is absent. PK nodes decode from raw MDBX bytes
-	via a cursor. Value nodes return a closure over :row() using the output alias
-	from the select spec; pass-through value nodes forward to their input.
+	member, or nil when the column is absent. The closure is valid across runs
+	as long as the node is open and positioned.
 
 		node:col(member, col) -> v | nil
 
-	Convenience: calls compile_col, caches the closure, invokes it. Returns nil
-	when the column is absent or the member does not match.
+	Returns the current value of column col for the named member, or nil when
+	absent. Valid after next_group() returns true.
 
 		node:row() -> row   (value nodes only)
 
 	Returns the current decoded Lua row (a table). Valid after next_group()
-	returns true; nil when not positioned. Pass-through nodes delegate to their
-	input with no intermediate store; producing nodes keep an internal slot.
+	returns true.
 
 ]]
 
@@ -250,7 +249,7 @@ local function key_eq(k1, n1, k2, n2)
 end
 
 -- pk_get: single base-table PK lookup; returns zero or one PK item.
--- Usage: db:pk_get(table_name, pk_val...)  -- pk_val count must equal PK column count.
+-- Usage: db:pk_get(table_name, pk...)  -- pk count must equal PK column count.
 Db.pk_get = object(Db.query_node, {
 	kind   = 'pk_get',
 	item   = 'pk',
@@ -272,8 +271,8 @@ function Db.pk_get:__call(db, tab, ...)
 		members = {schema.name},
 		order   = {{col = schema.name..'.pk', dir = 'asc'}},
 	})
-	local cur, cur_alive
-	local pk_val = MDBX_val()
+	local cur, is_open
+	local pk_rec = MDBX_val()
 	local val_rec = MDBX_val()
 	local done, has_pk
 	function node:pk(name)
@@ -282,27 +281,27 @@ function Db.pk_get:__call(db, tab, ...)
 		end
 	end
 	function node:compile_col(member, col)
-		return db:compile_col(schema, col, nil, pk_val,
+		return db:compile_col(schema, col, nil, pk_rec,
 			function() return val_rec.data, val_rec.size end)
 	end
 	function node:next_group()
 		if done then has_pk = nil; return end
 		done = true
-		if not cur then cur = db:cursor_raw(assert(db:try_dbi(schema.name))); cur.schema = schema end
-		has_pk = cur:move_raw_into(C.MDBX_SET_KEY, pk_val, val_rec)
+		if not cur then cur = db:cursor(schema.name) end
+		has_pk = cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, val_rec)
 		if not has_pk then return end
 		return true
 	end
 	function node:close()
-		if cur_alive then
+		if is_open then
 			if cur then cur:close(); cur = nil end
-			cur_alive = false
+			is_open = false
 		end
 	end
 	function node:open()
-		assert(not cur_alive, 'node already open')
-		cur_alive = true
-		pk_val.data = pk_key; pk_val.size = sz
+		assert(not is_open, 'node already open')
+		is_open = true
+		pk_rec.data = pk_key; pk_rec.size = sz
 		done = false; has_pk = nil
 	end
 	node.merge_cmp = key_cmp
@@ -334,7 +333,7 @@ function Db.pk_seek:__call(db, ix_name, ...)
 		members = {val_schema.name},
 		order   = {{col = val_schema.name..'.pk', dir = 'asc'}},
 	})
-	local cur, base_cur, cur_alive
+	local cur, base_cur, is_open
 	local has_pk
 	local fixedsize = schema.dup_fixedsize
 	if fixedsize then
@@ -348,10 +347,7 @@ function Db.pk_seek:__call(db, ix_name, ...)
 		base_pk_rec.size = fixedsize
 		local function get_base_val()
 			if not base_seeked then
-				if not base_cur then
-					base_cur = db:cursor_raw(assert(db:try_dbi(val_schema.name)))
-					base_cur.schema = val_schema
-				end
+				if not base_cur then base_cur = db:cursor(val_schema.name) end
 				base_cur:move_raw_into(C.MDBX_SET_KEY, base_pk_rec, base_val_rec)
 				base_seeked = true
 			end
@@ -368,7 +364,7 @@ function Db.pk_seek:__call(db, ix_name, ...)
 		end
 		function node:merge_key() return pk, pk_sz end
 		function node:next_group()
-			if not cur then cur = db:cursor_raw(assert(db:try_dbi(schema.name))) end
+			if not cur then cur = db:cursor(schema.name) end
 			if first then
 				first = false
 				ok, v, v_sz = cur:move_raw_v(C.MDBX_SEEK_AND_GET_MULTIPLE, ix_key, sz)
@@ -387,15 +383,15 @@ function Db.pk_seek:__call(db, ix_name, ...)
 			return true
 		end
 		function node:close()
-			if cur_alive then
+			if is_open then
 				if cur then cur:close(); cur = nil end
 				if base_cur then base_cur:close(); base_cur = nil end
-				cur_alive = false
+				is_open = false
 			end
 		end
 		function node:open()
-			assert(not cur_alive, 'node already open')
-			cur_alive = true
+			assert(not is_open, 'node already open')
+			is_open = true
 			has_pk = nil; base_seeked = false; first = true; v_o = 0
 		end
 	else
@@ -407,10 +403,7 @@ function Db.pk_seek:__call(db, ix_name, ...)
 		local base_seeked, first
 		local function get_base_val()
 			if not base_seeked then
-				if not base_cur then
-					base_cur = db:cursor_raw(assert(db:try_dbi(val_schema.name)))
-					base_cur.schema = val_schema
-				end
+				if not base_cur then base_cur = db:cursor(val_schema.name) end
 				base_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, base_val_rec)
 				base_seeked = true
 			end
@@ -426,7 +419,7 @@ function Db.pk_seek:__call(db, ix_name, ...)
 		end
 		function node:merge_key() return pk_rec.data, pk_rec.size end
 		function node:next_group()
-			if not cur then cur = db:cursor_raw(assert(db:try_dbi(schema.name))) end
+			if not cur then cur = db:cursor(schema.name) end
 			if first then
 				first = false
 				if not cur:move_raw_into(C.MDBX_SET_KEY, ix_rec, pk_rec) then has_pk = nil; return end
@@ -443,15 +436,15 @@ function Db.pk_seek:__call(db, ix_name, ...)
 			return true
 		end
 		function node:close()
-			if cur_alive then
+			if is_open then
 				if cur then cur:close(); cur = nil end
 				if base_cur then base_cur:close(); base_cur = nil end
-				cur_alive = false
+				is_open = false
 			end
 		end
 		function node:open()
-			assert(not cur_alive, 'node already open')
-			cur_alive = true
+			assert(not is_open, 'node already open')
+			is_open = true
 			has_pk = nil; base_seeked = false; first = true
 		end
 	end
@@ -519,7 +512,7 @@ function Db.pk_range:__call(db, name, ...)
 		members = {member_schema.name},
 		order   = order,
 	})
-	local cur, base_cur, cur_alive
+	local cur, base_cur, is_open
 	local has_pk
 	local mk_rec = MDBX_val()
 	local pk_rec = is_index and MDBX_val() or mk_rec
@@ -538,10 +531,7 @@ function Db.pk_range:__call(db, name, ...)
 	if is_index then
 		get_base_val = function()
 			if not base_seeked then
-				if not base_cur then
-					base_cur = db:cursor_raw(assert(db:try_dbi(member_schema.name)))
-					base_cur.schema = member_schema
-				end
+				if not base_cur then base_cur = db:cursor(member_schema.name) end
 				base_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, base_val_rec)
 				base_seeked = true
 			end
@@ -569,8 +559,7 @@ function Db.pk_range:__call(db, name, ...)
 	function node:merge_key() return mk_rec.data, mk_rec.size end
 	function node:next_group()
 		if not cur then
-			cur = db:cursor_raw(assert(db:try_dbi(schema.name)))
-			if not is_index then cur.schema = schema end
+			cur = db:cursor(schema.name)
 		end
 		if first then
 			first = false
@@ -636,15 +625,15 @@ function Db.pk_range:__call(db, name, ...)
 		end
 	end
 	function node:close()
-		if cur_alive then
+		if is_open then
 			if cur then cur:close(); cur = nil end
 			if base_cur then base_cur:close(); base_cur = nil end
-			cur_alive = false
+			is_open = false
 		end
 	end
 	function node:open()
-		assert(not cur_alive, 'node already open')
-		cur_alive = true
+		assert(not is_open, 'node already open')
+		is_open = true
 		has_pk = nil; base_seeked = false; first = true
 	end
 	node.merge_cmp = key_cmp
@@ -685,7 +674,7 @@ function Db.pk_prefix:__call(db, ix_name, ...)
 		members = {val_schema.name},
 		order   = order,
 	})
-	local cur, base_cur, cur_alive
+	local cur, base_cur, is_open
 	local has_pk
 	local mk_rec = MDBX_val()
 	local pk_rec = MDBX_val()
@@ -693,10 +682,7 @@ function Db.pk_prefix:__call(db, ix_name, ...)
 	local base_seeked, first
 	local function get_base_val()
 		if not base_seeked then
-			if not base_cur then
-				base_cur = db:cursor_raw(assert(db:try_dbi(val_schema.name)))
-				base_cur.schema = val_schema
-			end
+			if not base_cur then base_cur = db:cursor(val_schema.name) end
 			base_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, base_val_rec)
 			base_seeked = true
 		end
@@ -712,7 +698,7 @@ function Db.pk_prefix:__call(db, ix_name, ...)
 	end
 	function node:merge_key() return mk_rec.data, mk_rec.size end
 	function node:next_group()
-		if not cur then cur = db:cursor_raw(assert(db:try_dbi(schema.name))) end
+		if not cur then cur = db:cursor(schema.name) end
 		if first then
 			first = false
 			mk_rec.data = ix_key; mk_rec.size = sz
@@ -750,15 +736,15 @@ function Db.pk_prefix:__call(db, ix_name, ...)
 		return true
 	end
 	function node:close()
-		if cur_alive then
+		if is_open then
 			if cur then cur:close(); cur = nil end
 			if base_cur then base_cur:close(); base_cur = nil end
-			cur_alive = false
+			is_open = false
 		end
 	end
 	function node:open()
-		assert(not cur_alive, 'node already open')
-		cur_alive = true
+		assert(not is_open, 'node already open')
+		is_open = true
 		has_pk = nil; base_seeked = false; first = true
 	end
 	node.merge_cmp = key_cmp
@@ -798,7 +784,7 @@ function Db.fk_parent_scan:__call(db, ix_name)
 		members = {parent_schema.name},
 		order   = {{col = parent_schema.name..'.pk', dir = 'asc'}},
 	})
-	local cur, cur_alive
+	local cur, is_open
 	local op
 	local has_pk
 	local pk_rec = MDBX_val()
@@ -816,21 +802,21 @@ function Db.fk_parent_scan:__call(db, ix_name)
 		return true
 	end
 	function node:next_group()
-		if not cur then cur = db:cursor_raw(assert(db:try_dbi(schema.name))) end
+		if not cur then cur = db:cursor(schema.name) end
 		has_pk = cur:move_raw_into(op, pk_rec, nil)
 		op = C.MDBX_NEXT_NODUP
 		if not has_pk then return end
 		return true
 	end
 	function node:close()
-		if cur_alive then
+		if is_open then
 			if cur then cur:close(); cur = nil end
-			cur_alive = false
+			is_open = false
 		end
 	end
 	function node:open()
-		assert(not cur_alive, 'node already open')
-		cur_alive = true
+		assert(not is_open, 'node already open')
+		is_open = true
 		op = C.MDBX_FIRST; has_pk = nil
 	end
 	node.merge_cmp = key_cmp
@@ -871,7 +857,7 @@ function Db.pk_group_first:__call(db, ix_name, ...)
 		members = {val_schema.name},
 		order   = order,
 	})
-	local cur, base_cur, cur_alive
+	local cur, base_cur, is_open
 	local has_pk
 	local mk_rec = MDBX_val()
 	local pk_rec = MDBX_val()
@@ -879,10 +865,7 @@ function Db.pk_group_first:__call(db, ix_name, ...)
 	local base_seeked
 	local function get_base_val()
 		if not base_seeked then
-			if not base_cur then
-				base_cur = db:cursor_raw(assert(db:try_dbi(val_schema.name)))
-				base_cur.schema = val_schema
-			end
+			if not base_cur then base_cur = db:cursor(val_schema.name) end
 			base_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, base_val_rec)
 			base_seeked = true
 		end
@@ -900,7 +883,7 @@ function Db.pk_group_first:__call(db, ix_name, ...)
 	if ix_key then
 		local first
 		function node:next_group()
-			if not cur then cur = db:cursor_raw(assert(db:try_dbi(schema.name))) end
+			if not cur then cur = db:cursor(schema.name) end
 			if first then
 				first = false
 				mk_rec.data = ix_key; mk_rec.size = sz
@@ -917,36 +900,36 @@ function Db.pk_group_first:__call(db, ix_name, ...)
 			return true
 		end
 		function node:close()
-			if cur_alive then
+			if is_open then
 				if cur then cur:close(); cur = nil end
 				if base_cur then base_cur:close(); base_cur = nil end
-				cur_alive = false
+				is_open = false
 			end
 		end
 		function node:open()
-			assert(not cur_alive, 'node already open')
-			cur_alive = true
+			assert(not is_open, 'node already open')
+			is_open = true
 			has_pk = nil; base_seeked = false; first = true
 		end
 	else
 		local op
 		function node:next_group()
-			if not cur then cur = db:cursor_raw(assert(db:try_dbi(schema.name))) end
+			if not cur then cur = db:cursor(schema.name) end
 			if not cur:move_raw_into(op, mk_rec, pk_rec) then has_pk = nil; return end
 			op = C.MDBX_NEXT_NODUP
 			has_pk = true; base_seeked = false
 			return true
 		end
 		function node:close()
-			if cur_alive then
+			if is_open then
 				if cur then cur:close(); cur = nil end
 				if base_cur then base_cur:close(); base_cur = nil end
-				cur_alive = false
+				is_open = false
 			end
 		end
 		function node:open()
-			assert(not cur_alive, 'node already open')
-			cur_alive = true
+			assert(not is_open, 'node already open')
+			is_open = true
 			has_pk = nil; base_seeked = false; op = C.MDBX_FIRST
 		end
 	end
@@ -1372,29 +1355,26 @@ function Db.pk_join_seek:__call(db, driver, fk_name)
 	node.inputs = {driver}
 	node.merge_cmp = driver.merge_cmp
 	node.merge_sig = driver.merge_sig
-	local fk_cur, child_cur, cur_alive
+	local fk_cur, child_cur, is_open
 	local parent_pk, parent_pk_sz
 	local child_pk_rec = MDBX_val()
 	local child_val_rec = MDBX_val()
-	local parent_pk_tmp = MDBX_val()
+	local parent_pk_rec = MDBX_val()
 	local has_pair, in_match, child_base_seeked
 	local function get_child_val()
 		if not child_base_seeked then
-			if not child_cur then
-				child_cur = db:cursor_raw(assert(db:try_dbi(child_schema.name)))
-				child_cur.schema = child_schema
-			end
+			if not child_cur then child_cur = db:cursor(child_schema.name) end
 			child_cur:move_raw_into(C.MDBX_SET_KEY, child_pk_rec, child_val_rec)
 			child_base_seeked = true
 		end
 		return child_val_rec.data, child_val_rec.size
 	end
 	function node:close()
-		if cur_alive then
+		if is_open then
 			driver:close()
 			if fk_cur then fk_cur:close(); fk_cur = nil end
 			if child_cur then child_cur:close(); child_cur = nil end
-			cur_alive = false
+			is_open = false
 		end
 	end
 	function node:merge_key() return parent_pk, parent_pk_sz end
@@ -1412,7 +1392,7 @@ function Db.pk_join_seek:__call(db, driver, fk_name)
 	end
 	function node:next_group()
 		has_pair = false
-		if not fk_cur then fk_cur = db:cursor_raw(assert(db:try_dbi(fk_schema.name))) end
+		if not fk_cur then fk_cur = db:cursor(fk_schema.name) end
 		while true do
 			if in_match then
 				if fk_cur:move_raw_into(C.MDBX_NEXT_DUP, nil, child_pk_rec) then
@@ -1423,17 +1403,17 @@ function Db.pk_join_seek:__call(db, driver, fk_name)
 			if not driver:next_item() then return end
 			local _, p, p_sz = driver:pk(parent_schema.name)
 			parent_pk, parent_pk_sz = p, p_sz
-			parent_pk_tmp.data = p; parent_pk_tmp.size = p_sz
-			if fk_cur:move_raw_into(C.MDBX_SET_KEY, parent_pk_tmp, child_pk_rec) then
+			parent_pk_rec.data = p; parent_pk_rec.size = p_sz
+			if fk_cur:move_raw_into(C.MDBX_SET_KEY, parent_pk_rec, child_pk_rec) then
 				in_match = true
 				child_base_seeked = false; has_pair = true; return true
 			end
 		end
 	end
 	function node:open()
-		assert(not cur_alive, 'node already open')
+		assert(not is_open, 'node already open')
 		driver:open()
-		cur_alive = true
+		is_open = true
 		has_pair = false; in_match = false; child_base_seeked = false
 		parent_pk = nil; parent_pk_sz = nil
 	end
@@ -1467,7 +1447,7 @@ function Db.pk_join_hash:__call(db, driver, fk_name)
 	node.merge_cmp = key_cmp
 	node.merge_sig = parent_schema.key_sig
 	local driver_set
-	local fk_cur, parent_cur, child_cur, cur_alive
+	local fk_cur, parent_cur, child_cur, is_open
 	local mk_rec = MDBX_val()
 	local pk_rec = MDBX_val()
 	local parent_val_rec = MDBX_val()
@@ -1475,10 +1455,7 @@ function Db.pk_join_hash:__call(db, driver, fk_name)
 	local has_pair, parent_base_seeked, child_base_seeked, in_match, op
 	local function get_parent_val()
 		if not parent_base_seeked then
-			if not parent_cur then
-				parent_cur = db:cursor_raw(assert(db:try_dbi(parent_schema.name)))
-				parent_cur.schema = parent_schema
-			end
+			if not parent_cur then parent_cur = db:cursor(parent_schema.name) end
 			parent_cur:move_raw_into(C.MDBX_SET_KEY, mk_rec, parent_val_rec)
 			parent_base_seeked = true
 		end
@@ -1486,21 +1463,18 @@ function Db.pk_join_hash:__call(db, driver, fk_name)
 	end
 	local function get_child_val()
 		if not child_base_seeked then
-			if not child_cur then
-				child_cur = db:cursor_raw(assert(db:try_dbi(child_schema.name)))
-				child_cur.schema = child_schema
-			end
+			if not child_cur then child_cur = db:cursor(child_schema.name) end
 			child_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, child_val_rec)
 			child_base_seeked = true
 		end
 		return child_val_rec.data, child_val_rec.size
 	end
 	function node:close()
-		if cur_alive then
+		if is_open then
 			if fk_cur then fk_cur:close(); fk_cur = nil end
 			if parent_cur then parent_cur:close(); parent_cur = nil end
 			if child_cur then child_cur:close(); child_cur = nil end
-			cur_alive = false
+			is_open = false
 		end
 	end
 	function node:merge_key() return mk_rec.data, mk_rec.size end
@@ -1518,7 +1492,7 @@ function Db.pk_join_hash:__call(db, driver, fk_name)
 	end
 	function node:next_group()
 		has_pair = false
-		if not fk_cur then fk_cur = db:cursor_raw(assert(db:try_dbi(fk_schema.name))) end
+		if not fk_cur then fk_cur = db:cursor(fk_schema.name) end
 		while true do
 			if in_match then
 				if fk_cur:move_raw_into(C.MDBX_NEXT_DUP, mk_rec, pk_rec) then
@@ -1537,7 +1511,7 @@ function Db.pk_join_hash:__call(db, driver, fk_name)
 		end
 	end
 	function node:open()
-		assert(not cur_alive, 'node already open')
+		assert(not is_open, 'node already open')
 		driver:open()
 		driver_set = {}
 		while driver:next_item() do
@@ -1545,7 +1519,7 @@ function Db.pk_join_hash:__call(db, driver, fk_name)
 			driver_set[str(p, p_sz)] = true
 		end
 		driver:close()
-		cur_alive = true
+		is_open = true
 		has_pair = false; parent_base_seeked = false; child_base_seeked = false
 		in_match = false; op = C.MDBX_FIRST
 	end
@@ -1651,7 +1625,7 @@ function Db.pk_parent_lookup:__call(db, driver, fk_name, opts)
 	node.inputs = {driver}
 	node.merge_cmp = driver.merge_cmp
 	node.merge_sig = driver.merge_sig
-	local parent_cur, cur_alive
+	local parent_cur, is_open
 	local child_pk, child_pk_sz
 	local parent_pk, parent_pk_sz
 	local parent_key_rec = MDBX_val()
@@ -1667,10 +1641,10 @@ function Db.pk_parent_lookup:__call(db, driver, fk_name, opts)
 		return parent_val_rec.data, parent_val_rec.size
 	end
 	function node:close()
-		if cur_alive then
+		if is_open then
 			driver:close()
 			if parent_cur then parent_cur:close(); parent_cur = nil end
-			cur_alive = false
+			is_open = false
 		end
 	end
 	function node:merge_key() return child_pk, child_pk_sz end
@@ -1692,10 +1666,7 @@ function Db.pk_parent_lookup:__call(db, driver, fk_name, opts)
 	end
 	function node:next_group()
 		has_child = false; has_parent = false
-		if not parent_cur then
-			parent_cur = db:cursor_raw(assert(db:try_dbi(parent_schema.name)))
-			parent_cur.schema = parent_schema
-		end
+		if not parent_cur then parent_cur = db:cursor(parent_schema.name) end
 		while true do
 			if not driver:next_item() then return end
 			local _, cp, cp_sz = driver:pk(child_schema.name)
@@ -1716,9 +1687,9 @@ function Db.pk_parent_lookup:__call(db, driver, fk_name, opts)
 		end
 	end
 	function node:open()
-		assert(not cur_alive, 'node already open')
+		assert(not is_open, 'node already open')
 		driver:open()
-		cur_alive = true
+		is_open = true
 		for i, kf in ipairs(fk_schema.key_fields) do
 			fk_fns[i] = driver:compile_col(child_schema.name, kf.col)
 		end
@@ -2116,26 +2087,23 @@ function Db.pk_sort:__call(db, input)
 	node.merge_cmp = key_cmp
 	node.merge_sig = schema.key_sig
 	local pks
-	local base_cur, cur_alive
+	local base_cur, is_open
 	local i, cur_pk, cur_pk_sz
 	local cur_pk_rec = MDBX_val()
 	local base_val_rec = MDBX_val()
 	local has_pk, base_seeked
 	local function get_base_val()
 		if not base_seeked then
-			if not base_cur then
-				base_cur = db:cursor_raw(assert(db:try_dbi(member_name)))
-				base_cur.schema = schema
-			end
+			if not base_cur then base_cur = db:cursor(member_name) end
 			base_cur:move_raw_into(C.MDBX_SET_KEY, cur_pk_rec, base_val_rec)
 			base_seeked = true
 		end
 		return base_val_rec.data, base_val_rec.size
 	end
 	function node:close()
-		if cur_alive then
+		if is_open then
 			if base_cur then base_cur:close(); base_cur = nil end
-			cur_alive = false
+			is_open = false
 		end
 	end
 	function node:pk(name)
@@ -2157,7 +2125,7 @@ function Db.pk_sort:__call(db, input)
 		return true
 	end
 	function node:open()
-		assert(not cur_alive, 'node already open')
+		assert(not is_open, 'node already open')
 		input:open()
 		pks = {}
 		while input:next_item() do
@@ -2169,7 +2137,7 @@ function Db.pk_sort:__call(db, input)
 		sort(pks, function(a, b)
 				return key_lt(a.p, a.sz, b.p, b.sz)
 		end)
-		cur_alive = true
+		is_open = true
 		i = 0; has_pk = false; base_seeked = false
 		cur_pk = nil; cur_pk_sz = nil
 	end
@@ -2216,14 +2184,14 @@ function Db.pk_and_probe:__call(db, driver, ...)
 	node.merge_cmp = driver.merge_cmp
 	node.merge_sig = driver.merge_sig
 	local probe_curs = {}
-	local cur_alive
+	local is_open
 	local has_pk, cur_pk, cur_pk_sz
 	function node:compile_col(m, c) return driver:compile_col(m, c) end
 	function node:close()
-		if cur_alive then
+		if is_open then
 			driver:close()
 			for i, c in ipairs(probe_curs) do c:close(); probe_curs[i] = nil end
-			cur_alive = false
+			is_open = false
 		end
 	end
 	function node:pk(name)
@@ -2236,7 +2204,7 @@ function Db.pk_and_probe:__call(db, driver, ...)
 		has_pk = false
 		if not probe_curs[1] then
 			for i, p in ipairs(probes) do
-				probe_curs[i] = db:cursor_raw(assert(db:try_dbi(p.schema.name)))
+				probe_curs[i] = db:cursor(p.schema.name)
 			end
 		end
 		while true do
@@ -2258,9 +2226,9 @@ function Db.pk_and_probe:__call(db, driver, ...)
 		end
 	end
 	function node:open()
-		assert(not cur_alive, 'node already open')
+		assert(not is_open, 'node already open')
 		driver:open()
-		cur_alive = true
+		is_open = true
 		has_pk = false; cur_pk = nil; cur_pk_sz = nil
 	end
 	return node
@@ -2541,26 +2509,23 @@ function Db.value_sort:__call(db, input, spec)
 		})
 		node.inputs = {input}
 		local entries
-		local base_cur, cur_alive
+		local base_cur, is_open
 		local cur_pk_rec = MDBX_val()
 		local base_val_rec = MDBX_val()
 		local base_seeked, has_pk, idx
 		local cmp = make_cmp(function(e) return e.vals end)
 		local function get_base_val()
 			if not base_seeked then
-				if not base_cur then
-					base_cur = db:cursor_raw(assert(db:try_dbi(member_name)))
-					base_cur.schema = schema
-				end
+				if not base_cur then base_cur = db:cursor(member_name) end
 				base_cur:move_raw_into(C.MDBX_SET_KEY, cur_pk_rec, base_val_rec)
 				base_seeked = true
 			end
 			return base_val_rec.data, base_val_rec.size
 		end
 		function node:close()
-			if cur_alive then
+			if is_open then
 				if base_cur then base_cur:close(); base_cur = nil end
-				cur_alive = false
+				is_open = false
 			end
 		end
 		function node:pk(name)
@@ -2581,7 +2546,7 @@ function Db.value_sort:__call(db, input, spec)
 			return true
 		end
 		function node:open()
-			assert(not cur_alive, 'node already open')
+			assert(not is_open, 'node already open')
 			input:open()
 			local decoders = {}
 			for _, p in ipairs(parts) do
@@ -2597,7 +2562,7 @@ function Db.value_sort:__call(db, input, spec)
 			end
 			input:close()
 			sort(entries, cmp)
-			cur_alive = true
+			is_open = true
 			idx = 0; has_pk = false; base_seeked = false
 		end
 		return node

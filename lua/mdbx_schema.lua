@@ -1310,14 +1310,18 @@ function Db:try_dbi(tab)
 		return try_open(self, tab)
 	end
 end
+function Db:dbi(tab)
+	local dbi, err = self:try_dbi(tab)
+	if dbi then return dbi end
+	return self:check_schema('t_open', self:table_name(tab), nil, nil, err)
+end
 function Db:try_dbi_schema(tab)
 	local dbi, err = self:try_dbi(tab)
 	if not dbi then return nil, err end
 	return dbi, assert(self:table_schema(tab), 'table has no schema')
 end
 function Db:dbi_schema(tab)
-	local dbi = self:check_schema('t_open', self:table_name(tab), nil,
-		self:try_dbi(tab))
+	local dbi = self:dbi(tab)
 	return dbi, assert(self:table_schema(tab), 'table has no schema')
 end
 
@@ -2129,11 +2133,11 @@ end
 local function check_existing_fk(self, event, schema, fk_name, fk)
 	local ref_dbi, ref_schema = self:dbi_schema(fk.ref_table)
 	local n = #fk.cols
-	for cur, rec in self:each(fk.table, '{}') do
+	for cur, row in self:each(fk.table, '{}') do
 		local skip = false
 		local vals = {}
 		for i = 1, n do
-			local v = rec[fk.cols[i]]
+			local v = row[fk.cols[i]]
 			if v == nil or v == null then skip = true; break end
 			vals[i] = v
 		end
@@ -2531,10 +2535,10 @@ local function enforce_del_fks(self, schema, ...)
 				local ok, v, v_sz =
 					first_referencing_child(self, ix_dbi, fk.index, ...)
 				if not ok then break end
-				local rec = {}
-				decode_key(child_schema, v, v_sz, rec, '{}')
-				for _, col in ipairs(fk.cols) do rec[col] = null end
-				self:update(fk.table, '{}', rec)
+				local row = {}
+				decode_key(child_schema, v, v_sz, row, '{}')
+				for _, col in ipairs(fk.cols) do row[col] = null end
+				self:update(fk.table, '{}', row)
 			end
 		end
 	end
@@ -2803,9 +2807,9 @@ function Db:del(tab, ...)
 end
 
 --fast bulk put but can't have indexes or fks. for initializing new tables.
-function Db:put_records(tab, cols, records)
+function Db:put_records(tab, cols, rows)
 	if istab(cols) then
-		cols, records = '[]', cols
+		cols, rows = '[]', cols
 	end
 	local dbi, schema = self:dbi_schema(tab)
 	assert(not schema.indexes)
@@ -2816,7 +2820,7 @@ function Db:put_records(tab, cols, records)
 	cols = cols or schema.cols
 	local k, k_buf_sz = key_rec_buffer, MDBX_MAX_KEY_SIZE
 	local v, v_buf_sz = val_rec_buffer(schema.val_fields.max_rec_size)
-	for _,vals in ipairs(records) do
+	for _,vals in ipairs(rows) do
 		if as == '{}' then check_cols(schema, nil, vals) end
 		local k_sz = encode_key(self, schema, 'put_rec', nil, k, k_buf_sz, cols, as, vals)
 		local v_sz = encode_val(self, schema, 'put_rec', v, v_buf_sz, cols, as, vals)

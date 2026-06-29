@@ -53,8 +53,8 @@ Reverse iteration reverses the entire scan:
 **value nodes**: decode a PK stream into value records; operate on value records.
 
 Access, merge, probe, and transform nodes work on raw PK bytes.
-`get_col(member, col) -> val | nil` reads decoded column values on demand.
-base-table cursors open lazily per member and only when the requested columns
+`node:col(member, col) -> v | nil` reads decoded column values on demand.
+Base-table cursors open lazily per member and only when the requested columns
 are not present in the index. Value nodes produce Lua value records.
 
 
@@ -186,8 +186,8 @@ scans the FK index once in FK-index order. Use when the driver is large and
 unordered and FK-index order is acceptable.
 
 **pk_parent_lookup** vs **pk_join_***: the only node that goes child->parent.
-Reads the FK column from the child's source via `get_cols` and probes the parent
-base table by PK. Child order preserved.
+Reads the FK column value from the child's row and probes the parent base table
+by PK. Child order preserved.
 
 	pk_parent_lookup(
 		pk_range('sessions/started_at,user_id', {desc=true}),
@@ -253,10 +253,10 @@ removes all but one, returning a flat PK stream.
 
 **pk_filter** vs **pk_and_probe**: `pk_and_probe` tests index key presence
 without reading column values (no base-table open). `pk_filter` runs an
-arbitrary predicate that may call `get_cols`.
+arbitrary predicate that may call `node:col`.
 
 **pk_group** holds the node positioned at the first (or last) row of each group.
-`stream_aggregate` then reads all rows in the group via `get_cols`. `opts.which`
+`stream_aggregate` then reads all rows in the group. `opts.which`
 = `'first'` (default) or `'last'`.
 
 **semi_join** and **anti_join**: `inner_fn` receives the positioned outer node
@@ -270,8 +270,8 @@ overlap with the outer node's members.
 
 Decode a PK stream into value records, or transform value records.
 
-**select** is the decode step: reads columns via `get_cols` and returns one Lua
-value record per item.
+**select** is the decode step: reads column values and returns one Lua value
+record per item.
 
 	select(input, outputs)              input-ord   PK stream -> value records
 
@@ -292,7 +292,7 @@ Both filters and `limit` preserve input order and duplicates.
 
 	key_fn(item) -> {part, ...}
 
-At PK level, `item` is the positioned node; call `get_cols` to read values.
+At PK level, `item` is the positioned node; call `item:col(member, col)` to read values.
 At value level, `item` is a value record. Returns a non-empty array. Use `null`
 for a DB null part; `nil` is invalid.
 
@@ -315,7 +315,7 @@ for a DB null part; `nil` is invalid.
 Omit `key_fn` for a grand-total aggregate; `stream_aggregate` then needs no
 particular input order.
 
-`agg` for `stream_aggregate` (reads via `get_cols`):
+`agg` for `stream_aggregate` (reads column values by `member` and `col`):
 
 	{name='n',     op='count'}
 	{name='total', op='sum',    member='users', col='score'}
