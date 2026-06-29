@@ -271,32 +271,38 @@ function Db.pk_get:__call(db, tab, ...)
 		members = {schema.name},
 		order   = {{col = schema.name..'.pk', dir = 'asc'}},
 	})
+	local cur, cur_alive
+	local pk_val = MDBX_val()
+	local val_rec = MDBX_val()
+	local done, has_pk
+	function node:pk(name)
+		if has_pk and (name == nil or name == schema.name) then
+			return true, pk_key, sz
+		end
+	end
+	function node:compile_col(member, col)
+		return db:compile_col(schema, col, nil, pk_val,
+			function() return val_rec.data, val_rec.size end)
+	end
+	function node:next_group()
+		if done then has_pk = nil; return end
+		done = true
+		has_pk = cur:move_raw_into(C.MDBX_SET_KEY, pk_val, val_rec)
+		if not has_pk then return end
+		return true
+	end
+	function node:close()
+		if cur_alive then cur:close(); cur_alive = false end
+	end
 	function node:open()
+		assert(not cur_alive, 'node already open')
 		local dbi = assert(db:try_dbi(schema.name))
-		local cur = db:cursor_raw(dbi)
+		cur = db:cursor_raw(dbi)
 		cur.schema = schema
-		local cur_alive = true
-		function node:close() if cur_alive then cur:close(); cur_alive = false end end
-		local done = false
-		local has_pk
-		local pk_val = MDBX_val(); pk_val.data = pk_key; pk_val.size = sz
-		local val_rec = MDBX_val()
-		function node:pk(name)
-			if has_pk and (name == nil or name == schema.name) then
-				return true, pk_key, sz
-			end
-		end
-		function node:compile_col(member, col)
-			return db:compile_col(schema, col, nil, pk_val,
-				function() return val_rec.data, val_rec.size end)
-		end
-		function node:next_group()
-			if done then has_pk = nil; return end
-			done = true
-			has_pk = cur:move_raw_into(C.MDBX_SET_KEY, pk_val, val_rec)
-			if not has_pk then return end
-			return true
-		end
+		cur_alive = true
+		pk_val.data = pk_key; pk_val.size = sz
+		done = false
+		has_pk = nil
 	end
 	node.merge_cmp = key_cmp
 	node.merge_sig = schema.key_sig
