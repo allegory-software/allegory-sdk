@@ -209,7 +209,6 @@ function Db.query_node:col(member, col)
 	return f()
 end
 function Db.query_node:next_item()
-	if not self._ni_started then self._ni_started = true; return self:next_group() end
 	return self:next_pk() or self:next_group()
 end
 
@@ -331,7 +330,6 @@ function Db.pk_seek:__call(db, ix_name, ...)
 	function node:open()
 		local dbi = assert(db:try_dbi(schema.name))
 		local cur = db:cursor_raw(dbi)
-		self.cursor = cur
 		local base_dbi = assert(db:try_dbi(val_schema.name))
 		local base_cur
 		local cur_alive = true
@@ -500,7 +498,6 @@ function Db.pk_range:__call(db, name, ...)
 	function node:open()
 		local dbi = assert(db:try_dbi(schema.name))
 		local cur = db:cursor_raw(dbi)
-		self.cursor = cur
 		if not is_index then cur.schema = schema end
 		local base_dbi = is_index and assert(db:try_dbi(member_schema.name))
 		local base_cur
@@ -550,42 +547,45 @@ function Db.pk_range:__call(db, name, ...)
 		local cmp_hi = hi_open and key_ge or key_gt
 		local cmp_lo = lo_open and key_le or key_lt
 		local adv_val = is_index and pk_rec or nil
-		if not desc then
-			if lo_key then
-				mk_rec.data = lo_key; mk_rec.size = lo_sz
-				if not cur:move_raw_into(C.MDBX_SET_RANGE, mk_rec, adv_val) then return end
-				if lo_open and key_eq(mk_rec.data, mk_rec.size, lo_key, lo_sz) then
-					if not cur:move_raw_into(C.MDBX_NEXT_NODUP, mk_rec, adv_val) then return end
-				end
-			else
-				if not cur:move_raw_into(C.MDBX_FIRST, mk_rec, adv_val) then return end
-			end
-			if hi_key and cmp_hi(mk_rec.data, mk_rec.size, hi_key, hi_sz) then return end
-		else
-			if hi_key then
-				mk_rec.data = hi_key; mk_rec.size = hi_sz
-				if not cur:move_raw_into(C.MDBX_TO_KEY_LESSER_OR_EQUAL, mk_rec, adv_val) then return end
-				local skip = hi_open and key_eq(mk_rec.data, mk_rec.size, hi_key, hi_sz)
-				if skip then
-					if not cur:move_raw_into(C.MDBX_PREV_NODUP, mk_rec, adv_val) then return end
-				elseif is_index then
-					if not cur:move_raw_into(C.MDBX_LAST_DUP, mk_rec, pk_rec) then return end
-				end
-			else
-				if not cur:move_raw_into(C.MDBX_LAST, mk_rec, adv_val) then return end
-			end
-			if lo_key and cmp_lo(mk_rec.data, mk_rec.size, lo_key, lo_sz) then return end
-		end
-		has_pk = true
-		local first    = true
 		local adv_group = desc and (is_index and C.MDBX_PREV_NODUP or C.MDBX_PREV)
 		                       or  (is_index and C.MDBX_NEXT_NODUP or C.MDBX_NEXT)
 		local adv_pk   = desc and C.MDBX_PREV_DUP or C.MDBX_NEXT_DUP
 		local bnd_key  = desc and lo_key  or hi_key
 		local bnd_sz   = desc and lo_sz   or hi_sz
 		local cmp_bnd  = desc and cmp_lo  or cmp_hi
+		local first = true
 		function node:next_group()
-			if first then first = false; return true end
+			if first then
+				first = false
+				if not desc then
+					if lo_key then
+						mk_rec.data = lo_key; mk_rec.size = lo_sz
+						if not cur:move_raw_into(C.MDBX_SET_RANGE, mk_rec, adv_val) then return end
+						if lo_open and key_eq(mk_rec.data, mk_rec.size, lo_key, lo_sz) then
+							if not cur:move_raw_into(C.MDBX_NEXT_NODUP, mk_rec, adv_val) then return end
+						end
+					else
+						if not cur:move_raw_into(C.MDBX_FIRST, mk_rec, adv_val) then return end
+					end
+					if hi_key and cmp_hi(mk_rec.data, mk_rec.size, hi_key, hi_sz) then return end
+				else
+					if hi_key then
+						mk_rec.data = hi_key; mk_rec.size = hi_sz
+						if not cur:move_raw_into(C.MDBX_TO_KEY_LESSER_OR_EQUAL, mk_rec, adv_val) then return end
+						local skip = hi_open and key_eq(mk_rec.data, mk_rec.size, hi_key, hi_sz)
+						if skip then
+							if not cur:move_raw_into(C.MDBX_PREV_NODUP, mk_rec, adv_val) then return end
+						elseif is_index then
+							if not cur:move_raw_into(C.MDBX_LAST_DUP, mk_rec, pk_rec) then return end
+						end
+					else
+						if not cur:move_raw_into(C.MDBX_LAST, mk_rec, adv_val) then return end
+					end
+					if lo_key and cmp_lo(mk_rec.data, mk_rec.size, lo_key, lo_sz) then return end
+				end
+				has_pk = true
+				return true
+			end
 			if not cur:move_raw_into(adv_group, mk_rec, adv_val) then has_pk = nil; return end
 			if bnd_key and cmp_bnd(mk_rec.data, mk_rec.size, bnd_key, bnd_sz) then
 				has_pk = nil; return
@@ -595,6 +595,7 @@ function Db.pk_range:__call(db, name, ...)
 		end
 		if is_index then
 			function node:next_pk()
+				if not has_pk then return end
 				if not cur:move_raw_into(adv_pk, mk_rec, pk_rec) then has_pk = nil; return end
 				base_seeked = false
 				return true
@@ -691,13 +692,16 @@ function Db.pk_prefix:__call(db, ix_name, ...)
 			return db:compile_col(schema, col, mk_rec, pk_rec, get_base_val)
 		end
 		function node:merge_key() return mk_rec.data, mk_rec.size end
-		mk_rec.data = ix_key; mk_rec.size = sz
-		if not cur:move_raw_into(C.MDBX_SET_RANGE, mk_rec, pk_rec) then return end
-		if mk_rec.size < sz or memcmp(mk_rec.data, ix_key, sz) ~= 0 then return end
-		has_pk = true
 		local first = true
 		function node:next_group()
-			if first then first = false; return true end
+			if first then
+				first = false
+				mk_rec.data = ix_key; mk_rec.size = sz
+				if not cur:move_raw_into(C.MDBX_SET_RANGE, mk_rec, pk_rec) then return end
+				if mk_rec.size < sz or memcmp(mk_rec.data, ix_key, sz) ~= 0 then return end
+				has_pk = true
+				return true
+			end
 			if not cur:move_raw_into(C.MDBX_NEXT_NODUP, mk_rec, pk_rec) then has_pk = nil; return end
 			if mk_rec.size < sz or memcmp(mk_rec.data, ix_key, sz) ~= 0 then
 				has_pk = nil; return
@@ -706,6 +710,7 @@ function Db.pk_prefix:__call(db, ix_name, ...)
 			return true
 		end
 		function node:next_pk()
+			if not has_pk then return end
 			if not cur:move_raw_into(C.MDBX_NEXT_DUP, nil, pk_rec) then has_pk = nil; return end
 			base_seeked = false
 			return true
@@ -766,7 +771,6 @@ function Db.fk_parent_scan:__call(db, ix_name)
 	function node:open()
 		local dbi = assert(db:try_dbi(schema.name))
 		local cur = db:cursor_raw(dbi)
-		self.cursor = cur
 		local cur_alive = true
 		function node:close() if cur_alive then cur:close(); cur_alive = false end end
 		local op = C.MDBX_FIRST
