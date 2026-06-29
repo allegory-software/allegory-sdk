@@ -287,22 +287,22 @@ function Db.pk_get:__call(db, tab, ...)
 	function node:next_group()
 		if done then has_pk = nil; return end
 		done = true
+		if not cur then cur = db:cursor_raw(assert(db:try_dbi(schema.name))); cur.schema = schema end
 		has_pk = cur:move_raw_into(C.MDBX_SET_KEY, pk_val, val_rec)
 		if not has_pk then return end
 		return true
 	end
 	function node:close()
-		if cur_alive then cur:close(); cur_alive = false end
+		if cur_alive then
+			if cur then cur:close(); cur = nil end
+			cur_alive = false
+		end
 	end
 	function node:open()
 		assert(not cur_alive, 'node already open')
-		local dbi = assert(db:try_dbi(schema.name))
-		cur = db:cursor_raw(dbi)
-		cur.schema = schema
 		cur_alive = true
 		pk_val.data = pk_key; pk_val.size = sz
-		done = false
-		has_pk = nil
+		done = false; has_pk = nil
 	end
 	node.merge_cmp = key_cmp
 	node.merge_sig = schema.key_sig
@@ -333,108 +333,125 @@ function Db.pk_seek:__call(db, ix_name, ...)
 		members = {val_schema.name},
 		order   = {{col = val_schema.name..'.pk', dir = 'asc'}},
 	})
-	function node:open()
-		local dbi = assert(db:try_dbi(schema.name))
-		local cur = db:cursor_raw(dbi)
-		local base_dbi = assert(db:try_dbi(val_schema.name))
-		local base_cur
-		local cur_alive = true
+	local cur, base_cur, cur_alive
+	local has_pk
+	local fixedsize = schema.dup_fixedsize
+	if fixedsize then
+		--DUPFIXED: bulk pk iteration via MDBX_GET_MULTIPLE / MDBX_NEXT_MULTIPLE.
+		--merge_key = pk value; each dup is a separate group; next_pk = noop.
+		local pk, pk_sz
+		local base_pk_rec = MDBX_val()
+		local base_val_rec = MDBX_val()
+		local base_seeked
+		local mk_rec_ix = MDBX_val(); mk_rec_ix.data = ix_key; mk_rec_ix.size = sz
+		base_pk_rec.size = fixedsize
+		local function get_base_val()
+			if not base_seeked then
+				if not base_cur then
+					base_cur = db:cursor_raw(assert(db:try_dbi(val_schema.name)))
+					base_cur.schema = val_schema
+				end
+				base_cur:move_raw_into(C.MDBX_SET_KEY, base_pk_rec, base_val_rec)
+				base_seeked = true
+			end
+			return base_val_rec.data, base_val_rec.size
+		end
+		local ok, v, v_sz, v_o, first
+		function node:pk(name)
+			if has_pk and (name == nil or name == val_schema.name) then
+				return true, pk, pk_sz
+			end
+		end
+		function node:compile_col(member, col)
+			return db:compile_col(schema, col, mk_rec_ix, base_pk_rec, get_base_val)
+		end
+		function node:merge_key() return pk, pk_sz end
+		function node:next_group()
+			if not cur then cur = db:cursor_raw(assert(db:try_dbi(schema.name))) end
+			if first then
+				first = false
+				ok, v, v_sz = cur:move_raw_v(C.MDBX_SEEK_AND_GET_MULTIPLE, ix_key, sz)
+				if not ok then has_pk = nil; return end
+				v_o = 0
+			else
+				if v_o >= v_sz then
+					ok, v, v_sz = cur:next_multiple_raw()
+					if not ok then has_pk = nil; return end
+					v_o = 0
+				end
+			end
+			pk = v + v_o; pk_sz = fixedsize; has_pk = true
+			base_pk_rec.data = pk; base_seeked = false
+			v_o = v_o + fixedsize
+			return true
+		end
 		function node:close()
 			if cur_alive then
-				cur:close()
-				if base_cur then base_cur:close() end
+				if cur then cur:close(); cur = nil end
+				if base_cur then base_cur:close(); base_cur = nil end
 				cur_alive = false
 			end
 		end
-		local has_pk
-		local fixedsize = schema.dup_fixedsize
-		if fixedsize then
-			--DUPFIXED: bulk pk iteration via MDBX_GET_MULTIPLE / MDBX_NEXT_MULTIPLE.
-			--merge_key = pk value; each dup is a separate group; next_pk = noop.
-			local pk, pk_sz
-			local base_pk_rec = MDBX_val()
-			local base_val_rec = MDBX_val()
-			local base_seeked = false
-			local mk_rec_ix = MDBX_val(); mk_rec_ix.data = ix_key; mk_rec_ix.size = sz
-			base_pk_rec.size = fixedsize
-			local function get_base_val()
-				if not base_seeked then
-					if not base_cur then base_cur = db:cursor_raw(base_dbi); base_cur.schema = val_schema end
-					base_cur:move_raw_into(C.MDBX_SET_KEY, base_pk_rec, base_val_rec)
-					base_seeked = true
+		function node:open()
+			assert(not cur_alive, 'node already open')
+			cur_alive = true
+			has_pk = nil; base_seeked = false; first = true; v_o = 0
+		end
+	else
+		--non-DUPFIXED: one dup at a time.
+		--merge_key = pk value; each dup is a separate group; next_pk = noop.
+		local ix_rec = MDBX_val(); ix_rec.data = ix_key; ix_rec.size = sz
+		local pk_rec = MDBX_val()
+		local base_val_rec = MDBX_val()
+		local base_seeked, first
+		local function get_base_val()
+			if not base_seeked then
+				if not base_cur then
+					base_cur = db:cursor_raw(assert(db:try_dbi(val_schema.name)))
+					base_cur.schema = val_schema
 				end
-				return base_val_rec.data, base_val_rec.size
+				base_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, base_val_rec)
+				base_seeked = true
 			end
-			function node:pk(name)
-				if has_pk and (name == nil or name == val_schema.name) then
-					return true, pk, pk_sz
-				end
+			return base_val_rec.data, base_val_rec.size
+		end
+		function node:pk(name)
+			if has_pk and (name == nil or name == val_schema.name) then
+				return true, pk_rec.data, pk_rec.size
 			end
-			function node:compile_col(member, col)
-				return db:compile_col(schema, col, mk_rec_ix, base_pk_rec, get_base_val)
+		end
+		function node:compile_col(member, col)
+			return db:compile_col(schema, col, ix_rec, pk_rec, get_base_val)
+		end
+		function node:merge_key() return pk_rec.data, pk_rec.size end
+		function node:next_group()
+			if not cur then cur = db:cursor_raw(assert(db:try_dbi(schema.name))) end
+			if first then
+				first = false
+				if not cur:move_raw_into(C.MDBX_SET_KEY, ix_rec, pk_rec) then has_pk = nil; return end
+			else
+				if not cur:move_raw_into(C.MDBX_NEXT_DUP, nil, pk_rec) then has_pk = nil; return end
 			end
-			function node:merge_key() return pk, pk_sz end
-			local ok, v, v_sz, v_o
-			local first = true
-			function node:next_group()
-				if first then
-					first = false
-					ok, v, v_sz = cur:move_raw_v(C.MDBX_SEEK_AND_GET_MULTIPLE, ix_key, sz)
-					if not ok then has_pk = nil; return end
-					v_o = 0
-				else
-					if v_o >= v_sz then
-						ok, v, v_sz = cur:next_multiple_raw()
-						if not ok then has_pk = nil; return end
-						v_o = 0
-					end
-				end
-				pk = v + v_o; pk_sz = fixedsize; has_pk = true
-				base_pk_rec.data = pk; base_seeked = false
-				v_o = v_o + fixedsize
-				return true
+			has_pk = true; base_seeked = false
+			return true
+		end
+		function node:skip_to(target, target_sz)
+			pk_rec.data = target; pk_rec.size = target_sz
+			if not cur:move_raw_into(C.MDBX_GET_BOTH_RANGE, ix_rec, pk_rec) then has_pk = nil; return end
+			has_pk = true; base_seeked = false
+			return true
+		end
+		function node:close()
+			if cur_alive then
+				if cur then cur:close(); cur = nil end
+				if base_cur then base_cur:close(); base_cur = nil end
+				cur_alive = false
 			end
-		else
-			--non-DUPFIXED: one dup at a time.
-			--merge_key = pk value; each dup is a separate group; next_pk = noop.
-			local ix_rec = MDBX_val(); ix_rec.data = ix_key; ix_rec.size = sz
-			local pk_rec = MDBX_val()
-			local base_val_rec = MDBX_val()
-			local base_seeked = false
-			local function get_base_val()
-				if not base_seeked then
-					if not base_cur then base_cur = db:cursor_raw(base_dbi); base_cur.schema = val_schema end
-					base_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, base_val_rec)
-					base_seeked = true
-				end
-				return base_val_rec.data, base_val_rec.size
-			end
-			function node:pk(name)
-				if has_pk and (name == nil or name == val_schema.name) then
-					return true, pk_rec.data, pk_rec.size
-				end
-			end
-			function node:compile_col(member, col)
-				return db:compile_col(schema, col, ix_rec, pk_rec, get_base_val)
-			end
-			function node:merge_key() return pk_rec.data, pk_rec.size end
-			local first = true
-			function node:next_group()
-				if first then
-					first = false
-					if not cur:move_raw_into(C.MDBX_SET_KEY, ix_rec, pk_rec) then has_pk = nil; return end
-				else
-					if not cur:move_raw_into(C.MDBX_NEXT_DUP, nil, pk_rec) then has_pk = nil; return end
-				end
-				has_pk = true; base_seeked = false
-				return true
-			end
-			function node:skip_to(target, target_sz)
-				pk_rec.data = target; pk_rec.size = target_sz
-				if not cur:move_raw_into(C.MDBX_GET_BOTH_RANGE, ix_rec, pk_rec) then has_pk = nil; return end
-				has_pk = true; base_seeked = false
-				return true
-			end
+		end
+		function node:open()
+			assert(not cur_alive, 'node already open')
+			cur_alive = true
+			has_pk = nil; base_seeked = false; first = true
 		end
 	end
 	node.merge_cmp = key_cmp
@@ -501,129 +518,133 @@ function Db.pk_range:__call(db, name, ...)
 		members = {member_schema.name},
 		order   = order,
 	})
-	function node:open()
-		local dbi = assert(db:try_dbi(schema.name))
-		local cur = db:cursor_raw(dbi)
-		if not is_index then cur.schema = schema end
-		local base_dbi = is_index and assert(db:try_dbi(member_schema.name))
-		local base_cur
-		local cur_alive = true
-		function node:close()
-			if cur_alive then
-				cur:close()
-				if base_cur then base_cur:close() end
-				cur_alive = false
-			end
-		end
-		local has_pk
-		local mk_rec = MDBX_val()
-		local pk_rec = is_index and MDBX_val() or mk_rec
-		local base_val_rec = MDBX_val()
-		local base_seeked = false
-		local get_base_val
-		if is_index then
-			get_base_val = function()
-				if not base_seeked then
-					if not base_cur then base_cur = db:cursor_raw(base_dbi); base_cur.schema = member_schema end
-					base_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, base_val_rec)
-					base_seeked = true
+	local cur, base_cur, cur_alive
+	local has_pk
+	local mk_rec = MDBX_val()
+	local pk_rec = is_index and MDBX_val() or mk_rec
+	local base_val_rec = MDBX_val()
+	local base_seeked, first
+	local cmp_hi = hi_open and key_ge or key_gt
+	local cmp_lo = lo_open and key_le or key_lt
+	local adv_val = is_index and pk_rec or nil
+	local adv_group = desc and (is_index and C.MDBX_PREV_NODUP or C.MDBX_PREV)
+	                       or  (is_index and C.MDBX_NEXT_NODUP or C.MDBX_NEXT)
+	local adv_pk   = desc and C.MDBX_PREV_DUP or C.MDBX_NEXT_DUP
+	local bnd_key  = desc and lo_key  or hi_key
+	local bnd_sz   = desc and lo_sz   or hi_sz
+	local cmp_bnd  = desc and cmp_lo  or cmp_hi
+	local get_base_val
+	if is_index then
+		get_base_val = function()
+			if not base_seeked then
+				if not base_cur then
+					base_cur = db:cursor_raw(assert(db:try_dbi(member_schema.name)))
+					base_cur.schema = member_schema
 				end
-				return base_val_rec.data, base_val_rec.size
+				base_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, base_val_rec)
+				base_seeked = true
 			end
-		else
-			get_base_val = function()
-				if not base_seeked then
-					local ok, k, k_sz, v, v_sz = cur:current_raw()
-					base_val_rec.data = v; base_val_rec.size = v_sz
-					base_seeked = true
-				end
-				return base_val_rec.data, base_val_rec.size
+			return base_val_rec.data, base_val_rec.size
+		end
+	else
+		get_base_val = function()
+			if not base_seeked then
+				local ok, k, k_sz, v, v_sz = cur:current_raw()
+				base_val_rec.data = v; base_val_rec.size = v_sz
+				base_seeked = true
 			end
+			return base_val_rec.data, base_val_rec.size
 		end
-		function node:pk(name)
-			if has_pk and (name == nil or name == member_schema.name) then
-				return true, pk_rec.data, pk_rec.size
-			end
+	end
+	function node:pk(name)
+		if has_pk and (name == nil or name == member_schema.name) then
+			return true, pk_rec.data, pk_rec.size
 		end
-		function node:compile_col(member, col)
-			return db:compile_col(is_index and schema or member_schema, col,
-				is_index and mk_rec or nil, is_index and pk_rec or mk_rec, get_base_val)
+	end
+	function node:compile_col(member, col)
+		return db:compile_col(is_index and schema or member_schema, col,
+			is_index and mk_rec or nil, is_index and pk_rec or mk_rec, get_base_val)
+	end
+	function node:merge_key() return mk_rec.data, mk_rec.size end
+	function node:next_group()
+		if not cur then
+			cur = db:cursor_raw(assert(db:try_dbi(schema.name)))
+			if not is_index then cur.schema = schema end
 		end
-		function node:merge_key() return mk_rec.data, mk_rec.size end
-		local cmp_hi = hi_open and key_ge or key_gt
-		local cmp_lo = lo_open and key_le or key_lt
-		local adv_val = is_index and pk_rec or nil
-		local adv_group = desc and (is_index and C.MDBX_PREV_NODUP or C.MDBX_PREV)
-		                       or  (is_index and C.MDBX_NEXT_NODUP or C.MDBX_NEXT)
-		local adv_pk   = desc and C.MDBX_PREV_DUP or C.MDBX_NEXT_DUP
-		local bnd_key  = desc and lo_key  or hi_key
-		local bnd_sz   = desc and lo_sz   or hi_sz
-		local cmp_bnd  = desc and cmp_lo  or cmp_hi
-		local first = true
-		function node:next_group()
-			if first then
-				first = false
-				if not desc then
-					if lo_key then
-						mk_rec.data = lo_key; mk_rec.size = lo_sz
-						if not cur:move_raw_into(C.MDBX_SET_RANGE, mk_rec, adv_val) then return end
-						if lo_open and key_eq(mk_rec.data, mk_rec.size, lo_key, lo_sz) then
-							if not cur:move_raw_into(C.MDBX_NEXT_NODUP, mk_rec, adv_val) then return end
-						end
-					else
-						if not cur:move_raw_into(C.MDBX_FIRST, mk_rec, adv_val) then return end
+		if first then
+			first = false
+			if not desc then
+				if lo_key then
+					mk_rec.data = lo_key; mk_rec.size = lo_sz
+					if not cur:move_raw_into(C.MDBX_SET_RANGE, mk_rec, adv_val) then return end
+					if lo_open and key_eq(mk_rec.data, mk_rec.size, lo_key, lo_sz) then
+						if not cur:move_raw_into(C.MDBX_NEXT_NODUP, mk_rec, adv_val) then return end
 					end
-					if hi_key and cmp_hi(mk_rec.data, mk_rec.size, hi_key, hi_sz) then return end
 				else
-					if hi_key then
-						mk_rec.data = hi_key; mk_rec.size = hi_sz
-						if not cur:move_raw_into(C.MDBX_TO_KEY_LESSER_OR_EQUAL, mk_rec, adv_val) then return end
-						local skip = hi_open and key_eq(mk_rec.data, mk_rec.size, hi_key, hi_sz)
-						if skip then
-							if not cur:move_raw_into(C.MDBX_PREV_NODUP, mk_rec, adv_val) then return end
-						elseif is_index then
-							if not cur:move_raw_into(C.MDBX_LAST_DUP, mk_rec, pk_rec) then return end
-						end
-					else
-						if not cur:move_raw_into(C.MDBX_LAST, mk_rec, adv_val) then return end
-					end
-					if lo_key and cmp_lo(mk_rec.data, mk_rec.size, lo_key, lo_sz) then return end
+					if not cur:move_raw_into(C.MDBX_FIRST, mk_rec, adv_val) then return end
 				end
-				has_pk = true
-				return true
+				if hi_key and cmp_hi(mk_rec.data, mk_rec.size, hi_key, hi_sz) then return end
+			else
+				if hi_key then
+					mk_rec.data = hi_key; mk_rec.size = hi_sz
+					if not cur:move_raw_into(C.MDBX_TO_KEY_LESSER_OR_EQUAL, mk_rec, adv_val) then return end
+					local skip = hi_open and key_eq(mk_rec.data, mk_rec.size, hi_key, hi_sz)
+					if skip then
+						if not cur:move_raw_into(C.MDBX_PREV_NODUP, mk_rec, adv_val) then return end
+					elseif is_index then
+						if not cur:move_raw_into(C.MDBX_LAST_DUP, mk_rec, pk_rec) then return end
+					end
+				else
+					if not cur:move_raw_into(C.MDBX_LAST, mk_rec, adv_val) then return end
+				end
+				if lo_key and cmp_lo(mk_rec.data, mk_rec.size, lo_key, lo_sz) then return end
 			end
-			if not cur:move_raw_into(adv_group, mk_rec, adv_val) then has_pk = nil; return end
-			if bnd_key and cmp_bnd(mk_rec.data, mk_rec.size, bnd_key, bnd_sz) then
-				has_pk = nil; return
-			end
+			has_pk = true
+			return true
+		end
+		if not cur:move_raw_into(adv_group, mk_rec, adv_val) then has_pk = nil; return end
+		if bnd_key and cmp_bnd(mk_rec.data, mk_rec.size, bnd_key, bnd_sz) then
+			has_pk = nil; return
+		end
+		has_pk = true; base_seeked = false
+		return true
+	end
+	if is_index then
+		function node:next_pk()
+			if not has_pk then return end
+			if not cur:move_raw_into(adv_pk, mk_rec, pk_rec) then has_pk = nil; return end
+			base_seeked = false
+			return true
+		end
+	end
+	if not desc then
+		function node:skip_to(target, target_sz)
+			mk_rec.data = target; mk_rec.size = target_sz
+			if not cur:move_raw_into(C.MDBX_SET_RANGE, mk_rec, adv_val) then has_pk = nil; return end
+			if hi_key and cmp_hi(mk_rec.data, mk_rec.size, hi_key, hi_sz) then has_pk = nil; return end
 			has_pk = true; base_seeked = false
+			first = false
 			return true
 		end
 		if is_index then
-			function node:next_pk()
-				if not has_pk then return end
-				if not cur:move_raw_into(adv_pk, mk_rec, pk_rec) then has_pk = nil; return end
-				base_seeked = false
-				return true
-			end
-		end
-		if not desc then
-			function node:skip_to(target, target_sz)
-				mk_rec.data = target; mk_rec.size = target_sz
-				if not cur:move_raw_into(C.MDBX_SET_RANGE, mk_rec, adv_val) then has_pk = nil; return end
-				if hi_key and cmp_hi(mk_rec.data, mk_rec.size, hi_key, hi_sz) then has_pk = nil; return end
+			function node:reset_group()
+				if not cur:move_raw_into(C.MDBX_SET_KEY, mk_rec, pk_rec) then return end
 				has_pk = true; base_seeked = false
-				first = false
 				return true
 			end
-			if is_index then
-				function node:reset_group()
-					if not cur:move_raw_into(C.MDBX_SET_KEY, mk_rec, pk_rec) then return end
-					has_pk = true; base_seeked = false
-					return true
-				end
-			end
 		end
+	end
+	function node:close()
+		if cur_alive then
+			if cur then cur:close(); cur = nil end
+			if base_cur then base_cur:close(); base_cur = nil end
+			cur_alive = false
+		end
+	end
+	function node:open()
+		assert(not cur_alive, 'node already open')
+		cur_alive = true
+		has_pk = nil; base_seeked = false; first = true
 	end
 	node.merge_cmp = key_cmp
 	node.merge_sig = schema.key_sig
@@ -663,79 +684,81 @@ function Db.pk_prefix:__call(db, ix_name, ...)
 		members = {val_schema.name},
 		order   = order,
 	})
-	function node:open()
-		local dbi = assert(db:try_dbi(schema.name))
-		local cur = db:cursor_raw(dbi)
-		local base_dbi = assert(db:try_dbi(val_schema.name))
-		local base_cur
-		local cur_alive = true
-		function node:close()
-			if cur_alive then
-				cur:close()
-				if base_cur then base_cur:close() end
-				cur_alive = false
+	local cur, base_cur, cur_alive
+	local has_pk
+	local mk_rec = MDBX_val()
+	local pk_rec = MDBX_val()
+	local base_val_rec = MDBX_val()
+	local base_seeked, first
+	local function get_base_val()
+		if not base_seeked then
+			if not base_cur then
+				base_cur = db:cursor_raw(assert(db:try_dbi(val_schema.name)))
+				base_cur.schema = val_schema
 			end
+			base_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, base_val_rec)
+			base_seeked = true
 		end
-		local has_pk
-		local mk_rec = MDBX_val()
-		local pk_rec = MDBX_val()
-		local base_val_rec = MDBX_val()
-		local base_seeked = false
-		local function get_base_val()
-			if not base_seeked then
-				if not base_cur then base_cur = db:cursor_raw(base_dbi); base_cur.schema = val_schema end
-				base_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, base_val_rec)
-				base_seeked = true
-			end
-			return base_val_rec.data, base_val_rec.size
+		return base_val_rec.data, base_val_rec.size
+	end
+	function node:pk(name)
+		if has_pk and (name == nil or name == val_schema.name) then
+			return true, pk_rec.data, pk_rec.size
 		end
-		function node:pk(name)
-			if has_pk and (name == nil or name == val_schema.name) then
-				return true, pk_rec.data, pk_rec.size
-			end
-		end
-		function node:compile_col(member, col)
-			return db:compile_col(schema, col, mk_rec, pk_rec, get_base_val)
-		end
-		function node:merge_key() return mk_rec.data, mk_rec.size end
-		local first = true
-		function node:next_group()
-			if first then
-				first = false
-				mk_rec.data = ix_key; mk_rec.size = sz
-				if not cur:move_raw_into(C.MDBX_SET_RANGE, mk_rec, pk_rec) then return end
-				if mk_rec.size < sz or memcmp(mk_rec.data, ix_key, sz) ~= 0 then return end
-				has_pk = true
-				return true
-			end
-			if not cur:move_raw_into(C.MDBX_NEXT_NODUP, mk_rec, pk_rec) then has_pk = nil; return end
-			if mk_rec.size < sz or memcmp(mk_rec.data, ix_key, sz) ~= 0 then
-				has_pk = nil; return
-			end
-			has_pk = true; base_seeked = false
-			return true
-		end
-		function node:next_pk()
-			if not has_pk then return end
-			if not cur:move_raw_into(C.MDBX_NEXT_DUP, nil, pk_rec) then has_pk = nil; return end
-			base_seeked = false
-			return true
-		end
-		function node:skip_to(target, target_sz)
-			mk_rec.data = target; mk_rec.size = target_sz
-			if not cur:move_raw_into(C.MDBX_SET_RANGE, mk_rec, pk_rec) then has_pk = nil; return end
-			if mk_rec.size < sz or memcmp(mk_rec.data, ix_key, sz) ~= 0 then
-				has_pk = nil; return
-			end
-			has_pk = true; base_seeked = false
+	end
+	function node:compile_col(member, col)
+		return db:compile_col(schema, col, mk_rec, pk_rec, get_base_val)
+	end
+	function node:merge_key() return mk_rec.data, mk_rec.size end
+	function node:next_group()
+		if not cur then cur = db:cursor_raw(assert(db:try_dbi(schema.name))) end
+		if first then
 			first = false
+			mk_rec.data = ix_key; mk_rec.size = sz
+			if not cur:move_raw_into(C.MDBX_SET_RANGE, mk_rec, pk_rec) then return end
+			if mk_rec.size < sz or memcmp(mk_rec.data, ix_key, sz) ~= 0 then return end
+			has_pk = true
 			return true
 		end
-		function node:reset_group()
-			if not cur:move_raw_into(C.MDBX_SET_KEY, mk_rec, pk_rec) then return end
-			has_pk = true; base_seeked = false
-			return true
+		if not cur:move_raw_into(C.MDBX_NEXT_NODUP, mk_rec, pk_rec) then has_pk = nil; return end
+		if mk_rec.size < sz or memcmp(mk_rec.data, ix_key, sz) ~= 0 then
+			has_pk = nil; return
 		end
+		has_pk = true; base_seeked = false
+		return true
+	end
+	function node:next_pk()
+		if not has_pk then return end
+		if not cur:move_raw_into(C.MDBX_NEXT_DUP, nil, pk_rec) then has_pk = nil; return end
+		base_seeked = false
+		return true
+	end
+	function node:skip_to(target, target_sz)
+		mk_rec.data = target; mk_rec.size = target_sz
+		if not cur:move_raw_into(C.MDBX_SET_RANGE, mk_rec, pk_rec) then has_pk = nil; return end
+		if mk_rec.size < sz or memcmp(mk_rec.data, ix_key, sz) ~= 0 then
+			has_pk = nil; return
+		end
+		has_pk = true; base_seeked = false
+		first = false
+		return true
+	end
+	function node:reset_group()
+		if not cur:move_raw_into(C.MDBX_SET_KEY, mk_rec, pk_rec) then return end
+		has_pk = true; base_seeked = false
+		return true
+	end
+	function node:close()
+		if cur_alive then
+			if cur then cur:close(); cur = nil end
+			if base_cur then base_cur:close(); base_cur = nil end
+			cur_alive = false
+		end
+	end
+	function node:open()
+		assert(not cur_alive, 'node already open')
+		cur_alive = true
+		has_pk = nil; base_seeked = false; first = true
 	end
 	node.merge_cmp = key_cmp
 	node.merge_sig = schema.key_sig
@@ -774,33 +797,40 @@ function Db.fk_parent_scan:__call(db, ix_name)
 		members = {parent_schema.name},
 		order   = {{col = parent_schema.name..'.pk', dir = 'asc'}},
 	})
+	local cur, cur_alive
+	local op
+	local has_pk
+	local pk_rec = MDBX_val()
+	function node:pk(name)
+		if has_pk and (name == nil or name == parent_schema.name) then
+			return true, pk_rec.data, pk_rec.size
+		end
+	end
+	function node:merge_key() return pk_rec.data, pk_rec.size end
+	function node:skip_to(target, target_sz)
+		pk_rec.data = target; pk_rec.size = target_sz
+		has_pk = cur:move_raw_into(C.MDBX_SET_RANGE, pk_rec, nil)
+		op = C.MDBX_NEXT_NODUP
+		if not has_pk then return end
+		return true
+	end
+	function node:next_group()
+		if not cur then cur = db:cursor_raw(assert(db:try_dbi(schema.name))) end
+		has_pk = cur:move_raw_into(op, pk_rec, nil)
+		op = C.MDBX_NEXT_NODUP
+		if not has_pk then return end
+		return true
+	end
+	function node:close()
+		if cur_alive then
+			if cur then cur:close(); cur = nil end
+			cur_alive = false
+		end
+	end
 	function node:open()
-		local dbi = assert(db:try_dbi(schema.name))
-		local cur = db:cursor_raw(dbi)
-		local cur_alive = true
-		function node:close() if cur_alive then cur:close(); cur_alive = false end end
-		local op = C.MDBX_FIRST
-		local has_pk
-		local pk_rec = MDBX_val()
-		function node:pk(name)
-			if has_pk and (name == nil or name == parent_schema.name) then
-				return true, pk_rec.data, pk_rec.size
-			end
-		end
-		function node:merge_key() return pk_rec.data, pk_rec.size end
-		function node:skip_to(target, target_sz)
-			pk_rec.data = target; pk_rec.size = target_sz
-			has_pk = cur:move_raw_into(C.MDBX_SET_RANGE, pk_rec, nil)
-			op = C.MDBX_NEXT_NODUP
-			if not has_pk then return end
-			return true
-		end
-		function node:next_group()
-			has_pk = cur:move_raw_into(op, pk_rec, nil)
-			op = C.MDBX_NEXT_NODUP
-			if not has_pk then return end
-			return true
-		end
+		assert(not cur_alive, 'node already open')
+		cur_alive = true
+		op = C.MDBX_FIRST; has_pk = nil
 	end
 	node.merge_cmp = key_cmp
 	node.merge_sig = parent_schema.key_sig
@@ -840,64 +870,83 @@ function Db.pk_group_first:__call(db, ix_name, ...)
 		members = {val_schema.name},
 		order   = order,
 	})
-	function node:open()
-		local dbi = assert(db:try_dbi(schema.name))
-		local cur = db:cursor_raw(dbi)
-		local base_dbi = assert(db:try_dbi(val_schema.name))
-		local base_cur
-		local cur_alive = true
+	local cur, base_cur, cur_alive
+	local has_pk
+	local mk_rec = MDBX_val()
+	local pk_rec = MDBX_val()
+	local base_val_rec = MDBX_val()
+	local base_seeked
+	local function get_base_val()
+		if not base_seeked then
+			if not base_cur then
+				base_cur = db:cursor_raw(assert(db:try_dbi(val_schema.name)))
+				base_cur.schema = val_schema
+			end
+			base_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, base_val_rec)
+			base_seeked = true
+		end
+		return base_val_rec.data, base_val_rec.size
+	end
+	function node:pk(name)
+		if has_pk and (name == nil or name == val_schema.name) then
+			return true, pk_rec.data, pk_rec.size
+		end
+	end
+	function node:compile_col(member, col)
+		return db:compile_col(schema, col, mk_rec, pk_rec, get_base_val)
+	end
+	function node:merge_key() return mk_rec.data, mk_rec.size end
+	if ix_key then
+		local first
+		function node:next_group()
+			if not cur then cur = db:cursor_raw(assert(db:try_dbi(schema.name))) end
+			if first then
+				first = false
+				mk_rec.data = ix_key; mk_rec.size = sz
+				if not cur:move_raw_into(C.MDBX_SET_RANGE, mk_rec, pk_rec) then return end
+				if mk_rec.size < sz or memcmp(mk_rec.data, ix_key, sz) ~= 0 then return end
+				has_pk = true
+				return true
+			end
+			if not cur:move_raw_into(C.MDBX_NEXT_NODUP, mk_rec, pk_rec) then has_pk = nil; return end
+			if mk_rec.size < sz or memcmp(mk_rec.data, ix_key, sz) ~= 0 then
+				has_pk = nil; return
+			end
+			has_pk = true; base_seeked = false
+			return true
+		end
 		function node:close()
 			if cur_alive then
-				cur:close()
-				if base_cur then base_cur:close() end
+				if cur then cur:close(); cur = nil end
+				if base_cur then base_cur:close(); base_cur = nil end
 				cur_alive = false
 			end
 		end
-		local has_pk
-		local mk_rec = MDBX_val()
-		local pk_rec = MDBX_val()
-		local base_val_rec = MDBX_val()
-		local base_seeked = false
-		local function get_base_val()
-			if not base_seeked then
-				if not base_cur then base_cur = db:cursor_raw(base_dbi); base_cur.schema = val_schema end
-				base_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, base_val_rec)
-				base_seeked = true
-			end
-			return base_val_rec.data, base_val_rec.size
+		function node:open()
+			assert(not cur_alive, 'node already open')
+			cur_alive = true
+			has_pk = nil; base_seeked = false; first = true
 		end
-		function node:pk(name)
-			if has_pk and (name == nil or name == val_schema.name) then
-				return true, pk_rec.data, pk_rec.size
+	else
+		local op
+		function node:next_group()
+			if not cur then cur = db:cursor_raw(assert(db:try_dbi(schema.name))) end
+			if not cur:move_raw_into(op, mk_rec, pk_rec) then has_pk = nil; return end
+			op = C.MDBX_NEXT_NODUP
+			has_pk = true; base_seeked = false
+			return true
+		end
+		function node:close()
+			if cur_alive then
+				if cur then cur:close(); cur = nil end
+				if base_cur then base_cur:close(); base_cur = nil end
+				cur_alive = false
 			end
 		end
-		function node:compile_col(member, col)
-			return db:compile_col(schema, col, mk_rec, pk_rec, get_base_val)
-		end
-		function node:merge_key() return mk_rec.data, mk_rec.size end
-		if ix_key then
-			mk_rec.data = ix_key; mk_rec.size = sz
-			if not cur:move_raw_into(C.MDBX_SET_RANGE, mk_rec, pk_rec) then return end
-			if mk_rec.size < sz or memcmp(mk_rec.data, ix_key, sz) ~= 0 then return end
-			has_pk = true
-			local first = true
-			function node:next_group()
-				if first then first = false; return true end
-				if not cur:move_raw_into(C.MDBX_NEXT_NODUP, mk_rec, pk_rec) then has_pk = nil; return end
-				if mk_rec.size < sz or memcmp(mk_rec.data, ix_key, sz) ~= 0 then
-					has_pk = nil; return
-				end
-				has_pk = true; base_seeked = false
-				return true
-			end
-		else
-			local op = C.MDBX_FIRST
-			function node:next_group()
-				if not cur:move_raw_into(op, mk_rec, pk_rec) then has_pk = nil; return end
-				op = C.MDBX_NEXT_NODUP
-				has_pk = true; base_seeked = false
-				return true
-			end
+		function node:open()
+			assert(not cur_alive, 'node already open')
+			cur_alive = true
+			has_pk = nil; base_seeked = false; op = C.MDBX_FIRST
 		end
 	end
 	node.merge_cmp = key_cmp
@@ -951,132 +1000,135 @@ function Db.merge_join:__call(db, ...)
 	node.inputs = inputs
 	node.merge_cmp = inputs[1].merge_cmp
 	node.merge_sig = inputs[1].merge_sig
-	function node:open()
-		for i = 1, n do inputs[i]:open() end
-		function node:close() for i = 1, n do inputs[i]:close() end end
-		local mk    = {}
-		local mk_sz = {}
-		for i = 1, n do
-			if inputs[i]:next_group() then mk[i], mk_sz[i] = inputs[i]:merge_key() end
-		end
-		local matched = any_optional and {} or nil
-		local yielded = false
-		function node:merge_key() return mk[1], mk_sz[1] end
-		local function advance()
-			if yielded then
-				local any_matched = not matched
-				if matched then
-					for i = 2, n do if matched[i] then any_matched = true; break end end
+	local mk    = {}
+	local mk_sz = {}
+	local matched = any_optional and {} or nil
+	local yielded
+	function node:close() for i = 1, n do inputs[i]:close() end end
+	function node:merge_key() return mk[1], mk_sz[1] end
+	local function advance()
+		if yielded then
+			local any_matched = not matched
+			if matched then
+				for i = 2, n do if matched[i] then any_matched = true; break end end
+			end
+			if any_matched then
+				-- odometer over participating inputs (rightmost first)
+				local advanced = false
+				local reset_from = n + 1
+				for i = n, 1, -1 do
+					if not matched or not optional[i] or matched[i] then
+						if inputs[i]:next_pk() then
+							advanced = true; reset_from = i + 1; break
+						end
+					end
 				end
-				if any_matched then
-					-- odometer over participating inputs (rightmost first)
-					local advanced = false
-					local reset_from = n + 1
-					for i = n, 1, -1 do
+				if advanced then
+					for i = reset_from, n do
 						if not matched or not optional[i] or matched[i] then
-							if inputs[i]:next_pk() then
-								advanced = true; reset_from = i + 1; break
-							end
+							inputs[i]:reset_group()
+							mk[i], mk_sz[i] = inputs[i]:merge_key()
 						end
 					end
-					if advanced then
-						for i = reset_from, n do
-							if not matched or not optional[i] or matched[i] then
-								inputs[i]:reset_group()
-								mk[i], mk_sz[i] = inputs[i]:merge_key()
-							end
-						end
-						return true
-					end
-					-- group done: advance all to next group
-					for i = 1, n do
-						if inputs[i]:next_group() then mk[i], mk_sz[i] = inputs[i]:merge_key()
-						else mk[i] = nil end
-					end
-					if matched then for i = 1, n do matched[i] = false end end
-				else
-					-- left-outer no-match: advance input 1 only
-					if inputs[1]:next_pk() then return true end
-					if inputs[1]:next_group() then mk[1], mk_sz[1] = inputs[1]:merge_key()
-					else mk[1] = nil end
+					return true
 				end
-			end
-			yielded = false
-			while true do
-				if mk[1] == nil then return end
-				if not any_optional then
-					-- inner join: each_and convergence over all inputs
-					local max_i = 1
-					for i = 2, n do
-						if mk[i] == nil then return end
-						if merge_cmp(mk[i], mk_sz[i], mk[max_i], mk_sz[max_i]) > 0 then max_i = i end
-					end
-					local all_eq = true
-					for i = 1, n do
-						if merge_cmp(mk[i], mk_sz[i], mk[max_i], mk_sz[max_i]) ~= 0 then
-							all_eq = false
-							if inputs[i]:skip_to(mk[max_i], mk_sz[max_i]) then
-								mk[i], mk_sz[i] = inputs[i]:merge_key()
-							else
-								mk[i] = nil; return
-							end
-						end
-					end
-					if all_eq then yielded = true; return true end
-				else
-					-- left outer: align optional inputs to input 1
-					for i = 2, n do
-						matched[i] = false
-						if mk[i] ~= nil then
-							local c = merge_cmp(mk[i], mk_sz[i], mk[1], mk_sz[1])
-							if c < 0 then
-								if inputs[i]:skip_to(mk[1], mk_sz[1]) then
-									mk[i], mk_sz[i] = inputs[i]:merge_key()
-									matched[i] = merge_cmp(mk[i], mk_sz[i], mk[1], mk_sz[1]) == 0
-								else
-									mk[i] = nil
-								end
-							elseif c == 0 then
-								matched[i] = true
-							end
-						end
-					end
-					yielded = true; return true
-				end
-			end
-		end
-		node.next_group = advance
-		function node:skip_to(target, target_sz)
-			for i = 1, n do
-				if mk[i] ~= nil and merge_cmp(mk[i], mk_sz[i], target, target_sz) < 0 then
-					if inputs[i]:skip_to(target, target_sz) then mk[i], mk_sz[i] = inputs[i]:merge_key()
+				-- group done: advance all to next group
+				for i = 1, n do
+					if inputs[i]:next_group() then mk[i], mk_sz[i] = inputs[i]:merge_key()
 					else mk[i] = nil end
 				end
+				if matched then for i = 1, n do matched[i] = false end end
+			else
+				-- left-outer no-match: advance input 1 only
+				if inputs[1]:next_pk() then return true end
+				if inputs[1]:next_group() then mk[1], mk_sz[1] = inputs[1]:merge_key()
+				else mk[1] = nil end
 			end
-			yielded = false
-			return advance()
 		end
-		function node:pk(name)
-			if not yielded then return end
-			for i = 1, n do
-				if not matched or not optional[i] or matched[i] then
-					local ok, p, sz = inputs[i]:pk(name)
-					if ok then return true, p, sz end
+		yielded = false
+		while true do
+			if mk[1] == nil then return end
+			if not any_optional then
+				-- inner join: each_and convergence over all inputs
+				local max_i = 1
+				for i = 2, n do
+					if mk[i] == nil then return end
+					if merge_cmp(mk[i], mk_sz[i], mk[max_i], mk_sz[max_i]) > 0 then max_i = i end
 				end
-			end
-		end
-		function node:compile_col(member, col)
-			for i = 1, n do
-				for _, m in ipairs(inputs[i].members) do
-					if m == member then
-						local inner = inputs[i]:compile_col(member, col)
-						if matched and optional[i] then
-							return function() return matched[i] and inner() or nil end
+				local all_eq = true
+				for i = 1, n do
+					if merge_cmp(mk[i], mk_sz[i], mk[max_i], mk_sz[max_i]) ~= 0 then
+						all_eq = false
+						if inputs[i]:skip_to(mk[max_i], mk_sz[max_i]) then
+							mk[i], mk_sz[i] = inputs[i]:merge_key()
+						else
+							mk[i] = nil; return
 						end
-						return inner
 					end
 				end
+				if all_eq then yielded = true; return true end
+			else
+				-- left outer: align optional inputs to input 1
+				for i = 2, n do
+					matched[i] = false
+					if mk[i] ~= nil then
+						local c = merge_cmp(mk[i], mk_sz[i], mk[1], mk_sz[1])
+						if c < 0 then
+							if inputs[i]:skip_to(mk[1], mk_sz[1]) then
+								mk[i], mk_sz[i] = inputs[i]:merge_key()
+								matched[i] = merge_cmp(mk[i], mk_sz[i], mk[1], mk_sz[1]) == 0
+							else
+								mk[i] = nil
+							end
+						elseif c == 0 then
+							matched[i] = true
+						end
+					end
+				end
+				yielded = true; return true
 			end
+		end
+	end
+	node.next_group = advance
+	function node:skip_to(target, target_sz)
+		for i = 1, n do
+			if mk[i] ~= nil and merge_cmp(mk[i], mk_sz[i], target, target_sz) < 0 then
+				if inputs[i]:skip_to(target, target_sz) then mk[i], mk_sz[i] = inputs[i]:merge_key()
+				else mk[i] = nil end
+			end
+		end
+		yielded = false
+		return advance()
+	end
+	function node:pk(name)
+		if not yielded then return end
+		for i = 1, n do
+			if not matched or not optional[i] or matched[i] then
+				local ok, p, sz = inputs[i]:pk(name)
+				if ok then return true, p, sz end
+			end
+		end
+	end
+	function node:compile_col(member, col)
+		for i = 1, n do
+			for _, m in ipairs(inputs[i].members) do
+				if m == member then
+					local inner = inputs[i]:compile_col(member, col)
+					if matched and optional[i] then
+						return function() return matched[i] and inner() or nil end
+					end
+					return inner
+				end
+			end
+		end
+	end
+	function node:open()
+		for i = 1, n do inputs[i]:open() end
+		yielded = false
+		for i = 1, n do mk[i] = nil; mk_sz[i] = nil end
+		if matched then for i = 1, n do matched[i] = false end end
+		for i = 1, n do
+			if inputs[i]:next_group() then mk[i], mk_sz[i] = inputs[i]:merge_key() end
 		end
 	end
 	return node
@@ -1120,93 +1172,95 @@ function Db.merge_union:__call(db, mode, ...)
 	node.inputs = inputs
 	node.merge_cmp = merge_cmp
 	node.merge_sig = inputs[1].merge_sig
-	function node:open()
-		for i = 1, n do inputs[i]:open() end
-		function node:close() for i = 1, n do inputs[i]:close() end end
-		local mk    = {}
-		local mk_sz = {}
-		for i = 1, n do
-			if inputs[i]:next_group() then mk[i], mk_sz[i] = inputs[i]:merge_key() end
-		end
-		local to_adv = mode ~= 'union_all' and {} or nil
-		local yielded = false
-		local cur_i
-		function node:merge_key() return inputs[cur_i]:merge_key() end
-		local function advance()
-			if yielded then
-				if mode == 'union_all' then
-					if inputs[cur_i]:next_group() then mk[cur_i], mk_sz[cur_i] = inputs[cur_i]:merge_key()
-					else mk[cur_i] = nil end
-				else
-					for i = 1, n do
-						if to_adv[i] then
-							to_adv[i] = false
-							if inputs[i]:next_group() then mk[i], mk_sz[i] = inputs[i]:merge_key()
-							else mk[i] = nil end
-						end
-					end
-				end
-			end
-			yielded = false
-			local min_i
-			for i = 1, n do
-				if mk[i] ~= nil then
-					if not min_i or merge_cmp(mk[i], mk_sz[i], mk[min_i], mk_sz[min_i]) < 0 then
-						min_i = i
-					end
-				end
-			end
-			if not min_i then return end
-			cur_i = min_i
-			if mode ~= 'union_all' then
-				for i = 1, n do
-					if mk[i] ~= nil and merge_cmp(mk[i], mk_sz[i], mk[min_i], mk_sz[min_i]) == 0 then
-						to_adv[i] = true
-					end
-				end
-			end
-			yielded = true
-			return true
-		end
-		node.next_group = advance
-		function node:skip_to(target, target_sz)
-			for i = 1, n do
-				if mk[i] ~= nil and merge_cmp(mk[i], mk_sz[i], target, target_sz) < 0 then
-					if inputs[i]:skip_to(target, target_sz) then mk[i], mk_sz[i] = inputs[i]:merge_key()
-					else mk[i] = nil end
-				end
-			end
-			yielded = false
-			return advance()
-		end
-		function node:pk(name)
-			if not yielded then return end
-			if mode == 'full' then
+	local mk    = {}
+	local mk_sz = {}
+	local to_adv = mode ~= 'union_all' and {} or nil
+	local yielded, cur_i
+	function node:close() for i = 1, n do inputs[i]:close() end end
+	function node:merge_key() return inputs[cur_i]:merge_key() end
+	local function advance()
+		if yielded then
+			if mode == 'union_all' then
+				if inputs[cur_i]:next_group() then mk[cur_i], mk_sz[cur_i] = inputs[cur_i]:merge_key()
+				else mk[cur_i] = nil end
+			else
 				for i = 1, n do
 					if to_adv[i] then
-						local ok, p, sz = inputs[i]:pk(name)
-						if ok then return true, p, sz end
+						to_adv[i] = false
+						if inputs[i]:next_group() then mk[i], mk_sz[i] = inputs[i]:merge_key()
+						else mk[i] = nil end
 					end
 				end
-			else
-				return inputs[cur_i]:pk(name)
 			end
 		end
-		function node:compile_col(member, col)
-			if mode == 'full' then
-				for i = 1, n do
-					for _, m in ipairs(inputs[i].members) do
-						if m == member then
-							local inner = inputs[i]:compile_col(member, col)
-							return function() return to_adv[i] and inner() or nil end
-						end
+		yielded = false
+		local min_i
+		for i = 1, n do
+			if mk[i] ~= nil then
+				if not min_i or merge_cmp(mk[i], mk_sz[i], mk[min_i], mk_sz[min_i]) < 0 then
+					min_i = i
+				end
+			end
+		end
+		if not min_i then return end
+		cur_i = min_i
+		if mode ~= 'union_all' then
+			for i = 1, n do
+				if mk[i] ~= nil and merge_cmp(mk[i], mk_sz[i], mk[min_i], mk_sz[min_i]) == 0 then
+					to_adv[i] = true
+				end
+			end
+		end
+		yielded = true
+		return true
+	end
+	node.next_group = advance
+	function node:skip_to(target, target_sz)
+		for i = 1, n do
+			if mk[i] ~= nil and merge_cmp(mk[i], mk_sz[i], target, target_sz) < 0 then
+				if inputs[i]:skip_to(target, target_sz) then mk[i], mk_sz[i] = inputs[i]:merge_key()
+				else mk[i] = nil end
+			end
+		end
+		yielded = false
+		return advance()
+	end
+	function node:pk(name)
+		if not yielded then return end
+		if mode == 'full' then
+			for i = 1, n do
+				if to_adv[i] then
+					local ok, p, sz = inputs[i]:pk(name)
+					if ok then return true, p, sz end
+				end
+			end
+		else
+			return inputs[cur_i]:pk(name)
+		end
+	end
+	function node:compile_col(member, col)
+		if mode == 'full' then
+			for i = 1, n do
+				for _, m in ipairs(inputs[i].members) do
+					if m == member then
+						local inner = inputs[i]:compile_col(member, col)
+						return function() return to_adv[i] and inner() or nil end
 					end
 				end
-			else
-				local closures = {}
-				for i = 1, n do closures[i] = inputs[i]:compile_col(member, col) end
-				return function() return closures[cur_i]() end
 			end
+		else
+			local closures = {}
+			for i = 1, n do closures[i] = inputs[i]:compile_col(member, col) end
+			return function() return closures[cur_i]() end
+		end
+	end
+	function node:open()
+		for i = 1, n do inputs[i]:open() end
+		yielded = false; cur_i = nil
+		for i = 1, n do mk[i] = nil; mk_sz[i] = nil end
+		if to_adv then for i = 1, n do to_adv[i] = false end end
+		for i = 1, n do
+			if inputs[i]:next_group() then mk[i], mk_sz[i] = inputs[i]:merge_key() end
 		end
 	end
 	return node
@@ -1231,49 +1285,50 @@ function Db.merge_except:__call(db, a, b)
 	node.inputs = {a, b}
 	node.merge_cmp = merge_cmp
 	node.merge_sig = a.merge_sig
+	local mk1, mk1_sz, mk2, mk2_sz
+	local yielded
+	function node:close() a:close(); b:close() end
+	function node:merge_key() return a:merge_key() end
+	local function advance()
+		if yielded then
+			if a:next_group() then mk1, mk1_sz = a:merge_key() else mk1 = nil end
+		end
+		yielded = false
+		while true do
+			if mk1 == nil then return end
+			if mk2 == nil then yielded = true; return true end
+			local c = merge_cmp(mk1, mk1_sz, mk2, mk2_sz)
+			if c < 0 then
+				yielded = true; return true
+			elseif c == 0 then
+				if a:next_group() then mk1, mk1_sz = a:merge_key() else mk1 = nil end
+				if b:next_group() then mk2, mk2_sz = b:merge_key() else mk2 = nil end
+			else
+				if b:skip_to(mk1, mk1_sz) then mk2, mk2_sz = b:merge_key() else mk2 = nil end
+			end
+		end
+	end
+	node.next_group = advance
+	function node:skip_to(target, target_sz)
+		if mk1 ~= nil and merge_cmp(mk1, mk1_sz, target, target_sz) < 0 then
+			if a:skip_to(target, target_sz) then mk1, mk1_sz = a:merge_key() else mk1 = nil end
+		end
+		if mk2 ~= nil and merge_cmp(mk2, mk2_sz, target, target_sz) < 0 then
+			if b:skip_to(target, target_sz) then mk2, mk2_sz = b:merge_key() else mk2 = nil end
+		end
+		yielded = false
+		return advance()
+	end
+	function node:pk(name)
+		if not yielded then return end
+		return a:pk(name)
+	end
+	node.compile_col = a.compile_col
 	function node:open()
 		a:open(); b:open()
-		function node:close() a:close(); b:close() end
-		local mk1, mk1_sz, mk2, mk2_sz
+		yielded = false; mk1 = nil; mk2 = nil
 		if a:next_group() then mk1, mk1_sz = a:merge_key() end
 		if b:next_group() then mk2, mk2_sz = b:merge_key() end
-		local yielded = false
-		function node:merge_key() return a:merge_key() end
-		local function advance()
-			if yielded then
-				if a:next_group() then mk1, mk1_sz = a:merge_key() else mk1 = nil end
-			end
-			yielded = false
-			while true do
-				if mk1 == nil then return end
-				if mk2 == nil then yielded = true; return true end
-				local c = merge_cmp(mk1, mk1_sz, mk2, mk2_sz)
-				if c < 0 then
-					yielded = true; return true
-				elseif c == 0 then
-					if a:next_group() then mk1, mk1_sz = a:merge_key() else mk1 = nil end
-					if b:next_group() then mk2, mk2_sz = b:merge_key() else mk2 = nil end
-				else
-					if b:skip_to(mk1, mk1_sz) then mk2, mk2_sz = b:merge_key() else mk2 = nil end
-				end
-			end
-		end
-		node.next_group = advance
-		function node:skip_to(target, target_sz)
-			if mk1 ~= nil and merge_cmp(mk1, mk1_sz, target, target_sz) < 0 then
-				if a:skip_to(target, target_sz) then mk1, mk1_sz = a:merge_key() else mk1 = nil end
-			end
-			if mk2 ~= nil and merge_cmp(mk2, mk2_sz, target, target_sz) < 0 then
-				if b:skip_to(target, target_sz) then mk2, mk2_sz = b:merge_key() else mk2 = nil end
-			end
-			yielded = false
-			return advance()
-		end
-		function node:pk(name)
-			if not yielded then return end
-			return a:pk(name)
-		end
-		node.compile_col = a.compile_col
 	end
 	return node
 end
@@ -1316,67 +1371,70 @@ function Db.pk_join_seek:__call(db, driver, fk_name)
 	node.inputs = {driver}
 	node.merge_cmp = driver.merge_cmp
 	node.merge_sig = driver.merge_sig
-	function node:open()
-		driver:open()
-		local fk_dbi    = assert(db:try_dbi(fk_schema.name))
-		local fk_cur    = db:cursor_raw(fk_dbi)
-		local child_dbi = assert(db:try_dbi(child_schema.name))
-		local child_cur
-		local cur_alive = true
-		function node:close()
-			if cur_alive then
-				driver:close(); fk_cur:close()
-				if child_cur then child_cur:close() end
-				cur_alive = false
+	local fk_cur, child_cur, cur_alive
+	local parent_pk, parent_pk_sz
+	local child_pk_rec = MDBX_val()
+	local child_val_rec = MDBX_val()
+	local parent_pk_tmp = MDBX_val()
+	local has_pair, in_match, child_base_seeked
+	local function get_child_val()
+		if not child_base_seeked then
+			if not child_cur then
+				child_cur = db:cursor_raw(assert(db:try_dbi(child_schema.name)))
+				child_cur.schema = child_schema
 			end
+			child_cur:move_raw_into(C.MDBX_SET_KEY, child_pk_rec, child_val_rec)
+			child_base_seeked = true
 		end
-		local parent_pk, parent_pk_sz
-		local child_pk_rec = MDBX_val()
-		local child_val_rec = MDBX_val()
-		local parent_pk_tmp = MDBX_val()
-		local has_pair = false
-		local in_match = false
-		local child_base_seeked = false
-		local function get_child_val()
-			if not child_base_seeked then
-				if not child_cur then child_cur = db:cursor_raw(child_dbi); child_cur.schema = child_schema end
-				child_cur:move_raw_into(C.MDBX_SET_KEY, child_pk_rec, child_val_rec)
-				child_base_seeked = true
-			end
-			return child_val_rec.data, child_val_rec.size
+		return child_val_rec.data, child_val_rec.size
+	end
+	function node:close()
+		if cur_alive then
+			driver:close()
+			if fk_cur then fk_cur:close(); fk_cur = nil end
+			if child_cur then child_cur:close(); child_cur = nil end
+			cur_alive = false
 		end
-		function node:merge_key() return parent_pk, parent_pk_sz end
-		function node:pk(name)
-			if not has_pair then return end
-			-- child is the only member this node owns; everything else delegates upstream.
-			if name == child_schema.name then return true, child_pk_rec.data, child_pk_rec.size end
-			return driver:pk(name)
+	end
+	function node:merge_key() return parent_pk, parent_pk_sz end
+	function node:pk(name)
+		if not has_pair then return end
+		-- child is the only member this node owns; everything else delegates upstream.
+		if name == child_schema.name then return true, child_pk_rec.data, child_pk_rec.size end
+		return driver:pk(name)
+	end
+	function node:compile_col(member, col)
+		if member == child_schema.name then
+			return db:compile_col(child_schema, col, nil, child_pk_rec, get_child_val)
 		end
-		function node:compile_col(member, col)
-			if member == child_schema.name then
-				return db:compile_col(child_schema, col, nil, child_pk_rec, get_child_val)
-			end
-			return driver:compile_col(member, col)
-		end
-		function node:next_group()
-			has_pair = false
-			while true do
-				if in_match then
-					if fk_cur:move_raw_into(C.MDBX_NEXT_DUP, nil, child_pk_rec) then
-						child_base_seeked = false; has_pair = true; return true
-					end
-					in_match = false
-				end
-				if not driver:next_item() then return end
-				local _, p, p_sz = driver:pk(parent_schema.name)
-				parent_pk, parent_pk_sz = p, p_sz
-				parent_pk_tmp.data = p; parent_pk_tmp.size = p_sz
-				if fk_cur:move_raw_into(C.MDBX_SET_KEY, parent_pk_tmp, child_pk_rec) then
-					in_match = true
+		return driver:compile_col(member, col)
+	end
+	function node:next_group()
+		has_pair = false
+		if not fk_cur then fk_cur = db:cursor_raw(assert(db:try_dbi(fk_schema.name))) end
+		while true do
+			if in_match then
+				if fk_cur:move_raw_into(C.MDBX_NEXT_DUP, nil, child_pk_rec) then
 					child_base_seeked = false; has_pair = true; return true
 				end
+				in_match = false
+			end
+			if not driver:next_item() then return end
+			local _, p, p_sz = driver:pk(parent_schema.name)
+			parent_pk, parent_pk_sz = p, p_sz
+			parent_pk_tmp.data = p; parent_pk_tmp.size = p_sz
+			if fk_cur:move_raw_into(C.MDBX_SET_KEY, parent_pk_tmp, child_pk_rec) then
+				in_match = true
+				child_base_seeked = false; has_pair = true; return true
 			end
 		end
+	end
+	function node:open()
+		assert(not cur_alive, 'node already open')
+		driver:open()
+		cur_alive = true
+		has_pair = false; in_match = false; child_base_seeked = false
+		parent_pk = nil; parent_pk_sz = nil
 	end
 	return node
 end
@@ -1407,86 +1465,88 @@ function Db.pk_join_hash:__call(db, driver, fk_name)
 	node.inputs = {driver}
 	node.merge_cmp = key_cmp
 	node.merge_sig = parent_schema.key_sig
+	local driver_set
+	local fk_cur, parent_cur, child_cur, cur_alive
+	local mk_rec = MDBX_val()
+	local pk_rec = MDBX_val()
+	local parent_val_rec = MDBX_val()
+	local child_val_rec = MDBX_val()
+	local has_pair, parent_base_seeked, child_base_seeked, in_match, op
+	local function get_parent_val()
+		if not parent_base_seeked then
+			if not parent_cur then
+				parent_cur = db:cursor_raw(assert(db:try_dbi(parent_schema.name)))
+				parent_cur.schema = parent_schema
+			end
+			parent_cur:move_raw_into(C.MDBX_SET_KEY, mk_rec, parent_val_rec)
+			parent_base_seeked = true
+		end
+		return parent_val_rec.data, parent_val_rec.size
+	end
+	local function get_child_val()
+		if not child_base_seeked then
+			if not child_cur then
+				child_cur = db:cursor_raw(assert(db:try_dbi(child_schema.name)))
+				child_cur.schema = child_schema
+			end
+			child_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, child_val_rec)
+			child_base_seeked = true
+		end
+		return child_val_rec.data, child_val_rec.size
+	end
+	function node:close()
+		if cur_alive then
+			if fk_cur then fk_cur:close(); fk_cur = nil end
+			if parent_cur then parent_cur:close(); parent_cur = nil end
+			if child_cur then child_cur:close(); child_cur = nil end
+			cur_alive = false
+		end
+	end
+	function node:merge_key() return mk_rec.data, mk_rec.size end
+	function node:pk(name)
+		if not has_pair then return end
+		if name == nil or name == parent_schema.name then return true, mk_rec.data, mk_rec.size
+		elseif name == child_schema.name then return true, pk_rec.data, pk_rec.size end
+	end
+	function node:compile_col(member, col)
+		if member == parent_schema.name then
+			return db:compile_col(parent_schema, col, nil, mk_rec, get_parent_val)
+		elseif member == child_schema.name then
+			return db:compile_col(child_schema, col, nil, pk_rec, get_child_val)
+		end
+	end
+	function node:next_group()
+		has_pair = false
+		if not fk_cur then fk_cur = db:cursor_raw(assert(db:try_dbi(fk_schema.name))) end
+		while true do
+			if in_match then
+				if fk_cur:move_raw_into(C.MDBX_NEXT_DUP, mk_rec, pk_rec) then
+					parent_base_seeked = false; child_base_seeked = false
+					has_pair = true; return true
+				end
+				in_match = false
+			end
+			if not fk_cur:move_raw_into(op, mk_rec, pk_rec) then return end
+			op = C.MDBX_NEXT_NODUP
+			if driver_set[str(mk_rec.data, mk_rec.size)] then
+				in_match = true
+				parent_base_seeked = false; child_base_seeked = false
+				has_pair = true; return true
+			end
+		end
+	end
 	function node:open()
+		assert(not cur_alive, 'node already open')
 		driver:open()
-		local driver_set = {}
+		driver_set = {}
 		while driver:next_item() do
 			local _, p, p_sz = driver:pk()
 			driver_set[str(p, p_sz)] = true
 		end
 		driver:close()
-		local fk_dbi     = assert(db:try_dbi(fk_schema.name))
-		local fk_cur     = db:cursor_raw(fk_dbi)
-		local parent_dbi = assert(db:try_dbi(parent_schema.name))
-		local parent_cur
-		local child_dbi  = assert(db:try_dbi(child_schema.name))
-		local child_cur
-		local cur_alive = true
-		function node:close()
-			if cur_alive then
-				fk_cur:close()
-				if parent_cur then parent_cur:close() end
-				if child_cur  then child_cur:close()  end
-				cur_alive = false
-			end
-		end
-		local mk_rec = MDBX_val()
-		local pk_rec = MDBX_val()
-		local parent_val_rec = MDBX_val()
-		local child_val_rec = MDBX_val()
-		local has_pair = false
-		local parent_base_seeked = false
-		local child_base_seeked = false
-		local function get_parent_val()
-			if not parent_base_seeked then
-				if not parent_cur then parent_cur = db:cursor_raw(parent_dbi); parent_cur.schema = parent_schema end
-				parent_cur:move_raw_into(C.MDBX_SET_KEY, mk_rec, parent_val_rec)
-				parent_base_seeked = true
-			end
-			return parent_val_rec.data, parent_val_rec.size
-		end
-		local function get_child_val()
-			if not child_base_seeked then
-				if not child_cur then child_cur = db:cursor_raw(child_dbi); child_cur.schema = child_schema end
-				child_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, child_val_rec)
-				child_base_seeked = true
-			end
-			return child_val_rec.data, child_val_rec.size
-		end
-		function node:merge_key() return mk_rec.data, mk_rec.size end
-		function node:pk(name)
-			if not has_pair then return end
-			if name == nil or name == parent_schema.name then return true, mk_rec.data, mk_rec.size
-			elseif name == child_schema.name then return true, pk_rec.data, pk_rec.size end
-		end
-		function node:compile_col(member, col)
-			if member == parent_schema.name then
-				return db:compile_col(parent_schema, col, nil, mk_rec, get_parent_val)
-			elseif member == child_schema.name then
-				return db:compile_col(child_schema, col, nil, pk_rec, get_child_val)
-			end
-		end
-		local in_match = false
-		local op = C.MDBX_FIRST
-		function node:next_group()
-			has_pair = false
-			while true do
-				if in_match then
-					if fk_cur:move_raw_into(C.MDBX_NEXT_DUP, mk_rec, pk_rec) then
-						parent_base_seeked = false; child_base_seeked = false
-						has_pair = true; return true
-					end
-					in_match = false
-				end
-				if not fk_cur:move_raw_into(op, mk_rec, pk_rec) then return end
-				op = C.MDBX_NEXT_NODUP
-				if driver_set[str(mk_rec.data, mk_rec.size)] then
-					in_match = true
-					parent_base_seeked = false; child_base_seeked = false
-					has_pair = true; return true
-				end
-			end
-		end
+		cur_alive = true
+		has_pair = false; parent_base_seeked = false; child_base_seeked = false
+		in_match = false; op = C.MDBX_FIRST
 	end
 	return node
 end
@@ -1520,38 +1580,39 @@ function Db.pk_hash_filter:__call(db, driver, set_node, mode)
 	node.inputs = {driver, set_node}
 	node.merge_cmp = driver.merge_cmp
 	node.merge_sig = driver.merge_sig
+	local pk_set
+	local has_pk, cur_pk, cur_pk_sz
+	local want_in = mode == 'in'
+	function node:compile_col(m, c) return driver:compile_col(m, c) end
+	function node:close() driver:close() end
+	function node:pk(name)
+		if has_pk and (name == nil or name == member_name) then
+			return true, cur_pk, cur_pk_sz
+		end
+	end
+	function node:merge_key() return driver:merge_key() end
+	function node:next_group()
+		has_pk = false
+		while true do
+			if not driver:next_item() then return end
+			local _, p, p_sz = driver:pk()
+			if (pk_set[str(p, p_sz)] ~= nil) == want_in then
+				cur_pk, cur_pk_sz = p, p_sz
+				has_pk = true
+				return true
+			end
+		end
+	end
 	function node:open()
 		set_node:open()
-		local pk_set = {}
+		pk_set = {}
 		while set_node:next_item() do
 			local _, p, p_sz = set_node:pk()
 			pk_set[str(p, p_sz)] = true
 		end
 		set_node:close()
 		driver:open()
-		function node:close() driver:close() end
-		local has_pk = false
-		local cur_pk, cur_pk_sz
-		function node:pk(name)
-			if has_pk and (name == nil or name == member_name) then
-				return true, cur_pk, cur_pk_sz
-			end
-		end
-		node.compile_col = driver.compile_col
-		function node:merge_key() return driver:merge_key() end
-		local want_in = mode == 'in'
-		function node:next_group()
-			has_pk = false
-			while true do
-				if not driver:next_item() then return end
-				local _, p, p_sz = driver:pk()
-				if (pk_set[str(p, p_sz)] ~= nil) == want_in then
-					cur_pk, cur_pk_sz = p, p_sz
-					has_pk = true
-					return true
-				end
-			end
-		end
+		has_pk = false; cur_pk = nil; cur_pk_sz = nil
 	end
 	return node
 end
@@ -1589,72 +1650,79 @@ function Db.pk_parent_lookup:__call(db, driver, fk_name, opts)
 	node.inputs = {driver}
 	node.merge_cmp = driver.merge_cmp
 	node.merge_sig = driver.merge_sig
-	function node:open()
-		driver:open()
-		local parent_dbi = assert(db:try_dbi(parent_schema.name))
-		local parent_cur = db:cursor_raw(parent_dbi)
-		parent_cur.schema = parent_schema
-		local cur_alive = true
-		function node:close()
-			if cur_alive then driver:close(); parent_cur:close(); cur_alive = false end
+	local parent_cur, cur_alive
+	local child_pk, child_pk_sz
+	local parent_pk, parent_pk_sz
+	local parent_key_rec = MDBX_val()
+	local parent_val_rec = MDBX_val()
+	local has_child, has_parent, parent_base_seeked
+	local fk_row = {}
+	local fk_fns = {}
+	local function get_parent_val()
+		if not parent_base_seeked then
+			parent_cur:move_raw_into(C.MDBX_SET_KEY, parent_key_rec, parent_val_rec)
+			parent_base_seeked = true
 		end
-		local child_pk, child_pk_sz
-		local parent_pk, parent_pk_sz
-		local parent_key_rec = MDBX_val()
-		local parent_val_rec = MDBX_val()
-		local has_child  = false
-		local has_parent = false
-		local parent_base_seeked = false
-		local fk_row = {}
-		local fk_fns = {}
+		return parent_val_rec.data, parent_val_rec.size
+	end
+	function node:close()
+		if cur_alive then
+			driver:close()
+			if parent_cur then parent_cur:close(); parent_cur = nil end
+			cur_alive = false
+		end
+	end
+	function node:merge_key() return child_pk, child_pk_sz end
+	function node:pk(name)
+		if not has_child then return end
+		-- parent is the only member this node owns; everything else delegates upstream.
+		if name == parent_schema.name then
+			if has_parent then return true, parent_pk, parent_pk_sz end
+			return -- left-join: child present but parent absent
+		end
+		return driver:pk(name)
+	end
+	function node:compile_col(member, col)
+		if member == parent_schema.name then
+			local inner = db:compile_col(parent_schema, col, nil, parent_key_rec, get_parent_val)
+			return function() return has_parent and inner() or nil end
+		end
+		return driver:compile_col(member, col)
+	end
+	function node:next_group()
+		has_child = false; has_parent = false
+		if not parent_cur then
+			parent_cur = db:cursor_raw(assert(db:try_dbi(parent_schema.name)))
+			parent_cur.schema = parent_schema
+		end
+		while true do
+			if not driver:next_item() then return end
+			local _, cp, cp_sz = driver:pk(child_schema.name)
+			child_pk, child_pk_sz = cp, cp_sz
+			for i, ref_col in ipairs(fk.ref_cols) do fk_row[ref_col] = fk_fns[i]() end
+			local pp_sz = mdbx_encode_key(db, parent_schema, 'pk_parent_lookup',
+				nil, mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
+				parent_schema.key_cols, '{}', fk_row)
+			parent_key_rec.data = mdbx_key_rec_buffer; parent_key_rec.size = pp_sz
+			if parent_cur:move_raw_into(C.MDBX_SET_KEY, parent_key_rec, nil) then
+				local ppk = u8a(pp_sz); copy(ppk, mdbx_key_rec_buffer, pp_sz)
+				parent_pk, parent_pk_sz = ppk, pp_sz
+				parent_key_rec.data = ppk
+				parent_base_seeked = false
+				has_child = true; has_parent = true; return true
+			end
+			if left_join then has_child = true; return true end
+		end
+	end
+	function node:open()
+		assert(not cur_alive, 'node already open')
+		driver:open()
+		cur_alive = true
 		for i, kf in ipairs(fk_schema.key_fields) do
 			fk_fns[i] = driver:compile_col(child_schema.name, kf.col)
 		end
-		local function get_parent_val()
-			if not parent_base_seeked then
-				parent_cur:move_raw_into(C.MDBX_SET_KEY, parent_key_rec, parent_val_rec)
-				parent_base_seeked = true
-			end
-			return parent_val_rec.data, parent_val_rec.size
-		end
-		function node:merge_key() return child_pk, child_pk_sz end
-		function node:pk(name)
-			if not has_child then return end
-			-- parent is the only member this node owns; everything else delegates upstream.
-			if name == parent_schema.name then
-				if has_parent then return true, parent_pk, parent_pk_sz end
-				return -- left-join: child present but parent absent
-			end
-			return driver:pk(name)
-		end
-		function node:compile_col(member, col)
-			if member == parent_schema.name then
-				local inner = db:compile_col(parent_schema, col, nil, parent_key_rec, get_parent_val)
-				return function() return has_parent and inner() or nil end
-			end
-			return driver:compile_col(member, col)
-		end
-		function node:next_group()
-			has_child = false; has_parent = false
-			while true do
-				if not driver:next_item() then return end
-				local _, cp, cp_sz = driver:pk(child_schema.name)
-				child_pk, child_pk_sz = cp, cp_sz
-				for i, ref_col in ipairs(fk.ref_cols) do fk_row[ref_col] = fk_fns[i]() end
-				local pp_sz = mdbx_encode_key(db, parent_schema, 'pk_parent_lookup',
-					nil, mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
-					parent_schema.key_cols, '{}', fk_row)
-				parent_key_rec.data = mdbx_key_rec_buffer; parent_key_rec.size = pp_sz
-				if parent_cur:move_raw_into(C.MDBX_SET_KEY, parent_key_rec, nil) then
-					local ppk = u8a(pp_sz); copy(ppk, mdbx_key_rec_buffer, pp_sz)
-					parent_pk, parent_pk_sz = ppk, pp_sz
-					parent_key_rec.data = ppk
-					parent_base_seeked = false
-					has_child = true; has_parent = true; return true
-				end
-				if left_join then has_child = true; return true end
-			end
-		end
+		has_child = false; has_parent = false; parent_base_seeked = false
+		child_pk = nil; child_pk_sz = nil; parent_pk = nil; parent_pk_sz = nil
 	end
 	return node
 end
@@ -1679,24 +1747,25 @@ function Db.pk_filter:__call(db, input, fn)
 	node.inputs = {input}
 	node.merge_cmp = input.merge_cmp
 	node.merge_sig = input.merge_sig
+	local has_pk
+	function node:compile_col(m, c) return input:compile_col(m, c) end
+	function node:close() input:close() end
+	function node:pk(name)
+		if not has_pk then return end
+		return input:pk(name)
+	end
+	function node:merge_key() return input:merge_key() end
+	function node:next_group()
+		while true do
+			has_pk = false
+			if not input:next_item() then return end
+			has_pk = true
+			if fn(node) then return true end
+		end
+	end
 	function node:open()
 		input:open()
-		function node:close() input:close() end
-		local has_pk = false
-		function node:pk(name)
-			if not has_pk then return end
-			return input:pk(name)
-		end
-		node.compile_col = input.compile_col
-		function node:merge_key() return input:merge_key() end
-		function node:next_group()
-			while true do
-				has_pk = false
-				if not input:next_item() then return end
-				has_pk = true
-				if fn(node) then return true end
-			end
-		end
+		has_pk = false
 	end
 	return node
 end
@@ -1713,29 +1782,30 @@ local function make_existence_join(self, db, outer, inner_fn, want_inner)
 	node.inputs = {outer}
 	node.merge_cmp = outer.merge_cmp
 	node.merge_sig = outer.merge_sig
+	local has_pk
+	function node:compile_col(m, c) return outer:compile_col(m, c) end
+	function node:close() outer:close() end
+	function node:pk(name)
+		if not has_pk then return end
+		return outer:pk(name)
+	end
+	function node:merge_key() return outer:merge_key() end
+	function node:next_group()
+		has_pk = false
+		while true do
+			if not outer:next_item() then return end
+			has_pk = true
+			local inner = inner_fn(node)
+			inner:open()
+			local has_inner = inner:next_group() ~= nil
+			inner:close()
+			if has_inner == want_inner then return true end
+			has_pk = false
+		end
+	end
 	function node:open()
 		outer:open()
-		function node:close() outer:close() end
-		local has_pk = false
-		function node:pk(name)
-			if not has_pk then return end
-			return outer:pk(name)
-		end
-		node.compile_col = outer.compile_col
-		function node:merge_key() return outer:merge_key() end
-		function node:next_group()
-			has_pk = false
-			while true do
-				if not outer:next_item() then return end
-				has_pk = true
-				local inner = inner_fn(node)
-				inner:open()
-				local has_inner = inner:next_group() ~= nil
-				inner:close()
-				if has_inner == want_inner then return true end
-				has_pk = false
-			end
-		end
+		has_pk = false
 	end
 	return node
 end
@@ -1774,60 +1844,60 @@ function Db.nested_join:__call(db, outer, inner_fn)
 	node.inputs = {outer}
 	node.merge_cmp = outer.merge_cmp
 	node.merge_sig = outer.merge_sig
+	local has_pk, cur_inner
+	local inner_members_set = false
+	function node:close()
+		outer:close()
+		if cur_inner then cur_inner:close(); cur_inner = nil end
+	end
+	function node:pk(name)
+		if not has_pk then return end
+		local ok, p, sz = outer:pk(name)
+		if ok then return true, p, sz end
+		if cur_inner then return cur_inner:pk(name) end
+	end
+	function node:compile_col(member, col)
+		for _, m in ipairs(outer.members) do
+			if m == member then
+				return outer:compile_col(member, col)
+			end
+		end
+		local last_inner, cached_fn
+		return function()
+			if not cur_inner then return nil end
+			if cur_inner ~= last_inner then
+				cached_fn = cur_inner:compile_col(member, col)
+				last_inner = cur_inner
+			end
+			return cached_fn()
+		end
+	end
+	function node:merge_key() return outer:merge_key() end
+	function node:next_group()
+		has_pk = false
+		while true do
+			if cur_inner ~= nil then
+				if cur_inner:next_pk() or cur_inner:next_group() then
+					has_pk = true; return true
+				end
+				cur_inner:close(); cur_inner = nil
+			end
+			if not outer:next_item() then return end
+			has_pk = true
+			local inner = inner_fn(node)
+			if not inner_members_set then
+				for _, m in ipairs(inner.members) do members[#members+1] = m end
+				inner_members_set = true
+			end
+			inner:open()
+			if inner:next_group() then cur_inner = inner; return true end
+			inner:close()
+			has_pk = false
+		end
+	end
 	function node:open()
 		outer:open()
-		local has_pk = false
-		local cur_inner = nil
-		local inner_members_set = false
-		function node:close()
-			outer:close()
-			if cur_inner then cur_inner:close(); cur_inner = nil end
-		end
-		function node:pk(name)
-			if not has_pk then return end
-			local ok, p, sz = outer:pk(name)
-			if ok then return true, p, sz end
-			if cur_inner then return cur_inner:pk(name) end
-		end
-		function node:compile_col(member, col)
-			for _, m in ipairs(outer.members) do
-				if m == member then
-					return outer:compile_col(member, col)
-				end
-			end
-			local last_inner, cached_fn
-			return function()
-				if not cur_inner then return nil end
-				if cur_inner ~= last_inner then
-					cached_fn = cur_inner:compile_col(member, col)
-					last_inner = cur_inner
-				end
-				return cached_fn()
-			end
-		end
-		function node:merge_key() return outer:merge_key() end
-		function node:next_group()
-			has_pk = false
-			while true do
-				if cur_inner ~= nil then
-					if cur_inner:next_pk() or cur_inner:next_group() then
-						has_pk = true; return true
-					end
-					cur_inner:close(); cur_inner = nil
-				end
-				if not outer:next_item() then return end
-				has_pk = true
-				local inner = inner_fn(node)
-				if not inner_members_set then
-					for _, m in ipairs(inner.members) do members[#members+1] = m end
-					inner_members_set = true
-				end
-				inner:open()
-				if inner:next_group() then cur_inner = inner; return true end
-				inner:close()
-				has_pk = false
-			end
-		end
+		has_pk = false; cur_inner = nil
 	end
 	return node
 end
@@ -1853,32 +1923,31 @@ function Db.limit:__call(db, input, n, offset)
 	node.inputs = {input}
 	node.merge_cmp = input.merge_cmp
 	node.merge_sig = input.merge_sig
-	function node:open()
-		input:open()
-		function node:close() input:close() end
-		node.compile_col = input.compile_col
-		function node:row() return input:row() end
-		local has_item = false
-		function node:pk(name)
-			if not has_item then return end
-			return input:pk(name)
-		end
-		function node:merge_key() return input:merge_key() end
-		local count   = 0
-		local skipped = 0
-		function node:next_group()
-			has_item = false
-			if count >= n then return end
-			while true do
-				if not input:next_item() then return end
-				if skipped < offset then skipped = skipped + 1
-				else
-					count = count + 1
-					has_item = true
-					return true
-				end
+	local has_item, count, skipped
+	function node:compile_col(m, c) return input:compile_col(m, c) end
+	function node:close() input:close() end
+	function node:row() return input:row() end
+	function node:pk(name)
+		if not has_item then return end
+		return input:pk(name)
+	end
+	function node:merge_key() return input:merge_key() end
+	function node:next_group()
+		has_item = false
+		if count >= n then return end
+		while true do
+			if not input:next_item() then return end
+			if skipped < offset then skipped = skipped + 1
+			else
+				count = count + 1
+				has_item = true
+				return true
 			end
 		end
+	end
+	function node:open()
+		input:open()
+		has_item = false; count = 0; skipped = 0
 	end
 	return node
 end
@@ -1916,49 +1985,47 @@ function Db.pk_group:__call(db, input, key_fn, opts)
 	node.inputs = {input}
 	node.merge_cmp = input.merge_cmp
 	node.merge_sig = input.merge_sig
-	function node:open()
-		input:open()
-		function node:close() input:close() end
-		local done    = false
-		local has_current = false
-		local cur_key = nil
-		local peeked  = false  -- input is at first item of next group (detected by next_pk)
-		local function adv()
-			if done then return false end
-			if not input:next_item() then done = true; return false end
-			return true
-		end
-		function node:pk(name)
-			if not has_current then return end
-			return input:pk(name)
-		end
-		node.compile_col = input.compile_col
-		function node:merge_key() return input:merge_key() end
-		function node:next_group()
-			has_current = false
-			if done then return end
-			if not peeked then
-				if not adv() then return end
-				-- skip remaining items of the previous group (when caller skipped next_pk calls)
-				if cur_key ~= nil then
-					-- call key_fn(input) directly: node is between groups, input is still positioned
-					while keys_eq(key_fn(input), cur_key) do
-						if not adv() then return end
-					end
+	local done, has_current, cur_key, peeked
+	function node:compile_col(m, c) return input:compile_col(m, c) end
+	local function adv()
+		if done then return false end
+		if not input:next_item() then done = true; return false end
+		return true
+	end
+	function node:close() input:close() end
+	function node:pk(name)
+		if not has_current then return end
+		return input:pk(name)
+	end
+	function node:merge_key() return input:merge_key() end
+	function node:next_group()
+		has_current = false
+		if done then return end
+		if not peeked then
+			if not adv() then return end
+			-- skip remaining items of the previous group (when caller skipped next_pk calls)
+			if cur_key ~= nil then
+				-- call key_fn(input) directly: node is between groups, input is still positioned
+				while keys_eq(key_fn(input), cur_key) do
+					if not adv() then return end
 				end
 			end
-			peeked = false
-			cur_key = key_fn(input)  -- input is positioned; has_current not yet true
-			has_current = true
-			return true
 		end
-		function node:next_pk()
-			if not has_current then return end
-			if not adv() then has_current = false; return end
-			local k = key_fn(node)  -- has_current still true; node:col works
-			if keys_eq(k, cur_key) then return true end
-			peeked = true; has_current = false; return nil
-		end
+		peeked = false
+		cur_key = key_fn(input)  -- input is positioned; has_current not yet true
+		has_current = true
+		return true
+	end
+	function node:next_pk()
+		if not has_current then return end
+		if not adv() then has_current = false; return end
+		local k = key_fn(node)  -- has_current still true; node:col works
+		if keys_eq(k, cur_key) then return true end
+		peeked = true; has_current = false; return nil
+	end
+	function node:open()
+		input:open()
+		done = false; has_current = false; cur_key = nil; peeked = false
 	end
 	return node
 end
@@ -1997,30 +2064,30 @@ function Db.pk_project:__call(db, input, member_name)
 	node.inputs = {input}
 	node.merge_cmp = key_cmp
 	node.merge_sig = schema.key_sig
+	local has_pk, cur_pk, cur_pk_sz
+	function node:compile_col(m, c) return input:compile_col(m, c) end
+	function node:close() input:close() end
+	function node:pk(name)
+		if has_pk and (name == nil or name == member_name) then
+			return true, cur_pk, cur_pk_sz
+		end
+	end
+	function node:merge_key() return cur_pk, cur_pk_sz end
+	function node:next_group()
+		has_pk = false
+		while true do
+			if not input:next_item() then return end
+			local ok, p, p_sz = input:pk(member_name)
+			if ok then
+				cur_pk, cur_pk_sz = p, p_sz
+				has_pk = true
+				return true
+			end
+		end
+	end
 	function node:open()
 		input:open()
-		function node:close() input:close() end
-		local has_pk = false
-		local cur_pk, cur_pk_sz
-		function node:pk(name)
-			if has_pk and (name == nil or name == member_name) then
-				return true, cur_pk, cur_pk_sz
-			end
-		end
-		node.compile_col = input.compile_col
-		function node:merge_key() return cur_pk, cur_pk_sz end
-		function node:next_group()
-			has_pk = false
-			while true do
-				if not input:next_item() then return end
-				local ok, p, p_sz = input:pk(member_name)
-				if ok then
-					cur_pk, cur_pk_sz = p, p_sz
-					has_pk = true
-					return true
-				end
-			end
-		end
+		has_pk = false; cur_pk = nil; cur_pk_sz = nil
 	end
 	return node
 end
@@ -2047,9 +2114,51 @@ function Db.pk_sort:__call(db, input)
 	node.inputs = {input}
 	node.merge_cmp = key_cmp
 	node.merge_sig = schema.key_sig
+	local pks
+	local base_cur, cur_alive
+	local i, cur_pk, cur_pk_sz
+	local cur_pk_rec = MDBX_val()
+	local base_val_rec = MDBX_val()
+	local has_pk, base_seeked
+	local function get_base_val()
+		if not base_seeked then
+			if not base_cur then
+				base_cur = db:cursor_raw(assert(db:try_dbi(member_name)))
+				base_cur.schema = schema
+			end
+			base_cur:move_raw_into(C.MDBX_SET_KEY, cur_pk_rec, base_val_rec)
+			base_seeked = true
+		end
+		return base_val_rec.data, base_val_rec.size
+	end
+	function node:close()
+		if cur_alive then
+			if base_cur then base_cur:close(); base_cur = nil end
+			cur_alive = false
+		end
+	end
+	function node:pk(name)
+		if has_pk and (name == nil or name == member_name) then
+			return true, cur_pk, cur_pk_sz
+		end
+	end
+	function node:compile_col(member, col)
+		return db:compile_col(schema, col, nil, cur_pk_rec, get_base_val)
+	end
+	function node:merge_key() return cur_pk, cur_pk_sz end
+	function node:next_group()
+		i = i + 1
+		local entry = pks[i]
+		if not entry then has_pk = false; return end
+		cur_pk, cur_pk_sz = entry.p, entry.sz
+		cur_pk_rec.data = entry.p; cur_pk_rec.size = entry.sz
+		has_pk = true; base_seeked = false
+		return true
+	end
 	function node:open()
+		assert(not cur_alive, 'node already open')
 		input:open()
-		local pks = {}
+		pks = {}
 		while input:next_item() do
 			local _, p, p_sz = input:pk()
 			local s = str(p, p_sz)
@@ -2059,43 +2168,9 @@ function Db.pk_sort:__call(db, input)
 		sort(pks, function(a, b)
 				return key_lt(a.p, a.sz, b.p, b.sz)
 		end)
-		local base_dbi = assert(db:try_dbi(member_name))
-		local base_cur
-		local i = 0
-		local cur_pk, cur_pk_sz
-		local cur_pk_rec = MDBX_val()
-		local base_val_rec = MDBX_val()
-		local has_pk = false
-		local base_seeked = false
-		local function get_base_val()
-			if not base_seeked then
-				if not base_cur then base_cur = db:cursor_raw(base_dbi); base_cur.schema = schema end
-				base_cur:move_raw_into(C.MDBX_SET_KEY, cur_pk_rec, base_val_rec)
-				base_seeked = true
-			end
-			return base_val_rec.data, base_val_rec.size
-		end
-		function node:close()
-			if base_cur then base_cur:close(); base_cur = nil end
-		end
-		function node:pk(name)
-			if has_pk and (name == nil or name == member_name) then
-				return true, cur_pk, cur_pk_sz
-			end
-		end
-		function node:compile_col(member, col)
-			return db:compile_col(schema, col, nil, cur_pk_rec, get_base_val)
-		end
-		function node:merge_key() return cur_pk, cur_pk_sz end
-		function node:next_group()
-			i = i + 1
-			local entry = pks[i]
-			if not entry then has_pk = false; return end
-			cur_pk, cur_pk_sz = entry.p, entry.sz
-			cur_pk_rec.data = entry.p; cur_pk_rec.size = entry.sz
-			has_pk = true; base_seeked = false
-			return true
-		end
+		cur_alive = true
+		i = 0; has_pk = false; base_seeked = false
+		cur_pk = nil; cur_pk_sz = nil
 	end
 	return node
 end
@@ -2139,50 +2214,53 @@ function Db.pk_and_probe:__call(db, driver, ...)
 	node.inputs = {driver}
 	node.merge_cmp = driver.merge_cmp
 	node.merge_sig = driver.merge_sig
+	local probe_curs = {}
+	local cur_alive
+	local has_pk, cur_pk, cur_pk_sz
+	function node:compile_col(m, c) return driver:compile_col(m, c) end
+	function node:close()
+		if cur_alive then
+			driver:close()
+			for i, c in ipairs(probe_curs) do c:close(); probe_curs[i] = nil end
+			cur_alive = false
+		end
+	end
+	function node:pk(name)
+		if has_pk and (name == nil or name == member_name) then
+			return true, cur_pk, cur_pk_sz
+		end
+	end
+	function node:merge_key() return driver:merge_key() end
+	function node:next_group()
+		has_pk = false
+		if not probe_curs[1] then
+			for i, p in ipairs(probes) do
+				probe_curs[i] = db:cursor_raw(assert(db:try_dbi(p.schema.name)))
+			end
+		end
+		while true do
+			if not driver:next_item() then return end
+			local _, p, p_sz = driver:pk()
+			local pass = true
+			for i, probe in ipairs(probes) do
+				local ok, v, v_sz = probe_curs[i]:find_dup_ge_raw(
+					probe.key, probe.key_sz, p, p_sz)
+				if not ok or not key_eq(v, v_sz, p, p_sz) then
+					pass = false; break
+				end
+			end
+			if pass then
+				cur_pk, cur_pk_sz = p, p_sz
+				has_pk = true
+				return true
+			end
+		end
+	end
 	function node:open()
+		assert(not cur_alive, 'node already open')
 		driver:open()
-		local probe_curs = {}
-		local cur_alive = true
-		function node:close()
-			if cur_alive then
-				driver:close()
-				for _, c in ipairs(probe_curs) do c:close() end
-				cur_alive = false
-			end
-		end
-		for i, p in ipairs(probes) do
-			local dbi = assert(db:try_dbi(p.schema.name))
-			probe_curs[i] = db:cursor_raw(dbi)
-		end
-		local has_pk = false
-		local cur_pk, cur_pk_sz
-		function node:pk(name)
-			if has_pk and (name == nil or name == member_name) then
-				return true, cur_pk, cur_pk_sz
-			end
-		end
-		node.compile_col = driver.compile_col
-		function node:merge_key() return driver:merge_key() end
-		function node:next_group()
-			has_pk = false
-			while true do
-				if not driver:next_item() then return end
-				local _, p, p_sz = driver:pk()
-				local pass = true
-				for i, probe in ipairs(probes) do
-					local ok, v, v_sz = probe_curs[i]:find_dup_ge_raw(
-						probe.key, probe.key_sz, p, p_sz)
-					if not ok or not key_eq(v, v_sz, p, p_sz) then
-						pass = false; break
-					end
-				end
-				if pass then
-					cur_pk, cur_pk_sz = p, p_sz
-					has_pk = true
-					return true
-				end
-			end
-		end
+		cur_alive = true
+		has_pk = false; cur_pk = nil; cur_pk_sz = nil
 	end
 	return node
 end
@@ -2252,16 +2330,14 @@ function Db.value_filter:__call(db, input, fn)
 	node.inputs = {input}
 	function node:row() return input:row() end
 	function node:compile_col(m, c) return input:compile_col(m, c) end
-	function node:open()
-		input:open()
-		function node:close() input:close() end
-		function node:next_group()
-			while true do
-				if not input:next_group() then return end
-				if fn(input:row()) then return true end
-			end
+	function node:close() input:close() end
+	function node:next_group()
+		while true do
+			if not input:next_group() then return end
+			if fn(input:row()) then return true end
 		end
 	end
+	function node:open() input:open() end
 	return node
 end
 
@@ -2286,34 +2362,32 @@ function Db.select:__call(db, input, outputs)
 	})
 	node.inputs = {input}
 	local col_map = build_col_map(parsed)
+	local getters = {}
+	local names = {}
 	function node:row() return node._row end
 	function node:compile_col(member, col)
 		local name = col_map[member..':'..col]
 		if name then return function() return node._row[name] end end
 	end
-	function node:open()
-		input:open()
-		local getters = {}
-		local names = {}
-		for i,o in ipairs(parsed) do
-			local user_get = o.fn
-			if user_get then
-				getters[i] = function() return user_get(input) end
-			else
-				getters[i] = input:compile_col(o.member, o.col)
-			end
-			names[i] = o.name
+	for i, o in ipairs(parsed) do
+		local user_get = o.fn
+		if user_get then
+			getters[i] = function() return user_get(input) end
+		else
+			getters[i] = input:compile_col(o.member, o.col)
 		end
-		local ngetters = #getters
-		function node:close() input:close() end
-		function node:next_group()
-			if not input:next_item() then return end
-			local rec = {}
-			for i = 1, ngetters do rec[names[i]] = getters[i]() end
-			node._row = rec
-			return true
-		end
+		names[i] = o.name
 	end
+	local ngetters = #getters
+	function node:close() input:close() end
+	function node:next_group()
+		if not input:next_item() then return end
+		local rec = {}
+		for i = 1, ngetters do rec[names[i]] = getters[i]() end
+		node._row = rec
+		return true
+	end
+	function node:open() input:open() end
 	return node
 end
 
@@ -2336,22 +2410,23 @@ function Db.stream_distinct:__call(db, input, key_fn)
 		unique  = true,
 	})
 	node.inputs = {input}
+	local prev_key
 	function node:row() return input:row() end
 	function node:compile_col(m, c) return input:compile_col(m, c) end
-	function node:open()
-		input:open()
-		function node:close() input:close() end
-		local prev_key
-		function node:next_group()
-			while true do
-				if not input:next_group() then return end
-				local k = key_fn(input:row())
-				if not prev_key or not keys_eq(k, prev_key) then
-					prev_key = k
-					return true
-				end
+	function node:close() input:close() end
+	function node:next_group()
+		while true do
+			if not input:next_group() then return end
+			local k = key_fn(input:row())
+			if not prev_key or not keys_eq(k, prev_key) then
+				prev_key = k
+				return true
 			end
 		end
+	end
+	function node:open()
+		input:open()
+		prev_key = nil
 	end
 	return node
 end
@@ -2375,20 +2450,20 @@ function Db.hash_distinct:__call(db, input, key_fn)
 		unique  = true,
 	})
 	node.inputs = {input}
+	local tuple_space, seen
 	function node:row() return input:row() end
 	function node:compile_col(m, c) return input:compile_col(m, c) end
+	function node:close() input:close() end
+	function node:next_group()
+		while true do
+			if not input:next_group() then return end
+			local t = tuple_space(unpack(key_fn(input:row())))
+			if not seen[t] then seen[t] = true; return true end
+		end
+	end
 	function node:open()
 		input:open()
-		function node:close() input:close() end
-		local tuple = tuples()
-		local seen = {}
-		function node:next_group()
-			while true do
-				if not input:next_group() then return end
-				local t = tuple(unpack(key_fn(input:row())))
-				if not seen[t] then seen[t] = true; return true end
-			end
-		end
+		tuple_space = tuples(); seen = {}
 	end
 	return node
 end
@@ -2464,13 +2539,54 @@ function Db.value_sort:__call(db, input, spec)
 			item    = input.item,
 		})
 		node.inputs = {input}
+		local entries
+		local base_cur, cur_alive
+		local cur_pk_rec = MDBX_val()
+		local base_val_rec = MDBX_val()
+		local base_seeked, has_pk, idx
+		local cmp = make_cmp(function(e) return e.vals end)
+		local function get_base_val()
+			if not base_seeked then
+				if not base_cur then
+					base_cur = db:cursor_raw(assert(db:try_dbi(member_name)))
+					base_cur.schema = schema
+				end
+				base_cur:move_raw_into(C.MDBX_SET_KEY, cur_pk_rec, base_val_rec)
+				base_seeked = true
+			end
+			return base_val_rec.data, base_val_rec.size
+		end
+		function node:close()
+			if cur_alive then
+				if base_cur then base_cur:close(); base_cur = nil end
+				cur_alive = false
+			end
+		end
+		function node:pk(name)
+			if not has_pk then return end
+			if name == nil or name == member_name then
+				return true, cur_pk_rec.data, cur_pk_rec.size
+			end
+		end
+		function node:compile_col(member, col)
+			return db:compile_col(schema, col, nil, cur_pk_rec, get_base_val)
+		end
+		function node:next_group()
+			idx = idx + 1
+			local e = entries[idx]
+			if not e then has_pk = false; return end
+			cur_pk_rec.data = e.p; cur_pk_rec.size = e.sz
+			has_pk = true; base_seeked = false
+			return true
+		end
 		function node:open()
+			assert(not cur_alive, 'node already open')
 			input:open()
 			local decoders = {}
 			for _, p in ipairs(parts) do
 				decoders[#decoders+1] = input:compile_col(p.member, p.col)
 			end
-			local entries = {}
+			entries = {}
 			while input:next_item() do
 				local _, p, p_sz = input:pk()
 				local pk = u8a(p_sz); copy(pk, p, p_sz)
@@ -2479,43 +2595,9 @@ function Db.value_sort:__call(db, input, spec)
 				entries[#entries+1] = {p=pk, sz=p_sz, vals=vals}
 			end
 			input:close()
-			local cmp = make_cmp(function(e) return e.vals end)
 			sort(entries, cmp)
-			local base_dbi = assert(db:try_dbi(member_name))
-			local base_cur
-			local cur_pk_rec = MDBX_val()
-			local base_val_rec = MDBX_val()
-			local base_seeked = false
-			local has_pk = false
-			local idx = 0
-			local function get_base_val()
-				if not base_seeked then
-					if not base_cur then base_cur = db:cursor_raw(base_dbi); base_cur.schema = schema end
-					base_cur:move_raw_into(C.MDBX_SET_KEY, cur_pk_rec, base_val_rec)
-					base_seeked = true
-				end
-				return base_val_rec.data, base_val_rec.size
-			end
-			function node:close()
-				if base_cur then base_cur:close(); base_cur = nil end
-			end
-			function node:pk(name)
-				if not has_pk then return end
-				if name == nil or name == member_name then
-					return true, cur_pk_rec.data, cur_pk_rec.size
-				end
-			end
-			function node:compile_col(member, col)
-				return db:compile_col(schema, col, nil, cur_pk_rec, get_base_val)
-			end
-			function node:next_group()
-				idx = idx + 1
-				local e = entries[idx]
-				if not e then has_pk = false; return end
-				cur_pk_rec.data = e.p; cur_pk_rec.size = e.sz
-				has_pk = true; base_seeked = false
-				return true
-			end
+			cur_alive = true
+			idx = 0; has_pk = false; base_seeked = false
 		end
 		return node
 	else
@@ -2544,20 +2626,21 @@ function Db.value_sort:__call(db, input, spec)
 				return false
 			end
 		end
+		local recs, idx
+		function node:close() end
+		function node:next_group()
+			idx = idx + 1
+			if not recs[idx] then return end
+			node._row = recs[idx]
+			return true
+		end
 		function node:open()
 			input:open()
-			local recs = {}
+			recs = {}
 			while input:next_group() do recs[#recs+1] = input:row() end
 			input:close()
 			sort(recs, cmp)
-			local i = 0
-			function node:close() end
-			function node:next_group()
-				i = i + 1
-				if not recs[i] then return end
-				node._row = recs[i]
-				return true
-			end
+			idx = 0
 		end
 		return node
 	end
@@ -2619,55 +2702,56 @@ function Db.stream_aggregate:__call(db, input, key_fn, agg)
 		local name = col_map[member..':'..col]
 		if name then return function() return node._row[name] end end
 	end
-	function node:open()
-		input:open()
-		function node:close() input:close() end
-		local done = false
-		local function accumulate(acc, key)
-			for _, a in ipairs(agg) do
-				if a.op == 'count' then
-					acc[a.name] = acc[a.name] + 1
-				elseif a.op == 'key' then
-					acc[a.name] = key and key[a.part]
-				else
-					local v = input:col(a.member, a.col)
-					if v ~= nil and v ~= null then
-						if a.op == 'sum' then
-							acc[a.name] = (acc[a.name] or 0) + v
-						elseif a.op == 'avg' then
-							acc[a.name].sum = acc[a.name].sum + v
-							acc[a.name].n   = acc[a.name].n   + 1
-						elseif a.op == 'min' then
-							if acc[a.name] == nil or v < acc[a.name] then acc[a.name] = v end
-						elseif a.op == 'max' then
-							if acc[a.name] == nil or v > acc[a.name] then acc[a.name] = v end
-						elseif a.op == 'concat' then
-							acc[a.name][#acc[a.name]+1] = tostring(v)
-						end
+	local done
+	local function accumulate(acc, key)
+		for _, a in ipairs(agg) do
+			if a.op == 'count' then
+				acc[a.name] = acc[a.name] + 1
+			elseif a.op == 'key' then
+				acc[a.name] = key and key[a.part]
+			else
+				local v = input:col(a.member, a.col)
+				if v ~= nil and v ~= null then
+					if a.op == 'sum' then
+						acc[a.name] = (acc[a.name] or 0) + v
+					elseif a.op == 'avg' then
+						acc[a.name].sum = acc[a.name].sum + v
+						acc[a.name].n   = acc[a.name].n   + 1
+					elseif a.op == 'min' then
+						if acc[a.name] == nil or v < acc[a.name] then acc[a.name] = v end
+					elseif a.op == 'max' then
+						if acc[a.name] == nil or v > acc[a.name] then acc[a.name] = v end
+					elseif a.op == 'concat' then
+						acc[a.name][#acc[a.name]+1] = tostring(v)
 					end
 				end
 			end
 		end
-		if not key_fn then
-			function node:next_group()
-				if done then return end; done = true
-				local acc = agg_init(agg)
-				while input:next_item() do accumulate(acc, nil) end
-				node._row = agg_finalize(agg, acc)
-				return true
-			end
-		else
-			function node:next_group()
-				if done then return end
-				if not input:next_group() then done = true; return end
-				local key = key_fn(input)
-				local acc = agg_init(agg)
-				accumulate(acc, key)
-				while input:next_pk() do accumulate(acc, key) end
-				node._row = agg_finalize(agg, acc)
-				return true
-			end
+	end
+	function node:close() input:close() end
+	if not key_fn then
+		function node:next_group()
+			if done then return end; done = true
+			local acc = agg_init(agg)
+			while input:next_item() do accumulate(acc, nil) end
+			node._row = agg_finalize(agg, acc)
+			return true
 		end
+	else
+		function node:next_group()
+			if done then return end
+			if not input:next_group() then done = true; return end
+			local key = key_fn(input)
+			local acc = agg_init(agg)
+			accumulate(acc, key)
+			while input:next_pk() do accumulate(acc, key) end
+			node._row = agg_finalize(agg, acc)
+			return true
+		end
+	end
+	function node:open()
+		input:open()
+		done = false
 	end
 	return node
 end
@@ -2692,34 +2776,42 @@ function Db.hash_aggregate:__call(db, input, key_fn, agg)
 		'hash_aggregate: arg 3: non-empty agg list expected')
 	local node = object(self, {members = input.members, unique = true})
 	node.inputs = {input}
-	function node:row() return node._row end
-	function node:open()
-		input:open()
-		local function accumulate(acc, rec, key)
-			for _, a in ipairs(agg) do
-				if a.op == 'count' then
-					acc[a.name] = acc[a.name] + 1
-				elseif a.op == 'key' then
-					acc[a.name] = key and key[a.part]
-				else
-					local v = a.input and rec[a.input]
-					if v ~= nil and v ~= null then
-						if a.op == 'sum' then
-							acc[a.name] = (acc[a.name] or 0) + v
-						elseif a.op == 'avg' then
-							acc[a.name].sum = acc[a.name].sum + v
-							acc[a.name].n   = acc[a.name].n   + 1
-						elseif a.op == 'min' then
-							if acc[a.name] == nil or v < acc[a.name] then acc[a.name] = v end
-						elseif a.op == 'max' then
-							if acc[a.name] == nil or v > acc[a.name] then acc[a.name] = v end
-						elseif a.op == 'concat' then
-							acc[a.name][#acc[a.name]+1] = tostring(v)
-						end
+	local output, idx
+	local function accumulate(acc, rec, key)
+		for _, a in ipairs(agg) do
+			if a.op == 'count' then
+				acc[a.name] = acc[a.name] + 1
+			elseif a.op == 'key' then
+				acc[a.name] = key and key[a.part]
+			else
+				local v = a.input and rec[a.input]
+				if v ~= nil and v ~= null then
+					if a.op == 'sum' then
+						acc[a.name] = (acc[a.name] or 0) + v
+					elseif a.op == 'avg' then
+						acc[a.name].sum = acc[a.name].sum + v
+						acc[a.name].n   = acc[a.name].n   + 1
+					elseif a.op == 'min' then
+						if acc[a.name] == nil or v < acc[a.name] then acc[a.name] = v end
+					elseif a.op == 'max' then
+						if acc[a.name] == nil or v > acc[a.name] then acc[a.name] = v end
+					elseif a.op == 'concat' then
+						acc[a.name][#acc[a.name]+1] = tostring(v)
 					end
 				end
 			end
 		end
+	end
+	function node:row() return node._row end
+	function node:close() end
+	function node:next_group()
+		idx = idx + 1
+		if not output[idx] then return end
+		node._row = output[idx]
+		return true
+	end
+	function node:open()
+		input:open()
 		local group_list = {}
 		local group_map  = {}
 		local tuple_space = key_fn and tuples() or nil
@@ -2741,16 +2833,9 @@ function Db.hash_aggregate:__call(db, input, key_fn, agg)
 			accumulate(acc, rec, key)
 		end
 		input:close()
-		local output = {}
+		output = {}
 		for _, g in ipairs(group_list) do output[#output+1] = agg_finalize(agg, g) end
-		local i = 0
-		function node:close() end
-		function node:next_group()
-			i = i + 1
-			if not output[i] then return end
-			node._row = output[i]
-			return true
-		end
+		idx = 0
 	end
 	return node
 end
@@ -2775,26 +2860,26 @@ function Db.union_all:__call(db, ...)
 	end
 	local node = object(self, {members = inputs[1].members})
 	node.inputs = inputs
-	local cur_i = 1
+	local cur_i, i
 	function node:row() return inputs[cur_i]:row() end
 	function node:compile_col(member, col)
 		local cls = {}
 		for j = 1, n do cls[j] = inputs[j]:compile_col(member, col) end
 		return function() return cls[cur_i] and cls[cur_i]() end
 	end
+	function node:close() for j = 1, n do inputs[j]:close() end end
+	function node:next_group()
+		while i <= n do
+			if inputs[i]:next_group() then
+				cur_i = i
+				return true
+			end
+			i = i + 1
+		end
+	end
 	function node:open()
 		for j = 1, n do inputs[j]:open() end
-		function node:close() for j = 1, n do inputs[j]:close() end end
-		local i = 1
-		function node:next_group()
-			while i <= n do
-				if inputs[i]:next_group() then
-					cur_i = i
-					return true
-				end
-				i = i + 1
-			end
-		end
+		cur_i = 1; i = 1
 	end
 	return node
 end
@@ -2819,40 +2904,37 @@ function Db.union_distinct:__call(db, ...)
 	end
 	local node = object(self, {members = inputs[1].members, unique = true})
 	node.inputs = inputs
-	local cur_i = 1
+	local cur_i, seen, tuple_space, key_list, i
 	function node:row() return inputs[cur_i]:row() end
 	function node:compile_col(member, col)
 		local cls = {}
 		for j = 1, n do cls[j] = inputs[j]:compile_col(member, col) end
 		return function() return cls[cur_i] and cls[cur_i]() end
 	end
-	function node:open()
-		for j = 1, n do inputs[j]:open() end
-		function node:close() for j = 1, n do inputs[j]:close() end end
-		local seen = {}
-		local tuple_space = tuples()
-		-- key list discovered from first row; sorted for deterministic tuple encoding.
-		local key_list = nil
-		local i = 1
-		function node:next_group()
-			while i <= n do
-				if inputs[i]:next_group() then
-					cur_i = i
-					local rec = inputs[i]:row()
-					if not key_list then
-						key_list = {}
-						for k in pairs(rec) do key_list[#key_list+1] = k end
-						sort(key_list)
-					end
-					local vals = {}
-					for _, k in ipairs(key_list) do vals[#vals+1] = rec[k] end
-					local t = tuple_space(unpack(vals))
-					if not seen[t] then seen[t] = true; return true end
-				else
-					i = i + 1
+	function node:close() for j = 1, n do inputs[j]:close() end end
+	-- key list discovered from first row; sorted for deterministic tuple encoding.
+	function node:next_group()
+		while i <= n do
+			if inputs[i]:next_group() then
+				cur_i = i
+				local rec = inputs[i]:row()
+				if not key_list then
+					key_list = {}
+					for k in pairs(rec) do key_list[#key_list+1] = k end
+					sort(key_list)
 				end
+				local vals = {}
+				for _, k in ipairs(key_list) do vals[#vals+1] = rec[k] end
+				local t = tuple_space(unpack(vals))
+				if not seen[t] then seen[t] = true; return true end
+			else
+				i = i + 1
 			end
 		end
+	end
+	function node:open()
+		for j = 1, n do inputs[j]:open() end
+		cur_i = 1; seen = {}; tuple_space = tuples(); key_list = nil; i = 1
 	end
 	return node
 end
