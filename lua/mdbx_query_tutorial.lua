@@ -10,18 +10,20 @@ Run: ~/sdk/bin/luajit -lscite ~/sdk/lua/mdbx_query_tutorial.lua
 ]]
 
 ------------------------------------------------------------------------
--- Schema definition (paper schema language)
---
--- mdbx_schema() creates a schema object.
--- sc:import(fn) runs fn in a DSL environment where bare names resolve
--- to field type tokens declared in schema_std.
---
--- Each table is a flat list of alternating name/type tokens with
--- optional constraint tokens (not_null, uk, child_fk, ...).
--- idpk = u64 primary key with auto-increment.
--- child_fk = non-unique FK index pointing to the idpk of the named table.
--- uk = unique index on the preceding field; varsize fields also need nozero.
--- pk(col,...) = composite primary key replacing the default single-col pk.
+--[[
+Schema definition (paper schema language)
+
+mdbx_schema() creates a schema object.
+sc:import(fn) runs fn in a DSL environment where bare names resolve
+to field type tokens declared in schema_std.
+
+Each table is a flat list of alternating name/type tokens with
+optional constraint tokens (not_null, uk, child_fk, ...).
+idpk = u64 primary key with auto-increment.
+child_fk = non-unique FK index pointing to the idpk of the named table.
+uk = unique index on the preceding field; varsize fields also need nozero.
+pk(col,...) = composite primary key replacing the default single-col pk.
+]]
 ------------------------------------------------------------------------
 
 function blog_schema()
@@ -73,13 +75,15 @@ local function rows_of(q)
 end
 
 ------------------------------------------------------------------------
--- Database setup
---
--- 1. Create a schema object and import the schema function.
--- 2. Open the database file and attach the schema.
--- 3. Call sync_schema to create all tables and indexes that do not yet
---    exist. It validates already-existing ones and leaves them unchanged.
--- 4. Insert fixture rows inside a write transaction.
+--[[
+Database setup
+
+1. Create a schema object and import the schema function.
+2. Open the database file and attach the schema.
+3. Call sync_schema to create all tables and indexes that do not yet
+   exist. It validates already-existing ones and leaves them unchanged.
+4. Insert fixture rows inside a write transaction.
+]]
 ------------------------------------------------------------------------
 
 local DB_FILE = '/tmp/mdbx_query_tutorial_'..uuid()..'.mdb'
@@ -95,27 +99,27 @@ db:sync_schema()
 
 db:begin'w'
 
-db:insert('category', '{}', {id=1, name='tech',    slug='tech'})
-db:insert('category', '{}', {id=2, name='science', slug='science'})
-db:insert('category', '{}', {id=3, name='art',     slug='art'})    -- no posts
+db:insert('category', '{}', {id = 1, name = 'tech',    slug = 'tech'})
+db:insert('category', '{}', {id = 2, name = 'science', slug = 'science'})
+db:insert('category', '{}', {id = 3, name = 'art',     slug = 'art'})    -- no posts
 
-db:insert('post', '{}', {id=1, category=1, title='Lua intro',   status='draft',     score=10})
-db:insert('post', '{}', {id=2, category=1, title='MDBX guide',  status='published', score=50})
-db:insert('post', '{}', {id=3, category=2, title='Black holes', status='published', score=80})
-db:insert('post', '{}', {id=4, category=2, title='Galaxies',    status='archived',  score=nil})
-db:insert('post', '{}', {id=5, category=2, title='Painting',    status='draft',     score=20})
+db:insert('post', '{}', {id = 1, category = 1, title = 'Lua intro',   status = 'draft',     score = 10})
+db:insert('post', '{}', {id = 2, category = 1, title = 'MDBX guide',  status = 'published', score = 50})
+db:insert('post', '{}', {id = 3, category = 2, title = 'Black holes', status = 'published', score = 80})
+db:insert('post', '{}', {id = 4, category = 2, title = 'Galaxies',    status = 'archived',  score = nil})
+db:insert('post', '{}', {id = 5, category = 2, title = 'Painting',    status = 'draft',     score = 20})
 
-db:insert('tag', '{}', {id=1, name='lua'})
-db:insert('tag', '{}', {id=2, name='db'})
-db:insert('tag', '{}', {id=3, name='web'})
-db:insert('tag', '{}', {id=4, name='oop'})
+db:insert('tag', '{}', {id = 1, name = 'lua'})
+db:insert('tag', '{}', {id = 2, name = 'db'})
+db:insert('tag', '{}', {id = 3, name = 'web'})
+db:insert('tag', '{}', {id = 4, name = 'oop'})
 
-db:insert('post_tag', '{}', {post=1, tag=1})   -- Lua intro  -> lua
-db:insert('post_tag', '{}', {post=1, tag=2})   -- Lua intro  -> db
-db:insert('post_tag', '{}', {post=2, tag=3})   -- MDBX guide -> web
-db:insert('post_tag', '{}', {post=3, tag=1})   -- Black holes -> lua
-db:insert('post_tag', '{}', {post=3, tag=3})   -- Black holes -> web
-db:insert('post_tag', '{}', {post=4, tag=4})   -- Galaxies   -> oop
+db:insert('post_tag', '{}', {post = 1, tag = 1})   -- Lua intro  -> lua
+db:insert('post_tag', '{}', {post = 1, tag = 2})   -- Lua intro  -> db
+db:insert('post_tag', '{}', {post = 2, tag = 3})   -- MDBX guide -> web
+db:insert('post_tag', '{}', {post = 3, tag = 1})   -- Black holes -> lua
+db:insert('post_tag', '{}', {post = 3, tag = 3})   -- Black holes -> web
+db:insert('post_tag', '{}', {post = 4, tag = 4})   -- Galaxies   -> oop
 -- post 5 (Painting) has no tags
 
 db:commit()
@@ -619,14 +623,14 @@ The group-by columns appear in the output under their bare column names
 			db:from('post')
 				:group_by('category')
 				:agg{
-					{name='n',         op='count'},
-					{name='avg_score', op='avg', member='post', col='score'},
+					{name = 'n',         op = 'count'},
+					{name = 'avg_score', op = 'avg', member = 'post', col = 'score'},
 				})
 		pr(#rows)               -- 2
 		pr(rows[1].category)    -- 1
 		pr(rows[1].n)           -- 2   (posts 1, 2)
 		pr(rows[2].n)           -- 3   (posts 3, 4, 5)
-		-- avg_score: cat1 = (10+50)/2 = 30.0; cat2 = (80+20)/2 = 50.0 (null skipped)
+		-- avg_score: cat1=(10+50)/2=30.0; cat2=(80+20)/2=50.0 (null skipped)
 		pr(rows[1].avg_score)   -- 30.0
 	end)
 end
@@ -643,8 +647,8 @@ Always produces exactly one row, even for an empty table (count=0, sums=nil).
 		local rows = rows_of(
 			db:from('post')
 				:agg{
-					{name='n',   op='count'},
-					{name='tot', op='sum', member='post', col='score'},
+					{name = 'n',   op = 'count'},
+					{name = 'tot', op = 'sum', member = 'post', col = 'score'},
 				})
 		pr(#rows)         -- 1
 		pr(rows[1].n)     -- 5
@@ -665,7 +669,7 @@ Default op is '=='. Supported ops: ==  ~=  <  <=  >  >=
 		local rows = rows_of(
 			db:from('post')
 				:group_by('category')
-				:agg{{name='n', op='count'}}
+				:agg{{name = 'n', op = 'count'}}
 				:having('n', '>', 2))
 		pr(#rows)               -- 1
 		pr(rows[1].category)    -- 2   (3 posts; cat1 has 2 which fails >2)
@@ -685,7 +689,7 @@ primary key order.
 		local rows = rows_of(
 			db:from('post')
 				:group_by('category')
-				:agg{{name='titles', op='concat', member='post', col='title', sep='; '}})
+				:agg{{name = 'titles', op = 'concat', member = 'post', col = 'title', sep = '; '}})
 		pr(rows[1].titles)    -- Lua intro; MDBX guide
 		pr(rows[2].titles)    -- Black holes; Galaxies; Painting
 	end)
@@ -706,7 +710,7 @@ Returning nil omits the field from the record entirely (not set, not null).
 			db:from('post'):select{
 				'post.id',
 				'post.score',
-				{name='double', fn=function(node)
+				{name = 'double', fn = function(node)
 					local s = node:col('post', 'score')
 					return (s ~= nil and s ~= null) and s * 2 or nil
 				end},

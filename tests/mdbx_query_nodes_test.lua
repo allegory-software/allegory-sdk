@@ -1,4 +1,4 @@
-require'mdbx_query'
+require'mdbx_query_nodes'
 
 local test = setmetatable({}, {__newindex = function(t, k, v)
 	rawset(t, k, v)
@@ -49,8 +49,8 @@ local function pk_id(node, name, db_or_schema)
 	return decode_pk(schema, p, sz)
 end
 
-local function collect_pks(node, name, schema)
-	node:open()
+local function collect_pks(node, name, schema, params)
+	node:open(params)
 	local t = {}
 	while node:next_group() do
 		repeat
@@ -135,6 +135,54 @@ local function with_db(name, fn)
 	assert(ok, err)
 end
 
+local function build_u32_fixture(db)
+	db:begin'w'
+	db:create_table('users', {fields = {
+		{col = 'id'    , mdbx_type = 'u32', not_null = true},
+		{col = 'status', mdbx_type = 'u32', not_null = true},
+		{col = 'score' , mdbx_type = 'u32', not_null = true},
+	}, pk = {'id'}})
+	db:add_index('users', {'status'})
+	db:add_index('users', {'score'})
+
+	db:create_table('sessions', {fields = {
+		{col = 'id'     , mdbx_type = 'u32', not_null = true},
+		{col = 'user_id', mdbx_type = 'u32', not_null = true},
+	}, pk = {'id'}})
+	db:add_index('sessions', {'user_id'})
+	db:add_fk{table = 'sessions', cols = {'user_id'},
+		ref_table = 'users', ref_cols = {'id'}}
+
+	for _, r in ipairs{
+		{id = 1, status = 1, score = 80},
+		{id = 2, status = 1, score = 95},
+		{id = 3, status = 2, score = 50},
+		{id = 4, status = 1, score = 70},
+		{id = 5, status = 2, score = 60},
+	} do db:insert('users', '{}', r) end
+
+	for _, r in ipairs{
+		{id = 11, user_id = 1},
+		{id = 12, user_id = 1},
+		{id = 13, user_id = 2},
+		{id = 14, user_id = 4},
+	} do db:insert('sessions', '{}', r) end
+	db:commit()
+end
+
+local function with_u32_db(name, fn)
+	local file = test_file(name)
+	cleanup(file)
+	local db = mdbx_open(file)
+	local ok, err = xpcall(function()
+		build_u32_fixture(db)
+		fn(db)
+	end, debug.traceback)
+	if db.env then db:close() end
+	cleanup(file)
+	assert(ok, err)
+end
+
 ------------------------------------------------------------------------------
 
 function test.explain_pk_range()
@@ -154,7 +202,7 @@ end
 function test.explain_pk_get()
 	with_db('explain_pk_get', function(db)
 		db:atomic('r', function()
-			local e = db:pk_get('users', 1):explain()
+			local e = db:pk_get('users', 'K'):explain()
 			assert(e.kind == 'pk_get', e.kind)
 			assert(e.item == 'pk', e.item)
 			assert(e.members[1] == 'users', e.members[1])
@@ -172,9 +220,8 @@ function test.resolve_errors()
 			assert(not pcall(db.pk_range, db, 'nope'))
 			--wrong bound arg count.
 			assert(not pcall(db.pk_range, db, 'users', 1))
-			--wrong pk arity.
+			--missing KEY param name.
 			assert(not pcall(db.pk_get, db, 'users'))
-			assert(not pcall(db.pk_get, db, 'users', 1, 2))
 		end)
 	end)
 end
@@ -186,13 +233,13 @@ function test.pk_seek_exec()
 		db:atomic('r', function()
 			local schema = db:table_schema('users')
 			--seek 'active' -> users 1, 2, 4 in pk-order
-			local node = db:pk_seek('users/status', 'active')
-			local pks = collect_pks(node, 'users', schema)
+			local node = db:pk_seek('users/status', 'S')
+			local pks = collect_pks(node, 'users', schema, {S={'active'}})
 			assert(#pks == 3, 'expected 3, got '..#pks)
 			assert(pks[1] == 1 and pks[2] == 2 and pks[3] == 4, S(pks))
 			--seek missing key -> nil immediately
-			local n = db:pk_seek('users/status', 'missing')
-			n:open()
+			local n = db:pk_seek('users/status', 'S')
+			n:open({S={'missing'}})
 			assert(n:next_group() == nil)
 			assert(n:pk('users') == nil)
 			n:close()
@@ -204,8 +251,8 @@ function test.pk_get_exec()
 	with_db('pk_get_exec', function(db)
 		db:atomic('r', function()
 			--existing PK returns it
-			local node = db:pk_get('users', 3)
-			node:open()
+			local node = db:pk_get('users', 'K')
+			node:open({K={3}})
 			assert(node:next_group() == true)
 			assert(pk_id(node, 'users', db) == 3)
 			--exhausted after one item
@@ -213,8 +260,8 @@ function test.pk_get_exec()
 			assert(node:pk('users') == nil)
 			node:close()
 			--missing PK returns nil
-			local n = db:pk_get('users', 999)
-			n:open()
+			local n = db:pk_get('users', 'K')
+			n:open({K={999}})
 			assert(n:next_group() == nil)
 			assert(n:pk('users') == nil)
 			n:close()
@@ -241,21 +288,21 @@ function test.pk_prefix_exec()
 			local schema = db:table_schema('sessions')
 			--prefix user_id=1 -> sessions 11,12,13 in started_at (index-key) order
 			local pks = collect_pks(
-				db:pk_prefix('sessions/user_id,started_at', 1),
-				'sessions', schema)
+				db:pk_prefix('sessions/user_id,started_at', 'P'),
+				'sessions', schema, {P={1}})
 			assert(#pks == 3, 'expected 3 sessions, got '..#pks)
 			assert(pks[1] == 11 and pks[2] == 12 and pks[3] == 13, S(pks))
 			--prefix user_id=3 -> no sessions (user 3 has none)
-			local n = db:pk_prefix('sessions/user_id,started_at', 3)
-			n:open()
+			local n = db:pk_prefix('sessions/user_id,started_at', 'P')
+			n:open({P={3}})
 			assert(n:next_group() == nil)
 			assert(n:pk('sessions') == nil)
 			n:close()
-			--wrong arity: full key (2 cols) not allowed; need 1..n-1
+			--non-string KEY rejected at construction
 			assert(not pcall(db.pk_prefix, db, 'sessions/user_id,started_at', 1, 1000))
-			--wrong arity: zero cols not allowed
+			--missing KEY rejected at construction
 			assert(not pcall(db.pk_prefix, db, 'sessions/user_id,started_at'))
-			--single-column index: no valid prefix length
+			--single-column index: open() rejects any prefix
 			assert(not pcall(db.pk_prefix, db, 'sessions/user_id', 1))
 		end)
 	end)
@@ -280,20 +327,20 @@ function test.merge_join_and_exec()
 	with_db('merge_join_and_exec', function(db)
 		db:atomic('r', function()
 			local schema = db:table_schema('users')
-			local function pks(node)
-				return collect_pks(node, 'users', schema)
+			local function pks(node, p)
+				return collect_pks(node, 'users', schema, p)
 			end
 			local t = pks(db:merge_join(
 				db:pk_range('users'),
-				db:pk_seek('users/status', 'active')))
+				db:pk_seek('users/status', 'S')), {S={'active'}})
 			assert(cat(t, ',') == '1,2,4', S(t))
 			t = pks(db:merge_join(
-				db:pk_seek('users/status', 'active'),
-				db:pk_seek('users/status', 'banned')))
+				db:pk_seek('users/status', 'S1'),
+				db:pk_seek('users/status', 'S2')), {S1={'active'}, S2={'banned'}})
 			assert(#t == 0, S(t))
 			assert(not pcall(db.merge_join, db,
 				db:pk_range('users'),
-				db:pk_range('users/score', '>=', 70, '<=', 95)))
+				db:pk_range('users/score', '>=', 'LO', '<=', 'HI')))
 		end)
 	end)
 end
@@ -352,23 +399,26 @@ function test.pk_range_exec()
 	with_db('pk_range_exec', function(db)
 		db:atomic('r', function()
 			local schema = db:table_schema('users')
-			local function pks(node)
-				return collect_pks(node, 'users', schema)
+			local function pks(node, p)
+				return collect_pks(node, 'users', schema, p)
 			end
 			local function eq(a, b)
 				if #a ~= #b then return false end
 				for i = 1, #a do if a[i] ~= b[i] then return false end end
 				return true
 			end
-			assert(eq(pks(db:pk_range('users/score', '>=', 70, '<=', 95)), {4,1,2}))
-			assert(eq(pks(db:pk_range('users/score', '>=', 70, '<=', 95, {desc=true})), {2,1,4}))
-			assert(eq(pks(db:pk_range('users/score', '>', 70, '<=', 95)), {1,2}))
-			assert(eq(pks(db:pk_range('users/score', '>=', 70, '<', 95)), {4,1}))
+			assert(eq(pks(db:pk_range('users/score', '>=', 'LO', '<=', 'HI'), {LO={70}, HI={95}}), {4,1,2}))
+			assert(eq(pks(db:pk_range('users/score', '>=', 'LO', '<=', 'HI', {desc=true}), {LO={70}, HI={95}}), {2,1,4}))
+			assert(eq(pks(db:pk_range('users/score', '>', 'LO', '<=', 'HI'), {LO={70}, HI={95}}), {1,2}))
+			assert(eq(pks(db:pk_range('users/score', '>=', 'LO', '<', 'HI'), {LO={70}, HI={95}}), {4,1}))
 			assert(eq(pks(db:pk_range('users/score')), {3,5,4,1,2}))
 			assert(eq(pks(db:pk_range('users/score', {desc=true})), {2,1,4,5,3}))
-			assert(eq(pks(db:pk_range('users/score', '>=', null, '<=', null)), {}))
-			assert(eq(pks(db:pk_range('users/score', '>', null)), {3,5,4,1,2}))
-			assert(not pcall(db.pk_range, db, 'users/score', '>=', 95, '<=', 70))
+			assert(eq(pks(db:pk_range('users/score', '>=', 'LO', '<=', 'HI'), {LO={null}, HI={null}}), {}))
+			assert(eq(pks(db:pk_range('users/score', '>', 'LO'), {LO={null}}), {3,5,4,1,2}))
+			assert(not pcall(function()
+				local n = db:pk_range('users/score', '>=', 'LO', '<=', 'HI')
+				n:open({LO={95}, HI={70}})
+			end))
 		end)
 	end)
 end
@@ -377,23 +427,23 @@ function test.merge_union_or_exec()
 	with_db('merge_union_or_exec', function(db)
 		db:atomic('r', function()
 			local schema = db:table_schema('users')
-			local function pks(node)
-				return collect_pks(node, 'users', schema)
+			local function pks(node, p)
+				return collect_pks(node, 'users', schema, p)
 			end
 			--active OR banned = all 5 users in pk order
 			local t = pks(db:merge_union(
-				db:pk_seek('users/status', 'active'),
-				db:pk_seek('users/status', 'banned')))
+				db:pk_seek('users/status', 'S1'),
+				db:pk_seek('users/status', 'S2')), {S1={'active'}, S2={'banned'}})
 			assert(cat(t, ',') == '1,2,3,4,5', S(t))
 			--dedup: active OR active = just active
 			t = pks(db:merge_union(
-				db:pk_seek('users/status', 'active'),
-				db:pk_seek('users/status', 'active')))
+				db:pk_seek('users/status', 'S'),
+				db:pk_seek('users/status', 'S')), {S={'active'}})
 			assert(cat(t, ',') == '1,2,4', S(t))
 			--one side empty: active OR missing = just active
 			t = pks(db:merge_union(
-				db:pk_seek('users/status', 'active'),
-				db:pk_seek('users/status', 'missing')))
+				db:pk_seek('users/status', 'S1'),
+				db:pk_seek('users/status', 'S2')), {S1={'active'}, S2={'missing'}})
 			assert(cat(t, ',') == '1,2,4', S(t))
 		end)
 	end)
@@ -403,28 +453,28 @@ function test.merge_except_exec()
 	with_db('merge_except_exec', function(db)
 		db:atomic('r', function()
 			local schema = db:table_schema('users')
-			local function pks(node)
-				return collect_pks(node, 'users', schema)
+			local function pks(node, p)
+				return collect_pks(node, 'users', schema, p)
 			end
 			--all users except active = banned {3,5}
 			local t = pks(db:merge_except(
 				db:pk_range('users'),
-				db:pk_seek('users/status', 'active')))
+				db:pk_seek('users/status', 'S')), {S={'active'}})
 			assert(cat(t, ',') == '3,5', S(t))
 			--active except banned = active {1,2,4}
 			t = pks(db:merge_except(
-				db:pk_seek('users/status', 'active'),
-				db:pk_seek('users/status', 'banned')))
+				db:pk_seek('users/status', 'S1'),
+				db:pk_seek('users/status', 'S2')), {S1={'active'}, S2={'banned'}})
 			assert(cat(t, ',') == '1,2,4', S(t))
 			--except self = empty
 			t = pks(db:merge_except(
-				db:pk_seek('users/status', 'active'),
-				db:pk_seek('users/status', 'active')))
+				db:pk_seek('users/status', 'S'),
+				db:pk_seek('users/status', 'S')), {S={'active'}})
 			assert(#t == 0, S(t))
 			--except empty = unchanged
 			t = pks(db:merge_except(
-				db:pk_seek('users/status', 'active'),
-				db:pk_seek('users/status', 'missing')))
+				db:pk_seek('users/status', 'S1'),
+				db:pk_seek('users/status', 'S2')), {S1={'active'}, S2={'missing'}})
 			assert(cat(t, ',') == '1,2,4', S(t))
 		end)
 	end)
@@ -434,8 +484,8 @@ function test.pk_join_seek_exec()
 	with_db('pk_join_seek_exec', function(db)
 		db:atomic('r', function()
 			-- active users (1,2,4) + their sessions; driver order preserved
-			local node = db:pk_join_seek(db:pk_seek('users/status', 'active'), 'sessions/user_id')
-			node:open()
+			local node = db:pk_join_seek(db:pk_seek('users/status', 'S'), 'sessions/user_id')
+			node:open({S={'active'}})
 			local tuples = {}
 			while node:next_group() do
 				tuples[#tuples+1] = pk_id(node, 'users', db)..':'..pk_id(node, 'sessions', db)
@@ -444,8 +494,8 @@ function test.pk_join_seek_exec()
 			-- user 1 has sessions 11,12,13; user 2 has 14; user 4 has 15
 			assert(cat(tuples, ',') == '1:11,1:12,1:13,2:14,4:15', S(tuples))
 			-- user with no children: user 3 has no sessions
-			local node2 = db:pk_join_seek(db:pk_get('users', 3), 'sessions/user_id')
-			node2:open()
+			local node2 = db:pk_join_seek(db:pk_get('users', 'K'), 'sessions/user_id')
+			node2:open({K={3}})
 			assert(node2:next_group() == nil)
 			node2:close()
 			-- error: driver member must match parent table
@@ -461,9 +511,9 @@ function test.pk_join_hash_exec()
 		db:atomic('r', function()
 			-- driver in score order (users 4,1,2); output in FK-index order (user PK asc)
 			local node = db:pk_join_hash(
-				db:pk_range('users/score', '>=', 70),
+				db:pk_range('users/score', '>=', 'LO'),
 				'sessions/user_id')
-			node:open()
+			node:open({LO={70}})
 			local tuples = {}
 			while node:next_group() do
 				tuples[#tuples+1] = pk_id(node, 'users', db)..':'..pk_id(node, 'sessions', db)
@@ -472,8 +522,8 @@ function test.pk_join_hash_exec()
 			-- FK index order: user 1 first (not user 4 which led in score order)
 			assert(cat(tuples, ',') == '1:11,1:12,1:13,2:14,4:15', S(tuples))
 			-- driver with no matches: user 3 has no sessions
-			local node2 = db:pk_join_hash(db:pk_get('users', 3), 'sessions/user_id')
-			node2:open()
+			local node2 = db:pk_join_hash(db:pk_get('users', 'K'), 'sessions/user_id')
+			node2:open({K={3}})
 			assert(node2:next_group() == nil)
 			node2:close()
 		end)
@@ -494,9 +544,9 @@ function test.pk_parent_lookup_exec()
 			assert(cat(tuples, ',') == '11:1,12:1,13:1,14:2,15:4', S(tuples))
 			-- covered read: user_id is in sessions/user_id,started_at index key
 			local node2 = db:pk_parent_lookup(
-				db:pk_prefix('sessions/user_id,started_at', 1),
+				db:pk_prefix('sessions/user_id,started_at', 'P'),
 				'sessions/user_id')
-			node2:open()
+			node2:open({P={1}})
 			local t2 = {}
 			while node2:next_group() do
 				t2[#t2+1] = pk_id(node2, 'sessions', db)..':'..pk_id(node2, 'users', db)
@@ -523,33 +573,97 @@ function test.pk_hash_filter_exec()
 	with_db('pk_hash_filter_exec', function(db)
 		db:atomic('r', function()
 			local schema = db:table_schema('users')
-			local function pks(node)
-				return collect_pks(node, 'users', schema)
+			local function pks(node, p)
+				return collect_pks(node, 'users', schema, p)
 			end
 			-- 'in': score >= 70 (ix-order: u4,u1,u2) intersect active (u1,u2,u4) = u4,u1,u2
 			local t = pks(db:pk_hash_filter(
-				db:pk_range('users/score', '>=', 70),
-				db:pk_seek('users/status', 'active'),
-				'in'))
+				db:pk_range('users/score', '>=', 'LO'),
+				db:pk_seek('users/status', 'S'),
+				'in'), {LO={70}, S={'active'}})
 			assert(cat(t, ',') == '4,1,2', S(t))
 			-- 'not_in': all scores (ix-order: u3,u5,u4,u1,u2) minus active (u1,u2,u4) = u3,u5
 			t = pks(db:pk_hash_filter(
 				db:pk_range('users/score'),
-				db:pk_seek('users/status', 'active'),
-				'not_in'))
+				db:pk_seek('users/status', 'S'),
+				'not_in'), {S={'active'}})
 			assert(cat(t, ',') == '3,5', S(t))
 			-- 'in' with empty set: nothing passes
 			t = pks(db:pk_hash_filter(
 				db:pk_range('users/score'),
-				db:pk_seek('users/status', 'missing'),
-				'in'))
+				db:pk_seek('users/status', 'S'),
+				'in'), {S={'missing'}})
 			assert(#t == 0, S(t))
 			-- 'not_in' with full set: nothing passes
 			t = pks(db:pk_hash_filter(
-				db:pk_seek('users/status', 'active'),
+				db:pk_seek('users/status', 'S'),
 				db:pk_range('users'),
-				'not_in'))
+				'not_in'), {S={'active'}})
 			assert(#t == 0, S(t))
+		end)
+	end)
+end
+
+function test.pk_hash_filter_u32_exec()
+	with_u32_db('pk_hash_filter_u32_exec', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local function pks(node, p)
+				return collect_pks(node, 'users', schema, p)
+			end
+			local t = pks(db:pk_hash_filter(
+				db:pk_range('users/score', '>=', 'LO'),
+				db:pk_seek('users/status', 'S'),
+				'in'), {LO={70}, S={1}})
+			assert(cat(t, ',') == '4,1,2', S(t))
+
+			t = pks(db:pk_hash_filter(
+				db:pk_range('users/score'),
+				db:pk_seek('users/status', 'S'),
+				'not_in'), {S={1}})
+			assert(cat(t, ',') == '3,5', S(t))
+
+			t = pks(db:pk_hash_filter(
+				db:pk_range('users/score'),
+				db:pk_seek('users/status', 'S'),
+				'in'), {S={9}})
+			assert(#t == 0, S(t))
+
+			t = pks(db:pk_hash_filter(
+				db:pk_range('users/score'),
+				db:pk_seek('users/status', 'S'),
+				'not_in'), {S={9}})
+			assert(cat(t, ',') == '3,5,4,1,2', S(t))
+
+			t = pks(db:pk_hash_filter(
+				db:pk_seek('users/status', 'S'),
+				db:pk_range('users'),
+				'not_in'), {S={1}})
+			assert(#t == 0, S(t))
+		end)
+	end)
+end
+
+function test.pk_join_hash_u32_exec()
+	with_u32_db('pk_join_hash_u32_exec', function(db)
+		db:atomic('r', function()
+			local node = db:pk_join_hash(
+				db:pk_seek('users/status', 'S'),
+				'sessions/user_id')
+			node:open({S={1}})
+			local tuples = {}
+			while node:next_group() do
+				tuples[#tuples+1] = pk_id(node, 'users', db)..':'..pk_id(node, 'sessions', db)
+			end
+			node:close()
+			assert(cat(tuples, ',') == '1:11,1:12,2:13,4:14', S(tuples))
+
+			local node2 = db:pk_join_hash(
+				db:pk_seek('users/status', 'S'),
+				'sessions/user_id')
+			node2:open({S={9}})
+			assert(node2:next_group() == nil)
+			node2:close()
 		end)
 	end)
 end
@@ -558,13 +672,13 @@ function test.limit_exec()
 	with_db('limit_exec', function(db)
 		db:atomic('r', function()
 			local schema = db:table_schema('users')
-			local function pks(node)
-				return collect_pks(node, 'users', schema)
+			local function pks(node, p)
+				return collect_pks(node, 'users', schema, p)
 			end
-			assert(cat(pks(db:limit(db:pk_range('users'), 3)),    ',') == '1,2,3',   'limit 3')
-			assert(cat(pks(db:limit(db:pk_range('users'), 3, 2)), ',') == '3,4,5',   'limit 3 offset 2')
-			assert(    pks(db:limit(db:pk_range('users'), 0))     [1]  == nil,        'limit 0')
-			assert(cat(pks(db:limit(db:pk_range('users'), 10)),   ',') == '1,2,3,4,5','limit > count')
+			assert(cat(pks(db:limit(db:pk_range('users'), 'N'),       {N=3}),       ',') == '1,2,3',   'limit 3')
+			assert(cat(pks(db:limit(db:pk_range('users'), 'N', 'O'),  {N=3, O=2}),  ',') == '3,4,5',   'limit 3 offset 2')
+			assert(    pks(db:limit(db:pk_range('users'), 'N'),       {N=0})        [1]  == nil,        'limit 0')
+			assert(cat(pks(db:limit(db:pk_range('users'), 'N'),       {N=10}),      ',') == '1,2,3,4,5','limit > count')
 		end)
 	end)
 end
@@ -572,12 +686,12 @@ end
 function test.nested_join_exec()
 	with_db('nested_join_exec', function(db)
 		db:atomic('r', function()
-			local function run(driver)
-				local node = db:nested_join(driver, function(outer)
-					local uid = pk_id(outer, 'users', db)
-					return db:pk_seek('sessions/user_id', uid)
-				end)
-				node:open()
+			local function factory(outer)
+				return db:pk_seek('sessions/user_id', 'UID'), {UID = outer('users.id')}
+			end
+			local function run(driver, params)
+				local node = db:nested_join(driver, 'FN')
+				node:open(update({FN = factory}, params))
 				local tuples = {}
 				while node:next_group() do
 					tuples[#tuples+1] = pk_id(node, 'users', db)..':'..pk_id(node, 'sessions', db)
@@ -586,18 +700,14 @@ function test.nested_join_exec()
 				return tuples
 			end
 			-- active users (1,2,4) x their sessions
-			local t = run(db:pk_seek('users/status', 'active'))
+			local t = run(db:pk_seek('users/status', 'S'), {S={'active'}})
 			assert(cat(t, ',') == '1:11,1:12,1:13,2:14,4:15', S(t))
 			-- all users: users 3 and 5 have no sessions and are skipped
 			t = run(db:pk_range('users'))
 			assert(cat(t, ',') == '1:11,1:12,1:13,2:14,4:15', S(t))
 			-- members extended with inner members after first iteration
-			local node = db:nested_join(
-				db:pk_seek('users/status', 'active'),
-				function(outer)
-					return db:pk_seek('sessions/user_id', pk_id(outer, 'users', db))
-				end)
-			node:open()
+			local node = db:nested_join(db:pk_seek('users/status', 'S'), 'FN')
+			node:open({S={'active'}, FN = factory})
 			node:next_group()
 			assert(#node.members == 2 and node.members[1] == 'users' and node.members[2] == 'sessions',
 				S(node.members))
@@ -609,21 +719,21 @@ end
 function test.anti_join_exec()
 	with_db('anti_join_exec', function(db)
 		db:atomic('r', function()
-			local function pks(node)
-				return collect_pks(node, 'users', db)
+			local function pks(node, p)
+				return collect_pks(node, 'users', db, p)
 			end
 			-- keep users with NO sessions (users 3 and 5 have none)
-			local t = pks(db:anti_join(
-				db:pk_range('users'),
-				function(outer)
-					local uid = pk_id(outer, 'users', db)
-					return db:pk_seek('sessions/user_id', uid)
-				end))
+			local function factory(outer)
+				return db:pk_seek('sessions/user_id', 'UID'), {UID = outer('users.id')}
+			end
+			local t = pks(db:anti_join(db:pk_range('users'), 'FN'), {FN=factory})
 			assert(cat(t, ',') == '3,5', S(t))
 			-- inner always empty: all outer items pass
-			t = pks(db:anti_join(
-				db:pk_seek('users/status', 'active'),
-				function(outer) return db:pk_seek('sessions/user_id', 999) end))
+			local function empty_factory(_)
+				return db:pk_seek('sessions/user_id', 'UID'), {UID={999}}
+			end
+			t = pks(db:anti_join(db:pk_seek('users/status', 'S'), 'FN'),
+				{FN=empty_factory, S={'active'}})
 			assert(cat(t, ',') == '1,2,4', S(t))
 		end)
 	end)
@@ -632,21 +742,20 @@ end
 function test.semi_join_exec()
 	with_db('semi_join_exec', function(db)
 		db:atomic('r', function()
-			local function pks(node)
-				return collect_pks(node, 'users', db)
+			local function pks(node, p)
+				return collect_pks(node, 'users', db, p)
 			end
 			-- keep users that have at least one session (users 1,2,4 do; 3,5 don't)
-			local t = pks(db:semi_join(
-				db:pk_range('users'),
-				function(outer)
-					local uid = pk_id(outer, 'users', db)
-					return db:pk_seek('sessions/user_id', uid)
-				end))
+			local function factory(outer)
+				return db:pk_seek('sessions/user_id', 'UID'), {UID = outer('users.id')}
+			end
+			local t = pks(db:semi_join(db:pk_range('users'), 'FN'), {FN=factory})
 			assert(cat(t, ',') == '1,2,4', S(t))
 			-- inner always empty: no outer items pass
-			t = pks(db:semi_join(
-				db:pk_range('users'),
-				function(outer) return db:pk_seek('sessions/user_id', 999) end))
+			local function empty_factory(_)
+				return db:pk_seek('sessions/user_id', 'UID'), {UID={999}}
+			end
+			t = pks(db:semi_join(db:pk_range('users'), 'FN'), {FN=empty_factory})
 			assert(#t == 0, S(t))
 		end)
 	end)
@@ -661,8 +770,8 @@ function test.pk_group_exec()
 			end
 			-- sessions/user_id order: user 1 -> {11,12,13}, user 2 -> {14}, user 4 -> {15}
 			-- first item per group: 11, 14, 15
-			local node = db:pk_group(db:pk_range('sessions/user_id'), uid_key)
-			node:open()
+			local node = db:pk_group(db:pk_range('sessions/user_id'), 'KFN')
+			node:open({KFN=uid_key})
 			local firsts = {}
 			while node:next_group() do
 				firsts[#firsts+1] = pk_id(node, 'sessions', db)
@@ -671,8 +780,8 @@ function test.pk_group_exec()
 			node:close()
 			assert(cat(firsts, ',') == '11,14,15', S(firsts))
 			-- full group iteration via next_pk: all sessions per user group
-			node = db:pk_group(db:pk_range('sessions/user_id'), uid_key)
-			node:open()
+			node = db:pk_group(db:pk_range('sessions/user_id'), 'KFN')
+			node:open({KFN=uid_key})
 			local groups = {}
 			while node:next_group() do
 				local grp = {pk_id(node, 'sessions', db)}
@@ -690,26 +799,23 @@ end
 function test.pk_filter_exec()
 	with_db('pk_filter_exec', function(db)
 		db:atomic('r', function()
-			local function pks(node)
-				return collect_pks(node, 'users', db)
+			local function pks(node, p)
+				return collect_pks(node, 'users', db, p)
 			end
 			-- keep users with id <= 3 using get_pk in the predicate
-			local t = pks(db:pk_filter(
-				db:pk_range('users'),
-				function(node)
+			local t = pks(db:pk_filter(db:pk_range('users'), 'FN'),
+				{FN = function(node)
 					local ok = node:pk('users')
 					return ok and pk_id(node, 'users', db) <= 3
-				end))
+				end})
 			assert(cat(t, ',') == '1,2,3', S(t))
 			-- always-true: all active users pass through unchanged
-			t = pks(db:pk_filter(
-				db:pk_seek('users/status', 'active'),
-				function() return true end))
+			t = pks(db:pk_filter(db:pk_seek('users/status', 'S'), 'FN'),
+				{FN = function() return true end, S={'active'}})
 			assert(cat(t, ',') == '1,2,4', S(t))
 			-- always-false: empty result
-			t = pks(db:pk_filter(
-				db:pk_range('users'),
-				function() return false end))
+			t = pks(db:pk_filter(db:pk_range('users'), 'FN'),
+				{FN = function() return false end})
 			assert(#t == 0, S(t))
 		end)
 	end)
@@ -751,27 +857,27 @@ function test.pk_and_probe_exec()
 	with_db('pk_and_probe_exec', function(db)
 		db:atomic('r', function()
 			local schema = db:table_schema('users')
-			local function pks(node)
-				return collect_pks(node, 'users', schema)
+			local function pks(node, p)
+				return collect_pks(node, 'users', schema, p)
 			end
 			-- single probe: score desc (u2,u1,u4,u5,u3), keep only active (1,2,4) -> 2,1,4
 			local t = pks(db:pk_and_probe(
 				db:pk_range('users/score', {desc=true}),
-				{ix='users/status', key='active'}))
+				{ix='users/status', key='S1'}), {S1={'active'}})
 			assert(cat(t, ',') == '2,1,4', S(t))
 			-- two probes: all users (pk order), keep active (1,2,4) AND score=80 (user 1 only)
 			t = pks(db:pk_and_probe(
 				db:pk_range('users'),
-				{ix='users/status', key='active'},
-				{ix='users/score', key=80}))
+				{ix='users/status', key='S1'},
+				{ix='users/score', key='S2'}), {S1={'active'}, S2={80}})
 			assert(cat(t, ',') == '1', S(t))
 			-- no match: active users probed against banned key -> empty
 			t = pks(db:pk_and_probe(
-				db:pk_seek('users/status', 'active'),
-				{ix='users/status', key='banned'}))
+				db:pk_seek('users/status', 'S1'),
+				{ix='users/status', key='S2'}), {S1={'active'}, S2={'banned'}})
 			assert(#t == 0, S(t))
 			-- error: not an index
-			assert(not pcall(db.pk_and_probe, db, db:pk_range('users'), {ix='users', key=1}))
+			assert(not pcall(db.pk_and_probe, db, db:pk_range('users'), {ix='users', key='K'}))
 			-- error: no probes
 			assert(not pcall(db.pk_and_probe, db, db:pk_range('users')))
 		end)
@@ -817,83 +923,8 @@ end
 
 ------------------------------------------------------------------------------
 
-function test.starts_exec()
-	with_db('starts_exec', function(db)
-		db:atomic('r', function()
-			local function ids(q)
-				local t = {}
-				for r in q:select{'users.id'}:rows() do t[#t+1] = r['users.id'] end
-				sort(t)
-				return t
-			end
-
-			-- indexed path: status column has users/status index; starts folds to pk_range;
-			-- no residual pk_filter is added, so the plan root is the pk_range node directly.
-			local plan = db:from'users':starts('status', 'act'):_lower():explain()
-			assert(plan.kind == 'pk_range', 'expected pk_range, got '..tostring(plan.kind))
-
-			local t = ids(db:from'users':starts('status', 'act'))
-			assert(#t == 3 and t[1] == 1 and t[2] == 2 and t[3] == 4, S(t))
-
-			t = ids(db:from'users':starts('status', 'ban'))
-			assert(#t == 2 and t[1] == 3 and t[2] == 5, S(t))
-
-			-- no match
-			t = ids(db:from'users':starts('status', 'xyz'))
-			assert(#t == 0, S(t))
-
-			-- residual path: no_index forces full scan; mk_pkfn handles starts as a predicate.
-			t = ids(db:from'users':starts('status', 'act'):no_index('users'))
-			assert(#t == 3 and t[1] == 1 and t[2] == 2 and t[3] == 4, S(t))
-		end)
-	end)
-end
-
-function test.use_counts_exec()
-	with_db('use_counts_exec', function(db)
-		db:atomic('r', function()
-			-- both users/status and users/score score equally (single eq, score=30).
-			-- use_counts() opts in to entry-count tie-breaking; with equal counts here
-			-- the winner is the same as without it, so we verify results are correct
-			-- and the plan uses an index (pk_filter over pk_seek, not a full scan).
-			local q = db:from'users':eq('status', 'active'):eq('score', 80):use_counts()
-			local plan = q:_lower():explain()
-			assert(plan.kind == 'pk_filter', 'expected pk_filter, got '..tostring(plan.kind))
-			assert(plan.inputs[1].kind == 'pk_seek', 'expected pk_seek input, got '..tostring(plan.inputs[1].kind))
-
-			local t = {}
-			for r in q:select{'users.id'}:rows() do t[#t+1] = r['users.id'] end
-			assert(#t == 1 and t[1] == 1, S(t))
-		end)
-	end)
-end
-
-function test.in_query_exec()
-	with_db('in_query_exec', function(db)
-		db:atomic('r', function()
-			local function ids(q)
-				local t = {}
-				for r in q:select{'users.id'}:rows() do t[#t+1] = r['users.id'] end
-				sort(t)
-				return t
-			end
-
-			-- query-based in_: subquery produces PKs of users with score > 80 (only id=2).
-			local t = ids(db:from'users':in_('id', db:from'users':gt('score', 80)))
-			assert(#t == 1 and t[1] == 2, S(t))
-
-			-- query-based not_in: exclude banned users (3 and 5) -> active users.
-			t = ids(db:from'users':not_in('id', db:from'users':eq('status', 'banned')))
-			assert(#t == 3 and t[1] == 1 and t[2] == 2 and t[3] == 4, S(t))
-
-		end)
-	end)
-end
-
-------------------------------------------------------------------------------
-
 local name = ...
-if name == 'mdbx_query_test' then name = nil end
+if name == 'mdbx_query_nodes_test' then name = nil end
 local tests = name and {name} or test
 local n_ok, n_fail = 0, 0
 for _, k in ipairs(tests) do

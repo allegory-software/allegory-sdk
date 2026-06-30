@@ -631,3 +631,23 @@ void schema_sort_u32_be(void* buf, void* tmp, size_t n) {
 	if (src != (u8*)buf)
 		memcpy(buf, src, n * 4);
 }
+
+INLINE u32 read_u32_be(const void* p) {
+	return __builtin_bswap32(*(const u32*)p);
+}
+
+int schema_find_u32_be(const void* buf, size_t n, const void* key) {
+	const u8* base = buf;
+	u32 k = read_u32_be(key);
+	size_t lo = 0;
+	size_t hi = n;
+	while (lo < hi) {
+		size_t mid = lo + ((hi - lo) >> 1);
+		u32 v = read_u32_be(base + mid * 4);
+		if (v < k)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	return lo < n && read_u32_be(base + lo * 4) == k;
+}

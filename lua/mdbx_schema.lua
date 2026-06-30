@@ -11,9 +11,9 @@ FEATURES
 	- auto-increment primary keys.
 	- indexes: unique and non-unique, utf-8 ai_ci, nullable columns for non-unique.
 	- foreign keys: cascade or set-null on delete; enforced on insert/update.
-	- triggers: Lua functions in paper schema fired before/after insert/update/delete.
-	- computed columns (stored) via Lua functions in paper schema.
-	- automatic schema migration: paper schema diff executes DDL ops.
+	- triggers: Lua functions in schema fired before/after insert/update/delete.
+	- computed columns (stored) via Lua functions in schema.
+	- automatic schema migration: run DDL to sync stored schema to paper schema.
 	- schema validation on table open: stored schema must match paper schema.
 LIMITATIONS
 	- varsize columns must have `nozero` (no embedded \0) to be used in indexes.
@@ -37,27 +37,27 @@ This API extends the API in mdbx.lua so start there.
 DDL
 	db:[try_]dbi      (name|dbi) -> dbi             open existing table (once)
 	db:table_schema   (name|dbi) -> table_schema    get table schema (if any)
-	db:create_table   (name, schema_spec)           create table; ixs/fks added separately
-	db:alter_table    (name|dbi, schema_spec)       change field types/attrs; rewrites data if encoding changes
-	db:drop_table     (name|dbi)                    drop table and all its indexes and fks
-	db:rename_table   (name|dbi, new_name)          rename table (also renames derived index names)
-	db:rename_column  (name|dbi, old_col, new_col)  rename column (also renames containing indexes)
+	db:create_table   (name, schema_spec)           create table; no ixs/fks
+	db:alter_table    (name|dbi, schema_spec)       change field types/attrs
+	db:drop_table     (name|dbi)                    drop table and its ixs/fks
+	db:rename_table   (name|dbi, new_name)          rename table (and its ixs)
+	db:rename_column  (name|dbi, old_col, new_col)  rename column (and related ixs)
 	db:add_index      (name|dbi, ix_spec)           add index
 	db:drop_index     (ix_name)                     drop index
 	db:add_fk         (fk_spec)                     add foreign key constraint
-	db:drop_fk        (table_name, fk_name)         drop foreign key (name = 'col1,col2,...')
-	db:sync_schema    ([src], [opt])                auto-migrate stored schema to match paper schema
-	db:extract_schema ()                            extract stored schema as a schema object
-	db:schema_diff    ()                            compute diff between paper and stored schemas (read-only)
+	db:drop_fk        (table_name, fk_cols)         drop fk; fk_cols='col1,col2...'
+	db:sync_schema    ([schema], [opt])             auto-migrate schema to .schema
+	db:extract_schema () -> schema                  extract schema
+	db:schema_diff    () -> diff                    diff stored vs .schema
 CURSORS
 	db:cursor         (name|dbi) -> cur      create cursor
 UPDATE
 	db:insert         (name|dbi, [cols], keysvals...) -> seq  insert
 	db:update         (name|dbi, [cols], keysvals...)         update (must exist)
-	db:upsert         (name|dbi, [cols], keysvals...)         insert or partial update
+	db:upsert         (name|dbi, [cols], keysvals...)         insert or update
 	db:del            (name|uk_name|dbi, keys...) -> deleted  delete
 	db:put_records    (name|dbi, [cols, ]{keysvals1,...})     bulk put
-	cur:update        ([val_cols], vals...)                   partial update current
+	cur:update        ([val_cols], vals...)                   update current
 	cur:del           ()                                      delete current
 QUERY
 	db:[must_|try_]find     (name|dbi, [val_cols], keys...) -> vals...
@@ -104,7 +104,9 @@ SCHEMA SPEC (create_table, alter_table)
 		},
 		pk = {'col1', ...},
 	}
-	-- ixs and fks are NOT part of schema_spec; add them after create_table via add_index/add_fk.
+
+	NOTE: ixs and fks are NOT part of schema_spec! add them after create_table
+	via add_index/add_fk.
 
 	ix_spec:  {'col1', 'col2', ..., [is_unique=true]}
 	fk_spec:  {table='t', cols={'col',...}, ref_table='r', ref_cols={'col',...},
@@ -279,9 +281,11 @@ void schema_val_add(schema_table* tbl, int col_i,
 );
 
 void schema_sort_u32_be(void* buf, void* tmp, size_t n);
+int schema_find_u32_be(const void* buf, size_t n, const void* key);
 ]]
 
 mdbx_schema_sort_u32_be = C.schema_sort_u32_be
+mdbx_schema_find_u32_be = C.schema_find_u32_be
 
 local col_ct = {
 	utf8 = 'u8',
@@ -506,9 +510,11 @@ local function decode_val_with_null(schema, v, v_sz, t)
 	end
 end
 
---decode one index col from the appropriate record into a decoded value. f must be
---a field of val_schema; key fields are read from k/k_sz, val fields from v/v_sz.
---kb/kb_sz is a scratch buffer for key col decode (for descending key inversion).
+--[[
+decode one index col from the appropriate record into a decoded value. f must be
+a field of val_schema; key fields are read from k/k_sz, val fields from v/v_sz.
+kb/kb_sz is a scratch buffer for key col decode (for descending key inversion).
+]]
 local function decode_ix_col(val_schema, f, k, k_sz, v, v_sz, kb, kb_sz)
 	local len
 	if f.key_index then
@@ -566,11 +572,13 @@ function Cur:decode_kv(k, k_sz, v, v_sz, val_cols)
 	return decode_kv(self.db, self.schema, k, k_sz, v, v_sz, val_cols)
 end
 
--- Compile a single-column decoder for use in hot iteration loops.
--- ix_key: MDBX_val holding the index key (nil when schema is a base table).
--- pk: MDBX_val holding the base table pk (dup value when schema is an index).
--- get_base_val() -> data, sz; called lazily when a val field is needed.
--- Returns f() -> decoded value for the current cursor position.
+--[[
+Compile a single-column decoder for use in hot iteration loops.
+ix_key: MDBX_val holding the index key (nil when schema is a base table).
+pk: MDBX_val holding the base table pk (dup value when schema is an index).
+get_base_val() -> data, sz; called lazily when a val field is needed.
+Returns f() -> decoded value for the current cursor position.
+]]
 function Db:compile_col(schema, col, ix_key, pk, get_base_val)
 	local out, out_sz = key_decode_buffer, MDBX_MAX_KEY_SIZE
 	local ix_f = schema.is_index and schema.fields[col]
@@ -1556,9 +1564,8 @@ local function alter_via_temp_table(self, dbi, old_schema, new_schema, event)
 			alter_key_rec_buffer, MDBX_MAX_KEY_SIZE
 		local nv, nv_buf_sz =
 			val_rec_buffer(new_schema.val_fields.max_rec_size)
-		local nk_sz = encode_key(
-			self, new_schema, event, nil, nk, nk_buf_sz,
-			new_schema.cols, '{}', rec)
+		local nk_sz = encode_key(self, new_schema, event, nil,
+			nk, nk_buf_sz, new_schema.cols, '{}', rec)
 		local nv_sz = encode_val(
 			self, new_schema, event, nv, nv_buf_sz,
 			new_schema.cols, '{}', rec)
@@ -1650,10 +1657,12 @@ end
 
 --DDL / RENAME TABLE ---------------------------------------------------------
 
---rename an index table to new_ix: rename the dbi, move its $schema row, and fix
---its back-references (name, val_table) and the val_schema.ixs map. val_table is
---taken from val_schema.name, so this works both when the table itself was renamed
---(name already updated) and when only the index names change (column rename).
+--[[
+rename an index table to new_ix: rename the dbi, move its $schema row, and fix
+its back-references (name, val_table) and the val_schema.ixs map. val_table is
+taken from val_schema.name, so this works both when the table itself was renamed
+(name already updated) and when only the index names change (column rename).
+]]
 local function rename_index(self, val_schema, ix_schema, new_ix)
 	local old_ix = ix_schema.name
 	touch_schema(self, old_ix)
@@ -1727,10 +1736,12 @@ end
 
 --DDL / RENAME COLUMN --------------------------------------------------------
 
---rename a column. encoding is positional (col_pos + offsets), so no row or index
---data is rewritten; this only updates names: the field, the pk, the dependent
---index/fk-index tables (whose names embed the column), the fks that use the
---column, and the (descriptive) ref_cols of children when a pk column is renamed.
+--[[
+rename a column. encoding is positional (col_pos + offsets), so no row or index
+data is rewritten; this only updates names: the field, the pk, the dependent
+index/fk-index tables (whose names embed the column), the fks that use the
+column, and the (descriptive) ref_cols of children when a pk column is renamed.
+]]
 local function rename_in_list(list, old, new) --returns true if `old` was present
 	for i = 1, #list do
 		if list[i] == old then list[i] = new; return true end
@@ -1888,12 +1899,14 @@ end
 	end
 	ix_schema.dup_fixedsize = dup_fixed and val_schema.key_fields.max_rec_size or nil
 
-	--an index col may be a pk col of the val_table (e.g. composite-pk fk). for the
-	--common val-only case, decode_val handles everything. for the mixed case, decode
-	--each col individually into the right positional slot (dt[i] for cols[i]):
-	--val cols via schema_get_val, pk cols via schema_get_key with pp=nil (random
-	--access mode -- skips the sequential-scan optimisation, but avoids a separate
-	--buffer and stays with the cheap integer-keyed dt arrays throughout).
+	--[[
+	an index col may be a pk col of the val_table (e.g. composite-pk fk). for the
+	common val-only case, decode_val handles everything. for the mixed case, decode
+	each col individually into the right positional slot (dt[i] for cols[i]):
+	val cols via schema_get_val, pk cols via schema_get_key with pp=nil (random
+	access mode -- skips the sequential-scan optimisation, but avoids a separate
+	buffer and stays with the cheap integer-keyed dt arrays throughout).
+	]]
 	local has_pk_col = false
 	for _, col in ipairs(cols) do
 		if val_schema.fields[col].key_index then has_pk_col = true; break end
@@ -1957,7 +1970,8 @@ end
 		--derive index key from v (key cols come from k, val cols from v)
 		local xk, xk_buf_sz = ix1_key_rec_buffer, MDBX_MAX_KEY_SIZE
 		decode_ix_into(k, k_sz, v, v_sz, dt)
-		local xk_sz = encode_key(self, ix_schema, 'i_update', nil, xk, xk_buf_sz, cols, '[]', dt)
+		local xk_sz = encode_key(self, ix_schema, 'i_update', nil,
+			xk, xk_buf_sz, cols, '[]', dt)
 		clear(dt)
 
 		if v0 then --record updated: remove the old index record
@@ -1965,7 +1979,8 @@ end
 			--derive old index key from v0 (pk k is unchanged; only the val record differs).
 			local xk0, xk0_buf_sz = ix2_key_rec_buffer, MDBX_MAX_KEY_SIZE
 			decode_ix_into(k, k_sz, v0, v0_sz, dt0)
-			local xk0_sz = encode_key(self, ix_schema, 'i_update', nil, xk0, xk0_buf_sz, cols, '[]', dt0)
+			local xk0_sz = encode_key(self, ix_schema, 'i_update', nil,
+				xk0, xk0_buf_sz, cols, '[]', dt0)
 			clear(dt0)
 
 			--abort if index key didn't change
@@ -1994,7 +2009,8 @@ end
 		local ix_dbi = self:dbi_raw(ix_schema.name)
 		local xk0, xk0_buf_sz = ix2_key_rec_buffer, MDBX_MAX_KEY_SIZE
 		decode_ix_into(k, k_sz, v0, v0_sz, dt0)
-		local xk0_sz = encode_key(self, ix_schema, 'i_del', nil, xk0, xk0_buf_sz, cols, '[]', dt0)
+		local xk0_sz = encode_key(self, ix_schema, 'i_del', nil,
+			xk0, xk0_buf_sz, cols, '[]', dt0)
 		clear(dt0)
 		assert(self:try_del_raw(ix_dbi, xk0, xk0_sz, k, k_sz))
 	end
@@ -2147,8 +2163,8 @@ local function check_existing_fk(self, event, schema, fk_name, fk)
 		end
 		if not skip then
 			local pk, pk_buf_sz = fk_key_buffer, MDBX_MAX_KEY_SIZE
-			local pk_sz = encode_key(self, ref_schema, event, nil, pk, pk_buf_sz,
-				ref_schema.key_cols, nil, unpack(vals, 1, n))
+			local pk_sz = encode_key(self, ref_schema, event, nil,
+				pk, pk_buf_sz, ref_schema.key_cols, nil, unpack(vals, 1, n))
 			if not self:find_raw(ref_dbi, pk, pk_sz) then
 				cur:close()
 				return false, fmt('fk %s: existing row references missing %s',
@@ -2446,7 +2462,9 @@ local function fire_triggers(schema, event, db, ...)
 	if not evlist then return end
 	local depth = (db._trigger_depth or 0) + 1
 	assertf(depth <= max_trigger_depth,
-		'trigger max depth %d exceeded: %s.%s', max_trigger_depth, schema.name, event)
+		'trigger max depth (%d) exceeded: %s.%s',
+		max_trigger_depth, schema.name, event
+	)
 	db._trigger_depth = depth
 	local ok, err = true
 	for _, fn in ipairs(evlist) do
@@ -2472,9 +2490,11 @@ local function apply_generated(db, schema, new_t)
 	end
 end
 
---check that every fk's referenced row exists for the selected values. on a full
---write (insert/put) an unset col takes its default. a nil/null fk col means "no
---reference" so the fk is skipped ("MATCH SIMPLE": any null col skips checking).
+--[[
+check that every fk's referenced row exists for the selected values. on a full
+write (insert/put) an unset col takes its default. a nil/null fk col means "no
+reference" so the fk is skipped ("MATCH SIMPLE": any null col skips checking).
+]]
 local function check_fks(self, event, schema, cols, as, full, ...)
 	for fk_name, fk in pairs(schema.fks) do
 		local vals = {}
@@ -2493,8 +2513,8 @@ local function check_fks(self, event, schema, cols, as, full, ...)
 			local ref_dbi, ref_schema = self:dbi_schema(fk.ref_table)
 			assertf(ref_dbi, 'fk %s: ref table missing: %s', fk_name, fk.ref_table)
 			local pk, pk_buf_sz = fk_key_buffer, MDBX_MAX_KEY_SIZE
-			local pk_sz = encode_key(self, ref_schema, 'get', nil, pk, pk_buf_sz,
-				ref_schema.key_cols, nil, unpack(vals, 1, n))
+			local pk_sz = encode_key(self, ref_schema, 'get', nil,
+				pk, pk_buf_sz, ref_schema.key_cols, nil, unpack(vals, 1, n))
 			if not self:find_raw(ref_dbi, pk, pk_sz) then
 				self:check_row(event, schema.name, false,
 					fmt('fk %s: no parent row in %s', fk_name, fk.ref_table))
@@ -2504,21 +2524,25 @@ local function check_fks(self, event, schema, cols, as, full, ...)
 end
 
 local del_fk_key_buffer = u8a(MDBX_MAX_KEY_SIZE)
---probe a child's fk index for the first row referencing the deleted parent pk
---(`...`); returns find_raw's (ok, v, v_sz) where v is the child's encoded pk. the
---key is re-encoded on every call because a recursive cascade reuses the buffer.
+--[[
+probe a child's fk index for the first row referencing the deleted parent pk
+(`...`); returns find_raw's (ok, v, v_sz) where v is the child's encoded pk. the
+key is re-encoded on every call because a recursive cascade reuses the buffer.
+]]
 local function first_referencing_child(self, ix_dbi, ix_schema, ...)
 	local xk, xk_buf_sz = del_fk_key_buffer, MDBX_MAX_KEY_SIZE
-	local xk_sz = encode_key(self, ix_schema, 'get', nil, xk, xk_buf_sz,
-		ix_schema.key_cols, nil, ...)
+	local xk_sz = encode_key(self, ix_schema, 'get', nil,
+		xk, xk_buf_sz, ix_schema.key_cols, nil, ...)
 	return self:find_raw(ix_dbi, xk, xk_sz)
 end
---apply the referential actions of fks that reference this (parent) table after
---its row was deleted. `...` are the parent pk values (fk.cols order == ref pk
---order). two passes so a sibling cascade that clears a reference is honored
---before we check it: pass 1 cascades/nulls (each drains by re-probing -- a delete
---/null removes the child's entry at this key, a cascade also recurses), pass 2
---does the NO ACTION (default) checks -- reject if anything still references us.
+--[[
+apply the referential actions of fks that reference this (parent) table after
+its row was deleted. `...` are the parent pk values (fk.cols order == ref pk
+order). two passes so a sibling cascade that clears a reference is honored
+before we check it: pass 1 cascades/nulls (each drains by re-probing -- a delete
+/null removes the child's entry at this key, a cascade also recurses), pass 2
+does the NO ACTION (default) checks -- reject if anything still references us.
+]]
 local function enforce_del_fks(self, schema, ...)
 	for _, fk in pairs(schema.ref_fks) do
 		local child_schema = fk.index.val_schema
@@ -2546,7 +2570,7 @@ local function enforce_del_fks(self, schema, ...)
 			end
 		end
 	end
-	for _, fk in pairs(schema.ref_fks) do --no action (default): reject if referenced
+	for _, fk in pairs(schema.ref_fks) do --no action (default): reject if ref'ed
 		if fk.ondelete ~= 'cascade' and fk.ondelete ~= 'set null' then
 			local ix_dbi = self:dbi_raw(fk.index.name)
 			if first_referencing_child(self, ix_dbi, fk.index, ...) then
@@ -2557,7 +2581,10 @@ local function enforce_del_fks(self, schema, ...)
 	end
 end
 
-local function update_indexes(self, event, schema, k, k_sz, v, v_sz, v0, v0_sz, ix_cur)
+local function update_indexes(
+	self, event, schema,
+	k, k_sz, v, v_sz, v0, v0_sz, ix_cur
+)
 	for _, ix_schema in ipairs(schema.indexes) do
 		local cur = ix_cur and ix_cur.schema == ix_schema and ix_cur or nil
 		local ok, err = ix_schema:update(self, k, k_sz, v, v_sz, v0, v0_sz, cur)
@@ -2565,7 +2592,8 @@ local function update_indexes(self, event, schema, k, k_sz, v, v_sz, v0, v0_sz, 
 	end
 end
 
-local cur_k_buffer = u8a(MDBX_MAX_KEY_SIZE) --stable copy of a cursor's key across writes
+--stable copy of a cursor's key across writes
+local cur_k_buffer = u8a(MDBX_MAX_KEY_SIZE)
 
 local function cur_update(self, ix_cur, val_cols, ...)
 	local schema = assert(self.schema)
@@ -2645,8 +2673,12 @@ local function put(self, flags, op, tab, cols, ...)
 	local k, k_buf_sz = key_rec_buffer, MDBX_MAX_KEY_SIZE
 	local v, v_buf_sz = val_rec_buffer(schema.val_fields.max_rec_size)
 	local autoinc_f = op == 'insert' and schema.autoinc_field
-	local k_sz, autoinc_v = encode_key(self, schema, op, autoinc_f, k, k_buf_sz, cols, as, ...)
-	if op == 'update' or op == 'upsert' or schema.indexes or schema.fks or schema.triggers or schema.has_generated then
+	local k_sz, autoinc_v = encode_key(self, schema, op, autoinc_f,
+		k, k_buf_sz, cols, as, ...)
+	if op == 'update' or op == 'upsert'
+		or schema.indexes or schema.fks
+		or schema.triggers or schema.has_generated
+	then
 		local cur = self:cursor(dbi)
 		--insert skips the get: v0=nil by definition, NOOVERWRITE detects exists
 		local found, v0, v0_sz
@@ -2686,7 +2718,8 @@ local function put(self, flags, op, tab, cols, ...)
 			end
 			v_sz = encode_val(self, schema, op, v, v_buf_sz, val_cols, '{}', t)
 			if schema.fks then
-				if not schema.triggers and not schema.has_generated then --pk not yet in t
+				if not schema.triggers and not schema.has_generated then
+					--pk not yet in t
 					for _, f in ipairs(schema.key_fields) do
 						t[f.col] = select_col(cols, as, f.col, ...)
 					end
@@ -2708,7 +2741,8 @@ local function put(self, flags, op, tab, cols, ...)
 				if schema.has_generated then
 					apply_generated(self, schema, new_t)
 				end
-				v_sz = encode_val(self, schema, op, v, v_buf_sz, schema.val_cols, '{}', new_t)
+				v_sz = encode_val(self, schema, op,
+					v, v_buf_sz, schema.val_cols, '{}', new_t)
 				if schema.fks then
 					check_fks(self, op, schema, schema.cols, '{}', true, new_t)
 				end
@@ -2826,8 +2860,10 @@ function Db:put_records(tab, cols, rows)
 	local v, v_buf_sz = val_rec_buffer(schema.val_fields.max_rec_size)
 	for _,vals in ipairs(rows) do
 		if as == '{}' then check_cols(schema, nil, vals) end
-		local k_sz = encode_key(self, schema, 'put_rec', nil, k, k_buf_sz, cols, as, vals)
-		local v_sz = encode_val(self, schema, 'put_rec', v, v_buf_sz, cols, as, vals)
+		local k_sz = encode_key(self, schema, 'put_rec', nil,
+			k, k_buf_sz, cols, as, vals)
+		local v_sz = encode_val(self, schema, 'put_rec',
+			v, v_buf_sz, cols, as, vals)
 		local ok, err = self:try_put_raw(dbi, k, k_sz, v, v_sz)
 		self:check_row('put_rec', schema.name, ok, err)
 	end
@@ -2906,7 +2942,8 @@ end
 
 local function find_raw_by_pk(self, dbi, schema, ...)
 	local k, k_buf_sz = key_rec_buffer, MDBX_MAX_KEY_SIZE
-	local k_sz = encode_key(self, schema, 'get', nil, k, k_buf_sz, schema.key_cols, nil, ...)
+	local k_sz = encode_key(self, schema, 'get', nil,
+		k, k_buf_sz, schema.key_cols, nil, ...)
 	return self:find_raw(dbi, k, k_sz)
 end
 
