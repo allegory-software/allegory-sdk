@@ -233,8 +233,6 @@ ALLOCATION
 	realloc(p, size) -> p          C realloc
 	free(p)                        C free
 BUFFERS
-	dynarray([ct][,cap]) -> alloc
-		alloc(len) -> buf, len      alloc len and get a buffer, contents preserved
 	dynarray_pump() -> write, collect, reset
 	  write(s | buf, len)          append to internal buffer
 	  collect() -> buf,len         get internal buffer
@@ -2282,24 +2280,6 @@ end
 
 --buffers --------------------------------------------------------------------
 
---like buffer() but preserves data on reallocations.
---also returns minlen instead of capacity.
-function dynarray(ct, min_capacity)
-	ct = ct or u8a
-	local alloc = buffer(ct)
-	local elem_size = sizeof(ct, 1)
-	local buf0, minlen0
-	return function(minlen)
-		local buf, len = alloc(minlen and max(min_capacity or 0, minlen))
-		--TODO: would realloc() be better than copy? probably not...
-		if buf ~= buf0 and buf ~= nil and buf0 ~= nil then
-			copy(buf, buf0, minlen0 * elem_size)
-		end
-		buf0, minlen0 = buf, minlen
-		return buf, minlen
-	end
-end
-
 --make a write(buf, sz) function that appends data to a dynamic buffer.
 function dynarray_pump()
 	local b = string_buffer()
@@ -2324,8 +2304,8 @@ function dynarray_pump()
 	return write, collect, reset
 end
 
---like dynarray() but with a lot more features, including fast binary
---(de)serialization of Lua values and a queue-like push/pull API.
+--dynamic byte buffer with fast binary (de)serialization of Lua values and a
+--queue-like push/pull API.
 --see https://luajit.org/ext_buffer.html
 string_buffer = require'string.buffer'.new
 

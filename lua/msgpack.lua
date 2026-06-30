@@ -65,8 +65,8 @@ if not ... then require'msgpack_test'; return end
 require'glue'
 
 local
-	type, bor, band, shr, floor, noop, repl, update, dynarray =
-	type, bor, band, shr, floor, noop, repl, update, dynarray
+	type, bor, band, shr, floor, noop, repl, update, string_buffer =
+	type, bor, band, shr, floor, noop, repl, update, string_buffer
 local
 	isctype, copy, cast, ffi_string =
 	isctype, copy, cast, ffi.string
@@ -237,11 +237,13 @@ end
 function mp:encoding_buffer(min_size)
 	local mp = self
 	local buf = {}
-	local arr = dynarray(u8a, min_size)
+	local sb = string_buffer(min_size)
 	local n = 0
 	local function b(len)
 		n = n + len
-		return arr(n), n-len
+		local p = sb:reserve(len)
+		sb:commit(len)
+		return p, 0
 	end
 	local function encode_len(n, u8mark, u16mark, u32mark)
 		if n <= 0xff and u8mark then
@@ -475,13 +477,14 @@ function mp:encoding_buffer(min_size)
 		return n
 	end
 	function buf:get()
-		return arr(n)
+		return sb:ref()
 	end
 	function buf:tostring()
-		return ffi_string(arr(n))
+		return ffi_string(sb:ref())
 	end
 	function buf:reset()
 		n = 0
+		sb:reset()
 		return self
 	end
 	return buf

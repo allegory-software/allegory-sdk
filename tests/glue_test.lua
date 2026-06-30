@@ -1241,22 +1241,8 @@ do --buffer: custom ctype
 	assert(buf[0] == 42 and buf[1] == 99)
 end
 
---dynarray -------------------------------------------------------------------
+--dynarray_pump --------------------------------------------------------------
 
-do --dynarray: preserves data across reallocations
-	local da = dynarray()
-	local buf, len = da(4)
-	assert(buf ~= nil and len == 4)
-	buf[0] = 65; buf[1] = 66; buf[2] = 67; buf[3] = 68 --'ABCD'
-	local buf2, len2 = da(100) --force realloc
-	assert(len2 == 100)
-	assert(buf2[0] == 65 and buf2[1] == 66 and buf2[2] == 67 and buf2[3] == 68) --preserved
-end
-do --dynarray: with min_capacity
-	local da = dynarray(nil, 64)
-	local buf, len = da(1) --request 1, but min_capacity is 64
-	assert(buf ~= nil and len == 1) --returns minlen, not capacity
-end
 do --dynarray_pump: write and collect
 	local write, collect, reset = dynarray_pump()
 	write('hello')
