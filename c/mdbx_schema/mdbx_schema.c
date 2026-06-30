@@ -587,3 +587,47 @@ void schema_val_add(schema_table* tbl, int col_i,
 	// advance data pointer.
 	*pp = p + mem_size;
 }
+
+// Sort an array of 4-byte big-endian u32 elements using LSD radix sort over
+// bytes 3, 2, 1, 0, skipping passes where all records have the same byte.
+// Descending u32 keys are encoded by inverting the bytes so sorting the
+// encoded bytes still matches memcmp() and MDBX raw key order.
+// tmp must be a distinct n * 4 byte scratch buffer.
+void schema_sort_u32_be(void* buf, void* tmp, size_t n) {
+	if (n < 2)
+		return;
+
+	u8* src = buf;
+	u8* dst = tmp;
+	size_t pos[256];
+
+	for (int byte_i = 3; byte_i >= 0; byte_i--) {
+		memset(pos, 0, sizeof(pos));
+		for (size_t i = 0; i < n; i++)
+			pos[src[i * 4 + byte_i]]++;
+
+		size_t sum = 0;
+		int used = 0;
+		for (int i = 0; i < 256; i++) {
+			size_t count = pos[i];
+			pos[i] = sum;
+			sum += count;
+			used += count != 0;
+		}
+		if (used == 1)
+			continue;
+
+		for (size_t i = 0; i < n; i++) {
+			u8* s = src + i * 4;
+			u8* d = dst + pos[s[byte_i]]++ * 4;
+			memcpy(d, s, 4);
+		}
+
+		u8* p = src;
+		src = dst;
+		dst = p;
+	}
+
+	if (src != (u8*)buf)
+		memcpy(buf, src, n * 4);
+}

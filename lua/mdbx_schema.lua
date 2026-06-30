@@ -277,7 +277,11 @@ void schema_val_add(schema_table* tbl, int col_i,
 	void* rec, int rec_buf_size, int val_len,
 	u8** pp
 );
+
+void schema_sort_u32_be(void* buf, void* tmp, size_t n);
 ]]
+
+mdbx_schema_sort_u32_be = C.schema_sort_u32_be
 
 local col_ct = {
 	utf8 = 'u8',
