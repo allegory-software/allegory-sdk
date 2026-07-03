@@ -1139,8 +1139,7 @@ function Q:lower()
 				node = db:pk_parent_lookup(node, fk_ix,
 					j.left and {left = true} or nil)
 			else
-				assertf(not j.left, 'left join parent->child not yet supported')
-				node = db:pk_join_seek(node, fk_ix)
+				node = db:pk_join_seek(node, fk_ix, j.left and {left = true} or nil)
 			end
 			-- apply join-table filters while the cursor is still positioned.
 			for _, f in ipairs(by_member[join_tbl] or empty) do

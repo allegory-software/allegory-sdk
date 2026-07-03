@@ -1405,7 +1405,8 @@ per driver PK. driver: any PK-stream node; fk: FK index name.
 Output: PK tuple stream in driver order; one seek per row, O(n log m).
 fk may be wider than the FK's own columns; then the seek becomes a
 prefix scan instead of an exact match (see fk_child below).
-Usage: db:pk_join_seek(driver, fk_ix_name)
+opts.left = true: left join; emit parent with absent child.
+Usage: db:pk_join_seek(driver, fk_ix_name [, opts])
 ]]
 Db.pk_join_seek = object(Db.query_node, {
 	kind   = 'pk_join_seek',
@@ -1414,8 +1415,9 @@ Db.pk_join_seek = object(Db.query_node, {
 	source = 'probe',
 	work   = 'FK index seek per driver row',
 })
-function Db.pk_join_seek:__call(db, driver, fk_name)
+function Db.pk_join_seek:__call(db, driver, fk_name, opts)
 	check_pk_node(driver, 'pk_join_seek', 1)
+	opts = opts or {}
 	local fk_schema = resolve(db, fk_name)
 	check_index(fk_schema, 'pk_join_seek', fk_name)
 	local child_schema = fk_schema.val_schema
@@ -1424,6 +1426,7 @@ function Db.pk_join_seek:__call(db, driver, fk_name)
 	-- driver may carry multiple members (chained joins); child is the new one.
 	assertf(driver_has_member(driver, parent_schema.name),
 		'pk_join_seek: driver must have member %s', parent_schema.name)
+	local left_join = opts.left
 	local members = extend({}, driver.members)
 	members[#members+1] = child_schema.name
 	local node = object(self, {
@@ -1443,7 +1446,7 @@ function Db.pk_join_seek:__call(db, driver, fk_name)
 	local child_pk_rec = MDBX_val()
 	local child_val_rec = MDBX_val()
 	local parent_pk_rec = MDBX_val()
-	local has_pair, in_match, child_base_seeked
+	local has_pair, has_child, in_match, child_base_seeked
 	local function get_child_val()
 		if not child_base_seeked then
 			if not child_cur then child_cur = db:cursor(child_schema.name) end
@@ -1466,6 +1469,7 @@ function Db.pk_join_seek:__call(db, driver, fk_name)
 		if not has_pair then return end
 		-- child is the only member owned here; all others delegate upstream.
 		if name == child_schema.name then
+			if not has_child then return end -- left-join: parent present, child absent
 			if wide then return fk_child:pk(child_schema.name) end
 			return true, child_pk_rec.data, child_pk_rec.size
 		end
@@ -1473,8 +1477,9 @@ function Db.pk_join_seek:__call(db, driver, fk_name)
 	end
 	function node:compile_col(member, col)
 		if member == child_schema.name then
-			if wide then return fk_child:compile_col(child_schema.name, col) end
-			return db:compile_col(child_schema, col, nil, child_pk_rec, get_child_val)
+			local inner = wide and fk_child:compile_col(child_schema.name, col)
+				or db:compile_col(child_schema, col, nil, child_pk_rec, get_child_val)
+			return function() return has_child and inner() or nil end
 		end
 		return driver:compile_col(member, col)
 	end
@@ -1487,12 +1492,12 @@ function Db.pk_join_seek:__call(db, driver, fk_name)
 	key still in the prefix.
 	]]
 	function node:next_group()
-		has_pair = false
+		has_pair = false; has_child = false
 		if wide then
 			while true do
 				if in_match then
-					if fk_child:next_pk() then has_pair = true; return true end
-					if fk_child:next_group() then has_pair = true; return true end
+					if fk_child:next_pk() then has_pair = true; has_child = true; return true end
+					if fk_child:next_group() then has_pair = true; has_child = true; return true end
 					in_match = false
 				end
 				if not driver:next_item() then return end
@@ -1501,8 +1506,9 @@ function Db.pk_join_seek:__call(db, driver, fk_name)
 				fk_child:reset_prefix(p, p_sz)
 				if fk_child:next_group() then
 					in_match = true
-					has_pair = true; return true
+					has_pair = true; has_child = true; return true
 				end
+				if left_join then has_pair = true; return true end
 			end
 		end
 		if not fk_cur then fk_cur = db:cursor(fk_schema.name) end
@@ -1510,7 +1516,7 @@ function Db.pk_join_seek:__call(db, driver, fk_name)
 			if in_match then
 				if fk_cur:move_raw_into(C.MDBX_NEXT_DUP, nil, child_pk_rec) then
 					child_base_seeked = false
-					has_pair = true; return true
+					has_pair = true; has_child = true; return true
 				end
 				in_match = false
 			end
@@ -1521,15 +1527,16 @@ function Db.pk_join_seek:__call(db, driver, fk_name)
 			if fk_cur:move_raw_into(C.MDBX_SET_KEY, parent_pk_rec, child_pk_rec) then
 				in_match = true
 				child_base_seeked = false
-				has_pair = true; return true
+				has_pair = true; has_child = true; return true
 			end
+			if left_join then has_pair = true; return true end
 		end
 	end
 	function node:open(params)
 		assert(not is_open, 'node already open')
 		driver:open(params)
 		is_open = true
-		has_pair = false; in_match = false; child_base_seeked = false
+		has_pair = false; has_child = false; in_match = false; child_base_seeked = false
 		parent_pk = nil; parent_pk_sz = nil
 	end
 	return node
@@ -1671,13 +1678,14 @@ end
 pk_hash_filter: materialise set node PKs into a hash, then filter
 driver by membership. mode='in': keep driver items whose PK is in
 the set. mode='not_in': keep driver items whose PK is not in the
-set. Both inputs must be flat pk streams; driver and set may differ
-in order and key space.
+set. set_node must be a flat pk stream; driver may carry other
+tuple members (chained joins) alongside the one tested against the
+set, named by set_node's own member. Driver and set may differ in
+order and key space.
 Usage: db:pk_hash_filter(driver, set_node, mode)
 ]]
 Db.pk_hash_filter = object(Db.query_node, {
 	kind   = 'pk_hash_filter',
-	item   = 'pk',
 	unique = false,
 	source = 'probe',
 	work   = 'materialise set + driver scan',
@@ -1687,13 +1695,15 @@ function Db.pk_hash_filter:__call(db, driver, set_node, mode)
 	check_pk_node(set_node, 'pk_hash_filter', 2)
 	assertf(mode == 'in' or mode == 'not_in',
 		'pk_hash_filter: mode must be "in" or "not_in"')
-	check_flat_pk(driver, 'pk_hash_filter', 'driver')
 	check_flat_pk(set_node, 'pk_hash_filter', 'set')
-	local member_name = driver.members[1]
+	local member_name = set_node.members[1]
+	assertf(driver_has_member(driver, member_name),
+		'pk_hash_filter: driver must have member %s', member_name)
 	local node = object(self, {
-		members = {member_name},
+		members = driver.members,
 		order   = driver.order,
 		unique  = driver.unique,
+		item    = driver.item,
 	})
 	node.inputs = {driver, set_node}
 	node.merge_cmp = driver.merge_cmp
@@ -1701,23 +1711,23 @@ function Db.pk_hash_filter:__call(db, driver, set_node, mode)
 	local pk_set
 	-- Avoid per-row string allocation + Lua hash lookup for 4-byte u32 keys:
 	-- measured ~2x in pk_hash_filter and ~2.8x-3.6x materialise+probe.
-	local use_u32_set = pk_is_u32(resolve(db, driver.members[1]))
+	local use_u32_set = pk_is_u32(resolve(db, member_name))
 		and pk_is_u32(resolve(db, set_node.members[1]))
 	local has_pk, cur_pk, cur_pk_sz
 	local want_in = mode == 'in'
 	function node:compile_col(m, c) return driver:compile_col(m, c) end
 	function node:close() driver:close() end
 	function node:pk(name)
-		if has_pk and (name == nil or name == member_name) then
-			return true, cur_pk, cur_pk_sz
-		end
+		if not has_pk then return end
+		if name == member_name then return true, cur_pk, cur_pk_sz end
+		return driver:pk(name)
 	end
 	function node:merge_key() return driver:merge_key() end
 	function node:next_group()
 		has_pk = false
 		while true do
 			if not driver:next_item() then return end
-			local _, p, p_sz = driver:pk()
+			local _, p, p_sz = driver:pk(member_name)
 			local found
 			if use_u32_set then
 				found = pk_set:lookup(p)
@@ -2429,20 +2439,20 @@ end
 pk_and_probe: filter a driver pk stream by testing each PK against
 one or more index keys via MDBX_GET_BOTH_RANGE; all probes must
 pass (ANDed). O(1) memory, one seek per probe per driver row. Probe
-key is encoded once; a dedicated cursor is kept open per probe.
+key is encoded once; a dedicated cursor is kept open per probe. All
+probes test the same driver member (the table they index); driver
+may carry other tuple members (chained joins) alongside it.
 probe: {ix=index_name, keys={P1, P2, ...}} -- one param name per key col.
 Usage: db:pk_and_probe(driver, probe, ...)
 ]]
 Db.pk_and_probe = object(Db.query_node, {
 	kind   = 'pk_and_probe',
-	item   = 'pk',
 	unique = false,
 	source = 'probe',
 	work   = 'driver scan + GET_BOTH per probe',
 })
 function Db.pk_and_probe:__call(db, driver, ...)
 	check_pk_node(driver, 'pk_and_probe', 1)
-	check_flat_pk(driver, 'pk_and_probe', 'driver')
 	local nprobes = select('#', ...)
 	assertf(nprobes >= 1, 'pk_and_probe: at least one probe required')
 	local probes = {}
@@ -2454,11 +2464,14 @@ function Db.pk_and_probe:__call(db, driver, ...)
 		check_index(ix_schema, 'pk_and_probe', p.ix)
 		probes[i] = {schema = ix_schema, keys = p.keys}
 	end
-	local member_name = driver.members[1]
+	local member_name = probes[1].schema.val_schema.name
+	assertf(driver_has_member(driver, member_name),
+		'pk_and_probe: driver must have member %s', member_name)
 	local node = object(self, {
-		members = {member_name},
+		members = driver.members,
 		order   = driver.order,
 		unique  = driver.unique,
+		item    = driver.item,
 	})
 	node.inputs = {driver}
 	node.merge_cmp = driver.merge_cmp
@@ -2475,9 +2488,9 @@ function Db.pk_and_probe:__call(db, driver, ...)
 		end
 	end
 	function node:pk(name)
-		if has_pk and (name == nil or name == member_name) then
-			return true, cur_pk, cur_pk_sz
-		end
+		if not has_pk then return end
+		if name == member_name then return true, cur_pk, cur_pk_sz end
+		return driver:pk(name)
 	end
 	function node:merge_key() return driver:merge_key() end
 	--[[
@@ -2495,7 +2508,7 @@ function Db.pk_and_probe:__call(db, driver, ...)
 		end
 		while true do
 			if not driver:next_item() then return end
-			local _, p, p_sz = driver:pk()
+			local _, p, p_sz = driver:pk(member_name)
 			local pass = true
 			for i, probe in ipairs(probes) do
 				local ok, v, v_sz = probe_curs[i]:find_dup_ge_raw(
