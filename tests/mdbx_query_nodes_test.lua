@@ -304,6 +304,33 @@ function test.pk_prefix_exec()
 	end)
 end
 
+function test.pk_range_partial_prefix_exec()
+	with_db('pk_range_partial_prefix_exec', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local function pks(node, p)
+				return collect_pks(node, 'users', schema, p)
+			end
+			local t = pks(db:pk_range('users/status',
+				{prefix = 'partial'}, 'P'), {P = 'act'})
+			assert(cat(t, ',') == '1,2,4', S(t))
+
+			t = pks(db:pk_range('users/status',
+				{prefix = 'partial', desc = true}, 'P'), {P = 'act'})
+			assert(cat(t, ',') == '4,2,1', S(t))
+
+			local e = db:pk_range('users/status',
+				{prefix = 'partial'}, 'P'):explain()
+			assert(e.order[1] == 'users.status asc', e.order[1])
+
+			assert(not pcall(function()
+				local n = db:pk_range('users/status', {prefix = 'partial'}, 'P')
+				n:open({P = nil})
+			end))
+		end)
+	end)
+end
+
 function test.fk_parent_scan_exec()
 	with_db('fk_parent_scan_exec', function(db)
 		db:atomic('r', function()
@@ -411,10 +438,8 @@ function test.pk_range_exec()
 			assert(eq(pks(db:pk_range('users/score', {desc=true})), {2,1,4,5,3}))
 			assert(eq(pks(db:pk_range('users/score', '>=', 'LO', '<=', 'HI'), {LO=null, HI=null}), {}))
 			assert(eq(pks(db:pk_range('users/score', '>', 'LO'), {LO=null}), {3,5,4,1,2}))
-			assert(not pcall(function()
-				local n = db:pk_range('users/score', '>=', 'LO', '<=', 'HI')
-				n:open({LO=95, HI=70})
-			end))
+			assert(eq(pks(db:pk_range('users/score', '>=', 'LO', '<=', 'HI'),
+				{LO=95, HI=70}), {}))
 		end)
 	end)
 end

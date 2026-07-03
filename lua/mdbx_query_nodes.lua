@@ -1,7 +1,7 @@
 --[[
 
 	query engine over mdbx_schema tables and indexes.
-	Written by Cosmin Apreutesei. Public Domain.
+	Written by AI driven by Cosmin Apreutesei. Public Domain.
 
 API
 
@@ -97,17 +97,9 @@ local C  = C
 local Db = mdbx_db
 local encode_key = mdbx_encode_key
 local encode_key_prefix = mdbx_encode_key_prefix
+local key_reencode = mdbx_key_reencode
 local sort_u32_be = mdbx_schema_sort_u32_be
 local find_u32_be = mdbx_schema_find_u32_be
-
--- Increment the last non-0xFF byte to get the strict upper prefix bound.
--- Returns nil when all bytes are 0xFF (no finite upper bound exists).
-local function next_prefix(s)
-	local i = #s
-	while i >= 1 and s:byte(i) == 255 do i = i - 1 end
-	if i < 1 then return nil end
-	return s:sub(1, i-1) .. string.char(s:byte(i) + 1)
-end
 
 --utils ----------------------------------------------------------------------
 
@@ -286,6 +278,10 @@ local function key_ge(k1, n1, k2, n2) return key_cmp(k1, n1, k2, n2) >= 0 end
 local function key_le(k1, n1, k2, n2) return key_cmp(k1, n1, k2, n2) <= 0 end
 local function key_lt(k1, n1, k2, n2) return key_cmp(k1, n1, k2, n2)  < 0 end
 local function key_gt(k1, n1, k2, n2) return key_cmp(k1, n1, k2, n2)  > 0 end
+--true once k no longer starts with prefix p (used as a stop bound).
+local function key_past_prefix(k, k_sz, p, p_sz)
+	return k_sz < p_sz or memcmp(k, p, p_sz) ~= 0
+end
 
 -- pk_get: single base-table PK lookup; returns zero or one PK item.
 -- Usage: db:pk_get(table_name, pk...)  -- pk count = PK column count.
@@ -481,7 +477,8 @@ For a base table:       merge_key = pk = base table key bytes.
 Bounds: op ('>'|'>='|'<'|'<=') followed by fixed leading param names
 and one range param name; null sentinel ok.
 opts: desc (scan backward), n_fixed_params (fixed leading key columns),
-hi_next_prefix (transform last high-bound value with next_prefix()).
+prefix (true for complete key-column prefix, 'partial' to stop before
+the last varsize key-column terminator).
 Usage: db:pk_range(name [, opts] [, op, val...] ...)
 ]]
 Db.pk_range = object(Db.query_node, {
@@ -498,44 +495,48 @@ function Db.pk_range:__call(db, name, opt, ...)
 	local schema = resolve(db, name)
 	local is_index = schema.is_index
 	local nkey = #schema.key_fields
-	local nargs = select('#', ...)
 	local nfixed = opt.n_fixed_params or 0
-	local hi_next_prefix = opt.hi_next_prefix
+	local prefix = opt.prefix
+	local prefix_partial = prefix == 'partial'
+	assertf(prefix == nil or prefix == true or prefix_partial,
+		'pk_range: %s: invalid prefix option', schema.name)
 	assertf(nfixed >= 0 and nfixed <= nkey,
 		'pk_range: %s: n_fixed_params out of range: %d',
 		schema.name, nfixed)
-	local narg = nargs - 1
-	local nnames, ngroups
-	if narg == 0 then
-		nnames, ngroups = 0, 0
-	elseif nfixed > 0 and narg == nfixed + 1 then
-		nnames, ngroups = nfixed, 1
-	elseif narg == nfixed + 2 then
-		nnames, ngroups = nfixed + 1, 1
-	elseif narg == 2 * (nfixed + 2) then
-		nnames, ngroups = nfixed + 1, 2
-	else
-		assertf(false, 'pk_range: %s: invalid args', schema.name)
-	end
 	local names = {}
 	local lo_op, lo_i, lo_n, hi_op, hi_i, hi_n
-	local ai = 2
-	for group = 1, ngroups do
-		local op = select(ai, ...)
-		assertf(op == '>' or op == '>=' or op == '<' or op == '<=',
-			'pk_range: %s: expected op at arg %d', schema.name, ai)
-		ai = ai + 1
-		local ni = #names + 1
-		for i = 1, nnames do
-			names[#names+1] = select(ai, ...)
-			ai = ai + 1
+	local order_fixed
+	local nprefix
+	if prefix then
+		nprefix = nfixed + (prefix_partial and 1 or 0)
+		assertf(nprefix > 0 and nprefix <= nkey,
+			'pk_range: %s: invalid prefix args', schema.name)
+		if prefix_partial then
+			local f = schema.key_fields[nprefix]
+			assertf(f.maxlen and not f.padded,
+				'pk_range: %s: partial prefix on fixed-size key column',
+				schema.name)
 		end
-		if op == '>=' or op == '>' then lo_op, lo_i, lo_n = op, ni, nnames
-		else hi_op, hi_i, hi_n = op, ni, nnames end
-	end
-	if hi_next_prefix then
-		assertf(hi_i, 'pk_range: %s: hi_next_prefix without hi bound',
-			schema.name)
+		for i = 1, nprefix do names[i] = select(i, ...) end
+		order_fixed = nfixed
+	else
+		local nnames = nfixed + 1
+		for ai = 1, nfixed + 3, nfixed + 2 do
+			local op = select(ai, ...)
+			if op == nil then break end
+			if ai > 1
+				and not (op == '>' or op == '>=' or op == '<' or op == '<=')
+			then break end
+			assertf(op == '>' or op == '>=' or op == '<' or op == '<=',
+				'pk_range: %s: expected op at arg %d', schema.name, ai)
+			local ni = #names + 1
+			for i = 1, nnames do
+				names[#names+1] = select(ai + i, ...)
+			end
+			if op == '>=' or op == '>' then lo_op, lo_i, lo_n = op, ni, nnames
+			else hi_op, hi_i, hi_n = op, ni, nnames end
+		end
+		order_fixed = nfixed
 	end
 	local lo_open_arg = lo_op == '>'
 	local hi_open_arg = hi_op == '<'
@@ -546,7 +547,7 @@ function Db.pk_range:__call(db, name, opt, ...)
 	local member_schema = is_index and schema.val_schema or schema
 	local dir = desc and 'desc' or 'asc'
 	local order = {}
-	for i = nfixed + 1, #schema.key_fields do
+	for i = order_fixed + 1, #schema.key_fields do
 		local f = schema.key_fields[i]
 		order[#order+1] = {col = member_schema.name..'.'..f.col, dir = dir}
 	end
@@ -665,6 +666,17 @@ function Db.pk_range:__call(db, name, opt, ...)
 				return true
 			end
 		end
+		if prefix then
+			--re-seek to a new prefix on the same open cursor; used by pk_join_seek
+			--for per-row seeks. needs a different cmp that stops once the key no
+			--longer starts with buf, as opposed to stopping at the boundary value.
+			function node:reset_prefix(buf, buf_sz)
+				lo_key = buf; lo_sz = buf_sz; lo_open = false
+				bnd_key = buf; bnd_sz = buf_sz; cmp_bnd = key_past_prefix
+				is_open = true
+				has_pk = nil; base_seeked = false; first = true
+			end
+		end
 	end
 	function node:close()
 		if is_open then
@@ -678,67 +690,46 @@ function Db.pk_range:__call(db, name, opt, ...)
 		assert(not is_open, 'node already open')
 		lo_open = lo_open_arg
 		hi_open = hi_open_arg
-		local prefix_key, prefix_sz, prefix_hi_key, prefix_hi_sz
-		if nfixed > 0 then
-			local fixed_i = lo_i or hi_i
-			assertf(fixed_i,
-				'pk_range: %s: n_fixed_params without bound names',
-				schema.name)
-			for i = 1, nfixed do vals[i] = params[names[fixed_i + i - 1]] end
-			prefix_sz = encode_key_prefix(db, schema, 'range',
-				mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
-				nfixed, unpack(vals, 1, nfixed))
-			prefix_key = u8a(prefix_sz); copy(prefix_key, mdbx_key_rec_buffer, prefix_sz)
-			local ns = next_prefix(str(prefix_key, prefix_sz))
-			if ns then
-				prefix_hi_sz = #ns
-				prefix_hi_key = u8a(prefix_hi_sz); copy(prefix_hi_key, ns, prefix_hi_sz)
-			else
-				prefix_hi_key = nil; prefix_hi_sz = nil
+		if prefix then
+			for i = 1, nprefix do vals[i] = params[names[i]] end
+			if prefix_partial then
+				assertf(vals[nprefix] ~= nil and vals[nprefix] ~= null,
+					'pk_range: %s: partial prefix is null', schema.name)
 			end
-		end
-		if lo_i then
-			if nfixed > 0 and lo_n == nfixed then
-				lo_key, lo_sz, lo_open = prefix_key, prefix_sz, false
+			local prefix_sz = encode_key_prefix(db, schema, 'range',
+				mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
+				nprefix, prefix_partial, unpack(vals, 1, nprefix))
+			lo_key = u8a(prefix_sz); copy(lo_key, mdbx_key_rec_buffer, prefix_sz)
+			lo_sz = prefix_sz; lo_open = false
+			--compute the strict upper bound for this encoded byte prefix.
+			--if all bytes are 0xff, there is no finite upper bound.
+			local i = prefix_sz - 1
+			while i >= 0 and lo_key[i] == 255 do i = i - 1 end
+			if i >= 0 then
+				hi_sz = i + 1
+				hi_key = u8a(hi_sz); copy(hi_key, lo_key, hi_sz)
+				hi_key[i] = hi_key[i] + 1
+				hi_open = true
 			else
+				hi_key = nil; hi_sz = nil
+			end
+		else
+			if lo_i then
 				for i = 1, lo_n do vals[i] = params[names[lo_i + i - 1]] end
 				lo_sz = encode_key(db, schema, 'range', nil,
 					mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
 					schema.key_cols, nil, unpack(vals, 1, lo_n))
 				lo_key = u8a(lo_sz); copy(lo_key, mdbx_key_rec_buffer, lo_sz)
-			end
-		else lo_key = nil; lo_sz = nil end
-		if hi_i then
-			for i = 1, hi_n do vals[i] = params[names[hi_i + i - 1]] end
-			local has_hi = true
-			if hi_next_prefix then
-				local ns = next_prefix(vals[hi_n])
-				if ns then vals[hi_n] = ns
-				else
-					hi_key = nil; hi_sz = nil
-					has_hi = false
-				end
-			end
-			if has_hi then
-				if nfixed > 0 and hi_n == nfixed then
-					hi_key, hi_sz, hi_open = prefix_key, prefix_sz, false
-				else
-					hi_sz = encode_key(db, schema, 'range', nil,
-						mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
-						schema.key_cols, nil, unpack(vals, 1, hi_n))
-					hi_key = u8a(hi_sz); copy(hi_key, mdbx_key_rec_buffer, hi_sz)
-				end
-			end
-		else
-			hi_key = nil
-			hi_sz = nil
-		end
-		if prefix_key then
-			if not lo_key then
-				lo_key, lo_sz, lo_open = prefix_key, prefix_sz, false
-			end
-			if not hi_key and prefix_hi_key then
-				hi_key, hi_sz, hi_open = prefix_hi_key, prefix_hi_sz, true
+			else lo_key = nil; lo_sz = nil end
+			if hi_i then
+				for i = 1, hi_n do vals[i] = params[names[hi_i + i - 1]] end
+				hi_sz = encode_key(db, schema, 'range', nil,
+					mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
+					schema.key_cols, nil, unpack(vals, 1, hi_n))
+				hi_key = u8a(hi_sz); copy(hi_key, mdbx_key_rec_buffer, hi_sz)
+			else
+				hi_key = nil
+				hi_sz = nil
 			end
 		end
 		cmp_hi = hi_open and key_ge or key_gt
@@ -755,7 +746,8 @@ function Db.pk_range:__call(db, name, opt, ...)
 end
 
 function Db:pk_prefix(ix_name, ...)
-	return self:pk_range(ix_name, {n_fixed_params = select('#', ...)}, '>=', ...)
+	return self:pk_range(ix_name,
+		{prefix = true, n_fixed_params = select('#', ...)}, ...)
 end
 
 --[[
@@ -785,10 +777,9 @@ function Db.fk_parent_scan:__call(db, ix_name)
 	local parent_schema = resolve(db, fk.ref_table)
 	assertf(#fk.ref_cols == #parent_schema.key_fields,
 		'fk_parent_scan: %s does not reference the full parent PK', ix_name)
-	--all key cols must be not_null; null FK support is not yet implemented
+	local nullable_fk = false
 	for _, f in ipairs(schema.key_fields) do
-		assertf(f.not_null,
-			'fk_parent_scan: nullable FK col not supported: %s', f.col)
+		if not f.not_null then nullable_fk = true end
 	end
 	local node = object(self, {
 		members = {parent_schema.name},
@@ -798,6 +789,24 @@ function Db.fk_parent_scan:__call(db, ix_name)
 	local op
 	local has_pk
 	local pk_rec = MDBX_val()
+	--not_null FK cols byte-match the parent PK already: pk_rec is used as-is.
+	--nullable FK cols don't (extra marker byte), so re-encode via
+	--schema_key_reencode, and skip entries that decode null (a null
+	--FK references no parent). reenc_buf is per-node: a merge partner may
+	--hold this node's current key alive while comparing against another.
+	local reenc_buf = nullable_fk and u8a(MDBX_MAX_KEY_SIZE) or nil
+	local function skip_nulls()
+		while has_pk do
+			if not nullable_fk then return true end
+			local sz = key_reencode(schema, parent_schema,
+				pk_rec.data, pk_rec.size, reenc_buf, MDBX_MAX_KEY_SIZE)
+			if sz >= 0 then
+				pk_rec.data = reenc_buf; pk_rec.size = sz
+				return true
+			end
+			has_pk = cur:move_raw_into(C.MDBX_NEXT_NODUP, pk_rec, nil)
+		end
+	end
 	function node:pk(name)
 		if has_pk and (name == nil or name == parent_schema.name) then
 			return true, pk_rec.data, pk_rec.size
@@ -805,18 +814,24 @@ function Db.fk_parent_scan:__call(db, ix_name)
 	end
 	function node:merge_key() return pk_rec.data, pk_rec.size end
 	function node:skip_to(target, target_sz)
-		pk_rec.data = target; pk_rec.size = target_sz
+		if nullable_fk then
+			--target is a parent PK; re-encode into a FK index seek prefix
+			--(same function, schema args swapped: parent is now the source).
+			local sz = key_reencode(parent_schema, schema,
+				target, target_sz, reenc_buf, MDBX_MAX_KEY_SIZE)
+			pk_rec.data = reenc_buf; pk_rec.size = sz
+		else
+			pk_rec.data = target; pk_rec.size = target_sz
+		end
 		has_pk = cur:move_raw_into(C.MDBX_SET_RANGE, pk_rec, nil)
 		op = C.MDBX_NEXT_NODUP
-		if not has_pk then return end
-		return true
+		return skip_nulls()
 	end
 	function node:next_group()
 		if not cur then cur = db:cursor(schema.name) end
 		has_pk = cur:move_raw_into(op, pk_rec, nil)
 		op = C.MDBX_NEXT_NODUP
-		if not has_pk then return end
-		return true
+		return skip_nulls()
 	end
 	function node:close()
 		if is_open then
@@ -925,7 +940,7 @@ function Db.pk_group_first:__call(db, ix_name, ...)
 			for i, kn in ipairs(key_names) do key_vals[i] = params[kn] end
 			sz = encode_key_prefix(db, schema, 'prefix',
 				mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
-				nk, unpack(key_vals, 1, nk))
+				nk, false, unpack(key_vals, 1, nk))
 			ix_key = u8a(sz); copy(ix_key, mdbx_key_rec_buffer, sz)
 			is_open = true
 			has_pk = nil; base_seeked = false; first = true
@@ -1366,10 +1381,21 @@ end
 
 --PROBE NODES ----------------------------------------------------------------
 
+--an index qualifies if a FK's columns are a leading prefix of it;
+--longest match wins if more than one FK qualifies.
 local function find_fk(db, child_schema, fk_schema, caller, fk_name)
+	local best, best_n
 	for _, f in pairs(child_schema.fks or {}) do
-		if f.index == fk_schema then return f, resolve(db, f.ref_table) end
+		local n = #f.cols
+		if n <= #fk_schema.pk and (not best or n > best_n) then
+			local ok = true
+			for i = 1, n do
+				if fk_schema.pk[i] ~= f.cols[i] then ok = false; break end
+			end
+			if ok then best, best_n = f, n end
+		end
 	end
+	if best then return best, resolve(db, best.ref_table) end
 	assertf(false, '%s: %s is not a FK index', caller, fk_name)
 end
 
@@ -1377,6 +1403,8 @@ end
 pk_join_seek: nested join -- one MDBX_SET_KEY seek on the FK index
 per driver PK. driver: any PK-stream node; fk: FK index name.
 Output: PK tuple stream in driver order; one seek per row, O(n log m).
+fk may be wider than the FK's own columns; then the seek becomes a
+prefix scan instead of an exact match (see fk_child below).
 Usage: db:pk_join_seek(driver, fk_ix_name)
 ]]
 Db.pk_join_seek = object(Db.query_node, {
@@ -1391,7 +1419,7 @@ function Db.pk_join_seek:__call(db, driver, fk_name)
 	local fk_schema = resolve(db, fk_name)
 	check_index(fk_schema, 'pk_join_seek', fk_name)
 	local child_schema = fk_schema.val_schema
-	local _, parent_schema = find_fk(
+	local fk, parent_schema = find_fk(
 		db, child_schema, fk_schema, 'pk_join_seek', fk_name)
 	-- driver may carry multiple members (chained joins); child is the new one.
 	assertf(driver_has_member(driver, parent_schema.name),
@@ -1402,7 +1430,12 @@ function Db.pk_join_seek:__call(db, driver, fk_name)
 		members = members,
 		order   = driver.order,
 	})
-	node.inputs = {driver}
+	--wide index: children of one parent are a key range, not dupsort
+	--duplicates of one key. fk_child (pk_prefix, reset per row) walks
+	--that range instead of the narrow case's exact SET_KEY/NEXT_DUP.
+	local wide = #fk_schema.pk > #fk.cols
+	local fk_child = wide and db:pk_prefix(fk_name, unpack(fk.cols)) or nil
+	node.inputs = wide and {driver, fk_child} or {driver}
 	node.merge_cmp = driver.merge_cmp
 	node.merge_sig = driver.merge_sig
 	local fk_cur, child_cur, is_open
@@ -1422,6 +1455,7 @@ function Db.pk_join_seek:__call(db, driver, fk_name)
 	function node:close()
 		if is_open then
 			driver:close()
+			if fk_child then fk_child:close() end
 			if fk_cur then fk_cur:close(); fk_cur = nil end
 			if child_cur then child_cur:close(); child_cur = nil end
 			is_open = false
@@ -1431,12 +1465,15 @@ function Db.pk_join_seek:__call(db, driver, fk_name)
 	function node:pk(name)
 		if not has_pair then return end
 		-- child is the only member owned here; all others delegate upstream.
-		if name == child_schema.name
-		then return true, child_pk_rec.data, child_pk_rec.size end
+		if name == child_schema.name then
+			if wide then return fk_child:pk(child_schema.name) end
+			return true, child_pk_rec.data, child_pk_rec.size
+		end
 		return driver:pk(name)
 	end
 	function node:compile_col(member, col)
 		if member == child_schema.name then
+			if wide then return fk_child:compile_col(child_schema.name, col) end
 			return db:compile_col(child_schema, col, nil, child_pk_rec, get_child_val)
 		end
 		return driver:compile_col(member, col)
@@ -1446,9 +1483,28 @@ function Db.pk_join_seek:__call(db, driver, fk_name)
 	first child PK for the parent PK key, then MDBX_NEXT_DUP to walk
 	remaining children before advancing the driver. One index seek per
 	driver item; O(n log m) where n = driver items, m = FK index size.
+	Wide case: next_pk for dups of one key, next_group for the next
+	key still in the prefix.
 	]]
 	function node:next_group()
 		has_pair = false
+		if wide then
+			while true do
+				if in_match then
+					if fk_child:next_pk() then has_pair = true; return true end
+					if fk_child:next_group() then has_pair = true; return true end
+					in_match = false
+				end
+				if not driver:next_item() then return end
+				local _, p, p_sz = driver:pk(parent_schema.name)
+				parent_pk, parent_pk_sz = p, p_sz
+				fk_child:reset_prefix(p, p_sz)
+				if fk_child:next_group() then
+					in_match = true
+					has_pair = true; return true
+				end
+			end
+		end
 		if not fk_cur then fk_cur = db:cursor(fk_schema.name) end
 		while true do
 			if in_match then
@@ -1789,15 +1845,26 @@ function Db.pk_parent_lookup:__call(db, driver, fk_name, opts)
 			if not driver:next_item() then return end
 			local _, cp, cp_sz = driver:pk(child_schema.name)
 			child_pk, child_pk_sz = cp, cp_sz
-			for i, ref_col in ipairs(fk.ref_cols) do fk_row[ref_col] = fk_fns[i]() end
-			local pp_sz = encode_key(db, parent_schema, 'pk_parent_lookup', nil,
-				mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
-				parent_schema.key_cols, '{}', fk_row)
-			parent_key_rec.data = mdbx_key_rec_buffer; parent_key_rec.size = pp_sz
-			if parent_cur:move_raw_into(C.MDBX_SET_KEY, parent_key_rec, nil) then
-				parent_pk, parent_pk_sz = parent_key_rec.data, parent_key_rec.size
-				parent_base_seeked = false
-				has_child = true; has_parent = true; return true
+			local has_null = false
+			for i, ref_col in ipairs(fk.ref_cols) do
+				local v = fk_fns[i]()
+				if v == nil then has_null = true end
+				fk_row[ref_col] = v
+			end
+			--a null FK component means no parent to look up; encode_key would
+			--crash trying to encode it (a null PK field is a real bug for its
+			--other callers, insert/update), so skip straight to the same
+			--fallback used for a real FK with no matching parent row.
+			if not has_null then
+				local pp_sz = encode_key(db, parent_schema, 'pk_parent_lookup', nil,
+					mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
+					parent_schema.key_cols, '{}', fk_row)
+				parent_key_rec.data = mdbx_key_rec_buffer; parent_key_rec.size = pp_sz
+				if parent_cur:move_raw_into(C.MDBX_SET_KEY, parent_key_rec, nil) then
+					parent_pk, parent_pk_sz = parent_key_rec.data, parent_key_rec.size
+					parent_base_seeked = false
+					has_child = true; has_parent = true; return true
+				end
 			end
 			if left_join then has_child = true; return true end
 		end

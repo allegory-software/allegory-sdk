@@ -124,6 +124,11 @@ void schema_key_add(schema_table* tbl, int col_i,
 	void* rec, int rec_buf_size, int val_len,
 	u8** pp
 );
+int schema_key_reencode(
+	schema_table* fk_ix, schema_table* parent,
+	void* fk_key, int fk_key_size,
+	void* out, int out_size
+);
 void schema_val_add_start(schema_table* tbl,
 	void* rec, int rec_buf_size,
 	u8** pp
@@ -545,6 +550,36 @@ void schema_key_add(schema_table* tbl, int col_i,
 	*pp = p + mem_size;
 }
 
+/*
+Re-encode a key form one format to another. Used for converting
+FK index key prefix -> parent PK and parent PK -> FK index key prefix
+when the FK contains nullable columns so the raw FK key differs from PK key.
+Returns -1 if any source key part is null (no parent row to reference).
+*/
+int schema_key_reencode(
+	schema_table* fk_ix, schema_table* parent,
+	void* fk_key, int fk_key_size,
+	void* out, int out_size
+) {
+	int n = fk_ix->n_key_cols < parent->n_key_cols
+		? fk_ix->n_key_cols : parent->n_key_cols;
+	u8* pp_in = fk_key;
+	u8* pp_out = out;
+	for (int i = 0; i < n; i++) {
+		u8* pout;
+		int len = schema_get_key(fk_ix, i, fk_key, fk_key_size,
+			pp_out, out_size - (pp_out - (u8*)out), &pout, &pp_in);
+		if (len == -1)
+			return -1; // null FK component: no parent reference
+		schema_col* col = get_key_col(fk_ix, i);
+		int val_size = len << col->elem_size_shift;
+		if (pout != pp_out) // schema_get_key didn't write into out
+			memmove(pp_out, pout, val_size);
+		schema_key_add(parent, i, out, out_size, len, &pp_out);
+	}
+	return pp_out - (u8*)out;
+}
+
 void schema_val_add_start(schema_table* tbl,
 	void* rec, int rec_buf_size,
 	u8** pp
@@ -588,11 +623,13 @@ void schema_val_add(schema_table* tbl, int col_i,
 	*pp = p + mem_size;
 }
 
-// Sort an array of 4-byte big-endian u32 elements using LSD radix sort over
-// bytes 3, 2, 1, 0, skipping passes where all records have the same byte.
-// Descending u32 keys are encoded by inverting the bytes so sorting the
-// encoded bytes still matches memcmp() and MDBX raw key order.
-// tmp must be a distinct n * 4 byte scratch buffer.
+/*
+Sort an array of 4-byte big-endian u32 elements using LSD radix sort over
+bytes 3, 2, 1, 0, skipping passes where all records have the same byte.
+Descending u32 keys are encoded by inverting the bytes so sorting the
+encoded bytes still matches memcmp() and MDBX raw key order.
+tmp must be a distinct n * 4 byte scratch buffer.
+*/
 void schema_sort_u32_be(void* buf, void* tmp, size_t n) {
 	if (n < 2)
 		return;

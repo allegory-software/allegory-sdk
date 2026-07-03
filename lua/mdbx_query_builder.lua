@@ -1,7 +1,7 @@
 --[[
 
-	mdbx query builder: convert a query spec to a runnable node-based query plan.
-	Written by Cosmin Apreutesei. Public Domain.
+	convert a query spec to a runnable node-based query plan.
+	Written by AI driven by Cosmin Apreutesei. Public Domain.
 
 JOIN
 	db:from('TABLE [ALIAS]') -> q  make a query
@@ -506,6 +506,7 @@ local function try_ix_plan(ix_schema, mf, is_pk)
 	local eq    = {}   -- col -> {v, fi}
 	local lo_by = {}   -- col -> {op, v, fi}
 	local hi_by = {}   -- col -> {op, v, fi}
+	local prefix_by = {} -- col -> {v, fi}
 	-- ntnull on a not_null field: null is never stored, so the filter is
 	-- vacuously true. Track separately instead of adding a '__null' lo
 	-- bound, which fails to encode for not_null fields (check_col error).
@@ -539,12 +540,8 @@ local function try_ix_plan(ix_schema, mf, is_pk)
 				lo_by[col] = {op = '>', v = '__null', fi = i}
 			end
 		elseif k == 'starts' then
-			if not lo_by[col] then
-				lo_by[col] = {op = '>=', v = f.prefix, fi = i}
-			end
-			if not hi_by[col] then
-				hi_by[col] = {op = '<', v = f.prefix, fi = i,
-					hi_next_prefix = true}
+			if not prefix_by[col] then
+				prefix_by[col] = {v = f.prefix, fi = i}
 			end
 		end
 		::continue::
@@ -567,6 +564,18 @@ local function try_ix_plan(ix_schema, mf, is_pk)
 		}
 	end
 	local nc = kc[depth+1]
+	local prefix = prefix_by[nc]
+	if prefix then
+		consumed[prefix.fi] = true
+		return {
+			kind     = 'pk_range',
+			ix       = ix_schema.name,
+			eq_vals  = eq_vals,
+			prefix   = prefix.v,
+			consumed = consumed,
+			score    = depth*20 + 5,
+		}
+	end
 	local lo = lo_by[nc]; local hi = hi_by[nc]
 	if lo or hi then
 		if lo then consumed[lo.fi] = true end
@@ -580,7 +589,6 @@ local function try_ix_plan(ix_schema, mf, is_pk)
 			lo       = lo and lo.v,
 			hi_op    = hi and hi.op,
 			hi       = hi and hi.v,
-			hi_next_prefix = hi and hi.hi_next_prefix,
 			consumed = consumed,
 			score    = depth*20 + 5,
 		}
@@ -664,18 +672,24 @@ local function build_access(db, schema, mf, hints, use_counts, want_order,
 			local args = {}
 			local opts = {}
 			if best.desc then opts.desc = true end
-			if #best.eq_vals > 0 then opts.n_fixed_params = #best.eq_vals end
-			if best.lo_op then
-				args[#args+1] = best.lo_op
+			if best.prefix then
+				opts.prefix = 'partial'
+				if #best.eq_vals > 0 then opts.n_fixed_params = #best.eq_vals end
 				for _, pn in ipairs(best.eq_vals) do args[#args+1] = pn end
-				args[#args+1] = best.lo
+				args[#args+1] = best.prefix
+			else
+				if #best.eq_vals > 0 then opts.n_fixed_params = #best.eq_vals end
+				if best.lo_op then
+					args[#args+1] = best.lo_op
+					for _, pn in ipairs(best.eq_vals) do args[#args+1] = pn end
+					args[#args+1] = best.lo
+				end
+				if best.hi_op then
+					args[#args+1] = best.hi_op
+					for _, pn in ipairs(best.eq_vals) do args[#args+1] = pn end
+					args[#args+1] = best.hi
+				end
 			end
-			if best.hi_op then
-				args[#args+1] = best.hi_op
-				for _, pn in ipairs(best.eq_vals) do args[#args+1] = pn end
-				args[#args+1] = best.hi
-			end
-			if best.hi_next_prefix then opts.hi_next_prefix = true end
 			return db:pk_range(best.ix, opts, unpack(args)), best.consumed
 		end
 	end
@@ -897,7 +911,8 @@ Steps in order:
      the query can stop at limit without value_sort. Otherwise build_access
      scores indexes against the current AND filters and picks the best.
      Equality folds to pk_seek or pk_get; range to pk_range with lo/hi bounds;
-     leading-key prefix to pk_prefix; no match -> full pk_range scan.
+     starts to pk_range partial prefix; leading-key prefix to pk_prefix;
+     no match -> full pk_range scan.
 	  Filters that the index absorbes are marked consumed; the rest becomes
 	  step-2 predicates. order_by names are real query columns, not output
 	  field names.

@@ -103,9 +103,11 @@ next key on a miss and requires a follow-up equality check.
 **pk_seek** vs **pk_range**: same distinction for index keys. Use `pk_seek` for
 an exact key match, `pk_range` for a span.
 
-**pk_prefix** vs **pk_range**: `pk_prefix` fixes k leading columns where k < n.
-`pk_range` can scan a suffix range after fixed leading columns by passing
-`opts.n_fixed_params`.
+**pk_prefix** vs **pk_range**: `pk_prefix` is the complete leading-column
+prefix form of `pk_range(..., {prefix=true, n_fixed_params=N}, ...)`.
+`pk_range` can also scan a suffix range after fixed leading columns by passing
+`opts.n_fixed_params`, or a partial varsize key-column prefix by passing
+`opts.prefix='partial'`.
 
 	-- params[UID]=uid; all sessions for uid, any started_at
 	pk_prefix('sessions/user_id,started_at', 'UID')
@@ -138,8 +140,14 @@ the intent differs: `fk_parent_scan` answers "which parents have children";
 	pk_range('t/a')                           -- full scan; no params
 	pk_range('t/a', {desc=true})              -- full scan descending; no params
 	pk_range('t/a', {desc=true}, '>=', 'LO')  -- bounded descending scan
+	pk_range('t/a,b', {prefix=true, n_fixed_params=1}, 'A')
+	  -- params[A]=1; all b values
+	pk_range('t/a', {prefix='partial'}, 'P')  -- params[P]='foo'; a starts foo
+	pk_range('t/a,b', {prefix='partial', n_fixed_params=1}, 'A', 'P')
+	  -- params[A]=1, params[P]='foo'; fixed a, b starts foo
 
-**pk_prefix** must cover at least one and fewer than all key columns.
+**pk_prefix** is shorthand for `pk_range(..., {prefix=true,
+n_fixed_params=#prefix_params}, ...)`.
 
 	pk_prefix('t/a,b', 'P')   -- params[P]='foo'
 

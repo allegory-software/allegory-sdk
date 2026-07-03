@@ -1,6 +1,6 @@
 --[[
 
-	mdbx_schema: structured data and multi-key indexing for mdbx.
+	structured data and multi-key indexing for mdbx.
 	Written by Cosmin Apreutsei. Public Domain.
 
 FEATURES
@@ -270,6 +270,12 @@ void schema_key_add(schema_table* tbl, int col_i,
 	u8** pp
 );
 
+int schema_key_reencode(
+	schema_table* fk_ix, schema_table* parent,
+	const void* fk_key, int fk_key_size,
+	void* out, int out_size
+);
+
 void schema_val_add_start(schema_table* tbl,
 	void* rec, int rec_buf_size,
 	u8** pp
@@ -402,7 +408,7 @@ local function encode_key(
 			autoinc_v = val
 		end
 		if val == nil then
-			if schema.is_index and not f.not_null then
+			if not f.not_null then
 				C.schema_key_add(schema._st, ki-1, rec, rec_buf_sz, -1, pp)
 			else
 				self:check_col(event, schema.name, f.col, false, 'null_key')
@@ -416,9 +422,15 @@ local function encode_key(
 end
 mdbx_encode_key = encode_key
 
+local function key_reencode(fk_ix, parent, fk_key, fk_key_size, out, out_size)
+	return C.schema_key_reencode(fk_ix._st, parent._st,
+		fk_key, fk_key_size, out, out_size)
+end
+mdbx_key_reencode = key_reencode
+
 local function encode_key_prefix(
 	self, schema, event,
-	rec, rec_buf_sz, n, ...
+	rec, rec_buf_sz, n, partial, ...
 )
 	pp[0] = rec
 	for ki = 1, n do
@@ -428,6 +440,7 @@ local function encode_key_prefix(
 			val = resolve_null_val(schema, f)
 		end
 		if val == nil then
+			assert(not (partial and ki == n), 'partial key prefix is null')
 			if not f.not_null then
 				C.schema_key_add(schema._st, ki-1, rec, rec_buf_sz, -1, pp)
 			else
@@ -437,6 +450,9 @@ local function encode_key_prefix(
 			local len = f.encode(self, event, pp[0], val)
 			C.schema_key_add(schema._st, ki-1, rec, rec_buf_sz, len, pp)
 		end
+	end
+	if partial then --last key val was a prefix so remove its \0 terminator.
+		pp[0] = pp[0] - schema.key_fields[n].elem_size
 	end
 	return pp[0] - rec
 end
@@ -3018,7 +3034,8 @@ function Cur:try_find_prefix(val_cols, ...)
 	local n = select('#', ...)
 	assert(n >= 1 and n <= #schema.key_fields)
 	local k, k_buf_sz = key_rec_buffer, MDBX_MAX_KEY_SIZE
-	local k_sz = encode_key_prefix(self.db, schema, 'c_seek', k, k_buf_sz, n, ...)
+	local k_sz = encode_key_prefix(self.db, schema, 'c_seek',
+		k, k_buf_sz, n, false, ...)
 	local ok, k2, k2_sz, v, v_sz = self:find_ge_raw(k, k_sz)
 	if not ok or k2_sz < k_sz or memcmp(k2, k, k_sz) ~= 0 then
 		return false, 'not_found'
@@ -3045,7 +3062,8 @@ local function prefix_next(self, ctrl)
 end
 local function prefix_seek(self, schema, val_cols, n, ...)
 	local k, k_buf_sz = key_rec_buffer, MDBX_MAX_KEY_SIZE
-	local k_sz = encode_key_prefix(self.db, schema, 'c_seek', k, k_buf_sz, n, ...)
+	local k_sz = encode_key_prefix(self.db, schema, 'c_seek',
+		k, k_buf_sz, n, false, ...)
 	if not self:find_ge_raw(k, k_sz) then return false end
 	self.prefix_str = str(k, k_sz)
 	self.prefix_sz = k_sz
