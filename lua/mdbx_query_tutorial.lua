@@ -174,28 +174,30 @@ end
 function tutorial.equality_filters()
 	pr[[
 
-Equality filters: :eq / :where / :ne.
+Equality filters: :where.
 
-:eq(col, v) and :where(col, v) keep rows where col equals v.
+:where(col, v) keeps rows where col equals v.
 :where(col, op, v) also accepts op: ==  ~=  <  <=  >  >=
-:ne(col, v) keeps rows where col differs from v.
+:where(col, '~=', v) keeps rows where col differs from v.
 
-When the column has an index, :eq uses it for a fast exact lookup.
+When the column has an index, equality uses it for a fast exact lookup.
 When there is no index the whole table is scanned and each row checked.
 col can be 'post.status' (qualified) or just 'status' (assumes the from table).
 ]]
 	db:atomic('r', function()
-		for r in db:from('post'):eq('status', 'published'):select('post.id id'):rows() do
+		for r in db:from('post'):where('status', 'published'):select('post.id id'):rows() do
 			pr(r.id)     -- 2, 3
 		end
 
-		-- :where with explicit op is identical to :eq for '=='
+		-- :where with explicit op is identical to implicit '=='
 		for r in db:from('post'):where('status', '==', 'published'):select('post.id id'):rows() do
 			pr(r.id)     -- 2, 3
 		end
 
-		-- :ne is always a full-table scan + per-row check
-		local rows = rows_of(db:from('post'):ne('status', 'draft'):select('post.id, post.status'))
+		-- '~=' is always a full-table scan + per-row check
+		local rows = rows_of(db:from('post')
+			:where('status', '~=', 'draft')
+			:select('post.id, post.status'))
 		pr(#rows)   -- 3   (published x2, archived x1)
 	end)
 end
@@ -203,16 +205,16 @@ end
 function tutorial.range_filters()
 	pr[[
 
-Range filters: :gt / :ge / :lt / :le / :between.
+Range filters: :where / :between.
 
-:between(col, lo, hi) is equivalent to :ge(col, lo):le(col, hi).
+:between(col, lo, hi) is equivalent to :where(col, '>=', lo):where(col, '<=', hi).
 On an indexed column these use the index to scan just the matching range.
 On a non-indexed column the whole table is scanned.
 Null sorts before all non-null values in ascending order.
 ]]
 	db:atomic('r', function()
 		-- posts with score >= 50
-		for r in db:from('post'):ge('score', 50):select('post.id id, post.score score'):rows() do
+		for r in db:from('post'):where('score', '>=', 50):select('post.id id, post.score score'):rows() do
 			pr(r.id, r.score)   -- 2  50 / 3  80
 		end
 
@@ -273,12 +275,18 @@ one of the filters and applies the rest as row-by-row checks on top.
 ]]
 	db:atomic('r', function()
 		-- status index used for 'published'; score is a residual check
-		for r in db:from('post'):eq('status', 'published'):ge('score', 60):select('post.id id'):rows() do
+		for r in db:from('post')
+			:where('status', 'published')
+			:where('score', '>=', 60)
+			:select('post.id id'):rows() do
 			pr(r.id)    -- 3   (score 80, published)
 		end
 
 		-- no score index; both are residual
-		for r in db:from('post'):ge('score', 10):le('score', 30):select('post.id id'):rows() do
+		for r in db:from('post')
+			:where('score', '>=', 10)
+			:where('score', '<=', 30)
+			:select('post.id id'):rows() do
 			pr(r.id)    -- 1  5   (scores 10, 20)
 		end
 	end)
@@ -318,7 +326,7 @@ All column references in filters and select must use the alias.
 Aliases are required when the same table appears more than once in a query.
 ]]
 	db:atomic('r', function()
-		for r in db:from('post p'):eq('p.status', 'published'):select('p.id id'):rows() do
+		for r in db:from('post p'):where('p.status', 'published'):select('p.id id'):rows() do
 			pr(r.id)    -- 2, 3
 		end
 	end)
@@ -399,6 +407,7 @@ function tutorial.order_by()
 Order by: :order_by.
 
 :order_by('col [asc|desc]', ...) sorts the output. Default direction is asc.
+Names are table columns, not :select output aliases.
 When the data is already in the required order from the index no sort is added.
 Otherwise all matching rows are collected and sorted before output.
 Null sorts before non-null ascending; after non-null descending.
@@ -426,8 +435,9 @@ Limit and offset: :limit / :offset.
 
 Without :order_by, :limit stops the scan as soon as enough rows are found.
 Only that many rows are read; the rest of the table is not visited.
-With :order_by, all matching rows are collected and sorted first; then
-:limit and :offset select a window from the sorted result.
+With :order_by, an index in the right order can also stop early. Otherwise
+all matching rows are collected and sorted first; then :limit and :offset
+select a window from the sorted result.
 ]]
 	db:atomic('r', function()
 		-- first 2 rows in PK order
@@ -499,7 +509,7 @@ The outer row is kept when at least one inner row matches.
 		-- categories that have at least one published post
 		for r in db:from('category'):where_has('post', function(on)
 			local cat_id = on:col('category', 'id')
-			return db:from('post'):eq('category', cat_id):eq('status', 'published')
+			return db:from('post'):where('category', cat_id):where('status', 'published')
 		end):select('category.id id'):rows() do
 			pr(r.id)    -- 1, 2
 		end
@@ -518,12 +528,12 @@ result applies to every outer row: either all pass or none do.
 	db:atomic('r', function()
 		-- a published post exists -> all 3 categories pass
 		pr(db:from('category')
-			:where_exists(db:from('post'):eq('status', 'published'))
+			:where_exists(db:from('post'):where('status', 'published'))
 			:count())    -- 3
 
 		-- no 'invisible' posts -> none pass
 		pr(db:from('category')
-			:where_exists(db:from('post'):eq('status', 'invisible'))
+			:where_exists(db:from('post'):where('status', 'invisible'))
 			:count())    -- 0
 	end)
 end
@@ -546,8 +556,8 @@ Use a from alias when the inner and outer queries use the same table name.
 		for r in db:from('category c')
 			:where_exists(
 				db:from('post')
-					:eq('category', mdbx_outer'c.id')
-					:eq('status', 'published'))
+					:where('category', mdbx_outer'c.id')
+					:where('status', 'published'))
 			:select('category.id id')
 			:rows() do
 			pr(r.id)    -- 1, 2
@@ -569,8 +579,8 @@ make mdbx_outer ambiguous.
 		for r in db:from('category c')
 			:where_exists(function(o)
 				return db:from('post')
-					:eq('category', o'c.id')
-					:eq('status', 'published')
+					:where('category', o'c.id')
+					:where('status', 'published')
 			end)
 			:select('category.id id')
 			:rows() do
@@ -591,8 +601,8 @@ Both correlated and uncorrelated forms work the same as :where_exists.
 		for r in db:from('category c')
 			:where_not_exists(
 				db:from('post')
-					:eq('category', mdbx_outer'c.id')
-					:eq('status', 'published'))
+					:where('category', mdbx_outer'c.id')
+					:where('status', 'published'))
 			:select('category.id id')
 			:rows() do
 			pr(r.id)    -- 3   (art has no published posts)
@@ -736,7 +746,7 @@ Use it when you need a specific related row per driver row, such as
 			db:from('category'):nested_join(function(on)
 				local cat_id = on:col('category', 'id')
 				return db:from('post')
-					:eq('category', cat_id)
+					:where('category', cat_id)
 					:is_not_null('score')
 					:order_by('score desc')
 					:limit(1)
@@ -762,7 +772,7 @@ Index names are generated from the schema as 'table/col1,col2'.
 	db:atomic('r', function()
 		-- force the FK index on the category column
 		for r in db:from('post')
-			:eq('category', 1)
+			:where('category', 1)
 			:use_index('post', 'post/category')
 			:select('post.id id')
 			:rows() do
@@ -772,7 +782,7 @@ Index names are generated from the schema as 'table/col1,col2'.
 		-- forbid all indexes: full scan with residual filter
 		local rows = rows_of(
 			db:from('post')
-				:eq('status', 'published')
+				:where('status', 'published')
 				:no_index('post')
 				:select('post.id'))
 		pr(#rows)    -- 2

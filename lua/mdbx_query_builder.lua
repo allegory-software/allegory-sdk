@@ -1,58 +1,134 @@
 --[[
 
-	mdbx query builder: lower a query spec to a runnable node-based query plan.
+	mdbx query builder: convert a query spec to a runnable node-based query plan.
 	Written by Cosmin Apreutesei. Public Domain.
 
-API
-
+JOIN
 	db:from('TABLE [ALIAS]') -> q  make a query
-	:join('TABLE' [, opts])        inner/left join on FK from existing member
-		from  = member
-		on    = fk
-		index = ix
-		left  = bool
-		as    = alias
-	:inner_join(...)               inner join
-	:left_join(...)                left join
-	:nested_join(fn)               correlated join; fn(outer_node) -> query
+	:join('TABLE [ALIAS]', [opt])  join on FK from an existing member
+		from  = member              which member to join from; inferred when unambiguous
+		on    = fk_name             'COL1,COL2...'; for when > 1 FK to same table
+		left  = true                left join (default is inner)
+		as    = alias               another way to give alias
+	:inner_join(...)               same as :join
+	:left_join(...)                left join (child->parent only)
+	:nested_join(fn)               nested-loop join; fn(outer) -> query
+	outer                       outer('MEMBER.COL', ...) -> {val1,...}
 ORDER / LIMIT / DISTINCT
-	:order_by(col, ...)            'col' or 'col desc'; index order or value_sort
-	:limit(n) / :offset(n)         pushed to driving scan when order satisfied
-	:distinct(cols)                stream_distinct (input grouped) or hash_distinct
+	:order_by(col, ...)            query col or 'col desc'; free if index order, else sort
+	:limit(n) / :offset(n)         early stop when index order already satisfied
+	:distinct(cols)                streaming dedup if input ordered, else hash pass
 FILTERS
-	:eq/:ne/:lt/:le/:gt/:ge(col, val)   comparison
 	:between(col, lo, hi)          range
 	:where(col [,op], val)         op: ==, ~=, <, <=, >, >=
-	:is_null(col)                  null-first key range
-	:is_not_null(col)              null-first key range
-	:starts(col, prefix)           prefix match; folds to pk_range on indexed col
-	:in_(col, values|query)        pk_hash_filter 'in'  (in is a Lua keyword)
-	:not_in(col, values|query)     pk_hash_filter 'not_in'
-	:where_exists(query|fn)        semi_join or run-once if uncorrelated
-	:where_not_exists(query|fn)    anti_join
-	:where_has(table [,fn])        FK exists; no fn -> fk_parent_scan; else semi_join
-	:where_hasnt(table [,fn])      FK absent; no fn -> merge_except; else anti_join
-	:or_where(col [,op], val)      OR (AND binds tighter); folds to merge_union
-	:filter(fn)                    arbitrary Lua predicate; always residual
+	:is_null(col)                  uses index
+	:is_not_null(col)              uses index
+	:starts(col, prefix)           prefix match; uses index
+	:in_(col, values|query)        set or subquery filter (in is a Lua keyword)
+	:not_in(col, values|query)     negated :in_
+	:where_exists(query|fn)        keep row if subquery returns any result
+	:where_not_exists(query|fn)    keep row if subquery returns no result
+	:where_has(table [,fn])        keep row if FK to table exists
+	:where_hasnt(table [,fn])      keep row if FK to table is absent
+	:or_where(col [,op], val)      OR (AND binds tighter)
+	:filter(fn)                    Lua fn; never uses index
+	mdbx_outer(ref)                ref = 'alias.col'; pins a col from the outer query
 GROUP / AGGREGATE
-	:group_by(cols)                with :agg{...} -> pk_group / stream_aggregate / hash_agg
-	:agg{...}                      without :group_by -> grand total
-	:having(col [,op], val|fn)     value_filter after aggregate
+	:group_by(cols)                group rows; use with :agg{...} for aggregates
+	:agg{name=,op=[,member=]...}   aggregate spec; without :group_by -> grand total
+	:having(out_col [,op], val)    post-group filter; out_col is output name, not member.col
 PROJECTION
-	:select{outputs}               'member.col', 'member.col alias', or {name=, fn=}
+	:select(outputs)               'member.col', 'member.col alias', or {name=, fn=}
 	:agg{...} -> value stream
-SET OPERATIONS
-	db:union{q,...}                union_distinct over value queries with the same fields
-	db:union_all{q,...}            union_all
+UNION
+	db:union([mode,] q, ...)       mode: 'distinct' (default) or 'all'
+	db:union_all(q, ...)           same as db:union('all', q, ...)
 CONTROL
 	:use_index(member, ix)         force index
 	:no_index(member [,ix])        forbid index (all if ix omitted)
 	:use_counts()                  use MDBX row counts to break ties (off by default)
+	:lower() -> node               convert to query-node tree (once and cache)
 TERMINALS
-	:rows([params])                iterate value records
-	:first([params])               first value record or nil
-	:count([params])               row count; exact via ix_count or stat when possible
+	:rows([params])                iterate result rows (closes on finish)
+	:first([params])               first result row or nil
+	:count([params])               row count
 	:exists([params])              true if any row matches
+
+OVERVIEW
+
+	same query + same schema -> same node tree (unless :use_counts())
+	:lower():explain() prints the execution plan without running the query
+
+	member = the alias in 'TABLE ALIAS', or TABLE itself when no alias given.
+	col refs are bare (driving table) or member.col (any joined table).
+
+
+JOINS
+
+	child->parent FK (many-to-one): single row lookup by PK of the parent.
+	parent->child FK (one-to-many): seeks on the indexed FK column in the child.
+	from=: specifies which member's FK column to traverse; auto-inferred when
+	   only one FK path exists between the two tables; error if ambiguous.
+	on=: disambiguates when multiple FKs exist between the same two tables;
+	   matches the FK constraint name.
+
+FILTERS
+
+	filters ANDed; one indexed col drives the scan (equality preferred);
+	filters on the driving col are used by the index; the rest are applied
+	row by row over each candidate.
+	:where on PK col: O(1) point lookup; on secondary indexed col: O(log n).
+	range filters on indexed col: index range scan; else full scan + filter.
+	:starts on indexed col: range scan over all keys with the given prefix.
+	:in_/:not_in with query: runs the subquery and collects its PKs; col
+	   must use the same key type as the subquery's PK; for FK membership
+	   use :where_exists instead.
+	:where_has/:where_hasnt without fn: O(n+m) where n = driving table rows
+	   and m = child table rows; one sequential pass over each.
+	:or_where: col must be on the driving table; requires >= 1 AND filter
+	   first; each OR branch gets its own index plan; branches are merged,
+	   then joins and cross-member filters run over the merged stream.
+
+	local outer = mdbx_outer
+	db:from'users u':where_exists(
+		db:from'sessions':where('user_id', outer'u.id'))
+
+	db:from'users u':where_exists(function(o)
+		return db:from'sessions':where('user_id', o'u.id')
+	end)
+
+ORDER, LIMIT, DISTINCT
+
+	:order_by: names query columns, not select output names.
+	   Free when col is the index key; else O(n log n) full sort.
+	:limit + :order_by: when the index already provides the required order,
+	   limit is applied at scan level for an early stop; otherwise all rows
+	   are buffered before limiting.
+	:distinct: O(1) streaming when input is already ordered by the cols;
+	   else O(n) hash pass over all rows.
+
+GROUP, AGGREGATE, PROJECTION
+
+	:agg items: {name=string, op=string [,member=string] ...}
+	   (full op/type spec in mdbx_query_nodes; member= is the member alias,
+	   not the raw table name)
+	:group_by when cols exactly match an index key with no filters, joins, or
+	   aggregate expressions: O(n groups) with one cursor seek per group.
+	:select outputs: comma string | list of 'member.col'|'member.col alias'
+	   |{name=, fn=}
+
+UNION
+
+	mode aliases: 'union' = 'distinct'; 'union_all' = 'all'
+	all queries must select same output fields in same order
+	no full outer join API
+
+TERMINALS
+
+	:rows: returns one Lua table per row with all selected columns; iterator
+	   auto-closes the query when the last row is consumed.
+	:count: counts all matching rows.
+	:exists: true if at least one row matches.
 
 ]]
 
@@ -69,6 +145,7 @@ mdbx_outer = outer
 local function is_outer(v) return getmetatable(v) == outer_mt end
 
 local Q = {}; Q.__index = Q
+local U = {}; U.__index = U
 
 local function qnew(db, from_spec)
 	local tbl, alias = from_spec:match'^(%S+)%s+(%S+)$'
@@ -93,16 +170,42 @@ end
 
 function Db:from(spec) return qnew(self, spec) end
 
+local union_mode = {
+	distinct  = 'distinct',
+	union     = 'distinct',
+	all       = 'all',
+	union_all = 'all',
+}
+
+function Db:union(mode, ...)
+	local inputs
+	if isstr(mode) then
+		inputs = {...}
+	else
+		inputs, mode = {mode, ...}, 'distinct'
+	end
+	local m = union_mode[mode]
+	assertf(m, 'union: invalid mode %q', tostring(mode))
+	assertf(#inputs >= 2, 'union: need at least 2 queries, got %d', #inputs)
+	for i, q in ipairs(inputs) do
+		assertf(type(q) == 'table' and q.lower,
+			'union: query %d: builder query expected', i)
+	end
+	return setmetatable({
+		_db = self,
+		_mode = m,
+		_inputs = inputs,
+	}, U)
+end
+
+function Db:union_all(...)
+	return self:union('all', ...)
+end
+
 --filter methods
 
 local function addf(q, f) q._filt[#q._filt+1] = f; return q end
 
-function Q:eq(col, v) return addf(self, {k = '==', col = col, v = v}) end
-function Q:ne(col, v) return addf(self, {k = '~=', col = col, v = v}) end
-function Q:lt(col, v) return addf(self, {k = '<',  col = col, v = v}) end
-function Q:le(col, v) return addf(self, {k = '<=', col = col, v = v}) end
-function Q:gt(col, v) return addf(self, {k = '>',  col = col, v = v}) end
-function Q:ge(col, v) return addf(self, {k = '>=', col = col, v = v}) end
 function Q:is_null(col) return addf(self, {k = 'null',   col = col}) end
 function Q:is_not_null(col) return addf(self, {k = 'ntnull', col = col}) end
 function Q:starts(col, prefix)
@@ -142,7 +245,7 @@ local cmp = {
 }
 
 function Q:where(col, op_or_v, v)
-	if v == nil then return self:eq(col, op_or_v) end
+	if v == nil then return addf(self, {k = '==', col = col, v = op_or_v}) end
 	assertf(cmp[op_or_v], 'where: bad op %q', op_or_v)
 	return addf(self, {k = op_or_v, col = col, v = v})
 end
@@ -171,7 +274,6 @@ local function addjoin(q, spec, opts, left0)
 		left       = (opts and opts.left) or left0 or false,
 		from_alias = opts and opts.from,
 		fk_hint    = opts and opts.on,
-		ix_hint    = opts and opts.index,
 	}
 	return q
 end
@@ -192,7 +294,8 @@ function Q:order_by(...)
 	local args = {...}
 	if type(args[1]) == 'table' and not args[2] then args = args[1] end
 	for _, s in ipairs(args) do
-		local col, d = s:match'^(.-)%s+(asc|desc)$'
+		local col, d = s:match'^(.-)%s+(%S+)$'
+		if d ~= 'asc' and d ~= 'desc' then col = nil end
 		if not col then col = s; d = 'asc' end
 		self._order[#self._order+1] = {col = col, desc = d == 'desc'}
 	end
@@ -281,34 +384,54 @@ local function qtrans_sel(q, sel)
 	return out
 end
 
--- translate order-by col spec to value-sort field spec
-local function qtrans_order(q, o)
-	local alias, c = o.col:match'^([^.]+)%.(.+)$'
-	local col = alias and (q._al[alias] or alias)..'.'..c or o.col
-	return col..(o.desc and ' desc' or '')
+local function resolve_order(q, db)
+	if not q._order then return end
+	local order = {}
+	for _, o in ipairs(q._order) do
+		local sn, col = qrcol(q, o.col)
+		local schema = assertf(db:table_schema(sn),
+			'order_by: unknown member or table %s', sn)
+		assertf(not schema.is_index, 'order_by: index not allowed: %s', sn)
+		assertf(schema.fields[col], 'order_by: unknown column %s.%s', sn, col)
+		order[#order+1] = {
+			sn  = sn,
+			col = col,
+			dir = o.desc and 'desc' or 'asc',
+		}
+	end
+	return order
 end
 
-local function order_spec(q)
+local function order_spec(order)
 	local parts = {}
-	for _, o in ipairs(q._order) do
-		parts[#parts+1] = qtrans_order(q, o)
+	for _, o in ipairs(order) do
+		parts[#parts+1] = o.sn..'.'..o.col..(o.dir == 'desc' and ' desc' or '')
 	end
 	return cat(parts, ',')
 end
 
--- true when node.order is a prefix match (or exact) of q._order
+local function physical_order(order, schema)
+	if not order then return end
+	local want = {}
+	for _, o in ipairs(order) do
+		if o.sn ~= schema.name then return end
+		want[#want+1] = {
+			col = schema.name..'.'..o.col,
+			dir = o.dir,
+		}
+	end
+	return want
+end
+
+-- true when node.order is a prefix match (or exact) of want_order
 -- in the same direction.
-local function order_matches(node, q)
+local function order_matches(node, want_order)
 	local have = node.order
-	if not have then return false end
-	local want = q._order
-	if #want > #have then return false end
-	for i, o in ipairs(want) do
-		local spec = qtrans_order(q, o)
-		local col, dir = spec:match('^(.+) (desc)$')
-		if not col then col, dir = spec, 'asc' end
+	if not have or not want_order then return false end
+	if #want_order > #have then return false end
+	for i, wo in ipairs(want_order) do
 		local h = have[i]
-		if h.col ~= col or h.dir ~= dir then return false end
+		if h.col ~= wo.col or h.dir ~= wo.dir then return false end
 	end
 	return true
 end
@@ -331,14 +454,44 @@ local function dist_grouped(vnode, q)
 	return true
 end
 
--- Increment the last non-0xFF byte to get a strict upper prefix bound.
--- Returns nil when all bytes are 0xFF (no finite upper bound exists).
--- Used by starts() to fold a prefix filter into a pk_range hi bound.
-local function next_prefix(s)
-	local i = #s
-	while i >= 1 and s:byte(i) == 255 do i = i - 1 end
-	if i < 1 then return nil end
-	return s:sub(1, i-1) .. string.char(s:byte(i) + 1)
+local function group_ordered(node, grp_cols)
+	local have = node.order
+	if not have or #grp_cols > #have then return false end
+	for i, gc in ipairs(grp_cols) do
+		if have[i].col ~= gc.sn..'.'..gc.col then return false end
+	end
+	return true
+end
+
+--[[
+Returns 'asc' or 'desc' when the ix_schema key fields are a leading
+prefix of want_order and the index can be scanned in one consistent
+direction to deliver that logical order; nil otherwise.
+A field stored with f.descending inverts its effective direction: a
+forward scan ('asc') yields logically descending values and vice versa.
+Used by build_access to find an order-matching index for order_by/limit
+and group_by cases that can avoid value_sort.
+]]
+local function ix_order_dir(ix_schema, schema_name, want_order)
+	local kf = ix_schema.key_fields
+	if #want_order > #kf then return nil end
+	local wo1 = want_order[1]
+	local wc1 = wo1.col:match('^[^.]+%.(.+)$') or wo1.col
+	if kf[1].col ~= wc1 then return nil end
+	-- forward scan of a normal field delivers 'asc'; a descending-stored
+	-- field delivers 'desc'. Derive the scan direction from the first col.
+	local fwd1 = kf[1].descending and 'desc' or 'asc'
+	local scan_dir = wo1.dir == fwd1 and 'asc' or 'desc'
+	for i = 2, #want_order do
+		local wo = want_order[i]; local kfi = kf[i]
+		local wc = wo.col:match('^[^.]+%.(.+)$') or wo.col
+		if kfi.col ~= wc then return nil end
+		local fwdi = kfi.descending and 'desc' or 'asc'
+		local need = scan_dir == 'asc' and fwdi
+			or (fwdi == 'asc' and 'desc' or 'asc')
+		if wo.dir ~= need then return nil end
+	end
+	return scan_dir
 end
 
 --[[
@@ -353,6 +506,12 @@ local function try_ix_plan(ix_schema, mf, is_pk)
 	local eq    = {}   -- col -> {v, fi}
 	local lo_by = {}   -- col -> {op, v, fi}
 	local hi_by = {}   -- col -> {op, v, fi}
+	-- ntnull on a not_null field: null is never stored, so the filter is
+	-- vacuously true. Track separately instead of adding a '__null' lo
+	-- bound, which fails to encode for not_null fields (check_col error).
+	local noop = {}   -- col -> filter index (ntnull on not_null field)
+	local kf_map = {}
+	for _, kf in ipairs(ix_schema.key_fields) do kf_map[kf.col] = kf end
 	for i, f in ipairs(mf) do
 		local col = f._col
 		if not col then goto continue end
@@ -360,7 +519,7 @@ local function try_ix_plan(ix_schema, mf, is_pk)
 		if k == '==' and not is_outer(f.v) then
 			if not eq[col] then eq[col] = {v = f.v, fi = i} end
 		elseif k == 'null' then
-			if not eq[col] then eq[col] = {v = null, fi = i} end
+			if not eq[col] then eq[col] = {v = '__null', fi = i} end
 		elseif (k == '>' or k == '>=') and not is_outer(f.v) then
 			if not lo_by[col] then lo_by[col] = {op = k, v = f.v, fi = i} end
 		elseif (k == '<' or k == '<=') and not is_outer(f.v) then
@@ -373,14 +532,19 @@ local function try_ix_plan(ix_schema, mf, is_pk)
 				hi_by[col] = {op = f.hi_op, v = f.hi, fi = i}
 			end
 		elseif k == 'ntnull' then
-			if not lo_by[col] then lo_by[col] = {op = '>', v = null, fi = i} end
+			local kf = kf_map[col]
+			if kf and kf.not_null then
+				noop[col] = noop[col] or i
+			elseif not lo_by[col] then
+				lo_by[col] = {op = '>', v = '__null', fi = i}
+			end
 		elseif k == 'starts' then
 			if not lo_by[col] then
 				lo_by[col] = {op = '>=', v = f.prefix, fi = i}
 			end
 			if not hi_by[col] then
-				local hi = next_prefix(f.prefix)
-				if hi then hi_by[col] = {op = '<', v = hi, fi = i} end
+				hi_by[col] = {op = '<', v = f.prefix, fi = i,
+					hi_next_prefix = true}
 			end
 		end
 		::continue::
@@ -407,6 +571,7 @@ local function try_ix_plan(ix_schema, mf, is_pk)
 	if lo or hi then
 		if lo then consumed[lo.fi] = true end
 		if hi then consumed[hi.fi] = true end
+		if noop[nc] then consumed[noop[nc]] = true end
 		return {
 			kind     = 'pk_range',
 			ix       = ix_schema.name,
@@ -415,11 +580,13 @@ local function try_ix_plan(ix_schema, mf, is_pk)
 			lo       = lo and lo.v,
 			hi_op    = hi and hi.op,
 			hi       = hi and hi.v,
+			hi_next_prefix = hi and hi.hi_next_prefix,
 			consumed = consumed,
 			score    = depth*20 + 5,
 		}
 	end
 	if depth > 0 then
+		if nc and noop[nc] then consumed[noop[nc]] = true end
 		return {
 			kind     = 'pk_prefix',
 			ix       = ix_schema.name,
@@ -431,12 +598,8 @@ local function try_ix_plan(ix_schema, mf, is_pk)
 	return nil
 end
 
--- build the access node for the from-table member.
--- mf: filters for this member with _col set.
--- returns: node, consumed (set: filter_index -> true)
-local function build_access(
-	db, schema, mf, hints, use_counts, bparams, bpname
-)
+local function build_access(db, schema, mf, hints, use_counts, want_order,
+	prefer_order)
 	local h = hints[schema.name]
 	local best
 	if h and h.use then
@@ -445,70 +608,95 @@ local function build_access(
 			'use_index: %q matches no filter for %s', h.use, schema.name)
 	else
 		local no_all = h and h.no_all
-		if not no_all then
-			local p = try_ix_plan(schema, mf, true)
-			if p then best = p end
-		end
-		for _, ix_s in ipairs(schema.indexes or empty) do
-			local skip = no_all or (h and h.no and h.no[ix_s.name])
-			if not skip then
-				local p = try_ix_plan(ix_s, mf, false)
-				if p then
-					local better = not best or p.score > best.score
-						or (use_counts and p.score == best.score
-							and db:table_entries(p.ix) < db:table_entries(best.ix))
-					if better then best = p end
+		local function try_order_plan()
+			if not want_order then return end
+			for _, ix_s in ipairs(schema.indexes or empty) do
+				local skip = no_all or (h and h.no and h.no[ix_s.name])
+				if not skip then
+					local od = ix_order_dir(ix_s, schema.name, want_order)
+					if od then
+						return {
+							kind     = 'pk_range',
+							ix       = ix_s.name,
+							eq_vals  = {},
+							consumed = {},
+							desc     = od == 'desc',
+						}
+					end
 				end
 			end
 		end
+		if prefer_order then best = try_order_plan() end
+		if not best then
+			if not no_all then
+				local p = try_ix_plan(schema, mf, true)
+				if p then best = p end
+			end
+			for _, ix_s in ipairs(schema.indexes or empty) do
+				local skip = no_all or (h and h.no and h.no[ix_s.name])
+				if not skip then
+					local p = try_ix_plan(ix_s, mf, false)
+					if p then
+						local better = not best or p.score > best.score
+							or (use_counts and p.score == best.score
+								and db:table_entries(p.ix) < db:table_entries(best.ix))
+						if better then best = p end
+					end
+				end
+			end
+		end
+		--[[
+		If no filter plan was found, an ordered index is still useful:
+		it avoids value_sort for order_by queries and feeds group_by in
+		group order for streaming aggregation.
+		]]
+		if not best then best = try_order_plan() end
 	end
 	if best then
 		local kind = best.kind
 		if kind == 'pk_get' then
-			local n = bpname(); bparams[n] = best.vals
-			return db:pk_get(schema.name, n), best.consumed
+			return db:pk_get(schema.name, unpack(best.vals)), best.consumed
 		elseif kind == 'pk_seek' then
-			local n = bpname(); bparams[n] = best.vals
-			return db:pk_seek(best.ix, n), best.consumed
+			return db:pk_seek(best.ix, unpack(best.vals)), best.consumed
 		elseif kind == 'pk_prefix' then
-			local n = bpname(); bparams[n] = best.vals
-			return db:pk_prefix(best.ix, n), best.consumed
+			return db:pk_prefix(best.ix, unpack(best.vals)), best.consumed
 		else  -- pk_range
 			local args = {}
+			local opts = {}
+			if best.desc then opts.desc = true end
+			if #best.eq_vals > 0 then opts.n_fixed_params = #best.eq_vals end
 			if best.lo_op then
 				args[#args+1] = best.lo_op
-				local lo_vals = extend({}, best.eq_vals)
-				lo_vals[#lo_vals+1] = best.lo
-				local n = bpname(); bparams[n] = lo_vals
-				args[#args+1] = n
+				for _, pn in ipairs(best.eq_vals) do args[#args+1] = pn end
+				args[#args+1] = best.lo
 			end
 			if best.hi_op then
 				args[#args+1] = best.hi_op
-				local hi_vals = extend({}, best.eq_vals)
-				hi_vals[#hi_vals+1] = best.hi
-				local n = bpname(); bparams[n] = hi_vals
-				args[#args+1] = n
+				for _, pn in ipairs(best.eq_vals) do args[#args+1] = pn end
+				args[#args+1] = best.hi
 			end
-			return db:pk_range(best.ix, unpack(args)), best.consumed
+			if best.hi_next_prefix then opts.hi_next_prefix = true end
+			return db:pk_range(best.ix, opts, unpack(args)), best.consumed
 		end
 	end
-	return db:pk_range(schema.name), {}   -- full scan
+	return db:pk_range(schema.name, empty), {}   -- full scan
 end
 
--- build a pk_filter predicate from a residual filter spec
+-- build a pk_filter predicate from a residual filter spec.
+-- pk_filter calls fn(node, params); filter values are param names.
 local function mk_pkfn(db, f)
 	local sn, col, k = f._sname, f._col, f.k
 	if k == 'fn' then return f.fn end
 	if k == '==' or k == '~=' then
-		local fn, v = cmp[k], f.v
-		return function(node) return fn(node:col(sn, col), v) end
+		local fn, pname = cmp[k], f.v
+		return function(node, params) return fn(node:col(sn, col), params[pname]) end
 	end
 	local fn = cmp[k]
 	if fn then
-		local v = f.v
-		return function(node)
+		local pname = f.v
+		return function(node, params)
 			local g = node:col(sn, col)
-			return g ~= nil and g ~= null and fn(g, v)
+			return g ~= nil and g ~= null and fn(g, params[pname])
 		end
 	end
 	if k == 'null' then
@@ -522,11 +710,12 @@ local function mk_pkfn(db, f)
 			return g ~= nil and g ~= null
 		end
 	elseif k == 'range' then
-		local lo, hi, lo_fn, hi_fn = f.lo, f.hi, cmp[f.lo_op], cmp[f.hi_op]
-		return function(node)
+		local lo_pn, hi_pn = f.lo, f.hi
+		local lo_fn, hi_fn = cmp[f.lo_op], cmp[f.hi_op]
+		return function(node, params)
 			local g = node:col(sn, col)
 			if g == nil or g == null then return false end
-			return lo_fn(g, lo) and hi_fn(g, hi)
+			return lo_fn(g, params[lo_pn]) and hi_fn(g, params[hi_pn])
 		end
 	elseif k == 'in' or k == 'nin' then
 		local mt = db:table_schema(sn).fields[col].mdbx_type
@@ -539,10 +728,11 @@ local function mk_pkfn(db, f)
 			return function(node) return lut[node:col(sn, col)] == nil end
 		end
 	elseif k == 'starts' then
-		local prefix, n = f.prefix, #f.prefix
-		return function(node)
+		local pname = f.prefix
+		return function(node, params)
+			local prefix = params[pname]
 			local v = node:col(sn, col)
-			return type(v) == 'string' and v:sub(1, n) == prefix
+			return type(v) == 'string' and v:sub(1, #prefix) == prefix
 		end
 	end
 	assertf(false, 'mk_pkfn: unhandled filter kind %q', k)
@@ -574,14 +764,14 @@ local function prep_filters(q, filt)
 end
 
 -- find FK between from_sname and to_sname.
--- hint: optional FK name or FK index name to pin the choice.
+-- hint: optional FK name to pin the choice.
 -- returns: 'child_to_parent' | 'parent_to_child', fk_ix_name
 local function qfind_fk(db, from_sname, to_sname, hint)
 	local from_s = db:table_schema(from_sname)
 	if from_s and from_s.fks then
 		for fname, fk in pairs(from_s.fks) do
 			if fk.ref_table == to_sname then
-				if not hint or hint == fname or hint == fk.index.name then
+				if not hint or hint == fname then
 					return 'child_to_parent', fk.index.name
 				end
 			end
@@ -591,7 +781,7 @@ local function qfind_fk(db, from_sname, to_sname, hint)
 	if to_s and to_s.fks then
 		for fname, fk in pairs(to_s.fks) do
 			if fk.ref_table == from_sname then
-				if not hint or hint == fname or hint == fk.index.name then
+				if not hint or hint == fname then
 					return 'parent_to_child', fk.index.name
 				end
 			end
@@ -601,31 +791,29 @@ local function qfind_fk(db, from_sname, to_sname, hint)
 end
 
 -- lower an exists/not_exists filter
-local function lower_ex_filter(db, node, f, outer_q, bparams, bpname)
+local function lower_ex_filter(db, node, f, outer_q)
 	local want = f.k == 'ex'
 	local q2   = f.q2
-	local function apply(fn_name)
-		if want then return db:semi_join(node, fn_name)
-		else return db:anti_join(node, fn_name) end
+	local function apply(factory)
+		if want then return db:semi_join(node, factory)
+		else return db:anti_join(node, factory) end
 	end
-	local fn_name = bpname()
 
 	if type(q2) == 'function' then
 		-- user fn: factory wraps alias-aware proxy around outer_fn
 		local fn = q2
-		bparams[fn_name] = function(outer_fn)
+		local factory = function(outer_fn, params)
 			local proxy = function(ref)
 				local sn, c = qrcol(outer_q, ref)
 				return outer_fn(sn..'.'..c)
 			end
 			local built = fn(proxy)
-			if type(built) == 'table' and built._lower then
-				local inner = built:_lower()
-				return inner, built._bparams or {}
+			if type(built) == 'table' and built.lower then
+				return built:lower(), params
 			end
-			return built, {}
+			return built, params
 		end
-		return apply(fn_name)
+		return apply(factory)
 	end
 
 	local has_sent = false
@@ -635,41 +823,49 @@ local function lower_ex_filter(db, node, f, outer_q, bparams, bpname)
 		end
 	end
 
-	local function res(outer_fn, v)
-		if not is_outer(v) then return v end
-		local sn, c = qrcol(outer_q, v._ref)
-		return outer_fn(sn..'.'..c)[1]
-	end
-
 	if has_sent then
-		-- correlated: re-lower per outer row with resolved outer-ref values
-		bparams[fn_name] = function(outer_fn)
-			local from_spec = q2._from.tbl
-			if q2._from.alias ~= q2._from.tbl then
-				from_spec = from_spec..' '..q2._from.alias
-			end
-			local rq = qnew(q2._db, from_spec)
-			rq._al    = q2._al;    rq._joins = q2._joins
-			rq._order = q2._order; rq._lim   = q2._lim
-			rq._off   = q2._off;   rq._sel   = q2._sel
-			rq._hints = q2._hints; rq._use_counts = q2._use_counts
-			for _, f2 in ipairs(q2._filt) do
-				local cf = update({}, f2)
-				cf.v  = res(outer_fn, cf.v)
-				cf.lo = res(outer_fn, cf.lo)
-				cf.hi = res(outer_fn, cf.hi)
-				rq._filt[#rq._filt+1] = cf
-			end
-			local inner = rq:_lower()
-			return inner, rq._bparams or {}
+		--[[ correlated: assign ephemeral param names to outer refs at build
+		time; factory injects actual values per outer row into a merged params
+		table so the inner node can resolve them via normal param lookup. ]]
+		local from_spec = q2._from.tbl
+		if q2._from.alias ~= q2._from.tbl then
+			from_spec = from_spec..' '..q2._from.alias
 		end
+		local rq = qnew(q2._db, from_spec)
+		rq._al    = q2._al;    rq._joins = q2._joins
+		rq._order = q2._order; rq._lim   = q2._lim
+		rq._off   = q2._off;   rq._sel   = q2._sel
+		rq._hints = q2._hints; rq._use_counts = q2._use_counts
+		local ovrefs = {}
+		local function remap(v)
+			if not is_outer(v) then return v end
+			local k = '__ov'..(#ovrefs+1)
+			local sn, c = qrcol(outer_q, v._ref)
+			ovrefs[#ovrefs+1] = {key = k, sn = sn, col = c}
+			return k
+		end
+		for _, f2 in ipairs(q2._filt) do
+			local cf = update({}, f2)
+			cf.v  = remap(cf.v)
+			cf.lo = remap(cf.lo)
+			cf.hi = remap(cf.hi)
+			rq._filt[#rq._filt+1] = cf
+		end
+		local inner = rq:lower()
+		local factory = function(outer_fn, params)
+			local ov_params = update({}, params)
+			for _, ov in ipairs(ovrefs) do
+				ov_params[ov.key] = outer_fn(ov.sn..'.'..ov.col)[1]
+			end
+			return inner, ov_params
+		end
+		return apply(factory)
 	else
 		-- uncorrelated: lower once; factory ignores outer_fn
-		local inner_node = q2:_lower()
-		local inner_bparams = q2._bparams or {}
-		bparams[fn_name] = function(_) return inner_node, inner_bparams end
+		local inner_node = q2:lower()
+		local factory = function(_, params) return inner_node, params end
+		return apply(factory)
 	end
-	return apply(fn_name)
 end
 
 -- pk-level key function for pk_group / stream_aggregate
@@ -696,11 +892,15 @@ away at PK level never incur a base-table read.
 Steps in order:
 
   1. ACCESS (from-table)
-     One index drives the scan; build_access scores all candidates against
-     the current AND filters and picks the best. Equality folds to pk_seek or
-     pk_get; range to pk_range with lo/hi bounds; leading-key prefix to
-     pk_prefix; no match -> full pk_range scan. Filters the index absorbed
-     are marked consumed; the rest become step-2 predicates.
+     One index drives the scan. For simple order_by+limit queries, an index
+     that already returns rows in the requested table-column order can win so
+     the query can stop at limit without value_sort. Otherwise build_access
+     scores indexes against the current AND filters and picks the best.
+     Equality folds to pk_seek or pk_get; range to pk_range with lo/hi bounds;
+     leading-key prefix to pk_prefix; no match -> full pk_range scan.
+	  Filters that the index absorbes are marked consumed; the rest becomes
+	  step-2 predicates. order_by names are real query columns, not output
+	  field names.
 
   2. RESIDUAL AND FILTERS
      Conditions not consumed by the access node (non-indexed col, second
@@ -739,8 +939,8 @@ Steps in order:
 
   6. PK-LEVEL LIMIT
      Without order_by, limit stops the scan early at PK level.
-     Also applied when order_ok (see step 2): the access node already delivers
-     rows in query order, so value_sort is skipped and limit terminates early.
+     Also applied when order_ok: the PK stream already delivers rows in query
+     order, either from an index scan or from a PK-level value_sort.
      Otherwise deferred to step 9.
 
   7. AGGREGATE / SELECT  (PK stream -> value stream)
@@ -756,8 +956,11 @@ Steps in order:
   9. DISTINCT, ORDER, VALUE-LEVEL LIMIT
      hash_distinct before sort (fewer records), value_sort materialises
      the full stream, limit takes the top n. Skipped when order_ok.
+     At this point order_by still uses real query columns through compile_col;
+     it does not read output field names.
 ]]
-function Q:_lower()
+function Q:lower()
+	if self._node then return self._node end
 	local db   = self._db
 	local q    = self
 	local from_s = assertf(db:table_schema(q._from.tbl),
@@ -765,28 +968,46 @@ function Q:_lower()
 	assertf(not from_s.is_index, 'from: index not allowed: %s', q._from.tbl)
 
 	local by_member, cross, or_conds = prep_filters(q, q._filt)
+	local order_cols = resolve_order(q, db)
 
-	-- builder-generated params: access nodes use auto-named param names;
-	-- bparams holds their values, merged into user params at open().
-	local bparams = {}
-	local bpcount = 0
-	local function bpname() bpcount = bpcount + 1; return '__b'..bpcount end
+	local group_order
+	if q._agg and q._grp and #q._joins == 0 and #or_conds == 0
+		and #cross == 0
+	then
+		group_order = {}
+		for _, c in ipairs(q._grp) do
+			local sn, col = qrcol(q, c)
+			if sn ~= q._from.tbl then group_order = nil; break end
+			group_order[#group_order+1] = {
+				col = from_s.name..'.'..col,
+				dir = 'asc',
+			}
+		end
+	end
+	local order_want
+	if q._order and q._lim and not q._agg and not q._dist and not q._hav
+		and #q._joins == 0 and #or_conds == 0
+	then
+		order_want = physical_order(order_cols, from_s)
+	end
 
-	-- 1. ACCESS: build_access scores all indexes against the AND filters and
-	--    picks the best; consumed marks which filter entries it absorbed.
+	-- 1. ACCESS: choose the first read. order_by+limit can prefer an index
+	--    that already returns rows in order; otherwise filters choose it.
+	--    consumed marks which filter entries the chosen read absorbed.
 	local mf = by_member[q._from.tbl] or {}
 	local node, consumed = build_access(
-		db, from_s, mf, q._hints, q._use_counts, bparams, bpname)
+		db, from_s, mf, q._hints, q._use_counts, order_want or group_order,
+		order_want ~= nil)
 
 	--[[
-	order_ok: access node already delivers rows in q._order; value_sort
-	is skipped and limit is applied at PK level (step 6) for early
-	termination. Requires: no or_conds, no joins, no agg/distinct/having.
+	order_ok: the PK stream already delivers rows in q._order; value_sort is
+	skipped and limit is applied at PK level (step 6) for early termination.
+	Requires: no or_conds, no joins, no agg/distinct/having.
 	]]
 	local order_ok = q._order and q._lim
 		and not q._agg and not q._dist and not q._hav
 		and #q._joins == 0 and #or_conds == 0
-		and order_matches(node, q)
+		and order_matches(node, order_want)
 
 	-- 2. RESIDUAL AND FILTERS: conditions the access node could not encode.
 	-- pk_and_probe: when order_ok, equality filters fully covered by a secondary
@@ -808,8 +1029,7 @@ function Q:_lower()
 					if used[ri] then conflict = true; break end
 				end
 				if not conflict then
-					local pn = bpname(); bparams[pn] = p.vals
-					probes[#probes+1] = {ix = ix_s.name, key = pn}
+					probes[#probes+1] = {ix = ix_s.name, keys = p.vals}
 					for ri in pairs(p.consumed) do used[ri] = true end
 				end
 			end
@@ -824,13 +1044,11 @@ function Q:_lower()
 			-- query-based in_/not_in: materialise subquery PKs into a hash and filter
 			-- driver by membership; the col is the PK col and the subquery must be in
 			-- the same PK key space. For FK use cases use where_exists instead.
-			if (f.k == 'in' or f.k == 'nin') and f.set._lower then
-				local inner = f.set:_lower()
-				update(bparams, f.set._bparams)
-				node = db:pk_hash_filter(node, inner, f.k == 'in' and 'in' or 'not_in')
+			if (f.k == 'in' or f.k == 'nin') and f.set.lower then
+				node = db:pk_hash_filter(
+					node, f.set:lower(), f.k == 'in' and 'in' or 'not_in')
 			else
-				local pn = bpname(); bparams[pn] = mk_pkfn(db, f)
-				node = db:pk_filter(node, pn)
+				node = db:pk_filter(node, mk_pkfn(db, f))
 			end
 		end
 	end
@@ -853,10 +1071,9 @@ function Q:_lower()
 		local nodes = {node}
 		for _, oc in ipairs(or_conds) do
 			local or_node, or_consumed = build_access(
-				db, from_s, {oc}, {}, q._use_counts, bparams, bpname)
+				db, from_s, {oc}, {}, q._use_counts)
 			if not or_consumed[1] then
-				local pn = bpname(); bparams[pn] = mk_pkfn(db, oc)
-				or_node = db:pk_filter(or_node, pn)
+				or_node = db:pk_filter(or_node, mk_pkfn(db, oc))
 			end
 			if or_node.merge_sig ~= from_s.key_sig then
 				or_node = db:pk_sort(or_node)
@@ -877,16 +1094,14 @@ function Q:_lower()
 	for _, j in ipairs(q._joins) do
 		if j.nested then
 			local jfn = j.fn
-			local function factory(outer_fn)
+			local factory = function(outer_fn, params)
 				local r = jfn(outer_fn)
-				if type(r) == 'table' and r._lower then
-					local inner = r:_lower()
-					return inner, r._bparams or {}
+				if type(r) == 'table' and r.lower then
+					return r:lower(), params
 				end
-				return r, {}
+				return r, params
 			end
-			local pn = bpname(); bparams[pn] = factory
-			node = db:nested_join(node, pn)
+			node = db:nested_join(node, factory)
 		else
 			local join_tbl = j.tbl
 			assertf(db:table_schema(join_tbl), 'join: unknown table %s', join_tbl)
@@ -895,14 +1110,14 @@ function Q:_lower()
 				from_sname = q._al[j.from_alias] or j.from_alias
 			else
 				for _, sn in ipairs(acc) do
-					if pcall(qfind_fk, db, sn, join_tbl, j.fk_hint or j.ix_hint) then
+					if pcall(qfind_fk, db, sn, join_tbl, j.fk_hint) then
 						from_sname = sn; break
 					end
 				end
 			end
 			assertf(from_sname, 'join: no FK from accumulated members to %s', join_tbl)
 			local dir, fk_ix = qfind_fk(
-				db, from_sname, join_tbl, j.fk_hint or j.ix_hint)
+				db, from_sname, join_tbl, j.fk_hint)
 			-- join chains of any length lower the same way as 2-table joins
 			-- because both nodes accept multi-member drivers.
 			if dir == 'child_to_parent' then
@@ -914,8 +1129,7 @@ function Q:_lower()
 			end
 			-- apply join-table filters while the cursor is still positioned.
 			for _, f in ipairs(by_member[join_tbl] or empty) do
-				local pn = bpname(); bparams[pn] = mk_pkfn(db, f)
-				node = db:pk_filter(node, pn)
+				node = db:pk_filter(node, mk_pkfn(db, f))
 			end
 			acc[#acc+1] = join_tbl
 		end
@@ -925,10 +1139,9 @@ function Q:_lower()
 	for _, f in ipairs(cross) do
 		local k = f.k
 		if k == 'fn' then
-			local pn = bpname(); bparams[pn] = f.fn
-			node = db:pk_filter(node, pn)
+			node = db:pk_filter(node, f.fn)
 		elseif k == 'ex' or k == 'nex' then
-			node = lower_ex_filter(db, node, f, q, bparams, bpname)
+			node = lower_ex_filter(db, node, f, q)
 		elseif k == 'has' or k == 'hasnt' then
 			local fk_tbl = f.tbl
 			local dir2, fk_ix2 = qfind_fk(db, q._from.tbl, fk_tbl, nil)
@@ -938,17 +1151,15 @@ function Q:_lower()
 				-- user fn shapes the inner query; factory per outer row.
 				local want = k == 'has'
 				local ufn = f.fn
-				local function factory(outer_fn)
+				local factory = function(outer_fn, params)
 					local r = ufn(outer_fn)
-					if type(r) == 'table' and r._lower then
-						local inner = r:_lower()
-						return inner, r._bparams or {}
+					if type(r) == 'table' and r.lower then
+						return r:lower(), params
 					end
-					return r, {}
+					return r, params
 				end
-				local pn = bpname(); bparams[pn] = factory
-				if want then node = db:semi_join(node, pn)
-				else node = db:anti_join(node, pn) end
+				if want then node = db:semi_join(node, factory)
+				else node = db:anti_join(node, factory) end
 			else
 				-- materialise the set of parents-with-children once via fk_parent_scan,
 				-- then filter the driver by membership; O(n+m), no per-row index seek.
@@ -958,13 +1169,18 @@ function Q:_lower()
 		end
 	end
 
+	if order_cols and not order_ok and not q._agg and not q._dist and not q._hav
+		and node.item ~= 'value' and #node.members == 1
+	then
+		node = db:value_sort(node, order_spec(order_cols))
+		order_ok = true
+	end
+
 	-- 6. PK-LEVEL LIMIT: without order_by the stream order is stable; limit
 	--    stops the scan early. Also applied when order_ok (rows in order).
 	--    Otherwise deferred to step 9.
 	if q._lim and not q._agg and (not q._order or order_ok) then
-		local ln = bpname(); bparams[ln] = q._lim
-		local lo = q._off and bpname() or nil; if lo then bparams[lo] = q._off end
-		node = db:limit(node, ln, lo)
+		node = db:limit(node, q._lim, q._off)
 	end
 
 	-- 7. AGGREGATE / SELECT: transition from PK stream to value stream.
@@ -988,7 +1204,13 @@ function Q:_lower()
 			local key_fn = make_key_fn(grp_cols)
 			local full_agg = {}
 			for i, gc in ipairs(grp_cols) do
-				full_agg[#full_agg+1] = {name = gc.col, op = 'key', part = i}
+				full_agg[#full_agg+1] = {
+					name   = gc.col,
+					op     = 'key',
+					part   = i,
+					member = gc.sn,
+					col    = gc.col,
+				}
 			end
 			extend(full_agg, tagg)
 
@@ -1008,11 +1230,15 @@ function Q:_lower()
 					end
 				end
 			end
-			local kn = bpname(); bparams[kn] = key_fn
 			if grp_ix then
-				vnode = db:stream_aggregate(db:pk_group_first(grp_ix), kn, full_agg)
+				vnode = db:stream_aggregate(
+					db:pk_group_first(grp_ix), key_fn, full_agg)
 			else
-				vnode = db:stream_aggregate(db:pk_group(node, kn), kn, full_agg)
+				if not group_ordered(node, grp_cols) then
+					node = db:value_sort(node, cat(imap(grp_cols,
+						function(gc) return gc.sn..'.'..gc.col end), ','))
+				end
+				vnode = db:stream_aggregate(db:pk_group(node, key_fn), key_fn, full_agg)
 			end
 		else
 			vnode = db:stream_aggregate(node, nil, tagg)
@@ -1025,23 +1251,19 @@ function Q:_lower()
 		assertf(not q._dist, 'distinct requires select')
 		assertf(not q._hav, 'having requires select')
 		if q._order and not order_ok then
-			node = db:value_sort(node, order_spec(q))
-			if q._lim then
-				local ln = bpname(); bparams[ln] = q._lim
-				local lo = q._off and bpname() or nil; if lo then bparams[lo] = q._off end
-				node = db:limit(node, ln, lo)
-			end
+			node = db:value_sort(node, order_spec(order_cols))
+			if q._lim then node = db:limit(node, q._lim, q._off) end
 		end
-		self._bparams = bparams
+		-- not cached: caller may still add :select() before running the query.
 		return node
 	end
 
 	-- 8. HAVING: post-aggregate predicate; must see value records, not PKs.
 	if q._hav then
 		for _, h in ipairs(q._hav) do
-			local hv, hfn, hcol = h.v, cmp[h.op], h.col
-			local pn = bpname(); bparams[pn] = function(r) return hfn(r[hcol], hv) end
-			vnode = db:value_filter(vnode, pn)
+			local hpname, hfn, hcol = h.v, cmp[h.op], h.col
+			vnode = db:value_filter(vnode,
+				function(r, params) return hfn(r[hcol], params[hpname]) end)
 		end
 	end
 
@@ -1053,8 +1275,7 @@ function Q:_lower()
 	]]
 	if q._dist then
 		local dc = q._dist
-		local dkn = bpname()
-		bparams[dkn] = function(r)
+		local dist_fn = function(r)
 			local parts = {}
 			for _, c in ipairs(dc) do
 				parts[#parts+1] = r[c] ~= nil and r[c] or null
@@ -1062,38 +1283,50 @@ function Q:_lower()
 			return parts
 		end
 		if dist_grouped(vnode, q) then
-			vnode = db:stream_distinct(vnode, dkn)
+			vnode = db:stream_distinct(vnode, dist_fn)
 		else
-			vnode = db:hash_distinct(vnode, dkn)
+			vnode = db:hash_distinct(vnode, dist_fn)
 		end
 	end
 
 	-- value_sort materialises the full stream; limit takes the top n.
 	-- Skipped when order_ok: limit was already applied at PK level in step 6.
 	if q._order and not order_ok then
-		vnode = db:value_sort(vnode, order_spec(q))
-		if q._lim then
-			local ln = bpname(); bparams[ln] = q._lim
-			local lo = q._off and bpname() or nil; if lo then bparams[lo] = q._off end
-			vnode = db:limit(vnode, ln, lo)
-		end
+		vnode = db:value_sort(vnode, order_spec(order_cols))
+		if q._lim then vnode = db:limit(vnode, q._lim, q._off) end
 	end
 
-	self._bparams = bparams
-	return vnode
+	self._node = vnode
+	return self._node
+end
+
+function U:lower()
+	if self._node then return self._node end
+	local db = self._db
+	local nodes = {}
+	for i, q in ipairs(self._inputs) do
+		local node = q:lower()
+		assertf(node.item == 'value',
+			'union: query %d: value query expected', i)
+		nodes[i] = node
+	end
+	local node
+	if self._mode == 'all' then
+		node = db:value_concat(unpack(nodes))
+	else
+		node = db:union_distinct(unpack(nodes))
+	end
+	self._node = node
+	return self._node
 end
 
 --terminals
 
-local function q_node(q)
-	if not q._node then q._node = q:_lower() end
-	return q._node
-end
-
 local function q_open(q, params)
-	local node = q_node(q)
-	local eparams = update({}, q._bparams, params)
-	node:open(eparams)
+	local node = q:lower()
+	params = params or {}
+	params.__null = null --NOTE: dirtying the caller's table.
+	node:open(params)
 	return node
 end
 
@@ -1145,3 +1378,8 @@ function Q:exists(params)
 	node:close()
 	return found
 end
+
+U.rows   = Q.rows
+U.first  = Q.first
+U.count  = Q.count
+U.exists = Q.exists

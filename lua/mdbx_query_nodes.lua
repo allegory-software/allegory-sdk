@@ -16,17 +16,17 @@ PARAMS
 	The caller chooses the actual name string; at open(params) time each node
 	reads its values from the params table by name:
 
-		params[NAME] = {v1, v2, ...}  -- key column values for access nodes
+		params[NAME] = v              -- key column value for access nodes
 		params[NAME] = n              -- plain number for limit / offset
 
 	The same params table is passed down the whole node tree, so names must
 	be unique across all nodes in one query.
 
 		local node = db:pk_seek('users/status', 'STATUS')
-		node:open({STATUS = {'active'}})
+		node:open({STATUS = 'active'})
 
 		local node = db:pk_range('users/score', '>=', 'LO', '<=', 'HI')
-		node:open({LO = {70}, HI = {95}})
+		node:open({LO = 70, HI = 95})
 
 NODE INTERFACE
 
@@ -100,6 +100,15 @@ local encode_key_prefix = mdbx_encode_key_prefix
 local sort_u32_be = mdbx_schema_sort_u32_be
 local find_u32_be = mdbx_schema_find_u32_be
 
+-- Increment the last non-0xFF byte to get the strict upper prefix bound.
+-- Returns nil when all bytes are 0xFF (no finite upper bound exists).
+local function next_prefix(s)
+	local i = #s
+	while i >= 1 and s:byte(i) == 255 do i = i - 1 end
+	if i < 1 then return nil end
+	return s:sub(1, i-1) .. string.char(s:byte(i) + 1)
+end
+
 --utils ----------------------------------------------------------------------
 
 local function resolve(db, name)
@@ -164,11 +173,11 @@ local function driver_has_member(driver, name)
 	for _, m in ipairs(driver.members) do if m == name then return true end end
 end
 
-local function param_name(s, op, arg)
-	assertf(isstr(s), '%s: arg %s: param name expected', op, arg)
-end
-
 --dynamic array of u32-big-endian numbers with radix sort in C ---------------
+
+local function key_eq(k1, n1, k2, n2)
+	return n1 == n2 and memcmp(k1, k2, n1) == 0
+end
 
 local function u32_keyset()
 	local data = string_buffer(256)
@@ -278,10 +287,6 @@ local function key_le(k1, n1, k2, n2) return key_cmp(k1, n1, k2, n2) <= 0 end
 local function key_lt(k1, n1, k2, n2) return key_cmp(k1, n1, k2, n2)  < 0 end
 local function key_gt(k1, n1, k2, n2) return key_cmp(k1, n1, k2, n2)  > 0 end
 
-local function key_eq(k1, n1, k2, n2)
-	return n1 == n2 and memcmp(k1, k2, n1) == 0
-end
-
 -- pk_get: single base-table PK lookup; returns zero or one PK item.
 -- Usage: db:pk_get(table_name, pk...)  -- pk count = PK column count.
 Db.pk_get = object(Db.query_node, {
@@ -291,10 +296,13 @@ Db.pk_get = object(Db.query_node, {
 	source = 'pk_bytes',
 	work   = 'base-table key lookup',
 })
-function Db.pk_get:__call(db, tab, KEY)
+function Db.pk_get:__call(db, tab, ...)
 	local schema = resolve(db, tab)
 	check_base_table(schema, 'pk_get', tab)
-	param_name(KEY, 'pk_get', 'key')
+	local key_names = {...}
+	assertf(#key_names == #schema.key_fields,
+		'pk_get: %s needs %d param name(s), got %d',
+		schema.name, #schema.key_fields, #key_names)
 	local node = object(self, {
 		members = {schema.name},
 		order   = {{col = schema.name..'.pk', dir = 'asc'}},
@@ -304,6 +312,7 @@ function Db.pk_get:__call(db, tab, KEY)
 	local pk_rec = MDBX_val()
 	local val_rec = MDBX_val()
 	local done, has_pk
+	local key_vals = {}
 	function node:pk(name)
 		if has_pk and (name == nil or name == schema.name) then
 			return true, pk_rec.data, pk_rec.size
@@ -330,14 +339,10 @@ function Db.pk_get:__call(db, tab, KEY)
 	end
 	function node:open(params)
 		assert(not is_open, 'node already open')
-		local key = params[KEY]
-		local n = key.n or #key
-		assertf(n == #schema.key_fields,
-			'pk_get: %s needs %d pk value(s), got %d',
-			schema.name, #schema.key_fields, n)
+		for i, kn in ipairs(key_names) do key_vals[i] = params[kn] end
 		sz = encode_key(db, schema, 'get', nil,
 			mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
-			schema.key_cols, nil, unpack(key, 1, n))
+			schema.key_cols, nil, unpack(key_vals, 1, #key_names))
 		is_open = true
 		done = false
 		has_pk = nil
@@ -356,10 +361,10 @@ Db.pk_seek = object(Db.query_node, {
 	source = 'index cursor',
 	work   = 'index key seek',
 })
-function Db.pk_seek:__call(db, ix_name, KEY)
+function Db.pk_seek:__call(db, ix_name, ...)
 	local schema = resolve(db, ix_name)
 	check_index(schema, 'pk_seek', ix_name)
-	param_name(KEY, 'pk_seek', 'key')
+	local key_names = {...}
 	local val_schema = schema.val_schema
 	local ix_key, sz
 	local node = object(self, {
@@ -374,6 +379,7 @@ function Db.pk_seek:__call(db, ix_name, KEY)
 	local base_val_rec = MDBX_val()
 	local base_seeked, first
 	local v, v_sz, v_o  -- DUPFIXED multi-page state
+	local key_vals = {}
 
 	local function get_base_val()
 		if not base_seeked then
@@ -451,14 +457,10 @@ function Db.pk_seek:__call(db, ix_name, KEY)
 	end
 	function node:open(params)
 		assert(not is_open, 'node already open')
-		local key = params[KEY]
-		local nk = key.n or #key
-		assertf(nk == #schema.key_fields,
-			'pk_seek: %s needs %d key value(s), got %d',
-			schema.name, #schema.key_fields, nk)
+		for i, kn in ipairs(key_names) do key_vals[i] = params[kn] end
 		sz = encode_key(db, schema, 'seek', nil,
 			mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
-			schema.key_cols, nil, unpack(key, 1, nk))
+			schema.key_cols, nil, unpack(key_vals, 1, #key_names))
 		ix_key = u8a(sz); copy(ix_key, mdbx_key_rec_buffer, sz)
 		ix_rec.data = ix_key; ix_rec.size = sz
 		is_open = true
@@ -476,10 +478,11 @@ in key order.
 For an index (DUPSORT): merge_key = index key bytes;
 pk = dup (child PK) bytes.
 For a base table:       merge_key = pk = base table key bytes.
-Bounds: op ('>'|'>='|'<'|'<=') followed by one value per key
-column; null sentinel ok.
-opts: desc (scan backward).
-Usage: db:pk_range(name [, op, val...] ... [, opts])
+Bounds: op ('>'|'>='|'<'|'<=') followed by fixed leading param names
+and one range param name; null sentinel ok.
+opts: desc (scan backward), n_fixed_params (fixed leading key columns),
+hi_next_prefix (transform last high-bound value with next_prefix()).
+Usage: db:pk_range(name [, opts] [, op, val...] ...)
 ]]
 Db.pk_range = object(Db.query_node, {
 	kind   = 'pk_range',
@@ -488,39 +491,63 @@ Db.pk_range = object(Db.query_node, {
 	source = 'cursor',
 	work   = 'key range scan',
 })
-function Db.pk_range:__call(db, name, ...)
+function Db.pk_range:__call(db, name, opt, ...)
+	if not istab(opt) then
+		return db:pk_range(name, empty, opt, ...)
+	end
 	local schema = resolve(db, name)
 	local is_index = schema.is_index
 	local nkey = #schema.key_fields
-	local n = select('#', ...)
-	local nv, opts = n, {}
-	if n >= 1 and type((select(n, ...))) == 'table' then
-		opts = (select(n, ...)); nv = n - 1
+	local nargs = select('#', ...)
+	local nfixed = opt.n_fixed_params or 0
+	local hi_next_prefix = opt.hi_next_prefix
+	assertf(nfixed >= 0 and nfixed <= nkey,
+		'pk_range: %s: n_fixed_params out of range: %d',
+		schema.name, nfixed)
+	local narg = nargs - 1
+	local nnames, ngroups
+	if narg == 0 then
+		nnames, ngroups = 0, 0
+	elseif nfixed > 0 and narg == nfixed + 1 then
+		nnames, ngroups = nfixed, 1
+	elseif narg == nfixed + 2 then
+		nnames, ngroups = nfixed + 1, 1
+	elseif narg == 2 * (nfixed + 2) then
+		nnames, ngroups = nfixed + 1, 2
+	else
+		assertf(false, 'pk_range: %s: invalid args', schema.name)
 	end
-	assertf(nv == 0 or nv == 2 or nv == 4,
-		'pk_range: %s: invalid args', schema.name)
-	local a1, a2, a3, a4 = ...
-	local lo_op, LO, hi_op, HI
-	if nv >= 2 then
-		local op, PARAM = a1, a2
-		if op=='>=' or op=='>' then lo_op, LO = op, PARAM
-		else hi_op, HI = op, PARAM end
+	local names = {}
+	local lo_op, lo_i, lo_n, hi_op, hi_i, hi_n
+	local ai = 2
+	for group = 1, ngroups do
+		local op = select(ai, ...)
+		assertf(op == '>' or op == '>=' or op == '<' or op == '<=',
+			'pk_range: %s: expected op at arg %d', schema.name, ai)
+		ai = ai + 1
+		local ni = #names + 1
+		for i = 1, nnames do
+			names[#names+1] = select(ai, ...)
+			ai = ai + 1
+		end
+		if op == '>=' or op == '>' then lo_op, lo_i, lo_n = op, ni, nnames
+		else hi_op, hi_i, hi_n = op, ni, nnames end
 	end
-	if nv >= 4 then
-		local op, PARAM = a3, a4
-		if op=='>=' or op=='>' then lo_op, LO = op, PARAM
-		else hi_op, HI = op, PARAM end
+	if hi_next_prefix then
+		assertf(hi_i, 'pk_range: %s: hi_next_prefix without hi bound',
+			schema.name)
 	end
-	if LO then param_name(LO, 'pk_range', 'LO') end
-	if HI then param_name(HI, 'pk_range', 'HI') end
-	local lo_open = lo_op == '>'
-	local hi_open = hi_op == '<'
-	local desc = opts.desc
+	local lo_open_arg = lo_op == '>'
+	local hi_open_arg = hi_op == '<'
+	local desc = opt.desc
 	local lo_key, lo_sz, hi_key, hi_sz, bnd_key, bnd_sz
+	local lo_open, hi_open
+	local cmp_hi, cmp_lo, cmp_bnd
 	local member_schema = is_index and schema.val_schema or schema
 	local dir = desc and 'desc' or 'asc'
 	local order = {}
-	for _, f in ipairs(schema.key_fields) do
+	for i = nfixed + 1, #schema.key_fields do
+		local f = schema.key_fields[i]
 		order[#order+1] = {col = member_schema.name..'.'..f.col, dir = dir}
 	end
 	if is_index then
@@ -536,13 +563,10 @@ function Db.pk_range:__call(db, name, ...)
 	local pk_rec = is_index and MDBX_val() or mk_rec
 	local base_val_rec = MDBX_val()
 	local base_seeked, first
-	local cmp_hi = hi_open and key_ge or key_gt
-	local cmp_lo = lo_open and key_le or key_lt
 	local adv_val = is_index and pk_rec or nil
 	local adv_group = desc and (is_index and C.MDBX_PREV_NODUP or C.MDBX_PREV)
 	                       or  (is_index and C.MDBX_NEXT_NODUP or C.MDBX_NEXT)
 	local adv_pk   = desc and C.MDBX_PREV_DUP or C.MDBX_NEXT_DUP
-	local cmp_bnd  = desc and cmp_lo  or cmp_hi
 	local get_base_val
 	if is_index then
 		get_base_val = function()
@@ -574,15 +598,12 @@ function Db.pk_range:__call(db, name, ...)
 	end
 	function node:merge_key() return mk_rec.data, mk_rec.size end
 	function node:next_group()
-		if not cur then
-			cur = db:cursor(schema.name)
-		end
+		if not cur then cur = db:cursor(schema.name) end
 		if first then
 			first = false
 			local sk, sk_sz, sk_open
 			if desc then sk, sk_sz, sk_open = hi_key, hi_sz, hi_open
-			else         sk, sk_sz, sk_open = lo_key, lo_sz, lo_open
-			end
+			else         sk, sk_sz, sk_open = lo_key, lo_sz, lo_open end
 			if sk then
 				mk_rec.data = sk; mk_rec.size = sk_sz
 				if not cur:move_raw_into(
@@ -652,30 +673,77 @@ function Db.pk_range:__call(db, name, ...)
 			is_open = false
 		end
 	end
+	local vals = {}
 	function node:open(params)
 		assert(not is_open, 'node already open')
-		if LO then
-			local key = params[LO]
-			lo_sz = encode_key(db, schema, 'range', nil,
+		lo_open = lo_open_arg
+		hi_open = hi_open_arg
+		local prefix_key, prefix_sz, prefix_hi_key, prefix_hi_sz
+		if nfixed > 0 then
+			local fixed_i = lo_i or hi_i
+			assertf(fixed_i,
+				'pk_range: %s: n_fixed_params without bound names',
+				schema.name)
+			for i = 1, nfixed do vals[i] = params[names[fixed_i + i - 1]] end
+			prefix_sz = encode_key_prefix(db, schema, 'range',
 				mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
-				schema.key_cols, nil, unpack(key, 1, key.n or #key))
-			lo_key = u8a(lo_sz); copy(lo_key, mdbx_key_rec_buffer, lo_sz)
-		else
-			lo_key = nil
+				nfixed, unpack(vals, 1, nfixed))
+			prefix_key = u8a(prefix_sz); copy(prefix_key, mdbx_key_rec_buffer, prefix_sz)
+			local ns = next_prefix(str(prefix_key, prefix_sz))
+			if ns then
+				prefix_hi_sz = #ns
+				prefix_hi_key = u8a(prefix_hi_sz); copy(prefix_hi_key, ns, prefix_hi_sz)
+			else
+				prefix_hi_key = nil; prefix_hi_sz = nil
+			end
 		end
-		if HI then
-			local key = params[HI]
-			hi_sz = encode_key(db, schema, 'range', nil,
-				mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
-				schema.key_cols, nil, unpack(key, 1, key.n or #key))
-			hi_key = u8a(hi_sz); copy(hi_key, mdbx_key_rec_buffer, hi_sz)
+		if lo_i then
+			if nfixed > 0 and lo_n == nfixed then
+				lo_key, lo_sz, lo_open = prefix_key, prefix_sz, false
+			else
+				for i = 1, lo_n do vals[i] = params[names[lo_i + i - 1]] end
+				lo_sz = encode_key(db, schema, 'range', nil,
+					mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
+					schema.key_cols, nil, unpack(vals, 1, lo_n))
+				lo_key = u8a(lo_sz); copy(lo_key, mdbx_key_rec_buffer, lo_sz)
+			end
+		else lo_key = nil; lo_sz = nil end
+		if hi_i then
+			for i = 1, hi_n do vals[i] = params[names[hi_i + i - 1]] end
+			local has_hi = true
+			if hi_next_prefix then
+				local ns = next_prefix(vals[hi_n])
+				if ns then vals[hi_n] = ns
+				else
+					hi_key = nil; hi_sz = nil
+					has_hi = false
+				end
+			end
+			if has_hi then
+				if nfixed > 0 and hi_n == nfixed then
+					hi_key, hi_sz, hi_open = prefix_key, prefix_sz, false
+				else
+					hi_sz = encode_key(db, schema, 'range', nil,
+						mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
+						schema.key_cols, nil, unpack(vals, 1, hi_n))
+					hi_key = u8a(hi_sz); copy(hi_key, mdbx_key_rec_buffer, hi_sz)
+				end
+			end
 		else
 			hi_key = nil
+			hi_sz = nil
 		end
-		if lo_key and hi_key then
-			assertf(not key_gt(lo_key, lo_sz, hi_key, hi_sz),
-				'pk_range: %s: lo bound exceeds hi bound', schema.name)
+		if prefix_key then
+			if not lo_key then
+				lo_key, lo_sz, lo_open = prefix_key, prefix_sz, false
+			end
+			if not hi_key and prefix_hi_key then
+				hi_key, hi_sz, hi_open = prefix_hi_key, prefix_hi_sz, true
+			end
 		end
+		cmp_hi = hi_open and key_ge or key_gt
+		cmp_lo = lo_open and key_le or key_lt
+		cmp_bnd = desc and cmp_lo or cmp_hi
 		bnd_key = desc and lo_key or hi_key
 		bnd_sz  = desc and lo_sz  or hi_sz
 		is_open = true
@@ -686,126 +754,8 @@ function Db.pk_range:__call(db, name, ...)
 	return node
 end
 
---[[
-pk_prefix: composite index scan by leading equality prefix.
-Scans all index entries whose first nk key columns equal the given
-values, returning PKs in index-key order (full key asc, PK asc
-within each key).
-Usage: db:pk_prefix(ix_name, val...)
-  val count must be 1..n-1 for an n-column index.
-]]
-Db.pk_prefix = object(Db.query_node, {
-	kind   = 'pk_prefix',
-	item   = 'pk',
-	unique = true,
-	source = 'index cursor',
-	work   = 'index key prefix scan',
-})
-
-function Db.pk_prefix:__call(db, ix_name, KEY)
-	local schema = resolve(db, ix_name)
-	check_index(schema, 'pk_prefix', ix_name)
-	param_name(KEY, 'pk_prefix', 'key')
-	local nkey = #schema.key_fields
-	local ix_key, sz
-	local val_schema = schema.val_schema
-	local order = {}
-	for _, f in ipairs(schema.key_fields) do
-		order[#order+1] = {col = val_schema.name..'.'..f.col, dir = 'asc'}
-	end
-	order[#order+1] = {col = val_schema.name..'.pk', dir = 'asc'}
-	local node = object(self, {
-		members = {val_schema.name},
-		order   = order,
-	})
-	local cur, base_cur, is_open
-	local has_pk
-	local mk_rec = MDBX_val()
-	local pk_rec = MDBX_val()
-	local base_val_rec = MDBX_val()
-	local base_seeked, first
-	local function get_base_val()
-		if not base_seeked then
-			if not base_cur then base_cur = db:cursor(val_schema.name) end
-			base_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, base_val_rec)
-			base_seeked = true
-		end
-		return base_val_rec.data, base_val_rec.size
-	end
-	function node:pk(name)
-		if has_pk and (name == nil or name == val_schema.name) then
-			return true, pk_rec.data, pk_rec.size
-		end
-	end
-	function node:compile_col(member, col)
-		return db:compile_col(schema, col, mk_rec, pk_rec, get_base_val)
-	end
-	function node:merge_key() return mk_rec.data, mk_rec.size end
-	function node:next_group()
-		if not cur then cur = db:cursor(schema.name) end
-		if first then
-			first = false
-			mk_rec.data = ix_key; mk_rec.size = sz
-			if not cur:move_raw_into(C.MDBX_SET_RANGE, mk_rec, pk_rec) then return end
-			if mk_rec.size < sz or memcmp(mk_rec.data, ix_key, sz) ~= 0 then return end
-			has_pk = true
-			return true
-		end
-		if not cur:move_raw_into(C.MDBX_NEXT_NODUP, mk_rec, pk_rec)
-		then has_pk = nil; return end
-		if mk_rec.size < sz or memcmp(mk_rec.data, ix_key, sz) ~= 0 then
-			has_pk = nil; return
-		end
-		has_pk = true; base_seeked = false
-		return true
-	end
-	function node:next_pk()
-		if not has_pk then return end
-		if not cur:move_raw_into(C.MDBX_NEXT_DUP, nil, pk_rec)
-		then has_pk = nil; return end
-		base_seeked = false
-		return true
-	end
-	function node:skip_to(target, target_sz)
-		mk_rec.data = target; mk_rec.size = target_sz
-		if not cur:move_raw_into(C.MDBX_SET_RANGE, mk_rec, pk_rec)
-		then has_pk = nil; return end
-		if mk_rec.size < sz or memcmp(mk_rec.data, ix_key, sz) ~= 0 then
-			has_pk = nil; return
-		end
-		has_pk = true; base_seeked = false
-		first = false
-		return true
-	end
-	function node:reset_group()
-		if not cur:move_raw_into(C.MDBX_SET_KEY, mk_rec, pk_rec) then return end
-		has_pk = true; base_seeked = false
-		return true
-	end
-	function node:close()
-		if is_open then
-			if cur then cur:close(); cur = nil end
-			if base_cur then base_cur:close(); base_cur = nil end
-			is_open = false
-		end
-	end
-	function node:open(params)
-		assert(not is_open, 'node already open')
-		local key = params[KEY]
-		local nk = key.n or #key
-		assertf(nk >= 1 and nk < nkey,
-			'pk_prefix: %s needs 1..%d prefix column(s), got %d',
-			schema.name, nkey - 1, nk)
-		sz = encode_key_prefix(db, schema, 'prefix',
-			mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
-			nk, unpack(key, 1, nk))
-		ix_key = u8a(sz); copy(ix_key, mdbx_key_rec_buffer, sz)
-		is_open = true
-		has_pk = nil; base_seeked = false; first = true
-	end
-	node.merge_cmp = key_cmp
-	node.merge_sig = schema.key_sig
-	return node
+function Db:pk_prefix(ix_name, ...)
+	return self:pk_range(ix_name, {n_fixed_params = select('#', ...)}, '>=', ...)
 end
 
 --[[
@@ -898,10 +848,10 @@ Db.pk_group_first = object(Db.query_node, {
 	source = 'index cursor',
 	work   = 'index distinct key scan; first PK per group',
 })
-function Db.pk_group_first:__call(db, ix_name, KEY)
+function Db.pk_group_first:__call(db, ix_name, ...)
 	local schema = resolve(db, ix_name)
 	check_index(schema, 'pk_group_first', ix_name)
-	if KEY then param_name(KEY, 'pk_group_first', 'key') end
+	local key_names = {...}
 	local nkey = #schema.key_fields
 	local val_schema = schema.val_schema
 	local order = {}
@@ -919,6 +869,8 @@ function Db.pk_group_first:__call(db, ix_name, KEY)
 	local pk_rec = MDBX_val()
 	local base_val_rec = MDBX_val()
 	local base_seeked
+	local nk = #key_names
+	local key_vals = {}
 	local function get_base_val()
 		if not base_seeked then
 			if not base_cur then base_cur = db:cursor(val_schema.name) end
@@ -936,7 +888,7 @@ function Db.pk_group_first:__call(db, ix_name, KEY)
 		return db:compile_col(schema, col, mk_rec, pk_rec, get_base_val)
 	end
 	function node:merge_key() return mk_rec.data, mk_rec.size end
-	if KEY then
+	if nk > 0 then
 		local first
 		function node:next_group()
 			if not cur then cur = db:cursor(schema.name) end
@@ -967,14 +919,13 @@ function Db.pk_group_first:__call(db, ix_name, KEY)
 		end
 		function node:open(params)
 			assert(not is_open, 'node already open')
-			local key = params[KEY]
-			local nk = key.n or #key
 			assertf(nk >= 1 and nk < nkey,
 				'pk_group_first: %s needs 1..%d prefix column(s), got %d',
 				schema.name, nkey - 1, nk)
+			for i, kn in ipairs(key_names) do key_vals[i] = params[kn] end
 			sz = encode_key_prefix(db, schema, 'prefix',
 				mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
-				nk, unpack(key, 1, nk))
+				nk, unpack(key_vals, 1, nk))
 			ix_key = u8a(sz); copy(ix_key, mdbx_key_rec_buffer, sz)
 			is_open = true
 			has_pk = nil; base_seeked = false; first = true
@@ -1864,17 +1815,17 @@ function Db.pk_parent_lookup:__call(db, driver, fk_name, opts)
 	return node
 end
 
--- pk_filter: keep items from a pk stream where fn(node) returns true.
--- fn receives the positioned pk_filter node; use node:col() to read values.
+-- pk_filter: keep items from a pk stream where fn(node, params) is true.
+-- fn receives the positioned pk_filter node and the open() params table.
 -- Usage: db:pk_filter(input, fn)
 Db.pk_filter = object(Db.query_node, {
 	kind   = 'pk_filter',
 	source = 'pass-through',
 	work   = 'predicate filter over pk stream',
 })
-function Db.pk_filter:__call(db, input, FN)
+function Db.pk_filter:__call(db, input, fn)
 	check_pk_node(input, 'pk_filter', 1)
-	param_name(FN, 'pk_filter', 'fn')
+	assert(type(fn) == 'function', 'pk_filter: fn must be a function')
 	local node = object(self, {
 		members = input.members,
 		order   = input.order,
@@ -1884,7 +1835,7 @@ function Db.pk_filter:__call(db, input, FN)
 	node.inputs = {input}
 	node.merge_cmp = input.merge_cmp
 	node.merge_sig = input.merge_sig
-	local has_pk, fn
+	local has_pk, cur_params
 	function node:compile_col(m, c) return input:compile_col(m, c) end
 	function node:close() input:close() end
 	function node:pk(name)
@@ -1897,13 +1848,11 @@ function Db.pk_filter:__call(db, input, FN)
 			has_pk = false
 			if not input:next_item() then return end
 			has_pk = true
-			if fn(node) then return true end
+			if fn(node, cur_params) then return true end
 		end
 	end
 	function node:open(params)
-		fn = params[FN]
-		assertf(type(fn) == 'function',
-			'pk_filter: param %s: function expected', FN)
+		cur_params = params
 		input:open(params)
 		has_pk = false
 	end
@@ -1925,9 +1874,9 @@ local function make_outer_fn(outer)
 	end
 end
 
-local function make_existence_join(self, db, outer, FN, want_inner)
+local function make_existence_join(self, db, outer, fn, want_inner)
 	check_pk_node(outer, self.kind, 1)
-	param_name(FN, self.kind, 'fn')
+	assert(type(fn) == 'function', self.kind..': fn must be a function')
 	local node = object(self, {
 		members = outer.members,
 		order   = outer.order,
@@ -1937,7 +1886,7 @@ local function make_existence_join(self, db, outer, FN, want_inner)
 	node.inputs = {outer}
 	node.merge_cmp = outer.merge_cmp
 	node.merge_sig = outer.merge_sig
-	local has_pk, factory
+	local has_pk, cur_params
 	local outer_fn = make_outer_fn(outer)
 	function node:compile_col(m, c) return outer:compile_col(m, c) end
 	function node:close() outer:close() end
@@ -1951,7 +1900,7 @@ local function make_existence_join(self, db, outer, FN, want_inner)
 		while true do
 			if not outer:next_item() then return end
 			has_pk = true
-			local inner, iparams = factory(outer_fn)
+			local inner, iparams = fn(outer_fn, cur_params)
 			inner:open(iparams)
 			local has_inner = inner:next_group() ~= nil
 			inner:close()
@@ -1960,9 +1909,7 @@ local function make_existence_join(self, db, outer, FN, want_inner)
 		end
 	end
 	function node:open(params)
-		factory = params[FN]
-		assertf(type(factory) == 'function',
-			'%s: param %s: function expected', self.kind, FN)
+		cur_params = params
 		outer:open(params)
 		has_pk = false
 	end
@@ -1970,9 +1917,9 @@ local function make_existence_join(self, db, outer, FN, want_inner)
 end
 
 --[[
-semi_join: keep outer items where factory(outer_fn) yields >= 1 item.
-anti_join: keep outer items where factory(outer_fn) yields 0 items.
-FN param: factory(outer_fn) -> (inner_node, iparams); per outer row.
+semi_join: keep outer items where fn(outer_fn, params) yields >= 1 item.
+anti_join: keep outer items where fn(outer_fn, params) yields 0 items.
+fn: factory(outer_fn, params) -> (inner_node, iparams); per outer row.
 outer_fn('sname.col', ...) -> {v1,...}: reads current outer cols.
 ]]
 Db.semi_join = object(Db.query_node, {
@@ -1985,23 +1932,22 @@ Db.anti_join = object(Db.query_node, {
 	source = 'pass-through',
 	work   = 'keep outer where factory yields 0 items',
 })
-function Db.semi_join:__call(db, outer, FN)
-	return make_existence_join(self, db, outer, FN, true)
+function Db.semi_join:__call(db, outer, fn)
+	return make_existence_join(self, db, outer, fn, true)
 end
-function Db.anti_join:__call(db, outer, FN)
-	return make_existence_join(self, db, outer, FN, false)
+function Db.anti_join:__call(db, outer, fn)
+	return make_existence_join(self, db, outer, fn, false)
 end
 
 --[[
-nested_join: for each outer item, call factory(outer_fn) to get
+nested_join: for each outer item, call fn(outer_fn, params) to get
 (inner_node, iparams), then yield one output per inner item with
 merged outer+inner members. Inner members must not overlap outer;
 inner is opened/closed per outer item. node.members is extended
 with inner members on the first iteration.
-FN: factory(outer_fn) -> (inner_node, iparams); factory builds
-inner once, mutates iparams per row.
+fn: factory(outer_fn, params) -> (inner_node, iparams).
 outer_fn('sname.col', ...) -> {v1,...}: reads current outer cols.
-Usage: db:nested_join(outer, FN)
+Usage: db:nested_join(outer, fn)
 ]]
 Db.nested_join = object(Db.query_node, {
 	kind   = 'nested_join',
@@ -2010,9 +1956,9 @@ Db.nested_join = object(Db.query_node, {
 	source = 'pass-through',
 	work   = 'correlated inner per outer item; one output per inner item',
 })
-function Db.nested_join:__call(db, outer, FN)
+function Db.nested_join:__call(db, outer, fn)
 	check_pk_node(outer, 'nested_join', 1)
-	param_name(FN, 'nested_join', 'fn')
+	assert(type(fn) == 'function', 'nested_join: fn must be a function')
 	local members = extend({}, outer.members)
 	local node = object(self, {
 		members = members,
@@ -2023,7 +1969,7 @@ function Db.nested_join:__call(db, outer, FN)
 	node.inputs = {outer}
 	node.merge_cmp = outer.merge_cmp
 	node.merge_sig = outer.merge_sig
-	local has_pk, cur_inner, factory
+	local has_pk, cur_inner, cur_params
 	local outer_fn = make_outer_fn(outer)
 	local inner_members_set = false
 	function node:close()
@@ -2064,10 +2010,10 @@ function Db.nested_join:__call(db, outer, FN)
 			end
 			if not outer:next_item() then return end
 			has_pk = true
-			local inner, iparams = factory(outer_fn)
+			local inner, iparams = fn(outer_fn, cur_params)
 			--[[
-			inner.members can only be known after factory() is called
-			(factory may return different node types per outer row), so
+			inner.members can only be known after fn() is called
+			(fn may return different node types per outer row), so
 			we extend members on the first inner open rather than at
 			construction time.
 			]]
@@ -2082,9 +2028,7 @@ function Db.nested_join:__call(db, outer, FN)
 		end
 	end
 	function node:open(params)
-		factory = params[FN]
-		assertf(type(factory) == 'function',
-			'nested_join: param %s: function expected', FN)
+		cur_params = params
 		outer:open(params)
 		has_pk = false; cur_inner = nil
 	end
@@ -2098,10 +2042,13 @@ Db.limit = object(Db.query_node, {
 	source = 'pass-through',
 	work   = 'at most n items after skipping offset',
 })
-function Db.limit:__call(db, input, N, OFFSET)
+function Db.limit:__call(db, input, n, offset)
 	check_node(input, 'limit', 1)
-	param_name(N, 'limit', 'n')
-	if OFFSET then param_name(OFFSET, 'limit', 'offset') end
+	assertf(type(n) == 'number' and n >= 0,
+		'limit: n: non-negative number expected')
+	offset = offset or 0
+	assertf(type(offset) == 'number' and offset >= 0,
+		'limit: offset: non-negative number expected')
 	local node = object(self, {
 		members = input.members,
 		order   = input.order,
@@ -2112,7 +2059,6 @@ function Db.limit:__call(db, input, N, OFFSET)
 	node.merge_cmp = input.merge_cmp
 	node.merge_sig = input.merge_sig
 	local has_item, count, skipped
-	local n, offset
 	function node:compile_col(m, c) return input:compile_col(m, c) end
 	function node:close() input:close() end
 	function node:row() return input:row() end
@@ -2135,14 +2081,6 @@ function Db.limit:__call(db, input, N, OFFSET)
 		end
 	end
 	function node:open(params)
-		n = params[N]
-		assertf(type(n) == 'number' and n >= 0,
-			'limit: N: non-negative number expected')
-		offset = OFFSET and params[OFFSET] or 0
-		if OFFSET then
-			assertf(type(offset) == 'number' and offset >= 0,
-				'limit: OFFSET: non-negative number expected')
-		end
 		input:open(params)
 		has_item = false; count = 0; skipped = 0
 	end
@@ -2170,9 +2108,9 @@ Db.pk_group = object(Db.query_node, {
 	source = 'pass-through',
 	work   = 'group by key_fn; first item per group via next_group; rest via next_pk',
 })
-function Db.pk_group:__call(db, input, KEY_FN, opts)
+function Db.pk_group:__call(db, input, key_fn, opts)
 	check_pk_node(input, 'pk_group', 1)
-	param_name(KEY_FN, 'pk_group', 'key_fn')
+	assert(type(key_fn) == 'function', 'pk_group: key_fn must be a function')
 	opts = opts or {}
 	local which = opts.which or 'first'
 	assertf(which == 'first', 'pk_group: opts.which="last" not yet implemented')
@@ -2185,7 +2123,7 @@ function Db.pk_group:__call(db, input, KEY_FN, opts)
 	node.inputs = {input}
 	node.merge_cmp = input.merge_cmp
 	node.merge_sig = input.merge_sig
-	local done, has_current, cur_key, peeked, key_fn
+	local done, has_current, cur_key, peeked
 	function node:compile_col(m, c) return input:compile_col(m, c) end
 	local function adv()
 		if done then return false end
@@ -2224,9 +2162,6 @@ function Db.pk_group:__call(db, input, KEY_FN, opts)
 		peeked = true; has_current = false; return nil
 	end
 	function node:open(params)
-		key_fn = params[KEY_FN]
-		assertf(type(key_fn) == 'function',
-			'pk_group: param %s: function expected', KEY_FN)
 		input:open(params)
 		done = false; has_current = false; cur_key = nil; peeked = false
 	end
@@ -2428,8 +2363,7 @@ pk_and_probe: filter a driver pk stream by testing each PK against
 one or more index keys via MDBX_GET_BOTH_RANGE; all probes must
 pass (ANDed). O(1) memory, one seek per probe per driver row. Probe
 key is encoded once; a dedicated cursor is kept open per probe.
-probe: {ix=index_name, key=val} or {ix=index_name, key={val,...}}
-for multi-col keys.
+probe: {ix=index_name, keys={P1, P2, ...}} -- one param name per key col.
 Usage: db:pk_and_probe(driver, probe, ...)
 ]]
 Db.pk_and_probe = object(Db.query_node, {
@@ -2447,12 +2381,11 @@ function Db.pk_and_probe:__call(db, driver, ...)
 	local probes = {}
 	for i = 1, nprobes do
 		local p = (select(i, ...))
-		assertf(type(p) == 'table' and p.ix,
-			'pk_and_probe: probe %d: {ix=, key=PARAM_NAME} expected', i)
-		param_name(p.key, 'pk_and_probe', 'probe '..i..'.key')
+		assertf(type(p) == 'table' and p.ix and type(p.keys) == 'table',
+			'pk_and_probe: probe %d: {ix=, keys={...}} expected', i)
 		local ix_schema = resolve(db, p.ix)
 		check_index(ix_schema, 'pk_and_probe', p.ix)
-		probes[i] = {schema = ix_schema, key = p.key}
+		probes[i] = {schema = ix_schema, keys = p.keys}
 	end
 	local member_name = driver.members[1]
 	local node = object(self, {
@@ -2514,10 +2447,13 @@ function Db.pk_and_probe:__call(db, driver, ...)
 	function node:open(params)
 		assert(not is_open, 'node already open')
 		for i, probe in ipairs(probes) do
-			local key = params[probe.key]
+			local key_vals = {}
+			for _, kn in ipairs(probe.keys) do
+				key_vals[#key_vals+1] = params[kn]
+			end
 			local sz = encode_key(db, probe.schema, 'pk_and_probe', nil,
 				mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
-				probe.schema.key_cols, nil, unpack(key, 1, key.n or #key))
+				probe.schema.key_cols, nil, unpack(key_vals))
 			local buf = u8a(sz); copy(buf, mdbx_key_rec_buffer, sz)
 			probe.key_buf = buf; probe.key_sz = sz
 		end
@@ -2573,8 +2509,8 @@ local function parse_outputs(outputs)
 	return parsed
 end
 
--- value_filter: keep value records where fn(record) is true.
--- fn receives the value record (a Lua table). Input must be a value node.
+-- value_filter: keep value records where fn(record, params) is true.
+-- fn receives the value record and the params table. Input must be a value node.
 -- Usage: db:value_filter(input, fn)
 Db.value_filter = object(Db.query_node, {
 	kind   = 'value_filter',
@@ -2583,31 +2519,26 @@ Db.value_filter = object(Db.query_node, {
 	source = 'pass-through',
 	work   = 'keep value records where fn(record) is true',
 })
-function Db.value_filter:__call(db, input, FN)
+function Db.value_filter:__call(db, input, fn)
 	check_value_node(input, 'value_filter', 1)
-	param_name(FN, 'value_filter', 'fn')
+	assert(type(fn) == 'function', 'value_filter: fn must be a function')
 	local node = object(self, {
 		members = input.members,
 		order   = input.order,
 		unique  = input.unique,
 	})
 	node.inputs = {input}
-	local fn
+	local cur_params
 	function node:row() return input:row() end
 	function node:compile_col(m, c) return input:compile_col(m, c) end
 	function node:close() input:close() end
 	function node:next_group()
 		while true do
 			if not input:next_group() then return end
-			if fn(input:row()) then return true end
+			if fn(input:row(), cur_params) then return true end
 		end
 	end
-	function node:open(params)
-		fn = params[FN]
-		assertf(type(fn) == 'function',
-			'value_filter: param %s: function expected', FN)
-		input:open(params)
-	end
+	function node:open(params) cur_params = params; input:open(params) end
 	return node
 end
 
@@ -2640,6 +2571,8 @@ function Db.select:__call(db, input, outputs)
 	function node:compile_col(member, col)
 		local name = col_map[member..':'..col]
 		if name then return function() return node._row[name] end end
+		-- Let later value nodes sort/filter by columns not selected by this node.
+		return input:compile_col(member, col)
 	end
 	for i, o in ipairs(parsed) do
 		local user_get = o.fn
@@ -2675,16 +2608,16 @@ Db.stream_distinct = object(Db.query_node, {
 	source = 'pass-through',
 	work   = 'dedup adjacent value records by key_fn; requires group order',
 })
-function Db.stream_distinct:__call(db, input, KEY_FN)
+function Db.stream_distinct:__call(db, input, key_fn)
 	check_value_node(input, 'stream_distinct', 1)
-	param_name(KEY_FN, 'stream_distinct', 'key_fn')
+	assert(type(key_fn) == 'function', 'stream_distinct: key_fn must be a function')
 	local node = object(self, {
 		members = input.members,
 		order   = input.order,
 		unique  = true,
 	})
 	node.inputs = {input}
-	local prev_key, key_fn
+	local prev_key
 	function node:row() return input:row() end
 	function node:compile_col(m, c) return input:compile_col(m, c) end
 	function node:close() input:close() end
@@ -2699,9 +2632,6 @@ function Db.stream_distinct:__call(db, input, KEY_FN)
 		end
 	end
 	function node:open(params)
-		key_fn = params[KEY_FN]
-		assertf(type(key_fn) == 'function',
-			'stream_distinct: param %s: function expected', KEY_FN)
 		input:open(params)
 		prev_key = nil
 	end
@@ -2718,16 +2648,16 @@ Db.hash_distinct = object(Db.query_node, {
 	source = 'pass-through',
 	work   = 'dedup any-order value records by key_fn; O(n) memory',
 })
-function Db.hash_distinct:__call(db, input, KEY_FN)
+function Db.hash_distinct:__call(db, input, key_fn)
 	check_value_node(input, 'hash_distinct', 1)
-	param_name(KEY_FN, 'hash_distinct', 'key_fn')
+	assert(type(key_fn) == 'function', 'hash_distinct: key_fn must be a function')
 	local node = object(self, {
 		members = input.members,
 		order   = input.order,
 		unique  = true,
 	})
 	node.inputs = {input}
-	local tuple_space, seen, key_fn
+	local tuple_space, seen
 	function node:row() return input:row() end
 	function node:compile_col(m, c) return input:compile_col(m, c) end
 	function node:close() input:close() end
@@ -2743,9 +2673,6 @@ function Db.hash_distinct:__call(db, input, KEY_FN)
 		end
 	end
 	function node:open(params)
-		key_fn = params[KEY_FN]
-		assertf(type(key_fn) == 'function',
-			'hash_distinct: param %s: function expected', KEY_FN)
 		input:open(params)
 		tuple_space = tuples(); seen = {}
 	end
@@ -2758,8 +2685,8 @@ value input. For value input: collects rows, sorts, serves via
 next_group()/:row(). For PK input (single-member only): collects
 pks + decoded sort values, sorts by those values, serves as a PK
 node with compile_col via a fresh base cursor.
-spec: 'field [asc|desc], ...' where field is bare alias for value
-input or 'member.col' for pk input; or a comparator fn(a, b)
+spec: 'field [asc|desc], ...' where field is a bare value-row key or
+'member.col' resolved through compile_col; or a comparator fn(a, b)
 (value input only). null sorts before non-null in asc, after in desc.
 Usage: db:value_sort(input, spec)
 ]]
@@ -2783,11 +2710,12 @@ function Db.value_sort:__call(db, input, spec)
 		'value_sort: pk input must be single-member')
 
 	-- parse spec into parts; for pk input extract member+col for compile_col
-	local parts
+	local parts, sort_order
 	if type(spec) ~= 'function' then
 		assertf(isstr(spec),
 			'value_sort: arg 2: string or comparator function expected')
 		parts = {}
+		sort_order = {}
 		local default_member = is_pk and input.members[1] or nil
 		for s in spec:gmatch('[^,]+') do
 			s = s:match('^%s*(.-)%s*$')
@@ -2797,11 +2725,17 @@ function Db.value_sort:__call(db, input, spec)
 			assertf(dir == 'asc' or dir == 'desc',
 				'value_sort: invalid direction %q in %q', dir, spec)
 			local member, col = field:match('^([^.]+)%.(.+)$')
+			local sort_member = member or default_member
+			local sort_col = col or field
 			parts[#parts+1] = {
 				field = field,
-				member = member or default_member,
-				col = col or field,
+				member = sort_member,
+				col = sort_col,
 				desc = dir=='desc',
+			}
+			sort_order[#sort_order+1] = {
+				col = sort_member and sort_member..'.'..sort_col or field,
+				dir = dir,
 			}
 		end
 		assertf(#parts >= 1, 'value_sort: empty spec')
@@ -2832,7 +2766,7 @@ function Db.value_sort:__call(db, input, spec)
 		local schema = resolve(db, member_name)
 		local node = object(self, {
 			members = {member_name},
-			order   = input.order,
+			order   = sort_order,
 			unique  = input.unique,
 			item    = input.item,
 		})
@@ -2899,41 +2833,42 @@ function Db.value_sort:__call(db, input, spec)
 		-- value path: collect rows, sort, serve via next_group()/:row().
 		local node = object(self, {
 			members = input.members,
+			order   = sort_order,
 			unique  = input.unique,
 		})
 		node.inputs = {input}
 		function node:row() return node._row end
-		local cmp
-		if type(spec) == 'function' then
-			cmp = spec
-		else
-			cmp = function(a, b)
-				for _, p in ipairs(parts) do
-					local av, bv = a[p.field], b[p.field]
-					if av ~= bv then
-						local a_null = av == null or av == nil
-					local b_null = bv == null or bv == nil
-						if a_null ~= b_null then
-							return p.desc and b_null or not p.desc and a_null
-						end
-						return p.desc and av > bv or not p.desc and av < bv
-					end
-				end
-				return false
-			end
-		end
+		local cmp = type(spec) == 'function' and spec
+			or make_cmp(function(e) return e.vals end)
 		local recs, idx
 		function node:close() end
 		function node:next_group()
 			idx = idx + 1
 			if not recs[idx] then return end
-			node._row = recs[idx]
+			node._row = type(spec) == 'function' and recs[idx] or recs[idx].row
 			return true
 		end
 		function node:open(params)
 			input:open(params)
 			recs = {}
-			while input:next_group() do recs[#recs+1] = input:row() end
+			if type(spec) == 'function' then
+				while input:next_group() do recs[#recs+1] = input:row() end
+			else
+				local getters = {}
+				for i, p in ipairs(parts) do
+					if p.member then
+						getters[i] = assertf(input:compile_col(p.member, p.col),
+							'value_sort: field not available: %s', p.field)
+					else
+						getters[i] = function() return input:row()[p.field] end
+					end
+				end
+				while input:next_group() do
+					local vals = {}
+					for i, get in ipairs(getters) do vals[i] = get() end
+					recs[#recs+1] = {row = input:row(), vals = vals}
+				end
+			end
 			input:close()
 			sort(recs, cmp)
 			idx = 0
@@ -3008,10 +2943,10 @@ Db.stream_aggregate = object(Db.query_node, {
 	source = 'pass-through',
 	work   = 'aggregate PK stream into one value record per group',
 })
-function Db.stream_aggregate:__call(db, input, KEY_FN, agg)
+function Db.stream_aggregate:__call(db, input, key_fn, agg)
 	check_pk_node(input, 'stream_aggregate', 1)
-	assertf(KEY_FN == nil or isstr(KEY_FN),
-		'stream_aggregate: arg 2: param name string or nil expected')
+	assertf(key_fn == nil or type(key_fn) == 'function',
+		'stream_aggregate: arg 2: function or nil expected')
 	assertf(type(agg) == 'table' and #agg >= 1,
 		'stream_aggregate: arg 3: non-empty agg list expected')
 	local fields = {}
@@ -3026,7 +2961,7 @@ function Db.stream_aggregate:__call(db, input, KEY_FN, agg)
 		local name = col_map[member..':'..col]
 		if name then return function() return node._row[name] end end
 	end
-	local done, key_fn
+	local done
 	local function accumulate(acc, key)
 		for _, a in ipairs(agg) do
 			local v
@@ -3037,7 +2972,7 @@ function Db.stream_aggregate:__call(db, input, KEY_FN, agg)
 		end
 	end
 	function node:close() input:close() end
-	if not KEY_FN then
+	if not key_fn then
 		function node:next_group()
 			if done then return end; done = true
 			local acc = agg_init(agg)
@@ -3058,11 +2993,6 @@ function Db.stream_aggregate:__call(db, input, KEY_FN, agg)
 		end
 	end
 	function node:open(params)
-		if KEY_FN then
-			key_fn = params[KEY_FN]
-			assertf(type(key_fn) == 'function',
-				'stream_aggregate: param %s: function expected', KEY_FN)
-		end
 		input:open(params)
 		done = false
 	end
@@ -3083,10 +3013,10 @@ Db.hash_aggregate = object(Db.query_node, {
 	source = 'pass-through',
 	work   = 'group and aggregate value records; any order; O(n groups) memory',
 })
-function Db.hash_aggregate:__call(db, input, KEY_FN, agg)
+function Db.hash_aggregate:__call(db, input, key_fn, agg)
 	check_value_node(input, 'hash_aggregate', 1)
-	assertf(KEY_FN == nil or isstr(KEY_FN),
-		'hash_aggregate: arg 2: param name string or nil expected')
+	assertf(key_fn == nil or type(key_fn) == 'function',
+		'hash_aggregate: arg 2: function or nil expected')
 	assertf(type(agg) == 'table' and #agg >= 1,
 		'hash_aggregate: arg 3: non-empty agg list expected')
 	local node = object(self, {members = input.members, unique = true})
@@ -3110,12 +3040,6 @@ function Db.hash_aggregate:__call(db, input, KEY_FN, agg)
 		return true
 	end
 	function node:open(params)
-		local key_fn
-		if KEY_FN then
-			key_fn = params[KEY_FN]
-			assertf(type(key_fn) == 'function',
-				'hash_aggregate: param %s: function expected', KEY_FN)
-		end
 		input:open(params)
 		local group_list = {}
 		local group_map  = {}
@@ -3147,22 +3071,23 @@ function Db.hash_aggregate:__call(db, input, KEY_FN, agg)
 	return node
 end
 
--- union_all: combine value streams in argument order; keep all duplicates.
--- All inputs must have the same fields. Usage: db:union_all(input, ...)
-Db.union_all = object(Db.query_node, {
-	kind   = 'union_all',
+-- value_concat: concatenate value streams in argument order.
+-- better name is union_all but that name is used for combinng query objects!
+-- All inputs must have the same fields. Usage: db:value_concat(input, ...)
+Db.value_concat = object(Db.query_node, {
+	kind   = 'value_concat',
 	item   = 'value',
 	unique = false,
 	source = 'pass-through',
 	work   = 'concatenate value streams in argument order',
 })
-function Db.union_all:__call(db, ...)
+function Db.value_concat:__call(db, ...)
 	local n = select('#', ...)
-	assertf(n >= 2, 'union_all: need at least 2 inputs, got %d', n)
+	assertf(n >= 2, 'value_concat: need at least 2 inputs, got %d', n)
 	local inputs = {}
 	for j = 1, n do
 		local inp = (select(j, ...))
-		check_value_node(inp, 'union_all', j)
+		check_value_node(inp, 'value_concat', j)
 		inputs[j] = inp
 	end
 	local node = object(self, {members = inputs[1].members})

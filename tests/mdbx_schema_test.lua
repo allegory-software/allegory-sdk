@@ -2230,6 +2230,7 @@ function test.fk_partial_composite_update()
 		})
 		db:add_fk{table = 'child', cols = {'a', 'b'},
 			ref_table = 'parent', ref_cols = {'a', 'b'}}
+		assert(db:table_schema'child'.fks['a,b'], 'composite fk name')
 		db:insert('parent', '{}', {a = 1, b = 1})
 		db:insert('parent', '{}', {a = 2, b = 2})
 		db:insert('child', '{}', {id = 10, a = 1, b = 1})

@@ -2145,7 +2145,7 @@ end
 --register a foreign key (child.cols -> ref_table.pk) on the child table.
 --input shape is schema.lua's fk definition without a caller-supplied name.
 --[[local]] function format_fk_name(cols)
-	return cat(cols, '-')
+	return cat(cols, ',')
 end
 --check that existing rows satisfy the fk: every child row whose fk cols are all
 --non-null must reference an existing parent row (MATCH SIMPLE: a row with any

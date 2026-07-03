@@ -68,7 +68,7 @@ Uppercase identifiers in node signatures are **param name placeholders**. The
 caller chooses the actual string name; at `open(params)` each node reads its
 values from the params table by that name:
 
-	params[NAME] = {v1, v2, ...}  -- key column values (access nodes)
+	params[NAME] = v              -- key column value (access nodes)
 	params[NAME] = n              -- plain number (limit / offset)
 
 The same params table cascades to the whole node tree, so names must be unique
@@ -76,10 +76,10 @@ across all nodes in one query. Convention: use UPPER_CASE in code to
 distinguish param names from literal values.
 
 	local node = db:pk_seek('users/status', 'S')
-	node:open({S = {'active'}})
+	node:open({S = 'active'})
 
 	local node = db:pk_range('users/score', '>=', 'LO', '<=', 'HI')
-	node:open({LO = {70}, HI = {95}})
+	node:open({LO = 70, HI = 95})
 
 	local node = db:limit(db:pk_range('users'), 'N', 'OFF')
 	node:open({N = 10, OFF = 2})
@@ -89,10 +89,10 @@ distinguish param names from literal values.
 
 No inputs. Read base tables and indexes; produce a PK stream.
 
-	pk_get(base, KEY)                          pk-order  exact PK lookup
-	pk_seek(ix, KEY)                           pk-order  exact index key
-	pk_prefix(ix, KEY)                         ix-order  leading-column prefix scan
-	pk_range(base|ix [, op, LO [, op, HI]] [, opts])  pk|ix-ord  key range scan
+	pk_get(base, KEY...)                       pk-order  exact PK lookup
+	pk_seek(ix, KEY...)                        pk-order  exact index key
+	pk_prefix(ix, PREFIX...)                   ix-order  leading-column prefix scan
+	pk_range(base|ix [, opts] [, op, PARAM...])  pk|ix-ord  key range scan
 	fk_parent_scan(fk_ix)            pk-order  FK index distinct keys as parent PKs
 	pk_group_first(ix [, KEY])       ix-order  first PK per distinct index key
 
@@ -103,10 +103,11 @@ next key on a miss and requires a follow-up equality check.
 **pk_seek** vs **pk_range**: same distinction for index keys. Use `pk_seek` for
 an exact key match, `pk_range` for a span.
 
-**pk_prefix** vs **pk_range**: `pk_prefix` fixes k leading columns where k < n;
-`pk_range` requires all n columns for each bound.
+**pk_prefix** vs **pk_range**: `pk_prefix` fixes k leading columns where k < n.
+`pk_range` can scan a suffix range after fixed leading columns by passing
+`opts.n_fixed_params`.
 
-	-- params[UID]={uid}; all sessions for uid, any started_at
+	-- params[UID]=uid; all sessions for uid, any started_at
 	pk_prefix('sessions/user_id,started_at', 'UID')
 
 **fk_parent_scan** vs **pk_range** on the same FK index: `pk_range` iterates
@@ -130,30 +131,31 @@ the intent differs: `fk_parent_scan` answers "which parents have children";
 
 **pk_range** bound syntax:
 
-	pk_range('t/a', '>=', 'LO', '<=', 'HI')   -- params[LO]={10}, params[HI]={20}
-	pk_range('t/a,b', '>=', 'LO', '<=', 'HI')
-	  -- params[LO]={1,10}, params[HI]={1,20}
-	pk_range('t/a', '<=', 'HI')               -- params[HI]={10}
-	pk_range('t/a')                            -- full scan; no params
-	pk_range('t/a', {desc=true})               -- full scan descending; no params
+	pk_range('t/a', '>=', 'LO', '<=', 'HI')   -- params[LO]=10, params[HI]=20
+	pk_range('t/a,b', {n_fixed_params=1}, '>=', 'A', 'B_LO', '<=', 'A', 'B_HI')
+	  -- fixed a, range on b; params[A]=1, params[B_LO]=10, params[B_HI]=20
+	pk_range('t/a', '<=', 'HI')               -- params[HI]=10
+	pk_range('t/a')                           -- full scan; no params
+	pk_range('t/a', {desc=true})              -- full scan descending; no params
+	pk_range('t/a', {desc=true}, '>=', 'LO')  -- bounded descending scan
 
 **pk_prefix** must cover at least one and fewer than all key columns.
 
-	pk_prefix('t/a,b', 'P')   -- params[P]={'foo'}
+	pk_prefix('t/a,b', 'P')   -- params[P]='foo'
 
 
 ### NULL KEYS
 
 `nil` = omitted argument or unbounded range side. `null` = DB null value.
 
-	pk_seek('t/a', 'K')      -- params[K]={null}           a IS NULL
-	pk_seek('t/a,b', 'K')    -- params[K]={null, 3}        a IS NULL AND b = 3
+	pk_seek('t/a', 'K')             -- params[K]=null              a IS NULL
+	pk_seek('t/a,b', 'A', 'B')      -- params[A]=null, params[B]=3 a IS NULL AND b = 3
 	pk_range('t/a', '>=', 'LO', '<=', 'HI')
-	  -- params[LO]={null}, params[HI]={10}; null <= a <= 10
+	  -- params[LO]=null, params[HI]=10; null <= a <= 10
 	pk_range('t/a', '>', 'LO')
-	  -- params[LO]={null}; a IS NOT NULL
-	pk_range('t/a,b', '>=', 'LO', '<=', 'HI')
-	  -- params[LO]={null,0}, params[HI]={null,9}; a IS NULL, 0<=b<=9
+	  -- params[LO]=null; a IS NOT NULL
+	pk_range('t/a,b', {n_fixed_params=1}, '>=', 'A', 'LO', '<=', 'A', 'HI')
+	  -- params[A]=null, params[LO]=0, params[HI]=9; a IS NULL, 0 <= b <= 9
 
 `mdbx_schema` sorts null before non-null.
 
@@ -278,7 +280,7 @@ order or key space.
 	pk_hash_filter(
 		pk_range('users/score', '>=', 'LO', '<=', 'HI'),
 		pk_seek('users/status', 'S'),
-		'in')  -- open({LO={80}, HI={100}, S={'active'}})
+		'in')  -- open({LO=80, HI=100, S='active'})
 
 **pk_and_probe** vs **pk_hash_filter**: `pk_hash_filter` materialises the set
 (O(n) memory). `pk_and_probe` tests each driver PK against an index via GET_BOTH
@@ -287,7 +289,7 @@ without materialisation.
 
 	pk_and_probe(
 		pk_range('users/score', {desc=true}),
-		{ix='users/status', key='S'})  -- open({S={'active'}})
+		{ix='users/status', key='S'})  -- open({S='active'})
 
 **pk_project** vs **probe nodes**: probe nodes add a member; `pk_project`
 removes all but one, returning a flat PK stream.
@@ -379,7 +381,7 @@ Output fields = `agg` names in order.
 
 **Union**:
 
-	union_all(inputs...)        arg-ord     combine value streams; keep duplicates
+	value_concat(inputs...)     arg-ord     concatenate value streams; keep duplicates
 	union_distinct(inputs...)   first-seen  combine value streams; dedup
 
 All inputs must have the same fields in the same order.
@@ -392,7 +394,7 @@ All inputs must have the same fields in the same order.
 	pk_hash_filter, pk_and_probe, pk_filter,
 	  pk_group, semi_join, anti_join, limit,
 	  select, value_filter, value_sort,
-	  union_all                                   inherit from input
+	  value_concat                                inherit from input
 	stream_distinct, hash_distinct,
 	  stream_aggregate, hash_aggregate,
 	  union_distinct                              unique by key
