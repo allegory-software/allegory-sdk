@@ -669,7 +669,7 @@ void schema_sort_u32_be(void* buf, void* tmp, size_t n) {
 		memcpy(buf, src, n * 4);
 }
 
-// binsearch in sorted u32-BE array.
+// binsearch in sorted u32-BE array. Returns the index if found, -1 if not.
 int schema_find_u32_be(const u32* buf, size_t n, const u32* key) {
 	u32 k = __builtin_bswap32(*key);
 	size_t lo = 0;
@@ -682,5 +682,5 @@ int schema_find_u32_be(const u32* buf, size_t n, const u32* key) {
 		else
 			hi = mid;
 	}
-	return lo < n && __builtin_bswap32(buf[lo]) == k;
+	return (lo < n && __builtin_bswap32(buf[lo]) == k) ? (int)lo : -1;
 }
