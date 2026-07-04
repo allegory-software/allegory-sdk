@@ -5,7 +5,7 @@
 
 API
 
-	db:<node>(args...) -> node    build a plan node (see mdbx_query.md).
+	db:<node>(args...) -> node    build a plan node (see mdbx_query_nodes.md).
 	node:open([params])           start a run; may be called again after close().
 	node:close()                  end a run; re-open allowed; idempotent.
 	node:explain() -> t           node metadata, no row reads.
@@ -50,6 +50,8 @@ NODE INTERFACE
 		                               noop on base-table nodes, pk_seek, and all
 		                               value nodes (each record is its own group).
 		node:reset_group()             rewind to the first PK of the current group.
+		node:next_item()  -> true|nil  next_pk() or next_group(), whichever applies;
+		                               the usual way to drive iteration.
 
 	The next_group / next_pk split exists for merge_join: convergence uses
 	next_group (and skip_to) to align inputs on a common merge_key, then
@@ -147,9 +149,12 @@ local function check_merge_compat(inputs, n, op)
 	end
 end
 
-local function check_driver_member(driver, schema, op)
-	assertf(#driver.members == 1 and driver.members[1] == schema.name,
-		'%s: driver member must be %s', op, schema.name)
+--pk_join_hash doesn't chain (single-member driver only); the one member
+--may be named after an alias (e.g. a self-join), not just the schema
+--itself, so it's returned rather than checked against schema.name.
+local function check_driver_member(driver, op)
+	assertf(#driver.members == 1, '%s: driver must have exactly one member', op)
+	return driver.members[1]
 end
 
 local function pk_is_u32(schema)
@@ -1407,6 +1412,10 @@ Output: PK tuple stream in driver order; one seek per row, O(n log m).
 fk may be wider than the FK's own columns; then the seek becomes a
 prefix scan instead of an exact match (see fk_child below).
 opts.left = true: left join; emit parent with absent child.
+opts.member: name for the new child member (default: child_schema.name).
+opts.from_member: name of the existing parent member in driver
+(default: parent_schema.name); needed when the parent was joined
+under an alias, e.g. a self-join.
 Usage: db:pk_join_seek(driver, fk_ix_name [, opts])
 ]]
 Db.pk_join_seek = object(Db.query_node, {
@@ -1424,12 +1433,14 @@ function Db.pk_join_seek:__call(db, driver, fk_name, opts)
 	local child_schema = fk_schema.val_schema
 	local fk, parent_schema = find_fk(
 		db, child_schema, fk_schema, 'pk_join_seek', fk_name)
+	local from_member = opts.from_member or parent_schema.name
+	local child_member = opts.member or child_schema.name
 	-- driver may carry multiple members (chained joins); child is the new one.
-	assertf(driver_has_member(driver, parent_schema.name),
-		'pk_join_seek: driver must have member %s', parent_schema.name)
+	assertf(driver_has_member(driver, from_member),
+		'pk_join_seek: driver must have member %s', from_member)
 	local left_join = opts.left
 	local members = extend({}, driver.members)
-	members[#members+1] = child_schema.name
+	members[#members+1] = child_member
 	local node = object(self, {
 		members = members,
 		order   = driver.order,
@@ -1469,7 +1480,7 @@ function Db.pk_join_seek:__call(db, driver, fk_name, opts)
 	function node:pk(name)
 		if not has_pair then return end
 		-- child is the only member owned here; all others delegate upstream.
-		if name == child_schema.name then
+		if name == child_member then
 			if not has_child then return end -- left-join: parent present, child absent
 			if wide then return fk_child:pk(child_schema.name) end
 			return true, child_pk_rec.data, child_pk_rec.size
@@ -1477,7 +1488,7 @@ function Db.pk_join_seek:__call(db, driver, fk_name, opts)
 		return driver:pk(name)
 	end
 	function node:compile_col(member, col)
-		if member == child_schema.name then
+		if member == child_member then
 			local inner = wide and fk_child:compile_col(child_schema.name, col)
 				or db:compile_col(child_schema, col, nil, child_pk_rec, get_child_val)
 			return function() return has_child and inner() or nil end
@@ -1502,7 +1513,7 @@ function Db.pk_join_seek:__call(db, driver, fk_name, opts)
 					in_match = false
 				end
 				if not driver:next_item() then return end
-				local _, p, p_sz = driver:pk(parent_schema.name)
+				local _, p, p_sz = driver:pk(from_member)
 				parent_pk, parent_pk_sz = p, p_sz
 				fk_child:reset_prefix(p, p_sz)
 				if fk_child:next_group() then
@@ -1522,7 +1533,7 @@ function Db.pk_join_seek:__call(db, driver, fk_name, opts)
 				in_match = false
 			end
 			if not driver:next_item() then return end
-			local _, p, p_sz = driver:pk(parent_schema.name)
+			local _, p, p_sz = driver:pk(from_member)
 			parent_pk, parent_pk_sz = p, p_sz
 			parent_pk_rec.data = p; parent_pk_rec.size = p_sz
 			if fk_cur:move_raw_into(C.MDBX_SET_KEY, parent_pk_rec, child_pk_rec) then
@@ -1551,6 +1562,9 @@ asc); O(n+m).
 opts.left = true: left join; emit parent with absent child. Unmatched
 parents are appended after the matched rows, unordered (see
 mdbx_query_validators.md).
+opts.member: name for the new child member (default: child_schema.name).
+The driver's one member may be named after an alias (e.g. a self-join);
+its own name is kept as the parent member, not forced to parent_schema.name.
 Usage: db:pk_join_hash(driver, fk_ix_name [, opts])
 ]]
 Db.pk_join_hash = object(Db.query_node, {
@@ -1568,12 +1582,13 @@ function Db.pk_join_hash:__call(db, driver, fk_name, opts)
 	local child_schema = fk_schema.val_schema
 	local _, parent_schema = find_fk(
 		db, child_schema, fk_schema, 'pk_join_hash', fk_name)
-	check_driver_member(driver, parent_schema, 'pk_join_hash')
+	local parent_member = check_driver_member(driver, 'pk_join_hash')
+	local child_member = opts.member or child_schema.name
 	local left_join = opts.left
 	local node = object(self, {
-		members = {parent_schema.name, child_schema.name},
-		order   = {{col = parent_schema.name..'.pk', dir = 'asc'},
-		           {col = child_schema.name..'.pk',  dir = 'asc'}},
+		members = {parent_member, child_member},
+		order   = {{col = parent_member..'.pk', dir = 'asc'},
+		           {col = child_member..'.pk',  dir = 'asc'}},
 	})
 	node.inputs = {driver}
 	node.merge_cmp = key_cmp
@@ -1617,17 +1632,17 @@ function Db.pk_join_hash:__call(db, driver, fk_name, opts)
 	function node:merge_key() return mk_rec.data, mk_rec.size end
 	function node:pk(name)
 		if not has_pair then return end
-		if name == nil or name == parent_schema.name
+		if name == nil or name == parent_member
 		then return true, mk_rec.data, mk_rec.size
-		elseif name == child_schema.name then
+		elseif name == child_member then
 			if not has_child then return end -- left-join: parent present, child absent
 			return true, pk_rec.data, pk_rec.size
 		end
 	end
 	function node:compile_col(member, col)
-		if member == parent_schema.name then
+		if member == parent_member then
 			return db:compile_col(parent_schema, col, nil, mk_rec, get_parent_val)
-		elseif member == child_schema.name then
+		elseif member == child_member then
 			local inner = db:compile_col(child_schema, col, nil, pk_rec, get_child_val)
 			return function() return has_child and inner() or nil end
 		end
@@ -1824,6 +1839,10 @@ column values via compile_col and seeks the parent base table.
 driver: any PK-stream node producing child PKs; fk: FK index name.
 Output: PK tuple stream in child (driver) order.
 opts.left = true: left join; emit child with absent parent.
+opts.member: name for the new parent member (default: parent_schema.name).
+opts.from_member: name of the existing child member in driver
+(default: child_schema.name); needed when the child was joined
+under an alias, e.g. a self-join.
 Usage: db:pk_parent_lookup(driver, fk_ix_name [, opts])
 ]]
 Db.pk_parent_lookup = object(Db.query_node, {
@@ -1841,12 +1860,14 @@ function Db.pk_parent_lookup:__call(db, driver, fk_name, opts)
 	local child_schema = fk_schema.val_schema
 	local fk, parent_schema = find_fk(
 		db, child_schema, fk_schema, 'pk_parent_lookup', fk_name)
+	local from_member = opts.from_member or child_schema.name
+	local parent_member = opts.member or parent_schema.name
 	-- driver may carry multiple members (chained joins); parent is the new one.
-	assertf(driver_has_member(driver, child_schema.name),
-		'pk_parent_lookup: driver must have member %s', child_schema.name)
+	assertf(driver_has_member(driver, from_member),
+		'pk_parent_lookup: driver must have member %s', from_member)
 	local left_join = opts.left
 	local members = extend({}, driver.members)
-	members[#members+1] = parent_schema.name
+	members[#members+1] = parent_member
 	local node = object(self, {
 		members = members,
 		order   = driver.order,
@@ -1880,14 +1901,14 @@ function Db.pk_parent_lookup:__call(db, driver, fk_name, opts)
 	function node:pk(name)
 		if not has_child then return end
 		-- parent is the only member owned here; all others delegate upstream.
-		if name == parent_schema.name then
+		if name == parent_member then
 			if has_parent then return true, parent_pk, parent_pk_sz end
 			return -- left-join: child present but parent absent
 		end
 		return driver:pk(name)
 	end
 	function node:compile_col(member, col)
-		if member == parent_schema.name then
+		if member == parent_member then
 			local inner = db:compile_col(
 				parent_schema, col, nil, parent_key_rec, get_parent_val)
 			return function() return has_parent and inner() or nil end
@@ -1907,7 +1928,7 @@ function Db.pk_parent_lookup:__call(db, driver, fk_name, opts)
 		if not parent_cur then parent_cur = db:cursor(parent_schema.name) end
 		while true do
 			if not driver:next_item() then return end
-			local _, cp, cp_sz = driver:pk(child_schema.name)
+			local _, cp, cp_sz = driver:pk(from_member)
 			child_pk, child_pk_sz = cp, cp_sz
 			local has_null = false
 			for i, ref_col in ipairs(fk.ref_cols) do
@@ -1938,7 +1959,7 @@ function Db.pk_parent_lookup:__call(db, driver, fk_name, opts)
 		driver:open(params)
 		is_open = true
 		for i, kf in ipairs(fk_schema.key_fields) do
-			fk_fns[i] = driver:compile_col(child_schema.name, kf.col)
+			fk_fns[i] = driver:compile_col(from_member, kf.col)
 		end
 		has_child = false; has_parent = false; parent_base_seeked = false
 		child_pk = nil; child_pk_sz = nil; parent_pk = nil; parent_pk_sz = nil

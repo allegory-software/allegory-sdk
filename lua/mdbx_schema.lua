@@ -78,6 +78,9 @@ QUERY
 	cur:each_prefix         ([val_cols], pk_val1, ...) -> iter() -> cur, keysvals...
 	cur:each_dup            ([val_cols], keys...) -> iter() -> cur, keysvals...
 	cur:each_current_dup    ([val_cols]) -> iter() -> cur, keysvals...
+	db:compile_col    (schema, col, ix_key, pk, get_base_val) -> fn  compile a
+	                        single-column decoder for hot iteration loops (used
+	                        by mdbx_query_nodes.lua); fn() -> decoded value
 
 COLUMS LISTS & IN/OUT VALUES FORMATS
 

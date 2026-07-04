@@ -351,22 +351,37 @@ function Q:use_counts() self._use_counts = true; return self end
 
 --lowering helpers
 
--- resolve 'alias.col' or bare 'col' to (schema_name, bare_col)
+--[[
+resolve 'alias.col' or bare 'col' to (member, bare_col). member is the
+node-level tuple member name: for the from-table's own alias (or a bare
+column) it's the from-table's schema name, same as always, since the
+from access node never carries an alias of its own. For a join alias it's
+the alias itself, unresolved -- that's what lets two joins to the same
+table (a self-join) keep distinct members instead of both collapsing to
+the same schema name.
+]]
 local function qrcol(q, col)
 	local alias, c = col:match'^([^.]+)%.(.+)$'
-	if alias then return q._al[alias] or alias, c end
-	return q._from.tbl, col
+	if not alias then return q._from.tbl, col end
+	if alias == q._from.alias then return q._from.tbl, c end
+	return alias, c
 end
 
--- translate one output spec item: 'alias.col [name]' -> 'sname.col [name]'
+-- resolve a member (alias or bare table name) to its underlying schema name.
+local function qrschema(q, member)
+	return q._al[member] or member
+end
+
+-- translate one output spec item: 'alias.col [name]' -> 'member.col [name]'
+-- (member: from-table's own schema name, or the join alias -- see qrcol).
 local function qtrans1(q, s)
 	s = s:match'^%s*(.-)%s*$'
 	local mcol, name = s:match'^(%S+)%s+(%S+)$'
 	if not mcol then mcol = s end
 	local alias, c = mcol:match'^([^.]+)%.(.+)$'
 	if not alias then return s end
-	local sname = q._al[alias] or alias
-	local t = sname..'.'..c
+	local member = alias == q._from.alias and q._from.tbl or alias
+	local t = member..'.'..c
 	return name and t..' '..name or t
 end
 
@@ -389,6 +404,7 @@ local function resolve_order(q, db)
 	local order = {}
 	for _, o in ipairs(q._order) do
 		local sn, col = qrcol(q, o.col)
+		sn = qrschema(q, sn)
 		local schema = assertf(db:table_schema(sn),
 			'order_by: unknown member or table %s', sn)
 		assertf(not schema.is_index, 'order_by: index not allowed: %s', sn)
@@ -698,8 +714,10 @@ end
 
 -- build a pk_filter predicate from a residual filter spec.
 -- pk_filter calls fn(node, params); filter values are param names.
+-- node:col uses _member (tuple member identity); the schema (_sname) is
+-- only needed for the in_/not_in column-type check below.
 local function mk_pkfn(db, f)
-	local sn, col, k = f._sname, f._col, f.k
+	local sn, col, k = f._member, f._col, f.k
 	if k == 'fn' then return f.fn end
 	if k == '==' or k == '~=' then
 		local fn, pname = cmp[k], f.v
@@ -732,7 +750,7 @@ local function mk_pkfn(db, f)
 			return lo_fn(g, params[lo_pn]) and hi_fn(g, params[hi_pn])
 		end
 	elseif k == 'in' or k == 'nin' then
-		local mt = db:table_schema(sn).fields[col].mdbx_type
+		local mt = db:table_schema(f._sname).fields[col].mdbx_type
 		assertf(mt ~= 'i64' and mt ~= 'u64',
 			'list-based in_/not_in on boxed %s column %s.%s', mt, sn, col)
 		local lut = index(f.set)
@@ -752,8 +770,12 @@ local function mk_pkfn(db, f)
 	assertf(false, 'mk_pkfn: unhandled filter kind %q', k)
 end
 
--- categorize filters by member; resolve alias.col; set _sname/_col.
--- returns: by_member, cross (fn/ex/nex/has/hasnt), or_conds.
+--[[
+categorize filters by member; resolve alias.col. Sets both _member (the
+tuple member identity used to address the node, e.g. a self-join alias)
+and _sname (the underlying schema, needed only for type lookups).
+returns: by_member, cross (fn/ex/nex/has/hasnt), or_conds.
+]]
 local function prep_filters(q, filt)
 	local by_member = {}
 	local cross = {}
@@ -762,14 +784,14 @@ local function prep_filters(q, filt)
 		local k = f.k
 		if k == 'or' then
 			local sn, col = qrcol(q, f.sub.col)
-			f.sub._sname = sn; f.sub._col = col
+			f.sub._member = sn; f.sub._sname = qrschema(q, sn); f.sub._col = col
 			or_conds[#or_conds+1] = f.sub
 		elseif k == 'fn' or k == 'ex' or k == 'nex'
 			or k == 'has' or k == 'hasnt' then
 			cross[#cross+1] = f
 		else
 			local sn, col = qrcol(q, f.col)
-			f._sname = sn; f._col = col
+			f._member = sn; f._sname = qrschema(q, sn); f._col = col
 			by_member[sn] = by_member[sn] or {}
 			by_member[sn][#by_member[sn]+1] = f
 		end
@@ -1099,13 +1121,17 @@ function Q:lower()
 	end
 
 	--[[
-	4. JOINS: acc tracks accumulated members for FK auto-discovery.
+	4. JOINS: acc tracks accumulated {sname=, member=} pairs for FK
+	auto-discovery. member is the node-level tuple member (the join's
+	alias, or the schema name when unaliased); sname is the real schema,
+	needed to look up FKs. Two joins to the same table (a self-join) get
+	distinct members via distinct aliases, so they don't collide.
 	Strategy: child->parent -> pk_parent_lookup;
 	parent->child -> pk_join_seek. Both nodes accept multi-member
 	drivers, so join chains of any length lower the same way: each
 	step appends one new member to the running node.
 	]]
-	local acc = {q._from.tbl}
+	local acc = {{sname = q._from.tbl, member = q._from.tbl}}
 	for _, j in ipairs(q._joins) do
 		if j.nested then
 			local jfn = j.fn
@@ -1119,14 +1145,19 @@ function Q:lower()
 			node = db:nested_join(node, factory)
 		else
 			local join_tbl = j.tbl
+			local join_member = j.alias
 			assertf(db:table_schema(join_tbl), 'join: unknown table %s', join_tbl)
-			local from_sname
+			local from_sname, from_member
 			if j.from_alias then
+				-- the from-table's own alias always maps to its schema name
+				-- (see qrcol); any other alias is a prior join's own member.
+				from_member = j.from_alias == q._from.alias
+					and q._from.tbl or j.from_alias
 				from_sname = q._al[j.from_alias] or j.from_alias
 			else
-				for _, sn in ipairs(acc) do
-					if pcall(qfind_fk, db, sn, join_tbl, j.fk_hint) then
-						from_sname = sn; break
+				for _, e in ipairs(acc) do
+					if pcall(qfind_fk, db, e.sname, join_tbl, j.fk_hint) then
+						from_sname, from_member = e.sname, e.member; break
 					end
 				end
 			end
@@ -1135,17 +1166,18 @@ function Q:lower()
 				db, from_sname, join_tbl, j.fk_hint)
 			-- join chains of any length lower the same way as 2-table joins
 			-- because both nodes accept multi-member drivers.
+			local opts = {left = j.left or nil, member = join_member,
+				from_member = from_member}
 			if dir == 'child_to_parent' then
-				node = db:pk_parent_lookup(node, fk_ix,
-					j.left and {left = true} or nil)
+				node = db:pk_parent_lookup(node, fk_ix, opts)
 			else
-				node = db:pk_join_seek(node, fk_ix, j.left and {left = true} or nil)
+				node = db:pk_join_seek(node, fk_ix, opts)
 			end
 			-- apply join-table filters while the cursor is still positioned.
-			for _, f in ipairs(by_member[join_tbl] or empty) do
+			for _, f in ipairs(by_member[join_member] or empty) do
 				node = db:pk_filter(node, mk_pkfn(db, f))
 			end
-			acc[#acc+1] = join_tbl
+			acc[#acc+1] = {sname = join_tbl, member = join_member}
 		end
 	end
 

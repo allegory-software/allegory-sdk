@@ -15,6 +15,21 @@ Indexes: users/status, users/score, sessions/user_id, sessions/started_at,
 events/session_id, events/kind.
 
 
+## NOT YET IMPLEMENTED
+
+PK Tuple-preserving `pk_sort`, `value_sort`, `pk_join_hash`.
+
+Currently `pk_sort` won't accept PK tuple inputs, only flat PK inputs,
+because it cannot sort multiple PK streams in parallel. That makes `merge_join`
+non-composable but `nested_join` and `pk_join_seek` can do the job instead.
+`merge_join` is usually chosen for unrelated index joins.
+
+`pk_join_hash` also requires a single-member (non-chained) driver; it cannot
+sit downstream of another join the way `pk_join_seek` and `nested_join` can.
+It also has no wide-FK (prefix-scan) path: `pk_join_seek` handles a FK index
+wider than the FK's own columns via a prefix scan, `pk_join_hash` does not.
+
+
 ## STORAGE MODEL
 
 Base table:  B-tree keyed by row PK; value = encoded row.
@@ -231,7 +246,8 @@ unordered and FK-index order is acceptable.
 
 **pk_parent_lookup** vs **pk_join_***: the only node that goes child->parent.
 Reads the FK column value from the child's row and probes the parent base table
-by PK. Child order preserved.
+by PK. Child order preserved. The driver may already carry other tuple members
+from an earlier join (chained); parent is the new one.
 
 	pk_parent_lookup(
 		pk_range('sessions/started_at,user_id', {desc=true}),
@@ -246,7 +262,8 @@ matched rows, unordered; the other two preserve their stated order.
 **Chained joins** (users -> sessions -> events): `merge_join(pk_range('users'),
 pk_range('sessions/user_id'))` produces sessions in FK-index order (user_id asc,
 session PK asc), not session-PK order. Joining events onto that output requires
-`pk_join_seek` or `pk_join_hash` for the second step.
+`pk_join_seek` for the second step -- `pk_join_hash` cannot take a multi-member
+driver (see NOT YET IMPLEMENTED).
 
 
 ## TRANSFORM NODES
@@ -283,7 +300,9 @@ any merge node fed by an index range.
 
 **pk_hash_filter** vs **merge nodes**: merge nodes require sorted inputs with
 matching `merge_sig`. `pk_hash_filter` accepts any two PK streams regardless of
-order or key space.
+order or key space. The driver may already carry other tuple members from an
+earlier join (chained); only the tested member needs to match the set's key
+space.
 
 	pk_hash_filter(
 		pk_range('users/score', '>=', 'LO', '<=', 'HI'),
@@ -293,7 +312,8 @@ order or key space.
 **pk_and_probe** vs **pk_hash_filter**: `pk_hash_filter` materialises the set
 (O(n) memory). `pk_and_probe` tests each driver PK against an index via GET_BOTH
 -- O(1) memory, one seek per probe per driver row. Use to preserve driver order
-without materialisation.
+without materialisation. The driver may already carry other tuple members from
+an earlier join (chained); all probes test the same one.
 
 	pk_and_probe(
 		pk_range('users/score', {desc=true}),
