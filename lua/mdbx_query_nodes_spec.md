@@ -16,10 +16,7 @@ Terminology:
 ## Not Yet Implemented
 
 `pk_join_merge` and `pk_join_sort_merge` are documented here but are not
-implemented. `pk_join_hash` already gives O(n+m) for the single-join case;
-these would only add a narrower win on top of that (driver already sorted,
-or a sort needed anyway), so they are deferred until a concrete case needs
-them.
+implemented; deferred until a concrete case needs them.
 
 ## Order Metadata
 
@@ -47,7 +44,6 @@ Order checks (facts not already itemized per-node in Validators below):
 | `merge_union`,`merge_except` | Single PK member ascending.          |
 | merge join                   | Both sides ordered by the join keys. |
 | `ORDER BY ... LIMIT`         | Requested order is an order prefix.  |
-| `pk_join_hash`               | Any driver order accepted.           |
 | `pk_join_sort_merge`         | Any driver order accepted.           |
 
 Notes:
@@ -189,7 +185,6 @@ These are derived from node inputs and schema resolution.
 | `pk_parent_lookup(child, fk)`       | child+parent | child order     |
 | `pk_join_merge(driver, fk)`         | tuple        | FK index order  |
 | `pk_join_seek(driver, fk)`          | tuple        | driver order    |
-| `pk_join_hash(driver, fk)`          | tuple        | FK index order  |
 | `pk_join_sort_merge(driver, fk)`    | tuple        | FK index order  |
 
 | Node                                | Unique | Source            |
@@ -209,7 +204,6 @@ These are derived from node inputs and schema resolution.
 | `pk_parent_lookup(child, fk)`       | varies | child source      |
 | `pk_join_merge(driver, fk)`         | varies | driver + child ix |
 | `pk_join_seek(driver, fk)`          | varies | driver + child ix |
-| `pk_join_hash(driver, fk)`          | varies | child ix          |
 | `pk_join_sort_merge(driver, fk)`    | varies | child ix          |
 
 Notes:
@@ -235,8 +229,8 @@ Notes:
   that index.
 - `merge_union`, `merge_except`, `pk_sort`, and `pk_join_sort_merge` drop driver
   source cursors.
-- A left join (`opts.left`) emits unmatched driver rows; `pk_join_hash` places
-  them, unordered, after the matched rows; other joins keep their stated order.
+- A left join (`opts.left`) emits unmatched driver rows in the node's stated
+  order.
 
 ## Validators
 
@@ -290,7 +284,6 @@ Key Function Rules above for the shared `key_fn` rules.
 | parent-to-child join         | `opts.left` keeps drivers with no child.             |
 | `pk_join_merge`              | Driver is ordered by parent PK ascending.            |
 | `pk_join_seek`               | Any driver order accepted.                           |
-| `pk_join_hash`               | Hash key is the driver parent PK.                    |
 | `pk_join_sort_merge`         | Sort key is the driver parent PK.                    |
 | chained parent-child joins   | SQL join-order semantics apply.                      |
 | cursor joins                 | Inner function returns a node per outer bundle.      |

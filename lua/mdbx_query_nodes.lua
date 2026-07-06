@@ -149,14 +149,6 @@ local function check_merge_compat(inputs, n, op)
 	end
 end
 
---pk_join_hash doesn't chain (single-member driver only); the one member
---may be named after an alias (e.g. a self-join), not just the schema
---itself, so it's returned rather than checked against schema.name.
-local function check_driver_member(driver, op)
-	assertf(#driver.members == 1, '%s: driver must have exactly one member', op)
-	return driver.members[1]
-end
-
 local function pk_is_u32(schema)
 	local f = schema.key_fields[1]
 	return #schema.key_fields == 1 and f.mdbx_type == 'u32' and not f.maxlen
@@ -164,8 +156,6 @@ local function pk_is_u32(schema)
 end
 
 --Used by pk_join_seek and pk_parent_lookup which accept multi-member drivers.
---pk_join_hash keeps check_driver_member (single-member only; not called from
---join chains).
 local function driver_has_member(driver, name)
 	for _, m in ipairs(driver.members) do if m == name then return true end end
 end
@@ -382,7 +372,6 @@ function Db.pk_seek:__call(db, ix_name, ...)
 	local base_seeked, first
 	local v, v_sz, v_o  -- DUPFIXED multi-page state
 	local key_vals = {}
-
 	local function get_base_val()
 		if not base_seeked then
 			if not base_cur then base_cur = db:cursor(val_schema.name) end
@@ -400,7 +389,6 @@ function Db.pk_seek:__call(db, ix_name, ...)
 	function node:compile_col(member, col)
 		return db:compile_col(schema, col, ix_rec, pk_rec, get_base_val)
 	end
-
 	if fixedsize then
 		--DUPFIXED: bulk pk iteration via MDBX_GET_MULTIPLE / MDBX_NEXT_MULTIPLE.
 		--merge_key = pk value; each dup is a separate group; next_pk = noop.
@@ -449,7 +437,6 @@ function Db.pk_seek:__call(db, ix_name, ...)
 			return true
 		end
 	end
-
 	function node:close()
 		if is_open then
 			if cur then cur:close(); cur = nil end
@@ -1554,193 +1541,6 @@ function Db.pk_join_seek:__call(db, driver, fk_name, opts)
 	return node
 end
 
---[[
-pk_join_hash: hash join -- materialise driver PKs into a set, then
-scan FK index once. driver: any PK-stream node; fk: FK index name.
-Output: PK tuple stream in FK index order (parent PK asc, child PK
-asc); O(n+m).
-opts.left = true: left join; emit parent with absent child. Unmatched
-parents are appended after the matched rows, unordered (see
-mdbx_query_validators.md).
-opts.member: name for the new child member (default: child_schema.name).
-The driver's one member may be named after an alias (e.g. a self-join);
-its own name is kept as the parent member, not forced to parent_schema.name.
-Usage: db:pk_join_hash(driver, fk_ix_name [, opts])
-]]
-Db.pk_join_hash = object(Db.query_node, {
-	kind   = 'pk_join_hash',
-	item   = 'pk_tuple',
-	unique = false,
-	source = 'probe',
-	work   = 'materialise driver + FK index scan',
-})
-function Db.pk_join_hash:__call(db, driver, fk_name, opts)
-	check_pk_node(driver, 'pk_join_hash', 1)
-	opts = opts or {}
-	local fk_schema = resolve(db, fk_name)
-	check_index(fk_schema, 'pk_join_hash', fk_name)
-	local child_schema = fk_schema.val_schema
-	local _, parent_schema = find_fk(
-		db, child_schema, fk_schema, 'pk_join_hash', fk_name)
-	local parent_member = check_driver_member(driver, 'pk_join_hash')
-	local child_member = opts.member or child_schema.name
-	local left_join = opts.left
-	local node = object(self, {
-		members = {parent_member, child_member},
-		order   = {{col = parent_member..'.pk', dir = 'asc'},
-		           {col = child_member..'.pk',  dir = 'asc'}},
-	})
-	node.inputs = {driver}
-	node.merge_cmp = key_cmp
-	node.merge_sig = parent_schema.key_sig
-	local driver_set
-	-- Avoid per-row string allocation + Lua hash lookup for 4-byte u32 keys:
-	-- measured ~2x in pk_hash_filter and ~2.8x-3.6x materialise+probe.
-	local u32_driver_set = pk_is_u32(parent_schema) and pk_is_u32(fk_schema)
-	local fk_cur, parent_cur, child_cur, is_open
-	local mk_rec = MDBX_val()
-	local pk_rec = MDBX_val()
-	local parent_val_rec = MDBX_val()
-	local child_val_rec = MDBX_val()
-	local has_pair, has_child, parent_base_seeked, child_base_seeked
-	local in_match, op, sweeping, sweep_key, sweep_done
-	local matched -- opts.left, u32 path: per-driver-element matched flags
-	local function get_parent_val()
-		if not parent_base_seeked then
-			if not parent_cur then parent_cur = db:cursor(parent_schema.name) end
-			parent_cur:move_raw_into(C.MDBX_SET_KEY, mk_rec, parent_val_rec)
-			parent_base_seeked = true
-		end
-		return parent_val_rec.data, parent_val_rec.size
-	end
-	local function get_child_val()
-		if not child_base_seeked then
-			if not child_cur then child_cur = db:cursor(child_schema.name) end
-			child_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, child_val_rec)
-			child_base_seeked = true
-		end
-		return child_val_rec.data, child_val_rec.size
-	end
-	function node:close()
-		if is_open then
-			if fk_cur then fk_cur:close(); fk_cur = nil end
-			if parent_cur then parent_cur:close(); parent_cur = nil end
-			if child_cur then child_cur:close(); child_cur = nil end
-			is_open = false
-		end
-	end
-	function node:merge_key() return mk_rec.data, mk_rec.size end
-	function node:pk(name)
-		if not has_pair then return end
-		if name == nil or name == parent_member
-		then return true, mk_rec.data, mk_rec.size
-		elseif name == child_member then
-			if not has_child then return end -- left-join: parent present, child absent
-			return true, pk_rec.data, pk_rec.size
-		end
-	end
-	function node:compile_col(member, col)
-		if member == parent_member then
-			return db:compile_col(parent_schema, col, nil, mk_rec, get_parent_val)
-		elseif member == child_member then
-			local inner = db:compile_col(child_schema, col, nil, pk_rec, get_child_val)
-			return function() return has_child and inner() or nil end
-		end
-	end
-	--[[
-	opts.left: once the FK index is exhausted, sweep for driver elements
-	that never matched a child and emit them with child absent. No sort
-	needed: the spec allows this tail unordered, unlike the matched rows
-	above (see mdbx_query_validators.md).
-	]]
-	local function sweep()
-		if u32_driver_set then
-			while true do
-				local q, q_sz, idx = driver_set:next()
-				if not q then return end
-				if matched[idx] == 0 then
-					mk_rec.data = q; mk_rec.size = q_sz
-					break
-				end
-			end
-		else
-			if sweep_done then return end
-			local key
-			repeat
-				key = next(driver_set, sweep_key)
-				sweep_key = key
-			until not key or not driver_set[key]
-			if not key then sweep_done = true; return end
-			mk_rec.data = key; mk_rec.size = #key
-		end
-		parent_base_seeked = false
-		has_pair = true; has_child = false
-		return true
-	end
-	function node:next_group()
-		has_pair = false; has_child = false
-		if sweeping then return sweep() end
-		if not fk_cur then fk_cur = db:cursor(fk_schema.name) end
-		while true do
-			if in_match then
-				if fk_cur:move_raw_into(C.MDBX_NEXT_DUP, mk_rec, pk_rec) then
-					parent_base_seeked = false; child_base_seeked = false
-					has_pair = true; has_child = true; return true
-				end
-				in_match = false
-			end
-			if not fk_cur:move_raw_into(op, mk_rec, pk_rec) then
-				if left_join then sweeping = true; return sweep() end
-				return
-			end
-			op = C.MDBX_NEXT_NODUP
-			local found
-			if u32_driver_set then
-				local idx = driver_set:index_of(mk_rec.data)
-				found = idx >= 0
-				if found and matched then matched[idx] = 1 end
-			else
-				local key = str(mk_rec.data, mk_rec.size)
-				found = driver_set[key] ~= nil
-				if found then driver_set[key] = true end
-			end
-			if found then
-				in_match = true
-				parent_base_seeked = false; child_base_seeked = false
-				has_pair = true; has_child = true; return true
-			end
-		end
-	end
-	function node:open(params)
-		assert(not is_open, 'node already open')
-		driver:open(params)
-		if u32_driver_set then
-			driver_set = u32_keyset()
-			local n = 0
-			while driver:next_item() do
-				local _, p = driver:pk()
-				driver_set:add(p)
-				n = n + 1
-			end
-			driver_set:sort()
-			if left_join then matched = u8a(n) end
-		else
-			driver_set = {}
-			while driver:next_item() do
-				local _, p, p_sz = driver:pk()
-				driver_set[str(p, p_sz)] = false
-			end
-		end
-		driver:close()
-		is_open = true
-		has_pair = false; has_child = false
-		parent_base_seeked = false; child_base_seeked = false
-		in_match = false; op = C.MDBX_FIRST
-		sweeping = false; sweep_key = nil; sweep_done = false
-	end
-	return node
-end
-
 --TRANSFORM NODES -----------------------------------------------------------
 
 --[[
@@ -2821,9 +2621,14 @@ function Db.hash_distinct:__call(db, input, key_fn)
 			if not input:next_group() then return end
 			local key = key_fn(input:row())
 			-- for 1-col keys use the value directly; tuples() for multi-col.
+			-- int64key: a decoded int64/uint64 value doesn't hash correctly
+			-- as a raw table/tuple key (see glue.lua int64key).
 			local t
-			if #key == 1 then t = key[1]
-			else t = tuple_space(unpack(key)) end
+			if #key == 1 then t = int64key(key[1])
+			else
+				for i, v in ipairs(key) do key[i] = int64key(v) end
+				t = tuple_space(unpack(key))
+			end
 			if not seen[t] then seen[t] = true; return true end
 		end
 	end
@@ -3157,7 +2962,10 @@ end
 --[[
 hash_aggregate: group and aggregate value records in any order; O(n groups).
 key_fn(rec) -> {part,...}: group key at value level; nil = grand total.
-agg: list of {name=, op=, [input=, sep=, part=]}; input= is the field name.
+agg: list of {name=, op=, [input=, member=, col=, sep=, part=]}; input= is
+the field name read for accumulation; member=/col= are optional and only
+used by compile_col, so a later node (order_by, having) can still address
+this output by its original source column, same as stream_aggregate.
 ops: count, sum, avg, min, max, concat (skip null), key (key_fn index).
 Usage: db:hash_aggregate(input, key_fn, agg)
 ]]
@@ -3174,8 +2982,17 @@ function Db.hash_aggregate:__call(db, input, key_fn, agg)
 		'hash_aggregate: arg 2: function or nil expected')
 	assertf(type(agg) == 'table' and #agg >= 1,
 		'hash_aggregate: arg 3: non-empty agg list expected')
+	local fields = {}
+	for _, a in ipairs(agg) do
+		fields[#fields+1] = {name = a.name, member = a.member, col = a.col}
+	end
 	local node = object(self, {members = input.members, unique = true})
 	node.inputs = {input}
+	local col_map = build_col_map(fields)
+	function node:compile_col(member, col)
+		local name = col_map[member..':'..col]
+		if name then return function() return node._row[name] end end
+	end
 	local output, idx
 	local function accumulate(acc, rec, key)
 		for _, a in ipairs(agg) do
@@ -3204,7 +3021,13 @@ function Db.hash_aggregate:__call(db, input, key_fn, agg)
 			local key, t
 			if key_fn then
 				key = key_fn(rec)
-				t = tuple_space(unpack(key))
+				-- int64key: a decoded int64/uint64 value doesn't hash correctly
+				-- as a raw tuple key (see glue.lua int64key). key itself must
+				-- stay unconverted: agg_step's 'key' op reads the original
+				-- value from it for the output row.
+				local ck = {}
+				for i, v in ipairs(key) do ck[i] = int64key(v) end
+				t = tuple_space(unpack(ck))
 			else
 				t = true
 			end
@@ -3308,8 +3131,10 @@ function Db.union_distinct:__call(db, ...)
 				if not key_list then
 					key_list = keys(rec, true)
 				end
+				-- int64key: a decoded int64/uint64 value doesn't hash correctly
+				-- as a raw tuple key (see glue.lua int64key).
 				local vals = {}
-				for _, k in ipairs(key_list) do vals[#vals+1] = rec[k] end
+				for _, k in ipairs(key_list) do vals[#vals+1] = int64key(rec[k]) end
 				local t = tuple_space(unpack(vals))
 				if not seen[t] then seen[t] = true; return true end
 			else

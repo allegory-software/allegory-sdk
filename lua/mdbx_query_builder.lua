@@ -770,6 +770,19 @@ local function mk_pkfn(db, f)
 	assertf(false, 'mk_pkfn: unhandled filter kind %q', k)
 end
 
+-- apply one member filter to a pk stream. query-based in_/not_in materialises
+-- the subquery's PKs and filters by membership (pk_hash_filter); everything
+-- else (including list-based in_/not_in) becomes a pk_filter row predicate.
+-- shared by the from-table residual step and the joined-member filter step,
+-- so both get the same subquery handling.
+local function apply_member_filter(db, node, f)
+	if (f.k == 'in' or f.k == 'nin') and f.set.lower then
+		return db:pk_hash_filter(
+			node, f.set:lower(), f.k == 'in' and 'in' or 'not_in')
+	end
+	return db:pk_filter(node, mk_pkfn(db, f))
+end
+
 --[[
 categorize filters by member; resolve alias.col. Sets both _member (the
 tuple member identity used to address the node, e.g. a self-join alias)
@@ -928,13 +941,17 @@ away at PK level never incur a base-table read.
 Steps in order:
 
   1. ACCESS (from-table)
-     One index drives the scan. For simple order_by+limit queries, an index
-     that already returns rows in the requested table-column order can win so
-     the query can stop at limit without value_sort. Otherwise build_access
-     scores indexes against the current AND filters and picks the best.
-     Equality folds to pk_seek or pk_get; range to pk_range with lo/hi bounds;
-     starts to pk_range partial prefix; leading-key prefix to pk_prefix;
-     no match -> full pk_range scan.
+     One index drives the scan. For simple order_by queries (no joins/agg/
+     distinct/having/or_where), an index that already returns rows in the
+     requested table-column order can avoid value_sort entirely; with
+     :limit() it also wins over a filter match so the scan can stop early.
+     Without :limit(), it's only used as a fallback when no AND filter
+     matched any index (would otherwise be a full unordered scan followed
+     by a sort -- the order-matching index costs no more and needs no sort).
+     Otherwise build_access scores indexes against the current AND filters
+     and picks the best. Equality folds to pk_seek or pk_get; range to
+     pk_range with lo/hi bounds; starts to pk_range partial prefix;
+     leading-key prefix to pk_prefix; no match -> full pk_range scan.
 	  Filters that the index absorbes are marked consumed; the rest becomes
 	  step-2 predicates. order_by names are real query columns, not output
 	  field names.
@@ -956,10 +973,11 @@ Steps in order:
      Each join adds a member. FK direction determines the node:
        child->parent: pk_parent_lookup (one base-table seek per row)
        parent->child: pk_join_seek (one FK-index seek per row)
-     First join: applied directly to the flat PK stream.
-     Later joins: the driver is a multi-member tuple (item='pk_tuple'), so
-     pk_project extracts the FK-bearing member into a flat PK stream before
-     joining, then pk_project strips it back to just the child table.
+     First join: applied directly to the flat PK stream. Later joins: the
+     driver is a multi-member tuple (item='pk_tuple'); pk_parent_lookup and
+     pk_join_seek both accept a multi-member driver directly (from_member
+     picks which existing member carries the FK side), so no projection step
+     is needed between chained joins.
      acc tracks all accumulated members so FK discovery can find the right
      side of the relation when from= is not specified.
      Filters on a joined table are applied immediately after its join, while
@@ -1022,26 +1040,35 @@ function Q:lower()
 		end
 	end
 	local order_want
-	if q._order and q._lim and not q._agg and not q._dist and not q._hav
+	if q._order and not q._agg and not q._dist and not q._hav
 		and #q._joins == 0 and #or_conds == 0
 	then
 		order_want = physical_order(order_cols, from_s)
 	end
 
-	-- 1. ACCESS: choose the first read. order_by+limit can prefer an index
-	--    that already returns rows in order; otherwise filters choose it.
-	--    consumed marks which filter entries the chosen read absorbed.
+	--[[
+	1. ACCESS: choose the first read. order_want lets build_access recognise
+	an index that already returns rows in the requested order; otherwise
+	filters choose it. prefer_order (only with :limit()) makes build_access
+	pick that index even over a more selective filter match, since reading
+	in order lets limit stop the scan early; without a limit, all matching
+	rows are needed anyway, so a selective filter index (fewer rows to
+	sort) still wins there -- order_want only serves as a zero-cost
+	fallback (build_access tries it last) when no filter matched an index
+	at all, replacing what would otherwise be a full unordered scan.
+	consumed marks which filter entries the chosen read absorbed.
+	]]
 	local mf = by_member[q._from.tbl] or {}
 	local node, consumed = build_access(
 		db, from_s, mf, q._hints, q._use_counts, order_want or group_order,
-		order_want ~= nil)
+		order_want ~= nil and q._lim ~= nil)
 
 	--[[
 	order_ok: the PK stream already delivers rows in q._order; value_sort is
-	skipped and limit is applied at PK level (step 6) for early termination.
-	Requires: no or_conds, no joins, no agg/distinct/having.
+	skipped, and limit (when present) is applied at PK level (step 6) for
+	early termination. Requires: no or_conds, no joins, no agg/distinct/having.
 	]]
-	local order_ok = q._order and q._lim
+	local order_ok = q._order
 		and not q._agg and not q._dist and not q._hav
 		and #q._joins == 0 and #or_conds == 0
 		and order_matches(node, order_want)
@@ -1081,12 +1108,7 @@ function Q:lower()
 			-- query-based in_/not_in: materialise subquery PKs into a hash and filter
 			-- driver by membership; the col is the PK col and the subquery must be in
 			-- the same PK key space. For FK use cases use where_exists instead.
-			if (f.k == 'in' or f.k == 'nin') and f.set.lower then
-				node = db:pk_hash_filter(
-					node, f.set:lower(), f.k == 'in' and 'in' or 'not_in')
-			else
-				node = db:pk_filter(node, mk_pkfn(db, f))
-			end
+			node = apply_member_filter(db, node, f)
 		end
 	end
 
@@ -1175,7 +1197,7 @@ function Q:lower()
 			end
 			-- apply join-table filters while the cursor is still positioned.
 			for _, f in ipairs(by_member[join_member] or empty) do
-				node = db:pk_filter(node, mk_pkfn(db, f))
+				node = apply_member_filter(db, node, f)
 			end
 			acc[#acc+1] = {sname = join_tbl, member = join_member}
 		end
@@ -1240,8 +1262,9 @@ function Q:lower()
 			tagg[#tagg+1] = ta
 		end
 		if q._grp then
-			-- group_by requires group order: pk_group collapses consecutive same-key
-			-- rows, stream_aggregate reads all rows per group via next_pk.
+			-- pk_group+stream_aggregate need group order (consecutive same-key
+			-- rows); used when that's free (grp_ix, or node already delivers
+			-- it). Otherwise hash_aggregate below groups without needing order.
 			local grp_cols = {}
 			for _, c in ipairs(q._grp) do
 				local sn, col = qrcol(q, c)
@@ -1279,12 +1302,53 @@ function Q:lower()
 			if grp_ix then
 				vnode = db:stream_aggregate(
 					db:pk_group_first(grp_ix), key_fn, full_agg)
-			else
-				if not group_ordered(node, grp_cols) then
-					node = db:value_sort(node, cat(imap(grp_cols,
-						function(gc) return gc.sn..'.'..gc.col end), ','))
-				end
+			elseif group_ordered(node, grp_cols) then
 				vnode = db:stream_aggregate(db:pk_group(node, key_fn), key_fn, full_agg)
+			else
+				--[[
+				no natural group order: sorting the pk stream (value_sort) would
+				also require it to be a flat single-member driver, which a joined
+				node isn't. hash_aggregate groups an already-decoded value stream
+				in one O(n) pass with no order requirement -- strictly cheaper
+				than sort-then-stream here too, since there's no free order to
+				lose by not sorting. select decodes exactly the columns the
+				group key and aggregates need; out_name dedups repeated columns
+				and gives each a private field name in that row.
+				]]
+				local outputs = {}
+				local seen = {}
+				local function out_name(member, col)
+					local k = member..':'..col
+					local name = seen[k]
+					if name then return name end
+					name = '_g'..(#outputs+1)
+					outputs[#outputs+1] = {name = name,
+						fn = function(pk) return pk:col(member, col) end}
+					seen[k] = name
+					return name
+				end
+				local grp_names = {}
+				for i, gc in ipairs(grp_cols) do grp_names[i] = out_name(gc.sn, gc.col) end
+				local full_hagg = {}
+				for i, gc in ipairs(grp_cols) do
+					full_hagg[#full_hagg+1] = {
+						name = gc.col, op = 'key', part = i,
+						member = gc.sn, col = gc.col,
+					}
+				end
+				for _, a in ipairs(tagg) do
+					local ha = update({}, a)
+					if a.op ~= 'count' then ha.input = out_name(a.member, a.col) end
+					full_hagg[#full_hagg+1] = ha
+				end
+				local value_key_fn = function(rec)
+					local parts = {}
+					for i, gn in ipairs(grp_names) do
+						parts[i] = rec[gn] ~= nil and rec[gn] or null
+					end
+					return parts
+				end
+				vnode = db:hash_aggregate(db:select(node, outputs), value_key_fn, full_hagg)
 			end
 		else
 			vnode = db:stream_aggregate(node, nil, tagg)

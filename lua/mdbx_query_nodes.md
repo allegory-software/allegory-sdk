@@ -17,17 +17,12 @@ events/session_id, events/kind.
 
 ## NOT YET IMPLEMENTED
 
-PK Tuple-preserving `pk_sort`, `value_sort`, `pk_join_hash`.
+PK Tuple-preserving `pk_sort`, `value_sort`.
 
 Currently `pk_sort` won't accept PK tuple inputs, only flat PK inputs,
 because it cannot sort multiple PK streams in parallel. That makes `merge_join`
 non-composable but `nested_join` and `pk_join_seek` can do the job instead.
 `merge_join` is usually chosen for unrelated index joins.
-
-`pk_join_hash` also requires a single-member (non-chained) driver; it cannot
-sit downstream of another join the way `pk_join_seek` and `nested_join` can.
-It also has no wide-FK (prefix-scan) path: `pk_join_seek` handles a FK index
-wider than the FK's own columns via a prefix scan, `pk_join_hash` does not.
 
 
 ## STORAGE MODEL
@@ -229,8 +224,6 @@ Driver + FK index. Output adds a member from a different key space. Driver can
 be in any order.
 
 	pk_join_seek(driver, fk)  driver order  one FK seek per driver PK; O(n log m)
-	pk_join_hash(driver, fk)    FK index order
-	  materialise driver set; scan FK index; O(n+m)
 	pk_parent_lookup(child, fk) child order     child PK -> parent PK via FK column
 
 **pk_join_seek** vs **merge_join**: use `pk_join_seek` when the driver is small,
@@ -238,11 +231,6 @@ unsorted, or driver order must be preserved.
 
 	pk_join_seek(pk_seek('users/status','active'), 'sessions/user_id')
 	-- active users and their sessions in status-index order
-
-**pk_join_hash** vs **pk_join_seek**: `pk_join_seek` preserves driver order, one
-seek per row. `pk_join_hash` materialises all driver PKs into a hash set then
-scans the FK index once in FK-index order. Use when the driver is large and
-unordered and FK-index order is acceptable.
 
 **pk_parent_lookup** vs **pk_join_***: the only node that goes child->parent.
 Reads the FK column value from the child's row and probes the parent base table
@@ -256,14 +244,12 @@ from an earlier join (chained); parent is the new one.
 	-- user_id is in the index: no base-table read
 
 `opts.left = true`: left join; rows with null FK or missing parent are emitted
-once with the parent member absent. `pk_join_hash` appends unmatched rows after
-matched rows, unordered; the other two preserve their stated order.
+once with the parent member absent, in the node's stated order.
 
 **Chained joins** (users -> sessions -> events): `merge_join(pk_range('users'),
 pk_range('sessions/user_id'))` produces sessions in FK-index order (user_id asc,
 session PK asc), not session-PK order. Joining events onto that output requires
-`pk_join_seek` for the second step -- `pk_join_hash` cannot take a multi-member
-driver (see NOT YET IMPLEMENTED).
+`pk_join_seek` for the second step.
 
 
 ## TRANSFORM NODES
@@ -426,7 +412,7 @@ All inputs must have the same fields in the same order.
 	stream_distinct, hash_distinct,
 	  stream_aggregate, hash_aggregate,
 	  union_distinct                              unique by key
-	merge_join, pk_join_seek, pk_join_hash,
+	merge_join, pk_join_seek,
 	  pk_parent_lookup, nested_join               parent PK may repeat
 	pk_project                                    inherits projected member
 
