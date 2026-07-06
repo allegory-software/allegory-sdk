@@ -224,6 +224,7 @@ FFI
 	ptr(p)                       = p ~= nil and p  or nil
 	ptr_serialize(p) -> n|s             store pointer address in Lua value
 	ptr_deserialize([ct,]n|s) -> p      convert address to pointer
+	int64key(v) -> n|s                  cdata int64/uint64 as a table key
 	memcmp(p1, p2, sz) -> i        memcmp
 ALLOCATION
 	freelist([create], [destroy]) -> alloc,free   Lua freelist allocation pattern
@@ -2276,6 +2277,16 @@ function ptr_deserialize(ct, addr)
 	else
 		return cast(ct, addr)
 	end
+end
+
+--int64 is boxed and can't be used as table key. we convert to number (unboxed)
+--and if it doesn't fit we convert to string (interned). for hashes it won't
+--help much but for autoincremented ids it will likely convert to number always.
+function int64key(v)
+	if type(v) ~= 'cdata' then return v end
+	local n = tonumber(v)
+	if n == v then return n end
+	return tostring(v)
 end
 
 --buffers --------------------------------------------------------------------
