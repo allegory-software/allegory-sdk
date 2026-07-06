@@ -301,10 +301,12 @@ function Db.pk_get:__call(db, tab, ...)
 	})
 	local cur, is_open
 	local sz
+	local pk_key --per-instance copy of the encoded key; see open()
 	local pk_rec = MDBX_val()
 	local val_rec = MDBX_val()
 	local done, has_pk
 	local key_vals = {}
+	function node:merge_key() return pk_rec.data, pk_rec.size end
 	function node:pk(name)
 		if has_pk and (name == nil or name == schema.name) then
 			return true, pk_rec.data, pk_rec.size
@@ -318,7 +320,7 @@ function Db.pk_get:__call(db, tab, ...)
 		if done then has_pk = nil; return end
 		done = true
 		if not cur then cur = db:cursor(schema.name) end
-		pk_rec.data = mdbx_key_rec_buffer; pk_rec.size = sz
+		pk_rec.data = pk_key; pk_rec.size = sz
 		has_pk = cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, val_rec)
 		if not has_pk then return end
 		return true
@@ -335,6 +337,7 @@ function Db.pk_get:__call(db, tab, ...)
 		sz = encode_key(db, schema, 'get', nil,
 			mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
 			schema.key_cols, nil, unpack(key_vals, 1, #key_names))
+		pk_key = u8a(sz); copy(pk_key, mdbx_key_rec_buffer, sz)
 		is_open = true
 		done = false
 		has_pk = nil
@@ -1436,6 +1439,16 @@ function Db.pk_join_seek:__call(db, driver, fk_name, opts)
 	--duplicates of one key. fk_child (pk_prefix, reset per row) walks
 	--that range instead of the narrow case's exact SET_KEY/NEXT_DUP.
 	local wide = #fk_schema.pk > #fk.cols
+	--seek/reset_prefix below reuse driver's parent-pk bytes as-is, which
+	--only works if the FK index key is byte-identical to the parent pk
+	--(fails for a nullable FK col: extra marker byte). not_null is the
+	--only attribute that can differ (add_fk enforces the rest), same
+	--check as fk_parent_scan's nullable_fk.
+	local reencode = false
+	for _, col in ipairs(fk.cols) do
+		if not child_schema.fields[col].not_null then reencode = true; break end
+	end
+	local reenc_buf = reencode and u8a(MDBX_MAX_KEY_SIZE) or nil
 	local fk_child = wide and db:pk_prefix(fk_name, unpack(fk.cols)) or nil
 	node.inputs = wide and {driver, fk_child} or {driver}
 	node.merge_cmp = driver.merge_cmp
@@ -1502,7 +1515,13 @@ function Db.pk_join_seek:__call(db, driver, fk_name, opts)
 				if not driver:next_item() then return end
 				local _, p, p_sz = driver:pk(from_member)
 				parent_pk, parent_pk_sz = p, p_sz
-				fk_child:reset_prefix(p, p_sz)
+				if reencode then
+					local sz = key_reencode(
+						parent_schema, fk_schema, p, p_sz, reenc_buf, MDBX_MAX_KEY_SIZE)
+					fk_child:reset_prefix(reenc_buf, sz)
+				else
+					fk_child:reset_prefix(p, p_sz)
+				end
 				if fk_child:next_group() then
 					in_match = true
 					has_pair = true; has_child = true; return true
@@ -1522,7 +1541,13 @@ function Db.pk_join_seek:__call(db, driver, fk_name, opts)
 			if not driver:next_item() then return end
 			local _, p, p_sz = driver:pk(from_member)
 			parent_pk, parent_pk_sz = p, p_sz
-			parent_pk_rec.data = p; parent_pk_rec.size = p_sz
+			if reencode then
+				local sz = key_reencode(
+					parent_schema, fk_schema, p, p_sz, reenc_buf, MDBX_MAX_KEY_SIZE)
+				parent_pk_rec.data = reenc_buf; parent_pk_rec.size = sz
+			else
+				parent_pk_rec.data = p; parent_pk_rec.size = p_sz
+			end
 			if fk_cur:move_raw_into(C.MDBX_SET_KEY, parent_pk_rec, child_pk_rec) then
 				in_match = true
 				child_base_seeked = false
@@ -1899,7 +1924,10 @@ inner is opened/closed per outer item. node.members is extended
 with inner members on the first iteration.
 fn: factory(outer_fn, params) -> (inner_node, iparams).
 outer_fn('sname.col', ...) -> {v1,...}: reads current outer cols.
-Usage: db:nested_join(outer, fn)
+opts.left = true: left join; when fn yields zero inner items, emit
+the outer item once with the inner member absent (pk/compile_col
+return nil for it), instead of dropping the outer item.
+Usage: db:nested_join(outer, fn [, opts])
 ]]
 Db.nested_join = object(Db.query_node, {
 	kind   = 'nested_join',
@@ -1908,9 +1936,10 @@ Db.nested_join = object(Db.query_node, {
 	source = 'pass-through',
 	work   = 'correlated inner per outer item; one output per inner item',
 })
-function Db.nested_join:__call(db, outer, fn)
+function Db.nested_join:__call(db, outer, fn, opts)
 	check_pk_node(outer, 'nested_join', 1)
 	assert(type(fn) == 'function', 'nested_join: fn must be a function')
+	local left = opts and opts.left
 	local members = extend({}, outer.members)
 	local node = object(self, {
 		members = members,
@@ -1976,6 +2005,7 @@ function Db.nested_join:__call(db, outer, fn)
 			inner:open(iparams)
 			if inner:next_group() then cur_inner = inner; return true end
 			inner:close()
+			if left then return true end -- left join: outer emitted, inner member absent
 			has_pk = false
 		end
 	end

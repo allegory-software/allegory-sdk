@@ -260,6 +260,111 @@ local function bench_query(name, fn)
 		name, runs / dt, rows / dt, dt * 1000 / runs, rows / runs)
 end
 
+-- same fk (all N_POSTS entries) throughout; driver size swept as a
+-- fraction of N_AUTHORS. Three strategy comparisons, all on author<->post:
+--   parent->child:  pk_join_seek     vs merge_join
+--   child->parent:  pk_parent_lookup vs merge_join (roles reversed)
+--   set difference: pk_hash_filter   vs merge_except (authors w/o posts)
+-- merge_join/merge_except require their inputs already in ascending-PK
+-- order; a plain pk_range on the base table (driver here) and
+-- fk_parent_scan's output both qualify without an extra pk_sort, so this
+-- is a fair like-for-like comparison, not one strategy paying a sort the
+-- other doesn't.
+local function bench_join_sweep(db, label, author_tbl, fk_name, n_authors)
+	for _, frac in ipairs{0.01, 0.05, 0.10, 0.25, 0.50, 1.00} do
+		local lo, hi = 1, math.max(1, math.min(n_authors, math.floor(n_authors * frac)))
+		local p = {LO = lo, HI = hi}
+		bench_query(('%s pk_join_seek (n=%d%%)'):format(label, frac * 100), function()
+			return each_node(
+				db:pk_join_seek(
+					db:pk_range(author_tbl, '>=', 'LO', '<=', 'HI'), fk_name),
+				p)
+		end)
+		bench_query(('%s merge_join (n=%d%%)'):format(label, frac * 100), function()
+			return each_node(
+				db:merge_join(
+					db:pk_range(author_tbl, '>=', 'LO', '<=', 'HI'),
+					db:pk_range(fk_name)),
+				p)
+		end)
+	end
+end
+
+local function bench_parent_lookup_sweep(db, label, author_tbl, fk_name, n_authors)
+	for _, frac in ipairs{0.01, 0.05, 0.10, 0.25, 0.50, 1.00} do
+		local lo, hi = 1, math.max(1, math.min(n_authors, math.floor(n_authors * frac)))
+		local p = {LO = lo, HI = hi}
+		-- both driven by the same author_id-ordered post range, so the
+		-- comparison isolates the parent-lookup strategy, not the input scan.
+		bench_query(('%s pk_parent_lookup (n=%d%%)'):format(label, frac * 100), function()
+			return each_node(
+				db:pk_parent_lookup(
+					db:pk_range(fk_name, '>=', 'LO', '<=', 'HI'), fk_name),
+				p)
+		end)
+		bench_query(('%s merge_join rev (n=%d%%)'):format(label, frac * 100), function()
+			return each_node(
+				db:merge_join(
+					db:pk_range(fk_name, '>=', 'LO', '<=', 'HI'),
+					db:pk_range(author_tbl)),
+				p)
+		end)
+	end
+end
+
+local function bench_except_sweep(db, label, author_tbl, fk_name, n_authors)
+	for _, frac in ipairs{0.01, 0.05, 0.10, 0.25, 0.50, 1.00} do
+		local lo, hi = 1, math.max(1, math.min(n_authors, math.floor(n_authors * frac)))
+		local p = {LO = lo, HI = hi}
+		bench_query(('%s pk_hash_filter not_in (n=%d%%)'):format(label, frac * 100), function()
+			return each_node(
+				db:pk_hash_filter(
+					db:pk_range(author_tbl, '>=', 'LO', '<=', 'HI'),
+					db:fk_parent_scan(fk_name),
+					'not_in'),
+				p)
+		end)
+		bench_query(('%s merge_except (n=%d%%)'):format(label, frac * 100), function()
+			return each_node(
+				db:merge_except(
+					db:pk_range(author_tbl, '>=', 'LO', '<=', 'HI'),
+					db:fk_parent_scan(fk_name)),
+				p)
+		end)
+	end
+end
+
+--[[
+all three sweeps above feed merge_join/merge_except a driver that's
+already ascending-PK-ordered for free (a plain pk_range on the base
+table), so they never pay for the pk_sort that pk_join_seek/pk_hash_filter
+don't need either way -- a favorable case for the merge strategies that
+doesn't show what happens when the driver isn't already sorted.
+
+author/status (unbounded, both values) breaks that: it's ordered by
+status first, so PK order resets at the status boundary (all 'active'
+authors ascending by PK, then all 'inactive' ones, which are scattered
+throughout the PK range, not just at the end). merge_join/merge_except
+need an explicit pk_sort here to converge correctly; pk_join_seek/
+pk_hash_filter tolerate the input in any order as-is and are unaffected.
+This isolates the sort cost the sweeps above didn't have to pay.
+]]
+local function bench_unsorted_driver_cost(db, label, author_tbl, fk_name)
+	local function driver() return db:pk_range(author_tbl..'/status') end
+	bench_query(label..' pk_join_seek (unsorted driver)', function()
+		return each_node(db:pk_join_seek(driver(), fk_name))
+	end)
+	bench_query(label..' merge_join (+pk_sort)', function()
+		return each_node(db:merge_join(db:pk_sort(driver()), db:pk_range(fk_name)))
+	end)
+	bench_query(label..' pk_hash_filter not_in (unsorted driver)', function()
+		return each_node(db:pk_hash_filter(driver(), db:fk_parent_scan(fk_name), 'not_in'))
+	end)
+	bench_query(label..' merge_except (+pk_sort)', function()
+		return each_node(db:merge_except(db:pk_sort(driver()), db:fk_parent_scan(fk_name)))
+	end)
+end
+
 local function bench_op(name, fn)
 	collectgarbage()
 	collectgarbage()
@@ -353,6 +458,14 @@ local function run_query_benchmarks(db)
 	bench_query('tag -> post_tag -> post join', function()
 		return each_row(q_tag_join, p_tag)
 	end)
+
+	printf_line('')
+	printf_line('join / set-op strategy comparison (author <-> post, u64 ids)')
+	bench_join_sweep(db, 'author->post', 'author', 'post/author_id', N_AUTHORS)
+	bench_parent_lookup_sweep(db, 'post->author', 'author', 'post/author_id', N_AUTHORS)
+	bench_except_sweep(db, 'author w/o post', 'author', 'post/author_id', N_AUTHORS)
+	bench_unsorted_driver_cost(db, 'author->post', 'author', 'post/author_id')
+	printf_line('')
 
 	local q_has_posts = db:from'category'
 		:where_has'post'

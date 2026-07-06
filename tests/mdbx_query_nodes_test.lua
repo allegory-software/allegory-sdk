@@ -183,6 +183,49 @@ local function with_u32_db(name, fn)
 	assert(ok, err)
 end
 
+--fixture for pk_join_seek's nullable-FK reencode path: nuser_id is
+--nullable, so its index key differs (extra marker byte) from users' own
+--not_null pk. narrow index is the fk's own; wide adds started_at.
+local function build_nullable_fk_fixture(db)
+	db:begin'w'
+	db:create_table('users', {fields = {
+		{col = 'id', mdbx_type = 'u64', not_null = true},
+	}, pk = {'id'}})
+
+	db:create_table('sessions', {fields = {
+		{col = 'id'        , mdbx_type = 'u64', not_null = true},
+		{col = 'nuser_id'  , mdbx_type = 'u64', not_null = false},
+		{col = 'started_at', mdbx_type = 'u64', not_null = true},
+	}, pk = {'id'}})
+	db:add_index('sessions', {'nuser_id'})
+	db:add_index('sessions', {'nuser_id', 'started_at'})
+	db:add_fk{table = 'sessions', cols = {'nuser_id'},
+		ref_table = 'users', ref_cols = {'id'}}
+
+	db:insert('users', '{}', {id = 1})
+	db:insert('users', '{}', {id = 2})
+	local sessions = {
+		{id = 11, nuser_id = 1, started_at = 100},
+		{id = 12, nuser_id = 1, started_at = 200},
+		{id = 13, nuser_id = null, started_at = 50},
+	}
+	for _, r in ipairs(sessions) do db:insert('sessions', '{}', r) end
+	db:commit()
+end
+
+local function with_nullable_fk_db(name, fn)
+	local file = test_file(name)
+	cleanup(file)
+	local db = mdbx_open(file)
+	local ok, err = xpcall(function()
+		build_nullable_fk_fixture(db)
+		fn(db)
+	end, debug.traceback)
+	if db.env then db:close() end
+	cleanup(file)
+	assert(ok, err)
+end
+
 ------------------------------------------------------------------------------
 
 function test.explain_pk_range()
@@ -527,6 +570,33 @@ function test.pk_join_seek_exec()
 	end)
 end
 
+function test.pk_join_seek_nullable_fk_exec()
+	with_nullable_fk_db('pk_join_seek_nullable_fk_exec', function(db)
+		db:atomic('r', function()
+			-- narrow index on the nullable FK column itself
+			local node = db:pk_join_seek(db:pk_range('users'), 'sessions/nuser_id')
+			node:open()
+			local tuples = {}
+			while node:next_group() do
+				tuples[#tuples+1] = pk_id(node, 'users', db)..':'..pk_id(node, 'sessions', db)
+			end
+			node:close()
+			-- session 13 (nuser_id null) has no parent and is excluded
+			assert(cat(tuples, ',') == '1:11,1:12', S(tuples))
+
+			-- wide index: nuser_id plus a trailing, non-FK column
+			local node2 = db:pk_join_seek(db:pk_range('users'), 'sessions/nuser_id,started_at')
+			node2:open()
+			local tuples2 = {}
+			while node2:next_group() do
+				tuples2[#tuples2+1] = pk_id(node2, 'users', db)..':'..pk_id(node2, 'sessions', db)
+			end
+			node2:close()
+			assert(cat(tuples2, ',') == '1:11,1:12', S(tuples2))
+		end)
+	end)
+end
+
 function test.pk_parent_lookup_exec()
 	with_db('pk_parent_lookup_exec', function(db)
 		db:atomic('r', function()
@@ -686,6 +756,28 @@ function test.nested_join_exec()
 			assert(#node.members == 2 and node.members[1] == 'users' and node.members[2] == 'sessions',
 				S(node.members))
 			node:close()
+		end)
+	end)
+end
+
+function test.nested_join_left_exec()
+	with_db('nested_join_left_exec', function(db)
+		db:atomic('r', function()
+			local function factory(outer)
+				return db:pk_seek('sessions/user_id', 'UID'), {UID = outer('users.id')[1]}
+			end
+			-- left join: users 3 and 5 (no sessions) are still emitted, with the
+			-- sessions member absent.
+			local node = db:nested_join(db:pk_range('users'), factory, {left = true})
+			node:open()
+			local t = {}
+			while node:next_group() do
+				local uid = pk_id(node, 'users', db)
+				local ok = node:pk('sessions')
+				t[#t+1] = ok and uid..':'..pk_id(node, 'sessions', db) or uid..':none'
+			end
+			node:close()
+			assert(cat(t, ',') == '1:11,1:12,1:13,2:14,3:none,4:15,5:none', S(t))
 		end)
 	end)
 end

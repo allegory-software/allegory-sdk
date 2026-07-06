@@ -12,7 +12,8 @@ JOIN
 		as    = alias               another way to give alias
 	:inner_join(...)               same as :join
 	:left_join(...)                left join (child->parent only)
-	:nested_join(fn)               nested-loop join; fn(outer) -> query
+	:nested_join(fn [, opt])       nested-loop join; fn(outer) -> query
+		left = true                 keep outer row when fn yields no rows
 	outer                       outer('MEMBER.COL', ...) -> {val1,...}
 ORDER / LIMIT / DISTINCT
 	:order_by(col, ...)            query col or 'col desc'; free if index order, else sort
@@ -282,8 +283,8 @@ function Q:join(spec, opts)       return addjoin(self, spec, opts, false) end
 function Q:inner_join(spec, opts) return addjoin(self, spec, opts, false) end
 function Q:left_join(spec, opts)  return addjoin(self, spec, opts, true) end
 
-function Q:nested_join(fn)
-	self._joins[#self._joins+1] = {nested = true, fn = fn}
+function Q:nested_join(fn, opts)
+	self._joins[#self._joins+1] = {nested = true, fn = fn, left = opts and opts.left}
 	return self
 end
 
@@ -523,6 +524,7 @@ local function try_ix_plan(ix_schema, mf, is_pk)
 	local lo_by = {}   -- col -> {op, v, fi}
 	local hi_by = {}   -- col -> {op, v, fi}
 	local prefix_by = {} -- col -> {v, fi}
+	local in_by = {}   -- col -> {vals, fi} (single-column full-key IN match)
 	-- ntnull on a not_null field: null is never stored, so the filter is
 	-- vacuously true. Track separately instead of adding a '__null' lo
 	-- bound, which fails to encode for not_null fields (check_col error).
@@ -559,6 +561,8 @@ local function try_ix_plan(ix_schema, mf, is_pk)
 			if not prefix_by[col] then
 				prefix_by[col] = {v = f.prefix, fi = i}
 			end
+		elseif k == 'in' and not f.set.lower and #f.set >= 1 then
+			if not in_by[col] then in_by[col] = {vals = f.set, fi = i} end
 		end
 		::continue::
 	end
@@ -580,6 +584,25 @@ local function try_ix_plan(ix_schema, mf, is_pk)
 		}
 	end
 	local nc = kc[depth+1]
+	--[[
+	single-column IN match: same idea as or_where's multiple access
+	branches merge_union'd together, but for one column's value list
+	instead of separate user-written OR conditions. Limited to a schema
+	with exactly one key column: a composite key can't be filled from one
+	IN list without pairing it with fixed values for the other columns,
+	which isn't attempted here.
+	]]
+	if n == 1 and depth == 0 and in_by[nc] then
+		local ib = in_by[nc]
+		return {
+			kind     = 'in_union',
+			ix       = ix_schema.name,
+			is_pk    = is_pk,
+			vals     = ib.vals,
+			consumed = {[ib.fi] = true},
+			score    = n*20 + 10,
+		}
+	end
 	local prefix = prefix_by[nc]
 	if prefix then
 		consumed[prefix.fi] = true
@@ -684,6 +707,33 @@ local function build_access(db, schema, mf, hints, use_counts, want_order,
 			return db:pk_seek(best.ix, unpack(best.vals)), best.consumed
 		elseif kind == 'pk_prefix' then
 			return db:pk_prefix(best.ix, unpack(best.vals)), best.consumed
+		elseif kind == 'in_union' then
+			--[[
+			:in_ values are literals known at lower() time, not params bound
+			at :rows() time like other filters (there's no per-value param
+			name to give pk_get/pk_seek). Build one access node per value and
+			merge_union them, then wrap the result's open() to inject the
+			literal bindings into whatever params table reaches it -- this
+			works regardless of nesting (top-level query, or used as a
+			subquery via where_exists/nested_join/where_has), since the
+			injection happens at the node itself rather than relying on
+			whichever call site happens to assemble params for it.
+			]]
+			local nodes = {}
+			local binds = {}
+			for i, v in ipairs(best.vals) do
+				local pname = '__inv'..i
+				binds[pname] = v
+				nodes[i] = best.is_pk and db:pk_get(best.ix, pname)
+					or db:pk_seek(best.ix, pname)
+			end
+			local unode = #nodes == 1 and nodes[1] or db:merge_union(unpack(nodes))
+			local uopen = unode.open
+			function unode:open(params)
+				for pname, v in pairs(binds) do params[pname] = v end
+				return uopen(self, params)
+			end
+			return unode, best.consumed
 		else  -- pk_range
 			local args = {}
 			local opts = {}
@@ -714,8 +764,7 @@ end
 
 -- build a pk_filter predicate from a residual filter spec.
 -- pk_filter calls fn(node, params); filter values are param names.
--- node:col uses _member (tuple member identity); the schema (_sname) is
--- only needed for the in_/not_in column-type check below.
+-- node:col uses _member (tuple member identity), not _sname.
 local function mk_pkfn(db, f)
 	local sn, col, k = f._member, f._col, f.k
 	if k == 'fn' then return f.fn end
@@ -750,14 +799,14 @@ local function mk_pkfn(db, f)
 			return lo_fn(g, params[lo_pn]) and hi_fn(g, params[hi_pn])
 		end
 	elseif k == 'in' or k == 'nin' then
-		local mt = db:table_schema(f._sname).fields[col].mdbx_type
-		assertf(mt ~= 'i64' and mt ~= 'u64',
-			'list-based in_/not_in on boxed %s column %s.%s', mt, sn, col)
-		local lut = index(f.set)
+		-- int64key: a decoded int64/uint64 value doesn't hash correctly as
+		-- a raw table key (see glue.lua int64key).
+		local lut = {}
+		for _, v in ipairs(f.set) do lut[int64key(v)] = true end
 		if k == 'in' then
-			return function(node) return lut[node:col(sn, col)] ~= nil end
+			return function(node) return lut[int64key(node:col(sn, col))] ~= nil end
 		else
-			return function(node) return lut[node:col(sn, col)] == nil end
+			return function(node) return lut[int64key(node:col(sn, col))] == nil end
 		end
 	elseif k == 'starts' then
 		local pname = f.prefix
@@ -786,7 +835,7 @@ end
 --[[
 categorize filters by member; resolve alias.col. Sets both _member (the
 tuple member identity used to address the node, e.g. a self-join alias)
-and _sname (the underlying schema, needed only for type lookups).
+and _sname (the underlying schema; or_where checks it's the from-table).
 returns: by_member, cross (fn/ex/nex/has/hasnt), or_conds.
 ]]
 local function prep_filters(q, filt)
@@ -1164,7 +1213,7 @@ function Q:lower()
 				end
 				return r, params
 			end
-			node = db:nested_join(node, factory)
+			node = db:nested_join(node, factory, {left = j.left})
 		else
 			local join_tbl = j.tbl
 			local join_member = j.alias
@@ -1193,7 +1242,20 @@ function Q:lower()
 			if dir == 'child_to_parent' then
 				node = db:pk_parent_lookup(node, fk_ix, opts)
 			else
-				node = db:pk_join_seek(node, fk_ix, opts)
+				--merge_join: O(n+m) vs pk_join_seek's O(n log m), but only
+				--when driver is already in from-table pk order (pk_sort
+				--tips it back to pk_join_seek, per bench). First join only
+				--(#acc==1; can't chain hops), no left join, no alias (no
+				--opts.member). merge_sig check on the candidate also
+				--excludes a nullable FK column (different index key space).
+				local merge_ok = #acc == 1 and not j.left and join_member == join_tbl
+					and node.merge_sig == from_s.key_sig
+				local candidate = merge_ok and db:pk_range(fk_ix)
+				if candidate and candidate.merge_sig == node.merge_sig then
+					node = db:merge_join(node, candidate)
+				else
+					node = db:pk_join_seek(node, fk_ix, opts)
+				end
 			end
 			-- apply join-table filters while the cursor is still positioned.
 			for _, f in ipairs(by_member[join_member] or empty) do
@@ -1229,10 +1291,26 @@ function Q:lower()
 				if want then node = db:semi_join(node, factory)
 				else node = db:anti_join(node, factory) end
 			else
-				-- materialise the set of parents-with-children once via fk_parent_scan,
-				-- then filter the driver by membership; O(n+m), no per-row index seek.
-				node = db:pk_hash_filter(node, db:fk_parent_scan(fk_ix2),
-					k == 'has' and 'in' or 'not_in')
+				--fk_parent_scan is always in from-table pk order (it
+				--re-encodes nullable FK parts itself), so merge_except/
+				--merge_join just need node already sorted too (per bench,
+				--they lose once a pk_sort would be needed). hasnt keeps all
+				--of node's members via merge_except; has goes through
+				--pk_project, which drops all but one member, so it's
+				--restricted to #node.members==1 (no prior joins).
+				local sorted = node.merge_sig == from_s.key_sig
+				if k == 'hasnt' and sorted then
+					node = db:merge_except(node, db:fk_parent_scan(fk_ix2))
+				elseif k == 'has' and sorted and #node.members == 1 then
+					node = db:pk_project(
+						db:merge_join(node, db:fk_parent_scan(fk_ix2)), q._from.tbl)
+				else
+					-- materialise the set of parents-with-children once via
+					-- fk_parent_scan, then filter the driver by membership;
+					-- O(n+m), no per-row index seek.
+					node = db:pk_hash_filter(node, db:fk_parent_scan(fk_ix2),
+						k == 'has' and 'in' or 'not_in')
+				end
 			end
 		end
 	end
@@ -1361,6 +1439,12 @@ function Q:lower()
 		assertf(not q._dist, 'distinct requires select')
 		assertf(not q._hav, 'having requires select')
 		if q._order and not order_ok then
+			-- value_sort's pk-input path only sorts a flat single-member
+			-- stream; a join's multi-member tuple has no such path (nothing
+			-- sorts a pk-tuple stream while keeping the whole tuple), so
+			-- name the restriction instead of letting value_sort's generic
+			-- assert surface as a confusing crash.
+			assertf(#node.members == 1, 'order_by after join requires select')
 			node = db:value_sort(node, order_spec(order_cols))
 			if q._lim then node = db:limit(node, q._lim, q._off) end
 		end
