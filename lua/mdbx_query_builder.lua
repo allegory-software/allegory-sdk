@@ -819,17 +819,38 @@ local function mk_pkfn(db, f)
 	assertf(false, 'mk_pkfn: unhandled filter kind %q', k)
 end
 
--- apply one member filter to a pk stream. query-based in_/not_in materialises
--- the subquery's PKs and filters by membership (pk_hash_filter); everything
--- else (including list-based in_/not_in) becomes a pk_filter row predicate.
--- shared by the from-table residual step and the joined-member filter step,
--- so both get the same subquery handling.
-local function apply_member_filter(db, node, f)
-	if (f.k == 'in' or f.k == 'nin') and f.set.lower then
-		return db:pk_hash_filter(
-			node, f.set:lower(), f.k == 'in' and 'in' or 'not_in')
+-- AND-compose predicate fns; single fn returned unwrapped (no call overhead).
+local function and_fns(fns)
+	if #fns == 1 then return fns[1] end
+	return function(node, params)
+		for i = 1, #fns do
+			if not fns[i](node, params) then return false end
+		end
+		return true
 	end
-	return db:pk_filter(node, mk_pkfn(db, f))
+end
+
+-- apply a list of member filters to a pk stream. query-based in_/not_in
+-- materialises the subquery's PKs and filters by membership (pk_hash_filter);
+-- everything else (including list-based in_/not_in) is AND-composed into one
+-- pk_filter predicate -- one node instead of one per filter. subquery filters
+-- split the run so relative order is preserved. shared by the from-table
+-- residual step and the joined-member filter step.
+local function apply_member_filters(db, node, filters)
+	local pending = {}
+	for _, f in ipairs(filters) do
+		if (f.k == 'in' or f.k == 'nin') and f.set.lower then
+			if #pending > 0 then
+				node = db:pk_filter(node, and_fns(pending)); pending = {}
+			end
+			node = db:pk_hash_filter(
+				node, f.set:lower(), f.k == 'in' and 'in' or 'not_in')
+		else
+			pending[#pending+1] = mk_pkfn(db, f)
+		end
+	end
+	if #pending > 0 then node = db:pk_filter(node, and_fns(pending)) end
+	return node
 end
 
 --[[
@@ -1159,14 +1180,14 @@ function Q:lower()
 			node = db:pk_and_probe(node, unpack(probes))
 		end
 	end
+	-- query-based in_/not_in: materialise subquery PKs into a hash and filter
+	-- driver by membership; the col is the PK col and the subquery must be in
+	-- the same PK key space. For FK use cases use where_exists instead.
+	local residual = {}
 	for i, f in ipairs(mf) do
-		if not consumed[i] and not probe_consumed[i] then
-			-- query-based in_/not_in: materialise subquery PKs into a hash and filter
-			-- driver by membership; the col is the PK col and the subquery must be in
-			-- the same PK key space. For FK use cases use where_exists instead.
-			node = apply_member_filter(db, node, f)
-		end
+		if not consumed[i] and not probe_consumed[i] then residual[#residual+1] = f end
 	end
+	node = apply_member_filters(db, node, residual)
 
 	-- 3. OR CONDITIONS: each branch gets its own access node (and its own
 	--    index). All branches must be in PK order (same merge_sig) before
@@ -1260,9 +1281,7 @@ function Q:lower()
 				end
 			end
 			-- apply join-table filters while the cursor is still positioned.
-			for _, f in ipairs(by_member[join_member] or empty) do
-				node = apply_member_filter(db, node, f)
-			end
+			node = apply_member_filters(db, node, by_member[join_member] or empty)
 			acc[#acc+1] = {sname = join_tbl, member = join_member}
 		end
 	end
@@ -1451,12 +1470,14 @@ function Q:lower()
 	end
 
 	-- 8. HAVING: post-aggregate predicate; must see value records, not PKs.
+	-- AND-composed into one value_filter instead of one per condition.
 	if q._hav then
+		local fns = {}
 		for _, h in ipairs(q._hav) do
 			local hpname, hfn, hcol = h.v, cmp[h.op], h.col
-			vnode = db:value_filter(vnode,
-				function(r, params) return hfn(r[hcol], params[hpname]) end)
+			fns[#fns+1] = function(r, params) return hfn(r[hcol], params[hpname]) end
 		end
+		vnode = db:value_filter(vnode, and_fns(fns))
 	end
 
 	--[[

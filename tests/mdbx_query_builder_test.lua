@@ -415,6 +415,53 @@ function test.or_where_exec()
 	end)
 end
 
+function test.multi_filter_and_exec()
+	with_db('multi_filter_and_exec', function(db)
+		db:atomic('r', function()
+			--residual: 2 unindexed AND filters compose into 1 pk_filter node.
+			local q1 = db:from'users'
+				:where('status', 'P_st'):where('score', 'P_sc')
+				:no_index('users')
+				:select{'users.id id'}
+			local plan1 = q1:lower():explain()
+			assert(plan1.inputs[1].kind == 'pk_filter', plan1.inputs[1].kind)
+			assert(plan1.inputs[1].inputs[1].kind == 'pk_range',
+				plan1.inputs[1].inputs[1].kind)
+			local t = {}
+			for r in q1:rows({P_st = 'active', P_sc = 80}) do t[#t+1] = tonumber(r.id) end
+			assert(cat(t, ',') == '1', S(t))
+
+			--join-member: 2 filters on the joined member compose into 1 pk_filter.
+			local q2 = db:from'users':join'sessions'
+				:where('sessions.started_at', '>', 'P_lo')
+				:where('sessions.started_at', '<', 'P_hi')
+				:select{'users.id uid', 'sessions.id sid'}
+			local plan2 = q2:lower():explain()
+			assert(plan2.inputs[1].kind == 'pk_filter', plan2.inputs[1].kind)
+			assert(plan2.inputs[1].inputs[1].kind == 'merge_join',
+				plan2.inputs[1].inputs[1].kind)
+			t = {}
+			for r in q2:rows({P_lo = 1050, P_hi = 1250}) do
+				t[#t+1] = tonumber(r.uid)..':'..tonumber(r.sid)
+			end
+			assert(cat(t, ',') == '1:12,1:13', S(t))
+
+			--having: 2 conditions compose into 1 value_filter node.
+			local q3 = db:from'sessions':group_by('user_id')
+				:agg{{name = 'cnt', op = 'count'}}
+				:having('cnt', '>=', 'P_lo')
+				:having('cnt', '<', 'P_hi')
+			local plan3 = q3:lower():explain()
+			assert(plan3.kind == 'value_filter', plan3.kind)
+			assert(plan3.inputs[1].kind ~= 'value_filter', plan3.inputs[1].kind)
+			t = {}
+			for r in q3:rows({P_lo = 1, P_hi = 3}) do t[#t+1] = tonumber(r.user_id) end
+			sort(t)
+			assert(cat(t, ',') == '2,4', S(t))
+		end)
+	end)
+end
+
 ------------------------------------------------------------------------------
 
 local name = ...
