@@ -346,6 +346,75 @@ function test.where_exists_exec()
 	end)
 end
 
+function test.join_parent_to_child_exec()
+	with_db('join_parent_to_child_exec', function(db)
+		db:atomic('r', function()
+			local function pairs_ids(q, params)
+				local t = {}
+				for r in q:rows(params) do
+					t[#t+1] = tonumber(r.uid)..':'..(r.sid and tonumber(r.sid) or 'none')
+				end
+				return t
+			end
+
+			local function join_kind(q) return q:lower():explain().inputs[1].kind end
+
+			--plain join, unaliased, first join, no left: merge_join path.
+			local q1 = db:from'users':join'sessions'
+				:select{'users.id uid', 'sessions.id sid'}
+			assert(join_kind(q1) == 'merge_join', join_kind(q1))
+			assert(cat(pairs_ids(q1), ',') == '1:11,1:12,1:13,2:14,4:15', S(pairs_ids(q1)))
+
+			--left join: merge_ok excludes j.left -> pk_join_seek path.
+			local q2 = db:from'users':left_join'sessions'
+				:select{'users.id uid', 'sessions.id sid'}
+			assert(join_kind(q2) == 'pk_join_seek', join_kind(q2))
+			assert(cat(pairs_ids(q2), ',')
+				== '1:11,1:12,1:13,2:14,3:none,4:15,5:none', S(pairs_ids(q2)))
+
+			--aliased join: merge_ok excludes join_member ~= join_tbl -> pk_join_seek.
+			local q3 = db:from'users':join'sessions s'
+				:select{'users.id uid', 's.id sid'}
+			assert(join_kind(q3) == 'pk_join_seek', join_kind(q3))
+			assert(cat(pairs_ids(q3), ',') == '1:11,1:12,1:13,2:14,4:15', S(pairs_ids(q3)))
+		end)
+	end)
+end
+
+function test.or_where_exec()
+	with_db('or_where_exec', function(db)
+		db:atomic('r', function()
+			local function ids(q, params)
+				local t = {}
+				for r in q:select{'users.id'}:rows(params) do
+					t[#t+1] = r['users.id']
+				end
+				sort(t)
+				return t
+			end
+
+			--AND branch (score index) or OR branch (status index); merge_union'd.
+			local t = ids(db:from'users'
+				:where('score', '>', 'P_hi')
+				:or_where('status', 'P_ban'), {P_hi = 90, P_ban = 'banned'})
+			assert(#t == 3 and t[1]==2 and t[2]==3 and t[3]==5, S(t))
+
+			--no preceding :where -> has_and assert fires.
+			assert(not pcall(function()
+				return db:from'users':or_where('status', 'x'):lower()
+			end))
+
+			--or_where column not on the from-table -> assert fires.
+			assert(not pcall(function()
+				return db:from'users':where('status', 'P')
+					:join'sessions'
+					:or_where('sessions.started_at', '>', 'X')
+					:lower()
+			end))
+		end)
+	end)
+end
+
 ------------------------------------------------------------------------------
 
 local name = ...

@@ -950,8 +950,15 @@ local function lower_ex_filter(db, node, f, outer_q)
 			rq._filt[#rq._filt+1] = cf
 		end
 		local inner = rq:lower()
+		--params is the same table ref for every outer row in one run
+		--(make_existence_join); copy once per run, refresh only __ovN
+		--per row. Misses in-place mutation of params mid-run (not done).
+		local ov_params, src_params
 		local factory = function(outer_fn, params)
-			local ov_params = update({}, params)
+			if params ~= src_params then
+				ov_params = update({}, params)
+				src_params = params
+			end
 			for _, ov in ipairs(ovrefs) do
 				ov_params[ov.key] = outer_fn(ov.sn..'.'..ov.col)[1]
 			end
@@ -1165,11 +1172,7 @@ function Q:lower()
 	--    index). All branches must be in PK order (same merge_sig) before
 	--    merge_union; pk_sort normalises any ix-order branch.
 	if #or_conds > 0 then
-		local has_and = false
-		for _, f in ipairs(q._filt) do
-			if f.k ~= 'or' then has_and = true; break end
-		end
-		assertf(has_and,
+		assertf(next(by_member) ~= nil or #cross > 0,
 			'or_where: at least one :where filter required before :or_where')
 		for _, oc in ipairs(or_conds) do
 			assertf(oc._sname == q._from.tbl,
@@ -1242,17 +1245,16 @@ function Q:lower()
 			if dir == 'child_to_parent' then
 				node = db:pk_parent_lookup(node, fk_ix, opts)
 			else
-				--merge_join: O(n+m) vs pk_join_seek's O(n log m), but only
-				--when driver is already in from-table pk order (pk_sort
-				--tips it back to pk_join_seek, per bench). First join only
-				--(#acc==1; can't chain hops), no left join, no alias (no
-				--opts.member). merge_sig check on the candidate also
-				--excludes a nullable FK column (different index key space).
+				--merge_join: O(n+m) vs pk_join_seek's O(n log m); only when
+				--driver is in from-table pk order (pk_sort tips it back to
+				--pk_join_seek, per bench), first join only, no left join,
+				--no alias. key_sig check excludes a nullable FK column
+				--(different key space); read off the schema, not a built node.
 				local merge_ok = #acc == 1 and not j.left and join_member == join_tbl
 					and node.merge_sig == from_s.key_sig
-				local candidate = merge_ok and db:pk_range(fk_ix)
-				if candidate and candidate.merge_sig == node.merge_sig then
-					node = db:merge_join(node, candidate)
+					and db:table_schema(fk_ix).key_sig == node.merge_sig
+				if merge_ok then
+					node = db:merge_join(node, db:pk_range(fk_ix))
 				else
 					node = db:pk_join_seek(node, fk_ix, opts)
 				end
@@ -1439,14 +1441,10 @@ function Q:lower()
 		assertf(not q._dist, 'distinct requires select')
 		assertf(not q._hav, 'having requires select')
 		if q._order and not order_ok then
-			-- value_sort's pk-input path only sorts a flat single-member
-			-- stream; a join's multi-member tuple has no such path (nothing
-			-- sorts a pk-tuple stream while keeping the whole tuple), so
-			-- name the restriction instead of letting value_sort's generic
-			-- assert surface as a confusing crash.
+			-- always fires: step 6 already sorts and sets order_ok for the
+			-- only case where #node.members == 1 here. Named so a join
+			-- hits this message instead of value_sort's generic assert.
 			assertf(#node.members == 1, 'order_by after join requires select')
-			node = db:value_sort(node, order_spec(order_cols))
-			if q._lim then node = db:limit(node, q._lim, q._off) end
 		end
 		-- not cached: caller may still add :select() before running the query.
 		return node
