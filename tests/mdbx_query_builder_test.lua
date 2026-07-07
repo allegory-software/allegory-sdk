@@ -462,6 +462,91 @@ function test.multi_filter_and_exec()
 	end)
 end
 
+function test.nested_join_exec()
+	with_db('nested_join_exec', function(db)
+		db:atomic('r', function()
+			--uncorrelated inner (fn ignores outer_fn): cross product of
+			--5 users x 5 sessions = 25 tuples, with select projecting both.
+			local q = db:from'users':nested_join(function(outer_fn)
+				return db:from'sessions'
+			end):select{'users.id uid', 'sessions.id sid'}
+			local n = 0
+			for r in q:rows() do
+				n = n + 1
+				assert(r.sid ~= nil, 'sessions member missing from row')
+			end
+			assert(n == 25, n)
+
+			--nested_join's members list isn't extended until first runtime
+			--iteration, so at build time it looks like a flat 1-member
+			--stream even though it's a tuple; order_by without select must
+			--reject it.
+			local q2 = db:from'users':nested_join(function(outer_fn)
+				return db:from'sessions'
+			end):order_by('users.id desc')
+			assert(not pcall(function() return q2:lower() end))
+		end)
+	end)
+end
+
+function test.group_by_index_exec()
+	with_db('group_by_index_exec', function(db)
+		db:atomic('r', function()
+			--group cols exactly match the users/status index key, no agg
+			--exprs/filters/joins: grp_ix path, pk_group_first drives the
+			--group scan directly (no access node built first).
+			local q = db:from'users':group_by('status'):agg{}
+			local plan = q:lower():explain()
+			assert(plan.kind == 'stream_aggregate', plan.kind)
+			assert(plan.inputs[1].kind == 'pk_group_first', plan.inputs[1].kind)
+			local t = {}
+			for r in q:rows() do t[#t+1] = r.status end
+			sort(t)
+			assert(cat(t, ',') == 'active,banned', S(t))
+		end)
+	end)
+end
+
+function test.is_not_null_exec()
+	with_db('is_not_null_exec', function(db)
+		db:begin'w'
+		db:insert('users', '{}', {id = 6, status = 'active', score = null})
+		db:commit()
+
+		db:atomic('r', function()
+			--nullable indexed column: ntnull resolves to a '> __null' lower
+			--bound; user 6 (null score) is excluded via the index.
+			local q1 = db:from'users':is_not_null('score'):select{'users.id'}
+			local plan1 = q1:lower():explain()
+			assert(plan1.inputs[1].kind == 'pk_range', plan1.inputs[1].kind)
+			local t = {}
+			for r in q1:rows() do t[#t+1] = tonumber(r['users.id']) end
+			sort(t)
+			assert(cat(t, ',') == '1,2,3,4,5', S(t))
+
+			--not_null column combined with an eq filter on the same composite
+			--index (sessions/user_id,started_at, forced via use_index since
+			--the plain user_id index alone would score higher): ntnull is
+			--vacuously true (noop) and gets absorbed into the index plan's
+			--consumed set, rather than becoming a residual row predicate.
+			local q2 = db:from'sessions'
+				:where('user_id', 'UID'):is_not_null('started_at')
+				:use_index('sessions', 'sessions/user_id,started_at')
+				:select{'sessions.id'}
+			local plan2 = q2:lower():explain()
+			--pk_range: pk_prefix is a build-time plan label, not a distinct
+			--node kind -- it lowers through pk_range like any bounded scan.
+			--kind == 'pk_range' directly (no pk_filter wrapper) confirms
+			--both filters were absorbed by the index, none left residual.
+			assert(plan2.inputs[1].kind == 'pk_range', plan2.inputs[1].kind)
+			local t = {}
+			for r in q2:rows({UID = 1}) do t[#t+1] = tonumber(r['sessions.id']) end
+			sort(t)
+			assert(cat(t, ',') == '11,12,13', S(t))
+		end)
+	end)
+end
+
 ------------------------------------------------------------------------------
 
 local name = ...

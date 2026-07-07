@@ -512,60 +512,71 @@ local function ix_order_dir(ix_schema, schema_name, want_order)
 end
 
 --[[
-try to find an index plan for ix_schema given member filters mf.
+categorize member filters by column and kind, once per member instead of
+once per candidate index. ntnull resolves against the member's own
+not_null constraint here (a column-level constant, identical for every
+index that covers the column), instead of a per-index key_fields lookup.
 mf: list of filter specs with _col (bare col name) pre-set.
-is_pk: true when ix_schema is the base table (pk_get instead of pk_seek).
-returns plan table or nil; plan.consumed = {filter_index -> true}
+base_schema: the member's own schema (for ntnull's not_null lookup).
 ]]
-local function try_ix_plan(ix_schema, mf, is_pk)
-	local kc = ix_schema.key_cols
-	local n  = #kc
-	local eq    = {}   -- col -> {v, fi}
-	local lo_by = {}   -- col -> {op, v, fi}
-	local hi_by = {}   -- col -> {op, v, fi}
-	local prefix_by = {} -- col -> {v, fi}
-	local in_by = {}   -- col -> {vals, fi} (single-column full-key IN match)
-	-- ntnull on a not_null field: null is never stored, so the filter is
-	-- vacuously true. Track separately instead of adding a '__null' lo
-	-- bound, which fails to encode for not_null fields (check_col error).
-	local noop = {}   -- col -> filter index (ntnull on not_null field)
-	local kf_map = {}
-	for _, kf in ipairs(ix_schema.key_fields) do kf_map[kf.col] = kf end
+local function categorize_filters(mf, base_schema)
+	local b = {
+		eq = {}, lo_by = {}, hi_by = {}, prefix_by = {}, in_by = {},
+		-- ntnull on a not_null field: null is never stored, so the filter is
+		-- vacuously true. Tracked separately from a '__null' lo bound, which
+		-- fails to encode for not_null fields (check_col error).
+		noop = {},
+	}
 	for i, f in ipairs(mf) do
 		local col = f._col
-		if not col then goto continue end
-		local k = f.k
-		if k == '==' and not is_outer(f.v) then
-			if not eq[col] then eq[col] = {v = f.v, fi = i} end
-		elseif k == 'null' then
-			if not eq[col] then eq[col] = {v = '__null', fi = i} end
-		elseif (k == '>' or k == '>=') and not is_outer(f.v) then
-			if not lo_by[col] then lo_by[col] = {op = k, v = f.v, fi = i} end
-		elseif (k == '<' or k == '<=') and not is_outer(f.v) then
-			if not hi_by[col] then hi_by[col] = {op = k, v = f.v, fi = i} end
-		elseif k == 'range' and not is_outer(f.lo) and not is_outer(f.hi) then
-			if not lo_by[col] then
-				lo_by[col] = {op = f.lo_op, v = f.lo, fi = i}
+		if col then
+			local k = f.k
+			if k == '==' and not is_outer(f.v) then
+				if not b.eq[col] then b.eq[col] = {v = f.v, fi = i} end
+			elseif k == 'null' then
+				if not b.eq[col] then b.eq[col] = {v = '__null', fi = i} end
+			elseif (k == '>' or k == '>=') and not is_outer(f.v) then
+				if not b.lo_by[col] then b.lo_by[col] = {op = k, v = f.v, fi = i} end
+			elseif (k == '<' or k == '<=') and not is_outer(f.v) then
+				if not b.hi_by[col] then b.hi_by[col] = {op = k, v = f.v, fi = i} end
+			elseif k == 'range' and not is_outer(f.lo) and not is_outer(f.hi) then
+				if not b.lo_by[col] then
+					b.lo_by[col] = {op = f.lo_op, v = f.lo, fi = i}
+				end
+				if not b.hi_by[col] then
+					b.hi_by[col] = {op = f.hi_op, v = f.hi, fi = i}
+				end
+			elseif k == 'ntnull' then
+				local field = base_schema.fields[col]
+				if field and field.not_null then
+					b.noop[col] = b.noop[col] or i
+				elseif not b.lo_by[col] then
+					b.lo_by[col] = {op = '>', v = '__null', fi = i}
+				end
+			elseif k == 'starts' then
+				if not b.prefix_by[col] then
+					b.prefix_by[col] = {v = f.prefix, fi = i}
+				end
+			elseif k == 'in' and not f.set.lower and #f.set >= 1 then
+				if not b.in_by[col] then b.in_by[col] = {vals = f.set, fi = i} end
 			end
-			if not hi_by[col] then
-				hi_by[col] = {op = f.hi_op, v = f.hi, fi = i}
-			end
-		elseif k == 'ntnull' then
-			local kf = kf_map[col]
-			if kf and kf.not_null then
-				noop[col] = noop[col] or i
-			elseif not lo_by[col] then
-				lo_by[col] = {op = '>', v = '__null', fi = i}
-			end
-		elseif k == 'starts' then
-			if not prefix_by[col] then
-				prefix_by[col] = {v = f.prefix, fi = i}
-			end
-		elseif k == 'in' and not f.set.lower and #f.set >= 1 then
-			if not in_by[col] then in_by[col] = {vals = f.set, fi = i} end
 		end
-		::continue::
 	end
+	return b
+end
+
+--[[
+try to find an index plan for ix_schema given filter buckets (see
+categorize_filters). is_pk: true when ix_schema is the base table
+(pk_get instead of pk_seek). returns plan table or nil;
+plan.consumed = {filter_index -> true}
+]]
+local function try_ix_plan(ix_schema, buckets, is_pk)
+	local eq, lo_by, hi_by, prefix_by, in_by, noop =
+		buckets.eq, buckets.lo_by, buckets.hi_by,
+		buckets.prefix_by, buckets.in_by, buckets.noop
+	local kc = ix_schema.key_cols
+	local n  = #kc
 	local depth = 0; local eq_vals = {}; local consumed = {}
 	for _, col in ipairs(kc) do
 		if eq[col] then
@@ -648,10 +659,11 @@ end
 local function build_access(db, schema, mf, hints, use_counts, want_order,
 	prefer_order)
 	local h = hints[schema.name]
+	local buckets = categorize_filters(mf, schema)
 	local best
 	if h and h.use then
 		local ix_s = assertf(db:table_schema(h.use), 'use_index: unknown %q', h.use)
-		best = assertf(try_ix_plan(ix_s, mf, false),
+		best = assertf(try_ix_plan(ix_s, buckets, false),
 			'use_index: %q matches no filter for %s', h.use, schema.name)
 	else
 		local no_all = h and h.no_all
@@ -676,13 +688,13 @@ local function build_access(db, schema, mf, hints, use_counts, want_order,
 		if prefer_order then best = try_order_plan() end
 		if not best then
 			if not no_all then
-				local p = try_ix_plan(schema, mf, true)
+				local p = try_ix_plan(schema, buckets, true)
 				if p then best = p end
 			end
 			for _, ix_s in ipairs(schema.indexes or empty) do
 				local skip = no_all or (h and h.no and h.no[ix_s.name])
 				if not skip then
-					local p = try_ix_plan(ix_s, mf, false)
+					local p = try_ix_plan(ix_s, buckets, false)
 					if p then
 						local better = not best or p.score > best.score
 							or (use_counts and p.score == best.score
@@ -1102,10 +1114,13 @@ function Q:lower()
 	local by_member, cross, or_conds = prep_filters(q, q._filt)
 	local order_cols = resolve_order(q, db)
 
+	-- shared guards: plain = no agg/distinct/having; order_stable = the
+	-- initial access node's order isn't disturbed by a join or an OR-merge.
+	local plain = not q._agg and not q._dist and not q._hav
+	local order_stable = #q._joins == 0 and #or_conds == 0
+
 	local group_order
-	if q._agg and q._grp and #q._joins == 0 and #or_conds == 0
-		and #cross == 0
-	then
+	if q._agg and q._grp and order_stable and #cross == 0 then
 		group_order = {}
 		for _, c in ipairs(q._grp) do
 			local sn, col = qrcol(q, c)
@@ -1117,9 +1132,7 @@ function Q:lower()
 		end
 	end
 	local order_want
-	if q._order and not q._agg and not q._dist and not q._hav
-		and #q._joins == 0 and #or_conds == 0
-	then
+	if q._order and plain and order_stable then
 		order_want = physical_order(order_cols, from_s)
 	end
 
@@ -1136,18 +1149,48 @@ function Q:lower()
 	consumed marks which filter entries the chosen read absorbed.
 	]]
 	local mf = by_member[q._from.tbl] or {}
-	local node, consumed = build_access(
-		db, from_s, mf, q._hints, q._use_counts, order_want or group_order,
-		order_want ~= nil and q._lim ~= nil)
+
+	--[[
+	group index: when grouping needs no filters/joins beyond grouping
+	itself and no other aggregates, and the group cols exactly match an
+	index key, the index cursor groups natively via NEXT_NODUP (O(n groups)
+	base reads) -- decided here so the normal access node (step 1) is
+	skipped entirely instead of being built and discarded.
+	]]
+	local grp_cols, grp_ix
+	if q._agg and q._grp then
+		grp_cols = {}
+		for _, c in ipairs(q._grp) do
+			local sn, col = qrcol(q, c)
+			grp_cols[#grp_cols+1] = {sn = sn, col = col}
+		end
+		if #q._agg == 0 and #mf == 0 and order_stable and #cross == 0 then
+			local n = #grp_cols
+			for _, ix_s in ipairs(from_s.indexes or empty) do
+				if #ix_s.key_fields == n then
+					local match = true
+					for i, kf in ipairs(ix_s.key_fields) do
+						if kf.col ~= grp_cols[i].col then match = false; break end
+					end
+					if match then grp_ix = ix_s.name; break end
+				end
+			end
+		end
+	end
+
+	local node, consumed
+	if not grp_ix then
+		node, consumed = build_access(
+			db, from_s, mf, q._hints, q._use_counts, order_want or group_order,
+			order_want ~= nil and q._lim ~= nil)
+	end
 
 	--[[
 	order_ok: the PK stream already delivers rows in q._order; value_sort is
 	skipped, and limit (when present) is applied at PK level (step 6) for
 	early termination. Requires: no or_conds, no joins, no agg/distinct/having.
 	]]
-	local order_ok = q._order
-		and not q._agg and not q._dist and not q._hav
-		and #q._joins == 0 and #or_conds == 0
+	local order_ok = q._order and plain and order_stable
 		and order_matches(node, order_want)
 
 	-- 2. RESIDUAL AND FILTERS: conditions the access node could not encode.
@@ -1160,10 +1203,11 @@ function Q:lower()
 		for i, f in ipairs(mf) do
 			if not consumed[i] then rmf[#rmf+1] = f; rfi[#rfi+1] = i end
 		end
+		local rbuckets = categorize_filters(rmf, from_s)
 		local used = {}
 		local probes = {}
 		for _, ix_s in ipairs(from_s.indexes or empty) do
-			local p = try_ix_plan(ix_s, rmf, false)
+			local p = try_ix_plan(ix_s, rbuckets, false)
 			if p and p.kind == 'pk_seek' then
 				local conflict = false
 				for ri in pairs(p.consumed) do
@@ -1336,9 +1380,11 @@ function Q:lower()
 		end
 	end
 
-	if order_cols and not order_ok and not q._agg and not q._dist and not q._hav
-		and node.item ~= 'value' and #node.members == 1
-	then
+	--node.item == 'pk' is the flat single-member case value_sort's pk-input
+	--path requires. nested_join's members list isn't extended until its
+	--first runtime iteration, so it can show #members == 1 at build time
+	--while its item stays 'pk_tuple'.
+	if order_cols and not order_ok and plain and node.item == 'pk' then
 		node = db:value_sort(node, order_spec(order_cols))
 		order_ok = true
 	end
@@ -1364,11 +1410,8 @@ function Q:lower()
 			-- pk_group+stream_aggregate need group order (consecutive same-key
 			-- rows); used when that's free (grp_ix, or node already delivers
 			-- it). Otherwise hash_aggregate below groups without needing order.
-			local grp_cols = {}
-			for _, c in ipairs(q._grp) do
-				local sn, col = qrcol(q, c)
-				grp_cols[#grp_cols+1] = {sn = sn, col = col}
-			end
+			-- grp_cols/grp_ix: computed above, before step 1, so a matching
+			-- grp_ix could skip the access node entirely.
 			local key_fn = make_key_fn(grp_cols)
 			local full_agg = {}
 			for i, gc in ipairs(grp_cols) do
@@ -1382,22 +1425,6 @@ function Q:lower()
 			end
 			extend(full_agg, tagg)
 
-			-- pk_group_first: no filters/joins and no agg -> index cursor
-			-- groups natively via NEXT_NODUP (O(n groups) base reads).
-			local grp_ix
-			if #tagg == 0 and #mf == 0 and #or_conds == 0
-				and #cross == 0 and #q._joins == 0 then
-				local n = #grp_cols
-				for _, ix_s in ipairs(from_s.indexes or empty) do
-					if #ix_s.key_fields == n then
-						local match = true
-						for i, kf in ipairs(ix_s.key_fields) do
-							if kf.col ~= grp_cols[i].col then match = false; break end
-						end
-						if match then grp_ix = ix_s.name; break end
-					end
-				end
-			end
 			if grp_ix then
 				vnode = db:stream_aggregate(
 					db:pk_group_first(grp_ix), key_fn, full_agg)
@@ -1461,9 +1488,9 @@ function Q:lower()
 		assertf(not q._hav, 'having requires select')
 		if q._order and not order_ok then
 			-- always fires: step 6 already sorts and sets order_ok for the
-			-- only case where #node.members == 1 here. Named so a join
+			-- only case where node.item == 'pk' here. Named so a join
 			-- hits this message instead of value_sort's generic assert.
-			assertf(#node.members == 1, 'order_by after join requires select')
+			assertf(node.item == 'pk', 'order_by after join requires select')
 		end
 		-- not cached: caller may still add :select() before running the query.
 		return node
