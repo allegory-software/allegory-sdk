@@ -344,6 +344,7 @@ function Db.pk_get:__call(db, tab, ...)
 	end
 	node.merge_cmp = key_cmp
 	node.merge_sig = schema.key_sig
+	node.next_item = node.next_group  --one pk per group; next_pk noop
 	return node
 end
 
@@ -461,6 +462,7 @@ function Db.pk_seek:__call(db, ix_name, ...)
 	end
 	node.merge_cmp = key_cmp
 	node.merge_sig = val_schema.key_sig
+	node.next_item = node.next_group  --each dup is its own group; next_pk noop
 	return node
 end
 
@@ -738,6 +740,8 @@ function Db.pk_range:__call(db, name, opt, ...)
 	end
 	node.merge_cmp = key_cmp
 	node.merge_sig = schema.key_sig
+	--base table has no next_pk override (one pk per group); index does.
+	if not is_index then node.next_item = node.next_group end
 	return node
 end
 
@@ -842,6 +846,7 @@ function Db.fk_parent_scan:__call(db, ix_name)
 	end
 	node.merge_cmp = key_cmp
 	node.merge_sig = parent_schema.key_sig
+	node.next_item = node.next_group  --one parent pk per group; next_pk noop
 	return node
 end
 
@@ -965,6 +970,7 @@ function Db.pk_group_first:__call(db, ix_name, ...)
 	end
 	node.merge_cmp = key_cmp
 	node.merge_sig = schema.key_sig
+	node.next_item = node.next_group  --first pk per distinct key; next_pk noop
 	return node
 end
 
@@ -1153,6 +1159,7 @@ function Db.merge_join:__call(db, ...)
 			if inputs[i]:next_group() then mk[i], mk_sz[i] = inputs[i]:merge_key() end
 		end
 	end
+	node.next_item = node.next_group  --one tuple per convergence; next_pk noop
 	return node
 end
 
@@ -1299,6 +1306,7 @@ function Db.merge_union:__call(db, mode, ...)
 			if inputs[i]:next_group() then mk[i], mk_sz[i] = inputs[i]:merge_key() end
 		end
 	end
+	node.next_item = node.next_group  --one pk per merge step; next_pk noop
 	return node
 end
 
@@ -1372,6 +1380,7 @@ function Db.merge_except:__call(db, a, b)
 		if a:next_group() then mk1, mk1_sz = a:merge_key() end
 		if b:next_group() then mk2, mk2_sz = b:merge_key() end
 	end
+	node.next_item = node.next_group  --one pk per step; next_pk noop
 	return node
 end
 
@@ -1563,6 +1572,7 @@ function Db.pk_join_seek:__call(db, driver, fk_name, opts)
 		has_pair = false; has_child = false; in_match = false; child_base_seeked = false
 		parent_pk = nil; parent_pk_sz = nil
 	end
+	node.next_item = node.next_group  --one tuple per driver step; next_pk noop
 	return node
 end
 
@@ -1655,6 +1665,7 @@ function Db.pk_hash_filter:__call(db, driver, set_node, mode)
 		driver:open(params)
 		has_pk = false; cur_pk = nil; cur_pk_sz = nil
 	end
+	node.next_item = node.next_group  --one driver item per step; next_pk noop
 	return node
 end
 
@@ -1789,6 +1800,7 @@ function Db.pk_parent_lookup:__call(db, driver, fk_name, opts)
 		has_child = false; has_parent = false; parent_base_seeked = false
 		child_pk = nil; child_pk_sz = nil; parent_pk = nil; parent_pk_sz = nil
 	end
+	node.next_item = node.next_group  --one tuple per child row; next_pk noop
 	return node
 end
 
@@ -1833,6 +1845,7 @@ function Db.pk_filter:__call(db, input, fn)
 		input:open(params)
 		has_pk = false
 	end
+	node.next_item = node.next_group  --one input item per step; next_pk noop
 	return node
 end
 
@@ -1890,6 +1903,7 @@ local function make_existence_join(self, db, outer, fn, want_inner)
 		outer:open(params)
 		has_pk = false
 	end
+	node.next_item = node.next_group  --one outer item per step; next_pk noop
 	return node
 end
 
@@ -2014,6 +2028,7 @@ function Db.nested_join:__call(db, outer, fn, opts)
 		outer:open(params)
 		has_pk = false; cur_inner = nil
 	end
+	node.next_item = node.next_group  --one output item per step; next_pk noop
 	return node
 end
 
@@ -2066,6 +2081,7 @@ function Db.limit:__call(db, input, n, offset)
 		input:open(params)
 		has_item = false; count = 0; skipped = 0
 	end
+	node.next_item = node.next_group  --one input item per step; next_pk noop
 	return node
 end
 
@@ -2209,6 +2225,7 @@ function Db.pk_project:__call(db, input, member_name)
 		input:open(params)
 		has_pk = false; cur_pk = nil; cur_pk_sz = nil
 	end
+	node.next_item = node.next_group  --one projected pk per step; next_pk noop
 	return node
 end
 
@@ -2337,6 +2354,7 @@ function Db.pk_sort:__call(db, input)
 		idx = 0; has_pk = false; base_seeked = false
 		prev_off = nil; prev_sz = nil
 	end
+	node.next_item = node.next_group  --one sorted pk per step; next_pk noop
 	return node
 end
 
@@ -2446,6 +2464,7 @@ function Db.pk_and_probe:__call(db, driver, ...)
 		is_open = true
 		has_pk = false; cur_pk = nil; cur_pk_sz = nil
 	end
+	node.next_item = node.next_group  --one driver item per step; next_pk noop
 	return node
 end
 
