@@ -829,13 +829,10 @@ end
 function test.pk_group_exec()
 	with_db('pk_group_exec', function(db)
 		db:atomic('r', function()
-			local function uid_key(n)
-				local uid = n:col('sessions', 'user_id')
-				return {uid}
-			end
+			local cols = {{member = 'sessions', col = 'user_id'}}
 			-- sessions/user_id order: user 1 -> {11,12,13}, user 2 -> {14}, user 4 -> {15}
 			-- first item per group: 11, 14, 15
-			local node = db:pk_group(db:pk_range('sessions/user_id'), uid_key)
+			local node = db:pk_group(db:pk_range('sessions/user_id'), cols)
 			node:open()
 			local firsts = {}
 			while node:next_group() do
@@ -845,7 +842,7 @@ function test.pk_group_exec()
 			node:close()
 			assert(cat(firsts, ',') == '11,14,15', S(firsts))
 			-- full group iteration via next_pk: all sessions per user group
-			node = db:pk_group(db:pk_range('sessions/user_id'), uid_key)
+			node = db:pk_group(db:pk_range('sessions/user_id'), cols)
 			node:open()
 			local groups = {}
 			while node:next_group() do
@@ -1186,7 +1183,7 @@ function test.stream_distinct_exec()
 			-- -> stream_distinct by status -> 2 records.
 			local t = collect_recs(db:stream_distinct(
 				db:select(db:pk_range('users/status'), 'users.status'),
-				function(rec) return {rec['users.status']} end))
+				{'users.status'}))
 			assert(#t == 2, 'expected 2, got '..#t)
 			assert(t[1]['users.status'] == 'active', tostring(t[1]['users.status']))
 			assert(t[2]['users.status'] == 'banned', tostring(t[2]['users.status']))
@@ -1209,7 +1206,7 @@ function test.hash_distinct_exec()
 			-- hash_distinct deduplicates regardless of adjacency -> banned,active (first-seen).
 			local t = collect_recs(db:hash_distinct(
 				db:select(db:pk_range('users/score'), 'users.status'),
-				function(rec) return {rec['users.status']} end))
+				{'users.status'}))
 			assert(#t == 2, 'expected 2, got '..#t)
 			assert(t[1]['users.status'] == 'banned', tostring(t[1]['users.status']))
 			assert(t[2]['users.status'] == 'active', tostring(t[2]['users.status']))
@@ -1217,9 +1214,7 @@ function test.hash_distinct_exec()
 			-- multi-col key: (status, score) -> 5 distinct pairs -> 5 records.
 			t = collect_recs(db:hash_distinct(
 				db:select(db:pk_range('users/score'), 'users.status, users.score'),
-				function(rec)
-					return {rec['users.status'], rec['users.score']}
-				end))
+				{'users.status', 'users.score'}))
 			assert(#t == 5, 'expected 5, got '..#t)
 		end)
 	end)
@@ -1300,7 +1295,7 @@ function test.stream_aggregate_exec()
 				return t
 			end
 
-			-- grand total: nil key_fn, count + sum over all users.
+			-- grand total: nil cols, count + sum over all users.
 			-- scores: 80+95+50+70+60 = 355.
 			local t = collect_recs(db:stream_aggregate(
 				db:pk_range('users'), nil, {
@@ -1311,12 +1306,12 @@ function test.stream_aggregate_exec()
 			assert(t[1].cnt == 5, 'count: expected 5, got '..tostring(t[1].cnt))
 			assert(t[1].tot == 355, 'sum: expected 355, got '..tostring(t[1].tot))
 
-			-- grouped: pk_range('users/status') groups by status; key_fn reads status
-			-- from the positioned index node; next_pk() advances within group.
+			-- grouped: pk_range('users/status') groups by status; cols compile a
+			-- getter for status; next_pk() advances within group.
 			-- active: 3 users, score sum=245; banned: 2 users, score sum=110.
 			t = collect_recs(db:stream_aggregate(
 				db:pk_range('users/status'),
-				function(input) return {input:col('users', 'status')} end,
+				{{member = 'users', col = 'status'}},
 				{
 					{name='status', op='key', part=1},
 					{name='cnt', op='count'},
@@ -1342,7 +1337,7 @@ function test.hash_aggregate_exec()
 				return t
 			end
 
-			-- grand total: nil key_fn over a value stream.
+			-- grand total: nil fields over a value stream.
 			local t = collect_recs(db:hash_aggregate(
 				db:select(db:pk_range('users'), 'users.status, users.score'),
 				nil,
@@ -1353,7 +1348,7 @@ function test.hash_aggregate_exec()
 			-- input in score-asc order so statuses are not pre-grouped.
 			t = collect_recs(db:hash_aggregate(
 				db:select(db:pk_range('users/score'), 'users.status, users.score'),
-				function(rec) return {rec['users.status']} end,
+				{'users.status'},
 				{
 					{name='status', op='key',   part=1},
 					{name='cnt',    op='count'},

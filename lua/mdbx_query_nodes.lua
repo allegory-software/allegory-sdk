@@ -2085,30 +2085,26 @@ function Db.limit:__call(db, input, n, offset)
 	return node
 end
 
-local function keys_eq(a, b)
-	if #a ~= #b then return false end
-	for i = 1, #a do if a[i] ~= b[i] then return false end end
-	return true
-end
-
 --[[
-pk_group: group consecutive input items by key_fn; yield first item
-per group via next_group(), remaining via next_pk(). Requires input
-to already be in group order. opts.which = 'first' (default).
+pk_group: group consecutive input items by cols; yield first item per
+group via next_group(), remaining via next_pk(). Requires input to
+already be in group order. opts.which = 'first' (default).
 stream_aggregate iterates via next_group/next_pk.
-key_fn(node) -> {part, ...}; parts must not be nil.
-Usage: db:pk_group(input, key_fn [, opts])
+cols: list of {member=, col=}; getters compiled once at open(), compared
+part-wise against a reused array instead of allocating a key table per row.
+Usage: db:pk_group(input, cols [, opts])
 ]]
 Db.pk_group = object(Db.query_node, {
 	kind   = 'pk_group',
 	item   = 'pk',
 	unique = false,
 	source = 'pass-through',
-	work   = 'group by key_fn; first item per group via next_group; rest via next_pk',
+	work   = 'group by cols; first item per group via next_group; rest via next_pk',
 })
-function Db.pk_group:__call(db, input, key_fn, opts)
+function Db.pk_group:__call(db, input, cols, opts)
 	check_pk_node(input, 'pk_group', 1)
-	assert(type(key_fn) == 'function', 'pk_group: key_fn must be a function')
+	assertf(type(cols) == 'table' and #cols >= 1,
+		'pk_group: cols: non-empty list expected')
 	opts = opts or {}
 	local which = opts.which or 'first'
 	assertf(which == 'first', 'pk_group: opts.which="last" not yet implemented')
@@ -2121,8 +2117,25 @@ function Db.pk_group:__call(db, input, key_fn, opts)
 	node.inputs = {input}
 	node.merge_cmp = input.merge_cmp
 	node.merge_sig = input.merge_sig
-	local done, has_current, cur_key, peeked
+	local ncols = #cols
+	local getters, prev
+	local done, has_current, has_prev, peeked
 	function node:compile_col(m, c) return input:compile_col(m, c) end
+	-- true when the getters' current values still match prev (the group key).
+	local function same_key()
+		for i = 1, ncols do
+			local v = getters[i](); if v == nil then v = null end
+			if prev[i] ~= v then return false end
+		end
+		return true
+	end
+	-- overwrite prev with the getters' current values (new group key).
+	local function set_key()
+		for i = 1, ncols do
+			local v = getters[i](); if v == nil then v = null end
+			prev[i] = v
+		end
+	end
 	local function adv()
 		if done then return false end
 		if not input:next_item() then done = true; return false end
@@ -2140,28 +2153,29 @@ function Db.pk_group:__call(db, input, key_fn, opts)
 		if not peeked then
 			if not adv() then return end
 			-- skip remaining items in the previous group (caller may skip next_pk).
-			if cur_key ~= nil then
-				-- call key_fn(input) directly: node is between groups, input positioned
-				while keys_eq(key_fn(input), cur_key) do
+			if has_prev then
+				while same_key() do
 					if not adv() then return end
 				end
 			end
 		end
 		peeked = false
-		cur_key = key_fn(input)  -- input is positioned; has_current not yet true
+		set_key(); has_prev = true  -- input is positioned; has_current not yet true
 		has_current = true
 		return true
 	end
 	function node:next_pk()
 		if not has_current then return end
 		if not adv() then has_current = false; return end
-		local k = key_fn(node)  -- has_current still true; node:col works
-		if keys_eq(k, cur_key) then return true end
+		if same_key() then return true end
 		peeked = true; has_current = false; return nil
 	end
 	function node:open(params)
 		input:open(params)
-		done = false; has_current = false; cur_key = nil; peeked = false
+		getters = {}
+		for i, c in ipairs(cols) do getters[i] = input:compile_col(c.member, c.col) end
+		prev = {}
+		done = false; has_current = false; has_prev = false; peeked = false
 	end
 	return node
 end
@@ -2601,66 +2615,78 @@ function Db.select:__call(db, input, outputs)
 end
 
 --[[
-stream_distinct: dedup adjacent value records by key_fn; input in group order!
-key_fn(rec) -> {part, ...}; use null for DB null, never nil.
-Usage: db:stream_distinct(input, key_fn)
+stream_distinct: dedup adjacent value records by fields; input in group
+order! fields: list of record field names. Compares field values directly
+against a reused array instead of allocating a key table per row.
+Usage: db:stream_distinct(input, fields)
 ]]
 Db.stream_distinct = object(Db.query_node, {
 	kind   = 'stream_distinct',
 	item   = 'value',
 	unique = true,
 	source = 'pass-through',
-	work   = 'dedup adjacent value records by key_fn; requires group order',
+	work   = 'dedup adjacent value records by fields; requires group order',
 })
-function Db.stream_distinct:__call(db, input, key_fn)
+function Db.stream_distinct:__call(db, input, fields)
 	check_value_node(input, 'stream_distinct', 1)
-	assert(type(key_fn) == 'function', 'stream_distinct: key_fn must be a function')
+	assertf(type(fields) == 'table' and #fields >= 1,
+		'stream_distinct: fields: non-empty list expected')
 	local node = object(self, {
 		members = input.members,
 		order   = input.order,
 		unique  = true,
 	})
 	node.inputs = {input}
-	local prev_key
+	local nfields = #fields
+	local prev, has_prev
 	function node:row() return input:row() end
 	function node:compile_col(m, c) return input:compile_col(m, c) end
 	function node:close() input:close() end
 	function node:next_group()
 		while true do
 			if not input:next_group() then return end
-			local k = key_fn(input:row())
-			if not prev_key or not keys_eq(k, prev_key) then
-				prev_key = k
-				return true
+			local rec = input:row()
+			local same = has_prev
+			for i = 1, nfields do
+				local v = rec[fields[i]]; if v == nil then v = null end
+				if prev[i] ~= v then same = false end
+				prev[i] = v
 			end
+			if not same then has_prev = true; return true end
 		end
 	end
 	function node:open(params)
 		input:open(params)
-		prev_key = nil
+		prev = {}; has_prev = false
 	end
 	return node
 end
 
--- hash_distinct: dedup value records in any order by key_fn; O(n) memory.
--- key_fn(rec) -> {part, ...}; use null for DB null, never nil.
--- Usage: db:hash_distinct(input, key_fn)
+--[[
+hash_distinct: dedup value records in any order by fields; O(n) memory.
+fields: list of record field names. Values are read into a reused array
+for hashing instead of allocating a key table per row.
+Usage: db:hash_distinct(input, fields)
+]]
 Db.hash_distinct = object(Db.query_node, {
 	kind   = 'hash_distinct',
 	item   = 'value',
 	unique = true,
 	source = 'pass-through',
-	work   = 'dedup any-order value records by key_fn; O(n) memory',
+	work   = 'dedup any-order value records by fields; O(n) memory',
 })
-function Db.hash_distinct:__call(db, input, key_fn)
+function Db.hash_distinct:__call(db, input, fields)
 	check_value_node(input, 'hash_distinct', 1)
-	assert(type(key_fn) == 'function', 'hash_distinct: key_fn must be a function')
+	assertf(type(fields) == 'table' and #fields >= 1,
+		'hash_distinct: fields: non-empty list expected')
 	local node = object(self, {
 		members = input.members,
 		order   = input.order,
 		unique  = true,
 	})
 	node.inputs = {input}
+	local nfields = #fields
+	local vals = {}
 	local tuple_space, seen
 	function node:row() return input:row() end
 	function node:compile_col(m, c) return input:compile_col(m, c) end
@@ -2668,15 +2694,20 @@ function Db.hash_distinct:__call(db, input, key_fn)
 	function node:next_group()
 		while true do
 			if not input:next_group() then return end
-			local key = key_fn(input:row())
+			local rec = input:row()
 			-- for 1-col keys use the value directly; tuples() for multi-col.
 			-- int64key: a decoded int64/uint64 value doesn't hash correctly
 			-- as a raw table/tuple key (see glue.lua int64key).
 			local t
-			if #key == 1 then t = int64key(key[1])
+			if nfields == 1 then
+				local v = rec[fields[1]]
+				t = int64key(v ~= nil and v or null)
 			else
-				for i, v in ipairs(key) do key[i] = int64key(v) end
-				t = tuple_space(unpack(key))
+				for i = 1, nfields do
+					local v = rec[fields[i]]
+					vals[i] = int64key(v ~= nil and v or null)
+				end
+				t = tuple_space(unpack(vals, 1, nfields))
 			end
 			if not seen[t] then seen[t] = true; return true end
 		end
@@ -2938,12 +2969,14 @@ end
 
 --[[
 stream_aggregate: one value record per group from a PK stream; needs order.
-key_fn(node) -> {part,...}: group key at PK level; nil = grand total.
+cols: list of {member=, col=}, group key at PK level; nil = grand total.
+Getters compiled once at open(); the key table is built once per group
+(not per row -- grouping itself, via next_pk, needs no key comparison here).
 agg: list of {name=, op=, [member=, col=, sep=, part=]}.
 ops: count, sum, avg, min, max,
 	concat (skip null/absent),
-	key (from key_fn part index).
-Usage: db:stream_aggregate(input, key_fn, agg)
+	key (from cols part index).
+Usage: db:stream_aggregate(input, cols, agg)
 ]]
 Db.stream_aggregate = object(Db.query_node, {
 	kind   = 'stream_aggregate',
@@ -2952,10 +2985,10 @@ Db.stream_aggregate = object(Db.query_node, {
 	source = 'pass-through',
 	work   = 'aggregate PK stream into one value record per group',
 })
-function Db.stream_aggregate:__call(db, input, key_fn, agg)
+function Db.stream_aggregate:__call(db, input, cols, agg)
 	check_pk_node(input, 'stream_aggregate', 1)
-	assertf(key_fn == nil or type(key_fn) == 'function',
-		'stream_aggregate: arg 2: function or nil expected')
+	assertf(cols == nil or type(cols) == 'table',
+		'stream_aggregate: arg 2: cols list or nil expected')
 	assertf(type(agg) == 'table' and #agg >= 1,
 		'stream_aggregate: arg 3: non-empty agg list expected')
 	local fields = {}
@@ -2970,7 +3003,7 @@ function Db.stream_aggregate:__call(db, input, key_fn, agg)
 		local name = col_map[member..':'..col]
 		if name then return function() return node._row[name] end end
 	end
-	local done
+	local done, getters
 	local function accumulate(acc, key)
 		for _, a in ipairs(agg) do
 			local v
@@ -2981,7 +3014,7 @@ function Db.stream_aggregate:__call(db, input, key_fn, agg)
 		end
 	end
 	function node:close() input:close() end
-	if not key_fn then
+	if not cols then
 		function node:next_group()
 			if done then return end; done = true
 			local acc = agg_init(agg)
@@ -2993,7 +3026,10 @@ function Db.stream_aggregate:__call(db, input, key_fn, agg)
 		function node:next_group()
 			if done then return end
 			if not input:next_group() then done = true; return end
-			local key = key_fn(input)
+			local key = {}
+			for i = 1, #getters do
+				local v = getters[i](); key[i] = v ~= nil and v or null
+			end
 			local acc = agg_init(agg)
 			accumulate(acc, key)
 			while input:next_pk() do accumulate(acc, key) end
@@ -3003,6 +3039,10 @@ function Db.stream_aggregate:__call(db, input, key_fn, agg)
 	end
 	function node:open(params)
 		input:open(params)
+		if cols then
+			getters = {}
+			for i, c in ipairs(cols) do getters[i] = input:compile_col(c.member, c.col) end
+		end
 		done = false
 	end
 	return node
@@ -3010,13 +3050,15 @@ end
 
 --[[
 hash_aggregate: group and aggregate value records in any order; O(n groups).
-key_fn(rec) -> {part,...}: group key at value level; nil = grand total.
+fields: list of record field names, group key at value level; nil = grand
+total. Values are read into reused arrays per row instead of allocating a
+key table via a function call.
 agg: list of {name=, op=, [input=, member=, col=, sep=, part=]}; input= is
 the field name read for accumulation; member=/col= are optional and only
 used by compile_col, so a later node (order_by, having) can still address
 this output by its original source column, same as stream_aggregate.
-ops: count, sum, avg, min, max, concat (skip null), key (key_fn index).
-Usage: db:hash_aggregate(input, key_fn, agg)
+ops: count, sum, avg, min, max, concat (skip null), key (fields part index).
+Usage: db:hash_aggregate(input, fields, agg)
 ]]
 Db.hash_aggregate = object(Db.query_node, {
 	kind   = 'hash_aggregate',
@@ -3025,19 +3067,19 @@ Db.hash_aggregate = object(Db.query_node, {
 	source = 'pass-through',
 	work   = 'group and aggregate value records; any order; O(n groups) memory',
 })
-function Db.hash_aggregate:__call(db, input, key_fn, agg)
+function Db.hash_aggregate:__call(db, input, fields, agg)
 	check_value_node(input, 'hash_aggregate', 1)
-	assertf(key_fn == nil or type(key_fn) == 'function',
-		'hash_aggregate: arg 2: function or nil expected')
+	assertf(fields == nil or type(fields) == 'table',
+		'hash_aggregate: arg 2: fields list or nil expected')
 	assertf(type(agg) == 'table' and #agg >= 1,
 		'hash_aggregate: arg 3: non-empty agg list expected')
-	local fields = {}
+	local outfields = {}
 	for _, a in ipairs(agg) do
-		fields[#fields+1] = {name = a.name, member = a.member, col = a.col}
+		outfields[#outfields+1] = {name = a.name, member = a.member, col = a.col}
 	end
 	local node = object(self, {members = input.members, unique = true})
 	node.inputs = {input}
-	local col_map = build_col_map(fields)
+	local col_map = build_col_map(outfields)
 	function node:compile_col(member, col)
 		local name = col_map[member..':'..col]
 		if name then return function() return node._row[name] end end
@@ -3064,19 +3106,25 @@ function Db.hash_aggregate:__call(db, input, key_fn, agg)
 		input:open(params)
 		local group_list = {}
 		local group_map  = {}
-		local tuple_space = key_fn and tuples() or nil
+		local nfields = fields and #fields or 0
+		local tuple_space = fields and tuples() or nil
+		-- key/vals reused across rows: agg_step's 'key' op reads key[part]
+		-- synchronously during accumulate(), so overwriting them next row
+		-- is safe; vals only feeds tuple_space(unpack(...)), which reads
+		-- the unpacked scalars immediately, not the table itself.
+		local key = fields and {} or nil
+		local vals = fields and {} or nil
 		while input:next_group() do
 			local rec = input:row()
-			local key, t
-			if key_fn then
-				key = key_fn(rec)
-				-- int64key: a decoded int64/uint64 value doesn't hash correctly
-				-- as a raw tuple key (see glue.lua int64key). key itself must
-				-- stay unconverted: agg_step's 'key' op reads the original
-				-- value from it for the output row.
-				local ck = {}
-				for i, v in ipairs(key) do ck[i] = int64key(v) end
-				t = tuple_space(unpack(ck))
+			local t
+			if fields then
+				for i = 1, nfields do
+					local v = rec[fields[i]]; if v == nil then v = null end
+					-- int64key: a decoded int64/uint64 value doesn't hash
+					-- correctly as a raw tuple key (see glue.lua int64key).
+					key[i] = v; vals[i] = int64key(v)
+				end
+				t = tuple_space(unpack(vals, 1, nfields))
 			else
 				t = true
 			end
@@ -3086,7 +3134,7 @@ function Db.hash_aggregate:__call(db, input, key_fn, agg)
 				group_map[t] = acc
 				group_list[#group_list+1] = acc
 			end
-			accumulate(acc, rec, key)
+			accumulate(acc, rec, fields and key or nil)
 		end
 		input:close()
 		output = {}

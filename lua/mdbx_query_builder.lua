@@ -1037,18 +1037,6 @@ local function lower_ex_filter(db, node, f, outer_q)
 	end
 end
 
--- pk-level key function for pk_group / stream_aggregate
-local function make_key_fn(grp_cols)
-	return function(node)
-		local parts = {}
-		for _, gc in ipairs(grp_cols) do
-			local v = node:col(gc.sn, gc.col)
-			parts[#parts+1] = v ~= nil and v or null
-		end
-		return parts
-	end
-end
-
 --[[
 Lowering pass: translate the builder's logical description into a physical
 node tree. The output is either a PK stream (no select/agg; used by
@@ -1427,7 +1415,8 @@ function Q:lower()
 			-- it). Otherwise hash_aggregate below groups without needing order.
 			-- grp_cols/grp_ix: computed above, before step 1, so a matching
 			-- grp_ix could skip the access node entirely.
-			local key_fn = make_key_fn(grp_cols)
+			local cols = {}
+			for i, gc in ipairs(grp_cols) do cols[i] = {member = gc.sn, col = gc.col} end
 			local full_agg = {}
 			for i, gc in ipairs(grp_cols) do
 				full_agg[#full_agg+1] = {
@@ -1441,10 +1430,9 @@ function Q:lower()
 			extend(full_agg, tagg)
 
 			if grp_ix then
-				vnode = db:stream_aggregate(
-					db:pk_group_first(grp_ix), key_fn, full_agg)
+				vnode = db:stream_aggregate(db:pk_group_first(grp_ix), cols, full_agg)
 			elseif group_ordered(node, grp_cols) then
-				vnode = db:stream_aggregate(db:pk_group(node, key_fn), key_fn, full_agg)
+				vnode = db:stream_aggregate(db:pk_group(node, cols), cols, full_agg)
 			else
 				--[[
 				no natural group order: sorting the pk stream (value_sort) would
@@ -1482,14 +1470,7 @@ function Q:lower()
 					if a.op ~= 'count' then ha.input = out_name(a.member, a.col) end
 					full_hagg[#full_hagg+1] = ha
 				end
-				local value_key_fn = function(rec)
-					local parts = {}
-					for i, gn in ipairs(grp_names) do
-						parts[i] = rec[gn] ~= nil and rec[gn] or null
-					end
-					return parts
-				end
-				vnode = db:hash_aggregate(db:select(node, outputs), value_key_fn, full_hagg)
+				vnode = db:hash_aggregate(db:select(node, outputs), grp_names, full_hagg)
 			end
 		else
 			vnode = db:stream_aggregate(node, nil, tagg)
@@ -1530,17 +1511,10 @@ function Q:lower()
 	]]
 	if q._dist then
 		local dc = q._dist
-		local dist_fn = function(r)
-			local parts = {}
-			for _, c in ipairs(dc) do
-				parts[#parts+1] = r[c] ~= nil and r[c] or null
-			end
-			return parts
-		end
 		if dist_grouped(vnode, q) then
-			vnode = db:stream_distinct(vnode, dist_fn)
+			vnode = db:stream_distinct(vnode, dc)
 		else
-			vnode = db:hash_distinct(vnode, dist_fn)
+			vnode = db:hash_distinct(vnode, dc)
 		end
 	end
 
