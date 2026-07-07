@@ -373,8 +373,12 @@ local function qrschema(q, member)
 	return q._al[member] or member
 end
 
--- translate one output spec item: 'alias.col [name]' -> 'member.col [name]'
+-- translate one output spec item: 'alias.col [name]' -> {name=,member=,col=}
 -- (member: from-table's own schema name, or the join alias -- see qrcol).
+-- unresolvable specs (no dot) are returned unchanged as a string, so
+-- parse_col_spec still produces its "member.col [alias]" error for them.
+-- default name (no alias given) is the full 'member.col' string, matching
+-- parse_col_spec's own default (dist_grouped relies on this convention).
 local function qtrans1(q, s)
 	s = s:match'^%s*(.-)%s*$'
 	local mcol, name = s:match'^(%S+)%s+(%S+)$'
@@ -382,18 +386,18 @@ local function qtrans1(q, s)
 	local alias, c = mcol:match'^([^.]+)%.(.+)$'
 	if not alias then return s end
 	local member = alias == q._from.alias and q._from.tbl or alias
-	local t = member..'.'..c
-	return name and t..' '..name or t
+	return {name = name or (member..'.'..c), member = member, col = c}
 end
 
--- translate a select spec (string or list) using the alias map
+-- translate a select spec (string or list) using the alias map; always
+-- returns a list of {name=,member=,col=} / {name=,fn=} entries -- no
+-- intermediate string join/re-split through parse_outputs.
 local function qtrans_sel(q, sel)
-	if isstr(sel) then
-		local parts = {}
-		for s in sel:gmatch('[^,]+') do parts[#parts+1] = qtrans1(q, s) end
-		return cat(parts, ',')
-	end
 	local out = {}
+	if isstr(sel) then
+		for s in sel:gmatch('[^,]+') do out[#out+1] = qtrans1(q, s) end
+		return out
+	end
 	for _, s in ipairs(sel) do
 		out[#out+1] = isstr(s) and qtrans1(q, s) or s
 	end
@@ -419,12 +423,13 @@ local function resolve_order(q, db)
 	return order
 end
 
-local function order_spec(order)
-	local parts = {}
-	for _, o in ipairs(order) do
-		parts[#parts+1] = o.sn..'.'..o.col..(o.dir == 'desc' and ' desc' or '')
+-- resolve_order's {sn=,col=,dir=} -> value_sort's structured spec shape.
+local function sort_spec(order)
+	local spec = {}
+	for i, o in ipairs(order) do
+		spec[i] = {member = o.sn, col = o.col, desc = o.dir == 'desc'}
 	end
-	return cat(parts, ',')
+	return spec
 end
 
 local function physical_order(order, schema)
@@ -433,8 +438,9 @@ local function physical_order(order, schema)
 	for _, o in ipairs(order) do
 		if o.sn ~= schema.name then return end
 		want[#want+1] = {
-			col = schema.name..'.'..o.col,
-			dir = o.dir,
+			member = schema.name,
+			col    = o.col,
+			dir    = o.dir,
 		}
 	end
 	return want
@@ -448,7 +454,7 @@ local function order_matches(node, want_order)
 	if #want_order > #have then return false end
 	for i, wo in ipairs(want_order) do
 		local h = have[i]
-		if h.col ~= wo.col or h.dir ~= wo.dir then return false end
+		if h.member ~= wo.member or h.col ~= wo.col or h.dir ~= wo.dir then return false end
 	end
 	return true
 end
@@ -458,7 +464,10 @@ true when the value stream is already in group order for the distinct
 columns, meaning stream_distinct can be used instead of hash_distinct
 (O(1) vs O(n) memory). Compares output column names against physical
 column names in vnode.order; only correct when columns are not aliased
-in select, but safely falls back otherwise.
+in select, but safely falls back otherwise. node.order is member/col
+here but q._dist holds output field names -- for an unaliased select
+spec those happen to be the same 'member.col' string (parse_col_spec's
+default output name), so the comparison rebuilds that string.
 ]]
 local function dist_grouped(vnode, q)
 	local have = vnode.order
@@ -466,7 +475,7 @@ local function dist_grouped(vnode, q)
 	local dc = q._dist
 	if #dc > #have then return false end
 	for i, c in ipairs(dc) do
-		if have[i].col ~= c then return false end
+		if have[i].member..'.'..have[i].col ~= c then return false end
 	end
 	return true
 end
@@ -475,7 +484,7 @@ local function group_ordered(node, grp_cols)
 	local have = node.order
 	if not have or #grp_cols > #have then return false end
 	for i, gc in ipairs(grp_cols) do
-		if have[i].col ~= gc.sn..'.'..gc.col then return false end
+		if have[i].member ~= gc.sn or have[i].col ~= gc.col then return false end
 	end
 	return true
 end
@@ -493,16 +502,14 @@ local function ix_order_dir(ix_schema, schema_name, want_order)
 	local kf = ix_schema.key_fields
 	if #want_order > #kf then return nil end
 	local wo1 = want_order[1]
-	local wc1 = wo1.col:match('^[^.]+%.(.+)$') or wo1.col
-	if kf[1].col ~= wc1 then return nil end
+	if kf[1].col ~= wo1.col then return nil end
 	-- forward scan of a normal field delivers 'asc'; a descending-stored
 	-- field delivers 'desc'. Derive the scan direction from the first col.
 	local fwd1 = kf[1].descending and 'desc' or 'asc'
 	local scan_dir = wo1.dir == fwd1 and 'asc' or 'desc'
 	for i = 2, #want_order do
 		local wo = want_order[i]; local kfi = kf[i]
-		local wc = wo.col:match('^[^.]+%.(.+)$') or wo.col
-		if kfi.col ~= wc then return nil end
+		if kfi.col ~= wo.col then return nil end
 		local fwdi = kfi.descending and 'desc' or 'asc'
 		local need = scan_dir == 'asc' and fwdi
 			or (fwdi == 'asc' and 'desc' or 'asc')
@@ -1388,7 +1395,7 @@ function Q:lower()
 	--first runtime iteration, so it can show #members == 1 at build time
 	--while its item stays 'pk_tuple'.
 	if order_cols and not order_ok and plain and node.item == 'pk' then
-		node = db:value_sort(node, order_spec(order_cols))
+		node = db:value_sort(node, sort_spec(order_cols))
 		order_ok = true
 	end
 
@@ -1521,7 +1528,7 @@ function Q:lower()
 	-- value_sort materialises the full stream; limit takes the top n.
 	-- Skipped when order_ok: limit was already applied at PK level in step 6.
 	if q._order and not order_ok then
-		vnode = db:value_sort(vnode, order_spec(order_cols))
+		vnode = db:value_sort(vnode, sort_spec(order_cols))
 		if q._lim then vnode = db:limit(vnode, q._lim, q._off) end
 	end
 

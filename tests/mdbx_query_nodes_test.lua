@@ -1280,6 +1280,13 @@ function test.value_sort_pk_exec()
 				db:value_sort(db:pk_range('users'), 'users.score desc'),
 				'users', schema)
 			assert(cat(t, ',') == '2,1,4,5,3', S(t))
+
+			-- structured spec (no string spec at all), same result as 'score asc'.
+			t = collect_pks(
+				db:value_sort(db:pk_range('users'),
+					{{member = 'users', col = 'score', desc = false}}),
+				'users', schema)
+			assert(cat(t, ',') == '3,5,4,1,2', S(t))
 		end)
 	end)
 end
@@ -1436,6 +1443,26 @@ function test.select_fn_exec()
 				'user 3 doubled: expected 100, got '..tostring(recs[3].doubled_score))
 			assert(recs[1]['users.status'] == 'active',
 				'user 1 status: got '..tostring(recs[1]['users.status']))
+		end)
+	end)
+end
+
+function test.select_structured_output_exec()
+	with_db('select_structured_output_exec', function(db)
+		db:atomic('r', function()
+			-- pre-parsed {name=, member=, col=} output entries, as produced
+			-- by the builder's qtrans_sel (no string spec at all).
+			local node = db:select(db:pk_range('users'), {
+				{name = 'st', member = 'users', col = 'status'},
+				{name = 'sc', member = 'users', col = 'score'},
+			})
+			node:open()
+			local recs = {}
+			while node:next_group() do recs[#recs+1] = node:row() end
+			node:close()
+			assert(#recs == 5, 'expected 5, got '..#recs)
+			assert(recs[1].st == 'active' and recs[1].sc == 80, S(recs[1]))
+			assert(recs[3].st == 'banned' and recs[3].sc == 50, S(recs[3]))
 		end)
 	end)
 end

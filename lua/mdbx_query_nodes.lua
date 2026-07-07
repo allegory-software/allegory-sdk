@@ -249,7 +249,7 @@ function Db.query_node:explain()
 		item    = self.item,
 		members = self.members and extend({}, self.members) or nil,
 		order   = self.order and imap(self.order,
-			function(o) return o.col..' '..o.dir end) or nil,
+			function(o) return o.member..'.'..o.col..' '..o.dir end) or nil,
 		unique  = self.unique,
 		source  = self.source,
 		work    = self.work,
@@ -297,7 +297,7 @@ function Db.pk_get:__call(db, tab, ...)
 		schema.name, #schema.key_fields, #key_names)
 	local node = object(self, {
 		members = {schema.name},
-		order   = {{col = schema.name..'.pk', dir = 'asc'}},
+		order   = {{member = schema.name, col = 'pk', dir = 'asc'}},
 	})
 	local cur, is_open
 	local sz
@@ -365,7 +365,7 @@ function Db.pk_seek:__call(db, ix_name, ...)
 	local ix_key, sz
 	local node = object(self, {
 		members = {val_schema.name},
-		order   = {{col = val_schema.name..'.pk', dir = 'asc'}},
+		order   = {{member = val_schema.name, col = 'pk', dir = 'asc'}},
 	})
 	local cur, base_cur, is_open
 	local has_pk
@@ -547,10 +547,10 @@ function Db.pk_range:__call(db, name, opt, ...)
 	local order = {}
 	for i = order_fixed + 1, #schema.key_fields do
 		local f = schema.key_fields[i]
-		order[#order+1] = {col = member_schema.name..'.'..f.col, dir = dir}
+		order[#order+1] = {member = member_schema.name, col = f.col, dir = dir}
 	end
 	if is_index then
-		order[#order+1] = {col = member_schema.name..'.pk', dir = dir}
+		order[#order+1] = {member = member_schema.name, col = 'pk', dir = dir}
 	end
 	local node = object(self, {
 		members = {member_schema.name},
@@ -783,7 +783,7 @@ function Db.fk_parent_scan:__call(db, ix_name)
 	end
 	local node = object(self, {
 		members = {parent_schema.name},
-		order   = {{col = parent_schema.name..'.pk', dir = 'asc'}},
+		order   = {{member = parent_schema.name, col = 'pk', dir = 'asc'}},
 	})
 	local cur, is_open
 	local op
@@ -872,7 +872,7 @@ function Db.pk_group_first:__call(db, ix_name, ...)
 	local val_schema = schema.val_schema
 	local order = {}
 	for _, f in ipairs(schema.key_fields) do
-		order[#order+1] = {col = val_schema.name..'.'..f.col, dir = 'asc'}
+		order[#order+1] = {member = val_schema.name, col = f.col, dir = 'asc'}
 	end
 	local ix_key, sz
 	local node = object(self, {
@@ -2202,7 +2202,7 @@ function Db.pk_project:__call(db, input, member_name)
 	local order = {}
 	if input.order then
 		for _, o in ipairs(input.order) do
-			if o.col:match('^([^.]+)%.') == member_name then
+			if o.member == member_name then
 				order[#order+1] = o
 			end
 		end
@@ -2260,7 +2260,7 @@ function Db.pk_sort:__call(db, input)
 	local schema = resolve(db, member_name)
 	local node = object(self, {
 		members = {member_name},
-		order   = {{col = member_name..'.pk', dir = 'asc'}},
+		order   = {{member = member_name, col = 'pk', dir = 'asc'}},
 	})
 	node.inputs = {input}
 	node.merge_cmp = key_cmp
@@ -2517,8 +2517,9 @@ local function parse_outputs(outputs)
 			if isstr(o) then
 				parsed[#parsed+1] = parse_col_spec(o)
 			else
-				assertf(type(o) == 'table' and isstr(o.name) and type(o.fn) == 'function',
-					'select: output %d: string or {name=, fn=} expected', i)
+				assertf(type(o) == 'table' and isstr(o.name) and (type(o.fn) == 'function'
+					or (isstr(o.member) and isstr(o.col))),
+					'select: output %d: string, {name=, fn=}, or {name=, member=, col=} expected', i)
 				parsed[#parsed+1] = o
 			end
 		end
@@ -2726,8 +2727,10 @@ next_group()/:row(). For PK input (single-member only): collects
 pks + decoded sort values, sorts by those values, serves as a PK
 node with compile_col via a fresh base cursor.
 spec: 'field [asc|desc], ...' where field is a bare value-row key or
-'member.col' resolved through compile_col; or a comparator fn(a, b)
-(value input only). null sorts before non-null in asc, after in desc.
+'member.col' resolved through compile_col; a list of pre-parsed
+{member=, col=, desc=} / {field=, desc=} entries (same shape, no string
+round-trip); or a comparator fn(a, b) (value input only).
+null sorts before non-null in asc, after in desc.
 Usage: db:value_sort(input, spec)
 ]]
 Db.value_sort = object(Db.query_node, {
@@ -2744,41 +2747,53 @@ function Db.value_sort:__call(db, input, spec)
 		assertf(not is_pk,
 			'value_sort: comparator function not supported for pk input')
 	end
-	assertf(not is_pk or isstr(spec),
-		'value_sort: arg 2: string expected for pk input')
+	assertf(not is_pk or isstr(spec) or istab(spec),
+		'value_sort: arg 2: string or cols list expected for pk input')
 	assertf(not is_pk or #input.members == 1,
 		'value_sort: pk input must be single-member')
 
 	-- parse spec into parts; for pk input extract member+col for compile_col
 	local parts, sort_order
 	if type(spec) ~= 'function' then
-		assertf(isstr(spec),
-			'value_sort: arg 2: string or comparator function expected')
+		assertf(isstr(spec) or istab(spec),
+			'value_sort: arg 2: string, cols list, or comparator function expected')
 		parts = {}
-		sort_order = {}
 		local default_member = is_pk and input.members[1] or nil
-		for s in spec:gmatch('[^,]+') do
-			s = s:match('^%s*(.-)%s*$')
-			local field, dir = s:match('^(%S+)%s+(%S+)$')
-			if not field then field = s end
-			dir = dir or 'asc'
-			assertf(dir == 'asc' or dir == 'desc',
-				'value_sort: invalid direction %q in %q', dir, spec)
-			local member, col = field:match('^([^.]+)%.(.+)$')
-			local sort_member = member or default_member
-			local sort_col = col or field
-			parts[#parts+1] = {
-				field = field,
-				member = sort_member,
-				col = sort_col,
-				desc = dir=='desc',
-			}
-			sort_order[#sort_order+1] = {
-				col = sort_member and sort_member..'.'..sort_col or field,
-				dir = dir,
-			}
+		if isstr(spec) then
+			for s in spec:gmatch('[^,]+') do
+				s = s:match('^%s*(.-)%s*$')
+				local field, dir = s:match('^(%S+)%s+(%S+)$')
+				if not field then field = s end
+				dir = dir or 'asc'
+				assertf(dir == 'asc' or dir == 'desc',
+					'value_sort: invalid direction %q in %q', dir, spec)
+				local member, col = field:match('^([^.]+)%.(.+)$')
+				local sort_member = member or default_member
+				parts[#parts+1] = {
+					field = field,
+					member = sort_member,
+					col = col or field,
+					desc = dir=='desc',
+				}
+			end
+			assertf(#parts >= 1, 'value_sort: empty spec')
+		else
+			assertf(#spec >= 1, 'value_sort: empty spec')
+			for _, s in ipairs(spec) do
+				local sort_member = s.member or default_member
+				local sort_col = s.col or s.field
+				parts[#parts+1] = {
+					field = s.field or sort_col,
+					member = sort_member,
+					col = sort_col,
+					desc = not not s.desc,
+				}
+			end
 		end
-		assertf(#parts >= 1, 'value_sort: empty spec')
+		sort_order = {}
+		for i, p in ipairs(parts) do
+			sort_order[i] = {member = p.member, col = p.col, dir = p.desc and 'desc' or 'asc'}
+		end
 	end
 
 	-- null-aware comparator over a parallel vals array {a_vals, b_vals}
