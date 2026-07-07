@@ -359,20 +359,22 @@ function test.join_parent_to_child_exec()
 
 			local function join_kind(q) return q:lower():explain().inputs[1].kind end
 
-			--plain join, unaliased, first join, no left: merge_join path.
+			--plain join, unaliased, first join, no left: pk_join_seek path
+			--(parent->child never uses merge_join -- see "FIXED BY BENCH"
+			--in mdbx_query_builder.lua's lower() doc comment).
 			local q1 = db:from'users':join'sessions'
 				:select{'users.id uid', 'sessions.id sid'}
-			assert(join_kind(q1) == 'merge_join', join_kind(q1))
+			assert(join_kind(q1) == 'pk_join_seek', join_kind(q1))
 			assert(cat(pairs_ids(q1), ',') == '1:11,1:12,1:13,2:14,4:15', S(pairs_ids(q1)))
 
-			--left join: merge_ok excludes j.left -> pk_join_seek path.
+			--left join: pk_join_seek path.
 			local q2 = db:from'users':left_join'sessions'
 				:select{'users.id uid', 'sessions.id sid'}
 			assert(join_kind(q2) == 'pk_join_seek', join_kind(q2))
 			assert(cat(pairs_ids(q2), ',')
 				== '1:11,1:12,1:13,2:14,3:none,4:15,5:none', S(pairs_ids(q2)))
 
-			--aliased join: merge_ok excludes join_member ~= join_tbl -> pk_join_seek.
+			--aliased join: pk_join_seek path.
 			local q3 = db:from'users':join'sessions s'
 				:select{'users.id uid', 's.id sid'}
 			assert(join_kind(q3) == 'pk_join_seek', join_kind(q3))
@@ -438,7 +440,7 @@ function test.multi_filter_and_exec()
 				:select{'users.id uid', 'sessions.id sid'}
 			local plan2 = q2:lower():explain()
 			assert(plan2.inputs[1].kind == 'pk_filter', plan2.inputs[1].kind)
-			assert(plan2.inputs[1].inputs[1].kind == 'merge_join',
+			assert(plan2.inputs[1].inputs[1].kind == 'pk_join_seek',
 				plan2.inputs[1].inputs[1].kind)
 			t = {}
 			for r in q2:rows({P_lo = 1050, P_hi = 1250}) do

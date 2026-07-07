@@ -1,4 +1,9 @@
---go@ ~/sdk/bin/luajit -lscite ~/sdk/tests/mdbx_query_bench.lua
+--go@ ~/sdk/bin/luajit -joff -lscite ~/sdk/tests/mdbx_query_bench.lua
+--
+-- jit off: JIT warmup/trace-compilation timing swamps the actual effect
+-- being measured for close comparisons (a left-join merge_join vs
+-- pk_join_seek micro-benchmark below flipped from a clean 2x-4x win to
+-- a loss once jit was disabled -- see bench_left_join_strategy).
 --
 -- Real-life-ish benchmark for mdbx_query_builder.
 --
@@ -15,6 +20,8 @@
 
 require'glue'
 require'mdbx_query_builder'
+local ffi = require'ffi'
+local C = ffi.load'mdbx'
 
 if ... then return end
 
@@ -579,6 +586,411 @@ local function run_insert_benchmarks()
 	bench_insert_case('insert indexes + FK checks', true, true)
 end
 
+--[[
+dedicated fixtures for join/group strategy comparisons that don't fit
+the author/post/tag shape above:
+  lp/lc_*: one-to-many parent->child with a controllable match rate
+    (fraction of parents with >=1 child), for the left-join comparison.
+  p/c1/c2: two one-to-many children of the same parent in the same key
+    space, for the n-ary merge_join comparison.
+  gx: two-column indexed table with real per-key duplication, for the
+    distinct-group-by prefix comparison.
+]]
+local N_LP = 40000
+local LP_CHILDREN_PER_MATCH = 3
+local N_P = 40000
+local P_K1, P_K2 = 3, 2
+local GX_A, GX_B, GX_DUPS = 20, 20, 200
+local N_TIX_SMALL = 50
+local N_TIX_BIG = 2000000
+local DFX_KEYS = 20
+local DFX_DUPS_PER_KEY = 2000
+
+local function create_strategy_db()
+	local file = test_file'strategy'
+	local db = mdbx_open(file)
+	db:begin'w'
+
+	db:create_table('lp', {fields = {
+		{col = 'id', mdbx_type = 'u64', not_null = true},
+	}, pk = {'id'}})
+	local function make_lc(name)
+		db:create_table(name, {fields = {
+			{col = 'id', mdbx_type = 'u64', not_null = true},
+			{col = 'parent_id', mdbx_type = 'u64', not_null = true},
+		}, pk = {'id'}})
+		db:add_index(name, {'parent_id'})
+		db:add_fk{table = name, cols = {'parent_id'},
+			ref_table = 'lp', ref_cols = {'id'}}
+	end
+	make_lc('lc_full')
+	make_lc('lc_half')
+	make_lc('lc_none')
+
+	db:create_table('p', {fields = {
+		{col = 'id', mdbx_type = 'u64', not_null = true},
+	}, pk = {'id'}})
+	local function make_pc(name)
+		db:create_table(name, {fields = {
+			{col = 'id', mdbx_type = 'u64', not_null = true},
+			{col = 'parent_id', mdbx_type = 'u64', not_null = true},
+		}, pk = {'id'}})
+		db:add_index(name, {'parent_id'})
+		db:add_fk{table = name, cols = {'parent_id'},
+			ref_table = 'p', ref_cols = {'id'}}
+	end
+	make_pc('c1')
+	make_pc('c2')
+
+	db:create_table('gx', {fields = {
+		{col = 'id', mdbx_type = 'u64', not_null = true},
+		{col = 'a' , mdbx_type = 'u64', not_null = true},
+		{col = 'b' , mdbx_type = 'u64', not_null = true},
+	}, pk = {'id'}})
+	db:add_index('gx', {'a', 'b'})
+
+	local function make_tix(name)
+		db:create_table(name, {fields = {
+			{col = 'id', mdbx_type = 'u64', not_null = true},
+			{col = 'k' , mdbx_type = 'u64', not_null = true},
+		}, pk = {'id'}})
+		db:add_index(name, {'k'})
+	end
+	make_tix('tix_small')
+	make_tix('tix_big')
+
+	local row = {}
+	for id = 1, N_LP do row.id = id; db:insert('lp', '{}', row) end
+	local crow = {}
+	local next_full, next_half = 1, 1
+	for pid = 1, N_LP do
+		for k = 1, LP_CHILDREN_PER_MATCH do
+			crow.id = next_full; crow.parent_id = pid
+			db:insert('lc_full', '{}', crow)
+			next_full = next_full + 1
+		end
+		if pid % 2 == 0 then
+			for k = 1, LP_CHILDREN_PER_MATCH do
+				crow.id = next_half; crow.parent_id = pid
+				db:insert('lc_half', '{}', crow)
+				next_half = next_half + 1
+			end
+		end
+	end
+	-- lc_none: one child far outside the swept range; ~0% match.
+	crow.id = 1; crow.parent_id = N_LP
+	db:insert('lc_none', '{}', crow)
+
+	for id = 1, N_P do row.id = id; db:insert('p', '{}', row) end
+	local nid = 1
+	for pid = 1, N_P do
+		for k = 1, P_K1 do
+			crow.id = nid; crow.parent_id = pid
+			db:insert('c1', '{}', crow)
+			nid = nid + 1
+		end
+	end
+	nid = 1
+	for pid = 1, N_P do
+		for k = 1, P_K2 do
+			crow.id = nid; crow.parent_id = pid
+			db:insert('c2', '{}', crow)
+			nid = nid + 1
+		end
+	end
+
+	local gxrow = {}
+	local gid = 1
+	for a = 1, GX_A do
+		for b = 1, GX_B do
+			for k = 1, GX_DUPS do
+				gxrow.id = gid; gxrow.a = a; gxrow.b = b
+				db:insert('gx', '{}', gxrow)
+				gid = gid + 1
+			end
+		end
+	end
+
+	for id = 1, N_TIX_SMALL do db:insert('tix_small', '{}', {id = id, k = id}) end
+	for id = 1, N_TIX_BIG do db:insert('tix_big', '{}', {id = id, k = id}) end
+
+	db:create_table('dfx', {fields = {
+		{col = 'id', mdbx_type = 'u64', not_null = true},
+		{col = 'k' , mdbx_type = 'u64', not_null = true},
+	}, pk = {'id'}})
+	db:add_index('dfx', {'k'})
+	local nid = 1
+	for k = 1, DFX_KEYS do
+		for _ = 1, DFX_DUPS_PER_KEY do
+			db:insert('dfx', '{}', {id = nid, k = k})
+			nid = nid + 1
+		end
+	end
+
+	db:commit()
+	return db
+end
+
+--[[
+left join strategy: pk_join_seek(left=true) vs merge_join + db.left,
+across match rate (fraction of parents with >=1 child). With the JIT
+on, merge_join looked like a 2x-4x win here, which briefly motivated
+dropping mdbx_query_builder.lua's "not j.left" restriction on merge_ok
+-- but that was a JIT warmup artifact: with the JIT off (see go@ above),
+pk_join_seek(left=true) is consistently faster instead, so "not j.left"
+stays. Kept here as a permanent record and regression check.
+]]
+local function bench_left_join_strategy(db)
+	printf_line('')
+	printf_line('left join strategy (parent->child, one-to-many)')
+	for _, child in ipairs{'lc_full', 'lc_half', 'lc_none'} do
+		bench_query(('pk_join_seek left=true  (%s)'):format(child), function()
+			return each_node(db:pk_join_seek(
+				db:pk_range('lp'), child..'/parent_id', {left = true}))
+		end)
+		bench_query(('merge_join db.left       (%s)'):format(child), function()
+			return each_node(db:merge_join(
+				db:pk_range('lp'), db.left(db:pk_range(child..'/parent_id'))))
+		end)
+	end
+end
+
+--[[
+n-ary merge_join vs chained pk_join_seek for two parent->child joins in
+the same key space (root -> c1, root -> c2). n-ary is the only correct
+option of the two: chaining two binary merge_join calls silently drops
+rows when both sides have real duplicate fan-out for the same key
+(verified separately -- a chained-binary repro returned 10 of an
+expected 30 rows for a 3x2 per-parent cross product). Speed-wise,
+n-ary looked ~35% faster with the JIT on, but with the JIT off (see
+go@ above) it's consistently a slight loss instead -- another JIT
+warmup artifact, not a real effect. NOT wired into the builder; kept
+here so that decision has a number attached to it.
+]]
+local function bench_nary_merge_strategy(db)
+	printf_line('')
+	printf_line('n-ary merge_join vs chained pk_join_seek (2 one-to-many joins, same key space)')
+	for _, frac in ipairs{0.01, 0.05, 0.10, 0.25, 0.50, 1.00} do
+		local lo, hi = 1, math.max(1, math.floor(N_P * frac))
+		local p = {LO = lo, HI = hi}
+		bench_query(('chained pk_join_seek (n=%d%%)'):format(frac * 100), function()
+			return each_node(
+				db:pk_join_seek(
+					db:pk_join_seek(
+						db:pk_range('p', '>=', 'LO', '<=', 'HI'), 'c1/parent_id'),
+					'c2/parent_id'),
+				p)
+		end)
+		bench_query(('n-ary merge_join     (n=%d%%)'):format(frac * 100), function()
+			return each_node(
+				db:merge_join(
+					db:pk_range('p', '>=', 'LO', '<=', 'HI'),
+					db:pk_range('c1/parent_id'),
+					db:pk_range('c2/parent_id')),
+				p)
+		end)
+	end
+end
+
+--[[
+distinct group_by(a,b) with an equality filter on the leading index
+column: current fallback (hash_aggregate over a full select of matching
+rows) vs pk_group_first's prefix-arg support (NEXT_NODUP skips duplicate
+(a,b) rows entirely). Several hundred x in the exploratory bench that
+motivated the grp_ix extension in mdbx_query_builder.lua's lower()
+("group index" comment) -- an algorithmic difference (skipping
+duplicate rows entirely, not a constant-factor speedup), so unlike the
+two strategies above this one holds with the JIT off too. Kept here as
+a permanent record.
+]]
+local function bench_grp_ix_prefix_strategy(db)
+	printf_line('')
+	printf_line('distinct group_by(a,b) with equality filter on leading col')
+	local p = {A = 7}
+	bench_query('current: hash_aggregate(select(pk_range))', function()
+		local node = db:pk_range('gx/a,b', {prefix = true, n_fixed_params = 1}, 'A')
+		local outputs = {
+			{name = 'a', fn = function(n) return n:col('gx', 'a') end},
+			{name = 'b', fn = function(n) return n:col('gx', 'b') end},
+		}
+		local vnode = db:hash_aggregate(db:select(node, outputs), {'a', 'b'},
+			{{name = 'a', op = 'key', part = 1}, {name = 'b', op = 'key', part = 2}})
+		return each_node(vnode, p)
+	end)
+	bench_query('proposed: pk_group_first(ix, A) + stream_aggregate', function()
+		local node = db:pk_group_first('gx/a,b', 'A')
+		local cols = {{member = 'gx', col = 'a'}, {member = 'gx', col = 'b'}}
+		local vnode = db:stream_aggregate(node, cols,
+			{{name = 'a', op = 'key', part = 1}, {name = 'b', op = 'key', part = 2}})
+		return each_node(vnode, p)
+	end)
+end
+
+--[[
+use_counts tie-break: db:table_entries(ix) is used only to break a score
+tie between two candidate indexes in build_access, preferring the one with
+fewer entries. An exact-match pk_seek is an mdbx btree lookup, O(log n) in
+entries with a large fanout per page, so the entries-count gap needed to
+move tree depth by even one level is enormous. Compares single-row seek
+latency on a 50-entry unique index against a 2,000,000-entry unique index
+(same key shape, same result shape -- 1 row each -- so this isolates seek
+cost from row-iteration cost).
+]]
+local function bench_use_counts_tiebreak(db)
+	printf_line('')
+	printf_line('pk_seek latency vs index entry count (use_counts tie-break rationale)')
+	printf_line('tix_small/k entries=%d  tix_big/k entries=%d',
+		db:table_entries'tix_small/k', db:table_entries'tix_big/k')
+	bench_query('pk_seek small index (tix_small/k, 50 entries)', function()
+		return each_node(db:pk_seek('tix_small/k', 'K'), {K = 25})
+	end)
+	bench_query('pk_seek big index (tix_big/k, 2000000 entries)', function()
+		return each_node(db:pk_seek('tix_big/k', 'K'), {K = 1000000})
+	end)
+end
+
+--[[
+hash_aggregate vs value_sort+pk_group+stream_aggregate for a distinct
+group_by(a,b) with no natural order (no matching index prefix, driver in
+PK order). This is the fallback in lower()'s step 7 when
+group_ordered(node, grp_cols) is false. The doc comment called the
+alternative "pk_sort+pk_group"; the actual alternative is value_sort (sorts
+by the group columns) + pk_group, since pk_sort only normalises PK order
+and doesn't touch a,b order at all -- corrected here. Reasoning was
+asymptotic (O(n) hash pass vs O(n log n) sort-then-stream); this confirms
+it holds in practice, not just in theory.
+]]
+local function bench_hash_vs_sort_group(db)
+	printf_line('')
+	printf_line('group_by(a,b) with no natural order: hash_aggregate vs value_sort+pk_group')
+	local agg = {
+		{name = 'a', op = 'key', part = 1},
+		{name = 'b', op = 'key', part = 2},
+		{name = 'cnt', op = 'count'},
+	}
+	bench_query('hash_aggregate(select(pk_range))', function()
+		local outputs = {
+			{name = 'a', fn = function(n) return n:col('gx', 'a') end},
+			{name = 'b', fn = function(n) return n:col('gx', 'b') end},
+		}
+		local vnode = db:hash_aggregate(db:select(db:pk_range('gx'), outputs),
+			{'a', 'b'}, agg)
+		return each_node(vnode)
+	end)
+	bench_query('value_sort+pk_group+stream_aggregate', function()
+		local cols = {{member = 'gx', col = 'a'}, {member = 'gx', col = 'b'}}
+		local sorted = db:value_sort(db:pk_range('gx'), cols)
+		local vnode = db:stream_aggregate(db:pk_group(sorted, cols), cols, agg)
+		return each_node(vnode)
+	end)
+end
+
+--[[
+pk_seek's DUPFIXED bulk-read path (MDBX_SEEK_AND_GET_MULTIPLE / NEXT_MULTIPLE,
+whole pages of same-key dups per call) vs a forced one-dup-at-a-time walk
+(MDBX_SET_KEY then MDBX_NEXT_DUP), bypassing pk_seek and driving both
+cursor op sequences by hand. The bulk side must still walk the returned
+buffer one fixed-size chunk at a time (not just sum bytes per page) --
+pk_seek's next_group() has to yield one row per call regardless of which
+branch it's in, so a bench that doesn't pay that same per-row cost isn't
+comparable to what the node actually does.
+]]
+local function bench_dupfixed_bulk_read(db)
+	printf_line('')
+	printf_line('DUPFIXED bulk multi-get vs forced one-dup-at-a-time (%d dups/key)',
+		DFX_DUPS_PER_KEY)
+	local cur = db:cursor('dfx/k')
+	local ok, k, k_sz = cur:first_raw()
+	assert(ok, 'dfx/k: empty index')
+	local key = u8a(k_sz); copy(key, k, k_sz)
+
+	bench_query('bulk, walked one row at a time (SEEK_AND_GET_MULTIPLE/NEXT_MULTIPLE)', function()
+		local n = 0
+		local ok, v, v_sz = cur:find_multiple_raw(key, k_sz)
+		if ok then
+			local v_o = 0
+			while true do
+				if v_o >= v_sz then
+					ok, v, v_sz = cur:next_multiple_raw()
+					if not ok then break end
+					v_o = 0
+				end
+				n = n + 1
+				v_o = v_o + 8  -- 8 = sizeof(u64 pk)
+			end
+		end
+		return n
+	end)
+	local val = MDBX_val()
+	bench_query('forced one-at-a-time (SET_KEY/NEXT_DUP)', function()
+		local n = 0
+		if cur:find_raw(key, k_sz) then
+			n = 1
+			while cur:move_raw_into(C.MDBX_NEXT_DUP, nil, val) do n = n + 1 end
+		end
+		return n
+	end)
+	cur:close()
+end
+
+--[[
+same DUPFIXED question, but through the real db:pk_seek node instead of
+hand-rolled cursor ops -- the raw-cursor bench above proves the algorithm
+wins, this one checks the actual mdbx_query_nodes.lua code preserves that
+win rather than losing it to Lua/FFI/node overhead. MDBX_NODUPFIXED
+(mdbx_query_nodes.lua, pk_seek) forces the non-DUPFIXED branch on the same
+physical dfx table -- no separate table needed, no confound: MDBX_NEXT_DUP
+works fine on a DUPFIXED-flagged table, DUPFIXED only adds the bulk ops.
+]]
+local function bench_dupfixed_node(db)
+	printf_line('')
+	printf_line('pk_seek DUPFIXED vs non-DUPFIXED, through the real node (%d dups/key)',
+		DFX_DUPS_PER_KEY)
+	bench_query('dfx/k (DUPFIXED)', function()
+		return each_node(db:pk_seek('dfx/k', 'K'), {K = 1})
+	end)
+	MDBX_NODUPFIXED = true
+	bench_query('dfx/k (non-DUPFIXED, forced)', function()
+		return each_node(db:pk_seek('dfx/k', 'K'), {K = 1})
+	end)
+	MDBX_NODUPFIXED = false
+end
+
+--[[
+pk_join_seek's wide vs narrow fk path: narrow (single-col fk, p/c1 here)
+walks children via MDBX_NEXT_DUP; wide walks a pk_prefix key range instead.
+MDBX_WIDEFK forces the wide branch on the same narrow-fk table.
+]]
+local function bench_widefk_node(db)
+	printf_line('')
+	printf_line('pk_join_seek narrow vs forced-wide fk path (p/c1, %d children/parent)', P_K1)
+	bench_query('c1/parent_id (narrow)', function()
+		return each_node(db:pk_join_seek(db:pk_range('p'), 'c1/parent_id'))
+	end)
+	MDBX_WIDEFK = true
+	bench_query('c1/parent_id (wide, forced)', function()
+		return each_node(db:pk_join_seek(db:pk_range('p'), 'c1/parent_id'))
+	end)
+	MDBX_WIDEFK = false
+end
+
+local function run_strategy_benchmarks()
+	printf_line('')
+	printf_line('join/group strategy micro-benchmarks (dedicated fixtures)')
+	local db = create_strategy_db()
+	db:begin'r'
+	bench_left_join_strategy(db)
+	bench_nary_merge_strategy(db)
+	bench_grp_ix_prefix_strategy(db)
+	bench_use_counts_tiebreak(db)
+	bench_hash_vs_sort_group(db)
+	bench_dupfixed_bulk_read(db)
+	bench_dupfixed_node(db)
+	bench_widefk_node(db)
+	db:commit()
+	db:close()
+end
+
 local function main()
 	printf_line('mdbx_query_builder benchmark')
 	printf_line('posts=%d authors=%d categories=%d tags=%d seconds=%.2f',
@@ -589,6 +1001,7 @@ local function main()
 	run_query_benchmarks(db)
 	db:close()
 	run_insert_benchmarks()
+	run_strategy_benchmarks()
 
 	if KEEP_FILES then
 		printf_line('')

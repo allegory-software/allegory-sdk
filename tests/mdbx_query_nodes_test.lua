@@ -1068,19 +1068,6 @@ function test.merge_union_modes_exec()
 				db:pk_seek('users/status', 'S'),
 				db:pk_seek('users/status', 'S')), {S='active'})
 			assert(cat(t, ',') == '1,1,2,2,4,4', S(t))
-
-			-- full: dedup like union; all equal-key inputs are advanced together.
-			-- non-overlapping active+banned -> 1,2,3,4,5 same as union.
-			t = pks(db:merge_union('full',
-				db:pk_seek('users/status', 'S1'),
-				db:pk_seek('users/status', 'S2')), {S1='active', S2='banned'})
-			assert(cat(t, ',') == '1,2,3,4,5', S(t))
-
-			-- full with overlap: both inputs at same key are advanced; deduped output.
-			t = pks(db:merge_union('full',
-				db:pk_seek('users/status', 'S'),
-				db:pk_seek('users/status', 'S')), {S='active'})
-			assert(cat(t, ',') == '1,2,4', S(t))
 		end)
 	end)
 end

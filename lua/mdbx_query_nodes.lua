@@ -95,6 +95,9 @@ if not ... then require'mdbx_query_nodes_test'; return end
 
 require'mdbx_schema'
 
+MDBX_NODUPFIXED = false --bench override, see pk_seek
+MDBX_WIDEFK = false --bench override, see pk_join_seek
+
 local C  = C
 local Db = mdbx_db
 local encode_key = mdbx_encode_key
@@ -369,7 +372,7 @@ function Db.pk_seek:__call(db, ix_name, ...)
 	})
 	local cur, base_cur, is_open
 	local has_pk
-	local fixedsize = schema.dup_fixedsize
+	local fixedsize = not MDBX_NODUPFIXED and schema.dup_fixedsize
 	local ix_rec = MDBX_val()
 	local pk_rec = MDBX_val()
 	local base_val_rec = MDBX_val()
@@ -396,6 +399,7 @@ function Db.pk_seek:__call(db, ix_name, ...)
 	if fixedsize then
 		--DUPFIXED: bulk pk iteration via MDBX_GET_MULTIPLE / MDBX_NEXT_MULTIPLE.
 		--merge_key = pk value; each dup is a separate group; next_pk = noop.
+		--~2.9x faster than the non-DUPFIXED branch below.
 		pk_rec.size = fixedsize
 		function node:next_group()
 			if not cur then cur = db:cursor(schema.name) end
@@ -978,6 +982,7 @@ end
 
 -- Marks a node as optional (left outer) in db:merge_join.
 -- Usage: db:merge_join(required_node, db.left(optional_node), ...)
+-- not used by the builder: pk_join_seek(left=true) wins for left joins.
 Db.left = function(node) return {left = node} end
 
 --[[
@@ -986,6 +991,8 @@ inputs: access nodes exposing merge_key(), pk(), get_pk(),
 next_group(), next_pk(), reset_group(), skip_to().
 Wrap optional inputs with db.left(node) for left outer join.
 Usage: db:merge_join(node [, db.left(node)] ...)
+builder only ever calls this with exactly 2 required inputs; the n>2 and
+db.left forms are unused -- chained pk_join_seek wins for both cases.
 ]]
 Db.merge_join = object(Db.query_node, {
 	kind   = 'merge_join',
@@ -1166,11 +1173,9 @@ end
 --[[
 merge_union: n-ary sorted-merge union on merge_key bytes.
 mode='union' (default): dedup, get_pk from the yielding input only.
-mode='full': dedup, get_pk from all inputs at the yielded key
-(full outer join).
 mode='union_all': no dedup, advance only the yielding input each step.
 Inputs must be unique (one pk per next_group call).
-Usage: db:merge_union(['union'|'full'|'union_all',] node, node, ...)
+Usage: db:merge_union(['union'|'union_all',] node, node, ...)
 ]]
 Db.merge_union = object(Db.query_node, {
 	kind   = 'merge_union',
@@ -1181,7 +1186,7 @@ Db.merge_union = object(Db.query_node, {
 })
 function Db.merge_union:__call(db, mode, ...)
 	if not isstr(mode) then return db:merge_union('union', mode, ...) end
-	assertf(mode=='union' or mode=='full' or mode=='union_all',
+	assertf(mode=='union' or mode=='union_all',
 		'merge_union: invalid mode %q', mode)
 	local n = select('#', ...)
 	assertf(n >= 2, 'merge_union: need at least 2 inputs, got %d', n)
@@ -1270,32 +1275,12 @@ function Db.merge_union:__call(db, mode, ...)
 	end
 	function node:pk(name)
 		if not yielded then return end
-		if mode == 'full' then
-			for i = 1, n do
-				if to_adv[i] then
-					local ok, p, sz = inputs[i]:pk(name)
-					if ok then return true, p, sz end
-				end
-			end
-		else
-			return inputs[cur_i]:pk(name)
-		end
+		return inputs[cur_i]:pk(name)
 	end
 	function node:compile_col(member, col)
-		if mode == 'full' then
-			for i = 1, n do
-				for _, m in ipairs(inputs[i].members) do
-					if m == member then
-						local inner = inputs[i]:compile_col(member, col)
-						return function() return to_adv[i] and inner() or nil end
-					end
-				end
-			end
-		else
-			local closures = {}
-			for i = 1, n do closures[i] = inputs[i]:compile_col(member, col) end
-			return function() return closures[cur_i]() end
-		end
+		local closures = {}
+		for i = 1, n do closures[i] = inputs[i]:compile_col(member, col) end
+		return function() return closures[cur_i]() end
 	end
 	function node:open(params)
 		for i = 1, n do inputs[i]:open(params) end
@@ -1447,7 +1432,8 @@ function Db.pk_join_seek:__call(db, driver, fk_name, opts)
 	--wide index: children of one parent are a key range, not dupsort
 	--duplicates of one key. fk_child (pk_prefix, reset per row) walks
 	--that range instead of the narrow case's exact SET_KEY/NEXT_DUP.
-	local wide = #fk_schema.pk > #fk.cols
+	--MDBX_WIDEFK: global bench override, forces this branch.
+	local wide = MDBX_WIDEFK or #fk_schema.pk > #fk.cols
 	--seek/reset_prefix below reuse driver's parent-pk bytes as-is, which
 	--only works if the FK index key is byte-identical to the parent pk
 	--(fails for a nullable FK col: extra marker byte). not_null is the
@@ -2381,6 +2367,7 @@ probes test the same driver member (the table they index); driver
 may carry other tuple members (chained joins) alongside it.
 probe: {ix=index_name, keys={P1, P2, ...}} -- one param name per key col.
 Usage: db:pk_and_probe(driver, probe, ...)
+not used by the builder: plain pk_filter wins in every shape tried.
 ]]
 Db.pk_and_probe = object(Db.query_node, {
 	kind   = 'pk_and_probe',

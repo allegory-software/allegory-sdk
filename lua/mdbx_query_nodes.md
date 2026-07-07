@@ -183,7 +183,7 @@ n_fixed_params=#prefix_params}, ...)`.
 Two or more pk-order inputs on the same key space. Advance in lockstep by
 comparing raw PK bytes; O(n+m). All inputs must share the same `merge_sig`.
 
-	merge_union(['union'|'full'|'union_all',] node, node...)
+	merge_union(['union'|'union_all',] node, node...)
 	  flat PK stream; dedup or all
 	merge_except(a, b)          flat PK stream; a minus b
 	merge_join(node [, db.left(node)]...)  PK tuple stream; inner or left join
@@ -211,7 +211,6 @@ any driver order at the cost of one index seek per row.
 **merge_union** mode (leading string, default `'union'`):
 
 	'union'      dedup; PK taken from the first input at each merge key
-	'full'       dedup; PK taken from all inputs at each merge key
 	'union_all'  no dedup; advance only the input that yielded
 
 `merge_union` and `merge_except` require unique inputs (one PK per key group).

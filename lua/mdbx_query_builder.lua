@@ -122,7 +122,7 @@ UNION
 
 	mode aliases: 'union' = 'distinct'; 'union_all' = 'all'
 	all queries must select same output fields in same order
-	no full outer join API
+	NYI: full outer join API
 
 TERMINALS
 
@@ -578,6 +578,14 @@ categorize_filters). is_pk: true when ix_schema is the base table
 (pk_get instead of pk_seek). returns plan table or nil;
 plan.consumed = {filter_index -> true}
 ]]
+--max :in_ list size eligible for the in_union plan (one pk_get/pk_seek
+--per value, merge_union'd): merge_union is a linear scan over its N
+--inputs per output item (O(n*m) total), so this gets worse, not
+--better, as the list grows. Past this size, fall through to the
+--residual hash-set pk_filter instead. 16 is a conservative cutoff --
+--benched catastrophic loss (~16.6x) at 5000; the actual crossover
+--point wasn't bracketed.
+local IN_UNION_MAX = 16
 local function try_ix_plan(ix_schema, buckets, is_pk)
 	local eq, lo_by, hi_by, prefix_by, in_by, noop =
 		buckets.eq, buckets.lo_by, buckets.hi_by,
@@ -610,7 +618,8 @@ local function try_ix_plan(ix_schema, buckets, is_pk)
 	IN list without pairing it with fixed values for the other columns,
 	which isn't attempted here.
 	]]
-	if n == 1 and depth == 0 and in_by[nc] then
+	if n == 1 and depth == 0 and in_by[nc]
+		and #in_by[nc].vals <= IN_UNION_MAX then
 		local ib = in_by[nc]
 		return {
 			kind     = 'in_union',
@@ -703,24 +712,39 @@ local function build_access(db, schema, mf, hints, use_counts, want_order,
 				end
 			end
 		end
-		if prefer_order then best = try_order_plan() end
-		if not best then
-			if not no_all then
-				local p = try_ix_plan(schema, buckets, true)
-				if p then best = p end
-			end
-			for _, ix_s in ipairs(schema.indexes or empty) do
-				local skip = no_all or (h and h.no and h.no[ix_s.name])
-				if not skip then
-					local p = try_ix_plan(ix_s, buckets, false)
-					if p then
-						local better = not best or p.score > best.score
-							or (use_counts and p.score == best.score
-								and db:table_entries(p.ix) < db:table_entries(best.ix))
-						if better then best = p end
-					end
+		if not no_all then
+			local p = try_ix_plan(schema, buckets, true)
+			if p then best = p end
+		end
+		for _, ix_s in ipairs(schema.indexes or empty) do
+			local skip = no_all or (h and h.no and h.no[ix_s.name])
+			if not skip then
+				local p = try_ix_plan(ix_s, buckets, false)
+				if p then
+					local better = not best or p.score > best.score
+						or (use_counts and p.score == best.score
+							and db:table_entries(p.ix) < db:table_entries(best.ix))
+					if better then best = p end
 				end
 			end
+		end
+		--[[
+		prefer_order: with :limit(), reading in the requested order lets
+		the scan stop early, which usually beats a filter match that
+		still needs a full sort afterward. But an exact filter match
+		(pk_get/pk_seek, all key cols covered) is high-confidence
+		selective -- letting it lose to order_want here caused an 86x
+		regression at high selectivity (benched; see "CONFIRMED GAPS BY
+		BENCH" in this function's doc comment -- the real fix needs a
+		per-key match-count estimate, which needs a new primitive; this
+		is the conservative version). Weaker range/prefix matches, where
+		selectivity is uncertain anyway, still lose to order_want.
+		]]
+		if prefer_order
+			and not (best and (best.kind == 'pk_get' or best.kind == 'pk_seek'))
+		then
+			local op = try_order_plan()
+			if op then best = op end
 		end
 		--[[
 		If no filter plan was found, an ordered index is still useful:
@@ -1119,6 +1143,153 @@ Steps in order:
      the full stream, limit takes the top n. Skipped when order_ok.
      At this point order_by still uses real query columns through compile_col;
      it does not read output field names.
+
+REJECTED BY BENCH -- don't retry these without new evidence:
+
+  - left_join via merge_join + db.left on the fk side, instead of
+    pk_join_seek(left=true) (step 4). Looked like a 2x-4x win with the
+    jit on; with the jit off, pk_join_seek(left=true) wins instead.
+    jit warmup artifact, not a real effect (see tests/mdbx_query_bench.lua,
+    bench_left_join_strategy).
+  - n-ary merge_join for two or more parent->child joins from the same
+    from-table in the same key space (step 4), instead of chaining
+    pk_join_seek per join. Looked like a ~35% win with the jit on; with
+    the jit off it's a consistent slight loss instead (same jit-warmup
+    artifact as above). Separately: chaining two binary merge_join calls
+    (as opposed to one n-ary call) is outright wrong, not just slower --
+    it silently drops rows when both sides have real duplicate fan-out
+    for the same key (see tests/mdbx_query_bench.lua,
+    bench_nary_merge_strategy).
+  - pk-level union pushdown: merge_union the branches' pk streams and
+    select once, instead of selecting each branch then value_concat +
+    hash_distinct (Db:union / U:lower). Confirmed a real, reproducible
+    ~2x win (survives jit off), but requires exposing each branch's
+    pre-select pk node from Q:lower() as a new field -- judged not worth
+    the added surface for 2x (see tests/mdbx_query_bench.lua,
+    bench_union_pushdown in scratch history).
+  - merge_union('full') for full outer join: removed. Only correct for a
+    1:1 relationship between inputs (advances via next_group only, never
+    next_pk), so it silently drops duplicate children for the common
+    parent->child one-to-many case -- the case a full outer join API
+    would actually need to cover.
+
+FIXED BY BENCH -- an existing default was measured worse than the
+alternative and has been corrected; don't reintroduce without new
+evidence:
+
+  - parent->child merge_ok (step 4, "first join only, no left join, no
+    alias" -- the ORIGINAL fast path, predated the jit-off convention):
+    used to prefer merge_join over pk_join_seek. Re-measured jit off at
+    both N_POSTS=3000 and the file's default N_POSTS=20000:
+    pk_join_seek won instead, consistently, at every driver-size
+    fraction (~10%-20% faster). The comment's own "per bench"
+    justification looks like the same kind of jit-warmup artifact found
+    and reverted above -- it just predated this session instead of
+    being introduced during it. merge_ok deleted; always pk_join_seek
+    for this direction now.
+  - pk_and_probe (step 2, order_ok residual equality filter -> probe a
+    secondary index instead of pk_filter decode+compare): lost to plain
+    pk_filter in both shapes tested (count-only and full select), jit
+    off, reproducibly. Expected pk_and_probe to win the count-only case
+    (avoids a base-table read) but it didn't even there. Conversion
+    removed; residual filters always go through pk_filter now (the
+    pk_and_probe node itself stays, just unused by the builder).
+  - in_union (step 1, single-column :in_ -> one pk_get/pk_seek per
+    value + merge_union): for a wide list (5000 values, 2.5% table
+    selectivity) this was ~16.6x slower, jit off, than a full scan +
+    hash-set pk_filter (the same strategy already used for an :in_
+    filter that isn't index-eligible) -- merge_union is O(n*m) in the
+    number of merged inputs (see its own "Linear scan" comment in
+    mdbx_query_nodes.lua), so this gets worse, not better, as the list
+    grows. Capped at IN_UNION_MAX (16, a conservative guess -- the
+    actual crossover point wasn't bracketed); above that, falls through
+    to the residual hash-set pk_filter instead.
+  - prefer_order (step 1, build_access: with :limit(), an order-matching
+    index scan used to always win over a more selective filter-index
+    scan, unconditionally): at high filter selectivity (match count ==
+    limit, spread evenly through the ordered range) the order-scan had
+    to walk almost the entire table to collect enough matches -- 86x
+    slower, jit off, than filter-index-scan + value_sort + limit (worst
+    case; crossover point not bracketed). Conservative fix applied: an
+    exact filter match (pk_get/pk_seek, all key cols covered) now wins
+    over order_want regardless of :limit(); weaker range/prefix matches,
+    where selectivity is uncertain anyway, still lose to order_want as
+    before. The proper fix (a per-key match-count estimate, deciding
+    both directions of the tradeoff rather than special-casing the one
+    that regressed) needs a new primitive -- MDBX has a cheap per-key
+    dup count (mdbx_cursor_count, declared in mdbx_h.lua) but it's not
+    wrapped in mdbx.lua yet -- left as a follow-up, not done here.
+
+CONFIRMED BY BENCH -- existing choice measured and left as-is, no code
+change:
+
+  - use_counts tie-break (db:table_entries): a same-shape (unique key,
+    single-row result) pk_seek on a 50-entry index vs a 2,000,000-entry
+    index, jit off, came out within ~6% (79.4k q/s vs 74.7k q/s) --
+    exact-match seek cost is dominated by btree depth (O(log n)), and the
+    entries gap needed to move depth by even one level is far larger than
+    any realistic index-size difference. Confirms "off by default" is the
+    right default, not just an untested guess.
+  - hash_aggregate vs value_sort+pk_group+stream_aggregate for group_by
+    with no natural order (step 7): hash_aggregate won by ~3x (3.3 q/s vs
+    1.1 q/s, 400-row groups over a full unsorted scan), jit off --
+    confirms the O(n) vs O(n log n) reasoning holds in practice, not just
+    asymptotically. (The doc's prior wording called the alternative
+    "pk_sort+pk_group" -- wrong: pk_sort only normalises PK order, doesn't
+    touch group-column order. The real alternative is value_sort, which
+    is what was benched.)
+  - pk_seek's DUPFIXED bulk-read path (MDBX_SEEK_AND_GET_MULTIPLE/
+    NEXT_MULTIPLE, whole pages of same-key dups per call): the dispatch is
+    schema-determined (set whenever the base table's pk is fixed-size), so
+    no query picks the alternative on the same data. Two benches, jit off,
+    2000 dups/key:
+    (a) raw cursor ops by hand, bypassing pk_seek, both sides walking one
+        row at a time (matching next_group()'s one-row-per-call contract,
+        not just summing a page's byte count): bulk won ~48x (49.3k q/s
+        vs 1.0k q/s).
+    (b) through the real db:pk_seek node -- MDBX_NODUPFIXED (global bench
+        override in mdbx_query_nodes.lua's pk_seek) forces the non-DUPFIXED
+        branch on the exact same physical dfx table, no second table
+        needed: bulk won ~2.9x (2.9k q/s vs 1.0k q/s).
+    The (a)-vs-(b) gap is real, not a bug: next_group() writes two cdata
+    struct fields (pk_rec.data/size) every row in both branches, and that
+    write costs ~32x more per call under jit off than plain Lua arithmetic
+    (checked separately) -- a fixed per-row cost common to both branches
+    that dilutes the visible ratio. (a) has no such cost, so it shows the
+    algorithm's raw gap undiluted. Still worth it either way, comfortably
+    over the 2x bar; (b) is the number for "is this worth the code" since
+    it's measured the way this project always benches (jit off).
+  - pk_join_seek's wide vs narrow fk path: MDBX_WIDEFK (global bench
+    override in mdbx_query_nodes.lua's pk_join_seek) forces the wide
+    (pk_prefix range-scan) branch on p/c1, a normal single-col-fk table
+    that would dispatch to narrow (MDBX_NEXT_DUP). Narrow won by only
+    ~1.3x -- under the 2x bar, but kept as-is since it's the natural
+    dispatch already in place, not new code being justified.
+
+CONFIRMED GAPS BY BENCH -- current behavior measured worse than an
+alternative, jit off; decision made, not acted on:
+
+  - child->parent (pk_parent_lookup, step 4): has no merge-based fast
+    path at all today (pk_parent_lookup used unconditionally).
+    tests/mdbx_query_bench.lua's own bench_parent_lookup_sweep
+    ("merge_join rev") shows merge_join beating pk_parent_lookup by
+    ~1.7x-2.5x (rising with driver size), consistently, jit off, at
+    every fraction -- a real, unexploited win. Not a simple flip like
+    the parent->child case above: merge_join needs the driver already
+    streaming in FK-value order (e.g. scanning post/author_id), not the
+    child table's own PK order, so build_access would need a new hint
+    (like order_want/group_order) to prefer the FK index as a fallback
+    driving scan -- new plumbing, not just a condition change. Declined:
+    not worth that plumbing for ~2x. Don't revisit without a bigger win
+    or a reason the plumbing is needed for something else too.
+
+NOT BENCHED -- judged not worth constructing an isolated test for, or
+not a tunable choice at all:
+
+  - try_ix_plan's scoring weights (n*20+10 full match, depth*20+5
+    range, depth*20 prefix): a relative ranking across many candidate
+    index shapes at once, not a single two-way comparison; no isolated
+    test constructed.
 ]]
 function Q:lower()
 	if self._node then return self._node end
@@ -1168,20 +1339,27 @@ function Q:lower()
 	local mf = by_member[q._from.tbl] or {}
 
 	--[[
-	group index: when grouping needs no filters/joins beyond grouping
-	itself and no other aggregates, and the group cols exactly match an
-	index key, the index cursor groups natively via NEXT_NODUP (O(n groups)
-	base reads) -- decided here so the normal access node (step 1) is
-	skipped entirely instead of being built and discarded.
+	group index: when grouping needs no other aggregates (agg{} empty --
+	a "distinct group keys" query) and no joins/cross filters, and the
+	group cols exactly match an index key, the index cursor groups
+	natively via NEXT_NODUP (O(n groups) base reads) -- decided here so
+	the normal access node (step 1) is skipped entirely instead of being
+	built and discarded. A leading run of the group cols pinned by an
+	equality filter narrows the scan to a prefix of the index
+	(pk_group_first's own prefix-arg support, benched ~200x over
+	hash_aggregate on a filtered high-cardinality group). Any mf entry
+	left unconsumed by that prefix blocks the fast path: pk_group_first
+	exposes only one representative row per group, so a filter on a
+	non-key column can't be safely checked against it.
 	]]
-	local grp_cols, grp_ix
+	local grp_cols, grp_ix, grp_ix_prefix, grp_ix_consumed
 	if q._agg and q._grp then
 		grp_cols = {}
 		for _, c in ipairs(q._grp) do
 			local sn, col = qrcol(q, c)
 			grp_cols[#grp_cols+1] = {sn = sn, col = col}
 		end
-		if #q._agg == 0 and #mf == 0 and order_stable and #cross == 0 then
+		if #q._agg == 0 and order_stable and #cross == 0 then
 			local n = #grp_cols
 			for _, ix_s in ipairs(from_s.indexes or empty) do
 				if #ix_s.key_fields == n then
@@ -1189,14 +1367,37 @@ function Q:lower()
 					for i, kf in ipairs(ix_s.key_fields) do
 						if kf.col ~= grp_cols[i].col then match = false; break end
 					end
-					if match then grp_ix = ix_s.name; break end
+					if match then
+						local prefix, used, depth = {}, {}, 0
+						for _, gc in ipairs(grp_cols) do
+							local fi, pname
+							for j, f in ipairs(mf) do
+								if not used[j] and f.k == '==' and f.col == gc.col
+									and not is_outer(f.v) then
+									fi, pname = j, f.v; break
+								end
+							end
+							if not fi then break end
+							used[fi] = true
+							prefix[#prefix+1] = pname
+							depth = depth + 1
+						end
+						if depth == #mf and depth < n then
+							grp_ix = ix_s.name
+							grp_ix_prefix = prefix
+							grp_ix_consumed = used
+						end
+						break
+					end
 				end
 			end
 		end
 	end
 
 	local node, consumed
-	if not grp_ix then
+	if grp_ix then
+		consumed = grp_ix_consumed
+	else
 		node, consumed = build_access(
 			db, from_s, mf, q._hints, q._use_counts, order_want or group_order,
 			order_want ~= nil and q._lim ~= nil)
@@ -1211,42 +1412,12 @@ function Q:lower()
 		and order_matches(node, order_want)
 
 	-- 2. RESIDUAL AND FILTERS: conditions the access node could not encode.
-	-- pk_and_probe: when order_ok, equality filters fully covered by a secondary
-	-- index become probes instead of pk_filter predicates; the driver's natural
-	-- order is preserved and limit (step 6) can then terminate the scan early.
-	local probe_consumed = {}
-	if order_ok then
-		local rmf, rfi = {}, {}
-		for i, f in ipairs(mf) do
-			if not consumed[i] then rmf[#rmf+1] = f; rfi[#rfi+1] = i end
-		end
-		local rbuckets = categorize_filters(rmf, from_s)
-		local used = {}
-		local probes = {}
-		for _, ix_s in ipairs(from_s.indexes or empty) do
-			local p = try_ix_plan(ix_s, rbuckets, false)
-			if p and p.kind == 'pk_seek' then
-				local conflict = false
-				for ri in pairs(p.consumed) do
-					if used[ri] then conflict = true; break end
-				end
-				if not conflict then
-					probes[#probes+1] = {ix = ix_s.name, keys = p.vals}
-					for ri in pairs(p.consumed) do used[ri] = true end
-				end
-			end
-		end
-		if #probes > 0 then
-			for ri in pairs(used) do probe_consumed[rfi[ri]] = true end
-			node = db:pk_and_probe(node, unpack(probes))
-		end
-	end
 	-- query-based in_/not_in: materialise subquery PKs into a hash and filter
 	-- driver by membership; the col is the PK col and the subquery must be in
 	-- the same PK key space. For FK use cases use where_exists instead.
 	local residual = {}
 	for i, f in ipairs(mf) do
-		if not consumed[i] and not probe_consumed[i] then residual[#residual+1] = f end
+		if not consumed[i] then residual[#residual+1] = f end
 	end
 	node = apply_member_filters(db, node, residual)
 
@@ -1319,19 +1490,7 @@ function Q:lower()
 			if dir == 'child_to_parent' then
 				node = db:pk_parent_lookup(node, fk_ix, opts)
 			else
-				--merge_join: O(n+m) vs pk_join_seek's O(n log m); only when
-				--driver is in from-table pk order (pk_sort tips it back to
-				--pk_join_seek, per bench), first join only, no left join,
-				--no alias. key_sig check excludes a nullable FK column
-				--(different key space); read off the schema, not a built node.
-				local merge_ok = #acc == 1 and not j.left and join_member == join_tbl
-					and node.merge_sig == from_s.key_sig
-					and db:table_schema(fk_ix).key_sig == node.merge_sig
-				if merge_ok then
-					node = db:merge_join(node, db:pk_range(fk_ix))
-				else
-					node = db:pk_join_seek(node, fk_ix, opts)
-				end
+				node = db:pk_join_seek(node, fk_ix, opts)
 			end
 			-- apply join-table filters while the cursor is still positioned.
 			node = apply_member_filters(db, node, by_member[join_member] or empty)
@@ -1428,7 +1587,9 @@ function Q:lower()
 			extend(full_agg, tagg)
 
 			if grp_ix then
-				vnode = db:stream_aggregate(db:pk_group_first(grp_ix), cols, full_agg)
+				--~147x faster than the hash_aggregate fallback below.
+				vnode = db:stream_aggregate(
+					db:pk_group_first(grp_ix, unpack(grp_ix_prefix)), cols, full_agg)
 			elseif group_ordered(node, grp_cols) then
 				vnode = db:stream_aggregate(db:pk_group(node, cols), cols, full_agg)
 			else
@@ -1441,6 +1602,7 @@ function Q:lower()
 				lose by not sorting. select decodes exactly the columns the
 				group key and aggregates need; out_name dedups repeated columns
 				and gives each a private field name in that row.
+				~3x faster than value_sort+pk_group+stream_aggregate.
 				]]
 				local outputs = {}
 				local seen = {}
