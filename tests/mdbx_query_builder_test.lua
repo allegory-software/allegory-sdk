@@ -547,6 +547,87 @@ function test.is_not_null_exec()
 	end)
 end
 
+function test.correlated_fn_exec()
+	with_db('correlated_fn_exec', function(db)
+		db:atomic('r', function()
+			local function user_ids(q, params)
+				local t = {}
+				for r in q:select{'users.id'}:rows(params) do
+					t[#t+1] = tonumber(r['users.id'])
+				end
+				sort(t)
+				return t
+			end
+
+			--where_exists(fn): o'member.col' proxies the outer row; users
+			--with at least one session. fn is called once (5 outer rows),
+			--not per row: it only ever hands back a param name, so the
+			--query it builds is the same every time; only the bound value
+			--(read via outer_fn) varies per row.
+			local n1 = 0
+			local t = user_ids(db:from'users':where_exists(function(o)
+				n1 = n1 + 1
+				return db:from'sessions':where('user_id', o'users.id')
+			end))
+			assert(cat(t, ',') == '1,2,4', S(t))
+			assert(n1 == 1, n1)
+
+			--nested_join(fn): same proxy convention, correlated per outer row.
+			local n2 = 0
+			local q2 = db:from'users':nested_join(function(o)
+				n2 = n2 + 1
+				return db:from'sessions':where('user_id', o'users.id')
+			end):select{'users.id uid', 'sessions.id sid'}
+			local pairs_t = {}
+			for r in q2:rows() do
+				pairs_t[#pairs_t+1] = tonumber(r.uid)..':'..tonumber(r.sid)
+			end
+			assert(cat(pairs_t, ',') == '1:11,1:12,1:13,2:14,4:15', S(pairs_t))
+			assert(n2 == 1, n2)
+
+			--where_has(fn): fn adds a condition on the child rows; users
+			--with a session started after 1250 (sessions 14, 15 -> users 2, 4).
+			local n3 = 0
+			t = user_ids(db:from'users':where_has('sessions', function(o)
+				n3 = n3 + 1
+				return db:from'sessions'
+					:where('user_id', o'users.id'):where('started_at', '>', 'P')
+			end), {P = 1250})
+			assert(cat(t, ',') == '2,4', S(t))
+			assert(n3 == 1, n3)
+		end)
+	end)
+end
+
+function test.outer_ref_scope_exec()
+	with_db('outer_ref_scope_exec', function(db)
+		db:atomic('r', function()
+			--skip-level ref: innermost query wants the grandparent ('u'),
+			--skipping its immediate parent ('s') -- must fail to build
+			--instead of silently reading the wrong node at runtime.
+			assert(not pcall(function()
+				return db:from'users u':where_exists(
+					db:from'sessions s':where_exists(
+						db:from'events':where('session_id', mdbx_outer'u.id')
+					)):lower()
+			end))
+
+			--valid case: outer ref to a joined member (not the from-table's
+			--own alias) of the immediate enclosing query.
+			local q = db:from'users':join'sessions'
+				:where_exists(db:from'events'
+					:where('session_id', mdbx_outer'sessions.id'))
+				:select{'users.id uid', 'sessions.id sid'}
+			local t = {}
+			for r in q:rows() do
+				t[#t+1] = tonumber(r.uid)..':'..tonumber(r.sid)
+			end
+			sort(t)
+			assert(cat(t, ',') == '1:11,2:14', S(t))
+		end)
+	end)
+end
+
 ------------------------------------------------------------------------------
 
 local name = ...

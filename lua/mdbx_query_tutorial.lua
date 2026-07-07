@@ -501,15 +501,15 @@ function tutorial.where_has_with_predicate()
 where_has with a predicate function.
 
 Passing a function to :where_has lets you add conditions on the child rows.
-fn receives the outer row as a cursor node; call node:col(member, col) to
-read a single column value. Return a query scoped to the child table.
-The outer row is kept when at least one inner row matches.
+fn receives a proxy o; call o('category.id') to get the current outer
+column value. Return a query scoped to the child table. The outer row is
+kept when at least one inner row matches.
 ]]
 	db:atomic('r', function()
 		-- categories that have at least one published post
-		for r in db:from('category'):where_has('post', function(on)
-			local cat_id = on:col('category', 'id')
-			return db:from('post'):where('category', cat_id):where('status', 'published')
+		for r in db:from('category'):where_has('post', function(o)
+			return db:from('post')
+				:where('category', o'category.id'):where('status', 'published')
 		end):select('category.id id'):rows() do
 			pr(r.id)    -- 1, 2
 		end
@@ -736,17 +736,16 @@ function tutorial.nested_join()
 Nested join: :nested_join.
 
 :nested_join(fn) runs fn once for each outer row to produce correlated inner
-rows. fn receives a cursor node to read outer column values. The inner query's
-member names must not overlap the outer ones.
+rows. fn receives a proxy o; call o('category.id') to get the current outer
+column value. The inner query's member names must not overlap the outer ones.
 Use it when you need a specific related row per driver row, such as
 "for each category, find the post with the highest score".
 ]]
 	db:atomic('r', function()
 		local rows = rows_of(
-			db:from('category'):nested_join(function(on)
-				local cat_id = on:col('category', 'id')
+			db:from('category'):nested_join(function(o)
 				return db:from('post')
-					:where('category', cat_id)
+					:where('category', o'category.id')
 					:is_not_null('score')
 					:order_by('score desc')
 					:limit(1)

@@ -921,6 +921,41 @@ local function qfind_fk(db, from_sname, to_sname, hint)
 	assertf(false, 'join: no FK between %s and %s', from_sname, to_sname)
 end
 
+--[[
+wrap a user-supplied fn(o) callback for a correlated subquery
+(where_exists/where_has/nested_join fn form). ufn is called once here,
+not once per outer row: o('member.col') only ever hands the query a
+fresh param name (the same convention as every other filter value,
+resolved later via params[pname]), so ufn builds the identical query
+structure on every row regardless -- only the bound values vary. Lowers
+once here and reuses that node across rows; the returned per-row factory
+only rebinds the param values.
+]]
+local function wrap_user_fn(q, ufn)
+	local n = 0
+	local binds = {}
+	local proxy = function(ref)
+		local sn, c = qrcol(q, ref)
+		n = n + 1
+		local pname = '__of'..n
+		binds[n] = {name = pname, sn = sn, col = c}
+		return pname
+	end
+	local r = ufn(proxy)
+	local inner = (type(r) == 'table' and r.lower) and r:lower() or r
+	local ov_params, src_params
+	return function(outer_fn, params)
+		if params ~= src_params then
+			ov_params = update({}, params)
+			src_params = params
+		end
+		for _, b in ipairs(binds) do
+			ov_params[b.name] = outer_fn(b.sn..'.'..b.col)[1]
+		end
+		return inner, ov_params
+	end
+end
+
 -- lower an exists/not_exists filter
 local function lower_ex_filter(db, node, f, outer_q)
 	local want = f.k == 'ex'
@@ -931,20 +966,7 @@ local function lower_ex_filter(db, node, f, outer_q)
 	end
 
 	if type(q2) == 'function' then
-		-- user fn: factory wraps alias-aware proxy around outer_fn
-		local fn = q2
-		local factory = function(outer_fn, params)
-			local proxy = function(ref)
-				local sn, c = qrcol(outer_q, ref)
-				return outer_fn(sn..'.'..c)
-			end
-			local built = fn(proxy)
-			if type(built) == 'table' and built.lower then
-				return built:lower(), params
-			end
-			return built, params
-		end
-		return apply(factory)
+		return apply(wrap_user_fn(outer_q, q2))
 	end
 
 	local has_sent = false
@@ -970,8 +992,17 @@ local function lower_ex_filter(db, node, f, outer_q)
 		local ovrefs = {}
 		local function remap(v)
 			if not is_outer(v) then return v end
-			local k = '__ov'..(#ovrefs+1)
 			local sn, c = qrcol(outer_q, v._ref)
+			-- qrcol doesn't validate the alias belongs to outer_q; an
+			-- unvalidated ref that meant to skip past outer_q (referencing
+			-- a grandparent, not the immediate parent) would otherwise
+			-- silently read the wrong node at runtime instead of failing here.
+			assertf(sn == outer_q._from.tbl or outer_q._al[sn],
+				'mdbx_outer: %q does not resolve in the immediate enclosing '
+				..'query; referencing an ancestor beyond the immediate '
+				..'parent is not supported here -- use the function form',
+				v._ref)
+			local k = '__ov'..(#ovrefs+1)
 			ovrefs[#ovrefs+1] = {key = k, sn = sn, col = c}
 			return k
 		end
@@ -1273,15 +1304,7 @@ function Q:lower()
 	local acc = {{sname = q._from.tbl, member = q._from.tbl}}
 	for _, j in ipairs(q._joins) do
 		if j.nested then
-			local jfn = j.fn
-			local factory = function(outer_fn, params)
-				local r = jfn(outer_fn)
-				if type(r) == 'table' and r.lower then
-					return r:lower(), params
-				end
-				return r, params
-			end
-			node = db:nested_join(node, factory, {left = j.left})
+			node = db:nested_join(node, wrap_user_fn(q, j.fn), {left = j.left})
 		else
 			local join_tbl = j.tbl
 			local join_member = j.alias
@@ -1344,16 +1367,8 @@ function Q:lower()
 				'where_has: %s must have FK to %s', fk_tbl, q._from.tbl)
 			if f.fn then
 				-- user fn shapes the inner query; factory per outer row.
-				local want = k == 'has'
-				local ufn = f.fn
-				local factory = function(outer_fn, params)
-					local r = ufn(outer_fn)
-					if type(r) == 'table' and r.lower then
-						return r:lower(), params
-					end
-					return r, params
-				end
-				if want then node = db:semi_join(node, factory)
+				local factory = wrap_user_fn(q, f.fn)
+				if k == 'has' then node = db:semi_join(node, factory)
 				else node = db:anti_join(node, factory) end
 			else
 				--fk_parent_scan is always in from-table pk order (it
