@@ -624,13 +624,16 @@ local function try_ix_plan(ix_schema, buckets, is_pk)
 	local prefix = prefix_by[nc]
 	if prefix then
 		consumed[prefix.fi] = true
+		local args = {}
+		for _, pn in ipairs(eq_vals) do args[#args+1] = pn end
+		args[#args+1] = prefix.v
 		return {
-			kind     = 'pk_range',
-			ix       = ix_schema.name,
-			eq_vals  = eq_vals,
-			prefix   = prefix.v,
-			consumed = consumed,
-			score    = depth*20 + 5,
+			kind      = 'pk_range',
+			ix        = ix_schema.name,
+			call_args = args,
+			call_opts = {prefix = 'partial', n_fixed_params = #eq_vals},
+			consumed  = consumed,
+			score     = depth*20 + 5,
 		}
 	end
 	local lo = lo_by[nc]; local hi = hi_by[nc]
@@ -638,16 +641,24 @@ local function try_ix_plan(ix_schema, buckets, is_pk)
 		if lo then consumed[lo.fi] = true end
 		if hi then consumed[hi.fi] = true end
 		if noop[nc] then consumed[noop[nc]] = true end
+		local args = {}
+		if lo then
+			args[#args+1] = lo.op
+			for _, pn in ipairs(eq_vals) do args[#args+1] = pn end
+			args[#args+1] = lo.v
+		end
+		if hi then
+			args[#args+1] = hi.op
+			for _, pn in ipairs(eq_vals) do args[#args+1] = pn end
+			args[#args+1] = hi.v
+		end
 		return {
-			kind     = 'pk_range',
-			ix       = ix_schema.name,
-			eq_vals  = eq_vals,
-			lo_op    = lo and lo.op,
-			lo       = lo and lo.v,
-			hi_op    = hi and hi.op,
-			hi       = hi and hi.v,
-			consumed = consumed,
-			score    = depth*20 + 5,
+			kind      = 'pk_range',
+			ix        = ix_schema.name,
+			call_args = args,
+			call_opts = {n_fixed_params = #eq_vals},
+			consumed  = consumed,
+			score     = depth*20 + 5,
 		}
 	end
 	if depth > 0 then
@@ -682,11 +693,11 @@ local function build_access(db, schema, mf, hints, use_counts, want_order,
 					local od = ix_order_dir(ix_s, schema.name, want_order)
 					if od then
 						return {
-							kind     = 'pk_range',
-							ix       = ix_s.name,
-							eq_vals  = {},
-							consumed = {},
-							desc     = od == 'desc',
+							kind      = 'pk_range',
+							ix        = ix_s.name,
+							call_args = {},
+							call_opts = {desc = od == 'desc'},
+							consumed  = {},
 						}
 					end
 				end
@@ -753,29 +764,9 @@ local function build_access(db, schema, mf, hints, use_counts, want_order,
 				return uopen(self, params)
 			end
 			return unode, best.consumed
-		else  -- pk_range
-			local args = {}
-			local opts = {}
-			if best.desc then opts.desc = true end
-			if best.prefix then
-				opts.prefix = 'partial'
-				if #best.eq_vals > 0 then opts.n_fixed_params = #best.eq_vals end
-				for _, pn in ipairs(best.eq_vals) do args[#args+1] = pn end
-				args[#args+1] = best.prefix
-			else
-				if #best.eq_vals > 0 then opts.n_fixed_params = #best.eq_vals end
-				if best.lo_op then
-					args[#args+1] = best.lo_op
-					for _, pn in ipairs(best.eq_vals) do args[#args+1] = pn end
-					args[#args+1] = best.lo
-				end
-				if best.hi_op then
-					args[#args+1] = best.hi_op
-					for _, pn in ipairs(best.eq_vals) do args[#args+1] = pn end
-					args[#args+1] = best.hi
-				end
-			end
-			return db:pk_range(best.ix, opts, unpack(args)), best.consumed
+		else  -- pk_range: call_args/call_opts built where the plan was decided
+			return db:pk_range(best.ix, best.call_opts, unpack(best.call_args)),
+				best.consumed
 		end
 	end
 	return db:pk_range(schema.name, empty), {}   -- full scan
