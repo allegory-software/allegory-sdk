@@ -630,6 +630,74 @@ function test.outer_ref_scope_exec()
 	end)
 end
 
+function test.pk_range_bound_exec()
+	with_db('pk_range_bound_exec', function(db)
+		--own fixture: a composite index (cat, score, extra) where score
+		--(the range column) isn't last -- extra trails it, and several
+		--rows share one score value. this is what an exclusive '>' lo or
+		--inclusive '<=' hi must get right despite the trailing column.
+		db:begin'w'
+		db:create_table('items', {fields = {
+			{col = 'id', mdbx_type = 'u64', not_null = true},
+			{col = 'cat', mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
+			{col = 'score', mdbx_type = 'i32', not_null = true},
+			{col = 'extra', mdbx_type = 'u64', not_null = true},
+		}, pk = {'id'}})
+		db:add_index('items', {'cat', 'score', 'extra'})
+		local items = {
+			{id=1, cat='a', score=100, extra=1},
+			{id=2, cat='a', score=100, extra=2},
+			{id=3, cat='a', score=100, extra=3},
+			{id=4, cat='a', score=90,  extra=1},
+			{id=5, cat='a', score=110, extra=1},
+			{id=6, cat='a', score=110, extra=2},
+		}
+		for _, r in ipairs(items) do db:insert('items', '{}', r) end
+		db:commit()
+
+		db:atomic('r', function()
+			local function ids(q, params)
+				local t = {}
+				for r in q:select{'items.id'}:rows(params) do
+					t[#t+1] = tonumber(r['items.id'])
+				end
+				sort(t)
+				return t
+			end
+
+			local plan = db:from'items':where('cat', 'CAT'):where('score', '<=', 'V')
+				:lower():explain()
+			assert(plan.kind == 'pk_range', 'expected pk_range, got '..tostring(plan.kind))
+
+			-- inclusive hi at a boundary three rows share.
+			local t = ids(db:from'items':where('cat', 'CAT'):where('score', '<=', 'V'),
+				{CAT = 'a', V = 100})
+			assert(cat(t, ',') == '1,2,3,4', S(t))
+
+			-- exclusive lo at a boundary: score=90 excluded entirely.
+			t = ids(db:from'items':where('cat', 'CAT'):where('score', '>', 'V'),
+				{CAT = 'a', V = 90})
+			assert(cat(t, ',') == '1,2,3,5,6', S(t))
+
+			-- inclusive lo at the same boundary: score=90 included.
+			t = ids(db:from'items':where('cat', 'CAT'):where('score', '>=', 'V'),
+				{CAT = 'a', V = 90})
+			assert(cat(t, ',') == '1,2,3,4,5,6', S(t))
+
+			-- strict hi at a boundary: score=100 excluded entirely.
+			t = ids(db:from'items':where('cat', 'CAT'):where('score', '<', 'V'),
+				{CAT = 'a', V = 100})
+			assert(cat(t, ',') == '4', S(t))
+
+			-- exclusive lo + inclusive hi together.
+			t = ids(db:from'items':where('cat', 'CAT')
+				:where('score', '>', 'LO'):where('score', '<=', 'HI'),
+				{CAT = 'a', LO = 90, HI = 100})
+			assert(cat(t, ',') == '1,2,3', S(t))
+		end)
+	end)
+end
+
 ------------------------------------------------------------------------------
 
 local name = ...

@@ -281,6 +281,19 @@ local function key_gt(k1, n1, k2, n2) return key_cmp(k1, n1, k2, n2)  > 0 end
 local function key_past_prefix(k, k_sz, p, p_sz)
 	return k_sz < p_sz or memcmp(k, p, p_sz) ~= 0
 end
+--the smallest encoded byte string that's strictly greater than every
+--string starting with buf[0..sz): increment the last byte that isn't
+--already 0xff, drop everything after it. returns the new length, or nil
+--if every byte is 0xff (no finite upper bound exists at this length).
+local function increment_prefix(buf, sz)
+	local i = sz - 1
+	while i >= 0 and buf[i] == 255 do
+		i = i - 1
+	end
+	if i < 0 then return nil end
+	buf[i] = buf[i] + 1
+	return i + 1
+end
 
 -- pk_get: single base-table PK lookup; returns zero or one PK item.
 -- Usage: db:pk_get(table_name, pk...)  -- pk count = PK column count.
@@ -545,7 +558,9 @@ function Db.pk_range:__call(db, name, opt, ...)
 	local desc = opt.desc
 	local lo_key, lo_sz, hi_key, hi_sz, bnd_key, bnd_sz
 	local lo_open, hi_open
-	local cmp_hi, cmp_lo, cmp_bnd
+	local cmp_hi = key_ge
+	local cmp_lo = key_lt
+	local cmp_bnd = desc and cmp_lo or cmp_hi
 	local member_schema = is_index and schema.val_schema or schema
 	local dir = desc and 'desc' or 'asc'
 	local order = {}
@@ -703,40 +718,51 @@ function Db.pk_range:__call(db, name, opt, ...)
 				nprefix, prefix_partial, unpack(vals, 1, nprefix))
 			lo_key = u8a(prefix_sz); copy(lo_key, mdbx_key_rec_buffer, prefix_sz)
 			lo_sz = prefix_sz; lo_open = false
-			--compute the strict upper bound for this encoded byte prefix.
-			--if all bytes are 0xff, there is no finite upper bound.
-			local i = prefix_sz - 1
-			while i >= 0 and lo_key[i] == 255 do i = i - 1 end
-			if i >= 0 then
-				hi_sz = i + 1
-				hi_key = u8a(hi_sz); copy(hi_key, lo_key, hi_sz)
-				hi_key[i] = hi_key[i] + 1
+			--strict upper bound for this encoded byte prefix.
+			--nil (no finite bound) when every byte is 0xff.
+			hi_key = u8a(prefix_sz); copy(hi_key, lo_key, prefix_sz)
+			hi_sz = increment_prefix(hi_key, prefix_sz)
+			if hi_sz then
 				hi_open = true
 			else
-				hi_key = nil; hi_sz = nil
+				hi_key = nil
 			end
 		else
 			if lo_i then
 				for i = 1, lo_n do vals[i] = params[names[lo_i + i - 1]] end
-				lo_sz = encode_key(db, schema, 'range', nil,
+				--bare prefix of just the supplied columns: comparable
+				--directly against a real row's own longer key, since it
+				--carries no assumption about what trails after it.
+				lo_sz = encode_key_prefix(db, schema, 'range',
 					mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
-					schema.key_cols, nil, unpack(vals, 1, lo_n))
+					lo_n, false, unpack(vals, 1, lo_n))
 				lo_key = u8a(lo_sz); copy(lo_key, mdbx_key_rec_buffer, lo_sz)
+				--exclusive lo: bump to the smallest key past the whole lo
+				--group, so seeking straight to it lands correctly.
+				if lo_open then
+					lo_sz = increment_prefix(lo_key, lo_sz)
+					lo_open = false
+					if not lo_sz then lo_key = nil end
+				end
 			else lo_key = nil; lo_sz = nil end
 			if hi_i then
 				for i = 1, hi_n do vals[i] = params[names[hi_i + i - 1]] end
-				hi_sz = encode_key(db, schema, 'range', nil,
+				--bare prefix, same as lo above.
+				hi_sz = encode_key_prefix(db, schema, 'range',
 					mdbx_key_rec_buffer, MDBX_MAX_KEY_SIZE,
-					schema.key_cols, nil, unpack(vals, 1, hi_n))
+					hi_n, false, unpack(vals, 1, hi_n))
 				hi_key = u8a(hi_sz); copy(hi_key, mdbx_key_rec_buffer, hi_sz)
+				--inclusive hi: bump to a strict bound, same as lo above.
+				if not hi_open then
+					hi_sz = increment_prefix(hi_key, hi_sz)
+					hi_open = true
+					if not hi_sz then hi_key = nil end
+				end
 			else
 				hi_key = nil
 				hi_sz = nil
 			end
 		end
-		cmp_hi = hi_open and key_ge or key_gt
-		cmp_lo = lo_open and key_le or key_lt
-		cmp_bnd = desc and cmp_lo or cmp_hi
 		bnd_key = desc and lo_key or hi_key
 		bnd_sz  = desc and lo_sz  or hi_sz
 		is_open = true
