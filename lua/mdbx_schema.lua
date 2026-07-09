@@ -601,6 +601,9 @@ Returns f() -> decoded value for the current cursor position.
 function Db:compile_col(schema, col, ix_key, pk, get_base_val)
 	local out, out_sz = key_decode_buffer, MDBX_MAX_KEY_SIZE
 	local ix_f = schema.is_index and schema.fields[col]
+	--an ai_ci index key stores lowercased, accent-stripped text, not the
+	--original; the original is only in the base table.
+	if ix_f and ix_f.mdbx_collation == 'utf8_ai_ci' then ix_f = nil end
 	if ix_f then
 		local st, ki, decode = schema._st, ix_f.key_index-1, ix_f.decode
 		return function()
@@ -887,6 +890,16 @@ local function encode_ai_ci(s, len)
 	assertf(sz >= 0, 'utf8_ai_ci: reencode failed (%d)', sz)
 	return out, sz
 end
+
+--turn a plain string into the same lowercased, accent-stripped form an
+--ai_ci index stores, for comparing/sorting by hand when there's no index
+--to do it for us.
+local function fold_ai_ci(s)
+	local p, sz = encode_ai_ci(s, #s)
+	assertf(p, 'utf8_ai_ci: invalid utf8 (%d)', sz)
+	return ffi.string(p, sz)
+end
+mdbx_fold_ai_ci = fold_ai_ci
 
 local function compile_table_schema(schema)
 
