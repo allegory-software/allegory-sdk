@@ -11,7 +11,7 @@
 
 --[[
 pk_join_hash: removed from mdbx_query_nodes.lua on 2026-07-05. Benchmarked
-(tests/mdbx_query_bench.lua / .unused/mdbx_join_hash_bench.lua,
+(tests/mdbx_query_builder_bench.lua / .unused/mdbx_join_hash_bench.lua,
 bench_join_sweep) against pk_join_seek across driver-size fractions of
 N_AUTHORS, u64 and u32 keys alike: pk_join_hash never won. The O(n+m) vs
 O(n log m) complexity difference doesn't show up in practice -- per-row

@@ -48,6 +48,11 @@ IMPLEMENTATION ABSTRACTIONS
 	- .kind: equality, range, prefix, membership, existence, or null
 - residual row check
 	- ?
+- terminal
+	- ?
+- executor
+	- ?
+
 
 ACCESS PLANING RULES
 
@@ -775,8 +780,11 @@ OUT-OF-SCOPE
 
 ]]
 
+if not ... then require'mdbx_query_test'; return end
+
 require'mdbx_schema'
 
+local C  = C
 local Db = mdbx_db
 
 --PARSING --------------------------------------------------------------------
@@ -899,12 +907,14 @@ Rel.select   = once_part('select_outputs', 'select', parse_select_outputs)
 Rel.group    = once_part('group_outputs', 'group', parse_group_outputs)
 Rel.order_by = once_part('order_by_terms', 'order_by')
 Rel.distinct = once_part('distinct_rows', 'distinct', function() return true end)
+--index_name matches schema.indexes[i].name (mdbx_schema's format_ix_name:
+--'table/col1,col2[:desc]'), not a bare identifier, so it isn't parse_name()'d;
+--choose_access() already rejects an unknown name with a clear error.
 Rel.use_index = list_part('use_indexes', function(member, index_name)
-	return {member = parse_name(member), index_name = parse_name(index_name)}
+	return {member = parse_name(member), index_name = index_name}
 end)
 Rel.no_index = list_part('no_indexes', function(member, index_name)
-	return {member = parse_name(member),
-		index_name = index_name and parse_name(index_name) or nil}
+	return {member = parse_name(member), index_name = index_name}
 end)
 Rel.limit = once_part('limit_rows', 'limit', function(n, offset)
 	return {n = n, offset = offset}
@@ -1446,6 +1456,39 @@ end
 
 	--STAGE 8: cursor choice --------------------------------------------------
 
+	--[[
+	- a left_join()'d member's own "found" must depend only on its on_expr,
+	  never on a later where() -- a where() condition on such a member has
+	  to run once against the finished row (late), not as a per-candidate
+	  residual during that member's scan, or an unmatched row that should
+	  null-extend would instead get silently dropped or wrongly kept.
+	- a left-joined fragment null-extends as one atomic unit, so every
+	  member inside it counts as left-joined too, regardless of the join
+	  kind used between members *inside* the fragment.
+	- limitation: this means such a where() condition can never drive an
+	  index seek, even when one exists on that column -- only the member's
+	  own on_expr can still choose an index for it. a fix that kept index
+	  use would need a separate existence-proving scan from the
+	  candidate-narrowing one, which this engine doesn't have.
+	]]
+	local left_joined_members = {} --{member_name->true}
+	local function collect_left_joined_members(joins)
+		for _, join in ipairs(joins) do
+			if is_relation(join.right) then
+				if join.kind == 'left_join' then
+					for _, member in ipairs(join.right.members) do
+						left_joined_members[member.member] = true
+					end
+				else
+					collect_left_joined_members(join.right.joins)
+				end
+			elseif join.kind == 'left_join' then
+				left_joined_members[join.right.member] = true
+			end
+		end
+	end
+	collect_left_joined_members(rel.joins)
+
 	local function attribute_conditions(conditions)
 		for _, cond in ipairs(conditions) do
 			local found = {} --{member->true}
@@ -1455,7 +1498,7 @@ end
 				n = n + 1
 				only = member
 			end
-			cond.member = n == 1 and only or false
+			cond.member = (n == 1 and not left_joined_members[only]) and only or false
 		end
 	end
 	attribute_conditions(rel.where_conditions)
@@ -1610,6 +1653,50 @@ end
 		end
 	end
 	prepare_scans(access)
+
+	--[[
+	- collect every table-spec exists()/not_exists() source this relation's
+	  own residual/late/having checks can reach, so run_filtered can open
+	  them all once per execution instead of eval_exists_source opening one
+	  fresh per row.
+	- a relation-form exists()/in_() is not collected here: it compiles and
+	  runs through its own run_filtered call, which walks its own tree.
+	- recurses into on_expr, since one exists() can nest inside another.
+	]]
+	local function collect_exists_sources(expr, entries, seen)
+		if type(expr) ~= 'table' then return end
+		local op = expr[1]
+		if op == 'exists' or op == 'not_exists' then
+			local source, on = expr[2], expr[3]
+			if not is_relation(source) and not seen[source] then
+				seen[source] = true
+				add(entries, {source = source, on = on})
+			end
+			if on then collect_exists_sources(on, entries, seen) end
+		else
+			for i = 2, #expr do
+				collect_exists_sources(expr[i], entries, seen)
+			end
+		end
+	end
+	local function collect_step_exists(step, entries, seen)
+		if step.nested then
+			for _, s in ipairs(step.nested) do collect_step_exists(s, entries, seen) end
+		else
+			for _, cond in ipairs(step.plan.residual) do
+				collect_exists_sources(cond.expr, entries, seen)
+			end
+		end
+	end
+	local exists_sources, exists_seen = {}, {}
+	for _, step in ipairs(access) do collect_step_exists(step, exists_sources, exists_seen) end
+	for _, cond in ipairs(late_conditions) do
+		collect_exists_sources(cond.expr, exists_sources, exists_seen)
+	end
+	for _, cond in ipairs(rel.having_conditions) do
+		collect_exists_sources(cond.expr, exists_sources, exists_seen)
+	end
+	rel.exists_sources = exists_sources
 
 	local needs_output =
 		terminal_kind == 'rows' or
@@ -2116,6 +2203,8 @@ end
 - inclusive hi bumps that bound with increment_prefix().
 - trailing row key columns cannot pass the bumped inclusive bound.
 ]]
+MDBX_NODUPFIXED = false --bench override, see compile_scan's walk_dups
+
 --[[local]] function compile_scan(db, plan)
 	local schema = plan.schema
 	local seek_fns = {} --{fn...}
@@ -2135,16 +2224,35 @@ end
 		local depth_buf = depth > 0 and u8a(MDBX_MAX_KEY_SIZE) or nil
 		--hi is only a stop bound; lo and prefix also position the cursor.
 		local hi_buf = hi_fn and u8a(MDBX_MAX_KEY_SIZE)
-		local ix_rec, pk_rec = MDBX_val(), MDBX_val()
-		local cur_v_data, cur_v_sz --current row's base-table value bytes
+		local ix_rec, pk_rec, val_rec = MDBX_val(), MDBX_val(), MDBX_val()
+		local base_val_rec = MDBX_val()
+		--DUPFIXED bulk scans need a separate record for the whole
+		--multi-value page: pk_rec holds one row's slice at a time and
+		--can't double as the page's own stable base pointer.
+		local bulk_rec = MDBX_val()
+		--MDBX_NODUPFIXED forces the one-dup-at-a-time path; bench-only toggle.
+		local dup_fixedsize = schema.is_index and not MDBX_NODUPFIXED and schema.dup_fixedsize
+		--[[
+		- key_rec/out_rec pick which pre-allocated record plays which
+		  mdbx cursor role, decided once (schema.is_index never changes).
+		- an index's cursor key is the index key (ix_rec) and its value
+		  is the pk (pk_rec); a base table's cursor key IS the pk
+		  (pk_rec) and its value is the row itself (val_rec).
+		- every seek/walk below writes straight into these via
+		  move_raw_into, never move_raw_kv/move_raw_v's shared-global-
+		  and-return-values path -- no per-row loose pointer values get
+		  materialized just to copy them into ix_rec/pk_rec right after.
+		]]
+		local key_rec = schema.is_index and ix_rec or pk_rec
+		local out_rec = schema.is_index and pk_rec or val_rec
 		local function get_base_val()
 			if schema.is_index then
 				if not base_cur then base_cur = db:cursor(schema.val_table) end
-				local found, bv_data, bv_sz = base_cur:find_raw(pk_rec.data, pk_rec.size)
+				local found = base_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, base_val_rec)
 				assert(found, 'base row missing for an existing key')
-				return bv_data, bv_sz
+				return base_val_rec.data, base_val_rec.size
 			end
-			return cur_v_data, cur_v_sz
+			return val_rec.data, val_rec.size
 		end
 		local decoders = {} --{col->fn}
 		--decoders compile once per column.
@@ -2158,6 +2266,51 @@ end
 				decoders[col] = f
 			end
 			return f()
+		end
+		--[[
+		- walk every dup value under one exact index key.
+		- a non-unique index with fixed-size dup values (dup_fixedsize)
+		  bulk-fetches a whole page of dups per mdbx call
+		  (MDBX_SEEK_AND_GET_MULTIPLE/MDBX_NEXT_MULTIPLE) instead of one
+		  MDBX_NEXT-equivalent call per row -- into bulk_rec, since
+		  pk_rec must keep pointing at one row's slice at a time.
+		- MDBX_NEXT_MULTIPLE only ever returns more of the SAME already
+		  -seeked key, so this never walks past the match onto a
+		  different key -- no per-row boundary check is needed.
+		- ix_rec is set once to the seek buffer: every dup shares that
+		  key, so there's no need for mdbx to hand back the key per row.
+		- base-table scans and non-fixedsize indexes fall back to one
+		  row at a time, boundary-checked against seek_sz.
+		]]
+		local walk_dups
+		if dup_fixedsize then
+			function walk_dups(seek_buf, seek_sz, row_fn)
+				ix_rec.data, ix_rec.size = seek_buf, seek_sz
+				local ok = cur:move_raw_into(C.MDBX_SEEK_AND_GET_MULTIPLE, ix_rec, bulk_rec)
+				local v_o = 0
+				while ok do
+					if v_o >= bulk_rec.size then
+						ok = cur:move_raw_into(C.MDBX_NEXT_MULTIPLE, ix_rec, bulk_rec)
+						v_o = 0
+					else
+						pk_rec.data, pk_rec.size = bulk_rec.data + v_o, dup_fixedsize
+						v_o = v_o + dup_fixedsize
+						row_fn(decode_col)
+					end
+				end
+			end
+		else
+			function walk_dups(seek_buf, seek_sz, row_fn)
+				key_rec.data, key_rec.size = seek_buf, seek_sz
+				local ok = cur:move_raw_into(C.MDBX_SET_RANGE, key_rec, out_rec)
+				while ok do
+					if key_rec.size < seek_sz or memcmp(key_rec.data, seek_buf, seek_sz) ~= 0 then
+						break
+					end
+					row_fn(decode_col)
+					ok = cur:move_raw_into(C.MDBX_NEXT, key_rec, out_rec)
+				end
+			end
 		end
 		--[[
 		- vals holds the leading equality values for this execution.
@@ -2181,19 +2334,7 @@ end
 						local key = ffi.string(buf, seek_sz)
 						if not seen[key] then
 							seen[key] = true
-							local ok, k_data, k_sz, v_data, v_sz = cur:find_ge_raw(buf, seek_sz)
-							while ok do
-								ix_rec.data, ix_rec.size = k_data, k_sz
-								if schema.is_index then
-									pk_rec.data, pk_rec.size = v_data, v_sz --non-unique index: value = pk bytes
-								else
-									pk_rec.data, pk_rec.size = k_data, k_sz --base table: key = pk bytes
-									cur_v_data, cur_v_sz = v_data, v_sz
-								end
-								if k_sz < seek_sz or memcmp(k_data, buf, seek_sz) ~= 0 then break end
-								row_fn(decode_col)
-								ok, k_data, k_sz, v_data, v_sz = cur:next_raw()
-							end
+							walk_dups(buf, seek_sz, row_fn)
 						end
 					end
 				end
@@ -2209,16 +2350,22 @@ end
 				vals[i] = v
 			end
 			if null_seek then return end
-			local ok, k_data, k_sz, v_data, v_sz
+			local ok
 			local seek_sz --buf length for the current seek.
 			--range lo and prefix encode depth+1 columns.
 			--that same encoding is the later stop bound.
 			if plan.kind == 'full' then
-				ok, k_data, k_sz, v_data, v_sz = cur:first_raw()
+				ok = cur:move_raw_into(C.MDBX_FIRST, key_rec, out_rec)
 			elseif plan.kind == 'exact' then
+				--depth == #pk here (try_key's only 'exact' case): the whole
+				--key is pinned, so walk_dups's own seek_sz boundary check
+				--already does what the general loop's depth_sz check below
+				--would (same encode call, same bytes) -- no need to fall
+				--through to it.
 				seek_sz = mdbx_encode_key_prefix(db, schema, 'get', buf,
 					MDBX_MAX_KEY_SIZE, depth, false, unpack(vals, 1, depth))
-				ok, k_data, k_sz, v_data, v_sz = cur:find_ge_raw(buf, seek_sz)
+				walk_dups(buf, seek_sz, row_fn)
+				return
 			else --range, prefix, eq_prefix
 				local bound_val = lo_fn and lo_fn(params, row_ctx)
 					or (prefix_fn and prefix_fn(params, row_ctx))
@@ -2233,7 +2380,8 @@ end
 				end
 				seek_sz = mdbx_encode_key_prefix(db, schema, 'c_seek', buf,
 					MDBX_MAX_KEY_SIZE, n, plan.kind == 'prefix', unpack(vals, 1, n))
-				ok, k_data, k_sz, v_data, v_sz = cur:find_ge_raw(buf, seek_sz)
+				key_rec.data, key_rec.size = buf, seek_sz
+				ok = cur:move_raw_into(C.MDBX_SET_RANGE, key_rec, out_rec)
 			end
 			--[[
 			- depth_buf encodes only the leading equality columns.
@@ -2265,30 +2413,27 @@ end
 				end
 			end
 			while ok do
-				ix_rec.data, ix_rec.size = k_data, k_sz
-				if schema.is_index then
-					pk_rec.data, pk_rec.size = v_data, v_sz --non-unique index: value = pk bytes
-				else
-					pk_rec.data, pk_rec.size = k_data, k_sz --base table: key = pk bytes
-					cur_v_data, cur_v_sz = v_data, v_sz
-				end
 				--stop when leading equality columns no longer match.
 				--compare only depth_sz bytes.
 				--trailing key bytes do not affect this check.
-				if depth_sz and (k_sz < depth_sz or memcmp(k_data, depth_buf, depth_sz) ~= 0) then
+				if depth_sz and (key_rec.size < depth_sz
+					or memcmp(key_rec.data, depth_buf, depth_sz) ~= 0)
+				then
 					break
 				end
 				--cursor keys are sorted.
 				--reaching or passing hi_sz means the scan is done.
 				--hi_sz is a strict boundary for both hi operators.
-				if hi_sz and raw_key_cmp(k_data, k_sz, hi_buf, hi_sz) >= 0 then
+				if hi_sz and raw_key_cmp(key_rec.data, key_rec.size, hi_buf, hi_sz) >= 0 then
 					break
 				end
 				--prefix reuses the seek buffer.
 				--the row key must keep the encoded prefix.
 				--no length tie-break is needed.
 				if plan.kind == 'prefix' then
-					if k_sz < seek_sz or memcmp(k_data, buf, seek_sz) ~= 0 then break end
+					if key_rec.size < seek_sz or memcmp(key_rec.data, buf, seek_sz) ~= 0 then
+						break
+					end
 				end
 				--[[
 				- a lo bound only rejects rows exactly at the boundary.
@@ -2298,13 +2443,14 @@ end
 				]]
 				local passes_lo = true
 				if plan.kind == 'range' and lo_fn then
-					passes_lo = not (k_sz >= seek_sz and memcmp(k_data, buf, seek_sz) == 0
+					passes_lo = not (key_rec.size >= seek_sz
+						and memcmp(key_rec.data, buf, seek_sz) == 0
 						and plan.lo.op == 'gt')
 				end
 				if passes_lo then
 					row_fn(decode_col)
 				end
-				ok, k_data, k_sz, v_data, v_sz = cur:next_raw()
+				ok = cur:move_raw_into(C.MDBX_NEXT, key_rec, out_rec)
 			end
 		end
 		local function close()
@@ -2367,35 +2513,41 @@ end
 
 --[[
 - evaluate scalar expressions for residual and having() checks.
-- val(x) resolves leaf operands.
-- residual checks resolve through row_ctx.
-- having() resolves through the finished group row.
+- group_row set means having(): col/param read the finished group row.
+- group_row nil means residual: col/param read through row_ctx.
 ]]
-local function eval_expr(expr, val, params, row_ctx)
+local function eval_expr(expr, params, row_ctx, group_row)
 	if type(expr) ~= 'table' then return expr end
 	local op, a, b = unpack(expr, 1, 3)
-	if op == 'param' or op == 'col' then return val(expr) end
+	if op == 'param' or op == 'col' then
+		if group_row then
+			if op == 'param' then return params[a] end
+			assertf(op == 'col', 'unsupported having operand: %s', op)
+			return group_row[expr.field.name]
+		end
+		return eval_value(expr, params, row_ctx)
+	end
 	if op == 'and' then
 		for i = 2, #expr do
-			if not expr_passes(eval_expr(expr[i], val, params, row_ctx)) then
+			if not expr_passes(eval_expr(expr[i], params, row_ctx, group_row)) then
 				return false
 			end
 		end
 		return true
 	elseif op == 'or' then
 		for i = 2, #expr do
-			if expr_passes(eval_expr(expr[i], val, params, row_ctx)) then
+			if expr_passes(eval_expr(expr[i], params, row_ctx, group_row)) then
 				return true
 			end
 		end
 		return false
 	elseif op == 'is_null' then
-		return null_value(eval_expr(a, val, params, row_ctx))
+		return null_value(eval_expr(a, params, row_ctx, group_row))
 	elseif op == 'is_not_null' then
-		return not null_value(eval_expr(a, val, params, row_ctx))
+		return not null_value(eval_expr(a, params, row_ctx, group_row))
 	elseif op == 'starts' then
-		local v = eval_expr(a, val, params, row_ctx)
-		local prefix = eval_expr(b, val, params, row_ctx)
+		local v = eval_expr(a, params, row_ctx, group_row)
+		local prefix = eval_expr(b, params, row_ctx, group_row)
 		if null_value(v) or null_value(prefix) then return false end
 		if type(v) ~= 'string' then return false end
 		--for an ai_ci column, fold both sides first (same folding an ai_ci
@@ -2404,7 +2556,7 @@ local function eval_expr(expr, val, params, row_ctx)
 		return v:sub(1, #prefix) == prefix
 	elseif op == 'in' or op == 'not_in' then
 		--membership checks scan the candidate set and ignore null candidates.
-		local v = eval_expr(a, val, params, row_ctx)
+		local v = eval_expr(a, params, row_ctx, group_row)
 		if null_value(v) then return false end
 		local fold = ai_ci_operand(a)
 		if fold then v = mdbx_fold_ai_ci(v) end
@@ -2421,10 +2573,10 @@ local function eval_expr(expr, val, params, row_ctx)
 		else
 			local param_list = type(b) == 'table' and b[1] == 'param'
 			local values
-			if param_list then values = eval_expr(b, val, params, row_ctx)
+			if param_list then values = eval_expr(b, params, row_ctx, group_row)
 			else values = b end
 			for _, item in ipairs(values) do
-				local candidate = param_list and item or eval_expr(item, val, params, row_ctx)
+				local candidate = param_list and item or eval_expr(item, params, row_ctx, group_row)
 				if not null_value(candidate) then
 					if fold then candidate = mdbx_fold_ai_ci(candidate) end
 					if v == candidate then found = true; break end
@@ -2439,13 +2591,13 @@ local function eval_expr(expr, val, params, row_ctx)
 		if is_relation(a) then
 			found = eval_relation_exists(a, params, row_ctx)
 		else
-			found = eval_exists_source(a, b, params, row_ctx)
+			found = eval_exists_source(a, params, row_ctx)
 		end
 		if op == 'exists' then return found end
 		return not found
 	end
 	--comparisons involving null are false (see the file's own "nulls" doc).
-	local va, vb = eval_expr(a, val, params, row_ctx), eval_expr(b, val, params, row_ctx)
+	local va, vb = eval_expr(a, params, row_ctx, group_row), eval_expr(b, params, row_ctx, group_row)
 	if null_value(va) or null_value(vb) then return false end
 	if ai_ci_operand(a) or ai_ci_operand(b) then
 		va, vb = mdbx_fold_ai_ci(va), mdbx_fold_ai_ci(vb)
@@ -2460,17 +2612,11 @@ local function eval_expr(expr, val, params, row_ctx)
 end
 --evaluate a where()/on_expr row check against the current row context.
 local function eval_residual(expr, params, row_ctx)
-	return expr_passes(eval_expr(expr, function(x)
-		return eval_value(x, params, row_ctx)
-	end, params, row_ctx))
+	return expr_passes(eval_expr(expr, params, row_ctx, nil))
 end
 --evaluate having() against a finished group row.
 local function eval_having(expr, params, group_row)
-	return expr_passes(eval_expr(expr, function(x)
-		if x[1] == 'param' then return params[x[2]] end
-		assertf(x[1] == 'col', 'unsupported having operand: %s', x[1])
-		return group_row[x.field.name]
-	end, params, nil))
+	return expr_passes(eval_expr(expr, params, nil, group_row))
 end
 
 --decode a missing right-side member.
@@ -2677,27 +2823,42 @@ local function run_query(access, params, emit, seed_row_ctx)
 end
 
 --[[
-- evaluate table-form exists() by scanning the right table.
-- on_expr is planned like a join's on_expr: split into facts, then
-  choose_access seeks whatever index those facts support.
+- open one exists()/not_exists() table-spec source for this execution.
+- on_expr is planned like a join's on_expr: split into facts once, then
+  choose_access seeks whatever index those facts support -- cached on the
+  source permanently, since the plan never depends on which execution
+  this is, only on the query's shape.
+- the scan itself (source.exists_run) is opened fresh here and closed by
+  the caller at the end of this same execution, instead of being reopened
+  by eval_exists_source on every row: run_filtered calls this once per
+  rel.exists_sources entry, matching how a real access step's cursor is
+  opened once per execution and only reseeked per row.
 - use_index()/no_index() do not apply here: this table is never a named
   member of the outer relation, so forced/forbidden are always nil.
-- whatever the chosen index does not prove stays a residual row check.
+- returns close(), for the caller to tear down at the end of this run.
 ]]
-function eval_exists_source(source, on, params, row_ctx)
-	if not source.exists_open then
+local function open_exists_source(entry)
+	local source, on = entry.source, entry.on
+	if not source.exists_plan then
 		local conditions = (on == nil or on == true) and empty or split_conditions({on}, true)
 		local members = {[source.member] = source}
-		local plan = choose_access(source, conditions, members, nil, nil)
-		source.exists_open = compile_scan(source.db, plan)
-		source.exists_residual = plan.residual
+		source.exists_plan = choose_access(source, conditions, members, nil, nil)
 	end
-	local run, close = source.exists_open()
+	local run, close = compile_scan(source.db, source.exists_plan)()
+	source.exists_run = run
+	return close
+end
+
+--evaluate table-form exists(): source.exists_run is already open for this
+--execution (run_filtered opened it before any row was scanned), so this
+--only seeks and reads -- whatever the chosen index does not prove stays
+--a residual row check.
+function eval_exists_source(source, params, row_ctx)
 	local found = false
 	local child_ctx = row_ctx and setmetatable({}, {__index = row_ctx}) or {}
-	local residual = source.exists_residual
+	local residual = source.exists_plan.residual
 	local ok, err = pcall(function()
-		run(params, child_ctx, function(decode_col)
+		source.exists_run(params, child_ctx, function(decode_col)
 			child_ctx[source.member] = decode_col
 			for _, cond in ipairs(residual) do
 				if not eval_residual(cond.expr, params, child_ctx) then return end
@@ -2706,7 +2867,6 @@ function eval_exists_source(source, on, params, row_ctx)
 			error(stop_scan)
 		end)
 	end)
-	close()
 	if not ok and err ~= stop_scan then error(err, 0) end
 	return found
 end
@@ -2722,6 +2882,31 @@ local function run_filtered(rel, params, emit, seed_row_ctx)
 		end
 		emit(row_ctx)
 	end, seed_row_ctx)
+end
+
+--[[
+- call fn(...) with this relation's exists()/not_exists() table-spec
+  sources opened for fn's whole duration, closed once fn returns or
+  raises -- instead of eval_exists_source opening one fresh per row.
+- must wrap the outermost call that evaluates this relation for one
+  terminal, not run_filtered/run_grouped themselves: a grouped call's
+  having() checks run in finish_group_row, after run_filtered's own scan
+  already returned, so the bracket has to span both or having()'s exists()
+  finds its cursor already closed.
+- callers that delegate to build_rows (which wraps itself) must not wrap
+  again -- one bracket per relation per execution, never nested, since a
+  nested open would overwrite source.exists_run out from under the outer
+  bracket's later use (its own close would then leave the outer context
+  holding a closed cursor).
+]]
+local function with_exists_sources(rel, fn, ...)
+	local exists_closes = {} --{close_fn...}
+	for _, entry in ipairs(rel.exists_sources) do
+		add(exists_closes, open_exists_source(entry))
+	end
+	local ok, err = pcall(fn, ...)
+	for _, close in ipairs(exists_closes) do close() end
+	if not ok then error(err, 0) end
 end
 
 function Rel:prepare(terminal_kind)
@@ -3012,7 +3197,7 @@ function build_rows(self, params, seed_row_ctx)
 	local sort_needed = sort_actually_needed(self)
 
 	if self.group_outputs then
-		run_grouped(self, params, rows, seed_row_ctx)
+		with_exists_sources(self, run_grouped, self, params, rows, seed_row_ctx)
 		if sort_needed then
 			for _, row in ipairs(rows) do
 				local key = {} --{val...}
@@ -3024,7 +3209,7 @@ function build_rows(self, params, seed_row_ctx)
 		end
 	else
 		local outputs = self.select_outputs
-		run_filtered(self, params, function(row_ctx)
+		with_exists_sources(self, run_filtered, self, params, function(row_ctx)
 			local row = {} --{name->value}
 			for _, output in ipairs(outputs) do
 				local expr, name = unpack(output, 1, 2)
@@ -3132,7 +3317,7 @@ local function collect_rows(self, params, limit, seed_row_ctx)
 	end
 	local outputs = self.select_outputs
 	local rows = {} --{row...}
-	run_filtered(self, params, function(row_ctx)
+	with_exists_sources(self, run_filtered, self, params, function(row_ctx)
 		local row = {} --{name->value}
 		for _, output in ipairs(outputs) do
 			local expr, name = unpack(output, 1, 2)
@@ -3150,9 +3335,20 @@ local function collect_rows(self, params, limit, seed_row_ctx)
 	return rows
 end
 
+--every terminal binds params after compiling. a name collected by
+--add_param() during compile but absent here is a missing param, not a
+--null one (null is the explicit `null` sentinel, never plain Lua nil).
+local function bind_params(rel, params)
+	params = params or empty
+	for _, name in ipairs(rel.params) do
+		assertf(params[name] ~= nil, 'missing param: %s', name)
+	end
+	return params
+end
+
 function Rel:rows(params)
 	compile(self, 'rows', nil, true)
-	local rows = collect_rows(self, params or empty, nil)
+	local rows = collect_rows(self, bind_params(self, params), nil)
 	local i = 0
 	return function()
 		i = i + 1
@@ -3169,29 +3365,29 @@ end
 
 function Rel:first(params)
 	compile(self, 'first', nil, true)
-	return collect_rows(self, params or empty, 1)[1]
+	return collect_rows(self, bind_params(self, params), 1)[1]
 end
 
 function Rel:one(params)
 	compile(self, 'one', nil, true)
-	local rows = collect_rows(self, params or empty, 2)
+	local rows = collect_rows(self, bind_params(self, params), 2)
 	assert(#rows <= 1, 'one() matched more than one row')
 	return rows[1]
 end
 
 function Rel:must_one(params)
 	compile(self, 'must_one', nil, true)
-	local rows = collect_rows(self, params or empty, 2)
+	local rows = collect_rows(self, bind_params(self, params), 2)
 	assert(#rows == 1, 'must_one() matched '..#rows..' rows, expected exactly one')
 	return rows[1]
 end
 
 function Rel:count(params)
 	compile(self, 'count', nil, true)
-	params = params or empty
+	params = bind_params(self, params)
 	if self.group_outputs then
 		local rows = {} --{row...}
-		run_grouped(self, params, rows)
+		with_exists_sources(self, run_grouped, self, params, rows)
 		return #rows
 	end
 	if self.distinct_rows then
@@ -3201,23 +3397,23 @@ function Rel:count(params)
 	--no early stop is possible.
 	--the answer changes with each matching row.
 	local n = 0
-	run_filtered(self, params, function() n = n + 1 end)
+	with_exists_sources(self, run_filtered, self, params, function() n = n + 1 end)
 	return n
 end
 
 function Rel:exists(params)
 	compile(self, 'exists', nil, true)
-	params = params or empty
+	params = bind_params(self, params)
 	if self.group_outputs then
 		--a group exists only after it is finished.
 		--having() can depend on fully accumulated aggregates.
 		--grouped exists() needs the full group pass.
 		local rows = {} --{row...}
-		run_grouped(self, params, rows)
+		with_exists_sources(self, run_grouped, self, params, rows)
 		return rows[1] ~= nil
 	end
 	local found = false
-	run_filtered(self, params, function()
+	with_exists_sources(self, run_filtered, self, params, function()
 		found = true
 		error(stop_scan)
 	end)

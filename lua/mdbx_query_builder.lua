@@ -1149,7 +1149,7 @@ REJECTED BY BENCH -- don't retry these without new evidence:
   - left_join via merge_join + db.left on the fk side, instead of
     pk_join_seek(left=true) (step 4). Looked like a 2x-4x win with the
     jit on; with the jit off, pk_join_seek(left=true) wins instead.
-    jit warmup artifact, not a real effect (see tests/mdbx_query_bench.lua,
+    jit warmup artifact, not a real effect (see tests/mdbx_query_builder_bench.lua,
     bench_left_join_strategy).
   - n-ary merge_join for two or more parent->child joins from the same
     from-table in the same key space (step 4), instead of chaining
@@ -1158,14 +1158,14 @@ REJECTED BY BENCH -- don't retry these without new evidence:
     artifact as above). Separately: chaining two binary merge_join calls
     (as opposed to one n-ary call) is outright wrong, not just slower --
     it silently drops rows when both sides have real duplicate fan-out
-    for the same key (see tests/mdbx_query_bench.lua,
+    for the same key (see tests/mdbx_query_builder_bench.lua,
     bench_nary_merge_strategy).
   - pk-level union pushdown: merge_union the branches' pk streams and
     select once, instead of selecting each branch then value_concat +
     hash_distinct (Db:union / U:lower). Confirmed a real, reproducible
     ~2x win (survives jit off), but requires exposing each branch's
     pre-select pk node from Q:lower() as a new field -- judged not worth
-    the added surface for 2x (see tests/mdbx_query_bench.lua,
+    the added surface for 2x (see tests/mdbx_query_builder_bench.lua,
     bench_union_pushdown in scratch history).
   - merge_union('full') for full outer join: removed. Only correct for a
     1:1 relationship between inputs (advances via next_group only, never
@@ -1271,7 +1271,7 @@ alternative, jit off; decision made, not acted on:
 
   - child->parent (pk_parent_lookup, step 4): has no merge-based fast
     path at all today (pk_parent_lookup used unconditionally).
-    tests/mdbx_query_bench.lua's own bench_parent_lookup_sweep
+    tests/mdbx_query_builder_bench.lua's own bench_parent_lookup_sweep
     ("merge_join rev") shows merge_join beating pk_parent_lookup by
     ~1.7x-2.5x (rising with driver size), consistently, jit off, at
     every fraction -- a real, unexploited win. Not a simple flip like

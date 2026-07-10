@@ -1,9 +1,11 @@
---archived from tests/mdbx_query_bench.lua: the pk_join_hash vs pk_join_seek
---comparison that led to removing pk_join_hash from mdbx_query_nodes.lua (see
+--archived from tests/mdbx_query_builder_bench.lua (then named
+--mdbx_query_bench.lua): the pk_join_hash vs pk_join_seek comparison that
+--led to removing pk_join_hash from mdbx_query_nodes.lua (see
 --mdbx_query_nodes_unused.lua). reference only: depends on Db.pk_join_hash
 --(not available; see mdbx_query_nodes_unused.lua) and on helpers defined in
---mdbx_query_bench.lua (test_file, printf_line, bench_query, each_node), none
---of which are available here, so this file is not runnable as-is.
+--mdbx_query_builder_bench.lua (test_file, printf_line, bench_query,
+--each_node), none of which are available here, so this file is not
+--runnable as-is.
 
 -- u32-keyed mirror of author/post, sized identically, so pk_join_hash's
 -- u32 sort+binsearch fast path (mdbx_query_nodes.lua u32_keyset) can be
