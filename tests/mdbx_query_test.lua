@@ -148,6 +148,7 @@ function test.access_plan_composite_exec()
 				nil, 'id', true), {})
 		end)
 	end)
+
 end
 
 function test.null_fact_plan_exec()
@@ -201,6 +202,16 @@ function test.in_union_and_dedup_exec()
 			check('in dedup', vals(db:from('item i')
 				:where(q.in_(c'i.id', {1, 1, 3})):select{'i.id id'}, nil, 'id', true), {1, 3})
 
+			--a same-column equality disjunction is rewritten to one in plan,
+			--so it uses the repeated-seek executor rather than a residual or.
+			local function or_rel()
+				return db:from('item i')
+					:where(q.or_(q.eq(c'i.id', 1), q.eq(c'i.id', 3)))
+					:select{'i.id id'}
+			end
+			assert(or_rel():explain().steps[1].kind == 'in', 'expected or() to use an in plan')
+			check('or equality rewrite', vals(or_rel(), nil, 'id', true), {1, 3})
+
 			--a literal null inside the seek list is skipped, not seeked.
 			check('in literal null skipped (seek path)', sorted_vals(db:from('item i')
 				:where(q.in_(c'i.id', {1, null, 3})):select{'i.id id'}, nil, 'id', true), {1, 3})
@@ -217,6 +228,78 @@ function test.in_union_and_dedup_exec()
 	end)
 end
 
+function test.union_materialization_exec()
+	with_db(build_core, 'union_materialization', function(db)
+		db:atomic('r', function()
+			local function union_ids()
+				local a = db:from('item i'):where(q.in_(c'i.id', {1, 2}))
+					:select{'i.id id'}
+				local b = db:from('item i'):where(q.in_(c'i.id', {2, 3}))
+					:select{'i.id id'}
+				return a:union(b)
+			end
+
+			check('union keeps duplicate rows', vals(union_ids(), nil, 'id', true), {1, 2, 2, 3})
+
+			local set = db:from(union_ids(), 'u')
+				:select{'u.id id'}
+				:distinct()
+				:order_by{{c'id', 'desc'}}
+				:limit(2)
+			check('union relation materializes before distinct sort limit',
+				vals(set, nil, 'id', true), {3, 2})
+
+			local members = db:from('item i')
+				:where(q.in_(c'i.id', union_ids()))
+				:select{'i.id id'}
+			check('in_ reads union rows', vals(members, nil, 'id', true), {1, 2, 3})
+		end)
+	end)
+end
+
+function test.relation_exists_and_terminals_exec()
+	with_db(build_core, 'relation_exists_and_terminals', function(db)
+		db:atomic('r', function()
+			local function union_for_exists()
+				local empty = db:from('item i'):where(q.eq(c'i.id', 99)):select{'i.id id'}
+				local found = db:from('item i'):where(q.eq(c'i.id', 2)):select{'i.id id'}
+				return empty:union(found)
+			end
+			check('relation exists scans later union input', vals(db:from('item i')
+				:where(q.exists(union_for_exists())):select{'i.id id'}, nil, 'id', true),
+				{1, 2, 3, 4, 5})
+			assert(union_for_exists():exists(), 'union exists() must scan past an empty first input')
+
+			local function empty_groups()
+				return db:from('tag t'):where(q.eq(c't.name', 'missing'))
+					:group{{q.count(), 'n'}}
+					:having(q.gt(c'n', 0))
+			end
+			check('relation exists finishes grouped input before testing it', vals(db:from('item i')
+				:where(q.exists(empty_groups())):select{'i.id id'}, nil, 'id', true), {})
+			assert(not empty_groups():exists(), 'group exists() must apply having()')
+
+			local function count_union()
+				local a = db:from('item i'):where(q.eq(c'i.id', 1)):select{'i.id id'}
+				local b = db:from('item i'):where(q.in_(c'i.id', {2, 3})):select{'i.id id'}
+				return a:union(b)
+			end
+			assert(count_union():count() == 3, 'union count() must sum input counts')
+
+			local grouped = db:from('item i')
+				:group{{c'i.cat', 'cat'}, {q.count(), 'n'}}
+				:having(q.gt(c'n', 2))
+			assert(grouped:count() == 1, 'group count() must count rows after having()')
+
+			local distinct = db:from('item i')
+				:left_join('tag t', q.eq(c't.item_id', c'i.id'))
+				:select{'i.id id'}
+				:distinct()
+			assert(distinct:count() == 5, 'distinct count() must count deduped rows')
+		end)
+	end)
+end
+
 ------------------------------------------------------------------------------
 --FIXTURE: range -- a composite index (cat, score, extra) where the range
 --column (score) isn't last, and several rows share one score value.
@@ -225,10 +308,10 @@ end
 local function build_range(db)
 	db:begin'w'
 	db:create_table('range_item', {fields = {
-		{col = 'id',    mdbx_type = 'u64',  not_null = true},
+		{col = 'id',    mdbx_type = 'u32',  not_null = true},
 		{col = 'cat',   mdbx_type = 'utf8', maxlen = 4, nozero = true, not_null = true},
 		{col = 'score', mdbx_type = 'i32',  not_null = true},
-		{col = 'extra', mdbx_type = 'u64',  not_null = true},
+		{col = 'extra', mdbx_type = 'u32',  not_null = true},
 		{col = 'tiny',  mdbx_type = 'u8',   not_null = true},
 	}, pk = {'id'}})
 	db:add_index('range_item', {'cat', 'score', 'extra'})
@@ -370,6 +453,27 @@ function test.null_semantics_exec()
 				:where(q.eq(c'i.cat', 'a')):where(q.not_in(c'i.score', {10, 20}))
 				:select{'i.id id'}, nil, 'id', true), {}) --id5's score is null -> excluded, not kept
 
+			--a relation candidate list has the same null rule as a literal
+			--list. item 5 contributes the nil candidate through score.
+			local function score_values()
+				return db:from('item j'):select{'j.score score'}
+			end
+			check('in_ relation ignores null candidate', vals(db:from('item i')
+				:where(q.in_(c'i.id', score_values())):select{'i.id id'}, nil, 'id', true), {5})
+			check('not_in relation ignores null candidate', vals(db:from('item i')
+				:where(q.not_in(c'i.id', score_values())):select{'i.id id'}, nil, 'id', true),
+				{1, 2, 3, 4})
+
+			--this cannot become an in plan because its first arm is an and.
+			--it stays one residual condition and exercises nested or/and eval.
+			local residual_or = db:from('item i')
+				:where(q.or_(
+					q.and_(q.eq(c'i.cat', 'a'), q.eq(c'i.score', 10)),
+					q.eq(c'i.id', 3)
+				))
+				:select{'i.id id'}
+			check('residual nested or and', vals(residual_or, nil, 'id', true), {1, 3})
+
 			--left join, unmatched right row: a plain equality filter on the
 			--right side drops the row; is_null() on that field keeps it.
 			local matched = sorted_vals(db:from('item i')
@@ -385,6 +489,53 @@ function test.null_semantics_exec()
 	end)
 end
 
+function test.table_exists_strategy_exec()
+	with_db(build_core, 'table_exists_strategy', function(db)
+		db:atomic('r', function()
+			local function matching_items(op)
+				return db:from('item i'):where(op('item j', q.and_(
+					q.eq(c'j.cat', c'i.cat'),
+					q.eq(c'j.score', 20),
+					q.eq(c'j.label', 'beta')
+				))):select{'i.id id'}
+			end
+
+			local has_match = matching_items(q.exists)
+			check('indexed exists with residual', vals(has_match, nil, 'id', true), {1, 2, 5})
+			local source = has_match.wheres[1][2]
+			assert(source.exists_plan.kind == 'exact'
+				and source.exists_plan.schema.is_index
+				and #source.exists_plan.residual == 1,
+				'expected an indexed exact seek with one residual')
+
+			check('indexed not_exists with residual', vals(matching_items(q.not_exists), nil, 'id', true),
+				{3, 4})
+
+			--relation-form exists() runs the inner relation with i's decoder as
+			--its parent scope, so j.cat and j.score can form an exact inner seek.
+			local inner = db:from('item j'):where(q.and_(
+				q.eq(c'j.cat', c'i.cat'),
+				q.eq(c'j.score', 20)
+			))
+			local relation_exists = db:from('item i')
+				:where(q.exists(inner))
+				:select{'i.id id'}
+			check('correlated relation exists indexed seek',
+				vals(relation_exists, nil, 'id', true), {1, 2, 5})
+			assert(inner.access[1].plan.kind == 'exact' and inner.access[1].plan.schema.is_index,
+				'expected relation exists() to use an inner indexed exact seek')
+
+			--having() evaluates after run_filtered() returns, so this checks
+			--that table exists sources stay open through group finalization.
+			local grouped = db:from('item i')
+				:group{{c'i.cat', 'cat'}, {q.count(), 'n'}}
+				:having(q.exists('tag t', q.eq(c't.name', 'x')))
+				:select{{c'cat', 'cat'}}
+			check('exists in having', sorted_vals(grouped, nil, 'cat', false), {'a', 'b'})
+		end)
+	end)
+end
+
 function test.join_dependency_and_cycle_exec()
 	with_db(build_core, 'join_dependency_and_cycle', function(db)
 		db:atomic('r', function()
@@ -395,7 +546,7 @@ function test.join_dependency_and_cycle_exec()
 				:join('tag t', q.eq(c't.item_id', c'i.id'))
 				:select{'i.id id', 'n.body body'}
 			local pairs_t = {} --{'id:body'...}
-			for row in q1:rows() do
+			for row in q1:rows'{}' do
 				pairs_t[#pairs_t + 1] = tonumber(row.id)..':'..row.body
 			end
 			table.sort(pairs_t)
@@ -410,6 +561,31 @@ function test.join_dependency_and_cycle_exec()
 				:select{'i.id id'}:prepare()
 		end)
 		assert(not ok and err:find('source step cycle', 1, true), tostring(err))
+	end)
+end
+
+function test.indexed_join_seek_exec()
+	with_db(build_core, 'indexed_join_seek', function(db)
+		db:atomic('r', function()
+			--j reads both seek values from i. item 5's nil score must skip
+			--the exact seek and become the left join's null-extended row.
+			local rel = db:from('item i')
+				:left_join('item j', q.and_(
+					q.eq(c'j.cat', c'i.cat'),
+					q.eq(c'j.score', c'i.score')
+				))
+				:select{'i.id id', 'j.id match_id'}
+			rel:prepare()
+			local plan = rel.access[2].plan
+			assert(plan.kind == 'exact' and plan.schema.is_index,
+				'expected the joined item to use an indexed exact seek')
+			local pairs = {} --{'id:match_id'...}
+			for row in rel:rows'{}' do
+				pairs[#pairs + 1] = tonumber(row.id)..':'..(row.match_id and tonumber(row.match_id) or 'nil')
+			end
+			check('indexed join seek and null extension', pairs,
+				{'1:1', '2:2', '3:3', '4:4', '5:nil'})
+		end)
 	end)
 end
 
@@ -429,7 +605,7 @@ function test.left_join_fragment_vs_separate_exec()
 				:left_join('note n', q.eq(c'n.tag_id', c't.tag_id'))
 				:select{'i.id id', 'n.body body'}
 			local sep = {} --{'id:body'...}
-			for row in q_sep:rows() do
+			for row in q_sep:rows'{}' do
 				sep[#sep + 1] = tonumber(row.id)..':'..(row.body or 'nil')
 			end
 			table.sort(sep)
@@ -447,7 +623,7 @@ function test.left_join_fragment_vs_separate_exec()
 				:left_join(frag)
 				:select{'i.id id', 'n.body body'}
 			local frag_t = {} --{'id:body'...}
-			for row in q_frag:rows() do
+				for row in q_frag:rows'{}' do
 				frag_t[#frag_t + 1] = tonumber(row.id)..':'..(row.body or 'nil')
 			end
 			table.sort(frag_t)
@@ -468,7 +644,7 @@ function test.left_join_residual_extends_exec()
 				:left_join('tag t', q.and_(q.eq(c't.item_id', c'i.id'), q.eq(c't.name', 'nonexistent')))
 				:select{'i.id id', 't.name name'}
 			local rows = {} --{'id:name'...}
-			for row in q1:rows() do
+				for row in q1:rows'{}' do
 				rows[#rows + 1] = tonumber(row.id)..':'..(row.name or 'nil')
 			end
 			table.sort(rows)
@@ -497,6 +673,57 @@ function test.outer_scope_exec()
 			db:from('item i1'):join('item i2', true):where(q.eq(c'id', 1)):prepare'count'
 		end)
 		assert(not ok and err:find('ambiguous field', 1, true), tostring(err))
+	end)
+end
+
+function test.relation_exists_alias_exec()
+	with_db(build_core, 'relation_exists_alias', function(db)
+		db:atomic('r', function()
+			local tag_counts = db:from('tag t')
+				:group{
+					{c't.item_id', 'item_id'},
+					{q.count(), 'n'},
+				}
+			local grouped = db:from('item i')
+				:where(q.exists(tag_counts, 'tc', q.and_(
+					q.eq(c'tc.item_id', c'i.id'),
+					q.ge(c'tc.n', 2)
+				)))
+				:select{'i.id id'}
+			check('exists() aliased relation output', sorted_vals(grouped, nil, 'id', true), {1, 2})
+
+			local function tag_items()
+				return db:from('tag t'):select{'t.item_id item_id'}
+			end
+			local semi = db:from('item i')
+				:semi_join(tag_items(), 'tags', q.eq(c'tags.item_id', c'i.id'))
+				:select{'i.id id'}
+			check('semi_join() aliased relation', sorted_vals(semi, nil, 'id', true), {1, 2})
+
+			local anti = db:from('item i')
+				:anti_join(tag_items(), 'tags', q.eq(c'tags.item_id', c'i.id'))
+				:select{'i.id id'}
+			check('anti_join() aliased relation', sorted_vals(anti, nil, 'id', true), {3, 4, 5})
+
+			local joined = db:from('item i')
+				:join(tag_items(), 'tags', q.eq(c'tags.item_id', c'i.id'))
+				:select{'i.id id'}
+			check('inner join scans aliased relation rows', vals(joined, nil, 'id', true), {1, 1, 2, 2})
+
+			local function x_items()
+				return db:from('tag t'):where(q.eq(c't.name', 'x'))
+					:select{'t.item_id item_id'}
+			end
+			local left = db:from('item i')
+				:left_join(x_items(), 'tags', q.eq(c'tags.item_id', c'i.id'))
+				:select{'i.id id', 'tags.item_id tag_item_id'}
+			local pairs = {} --{'item_id:tag_item_id'...}
+			for row in left:rows'{}' do
+				pairs[#pairs + 1] = tonumber(row.id)..':'..(row.tag_item_id and tonumber(row.tag_item_id) or 'nil')
+			end
+			check('left join null-extends aliased relation rows', pairs,
+				{'1:1', '2:nil', '3:nil', '4:nil', '5:nil'})
+		end)
 	end)
 end
 
@@ -530,7 +757,7 @@ function test.grouping_streaming_and_hash_exec()
 			--scan is already grouped by cat -- streaming grouping applies.
 			local sums = {} --{'cat:total'...}
 			for row in db:from('gitem g'):group{{c'g.cat', 'cat'}, {q.sum(c'g.val'), 'total'}}
-				:select{{c'cat', 'cat'}, {c'total', 'total'}}:rows() do
+					:select{{c'cat', 'cat'}, {c'total', 'total'}}:rows'{}' do
 				sums[#sums + 1] = row.cat..':'..tonumber(row.total)
 			end
 			table.sort(sums)
@@ -545,7 +772,7 @@ function test.grouping_streaming_and_hash_exec()
 			local sums = {} --{'cat:total'...}
 			for row in db:from('item i'):where(q.in_(c'i.id', {1, 2, 3, 4}))
 				:group{{c'i.cat', 'cat'}, {q.sum(c'i.score'), 'total'}}
-				:select{{c'cat', 'cat'}, {c'total', 'total'}}:rows() do
+					:select{{c'cat', 'cat'}, {c'total', 'total'}}:rows'{}' do
 				sums[#sums + 1] = row.cat..':'..tonumber(row.total)
 			end
 			table.sort(sums)
@@ -555,7 +782,7 @@ function test.grouping_streaming_and_hash_exec()
 			--output row, count()=0. exercise it on the same forced-hash path.
 			local rows = {} --{row...}
 			for row in db:from('item i'):where(q.eq(c'i.cat', 'zzz'))
-				:group{{q.count(), 'n'}}:select{{c'n', 'n'}}:rows() do
+					:group{{q.count(), 'n'}}:select{{c'n', 'n'}}:rows'{}' do
 				rows[#rows + 1] = row
 			end
 			assert(#rows == 1 and tonumber(rows[1].n) == 0,
@@ -568,11 +795,54 @@ function test.grouping_streaming_and_hash_exec()
 		db:atomic('r', function()
 			local rows = {} --{row...}
 			for row in db:from('gitem g'):where(q.eq(c'g.cat', 'zzz'))
-				:group{{q.count(), 'n'}}:select{{c'n', 'n'}}:rows() do
+					:group{{q.count(), 'n'}}:select{{c'n', 'n'}}:rows'{}' do
 				rows[#rows + 1] = row
 			end
 			assert(#rows == 1 and tonumber(rows[1].n) == 0,
 				'expected one row with n=0, got '..#rows..' rows')
+		end)
+	end)
+end
+
+function test.aggregate_having_sort_exec()
+	with_db(build_core, 'aggregate_having_sort', function(db)
+		db:atomic('r', function()
+			--there is no group-key access hint when aggregates are present, so
+			--item's pk scan forces hash grouping. order_by() then sorts the
+			--finished group rows by an aggregate output.
+			local summaries = db:from('item i')
+				:group{
+					{c'i.cat', 'cat'},
+					{q.count(), 'n'},
+					{q.count(c'i.score'), 'n_score'},
+					{q.min(c'i.score'), 'min_score'},
+					{q.max(c'i.score'), 'max_score'},
+					{q.sum(c'i.score'), 'total'},
+					{q.avg(c'i.score'), 'average'},
+				}
+				:select{
+					{c'cat', 'cat'},
+					{c'n', 'n'},
+					{c'n_score', 'n_score'},
+					{c'min_score', 'min_score'},
+					{c'max_score', 'max_score'},
+					{c'total', 'total'},
+					{c'average', 'average'},
+				}
+				:order_by{{c'total', 'desc'}, {c'cat', 'asc'}}
+			local got = {} --{summary...}
+			for row in summaries:rows'{}' do
+				got[#got + 1] = row.cat..':'..tonumber(row.n)..':'..tonumber(row.n_score)
+					..':'..tonumber(row.min_score)..':'..tonumber(row.max_score)
+					..':'..tonumber(row.total)..':'..tonumber(row.average)
+			end
+			check('hash group aggregates and sort', got, {'b:2:2:5:30:35:17.5', 'a:3:2:10:20:30:15'})
+
+			local filtered = db:from('item i')
+				:group{{c'i.cat', 'cat'}, {q.count(), 'n'}}
+				:having(q.gt(c'n', 2))
+				:select{{c'cat', 'cat'}}
+			check('having rejects finished groups', vals(filtered, nil, 'cat', false), {'a'})
 		end)
 	end)
 end
@@ -593,6 +863,209 @@ function test.distinct_streaming_and_hash_exec()
 			check('hash distinct catches non-adjacent duplicates',
 				sorted_vals(db:from('gitem g'):select{'g.val val'}:distinct(), nil, 'val', true),
 				{5, 7, 9})
+		end)
+	end)
+
+	with_db(build_core, 'distinct_hash_tuple', function(db)
+		db:atomic('r', function()
+			--the join repeats item 1 and item 2, while item 5 contributes a
+			--nil score. two returned fields force hash_dedup_rows() through
+			--its tuple-space path instead of the single-value table-key path.
+			local rel = db:from('item i')
+				:left_join('tag t', q.eq(c't.item_id', c'i.id'))
+				:select{'i.cat cat', 'i.score score'}
+				:distinct()
+			local got = {} --{pair...}
+			for row in rel:rows'{}' do
+				got[#got + 1] = row.cat..':'..(row.score and tonumber(row.score) or 'nil')
+			end
+			table.sort(got)
+			check('hash distinct pairs with nil', got, {'a:10', 'a:20', 'a:nil', 'b:30', 'b:5'})
+		end)
+	end)
+end
+
+------------------------------------------------------------------------------
+--FIXTURE: dup -- an index with fixed-size duplicate primary keys.
+------------------------------------------------------------------------------
+
+local function build_dup(db)
+	db:begin'w'
+	db:create_table('dup', {fields = {
+		{col = 'id', mdbx_type = 'u32', not_null = true},
+		{col = 'k',  mdbx_type = 'u32', not_null = true},
+	}, pk = {'id'}})
+	db:add_index('dup', {'k'})
+	for id, k in ipairs({1, 1, 1, 1, 2, 2}) do
+		db:insert('dup', '{}', {id = id, k = k})
+	end
+	db:commit()
+end
+
+function test.duplicate_index_paths_exec()
+	with_db(build_dup, 'duplicate_index_paths', function(db)
+		db:atomic('r', function()
+			local function matching()
+				return db:from('dup d'):where(q.eq(c'd.k', 1)):select{'d.id id'}
+			end
+
+			local bulk = matching()
+			bulk:prepare()
+			assert(bulk.access[1].plan.schema.is_index and bulk.access[1].plan.schema.dup_fixedsize,
+				'expected the duplicate index to use fixed-size duplicate values')
+			check('DUPFIXED bulk walk', vals(bulk, nil, 'id', true), {1, 2, 3, 4})
+
+			local old = MDBX_NODUPFIXED
+			MDBX_NODUPFIXED = true
+			local one_at_a_time = matching()
+			one_at_a_time:prepare()
+			check('DUPFIXED fallback walk', vals(one_at_a_time, nil, 'id', true), {1, 2, 3, 4})
+			MDBX_NODUPFIXED = old
+
+			local function keys_in()
+				return db:from('dup d'):where(q.in_(c'd.k', {1, 1, 2})):select{'d.id id'}
+			end
+			assert(keys_in():explain().steps[1].kind == 'in', 'expected an index in plan')
+			check('in plan dedups duplicate non-unique keys', vals(keys_in(), nil, 'id', true),
+				{1, 2, 3, 4, 5, 6})
+
+			local function distinct_keys()
+				return db:from('dup d'):select{'d.k k'}:distinct()
+			end
+
+			local skipped = distinct_keys()
+			skipped:prepare()
+			assert(skipped.access[1].plan.next_nodup,
+				'expected distinct(k) to skip duplicate index groups')
+			check('NEXT_NODUP distinct walk', vals(skipped, nil, 'k', true), {1, 2})
+
+			old = MDBX_NO_NEXT_NODUP
+			MDBX_NO_NEXT_NODUP = true
+			local all_dups = distinct_keys()
+			all_dups:prepare()
+			assert(not all_dups.access[1].plan.next_nodup,
+				'expected the bench override to keep duplicate index rows visible')
+			check('NEXT_NODUP fallback walk', vals(all_dups, nil, 'k', true), {1, 2})
+			MDBX_NO_NEXT_NODUP = old
+
+			local grouped = db:from('dup d'):group{{c'd.k', 'k'}}
+			grouped:prepare()
+			assert(grouped.access[1].plan.next_nodup,
+				'expected group(k) without aggregates to skip duplicate index groups')
+			check('group without aggregates skips duplicate index groups',
+				vals(grouped, nil, 'k', true), {1, 2})
+		end)
+	end)
+end
+
+------------------------------------------------------------------------------
+--FIXTURE: parent/child -- child.parent_id has the FK-owned index.
+------------------------------------------------------------------------------
+
+local function build_fk(db)
+	db:begin'w'
+	db:create_table('parent', {fields = {
+		{col = 'id', mdbx_type = 'u32', not_null = true},
+	}, pk = {'id'}})
+	db:create_table('child', {fields = {
+		{col = 'id',        mdbx_type = 'u32',  not_null = true},
+		{col = 'parent_id', mdbx_type = 'u32',  not_null = true},
+		{col = 'kind',      mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
+	}, pk = {'id'}})
+	for _, row in ipairs{{id = 1}, {id = 2}, {id = 3}} do
+		db:insert('parent', '{}', row)
+	end
+	for _, row in ipairs{
+		{id = 11, parent_id = 1, kind = 'x'},
+		{id = 12, parent_id = 1, kind = 'y'},
+		{id = 13, parent_id = 2, kind = 'x'},
+	} do
+		db:insert('child', '{}', row)
+	end
+	db:add_fk{
+		table = 'child',
+		cols = {'parent_id'},
+		ref_table = 'parent',
+		ref_cols = {'id'},
+	}
+	db:commit()
+end
+
+function test.fk_paths_exec()
+	with_db(build_fk, 'fk_paths', function(db)
+		db:atomic('r', function()
+			local parent_to_child = db:from('parent p')
+				:fk_join('child c')
+				:select{'p.id parent_id', 'c.id child_id'}
+			local pairs = {} --{'parent_id:child_id'...}
+			for row in parent_to_child:rows'{}' do
+				pairs[#pairs + 1] = tonumber(row.parent_id)..':'..tonumber(row.child_id)
+			end
+			check('fk_join parent to child', pairs, {'1:11', '1:12', '2:13'})
+
+			local child_to_parent = db:from('child c')
+				:fk_join('parent p')
+				:select{'c.id child_id', 'p.id parent_id'}
+			pairs = {}
+			for row in child_to_parent:rows'{}' do
+				pairs[#pairs + 1] = tonumber(row.child_id)..':'..tonumber(row.parent_id)
+			end
+			check('fk_join child to parent', pairs, {'11:1', '12:1', '13:2'})
+
+			local left = db:from('parent p')
+				:fk_left_join('child c')
+				:select{'p.id parent_id', 'c.id child_id'}
+			pairs = {}
+			for row in left:rows'{}' do
+				pairs[#pairs + 1] = tonumber(row.parent_id)..':'..(row.child_id and tonumber(row.child_id) or 'nil')
+			end
+			check('fk_left_join parent to child', pairs, {'1:11', '1:12', '2:13', '3:nil'})
+
+			local has_kind_x = db:from('parent p')
+				:where_has('child c', q.eq(c'c.kind', 'x'))
+				:select{'p.id id'}
+			check('where_has fk and filter', vals(has_kind_x, nil, 'id', true), {1, 2})
+
+			local lacks_kind_x = db:from('parent p')
+				:where_hasnt('child c', q.eq(c'c.kind', 'x'))
+				:select{'p.id id'}
+			check('where_hasnt fk and filter', vals(lacks_kind_x, nil, 'id', true), {3})
+		end)
+	end)
+end
+
+------------------------------------------------------------------------------
+--FIXTURE: group_key -- two different pairs that collided through '\1'.
+------------------------------------------------------------------------------
+
+local function build_group_key(db)
+	db:begin'w'
+	db:create_table('group_key', {fields = {
+		{col = 'id', mdbx_type = 'u32',  not_null = true},
+		{col = 'a',  mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
+		{col = 'b',  mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
+	}, pk = {'id'}})
+	local sep = string.char(1)
+	db:insert('group_key', '{}', {id = 1, a = 'a'..sep..'b', b = 'c'})
+	db:insert('group_key', '{}', {id = 2, a = 'a', b = 'b'..sep..'c'})
+	db:commit()
+end
+
+function test.hash_group_key_collision_exec()
+	with_db(build_group_key, 'hash_group_key_collision', function(db)
+		db:atomic('r', function()
+			--the primary-key scan does not group a and b, so this takes the
+			--hash path. the two pairs used to both stringify as a\1b\1c.
+			local rel = db:from('group_key g')
+				:group{{c'g.a', 'a'}, {c'g.b', 'b'}}
+			local sep = string.char(1)
+			local pairs = {} --{'a:b'...}
+			for row in rel:rows'{}' do
+				pairs[#pairs + 1] = row.a..':'..row.b
+			end
+			table.sort(pairs)
+			check('hash group keeps control-byte pairs separate', pairs,
+				{'a'..sep..'b'..':'..'c', 'a'..':'..'b'..sep..'c'})
 		end)
 	end)
 end
@@ -626,13 +1099,39 @@ function test.order_by_desc_pushdown_exec()
 			assert(mk_desc():explain().sort_pushed == true, 'expected desc order to be pushed')
 			check('desc pushdown order', vals(mk_desc(), nil, 'id', true), {3, 2, 1})
 
-			--opposite direction: the stored order can't satisfy it, so an
-			--explicit sort is required -- but must still come out correct.
+			--opposite direction: the stored order is exactly backward for
+			--this request, so the scan walks MDBX_PREV from MDBX_LAST
+			--instead of MDBX_NEXT from MDBX_FIRST -- still no explicit sort.
 			local function mk_asc()
 				return db:from('desc_item d'):order_by{{c'd.id', 'asc'}}:select{'d.id id'}
 			end
-			assert(mk_asc():explain().sort_pushed == false, 'expected asc order to require an explicit sort')
-			check('asc requires explicit sort', vals(mk_asc(), nil, 'id', true), {1, 2, 3})
+			assert(mk_asc():explain().sort_pushed == true, 'expected asc order to be pushed via backward scan')
+			check('asc pushdown via backward scan', vals(mk_asc(), nil, 'id', true), {1, 2, 3})
+		end)
+	end)
+end
+
+function test.order_by_desc_eq_prefix_pushdown_exec()
+	with_db(build_core, 'order_by_desc_eq_prefix_pushdown', function(db)
+		db:atomic('r', function()
+			--item/cat,score is stored ascending: cat='a' pins the leading
+			--column (eq_prefix, depth=1), score is left varying. order_by()
+			--score desc is the reverse of that stored order, so the scan
+			--seeks to the end of the cat='a' group (MDBX_TO_KEY_LESSER_OR_EQUAL)
+			--and walks MDBX_PREV -- still no explicit sort.
+			--item/cat alone would satisfy cat='a' with a plain 'exact' seek
+			--(and win over eq_prefix on selectivity), so force the composite
+			--index to exercise the eq_prefix desc path.
+			local function mk()
+				return db:from('item i'):use_index('i', 'item/cat,score')
+					:where(q.eq(c'i.cat', 'a'))
+					:order_by{{c'i.score', 'desc'}}:select{'i.id id'}
+			end
+			local plan = mk():explain()
+			assert(plan.steps[1].kind == 'eq_prefix', S{plan.steps[1].kind})
+			assert(plan.sort_pushed == true, 'expected desc order to be pushed via backward scan')
+			--score desc, null last: id2 (20), id1 (10), id5 (null).
+			check('eq_prefix desc pushdown', vals(mk(), nil, 'id', true), {2, 1, 5})
 		end)
 	end)
 end
@@ -677,6 +1176,34 @@ function test.order_by_partial_coverage_exec()
 			--score asc (null first) decides the order; id desc only breaks
 			--ties on equal scores, and 10 vs 20 aren't tied.
 			check('partial order coverage falls back to sort', vals(mk1(), nil, 'id', true), {5, 1, 2})
+
+			--alpha occurs twice, so the explicit sorter must reach the second
+			--term and reverse those two ids while still placing nil first.
+			local function mk2()
+				return db:from('item i')
+					:order_by{{c'i.label', 'asc'}, {c'i.id', 'desc'}}
+					:select{'i.id id'}
+			end
+			assert(mk2():explain().sort_pushed == false, 'expected a two-key explicit sort')
+			check('explicit sort uses later tie keys', vals(mk2(), nil, 'id', true), {3, 4, 1, 2, 5})
+
+			--the sort key comes from a joined member, so it cannot use the
+			--base scan order. order_key() must still read it before row_ctx
+			--goes away, without adding it to the returned row.
+			local function joined_order()
+				return db:from('item i')
+					:join('tag t', q.eq(c't.item_id', c'i.id'))
+					:select{'i.id id'}
+					:order_by{{c't.name', 'asc'}, {c'i.id', 'desc'}}
+			end
+			assert(not joined_order():explain().sort_pushed,
+				'joined sort key must require explicit sorting')
+			local ids = {} --{id...}
+			for row in joined_order():rows'{}' do
+				assert(row.name == nil, 'unselected joined sort field leaked into output')
+				ids[#ids + 1] = tonumber(row.id)
+			end
+			check('sort by unselected joined field', ids, {2, 1, 2, 1})
 		end)
 	end)
 end
@@ -685,9 +1212,9 @@ function test.limit_offset_compose_exec()
 	with_db(build_core, 'limit_offset_compose', function(db)
 		db:atomic('r', function()
 			--query-level limit(n, offset) composed with a terminal cap
-			--(first() asks collect_rows() for 1 row).
+			--(first() asks rows_array() for 1 row).
 			local q1 = db:from('item i'):order_by{{c'i.id', 'asc'}}:limit(2, 1):select{'i.id id'}
-			local row = q1:first()
+			local row = q1:first'{}'
 			assert(tonumber(row.id) == 2, 'expected id=2, got '..tostring(row and row.id))
 
 			--order_by() needing an explicit sort must still respect
@@ -757,6 +1284,344 @@ function test.params_exec()
 			check('in_ with param list, null filtered', sorted_vals(db:from('item i')
 				:where(q.in_(c'i.score', p'LIST')):select{'i.id id'},
 				{LIST = {10, null, 30}}, 'id', true), {1, 3})
+		end)
+	end)
+end
+
+------------------------------------------------------------------------------
+--FIXTURE: compile -- post, comment, tag, ban.
+--empty tables: these tests exercise the query builder's parsing, binding,
+--and validation, not row results.
+------------------------------------------------------------------------------
+
+local function build_compile(db)
+	db:begin'w'
+	db:create_table('post', {fields = {
+		{col = 'id',         mdbx_type = 'u32',  not_null = true},
+		{col = 'status',     mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
+		{col = 'score',      mdbx_type = 'i32'},
+		{col = 'title',      mdbx_type = 'utf8', maxlen = 32, nozero = true},
+		{col = 'deleted_at', mdbx_type = 'u32'},
+	}, pk = {'id'}})
+	db:create_table('comment', {fields = {
+		{col = 'id',      mdbx_type = 'u32', not_null = true},
+		{col = 'post_id', mdbx_type = 'u32'},
+	}, pk = {'id'}})
+	db:create_table('tag', {fields = {
+		{col = 'id',      mdbx_type = 'u32', not_null = true},
+		{col = 'post_id', mdbx_type = 'u32'},
+	}, pk = {'id'}})
+	db:create_table('ban', {fields = {
+		{col = 'post_id', mdbx_type = 'u32', not_null = true},
+	}, pk = {'post_id'}})
+	db:commit()
+end
+
+------------------------------------------------------------------------------
+
+function test.query_builder_compile_exec()
+	with_db(build_compile, 'query_builder_compile', function(db)
+		db:atomic('r', function()
+			local r = db:from('post p')
+				:join('comment c', q.eq(c'c.post_id', c'p.id'))
+				:left_join('tag pt', q.eq(c'pt.post_id', c'p.id'))
+				:where(q.and_(
+					q.eq(c'p.status', p'STATUS'),
+					q.ne(c'p.status', 'banned'),
+					q.lt(c'p.score', 1000),
+					q.le(c'p.score', 999),
+					q.gt(c'p.score', 0),
+					q.ge(c'p.score', p'MIN_SCORE'),
+					q.is_not_null(c'p.title'),
+					q.starts(c'p.title', 'A'),
+					q.in_(c'p.status', {'draft', 'live'}),
+					q.not_in(c'p.status', {'deleted'}),
+					q.or_(q.is_null(c'p.deleted_at'), q.eq(c'p.deleted_at', p'ASOF')),
+					q.exists('comment c2', q.eq(c'c2.post_id', q.outer'p.id')),
+					q.not_exists('tag t2b', q.eq(c't2b.post_id', c'p.id'))
+				))
+				:group{
+					{c'p.status', 'status'},
+					{q.count(), 'n'},
+					{q.count(c'p.id'), 'n_ids'},
+					{q.min(c'p.score'), 'min_score'},
+					{q.max(c'p.score'), 'max_score'},
+					{q.sum(c'p.score'), 'total_score'},
+					{q.avg(c'p.score'), 'avg_score'},
+				}
+				:having(q.gt(c'n', 0))
+				:select{
+					{c'status', 'status'},
+					{c'n', 'n'},
+				}
+				:distinct()
+				:order_by{{c'n', 'desc'}}
+				:limit(50, 10)
+				:use_index('p', 'ix_status')
+				:no_index('p', 'ix_old')
+
+			assert(r.source.kind == 'table' and r.source.table == 'post' and r.source.alias == 'p',
+				'table specs must parse on relation sources')
+			local comment_join = r.joins[1]
+			local tag_join = r.joins[2]
+			assert(comment_join.right.kind == 'table' and comment_join.right.table == 'comment'
+				and comment_join.right.alias == 'c', 'table specs must parse on joins')
+			assert(tag_join.right.table == 'tag' and tag_join.right.alias == 'pt'
+				and tag_join.alias == nil, 'table join aliases must be inline')
+
+			local ok, err = pcall(function()
+				db:from('post p', 'p2')
+			end)
+			assert(not ok and err:find('table alias must be inline', 1, true),
+				'base table source aliases must be inline')
+			ok, err = pcall(function()
+				db:from('post p'):join('comment c', 'c2', true)
+			end)
+			assert(not ok and err:find('table alias must be inline', 1, true),
+				'join table source aliases must be inline')
+			ok, err = pcall(function()
+				q.exists('comment c', 'c2', true)
+			end)
+			assert(not ok and err:find('table alias must be inline', 1, true),
+				'exists() table source aliases must be inline')
+			ok, err = pcall(function()
+				q.not_exists('comment c', 'c2', true)
+			end)
+			assert(not ok and err:find('table alias must be inline', 1, true),
+				'not_exists() table source aliases must be inline')
+
+			local r3 = db:from('post p')
+				:select{'p.id id', 'p.title'}
+			local select_outputs = r3.select_outputs
+			local id_output = select_outputs[1]
+			local title_output = select_outputs[2]
+			local id_expr, id_name = unpack(id_output, 1, 2)
+			local id_op, id_member, id_col = unpack(id_expr, 1, 3)
+			local title_expr, title_name = unpack(title_output, 1, 2)
+			local title_op, _, title_col = unpack(title_expr, 1, 3)
+			assert(id_op == 'col' and id_member == 'p' and id_col == 'id' and id_name == 'id',
+				'select strings must parse explicit aliases')
+			assert(title_op == 'col' and title_col == 'title' and title_name == 'title',
+				'select strings must default names to columns')
+
+			local sugar = db:from('post p')
+				:cross_join('tag t')
+				:semi_join('comment c', q.eq(c'c.post_id', c'p.id'))
+				:anti_join('ban b', q.eq(c'b.post_id', c'p.id'))
+				:where(q.between(c'p.score', 10, 20))
+			local sugar_join = sugar.joins[1]
+			local exists_where = sugar.wheres[1]
+			local not_exists_where = sugar.wheres[2]
+			local between_where = sugar.wheres[3]
+			local exists_op, exists_right = unpack(exists_where, 1, 2)
+			local not_exists_op, not_exists_right = unpack(not_exists_where, 1, 2)
+			local between_op, ge_expr, le_expr = unpack(between_where, 1, 3)
+			local ge_op = ge_expr[1]
+			local le_op = le_expr[1]
+			assert(sugar_join.kind == 'join' and sugar_join.on == true,
+				'cross_join() must rewrite to join(right, true)')
+			assert(exists_op == 'exists' and exists_right.table == 'comment',
+				'semi_join() must rewrite to where(exists(...))')
+			assert(not_exists_op == 'not_exists' and not_exists_right.table == 'ban',
+				'anti_join() must rewrite to where(not_exists(...))')
+			assert(between_op == 'and' and ge_op == 'ge' and le_op == 'le',
+				'between() must rewrite to ge/le')
+
+			local nested = db:from('comment c')
+				:select{'c.id id', 'c.post_id post_id'}
+			local from_nested = db:from(nested, 'comments')
+				:select{'comments.id id'}
+			from_nested:prepare()
+			assert(from_nested.source.kind == 'relation' and from_nested.source.alias == 'comments'
+				and from_nested.source.relation == nested, 'base relation sources must compile as nested sources')
+			local nested_id_field = nested.returned_fields[1]
+			local nested_post_id_field = nested.returned_fields[2]
+			assert(nested.terminal_kind == 'rows' and nested_id_field == 'id'
+				and nested_post_id_field == 'post_id', 'nested relation sources must expose returned fields')
+
+			local nested_join = db:from('tag t')
+				:select{'t.id id'}
+			local joined_nested = db:from('post p')
+				:join(nested_join, 'tags', true)
+				:select{'p.id id'}
+			joined_nested:prepare()
+			local joined_nested_join = joined_nested.joins[1]
+			local joined_nested_id_field = joined_nested_join.right.returned_fields[1]
+			assert(joined_nested_join.right.kind == 'relation'
+				and joined_nested_join.right.alias == 'tags'
+				and joined_nested_id_field == 'id',
+				'aliased join relation sources must compile as nested sources')
+
+			local fragment = db:from('comment c')
+				:where(q.eq(c'c.post_id', c'p.id'))
+			local joined_fragment = db:from('post p')
+				:join(fragment, true)
+				:select{'p.id id'}
+			joined_fragment:prepare()
+			local joined_fragment_join = joined_fragment.joins[1]
+			assert(joined_fragment_join.right == fragment,
+				'unaliased join fragments must stay unwrapped')
+			local joined_fragment_on = joined_fragment_join.on
+			joined_fragment:prepare()
+			assert(joined_fragment_join.on == joined_fragment_on,
+				'prepare() must be idempotent')
+
+			ok, err = pcall(function()
+				db:from(db:from('post p'):select{'p.id id'}):prepare'count'
+			end)
+			assert(not ok and err:find('relation source requires alias', 1, true),
+				'base relation sources must require aliases')
+
+			ok, err = pcall(function()
+				db:from('post p')
+					:join(db:from('comment c'):select{'c.id id'}, true)
+					:select{'p.id id'}
+					:prepare()
+			end)
+			assert(not ok and err:find('relation source requires alias', 1, true),
+				'selecting join relation sources must require aliases')
+
+			ok, err = pcall(function()
+				db:from('post p')
+					:join(db:from('comment c'):order_by{{c'c.id', 'asc'}}, true)
+					:select{'p.id id'}
+					:prepare()
+			end)
+			assert(not ok and err:find('relation fragment may contain only source steps and where()', 1, true),
+				'relation fragments must reject non-mergeable query parts')
+
+			local exists_table = db:from('post p')
+				:where(q.exists('comment c2', q.eq(c'c2.post_id', c'p.id')))
+				:select{'p.id id'}
+			exists_table:prepare()
+			local exists_expr = exists_table.wheres[1]
+			local _, exists_right = unpack(exists_expr, 1, 2)
+			assert(exists_right.member == 'c2' and exists_right.schema == db:table_schema'comment'
+				and exists_right.fields == db:table_schema('comment').fields,
+				'exists() table sources must resolve source fields')
+
+			local exists_inner = db:from('comment c')
+				:where(q.eq(c'c.post_id', q.outer'p.id'))
+			db:from('post p')
+				:where(q.exists(exists_inner))
+				:select{'p.id id'}
+				:prepare()
+			assert(exists_inner.terminal_kind == 'exists' and exists_inner.needs_output == false,
+				'exists() relation subqueries must not require returned rows')
+			local _, _, exists_outer = unpack(exists_inner.wheres[1], 1, 3)
+			assert(exists_outer[1] == 'col' and exists_outer.source and exists_outer.field,
+				'outer() must validate, then bind as a scoped col()')
+
+			local in_inner = db:from('comment c')
+				:select{'c.post_id post_id'}
+			db:from('post p')
+				:where(q.in_(c'p.id', in_inner))
+				:select{'p.id id'}
+				:prepare()
+			local in_field = in_inner.returned_fields[1]
+			assert(in_inner.terminal_kind == 'rows' and in_field == 'post_id',
+				'in_() relation subqueries must expose one returned field')
+
+			ok, err = pcall(function()
+				db:from('post p')
+					:where(q.in_(c'p.id', db:from('comment c'):select{'c.id id', 'c.post_id post_id'}))
+					:select{'p.id id'}
+					:prepare()
+			end)
+			assert(not ok and err:find('in_() relation requires one returned field', 1, true),
+				'in_() relation subqueries must reject multiple returned fields')
+
+			local bound = db:from('post p')
+				:where(q.eq(c'status', p'STATUS'))
+				:select{'p.id id'}
+				:order_by{{c'title', 'asc'}}
+			bound:prepare()
+			local _, bound_left = unpack(bound.wheres[1], 1, 2)
+			local _, bound_member, bound_col = unpack(bound_left, 1, 3)
+			assert(bound_member == false and bound_col == 'status'
+				and bound_left.source and bound.params.STATUS,
+				'unqualified source fields and params must bind')
+
+			local grouped = db:from('post p')
+				:group{{c'p.status', 'status'}, {q.count(), 'n'}}
+				:having(q.gt(c'n', 0))
+				:select{{c'status', 'status'}, {c'n', 'n'}}
+				:order_by{{c'n', 'desc'}}
+			grouped:prepare()
+			local _, having_col = unpack(grouped.havings[1], 1, 2)
+			assert(not having_col.source, 'having() fields must bind to group outputs')
+
+			local correlated = db:from('comment c')
+				:where(q.eq(c'c.post_id', c'p.id'))
+			db:from('post p')
+				:where(q.exists(correlated))
+				:select{'p.id id'}
+				:prepare()
+			local _, _, outer_col = unpack(correlated.wheres[1], 1, 3)
+			assert(outer_col.source.member == 'p' and not correlated.members.p,
+				'nested q.col() must bind through parent scopes')
+
+			ok, err = pcall(function()
+				db:from('post p')
+					:where(q.exists(
+						db:from('comment p')
+							:where(q.eq(c'p.post_id', q.outer'p.id'))))
+					:select{'p.id id'}
+					:prepare()
+			end)
+			assert(not ok and err:find('outer field resolved in current scope', 1, true),
+				'outer() must not bypass normal scope resolution')
+
+			ok, err = pcall(function()
+				db:from('post p')
+					:select{'p.id x', 'p.title x'}
+					:prepare()
+			end)
+			assert(not ok and err:find('duplicate select() output field: x', 1, true),
+				'select() output names must be unique')
+
+			ok, err = pcall(function()
+				db:from('post p')
+					:where(c'p.missing')
+					:prepare'count'
+			end)
+			assert(not ok and err:find('unknown field: p.missing', 1, true),
+				'source fields must exist')
+
+			ok, err = pcall(function()
+				db:from('post p')
+					:having(q.gt(c'n', 0))
+					:prepare'count'
+			end)
+			assert(not ok and err:find('having() requires group()', 1, true),
+				'having() must require group()')
+
+			ok, err = pcall(function()
+				db:from('post p')
+					:group{{c'p.status', 'status'}}
+					:select{{c'p.id', 'id'}}
+					:prepare()
+			end)
+			assert(not ok and err:find('output field must be unqualified', 1, true),
+				'grouped select() must read group outputs')
+
+			ok, err = pcall(function()
+				db:from('post p')
+					:group{{c'p.status', 'status'}}
+					:order_by{{c'p.id', 'asc'}}
+					:prepare()
+			end)
+			assert(not ok and err:find('output field must be unqualified', 1, true),
+				'grouped order_by() must read returned fields')
+
+			ok, err = pcall(function()
+				db:from('post p')
+					:use_index('p', 'ix_status')
+					:no_index('p', 'ix_status')
+					:prepare'count'
+			end)
+			assert(not ok and err:find('index is both forced and forbidden', 1, true),
+				'use_index() and no_index() must not conflict')
 		end)
 	end)
 end

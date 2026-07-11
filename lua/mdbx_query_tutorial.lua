@@ -4,6 +4,8 @@ pr[[
 mdbx_query query builder tutorial.
 
 Shows the high-level query builder: db:from(...):...:rows() and friends.
+rows() yields unpacked values by default; this tutorial requests '{}' when
+it needs a named row table.
 The low-level node API (pk_get, merge_join, etc.) is in mdbx_query_test.lua.
 
 Run: ~/sdk/bin/luajit -lscite ~/sdk/lua/mdbx_query_tutorial.lua
@@ -19,7 +21,7 @@ to field type tokens declared in schema_std.
 
 Each table is a flat list of alternating name/type tokens with
 optional constraint tokens (not_null, uk, child_fk, ...).
-idpk = u64 primary key with auto-increment.
+idpk = u32 primary key with auto-increment.
 child_fk = non-unique FK index pointing to the idpk of the named table.
 uk = unique index on the preceding field; varsize fields also need nozero.
 pk(col,...) = composite primary key replacing the default single-col pk.
@@ -70,7 +72,7 @@ end})
 
 local function rows_of(q)
 	local t = {}
-	for r in q:rows() do t[#t+1] = r end
+	for r in q:rows'{}' do t[#t+1] = r end
 	return t
 end
 
@@ -139,8 +141,10 @@ Without an alias the output key is the full 'member.col' string.
 See column_alias for how to use shorter names.
 
 Terminals run the query:
-  :rows()   -- iterator, yields one record per row
-  :first()  -- first matching record, or nil if none
+  :rows()   -- iterator, yields unpacked values
+  :rows'[]' -- iterator, yields one array row per row
+  :rows'{}' -- iterator, yields one named table row per row
+  :first()  -- first matching row as unpacked values, or nil if none
   :count()  -- number of matching rows (no :select needed)
   :exists() -- true if at least one row matches
 ]]
@@ -150,7 +154,7 @@ Terminals run the query:
 		pr(rows[1]['post.id'])      -- 1
 		pr(rows[1]['post.title'])   -- Lua intro
 
-		pr(db:from('post'):select('post.id'):first()['post.id'])  -- 1
+		pr(db:from('post'):select('post.id'):first'{}'['post.id'])  -- 1
 		pr(db:from('post'):count())   -- 5
 		pr(db:from('post'):exists())  -- true
 	end)
@@ -165,7 +169,7 @@ Adding a name after a column renames it in the result record.
 Without an alias the key is the full 'post.id' string including the table name.
 ]]
 	db:atomic('r', function()
-		local r = db:from('post'):select('post.id pid, post.title t'):first()
+		local r = db:from('post'):select('post.id pid, post.title t'):first'{}'
 		pr(r.pid)    -- 1
 		pr(r.t)      -- Lua intro
 	end)
@@ -185,12 +189,12 @@ When there is no index the whole table is scanned and each row checked.
 col can be 'post.status' (qualified) or just 'status' (assumes the from table).
 ]]
 	db:atomic('r', function()
-		for r in db:from('post'):where('status', 'published'):select('post.id id'):rows() do
+		for r in db:from('post'):where('status', 'published'):select('post.id id'):rows'{}' do
 			pr(r.id)     -- 2, 3
 		end
 
 		-- :where with explicit op is identical to implicit '=='
-		for r in db:from('post'):where('status', '==', 'published'):select('post.id id'):rows() do
+		for r in db:from('post'):where('status', '==', 'published'):select('post.id id'):rows'{}' do
 			pr(r.id)     -- 2, 3
 		end
 
@@ -214,12 +218,12 @@ Null sorts before all non-null values in ascending order.
 ]]
 	db:atomic('r', function()
 		-- posts with score >= 50
-		for r in db:from('post'):where('score', '>=', 50):select('post.id id, post.score score'):rows() do
+		for r in db:from('post'):where('score', '>=', 50):select('post.id id, post.score score'):rows'{}' do
 			pr(r.id, r.score)   -- 2  50 / 3  80
 		end
 
 		-- posts with 10 <= score <= 50
-		for r in db:from('post'):between('score', 10, 50):select('post.id id, post.score score'):rows() do
+		for r in db:from('post'):between('score', 10, 50):select('post.id id, post.score score'):rows'{}' do
 			pr(r.id, r.score)   -- 1  10 / 2  50 / 5  20
 		end
 	end)
@@ -236,7 +240,7 @@ Null sorts before non-null in ascending order.
 ]]
 	db:atomic('r', function()
 		-- only Galaxies (post 4) has no score
-		for r in db:from('post'):is_null('score'):select('post.id id'):rows() do
+		for r in db:from('post'):is_null('score'):select('post.id id'):rows'{}' do
 			pr(r.id)    -- 4
 		end
 
@@ -255,11 +259,11 @@ Set membership: :in_ / :not_in.
 Neither uses an index; both scan the whole table.
 ]]
 	db:atomic('r', function()
-		for r in db:from('post'):in_('status', {'draft', 'archived'}):select('post.id id'):rows() do
+		for r in db:from('post'):in_('status', {'draft', 'archived'}):select('post.id id'):rows'{}' do
 			pr(r.id)    -- 1, 4, 5
 		end
 
-		for r in db:from('post'):not_in('status', {'published', 'archived'}):select('post.id id'):rows() do
+		for r in db:from('post'):not_in('status', {'published', 'archived'}):select('post.id id'):rows'{}' do
 			pr(r.id)    -- 1, 5
 		end
 	end)
@@ -278,7 +282,7 @@ one of the filters and applies the rest as row-by-row checks on top.
 		for r in db:from('post')
 			:where('status', 'published')
 			:where('score', '>=', 60)
-			:select('post.id id'):rows() do
+			:select('post.id id'):rows'{}' do
 			pr(r.id)    -- 3   (score 80, published)
 		end
 
@@ -286,7 +290,7 @@ one of the filters and applies the rest as row-by-row checks on top.
 		for r in db:from('post')
 			:where('score', '>=', 10)
 			:where('score', '<=', 30)
-			:select('post.id id'):rows() do
+			:select('post.id id'):rows'{}' do
 			pr(r.id)    -- 1  5   (scores 10, 20)
 		end
 	end)
@@ -326,7 +330,7 @@ All column references in filters and select must use the alias.
 Aliases are required when the same table appears more than once in a query.
 ]]
 	db:atomic('r', function()
-		for r in db:from('post p'):where('p.status', 'published'):select('p.id id'):rows() do
+		for r in db:from('post p'):where('p.status', 'published'):select('p.id id'):rows'{}' do
 			pr(r.id)    -- 2, 3
 		end
 	end)
@@ -484,12 +488,12 @@ The child table must have an FK pointing to the driving table.
 ]]
 	db:atomic('r', function()
 		-- categories that have at least one post
-		for r in db:from('category'):where_has('post'):select('category.id id'):rows() do
+		for r in db:from('category'):where_has('post'):select('category.id id'):rows'{}' do
 			pr(r.id)    -- 1, 2
 		end
 
 		-- categories with no posts
-		for r in db:from('category'):where_hasnt('post'):select('category.id id'):rows() do
+		for r in db:from('category'):where_hasnt('post'):select('category.id id'):rows'{}' do
 			pr(r.id)    -- 3
 		end
 	end)
@@ -510,7 +514,7 @@ kept when at least one inner row matches.
 		for r in db:from('category'):where_has('post', function(o)
 			return db:from('post')
 				:where('category', o'category.id'):where('status', 'published')
-		end):select('category.id id'):rows() do
+		end):select('category.id id'):rows'{}' do
 			pr(r.id)    -- 1, 2
 		end
 	end)
@@ -559,7 +563,7 @@ Use a from alias when the inner and outer queries use the same table name.
 					:where('category', mdbx_outer'c.id')
 					:where('status', 'published'))
 			:select('category.id id')
-			:rows() do
+			:rows'{}' do
 			pr(r.id)    -- 1, 2
 		end
 	end)
@@ -583,7 +587,7 @@ make mdbx_outer ambiguous.
 					:where('status', 'published')
 			end)
 			:select('category.id id')
-			:rows() do
+			:rows'{}' do
 			pr(r.id)    -- 1, 2
 		end
 	end)
@@ -604,7 +608,7 @@ Both correlated and uncorrelated forms work the same as :where_exists.
 					:where('category', mdbx_outer'c.id')
 					:where('status', 'published'))
 			:select('category.id id')
-			:rows() do
+			:rows'{}' do
 			pr(r.id)    -- 3   (art has no published posts)
 		end
 	end)
@@ -774,7 +778,7 @@ Index names are generated from the schema as 'table/col1,col2'.
 			:where('category', 1)
 			:use_index('post', 'post/category')
 			:select('post.id id')
-			:rows() do
+			:rows'{}' do
 			pr(r.id)    -- 1, 2
 		end
 

@@ -185,7 +185,7 @@ streaming (single pass, no memory). Otherwise it falls back to a hash
 table keyed by the group key. `having()` then filters finished groups.
 
 **13. Select / distinct / sort / limit**
-`select()` turns the row into named output fields. `distinct()` removes
+`select()` turns the row into an array of output values. `distinct()` removes
 duplicates — streaming (adjacent-only) when the scan order already
 groups equal rows together, hash-set otherwise. Sorting only happens if
 the chosen scan order doesn't already satisfy `order_by()` — this is the
@@ -202,7 +202,9 @@ mechanism as a fast way to unwind out of the nested closures from stage
 thin wrappers that differ mainly in how many rows they ask for (1 for
 `first()`, 2 for `one()`/`must_one()` — just enough to detect "more than
 one exists" without reading everything) and whether they need decoded
-output rows at all (`count()`/`exists()` often don't).
+output rows at all (`count()`/`exists()` often don't). `rows_array()`
+exposes the materialized array rows directly; the other row terminals can
+return unpacked values, arrays, or named tables.
 
 That's the whole arc: describe the query as data -> resolve every name
 -> classify what each condition can prove -> pick one scan strategy per
@@ -214,6 +216,32 @@ Note: the module header's own "IMPLEMENTATION PLAN" section (stages 1-9
 in the doc comment at the top of the file) is a design sketch, not a
 literal map of the code. In the real code, stages 3-8 above all happen
 inside one call to `compile()`, not as separate passes.
+
+## Implementation abstractions
+
+- table spec
+	- .table + .alias
+- source
+	- exposes .member and .fields after source resolution
+	- can refer to a table or an aliased relation
+	- .fields maps field names to schema fields or returned-field indexes
+- members list (rel.members)
+	- the flat symbol table used by q.col() to solve col refs
+- fragment
+	- unaliased relation to be used as the right side of a join
+	- useful for grouping joins (it matters for left join)
+	- its .members are merged into rel.members
+	- its .wheres are merged into the join's `on` condition
+- fact
+	- a classified `where` condition that might be answerable by an index
+	- .kind: equality, range, prefix, membership, existence, or null
+- residual row check
+	- a condition evaluated after all source members it reads are available
+- terminal
+	- a public operation that chooses how the relation is executed and returned
+- executor
+	- the runtime closure chain that scans members and emits row contexts
+
 
 ## Deep dives
 

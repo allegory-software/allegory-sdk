@@ -4,7 +4,7 @@
 	Written by Cosmin Apreutsei. Public Domain.
 
 FEATURES
-	- scalars: 8, 16, 32, 64 bit int, signed/unsigned; 32 and 64 bit floats, bool.
+	- scalars: 8, 16, 32 bit int signed/unsigned; 32 and 64 bit floats; bool.
 	- arrays: fixed-size (zero-padded) and variable-size.
 	- table/index keys: composite, with per-field ascending/descending order.
 	- null support (nulls come first in keys).
