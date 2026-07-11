@@ -107,14 +107,14 @@ end
 
 local function create_reference_tables(db, n_tags)
 	db:create_table('author', {fields = {
-		{col = 'id'    , mdbx_type = 'u64' , not_null = true},
+		{col = 'id'    , mdbx_type = 'u32' , not_null = true},
 		{col = 'name'  , mdbx_type = 'utf8', maxlen = 64, nozero = true, not_null = true},
 		{col = 'status', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
 	}, pk = {'id'}})
 	db:add_index('author', {'status'})
 
 	db:create_table('category', {fields = {
-		{col = 'id'  , mdbx_type = 'u64' , not_null = true},
+		{col = 'id'  , mdbx_type = 'u32' , not_null = true},
 		{col = 'slug', mdbx_type = 'utf8', maxlen = 32, nozero = true, not_null = true},
 		{col = 'name', mdbx_type = 'utf8', maxlen = 64, nozero = true, not_null = true},
 	}, pk = {'id'}})
@@ -122,7 +122,7 @@ local function create_reference_tables(db, n_tags)
 
 	if n_tags then
 		db:create_table('tag', {fields = {
-			{col = 'id'  , mdbx_type = 'u64' , not_null = true},
+			{col = 'id'  , mdbx_type = 'u32' , not_null = true},
 			{col = 'name', mdbx_type = 'utf8', maxlen = 32, nozero = true, not_null = true},
 		}, pk = {'id'}})
 		db:add_index('tag', {'name', is_unique = true})
@@ -131,12 +131,12 @@ end
 
 local function create_post_table(db)
 	db:create_table('post', {fields = {
-		{col = 'id'         , mdbx_type = 'u64' , not_null = true},
-		{col = 'author_id'  , mdbx_type = 'u64' , not_null = true},
-		{col = 'category_id', mdbx_type = 'u64' , not_null = true},
+		{col = 'id'         , mdbx_type = 'u32' , not_null = true},
+		{col = 'author_id'  , mdbx_type = 'u32' , not_null = true},
+		{col = 'category_id', mdbx_type = 'u32' , not_null = true},
 		{col = 'status'     , mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true},
-		{col = 'ctime'      , mdbx_type = 'i64' , not_null = true},
-		{col = 'score'      , mdbx_type = 'i64' },
+		{col = 'ctime'      , mdbx_type = 'i32' , not_null = true},
+		{col = 'score'      , mdbx_type = 'i32' },
 		{col = 'title'      , mdbx_type = 'utf8', maxlen = 128, nozero = true, not_null = true},
 	}, pk = {'id'}})
 end
@@ -158,8 +158,8 @@ end
 
 local function create_tag_link_table(db)
 	db:create_table('post_tag', {fields = {
-		{col = 'post_id', mdbx_type = 'u64', not_null = true},
-		{col = 'tag_id' , mdbx_type = 'u64', not_null = true},
+		{col = 'post_id', mdbx_type = 'u32', not_null = true},
+		{col = 'tag_id' , mdbx_type = 'u32', not_null = true},
 	}, pk = {'post_id', 'tag_id'}})
 	db:add_fk{table = 'post_tag', cols = {'post_id'},
 		ref_table = 'post', ref_cols = {'id'}}
@@ -467,7 +467,7 @@ local function run_query_benchmarks(db)
 	end)
 
 	printf_line('')
-	printf_line('join / set-op strategy comparison (author <-> post, u64 ids)')
+	printf_line('join / set-op strategy comparison (author <-> post, u32 ids)')
 	bench_join_sweep(db, 'author->post', 'author', 'post/author_id', N_AUTHORS)
 	bench_parent_lookup_sweep(db, 'post->author', 'author', 'post/author_id', N_AUTHORS)
 	bench_except_sweep(db, 'author w/o post', 'author', 'post/author_id', N_AUTHORS)
@@ -613,12 +613,12 @@ local function create_strategy_db()
 	db:begin'w'
 
 	db:create_table('lp', {fields = {
-		{col = 'id', mdbx_type = 'u64', not_null = true},
+		{col = 'id', mdbx_type = 'u32', not_null = true},
 	}, pk = {'id'}})
 	local function make_lc(name)
 		db:create_table(name, {fields = {
-			{col = 'id', mdbx_type = 'u64', not_null = true},
-			{col = 'parent_id', mdbx_type = 'u64', not_null = true},
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'parent_id', mdbx_type = 'u32', not_null = true},
 		}, pk = {'id'}})
 		db:add_index(name, {'parent_id'})
 		db:add_fk{table = name, cols = {'parent_id'},
@@ -629,12 +629,12 @@ local function create_strategy_db()
 	make_lc('lc_none')
 
 	db:create_table('p', {fields = {
-		{col = 'id', mdbx_type = 'u64', not_null = true},
+		{col = 'id', mdbx_type = 'u32', not_null = true},
 	}, pk = {'id'}})
 	local function make_pc(name)
 		db:create_table(name, {fields = {
-			{col = 'id', mdbx_type = 'u64', not_null = true},
-			{col = 'parent_id', mdbx_type = 'u64', not_null = true},
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'parent_id', mdbx_type = 'u32', not_null = true},
 		}, pk = {'id'}})
 		db:add_index(name, {'parent_id'})
 		db:add_fk{table = name, cols = {'parent_id'},
@@ -644,16 +644,16 @@ local function create_strategy_db()
 	make_pc('c2')
 
 	db:create_table('gx', {fields = {
-		{col = 'id', mdbx_type = 'u64', not_null = true},
-		{col = 'a' , mdbx_type = 'u64', not_null = true},
-		{col = 'b' , mdbx_type = 'u64', not_null = true},
+		{col = 'id', mdbx_type = 'u32', not_null = true},
+		{col = 'a' , mdbx_type = 'u32', not_null = true},
+		{col = 'b' , mdbx_type = 'u32', not_null = true},
 	}, pk = {'id'}})
 	db:add_index('gx', {'a', 'b'})
 
 	local function make_tix(name)
 		db:create_table(name, {fields = {
-			{col = 'id', mdbx_type = 'u64', not_null = true},
-			{col = 'k' , mdbx_type = 'u64', not_null = true},
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'k' , mdbx_type = 'u32', not_null = true},
 		}, pk = {'id'}})
 		db:add_index(name, {'k'})
 	end
@@ -664,7 +664,7 @@ local function create_strategy_db()
 	-- fallback case (no index to seek), for bench_unindexed_exists below.
 	local function make_uc(name)
 		db:create_table(name, {fields = {
-			{col = 'id', mdbx_type = 'u64', not_null = true},
+			{col = 'id', mdbx_type = 'u32', not_null = true},
 			{col = 'k' , mdbx_type = 'u32', not_null = true},
 		}, pk = {'id'}})
 	end
@@ -743,8 +743,8 @@ local function create_strategy_db()
 	fill_uc('uc_big', N_UC_BIG)
 
 	db:create_table('dfx', {fields = {
-		{col = 'id', mdbx_type = 'u64', not_null = true},
-		{col = 'k' , mdbx_type = 'u64', not_null = true},
+		{col = 'id', mdbx_type = 'u32', not_null = true},
+		{col = 'k' , mdbx_type = 'u32', not_null = true},
 	}, pk = {'id'}})
 	db:add_index('dfx', {'k'})
 	local nid = 1
@@ -944,7 +944,7 @@ local function bench_dupfixed_bulk_read(db)
 					v_o = 0
 				end
 				n = n + 1
-				v_o = v_o + 8  -- 8 = sizeof(u64 pk)
+				v_o = v_o + 4  -- 4 = sizeof(u32 pk)
 			end
 		end
 		return n
@@ -1013,7 +1013,7 @@ increasing unindexed table sizes.
 
 pk_join_hash (.unused/mdbx_query_nodes_unused.lua) already tried an
 O(n+m) hash vs O(n log m) pk_join_seek and never won, at any driver
-fraction, u64 or u32 keys. That was hash vs an already-indexed seek
+fraction, with u32 keys. That was hash vs an already-indexed seek
 though -- this targets the worse baseline (O(m) unindexed rescan, not
 O(log m)) that's the actual reason this comparison is being run again.
 

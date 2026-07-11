@@ -107,8 +107,8 @@ local function bench_op(name, fn)
 end
 
 --[[
-dfx: one indexed key (k, u64) with many dups per key, fixed-size dup
-values (a plain u64 PK) -- DUPFIXED-eligible, so compile_scan's
+dfx: one indexed key (k, u32) with many dups per key, fixed-size dup
+values (a plain u32 PK) -- DUPFIXED-eligible, so compile_scan's
 'exact' plan kind walks it via find_multiple_raw/next_multiple_raw
 (bulk) instead of one MDBX_NEXT_DUP-equivalent call per row.
 ]]
@@ -120,8 +120,8 @@ local function create_dfx_db()
 	local db = mdbx_open(file)
 	db:begin'w'
 	db:create_table('dfx', {fields = {
-		{col = 'id', mdbx_type = 'u64', not_null = true},
-		{col = 'k' , mdbx_type = 'u64', not_null = true},
+		{col = 'id', mdbx_type = 'u32', not_null = true},
+		{col = 'k' , mdbx_type = 'u32', not_null = true},
 	}, pk = {'id'}})
 	db:add_index('dfx', {'k'})
 	local nid = 1

@@ -2710,16 +2710,14 @@ function Db.hash_distinct:__call(db, input, fields)
 			if not input:next_group() then return end
 			local rec = input:row()
 			-- for 1-col keys use the value directly; tuples() for multi-col.
-			-- int64key: a decoded int64/uint64 value doesn't hash correctly
-			-- as a raw table/tuple key (see glue.lua int64key).
 			local t
 			if nfields == 1 then
 				local v = rec[fields[1]]
-				t = int64key(v ~= nil and v or null)
+				t = v ~= nil and v or null
 			else
 				for i = 1, nfields do
 					local v = rec[fields[i]]
-					vals[i] = int64key(v ~= nil and v or null)
+					vals[i] = v ~= nil and v or null
 				end
 				t = tuple_space(unpack(vals, 1, nfields))
 			end
@@ -3148,9 +3146,7 @@ function Db.hash_aggregate:__call(db, input, fields, agg)
 			if fields then
 				for i = 1, nfields do
 					local v = rec[fields[i]]; if v == nil then v = null end
-					-- int64key: a decoded int64/uint64 value doesn't hash
-					-- correctly as a raw tuple key (see glue.lua int64key).
-					key[i] = v; vals[i] = int64key(v)
+					key[i] = v; vals[i] = v
 				end
 				t = tuple_space(unpack(vals, 1, nfields))
 			else
@@ -3256,10 +3252,8 @@ function Db.union_distinct:__call(db, ...)
 				if not key_list then
 					key_list = keys(rec, true)
 				end
-				-- int64key: a decoded int64/uint64 value doesn't hash correctly
-				-- as a raw tuple key (see glue.lua int64key).
 				local vals = {}
-				for _, k in ipairs(key_list) do vals[#vals+1] = int64key(rec[k]) end
+				for _, k in ipairs(key_list) do vals[#vals+1] = rec[k] end
 				local t = tuple_space(unpack(vals))
 				if not seen[t] then seen[t] = true; return true end
 			else

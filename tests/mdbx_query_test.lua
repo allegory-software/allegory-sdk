@@ -32,10 +32,10 @@ local function with_db(build, name, fn)
 end
 
 --collect one field from every row, in scan order; numeric=true converts
---cdata ints (u64 etc.) to plain Lua numbers for comparison.
+--decoded numeric cdata to plain Lua numbers for comparison.
 local function vals(rel, params, field, numeric)
 	local t = {} --{val...}
-	for row in rel:rows(params) do
+	for row in rel:rows('{}', params) do
 		local v = row[field]
 		t[#t + 1] = numeric and tonumber(v) or v
 	end
@@ -63,7 +63,7 @@ end
 local function build_core(db)
 	db:begin'w'
 	db:create_table('item', {fields = {
-		{col = 'id',    mdbx_type = 'u64',  not_null = true},
+		{col = 'id',    mdbx_type = 'u32',  not_null = true},
 		{col = 'cat',   mdbx_type = 'utf8', maxlen = 4, nozero = true, not_null = true},
 		{col = 'score', mdbx_type = 'i32'},
 		{col = 'label', mdbx_type = 'utf8', maxlen = 16, nozero = true},
@@ -73,15 +73,15 @@ local function build_core(db)
 	db:add_index('item', {'cat', 'label'})
 
 	db:create_table('tag', {fields = {
-		{col = 'tag_id',  mdbx_type = 'u64', not_null = true},
-		{col = 'item_id', mdbx_type = 'u64'},
+		{col = 'tag_id',  mdbx_type = 'u32', not_null = true},
+		{col = 'item_id', mdbx_type = 'u32'},
 		{col = 'name',    mdbx_type = 'utf8', maxlen = 8, nozero = true},
 	}, pk = {'tag_id'}})
 
 	db:create_table('note', {fields = {
-		{col = 'note_id', mdbx_type = 'u64', not_null = true},
-		{col = 'item_id', mdbx_type = 'u64'},
-		{col = 'tag_id',  mdbx_type = 'u64'},
+		{col = 'note_id', mdbx_type = 'u32', not_null = true},
+		{col = 'item_id', mdbx_type = 'u32'},
+		{col = 'tag_id',  mdbx_type = 'u32'},
 		{col = 'body',    mdbx_type = 'utf8', maxlen = 8, nozero = true},
 	}, pk = {'note_id'}})
 
@@ -288,7 +288,7 @@ end
 local function build_word(db)
 	db:begin'w'
 	db:create_table('word', {fields = {
-		{col = 'id',   mdbx_type = 'u64',  not_null = true},
+		{col = 'id',   mdbx_type = 'u32',  not_null = true},
 		{col = 'text', mdbx_type = 'utf8', maxlen = 16, nozero = true, not_null = true,
 			mdbx_collation = 'utf8_ai_ci'},
 	}, pk = {'id'}})
@@ -509,7 +509,7 @@ local function build_gitem(db)
 	db:begin'w'
 	db:create_table('gitem', {fields = {
 		{col = 'cat', mdbx_type = 'utf8', maxlen = 4, nozero = true, not_null = true},
-		{col = 'id',  mdbx_type = 'u64',  not_null = true},
+		{col = 'id',  mdbx_type = 'u32',  not_null = true},
 		{col = 'val', mdbx_type = 'i32',  not_null = true},
 	}, pk = {'cat', 'id'}})
 	local rows = {
@@ -604,7 +604,7 @@ end
 local function build_desc(db)
 	db:begin'w'
 	db:create_table('desc_item', {fields = {
-		{col = 'id',  mdbx_type = 'u64', not_null = true},
+		{col = 'id',  mdbx_type = 'u32', not_null = true},
 		{col = 'val', mdbx_type = 'i32', not_null = true},
 	}, pk = {'id', desc = {true}}})
 	db:insert('desc_item', '{}', {id = 1, val = 100})

@@ -67,17 +67,17 @@ end
 local function build_fixture(db)
 	db:begin'w'
 	db:create_table('users', {fields = {
-		{col = 'id'    , mdbx_type = 'u64', not_null = true},
+		{col = 'id'    , mdbx_type = 'u32', not_null = true},
 		{col = 'status', mdbx_type = 'utf8', maxlen = 16, nozero = true},
-		{col = 'score' , mdbx_type = 'i64'},
+		{col = 'score' , mdbx_type = 'i32'},
 	}, pk = {'id'}})
 	db:add_index('users', {'status'})
 	db:add_index('users', {'score'})
 
 	db:create_table('sessions', {fields = {
-		{col = 'id'        , mdbx_type = 'u64', not_null = true},
-		{col = 'user_id'   , mdbx_type = 'u64', not_null = true},
-		{col = 'started_at', mdbx_type = 'i64', not_null = true},
+		{col = 'id'        , mdbx_type = 'u32', not_null = true},
+		{col = 'user_id'   , mdbx_type = 'u32', not_null = true},
+		{col = 'started_at', mdbx_type = 'i32', not_null = true},
 	}, pk = {'id'}})
 	db:add_index('sessions', {'user_id'})
 	db:add_index('sessions', {'started_at'})
@@ -86,8 +86,8 @@ local function build_fixture(db)
 		ref_table = 'users', ref_cols = {'id'}}
 
 	db:create_table('events', {fields = {
-		{col = 'id'        , mdbx_type = 'u64', not_null = true},
-		{col = 'session_id', mdbx_type = 'u64', not_null = true},
+		{col = 'id'        , mdbx_type = 'u32', not_null = true},
+		{col = 'session_id', mdbx_type = 'u32', not_null = true},
 		{col = 'kind'      , mdbx_type = 'utf8', maxlen = 16, nozero = true},
 	}, pk = {'id'}})
 	db:add_index('events', {'session_id'})
@@ -638,10 +638,10 @@ function test.pk_range_bound_exec()
 		--inclusive '<=' hi must get right despite the trailing column.
 		db:begin'w'
 		db:create_table('items', {fields = {
-			{col = 'id', mdbx_type = 'u64', not_null = true},
+			{col = 'id', mdbx_type = 'u32', not_null = true},
 			{col = 'cat', mdbx_type = 'utf8', maxlen = 8, nozero = true, not_null = true},
 			{col = 'score', mdbx_type = 'i32', not_null = true},
-			{col = 'extra', mdbx_type = 'u64', not_null = true},
+			{col = 'extra', mdbx_type = 'u32', not_null = true},
 		}, pk = {'id'}})
 		db:add_index('items', {'cat', 'score', 'extra'})
 		local items = {

@@ -10,7 +10,7 @@
 	of structured values.
 
 	Data types:
-		- ints: 8, 16, 32, 64 bit, signed/unsigned
+		- ints: 8, 16, 32 bit, signed/unsigned
 		- floats: 32 and 64 bit
 		- arrays: fixed-size and variable-size
 		- nullable keys and values
@@ -35,7 +35,6 @@
 typedef int8_t   i8;
 typedef int16_t  i16;
 typedef int32_t  i32;
-typedef int64_t  i64;
 typedef uint8_t  bool8;
 typedef uint8_t  u8;
 typedef uint16_t u16;
@@ -54,13 +53,9 @@ typedef enum schema_col_type {
 	schema_col_type_i8,
 	schema_col_type_i16,
 	schema_col_type_i32,
-	schema_col_type_i64,
 	schema_col_type_u8,
 	schema_col_type_u16,
 	schema_col_type_u32,
-	schema_col_type_u64,
-	schema_col_type_u32_le,
-	schema_col_type_u64_le,
 	schema_col_type_f32,
 	schema_col_type_f64,
 } schema_col_type;
@@ -180,14 +175,6 @@ static void encode_u32(u32* d, u32* s, int len) {
 	while (len--)
 		*d++ = __builtin_bswap32(*s++);
 }
-static void decode_u64(u64* d, u64* s, int len) {
-	while (len--)
-		*d++ = __builtin_bswap64(*s++);
-}
-static void encode_u64(u64* d, u64* s, int len) {
-	while (len--)
-		*d++ = __builtin_bswap64(*s++);
-}
 static void decode_i8(u8* d, u8* s, int len) {
 	while (len--)
 		*d++ = *s++ ^ 0x80;
@@ -211,14 +198,6 @@ static void decode_i32(u32* d, u32* s, int len) {
 static void encode_i32(u32* d, u32* s, int len) {
 	while (len--)
 		*d++ = __builtin_bswap32(*s++ ^ 0x80000000);
-}
-static void decode_i64(u64* d, u64* s, int len) {
-	while (len--)
-		*d++ = __builtin_bswap64(*s++) ^ 0x8000000000000000ULL;
-}
-static void encode_i64(u64* d, u64* s, int len) {
-	while (len--)
-		*d++ = __builtin_bswap64(*s++ ^ 0x8000000000000000ULL);
 }
 static void decode_f32(u32* d, u32* s, int len) {
 	while (len--) {
@@ -254,12 +233,9 @@ static encdec_t decoders[] = {
 	(encdec_t)&decode_i8,
 	(encdec_t)&decode_i16,
 	(encdec_t)&decode_i32,
-	(encdec_t)&decode_i64,
 	(encdec_t)(0),
 	(encdec_t)&decode_u16,
 	(encdec_t)&decode_u32,
-	(encdec_t)&decode_u64,
-	(encdec_t)(0),
 	(encdec_t)(0),
 	(encdec_t)&decode_f32,
 	(encdec_t)&decode_f64,
@@ -270,12 +246,9 @@ static encdec_t encoders[] = {
 	(encdec_t)&encode_i8,
 	(encdec_t)&encode_i16,
 	(encdec_t)&encode_i32,
-	(encdec_t)&encode_i64,
 	(encdec_t)(0),
 	(encdec_t)&encode_u16,
 	(encdec_t)&encode_u32,
-	(encdec_t)&encode_u64,
-	(encdec_t)(0),
 	(encdec_t)(0),
 	(encdec_t)&encode_f32,
 	(encdec_t)&encode_f64,

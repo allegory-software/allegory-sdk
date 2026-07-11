@@ -833,14 +833,12 @@ local function mk_pkfn(db, f)
 			return lo_fn(g, params[lo_pn]) and hi_fn(g, params[hi_pn])
 		end
 	elseif k == 'in' or k == 'nin' then
-		-- int64key: a decoded int64/uint64 value doesn't hash correctly as
-		-- a raw table key (see glue.lua int64key).
 		local lut = {}
-		for _, v in ipairs(f.set) do lut[int64key(v)] = true end
+		for _, v in ipairs(f.set) do lut[v] = true end
 		if k == 'in' then
-			return function(node) return lut[int64key(node:col(sn, col))] ~= nil end
+			return function(node) return lut[node:col(sn, col)] ~= nil end
 		else
-			return function(node) return lut[int64key(node:col(sn, col))] == nil end
+			return function(node) return lut[node:col(sn, col)] == nil end
 		end
 	elseif k == 'starts' then
 		local pname = f.prefix

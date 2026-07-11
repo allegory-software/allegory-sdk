@@ -154,11 +154,9 @@ local num_vals = {
 	u8  = {0, 1, 2, 0xff},
 	u16 = {0, 1, 2, 0xffff},
 	u32 = {0, 1, 2, 0xffffffff},
-	u64 = {0ULL, 1, 2, 0xffffffffffffffffULL},
 	i8  = {-128, -2, -1, 0, 1, 2, 127},
 	i16 = {-32768, -2, -1, 0, 1, 2, 32767},
 	i32 = {-2147483648, -2, -1, 0, 1, 2, 2147483647},
-	i64 = {cast('int64_t', 0x8000000000000000ULL), -2, -1, 0, 1, 2, 0x7fffffffffffffffLL},
 	f32 = {cast('float', -1e9), -2, -1, cast('float', -0.5), 0, cast('float', 0.5), 1, 2, cast('float', 1e9)},
 	f64 = {-1e15, -2, -1, -0.5, 0, 0.5, 1, 2, 1e15},
 }
@@ -168,7 +166,7 @@ local num_vals = {
 function test.numeric_keys_and_values()
 	with_db('numeric_keys_and_values', function(db)
 		db:begin'w'
-		for typ in words'u8 u16 u32 u64 i8 i16 i32 i64 f32 f64' do
+		for typ in words'u8 u16 u32 i8 i16 i32 f32 f64' do
 			local ct = ctype(typ)
 			local vals = imap(num_vals[typ], function(v) return ct(v) end)
 			for order in words'asc desc' do
@@ -344,7 +342,7 @@ function test.padded_array_value()
 		db:create_table('t', {
 			name = 't',
 			fields = {
-				{col = 'id', mdbx_type = 'u64', not_null = true},
+				{col = 'id', mdbx_type = 'u32', not_null = true},
 				{col = 's1', mdbx_type = 'utf8', maxlen = 8},
 				{col = 'a' , mdbx_type = 'u8'  , maxlen = 4, padded = true},
 				{col = 's2', mdbx_type = 'utf8', maxlen = 8},
@@ -628,7 +626,7 @@ function test.reopen_roundtrip()
 		db:create_table('t', {
 			name = 't',
 			fields = {
-				{col = 'id' , mdbx_type = 'u64', not_null = true},
+				{col = 'id' , mdbx_type = 'u32', not_null = true},
 				{col = 'num', mdbx_type = 'i32'},
 				{col = 'a'  , mdbx_type = 'u8'  , maxlen = 3, padded = true},
 				{col = 's'  , mdbx_type = 'utf8', maxlen = 16},
@@ -4596,14 +4594,14 @@ function test.alter_table_rewrites_keys()
 	with_db_reopen('alter_table_rewrites_keys', function(db)
 		db:begin'w'
 		db:create_table('t', {name = 't', fields = {
-			{col = 'id', mdbx_type = 'u32', not_null = true,
+			{col = 'id', mdbx_type = 'u16', not_null = true,
 				auto_increment = true},
 			{col = 'v' , mdbx_type = 'u32'},
 		}, pk = {'id'}})
 		local id0 = num(db:insert('t', '{}', {v = 10}))
 		local id1 = num(db:insert('t', '{}', {v = 20}))
 		db:alter_table('t', {name = 't', fields = {
-			{col = 'id', mdbx_type = 'u64', not_null = true,
+			{col = 'id', mdbx_type = 'u32', not_null = true,
 				auto_increment = true},
 			{col = 'v' , mdbx_type = 'u32'},
 		}, pk = {'id'}})
@@ -4615,7 +4613,7 @@ function test.alter_table_rewrites_keys()
 	end, function(db)
 		db:begin'r'
 		local _, schema = db:dbi_schema't'
-		assert(schema.fields.id.mdbx_type == 'u64')
+		assert(schema.fields.id.mdbx_type == 'u32')
 		assert(num(db:find('t', 'v', 0)) == 10)
 		assert(num(db:find('t', 'v', 1)) == 20)
 		assert(num(db:find('t', 'v', 2)) == 30)
@@ -4691,15 +4689,15 @@ function test.alter_table_refuses_dependencies()
 		refused('child', {name = 'child', fields = {
 			{col = 'id' , mdbx_type = 'u32', not_null = true},
 			{col = 'pid', mdbx_type = 'u32', not_null = true},
-			{col = 'tag', mdbx_type = 'u64', not_null = true},
+			{col = 'tag', mdbx_type = 'u16', not_null = true},
 		}, pk = {'id'}}, 'tag')
 		refused('child', {name = 'child', fields = {
 			{col = 'id' , mdbx_type = 'u32', not_null = true},
-			{col = 'pid', mdbx_type = 'u64', not_null = true},
+			{col = 'pid', mdbx_type = 'u16', not_null = true},
 			{col = 'tag', mdbx_type = 'u32', not_null = true},
 		}, pk = {'id'}}, 'pid')
 		refused('parent', {name = 'parent', fields = {
-			{col = 'id', mdbx_type = 'u64', not_null = true},
+			{col = 'id', mdbx_type = 'u16', not_null = true},
 		}, pk = {'id'}}, 'id')
 		db:commit()
 	end)

@@ -13,7 +13,7 @@ end
 local function build(db, n)
 	db:begin'w'
 	db:create_table('items', {fields = {
-		{col = 'id',  mdbx_type = 'u64', not_null = true},
+		{col = 'id',  mdbx_type = 'u32', not_null = true},
 		{col = 'cat', mdbx_type = 'utf8', maxlen = 1, nozero = true},
 	}, pk = {'id'}})
 	db:add_index('items', {'cat'})

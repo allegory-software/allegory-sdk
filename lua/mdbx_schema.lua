@@ -101,7 +101,7 @@ SCHEMA SPEC (create_table, alter_table)
 	schema_spec: {
 		fields = {
 			{
-				col=name, mdbx_type='u32|i32|u64|i64|u8|i8|u16|i16|f32|f64|utf8|bool',
+				col=name, mdbx_type='u32|i32|u8|i8|u16|i16|f32|f64|utf8|bool',
 				[not_null=true], [maxlen=N], [nozero=true], [padded=true]
 			}, ...
 		},
@@ -209,12 +209,10 @@ cdef[[
 typedef int8_t   i8;
 typedef int16_t  i16;
 typedef int32_t  i32;
-typedef int64_t  i64;
 typedef uint8_t  bool8;
 typedef uint8_t  u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
-typedef uint64_t u64;
 typedef float    f32;
 typedef double   f64;
 
@@ -222,13 +220,9 @@ typedef enum schema_col_type {
 	schema_col_type_i8,
 	schema_col_type_i16,
 	schema_col_type_i32,
-	schema_col_type_i64,
 	schema_col_type_u8,
 	schema_col_type_u16,
 	schema_col_type_u32,
-	schema_col_type_u64,
-	schema_col_type_u32_le,
-	schema_col_type_u64_le,
 	schema_col_type_f32,
 	schema_col_type_f64,
 } schema_col_type;
@@ -305,11 +299,9 @@ local schema_col_types = {
 	i8     = C.schema_col_type_i8,
 	i16    = C.schema_col_type_i16,
 	i32    = C.schema_col_type_i32,
-	i64    = C.schema_col_type_i64,
 	u8     = C.schema_col_type_u8,
 	u16    = C.schema_col_type_u16,
 	u32    = C.schema_col_type_u32,
-	u64    = C.schema_col_type_u64,
 	f32    = C.schema_col_type_f32,
 	f64    = C.schema_col_type_f64,
 	utf8   = C.schema_col_type_u8,
