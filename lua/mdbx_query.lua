@@ -583,6 +583,7 @@ end
 local compile --fw. decl.
 local compile_scan --fw. decl.
 local compile_relation_scan --fw. decl.
+local compile_virtual_scan --fw. decl.
 local order_satisfied --fw. decl.
 local order_satisfied_set --fw. decl.
 local output_source_col --fw. decl.
@@ -609,11 +610,19 @@ end
 
 --table sources use mdbx_schema fields.
 --relation sources expose their returned fields.
+--virtual tables have no physical storage: their schema comes straight
+--from the paper schema, never through db:table_schema()'s live/stored
+--schema reconciliation, which only knows about real tables.
 local function resolve_source(source, db)
 	if source.kind == 'table' then
 		source.member = source.alias or source.table
-		source.schema = assertf(db:table_schema(source.table),
-			'table has no schema: %s', source.table)
+		local virtual_schema = db.schema and db.schema.tables[source.table]
+		if virtual_schema and virtual_schema.virtual then
+			source.schema = virtual_schema
+		else
+			source.schema = assertf(db:table_schema(source.table),
+				'table has no schema: %s', source.table)
+		end
 		source.fields = source.schema.fields
 	else
 		source.member = source.alias
@@ -1380,6 +1389,7 @@ MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup eligibil
 	--build each step opener once at compile time.
 	--recurse into nested left-join fragment steps.
 	--relation sources open the already-compiled inner relation instead of a cursor.
+	--virtual tables open through their schema's open/next_row/get_col/close.
 	local function prepare_scans(access_list)
 		for _, step in ipairs(access_list) do
 			if step.nested then
@@ -1388,6 +1398,8 @@ MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup eligibil
 				step.open = compile_scan(rel.db, step.plan)
 			elseif step.member.kind == 'relation' then
 				step.open = compile_relation_scan(step.member.relation)
+			elseif step.member.schema.virtual then
+				step.open = compile_virtual_scan(step.member.schema)
 			end
 		end
 	end
@@ -1817,7 +1829,9 @@ function choose_access(member, conditions, members, forced, forbidden, order_ter
 	group_terms)
 	--relation sources have no pk or index metadata here.
 	--they scan the already-compiled inner relation.
-	if member.kind ~= 'table' then
+	--virtual tables have no pk or index metadata either: no physical
+	--storage means no seek, so every condition on them stays residual.
+	if member.kind ~= 'table' or member.schema.virtual then
 		return {kind = 'full', depth = 0, dir = 'asc', is_pk = false,
 			schema = false, seek = empty, residual = conditions}
 	end
@@ -1987,6 +2001,7 @@ end
 - returns an opener for one query execution.
 - opener returns run(params, row_ctx, row_fn) and close().
 - run walks cursor rows and calls row_fn(decode_col).
+- a true row_fn result stops the scan; run returns true in turn.
 - close releases cursors.
 - cursors, buffers, and records are reused within one execution.
 - depth, hi, lo, and prefix checks compare encoded key bytes.
@@ -2100,7 +2115,7 @@ MDBX_NODUPFIXED = false --bench override, see compile_scan's walk_dups
 						--giving only 2x total speed up for the entire DUPFIXED branch.
 						pk_rec.data, pk_rec.size = bulk_rec.data + v_o, dup_fixedsize
 						v_o = v_o + dup_fixedsize
-						row_fn(decode_col)
+						if row_fn(decode_col) then return true end
 					end
 				end
 			end
@@ -2112,7 +2127,7 @@ MDBX_NODUPFIXED = false --bench override, see compile_scan's walk_dups
 					if key_rec.size < seek_sz or memcmp(key_rec.data, seek_buf, seek_sz) ~= 0 then
 						break
 					end
-					row_fn(decode_col)
+					if row_fn(decode_col) then return true end
 					ok = cur:move_raw_into(C.MDBX_NEXT, key_rec, out_rec)
 				end
 			end
@@ -2139,7 +2154,7 @@ MDBX_NODUPFIXED = false --bench override, see compile_scan's walk_dups
 						local key = ffi.string(buf, seek_sz)
 						if not seen[key] then
 							seen[key] = true
-							walk_dups(buf, seek_sz, row_fn)
+							if walk_dups(buf, seek_sz, row_fn) then return true end
 						end
 					end
 				end
@@ -2169,8 +2184,7 @@ MDBX_NODUPFIXED = false --bench override, see compile_scan's walk_dups
 				--through to it.
 				seek_sz = mdbx_encode_key_prefix(db, schema, 'get', buf,
 					MDBX_MAX_KEY_SIZE, depth, false, unpack(vals, 1, depth))
-				walk_dups(buf, seek_sz, row_fn)
-				return
+				return walk_dups(buf, seek_sz, row_fn)
 			else --range, prefix, eq_prefix
 				local bound_val = lo_fn and lo_fn(params, row_ctx)
 					or (prefix_fn and prefix_fn(params, row_ctx))
@@ -2269,7 +2283,7 @@ MDBX_NODUPFIXED = false --bench override, see compile_scan's walk_dups
 						and plan.lo.op == 'gt')
 				end
 				if passes_lo then
-					row_fn(decode_col)
+					if row_fn(decode_col) then return true end
 				end
 				ok = cur:move_raw_into(next_op, key_rec, out_rec)
 			end
@@ -2301,8 +2315,41 @@ end
 				or build_rows(nested_rel, params, row_ctx)
 			for _, row in ipairs(rows) do
 				local function decode_col(col) return row[output_fields[col].index] end
-				row_fn(decode_col)
+				if row_fn(decode_col) then return true end
 			end
+		end
+		local function close() end
+		return run, close
+	end
+end
+
+--[[
+- compile one virtual-table source/join step.
+- called once per step at compile time.
+- returns an opener for one query execution.
+- opener returns run(params, row_ctx, row_fn) and close().
+- schema.open()/next_row()/get_col()/close() are application-supplied on
+  the table's schema object; this adapts that row-at-a-time protocol to
+  the same run/close shape compile_scan/compile_relation_scan return.
+- no seek capability: run() rescans from schema.open() every call, same
+  as a joined relation re-evaluating fresh per outer driving row.
+- the outer close() is a no-op: each run() call closes its own scan, so
+  there is nothing left open across calls for close_access() to release.
+]]
+--[[local]] function compile_virtual_scan(schema)
+	assert(schema.get_col)
+	return function()
+		local function run(params, row_ctx, row_fn)
+			call(schema.open, params)
+			local stop = false
+			while schema.next_row() do
+				if row_fn(schema.get_col) then
+					stop = true
+					break
+				end
+			end
+			call(schema.close)
+			return stop
 		end
 		local function close() end
 		return run, close
@@ -2515,6 +2562,29 @@ end
 end
 
 --[[
+- true when rows with the same key values are guaranteed to come out
+  next to each other, so distinct()/group() can dedup by comparing
+  each row to the one before it instead of hashing.
+- one way that holds: the index the base scan picked already groups
+  these columns together (order_satisfied_set checks that).
+- another way, with no index needed: the columns cover the base
+  table's whole primary key. nested-loop execution visits each base
+  row once, so all of its fan-out rows come out together, no matter
+  what order the scan runs in.
+]]
+local function terms_group_consecutive(rel, terms)
+	if order_satisfied_set(terms, rel.natural_order) then return true end
+	if rel.source.kind ~= 'table' then return false end
+	local needed = {} --{col->true}
+	for _, field in ipairs(rel.source.schema.key_fields) do needed[field.col] = true end
+	for _, term in ipairs(terms) do
+		if term.member ~= rel.source.member then return false end
+		needed[term.col] = nil
+	end
+	return not next(needed)
+end
+
+--[[
 - resolve a returned output name to {member=, col=}.
 - succeeds only for plain q.col() outputs bound to source fields.
 - distinct() and order_by() use this to reuse natural scan order.
@@ -2573,6 +2643,8 @@ end
 - empty nested groups null-extend every inner member once.
 - closures are built once per execution, not once per driver row.
 - row_ctx is mutated in place during one query execution.
+- a true result from next_step(), or from a step's run(), stops the
+  whole walk; every wrapper forwards it up to its own caller.
 ]]
 local function build_processors(steps, params, row_ctx, next_step)
 	local rest = next_step
@@ -2584,16 +2656,16 @@ local function build_processors(steps, params, row_ctx, next_step)
 			local members = step_members(step)
 			local nested_start = build_processors(step.nested, params, row_ctx, function()
 				found = true
-				this_rest()
+				return this_rest()
 			end)
 			rest = function()
 				found = false
-				nested_start()
+				if nested_start() then return true end
 				if not found then
 					for _, member in ipairs(members) do
 						row_ctx[member] = nil_decode
 					end
-					this_rest()
+					return this_rest()
 				end
 			end
 		else
@@ -2606,26 +2678,21 @@ local function build_processors(steps, params, row_ctx, next_step)
 					if not eval_residual(cond.expr, params, row_ctx) then return end
 				end
 				found = true
-				this_rest()
+				return this_rest()
 			end
 			local is_left = step.join and step.join.kind == 'left_join'
 			rest = function()
 				found = false
-				step.run(params, row_ctx, on_match)
+				if step.run(params, row_ctx, on_match) then return true end
 				if not found and is_left then
 					row_ctx[member] = nil_decode
-					this_rest()
+					return this_rest()
 				end
 			end
 		end
 	end
 	return rest
 end
-
---unique sentinel for early scan stop.
---rows_array() and exists() throw it after enough rows.
---run_query treats it as normal completion.
-local stop_scan = {}
 
 --[[
 - open every step cursor for one execution.
@@ -2658,16 +2725,17 @@ end
 - open every step once.
 - build the step chain once.
 - reuse cursors and buffers for every row.
-- close opened steps after normal or early exit.
+- close opened steps once the walk finishes normally or stops early.
+- on error, cursors stay owned by the enclosing transaction: its own
+  abort unbinds them, so no cleanup is needed here (see Db:atomic()).
 ]]
 local function run_query(access, params, emit, seed_row_ctx)
 	local opened = open_access(access)
 	--correlated subqueries inherit outer member decoders through row_ctx.
 	local row_ctx = seed_row_ctx and setmetatable({}, {__index = seed_row_ctx}) or {}
-	local process = build_processors(access, params, row_ctx, function() emit(row_ctx) end)
-	local ok, err = pcall(process)
+	local process = build_processors(access, params, row_ctx, function() return emit(row_ctx) end)
+	process()
 	close_access(opened)
-	if not ok and err ~= stop_scan then error(err, 0) end
 end
 
 --[[
@@ -2692,7 +2760,10 @@ local function open_exists_source(entry)
 		local members = {[source.member] = source}
 		source.exists_plan = choose_access(source, conditions, members, nil, nil)
 	end
-	local run, close = compile_scan(source.db, source.exists_plan)()
+	local opener = source.schema.virtual
+		and compile_virtual_scan(source.schema)
+		or compile_scan(source.db, source.exists_plan)
+	local run, close = opener()
 	source.exists_run = run
 	return close
 end
@@ -2705,17 +2776,14 @@ function eval_exists_source(source, params, row_ctx)
 	local found = false
 	local child_ctx = row_ctx and setmetatable({}, {__index = row_ctx}) or {}
 	local residual = source.exists_plan.residual
-	local ok, err = pcall(function()
-		source.exists_run(params, child_ctx, function(decode_col)
-			child_ctx[source.member] = decode_col
-			for _, cond in ipairs(residual) do
-				if not eval_residual(cond.expr, params, child_ctx) then return end
-			end
-			found = true
-			error(stop_scan)
-		end)
+	source.exists_run(params, child_ctx, function(decode_col)
+		child_ctx[source.member] = decode_col
+		for _, cond in ipairs(residual) do
+			if not eval_residual(cond.expr, params, child_ctx) then return end
+		end
+		found = true
+		return true
 	end)
-	if not ok and err ~= stop_scan then error(err, 0) end
 	return found
 end
 
@@ -2728,7 +2796,7 @@ local function run_filtered(rel, params, emit, seed_row_ctx)
 		for _, cond in ipairs(late_conditions) do
 			if not eval_residual(cond.expr, params, row_ctx) then return end
 		end
-		emit(row_ctx)
+		return emit(row_ctx)
 	end, seed_row_ctx)
 end
 
@@ -2951,7 +3019,8 @@ local function run_grouped(self, params, rows, seed_row_ctx)
 	- streaming needs key columns to be plain q.col() expressions.
 	- those q.col() expressions must be bound to source fields.
 	- computed key expressions require hashing.
-	- key columns must be the natural-order prefix as a set.
+	- matching rows must come out consecutively (terms_group_consecutive
+	  checks that).
 	- join fan-out stays nested inside each driver row.
 	]]
 	local key_terms, streaming = {}, true --{{member=,col=}...}
@@ -2964,7 +3033,7 @@ local function run_grouped(self, params, rows, seed_row_ctx)
 			break
 		end
 	end
-	streaming = streaming and order_satisfied_set(key_terms, self.natural_order)
+	streaming = streaming and terms_group_consecutive(self, key_terms)
 	if streaming then
 		run_grouped_streaming(self, params, rows, group_outputs, key_ids, agg_ids,
 			seed_row_ctx)
@@ -2990,7 +3059,7 @@ function eval_relation_exists(rel, params, row_ctx)
 	local found = false
 	run_filtered(rel, params, function()
 		found = true
-		error(stop_scan)
+		return true
 	end, row_ctx)
 	return found
 end
@@ -3149,12 +3218,13 @@ function build_rows(self, params, seed_row_ctx)
 		- streaming distinct removes adjacent duplicates.
 		- it applies only to plain ungrouped rows.
 		- every dedup field must be a source-column passthrough.
-		- dedup fields must cover the natural-order prefix as a set.
+		- rows with the same dedup value must come out consecutively
+		  (terms_group_consecutive checks that).
 		]]
 		local streaming = false
 		if not self.group_outputs then
 			local terms = returned_source_terms(self, fields)
-			streaming = terms ~= nil and order_satisfied_set(terms, self.natural_order)
+			streaming = terms ~= nil and terms_group_consecutive(self, terms)
 		end
 		if streaming then
 			local deduped = {} --{row...}
@@ -3250,7 +3320,7 @@ local function rows_array(self, params, limit, seed_row_ctx)
 	with_exists_sources(self, run_filtered, self, params, function(row_ctx)
 		local row = project_row(outputs, row_ctx)
 		add(rows, row)
-		if cap and #rows >= cap then error(stop_scan) end
+		if cap and #rows >= cap then return true end
 	end, seed_row_ctx)
 	if offset > 0 then
 		local trimmed = {} --{row...}
@@ -3394,7 +3464,7 @@ function Rel:exists(params)
 	local found = false
 	with_exists_sources(self, run_filtered, self, params, function()
 		found = true
-		error(stop_scan)
+		return true
 	end)
 	return found
 end

@@ -87,6 +87,11 @@ return function()
 
 	current_timestamp = current_timestamp_symbol
 
+	--table-level marker: place as the first entry in a table's field list.
+	--mdbx_query reads a virtual table's fields from the paper schema
+	--directly and never opens it as a physical table.
+	function virtual(self, tbl) tbl.virtual = true end
+
 	flags.hidden     = {hidden = true}
 	flags.not_null   = {not_null = true}
 	flags.autoinc    = {auto_increment = true, readonly = true}

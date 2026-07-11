@@ -1627,6 +1627,86 @@ function test.query_builder_compile_exec()
 end
 
 ------------------------------------------------------------------------------
+--FIXTURE: vitem/vtag -- vtag is a virtual table (no physical storage): its
+--rows come from a plain lua array through open()/next_row()/get_col()/close()
+--instead of a cursor.
+------------------------------------------------------------------------------
+
+local function build_virtual(db)
+	db:begin'w'
+	db:create_table('vitem', {fields = {
+		{col = 'id',   mdbx_type = 'u32',  not_null = true},
+		{col = 'name', mdbx_type = 'utf8', maxlen = 16},
+	}, pk = {'id'}})
+	local items = {
+		{id = 1, name = 'a'},
+		{id = 2, name = 'b'},
+		{id = 3, name = 'c'},
+	}
+	for _, r in ipairs(items) do db:insert('vitem', '{}', r) end
+	db:commit()
+
+	local rows = { --{id=,tag=}...: id=5 has no matching vitem row.
+		{id = 1, tag = 'x'},
+		{id = 2, tag = 'y'},
+		{id = 5, tag = 'z'},
+	}
+	local vtag = {
+		name = 'vtag',
+		virtual = true,
+		fields = {id = {col = 'id'}, tag = {col = 'tag'}},
+	}
+	local pos
+	function vtag.open(params) pos = 0 end
+	function vtag.next_row() pos = pos + 1; return rows[pos] ~= nil end
+	function vtag.get_col(col) return rows[pos][col] end
+	function vtag.close() end
+	db.schema = {tables = {vtag = vtag}}
+end
+
+------------------------------------------------------------------------------
+
+function test.virtual_table_exec()
+	with_db(build_virtual, 'virtual_table', function(db)
+		db:atomic('r', function()
+			--base source: plain scan, where() runs as a residual check since
+			--a virtual table has no index to seek.
+			check('base scan + where', sorted_vals(db:from('vtag v')
+				:where(q.eq(c'v.tag', 'x')):select{'v.id id'}, nil, 'id', true), {1})
+
+			--join a real table to the virtual one.
+			local joined = {} --{'id:name:tag'...}
+			for row in db:from('vitem i')
+				:join('vtag v', q.eq(c'i.id', c'v.id'))
+				:select{'i.id id', 'i.name name', 'v.tag tag'}
+				:order_by'i.id'
+				:rows'{}'
+			do
+				joined[#joined + 1] = tonumber(row.id)..':'..row.name..':'..row.tag
+			end
+			check('join real to virtual', joined, {'1:a:x', '2:b:y'})
+
+			--left_join: vitem row 3 has no matching vtag row, null-extends.
+			local extended = {} --{'id:tag'...}
+			for row in db:from('vitem i')
+				:left_join('vtag v', q.eq(c'i.id', c'v.id'))
+				:select{'i.id id', 'v.tag tag'}
+				:order_by'i.id'
+				:rows'{}'
+			do
+				extended[#extended + 1] = tonumber(row.id)..':'..(row.tag or 'nil')
+			end
+			check('left join null-extends', extended, {'1:x', '2:y', '3:nil'})
+
+			--bare table-spec exists() against a virtual table.
+			check('exists() on virtual table', sorted_vals(db:from('vitem i')
+				:where(q.exists('vtag v', q.eq(c'i.id', c'v.id')))
+				:select{'i.id id'}, nil, 'id', true), {1, 2})
+		end)
+	end)
+end
+
+------------------------------------------------------------------------------
 
 local name = ...
 if name == 'mdbx_query_test' then name = nil end
