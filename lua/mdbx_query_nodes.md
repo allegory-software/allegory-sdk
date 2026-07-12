@@ -86,13 +86,13 @@ across all nodes in one query. Convention: use UPPER_CASE in code to
 distinguish param names from literal values.
 
 	local node = db:pk_seek('users/status', 'S')
-	node:open({S = 'active'})
+	node:reset({S = 'active'})
 
 	local node = db:pk_range('users/score', '>=', 'LO', '<=', 'HI')
-	node:open({LO = 70, HI = 95})
+	node:reset({LO = 70, HI = 95})
 
 	local node = db:limit(db:pk_range('users'), 'N', 'OFF')
-	node:open({N = 10, OFF = 2})
+	node:reset({N = 10, OFF = 2})
 
 
 ## ACCESS NODES

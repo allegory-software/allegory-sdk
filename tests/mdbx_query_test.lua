@@ -1627,8 +1627,8 @@ function test.query_builder_compile_exec()
 end
 
 ------------------------------------------------------------------------------
---FIXTURE: vitem/vtag -- vtag is a virtual table (no physical storage): its
---rows come from a plain lua array through open()/next_row()/get_col()/close()
+--fixture: vitem/vtag -- vtag is a virtual table (no physical storage): its
+--rows come from a plain lua array through open()/reset()/next_row()/get_col()/close()
 --instead of a cursor.
 ------------------------------------------------------------------------------
 
@@ -1657,10 +1657,14 @@ local function build_virtual(db)
 		fields = {id = {col = 'id'}, tag = {col = 'tag'}},
 	}
 	local pos
-	function vtag.open(params) pos = 0 end
+	function vtag.open() vtag.open_count = (vtag.open_count or 0) + 1 end
+	function vtag.reset(params, row_ctx)
+		vtag.reset_count = (vtag.reset_count or 0) + 1
+		pos = 0
+	end
 	function vtag.next_row() pos = pos + 1; return rows[pos] ~= nil end
 	function vtag.get_col(col) return rows[pos][col] end
-	function vtag.close() end
+	function vtag.close() vtag.close_count = (vtag.close_count or 0) + 1 end
 	db.schema = {tables = {vtag = vtag}}
 end
 
@@ -1702,6 +1706,12 @@ function test.virtual_table_exec()
 			check('exists() on virtual table', sorted_vals(db:from('vitem i')
 				:where(q.exists('vtag v', q.eq(c'i.id', c'v.id')))
 				:select{'i.id id'}, nil, 'id', true), {1, 2})
+
+			local vtag = db.schema.tables.vtag
+			assert(vtag.reset_count > vtag.open_count,
+				'correlated virtual scans must reset one open instance')
+			assert(vtag.close_count == vtag.open_count,
+				'every virtual instance must close with its query execution')
 		end)
 	end)
 end

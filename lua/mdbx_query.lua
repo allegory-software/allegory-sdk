@@ -1430,7 +1430,7 @@ MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup eligibil
 	--build each step opener once at compile time.
 	--recurse into nested left-join fragment steps.
 	--relation sources open the already-compiled inner relation instead of a cursor.
-	--virtual tables open through their schema's open/next_row/get_col/close.
+	--virtual tables open once, then reset through their schema object.
 	local function prepare_scans(access_list)
 		for _, step in ipairs(access_list) do
 			if step.nested then
@@ -2477,23 +2477,20 @@ end
 - called once per step at compile time.
 - returns an opener for one query execution.
 - opener returns run(params, row_ctx, row_fn) and close().
-- schema.open()/next_row()/get_col()/close() are application-supplied on
-  the table's schema object; this adapts that row-at-a-time protocol to
+- schema.open()/reset()/next_row()/get_col()/close() are application-supplied
+  on the table's schema object; this adapts that row-at-a-time protocol to
   the same run/close shape compile_scan/compile_relation_scan return.
-- no seek capability: run() rescans from schema.open() every call, same
-  as a joined relation re-evaluating fresh per outer driving row.
-- open() gets row_ctx too, same as a nested relation's build_rows() --
-  a correlated read does row_ctx[outer_member](col) to read the outer
-  row directly, instead of relying only on a residual check after the
-  fact, so a virtual table can push the correlation into its own fetch.
-- the outer close() is a no-op: each run() call closes its own scan, so
-  there is nothing left open across calls for close_access() to release.
+- open() creates one virtual-table instance for this query execution.
+- reset() starts one scan with this call's params and outer row.
+- a correlated join reuses that instance through reset(), not open()/close().
+- close_access() closes the instance when the query execution ends.
 ]]
 --[[local]] function compile_virtual_scan(schema)
 	assert(schema.get_col)
 	return function()
+		call(schema.open)
 		local function run(params, row_ctx, row_fn)
-			call(schema.open, params, row_ctx)
+			call(schema.reset, params, row_ctx)
 			local stop = false
 			while schema.next_row() do
 				if row_fn(schema.get_col) then
@@ -2501,10 +2498,9 @@ end
 					break
 				end
 			end
-			call(schema.close)
 			return stop
 		end
-		local function close() end
+		local function close() call(schema.close) end
 		return run, close
 	end
 end
@@ -3064,19 +3060,6 @@ local function hash_grouping(self, params, group_outputs, key_ids, agg_ids, rows
 end
 
 --[[
-- implement hash-based group()+having().
-- materialize one row per distinct group key.
-- finish groups after all input rows are drained.
-- works for any input order.
-]]
-local function run_grouped_hash(self, params, rows, group_outputs, key_ids, agg_ids, seed_row_ctx)
-	local accumulate_row, finish =
-		hash_grouping(self, params, group_outputs, key_ids, agg_ids, rows)
-	run_filtered(self, params, accumulate_row, seed_row_ctx)
-	finish()
-end
-
---[[
 - build a fresh accumulator for streaming group()+having(): caller proves
   scan order keeps equal group keys adjacent, so consecutive rows with
   the same key fold into the current group and no hash table or string
@@ -3125,14 +3108,6 @@ local function streaming_grouping(self, params, group_outputs, key_ids, agg_ids,
 	return accumulate_row, finish
 end
 
-local function run_grouped_streaming(self, params, rows, group_outputs, key_ids, agg_ids,
-	seed_row_ctx)
-	local accumulate_row, finish =
-		streaming_grouping(self, params, group_outputs, key_ids, agg_ids, rows)
-	run_filtered(self, params, accumulate_row, seed_row_ctx)
-	finish()
-end
-
 --[[
 - decide whether group()+having() can stream (matching adjacent scan
   order) or needs a hash pass, and split group_outputs into key vs
@@ -3168,15 +3143,23 @@ local function choose_grouping(self)
 	return group_outputs, key_ids, agg_ids, streaming
 end
 
-local function run_grouped(self, params, rows, seed_row_ctx)
+--feed grouped rows from an already-open relation scan when scan is set.
+local function run_grouped(self, params, rows, seed_row_ctx, scan)
 	local group_outputs, key_ids, agg_ids, streaming = choose_grouping(self)
+	local accumulate_row, finish
 	if streaming then
-		run_grouped_streaming(self, params, rows, group_outputs, key_ids, agg_ids,
-			seed_row_ctx)
+		accumulate_row, finish =
+			streaming_grouping(self, params, group_outputs, key_ids, agg_ids, rows)
 	else
-		run_grouped_hash(self, params, rows, group_outputs, key_ids, agg_ids,
-			seed_row_ctx)
+		accumulate_row, finish =
+			hash_grouping(self, params, group_outputs, key_ids, agg_ids, rows)
 	end
+	if scan then
+		scan(params, seed_row_ctx, accumulate_row)
+	else
+		run_filtered(self, params, accumulate_row, seed_row_ctx)
+	end
+	finish()
 end
 
 --PROJECT AND FINISH ---------------------------------------------------------
@@ -3417,52 +3400,8 @@ end
 		local row
 		local function decode_col(col) return row[output_fields[col].index] end
 
-		--materialize returned rows for one probe: project(), then
-		--group()/distinct()/sort()/limit() exactly as build_rows() does,
-		--just fed by the persistent scan() instead of a fresh one.
-		local function materialize(params, seed_row_ctx)
-			local rows = {} --{row...}
-			local sort_keys = {} --{row->{val...}}
-			local sort_needed = nested_rel.sort_needed
-			if nested_rel.group_outputs then
-				local group_outputs, key_ids, agg_ids, streaming = choose_grouping(nested_rel)
-				local accumulate_row, finish
-				if streaming then
-					accumulate_row, finish =
-						streaming_grouping(nested_rel, params, group_outputs, key_ids, agg_ids, rows)
-				else
-					accumulate_row, finish =
-						hash_grouping(nested_rel, params, group_outputs, key_ids, agg_ids, rows)
-				end
-				scan(params, seed_row_ctx, accumulate_row)
-				finish()
-				if sort_needed then
-					for _, r in ipairs(rows) do
-						local key = {} --{val...}
-						for i, term in ipairs(nested_rel.order_by_terms) do
-							key[i] = order_key(term, r, nil)
-						end
-						sort_keys[r] = key
-					end
-				end
-			else
-				local outputs = nested_rel.select_outputs
-				scan(params, seed_row_ctx, function(rc)
-					local r = project_row(outputs, rc)
-					if sort_needed then
-						local key = {} --{val...}
-						for i, term in ipairs(nested_rel.order_by_terms) do
-							key[i] = order_key(term, r, rc)
-						end
-						sort_keys[r] = key
-					end
-					add(rows, r)
-				end)
-			end
-			return finish_rows(nested_rel, params, rows, sort_needed, sort_keys)
-		end
 		local function run(params, row_ctx_arg, row_fn)
-			for _, r in ipairs(materialize(params, row_ctx_arg)) do
+			for _, r in ipairs(build_rows(nested_rel, params, row_ctx_arg, scan)) do
 				row = r
 				if row_fn(decode_col) then return true end
 			end
@@ -3494,14 +3433,18 @@ end
 
 --MATERIALIZE AND THE PUBLIC API ---------------------------------------------
 
---materialize returned rows after filtering, grouping, distinct, sort, and limit.
-function build_rows(self, params, seed_row_ctx)
+--turn this relation's filtered rows into returned rows.
+function build_rows(self, params, seed_row_ctx, scan)
 	local rows = {} --{row...}
 	local sort_keys = {} --{row->{val...}}: only filled when an explicit sort is needed
 	local sort_needed = self.sort_needed
 
 	if self.group_outputs then
-		with_exists_sources(self, run_grouped, self, params, rows, seed_row_ctx)
+		if scan then
+			run_grouped(self, params, rows, seed_row_ctx, scan)
+		else
+			with_exists_sources(self, run_grouped, self, params, rows, seed_row_ctx)
+		end
 		if sort_needed then
 			for _, row in ipairs(rows) do
 				local key = {} --{val...}
@@ -3513,7 +3456,7 @@ function build_rows(self, params, seed_row_ctx)
 		end
 	else
 		local outputs = self.select_outputs
-		with_exists_sources(self, run_filtered, self, params, function(row_ctx)
+		local function add_row(row_ctx)
 			local row = project_row(outputs, row_ctx)
 			if sort_needed then
 				local key = {} --{val...}
@@ -3523,7 +3466,12 @@ function build_rows(self, params, seed_row_ctx)
 				sort_keys[row] = key
 			end
 			add(rows, row)
-		end, seed_row_ctx)
+		end
+		if scan then
+			scan(params, seed_row_ctx, add_row)
+		else
+			with_exists_sources(self, run_filtered, self, params, add_row, seed_row_ctx)
+		end
 	end
 
 	return finish_rows(self, params, rows, sort_needed, sort_keys)

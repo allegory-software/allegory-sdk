@@ -6,7 +6,7 @@
 API
 
 	db:<node>(args...) -> node    build a plan node (see mdbx_query_nodes.md).
-	node:open([params])           start a run; may be called again after close().
+	node:reset([params])           start a run; may be called again after close().
 	node:close()                  end a run; re-open allowed; idempotent.
 	node:explain() -> t           node metadata, no row reads.
 
@@ -23,10 +23,10 @@ PARAMS
 	be unique across all nodes in one query.
 
 		local node = db:pk_seek('users/status', 'STATUS')
-		node:open({STATUS = 'active'})
+		node:reset({STATUS = 'active'})
 
 		local node = db:pk_range('users/score', '>=', 'LO', '<=', 'HI')
-		node:open({LO = 70, HI = 95})
+		node:reset({LO = 70, HI = 95})
 
 NODE INTERFACE
 
@@ -220,7 +220,7 @@ open() installs next_group/get_pk.
 ]]
 Db.query_node = object()
 
-function Db.query_node:open(params)
+function Db.query_node:reset(params, row_ctx)
 	error(self.kind..': open not implemented yet')
 end
 Db.query_node.next_group  = noop
@@ -347,7 +347,7 @@ function Db.pk_get:__call(db, tab, ...)
 			is_open = false
 		end
 	end
-	function node:open(params)
+	function node:reset(params, row_ctx)
 		assert(not is_open, 'node already open')
 		for i, kn in ipairs(key_names) do key_vals[i] = params[kn] end
 		sz = encode_key(db, schema, 'get', nil,
@@ -465,7 +465,7 @@ function Db.pk_seek:__call(db, ix_name, ...)
 			is_open = false
 		end
 	end
-	function node:open(params)
+	function node:reset(params, row_ctx)
 		assert(not is_open, 'node already open')
 		for i, kn in ipairs(key_names) do key_vals[i] = params[kn] end
 		sz = encode_key(db, schema, 'seek', nil,
@@ -703,7 +703,7 @@ function Db.pk_range:__call(db, name, opt, ...)
 		end
 	end
 	local vals = {}
-	function node:open(params)
+	function node:reset(params, row_ctx)
 		assert(not is_open, 'node already open')
 		lo_open = lo_open_arg
 		hi_open = hi_open_arg
@@ -869,7 +869,7 @@ function Db.fk_parent_scan:__call(db, ix_name)
 			is_open = false
 		end
 	end
-	function node:open(params)
+	function node:reset(params, row_ctx)
 		assert(not is_open, 'node already open')
 		is_open = true
 		op = C.MDBX_FIRST; has_pk = nil
@@ -963,7 +963,7 @@ function Db.pk_group_first:__call(db, ix_name, ...)
 				is_open = false
 			end
 		end
-		function node:open(params)
+		function node:reset(params, row_ctx)
 			assert(not is_open, 'node already open')
 			assertf(nk >= 1 and nk < nkey,
 				'pk_group_first: %s needs 1..%d prefix column(s), got %d',
@@ -992,7 +992,7 @@ function Db.pk_group_first:__call(db, ix_name, ...)
 				is_open = false
 			end
 		end
-		function node:open(params)
+		function node:reset(params, row_ctx)
 			assert(not is_open, 'node already open')
 			is_open = true
 			has_pk = nil; base_seeked = false; op = C.MDBX_FIRST
@@ -1183,8 +1183,8 @@ function Db.merge_join:__call(db, ...)
 			end
 		end
 	end
-	function node:open(params)
-		for i = 1, n do inputs[i]:open(params) end
+	function node:reset(params, row_ctx)
+		for i = 1, n do inputs[i]:reset(params, row_ctx) end
 		yielded = false
 		for i = 1, n do mk[i] = nil; mk_sz[i] = nil end
 		if matched then for i = 1, n do matched[i] = false end end
@@ -1308,8 +1308,8 @@ function Db.merge_union:__call(db, mode, ...)
 		for i = 1, n do closures[i] = inputs[i]:compile_col(member, col) end
 		return function() return closures[cur_i]() end
 	end
-	function node:open(params)
-		for i = 1, n do inputs[i]:open(params) end
+	function node:reset(params, row_ctx)
+		for i = 1, n do inputs[i]:reset(params, row_ctx) end
 		yielded = false; cur_i = nil
 		for i = 1, n do mk[i] = nil; mk_sz[i] = nil end
 		if to_adv then for i = 1, n do to_adv[i] = false end end
@@ -1385,8 +1385,8 @@ function Db.merge_except:__call(db, a, b)
 		return a:pk(name)
 	end
 	node.compile_col = a.compile_col
-	function node:open(params)
-		a:open(params); b:open(params)
+	function node:reset(params, row_ctx)
+		a:reset(params, row_ctx); b:reset(params, row_ctx)
 		yielded = false; mk1 = nil; mk2 = nil
 		if a:next_group() then mk1, mk1_sz = a:merge_key() end
 		if b:next_group() then mk2, mk2_sz = b:merge_key() end
@@ -1577,9 +1577,9 @@ function Db.pk_join_seek:__call(db, driver, fk_name, opts)
 			if left_join then has_pair = true; return true end
 		end
 	end
-	function node:open(params)
+	function node:reset(params, row_ctx)
 		assert(not is_open, 'node already open')
-		driver:open(params)
+		driver:reset(params, row_ctx)
 		is_open = true
 		has_pair = false; has_child = false; in_match = false; child_base_seeked = false
 		parent_pk = nil; parent_pk_sz = nil
@@ -1657,8 +1657,8 @@ function Db.pk_hash_filter:__call(db, driver, set_node, mode)
 			end
 		end
 	end
-	function node:open(params)
-		set_node:open(params)
+	function node:reset(params, row_ctx)
+		set_node:reset(params, row_ctx)
 		if use_u32_set then
 			pk_set = u32_keyset()
 			while set_node:next_item() do
@@ -1674,7 +1674,7 @@ function Db.pk_hash_filter:__call(db, driver, set_node, mode)
 			end
 		end
 		set_node:close()
-		driver:open(params)
+		driver:reset(params, row_ctx)
 		has_pk = false; cur_pk = nil; cur_pk_sz = nil
 	end
 	node.next_item = node.next_group  --one driver item per step; next_pk noop
@@ -1802,9 +1802,9 @@ function Db.pk_parent_lookup:__call(db, driver, fk_name, opts)
 			if left_join then has_child = true; return true end
 		end
 	end
-	function node:open(params)
+	function node:reset(params, row_ctx)
 		assert(not is_open, 'node already open')
-		driver:open(params)
+		driver:reset(params, row_ctx)
 		is_open = true
 		for i, kf in ipairs(fk_schema.key_fields) do
 			fk_fns[i] = driver:compile_col(from_member, kf.col)
@@ -1852,9 +1852,9 @@ function Db.pk_filter:__call(db, input, fn)
 			if fn(node, cur_params) then return true end
 		end
 	end
-	function node:open(params)
+	function node:reset(params, row_ctx)
 		cur_params = params
-		input:open(params)
+		input:reset(params, row_ctx)
 		has_pk = false
 	end
 	node.next_item = node.next_group  --one input item per step; next_pk noop
@@ -1903,16 +1903,16 @@ local function make_existence_join(self, db, outer, fn, want_inner)
 			if not outer:next_item() then return end
 			has_pk = true
 			local inner, iparams = fn(outer_fn, cur_params)
-			inner:open(iparams)
+			inner:reset(iparams)
 			local has_inner = inner:next_group() ~= nil
 			inner:close()
 			if has_inner == want_inner then return true end
 			has_pk = false
 		end
 	end
-	function node:open(params)
+	function node:reset(params, row_ctx)
 		cur_params = params
-		outer:open(params)
+		outer:reset(params, row_ctx)
 		has_pk = false
 	end
 	node.next_item = node.next_group  --one outer item per step; next_pk noop
@@ -2028,16 +2028,16 @@ function Db.nested_join:__call(db, outer, fn, opts)
 				extend(members, inner.members)
 				inner_members_set = true
 			end
-			inner:open(iparams)
+			inner:reset(iparams)
 			if inner:next_group() then cur_inner = inner; return true end
 			inner:close()
 			if left then return true end -- left join: outer emitted, inner member absent
 			has_pk = false
 		end
 	end
-	function node:open(params)
+	function node:reset(params, row_ctx)
 		cur_params = params
-		outer:open(params)
+		outer:reset(params, row_ctx)
 		has_pk = false; cur_inner = nil
 	end
 	node.next_item = node.next_group  --one output item per step; next_pk noop
@@ -2089,8 +2089,8 @@ function Db.limit:__call(db, input, n, offset)
 			end
 		end
 	end
-	function node:open(params)
-		input:open(params)
+	function node:reset(params, row_ctx)
+		input:reset(params, row_ctx)
 		has_item = false; count = 0; skipped = 0
 	end
 	node.next_item = node.next_group  --one input item per step; next_pk noop
@@ -2182,8 +2182,8 @@ function Db.pk_group:__call(db, input, cols, opts)
 		if same_key() then return true end
 		peeked = true; has_current = false; return nil
 	end
-	function node:open(params)
-		input:open(params)
+	function node:reset(params, row_ctx)
+		input:reset(params, row_ctx)
 		getters = {}
 		for i, c in ipairs(cols) do getters[i] = input:compile_col(c.member, c.col) end
 		prev = {}
@@ -2247,8 +2247,8 @@ function Db.pk_project:__call(db, input, member_name)
 			end
 		end
 	end
-	function node:open(params)
-		input:open(params)
+	function node:reset(params, row_ctx)
+		input:reset(params, row_ctx)
 		has_pk = false; cur_pk = nil; cur_pk_sz = nil
 	end
 	node.next_item = node.next_group  --one projected pk per step; next_pk noop
@@ -2340,9 +2340,9 @@ function Db.pk_sort:__call(db, input)
 			end
 		end
 	end
-	function node:open(params)
+	function node:reset(params, row_ctx)
 		assert(not is_open, 'node already open')
-		input:open(params)
+		input:reset(params, row_ctx)
 		if sort_u32_pk then
 			keys = u32_keyset()
 			pk_buf = nil; offs = nil
@@ -2474,7 +2474,7 @@ function Db.pk_and_probe:__call(db, driver, ...)
 			end
 		end
 	end
-	function node:open(params)
+	function node:reset(params, row_ctx)
 		assert(not is_open, 'node already open')
 		for i, probe in ipairs(probes) do
 			local key_vals = {}
@@ -2487,7 +2487,7 @@ function Db.pk_and_probe:__call(db, driver, ...)
 			local buf = u8a(sz); copy(buf, mdbx_key_rec_buffer, sz)
 			probe.key_buf = buf; probe.key_sz = sz
 		end
-		driver:open(params)
+		driver:reset(params, row_ctx)
 		is_open = true
 		has_pk = false; cur_pk = nil; cur_pk_sz = nil
 	end
@@ -2570,7 +2570,7 @@ function Db.value_filter:__call(db, input, fn)
 			if fn(input:row(), cur_params) then return true end
 		end
 	end
-	function node:open(params) cur_params = params; input:open(params) end
+	function node:reset(params, row_ctx) cur_params = params; input:reset(params, row_ctx) end
 	return node
 end
 
@@ -2624,7 +2624,7 @@ function Db.select:__call(db, input, outputs)
 		node._row = rec
 		return true
 	end
-	function node:open(params) input:open(params) end
+	function node:reset(params, row_ctx) input:reset(params, row_ctx) end
 	return node
 end
 
@@ -2669,8 +2669,8 @@ function Db.stream_distinct:__call(db, input, fields)
 			if not same then has_prev = true; return true end
 		end
 	end
-	function node:open(params)
-		input:open(params)
+	function node:reset(params, row_ctx)
+		input:reset(params, row_ctx)
 		prev = {}; has_prev = false
 	end
 	return node
@@ -2724,8 +2724,8 @@ function Db.hash_distinct:__call(db, input, fields)
 			if not seen[t] then seen[t] = true; return true end
 		end
 	end
-	function node:open(params)
-		input:open(params)
+	function node:reset(params, row_ctx)
+		input:reset(params, row_ctx)
 		tuple_space = tuples(); seen = {}
 	end
 	return node
@@ -2874,9 +2874,9 @@ function Db.value_sort:__call(db, input, spec)
 			has_pk = true; base_seeked = false
 			return true
 		end
-		function node:open(params)
+		function node:reset(params, row_ctx)
 			assert(not is_open, 'node already open')
-			input:open(params)
+			input:reset(params, row_ctx)
 			local decoders = {}
 			for _, p in ipairs(parts) do
 				decoders[#decoders+1] = input:compile_col(p.member, p.col)
@@ -2914,8 +2914,8 @@ function Db.value_sort:__call(db, input, spec)
 			node._row = type(spec) == 'function' and recs[idx] or recs[idx].row
 			return true
 		end
-		function node:open(params)
-			input:open(params)
+		function node:reset(params, row_ctx)
+			input:reset(params, row_ctx)
 			recs = {}
 			if type(spec) == 'function' then
 				while input:next_group() do recs[#recs+1] = input:row() end
@@ -3063,8 +3063,8 @@ function Db.stream_aggregate:__call(db, input, cols, agg)
 			return true
 		end
 	end
-	function node:open(params)
-		input:open(params)
+	function node:reset(params, row_ctx)
+		input:reset(params, row_ctx)
 		if cols then
 			getters = {}
 			for i, c in ipairs(cols) do getters[i] = input:compile_col(c.member, c.col) end
@@ -3128,8 +3128,8 @@ function Db.hash_aggregate:__call(db, input, fields, agg)
 		node._row = output[idx]
 		return true
 	end
-	function node:open(params)
-		input:open(params)
+	function node:reset(params, row_ctx)
+		input:reset(params, row_ctx)
 		local group_list = {}
 		local group_map  = {}
 		local nfields = fields and #fields or 0
@@ -3208,8 +3208,8 @@ function Db.value_concat:__call(db, ...)
 			i = i + 1
 		end
 	end
-	function node:open(params)
-		for j = 1, n do inputs[j]:open(params) end
+	function node:reset(params, row_ctx)
+		for j = 1, n do inputs[j]:reset(params, row_ctx) end
 		cur_i = 1; i = 1
 	end
 	return node
@@ -3261,8 +3261,8 @@ function Db.union_distinct:__call(db, ...)
 			end
 		end
 	end
-	function node:open(params)
-		for j = 1, n do inputs[j]:open(params) end
+	function node:reset(params, row_ctx)
+		for j = 1, n do inputs[j]:reset(params, row_ctx) end
 		cur_i = 1; seen = {}; tuple_space = tuples(); key_list = nil; i = 1
 	end
 	return node

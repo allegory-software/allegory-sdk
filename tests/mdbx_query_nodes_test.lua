@@ -50,7 +50,7 @@ local function pk_id(node, name, db_or_schema)
 end
 
 local function collect_pks(node, name, schema, params)
-	node:open(params)
+	node:reset(params)
 	local t = {}
 	while node:next_group() do
 		repeat
@@ -282,7 +282,7 @@ function test.pk_seek_exec()
 			assert(pks[1] == 1 and pks[2] == 2 and pks[3] == 4, S(pks))
 			--seek missing key -> nil immediately
 			local n = db:pk_seek('users/status', 'S')
-			n:open({S='missing'})
+			n:reset({S='missing'})
 			assert(n:next_group() == nil)
 			assert(n:pk('users') == nil)
 			n:close()
@@ -295,7 +295,7 @@ function test.pk_get_exec()
 		db:atomic('r', function()
 			--existing PK returns it
 			local node = db:pk_get('users', 'K')
-			node:open({K=3})
+			node:reset({K=3})
 			assert(node:next_group() == true)
 			assert(pk_id(node, 'users', db) == 3)
 			--exhausted after one item
@@ -304,7 +304,7 @@ function test.pk_get_exec()
 			node:close()
 			--missing PK returns nil
 			local n = db:pk_get('users', 'K')
-			n:open({K=999})
+			n:reset({K=999})
 			assert(n:next_group() == nil)
 			assert(n:pk('users') == nil)
 			n:close()
@@ -337,7 +337,7 @@ function test.pk_prefix_exec()
 			assert(pks[1] == 11 and pks[2] == 12 and pks[3] == 13, S(pks))
 			--prefix user_id=3 -> no sessions (user 3 has none)
 			local n = db:pk_prefix('sessions/user_id,started_at', 'P')
-			n:open({P=3})
+			n:reset({P=3})
 			assert(n:next_group() == nil)
 			assert(n:pk('sessions') == nil)
 			n:close()
@@ -368,7 +368,7 @@ function test.pk_range_partial_prefix_exec()
 
 			assert(not pcall(function()
 				local n = db:pk_range('users/status', {prefix = 'partial'}, 'P')
-				n:open({P = nil})
+				n:reset({P = nil})
 			end))
 		end)
 	end)
@@ -417,7 +417,7 @@ function test.merge_join_exec()
 			local node = db:merge_join(
 				db:pk_range('users'),
 				db:pk_range('sessions/user_id'))
-			node:open()
+			node:reset()
 			local tuples = {}
 			while node:next_group() do
 				tuples[#tuples+1] = pk_id(node, 'users', db)..':'..pk_id(node, 'sessions', db)
@@ -428,7 +428,7 @@ function test.merge_join_exec()
 			local left = db:merge_join(
 				db:pk_range('users'),
 				db.left(db:pk_range('sessions/user_id')))
-			left:open()
+			left:reset()
 			local missing = {}
 			while left:next_group() do
 				if not left:pk('sessions') then
@@ -449,7 +449,7 @@ function test.merge_join_reset_group()
 			local node = db:merge_join(
 				db:pk_range('events/kind'),
 				db:pk_range('events/kind'))
-			node:open()
+			node:reset()
 			local lefts = {}
 			while node:next_group() do
 				lefts[#lefts+1] = pk_id(node, 'events', db)
@@ -549,7 +549,7 @@ function test.pk_join_seek_exec()
 		db:atomic('r', function()
 			-- active users (1,2,4) + their sessions; driver order preserved
 			local node = db:pk_join_seek(db:pk_seek('users/status', 'S'), 'sessions/user_id')
-			node:open({S='active'})
+			node:reset({S='active'})
 			local tuples = {}
 			while node:next_group() do
 				tuples[#tuples+1] = pk_id(node, 'users', db)..':'..pk_id(node, 'sessions', db)
@@ -559,7 +559,7 @@ function test.pk_join_seek_exec()
 			assert(cat(tuples, ',') == '1:11,1:12,1:13,2:14,4:15', S(tuples))
 			-- user with no children: user 3 has no sessions
 			local node2 = db:pk_join_seek(db:pk_get('users', 'K'), 'sessions/user_id')
-			node2:open({K=3})
+			node2:reset({K=3})
 			assert(node2:next_group() == nil)
 			node2:close()
 			-- error: driver member must match parent table
@@ -575,7 +575,7 @@ function test.pk_join_seek_nullable_fk_exec()
 		db:atomic('r', function()
 			-- narrow index on the nullable FK column itself
 			local node = db:pk_join_seek(db:pk_range('users'), 'sessions/nuser_id')
-			node:open()
+			node:reset()
 			local tuples = {}
 			while node:next_group() do
 				tuples[#tuples+1] = pk_id(node, 'users', db)..':'..pk_id(node, 'sessions', db)
@@ -586,7 +586,7 @@ function test.pk_join_seek_nullable_fk_exec()
 
 			-- wide index: nuser_id plus a trailing, non-FK column
 			local node2 = db:pk_join_seek(db:pk_range('users'), 'sessions/nuser_id,started_at')
-			node2:open()
+			node2:reset()
 			local tuples2 = {}
 			while node2:next_group() do
 				tuples2[#tuples2+1] = pk_id(node2, 'users', db)..':'..pk_id(node2, 'sessions', db)
@@ -602,7 +602,7 @@ function test.pk_parent_lookup_exec()
 		db:atomic('r', function()
 			-- all sessions -> their users; sessions in PK order 11..15
 			local node = db:pk_parent_lookup(db:pk_range('sessions'), 'sessions/user_id')
-			node:open()
+			node:reset()
 			local tuples = {}
 			while node:next_group() do
 				tuples[#tuples+1] = pk_id(node, 'sessions', db)..':'..pk_id(node, 'users', db)
@@ -613,7 +613,7 @@ function test.pk_parent_lookup_exec()
 			local node2 = db:pk_parent_lookup(
 				db:pk_prefix('sessions/user_id,started_at', 'P'),
 				'sessions/user_id')
-			node2:open({P=1})
+			node2:reset({P=1})
 			local t2 = {}
 			while node2:next_group() do
 				t2[#t2+1] = pk_id(node2, 'sessions', db)..':'..pk_id(node2, 'users', db)
@@ -623,7 +623,7 @@ function test.pk_parent_lookup_exec()
 			assert(cat(t2, ',') == '11:1,12:1,13:1', S(t2))
 			-- left join: events -> sessions (event 23 -> session 14 -> user 2; events 21,22 -> session 11)
 			local node3 = db:pk_parent_lookup(db:pk_range('events'), 'events/session_id')
-			node3:open()
+			node3:reset()
 			local t3 = {}
 			while node3:next_group() do
 				t3[#t3+1] = pk_id(node3, 'events', db)..':'..pk_id(node3, 'sessions', db)
@@ -735,7 +735,7 @@ function test.nested_join_exec()
 			end
 			local function run(driver, params)
 				local node = db:nested_join(driver, factory)
-				node:open(params)
+				node:reset(params)
 				local tuples = {}
 				while node:next_group() do
 					tuples[#tuples+1] = pk_id(node, 'users', db)..':'..pk_id(node, 'sessions', db)
@@ -751,7 +751,7 @@ function test.nested_join_exec()
 			assert(cat(t, ',') == '1:11,1:12,1:13,2:14,4:15', S(t))
 			-- members extended with inner members after first iteration
 			local node = db:nested_join(db:pk_seek('users/status', 'S'), factory)
-			node:open({S='active'})
+			node:reset({S='active'})
 			node:next_group()
 			assert(#node.members == 2 and node.members[1] == 'users' and node.members[2] == 'sessions',
 				S(node.members))
@@ -769,7 +769,7 @@ function test.nested_join_left_exec()
 			-- left join: users 3 and 5 (no sessions) are still emitted, with the
 			-- sessions member absent.
 			local node = db:nested_join(db:pk_range('users'), factory, {left = true})
-			node:open()
+			node:reset()
 			local t = {}
 			while node:next_group() do
 				local uid = pk_id(node, 'users', db)
@@ -833,7 +833,7 @@ function test.pk_group_exec()
 			-- sessions/user_id order: user 1 -> {11,12,13}, user 2 -> {14}, user 4 -> {15}
 			-- first item per group: 11, 14, 15
 			local node = db:pk_group(db:pk_range('sessions/user_id'), cols)
-			node:open()
+			node:reset()
 			local firsts = {}
 			while node:next_group() do
 				firsts[#firsts+1] = pk_id(node, 'sessions', db)
@@ -843,7 +843,7 @@ function test.pk_group_exec()
 			assert(cat(firsts, ',') == '11,14,15', S(firsts))
 			-- full group iteration via next_pk: all sessions per user group
 			node = db:pk_group(db:pk_range('sessions/user_id'), cols)
-			node:open()
+			node:reset()
 			local groups = {}
 			while node:next_group() do
 				local grp = {pk_id(node, 'sessions', db)}
@@ -951,7 +951,7 @@ function test.select_exec()
 			-- bug: decode_kv prepends key cols (id) before val cols, so select
 			-- captures id instead of the requested val col.
 			local function collect_recs(node)
-				node:open()
+				node:reset()
 				local t = {}
 				while node:next_group() do t[#t+1] = node:row() end
 				node:close()
@@ -1007,7 +1007,7 @@ function test.pk_group_first_exec()
 			-- prefix on a single-col index violates nk < nkey; errors on open.
 			assert(not pcall(function()
 				local n = db:pk_group_first('users/status', 'K')
-				n:open({K='active'})
+				n:reset({K='active'})
 			end))
 		end)
 	end)
@@ -1082,7 +1082,7 @@ function test.pk_parent_lookup_left_exec()
 		local u3_key_str
 		db:atomic('r', function()
 			local n = db:pk_get('users', 'K')
-			n:open({K=3})
+			n:reset({K=3})
 			n:next_group()
 			local _, p, sz = n:pk('users')
 			u3_key_str = ffi.string(p, sz)
@@ -1097,7 +1097,7 @@ function test.pk_parent_lookup_left_exec()
 		db:atomic('r', function()
 			-- inner join: session 99 (user_id=3, base row deleted) is skipped.
 			local node = db:pk_parent_lookup(db:pk_range('sessions'), 'sessions/user_id')
-			node:open()
+			node:reset()
 			local inner = {}
 			while node:next_group() do
 				inner[#inner+1] = pk_id(node, 'sessions', db)
@@ -1108,7 +1108,7 @@ function test.pk_parent_lookup_left_exec()
 			-- left join: session 99 is emitted; pk('users') returns nil (no parent).
 			local node2 = db:pk_parent_lookup(
 				db:pk_range('sessions'), 'sessions/user_id', {left=true})
-			node2:open()
+			node2:reset()
 			local left_t = {}
 			while node2:next_group() do
 				local sid = pk_id(node2, 'sessions', db)
@@ -1127,7 +1127,7 @@ function test.value_filter_exec()
 	with_db('value_filter_exec', function(db)
 		db:atomic('r', function()
 			local function collect_recs(node)
-				node:open()
+				node:reset()
 				local t = {}
 				while node:next_group() do t[#t+1] = node:row() end
 				node:close()
@@ -1159,7 +1159,7 @@ function test.stream_distinct_exec()
 	with_db('stream_distinct_exec', function(db)
 		db:atomic('r', function()
 			local function collect_recs(node)
-				node:open()
+				node:reset()
 				local t = {}
 				while node:next_group() do t[#t+1] = node:row() end
 				node:close()
@@ -1182,7 +1182,7 @@ function test.hash_distinct_exec()
 	with_db('hash_distinct_exec', function(db)
 		db:atomic('r', function()
 			local function collect_recs(node)
-				node:open()
+				node:reset()
 				local t = {}
 				while node:next_group() do t[#t+1] = node:row() end
 				node:close()
@@ -1211,7 +1211,7 @@ function test.value_sort_value_exec()
 	with_db('value_sort_value_exec', function(db)
 		db:atomic('r', function()
 			local function collect_recs(node)
-				node:open()
+				node:reset()
 				local t = {}
 				while node:next_group() do t[#t+1] = node:row() end
 				node:close()
@@ -1282,7 +1282,7 @@ function test.stream_aggregate_exec()
 	with_db('stream_aggregate_exec', function(db)
 		db:atomic('r', function()
 			local function collect_recs(node)
-				node:open()
+				node:reset()
 				local t = {}
 				while node:next_group() do t[#t+1] = node:row() end
 				node:close()
@@ -1324,7 +1324,7 @@ function test.hash_aggregate_exec()
 	with_db('hash_aggregate_exec', function(db)
 		db:atomic('r', function()
 			local function collect_recs(node)
-				node:open()
+				node:reset()
 				local t = {}
 				while node:next_group() do t[#t+1] = node:row() end
 				node:close()
@@ -1364,7 +1364,7 @@ function test.value_concat_exec()
 			local node = db:value_concat(
 				db:select(db:pk_seek('users/status', 'S1'), 'users.status'),
 				db:select(db:pk_seek('users/status', 'S2'), 'users.status'))
-			node:open({S1='active', S2='banned'})
+			node:reset({S1='active', S2='banned'})
 			local recs = {}
 			while node:next_group() do recs[#recs+1] = node:row() end
 			node:close()
@@ -1386,7 +1386,7 @@ function test.union_distinct_exec()
 			local node = db:union_distinct(
 				db:select(db:pk_seek('users/status', 'S1'), 'users.status'),
 				db:select(db:pk_seek('users/status', 'S2'), 'users.status'))
-			node:open({S1='active', S2='banned'})
+			node:reset({S1='active', S2='banned'})
 			local t = {}
 			while node:next_group() do t[#t+1] = node:row()['users.status'] end
 			node:close()
@@ -1397,7 +1397,7 @@ function test.union_distinct_exec()
 			local node2 = db:union_distinct(
 				db:select(db:pk_seek('users/status', 'S'), 'users.status'),
 				db:select(db:pk_seek('users/status', 'S'), 'users.status'))
-			node2:open({S='active'})
+			node2:reset({S='active'})
 			local t2 = {}
 			while node2:next_group() do t2[#t2+1] = node2:row()['users.status'] end
 			node2:close()
@@ -1417,7 +1417,7 @@ function test.select_fn_exec()
 					return (n:col('users', 'score') or 0) * 2
 				end},
 			})
-			node:open()
+			node:reset()
 			local recs = {}
 			while node:next_group() do recs[#recs+1] = node:row() end
 			node:close()
@@ -1443,7 +1443,7 @@ function test.select_structured_output_exec()
 				{name = 'st', member = 'users', col = 'status'},
 				{name = 'sc', member = 'users', col = 'score'},
 			})
-			node:open()
+			node:reset()
 			local recs = {}
 			while node:next_group() do recs[#recs+1] = node:row() end
 			node:close()
