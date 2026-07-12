@@ -1,4 +1,4 @@
-require'mdbx_query'
+require'mdbx_query_nodes'
 
 local N = 1000  -- rows per side; inner-loop iterations = N^2
 

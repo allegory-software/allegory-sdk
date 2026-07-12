@@ -1506,8 +1506,8 @@ function test.query_builder_compile_exec()
 				:where(q.exists(exists_inner))
 				:select{'p.id id'}
 				:prepare()
-			assert(exists_inner.terminal_kind == 'exists' and exists_inner.needs_output == false,
-				'exists() relation subqueries must not require returned rows')
+			assert(exists_inner.terminal_kind == 'exists',
+				'exists() relation subqueries must compile for exists()')
 			local _, _, exists_outer = unpack(exists_inner.wheres[1], 1, 3)
 			assert(exists_outer[1] == 'col' and exists_outer.source and exists_outer.field,
 				'outer() must validate, then bind as a scoped col()')

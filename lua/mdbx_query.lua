@@ -578,7 +578,7 @@ function Rel:union(right)
 	return object(Rel, rel)
 end
 
---COMPILE ENTRY --------------------------------------------------------------
+--COMPILATION STAGE ----------------------------------------------------------
 
 local compile --fw. decl.
 local compile_scan --fw. decl.
@@ -588,6 +588,12 @@ local order_satisfied --fw. decl.
 local order_satisfied_set --fw. decl.
 local output_source_col --fw. decl.
 local returned_source_terms --fw. decl.
+local order_term --fw. decl.
+local sort_actually_needed --fw. decl.
+--terms_group_consecutive stays in the executor: choose_grouping() also
+--needs it, for the same question about group() as this asks about
+--distinct().
+local terms_group_consecutive --fw. decl.
 --residual checks use these functions to run exists()/in_() subqueries.
 local build_rows --fw. decl.
 local union_rows --fw. decl.
@@ -793,6 +799,8 @@ MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup eligibil
 
 --[[local]] function compile(rel, terminal_kind, parent_scope, top_level)
 
+	--CHECK IF THERE'S ANYTHING TO DO -------------------------------------------
+
 	if rel.compiled then
 		--a compiled relation is already bound to one terminal kind.
 		assertf(rel.terminal_kind == terminal_kind,
@@ -806,7 +814,12 @@ MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup eligibil
 	--embedded sources mark themselves used at construction.
 	--top-level compile catches direct compile after prior embedding.
 	if top_level then mark_used(rel) end
+
+	--RESOLVE SOURCES -----------------------------------------------------------
+
 	local members = resolve_sources(rel)
+
+	--WORK OUT THE OUTPUT COLUMN NAMES ------------------------------------------
 
 	--compute output-name maps before binding expressions.
 	--group_fields/select_fields reject duplicate output names.
@@ -824,8 +837,6 @@ MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup eligibil
 	end
 	local group_fields = output_fields(rel.group_outputs, 'group')
 	local select_fields = output_fields(rel.select_outputs, 'select')
-	rel.group_fields = group_fields
-	rel.select_fields = select_fields
 
 	local outputs = rel.select_outputs or rel.group_outputs
 	--select() outputs take precedence over group() outputs when both exist.
@@ -841,9 +852,10 @@ MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup eligibil
 		rel.output_fields = returned_output_fields
 	end
 
+	--SET UP SCOPE AND PARAMS ---------------------------------------------------
+
 	--child relations search this scope after checking their own members.
 	local scope = {members = members, parent = parent_scope or false} --{members=members,parent=scope|false}
-	rel.scope = scope
 	local params = {} --{name...; name->true}
 	rel.params = params
 	local function add_param(name)
@@ -857,6 +869,9 @@ MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup eligibil
 			add_param(name)
 		end
 	end
+
+	--WRITE THE FUNCTION THAT BINDS ONE EXPRESSION ------------------------------
+
 	local function bind_field_ref(expr, source, field)
 		--bound field ref: {'col', member|false, col; source = source|nil, field = field}
 		expr.source = source
@@ -1006,6 +1021,8 @@ MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup eligibil
 		end
 	end
 
+	--RUN THAT BINDER OVER THE WHOLE QUERY --------------------------------------
+
 	--bind each query part with the fields that part is allowed to read.
 	for _, source in ipairs(members) do
 		if source.kind == 'relation' then
@@ -1071,6 +1088,8 @@ MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup eligibil
 	end
 	split_join_conditions(rel.joins)
 
+	--RESOLVE ORDER_BY() AND DISTINCT() -----------------------------------------
+
 	if rel.order_by_terms then
 		local order_fields = returned_output_fields or false
 		local order_mode = (rel.group_outputs or rel.distinct_rows) and 'output' or 'output_source'
@@ -1091,10 +1110,10 @@ MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup eligibil
 	end
 
 	--record index hints by member and reject contradictory hints.
+	--READ USE_INDEX()/NO_INDEX() HINTS -----------------------------------------
+
 	local use_index_by_member = {} --{member->index_name}
 	local no_index_by_member = {} --{member->true|{index_name->true}}
-	rel.use_index_by_member = use_index_by_member
-	rel.no_index_by_member = no_index_by_member
 	local function check_hint_member(member)
 		assertf(members[member], 'unknown source member: %s', member)
 	end
@@ -1127,22 +1146,23 @@ MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup eligibil
 		end
 	end
 
-	--STAGE 8: cursor choice --------------------------------------------------
+	--DECIDE HOW TO READ EACH TABLE ---------------------------------------------
 
 	--[[
-	- a left_join()'d member's own "found" must depend only on its on_expr,
-	  never on a later where() -- a where() condition on such a member has
-	  to run once against the finished row (late), not as a per-candidate
-	  residual during that member's scan, or an unmatched row that should
-	  null-extend would instead get silently dropped or wrongly kept.
-	- a left-joined fragment null-extends as one atomic unit, so every
-	  member inside it counts as left-joined too, regardless of the join
-	  kind used between members *inside* the fragment.
+	- whether a left_join()'d member matched must depend only on its
+	  on_expr, never on a later where() -- a where() condition on such a
+	  member has to run once against the finished row (late), not as a
+	  per-candidate residual during that member's scan, or an unmatched
+	  row that should null-extend would instead get silently dropped or
+	  wrongly kept.
+	- a left-joined fragment null-extends all at once, so every member
+	  inside it counts as left-joined too, regardless of which join kind
+	  connects members *inside* the fragment.
 	- limitation: this means such a where() condition can never drive an
 	  index seek, even when one exists on that column -- only the member's
 	  own on_expr can still choose an index for it. a fix that kept index
-	  use would need a separate existence-proving scan from the
-	  candidate-narrowing one, which this engine doesn't have.
+	  use would need two separate scans, one to prove existence and one
+	  to narrow candidates, which this engine doesn't have.
 	]]
 	local left_joined_members = {} --{member_name->true}
 	local function collect_left_joined_members(joins)
@@ -1175,16 +1195,18 @@ MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup eligibil
 		end
 	end
 	attribute_conditions(rel.where_conditions)
-	--conditions that cannot narrow one member run after all members are scanned.
+	--a condition that cannot narrow to one member gets checked after every
+	--member has been scanned, not before.
 	local late_conditions = {} --{condition...}
 	for _, cond in ipairs(rel.where_conditions) do
 		if cond.member == false then add(late_conditions, cond) end
 	end
 	rel.late_conditions = late_conditions
 
-	--only the base source can provide final row order.
-	--joined members run under each driver row.
-	--joined-member cursor order is local to that driver row.
+	--only the base source's cursor order can set final row order: a
+	--joined member's scan re-runs under each driver row, so its own
+	--cursor order only holds within that one driver row, not across the
+	--whole result.
 	local function base_order_terms()
 		if not rel.order_by_terms or rel.group_outputs or rel.distinct_rows then return end
 		local terms = {} --{{member=,col=,dir=}...}
@@ -1280,13 +1302,15 @@ MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup eligibil
 	end
 
 	--[[
-	- order joins by dependency readiness.
-	- ties keep declaration order.
-	- ordering uses on_expr column references only.
-	- table contents do not affect join order.
-	- inner-joined fragments flatten into this sequence.
-	- left-joined fragments run as nested atomic groups.
-	- a left-joined fragment either matches as a group or null-extends as a group.
+	- pick the next join to schedule: only one whose on_expr reads no
+	  member that isn't scheduled yet. among ties, keep the order joins
+	  were declared in.
+	- this only looks at on_expr's column references, never at what's
+	  actually stored in any table.
+	- an inner join's own fragment just adds its joins to this same list.
+	- a left join's fragment moves as one piece: it and everything joined
+	  onto it inside that fragment either all match together, or all
+	  null-extend together, never split apart.
 	]]
 	local function build_access(joins, scheduled, access)
 		local pending = {} --{join...}
@@ -1386,6 +1410,23 @@ MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup eligibil
 		end
 	end
 
+	--[[
+	- whether an explicit sort is needed, and whether distinct() can
+	  remove adjacent duplicates instead of hashing, are both fully
+	  decided by what's already been set above (order_by_terms,
+	  natural_order, group_outputs, distinct_rows) -- decide both once
+	  here, instead of recomputing them on every execution.
+	]]
+	rel.sort_needed = sort_actually_needed(rel)
+	rel.distinct_streaming = false
+	if rel.distinct_rows and not rel.group_outputs then
+		local fields = dedup_key_fields(rel)
+		local terms = returned_source_terms(rel, fields)
+		rel.distinct_streaming = terms ~= nil and terms_group_consecutive(rel, terms)
+	end
+
+	--GIVE EACH STEP A WAY TO OPEN ITSELF ---------------------------------------
+
 	--build each step opener once at compile time.
 	--recurse into nested left-join fragment steps.
 	--relation sources open the already-compiled inner relation instead of a cursor.
@@ -1405,25 +1446,33 @@ MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup eligibil
 	end
 	prepare_scans(access)
 
+	--FIND EVERY EXISTS()/IN_() TARGET ------------------------------------------
+
 	--[[
-	- collect every table-spec exists()/not_exists() source this relation's
-	  own residual/late/having checks can reach, so run_filtered can open
-	  them all once per execution instead of eval_exists_source opening one
-	  fresh per row.
-	- a relation-form exists()/in_() is not collected here: it compiles and
-	  runs through its own run_filtered call, which walks its own tree.
-	- recurses into on_expr, since one exists() can nest inside another.
+	- collect every exists()/not_exists()/in_()/not_in() source this
+	  relation's own residual/late/having checks can reach -- a plain
+	  table or a whole subquery -- so run_filtered can open them all once
+	  per execution instead of opening one fresh per row.
+	- recurses into on_expr and in_()'s value expr: one of these can nest
+	  another exists()/in_() inside it.
 	]]
 	local function collect_exists_sources(expr, entries, seen)
 		if type(expr) ~= 'table' then return end
 		local op = expr[1]
 		if op == 'exists' or op == 'not_exists' then
 			local source, on = expr[2], expr[3]
-			if not is_relation(source) and not seen[source] then
+			if not seen[source] then
 				seen[source] = true
 				add(entries, {source = source, on = on})
 			end
 			if on then collect_exists_sources(on, entries, seen) end
+		elseif (op == 'in' or op == 'not_in') and is_relation(expr[3]) then
+			local values_rel = expr[3]
+			if not seen[values_rel] then
+				seen[values_rel] = true
+				add(entries, {source = values_rel})
+			end
+			collect_exists_sources(expr[2], entries, seen)
 		else
 			for i = 2, #expr do
 				collect_exists_sources(expr[i], entries, seen)
@@ -1449,6 +1498,8 @@ MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup eligibil
 	end
 	rel.exists_sources = exists_sources
 
+	--LOCK IT IN ----------------------------------------------------------------
+
 	local needs_output =
 		terminal_kind == 'rows' or
 		terminal_kind == 'first' or
@@ -1459,16 +1510,146 @@ MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup eligibil
 	end
 
 	rel.terminal_kind = terminal_kind
-	rel.needs_output = needs_output
 	rel.compiled = true
 	return rel
 end
 
---STAGE 8: cursor choice ------------------------------------------------
---shared by compile() (real relation members) and eval_exists_source()
---(exists()/not_exists()'s standalone table-spec scan): both plan one
---member's scan from a member, its access conditions, and the relation
---scope (members) those conditions may reference.
+--SORT AND DEDUP HELPERS -----------------------------------------------------
+
+--[[
+- test whether natural scan order satisfies ordered terms.
+- terms are ordered by order_by() priority.
+- fixed natural columns are skipped.
+- varying natural columns must match in sequence.
+- dir must match when a term declares it.
+]]
+function order_satisfied(terms, natural)
+	local fixed = {} --{'member.col'->true}
+	local varying = {} --{{member=,col=,dir=}...}
+	for _, n in ipairs(natural) do
+		if n.fixed then fixed[n.member..'.'..n.col] = true
+		else add(varying, n) end
+	end
+	local vi = 1
+	for _, term in ipairs(terms) do
+		if not fixed[term.member..'.'..term.col] then
+			local v = varying[vi]
+			if not v or v.member ~= term.member or v.col ~= term.col
+				or (term.dir and term.dir ~= v.dir) then
+				return false
+			end
+			vi = vi + 1
+		end
+	end
+	return true
+end
+
+--[[
+- test whether natural scan order groups a set of columns together.
+- term order does not matter.
+- fixed natural columns are skipped.
+- remaining terms must cover the exact varying prefix as a set.
+- skipping a varying prefix column would split equal groups apart.
+- second return is how many varying columns the terms covered: callers
+  that need the terms to cover the WHOLE varying tail (not just a
+  prefix of it) compare this against #varying themselves.
+]]
+--[[local]] function order_satisfied_set(terms, natural)
+	local fixed = {} --{'member.col'->true}
+	local varying = {} --{{member=,col=}...}
+	for _, n in ipairs(natural) do
+		if n.fixed then fixed[n.member..'.'..n.col] = true
+		else add(varying, n) end
+	end
+	local wanted = {} --{'member.col'->true}
+	local n_wanted = 0
+	for _, term in ipairs(terms) do
+		local key = term.member..'.'..term.col
+		if not fixed[key] then
+			wanted[key] = true
+			n_wanted = n_wanted + 1
+		end
+	end
+	if n_wanted > #varying then return false end
+	for i = 1, n_wanted do
+		if not wanted[varying[i].member..'.'..varying[i].col] then return false end
+	end
+	return true, n_wanted
+end
+
+--[[
+- resolve a returned output name to {member=, col=}.
+- succeeds only for plain q.col() outputs bound to source fields.
+- distinct() and order_by() use this to reuse natural scan order.
+- returns nil for aggregates and computed outputs.
+]]
+function output_source_col(self, name)
+	local outputs = self.select_outputs or self.group_outputs
+	for _, output in ipairs(outputs) do
+		if output[2] == name then
+			return col_term(output[1])
+		end
+	end
+end
+
+--[[
+- resolve every name in fields (self.returned_fields by default) to a
+  {member=, col=} term.
+- nil if any field is not a plain source-column passthrough (an aggregate
+  or computed output).
+- distinct()'s streaming dedup and the NEXT_NODUP compile-time check
+  (shared by distinct() and group() with no aggregate outputs) share
+  this: all three need the dedup columns to be readable straight off the
+  scan key, not computed.
+]]
+function returned_source_terms(self, fields)
+	local terms = {} --{{member=,col=}...}
+	for _, name in ipairs(fields or self.returned_fields) do
+		local src = output_source_col(self, name)
+		if not src then return nil end
+		add(terms, src)
+	end
+	return terms
+end
+
+--[[
+- resolve one order_by() term to {member=, col=, dir=}.
+- terms bound to source fields resolve directly.
+- terms bound to output fields resolve through select()/group() output names.
+- terms bound to output fields are order-checkable only for plain passthrough outputs.
+- aggregate or computed outputs return nil.
+]]
+function order_term(self, term)
+	local expr, dir = term[1], term[2]
+	if expr.source then
+		return {member = expr.source.member, col = expr[3], dir = dir}
+	end
+	local src = output_source_col(self, expr.field.name)
+	return src and {member = src.member, col = src.col, dir = dir}
+end
+
+--[[
+- decide whether order_by() needs an explicit sort.
+- no order_by() means no sort.
+- group() and distinct() sort explicitly for now.
+- plain ungrouped rows can reuse driving-member scan order.
+- build_rows() uses this to skip sorting.
+- rows_array() uses this to push limit()/offset().
+]]
+function sort_actually_needed(self)
+	if not self.order_by_terms then return false end
+	if self.group_outputs or self.distinct_rows then return true end
+	local terms = {} --{{member=,col=,dir=}...}
+	for _, term in ipairs(self.order_by_terms) do
+		local t = order_term(self, term)
+		if not t then return true end
+		add(terms, t)
+	end
+	return not order_satisfied(terms, self.natural_order)
+end
+
+
+--CHOOSE HOW TO READ ONE TABLE -----------------------------------------------
 
 local fact_kind = { --{op->fact kind}
 	eq = 'equality',
@@ -1701,7 +1882,7 @@ end
 
 --[[
 - compare one candidate key to this member's fact buckets.
-- depth is the leading run of equality-matched columns.
+- depth is how many columns at the start are pinned by an equality fact.
 - the next key column can use in_(), prefix, or range facts.
 - the result classifies scan strength.
 - no row counts or index sizes are used.
@@ -1824,6 +2005,11 @@ end
   which is never a named member of the outer relation).
 - consumed conditions are marked on the chosen plan.
 - unconsumed conditions become residual row checks.
+- called from compilation stage's own step for reading each table, and
+  from execution stage's open_exists_source(), for a table passed
+  directly to exists(). the second caller only runs this the first time
+  that exists() executes, not while the query compiles -- so explain()
+  cannot show how that table will be read before the query has run once.
 ]]
 function choose_access(member, conditions, members, forced, forbidden, order_terms, prefer_order,
 	group_terms)
@@ -1924,14 +2110,9 @@ function choose_access(member, conditions, members, forced, forbidden, order_ter
 	return best_plan
 end
 
---STAGE 9: executor -----------------------------------------------------
+--EXECUTION STAGE ------------------------------------------------------------
 
---[[
-- row_ctx shape: {member_name -> decode_col fn}.
-- each scanned step adds its decoder to row_ctx.
-- seek, bound, and residual exprs read earlier members through row_ctx.
-- join conditions use this to supply seek values.
-]]
+--OPEN A REAL OR VIRTUAL TABLE -----------------------------------------------
 
 --[[
 - compile a seek or bound value expression.
@@ -2053,13 +2234,9 @@ MDBX_NODUPFIXED = false --bench override, see compile_scan's walk_dups
 		--[[
 		- key_rec/out_rec pick which pre-allocated record plays which
 		  mdbx cursor role, decided once (schema.is_index never changes).
-		- an index's cursor key is the index key (ix_rec) and its value
-		  is the pk (pk_rec); a base table's cursor key IS the pk
-		  (pk_rec) and its value is the row itself (val_rec).
-		- every seek/walk below writes straight into these via
-		  move_raw_into, never move_raw_kv/move_raw_v's shared-global-
-		  and-return-values path -- no per-row loose pointer values get
-		  materialized just to copy them into ix_rec/pk_rec right after.
+		- index: ix_rec -> pk_rec. table: pk_rec -> val_rec.
+		- every seek/walk below writes each row straight into these two
+		  records.
 		]]
 		local key_rec = schema.is_index and ix_rec or pk_rec
 		local out_rec = schema.is_index and pk_rec or val_rec
@@ -2111,8 +2288,7 @@ MDBX_NODUPFIXED = false --bench override, see compile_scan's walk_dups
 						ok = cur:move_raw_into(C.MDBX_NEXT_MULTIPLE, ix_rec, bulk_rec)
 						v_o = 0
 					else
-						--assignment + pointer arith causes 5.5x slowdown with jit off,
-						--giving only 2x total speed up for the entire DUPFIXED branch.
+						--kept as a plain assignment: about 2x faster overall for this branch.
 						pk_rec.data, pk_rec.size = bulk_rec.data + v_o, dup_fixedsize
 						v_o = v_o + dup_fixedsize
 						if row_fn(decode_col) then return true end
@@ -2297,33 +2473,6 @@ MDBX_NODUPFIXED = false --bench override, see compile_scan's walk_dups
 end
 
 --[[
-- compile one relation-kind source/join step.
-- called once per step at compile time.
-- returns an opener for one query execution.
-- opener returns run(params, row_ctx, row_fn) and close().
-- run materializes the inner relation's rows fresh per call, so a joined
-  relation re-evaluates per outer driving row (same as a correlated subquery).
-- row_ctx seeds the inner relation for correlated where()/on() reads.
-- there is no cursor to hold open: rows are already fully decoded.
-]]
---[[local]] function compile_relation_scan(nested_rel)
-	local output_fields = nested_rel.output_fields
-	return function()
-		local function run(params, row_ctx, row_fn)
-			local rows = nested_rel.union_inputs
-				and union_rows(nested_rel, params, row_ctx)
-				or build_rows(nested_rel, params, row_ctx)
-			for _, row in ipairs(rows) do
-				local function decode_col(col) return row[output_fields[col].index] end
-				if row_fn(decode_col) then return true end
-			end
-		end
-		local function close() end
-		return run, close
-	end
-end
-
---[[
 - compile one virtual-table source/join step.
 - called once per step at compile time.
 - returns an opener for one query execution.
@@ -2333,6 +2482,10 @@ end
   the same run/close shape compile_scan/compile_relation_scan return.
 - no seek capability: run() rescans from schema.open() every call, same
   as a joined relation re-evaluating fresh per outer driving row.
+- open() gets row_ctx too, same as a nested relation's build_rows() --
+  a correlated read does row_ctx[outer_member](col) to read the outer
+  row directly, instead of relying only on a residual check after the
+  fact, so a virtual table can push the correlation into its own fetch.
 - the outer close() is a no-op: each run() call closes its own scan, so
   there is nothing left open across calls for close_access() to release.
 ]]
@@ -2340,7 +2493,7 @@ end
 	assert(schema.get_col)
 	return function()
 		local function run(params, row_ctx, row_fn)
-			call(schema.open, params)
+			call(schema.open, params, row_ctx)
 			local stop = false
 			while schema.next_row() do
 				if row_fn(schema.get_col) then
@@ -2355,6 +2508,8 @@ end
 		return run, close
 	end
 end
+
+--EVALUATE EXPRESSIONS -------------------------------------------------------
 
 --[[
 - read a value operand for a residual check.
@@ -2434,18 +2589,16 @@ local function eval_expr(expr, params, row_ctx, group_row)
 		if fold then v = mdbx_fold_ai_ci(v) end
 		local found = false
 		if is_relation(b) then
+			--b.rows_run reseeks a persistent scan (opened once for this
+			--execution by with_exists_sources) instead of rebuilding b's
+			--rows fresh on every call.
 			local name = b.returned_fields[1]
-			local index = b.output_fields[name].index
-			local rows = b.union_inputs
-				and union_rows(b, params, row_ctx)
-				or build_rows(b, params, row_ctx)
-			for _, row in ipairs(rows) do
-				local candidate = row[index]
-				if not null_value(candidate) then
-					if fold then candidate = mdbx_fold_ai_ci(candidate) end
-					if v == candidate then found = true; break end
-				end
-			end
+			found = b.rows_run(params, row_ctx, function(decode_col)
+				local candidate = decode_col(name)
+				if null_value(candidate) then return end
+				if fold then candidate = mdbx_fold_ai_ci(candidate) end
+				return v == candidate
+			end) or false
 		else
 			local param_list = type(b) == 'table' and b[1] == 'param'
 			local values
@@ -2500,124 +2653,7 @@ end
 --used for left joins and empty nested groups.
 local function nil_decode() return nil end
 
---[[
-- test whether natural scan order satisfies ordered terms.
-- terms are ordered by order_by() priority.
-- fixed natural columns are skipped.
-- varying natural columns must match in sequence.
-- dir must match when a term declares it.
-]]
-function order_satisfied(terms, natural)
-	local fixed = {} --{'member.col'->true}
-	local varying = {} --{{member=,col=,dir=}...}
-	for _, n in ipairs(natural) do
-		if n.fixed then fixed[n.member..'.'..n.col] = true
-		else add(varying, n) end
-	end
-	local vi = 1
-	for _, term in ipairs(terms) do
-		if not fixed[term.member..'.'..term.col] then
-			local v = varying[vi]
-			if not v or v.member ~= term.member or v.col ~= term.col
-				or (term.dir and term.dir ~= v.dir) then
-				return false
-			end
-			vi = vi + 1
-		end
-	end
-	return true
-end
-
---[[
-- test whether natural scan order groups a set of columns together.
-- term order does not matter.
-- fixed natural columns are skipped.
-- remaining terms must cover the exact varying prefix as a set.
-- skipping a varying prefix column would split equal groups apart.
-- second return is how many varying columns the terms covered: callers
-  that need the terms to cover the WHOLE varying tail (not just a
-  prefix of it) compare this against #varying themselves.
-]]
---[[local]] function order_satisfied_set(terms, natural)
-	local fixed = {} --{'member.col'->true}
-	local varying = {} --{{member=,col=}...}
-	for _, n in ipairs(natural) do
-		if n.fixed then fixed[n.member..'.'..n.col] = true
-		else add(varying, n) end
-	end
-	local wanted = {} --{'member.col'->true}
-	local n_wanted = 0
-	for _, term in ipairs(terms) do
-		local key = term.member..'.'..term.col
-		if not fixed[key] then
-			wanted[key] = true
-			n_wanted = n_wanted + 1
-		end
-	end
-	if n_wanted > #varying then return false end
-	for i = 1, n_wanted do
-		if not wanted[varying[i].member..'.'..varying[i].col] then return false end
-	end
-	return true, n_wanted
-end
-
---[[
-- true when rows with the same key values are guaranteed to come out
-  next to each other, so distinct()/group() can dedup by comparing
-  each row to the one before it instead of hashing.
-- one way that holds: the index the base scan picked already groups
-  these columns together (order_satisfied_set checks that).
-- another way, with no index needed: the columns cover the base
-  table's whole primary key. nested-loop execution visits each base
-  row once, so all of its fan-out rows come out together, no matter
-  what order the scan runs in.
-]]
-local function terms_group_consecutive(rel, terms)
-	if order_satisfied_set(terms, rel.natural_order) then return true end
-	if rel.source.kind ~= 'table' then return false end
-	local needed = {} --{col->true}
-	for _, field in ipairs(rel.source.schema.key_fields) do needed[field.col] = true end
-	for _, term in ipairs(terms) do
-		if term.member ~= rel.source.member then return false end
-		needed[term.col] = nil
-	end
-	return not next(needed)
-end
-
---[[
-- resolve a returned output name to {member=, col=}.
-- succeeds only for plain q.col() outputs bound to source fields.
-- distinct() and order_by() use this to reuse natural scan order.
-- returns nil for aggregates and computed outputs.
-]]
-function output_source_col(self, name)
-	local outputs = self.select_outputs or self.group_outputs
-	for _, output in ipairs(outputs) do
-		if output[2] == name then
-			return col_term(output[1])
-		end
-	end
-end
-
---[[
-- resolve every name in fields (self.returned_fields by default) to a
-  {member=, col=} term.
-- nil if any field is not a plain source-column passthrough (an aggregate
-  or computed output).
-- distinct()'s streaming dedup and the NEXT_NODUP compile-time check
-  (shared by distinct() and group() with no aggregate outputs) share
-  this: all three need the dedup columns to be readable straight off the
-  scan key, not computed.
-]]
-function returned_source_terms(self, fields)
-	local terms = {} --{{member=,col=}...}
-	for _, name in ipairs(fields or self.returned_fields) do
-		local src = output_source_col(self, name)
-		if not src then return nil end
-		add(terms, src)
-	end
-	return terms
-end
+--WALK ROWS ------------------------------------------------------------------
 
 --collect every member name covered by one access step.
 --recurse into nested groups.
@@ -2637,14 +2673,17 @@ end
 - processors close over shared params and row_ctx.
 - the returned function walks all access steps.
 - next_step() runs once per complete row combination.
-- normal joins call next_step() once per matching row.
-- unmatched left joins call next_step() once with a nil decoder.
-- nested groups call next_step() once per inner combination.
-- empty nested groups null-extend every inner member once.
+- for a normal join, call next_step() once per matching row.
+- when a left join finds no match, call next_step() once anyway, with a
+  nil decoder.
+- for a nested group, call next_step() once per inner combination.
+- when a nested group matches nothing, null-extend every inner member once.
 - closures are built once per execution, not once per driver row.
 - row_ctx is mutated in place during one query execution.
 - a true result from next_step(), or from a step's run(), stops the
   whole walk; every wrapper forwards it up to its own caller.
+- calls itself for step.nested: depth matches how deeply left_join()
+  fragments are nested in the query, never open-ended.
 ]]
 local function build_processors(steps, params, row_ctx, next_step)
 	local rest = next_step
@@ -2697,7 +2736,9 @@ end
 --[[
 - open every step cursor for one execution.
 - open scratch buffers before scanning rows.
-- recurse into nested left-join fragment steps.
+- calls itself for nested left-join fragment steps, same bounded depth
+  as build_processors -- opened stays one flat list either way, so
+  close_access() never needs to recurse back through the nesting.
 - return opened steps for close_access().
 - relation sources open their compiled inner relation, not a cursor.
 ]]
@@ -2738,23 +2779,36 @@ local function run_query(access, params, emit, seed_row_ctx)
 	close_access(opened)
 end
 
+--EXISTS AND SUBQUERY SOURCES ------------------------------------------------
+
 --[[
-- open one exists()/not_exists() table-spec source for this execution.
-- on_expr is planned like a join's on_expr: split into facts once, then
-  choose_access seeks whatever index those facts support -- cached on the
-  source permanently, since the plan never depends on which execution
-  this is, only on the query's shape.
-- the scan itself (source.exists_run) is opened fresh here and closed by
-  the caller at the end of this same execution, instead of being reopened
-  by eval_exists_source on every row: run_filtered calls this once per
-  rel.exists_sources entry, matching how a real access step's cursor is
-  opened once per execution and only reseeked per row.
-- use_index()/no_index() do not apply here: this table is never a named
-  member of the outer relation, so forced/forbidden are always nil.
-- returns close(), for the caller to tear down at the end of this run.
+- open one exists()/not_exists()/in_()/not_in() source for this execution
+  -- a plain table, or a whole subquery.
+- subquery source: call compile_relation_scan(source)() once. it returns
+  run/close/exists_run -- keep exists_run as source.exists_run (used by
+  exists()) and run as source.rows_run (used by in_()/not_in()); both
+  come from the same call, so both get stashed even though only one is
+  ever read for a given entry.
+- table source: on_expr is planned like a join's on_expr -- split into
+  facts once, then choose_access picks whatever index those facts
+  support. cached on the source permanently: the plan only depends on
+  the query's shape, not which execution this is. use_index()/no_index()
+  don't apply here -- this table is never a named member of the outer
+  relation.
+- either way: opened once here, closed by the caller at the end of this
+  run, instead of reopened on every row. run_filtered calls this once
+  per rel.exists_sources entry, same as a real access step's cursor:
+  opened once, reseeked per row.
+- returns close(), for the caller to run at the end of this run.
 ]]
 local function open_exists_source(entry)
 	local source, on = entry.source, entry.on
+	if is_relation(source) then
+		local run, close, exists_run = compile_relation_scan(source)()
+		source.exists_run = exists_run
+		source.rows_run = run
+		return close
+	end
 	if not source.exists_plan then
 		local conditions = (on == nil or on == true) and empty or split_conditions({on}, true)
 		local members = {[source.member] = source}
@@ -2765,6 +2819,9 @@ local function open_exists_source(entry)
 		or compile_scan(source.db, source.exists_plan)
 	local run, close = opener()
 	source.exists_run = run
+	--cleared per bracket; eval_exists_source fills it in on first use, since
+	--row_ctx (the value it would key on) doesn't exist yet at open time.
+	source.exists_child_ctx = nil
 	return close
 end
 
@@ -2772,19 +2829,26 @@ end
 --execution (run_filtered opened it before any row was scanned), so this
 --only seeks and reads -- whatever the chosen index does not prove stays
 --a residual row check.
+--child_ctx and the row callback are built once per bracket
+--(open_exists_source clears exists_child_ctx), then reused: row_ctx and
+--params both stay the same for the whole execution, so nothing the
+--callback closes over changes between calls. found is exists_run's own
+--stop-early return value, the same channel a real cursor's run() uses,
+--not separate state.
 function eval_exists_source(source, params, row_ctx)
-	local found = false
-	local child_ctx = row_ctx and setmetatable({}, {__index = row_ctx}) or {}
-	local residual = source.exists_plan.residual
-	source.exists_run(params, child_ctx, function(decode_col)
-		child_ctx[source.member] = decode_col
-		for _, cond in ipairs(residual) do
-			if not eval_residual(cond.expr, params, child_ctx) then return end
+	if not source.exists_child_ctx then
+		local child_ctx = row_ctx and setmetatable({}, {__index = row_ctx}) or {}
+		local member, residual = source.member, source.exists_plan.residual
+		source.exists_child_ctx = child_ctx
+		source.exists_row_fn = function(decode_col)
+			child_ctx[member] = decode_col
+			for _, cond in ipairs(residual) do
+				if not eval_residual(cond.expr, params, child_ctx) then return end
+			end
+			return true
 		end
-		found = true
-		return true
-	end)
-	return found
+	end
+	return source.exists_run(params, source.exists_child_ctx, source.exists_row_fn) or false
 end
 
 --run relation-level where() checks.
@@ -2802,8 +2866,8 @@ end
 
 --[[
 - call fn(...) with this relation's exists()/not_exists() table-spec
-  sources opened for fn's whole duration, closed once fn returns or
-  raises -- instead of eval_exists_source opening one fresh per row.
+  sources opened for fn's whole duration, then close them after fn returns.
+- if fn raises, the enclosing transaction owns the open cursors.
 - must wrap the outermost call that evaluates this relation for one
   terminal, not run_filtered/run_grouped themselves: a grouped call's
   having() checks run in finish_group_row, after run_filtered's own scan
@@ -2820,14 +2884,42 @@ local function with_exists_sources(rel, fn, ...)
 	for _, entry in ipairs(rel.exists_sources) do
 		add(exists_closes, open_exists_source(entry))
 	end
-	local ok, err = pcall(fn, ...)
+	fn(...)
 	for _, close in ipairs(exists_closes) do close() end
-	if not ok then error(err, 0) end
 end
 
-function Rel:prepare(terminal_kind)
-	compile(self, terminal_kind or 'rows', nil, true)
-	return self
+--evaluate relation-form exists(): rel.exists_run is opened once per
+--execution by whichever with_exists_sources bracket owns rel (the outer
+--relation's own, if rel is a direct exists() target -- or a further-out
+--one, if rel is itself nested inside another relation-form exists()
+--target) -- union/group/plain are all handled inside it already.
+function eval_relation_exists(rel, params, row_ctx)
+	return rel.exists_run(params, row_ctx)
+end
+
+--GROUP ROWS -----------------------------------------------------------------
+
+--[[
+- true when rows with the same key values are guaranteed to come out
+  next to each other, so distinct()/group() can dedup by comparing
+  each row to the one before it instead of hashing.
+- one way that holds: the index the base scan picked already groups
+  these columns together (order_satisfied_set checks that).
+- another way, with no index needed: the columns cover the base
+  table's whole primary key. nested-loop execution visits each base
+  row once, so all of its fan-out rows come out together, no matter
+  what order the scan runs in.
+]]
+function terms_group_consecutive(rel, terms)
+	if order_satisfied_set(terms, rel.natural_order) then return true end
+	if rel.source.kind ~= 'table' then return false end
+	local needed = {} --{col->true}
+	for _, field in ipairs(rel.source.schema.key_fields) do needed[field.col] = true end
+	for _, term in ipairs(terms) do
+		if term.member ~= rel.source.member then return false end
+		needed[term.col] = nil
+	end
+	return not next(needed)
 end
 
 local aggregate_ops = {count = true, min = true, max = true, sum = true, avg = true} --{op->true}
@@ -2900,21 +2992,25 @@ local function new_group(group_outputs, agg_ids, g)
 end
 
 --[[
-- implement hash-based group()+having().
-- materialize one row per distinct group key.
+- build a fresh accumulator for hash-based group()+having().
 - one key uses the value itself; many keys use an interned value tuple.
-- aggregate input rows as they arrive.
-- finish groups after all input rows are drained.
-- works for any input order.
+- accumulate_row(row_ctx) folds one input row in; finish() finishes
+  every group (including the empty-input, all-aggregate special case)
+  and appends the surviving rows -- same finish() shape as
+  streaming_grouping, so a caller never needs to know which
+  strategy it got.
+- shared by run_grouped_hash's own one-shot scan and
+  compile_relation_scan's persistent one -- the grouping logic itself
+  never changes, only how rows reach it does.
 ]]
-local function run_grouped_hash(self, params, rows, group_outputs, key_ids, agg_ids, seed_row_ctx)
+local function hash_grouping(self, params, group_outputs, key_ids, agg_ids, rows)
 	local one_key_groups = #key_ids == 1 and {} --{value->group}
 	local tuple_space = #key_ids > 1 and tuples(#key_ids)
 	local vals = tuple_space and {} --{value...}
 	local group_keys = {} --{group...}: first-seen order
 	local all_group
 	local saw_input = false
-	run_filtered(self, params, function(row_ctx)
+	local function accumulate_row(row_ctx)
 		saw_input = true
 		local g
 		if one_key_groups then
@@ -2949,31 +3045,49 @@ local function run_grouped_hash(self, params, rows, group_outputs, key_ids, agg_
 		for _, i in ipairs(agg_ids) do
 			accumulate(g.acc[i], group_outputs[i][1], params, row_ctx)
 		end
-	end, seed_row_ctx)
-	--[[
-	- all-aggregate outputs have no key columns.
-	- they always produce one group.
-	- empty input gives count() = 0.
-	- empty input gives other aggregates nil.
-	]]
-	if not saw_input and #key_ids == 0 then
-		all_group = new_group(group_outputs, agg_ids)
-		add(group_keys, all_group)
 	end
-	for _, g in ipairs(group_keys) do
-		finish_group_row(self, params, group_outputs, agg_ids, g, rows)
+	local function finish()
+		--[[
+		- all-aggregate outputs have no key columns.
+		- they always produce one group.
+		- empty input gives count() = 0.
+		- empty input gives other aggregates nil.
+		]]
+		if not saw_input and #key_ids == 0 then
+			add(group_keys, new_group(group_outputs, agg_ids))
+		end
+		for _, g in ipairs(group_keys) do
+			finish_group_row(self, params, group_outputs, agg_ids, g, rows)
+		end
 	end
+	return accumulate_row, finish
 end
 
 --[[
-- implement streaming group()+having().
-- caller proves scan order keeps equal group keys adjacent.
-- consecutive rows with the same key fold into the current group.
-- no hash table or string group keys are needed.
-- a group finishes when the key changes.
+- implement hash-based group()+having().
+- materialize one row per distinct group key.
+- finish groups after all input rows are drained.
+- works for any input order.
 ]]
-local function run_grouped_streaming(self, params, rows, group_outputs, key_ids, agg_ids,
-	seed_row_ctx)
+local function run_grouped_hash(self, params, rows, group_outputs, key_ids, agg_ids, seed_row_ctx)
+	local accumulate_row, finish =
+		hash_grouping(self, params, group_outputs, key_ids, agg_ids, rows)
+	run_filtered(self, params, accumulate_row, seed_row_ctx)
+	finish()
+end
+
+--[[
+- build a fresh accumulator for streaming group()+having(): caller proves
+  scan order keeps equal group keys adjacent, so consecutive rows with
+  the same key fold into the current group and no hash table or string
+  group keys are needed -- a group finishes the moment the key changes.
+- accumulate_row(row_ctx) folds one input row in; finish() flushes
+  whatever group is still open once the scan ends.
+- shared by run_grouped_streaming's own one-shot scan and
+  compile_relation_scan's persistent one -- the grouping logic itself
+  never changes, only how rows reach it does.
+]]
+local function streaming_grouping(self, params, group_outputs, key_ids, agg_ids, rows)
 	local cur_key, cur_g
 	local function keys_equal(a, b)
 		for i = 1, #a do
@@ -2981,7 +3095,7 @@ local function run_grouped_streaming(self, params, rows, group_outputs, key_ids,
 		end
 		return true
 	end
-	run_filtered(self, params, function(row_ctx)
+	local function accumulate_row(row_ctx)
 		local key = {} --{val...}
 		for i, id in ipairs(key_ids) do
 			key[i] = eval_value(group_outputs[id][1], params, row_ctx)
@@ -2996,33 +3110,50 @@ local function run_grouped_streaming(self, params, rows, group_outputs, key_ids,
 		for _, i in ipairs(agg_ids) do
 			accumulate(cur_g.acc[i], group_outputs[i][1], params, row_ctx)
 		end
-	end, seed_row_ctx)
-	if cur_g then
-		finish_group_row(self, params, group_outputs, agg_ids, cur_g, rows)
-	elseif #key_ids == 0 then
-		--all-aggregate outputs have no key columns.
-		--empty input produces one group.
-		--count() is 0 and other aggregates are nil.
-		finish_group_row(self, params, group_outputs, agg_ids,
-			new_group(group_outputs, agg_ids), rows)
 	end
+	local function finish()
+		if cur_g then
+			finish_group_row(self, params, group_outputs, agg_ids, cur_g, rows)
+		elseif #key_ids == 0 then
+			--all-aggregate outputs have no key columns.
+			--empty input produces one group.
+			--count() is 0 and other aggregates are nil.
+			finish_group_row(self, params, group_outputs, agg_ids,
+				new_group(group_outputs, agg_ids), rows)
+		end
+	end
+	return accumulate_row, finish
 end
 
-local function run_grouped(self, params, rows, seed_row_ctx)
+local function run_grouped_streaming(self, params, rows, group_outputs, key_ids, agg_ids,
+	seed_row_ctx)
+	local accumulate_row, finish =
+		streaming_grouping(self, params, group_outputs, key_ids, agg_ids, rows)
+	run_filtered(self, params, accumulate_row, seed_row_ctx)
+	finish()
+end
+
+--[[
+- decide whether group()+having() can stream (matching adjacent scan
+  order) or needs a hash pass, and split group_outputs into key vs
+  aggregate output indexes.
+- streaming needs key columns to be plain q.col() expressions.
+- those q.col() expressions must be bound to source fields.
+- computed key expressions require hashing.
+- matching rows must come out consecutively (terms_group_consecutive
+  checks that).
+- join fan-out stays nested inside each driver row.
+- this answer is fully decided by self's compile-time shape, so it never
+  changes across executions of the same compiled relation -- it is still
+  recomputed on every call, not decided once and stored.
+]]
+local function choose_grouping(self)
 	local group_outputs = self.group_outputs
 	local key_ids, agg_ids = {}, {} --{output_index...}
 	for i, output in ipairs(group_outputs) do
 		local expr = output[1]
 		add(type(expr) == 'table' and aggregate_ops[expr[1]] and agg_ids or key_ids, i)
 	end
-	--[[
-	- streaming needs key columns to be plain q.col() expressions.
-	- those q.col() expressions must be bound to source fields.
-	- computed key expressions require hashing.
-	- matching rows must come out consecutively (terms_group_consecutive
-	  checks that).
-	- join fan-out stays nested inside each driver row.
-	]]
 	local key_terms, streaming = {}, true --{{member=,col=}...}
 	for _, i in ipairs(key_ids) do
 		local ct = col_term(group_outputs[i][1])
@@ -3034,6 +3165,11 @@ local function run_grouped(self, params, rows, seed_row_ctx)
 		end
 	end
 	streaming = streaming and terms_group_consecutive(self, key_terms)
+	return group_outputs, key_ids, agg_ids, streaming
+end
+
+local function run_grouped(self, params, rows, seed_row_ctx)
+	local group_outputs, key_ids, agg_ids, streaming = choose_grouping(self)
 	if streaming then
 		run_grouped_streaming(self, params, rows, group_outputs, key_ids, agg_ids,
 			seed_row_ctx)
@@ -3043,97 +3179,7 @@ local function run_grouped(self, params, rows, seed_row_ctx)
 	end
 end
 
---evaluate relation-form exists(); grouped relations must finish groups first.
-function eval_relation_exists(rel, params, row_ctx)
-	if rel.union_inputs then
-		for _, input in ipairs(rel.union_inputs) do
-			if eval_relation_exists(input, params, row_ctx) then return true end
-		end
-		return false
-	end
-	if rel.group_outputs then
-		local rows = {} --{row...}
-		run_grouped(rel, params, rows, row_ctx)
-		return rows[1] ~= nil
-	end
-	local found = false
-	run_filtered(rel, params, function()
-		found = true
-		return true
-	end, row_ctx)
-	return found
-end
-
---[[
-- read one order_by() key value.
-- terms bound to output fields read the built output row.
-- terms bound to source fields read row_ctx before it goes out of scope.
-- terms bound to source fields may not be present in the output row.
-- for an ai_ci field, fold the value first (same folding an ai_ci index
-  does), so we sort "Cafe" next to "cafe" instead of by raw text.
-]]
-local function order_key(term, row, row_ctx)
-	local expr = term[1]
-	local v = expr.source and row_ctx[expr.source.member](expr[3]) or row[expr.field.index]
-	if v ~= nil and expr.field.mdbx_collation == 'utf8_ai_ci' then
-		v = mdbx_fold_ai_ci(v)
-	end
-	return v
-end
-
---compare order_by() keys with null handling.
---ascending sorts null first.
---descending reverses that order.
-local function order_cmp(av, bv, dir)
-	local c
-	if av == nil and bv == nil then c = 0
-	elseif av == nil then c = -1
-	elseif bv == nil then c = 1
-	else c = key_cmp(av, bv) end
-	return dir == 'desc' and -c or c
-end
-
-local function eval_limit_value(x, params)
-	if type(x) ~= 'table' then return x end
-	assert(x[1] == 'param', 'unsupported limit()/offset() value')
-	return params[x[2]]
-end
-
---[[
-- resolve one order_by() term to {member=, col=, dir=}.
-- terms bound to source fields resolve directly.
-- terms bound to output fields resolve through select()/group() output names.
-- terms bound to output fields are order-checkable only for plain passthrough outputs.
-- aggregate or computed outputs return nil.
-]]
-local function order_term(self, term)
-	local expr, dir = term[1], term[2]
-	if expr.source then
-		return {member = expr.source.member, col = expr[3], dir = dir}
-	end
-	local src = output_source_col(self, expr.field.name)
-	return src and {member = src.member, col = src.col, dir = dir}
-end
-
---[[
-- decide whether order_by() needs an explicit sort.
-- no order_by() means no sort.
-- group() and distinct() sort explicitly for now.
-- plain ungrouped rows can reuse driving-member scan order.
-- build_rows() uses this to skip sorting.
-- rows_array() uses this to push limit()/offset().
-]]
-local function sort_actually_needed(self)
-	if not self.order_by_terms then return false end
-	if self.group_outputs or self.distinct_rows then return true end
-	local terms = {} --{{member=,col=,dir=}...}
-	for _, term in ipairs(self.order_by_terms) do
-		local t = order_term(self, term)
-		if not t then return true end
-		add(terms, t)
-	end
-	return not order_satisfied(terms, self.natural_order)
-end
+--PROJECT AND FINISH ---------------------------------------------------------
 
 --project select_outputs (plain columns only) into a sparse array row.
 local function project_row(outputs, row_ctx)
@@ -3180,53 +3226,50 @@ local function hash_dedup_rows(rows, fields, output_fields)
 	return deduped
 end
 
---materialize returned rows after filtering, grouping, distinct, sort, and limit.
-function build_rows(self, params, seed_row_ctx)
-	local rows = {} --{row...}
-	local sort_keys = {} --{row->{val...}}: only filled when an explicit sort is needed
-	local sort_needed = sort_actually_needed(self)
-
-	if self.group_outputs then
-		with_exists_sources(self, run_grouped, self, params, rows, seed_row_ctx)
-		if sort_needed then
-			for _, row in ipairs(rows) do
-				local key = {} --{val...}
-				for i, term in ipairs(self.order_by_terms) do
-					key[i] = order_key(term, row, nil)
-				end
-				sort_keys[row] = key
-			end
-		end
-	else
-		local outputs = self.select_outputs
-		with_exists_sources(self, run_filtered, self, params, function(row_ctx)
-			local row = project_row(outputs, row_ctx)
-			if sort_needed then
-				local key = {} --{val...}
-				for i, term in ipairs(self.order_by_terms) do
-					key[i] = order_key(term, row, row_ctx)
-				end
-				sort_keys[row] = key
-			end
-			add(rows, row)
-		end, seed_row_ctx)
+--[[
+- read one order_by() key value.
+- terms bound to output fields read the built output row.
+- terms bound to source fields read row_ctx before it goes out of scope.
+- terms bound to source fields may not be present in the output row.
+- for an ai_ci field, fold the value first (same folding an ai_ci index
+  does), so we sort "Cafe" next to "cafe" instead of by raw text.
+]]
+local function order_key(term, row, row_ctx)
+	local expr = term[1]
+	local v = expr.source and row_ctx[expr.source.member](expr[3]) or row[expr.field.index]
+	if v ~= nil and expr.field.mdbx_collation == 'utf8_ai_ci' then
+		v = mdbx_fold_ai_ci(v)
 	end
+	return v
+end
 
+--compare order_by() keys with null handling.
+--ascending sorts null first.
+--descending reverses that order.
+local function order_cmp(av, bv, dir)
+	local c
+	if av == nil and bv == nil then c = 0
+	elseif av == nil then c = -1
+	elseif bv == nil then c = 1
+	else c = key_cmp(av, bv) end
+	return dir == 'desc' and -c or c
+end
+
+local function eval_limit_value(x, params)
+	if type(x) ~= 'table' then return x end
+	assert(x[1] == 'param', 'unsupported limit()/offset() value')
+	return params[x[2]]
+end
+
+--[[
+- apply distinct(), sort, and limit()/offset() to already-collected rows.
+- runs once per probe, over whatever rows that probe produced -- no
+  persistent scan of its own, unlike the row-collecting step before it.
+]]
+local function finish_rows(self, params, rows, sort_needed, sort_keys)
 	if self.distinct_rows then
 		local fields = dedup_key_fields(self)
-		--[[
-		- streaming distinct removes adjacent duplicates.
-		- it applies only to plain ungrouped rows.
-		- every dedup field must be a source-column passthrough.
-		- rows with the same dedup value must come out consecutively
-		  (terms_group_consecutive checks that).
-		]]
-		local streaming = false
-		if not self.group_outputs then
-			local terms = returned_source_terms(self, fields)
-			streaming = terms ~= nil and terms_group_consecutive(self, terms)
-		end
-		if streaming then
+		if self.distinct_streaming then
 			local deduped = {} --{row...}
 			local indexes = {} --{field_index...}
 			for i, name in ipairs(fields) do indexes[i] = self.output_fields[name].index end
@@ -3269,18 +3312,231 @@ function build_rows(self, params, seed_row_ctx)
 	return rows
 end
 
+--COMPILE A RELATION OR JOIN STEP --------------------------------------------
+
 --[[
-materialize a union relation's rows: each input read in full and
-concatenated. union is a bag union, never deduped -- wrap it with
-from(union, alias):distinct() for set-union semantics.
-used by rows()/first()/one()/must_one()/rows_array() and relation materialization sites
-such as from(rel, alias) and relation-form in_()/not_in(); count() sums each
-input's own count() instead (see compile_union) and exists() never
-materializes rows.
-seed_row_ctx carries any outer row decoders into each union input.
-not lowered to a single pass over a merged pk stream (mdbx_query_builder.lua's
-rejected "pk-level union pushdown" bench note found ~2x there but judged not
-worth the added surface) -- no evidence yet that this engine needs it either.
+- compile one relation-kind source/join step.
+- called once per step at compile time.
+- returns an opener for one query execution.
+- opener returns run(params, row_ctx, row_fn), close(), and
+  exists_run(params, row_ctx).
+- run() and exists_run() reseek a persistent scan instead of rebuilding
+  one: a joined relation reuses its cursors, buffers, decoders, and
+  processor chain across every outer driving row -- only the seek values
+  (through row_ctx) and the collected output rows differ per call.
+- run() projects and applies group()/distinct()/sort()/limit() fresh on
+  every call, since their input differs per call -- only the scan
+  feeding them is persistent. used where output values are actually
+  read: a join's right side, and in_()'s relation form (bind-time
+  guaranteed to have exactly one returned field).
+- exists_run() applies no projection and no distinct()/sort()/limit() --
+  existence never depends on any of them. it must not require
+  select()/group() to be set: a bare where()-only relation is a legal
+  exists() argument, and routing it through run() instead would crash on
+  project_row()'s missing outputs.
+- row_ctx seeds the inner relation for correlated where()/on() reads.
+]]
+--[[local]] function compile_relation_scan(nested_rel)
+	--a union relation has no .access/.exists_sources of its own -- each
+	--input is a whole compiled relation, so each gets this same
+	--treatment, recursively (depth matches how many :union() calls were
+	--chained, never open-ended). run() and exists_run() try each input
+	--in turn, stopping at the first one that matches.
+	if nested_rel.union_inputs then
+		return function()
+			local sub_runs, sub_closes, sub_exists_runs = {}, {}, {}
+			for i, input in ipairs(nested_rel.union_inputs) do
+				sub_runs[i], sub_closes[i], sub_exists_runs[i] = compile_relation_scan(input)()
+			end
+			local function run(params, row_ctx, row_fn)
+				for _, sub_run in ipairs(sub_runs) do
+					if sub_run(params, row_ctx, row_fn) then return true end
+				end
+			end
+			local function close()
+				for _, sub_close in ipairs(sub_closes) do sub_close() end
+			end
+			local function exists_run(params, row_ctx)
+				for _, sub_exists_run in ipairs(sub_exists_runs) do
+					if sub_exists_run(params, row_ctx) then return true end
+				end
+				return false
+			end
+			return run, close, exists_run
+		end
+	end
+
+	local output_fields = nested_rel.output_fields
+	return function()
+		--[[
+		- persistent scan state for nested_rel's own access steps and
+		  exists() sources, built lazily on the first scan() call --
+		  row_ctx (what they chain onto) doesn't exist at opener time,
+		  same reason eval_exists_source()'s child_ctx is built lazily.
+		- neither params nor the seed row_ctx's identity changes across
+		  probes within one containing execution, so nothing scan()
+		  closes over needs rebuilding either -- only what happens at
+		  the leaf does, through current_row_handler.
+		]]
+		local opened, exists_closes, row_ctx, process, scan_params
+		local current_row_handler
+		local late_conditions = nested_rel.late_conditions
+		local function terminal_callback(rc)
+			for _, cond in ipairs(late_conditions) do
+				if not eval_residual(cond.expr, scan_params, rc) then return end
+			end
+			return current_row_handler(rc)
+		end
+		local function ensure_open(params, seed_row_ctx)
+			if opened then return end
+			scan_params = params
+			opened = open_access(nested_rel.access)
+			exists_closes = {} --{close_fn...}
+			for _, entry in ipairs(nested_rel.exists_sources) do
+				add(exists_closes, open_exists_source(entry))
+			end
+			row_ctx = seed_row_ctx and setmetatable({}, {__index = seed_row_ctx}) or {}
+			process = build_processors(nested_rel.access, params, row_ctx,
+				function() return terminal_callback(row_ctx) end)
+		end
+		--reseek: walk nested_rel's access with whatever seed_row_ctx
+		--currently holds, handing each surviving row to row_handler.
+		local function scan(params, seed_row_ctx, row_handler)
+			ensure_open(params, seed_row_ctx)
+			current_row_handler = row_handler
+			return process()
+		end
+		local function close()
+			if not opened then return end
+			close_access(opened)
+			for _, c in ipairs(exists_closes) do c() end
+		end
+
+		--one decode_col closure serves every row of every run() call;
+		--row is the only thing that changes between rows.
+		local row
+		local function decode_col(col) return row[output_fields[col].index] end
+
+		--materialize returned rows for one probe: project(), then
+		--group()/distinct()/sort()/limit() exactly as build_rows() does,
+		--just fed by the persistent scan() instead of a fresh one.
+		local function materialize(params, seed_row_ctx)
+			local rows = {} --{row...}
+			local sort_keys = {} --{row->{val...}}
+			local sort_needed = nested_rel.sort_needed
+			if nested_rel.group_outputs then
+				local group_outputs, key_ids, agg_ids, streaming = choose_grouping(nested_rel)
+				local accumulate_row, finish
+				if streaming then
+					accumulate_row, finish =
+						streaming_grouping(nested_rel, params, group_outputs, key_ids, agg_ids, rows)
+				else
+					accumulate_row, finish =
+						hash_grouping(nested_rel, params, group_outputs, key_ids, agg_ids, rows)
+				end
+				scan(params, seed_row_ctx, accumulate_row)
+				finish()
+				if sort_needed then
+					for _, r in ipairs(rows) do
+						local key = {} --{val...}
+						for i, term in ipairs(nested_rel.order_by_terms) do
+							key[i] = order_key(term, r, nil)
+						end
+						sort_keys[r] = key
+					end
+				end
+			else
+				local outputs = nested_rel.select_outputs
+				scan(params, seed_row_ctx, function(rc)
+					local r = project_row(outputs, rc)
+					if sort_needed then
+						local key = {} --{val...}
+						for i, term in ipairs(nested_rel.order_by_terms) do
+							key[i] = order_key(term, r, rc)
+						end
+						sort_keys[r] = key
+					end
+					add(rows, r)
+				end)
+			end
+			return finish_rows(nested_rel, params, rows, sort_needed, sort_keys)
+		end
+		local function run(params, row_ctx_arg, row_fn)
+			for _, r in ipairs(materialize(params, row_ctx_arg)) do
+				row = r
+				if row_fn(decode_col) then return true end
+			end
+		end
+
+		--does anything survive: no projection, no distinct()/sort()/limit().
+		local function exists_run(params, seed_row_ctx)
+			if nested_rel.group_outputs then
+				local rows = {} --{row...}
+				local group_outputs, key_ids, agg_ids, streaming = choose_grouping(nested_rel)
+				local accumulate_row, finish
+				if streaming then
+					accumulate_row, finish =
+						streaming_grouping(nested_rel, params, group_outputs, key_ids, agg_ids, rows)
+				else
+					accumulate_row, finish =
+						hash_grouping(nested_rel, params, group_outputs, key_ids, agg_ids, rows)
+				end
+				scan(params, seed_row_ctx, accumulate_row)
+				finish()
+				return rows[1] ~= nil
+			end
+			return scan(params, seed_row_ctx, function() return true end) or false
+		end
+
+		return run, close, exists_run
+	end
+end
+
+--MATERIALIZE AND THE PUBLIC API ---------------------------------------------
+
+--materialize returned rows after filtering, grouping, distinct, sort, and limit.
+function build_rows(self, params, seed_row_ctx)
+	local rows = {} --{row...}
+	local sort_keys = {} --{row->{val...}}: only filled when an explicit sort is needed
+	local sort_needed = self.sort_needed
+
+	if self.group_outputs then
+		with_exists_sources(self, run_grouped, self, params, rows, seed_row_ctx)
+		if sort_needed then
+			for _, row in ipairs(rows) do
+				local key = {} --{val...}
+				for i, term in ipairs(self.order_by_terms) do
+					key[i] = order_key(term, row, nil)
+				end
+				sort_keys[row] = key
+			end
+		end
+	else
+		local outputs = self.select_outputs
+		with_exists_sources(self, run_filtered, self, params, function(row_ctx)
+			local row = project_row(outputs, row_ctx)
+			if sort_needed then
+				local key = {} --{val...}
+				for i, term in ipairs(self.order_by_terms) do
+					key[i] = order_key(term, row, row_ctx)
+				end
+				sort_keys[row] = key
+			end
+			add(rows, row)
+		end, seed_row_ctx)
+	end
+
+	return finish_rows(self, params, rows, sort_needed, sort_keys)
+end
+
+--[[
+- materialize a union relation's rows: each input read in full and
+  concatenated.
+- union is a bag union, never deduped -- wrap it with
+  from(union, alias):distinct() for set-union semantics.
+- count() sums each input's own count() instead, and exists() never
+  materializes rows -- both have their own handling elsewhere.
+- seed_row_ctx carries any outer row decoders into each union input.
 ]]
 function union_rows(self, params, seed_row_ctx)
 	local rows = {} --{row...}
@@ -3306,7 +3562,7 @@ local function rows_array(self, params, limit, seed_row_ctx)
 	if self.union_inputs then
 		return union_rows(self, params, seed_row_ctx)
 	end
-	if self.group_outputs or self.distinct_rows or sort_actually_needed(self) then
+	if self.group_outputs or self.distinct_rows or self.sort_needed then
 		return build_rows(self, params, seed_row_ctx)
 	end
 	local offset, cap = 0, limit
@@ -3469,6 +3725,11 @@ function Rel:exists(params)
 	return found
 end
 
+function Rel:prepare(terminal_kind)
+	compile(self, terminal_kind or 'rows', nil, true)
+	return self
+end
+
 --describe one access step for explain().
 --normal steps report one member.
 --nested left-join fragment groups report inner steps under .nested.
@@ -3493,13 +3754,13 @@ function Rel:explain()
 	local steps = {} --{step_desc...}
 	for _, step in ipairs(self.access) do add(steps, describe_step(step)) end
 	local sort = self.order_by_terms ~= nil
-	local sort_pushed = sort and not sort_actually_needed(self)
+	local sort_pushed = sort and not self.sort_needed
 	--limit()/offset() pushes into the scan under rows_array() conditions.
 	--no group() or distinct() can require materialization.
 	--no explicit sort can be needed.
 	local limit = self.limit_rows ~= nil
 	local limit_pushed = limit
-		and not (self.group_outputs or self.distinct_rows or sort_actually_needed(self))
+		and not (self.group_outputs or self.distinct_rows or self.sort_needed)
 	return {
 		steps = steps,
 		group = self.group_outputs ~= nil,
