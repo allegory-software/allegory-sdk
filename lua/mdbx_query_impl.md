@@ -22,12 +22,10 @@ shape allows it.
 Two design choices shape everything downstream:
 
 **1. Build first, run later.** You chain methods (`where`, `join`,
-`select`, ...) to build up a "relation" value. Nothing touches the
+`select`, ...) to build up a relation (`Rel` object). Nothing touches the
 database until a terminal method (`rows()`, `count()`, ...) is called.
 This matters because deciding whether an index helps requires seeing the
-*whole* query at once — one `where()` call in isolation tells you
-nothing; you need every condition together to know which columns are
-pinned down.
+*whole* query at once — one `where()` call in isolation tells you nothing.
 
 **2. No statistics, no cost model.** A real SQL engine picks a plan by
 estimating row counts and costs. This module has none of that. It has a
@@ -55,18 +53,18 @@ right one to hold in your head.
   checks, group/sort/limit. Cheap, repeatable — because params never
   change the plan, only which rows a fixed plan visits.
 
-## The stages
+## Compilation stages
 
-**1. Building the relation** (`Rel` methods, `parse_*` functions)
-In: your method calls (`where`, `join`, `select`, ...). Out: a relation
-value that's just stored, unvalidated data — lists of conditions, a
+**Building the relation** (`Rel` methods, `parse_*` functions)
+In: your method calls (`where`, `join`, `select`, ...). Out: a rel
+object that's just stored, unvalidated data — lists of conditions, a
 select-outputs list, etc. Nothing is checked against a schema yet. Why:
 this gives you a mutable value the rest of the pipeline can transform in
 place, and it decouples *how you wrote the query* (method call order)
 from *what order it runs in* (fixed SQL order) — the builder just
 accumulates, order is imposed later.
 
-**2. Expressions** (`q.col`, `q.eq`, `q.exists`, ...)
+**Expressions** (`q.col`, `q.eq`, `q.exists`, ...)
 Each of these just builds a small tagged Lua table like `{'eq', a, b}`.
 Not resolved to anything real yet — no schema knowledge is needed to
 construct one. Why: expressions need to exist as a rewritable tree,
@@ -74,37 +72,32 @@ because later stages need to walk them (to bind names, to classify
 facts, to reshape `q.or_` into `q.in_`, etc.) without re-parsing
 anything.
 
-**3. `compile()` entry**
-This one function does everything from here on, in a single recursive
-pass — recursive because a subquery (in `exists()`, `in_()`, or a join
-source) gets compiled too, with this relation as its parent scope. It's
-triggered lazily by the first terminal call, remembers which terminal
-kind (`rows`, `count`, `exists`, ...) it was compiled for, and refuses to
-compile again for a different kind. Why lazy: a relation might be
-embedded as someone else's subquery and never compiled standalone at
-all.
+**Compilation**
+Compilation does everything in a single recursive pass — recursive because a
+subquery (in `exists()`, `in_()`, or join) gets compiled too, with this rel
+as its parent scope. It's triggered lazily by the first terminal call or by
+a call to `prepare()`.
 
-**4. `resolve_sources`**
-In: the raw `source`/`joins` list. Out: a `members` list — one entry per
-table or nested relation participating in this query, each with a name
-(its alias) and the fields it can supply. This step also flattens
-"fragments" — an unaliased relation passed to `join()` isn't a subquery,
-it's just a way to group several joined tables so `left_join()` can
-treat the whole group as one atomic optional unit; its members get
-merged straight into this relation's member list, and its `where()`
-conditions get merged into the join's `on` condition. (See the deep dive
-below.)
+**Resolving sources**
+In: the raw `joins` list. Out: a `sources` list — one entry per table or
+nested rel participating in this query, each with a name (its alias) and
+the fields it can supply. This step also flattens join groups: an unaliased
+rel passed to `join()` isn't a subquery, it's just a way to group several
+joined tables so `left_join()` can treat the whole group as one atomic optional
+unit; its sources get merged straight into this rel's source list, and its
+`where()` conditions get merged into the join's `on` condition (for left joins)
+or into rel's `where()` condition list (for inner and cross joins).
 
-**5. Output name maps**
+**Output column maps**
 Before any name gets resolved, the compiler needs to know what
 `select()`/`group()` produce as named outputs, because some later
 expressions (like `order_by()` after a `group()`) bind against *those*
 names instead of table columns.
 
-**6. Scope + `bind_expr`** — name resolution
-This walks every expression tree stored anywhere in the relation and
+**Column binding**
+This walks every expression tree stored anywhere in the rel and
 rewrites each `q.col()` node in place to point at a real field: which
-member, which column. It uses a different lookup scope depending on
+source, which column. It uses a different lookup scope depending on
 where the expression sits — `where()`/join `on` look up table fields,
 `having()` looks up group outputs, `select()` after a `group()` looks up
 group outputs, and so on. Nested relations get a "parent scope" chained
@@ -112,7 +105,17 @@ on, so `q.outer()` inside them can validate that a name resolves
 *outside* the subquery. This is exactly the scoping problem a compiler
 solves for nested function bodies — same shape, different vocabulary.
 
-**7. Condition splitting and fact classification**
+**Condition splitting and fact classification**
+At this stage compilation knows which tables the query touches and it binded
+every column name to the right table/column pair. But it has no opinion at all
+on how to actually go get the data — it doesn't know whether to scan a whole
+table, use an index, in what order rows would come back, or whether joins could
+run in any particular order.
+
+This decision comes now: for every table in the query, it decides the fastest way to read it, works out a safe order to run the joins in, and figures out whether the rows will already come out sorted/grouped the way order_by()/group_by()/distinct() want, so a second sorting pass can often be skipped entirely.
+
+Without this, the only correct fallback would be: read every row of every table, check every condition on every row by hand, then sort everything afterward. That works, but it doesn't use your indexes or your primary keys at all.
+
 `where()` conditions and a top-level `q.and_()` both get flattened into
 one list of independent conditions (since `A and B and C` can be checked
 as three independent things, whichever order is convenient). Each
@@ -125,36 +128,36 @@ those shapes just stays an ordinary condition with no fact kind — it'll
 be checked row by row later, never used to drive a seek. (See the deep
 dive below on how "fact" relates to "condition".)
 
-**8. Cursor choice / access planning** — the actual "planner"
-This is the core of the module. For each table member, it looks only at
-the conditions that mention *that one member and nothing else*, and
+**Cursor choice / access planning** — the actual "planner"
+This is the core of the module. For each table source, it looks only at
+the conditions that mention *that one source and nothing else*, and
 asks: how many leading columns of some key (the primary key, or an
 available index) does an equality condition pin down exactly? Can the
 next column after that be narrowed by a range, a prefix, or a membership
 list? That answer — which key, how many leading columns are pinned, what
 (if anything) bounds the next one — *is* the plan for scanning that
-member. Everything not covered by the chosen key becomes a "residual"
+source. Everything not covered by the chosen key becomes a "residual"
 row check, run after the row is fetched. There's one extra rule: if
 there's a `limit()` and the scan's natural order already matches
 `order_by()`, that ordered scan can beat a filter-driven plan, because
 stopping early after N rows in the right order can be cheaper than
 filtering everything then sorting and truncating it.
 
-This stage also decides join order: a member can only start scanning
-once every member its `on_expr` reads from has already been scheduled (a
+This stage also decides join order: a source can only start scanning
+once every source its `on_expr` reads from has already been scheduled (a
 dependency sort — cycles are a compile error), and it records whether
 the resulting overall scan order happens to already satisfy
 `order_by()`/`group()`/`distinct()`, so later stages know whether they
 can skip materializing everything just to sort or dedupe it.
 
-Why no cost model here either: picking "the best" index in general needs
+Why no cost model here: picking "the best" index in general needs
 row-count estimates. This code sidesteps that by using a purely
 structural ranking — more pinned/narrowed key columns wins, ties broken
 by fact kind. It can't be "wrong" in the sense of returning bad rows,
 only "not optimal" in the sense a cost-based planner might do better on
 skewed data.
 
-**9. Executor construction** (still compile time)
+**Executor construction** (still compile time)
 Each chosen access plan gets turned into a reusable "opener" — a closure
 factory that, when called, opens real MDBX cursors and hands back
 `run()`/`close()` functions. Built once per compiled relation, not once
@@ -162,7 +165,9 @@ per call to `rows()` — because building all these value-reading closures
 is real work you don't want to repeat every execution, let alone every
 row.
 
-**10. Run time: join execution** (`run_query`/`build_processors`)
+## Execution stages
+
+**Run time: join execution** (`run_query`/`build_processors`)
 This is where rows actually get produced. The access steps are wired
 into a closure chain, innermost to outermost: scanning step N calls step
 N+1's runner once for every one of its rows. Nested loops fall out of
@@ -171,20 +176,20 @@ This module only implements one join strategy — nested loop — which is
 the natural consequence of walking dependency-ordered cursors; there's
 no hash join or merge join.
 
-**11. Residual and late conditions**
+**Residual and late conditions**
 A condition an index only partially proved gets checked the moment its
-member's row is available (attached right to that step). A condition
-that reads more than one member can't be checked until every member it
+source's row is available (attached right to that step). A condition
+that reads more than one source can't be checked until every source it
 needs has been scanned, so those run last, after a full row combination
 is assembled.
 
-**12. Group / having**
+**Group / having**
 Once rows are flowing, they can optionally fold into groups. If the scan
 order already keeps equal group keys next to each other, grouping is
 streaming (single pass, no memory). Otherwise it falls back to a hash
 table keyed by the group key. `having()` then filters finished groups.
 
-**13. Select / distinct / sort / limit**
+**Select / distinct / sort / limit**
 `select()` turns the row into an array of output values. `distinct()` removes
 duplicates — streaming (adjacent-only) when the scan order already
 groups equal rows together, hash-set otherwise. Sorting only happens if
@@ -197,7 +202,7 @@ sentinel value up through a `pcall` — a deliberate use of Lua's error
 mechanism as a fast way to unwind out of the nested closures from stage
 10.
 
-**14. Terminals**
+**Terminals**
 `rows()`, `first()`, `one()`, `must_one()`, `count()`, `exists()` are
 thin wrappers that differ mainly in how many rows they ask for (1 for
 `first()`, 2 for `one()`/`must_one()` — just enough to detect "more than
@@ -217,106 +222,88 @@ in the doc comment at the top of the file) is a design sketch, not a
 literal map of the code. In the real code, stages 3-8 above all happen
 inside one call to `compile()`, not as separate passes.
 
-## Implementation abstractions
+## Implementation concepts
 
-- table spec
-	- .table + .alias
-- source
-	- exposes .member and .fields after source resolution
-	- can refer to a table or an aliased relation
-	- .fields maps field names to schema fields or returned-field indexes
-- members list (rel.members)
-	- the flat symbol table used by q.col() to solve col refs
-- fragment
-	- unaliased relation to be used as the right side of a join
-	- useful for grouping joins (it matters for left join)
-	- its .members are merged into rel.members
-	- its .wheres are merged into the join's `on` condition
-- fact
-	- a classified `where` condition that might be answerable by an index
-	- .kind: equality, range, prefix, membership, existence, or null
-- residual row check
-	- a condition evaluated after all source members it reads are available
-- terminal
-	- a public operation that chooses how the relation is executed and returned
-- executor
-	- the runtime closure chain that scans members and emits row contexts
-
+- `rel` (relation): query object.
+- `source`: uniform wrapper over table or aliased rel with `name` and `cols`.
+- `scope`: namespace for sources and cols. group_by and exists create scopes.
+- `join group`: rel without terminals used to join with.
+- `terminal`: one of the methods that executes rel.
+- `fixed col`: a leading key column that has an `= value` condition, so every
+row that the scan reads will have that value on that key.
+- `fact`: a per-column value pulled from a condition for one source's access
+plan; thrown away once that plan is chosen.
+- `fact kind`: equality, range, prefix, membership, existence, or null.
+- `condition record`: a wrapper for each flattened where()/having()/join
+condition with a classification tag and a "has this been used up by an index
+seek yet" flag.
+- `residual row check`: a condition checked as soon as its own source's row
+is fetched.
+- `late condition`: a condition needing every source scanned before it can be
+checked.
+- `executor`: the runtime query node chain that scans sources and emits rows.
+- `access plan`: a structured description of "how to read this one table", i.e.
+which key, how many leading columns are pinned, which direction, what's left
+as a manual check.
+- `plan kind`: exact, range, prefix, eq_prefix, in, or full -- how well a key
+matches a source's conditions.
+- `natural order`: the order rows come out of a scan in, treated as a real,
+comparable value instead of an implicit assumption.
+- `rel.access`: the list of per-table steps for the whole query, in scheduled
+order, each one either a plain step or a nested left-joined group.
+- `col_term`: source+col+direction(when order matters), so that
+order_by()/group_by()/distinct() can be compared directly against what a
+table key naturally produces.
 
 ## Deep dives
 
-### resolve_sources: building the member scope
+#### What "resolving" means
 
-`resolve_sources` (plural) and `resolve_source` (singular) are two different functions doing two different jobs — worth keeping separate in your head since the naming is easy to conflate.
+`resolve_sources` wraps row sources, which can be aliased tables or rels into
+a uniform shape with:
+- `.name` — the name it's addressed by (alias if given, else the table name).
+- `.cols` — schema fields list+map for tables, or output cols list+map.
+- `.schema` — for a table, its schema object from `db:table_schema(table_name)`.
 
-#### What "resolving" means here
-
-`resolve_source` (singular) takes one source — either a table spec
-(`{kind='table', table=, alias=}`, produced earlier by
-`parse_table_spec`) or a relation object — and turns it into a uniform
-shape with three things:
-- `.member` — the name it's addressed by (alias if given, else the table
-  name)
-- `.schema` — for a table, an actual lookup into `mdbx_schema`
-  (`db:table_schema(source.table)`) to get the real schema object
-- `.fields` — a name-to-field map
-
-For a table, `.fields` comes straight from the schema. For a relation
-source, there's no schema — instead `.fields` is synthesized from the
-*already-compiled* subquery's `returned_fields`: `{name = name, index =
-i}` for each output column. So a subquery's output columns become
-addressable exactly like table columns, but only the columns it chose to
-return — its internals stay invisible. That's the point: after this
-step, code anywhere downstream (name binding, index planning) can treat
-"a table" and "a subquery result" identically, through the same
-`.member`/`.fields` shape, without caring which one it actually is.
+For a table, `.cols` comes straight from the schema. For a rel source, there's
+no schema — instead `.cols` is synthesized from the *already-compiled*
+subquery's `out_cols` for each output column. So a subquery's output columns
+become addressable exactly like table columns, but only the columns it chose
+to return — its internals stay invisible. That's the point: after this step,
+code anywhere downstream (name binding, index planning) can treat "a table"
+and "a subquery result" identically, through the same `.name`/`.cols` shape,
+without caring which one it actually is.
 
 So "resolving" = going from *what the user wrote* (a bare string, or a
 `Rel` object) to *a concrete, schema-backed thing with known columns* —
 the same sense as "resolving a symbol": you had a name, now you have the
 definition it points to.
 
-#### Why build the members list
+#### Why build the sources list
 
-`resolve_sources` (plural) is the driver: it calls `resolve_source` on
-the base source and every join's right side, and assembles the results
-into `rel.members` — both an ordered array and a name-to-source map
-(`members[source.member] = source`).
-
-This list is what stage 6 (`bind_expr`, specifically
-`find_member`/`find_col`) searches when it resolves `q.col()`. Qualified
-refs (`q.col('p.title')`) look up `members['p']` directly — O(1) map
-lookup. Unqualified refs (`q.col('title')`) have to walk the ordered
-array checking every member's `.fields` for one that has that column,
+This list is what `bind_expr()` searches when it resolves `q.col()`.
+Qualified refs like `q.col('p.title')` look up `sources['p']` directly.
+Unqualified refs like `q.col('title')` have to walk the ordered array
+checking every source's `.cols` for one that has that column,
 raising "ambiguous field" if more than one does — that needs the array,
 not just the map, since it has to check *all* candidates before
-deciding. The map is also how alias collisions get caught
-(`assertf(not members[source.member], 'duplicate source member')`).
+deciding. The map is also how alias collisions get caught.
 
 Stage 8 (`choose_access`) also consumes this list — `access_conditions`
-and `referenced_members` check whether a `q.col()`'s bound `.source` is a
+and `referenced_sources` check whether a `q.col()`'s bound `.source` is a
 member of *this* relation's flat scope (`members[expr.source.member] ==
 expr.source`) versus belonging to an outer scope. So the members list is
 really the flat symbol table this whole compile pass resolves names
 against.
 
-#### The fragment "contradiction" — it isn't one, it's two different concerns
+#### Join groups
 
-A fragment always flattens its members into the parent's name scope, but
-also stays grouped as one atomic unit at execution time for
-`left_join()`. Both are true, but they answer two unrelated questions,
-at two different stages:
-
-**Stage 4 (`resolve_sources`, naming):** a fragment *always* flattens
-its members into `rel.members`, regardless of whether it was passed to
-`join()` or `left_join()`. This has to happen because a fragment is
-unaliased by definition — it's not a subquery, it's just a grouping
-device. If its members didn't flatten into the parent's name scope,
-you'd have no way to write `q.col('pt.tag')` from the outer query at
-all; you'd need an alias, which is exactly what turns it into an aliased
-sub-relation instead of a fragment. So flattening at the naming level is
-what makes a fragment a fragment rather than a subquery — it's the whole
-reason the feature exists.
+A join group is when joining with a rel without providing an alias. When
+given an alias, that's joining with a sub-query, which is very different.
+A join group is not a subquery, it's just a grouping device. Its sources
+flatten into the parent's name scope so that you can reference their columns
+directly from the outer query. A join group stays grouped as one atomic unit
+at execution time because left join requires it.
 
 **Stage 8 (`build_access`, execution):** here the join kind actually
 matters, and this is a separate question — not "what can I call this
