@@ -914,6 +914,80 @@ local function group_key_terms(rel)
 	end
 end
 
+--[[
+- true when rows sharing the same values for these terms are
+  guaranteed to come out of the whole access chain next to each other,
+  so a streaming grouper/dedup (pk_group+stream_aggregate,
+  stream_distinct) can compare each row to the one before it instead
+  of hashing every group in memory.
+- first way this holds: the chosen access plan's own natural_order
+  already keeps these terms' cols adjacent -- the same set check
+  dedup_only()'s NEXT_NODUP path uses, minus that path's extra "covers
+  the whole key" condition: a proper prefix of the varying natural
+  order is enough for grouping specifically (nothing needs to vary
+  after it), unlike NEXT_NODUP's stricter requirement.
+- second way, needing no natural order at all: the terms cover the
+  base (driving) source's whole primary key. nested-loop execution
+  (pk_join_seek/nested_join) processes one base row's entire join
+  fan-out before moving to the next, so every row sharing one base
+  row's identity comes out together regardless of what order any
+  joined source's own scan runs in.
+- ported from mdbx_query.lua's terms_group_consecutive(), which this
+  file's own TODOs already named as the missing piece.
+]]
+local function terms_group_consecutive(rel, terms)
+	if order_satisfied_set(terms, rel.natural_order) then return true end
+	local base_source = rel.access[1].source
+	if not base_source.table or base_source.schema.virtual then
+		return false
+	end
+	local needed = {} --{key->true}
+	for _, col in ipairs(base_source.schema.pk) do
+		needed[base_source.name..'.'..col] = true
+	end
+	for _, term in ipairs(terms) do
+		if not needed[term.key] then return false end
+		needed[term.key] = nil
+	end
+	return not next(needed)
+end
+
+--[[
+- decide whether group_by()'s aggregates can stream (pk_group +
+  stream_aggregate) instead of hashing (hash_aggregate).
+- group_key_terms() returns nil both when group_by() wasn't called and
+  when it has no non-aggregate (key) cols at all (a grand total) --
+  neither case can stream, since there's no key to keep adjacent.
+- benchmarked in the prior implementation (mdbx_query_builder.lua's
+  "CONFIRMED BY BENCH" notes): streaming wins by ~147x when order is
+  free; hashing wins by ~3x when it isn't, since sorting just to
+  unlock streaming costs more than it saves.
+]]
+local function group_actually_streamable(rel)
+	if not rel.group_cols then return false end
+	local terms = group_key_terms(rel)
+	if not terms then return false end
+	return terms_group_consecutive(rel, terms)
+end
+
+--[[
+- decide whether distinct() can stream (stream_distinct) instead of
+  hashing (hash_distinct) -- same terms_group_consecutive() check
+  group_actually_streamable() uses, over distinct()'s own dedup key
+  cols instead of group_by()'s.
+- distinct() after group_by() always hashes: the aggregated output's
+  order isn't rel.natural_order (that describes the pre-aggregation
+  access chain, not what pk_group/stream_aggregate or hash_aggregate
+  happen to emit), and nothing tracks the aggregated order separately
+  yet.
+]]
+local function distinct_actually_streamable(rel)
+	if not rel.distinct_cols or rel.group_cols then return false end
+	local terms = group_key_terms(rel)
+	if not terms then return false end
+	return terms_group_consecutive(rel, terms)
+end
+
 --CHOOSE HOW TO READ ONE TABLE -----------------------------------------------
 
 local fact_kind = { --{op->fact kind}
@@ -1813,19 +1887,14 @@ MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup check
 	--SORT AND DEDUP ----------------------------------------------------------
 
 	--[[
-	- whether an explicit sort is needed is fully decided by what's
-	  already been set above (order_cols, natural_order, group_cols,
-	  distinct_cols) -- decide it once here, instead of recomputing it on
-	  every execution.
-	- distinct_streaming (skip adjacent duplicates at the cursor instead
-	  of hashing) needs terms_group_consecutive() from the execution
-	  stage, not yet ported; always hashing is correct, just not the
-	  fastest path yet.
+	- whether an explicit sort is needed, or a group/distinct can stream
+	  instead of hash, is fully decided by what's already been set above
+	  (order_cols, natural_order, group_cols, distinct_cols) -- decide it
+	  once here, instead of recomputing it on every execution.
 	]]
 	rel.sort_needed = sort_actually_needed(rel)
-	--TODO: always false; needs terms_group_consecutive() from the
-	--execution stage to actually stream instead of hash.
-	rel.distinct_streaming = false
+	rel.distinct_streaming = distinct_actually_streamable(rel)
+	rel.group_streaming = group_actually_streamable(rel)
 
 	--COLLECT EXISTS TARGETS --------------------------------------------------
 
@@ -1865,7 +1934,10 @@ end
 ]]
 --TODO: a q.col() expr (a correlated read of another, already-scheduled
 --source) isn't handled -- not reachable for a single, un-joined access
---step; needed once joins are wired up.
+--step. Still not reachable now that joins exist either: a joined
+--step's own seek goes through pk_join_seek's raw pk bytes, and a
+--nested group's base step goes through reset_prefix (see
+--compile_nested below); neither ever calls compile_getter.
 local function compile_getter(expr, params)
 	if type(expr) == 'table' and expr[1] == 'param' then
 		local name = expr[2]
@@ -1900,6 +1972,200 @@ local function compile_plan(plan, params)
 	return node_plan
 end
 
+--EVALUATE RESIDUAL CONDITIONS -----------------------------------------------
+
+--where()/having() treat only false, nil, and null as rejection.
+local function expr_passes(v)
+	return v ~= nil and v ~= false and v ~= null
+end
+local function null_value(v)
+	return v == nil or v == null
+end
+--is x a column read (q.col()) that points at an ai_ci field? if so
+--both sides must be folded before comparing, not just compared as raw
+--text.
+local function ai_ci_operand(x)
+	return type(x) == 'table' and x[1] == 'col' and x.source
+		and ai_ci_col(x.source.schema, x[3])
+end
+--compare same-kind decoded values in key order: numbers numerically,
+--utf8 by byte order.
+local function value_cmp(a, b)
+	if a == b then return 0 end
+	return a < b and -1 or 1
+end
+--[[
+- read a value operand for a residual or having() check.
+- literals return themselves.
+- q.param() reads params.
+- q.col() bound to a source (residual: where()/on_expr conditions)
+  reads through node:col() -- the member can differ from the step
+  that owns the residual.
+- q.col() bound to an out_col instead (having(): compile()'s BIND
+  COLUMNS stage always binds having() by out_col name, never to a raw
+  source col) has no source to read through -- node is the aggregated
+  value row itself here, so this reads the field directly by name.
+]]
+local function eval_value(x, params, node)
+	if type(x) ~= 'table' then return x end
+	if x[1] == 'param' then return params[x[2]] end
+	if x[1] == 'col' then
+		if x.source then return node:col(x.source.name, x[3]) end
+		return node[x.col.name]
+	end
+	error('unsupported residual operand: '..tostring(x[1]))
+end
+--[[
+evaluate a where()/on_expr row check against the current row. q.col()
+reads decoded columns through node:col(), the same node pk_filter
+hands its own fn.
+--TODO: in()/not_in() against a relation, and exists()/not_exists(),
+aren't handled -- no subquery execution exists in this architecture
+yet.
+]]
+local function eval_expr(expr, params, node)
+	if type(expr) ~= 'table' then return expr end
+	local op, a, b = unpack(expr, 1, 3)
+	if op == 'param' or op == 'col' then
+		return eval_value(expr, params, node)
+	end
+	if op == 'and' then
+		for i = 2, #expr do
+			if not expr_passes(eval_expr(expr[i], params, node)) then
+				return false
+			end
+		end
+		return true
+	elseif op == 'or' then
+		for i = 2, #expr do
+			if expr_passes(eval_expr(expr[i], params, node)) then
+				return true
+			end
+		end
+		return false
+	elseif op == 'is_null' then
+		return null_value(eval_expr(a, params, node))
+	elseif op == 'is_not_null' then
+		return not null_value(eval_expr(a, params, node))
+	elseif op == 'starts' then
+		local v = eval_expr(a, params, node)
+		local prefix = eval_expr(b, params, node)
+		if null_value(v) or null_value(prefix) then return false end
+		if type(v) ~= 'string' then return false end
+		if ai_ci_operand(a) then
+			v, prefix = mdbx_fold_ai_ci(v), mdbx_fold_ai_ci(prefix)
+		end
+		return v:sub(1, #prefix) == prefix
+	elseif op == 'in' or op == 'not_in' then
+		assertf(not inherits(b, Rel),
+			'eval_expr: in()/not_in() against a relation not supported yet')
+		local v = eval_expr(a, params, node)
+		if null_value(v) then return false end
+		local fold = ai_ci_operand(a)
+		if fold then v = mdbx_fold_ai_ci(v) end
+		local found = false
+		local param_list = type(b) == 'table' and b[1] == 'param'
+		local values = param_list and eval_expr(b, params, node) or b
+		for _, item in ipairs(values) do
+			local candidate = param_list and item
+				or eval_expr(item, params, node)
+			if not null_value(candidate) then
+				if fold then candidate = mdbx_fold_ai_ci(candidate) end
+				if v == candidate then found = true; break end
+			end
+		end
+		if op == 'in' then return found end
+		return not found
+	elseif op == 'exists' or op == 'not_exists' then
+		error('eval_expr: exists()/not_exists() residual checks not'
+			..' supported yet')
+	end
+	local va, vb = eval_expr(a, params, node), eval_expr(b, params, node)
+	if null_value(va) or null_value(vb) then return false end
+	if ai_ci_operand(a) or ai_ci_operand(b) then
+		va, vb = mdbx_fold_ai_ci(va), mdbx_fold_ai_ci(vb)
+	end
+	if op == 'eq' then return va == vb
+	elseif op == 'ne' then return va ~= vb
+	elseif op == 'lt' then return value_cmp(va, vb) < 0
+	elseif op == 'le' then return value_cmp(va, vb) <= 0
+	elseif op == 'gt' then return value_cmp(va, vb) > 0
+	elseif op == 'ge' then return value_cmp(va, vb) >= 0
+	else error('unsupported condition op: '..tostring(op)) end
+end
+--evaluate a where()/on_expr row check against the current row.
+local function eval_residual(expr, params, node)
+	return expr_passes(eval_expr(expr, params, node))
+end
+
+--wrap node in a pk_filter checking every unconsumed condition in
+--residual (choose_access()'s leftover where()/on_expr conditions for
+--this step); a no-op when residual is empty.
+local function apply_residual(db, node, residual, params)
+	if #residual == 0 then return node end
+	return db:pk_filter(node, function(n)
+		for _, cond in ipairs(residual) do
+			if not eval_residual(cond.expr, params, n) then return false end
+		end
+		return true
+	end)
+end
+
+--wrap node (a group_by() aggregate's value stream) in a value_filter
+--checking every having_conditions entry; a no-op when there are none.
+--eval_residual reads having()'s out_col-bound cols straight off the
+--aggregated row (see eval_value), so the row itself stands in for the
+--node argument here -- there's no pk/getter-backed node at this stage.
+local function apply_having(db, node, having_conditions, params)
+	if #having_conditions == 0 then return node end
+	return db:value_filter(node, function(row)
+		for _, cond in ipairs(having_conditions) do
+			if not eval_residual(cond.expr, params, row) then return false end
+		end
+		return true
+	end)
+end
+
+--[[
+compile_nested(db, step, params) -> node, from_member
+
+builds a left-joined group's own chain (step.nested: the group's base
+step, plus any further joins inside the group) into a single node,
+for compile_step to wrap in nested_join. Also returns the outer
+member name the group's base step correlates against, read off
+plan.seek[1].source -- the same field source_operand()/bucket_facts()
+already set during compile()'s BIND COLUMNS stage.
+
+The group's base step is never built through compile_plan/pk_scan's
+usual getter path: its seek expr is a correlated read of an outer
+column, which compile_getter doesn't handle. It's built with an empty
+seek instead, driven by reset_prefix from that outer member's raw pk
+bytes -- see nested_join's opts.from_member. Every further step inside
+the group chains onto it via pk_join_seek, same as compile_step's own
+top-level loop.
+]]
+local function compile_nested(db, step, params)
+	local base = step.nested[1]
+	assert(base.plan.schema and base.plan.schema.is_index,
+		'compile_step: nested group base has no index to seek by')
+	local seek1 = base.plan.seek[1]
+	assert(type(seek1) == 'table' and seek1[1] == 'col' and seek1.source,
+		'compile_step: nested group base must correlate on an outer column')
+	local from_member = seek1.source.name
+	local node = db:pk_scan{kind = base.plan.kind, schema = base.plan.schema,
+		depth = base.plan.depth, dir = base.plan.dir, seek = {}}
+	node = apply_residual(db, node, base.plan.residual, params)
+	for i = 2, #step.nested do
+		local inner_step = step.nested[i]
+		assert(inner_step.plan.schema and inner_step.plan.schema.is_index,
+			'compile_step: joined step inside group has no index to seek by')
+		local opts = inner_step.join.op == 'left' and {left = true} or nil
+		node = db:pk_join_seek(node, inner_step.plan.schema, opts)
+		node = apply_residual(db, node, inner_step.plan.residual, params)
+	end
+	return node, from_member
+end
+
 --[[
 compile_step(db, rel, params) -> node
 
@@ -1909,24 +2175,29 @@ overwrite its contents before each node:reset() to run with different
 bound values; every getter the base step's node reads through stays
 wired to that same table.
 
-Two shapes are handled so far:
+Each step past the base chains onto whatever's been built so far:
 - a single, un-joined base step -> pk_scan, bound values read through
   params via compile_getter.
-- that plus exactly one joined step whose chosen plan uses an index
-  (step.plan.schema.is_index) -> pk_join_seek(outer_node, plan.schema
-  [, {left = true}] when step.join.op == 'left'). Whether that index
-  is actually the join's own FK relationship isn't checked here --
-  pk_join_seek's own find_fk() already does that check, so there's no
-  reason to duplicate it. pk_join_seek never reads plan.kind/seek/lo/hi
-  at all (it reads the outer row's raw PK bytes directly instead of
-  decoding+re-encoding a value), so none of that gets compiled for
-  this step.
+- a joined step whose chosen plan uses an index (step.plan.schema.is_index)
+  -> pk_join_seek(node_so_far, plan.schema [, {left = true}] when
+  step.join.op == 'left'). pk_join_seek's own find_fk() validates the FK
+  relationship. pk_join_seek reads the outer row's raw PK bytes directly
+  and never touches plan.kind/seek/lo/hi, so compile_step skips compiling
+  those fields for this step.
+- a left-joined group (step.nested) -> compile_nested() builds the
+  group's own chain, wrapped in nested_join(node_so_far, inner,
+  {left = true, from_member = ...}).
+Every step's plan.residual (choose_access()'s leftover where()/on_expr
+conditions the seek didn't consume) gets applied via apply_residual()
+right after that step's node is built.
 
---TODO: anything past one join, a joined step whose plan isn't an
-index at all (no relevant index exists -- a different, not-yet-built
-execution strategy), or a nested join group isn't wired up yet.
-group_by/having/distinct/order_by/limit aren't applied at runtime
-yet either.
+--TODO: a joined step whose plan isn't an index at all (no relevant
+index exists -- a different, not-yet-built execution strategy), a
+group nested inside another group, a group base that doesn't
+correlate on a plain outer column, and self-join member disambiguation
+across a chain (opts.member/from_member are never passed) aren't wired
+up yet. group_by/having/distinct/order_by/limit aren't applied at
+runtime yet either.
 ]]
 local function compile_step(db, rel, params)
 	assert(rel.access and #rel.access >= 1, 'compile_step: rel.access missing')
@@ -1934,15 +2205,308 @@ local function compile_step(db, rel, params)
 	assert(not base.join,
 		'compile_step: access[1] must be the un-joined base step')
 	local node = db:pk_scan(compile_plan(base.plan, params))
-	if #rel.access == 1 then return node end
-	assert(#rel.access == 2, 'compile_step: only one join is wired up so far')
-	local step = rel.access[2]
-	assert(step.join and not step.nested,
-		'compile_step: only a plain (non-nested) join is wired up so far')
-	assert(step.plan.schema and step.plan.schema.is_index,
-		'compile_step: joined step has no index to seek by')
-	local opts = step.join.op == 'left' and {left = true} or nil
-	return db:pk_join_seek(node, step.plan.schema, opts)
+	node = apply_residual(db, node, base.plan.residual, params)
+	for i = 2, #rel.access do
+		local step = rel.access[i]
+		if step.nested then
+			local inner, from_member = compile_nested(db, step, params)
+			node = db:nested_join(node, inner,
+				{left = true, from_member = from_member})
+		else
+			assert(step.join, 'compile_step: expected a joined step')
+			assert(step.plan.schema and step.plan.schema.is_index,
+				'compile_step: joined step has no index to seek by')
+			local opts = step.join.op == 'left' and {left = true} or nil
+			node = db:pk_join_seek(node, step.plan.schema, opts)
+			node = apply_residual(db, node, step.plan.residual, params)
+		end
+	end
+	return node
 end
 
 mdbx_compile_step = compile_step
+
+--MATERIALIZE ROWS -----------------------------------------------------------
+
+--[[
+compile_terminal(db, rel, params) -> node
+
+builds on compile_step()'s access/join chain with the rest of the
+pipeline a terminal needs: select() projection (rel.out_cols), then
+distinct/sort/limit as rel's compile()-time flags call for. Order
+matches SQL: project, then distinct, then sort, then limit -- the same
+order compile()'s order_by binding already assumes (order_mode is
+'out_col' whenever distinct_cols is set, so every order_by() term is
+guaranteed to name a projected field, never a pre-distinct one).
+rel.distinct_streaming is always false for now (see compile()), so
+distinct always goes through hash_distinct, never stream_distinct.
+group_by() execution (pk_group/stream_aggregate/hash_aggregate,
+having()) is not wired up yet.
+]]
+--[[
+split rel.group_cols into plain group keys (expr.aggregate is falsy)
+and aggregate outputs (q.count/min/max/sum/avg -- the only exprs
+bind_expr allows through with .aggregate set), building a
+stream_aggregate/hash_aggregate 'agg' list: one synthetic {op = 'key'}
+entry per key col (so the key ends up in the output row) plus the
+real aggregate entries, all carrying rel.group_cols' own out_col
+names.
+]]
+local function split_group_cols(rel)
+	local key_cols, agg_list = {}, {}
+	for _, expr in ipairs(rel.group_cols) do
+		if expr.aggregate then
+			local value_expr = expr[2]
+			assert(value_expr == nil
+				or (value_expr[1] == 'col' and value_expr.source),
+				'group_by(): only plain column aggregate arguments are'
+					..' implemented yet')
+			add(agg_list, {name = expr.name, op = expr[1],
+				member = value_expr and value_expr.source.name,
+				col = value_expr and value_expr[3]})
+		else
+			assert(expr[1] == 'col' and expr.source,
+				'group_by(): only plain column group keys are'
+					..' implemented yet')
+			add(key_cols, {name = expr.name, member = expr.source.name,
+				col = expr[3]})
+		end
+	end
+	local full_agg = {}
+	for i, kc in ipairs(key_cols) do
+		add(full_agg, {name = kc.name, op = 'key', part = i})
+	end
+	for _, a in ipairs(agg_list) do add(full_agg, a) end
+	return key_cols, full_agg
+end
+
+--[[
+build the group_by()/aggregate stage of the pipeline: a grand total
+(no key cols -- stream_aggregate's cols=nil path, one record, no order
+or grouping needed), streamed (rel.group_streaming: pk_group +
+stream_aggregate, reading straight off the pk stream, no select()
+needed), or hashed (hash_aggregate over a select()'ed value stream --
+the fallback whenever grouped order isn't already free). having() is
+applied last, over whichever aggregate node was built.
+]]
+local function compile_group(db, node, rel, params)
+	local key_cols, full_agg = split_group_cols(rel)
+	if #key_cols == 0 then
+		node = db:stream_aggregate(node, nil, full_agg)
+	elseif rel.group_streaming then
+		local cols = {}
+		for i, kc in ipairs(key_cols) do
+			cols[i] = {member = kc.member, col = kc.col}
+		end
+		node = db:stream_aggregate(db:pk_group(node, cols), cols, full_agg)
+	else
+		local outputs = {}
+		for i, kc in ipairs(key_cols) do
+			outputs[i] = {name = kc.name, member = kc.member, col = kc.col}
+		end
+		for _, a in ipairs(full_agg) do
+			if a.op ~= 'key' and a.member then
+				add(outputs, {name = '_agg'..(#outputs + 1),
+					member = a.member, col = a.col})
+				a.input = outputs[#outputs].name
+			end
+		end
+		local fields = {}
+		for i, kc in ipairs(key_cols) do fields[i] = kc.name end
+		node = db:hash_aggregate(db:select(node, outputs), fields, full_agg)
+	end
+	return apply_having(db, node, rel.having_conditions, params)
+end
+
+local function compile_terminal(db, rel, params)
+	assert(rel.out_cols, 'rows()/first()/one()/must_one() require'
+		..' select() or group_by()')
+	assert(not (rel.group_cols and rel.select_cols),
+		'select() after group_by() is not implemented yet')
+	local node = compile_step(db, rel, params)
+	if rel.group_cols then
+		node = compile_group(db, node, rel, params)
+	else
+		local outputs = {}
+		for i, out_col in ipairs(rel.out_cols) do
+			assert(out_col[1] == 'col' and out_col.source,
+				'select(): only plain column outputs are implemented yet')
+			outputs[i] = {name = out_col.name, member = out_col.source.name,
+				col = out_col[3]}
+		end
+		node = db:select(node, outputs)
+	end
+	if rel.distinct_cols then
+		local fields = {}
+		for i, c in ipairs(dedup_key_cols(rel)) do fields[i] = c.name end
+		if rel.distinct_streaming then
+			node = db:stream_distinct(node, fields)
+		else
+			node = db:hash_distinct(node, fields)
+		end
+	end
+	if rel.sort_needed then
+		local spec = {}
+		for i, term in ipairs(rel.order_cols) do
+			spec[i] = term.source
+				and {member = term.source.name, col = term[3],
+					desc = term.dir == 'desc'}
+				or {field = term.col.name, desc = term.dir == 'desc'}
+		end
+		node = db:value_sort(node, spec)
+	end
+	if rel._limit ~= nil then
+		local n = compile_getter(rel._limit, params)()
+		local offset = rel._offset and compile_getter(rel._offset, params)()
+		node = db:limit(node, n, offset)
+	end
+	return node
+end
+
+local function bind_params(params)
+	return params or empty
+end
+
+local function parse_row_args(shape, params) --shape [, params]
+	if type(shape) == 'table' then
+		--a table first arg is params, so shape and params can't both be tables.
+		assert(params == nil, 'row shape must be the first argument')
+		return nil, shape
+	end
+	assert(shape == nil or shape == '[]' or shape == '{}',
+		"row shape must be '[]' or '{}'")
+	return shape, params
+end
+
+--row: {name -> value} (a select() node's :row()). fields: rel.out_cols,
+--read in select() order -- '{}' passes the row straight through since
+--it's already name-keyed; '[]'/unpacked need it read out positionally.
+local function shape_row(fields, row, shape)
+	if shape == '{}' then return row end
+	local t = {}
+	for i, out_col in ipairs(fields) do t[i] = row[out_col.name] end
+	if shape == '[]' then return t end
+	return unpack(t, 1, #fields)
+end
+
+--[[
+collect up to cap rows (nil = every row) from rel's terminal node
+chain, built fresh for this call (own node tree, own params binding --
+matches the old file's per-terminal-call compile). cap stops the pull
+loop early once enough rows are collected -- correct for the plain
+(no distinct()/explicit sort) case, since next_item() then reads one
+row straight off the cursor chain per call. hash_distinct/value_sort
+still read every row regardless of cap: both materialise their whole
+input during reset(), before next_item() can be called even once.
+]]
+local function collect_rows(db, rel, params, cap)
+	if not rel.compiled then compile(rel) end
+	params = bind_params(params)
+	local node = compile_terminal(db, rel, params)
+	node:reset()
+	local rows = {}
+	while (not cap or #rows < cap) and node:next_item() do
+		add(rows, node:row())
+	end
+	node:close()
+	return rows
+end
+
+function Rel:rows(shape, params)
+	shape, params = parse_row_args(shape, params)
+	local rows = collect_rows(self.db, self, params, nil)
+	local i = 0
+	return function()
+		i = i + 1
+		local row = rows[i]
+		if row then return shape_row(self.out_cols, row, shape) end
+	end
+end
+
+function Rel:first(shape, params)
+	shape, params = parse_row_args(shape, params)
+	local row = collect_rows(self.db, self, params, 1)[1]
+	if row then return shape_row(self.out_cols, row, shape) end
+end
+
+function Rel:one(shape, params)
+	shape, params = parse_row_args(shape, params)
+	local rows = collect_rows(self.db, self, params, 2)
+	assert(#rows <= 1, 'one() matched more than one row')
+	local row = rows[1]
+	if row then return shape_row(self.out_cols, row, shape) end
+end
+
+function Rel:must_one(shape, params)
+	shape, params = parse_row_args(shape, params)
+	local rows = collect_rows(self.db, self, params, 2)
+	assert(#rows == 1,
+		'must_one() matched '..#rows..' rows, expected exactly one')
+	return shape_row(self.out_cols, rows[1], shape)
+end
+
+--[[
+count()/exists() don't need select()/group_by() at all -- unlike
+rows()/first()/one()/must_one(), they can answer from compile_step()'s
+raw filtered/joined stream directly, no projection needed. group_by()
+still applies: a group's having() can depend on fully accumulated
+aggregates, so a group only "exists"/counts once it's finished
+(compile_group already applies having()). distinct() changes count()'s
+answer (fewer rows) but never exists()'s: a row surviving distinct()
+never disappears to zero, so exists() skips it entirely and just
+checks the raw stream for any match.
+neither respects order_by()/limit(): order never changes a count or
+an existence check, and limit()+count()/exists() together isn't a
+combination this API composes (unlike a real SQL subquery LIMIT).
+]]
+local function count_items(node)
+	node:reset()
+	local n = 0
+	while node:next_item() do n = n + 1 end
+	node:close()
+	return n
+end
+
+local function compile_group_or_distinct(db, rel, params)
+	local node = compile_step(db, rel, params)
+	if rel.group_cols then
+		return compile_group(db, node, rel, params)
+	end
+	if rel.distinct_cols then
+		assert(rel.out_cols, 'distinct() requires select() or group_by()')
+		local outputs = {}
+		for i, out_col in ipairs(rel.out_cols) do
+			assert(out_col[1] == 'col' and out_col.source,
+				'select(): only plain column outputs are implemented yet')
+			outputs[i] = {name = out_col.name, member = out_col.source.name,
+				col = out_col[3]}
+		end
+		node = db:select(node, outputs)
+		local fields = {}
+		for i, c in ipairs(dedup_key_cols(rel)) do fields[i] = c.name end
+		if rel.distinct_streaming then
+			return db:stream_distinct(node, fields)
+		end
+		return db:hash_distinct(node, fields)
+	end
+	return node
+end
+
+function Rel:count(params)
+	if not self.compiled then compile(self) end
+	params = bind_params(params)
+	return count_items(compile_group_or_distinct(self.db, self, params))
+end
+
+function Rel:exists(params)
+	if not self.compiled then compile(self) end
+	params = bind_params(params)
+	local node = compile_step(self.db, self, params)
+	if self.group_cols then
+		node = compile_group(self.db, node, self, params)
+	end
+	node:reset()
+	local found = node:next_item() ~= nil
+	node:close()
+	return found
+end

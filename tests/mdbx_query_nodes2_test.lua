@@ -49,8 +49,8 @@ local function pk_id(node, name, db_or_schema)
 	return decode_pk(schema, p, sz)
 end
 
-local function collect_pks(node, name, schema, params)
-	node:reset(params)
+local function collect_pks(node, name, schema)
+	node:reset()
 	local t = {}
 	while node:next_group() do
 		repeat
@@ -461,6 +461,596 @@ function test.pk_join_seek_nullable_fk_exec()
 			end
 			node2:close()
 			assert(cat(t2, ',') == '1:11,1:12', S(t2))
+		end)
+	end)
+end
+
+--[[
+nested_join: left join a whole group (sessions JOIN events, events
+required) onto users, one unit at a time. sessions_node is driven via
+opts.from_member (nested_join reads outer:pk('users') raw and calls
+inner:reset_prefix() with it) -- the group attaches to users through
+an FK, same as any pk_join_seek edge, so no getter/decode/encode is
+needed to re-seek it per outer row.
+Group semantics (the reason this node exists over pk_join_seek):
+- user 1: sessions 12/13 have no events -- inner join drops them, only
+  session 11 (with 2 events) survives.
+- user 4: session 15 exists but has no events -- the whole group nulls
+  out, including session 15, not just the event.
+- users 3 and 5 have no sessions at all -- group absent, nulled too.
+]]
+local function build_group_join(db)
+	local users_schema = db:table_schema('users')
+	local outer = db:pk_scan{kind = 'full', schema = users_schema,
+		depth = 0, dir = 'asc', seek = {}}
+	local sessions_ix = db:table_schema('sessions/user_id')
+	local sessions_node = db:pk_scan{kind = 'eq_prefix', schema = sessions_ix,
+		depth = 1, dir = 'asc', seek = {}}
+	local events_fk = db:table_schema('events/session_id')
+	local inner = db:pk_join_seek(sessions_node, events_fk)
+	return outer, db:nested_join(outer, inner,
+		{left = true, from_member = 'users'})
+end
+
+function test.explain_nested_join()
+	with_db('explain_nested_join', function(db)
+		db:atomic('r', function()
+			local _, node = build_group_join(db)
+			local e = node:explain()
+			assert(e.kind == 'nested_join', e.kind)
+			assert(e.item == 'pk_tuple', e.item)
+			assert(cat(e.members, ',') == 'users,sessions,events', S(e.members))
+		end)
+	end)
+end
+
+function test.nested_join_resolve_errors()
+	with_db('nested_join_resolve_errors', function(db)
+		db:atomic('r', function()
+			local users_schema = db:table_schema('users')
+			local outer = db:pk_scan{kind = 'full', schema = users_schema,
+				depth = 0, dir = 'asc', seek = {}}
+			--inner reusing the same member name as outer.
+			local dup_inner = db:pk_scan{kind = 'full', schema = users_schema,
+				depth = 0, dir = 'asc', seek = {}}
+			assert(not pcall(db.nested_join, db, outer, dup_inner))
+		end)
+	end)
+end
+
+function test.nested_join_group_left_exec()
+	with_db('nested_join_group_left_exec', function(db)
+		db:atomic('r', function()
+			local _, node = build_group_join(db)
+			node:reset()
+			local t = {}
+			while node:next_item() do
+				local u = pk_id(node, 'users', db)
+				local ok_s, sp, ssz = node:pk('sessions')
+				local ok_e, ep, esz = node:pk('events')
+				local s = ok_s and decode_pk(db:table_schema('sessions'), sp, ssz)
+				local e = ok_e and decode_pk(db:table_schema('events'), ep, esz)
+				t[#t+1] = u..':'..(s or '-')..':'..(e or '-')
+			end
+			node:close()
+			assert(cat(t, ',') ==
+				'1:11:21,1:11:22,2:14:23,3:-:-,4:-:-,5:-:-', S(t))
+		end)
+	end)
+end
+
+function test.explain_pk_filter()
+	with_db('explain_pk_filter', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local driver = db:pk_scan{kind = 'full', schema = schema,
+				depth = 0, dir = 'asc', seek = {}}
+			local e = db:pk_filter(driver, function() return true end):explain()
+			assert(e.kind == 'pk_filter', e.kind)
+			assert(cat(e.members, ',') == 'users', S(e.members))
+		end)
+	end)
+end
+
+--keeps rows where fn(node) is true, reading columns straight off the
+--node it's given (delegating through the wrapped input's compile_col).
+function test.pk_filter_exec()
+	with_db('pk_filter_exec', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local driver = db:pk_scan{kind = 'full', schema = schema,
+				depth = 0, dir = 'asc', seek = {}}
+			local node = db:pk_filter(driver,
+				function(n) return n:col('users', 'score') >= 80 end)
+			node:reset()
+			local t = {}
+			while node:next_item() do t[#t+1] = pk_id(node, 'users', db) end
+			node:close()
+			--users 1(80) and 2(95) pass; 3(50), 4(70), 5(60) are filtered out.
+			assert(cat(t, ',') == '1,2', S(t))
+		end)
+	end)
+end
+
+------------------------------------------------------------------------------
+--select/value_filter/stream_distinct/hash_distinct/value_sort/limit:
+--terminal-side nodes, decoding a pk stream into value records and
+--shaping the result (filter, dedup, sort, cap).
+
+function test.explain_select()
+	with_db('explain_select', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local driver = db:pk_scan{kind = 'full', schema = schema,
+				depth = 0, dir = 'asc', seek = {}}
+			local e = db:select(driver,
+				{{name = 'id', member = 'users', col = 'id'}}):explain()
+			assert(e.kind == 'select', e.kind)
+			assert(e.item == 'value', e.item)
+			assert(cat(e.members, ',') == 'users', S(e.members))
+		end)
+	end)
+end
+
+--plain columns and a synthetic fn() output, one record per input item.
+function test.select_exec()
+	with_db('select_exec', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local driver = db:pk_scan{kind = 'full', schema = schema,
+				depth = 0, dir = 'asc', seek = {}}
+			local node = db:select(driver, {
+				{name = 'id', member = 'users', col = 'id'},
+				{name = 'score', member = 'users', col = 'score'},
+				{name = 'tag', fn = function() return 'x' end},
+			})
+			node:reset()
+			local t = {}
+			while node:next_item() do
+				local row = node:row()
+				t[#t+1] = row.id..':'..row.score..':'..row.tag
+			end
+			node:close()
+			assert(cat(t, ',') == '1:80:x,2:95:x,3:50:x,4:70:x,5:60:x', S(t))
+		end)
+	end)
+end
+
+function test.explain_value_filter()
+	with_db('explain_value_filter', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local driver = db:pk_scan{kind = 'full', schema = schema,
+				depth = 0, dir = 'asc', seek = {}}
+			local sel = db:select(driver,
+				{{name = 'score', member = 'users', col = 'score'}})
+			local e = db:value_filter(sel, function() return true end):explain()
+			assert(e.kind == 'value_filter', e.kind)
+			assert(e.item == 'value', e.item)
+		end)
+	end)
+end
+
+function test.value_filter_exec()
+	with_db('value_filter_exec', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local driver = db:pk_scan{kind = 'full', schema = schema,
+				depth = 0, dir = 'asc', seek = {}}
+			local sel = db:select(driver, {
+				{name = 'id', member = 'users', col = 'id'},
+				{name = 'score', member = 'users', col = 'score'},
+			})
+			local node = db:value_filter(sel,
+				function(row) return row.score >= 70 end)
+			node:reset()
+			local t = {}
+			while node:next_item() do t[#t+1] = node:row().id end
+			node:close()
+			--users 1(80), 2(95), 4(70) pass; 3(50), 5(60) filtered out.
+			assert(cat(t, ',') == '1,2,4', S(t))
+		end)
+	end)
+end
+
+function test.explain_stream_distinct()
+	with_db('explain_stream_distinct', function(db)
+		db:atomic('r', function()
+			local ix = db:table_schema('users/status')
+			local driver = db:pk_scan{kind = 'full', schema = ix,
+				depth = 0, dir = 'asc', seek = {}}
+			local sel = db:select(driver,
+				{{name = 'status', member = 'users', col = 'status'}})
+			local e = db:stream_distinct(sel, {'status'}):explain()
+			assert(e.kind == 'stream_distinct', e.kind)
+			assert(e.unique == true)
+		end)
+	end)
+end
+
+--dedups adjacent records; needs input already grouped by field, which
+--a full scan on the status index provides (equal keys are adjacent).
+function test.stream_distinct_exec()
+	with_db('stream_distinct_exec', function(db)
+		db:atomic('r', function()
+			local ix = db:table_schema('users/status')
+			local driver = db:pk_scan{kind = 'full', schema = ix,
+				depth = 0, dir = 'asc', seek = {}}
+			local sel = db:select(driver, {
+				{name = 'id', member = 'users', col = 'id'},
+				{name = 'status', member = 'users', col = 'status'},
+			})
+			local node = db:stream_distinct(sel, {'status'})
+			node:reset()
+			local t = {}
+			while node:next_item() do
+				local row = node:row()
+				t[#t+1] = row.id..':'..row.status
+			end
+			node:close()
+			assert(cat(t, ',') == '1:active,3:banned', S(t))
+		end)
+	end)
+end
+
+function test.explain_hash_distinct()
+	with_db('explain_hash_distinct', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local driver = db:pk_scan{kind = 'full', schema = schema,
+				depth = 0, dir = 'asc', seek = {}}
+			local sel = db:select(driver,
+				{{name = 'status', member = 'users', col = 'status'}})
+			local e = db:hash_distinct(sel, {'status'}):explain()
+			assert(e.kind == 'hash_distinct', e.kind)
+			assert(e.unique == true)
+		end)
+	end)
+end
+
+--dedups by first-seen, independent of input order -- unlike
+--stream_distinct, a plain pk-order scan (not grouped by status) works.
+function test.hash_distinct_exec()
+	with_db('hash_distinct_exec', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local driver = db:pk_scan{kind = 'full', schema = schema,
+				depth = 0, dir = 'asc', seek = {}}
+			local sel = db:select(driver, {
+				{name = 'id', member = 'users', col = 'id'},
+				{name = 'status', member = 'users', col = 'status'},
+			})
+			local node = db:hash_distinct(sel, {'status'})
+			node:reset()
+			local t = {}
+			while node:next_item() do
+				local row = node:row()
+				t[#t+1] = row.id..':'..row.status
+			end
+			node:close()
+			assert(cat(t, ',') == '1:active,3:banned', S(t))
+		end)
+	end)
+end
+
+function test.explain_value_sort()
+	with_db('explain_value_sort', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local driver = db:pk_scan{kind = 'full', schema = schema,
+				depth = 0, dir = 'asc', seek = {}}
+			local e = db:value_sort(driver, {{col = 'score'}}):explain()
+			assert(e.kind == 'value_sort', e.kind)
+			assert(e.item == 'pk', e.item)
+		end)
+	end)
+end
+
+--pk path: sorts a pk stream by column value, still yielding pks.
+function test.value_sort_pk_exec()
+	with_db('value_sort_pk_exec', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local driver = db:pk_scan{kind = 'full', schema = schema,
+				depth = 0, dir = 'asc', seek = {}}
+			local node = db:value_sort(driver, {{col = 'score'}})
+			local pks = collect_pks(node, 'users', schema)
+			assert(cat(pks, ',') == '3,5,4,1,2', S(pks))
+		end)
+	end)
+end
+
+--value path: sorts already-projected value records by a plain field.
+function test.value_sort_value_exec()
+	with_db('value_sort_value_exec', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local driver = db:pk_scan{kind = 'full', schema = schema,
+				depth = 0, dir = 'asc', seek = {}}
+			local sel = db:select(driver, {
+				{name = 'id', member = 'users', col = 'id'},
+				{name = 'score', member = 'users', col = 'score'},
+			})
+			local node = db:value_sort(sel, {{field = 'score', desc = true}})
+			node:reset()
+			local t = {}
+			while node:next_item() do t[#t+1] = node:row().id end
+			node:close()
+			assert(cat(t, ',') == '2,1,4,5,3', S(t))
+		end)
+	end)
+end
+
+function test.explain_limit()
+	with_db('explain_limit', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local driver = db:pk_scan{kind = 'full', schema = schema,
+				depth = 0, dir = 'asc', seek = {}}
+			local e = db:limit(driver, 2):explain()
+			assert(e.kind == 'limit', e.kind)
+			assert(e.item == 'pk', e.item)
+		end)
+	end)
+end
+
+function test.limit_exec()
+	with_db('limit_exec', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local function scan()
+				return db:pk_scan{kind = 'full', schema = schema,
+					depth = 0, dir = 'asc', seek = {}}
+			end
+			assert(cat(collect_pks(db:limit(scan(), 2), 'users', schema), ',')
+				== '1,2')
+			assert(cat(collect_pks(db:limit(scan(), 2, 1), 'users', schema), ',')
+				== '2,3')
+		end)
+	end)
+end
+
+------------------------------------------------------------------------------
+--pk_group/stream_aggregate/hash_aggregate: group_by() execution, two
+--strategies for the same result.
+
+function test.explain_pk_group()
+	with_db('explain_pk_group', function(db)
+		db:atomic('r', function()
+			local ix = db:table_schema('users/status')
+			local driver = db:pk_scan{kind = 'full', schema = ix,
+				depth = 0, dir = 'asc', seek = {}}
+			local e = db:pk_group(driver,
+				{{member = 'users', col = 'status'}}):explain()
+			assert(e.kind == 'pk_group', e.kind)
+			assert(e.item == 'pk', e.item)
+		end)
+	end)
+end
+
+--full scan on the status index visits equal-status rows adjacently,
+--so pk_group can walk it directly: next_group() lands on the first pk
+--of each group, next_pk() walks the rest of that same group.
+function test.pk_group_exec()
+	with_db('pk_group_exec', function(db)
+		db:atomic('r', function()
+			local ix = db:table_schema('users/status')
+			local driver = db:pk_scan{kind = 'full', schema = ix,
+				depth = 0, dir = 'asc', seek = {}}
+			local cols = {{member = 'users', col = 'status'}}
+			local node = db:pk_group(driver, cols)
+			node:reset()
+			local t = {}
+			while node:next_group() do
+				local g = {}
+				repeat
+					g[#g+1] = pk_id(node, 'users', db)
+				until not node:next_pk()
+				t[#t+1] = cat(g, '+')
+			end
+			node:close()
+			assert(cat(t, ',') == '1+2+4,3+5', S(t))
+		end)
+	end)
+end
+
+function test.explain_stream_aggregate()
+	with_db('explain_stream_aggregate', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local driver = db:pk_scan{kind = 'full', schema = schema,
+				depth = 0, dir = 'asc', seek = {}}
+			local e = db:stream_aggregate(driver, nil,
+				{{name = 'n', op = 'count'}}):explain()
+			assert(e.kind == 'stream_aggregate', e.kind)
+			assert(e.item == 'value', e.item)
+		end)
+	end)
+end
+
+--grand total (cols = nil): one record for the whole input, no group key.
+function test.stream_aggregate_grand_total_exec()
+	with_db('stream_aggregate_grand_total_exec', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local driver = db:pk_scan{kind = 'full', schema = schema,
+				depth = 0, dir = 'asc', seek = {}}
+			local node = db:stream_aggregate(driver, nil, {
+				{name = 'n', op = 'count'},
+				{name = 'total', op = 'sum', member = 'users', col = 'score'},
+			})
+			node:reset()
+			assert(node:next_item() == true)
+			local row = node:row()
+			assert(row.n == 5 and row.total == 355, row.n..','..row.total)
+			assert(node:next_item() == nil)
+			node:close()
+		end)
+	end)
+end
+
+--grouped: pk_group over the status index (already grouped) feeds
+--stream_aggregate one group at a time via next_pk.
+function test.stream_aggregate_grouped_exec()
+	with_db('stream_aggregate_grouped_exec', function(db)
+		db:atomic('r', function()
+			local ix = db:table_schema('users/status')
+			local driver = db:pk_scan{kind = 'full', schema = ix,
+				depth = 0, dir = 'asc', seek = {}}
+			local cols = {{member = 'users', col = 'status'}}
+			local grouped = db:pk_group(driver, cols)
+			local node = db:stream_aggregate(grouped, cols, {
+				{name = 'status', op = 'key', part = 1},
+				{name = 'n', op = 'count'},
+				{name = 'total', op = 'sum', member = 'users', col = 'score'},
+			})
+			node:reset()
+			local t = {}
+			while node:next_item() do
+				local row = node:row()
+				t[#t+1] = row.status..':'..row.n..':'..row.total
+			end
+			node:close()
+			assert(cat(t, ',') == 'active:3:245,banned:2:110', S(t))
+		end)
+	end)
+end
+
+function test.explain_hash_aggregate()
+	with_db('explain_hash_aggregate', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local driver = db:pk_scan{kind = 'full', schema = schema,
+				depth = 0, dir = 'asc', seek = {}}
+			local sel = db:select(driver,
+				{{name = 'score', member = 'users', col = 'score'}})
+			local e = db:hash_aggregate(sel, nil,
+				{{name = 'n', op = 'count'}}):explain()
+			assert(e.kind == 'hash_aggregate', e.kind)
+			assert(e.item == 'value', e.item)
+		end)
+	end)
+end
+
+--grand total (fields = nil), over an already-selected value stream.
+function test.hash_aggregate_grand_total_exec()
+	with_db('hash_aggregate_grand_total_exec', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local driver = db:pk_scan{kind = 'full', schema = schema,
+				depth = 0, dir = 'asc', seek = {}}
+			local sel = db:select(driver,
+				{{name = 'score', member = 'users', col = 'score'}})
+			local node = db:hash_aggregate(sel, nil, {
+				{name = 'n', op = 'count'},
+				{name = 'total', op = 'sum', input = 'score'},
+			})
+			node:reset()
+			assert(node:next_item() == true)
+			local row = node:row()
+			assert(row.n == 5 and row.total == 355, row.n..','..row.total)
+			assert(node:next_item() == nil)
+			node:close()
+		end)
+	end)
+end
+
+--grouped by first-seen, independent of input order -- a plain pk-order
+--scan (not grouped by status) still gives the right groups.
+function test.hash_aggregate_grouped_exec()
+	with_db('hash_aggregate_grouped_exec', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('users')
+			local driver = db:pk_scan{kind = 'full', schema = schema,
+				depth = 0, dir = 'asc', seek = {}}
+			local sel = db:select(driver, {
+				{name = 'status', member = 'users', col = 'status'},
+				{name = 'score', member = 'users', col = 'score'},
+			})
+			local node = db:hash_aggregate(sel, {'status'}, {
+				{name = 'status', op = 'key', part = 1},
+				{name = 'n', op = 'count'},
+				{name = 'total', op = 'sum', input = 'score'},
+			})
+			node:reset()
+			local t = {}
+			while node:next_item() do
+				local row = node:row()
+				t[#t+1] = row.status..':'..row.n..':'..row.total
+			end
+			node:close()
+			assert(cat(t, ',') == 'active:3:245,banned:2:110', S(t))
+		end)
+	end)
+end
+
+--fixture with a nullable column: count(expr) must count only its
+--non-null rows, count() (no expr) counts every row regardless.
+local function build_nulls_fixture(db)
+	db:begin'w'
+	db:create_table('scores', {fields = {
+		{col = 'id', mdbx_type = 'u32', not_null = true},
+		{col = 'v' , mdbx_type = 'i32', not_null = false},
+	}, pk = {'id'}})
+	db:insert('scores', '{}', {id = 1, v = 10})
+	db:insert('scores', '{}', {id = 2, v = null})
+	db:insert('scores', '{}', {id = 3, v = 20})
+	db:commit()
+end
+
+local function with_nulls_db(name, fn)
+	local file = test_file(name)
+	cleanup(file)
+	local db = mdbx_open(file)
+	local ok, err = xpcall(function()
+		build_nulls_fixture(db)
+		fn(db)
+	end, debug.traceback)
+	if db.env then db:close() end
+	cleanup(file)
+	assert(ok, err)
+end
+
+function test.stream_aggregate_count_null_exec()
+	with_nulls_db('stream_aggregate_count_null_exec', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('scores')
+			local driver = db:pk_scan{kind = 'full', schema = schema,
+				depth = 0, dir = 'asc', seek = {}}
+			local node = db:stream_aggregate(driver, nil, {
+				{name = 'n_all', op = 'count'},
+				{name = 'n_v', op = 'count', member = 'scores', col = 'v'},
+				{name = 'total', op = 'sum', member = 'scores', col = 'v'},
+			})
+			node:reset()
+			assert(node:next_item() == true)
+			local row = node:row()
+			assert(row.n_all == 3 and row.n_v == 2 and row.total == 30,
+				row.n_all..','..row.n_v..','..row.total)
+			node:close()
+		end)
+	end)
+end
+
+function test.hash_aggregate_count_null_exec()
+	with_nulls_db('hash_aggregate_count_null_exec', function(db)
+		db:atomic('r', function()
+			local schema = db:table_schema('scores')
+			local driver = db:pk_scan{kind = 'full', schema = schema,
+				depth = 0, dir = 'asc', seek = {}}
+			local sel = db:select(driver,
+				{{name = 'v', member = 'scores', col = 'v'}})
+			local node = db:hash_aggregate(sel, nil, {
+				{name = 'n_all', op = 'count'},
+				{name = 'n_v', op = 'count', input = 'v'},
+				{name = 'total', op = 'sum', input = 'v'},
+			})
+			node:reset()
+			assert(node:next_item() == true)
+			local row = node:row()
+			assert(row.n_all == 3 and row.n_v == 2 and row.total == 30,
+				row.n_all..','..row.n_v..','..row.total)
+			node:close()
 		end)
 	end)
 end
