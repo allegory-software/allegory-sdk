@@ -8,7 +8,7 @@
 	starts a run, node:next_group()/next_pk() walk it) but is a separate,
 	self-contained file -- it does not require mdbx_query_nodes.lua and
 	is not loaded together with it. See mdbx_query_nodes.md and
-	mdbx_query_nodes_spec.md for the fuller node vocabulary this design
+	mdbx_query_nodes_spec.md for the fuller node vocabulary that this design
 	is drawn from; treat mdbx_query_nodes.lua itself as inspiration only,
 	not a shared dependency.
 
@@ -171,6 +171,11 @@ function Db.pk_scan:__call(db, plan)
 	local schema = plan.schema
 	local is_index = schema.is_index
 	local member_schema = is_index and schema.val_schema or schema
+	--plan.member: the query-facing name (an alias) this scan's one
+	--member is known by everywhere else -- member_schema.name is always
+	--the underlying physical table, wrong whenever the source is
+	--aliased (self-join, or a plain aliased FROM/JOIN).
+	local member_name = plan.member or member_schema.name
 	local depth = plan.depth
 	local desc = plan.dir == 'desc'
 	local seek_getters = plan.seek
@@ -182,15 +187,15 @@ function Db.pk_scan:__call(db, plan)
 	local order = {}
 	for i = depth + 1, #schema.key_fields do
 		local f = schema.key_fields[i]
-		order[#order+1] = {member = member_schema.name, col = f.col,
+		order[#order+1] = {member = member_name, col = f.col,
 			dir = desc and 'desc' or 'asc'}
 	end
 	if is_index then
-		order[#order+1] = {member = member_schema.name, col = 'pk',
+		order[#order+1] = {member = member_name, col = 'pk',
 			dir = desc and 'desc' or 'asc'}
 	end
 	local node = object(self, {
-		members = {member_schema.name},
+		members = {member_name},
 		order   = order,
 	})
 	local cur, base_cur, is_open, first
@@ -223,7 +228,7 @@ function Db.pk_scan:__call(db, plan)
 		end
 	end
 	function node:pk(name)
-		if has_pk and (name == nil or name == member_schema.name) then
+		if has_pk and (name == nil or name == member_name) then
 			return true, pk_rec.data, pk_rec.size
 		end
 	end
@@ -425,6 +430,10 @@ local function find_fk(child_schema, fk_schema)
 	end
 	return best
 end
+--exposed for mdbx_query2.lua's choose_access(): planning needs the same
+--FK match find_fk() already validates, to classify a joined step as
+--fk_seek before pk_join_seek would otherwise re-derive it.
+mdbx_find_fk = find_fk
 
 --[[
 pk_join_seek: nested join -- one MDBX_SET_KEY seek on the fk index per
@@ -437,6 +446,10 @@ opts.member: name for the new child member (default: child_schema.name).
 opts.from_member: name of the existing parent member in driver
 (default: parent table's name); needed when the parent was joined
 under an alias, e.g. a self-join.
+opts.fk: the FK entry (find_fk()'s own return shape), when the caller
+already matched it and knows fk_schema is a real FK index -- e.g.
+mdbx_query2.lua's compile_joined_step(), passing choose_access()'s
+classify_join_op() match through instead of find_fk() re-deriving it.
 Usage: db:pk_join_seek(driver, fk_schema [, opts])
 ]]
 Db.pk_join_seek = object(Db.query_node, {
@@ -450,7 +463,7 @@ function Db.pk_join_seek:__call(db, driver, fk_schema, opts)
 	check_pk_node(driver, 'pk_join_seek', 1)
 	opts = opts or {}
 	local child_schema = fk_schema.val_schema
-	local fk = find_fk(child_schema, fk_schema)
+	local fk = opts.fk or find_fk(child_schema, fk_schema)
 	assert(fk, 'pk_join_seek: not a FK index')
 	local parent_schema = db:table_schema(fk.ref_table)
 	local from_member = opts.from_member or parent_schema.name
@@ -626,7 +639,7 @@ item, emit the outer item once with every inner member absent.
 opts.from_member: name of the outer member whose raw pk bytes drive
 inner via inner:reset_prefix(), instead of inner:reset(). Requires
 inner to implement reset_prefix (any pk_scan/pk_join_seek chain does).
-Without it, inner:reset() runs instead, and any correlated value inner
+Without it, inner:reset() runs instead, and any correlated value that inner
 needs must read outer's current row through its own getter.
 Usage: db:nested_join(outer, inner [, opts])
 ]]
@@ -710,7 +723,7 @@ end
 --[[
 pk_filter: keep pk/pk_tuple stream items where fn(node) is true, drop
 the rest. fn reads columns off node itself (delegates to input via
-compile_col), so it can read any member the input stream carries.
+compile_col), so it can read any member that the input stream carries.
 Usage: db:pk_filter(input, fn)
 ]]
 Db.pk_filter = object(Db.query_node, {

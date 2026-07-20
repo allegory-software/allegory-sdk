@@ -247,6 +247,27 @@ function test.exact_literal_exec()
 	end)
 end
 
+--q.in_() against the (single-column) pk with a short literal list:
+--try_key() used to offer this as a seekable 'in' plan, which no
+--executor implements (pk_scan's own kind assert never included 'in')
+---- choose_access() would pick it anyway (best coverage) and crash at
+--prepare() time, even though eval_expr()'s residual path already
+--handles list membership correctly on its own.
+function test.where_in_literal_list_exec()
+	with_db('where_in_literal_list_exec', function(db)
+		db:atomic('r', function()
+			local rel = db:from('users')
+				:where(q.in_(q.col('users.id'), {2, 4}))
+				:select'users.id id'
+				:order_by'id'
+				:prepare()
+			local node = compile_step(db, rel, {})
+			local pks = collect_pks(node, 'users', db)
+			assert(cat(pks, ',') == '2,4', cat(pks, ','))
+		end)
+	end)
+end
+
 --two independent equality facts (status, score), each with its own
 --single-column index and no composite index covering both:
 --choose_access can only drive the seek from one of them, so the other
@@ -326,6 +347,39 @@ function test.left_join_exec()
 	end)
 end
 
+--a where() on a left-joined member: attribute_conditions() forces this
+--late (see the left-join doc in compile()'s ATTRIBUTE CONDITIONS
+--section) since a left join's own matching must depend only on its
+--on_expr. compile_step must still check the condition once against the
+--finished row, or every candidate -- including null-extended ones --
+--would leak through unfiltered.
+function test.left_join_where_late_exec()
+	with_db('left_join_where_late_exec', function(db)
+		db:atomic('r', function()
+			local rel = db:from('users')
+				:left_join('sessions',
+					q.eq(q.col('sessions.user_id'), q.col('users.id')))
+				:where(q.eq(q.col('sessions.id'), q.param('SID')))
+				:select'users.id id'
+				:prepare()
+			local node = compile_step(db, rel, {SID = 11})
+			node:reset()
+			local t = {}
+			while node:next_item() do
+				local u = pk_id(node, 'users', db)
+				local ok, p, sz = node:pk('sessions')
+				local s = ok and decode_pk(db:table_schema('sessions'), p, sz)
+				t[#t+1] = u..':'..(s or '-')
+			end
+			node:close()
+			--only user 1's session 11 matches; user 1's other sessions,
+			--user 2/4's non-11 sessions, and users 3/5's null-extended
+			--rows all fail the late check.
+			assert(cat(t, ',') == '1:11', cat(t, ','))
+		end)
+	end)
+end
+
 --left join a whole group (sessions JOIN events, events required) onto
 --users: compiles rel.access[2] as a step.nested, wired up by
 --compile_nested() as nested_join(base_node, inner, {left = true,
@@ -359,6 +413,41 @@ function test.left_join_group_exec()
 			node:close()
 			assert(cat(t, ',') ==
 				'1:11:21,1:11:22,2:14:23,3:-:-,4:-:-,5:-:-', cat(t, ','))
+		end)
+	end)
+end
+
+--inner join a whole group (sessions JOIN events, events required) onto
+--users: compiles the group's base_source (sessions) as a plain access
+--step (join = picked), chained via classify_join_op like any other
+--joined source, not through the left-group's nested/correlated path.
+--Sessions 12/13/15 have no events and users 3/4/5 have no matching
+--session with an event, so an inner join drops them all -- only rows
+--where every level of the group matches survive.
+function test.inner_join_group_exec()
+	with_group_db('inner_join_group_exec', function(db)
+		db:atomic('r', function()
+			local group = db:from('sessions')
+				:join('events',
+					q.eq(q.col('events.session_id'), q.col('sessions.id')))
+			local rel = db:from('users')
+				:join(group,
+					q.eq(q.col('sessions.user_id'), q.col('users.id')))
+				:select'users.id id'
+				:prepare()
+			local node = compile_step(db, rel, {})
+			node:reset()
+			local t = {}
+			while node:next_item() do
+				local u = pk_id(node, 'users', db)
+				local ok_s, sp, ssz = node:pk('sessions')
+				local ok_e, ep, esz = node:pk('events')
+				local s = ok_s and decode_pk(db:table_schema('sessions'), sp, ssz)
+				local e = ok_e and decode_pk(db:table_schema('events'), ep, esz)
+				t[#t+1] = u..':'..(s or '-')..':'..(e or '-')
+			end
+			node:close()
+			assert(cat(t, ',') == '1:11:21,1:11:22,2:14:23', cat(t, ','))
 		end)
 	end)
 end
@@ -428,6 +517,384 @@ function test.left_join_group_chain_exec()
 			assert(cat(t, ',') ==
 				'1:11:21:31,1:11:21:32,2:-:-:-,3:-:-:-,4:-:-:-,5:-:-:-',
 				cat(t, ','))
+		end)
+	end)
+end
+
+--fixture: sessions has a wide index {user_id, kind}, but the FK is
+--declared on user_id alone. classify_join_op() must still pick the
+--wide index for its coverage, but cap what pk_join_seek actually
+--consumes at the FK's own column, leaving kind's equality residual.
+local function build_wide_fk_fixture(db)
+	db:begin'w'
+	db:create_table('users', {fields = {
+		{col = 'id', mdbx_type = 'u32', not_null = true},
+	}, pk = {'id'}})
+	db:insert('users', '{}', {id = 1})
+	db:insert('users', '{}', {id = 2})
+	db:create_table('sessions', {fields = {
+		{col = 'id'     , mdbx_type = 'u32', not_null = true},
+		{col = 'user_id', mdbx_type = 'u32', not_null = true},
+		{col = 'kind'   , mdbx_type = 'utf8', maxlen = 16, nozero = true},
+	}, pk = {'id'}})
+	db:add_index('sessions', {'user_id'})
+	db:add_index('sessions', {'user_id', 'kind'})
+	db:add_fk{table = 'sessions', cols = {'user_id'},
+		ref_table = 'users', ref_cols = {'id'}}
+	local sessions = {
+		{id = 11, user_id = 1, kind = 'web'},
+		{id = 12, user_id = 1, kind = 'app'},
+		{id = 13, user_id = 2, kind = 'web'},
+	}
+	for _, r in ipairs(sessions) do db:insert('sessions', '{}', r) end
+	db:commit()
+end
+
+local function with_wide_fk_db(name, fn)
+	local file = test_file(name)
+	cleanup(file)
+	local db = mdbx_open(file)
+	local ok, err = xpcall(function()
+		build_wide_fk_fixture(db)
+		fn(db)
+	end, debug.traceback)
+	if db.env then db:close() end
+	cleanup(file)
+	assert(ok, err)
+end
+
+--join on both the FK column and a trailing column of a wider index:
+--choose_access() picks the wide {user_id,kind} index for its coverage,
+--but classify_join_op() caps what pk_join_seek actually consumes at
+--the FK's own column (user_id) -- kind's equality must still end up
+--in plan.residual, or session 12 (same user, wrong kind) would leak
+--through unfiltered.
+function test.inner_join_wide_fk_residual_exec()
+	with_wide_fk_db('inner_join_wide_fk_residual_exec', function(db)
+		db:atomic('r', function()
+			local rel = db:from('users')
+				:join('sessions', q.and_(
+					q.eq(q.col('sessions.user_id'), q.col('users.id')),
+					q.eq(q.col('sessions.kind'), 'web')))
+				:select'users.id id'
+				:prepare()
+			local node = compile_step(db, rel, {})
+			node:reset()
+			local t = {}
+			while node:next_item() do
+				local u = pk_id(node, 'users', db)
+				local s = pk_id(node, 'sessions', db)
+				t[#t+1] = u..':'..s
+			end
+			node:close()
+			--session 12 (user 1, kind='app') must not leak through even
+			--though pk_join_seek only ever seeks on user_id.
+			assert(cat(t, ',') == '1:11,2:13', cat(t, ','))
+		end)
+	end)
+end
+
+--a left join whose on_expr has an extra condition past the FK equality
+--(so it lands in plan.residual, not the seek): a raw child row can
+--exist and still fail that extra condition. The outer row must still
+--come through null-extended, the same as if no child row existed at
+--all -- compile_joined_step() applies residual to the seek's own rows
+--before nested_join decides whether the driver row matched, instead
+--of to the combined row afterward (which would silently drop it).
+function test.left_join_residual_null_extends_exec()
+	with_wide_fk_db('left_join_residual_null_extends_exec', function(db)
+		db:atomic('r', function()
+			local rel = db:from('users')
+				:left_join('sessions', q.and_(
+					q.eq(q.col('sessions.user_id'), q.col('users.id')),
+					q.eq(q.col('sessions.kind'), 'admin')))
+				:select'users.id id'
+				:order_by'id'
+				:prepare()
+			local node = compile_step(db, rel, {})
+			node:reset()
+			local t = {}
+			while node:next_item() do
+				local u = pk_id(node, 'users', db)
+				local ok = node:pk('sessions')
+				t[#t+1] = u..':'..(ok and 'y' or 'n')
+			end
+			node:close()
+			--user 1 has sessions (11 web, 12 app) and user 2 has one (13
+			--web), but none is kind='admin' -- both must still appear,
+			--null-extended, not disappear.
+			assert(cat(t, ',') == '1:n,2:n', cat(t, ','))
+		end)
+	end)
+end
+
+--fixture: sessions.kind has NO index at all (unlike build_wide_fk_fixture,
+--where it's part of a wider index alongside user_id) -- the residual
+--condition here was never a candidate for ANY chosen index, not even
+--a trailing column of one, so it must always land in plan.residual
+--regardless of the fk_seek-depth-capping fix.
+local function build_narrow_fk_fixture(db)
+	db:begin'w'
+	db:create_table('users', {fields = {
+		{col = 'id', mdbx_type = 'u32', not_null = true},
+	}, pk = {'id'}})
+	db:insert('users', '{}', {id = 1})
+	db:create_table('sessions', {fields = {
+		{col = 'id'     , mdbx_type = 'u32', not_null = true},
+		{col = 'user_id', mdbx_type = 'u32', not_null = true},
+		{col = 'kind'   , mdbx_type = 'utf8', maxlen = 16, nozero = true},
+	}, pk = {'id'}})
+	db:add_index('sessions', {'user_id'})
+	db:add_fk{table = 'sessions', cols = {'user_id'},
+		ref_table = 'users', ref_cols = {'id'}}
+	db:insert('sessions', '{}', {id = 11, user_id = 1, kind = 'web'})
+	db:commit()
+end
+
+local function with_narrow_fk_db(name, fn)
+	local file = test_file(name)
+	cleanup(file)
+	local db = mdbx_open(file)
+	local ok, err = xpcall(function()
+		build_narrow_fk_fixture(db)
+		fn(db)
+	end, debug.traceback)
+	if db.env then db:close() end
+	cleanup(file)
+	assert(ok, err)
+end
+
+--same bug as left_join_residual_null_extends_exec, but the residual
+--condition (kind='admin') was never part of any candidate index at
+--all (sessions.kind has no index here) -- choose_access() correctly
+--leaves it in plan.residual regardless (nothing ever marks it
+--consumed), so this exercises the #residual > 0 downgrade check on
+--its own, independent of the fk_seek depth-capping fix above.
+function test.left_join_residual_unindexed_col_null_extends_exec()
+	with_narrow_fk_db('left_join_residual_unindexed_col_null_extends_exec',
+	function(db)
+		db:atomic('r', function()
+			local rel = db:from('users')
+				:left_join('sessions', q.and_(
+					q.eq(q.col('sessions.user_id'), q.col('users.id')),
+					q.eq(q.col('sessions.kind'), 'admin')))
+				:select'users.id id'
+				:prepare()
+			local node = compile_step(db, rel, {})
+			node:reset()
+			local t = {}
+			while node:next_item() do
+				local u = pk_id(node, 'users', db)
+				local ok = node:pk('sessions')
+				t[#t+1] = u..':'..(ok and 'y' or 'n')
+			end
+			node:close()
+			--user 1's only session is kind='web', never 'admin' -- must
+			--still appear, null-extended.
+			assert(cat(t, ',') == '1:n', cat(t, ','))
+		end)
+	end)
+end
+
+--child-to-parent join: sessions.user_id is equated against users.id,
+--the PARENT's own pk, not one of sessions' own FK indexes -- best_cand
+--is users' own pk (is_pk, not is_index), so classify_join_op() picks
+--'index_seek': a getter-driven pk_scan on users' pk, correlated
+--against the driver (sessions) node, wrapped in nested_join.
+function test.inner_join_child_to_parent_exec()
+	with_db('inner_join_child_to_parent_exec', function(db)
+		db:atomic('r', function()
+			local rel = db:from('sessions')
+				:join('users', q.eq(q.col('users.id'), q.col('sessions.user_id')))
+				:select'sessions.id sid'
+				:prepare()
+			local node = compile_step(db, rel, {})
+			node:reset()
+			local t = {}
+			while node:next_item() do
+				local s = pk_id(node, 'sessions', db)
+				local u = pk_id(node, 'users', db)
+				t[#t+1] = s..':'..u
+			end
+			node:close()
+			assert(cat(t, ',') == '11:1,12:1,13:1,14:2,15:4', cat(t, ','))
+		end)
+	end)
+end
+
+--cross join: on_expr is a bare `true`, so no eq/lo/hi facts exist at
+--all for sessions -- best_plan stays the 'full' fallback and
+--classify_join_op() picks 'cross': an uncorrelated full pk_scan of
+--sessions, wrapped in nested_join and re-run once per user row.
+function test.cross_join_exec()
+	with_db('cross_join_exec', function(db)
+		db:atomic('r', function()
+			local rel = db:from('users')
+				:join('sessions', true)
+				:select'users.id uid, sessions.id sid'
+				:prepare()
+			local node = compile_step(db, rel, {})
+			node:reset()
+			local n = 0
+			while node:next_item() do n = n + 1 end
+			node:close()
+			--5 users x 5 sessions, every combination.
+			assert(n == 25, n)
+		end)
+	end)
+end
+
+--fixture: self-referencing FK (users.manager_id -> users.id) with its
+--own index -- exercises pk_join_seek's opts.member/from_member for an
+--aliased join, which compile_joined_step now threads through
+--explicitly instead of relying on pk_join_seek's un-aliased
+--schema-name default (which would collide: both sides are 'users').
+local function build_self_fk_fixture(db)
+	db:begin'w'
+	db:create_table('users', {fields = {
+		{col = 'id'        , mdbx_type = 'u32', not_null = true},
+		{col = 'manager_id', mdbx_type = 'u32', not_null = false},
+	}, pk = {'id'}})
+	db:add_index('users', {'manager_id'})
+	db:add_fk{table = 'users', cols = {'manager_id'},
+		ref_table = 'users', ref_cols = {'id'}}
+	local users = {
+		{id = 1, manager_id = null},
+		{id = 2, manager_id = 1},
+		{id = 3, manager_id = 1},
+		{id = 4, manager_id = 2},
+		{id = 5, manager_id = null},
+	}
+	for _, r in ipairs(users) do db:insert('users', '{}', r) end
+	db:commit()
+end
+
+local function with_self_fk_db(name, fn)
+	local file = test_file(name)
+	cleanup(file)
+	local db = mdbx_open(file)
+	local ok, err = xpcall(function()
+		build_self_fk_fixture(db)
+		fn(db)
+	end, debug.traceback)
+	if db.env then db:close() end
+	cleanup(file)
+	assert(ok, err)
+end
+
+--self-join, aliased on the joined (child) side only: the base 'users'
+--member keeps the table's own name, so from_member resolves without
+--needing base-side alias support; the joined 'mgr' member needs its
+--own name threaded into pk_join_seek's opts.member, or its pk stream
+--would either collide with the base member or read back as 'users'.
+function test.inner_join_self_fk_alias_exec()
+	with_self_fk_db('inner_join_self_fk_alias_exec', function(db)
+		db:atomic('r', function()
+			local rel = db:from('users')
+				:join('users mgr',
+					q.eq(q.col('mgr.manager_id'), q.col('users.id')))
+				:select'users.id boss'
+				:prepare()
+			local node = compile_step(db, rel, {})
+			node:reset()
+			local t = {}
+			while node:next_item() do
+				local boss = pk_id(node, 'users', db)
+				local ok, p, sz = node:pk('mgr')
+				assert(ok, 'expected current pk')
+				local report = decode_pk(db:table_schema('users'), p, sz)
+				t[#t+1] = boss..':'..report
+			end
+			node:close()
+			--each report's boss, via the aliased self-join member 'mgr' --
+			--users 3,4,5 have no reports and drop out of the inner join.
+			assert(cat(t, ',') == '1:2,1:3,2:4', cat(t, ','))
+		end)
+	end)
+end
+
+--fixture: b has a composite (2-col) FK to a, but the join only
+--equates the first column -- a partial match against the FK.
+local function build_composite_fk_fixture(db)
+	db:begin'w'
+	db:create_table('a', {fields = {
+		{col = 'x', mdbx_type = 'u32', not_null = true},
+		{col = 'y', mdbx_type = 'u32', not_null = true},
+	}, pk = {'x', 'y'}})
+	db:create_table('b', {fields = {
+		{col = 'id', mdbx_type = 'u32', not_null = true},
+		{col = 'x' , mdbx_type = 'u32', not_null = true},
+		{col = 'y' , mdbx_type = 'u32', not_null = true},
+	}, pk = {'id'}})
+	db:add_index('b', {'x', 'y'})
+	db:add_fk{table = 'b', cols = {'x', 'y'}, ref_table = 'a', ref_cols = {'x', 'y'}}
+	db:insert('a', '{}', {x = 1, y = 1})
+	db:insert('a', '{}', {x = 1, y = 2})
+	db:insert('b', '{}', {id = 10, x = 1, y = 1})
+	db:insert('b', '{}', {id = 11, x = 1, y = 2})
+	db:commit()
+end
+
+local function with_composite_fk_db(name, fn)
+	local file = test_file(name)
+	cleanup(file)
+	local db = mdbx_open(file)
+	local ok, err = xpcall(function()
+		build_composite_fk_fixture(db)
+		fn(db)
+	end, debug.traceback)
+	if db.env then db:close() end
+	cleanup(file)
+	assert(ok, err)
+end
+
+--joining on only the first column of a 2-column FK: fk_driving_source()
+--used to read eq[cand_schema.pk[i]] for every i up to #fk.cols
+--regardless of how many of those columns the join's on_expr actually
+--matched by equality, crashing (index a nil fact) on this partial
+--match instead of correctly falling back to index_seek.
+function test.inner_join_composite_fk_partial_match_exec()
+	with_composite_fk_db('inner_join_composite_fk_partial_match_exec',
+	function(db)
+		db:atomic('r', function()
+			local rel = db:from('a')
+				:join('b', q.eq(q.col('b.x'), q.col('a.x')))
+				:select'a.x id'
+				:prepare()
+			local node = compile_step(db, rel, {})
+			node:reset()
+			local n = 0
+			while node:next_item() do n = n + 1 end
+			node:close()
+			--2 a-rows (x=1,y=1 and x=1,y=2) x 2 b-rows (x=1,y=1 and
+			--x=1,y=2) -- the join only equates x, so every a-row pairs
+			--with every b-row regardless of y.
+			assert(n == 4, n)
+		end)
+	end)
+end
+
+--base source aliased in FROM: pk_scan must register its one member
+--under the alias (source.name), not schema.name (the physical
+--table), or every downstream node:pk()/node:col() lookup by alias
+--would miss it.
+function test.from_alias_exec()
+	with_db('from_alias_exec', function(db)
+		db:atomic('r', function()
+			local rel = db:from('users u')
+				:where(q.eq(q.col('u.status'), 'active'))
+				:select'u.id id'
+				:prepare()
+			local node = compile_step(db, rel, {})
+			node:reset()
+			local t = {}
+			while node:next_item() do
+				local ok, p, sz = node:pk('u')
+				assert(ok, 'expected current pk')
+				t[#t+1] = decode_pk(db:table_schema('users'), p, sz)
+			end
+			node:close()
+			assert(cat(t, ',') == '1,2,4', cat(t, ','))
 		end)
 	end)
 end
@@ -619,7 +1086,7 @@ function test.limit_exec()
 	end)
 end
 
---limit(q.param()): resolved through the same params table rows()
+--limit(q.param()): resolved through the same params table that rows()
 --binds, same as any other bound value in a query.
 function test.limit_via_param_exec()
 	with_db('limit_via_param_exec', function(db)
@@ -688,7 +1155,7 @@ function test.group_by_aggregate_streamed_exec()
 end
 
 --where() on score forces choose_access onto the score index instead
---(the only candidate try_key can seek with), so status's natural
+--(the only candidate that try_key can seek with), so status's natural
 --group order is gone -- group_streaming should come out false and
 --hash_aggregate carries the same result.
 function test.group_by_aggregate_hashed_exec()
@@ -706,6 +1173,37 @@ function test.group_by_aggregate_hashed_exec()
 				t[#t+1] = row.status..':'..row.n..':'..row.total
 			end
 			assert(cat(t, ',') == 'active:3:245,banned:2:110', cat(t, ','))
+		end)
+	end)
+end
+
+--the group key is named '_agg2', matching what the first aggregate's
+--auto-generated projected-field name would also be, and two
+--aggregates (sum/avg) both read the same source column (score):
+--compile_group()'s hash path used to name that first aggregate's
+--field '_agg'..#outputs, colliding with (and silently overwriting)
+--the key's own output slot instead of checking for that name already
+--being taken, and separately projected that column once per
+--aggregate instead of once total.
+function test.group_by_aggregate_hashed_name_collision_exec()
+	with_db('group_by_aggregate_hashed_name_collision_exec', function(db)
+		db:atomic('r', function()
+			local rel = db:from('users')
+				:where(q.ge(q.col('users.score'), 0))
+				:group_by{'users.status _agg2',
+					{q.sum(q.col('users.score')), 'total'},
+					{q.avg(q.col('users.score')), 'avg'}}
+				:order_by'_agg2'
+				:prepare()
+			assert(not rel.group_streaming, 'expected the hash path here')
+			local t = {}
+			for row in rel:rows'{}' do
+				t[#t+1] = row._agg2..':'..row.total..':'..row.avg
+			end
+			--active: scores 80,95,70 -> sum 245, avg 245/3; banned: 50,60
+			---> sum 110, avg 55.
+			assert(cat(t, ',') ==
+				'active:245:'..(245/3)..',banned:110:55', cat(t, ','))
 		end)
 	end)
 end
@@ -821,6 +1319,325 @@ function test.exists_having_exec()
 				:having(q.ge(q.col('n'), 10))
 				:prepare()
 			assert(rel:exists() == false)
+		end)
+	end)
+end
+
+------------------------------------------------------------------------------
+--where_has()/where_hasnt(): exists()/not_exists() via FK, evaluated
+--per row through a persistent probe (one seek per outer row, opened
+--once for the whole run) -- users 1/2/4 have sessions, 3/5 don't.
+
+function test.where_has_exec()
+	with_group_db('where_has_exec', function(db)
+		db:atomic('r', function()
+			local rel = db:from('users')
+				:where_has('sessions')
+				:select'users.id id'
+				:order_by'users.id'
+				:prepare()
+			local t = {}
+			for id in rel:rows() do t[#t+1] = id end
+			assert(cat(t, ',') == '1,2,4', cat(t, ','))
+		end)
+	end)
+end
+
+function test.where_hasnt_exec()
+	with_group_db('where_hasnt_exec', function(db)
+		db:atomic('r', function()
+			local rel = db:from('users')
+				:where_hasnt('sessions')
+				:select'users.id id'
+				:order_by'users.id'
+				:prepare()
+			local t = {}
+			for id in rel:rows() do t[#t+1] = id end
+			assert(cat(t, ',') == '3,5', cat(t, ','))
+		end)
+	end)
+end
+
+--where_has()'s filter ANDs onto the FK condition; exists_key_conditions
+--must still single out only the FK equality to drive the probe's seek,
+--leaving id>13 as an ordinary residual check on the probe's own row --
+--user 1's sessions (11,12,13) all fail it, 2's (14) and 4's (15) pass.
+function test.where_has_filter_exec()
+	with_group_db('where_has_filter_exec', function(db)
+		db:atomic('r', function()
+			local rel = db:from('users')
+				:where_has('sessions', q.gt(q.col('sessions.id'), 13))
+				:select'users.id id'
+				:order_by'users.id'
+				:prepare()
+			local t = {}
+			for id in rel:rows() do t[#t+1] = id end
+			assert(cat(t, ',') == '2,4', cat(t, ','))
+		end)
+	end)
+end
+
+--exists() combined with another condition via and_(): proves the
+--probe is reachable from anywhere in the boolean tree, not just as
+--the sole where() condition.
+--q.exists() with no on_expr at all is an uncorrelated check ("does
+--the table have any row"), unlike where_has()'s auto-resolved FK --
+--the correlation has to be spelled out by hand here.
+function test.exists_in_and_expr_exec()
+	with_group_db('exists_in_and_expr_exec', function(db)
+		db:atomic('r', function()
+			local rel = db:from('users')
+				:where(q.and_(
+					q.exists('sessions',
+						q.eq(q.col('sessions.user_id'), q.col('users.id'))),
+					q.ne(q.col('users.id'), 2)))
+				:select'users.id id'
+				:order_by'users.id'
+				:prepare()
+			local t = {}
+			for id in rel:rows() do t[#t+1] = id end
+			assert(cat(t, ',') == '1,4', cat(t, ','))
+		end)
+	end)
+end
+
+--exists()/not_exists() against a whole sub-relation (compile_rel_probe),
+--not a plain table: same correlation as where_has_exec, spelled out by
+--hand instead of resolved from a FK. The sub-relation's own where()
+--puts the outer q.col() straight into its base step's plan.seek, read
+--through compile_plan's outer_box the same way compile_exists_plan()
+--reads one for a table probe.
+function test.exists_rel_exec()
+	with_group_db('exists_rel_exec', function(db)
+		db:atomic('r', function()
+			local sub = db:from('sessions')
+				:where(q.eq(q.col('sessions.user_id'), q.col('users.id')))
+			local rel = db:from('users')
+				:where(q.exists(sub))
+				:select'users.id id'
+				:order_by'users.id'
+				:prepare()
+			local t = {}
+			for id in rel:rows() do t[#t+1] = id end
+			assert(cat(t, ',') == '1,2,4', cat(t, ','))
+		end)
+	end)
+end
+
+function test.not_exists_rel_exec()
+	with_group_db('not_exists_rel_exec', function(db)
+		db:atomic('r', function()
+			local sub = db:from('sessions')
+				:where(q.eq(q.col('sessions.user_id'), q.col('users.id')))
+			local rel = db:from('users')
+				:where(q.not_exists(sub))
+				:select'users.id id'
+				:order_by'users.id'
+				:prepare()
+			local t = {}
+			for id in rel:rows() do t[#t+1] = id end
+			assert(cat(t, ',') == '3,5', cat(t, ','))
+		end)
+	end)
+end
+
+--in_()/not_in() against a whole sub-relation (compile_rel_probe's
+--values()): uncorrelated here (the sub-relation just projects every
+--session's user_id), so it answers the same "has a session" question
+--as exists_rel_exec, through value membership instead of a
+--correlated probe.
+function test.in_rel_exec()
+	with_group_db('in_rel_exec', function(db)
+		db:atomic('r', function()
+			local sub = db:from('sessions'):select'sessions.user_id id'
+			local rel = db:from('users')
+				:where(q.in_(q.col('users.id'), sub))
+				:select'users.id id'
+				:order_by'users.id'
+				:prepare()
+			local t = {}
+			for id in rel:rows() do t[#t+1] = id end
+			assert(cat(t, ',') == '1,2,4', cat(t, ','))
+		end)
+	end)
+end
+
+function test.not_in_rel_exec()
+	with_group_db('not_in_rel_exec', function(db)
+		db:atomic('r', function()
+			local sub = db:from('sessions'):select'sessions.user_id id'
+			local rel = db:from('users')
+				:where(q.not_in(q.col('users.id'), sub))
+				:select'users.id id'
+				:order_by'users.id'
+				:prepare()
+			local t = {}
+			for id in rel:rows() do t[#t+1] = id end
+			assert(cat(t, ',') == '3,5', cat(t, ','))
+		end)
+	end)
+end
+
+--a sub-relation with a join of its own: compile_rel_probe() delegates
+--to compile_step(), which already builds a multi-step chain for a
+--top-level rel, so this needs no extra code. user 4's session 15 has
+--no events -- the inner join drops it, so user 4 fails exists() here
+--even though it passes exists_rel_exec's single-step version.
+function test.exists_rel_join_exec()
+	with_group_db('exists_rel_join_exec', function(db)
+		db:atomic('r', function()
+			local sub = db:from('sessions')
+				:join('events',
+					q.eq(q.col('events.session_id'), q.col('sessions.id')))
+				:where(q.eq(q.col('sessions.user_id'), q.col('users.id')))
+			local rel = db:from('users')
+				:where(q.exists(sub))
+				:select'users.id id'
+				:order_by'users.id'
+				:prepare()
+			local t = {}
+			for id in rel:rows() do t[#t+1] = id end
+			assert(cat(t, ',') == '1,2', cat(t, ','))
+		end)
+	end)
+end
+
+--output/distinct/sort descriptors and an exists() table-source probe's
+--own scan plan are computed once during prepare(), not rebuilt on
+--every rows() call -- verified by object identity across two separate
+--calls against the same prepared rel.
+function test.descriptors_compiled_once_exec()
+	with_group_db('descriptors_compiled_once_exec', function(db)
+		db:atomic('r', function()
+			local rel = db:from('users')
+				:where_has('sessions')
+				:select'users.id id'
+				:order_by'id desc'
+				:distinct()
+				:prepare()
+			local exists_expr
+			for _, cond in ipairs(rel.access[1].plan.residual) do
+				if cond.expr[1] == 'exists' then exists_expr = cond.expr end
+			end
+			assert(exists_expr, 'expected where_has() to leave a residual'
+				..' exists() condition on the base step')
+			local output_descriptor = rel.output_descriptor
+			local distinct_fields = rel.distinct_fields
+			local sort_spec = rel.sort_spec
+			local exists_plan = exists_expr.plan
+			assert(output_descriptor and distinct_fields and sort_spec
+				and exists_plan, 'expected every descriptor to be precomputed')
+			for _ in rel:rows() do end
+			for _ in rel:rows() do end
+			assert(rel.output_descriptor == output_descriptor,
+				'output_descriptor rebuilt')
+			assert(rel.distinct_fields == distinct_fields,
+				'distinct_fields rebuilt')
+			assert(rel.sort_spec == sort_spec, 'sort_spec rebuilt')
+			assert(exists_expr.plan == exists_plan,
+				'exists() checker plan rebuilt')
+		end)
+	end)
+end
+
+--fixture: sessions has an index on started_at (not on user_id) --
+--exercises a range correlation against an outer column, which the old
+--equality-only correlation check rejected outright regardless of any
+--index.
+local function build_range_correlation_fixture(db)
+	db:begin'w'
+	db:create_table('users', {fields = {
+		{col = 'id'       , mdbx_type = 'u32', not_null = true},
+		{col = 'min_start', mdbx_type = 'u32', not_null = true},
+	}, pk = {'id'}})
+	local users = {
+		{id = 1, min_start = 100},
+		{id = 2, min_start = 1000},
+	}
+	for _, r in ipairs(users) do db:insert('users', '{}', r) end
+	db:create_table('sessions', {fields = {
+		{col = 'id'        , mdbx_type = 'u32', not_null = true},
+		{col = 'started_at', mdbx_type = 'u32', not_null = true},
+	}, pk = {'id'}})
+	db:add_index('sessions', {'started_at'})
+	local sessions = {
+		{id = 11, started_at = 150},
+		{id = 12, started_at = 50},
+		{id = 13, started_at = 300},
+	}
+	for _, r in ipairs(sessions) do db:insert('sessions', '{}', r) end
+	db:commit()
+end
+
+local function with_range_correlation_db(name, fn)
+	local file = test_file(name)
+	cleanup(file)
+	local db = mdbx_open(file)
+	local ok, err = xpcall(function()
+		build_range_correlation_fixture(db)
+		fn(db)
+	end, debug.traceback)
+	if db.env then db:close() end
+	cleanup(file)
+	assert(ok, err)
+end
+
+--a non-equality (range) correlation against an outer column: choose_access()
+--picks the started_at index (a 'range' plan, lo-only) the same way it
+--would for a real join, and expr.correlated is true -- checked once
+--per outer row, via a getter reading users' current row, not a probe
+--restricted to equality.
+function test.exists_range_correlation_exec()
+	with_range_correlation_db('exists_range_correlation_exec', function(db)
+		db:atomic('r', function()
+			local rel = db:from('users')
+				:where(q.exists('sessions',
+					q.ge(q.col('sessions.started_at'), q.col('users.min_start'))))
+				:select'users.id id'
+				:order_by'id'
+				:prepare()
+			local exists_expr
+			for _, cond in ipairs(rel.access[1].plan.residual) do
+				if cond.expr[1] == 'exists' then exists_expr = cond.expr end
+			end
+			assert(exists_expr and exists_expr.correlated,
+				'expected a correlated exists() classification')
+			assert(exists_expr.plan.kind == 'range',
+				'expected the started_at index to drive a range seek')
+			local t = {}
+			for id in rel:rows() do t[#t+1] = id end
+			--user 1 (min_start=100): sessions 11/13 qualify -> true.
+			--user 2 (min_start=1000): no session qualifies -> false, dropped.
+			assert(cat(t, ',') == '1', cat(t, ','))
+		end)
+	end)
+end
+
+--an exists() with no reference to the outer scope at all is classified
+--uncorrelated at compile() time -- its answer can't vary per outer
+--row, so it's worth answering once instead of via a per-row probe.
+--referencing nothing from 'users' also means attribute_conditions()
+--can't own it by any one access step, so it lands in rel.late_conditions
+--(checked once, over the whole finished row), not a step's own residual.
+function test.exists_uncorrelated_classified_exec()
+	with_db('exists_uncorrelated_classified_exec', function(db)
+		db:atomic('r', function()
+			local rel = db:from('users')
+				:where(q.exists('sessions', q.eq(q.col('sessions.id'), 11)))
+				:select'users.id id'
+				:order_by'id'
+				:prepare()
+			local exists_expr
+			for _, cond in ipairs(rel.late_conditions) do
+				if cond.expr[1] == 'exists' then exists_expr = cond.expr end
+			end
+			assert(exists_expr and exists_expr.correlated == false,
+				'expected an uncorrelated exists() classification')
+			local t = {}
+			for id in rel:rows() do t[#t+1] = id end
+			--session 11 exists (user_id=1), so every user matches --
+			--the check doesn't vary per row, same for all 5 users.
+			assert(cat(t, ',') == '1,2,3,4,5', cat(t, ','))
 		end)
 	end)
 end

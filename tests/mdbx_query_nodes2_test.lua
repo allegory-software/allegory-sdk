@@ -472,7 +472,7 @@ opts.from_member (nested_join reads outer:pk('users') raw and calls
 inner:reset_prefix() with it) -- the group attaches to users through
 an FK, same as any pk_join_seek edge, so no getter/decode/encode is
 needed to re-seek it per outer row.
-Group semantics (the reason this node exists over pk_join_seek):
+Group semantics (the reason that this node exists over pk_join_seek):
 - user 1: sessions 12/13 have no events -- inner join drops them, only
   session 11 (with 2 events) survives.
 - user 4: session 15 exists but has no events -- the whole group nulls
@@ -553,7 +553,7 @@ function test.explain_pk_filter()
 end
 
 --keeps rows where fn(node) is true, reading columns straight off the
---node it's given (delegating through the wrapped input's compile_col).
+--node that it's given (delegating through the wrapped input's compile_col).
 function test.pk_filter_exec()
 	with_db('pk_filter_exec', function(db)
 		db:atomic('r', function()

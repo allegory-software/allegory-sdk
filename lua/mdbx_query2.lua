@@ -112,7 +112,6 @@ IMPLEMENTATION
 require'mdbx_schema'
 require'mdbx_query_nodes2'
 
-local C  = C
 local Db = mdbx_db
 
 --PARSING --------------------------------------------------------------------
@@ -277,11 +276,16 @@ end
 function q.is_null     (expr) return {'is_null'    , expr} end
 function q.is_not_null (expr) return {'is_not_null', expr} end
 
-function q.count (expr) return {'count', expr, aggregate = true} end
-function q.min   (expr) return {'min'  , expr, aggregate = true} end
-function q.max   (expr) return {'max'  , expr, aggregate = true} end
-function q.sum   (expr) return {'sum'  , expr, aggregate = true} end
-function q.avg   (expr) return {'avg'  , expr, aggregate = true} end
+--{op->true}: q.count/min/max/sum/avg, the only ops group_by() allows
+--as an aggregate output.
+local AGGREGATE_OPS = {count = true, min = true, max = true, sum = true,
+	avg = true}
+
+function q.count (expr) return {'count', expr} end
+function q.min   (expr) return {'min'  , expr} end
+function q.max   (expr) return {'max'  , expr} end
+function q.sum   (expr) return {'sum'  , expr} end
+function q.avg   (expr) return {'avg'  , expr} end
 
 function q.starts(expr, prefix)
 	return {'starts', expr, prefix}
@@ -344,8 +348,9 @@ ANALYZING
 - split conditions; wheres/havings/on_exprs -> fact|residual conditions
 - attribute conditions; where conditions -> owning source | late
 - build access plan; joins -> per-source scan plan, natural_order
-- decide sort/dedup shortcuts; -> sort_needed, next_nodup, distinct_streaming
-- collect exists()/in_() targets; residual/late/having -> exists_sources
+- decide sort/dedup shortcuts; -> sort_needed, distinct_streaming
+- compile output pipeline; out/group/distinct/sort cols -> descriptors
+- classify exists()/in_() targets; residual/late/having -> expr.plan/.correlated
 ]]
 
 local resolve_table_source --fw.decl.
@@ -400,7 +405,6 @@ local function bind_col(expr, scope)
 	assert(not expr.outer or depth > 0,
 		'outer col resolved in current scope')
 	expr.source = source
-	expr.col = bcol
 end
 
 --bind a col to an output col by name, not to a source col.
@@ -438,9 +442,7 @@ local function fk_expr(found_fk)
 			..found_fk.fk.ref_cols[i])
 		--source names can repeat across exists() scopes.
 		child_col.source = found_fk.child
-		child_col.col = found_fk.child.cols[col]
 		parent_col.source = found_fk.parent
-		parent_col.col = found_fk.parent.cols[found_fk.fk.ref_cols[i]]
 		exprs[i] = q.eq(child_col, parent_col)
 	end
 	return #exprs == 1 and exprs[1] or q.and_(unpack(exprs))
@@ -464,12 +466,14 @@ end
 --EXPRESSION BINDING ---------------------------------------------------------
 
 local compile
+local split_group_cols   --fw. decl.
+local resolve_exists_plan --fw. decl.
 
 --bind every col nested in an expression.
 local function bind_expr(expr, scope, out_cols, mode, allow_aggregate)
 	if type(expr) ~= 'table' then return end
 	local op = expr[1]
-	if expr.aggregate then
+	if AGGREGATE_OPS[op] then
 		--aggregate exprs (count/sum/...) are only allowed in group_by().
 		assert(allow_aggregate,
 			'aggregate expressions are only allowed in group_by()')
@@ -575,9 +579,6 @@ local function resolve_out_cols(cols)
 		assert(type(name) == 'string', 'output col name must be a string')
 		assertf(not out_cols[name], 'duplicate output col: %s', name)
 		expr.name = name
-		--a source lookup by name (source.cols[col]) only gets one entry,
-		--not this whole array, so the position has to live on the entry.
-		expr.index = i
 		out_cols[i] = expr
 		out_cols[name] = expr
 	end
@@ -882,13 +883,9 @@ end
 local function group_has_no_aggregates(rel)
 	if not rel.group_cols then return false end
 	for _, expr in ipairs(rel.group_cols) do
-		if expr.aggregate then return false end
+		if AGGREGATE_OPS[expr[1]] then return false end
 	end
 	return true
-end
-local function dedup_only(rel)
-	return (rel.distinct_cols and not rel.group_cols)
-		or group_has_no_aggregates(rel)
 end
 --index selection for group order: an index whose key groups these
 --cols together lets a later streaming grouper run instead of a hash,
@@ -901,7 +898,7 @@ local function group_key_terms(rel)
 	if rel.group_cols then
 		local terms = {} --{{key=}...}
 		for _, expr in ipairs(rel.group_cols) do
-			if not expr.aggregate then
+			if not AGGREGATE_OPS[expr[1]] then
 				local t = col_term(expr)
 				if not t then return nil end --computed key: index can't help
 				add(terms, t)
@@ -921,11 +918,9 @@ end
   stream_distinct) can compare each row to the one before it instead
   of hashing every group in memory.
 - first way this holds: the chosen access plan's own natural_order
-  already keeps these terms' cols adjacent -- the same set check
-  dedup_only()'s NEXT_NODUP path uses, minus that path's extra "covers
-  the whole key" condition: a proper prefix of the varying natural
-  order is enough for grouping specifically (nothing needs to vary
-  after it), unlike NEXT_NODUP's stricter requirement.
+  already keeps these terms' cols adjacent -- a proper prefix of the
+  varying natural order is enough for grouping (nothing needs to vary
+  after it).
 - second way, needing no natural order at all: the terms cover the
   base (driving) source's whole primary key. nested-loop execution
   (pk_join_seek/nested_join) processes one base row's entire join
@@ -973,7 +968,7 @@ end
 --[[
 - decide whether distinct() can stream (stream_distinct) instead of
   hashing (hash_distinct) -- same terms_group_consecutive() check
-  group_actually_streamable() uses, over distinct()'s own dedup key
+  that group_actually_streamable() uses, over distinct()'s own dedup key
   cols instead of group_by()'s.
 - distinct() after group_by() always hashes: the aggregated output's
   order isn't rel.natural_order (that describes the pre-aggregation
@@ -1072,58 +1067,107 @@ end
 
 local referenced_sources --fw. decl.
 
---walk a rel's own filters so correlated exists()/in_() can be owned by
---the outer source they read.
-local function referenced_rel_sources(rel, found, sources)
+--walk a rel's own filters (where()s and joins' on_expr) so a
+--correlated exists()/in_() can be owned by the outer source that it
+--reads (through_exists=true), or so a sub-relation's own correlation
+--to a given source set can be detected (through_exists=false, see
+--references_outside() below).
+local function referenced_rel_sources(rel, found, sources, through_exists)
 	if rel.union_rels then
 		for _, input in ipairs(rel.union_rels) do
-			referenced_rel_sources(input, found, sources)
+			referenced_rel_sources(input, found, sources, through_exists)
+		end
+		return
+	end
+	for _, cond in ipairs(rel.where_conditions) do
+		referenced_sources(cond.expr, found, sources, through_exists)
+	end
+	for _, join in ipairs(rel.joins or empty) do
+		referenced_sources(join.on_expr, found, sources, through_exists)
+	end
+end
+
+--[[
+- collect the sources an expression reads into found (name -> source).
+- q.col() nodes count when sources is nil (record every source) or
+  when they bind to one of sources (record only those).
+- through_exists controls what an exists()/not_exists()/in_()/not_in()
+  boundary does:
+  - true (attribute_conditions()'s use): recurse into its on_expr and
+    inner where()/joins too -- a whole condition that reads an outer
+    col only via a nested exists()/in_() still "reads" that source,
+    for scheduling purposes.
+  - false (references_outside()'s use): stop there -- a nested
+    exists()/in_() is evaluated as its own independent, self-contained
+    boolean; its own correlation is resolved separately, so it never
+    makes the enclosing occurrence itself correlated.
+- attribute_conditions() uses how many sources this returns (through_exists
+  = true, sources = the owning rel's own) to decide whether one source
+  can own a condition; a cross-source condition becomes a late
+  condition, checked only after every source has been scanned.
+]]
+--found: {name -> source}
+--[[local]] function referenced_sources(expr, found, sources, through_exists)
+	if type(expr) ~= 'table' then return end
+	local op = expr[1]
+	if op == 'col' then
+		if expr.source and (not sources or sources[expr.source.name] == expr.source) then
+			found[expr.source.name] = expr.source
+		end
+	elseif op == 'exists' or op == 'not_exists' then
+		if through_exists then
+			local right, on_expr = expr[2], expr[3]
+			if on_expr then
+				referenced_sources(on_expr, found, sources, through_exists)
+			end
+			if inherits(right, Rel) then
+				referenced_rel_sources(right, found, sources, through_exists)
+			end
+		end
+	elseif op == 'in' or op == 'not_in' then
+		referenced_sources(expr[2], found, sources, through_exists)
+		local values_or_rel = expr[3]
+		if inherits(values_or_rel, Rel) then
+			if through_exists then
+				referenced_rel_sources(values_or_rel, found, sources,
+					through_exists)
+			end
+		elseif values_or_rel[1] ~= 'param' then
+			for _, item in ipairs(values_or_rel) do
+				referenced_sources(item, found, sources, through_exists)
+			end
 		end
 	else
-		for _, cond in ipairs(rel.where_conditions) do
-			referenced_sources(cond.expr, found, sources)
+		for i = 2, #expr do
+			referenced_sources(expr[i], found, sources, through_exists)
 		end
 	end
 end
 
 --[[
-- collect this rel's sources read by an expression.
-- q.col() nodes count when they bind to this rel.
-- exists()/in_() correlations count through on_expr and inner where().
-- attribute_conditions() uses how many sources this returns to decide
-  whether one source can own a condition.
-- a cross-source condition becomes a late condition, checked only
-  after every source has been scanned.
+true if expr (references_outside()) or rel's own where()/join
+conditions (rel_references_outside()) read a col whose source isn't in
+own_sources -- an outer-scope correlation, from own_sources' point of
+view. Used two ways: exists()/not_exists()'s own on_expr (own_sources
+is just {[source.name] = source}, so anything else is outer), and
+detecting whether a whole exists()/in_() occurrence is correlated at
+all (own_sources is the table/sub-relation's full source set).
 ]]
---found: {name->true}
---[[local]] function referenced_sources(expr, found, sources)
-	if type(expr) ~= 'table' then return end
-	local op = expr[1]
-	if op == 'col' then
-		if expr.source and sources[expr.source.name] == expr.source then
-			found[expr.source.name] = true
-		end
-	elseif op == 'exists' or op == 'not_exists' then
-		local right, on_expr = expr[2], expr[3]
-		if on_expr then referenced_sources(on_expr, found, sources) end
-		if inherits(right, Rel) then
-			referenced_rel_sources(right, found, sources)
-		end
-	elseif op == 'in' or op == 'not_in' then
-		referenced_sources(expr[2], found, sources)
-		local values_or_rel = expr[3]
-		if inherits(values_or_rel, Rel) then
-			referenced_rel_sources(values_or_rel, found, sources)
-		else
-			for _, item in ipairs(values_or_rel) do
-				referenced_sources(item, found, sources)
-			end
-		end
-	else
-		for i = 2, #expr do
-			referenced_sources(expr[i], found, sources)
-		end
+local function found_outside(found, own_sources)
+	for name, source in pairs(found) do
+		if own_sources[name] ~= source then return true end
 	end
+	return false
+end
+local function references_outside(expr, own_sources)
+	local found = {}
+	referenced_sources(expr, found, nil, false)
+	return found_outside(found, own_sources)
+end
+local function rel_references_outside(rel, own_sources)
+	local found = {}
+	referenced_rel_sources(rel, found, nil, false)
+	return found_outside(found, own_sources)
 end
 
 --[[
@@ -1137,7 +1181,7 @@ end
   inside it counts as left-joined too, regardless of which join op
   connects sources *inside* the group.
 - limitation: such a where() condition can never become a fact
-  choose_access() can use for an index seek, even when one exists on
+  that choose_access() can use for an index seek, even when one exists on
   that col -- only a condition on the source's own on_expr still can.
   a fix that kept index use would need two separate scans, one to
   prove existence and one to narrow candidates, which this engine
@@ -1160,13 +1204,13 @@ local function collect_left_joined_sources(joins, left_joined_sources)
 end
 
 --decide which single source, if any, owns a condition: the one
---source it reads, when that source isn't left-joined. a condition
+--source that it reads, when that source isn't left-joined. a condition
 --that reads more than one source, or none, or a left-joined source,
 --can't be checked before every source has been scanned.
 local function attribute_conditions(conditions, sources, left_joined_sources)
 	for _, cond in ipairs(conditions) do
-		local found = {} --{name->true}
-		referenced_sources(cond.expr, found, sources)
+		local found = {} --{name->source}
+		referenced_sources(cond.expr, found, sources, true)
 		local n, only = 0, nil
 		for name in pairs(found) do
 			n = n + 1
@@ -1194,14 +1238,14 @@ local function source_operand(source, left, right)
 end
 --{op->flipped op}
 local flip_range_op = {lt = 'gt', le = 'ge', gt = 'lt', ge = 'le'}
---in_() lists up to IN_UNION_MAX can use repeated exact seeks.
---longer lists stay as residual row checks.
---the cutoff bounds the number of cursor seeks.
-local IN_UNION_MAX = 16
 
 --[[
 - pull facts out of access conditions that read only this source.
-- supported facts: equality, range, prefix, membership, null.
+- supported facts: equality, range, prefix, null. membership (in_())
+  is deliberately not one of them: no executor seeks a plan.kind='in'
+  (pk_scan only implements exact/range/prefix/eq_prefix/full), and
+  the residual evaluator already checks list membership correctly, so
+  a membership condition is left alone here and always stays residual.
 - facts are bucketed by col.
 - each col gets one fact per kind.
 - a later condition for a (col,kind) slot that's already filled is
@@ -1209,9 +1253,9 @@ local IN_UNION_MAX = 16
 - keeping the first fact per (col,kind) picks an arbitrary but valid
   seek; it never changes query correctness.
 ]]
-local function bucket_facts(source, conditions, sources)
+local function bucket_facts(source, conditions)
 	--{col->{cond=,expr=[,op=]}}
-	local eq, lo, hi, prefix, in_by = {}, {}, {}, {}, {}
+	local eq, lo, hi, prefix = {}, {}, {}, {}
 	for _, cond in ipairs(conditions) do
 		if not cond.consumed then
 			local expr = cond.expr
@@ -1234,26 +1278,6 @@ local function bucket_facts(source, conditions, sources)
 				then
 					if not prefix[left[3]] then
 						prefix[left[3]] = {cond = cond, expr = expr[3]}
-					end
-				end
-			elseif cond.kind == 'membership' then
-				local left, values = expr[2], expr[3]
-				if expr[1] == 'in' and type(values) == 'table'
-					and not inherits(values, Rel)
-					and not (type(values) == 'table' and values[1] == 'param')
-					and #values <= IN_UNION_MAX
-					and type(left) == 'table' and left[1] == 'col'
-					and left.source == source
-				then
-					--seek values must be known before this source is scanned.
-					local self_ref = false
-					for _, item in ipairs(values) do
-						local found = {} --{name->true}
-						referenced_sources(item, found, sources)
-						if found[source.name] then self_ref = true; break end
-					end
-					if not self_ref and not in_by[left[3]] then
-						in_by[left[3]] = {cond = cond, exprs = values}
 					end
 				end
 			elseif cond.kind == 'null' then
@@ -1280,7 +1304,7 @@ local function bucket_facts(source, conditions, sources)
 			end
 		end
 	end
-	return eq, lo, hi, prefix, in_by
+	return eq, lo, hi, prefix
 end
 
 --is this col marked ai_ci? true or false either way, whether we're
@@ -1320,7 +1344,7 @@ end
 - we never use an ai_ci col for a prefix search (starts()), because
   folding text can shift where a prefix starts or ends.
 ]]
-local function try_key(schema, eq, lo, hi, prefix, in_by)
+local function try_key(schema, eq, lo, hi, prefix)
 	local pk = schema.pk
 	local depth = eq_depth(schema, eq)
 	if depth == #pk then
@@ -1328,9 +1352,6 @@ local function try_key(schema, eq, lo, hi, prefix, in_by)
 	end
 	local nc = pk[depth + 1]
 	local nc_seekable = nc and (schema.is_index or not ai_ci_col(schema, nc))
-	if #pk == 1 and depth == 0 and nc_seekable and in_by[nc] then
-		return {kind = 'in', depth = 0, bound_col = nc}
-	end
 	if nc and prefix[nc] and not ai_ci_col(schema, nc) then
 		return {kind = 'prefix', depth = depth, bound_col = nc}
 	end
@@ -1351,10 +1372,8 @@ end
 - row counts and index sizes are not ranking inputs.
 ]]
 --{kind->tie-break rank}
-local kind_rank =
-	{exact = 2, ['in'] = 2, range = 1, prefix = 1, eq_prefix = 0}
+local kind_rank = {exact = 2, range = 1, prefix = 1, eq_prefix = 0}
 local function plan_coverage(plan)
-	if plan.kind == 'in' then return 1 end
 	if plan.kind == 'range' or plan.kind == 'prefix' then
 		return plan.depth + 1
 	end
@@ -1364,13 +1383,13 @@ end
 --[[
 - what order the rows come out in if we scan this key.
 - if an ai_ci col is fixed to one value at the start (an "=" match),
-  we still count it as fixed: every row we keep really does have the
+  we still count it as fixed: every row that we keep really does have the
   same real text, because we double-check it later, so the cols after
   it still sort correctly.
 - if an ai_ci col comes later, varying, we can only trust its order
   when this schema is the index that stores the folded text. the table
   itself, or a plain index, stores the real text, which sorts
-  differently -- so we stop here instead of claiming an order we can't
+  differently -- so we stop here instead of claiming an order that we can't
   back up.
 - a col stored as "desc" scans in descending order, not ascending (the
   key bytes are inverted for this at write time, so a normal forward
@@ -1431,30 +1450,85 @@ local function try_group_key(source, schema, eq, group_terms)
 end
 
 --[[
+does eq's first n leading key cols of cand_schema all bind, via
+equality, to the very same already-scheduled source's own pk, in
+matching pk order? pk_join_seek reads that source's whole encoded pk
+as raw bytes (driver:pk(from_member)), so anything looser -- a
+literal, a different source, an out-of-order or partial match -- can't
+drive it and must fall back to a getter-driven seek instead.
+]]
+local function fk_driving_source(eq, cand_schema, n)
+	local from_source
+	for i = 1, n do
+		local fact = eq[cand_schema.pk[i]]
+		if not fact then return nil end
+		local val = fact.expr
+		if type(val) ~= 'table' or val[1] ~= 'col' or not val.source then
+			return nil
+		end
+		if not from_source then from_source = val.source
+		elseif val.source ~= from_source then return nil end
+		if val[3] ~= from_source.schema.pk[i] then return nil end
+	end
+	return from_source
+end
+
+--[[
+classify a joined step's winning candidate into the exact physical
+operation compile_step() will run:
+- 'fk_seek': cand is one of source's own FK indexes (mdbx_find_fk), and
+  every one of the FK's own columns is driven by an equality against
+  the referenced source's own pk, in order -- pk_join_seek's raw-byte
+  reuse needs exactly that shape.
+- 'index_seek': cand is source's own pk or another index, driven by a
+  getter reading the driver node built so far -- covers a
+  child-to-parent pk lookup and any other indexed equi/range join.
+- 'cross': no candidate covered any condition (kind == 'full') -- a
+  full nested-loop scan of source per driver row, on_expr entirely
+  residual.
+]]
+local function classify_join_op(source, best_cand, best_plan, eq)
+	if best_plan.kind == 'full' then return 'cross' end
+	if best_cand.schema.is_index then
+		local fk = mdbx_find_fk(best_cand.schema.val_schema, best_cand.schema)
+		if fk then
+			local from_source = fk_driving_source(eq, best_cand.schema, #fk.cols)
+			if from_source then return 'fk_seek', fk, from_source end
+		end
+	end
+	return 'index_seek'
+end
+
+--[[
 - choose the key that drives this source's scan.
 - candidates are the source's pk and its indexes.
 - consumed conditions are marked on the chosen plan.
 - unconsumed conditions become residual row checks.
-- key_conditions vs all_conditions: for a joined source, only the
-  join's own on_expr can drive the key (see access_conditions()) --
-  all_conditions is the wider set used for the residual list, so a
-  where() condition on this source that isn't part of the join still
-  ends up checked, just never as (or extending) the seek itself.
+- conditions (access_conditions()): the join's own on_expr conditions
+  plus any where() condition that reads only this source, all equally
+  key-eligible.
+- join (the Join object, or false/nil for a base source) additionally
+  picks plan.op, the exact physical operation compile_step() will run
+  for a joined step -- see classify_join_op() below. A base source has
+  no join and is always lowered by the same pk_scan path, so it gets
+  no op.
 ]]
-local function choose_access(source, key_conditions, all_conditions,
-	sources, order_terms, prefer_order, group_terms)
+local function choose_access(source, conditions, join, order_terms,
+	prefer_order, group_terms)
 	--rel sources have no pk or index metadata here.
 	--they scan the already-compiled inner rel.
 	--virtual tables have no pk or index metadata either: no physical
 	--storage means no seek, so every condition on them stays residual.
+	--neither has a physical scan node yet (compile_step()'s pk_scan
+	--needs a real schema) -- reject here rather than let compile_step
+	--crash deep inside pk_scan on a false schema.
 	if not source.table or source.schema.virtual then
-		return {kind = 'full', depth = 0, dir = 'asc', is_pk = false,
-			schema = false, seek = empty, residual = all_conditions}
+		assertf(false, 'choose_access: %s: a relation/virtual source is not'
+			..' implemented yet', source.name)
 	end
-	local eq, lo, hi, prefix, in_by =
-		bucket_facts(source, key_conditions, sources)
-	local candidates = {} --{{schema=,is_pk=}...}
-	add(candidates, {schema = source.schema, is_pk = true})
+	local eq, lo, hi, prefix = bucket_facts(source, conditions)
+	local candidates = {} --{{schema=}...}
+	add(candidates, {schema = source.schema})
 	for _, ix in ipairs(source.schema.indexes or empty) do
 		add(candidates, {schema = ix})
 	end
@@ -1462,7 +1536,7 @@ local function choose_access(source, key_conditions, all_conditions,
 	local order_cand, order_plan
 	local group_cand, group_plan
 	for _, cand in ipairs(candidates) do
-		local plan = try_key(cand.schema, eq, lo, hi, prefix, in_by)
+		local plan = try_key(cand.schema, eq, lo, hi, prefix)
 		if plan then
 			local cov = plan_coverage(plan)
 			if not best_plan or cov > best_cov
@@ -1501,23 +1575,49 @@ local function choose_access(source, key_conditions, all_conditions,
 	end
 	if not best_plan then
 		best_cand, best_plan =
-			{schema = source.schema, is_pk = true}, {kind = 'full', depth = 0}
+			{schema = source.schema}, {kind = 'full', depth = 0}
 	end
 	best_plan.schema = best_cand.schema
-	best_plan.is_pk = best_cand.is_pk
+	best_plan.member = source.name --pk_scan's own name override; see its doc
 	best_plan.dir = best_plan.dir or 'asc' --order_plan may already carry 'desc'
+	local consume_depth = best_plan.depth
+	local fk
+	if join then
+		local op, from_source
+		op, fk, from_source = classify_join_op(source, best_cand, best_plan, eq)
+		best_plan.op = op
+		if op == 'fk_seek' then
+			best_plan.from_source = from_source
+			--already found here, for #fk.cols below -- carried on the plan
+			--so compile_joined_step can pass it into pk_join_seek instead
+			--of pk_join_seek re-deriving it with its own find_fk call.
+			best_plan.fk = fk
+			consume_depth = #fk.cols
+			--cap kind/depth down to exactly what gets marked consumed
+			--below -- pk_join_seek ignores kind/seek/lo/hi/prefix
+			--entirely, reading from_source's whole encoded pk as raw
+			--bytes instead, so nothing past the FK's own columns is
+			--ever actually checked by the seek itself, even when the
+			--chosen index is wider or a further range/prefix bound_col
+			--would otherwise apply. This also keeps the plan internally
+			--consistent (seek's own length matches plan.depth) if a
+			--left join later downgrades this step to index_seek, below.
+			--TODO(pk_join_seek): seek a wide FK index deeper than
+			--#fk.cols so a trailing equality also narrows the scan
+			--instead of staying a residual check.
+			best_plan.depth = consume_depth
+			best_plan.kind = (consume_depth == #best_cand.schema.pk)
+				and 'exact' or 'eq_prefix'
+		end
+	end
 	local seek = {} --{expr...}: one value-operand expr per matched leading col
-	for i = 1, best_plan.depth do
+	for i = 1, consume_depth do
 		local fact = eq[best_cand.schema.pk[i]]
 		seek[i] = fact.expr
 		fact.cond.consumed = true
 	end
 	best_plan.seek = seek
-	if best_plan.kind == 'in' then
-		local fact = in_by[best_plan.bound_col]
-		best_plan.in_values = fact.exprs
-		fact.cond.consumed = true
-	elseif best_plan.kind == 'range' then
+	if best_plan.kind == 'range' then
 		local lo_fact, hi_fact = lo[best_plan.bound_col], hi[best_plan.bound_col]
 		if lo_fact then
 			best_plan.lo = {op = lo_fact.op, expr = lo_fact.expr}
@@ -1533,40 +1633,54 @@ local function choose_access(source, key_conditions, all_conditions,
 		fact.cond.consumed = true
 	end
 	local residual = {} --{condition...}
-	for _, cond in ipairs(all_conditions) do
+	for _, cond in ipairs(conditions) do
 		if not cond.consumed then
 			add(residual, cond)
 		end
 	end
 	best_plan.residual = residual
+	--pk_join_seek's left-join null-extension depends only on whether the
+	--raw FK seek found a row -- it has no way to also require the
+	--residual to pass before deciding a driver row matched, so a raw
+	--match that fails the residual would wrongly count as "matched" and
+	--the null-extended row would never be emitted. Falling back to
+	--index_seek's getter-driven pk_scan lets compile_joined_step apply
+	--the residual to the seek's own rows before nested_join decides,
+	--which handles this correctly (see compile_joined_step()). The plan
+	--is already internally consistent for this (kind/depth capped
+	--above), so no re-derivation is needed here.
+	if best_plan.op == 'fk_seek' and type(join) == 'table' and join.op == 'left'
+		and #residual > 0
+	then
+		best_plan.op = 'index_seek'
+		best_plan.from_source = nil
+		best_plan.fk = nil
+	end
 	return best_plan
 end
 
 --[[
-- returns key_conditions, all_conditions.
-- all_conditions include join on_expr conditions plus where()
-  conditions that read only this source; join_deps() schedules
-  on_expr inputs before this source scans.
-- key_conditions is what choose_access() may use to drive the seek.
-  for a joined source, that's the join's own on_expr conditions only
-  -- a where() condition on this source never overrides or extends
-  the join key, it just rides along in all_conditions as a residual
-  check once the key is chosen. for the base (un-joined) source,
-  there's no join to single out, so every where() condition here is
-  key-eligible and both lists are the same one.
+- returns the conditions that may drive source's own access: the
+  join's own on_expr conditions plus any where() condition that reads
+  only this source; join_deps() schedules on_expr inputs before this
+  source scans.
+- a where() on a left-joined source is never in here: attribute_conditions()
+  already gives it source_name = false (checked once every source has
+  scanned, via rel.late_conditions), since whether such a source
+  matched must depend only on its own on_expr. a where() on an
+  inner-joined source has no such restriction -- if it rejected the
+  row, an inner join drops the row anyway, so it's as key-eligible as
+  the join's own on_expr.
 ]]
 local function access_conditions(source, join, where_conditions)
-	local all_list = {} --{condition...}
+	local list = {} --{condition...}
 	if join then
-		for _, cond in ipairs(join.on_conditions) do add(all_list, cond) end
+		for _, cond in ipairs(join.on_conditions) do add(list, cond) end
 	end
 	for _, cond in ipairs(where_conditions) do
-		if cond.source_name == source.name then add(all_list, cond) end
+		if cond.source_name == source.name then add(list, cond) end
 	end
-	if not join then return all_list, all_list end
-	local key_list = {} --{condition...}
-	for _, cond in ipairs(join.on_conditions) do add(key_list, cond) end
-	return key_list, all_list
+	return list
 end
 
 --[[
@@ -1583,15 +1697,13 @@ local function natural_order(step)
 	local plan = step.plan
 	--rel source: no guaranteed key order.
 	if not plan.schema then return empty end
-	--separate seeks: no one key order.
-	if plan.kind == 'in' then return empty end
 	return key_order(step.source, plan.schema, plan.depth,
 		plan.dir == 'desc')
 end
 
 --SCHEDULE JOINS -------------------------------------------------------------
 
---a join can run after every outside source its on_expr reads is
+--a join can run after every outside source that its on_expr reads is
 --scheduled. the join's own right source does not count as a
 --dependency. a join group's internal sources do not count as
 --outside dependencies.
@@ -1610,7 +1722,7 @@ end
 
 --[[
 - pick the next join to schedule: only one whose on_expr reads no
-  source that isn't scheduled yet. among ties, keep the order joins
+  source that isn't scheduled yet. among ties, keep the order that joins
   were declared in.
 - this only looks at on_expr's col references, never at what's
   actually stored in any table.
@@ -1645,17 +1757,22 @@ local function build_access(joins, scheduled, access, sources,
 		if inherits(picked.right, Rel) then
 			local group = picked.right
 			local base_source = group.joins[1].right
-			local key_conditions, all_conditions =
-				access_conditions(base_source, picked, where_conditions)
-			local base_step = {source = base_source, join = false,
-				plan = choose_access(base_source, key_conditions,
-					all_conditions, sources)}
+			local conditions = access_conditions(base_source, picked,
+				where_conditions)
 			if picked.op ~= 'left' then
-				add(access, base_step)
+				--an inner join(rel, on_expr) group has no null-extension
+				--semantics, so its base_source chains onto the driver the
+				--same way any plain joined source does (fk_seek/index_seek/
+				--cross via classify_join_op), not through the left-group's
+				--separate correlated/nested_join path below.
+				add(access, {source = base_source, join = picked,
+					plan = choose_access(base_source, conditions, picked)})
 				scheduled[base_source.name] = true
 				build_access(group.joins, scheduled, access, sources,
 					where_conditions)
 			else
+				local base_step = {source = base_source, join = false,
+					plan = choose_access(base_source, conditions)}
 				local nested_scheduled = {[base_source.name] = true}
 				local nested = {base_step} --{step...}
 				build_access(group.joins, nested_scheduled, nested, sources,
@@ -1663,64 +1780,87 @@ local function build_access(joins, scheduled, access, sources,
 				add(access, {source = false, join = picked, nested = nested})
 			end
 		else
-			local key_conditions, all_conditions =
-				access_conditions(picked.right, picked, where_conditions)
+			local conditions = access_conditions(picked.right, picked,
+				where_conditions)
 			add(access, {source = picked.right, join = picked,
-				plan = choose_access(picked.right, key_conditions,
-					all_conditions, sources)})
+				plan = choose_access(picked.right, conditions, picked)})
 			scheduled[picked.right.name] = true
 		end
 	end
 end
 
---COLLECT EXISTS TARGETS -----------------------------------------------------
+--CLASSIFY EXISTS TARGETS -----------------------------------------------------
 
 --[[
-- collect every exists()/not_exists()/in_()/not_in() source this
-  rel's own residual/late/having checks can reach -- a plain table or
-  a whole subquery -- so execution can open them all once per run
-  instead of opening one fresh per row.
-- recurses into on_expr and in_()'s value expr: one of these can nest
-  another exists()/in_() inside it.
+walk expr looking for exists()/not_exists()/in_()/not_in() occurrences,
+calling visit(expr) at each one found -- an in_()/not_in() occurrence
+only when its value is a sub-relation (a literal/param list has no
+occurrence to visit, see eval_expr()). Shared by classify_exists_targets()
+(compile()-time: plans/classifies each occurrence) and
+compile_residual_checkers() (once per attachment site: builds each
+occurrence's live checker) -- same traversal either way: recurses into
+on_expr and in_()'s own tested value expr, since one of these can nest
+another exists()/in_() inside it, but never into a sub-relation's own
+structure, which is a separate correlation boundary resolved on its own.
 ]]
-local function collect_exists_sources(expr, entries, seen)
+local function walk_exists_nodes(expr, visit)
 	if type(expr) ~= 'table' then return end
 	local op = expr[1]
 	if op == 'exists' or op == 'not_exists' then
-		local right, on_expr = expr[2], expr[3]
-		if not seen[right] then
-			seen[right] = true
-			add(entries, {source = right, on_expr = on_expr})
-		end
-		if on_expr then collect_exists_sources(on_expr, entries, seen) end
-	elseif (op == 'in' or op == 'not_in') and inherits(expr[3], Rel) then
-		local values_rel = expr[3]
-		if not seen[values_rel] then
-			seen[values_rel] = true
-			add(entries, {source = values_rel})
-		end
-		collect_exists_sources(expr[2], entries, seen)
+		visit(expr)
+		if expr[3] then walk_exists_nodes(expr[3], visit) end
+	elseif op == 'in' or op == 'not_in' then
+		if inherits(expr[3], Rel) then visit(expr) end
+		walk_exists_nodes(expr[2], visit)
 	else
 		for i = 2, #expr do
-			collect_exists_sources(expr[i], entries, seen)
+			walk_exists_nodes(expr[i], visit)
 		end
 	end
 end
-local function collect_step_exists(step, entries, seen)
+
+--[[
+classify every exists()/not_exists()/in_()/not_in() occurrence that
+this rel's own residual/late/having checks can reach -- a plain table
+or a whole sub-relation -- once, here, instead of on every terminal
+call.
+- a table-source occurrence gets its own seek plan (resolve_exists_plan()),
+  stored as expr.plan; a sub-relation occurrence has none of its own
+  (compile(right, scope), already run at bind time, planned its own
+  access chain the normal way).
+- either way, expr.correlated records whether the occurrence reads
+  anything outside its own source(s) at all -- if not, its result
+  never depends on the outer row, so it can be checked once instead of
+  once per row.
+]]
+local function classify_exists_targets(expr)
+	walk_exists_nodes(expr, function(e)
+		if e[1] == 'exists' or e[1] == 'not_exists' then
+			local right = e[2]
+			if inherits(right, Rel) then
+				e.correlated = rel_references_outside(right, right.sources)
+			else
+				e.plan, e.correlated = resolve_exists_plan(right, e[3])
+			end
+		else --in()/not_in(), always a sub-relation (see walk_exists_nodes())
+			local values = e[3]
+			e.correlated = rel_references_outside(values, values.sources)
+		end
+	end)
+end
+local function classify_step_exists(step)
 	if step.nested then
 		for _, s in ipairs(step.nested) do
-			collect_step_exists(s, entries, seen)
+			classify_step_exists(s)
 		end
 	else
 		for _, cond in ipairs(step.plan.residual) do
-			collect_exists_sources(cond.expr, entries, seen)
+			classify_exists_targets(cond.expr)
 		end
 	end
 end
 
 --COMPILE DRIVER -------------------------------------------------------------
-
-MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup check
 
 --[[local]] function compile(rel, parent_scope)
 	assert(not rel.compiled)
@@ -1838,12 +1978,11 @@ MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup check
 		local base_source = rel.joins[1].right
 		local access = {} --{{source=,join=|false,plan=|nested=}...}
 		rel.access = access
-		local base_key_conditions, base_all_conditions =
+		local base_conditions =
 			access_conditions(base_source, false, rel.where_conditions)
 		add(access, {source = base_source, join = false,
-			plan = choose_access(base_source, base_key_conditions,
-				base_all_conditions, sources, source_order_terms, prefer_order,
-				source_group_terms)})
+			plan = choose_access(base_source, base_conditions, false,
+				source_order_terms, prefer_order, source_group_terms)})
 		build_access(rel.joins, {[base_source.name] = true}, access, sources,
 			rel.where_conditions)
 		rel.natural_order = natural_order(access[1])
@@ -1851,37 +1990,6 @@ MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup check
 		--step (old file's prepare_scans: compile_scan/compile_relation_
 		--scan/compile_virtual_scan) -- blocked on the execution stage,
 		--which isn't ported yet.
-
-		--[[
-		- distinct(), and group_by() with no aggregate outputs, can skip a
-		  whole duplicate group at the cursor via MDBX_NEXT_NODUP instead
-		  of decoding every duplicate row -- only when the group is the
-		  literal DUPSORT boundary: the returned cols must cover the WHOLE
-		  remaining index key, not just a prefix.
-		- a residual check or a second access step could pick a different
-		  row out of the same group, so skipping unseen duplicates would
-		  be wrong unless neither exists.
-		- 'exact'/'in' plans leave no varying key cols to group over.
-		- MDBX_NEXT_NODUP is forward-only; excludes dir == 'desc'.
-		]]
-		if dedup_only(rel) and #access == 1 and not MDBX_NO_NEXT_NODUP then
-			local plan = access[1].plan
-			local kind_ok = plan.kind == 'full' or plan.kind == 'range'
-				or plan.kind == 'prefix' or plan.kind == 'eq_prefix'
-			if kind_ok and plan.schema and plan.schema.is_index
-				and plan.dir ~= 'desc' and #plan.residual == 0
-				and #late_conditions == 0
-			then
-				local terms = returned_source_terms(rel, dedup_key_cols(rel))
-				if terms then
-					local ok, n_wanted =
-						order_satisfied_set(terms, rel.natural_order)
-					if ok and plan.depth + n_wanted == #plan.schema.pk then
-						plan.next_nodup = true
-					end
-				end
-			end
-		end
 	end
 
 	--SORT AND DEDUP ----------------------------------------------------------
@@ -1896,19 +2004,100 @@ MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup check
 	rel.distinct_streaming = distinct_actually_streamable(rel)
 	rel.group_streaming = group_actually_streamable(rel)
 
-	--COLLECT EXISTS TARGETS --------------------------------------------------
+	--COMPILE OUTPUT PIPELINE -------------------------------------------------
 
-	local exists_sources, exists_seen = {}, {}
+	--[[
+	the output/group/distinct/sort descriptors below are fully decided
+	by rel's own bound out_cols/group_cols/distinct_cols/order_cols,
+	never by params -- built once here instead of on every terminal
+	call (compile_terminal()/compile_group() used to rebuild all of
+	this on every rows()/first()/exists() call against the same rel).
+	]]
+	if rel.out_cols and not rel.group_cols then
+		local outputs = {}
+		for i, out_col in ipairs(rel.out_cols) do
+			assert(out_col[1] == 'col' and out_col.source,
+				'select(): only plain column outputs are implemented yet')
+			outputs[i] = {name = out_col.name, member = out_col.source.name,
+				col = out_col[3]}
+		end
+		rel.output_descriptor = outputs
+	end
+	if rel.group_cols then
+		rel.group_key_cols, rel.group_full_agg = split_group_cols(rel)
+		local key_cols, full_agg = rel.group_key_cols, rel.group_full_agg
+		if #key_cols > 0 then
+			if rel.group_streaming then
+				local cols = {}
+				for i, kc in ipairs(key_cols) do
+					cols[i] = {member = kc.member, col = kc.col}
+				end
+				rel.group_stream_cols = cols
+			else
+				local outputs = {}
+				local used = {} --{name->true}: every name already claimed by a key
+				for i, kc in ipairs(key_cols) do
+					outputs[i] = {name = kc.name, member = kc.member, col = kc.col}
+					used[kc.name] = true
+				end
+				--several aggregates can read the same source column (sum(x) and
+				--avg(x) both reading x): project it once, not once per aggregate.
+				local input_by_col = {} --{"member.col"->name}
+				local next_agg = 1
+				for _, a in ipairs(full_agg) do
+					if a.op ~= 'key' and a.member then
+						local col_key = a.member..'.'..a.col
+						local name = input_by_col[col_key]
+						if not name then
+							--a user-chosen key name (e.g. an out_col literally
+							--named '_agg1') can collide with the next generated
+							--name -- keep counting until one isn't already used,
+							--instead of overwriting that key's own output slot.
+							repeat
+								name = '_agg'..next_agg
+								next_agg = next_agg + 1
+							until not used[name]
+							used[name] = true
+							input_by_col[col_key] = name
+							add(outputs, {name = name, member = a.member, col = a.col})
+						end
+						a.input = name
+					end
+				end
+				local fields = {}
+				for i, kc in ipairs(key_cols) do fields[i] = kc.name end
+				rel.group_hash_outputs = outputs
+				rel.group_hash_fields = fields
+			end
+		end
+	end
+	if rel.distinct_cols then
+		local fields = {}
+		for i, c in ipairs(dedup_key_cols(rel)) do fields[i] = c.name end
+		rel.distinct_fields = fields
+	end
+	if rel.sort_needed then
+		local spec = {}
+		for i, term in ipairs(rel.order_cols) do
+			spec[i] = term.source
+				and {member = term.source.name, col = term[3],
+					desc = term.dir == 'desc'}
+				or {field = term.col.name, desc = term.dir == 'desc'}
+		end
+		rel.sort_spec = spec
+	end
+
+	--CLASSIFY EXISTS TARGETS --------------------------------------------------
+
 	for _, step in ipairs(rel.access or empty) do
-		collect_step_exists(step, exists_sources, exists_seen)
+		classify_step_exists(step)
 	end
 	for _, cond in ipairs(late_conditions) do
-		collect_exists_sources(cond.expr, exists_sources, exists_seen)
+		classify_exists_targets(cond.expr)
 	end
 	for _, cond in ipairs(rel.having_conditions) do
-		collect_exists_sources(cond.expr, exists_sources, exists_seen)
+		classify_exists_targets(cond.expr)
 	end
-	rel.exists_sources = exists_sources
 
 	--TODO: once terminals exist, compile() needs a terminal_kind param
 	--and an assert here that rows()/first()/one()/must_one() require
@@ -1931,43 +2120,59 @@ end
 - q.param() reads from a shared, reusable params table: the caller
   overwrites that same table's contents before each node:reset(), and
   every getter built against it stays wired to the new values.
+- q.col() reaches here three ways: an exists()/in_() occurrence's own
+  scan (compile_exists_checker()), correlating against the stable node
+  its attachment site checks; a sub-relation's own base step, same
+  function, correlating the same way; and an 'index_seek'/'cross'
+  joined step (compile_joined_step()), correlating against the driver
+  node built so far. A top-level base step's own conditions never bind
+  a seek/lo/hi/prefix expr to another source's column
+  (attribute_conditions() makes any such condition late instead).
+  outer_node is that stable node -- nil at the top level, where a
+  q.col() here would be a real bug, not a legitimate read. It's a
+  plain reference, never reassigned after the caller builds it: unlike
+  params (one shared table, its contents overwritten before every
+  reset()), each of these three callers already has its own fixed node
+  to close over, no reset()-time indirection needed.
 ]]
---TODO: a q.col() expr (a correlated read of another, already-scheduled
---source) isn't handled -- not reachable for a single, un-joined access
---step. Still not reachable now that joins exist either: a joined
---step's own seek goes through pk_join_seek's raw pk bytes, and a
---nested group's base step goes through reset_prefix (see
---compile_nested below); neither ever calls compile_getter.
-local function compile_getter(expr, params)
+local function compile_getter(expr, params, outer_node)
 	if type(expr) == 'table' and expr[1] == 'param' then
 		local name = expr[2]
 		return function() return params[name] end
+	end
+	if type(expr) == 'table' and expr[1] == 'col' then
+		assert(outer_node, 'compile_getter: a q.col() bound value is only'
+			..' valid inside a sub-relation probe or a joined index_seek')
+		local member, col = expr.source.name, expr[3]
+		return function() return outer_node:col(member, col) end
 	end
 	return function() return expr end
 end
 
 --turn one choose_access() plan (schema/depth/dir plus exprs) into the
---shape pk_scan() expects (same schema/depth/dir, but every bound expr
---replaced by a getter).
-local function compile_plan(plan, params)
+--shape that pk_scan() expects (same schema/depth/dir, but every bound expr
+--replaced by a getter). outer_node (nil at the top level) passes straight
+--through to compile_getter, for a sub-relation probe's correlated base
+--step or a joined index_seek/cross step's correlated seek.
+local function compile_plan(plan, params, outer_node)
 	local seek = {}
 	for i, expr in ipairs(plan.seek) do
-		seek[i] = compile_getter(expr, params)
+		seek[i] = compile_getter(expr, params, outer_node)
 	end
 	local node_plan = {
 		kind = plan.kind, schema = plan.schema, depth = plan.depth,
-		dir = plan.dir, seek = seek,
+		dir = plan.dir, seek = seek, member = plan.member,
 	}
 	if plan.lo then
 		node_plan.lo = {op = plan.lo.op,
-			get = compile_getter(plan.lo.expr, params)}
+			get = compile_getter(plan.lo.expr, params, outer_node)}
 	end
 	if plan.hi then
 		node_plan.hi = {op = plan.hi.op,
-			get = compile_getter(plan.hi.expr, params)}
+			get = compile_getter(plan.hi.expr, params, outer_node)}
 	end
 	if plan.prefix then
-		node_plan.prefix = compile_getter(plan.prefix, params)
+		node_plan.prefix = compile_getter(plan.prefix, params, outer_node)
 	end
 	return node_plan
 end
@@ -2015,15 +2220,24 @@ local function eval_value(x, params, node)
 	end
 	error('unsupported residual operand: '..tostring(x[1]))
 end
+--does candidate (ai_ci-folded when fold is set) equal v? null never
+--matches, in_()/not_in() alike.
+local function candidate_matches(candidate, v, fold)
+	if null_value(candidate) then return false end
+	if fold then candidate = mdbx_fold_ai_ci(candidate) end
+	return v == candidate
+end
 --[[
 evaluate a where()/on_expr row check against the current row. q.col()
-reads decoded columns through node:col(), the same node pk_filter
-hands its own fn.
---TODO: in()/not_in() against a relation, and exists()/not_exists(),
-aren't handled -- no subquery execution exists in this architecture
-yet.
+reads decoded columns through node:col(), the same node that pk_filter
+hands its own fn. probes: {expr -> checker}, filled in lazily by
+compile_residual_checkers()/compile_exists_checker() the first time
+each attachment site processes its own condition list -- exists()/
+not_exists() and in_()/not_in() both look their checker up by the
+exists()/in_() expr node itself (not by source: the same source can
+appear in more than one occurrence).
 ]]
-local function eval_expr(expr, params, node)
+local function eval_expr(expr, params, node, probes)
 	if type(expr) ~= 'table' then return expr end
 	local op, a, b = unpack(expr, 1, 3)
 	if op == 'param' or op == 'col' then
@@ -2031,25 +2245,25 @@ local function eval_expr(expr, params, node)
 	end
 	if op == 'and' then
 		for i = 2, #expr do
-			if not expr_passes(eval_expr(expr[i], params, node)) then
+			if not expr_passes(eval_expr(expr[i], params, node, probes)) then
 				return false
 			end
 		end
 		return true
 	elseif op == 'or' then
 		for i = 2, #expr do
-			if expr_passes(eval_expr(expr[i], params, node)) then
+			if expr_passes(eval_expr(expr[i], params, node, probes)) then
 				return true
 			end
 		end
 		return false
 	elseif op == 'is_null' then
-		return null_value(eval_expr(a, params, node))
+		return null_value(eval_expr(a, params, node, probes))
 	elseif op == 'is_not_null' then
-		return not null_value(eval_expr(a, params, node))
+		return not null_value(eval_expr(a, params, node, probes))
 	elseif op == 'starts' then
-		local v = eval_expr(a, params, node)
-		local prefix = eval_expr(b, params, node)
+		local v = eval_expr(a, params, node, probes)
+		local prefix = eval_expr(b, params, node, probes)
 		if null_value(v) or null_value(prefix) then return false end
 		if type(v) ~= 'string' then return false end
 		if ai_ci_operand(a) then
@@ -2057,30 +2271,52 @@ local function eval_expr(expr, params, node)
 		end
 		return v:sub(1, #prefix) == prefix
 	elseif op == 'in' or op == 'not_in' then
-		assertf(not inherits(b, Rel),
-			'eval_expr: in()/not_in() against a relation not supported yet')
-		local v = eval_expr(a, params, node)
+		local v = eval_expr(a, params, node, probes)
 		if null_value(v) then return false end
 		local fold = ai_ci_operand(a)
 		if fold then v = mdbx_fold_ai_ci(v) end
 		local found = false
-		local param_list = type(b) == 'table' and b[1] == 'param'
-		local values = param_list and eval_expr(b, params, node) or b
-		for _, item in ipairs(values) do
-			local candidate = param_list and item
-				or eval_expr(item, params, node)
-			if not null_value(candidate) then
-				if fold then candidate = mdbx_fold_ai_ci(candidate) end
-				if v == candidate then found = true; break end
+		if inherits(b, Rel) then
+			local probe = assertf(probes[expr], 'eval_expr: no in_() probe'
+				..' compiled for source: %s', tostring(b.name))
+			if probe.values_set then
+				--v is already fold()'d above, matching how values_set's own
+				--keys were folded when built (compile_exists_checker()) --
+				--a direct hash lookup, no per-candidate loop needed.
+				found = probe.values_set[v] ~= nil
+			else
+				for candidate in probe.values() do
+					if candidate_matches(candidate, v, fold) then
+						found = true
+						break
+					end
+				end
+			end
+		else
+			local param_list = type(b) == 'table' and b[1] == 'param'
+			local values = param_list and eval_expr(b, params, node, probes)
+				or b
+			for _, item in ipairs(values) do
+				local candidate = param_list and item
+					or eval_expr(item, params, node, probes)
+				if candidate_matches(candidate, v, fold) then
+					found = true
+					break
+				end
 			end
 		end
 		if op == 'in' then return found end
 		return not found
 	elseif op == 'exists' or op == 'not_exists' then
-		error('eval_expr: exists()/not_exists() residual checks not'
-			..' supported yet')
+		local probe = assertf(probes[expr], 'eval_expr: no exists probe'
+			..' compiled for source: %s', tostring(a.name))
+		local found = probe.constant
+		if found == nil then found = probe.check_exists() end
+		if op == 'exists' then return found end
+		return not found
 	end
-	local va, vb = eval_expr(a, params, node), eval_expr(b, params, node)
+	local va = eval_expr(a, params, node, probes)
+	local vb = eval_expr(b, params, node, probes)
 	if null_value(va) or null_value(vb) then return false end
 	if ai_ci_operand(a) or ai_ci_operand(b) then
 		va, vb = mdbx_fold_ai_ci(va), mdbx_fold_ai_ci(vb)
@@ -2094,18 +2330,53 @@ local function eval_expr(expr, params, node)
 	else error('unsupported condition op: '..tostring(op)) end
 end
 --evaluate a where()/on_expr row check against the current row.
-local function eval_residual(expr, params, node)
-	return expr_passes(eval_expr(expr, params, node))
+local function eval_residual(expr, params, node, probes)
+	return expr_passes(eval_expr(expr, params, node, probes))
+end
+
+--TODO(predicate factories): eval_expr/eval_value (past their exists()/
+--in_() cases, now compiled once per attachment site below) still
+--re-walk cond.expr's raw AST on every row, and apply_residual/
+--apply_having still build a fresh pk_filter/value_filter closure on
+--every terminal call for the same rel -- same waste class as
+--compile_plan()'s getters, not yet fixed the way the output/group/
+--distinct/sort descriptors were (see compile()'s COMPILE OUTPUT
+--PIPELINE). Unlike those, this can't just move into compile() as a
+--plain data descriptor: the closure reads params, so a rel-level
+--precompiled version needs to take params as an argument (a real
+--factory) instead of closing over it -- the same shift
+--compile_getter()/compile_plan() would need too.
+
+local apply_residual --fw. decl.
+local compile_exists_checker --fw. decl.
+
+--[[
+compile_exists_checker() every exists()/not_exists()/in_()/not_in()
+occurrence in expr, bound to node -- the stable row this attachment
+site (one apply_residual()/apply_having() call) checks against. Runs
+once per attachment site, before the per-row predicate closure is
+built, so eval_expr's own exists()/in_() cases only ever look up an
+already-compiled checker in probes, never build one.
+]]
+local function compile_residual_checkers(db, expr, params, node, probes)
+	walk_exists_nodes(expr, function(e)
+		compile_exists_checker(db, e, params, node, probes)
+	end)
 end
 
 --wrap node in a pk_filter checking every unconsumed condition in
 --residual (choose_access()'s leftover where()/on_expr conditions for
 --this step); a no-op when residual is empty.
-local function apply_residual(db, node, residual, params)
+function apply_residual(db, node, residual, params, probes)
 	if #residual == 0 then return node end
+	for _, cond in ipairs(residual) do
+		compile_residual_checkers(db, cond.expr, params, node, probes)
+	end
 	return db:pk_filter(node, function(n)
 		for _, cond in ipairs(residual) do
-			if not eval_residual(cond.expr, params, n) then return false end
+			if not eval_residual(cond.expr, params, n, probes) then
+				return false
+			end
 		end
 		return true
 	end)
@@ -2116,14 +2387,232 @@ end
 --eval_residual reads having()'s out_col-bound cols straight off the
 --aggregated row (see eval_value), so the row itself stands in for the
 --node argument here -- there's no pk/getter-backed node at this stage.
-local function apply_having(db, node, having_conditions, params)
+--having()'s own exists()/in_() correlation (against the aggregated
+--row's out_cols) isn't implemented -- compile_exists_checker() expects
+--a pk/getter-backed node, not a value row -- so nothing here compiles
+--checkers; if having() ever nests exists()/in_(), eval_expr's own
+--assertf catches the missing probe.
+local function apply_having(db, node, having_conditions, params, probes)
 	if #having_conditions == 0 then return node end
 	return db:value_filter(node, function(row)
 		for _, cond in ipairs(having_conditions) do
-			if not eval_residual(cond.expr, params, row) then return false end
+			if not eval_residual(cond.expr, params, row, probes) then
+				return false
+			end
 		end
 		return true
 	end)
+end
+
+--COMPILE EXISTS CHECKERS -----------------------------------------------------
+
+local compile_step --fw. decl.
+
+--probes[expr] is either {check_exists=,close=} / {values=,close=}
+--(correlated: a live, reusable check bound to node) or {constant=} /
+--{values_set=} (uncorrelated: already answered, nothing left to close).
+local function close_probes(probes)
+	for _, probe in pairs(probes) do
+		if probe.close then probe.close() end
+	end
+end
+
+--[[
+plan a table-source exists()/not_exists()'s own scan -- same
+choose_access() a real join/base step uses (no join classification:
+exists() only ever runs one seek at a time, so pk_join_seek's
+per-driver-row dup-walk never applies here -- a plain, possibly
+index-driven pk_scan is the whole story). Runs once, during compile()
+(see CLASSIFY EXISTS TARGETS), and is stored on the exists() expr so
+compiling its checker only binds getters/builds a node, never re-plans,
+on every terminal call.
+Second return: whether the correlation reads anything outside source
+at all -- if not, the check never depends on the outer row and can be
+answered once instead of once per row.
+]]
+function resolve_exists_plan(source, on_expr)
+	local all_conditions = (on_expr == nil or on_expr == true)
+		and empty or split_conditions({on_expr}, true)
+	local own_sources = {[source.name] = source}
+	local plan = choose_access(source, all_conditions)
+	for _, cond in ipairs(plan.residual) do
+		assert(not references_outside(cond.expr, own_sources),
+			'exists(): a correlation not fully covered by one index seek'
+				..' is not implemented yet')
+	end
+	local correlated = false
+	for _, cond in ipairs(all_conditions) do
+		if references_outside(cond.expr, own_sources) then
+			correlated = true
+			break
+		end
+	end
+	return plan, correlated
+end
+
+--[[
+compile one exists()/not_exists()/in_()/not_in() occurrence (expr) into
+probes[expr], bound to node -- the stable row this attachment site
+checks against. Called by compile_residual_checkers(), once per
+attachment site, before the per-row predicate closure runs.
+The probes[expr] guard below is not about a caller reusing one
+occurrence in two places -- each occurrence's own table is only ever
+reached from where it's written in the AST. It exists because this
+same occurrence can be walked twice from here: once directly, by the
+outer compile_residual_checkers()'s own walk_exists_nodes() over
+on_expr, and once more when the branch below reaches expr.plan.residual
+(a leftover subset of that same on_expr) and calls apply_residual() on
+it, which walks it again through compile_residual_checkers(). The
+guard makes the second walk a no-op.
+- expr.correlated (classify_exists_targets(), compile()-time): false
+  means the occurrence never reads the outer row at all, so it's
+  answered once, right here, and probes[expr] holds the plain
+  {constant=} / {values_set=} result instead of a live checker.
+- table source (exists()/not_exists() only): one persistent pk_scan,
+  built from expr.plan (resolve_exists_plan(), compile()-time) with a
+  getter fixed on node -- reset() and check once per outer row, same
+  as pk_scan's own open-once-per-run, reseek-per-row design.
+- sub-relation source: delegates the whole node chain to compile_step()
+  (rel is already fully compiled -- compile() recursed into it at bind
+  time through bind_expr's 'exists'/'in' cases), with node passed
+  through the same way, so the sub-relation's own base step reads the
+  correlation through it instead of params. check_exists() answers
+  exists()/not_exists(); values() answers in_()/not_in() by yielding
+  the sub-relation's one out_col, decoded off the node, for every row
+  of a fresh scan.
+Still asserted rather than silently wrong (sub-relation source):
+- a union sub-relation -- compile_step() has no access plan to build
+  from (compile() skips BUILD ACCESS for a union rel).
+- group_by()/having() inside a sub-relation -- aggregating is
+  compile_group()'s job, run separately from compile_step() by
+  compile_terminal()/Rel:exists(); nothing here calls it yet.
+]]
+function compile_exists_checker(db, expr, params, node, probes)
+	if probes[expr] then return end
+	local op = expr[1]
+	--exists()/not_exists(): expr[2] is the source, expr[3] is on_expr.
+	--in()/not_in(): expr[3] is the source (a sub-relation, the only
+	--shape compile_residual_checkers() calls this for); expr[2] is the
+	--tested value expr, unrelated to this occurrence's own source.
+	local right = (op == 'in' or op == 'not_in') and expr[3] or expr[2]
+	local outer_node = expr.correlated and node or nil
+	if inherits(right, Rel) then
+		assert(not right.union_rels,
+			'exists()/in_(): a union sub-relation is not implemented yet')
+		assert(not right.group_cols,
+			'exists()/in_(): group_by()/having() inside a sub-relation is'
+				..' not implemented yet')
+		local out_col = right.out_cols and right.out_cols[1]
+		if out_col then
+			assert(#right.out_cols == 1 and out_col[1] == 'col'
+				and out_col.source,
+				'in_()/not_in(): sub-relation output must be one plain column')
+		end
+		local sub_node, sub_probes = compile_step(db, right, params, outer_node)
+		if expr.correlated then
+			probes[expr] = {
+				check_exists = function()
+					sub_node:reset()
+					return sub_node:next_item() ~= nil
+				end,
+				values = function()
+					sub_node:reset()
+					return function()
+						if sub_node:next_item() then
+							return eval_value(out_col, params, sub_node)
+						end
+					end
+				end,
+				close = function()
+					sub_node:close()
+					close_probes(sub_probes)
+				end,
+			}
+		else
+			sub_node:reset()
+			if out_col then
+				--ai_ci_operand(expr[2]) is a static property of the tested
+				--value's own expr, the same for every row -- fold each
+				--candidate once, here, instead of per-row at lookup (see
+				--eval_expr()'s 'in'/'not_in' case). A null candidate never
+				--matches (candidate_matches()'s own rule), so it's simply
+				--never added -- a real hash set, not a linear-scanned list.
+				local fold = ai_ci_operand(expr[2])
+				local set = {}
+				while sub_node:next_item() do
+					local v = eval_value(out_col, params, sub_node)
+					if not null_value(v) then
+						set[fold and mdbx_fold_ai_ci(v) or v] = true
+					end
+				end
+				probes[expr] = {values_set = set}
+			else
+				probes[expr] = {constant = sub_node:next_item() ~= nil}
+			end
+			sub_node:close()
+			close_probes(sub_probes)
+		end
+	else
+		local inner = db:pk_scan(compile_plan(expr.plan, params, outer_node))
+		inner = apply_residual(db, inner, expr.plan.residual, params, probes)
+		if expr.correlated then
+			probes[expr] = {
+				check_exists = function()
+					inner:reset()
+					return inner:next_item() ~= nil
+				end,
+				close = function() inner:close() end,
+			}
+		else
+			inner:reset()
+			probes[expr] = {constant = inner:next_item() ~= nil}
+			inner:close()
+		end
+	end
+end
+
+--[[
+compile_joined_step(db, node, step, params, probes) -> node
+
+chains one joined step onto node, the driver built so far, and applies
+the step's own residual conditions. Shared by compile_step's own
+access loop and compile_nested's group-inner loop -- both chain a
+step's plan.op onto a driver the same way:
+- 'fk_seek': pk_join_seek(node, plan.schema, {left=, member=,
+  from_member=}). plan.from_source (choose_access()'s
+  classify_join_op()) names the already-scheduled source whose raw pk
+  bytes pk_join_seek reads; step.source.name is the new member's own
+  name, so an aliased (e.g. self-)join gets its real name instead of
+  pk_join_seek's table-name default.
+- 'index_seek'/'cross': a plain pk_scan built the same way a base step
+  is (compile_plan), except its seek getters read the driver node
+  built so far instead of params, wrapped in nested_join(node, inner)
+  with no from_member -- nested_join then
+  runs inner:reset() per driver row instead of reset_prefix, calling
+  back into those getters. 'cross' is the same path with an empty seek
+  (kind == 'full').
+]]
+local function compile_joined_step(db, node, step, params, probes)
+	local plan = step.plan
+	local opts = step.join.op == 'left' and {left = true} or nil
+	if plan.op == 'fk_seek' then
+		opts = opts or {}
+		opts.member = step.source.name
+		opts.from_member = plan.from_source.name
+		opts.fk = plan.fk
+		node = db:pk_join_seek(node, plan.schema, opts)
+		return apply_residual(db, node, plan.residual, params, probes)
+	end
+	--residual applies to inner BEFORE nested_join decides whether this
+	--driver row matched: a left join must null-extend when every raw
+	--seek match also fails the residual, not just when the seek itself
+	--found nothing. Applying residual to the combined row afterward
+	--(as fk_seek still does, only reachable when that can't happen --
+	--see choose_access()'s fk_seek-to-index_seek left+residual
+	--downgrade) would instead silently drop the outer row.
+	local inner = db:pk_scan(compile_plan(plan, params, node))
+	inner = apply_residual(db, inner, plan.residual, params, probes)
+	return db:nested_join(node, inner, opts)
 end
 
 --[[
@@ -2132,8 +2621,8 @@ compile_nested(db, step, params) -> node, from_member
 builds a left-joined group's own chain (step.nested: the group's base
 step, plus any further joins inside the group) into a single node,
 for compile_step to wrap in nested_join. Also returns the outer
-member name the group's base step correlates against, read off
-plan.seek[1].source -- the same field source_operand()/bucket_facts()
+member name that the group's base step correlates against, read off
+plan.seek[1].source -- the same field that source_operand()/bucket_facts()
 already set during compile()'s BIND COLUMNS stage.
 
 The group's base step is never built through compile_plan/pk_scan's
@@ -2141,10 +2630,10 @@ usual getter path: its seek expr is a correlated read of an outer
 column, which compile_getter doesn't handle. It's built with an empty
 seek instead, driven by reset_prefix from that outer member's raw pk
 bytes -- see nested_join's opts.from_member. Every further step inside
-the group chains onto it via pk_join_seek, same as compile_step's own
-top-level loop.
+the group chains onto it via compile_joined_step(), same as
+compile_step's own top-level loop.
 ]]
-local function compile_nested(db, step, params)
+local function compile_nested(db, step, params, probes)
 	local base = step.nested[1]
 	assert(base.plan.schema and base.plan.schema.is_index,
 		'compile_step: nested group base has no index to seek by')
@@ -2153,75 +2642,76 @@ local function compile_nested(db, step, params)
 		'compile_step: nested group base must correlate on an outer column')
 	local from_member = seek1.source.name
 	local node = db:pk_scan{kind = base.plan.kind, schema = base.plan.schema,
-		depth = base.plan.depth, dir = base.plan.dir, seek = {}}
-	node = apply_residual(db, node, base.plan.residual, params)
+		depth = base.plan.depth, dir = base.plan.dir, seek = {},
+		member = base.plan.member}
+	node = apply_residual(db, node, base.plan.residual, params, probes)
 	for i = 2, #step.nested do
-		local inner_step = step.nested[i]
-		assert(inner_step.plan.schema and inner_step.plan.schema.is_index,
-			'compile_step: joined step inside group has no index to seek by')
-		local opts = inner_step.join.op == 'left' and {left = true} or nil
-		node = db:pk_join_seek(node, inner_step.plan.schema, opts)
-		node = apply_residual(db, node, inner_step.plan.residual, params)
+		node = compile_joined_step(db, node, step.nested[i], params, probes)
 	end
 	return node, from_member
 end
 
 --[[
-compile_step(db, rel, params) -> node
+compile_step(db, rel, params, [outer_node]) -> node, probes
 
 builds the executor node for rel's access plan. rel must already be
 compiled (rel:prepare()). params is a shared, reusable table:
 overwrite its contents before each node:reset() to run with different
-bound values; every getter the base step's node reads through stays
-wired to that same table.
+bound values; every getter that the base step's node reads through stays
+wired to that same table. outer_node (nil at the top level) threads
+through to the base step's compile_plan() the same way, for a
+sub-relation compiled as an exists()/in_() checker (compile_exists_checker()).
+probes starts empty here and is filled in lazily, by apply_residual()/
+apply_having(), the first time each attachment site compiles its own
+exists()/in_() occurrences (compile_residual_checkers()) -- callers
+close it after their run, the same "build fresh per call" contract
+compile_step's own node chain follows, just alongside it instead of
+inside it.
 
 Each step past the base chains onto whatever's been built so far:
 - a single, un-joined base step -> pk_scan, bound values read through
   params via compile_getter.
-- a joined step whose chosen plan uses an index (step.plan.schema.is_index)
-  -> pk_join_seek(node_so_far, plan.schema [, {left = true}] when
-  step.join.op == 'left'). pk_join_seek's own find_fk() validates the FK
-  relationship. pk_join_seek reads the outer row's raw PK bytes directly
-  and never touches plan.kind/seek/lo/hi, so compile_step skips compiling
-  those fields for this step.
+- a joined step -> compile_joined_step(), which lowers plan.op
+  (choose_access()'s classify_join_op()) directly: 'fk_seek' via
+  pk_join_seek, 'index_seek'/'cross' via a getter-driven pk_scan
+  wrapped in nested_join. No physical shape is re-derived here.
 - a left-joined group (step.nested) -> compile_nested() builds the
   group's own chain, wrapped in nested_join(node_so_far, inner,
   {left = true, from_member = ...}).
 Every step's plan.residual (choose_access()'s leftover where()/on_expr
-conditions the seek didn't consume) gets applied via apply_residual()
-right after that step's node is built.
+conditions that the seek didn't consume) gets applied via apply_residual()
+right after that step's node is built. Once every step is chained on,
+rel.late_conditions (attribute_conditions()'s cross-source and
+left-joined-member conditions -- see attribute_conditions() and
+collect_left_joined_sources()) gets applied the same way, once, over
+the whole finished row.
 
---TODO: a joined step whose plan isn't an index at all (no relevant
-index exists -- a different, not-yet-built execution strategy), a
-group nested inside another group, a group base that doesn't
-correlate on a plain outer column, and self-join member disambiguation
-across a chain (opts.member/from_member are never passed) aren't wired
-up yet. group_by/having/distinct/order_by/limit aren't applied at
-runtime yet either.
+--TODO: a group nested inside another group, and a group base that
+doesn't correlate on a plain outer column, aren't wired up yet.
+group_by/having/distinct/order_by/limit aren't applied at runtime yet
+either.
 ]]
-local function compile_step(db, rel, params)
+--[[local]] function compile_step(db, rel, params, outer_node)
 	assert(rel.access and #rel.access >= 1, 'compile_step: rel.access missing')
+	local probes = {}
 	local base = rel.access[1]
 	assert(not base.join,
 		'compile_step: access[1] must be the un-joined base step')
-	local node = db:pk_scan(compile_plan(base.plan, params))
-	node = apply_residual(db, node, base.plan.residual, params)
+	local node = db:pk_scan(compile_plan(base.plan, params, outer_node))
+	node = apply_residual(db, node, base.plan.residual, params, probes)
 	for i = 2, #rel.access do
 		local step = rel.access[i]
 		if step.nested then
-			local inner, from_member = compile_nested(db, step, params)
+			local inner, from_member = compile_nested(db, step, params, probes)
 			node = db:nested_join(node, inner,
 				{left = true, from_member = from_member})
 		else
 			assert(step.join, 'compile_step: expected a joined step')
-			assert(step.plan.schema and step.plan.schema.is_index,
-				'compile_step: joined step has no index to seek by')
-			local opts = step.join.op == 'left' and {left = true} or nil
-			node = db:pk_join_seek(node, step.plan.schema, opts)
-			node = apply_residual(db, node, step.plan.residual, params)
+			node = compile_joined_step(db, node, step, params, probes)
 		end
 	end
-	return node
+	node = apply_residual(db, node, rel.late_conditions, params, probes)
+	return node, probes
 end
 
 mdbx_compile_step = compile_step
@@ -2232,10 +2722,10 @@ mdbx_compile_step = compile_step
 compile_terminal(db, rel, params) -> node
 
 builds on compile_step()'s access/join chain with the rest of the
-pipeline a terminal needs: select() projection (rel.out_cols), then
+pipeline that a terminal needs: select() projection (rel.out_cols), then
 distinct/sort/limit as rel's compile()-time flags call for. Order
 matches SQL: project, then distinct, then sort, then limit -- the same
-order compile()'s order_by binding already assumes (order_mode is
+order that compile()'s order_by binding already assumes (order_mode is
 'out_col' whenever distinct_cols is set, so every order_by() term is
 guaranteed to name a projected field, never a pre-distinct one).
 rel.distinct_streaming is always false for now (see compile()), so
@@ -2244,18 +2734,18 @@ group_by() execution (pk_group/stream_aggregate/hash_aggregate,
 having()) is not wired up yet.
 ]]
 --[[
-split rel.group_cols into plain group keys (expr.aggregate is falsy)
-and aggregate outputs (q.count/min/max/sum/avg -- the only exprs
-bind_expr allows through with .aggregate set), building a
+split rel.group_cols into plain group keys (op not in AGGREGATE_OPS)
+and aggregate outputs (q.count/min/max/sum/avg -- the only ops
+bind_expr allows through with allow_aggregate), building a
 stream_aggregate/hash_aggregate 'agg' list: one synthetic {op = 'key'}
 entry per key col (so the key ends up in the output row) plus the
 real aggregate entries, all carrying rel.group_cols' own out_col
 names.
 ]]
-local function split_group_cols(rel)
+function split_group_cols(rel)
 	local key_cols, agg_list = {}, {}
 	for _, expr in ipairs(rel.group_cols) do
-		if expr.aggregate then
+		if AGGREGATE_OPS[expr[1]] then
 			local value_expr = expr[2]
 			assert(value_expr == nil
 				or (value_expr[1] == 'col' and value_expr.source),
@@ -2289,33 +2779,18 @@ needed), or hashed (hash_aggregate over a select()'ed value stream --
 the fallback whenever grouped order isn't already free). having() is
 applied last, over whichever aggregate node was built.
 ]]
-local function compile_group(db, node, rel, params)
-	local key_cols, full_agg = split_group_cols(rel)
-	if #key_cols == 0 then
+local function compile_group(db, node, rel, params, probes)
+	local full_agg = rel.group_full_agg
+	if #rel.group_key_cols == 0 then
 		node = db:stream_aggregate(node, nil, full_agg)
 	elseif rel.group_streaming then
-		local cols = {}
-		for i, kc in ipairs(key_cols) do
-			cols[i] = {member = kc.member, col = kc.col}
-		end
+		local cols = rel.group_stream_cols
 		node = db:stream_aggregate(db:pk_group(node, cols), cols, full_agg)
 	else
-		local outputs = {}
-		for i, kc in ipairs(key_cols) do
-			outputs[i] = {name = kc.name, member = kc.member, col = kc.col}
-		end
-		for _, a in ipairs(full_agg) do
-			if a.op ~= 'key' and a.member then
-				add(outputs, {name = '_agg'..(#outputs + 1),
-					member = a.member, col = a.col})
-				a.input = outputs[#outputs].name
-			end
-		end
-		local fields = {}
-		for i, kc in ipairs(key_cols) do fields[i] = kc.name end
-		node = db:hash_aggregate(db:select(node, outputs), fields, full_agg)
+		node = db:hash_aggregate(db:select(node, rel.group_hash_outputs),
+			rel.group_hash_fields, full_agg)
 	end
-	return apply_having(db, node, rel.having_conditions, params)
+	return apply_having(db, node, rel.having_conditions, params, probes)
 end
 
 local function compile_terminal(db, rel, params)
@@ -2323,44 +2798,28 @@ local function compile_terminal(db, rel, params)
 		..' select() or group_by()')
 	assert(not (rel.group_cols and rel.select_cols),
 		'select() after group_by() is not implemented yet')
-	local node = compile_step(db, rel, params)
+	local node, probes = compile_step(db, rel, params)
 	if rel.group_cols then
-		node = compile_group(db, node, rel, params)
+		node = compile_group(db, node, rel, params, probes)
 	else
-		local outputs = {}
-		for i, out_col in ipairs(rel.out_cols) do
-			assert(out_col[1] == 'col' and out_col.source,
-				'select(): only plain column outputs are implemented yet')
-			outputs[i] = {name = out_col.name, member = out_col.source.name,
-				col = out_col[3]}
-		end
-		node = db:select(node, outputs)
+		node = db:select(node, rel.output_descriptor)
 	end
 	if rel.distinct_cols then
-		local fields = {}
-		for i, c in ipairs(dedup_key_cols(rel)) do fields[i] = c.name end
 		if rel.distinct_streaming then
-			node = db:stream_distinct(node, fields)
+			node = db:stream_distinct(node, rel.distinct_fields)
 		else
-			node = db:hash_distinct(node, fields)
+			node = db:hash_distinct(node, rel.distinct_fields)
 		end
 	end
 	if rel.sort_needed then
-		local spec = {}
-		for i, term in ipairs(rel.order_cols) do
-			spec[i] = term.source
-				and {member = term.source.name, col = term[3],
-					desc = term.dir == 'desc'}
-				or {field = term.col.name, desc = term.dir == 'desc'}
-		end
-		node = db:value_sort(node, spec)
+		node = db:value_sort(node, rel.sort_spec)
 	end
 	if rel._limit ~= nil then
 		local n = compile_getter(rel._limit, params)()
 		local offset = rel._offset and compile_getter(rel._offset, params)()
 		node = db:limit(node, n, offset)
 	end
-	return node
+	return node, probes
 end
 
 local function bind_params(params)
@@ -2402,13 +2861,14 @@ input during reset(), before next_item() can be called even once.
 local function collect_rows(db, rel, params, cap)
 	if not rel.compiled then compile(rel) end
 	params = bind_params(params)
-	local node = compile_terminal(db, rel, params)
+	local node, probes = compile_terminal(db, rel, params)
 	node:reset()
 	local rows = {}
 	while (not cap or #rows < cap) and node:next_item() do
 		add(rows, node:row())
 	end
 	node:close()
+	close_probes(probes)
 	return rows
 end
 
@@ -2457,7 +2917,7 @@ never disappears to zero, so exists() skips it entirely and just
 checks the raw stream for any match.
 neither respects order_by()/limit(): order never changes a count or
 an existence check, and limit()+count()/exists() together isn't a
-combination this API composes (unlike a real SQL subquery LIMIT).
+combination that this API composes (unlike a real SQL subquery LIMIT).
 ]]
 local function count_items(node)
 	node:reset()
@@ -2468,45 +2928,40 @@ local function count_items(node)
 end
 
 local function compile_group_or_distinct(db, rel, params)
-	local node = compile_step(db, rel, params)
+	local node, probes = compile_step(db, rel, params)
 	if rel.group_cols then
-		return compile_group(db, node, rel, params)
+		return compile_group(db, node, rel, params, probes), probes
 	end
 	if rel.distinct_cols then
 		assert(rel.out_cols, 'distinct() requires select() or group_by()')
-		local outputs = {}
-		for i, out_col in ipairs(rel.out_cols) do
-			assert(out_col[1] == 'col' and out_col.source,
-				'select(): only plain column outputs are implemented yet')
-			outputs[i] = {name = out_col.name, member = out_col.source.name,
-				col = out_col[3]}
-		end
-		node = db:select(node, outputs)
-		local fields = {}
-		for i, c in ipairs(dedup_key_cols(rel)) do fields[i] = c.name end
+		node = db:select(node, rel.output_descriptor)
 		if rel.distinct_streaming then
-			return db:stream_distinct(node, fields)
+			return db:stream_distinct(node, rel.distinct_fields), probes
 		end
-		return db:hash_distinct(node, fields)
+		return db:hash_distinct(node, rel.distinct_fields), probes
 	end
-	return node
+	return node, probes
 end
 
 function Rel:count(params)
 	if not self.compiled then compile(self) end
 	params = bind_params(params)
-	return count_items(compile_group_or_distinct(self.db, self, params))
+	local node, probes = compile_group_or_distinct(self.db, self, params)
+	local n = count_items(node)
+	close_probes(probes)
+	return n
 end
 
 function Rel:exists(params)
 	if not self.compiled then compile(self) end
 	params = bind_params(params)
-	local node = compile_step(self.db, self, params)
+	local node, probes = compile_step(self.db, self, params)
 	if self.group_cols then
-		node = compile_group(self.db, node, self, params)
+		node = compile_group(self.db, node, self, params, probes)
 	end
 	node:reset()
 	local found = node:next_item() ~= nil
 	node:close()
+	close_probes(probes)
 	return found
 end
