@@ -78,9 +78,11 @@ QUERY
 	cur:each_prefix         ([val_cols], pk_val1, ...) -> iter() -> cur, keysvals...
 	cur:each_dup            ([val_cols], keys...) -> iter() -> cur, keysvals...
 	cur:each_current_dup    ([val_cols]) -> iter() -> cur, keysvals...
-	db:compile_col    (schema, col, ix_key, pk, get_base_val) -> fn  compile a
-	                        single-column decoder for hot iteration loops (used
-	                        by mdbx_query_nodes.lua); fn() -> decoded value
+ENCODING / DECODING
+	db:decode_kv   (name|dbi, k,k_sz, v,v_sz, [val_cols]) -> keysvals...
+	cur:decode_kv  (k,k_sz, v,v_sz, [val_cols]) -> keysvals...
+	db:col_decoder (schema, col, ix_key, pk, get_base_val) -> get()
+	db:key_encoder (schema, cols, key_schema, ix_key, pk, get_base_val) -> enc()
 
 COLUMS LISTS & IN/OUT VALUES FORMATS
 
@@ -473,20 +475,20 @@ local function encode_val(self, schema, event, rec, rec_buf_sz, cols, as, ...)
 end
 
 local pout = new'const u8*[1]'
-local pp = new'const u8*[1]'
+local decode_pp = new'const u8*[1]'
 
 local function decode_key(schema, rec, rec_sz, t, as, i0)
 	i0 = i0 or 1
 	local key_fields = schema.key_fields
 	local out, out_sz = key_decode_buffer, MDBX_MAX_KEY_SIZE
-	pp[0] = rec
+	decode_pp[0] = rec
 	local n = #key_fields
 	for i=1,n do
 		local f = key_fields[i]
 		local len = C.schema_get_key(schema._st, i-1,
 			rec, rec_sz,
 			out, out_sz,
-			pout, pp)
+			pout, decode_pp)
 		local k = as == '{}' and f.col or i0 + i - 1
 		if len ~= -1 then
 			t[k] = f.decode(pout[0], len)
@@ -590,7 +592,7 @@ pk: MDBX_val holding the base table pk (dup value when schema is an index).
 get_base_val() -> data, sz; called lazily when a val field is needed.
 Returns f() -> decoded value for the current cursor position.
 ]]
-function Db:compile_col(schema, col, ix_key, pk, get_base_val)
+function Db:col_decoder(schema, col, ix_key, pk, get_base_val)
 	local out, out_sz = key_decode_buffer, MDBX_MAX_KEY_SIZE
 	local ix_f = schema.is_index and schema.fields[col]
 	--an ai_ci index key stores lowercased, accent-stripped text, not the
@@ -620,6 +622,108 @@ function Db:compile_col(schema, col, ix_key, pk, get_base_val)
 			local len = C.schema_get_val(st, vi, v, v_sz, pout)
 			return len ~= -1 and decode(pout[0], len) or nil
 		end
+	end
+end
+
+--[[
+Compile a key encoder for use in hot iteration loops.
+schema: base-table schema or index schema for ix_key and pk.
+cols: columns to read; cols[i] becomes key_schema's i-th key field.
+key_schema: schema of the encoded key.
+ix_key: MDBX_val holding the index key (nil when schema is a base table).
+pk: MDBX_val holding the base table pk (dup value when schema is an index).
+get_base_val() -> data, sz; called lazily when a val field is needed.
+Returns: `enc() -> true, p, sz` for the current cursor position, or `false` if
+any column is null.
+]]
+function Db:key_encoder(
+	schema, cols, key_schema, ix_key, pk,
+	get_base_val
+)
+	local table_schema = schema.val_schema or schema
+	local col_reads = {}
+	local key_prefix_schema, key_prefix_rec
+	local output_has_ai_ci
+	local all_cols_not_null = true
+	-- col_reads[i] = {schema, field, record | nil}.
+	-- nil record -> field in the base-table value.
+	for i, col in ipairs(cols) do
+		output_has_ai_ci = output_has_ai_ci
+			or key_schema.key_fields[i].mdbx_collation == 'utf8_ai_ci'
+		local field_schema = schema
+		local field = schema.fields[col]
+		local record = schema.is_index and ix_key or pk
+		if not field or not field.key_index
+			or field.mdbx_collation == 'utf8_ai_ci'
+		then
+			field_schema = table_schema
+			field = table_schema.fields[col]
+			record = field.key_index and pk or nil
+		end
+		all_cols_not_null = all_cols_not_null and field.not_null
+		col_reads[i] = {
+			schema = field_schema,
+			field = field,
+			record = record,
+		}
+		if i == 1 then
+			key_prefix_schema = field_schema
+			key_prefix_rec = record
+		end
+		if field_schema ~= key_prefix_schema
+			or record ~= key_prefix_rec
+			or field.key_index ~= i
+		then
+			key_prefix_schema = nil
+		end
+	end
+	if key_prefix_schema
+		and #cols == #key_prefix_schema.key_fields
+		and key_prefix_schema.key_sig == key_schema.key_sig
+		and all_cols_not_null
+	then
+		return function()
+			return true, key_prefix_rec.data, key_prefix_rec.size
+		end
+	end
+	-- rebuilding cannot apply utf8_ai_ci to base-table text.
+	assert(not output_has_ai_ci)
+
+	local out = key_rec_buffer
+	if key_prefix_schema then
+		return function()
+			local sz = key_reencode(key_prefix_schema, key_schema,
+				key_prefix_rec.data, key_prefix_rec.size, out,
+				MDBX_MAX_KEY_SIZE)
+			if sz >= 0 then return true, out, sz end
+		end
+	end
+
+	local out_pos = pp
+	return function()
+		out_pos[0] = out
+		for i, col_read in ipairs(col_reads) do
+			local field = col_read.field
+			local len
+			if col_read.record then
+				local record = col_read.record
+				len = C.schema_get_key(col_read.schema._st,
+					field.key_index - 1, record.data, record.size,
+					out_pos[0], MDBX_MAX_KEY_SIZE - (out_pos[0] - out),
+					pout, nil)
+			else
+				local data, sz = get_base_val()
+				len = C.schema_get_val(col_read.schema._st,
+					field.val_index - 1, data, sz, pout)
+			end
+			if len < 0 then return false end
+			if pout[0] ~= out_pos[0] then
+				copy(out_pos[0], pout[0], len * field.elem_size)
+			end
+			C.schema_key_add(key_schema._st, i - 1, out,
+				MDBX_MAX_KEY_SIZE, len, out_pos)
+		end
+		return true, out, out_pos[0] - out
 	end
 end
 
@@ -1984,7 +2088,7 @@ end
          ----------------------
 				A -> X       X -> A  existing record and associated index key
 			----------------------
-			~  A -> X       X -> A  record updated but index key didn't change (do nothing)
+			~  A -> X       X -> A  record updated but ix key didn't change: skip
 			~  A -> Y    -  X -> A  record updated: remove old index
 			             +  Y -> A  and add new index
 			+  B -> X    x  X -> B  record inserted: unique key violation
@@ -2000,7 +2104,8 @@ end
 
 		if v0 then --record updated: remove the old index record
 
-			--derive old index key from v0 (pk k is unchanged; only the val record differs).
+			--derive old index key from v0.
+			--pk k is unchanged; only the val record differs.
 			local xk0, xk0_buf_sz = ix2_key_rec_buffer, MDBX_MAX_KEY_SIZE
 			decode_ix_into(k, k_sz, v0, v0_sz, dt0)
 			local xk0_sz = encode_key(self, ix_schema, 'i_update', nil,
