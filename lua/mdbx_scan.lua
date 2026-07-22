@@ -16,8 +16,8 @@ API
 	scan:filter(accept) -> scan
 	scan:join(spec) -> scan
 	scan:left_join(spec) -> scan
-	scan:fk_join('table.fk_cols') -> scan
-	scan:fk_left_join('table.fk_cols') -> scan
+	scan:fk_join(child_table, fk_cols) -> scan
+	scan:fk_left_join(child_table, fk_cols) -> scan
 	scan.col_decoder(table, col) -> get() -> value
 
 RULES
@@ -31,7 +31,8 @@ RULES
 	- join spec = 'table[@alias].col[,col...]=table.col[,col...]'
 	- join cols -> exact table PK or index
 	- table_name right of '=' -> table already in scan
-	- fk_join spec = 'table.fk_cols'; fk_cols = 'col1,col2'
+	- child_table owns fk_cols
+	- fk_cols = 'col1,col2'
 	- missing left-join row -> nil from each joined table getter
 
 PATH
@@ -301,46 +302,32 @@ local function add_join(db, outer_scan, spec, kind)
 	return add_join_table(db, outer_scan, key_schema, get_key, table_name, kind)
 end
 
--- resolves either FK direction before adding the joined table.
-local function add_fk_join(db, outer_scan, spec, kind)
-	local schema_name, fk_cols = spec:match'^%s*(.-)%s*%.%s*(.-)%s*$'
-	assertf(schema_name and schema_name ~= '' and fk_cols ~= '',
-		'fk_join: spec: %s', spec)
-	local table_schema = assertf(db:table_schema(schema_name),
-		'fk_join: no schema: %s', schema_name)
-	assert(not table_schema.is_index, 'fk_join: base table')
+-- uses one FK to add its absent child or parent table.
+local function add_fk_join(db, outer_scan, child_table_name, fk_cols, kind)
+	local child_schema = assertf(db:table_schema(child_table_name),
+		'fk_join: no schema: %s', child_table_name)
+	assert(not child_schema.is_index, 'fk_join: base table')
+	local fk = child_schema.fks and child_schema.fks[fk_cols]
+	assertf(fk, 'fk_join: no FK: %s(%s)', child_table_name, fk_cols)
+	local parent_schema = assert(db:table_schema(fk.ref_table))
 	local find_outer_table = outer_scan._find_table
-	local fk, get_key, table_name, key_schema
-
-	-- table_schema.fks[fk_cols] -> new child table.
-	local child_fk = table_schema.fks and table_schema.fks[fk_cols]
-	if child_fk then
-		local outer_parent_schema, _, outer_parent_key_encoder =
-			find_outer_table(child_fk.ref_table)
-		if outer_parent_schema then
-			fk = child_fk
-			get_key = outer_parent_key_encoder(
-				outer_parent_schema.key_cols, child_fk.index)
-			table_name = schema_name
-			key_schema = child_fk.index
-		end
+	local outer_child_schema, _, outer_child_key_encoder =
+		find_outer_table(child_schema.name)
+	local outer_parent_schema, _, outer_parent_key_encoder =
+		find_outer_table(parent_schema.name)
+	-- fk_join adds exactly one of the FK's two tables.
+	assert(not outer_child_schema ~= not outer_parent_schema,
+		'fk_join: one FK table')
+	local get_key, table_name, key_schema
+	if outer_child_schema then
+		get_key = outer_child_key_encoder(fk.cols, parent_schema)
+		table_name = parent_schema.name
+		key_schema = parent_schema
+	else
+		get_key = outer_parent_key_encoder(parent_schema.key_cols, fk.index)
+		table_name = child_schema.name
+		key_schema = fk.index
 	end
-	-- table_schema.ref_fks named fk_cols -> new parent table.
-	for _, parent_fk in pairs(table_schema.ref_fks or empty) do
-		if parent_fk.name == fk_cols then
-			local outer_child_schema, _, outer_child_key_encoder =
-				find_outer_table(parent_fk.table)
-			if outer_child_schema then
-				assertf(not fk, 'fk_join: ambiguous FK: %s', fk_cols)
-				fk = parent_fk
-				get_key = outer_child_key_encoder(
-					parent_fk.cols, table_schema)
-				table_name = schema_name
-				key_schema = table_schema
-			end
-		end
-	end
-	assertf(fk, 'fk_join: no FK: %s', fk_cols)
 	return add_join_table(db, outer_scan, key_schema, get_key, table_name, kind,
 		fk.name)
 end
@@ -834,13 +821,14 @@ function Db:scan(table_name, path)
 	end
 	scan.left_join = left_join
 
-	local function fk_join(self, spec)
-		return add_fk_join(db, self, spec, 'fk_join')
+	local function fk_join(self, child_table_name, fk_cols)
+		return add_fk_join(db, self, child_table_name, fk_cols, 'fk_join')
 	end
 	scan.fk_join = fk_join
 
-	local function fk_left_join(self, spec)
-		return add_fk_join(db, self, spec, 'fk_left_join')
+	local function fk_left_join(self, child_table_name, fk_cols)
+		return add_fk_join(db, self, child_table_name, fk_cols,
+			'fk_left_join')
 	end
 	scan.fk_left_join = fk_left_join
 
