@@ -566,7 +566,7 @@ function test.fk_join_directions()
 		add_join_data(db)
 		db:atomic('r', function()
 			local children = db:scan('customers', 'id asc')
-				:fk_join('orders.customer_id')
+				:fk_join('orders', 'customer_id')
 			assert_values(collect_pairs(children,
 				children.col_decoder('customers', 'id'),
 				children.col_decoder('orders', 'id')),
@@ -575,7 +575,7 @@ function test.fk_join_directions()
 
 			local parents = db:scan('orders',
 				'customer_id asc, id asc')
-				:fk_join('customers.customer_id')
+				:fk_join('orders', 'customer_id')
 			assert_values(collect_pairs(parents,
 				parents.col_decoder('orders', 'id'),
 				parents.col_decoder('customers', 'id')),
@@ -583,7 +583,7 @@ function test.fk_join_directions()
 			parents.close()
 
 			local left = db:scan('customers', 'id asc')
-				:fk_left_join('orders.customer_id')
+				:fk_left_join('orders', 'customer_id')
 			assert_values(collect_pairs(left,
 				left.col_decoder('customers', 'id'),
 				left.col_decoder('orders', 'id')),
@@ -598,14 +598,14 @@ function test.fk_join_columns()
 	with_db('fk_join_columns', function(db)
 		add_join_data(db)
 		db:atomic('r', function()
-			local ambiguous = db:scan('invoices', 'id asc')
+			local missing_fk_cols = db:scan('invoices', 'id asc')
 			assert(not pcall(function()
-				ambiguous:fk_join('customers')
+				missing_fk_cols:fk_join('invoices')
 			end))
-			ambiguous.close()
+			missing_fk_cols.close()
 
 			local buyers = db:scan('invoices', 'id asc')
-				:fk_join('customers.buyer_id')
+				:fk_join('invoices', 'buyer_id')
 			assert_values(collect_pairs(buyers,
 				buyers.col_decoder('invoices', 'id'),
 				buyers.col_decoder('customers', 'id')),
@@ -613,7 +613,7 @@ function test.fk_join_columns()
 			buyers.close()
 
 			local sold = db:scan('customers', 'id asc')
-				:fk_join('invoices.seller_id')
+				:fk_join('invoices', 'seller_id')
 			assert_values(collect_pairs(sold,
 				sold.col_decoder('customers', 'id'),
 				sold.col_decoder('invoices', 'id')),
@@ -646,7 +646,8 @@ function test.self_join()
 
 			-- fk_join cannot resolve a self-referencing FK.
 			assert(not pcall(function()
-				db:scan('employees', 'id asc'):fk_join('employees.manager_id')
+				db:scan('employees', 'id asc')
+					:fk_join('employees', 'manager_id')
 			end))
 		end)
 	end)
@@ -675,7 +676,7 @@ function test.fk_composite_key()
 		add_join_data(db)
 		db:atomic('r', function()
 			local parents = db:scan('tickets', 'id asc')
-				:fk_join('accounts.tenant_id,account_id')
+				:fk_join('tickets', 'tenant_id,account_id')
 			assert_values(collect_pairs(parents,
 				parents.col_decoder('tickets', 'id'),
 				parents.col_decoder('accounts', 'id')),
@@ -684,7 +685,7 @@ function test.fk_composite_key()
 
 			local children = db:scan('accounts',
 				'tenant_id asc, id desc')
-				:fk_join('tickets.tenant_id,account_id')
+				:fk_join('tickets', 'tenant_id,account_id')
 			assert_values(collect_pairs(children,
 				children.col_decoder('accounts', 'id'),
 				children.col_decoder('tickets', 'id')),
