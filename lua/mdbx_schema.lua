@@ -1106,7 +1106,7 @@ function Db:save_table_schema(schema)
 		for ix_name, ix in pairs(schema.ixs) do
 			t.ixs[ix_name] = extend({
 				is_unique = ix.is_unique,
-				desc = ix.desc and imap(ix.desc),
+				desc = imap(ix.desc),
 			}, ix)
 		end
 	end
@@ -1114,14 +1114,14 @@ function Db:save_table_schema(schema)
 		t.fks = {}
 		for fk_name, fk in pairs(schema.fks) do
 			t.fks[fk_name] = {
-				cols = imap(fk.cols),
+				cols = extend({desc = imap(fk.cols.desc)}, fk.cols),
 				ref_table = fk.ref_table,
 				ref_cols = imap(fk.ref_cols),
 				ondelete = fk.ondelete,
 			}
 		end
 	end
-	if schema.ref_fks then --reverse refs (parent side): {key -> fk (runtime) | true (stored)}.
+	if schema.ref_fks then --backrefs (parent side): {key->true} -> {key->fk}
 		t.ref_fks = {}
 		for k in pairs(schema.ref_fks) do
 			t.ref_fks[k] = true
@@ -1448,7 +1448,7 @@ local function copy_base_schema(src, name)
 		fields = {},
 		pk = imap(assert(src.pk)),
 	}
-	schema.pk.desc = src.pk.desc and imap(src.pk.desc)
+	schema.pk.desc = imap(src.pk.desc)
 	for _, src_f in ipairs(assert(src.fields)) do
 		local f = {}
 		for k in pairs(paper_field_attrs) do
@@ -1868,7 +1868,7 @@ end
 
 --[[local]] function index_schema(val_schema, src_cols, is_unique)
 	local cols = imap(src_cols)
-	cols.desc = src_cols.desc and imap(src_cols.desc)
+	cols.desc = imap(src_cols.desc)
 	local ix_name = format_ix_name(val_schema.name, cols)
 	local ix_fields = {}
 	for _,col in ipairs(cols) do
@@ -2247,9 +2247,12 @@ function Db:add_fk(fk)
 	local ok, err = check_existing_fk(self, event, schema, fk_name, fk)
 	self:check_schema('fk_add', fk.table, nil, ok, err)
 
-	--install the fk and its index.
+	--install the fk and its index; the fk index follows the ref pk's
+	--per-column direction so scans can reuse raw key bytes instead of
+	--going through key_reencode.
 	touch_schema(self, schema.name)
 	fk.name = fk_name
+	fk.cols.desc = imap(ref_schema.pk.desc)
 	local ix_name = format_ix_name(schema.name, fk.cols)
 	local ix_schema = schema.indexes and schema.indexes[ix_name]
 	if not ix_schema then
