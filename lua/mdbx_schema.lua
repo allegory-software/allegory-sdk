@@ -641,12 +641,10 @@ function Db:key_encoder(
 	get_base_val
 )
 	local table_schema = schema.val_schema or schema
-	local col_reads = {}
+	local col_reads = {} -- {st, field_index, record | false, elem_size, ...}
 	local key_prefix_schema, key_prefix_rec
 	local output_has_ai_ci
 	local all_cols_not_null = true
-	-- col_reads[i] = {schema, field, record | nil}.
-	-- nil record -> field in the base-table value.
 	for i, col in ipairs(cols) do
 		output_has_ai_ci = output_has_ai_ci
 			or key_schema.key_fields[i].mdbx_collation == 'utf8_ai_ci'
@@ -661,11 +659,10 @@ function Db:key_encoder(
 			record = field.key_index and pk or nil
 		end
 		all_cols_not_null = all_cols_not_null and field.not_null
-		col_reads[i] = {
-			schema = field_schema,
-			field = field,
-			record = record,
-		}
+		local field_index = record and field.key_index - 1
+			or field.val_index - 1
+		append(col_reads, field_schema._st, field_index, record or false,
+			field.elem_size)
 		if i == 1 then
 			key_prefix_schema = field_schema
 			key_prefix_rec = record
@@ -699,31 +696,29 @@ function Db:key_encoder(
 		end
 	end
 
-	local out_pos = pp
 	return function()
-		out_pos[0] = out
-		for i, col_read in ipairs(col_reads) do
-			local field = col_read.field
+		pp[0] = out
+		local i = 1
+		for ki = 1, #cols do
+			local st, field_index, rec, elem_size = unpack(col_reads, i, i + 3)
+			i = i + 4
 			local len
-			if col_read.record then
-				local record = col_read.record
-				len = C.schema_get_key(col_read.schema._st,
-					field.key_index - 1, record.data, record.size,
-					out_pos[0], MDBX_MAX_KEY_SIZE - (out_pos[0] - out),
+			if rec then
+				len = C.schema_get_key(st, field_index, rec.data, rec.size,
+					pp[0], MDBX_MAX_KEY_SIZE - (pp[0] - out),
 					pout, nil)
 			else
 				local data, sz = get_base_val()
-				len = C.schema_get_val(col_read.schema._st,
-					field.val_index - 1, data, sz, pout)
+				len = C.schema_get_val(st, field_index, data, sz, pout)
 			end
 			if len < 0 then return false end
-			if pout[0] ~= out_pos[0] then
-				copy(out_pos[0], pout[0], len * field.elem_size)
+			if pout[0] ~= pp[0] then
+				copy(pp[0], pout[0], len * elem_size)
 			end
-			C.schema_key_add(key_schema._st, i - 1, out,
-				MDBX_MAX_KEY_SIZE, len, out_pos)
+			C.schema_key_add(key_schema._st, ki - 1, out,
+				MDBX_MAX_KEY_SIZE, len, pp)
 		end
-		return true, out, out_pos[0] - out
+		return true, out, pp[0] - out
 	end
 end
 
