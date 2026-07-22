@@ -553,7 +553,7 @@ function test.explain_pk_filter()
 end
 
 --keeps rows where fn(node) is true, reading columns straight off the
---node that it's given (delegating through the wrapped input's compile_col).
+--node that it's given (delegating through the wrapped input's col_decoder).
 function test.pk_filter_exec()
 	with_db('pk_filter_exec', function(db)
 		db:atomic('r', function()

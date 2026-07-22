@@ -57,7 +57,7 @@ function Db.query_node:col(member, col)
 	if not mc then mc = {}; cache[member or false] = mc end
 	local f = mc[col]
 	if not f then
-		f = self:compile_col(member, col)
+		f = self:col_decoder(member, col)
 		mc[col] = f
 	end
 	return f()
@@ -232,8 +232,8 @@ function Db.pk_scan:__call(db, plan)
 			return true, pk_rec.data, pk_rec.size
 		end
 	end
-	function node:compile_col(member, col)
-		return db:compile_col(is_index and schema or member_schema, col,
+	function node:col_decoder(member, col)
+		return db:col_decoder(is_index and schema or member_schema, col,
 			is_index and mk_rec or nil, is_index and pk_rec or mk_rec,
 			get_base_val)
 	end
@@ -484,13 +484,17 @@ function Db.pk_join_seek:__call(db, driver, fk_schema, opts)
 	--SET_KEY/NEXT_DUP.
 	--MDBX_WIDEFK: global bench override, forces this branch.
 	local wide = MDBX_WIDEFK or #fk_schema.pk > #fk.cols
-	--seek/reset_prefix below reuse driver's parent-pk bytes as-is, which
-	--only works if the FK index key is byte-identical to the parent pk
-	--(fails for a nullable FK col: extra marker byte). not_null is the
-	--only attribute that can differ (add_fk enforces the rest).
+	-- re-encode when the FK key has null markers or different directions.
 	local reencode = false
-	for _, col in ipairs(fk.cols) do
-		if not child_schema.fields[col].not_null then reencode = true; break end
+	for i, col in ipairs(fk.cols) do
+		local parent_desc = not not parent_schema.key_fields[i].descending
+		local fk_desc = not not fk_schema.key_fields[i].descending
+		if not child_schema.fields[col].not_null
+			or parent_desc ~= fk_desc
+		then
+			reencode = true
+			break
+		end
 	end
 	local reenc_buf = reencode and u8a(MDBX_MAX_KEY_SIZE) or nil
 	local fk_child = wide and db:pk_scan{kind = 'eq_prefix',
@@ -533,14 +537,14 @@ function Db.pk_join_seek:__call(db, driver, fk_schema, opts)
 		end
 		return driver:pk(name)
 	end
-	function node:compile_col(member, col)
+	function node:col_decoder(member, col)
 		if member == child_member then
-			local inner = wide and fk_child:compile_col(child_schema.name, col)
-				or db:compile_col(child_schema, col, nil, child_pk_rec,
+			local inner = wide and fk_child:col_decoder(child_schema.name, col)
+				or db:col_decoder(child_schema, col, nil, child_pk_rec,
 					get_child_val)
 			return function() return has_child and inner() or nil end
 		end
-		return driver:compile_col(member, col)
+		return driver:col_decoder(member, col)
 	end
 	--[[
 	Per driver item: one MDBX_SET_KEY on the FK index to land on the
@@ -679,11 +683,11 @@ function Db.nested_join:__call(db, outer, inner, opts)
 		if ok then return true, p, sz end
 		if has_inner then return inner:pk(name) end
 	end
-	function node:compile_col(member, col)
+	function node:col_decoder(member, col)
 		if driver_has_member(outer, member) then
-			return outer:compile_col(member, col)
+			return outer:col_decoder(member, col)
 		end
-		local inner_fn = inner:compile_col(member, col)
+		local inner_fn = inner:col_decoder(member, col)
 		return function() return has_inner and inner_fn() or nil end
 	end
 	function node:merge_key() return outer:merge_key() end
@@ -723,7 +727,7 @@ end
 --[[
 pk_filter: keep pk/pk_tuple stream items where fn(node) is true, drop
 the rest. fn reads columns off node itself (delegates to input via
-compile_col), so it can read any member that the input stream carries.
+col_decoder), so it can read any member that the input stream carries.
 Usage: db:pk_filter(input, fn)
 ]]
 Db.pk_filter = object(Db.query_node, {
@@ -744,7 +748,7 @@ function Db.pk_filter:__call(db, input, fn)
 	node.merge_cmp = input.merge_cmp
 	node.merge_sig = input.merge_sig
 	local has_pk
-	function node:compile_col(m, c) return input:compile_col(m, c) end
+	function node:col_decoder(m, c) return input:col_decoder(m, c) end
 	function node:close() input:close() end
 	function node:pk(name)
 		if not has_pk then return end
@@ -798,16 +802,16 @@ function Db.select:__call(db, input, outputs)
 	local getters, names = {}, {}
 	for i, o in ipairs(outputs) do
 		getters[i] = o.fn and function() return o.fn(input) end
-			or input:compile_col(o.member, o.col)
+			or input:col_decoder(o.member, o.col)
 		names[i] = o.name
 	end
 	local ngetters = #getters
 	function node:row() return node._row end
-	function node:compile_col(member, col)
+	function node:col_decoder(member, col)
 		local name = col_map[member..':'..col]
 		if name then return function() return node._row[name] end end
 		--let later value nodes sort/filter by columns not selected here.
-		return input:compile_col(member, col)
+		return input:col_decoder(member, col)
 	end
 	function node:close() input:close() end
 	function node:next_group()
@@ -842,7 +846,7 @@ function Db.value_filter:__call(db, input, fn)
 	})
 	node.inputs = {input}
 	function node:row() return input:row() end
-	function node:compile_col(m, c) return input:compile_col(m, c) end
+	function node:col_decoder(m, c) return input:col_decoder(m, c) end
 	function node:close() input:close() end
 	function node:next_group()
 		while true do
@@ -878,7 +882,7 @@ function Db.stream_distinct:__call(db, input, fields)
 	local nfields = #fields
 	local prev, has_prev
 	function node:row() return input:row() end
-	function node:compile_col(m, c) return input:compile_col(m, c) end
+	function node:col_decoder(m, c) return input:col_decoder(m, c) end
 	function node:close() input:close() end
 	function node:next_group()
 		while true do
@@ -925,7 +929,7 @@ function Db.hash_distinct:__call(db, input, fields)
 	local vals = {}
 	local tuple_space, seen
 	function node:row() return input:row() end
-	function node:compile_col(m, c) return input:compile_col(m, c) end
+	function node:col_decoder(m, c) return input:col_decoder(m, c) end
 	function node:close() input:close() end
 	function node:next_group()
 		while true do
@@ -958,7 +962,7 @@ end
 value_sort: materialise and sort by field values; accepts pk or value
 input. For value input: collects rows, sorts, serves via next_group()/
 :row(). For pk input (single-member only): collects pks + decoded sort
-values, sorts by those values, serves as a pk node with compile_col via
+values, sorts by those values, serves as a pk node with col_decoder via
 a fresh base cursor.
 spec: list of {member=, col=, desc=} / {field=, desc=} entries, or a
 comparator fn(a, b) (value input only).
@@ -1023,7 +1027,7 @@ function Db.value_sort:__call(db, input, spec)
 	end
 
 	if is_pk then
-		--pk path: output is still a pk node; compile_col serves via a
+		--pk path: output is still a pk node; col_decoder serves via a
 		--fresh cursor, since materializing discards the input's own.
 		local member_name = input.members[1]
 		local schema = db:table_schema(member_name)
@@ -1060,8 +1064,8 @@ function Db.value_sort:__call(db, input, spec)
 				return true, cur_pk_rec.data, cur_pk_rec.size
 			end
 		end
-		function node:compile_col(member, col)
-			return db:compile_col(schema, col, nil, cur_pk_rec, get_base_val)
+		function node:col_decoder(member, col)
+			return db:col_decoder(schema, col, nil, cur_pk_rec, get_base_val)
 		end
 		function node:next_group()
 			idx = idx + 1
@@ -1076,7 +1080,7 @@ function Db.value_sort:__call(db, input, spec)
 			input:reset()
 			local decoders = {}
 			for _, p in ipairs(parts) do
-				decoders[#decoders+1] = input:compile_col(p.member, p.col)
+				decoders[#decoders+1] = input:col_decoder(p.member, p.col)
 			end
 			entries = {}
 			while input:next_item() do
@@ -1120,7 +1124,7 @@ function Db.value_sort:__call(db, input, spec)
 				local getters = {}
 				for i, p in ipairs(parts) do
 					if p.member then
-						getters[i] = assert(input:compile_col(p.member, p.col))
+						getters[i] = assert(input:col_decoder(p.member, p.col))
 					else
 						getters[i] = function() return input:row()[p.field] end
 					end
@@ -1163,7 +1167,7 @@ function Db.limit:__call(db, input, n, offset)
 	node.merge_cmp = input.merge_cmp
 	node.merge_sig = input.merge_sig
 	local has_item, count, skipped
-	function node:compile_col(m, c) return input:compile_col(m, c) end
+	function node:col_decoder(m, c) return input:col_decoder(m, c) end
 	function node:close() input:close() end
 	function node:row() return input:row() end
 	function node:pk(name)
@@ -1226,7 +1230,7 @@ function Db.pk_group:__call(db, input, cols)
 	local ncols = #cols
 	local getters, prev
 	local done, has_current, has_prev, peeked
-	function node:compile_col(m, c) return input:compile_col(m, c) end
+	function node:col_decoder(m, c) return input:col_decoder(m, c) end
 	local function same_key()
 		for i = 1, ncols do
 			local v = getters[i](); if v == nil then v = null end
@@ -1277,7 +1281,7 @@ function Db.pk_group:__call(db, input, cols)
 		input:reset()
 		getters = {}
 		for i, c in ipairs(cols) do
-			getters[i] = input:compile_col(c.member, c.col)
+			getters[i] = input:col_decoder(c.member, c.col)
 		end
 		prev = {}
 		done = false; has_current = false; has_prev = false; peeked = false
@@ -1369,7 +1373,7 @@ function Db.stream_aggregate:__call(db, input, cols, agg)
 		if a.member and a.col then col_map[a.member..':'..a.col] = a.name end
 	end
 	function node:row() return node._row end
-	function node:compile_col(member, col)
+	function node:col_decoder(member, col)
 		local name = col_map[member..':'..col]
 		if name then return function() return node._row[name] end end
 	end
@@ -1415,7 +1419,7 @@ function Db.stream_aggregate:__call(db, input, cols, agg)
 		if cols then
 			getters = {}
 			for i, c in ipairs(cols) do
-				getters[i] = input:compile_col(c.member, c.col)
+				getters[i] = input:col_decoder(c.member, c.col)
 			end
 		end
 		done = false
@@ -1454,7 +1458,7 @@ function Db.hash_aggregate:__call(db, input, fields, agg)
 	for _, a in ipairs(agg) do
 		if a.member and a.col then col_map[a.member..':'..a.col] = a.name end
 	end
-	function node:compile_col(member, col)
+	function node:col_decoder(member, col)
 		local name = col_map[member..':'..col]
 		if name then return function() return node._row[name] end end
 	end

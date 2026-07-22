@@ -1047,7 +1047,7 @@ end
 --order_by() on a column not in select(): binds directly to the source
 --col (out_col_or_source mode falls through to bind_col since the
 --reference is qualified), so value_sort's spec reads it via
---compile_col passthrough, not the projected row dict.
+--col_decoder passthrough, not the projected row dict.
 function test.order_by_unselected_col_exec()
 	with_db('order_by_unselected_col_exec', function(db)
 		db:atomic('r', function()

@@ -2256,7 +2256,7 @@ MDBX_NODUPFIXED = false --bench override, see compile_scan's walk_dups
 		local function decode_col(col)
 			local f = decoders[col]
 			if not f then
-				f = db:compile_col(schema, col, schema.is_index and ix_rec or nil,
+				f = db:col_decoder(schema, col, schema.is_index and ix_rec or nil,
 					pk_rec, get_base_val)
 				decoders[col] = f
 			end
