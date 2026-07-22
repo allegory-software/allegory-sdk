@@ -69,7 +69,7 @@ Use Lua's naming conventions `foo_bar` and `foobar` instead of `FooBar` or `fooB
   * `s` is for strings
   * `c` is for 1-char strings
   * `f`, `fn`, `func` are for functions
-  * `f` is also for files
+  * `f` is also for files and fields
   * `o` is for objects
   * `ret` is for return values
   * `ok, ret` is what you get out of `pcall`
