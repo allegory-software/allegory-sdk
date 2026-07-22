@@ -6,26 +6,42 @@
 API
 	db:scan(table, path) -> scan
 	scan.reset(params...)
-	scan.next() -> true | nil
-	scan.next_key() -> true | nil
-	scan.compile_col(col) -> get() -> value
+	scan.advance([by_key]) -> true | nil
+	scan.col_decoder(col) -> get() -> value
 	scan.explain() -> table
 	scan.close()
-	scan.in_('col', values) -> iter
-	scan.not_in('col', values) -> iter
+	scan:each(params...) -> iter() -> true
+	scan:in_('col', values) -> scan
+	scan:not_in('col', values) -> scan
+	scan:filter(accept) -> scan
+	scan:join(spec) -> scan
+	scan:left_join(spec) -> scan
+	scan:fk_join('table.fk_cols') -> scan
+	scan:fk_left_join('table.fk_cols') -> scan
+	scan.col_decoder(table, col) -> get() -> value
 
-	`in_()` removes duplicate values and concatenates scans in list order. It
-	reports no order. Its reset() omits the selected equality argument.
-	`not_in()` preserves scan order. Its next_key() tests only the row that
-	scan.next_key() returns. `null` in the list excludes a DB null value.
+RULES
+	- in_() | not_in() | filter() | join() | left_join() -> same scan
+	- fk_join() | fk_left_join() -> same scan
+	- in_(col, values) -> distinct values in list order; order = {}
+	- in_.reset(params...) -> params omit the selected equality arg
+	- not_in(col, values) -> scan order preserved
+	- not_in(...null...) -> DB null excluded
+	- not_in(...).advance(true) -> only returned row tested
+	- join spec = 'table[@alias].col[,col...]=table.col[,col...]'
+	- join cols -> exact table PK or index
+	- table_name right of '=' -> table already in scan
+	- fk_join spec = 'table.fk_cols'; fk_cols = 'col1,col2'
+	- missing left-join row -> nil from each joined table getter
 
-	path = 'eq_col, range_col [,) asc, order_col asc'
-
-	The scanner assigns equality arguments to bare leading fields and lower and
-	upper arguments to `[,)`; `[` or `]` includes that bound. Pass nil for an
-	absent range bound. `^` takes one string-prefix argument. The scanner uses
-	directions to select a key and cursor direction; it does not sort. An empty
-	path scans the table PK forward.
+PATH
+	path = 'eq_col, range_col [:) asc, order_col asc'
+	- bare leading field -> one equality arg
+	- '[:)' -> lower arg, upper arg; nil -> no bound
+	- '[' | ']' -> inclusive bound
+	- '^' -> one string-prefix arg
+	- direction -> key selection + cursor direction; no sorting
+	- '' -> table PK, forward
 
 ]]
 
@@ -38,26 +54,312 @@ local Db = mdbx_db
 local encode_key_prefix = mdbx_encode_key_prefix
 local min, memcmp = min, memcmp
 
---DECLARATION ----------------------------------------------------------------
+--TABLE API ------------------------------------------------------------------
 
--- construct a one-table scan iterator.
+-- returns cursor operations that share key_rec and pk_rec.
+local function table_api(db, key_schema)
+	local table_schema = key_schema.val_schema or key_schema
+	local is_index = key_schema.is_index or false
+	local key_rec = MDBX_val()
+	local pk_rec = is_index and MDBX_val() or key_rec
+	local val_rec = MDBX_val()
+	local cur, base_cur, base_seeked
+
+	-- updates key_rec and pk_rec after each cursor move.
+	local function move(op)
+		if cur and cur:closed() then cur = nil end
+		if not cur then cur = db:cursor(key_schema.name) end
+		local val = is_index and pk_rec or val_rec
+		local ok = cur:move_raw_into(op, key_rec, val)
+		if ok then base_seeked = false end
+		return ok
+	end
+
+	-- seeks the base row only when the index cannot supply the value.
+	local function base_value()
+		if not is_index then return val_rec.data, val_rec.size end
+		if not base_seeked then
+			if base_cur and base_cur:closed() then base_cur = nil end
+			if not base_cur then
+				base_cur = db:cursor(table_schema.name)
+			end
+			local ok = base_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec,
+				val_rec)
+			assert(ok, 'scan: missing PK')
+			base_seeked = true
+		end
+		return val_rec.data, val_rec.size
+	end
+
+	local function col_decoder(col)
+		assertf(table_schema.fields[col], 'scan: bad field: %s', col)
+		return db:col_decoder(key_schema, col,
+			is_index and key_rec or nil, pk_rec, base_value)
+	end
+
+	local function key_encoder(cols, output_schema)
+		return db:key_encoder(key_schema, cols, output_schema,
+			is_index and key_rec or nil, pk_rec, base_value)
+	end
+
+	-- closes both cursors and clears the saved base-row position.
+	local function close()
+		if cur then cur:close(); cur = nil end
+		if base_cur then base_cur:close(); base_cur = nil end
+		base_seeked = false
+	end
+	return move, key_rec, pk_rec, col_decoder, key_encoder, close
+end
+
+--JOINS ---------------------------------------------------------------------
+
+-- adds key_schema's table to outer_scan.
+local function add_join_table(db, outer_scan, key_schema, get_key, table_name,
+	kind, fk_name)
+	local table_schema = key_schema.val_schema or key_schema
+	local left = kind == 'left_join' or kind == 'fk_left_join'
+	local op = fk_name and 'fk_join' or 'join'
+	local find_outer_table = outer_scan._find_table
+	assertf(not find_outer_table(table_name),
+		'%s: table name already used: %s', op, table_name)
+
+	--JOIN KEY ----------------------------------------------------------------
+
+	local move, key_rec, _, table_col_decoder,
+		table_key_encoder, close_key = table_api(db, key_schema)
+	local row_found
+
+	-- left join decoders return nil and key encoders return nothing when
+	-- no row was found.
+	local function col_decoder(col)
+		local get = table_col_decoder(col)
+		if not left then return get end
+		return function() return row_found and get() or nil end
+	end
+
+	local function key_encoder(cols, output_schema)
+		local get = table_key_encoder(cols, output_schema)
+		if not left then return get end
+		return function()
+			if row_found then return get() end
+		end
+	end
+
+	local function find_table(name)
+		if name == table_name then
+			return table_schema, col_decoder, key_encoder
+		end
+		return find_outer_table(name)
+	end
+
+	local function join_col_decoder(name, col)
+		local _, col_decoder = find_table(name)
+		assertf(col_decoder, '%s: no table: %s', op, name)
+		return col_decoder(col)
+	end
+
+	--ITERATION ---------------------------------------------------------------
+
+	local outer_reset = outer_scan.reset
+	local outer_advance = outer_scan.advance
+
+	local function reset_join(...)
+		outer_reset(...)
+		row_found = false
+	end
+
+	-- returns all matching index rows before advancing outer_scan.
+	local function advance_join(by_key)
+		-- advance_join() cannot select one key from multiple cursors.
+		assertf(not by_key, '%s: no key iteration', op)
+		if key_schema.is_index and row_found
+			and move(C.MDBX_NEXT_DUP)
+		then
+			return true
+		end
+		row_found = false
+		while outer_advance() do
+			local ok, p, p_sz = get_key()
+			if ok then
+				key_rec.data = p
+				key_rec.size = p_sz
+				if move(C.MDBX_SET_KEY) then
+					row_found = true
+					return true
+				end
+			end
+			if left then return true end
+		end
+	end
+
+	local outer_close = outer_scan.close
+
+	local function close_join()
+		outer_close()
+		close_key()
+		row_found = false
+	end
+
+	local outer_explain = outer_scan.explain
+
+	local function explain_join() -- -> {kind, outer, table, key [, fk]}
+		local t = {
+			kind = kind,
+			outer = outer_explain(),
+			table = table_schema.name,
+			key = key_schema.name,
+		}
+		if fk_name then t.fk = fk_name end
+		return t
+	end
+
+	outer_scan.reset = reset_join
+	outer_scan.advance = advance_join
+	outer_scan._find_table = find_table
+	outer_scan.col_decoder = join_col_decoder
+	outer_scan.explain = explain_join
+	outer_scan.close = close_join
+	outer_scan.not_in = nil
+	return outer_scan
+end
+
+-- parses the spec and requires an exact physical key.
+local function add_join(db, outer_scan, spec, kind)
+
+	--SPEC --------------------------------------------------------------------
+
+	local table_spec, table_cols_spec, outer_table_name,
+		outer_cols_spec = spec:match(
+		'^%s*(.-)%s*%.%s*(.-)%s*=%s*(.-)%s*%.%s*(.-)%s*$')
+	assert(table_spec and table_cols_spec ~= ''
+		and outer_table_name ~= '' and outer_cols_spec ~= '',
+		'join: spec')
+	local schema_name, table_name =
+		table_spec:match'^(.-)%s*@%s*(.*)$'
+	if not schema_name then
+		schema_name = table_spec
+		table_name = schema_name
+	end
+	assert(schema_name ~= '' and table_name ~= '', 'join: table')
+	local table_schema = assertf(db:table_schema(schema_name),
+		'join: no schema: %s', schema_name)
+	assert(not table_schema.is_index, 'join: base table')
+
+	local find_outer_table = outer_scan._find_table
+	local outer_schema, _, outer_key_encoder =
+		find_outer_table(outer_table_name)
+	assertf(outer_schema, 'join: no table: %s', outer_table_name)
+	local table_cols, outer_cols = {}, {}
+	for part in split(table_cols_spec, ',', 1, true) do
+		local table_col = part:match'^%s*(.-)%s*$'
+		assertf(table_schema.fields[table_col],
+			'join: bad field: %s.%s', schema_name, table_col)
+		table_cols[#table_cols + 1] = table_col
+	end
+	for part in split(outer_cols_spec, ',', 1, true) do
+		local outer_col = part:match'^%s*(.-)%s*$'
+		assertf(outer_schema.fields[outer_col],
+			'join: bad field: %s.%s', outer_table_name, outer_col)
+		outer_cols[#outer_cols + 1] = outer_col
+	end
+	assert(#table_cols == #outer_cols, 'join: cols')
+
+	--KEY ---------------------------------------------------------------------
+
+	local key_schema
+	for i = 0, #(table_schema.indexes or empty) do
+		local table_key_schema = i == 0 and table_schema
+			or table_schema.indexes[i]
+		if #table_key_schema.key_fields == #table_cols then
+			key_schema = table_key_schema
+			for j, col in ipairs(table_cols) do
+				if table_key_schema.key_fields[j].col ~= col then
+					key_schema = nil
+					break
+				end
+			end
+			if key_schema then break end
+		end
+	end
+	assertf(key_schema, 'join: no key: %s(%s)',
+		schema_name, cat(table_cols, ', '))
+
+	-- both columns must allow the same values and equality rules.
+	for i, outer_col in ipairs(outer_cols) do
+		local outer_field = outer_schema.fields[outer_col]
+		local key_field = key_schema.key_fields[i]
+		assertf(outer_field.mdbx_type == key_field.mdbx_type
+			and outer_field.maxlen == key_field.maxlen
+			and outer_field.padded == key_field.padded
+			and outer_field.nozero == key_field.nozero
+			and outer_field.mdbx_collation == key_field.mdbx_collation,
+			'join: incompatible: %s.%s = %s.%s',
+			schema_name, table_cols[i], outer_table_name, outer_col)
+	end
+
+	local get_key = outer_key_encoder(outer_cols, key_schema)
+	return add_join_table(db, outer_scan, key_schema, get_key, table_name, kind)
+end
+
+-- resolves either FK direction before adding the joined table.
+local function add_fk_join(db, outer_scan, spec, kind)
+	local schema_name, fk_cols = spec:match'^%s*(.-)%s*%.%s*(.-)%s*$'
+	assertf(schema_name and schema_name ~= '' and fk_cols ~= '',
+		'fk_join: spec: %s', spec)
+	local table_schema = assertf(db:table_schema(schema_name),
+		'fk_join: no schema: %s', schema_name)
+	assert(not table_schema.is_index, 'fk_join: base table')
+	local find_outer_table = outer_scan._find_table
+	local fk, get_key, table_name, key_schema
+
+	-- table_schema.fks[fk_cols] -> new child table.
+	local child_fk = table_schema.fks and table_schema.fks[fk_cols]
+	if child_fk then
+		local outer_parent_schema, _, outer_parent_key_encoder =
+			find_outer_table(child_fk.ref_table)
+		if outer_parent_schema then
+			fk = child_fk
+			get_key = outer_parent_key_encoder(
+				outer_parent_schema.key_cols, child_fk.index)
+			table_name = schema_name
+			key_schema = child_fk.index
+		end
+	end
+	-- table_schema.ref_fks named fk_cols -> new parent table.
+	for _, parent_fk in pairs(table_schema.ref_fks or empty) do
+		if parent_fk.name == fk_cols then
+			local outer_child_schema, _, outer_child_key_encoder =
+				find_outer_table(parent_fk.table)
+			if outer_child_schema then
+				assertf(not fk, 'fk_join: ambiguous FK: %s', fk_cols)
+				fk = parent_fk
+				get_key = outer_child_key_encoder(
+					parent_fk.cols, table_schema)
+				table_name = schema_name
+				key_schema = table_schema
+			end
+		end
+	end
+	assertf(fk, 'fk_join: no FK: %s', fk_cols)
+	return add_join_table(db, outer_scan, key_schema, get_key, table_name, kind,
+		fk.name)
+end
+
+--PUBLIC API -----------------------------------------------------------------
+
 function Db:scan(table_name, path)
 	local db = self
 	local scan = {}
-
-	--PATH --------------------------------------------------------------------
 	local base_schema = assertf(db:table_schema(table_name),
 		'scan: no schema: %s', table_name)
-	assert(not base_schema.is_index,
-		'scan: base table')
+	assert(not base_schema.is_index, 'scan: not base table')
 
-	-- parse the access path that one key must cover.
-	local eq, eq_n = {}, 0
-	local bound
-	local nparams = 0
-	local terms = {}
-	-- protect the range comma before splitting path terms.
-	path = path:gsub('([%[(])%s*,%s*([%])])', '%1;%2')
+	--PATH --------------------------------------------------------------------
+
+	-- path -> equality + bound + order terms.
+	local eq_param_indexes, eq_n = {}, 0
+	local lower_mark, upper_mark, starts
+	local path_terms = {}
 	for part in path:gmatch'[^,]+' do
 		local col, suffix = part:match'^%s*([%a_][%w_]*)%s*(.-)%s*$'
 		assertf(col, 'scan: path: %s', part)
@@ -72,48 +374,37 @@ function Db:scan(table_name, path)
 				suffix, dir = body, word
 			end
 		end
-		local open, close = suffix:match'^([%[(]);([%])])$'
-		local starts = suffix == '^'
-		assert(suffix == '' or starts or open, 'scan: path')
-		local term = {col = col, dir = dir}
+		local open, close = suffix:match'^([%[(]):([%])])$'
+		local starts_bound = suffix == '^'
+		assert(suffix == '' or starts_bound or open, 'scan: path')
 		assertf(base_schema.fields[col], 'scan: bad field: %s', col)
-		terms[#terms + 1] = term
-		local i = #terms
-		if open then
-			-- assign lower and upper argument positions in path order.
-			nparams = nparams + 1
-			term[open == '[' and 'ge' or 'gt'] = nparams
-			nparams = nparams + 1
-			term[close == ']' and 'le' or 'lt'] = nparams
-		elseif starts then
-			nparams = nparams + 1
-			term.starts = nparams
-		end
+		path_terms[#path_terms + 1] = {col = col, dir = dir}
+		local i = #path_terms
 		if suffix == '' and not dir then
-			-- assign one equality argument to each bare leading field.
-			assert(i == eq_n + 1 and not bound, 'scan: eq first')
-			nparams = nparams + 1
-			eq[col] = nparams
+			-- invariant: equality fields precede bounds and order fields.
+			assert(i == eq_n + 1 and not lower_mark and not starts,
+				'scan: eq first')
 			eq_n = eq_n + 1
-		elseif open or starts then
-			-- one bound must follow the equality prefix directly.
-			assert(i == eq_n + 1 and not bound,
+			eq_param_indexes[col] = eq_n
+		elseif open or starts_bound then
+			-- invariant: one bound follows the equality fields.
+			assert(i == eq_n + 1 and not lower_mark and not starts,
 				'scan: bound first')
-			if starts then
+			if starts_bound then
 				local f = base_schema.fields[col]
-				-- partial encoding requires an unpadded variable field.
+				-- starts field -> variable + unpadded.
 				assertf(f.maxlen and not f.padded,
 					'scan: starts field: %s', col)
 			end
-			bound = term
+			lower_mark, upper_mark, starts = open, close, starts_bound
 		end
 	end
-	path = terms
+	local nparams = eq_n + (lower_mark and 2 or starts and 1 or 0)
 
 	--KEY SELECTION -----------------------------------------------------------
 
-	-- return fields and direction when this key matches the complete path.
-	local function select_key(schema)
+	-- matches the requested path against one physical key.
+	local function key_fields_for_path(schema)
 		local fields = {}
 		for _, f in ipairs(schema.key_fields) do
 			fields[#fields + 1] = f
@@ -126,12 +417,11 @@ function Db:scan(table_name, path)
 			end
 		end
 		local backwards
-		for i, term in ipairs(path) do
+		for i, term in ipairs(path_terms) do
 			local f = fields[i]
 			if not f or f.col ~= term.col then return end
 			if term.dir then
-				local is_backwards = not not f.descending
-					~= (term.dir == 'desc')
+				local is_backwards = not not f.descending ~= (term.dir == 'desc')
 				if backwards == nil then
 					backwards = is_backwards
 				elseif backwards ~= is_backwards then
@@ -144,16 +434,16 @@ function Db:scan(table_name, path)
 
 	local key_schema, key_fields, reverse
 
-	-- scan table and indexes in declaration order.
+	-- table + indexes -> first key that covers path.
 	for i = 0, #(base_schema.indexes or empty) do
 		local schema = i == 0 and base_schema or base_schema.indexes[i]
-		key_fields, reverse = select_key(schema)
+		key_fields, reverse = key_fields_for_path(schema)
 		if key_fields then key_schema = schema; break end
 	end
 
 	if not key_schema then
 		local needed = {}
-		for i, term in ipairs(path) do
+		for i, term in ipairs(path_terms) do
 			needed[i] = term.col..(term.dir and ' '..term.dir or '')
 		end
 		assertf(false, 'scan: no key: %s', cat(needed, ', '))
@@ -162,92 +452,58 @@ function Db:scan(table_name, path)
 	local pk_depth = 0
 	if key_schema.is_index and key_depth == #key_schema.key_fields then
 		for _, f in ipairs(base_schema.key_fields) do
-			if not eq[f.col] then break end
+			if not eq_param_indexes[f.col] then break end
 			pk_depth = pk_depth + 1
 		end
 	end
-	local varying_field = bound and key_fields[eq_n + 1] or nil
-	local varying_part = bound and
-		(eq_n < #key_schema.key_fields and 'key' or 'pk') or nil
+	local has_bound = lower_mark or starts
+	local varying_field = has_bound and key_fields[eq_n + 1] or nil
 	local is_index = key_schema.is_index or false
-	local pk_suffix = is_index
-		and (pk_depth > 0 or varying_part == 'pk') or false
+	local pk_suffix = is_index and (pk_depth > 0
+		or (has_bound and eq_n >= #key_schema.key_fields)) or false
 
 	--BOUND ORDER -------------------------------------------------------------
 
-	local starts_param = bound and bound.starts
-	local starts = starts_param ~= nil
-	local range = bound and not starts
 	local start_op, start_param, stop_op, stop_param
-	if range then
+	if lower_mark then
 		local f = varying_field
-		-- convert logical bounds to the byte order of this key field.
+		local lower_param, upper_param = eq_n + 1, eq_n + 2
+		-- logical bounds -> encoded start + stop order.
 		if f.descending then
-			start_op = bound.lt and 'gt' or bound.le and 'ge' or nil
-			start_param = bound.lt or bound.le
-			stop_op = bound.gt and 'lt' or bound.ge and 'le' or nil
-			stop_param = bound.gt or bound.ge
+			start_op = upper_mark == ')' and 'gt' or 'ge'
+			stop_op  = lower_mark == '(' and 'lt' or 'le'
+			start_param = upper_param
+			stop_param  = lower_param
 		else
-			start_op = bound.gt and 'gt' or bound.ge and 'ge' or nil
-			start_param = bound.gt or bound.ge
-			stop_op = bound.lt and 'lt' or bound.le and 'le' or nil
-			stop_param = bound.lt or bound.le
+			start_op = lower_mark == '(' and 'gt' or 'ge'
+			stop_op  = upper_mark == ')' and 'lt' or 'le'
+			start_param = lower_param
+			stop_param  = upper_param
 		end
 	end
 
-	--CURSORS -----------------------------------------------------------------
+	local scan_move, key_rec, pk_rec, col_decoder, key_encoder,
+		close_scan = table_api(db, key_schema)
 
-	local key_rec = MDBX_val()
-	local pk_rec = is_index and MDBX_val() or key_rec
-	local val_rec = MDBX_val()
-	local cur, base_cur, base_seeked
-
-	-- open the cursor as needed and update its current key and PK records.
-	local function scan_move(op)
-		if cur and cur:closed() then cur = nil end
-		if not cur then cur = db:cursor(key_schema.name) end
-		local val = is_index and pk_rec or val_rec
-		return cur:move_raw_into(op, key_rec, val)
-	end
-
-	-- return the base record for a compiled value-field reader.
-	local function base_value()
-		if not is_index then return val_rec.data, val_rec.size end
-		if not base_seeked then
-			if base_cur and base_cur:closed() then base_cur = nil end
-			if not base_cur then
-				base_cur = db:cursor(base_schema.name)
-			end
-			local ok = base_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec,
-				val_rec)
-			assert(ok, 'scan: missing PK')
-			base_seeked = true
+	local function find_table(table_name)
+		if table_name == base_schema.name then
+			return base_schema, col_decoder, key_encoder
 		end
-		return val_rec.data, val_rec.size
 	end
-
-	-- compile one reader against the iterator's current records.
-	local function compile_col(col)
-		assertf(base_schema.fields[col],
-			'scan: bad field: %s', col)
-		return db:compile_col(key_schema, col,
-			is_index and key_rec or nil, pk_rec, base_value)
-	end
-
-	scan.compile_col = compile_col
+	scan.col_decoder = col_decoder
+	scan._find_table = find_table
 
 	--BOUNDS ------------------------------------------------------------------
 
-	-- compare two encoded key prefixes in MDBX byte order.
-	local function key_cmp(a, an, b, bn)
-		local c = memcmp(a, b, min(an, bn))
+	local function key_cmp(a, a_sz, b, b_sz) -- -> -1 | 0 | 1
+		local c = memcmp(a, b, min(a_sz, b_sz))
 		if c ~= 0 then return c end
-		if an < bn then return -1 end
-		if an > bn then return 1 end
+		if a_sz < b_sz then return -1 end
+		if a_sz > b_sz then return 1 end
 		return 0
 	end
 
-	-- compute the exclusive end of each string that starts with prefix.
+	-- increments a byte prefix to make an exclusive upper bound.
 	local function increment_prefix(prefix, n)
 		local i = n - 1
 		while i >= 0 and prefix[i] == 255 do i = i - 1 end
@@ -259,146 +515,143 @@ function Db:scan(table_name, path)
 	local bound_schema = pk_suffix and base_schema or key_schema
 	local bound_depth = pk_suffix and pk_depth or key_depth
 	local bound_rec = pk_suffix and pk_rec or key_rec
-	local pk_fixedsize = pk_suffix and key_schema.dup_fixedsize or nil
+	local pk_fixed_sz = pk_suffix and key_schema.dup_fixedsize or nil
 
-	local start = u8a(MDBX_MAX_KEY_SIZE)
-	local stop = u8a(MDBX_MAX_KEY_SIZE)
+	local start_key = u8a(MDBX_MAX_KEY_SIZE)
+	local stop_key = u8a(MDBX_MAX_KEY_SIZE)
 	local bound_values = {}
-	local start_n, stop_n, empty_scan, started
+	local start_sz, stop_sz, empty_scan, started
 	local index_key = pk_suffix and u8a(MDBX_MAX_KEY_SIZE) or nil
-	local index_key_n
+	local index_key_sz
 
-	-- encode the first n bound fields into one persistent buffer.
-	local function encode_values(out, n, partial)
+	local function encode_values(out, n, partial) -- -> sz
 		return encode_key_prefix(db, bound_schema, 'scan', out,
 			MDBX_MAX_KEY_SIZE, n, partial or false,
 			unpack(bound_values, 1, n))
 	end
 
-	-- bind parameters and compute the inclusive start and exclusive stop.
-	local function reset(...)
+	-- encodes scan params into the start and stop keys.
+	local function base_reset(...)
 		assert(select('#', ...) == nparams, 'scan: params')
 		if pk_suffix then
 			for i = 1, key_depth do
 				bound_values[i] = select(i, ...)
 			end
-			index_key_n = encode_key_prefix(db, key_schema, 'scan',
+			index_key_sz = encode_key_prefix(db, key_schema, 'scan',
 				index_key, MDBX_MAX_KEY_SIZE, key_depth, false,
 				unpack(bound_values, 1, key_depth))
 			for i = 1, bound_depth do
 				local col = bound_schema.key_fields[i].col
-				bound_values[i] = select(eq[col], ...)
+				bound_values[i] = select(eq_param_indexes[col], ...)
 			end
 		else
 			for i = 1, bound_depth do
 				bound_values[i] = select(i, ...)
 			end
 		end
-		start_n = nil
-		stop_n = nil
+		start_sz = nil
+		stop_sz = nil
 		empty_scan = false
 		if starts then
-			local value = select(starts_param, ...)
-			-- starts has no meaning for DB NULL.
+			local value = select(eq_n + 1, ...)
+			-- starts(nil | null) -> invalid.
 			assert(value ~= nil and value ~= null, 'scan: starts')
 			bound_values[bound_depth + 1] = value
-			start_n = encode_values(start, bound_depth + 1, true)
-			copy(stop, start, start_n)
-			stop_n = increment_prefix(stop, start_n)
+			start_sz = encode_values(start_key, bound_depth + 1, true)
+			copy(stop_key, start_key, start_sz)
+			stop_sz = increment_prefix(stop_key, start_sz)
 		else
 			local start_is_prefix
 			local value = start_op and select(start_param, ...)
 			if start_op and value ~= nil then
 				bound_values[bound_depth + 1] = value
-				start_n = encode_values(start, bound_depth + 1)
+				start_sz = encode_values(start_key, bound_depth + 1)
 				if start_op == 'gt' then
-					start_n = increment_prefix(start, start_n)
-					if not start_n then empty_scan = true end
+					start_sz = increment_prefix(start_key, start_sz)
+					if not start_sz then empty_scan = true end
 				end
 			elseif bound_depth > 0 then
-				start_n = encode_values(start, bound_depth)
+				start_sz = encode_values(start_key, bound_depth)
 				start_is_prefix = true
 			end
 
 			value = stop_op and select(stop_param, ...)
 			if stop_op and value ~= nil then
 				bound_values[bound_depth + 1] = value
-				stop_n = encode_values(stop, bound_depth + 1)
+				stop_sz = encode_values(stop_key, bound_depth + 1)
 				if stop_op == 'le' then
-					stop_n = increment_prefix(stop, stop_n)
+					stop_sz = increment_prefix(stop_key, stop_sz)
 				end
 			elseif bound_depth > 0 then
 				if start_is_prefix then
-					copy(stop, start, start_n)
-					stop_n = start_n
+					copy(stop_key, start_key, start_sz)
+					stop_sz = start_sz
 				else
-					stop_n = encode_values(stop, bound_depth)
+					stop_sz = encode_values(stop_key, bound_depth)
 				end
-				stop_n = increment_prefix(stop, stop_n)
+				stop_sz = increment_prefix(stop_key, stop_sz)
 			end
 		end
-		-- pad each PK bound because MDBX requires full DUPFIXED values.
-		if pk_fixedsize then
-			if start_n and start_n < pk_fixedsize then
-				fill(start + start_n, pk_fixedsize - start_n)
-				start_n = pk_fixedsize
+		-- DUPFIXED PK bound -> full fixed-size value.
+		if pk_fixed_sz then
+			if start_sz and start_sz < pk_fixed_sz then
+				fill(start_key + start_sz, pk_fixed_sz - start_sz)
+				start_sz = pk_fixed_sz
 			end
-			if stop_n and stop_n < pk_fixedsize then
-				fill(stop + stop_n, pk_fixedsize - stop_n)
-				stop_n = pk_fixedsize
+			if stop_sz and stop_sz < pk_fixed_sz then
+				fill(stop_key + stop_sz, pk_fixed_sz - stop_sz)
+				stop_sz = pk_fixed_sz
 			end
 		end
-		if start_n and stop_n
-			and key_cmp(start, start_n, stop, stop_n) >= 0
+		if start_sz and stop_sz
+			and key_cmp(start_key, start_sz, stop_key, stop_sz) >= 0
 		then
 			empty_scan = true
 		end
 		started = false
-		base_seeked = false
 	end
-
-	scan.reset = reset
+	scan.reset = base_reset
 
 	--ITERATION ---------------------------------------------------------------
+
 	local dup_op = reverse and C.MDBX_PREV_DUP or C.MDBX_NEXT_DUP
 	local nodup_op = reverse and C.MDBX_PREV_NODUP or C.MDBX_NEXT_NODUP
 
-	-- position at the first key record in the requested cursor direction.
-	local function first_key_record()
+	local function first_key_record() -- -> true | false
 		if empty_scan then return false end
 		if not reverse then
-			if start_n then
-				key_rec.data = start
-				key_rec.size = start_n
+			if start_sz then
+				key_rec.data = start_key
+				key_rec.size = start_sz
 				return scan_move(C.MDBX_SET_RANGE)
 			end
 			return scan_move(C.MDBX_FIRST)
 		end
-		if not stop_n then return scan_move(C.MDBX_LAST) end
-		key_rec.data = stop
-		key_rec.size = stop_n
+		if not stop_sz then return scan_move(C.MDBX_LAST) end
+		key_rec.data = stop_key
+		key_rec.size = stop_sz
 		if scan_move(C.MDBX_SET_RANGE) then
 			return scan_move(C.MDBX_PREV)
 		end
 		return scan_move(C.MDBX_LAST)
 	end
 
-	-- position at the first matching PK under one exact index key.
+	-- positions an exact index key at the first PK inside the bounds.
 	local function first_pk_record()
 		if empty_scan then return false end
 		key_rec.data = index_key
-		key_rec.size = index_key_n
+		key_rec.size = index_key_sz
 		if not reverse then
-			if start_n then
-				pk_rec.data = start
-				pk_rec.size = start_n
+			if start_sz then
+				pk_rec.data = start_key
+				pk_rec.size = start_sz
 				return scan_move(C.MDBX_GET_BOTH_RANGE)
 			end
 			return scan_move(C.MDBX_SET_KEY)
 		end
-		if stop_n then
-			pk_rec.data = stop
-			pk_rec.size = stop_n
+		if stop_sz then
+			pk_rec.data = stop_key
+			pk_rec.size = stop_sz
 			return scan_move(
 				C.MDBX_TO_EXACT_KEY_VALUE_LESSER_THAN)
 		end
@@ -406,34 +659,35 @@ function Db:scan(table_name, path)
 		return scan_move(C.MDBX_LAST_DUP)
 	end
 
-	-- select cursor operations once so every scan uses one iterator path.
+	-- scan flags -> fixed cursor ops for base_advance().
 	local first_record = pk_suffix and first_pk_record or first_key_record
 	local next_record_op = is_index and dup_op or nodup_op
 	local next_nodup_op = is_index and not pk_suffix and nodup_op or nil
 	local next_key_op = not pk_suffix and nodup_op or nil
 
-	-- accept the current cursor record when it is inside the remaining bound.
+	-- accepts a cursor result only while it remains inside the bounds.
 	local function accept_current_record(ok)
 		if not ok then return end
 		if reverse then
-			if start_n and key_cmp(bound_rec.data, bound_rec.size,
-				start, start_n) < 0
+			if start_sz and key_cmp(bound_rec.data, bound_rec.size,
+				start_key, start_sz) < 0
 			then return end
-		elseif stop_n and key_cmp(bound_rec.data, bound_rec.size,
-			stop, stop_n) >= 0
+		elseif stop_sz and key_cmp(bound_rec.data, bound_rec.size,
+			stop_key, stop_sz) >= 0
 		then
 			return
 		end
-		base_seeked = false
 		return true
 	end
 
-	-- advance to the next base-table record in the scan.
-	local function next_record()
+	-- by_key selects the first row of the next physical key.
+	local function base_advance(by_key)
 		local ok
 		if not started then
 			started = true
 			ok = first_record()
+		elseif by_key then
+			if next_key_op then ok = scan_move(next_key_op) end
 		else
 			ok = scan_move(next_record_op)
 			if not ok and next_nodup_op then
@@ -442,26 +696,11 @@ function Db:scan(table_name, path)
 		end
 		return accept_current_record(ok)
 	end
-
-	-- advance to the first row in the next distinct physical key.
-	local function next_key()
-		local ok
-		if not started then
-			started = true
-			ok = first_record()
-		elseif next_key_op then
-			ok = scan_move(next_key_op)
-		end
-		return accept_current_record(ok)
-	end
-
-	scan.next = next_record
-	scan.next_key = next_key
+	scan.advance = base_advance
 
 	--METADATA AND LIFETIME ---------------------------------------------------
 
-	-- describe the selected key and iteration order.
-	local function explain()
+	local function base_explain() -- -> {table, key, order, reverse}
 		local actual_order = {}
 		for i = eq_n + 1, #key_fields do
 			local f = key_fields[i]
@@ -476,29 +715,44 @@ function Db:scan(table_name, path)
 			reverse = reverse,
 		}
 	end
+	scan.explain = base_explain
 
-	scan.explain = explain
-
-	-- release both cursors owned by this scan.
-	local function close()
-		if cur then cur:close(); cur = nil end
-		if base_cur then base_cur:close(); base_cur = nil end
+	-- closes both cursors and clears the scan position.
+	local function base_close()
+		close_scan()
 		started = false
-		base_seeked = false
 	end
+	scan.close = base_close
 
-	scan.close = close
+	--FILTERS -----------------------------------------------------------------
 
-	--VALUE SET WRAPPERS ------------------------------------------------------
+	-- replaces advance() so that it skips rejected rows.
+	local function filter(self, accept)
+		local advance = self.advance
+		self.advance = function(by_key)
+			while advance(by_key) do
+				if accept() then return true end
+			end
+		end
+		self.in_ = nil
+		return self
+	end
+	scan.filter = filter
 
-	-- repeat this scan for distinct values of one equality field.
-	local function in_values(col, values)
-		local param_i = assertf(eq[col], 'scan: in field: %s', col)
-		local value_i, branch_open
+	--VALUE SETS --------------------------------------------------------------
+
+	-- runs one scan for each distinct value, in list order.
+	local function in_(self, col, values)
+		local param_i = assertf(eq_param_indexes[col],
+			'scan: in field: %s', col)
+		-- save the methods that in_() replaces.
+		local advance, reset, explain, close =
+			self.advance, self.reset, self.explain, self.close
+		local value_i
 		local seen = {}
 		local params = {}
 
-		-- insert each list value at the selected equality argument.
+		-- params omit the equality arg that in_ supplies.
 		local function reset_in(...)
 			assert(select('#', ...) == nparams - 1, 'scan: params')
 			local j = 1
@@ -509,34 +763,25 @@ function Db:scan(table_name, path)
 				end
 			end
 			clear(seen)
-			value_i, branch_open = 0, false
+			value_i = 0
 		end
 
-		-- drain one scan before resetting it for the next value.
-		local function advance_in(advance)
-			while true do
-				if branch_open and advance() then return true end
-				branch_open = false
+		local function advance_in(by_key)
+			while value_i <= #values do
+				if value_i > 0 and advance(by_key) then return true end
 				local value
-					repeat
-						value_i = value_i + 1
-						if value_i > #values then return end
-						value = values[value_i]
+				repeat
+					value_i = value_i + 1
+					if value_i > #values then return end
+					value = values[value_i]
 				until not seen[value]
 				seen[value] = true
 				params[param_i] = value
 				reset(unpack(params, 1, nparams))
-				branch_open = true
 			end
 		end
 
-		-- advance through every row from each distinct parameter value.
-		local function next_in() return advance_in(next_record) end
-
-		-- advance through distinct keys from each parameter value.
-		local function next_key_in() return advance_in(next_key) end
-
-		-- report no order because advance_in concatenates separate scans.
+		-- separate scans do not preserve one physical order.
 		local function explain_in()
 			local e = explain()
 			e.order = {}
@@ -544,49 +789,60 @@ function Db:scan(table_name, path)
 			return e
 		end
 
-		-- release the cursors and bound arguments.
 		local function close_in()
 			close()
 			clear(params)
-			branch_open = false
+			value_i = 0
 		end
 
-		return {
-			reset = reset_in, next = next_in, next_key = next_key_in,
-			compile_col = compile_col, explain = explain_in, close = close_in,
-		}
+		self.reset = reset_in
+		self.advance = advance_in
+		self.explain = explain_in
+		self.close = close_in
+		self.in_ = nil
+		return self
 	end
+	scan.in_ = in_
 
-	scan.in_ = in_values
-
-	-- skip rows whose compiled column value occurs in one list.
-	local function not_in_values(col, values)
-		local get = compile_col(col)
+	-- filters decoded values through one exclusion hash.
+	local function not_in(self, col, values)
+		local get = self.col_decoder(col)
 		local excluded = {}
 		for _, value in ipairs(values) do excluded[value] = true end
 
-		-- advance until the decoded column value is outside the hash.
-		local function advance_not_in(advance)
-			while advance() do
-				local value = get()
-				value = value == nil and null or value
-				if not excluded[value] then return true end
-			end
-		end
-
-		-- apply the hash to every row.
-		local function next_not_in() return advance_not_in(next_record) end
-
-		-- apply the hash to each representative row from next_key().
-		local function next_key_not_in() return advance_not_in(next_key) end
-
-		return {
-			reset = reset, next = next_not_in,
-			next_key = next_key_not_in, compile_col = compile_col,
-			explain = explain, close = close,
-		}
+		return filter(self, function()
+			local value = get()
+			value = value == nil and null or value
+			return not excluded[value]
+		end)
 	end
+	scan.not_in = not_in
 
-	scan.not_in = not_in_values
+	local function each(self, ...)
+		self.reset(...)
+		return self.advance
+	end
+	scan.each = each
+
+	local function join(self, spec)
+		return add_join(db, self, spec, 'join')
+	end
+	scan.join = join
+
+	local function left_join(self, spec)
+		return add_join(db, self, spec, 'left_join')
+	end
+	scan.left_join = left_join
+
+	local function fk_join(self, spec)
+		return add_fk_join(db, self, spec, 'fk_join')
+	end
+	scan.fk_join = fk_join
+
+	local function fk_left_join(self, spec)
+		return add_fk_join(db, self, spec, 'fk_left_join')
+	end
+	scan.fk_left_join = fk_left_join
+
 	return scan
 end

@@ -107,11 +107,90 @@ local function with_db(name, fn)
 	assert(ok, err)
 end
 
+-- add FK data for both join directions and self-joins.
+local function add_join_data(db)
+	db:begin'w'
+	db:create_table('customers', {fields = {
+		{col = 'id', mdbx_type = 'u32', not_null = true},
+		{col = 'name', mdbx_type = 'utf8', maxlen = 32,
+			nozero = true, not_null = true},
+	}, pk = {'id'}})
+	db:create_table('orders', {fields = {
+		{col = 'id', mdbx_type = 'u32', not_null = true},
+		{col = 'customer_id', mdbx_type = 'u32', not_null = true},
+	}, pk = {'id'}})
+	db:add_fk{table = 'orders', cols = {'customer_id'},
+		ref_table = 'customers', ref_cols = {'id'}}
+	for _, customer_row in ipairs{
+		{id = 1, name = 'Ada'},
+		{id = 2, name = 'Bob'},
+		{id = 3, name = 'Cyd'},
+	} do
+		db:insert('customers', '{}', customer_row)
+	end
+	for _, order_row in ipairs{
+		{id = 10, customer_id = 1},
+		{id = 11, customer_id = 1},
+		{id = 12, customer_id = 2},
+	} do
+		db:insert('orders', '{}', order_row)
+	end
+
+	db:create_table('invoices', {fields = {
+		{col = 'id', mdbx_type = 'u32', not_null = true},
+		{col = 'buyer_id', mdbx_type = 'u32', not_null = true},
+		{col = 'seller_id', mdbx_type = 'u32', not_null = true},
+	}, pk = {'id'}})
+	db:add_fk{table = 'invoices', cols = {'buyer_id'},
+		ref_table = 'customers', ref_cols = {'id'}}
+	db:add_fk{table = 'invoices', cols = {'seller_id'},
+		ref_table = 'customers', ref_cols = {'id'}}
+	db:insert('invoices', '{}', {id = 20, buyer_id = 1, seller_id = 2})
+	db:insert('invoices', '{}', {id = 21, buyer_id = 2, seller_id = 1})
+
+	db:create_table('employees', {fields = {
+		{col = 'id', mdbx_type = 'u32', not_null = true},
+		{col = 'manager_id', mdbx_type = 'u32'},
+		{col = 'name', mdbx_type = 'utf8', maxlen = 32,
+			nozero = true, not_null = true},
+	}, pk = {'id'}})
+	db:add_fk{table = 'employees', cols = {'manager_id'},
+		ref_table = 'employees', ref_cols = {'id'}}
+	db:insert('employees', '{}', {id = 1, name = 'CEO'})
+	db:insert('employees', '{}', {id = 2, manager_id = 1,
+		name = 'Lead'})
+	db:insert('employees', '{}', {id = 3, manager_id = 2,
+		name = 'Dev A'})
+	db:insert('employees', '{}', {id = 4, manager_id = 2,
+		name = 'Dev B'})
+
+	local account_pk = {'tenant_id', 'id'}
+	account_pk.desc = {false, true}
+	db:create_table('accounts', {fields = {
+		{col = 'tenant_id', mdbx_type = 'u32', not_null = true},
+		{col = 'id', mdbx_type = 'u32', not_null = true},
+	}, pk = account_pk})
+	db:create_table('tickets', {fields = {
+		{col = 'id', mdbx_type = 'u32', not_null = true},
+		{col = 'tenant_id', mdbx_type = 'u32', not_null = true},
+		{col = 'account_id', mdbx_type = 'u32', not_null = true},
+	}, pk = {'id'}})
+	db:add_fk{table = 'tickets', cols = {'tenant_id', 'account_id'},
+		ref_table = 'accounts', ref_cols = {'tenant_id', 'id'}}
+	db:insert('accounts', '{}', {tenant_id = 1, id = 10})
+	db:insert('accounts', '{}', {tenant_id = 1, id = 20})
+	db:insert('tickets', '{}', {id = 30, tenant_id = 1,
+		account_id = 10})
+	db:insert('tickets', '{}', {id = 31, tenant_id = 1,
+		account_id = 20})
+	db:commit()
+end
+
 -- collect one compiled value from one scan execution.
 local function collect(scan, get, ...)
 	scan.reset(...)
 	local t = {}
-	while scan.next() do t[#t + 1] = get() end
+	while scan.advance() do t[#t + 1] = get() end
 	return t
 end
 
@@ -119,7 +198,18 @@ end
 local function collect_keys(scan, get, ...)
 	scan.reset(...)
 	local t = {}
-	while scan.next_key() do t[#t + 1] = get() end
+	while scan.advance(true) do t[#t + 1] = get() end
+	return t
+end
+
+-- collect two compiled values from each joined row.
+local function collect_pairs(scan, get_a, get_b, ...)
+	scan.reset(...)
+	local t = {}
+	while scan.advance() do
+		local a, b = get_a(), get_b()
+		t[#t + 1] = a..':'..(b == nil and 'nil' or b)
+	end
 	return t
 end
 
@@ -134,14 +224,14 @@ function test.exact_pk()
 	with_db('exact_pk', function(db)
 		db:atomic('r', function()
 			local scan = db:scan('items', 'id')
-			local get_id = scan.compile_col'id'
-			local get_note = scan.compile_col'note'
+			local get_id = scan.col_decoder'id'
+			local get_note = scan.col_decoder'note'
 			scan.reset(3)
-			assert(scan.next())
+			assert(scan.advance())
 			assert(get_id() == 3 and get_note() == 'three')
-			assert(scan.next() == nil)
+			assert(scan.advance() == nil)
 			scan.reset(999)
-			assert(scan.next() == nil)
+			assert(scan.advance() == nil)
 			scan.close()
 		end)
 	end)
@@ -152,16 +242,16 @@ function test.exact_index()
 	with_db('exact_index', function(db)
 		db:atomic('r', function()
 			local scan = db:scan('items', 'status, id asc')
-			local get_id = scan.compile_col'id'
-			local get_status = scan.compile_col'status'
-			local get_note = scan.compile_col'note'
+			local get_id = scan.col_decoder'id'
+			local get_status = scan.col_decoder'status'
+			local get_note = scan.col_decoder'note'
 			assert_values(collect(scan, get_id, 'active'),
 				'1,2,3,5')
 			scan.reset('active')
-			assert(scan.next())
+			assert(scan.advance())
 			assert(get_id() == 1 and get_status() == 'active')
 			assert(get_note() == 'one')
-			assert(scan.next())
+			assert(scan.advance())
 			assert(get_id() == 2 and get_note() == nil)
 			local e = scan.explain()
 			assert(e.key == 'items/status', e.key)
@@ -176,8 +266,8 @@ function test.composite_range_asc()
 	with_db('composite_range_asc', function(db)
 		db:atomic('r', function()
 			local scan = db:scan('items',
-				'tenant_id, status, created_at [,] asc, id asc')
-			local get_id = scan.compile_col'id'
+				'tenant_id, status, created_at [:] asc, id asc')
+			local get_id = scan.col_decoder'id'
 			assert_values(collect(scan, get_id, 1, 'active', 100, 200),
 				'1,2,3')
 			assert(scan.explain().key
@@ -192,8 +282,8 @@ function test.composite_range_desc()
 	with_db('composite_range_desc', function(db)
 		db:atomic('r', function()
 			local scan = db:scan('items',
-				'tenant_id, status, created_at [,] desc, id desc')
-			local get_id = scan.compile_col'id'
+				'tenant_id, status, created_at [:] desc, id desc')
+			local get_id = scan.col_decoder'id'
 			assert_values(collect(scan, get_id, 1, 'active', 100, 200),
 				'3,2,1')
 			scan.close()
@@ -206,8 +296,8 @@ function test.mixed_index_order()
 	with_db('mixed_index_order', function(db)
 		db:atomic('r', function()
 			local scan = db:scan('items',
-				'tenant_id, status, created_at [,] asc, id desc')
-			assert_values(collect(scan, scan.compile_col'id',
+				'tenant_id, status, created_at [:] asc, id desc')
+			assert_values(collect(scan, scan.col_decoder'id',
 				1, 'active', 100, 200), '2,1,3')
 			local e = scan.explain()
 			assert(e.key == 'items/tenant_id,status,created_at:desc')
@@ -225,8 +315,8 @@ function test.range_bounds()
 				local open = lo_op == 'gt' and '(' or '['
 				local close = hi_op == 'le' and ']' or ')'
 				local scan = db:scan('items',
-					'score '..open..','..close..' asc, id asc')
-				local values = collect(scan, scan.compile_col'id', lo, hi)
+					'score '..open..':'..close..' asc, id asc')
+				local values = collect(scan, scan.col_decoder'id', lo, hi)
 				scan.close()
 				return values
 			end
@@ -247,8 +337,8 @@ function test.descending_key_range()
 		db:atomic('r', function()
 			local function ids(rank_dir, id_dir)
 				local scan = db:scan('items',
-					'rank [,] '..rank_dir..', id '..id_dir)
-				local values = collect(scan, scan.compile_col'id', 20, 40)
+					'rank [:] '..rank_dir..', id '..id_dir)
+				local values = collect(scan, scan.col_decoder'id', 20, 40)
 				scan.close()
 				return values
 			end
@@ -264,24 +354,24 @@ function test.full_scan()
 		db:atomic('r', function()
 			local asc = db:scan('items', '')
 			local desc = db:scan('items', 'id desc')
-			assert_values(collect(asc, asc.compile_col'id'), '1,2,3,4,5')
-			assert_values(collect(desc, desc.compile_col'id'), '5,4,3,2,1')
+			assert_values(collect(asc, asc.col_decoder'id'), '1,2,3,4,5')
+			assert_values(collect(desc, desc.col_decoder'id'), '5,4,3,2,1')
 			asc.close()
 			desc.close()
 		end)
 	end)
 end
 
--- return nil from a compiled nullable value-field reader.
+-- return nil from a nullable value-field getter.
 function test.null_output()
 	with_db('null_output', function(db)
 		db:atomic('r', function()
 			local scan = db:scan('items', 'id')
-			local get_note = scan.compile_col'note'
+			local get_note = scan.col_decoder'note'
 			scan.reset(2)
-			assert(scan.next())
+			assert(scan.advance())
 			assert(get_note() == nil)
-			assert(scan.next() == nil)
+			assert(scan.advance() == nil)
 			scan.close()
 		end)
 	end)
@@ -292,7 +382,7 @@ function test.reuse()
 	with_db('reuse', function(db)
 		db:atomic('r', function()
 			local scan = db:scan('items', 'status, id asc')
-			local get_id = scan.compile_col'id'
+			local get_id = scan.col_decoder'id'
 			assert_values(collect(scan, get_id, 'active'),
 				'1,2,3,5')
 			assert_values(collect(scan, get_id, 'closed'), '4')
@@ -306,12 +396,12 @@ function test.reset_after_early_stop()
 	with_db('reset_after_early_stop', function(db)
 		db:atomic('r', function()
 			local scan = db:scan('items', 'status, id asc')
-			local get_id = scan.compile_col'id'
+			local get_id = scan.col_decoder'id'
 			scan.reset('active')
-			assert(scan.next() and get_id() == 1)
+			assert(scan.advance() and get_id() == 1)
 			scan.reset('closed')
-			assert(scan.next() and get_id() == 4)
-			assert(scan.next() == nil)
+			assert(scan.advance() and get_id() == 4)
+			assert(scan.advance() == nil)
 			scan.close()
 		end)
 	end)
@@ -323,7 +413,7 @@ function test.reuse_across_transactions()
 		local scan, get_id
 		db:atomic('r', function()
 			scan = db:scan('items', 'id')
-			get_id = scan.compile_col'id'
+			get_id = scan.col_decoder'id'
 			assert_values(collect(scan, get_id, 1), '1')
 		end)
 		db:atomic('r', function()
@@ -340,8 +430,8 @@ function test.next_key()
 	with_db('next_key', function(db)
 		db:atomic('r', function()
 			local scan = db:scan('items',
-				'tenant_id, status, created_at [,] asc, id asc')
-			assert_values(collect_keys(scan, scan.compile_col'id',
+				'tenant_id, status, created_at [:] asc, id asc')
+			assert_values(collect_keys(scan, scan.col_decoder'id',
 				1, 'active', 100, 200), '1,3')
 			scan.close()
 		end)
@@ -352,8 +442,8 @@ end
 function test.pk_suffix_range()
 	with_db('pk_suffix_range', function(db)
 		db:atomic('r', function()
-			local scan = db:scan('items', 'status, id [,] desc')
-			local get_id = scan.compile_col'id'
+			local scan = db:scan('items', 'status, id [:] desc')
+			local get_id = scan.col_decoder'id'
 			assert_values(collect(scan, get_id, 'active', 2, 5), '5,3,2')
 			assert_values(collect_keys(scan, get_id, 'active', 2, 5), '5')
 			scan.close()
@@ -366,12 +456,12 @@ function test.composite_pk_suffix()
 	with_db('composite_pk_suffix', function(db)
 		db:atomic('r', function()
 			local scan = db:scan('entries',
-				'status, tenant_id [,] desc, id desc')
-			local get_tenant = scan.compile_col'tenant_id'
-			local get_id = scan.compile_col'id'
+				'status, tenant_id [:] desc, id desc')
+			local get_tenant = scan.col_decoder'tenant_id'
+			local get_id = scan.col_decoder'id'
 			scan.reset('active', 1, 2)
 			local rows = {}
-			while scan.next() do
+			while scan.advance() do
 				rows[#rows + 1] = get_tenant()..':'..get_id()
 			end
 			assert_values(rows, '2:3,2:1,1:4,1:2,1:1')
@@ -387,7 +477,7 @@ function test.pk_suffix_starts()
 			local function paths(dir)
 				local scan = db:scan('files',
 					'status, tenant_id, path ^ '..dir)
-				local values = collect(scan, scan.compile_col'path',
+				local values = collect(scan, scan.col_decoder'path',
 					'ready', 1, 'invoices/2026/')
 				scan.close()
 				return values
@@ -405,16 +495,33 @@ function test.in_values()
 	with_db('in_values', function(db)
 		db:atomic('r', function()
 			local scan = db:scan('items',
-				'tenant_id, status, created_at [,] asc, id asc')
-			local iter = scan.in_('status', {
+				'tenant_id, status, created_at [:] asc, id asc')
+			local iter = scan:in_('status', {
 				'closed', 'active', 'closed',
 			})
-			local get_id = iter.compile_col'id'
+			local get_id = iter.col_decoder'id'
 			assert_values(collect(iter, get_id, 1, 100, 200), '4,1,2,3')
 			assert(#iter.explain().order == 0)
-			local active = scan.in_('status', {'active'})
-			assert_values(collect_keys(active, get_id, 1, 100, 200), '1,3')
+			iter.close()
+			local active = db:scan('items',
+				'tenant_id, status, created_at [:] asc, id asc')
+				:in_('status', {'active'})
+			assert_values(collect_keys(active, active.col_decoder'id',
+				1, 100, 200), '1,3')
 			active.close()
+		end)
+	end)
+end
+
+-- run one Lua predicate for every candidate row.
+function test.filter()
+	with_db('filter', function(db)
+		db:atomic('r', function()
+			local scan = db:scan('items', 'id asc')
+			local get_id = scan.col_decoder'id'
+			scan:filter(function() return get_id() % 2 == 1 end)
+			assert_values(collect(scan, get_id), '1,3,5')
+			scan.close()
 		end)
 	end)
 end
@@ -424,31 +531,165 @@ function test.not_in_values()
 	with_db('not_in_values', function(db)
 		db:atomic('r', function()
 			local scan = db:scan('items', 'id asc')
-			local iter = scan.not_in('id', {2, 4, 2})
-			local get_id = iter.compile_col'id'
+			local iter = scan:not_in('id', {2, 4, 2})
+			local get_id = iter.col_decoder'id'
 			assert_values(collect(iter, get_id), '1,3,5')
 			assert(iter.explain().order[1] == 'id asc')
 			iter.close()
 
 			local nullable = db:scan('items', 'id asc')
-				.not_in('note', {null, 'one'})
-			assert_values(collect(nullable, nullable.compile_col'id'),
+				:not_in('note', {null, 'one'})
+			assert_values(collect(nullable, nullable.col_decoder'id'),
 				'3,4,5')
 			nullable.close()
 		end)
 	end)
 end
 
--- filter only the representative row returned by next_key().
+-- filter only the representative row returned by advance(true).
 function test.not_in_next_key()
 	with_db('not_in_next_key', function(db)
 		db:atomic('r', function()
 			local scan = db:scan('items',
-				'tenant_id, status, created_at [,] asc, id asc')
-			local iter = scan.not_in('id', {1})
-			assert_values(collect_keys(iter, iter.compile_col'id',
+				'tenant_id, status, created_at [:] asc, id asc')
+			local iter = scan:not_in('id', {1})
+			assert_values(collect_keys(iter, iter.col_decoder'id',
 				1, 'active', 100, 200), '3')
 			iter.close()
+		end)
+	end)
+end
+
+-- follow one FK toward children and toward a parent.
+function test.fk_join_directions()
+	with_db('fk_join_directions', function(db)
+		add_join_data(db)
+		db:atomic('r', function()
+			local children = db:scan('customers', 'id asc')
+				:fk_join('orders.customer_id')
+			assert_values(collect_pairs(children,
+				children.col_decoder('customers', 'id'),
+				children.col_decoder('orders', 'id')),
+				'1:10,1:11,2:12')
+			children.close()
+
+			local parents = db:scan('orders',
+				'customer_id asc, id asc')
+				:fk_join('customers.customer_id')
+			assert_values(collect_pairs(parents,
+				parents.col_decoder('orders', 'id'),
+				parents.col_decoder('customers', 'id')),
+				'10:1,11:1,12:2')
+			parents.close()
+
+			local left = db:scan('customers', 'id asc')
+				:fk_left_join('orders.customer_id')
+			assert_values(collect_pairs(left,
+				left.col_decoder('customers', 'id'),
+				left.col_decoder('orders', 'id')),
+				'1:10,1:11,2:12,3:nil')
+			left.close()
+		end)
+	end)
+end
+
+-- use FK columns to select one of two relationships between two tables.
+function test.fk_join_columns()
+	with_db('fk_join_columns', function(db)
+		add_join_data(db)
+		db:atomic('r', function()
+			local ambiguous = db:scan('invoices', 'id asc')
+			assert(not pcall(function()
+				ambiguous:fk_join('customers')
+			end))
+			ambiguous.close()
+
+			local buyers = db:scan('invoices', 'id asc')
+				:fk_join('customers.buyer_id')
+			assert_values(collect_pairs(buyers,
+				buyers.col_decoder('invoices', 'id'),
+				buyers.col_decoder('customers', 'id')),
+				'20:1,21:2')
+			buyers.close()
+
+			local sold = db:scan('customers', 'id asc')
+				:fk_join('invoices.seller_id')
+			assert_values(collect_pairs(sold,
+				sold.col_decoder('customers', 'id'),
+				sold.col_decoder('invoices', 'id')),
+				'1:21,2:20')
+			sold.close()
+		end)
+	end)
+end
+
+-- name both endpoints of a self-referencing FK with join aliases.
+function test.self_join()
+	with_db('self_join', function(db)
+		add_join_data(db)
+		db:atomic('r', function()
+			local managers = db:scan('employees', 'id asc')
+				:left_join('employees@manager.id = employees.manager_id')
+			assert_values(collect_pairs(managers,
+				managers.col_decoder('employees', 'id'),
+				managers.col_decoder('manager', 'id')),
+				'1:nil,2:1,3:2,4:2')
+			managers.close()
+
+			local reports = db:scan('employees', 'id asc')
+				:join('employees@report.manager_id = employees.id')
+			assert_values(collect_pairs(reports,
+				reports.col_decoder('employees', 'id'),
+				reports.col_decoder('report', 'id')),
+				'1:2,2:3,2:4')
+			reports.close()
+
+			-- fk_join cannot resolve a self-referencing FK.
+			assert(not pcall(function()
+				db:scan('employees', 'id asc'):fk_join('employees.manager_id')
+			end))
+		end)
+	end)
+end
+
+-- read a column from one joined table when chaining self-joins.
+function test.self_join_chain()
+	with_db('self_join_chain', function(db)
+		add_join_data(db)
+		db:atomic('r', function()
+			local scan = db:scan('employees', 'id asc')
+				:join('employees@manager.id = employees.manager_id')
+				:join('employees@grandmanager.id = manager.manager_id')
+			assert_values(collect_pairs(scan,
+				scan.col_decoder('employees', 'id'),
+				scan.col_decoder('grandmanager', 'id')),
+				'3:1,4:1')
+			scan.close()
+		end)
+	end)
+end
+
+-- convert composite FK fields into a descending parent PK.
+function test.fk_composite_key()
+	with_db('fk_composite_key', function(db)
+		add_join_data(db)
+		db:atomic('r', function()
+			local parents = db:scan('tickets', 'id asc')
+				:fk_join('accounts.tenant_id,account_id')
+			assert_values(collect_pairs(parents,
+				parents.col_decoder('tickets', 'id'),
+				parents.col_decoder('accounts', 'id')),
+				'30:10,31:20')
+			parents.close()
+
+			local children = db:scan('accounts',
+				'tenant_id asc, id desc')
+				:fk_join('tickets.tenant_id,account_id')
+			assert_values(collect_pairs(children,
+				children.col_decoder('accounts', 'id'),
+				children.col_decoder('tickets', 'id')),
+				'20:31,10:30')
+			children.close()
 		end)
 	end)
 end
@@ -473,7 +714,7 @@ function test.key_prefix_order()
 		db:atomic('r', function()
 			local ok, err = pcall(function()
 				db:scan('items',
-					'status, tenant_id, created_at [,) asc')
+					'status, tenant_id, created_at [:) asc')
 			end)
 			assert(not ok)
 			assert(tostring(err):find(
