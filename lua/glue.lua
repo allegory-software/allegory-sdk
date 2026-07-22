@@ -978,6 +978,7 @@ end
 --map `f(v, ...) -> v1` over t or extract a column from a list of records.
 --same plucking semantics as map() but applied on lists.
 function imap(t, f, ...)
+	if t == nil then return nil end
 	local dt = {}
 	local n = #t
 	if type(f) == 'function' then
