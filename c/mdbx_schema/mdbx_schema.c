@@ -236,7 +236,6 @@ static encdec_t decoders[] = {
 	(encdec_t)(0),
 	(encdec_t)&decode_u16,
 	(encdec_t)&decode_u32,
-	(encdec_t)(0),
 	(encdec_t)&decode_f32,
 	(encdec_t)&decode_f64,
 };
@@ -249,7 +248,6 @@ static encdec_t encoders[] = {
 	(encdec_t)(0),
 	(encdec_t)&encode_u16,
 	(encdec_t)&encode_u32,
-	(encdec_t)(0),
 	(encdec_t)&encode_f32,
 	(encdec_t)&encode_f64,
 };
