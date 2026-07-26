@@ -3,22 +3,114 @@
 	indexed scans over one mdbx_schema table.
 	Written by Cosmin Apreutesei. Public Domain.
 
-API
-	db:scan(table, path) -> scan
-	scan.reset(params...)
+SCANS
+	db:scan(table, 'EQ_COL, RANGE_COL [:) [asc|desc], ORDER_COL [asc|desc]') -> scan
+	scan:in_('col', values)
+	scan:not_in('col', values)
+	scan:filter(accept)
+	scan:[left_]join('TABLE[@ALIAS].COL[,COL...]=TABLE.COL[,COL...])
+	scan:fk_[left_]join('TABLE', 'FK_COL[,COL...]')
+	scan:select('[TABLE.]COL [NAME], ...')
+SCAN ITERATION
+	scan:rows(param1,...) -> iter() -> scan [, values...]
+	scan:each(param1,...) -> iter() -> true
+	scan.reset(param1,...)
 	scan.advance([by_key]) -> true | nil
 	scan.col_decoder(col) -> get() -> value
 	scan.explain() -> table
 	scan.close()
-	scan:each(params...) -> iter() -> true
-	scan:in_('col', values) -> scan
-	scan:not_in('col', values) -> scan
-	scan:filter(accept) -> scan
-	scan:join(spec) -> scan
-	scan:left_join(spec) -> scan
-	scan:fk_join(child_table, fk_cols) -> scan
-	scan:fk_left_join(child_table, fk_cols) -> scan
 	scan.col_decoder(table, col) -> get() -> value
+	scan.get() -> true | false, values...
+	scan.get(row) -> true | false, row
+NESTED SCANS
+	scan:join_scan(spec) -> child_scan
+	scan:fk_join_scan(child_table, fk_cols) -> child_scan
+	child_scan:join_scan(spec)
+	child_scan:fk_join_scan(child_table, fk_cols)
+	child_scan:select(outputs)
+NESTED SCANS ITERATION
+	child_scan:rows(parent_scan) -> iter() -> child_scan [, values...]
+	child_scan:left_rows(parent_scan) -> iter() -> child_scan [, values...]
+	child_scan:first(parent_scan) -> child_scan | nil
+	child_scan:exists(parent_scan) -> true | false
+	child_scan.get() -> true | false, values...
+	child_scan.get(row) -> true | false, row
+	child_scan.col_decoder(col) -> get() -> value
+	child_scan.close()
+
+NESTED SCANS EXAMPLE
+
+	local customers = db:scan('customers', 'tenant_id, id asc')
+		:select('id')
+	local orders = customers:fk_join_scan('orders', 'customer_id')
+		:select('id')
+	local items = orders:fk_join_scan('items', 'order_id')
+		:select('id')
+	local invoices = customers:fk_join_scan('invoices', 'customer_id')
+		:select('id')
+	local payments = invoices:fk_join_scan('payments', 'invoice_id')
+		:select('id')
+
+	for customer, customer_id in customers:rows(tenant_id) do
+		-- group 1: orders x items
+		for order, order_id in orders:left_rows(customer) do
+			for item, item_id in items:left_rows(order) do
+				-- group 2: invoices x payments
+				for invoice, invoice_id in invoices:left_rows(customer) do
+					for payment, payment_id in payments:left_rows(invoice) do
+						print(customer_id, order_id, item_id, invoice_id,
+							payment_id)
+					end
+				end
+			end
+		end
+	end
+	payments.close()
+	invoices.close()
+	items.close()
+	orders.close()
+	customers.close()
+
+FLAT JOIN EXAMPLE
+
+	local flat_scan = db:scan('customers', 'tenant_id, id asc')
+		:fk_left_join('orders', 'customer_id')
+		:fk_left_join('items', 'order_id')
+		:fk_left_join('invoices', 'customer_id')
+		:fk_left_join('payments', 'invoice_id')
+		:select('customers.id, orders.id, items.id, invoices.id, payments.id')
+
+	for _, customer_id, order_id, item_id, invoice_id, payment_id in
+		flat_scan:rows(tenant_id)
+	do
+		print(customer_id, order_id, item_id, invoice_id, payment_id)
+	end
+	flat_scan.close()
+
+SQL EQUIVALENT
+
+	SELECT c.id AS customer_id, o.id AS order_id, i.id AS item_id,
+		inv.id AS invoice_id, pay.id AS payment_id
+	FROM customers AS c
+	-- group 1: orders x items
+	LEFT JOIN (
+		orders AS o
+		LEFT JOIN items AS i ON i.order_id = o.id
+	) ON o.customer_id = c.id
+	-- group 2: invoices x payments
+	LEFT JOIN (
+		invoices AS inv
+		LEFT JOIN payments AS pay ON pay.invoice_id = inv.id
+	) ON inv.customer_id = c.id
+	WHERE c.tenant_id = ?
+	ORDER BY c.id ASC, o.id ASC, i.id ASC,
+		inv.id ASC, pay.id ASC;
+
+PATHS
+	- range spec: 'COL ( | ) | [ | ] | (:) | [:] | (:] | [:) [asc|desc]'
+	- prefix spec: 'COL^'
+	- direction -> key selection + cursor direction; no sorting
+	- '' -> table PK, forward
 
 RULES
 	- in_() | not_in() | filter() | join() | left_join() -> same scan
@@ -33,16 +125,11 @@ RULES
 	- table_name right of '=' -> table already in scan
 	- child_table owns fk_cols
 	- fk_cols = 'col1,col2'
-	- missing left-join row -> nil from each joined table getter
-
-PATH
-	path = 'eq_col, range_col [:) asc, order_col asc'
-	- bare leading field -> one equality arg
-	- '[:)' -> lower arg, upper arg; nil -> no bound
-	- '[' | ']' -> inclusive bound
-	- '^' -> one string-prefix arg
-	- direction -> key selection + cursor direction; no sorting
-	- '' -> table PK, forward
+	- outputs = '[table.]col [name], ...'; name defaults to col
+	- scan:rows() -> scan, selected values...
+	- child_scan:rows() | left_rows() -> child_scan, selected values...
+	- child_scan.get() after missing left_rows() -> false, nil values
+	- get(row) writes named fields; missing child clears them
 
 ]]
 
@@ -115,8 +202,8 @@ end
 --JOINS ---------------------------------------------------------------------
 
 -- adds key_schema's table to outer_scan.
-local function add_join_table(db, outer_scan, key_schema, get_key, table_name,
-	kind, fk_name)
+local function add_join_table(db, outer_scan, kind, key_schema, get_key,
+	table_name, fk_name)
 	local table_schema = key_schema.val_schema or key_schema
 	local left = kind == 'left_join' or kind == 'fk_left_join'
 	local op = fk_name and 'fk_join' or 'join'
@@ -153,7 +240,7 @@ local function add_join_table(db, outer_scan, key_schema, get_key, table_name,
 		return find_outer_table(name)
 	end
 
-	local function join_col_decoder(name, col)
+	function outer_scan.col_decoder(name, col)
 		local _, col_decoder = find_table(name)
 		assertf(col_decoder, '%s: no table: %s', op, name)
 		return col_decoder(col)
@@ -164,14 +251,14 @@ local function add_join_table(db, outer_scan, key_schema, get_key, table_name,
 	local outer_reset = outer_scan.reset
 	local outer_advance = outer_scan.advance
 
-	local function reset_join(...)
+	function outer_scan.reset(...)
 		outer_reset(...)
 		row_found = false
 	end
 
 	-- returns all matching index rows before advancing outer_scan.
-	local function advance_join(by_key)
-		-- advance_join() cannot select one key from multiple cursors.
+	function outer_scan.advance(by_key)
+		-- advance(true) cannot select one key from multiple cursors.
 		assertf(not by_key, '%s: no key iteration', op)
 		if key_schema.is_index and row_found
 			and move(C.MDBX_NEXT_DUP)
@@ -195,7 +282,7 @@ local function add_join_table(db, outer_scan, key_schema, get_key, table_name,
 
 	local outer_close = outer_scan.close
 
-	local function close_join()
+	function outer_scan.close()
 		outer_close()
 		close_key()
 		row_found = false
@@ -203,7 +290,7 @@ local function add_join_table(db, outer_scan, key_schema, get_key, table_name,
 
 	local outer_explain = outer_scan.explain
 
-	local function explain_join() -- -> {kind, outer, table, key [, fk]}
+	function outer_scan.explain() -- -> {kind, outer, table, key [, fk]}
 		local t = {
 			kind = kind,
 			outer = outer_explain(),
@@ -214,18 +301,13 @@ local function add_join_table(db, outer_scan, key_schema, get_key, table_name,
 		return t
 	end
 
-	outer_scan.reset = reset_join
-	outer_scan.advance = advance_join
 	outer_scan._find_table = find_table
-	outer_scan.col_decoder = join_col_decoder
-	outer_scan.explain = explain_join
-	outer_scan.close = close_join
 	outer_scan.not_in = nil
 	return outer_scan
 end
 
--- parses the spec and requires an exact physical key.
-local function add_join(db, outer_scan, spec, kind)
+-- returns the physical key and encoder selected by a join spec.
+local function join_key_encoder(db, outer_scan, spec)
 
 	--SPEC --------------------------------------------------------------------
 
@@ -299,11 +381,11 @@ local function add_join(db, outer_scan, spec, kind)
 	end
 
 	local get_key = outer_key_encoder(outer_cols, key_schema)
-	return add_join_table(db, outer_scan, key_schema, get_key, table_name, kind)
+	return key_schema, get_key, table_name
 end
 
--- uses one FK to add its absent child or parent table.
-local function add_fk_join(db, outer_scan, child_table_name, fk_cols, kind)
+-- returns the physical key and encoder selected by one FK.
+local function fk_key_encoder(db, outer_scan, child_table_name, fk_cols)
 	local child_schema = assertf(db:table_schema(child_table_name),
 		'fk_join: no schema: %s', child_table_name)
 	assert(not child_schema.is_index, 'fk_join: base table')
@@ -328,11 +410,161 @@ local function add_fk_join(db, outer_scan, child_table_name, fk_cols, kind)
 		table_name = child_schema.name
 		key_schema = fk.index
 	end
-	return add_join_table(db, outer_scan, key_schema, get_key, table_name, kind,
-		fk.name)
+	return key_schema, get_key, table_name, fk.name
 end
 
---PUBLIC API -----------------------------------------------------------------
+--SELECT ---------------------------------------------------------------------
+
+-- decodes the current iterator row into values or a supplied table.
+local function row_decoder(scan, unqualified_table_name, outputs, has_row)
+	local decoders, names = {}, {}
+	for output in outputs:gmatch'[^,]+' do
+		local col_spec, name =
+			output:match'^%s*(%S+)%s*(%S*)%s*$'
+		assert(col_spec, 'select: output')
+		local table_name, col = col_spec:match'^(.-)%.(.*)$'
+		if not table_name then
+			table_name = unqualified_table_name
+			col = col_spec
+		end
+		local _, col_decoder = scan._find_table(table_name)
+		assertf(col_decoder, 'select: no table: %s', table_name)
+		decoders[#decoders + 1] = col_decoder(col)
+		names[#names + 1] = name ~= '' and name or col
+	end
+	local n = #decoders
+	assert(n > 0, 'select: outputs')
+	local values = {}
+
+	-- returns whether the iterator has a stored row before its values.
+	local function decode_row(row)
+		local found = not has_row or has_row()
+		if row then
+			for i = 1, n do row[names[i]] = decoders[i]() end
+			return found, row
+		end
+		for i = 1, n do values[i] = decoders[i]() end
+		return found, unpack(values, 1, n)
+	end
+	return decode_row
+end
+
+--CHILD SCAN -----------------------------------------------------------------
+
+-- creates one prepared exact-key child iterator.
+local function child_scan(db, parent_scan, key_schema, get_key, table_name)
+	local child = {}
+	local table_schema = key_schema.val_schema or key_schema
+	local move, key_rec, _, table_col_decoder, table_key_encoder, close =
+		table_api(db, key_schema)
+	local row_found, selected_get
+
+	-- returns nil while left_rows() represents a missing row.
+	local function col_decoder(col)
+		local get = table_col_decoder(col)
+		return function()
+			if row_found then return get() end
+		end
+	end
+
+	-- prevents chained joins from reading a missing row.
+	local function key_encoder(cols, output_schema)
+		local get = table_key_encoder(cols, output_schema)
+		return function()
+			if row_found then return get() end
+		end
+	end
+
+	function child._find_table(name)
+		if name == table_name then
+			return table_schema, col_decoder, key_encoder
+		end
+	end
+	child.col_decoder = col_decoder
+	child.close = close
+
+	-- reports whether this child has a stored row.
+	local function has_row()
+		return not not row_found
+	end
+
+	-- positions the first stored row for the current parent key.
+	local function first_row()
+		local ok, p, p_sz = get_key()
+		if ok then
+			key_rec.data = p
+			key_rec.size = p_sz
+			ok = move(C.MDBX_SET_KEY)
+		end
+		row_found = ok or false
+		return row_found
+	end
+
+	-- uses the Lua loop value to choose SET_KEY or NEXT_DUP.
+	local function rows_iter(left, previous_child)
+		if previous_child == nil then
+			first_row()
+		elseif row_found and key_schema.is_index then
+			row_found = move(C.MDBX_NEXT_DUP) or false
+		else
+			row_found = false
+		end
+		if row_found or (left and previous_child == nil) then
+			if selected_get then
+				return child, select(2, selected_get())
+			end
+			return child
+		end
+	end
+
+	-- configures decoders for the current child row.
+	function child.select(self, outputs)
+		selected_get = row_decoder(self, table_name, outputs, has_row)
+		self.get = selected_get
+		return self
+	end
+
+	-- returns rows for the current row of this child's parent.
+	function child.rows(self, parent)
+		-- get_key() reads only from the parent used during compilation.
+		assert(parent == parent_scan, 'join_scan: parent')
+		return rows_iter, false
+	end
+
+	-- returns one missing row when the exact key does not exist.
+	function child.left_rows(self, parent)
+		-- get_key() reads only from the parent used during compilation.
+		assert(parent == parent_scan, 'join_scan: parent')
+		return rows_iter, true
+	end
+
+	-- returns the first row for the current row of this child's parent.
+	local function first(self, parent)
+		-- get_key() reads only from the parent used during compilation.
+		assert(parent == parent_scan, 'join_scan: parent')
+		if first_row() then return child end
+	end
+	child.first = first
+
+	-- reports whether the current parent row has a matching child row.
+	function child.exists(self, parent)
+		return first(self, parent) ~= nil
+	end
+
+	-- creates another exact child from a join spec.
+	function child.join_scan(self, spec)
+		return child_scan(db, self, join_key_encoder(db, self, spec))
+	end
+
+	-- creates another exact child from one FK.
+	function child.fk_join_scan(self, child_table_name, fk_cols)
+		return child_scan(db, self,
+			fk_key_encoder(db, self, child_table_name, fk_cols))
+	end
+	return child
+end
+
+--SCAN API -------------------------------------------------------------------
 
 function Db:scan(table_name, path)
 	local db = self
@@ -472,13 +704,12 @@ function Db:scan(table_name, path)
 	local scan_move, key_rec, pk_rec, col_decoder, key_encoder,
 		close_scan = table_api(db, key_schema)
 
-	local function find_table(table_name)
+	function scan._find_table(table_name)
 		if table_name == base_schema.name then
 			return base_schema, col_decoder, key_encoder
 		end
 	end
 	scan.col_decoder = col_decoder
-	scan._find_table = find_table
 
 	--BOUNDS ------------------------------------------------------------------
 
@@ -518,7 +749,7 @@ function Db:scan(table_name, path)
 	end
 
 	-- encodes scan params into the start and stop keys.
-	local function base_reset(...)
+	function scan.reset(...)
 		assert(select('#', ...) == nparams, 'scan: params')
 		if pk_suffix then
 			for i = 1, key_depth do
@@ -597,7 +828,6 @@ function Db:scan(table_name, path)
 		end
 		started = false
 	end
-	scan.reset = base_reset
 
 	--ITERATION ---------------------------------------------------------------
 
@@ -646,7 +876,7 @@ function Db:scan(table_name, path)
 		return scan_move(C.MDBX_LAST_DUP)
 	end
 
-	-- scan flags -> fixed cursor ops for base_advance().
+	-- scan flags -> fixed cursor ops for scan.advance().
 	local first_record = pk_suffix and first_pk_record or first_key_record
 	local next_record_op = is_index and dup_op or nodup_op
 	local next_nodup_op = is_index and not pk_suffix and nodup_op or nil
@@ -668,7 +898,7 @@ function Db:scan(table_name, path)
 	end
 
 	-- by_key selects the first row of the next physical key.
-	local function base_advance(by_key)
+	function scan.advance(by_key)
 		local ok
 		if not started then
 			started = true
@@ -683,11 +913,10 @@ function Db:scan(table_name, path)
 		end
 		return accept_current_record(ok)
 	end
-	scan.advance = base_advance
 
 	--METADATA AND LIFETIME ---------------------------------------------------
 
-	local function base_explain() -- -> {table, key, order, reverse}
+	function scan.explain() -- -> {table, key, order, reverse}
 		local actual_order = {}
 		for i = eq_n + 1, #key_fields do
 			local f = key_fields[i]
@@ -702,14 +931,12 @@ function Db:scan(table_name, path)
 			reverse = reverse,
 		}
 	end
-	scan.explain = base_explain
 
 	-- closes both cursors and clears the scan position.
-	local function base_close()
+	function scan.close()
 		close_scan()
 		started = false
 	end
-	scan.close = base_close
 
 	--FILTERS -----------------------------------------------------------------
 
@@ -729,7 +956,7 @@ function Db:scan(table_name, path)
 	--VALUE SETS --------------------------------------------------------------
 
 	-- runs one scan for each distinct value, in list order.
-	local function in_(self, col, values)
+	function scan.in_(self, col, values)
 		local param_i = assertf(eq_param_indexes[col],
 			'scan: in field: %s', col)
 		-- save the methods that in_() replaces.
@@ -740,7 +967,7 @@ function Db:scan(table_name, path)
 		local params = {}
 
 		-- params omit the equality arg that in_ supplies.
-		local function reset_in(...)
+		function self.reset(...)
 			assert(select('#', ...) == nparams - 1, 'scan: params')
 			local j = 1
 			for i = 1, nparams do
@@ -753,7 +980,7 @@ function Db:scan(table_name, path)
 			value_i = 0
 		end
 
-		local function advance_in(by_key)
+		function self.advance(by_key)
 			while value_i <= #values do
 				if value_i > 0 and advance(by_key) then return true end
 				local value
@@ -769,30 +996,25 @@ function Db:scan(table_name, path)
 		end
 
 		-- separate scans do not preserve one physical order.
-		local function explain_in()
+		function self.explain()
 			local e = explain()
 			e.order = {}
 			e.reverse = nil
 			return e
 		end
 
-		local function close_in()
+		function self.close()
 			close()
 			clear(params)
 			value_i = 0
 		end
 
-		self.reset = reset_in
-		self.advance = advance_in
-		self.explain = explain_in
-		self.close = close_in
 		self.in_ = nil
 		return self
 	end
-	scan.in_ = in_
 
 	-- filters decoded values through one exclusion hash.
-	local function not_in(self, col, values)
+	function scan.not_in(self, col, values)
 		local get = self.col_decoder(col)
 		local excluded = {}
 		for _, value in ipairs(values) do excluded[value] = true end
@@ -803,34 +1025,65 @@ function Db:scan(table_name, path)
 			return not excluded[value]
 		end)
 	end
-	scan.not_in = not_in
 
-	local function each(self, ...)
+	local rows_advance, selected_get
+
+	local function advance_row()
+		if rows_advance() then
+			if selected_get then
+				return scan, select(2, selected_get())
+			end
+			return scan
+		end
+	end
+	function scan.rows(self, ...)
+		self.reset(...)
+		rows_advance = self.advance
+		return advance_row
+	end
+
+	-- configures decoders for the scan's current row.
+	function scan.select(self, outputs)
+		selected_get = row_decoder(self, table_name, outputs)
+		self.get = selected_get
+		return self
+	end
+
+	function scan.each(self, ...)
 		self.reset(...)
 		return self.advance
 	end
-	scan.each = each
 
-	local function join(self, spec)
-		return add_join(db, self, spec, 'join')
+	function scan.join(self, spec)
+		return add_join_table(db, self, 'join',
+			join_key_encoder(db, self, spec))
 	end
-	scan.join = join
 
-	local function left_join(self, spec)
-		return add_join(db, self, spec, 'left_join')
+	function scan.left_join(self, spec)
+		return add_join_table(db, self, 'left_join',
+			join_key_encoder(db, self, spec))
 	end
-	scan.left_join = left_join
 
-	local function fk_join(self, child_table_name, fk_cols)
-		return add_fk_join(db, self, child_table_name, fk_cols, 'fk_join')
+	function scan.fk_join(self, child_table_name, fk_cols)
+		return add_join_table(db, self, 'fk_join',
+			fk_key_encoder(db, self, child_table_name, fk_cols))
 	end
-	scan.fk_join = fk_join
 
-	local function fk_left_join(self, child_table_name, fk_cols)
-		return add_fk_join(db, self, child_table_name, fk_cols,
-			'fk_left_join')
+	function scan.fk_left_join(self, child_table_name, fk_cols)
+		return add_join_table(db, self, 'fk_left_join',
+			fk_key_encoder(db, self, child_table_name, fk_cols))
 	end
-	scan.fk_left_join = fk_left_join
+
+	-- creates one exact child from a join spec.
+	function scan.join_scan(self, spec)
+		return child_scan(db, self, join_key_encoder(db, self, spec))
+	end
+
+	-- creates one exact child from one FK.
+	function scan.fk_join_scan(self, child_table_name, fk_cols)
+		return child_scan(db, self,
+			fk_key_encoder(db, self, child_table_name, fk_cols))
+	end
 
 	return scan
 end
