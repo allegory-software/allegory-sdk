@@ -3270,21 +3270,32 @@ end
 --TABLE SCANNER --------------------------------------------------------------
 
 --[[
-A table scanner brings column-based index/base-table seek over mdbx seek ops:
+
+A table scanner can seek base tables on a leading sequence of (pk cols) and
+index tables on a leading sequence of (ix cols, pk cols).
+
 The path arg is a strict sequence of path terms containing:
  - zero or more leading equality columns (the eq fields).
  - optionally, a range or string prefix on the next column (the range field).
  - optionally, the direction of the last column.
  - later columns remain unconstrained but determine returned order.
-For an index table, columns must be a sequence of leading (key cols, val cols)
-i.e. (ix cols, pk cols). For a base table, columns is a sequence of leading
-(key cols) only i.e. (pk_cols). Note that ix cols can contain one or more pk
-cols, in which case those input values will have to be repeated.
+
 Each path term contains the column name, an operator and one or two input value
 descriptors called params, which tells how the value is supplied: either in
 the param itself, via reset(...) args, or in a MDBX_val (key, val) pair that
-points to an index/base-table raw record from which the value can be extracted
-with or without decoding it first.
+points to an index/base-table raw record from which the value can be used raw
+without decoding if possible.
+
+Why so complicated:
+ - index tables and base tables need different treatment.
+ - eq cols can span an index key rec and/or val rec arbitrarily.
+ - range col is optional and can land on the index key rec or val rec.
+ - must rediscover fk keys by analyzing params and even that has two modes:
+   direct raw key use and re-encode key in C (for fks on nullable cols).
+ - getting params individually to write into the key buffer also has 3 modes:
+   encode Lua value, get raw key col, get raw val col.
+ - reversing means reversing the ranges and all mdbx ops, and has edge cases.
+
 ]]
 
 local function key_cmp(a, a_sz, b, b_sz)
@@ -3328,7 +3339,7 @@ local function table_param_rec(db, param, output_field)
 	if field and field.key_index
 		and (field.mdbx_collation ~= 'utf8_ai_ci'
 			or output_field.mdbx_collation == 'utf8_ai_ci')
-	then --field is in the index key_rec and it's usable.
+	then --field is in the index's key_rec and it's usable raw.
 		rec = param.key_rec
 	else
 		field = base_schema.fields[param.col]
@@ -3336,7 +3347,7 @@ local function table_param_rec(db, param, output_field)
 		if field.key_index then --field is pk
 			rec = param_schema.is_index and param.val_rec or param.key_rec
 		else
-			rec = param.val_rec --value column
+			rec = param.val_rec
 		end
 	end
 	if field.mdbx_type ~= output_field.mdbx_type
@@ -3350,30 +3361,36 @@ local function table_param_rec(db, param, output_field)
 	return field, rec, param_schema, base_schema
 end
 
---if params[1..key_n] are all table-type eq params pointing at the same rec
---and the rec layout is exactly the same as the seek key rec, including column
---order, and all cols are not_null, then we can use that rec directly to
---raw-seek with it without copying or re-encoding.
+--if params[1..key_n] are all table-type eq params pointing at the same rec,
+--in that rec's own field order, the key can be built without a field-by-field
+--Lua loop: 'direct' when the layout is also byte-identical (key_sig match,
+--all not_null) -> use the rec as-is; else 'reencode' -> key_reencode()
+--bridges a layout difference (e.g. a nullable column) in one C call instead
+--of key_n Lua closures.
 local function direct_read_rec(db, schema, path)
-	local first_rec
+	local first_rec, first_key_schema
+	local all_not_null = true
 	for i = 1, #schema.key_fields do
 		local param = path[i][3]
 		local output_field = schema.key_fields[i]
 		if not param.table then return end
 		local field, rec, param_schema, base_schema =
 			table_param_rec(db, param, output_field)
-		if not (field and field.key_index and field.not_null) then
-			return --incompatible, value column, or nullable source.
+		if not (field and field.key_index) then
+			return --incompatible or value column: neither path works.
 		end
 		if i == 1 then
-			local key_schema = rec == param.key_rec and param_schema or base_schema
-			if key_schema.key_sig ~= schema.key_sig then return end
 			first_rec = rec
+			first_key_schema = rec == param.key_rec and param_schema or base_schema
 		elseif field.key_index - 1 ~= i - 1 or rec ~= first_rec then
 			return
 		end
+		all_not_null = all_not_null and field.not_null
 	end
-	return first_rec
+	if all_not_null and first_key_schema.key_sig == schema.key_sig then
+		return 'direct', first_rec
+	end
+	return 'reencode', first_rec, first_key_schema
 end
 
 --param -> closure(out) that writes one field's bytes at pp[0] in out_schema
@@ -3461,6 +3478,22 @@ local function key_write(db, output_schema, params, args)
 	end
 end
 
+--one field (a range bound) -> closure(out, prefix_sz) -> data, sz; appends
+--after prefix_sz bytes already written at out. nil when absent (DB null).
+--partial trims the field's terminator, for a starts (prefix) scan.
+local function bound_write(db, param, output_schema, slot, args, partial)
+	if not param then return end
+	local fn = field_write(db, param, output_schema, slot, args)
+	local trim = partial and output_schema.key_fields[slot].elem_size
+	return function(out, prefix_sz)
+		pp[0] = out + prefix_sz
+		if not fn(out) then return end
+		local p = pp[0]
+		if trim then p = p - trim end
+		return out, p - out
+	end
+end
+
 function Db:table_scanner(tbl, path)
 	local db = self
 	local schema = assert(db:table_schema(tbl))
@@ -3530,21 +3563,6 @@ function Db:table_scanner(tbl, path)
 		lo_param, hi_param = hi_param, lo_param
 	end
 
-	--find nargs, i.e. how many params are to be supplied from reset(...) args.
-	local nargs = 0
-	local function scan_arg(param)
-		if param and param.arg then nargs = max(nargs, param.arg) end
-	end
-	for i = 1, eq_n do scan_arg(path[i][3]) end
-	scan_arg(lo_param)
-	scan_arg(hi_param)
-	scan_arg(prefix_param)
-	local args = nargs > 0 and {}
-
-	local direct_rec = exact_key and direct_read_rec(db, schema, path)
-
-	--reset -------------------------------------------------------------------
-
 	--seeked (key, val), published for use as raw input in other scans.
 	local key_rec = MDBX_val()
 	local val_rec = MDBX_val()
@@ -3563,18 +3581,138 @@ function Db:table_scanner(tbl, path)
 		exact_key and not is_index and 0
 		or (exact_key and is_index) and eq_n - key_n
 		or eq_n
+	local pk_fixed_sz = range_in_val and schema.dup_fixedsize
+
+	--param reading / encoder compilation --------------------------------------
+
+	--find nargs, i.e. how many params are to be supplied from reset(...) args.
+	local nargs = 0
+	local function scan_arg(param)
+		if param and param.arg then nargs = max(nargs, param.arg) end
+	end
+	for i = 1, eq_n do scan_arg(path[i][3]) end
+	scan_arg(lo_param)
+	scan_arg(hi_param)
+	scan_arg(prefix_param)
+	local args = nargs > 0 and {}
+
+	local direct_mode, direct_rec, direct_key_schema
+	if exact_key then
+		direct_mode, direct_rec, direct_key_schema =
+			direct_read_rec(db, schema, path)
+	end
+
+	--fallback exact-key encoder, used when direct_rec isn't verbatim-usable.
+	local exact_write, exact_buf, reencode_key
+	if direct_mode == 'reencode' then
+		reencode_key = u8a(schema.key_fields.max_rec_size)
+	elseif exact_key and not direct_mode then
+		local exact_params = {}
+		for i = 1, key_n do exact_params[i] = path[i][3] end
+		exact_write = key_write(db, schema, exact_params, args)
+		exact_buf = u8a(schema.key_fields.max_rec_size)
+	end
+
+	--range key's eq prefix (shared by starts/lo/hi), when non-empty.
+	local eq_write
+	if range_depth > 0 then
+		local eq_params = {}
+		for i = 1, range_depth do
+			eq_params[i] = path[range_eq_i + i - 1][3]
+		end
+		eq_write = key_write(db, range_schema, eq_params, args)
+	end
+
+	--range bound fields, each appended after the eq prefix at the same slot.
+	local bound_slot = range_depth + 1
+	local lo_write     = bound_write(db,     lo_param, range_schema, bound_slot, args)
+	local hi_write     = bound_write(db,     hi_param, range_schema, bound_slot, args)
+	local starts_write = bound_write(db, prefix_param, range_schema, bound_slot, args, true)
+
+	local range_cap = range_schema.key_fields.max_rec_size
+	local seek_key  = (eq_write or starts_write or lo_write) and u8a(range_cap)
+	local limit_key = (eq_write or starts_write or hi_write) and u8a(range_cap)
+
+	--reset -------------------------------------------------------------------
 
 	--state between reset() and advance().
 	local must_seek, limit_data, limit_sz
 	local empty_scan, started
 
+	--eq prefix (+ range bound) -> seek key, then the limit to stop at;
+	--swapped for a reverse scan so advance() has one fixed role per side.
+	local function compute_bounds()
+		local psz = 0
+		if eq_write then
+			local data, sz = eq_write(seek_key)
+			if not data then empty_scan = true; return end
+			psz = sz
+		end
+
+		local lo_data, lo_sz, hi_data, hi_sz
+		if starts_write then
+			local data, sz = starts_write(seek_key, psz)
+			if not data then empty_scan = true; return end
+			lo_data, lo_sz = data, sz
+			copy(limit_key, data, sz)
+			hi_data, hi_sz = limit_key, increment_prefix(limit_key, sz)
+		else
+			if psz > 0 then copy(limit_key, seek_key, psz) end
+			if lo_write then
+				local data, sz = lo_write(seek_key, psz)
+				if not data then empty_scan = true; return end
+				lo_data, lo_sz = data, sz
+				if lo_op == '>' then
+					lo_sz = increment_prefix(data, sz)
+					if not lo_sz then empty_scan = true; return end
+				end
+			elseif psz > 0 then
+				lo_data, lo_sz = seek_key, psz
+			end
+			if hi_write then
+				local data, sz = hi_write(limit_key, psz)
+				if not data then empty_scan = true; return end
+				hi_data, hi_sz = data, sz
+				if hi_op == '<=' then
+					hi_sz = increment_prefix(data, sz)
+				end
+			elseif psz > 0 then
+				hi_data, hi_sz = limit_key, increment_prefix(limit_key, psz)
+			end
+		end
+
+		if pk_fixed_sz then
+			lo_data, lo_sz = pad_data(lo_data, lo_sz, seek_key, pk_fixed_sz)
+			hi_data, hi_sz = pad_data(hi_data, hi_sz, limit_key, pk_fixed_sz)
+		end
+		if reverse then
+			return hi_data, hi_sz, lo_data, lo_sz
+		end
+		return lo_data, lo_sz, hi_data, hi_sz
+	end
+
 	function scan.reset(...)
 		assert(select('#', ...) == nargs, 'table_scanner: args')
 		for i = 1, nargs do args[i] = select(i, ...) end
 		empty_scan = false
-		if exact_enc then
-			local data, sz = encode_bound(exact_enc, exact_key)
-			if data then key_rec.data, key_rec.size = data, sz end
+		if direct_mode == 'direct' then
+			key_rec.data, key_rec.size = direct_rec.data, direct_rec.size
+		elseif direct_mode == 'reencode' then
+			local sz = key_reencode(direct_key_schema, schema,
+				direct_rec.data, direct_rec.size,
+				reencode_key, schema.key_fields.max_rec_size)
+			if sz >= 0 then
+				key_rec.data, key_rec.size = reencode_key, sz
+			else
+				empty_scan = true
+			end
+		elseif exact_write then
+			local data, sz = exact_write(exact_buf)
+			if data then
+				key_rec.data, key_rec.size = data, sz
+			else
+				empty_scan = true
+			end
 		end
 		local seek_data, seek_sz
 		seek_data, seek_sz, limit_data, limit_sz = compute_bounds()
