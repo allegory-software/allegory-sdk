@@ -3292,9 +3292,16 @@ Why so complicated:
  - range col is optional and can land on the index key rec or val rec.
  - must rediscover fk keys by analyzing params and even that has two modes:
    direct raw key use and re-encode key in C (for fks on nullable cols).
- - getting params individually to write into the key buffer also has 3 modes:
-   encode Lua value, get raw key col, get raw val col.
- - reversing means reversing the ranges and all mdbx ops, and has edge cases.
+ - getting params individually to write into the key buffer also has 4 modes:
+   encode Lua value, copy raw key col, copy raw val col, re-encode key/val col.
+ - reversing means reversing the ranges and all mdbx ops which has edge cases.
+ - edge case: bounds are converted to half-open byte intervals, but incrementing
+   a byte prefix can have no successor.
+ - edge case: partial bounds over DUPFIXED PKs require padding.
+ - useful inconsistency: a nil/null arg/value param means "seek to null"
+   but a null value coming from a table param means "the correlated comparison
+	cannot match" because table params are used as join conditions.
+ - edge case: ai_ci "collation" index columns do not contain the original text.
 
 ]]
 
@@ -3327,9 +3334,10 @@ local function path_field(schema, i) --i = path term index
 	return kf[i] or schema.is_index and schema.val_schema.key_fields[i - #kf]
 end
 
---for a table param, find the rec (either param.key_rec or param.val_rec) that
---can be put raw into a key buffer to form a search key; nil if not compatible.
---NOTE: field.key_index and field.not_null is checked by the caller.
+--for a table param, resolve the field and the rec (param.key_rec or
+--param.val_rec) that holds its bytes, plus the param's schemas. does not
+--judge type compatibility with output_field; the two callers treat a
+--mismatch differently.
 local function table_param_rec(db, param, output_field)
 	local param_schema = db:table_schema(param.table)
 	assertf(param_schema, 'no schema: %s', param.table)
@@ -3346,17 +3354,12 @@ local function table_param_rec(db, param, output_field)
 		assertf(field, 'no field: %s.%s', param.table, param.col)
 		if field.key_index then --field is pk
 			rec = param_schema.is_index and param.val_rec or param.key_rec
-		else
+		else --value column: only a base-table param carries it in val_rec;
+			--an index param's val_rec holds the pk, needing a base lookup.
+			assertf(not param_schema.is_index,
+				'value column from index param: %s.%s', param.table, param.col)
 			rec = param.val_rec
 		end
-	end
-	if field.mdbx_type ~= output_field.mdbx_type
-		or field.maxlen ~= output_field.maxlen
-		or field.padded ~= output_field.padded
-		or field.nozero ~= output_field.nozero
-		or field.mdbx_collation ~= output_field.mdbx_collation
-	then
-		return
 	end
 	return field, rec, param_schema, base_schema
 end
@@ -3376,8 +3379,16 @@ local function direct_read_rec(db, schema, path)
 		if not param.table then return end
 		local field, rec, param_schema, base_schema =
 			table_param_rec(db, param, output_field)
-		if not (field and field.key_index) then
-			return --incompatible or value column: neither path works.
+		--the verbatim/reencode paths reuse raw bytes, so a value column or a
+		--layout mismatch both rule them out.
+		if not field.key_index
+			or field.mdbx_type ~= output_field.mdbx_type
+			or field.maxlen ~= output_field.maxlen
+			or field.padded ~= output_field.padded
+			or field.nozero ~= output_field.nozero
+			or field.mdbx_collation ~= output_field.mdbx_collation
+		then
+			return
 		end
 		if i == 1 then
 			first_rec = rec
@@ -3423,15 +3434,34 @@ local function field_write(db, param, output_schema, slot, args)
 	else
 		local field, rec, param_schema, base_schema =
 			table_param_rec(db, param, output_field)
-		assertf(field, 'incompatible: %s.%s -> %s.%s',
-			param.table, param.col, output_schema.name, output_field.col)
-		if not field.key_index then --value column: an index param has no
-			assertf(not param_schema.is_index, --base-table lookup.
-				'value column from index param: %s.%s', param.table, param.col)
-		end
 		local is_key_read = rec == param.key_rec
 		local st = is_key_read and param_schema._st or base_schema._st
 		local field_i = field.key_index and field.key_index - 1 or field.val_index - 1
+
+		--raw bytes only work when the source encoding matches output_field's.
+		--otherwise decode the source value and encode it through output_field;
+		--like the raw path, an absent (DB null) source aborts the key.
+		if field.mdbx_type ~= output_field.mdbx_type
+			or field.maxlen ~= output_field.maxlen
+			or field.padded ~= output_field.padded
+			or field.nozero ~= output_field.nozero
+			or field.mdbx_collation ~= output_field.mdbx_collation
+		then
+			local decode = field.decode
+			assertf(decode, 'incompatible: %s.%s -> %s.%s',
+				param.table, param.col, output_schema.name, output_field.col)
+			return function(out)
+				local len = is_key_read
+					and C.schema_get_key(st, field_i, rec.data, rec.size,
+						key_decode_buffer, MDBX_MAX_KEY_SIZE, pout, nil)
+					or C.schema_get_val(st, field_i, rec.data, rec.size, pout)
+				if len < 0 then return false end
+				local elen = output_field.encode(db, 'scan', pp[0],
+					decode(pout[0], len))
+				C.schema_key_add(out_st, i, out, cap, elen, pp)
+				return true
+			end
+		end
 
 		local elem_sz = field.elem_size
 		if is_key_read then
@@ -3790,10 +3820,8 @@ function Db:table_scanner(tbl, path)
 	end
 
 	function scan.close()
-		if not cur then return end
-		cur:close()
-		cur = nil
 		started = nil
+		if cur then cur:close(); cur = nil end
 	end
 
 	return scan

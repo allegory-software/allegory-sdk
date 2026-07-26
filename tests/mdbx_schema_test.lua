@@ -5708,6 +5708,75 @@ function test.table_scanner_column_refs()
 	end)
 end
 
+--a correlated param whose source column has a different (but decodable)
+--layout than the output key field: the raw-bytes path can't be used, so the
+--source is decoded and re-encoded through the output field.
+function test.table_scanner_incompatible_decode()
+	with_db('table_scanner_incompatible_decode', function(db)
+		db:begin'w'
+		--source cols are utf8 maxlen 8; dest index cols are utf8 maxlen 16.
+		db:create_table('src', {fields = {
+			{col = 'tag', mdbx_type = 'utf8', maxlen = 8,
+				nozero = true, not_null = true},
+			{col = 'name', mdbx_type = 'utf8', maxlen = 8,
+				nozero = true, not_null = true},
+		}, pk = {'tag'}})
+		db:insert('src', '{}', {tag = 'x', name = 'foo'})
+
+		db:create_table('dst', {fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'tag', mdbx_type = 'utf8', maxlen = 16,
+				nozero = true, not_null = true},
+			{col = 'name', mdbx_type = 'utf8', maxlen = 16,
+				nozero = true, not_null = true},
+		}, pk = {'id'}})
+		db:add_index('dst', {'tag'})
+		db:add_index('dst', {'name'})
+		for _, row in ipairs{
+			{id = 1, tag = 'x', name = 'foo'},
+			{id = 2, tag = 'x', name = 'bar'},
+			{id = 3, tag = 'y', name = 'foo'},
+		} do
+			db:insert('dst', '{}', row)
+		end
+		db:commit()
+		db:begin'r'
+
+		local outer = db:table_scanner('src', {{'tag', dir = 'asc'}})
+		outer.reset()
+		assert(outer.advance())
+
+		--key-column source: src.tag (key_rec) -> dst/tag key (is_key_read).
+		local by_tag = db:table_scanner('dst/tag', {
+			{'tag', '=', {
+				table = 'src', col = 'tag',
+				key_rec = outer.key_rec, val_rec = outer.val_rec,
+			}},
+			{'id', dir = 'asc'},
+		})
+		local get_id = table_scanner_col_decoder(db, by_tag, 'id')
+		by_tag.reset()
+		assert(table_scanner_values(by_tag, get_id) == '1,2')
+
+		--value-column source: src.name (val_rec) -> dst/name key.
+		local by_name = db:table_scanner('dst/name', {
+			{'name', '=', {
+				table = 'src', col = 'name',
+				key_rec = outer.key_rec, val_rec = outer.val_rec,
+			}},
+			{'id', dir = 'asc'},
+		})
+		get_id = table_scanner_col_decoder(db, by_name, 'id')
+		by_name.reset()
+		assert(table_scanner_values(by_name, get_id) == '1,3')
+
+		outer.close()
+		by_tag.close()
+		by_name.close()
+		db:commit()
+	end)
+end
+
 function test.table_scanner_reuse()
 	with_db('table_scanner_reuse', function(db)
 		add_table_scanner_data(db)
