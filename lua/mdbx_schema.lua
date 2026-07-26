@@ -3516,6 +3516,12 @@ local function bound_write(db, param, output_schema, slot, args, partial)
 	local fn = field_write(db, param, output_schema, slot, args)
 	local trim = partial and output_schema.key_fields[slot].elem_size
 	return function(out, prefix_sz)
+		if partial and not param.table then
+			local v = param.value
+			if param.arg then v = args[param.arg] end
+			--a prefix value cannot be DB null.
+			assert(v ~= nil and v ~= null, 'table_scanner: starts')
+		end
 		pp[0] = out + prefix_sz
 		if not fn(out) then return end
 		local p = pp[0]
@@ -3534,7 +3540,7 @@ function Db:table_scanner(tbl, path)
 
 	local eq_n = 0 --how many equality columns
 	local reverse
-	local range_col
+	local range_field
 	local prefix_param
 	local lo_op, lo_param
 	local hi_op, hi_param
@@ -3543,14 +3549,17 @@ function Db:table_scanner(tbl, path)
 		local f = path_field(schema, i)
 		assertf(f and f.col == col, 'invalid col: %s', col)
 		if op then
-			assertf(i == eq_n + 1 and not range_col, 'invalid path term: %s', col)
+			assertf(i == eq_n + 1 and not range_field,
+				'invalid path term: %s', col)
 			if op == '=' then --{col, '=', param}
 				eq_n = eq_n + 1
 			elseif op == 'starts' then --{col, 'starts', param}
-				range_col = col
+				range_field = f
 				prefix_param = term[3]
+				--starts requires a value descriptor.
+				assert(prefix_param, 'table_scanner: starts param')
 			else --range or inequality
-				range_col = col
+				range_field = f
 				if op == 'range' then --{col, 'range', lo_op, param, hi_op, param}
 					lo_op, lo_param = term[3], term[4]
 					hi_op, hi_param = term[5], term[6]
@@ -3568,11 +3577,14 @@ function Db:table_scanner(tbl, path)
 		local dir = term.dir
 		if dir then
 			assertf(dir == 'asc' or dir == 'desc', 'invalid path dir: %s', dir)
-			local backwards = not f.descending ~= (dir == 'asc')
-			if reverse == nil then
-				reverse = backwards
-			else
-				assertf(reverse == backwards, 'mixed direction: %s', col)
+			--equality field direction does not affect returned order.
+			if op ~= '=' then
+				local backwards = not f.descending ~= (dir == 'asc')
+				if reverse == nil then
+					reverse = backwards
+				else
+					assertf(reverse == backwards, 'mixed direction: %s', col)
+				end
 			end
 		end
 	end
@@ -3580,7 +3592,6 @@ function Db:table_scanner(tbl, path)
 	local is_index = schema.is_index
 	local key_n = #schema.key_fields
 	local exact_key = eq_n >= key_n
-	local range_field = range_col and path_field(schema, eq_n + 1)
 	if prefix_param then --prefix scans require a varsize string field.
 		assertf(range_field.maxlen and not range_field.padded,
 			'prefix on field: %s', range_field.col)
@@ -3626,21 +3637,29 @@ function Db:table_scanner(tbl, path)
 	scan_arg(prefix_param)
 	local args = nargs > 0 and {}
 
-	local direct_mode, direct_rec, direct_key_schema
+	local exact_write
 	if exact_key then
-		direct_mode, direct_rec, direct_key_schema =
+		local direct_mode, direct_rec, direct_key_schema =
 			direct_read_rec(db, schema, path)
-	end
-
-	--fallback exact-key encoder, used when direct_rec isn't verbatim-usable.
-	local exact_write, exact_buf, reencode_key
-	if direct_mode == 'reencode' then
-		reencode_key = u8a(schema.key_fields.max_rec_size)
-	elseif exact_key and not direct_mode then
-		local exact_params = {}
-		for i = 1, key_n do exact_params[i] = path[i][3] end
-		exact_write = key_write(db, schema, exact_params, args)
-		exact_buf = u8a(schema.key_fields.max_rec_size)
+		if direct_mode == 'direct' then
+			exact_write = function()
+				return direct_rec.data, direct_rec.size
+			end
+		elseif direct_mode == 'reencode' then
+			local out = u8a(schema.key_fields.max_rec_size)
+			exact_write = function()
+				local sz = key_reencode(direct_key_schema, schema,
+					direct_rec.data, direct_rec.size, out,
+					schema.key_fields.max_rec_size)
+				if sz >= 0 then return out, sz end
+			end
+		else
+			local params = {}
+			for i = 1, key_n do params[i] = path[i][3] end
+			local out = u8a(schema.key_fields.max_rec_size)
+			local write = key_write(db, schema, params, args)
+			exact_write = function() return write(out) end
+		end
 	end
 
 	--range key's eq prefix (shared by starts/lo/hi), when non-empty.
@@ -3725,19 +3744,8 @@ function Db:table_scanner(tbl, path)
 		assert(select('#', ...) == nargs, 'table_scanner: args')
 		for i = 1, nargs do args[i] = select(i, ...) end
 		empty_scan = false
-		if direct_mode == 'direct' then
-			key_rec.data, key_rec.size = direct_rec.data, direct_rec.size
-		elseif direct_mode == 'reencode' then
-			local sz = key_reencode(direct_key_schema, schema,
-				direct_rec.data, direct_rec.size,
-				reencode_key, schema.key_fields.max_rec_size)
-			if sz >= 0 then
-				key_rec.data, key_rec.size = reencode_key, sz
-			else
-				empty_scan = true
-			end
-		elseif exact_write then
-			local data, sz = exact_write(exact_buf)
+		if exact_write then
+			local data, sz = exact_write()
 			if data then
 				key_rec.data, key_rec.size = data, sz
 			else
