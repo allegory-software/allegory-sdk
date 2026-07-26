@@ -83,6 +83,14 @@ ENCODING / DECODING
 	cur:decode_kv  (k,k_sz, v,v_sz, [val_cols]) -> keysvals...
 	db:col_decoder (schema, col, ix_key, pk, get_base_val) -> get()
 	db:key_encoder (schema, cols, key_schema, ix_key, pk, get_base_val) -> enc()
+TABLE SCANNER
+	db:table_scanner (table, path) -> scan
+	scan.reset        (args...)
+	scan.advance      ([by_key]) -> true | nil
+	scan.advance_pk   () -> true | nil
+	scan.advance_key  () -> true | nil
+	scan.close        ()
+	scan.key_rec, scan.val_rec
 
 COLUMS LISTS & IN/OUT VALUES FORMATS
 
@@ -156,8 +164,8 @@ require'schema'
 local C = ffi.load'mdbx_schema' --see src/c/mdbx_schema/mdbx_schema.c
 
 local
-	typeof, num, shl, shr, band, bor, xor, bnot, bswap, u8p, copy, cast, memcmp =
-	typeof, num, shl, shr, band, bor, xor, bnot, bswap, u8p, copy, cast, memcmp
+	assertf, assert, typeof, num, copy, cast, memcmp, min, null, select =
+	assertf, assert, typeof, num, copy, cast, memcmp, min, null, select
 
 assert(ffi.abi'le')
 
@@ -3257,4 +3265,398 @@ function Db:each_dup(ix_name, val_cols, ...)
 end
 function Cur:each_current_dup(val_cols)
 	return each_dup_from(self.db, self, assert(self.schema), val_cols, false)
+end
+
+--TABLE SCANNER --------------------------------------------------------------
+
+--[[
+A table scanner brings column-based index/base-table seek over mdbx seek ops:
+The path arg is a strict sequence of path terms containing:
+ - zero or more leading equality columns (the eq fields).
+ - optionally, a range or string prefix on the next column (the range field).
+ - optionally, the direction of the last column.
+ - later columns remain unconstrained but determine returned order.
+For an index table, columns must be a sequence of leading (key cols, val cols)
+i.e. (ix cols, pk cols). For a base table, columns is a sequence of leading
+(key cols) only i.e. (pk_cols). Note that ix cols can contain one or more pk
+cols, in which case those input values will have to be repeated.
+Each path term contains the column name, an operator and one or two input value
+descriptors called params, which tells how the value is supplied: either in
+the param itself, via reset(...) args, or in a MDBX_val (key, val) pair that
+points to an index/base-table raw record from which the value can be extracted
+with or without decoding it first.
+]]
+
+local function key_cmp(a, a_sz, b, b_sz)
+	local c = memcmp(a, b, min(a_sz, b_sz))
+	if c == 0 then return a_sz < b_sz end
+	return c < 0
+end
+
+--string prefix -> exclusive upper bound; nil when no larger prefix exists.
+local function increment_prefix(prefix, sz)
+	local i = sz - 1
+	while i >= 0 and prefix[i] == 255 do i = i - 1 end
+	if i < 0 then return end
+	prefix[i] = prefix[i] + 1
+	return i + 1
+end
+
+--copy and pad input data if not already for comparing with DUPFIXED keys.
+local function pad_data(data, sz, out, out_sz)
+	if not sz or sz >= out_sz then return data, sz end
+	if data ~= out then copy(out, data, sz) end
+	fill(out + sz, out_sz - sz)
+	return out, out_sz
+end
+
+--path fields is (keys..., vals...) for indexes and (keys...) for base tables.
+local function path_field(schema, i) --i = path term index
+	local kf = schema.key_fields
+	return kf[i] or schema.is_index and schema.val_schema.key_fields[i - #kf]
+end
+
+--for a table param, find the rec (either param.key_rec or param.val_rec) that
+--can be put raw into a key buffer to form a search key; nil if not compatible.
+--NOTE: field.key_index and field.not_null is checked by the caller.
+local function table_param_rec(db, param, output_field)
+	local param_schema = db:table_schema(param.table)
+	assertf(param_schema, 'no schema: %s', param.table)
+	local base_schema = param_schema.val_schema or param_schema
+	local field = param_schema.fields[param.col]
+	local rec
+	if field and field.key_index
+		and (field.mdbx_collation ~= 'utf8_ai_ci'
+			or output_field.mdbx_collation == 'utf8_ai_ci')
+	then --field is in the index key_rec and it's usable.
+		rec = param.key_rec
+	else
+		field = base_schema.fields[param.col]
+		assertf(field, 'no field: %s.%s', param.table, param.col)
+		if field.key_index then --field is pk
+			rec = param_schema.is_index and param.val_rec or param.key_rec
+		else
+			rec = param.val_rec --value column
+		end
+	end
+	if field.mdbx_type ~= output_field.mdbx_type
+		or field.maxlen ~= output_field.maxlen
+		or field.padded ~= output_field.padded
+		or field.nozero ~= output_field.nozero
+		or field.mdbx_collation ~= output_field.mdbx_collation
+	then
+		return
+	end
+	return field, rec, param_schema, base_schema
+end
+
+--if params[1..key_n] are all table-type eq params pointing at the same rec
+--and the rec layout is exactly the same as the seek key rec, including column
+--order, and all cols are not_null, then we can use that rec directly to
+--raw-seek with it without copying or re-encoding.
+local function direct_read_rec(db, schema, path)
+	local first_rec
+	for i = 1, #schema.key_fields do
+		local param = path[i][3]
+		local output_field = schema.key_fields[i]
+		if not param.table then return end
+		local field, rec, param_schema, base_schema =
+			table_param_rec(db, param, output_field)
+		if not (field and field.key_index and field.not_null) then
+			return --incompatible, value column, or nullable source.
+		end
+		if i == 1 then
+			local key_schema = rec == param.key_rec and param_schema or base_schema
+			if key_schema.key_sig ~= schema.key_sig then return end
+			first_rec = rec
+		elseif field.key_index - 1 ~= i - 1 or rec ~= first_rec then
+			return
+		end
+	end
+	return first_rec
+end
+
+--param -> closure(out) that writes one field's bytes at pp[0] in out_schema
+--and advances pp; returns false if a raw source field is absent (DB null).
+--args is the scan's reset-args table, needed for an arg-sourced param.
+local function field_write(db, param, output_schema, slot, args)
+	local output_field = output_schema.key_fields[slot]
+	local out_st = output_schema._st
+	local cap = output_schema.key_fields.max_rec_size
+	local i = slot - 1
+	if not param.table then
+		local arg, value = param.arg, param.value
+		local name = output_schema.name
+		return function(out)
+			local v = value
+			if arg then v = args[arg] end
+			local len
+			if v == nil or v == null then --missing arg is null.
+				if output_field.not_null then
+					db:check_col('scan', name, output_field.col,
+						false, 'null_key')
+				end
+				len = -1
+			else
+				len = output_field.encode(db, 'scan', pp[0], v)
+			end
+			C.schema_key_add(out_st, i, out, cap, len, pp)
+			return true
+		end
+	else
+		local field, rec, param_schema, base_schema =
+			table_param_rec(db, param, output_field)
+		assertf(field, 'incompatible: %s.%s -> %s.%s',
+			param.table, param.col, output_schema.name, output_field.col)
+		if not field.key_index then --value column: an index param has no
+			assertf(not param_schema.is_index, --base-table lookup.
+				'value column from index param: %s.%s', param.table, param.col)
+		end
+		local is_key_read = rec == param.key_rec
+		local st = is_key_read and param_schema._st or base_schema._st
+		local field_i = field.key_index and field.key_index - 1 or field.val_index - 1
+
+		local elem_sz = field.elem_size
+		if is_key_read then
+			return function(out)
+				--cache pp[0]/pout[0]: each box-allocates a cdata value on read,
+				--and neither changes until schema_key_add runs below.
+				local p = pp[0]
+				local len = C.schema_get_key(st, field_i, rec.data, rec.size,
+					p, cap - (p - out), pout, nil)
+				if len < 0 then return false end
+				local po = pout[0]
+				if po ~= p then copy(p, po, len * elem_sz) end
+				C.schema_key_add(out_st, i, out, cap, len, pp)
+				return true
+			end
+		else
+			return function(out)
+				local len = C.schema_get_val(st, field_i, rec.data, rec.size, pout)
+				if len < 0 then return false end
+				local p, po = pp[0], pout[0]
+				if po ~= p then copy(p, po, len * elem_sz) end
+				C.schema_key_add(out_st, i, out, cap, len, pp)
+				return true
+			end
+		end
+	end
+end
+
+--params (one per slot, 1..#params) + output_schema -> closure(out) -> data, sz;
+--nil when a raw source field is absent (DB null). combines field_write
+--closures for one output key.
+local function key_write(db, output_schema, params, args)
+	local fns = {}
+	for slot = 1, #params do
+		fns[slot] = field_write(db, params[slot], output_schema, slot, args)
+	end
+	local n = #fns
+	return function(out)
+		pp[0] = out
+		for i = 1, n do
+			if not fns[i](out) then return end
+		end
+		return out, pp[0] - out
+	end
+end
+
+function Db:table_scanner(tbl, path)
+	local db = self
+	local schema = assert(db:table_schema(tbl))
+	local scan = {}
+	scan.table = schema.name
+
+	--path parsing, validation, analysis --------------------------------------
+
+	local eq_n = 0 --how many equality columns
+	local reverse
+	local range_col
+	local prefix_param
+	local lo_op, lo_param
+	local hi_op, hi_param
+	for i, term in ipairs(path) do
+		local col, op = term[1], term[2]
+		local f = path_field(schema, i)
+		assertf(f and f.col == col, 'invalid col: %s', col)
+		if op then
+			assertf(i == eq_n + 1 and not range_col, 'invalid path term: %s', col)
+			if op == '=' then --{col, '=', param}
+				eq_n = eq_n + 1
+			elseif op == 'starts' then --{col, 'starts', param}
+				range_col = col
+				prefix_param = term[3]
+			else --range or inequality
+				range_col = col
+				if op == 'range' then --{col, 'range', lo_op, param, hi_op, param}
+					lo_op, lo_param = term[3], term[4]
+					hi_op, hi_param = term[5], term[6]
+					assert(not lo_op or lo_op == '>' or lo_op == '>=')
+					assert(not hi_op or hi_op == '<' or hi_op == '<=')
+				elseif op == '>' or op == '>=' then --{col, '>'|'>=', param}
+					lo_op, lo_param = op, term[3]
+				elseif op == '<' or op == '<=' then --{col, '<'|'<=', param}
+					hi_op, hi_param = op, term[3]
+				else
+					assertf(false, 'invalid op: %s', op)
+				end
+			end
+		end
+		local dir = term.dir
+		if dir then
+			assertf(dir == 'asc' or dir == 'desc', 'invalid path dir: %s', dir)
+			local backwards = not f.descending ~= (dir == 'asc')
+			if reverse == nil then
+				reverse = backwards
+			else
+				assertf(reverse == backwards, 'mixed direction: %s', col)
+			end
+		end
+	end
+
+	local is_index = schema.is_index
+	local key_n = #schema.key_fields
+	local exact_key = eq_n >= key_n
+	local range_field = range_col and path_field(schema, eq_n + 1)
+	if prefix_param then --prefix scans require a varsize string field.
+		assertf(range_field.maxlen and not range_field.padded,
+			'prefix on field: %s', range_field.col)
+	end
+	if (hi_op or lo_op) and range_field.descending then
+		--reverse range bounds for desc range col because bounds are in byte-order.
+		lo_op, hi_op =
+			hi_op and hi_op == '<' and '>' or '>=',
+			lo_op and lo_op == '>' and '<' or '<='
+		lo_param, hi_param = hi_param, lo_param
+	end
+
+	--find nargs, i.e. how many params are to be supplied from reset(...) args.
+	local nargs = 0
+	local function scan_arg(param)
+		if param and param.arg then nargs = max(nargs, param.arg) end
+	end
+	for i = 1, eq_n do scan_arg(path[i][3]) end
+	scan_arg(lo_param)
+	scan_arg(hi_param)
+	scan_arg(prefix_param)
+	local args = nargs > 0 and {}
+
+	local direct_rec = exact_key and direct_read_rec(db, schema, path)
+
+	--reset -------------------------------------------------------------------
+
+	--seeked (key, val), published for use as raw input in other scans.
+	local key_rec = MDBX_val()
+	local val_rec = MDBX_val()
+	scan.key_rec = key_rec
+	scan.val_rec = val_rec
+
+	local range_in_val = exact_key and is_index
+	local range_schema = range_in_val and schema.val_schema or schema
+	local range_rec = range_in_val and val_rec or key_rec
+
+	--eq columns start in key_rec but can extend into val_rec on an index.
+	--range_depth is how many eq columns are in range_rec.
+	--range_eq_i is where range eq columns start among the path's eq columns.
+	local range_eq_i = range_in_val and key_n + 1 or 1
+	local range_depth =
+		exact_key and not is_index and 0
+		or (exact_key and is_index) and eq_n - key_n
+		or eq_n
+
+	--state between reset() and advance().
+	local must_seek, limit_data, limit_sz
+	local empty_scan, started
+
+	function scan.reset(...)
+		assert(select('#', ...) == nargs, 'table_scanner: args')
+		for i = 1, nargs do args[i] = select(i, ...) end
+		empty_scan = false
+		if exact_enc then
+			local data, sz = encode_bound(exact_enc, exact_key)
+			if data then key_rec.data, key_rec.size = data, sz end
+		end
+		local seek_data, seek_sz
+		seek_data, seek_sz, limit_data, limit_sz = compute_bounds()
+		if seek_sz then
+			range_rec.data = seek_data
+			range_rec.size = seek_sz
+			must_seek = true
+		else
+			must_seek = false
+		end
+		started = false
+	end
+
+	--advance -----------------------------------------------------------------
+
+	--direction-aware steps.
+	local step_op  = reverse and C.MDBX_PREV       or C.MDBX_NEXT
+	local dup_op   = reverse and C.MDBX_PREV_DUP   or C.MDBX_NEXT_DUP
+	local nodup_op = reverse and C.MDBX_PREV_NODUP or C.MDBX_NEXT_NODUP
+
+	--start-of-scan positioning, based on: exact_key, is_index, reverse.
+	local seek_op = exact_key and is_index
+		and (reverse and C.MDBX_TO_EXACT_KEY_VALUE_LESSER_THAN or C.MDBX_GET_BOTH_RANGE)
+		or  (reverse and C.MDBX_TO_KEY_LESSER_THAN or C.MDBX_SET_RANGE)
+	local first_op = exact_key
+		and C.MDBX_SET_KEY
+		or (reverse and C.MDBX_LAST or C.MDBX_FIRST)
+	--a reverse dup scan lands on the key, then walks to its last duplicate.
+	local last_dup_op = exact_key and is_index
+		and reverse and C.MDBX_LAST_DUP or nil
+
+	--stepping ops for advance(), based on: exact_key, is_index.
+	local next_op =
+		exact_key and is_index and dup_op
+		or not exact_key and step_op
+	local next_pk_op = is_index and dup_op
+	--exact_key + is_index -> index key is fixed and the range is
+	--in the dup values, so there is no next key to step to.
+	local next_key_op =
+		not exact_key and is_index and nodup_op
+		or not is_index and next_op
+
+	local cur
+
+	local function advance(op)
+		assert(started ~= nil, 'advance: reset not called')
+		if not started then
+			started = true
+			if empty_scan then return end
+			if not cur then cur = db:cursor(schema.name) end
+			local start_op = must_seek and seek_op or first_op
+			if not cur:move_raw_into(start_op, key_rec, val_rec) then return end
+			if last_dup_op and not must_seek then
+				if not cur:move_raw_into(last_dup_op, key_rec, val_rec) then return end
+			end
+		elseif op then
+			if not cur:move_raw_into(op, key_rec, val_rec) then return end
+		else --next_*op is nil, no advance or limit check.
+			return
+		end
+		if limit_sz and key_cmp(range_rec.data, range_rec.size,
+			limit_data, limit_sz) ~= (not reverse)
+		then return end
+		return true
+	end
+	function scan.advance(by_key)
+		if by_key then return advance(next_key_op) end --next_key_op can be nil!
+		return advance(next_op)
+	end
+	function scan.advance_pk()
+		return advance(next_pk_op)
+	end
+	function scan.advance_key()
+		return advance(next_key_op)
+	end
+
+	function scan.close()
+		if not cur then return end
+		cur:close()
+		cur = nil
+		started = nil
+	end
+
+	return scan
 end
