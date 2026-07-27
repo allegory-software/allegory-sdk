@@ -292,6 +292,8 @@ void schema_key_add(schema_table* tbl, int col_i,
 );
 
 int schema_key_size(const void* rec, u8** pp);
+void schema_key_add_start(void* rec, int offset, u8** pp);
+void schema_key_pad(const void* data, int size, void* out, int out_size);
 
 int schema_key_add_key_rec(schema_table* tbl, int col_i,
 	void* rec, int rec_buf_size, u8** pp,
@@ -3351,8 +3353,7 @@ end
 --copy and pad input data if not already for comparing with DUPFIXED keys.
 local function pad_data(data, sz, out, out_sz)
 	if not sz or sz >= out_sz then return data, sz end
-	if data ~= out then copy(out, data, sz) end
-	fill(out + sz, out_sz - sz)
+	C.schema_key_pad(data, sz, out, out_sz)
 	return out, out_sz
 end
 
@@ -3540,7 +3541,7 @@ local function bound_write(db, param, output_schema, slot, args, partial)
 			--a prefix value cannot be DB null.
 			assert(v ~= nil and v ~= null, 'table_scanner: starts')
 		end
-		pp[0] = out + prefix_sz
+		C.schema_key_add_start(out, prefix_sz, pp)
 		if not fn(out) then return end
 		local sz = C.schema_key_size(out, pp)
 		if trim then sz = sz - trim end

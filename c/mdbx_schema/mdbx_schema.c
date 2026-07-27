@@ -132,6 +132,8 @@ void schema_key_add(schema_table* tbl, int col_i,
 	u8** pp
 );
 int schema_key_size(const void* rec, u8** pp);
+void schema_key_add_start(void* rec, int offset, u8** pp);
+void schema_key_pad(const void* data, int size, void* out, int out_size);
 int schema_key_add_key_rec(schema_table* tbl, int col_i,
 	void* rec, int rec_buf_size, u8** pp,
 	schema_table* src_tbl, int src_col_i, const MDBX_val* src_rec
@@ -577,6 +579,16 @@ void schema_key_add(schema_table* tbl, int col_i,
 
 int schema_key_size(const void* rec, u8** pp) {
 	return *pp - (const u8*)rec;
+}
+
+void schema_key_add_start(void* rec, int offset, u8** pp) {
+	*pp = (u8*)rec + offset;
+}
+
+void schema_key_pad(const void* data, int size, void* out, int out_size) {
+	if (data != out)
+		memmove(out, data, size);
+	memset((u8*)out + size, 0, out_size - size);
 }
 
 int schema_key_add_key_rec(schema_table* tbl, int col_i,
