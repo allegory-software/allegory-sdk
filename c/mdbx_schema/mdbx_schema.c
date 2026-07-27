@@ -102,8 +102,16 @@ typedef struct schema_table {
 	u8   dyn_offset_size; // 1,2,4
 } schema_table;
 
+int schema_key_cmp_rec(const MDBX_val* a, const MDBX_val* b);
+
 int schema_get_key(schema_table* tbl, int col_i,
 	void* rec, int rec_size,
+	u8* out, int out_size,
+	u8** pout,
+	u8** pp
+);
+int schema_get_key_rec(schema_table* tbl, int col_i,
+	const MDBX_val* rec,
 	u8* out, int out_size,
 	u8** pout,
 	u8** pp
@@ -115,14 +123,32 @@ int schema_get_val(schema_table* tbl, int col_i,
 	void* rec, int rec_size,
 	u8** pout
 );
+int schema_get_val_rec(schema_table* tbl, int col_i,
+	const MDBX_val* rec,
+	u8** pout
+);
 void schema_key_add(schema_table* tbl, int col_i,
 	void* rec, int rec_buf_size, int val_len,
 	u8** pp
+);
+int schema_key_size(const void* rec, u8** pp);
+int schema_key_add_key_rec(schema_table* tbl, int col_i,
+	void* rec, int rec_buf_size, u8** pp,
+	schema_table* src_tbl, int src_col_i, const MDBX_val* src_rec
+);
+int schema_key_add_val_rec(schema_table* tbl, int col_i,
+	void* rec, int rec_buf_size, u8** pp,
+	schema_table* src_tbl, int src_col_i, const MDBX_val* src_rec
 );
 int schema_key_reencode(
 	schema_table* fk_ix, schema_table* parent,
 	void* fk_key, int fk_key_size,
 	void* out, int out_size
+);
+int schema_key_reencode_rec(
+	schema_table* fk_ix, schema_table* parent,
+	const MDBX_val* fk_key, MDBX_val* out,
+	void* out_data, int out_size
 );
 void schema_val_add_start(schema_table* tbl,
 	void* rec, int rec_buf_size,
@@ -140,6 +166,15 @@ INLINE schema_col* try_get_key_col(schema_table* tbl, int col_i) {
 	schema_col* cols = tbl->key_cols;
 	return col_i >= 0 && col_i < n_cols ? &cols[col_i] : 0;
 }
+
+int schema_key_cmp_rec(const MDBX_val* a, const MDBX_val* b) {
+	size_t size = a->iov_len < b->iov_len ? a->iov_len : b->iov_len;
+	int c = memcmp(a->iov_base, b->iov_base, size);
+	if (c == 0)
+		return (a->iov_len > b->iov_len) - (a->iov_len < b->iov_len);
+	return c;
+}
+
 INLINE schema_col* get_key_col(schema_table* tbl, int col_i) {
 	schema_col* col = try_get_key_col(tbl, col_i);
 	assert(col);
@@ -456,6 +491,25 @@ int schema_get_val(schema_table* tbl, int col_i,
 	return in_size >> ss;
 }
 
+int schema_get_key_rec(schema_table* tbl, int col_i,
+	const MDBX_val* rec,
+	u8* out, int out_size,
+	u8** pout,
+	u8** pp
+) {
+	return schema_get_key(tbl, col_i,
+		rec->iov_base, (int)rec->iov_len,
+		out, out_size, pout, pp);
+}
+
+int schema_get_val_rec(schema_table* tbl, int col_i,
+	const MDBX_val* rec,
+	u8** pout
+) {
+	return schema_get_val(tbl, col_i,
+		rec->iov_base, (int)rec->iov_len, pout);
+}
+
 // update the dyn. offset of the next col if there is one.
 INLINE void set_next_dyn_offset(schema_table* tbl, int col_i,
 	void* p, int mem_size,
@@ -521,6 +575,43 @@ void schema_key_add(schema_table* tbl, int col_i,
 	*pp = p + mem_size;
 }
 
+int schema_key_size(const void* rec, u8** pp) {
+	return *pp - (const u8*)rec;
+}
+
+int schema_key_add_key_rec(schema_table* tbl, int col_i,
+	void* rec, int rec_buf_size, u8** pp,
+	schema_table* src_tbl, int src_col_i, const MDBX_val* src_rec
+) {
+	u8* p = *pp;
+	u8* data;
+	int len = schema_get_key_rec(src_tbl, src_col_i, src_rec,
+		p, rec_buf_size - (p - (u8*)rec), &data, 0);
+	if (len < 0)
+		return 0;
+	int size = len << get_key_col(src_tbl, src_col_i)->elem_size_shift;
+	if (data != p)
+		memmove(p, data, size);
+	schema_key_add(tbl, col_i, rec, rec_buf_size, len, pp);
+	return 1;
+}
+
+int schema_key_add_val_rec(schema_table* tbl, int col_i,
+	void* rec, int rec_buf_size, u8** pp,
+	schema_table* src_tbl, int src_col_i, const MDBX_val* src_rec
+) {
+	u8* p = *pp;
+	u8* data;
+	int len = schema_get_val_rec(src_tbl, src_col_i, src_rec, &data);
+	if (len < 0)
+		return 0;
+	int size = len << get_val_col(src_tbl, src_col_i)->elem_size_shift;
+	if (data != p)
+		memmove(p, data, size);
+	schema_key_add(tbl, col_i, rec, rec_buf_size, len, pp);
+	return 1;
+}
+
 /*
 Re-encode a key form one format to another. Used for converting
 FK index key prefix -> parent PK and parent PK -> FK index key prefix
@@ -549,6 +640,20 @@ int schema_key_reencode(
 		schema_key_add(parent, i, out, out_size, len, &pp_out);
 	}
 	return pp_out - (u8*)out;
+}
+
+int schema_key_reencode_rec(
+	schema_table* fk_ix, schema_table* parent,
+	const MDBX_val* fk_key, MDBX_val* out,
+	void* out_data, int out_size
+) {
+	int size = schema_key_reencode(fk_ix, parent,
+		fk_key->iov_base, (int)fk_key->iov_len, out_data, out_size);
+	if (size < 0)
+		return 0;
+	out->iov_base = out_data;
+	out->iov_len = size;
+	return 1;
 }
 
 void schema_val_add_start(schema_table* tbl,

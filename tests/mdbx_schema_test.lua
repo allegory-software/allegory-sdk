@@ -5683,6 +5683,28 @@ function test.table_scanner_column_refs()
 		same_pk.reset()
 		assert(table_scanner_values(same_pk, get_id) == '2')
 
+		local id_scan = db:table_scanner('scan_rows', {
+			{'tenant_id', dir = 'asc'},
+			{'id', dir = 'asc'},
+		})
+		id_scan.reset()
+		assert(id_scan.advance())
+		assert(id_scan.advance())
+		assert(id_scan.advance())
+		local tenant_id_scan = db:table_scanner('scan_rows', {
+			{'tenant_id', '=', {
+				table = 'scan_rows', col = 'tenant_id',
+				key_rec = outer.key_rec, val_rec = outer.val_rec,
+			}},
+			{'id', '=', {
+				table = 'scan_rows', col = 'id',
+				key_rec = id_scan.key_rec, val_rec = id_scan.val_rec,
+			}},
+		})
+		get_id = table_scanner_col_decoder(db, tenant_id_scan, 'id')
+		tenant_id_scan.reset()
+		assert(table_scanner_values(tenant_id_scan, get_id) == '3')
+
 		local same_score = db:table_scanner('scan_rows/score', {
 			{'score', '=', {
 				table = 'scan_rows', col = 'score',
@@ -5694,6 +5716,19 @@ function test.table_scanner_column_refs()
 		get_id = table_scanner_col_decoder(db, same_score, 'id')
 		same_score.reset()
 		assert(table_scanner_values(same_score, get_id) == '2')
+		same_score.reset()
+		assert(same_score.advance())
+		local index_score = db:table_scanner('scan_rows/score', {
+			{'score', '=', {
+				table = 'scan_rows/score', col = 'score',
+				key_rec = same_score.key_rec, val_rec = same_score.val_rec,
+			}},
+			{'tenant_id', dir = 'asc'},
+			{'id', dir = 'asc'},
+		})
+		get_id = table_scanner_col_decoder(db, index_score, 'id')
+		index_score.reset()
+		assert(table_scanner_values(index_score, get_id) == '2')
 		outer.reset()
 		assert(outer.advance())
 		same_score.reset()
@@ -5703,7 +5738,10 @@ function test.table_scanner_column_refs()
 		same_status.close()
 		same_active.close()
 		same_pk.close()
+		id_scan.close()
+		tenant_id_scan.close()
 		same_score.close()
+		index_score.close()
 		db:commit()
 	end)
 end
@@ -5802,6 +5840,45 @@ function test.table_scanner_reuse()
 		scan.reset('done')
 		assert(table_scanner_values(scan, get_id) == '2')
 		scan.close()
+		db:commit()
+	end)
+end
+
+function test.table_scanner_join()
+	with_db('table_scanner_join', function(db)
+		add_table_scanner_data(db)
+		db:begin'r'
+
+		local outer = db:table_scanner('scan_rows', {
+			{'tenant_id', '=', {arg = 1}},
+			{'id', dir = 'asc'},
+		})
+		local inner = db:table_scanner('scan_rows', {
+			{'tenant_id', '=', {
+				table = 'scan_rows', col = 'tenant_id',
+				key_rec = outer.key_rec, val_rec = outer.val_rec,
+			}},
+			{'id', '=', {
+				table = 'scan_rows', col = 'id',
+				key_rec = outer.key_rec, val_rec = outer.val_rec,
+			}},
+		})
+		local join = db:join_scans(outer, inner)
+		local get_outer_id = table_scanner_col_decoder(db, outer, 'id')
+		local get_inner_id = table_scanner_col_decoder(db, inner, 'id')
+
+		local function ids(tenant_id)
+			local t = {}
+			join.reset(tenant_id)
+			while join.advance() do
+				t[#t + 1] = get_outer_id()..':'..get_inner_id()
+			end
+			return cat(t, ',')
+		end
+		assert(ids(1) == '1:1,2:2,3:3')
+		assert(ids(2) == '1:1,2:2')
+
+		join.close()
 		db:commit()
 	end)
 end

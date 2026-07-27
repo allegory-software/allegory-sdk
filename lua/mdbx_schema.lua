@@ -256,6 +256,8 @@ typedef struct schema_table {
 	u8   dyn_offset_size; // 1,2,4
 } schema_table;
 
+int schema_key_cmp_rec(const MDBX_val* a, const MDBX_val* b);
+
 int schema_val_is_null(schema_table* tbl, int col_i,
 	const void* rec, int rec_size
 );
@@ -267,8 +269,20 @@ int schema_get_key(schema_table* tbl, int col_i,
 	const u8** pp
 );
 
+int schema_get_key_rec(schema_table* tbl, int col_i,
+	const MDBX_val* rec,
+	u8* out, int out_size,
+	const u8** pout,
+	const u8** pp
+);
+
 int schema_get_val(schema_table* tbl, int col_i,
 	const void* rec, int rec_size,
+	const u8** pout
+);
+
+int schema_get_val_rec(schema_table* tbl, int col_i,
+	const MDBX_val* rec,
 	const u8** pout
 );
 
@@ -277,10 +291,28 @@ void schema_key_add(schema_table* tbl, int col_i,
 	u8** pp
 );
 
+int schema_key_size(const void* rec, u8** pp);
+
+int schema_key_add_key_rec(schema_table* tbl, int col_i,
+	void* rec, int rec_buf_size, u8** pp,
+	schema_table* src_tbl, int src_col_i, const MDBX_val* src_rec
+);
+
+int schema_key_add_val_rec(schema_table* tbl, int col_i,
+	void* rec, int rec_buf_size, u8** pp,
+	schema_table* src_tbl, int src_col_i, const MDBX_val* src_rec
+);
+
 int schema_key_reencode(
 	schema_table* fk_ix, schema_table* parent,
 	const void* fk_key, int fk_key_size,
 	void* out, int out_size
+);
+
+int schema_key_reencode_rec(
+	schema_table* fk_ix, schema_table* parent,
+	const MDBX_val* fk_key, MDBX_val* out,
+	void* out_data, int out_size
 );
 
 void schema_val_add_start(schema_table* tbl,
@@ -3269,6 +3301,8 @@ end
 
 --TABLE SCANNER --------------------------------------------------------------
 
+local mdbx_val_size = sizeof'MDBX_val'
+
 --[[
 
 A table scanner can seek base tables on a leading sequence of (pk cols) and
@@ -3280,11 +3314,9 @@ The path arg is a strict sequence of path terms containing:
  - optionally, the direction of the last column.
  - later columns remain unconstrained but determine returned order.
 
-Each path term contains the column name, an operator and one or two input value
-descriptors called params, which tells how the value is supplied: either in
-the param itself, via reset(...) args, or in a MDBX_val (key, val) pair that
-points to an index/base-table raw record from which the value can be used raw
-without decoding if possible.
+Each path term contains the column name, an operator and one or two input
+value descriptors called params, which tell how the value is supplied: in
+the param, via reset(...) args, or from the current row of another scan.
 
 Why so complicated:
  - index tables and base tables need different treatment.
@@ -3299,17 +3331,13 @@ Why so complicated:
    a byte prefix can have no successor.
  - edge case: partial bounds over DUPFIXED PKs require padding.
  - useful inconsistency: a nil/null arg/value param means "seek to null"
-   but a null value coming from a table param means "the correlated comparison
-	cannot match" because table params are used as join conditions.
- - edge case: ai_ci "collation" index columns do not contain the original text.
+   but a null value from a scan param means "the correlated comparison cannot
+	match" because scan params are used as join conditions.
+ - edge case: index columns with ai_ci do not contain the original text.
+ - a base-table value from an index scan needs a secondary base table lookup.
+ - a scan param is valid only while its source scan has a current row.
 
 ]]
-
-local function key_cmp(a, a_sz, b, b_sz)
-	local c = memcmp(a, b, min(a_sz, b_sz))
-	if c == 0 then return a_sz < b_sz end
-	return c < 0
-end
 
 --string prefix -> exclusive upper bound; nil when no larger prefix exists.
 local function increment_prefix(prefix, sz)
@@ -3338,9 +3366,10 @@ end
 --param.val_rec) that holds its bytes, plus the param's schemas. does not
 --judge type compatibility with output_field; the two callers treat a
 --mismatch differently.
-local function table_param_rec(db, param, output_field)
-	local param_schema = db:table_schema(param.table)
-	assertf(param_schema, 'no schema: %s', param.table)
+local function scan_param_rec(db, param, output_field)
+	local scan = param.scan
+	local param_schema = db:table_schema(scan.table)
+	assertf(param_schema, 'no schema: %s', scan.table)
 	local base_schema = param_schema.val_schema or param_schema
 	local field = param_schema.fields[param.col]
 	local rec
@@ -3348,17 +3377,17 @@ local function table_param_rec(db, param, output_field)
 		and (field.mdbx_collation ~= 'utf8_ai_ci'
 			or output_field.mdbx_collation == 'utf8_ai_ci')
 	then --field is in the index's key_rec and it's usable raw.
-		rec = param.key_rec
+		rec = scan.key_rec
 	else
 		field = base_schema.fields[param.col]
-		assertf(field, 'no field: %s.%s', param.table, param.col)
+		assertf(field, 'no field: %s.%s', scan.table, param.col)
 		if field.key_index then --field is pk
-			rec = param_schema.is_index and param.val_rec or param.key_rec
+			rec = param_schema.is_index and scan.val_rec or scan.key_rec
 		else --value column: only a base-table param carries it in val_rec;
 			--an index param's val_rec holds the pk, needing a base lookup.
 			assertf(not param_schema.is_index,
-				'value column from index param: %s.%s', param.table, param.col)
-			rec = param.val_rec
+				'value column from index param: %s.%s', scan.table, param.col)
+			rec = scan.val_rec
 		end
 	end
 	return field, rec, param_schema, base_schema
@@ -3376,9 +3405,9 @@ local function direct_read_rec(db, schema, path)
 	for i = 1, #schema.key_fields do
 		local param = path[i][3]
 		local output_field = schema.key_fields[i]
-		if not param.table then return end
+		if not param.scan then return end
 		local field, rec, param_schema, base_schema =
-			table_param_rec(db, param, output_field)
+			scan_param_rec(db, param, output_field)
 		--the verbatim/reencode paths reuse raw bytes, so a value column or a
 		--layout mismatch both rule them out.
 		if not field.key_index
@@ -3392,7 +3421,8 @@ local function direct_read_rec(db, schema, path)
 		end
 		if i == 1 then
 			first_rec = rec
-			first_key_schema = rec == param.key_rec and param_schema or base_schema
+			first_key_schema = rec == param.scan.key_rec
+				and param_schema or base_schema
 		elseif field.key_index - 1 ~= i - 1 or rec ~= first_rec then
 			return
 		end
@@ -3412,7 +3442,7 @@ local function field_write(db, param, output_schema, slot, args)
 	local out_st = output_schema._st
 	local cap = output_schema.key_fields.max_rec_size
 	local i = slot - 1
-	if not param.table then
+	if not param.scan then
 		local arg, value = param.arg, param.value
 		local name = output_schema.name
 		return function(out)
@@ -3433,8 +3463,8 @@ local function field_write(db, param, output_schema, slot, args)
 		end
 	else
 		local field, rec, param_schema, base_schema =
-			table_param_rec(db, param, output_field)
-		local is_key_read = rec == param.key_rec
+			scan_param_rec(db, param, output_field)
+		local is_key_read = rec == param.scan.key_rec
 		local st = is_key_read and param_schema._st or base_schema._st
 		local field_i = field.key_index and field.key_index - 1 or field.val_index - 1
 
@@ -3449,12 +3479,13 @@ local function field_write(db, param, output_schema, slot, args)
 		then
 			local decode = field.decode
 			assertf(decode, 'incompatible: %s.%s -> %s.%s',
-				param.table, param.col, output_schema.name, output_field.col)
+				param.scan.table, param.col,
+				output_schema.name, output_field.col)
 			return function(out)
 				local len = is_key_read
-					and C.schema_get_key(st, field_i, rec.data, rec.size,
+					and C.schema_get_key_rec(st, field_i, rec,
 						key_decode_buffer, MDBX_MAX_KEY_SIZE, pout, nil)
-					or C.schema_get_val(st, field_i, rec.data, rec.size, pout)
+					or C.schema_get_val_rec(st, field_i, rec, pout)
 				if len < 0 then return false end
 				local elen = output_field.encode(db, 'scan', pp[0],
 					decode(pout[0], len))
@@ -3463,28 +3494,15 @@ local function field_write(db, param, output_schema, slot, args)
 			end
 		end
 
-		local elem_sz = field.elem_size
 		if is_key_read then
 			return function(out)
-				--cache pp[0]/pout[0]: each box-allocates a cdata value on read,
-				--and neither changes until schema_key_add runs below.
-				local p = pp[0]
-				local len = C.schema_get_key(st, field_i, rec.data, rec.size,
-					p, cap - (p - out), pout, nil)
-				if len < 0 then return false end
-				local po = pout[0]
-				if po ~= p then copy(p, po, len * elem_sz) end
-				C.schema_key_add(out_st, i, out, cap, len, pp)
-				return true
+				return C.schema_key_add_key_rec(out_st, i, out, cap, pp,
+					st, field_i, rec) ~= 0
 			end
 		else
 			return function(out)
-				local len = C.schema_get_val(st, field_i, rec.data, rec.size, pout)
-				if len < 0 then return false end
-				local p, po = pp[0], pout[0]
-				if po ~= p then copy(p, po, len * elem_sz) end
-				C.schema_key_add(out_st, i, out, cap, len, pp)
-				return true
+				return C.schema_key_add_val_rec(out_st, i, out, cap, pp,
+					st, field_i, rec) ~= 0
 			end
 		end
 	end
@@ -3504,7 +3522,7 @@ local function key_write(db, output_schema, params, args)
 		for i = 1, n do
 			if not fns[i](out) then return end
 		end
-		return out, pp[0] - out
+		return out, C.schema_key_size(out, pp)
 	end
 end
 
@@ -3516,7 +3534,7 @@ local function bound_write(db, param, output_schema, slot, args, partial)
 	local fn = field_write(db, param, output_schema, slot, args)
 	local trim = partial and output_schema.key_fields[slot].elem_size
 	return function(out, prefix_sz)
-		if partial and not param.table then
+		if partial and not param.scan then
 			local v = param.value
 			if param.arg then v = args[param.arg] end
 			--a prefix value cannot be DB null.
@@ -3524,9 +3542,9 @@ local function bound_write(db, param, output_schema, slot, args, partial)
 		end
 		pp[0] = out + prefix_sz
 		if not fn(out) then return end
-		local p = pp[0]
-		if trim then p = p - trim end
-		return out, p - out
+		local sz = C.schema_key_size(out, pp)
+		if trim then sz = sz - trim end
+		return out, sz
 	end
 end
 
@@ -3643,22 +3661,27 @@ function Db:table_scanner(tbl, path)
 			direct_read_rec(db, schema, path)
 		if direct_mode == 'direct' then
 			exact_write = function()
-				return direct_rec.data, direct_rec.size
+				copy(key_rec, direct_rec, mdbx_val_size)
+				return true
 			end
 		elseif direct_mode == 'reencode' then
 			local out = u8a(schema.key_fields.max_rec_size)
 			exact_write = function()
-				local sz = key_reencode(direct_key_schema, schema,
-					direct_rec.data, direct_rec.size, out,
-					schema.key_fields.max_rec_size)
-				if sz >= 0 then return out, sz end
+				return C.schema_key_reencode_rec(direct_key_schema._st,
+					schema._st, direct_rec, key_rec, out,
+					schema.key_fields.max_rec_size) == 1
 			end
 		else
 			local params = {}
 			for i = 1, key_n do params[i] = path[i][3] end
 			local out = u8a(schema.key_fields.max_rec_size)
 			local write = key_write(db, schema, params, args)
-			exact_write = function() return write(out) end
+			exact_write = function()
+				local data, sz = write(out)
+				if not data then return false end
+				key_rec.data, key_rec.size = data, sz
+				return true
+			end
 		end
 	end
 
@@ -3685,7 +3708,8 @@ function Db:table_scanner(tbl, path)
 	--reset -------------------------------------------------------------------
 
 	--state between reset() and advance().
-	local must_seek, limit_data, limit_sz
+	local limit_rec = MDBX_val()
+	local must_seek, has_limit
 	local empty_scan, started
 
 	--eq prefix (+ range bound) -> seek key, then the limit to stop at;
@@ -3744,22 +3768,21 @@ function Db:table_scanner(tbl, path)
 		assert(select('#', ...) == nargs, 'table_scanner: args')
 		for i = 1, nargs do args[i] = select(i, ...) end
 		empty_scan = false
-		if exact_write then
-			local data, sz = exact_write()
-			if data then
-				key_rec.data, key_rec.size = data, sz
-			else
-				empty_scan = true
-			end
-		end
-		local seek_data, seek_sz
-		seek_data, seek_sz, limit_data, limit_sz = compute_bounds()
+		if exact_write and not exact_write() then empty_scan = true end
+		local seek_data, seek_sz, limit_data, limit_sz = compute_bounds()
 		if seek_sz then
 			range_rec.data = seek_data
 			range_rec.size = seek_sz
 			must_seek = true
 		else
 			must_seek = false
+		end
+		if limit_sz then
+			limit_rec.data = limit_data
+			limit_rec.size = limit_sz
+			has_limit = true
+		else
+			has_limit = false
 		end
 		started = false
 	end
@@ -3811,8 +3834,8 @@ function Db:table_scanner(tbl, path)
 		else --next_*op is nil, no advance or limit check.
 			return
 		end
-		if limit_sz and key_cmp(range_rec.data, range_rec.size,
-			limit_data, limit_sz) ~= (not reverse)
+		if has_limit and (C.schema_key_cmp_rec(
+			range_rec, limit_rec) < 0) ~= (not reverse)
 		then return end
 		return true
 	end
@@ -3833,4 +3856,38 @@ function Db:table_scanner(tbl, path)
 	end
 
 	return scan
+end
+
+function Db:join_scans(outer, inner)
+	local join = {}
+
+	--exhaust inner before advancing outer to its next row.
+	local function advance_inner()
+		if inner.advance() then return true end
+		while outer.advance() do
+			inner.reset()
+			if inner.advance() then return true end
+		end
+	end
+
+	local function advance_outer()
+		while outer.advance() do
+			inner.reset()
+			if inner.advance() then
+				join.advance = advance_inner
+				return true
+			end
+		end
+	end
+
+	join.advance = advance_outer
+	function join.reset(...)
+		outer.reset(...)
+		join.advance = advance_outer
+	end
+	function join.close()
+		inner.close()
+		outer.close()
+	end
+	return join
 end
