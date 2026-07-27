@@ -66,6 +66,7 @@ QUERY
 	cur:move_raw             (op, [k],[k_sz], [v],[v_sz]) -> true | false,err  (k,v optional)
 	cur:move_raw_kv          (op, [k],[k_sz], [v],[v_sz]) -> true, k,k_sz, v,v_sz | false,err
 	cur:move_raw_v           (op, [k],[k_sz], [v],[v_sz]) -> true, v,v_sz | false,err
+	cur:move_raw_into        (op, [key], [val]) -> true | false,err
 	cur:first_raw            () -> true, k, k_sz, v, v_sz | false,err
 	cur:last_raw             () -> true, k, k_sz, v, v_sz | false,err
 	cur:next_raw             () -> true, k, k_sz, v, v_sz | false,err
