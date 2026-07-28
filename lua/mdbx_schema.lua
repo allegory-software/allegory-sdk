@@ -90,20 +90,9 @@ TABLE SCANNER
 	scan.advance      ([by_key]) -> true | nil
 	scan.advance_pk   () -> true | nil
 	scan.advance_key  () -> true | nil
+	scan.found        () -> true | nil
 	scan.close        ()
 	scan.key_rec, scan.val_rec
-	db:child_scan     (parent, child) -> child
-	child.rows        (parent) -> iter() -> child, values...
-	child.left_rows   (parent) -> iter() -> child, values...
-	child.first       (parent) -> child | nil
-	child.exists      (parent) -> true | false
-	child.row_found   -> true | false
-	db:join_scans      (outer, inner, [source_scans]) -> join
-	db:left_join_scans (outer, inner, [source_scans]) -> join
-	join.reset         (args...)
-	join.advance       () -> true | nil
-	inner.row_found    -> true | false
-	join.close         ()
 
 COLUMS LISTS & IN/OUT VALUES FORMATS
 
@@ -3316,8 +3305,6 @@ end
 
 --TABLE SCANNER --------------------------------------------------------------
 
-local mdbx_val_size = sizeof'MDBX_val'
-
 --[[
 
 A table scanner can seek into base tables on a leading sequence of (pk cols)
@@ -3339,12 +3326,12 @@ Why so complicated:
  - eq cols can span an index key rec and/or val rec arbitrarily.
  - the optional range col can land on the index key rec or val rec.
  - rediscovers that fk keys can be used raw by analyzing params and even that
-   has two modes: direct raw and re-encode (needed by fks on nullable cols).
+   has 2 modes: direct raw and key re-encode (needed by fks on nullable cols).
  - writing params individually into the key rec also has 4 modes:
    encode Lua value, copy raw key col, copy raw val col, re-encode key/val col.
  - descending means reversing the ranges and all mdbx ops which has edge cases.
  - edge case: bounds are converted to half-open byte intervals, but incrementing
-   a byte prefix can have no successor which needs an extra check.
+   a byte prefix can have no successor which needs an extra bool state.
  - edge case: partial bounds over DUPFIXED PKs require padding.
  - useful inconsistency: a null reset arg or a nil/null value param means
    "seek to null", but a null value from a scan param means "the correlated
@@ -3536,19 +3523,18 @@ local function field_write(db, param, output_schema, slot, scan, partial)
 	end
 end
 
---params (one per slot, 1..#params) + output_schema -> closure(out) -> data, sz;
---nil when a raw source field is absent (DB null). combines field_write
---closures for one output key.
-local function key_write(db, output_schema, params, scan)
+--n params starting at params[i0] (one per output slot) + output_schema ->
+--closure(out) -> data, sz; nil when a raw source field is absent (DB null).
+--combines field_write closures for one output key.
+local function key_write(db, output_schema, params, scan, i0, n)
 	local fns = {}
-	for slot = 1, #params do
-		fns[slot] = field_write(db, params[slot], output_schema, slot, scan)
+	for i = 1, n do
+		fns[i] = field_write(db, params[i0 + i - 1], output_schema, i, scan)
 	end
-	local n = #fns
 	return function(out)
 		pp[0] = out
-		for i = 1, n do
-			if not fns[i](out) then return end
+		for k = 1, n do
+			if not fns[k](out) then return end
 		end
 		return out, C.schema_key_size(out, pp)
 	end
@@ -3571,10 +3557,14 @@ local function bound_write(db, param, output_schema, slot, scan, partial)
 	end
 end
 
+local Scan = {}
+
+local MDBX_val_size = sizeof'MDBX_val'
+
 function Db:table_scanner(tbl, path)
 	local db = self
 	local schema = assert(db:table_schema(tbl))
-	local scan = {}
+	local scan = object(Scan)
 	scan.table = schema.name
 
 	--path parsing, validation, analysis --------------------------------------
@@ -3654,18 +3644,15 @@ function Db:table_scanner(tbl, path)
 	scan.val_rec = val_rec
 
 	local range_in_val = exact_key and is_index
-	local range_schema = range_in_val and schema.val_schema or schema
 	local range_rec = range_in_val and val_rec or key_rec
 
 	--eq columns start in key_rec but can extend into val_rec on an index.
-	--range_depth is how many eq columns are in range_rec.
-	--range_eq_i is where range eq columns start among the path's eq columns.
-	local range_eq_i = range_in_val and key_n + 1 or 1
-	local range_depth =
+	--range_eq_n is how many eq columns are in range_rec.
+	local range_eq_n =
 		exact_key and not is_index and 0
 		or (exact_key and is_index) and eq_n - key_n
 		or eq_n
-	local pk_fixed_sz = range_in_val and schema.dup_fixedsize
+	local has_bound = range_eq_n > 0 or lo_param or hi_param or prefix_param
 
 	--param reading / encoder compilation --------------------------------------
 
@@ -3675,7 +3662,7 @@ function Db:table_scanner(tbl, path)
 			direct_read_rec(db, schema, eq_params)
 		if direct_mode == 'direct' then
 			exact_write = function()
-				copy(key_rec, direct_rec, mdbx_val_size)
+				copy(key_rec, direct_rec, MDBX_val_size)
 				return true
 			end
 		elseif direct_mode == 'reencode' then
@@ -3686,10 +3673,8 @@ function Db:table_scanner(tbl, path)
 					schema.key_fields.max_rec_size) == 1
 			end
 		else
-			local params = {}
-			for i = 1, key_n do params[i] = eq_params[i] end
 			local out = u8a(schema.key_fields.max_rec_size)
-			local write = key_write(db, schema, params, scan)
+			local write = key_write(db, schema, eq_params, scan, 1, key_n)
 			exact_write = function()
 				local data, sz = write(out)
 				if not data then return false end
@@ -3699,106 +3684,121 @@ function Db:table_scanner(tbl, path)
 		end
 	end
 
-	--range key's eq prefix (shared by starts/lo/hi), when non-empty.
-	local eq_write
-	if range_depth > 0 then
-		local params = {}
-		for i = 1, range_depth do
-			params[i] = eq_params[range_eq_i + i - 1]
-		end
-		eq_write = key_write(db, range_schema, params, scan)
-	end
-
-	--range bound fields, each appended after the eq prefix at the same slot.
-	local bound_slot = range_depth + 1
-	local lo_write = bound_write(db, lo_param, range_schema, bound_slot, scan)
-	local hi_write = bound_write(db, hi_param, range_schema, bound_slot, scan)
-	local starts_write =
-		bound_write(db, prefix_param, range_schema, bound_slot, scan, true)
-
-	local range_cap = range_schema.key_fields.max_rec_size
-	local seek_key  = (eq_write or starts_write or lo_write) and u8a(range_cap)
-	local limit_key = (eq_write or starts_write or hi_write) and u8a(range_cap)
-
 	--reset -------------------------------------------------------------------
 
 	--state between reset() and advance().
 	local limit_rec = MDBX_val()
-	local must_seek, has_limit
-	local empty_scan, started
+	local must_seek, has_limit, empty_scan, started, found
 
-	--eq prefix (+ range bound) -> seek key, then the limit to stop at;
-	--swapped for a reverse scan so advance() has one fixed role per side.
-	local function compute_bounds()
-		local psz = 0
-		if eq_write then
-			local data, sz = eq_write(seek_key)
-			if not data then empty_scan = true; return end
-			psz = sz
-		end
+	if has_bound then
+		local range_schema = range_in_val and schema.val_schema or schema
+		--range_eq_i is where range eq columns start among the path's eq columns.
+		local range_eq_i = range_in_val and key_n + 1 or 1
+		local pk_fixed_sz = range_in_val and schema.dup_fixedsize
 
-		local lo_data, lo_sz, hi_data, hi_sz
-		if starts_write then
-			local data, sz = starts_write(seek_key, psz)
-			if not data then empty_scan = true; return end
-			lo_data, lo_sz = data, sz
-			copy(limit_key, data, sz)
-			hi_data, hi_sz = limit_key, increment_prefix(limit_key, sz)
-		else
-			if psz > 0 then copy(limit_key, seek_key, psz) end
-			if lo_write then
-				local data, sz = lo_write(seek_key, psz)
+		--range key's eq prefix (shared by starts/lo/hi), when non-empty.
+		local eq_write = range_eq_n > 0
+			and key_write(db, range_schema, eq_params, scan, range_eq_i, range_eq_n)
+
+		--range bound fields, each appended after the eq prefix at the same slot.
+		local lo_write = bound_write(db, lo_param, range_schema, range_eq_n+1, scan)
+		local hi_write = bound_write(db, hi_param, range_schema, range_eq_n+1, scan)
+		local starts_write =
+			bound_write(db, prefix_param, range_schema, range_eq_n+1, scan, true)
+
+		local range_cap = range_schema.key_fields.max_rec_size
+		local seek_key  = (eq_write or starts_write or lo_write) and u8a(range_cap)
+		local limit_key = (eq_write or starts_write or hi_write) and u8a(range_cap)
+
+		--eq prefix (+ range bound) -> seek key, then the limit to stop at;
+		--swapped for a reverse scan so advance() has one fixed role per side.
+		local function compute_bounds()
+			local psz = 0
+			if eq_write then
+				local data, sz = eq_write(seek_key)
+				if not data then empty_scan = true; return end
+				psz = sz
+			end
+
+			local lo_data, lo_sz, hi_data, hi_sz
+			if starts_write then
+				local data, sz = starts_write(seek_key, psz)
 				if not data then empty_scan = true; return end
 				lo_data, lo_sz = data, sz
-				if lo_op == '>' then
-					lo_sz = increment_prefix(data, sz)
-					if not lo_sz then empty_scan = true; return end
+				copy(limit_key, data, sz)
+				hi_data, hi_sz = limit_key, increment_prefix(limit_key, sz)
+			else
+				if psz > 0 then copy(limit_key, seek_key, psz) end
+				if lo_write then
+					local data, sz = lo_write(seek_key, psz)
+					if not data then empty_scan = true; return end
+					lo_data, lo_sz = data, sz
+					if lo_op == '>' then
+						lo_sz = increment_prefix(data, sz)
+						if not lo_sz then empty_scan = true; return end
+					end
+				elseif psz > 0 then
+					lo_data, lo_sz = seek_key, psz
 				end
-			elseif psz > 0 then
-				lo_data, lo_sz = seek_key, psz
+				if hi_write then
+					local data, sz = hi_write(limit_key, psz)
+					if not data then empty_scan = true; return end
+					hi_data, hi_sz = data, sz
+					if hi_op == '<=' then
+						hi_sz = increment_prefix(data, sz)
+					end
+				elseif psz > 0 then
+					hi_data, hi_sz = limit_key, increment_prefix(limit_key, psz)
+				end
 			end
-			if hi_write then
-				local data, sz = hi_write(limit_key, psz)
-				if not data then empty_scan = true; return end
-				hi_data, hi_sz = data, sz
-				if hi_op == '<=' then
-					hi_sz = increment_prefix(data, sz)
-				end
-			elseif psz > 0 then
-				hi_data, hi_sz = limit_key, increment_prefix(limit_key, psz)
+
+			if pk_fixed_sz then
+				lo_data, lo_sz = pad_data(lo_data, lo_sz, seek_key, pk_fixed_sz)
+				hi_data, hi_sz = pad_data(hi_data, hi_sz, limit_key, pk_fixed_sz)
+			end
+			if reverse then
+				return hi_data, hi_sz, lo_data, lo_sz
+			else
+				return lo_data, lo_sz, hi_data, hi_sz
 			end
 		end
 
-		if pk_fixed_sz then
-			lo_data, lo_sz = pad_data(lo_data, lo_sz, seek_key, pk_fixed_sz)
-			hi_data, hi_sz = pad_data(hi_data, hi_sz, limit_key, pk_fixed_sz)
+		function scan.reset(args)
+			scan.args = args
+			empty_scan = false
+			if exact_write and not exact_write() then
+				empty_scan = true
+			end
+			local seek_data, seek_sz, limit_data, limit_sz = compute_bounds()
+			if seek_sz then
+				range_rec.data = seek_data
+				range_rec.size = seek_sz
+				must_seek = true
+			else
+				must_seek = false
+			end
+			if limit_sz then
+				limit_rec.data = limit_data
+				limit_rec.size = limit_sz
+				has_limit = true
+			else
+				has_limit = false
+			end
+			started = false
+			found = nil
 		end
-		if reverse then
-			return hi_data, hi_sz, lo_data, lo_sz
+	else
+		--no range_eq/lo/hi/prefix past the exact key (or no key at all):
+		--must_seek and has_limit stay permanently false.
+		function scan.reset(args)
+			scan.args = args
+			empty_scan = false
+			if exact_write and not exact_write() then
+				empty_scan = true
+			end
+			started = false
+			found = nil
 		end
-		return lo_data, lo_sz, hi_data, hi_sz
-	end
-
-	function scan.reset(args)
-		scan.args = args
-		empty_scan = false
-		if exact_write and not exact_write() then empty_scan = true end
-		local seek_data, seek_sz, limit_data, limit_sz = compute_bounds()
-		if seek_sz then
-			range_rec.data = seek_data
-			range_rec.size = seek_sz
-			must_seek = true
-		else
-			must_seek = false
-		end
-		if limit_sz then
-			limit_rec.data = limit_data
-			limit_rec.size = limit_sz
-			has_limit = true
-		else
-			has_limit = false
-		end
-		started = false
 	end
 
 	--advance -----------------------------------------------------------------
@@ -3808,32 +3808,37 @@ function Db:table_scanner(tbl, path)
 	local dup_op   = reverse and C.MDBX_PREV_DUP   or C.MDBX_NEXT_DUP
 	local nodup_op = reverse and C.MDBX_PREV_NODUP or C.MDBX_NEXT_NODUP
 
-	--start-of-scan positioning, based on: exact_key, is_index, reverse.
-	local seek_op = exact_key and is_index
-		and (reverse and C.MDBX_TO_EXACT_KEY_VALUE_LESSER_THAN or C.MDBX_GET_BOTH_RANGE)
-		or  (reverse and C.MDBX_TO_KEY_LESSER_THAN or C.MDBX_SET_RANGE)
-	local first_op = exact_key
-		and C.MDBX_SET_KEY
-		or (reverse and C.MDBX_LAST or C.MDBX_FIRST)
-	--a reverse dup scan lands on the key, then walks to its last duplicate.
-	local last_dup_op = exact_key and is_index
-		and reverse and C.MDBX_LAST_DUP or nil
-
-	--stepping ops for advance(), based on: exact_key, is_index.
-	local next_op =
-		exact_key and is_index and dup_op
-		or not exact_key and step_op
-	local next_pk_op = is_index and dup_op
-	--exact_key + is_index -> index key is fixed and the range is
-	--in the dup values, so there is no next key to step to.
-	local next_key_op =
-		not exact_key and is_index and nodup_op
-		or not is_index and next_op
+	--start-of-scan positioning and stepping ops for advance().
+	local seek_op, first_op, last_dup_op, next_op, next_pk_op, next_key_op
+	if exact_key and is_index then --index key is fixed; scan walks dup vals.
+		seek_op = reverse and C.MDBX_TO_EXACT_KEY_VALUE_LESSER_THAN
+			or C.MDBX_GET_BOTH_RANGE
+		first_op = C.MDBX_SET_KEY
+		--a reverse dup scan lands on the key, then walks to its last dup.
+		last_dup_op = reverse and C.MDBX_LAST_DUP or nil
+		next_op = dup_op
+		next_pk_op = dup_op
+		--index key is fixed, range is in the dup vals, so no next key to step to.
+		next_key_op = false
+	elseif exact_key then --single base-table row, no stepping.
+		seek_op = reverse and C.MDBX_TO_KEY_LESSER_THAN or C.MDBX_SET_RANGE
+		first_op = C.MDBX_SET_KEY
+		next_op = false
+		next_pk_op = false
+		next_key_op = false
+	else --range/prefix/full scan: walk the whole key, dup groups included.
+		seek_op = reverse and C.MDBX_TO_KEY_LESSER_THAN or C.MDBX_SET_RANGE
+		first_op = reverse and C.MDBX_LAST or C.MDBX_FIRST
+		next_op = step_op
+		next_pk_op = is_index and dup_op
+		next_key_op = is_index and nodup_op or next_op
+	end
 
 	local cur
 
 	local function advance(op)
 		assert(started ~= nil, 'advance: reset not called')
+		found = nil
 		if not started then
 			started = true
 			if empty_scan then return end
@@ -3851,11 +3856,12 @@ function Db:table_scanner(tbl, path)
 		if has_limit and (C.schema_key_cmp_rec(
 			range_rec, limit_rec) < 0) ~= (not reverse)
 		then return end
+		found = true
 		return true
 	end
 	function scan.advance(by_key)
-		if by_key then return advance(next_key_op) end --next_key_op can be nil!
-		return advance(next_op)
+		local op; if by_key then op = next_key_op else op = next_op end
+		return advance(op)
 	end
 	function scan.advance_pk()
 		return advance(next_pk_op)
@@ -3863,10 +3869,18 @@ function Db:table_scanner(tbl, path)
 	function scan.advance_key()
 		return advance(next_key_op)
 	end
+	function scan.found()
+		return found
+	end
 
-	--
+	function scan.close()
+		started = nil
+		if cur then cur:close(); cur = nil end
+	end
 
-	function scan.col_decoder(self, col)
+	--col decoder -------------------------------------------------------------
+
+	function scan:col_decoder(col)
 		local field = schema.fields[col]
 		if field and field.key_index then
 			--ai_ci index keys hold folded text, not the base value.
@@ -3905,72 +3919,7 @@ function Db:table_scanner(tbl, path)
 		end
 	end
 
-	local function advance_row()
-		if scan.advance() then return scan end
-	end
-	local selected_get
-	local function advance_selected_row()
-		if scan.advance() then return scan, select(2, selected_get()) end
-	end
-	function scan.rows(self, args)
-		self.reset(args)
-		return selected_get and advance_selected_row or advance_row
-	end
-	function scan.each(self, args)
-		self.reset(args)
-		return self.advance
-	end
-
-	function scan.filter(self, accept)
-		local advance = self.advance
-		--advance until accept() approves the current row.
-		self.advance = function(by_key)
-			while advance(by_key) do
-				if accept() then return true end
-			end
-		end
-		return self
-	end
-	function scan.not_in(self, col, values)
-		local get = self:col_decoder(col)
-		local excluded = {}
-		for _, value in ipairs(values) do excluded[value] = true end
-		return self:filter(function()
-			--map DB null to the public null sentinel.
-			local value = get()
-			value = value == nil and null or value
-			return not excluded[value]
-		end)
-	end
-
-	function scan.select(self, outputs)
-		local decoders, names = {}, {}
-		for output in outputs:gmatch'[^,]+' do
-			local col_spec, name = output:match'^%s*(%S+)%s*(%S*)%s*$'
-			assert(col_spec, 'select: output')
-			local table_name, col = col_spec:match'^(.-)%.(.*)$'
-			--one physical scan has no joined table namespace.
-			assert(not table_name, 'select: table')
-			col = col or col_spec
-			decoders[#decoders + 1] = self:col_decoder(col)
-			names[#names + 1] = name ~= '' and name or col
-		end
-		local n = #decoders
-		assert(n > 0, 'select: outputs')
-		local values = {}
-		local function get(row)
-			if row then
-				for i = 1, n do row[names[i]] = decoders[i]() end
-				return true, row
-			else
-				for i = 1, n do values[i] = decoders[i]() end
-				return true, unpack(values, 1, n)
-			end
-		end
-		selected_get = get
-		self.get = get
-		return self
-	end
+	--explain -----------------------------------------------------------------
 
 	function scan.explain() -- -> {table, key, order, reverse}
 		local actual_order = {}
@@ -3991,189 +3940,106 @@ function Db:table_scanner(tbl, path)
 		}
 	end
 
-	function scan.close()
-		started = nil
-		if cur then cur:close(); cur = nil end
+	return scan
+end
+
+function Scan:each(args)
+	self.reset(args)
+	return self.advance --since it returns true|nil
+end
+
+function Scan:select(outputs)
+	local scan = self
+	assert(not scan.get)
+
+	local decoders, names = {}, {}
+	for output in outputs:gmatch'[^,]+' do
+		local col_spec, name = output:match'^%s*(%S+)%s*(%S*)%s*$'
+		assert(col_spec, 'select: output')
+		local table_name, col = col_spec:match'^(.-)%.(.*)$'
+		--one physical scan has no joined table namespace.
+		assert(not table_name, 'select: table')
+		col = col or col_spec
+		decoders[#decoders + 1] = self:col_decoder(col)
+		names[#names + 1] = name ~= '' and name or col
+	end
+	local n = #decoders
+	assert(n > 0, 'select: outputs')
+	local values = {}
+	local function get(row)
+		if row then
+			for i = 1, n do row[names[i]] = decoders[i]() end
+			return scan, row
+		else
+			for i = 1, n do values[i] = decoders[i]() end
+			return scan, unpack(values, 1, n)
+		end
+	end
+	scan.get = get
+
+	local reset = scan.reset
+	local advance = scan.advance
+	local function next_row()
+		if advance() then return get() end
+	end
+	function scan:rows(args)
+		reset(args)
+		return next_row
 	end
 
 	return scan
 end
 
---JOINS ----------------------------------------------------------------------
-
---source_scans are physical scans that inner reads for its key.
---advance() resets inner after every outer row with source scans present.
-function Db:join_scans(outer, inner, source_scans)
-	source_scans = source_scans or {outer}
-	local join = {}
-	local advance_inner
-	inner.row_found = false
-
-	local function source_scans_present()
-		for i = 1, #source_scans do
-			if source_scans[i].row_found == false then return false end
-		end
-		return true
-	end
-
-	local function advance_outer()
-		while outer.advance() do
-			if source_scans_present() then
-				inner.reset(join.args)
-				inner.row_found = inner.advance() or false
-				if inner.row_found then
-					join.advance = advance_inner
-					return true
-				end
-			end
+function Scan:filter(accept)
+	local advance = self.advance
+	--advance until accept() approves the current row.
+	self.advance = function(by_key)
+		while advance(by_key) do
+			if accept() then return true end
 		end
 	end
-	advance_inner = function()
-		if inner.advance() then return true end
-		inner.row_found = false
-		return advance_outer()
-	end
-
-	join.advance = advance_outer
-	function join.reset(args)
-		join.args = args
-		outer.reset(args)
-		inner.row_found = false
-		join.advance = advance_outer
-	end
-	function join.close()
-		inner.close()
-		outer.close()
-	end
-	return join
+	return self
 end
 
-function Db:left_join_scans(outer, inner, source_scans)
-	source_scans = source_scans or {outer}
-	local join = {}
-	local advance_inner
-	inner.row_found = false
-
-	local function source_scans_present()
-		for i = 1, #source_scans do
-			if source_scans[i].row_found == false then return false end
-		end
-		return true
-	end
-
-	local function advance_outer()
-		while outer.advance() do
-			if source_scans_present() then
-				inner.reset(join.args)
-				inner.row_found = inner.advance() or false
-				if inner.row_found then
-					join.advance = advance_inner
-				else
-					join.advance = advance_outer
-				end
-			else
-				inner.row_found = false
-				join.advance = advance_outer
-			end
-			return true
-		end
-	end
-	advance_inner = function()
-		if inner.advance() then return true end
-		inner.row_found = false
-		return advance_outer()
-	end
-
-	join.advance = advance_outer
-	function join.reset(args)
-		join.args = args
-		outer.reset(args)
-		inner.row_found = false
-		join.advance = advance_outer
-	end
-	function join.close()
-		inner.close()
-		outer.close()
-	end
-	return join
+function Scan:not_in(col, values)
+	local get = self:col_decoder(col)
+	local excluded = {}
+	for _, value in ipairs(values) do excluded[value] = true end
+	self:filter(function()
+		--map DB null to the public null sentinel.
+		local value = get()
+		value = value == nil and null or value
+		return not excluded[value]
+	end)
+	return self
 end
 
-function Db:child_scan(parent, child)
-	child.row_found = false
-	local reset, advance = child.reset, child.advance
-	local next_advance = advance
-	local function no_row() end
-	function child.reset(args)
-		reset(args)
-		child.row_found = false
-		next_advance = advance
+--VALUES SCAN ----------------------------------------------------------------
+
+function Db:values_scan(values)
+	local scan = {}
+	local value_i
+
+	function scan.reset(args)
+		scan.args = args
+		value_i = 0
 	end
-	function child.advance(by_key)
-		child.row_found = next_advance(by_key) or false
-		return child.row_found or nil
+	function scan.advance()
+		value_i = value_i + 1
+		return value_i <= #values or nil
+	end
+	function scan.get()
+		return values[value_i]
 	end
 
-	local col_decoder = child.col_decoder
-	function child.col_decoder(self, col)
-		local get = col_decoder(self, col)
-		return function()
-			if child.row_found then return get() end
-		end
-	end
-	local select_child = child.select
-	function child.select(self, outputs)
-		select_child(self, outputs)
-		local get = self.get
-		function self.get(...)
-			if child.row_found then
-				return get(...)
-			else
-				return false, select(2, get(...))
-			end
-		end
-		return self
-	end
-
-	local function reset_child(parent_scan)
-		--child params read this parent scan.
-		assert(parent_scan == parent, 'child_scan: parent')
-		if parent_scan.row_found == false then
-			--a missing left parent has no child key.
-			child.row_found = false
-			next_advance = no_row
-		else
-			child.reset(parent_scan.args)
-		end
-	end
-	local function current_row()
-		if child.get then return child, select(2, child.get()) end
-		return child
-	end
 	local function advance_row()
-		if child.advance() then return current_row() end
+		if scan.advance() then return scan end
 	end
-	local function advance_left_row(_, previous_child)
-		if previous_child == nil then
-			child.advance()
-			return current_row()
-		elseif child.row_found and child.advance() then
-			return current_row()
-		end
-	end
-	function child.rows(self, parent_scan)
-		reset_child(parent_scan)
+	function scan.rows(self, args)
+		self.reset(args)
 		return advance_row
 	end
-	function child.left_rows(self, parent_scan)
-		reset_child(parent_scan)
-		return advance_left_row, child
-	end
-	function child.first(self, parent_scan)
-		reset_child(parent_scan)
-		if child.advance() then return child end
-	end
-	function child.exists(self, parent_scan)
-		return self:first(parent_scan) ~= nil
-	end
-	return child
+	function scan.close() end
+
+	return scan
 end

@@ -5352,9 +5352,9 @@ function test.table_scanner_access_paths()
 			{'id', '=', {arg = 2}},
 		})
 		get_id = table_scanner_col_decoder(db, exact, 'id')
-		exact.reset(1, 2)
+		exact.reset{1, 2}
 		assert(table_scanner_values(exact, get_id) == '2')
-		exact.reset(9, 9)
+		exact.reset{9, 9}
 		assert(table_scanner_values(exact, get_id) == '')
 
 		local range = db:table_scanner('scan_rows', {
@@ -5363,7 +5363,7 @@ function test.table_scanner_access_paths()
 				dir = 'desc'},
 		})
 		get_id = table_scanner_col_decoder(db, range, 'id')
-		range.reset(1, 1, 3)
+		range.reset{1, 1, 3}
 		assert(table_scanner_values(range, get_id) == '3,2,1')
 
 		local index = db:table_scanner('scan_rows/status', {
@@ -5373,7 +5373,7 @@ function test.table_scanner_access_paths()
 		})
 		get_tenant = table_scanner_col_decoder(db, index, 'tenant_id')
 		get_id = table_scanner_col_decoder(db, index, 'id')
-		index.reset('ready')
+		index.reset{'ready'}
 		assert(table_scanner_values(index, function()
 			return get_tenant()..':'..get_id()
 		end) == '1:1,1:2,1:3,2:1')
@@ -5385,11 +5385,11 @@ function test.table_scanner_access_paths()
 		})
 		get_tenant = table_scanner_col_decoder(db, status_prefix, 'tenant_id')
 		get_id = table_scanner_col_decoder(db, status_prefix, 'id')
-		status_prefix.reset('rea')
+		status_prefix.reset{'rea'}
 		assert(table_scanner_values(status_prefix, function()
 			return get_tenant()..':'..get_id()
 		end) == '1:1,1:2,1:3,2:1')
-		status_prefix.reset('x')
+		status_prefix.reset{'x'}
 		assert(table_scanner_values(status_prefix, get_id) == '')
 
 		local groups = db:table_scanner('scan_rows/status', {
@@ -5418,7 +5418,7 @@ function test.table_scanner_access_paths()
 				dir = 'desc'},
 		})
 		get_id = table_scanner_col_decoder(db, pk_range, 'id')
-		pk_range.reset('ready', 1, 1, 3)
+		pk_range.reset{'ready', 1, 1, 3}
 		assert(table_scanner_values(pk_range, get_id) == '3,2,1')
 
 		local prefix = db:table_scanner('scan_files/status', {
@@ -5427,11 +5427,11 @@ function test.table_scanner_access_paths()
 			{'path', 'starts', {arg = 3}, dir = 'desc'},
 		})
 		local get_path = table_scanner_col_decoder(db, prefix, 'path')
-		prefix.reset('ready', 1, 'a/')
+		prefix.reset{'ready', 1, 'a/'}
 		assert(table_scanner_values(prefix, get_path) == 'a/2,a/1')
-		prefix.reset('ready', 1, 'a/1')
+		prefix.reset{'ready', 1, 'a/1'}
 		assert(table_scanner_values(prefix, get_path) == 'a/1')
-		prefix.reset('ready', 1, 'z/')
+		prefix.reset{'ready', 1, 'z/'}
 		assert(table_scanner_values(prefix, get_path) == '')
 
 		local prefix_asc = db:table_scanner('scan_files/status', {
@@ -5440,7 +5440,7 @@ function test.table_scanner_access_paths()
 			{'path', 'starts', {arg = 3}, dir = 'asc'},
 		})
 		get_path = table_scanner_col_decoder(db, prefix_asc, 'path')
-		prefix_asc.reset('ready', 1, 'a/')
+		prefix_asc.reset{'ready', 1, 'a/'}
 		assert(table_scanner_values(prefix_asc, get_path) == 'a/1,a/2')
 
 		for _, scan in ipairs{
@@ -5449,133 +5449,6 @@ function test.table_scanner_access_paths()
 		} do
 			scan.close()
 		end
-		db:commit()
-	end)
-end
-
-function test.table_scanner_in()
-	with_db('table_scanner_in', function(db)
-		add_table_scanner_data(db)
-		db:begin'r'
-
-		local exact = db:table_scanner('scan_rows', {
-			{'tenant_id', '=', {arg = 'tenant_id'}},
-			{'id', 'in', {value = {2, 1, 2}}},
-		})
-		local get_id = table_scanner_col_decoder(db, exact, 'id')
-		exact.reset{tenant_id = 1}
-		assert(table_scanner_values(exact, get_id) == '2,1')
-
-		local range = db:table_scanner('scan_rows/status', {
-			{'status', 'in', {value = {'done', 'ready', 'done'}}},
-			{'tenant_id', '=', {arg = 'tenant_id'}},
-			{'id', 'range', '>=', {value = 1}, '<=', {value = 2},
-				dir = 'asc'},
-		})
-		get_id = table_scanner_col_decoder(db, range, 'id')
-		range.reset{tenant_id = 2}
-		assert(table_scanner_values(range, get_id) == '2,1')
-		local e = range.explain()
-		assert(#e.order == 0 and e.reverse == nil)
-
-		local dynamic = db:table_scanner('scan_rows/status', {
-			{'status', 'in', {arg = 'statuses'}},
-			{'tenant_id', '=', {arg = 'tenant_id'}},
-			{'id', dir = 'asc'},
-		})
-		get_id = table_scanner_col_decoder(db, dynamic, 'id')
-		local args = {statuses = {'done', 'ready'}, tenant_id = 2}
-		dynamic.reset(args)
-		assert(dynamic.args == args)
-		assert(table_scanner_values(dynamic, get_id) == '2,1')
-		assert(dynamic.args == args)
-		dynamic.reset{statuses = {}, tenant_id = 2}
-		assert(table_scanner_values(dynamic, get_id) == '')
-		dynamic.reset{statuses = {'ready'}, tenant_id = 1}
-		assert(table_scanner_values(dynamic, get_id) == '1,2,3')
-		dynamic.close()
-		dynamic.reset{statuses = {'done'}, tenant_id = 2}
-		assert(table_scanner_values(dynamic, get_id) == '2')
-
-		local groups = db:table_scanner('scan_rows/status', {
-			{'status', 'in', {value = {'ready', 'done', 'ready'}}},
-			{'tenant_id', dir = 'asc'},
-			{'id', dir = 'asc'},
-		})
-		local get_status = table_scanner_col_decoder(db, groups, 'status')
-		local get_tenant = table_scanner_col_decoder(db, groups, 'tenant_id')
-		get_id = table_scanner_col_decoder(db, groups, 'id')
-		local grouped = {}
-		groups.reset()
-		while groups.advance_key() do
-			local pks = {get_tenant()..':'..get_id()}
-			while groups.advance_pk() do
-				pks[#pks + 1] = get_tenant()..':'..get_id()
-			end
-			grouped[#grouped + 1] = get_status()..'='..cat(pks, ',')
-		end
-		assert(cat(grouped, ';')
-			== 'ready=1:1,1:2,1:3,2:1;done=2:2')
-
-		local nullable = db:table_scanner('scan_rows/score', {
-			{'score', 'in', {value = {null, 10, null}}},
-			{'tenant_id', dir = 'asc'},
-			{'id', dir = 'asc'},
-		})
-		get_tenant = table_scanner_col_decoder(db, nullable, 'tenant_id')
-		get_id = table_scanner_col_decoder(db, nullable, 'id')
-		nullable.reset()
-		assert(table_scanner_values(nullable, function()
-			return get_tenant()..':'..get_id()
-		end) == '1:1,2:2,1:2')
-
-		local bool = db:table_scanner('scan_rows/active', {
-			{'active', 'in', {value = {false, true, false}}},
-			{'tenant_id', dir = 'asc'},
-			{'id', dir = 'asc'},
-		})
-		get_tenant = table_scanner_col_decoder(db, bool, 'tenant_id')
-		get_id = table_scanner_col_decoder(db, bool, 'id')
-		bool.reset()
-		assert(table_scanner_values(bool, function()
-			return get_tenant()..':'..get_id()
-		end) == '1:1,1:3,2:1,1:2,2:2')
-
-		for _, scan in ipairs{
-			exact, range, dynamic, groups, nullable, bool,
-		} do
-			scan.close()
-		end
-		db:commit()
-	end)
-end
-
-function test.table_scanner_in_left_join()
-	with_db('table_scanner_in_left_join', function(db)
-		add_table_scanner_data(db)
-		db:begin'r'
-
-		local outer = db:table_scanner('scan_rows', {
-			{'tenant_id', '=', {value = 2}},
-			{'id', dir = 'asc'},
-		})
-		local inner = db:table_scanner('scan_rows/status', {
-			{'status', 'in', {arg = 'statuses'}},
-			{'tenant_id', '=', {scan = outer, col = 'tenant_id'}},
-			{'id', '=', {scan = outer, col = 'id'}},
-		})
-		local left = db:left_join_scans(outer, inner)
-		local get_outer_id = table_scanner_col_decoder(db, outer, 'id')
-		local get_inner_id = table_scanner_col_decoder(db, inner, 'id')
-		local ids = {}
-		left.reset{statuses = {'ready', 'ready'}}
-		while left.advance() do
-			ids[#ids + 1] = get_outer_id()..':'
-				..(inner.row_found and get_inner_id() or '-')
-		end
-		assert(cat(ids, ',') == '1:1,2:-')
-
-		left.close()
 		db:commit()
 	end)
 end
@@ -5595,14 +5468,14 @@ function test.table_scanner_max_bounds()
 			{'id', '>', {arg = 1}},
 		})
 		local get_id = table_scanner_col_decoder(db, gt, 'id')
-		gt.reset(0xffffffff)
+		gt.reset{0xffffffff}
 		assert(table_scanner_values(gt, get_id) == '')
 
 		local le = db:table_scanner('scan_max', {
 			{'id', '<=', {arg = 1}},
 		})
 		get_id = table_scanner_col_decoder(db, le, 'id')
-		le.reset(0xffffffff)
+		le.reset{0xffffffff}
 		assert(table_scanner_values(le, get_id) == '1,4294967295')
 
 		gt.close()
@@ -5677,7 +5550,7 @@ function test.table_scanner_descending_ranges()
 				term,
 			})
 			get_id = table_scanner_col_decoder(db, scan, 'id')
-			scan.reset(unpack(args))
+			scan.reset(args)
 			assert(table_scanner_values(scan, get_id) == expected)
 			scan.close()
 		end
@@ -5689,7 +5562,7 @@ function test.table_scanner_descending_ranges()
 				dir = 'desc'},
 		})
 		get_id = table_scanner_col_decoder(db, pk_range, 'id')
-		pk_range.reset(1, 1, 3)
+		pk_range.reset{1, 1, 3}
 		assert(table_scanner_values(pk_range, get_id) == '3,2')
 
 		local pk_range_asc = db:table_scanner('scan_desc/status', {
@@ -5699,7 +5572,7 @@ function test.table_scanner_descending_ranges()
 				dir = 'asc'},
 		})
 		get_id = table_scanner_col_decoder(db, pk_range_asc, 'id')
-		pk_range_asc.reset(1, 1, 3)
+		pk_range_asc.reset{1, 1, 3}
 		assert(table_scanner_values(pk_range_asc, get_id) == '2,3')
 
 		full.close()
@@ -5722,7 +5595,7 @@ function test.table_scanner_nil_null_and_false()
 		})
 		local get_tenant = table_scanner_col_decoder(db, active, 'tenant_id')
 		local get_id = table_scanner_col_decoder(db, active, 'id')
-		active.reset(false)
+		active.reset{false}
 		assert(table_scanner_values(active, function()
 			return get_tenant()..':'..get_id()
 		end) == '1:1,1:3,2:1')
@@ -5739,9 +5612,7 @@ function test.table_scanner_nil_null_and_false()
 				return get_tenant()..':'..get_id()
 			end)
 		end
-		score.reset(nil)
-		assert(null_pks() == '1:1,2:2')
-		score.reset(null)
+		score.reset{null}
 		assert(null_pks() == '1:1,2:2')
 
 		active.close()
@@ -5763,10 +5634,7 @@ function test.table_scanner_column_refs()
 		assert(outer.advance())
 
 		local same_status = db:table_scanner('scan_rows/status', {
-			{'status', '=', {
-				table = 'scan_rows', col = 'status',
-				key_rec = outer.key_rec, val_rec = outer.val_rec,
-			}},
+			{'status', '=', {scan = outer, col = 'status'}},
 			{'tenant_id', dir = 'asc'},
 			{'id', dir = 'asc'},
 		})
@@ -5775,10 +5643,7 @@ function test.table_scanner_column_refs()
 		assert(table_scanner_values(same_status, get_id) == '1,2,3,1')
 
 		local same_active = db:table_scanner('scan_rows/active', {
-			{'active', '=', {
-				table = 'scan_rows', col = 'active',
-				key_rec = outer.key_rec, val_rec = outer.val_rec,
-			}},
+			{'active', '=', {scan = outer, col = 'active'}},
 			{'tenant_id', dir = 'asc'},
 			{'id', dir = 'asc'},
 		})
@@ -5797,14 +5662,8 @@ function test.table_scanner_column_refs()
 		end) == '1:2,2:2')
 
 		local same_pk = db:table_scanner('scan_rows', {
-			{'tenant_id', '=', {
-				table = 'scan_rows', col = 'tenant_id',
-				key_rec = outer.key_rec, val_rec = outer.val_rec,
-			}},
-			{'id', '=', {
-				table = 'scan_rows', col = 'id',
-				key_rec = outer.key_rec, val_rec = outer.val_rec,
-			}},
+			{'tenant_id', '=', {scan = outer, col = 'tenant_id'}},
+			{'id', '=', {scan = outer, col = 'id'}},
 		})
 		get_id = table_scanner_col_decoder(db, same_pk, 'id')
 		same_pk.reset()
@@ -5819,24 +5678,15 @@ function test.table_scanner_column_refs()
 		assert(id_scan.advance())
 		assert(id_scan.advance())
 		local tenant_id_scan = db:table_scanner('scan_rows', {
-			{'tenant_id', '=', {
-				table = 'scan_rows', col = 'tenant_id',
-				key_rec = outer.key_rec, val_rec = outer.val_rec,
-			}},
-			{'id', '=', {
-				table = 'scan_rows', col = 'id',
-				key_rec = id_scan.key_rec, val_rec = id_scan.val_rec,
-			}},
+			{'tenant_id', '=', {scan = outer, col = 'tenant_id'}},
+			{'id', '=', {scan = id_scan, col = 'id'}},
 		})
 		get_id = table_scanner_col_decoder(db, tenant_id_scan, 'id')
 		tenant_id_scan.reset()
 		assert(table_scanner_values(tenant_id_scan, get_id) == '3')
 
 		local same_score = db:table_scanner('scan_rows/score', {
-			{'score', '=', {
-				table = 'scan_rows', col = 'score',
-				key_rec = outer.key_rec, val_rec = outer.val_rec,
-			}},
+			{'score', '=', {scan = outer, col = 'score'}},
 			{'tenant_id', dir = 'asc'},
 			{'id', dir = 'asc'},
 		})
@@ -5846,10 +5696,7 @@ function test.table_scanner_column_refs()
 		same_score.reset()
 		assert(same_score.advance())
 		local index_score = db:table_scanner('scan_rows/score', {
-			{'score', '=', {
-				table = 'scan_rows/score', col = 'score',
-				key_rec = same_score.key_rec, val_rec = same_score.val_rec,
-			}},
+			{'score', '=', {scan = same_score, col = 'score'}},
 			{'tenant_id', dir = 'asc'},
 			{'id', dir = 'asc'},
 		})
@@ -5913,10 +5760,7 @@ function test.table_scanner_incompatible_decode()
 
 		--key-column source: src.tag (key_rec) -> dst/tag key (is_key_read).
 		local by_tag = db:table_scanner('dst/tag', {
-			{'tag', '=', {
-				table = 'src', col = 'tag',
-				key_rec = outer.key_rec, val_rec = outer.val_rec,
-			}},
+			{'tag', '=', {scan = outer, col = 'tag'}},
 			{'id', dir = 'asc'},
 		})
 		local get_id = table_scanner_col_decoder(db, by_tag, 'id')
@@ -5925,10 +5769,7 @@ function test.table_scanner_incompatible_decode()
 
 		--value-column source: src.name (val_rec) -> dst/name key.
 		local by_name = db:table_scanner('dst/name', {
-			{'name', '=', {
-				table = 'src', col = 'name',
-				key_rec = outer.key_rec, val_rec = outer.val_rec,
-			}},
+			{'name', '=', {scan = outer, col = 'name'}},
 			{'id', dir = 'asc'},
 		})
 		get_id = table_scanner_col_decoder(db, by_name, 'id')
@@ -5953,135 +5794,20 @@ function test.table_scanner_reuse()
 		})
 		local get_id = table_scanner_col_decoder(db, scan, 'id')
 
-		scan.reset('ready')
+		scan.reset{'ready'}
 		assert(scan.advance() and get_id() == 1)
-		scan.reset('done')
+		scan.reset{'done'}
 		assert(table_scanner_values(scan, get_id) == '2')
 		scan.close()
-		scan.reset('ready')
+		scan.reset{'ready'}
 		assert(scan.advance() and get_id() == 1)
 		scan.close()
 		db:commit()
 
 		db:begin'r'
-		scan.reset('done')
+		scan.reset{'done'}
 		assert(table_scanner_values(scan, get_id) == '2')
 		scan.close()
-		db:commit()
-	end)
-end
-
-function test.table_scanner_join()
-	with_db('table_scanner_join', function(db)
-		add_table_scanner_data(db)
-		db:begin'r'
-
-		local outer = db:table_scanner('scan_rows', {
-			{'tenant_id', '=', {arg = 1}},
-			{'id', dir = 'asc'},
-		})
-		local inner = db:table_scanner('scan_rows', {
-			{'tenant_id', '=', {
-				scan = outer, col = 'tenant_id',
-			}},
-			{'id', '=', {
-				scan = outer, col = 'id',
-			}},
-		})
-		local join = db:join_scans(outer, inner)
-		local get_outer_id = table_scanner_col_decoder(db, outer, 'id')
-		local get_inner_id = table_scanner_col_decoder(db, inner, 'id')
-
-		local function ids(tenant_id)
-			local t = {}
-			join.reset(tenant_id)
-			while join.advance() do
-				t[#t + 1] = get_outer_id()..':'..get_inner_id()
-			end
-			return cat(t, ',')
-		end
-		assert(ids(1) == '1:1,2:2,3:3')
-		assert(ids(2) == '1:1,2:2')
-
-		join.close()
-		db:commit()
-	end)
-end
-
-function test.table_scanner_left_join()
-	with_db('table_scanner_left_join', function(db)
-		add_table_scanner_data(db)
-		db:begin'r'
-
-		local outer = db:table_scanner('scan_rows', {
-			{'tenant_id', '=', {value = 1}},
-			{'id', dir = 'asc'},
-		})
-		local child = db:table_scanner('scan_rows/score', {
-			{'score', '=', {scan = outer, col = 'score'}},
-			{'tenant_id', dir = 'asc'},
-			{'id', dir = 'asc'},
-		})
-		local grandchild = db:table_scanner('scan_rows', {
-			{'tenant_id', '=', {scan = outer, col = 'tenant_id'}},
-			{'id', '=', {scan = child, col = 'id'}},
-		})
-		local left = db:left_join_scans(outer, child)
-		local get_outer_id = table_scanner_col_decoder(db, outer, 'id')
-		local get_child_id = table_scanner_col_decoder(db, child, 'id')
-		local get_grandchild_id =
-			table_scanner_col_decoder(db, grandchild, 'id')
-
-		local t = {}
-		left.reset()
-		while left.advance() do
-			local child_id = child.row_found and get_child_id() or '-'
-			t[#t + 1] = get_outer_id()..':'..child_id
-		end
-		assert(cat(t, ',') == '1:-,2:2,3:3')
-
-		local join = db:join_scans(left, grandchild, {outer, child})
-		clear(t)
-		join.reset()
-		while join.advance() do
-			assert(child.row_found)
-			assert(grandchild.row_found)
-			t[#t + 1] = get_outer_id()..':'..get_child_id()
-				..':'..get_grandchild_id()
-		end
-		assert(cat(t, ',') == '2:2:2,3:3:3')
-
-		local left_join = db:left_join_scans(left, grandchild, {outer, child})
-		clear(t)
-		left_join.reset()
-		while left_join.advance() do
-			local child_id =
-				child.row_found and get_child_id() or '-'
-			local grandchild_id =
-				grandchild.row_found and get_grandchild_id() or '-'
-			t[#t + 1] = get_outer_id()..':'..child_id..':'..grandchild_id
-		end
-		assert(cat(t, ',') == '1:-:-,2:2:2,3:3:3')
-
-		local nested_child = db:child_scan(outer, child)
-		local nested_grandchild = db:child_scan(nested_child, grandchild)
-		clear(t)
-		for outer_scan in outer:rows() do
-			for child_scan in nested_child:left_rows(outer_scan) do
-				for grandchild_scan in nested_grandchild:left_rows(child_scan) do
-					local child_id =
-						nested_child.row_found and get_child_id() or '-'
-					local grandchild_id =
-						nested_grandchild.row_found
-							and get_grandchild_id() or '-'
-					t[#t + 1] = get_outer_id()..':'..child_id
-						..':'..grandchild_id
-				end
-			end
-		end
-		assert(cat(t, ',') == '1:-:-,2:2:2,3:3:3')
-
-		left_join.close()
 		db:commit()
 	end)
 end
