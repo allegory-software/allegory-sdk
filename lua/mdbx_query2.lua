@@ -2245,10 +2245,15 @@ scanner is seeked by the base pk, read raw off the index scanner's own
 dup value via scan-params -- an ordinary correlated exact scan, not a
 table_scanner feature.
 
-TODO: this always builds and reseeks the base scanner, even for a row a
-cheaper index-only residual check would have rejected first -- the
-seek-skip this session designed (order the index-covered residual
-checks before the base seek) isn't wired up yet.
+The base seek is lazy: next_group()/next_pk() only mark it stale (and
+pass the raw scanner's own return value straight through, untouched --
+next_item()'s "found?" signal is never reinterpreted here); col_decoder()
+for an uncovered column seeks it on first read since the last
+invalidation. A residual/output that never reads an uncovered column on
+a rejected row never seeks the base scanner at all -- apply_residual()'s
+existing per-condition loop already stops at the first failing
+condition, so an index-covered condition ahead of an uncovered one in
+the same residual gets this for free, no residual reordering needed.
 ]]
 local function with_base_scanner(db, node, index_scanner, base_schema)
 	local path = {}
@@ -2258,26 +2263,29 @@ local function with_base_scanner(db, node, index_scanner, base_schema)
 	local base_scanner = db:table_scanner(base_schema.name, path)
 	local index_next_group, index_next_pk, index_col_decoder, index_close =
 		node.next_group, node.next_pk, node.col_decoder, node.close
-	local function step_base()
-		base_scanner.reset()
-		base_scanner.advance()
-	end
+	local stale
 	function node:next_group()
-		local ok = index_next_group(self)
-		if ok then step_base() end
-		return ok
+		stale = true
+		return index_next_group(self)
 	end
 	function node:next_pk()
-		local ok = index_next_pk(self)
-		if ok then step_base() end
-		return ok
+		stale = true
+		return index_next_pk(self)
 	end
 	function node:col_decoder(want_member, col)
 		local f = base_schema.fields[col]
-		if f and not f.key_index then
-			return base_scanner:col_decoder(col)
+		if not (f and not f.key_index) then
+			return index_col_decoder(self, want_member, col)
 		end
-		return index_col_decoder(self, want_member, col)
+		local decode = base_scanner:col_decoder(col)
+		return function()
+			if stale then
+				base_scanner.reset()
+				base_scanner.advance()
+				stale = false
+			end
+			return decode()
+		end
 	end
 	function node:close()
 		base_scanner.close()
