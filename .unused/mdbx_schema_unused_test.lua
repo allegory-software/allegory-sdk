@@ -159,3 +159,198 @@ function test.each_or()
 		db:commit()
 	end)
 end
+
+-- prefix scans --------------------------------------------------------------
+
+local function make_3col_table(db, name)
+	db:create_table(name, {
+		fields = {
+			{col = 's1', mdbx_type = 'utf8', maxlen = 50, nozero = true, not_null = true},
+			{col = 's2', mdbx_type = 'utf8', maxlen = 50, nozero = true, not_null = true},
+			{col = 's3', mdbx_type = 'utf8', maxlen = 50, nozero = true, not_null = true},
+			{col = 'v',  mdbx_type = 'utf8', maxlen = 50},
+		},
+		pk = {'s1', 's2', 's3'},
+	})
+	db:insert(name, nil, 'a', 'x', '1', 'ax1')
+	db:insert(name, nil, 'a', 'x', '2', 'ax2')
+	db:insert(name, nil, 'a', 'y', '1', 'ay1')
+	db:insert(name, nil, 'b', 'x', '1', 'bx1')
+	db:insert(name, nil, 'b', 'x', '2', 'bx2')
+	db:insert(name, nil, 'c', 'z', '1', 'cz1')
+end
+
+function test.find_prefix_exact_match()
+	with_db('find_prefix_exact_match', function(db)
+		db:begin'w'
+		make_3col_table(db, 't')
+		db:commit()
+		db:begin()
+		local cur = db:cursor('t')
+		local s1, s2, s3, v = cur:find_prefix(nil, 'b', 'x')
+		assert(s1 == 'b' and s2 == 'x' and s3 == '1' and v == 'bx1', S(s1,s2,s3,v))
+		cur:close()
+		db:commit()
+	end)
+end
+
+function test.find_prefix_one_col_lands_on_first_match()
+	with_db('find_prefix_one_col_lands_on_first_match', function(db)
+		db:begin'w'
+		make_3col_table(db, 't')
+		db:commit()
+		db:begin()
+		local cur = db:cursor('t')
+		local s1, s2, s3, v = cur:find_prefix(nil, 'a')
+		assert(s1 == 'a' and s2 == 'x' and s3 == '1' and v == 'ax1', S(s1,s2,s3,v))
+		cur:close()
+		db:commit()
+	end)
+end
+
+function test.find_prefix_between_keys_is_not_found()
+	with_db('find_prefix_between_keys_is_not_found', function(db)
+		db:begin'w'
+		make_3col_table(db, 't')
+		db:commit()
+		db:begin()
+		local cur = db:cursor('t')
+		-- 'a','w' is between 'a','x' and nothing — 'w' < 'x' so first key >= prefix
+		-- is ('a','x','1') but its prefix ('a','x') != ('a','w')
+		local ok, err = cur:try_find_prefix(nil, 'a', 'w')
+		assert(not ok and err == 'not_found', S(ok, err))
+		cur:close()
+		db:commit()
+	end)
+end
+
+function test.find_prefix_past_last_is_not_found()
+	with_db('find_prefix_past_last_is_not_found', function(db)
+		db:begin'w'
+		make_3col_table(db, 't')
+		db:commit()
+		db:begin()
+		local cur = db:cursor('t')
+		local ok, err = cur:try_find_prefix(nil, 'z')
+		assert(not ok and err == 'not_found', S(ok, err))
+		cur:close()
+		db:commit()
+	end)
+end
+
+function test.each_prefix_first_col()
+	with_db('each_prefix_first_col', function(db)
+		db:begin'w'
+		make_3col_table(db, 't')
+		db:commit()
+		db:begin()
+		local cur = db:cursor('t')
+		local rows = {}
+		for _, s1, s2, s3 in cur:each_prefix(nil, 'a') do
+			rows[#rows+1] = s2..s3
+		end
+		cur:close()
+		db:commit()
+		assert(table.concat(rows, ',') == 'x1,x2,y1', table.concat(rows, ','))
+	end)
+end
+
+function test.each_prefix_two_cols()
+	with_db('each_prefix_two_cols', function(db)
+		db:begin'w'
+		make_3col_table(db, 't')
+		db:commit()
+		db:begin()
+		local cur = db:cursor('t')
+		local rows = {}
+		for _, s1, s2, s3 in cur:each_prefix(nil, 'a', 'x') do
+			rows[#rows+1] = s3
+		end
+		cur:close()
+		db:commit()
+		assert(table.concat(rows, ',') == '1,2', table.concat(rows, ','))
+	end)
+end
+
+function test.each_prefix_no_match()
+	with_db('each_prefix_no_match', function(db)
+		db:begin'w'
+		make_3col_table(db, 't')
+		db:commit()
+		db:begin()
+		local cur = db:cursor('t')
+		local count = 0
+		for _ in cur:each_prefix(nil, 'z') do count = count + 1 end
+		cur:close()
+		db:commit()
+		assert(count == 0)
+	end)
+end
+
+function test.db_each_prefix_auto_cursor()
+	with_db('db_each_prefix_auto_cursor', function(db)
+		db:begin'w'
+		make_3col_table(db, 't')
+		db:commit()
+		db:begin()
+		local rows = {}
+		for _, s1, s2, s3 in db:each_prefix('t', nil, 'b') do
+			rows[#rows+1] = s2..s3
+		end
+		db:commit()
+		assert(table.concat(rows, ',') == 'x1,x2', table.concat(rows, ','))
+	end)
+end
+
+function test.each_prefix_cursor_reuse()
+	with_db('each_prefix_cursor_reuse', function(db)
+		db:begin'w'
+		make_3col_table(db, 't')
+		db:commit()
+		db:begin()
+		local cur = db:cursor('t')
+		local result = {}
+		for _, prefix in ipairs{'a', 'b', 'c', 'z'} do
+			local rows = {}
+			for _, s1, s2, s3 in cur:each_prefix(nil, prefix) do
+				rows[#rows+1] = s2..s3
+			end
+			result[prefix] = table.concat(rows, ',')
+		end
+		cur:close()
+		db:commit()
+		assert(result['a'] == 'x1,x2,y1', result['a'])
+		assert(result['b'] == 'x1,x2',    result['b'])
+		assert(result['c'] == 'z1',        result['c'])
+		assert(result['z'] == '',          result['z'])
+	end)
+end
+
+function test.each_prefix_numeric_composite_pk()
+	with_db('each_prefix_numeric_composite_pk', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			fields = {
+				{col = 'pid', mdbx_type = 'u32', not_null = true},
+				{col = 'cid', mdbx_type = 'u32', not_null = true},
+				{col = 'v',   mdbx_type = 'utf8', maxlen = 20},
+			},
+			pk = {'pid', 'cid'},
+		})
+		db:insert('t', '{}', {pid=1, cid=1, v='a'})
+		db:insert('t', '{}', {pid=1, cid=2, v='b'})
+		db:insert('t', '{}', {pid=2, cid=1, v='c'})
+		db:insert('t', '{}', {pid=2, cid=2, v='d'})
+		db:insert('t', '{}', {pid=3, cid=1, v='e'})
+		db:commit()
+		db:begin()
+		local cur = db:cursor('t')
+		local vals = {}
+		for _, pid, cid, v in cur:each_prefix(nil, 2) do
+			vals[#vals+1] = v
+		end
+		cur:close()
+		db:commit()
+		assert(table.concat(vals, ',') == 'c,d', table.concat(vals, ','))
+	end)
+end

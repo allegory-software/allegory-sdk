@@ -4,6 +4,14 @@
 	db:each_join         (name|cur, ..., db.left(name|cur), ...) -> iter() -> cur1, cur2|nil, ...
 	db:each_and          (ix_name, key_vals..., ix_name, key_vals...) -> iter() -> cur
 	db:each_or           (ix_name, key_vals..., ix_name, key_vals...) -> iter() -> cur
+	db:each_prefix       (name|dbi, [val_cols], pk_val1, ...) -> iter() -> cur, keysvals...
+	db:each_dup          (ix_name|ix_dbi, [val_cols], keys...) -> iter() -> cur, keysvals...
+	cur:[try_]find_prefix ([val_cols], pk_val1, ...) -> keysvals...
+	cur:each_prefix      ([val_cols], pk_val1, ...) -> iter() -> cur, keysvals...
+	cur:each_dup         ([val_cols], keys...) -> iter() -> cur, keysvals...
+
+	replaced by db:table_scanner: a prefix scan is a '^'/starts path term,
+	an exact-key dup scan is an all-'=' path on the index.
 
 ]]
 
@@ -304,4 +312,82 @@ function Db:each_or(...)
 		end
 		return cursors[min_i]
 	end
+end
+
+--PREFIX / DUP SCANS -----------------------------------------------------------
+
+function Cur:try_find_prefix(val_cols, ...)
+	local schema = assert(self.schema)
+	local n = select('#', ...)
+	assert(n >= 1 and n <= #schema.key_fields)
+	local k, k_buf_sz = key_rec_buffer, MDBX_MAX_KEY_SIZE
+	local k_sz = encode_key_prefix(self.db, schema, 'c_seek',
+		k, k_buf_sz, n, false, ...)
+	local ok, k2, k2_sz, v, v_sz = self:find_ge_raw(k, k_sz)
+	if not ok or k2_sz < k_sz or memcmp(k2, k, k_sz) ~= 0 then
+		return false, 'not_found'
+	end
+	return true, decode_kv(self.db, schema, k2, k2_sz, v, v_sz, val_cols)
+end
+function Cur:find_prefix(...)
+	return skip_ok(self:try_find_prefix(...))
+end
+local function prefix_next(self, ctrl)
+	local ok, k, k_sz, v, v_sz
+	if ctrl == nil then
+		ok, k, k_sz, v, v_sz = self:current_raw()
+	else
+		ok, k, k_sz, v, v_sz = self:next_raw()
+	end
+	local psz = self.prefix_sz
+	if not ok or k_sz < psz or memcmp(k, self.prefix_str, psz) ~= 0 then
+		self.prefix_str = nil; self.prefix_sz = nil
+		if self.prefix_close then self.prefix_close = nil; self:close() end
+		return
+	end
+	return self, decode_kv(self.db, self.schema, k, k_sz, v, v_sz, self.val_cols)
+end
+local function prefix_seek(self, schema, val_cols, n, ...)
+	local k, k_buf_sz = key_rec_buffer, MDBX_MAX_KEY_SIZE
+	local k_sz = encode_key_prefix(self.db, schema, 'c_seek',
+		k, k_buf_sz, n, false, ...)
+	if not self:find_ge_raw(k, k_sz) then return false end
+	self.prefix_str = str(k, k_sz)
+	self.prefix_sz = k_sz
+	self.val_cols = val_cols
+	return true
+end
+function Cur:each_prefix(val_cols, ...)
+	local schema = assert(self.schema)
+	local n = select('#', ...)
+	assert(n >= 1 and n <= #schema.key_fields)
+	if not prefix_seek(self, schema, val_cols, n, ...) then return noop end
+	return prefix_next, self
+end
+function Db:each_prefix(tbl_name, val_cols, ...)
+	local cur = self:cursor(tbl_name)
+	local schema = assert(cur.schema)
+	local n = select('#', ...)
+	assert(n >= 1 and n <= #schema.key_fields)
+	if not prefix_seek(cur, schema, val_cols, n, ...) then
+		cur:close(); return noop
+	end
+	cur.prefix_close = true
+	return prefix_next, cur
+end
+
+--uses each_dup_from(), still defined in mdbx_schema.lua for each_current_dup.
+local function each_dup(db, cur, ix_schema, val_cols, close_cur, ...)
+	assert(ix_schema.is_index)
+	local xk, xk_buf_sz = key_rec_buffer, MDBX_MAX_KEY_SIZE
+	local xk_sz = encode_key(db, ix_schema, 'each_dup', nil,
+		xk, xk_buf_sz, ix_schema.key_cols, nil, ...)
+	return each_dup_from(db, cur, ix_schema, val_cols, close_cur, xk, xk_sz)
+end
+function Cur:each_dup(val_cols, ...)
+	return each_dup(self.db, self, assert(self.schema), val_cols, false, ...)
+end
+function Db:each_dup(ix_name, val_cols, ...)
+	local dbi, ix_schema = self:dbi_schema(ix_name)
+	return each_dup(self, self:cursor_raw(dbi), ix_schema, val_cols, true, ...)
 end
