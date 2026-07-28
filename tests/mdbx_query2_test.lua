@@ -184,13 +184,13 @@ end
 --not a hand-built plan -- exercises compile_getter/compile_plan/
 --compile_step end to end.
 
---q.eq() on the table's own pk column: compiles to an 'exact' plan on the
+--'=' on the table's own pk column: compiles to an 'exact' plan on the
 --base table, bound value read through q.param().
 function test.exact_via_param_exec()
 	with_db('exact_via_param_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:where(q.eq(q.col('users.id'), q.param('ID')))
+				:where({'=', q.col('users.id'), q.param('ID')})
 				:select'users.id id'
 				:prepare()
 			local params = {}
@@ -230,14 +230,14 @@ function test.range_via_param_exec()
 	end)
 end
 
---q.eq() against a bare literal (no q.param() at all): compiles to an
+--'=' against a bare literal (no q.param() at all): compiles to an
 --'exact' plan on the status index, bound value is a plain constant
 --getter.
 function test.exact_literal_exec()
 	with_db('exact_literal_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:where(q.eq(q.col('users.status'), 'active'))
+				:where({'=', q.col('users.status'), 'active'})
 				:select'users.id id'
 				:prepare()
 			local node = compile_step(db, rel, {})
@@ -247,7 +247,7 @@ function test.exact_literal_exec()
 	end)
 end
 
---q.in_() against the (single-column) pk with a short literal list:
+--{'in', ...} against the (single-column) pk with a short literal list:
 --try_key() used to offer this as a seekable 'in' plan, which no
 --executor implements (pk_scan's own kind assert never included 'in')
 ---- choose_access() would pick it anyway (best coverage) and crash at
@@ -257,7 +257,7 @@ function test.where_in_literal_list_exec()
 	with_db('where_in_literal_list_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:where(q.in_(q.col('users.id'), {2, 4}))
+				:where({'in', q.col('users.id'), {2, 4}})
 				:select'users.id id'
 				:order_by'id'
 				:prepare()
@@ -277,8 +277,8 @@ function test.residual_filter_exec()
 	with_db('residual_filter_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:where(q.eq(q.col('users.status'), 'active'))
-				:where(q.eq(q.col('users.score'), 80))
+				:where({'=', q.col('users.status'), 'active'})
+				:where({'=', q.col('users.score'), 80})
 				:select'users.id id'
 				:prepare()
 			local node = compile_step(db, rel, {})
@@ -299,7 +299,7 @@ function test.inner_join_exec()
 		db:atomic('r', function()
 			local rel = db:from('users')
 				:join('sessions',
-					q.eq(q.col('sessions.user_id'), q.col('users.id')))
+					{'=', q.col('sessions.user_id'), q.col('users.id')})
 				:select'users.id id'
 				:prepare()
 			local node = compile_step(db, rel, {})
@@ -326,7 +326,7 @@ function test.left_join_exec()
 		db:atomic('r', function()
 			local rel = db:from('users')
 				:left_join('sessions',
-					q.eq(q.col('sessions.user_id'), q.col('users.id')))
+					{'=', q.col('sessions.user_id'), q.col('users.id')})
 				:select'users.id id'
 				:prepare()
 			local node = compile_step(db, rel, {})
@@ -358,8 +358,8 @@ function test.left_join_where_late_exec()
 		db:atomic('r', function()
 			local rel = db:from('users')
 				:left_join('sessions',
-					q.eq(q.col('sessions.user_id'), q.col('users.id')))
-				:where(q.eq(q.col('sessions.id'), q.param('SID')))
+					{'=', q.col('sessions.user_id'), q.col('users.id')})
+				:where({'=', q.col('sessions.id'), q.param('SID')})
 				:select'users.id id'
 				:prepare()
 			local node = compile_step(db, rel, {SID = 11})
@@ -393,10 +393,10 @@ function test.left_join_group_exec()
 		db:atomic('r', function()
 			local group = db:from('sessions')
 				:join('events',
-					q.eq(q.col('events.session_id'), q.col('sessions.id')))
+					{'=', q.col('events.session_id'), q.col('sessions.id')})
 			local rel = db:from('users')
 				:left_join(group,
-					q.eq(q.col('sessions.user_id'), q.col('users.id')))
+					{'=', q.col('sessions.user_id'), q.col('users.id')})
 				:select'users.id id'
 				:prepare()
 			local node = compile_step(db, rel, {})
@@ -429,10 +429,10 @@ function test.inner_join_group_exec()
 		db:atomic('r', function()
 			local group = db:from('sessions')
 				:join('events',
-					q.eq(q.col('events.session_id'), q.col('sessions.id')))
+					{'=', q.col('events.session_id'), q.col('sessions.id')})
 			local rel = db:from('users')
 				:join(group,
-					q.eq(q.col('sessions.user_id'), q.col('users.id')))
+					{'=', q.col('sessions.user_id'), q.col('users.id')})
 				:select'users.id id'
 				:prepare()
 			local node = compile_step(db, rel, {})
@@ -461,9 +461,9 @@ function test.inner_join_chain_exec()
 		db:atomic('r', function()
 			local rel = db:from('users')
 				:join('sessions',
-					q.eq(q.col('sessions.user_id'), q.col('users.id')))
+					{'=', q.col('sessions.user_id'), q.col('users.id')})
 				:join('events',
-					q.eq(q.col('events.session_id'), q.col('sessions.id')))
+					{'=', q.col('events.session_id'), q.col('sessions.id')})
 				:select'users.id id'
 				:prepare()
 			local node = compile_step(db, rel, {})
@@ -492,12 +492,12 @@ function test.left_join_group_chain_exec()
 		db:atomic('r', function()
 			local group = db:from('sessions')
 				:join('events',
-					q.eq(q.col('events.session_id'), q.col('sessions.id')))
+					{'=', q.col('events.session_id'), q.col('sessions.id')})
 				:join('tags',
-					q.eq(q.col('tags.event_id'), q.col('events.id')))
+					{'=', q.col('tags.event_id'), q.col('events.id')})
 			local rel = db:from('users')
 				:left_join(group,
-					q.eq(q.col('sessions.user_id'), q.col('users.id')))
+					{'=', q.col('sessions.user_id'), q.col('users.id')})
 				:select'users.id id'
 				:prepare()
 			local node = compile_step(db, rel, {})
@@ -573,9 +573,9 @@ function test.inner_join_wide_fk_residual_exec()
 	with_wide_fk_db('inner_join_wide_fk_residual_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:join('sessions', q.and_(
-					q.eq(q.col('sessions.user_id'), q.col('users.id')),
-					q.eq(q.col('sessions.kind'), 'web')))
+				:join('sessions', {'and',
+					{'=', q.col('sessions.user_id'), q.col('users.id')},
+					{'=', q.col('sessions.kind'), 'web'}})
 				:select'users.id id'
 				:prepare()
 			local node = compile_step(db, rel, {})
@@ -605,9 +605,9 @@ function test.left_join_residual_null_extends_exec()
 	with_wide_fk_db('left_join_residual_null_extends_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:left_join('sessions', q.and_(
-					q.eq(q.col('sessions.user_id'), q.col('users.id')),
-					q.eq(q.col('sessions.kind'), 'admin')))
+				:left_join('sessions', {'and',
+					{'=', q.col('sessions.user_id'), q.col('users.id')},
+					{'=', q.col('sessions.kind'), 'admin'}})
 				:select'users.id id'
 				:order_by'id'
 				:prepare()
@@ -675,9 +675,9 @@ function test.left_join_residual_unindexed_col_null_extends_exec()
 	function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:left_join('sessions', q.and_(
-					q.eq(q.col('sessions.user_id'), q.col('users.id')),
-					q.eq(q.col('sessions.kind'), 'admin')))
+				:left_join('sessions', {'and',
+					{'=', q.col('sessions.user_id'), q.col('users.id')},
+					{'=', q.col('sessions.kind'), 'admin'}})
 				:select'users.id id'
 				:prepare()
 			local node = compile_step(db, rel, {})
@@ -705,7 +705,7 @@ function test.inner_join_child_to_parent_exec()
 	with_db('inner_join_child_to_parent_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('sessions')
-				:join('users', q.eq(q.col('users.id'), q.col('sessions.user_id')))
+				:join('users', {'=', q.col('users.id'), q.col('sessions.user_id')})
 				:select'sessions.id sid'
 				:prepare()
 			local node = compile_step(db, rel, {})
@@ -792,7 +792,7 @@ function test.inner_join_self_fk_alias_exec()
 		db:atomic('r', function()
 			local rel = db:from('users')
 				:join('users mgr',
-					q.eq(q.col('mgr.manager_id'), q.col('users.id')))
+					{'=', q.col('mgr.manager_id'), q.col('users.id')})
 				:select'users.id boss'
 				:prepare()
 			local node = compile_step(db, rel, {})
@@ -858,7 +858,7 @@ function test.inner_join_composite_fk_partial_match_exec()
 	function(db)
 		db:atomic('r', function()
 			local rel = db:from('a')
-				:join('b', q.eq(q.col('b.x'), q.col('a.x')))
+				:join('b', {'=', q.col('b.x'), q.col('a.x')})
 				:select'a.x id'
 				:prepare()
 			local node = compile_step(db, rel, {})
@@ -882,7 +882,7 @@ function test.from_alias_exec()
 	with_db('from_alias_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users u')
-				:where(q.eq(q.col('u.status'), 'active'))
+				:where({'=', q.col('u.status'), 'active'})
 				:select'u.id id'
 				:prepare()
 			local node = compile_step(db, rel, {})
@@ -909,7 +909,7 @@ function test.rows_exec()
 	with_db('rows_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:where(q.eq(q.col('users.status'), 'active'))
+				:where({'=', q.col('users.status'), 'active'})
 				:select{'users.id id', 'users.score score'}
 				:order_by'users.id'
 				:prepare()
@@ -929,7 +929,7 @@ function test.rows_shape_exec()
 	with_db('rows_shape_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:where(q.eq(q.col('users.id'), 1))
+				:where({'=', q.col('users.id'), 1})
 				:select{'users.id id', 'users.score score'}
 				:prepare()
 			local id, score = rel:rows()()
@@ -949,14 +949,14 @@ function test.first_exec()
 	with_db('first_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:where(q.eq(q.col('users.status'), 'active'))
+				:where({'=', q.col('users.status'), 'active'})
 				:select'users.id id'
 				:order_by'users.id'
 				:prepare()
 			assert(rel:first() == 1)
 
 			local none = db:from('users')
-				:where(q.eq(q.col('users.id'), 999))
+				:where({'=', q.col('users.id'), 999})
 				:select'users.id id'
 				:prepare()
 			assert(none:first() == nil)
@@ -970,30 +970,30 @@ function test.one_must_one_exec()
 	with_db('one_must_one_exec', function(db)
 		db:atomic('r', function()
 			local single = db:from('users')
-				:where(q.eq(q.col('users.id'), 3))
+				:where({'=', q.col('users.id'), 3})
 				:select'users.id id'
 				:prepare()
 			assert(single:one() == 3)
 
 			local none = db:from('users')
-				:where(q.eq(q.col('users.id'), 999))
+				:where({'=', q.col('users.id'), 999})
 				:select'users.id id'
 				:prepare()
 			assert(none:one() == nil)
 			local none2 = db:from('users')
-				:where(q.eq(q.col('users.id'), 999))
+				:where({'=', q.col('users.id'), 999})
 				:select'users.id id'
 				:prepare()
 			assert(not pcall(function() none2:must_one() end))
 
 			local multi = db:from('users')
-				:where(q.eq(q.col('users.status'), 'active'))
+				:where({'=', q.col('users.status'), 'active'})
 				:select'users.id id'
 				:prepare()
 			assert(not pcall(function() multi:one() end))
 
 			local must_single = db:from('users')
-				:where(q.eq(q.col('users.id'), 3))
+				:where({'=', q.col('users.id'), 3})
 				:select'users.id id'
 				:prepare()
 			assert(must_single:must_one() == 3)
@@ -1031,7 +1031,7 @@ function test.distinct_hashed_exec()
 	with_db('distinct_hashed_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:where(q.ge(q.col('users.score'), 0))
+				:where({'>=', q.col('users.score'), 0})
 				:select'users.status status'
 				:distinct()
 				:order_by'status desc'
@@ -1135,11 +1135,11 @@ function test.group_by_aggregate_streamed_exec()
 		db:atomic('r', function()
 			local rel = db:from('users')
 				:group_by{'users.status status',
-					{q.count(), 'n'},
-					{q.sum(q.col('users.score')), 'total'},
-					{q.min(q.col('users.score')), 'lo'},
-					{q.max(q.col('users.score')), 'hi'},
-					{q.avg(q.col('users.score')), 'avg'}}
+					{{'count'}, 'n'},
+					{{'sum', q.col('users.score')}, 'total'},
+					{{'min', q.col('users.score')}, 'lo'},
+					{{'max', q.col('users.score')}, 'hi'},
+					{{'avg', q.col('users.score')}, 'avg'}}
 				:order_by'status'
 				:prepare()
 			assert(rel.group_streaming, 'expected the streaming path here')
@@ -1162,9 +1162,9 @@ function test.group_by_aggregate_hashed_exec()
 	with_db('group_by_aggregate_hashed_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:where(q.ge(q.col('users.score'), 0))
+				:where({'>=', q.col('users.score'), 0})
 				:group_by{'users.status status',
-					{q.count(), 'n'}, {q.sum(q.col('users.score')), 'total'}}
+					{{'count'}, 'n'}, {{'sum', q.col('users.score')}, 'total'}}
 				:order_by'status'
 				:prepare()
 			assert(not rel.group_streaming, 'expected the hash path here')
@@ -1189,10 +1189,10 @@ function test.group_by_aggregate_hashed_name_collision_exec()
 	with_db('group_by_aggregate_hashed_name_collision_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:where(q.ge(q.col('users.score'), 0))
+				:where({'>=', q.col('users.score'), 0})
 				:group_by{'users.status _agg2',
-					{q.sum(q.col('users.score')), 'total'},
-					{q.avg(q.col('users.score')), 'avg'}}
+					{{'sum', q.col('users.score')}, 'total'},
+					{{'avg', q.col('users.score')}, 'avg'}}
 				:order_by'_agg2'
 				:prepare()
 			assert(not rel.group_streaming, 'expected the hash path here')
@@ -1214,8 +1214,8 @@ function test.group_by_grand_total_exec()
 	with_db('group_by_grand_total_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:group_by{{q.count(), 'n'},
-					{q.sum(q.col('users.score')), 'total'}}
+				:group_by{{{'count'}, 'n'},
+					{{'sum', q.col('users.score')}, 'total'}}
 				:prepare()
 			local row = rel:first'{}'
 			assert(row.n == 5 and row.total == 355, row.n..','..row.total)
@@ -1229,8 +1229,8 @@ function test.having_exec()
 	with_db('having_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:group_by{'users.status status', {q.count(), 'n'}}
-				:having(q.ge(q.col('n'), 3))
+				:group_by{'users.status status', {{'count'}, 'n'}}
+				:having({'>=', q.col('n'), 3})
 				:order_by'status'
 				:prepare()
 			local t = {}
@@ -1248,7 +1248,7 @@ function test.count_exec()
 	with_db('count_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:where(q.eq(q.col('users.status'), 'active'))
+				:where({'=', q.col('users.status'), 'active'})
 				:prepare()
 			assert(rel:count() == 3)
 		end)
@@ -1285,8 +1285,8 @@ function test.count_having_exec()
 	with_db('count_having_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:group_by{'users.status status', {q.count(), 'n'}}
-				:having(q.ge(q.col('n'), 3))
+				:group_by{'users.status status', {{'count'}, 'n'}}
+				:having({'>=', q.col('n'), 3})
 				:prepare()
 			assert(rel:count() == 1)
 		end)
@@ -1297,11 +1297,11 @@ function test.exists_exec()
 	with_db('exists_exec', function(db)
 		db:atomic('r', function()
 			local yes = db:from('users')
-				:where(q.eq(q.col('users.id'), 1))
+				:where({'=', q.col('users.id'), 1})
 				:prepare()
 			assert(yes:exists() == true)
 			local no = db:from('users')
-				:where(q.eq(q.col('users.id'), 999))
+				:where({'=', q.col('users.id'), 999})
 				:prepare()
 			assert(no:exists() == false)
 		end)
@@ -1315,8 +1315,8 @@ function test.exists_having_exec()
 	with_db('exists_having_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:group_by{'users.status status', {q.count(), 'n'}}
-				:having(q.ge(q.col('n'), 10))
+				:group_by{'users.status status', {{'count'}, 'n'}}
+				:having({'>=', q.col('n'), 10})
 				:prepare()
 			assert(rel:exists() == false)
 		end)
@@ -1366,7 +1366,7 @@ function test.where_has_filter_exec()
 	with_group_db('where_has_filter_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:where_has('sessions', q.gt(q.col('sessions.id'), 13))
+				:where_has('sessions', {'>', q.col('sessions.id'), 13})
 				:select'users.id id'
 				:order_by'users.id'
 				:prepare()
@@ -1387,10 +1387,10 @@ function test.exists_in_and_expr_exec()
 	with_group_db('exists_in_and_expr_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:where(q.and_(
+				:where({'and',
 					q.exists('sessions',
-						q.eq(q.col('sessions.user_id'), q.col('users.id'))),
-					q.ne(q.col('users.id'), 2)))
+						{'=', q.col('sessions.user_id'), q.col('users.id')}),
+					{'~=', q.col('users.id'), 2}})
 				:select'users.id id'
 				:order_by'users.id'
 				:prepare()
@@ -1411,7 +1411,7 @@ function test.exists_rel_exec()
 	with_group_db('exists_rel_exec', function(db)
 		db:atomic('r', function()
 			local sub = db:from('sessions')
-				:where(q.eq(q.col('sessions.user_id'), q.col('users.id')))
+				:where({'=', q.col('sessions.user_id'), q.col('users.id')})
 			local rel = db:from('users')
 				:where(q.exists(sub))
 				:select'users.id id'
@@ -1428,7 +1428,7 @@ function test.not_exists_rel_exec()
 	with_group_db('not_exists_rel_exec', function(db)
 		db:atomic('r', function()
 			local sub = db:from('sessions')
-				:where(q.eq(q.col('sessions.user_id'), q.col('users.id')))
+				:where({'=', q.col('sessions.user_id'), q.col('users.id')})
 			local rel = db:from('users')
 				:where(q.not_exists(sub))
 				:select'users.id id'
@@ -1451,7 +1451,7 @@ function test.in_rel_exec()
 		db:atomic('r', function()
 			local sub = db:from('sessions'):select'sessions.user_id id'
 			local rel = db:from('users')
-				:where(q.in_(q.col('users.id'), sub))
+				:where({'in', q.col('users.id'), sub})
 				:select'users.id id'
 				:order_by'users.id'
 				:prepare()
@@ -1467,7 +1467,7 @@ function test.not_in_rel_exec()
 		db:atomic('r', function()
 			local sub = db:from('sessions'):select'sessions.user_id id'
 			local rel = db:from('users')
-				:where(q.not_in(q.col('users.id'), sub))
+				:where({'not_in', q.col('users.id'), sub})
 				:select'users.id id'
 				:order_by'users.id'
 				:prepare()
@@ -1488,8 +1488,8 @@ function test.exists_rel_join_exec()
 		db:atomic('r', function()
 			local sub = db:from('sessions')
 				:join('events',
-					q.eq(q.col('events.session_id'), q.col('sessions.id')))
-				:where(q.eq(q.col('sessions.user_id'), q.col('users.id')))
+					{'=', q.col('events.session_id'), q.col('sessions.id')})
+				:where({'=', q.col('sessions.user_id'), q.col('users.id')})
 			local rel = db:from('users')
 				:where(q.exists(sub))
 				:select'users.id id'
@@ -1592,7 +1592,7 @@ function test.exists_range_correlation_exec()
 		db:atomic('r', function()
 			local rel = db:from('users')
 				:where(q.exists('sessions',
-					q.ge(q.col('sessions.started_at'), q.col('users.min_start'))))
+					{'>=', q.col('sessions.started_at'), q.col('users.min_start')}))
 				:select'users.id id'
 				:order_by'id'
 				:prepare()
@@ -1623,7 +1623,7 @@ function test.exists_uncorrelated_classified_exec()
 	with_db('exists_uncorrelated_classified_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:where(q.exists('sessions', q.eq(q.col('sessions.id'), 11)))
+				:where(q.exists('sessions', {'=', q.col('sessions.id'), 11}))
 				:select'users.id id'
 				:order_by'id'
 				:prepare()

@@ -7,7 +7,7 @@ START
 	db:from'TABLE [ALIAS]'-> rel  new query from table
 	db:from(rel, alias) -> rel    new query from the rows of another query
 FILTER
-	:where(expr)                  where(e1):where(e2) == where(q.and_(e1, e2))
+	:where(expr)                  where(e1):where(e2) == where({'and', e1, e2})
 JOIN
 	:[left_]join(table, on_expr)  join to table; table is: 'TABLE [ALIAS]'
 	:[left_]join(rel, on_expr)    join to rel as join group (no terminals on rel)
@@ -34,17 +34,17 @@ EXPRESSIONS
 	q.col('REL.COL|NAME')         column reference; REL: rel or table alias/name
 	q.param(name)                 bound value at execution
 	q.outer('REL.COL|NAME')       col that must resolve in a parent scope
-	q.eq/ne/lt/le/gt/ge(a, b)     ==  ~=  <  <=  >  >=
-	q.and_(expr1, expr2, ...)
-	q.or_(expr1, expr2, ...)
-	q.is_[not_]null(expr)
-	q.starts(expr, prefix)
-	q.between(expr, lo, hi)       q.and_(q.ge(expr,lo), q.le(expr,hi))
+	{op, a, b}                    op: '=' '~=' '<' '<=' '>' '>='
+	{'and', expr1, expr2, ...}
+	{'or', expr1, expr2, ...}
+	{'is_[not_]null', expr}
+	{'starts', expr, prefix}
+	q.between(expr, lo, hi)       {'and', {'>=',expr,lo}, {'<=',expr,hi}}
 	q.[not_]exists(..., on_expr)
-	q.[not_]in_(expr, vals|rel)
+	{'[not_]in', expr, vals|rel}
 AGGREGATES (group_by() out_cols only)
-	q.count([val_expr])           val_expr: literal | q.param() | q.col()
-	q.min|max|sum|avg(val_expr)
+	{'count'[, val_expr]}         val_expr: literal | q.param() | q.col()
+	{'min'|'max'|'sum'|'avg', val_expr}
 SELECT
 	:select(out_cols)             {'REL.COL [NAME]' | {q.col(), name}, ...}
 TERMINALS (materialization)
@@ -86,9 +86,9 @@ EXAMPLE
 	local p = q.param
 
 	local posts =
-		db:from('post p')
-			:where(q.eq(c'p.status', p'STATUS'))
-			:where(q.ge(c'p.score', p'MIN_SCORE'))
+		db:from'post p'
+			:where{'=', c'p.status', p'STATUS'}
+			:where{'>=', c'p.score', p'MIN_SCORE'}
 			:select{
 				'p.id id',
 				'p.title title',
@@ -259,37 +259,14 @@ end
 
 function q.param (name) return {'param', name} end
 
-function q.eq(a, b) return {'eq', a, b} end
-function q.ne(a, b) return {'ne', a, b} end
-function q.lt(a, b) return {'lt', a, b} end
-function q.le(a, b) return {'le', a, b} end
-function q.gt(a, b) return {'gt', a, b} end
-function q.ge(a, b) return {'ge', a, b} end
-
-function q.and_(...) return {'and', ...} end
-function q.or_ (...) return {'or', ... } end
-
 function q.between(expr, lo, hi)
-	return q.and_(q.ge(expr, lo), q.le(expr, hi))
+	return {'and', {'>=', expr, lo}, {'<=', expr, hi}}
 end
 
-function q.is_null     (expr) return {'is_null'    , expr} end
-function q.is_not_null (expr) return {'is_not_null', expr} end
-
---{op->true}: q.count/min/max/sum/avg, the only ops group_by() allows
---as an aggregate output.
+--{op->true}: 'count'/'min'/'max'/'sum'/'avg', the only ops group_by()
+--allows as an aggregate output.
 local AGGREGATE_OPS = {count = true, min = true, max = true, sum = true,
 	avg = true}
-
-function q.count (expr) return {'count', expr} end
-function q.min   (expr) return {'min'  , expr} end
-function q.max   (expr) return {'max'  , expr} end
-function q.sum   (expr) return {'sum'  , expr} end
-function q.avg   (expr) return {'avg'  , expr} end
-
-function q.starts(expr, prefix)
-	return {'starts', expr, prefix}
-end
 
 local function exists_expr(op, rel, alias, on_expr)
 	if not isstr(alias) then --no alias, shift args
@@ -309,9 +286,6 @@ local function exists_expr(op, rel, alias, on_expr)
 end
 function q.exists    (...) return exists_expr('exists'    , ...) end
 function q.not_exists(...) return exists_expr('not_exists', ...) end
-
-function q.in_   (expr, values) return {'in'    , expr, values} end
-function q.not_in(expr, values) return {'not_in', expr, values} end
 
 function Rel:semi_join(...) return self:where(q.exists(...)) end
 function Rel:anti_join(...) return self:where(q.not_exists(...)) end
@@ -443,9 +417,9 @@ local function fk_expr(found_fk)
 		--source names can repeat across exists() scopes.
 		child_col.source = found_fk.child
 		parent_col.source = found_fk.parent
-		exprs[i] = q.eq(child_col, parent_col)
+		exprs[i] = {'=', child_col, parent_col}
 	end
-	return #exprs == 1 and exprs[1] or q.and_(unpack(exprs))
+	return #exprs == 1 and exprs[1] or {'and', unpack(exprs)}
 end
 
 --find the one foreign key connecting a new table to existing sources.
@@ -459,7 +433,7 @@ local function resolve_fk(marker, new_source, sources, what)
 	assertf(#found_fks > 0, '%s: no FK for %s', what, new_source.name)
 	assertf(#found_fks == 1, '%s: ambiguous FK for %s', what, new_source.name)
 	local expr = fk_expr(found_fks[1])
-	if marker.filter then return q.and_(expr, marker.filter) end
+	if marker.filter then return {'and', expr, marker.filter} end
 	return expr
 end
 
@@ -684,7 +658,7 @@ local function resolve_sources(rel)
 						if join.on_expr == nil or join.on_expr == true then
 							join.on_expr = join_where
 						else
-							join.on_expr = q.and_(join.on_expr, join_where)
+							join.on_expr = {'and', join.on_expr, join_where}
 						end
 					end
 				else
@@ -986,18 +960,18 @@ end
 --CHOOSE HOW TO READ ONE TABLE -----------------------------------------------
 
 local fact_kind = { --{op->fact kind}
-	eq = 'equality',
-	lt = 'range', le = 'range', gt = 'range', ge = 'range',
+	['='] = 'equality',
+	['<'] = 'range', ['<='] = 'range', ['>'] = 'range', ['>='] = 'range',
 	starts = 'prefix',
 	['in'] = 'membership', not_in = 'membership',
 	exists = 'existence', not_exists = 'existence',
 	is_null = 'null', is_not_null = 'null',
 }
 --[[
-- q.or_(q.eq(col, v1), q.eq(col, v2), ...) means the same thing as
-  q.in_(col, {v1, v2, ...}), so we turn it into that shape here.
+- {'or', {'=', col, v1}, {'=', col, v2}, ...} means the same thing as
+  {'in', col, {v1, v2, ...}}, so we turn it into that shape here.
 - once it's an 'in', it can drive an index seek exactly like a real
-  in_() would -- nothing else below needs to know it started as an or.
+  one would -- nothing else below needs to know it started as an or.
 - this only fires when every arm compares the exact same col. two
   different cols, or a col on both sides of one arm, can't collapse
   into one membership check, so we leave those alone.
@@ -1007,7 +981,7 @@ local function or_as_in(expr)
 	local col, values = nil, {}
 	for i = 2, #expr do
 		local arm = expr[i]
-		if type(arm) ~= 'table' or arm[1] ~= 'eq' then return nil end
+		if type(arm) ~= 'table' or arm[1] ~= '=' then return nil end
 		local l, r = arm[2], arm[3]
 		if type(r) == 'table' and r[1] == 'col' then l, r = r, l end
 		if type(l) ~= 'table' or l[1] ~= 'col' then return nil end
@@ -1020,8 +994,8 @@ local function or_as_in(expr)
 end
 
 --[[
-- where()/having() calls combine as q.and_().
-- a top-level q.and_() inside one call has the same effect.
+- where()/having() calls combine as if 'and'ed together.
+- a top-level {'and', ...} inside one call has the same effect.
 - split_conditions() flattens both forms into one independent-
   condition list.
 - choose_access() can turn a fact-classified condition into an index
@@ -1237,7 +1211,7 @@ local function source_operand(source, left, right)
 	return nil
 end
 --{op->flipped op}
-local flip_range_op = {lt = 'gt', le = 'ge', gt = 'lt', ge = 'le'}
+local flip_range_op = {['<'] = '>', ['<='] = '>=', ['>'] = '<', ['>='] = '<='}
 
 --[[
 - pull facts out of access conditions that read only this source.
@@ -1266,7 +1240,7 @@ local function bucket_facts(source, conditions)
 				local col, val, flipped = source_operand(source, expr[2], expr[3])
 				if col then
 					local rop = flipped and flip_range_op[expr[1]] or expr[1]
-					local bucket = (rop == 'gt' or rop == 'ge') and lo or hi
+					local bucket = (rop == '>' or rop == '>=') and lo or hi
 					if not bucket[col] then
 						bucket[col] = {cond = cond, op = rop, expr = val}
 					end
@@ -1298,7 +1272,7 @@ local function bucket_facts(source, conditions)
 						--TODO: range bucketing keeps the first lower-bound fact.
 						--is_not_null() can occupy the bucket before a
 						--stricter later range fact.
-						lo[col] = {cond = cond, op = 'gt', expr = null}
+						lo[col] = {cond = cond, op = '>', expr = null}
 					end
 				end
 			end
@@ -2149,32 +2123,167 @@ local function compile_getter(expr, params, outer_node)
 	return function() return expr end
 end
 
---turn one choose_access() plan (schema/depth/dir plus exprs) into the
---shape that pk_scan() expects (same schema/depth/dir, but every bound expr
---replaced by a getter). outer_node (nil at the top level) passes straight
---through to compile_getter, for a sub-relation probe's correlated base
---step or a joined index_seek/cross step's correlated seek.
-local function compile_plan(plan, params, outer_node)
-	local seek = {}
-	for i, expr in ipairs(plan.seek) do
-		seek[i] = compile_getter(expr, params, outer_node)
+--[[
+one bound-value expr -> a table_scanner param descriptor. a q.col() read
+of an already-registered member (registry[source.name], set by
+compile_step()/compile_joined_step() as each step's table_scanner is
+built) becomes a raw {scan=,col=} scan-param, reading that member's
+current row directly -- no decode/re-encode. This is what lets an
+fk_seek-classified join (choose_access()'s classify_join_op()) lower the
+exact same way as index_seek/cross: the FK's referenced column is always
+a q.col() on the already-scheduled parent, which is always a registered
+member by the time this runs, so pk_join_seek's raw-byte-reuse
+specialization has nothing left to add over the general case. Anything
+else (a q.param()/literal, or a q.col() whose source isn't a registered
+table_scanner -- a sub-relation probe's outer correlation, still read
+through compile_getter's decoded outer_node:col()) falls back to a
+{get=} closure.
+]]
+local function compile_scan_param(expr, params, outer_node, registry)
+	if registry and type(expr) == 'table' and expr[1] == 'col' and expr.source
+		and registry[expr.source.name]
+	then
+		return {scan = registry[expr.source.name], col = expr[3]}
 	end
-	local node_plan = {
-		kind = plan.kind, schema = plan.schema, depth = plan.depth,
-		dir = plan.dir, seek = seek, member = plan.member,
-	}
-	if plan.lo then
-		node_plan.lo = {op = plan.lo.op,
-			get = compile_getter(plan.lo.expr, params, outer_node)}
+	return {get = compile_getter(expr, params, outer_node)}
+end
+
+--turn one choose_access() plan (schema/depth/dir/kind plus seek/lo/hi/
+--prefix exprs) into a table_scanner path: one {col,'=',descriptor} term
+--per leading equality-pinned column (plan.schema.pk[i]), then one bound
+--term (range/prefix) or one dir-only term, whichever the plan calls for
+--past that prefix -- table_scanner only needs one term carrying `dir` to
+--fix the whole scan's direction, not one per trailing column. outer_node
+--(nil at the top level) passes straight through to compile_getter, for a
+--sub-relation probe's correlated base step. registry (nil outside
+--compile_step()'s own access-chain build) is compile_scan_param()'s
+--member -> table_scanner lookup for a joined step's correlated seek.
+local function compile_scan_path(plan, params, outer_node, registry)
+	local pk = plan.schema.pk
+	local path = {}
+	for i = 1, plan.depth do
+		path[i] = {pk[i], '=',
+			compile_scan_param(plan.seek[i], params, outer_node, registry)}
 	end
-	if plan.hi then
-		node_plan.hi = {op = plan.hi.op,
-			get = compile_getter(plan.hi.expr, params, outer_node)}
+	if plan.kind == 'range' then
+		local term = {plan.bound_col}
+		if plan.lo and plan.hi then
+			term[2] = 'range'
+			term[3] = plan.lo.op
+			term[4] = compile_scan_param(plan.lo.expr, params, outer_node, registry)
+			term[5] = plan.hi.op
+			term[6] = compile_scan_param(plan.hi.expr, params, outer_node, registry)
+		elseif plan.lo then
+			term[2] = plan.lo.op
+			term[3] = compile_scan_param(plan.lo.expr, params, outer_node, registry)
+		else
+			term[2] = plan.hi.op
+			term[3] = compile_scan_param(plan.hi.expr, params, outer_node, registry)
+		end
+		term.dir = plan.dir
+		path[#path + 1] = term
+	elseif plan.kind == 'prefix' then
+		path[#path + 1] = {plan.bound_col, 'starts',
+			compile_scan_param(plan.prefix, params, outer_node, registry),
+			dir = plan.dir}
+	elseif plan.dir and plan.depth < #pk then
+		path[#path + 1] = {pk[plan.depth + 1], dir = plan.dir}
 	end
-	if plan.prefix then
-		node_plan.prefix = compile_getter(plan.prefix, params, outer_node)
+	return path
+end
+
+--[[
+wraps one table_scanner as a generic executor node over `member`'s column
+namespace -- the reset/next_group/next_pk/pk/col_decoder/close contract
+that pk_join_seek/nested_join and select()/pk_filter()/pk_group()/
+stream_aggregate()/value_sort() (mdbx_query_nodes2.lua) call on an
+upstream node; col/next_item/explain fall back to Db.query_node's own
+defaults (see mdbx_query_nodes2.lua).
+
+table_scanner's advance_key()/advance_pk() are already exactly pk_scan's
+next_group()/next_pk(): both walk to the next distinct key vs. the next
+duplicate within the current key, and both correctly perform the initial
+seek on whichever is called first after reset(). found() is pk_scan's
+has_pk. The base table's pk bytes live in key_rec for a base-table scan,
+val_rec (the dup value) for an index scan.
+]]
+local function scan_node(scanner, member)
+	local node = object(Db.query_node, {item = 'pk', members = {member}})
+	function node:reset()
+		scanner.reset()
 	end
-	return node_plan
+	function node:next_group()
+		return scanner.advance_key()
+	end
+	function node:next_pk()
+		return scanner.advance_pk()
+	end
+	function node:pk(name)
+		if scanner.found() and (name == nil or name == member) then
+			local rec = scanner.is_index and scanner.val_rec or scanner.key_rec
+			return true, rec.data, rec.size
+		end
+	end
+	function node:col_decoder(want_member, col)
+		assertf(want_member == member, 'scan_node: unknown member: %s',
+			tostring(want_member))
+		return scanner:col_decoder(col)
+	end
+	function node:close()
+		scanner.close()
+	end
+	return node
+end
+
+--[[
+augments a scan_node whose source is accessed via a secondary index with
+a second, correlated exact scanner on the base table, for a residual/
+output/correlation that needs a base value column the index doesn't
+cover (table_scanner's own col_decoder rejects that case: a secondary
+index's dup value only carries the base pk, not other columns). The base
+scanner is seeked by the base pk, read raw off the index scanner's own
+dup value via scan-params -- an ordinary correlated exact scan, not a
+table_scanner feature.
+
+TODO: this always builds and reseeks the base scanner, even for a row a
+cheaper index-only residual check would have rejected first -- the
+seek-skip this session designed (order the index-covered residual
+checks before the base seek) isn't wired up yet.
+]]
+local function with_base_scanner(db, node, index_scanner, base_schema)
+	local path = {}
+	for i, col in ipairs(base_schema.pk) do
+		path[i] = {col, '=', {scan = index_scanner, col = col}}
+	end
+	local base_scanner = db:table_scanner(base_schema.name, path)
+	local index_next_group, index_next_pk, index_col_decoder, index_close =
+		node.next_group, node.next_pk, node.col_decoder, node.close
+	local function step_base()
+		base_scanner.reset()
+		base_scanner.advance()
+	end
+	function node:next_group()
+		local ok = index_next_group(self)
+		if ok then step_base() end
+		return ok
+	end
+	function node:next_pk()
+		local ok = index_next_pk(self)
+		if ok then step_base() end
+		return ok
+	end
+	function node:col_decoder(want_member, col)
+		local f = base_schema.fields[col]
+		if f and not f.key_index then
+			return base_scanner:col_decoder(col)
+		end
+		return index_col_decoder(self, want_member, col)
+	end
+	function node:close()
+		base_scanner.close()
+		index_close(self)
+	end
+	return node
 end
 
 --EVALUATE RESIDUAL CONDITIONS -----------------------------------------------
@@ -2321,12 +2430,12 @@ local function eval_expr(expr, params, node, probes)
 	if ai_ci_operand(a) or ai_ci_operand(b) then
 		va, vb = mdbx_fold_ai_ci(va), mdbx_fold_ai_ci(vb)
 	end
-	if op == 'eq' then return va == vb
-	elseif op == 'ne' then return va ~= vb
-	elseif op == 'lt' then return value_cmp(va, vb) < 0
-	elseif op == 'le' then return value_cmp(va, vb) <= 0
-	elseif op == 'gt' then return value_cmp(va, vb) > 0
-	elseif op == 'ge' then return value_cmp(va, vb) >= 0
+	if op == '=' then return va == vb
+	elseif op == '~=' then return va ~= vb
+	elseif op == '<' then return value_cmp(va, vb) < 0
+	elseif op == '<=' then return value_cmp(va, vb) <= 0
+	elseif op == '>' then return value_cmp(va, vb) > 0
+	elseif op == '>=' then return value_cmp(va, vb) >= 0
 	else error('unsupported condition op: '..tostring(op)) end
 end
 --evaluate a where()/on_expr row check against the current row.
@@ -2553,8 +2662,14 @@ function compile_exists_checker(db, expr, params, node, probes)
 			close_probes(sub_probes)
 		end
 	else
-		local inner = db:pk_scan(compile_plan(expr.plan, params, outer_node))
-		inner = apply_residual(db, inner, expr.plan.residual, params, probes)
+		local plan = expr.plan
+		local scanner = db:table_scanner(plan.schema.name,
+			compile_scan_path(plan, params, outer_node))
+		local inner = scan_node(scanner, plan.member)
+		if plan.schema.is_index then
+			inner = with_base_scanner(db, inner, scanner, plan.schema.val_schema)
+		end
+		inner = apply_residual(db, inner, plan.residual, params, probes)
 		if expr.correlated then
 			probes[expr] = {
 				check_exists = function()
@@ -2572,83 +2687,84 @@ function compile_exists_checker(db, expr, params, node, probes)
 end
 
 --[[
-compile_joined_step(db, node, step, params, probes) -> node
+compile_joined_step(db, node, step, params, probes, registry) -> node
 
-chains one joined step onto node, the driver built so far, and applies
-the step's own residual conditions. Shared by compile_step's own
-access loop and compile_nested's group-inner loop -- both chain a
-step's plan.op onto a driver the same way:
-- 'fk_seek': pk_join_seek(node, plan.schema, {left=, member=,
-  from_member=}). plan.from_source (choose_access()'s
-  classify_join_op()) names the already-scheduled source whose raw pk
-  bytes pk_join_seek reads; step.source.name is the new member's own
-  name, so an aliased (e.g. self-)join gets its real name instead of
-  pk_join_seek's table-name default.
-- 'index_seek'/'cross': a plain pk_scan built the same way a base step
-  is (compile_plan), except its seek getters read the driver node
-  built so far instead of params, wrapped in nested_join(node, inner)
-  with no from_member -- nested_join then
-  runs inner:reset() per driver row instead of reset_prefix, calling
-  back into those getters. 'cross' is the same path with an empty seek
-  (kind == 'full').
+chains one joined step onto node, the driver built so far, via
+db:nested_join(node, inner, opts) -- nested_join only needs the generic
+node contract from both sides, so every join shape choose_access()'s
+classify_join_op() can produce (fk_seek/index_seek/cross) lowers the same
+way: inner is a table_scanner built from plan via compile_scan_path(),
+correlated against node through compile_scan_param()'s registry lookup
+wherever plan's seek/lo/hi/prefix reads an already-registered member --
+this is what gives an fk_seek-classified join the same raw-byte reuse
+pk_join_seek existed only to provide (see compile_scan_param()), so
+pk_join_seek is not needed at all here. registry[step.source.name] is
+set so a later step can correlate against this one the same way.
+
+residual applies to inner BEFORE nested_join decides whether this driver
+row matched: a left join must null-extend when every raw seek match also
+fails the residual, not just when the seek itself found nothing.
+Applying residual to the combined row afterward would instead silently
+drop the outer row.
 ]]
-local function compile_joined_step(db, node, step, params, probes)
+local function compile_joined_step(db, node, step, params, probes, registry)
 	local plan = step.plan
 	local opts = step.join.op == 'left' and {left = true} or nil
-	if plan.op == 'fk_seek' then
-		opts = opts or {}
-		opts.member = step.source.name
-		opts.from_member = plan.from_source.name
-		opts.fk = plan.fk
-		node = db:pk_join_seek(node, plan.schema, opts)
-		return apply_residual(db, node, plan.residual, params, probes)
+	local scanner = db:table_scanner(plan.schema.name,
+		compile_scan_path(plan, params, node, registry))
+	registry[step.source.name] = scanner
+	local inner = scan_node(scanner, step.source.name)
+	if plan.schema.is_index then
+		inner = with_base_scanner(db, inner, scanner, plan.schema.val_schema)
 	end
-	--residual applies to inner BEFORE nested_join decides whether this
-	--driver row matched: a left join must null-extend when every raw
-	--seek match also fails the residual, not just when the seek itself
-	--found nothing. Applying residual to the combined row afterward
-	--(as fk_seek still does, only reachable when that can't happen --
-	--see choose_access()'s fk_seek-to-index_seek left+residual
-	--downgrade) would instead silently drop the outer row.
-	local inner = db:pk_scan(compile_plan(plan, params, node))
 	inner = apply_residual(db, inner, plan.residual, params, probes)
 	return db:nested_join(node, inner, opts)
 end
 
 --[[
-compile_nested(db, step, params) -> node, from_member
+compile_nested(db, step, params, probes, outer_registry, outer_node) -> inner
 
 builds a left-joined group's own chain (step.nested: the group's base
-step, plus any further joins inside the group) into a single node,
-for compile_step to wrap in nested_join. Also returns the outer
-member name that the group's base step correlates against, read off
-plan.seek[1].source -- the same field that source_operand()/bucket_facts()
-already set during compile()'s BIND COLUMNS stage.
-
-The group's base step is never built through compile_plan/pk_scan's
-usual getter path: its seek expr is a correlated read of an outer
-column, which compile_getter doesn't handle. It's built with an empty
-seek instead, driven by reset_prefix from that outer member's raw pk
-bytes -- see nested_join's opts.from_member. Every further step inside
-the group chains onto it via compile_joined_step(), same as
-compile_step's own top-level loop.
+step, plus any further joins inside the group) into a single node, for
+compile_step to wrap in nested_join{left=true} (no from_member: see
+below). plan.seek[1] on the group's base is a correlated read of an
+outer column (source_operand()/bucket_facts() set it during compile()'s
+BIND COLUMNS stage) -- compile_scan_path()/compile_scan_param() already
+turn that into a raw {scan=,col=} param against outer_registry, the same
+way any joined step's seek does, so the group's base needs no different
+treatment than compile_joined_step() gives an ordinary step. This is why
+nested_join's from_member/reset_prefix mechanism (built for pk_scan's
+getter-seek, which couldn't otherwise read a live outer row per reset())
+isn't needed here at all: nested_join's plain inner:reset() already
+re-evaluates the scan-param against outer_registry's live scanner on
+every outer row.
 ]]
-local function compile_nested(db, step, params, probes)
+local function compile_nested(db, step, params, probes, outer_registry,
+	outer_node
+)
 	local base = step.nested[1]
-	assert(base.plan.schema and base.plan.schema.is_index,
+	local plan = base.plan
+	assert(plan.schema and plan.schema.is_index,
 		'compile_step: nested group base has no index to seek by')
-	local seek1 = base.plan.seek[1]
-	assert(type(seek1) == 'table' and seek1[1] == 'col' and seek1.source,
+	assert(type(plan.seek[1]) == 'table' and plan.seek[1][1] == 'col'
+		and plan.seek[1].source,
 		'compile_step: nested group base must correlate on an outer column')
-	local from_member = seek1.source.name
-	local node = db:pk_scan{kind = base.plan.kind, schema = base.plan.schema,
-		depth = base.plan.depth, dir = base.plan.dir, seek = {},
-		member = base.plan.member}
-	node = apply_residual(db, node, base.plan.residual, params, probes)
-	for i = 2, #step.nested do
-		node = compile_joined_step(db, node, step.nested[i], params, probes)
+	local scanner = db:table_scanner(plan.schema.name,
+		compile_scan_path(plan, params, outer_node, outer_registry))
+	local inner = scan_node(scanner, plan.member)
+	if plan.schema.is_index then
+		inner = with_base_scanner(db, inner, scanner, plan.schema.val_schema)
 	end
-	return node, from_member
+	inner = apply_residual(db, inner, plan.residual, params, probes)
+	--the group's own inner correlations (nested[2..] against nested[1] or
+	--each other) are never referenced from outside the group, so they
+	--get their own fresh registry, seeded with the base's own scanner.
+	local registry = {[plan.member] = scanner}
+	for i = 2, #step.nested do
+		inner = compile_joined_step(db, inner, step.nested[i], params, probes,
+			registry)
+	end
+	return inner
 end
 
 --[[
@@ -2697,17 +2813,26 @@ either.
 	local base = rel.access[1]
 	assert(not base.join,
 		'compile_step: access[1] must be the un-joined base step')
-	local node = db:pk_scan(compile_plan(base.plan, params, outer_node))
-	node = apply_residual(db, node, base.plan.residual, params, probes)
+	local base_plan = base.plan
+	local registry = {}
+	local base_scanner = db:table_scanner(base_plan.schema.name,
+		compile_scan_path(base_plan, params, outer_node, registry))
+	registry[base_plan.member] = base_scanner
+	local node = scan_node(base_scanner, base_plan.member)
+	if base_plan.schema.is_index then
+		node = with_base_scanner(db, node, base_scanner,
+			base_plan.schema.val_schema)
+	end
+	node = apply_residual(db, node, base_plan.residual, params, probes)
 	for i = 2, #rel.access do
 		local step = rel.access[i]
 		if step.nested then
-			local inner, from_member = compile_nested(db, step, params, probes)
-			node = db:nested_join(node, inner,
-				{left = true, from_member = from_member})
+			local inner = compile_nested(db, step, params, probes, registry,
+				node)
+			node = db:nested_join(node, inner, {left = true})
 		else
 			assert(step.join, 'compile_step: expected a joined step')
-			node = compile_joined_step(db, node, step, params, probes)
+			node = compile_joined_step(db, node, step, params, probes, registry)
 		end
 	end
 	node = apply_residual(db, node, rel.late_conditions, params, probes)

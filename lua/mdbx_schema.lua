@@ -87,7 +87,7 @@ TABLE SCANNER
 	scan.advance_key  () -> true | nil
 	scan.found        () -> true | nil
 	scan.close        ()
-	scan.key_rec, scan.val_rec
+	scan.key_rec, scan.val_rec, scan.is_index
 
 COLUMS LISTS & IN/OUT VALUES FORMATS
 
@@ -3545,6 +3545,7 @@ function Db:table_scanner(tbl, path)
 	local is_index = schema.is_index
 	local key_n = #schema.key_fields
 	local exact_key = eq_n >= key_n
+	scan.is_index = is_index
 
 	--seeked (key, val), published for use as raw input in other scans.
 	local key_rec = MDBX_val()
