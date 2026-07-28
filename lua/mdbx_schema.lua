@@ -3227,20 +3227,20 @@ end
 --TABLE SCANNER --------------------------------------------------------------
 
 --[[
-
 A table scanner can seek into base tables on a leading sequence of (pk cols)
 and into index tables on a leading sequence of (ix cols, pk cols).
 
-The path is a strict sequence of path terms containing:
- - zero or more leading equality columns (the eq fields).
- - optionally, a range or string prefix on the next column (the range field).
- - optionally, the direction of the last column.
- - later columns remain unconstrained but determine returned order.
+The path is a sequence of terms:
 
-Each path term contains the column name, an operator and one or two input
-value descriptors called params, which tell how the value is supplied: by
-reading param.value or param.get(), via reset(args), or from the current
-row of another scan.
+	{{'COL','=',P}, ...,
+		{'COL','range'[,'>|>=',P][,'<|<=',P][,dir='asc|desc']}
+		| {'COL','starts',P[,dir='asc|desc']},
+		{'COL',dir='asc|desc'},...}
+	P: {value=V} | {arg='KEY'} | {get=fn()} | {scan=S, col='COL'}
+
+So 0..N '=' columns + 0..1 range/prefix column + 0..N direction-only columns.
+P is a param object telling how the value is supplied: by reading param.value
+or param.get(), via reset{[param.arg]}, or from the current row of another scan.
 
 Why so complicated:
  - index tables and base tables need different treatment.
@@ -3260,7 +3260,6 @@ Why so complicated:
  - edge case: index columns with ai_ci do not contain the original text.
  - a base-table value from an index scan needs a secondary base-table lookup.
  - a scan param is valid only while its source scan has a current row.
-
 ]]
 
 --string prefix -> exclusive upper bound; nil when no larger prefix exists.
