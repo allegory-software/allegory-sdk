@@ -1035,7 +1035,7 @@ local function compile_table_schema(schema)
 
 	local key_fields = schema.key_fields
 	local val_fields = schema.val_fields
-	--table_scanner() addresses an index key followed by its duplicate PK.
+	--scan() addresses an index key followed by its duplicate PK.
 	schema.path_fields = schema.is_index
 		and extend({}, key_fields, schema.val_schema.key_fields)
 		or key_fields

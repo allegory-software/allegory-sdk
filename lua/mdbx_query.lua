@@ -12,10 +12,11 @@ JOIN
 	:[left_]join(table, on_expr)  join to table; table is: 'TABLE [ALIAS]'
 	:[left_]join(rel, on_expr)    join to rel as join group (no terminals on rel)
 	:[left_]join(rel, alias, on_expr)   join to rel as rows source (materialized)
-	:fk_[left_]join(table)        join to table via FK
+	:fk_[left_]join(table, fk_cols)   join to table via FK
+	fk_cols names the FK on the child table that owns it: 'COL[,COL...]'.
 	the caller uses '=' between cols from different sources in on_expr
-	:where_has(table, [filter])   q.exists(table) via FK
-	:where_hasnt(table, [filter]) q.not_exists(table) via FK
+	:where_has(table, fk_cols, [filter])   q.exists(table) via FK
+	:where_hasnt(table, fk_cols, [filter]) q.not_exists(table) via FK
 	:cross_join(...)              unconditional join; takes no on_expr
 	:semi_join(...)               :where(q.exists(table|rel,alias, on_expr))
 	:anti_join(...)               :where(q.not_exists(table|rel,alias, on_expr))
@@ -290,16 +291,20 @@ function q.not_exists(...) return exists_expr('not_exists', ...) end
 function Rel:semi_join(...) return self:where(q.exists(...)) end
 function Rel:anti_join(...) return self:where(q.not_exists(...)) end
 
-function Rel:fk_join      (tbl) return join(self, 'inner', tbl, {fk = true}) end
-function Rel:fk_left_join (tbl) return join(self, 'left' , tbl, {fk = true}) end
-
-function Rel:where_has   (tbl, filter)
-	return self:where(exists_expr('exists', tbl,
-		{fk = true, filter = filter}))
+function Rel:fk_join      (tbl, fk_cols)
+	return join(self, 'inner', tbl, {fk = fk_cols or true})
 end
-function Rel:where_hasnt (tbl, filter)
+function Rel:fk_left_join (tbl, fk_cols)
+	return join(self, 'left' , tbl, {fk = fk_cols or true})
+end
+
+function Rel:where_has   (tbl, fk_cols, filter)
+	return self:where(exists_expr('exists', tbl,
+		{fk = fk_cols or true, filter = filter}))
+end
+function Rel:where_hasnt (tbl, fk_cols, filter)
 	return self:where(exists_expr('not_exists', tbl,
-		{fk = true, filter = filter}))
+		{fk = fk_cols or true, filter = filter}))
 end
 
 --COMPILATION ----------------------------------------------------------------
@@ -395,13 +400,14 @@ end
 
 --FK EXPR BINDING ------------------------------------------------------------
 
---collect foreign keys between two table sources in either direction.
-local function fk_matches(source_a, source_b, found_fks)
+--collect the foreign keys named fk_cols between two table sources, in
+--either direction. fks are keyed by their own col list, so naming it
+--distinguishes two FKs that connect the same pair of tables.
+local function fk_matches(source_a, source_b, fk_cols, found_fks)
 	local function scan(child, parent)
-		for _, fk in pairs(child.schema.fks or empty) do
-			if fk.ref_table == parent.table then
-				add(found_fks, {fk = fk, child = child, parent = parent})
-			end
+		local fk = child.schema.fks and child.schema.fks[fk_cols]
+		if fk and fk.ref_table == parent.table then
+			add(found_fks, {fk = fk, child = child, parent = parent})
 		end
 	end
 	scan(source_a, source_b)
@@ -423,16 +429,24 @@ local function fk_expr(found_fk)
 	return #exprs == 1 and exprs[1] or {'and', unpack(exprs)}
 end
 
---find the one foreign key connecting a new table to existing sources.
+--find the one foreign key named marker.fk connecting a new table to
+--existing sources.
 local function resolve_fk(marker, new_source, sources, what)
+	local fk_cols = marker.fk
+	--naming the FK is what keeps a second FK added to the schema later
+	--from changing what an existing query means.
+	assertf(fk_cols ~= true, '%s: fk cols required for %s', what,
+		new_source.name)
 	local found_fks = {}
 	for _, source in ipairs(sources) do
 		if source ~= new_source and source.table then
-			fk_matches(new_source, source, found_fks)
+			fk_matches(new_source, source, fk_cols, found_fks)
 		end
 	end
-	assertf(#found_fks > 0, '%s: no FK for %s', what, new_source.name)
-	assertf(#found_fks == 1, '%s: ambiguous FK for %s', what, new_source.name)
+	assertf(#found_fks > 0, '%s: no FK %s for %s', what, fk_cols,
+		new_source.name)
+	assertf(#found_fks == 1, '%s: ambiguous FK %s for %s', what, fk_cols,
+		new_source.name)
 	local expr = fk_expr(found_fks[1])
 	if marker.filter then return {'and', expr, marker.filter} end
 	return expr
@@ -1119,7 +1133,7 @@ local function check_join_operators(joins)
 			referenced_sources(expr, found, nil, false)
 			local source_n = 0
 			for _ in pairs(found) do source_n = source_n + 1 end
-			--table_scanner() accepts {scan=} only with '='.
+			--scan() accepts {scan=} only with '='.
 			assertf(source_n < 2,
 				"join: '%s' cannot compare cols from different sources", op)
 		elseif op == 'exists' or op == 'not_exists' then
@@ -1237,7 +1251,7 @@ local flip_range_op = {['<'] = '>', ['<='] = '>=', ['>'] = '<', ['>='] = '<='}
 - pull facts out of access conditions that read only this source.
 - supported facts: equality, range, prefix, null. membership (in_())
   is deliberately not one of them: no executor seeks a plan.kind='in'
-  (table_scanner only implements exact/range/prefix/eq_prefix/full), and
+  (scan only implements exact/range/prefix/eq_prefix/full), and
   the residual evaluator already checks list membership correctly, so
   a membership condition is left alone here and always stays residual.
 - facts are bucketed by col.
@@ -1258,7 +1272,7 @@ local function bucket_facts(source, conditions)
 				--seekable only for in() against a plain literal list: a
 				--q.param() list has no length until reset(args), and a
 				--sub-relation's values aren't known without scanning it,
-				--so neither can become a fixed set of table_scanner seeks.
+				--so neither can become a fixed set of scan seeks.
 				local left = expr[2]
 				if expr[1] == 'in' and type(left) == 'table'
 					and left[1] == 'col' and left.source == source
@@ -1412,7 +1426,7 @@ end
 --[[
 - choose_access() ranks candidates by how many distinct path cols narrow
   the scan.
-- table_scanner() rejects rows by key bytes before any base-table read.
+- scan() rejects rows by key bytes before any base-table read.
 - choose_access() breaks a coverage tie by kind, ranked via kind_rank.
 - choose_access() does not use row counts or index sizes.
 ]]
@@ -1512,9 +1526,9 @@ local function choose_access(source, conditions, order_terms, prefer_order,
 	--they scan the already-compiled inner rel.
 	--virtual tables have no pk or index metadata either: no physical
 	--storage means no seek, so every condition on them stays residual.
-	--neither has a physical scan node yet (compile_step()'s table_scanner
+	--neither has a physical scan node yet (compile_step()'s scan
 	--needs a real schema) -- reject here rather than let compile_step
-	--crash deep inside table_scanner on a false schema.
+	--crash deep inside scan() on a false schema.
 	if not source.table or source.schema.virtual then
 		assertf(false, 'choose_access: %s: a relation/virtual source is not'
 			..' implemented yet', source.name)
@@ -1576,7 +1590,7 @@ local function choose_access(source, conditions, order_terms, prefer_order,
 			{schema = source.schema}, {kind = 'full', depth = 0}
 	end
 	best_plan.schema = best_cand.schema
-	best_plan.member = source.name --table_scanner's alias arg; see its doc
+	best_plan.member = source.name --scan()'s alias arg; see its doc
 	best_plan.dir = best_plan.dir or 'asc' --order_plan may already carry 'desc'
 	local path_fields = best_cand.schema.path_fields
 	local seek = {} --{{cond=,op=,expr=}...}
@@ -1680,11 +1694,6 @@ local function natural_order(step)
 	--rel source: no guaranteed key order.
 	if not plan.schema then return empty end
 	if plan.kind == 'not_equal' then return empty end
-	--a non-literal in_() list isn't sorted until ordered_in_values() sees
-	--the runtime values, so the union's row order isn't guaranteed here.
-	if plan.kind == 'in' and not all_literal_values(plan.in_values) then
-		return empty
-	end
 	return key_order(step.source, plan.schema, plan.depth,
 		plan.dir == 'desc')
 end
@@ -2104,7 +2113,7 @@ function Rel:prepare()
 	return self
 end
 
---each step's {table,key,order,reverse} matches table_scanner's own
+--each step's {table,key,order,reverse} matches scan's own
 --scan.explain() exactly: both read plan.schema/plan.depth/plan.dir
 --through the same mdbx_scan_order(), no scanner ever built here.
 local function explain_steps(access, into)
@@ -2137,10 +2146,10 @@ end
 --EXECUTOR -------------------------------------------------------------------
 
 --[[
-compile_scan_param() maps one bound-value expr to a table_scanner param.
+compile_scan_param() maps one bound-value expr to a scan param.
 compile_scan_param() maps q.param() to {arg=} and maps a literal to
 {value=}. When registry contains a q.col() source backed by a plain
-table_scanner, compile_scan_param() returns {scan=,col=}; Db:table_scanner()
+scan, compile_scan_param() returns {scan=,col=}; Db:scan()
 can reuse the source's encoded bytes when the layouts match. A not_equal()/
 in_() source is a union of scans, not one physical record, so it has no
 raw bytes to reuse -- compile_scan_param() reads it through col_decoder()
@@ -2165,10 +2174,10 @@ local function compile_scan_param(expr, outer_node, registry)
 end
 
 --[[
-compile_scan_path() turns one choose_access() plan into a table_scanner
+compile_scan_path() turns one choose_access() plan into a scan
 path: one {col,'='|'is',param} term per leading key col
 (plan.schema.path_fields[i]), then one range/prefix/is_not_null or dir-only
-term. Db:table_scanner() needs one `dir` term to set the whole scan's
+term. Db:scan() needs one `dir` term to set the whole scan's
 direction. compile_scan_path() passes outer_node to compile_scan_param().
 the caller passes nil at the top level and passes the outer node for a
 sub-relation. compile_scan_param() uses registry to find each joined
@@ -2225,7 +2234,7 @@ end
 --q.param()/q.col() item is always kept, since its
 --runtime value isn't known here to compare -- compile_table_scan()
 --dedupes those at scan time instead, via merge_union(). sorts
---ascending/descending to match plan.dir, by the same folded key, when
+--to the bound col's own cursor order, by the same folded key, when
 --every value is a literal, so the union's bound-column order stays
 --monotonic across value boundaries like a single scan's -- left in
 --given order when any value isn't a literal, since it can't be sorted
@@ -2252,7 +2261,8 @@ local function ordered_in_values(plan)
 		end
 	end
 	if not all_literal then return deduped end
-	local desc = plan.dir == 'desc'
+	local bound_field = plan.schema.path_fields[plan.depth + 1]
+	local desc = (not not bound_field.descending) ~= (plan.dir == 'desc')
 	sort(deduped, function(a, b)
 		local ka, kb = keys[a], keys[b]
 		return desc and ka > kb or ka < kb
@@ -2273,9 +2283,9 @@ local function compile_table_scan(db, plan, outer_node, registry)
 	if plan.kind == 'not_equal' then
 		local path = compile_scan_path(plan, outer_node, registry, '<')
 		local range_term = path[#path]
-		local less_scan = db:table_scanner(plan.schema.name, path, plan.member)
+		local less_scan = db:scan(plan.schema.name, path, plan.member)
 		range_term[2] = '>'
-		local greater_scan = db:table_scanner(plan.schema.name, path, plan.member)
+		local greater_scan = db:scan(plan.schema.name, path, plan.member)
 		return less_scan:union(greater_scan)
 	end
 	if plan.kind == 'in' then
@@ -2284,15 +2294,15 @@ local function compile_table_scan(db, plan, outer_node, registry)
 		local term = path[#path]
 		local merge = not all_literal_values(values)
 		term[3] = compile_scan_param(values[1], outer_node, registry)
-		local scan = db:table_scanner(plan.schema.name, path, plan.member)
+		local scan = db:scan(plan.schema.name, path, plan.member)
 		for i = 2, #values do
 			term[3] = compile_scan_param(values[i], outer_node, registry)
-			local next_scan = db:table_scanner(plan.schema.name, path, plan.member)
+			local next_scan = db:scan(plan.schema.name, path, plan.member)
 			scan = merge and scan:merge_union(next_scan) or scan:union(next_scan)
 		end
 		return scan, scan
 	end
-	local scan = db:table_scanner(plan.schema.name,
+	local scan = db:scan(plan.schema.name,
 		compile_scan_path(plan, outer_node, registry), plan.member)
 	return scan, scan
 end
@@ -2503,10 +2513,10 @@ the same way compile_residual_checkers() above pre-builds exists()/in_()
 checkers -- once per attachment site, before the per-row predicate
 closure runs, into the same cache eval_value() reads. Without this,
 eval_value()'s own cache[x] check builds the decoder lazily, on
-whichever row happens to evaluate this operand first; a table_scanner
+whichever row happens to evaluate this operand first; a scan
 whose col_decoder() needs a base-table lookup only decides to fetch it
 on advance(), which already ran for that row by the time eval_value()
-gets to it -- see mdbx_schema.lua's table_scanner/need_base().
+gets to it -- see mdbx_scan.lua's scan()/need_base().
 ]]
 local function compile_col_decoders(expr, node, cache, registry)
 	if type(expr) ~= 'table' then return end
@@ -2689,10 +2699,10 @@ guard makes the second walk a no-op.
   means the occurrence never reads the outer row at all, so it's
   answered once, right here, and checks[expr] holds the plain
   {constant=} / {values_set=} result instead of a live checker.
-- table source (exists()/not_exists() only): one persistent table_scanner,
+- table source (exists()/not_exists() only): one persistent scan,
   built from expr.plan (resolve_exists_plan(), compile()-time) with a
   getter fixed on node -- reset() and check once per outer row, same
-  as table_scanner's own open-once-per-run, reseek-per-row design.
+  as scan()'s own open-once-per-run, reseek-per-row design.
 - sub-relation source: delegates the whole node chain to compile_step()
   (rel is already fully compiled -- compile() recursed into it at bind
   time through bind_expr's 'exists'/'in' cases), with node passed
@@ -2732,7 +2742,7 @@ function compile_exists_checker(db, expr, node, checks, registry)
 		local sub_node = compile_step(db, right, outer_node)
 		local cache = {}
 		--build out_col's decoder before the first advance(): a
-		--table_scanner needs need_base() enabled ahead of advance() to
+		--scan needs need_base() enabled ahead of advance() to
 		--read a base-only column.
 		if out_col then compile_col_decoders(out_col, sub_node, cache) end
 		if expr.correlated then
@@ -2766,13 +2776,13 @@ function compile_exists_checker(db, expr, node, checks, registry)
 		local inner_registry
 		if expr.correlated then
 			inner_registry = registry and update({}, registry) or {}
-			for _, member in ipairs(node.members) do
+			for member in pairs(node.member_scans) do
 				inner_registry[member] = node
 			end
 		end
 		local inner = compile_table_scan(db, plan, outer_node)
 		if inner_registry then
-			for _, member in ipairs(inner.members) do
+			for member in pairs(inner.member_scans) do
 				inner_registry[member] = inner
 			end
 		end
@@ -2884,15 +2894,15 @@ compiled (rel:prepare()). bound values (q.param()/q.col()) aren't
 compiled in: node.reset(args) supplies them fresh on every call, so the
 same node runs again with different args by calling reset(args) again.
 outer_node (nil at the top level) threads through to the base step's
-table_scanner the same way, for a sub-relation compiled as an
+scan() the same way, for a sub-relation compiled as an
 exists()/in_() checker (compile_exists_checker()).
 compile_step() starts checks empty. apply_residual() fills it when an
 attachment site compiles its exists()/in_() occurrences.
 
 Each step past the base chains onto whatever's been built so far:
-- a single, un-joined base step -> a table_scanner, bound values read
+- a single, un-joined base step -> a scan, bound values read
   through compile_scan_param()'s {arg=}/{scan=,col=}/{get=}/{value=}.
-- a joined step -> compile_joined_step() builds a correlated table_scanner
+- a joined step -> compile_joined_step() builds a correlated scan
   and wraps it in join_scans()/left_join_scans().
 - a left-joined group (step.nested) -> compile_nested() builds the
   group's own chain, wrapped in left_join_scans(node_so_far, inner).

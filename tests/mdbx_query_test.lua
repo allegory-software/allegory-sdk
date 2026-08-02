@@ -152,7 +152,7 @@ local function with_group_db(name, fn)
 end
 
 ------------------------------------------------------------------------------
---compile_step() builds a real table_scanner/join_scans chain from a query
+--compile_step() builds a real scan/join_scans chain from a query
 --compiled through mdbx_query.lua's actual builder + compile() pipeline,
 --not a hand-built plan.
 
@@ -456,9 +456,9 @@ function test.where_in_literal_list_exec()
 	end)
 end
 
---order_by() over a non-literal in_() list must sort explicitly: the
---runtime values aren't known at compile time, so the union of per-value
---scans can't be assumed to come out in bound-column order.
+--order_by() over a non-literal in_() list needs no sort: the per-value
+--seeks are chained with merge_union(), which compares key recs and so
+--yields in key order whatever the runtime values turn out to be.
 function test.in_dynamic_order_by_exec()
 	with_db('in_dynamic_order_by_exec', function(db)
 		db:atomic('r', function()
@@ -468,7 +468,7 @@ function test.in_dynamic_order_by_exec()
 				:select'users.id id'
 				:order_by'id'
 				:prepare()
-			assert(rel.sort_needed)
+			assert(not rel.sort_needed)
 			local rows = rel:rows_array('[]', {A = 3, B = 1})
 			local ids = {}
 			for i, row in ipairs(rows) do ids[i] = row[1] end
@@ -968,7 +968,7 @@ function test.inner_join_wide_fk_seek_exec()
 	end)
 end
 
---when db:table_scanner() finds no full {user_id,kind} key,
+--when db:scan() finds no full {user_id,kind} key,
 --left_join_scans() must emit the outer row with an absent child.
 function test.left_join_wide_fk_no_match_exec()
 	with_wide_fk_db('left_join_wide_fk_no_match_exec', function(db)
@@ -1988,7 +1988,7 @@ function test.where_has_exec()
 	with_group_db('where_has_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:where_has('sessions')
+				:where_has('sessions', 'user_id')
 				:select'users.id id'
 				:order_by'users.id'
 				:prepare()
@@ -2005,7 +2005,7 @@ function test.where_hasnt_exec()
 	with_group_db('where_hasnt_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:where_hasnt('sessions')
+				:where_hasnt('sessions', 'user_id')
 				:select'users.id id'
 				:order_by'users.id'
 				:prepare()
@@ -2025,7 +2025,7 @@ function test.where_has_filter_exec()
 	with_group_db('where_has_filter_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:where_has('sessions',
+				:where_has('sessions', 'user_id',
 					{'>', q.col('sessions.id'), q.param('MIN')})
 				:select'users.id id'
 				:order_by'users.id'
@@ -2202,7 +2202,7 @@ function test.descriptors_compiled_once_exec()
 	with_group_db('descriptors_compiled_once_exec', function(db)
 		db:atomic('r', function()
 			local rel = db:from('users')
-				:where_has('sessions')
+				:where_has('sessions', 'user_id')
 				:select'users.id id'
 				:order_by'id desc'
 				:distinct()
@@ -2377,6 +2377,163 @@ function test.exists_uncorrelated_classified_exec()
 end
 
 ------------------------------------------------------------------------------
+
+--[[
+two FKs from one table to the same parent: naming the FK cols is what
+tells fk_join()/where_has() which one to use. before fk_cols was
+required, resolve_fk() found both and rejected the pair as ambiguous.
+]]
+local function with_two_fk_db(name, fn)
+	local file = test_file(name)
+	cleanup(file)
+	local db = mdbx_open(file)
+	local ok, err = xpcall(function()
+		db:begin'w'
+		db:create_table('users', {fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		for _, r in ipairs{{id=1},{id=2},{id=3}} do db:insert('users','{}',r) end
+		db:create_table('messages', {fields = {
+			{col = 'id'          , mdbx_type = 'u32', not_null = true},
+			{col = 'from_user_id', mdbx_type = 'u32', not_null = true},
+			{col = 'to_user_id'  , mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:add_fk{table = 'messages', cols = {'from_user_id'},
+			ref_table = 'users', ref_cols = {'id'}}
+		db:add_fk{table = 'messages', cols = {'to_user_id'},
+			ref_table = 'users', ref_cols = {'id'}}
+		for _, r in ipairs{
+			{id = 101, from_user_id = 1, to_user_id = 2},
+			{id = 102, from_user_id = 2, to_user_id = 1},
+			{id = 103, from_user_id = 1, to_user_id = 3},
+		} do db:insert('messages', '{}', r) end
+		db:commit()
+		fn(db)
+	end, debug.traceback)
+	if db.env then db:close() end
+	cleanup(file)
+	assert(ok, err)
+end
+
+function test.fk_join_two_fks_exec()
+	with_two_fk_db('fk_join_two_fks_exec', function(db)
+		db:atomic('r', function()
+			local sent = db:from'users'
+				:fk_join('messages', 'from_user_id')
+				:select'users.id uid, messages.id mid'
+				:order_by'users.id, messages.id'
+			local t = {}
+			for _, row in sent:rows'{}' do t[#t+1] = row.uid..':'..row.mid end
+			assert(cat(t, ',') == '1:101,1:103,2:102', cat(t, ','))
+
+			local recv = db:from'users'
+				:fk_join('messages', 'to_user_id')
+				:select'users.id uid, messages.id mid'
+				:order_by'users.id, messages.id'
+			t = {}
+			for _, row in recv:rows'{}' do t[#t+1] = row.uid..':'..row.mid end
+			assert(cat(t, ',') == '1:102,2:101,3:103', cat(t, ','))
+		end)
+	end)
+end
+
+function test.where_has_two_fks_exec()
+	with_two_fk_db('where_has_two_fks_exec', function(db)
+		db:atomic('r', function()
+			--user 3 never sent a message; user 2 never received two.
+			local senders = db:from'users'
+				:where_has('messages', 'from_user_id')
+				:select'users.id id'
+				:order_by'users.id'
+			local t = {}
+			for _, row in senders:rows'{}' do t[#t+1] = row.id end
+			assert(cat(t, ',') == '1,2', cat(t, ','))
+
+			local no_recv = db:from'users'
+				:where_hasnt('messages', 'to_user_id')
+				:select'users.id id'
+				:order_by'users.id'
+			t = {}
+			for _, row in no_recv:rows'{}' do t[#t+1] = row.id end
+			assert(cat(t, ',') == '', cat(t, ','))
+		end)
+	end)
+end
+
+function test.fk_join_requires_fk_cols()
+	with_two_fk_db('fk_join_requires_fk_cols', function(db)
+		db:atomic('r', function()
+			assert(not pcall(function()
+				return db:from'users':fk_join'messages':prepare()
+			end))
+			--a name that is not a declared FK on the child table.
+			assert(not pcall(function()
+				return db:from'users':fk_join('messages', 'nope'):prepare()
+			end))
+		end)
+	end)
+end
+
+function test.or_in_param_keeps_order()
+	with_group_db('or_in_param_keeps_order', function(db)
+		db:atomic('r', function()
+			local rel = db:from'sessions'
+				:where{'or',
+					{'=', q.col'sessions.user_id', q.param'A'},
+					{'=', q.col'sessions.user_id', q.param'B'}}
+				:select'sessions.id id'
+				:order_by'sessions.user_id, sessions.id'
+				:prepare()
+			assert(rel.access[1].plan.kind == 'in', rel.access[1].plan.kind)
+			assert(not rel.sort_needed)
+			local t = {}
+			for _, row in rel:rows('{}', {A = 4, B = 1}) do t[#t+1] = row.id end
+			assert(cat(t, ',') == '11,12,13,15', cat(t, ','))
+		end)
+	end)
+end
+
+local function with_desc_ix_db(name, fn)
+	local file = test_file(name)
+	cleanup(file)
+	local db = mdbx_open(file)
+	local ok, err = xpcall(function()
+		db:begin'w'
+		db:create_table('dt', {fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'k' , mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:add_index('dt', {'k', desc = {true}})
+		for _, r in ipairs{{id = 1, k = 10}, {id = 2, k = 20},
+			{id = 3, k = 30}}
+		do db:insert('dt', '{}', r) end
+		db:commit()
+		fn(db)
+	end, debug.traceback)
+	if db.env then db:close() end
+	cleanup(file)
+	assert(ok, err)
+end
+
+--a descending index col runs the cursor from high to low, so the literal
+--in_() seeks must be issued high to low for union() to come out in key
+--order.
+function test.in_literal_descending_index_exec()
+	with_desc_ix_db('in_literal_descending_index_exec', function(db)
+		db:atomic('r', function()
+			local rel = db:from'dt'
+				:where{'in', q.col'dt.k', {10, 30}}
+				:select'dt.id id'
+				:order_by'dt.k desc, dt.id'
+				:prepare()
+			assert(rel.access[1].plan.kind == 'in', rel.access[1].plan.kind)
+			assert(not rel.sort_needed)
+			local t = {}
+			for _, row in rel:rows'{}' do t[#t+1] = row.id end
+			assert(cat(t, ',') == '3,1', cat(t, ','))
+		end)
+	end)
+end
 
 local name = ...
 if name == 'mdbx_query_test' then name = nil end

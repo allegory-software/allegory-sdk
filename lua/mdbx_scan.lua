@@ -4,7 +4,7 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 TABLE SCANNER
-	db:table_scanner  (table, path, [alias]) -> scan
+	db:scan           (table, path|spec, [alias]) -> scan
 	scan.reset        (args)
 	scan.advance      ([by_key]) -> true | nil
 	scan.advance_pk   () -> true | nil
@@ -12,7 +12,7 @@ TABLE SCANNER
 	scan.found        () -> true | nil
 	scan.close        ()
 	scan.key_rec, scan.val_rec, scan.is_index, scan.steps_by_key
-SCAN COMPOSITION (any scan: table_scanner, join, or child_scan result)
+SCAN COMPOSITION (any scan: db:scan, join, or child_scan result)
 	scan:each          (args) -> iter() -> true | nil
 	scan:try_first     (args) -> scan | nil
 	scan:exists        (args) -> true | false
@@ -30,16 +30,24 @@ OUTPUT TERMINALS (after select() or aggregate())
 	scan:one        ([shape], [args]) -> vals... | row | nil
 	scan:must_one   ([shape], [args]) -> vals... | row
 JOINS
-	db:join_scans      (outer, inner) -> join       inner join
-	db:left_join_scans (outer, inner) -> join       left join
-	join.reset         (args)
-	join.advance       () -> true | nil
-	join.found         () -> true | nil             was inner reached?
-	join.close         ()
-	db:child_scan      (parent, child) -> child     gates child on parent.found()
-	child.reset        (args)                       skipped when parent not found
-	child.advance      ([by_key]) -> true | nil
-	child.found        () -> true | nil             was parent+child reached?
+	spec: 'TABLE|INDEX[@ALIAS].COL[,COL...] = MEMBER.COL[,COL...]'
+	left of '=' is the table added, right of '=' a member already in scan.
+	the added cols must be the leading cols of its pk or of one of its
+	indexes; fewer cols than the key seek a prefix. naming an INDEX picks
+	the key instead of searching for the shortest one that starts with cols.
+	scan:join       (spec) -> join
+	scan:left_join  (spec) -> join
+	scan:join_scan  (spec) -> child                 nested
+	scan.member_scans  -> {MEMBER -> leaf scan holding that member's row}
+JOIN ASSEMBLY
+	db:[left_]join_scans (outer, inner) -> join       inner/left join
+	db:child_scan        (parent, child) -> child     gates child on parent.found()
+	join.reset           (args)
+	join.advance         () -> true | nil
+	join.found           () -> true | nil             was inner reached?
+	child.reset          (args)                       skipped when parent not found
+	child.advance        ([by_key]) -> true | nil
+	child.found          () -> true | nil             was parent+child reached?
 
 ]]
 
@@ -66,8 +74,8 @@ local collate_value = mdbx_collate_value
 --TABLE SCANNER --------------------------------------------------------------
 
 --[[
-A table scanner can seek into base tables on a leading sequence of (pk cols)
-and into index tables on a leading sequence of (ix cols, pk cols).
+A table scanner seeks into a base table on a leading sequence of (pk cols)
+and seeks into an index table on a leading sequence of (ix cols, pk cols).
 
 The path is a sequence of terms:
 
@@ -78,12 +86,21 @@ The path is a sequence of terms:
 		{'COL',dir='asc|desc'},...}
 	P: {value=V} | {arg='KEY'} | {get=fn()} | {scan=S, col='COL'}
 
-So 0..N '='|'is' terms + 0..1 range/prefix/is_not_null term + 0..N dir term.
+So 0..N '='|'is' terms + 0..1 range/prefix/is_not_null term + 0..N dir terms.
 
 P is a param object telling how the value is supplied: by reading param.value
 or param.get(), via reset{[param.arg]}, or from the current row of another scan.
 
-'=' / ranges / 'starts' reject null, 'is' allows it. {scan=} needs '='.
+'=', 'range' and 'starts' reject null, 'is' allows it. {scan=} needs '='.
+
+Spec form:
+	'COL [=|is P], COL >|>= P <|<= P | starts P | is_not_null P [asc|desc], ...'
+	P: '?' positional arg | ':KEY' named arg
+
+Example:
+	'tenant_id = ?, id >= ? <= ? desc'
+converts to:
+	{{'tenant_id', '=', {arg=1}}, {'id', 'range', '>=', {arg=2}, '<=', {arg=3}, dir=desc}}
 
 Why so complicated:
  - index tables and base tables need different treatment.
@@ -197,7 +214,7 @@ local function direct_read_rec(db, schema, params)
 	return 'reencode', first_rec, first_key_schema
 end
 
---key_add_param() -> closure(out) that writes one field at pp[0] and advances
+--key_add_param() -> f(out) that writes one field at pp[0] and advances
 --pp; returns false when op rejects null or when a scan source is absent.
 local function key_add_param(db, param, output_schema, slot, scan, op)
 	local output_field = output_schema.key_fields[slot]
@@ -282,7 +299,7 @@ local function key_add_param(db, param, output_schema, slot, scan, op)
 	end
 end
 
---key_write() -> closure(out) -> data, sz; nil when a param cannot form
+--key_write() -> f(out) -> data, sz; nil when a param cannot form
 --the key.
 local function key_write(db, output_schema, params, path, scan, i0, n)
 	local key_add = {}
@@ -300,7 +317,7 @@ local function key_write(db, output_schema, params, path, scan, i0, n)
 	end
 end
 
---bound_write() -> closure(out, prefix_sz) -> data, sz; nil when the param
+--bound_write() -> f(out, prefix_sz) -> data, sz; nil when the param
 --cannot form the bound. When partial is true, bound_write() trims a starts
 --value's terminator.
 local function bound_write(db, param, output_schema, slot, scan, op, partial)
@@ -327,9 +344,6 @@ local Scan = {}
 
 local MDBX_val_size = sizeof'MDBX_val'
 
---physical scan order for schema once depth leading path_fields are
---fixed by equality; reverse flips ascending fields to descending and
---vice versa. pure function of plan data, usable without a live scan.
 local function scan_order(schema, depth, reverse)
 	local order = {}
 	for i = depth + 1, #schema.path_fields do
@@ -342,13 +356,74 @@ local function scan_order(schema, depth, reverse)
 end
 mdbx_scan_order = scan_order
 
-function Db:table_scanner(tbl, path, alias)
+local SPEC_OPS = {['='] = true, ['>'] = true, ['>='] = true,
+	['<'] = true, ['<='] = true, is = true, starts = true}
+
+local function parse_scan_spec(spec)
+	local path = {}
+	if spec:match'^%s*$' then return path end
+	local argn = 0
+	for term_spec in spec:gmatch'[^,]+' do
+		local next_tok = term_spec:gmatch'%S+'
+		local col = assertf(next_tok(), 'scan: %s: no col', spec)
+		local eq_op, eq_param, dir, lo_op, lo_param, hi_op, hi_param
+		for tok in next_tok do
+			if tok == 'asc' or tok == 'desc' then
+				dir = tok
+			elseif tok == 'is_not_null' then
+				eq_op = 'is_not_null'
+			elseif SPEC_OPS[tok] then
+				local v = next_tok()
+				local param
+				if v == '?' then
+					argn = argn + 1
+					param = {arg = argn}
+				else
+					local name = v and v:match'^:([%a_][%w_]*)$'
+					assertf(name, 'scan: %s: expected ? or :KEY'
+						..' after %s %s', spec, col, tok)
+					param = {arg = name}
+				end
+				if tok == '>' or tok == '>=' then
+					lo_op, lo_param = tok, param
+				elseif tok == '<' or tok == '<=' then
+					hi_op, hi_param = tok, param
+				else
+					eq_op, eq_param = tok, param
+				end
+			else
+				assertf(false, 'scan: %s: unexpected: %s', spec, tok)
+			end
+		end
+		assertf(not (eq_op and (lo_op or hi_op)),
+			'scan: %s: %s has conflicting ops', spec, col)
+		local term = {col, dir = dir}
+		if eq_op == 'is_not_null' then
+			term[2] = 'is_not_null'
+		elseif eq_op then
+			term[2], term[3] = eq_op, eq_param
+		elseif lo_op and hi_op then
+			term[2], term[3], term[4], term[5], term[6] =
+				'range', lo_op, lo_param, hi_op, hi_param
+		elseif lo_op then
+			term[2], term[3] = lo_op, lo_param
+		elseif hi_op then
+			term[2], term[3] = hi_op, hi_param
+		end
+		add(path, term)
+	end
+	return path
+end
+
+function Db:scan(tbl, path, alias)
 	local db = self
 	local schema = assert(db:table_schema(tbl))
+	if isstr(path) then path = parse_scan_spec(path) end
 	local scan = object(Scan)
 	local base_schema = schema.val_schema or schema
+	scan.db = db
 	scan.table = schema.name
-	scan.members = {alias or base_schema.name}
+	scan.member_scans = {[alias or base_schema.name] = scan}
 
 	--path parsing, validation, analysis --------------------------------------
 
@@ -845,7 +920,7 @@ function Scan:filter(accept)
 end
 
 function Scan:not_in(col, values)
-	local get = self:col_decoder(self.members[1], col)
+	local get = self:col_decoder(next(self.member_scans), col)
 	local excluded = {}
 	for _, value in ipairs(values) do excluded[value] = true end
 	self:filter(function()
@@ -857,9 +932,12 @@ function Scan:not_in(col, values)
 	return self
 end
 
+--UNION ----------------------------------------------------------------------
+
 function Scan:union(scan2)
 	local scan1 = self
 	local scan = object(Scan)
+	scan.db = scan1.db
 	local current_scan = scan1
 	local output1 = scan1.get ~= nil
 	local output2 = scan2.get ~= nil
@@ -905,7 +983,7 @@ function Scan:union(scan2)
 			return return_scan(get())
 		end
 	elseif not output1 and not output2 then
-		scan.members = scan1.members
+		scan.member_scans = scan1.member_scans
 		scan.steps_by_key = scan1.steps_by_key and scan2.steps_by_key
 		function scan.advance_pk()
 			found = current_scan.advance_pk()
@@ -926,12 +1004,17 @@ function Scan:union(scan2)
 			end
 		end
 	end
+	function scan.explain()
+		return {kind = 'union', scan1.explain(), scan2.explain()}
+	end
 	function scan.close()
 		scan2.close()
 		scan1.close()
 	end
 	return scan
 end
+
+--MERGE UNION ----------------------------------------------------------------
 
 --unlike Scan:union(), advances both inputs together and yields once when
 --they're at the same MDBX entry, so overlapping inputs -- e.g. the same row
@@ -945,7 +1028,8 @@ function Scan:merge_union(scan2)
 	assert(scan1.is_index == scan2.is_index)
 	local reverse = scan1.reverse
 	local scan = object(Scan)
-	scan.members = scan1.members
+	scan.db = scan1.db
+	scan.member_scans = scan1.member_scans
 	scan.steps_by_key = scan1.steps_by_key and scan2.steps_by_key
 	local has1, has2, adv1, adv2, current_scan, found
 
@@ -1001,6 +1085,9 @@ function Scan:merge_union(scan2)
 			if current_scan == scan1 then return get1() else return get2() end
 		end
 	end
+	function scan.explain()
+		return {kind = 'merge_union', scan1.explain(), scan2.explain()}
+	end
 	function scan.close()
 		scan2.close()
 		scan1.close()
@@ -1014,7 +1101,17 @@ end
 --the next outer row once inner is exhausted.
 local function join_scans(outer, inner, left, accept)
 	local join = object(Scan)
-	join.members = extend({}, outer.members, inner.members)
+	join.db = outer.db
+	--col_decoder() resolves a member against outer first, so a duplicate
+	--would read the outer one and never say so.
+	join.member_scans = {}
+	for _, side in ipairs{outer, inner} do
+		for member, scan in pairs(side.member_scans or empty) do
+			assertf(not join.member_scans[member],
+				'join_scans: duplicate member: %s', member)
+			join.member_scans[member] = scan
+		end
+	end
 	local outer_found, inner_found = outer.found, inner.found
 	local advance_inner = inner.advance
 	if accept then
@@ -1051,13 +1148,17 @@ local function join_scans(outer, inner, left, accept)
 		return outer_found() and inner_found()
 	end
 	function join:col_decoder(member, col, folded)
-		if indexof(member, outer.members) then
+		if outer.member_scans[member] then
 			return outer:col_decoder(member, col, folded)
 		end
 		local get = inner:col_decoder(member, col, folded)
 		return function()
 			if inner_found() then return get() end
 		end
+	end
+	function join.explain()
+		return {kind = left and 'left_join' or 'join',
+			outer.explain(), inner.explain()}
 	end
 	function join.close()
 		inner.close()
@@ -1096,6 +1197,83 @@ function Db:child_scan(parent, child)
 		end
 	end
 	return child
+end
+
+--JOIN BY SPEC ----------------------------------------------------------------
+
+local function inner_scan(outer, spec)
+	local db = outer.db
+	local table_spec, cols_spec, member, member_cols_spec = spec:match
+		'^%s*(.-)%s*%.%s*(.-)%s*=%s*(.-)%s*%.%s*(.-)%s*$'
+	assertf(table_spec and cols_spec ~= '' and member ~= ''
+		and member_cols_spec ~= '', 'join: %s: invalid spec', spec)
+	local tbl, alias = table_spec:match'^(.-)%s*@%s*(.*)$'
+	if not tbl then tbl = table_spec end
+	local schema = assertf(db:table_schema(tbl), 'join: %s: no table: %s',
+		spec, tbl)
+	local member_scan = assertf((outer.member_scans or empty)[member],
+		'join: %s: no member: %s', spec, member)
+	local cols, member_cols = {}, {}
+	for col in cols_spec:gmatch'[^,]+' do add(cols, col:trim()) end
+	for col in member_cols_spec:gmatch'[^,]+' do
+		add(member_cols, col:trim())
+	end
+	assertf(#cols == #member_cols, 'join: %s: invalid', spec)
+	--check the col names here so the error can quote the spec.
+	--scan() also rejects an unknown col, but much later, from inside
+	--a param read, and its message does not include the spec.
+	local base = schema.val_schema or schema
+	for _, col in ipairs(cols) do
+		assertf(base.fields[col], 'join: %s: no col: %s.%s', spec, tbl, col)
+	end
+	local member_schema = db:table_schema(member_scan.table)
+	local member_base = member_schema.val_schema or member_schema
+	for _, col in ipairs(member_cols) do
+		assertf(member_schema.fields[col] or member_base.fields[col],
+			'join: %s: no col: %s.%s', spec, member, col)
+	end
+	local function starts_with_cols(key)
+		if #key.key_fields < #cols then return false end
+		for j, col in ipairs(cols) do
+			if key.key_fields[j].col ~= col then return false end
+		end
+		return true
+	end
+	local key_schema
+	if schema.is_index then
+		assertf(starts_with_cols(schema), 'join: %s: %s does not start with %s',
+			spec, schema.name, cat(cols, ','))
+		key_schema = schema
+	else
+		--fewest key cols wins: that is the tightest seek, and an exact key
+		--beats a longer one that merely starts with cols.
+		for i = 0, #(schema.indexes or empty) do
+			local cand = i == 0 and schema or schema.indexes[i]
+			if starts_with_cols(cand)
+				and (not key_schema
+					or #cand.key_fields < #key_schema.key_fields)
+			then
+				key_schema = cand
+			end
+		end
+		assertf(key_schema, 'join: %s: no key on %s(%s)', spec, tbl,
+			cat(cols, ','))
+	end
+	local path = {}
+	for i, col in ipairs(cols) do
+		path[i] = {col, '=', {scan = member_scan, col = member_cols[i]}}
+	end
+	return db:scan(key_schema.name, path, alias)
+end
+
+function Scan:join(spec)
+	return join_scans(self, inner_scan(self, spec))
+end
+function Scan:left_join(spec)
+	return join_scans(self, inner_scan(self, spec), true)
+end
+function Scan:join_scan(spec)
+	return self.db:child_scan(self, inner_scan(self, spec))
 end
 
 --SELECT ---------------------------------------------------------------------
@@ -1245,8 +1423,9 @@ function Scan:select(outputs)
 			member, col, name = output.member, output.col, output.name
 		end
 		if not member then
-			assertf(#self.members == 1, 'select: ambiguous column: %s', col)
-			member = self.members[1]
+			member = next(self.member_scans)
+			assertf(not next(self.member_scans, member),
+				'select: ambiguous column: %s', col)
 		end
 		decoders[#decoders + 1] = self:col_decoder(member, col)
 		names[#names + 1] = name
@@ -1292,6 +1471,8 @@ function Scan:limit(limit, offset)
 	end
 	return scan
 end
+
+--SORT -----------------------------------------------------------------------
 
 --[[
 sorts a value-record scan (the output of select()/aggregate()) by spec
@@ -1722,19 +1903,33 @@ end
 --VALUES SCAN ----------------------------------------------------------------
 
 function Db:values_scan(values)
-	local scan = {}
-	local value_i
+	local scan = object(Scan)
+	scan.db = self
+	scan.member_scans = {}
+	local arg = values.arg
+	local list, value_i
 
 	function scan.reset(args)
 		scan.args = args
+		list = values
+		if arg then
+			list = args and args[arg]
+			assertf(list, 'values_scan: missing arg: %s', arg)
+		end
 		value_i = 0
 	end
 	function scan.advance()
 		value_i = value_i + 1
-		return value_i <= #values or nil
+		return value_i <= #list or nil
+	end
+	function scan.found()
+		return list and value_i >= 1 and value_i <= #list or nil
 	end
 	function scan.get()
-		return values[value_i]
+		return list[value_i]
+	end
+	function scan.explain()
+		return {kind = 'values'}
 	end
 
 	local function advance_row()
