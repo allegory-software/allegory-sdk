@@ -1,52 +1,53 @@
 --[[
 
 	mdbx_query: query builder over mdbx_schema.
-	Written by AI / Cosmin Apreutesei. Public Domain.
+	Written by Cosmin Apreutesei. Public Domain.
 
 START
 	db:from'TABLE [ALIAS]'-> rel  new query from table
 	db:from(rel, alias) -> rel    new query from the rows of another query
 FILTER
-	:where(expr)                  where(e1):where(e2) == where(q.and_(e1, e2))
+	:where(expr)                  where(e1):where(e2) == where({'and', e1, e2})
 JOIN
 	:[left_]join(table, on_expr)  join to table; table is: 'TABLE [ALIAS]'
 	:[left_]join(rel, on_expr)    join to rel as join group (no terminals on rel)
 	:[left_]join(rel, alias, on_expr)   join to rel as rows source (materialized)
 	:fk_[left_]join(table)        join to table via FK
+	the caller uses '=' between cols from different sources in on_expr
 	:where_has(table, [filter])   q.exists(table) via FK
 	:where_hasnt(table, [filter]) q.not_exists(table) via FK
-	:cross_join(...)              :join(..., on_expr = true)
+	:cross_join(...)              unconditional join; takes no on_expr
 	:semi_join(...)               :where(q.exists(table|rel,alias, on_expr))
 	:anti_join(...)               :where(q.not_exists(table|rel,alias, on_expr))
 SET
-	:union(rel) -> rel            union-all (no dedup; use distinct() for that)
+	db:union(rel1,...) -> rel     union-all; use :distinct() to deduplicate
 GROUP
-	:group(outputs)               {{q.col() | agg_expr, name}, ...}
-	:having(expr)                 post-group filter; requires :group()
+	:group_by(out_cols)           {{q.col() | agg_expr, name}, ...}
+	:having(expr)                 post-group filter; requires :group_by()
 DISTINCT
-	:distinct([cols])             dedup by returned fields, or cols if given
+	:distinct([cols])             dedup by output cols, or cols if given
 ORDER
-	:order_by(order)              'MEMBER.COL [desc], ...' | {{q.col(), [dir]}, ...}
+	:order_by(order)              'REL.COL [desc],...' | {{q.col(), [dir]},...}
 LIMIT
 	:limit(n, [offset])
 EXPRESSIONS
 	q = mdbx_query
-	q.col('MEMBER.COL|NAME')      field ref; MEMBER: table-alias/rel-alias/table-name
+	q.col('REL.COL|NAME')         column reference; REL: rel or table alias/name
 	q.param(name)                 bound value at execution
-	q.outer('MEMBER.COL')         field ref but must be in parent scope
-	q.eq/ne/lt/le/gt/ge(a, b)     ==  ~=  <  <=  >  >=
-	q.and_(expr1, expr2, ...)
-	q.or_(expr1, expr2, ...)
-	q.is_[not_]null(expr)
-	q.starts(expr, prefix)
-	q.between(expr, lo, hi)       q.and_(q.ge(expr,lo), q.le(expr,hi))
+	q.outer('REL.COL|NAME')       col that must resolve in a parent scope
+	{op, a, b}                    op: '=' '~=' '<' '<=' '>' '>='
+	{'and', expr1, expr2, ...}
+	{'or', expr1, expr2, ...}
+	{'is_[not_]null', expr}
+	{'starts', expr, prefix}
+	q.between(expr, lo, hi)       {'and', {'>=',expr,lo}, {'<=',expr,hi}}
 	q.[not_]exists(..., on_expr)
-	q.[not_]in_(expr, vals|rel)
-AGGREGATES (group() outputs only)
-	q.count([val_expr])           val_expr: literal | q.param() | q.col()
-	q.min|max|sum|avg(val_expr)
+	{'[not_]in', expr, vals|rel}
+AGGREGATES (group_by() out_cols only)
+	{'count'[, val_expr]}         val_expr: literal | q.param() | q.col()
+	{'min'|'max'|'sum'|'avg', val_expr}
 SELECT
-	:select(outputs)              {'MEMBER.COL [NAME]' | {q.col(), name}, ...}
+	:select(out_cols)             {'REL.COL [NAME]' | {q.col(), name}, ...}
 TERMINALS (materialization)
 	:rows       ([shape], [params]) -> iter() -> vals...
 	:first      ([shape], [params]) -> vals... | nil
@@ -58,26 +59,24 @@ TERMINALS (materialization)
 PROFILING
 	:explain() -> expl            explain plan
 CONTROL
-	:use_index(member, index_name)        force an index for one member
-	:no_index(member [, index_name])      forbid one index, or all, for one member
-	:prepare([terminal_kind])             compile now; raises compile errors at load time
+	:prepare([terminal_kind])             compile now
 
 TODO: SET OPERATIONS
-	:intersect(source)            set intersection over returned fields
-	:except(source)               set difference over returned fields
-	:lateral(source [, alias] [, opts])    dependent join; opts.left keeps unmatched
+	:intersect(source)            set intersection over output cols
+	:except(source)               set difference over output cols
+	:lateral(source [, alias] [, opts])    dependent join; opts.left=left join
 TODO: DML
 	:update(assignments [, opts]) -> dml   assignments: {col_name -> expr}
 	:delete([opts]) -> dml
-	dml:returning(outputs) -> dml           output rows for changed target rows
+	dml:returning(out_cols) -> dml          output rows for changed target rows
 	dml:run([params]) -> n                  execute; return affected row count
 	dml:rows([params]) -> iterator -> row   execute; requires returning()
 
 ROW FORMATS (the `shape` arg of terminals):
 
-	rows()    ->  iter()  ->  val1, ..., valN
-	rows'[]'  ->  iter()  ->  {val1, ..., valN}
-	rows'{}'  ->  iter()  ->  {name1=val1, ..., nameN=valN}
+	rows()    ->  iter()  ->  val1,...
+	rows'[]'  ->  iter()  ->  {val1,...}
+	rows'{}'  ->  iter()  ->  {name->val}
 
 EXAMPLE
 
@@ -88,9 +87,9 @@ EXAMPLE
 	local p = q.param
 
 	local posts =
-		db:from('post p')
-			:where(q.eq(c'p.status', p'STATUS'))
-			:where(q.ge(c'p.score', p'MIN_SCORE'))
+		db:from'post p'
+			:where{'=', c'p.status', p'STATUS'}
+			:where{'>=', c'p.score', p'MIN_SCORE'}
 			:select{
 				'p.id id',
 				'p.title title',
@@ -102,1440 +101,631 @@ EXAMPLE
 		print(row.id, row.title)
 	end
 
-SEMANTICS
 
-mutation, lifecycle
-	- rel:where(a) -> rel -- same rel, mutated, not a copy
-	- rel used as a source, or compiled -> single-use; reusing it, or
-		compiling it for a different terminal, raises
-	- call order doesn't matter -- always runs:
-		source -> where -> group -> having -> select -> distinct -> order_by -> limit
-	- :select/:group/:distinct/:order_by/:limit -- set-once, 2nd call raises
-	- :where/:having/:use_index/:no_index -- accumulate across calls
-	- :prepare() -- terminal_kind defaults to 'rows'
+IMPLEMENTATION
 
-relation sources
-	- db:from(rel, alias), :join(rel, alias, on) -- need rel:select()/
-		:group() already set; only rel's returned fields are visible,
-		under alias
-	- wrap a rel this way to keep querying past select/group/distinct/limit
-	- :join(rel, on_expr) with no alias -- a "join group": members and
-		where() merge directly into this query, nothing hidden
-	- left_join() on a group null-extends the whole group at once, not
-		table by table
-
-fk_join() family
-	- fk_join/fk_left_join/where_has/where_hasnt -- raise unless exactly
-		one FK path exists to some other member
-	- ambiguous or missing FK -> use join()/left_join() with an explicit on_expr
-	- where_has(t, filter) -- filter ANDs into the exists() itself, not
-		the outer where()
-
-union()
-	- rel:union(r):where(...) -- raises; only rows/first/one/must_one/
-		rows_array/count/exists work on a union (wrap it in from() to
-		keep building)
-	- both sides need select()/group() already set, same fields, same order
-
-group(), having()
-	- :group{{col, 'k'}, {q.sum(x), 's'}} -- non-agg outputs are the key,
-		agg outputs are the aggregates
-	- :group{{q.param('x'), 'k'}} -- raises: a literal/param key would be
-		the same for every row
-	- :group{{q.sum(x), 's'}} over no rows -> one row, count() = 0, other
-		aggregates nil
-	- :having(expr) -- reads group() outputs only, never table fields
-
-distinct(), order_by()
-	- :distinct'a' -- dedups by a, but still returns every selected/
-		grouped field
-	- :order_by'a desc' -- nulls first on asc, last on desc
-	- :order_by() -- table fields not in the returned row only work with
-		no group()/distinct(); with either, returned fields only
-
-field scope
-	- member = alias, or table name when there's no alias
-	- q.col('x') in where()/group()/on_expr -> source field; in having()/
-		order_by() (grouped or distinct) -> output field
-	- q.outer('m.c') -- same resolution as q.col('m.c'), plus: raises
-		unless it resolves outside the current relation
-	- q.outer() -- legal only inside a join group or an exists()/in_()
-		subquery, and only from where(), not having()
-
-expressions
-	- no +, .., case, coalesce, or cast -- only what's in the cheat sheet above
-	- :limit(p'N', p'OFF') is fine -- any data value can be a param;
-		names/aliases/directions/opts can't
-	- q.param('x') missing from params -> raises; explicit nil -> ok;
-		extra keys in params -> ignored
-	- q.in_(x, {}), or all-nil candidates -> false; relation form needs
-		exactly one returned field
-
-comparisons, aggregates
-	- q.eq(col, nil) -> false, never an error; not the same as is_null(col)
-	- q.eq(int_col, 'x') -- mismatched kinds raise at compile
-	- avg() is always a float, even over an integer column
-
-nulls
-	- returned rows use plain nil for null; no separate null value
-	- no SQL "unknown" state: any comparison touching null/nil is just false
-	- q.not_in(x, vals) -> false (not true) when x is nil
-	- left_join(t):where(q.eq(t.c, v)) -- drops unmatched rows too (t.c
-		reads nil there) -> acts like inner join; use q.is_null(t.c) instead
-	- distinct(), group() keys, union() -- treat nil == nil; comparisons don't
-
-select()
-	- reads table fields with no group(), group() outputs with one; never both
-
-terminals
-	- rows/first/one/must_one/rows_array need select()/group(); count/exists don't
-	- rows(params) with no shape -- the one arg given is params, not shape
-	- first() takes the first row silently; one() -- nil for zero rows but
-		raises for more than one; must_one() -- raises for zero or more than one
-
-explain()
-	- reports, per member: scan used (pk/index + seek facts), row checks,
-		group/distinct/sort/limit steps, whether sort/limit reached a cursor
+	See `mdbx_query_impl.md`.
 
 ]]
 
 if not ... then require'mdbx_query_test'; return end
 
-require'mdbx_schema'
+require'mdbx_scan'
 
-local C  = C
 local Db = mdbx_db
 
 --PARSING --------------------------------------------------------------------
 
-local function parse_name(s)
-	return assertf(s:match'^[_A-Za-z][_A-Za-z0-9]*$', 'invalid name: %s', s)
-end
-
-local function parse_token_alias(s, what) --'TABLE|[MEMBER.]COL [ALIAS]'
-	local token, alias = s:match'^(%S+)%s*(%S*)$'
-	assertf(token, 'invalid %s spec: %s', what, s)
-	return token, alias ~= '' and parse_name(alias) or nil
-end
-
-local function parse_table_spec(s) --'TABLE [ALIAS]'
-	local table_name, alias = parse_token_alias(s, 'table')
-	return {kind = 'table', table = parse_name(table_name), alias = alias}
-end
-
-local function parse_field_ref(s, allow_no_member) --'[MEMBER.]COL'
-	local member, col = s:match'^([^.]+)%.([^.]+)$'
-	if member then
-		return parse_name(member), parse_name(col)
-	else
-		assertf(allow_no_member, 'invalid field reference: %s', s)
-		return false, parse_name(s)
+local function comma_list(s)
+	if istab(s) then
+		local i = 0
+		return function() i = i + 1; return s[i] end
 	end
+	return s:gmatch'[^,]+'
 end
 
-local function parse_col_spec(s) --'MEMBER.COL [ALIAS]'
-	local field, name = parse_token_alias(s, 'column')
-	local member, col = parse_field_ref(field)
-	return {'col', member, col}, name or col
+local function parse_opt(s, default_opt) -- 'S [OPT]'
+	local s0, opt = s:match'^(%S+)%s+(%S+)$'
+	opt = opt or default_opt
+	if not s0 then return s, opt end
+	return s0, opt
 end
 
---col: a q.col() expr, or the plain string q.col() takes.
-local function order_by_term(col, dir)
-	dir = dir or 'asc'
-	assertf(dir == 'asc' or dir == 'desc', 'order_by: invalid direction: %s', dir)
-	if isstr(col) then
-		local member, c = parse_field_ref(col, true)
-		col = {'col', member, c}
+local function parse_col(s) -- '[REL.]COL'
+	local rel, col = s:match'^([^.]+)%.([^.]+)$'
+	if not rel then return nil, s end
+	return rel, col
+end
+
+local function parse_out_col(s) --'REL.COL [NAME]'
+	local col, name = parse_opt(s)
+	local rel, col = parse_col(col)
+	return {'col', rel, col, name = name}
+end
+local function parse_out_cols(cols) --{'REL.COL [NAME],...'|{expr, name},...}
+	local t = {} --{col1,...}
+	for s in comma_list(cols) do
+		add(t, isstr(s) and parse_out_col(s:trim()) or s)
 	end
-	return {col, dir}
+	return t
 end
 
---spec: '[MEMBER.]COL [asc|desc], ...' | {{col1[, dir1]}, ...}
-local function parse_order_by(spec)
-	local terms = {} --{term...}
-	if isstr(spec) then
-		for s in spec:gmatch('[^,]+') do
-			local field, dir = parse_token_alias(s:trim(), 'order_by')
-			add(terms, order_by_term(field, dir))
-		end
-	else
-		for _, t in ipairs(spec) do
-			add(terms, order_by_term(t[1], t[2]))
-		end
+local function parse_distinct_cols(s) -- 'COL, ...'
+	local t = {} --{col1,...}
+	for s in s:gmatch'[^,]+' do
+		add(t, s:trim())
 	end
-	return terms
+	return t
 end
 
-local function parse_outputs(outputs, parse_col_spec) --{'MEMBER.COL [ALIAS]'|{expr, name}, ...}
-	local parsed = {} --{output...}
-	for i, output in ipairs(outputs) do
-		if isstr(output) then
-			assertf(parse_col_spec, 'invalid output column spec: %s', output)
-			local expr, name = parse_col_spec(output)
-			parsed[i] = {expr, name}
+-- 'REL.COL [asc|desc],...' | {{q.col(), 'asc|desc'},...}
+local function parse_order_by(cols)
+	if not cols then return end
+	local t = {}
+	for s in comma_list(cols) do
+		local expr
+		if isstr(s) then
+			local col, dir = parse_opt(s:trim(), 'asc')
+			local rel, col = parse_col(col)
+			expr = {'col', rel, col, dir = dir}
 		else
-			local _, name = unpack(output, 1, 2)
-			parse_name(name)
-			parsed[i] = output
+			expr = s[1]
+			expr.dir = s[2] or 'asc'
 		end
+		assertf(expr.dir == 'asc' or expr.dir == 'desc',
+			'invalid order_by() direction: %s', expr.dir)
+		add(t, expr)
 	end
-	return parsed
+	return t
 end
---spec: 'COL, ...'
-local function parse_distinct_cols(spec)
-	local cols = {} --{name...}
-	for s in spec:gmatch('[^,]+') do
-		add(cols, parse_name(s:trim()))
+
+--RELATIONS ------------------------------------------------------------------
+
+local Rel = {} --rel methods mutate rel and return it.
+
+function Db:from(rel, alias) --'TABLE [ALIAS]'|rel, [alias]
+	if isstr(rel) then
+		rel, alias = parse_opt(rel, alias)
 	end
-	return cols
-end
-local function parse_select_outputs(outputs) --{'MEMBER.COL [ALIAS]'|{col, name}, ...}
-	return parse_outputs(outputs, parse_col_spec)
-end
-local function parse_group_outputs(outputs) --{{col, name}|{agg_expr, name}, ...}
-	return parse_outputs(outputs)
+	return object(Rel, {db = self, joins = {{right = rel, alias = alias}}})
 end
 
-local function alias_on(a2, a3) --'alias',on_expr | on_expr | nil
-	if isstr(a2) then
-		return a2, a3 --'alias', on_expr
-	else
-		return nil, a2 --on_expr
+function Db:union(...) --rel1, ...
+	return object(Rel, {db = self, union_rels = {...}})
+end
+
+function Rel:where(expr)
+	add(attr(self, 'wheres'), expr)
+	return self
+end
+function Rel:having(expr)
+	add(attr(self, 'havings'), expr)
+	return self
+end
+function Rel:select(cols)
+	self.select_cols = parse_out_cols(cols)
+	return self
+end
+function Rel:group_by(cols)
+	self.group_cols = parse_out_cols(cols)
+	return self
+end
+function Rel:order_by(cols)
+	self.order_cols = parse_order_by(cols)
+	return self
+end
+function Rel:distinct(cols)
+	self.distinct_cols = cols and parse_distinct_cols(cols) or true
+	return self
+end
+function Rel:limit(n, offset)
+	self._limit = n
+	self._offset = offset
+	return self
+end
+local function join(self, op, rel, alias, on_expr)
+	if not isstr(alias) then --no alias, shift args
+		on_expr, alias = alias, nil
 	end
-end
-
---RELATION VALUES ------------------------------------------------------------
-
---relation values are mutable; methods append to self in place.
-local Rel = {}
-
-local function is_relation(v)
-	return inherits(v, Rel)
-end
-
---relations are single-use.
---compile() binds field refs in place.
---reuse would rebind expr trees to whichever query compiles last.
-local function mark_used(rel)
-	assert(not rel.used, 'relation already used')
-	rel.used = true
-end
-
-local function parse_source(source, alias) --'TABLE [ALIAS]' | rel
-	if isstr(source) then
-		--table aliases are part of the table spec; alias arguments are for relations.
-		assert(not alias, 'table alias must be inline')
-		return parse_table_spec(source)
-	else
-		alias = alias and parse_name(alias) or nil
-		mark_used(source)
-		return source, alias
+	if isstr(rel) then -- 'TABLE [ALIAS]'[, alias], on_expr
+		rel, alias = parse_opt(rel, alias)
+	else -- rel[, alias], on_expr
+		assert(inherits(rel, Rel))
 	end
+	assert((op == 'cross') == (on_expr == nil))
+	local t = {op = op, right = rel, alias = alias, on_expr = on_expr}
+	add(attr(self, 'joins'), t)
+	return self
 end
+function Rel:join       (...) return join(self, 'inner', ...) end
+function Rel:left_join  (...) return join(self, 'left' , ...) end
+function Rel:cross_join (...) return join(self, 'cross', ...) end
 
-local function list_part(PART, make)
-	Rel[PART] = empty --class default; each instance creates its own list on first append.
-	make = make or function(v) return v end
-	return function(self, ...)
-		local list = rawget(self, PART)
-		if not list then
-			list = {} --{entry...}
-			self[PART] = list
-		end
-		list[#list + 1] = make(...)
-		return self
-	end
-end
-local function once_part(PART, method, make)
-	make = make or function(v) return v end
-	return function(self, ...)
-		--only one value can be stored for this query part.
-		assert(self[PART] == nil, method..'() already set')
-		self[PART] = make(...)
-		return self
-	end
-end
-Rel.where    = list_part'wheres'
-Rel.having   = list_part'havings'
-Rel.select   = once_part('select_outputs', 'select', parse_select_outputs)
-Rel.group    = once_part('group_outputs', 'group', parse_group_outputs)
-Rel.order_by = once_part('order_by_terms', 'order_by', parse_order_by)
---distinct_rows: true (dedup by all returned fields) or {name...} (cols given).
-Rel.distinct = once_part('distinct_rows', 'distinct', function(cols)
-	return cols and parse_distinct_cols(cols) or true
-end)
---index_name matches schema.indexes[i].name (mdbx_schema's format_ix_name:
---'table/col1,col2[:desc]'), not a bare identifier, so it isn't parse_name()'d;
---choose_access() already rejects an unknown name with a clear error.
-Rel.use_index = list_part('use_indexes', function(member, index_name)
-	return {member = parse_name(member), index_name = index_name}
-end)
-Rel.no_index = list_part('no_indexes', function(member, index_name)
-	return {member = parse_name(member), index_name = index_name}
-end)
-Rel.limit = once_part('limit_rows', 'limit', function(n, offset)
-	return {n = n, offset = offset}
-end)
-local function join_part(kind)
-	return list_part('joins', function(right, a2, a3)
-		local alias, on = alias_on(a2, a3)
-		local source
-		source, alias = parse_source(right, alias)
-		return {kind = kind, right = source, alias = alias, on = on}
-	end)
-end
-Rel.join      = join_part'join'
-Rel.left_join = join_part'left_join'
+--EXPRESSIONS ----------------------------------------------------------------
 
-function Rel:cross_join(right)
-	return self:join(right, true)
-end
+--expr: {op, ...}
 
---source is a table spec string or a relation.
---alias only applies when source is a relation.
-function Db:from(source, alias)
-	source, alias = parse_source(source, alias)
-	local rel = {db = self, source = source, alias = alias}
-	return object(Rel, rel)
-end
-
---EXPRESSION VALUES ----------------------------------------------------------
-
---expression values are arrays tagged by a kind string in slot 1.
---shape: {kind, ...operands}.
---plain Lua values stay unwrapped as literals.
-local q = {} --{name->fn}
+local q = {}
 mdbx_query = q
 
 function q.col(s)
-	local member, col = parse_field_ref(s, true)
-	return {'col', member, col}
+	local rel, col = parse_col(s)
+	return {'col', rel, col}
 end
-
 function q.outer(s)
-	local member, col = parse_field_ref(s)
-	return {'outer', member, col}
+	local rel, col = parse_col(s)
+	return {'col', rel, col, outer = true}
 end
 
-function q.param (name) return {'param', parse_name(name)} end
-
-function q.eq(a, b) return {'eq', a, b} end
-function q.ne(a, b) return {'ne', a, b} end
-function q.lt(a, b) return {'lt', a, b} end
-function q.le(a, b) return {'le', a, b} end
-function q.gt(a, b) return {'gt', a, b} end
-function q.ge(a, b) return {'ge', a, b} end
-
-function q.and_(...) return {'and', ...} end
-function q.or_ (...) return {'or', ... } end
+function q.param (name) return {'param', name} end
 
 function q.between(expr, lo, hi)
-	return q.and_(q.ge(expr, lo), q.le(expr, hi))
+	return {'and', {'>=', expr, lo}, {'<=', expr, hi}}
 end
 
-function q.is_null     (expr) return {'is_null'    , expr} end
-function q.is_not_null (expr) return {'is_not_null', expr} end
+--{op->true}: 'count'/'min'/'max'/'sum'/'avg', the only ops group_by()
+--allows as an aggregate output.
+local AGGREGATE_OPS = {count = true, min = true, max = true, sum = true,
+	avg = true}
 
---aggregate markers, legal only in group() outputs (checked at compile).
-function q.count (val_expr) return {'count', val_expr} end
-function q.min   (val_expr) return {'min'  , val_expr} end
-function q.max   (val_expr) return {'max'  , val_expr} end
-function q.sum   (val_expr) return {'sum'  , val_expr} end
-function q.avg   (val_expr) return {'avg'  , val_expr} end
-
-function q.starts(expr, prefix)
-	return {'starts', expr, prefix}
-end
-
---table source aliases stay in expr.alias because on can be nil.
---aliased relation sources are wrapped as {'exists', source}.
-local function exists_expr(op, right, a2, a3)
-	local alias, on = alias_on(a2, a3)
-	--an aliased relation exposes returned fields through a normal source.
-	--put on_expr on that source so the regular where path evaluates it.
-	if is_relation(right) and alias then
-		local source = right.db:from(right, alias)
-		if on ~= nil and on ~= true then source:where(on) end
-		return {op, source}
+local function exists_expr(op, rel, alias, on_expr)
+	if not isstr(alias) then --no alias, shift args
+		on_expr, alias = alias, nil
 	end
-	local source
-	source, alias = parse_source(right, alias)
-	return {op, source, on, alias = alias}
+	if isstr(rel) then -- 'TABLE [ALIAS]'[, alias], [on_expr]
+		rel, alias = parse_opt(rel, alias)
+	else -- rel[, alias], [on_expr]
+		assert(inherits(rel, Rel))
+		if alias then
+			rel = rel.db:from(rel, alias)
+			if on_expr then rel:where(on_expr) end
+			alias, on_expr = nil
+		end
+	end
+	return {op, rel, on_expr, alias = alias}
+end
+function q.exists    (...) return exists_expr('exists'    , ...) end
+function q.not_exists(...) return exists_expr('not_exists', ...) end
+
+function Rel:semi_join(...) return self:where(q.exists(...)) end
+function Rel:anti_join(...) return self:where(q.not_exists(...)) end
+
+function Rel:fk_join      (tbl) return join(self, 'inner', tbl, {fk = true}) end
+function Rel:fk_left_join (tbl) return join(self, 'left' , tbl, {fk = true}) end
+
+function Rel:where_has   (tbl, filter)
+	return self:where(exists_expr('exists', tbl,
+		{fk = true, filter = filter}))
+end
+function Rel:where_hasnt (tbl, filter)
+	return self:where(exists_expr('not_exists', tbl,
+		{fk = true, filter = filter}))
 end
 
-function q.exists(right, a2, a3)
-	return exists_expr('exists', right, a2, a3)
+--COMPILATION ----------------------------------------------------------------
+
+--[[
+what compile() does, in order:
+BINDING
+- resolve input; union inputs -> shared out cols, else joins -> rel.sources
+- merge join group; its sources -> rel.sources, wheres -> on_expr | where
+- resolve output cols; group_by/select -> group_cols/select_cols, out_cols
+- resolve distinct; col names -> expr list | true | nil
+- build scopes; sources/union out cols (+group_cols) -> rel.scope, group_scope
+- bind group output cols; exprs -> source+col (aggregates allowed here)
+- bind select output cols; grouped -> out_col refs, else source refs
+- bind having; exprs -> group out_col refs
+- bind order_by; cols -> out_col refs | source refs
+- bind joins; fk marker -> on_expr, bind cols, recurse join groups
+- bind wheres; exprs -> source+col on cols
+ANALYZING
+- split conditions; wheres/havings/on_exprs -> fact|residual conditions
+- attribute conditions; where conditions -> owning source | late
+- build access plan; joins -> per-source scan plan, natural_order
+- decide sort/group/dedup shortcuts; -> sort_needed, group_streaming,
+  distinct_streaming
+- compile output pipeline; out/group/distinct/sort cols -> descriptors
+- classify exists()/in_() targets; residual/late/having -> expr.plan/.correlated
+]]
+
+local resolve_table_source --fw.decl.
+
+--SCOPE LOOKUP ---------------------------------------------------------------
+
+--find a named source in this scope or a parent scope.
+local function find_source(scope, rel_name)
+	local depth = 0
+	while scope do
+		local source = scope.sources[rel_name]
+		if source then return source, depth end
+		scope = scope.parent
+		depth = depth + 1
+	end
 end
 
-function q.not_exists(right, a2, a3)
-	return exists_expr('not_exists', right, a2, a3)
+--find the source of an unqualified col, or nil if it's an output col.
+local function find_col(scope, col)
+	local depth = 0
+	while scope do
+		local out_col = scope.cols and scope.cols[col]
+		if out_col then return nil, out_col, depth end
+		local found, bcol
+		for _, source in ipairs(scope.sources) do
+			local source_col = source.cols[col]
+			if source_col then --col found in two sources
+				assertf(not found, 'ambiguous col: %s', col)
+				found, bcol = source, source_col
+			end
+		end
+		if found then return found, bcol, depth end
+		scope = scope.parent
+		depth = depth + 1
+	end
 end
 
-function q.in_(expr, values)
-	if is_relation(values) then mark_used(values) end
-	return {'in', expr, values}
+--COLUMN BINDING -------------------------------------------------------------
+
+--bind a col expression to its source col.
+local function bind_col(expr, scope)
+	local _, rel_name, col = unpack(expr, 1, 3)
+	local source, bcol, depth
+	if rel_name then
+		source, depth = find_source(scope, rel_name)
+		assertf(source, 'unknown source: %s', rel_name)
+		bcol = assertf(source.cols[col], 'unknown col: %s.%s', rel_name, col)
+	else
+		source, bcol, depth = find_col(scope, col)
+		assertf(bcol, 'unknown col: %s', col)
+	end
+	assert(not expr.outer or depth > 0,
+		'outer col resolved in current scope')
+	expr.source = source
 end
-function q.not_in(expr, values)
-	if is_relation(values) then mark_used(values) end
-	return {'not_in', expr, values}
+
+--bind a col to an output col by name, not to a source col.
+local function bind_out_col(expr, out_cols)
+	local _, rel_name, col = unpack(expr, 1, 3)
+	--output cols have names but no REL prefix.
+	assert(not rel_name, 'output col must be unqualified')
+	local out_col = out_cols and out_cols[col]
+	assertf(out_col, 'unknown output col: %s', col)
+	expr.source = nil
+	expr.col = out_col
 end
 
-function Rel:semi_join(right, a2, a3)
-	return self:where(q.exists(right, a2, a3))
-end
+--FK EXPR BINDING ------------------------------------------------------------
 
-function Rel:anti_join(right, a2, a3)
-	return self:where(q.not_exists(right, a2, a3))
-end
-
---SCHEMA-BASED JOINS ----------------------------------------------------------
-
---marks an on_expr to be derived from the schema's FK at compile time.
-local function fk_auto(filter) return {fk_auto = true, filter = filter} end
-
---every FK between two table members, checked both directions.
-local function fk_matches(member_a, member_b, matches)
+--collect foreign keys between two table sources in either direction.
+local function fk_matches(source_a, source_b, found_fks)
 	local function scan(child, parent)
 		for _, fk in pairs(child.schema.fks or empty) do
 			if fk.ref_table == parent.table then
-				add(matches, {fk = fk, child = child, parent = parent})
+				add(found_fks, {fk = fk, child = child, parent = parent})
 			end
 		end
 	end
-	scan(member_a, member_b)
-	scan(member_b, member_a)
+	scan(source_a, source_b)
+	scan(source_b, source_a)
 end
 
---q.eq() on_expr for one FK match; AND'd together for a composite key.
-local function fk_on_expr(m)
-	local conds = {} --{expr...}
-	for i, col in ipairs(m.fk.cols) do
-		conds[i] = q.eq(
-			q.col(m.child.member..'.'..col),
-			q.col(m.parent.member..'.'..m.fk.ref_cols[i]))
+--build the equality condition for one foreign key.
+local function fk_expr(found_fk)
+	local exprs = {}
+	for i, col in ipairs(found_fk.fk.cols) do
+		local child_col = q.col(found_fk.child.name..'.'..col)
+		local parent_col = q.col(found_fk.parent.name..'.'
+			..found_fk.fk.ref_cols[i])
+		--source names can repeat across exists() scopes.
+		child_col.source = found_fk.child
+		parent_col.source = found_fk.parent
+		exprs[i] = {'=', child_col, parent_col}
 	end
-	return #conds == 1 and conds[1] or q.and_(unpack(conds))
+	return #exprs == 1 and exprs[1] or {'and', unpack(exprs)}
 end
 
---resolve a fk_auto marker against new_member: exactly one FK must connect
---it to some other member in candidates; ambiguous or absent FK paths raise.
-local function resolve_fk_auto(marker, new_member, candidates, what)
-	local matches = {} --{{fk=,child=,parent=}...}
-	for _, member in ipairs(candidates) do
-		if member ~= new_member and member.kind == 'table' then
-			fk_matches(new_member, member, matches)
+--find the one foreign key connecting a new table to existing sources.
+local function resolve_fk(marker, new_source, sources, what)
+	local found_fks = {}
+	for _, source in ipairs(sources) do
+		if source ~= new_source and source.table then
+			fk_matches(new_source, source, found_fks)
 		end
 	end
-	assertf(#matches > 0, '%s: no FK between %s and any other member', what, new_member.member)
-	assertf(#matches == 1, '%s: ambiguous FK for %s (%d candidates)', what, new_member.member, #matches)
-	local on = fk_on_expr(matches[1])
-	if marker.filter then return q.and_(on, marker.filter) end
-	return on
+	assertf(#found_fks > 0, '%s: no FK for %s', what, new_source.name)
+	assertf(#found_fks == 1, '%s: ambiguous FK for %s', what, new_source.name)
+	local expr = fk_expr(found_fks[1])
+	if marker.filter then return {'and', expr, marker.filter} end
+	return expr
 end
 
-local function assert_table_spec(what, table_spec)
-	assertf(isstr(table_spec), '%s: table spec must be a string, got %s',
-		what, type(table_spec))
-end
+--EXPRESSION BINDING ---------------------------------------------------------
 
-function Rel:fk_join(table_spec)
-	assert_table_spec('fk_join', table_spec)
-	return self:join(table_spec, fk_auto())
-end
+local compile
+local split_group_cols   --fw. decl.
+local resolve_exists_plan --fw. decl.
 
-function Rel:fk_left_join(table_spec)
-	assert_table_spec('fk_left_join', table_spec)
-	return self:left_join(table_spec, fk_auto())
-end
-
-function Rel:where_has(table_spec, filter)
-	assert_table_spec('where_has', table_spec)
-	return self:where(q.exists(table_spec, fk_auto(filter)))
-end
-
-function Rel:where_hasnt(table_spec, filter)
-	assert_table_spec('where_hasnt', table_spec)
-	return self:where(q.not_exists(table_spec, fk_auto(filter)))
-end
-
---SET OPERATIONS ---------------------------------------------------------------
-
---[[
-union() flattens a chain (a:union(b):union(c)) into one n-ary union_inputs
-list instead of nesting union-of-unions: each input is read independently
-either way, so nesting buys nothing and only adds a layer.
-]]
-function Rel:union(right)
-	assert(is_relation(right), 'union: relation expected')
-	if self.union_inputs then
-		mark_used(right)
-		add(self.union_inputs, right)
-		return self
-	end
-	mark_used(self)
-	mark_used(right)
-	local rel = {db = self.db, union_inputs = {self, right}}
-	return object(Rel, rel)
-end
-
---COMPILATION STAGE ----------------------------------------------------------
-
-local compile --fw. decl.
-local compile_scan --fw. decl.
-local compile_relation_scan --fw. decl.
-local compile_virtual_scan --fw. decl.
-local order_satisfied --fw. decl.
-local order_satisfied_set --fw. decl.
-local output_source_col --fw. decl.
-local returned_source_terms --fw. decl.
-local order_term --fw. decl.
-local sort_actually_needed --fw. decl.
---terms_group_consecutive stays in the executor: choose_grouping() also
---needs it, for the same question about group() as this asks about
---distinct().
-local terms_group_consecutive --fw. decl.
---residual checks use these functions to run exists()/in_() subqueries.
-local build_rows --fw. decl.
-local union_rows --fw. decl.
-local eval_exists_source --fw. decl.
-local eval_relation_exists --fw. decl.
---stage 8 cursor choice: shared by compile() and exists()'s standalone scan.
-local split_conditions --fw. decl.
-local referenced_members --fw. decl.
-local key_order --fw. decl.
-local choose_access --fw. decl.
-
---{member=,col=} for a plain q.col() bound to a source field; nil for a
---computed value, which an index can't drive.
-local function col_term(expr)
-	if type(expr) == 'table' and expr[1] == 'col' and expr.source then
-		return {member = expr.source.member, col = expr[3]}
-	end
-	return nil
-end
-
---table sources use mdbx_schema fields.
---relation sources expose their returned fields.
---virtual tables have no physical storage: their schema comes straight
---from the paper schema, never through db:table_schema()'s live/stored
---schema reconciliation, which only knows about real tables.
-local function resolve_source(source, db)
-	if source.kind == 'table' then
-		source.member = source.alias or source.table
-		local virtual_schema = db.schema and db.schema.tables[source.table]
-		if virtual_schema and virtual_schema.virtual then
-			source.schema = virtual_schema
+--bind every col nested in an expression.
+local function bind_expr(expr, scope, out_cols, mode, allow_aggregate)
+	if type(expr) ~= 'table' then return end
+	local op = expr[1]
+	if AGGREGATE_OPS[op] then
+		--aggregate exprs (count/sum/...) are only allowed in group_by().
+		assert(allow_aggregate,
+			'aggregate expressions are only allowed in group_by()')
+		bind_expr(expr[2], scope)
+		return
+	elseif op == 'col' then
+		--skip if already bound: fk_expr() already set source/col.
+		--a name lookup here would be wrong anyway as it could hit a different
+		--source using the same alias in another exists() scope.
+		if expr.source then return end
+		local _, rel_name, col = unpack(expr, 1, 3)
+		if expr.outer then
+			bind_col(expr, scope)
+		elseif mode == 'out_col' then --group_by, having
+			bind_out_col(expr, out_cols)
+		elseif mode == 'out_col_or_source' --order_by without group_by
+			and not rel_name
+			and out_cols and out_cols[col]
+		then
+			bind_out_col(expr, out_cols)
 		else
-			source.schema = assertf(db:table_schema(source.table),
-				'table has no schema: %s', source.table)
+			bind_col(expr, scope)
 		end
-		source.fields = source.schema.fields
-	else
-		source.member = source.alias
-		local fields = {} --{name->field}
-		for i, name in ipairs(source.returned_fields) do
-			fields[name] = {name = name, index = i}
-		end
-		source.fields = fields
-	end
-end
-
---a fragment does not get its own scope.
---its members merge into the relation that joined it.
---its where() exprs merge into the join condition.
-local function resolve_sources(rel)
-
-	--[[
-	- prepare relation values passed where a table can appear.
-	- from(rel, alias): rel returns rows read as alias.field.
-	- join(rel, alias, on): rel returns rows read through the join alias.
-	- join(rel, on): rel members and where() clauses merge into this query.
-	]]
-	if is_relation(rel.source) then
-		local source = rel.source
-		--without alias, returned fields would have no source name.
-		assert(rel.alias, 'relation source requires alias')
-		compile(source, 'rows')
-		rel.source = {
-			kind = 'relation',
-			relation = source,
-			alias = rel.alias,
-			returned_fields = source.returned_fields,
-		}
-	end
-	for _, join in ipairs(rel.joins) do
-		if is_relation(join.right) then
-			if join.alias then
-				local source = join.right
-				compile(source, 'rows')
-				join.right = {
-					kind = 'relation',
-					relation = source,
-					alias = join.alias,
-					returned_fields = source.returned_fields,
-				}
-			else
-				--without alias, returned fields would have no source name.
-				assert(not (join.right.select_outputs or join.right.group_outputs),
-					'relation source requires alias')
+		return
+	elseif op == 'param' then
+		return
+	elseif op == 'exists' or op == 'not_exists' then
+		local right, on_expr = expr[2], expr[3]
+		if isstr(right) then
+			local source = resolve_table_source(scope.db, right, expr.alias)
+			if type(on_expr) == 'table' and on_expr.fk then
+				on_expr = resolve_fk(on_expr, source, scope.sources,
+					'where_has')
+				expr[3] = on_expr
 			end
-		end
-	end
-	--[[
-	- build the member lookup used by q.col('member.col').
-	- table: member is alias or table name; fields come from mdbx_schema.
-	- from(rel, alias) and join(rel, alias, on): member is alias.
-	- join(rel, on): rel members are added and rel:where() exprs move to join.on.
-	]]
-	local members = {} --{source...; member->source}
-	rel.members = members
-	local function add_source(source)
-		resolve_source(source, rel.db)
-		assertf(not members[source.member], 'duplicate source member: %s', source.member)
-		add(members, source)
-		members[source.member] = source
-	end
-	add_source(rel.source)
-	for _, join in ipairs(rel.joins) do
-		if is_relation(join.right) then
-			local fragment = join.right
-			resolve_sources(fragment)
-			--unaliased relation fragments may merge only members and where() expressions.
-			assert(not (fragment.havings[1] or fragment.select_outputs
-				or fragment.group_outputs or fragment.distinct_rows
-				or fragment.order_by_terms or fragment.limit_rows
-				or fragment.use_indexes[1] or fragment.no_indexes[1]),
-				'relation fragment may contain only source steps and where()')
-			for _, where in ipairs(fragment.wheres) do
-				if join.on == nil or join.on == true then
-					join.on = where
-				else
-					join.on = q.and_(join.on, where)
-				end
-			end
-			for _, member in ipairs(fragment.members) do
-				assertf(not members[member.member],
-					'duplicate source member: %s', member.member)
-				add(members, member)
-				members[member.member] = member
-			end
+			local sources = {source}
+			sources[source.name] = source
+			expr[2] = source
+			expr.alias = nil
+			local exists_scope = {
+				db = scope.db,
+				sources = sources,
+				parent = scope,
+			}
+			bind_expr(on_expr, exists_scope)
 		else
-			add_source(join.right)
+			compile(right, scope)
+			bind_expr(on_expr, right.scope)
 		end
+		return
+	elseif op == 'in' or op == 'not_in' then
+		bind_expr(expr[2], scope, out_cols, mode)
+		local values = expr[3]
+		if inherits(values, Rel) then
+			compile(values, scope)
+			--in_()'s relation must return exactly one col: one value per row
+			--to compare against.
+			assert(values.out_cols and #values.out_cols == 1,
+				op..'() relation requires one output col')
+		elseif values[1] ~= 'param' then
+			for _, value in ipairs(values) do
+				bind_expr(value, scope, out_cols, mode)
+			end
+		end
+		return
 	end
-	return members
+	for i = 2, #expr do
+		bind_expr(expr[i], scope, out_cols, mode)
+	end
 end
 
---union inputs must use the same field names in the same order because
---materialized rows use those positions directly.
-local function same_fields(a, b)
-	if #a ~= #b then return false end
-	for i, name in ipairs(a) do
-		if name ~= b[i] then return false end
+--bind every join's on_expr; recurse into nested join groups.
+local function bind_joins(joins, scope, sources)
+	for _, join in ipairs(joins) do
+		if type(join.on_expr) == 'table' and join.on_expr.fk then
+			join.on_expr = resolve_fk(join.on_expr, join.right,
+				sources, 'fk_join')
+		end
+		bind_expr(join.on_expr, scope)
+		if inherits(join.right, Rel) then
+			bind_joins(join.right.joins or empty, scope, sources)
+		end
+	end
+end
+
+--OUTPUT COLS ----------------------------------------------------------------
+
+--build one table for output col order and name lookup.
+local function resolve_out_cols(cols)
+	if not cols then return end
+	local out_cols = {}
+	for i, out_col in ipairs(cols) do
+		local expr, name
+		if type(out_col[1]) == 'table' then
+			expr, name = out_col[1], out_col[2]
+		else
+			expr = out_col
+			name = expr.name or expr[1] == 'col' and expr[3]
+		end
+		assert(name, 'computed output col requires a name')
+		--reject a non-string name: out_cols[i] (position) and out_cols[name]
+		--(lookup) share this same table, so a numeric name would collide.
+		assert(type(name) == 'string', 'output col name must be a string')
+		assertf(not out_cols[name], 'duplicate output col: %s', name)
+		expr.name = name
+		out_cols[i] = expr
+		out_cols[name] = expr
+	end
+	return out_cols
+end
+
+--resolve distinct col names to output expressions.
+local function resolve_distinct(distinct, out_cols)
+	if distinct == nil or distinct == true then return distinct end
+	--distinct() names must match select()/group_by() output col names.
+	assert(out_cols, 'distinct cols require select() or group_by()')
+	local cols = {}
+	for i, name in ipairs(distinct) do
+		cols[i] = assertf(out_cols[name],
+			'unknown distinct output col: %s', name)
+	end
+	return cols
+end
+
+--check that two output col lists use the same names in the same order.
+local function same_out_cols(out_cols_a, out_cols_b)
+	if #out_cols_a ~= #out_cols_b then return false end
+	for i, expr in ipairs(out_cols_a) do
+		if expr.name ~= out_cols_b[i].name then return false end
 	end
 	return true
 end
 
---distinct()'s dedup key: cols if given, else every returned field (also
---covers group() with no aggregate outputs, where distinct_rows is nil).
-local function dedup_key_fields(rel)
-	return type(rel.distinct_rows) == 'table' and rel.distinct_rows or rel.returned_fields
+--SOURCE LIST ----------------------------------------------------------------
+
+--add one source to the ordered list and the name lookup.
+local function add_source(sources, source)
+	--reject a repeated source name: a later lookup by name can't tell the
+	--two sources apart.
+	assertf(not sources[source.name], 'duplicate source: %s', source.name)
+	add(sources, source)
+	sources[source.name] = source
 end
 
-local union_terminals = {rows = true, first = true, one = true,
-	must_one = true, count = true, exists = true} --{terminal_kind->true}
-
---[[
-union relations combine two or more already-compiled relations' rows; none
-of the normal source/join/access-plan pipeline (resolve_sources, bind_expr,
-build_access) applies, so this is its own compile path, entered from
-compile()'s first line instead of falling through resolve_sources().
-]]
-local function compile_union(rel, terminal_kind, parent_scope)
-	assertf(union_terminals[terminal_kind],
-		'union: %s() is not supported on a union relation', terminal_kind)
-	assert(not (rel.wheres[1] or rel.havings[1] or rel.select_outputs
-		or rel.group_outputs or rel.distinct_rows or rel.order_by_terms
-		or rel.limit_rows or rel.joins[1] or rel.use_indexes[1] or rel.no_indexes[1]),
-		'union: no further builder methods may be called on a union relation')
-	--[[
-	each input compiles for whichever terminal kind it will actually be
-	run with later, since compile() commits a relation to one kind for good.
-	exists(): duplicates don't matter, so each input's own exists() can
-	short-circuit instead of materializing every row.
-	count(): union never dedups, so it's a sum of each input's own
-	count(), which itself never decodes select() columns.
-	every other terminal needs full materialized rows to concatenate.
-	]]
-	local input_kind = 'rows'
-	if terminal_kind == 'exists' then input_kind = 'exists'
-	elseif terminal_kind == 'count' then input_kind = 'count'
+--[[local]] function resolve_table_source(db, tbl, alias)
+	--virtual tables have no physical storage: their schema comes from paper
+	--schema, not through db:table_schema(), which only knows about real tables.
+	local schema = db.schema and db.schema.tables[tbl]
+	if not (schema and schema.virtual) then
+		schema = assert(db:table_schema(tbl))
 	end
-	local returned_fields
-	local params = {} --{name...; name->true}
-	for _, input in ipairs(rel.union_inputs) do
-		compile(input, input_kind, parent_scope)
-		assertf(input.returned_fields, 'union: input has no select() or group()')
-		if not returned_fields then
-			returned_fields = input.returned_fields
-		else
-			--array rows need the same field at each position.
-			assertf(same_fields(returned_fields, input.returned_fields),
-				'union: inputs must return the same fields in the same order')
-		end
-		for _, name in ipairs(input.params) do
-			if not params[name] then add(params, name); params[name] = true end
-		end
-	end
-	rel.returned_fields = returned_fields
-	rel.output_fields = rel.union_inputs[1].output_fields
-	rel.params = params
-	rel.compiled = true
-	rel.terminal_kind = terminal_kind
-	return rel
+	return {
+		table = tbl,
+		schema = schema,
+		name = alias or tbl,
+		cols = schema.fields,
+	}
 end
 
-MDBX_NO_NEXT_NODUP = false --bench override, see compile()'s next_nodup eligibility check
+--compile a relation used as an aliased rows source.
+local function resolve_rel_source(rel, name, what)
+	compile(rel)
+	--only select()/group_by() give a relation named cols to use as a rows source.
+	local cols = assert(rel.out_cols, what..' requires select() or group_by()')
+	return {
+		rel = rel,
+		name = name,
+		cols = cols,
+	}
+end
 
---[[local]] function compile(rel, terminal_kind, parent_scope, top_level)
-
-	--CHECK IF THERE'S ANYTHING TO DO -------------------------------------------
-
-	if rel.compiled then
-		--a compiled relation is already bound to one terminal kind.
-		assertf(rel.terminal_kind == terminal_kind,
-			'query already compiled for %s()', rel.terminal_kind)
-		return rel
-	end
-	if rel.union_inputs then
-		if top_level then mark_used(rel) end
-		return compile_union(rel, terminal_kind, parent_scope)
-	end
-	--embedded sources mark themselves used at construction.
-	--top-level compile catches direct compile after prior embedding.
-	if top_level then mark_used(rel) end
-
-	--RESOLVE SOURCES -----------------------------------------------------------
-
-	local members = resolve_sources(rel)
-
-	--WORK OUT THE OUTPUT COLUMN NAMES ------------------------------------------
-
-	--compute output-name maps before binding expressions.
-	--group_fields/select_fields reject duplicate output names.
-	--returned_fields is the ordered list seen by an outer query.
-	local function output_fields(outputs, part)
-		local fields = {} --{name->field}
-		if outputs then
-			for i, output in ipairs(outputs) do
-				local _, name = unpack(output, 1, 2)
-				assertf(not fields[name], 'duplicate %s() output field: %s', part, name)
-				fields[name] = {name = name, index = i}
-			end
-		end
-		return fields
-	end
-	local group_fields = output_fields(rel.group_outputs, 'group')
-	local select_fields = output_fields(rel.select_outputs, 'select')
-
-	local outputs = rel.select_outputs or rel.group_outputs
-	--select() outputs take precedence over group() outputs when both exist.
-	local returned_output_fields = rel.select_outputs and select_fields or
-		(rel.group_outputs and group_fields or false)
-	if outputs then
-		local returned_fields = {} --{name...}
-		for i, output in ipairs(outputs) do
-			local _, name = unpack(output, 1, 2)
-			returned_fields[i] = name
-		end
-		rel.returned_fields = returned_fields
-		rel.output_fields = returned_output_fields
-	end
-
-	--SET UP SCOPE AND PARAMS ---------------------------------------------------
-
-	--child relations search this scope after checking their own members.
-	local scope = {members = members, parent = parent_scope or false} --{members=members,parent=scope|false}
-	local params = {} --{name...; name->true}
-	rel.params = params
-	local function add_param(name)
-		if not params[name] then
-			add(params, name)
-			params[name] = true
-		end
-	end
-	local function add_params_from(other_rel)
-		for _, name in ipairs(other_rel.params) do
-			add_param(name)
-		end
-	end
-
-	--WRITE THE FUNCTION THAT BINDS ONE EXPRESSION ------------------------------
-
-	local function bind_field_ref(expr, source, field)
-		--bound field ref: {'col', member|false, col; source = source|nil, field = field}
-		expr.source = source
-		expr.field = field
-	end
-	local function find_member(search_scope, member)
-		local depth = 0
-		while search_scope do
-			local source = search_scope.members[member]
-			if source then
-				return source, depth
-			end
-			search_scope = search_scope.parent
-			depth = depth + 1
-		end
-	end
-	local function find_col(search_scope, col)
-		local depth = 0
-		while search_scope do
-			local source, field
-			for _, candidate in ipairs(search_scope.members) do
-				local candidate_field = candidate.fields[col]
-				if candidate_field then
-					assertf(not source, 'ambiguous field: %s', col)
-					source, field = candidate, candidate_field
-				end
-			end
-			if source then
-				return source, field, depth
-			end
-			search_scope = search_scope.parent
-			depth = depth + 1
-		end
-	end
-	local function bind_source_col(expr, member, col, search_scope, require_parent)
-		local source, field, depth
-		if member then
-			source, depth = find_member(search_scope, member)
-			assertf(source, 'unknown source member: %s', member)
-			field = source.fields[col]
-			assertf(field, 'unknown field: %s.%s', member, col)
+--resolve sources and merge unaliased relation joins into this relation.
+local function resolve_sources(rel)
+	local sources = {}
+	rel.sources = sources
+	assert(rel.joins and rel.joins[1], 'from() missing')
+	for i, join in ipairs(rel.joins) do
+		if isstr(join.right) then
+			join.right = resolve_table_source(rel.db, join.right, join.alias)
+			add_source(sources, join.right)
+		elseif join.alias then
+			--the join alias becomes this source's name; the inner rel has no
+			--name of its own, only names for its own out_cols.
+			join.right = resolve_rel_source(join.right, join.alias,
+				i == 1 and 'from(rel)' or 'join(rel)')
+			add_source(sources, join.right)
 		else
-			source, field, depth = find_col(search_scope, col)
-			assertf(source, 'unknown field: %s', col)
-		end
-		--outer() validates that normal scope lookup reached a parent scope.
-		assert(not require_parent or depth > 0, 'outer field resolved in current scope')
-		bind_field_ref(expr, source, field)
-	end
-	local function bind_output_col(expr, member, col, fields)
-		--outputs are unqualified row fields.
-		assert(not member, 'output field must be unqualified')
-		local field = fields[col]
-		assertf(field, 'unknown output field: %s', col)
-		bind_field_ref(expr, nil, field)
-	end
-
-	local bind_expr
-	local aggregate_ops = {count = true, min = true, max = true, sum = true, avg = true} --{op->true}
-	local function is_agg_output(expr)
-		return type(expr) == 'table' and aggregate_ops[expr[1]]
-	end
-	--[[
-	- bind each expression in place.
-	- source positions bind q.col() to table/relation fields.
-	- output positions bind q.col() to group/select outputs.
-	- inner relations compile with this relation's scope as parent scope.
-	]]
-	function bind_expr(expr, search_scope, fields, mode, aggregates)
-		--plain Lua values are literals, not exprs; nothing to bind.
-		if type(expr) ~= 'table' then
-			return
-		end
-
-		local op, a, b = unpack(expr, 1, 3)
-		if op == 'col' then
-			local member, col = a, b
-			if mode == 'output' then
-				bind_output_col(expr, member, col, fields)
-			--order_by() unqualified name: prefer a returned field over a source field.
-			elseif mode == 'output_source' and not member and fields and fields[col] then
-				bind_output_col(expr, member, col, fields)
-			else
-				bind_source_col(expr, member, col, search_scope)
-			end
-		elseif op == 'outer' then
-			local member, col = a, b
-			--outer() must resolve in a parent scope; later stages treat it as q.col().
-			assert(search_scope and search_scope.parent, 'outer field requires parent scope')
-			bind_source_col(expr, member, col, search_scope, true)
-			expr[1] = 'col'
-		elseif op == 'param' then
-			add_param(a)
-		elseif aggregate_ops[op] then
-			assert(aggregates, 'aggregate expressions are only allowed in group()')
-			--aggregate args always read source fields, never outputs.
-			bind_expr(a, search_scope, false, 'source', false)
-		elseif op == 'exists' or op == 'not_exists' then
-			local right, on = a, b
-			if is_relation(right) then
-				compile(right, 'exists', search_scope)
-				add_params_from(right)
-				bind_expr(on, search_scope, fields, mode, aggregates)
-			else
-				--right is a bare table spec, not a relation.
-				--no compile is needed.
-				--one extra member lets on_expr resolve right-side fields.
-				resolve_source(right, rel.db)
-				right.db = rel.db
-				if type(on) == 'table' and on.fk_auto then
-					on = resolve_fk_auto(on, right, search_scope.members, 'where_has')
-					expr[3] = on
-				end
-				local right_members = {right} --{source...; member->source}
-				right_members[right.member] = right
-				local right_scope = {members = right_members, parent = search_scope} --{members=members,parent=scope|false}
-				bind_expr(on, right_scope, false, 'source', false)
-			end
-		elseif op == 'in' or op == 'not_in' then
-			local value, values_or_rel = a, b
-			bind_expr(value, search_scope, fields, mode, aggregates)
-			if is_relation(values_or_rel) then
-				local values_rel = values_or_rel
-				compile(values_rel, 'rows', search_scope)
-				add_params_from(values_rel)
-				local name = op == 'in' and 'in_' or 'not_in'
-				assert(#values_rel.returned_fields == 1,
-					name..'() relation requires one returned field')
-			elseif type(values_or_rel) == 'table' and values_or_rel[1] == 'param' then
-				--a list param supplies the candidate set at execution.
-				bind_expr(values_or_rel, search_scope, fields, mode, aggregates)
-			else
-				for _, item in ipairs(values_or_rel) do
-					bind_expr(item, search_scope, fields, mode, aggregates)
-				end
-			end
-		else
-			--expr[1] is the op tag, not an operand; bind everything after it.
-			local first = true
-			for _, operand in ipairs(expr) do
-				if first then
-					first = false
-				else
-					bind_expr(operand, search_scope, fields, mode, aggregates)
-				end
-			end
-		end
-	end
-
-	--RUN THAT BINDER OVER THE WHOLE QUERY --------------------------------------
-
-	--bind each query part with the fields that part is allowed to read.
-	for _, source in ipairs(members) do
-		if source.kind == 'relation' then
-			add_params_from(source.relation)
-		end
-	end
-	if rel.group_outputs then
-		for _, output in ipairs(rel.group_outputs) do
-			local expr = output[1]
-			bind_expr(expr, scope, false, 'source', true)
-			--a literal/param key is constant, collapsing every row into one group.
-			assertf((type(expr) == 'table' and expr[1] == 'col') or is_agg_output(expr),
-				'group(): %s must be a column or an aggregate', output[2])
-		end
-	end
-	if rel.select_outputs then
-		local select_mode = rel.group_outputs and 'output' or 'source'
-		local select_fields = rel.group_outputs and group_fields or false
-		for _, output in ipairs(rel.select_outputs) do
-			local expr = output[1]
-			bind_expr(expr, scope, select_fields, select_mode, false)
-		end
-	end
-	if rel.havings[1] then
-		assert(rel.group_outputs, 'having() requires group()')
-	end
-	for _, expr in ipairs(rel.havings) do
-		bind_expr(expr, scope, group_fields, 'output', false)
-	end
-	--a fragment never gets its own compile() call.
-	--its members share this relation's flat scope.
-	--its internal join on_expr values are bound here recursively.
-	local function bind_joins(joins)
-		for _, join in ipairs(joins) do
-			if type(join.on) == 'table' and join.on.fk_auto then
-				join.on = resolve_fk_auto(join.on, join.right, members, 'fk_join')
-			end
-			bind_expr(join.on, scope, false, 'source', false)
-			if is_relation(join.right) then
-				bind_joins(join.right.joins)
-			end
-		end
-	end
-	bind_joins(rel.joins)
-	for _, expr in ipairs(rel.wheres) do
-		bind_expr(expr, scope, false, 'source', false)
-	end
-
-	rel.where_conditions = split_conditions(rel.wheres, true)
-	rel.having_conditions = split_conditions(rel.havings, false)
-	--fragments can contain nested fragments.
-	--internal joins need on_conditions recursively.
-	local function split_join_conditions(joins)
-		for _, join in ipairs(joins) do
-			--unconditional joins have nothing to split.
-			--no always-true residual entry is needed.
-			join.on_conditions = (join.on == nil or join.on == true)
-				and empty or split_conditions({join.on}, true)
-			if is_relation(join.right) then
-				split_join_conditions(join.right.joins)
-			end
-		end
-	end
-	split_join_conditions(rel.joins)
-
-	--RESOLVE ORDER_BY() AND DISTINCT() -----------------------------------------
-
-	if rel.order_by_terms then
-		local order_fields = returned_output_fields or false
-		local order_mode = (rel.group_outputs or rel.distinct_rows) and 'output' or 'output_source'
-		if order_mode == 'output' then
-			assert(order_fields, 'order_by() with group() or distinct() requires returned fields')
-		end
-		for _, term in ipairs(rel.order_by_terms) do
-			local expr = term[1]
-			bind_expr(expr, scope, order_fields, order_mode, false)
-		end
-	end
-
-	if type(rel.distinct_rows) == 'table' then
-		assertf(returned_output_fields, 'distinct(): requires select() or group()')
-		for _, name in ipairs(rel.distinct_rows) do
-			assertf(returned_output_fields[name], 'distinct(): unknown returned field: %s', name)
-		end
-	end
-
-	--record index hints by member and reject contradictory hints.
-	--READ USE_INDEX()/NO_INDEX() HINTS -----------------------------------------
-
-	local use_index_by_member = {} --{member->index_name}
-	local no_index_by_member = {} --{member->true|{index_name->true}}
-	local function check_hint_member(member)
-		assertf(members[member], 'unknown source member: %s', member)
-	end
-	for _, hint in ipairs(rel.use_indexes) do
-		local member, index_name = hint.member, hint.index_name
-		check_hint_member(member)
-		local forced = use_index_by_member[member]
-		assertf(not forced or forced == index_name,
-			'conflicting use_index() for source member: %s', member)
-		use_index_by_member[member] = index_name
-	end
-	for _, hint in ipairs(rel.no_indexes) do
-		local member, index_name = hint.member, hint.index_name
-		check_hint_member(member)
-		if index_name == nil then
-			--all indexes cannot be forbidden after one index was forced.
-			assertf(not use_index_by_member[member],
-				'all indexes forbidden for source member with forced index: %s', member)
-			no_index_by_member[member] = true
-		else
-			local no_indexes = no_index_by_member[member]
-			--a member-wide no_index() already forbids this index.
-			assert(no_indexes ~= true, 'index already forbidden')
-			--one index cannot be both forced and forbidden.
-			assertf(use_index_by_member[member] ~= index_name,
-				'index is both forced and forbidden: %s.%s', member, index_name)
-			no_indexes = no_indexes or {} --{index_name->true}
-			no_indexes[index_name] = true
-			no_index_by_member[member] = no_indexes
-		end
-	end
-
-	--DECIDE HOW TO READ EACH TABLE ---------------------------------------------
-
-	--[[
-	- whether a left_join()'d member matched must depend only on its
-	  on_expr, never on a later where() -- a where() condition on such a
-	  member has to run once against the finished row (late), not as a
-	  per-candidate residual during that member's scan, or an unmatched
-	  row that should null-extend would instead get silently dropped or
-	  wrongly kept.
-	- a left-joined fragment null-extends all at once, so every member
-	  inside it counts as left-joined too, regardless of which join kind
-	  connects members *inside* the fragment.
-	- limitation: this means such a where() condition can never drive an
-	  index seek, even when one exists on that column -- only the member's
-	  own on_expr can still choose an index for it. a fix that kept index
-	  use would need two separate scans, one to prove existence and one
-	  to narrow candidates, which this engine doesn't have.
-	]]
-	local left_joined_members = {} --{member_name->true}
-	local function collect_left_joined_members(joins)
-		for _, join in ipairs(joins) do
-			if is_relation(join.right) then
-				if join.kind == 'left_join' then
-					for _, member in ipairs(join.right.members) do
-						left_joined_members[member.member] = true
+			assert(i > 1, 'from(rel) requires alias')
+			local join_rel = join.right
+			--a join group (unaliased relation join) may only have sources,
+			--joins, and where() -- nothing else merges into the parent.
+			assert(not (
+					join_rel.union_rels
+				or join_rel.havings
+				or join_rel.select_cols
+				or join_rel.group_cols
+				or join_rel.distinct_cols
+				or join_rel.order_cols
+				or join_rel._limit
+			), 'join rel contains unsupported query parts')
+			--get join group's sources before moving its where() clauses.
+			local join_sources = resolve_sources(join_rel)
+			--flatten join group: move its where() clauses out into rel.
+			if join_rel.wheres then
+				if join.op == 'left' then
+					--AND left join where() conditions to the join condition.
+					for _, join_where in ipairs(join_rel.wheres) do
+						if join.on_expr == nil or join.on_expr == true then
+							join.on_expr = join_where
+						else
+							join.on_expr = {'and', join.on_expr, join_where}
+						end
 					end
 				else
-					collect_left_joined_members(join.right.joins)
+					--AND cross/inner join where()s to rel's own where() list.
+					local wheres = attr(rel, 'wheres')
+					for _, join_where in ipairs(join_rel.wheres) do
+						add(wheres, join_where)
+					end
 				end
-			elseif join.kind == 'left_join' then
-				left_joined_members[join.right.member] = true
+				join_rel.wheres = nil
+			end
+			--add join group's sources to rel so that q.col() can bind into
+			--group's sources.
+			for _, join_source in ipairs(join_sources) do
+				add_source(sources, join_source)
 			end
 		end
 	end
-	collect_left_joined_members(rel.joins)
-
-	local function attribute_conditions(conditions)
-		for _, cond in ipairs(conditions) do
-			local found = {} --{member->true}
-			referenced_members(cond.expr, found, members)
-			local n, only = 0, nil
-			for member in pairs(found) do
-				n = n + 1
-				only = member
-			end
-			cond.member = (n == 1 and not left_joined_members[only]) and only or false
-		end
-	end
-	attribute_conditions(rel.where_conditions)
-	--a condition that cannot narrow to one member gets checked after every
-	--member has been scanned, not before.
-	local late_conditions = {} --{condition...}
-	for _, cond in ipairs(rel.where_conditions) do
-		if cond.member == false then add(late_conditions, cond) end
-	end
-	rel.late_conditions = late_conditions
-
-	--only the base source's cursor order can set final row order: a
-	--joined member's scan re-runs under each driver row, so its own
-	--cursor order only holds within that one driver row, not across the
-	--whole result.
-	local function base_order_terms()
-		if not rel.order_by_terms or rel.group_outputs or rel.distinct_rows then return end
-		local terms = {} --{{member=,col=,dir=}...}
-		for _, term in ipairs(rel.order_by_terms) do
-			local expr, dir = term[1], term[2]
-			if expr.source then
-				add(terms, {member = expr.source.member, col = expr[3], dir = dir})
-			else
-				local src = output_source_col(rel, expr.field.name)
-				if not src then return end
-				add(terms, {member = src.member, col = src.col, dir = dir})
-			end
-		end
-		return terms
-	end
-	local source_order_terms = base_order_terms()
-	local prefer_order = source_order_terms and rel.limit_rows ~= nil
-
-	--group() with no aggregate outputs is "distinct group keys" -- same
-	--access-plan requirement as distinct(): both can request an index
-	--whose key groups their columns together (any order, any direction),
-	--the same way order_by() requests one for row sequence above, but
-	--looser.
-	--mutually exclusive with source_order_terms (base_order_terms()
-	--returns nil whenever rel.distinct_rows or rel.group_outputs is set).
-	local function group_has_no_aggregates()
-		if not rel.group_outputs then return false end
-		for _, output in ipairs(rel.group_outputs) do
-			local expr = output[1]
-			if is_agg_output(expr) then return false end
-		end
-		return true
-	end
-	local function dedup_only()
-		return (rel.distinct_rows and not rel.group_outputs) or group_has_no_aggregates()
-	end
-	--index selection for group order: an index whose key groups these
-	--columns together lets run_grouped stream instead of hash, whether
-	--or not group() also has aggregate outputs.
-	--group()'s own key (non-aggregate) outputs are used directly --
-	--bound in 'source' mode regardless of any select() layered on top.
-	--distinct() without group() has no separate key notion: its dedup
-	--fields (cols if given, else every returned column) are its only key.
-	local function group_key_terms()
-		if rel.group_outputs then
-			local terms = {} --{{member=,col=}...}
-			for _, output in ipairs(rel.group_outputs) do
-				local expr = output[1]
-				if is_agg_output(expr) then
-					--aggregate output: not a grouping key
-				else
-					local ct = col_term(expr)
-					if not ct then return nil end --computed key expr: index can't help
-					add(terms, ct)
-				end
-			end
-			return terms[1] and terms or nil
-		end
-		if rel.distinct_rows then
-			return returned_source_terms(rel, dedup_key_fields(rel))
-		end
-	end
-	local source_group_terms = group_key_terms()
-
-	--access conditions include join on_expr conditions.
-	--they also include where() conditions that read only this member.
-	--join_deps() schedules on_expr inputs before this member scans.
-	local function access_conditions(member, join)
-		local list = {} --{condition...}
-		if join then
-			for _, cond in ipairs(join.on_conditions) do add(list, cond) end
-		end
-		for _, cond in ipairs(rel.where_conditions) do
-			if cond.member == member.member then add(list, cond) end
-		end
-		return list
-	end
-
-	--a join can run after every outside member its on_expr reads is scheduled.
-	--the join's own right member does not count as a dependency.
-	--a fragment's internal members do not count as outside dependencies.
-	local function join_deps(join)
-		local found = {} --{member->true}
-		referenced_members(join.on, found, members)
-		if is_relation(join.right) then
-			for _, member in ipairs(join.right.members) do
-				found[member.member] = nil
-			end
-		else
-			found[join.right.member] = nil
-		end
-		return found
-	end
-
-	--[[
-	- pick the next join to schedule: only one whose on_expr reads no
-	  member that isn't scheduled yet. among ties, keep the order joins
-	  were declared in.
-	- this only looks at on_expr's column references, never at what's
-	  actually stored in any table.
-	- an inner join's own fragment just adds its joins to this same list.
-	- a left join's fragment moves as one piece: it and everything joined
-	  onto it inside that fragment either all match together, or all
-	  null-extend together, never split apart.
-	]]
-	local function build_access(joins, scheduled, access)
-		local pending = {} --{join...}
-		for _, join in ipairs(joins) do
-			add(pending, join)
-		end
-		while pending[1] do
-			local picked, picked_i
-			for i, join in ipairs(pending) do
-				local deps = join_deps(join)
-				local ready = true
-				for member in pairs(deps) do
-					if not scheduled[member] then ready = false; break end
-				end
-				if ready then picked, picked_i = join, i; break end
-			end
-			assertf(picked, 'source step cycle: on_expr reads form a cycle'
-				..' across join()/left_join() steps')
-			remove(pending, picked_i)
-			if is_relation(picked.right) then
-				local fragment = picked.right
-				local base_step = {member = fragment.source, join = false,
-					plan = choose_access(fragment.source,
-						access_conditions(fragment.source, picked), members,
-						use_index_by_member[fragment.source.member],
-						no_index_by_member[fragment.source.member])}
-				if picked.kind == 'join' then
-					add(access, base_step)
-					scheduled[fragment.source.member] = true
-					build_access(fragment.joins, scheduled, access)
-				else
-					local nested_scheduled = {[fragment.source.member] = true}
-					local nested = {base_step} --{step...}
-					build_access(fragment.joins, nested_scheduled, nested)
-					add(access, {member = false, join = picked, nested = nested})
-				end
-			else
-				add(access, {member = picked.right, join = picked,
-					plan = choose_access(picked.right, access_conditions(picked.right, picked),
-						members, use_index_by_member[picked.right.member],
-						no_index_by_member[picked.right.member])})
-				scheduled[picked.right.member] = true
-			end
-		end
-	end
-
-	--[[
-	- natural_order is the driving member order guaranteed by its access plan.
-	- leading equality-pinned columns are fixed across the scan.
-	- remaining key columns follow cursor order.
-	- a backward-scanned plan (plan.dir == 'desc') reverses that cursor order.
-	- joined members do not contribute global order.
-	- group(), distinct(), and order_by() check this one fact.
-	]]
-	local function natural_order(step)
-		local plan = step.plan
-		if not plan.schema then return empty end --relation source does not guarantee key order
-		if plan.kind == 'in' then return empty end --separate seeks do not form one key order
-		return key_order(step.member, plan.schema, plan.depth, plan.dir == 'desc')
-	end
-
-	local access = {} --{{member=,join=|false,plan=|nested=}...}
-	rel.access = access
-	add(access, {member = rel.source, join = false,
-		plan = choose_access(rel.source, access_conditions(rel.source, false), members,
-			use_index_by_member[rel.source.member], no_index_by_member[rel.source.member],
-			source_order_terms, prefer_order, source_group_terms)})
-	build_access(rel.joins, {[rel.source.member] = true}, access)
-	rel.natural_order = natural_order(access[1])
-
-	--[[
-	- distinct(), and group() with no aggregate outputs, can skip a whole
-	  duplicate group at the cursor via MDBX_NEXT_NODUP instead of
-	  decoding every duplicate row -- only when the group is the literal
-	  DUPSORT boundary: the returned columns must cover the WHOLE
-	  remaining index key, not just a prefix.
-	- a residual check or a second access step could pick a different
-	  row out of the same group, so skipping unseen duplicates would be
-	  wrong unless neither exists.
-	- 'exact'/'in' plans have no varying key columns left to group over.
-	- MDBX_NEXT_NODUP is forward-only; excludes dir == 'desc'.
-	]]
-	if dedup_only() and #access == 1 and not MDBX_NO_NEXT_NODUP then
-		local plan = access[1].plan
-		local kind_ok = plan.kind == 'full' or plan.kind == 'range'
-			or plan.kind == 'prefix' or plan.kind == 'eq_prefix'
-		if kind_ok and plan.schema and plan.schema.is_index and plan.dir ~= 'desc'
-			and #plan.residual == 0 and #late_conditions == 0
-		then
-			local terms = returned_source_terms(rel, dedup_key_fields(rel))
-			if terms then
-				local ok, n_wanted = order_satisfied_set(terms, rel.natural_order)
-				if ok and plan.depth + n_wanted == #plan.schema.pk then
-					plan.next_nodup = true
-				end
-			end
-		end
-	end
-
-	--[[
-	- whether an explicit sort is needed, and whether distinct() can
-	  remove adjacent duplicates instead of hashing, are both fully
-	  decided by what's already been set above (order_by_terms,
-	  natural_order, group_outputs, distinct_rows) -- decide both once
-	  here, instead of recomputing them on every execution.
-	]]
-	rel.sort_needed = sort_actually_needed(rel)
-	rel.distinct_streaming = false
-	if rel.distinct_rows and not rel.group_outputs then
-		local fields = dedup_key_fields(rel)
-		local terms = returned_source_terms(rel, fields)
-		rel.distinct_streaming = terms ~= nil and terms_group_consecutive(rel, terms)
-	end
-
-	--GIVE EACH STEP A WAY TO OPEN ITSELF ---------------------------------------
-
-	--build each step opener once at compile time.
-	--recurse into nested left-join fragment steps.
-	--relation sources open the already-compiled inner relation instead of a cursor.
-	--virtual tables open once, then reset through their schema object.
-	local function prepare_scans(access_list)
-		for _, step in ipairs(access_list) do
-			if step.nested then
-				prepare_scans(step.nested)
-			elseif step.plan.schema then
-				step.open = compile_scan(rel.db, step.plan)
-			elseif step.member.kind == 'relation' then
-				step.open = compile_relation_scan(step.member.relation)
-			elseif step.member.schema.virtual then
-				step.open = compile_virtual_scan(step.member.schema)
-			end
-		end
-	end
-	prepare_scans(access)
-
-	--FIND EVERY EXISTS()/IN_() TARGET ------------------------------------------
-
-	--[[
-	- collect every exists()/not_exists()/in_()/not_in() source this
-	  relation's own residual/late/having checks can reach -- a plain
-	  table or a whole subquery -- so run_filtered can open them all once
-	  per execution instead of opening one fresh per row.
-	- recurses into on_expr and in_()'s value expr: one of these can nest
-	  another exists()/in_() inside it.
-	]]
-	local function collect_exists_sources(expr, entries, seen)
-		if type(expr) ~= 'table' then return end
-		local op = expr[1]
-		if op == 'exists' or op == 'not_exists' then
-			local source, on = expr[2], expr[3]
-			if not seen[source] then
-				seen[source] = true
-				add(entries, {source = source, on = on})
-			end
-			if on then collect_exists_sources(on, entries, seen) end
-		elseif (op == 'in' or op == 'not_in') and is_relation(expr[3]) then
-			local values_rel = expr[3]
-			if not seen[values_rel] then
-				seen[values_rel] = true
-				add(entries, {source = values_rel})
-			end
-			collect_exists_sources(expr[2], entries, seen)
-		else
-			for i = 2, #expr do
-				collect_exists_sources(expr[i], entries, seen)
-			end
-		end
-	end
-	local function collect_step_exists(step, entries, seen)
-		if step.nested then
-			for _, s in ipairs(step.nested) do collect_step_exists(s, entries, seen) end
-		else
-			for _, cond in ipairs(step.plan.residual) do
-				collect_exists_sources(cond.expr, entries, seen)
-			end
-		end
-	end
-	local exists_sources, exists_seen = {}, {}
-	for _, step in ipairs(access) do collect_step_exists(step, exists_sources, exists_seen) end
-	for _, cond in ipairs(late_conditions) do
-		collect_exists_sources(cond.expr, exists_sources, exists_seen)
-	end
-	for _, cond in ipairs(rel.having_conditions) do
-		collect_exists_sources(cond.expr, exists_sources, exists_seen)
-	end
-	rel.exists_sources = exists_sources
-
-	--LOCK IT IN ----------------------------------------------------------------
-
-	local needs_output =
-		terminal_kind == 'rows' or
-		terminal_kind == 'first' or
-		terminal_kind == 'one' or
-		terminal_kind == 'must_one'
-	if needs_output then
-		assert(outputs, terminal_kind..'() requires select() or group()')
-	end
-
-	rel.terminal_kind = terminal_kind
-	rel.compiled = true
-	return rel
+	return sources
 end
 
 --SORT AND DEDUP HELPERS -----------------------------------------------------
 
+--helpers used in deciding whether a sort step can be skipped because rows
+--come already sorted.
+
+--[[
+- turns a parsed col() expr into the same {key=} shape that key_order() builds
+  from the schema, so that order/group/distinct planning can compare
+  "what the query asked for" against "what the scan naturally produces" with
+  a plain key comparison.
+- nil if expr isn't a plain column (aggregate or computed): no physical key
+  can satisfy that, so there's nothing to compare.
+- note: the same col expr can be asked for two different terms in one compile
+  e.g. group_by('a.x k'):order_by('k desc') needs the bare column for the
+  grouping key and column+dir for the order, both read off the same out_col
+  object.
+]]
+local function col_term(expr)
+	if type(expr) == 'table' and expr[1] == 'col' and expr.source then
+		return {key = expr.source.name..'.'..expr[3]}
+	end
+	return nil
+end
+
 --[[
 - test whether natural scan order satisfies ordered terms.
 - terms are ordered by order_by() priority.
-- fixed natural columns are skipped.
-- varying natural columns must match in sequence.
-- dir must match when a term declares it.
+- fixed natural cols are skipped: every row shares one value there, so
+  comparing a term against it can never fail.
+- varying natural cols must match in sequence, dir included -- an
+  order_by() term always carries a dir (parse_order_by defaults it to
+  'asc'), so the dir check is never optional.
 ]]
-function order_satisfied(terms, natural)
-	local fixed = {} --{'member.col'->true}
-	local varying = {} --{{member=,col=,dir=}...}
-	for _, n in ipairs(natural) do
-		if n.fixed then fixed[n.member..'.'..n.col] = true
+local function order_satisfied(terms, natural_order)
+	local fixed = {} --{key->true}
+	local varying = {} --{{key=,dir=}...}
+	for _, n in ipairs(natural_order) do
+		if n.fixed then fixed[n.key] = true
 		else add(varying, n) end
 	end
 	local vi = 1
 	for _, term in ipairs(terms) do
-		if not fixed[term.member..'.'..term.col] then
+		if not fixed[term.key] then
 			local v = varying[vi]
-			if not v or v.member ~= term.member or v.col ~= term.col
-				or (term.dir and term.dir ~= v.dir) then
+			if not v or v.key ~= term.key or v.dir ~= term.dir then
 				return false
 			end
 			vi = vi + 1
@@ -1545,135 +735,243 @@ function order_satisfied(terms, natural)
 end
 
 --[[
-- test whether natural scan order groups a set of columns together.
-- term order does not matter.
-- fixed natural columns are skipped.
+- test whether scanning in natural key order already keeps rows with
+  equal terms adjacent, so a streaming grouper could use this set of
+  cols without a separate sort.
+- term order does not matter, only the set of cols.
+- fixed natural cols are skipped: every row shares one value there, so
+  grouping by it never separates one row from another.
 - remaining terms must cover the exact varying prefix as a set.
-- skipping a varying prefix column would split equal groups apart.
-- second return is how many varying columns the terms covered: callers
+- skipping a varying prefix col would split equal groups apart.
+- second return is how many varying cols the terms covered: callers
   that need the terms to cover the WHOLE varying tail (not just a
   prefix of it) compare this against #varying themselves.
 ]]
---[[local]] function order_satisfied_set(terms, natural)
-	local fixed = {} --{'member.col'->true}
-	local varying = {} --{{member=,col=}...}
-	for _, n in ipairs(natural) do
-		if n.fixed then fixed[n.member..'.'..n.col] = true
+local function order_satisfied_set(terms, natural_order)
+	local fixed = {} --{key->true}
+	local varying = {} --{{key=}...}
+	for _, n in ipairs(natural_order) do
+		if n.fixed then fixed[n.key] = true
 		else add(varying, n) end
 	end
-	local wanted = {} --{'member.col'->true}
+	local wanted = {} --{key->true}
 	local n_wanted = 0
 	for _, term in ipairs(terms) do
-		local key = term.member..'.'..term.col
-		if not fixed[key] then
-			wanted[key] = true
+		if not fixed[term.key] then
+			wanted[term.key] = true
 			n_wanted = n_wanted + 1
 		end
 	end
 	if n_wanted > #varying then return false end
 	for i = 1, n_wanted do
-		if not wanted[varying[i].member..'.'..varying[i].col] then return false end
+		if not wanted[varying[i].key] then
+			return false
+		end
 	end
 	return true, n_wanted
 end
 
 --[[
-- resolve a returned output name to {member=, col=}.
-- succeeds only for plain q.col() outputs bound to source fields.
-- distinct() and order_by() use this to reuse natural scan order.
-- returns nil for aggregates and computed outputs.
-]]
-function output_source_col(self, name)
-	local outputs = self.select_outputs or self.group_outputs
-	for _, output in ipairs(outputs) do
-		if output[2] == name then
-			return col_term(output[1])
-		end
-	end
-end
-
---[[
-- resolve every name in fields (self.returned_fields by default) to a
-  {member=, col=} term.
-- nil if any field is not a plain source-column passthrough (an aggregate
-  or computed output).
+- resolve every out_col in cols (rel.out_cols by default) to a {key=}
+  term.
+- nil if any out_col is not a plain source-col passthrough (an
+  aggregate or computed output).
 - distinct()'s streaming dedup and the NEXT_NODUP compile-time check
-  (shared by distinct() and group() with no aggregate outputs) share
-  this: all three need the dedup columns to be readable straight off the
+  (shared by distinct() and group_by() with no aggregate outputs) share
+  this: all three need the dedup cols to be readable straight off the
   scan key, not computed.
 ]]
-function returned_source_terms(self, fields)
-	local terms = {} --{{member=,col=}...}
-	for _, name in ipairs(fields or self.returned_fields) do
-		local src = output_source_col(self, name)
-		if not src then return nil end
-		add(terms, src)
+local function returned_source_terms(rel, cols)
+	local terms = {} --{{key=}...}
+	for _, out_col in ipairs(cols or rel.out_cols) do
+		local term = col_term(out_col)
+		if not term then return nil end
+		add(terms, term)
 	end
 	return terms
 end
 
 --[[
-- resolve one order_by() term to {member=, col=, dir=}.
-- terms bound to source fields resolve directly.
-- terms bound to output fields resolve through select()/group() output names.
-- terms bound to output fields are order-checkable only for plain passthrough outputs.
-- aggregate or computed outputs return nil.
+- resolve one order_by() term to {key=, dir=}.
+- when bind_col() bound this order_by() entry straight to a source
+  col, read col_term() off the entry itself.
+- when bind_out_col() bound it to an out_col by name instead (a
+  select()/group_by() output alias), read col_term() off that
+  out_col's own expr.
+- either way, only a plain col passthrough is order-checkable; an
+  aggregate or computed expr returns nil.
 ]]
-function order_term(self, term)
-	local expr, dir = term[1], term[2]
-	if expr.source then
-		return {member = expr.source.member, col = expr[3], dir = dir}
-	end
-	local src = output_source_col(self, expr.field.name)
-	return src and {member = src.member, col = src.col, dir = dir}
+local function order_term(term)
+	local t = col_term(term.source and term or term.col)
+	if t then t.dir = term.dir end
+	return t
 end
 
 --[[
-- decide whether order_by() needs an explicit sort.
-- no order_by() means no sort.
-- group() and distinct() sort explicitly for now.
-- plain ungrouped rows can reuse driving-member scan order.
-- build_rows() uses this to skip sorting.
-- rows_array() uses this to push limit()/offset().
+sort_actually_needed() returns false without order_by(). aggregate() and
+distinct() emit results in input encounter order, so sort_actually_needed()
+can reuse rel.natural_order after either call.
+When group_by() has no key cols, sort_actually_needed() returns false because
+aggregate() emits at most one row.
 ]]
-function sort_actually_needed(self)
-	if not self.order_by_terms then return false end
-	if self.group_outputs or self.distinct_rows then return true end
-	local terms = {} --{{member=,col=,dir=}...}
-	for _, term in ipairs(self.order_by_terms) do
-		local t = order_term(self, term)
+local function sort_actually_needed(rel)
+	if not rel.order_cols then return false end
+	if rel.group_cols then
+		local has_key
+		for _, expr in ipairs(rel.group_cols) do
+			if not AGGREGATE_OPS[expr[1]] then has_key = true; break end
+		end
+		if not has_key then return false end
+	end
+	if not rel.natural_order then return true end
+	local terms = {} --{{key=,dir=}...}
+	for _, term in ipairs(rel.order_cols) do
+		local t = order_term(term)
 		if not t then return true end
 		add(terms, t)
 	end
-	return not order_satisfied(terms, self.natural_order)
+	return not order_satisfied(terms, rel.natural_order)
 end
 
+--distinct()'s dedup key: cols if given, else every returned col (also
+--covers group_by() with no aggregate outputs, where distinct_cols is nil).
+local function dedup_key_cols(rel)
+	return type(rel.distinct_cols) == 'table' and rel.distinct_cols
+		or rel.out_cols
+end
+
+--only the base source's cursor order can set final row order: a
+--joined source's scan re-runs under each driver row, so its own
+--cursor order only holds within that one driver row, not across the
+--whole result.
+local function base_order_terms(rel)
+	if not rel.order_cols or rel.group_cols or rel.distinct_cols then
+		return
+	end
+	local terms = {} --{{key=,dir=}...}
+	for _, term in ipairs(rel.order_cols) do
+		local t = order_term(term)
+		if not t then return end
+		add(terms, t)
+	end
+	return terms
+end
+
+--index selection for group order: an index whose key groups these
+--cols together lets a later streaming grouper run instead of a hash,
+--whether or not group_by() also has aggregate outputs.
+--group_by()'s own key (non-aggregate) outputs are used directly --
+--bound in source mode regardless of any select() layered on top.
+--distinct() without group_by() has no separate key notion: its dedup
+--cols (cols if given, else every out col) are its only key.
+local function group_key_terms(rel)
+	if rel.group_cols then
+		local terms = {} --{{key=}...}
+		for _, expr in ipairs(rel.group_cols) do
+			if not AGGREGATE_OPS[expr[1]] then
+				local t = col_term(expr)
+				if not t then return nil end --computed key: index can't help
+				add(terms, t)
+			end
+		end
+		return terms[1] and terms or nil
+	end
+	if rel.distinct_cols then
+		return returned_source_terms(rel, dedup_key_cols(rel))
+	end
+end
+
+--[[
+- true when rows sharing the same values for these terms are
+  guaranteed to come out of the whole access chain next to each other,
+  so a streaming grouper/dedup (pk_group+stream_aggregate,
+  stream_distinct) can compare each row to the one before it instead
+  of hashing every group in memory.
+- first way this holds: the chosen access plan's own natural_order
+  already keeps these terms' cols adjacent -- a proper prefix of the
+  varying natural order is enough for grouping (nothing needs to vary
+  after it).
+- second way, needing no natural order at all: the terms cover the
+  base (driving) source's whole primary key. join_scans() emits one
+  base row's entire fan-out before moving to the next, so every row
+  sharing one base row's identity comes out together regardless of
+  the order of any joined source's scan.
+- ported from mdbx_query.lua's terms_group_consecutive(), which this
+  file's own TODOs already named as the missing piece.
+]]
+local function terms_group_consecutive(rel, terms)
+	if order_satisfied_set(terms, rel.natural_order) then return true end
+	local base_source = rel.access[1].source
+	if not base_source.table or base_source.schema.virtual then
+		return false
+	end
+	local needed = {} --{key->true}
+	for _, col in ipairs(base_source.schema.pk) do
+		needed[base_source.name..'.'..col] = true
+	end
+	for _, term in ipairs(terms) do
+		if not needed[term.key] then return false end
+		needed[term.key] = nil
+	end
+	return not next(needed)
+end
+
+--[[
+- decide whether group_by()'s aggregates can stream (pk_group +
+  stream_aggregate) instead of hashing (hash_aggregate).
+- group_key_terms() returns nil both when group_by() wasn't called and
+  when it has no non-aggregate (key) cols at all (a grand total) --
+  neither case can stream, since there's no key to keep adjacent.
+- benchmarked in the prior implementation (mdbx_query_builder.lua's
+  "CONFIRMED BY BENCH" notes): streaming wins by ~147x when order is
+  free; hashing wins by ~3x when it isn't, since sorting just to
+  unlock streaming costs more than it saves.
+]]
+local function group_actually_streamable(rel)
+	if not rel.group_cols then return false end
+	local terms = group_key_terms(rel)
+	if not terms then return false end
+	return terms_group_consecutive(rel, terms)
+end
+
+--[[
+distinct_actually_streamable() uses terms_group_consecutive() for
+distinct()'s key when group_by() is absent. distinct_actually_streamable()
+uses the hash path after group_by().
+]]
+local function distinct_actually_streamable(rel)
+	if not rel.distinct_cols or rel.group_cols then return false end
+	local terms = group_key_terms(rel)
+	if not terms then return false end
+	return terms_group_consecutive(rel, terms)
+end
 
 --CHOOSE HOW TO READ ONE TABLE -----------------------------------------------
 
 local fact_kind = { --{op->fact kind}
-	eq = 'equality',
-	lt = 'range', le = 'range', gt = 'range', ge = 'range',
+	['='] = 'equality',
+	['~='] = 'not_equal',
+	['<'] = 'range', ['<='] = 'range', ['>'] = 'range', ['>='] = 'range',
 	starts = 'prefix',
 	['in'] = 'membership', not_in = 'membership',
 	exists = 'existence', not_exists = 'existence',
 	is_null = 'null', is_not_null = 'null',
 }
 --[[
-- q.or_(q.eq(col, v1), q.eq(col, v2), ...) means the same thing as
-  q.in_(col, {v1, v2, ...}), so we turn it into that shape here.
+- {'or', {'=', col, v1}, {'=', col, v2}, ...} means the same thing as
+  {'in', col, {v1, v2, ...}}, so we turn it into that shape here.
 - once it's an 'in', it can drive an index seek exactly like a real
-  in_() would -- nothing else below needs to know it started as an or.
-- this only fires when every arm compares the exact same column. two
-  different columns, or a column on both sides of one arm, can't
-  collapse into one membership check, so we leave those alone.
+  one would -- nothing else below needs to know it started as an or.
+- this only fires when every arm compares the exact same col. two
+  different cols, or a col on both sides of one arm, can't collapse
+  into one membership check, so we leave those alone.
 ]]
 local function or_as_in(expr)
 	if type(expr) ~= 'table' or expr[1] ~= 'or' then return nil end
 	local col, values = nil, {}
 	for i = 2, #expr do
 		local arm = expr[i]
-		if type(arm) ~= 'table' or arm[1] ~= 'eq' then return nil end
+		if type(arm) ~= 'table' or arm[1] ~= '=' then return nil end
 		local l, r = arm[2], arm[3]
 		if type(r) == 'table' and r[1] == 'col' then l, r = r, l end
 		if type(l) ~= 'table' or l[1] ~= 'col' then return nil end
@@ -1686,13 +984,14 @@ local function or_as_in(expr)
 end
 
 --[[
-- where()/having() calls combine as q.and_().
-- a top-level q.and_() inside one call has the same effect.
-- both forms flatten into independent conditions.
-- searchable facts can drive an index seek.
-- unclassified conditions run as row checks.
+- where()/having() calls combine as if 'and'ed together.
+- a top-level {'and', ...} inside one call has the same effect.
+- split_conditions() flattens both forms into one independent-
+  condition list.
+- choose_access() can turn a fact-classified condition into an index
+  seek; an unclassified condition stays a residual row check.
 ]]
-function split_conditions(exprs, classify)
+local function split_conditions(exprs, classify)
 	local conditions = {} --{condition...; condition={kind=nil|fact, expr=expr}}
 	local function add_condition(expr)
 		if type(expr) == 'table' and expr[1] == 'and' then
@@ -1704,7 +1003,8 @@ function split_conditions(exprs, classify)
 				expr = or_as_in(expr) or expr
 			end
 			conditions[#conditions + 1] = {
-				kind = classify and type(expr) == 'table' and fact_kind[expr[1]] or nil,
+				kind = classify and type(expr) == 'table'
+					and fact_kind[expr[1]] or nil,
 				expr = expr,
 			}
 		end
@@ -1715,147 +1015,312 @@ function split_conditions(exprs, classify)
 	return conditions
 end
 
---[[
-- collect this relation's members read by an expression.
-- q.col() nodes count when they bind to this relation.
-- exists()/in_() correlations count through on_expr and inner where().
-- the result decides whether one member can own a condition.
-- cross-member conditions run after all members are scanned.
-]]
---walk relation filters so correlated exists()/in_() can be owned by the
---outer member they read.
-local function referenced_relation_members(rel, found, members)
-	if rel.union_inputs then
-		for _, input in ipairs(rel.union_inputs) do
-			referenced_relation_members(input, found, members)
-		end
-	else
-		for _, cond in ipairs(rel.where_conditions) do
-			referenced_members(cond.expr, found, members)
+--a join group can contain nested join groups.
+--internal joins need on_conditions recursively.
+local function split_join_conditions(joins)
+	for _, join in ipairs(joins) do
+		--an unconditional join has nothing to split.
+		--no always-true residual entry is needed.
+		join.on_conditions = (join.on_expr == nil or join.on_expr == true)
+			and empty or split_conditions({join.on_expr}, true)
+		if inherits(join.right, Rel) then
+			split_join_conditions(join.right.joins)
 		end
 	end
 end
 
-function referenced_members(expr, found, members) --found: {member->true}
+local referenced_sources --fw. decl.
+
+--walk a rel's own filters (where()s and joins' on_expr) so a
+--correlated exists()/in_() can be owned by the outer source that it
+--reads (through_exists=true), or so a sub-relation's own correlation
+--to a given source set can be detected (through_exists=false, see
+--references_outside() below).
+local function referenced_rel_sources(rel, found, sources, through_exists)
+	if rel.union_rels then
+		for _, input in ipairs(rel.union_rels) do
+			referenced_rel_sources(input, found, sources, through_exists)
+		end
+		return
+	end
+	for _, cond in ipairs(rel.where_conditions) do
+		referenced_sources(cond.expr, found, sources, through_exists)
+	end
+	for _, join in ipairs(rel.joins or empty) do
+		referenced_sources(join.on_expr, found, sources, through_exists)
+	end
+end
+
+--[[
+- collect the sources an expression reads into found (name -> source).
+- q.col() nodes count when sources is nil (record every source) or
+  when they bind to one of sources (record only those).
+- through_exists controls what an exists()/not_exists()/in_()/not_in()
+  boundary does:
+  - true (attribute_conditions()'s use): recurse into its on_expr and
+    inner where()/joins too -- a whole condition that reads an outer
+    col only via a nested exists()/in_() still "reads" that source,
+    for scheduling purposes.
+  - false (references_outside()'s use): stop there -- a nested
+    exists()/in_() is evaluated as its own independent, self-contained
+    boolean; its own correlation is resolved separately, so it never
+    makes the enclosing occurrence itself correlated.
+- attribute_conditions() uses how many sources this returns (through_exists
+  = true, sources = the owning rel's own) to decide whether one source
+  can own a condition; a cross-source condition becomes a late
+  condition, checked only after every source has been scanned.
+]]
+--found: {name -> source}
+--[[local]] function referenced_sources(expr, found, sources, through_exists)
 	if type(expr) ~= 'table' then return end
 	local op = expr[1]
 	if op == 'col' then
-		if expr.source and members[expr.source.member] == expr.source then
-			found[expr.source.member] = true
+		if expr.source and (not sources or sources[expr.source.name] == expr.source) then
+			found[expr.source.name] = expr.source
 		end
 	elseif op == 'exists' or op == 'not_exists' then
-		local source, on = expr[2], expr[3]
-		if on then referenced_members(on, found, members) end
-		if is_relation(source) then
-			referenced_relation_members(source, found, members)
+		if through_exists then
+			local right, on_expr = expr[2], expr[3]
+			if on_expr then
+				referenced_sources(on_expr, found, sources, through_exists)
+			end
+			if inherits(right, Rel) then
+				referenced_rel_sources(right, found, sources, through_exists)
+			end
 		end
 	elseif op == 'in' or op == 'not_in' then
-		referenced_members(expr[2], found, members)
+		referenced_sources(expr[2], found, sources, through_exists)
 		local values_or_rel = expr[3]
-		if is_relation(values_or_rel) then
-			referenced_relation_members(values_or_rel, found, members)
-		else
+		if inherits(values_or_rel, Rel) then
+			if through_exists then
+				referenced_rel_sources(values_or_rel, found, sources,
+					through_exists)
+			end
+		elseif values_or_rel[1] ~= 'param' then
 			for _, item in ipairs(values_or_rel) do
-				referenced_members(item, found, members)
+				referenced_sources(item, found, sources, through_exists)
 			end
 		end
 	else
 		for i = 2, #expr do
-			referenced_members(expr[i], found, members)
+			referenced_sources(expr[i], found, sources, through_exists)
+		end
+	end
+end
+
+local function check_join_operators(joins)
+	local function check_expr(expr)
+		if type(expr) ~= 'table' then return end
+		local op = expr[1]
+		if op == '~=' or op == '<' or op == '<=' or op == '>' or op == '>='
+			or op == 'starts'
+		then
+			local found = {}
+			referenced_sources(expr, found, nil, false)
+			local source_n = 0
+			for _ in pairs(found) do source_n = source_n + 1 end
+			--table_scanner() accepts {scan=} only with '='.
+			assertf(source_n < 2,
+				"join: '%s' cannot compare cols from different sources", op)
+		elseif op == 'exists' or op == 'not_exists' then
+			return
+		elseif op == 'in' or op == 'not_in' then
+			check_expr(expr[2])
+			return
+		end
+		for i = 2, #expr do check_expr(expr[i]) end
+	end
+	for _, join in ipairs(joins) do
+		check_expr(join.on_expr)
+		if inherits(join.right, Rel) then
+			check_join_operators(join.right.joins or empty)
 		end
 	end
 end
 
 --[[
-- find the one operand that is this member's q.col().
-- return the column name and the other operand.
-- flipped=true means the column was on the right.
-- flipped range ops read in reverse.
+true if expr (references_outside()) or rel's own where()/join
+conditions (rel_references_outside()) read a col whose source isn't in
+own_sources -- an outer-scope correlation, from own_sources' point of
+view. Used two ways: exists()/not_exists()'s own on_expr (own_sources
+is just {[source.name] = source}, so anything else is outer), and
+detecting whether a whole exists()/in_() occurrence is correlated at
+all (own_sources is the table/sub-relation's full source set).
 ]]
-local function member_operand(member, left, right)
-	local l_col = type(left) == 'table' and left[1] == 'col' and left.source == member
-	local r_col = type(right) == 'table' and right[1] == 'col' and right.source == member
+local function found_outside(found, own_sources)
+	for name, source in pairs(found) do
+		if own_sources[name] ~= source then return true end
+	end
+	return false
+end
+local function references_outside(expr, own_sources)
+	local found = {}
+	referenced_sources(expr, found, nil, false)
+	return found_outside(found, own_sources)
+end
+local function rel_references_outside(rel, own_sources)
+	local found = {}
+	referenced_rel_sources(rel, found, nil, false)
+	return found_outside(found, own_sources)
+end
+
+--[[
+- whether a left_join()'d source matched must depend only on its
+  on_expr, never on a later where() -- a where() condition on such a
+  source becomes a late condition, checked once against the finished
+  row, not evaluated per-candidate during that source's scan, or an
+  unmatched row that should null-extend would instead get silently
+  dropped or wrongly kept.
+- a left-joined join group null-extends all at once, so every source
+  inside it counts as left-joined too, regardless of which join op
+  connects sources *inside* the group.
+- limitation: such a where() condition can never become a fact
+  that choose_access() can use for an index seek, even when one exists on
+  that col -- only a condition on the source's own on_expr still can.
+  a fix that kept index use would need two separate scans, one to
+  prove existence and one to narrow candidates, which this engine
+  doesn't have.
+]]
+local function collect_left_joined_sources(joins, left_joined_sources)
+	for _, join in ipairs(joins) do
+		if inherits(join.right, Rel) then
+			if join.op == 'left' then
+				for _, source in ipairs(join.right.sources) do
+					left_joined_sources[source.name] = true
+				end
+			else
+				collect_left_joined_sources(join.right.joins, left_joined_sources)
+			end
+		elseif join.op == 'left' then
+			left_joined_sources[join.right.name] = true
+		end
+	end
+end
+
+--decide which single source, if any, owns a condition: the one
+--source that it reads, when that source isn't left-joined. a condition
+--that reads more than one source, or none, or a left-joined source,
+--can't be checked before every source has been scanned.
+local function attribute_conditions(conditions, sources, left_joined_sources)
+	for _, cond in ipairs(conditions) do
+		local found = {} --{name->source}
+		referenced_sources(cond.expr, found, sources, true)
+		local n, only = 0, nil
+		for name in pairs(found) do
+			n = n + 1
+			only = name
+		end
+		cond.source_name = (n == 1 and not left_joined_sources[only])
+			and only or false
+	end
+end
+
+--[[
+- find the one operand that is this source's q.col().
+- return the col name and the other operand.
+- flipped=true means the col was on the right.
+- bucket_facts() then flips the op's direction via flip_range_op.
+]]
+local function source_operand(source, left, right)
+	local l_col = type(left) == 'table' and left[1] == 'col'
+		and left.source == source
+	local r_col = type(right) == 'table' and right[1] == 'col'
+		and right.source == source
 	if l_col and not r_col then return left[3], right, false end
 	if r_col and not l_col then return right[3], left, true end
 	return nil
 end
-local flip_range_op = {lt = 'gt', le = 'ge', gt = 'lt', ge = 'le'} --{op->flipped op}
---in_() lists up to IN_UNION_MAX can use repeated exact seeks.
---longer lists stay as residual row checks.
---the cutoff bounds the number of cursor seeks.
-local IN_UNION_MAX = 16
+--{op->flipped op}
+local flip_range_op = {['<'] = '>', ['<='] = '>=', ['>'] = '<', ['>='] = '<='}
 
 --[[
-- pull facts that read only this member out of access conditions.
-- supported facts: equality, range, prefix, membership, null.
-- facts are bucketed by column.
-- each column gets one fact per kind.
-- duplicate facts stay residual checks.
-- first-wins affects scan choice, not correctness.
+- pull facts out of access conditions that read only this source.
+- supported facts: equality, range, prefix, null. membership (in_())
+  is deliberately not one of them: no executor seeks a plan.kind='in'
+  (table_scanner only implements exact/range/prefix/eq_prefix/full), and
+  the residual evaluator already checks list membership correctly, so
+  a membership condition is left alone here and always stays residual.
+- facts are bucketed by col.
+- each col gets one fact per kind.
+- a later condition for a (col,kind) slot that's already filled is
+  left unconsumed, so it stays a residual check.
+- keeping the first fact per (col,kind) picks an arbitrary but valid
+  seek; it never changes query correctness.
 ]]
-local function bucket_facts(member, conditions, members)
-	local eq, lo, hi, prefix, in_by = {}, {}, {}, {}, {} --{col->{cond=,expr=[,op=]}}
+local function bucket_facts(source, conditions)
+	--{col->{cond=,expr=[,op=]}}
+	local eq, lo, hi, prefix, not_null = {}, {}, {}, {}, {}
+	local not_equal, in_ = {}, {}
 	for _, cond in ipairs(conditions) do
 		if not cond.consumed then
 			local expr = cond.expr
-			if cond.kind == 'equality' then
-				local col, val = member_operand(member, expr[2], expr[3])
-				if col and not eq[col] then eq[col] = {cond = cond, expr = val} end
+			if cond.kind == 'membership' then
+				--seekable only for in() against a plain literal list: a
+				--q.param() list has no length until reset(args), and a
+				--sub-relation's values aren't known without scanning it,
+				--so neither can become a fixed set of table_scanner seeks.
+				local left = expr[2]
+				if expr[1] == 'in' and type(left) == 'table'
+					and left[1] == 'col' and left.source == source
+					and type(expr[3]) == 'table' and expr[3][1] ~= 'param'
+					and not inherits(expr[3], Rel)
+				then
+					local col = left[3]
+					if not in_[col] then in_[col] = {cond = cond, expr = expr[3]} end
+				end
+			elseif cond.kind == 'equality' then
+				local col, val = source_operand(source, expr[2], expr[3])
+				if col and not eq[col] then
+					eq[col] = {cond = cond, op = '=', expr = val}
+				end
+			elseif cond.kind == 'not_equal' then
+				local col, val = source_operand(source, expr[2], expr[3])
+				if col and not not_equal[col] then
+					not_equal[col] = {cond = cond, expr = val}
+				end
 			elseif cond.kind == 'range' then
-				local col, val, flipped = member_operand(member, expr[2], expr[3])
+				local col, val, flipped = source_operand(source, expr[2], expr[3])
 				if col then
 					local rop = flipped and flip_range_op[expr[1]] or expr[1]
-					local bucket = (rop == 'gt' or rop == 'ge') and lo or hi
-					if not bucket[col] then bucket[col] = {cond = cond, op = rop, expr = val} end
+					local bucket = (rop == '>' or rop == '>=') and lo or hi
+					if not bucket[col] then
+						bucket[col] = {cond = cond, op = rop, expr = val}
+					end
 				end
 			elseif cond.kind == 'prefix' then
 				local left = expr[2]
-				if type(left) == 'table' and left[1] == 'col' and left.source == member then
-					if not prefix[left[3]] then prefix[left[3]] = {cond = cond, expr = expr[3]} end
-				end
-			elseif cond.kind == 'membership' then
-				local left, values = expr[2], expr[3]
-				if expr[1] == 'in' and type(values) == 'table' and not is_relation(values)
-					and not (type(values) == 'table' and values[1] == 'param')
-					and #values <= IN_UNION_MAX
-					and type(left) == 'table' and left[1] == 'col' and left.source == member
+				if type(left) == 'table' and left[1] == 'col'
+					and left.source == source
 				then
-					--seek values must be known before this member is scanned.
-					local self_ref = false
-					for _, item in ipairs(values) do
-						local found = {} --{member->true}
-						referenced_members(item, found, members)
-						if found[member.member] then self_ref = true; break end
-					end
-					if not self_ref and not in_by[left[3]] then
-						in_by[left[3]] = {cond = cond, exprs = values}
+					if not prefix[left[3]] then
+						prefix[left[3]] = {cond = cond, expr = expr[3]}
 					end
 				end
 			elseif cond.kind == 'null' then
 				local left = expr[2]
-				if type(left) == 'table' and left[1] == 'col' and left.source == member then
+				if type(left) == 'table' and left[1] == 'col'
+					and left.source == source
+				then
 					local col = left[3]
-					local field = member.schema.fields[col]
+					local field = source.schema.fields[col]
 					if expr[1] == 'is_null' then
 						if not field.not_null and not eq[col] then
-							eq[col] = {cond = cond, expr = null}
+							eq[col] = {cond = cond, op = 'is', expr = null}
 						end
 					elseif field.not_null then
 						--a not_null field cannot reject an existing row here.
 						cond.consumed = true
-					elseif not lo[col] then
-						--todo: range bucketing keeps the first lower-bound fact.
-						--is_not_null() can occupy the bucket before a stricter later range fact.
-						lo[col] = {cond = cond, op = 'gt', expr = null}
+					elseif not not_null[col] then
+						not_null[col] = {cond = cond}
 					end
 				end
 			end
 		end
 	end
-	return eq, lo, hi, prefix, in_by
+	return eq, lo, hi, prefix, not_null, not_equal, in_
 end
 
---is this column marked ai_ci? true or false either way, whether we're
+--is this col marked ai_ci? true or false either way, whether we're
 --looking at the base table or an index -- every index just copies the
 --flag straight from the table.
 local function ai_ci_col(schema, col)
@@ -1863,15 +1328,18 @@ local function ai_ci_col(schema, col)
 	return f and f.mdbx_collation == 'utf8_ai_ci'
 end
 
---how many columns at the start of the key we can search on with "=".
---for an ai_ci column that's only true if this schema is the index that
---stores the folded text -- the table itself, and any other index,
---only have the real, unfolded text.
+--path_seekable() rejects ai_ci fields stored as original base-key text.
+local function path_seekable(schema, i)
+	local field = schema.path_fields[i]
+	return field.mdbx_collation ~= 'utf8_ai_ci'
+		or schema.is_index and i <= #schema.key_fields
+end
+
+--eq_depth() counts leading path fields that '=' or 'is' can constrain.
 local function eq_depth(schema, eq)
-	local pk = schema.pk
 	local depth = 0
-	for i, col in ipairs(pk) do
-		if eq[col] and (schema.is_index or not ai_ci_col(schema, col)) then
+	for i, field in ipairs(schema.path_fields) do
+		if eq[field.col] and path_seekable(schema, i) then
 			depth = i
 		else
 			break
@@ -1880,224 +1348,279 @@ local function eq_depth(schema, eq)
 	return depth
 end
 
---[[
-- compare one candidate key to this member's fact buckets.
-- depth is how many columns at the start are pinned by an equality fact.
-- the next key column can use in_(), prefix, or range facts.
-- the result classifies scan strength.
-- no row counts or index sizes are used.
-- the plan does not depend on table contents.
-- we never use an ai_ci column for a prefix search (starts()), because
-  folding text can shift where a prefix starts or ends.
-]]
-local function try_key(schema, eq, lo, hi, prefix, in_by)
-	local pk = schema.pk
-	local depth = eq_depth(schema, eq)
-	if depth == #pk then
-		return {kind = 'exact', depth = depth}
+--equality_kind() keeps exact for a complete encoded index key even when
+--path_fields continues through its duplicate PK.
+local function equality_kind(schema, depth)
+	if depth == #schema.path_fields
+		or schema.is_index and depth == #schema.key_fields
+	then
+		return 'exact'
 	end
-	local nc = pk[depth + 1]
-	local nc_seekable = nc and (schema.is_index or not ai_ci_col(schema, nc))
-	if #pk == 1 and depth == 0 and nc_seekable and in_by[nc] then
-		return {kind = 'in', depth = 0, bound_col = nc}
-	end
-	if nc and prefix[nc] and not ai_ci_col(schema, nc) then
-		return {kind = 'prefix', depth = depth, bound_col = nc}
-	end
-	if nc_seekable and (lo[nc] or hi[nc]) then
-		return {kind = 'range', depth = depth, bound_col = nc}
-	end
-	if depth > 0 then
-		return {kind = 'eq_prefix', depth = depth}
-	end
-	return nil
+	return depth > 0 and 'eq_prefix' or 'full'
 end
 
---[[
-- rank candidates by how many key columns narrow the scan.
-- range and prefix count their bound column.
-- key-byte checks reject rows before any base-table read.
-- kind breaks ties at equal coverage.
-- row counts and index sizes are not ranking inputs.
-]]
-local kind_rank = {exact = 2, ['in'] = 2, range = 1, prefix = 1, eq_prefix = 0} --{kind->tie-break rank}
-local function plan_coverage(plan)
-	if plan.kind == 'in' then return 1 end
-	if plan.kind == 'range' or plan.kind == 'prefix' then
-		return plan.depth + 1
-	end
-	return plan.depth
-end
-
---[[
-- what order the rows come out in if we scan this key.
-- if an ai_ci column is pinned to one value at the start (an "=" match),
-  we still count it as fixed: every row we keep really does have the
-  same real text, because we double-check it later, so the columns
-  after it still sort correctly.
-- if an ai_ci column comes later, unpinned, we can only trust its order
-  when this schema is the index that stores the folded text. the table
-  itself, or a plain index, stores the real text, which sorts
-  differently -- so we stop here instead of claiming an order we can't
-  back up.
-- a column stored as "desc" scans in descending order, not ascending
-  (the key bytes are inverted for this at write time, so a normal
-  forward scan just comes out reversed).
-- reverse flips every trailing column's dir at once: that's exactly
-  what walking the cursor backward (MDBX_PREV/MDBX_LAST) does to the
-  whole key order, so a single flag covers it.
-]]
-function key_order(member, schema, depth, reverse)
-	local order = {} --{{member=,col=,fixed=true|dir=}...}
-	local pk = schema.pk
+--path_coverage() counts each constrained col once when path_fields
+--repeats it.
+local function path_coverage(schema, depth, bound_col)
+	local cols = {}
+	local n = 0
 	for i = 1, depth do
-		add(order, {member = member.member, col = pk[i], fixed = true})
+		local col = schema.path_fields[i].col
+		if not cols[col] then cols[col] = true; n = n + 1 end
 	end
-	for i = depth + 1, #pk do
-		local col = pk[i]
-		if ai_ci_col(schema, col) and not schema.is_index then break end
-		local dir = pk.desc and pk.desc[i] and 'desc' or 'asc'
-		if reverse then dir = dir == 'desc' and 'asc' or 'desc' end
-		add(order, {member = member.member, col = col, dir = dir})
+	if bound_col and not cols[bound_col] then n = n + 1 end
+	return n
+end
+
+--[[
+try_key() fixes leading path fields with equality facts and then uses one
+prefix, range, or is_not_null fact on the next field.
+try_key() does not use an ai_ci field for starts() because lowercasing and
+removing accents can change prefix boundaries.
+]]
+local function try_key(schema, eq, lo, hi, prefix, not_null, not_equal, in_)
+	local fields = schema.path_fields
+	local depth = eq_depth(schema, eq)
+	local plan
+	if depth == #fields then
+		plan = {kind = 'exact', depth = depth}
+	else
+		local next_field = fields[depth + 1]
+		local col = next_field.col
+		if prefix[col] and next_field.mdbx_collation ~= 'utf8_ai_ci' then
+			plan = {kind = 'prefix', depth = depth, bound_col = col}
+		elseif path_seekable(schema, depth + 1) and in_[col] then
+			plan = {kind = 'in', depth = depth, bound_col = col}
+		elseif path_seekable(schema, depth + 1)
+			and (lo[col] or hi[col])
+		then
+			plan = {kind = 'range', depth = depth, bound_col = col}
+		elseif path_seekable(schema, depth + 1) and not_equal[col] then
+			plan = {kind = 'not_equal', depth = depth, bound_col = col}
+		elseif path_seekable(schema, depth + 1) and not_null[col] then
+			plan = {kind = 'range', depth = depth, bound_col = col}
+		elseif depth > 0 then
+			plan = {kind = equality_kind(schema, depth), depth = depth}
+		end
+	end
+	if plan then
+		plan.coverage = path_coverage(schema, depth, plan.bound_col)
+	end
+	return plan
+end
+
+--[[
+- choose_access() ranks candidates by how many distinct path cols narrow
+  the scan.
+- table_scanner() rejects rows by key bytes before any base-table read.
+- choose_access() breaks a coverage tie by kind, ranked via kind_rank.
+- choose_access() does not use row counts or index sizes.
+]]
+--{kind->tie-break rank}
+local kind_rank = {
+	exact = 2,
+	range = 1,
+	not_equal = 1,
+	prefix = 1,
+	['in'] = 1,
+	eq_prefix = 0,
+	full = -1,
+}
+
+--[[
+- key_order() marks equality fields as fixed and returns the remaining
+  path_fields in cursor order.
+- key_order() stops before an ai_ci duplicate-PK field.
+- key_order() removes repeated ordinary cols from the duplicate PK suffix.
+- key_order() applies each field's stored direction and reverses every
+  varying field when reverse is true.
+]]
+local function key_order(source, schema, depth, reverse)
+	local order = {} --{{key=,fixed=true|dir=}...}
+	local fields = schema.path_fields
+	local cols = {}
+	for i = 1, depth do
+		local col = fields[i].col
+		if not cols[col] then
+			cols[col] = true
+			add(order, {key = source.name..'.'..col, fixed = true})
+		end
+	end
+	for i = depth + 1, #fields do
+		if not path_seekable(schema, i) then break end
+		local field = fields[i]
+		local col = field.col
+		if not cols[col] then
+			cols[col] = true
+			local dir = field.descending and 'desc' or 'asc'
+			if reverse then dir = dir == 'desc' and 'asc' or 'desc' end
+			add(order, {key = source.name..'.'..col, dir = dir})
+		end
 	end
 	return order
 end
 
---an order plan scans a key to produce order_by() order.
---leading equalities also narrow that ordered walk.
---non-leading filters stay residual checks.
-local function try_order_key(member, schema, eq, order_terms)
+--try_order_key() returns a forward or reverse plan when key_order()
+--satisfies order_terms. try_order_key() uses equality facts for depth and
+--coverage.
+local function try_order_key(source, schema, eq, order_terms)
 	if not order_terms then return end
 	local depth = eq_depth(schema, eq)
-	local kind = depth == #schema.pk and 'exact'
-		or (depth > 0 and 'eq_prefix' or 'full')
-	if order_satisfied(order_terms, key_order(member, schema, depth)) then
-		return {kind = kind, depth = depth, dir = 'asc'}
+	local kind = equality_kind(schema, depth)
+	local coverage = path_coverage(schema, depth)
+	if order_satisfied(order_terms, key_order(source, schema, depth)) then
+		return {kind = kind, depth = depth, dir = 'asc', coverage = coverage}
 	end
-	--an "exact" plan has no trailing key columns left to walk in either
-	--direction, so only "eq_prefix"/"full" can be satisfied by scanning
-	--the same key order backward (MDBX_PREV/MDBX_LAST) instead of sorting.
-	if kind ~= 'exact'
-		and order_satisfied(order_terms, key_order(member, schema, depth, true))
+	--try_order_key() reverses only when path_fields has a varying field.
+	if depth < #schema.path_fields
+		and order_satisfied(order_terms, key_order(source, schema, depth, true))
 	then
-		return {kind = kind, depth = depth, dir = 'desc'}
+		return {kind = kind, depth = depth, dir = 'desc', coverage = coverage}
 	end
 end
 
---like try_order_key, but for distinct() / group() with no aggregate
---outputs: a SET match (order_satisfied_set), not a sequence match, and
---no backward-scan variant.
-local function try_group_key(member, schema, eq, group_terms)
+--try_group_key() returns a forward plan when key_order() keeps group_terms
+--consecutive. try_group_key() applies to group_by() with or without
+--aggregates and to distinct().
+local function try_group_key(source, schema, eq, group_terms)
 	if not group_terms then return end
 	local depth = eq_depth(schema, eq)
-	local kind = depth == #schema.pk and 'exact'
-		or (depth > 0 and 'eq_prefix' or 'full')
-	if order_satisfied_set(group_terms, key_order(member, schema, depth)) then
-		return {kind = kind, depth = depth, dir = 'asc'}
+	local kind = equality_kind(schema, depth)
+	if order_satisfied_set(group_terms, key_order(source, schema, depth)) then
+		return {kind = kind, depth = depth, dir = 'asc',
+			coverage = path_coverage(schema, depth)}
 	end
+end
+
+--plan_is_one() is true when reset() can return at most one physical row.
+local function plan_is_one(schema, plan)
+	return plan.depth == #schema.path_fields
+		or schema.is_unique and plan.depth >= #schema.key_fields
 end
 
 --[[
-- choose the key that drives this member's scan.
-- candidates are the member pk and allowed indexes.
-- forced/forbidden come from use_index()/no_index() and are nil for a
-  member with no such hints (e.g. exists()/not_exists()'s inner table,
-  which is never a named member of the outer relation).
-- consumed conditions are marked on the chosen plan.
-- unconsumed conditions become residual row checks.
-- called from compilation stage's own step for reading each table, and
-  from execution stage's open_exists_source(), for a table passed
-  directly to exists(). the second caller only runs this the first time
-  that exists() executes, not while the query compiles -- so explain()
-  cannot show how that table will be read before the query has run once.
+choose_access() examines the table PK and every index. choose_access() keeps
+separate best paths for filtering, for order_by(), and for
+group_by()/distinct().
+choose_access() ranks each list by constrained cols and then by kind_rank.
+choose_access() marks conditions used by the selected path and leaves the
+other conditions as residual row checks.
 ]]
-function choose_access(member, conditions, members, forced, forbidden, order_terms, prefer_order,
+local function choose_access(source, conditions, order_terms, prefer_order,
 	group_terms)
-	--relation sources have no pk or index metadata here.
-	--they scan the already-compiled inner relation.
+	--rel sources have no pk or index metadata here.
+	--they scan the already-compiled inner rel.
 	--virtual tables have no pk or index metadata either: no physical
 	--storage means no seek, so every condition on them stays residual.
-	if member.kind ~= 'table' or member.schema.virtual then
-		return {kind = 'full', depth = 0, dir = 'asc', is_pk = false,
-			schema = false, seek = empty, residual = conditions}
+	--neither has a physical scan node yet (compile_step()'s table_scanner
+	--needs a real schema) -- reject here rather than let compile_step
+	--crash deep inside table_scanner on a false schema.
+	if not source.table or source.schema.virtual then
+		assertf(false, 'choose_access: %s: a relation/virtual source is not'
+			..' implemented yet', source.name)
 	end
-	local eq, lo, hi, prefix, in_by = bucket_facts(member, conditions, members)
-	local candidates = {} --{{schema=,is_pk=}...}
-	if not forced then
-		add(candidates, {schema = member.schema, is_pk = true})
+	local eq, lo, hi, prefix, not_null, not_equal, in_ =
+		bucket_facts(source, conditions)
+	local candidates = {} --{{schema=}...}
+	add(candidates, {schema = source.schema})
+	for _, ix in ipairs(source.schema.indexes or empty) do
+		add(candidates, {schema = ix})
 	end
-	for _, ix in ipairs(member.schema.indexes or empty) do
-		if forced then
-			if ix.name == forced then add(candidates, {schema = ix}) end
-		elseif forbidden ~= true and not (forbidden and forbidden[ix.name]) then
-			add(candidates, {schema = ix})
-		end
-	end
-	assertf(not forced or candidates[1],
-		'use_index: unknown index for member %s: %s', member.member, forced)
 	local best_cand, best_plan, best_cov
 	local order_cand, order_plan
 	local group_cand, group_plan
 	for _, cand in ipairs(candidates) do
-		local plan = try_key(cand.schema, eq, lo, hi, prefix, in_by)
+		local plan = try_key(cand.schema, eq, lo, hi, prefix, not_null,
+			not_equal, in_)
 		if plan then
-			local cov = plan_coverage(plan)
+			local cov = plan.coverage
 			if not best_plan or cov > best_cov
-				or (cov == best_cov and kind_rank[plan.kind] > kind_rank[best_plan.kind]) then
+				or (cov == best_cov
+					and kind_rank[plan.kind] > kind_rank[best_plan.kind]) then
 				best_cand, best_plan, best_cov = cand, plan, cov
 			end
 		end
-		if not order_plan then
-			local plan = try_order_key(member, cand.schema, eq, order_terms)
-			if plan then order_cand, order_plan = cand, plan end
+		plan = try_order_key(source, cand.schema, eq, order_terms)
+		if plan and (not order_plan
+			or plan.coverage > order_plan.coverage
+			or (plan.coverage == order_plan.coverage
+				and kind_rank[plan.kind] > kind_rank[order_plan.kind]))
+		then
+			order_cand, order_plan = cand, plan
 		end
-		if not group_plan then
-			local plan = try_group_key(member, cand.schema, eq, group_terms)
-			if plan then group_cand, group_plan = cand, plan end
+		plan = try_group_key(source, cand.schema, eq, group_terms)
+		if plan and (not group_plan
+			or plan.coverage > group_plan.coverage
+			or (plan.coverage == group_plan.coverage
+				and kind_rank[plan.kind] > kind_rank[group_plan.kind]))
+		then
+			group_cand, group_plan = cand, plan
 		end
 	end
-	--order_plan never covers more key columns than best_plan already does
-	--(try_key only ever matches equal-or-more of them than try_order_key),
-	--so taking it whenever coverage ties is free: no rows scanned that
-	--best_plan wouldn't have scanned anyway, and no explicit sort needed.
-	--with limit(), an ordered scan can also give up coverage that a
-	--range/prefix filter would have had, stopping early instead.
-	--exact seeks over every key column stay on the selective path either way.
+	--choose_access() takes order_plan without extra rows when its coverage
+	--matches best_plan. With limit(), it may give up coverage to stop early.
+	--choose_access() keeps best_plan when it returns at most one row.
+	local best_is_one = best_plan and plan_is_one(best_cand.schema, best_plan)
 	if order_plan and (not best_plan
-		or (best_plan.kind ~= 'exact' and plan_coverage(order_plan) >= best_cov)
-		or (prefer_order and best_plan.kind ~= 'exact')) then
+		or (not best_is_one and order_plan.coverage >= best_cov)
+		or (prefer_order and not best_is_one)) then
 		best_cand, best_plan = order_cand, order_plan
-	--order_terms and group_terms never both apply (base_order_terms()
-	--returns nil when distinct_rows is set); no prefer_order counterpart
-	--here since build_rows always materializes every row anyway.
+	--choose_access() receives either order_terms or group_terms. Grouping and
+	--dedup read every row, so group_terms has no prefer_order counterpart.
 	elseif group_plan and (not best_plan
-		or (best_plan.kind ~= 'exact' and plan_coverage(group_plan) >= best_cov)) then
+		or (not best_is_one and group_plan.coverage >= best_cov)) then
 		best_cand, best_plan = group_cand, group_plan
 	end
 	if not best_plan then
-		best_cand, best_plan = {schema = member.schema, is_pk = true}, {kind = 'full', depth = 0}
+		best_cand, best_plan =
+			{schema = source.schema}, {kind = 'full', depth = 0}
 	end
 	best_plan.schema = best_cand.schema
-	best_plan.is_pk = best_cand.is_pk
+	best_plan.member = source.name --table_scanner's alias arg; see its doc
 	best_plan.dir = best_plan.dir or 'asc' --order_plan may already carry 'desc'
-	local seek = {} --{expr...}: one value-operand expr per matched leading column
+	local path_fields = best_cand.schema.path_fields
+	local seek = {} --{{cond=,op=,expr=}...}
 	for i = 1, best_plan.depth do
-		local fact = eq[best_cand.schema.pk[i]]
-		seek[i] = fact.expr
+		local col = path_fields[i].col
+		local fact = eq[col]
+		seek[i] = fact
 		fact.cond.consumed = true
+		local not_null_fact = not_null[col]
+		if fact.op == '=' and not_null_fact then
+			not_null_fact.cond.consumed = true
+		end
 	end
 	best_plan.seek = seek
-	if best_plan.kind == 'in' then
-		local fact = in_by[best_plan.bound_col]
-		best_plan.in_values = fact.exprs
-		fact.cond.consumed = true
-	elseif best_plan.kind == 'range' then
+	if best_plan.kind == 'range' then
 		local lo_fact, hi_fact = lo[best_plan.bound_col], hi[best_plan.bound_col]
-		if lo_fact then best_plan.lo = {op = lo_fact.op, expr = lo_fact.expr}; lo_fact.cond.consumed = true end
-		if hi_fact then best_plan.hi = {op = hi_fact.op, expr = hi_fact.expr}; hi_fact.cond.consumed = true end
+		if lo_fact then
+			best_plan.lo = {op = lo_fact.op, expr = lo_fact.expr}
+			lo_fact.cond.consumed = true
+		end
+		if hi_fact then
+			best_plan.hi = {op = hi_fact.op, expr = hi_fact.expr}
+			hi_fact.cond.consumed = true
+		end
+		local not_null_fact = not_null[best_plan.bound_col]
+		if not_null_fact then
+			if not lo_fact and not hi_fact then best_plan.is_not_null = true end
+			not_null_fact.cond.consumed = true
+		end
 	elseif best_plan.kind == 'prefix' then
 		local fact = prefix[best_plan.bound_col]
 		best_plan.prefix = fact.expr
+		fact.cond.consumed = true
+		local not_null_fact = not_null[best_plan.bound_col]
+		if not_null_fact then not_null_fact.cond.consumed = true end
+	elseif best_plan.kind == 'not_equal' then
+		local fact = not_equal[best_plan.bound_col]
+		best_plan.not_equal = fact.expr
+		fact.cond.consumed = true
+		local not_null_fact = not_null[best_plan.bound_col]
+		if not_null_fact then not_null_fact.cond.consumed = true end
+	elseif best_plan.kind == 'in' then
+		local fact = in_[best_plan.bound_col]
+		best_plan.in_values = fact.expr
 		fact.cond.consumed = true
 	end
 	local residual = {} --{condition...}
@@ -2110,1612 +1633,1547 @@ function choose_access(member, conditions, members, forced, forbidden, order_ter
 	return best_plan
 end
 
---EXECUTION STAGE ------------------------------------------------------------
-
---OPEN A REAL OR VIRTUAL TABLE -----------------------------------------------
-
 --[[
-- compile a seek or bound value expression.
-- literals return themselves.
-- q.param() reads params at execution.
-- q.col() reads an earlier member from row_ctx.
+- returns the conditions that may drive source's own access: the
+  join's own on_expr conditions plus any where() condition that reads
+  only this source; join_deps() schedules on_expr inputs before this
+  source scans.
+- a where() on a left-joined source is never in here: attribute_conditions()
+  already gives it source_name = false (checked once every source has
+  scanned, via rel.late_conditions), since whether such a source
+  matched must depend only on its own on_expr. a where() on an
+  inner-joined source has no such restriction -- if it rejected the
+  row, an inner join drops the row anyway, so it's as key-eligible as
+  the join's own on_expr.
 ]]
-local function compile_value(expr)
-	if type(expr) ~= 'table' then
-		return function() return expr end
+local function access_conditions(source, join, where_conditions)
+	local list = {} --{condition...}
+	if join then
+		for _, cond in ipairs(join.on_conditions) do add(list, cond) end
 	end
-	if expr[1] == 'param' then
-		local name = expr[2]
-		return function(params) return params[name] end
+	for _, cond in ipairs(where_conditions) do
+		if cond.source_name == source.name then add(list, cond) end
 	end
-	assertf(expr[1] == 'col', 'unsupported seek value expr: %s', expr[1])
-	local member, col = expr.source.member, expr[3]
-	return function(params, row_ctx) return row_ctx[member](col) end
+	return list
 end
 
 --[[
-- compare same-kind values in key order.
-- numbers compare numerically.
-- utf8 compares by byte order.
-- bool compares false before true.
+- natural_order is the driving source order guaranteed by its access
+  plan.
+- leading cols fixed by equality don't vary across the scan.
+- remaining key cols follow cursor order.
+- a backward-scanned plan (plan.dir == 'desc') reverses that cursor
+  order.
+- joined sources do not contribute global order.
+- group_by(), distinct(), and order_by() check this one fact.
 ]]
-local function key_cmp(a, b)
-	if a == b then return 0 end
-	return a < b and -1 or 1
-end
-
---[[
-- compare encoded composite keys.
-- memcmp covers the shared length.
-- shorter strict byte-prefix sorts first.
-- this matches variable-length key encoding order.
-]]
-local function raw_key_cmp(k1, n1, k2, n2)
-	local c = memcmp(k1, k2, min(n1, n2))
-	if c ~= 0 then return c end
-	if n1 < n2 then return -1 end
-	if n1 > n2 then return 1 end
-	return 0
-end
-
---[[
-- compute the smallest encoded key strictly after a byte prefix.
-- increment the last byte that is not 0xff.
-- drop bytes after the incremented byte.
-- return nil when every byte is 0xff.
-- nil means there is no finite upper bound at this length.
-- starts() prefix bounds use the same operation.
-]]
-local function increment_prefix(buf, sz)
-	local i = sz - 1
-	while i >= 0 and buf[i] == 255 do
-		i = i - 1
+--true when every in_() value is a literal, not a q.param()/q.col() ref.
+local function all_literal_values(values)
+	for i = 1, #values do
+		if type(values[i]) == 'table' then return false end
 	end
-	if i < 0 then return nil end
-	buf[i] = buf[i] + 1
-	return i + 1
+	return true
 end
 
---[[
-- compile one access-plan scan.
-- called once per step at compile time.
-- returns an opener for one query execution.
-- opener returns run(params, row_ctx, row_fn) and close().
-- run walks cursor rows and calls row_fn(decode_col).
-- a true row_fn result stops the scan; run returns true in turn.
-- close releases cursors.
-- cursors, buffers, and records are reused within one execution.
-- depth, hi, lo, and prefix checks compare encoded key bytes.
-- encoded key order matches value order.
-- byte checks avoid decoding rejected rows.
-- strict hi uses encode(depth cols, hi) as the upper bound.
-- inclusive hi bumps that bound with increment_prefix().
-- trailing row key columns cannot pass the bumped inclusive bound.
-]]
-MDBX_NODUPFIXED = false --bench override, see compile_scan's walk_dups
-
---[[local]] function compile_scan(db, plan)
-	local schema = plan.schema
-	local seek_fns = {} --{fn...}
-	for i, expr in ipairs(plan.seek) do seek_fns[i] = compile_value(expr) end
-	local in_fns = plan.in_values and {} --{fn...}
-	if in_fns then
-		for i, expr in ipairs(plan.in_values) do in_fns[i] = compile_value(expr) end
+local function natural_order(step)
+	local plan = step.plan
+	--rel source: no guaranteed key order.
+	if not plan.schema then return empty end
+	if plan.kind == 'not_equal' then return empty end
+	--a non-literal in_() list isn't sorted until ordered_in_values() sees
+	--the runtime values, so the union's row order isn't guaranteed here.
+	if plan.kind == 'in' and not all_literal_values(plan.in_values) then
+		return empty
 	end
-	local lo_fn = plan.lo and compile_value(plan.lo.expr)
-	local hi_fn = plan.hi and compile_value(plan.hi.expr)
-	local prefix_fn = plan.prefix and compile_value(plan.prefix)
-	local depth = plan.depth
-	--plan.dir == 'desc' only ever comes from try_order_key's 'full'/'eq_prefix'
-	--kinds (order_satisfied() matched the key order reversed): walk MDBX_PREV
-	--from MDBX_LAST instead of MDBX_NEXT from MDBX_FIRST, straight into
-	--order_by()'s wanted order instead of an explicit sort.
-	local first_op = plan.dir == 'desc' and C.MDBX_LAST or C.MDBX_FIRST
-	local next_op = plan.dir == 'desc' and C.MDBX_PREV or C.MDBX_NEXT
-	--set by compile()'s stage 8 only for an eligible ungrouped distinct():
-	--jump straight past the rest of the current duplicate group instead
-	--of decoding and discarding each dup row one MDBX_NEXT at a time.
-	if plan.next_nodup then next_op = C.MDBX_NEXT_NODUP end
-	return function()
-		local cur = db:cursor(schema.name)
-		local base_cur --lazily opened only if a non-key column is read
-		local buf = u8a(MDBX_MAX_KEY_SIZE)
-		local depth_buf = depth > 0 and u8a(MDBX_MAX_KEY_SIZE) or nil
-		--hi is only a stop bound; lo and prefix also position the cursor.
-		local hi_buf = hi_fn and u8a(MDBX_MAX_KEY_SIZE)
-		local ix_rec, pk_rec, val_rec = MDBX_val(), MDBX_val(), MDBX_val()
-		local base_val_rec = MDBX_val()
-		--DUPFIXED bulk scans need a separate record for the whole
-		--multi-value page: pk_rec holds one row's slice at a time and
-		--can't double as the page's own stable base pointer.
-		local bulk_rec = MDBX_val()
-		--MDBX_NODUPFIXED forces the one-dup-at-a-time path; bench-only toggle.
-		local dup_fixedsize = schema.is_index and not MDBX_NODUPFIXED and schema.dup_fixedsize
-		--[[
-		- key_rec/out_rec pick which pre-allocated record plays which
-		  mdbx cursor role, decided once (schema.is_index never changes).
-		- index: ix_rec -> pk_rec. table: pk_rec -> val_rec.
-		- every seek/walk below writes each row straight into these two
-		  records.
-		]]
-		local key_rec = schema.is_index and ix_rec or pk_rec
-		local out_rec = schema.is_index and pk_rec or val_rec
-		local function get_base_val()
-			if schema.is_index then
-				if not base_cur then base_cur = db:cursor(schema.val_table) end
-				local found = base_cur:move_raw_into(C.MDBX_SET_KEY, pk_rec, base_val_rec)
-				assert(found, 'base row missing for an existing key')
-				return base_val_rec.data, base_val_rec.size
-			end
-			return val_rec.data, val_rec.size
+	return key_order(step.source, plan.schema, plan.depth,
+		plan.dir == 'desc')
+end
+
+--SCHEDULE JOINS -------------------------------------------------------------
+
+--a join can run after every outside source that its on_expr reads is
+--scheduled. the join's own right source does not count as a
+--dependency. a join group's internal sources do not count as
+--outside dependencies.
+local function join_deps(join, sources)
+	local found = {} --{name->true}
+	referenced_sources(join.on_expr, found, sources)
+	if inherits(join.right, Rel) then
+		for _, source in ipairs(join.right.sources) do
+			found[source.name] = nil
 		end
-		local decoders = {} --{col->fn}
-		--decoders compile once per column.
-		--decode_col is scoped to this one step's schema.
-		--col alone is unique inside that step.
-		local function decode_col(col)
-			local f = decoders[col]
-			if not f then
-				f = db:col_decoder(schema, col, schema.is_index and ix_rec or nil,
-					pk_rec, get_base_val)
-				decoders[col] = f
+	else
+		found[join.right.name] = nil
+	end
+	return found
+end
+
+--[[
+- pick the next join to schedule: only one whose on_expr reads no
+  source that isn't scheduled yet. among ties, keep the order that joins
+  were declared in.
+- this only looks at on_expr's col references, never at what's
+  actually stored in any table.
+- for an inner or cross join, recurse into the join group's own
+  joins, scheduling them into this same list.
+- schedule a left join's join group as one nested unit instead: it
+  and everything joined onto it inside that group either all match
+  together, or all null-extend together, never split apart.
+- joins[1] is always the from() target of whichever joins list this
+  runs on, already scheduled by the caller, so scanning starts at
+  joins[2].
+]]
+local function build_access(joins, scheduled, access, sources,
+	where_conditions)
+	local pending = {} --{join...}
+	for i = 2, #joins do
+		add(pending, joins[i])
+	end
+	while pending[1] do
+		local picked, picked_i
+		for i, join in ipairs(pending) do
+			local deps = join_deps(join, sources)
+			local ready = true
+			for name in pairs(deps) do
+				if not scheduled[name] then ready = false; break end
 			end
-			return f()
+			if ready then picked, picked_i = join, i; break end
 		end
-		--[[
-		- walk every dup value under one exact index key.
-		- a non-unique index with fixed-size dup values (dup_fixedsize)
-		  bulk-fetches a whole page of dups per mdbx call
-		  (MDBX_SEEK_AND_GET_MULTIPLE/MDBX_NEXT_MULTIPLE) instead of one
-		  MDBX_NEXT-equivalent call per row -- into bulk_rec, since
-		  pk_rec must keep pointing at one row's slice at a time.
-		- MDBX_NEXT_MULTIPLE only ever returns more of the SAME already
-		  -seeked key, so this never walks past the match onto a
-		  different key -- no per-row boundary check is needed.
-		- ix_rec is set once to the seek buffer: every dup shares that
-		  key, so there's no need for mdbx to hand back the key per row.
-		- base-table scans and non-fixedsize indexes fall back to one
-		  row at a time, boundary-checked against seek_sz.
-		]]
-		local walk_dups
-		if dup_fixedsize then
-			function walk_dups(seek_buf, seek_sz, row_fn)
-				ix_rec.data, ix_rec.size = seek_buf, seek_sz
-				local ok = cur:move_raw_into(C.MDBX_SEEK_AND_GET_MULTIPLE, ix_rec, bulk_rec)
-				local v_o = 0
-				while ok do
-					if v_o >= bulk_rec.size then
-						ok = cur:move_raw_into(C.MDBX_NEXT_MULTIPLE, ix_rec, bulk_rec)
-						v_o = 0
-					else
-						--kept as a plain assignment: about 2x faster overall for this branch.
-						pk_rec.data, pk_rec.size = bulk_rec.data + v_o, dup_fixedsize
-						v_o = v_o + dup_fixedsize
-						if row_fn(decode_col) then return true end
-					end
-				end
-			end
-		else
-			function walk_dups(seek_buf, seek_sz, row_fn)
-				key_rec.data, key_rec.size = seek_buf, seek_sz
-				local ok = cur:move_raw_into(C.MDBX_SET_RANGE, key_rec, out_rec)
-				while ok do
-					if key_rec.size < seek_sz or memcmp(key_rec.data, seek_buf, seek_sz) ~= 0 then
-						break
-					end
-					if row_fn(decode_col) then return true end
-					ok = cur:move_raw_into(C.MDBX_NEXT, key_rec, out_rec)
-				end
-			end
-		end
-		--[[
-		- vals holds the leading equality values for this execution.
-		- slot depth+1 is temporary.
-		- lo, prefix, and hi checks reuse slot depth+1.
-		- other reads are bounded to 1..depth.
-		]]
-		local vals = {}
-		local function run(params, row_ctx, row_fn)
-			--in_() lists up to IN_UNION_MAX run as repeated exact seeks.
-			--runtime candidate keys are deduped before seeking.
-			--duplicate candidates do not emit matching rows more than once.
-			if in_fns then
-				local seen = {} --{encoded_key->true}
-				for _, fn in ipairs(in_fns) do
-					local v = fn(params, row_ctx)
-					if v ~= nil and v ~= null then
-						vals[1] = v
-						local seek_sz = mdbx_encode_key_prefix(db, schema, 'get', buf,
-							MDBX_MAX_KEY_SIZE, 1, false, v)
-						local key = ffi.string(buf, seek_sz)
-						if not seen[key] then
-							seen[key] = true
-							if walk_dups(buf, seek_sz, row_fn) then return true end
+		assertf(picked, 'source step cycle: on_expr reads form a cycle'
+			..' across join()/left_join() steps')
+		remove(pending, picked_i)
+		if inherits(picked.right, Rel) then
+			local group = picked.right
+			local base_source = group.joins[1].right
+			if picked.op ~= 'left' then
+				local conditions = access_conditions(base_source, picked,
+					where_conditions)
+				--build_access() adds an inner group's base like a plain joined
+				--source instead of using compile_nested().
+				add(access, {source = base_source, join = picked,
+					plan = choose_access(base_source, conditions)})
+				scheduled[base_source.name] = true
+				build_access(group.joins, scheduled, access, sources,
+					where_conditions)
+			else
+				local group_left_joined_sources = {}
+				collect_left_joined_sources(group.joins,
+					group_left_joined_sources)
+				--attribute_conditions() keeps source-local conditions on their
+				--internal scan; left_join_scans() checks the rest on the group.
+				attribute_conditions(picked.on_conditions, group.sources,
+					group_left_joined_sources)
+				local match_conditions = {} --{condition...}
+				for _, cond in ipairs(picked.on_conditions) do
+					if cond.source_name
+						and cond.source_name ~= base_source.name
+					then
+						local found = {}
+						referenced_sources(cond.expr, found, sources, true)
+						if found_outside(found, group.sources) then
+							cond.source_name = false
 						end
 					end
+					if not cond.source_name then add(match_conditions, cond) end
 				end
-				return
-			end
-			--null comparison operands match no rows.
-			--a null equality seek cannot be satisfied.
-			--the seek is skipped instead of seeking the null key.
-			local null_seek = false
-			for i, fn in ipairs(seek_fns) do
-				local v = fn(params, row_ctx)
-				if v == nil then null_seek = true end
-				vals[i] = v
-			end
-			if null_seek then return end
-			local ok
-			local seek_sz --buf length for the current seek.
-			--range lo and prefix encode depth+1 columns.
-			--that same encoding is the later stop bound.
-			if plan.kind == 'full' then
-				ok = cur:move_raw_into(first_op, key_rec, out_rec)
-			elseif plan.kind == 'exact' then
-				--depth == #pk here (try_key's only 'exact' case): the whole
-				--key is pinned, so walk_dups's own seek_sz boundary check
-				--already does what the general loop's depth_sz check below
-				--would (same encode call, same bytes) -- no need to fall
-				--through to it.
-				seek_sz = mdbx_encode_key_prefix(db, schema, 'get', buf,
-					MDBX_MAX_KEY_SIZE, depth, false, unpack(vals, 1, depth))
-				return walk_dups(buf, seek_sz, row_fn)
-			else --range, prefix, eq_prefix
-				local bound_val = lo_fn and lo_fn(params, row_ctx)
-					or (prefix_fn and prefix_fn(params, row_ctx))
-				--null lo/prefix facts match no rows.
-				--absent lo/prefix bounds leave the depth prefix open.
-				--eq_prefix scans everything under the depth-column prefix.
-				if (lo_fn or prefix_fn) and bound_val == nil then return end
-				local n = depth
-				if bound_val ~= nil then
-					vals[depth + 1] = bound_val
-					n = depth + 1
-				end
-				seek_sz = mdbx_encode_key_prefix(db, schema, 'c_seek', buf,
-					MDBX_MAX_KEY_SIZE, n, plan.kind == 'prefix', unpack(vals, 1, n))
-				key_rec.data, key_rec.size = buf, seek_sz
-				if plan.dir == 'desc' then
-					--eq_prefix desc (the only kind reaching here with dir ==
-					--'desc': bound_val is always nil, so n == depth): bump
-					--the depth-column prefix to its own upper bound and land
-					--on the last key at or under it, then walk backward.
-					--an all-0xff prefix has no upper bound -- it already IS
-					--the table's last key, so land on MDBX_LAST directly.
-					local end_sz = increment_prefix(buf, seek_sz)
-					if end_sz then
-						key_rec.size = end_sz
-						ok = cur:move_raw_into(C.MDBX_TO_KEY_LESSER_OR_EQUAL, key_rec, out_rec)
+				local group_conditions = extend({}, where_conditions,
+					picked.on_conditions)
+				local conditions = access_conditions(base_source, nil,
+					group_conditions)
+				local base_plan = choose_access(base_source, conditions)
+				local base_residual = {} --{condition...}
+				--left_join_scans() checks base residuals that read an outer source.
+				for _, cond in ipairs(base_plan.residual) do
+					local found = {}
+					referenced_sources(cond.expr, found, sources, true)
+					if found_outside(found, group.sources) then
+						add(match_conditions, cond)
 					else
-						ok = cur:move_raw_into(C.MDBX_LAST, key_rec, out_rec)
-					end
-				else
-					ok = cur:move_raw_into(C.MDBX_SET_RANGE, key_rec, out_rec)
-				end
-			end
-			--[[
-			- depth_buf encodes only the leading equality columns.
-			- it detects when the cursor leaves the current prefix.
-			- later key columns cannot change earlier encoded bytes.
-			- the same check works for every plan kind.
-			]]
-			local depth_sz
-			if depth > 0 then
-				depth_sz = mdbx_encode_key_prefix(db, schema, 'get', depth_buf,
-					MDBX_MAX_KEY_SIZE, depth, false, unpack(vals, 1, depth))
-			end
-			--[[
-			- q.col() hi values read earlier scheduled members.
-			- hi values are fixed for this invocation.
-			- hi is evaluated, null-checked, and encoded once.
-			- inclusive hi is bumped to a strict upper bound.
-			- overflow means no finite upper bound exists.
-			]]
-			local hi_sz
-			if plan.kind == 'range' and hi_fn then
-				local hv = hi_fn(params, row_ctx)
-				if hv == nil then return end
-				vals[depth + 1] = hv
-				hi_sz = mdbx_encode_key_prefix(db, schema, 'get', hi_buf,
-					MDBX_MAX_KEY_SIZE, depth + 1, false, unpack(vals, 1, depth + 1))
-				if plan.hi.op == 'le' then
-					hi_sz = increment_prefix(hi_buf, hi_sz)
-				end
-			end
-			while ok do
-				--stop when leading equality columns no longer match.
-				--compare only depth_sz bytes.
-				--trailing key bytes do not affect this check.
-				if depth_sz and (key_rec.size < depth_sz
-					or memcmp(key_rec.data, depth_buf, depth_sz) ~= 0)
-				then
-					break
-				end
-				--cursor keys are sorted.
-				--reaching or passing hi_sz means the scan is done.
-				--hi_sz is a strict boundary for both hi operators.
-				if hi_sz and raw_key_cmp(key_rec.data, key_rec.size, hi_buf, hi_sz) >= 0 then
-					break
-				end
-				--prefix reuses the seek buffer.
-				--the row key must keep the encoded prefix.
-				--no length tie-break is needed.
-				if plan.kind == 'prefix' then
-					if key_rec.size < seek_sz or memcmp(key_rec.data, buf, seek_sz) ~= 0 then
-						break
+						add(base_residual, cond)
 					end
 				end
-				--[[
-				- a lo bound only rejects rows exactly at the boundary.
-				- the seek already guarantees returned rows are >= lo.
-				- strict lo rejects exact equality.
-				- the seek buffer already holds the depth+lo encoding.
-				]]
-				local passes_lo = true
-				if plan.kind == 'range' and lo_fn then
-					passes_lo = not (key_rec.size >= seek_sz
-						and memcmp(key_rec.data, buf, seek_sz) == 0
-						and plan.lo.op == 'gt')
-				end
-				if passes_lo then
-					if row_fn(decode_col) then return true end
-				end
-				ok = cur:move_raw_into(next_op, key_rec, out_rec)
+				base_plan.residual = base_residual
+				local base_step = {source = base_source, join = false,
+					plan = base_plan}
+				local nested_scheduled = {[base_source.name] = true}
+				local nested = {base_step} --{step...}
+				build_access(group.joins, nested_scheduled, nested, sources,
+					group_conditions)
+				add(access, {source = false, join = picked, nested = nested,
+					match_conditions = match_conditions})
 			end
+		else
+			local conditions = access_conditions(picked.right, picked,
+				where_conditions)
+			add(access, {source = picked.right, join = picked,
+				plan = choose_access(picked.right, conditions)})
+			scheduled[picked.right.name] = true
 		end
-		local function close()
-			if base_cur then base_cur:close() end
-			cur:close()
+	end
+end
+
+--CLASSIFY EXISTS TARGETS -----------------------------------------------------
+
+--[[
+walk expr looking for exists()/not_exists()/in_()/not_in() occurrences,
+calling visit(expr) at each one found -- an in_()/not_in() occurrence
+only when its value is a sub-relation (a literal/param list has no
+occurrence to visit, see eval_expr()). Shared by classify_exists_targets()
+(compile()-time: plans/classifies each occurrence) and
+compile_residual_checkers() (once per attachment site: builds each
+occurrence's live checker) -- same traversal either way: recurses into
+on_expr and in_()'s own tested value expr, since one of these can nest
+another exists()/in_() inside it, but never into a sub-relation's own
+structure, which is a separate correlation boundary resolved on its own.
+]]
+local function walk_exists_nodes(expr, visit)
+	if type(expr) ~= 'table' then return end
+	local op = expr[1]
+	if op == 'exists' or op == 'not_exists' then
+		visit(expr)
+		if expr[3] then walk_exists_nodes(expr[3], visit) end
+	elseif op == 'in' or op == 'not_in' then
+		if inherits(expr[3], Rel) then visit(expr) end
+		walk_exists_nodes(expr[2], visit)
+	else
+		for i = 2, #expr do
+			walk_exists_nodes(expr[i], visit)
 		end
-		return run, close
 	end
 end
 
 --[[
-- compile one virtual-table source/join step.
-- called once per step at compile time.
-- returns an opener for one query execution.
-- opener returns run(params, row_ctx, row_fn) and close().
-- schema.open()/reset()/next_row()/get_col()/close() are application-supplied
-  on the table's schema object; this adapts that row-at-a-time protocol to
-  the same run/close shape compile_scan/compile_relation_scan return.
-- open() creates one virtual-table instance for this query execution.
-- reset() starts one scan with this call's params and outer row.
-- a correlated join reuses that instance through reset(), not open()/close().
-- close_access() closes the instance when the query execution ends.
+classify every exists()/not_exists()/in_()/not_in() occurrence that
+this rel's own residual/late/having checks can reach -- a plain table
+or a whole sub-relation -- once, here, instead of on every terminal
+call.
+- a table-source occurrence gets its own seek plan (resolve_exists_plan()),
+  stored as expr.plan; a sub-relation occurrence has none of its own
+  (compile(right, scope), already run at bind time, planned its own
+  access chain the normal way).
+- either way, expr.correlated records whether the occurrence reads
+  anything outside its own source(s) at all -- if not, its result
+  never depends on the outer row, so it can be checked once instead of
+  once per row.
 ]]
---[[local]] function compile_virtual_scan(schema)
-	assert(schema.get_col)
-	return function()
-		call(schema.open)
-		local function run(params, row_ctx, row_fn)
-			call(schema.reset, params, row_ctx)
-			local stop = false
-			while schema.next_row() do
-				if row_fn(schema.get_col) then
-					stop = true
-					break
-				end
+local function classify_exists_targets(expr)
+	walk_exists_nodes(expr, function(e)
+		if e[1] == 'exists' or e[1] == 'not_exists' then
+			local right = e[2]
+			if inherits(right, Rel) then
+				e.correlated = rel_references_outside(right, right.sources)
+			else
+				e.plan, e.correlated = resolve_exists_plan(right, e[3])
 			end
-			return stop
+		else --in()/not_in(), always a sub-relation (see walk_exists_nodes())
+			local values = e[3]
+			e.correlated = rel_references_outside(values, values.sources)
 		end
-		local function close() call(schema.close) end
-		return run, close
+	end)
+end
+local function classify_step_exists(step)
+	if step.nested then
+		for _, s in ipairs(step.nested) do
+			classify_step_exists(s)
+		end
+		for _, cond in ipairs(step.match_conditions) do
+			classify_exists_targets(cond.expr)
+		end
+	else
+		for _, cond in ipairs(step.plan.residual) do
+			classify_exists_targets(cond.expr)
+		end
 	end
 end
 
---EVALUATE EXPRESSIONS -------------------------------------------------------
+--COMPILE DRIVER -------------------------------------------------------------
+
+--[[local]] function compile(rel, parent_scope)
+	assert(not rel.compiled)
+	rel.compiled = true
+
+	--RESOLVE SOURCES ---------------------------------------------------------
+
+	local sources, union_out_cols
+	if rel.union_rels then
+		--can't call db:from()/join() on a union rel.
+		assert(not rel.joins, 'union does not allow joins')
+		for _, input in ipairs(rel.union_rels) do
+			compile(input, parent_scope)
+			assert(input.out_cols,
+				'union input requires select() or group_by()')
+			if union_out_cols then
+				assert(same_out_cols(union_out_cols, input.out_cols),
+					'union inputs must return the same cols')
+			else
+				union_out_cols = input.out_cols
+			end
+		end
+		sources = {}
+		rel.sources = sources
+	else
+		sources = resolve_sources(rel)
+	end
+
+	--RESOLVE OUTPUT COLUMNS --------------------------------------------------
+
+	rel.group_cols = resolve_out_cols(rel.group_cols)
+	rel.select_cols = resolve_out_cols(rel.select_cols)
+	rel.out_cols = rel.select_cols or rel.group_cols or union_out_cols
+	rel.distinct_cols = resolve_distinct(rel.distinct_cols, rel.out_cols)
+
+	--BUILD SCOPES ------------------------------------------------------------
+
+	rel.scope = { --kept in rel because it's used by correlated subqueries.
+		db = rel.db,
+		sources = sources,
+		cols = union_out_cols,
+		parent = parent_scope,
+	}
+	local group_scope
+	if rel.group_cols then
+		--new scope: binding after group_by() can only reach the grouped
+		--cols, not the ungrouped table columns.
+		group_scope = {
+			db = rel.db,
+			sources = {},
+			cols = rel.group_cols,
+			parent = parent_scope,
+		}
+	end
+
+	--BIND COLUMNS ------------------------------------------------------------
+
+	for _, expr in ipairs(rel.group_cols or empty) do
+		bind_expr(expr, rel.scope, nil, nil, true)
+	end
+	for _, expr in ipairs(rel.select_cols or empty) do
+		if rel.group_cols then
+			bind_expr(expr, group_scope, rel.group_cols, 'out_col')
+		else
+			bind_expr(expr, rel.scope)
+		end
+	end
+	assert(not rel.havings or rel.group_cols, 'having() requires group_by()')
+	for _, expr in ipairs(rel.havings or empty) do
+		bind_expr(expr, group_scope, rel.group_cols, 'out_col')
+	end
+
+	local order_mode = (rel.group_cols or rel.distinct_cols)
+		and 'out_col' or 'out_col_or_source'
+	local order_scope = rel.group_cols and group_scope or rel.scope
+	for _, expr in ipairs(rel.order_cols or empty) do
+		bind_expr(expr, order_scope, rel.out_cols, order_mode)
+	end
+
+	bind_joins(rel.joins or empty, rel.scope, sources)
+	check_join_operators(rel.joins or empty)
+	for _, expr in ipairs(rel.wheres or empty) do
+		bind_expr(expr, rel.scope)
+	end
+
+	--SPLIT CONDITIONS --------------------------------------------------------
+
+	rel.where_conditions = split_conditions(rel.wheres or empty, true)
+	rel.having_conditions = split_conditions(rel.havings or empty, false)
+	split_join_conditions(rel.joins or empty)
+
+	--ATTRIBUTE CONDITIONS ----------------------------------------------------
+
+	local left_joined_sources = {} --{name->true}
+	collect_left_joined_sources(rel.joins or empty, left_joined_sources)
+	attribute_conditions(rel.where_conditions, sources, left_joined_sources)
+	--when attribute_conditions can't attribute a condition to one source,
+	--check it only after every source has been scanned, not before.
+	local late_conditions = {} --{condition...}
+	for _, cond in ipairs(rel.where_conditions) do
+		if cond.source_name == false then add(late_conditions, cond) end
+	end
+	rel.late_conditions = late_conditions
+
+	--BUILD ACCESS ------------------------------------------------------------
+
+	local source_order_terms = base_order_terms(rel)
+	local prefer_order = source_order_terms and rel._limit ~= nil
+	local source_group_terms = group_key_terms(rel)
+
+	--TODO: compile() skips this whole block for a union rel, so
+	--distinct() on a union (which the doc block above implies works) has
+	--no dedup strategy yet. probably always hash, since a union has no
+	--single natural_order to stream against.
+	if not rel.union_rels then
+		local base_source = rel.joins[1].right
+		local access = {} --{{source=,join=|false,plan=|nested=}...}
+		rel.access = access
+		local base_conditions =
+			access_conditions(base_source, false, rel.where_conditions)
+		add(access, {source = base_source, join = false,
+			plan = choose_access(base_source, base_conditions,
+				source_order_terms, prefer_order, source_group_terms)})
+		build_access(rel.joins, {[base_source.name] = true}, access, sources,
+			rel.where_conditions)
+		rel.natural_order = natural_order(access[1])
+		--TODO: the execution stage still needs an opener for each access
+		--step (old file's prepare_scans: compile_scan/compile_relation_
+		--scan/compile_virtual_scan) -- blocked on the execution stage,
+		--which isn't ported yet.
+	end
+
+	--SORT AND DEDUP ----------------------------------------------------------
+
+	--[[
+	- whether an explicit sort is needed, or a group/distinct can stream
+	  instead of hash, is fully decided by what's already been set above
+	  (order_cols, natural_order, group_cols, distinct_cols) -- decide it
+	  once here, instead of recomputing it on every execution.
+	]]
+	rel.sort_needed = sort_actually_needed(rel)
+	rel.distinct_streaming = distinct_actually_streamable(rel)
+	rel.group_streaming = group_actually_streamable(rel)
+
+	--COMPILE OUTPUT PIPELINE -------------------------------------------------
+
+	--[[
+	the output/group/distinct/sort descriptors below are fully decided
+	by rel's own bound out_cols/group_cols/distinct_cols/order_cols,
+	never by params -- built once here instead of on every terminal
+	call (compile_terminal()/compile_group() used to rebuild all of
+	this on every rows()/first()/exists() call against the same rel).
+	]]
+	if rel.out_cols and not rel.group_cols then
+		local outputs = {}
+		for i, out_col in ipairs(rel.out_cols) do
+			assert(out_col[1] == 'col' and out_col.source,
+				'select(): only plain column outputs are implemented yet')
+			outputs[i] = {name = out_col.name, member = out_col.source.name,
+				col = out_col[3]}
+		end
+		rel.output_descriptor = outputs
+	end
+	if rel.group_cols then
+		rel.group_key_cols, rel.group_full_agg = split_group_cols(rel)
+		local key_cols, full_agg = rel.group_key_cols, rel.group_full_agg
+		if #key_cols > 0 then
+			if rel.group_streaming then
+				local cols = {}
+				for i, kc in ipairs(key_cols) do
+					cols[i] = {member = kc.member, col = kc.col}
+				end
+				rel.group_stream_cols = cols
+			end
+		end
+	end
+	if rel.distinct_cols then
+		local cols = {}
+		for i, c in ipairs(dedup_key_cols(rel)) do
+			cols[i] = {member = c.source.name, col = c[3]}
+		end
+		rel.distinct_key_cols = cols
+	end
+	if rel.sort_needed then
+		local spec = {}
+		for i, term in ipairs(rel.order_cols) do
+			spec[i] = term.source
+				and {member = term.source.name, col = term[3],
+					desc = term.dir == 'desc'}
+				or {field = term.col.name, desc = term.dir == 'desc'}
+		end
+		rel.sort_spec = spec
+	end
+
+	--CLASSIFY EXISTS TARGETS --------------------------------------------------
+
+	for _, step in ipairs(rel.access or empty) do
+		classify_step_exists(step)
+	end
+	for _, cond in ipairs(late_conditions) do
+		classify_exists_targets(cond.expr)
+	end
+	for _, cond in ipairs(rel.having_conditions) do
+		classify_exists_targets(cond.expr)
+	end
+
+	--TODO: once terminals exist, compile() needs a terminal_kind param
+	--and an assert here that rows()/first()/one()/must_one() require
+	--select() or group_by() (rel.out_cols) -- old file's needs_output
+	--check.
+end
+
+function Rel:prepare()
+	compile(self)
+	return self
+end
+
+--each step's {table,key,order,reverse} matches table_scanner's own
+--scan.explain() exactly: both read plan.schema/plan.depth/plan.dir
+--through the same mdbx_scan_order(), no scanner ever built here.
+local function explain_steps(access, into)
+	for _, step in ipairs(access) do
+		if step.nested then
+			explain_steps(step.nested, into)
+		else
+			local plan = step.plan
+			local schema = plan.schema
+			local reverse = plan.dir == 'desc'
+			add(into, {
+				source = step.source.name,
+				table = schema.val_schema and schema.val_schema.name or schema.name,
+				key = schema.name,
+				order = mdbx_scan_order(schema, plan.depth, reverse),
+				reverse = reverse,
+			})
+		end
+	end
+end
+
+function Rel:explain()
+	if not self.compiled then compile(self) end
+	assert(self.access, 'explain(): a union rel is not implemented yet')
+	local steps = {}
+	explain_steps(self.access, steps)
+	return steps
+end
+
+--EXECUTOR -------------------------------------------------------------------
 
 --[[
-- read a value operand for a residual check.
-- literals return themselves.
-- q.param() reads params.
-- q.col() reads any already-scanned member through row_ctx.
-- the member can differ from the step that owns the residual.
+compile_scan_param() maps one bound-value expr to a table_scanner param.
+compile_scan_param() maps q.param() to {arg=} and maps a literal to
+{value=}. When registry contains a q.col() source backed by a plain
+table_scanner, compile_scan_param() returns {scan=,col=}; Db:table_scanner()
+can reuse the source's encoded bytes when the layouts match. A not_equal()/
+in_() source is a union of scans, not one physical record, so it has no
+raw bytes to reuse -- compile_scan_param() reads it through col_decoder()
+same as when registry does not contain the source at all.
 ]]
-local function eval_value(x, params, row_ctx)
-	if type(x) ~= 'table' then return x end
-	if x[1] == 'param' then return params[x[2]] end
-	if x[1] == 'col' then return row_ctx[x.source.member](x[3]) end
-	error('unsupported residual operand: '..tostring(x[1]))
+local function compile_scan_param(expr, outer_node, registry)
+	local op = type(expr) == 'table' and expr[1]
+	if op == 'param' then
+		return {arg = expr[2]}
+	elseif op == 'col' then
+		assert(expr.source)
+		local scan = registry and registry[expr.source.name]
+		if scan and scan.table then return {scan = scan, col = expr[3]} end
+		if scan then
+			return {get = scan:col_decoder(expr.source.name, expr[3])}
+		end
+		assert(outer_node, 'compile_scan_param: a q.col() bound value is only'
+			..' valid inside a sub-relation or a joined scan')
+		return {get = outer_node:col_decoder(expr.source.name, expr[3])}
+	end
+	return {value = expr}
 end
-local function null_value(v)
-	return v == nil or v == null
+
+--[[
+compile_scan_path() turns one choose_access() plan into a table_scanner
+path: one {col,'='|'is',param} term per leading key col
+(plan.schema.path_fields[i]), then one range/prefix/is_not_null or dir-only
+term. Db:table_scanner() needs one `dir` term to set the whole scan's
+direction. compile_scan_path() passes outer_node to compile_scan_param().
+the caller passes nil at the top level and passes the outer node for a
+sub-relation. compile_scan_param() uses registry to find each joined
+member's scanner.
+]]
+local function compile_scan_path(plan, outer_node, registry, not_equal_op)
+	local fields = plan.schema.path_fields
+	local path = {}
+	for i = 1, plan.depth do
+		local fact = plan.seek[i]
+		path[i] = {fields[i].col, fact.op,
+			compile_scan_param(fact.expr, outer_node, registry)}
+	end
+	if plan.kind == 'range' then
+		local term = {plan.bound_col}
+		if plan.is_not_null then
+			term[2] = 'is_not_null'
+		elseif plan.lo and plan.hi then
+			term[2] = 'range'
+			term[3] = plan.lo.op
+			term[4] = compile_scan_param(plan.lo.expr, outer_node, registry)
+			term[5] = plan.hi.op
+			term[6] = compile_scan_param(plan.hi.expr, outer_node, registry)
+		elseif plan.lo then
+			term[2] = plan.lo.op
+			term[3] = compile_scan_param(plan.lo.expr, outer_node, registry)
+		else
+			term[2] = plan.hi.op
+			term[3] = compile_scan_param(plan.hi.expr, outer_node, registry)
+		end
+		term.dir = plan.dir
+		path[#path + 1] = term
+	elseif plan.kind == 'not_equal' then
+		path[#path + 1] = {plan.bound_col, not_equal_op,
+			compile_scan_param(plan.not_equal, outer_node, registry),
+			dir = plan.dir}
+	elseif plan.kind == 'in' then
+		--term[3] (the param) is filled in per value by compile_table_scan().
+		path[#path + 1] = {plan.bound_col, '=', dir = plan.dir}
+	elseif plan.kind == 'prefix' then
+		path[#path + 1] = {plan.bound_col, 'starts',
+			compile_scan_param(plan.prefix, outer_node, registry),
+			dir = plan.dir}
+	elseif plan.dir and plan.depth < #fields then
+		path[#path + 1] = {fields[plan.depth + 1].col, dir = plan.dir}
+	end
+	return path
 end
---is x a column read (q.col()) that points at an ai_ci field? if so we
---have to fold both sides before comparing, not just compare the raw text.
-local function ai_ci_operand(x)
-	return type(x) == 'table' and x[1] == 'col' and x.field
-		and x.field.mdbx_collation == 'utf8_ai_ci'
+
+--drops a literal null (in_() never matches null, so it needs no seek)
+--and literal duplicates (a repeated value would seek and yield the same
+--rows twice), collating first when the bound col's collation folds --
+--two spellings that fold to the same key are the same duplicate. a
+--q.param()/q.col() item is always kept, since its
+--runtime value isn't known here to compare -- compile_table_scan()
+--dedupes those at scan time instead, via merge_union(). sorts
+--ascending/descending to match plan.dir, by the same folded key, when
+--every value is a literal, so the union's bound-column order stays
+--monotonic across value boundaries like a single scan's -- left in
+--given order when any value isn't a literal, since it can't be sorted
+--without knowing it at runtime.
+local function ordered_in_values(plan)
+	local values = plan.in_values
+	local all_literal = all_literal_values(values)
+	local fold = ai_ci_col(plan.schema, plan.bound_col)
+	local seen, keys = {}, {}
+	local deduped = {}
+	for i = 1, #values do
+		local v = values[i]
+		if type(v) == 'table' then
+			deduped[#deduped + 1] = v
+		elseif v == nil or v == null then
+			--in() never matches null; drop it instead of seeking it.
+		else
+			local key = mdbx_collate_value(v, fold)
+			if not seen[key] then
+				seen[key] = true
+				keys[v] = key
+				deduped[#deduped + 1] = v
+			end
+		end
+	end
+	if not all_literal then return deduped end
+	local desc = plan.dir == 'desc'
+	sort(deduped, function(a, b)
+		local ka, kb = keys[a], keys[b]
+		return desc and ka > kb or ka < kb
+	end)
+	return deduped
 end
+
+--compile_table_scan() uses two disjoint strict ranges for ~=, and a
+--chain of disjoint exact seeks (one per value) for in_(). in_() values
+--already known at compile time (ordered_in_values()) are pre-sorted and
+--deduped, so their seeks union() in bound-column order with no overlap;
+--a q.param()/q.col() value isn't known until reset(), so two such seeks
+--can land on the same row at runtime -- merge_union() there instead of
+--union(), to dedupe by the row actually seeked rather than by the input
+--value (which would miss e.g. two different params resolving to the
+--same row, or an ai_ci spelling matching a param's resolved value).
+local function compile_table_scan(db, plan, outer_node, registry)
+	if plan.kind == 'not_equal' then
+		local path = compile_scan_path(plan, outer_node, registry, '<')
+		local range_term = path[#path]
+		local less_scan = db:table_scanner(plan.schema.name, path, plan.member)
+		range_term[2] = '>'
+		local greater_scan = db:table_scanner(plan.schema.name, path, plan.member)
+		return less_scan:union(greater_scan)
+	end
+	if plan.kind == 'in' then
+		local values = ordered_in_values(plan)
+		local path = compile_scan_path(plan, outer_node, registry)
+		local term = path[#path]
+		local merge = not all_literal_values(values)
+		term[3] = compile_scan_param(values[1], outer_node, registry)
+		local scan = db:table_scanner(plan.schema.name, path, plan.member)
+		for i = 2, #values do
+			term[3] = compile_scan_param(values[i], outer_node, registry)
+			local next_scan = db:table_scanner(plan.schema.name, path, plan.member)
+			scan = merge and scan:merge_union(next_scan) or scan:union(next_scan)
+		end
+		return scan, scan
+	end
+	local scan = db:table_scanner(plan.schema.name,
+		compile_scan_path(plan, outer_node, registry), plan.member)
+	return scan, scan
+end
+
+--EVALUATE RESIDUAL CONDITIONS -----------------------------------------------
+
 --where()/having() treat only false, nil, and null as rejection.
 local function expr_passes(v)
 	return v ~= nil and v ~= false and v ~= null
 end
-
+local function null_value(v)
+	return v == nil or v == null
+end
+--is x a column read (q.col()) that points at an ai_ci field? if so
+--both sides must be folded before comparing, not just compared as raw
+--text.
+--x binds either straight to a source col (x.source set by bind_col()) or
+--to an out_col by name (x.source nil, x.col set by bind_out_col() to the
+--out_col's own expr -- having()/order_by() after group_by()/distinct()).
+--the out_col still has its own .source when it's a plain column
+--passthrough; a computed/aggregate out_col has neither and never folds.
+local function ai_ci_operand(x)
+	if type(x) ~= 'table' or x[1] ~= 'col' then return false end
+	local ref = x.source and x or x.col
+	if not ref or not ref.source then return false end
+	return ai_ci_col(ref.source.schema, ref[3])
+end
+--compare same-kind decoded values in key order: numbers numerically,
+--utf8 by byte order.
+local function value_cmp(a, b)
+	if a == b then return 0 end
+	return a < b and -1 or 1
+end
 --[[
-- evaluate scalar expressions for residual and having() checks.
-- group_row set means having(): col/param read the finished group row.
-- group_row nil means residual: col/param read through row_ctx.
+- read a value operand for a residual or having() check.
+- literals return themselves.
+- q.param() reads scan.args.
+- q.col() bound to a source (residual: where()/on_expr conditions)
+  reads through node:col_decoder(), memoized in cache -- the member
+  can differ from the step that owns the residual.
+- q.col() bound to an out_col instead (having(): compile()'s BIND
+  COLUMNS stage always binds having() by out_col name, never to a raw
+  source col) has no source to read through -- node is the aggregated
+  value row itself here, so this reads the field directly by name.
 ]]
-local function eval_expr(expr, params, row_ctx, group_row)
-	if type(expr) ~= 'table' then return expr end
-	local op, a, b = unpack(expr, 1, 3)
-	if op == 'param' or op == 'col' then
-		if group_row then
-			if op == 'param' then return params[a] end
-			assertf(op == 'col', 'unsupported having operand: %s', op)
-			return group_row[expr.field.index]
+local function eval_value(x, scan, row, cache)
+	if type(x) ~= 'table' then return x end
+	if x[1] == 'param' then
+		local name = x[2]
+		local args = scan.args
+		assertf(args and args[name] ~= nil, 'missing arg: %s', name)
+		return args[name]
+	end
+	if x[1] == 'col' then
+		if x.source then
+			local decode = cache[x]
+			if not decode then
+				decode = row:col_decoder(x.source.name, x[3])
+				cache[x] = decode
+			end
+			return decode()
 		end
-		return eval_value(expr, params, row_ctx)
+		return row[x.col.name]
+	end
+	error('unsupported residual operand: '..tostring(x[1]))
+end
+--does candidate match v? null never matches, in_()/not_in() alike -- v
+--is already collated (see eval_expr()'s in/not_in case), and a null
+--candidate collates to itself, which v (never null) can't equal.
+local function candidate_matches(candidate, v, fold)
+	return v == mdbx_collate_value(candidate, fold)
+end
+--[[
+evaluate a where()/on_expr row check against the current row. q.col()
+reads decoded columns through node:col_decoder(), cached -- node is
+the same object apply_residual()/apply_having() call node:filter()
+on. compile_residual_checkers()/compile_exists_checker() fill checks:
+{exists()/in_() expr -> checker} the first time each attachment site
+processes its own condition list -- exists()/
+not_exists() and in_()/not_in() both look their checker up by the
+exists()/in_() expr node itself (not by source: the same source can
+appear in more than one occurrence).
+]]
+local function eval_expr(expr, scan, row, checks, cache)
+	if type(expr) ~= 'table' then return expr end
+	local op, a, b = expr[1], expr[2], expr[3]
+	if op == 'param' or op == 'col' then
+		return eval_value(expr, scan, row, cache)
 	end
 	if op == 'and' then
 		for i = 2, #expr do
-			if not expr_passes(eval_expr(expr[i], params, row_ctx, group_row)) then
+			if not expr_passes(eval_expr(expr[i], scan, row, checks, cache)) then
 				return false
 			end
 		end
 		return true
 	elseif op == 'or' then
 		for i = 2, #expr do
-			if expr_passes(eval_expr(expr[i], params, row_ctx, group_row)) then
+			if expr_passes(eval_expr(expr[i], scan, row, checks, cache)) then
 				return true
 			end
 		end
 		return false
 	elseif op == 'is_null' then
-		return null_value(eval_expr(a, params, row_ctx, group_row))
+		return null_value(eval_expr(a, scan, row, checks, cache))
 	elseif op == 'is_not_null' then
-		return not null_value(eval_expr(a, params, row_ctx, group_row))
+		return not null_value(eval_expr(a, scan, row, checks, cache))
 	elseif op == 'starts' then
-		local v = eval_expr(a, params, row_ctx, group_row)
-		local prefix = eval_expr(b, params, row_ctx, group_row)
+		local v = eval_expr(a, scan, row, checks, cache)
+		local prefix = eval_expr(b, scan, row, checks, cache)
 		if null_value(v) or null_value(prefix) then return false end
 		if type(v) ~= 'string' then return false end
-		--for an ai_ci column, fold both sides first (same folding an ai_ci
-		--index does) so "CA" matches "cafe" too.
-		if ai_ci_operand(a) then v, prefix = mdbx_fold_ai_ci(v), mdbx_fold_ai_ci(prefix) end
+		local fold = ai_ci_operand(a)
+		v, prefix = mdbx_collate_value(v, fold), mdbx_collate_value(prefix, fold)
 		return v:sub(1, #prefix) == prefix
 	elseif op == 'in' or op == 'not_in' then
-		--membership checks scan the candidate set and ignore null candidates.
-		local v = eval_expr(a, params, row_ctx, group_row)
-		if null_value(v) then return false end
 		local fold = ai_ci_operand(a)
-		if fold then v = mdbx_fold_ai_ci(v) end
+		local v = eval_expr(a, scan, row, checks, cache)
+		if null_value(v) then return false end
+		v = mdbx_collate_value(v, fold)
 		local found = false
-		if is_relation(b) then
-			--b.rows_run reseeks a persistent scan (opened once for this
-			--execution by with_exists_sources) instead of rebuilding b's
-			--rows fresh on every call.
-			local name = b.returned_fields[1]
-			found = b.rows_run(params, row_ctx, function(decode_col)
-				local candidate = decode_col(name)
-				if null_value(candidate) then return end
-				if fold then candidate = mdbx_fold_ai_ci(candidate) end
-				return v == candidate
-			end) or false
+		if inherits(b, Rel) then
+			local check = assertf(checks[expr],
+				'eval_expr: in_() check not compiled for source: %s',
+				tostring(b.name))
+			if check.values_set then
+				--v is already fold()'d above, matching how values_set's own
+				--keys were folded when built (compile_exists_checker()) --
+				--a direct hash lookup, no per-candidate loop needed.
+				found = check.values_set[v] ~= nil
+			else
+				for _, candidate in check.values() do
+					if candidate_matches(candidate, v, fold) then
+						found = true
+						break
+					end
+				end
+			end
+		elseif cache[expr] then
+			--pre-built hash set for a plain literal list; see
+			--compile_col_decoders(). candidate keys were folded the same
+			--way v already was above, so this is a direct lookup.
+			found = cache[expr][v] ~= nil
 		else
 			local param_list = type(b) == 'table' and b[1] == 'param'
-			local values
-			if param_list then values = eval_expr(b, params, row_ctx, group_row)
-			else values = b end
+			local values = param_list and eval_expr(b, scan, row, checks, cache)
+				or b
 			for _, item in ipairs(values) do
-				local candidate = param_list and item or eval_expr(item, params, row_ctx, group_row)
-				if not null_value(candidate) then
-					if fold then candidate = mdbx_fold_ai_ci(candidate) end
-					if v == candidate then found = true; break end
+				local candidate = param_list and item
+					or eval_expr(item, scan, row, checks, cache)
+				if candidate_matches(candidate, v, fold) then
+					found = true
+					break
 				end
 			end
 		end
 		if op == 'in' then return found end
 		return not found
 	elseif op == 'exists' or op == 'not_exists' then
-		--existence checks run the right side with the current row as context.
-		local found
-		if is_relation(a) then
-			found = eval_relation_exists(a, params, row_ctx)
-		else
-			found = eval_exists_source(a, params, row_ctx)
-		end
+		local check = assertf(checks[expr],
+			'eval_expr: exists() check not compiled for source: %s',
+			tostring(a.name))
+		local found = check.constant
+		if found == nil then found = check.check_exists() end
 		if op == 'exists' then return found end
 		return not found
 	end
-	--comparisons involving null are false (see the file's own "nulls" doc).
-	local va, vb = eval_expr(a, params, row_ctx, group_row), eval_expr(b, params, row_ctx, group_row)
+	local va = eval_expr(a, scan, row, checks, cache)
+	local vb = eval_expr(b, scan, row, checks, cache)
 	if null_value(va) or null_value(vb) then return false end
-	if ai_ci_operand(a) or ai_ci_operand(b) then
-		va, vb = mdbx_fold_ai_ci(va), mdbx_fold_ai_ci(vb)
-	end
-	if op == 'eq' then return va == vb
-	elseif op == 'ne' then return va ~= vb
-	elseif op == 'lt' then return key_cmp(va, vb) < 0
-	elseif op == 'le' then return key_cmp(va, vb) <= 0
-	elseif op == 'gt' then return key_cmp(va, vb) > 0
-	elseif op == 'ge' then return key_cmp(va, vb) >= 0
+	local fold = ai_ci_operand(a) or ai_ci_operand(b)
+	va, vb = mdbx_collate_value(va, fold), mdbx_collate_value(vb, fold)
+	if op == '=' then return va == vb
+	elseif op == '~=' then return va ~= vb
+	elseif op == '<' then return value_cmp(va, vb) < 0
+	elseif op == '<=' then return value_cmp(va, vb) <= 0
+	elseif op == '>' then return value_cmp(va, vb) > 0
+	elseif op == '>=' then return value_cmp(va, vb) >= 0
 	else error('unsupported condition op: '..tostring(op)) end
 end
---evaluate a where()/on_expr row check against the current row context.
-local function eval_residual(expr, params, row_ctx)
-	return expr_passes(eval_expr(expr, params, row_ctx, nil))
-end
---evaluate having() against a finished group row.
-local function eval_having(expr, params, group_row)
-	return expr_passes(eval_expr(expr, params, nil, group_row))
+--evaluate a where()/on_expr row check against the current row.
+local function eval_residual(expr, scan, row, checks, cache)
+	return expr_passes(eval_expr(expr, scan, row, checks, cache))
 end
 
---decode a missing right-side member.
---every column reads as nil.
---used for left joins and empty nested groups.
-local function nil_decode() return nil end
+--TODO(predicate compilation): eval_expr/eval_value (past their exists()/
+--in_() cases, now compiled once per attachment site below) still
+--re-walk cond.expr's raw AST and re-dispatch on op for every row.
 
---WALK ROWS ------------------------------------------------------------------
+local apply_residual --fw. decl.
+local compile_exists_checker --fw. decl.
 
---collect every member name covered by one access step.
---recurse into nested groups.
---used to null-extend every member in a left-joined fragment at once.
-local function step_members(step, list)
-	list = list or {} --{member_name...}
-	if step.nested then
-		for _, s in ipairs(step.nested) do step_members(s, list) end
-	else
-		add(list, step.member.member)
-	end
-	return list
+--[[
+compile_exists_checker() compiles every exists()/not_exists()/in_()/not_in()
+occurrence in expr and binds correlated reads to node. apply_residual()
+calls it once per condition list before building the per-row predicate,
+so eval_expr() only looks up an already-compiled checker in checks.
+]]
+local function compile_residual_checkers(db, expr, node, checks, registry)
+	walk_exists_nodes(expr, function(e)
+		compile_exists_checker(db, e, node, checks, registry)
+	end)
 end
 
 --[[
-- build one processor per access step for one execution.
-- processors close over shared params and row_ctx.
-- the returned function walks all access steps.
-- next_step() runs once per complete row combination.
-- for a normal join, call next_step() once per matching row.
-- when a left join finds no match, call next_step() once anyway, with a
-  nil decoder.
-- for a nested group, call next_step() once per inner combination.
-- when a nested group matches nothing, null-extend every inner member once.
-- closures are built once per execution, not once per driver row.
-- row_ctx is mutated in place during one query execution.
-- a true result from next_step(), or from a step's run(), stops the
-  whole walk; every wrapper forwards it up to its own caller.
-- calls itself for step.nested: depth matches how deeply left_join()
-  fragments are nested in the query, never open-ended.
+builds and caches node:col_decoder() for every q.col() operand in expr,
+the same way compile_residual_checkers() above pre-builds exists()/in_()
+checkers -- once per attachment site, before the per-row predicate
+closure runs, into the same cache eval_value() reads. Without this,
+eval_value()'s own cache[x] check builds the decoder lazily, on
+whichever row happens to evaluate this operand first; a table_scanner
+whose col_decoder() needs a base-table lookup only decides to fetch it
+on advance(), which already ran for that row by the time eval_value()
+gets to it -- see mdbx_schema.lua's table_scanner/need_base().
 ]]
-local function build_processors(steps, params, row_ctx, next_step)
-	local rest = next_step
-	for i = #steps, 1, -1 do
-		local step = steps[i]
-		local this_rest = rest
-		if step.nested then
-			local found
-			local members = step_members(step)
-			local nested_start = build_processors(step.nested, params, row_ctx, function()
-				found = true
-				return this_rest()
-			end)
-			rest = function()
-				found = false
-				if nested_start() then return true end
-				if not found then
-					for _, member in ipairs(members) do
-						row_ctx[member] = nil_decode
+local function compile_col_decoders(expr, node, cache, registry)
+	if type(expr) ~= 'table' then return end
+	local op = expr[1]
+	if op == 'col' and expr.source then
+		if not cache[expr] then
+			local decoder_node = registry and registry[expr.source.name] or node
+			cache[expr] = decoder_node:col_decoder(expr.source.name, expr[3])
+		end
+	elseif op == 'exists' or op == 'not_exists' then
+		--expr[3] is the correlated sub-relation's own filter, checked
+		--against its own node by compile_exists_checker() -- not node's.
+	elseif op == 'in' or op == 'not_in' then
+		--expr[3], a sub-relation or a value list, is never node's to read.
+		compile_col_decoders(expr[2], node, cache, registry)
+		--a plain literal list (not a q.param() list, whose values aren't
+		--known until reset(args)) gets a hash set here instead of the
+		--per-row linear scan eval_expr() would otherwise do.
+		local values = expr[3]
+		if type(values) == 'table' and not inherits(values, Rel)
+			and values[1] ~= 'param'
+		then
+			local all_literal = true
+			for i = 1, #values do
+				if type(values[i]) == 'table' then all_literal = false; break end
+			end
+			if all_literal then
+				local fold = ai_ci_operand(expr[2])
+				local set = {}
+				for i = 1, #values do
+					local v = values[i]
+					--in()/not_in() never match null; skip it instead of
+					--collating it.
+					if v ~= nil and v ~= null then
+						set[mdbx_collate_value(v, fold)] = true
 					end
-					return this_rest()
 				end
+				cache[expr] = set
 			end
+		end
+	else
+		for i = 2, #expr do
+			compile_col_decoders(expr[i], node, cache, registry)
+		end
+	end
+end
+
+--wrap node in a filter checking every unconsumed condition in
+--residual (choose_access()'s leftover where()/on_expr conditions for
+--this step); a no-op when residual is empty.
+function apply_residual(db, node, residual, checks, registry)
+	if #residual == 0 then return node end
+	local cache = {}
+	for _, cond in ipairs(residual) do
+		compile_residual_checkers(db, cond.expr, node, checks, registry)
+		compile_col_decoders(cond.expr, node, cache, registry)
+	end
+	return node:filter(function()
+		for _, cond in ipairs(residual) do
+			if not eval_residual(cond.expr, node, node, checks, cache) then
+				return false
+			end
+		end
+		return true
+	end)
+end
+
+--wrap node (a group_by() aggregate's value stream) in a filter
+--checking every having_conditions entry; a no-op when there are none.
+--eval_residual reads having()'s out_col-bound cols straight off
+--node.row -- there's no pk/getter-backed node to read through at this
+--stage. node.row is aggregate()'s own finished record (see
+--Scan:aggregate), read directly instead of copying it out through
+--get(); unlike get()/advance(), nothing downstream (sort()/distinct())
+--reassigns it, so there's nothing to go stale.
+--having()'s own exists()/in_() correlation (against the aggregated
+--row's out_cols) isn't implemented -- compile_exists_checker() expects
+--a pk/getter-backed node, not a value row -- so nothing here compiles
+--checkers; if having() ever nests exists()/in_(), eval_expr's own
+--assertf catches the missing check.
+local function apply_having(node, having_conditions)
+	if #having_conditions == 0 then return node end
+	local cache = {}
+	return node:filter(function()
+		local row = node.row
+		for _, cond in ipairs(having_conditions) do
+			if not eval_residual(cond.expr, node, row, empty, cache) then
+				return false
+			end
+		end
+		return true
+	end)
+end
+
+--COMPILE EXISTS CHECKERS -----------------------------------------------------
+
+local compile_step --fw. decl.
+
+local function set_check(checks, expr, check)
+	checks[expr] = check
+	local last = checks.last_scan
+	if last then last.next_scan = check else checks.first_scan = check end
+	checks.last_scan = check
+	if check.uncorrelated then
+		last = checks.last_reset
+		if last then last.next_reset = check else checks.first_reset = check end
+		checks.last_reset = check
+	end
+end
+
+local function close_checks(checks)
+	local check = checks.first_scan
+	while check do
+		check.scan.close()
+		check = check.next_scan
+	end
+end
+
+local function reset_check(check, args)
+	local scan = check.scan
+	scan.reset(args)
+	if check.out_col then
+		local set = {}
+		while scan.advance() do
+			local v = eval_value(check.out_col, scan, scan, check.cache)
+			if not null_value(v) then
+				set[mdbx_collate_value(v, check.ai_ci)] = true
+			end
+		end
+		check.values_set = set
+	else
+		check.constant = scan.advance() ~= nil
+	end
+	scan.close()
+end
+
+local function reset_checks(checks, args)
+	local check = checks.first_reset
+	while check do
+		reset_check(check, args)
+		check = check.next_reset
+	end
+end
+
+--[[
+resolve_exists_plan() calls the same choose_access() that a base or joined
+source uses. compile() stores the result on the exists() expr so
+compile_exists_checker() does not plan again for each terminal call.
+resolve_exists_plan() also returns whether on_expr reads outside source.
+When it returns false, compile_exists_checker() answers once instead of
+once per row.
+]]
+function resolve_exists_plan(source, on_expr)
+	local all_conditions = (on_expr == nil or on_expr == true)
+		and empty or split_conditions({on_expr}, true)
+	local plan = choose_access(source, all_conditions)
+	local own_sources = {[source.name] = source}
+	local correlated = false
+	for _, cond in ipairs(all_conditions) do
+		if references_outside(cond.expr, own_sources) then
+			correlated = true
+			break
+		end
+	end
+	return plan, correlated
+end
+
+--[[
+compile_exists_checker() compiles one exists()/not_exists()/in_()/not_in()
+occurrence (expr) into checks[expr] and binds correlated reads to node.
+compile_residual_checkers() calls it before the per-row predicate runs.
+If checks[expr] already exists, compile_exists_checker() returns.
+walk_exists_nodes() can reach the same occurrence twice: once directly
+from the outer compile_residual_checkers() call over
+on_expr, and once more when the branch below reaches expr.plan.residual
+(a leftover subset of that same on_expr) and calls apply_residual() on
+it, which walks it again through compile_residual_checkers(). The
+guard makes the second walk a no-op.
+- expr.correlated (classify_exists_targets(), compile()-time): false
+  means the occurrence never reads the outer row at all, so it's
+  answered once, right here, and checks[expr] holds the plain
+  {constant=} / {values_set=} result instead of a live checker.
+- table source (exists()/not_exists() only): one persistent table_scanner,
+  built from expr.plan (resolve_exists_plan(), compile()-time) with a
+  getter fixed on node -- reset() and check once per outer row, same
+  as table_scanner's own open-once-per-run, reseek-per-row design.
+- sub-relation source: delegates the whole node chain to compile_step()
+  (rel is already fully compiled -- compile() recursed into it at bind
+  time through bind_expr's 'exists'/'in' cases), with node passed
+  through the same way, so the sub-relation's own base step reads the
+  correlation through it instead of params. check_exists() answers
+  exists()/not_exists(); values() answers in_()/not_in() by yielding
+  the sub-relation's one out_col, decoded off the node, for every row
+  of a fresh scan.
+Still asserted rather than silently wrong (sub-relation source):
+- a union sub-relation -- compile_step() has no access plan to build
+  from (compile() skips BUILD ACCESS for a union rel).
+- group_by()/having() inside a sub-relation -- aggregating is
+  compile_group()'s job, run separately from compile_step() by
+  compile_terminal()/Rel:exists(); nothing here calls it yet.
+]]
+function compile_exists_checker(db, expr, node, checks, registry)
+	if checks[expr] then return end
+	local op = expr[1]
+	--exists()/not_exists(): expr[2] is the source, expr[3] is on_expr.
+	--in()/not_in(): expr[3] is the source (a sub-relation, the only
+	--shape compile_residual_checkers() calls this for); expr[2] is the
+	--tested value expr, unrelated to this occurrence's own source.
+	local right = (op == 'in' or op == 'not_in') and expr[3] or expr[2]
+	local outer_node = expr.correlated and node or nil
+	if inherits(right, Rel) then
+		assert(not right.union_rels,
+			'exists()/in_(): a union sub-relation is not implemented yet')
+		assert(not right.group_cols,
+			'exists()/in_(): group_by()/having() inside a sub-relation is'
+				..' not implemented yet')
+		local out_col = right.out_cols and right.out_cols[1]
+		if out_col then
+			assert(#right.out_cols == 1 and out_col[1] == 'col'
+				and out_col.source,
+				'in_()/not_in(): sub-relation output must be one plain column')
+		end
+		local sub_node = compile_step(db, right, outer_node)
+		local cache = {}
+		--build out_col's decoder before the first advance(): a
+		--table_scanner needs need_base() enabled ahead of advance() to
+		--read a base-only column.
+		if out_col then compile_col_decoders(out_col, sub_node, cache) end
+		if expr.correlated then
+			set_check(checks, expr, {
+				scan = sub_node,
+				check_exists = function()
+					sub_node.reset(node.args)
+					return sub_node.advance() ~= nil
+				end,
+				values = function()
+					sub_node.reset(node.args)
+					return function()
+						if sub_node.advance() then
+							return sub_node,
+								eval_value(out_col, sub_node, sub_node, cache)
+						end
+					end
+				end,
+			})
 		else
-			local found
-			local member = step.member.member
-			local residual = step.plan.residual
-			local function on_match(decode_col)
-				row_ctx[member] = decode_col
-				for _, cond in ipairs(residual) do
-					if not eval_residual(cond.expr, params, row_ctx) then return end
-				end
-				found = true
-				return this_rest()
-			end
-			local is_left = step.join and step.join.kind == 'left_join'
-			rest = function()
-				found = false
-				if step.run(params, row_ctx, on_match) then return true end
-				if not found and is_left then
-					row_ctx[member] = nil_decode
-					return this_rest()
-				end
+			set_check(checks, expr, {
+				scan = sub_node,
+				uncorrelated = true,
+				out_col = out_col,
+				cache = cache,
+				ai_ci = out_col and ai_ci_operand(expr[2]),
+			})
+		end
+	else
+		local plan = expr.plan
+		local inner_registry
+		if expr.correlated then
+			inner_registry = registry and update({}, registry) or {}
+			for _, member in ipairs(node.members) do
+				inner_registry[member] = node
 			end
 		end
-	end
-	return rest
-end
-
---[[
-- open every step cursor for one execution.
-- open scratch buffers before scanning rows.
-- calls itself for nested left-join fragment steps, same bounded depth
-  as build_processors -- opened stays one flat list either way, so
-  close_access() never needs to recurse back through the nesting.
-- return opened steps for close_access().
-- relation sources open their compiled inner relation, not a cursor.
-]]
-local function open_access(access, opened)
-	opened = opened or {} --{step...}
-	for _, step in ipairs(access) do
-		if step.nested then
-			open_access(step.nested, opened)
-		elseif step.open then
-			step.run, step.close = step.open()
-			add(opened, step)
+		local inner = compile_table_scan(db, plan, outer_node)
+		if inner_registry then
+			for _, member in ipairs(inner.members) do
+				inner_registry[member] = inner
+			end
+		end
+		inner = apply_residual(db, inner, plan.residual, checks,
+			inner_registry)
+		if expr.correlated then
+			set_check(checks, expr, {
+				scan = inner,
+				check_exists = function()
+					inner.reset(node.args)
+					return inner.advance() ~= nil
+				end,
+			})
+		else
+			set_check(checks, expr,
+				{scan = inner, uncorrelated = true})
 		end
 	end
-	return opened
-end
-
-local function close_access(opened)
-	for _, step in ipairs(opened) do
-		step.close()
-	end
 end
 
 --[[
-- run one query execution.
-- open every step once.
-- build the step chain once.
-- reuse cursors and buffers for every row.
-- close opened steps once the walk finishes normally or stops early.
-- on error, cursors stay owned by the enclosing transaction: its own
-  abort unbinds them, so no cleanup is needed here (see Db:atomic()).
+chains one joined step onto node, the driver built so far, via
+db:join_scans()/left_join_scans(node, inner). db:join_scans() and
+db:left_join_scans() use only the Scan methods from both sides.
+compile_joined_step() builds inner from plan through compile_scan_path()
+and correlates its seek params against node through compile_scan_param()'s
+registry lookup.
+compile_joined_step() adds the scanner to registry so a later step can
+read its current row.
+
+apply_residual() wraps inner before join_scans()/left_join_scans() decides
+whether the current outer row matched. left_join_scans() null-extends when
+every seek row fails the residual.
 ]]
-local function run_query(access, params, emit, seed_row_ctx)
-	local opened = open_access(access)
-	--correlated subqueries inherit outer member decoders through row_ctx.
-	local row_ctx = seed_row_ctx and setmetatable({}, {__index = seed_row_ctx}) or {}
-	local process = build_processors(access, params, row_ctx, function() return emit(row_ctx) end)
-	process()
-	close_access(opened)
-end
-
---EXISTS AND SUBQUERY SOURCES ------------------------------------------------
-
---[[
-- open one exists()/not_exists()/in_()/not_in() source for this execution
-  -- a plain table, or a whole subquery.
-- subquery source: call compile_relation_scan(source)() once. it returns
-  run/close/exists_run -- keep exists_run as source.exists_run (used by
-  exists()) and run as source.rows_run (used by in_()/not_in()); both
-  come from the same call, so both get stashed even though only one is
-  ever read for a given entry.
-- table source: on_expr is planned like a join's on_expr -- split into
-  facts once, then choose_access picks whatever index those facts
-  support. cached on the source permanently: the plan only depends on
-  the query's shape, not which execution this is. use_index()/no_index()
-  don't apply here -- this table is never a named member of the outer
-  relation.
-- either way: opened once here, closed by the caller at the end of this
-  run, instead of reopened on every row. run_filtered calls this once
-  per rel.exists_sources entry, same as a real access step's cursor:
-  opened once, reseeked per row.
-- returns close(), for the caller to run at the end of this run.
-]]
-local function open_exists_source(entry)
-	local source, on = entry.source, entry.on
-	if is_relation(source) then
-		local run, close, exists_run = compile_relation_scan(source)()
-		source.exists_run = exists_run
-		source.rows_run = run
-		return close
-	end
-	if not source.exists_plan then
-		local conditions = (on == nil or on == true) and empty or split_conditions({on}, true)
-		local members = {[source.member] = source}
-		source.exists_plan = choose_access(source, conditions, members, nil, nil)
-	end
-	local opener = source.schema.virtual
-		and compile_virtual_scan(source.schema)
-		or compile_scan(source.db, source.exists_plan)
-	local run, close = opener()
-	source.exists_run = run
-	--cleared per bracket; eval_exists_source fills it in on first use, since
-	--row_ctx (the value it would key on) doesn't exist yet at open time.
-	source.exists_child_ctx = nil
-	return close
-end
-
---evaluate table-form exists(): source.exists_run is already open for this
---execution (run_filtered opened it before any row was scanned), so this
---only seeks and reads -- whatever the chosen index does not prove stays
---a residual row check.
---child_ctx and the row callback are built once per bracket
---(open_exists_source clears exists_child_ctx), then reused: row_ctx and
---params both stay the same for the whole execution, so nothing the
---callback closes over changes between calls. found is exists_run's own
---stop-early return value, the same channel a real cursor's run() uses,
---not separate state.
-function eval_exists_source(source, params, row_ctx)
-	if not source.exists_child_ctx then
-		local child_ctx = row_ctx and setmetatable({}, {__index = row_ctx}) or {}
-		local member, residual = source.member, source.exists_plan.residual
-		source.exists_child_ctx = child_ctx
-		source.exists_row_fn = function(decode_col)
-			child_ctx[member] = decode_col
-			for _, cond in ipairs(residual) do
-				if not eval_residual(cond.expr, params, child_ctx) then return end
+local function compile_joined_step(db, node, step, checks, registry)
+	local plan = step.plan
+	local scanner, param_scanner =
+		compile_table_scan(db, plan, node, registry)
+	registry[step.source.name] = param_scanner
+	local cache, accept
+	if #plan.residual > 0 then
+		cache = {}
+		accept = function(join)
+			for _, cond in ipairs(plan.residual) do
+				if not eval_residual(cond.expr, join, join, checks, cache) then
+					return false
+				end
 			end
 			return true
 		end
 	end
-	return source.exists_run(params, source.exists_child_ctx, source.exists_row_fn) or false
-end
-
---run relation-level where() checks.
---cross-member checks run here after all members are scanned.
---checks that read no source members also run here.
-local function run_filtered(rel, params, emit, seed_row_ctx)
-	local late_conditions = rel.late_conditions
-	run_query(rel.access, params, function(row_ctx)
-		for _, cond in ipairs(late_conditions) do
-			if not eval_residual(cond.expr, params, row_ctx) then return end
-		end
-		return emit(row_ctx)
-	end, seed_row_ctx)
-end
-
---[[
-- call fn(...) with this relation's exists()/not_exists() table-spec
-  sources opened for fn's whole duration, then close them after fn returns.
-- if fn raises, the enclosing transaction owns the open cursors.
-- must wrap the outermost call that evaluates this relation for one
-  terminal, not run_filtered/run_grouped themselves: a grouped call's
-  having() checks run in finish_group_row, after run_filtered's own scan
-  already returned, so the bracket has to span both or having()'s exists()
-  finds its cursor already closed.
-- callers that delegate to build_rows (which wraps itself) must not wrap
-  again -- one bracket per relation per execution, never nested, since a
-  nested open would overwrite source.exists_run out from under the outer
-  bracket's later use (its own close would then leave the outer context
-  holding a closed cursor).
-]]
-local function with_exists_sources(rel, fn, ...)
-	local exists_closes = {} --{close_fn...}
-	for _, entry in ipairs(rel.exists_sources) do
-		add(exists_closes, open_exists_source(entry))
-	end
-	fn(...)
-	for _, close in ipairs(exists_closes) do close() end
-end
-
---evaluate relation-form exists(): rel.exists_run is opened once per
---execution by whichever with_exists_sources bracket owns rel (the outer
---relation's own, if rel is a direct exists() target -- or a further-out
---one, if rel is itself nested inside another relation-form exists()
---target) -- union/group/plain are all handled inside it already.
-function eval_relation_exists(rel, params, row_ctx)
-	return rel.exists_run(params, row_ctx)
-end
-
---GROUP ROWS -----------------------------------------------------------------
-
---[[
-- true when rows with the same key values are guaranteed to come out
-  next to each other, so distinct()/group() can dedup by comparing
-  each row to the one before it instead of hashing.
-- one way that holds: the index the base scan picked already groups
-  these columns together (order_satisfied_set checks that).
-- another way, with no index needed: the columns cover the base
-  table's whole primary key. nested-loop execution visits each base
-  row once, so all of its fan-out rows come out together, no matter
-  what order the scan runs in.
-]]
-function terms_group_consecutive(rel, terms)
-	if order_satisfied_set(terms, rel.natural_order) then return true end
-	if rel.source.kind ~= 'table' then return false end
-	local needed = {} --{col->true}
-	for _, field in ipairs(rel.source.schema.key_fields) do needed[field.col] = true end
-	for _, term in ipairs(terms) do
-		if term.member ~= rel.source.member then return false end
-		needed[term.col] = nil
-	end
-	return not next(needed)
-end
-
-local aggregate_ops = {count = true, min = true, max = true, sum = true, avg = true} --{op->true}
-
---[[
-- fold one row into an aggregate accumulator.
-- accumulator shape: {n=count, v=running value}.
-- min(), max(), and sum() keep a running value.
-- avg() keeps sum in v and count in n.
-- count(expr) counts non-null values.
-- count() counts every row.
-]]
-local function accumulate(a, expr, params, row_ctx)
-	local op, arg = expr[1], expr[2]
-	local v = arg and eval_value(arg, params, row_ctx)
-	if op == 'count' then
-		if not arg or v ~= nil then a.n = a.n + 1 end
-	elseif v ~= nil then
-		if op == 'min' then if a.v == nil or key_cmp(v, a.v) < 0 then a.v = v end
-		elseif op == 'max' then if a.v == nil or key_cmp(v, a.v) > 0 then a.v = v end
-		elseif op == 'sum' then a.v = (a.v or 0) + v
-		elseif op == 'avg' then a.v = (a.v or 0) + v; a.n = a.n + 1
-		end
-	end
-end
---the final output value of a finished accumulator.
-local function finish_aggregate(a, op)
-	if op == 'count' then return a.n end
-	if op == 'avg' then return a.n > 0 and (a.v / a.n) or nil end
-	return a.v
-end
-
---[[
-- finish one group.
-- write aggregate output values.
-- apply having().
-- emit the group row or select() projection.
-- shared by hash and streaming group implementations.
-]]
-local function finish_group_row(self, params, group_outputs, agg_ids, g, rows)
-	for _, i in ipairs(agg_ids) do
-		g.row[i] = finish_aggregate(g.acc[i], group_outputs[i][1][1])
-	end
-	local passes = true
-	for _, cond in ipairs(self.having_conditions) do
-		if not eval_having(cond.expr, params, g.row) then passes = false; break end
-	end
-	if passes then
-		if self.select_outputs then
-			local row = {} --{value...}
-			for i, output in ipairs(self.select_outputs) do
-				local expr = output[1]
-				assert(expr[1] == 'col', 'only plain column select() outputs are implemented so far')
-				row[i] = g.row[expr.field.index]
-			end
-			add(rows, row)
-		else
-			add(rows, g.row)
-		end
-	end
-end
-
-local function new_group(group_outputs, agg_ids, g)
-	g = g or {}
-	local acc = {} --{output_index->{n=0,v=nil}}
-	for _, i in ipairs(agg_ids) do acc[i] = {n = 0, v = nil} end
-	g.row = {} --{value...}, filled in once finished
-	g.acc = acc
-	return g
-end
-
---[[
-- build a fresh accumulator for hash-based group()+having().
-- one key uses the value itself; many keys use an interned value tuple.
-- accumulate_row(row_ctx) folds one input row in; finish() finishes
-  every group (including the empty-input, all-aggregate special case)
-  and appends the surviving rows -- same finish() shape as
-  streaming_grouping, so a caller never needs to know which
-  strategy it got.
-- shared by run_grouped_hash's own one-shot scan and
-  compile_relation_scan's persistent one -- the grouping logic itself
-  never changes, only how rows reach it does.
-]]
-local function hash_grouping(self, params, group_outputs, key_ids, agg_ids, rows)
-	local one_key_groups = #key_ids == 1 and {} --{value->group}
-	local tuple_space = #key_ids > 1 and tuples(#key_ids)
-	local vals = tuple_space and {} --{value...}
-	local group_keys = {} --{group...}: first-seen order
-	local all_group
-	local saw_input = false
-	local function accumulate_row(row_ctx)
-		saw_input = true
-		local g
-		if one_key_groups then
-			local i = key_ids[1]
-			local v = eval_value(group_outputs[i][1], params, row_ctx)
-			local key = v ~= nil and v or null
-			g = one_key_groups[key]
-			if not g then
-				g = new_group(group_outputs, agg_ids)
-				g.row[i] = v
-				one_key_groups[key] = g
-				add(group_keys, g)
-			end
-		elseif tuple_space then
-			for j, i in ipairs(key_ids) do
-				vals[j] = eval_value(group_outputs[i][1], params, row_ctx)
-			end
-			g = tuple_space(unpack(vals, 1, #key_ids))
-			if not g.row then
-				new_group(group_outputs, agg_ids, g)
-				for j, i in ipairs(key_ids) do g.row[i] = vals[j] end
-				add(group_keys, g)
-			end
-		else
-			g = all_group
-			if not g then
-				g = new_group(group_outputs, agg_ids)
-				all_group = g
-				add(group_keys, g)
-			end
-		end
-		for _, i in ipairs(agg_ids) do
-			accumulate(g.acc[i], group_outputs[i][1], params, row_ctx)
-		end
-	end
-	local function finish()
-		--[[
-		- all-aggregate outputs have no key columns.
-		- they always produce one group.
-		- empty input gives count() = 0.
-		- empty input gives other aggregates nil.
-		]]
-		if not saw_input and #key_ids == 0 then
-			add(group_keys, new_group(group_outputs, agg_ids))
-		end
-		for _, g in ipairs(group_keys) do
-			finish_group_row(self, params, group_outputs, agg_ids, g, rows)
-		end
-	end
-	return accumulate_row, finish
-end
-
---[[
-- build a fresh accumulator for streaming group()+having(): caller proves
-  scan order keeps equal group keys adjacent, so consecutive rows with
-  the same key fold into the current group and no hash table or string
-  group keys are needed -- a group finishes the moment the key changes.
-- accumulate_row(row_ctx) folds one input row in; finish() flushes
-  whatever group is still open once the scan ends.
-- shared by run_grouped_streaming's own one-shot scan and
-  compile_relation_scan's persistent one -- the grouping logic itself
-  never changes, only how rows reach it does.
-]]
-local function streaming_grouping(self, params, group_outputs, key_ids, agg_ids, rows)
-	local cur_key, cur_g
-	local function keys_equal(a, b)
-		for i = 1, #a do
-			if a[i] ~= b[i] then return false end
-		end
-		return true
-	end
-	local function accumulate_row(row_ctx)
-		local key = {} --{val...}
-		for i, id in ipairs(key_ids) do
-			key[i] = eval_value(group_outputs[id][1], params, row_ctx)
-		end
-		if not cur_g or not keys_equal(key, cur_key) then
-			if cur_g then finish_group_row(self, params, group_outputs, agg_ids, cur_g, rows) end
-			cur_key, cur_g = key, new_group(group_outputs, agg_ids)
-			for _, i in ipairs(key_ids) do
-				cur_g.row[i] = eval_value(group_outputs[i][1], params, row_ctx)
-			end
-		end
-		for _, i in ipairs(agg_ids) do
-			accumulate(cur_g.acc[i], group_outputs[i][1], params, row_ctx)
-		end
-	end
-	local function finish()
-		if cur_g then
-			finish_group_row(self, params, group_outputs, agg_ids, cur_g, rows)
-		elseif #key_ids == 0 then
-			--all-aggregate outputs have no key columns.
-			--empty input produces one group.
-			--count() is 0 and other aggregates are nil.
-			finish_group_row(self, params, group_outputs, agg_ids,
-				new_group(group_outputs, agg_ids), rows)
-		end
-	end
-	return accumulate_row, finish
-end
-
---[[
-- decide whether group()+having() can stream (matching adjacent scan
-  order) or needs a hash pass, and split group_outputs into key vs
-  aggregate output indexes.
-- streaming needs key columns to be plain q.col() expressions.
-- those q.col() expressions must be bound to source fields.
-- computed key expressions require hashing.
-- matching rows must come out consecutively (terms_group_consecutive
-  checks that).
-- join fan-out stays nested inside each driver row.
-- this answer is fully decided by self's compile-time shape, so it never
-  changes across executions of the same compiled relation -- it is still
-  recomputed on every call, not decided once and stored.
-]]
-local function choose_grouping(self)
-	local group_outputs = self.group_outputs
-	local key_ids, agg_ids = {}, {} --{output_index...}
-	for i, output in ipairs(group_outputs) do
-		local expr = output[1]
-		add(type(expr) == 'table' and aggregate_ops[expr[1]] and agg_ids or key_ids, i)
-	end
-	local key_terms, streaming = {}, true --{{member=,col=}...}
-	for _, i in ipairs(key_ids) do
-		local ct = col_term(group_outputs[i][1])
-		if ct then
-			add(key_terms, ct)
-		else
-			streaming = false
-			break
-		end
-	end
-	streaming = streaming and terms_group_consecutive(self, key_terms)
-	return group_outputs, key_ids, agg_ids, streaming
-end
-
---feed grouped rows from an already-open relation scan when scan is set.
-local function run_grouped(self, params, rows, seed_row_ctx, scan)
-	local group_outputs, key_ids, agg_ids, streaming = choose_grouping(self)
-	local accumulate_row, finish
-	if streaming then
-		accumulate_row, finish =
-			streaming_grouping(self, params, group_outputs, key_ids, agg_ids, rows)
+	local join
+	if step.join.op == 'left' then
+		join = db:left_join_scans(node, scanner, accept)
 	else
-		accumulate_row, finish =
-			hash_grouping(self, params, group_outputs, key_ids, agg_ids, rows)
+		join = db:join_scans(node, scanner, accept)
 	end
-	if scan then
-		scan(params, seed_row_ctx, accumulate_row)
-	else
-		run_filtered(self, params, accumulate_row, seed_row_ctx)
-	end
-	finish()
-end
-
---PROJECT AND FINISH ---------------------------------------------------------
-
---project select_outputs (plain columns only) into a sparse array row.
-local function project_row(outputs, row_ctx)
-	local row = {} --{value...}
-	for i, output in ipairs(outputs) do
-		local expr = output[1]
-		assert(expr[1] == 'col', 'only plain column select() outputs are implemented so far')
-		row[i] = row_ctx[expr.source.member](expr[3])
-	end
-	return row
-end
-
---[[
-	dedup rows by field values, keyed through a tuple space for proper value
-	identity (glue.lua tuples()) instead of stringifying and concatenating
-	values into a hash key.
-	- for a 1-col key the value itself is the seen-table key.
-	- null substitutes for a missing single-field value so it can be used as
-	a table key (Lua rejects a nil key); the multi-field tuple space handles
-	nil positions on its own.
-]]
-local function hash_dedup_rows(rows, fields, output_fields)
-	local deduped = {} --{row...}
-	local seen = {} --{key->true}
-	local nfields = #fields
-	local indexes = {} --{field_index...}
-	for i, name in ipairs(fields) do indexes[i] = output_fields[name].index end
-	if nfields == 1 then
-		local index = indexes[1]
-		for _, row in ipairs(rows) do
-			local v = row[index]
-			local key = v ~= nil and v or null
-			if not seen[key] then seen[key] = true; add(deduped, row) end
-		end
-	else
-		local tuple_space = tuples()
-		local vals = {} --{val...}
-		for _, row in ipairs(rows) do
-			for i = 1, nfields do vals[i] = row[indexes[i]] end
-			local key = tuple_space(unpack(vals, 1, nfields))
-			if not seen[key] then seen[key] = true; add(deduped, row) end
+	if accept then
+		for _, cond in ipairs(plan.residual) do
+			compile_residual_checkers(db, cond.expr, join, checks)
+			compile_col_decoders(cond.expr, join, cache)
 		end
 	end
-	return deduped
+	return join
 end
 
 --[[
-- read one order_by() key value.
-- terms bound to output fields read the built output row.
-- terms bound to source fields read row_ctx before it goes out of scope.
-- terms bound to source fields may not be present in the output row.
-- for an ai_ci field, fold the value first (same folding an ai_ci index
-  does), so we sort "Cafe" next to "cafe" instead of by raw text.
+builds a left-joined group's own chain (step.nested: the group's base
+step, plus any further joins inside the group) into a single node, for
+compile_step to wrap in left_join_scans() (no from_member: see below).
+compile_nested() requires plan.seek[1].expr to read an outer column
+(source_operand()/bucket_facts() set it during compile()'s BIND
+COLUMNS stage) -- compile_scan_path()/compile_scan_param() already turn
+that into a raw {scan=,col=} param against outer_registry, the same way
+any joined step's seek does, so the group's base needs no different
+treatment than compile_joined_step() gives an ordinary step. This is
+why the old node system's nested_join from_member/reset_prefix
+mechanism (built for pk_scan's getter-seek, which couldn't otherwise
+read a live outer row per reset()) isn't needed here at all:
+left_join_scans()'s plain inner.reset() already re-evaluates the
+scan-param against outer_registry's live scanner on every outer row.
 ]]
-local function order_key(term, row, row_ctx)
-	local expr = term[1]
-	local v = expr.source and row_ctx[expr.source.member](expr[3]) or row[expr.field.index]
-	if v ~= nil and expr.field.mdbx_collation == 'utf8_ai_ci' then
-		v = mdbx_fold_ai_ci(v)
+local function compile_nested(db, step, checks, outer_registry, outer_node)
+	local base = step.nested[1]
+	local plan = base.plan
+	assert(plan.schema and plan.schema.is_index,
+		'compile_step: nested group base has no index to seek by')
+	local seek_expr = plan.seek[1].expr
+	assert(type(seek_expr) == 'table' and seek_expr[1] == 'col'
+		and seek_expr.source,
+		'compile_step: nested group base must correlate on an outer column')
+	local scanner, param_scanner =
+		compile_table_scan(db, plan, outer_node, outer_registry)
+	local inner = apply_residual(db, scanner, plan.residual, checks)
+	--the group's own inner correlations (nested[2..] against nested[1] or
+	--each other) are never referenced from outside the group, so they
+	--get their own fresh registry, seeded with the base's own scanner.
+	local registry = {[plan.member] = param_scanner}
+	for i = 2, #step.nested do
+		inner = compile_joined_step(db, inner, step.nested[i], checks,
+			registry)
 	end
-	return v
-end
-
---compare order_by() keys with null handling.
---ascending sorts null first.
---descending reverses that order.
-local function order_cmp(av, bv, dir)
-	local c
-	if av == nil and bv == nil then c = 0
-	elseif av == nil then c = -1
-	elseif bv == nil then c = 1
-	else c = key_cmp(av, bv) end
-	return dir == 'desc' and -c or c
-end
-
-local function eval_limit_value(x, params)
-	if type(x) ~= 'table' then return x end
-	assert(x[1] == 'param', 'unsupported limit()/offset() value')
-	return params[x[2]]
+	return inner
 end
 
 --[[
-- apply distinct(), sort, and limit()/offset() to already-collected rows.
-- runs once per probe, over whatever rows that probe produced -- no
-  persistent scan of its own, unlike the row-collecting step before it.
+builds the executor node for rel's access plan. rel must already be
+compiled (rel:prepare()). bound values (q.param()/q.col()) aren't
+compiled in: node.reset(args) supplies them fresh on every call, so the
+same node runs again with different args by calling reset(args) again.
+outer_node (nil at the top level) threads through to the base step's
+table_scanner the same way, for a sub-relation compiled as an
+exists()/in_() checker (compile_exists_checker()).
+compile_step() starts checks empty. apply_residual() fills it when an
+attachment site compiles its exists()/in_() occurrences.
+
+Each step past the base chains onto whatever's been built so far:
+- a single, un-joined base step -> a table_scanner, bound values read
+  through compile_scan_param()'s {arg=}/{scan=,col=}/{get=}/{value=}.
+- a joined step -> compile_joined_step() builds a correlated table_scanner
+  and wraps it in join_scans()/left_join_scans().
+- a left-joined group (step.nested) -> compile_nested() builds the
+  group's own chain, wrapped in left_join_scans(node_so_far, inner).
+Every step's plan.residual (choose_access()'s leftover where()/on_expr
+conditions that the seek didn't consume) gets applied via apply_residual()
+right after that step's node is built. Once every step is chained on,
+rel.late_conditions (attribute_conditions()'s cross-source and
+left-joined-member conditions -- see attribute_conditions() and
+collect_left_joined_sources()) gets applied the same way, once, over
+the whole finished row.
+
+--TODO: a group nested inside another group, and a group base that
+doesn't correlate on a plain outer column, aren't wired up yet.
+group_by/having/distinct/order_by/limit aren't applied at runtime yet
+either.
 ]]
-local function finish_rows(self, params, rows, sort_needed, sort_keys)
-	if self.distinct_rows then
-		local fields = dedup_key_fields(self)
-		if self.distinct_streaming then
-			local deduped = {} --{row...}
-			local indexes = {} --{field_index...}
-			for i, name in ipairs(fields) do indexes[i] = self.output_fields[name].index end
-			local prev
-			for _, row in ipairs(rows) do
-				local dup = prev ~= nil
-				if dup then
-					for i = 1, #indexes do
-						local index = indexes[i]
-						if row[index] ~= prev[index] then dup = false; break end
+--[[local]] function compile_step(db, rel, outer_node)
+	assert(rel.access and #rel.access >= 1, 'compile_step: rel.access missing')
+	local checks = {}
+	local base = rel.access[1]
+	assert(not base.join,
+		'compile_step: access[1] must be the un-joined base step')
+	local base_plan = base.plan
+	local registry = {}
+	local base_scanner, param_scanner =
+		compile_table_scan(db, base_plan, outer_node, registry)
+	registry[base_plan.member] = param_scanner
+	local node = apply_residual(db, base_scanner, base_plan.residual, checks)
+	for i = 2, #rel.access do
+		local step = rel.access[i]
+		if step.nested then
+			local inner = compile_nested(db, step, checks, registry, node)
+			local conditions = step.match_conditions
+			local cache, accept
+			if #conditions > 0 then
+				cache = {}
+				accept = function(join)
+					for _, cond in ipairs(conditions) do
+						if not eval_residual(cond.expr, join, join, checks,
+							cache)
+						then
+							return false
+						end
 					end
+					return true
 				end
-				if not dup then add(deduped, row) end
-				prev = row
 			end
-			rows = deduped
+			local join = db:left_join_scans(node, inner, accept)
+			if accept then
+				for _, cond in ipairs(conditions) do
+					compile_residual_checkers(db, cond.expr, join, checks)
+					compile_col_decoders(cond.expr, join, cache)
+				end
+			end
+			node = join
 		else
-			rows = hash_dedup_rows(rows, fields, self.output_fields)
+			assert(step.join, 'compile_step: expected a joined step')
+			node = compile_joined_step(db, node, step, checks, registry)
 		end
 	end
-	if sort_needed then
-		table.sort(rows, function(a, b)
-			local ak, bk = sort_keys[a], sort_keys[b]
-			for i, term in ipairs(self.order_by_terms) do
-				local c = order_cmp(ak[i], bk[i], term[2])
-				if c ~= 0 then return c < 0 end
-			end
-			return false
-		end)
-	end
-	if self.limit_rows then
-		local n = eval_limit_value(self.limit_rows.n, params)
-		local offset = self.limit_rows.offset and eval_limit_value(self.limit_rows.offset, params) or 0
-		local limited = {} --{row...}
-		for i = offset + 1, math.min(offset + n, #rows) do
-			add(limited, rows[i])
+	node = apply_residual(db, node, rel.late_conditions, checks)
+	if checks.first_reset then
+		local reset = node.reset
+		function node.reset(args)
+			reset(args)
+			reset_checks(checks, args)
 		end
-		rows = limited
 	end
-	return rows
+	if checks.first_scan then
+		local close = node.close
+		function node.close()
+			close_checks(checks)
+			close()
+		end
+	end
+	return node
 end
 
---COMPILE A RELATION OR JOIN STEP --------------------------------------------
+mdbx_compile_step = compile_step
+
+--MATERIALIZE ROWS -----------------------------------------------------------
 
 --[[
-- compile one relation-kind source/join step.
-- called once per step at compile time.
-- returns an opener for one query execution.
-- opener returns run(params, row_ctx, row_fn), close(), and
-  exists_run(params, row_ctx).
-- run() and exists_run() reseek a persistent scan instead of rebuilding
-  one: a joined relation reuses its cursors, buffers, decoders, and
-  processor chain across every outer driving row -- only the seek values
-  (through row_ctx) and the collected output rows differ per call.
-- run() projects and applies group()/distinct()/sort()/limit() fresh on
-  every call, since their input differs per call -- only the scan
-  feeding them is persistent. used where output values are actually
-  read: a join's right side, and in_()'s relation form (bind-time
-  guaranteed to have exactly one returned field).
-- exists_run() applies no projection and no distinct()/sort()/limit() --
-  existence never depends on any of them. it must not require
-  select()/group() to be set: a bare where()-only relation is a legal
-  exists() argument, and routing it through run() instead would crash on
-  project_row()'s missing outputs.
-- row_ctx seeds the inner relation for correlated where()/on() reads.
+builds on compile_step()'s access/join chain with the rest of the
+pipeline that a terminal needs: select() projection (rel.out_cols) or
+compile_group()'s aggregate pipeline, then distinct/sort/limit as rel's
+compile()-time flags call for. Order matches SQL: project, then
+distinct, then sort, then limit -- the same order that compile()'s
+order_by binding already assumes (order_mode is 'out_col' whenever
+distinct_cols is set, so every order_by() term is guaranteed to name a
+projected field, never a pre-distinct one).
 ]]
---[[local]] function compile_relation_scan(nested_rel)
-	--a union relation has no .access/.exists_sources of its own -- each
-	--input is a whole compiled relation, so each gets this same
-	--treatment, recursively (depth matches how many :union() calls were
-	--chained, never open-ended). run() and exists_run() try each input
-	--in turn, stopping at the first one that matches.
-	if nested_rel.union_inputs then
-		return function()
-			local sub_runs, sub_closes, sub_exists_runs = {}, {}, {}
-			for i, input in ipairs(nested_rel.union_inputs) do
-				sub_runs[i], sub_closes[i], sub_exists_runs[i] = compile_relation_scan(input)()
-			end
-			local function run(params, row_ctx, row_fn)
-				for _, sub_run in ipairs(sub_runs) do
-					if sub_run(params, row_ctx, row_fn) then return true end
-				end
-			end
-			local function close()
-				for _, sub_close in ipairs(sub_closes) do sub_close() end
-			end
-			local function exists_run(params, row_ctx)
-				for _, sub_exists_run in ipairs(sub_exists_runs) do
-					if sub_exists_run(params, row_ctx) then return true end
-				end
-				return false
-			end
-			return run, close, exists_run
+--[[
+split rel.group_cols into plain group keys (op not in AGGREGATE_OPS)
+and aggregate outputs (q.count/min/max/sum/avg -- the only ops
+bind_expr allows through with allow_aggregate), building a
+stream_aggregate/hash_aggregate 'agg' list: one synthetic {op = 'key'}
+entry per key col (so the key ends up in the output row) plus the
+real aggregate entries, all carrying rel.group_cols' own out_col
+names.
+]]
+function split_group_cols(rel)
+	local key_cols, agg_list = {}, {}
+	for _, expr in ipairs(rel.group_cols) do
+		if AGGREGATE_OPS[expr[1]] then
+			local value_expr = expr[2]
+			assert(value_expr == nil
+				or (value_expr[1] == 'col' and value_expr.source),
+				'group_by(): only plain column aggregate arguments are'
+					..' implemented yet')
+			add(agg_list, {name = expr.name, op = expr[1],
+				member = value_expr and value_expr.source.name,
+				col = value_expr and value_expr[3]})
+		else
+			assert(expr[1] == 'col' and expr.source,
+				'group_by(): only plain column group keys are'
+					..' implemented yet')
+			add(key_cols, {name = expr.name, member = expr.source.name,
+				col = expr[3]})
 		end
 	end
-
-	local output_fields = nested_rel.output_fields
-	return function()
-		--[[
-		- persistent scan state for nested_rel's own access steps and
-		  exists() sources, built lazily on the first scan() call --
-		  row_ctx (what they chain onto) doesn't exist at opener time,
-		  same reason eval_exists_source()'s child_ctx is built lazily.
-		- neither params nor the seed row_ctx's identity changes across
-		  probes within one containing execution, so nothing scan()
-		  closes over needs rebuilding either -- only what happens at
-		  the leaf does, through current_row_handler.
-		]]
-		local opened, exists_closes, row_ctx, process, scan_params
-		local current_row_handler
-		local late_conditions = nested_rel.late_conditions
-		local function terminal_callback(rc)
-			for _, cond in ipairs(late_conditions) do
-				if not eval_residual(cond.expr, scan_params, rc) then return end
-			end
-			return current_row_handler(rc)
-		end
-		local function ensure_open(params, seed_row_ctx)
-			if opened then return end
-			scan_params = params
-			opened = open_access(nested_rel.access)
-			exists_closes = {} --{close_fn...}
-			for _, entry in ipairs(nested_rel.exists_sources) do
-				add(exists_closes, open_exists_source(entry))
-			end
-			row_ctx = seed_row_ctx and setmetatable({}, {__index = seed_row_ctx}) or {}
-			process = build_processors(nested_rel.access, params, row_ctx,
-				function() return terminal_callback(row_ctx) end)
-		end
-		--reseek: walk nested_rel's access with whatever seed_row_ctx
-		--currently holds, handing each surviving row to row_handler.
-		local function scan(params, seed_row_ctx, row_handler)
-			ensure_open(params, seed_row_ctx)
-			current_row_handler = row_handler
-			return process()
-		end
-		local function close()
-			if not opened then return end
-			close_access(opened)
-			for _, c in ipairs(exists_closes) do c() end
-		end
-
-		--one decode_col closure serves every row of every run() call;
-		--row is the only thing that changes between rows.
-		local row
-		local function decode_col(col) return row[output_fields[col].index] end
-
-		local function run(params, row_ctx_arg, row_fn)
-			for _, r in ipairs(build_rows(nested_rel, params, row_ctx_arg, scan)) do
-				row = r
-				if row_fn(decode_col) then return true end
-			end
-		end
-
-		--does anything survive: no projection, no distinct()/sort()/limit().
-		local function exists_run(params, seed_row_ctx)
-			if nested_rel.group_outputs then
-				local rows = {} --{row...}
-				local group_outputs, key_ids, agg_ids, streaming = choose_grouping(nested_rel)
-				local accumulate_row, finish
-				if streaming then
-					accumulate_row, finish =
-						streaming_grouping(nested_rel, params, group_outputs, key_ids, agg_ids, rows)
-				else
-					accumulate_row, finish =
-						hash_grouping(nested_rel, params, group_outputs, key_ids, agg_ids, rows)
-				end
-				scan(params, seed_row_ctx, accumulate_row)
-				finish()
-				return rows[1] ~= nil
-			end
-			return scan(params, seed_row_ctx, function() return true end) or false
-		end
-
-		return run, close, exists_run
+	local full_agg = {}
+	for i, kc in ipairs(key_cols) do
+		add(full_agg, {name = kc.name, op = 'key', part = i,
+			member = kc.member, col = kc.col})
 	end
+	for _, a in ipairs(agg_list) do add(full_agg, a) end
+	return key_cols, full_agg
 end
 
---MATERIALIZE AND THE PUBLIC API ---------------------------------------------
-
---turn this relation's filtered rows into returned rows.
-function build_rows(self, params, seed_row_ctx, scan)
-	local rows = {} --{row...}
-	local sort_keys = {} --{row->{val...}}: only filled when an explicit sort is needed
-	local sort_needed = self.sort_needed
-
-	if self.group_outputs then
-		if scan then
-			run_grouped(self, params, rows, seed_row_ctx, scan)
-		else
-			with_exists_sources(self, run_grouped, self, params, rows, seed_row_ctx)
-		end
-		if sort_needed then
-			for _, row in ipairs(rows) do
-				local key = {} --{val...}
-				for i, term in ipairs(self.order_by_terms) do
-					key[i] = order_key(term, row, nil)
-				end
-				sort_keys[row] = key
-			end
-		end
+--[[
+build the group_by()/aggregate stage of the pipeline: a grand total
+(no key cols -- aggregate()'s cols=nil path, one record, no order or
+grouping needed), streamed (rel.group_streaming: group_by()+aggregate(),
+reading straight off the pk stream), or hashed (aggregate(...,hash=true),
+reading straight off the pk stream too -- the fallback whenever grouped
+order isn't already free; only the grouping itself is unordered, not the
+column reads). having() is applied last, over whichever aggregate node
+was built.
+]]
+local function compile_group(node, rel)
+	local full_agg = rel.group_full_agg
+	if #rel.group_key_cols == 0 then
+		node = node:aggregate(full_agg)
+	elseif rel.group_streaming then
+		local cols = rel.group_stream_cols
+		node = node:group_by(cols):aggregate(full_agg, cols)
 	else
-		local outputs = self.select_outputs
-		local function add_row(row_ctx)
-			local row = project_row(outputs, row_ctx)
-			if sort_needed then
-				local key = {} --{val...}
-				for i, term in ipairs(self.order_by_terms) do
-					key[i] = order_key(term, row, row_ctx)
-				end
-				sort_keys[row] = key
-			end
-			add(rows, row)
+		node = node:aggregate(full_agg, rel.group_key_cols, true)
+	end
+	return apply_having(node, rel.having_conditions)
+end
+
+local function compile_terminal(db, rel)
+	assert(rel.out_cols, 'rows()/rows_array()/first()/one()/must_one() require'
+		..' select() or group_by()')
+	assert(not (rel.group_cols and rel.select_cols),
+		'select() after group_by() is not implemented yet')
+	local node
+	if rel.union_rels then
+		node = compile_terminal(db, rel.union_rels[1])
+		for i = 2, #rel.union_rels do
+			node = node:union(compile_terminal(db, rel.union_rels[i]))
 		end
-		if scan then
-			scan(params, seed_row_ctx, add_row)
-		else
-			with_exists_sources(self, run_filtered, self, params, add_row, seed_row_ctx)
+	elseif rel.group_cols then
+		node = compile_group(compile_step(db, rel), rel)
+	else
+		node = compile_step(db, rel):select(rel.output_descriptor)
+	end
+	if rel.distinct_cols then
+		node = node:distinct(rel.distinct_key_cols, not rel.distinct_streaming)
+	end
+	if rel.sort_needed then
+		node = node:sort(rel.sort_spec)
+	end
+	if rel._limit ~= nil then
+		local n = rel._limit
+		if type(n) == 'table' and n[1] == 'param' then
+			n = {arg = n[2]}
 		end
-	end
-
-	return finish_rows(self, params, rows, sort_needed, sort_keys)
-end
-
---[[
-- materialize a union relation's rows: each input read in full and
-  concatenated.
-- union is a bag union, never deduped -- wrap it with
-  from(union, alias):distinct() for set-union semantics.
-- count() sums each input's own count() instead, and exists() never
-  materializes rows -- both have their own handling elsewhere.
-- seed_row_ctx carries any outer row decoders into each union input.
-]]
-function union_rows(self, params, seed_row_ctx)
-	local rows = {} --{row...}
-	for _, input in ipairs(self.union_inputs) do
-		for _, row in ipairs(build_rows(input, params, seed_row_ctx)) do
-			add(rows, row)
+		local offset = rel._offset
+		if type(offset) == 'table' and offset[1] == 'param' then
+			offset = {arg = offset[2]}
 		end
+		node = node:limit(n, offset)
 	end
-	return rows
+	return node
 end
 
---[[
-- collect result rows for rows(), first(), one(), must_one(), and rows_array().
-- stop the scan once enough rows are produced.
-- early stop is allowed only before stages that need every row.
-- group(), distinct(), and explicit sort require all rows first.
-- limit is the caller terminal cap.
-- self.limit_rows adds query limit and offset.
-- pushable limit composes into one raw-scan cap.
-- leading offset rows are trimmed before returning.
-]]
-local function rows_array(self, params, limit, seed_row_ctx)
-	if self.union_inputs then
-		return union_rows(self, params, seed_row_ctx)
+--nesting a second call inside an unfinished iteration of the first
+--corrupts it -- prepare() a second rel instead.
+local function get_or_build_node(rel, field, builder)
+	if not rel.compiled then compile(rel) end
+	local node = rel[field]
+	if not node then
+		node = builder(rel.db, rel)
+		rel[field] = node
 	end
-	if self.group_outputs or self.distinct_rows or self.sort_needed then
-		return build_rows(self, params, seed_row_ctx)
-	end
-	local offset, cap = 0, limit
-	if self.limit_rows then
-		local n = eval_limit_value(self.limit_rows.n, params)
-		offset = self.limit_rows.offset and eval_limit_value(self.limit_rows.offset, params) or 0
-		cap = offset + (limit and math.min(n, limit) or n)
-	end
-	local outputs = self.select_outputs
-	local rows = {} --{row...}
-	with_exists_sources(self, run_filtered, self, params, function(row_ctx)
-		local row = project_row(outputs, row_ctx)
-		add(rows, row)
-		if cap and #rows >= cap then return true end
-	end, seed_row_ctx)
-	if offset > 0 then
-		local trimmed = {} --{row...}
-		for i = offset + 1, #rows do add(trimmed, rows[i]) end
-		rows = trimmed
-	end
-	return rows
+	return node
 end
 
---every terminal binds params after compiling. a name collected by
---add_param() during compile but absent here is a missing param, not a
---null one (null is the explicit `null` sentinel, never plain Lua nil).
-local function bind_params(rel, params)
-	params = params or empty
-	for _, name in ipairs(rel.params) do
-		assertf(params[name] ~= nil, 'missing param: %s', name)
-	end
-	return params
-end
-
-local function parse_row_args(shape, params) --shape [, params]
-	if type(shape) == 'table' then
-		--a table first argument is params, so shape and params cannot both be tables.
-		assert(params == nil, 'row shape must be the first argument')
-		return nil, shape
-	end
-	--only these two explicit shapes select a row representation; omitted means unpacked.
-	assert(shape == nil or shape == '[]' or shape == '{}',
-		"row shape must be '[]' or '{}'")
-	return shape, params
-end
-
-local function named_row(fields, row)
-	local named = {} --{name->value}
-	for i, name in ipairs(fields) do named[name] = row[i] end
-	return named
-end
-
-local function shape_row(fields, row, shape)
-	if shape == '[]' then return row end
-	if shape == '{}' then return named_row(fields, row) end
-	return unpack(row, 1, #fields)
+local function make_output_scan(rel)
+	return get_or_build_node(rel, '_rows_node', compile_terminal)
 end
 
 function Rel:rows(shape, params)
-	shape, params = parse_row_args(shape, params)
-	compile(self, 'rows', nil, true)
-	local rows = rows_array(self, bind_params(self, params), nil)
-	local i = 0
-	return function()
-		i = i + 1
-		local row = rows[i]
-		if row then return shape_row(self.returned_fields, row, shape) end
-	end
-end
-
---[[
-- first(), one(), and must_one() ask rows_array() for a small cap.
-- first() needs one row.
-- one() and must_one() need two rows to detect "more than one".
-- rows_array() decides whether the cap can stop the raw scan.
-]]
-
-function Rel:first(shape, params)
-	shape, params = parse_row_args(shape, params)
-	compile(self, 'first', nil, true)
-	local row = rows_array(self, bind_params(self, params), 1)[1]
-	if row then return shape_row(self.returned_fields, row, shape) end
-end
-
-function Rel:one(shape, params)
-	shape, params = parse_row_args(shape, params)
-	compile(self, 'one', nil, true)
-	local rows = rows_array(self, bind_params(self, params), 2)
-	assert(#rows <= 1, 'one() matched more than one row')
-	local row = rows[1]
-	if row then return shape_row(self.returned_fields, row, shape) end
-end
-
-function Rel:must_one(shape, params)
-	shape, params = parse_row_args(shape, params)
-	compile(self, 'must_one', nil, true)
-	local rows = rows_array(self, bind_params(self, params), 2)
-	assert(#rows == 1, 'must_one() matched '..#rows..' rows, expected exactly one')
-	return shape_row(self.returned_fields, rows[1], shape)
+	local scan = make_output_scan(self)
+	return scan:rows(shape, params)
 end
 
 function Rel:rows_array(shape, params)
-	shape, params = parse_row_args(shape, params)
-	compile(self, 'rows', nil, true)
-	local rows = rows_array(self, bind_params(self, params), nil)
-	if shape ~= '{}' then return rows end
-	local named = {} --{{name->value}...}
-	for i, row in ipairs(rows) do named[i] = named_row(self.returned_fields, row) end
-	return named
+	local scan = make_output_scan(self)
+	return scan:rows_array(shape, params)
 end
 
-function Rel:count(params)
-	compile(self, 'count', nil, true)
-	params = bind_params(self, params)
-	if self.union_inputs then
-		local n = 0
-		for _, input in ipairs(self.union_inputs) do
-			n = n + input:count(params)
-		end
-		return n
-	end
-	if self.group_outputs then
-		local rows = {} --{row...}
-		with_exists_sources(self, run_grouped, self, params, rows)
-		return #rows
-	end
-	if self.distinct_rows then
-		return #build_rows(self, params)
-	end
-	--count() needs every row.
-	--no early stop is possible.
-	--the answer changes with each matching row.
+function Rel:first(shape, params)
+	local scan = make_output_scan(self)
+	return scan:first(shape, params)
+end
+
+function Rel:one(shape, params)
+	local scan = make_output_scan(self)
+	return scan:one(shape, params)
+end
+
+function Rel:must_one(shape, params)
+	local scan = make_output_scan(self)
+	return scan:must_one(shape, params)
+end
+
+--[[
+count()/exists() don't need select()/group_by() at all -- unlike
+rows()/first()/one()/must_one(), they can answer from compile_step()'s
+raw filtered/joined stream directly, no projection needed. group_by()
+still applies: a group's having() can depend on fully accumulated
+aggregates, so a group only "exists"/counts once it's finished
+(compile_group already applies having()). distinct() changes count()'s
+answer (fewer rows) but never exists()'s: a row surviving distinct()
+never disappears to zero, so exists() skips it entirely and just
+checks the raw stream for any match.
+neither respects order_by()/limit(): order never changes a count or
+an existence check, and limit()+count()/exists() together isn't a
+combination that this API composes (unlike a real SQL subquery LIMIT).
+]]
+local function count_items(node, args)
+	node.reset(args)
 	local n = 0
-	with_exists_sources(self, run_filtered, self, params, function() n = n + 1 end)
+	while node.advance() do n = n + 1 end
+	node.close()
 	return n
 end
 
+local function compile_group_or_distinct(db, rel)
+	local node = compile_step(db, rel)
+	if rel.group_cols then
+		return compile_group(node, rel)
+	end
+	if rel.distinct_cols then
+		assert(rel.out_cols, 'distinct() requires select() or group_by()')
+		node = node:select(rel.output_descriptor)
+		return node:distinct(rel.distinct_key_cols, not rel.distinct_streaming)
+	end
+	return node
+end
+
+function Rel:count(params)
+	local node = get_or_build_node(self, '_count_node', compile_group_or_distinct)
+	return count_items(node, params)
+end
+
+local function compile_exists_node(db, rel)
+	local node = compile_step(db, rel)
+	if rel.group_cols then
+		node = compile_group(node, rel)
+	end
+	return node
+end
+
 function Rel:exists(params)
-	compile(self, 'exists', nil, true)
-	params = bind_params(self, params)
-	if self.union_inputs then
-		for _, input in ipairs(self.union_inputs) do
-			if input:exists(params) then return true end
-		end
-		return false
-	end
-	if self.group_outputs then
-		--a group exists only after it is finished.
-		--having() can depend on fully accumulated aggregates.
-		--grouped exists() needs the full group pass.
-		local rows = {} --{row...}
-		with_exists_sources(self, run_grouped, self, params, rows)
-		return rows[1] ~= nil
-	end
-	local found = false
-	with_exists_sources(self, run_filtered, self, params, function()
-		found = true
-		return true
-	end)
+	local node = get_or_build_node(self, '_exists_node', compile_exists_node)
+	local found = node:exists(params)
+	node.close()
 	return found
-end
-
-function Rel:prepare(terminal_kind)
-	compile(self, terminal_kind or 'rows', nil, true)
-	return self
-end
-
---describe one access step for explain().
---normal steps report one member.
---nested left-join fragment groups report inner steps under .nested.
-local function describe_step(step)
-	if step.nested then
-		local inner = {} --{step_desc...}
-		for _, s in ipairs(step.nested) do add(inner, describe_step(s)) end
-		return {join = 'left_join', nested = inner}
-	end
-	local plan = step.plan
-	return {
-		member = step.member.member,
-		join = step.join and step.join.kind or false,
-		scan = plan.schema and plan.schema.name or 'relation',
-		kind = plan.kind,
-		row_checks = #plan.residual,
-	}
-end
-
-function Rel:explain()
-	compile(self, 'explain', nil, true)
-	local steps = {} --{step_desc...}
-	for _, step in ipairs(self.access) do add(steps, describe_step(step)) end
-	local sort = self.order_by_terms ~= nil
-	local sort_pushed = sort and not self.sort_needed
-	--limit()/offset() pushes into the scan under rows_array() conditions.
-	--no group() or distinct() can require materialization.
-	--no explicit sort can be needed.
-	local limit = self.limit_rows ~= nil
-	local limit_pushed = limit
-		and not (self.group_outputs or self.distinct_rows or self.sort_needed)
-	return {
-		steps = steps,
-		group = self.group_outputs ~= nil,
-		distinct = self.distinct_rows or false,
-		sort = sort,
-		sort_pushed = sort_pushed,
-		limit = limit,
-		limit_pushed = limit_pushed,
-	}
 end

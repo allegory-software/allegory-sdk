@@ -2,743 +2,1195 @@ require'mdbx_scan'
 
 local test = setmetatable({}, {__newindex = function(t, k, v)
 	rawset(t, k, v)
-	rawset(t, #t + 1, k)
+	rawset(t, #t+1, k)
 end})
 
--- remove both files that an MDBX environment creates.
+local function test_file(name)
+	return '/tmp/sdk_mdbx_scan_test_'..name..'_'..uuid()..'.mdb'
+end
+
 local function cleanup(file)
 	os.remove(file)
 	os.remove(file..'-lck')
 end
 
--- run one test against a fresh database and always remove its files.
-local function with_db(name, fn)
-	local file = '/tmp/sdk_mdbx_scan_test_'..name..'_'..uuid()..'.mdb'
+--run f(db, file) against a fresh isolated db.
+local function with_db(name, f)
+	local file = test_file(name)
 	cleanup(file)
 	local db = mdbx_open(file)
-	local ok, err = xpcall(function()
-		db:begin'w'
-		db:create_table('items', {fields = {
-			{col = 'id', mdbx_type = 'u32', not_null = true},
-			{col = 'tenant_id', mdbx_type = 'u32', not_null = true},
-			{col = 'status', mdbx_type = 'utf8', maxlen = 16,
-				nozero = true, not_null = true},
-			{col = 'created_at', mdbx_type = 'u32', not_null = true},
-			{col = 'score', mdbx_type = 'i32'},
-			{col = 'rank', mdbx_type = 'i32', not_null = true},
-			{col = 'note', mdbx_type = 'utf8', maxlen = 32,
-				nozero = true},
-		}, pk = {'id'}})
-		db:add_index('items', {'status'})
-		db:add_index('items', {'score'})
-		local rank_index = {'rank'}
-		rank_index.desc = {true}
-		db:add_index('items', rank_index)
-		db:add_index('items', {'tenant_id', 'status', 'created_at'})
-		local created_desc_index = {'tenant_id', 'status', 'created_at'}
-		created_desc_index.desc = {false, false, true}
-		db:add_index('items', created_desc_index)
-		for _, row in ipairs{
-			{id = 1, tenant_id = 1, status = 'active',
-				created_at = 100, score = 10, rank = 10, note = 'one'},
-			{id = 2, tenant_id = 1, status = 'active',
-				created_at = 100, score = 20, rank = 20},
-			{id = 3, tenant_id = 1, status = 'active',
-				created_at = 200, score = 30, rank = 30,
-				note = 'three'},
-			{id = 4, tenant_id = 1, status = 'closed',
-				created_at = 150, score = 40, rank = 40,
-				note = 'four'},
-			{id = 5, tenant_id = 2, status = 'active',
-				created_at = 100, score = 50, rank = 50,
-				note = 'five'},
-		} do
-			db:insert('items', '{}', row)
-		end
-
-		db:create_table('entries', {fields = {
-			{col = 'tenant_id', mdbx_type = 'u32', not_null = true},
-			{col = 'id', mdbx_type = 'u32', not_null = true},
-			{col = 'status', mdbx_type = 'utf8', maxlen = 16,
-				nozero = true, not_null = true},
-		}, pk = {'tenant_id', 'id'}})
-		db:add_index('entries', {'status'})
-		for _, row in ipairs{
-			{tenant_id = 1, id = 1, status = 'active'},
-			{tenant_id = 1, id = 2, status = 'active'},
-			{tenant_id = 1, id = 4, status = 'active'},
-			{tenant_id = 2, id = 1, status = 'active'},
-			{tenant_id = 2, id = 3, status = 'active'},
-			{tenant_id = 3, id = 1, status = 'closed'},
-		} do
-			db:insert('entries', '{}', row)
-		end
-
-		local files_pk = {'tenant_id', 'path'}
-		files_pk.desc = {false, true}
-		db:create_table('files', {fields = {
-			{col = 'tenant_id', mdbx_type = 'u32', not_null = true},
-			{col = 'path', mdbx_type = 'utf8', maxlen = 64,
-				nozero = true, not_null = true},
-			{col = 'status', mdbx_type = 'utf8', maxlen = 16,
-				nozero = true, not_null = true},
-		}, pk = files_pk})
-		db:add_index('files', {'status'})
-		for _, row in ipairs{
-			{tenant_id = 1, path = 'invoices/2025/a',
-				status = 'ready'},
-			{tenant_id = 1, path = 'invoices/2026/a',
-				status = 'ready'},
-			{tenant_id = 1, path = 'invoices/2026/b',
-				status = 'ready'},
-			{tenant_id = 1, path = 'notes/a', status = 'ready'},
-			{tenant_id = 2, path = 'invoices/2026/c',
-				status = 'ready'},
-			{tenant_id = 1, path = 'invoices/2026/c',
-				status = 'closed'},
-		} do
-			db:insert('files', '{}', row)
-		end
-		db:commit()
-		fn(db)
-	end, debug.traceback)
+	local ok, err = xpcall(f, debug.traceback, db, file)
 	if db.env then db:close() end
 	cleanup(file)
 	assert(ok, err)
 end
 
--- add FK data for both join directions and self-joins.
-local function add_join_data(db)
+local function add_table_scanner_data(db)
 	db:begin'w'
-	db:create_table('customers', {fields = {
-		{col = 'id', mdbx_type = 'u32', not_null = true},
-		{col = 'name', mdbx_type = 'utf8', maxlen = 32,
-			nozero = true, not_null = true},
-	}, pk = {'id'}})
-	db:create_table('orders', {fields = {
-		{col = 'id', mdbx_type = 'u32', not_null = true},
-		{col = 'customer_id', mdbx_type = 'u32', not_null = true},
-	}, pk = {'id'}})
-	db:add_fk{table = 'orders', cols = {'customer_id'},
-		ref_table = 'customers', ref_cols = {'id'}}
-	for _, customer_row in ipairs{
-		{id = 1, name = 'Ada'},
-		{id = 2, name = 'Bob'},
-		{id = 3, name = 'Cyd'},
-	} do
-		db:insert('customers', '{}', customer_row)
-	end
-	for _, order_row in ipairs{
-		{id = 10, customer_id = 1},
-		{id = 11, customer_id = 1},
-		{id = 12, customer_id = 2},
-	} do
-		db:insert('orders', '{}', order_row)
-	end
-
-	db:create_table('invoices', {fields = {
-		{col = 'id', mdbx_type = 'u32', not_null = true},
-		{col = 'buyer_id', mdbx_type = 'u32', not_null = true},
-		{col = 'seller_id', mdbx_type = 'u32', not_null = true},
-	}, pk = {'id'}})
-	db:add_fk{table = 'invoices', cols = {'buyer_id'},
-		ref_table = 'customers', ref_cols = {'id'}}
-	db:add_fk{table = 'invoices', cols = {'seller_id'},
-		ref_table = 'customers', ref_cols = {'id'}}
-	db:insert('invoices', '{}', {id = 20, buyer_id = 1, seller_id = 2})
-	db:insert('invoices', '{}', {id = 21, buyer_id = 2, seller_id = 1})
-
-	db:create_table('employees', {fields = {
-		{col = 'id', mdbx_type = 'u32', not_null = true},
-		{col = 'manager_id', mdbx_type = 'u32'},
-		{col = 'name', mdbx_type = 'utf8', maxlen = 32,
-			nozero = true, not_null = true},
-	}, pk = {'id'}})
-	db:add_fk{table = 'employees', cols = {'manager_id'},
-		ref_table = 'employees', ref_cols = {'id'}}
-	db:insert('employees', '{}', {id = 1, name = 'CEO'})
-	db:insert('employees', '{}', {id = 2, manager_id = 1,
-		name = 'Lead'})
-	db:insert('employees', '{}', {id = 3, manager_id = 2,
-		name = 'Dev A'})
-	db:insert('employees', '{}', {id = 4, manager_id = 2,
-		name = 'Dev B'})
-
-	local account_pk = {'tenant_id', 'id'}
-	account_pk.desc = {false, true}
-	db:create_table('accounts', {fields = {
+	db:create_table('scan_rows', {fields = {
 		{col = 'tenant_id', mdbx_type = 'u32', not_null = true},
 		{col = 'id', mdbx_type = 'u32', not_null = true},
-	}, pk = account_pk})
-	db:create_table('tickets', {fields = {
-		{col = 'id', mdbx_type = 'u32', not_null = true},
+		{col = 'status', mdbx_type = 'utf8', maxlen = 16,
+			nozero = true, not_null = true},
+		{col = 'active', mdbx_type = 'bool', not_null = true},
+		{col = 'score', mdbx_type = 'i32'},
+	}, pk = {'tenant_id', 'id'}})
+	db:add_index('scan_rows', {'status'})
+	db:add_index('scan_rows', {'active'})
+	db:add_index('scan_rows', {'score'})
+	for _, row in ipairs{
+		{tenant_id = 1, id = 1, status = 'ready', active = false},
+		{tenant_id = 1, id = 2, status = 'ready', active = true,
+			score = 10},
+		{tenant_id = 1, id = 3, status = 'ready', active = false,
+			score = 20},
+		{tenant_id = 2, id = 1, status = 'ready', active = false,
+			score = 30},
+		{tenant_id = 2, id = 2, status = 'done', active = true},
+	} do
+		db:insert('scan_rows', '{}', row)
+	end
+
+	db:create_table('scan_files', {fields = {
 		{col = 'tenant_id', mdbx_type = 'u32', not_null = true},
-		{col = 'account_id', mdbx_type = 'u32', not_null = true},
-	}, pk = {'id'}})
-	db:add_fk{table = 'tickets', cols = {'tenant_id', 'account_id'},
-		ref_table = 'accounts', ref_cols = {'tenant_id', 'id'}}
-	db:insert('accounts', '{}', {tenant_id = 1, id = 10})
-	db:insert('accounts', '{}', {tenant_id = 1, id = 20})
-	db:insert('tickets', '{}', {id = 30, tenant_id = 1,
-		account_id = 10})
-	db:insert('tickets', '{}', {id = 31, tenant_id = 1,
-		account_id = 20})
+		{col = 'path', mdbx_type = 'utf8', maxlen = 32,
+			nozero = true, not_null = true},
+		{col = 'status', mdbx_type = 'utf8', maxlen = 16,
+			nozero = true, not_null = true},
+	}, pk = {'tenant_id', 'path'}})
+	db:add_index('scan_files', {'status'})
+	for _, row in ipairs{
+		{tenant_id = 1, path = 'a/1', status = 'ready'},
+		{tenant_id = 1, path = 'a/2', status = 'ready'},
+		{tenant_id = 1, path = 'b/1', status = 'ready'},
+		{tenant_id = 2, path = 'a/3', status = 'ready'},
+		{tenant_id = 1, path = 'a/4', status = 'done'},
+	} do
+		db:insert('scan_files', '{}', row)
+	end
 	db:commit()
 end
 
--- collect one compiled value from one scan execution.
-local function collect(scan, get, ...)
-	scan.reset(...)
+local function table_scanner_col_decoder(db, scan, col)
+	local cursor_schema = db:table_schema(scan.table)
+	local base_schema = cursor_schema.val_schema or cursor_schema
+	local pk_rec = cursor_schema.is_index and scan.val_rec or scan.key_rec
+	return db:col_decoder(cursor_schema, col,
+		cursor_schema.is_index and scan.key_rec or nil, pk_rec, function()
+			if not cursor_schema.is_index then
+				return scan.val_rec.data, scan.val_rec.size
+			end
+			local ok, data, sz = db:find_raw(base_schema.name,
+				pk_rec.data, pk_rec.size)
+			assert(ok)
+			return data, sz
+		end)
+end
+
+local function table_scanner_values(scan, get)
 	local t = {}
 	while scan.advance() do t[#t + 1] = get() end
-	return t
+	return cat(t, ',')
 end
 
--- collect one compiled value from each distinct physical key.
-local function collect_keys(scan, get, ...)
-	scan.reset(...)
-	local t = {}
-	while scan.advance(true) do t[#t + 1] = get() end
-	return t
-end
+function test.table_scanner_access_paths()
+	with_db('table_scanner_access_paths', function(db)
+		add_table_scanner_data(db)
+		db:begin'r'
 
--- collect two compiled values from each joined row.
-local function collect_pairs(scan, get_a, get_b, ...)
-	scan.reset(...)
-	local t = {}
-	while scan.advance() do
-		local a, b = get_a(), get_b()
-		t[#t + 1] = a..':'..(b == nil and 'nil' or b)
-	end
-	return t
-end
+		local full = db:table_scanner('scan_rows', {
+			{'tenant_id', dir = 'asc'},
+			{'id', dir = 'asc'},
+		})
+		local get_tenant = table_scanner_col_decoder(db, full, 'tenant_id')
+		local get_id = table_scanner_col_decoder(db, full, 'id')
+		full.reset()
+		assert(table_scanner_values(full, function()
+			return get_tenant()..':'..get_id()
+		end) == '1:1,1:2,1:3,2:1,2:2')
 
--- compare one value list with its comma-separated expected values.
-local function assert_values(values, expected)
-	assert(cat(values, ',') == expected,
-		'expected '..expected..', got '..cat(values, ','))
-end
+		local exact = db:table_scanner('scan_rows', {
+			{'tenant_id', '=', {arg = 1}},
+			{'id', '=', {arg = 2}},
+		})
+		get_id = table_scanner_col_decoder(db, exact, 'id')
+		exact.reset{1, 2}
+		assert(table_scanner_values(exact, get_id) == '2')
+		exact.reset{9, 9}
+		assert(table_scanner_values(exact, get_id) == '')
 
--- use the base-table PK for a complete exact lookup.
-function test.exact_pk()
-	with_db('exact_pk', function(db)
-		db:atomic('r', function()
-			local scan = db:scan('items', 'id')
-			local get_id = scan.col_decoder'id'
-			local get_note = scan.col_decoder'note'
-			scan.reset(3)
-			assert(scan.advance())
-			assert(get_id() == 3 and get_note() == 'three')
-			assert(scan.advance() == nil)
-			scan.reset(999)
-			assert(scan.advance() == nil)
-			scan.close()
-		end)
-	end)
-end
+		local range = db:table_scanner('scan_rows', {
+			{'tenant_id', '=', {arg = 1}},
+			{'id', 'range', '>=', {arg = 2}, '<=', {arg = 3},
+				dir = 'desc'},
+		})
+		get_id = table_scanner_col_decoder(db, range, 'id')
+		range.reset{1, 1, 3}
+		assert(table_scanner_values(range, get_id) == '3,2,1')
 
--- scan every duplicate under one exact secondary-index key.
-function test.exact_index()
-	with_db('exact_index', function(db)
-		db:atomic('r', function()
-			local scan = db:scan('items', 'status, id asc')
-			local get_id = scan.col_decoder'id'
-			local get_status = scan.col_decoder'status'
-			local get_note = scan.col_decoder'note'
-			assert_values(collect(scan, get_id, 'active'),
-				'1,2,3,5')
-			scan.reset('active')
-			assert(scan.advance())
-			assert(get_id() == 1 and get_status() == 'active')
-			assert(get_note() == 'one')
-			assert(scan.advance())
-			assert(get_id() == 2 and get_note() == nil)
-			local e = scan.explain()
-			assert(e.key == 'items/status', e.key)
-			assert(e.order[1] == 'id asc', e.order[1])
-			scan.close()
-		end)
-	end)
-end
+		local index = db:table_scanner('scan_rows/status', {
+			{'status', '=', {arg = 1}},
+			{'tenant_id', dir = 'asc'},
+			{'id', dir = 'asc'},
+		})
+		get_tenant = table_scanner_col_decoder(db, index, 'tenant_id')
+		get_id = table_scanner_col_decoder(db, index, 'id')
+		index.reset{'ready'}
+		assert(table_scanner_values(index, function()
+			return get_tenant()..':'..get_id()
+		end) == '1:1,1:2,1:3,2:1')
 
--- follow equality columns in key-prefix order before the ranged field.
-function test.composite_range_asc()
-	with_db('composite_range_asc', function(db)
-		db:atomic('r', function()
-			local scan = db:scan('items',
-				'tenant_id, status, created_at [:] asc, id asc')
-			local get_id = scan.col_decoder'id'
-			assert_values(collect(scan, get_id, 1, 'active', 100, 200),
-				'1,2,3')
-			assert(scan.explain().key
-				== 'items/tenant_id,status,created_at')
-			scan.close()
-		end)
-	end)
-end
+		local status_prefix = db:table_scanner('scan_rows/status', {
+			{'status', 'starts', {arg = 1}, dir = 'asc'},
+			{'tenant_id', dir = 'asc'},
+			{'id', dir = 'asc'},
+		})
+		get_tenant = table_scanner_col_decoder(db, status_prefix, 'tenant_id')
+		get_id = table_scanner_col_decoder(db, status_prefix, 'id')
+		status_prefix.reset{'rea'}
+		assert(table_scanner_values(status_prefix, function()
+			return get_tenant()..':'..get_id()
+		end) == '1:1,1:2,1:3,2:1')
+		status_prefix.reset{'x'}
+		assert(table_scanner_values(status_prefix, get_id) == '')
 
--- walk both the range keys and duplicate PKs backward.
-function test.composite_range_desc()
-	with_db('composite_range_desc', function(db)
-		db:atomic('r', function()
-			local scan = db:scan('items',
-				'tenant_id, status, created_at [:] desc, id desc')
-			local get_id = scan.col_decoder'id'
-			assert_values(collect(scan, get_id, 1, 'active', 100, 200),
-				'3,2,1')
-			scan.close()
-		end)
-	end)
-end
-
--- select the descending index when only its reverse has the requested order.
-function test.mixed_index_order()
-	with_db('mixed_index_order', function(db)
-		db:atomic('r', function()
-			local scan = db:scan('items',
-				'tenant_id, status, created_at [:] asc, id desc')
-			assert_values(collect(scan, scan.col_decoder'id',
-				1, 'active', 100, 200), '2,1,3')
-			local e = scan.explain()
-			assert(e.key == 'items/tenant_id,status,created_at:desc')
-			assert(e.reverse)
-			scan.close()
-		end)
-	end)
-end
-
--- honor every open and closed range-bound combination.
-function test.range_bounds()
-	with_db('range_bounds', function(db)
-		db:atomic('r', function()
-			local function ids(lo_op, hi_op, lo, hi)
-				local open = lo_op == 'gt' and '(' or '['
-				local close = hi_op == 'le' and ']' or ')'
-				local scan = db:scan('items',
-					'score '..open..':'..close..' asc, id asc')
-				local values = collect(scan, scan.col_decoder'id', lo, hi)
-				scan.close()
-				return values
+		local groups = db:table_scanner('scan_rows/status', {
+			{'status', dir = 'asc'},
+			{'tenant_id', dir = 'asc'},
+			{'id', dir = 'asc'},
+		})
+		local get_status = table_scanner_col_decoder(db, groups, 'status')
+		get_tenant = table_scanner_col_decoder(db, groups, 'tenant_id')
+		get_id = table_scanner_col_decoder(db, groups, 'id')
+		local grouped = {}
+		groups.reset()
+		while groups.advance_key() do
+			local pks = {get_tenant()..':'..get_id()}
+			while groups.advance_pk() do
+				pks[#pks + 1] = get_tenant()..':'..get_id()
 			end
-			assert_values(ids('ge', 'le', 20, 40), '2,3,4')
-			assert_values(ids('gt', 'le', 20, 40), '3,4')
-			assert_values(ids('ge', 'lt', 20, 40), '2,3')
-			assert_values(ids('ge', nil, 40), '4,5')
-			assert_values(ids(nil, 'le', nil, 20), '1,2')
-			assert_values(ids('gt', 'lt', 20, 20), '')
-			assert_values(ids('ge', 'le', 40, 20), '')
-		end)
-	end)
-end
+			grouped[#grouped + 1] = get_status()..'='..cat(pks, ',')
+		end
+		assert(cat(grouped, ';') == 'done=2:2;ready=1:1,1:2,1:3,2:1')
 
--- map logical bounds through a descending physical key encoding.
-function test.descending_key_range()
-	with_db('descending_key_range', function(db)
-		db:atomic('r', function()
-			local function ids(rank_dir, id_dir)
-				local scan = db:scan('items',
-					'rank [:] '..rank_dir..', id '..id_dir)
-				local values = collect(scan, scan.col_decoder'id', 20, 40)
-				scan.close()
-				return values
-			end
-			assert_values(ids('desc', 'asc'), '4,3,2')
-			assert_values(ids('asc', 'desc'), '2,3,4')
-		end)
-	end)
-end
+		local pk_range = db:table_scanner('scan_rows/status', {
+			{'status', '=', {arg = 1}},
+			{'tenant_id', '=', {arg = 2}},
+			{'id', 'range', '>=', {arg = 3}, '<=', {arg = 4},
+				dir = 'desc'},
+		})
+		get_id = table_scanner_col_decoder(db, pk_range, 'id')
+		pk_range.reset{'ready', 1, 1, 3}
+		assert(table_scanner_values(pk_range, get_id) == '3,2,1')
 
--- require explicit full scans and honor both PK cursor directions.
-function test.full_scan()
-	with_db('full_scan', function(db)
-		db:atomic('r', function()
-			local asc = db:scan('items', '')
-			local desc = db:scan('items', 'id desc')
-			assert_values(collect(asc, asc.col_decoder'id'), '1,2,3,4,5')
-			assert_values(collect(desc, desc.col_decoder'id'), '5,4,3,2,1')
-			asc.close()
-			desc.close()
-		end)
-	end)
-end
+		local prefix = db:table_scanner('scan_files/status', {
+			{'status', '=', {arg = 1}},
+			{'tenant_id', '=', {arg = 2}},
+			{'path', 'starts', {arg = 3}, dir = 'desc'},
+		})
+		local get_path = table_scanner_col_decoder(db, prefix, 'path')
+		prefix.reset{'ready', 1, 'a/'}
+		assert(table_scanner_values(prefix, get_path) == 'a/2,a/1')
+		prefix.reset{'ready', 1, 'a/1'}
+		assert(table_scanner_values(prefix, get_path) == 'a/1')
+		prefix.reset{'ready', 1, 'z/'}
+		assert(table_scanner_values(prefix, get_path) == '')
 
--- return nil from a nullable value-field getter.
-function test.null_output()
-	with_db('null_output', function(db)
-		db:atomic('r', function()
-			local scan = db:scan('items', 'id')
-			local get_note = scan.col_decoder'note'
-			scan.reset(2)
-			assert(scan.advance())
-			assert(get_note() == nil)
-			assert(scan.advance() == nil)
+		local prefix_asc = db:table_scanner('scan_files/status', {
+			{'status', '=', {arg = 1}},
+			{'tenant_id', '=', {arg = 2}},
+			{'path', 'starts', {arg = 3}, dir = 'asc'},
+		})
+		get_path = table_scanner_col_decoder(db, prefix_asc, 'path')
+		prefix_asc.reset{'ready', 1, 'a/'}
+		assert(table_scanner_values(prefix_asc, get_path) == 'a/1,a/2')
+
+		for _, scan in ipairs{
+			full, exact, range, index, status_prefix, groups, pk_range,
+			prefix, prefix_asc,
+		} do
 			scan.close()
-		end)
+		end
+		db:commit()
 	end)
 end
 
--- reuse one scan and its cursor with different parameters.
-function test.reuse()
-	with_db('reuse', function(db)
-		db:atomic('r', function()
-			local scan = db:scan('items', 'status, id asc')
-			local get_id = scan.col_decoder'id'
-			assert_values(collect(scan, get_id, 'active'),
-				'1,2,3,5')
-			assert_values(collect(scan, get_id, 'closed'), '4')
-			scan.close()
-		end)
+function test.table_scanner_merge_union()
+	with_db('table_scanner_merge_union', function(db)
+		add_table_scanner_data(db)
+		db:begin'r'
+
+		local function pk_of(db, scan)
+			local get_tenant = table_scanner_col_decoder(db, scan, 'tenant_id')
+			local get_id = table_scanner_col_decoder(db, scan, 'id')
+			return get_tenant()..':'..get_id()
+		end
+
+		--same value on both sides: dedups down to the plain single-scan
+		--result, not doubled.
+		local ready1 = db:table_scanner('scan_rows/status', {
+			{'status', '=', {value = 'ready'}},
+			{'tenant_id', dir = 'asc'}, {'id', dir = 'asc'},
+		})
+		local ready2 = db:table_scanner('scan_rows/status', {
+			{'status', '=', {value = 'ready'}},
+			{'tenant_id', dir = 'asc'}, {'id', dir = 'asc'},
+		})
+		local dup = ready1:merge_union(ready2)
+		dup.reset()
+		assert(table_scanner_values(dup, function() return pk_of(db, dup) end)
+			== '1:1,1:2,1:3,2:1')
+		dup.close()
+
+		--the same index key needs its duplicate PK as the tie-breaker.
+		local ready_tail = db:table_scanner('scan_rows/status', {
+			{'status', '=', {value = 'ready'}},
+			{'tenant_id', '=', {value = 1}}, {'id', '>=', {value = 2}},
+		})
+		local ready_head = db:table_scanner('scan_rows/status', {
+			{'status', '=', {value = 'ready'}},
+			{'tenant_id', '=', {value = 1}}, {'id', '<=', {value = 2}},
+		})
+		local overlap = ready_tail:merge_union(ready_head)
+		overlap.reset()
+		assert(table_scanner_values(overlap,
+			function() return pk_of(db, overlap) end) == '1:1,1:2,1:3')
+		overlap.close()
+
+		--different index keys stay in index order, not primary-key order.
+		local act_true = db:table_scanner('scan_rows/active', {
+			{'active', '=', {value = true}},
+			{'tenant_id', dir = 'asc'}, {'id', dir = 'asc'},
+		})
+		local act_false = db:table_scanner('scan_rows/active', {
+			{'active', '=', {value = false}},
+			{'tenant_id', dir = 'asc'}, {'id', dir = 'asc'},
+		})
+		local merged = act_true:merge_union(act_false)
+		merged.reset()
+		assert(table_scanner_values(merged, function() return pk_of(db, merged) end)
+			== '1:1,1:3,2:1,1:2,2:2')
+		merged.close()
+
+		--reverse direction.
+		local act_true_desc = db:table_scanner('scan_rows/active', {
+			{'active', '=', {value = true}},
+			{'tenant_id', dir = 'desc'}, {'id', dir = 'desc'},
+		})
+		local act_false_desc = db:table_scanner('scan_rows/active', {
+			{'active', '=', {value = false}},
+			{'tenant_id', dir = 'desc'}, {'id', dir = 'desc'},
+		})
+		local merged_desc = act_true_desc:merge_union(act_false_desc)
+		merged_desc.reset()
+		assert(table_scanner_values(merged_desc,
+			function() return pk_of(db, merged_desc) end)
+			== '2:2,1:2,2:1,1:3,1:1')
+		merged_desc.close()
+
+		--pairwise chaining: a third input duplicating the first's value
+		--still dedups, across two merge_union() layers.
+		local ready3 = db:table_scanner('scan_rows/status', {
+			{'status', '=', {value = 'ready'}},
+			{'tenant_id', dir = 'asc'}, {'id', dir = 'asc'},
+		})
+		local done1 = db:table_scanner('scan_rows/status', {
+			{'status', '=', {value = 'done'}},
+			{'tenant_id', dir = 'asc'}, {'id', dir = 'asc'},
+		})
+		local ready4 = db:table_scanner('scan_rows/status', {
+			{'status', '=', {value = 'ready'}},
+			{'tenant_id', dir = 'asc'}, {'id', dir = 'asc'},
+		})
+		local chained = ready3:merge_union(done1):merge_union(ready4)
+		chained.reset()
+		assert(table_scanner_values(chained, function() return pk_of(db, chained) end)
+			== '2:2,1:1,1:2,1:3,2:1')
+		chained.close()
+
+		--mismatched tables are rejected.
+		local files = db:table_scanner('scan_files/status', {
+			{'status', '=', {value = 'ready'}},
+		})
+		local rows = db:table_scanner('scan_rows/status', {
+			{'status', '=', {value = 'ready'}},
+		})
+		assert(not pcall(function() return files:merge_union(rows) end))
+		files.close()
+		rows.close()
+
+		db:commit()
 	end)
 end
 
--- reset a cursor after iteration stops before its last row.
-function test.reset_after_early_stop()
-	with_db('reset_after_early_stop', function(db)
-		db:atomic('r', function()
-			local scan = db:scan('items', 'status, id asc')
-			local get_id = scan.col_decoder'id'
-			scan.reset('active')
-			assert(scan.advance() and get_id() == 1)
-			scan.reset('closed')
-			assert(scan.advance() and get_id() == 4)
-			assert(scan.advance() == nil)
-			scan.close()
-		end)
+function test.table_scanner_max_bounds()
+	with_db('table_scanner_max_bounds', function(db)
+		db:begin'w'
+		db:create_table('scan_max', {fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:insert('scan_max', 'id', 1)
+		db:insert('scan_max', 'id', 0xffffffff)
+		db:commit()
+		db:begin'r'
+
+		local gt = db:table_scanner('scan_max', {
+			{'id', '>', {arg = 1}},
+		})
+		local get_id = table_scanner_col_decoder(db, gt, 'id')
+		gt.reset{0xffffffff}
+		assert(table_scanner_values(gt, get_id) == '')
+
+		local le = db:table_scanner('scan_max', {
+			{'id', '<=', {arg = 1}},
+		})
+		get_id = table_scanner_col_decoder(db, le, 'id')
+		le.reset{0xffffffff}
+		assert(table_scanner_values(le, get_id) == '1,4294967295')
+
+		gt.close()
+		le.close()
+		db:commit()
 	end)
 end
 
--- reopen owned cursors when the next execution uses a new transaction.
-function test.reuse_across_transactions()
-	with_db('reuse_across_transactions', function(db)
-		local scan, get_id
-		db:atomic('r', function()
-			scan = db:scan('items', 'id')
-			get_id = scan.col_decoder'id'
-			assert_values(collect(scan, get_id, 1), '1')
-		end)
-		db:atomic('r', function()
-			assert_values(collect(scan, get_id, 5), '5')
-			scan.close()
-			assert_values(collect(scan, get_id, 2), '2')
-			scan.close()
-		end)
-	end)
-end
+function test.table_scanner_descending_ranges()
+	with_db('table_scanner_descending_ranges', function(db)
+		db:begin'w'
+		db:create_table('scan_desc', {fields = {
+			{col = 'tenant_id', mdbx_type = 'u32', not_null = true},
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'status', mdbx_type = 'utf8', maxlen = 16,
+				nozero = true, not_null = true},
+		}, pk = {
+			'tenant_id', 'id', desc = {false, true},
+		}})
+		db:add_index('scan_desc', {'status'})
+		for _, row in ipairs{
+			{1, 1, 'ready'},
+			{1, 2, 'ready'},
+			{1, 3, 'ready'},
+			{1, 4, 'ready'},
+			{2, 2, 'ready'},
+		} do
+			db:insert('scan_desc', 'tenant_id id status', unpack(row))
+		end
+		db:commit()
+		db:begin'r'
 
--- skip duplicate PKs when advancing distinct physical index keys.
-function test.next_key()
-	with_db('next_key', function(db)
-		db:atomic('r', function()
-			local scan = db:scan('items',
-				'tenant_id, status, created_at [:] asc, id asc')
-			assert_values(collect_keys(scan, scan.col_decoder'id',
-				1, 'active', 100, 200), '1,3')
-			scan.close()
-		end)
-	end)
-end
+		local full = db:table_scanner('scan_desc', {
+			{'tenant_id', dir = 'asc'},
+			{'id', dir = 'desc'},
+		})
+		local get_tenant = table_scanner_col_decoder(db, full, 'tenant_id')
+		local get_id = table_scanner_col_decoder(db, full, 'id')
+		full.reset()
+		assert(table_scanner_values(full, function()
+			return get_tenant()..':'..get_id()
+		end) == '1:4,1:3,1:2,1:1,2:2')
 
--- apply a range to the implicit single-column PK index suffix.
-function test.pk_suffix_range()
-	with_db('pk_suffix_range', function(db)
-		db:atomic('r', function()
-			local scan = db:scan('items', 'status, id [:] desc')
-			local get_id = scan.col_decoder'id'
-			assert_values(collect(scan, get_id, 'active', 2, 5), '5,3,2')
-			assert_values(collect_keys(scan, get_id, 'active', 2, 5), '5')
-			scan.close()
-		end)
-	end)
-end
+		local reverse = db:table_scanner('scan_desc', {
+			{'tenant_id', dir = 'desc'},
+			{'id', dir = 'asc'},
+		})
+		get_tenant = table_scanner_col_decoder(db, reverse, 'tenant_id')
+		get_id = table_scanner_col_decoder(db, reverse, 'id')
+		reverse.reset()
+		assert(table_scanner_values(reverse, function()
+			return get_tenant()..':'..get_id()
+		end) == '2:2,1:1,1:2,1:3,1:4')
 
--- apply equality and range bounds to a fixed composite PK suffix.
-function test.composite_pk_suffix()
-	with_db('composite_pk_suffix', function(db)
-		db:atomic('r', function()
-			local scan = db:scan('entries',
-				'status, tenant_id [:] desc, id desc')
-			local get_tenant = scan.col_decoder'tenant_id'
-			local get_id = scan.col_decoder'id'
-			scan.reset('active', 1, 2)
-			local rows = {}
-			while scan.advance() do
-				rows[#rows + 1] = get_tenant()..':'..get_id()
-			end
-			assert_values(rows, '2:3,2:1,1:4,1:2,1:1')
-			scan.close()
-		end)
-	end)
-end
-
--- apply a prefix bound to the implicit variable-size PK suffix.
-function test.pk_suffix_starts()
-	with_db('pk_suffix_starts', function(db)
-		db:atomic('r', function()
-			local function paths(dir)
-				local scan = db:scan('files',
-					'status, tenant_id, path ^ '..dir)
-				local values = collect(scan, scan.col_decoder'path',
-					'ready', 1, 'invoices/2026/')
-				scan.close()
-				return values
-			end
-			assert_values(paths'desc',
-				'invoices/2026/b,invoices/2026/a')
-			assert_values(paths'asc',
-				'invoices/2026/a,invoices/2026/b')
-		end)
-	end)
-end
-
--- concatenate distinct equality scans in the input value order.
-function test.in_values()
-	with_db('in_values', function(db)
-		db:atomic('r', function()
-			local scan = db:scan('items',
-				'tenant_id, status, created_at [:] asc, id asc')
-			local iter = scan:in_('status', {
-				'closed', 'active', 'closed',
+		for _, range_test in ipairs{
+			{{'id', '>', {arg = 1}, dir = 'desc'}, {2}, '4,3'},
+			{{'id', '>=', {arg = 1}, dir = 'desc'}, {2}, '4,3,2'},
+			{{'id', '<', {arg = 1}, dir = 'desc'}, {3}, '2,1'},
+			{{'id', '<=', {arg = 1}, dir = 'desc'}, {3}, '3,2,1'},
+			{{'id', 'range', '>', {arg = 1}, '<=', {arg = 2},
+				dir = 'desc'}, {1, 3}, '3,2'},
+			{{'id', 'range', '>=', {arg = 1}, '<', {arg = 2},
+				dir = 'desc'}, {1, 3}, '2,1'},
+			{{'id', '>', {arg = 1}, dir = 'desc'}, {4}, ''},
+			{{'id', '<=', {arg = 1}, dir = 'desc'}, {0}, ''},
+			{{'id', 'range', '>=', {arg = 1}, '<=', {arg = 2},
+				dir = 'desc'}, {3, 2}, ''},
+		} do
+			local term, args, expected = unpack(range_test, 1, 3)
+			local scan = db:table_scanner('scan_desc', {
+				{'tenant_id', '=', {value = 1}},
+				term,
 			})
-			local get_id = iter.col_decoder'id'
-			assert_values(collect(iter, get_id, 1, 100, 200), '4,1,2,3')
-			assert(#iter.explain().order == 0)
-			iter.close()
-			local active = db:scan('items',
-				'tenant_id, status, created_at [:] asc, id asc')
-				:in_('status', {'active'})
-			assert_values(collect_keys(active, active.col_decoder'id',
-				1, 100, 200), '1,3')
-			active.close()
-		end)
-	end)
-end
-
--- run one Lua predicate for every candidate row.
-function test.filter()
-	with_db('filter', function(db)
-		db:atomic('r', function()
-			local scan = db:scan('items', 'id asc')
-			local get_id = scan.col_decoder'id'
-			scan:filter(function() return get_id() % 2 == 1 end)
-			assert_values(collect(scan, get_id), '1,3,5')
+			get_id = table_scanner_col_decoder(db, scan, 'id')
+			scan.reset(args)
+			assert(table_scanner_values(scan, get_id) == expected)
 			scan.close()
-		end)
+		end
+
+		local pk_range = db:table_scanner('scan_desc/status', {
+			{'status', '=', {value = 'ready'}},
+			{'tenant_id', '=', {arg = 1}},
+			{'id', 'range', '>', {arg = 2}, '<=', {arg = 3},
+				dir = 'desc'},
+		})
+		get_id = table_scanner_col_decoder(db, pk_range, 'id')
+		pk_range.reset{1, 1, 3}
+		assert(table_scanner_values(pk_range, get_id) == '3,2')
+
+		local pk_range_asc = db:table_scanner('scan_desc/status', {
+			{'status', '=', {value = 'ready'}},
+			{'tenant_id', '=', {arg = 1}},
+			{'id', 'range', '>', {arg = 2}, '<=', {arg = 3},
+				dir = 'asc'},
+		})
+		get_id = table_scanner_col_decoder(db, pk_range_asc, 'id')
+		pk_range_asc.reset{1, 1, 3}
+		assert(table_scanner_values(pk_range_asc, get_id) == '2,3')
+
+		full.close()
+		reverse.close()
+		pk_range.close()
+		pk_range_asc.close()
+		db:commit()
 	end)
 end
 
--- skip values in one hash while preserving the underlying scan order.
-function test.not_in_values()
-	with_db('not_in_values', function(db)
-		db:atomic('r', function()
-			local scan = db:scan('items', 'id asc')
-			local iter = scan:not_in('id', {2, 4, 2})
-			local get_id = iter.col_decoder'id'
-			assert_values(collect(iter, get_id), '1,3,5')
-			assert(iter.explain().order[1] == 'id asc')
-			iter.close()
+function test.table_scanner_nil_null_and_false()
+	with_db('table_scanner_nil_null_and_false', function(db)
+		add_table_scanner_data(db)
+		db:begin'r'
 
-			local nullable = db:scan('items', 'id asc')
-				:not_in('note', {null, 'one'})
-			assert_values(collect(nullable, nullable.col_decoder'id'),
-				'3,4,5')
-			nullable.close()
-		end)
-	end)
-end
+		local active = db:table_scanner('scan_rows/active', {
+			{'active', '=', {arg = 1}},
+			{'tenant_id', dir = 'asc'},
+			{'id', dir = 'asc'},
+		})
+		local get_tenant = table_scanner_col_decoder(db, active, 'tenant_id')
+		local get_id = table_scanner_col_decoder(db, active, 'id')
+		active.reset{false}
+		assert(table_scanner_values(active, function()
+			return get_tenant()..':'..get_id()
+		end) == '1:1,1:3,2:1')
 
--- filter only the representative row returned by advance(true).
-function test.not_in_next_key()
-	with_db('not_in_next_key', function(db)
-		db:atomic('r', function()
-			local scan = db:scan('items',
-				'tenant_id, status, created_at [:] asc, id asc')
-			local iter = scan:not_in('id', {1})
-			assert_values(collect_keys(iter, iter.col_decoder'id',
-				1, 'active', 100, 200), '3')
-			iter.close()
-		end)
-	end)
-end
-
--- follow one FK toward children and toward a parent.
-function test.fk_join_directions()
-	with_db('fk_join_directions', function(db)
-		add_join_data(db)
-		db:atomic('r', function()
-			local children = db:scan('customers', 'id asc')
-				:fk_join('orders', 'customer_id')
-			assert_values(collect_pairs(children,
-				children.col_decoder('customers', 'id'),
-				children.col_decoder('orders', 'id')),
-				'1:10,1:11,2:12')
-			children.close()
-
-			local parents = db:scan('orders',
-				'customer_id asc, id asc')
-				:fk_join('orders', 'customer_id')
-			assert_values(collect_pairs(parents,
-				parents.col_decoder('orders', 'id'),
-				parents.col_decoder('customers', 'id')),
-				'10:1,11:1,12:2')
-			parents.close()
-
-			local left = db:scan('customers', 'id asc')
-				:fk_left_join('orders', 'customer_id')
-			assert_values(collect_pairs(left,
-				left.col_decoder('customers', 'id'),
-				left.col_decoder('orders', 'id')),
-				'1:10,1:11,2:12,3:nil')
-			left.close()
-		end)
-	end)
-end
-
--- use FK columns to select one of two relationships between two tables.
-function test.fk_join_columns()
-	with_db('fk_join_columns', function(db)
-		add_join_data(db)
-		db:atomic('r', function()
-			local missing_fk_cols = db:scan('invoices', 'id asc')
-			assert(not pcall(function()
-				missing_fk_cols:fk_join('invoices')
-			end))
-			missing_fk_cols.close()
-
-			local buyers = db:scan('invoices', 'id asc')
-				:fk_join('invoices', 'buyer_id')
-			assert_values(collect_pairs(buyers,
-				buyers.col_decoder('invoices', 'id'),
-				buyers.col_decoder('customers', 'id')),
-				'20:1,21:2')
-			buyers.close()
-
-			local sold = db:scan('customers', 'id asc')
-				:fk_join('invoices', 'seller_id')
-			assert_values(collect_pairs(sold,
-				sold.col_decoder('customers', 'id'),
-				sold.col_decoder('invoices', 'id')),
-				'1:21,2:20')
-			sold.close()
-		end)
-	end)
-end
-
--- name both endpoints of a self-referencing FK with join aliases.
-function test.self_join()
-	with_db('self_join', function(db)
-		add_join_data(db)
-		db:atomic('r', function()
-			local managers = db:scan('employees', 'id asc')
-				:left_join('employees@manager.id = employees.manager_id')
-			assert_values(collect_pairs(managers,
-				managers.col_decoder('employees', 'id'),
-				managers.col_decoder('manager', 'id')),
-				'1:nil,2:1,3:2,4:2')
-			managers.close()
-
-			local reports = db:scan('employees', 'id asc')
-				:join('employees@report.manager_id = employees.id')
-			assert_values(collect_pairs(reports,
-				reports.col_decoder('employees', 'id'),
-				reports.col_decoder('report', 'id')),
-				'1:2,2:3,2:4')
-			reports.close()
-
-			-- fk_join cannot resolve a self-referencing FK.
-			assert(not pcall(function()
-				db:scan('employees', 'id asc')
-					:fk_join('employees', 'manager_id')
-			end))
-		end)
-	end)
-end
-
--- read a column from one joined table when chaining self-joins.
-function test.self_join_chain()
-	with_db('self_join_chain', function(db)
-		add_join_data(db)
-		db:atomic('r', function()
-			local scan = db:scan('employees', 'id asc')
-				:join('employees@manager.id = employees.manager_id')
-				:join('employees@grandmanager.id = manager.manager_id')
-			assert_values(collect_pairs(scan,
-				scan.col_decoder('employees', 'id'),
-				scan.col_decoder('grandmanager', 'id')),
-				'3:1,4:1')
-			scan.close()
-		end)
-	end)
-end
-
--- convert composite FK fields into a descending parent PK.
-function test.fk_composite_key()
-	with_db('fk_composite_key', function(db)
-		add_join_data(db)
-		db:atomic('r', function()
-			local parents = db:scan('tickets', 'id asc')
-				:fk_join('tickets', 'tenant_id,account_id')
-			assert_values(collect_pairs(parents,
-				parents.col_decoder('tickets', 'id'),
-				parents.col_decoder('accounts', 'id')),
-				'30:10,31:20')
-			parents.close()
-
-			local children = db:scan('accounts',
-				'tenant_id asc, id desc')
-				:fk_join('tickets', 'tenant_id,account_id')
-			assert_values(collect_pairs(children,
-				children.col_decoder('accounts', 'id'),
-				children.col_decoder('tickets', 'id')),
-				'20:31,10:30')
-			children.close()
-		end)
-	end)
-end
-
--- reject scans for which no one key enforces every condition.
-function test.missing_index()
-	with_db('missing_index', function(db)
-		db:atomic('r', function()
-			local ok, err = pcall(function()
-				db:scan('items', 'status, score')
+		local score_eq = db:table_scanner('scan_rows/score', {
+			{'score', '=', {arg = 1}},
+			{'tenant_id', dir = 'asc'},
+			{'id', dir = 'asc'},
+		})
+		get_tenant = table_scanner_col_decoder(db, score_eq, 'tenant_id')
+		get_id = table_scanner_col_decoder(db, score_eq, 'id')
+		local function score_pks(scan)
+			return table_scanner_values(scan, function()
+				return get_tenant()..':'..get_id()
 			end)
-			assert(not ok)
-			assert(tostring(err):find('scan: no key: status, score',
-				1, true))
-		end)
+		end
+		score_eq.reset{null}
+		assert(score_pks(score_eq) == '')
+
+		local score_is = db:table_scanner('scan_rows/score', {
+			{'score', 'is', {arg = 1}},
+			{'tenant_id', dir = 'asc'},
+			{'id', dir = 'asc'},
+		})
+		get_tenant = table_scanner_col_decoder(db, score_is, 'tenant_id')
+		get_id = table_scanner_col_decoder(db, score_is, 'id')
+		score_is.reset{null}
+		assert(score_pks(score_is) == '1:1,2:2')
+
+		local status_prefix = db:table_scanner('scan_rows/status', {
+			{'status', 'starts', {value = null}},
+		})
+		status_prefix.reset()
+		assert(not status_prefix.advance())
+
+		active.close()
+		score_eq.close()
+		score_is.close()
+		status_prefix.close()
+		db:commit()
 	end)
 end
 
--- reject equality fields that do not follow an existing key prefix.
-function test.key_prefix_order()
-	with_db('key_prefix_order', function(db)
-		db:atomic('r', function()
-			local ok, err = pcall(function()
-				db:scan('items',
-					'status, tenant_id, created_at [:) asc')
-			end)
-			assert(not ok)
-			assert(tostring(err):find(
-				'scan: no key: status, tenant_id, created_at asc',
-				1, true))
-		end)
-	end)
-end
+function test.table_scanner_null_comparisons()
+	with_db('table_scanner_null_comparisons', function(db)
+		db:begin'w'
+		db:create_table('scan_null', {fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'g', mdbx_type = 'u32', not_null = true},
+			{col = 'score', mdbx_type = 'i32'},
+		}, pk = {'id'}})
+		local _, _, score_asc = db:add_index('scan_null', {'score'})
+		local _, _, score_desc = db:add_index('scan_null', {
+			'score', desc = {true},
+		})
+		local _, _, group_asc = db:add_index('scan_null', {'g', 'score'})
+		local _, _, group_desc = db:add_index('scan_null', {
+			'g', 'score', desc = {false, true},
+		})
+		for _, row in ipairs{
+			{id = 1, g = 1},
+			{id = 2, g = 1, score = -1},
+			{id = 3, g = 1, score = 10},
+			{id = 4, g = 1, score = 20},
+			{id = 5, g = 2},
+			{id = 6, g = 2, score = 10},
+		} do
+			db:insert('scan_null', '{}', row)
+		end
+		db:commit()
+		db:begin'r'
 
--- reject invalid declarations and missing execution parameters.
-function test.validation()
-	with_db('validation', function(db)
-		db:atomic('r', function()
-			assert(not pcall(function()
-				db:scan('items', 'missing')
-			end))
-			local scan = db:scan('items', 'id')
-			assert(not pcall(function() scan.reset() end))
+		local function values(index, path, args, col)
+			local scan = db:table_scanner(index, path)
+			local get = table_scanner_col_decoder(db, scan, col or 'id')
+			scan.reset(args)
+			local s = table_scanner_values(scan, get)
 			scan.close()
-		end)
+			return s
+		end
+
+		assert(values(score_asc, {
+			{'score', '=', {value = null}},
+		}) == '')
+		assert(values(score_asc, {
+			{'score', 'is', {value = null}},
+		}) == '1,5')
+		assert(values(score_asc, {
+			{'score', 'is', {value = 10}},
+		}) == '3,6')
+		assert(values('scan_null', {
+			{'id', 'is', {value = null}},
+		}) == '')
+		assert(values('scan_null', {
+			{'id', 'is_not_null', dir = 'asc'},
+		}) == '1,2,3,4,5,6')
+
+		for _, index in ipairs{score_asc, score_desc} do
+			assert(values(index, {
+				{'score', 'is_not_null', dir = 'asc'},
+			}, nil, 'score') == '-1,10,10,20')
+			assert(values(index, {
+				{'score', '<=', {value = 10}, dir = 'asc'},
+			}, nil, 'score') == '-1,10,10')
+			assert(values(index, {
+				{'score', '<=', {value = 10}, dir = 'desc'},
+			}, nil, 'score') == '10,10,-1')
+			assert(values(index, {
+				{'score', '>', {value = null}, dir = 'asc'},
+			}) == '')
+			assert(values(index, {
+				{'score', '<=', {value = null}, dir = 'asc'},
+			}) == '')
+		end
+
+		for _, index in ipairs{group_asc, group_desc} do
+			assert(values(index, {
+				{'g', '=', {value = 1}},
+				{'score', '<=', {value = 10}, dir = 'asc'},
+			}, nil, 'score') == '-1,10')
+		end
+
+		local id_bound_read
+		local null_eq = db:table_scanner(group_asc, {
+			{'g', '=', {value = 1}},
+			{'score', '=', {value = null}},
+			{'id', '<=', {get = function()
+				id_bound_read = true
+				return 6
+			end}},
+		})
+		null_eq.reset()
+		assert(not id_bound_read and not null_eq.advance())
+
+		local max_score = null
+		local by_max = db:table_scanner(score_asc, {
+			{'score', '<=', {get = function() return max_score end},
+				dir = 'asc'},
+		})
+		local get_score = table_scanner_col_decoder(db, by_max, 'score')
+		by_max.reset()
+		assert(table_scanner_values(by_max, get_score) == '')
+		max_score = 10
+		by_max.reset()
+		assert(table_scanner_values(by_max, get_score) == '-1,10,10')
+		max_score = null
+		by_max.reset()
+		assert(table_scanner_values(by_max, get_score) == '')
+
+		local exact_score = null
+		local exact_get = db:table_scanner(score_asc, {
+			{'score', 'is', {get = function() return exact_score end}},
+		})
+		local get_id = table_scanner_col_decoder(db, exact_get, 'id')
+		exact_get.reset()
+		assert(table_scanner_values(exact_get, get_id) == '1,5')
+		exact_score = nil
+		exact_get.reset()
+		assert(table_scanner_values(exact_get, get_id) == '1,5')
+
+		by_max.close()
+		exact_get.close()
+		null_eq.close()
+		db:commit()
 	end)
 end
 
+function test.table_scanner_column_refs()
+	with_db('table_scanner_column_refs', function(db)
+		add_table_scanner_data(db)
+		db:begin'r'
+
+		local outer = db:table_scanner('scan_rows', {
+			{'tenant_id', dir = 'asc'},
+			{'id', dir = 'asc'},
+		})
+		outer.reset()
+		assert(outer.advance())
+
+		local same_status = db:table_scanner('scan_rows/status', {
+			{'status', '=', {scan = outer, col = 'status'}},
+			{'tenant_id', dir = 'asc'},
+			{'id', dir = 'asc'},
+		})
+		local get_id = table_scanner_col_decoder(db, same_status, 'id')
+		same_status.reset()
+		assert(table_scanner_values(same_status, get_id) == '1,2,3,1')
+
+		local same_active = db:table_scanner('scan_rows/active', {
+			{'active', '=', {scan = outer, col = 'active'}},
+			{'tenant_id', dir = 'asc'},
+			{'id', dir = 'asc'},
+		})
+		local get_tenant = table_scanner_col_decoder(db, same_active,
+			'tenant_id')
+		get_id = table_scanner_col_decoder(db, same_active, 'id')
+		same_active.reset()
+		assert(table_scanner_values(same_active, function()
+			return get_tenant()..':'..get_id()
+		end) == '1:1,1:3,2:1')
+
+		assert(outer.advance())
+		same_active.reset()
+		assert(table_scanner_values(same_active, function()
+			return get_tenant()..':'..get_id()
+		end) == '1:2,2:2')
+
+		local same_pk = db:table_scanner('scan_rows', {
+			{'tenant_id', '=', {scan = outer, col = 'tenant_id'}},
+			{'id', '=', {scan = outer, col = 'id'}},
+		})
+		get_id = table_scanner_col_decoder(db, same_pk, 'id')
+		same_pk.reset()
+		assert(table_scanner_values(same_pk, get_id) == '2')
+
+		local id_scan = db:table_scanner('scan_rows', {
+			{'tenant_id', dir = 'asc'},
+			{'id', dir = 'asc'},
+		})
+		id_scan.reset()
+		assert(id_scan.advance())
+		assert(id_scan.advance())
+		assert(id_scan.advance())
+		local tenant_id_scan = db:table_scanner('scan_rows', {
+			{'tenant_id', '=', {scan = outer, col = 'tenant_id'}},
+			{'id', '=', {scan = id_scan, col = 'id'}},
+		})
+		get_id = table_scanner_col_decoder(db, tenant_id_scan, 'id')
+		tenant_id_scan.reset()
+		assert(table_scanner_values(tenant_id_scan, get_id) == '3')
+
+		local same_score = db:table_scanner('scan_rows/score', {
+			{'score', '=', {scan = outer, col = 'score'}},
+			{'tenant_id', dir = 'asc'},
+			{'id', dir = 'asc'},
+		})
+		get_id = table_scanner_col_decoder(db, same_score, 'id')
+		same_score.reset()
+		assert(table_scanner_values(same_score, get_id) == '2')
+		same_score.reset()
+		assert(same_score.advance())
+		local index_score = db:table_scanner('scan_rows/score', {
+			{'score', '=', {scan = same_score, col = 'score'}},
+			{'tenant_id', dir = 'asc'},
+			{'id', dir = 'asc'},
+		})
+		get_id = table_scanner_col_decoder(db, index_score, 'id')
+		index_score.reset()
+		assert(table_scanner_values(index_score, get_id) == '2')
+		outer.reset()
+		assert(outer.advance())
+		same_score.reset()
+		assert(table_scanner_values(same_score, get_id) == '')
+
+		outer.close()
+		same_status.close()
+		same_active.close()
+		same_pk.close()
+		id_scan.close()
+		tenant_id_scan.close()
+		same_score.close()
+		index_score.close()
+		db:commit()
+	end)
+end
+
+--a correlated param whose source column has a different (but decodable)
+--layout than the output key field: the raw-bytes path can't be used, so the
+--source is decoded and re-encoded through the output field.
+function test.table_scanner_incompatible_decode()
+	with_db('table_scanner_incompatible_decode', function(db)
+		db:begin'w'
+		--source cols are utf8 maxlen 8; dest index cols are utf8 maxlen 16.
+		db:create_table('src', {fields = {
+			{col = 'tag', mdbx_type = 'utf8', maxlen = 8,
+				nozero = true, not_null = true},
+			{col = 'name', mdbx_type = 'utf8', maxlen = 8,
+				nozero = true, not_null = true},
+		}, pk = {'tag'}})
+		db:insert('src', '{}', {tag = 'x', name = 'foo'})
+
+		db:create_table('dst', {fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'tag', mdbx_type = 'utf8', maxlen = 16,
+				nozero = true, not_null = true},
+			{col = 'name', mdbx_type = 'utf8', maxlen = 16,
+				nozero = true, not_null = true},
+		}, pk = {'id'}})
+		db:add_index('dst', {'tag'})
+		db:add_index('dst', {'name'})
+		for _, row in ipairs{
+			{id = 1, tag = 'x', name = 'foo'},
+			{id = 2, tag = 'x', name = 'bar'},
+			{id = 3, tag = 'y', name = 'foo'},
+		} do
+			db:insert('dst', '{}', row)
+		end
+		db:commit()
+		db:begin'r'
+
+		local outer = db:table_scanner('src', {{'tag', dir = 'asc'}})
+		outer.reset()
+		assert(outer.advance())
+
+		--key-column source: src.tag (key_rec) -> dst/tag key (is_key_read).
+		local by_tag = db:table_scanner('dst/tag', {
+			{'tag', '=', {scan = outer, col = 'tag'}},
+			{'id', dir = 'asc'},
+		})
+		local get_id = table_scanner_col_decoder(db, by_tag, 'id')
+		by_tag.reset()
+		assert(table_scanner_values(by_tag, get_id) == '1,2')
+
+		--value-column source: src.name (val_rec) -> dst/name key.
+		local by_name = db:table_scanner('dst/name', {
+			{'name', '=', {scan = outer, col = 'name'}},
+			{'id', dir = 'asc'},
+		})
+		get_id = table_scanner_col_decoder(db, by_name, 'id')
+		by_name.reset()
+		assert(table_scanner_values(by_name, get_id) == '1,3')
+
+		outer.close()
+		by_tag.close()
+		by_name.close()
+		db:commit()
+	end)
+end
+
+function test.table_scanner_reuse()
+	with_db('table_scanner_reuse', function(db)
+		add_table_scanner_data(db)
+		db:begin'r'
+		local scan = db:table_scanner('scan_rows/status', {
+			{'status', '=', {arg = 1}},
+			{'tenant_id', dir = 'asc'},
+			{'id', dir = 'asc'},
+		})
+		local get_id = table_scanner_col_decoder(db, scan, 'id')
+
+		scan.reset{'ready'}
+		assert(scan.advance() and get_id() == 1)
+		scan.reset{'done'}
+		assert(table_scanner_values(scan, get_id) == '2')
+		scan.close()
+		scan.reset{'ready'}
+		assert(scan.advance() and get_id() == 1)
+		scan.close()
+		db:commit()
+
+		db:begin'r'
+		scan.reset{'done'}
+		assert(table_scanner_values(scan, get_id) == '2')
+		scan.close()
+		db:commit()
+	end)
+end
+
+------------------------------------------------------------------------------
+
+--fixture: users <- sessions <- events <- tags (FK chain). sessions
+--12/13 and 15 have no events; event 22 and 23 have no tags -- exercises
+--a left-joined group with two inner joins inside it (sessions JOIN
+--events JOIN tags) attached to users, and found() propagation through
+--all three levels (event 23's own missing tags drops session 14 and
+--event 23 too, nulling the whole group for user 2).
+local function build_join_fixture(db)
+	db:begin'w'
+	db:create_table('users', {fields = {
+		{col = 'id', mdbx_type = 'u32', not_null = true},
+	}, pk = {'id'}})
+	for _, r in ipairs{{id=1},{id=2},{id=3},{id=4},{id=5}} do
+		db:insert('users', '{}', r)
+	end
+	db:create_table('sessions', {fields = {
+		{col = 'id', mdbx_type = 'u32', not_null = true},
+		{col = 'user_id', mdbx_type = 'u32', not_null = true},
+	}, pk = {'id'}})
+	db:add_index('sessions', {'user_id'})
+	for _, r in ipairs{
+		{id=11,user_id=1}, {id=12,user_id=1}, {id=13,user_id=1},
+		{id=14,user_id=2}, {id=15,user_id=4},
+	} do db:insert('sessions', '{}', r) end
+	db:create_table('events', {fields = {
+		{col = 'id', mdbx_type = 'u32', not_null = true},
+		{col = 'session_id', mdbx_type = 'u32', not_null = true},
+	}, pk = {'id'}})
+	db:add_index('events', {'session_id'})
+	for _, r in ipairs{{id=21,session_id=11},{id=22,session_id=11},
+		{id=23,session_id=14}}
+	do db:insert('events', '{}', r) end
+	db:create_table('tags', {fields = {
+		{col = 'id', mdbx_type = 'u32', not_null = true},
+		{col = 'event_id', mdbx_type = 'u32', not_null = true},
+	}, pk = {'id'}})
+	db:add_index('tags', {'event_id'})
+	for _, r in ipairs{{id=31,event_id=21},{id=32,event_id=21}} do
+		db:insert('tags', '{}', r)
+	end
+	db:commit()
+end
+
+function test.join_scans_nested_group()
+	with_db('join_scans_nested_group', function(db)
+		build_join_fixture(db)
+		db:begin'r'
+
+		local users = db:table_scanner('users', {{'id', dir = 'asc'}})
+		local sessions = db:table_scanner('sessions/user_id', {
+			{'user_id', '=', {scan = users, col = 'id'}},
+			{'id', dir = 'asc'},
+		})
+		local events = db:table_scanner('events/session_id', {
+			{'session_id', '=', {scan = sessions, col = 'id'}},
+			{'id', dir = 'asc'},
+		})
+		local tags = db:table_scanner('tags/event_id', {
+			{'event_id', '=', {scan = events, col = 'id'}},
+			{'id', dir = 'asc'},
+		})
+		local get_session_id = sessions:col_decoder('sessions', 'id')
+		local get_event_id = events:col_decoder('events', 'id')
+		local get_tag_id = tags:col_decoder('tags', 'id')
+
+		--sessions JOIN events JOIN tags, all inner: only session 11's
+		--events (21 has 2 tags, 22 has none) ever survive.
+		local se = db:join_scans(sessions, events)
+		local group = db:join_scans(se, tags)
+		--the whole group left-joined onto users: user1 gets 2 real rows
+		--(via session 11/event 21/tags 31,32); users 2,3,4,5 each get one
+		--null-extended row.
+		local result = db:left_join_scans(users, group)
+
+		local t = {}
+		result.reset()
+		while result.advance() do
+			local uid = users:col_decoder('users', 'id')()
+			if group.found() then
+				t[#t+1] = uid..':'..get_session_id()..':'..get_event_id()
+					..':'..get_tag_id()
+			else
+				t[#t+1] = uid..':-'
+			end
+		end
+		result.close()
+		assert(cat(t, ',') ==
+			'1:11:21:31,1:11:21:32,2:-,3:-,4:-,5:-', cat(t, ','))
+
+		db:commit()
+	end)
+end
+
+function test.child_scan_basic()
+	with_db('child_scan_basic', function(db)
+		build_join_fixture(db)
+		db:begin'r'
+
+		local users = db:table_scanner('users', {{'id', dir = 'asc'}})
+		local sessions = db:table_scanner('sessions/user_id', {
+			{'user_id', '=', {scan = users, col = 'id'}},
+			{'id', dir = 'asc'},
+		})
+		db:child_scan(users, sessions)
+		local get_session_id = sessions:col_decoder('sessions', 'id')
+
+		--each(): inner-join sugar -- user 1 has 3 sessions, drives
+		--3 iterations; a user with none (below) yields nothing at all.
+		users.reset()
+		assert(users.advance())
+		local t = {}
+		for _ in sessions:each() do t[#t+1] = get_session_id() end
+		assert(cat(t, ',') == '11,12,13', cat(t, ','))
+
+		--left_rows(): user 3 has no sessions -- exactly one
+		--null-extended row, get_session_id() reading nil through the
+		--gated col_decoder.
+		while users.advance() and users:col_decoder('users', 'id')() ~= 3 do end
+		clear(t)
+		for _ in sessions:left_rows() do
+			t[#t+1] = sessions.found() and get_session_id() or '-'
+		end
+		assert(cat(t, ',') == '-', cat(t, ','))
+
+		--select()'s own decoders already go through the gated
+		--col_decoder, so a null-extended row null-fills with no
+		--separate wrapper: same user 3, via select() this time.
+		sessions:select'id'
+		for row in sessions:left_rows() do
+			local _, id_val = row.get()
+			assert(id_val == nil)
+		end
+
+		--first()/exists(): user 4 has session 15.
+		while users.advance() and users:col_decoder('users', 'id')() ~= 4 do end
+		assert(sessions:exists())
+		assert(sessions:first() == 15)
+
+		users.close()
+		db:commit()
+	end)
+end
+
+function test.child_scan_nested_group()
+	with_db('child_scan_nested_group', function(db)
+		build_join_fixture(db)
+		db:begin'r'
+
+		local users = db:table_scanner('users', {{'id', dir = 'asc'}})
+		local sessions = db:table_scanner('sessions/user_id', {
+			{'user_id', '=', {scan = users, col = 'id'}},
+			{'id', dir = 'asc'},
+		})
+		local events = db:table_scanner('events/session_id', {
+			{'session_id', '=', {scan = sessions, col = 'id'}},
+			{'id', dir = 'asc'},
+		})
+		local tags = db:table_scanner('tags/event_id', {
+			{'event_id', '=', {scan = events, col = 'id'}},
+			{'id', dir = 'asc'},
+		})
+		db:child_scan(users, sessions)
+		db:child_scan(sessions, events)
+		db:child_scan(events, tags)
+		local get_session_id = sessions:col_decoder('sessions', 'id')
+		local get_event_id = events:col_decoder('events', 'id')
+		local get_tag_id = tags:col_decoder('tags', 'id')
+
+		--same fixture, same expected shape as join_scans_nested_group,
+		--but driven by hand-written nested loops instead of a
+		--compiler-built join tree -- sessions/events are inner-joined
+		--(no matches drops the row entirely), only the outermost level
+		--(against users) null-extends.
+		local t = {}
+		for _ in users:each() do
+			local uid = users:col_decoder('users', 'id')()
+			local any = false
+			for _ in sessions:each() do
+				for _ in events:each() do
+					for _ in tags:each() do
+						any = true
+						t[#t+1] = uid..':'..get_session_id()..':'
+							..get_event_id()..':'..get_tag_id()
+					end
+				end
+			end
+			if not any then t[#t+1] = uid..':-' end
+		end
+		assert(cat(t, ',') ==
+			'1:11:21:31,1:11:21:32,2:-,3:-,4:-,5:-', cat(t, ','))
+
+		tags.close()
+		events.close()
+		sessions.close()
+		users.close()
+		db:commit()
+	end)
+end
+
+function test.select_table_outputs()
+	with_db('select_table_outputs', function(db)
+		build_join_fixture(db)
+		db:begin'r'
+
+		local users = db:table_scanner('users', {{'id', dir = 'asc'}})
+		users:select{{name = 'uid', member = 'users', col = 'id'}}
+
+		local t = {}
+		for _, uid in users:rows() do t[#t+1] = uid end
+		assert(cat(t, ',') == '1,2,3,4,5', cat(t, ','))
+
+		local users_from = db:table_scanner('users', {
+			{'id', '>=', {arg = 'MIN'}, dir = 'asc'},
+		})
+		users_from:select{{name = 'uid', member = 'users', col = 'id'}}
+		t = {}
+		for _, uid in users_from:rows{MIN = 3} do t[#t+1] = uid end
+		assert(cat(t, ',') == '3,4,5', cat(t, ','))
+
+		db:commit()
+	end)
+end
+
+function test.scan_group_by()
+	with_db('scan_group_by', function(db)
+		build_join_fixture(db)
+		db:begin'r'
+
+		local sessions = db:table_scanner('sessions/user_id', {
+			{'user_id', dir = 'asc'},
+			{'id', dir = 'asc'},
+		})
+		sessions:group_by{{member = 'sessions', col = 'user_id'}}
+		local get_user_id = sessions:col_decoder('sessions', 'user_id')
+		local get_id = sessions:col_decoder('sessions', 'id')
+
+		local groups = {}
+		sessions.reset()
+		while sessions.advance() do
+			local uid = get_user_id()
+			local ids = {get_id()}
+			while sessions.advance_pk() do ids[#ids+1] = get_id() end
+			groups[#groups+1] = uid..':'..cat(ids, ',')
+		end
+		assert(cat(groups, ' ') == '1:11,12,13 2:14 4:15', cat(groups, ' '))
+
+		sessions.close()
+		db:commit()
+	end)
+end
+
+function test.scan_aggregate_grouped()
+	with_db('scan_aggregate_grouped', function(db)
+		build_join_fixture(db)
+		db:begin'r'
+
+		local sessions = db:table_scanner('sessions/user_id', {
+			{'user_id', dir = 'asc'},
+			{'id', dir = 'asc'},
+		})
+		local cols = {{member = 'sessions', col = 'user_id'}}
+		sessions:group_by(cols)
+		sessions:aggregate({
+			{name = 'uid', op = 'key', part = 1},
+			{name = 'cnt', op = 'count'},
+			{name = 'idsum', op = 'sum', member = 'sessions', col = 'id'},
+		}, cols)
+
+		local t = {}
+		for _, uid, cnt, idsum in sessions:rows() do
+			t[#t+1] = uid..':'..cnt..':'..idsum
+		end
+		assert(cat(t, ' ') == '1:3:36 2:1:14 4:1:15', cat(t, ' '))
+
+		db:commit()
+	end)
+end
+
+function test.scan_aggregate_grand_total()
+	with_db('scan_aggregate_grand_total', function(db)
+		build_join_fixture(db)
+		db:begin'r'
+
+		local sessions = db:table_scanner('sessions/user_id', {
+			{'user_id', dir = 'asc'},
+			{'id', dir = 'asc'},
+		})
+		sessions:aggregate{
+			{name = 'cnt', op = 'count'},
+			{name = 'idsum', op = 'sum', member = 'sessions', col = 'id'},
+		}
+
+		local cnt, idsum = sessions:first()
+		assert(cnt == 5 and idsum == 65, cnt..':'..idsum)
+
+		db:commit()
+	end)
+end
+
+function test.scan_hash_aggregate()
+	with_db('scan_hash_aggregate', function(db)
+		db:begin'w'
+		db:create_table('events', {fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'user_id', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		--user_id interleaved, not adjacent -- group_by() would see 4
+		--separate single-row groups here; the hash mode must still find
+		--the 2 real groups regardless of scan order.
+		for _, r in ipairs{
+			{id=1,user_id=1}, {id=2,user_id=2}, {id=3,user_id=1}, {id=4,user_id=2},
+		} do db:insert('events', '{}', r) end
+		db:commit()
+		db:begin'r'
+
+		local events = db:table_scanner('events', {{'id', dir = 'asc'}})
+		local cols = {{member = 'events', col = 'user_id'}}
+		events:aggregate({
+			{name = 'uid', op = 'key', part = 1},
+			{name = 'cnt', op = 'count'},
+			{name = 'idsum', op = 'sum', member = 'events', col = 'id'},
+		}, cols, true)
+
+		local t = {}
+		for _, uid, cnt, idsum in events:rows() do
+			t[#t+1] = uid..':'..cnt..':'..idsum
+		end
+		sort(t)
+		assert(cat(t, ' ') == '1:2:4 2:2:6', cat(t, ' '))
+
+		db:commit()
+	end)
+end
+
+------------------------------------------------------------------------------
+
+function test.scan_sort()
+	with_db('scan_sort', function(db)
+		db:begin'w'
+		db:create_table('items', {fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'score', mdbx_type = 'i32'},
+		}, pk = {'id'}})
+		for _, r in ipairs{
+			{id=1,score=30}, {id=2,score=10}, {id=3}, {id=4,score=20},
+		} do db:insert('items', '{}', r) end
+		db:commit()
+		db:begin'r'
+
+		local items = db:table_scanner('items', {{'id', dir = 'asc'}})
+		items:select{
+			{name = 'id', member = 'items', col = 'id'},
+			{name = 'score', member = 'items', col = 'score'},
+		}
+		--desc: null sorts last, per doc.
+		items:sort{{col = 'score', desc = true}}
+
+		local t = {}
+		for _, row in items:rows'{}' do
+			t[#t+1] = row.id..':'..tostring(row.score)
+		end
+		assert(cat(t, ' ') == '1:30 4:20 2:10 3:nil', cat(t, ' '))
+
+		db:commit()
+	end)
+end
 local name = ...
 if name == 'mdbx_scan_test' then name = nil end
 local tests = name and {name} or test
