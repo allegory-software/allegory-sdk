@@ -5066,6 +5066,78 @@ function test.generated_col_with_index()
 	end)
 end
 
+--adding a generated column to a populated table computes it for every
+--stored row instead of leaving it null.
+function test.generated_col_alter_backfill()
+	with_db('generated_col_alter_backfill', function(db)
+		local spec = {
+			name = 't',
+			fields = {
+				{col = 'id' , mdbx_type = 'u32' , not_null = true},
+				{col = 'val', mdbx_type = 'utf8', maxlen = 32},
+			},
+			pk = {'id'},
+		}
+		local sc = mdbx_schema()
+		sc.tables['t'] = spec
+		db.schema = sc
+		db:atomic('w', function()
+			db:without_schema(function() db:create_table('t', spec) end)
+		end)
+		db:begin'w'
+		db:insert('t', 'id val', 1, 'hello')
+		db:insert('t', 'id val', 2, 'world')
+		db:commit()
+		local spec2 = {
+			name = 't',
+			fields = {
+				{col = 'id'   , mdbx_type = 'u32' , not_null = true},
+				{col = 'val'  , mdbx_type = 'utf8', maxlen = 32},
+				{col = 'upper', mdbx_type = 'utf8', maxlen = 32,
+				 generate = upper},
+			},
+			pk = {'id'},
+		}
+		sc.tables['t'] = spec2
+		db:atomic('w', function()
+			db:without_schema(function() db:alter_table('t', spec2) end)
+		end)
+		db:begin'r'
+		assert(db:find('t', 'upper', 1) == 'HELLO')
+		assert(db:find('t', 'upper', 2) == 'WORLD')
+		db:commit()
+	end)
+end
+
+--a generator yielding nothing for a not_null column is rejected instead
+--of storing null.
+function test.generated_col_not_null()
+	with_db('generated_col_not_null', function(db)
+		local spec = {
+			name = 't',
+			fields = {
+				{col = 'id'   , mdbx_type = 'u32' , not_null = true},
+				{col = 'val'  , mdbx_type = 'utf8', maxlen = 32},
+				{col = 'upper', mdbx_type = 'utf8', maxlen = 32,
+				 not_null = true, generate = upper},
+			},
+			pk = {'id'},
+		}
+		local sc = mdbx_schema()
+		sc.tables['t'] = spec
+		db.schema = sc
+		db:atomic('w', function()
+			db:without_schema(function() db:create_table('t', spec) end)
+		end)
+		db:begin'w'
+		db:insert('t', 'id val', 1, 'hello')
+		assert(db:find('t', 'upper', 1) == 'HELLO')
+		local ok, err = try_mutation(db, db.insert, 't', 'id', 2)
+		assert(not ok and iserror(err, 'field'), tostring(err))
+		db:commit()
+	end)
+end
+
 local name = ...
 if name == 'mdbx_schema_test' then name = nil end
 local tests = name and {name} or test

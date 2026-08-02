@@ -19,7 +19,11 @@ SCAN COMPOSITION (any scan: db:scan, join, or child_scan result)
 	scan:left_rows     (args) -> iter() -> scan | nil       null-extends
 	scan:select        (outputs) -> scan                    adds output terminals
 	scan.out_cols -> {'NAME',...}  scan.get(t) writes every key
-	scan:filter        (accept) -> scan
+	scan:filter        (accept) -> scan             accept() reads getters
+	scan:filter        ('[MEMBER.]COL [NAME],...', accept) -> scan
+		accept(row) -> true|false; row holds the comparison form of each
+		col, so an ai_ci col reads folded -- compare to db:collate()
+	db:collate         (table, col, v) -> v         v in comparison form
 	scan:not_in        (col, values) -> scan
 	scan:union         (scan2) -> scan              concatenates scan2 rows
 	scan:limit         (n|{arg='KEY'}, [offset|{arg='KEY'}]) -> scan
@@ -907,7 +911,58 @@ function Scan:left_rows(args)
 	end
 end
 
-function Scan:filter(accept)
+local function comma_list(s)
+	if istab(s) then
+		local i = 0
+		return function() i = i + 1; return s[i] end
+	end
+	return s:gmatch'[^,]+'
+end
+
+--'[MEMBER.]COL [NAME], ...' | {{member=,col=,name=},...} -> members,
+--cols, names
+local function col_specs(scan, spec, what)
+	local members, cols, names = {}, {}, {}
+	for item in comma_list(spec) do
+		local member, col, name
+		if isstr(item) then
+			local col_spec
+			col_spec, name = item:match'^%s*(%S+)%s*(%S*)%s*$'
+			assertf(col_spec, '%s: bad col: %s', what, item)
+			member, col = col_spec:match'^(.-)%.(.*)$'
+			col = col or col_spec
+			name = name ~= '' and name or col
+		else
+			member, col, name = item.member, item.col, item.name
+		end
+		if not member then
+			member = next(scan.member_scans)
+			assertf(not next(scan.member_scans, member),
+				'%s: ambiguous col: %s', what, col)
+		end
+		members[#members + 1] = member
+		cols[#cols + 1] = col
+		names[#names + 1] = name
+	end
+	assertf(#cols > 0, '%s: no cols', what)
+	return members, cols, names
+end
+
+function Scan:filter(cols, accept)
+	if accept == nil then
+		cols, accept = nil, cols
+	else
+		local members, col_list, names = col_specs(self, cols, 'filter')
+		local getters, row = {}, {}
+		for i, member in ipairs(members) do
+			getters[i] = self:col_decoder(member, col_list[i], true)
+		end
+		local test, n = accept, #getters
+		accept = function()
+			for i = 1, n do row[names[i]] = getters[i]() end
+			return test(row)
+		end
+	end
 	local advance = self.advance
 	--advance until accept() approves the current row.
 	self.advance = function(by_key)
@@ -920,9 +975,15 @@ function Scan:filter(accept)
 end
 
 function Scan:not_in(col, values)
-	local get = self:col_decoder(next(self.member_scans), col)
+	local members, cols = col_specs(self, col, 'not_in')
+	assertf(#cols == 1, 'not_in: one col expected, got %d', #cols)
+	local member, col_name = members[1], cols[1]
+	local tbl = self.member_scans[member].table
+	local get = self:col_decoder(member, col_name, true)
 	local excluded = {}
-	for _, value in ipairs(values) do excluded[value] = true end
+	for _, value in ipairs(values) do
+		excluded[self.db:collate(tbl, col_name, value)] = true
+	end
 	self:filter(function()
 		--map DB null to the public null sentinel.
 		local value = get()
@@ -1278,14 +1339,6 @@ end
 
 --SELECT ---------------------------------------------------------------------
 
-local function comma_list(s)
-	if istab(s) then
-		local i = 0
-		return function() i = i + 1; return s[i] end
-	end
-	return s:gmatch'[^,]+'
-end
-
 local function materialized_get(scan, row, out_row)
 	local out_cols = scan.out_cols
 	if out_row then
@@ -1409,28 +1462,11 @@ function Scan:select(outputs)
 	local scan = self
 	assert(not scan.get)
 
-	local decoders, names = {}, {}
-	for output in comma_list(outputs) do
-		local member, col, name
-		if isstr(output) then
-			local col_spec
-			col_spec, name = output:match'^%s*(%S+)%s*(%S*)%s*$'
-			assert(col_spec, 'select: output')
-			member, col = col_spec:match'^(.-)%.(.*)$'
-			col = col or col_spec
-			name = name ~= '' and name or col
-		else
-			member, col, name = output.member, output.col, output.name
-		end
-		if not member then
-			member = next(self.member_scans)
-			assertf(not next(self.member_scans, member),
-				'select: ambiguous column: %s', col)
-		end
-		decoders[#decoders + 1] = self:col_decoder(member, col)
-		names[#names + 1] = name
+	local members, cols, names = col_specs(self, outputs, 'select')
+	local decoders = {}
+	for i, member in ipairs(members) do
+		decoders[i] = self:col_decoder(member, cols[i])
 	end
-	assert(#decoders > 0, 'select: outputs')
 
 	install_get(scan, names, function(i) return decoders[i]() end)
 	return scan
@@ -1898,6 +1934,16 @@ function Scan:distinct(cols, hash)
 		output, row_i = nil, nil
 	end
 	return scan
+end
+
+--COLLATION ------------------------------------------------------------------
+
+function Db:collate(tbl, col, v)
+	local schema = assert(self:table_schema(tbl))
+	local base_schema = schema.val_schema or schema
+	local field = assertf(base_schema.fields[col] or schema.fields[col],
+		'collate: no col: %s.%s', tbl, col)
+	return collate_value(v, field.mdbx_collation == 'utf8_ai_ci')
 end
 
 --VALUES SCAN ----------------------------------------------------------------

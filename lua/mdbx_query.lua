@@ -1389,8 +1389,9 @@ end
 --[[
 try_key() fixes leading path fields with equality facts and then uses one
 prefix, range, or is_not_null fact on the next field.
-try_key() does not use an ai_ci field for starts() because lowercasing and
-removing accents can change prefix boundaries.
+try_key() uses an ai_ci field for starts() only where path_seekable()
+allows it: inside an index key, where encode_key_prefix() folds the bound
+through the field's own encoder and the stored bytes are folded too.
 ]]
 local function try_key(schema, eq, lo, hi, prefix, not_null, not_equal, in_)
 	local fields = schema.path_fields
@@ -1401,7 +1402,7 @@ local function try_key(schema, eq, lo, hi, prefix, not_null, not_equal, in_)
 	else
 		local next_field = fields[depth + 1]
 		local col = next_field.col
-		if prefix[col] and next_field.mdbx_collation ~= 'utf8_ai_ci' then
+		if prefix[col] and path_seekable(schema, depth + 1) then
 			plan = {kind = 'prefix', depth = depth, bound_col = col}
 		elseif path_seekable(schema, depth + 1) and in_[col] then
 			plan = {kind = 'in', depth = depth, bound_col = col}
@@ -2317,8 +2318,8 @@ local function null_value(v)
 	return v == nil or v == null
 end
 --is x a column read (q.col()) that points at an ai_ci field? if so
---both sides must be folded before comparing, not just compared as raw
---text.
+--eval_value() already returned it folded and cmp_value() folds the
+--other operand to match.
 --x binds either straight to a source col (x.source set by bind_col()) or
 --to an out_col by name (x.source nil, x.col set by bind_out_col() to the
 --out_col's own expr -- having()/order_by() after group_by()/distinct()).
@@ -2337,7 +2338,10 @@ local function value_cmp(a, b)
 	return a < b and -1 or 1
 end
 --[[
-- read a value operand for a residual or having() check.
+- read a value operand for a residual or having() check. a q.col()
+  operand comes back in comparison form: col_decoder(..., true) reads an
+  indexed ai_ci col straight from the folded index key, and an out_col
+  read is folded here.
 - literals return themselves.
 - q.param() reads scan.args.
 - q.col() bound to a source (residual: where()/on_expr conditions)
@@ -2360,12 +2364,12 @@ local function eval_value(x, scan, row, cache)
 		if x.source then
 			local decode = cache[x]
 			if not decode then
-				decode = row:col_decoder(x.source.name, x[3])
+				decode = row:col_decoder(x.source.name, x[3], true)
 				cache[x] = decode
 			end
 			return decode()
 		end
-		return row[x.col.name]
+		return mdbx_collate_value(row[x.col.name], ai_ci_operand(x))
 	end
 	error('unsupported residual operand: '..tostring(x[1]))
 end
@@ -2374,6 +2378,18 @@ end
 --candidate collates to itself, which v (never null) can't equal.
 local function candidate_matches(candidate, v, fold)
 	return v == mdbx_collate_value(candidate, fold)
+end
+local function cmp_value(cache, x, v, fold)
+	if not fold or v == nil or v == null then return v end
+	if type(x) == 'table' and x[1] == 'col' then
+		if ai_ci_operand(x) then return v end
+		return mdbx_collate_value(v, true)
+	end
+	local memo = cache[x]
+	if memo and memo[1] == v then return memo[2] end
+	local fv = mdbx_collate_value(v, true)
+	cache[x] = {v, fv}
+	return fv
 end
 --[[
 evaluate a where()/on_expr row check against the current row. q.col()
@@ -2416,26 +2432,27 @@ local function eval_expr(expr, scan, row, checks, cache)
 		if null_value(v) or null_value(prefix) then return false end
 		if type(v) ~= 'string' then return false end
 		local fold = ai_ci_operand(a)
-		v, prefix = mdbx_collate_value(v, fold), mdbx_collate_value(prefix, fold)
+		v = cmp_value(cache, a, v, fold)
+		prefix = cmp_value(cache, b, prefix, fold)
 		return v:sub(1, #prefix) == prefix
 	elseif op == 'in' or op == 'not_in' then
 		local fold = ai_ci_operand(a)
 		local v = eval_expr(a, scan, row, checks, cache)
 		if null_value(v) then return false end
-		v = mdbx_collate_value(v, fold)
+		v = cmp_value(cache, a, v, fold)
 		local found = false
 		if inherits(b, Rel) then
 			local check = assertf(checks[expr],
 				'eval_expr: in_() check not compiled for source: %s',
 				tostring(b.name))
 			if check.values_set then
-				--v is already fold()'d above, matching how values_set's own
-				--keys were folded when built (compile_exists_checker()) --
+				--reset_check() built values_set from eval_value(), which
+				--folds an ai_ci col the same way v was folded above --
 				--a direct hash lookup, no per-candidate loop needed.
 				found = check.values_set[v] ~= nil
 			else
 				for _, candidate in check.values() do
-					if candidate_matches(candidate, v, fold) then
+					if v == candidate then
 						found = true
 						break
 					end
@@ -2474,7 +2491,8 @@ local function eval_expr(expr, scan, row, checks, cache)
 	local vb = eval_expr(b, scan, row, checks, cache)
 	if null_value(va) or null_value(vb) then return false end
 	local fold = ai_ci_operand(a) or ai_ci_operand(b)
-	va, vb = mdbx_collate_value(va, fold), mdbx_collate_value(vb, fold)
+	va = cmp_value(cache, a, va, fold)
+	vb = cmp_value(cache, b, vb, fold)
 	if op == '=' then return va == vb
 	elseif op == '~=' then return va ~= vb
 	elseif op == '<' then return value_cmp(va, vb) < 0
@@ -2524,7 +2542,7 @@ local function compile_col_decoders(expr, node, cache, registry)
 	if op == 'col' and expr.source then
 		if not cache[expr] then
 			local decoder_node = registry and registry[expr.source.name] or node
-			cache[expr] = decoder_node:col_decoder(expr.source.name, expr[3])
+			cache[expr] = decoder_node:col_decoder(expr.source.name, expr[3], true)
 		end
 	elseif op == 'exists' or op == 'not_exists' then
 		--expr[3] is the correlated sub-relation's own filter, checked
@@ -2643,7 +2661,7 @@ local function reset_check(check, args)
 		while scan.advance() do
 			local v = eval_value(check.out_col, scan, scan, check.cache)
 			if not null_value(v) then
-				set[mdbx_collate_value(v, check.ai_ci)] = true
+				set[v] = true
 			end
 		end
 		check.values_set = set
@@ -2768,7 +2786,6 @@ function compile_exists_checker(db, expr, node, checks, registry)
 				uncorrelated = true,
 				out_col = out_col,
 				cache = cache,
-				ai_ci = out_col and ai_ci_operand(expr[2]),
 			})
 		end
 	else

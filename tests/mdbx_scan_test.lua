@@ -1737,6 +1737,134 @@ function test.scan_merge_union_orders_by_key()
 	end)
 end
 
+local function build_ci_fixture(db)
+	db:begin'w'
+	db:create_table('people', {fields = {
+		{col = 'id'  , mdbx_type = 'u32' , not_null = true},
+		{col = 'name', mdbx_type = 'utf8', not_null = true, maxlen = 16,
+			nozero = true, mdbx_collation = 'utf8_ai_ci'},
+		{col = 'age' , mdbx_type = 'u32' , not_null = true},
+	}, pk = {'id'}})
+	db:add_index('people', {'name'})
+	for _, r in ipairs{
+		{id = 1, name = 'Jose'  , age = 30},
+		{id = 2, name = 'JOSÉ'  , age = 40},
+		{id = 3, name = 'Ana'   , age = 50},
+	} do db:insert('people', '{}', r) end
+	db:commit()
+end
+
+function test.filter_cols_form()
+	with_db('filter_cols_form', function(db)
+		build_ci_fixture(db)
+		db:begin'r'
+		local scan = db:scan('people', 'id asc')
+			:filter('people.age, people.id n', function(r)
+				return r.age >= 40 and r.n ~= 3
+			end)
+			:select'people.id id'
+		local t = {}
+		for _, row in scan:rows'{}' do t[#t+1] = row.id end
+		assert(cat(t, ',') == '2', cat(t, ','))
+		scan.close()
+		db:commit()
+	end)
+end
+
+function test.filter_fn_only_form()
+	with_db('filter_fn_only_form', function(db)
+		build_ci_fixture(db)
+		db:begin'r'
+		local scan = db:scan('people', 'id asc')
+		local get_age = scan:col_decoder('people', 'age')
+		scan:filter(function() return get_age() > 35 end)
+		scan:select'people.id id'
+		local t = {}
+		for _, row in scan:rows'{}' do t[#t+1] = row.id end
+		assert(cat(t, ',') == '2,3', cat(t, ','))
+		scan.close()
+		db:commit()
+	end)
+end
+
+--a filter sees the comparison form, so an ai_ci col matches whatever
+--db:collate() makes of the literal, from either the base table or the index.
+function test.filter_ai_ci()
+	with_db('filter_ai_ci', function(db)
+		build_ci_fixture(db)
+		db:begin'r'
+		local want = db:collate('people', 'name', 'josÉ')
+		assert(want == 'jose', want)
+
+		local base = db:scan('people', 'id asc')
+			:filter('people.name', function(r) return r.name == want end)
+			:select'people.id id'
+		local t = {}
+		for _, row in base:rows'{}' do t[#t+1] = row.id end
+		assert(cat(t, ',') == '1,2', cat(t, ','))
+		base.close()
+
+		local ix = db:scan('people/name', 'name')
+			:filter('people.name', function(r) return r.name == want end)
+			:select'people.id id'
+		t = {}
+		for _, row in ix:rows'{}' do t[#t+1] = row.id end
+		assert(cat(t, ',') == '1,2', cat(t, ','))
+		ix.close()
+
+		--rows() keeps the display form.
+		local disp = db:scan('people', 'id asc'):select'people.name name'
+		t = {}
+		for _, row in disp:rows'{}' do t[#t+1] = row.name end
+		assert(cat(t, ',') == 'Jose,JOSÉ,Ana', cat(t, ','))
+		disp.close()
+
+		--a non-ai_ci col passes through db:collate() untouched.
+		assert(db:collate('people', 'age', 40) == 40)
+		db:commit()
+	end)
+end
+
+function test.not_in_collates()
+	with_db('not_in_collates', function(db)
+		build_ci_fixture(db)
+		db:begin'r'
+		local function ids(scan)
+			local t = {}
+			for _, row in scan:rows'{}' do t[#t+1] = row.id end
+			scan.close()
+			return cat(t, ',')
+		end
+
+		--one literal spelling excludes every spelling that folds to it.
+		assert(ids(db:scan('people', 'id asc')
+			:not_in('name', {'josé'})
+			:select'people.id id') == '3')
+
+		--same answer off the index, where the col is already folded.
+		assert(ids(db:scan('people/name', 'name')
+			:not_in('name', {'josé'})
+			:select'people.id id') == '3')
+
+		--a non-ai_ci col is compared as-is.
+		assert(ids(db:scan('people', 'id asc')
+			:not_in('age', {30, 50})
+			:select'people.id id') == '2')
+
+		--a qualified col names its member on a join.
+		local scan = db:scan('people', 'id asc', 'p')
+			:join'people@q.id = p.id'
+			:not_in('q.age', {30})
+			:select'p.id id'
+		assert(ids(scan) == '2,3')
+
+		local one = db:scan('people', 'id asc')
+		assert(not pcall(one.not_in, one, 'age, id', {1}))
+		one.close()
+		db:commit()
+	end)
+end
+
 local name = ...
 if name == 'mdbx_scan_test' then name = nil end
 local tests = name and {name} or test

@@ -12,7 +12,7 @@ FEATURES
 	- indexes: unique and non-unique, utf-8 ai_ci, nullable columns for non-unique.
 	- foreign keys: cascade or set-null on delete; enforced on insert/update.
 	- triggers: Lua functions in schema fired before/after insert/update/delete.
-	- computed columns (stored) via Lua functions in schema.
+	- stored generated columns, generated via Lua functions declared in schema.
 	- automatic schema migration: run DDL to sync stored schema to paper schema.
 	- schema validation on table open: stored schema must match paper schema.
 LIMITATIONS
@@ -100,7 +100,8 @@ SCHEMA SPEC (create_table, alter_table)
 		fields = {
 			{
 				col=name, mdbx_type='u32|i32|u8|i8|u16|i16|f32|f64|utf8|bool',
-				[not_null=true], [maxlen=N], [nozero=true], [padded=true]
+				[not_null=true], [maxlen=N], [nozero=true], [padded=true],
+
 			}, ...
 		},
 		pk = {'col1', ...},
@@ -112,6 +113,24 @@ SCHEMA SPEC (create_table, alter_table)
 	ix_spec:  {'col1', 'col2', ..., [is_unique=true]}
 	fk_spec:  {table='t', cols={'col',...}, ref_table='r', ref_cols={'col',...},
 					[ondelete='cascade'|'set null'], [onupdate='cascade']}
+
+TRIGGERS
+
+	table_schema.triggers = {
+		{before|after}_insert = {fn1,...},  -- fn(db, new_row)
+		{before|after}_update = {fn1,...},  -- fn(db, old_row, new_row)
+		{before|after}_delete = {fn1,...},  -- fn(db, old_row)
+	}
+
+	- firing triggers forces a decode_row per affected row.
+
+GENERATED COLUMNS
+
+	- declared in paper schema with `as(fn)` where `fn(db, row) -> val|nil`.
+	- fires on every insert and every update.
+	- return nil to set default.
+	- called on alter table for new columns but not on restructuring.
+	- slows down updates because it needs to decode the row.
 
 STATE
 
@@ -501,6 +520,19 @@ local function encode_val(self, schema, event, rec, rec_buf_sz, cols, as, ...)
 		C.schema_val_add(schema._st, vi-1, rec, rec_buf_sz, len, pp)
 	end
 	return pp[0] - rec
+end
+
+local function apply_generated(db, event, schema, new_t, fields)
+	for _, f in ipairs(fields or schema.val_fields) do
+		if f.generate then
+			local val = f.generate(db, new_t)
+			if val == nil then val = resolve_null_val(schema, f) end
+			if (val == nil or val == null) and f.not_null then
+				db:check_col(event, schema.name, f.col, false, 'not_null')
+			end
+			new_t[f.col] = val
+		end
+	end
 end
 
 local pout = new'const u8*[1]'
@@ -1587,7 +1619,7 @@ local function copy_base_schema(src, name)
 	}
 	schema.pk.desc = imap(src.pk.desc)
 	for _, src_f in ipairs(assert(src.fields)) do
-		local f = {}
+		local f = {generate = src_f.generate}
 		for k in pairs(paper_field_attrs) do
 			f[k] = src_f[k]
 		end
@@ -1691,13 +1723,19 @@ end
 
 local alter_key_rec_buffer = u8a(MDBX_MAX_KEY_SIZE)
 
-local function alter_values_in_place(self, dbi, old_schema, new_schema, event)
+local function alter_values_in_place(
+	self, dbi, old_schema, new_schema, event, gen_fields
+)
 	local cur = self:cursor_raw(dbi)
 	local ok, k, k_sz, v, v_sz = cur:first_raw()
 	local rec = {}
 	while ok do
 		local kk = alter_key_rec_buffer; copy(kk, k, k_sz)
 		decode_val_with_null(old_schema, v, v_sz, rec)
+		if gen_fields then
+			decode_key(old_schema, k, k_sz, rec, '{}')
+			apply_generated(self, event, new_schema, rec, gen_fields)
+		end
 		local nv, nv_buf_sz =
 			val_rec_buffer(new_schema.val_fields.max_rec_size)
 		local nv_sz = encode_val(
@@ -1709,7 +1747,9 @@ local function alter_values_in_place(self, dbi, old_schema, new_schema, event)
 	cur:close()
 end
 
-local function alter_via_temp_table(self, dbi, old_schema, new_schema, event)
+local function alter_via_temp_table(
+	self, dbi, old_schema, new_schema, event, gen_fields
+)
 
 	--create the replacement table and capture its sequence.
 	local temp_name = '$alter/'..uuid()
@@ -1721,6 +1761,9 @@ local function alter_via_temp_table(self, dbi, old_schema, new_schema, event)
 	for _, k, k_sz, v, v_sz in self:each_raw(dbi) do
 		decode_key(old_schema, k, k_sz, rec, '{}')
 		decode_val_with_null(old_schema, v, v_sz, rec)
+		if gen_fields then
+			apply_generated(self, event, new_schema, rec, gen_fields)
+		end
 		local nk, nk_buf_sz =
 			alter_key_rec_buffer, MDBX_MAX_KEY_SIZE
 		local nv, nv_buf_sz =
@@ -1767,10 +1810,17 @@ function Db:alter_table(tab, src_schema)
 	local rewrite_keys =
 		schema.pk_change_affects(
 			old_schema, new_schema, MS.index_field_attrs)
+	local gen_fields --gather new generated fields to apply on new columns.
+	for _, f in ipairs(new_schema.val_fields) do
+		if f.generate and not old_schema.fields[f.col] then
+			gen_fields = gen_fields or {}
+			add(gen_fields, f)
+		end
+	end
 	if rewrite_keys then
-		alter_via_temp_table(self, dbi, old_schema, new_schema, event)
+		alter_via_temp_table(self, dbi, old_schema, new_schema, event, gen_fields)
 	elseif val_reencode_needed(old_schema, new_schema) then
-		alter_values_in_place(self, dbi, old_schema, new_schema, event)
+		alter_values_in_place(self, dbi, old_schema, new_schema, event, gen_fields)
 	end
 
 	--install the new schema graph.
@@ -2647,14 +2697,6 @@ local function decode_row(schema, k, k_sz, v, v_sz)
 	return t
 end
 
-local function apply_generated(db, schema, new_t)
-	for _, f in ipairs(schema.val_fields) do
-		if f.generate then
-			new_t[f.col] = f.generate(db, new_t)
-		end
-	end
-end
-
 --[[
 check that every fk's referenced row exists for the selected values. on a full
 write (insert/put) an unset col takes its default. a nil/null fk col means "no
@@ -2803,7 +2845,7 @@ local function cur_update(self, ix_cur, val_cols, ...)
 			fire_triggers(schema, 'before_update', db, old_t, t)
 		end
 		if schema.has_generated then
-			apply_generated(db, schema, t)
+			apply_generated(db, 'c_update', schema, t)
 		end
 	end
 	local v_sz = encode_val(db, schema, 'c_update', v, v_buf_sz, val_cols, '{}', t)
@@ -2877,7 +2919,7 @@ local function put(self, flags, op, tab, cols, ...)
 					fire_triggers(schema, 'before_update', self, old_t, t)
 				end
 				if schema.has_generated then
-					apply_generated(self, schema, t)
+					apply_generated(self, op, schema, t)
 				end
 				new_t = t
 			end
@@ -2904,7 +2946,7 @@ local function put(self, flags, op, tab, cols, ...)
 					fire_triggers(schema, 'before_insert', self, new_t)
 				end
 				if schema.has_generated then
-					apply_generated(self, schema, new_t)
+					apply_generated(self, op, schema, new_t)
 				end
 				v_sz = encode_val(self, schema, op,
 					v, v_buf_sz, schema.val_cols, '{}', new_t)
@@ -3009,7 +3051,11 @@ function Db:del(tab, ...)
 	return true
 end
 
---fast bulk put but can't have indexes or fks. for initializing new tables.
+--fast bulk put for initializing tables.
+--caveats:
+--- can't have indexes or fks!
+--- doesn't fire triggers!
+--- doesn't compute generated columns!
 function Db:put_records(tab, cols, rows)
 	if istab(cols) then
 		cols, rows = '[]', cols

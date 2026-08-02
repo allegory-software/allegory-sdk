@@ -596,6 +596,37 @@ function test.in_ai_ci_null_residual_exec()
 	end)
 end
 
+--starts() on an ai_ci index key seeks the folded prefix: 'JOSE' has no
+--raw 'Jos' prefix and only matches once the bound is folded too.
+function test.starts_ai_ci_seek_exec()
+	with_db('starts_ai_ci_seek_exec', function(db)
+		db:begin'w'
+		db:create_table('people', {fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'name', mdbx_type = 'utf8', maxlen = 32, nozero = true,
+				not_null = true, mdbx_collation = 'utf8_ai_ci'},
+		}, pk = {'id'}})
+		db:add_index('people', {'name'})
+		db:insert('people', '{}', {id = 1, name = 'JOSÉ'})
+		db:insert('people', '{}', {id = 2, name = 'joseph'})
+		db:insert('people', '{}', {id = 3, name = 'Bob'})
+		db:commit()
+		db:atomic('r', function()
+			local rel = db:from('people')
+				:where({'starts', q.col('people.name'), 'Jos'})
+				:select'people.id id'
+				:prepare()
+			local plan = rel.access[1].plan
+			assert(plan.schema.name == 'people/name'
+				and plan.kind == 'prefix' and plan.bound_col == 'name'
+				and #plan.residual == 0, plan.kind)
+			local node = compile_step(db, rel)
+			local ids = collect_ids(node, 'people')
+			assert(cat(ids, ',') == '1,2', cat(ids, ','))
+		end)
+	end)
+end
+
 --two independent equality facts (status, score), each with its own
 --single-column index and no composite index covering both:
 --choose_access can only drive the seek from one of them, so the other
