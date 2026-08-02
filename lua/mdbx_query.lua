@@ -3046,6 +3046,15 @@ local function compile_group(node, rel)
 	return apply_having(node, rel.having_conditions)
 end
 
+--compile_union() builds each input for one terminal and concatenates them.
+local function compile_union(db, rel, compile_input)
+	local node = compile_input(db, rel.union_rels[1])
+	for i = 2, #rel.union_rels do
+		node = node:union(compile_input(db, rel.union_rels[i]))
+	end
+	return node
+end
+
 local function compile_terminal(db, rel)
 	assert(rel.out_cols, 'rows()/rows_array()/first()/one()/must_one() require'
 		..' select() or group_by()')
@@ -3053,10 +3062,7 @@ local function compile_terminal(db, rel)
 		'select() after group_by() is not implemented yet')
 	local node
 	if rel.union_rels then
-		node = compile_terminal(db, rel.union_rels[1])
-		for i = 2, #rel.union_rels do
-			node = node:union(compile_terminal(db, rel.union_rels[i]))
-		end
+		node = compile_union(db, rel, compile_terminal)
 	elseif rel.group_cols then
 		node = compile_group(compile_step(db, rel), rel)
 	else
@@ -3146,6 +3152,9 @@ local function count_items(node, args)
 end
 
 local function compile_group_or_distinct(db, rel)
+	if rel.union_rels then
+		return compile_union(db, rel, compile_group_or_distinct)
+	end
 	local node = compile_step(db, rel)
 	if rel.group_cols then
 		return compile_group(node, rel)
@@ -3164,6 +3173,9 @@ function Rel:count(params)
 end
 
 local function compile_exists_node(db, rel)
+	if rel.union_rels then
+		return compile_union(db, rel, compile_exists_node)
+	end
 	local node = compile_step(db, rel)
 	if rel.group_cols then
 		node = compile_group(node, rel)

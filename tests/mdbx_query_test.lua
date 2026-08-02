@@ -1952,6 +1952,33 @@ function test.exists_having_exec()
 	end)
 end
 
+function test.union_count_exists_exec()
+	with_db('union_count_exists_exec', function(db)
+		db:atomic('r', function()
+			local function selected(id)
+				return db:from('users')
+					:where({'=', q.col('users.id'), id})
+					:select'users.id id'
+			end
+			local grouped = db:from('users')
+				:where({'=', q.col('users.id'), 3})
+				:group_by'users.id id'
+			local rel = db:union(
+				db:union(selected(1), selected(2)), grouped):prepare()
+			assert(rel:count() == 3)
+			assert(rel:exists())
+			assert(rel:count() == 3)
+
+			local empty_group = db:from('users')
+				:where({'=', q.col('users.id'), 99})
+				:group_by'users.id id'
+			local empty_rel = db:union(selected(99), empty_group):prepare()
+			assert(empty_rel:count() == 0)
+			assert(not empty_rel:exists())
+		end)
+	end)
+end
+
 ------------------------------------------------------------------------------
 --where_has()/where_hasnt() evaluate exists()/not_exists() via FK with one
 --persistent scan. where_has() returns users 1/2/4; where_hasnt() returns

@@ -24,7 +24,7 @@ SCAN COMPOSITION (any scan: table_scanner, join, or child_scan result)
 	scan:union         (scan2) -> scan              concatenates scan2 rows
 	scan:limit         (n|{arg='KEY'}, [offset|{arg='KEY'}]) -> scan
 OUTPUT TERMINALS (after select() or aggregate())
-	scan:rows       ([shape], [args]) -> iter() -> vals... | row
+	scan:rows       ([shape], [args]) -> iter() -> scan, vals... | row
 	scan:rows_array ([shape], [args]) -> {row1,...}
 	scan:first      ([shape], [args]) -> vals... | row | nil
 	scan:one        ([shape], [args]) -> vals... | row | nil
@@ -861,9 +861,9 @@ function Scan:union(scan2)
 	local scan1 = self
 	local scan = object(Scan)
 	local current_scan = scan1
-	local output = scan1.get ~= nil
+	local output1 = scan1.get ~= nil
+	local output2 = scan2.get ~= nil
 	local found
-	assert(output == (scan2.get ~= nil))
 	function scan.reset(args)
 		scan.args = args
 		scan1.reset(args)
@@ -882,7 +882,7 @@ function Scan:union(scan2)
 	function scan.found()
 		return found
 	end
-	if output then
+	if output1 and output2 then
 		local names1, names2 = scan1.out_cols, scan2.out_cols
 		assert(#names1 == #names2)
 		for i, name in ipairs(names1) do assert(name == names2[i]) end
@@ -904,7 +904,7 @@ function Scan:union(scan2)
 			end
 			return return_scan(get())
 		end
-	else
+	elseif not output1 and not output2 then
 		scan.members = scan1.members
 		scan.steps_by_key = scan1.steps_by_key and scan2.steps_by_key
 		function scan.advance_pk()
