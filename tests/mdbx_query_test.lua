@@ -1940,6 +1940,18 @@ function test.count_group_by_exec()
 	end)
 end
 
+function test.count_group_by_distinct_exec()
+	with_db('count_group_by_distinct_exec', function(db)
+		db:atomic('r', function()
+			local rel = db:from('users')
+				:group_by{'users.score score', {{'count'}, 'n'}}
+				:distinct'n'
+				:prepare()
+			assert(rel:count() == 1)
+		end)
+	end)
+end
+
 --having() filters before count(): only 'active' has 3+ users.
 function test.count_having_exec()
 	with_db('count_having_exec', function(db)
@@ -2134,6 +2146,45 @@ function test.not_exists_rel_exec()
 	end)
 end
 
+function test.exists_selected_limit_exec()
+	with_db('exists_selected_limit_exec', function(db)
+		db:atomic('r', function()
+			local sub = db:from('users'):select'users.id id'
+				:limit(q.param'N')
+			local rel = db:from('users'):where(q.exists(sub)):prepare()
+			assert(rel:count{N = 0} == 0)
+			assert(rel:count{N = 1} == 5)
+		end)
+	end)
+end
+
+function test.exists_distinct_offset_exec()
+	with_db('exists_distinct_offset_exec', function(db)
+		db:atomic('r', function()
+			local sub = db:from('users'):select'users.status status'
+				:distinct():limit(1, 2)
+			local rel = db:from('users'):where(q.exists(sub)):prepare()
+			assert(rel:count() == 0)
+		end)
+	end)
+end
+
+function test.exists_grouped_rel_exec()
+	with_group_db('exists_grouped_rel_exec', function(db)
+		db:atomic('r', function()
+			local sub = db:from('sessions')
+				:where{'=', q.col'sessions.user_id', q.col'users.id'}
+				:group_by{{{'count'}, 'n'}}
+				:having{'>', q.col'n', 1}
+			local t = {}
+			for _, id in db:from('users'):where(q.exists(sub))
+				:select'users.id id':order_by'id':rows()
+			do t[#t+1] = id end
+			assert(cat(t, ',') == '1', cat(t, ','))
+		end)
+	end)
+end
+
 --[[
 compile_exists_checker() materializes every sessions.user_id once for
 an uncorrelated in/not_in relation.
@@ -2197,6 +2248,29 @@ function test.not_in_rel_exec()
 			local t = {}
 			for _, id in rel:rows() do t[#t+1] = id end
 			assert(cat(t, ',') == '3,5', cat(t, ','))
+		end)
+	end)
+end
+
+function test.in_rel_limit_exec()
+	with_db('in_rel_limit_exec', function(db)
+		db:atomic('r', function()
+			local sub = db:from('users'):select'users.id id'
+				:order_by'id desc':limit(1, 1)
+			local id = db:from('users'):where{'in', q.col'users.id', sub}
+				:select'users.id id':one()
+			assert(id == 4, id)
+		end)
+	end)
+end
+
+function test.in_grouped_rel_exec()
+	with_db('in_grouped_rel_exec', function(db)
+		db:atomic('r', function()
+			local sub = db:from('users'):group_by{{{'count'}, 'n'}}
+			local id = db:from('users'):where{'in', q.col'users.id', sub}
+				:select'users.id id':one()
+			assert(id == 5, id)
 		end)
 	end)
 end
@@ -2678,6 +2752,59 @@ function test.having_ai_ci_exec()
 				:rows()
 			do t[#t+1] = team..'/'..lo end
 			assert(cat(t, ',') == 'a/ange', cat(t, ','))
+		end)
+	end)
+end
+
+function test.in_rel_mixed_collation_exec()
+	with_ai_ci_db('in_rel_mixed_collation_exec', function(db)
+		db:begin'w'
+		db:create_table('plain_names', {fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'name', mdbx_type = 'utf8', maxlen = 32,
+				not_null = true},
+		}, pk = {'id'}})
+		db:insert('plain_names', '{}', {id = 1, name = 'ANGE'})
+		db:insert('plain_names', '{}', {id = 2, name = 'none'})
+		db:insert('plain_names', '{}', {id = 3, name = 'ANGE'})
+		db:commit()
+		db:atomic('r', function()
+			local plain = db:from('plain_names')
+				:select'plain_names.name name'
+			local t = {}
+			for _, id in db:from('people')
+				:where{'in', q.col'people.name', plain}
+				:select'people.id id':order_by'id':rows()
+			do t[#t+1] = id end
+			assert(cat(t, ',') == '2,3', cat(t, ','))
+
+			local names = db:from('people'):select'people.name name'
+			t = {}
+			for _, id in db:from('plain_names')
+				:where{'in', q.col'plain_names.name', names}
+				:select'plain_names.id id':order_by'id':rows()
+			do t[#t+1] = id end
+			assert(cat(t, ',') == '1,3', cat(t, ','))
+
+			local correlated_plain = db:from('plain_names')
+				:where{'=', q.col'plain_names.id', q.col'people.id'}
+				:select'plain_names.name name'
+			t = {}
+			for _, id in db:from('people')
+				:where{'in', q.col'people.name', correlated_plain}
+				:select'people.id id':order_by'id':rows()
+			do t[#t+1] = id end
+			assert(cat(t, ',') == '3', cat(t, ','))
+
+			local correlated_names = db:from('people')
+				:where{'=', q.col'people.id', q.col'plain_names.id'}
+				:select'people.name name'
+			t = {}
+			for _, id in db:from('plain_names')
+				:where{'in', q.col'plain_names.name', correlated_names}
+				:select'plain_names.id id':order_by'id':rows()
+			do t[#t+1] = id end
+			assert(cat(t, ',') == '3', cat(t, ','))
 		end)
 	end)
 end

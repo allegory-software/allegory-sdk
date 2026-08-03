@@ -1106,7 +1106,7 @@ end
 --they're at the same MDBX entry, so overlapping inputs -- e.g. the same row
 --reachable through two different seeks -- come out once, not twice. both
 --inputs must scan the same table in the same direction.
---compose pairwise for more than two: scan1:merge_union(scan2):merge_union(scan3)...
+--compose for more than two: scan1:merge_union(scan2):merge_union(scan3)...
 function Scan:merge_union(scan2)
 	local scan1 = self
 	assert(scan1.table and scan1.table == scan2.table)
@@ -1546,8 +1546,8 @@ end
 local function output_must_one(scan, shape, args)
 	shape, args = parse_row_args(shape, args)
 	local rows = collect_output_rows(scan, shape, args, 2)
-	assert(#rows > 0, 'must_one() matched no rows, expected exactly one')
-	assert(#rows == 1, 'must_one() matched more than one row, expected exactly one')
+	assert(#rows > 0, 'must_one(): no rows, expected exactly one')
+	assert(#rows == 1, 'must_one(): multiple rows, expected exactly one')
 	return output_row(scan, rows[1], shape)
 end
 

@@ -2044,10 +2044,6 @@ end
 	local prefer_order = source_order_terms and rel._limit ~= nil
 	local source_group_terms = group_key_terms(rel)
 
-	--TODO: compile() skips this whole block for a union rel, so
-	--distinct() on a union (which the doc block above implies works) has
-	--no dedup strategy yet. probably always hash, since a union has no
-	--single natural_order to stream against.
 	if not rel.set_op then
 		local base_source = rel.joins[1].right
 		local access = {} --{{source=,join=|false,plan=|nested=}...}
@@ -2060,10 +2056,6 @@ end
 		build_access(rel.joins, {[base_source.name] = true}, access, sources,
 			rel.where_conditions)
 		rel.natural_order = natural_order(access[1])
-		--TODO: the execution stage still needs an opener for each access
-		--step (old file's prepare_scans: compile_scan/compile_relation_
-		--scan/compile_virtual_scan) -- blocked on the execution stage,
-		--which isn't ported yet.
 	end
 
 	--SORT AND DEDUP ----------------------------------------------------------
@@ -2491,19 +2483,22 @@ local function eval_expr(expr, scan, checks, cache)
 		prefix = cmp_value(cache, b, prefix, fold)
 		return v:sub(1, #prefix) == prefix
 	elseif op == 'in' or op == 'not_in' then
-		local fold = operand_ai_ci(cache, a)
-		local v = eval_expr(a, scan, checks, cache)
-		if null_value(v) then return false end
-		v = cmp_value(cache, a, v, fold)
-		local found = false
+		local check
+		local ai_ci = operand_ai_ci(cache, a)
 		if inherits(b, Rel) then
-			local check = assertf(checks[expr],
+			check = assertf(checks[expr],
 				'eval_expr: in_() check not compiled for source: %s',
 				tostring(b.name))
+			ai_ci = ai_ci or check.ai_ci
+		end
+		local v = eval_expr(a, scan, checks, cache)
+		if null_value(v) then return false end
+		v = cmp_value(cache, a, v, ai_ci)
+		local found = false
+		if check then
 			if check.values_set then
-				--reset_check() built values_set from eval_value(), which
-				--folds an ai_ci col the same way v was folded above --
-				--a direct hash lookup, no per-candidate loop needed.
+				--reset_check() stores the same comparison values that
+				--cmp_value() produces above, so lookup needs no value loop.
 				found = check.values_set[v] ~= nil
 			else
 				for _, candidate in check.values() do
@@ -2514,9 +2509,8 @@ local function eval_expr(expr, scan, checks, cache)
 				end
 			end
 		elseif cache[expr] then
-			--pre-built hash set for a plain literal list; see
-			--compile_col_decoders(). candidate keys were folded the same
-			--way v already was above, so this is a direct lookup.
+			--compile_col_decoders() stores each literal in the same
+			--comparison form that cmp_value() produces above.
 			found = cache[expr][v] ~= nil
 		else
 			local param_list = type(b) == 'table' and b[1] == 'param'
@@ -2525,7 +2519,7 @@ local function eval_expr(expr, scan, checks, cache)
 			for _, item in ipairs(values) do
 				local candidate = param_list and item
 					or eval_expr(item, scan, checks, cache)
-				if candidate_matches(candidate, v, fold) then
+				if candidate_matches(candidate, v, ai_ci) then
 					found = true
 					break
 				end
@@ -2574,9 +2568,10 @@ occurrence in expr and binds correlated reads to node. apply_residual()
 calls it once per condition list before building the per-row predicate,
 so eval_expr() only looks up an already-compiled checker in checks.
 ]]
-local function compile_residual_checkers(db, expr, node, checks, registry)
+local function compile_residual_checkers(db, expr, node, checks, registry,
+		outer_cache)
 	walk_exists_nodes(expr, function(e)
-		compile_exists_checker(db, e, node, checks, registry)
+		compile_exists_checker(db, e, node, checks, registry, outer_cache)
 	end)
 end
 
@@ -2684,8 +2679,9 @@ local function row_check(conditions)
 	local function bind(db, node, node_checks, registry, outer_node)
 		bound, cache, checks = node, {}, node_checks
 		for _, cond in ipairs(conditions) do
-			compile_residual_checkers(db, cond.expr, node, node_checks, registry)
 			compile_col_decoders(cond.expr, node, cache, registry, outer_node)
+			compile_residual_checkers(db, cond.expr, node, node_checks, registry,
+				cache)
 		end
 	end
 	return accept, bind
@@ -2730,6 +2726,7 @@ end
 
 local compile_step --fw. decl.
 local compile_union --fw. decl.
+local compile_subquery_exists
 
 local function set_check(checks, expr, check)
 	checks[expr] = check
@@ -2754,10 +2751,10 @@ end
 local function reset_check(check, args)
 	local scan = check.scan
 	scan.reset(args)
-	if check.out_col then
+	if check.value_get then
 		local set = {}
 		while scan.advance() do
-			local v = eval_value(check.out_col, scan, check.cache)
+			local v = check.value_get()
 			if not null_value(v) then
 				set[v] = true
 			end
@@ -2806,103 +2803,77 @@ occurrence (expr) into checks[expr] and binds correlated reads to node.
 compile_residual_checkers() calls it before the per-row predicate runs.
 If checks[expr] already exists, compile_exists_checker() returns.
 walk_exists_nodes() can reach the same occurrence twice: once directly
-from the outer compile_residual_checkers() call over
-on_expr, and once more when the branch below reaches expr.plan.residual
-(a leftover subset of that same on_expr) and calls apply_residual() on
-it, which walks it again through compile_residual_checkers(). The
-guard makes the second walk a no-op.
-- expr.correlated (classify_exists_targets(), compile()-time): false
-  means the occurrence never reads the outer row at all, so it's
-  answered once, right here, and checks[expr] holds the plain
-  {constant=} / {values_set=} result instead of a live checker.
-- table source (exists()/not_exists() only): one persistent scan,
-  built from expr.plan (resolve_exists_plan(), compile()-time) with a
-  getter fixed on node -- reset() and check once per outer row, same
-  as scan()'s own open-once-per-run, reseek-per-row design.
-- sub-relation source: delegates the whole node chain to compile_step()
-  (rel is already fully compiled -- compile() recursed into it at bind
-  time through bind_expr's 'exists'/'in' cases), with node passed
-  through the same way, so the sub-relation's own base step reads the
-  correlation through it instead of params. check_exists() answers
-  exists()/not_exists(); values() answers in_()/not_in() by yielding
-  the sub-relation's one out_col, decoded off the node, for every row
-  of a fresh scan.
-Still asserted rather than silently wrong (sub-relation source):
-- a union sub-relation -- compile_step() has no access plan to build
-  from (compile() skips BUILD ACCESS for a union rel).
-- group_by()/having() inside a sub-relation -- aggregating is
-  compile_group()'s job, run separately from compile_step() by
-  compile_terminal()/Rel:exists(); nothing here calls it yet.
+from compile_residual_checkers() and once through apply_residual() on
+expr.plan.residual. If checks[expr] is set, compile_exists_checker() makes
+the second call a no-op.
+When expr.correlated is false, reset_check() computes {constant=} or
+{values_set=} once per outer reset and closes the check scan.
+For a table source, compile_table_scan() builds the persistent check scan
+from expr.plan. For a relation source, compile_terminal() builds the full
+value pipeline for in_()/not_in(), while compile_subquery_exists() builds
+only stages that can change whether rows remain for exists()/not_exists().
+check_exists() resets the relation per correlated outer row. values() resets
+it and yields its single named output value per correlated outer row.
 ]]
-function compile_exists_checker(db, expr, node, checks, registry)
+function compile_exists_checker(db, expr, node, checks, registry, outer_cache)
 	if checks[expr] then return end
 	local op = expr[1]
 	--exists()/not_exists(): expr[2] is the source, expr[3] is on_expr.
 	--in()/not_in(): expr[3] is the source (a sub-relation, the only
 	--shape compile_residual_checkers() calls this for); expr[2] is the
 	--tested value expr, unrelated to this occurrence's own source.
-	local right = (op == 'in' or op == 'not_in') and expr[3] or expr[2]
+	local membership = op == 'in' or op == 'not_in'
+	local right = membership and expr[3] or expr[2]
 	local outer_node = expr.correlated and node or nil
 	if inherits(right, Rel) then
-		assert(not right.group_cols,
-			'exists()/in_(): group_by()/having() inside a sub-relation is'
-				..' not implemented yet')
-		local out_col = right.out_cols and right.out_cols[1]
-		if out_col then
-			assert(#right.out_cols == 1 and out_col[1] == 'col'
-				and out_col.source,
-				'in_()/not_in(): sub-relation output must be one plain column')
-		end
+		local out_col, value_get, value_ai_ci, ai_ci
 		local sub_node
-		if right.set_op then
-			--a set-op rel has no access plan: build each input the same way a
-			--plain sub-relation is built, then project so the union can
-			--answer for its out cols.
-			sub_node = compile_union(db, right, function(db, input)
-				assert(not input.group_cols,
-					'exists()/in_(): group_by() inside a union sub-relation'
-						..' is not implemented yet')
-				return compile_step(db, input, outer_node)
-					:select(input.output_descriptor)
-			end)
-		else
-			sub_node = compile_step(db, right, outer_node)
-		end
-		local cache = {}
-		--build out_col's decoder before the first advance(): a
-		--scan needs need_base() enabled ahead of advance() to
-		--read a base-only column.
-		if out_col then
-			if right.set_op then
-				local get, ai_ci = sub_node:col_decoder(out_col.name, true)
-				cache[out_col] = {get = get, ai_ci = ai_ci}
-			else
-				compile_col_decoders(out_col, sub_node, cache)
+		if membership then
+			assert(right.out_cols and #right.out_cols == 1,
+				'in_()/not_in(): sub-relation must return one column')
+			out_col = right.out_cols[1]
+			sub_node = compile_terminal(db, right, outer_node)
+			--col_decoder() runs before the first advance() so scan() can
+			--fetch a base-only output column.
+			value_get, value_ai_ci =
+				sub_node:col_decoder(out_col.name, true)
+			ai_ci = operand_ai_ci(outer_cache, expr[2]) or value_ai_ci
+			if ai_ci and not value_ai_ci then
+				local get = value_get
+				value_get = function()
+					return mdbx_collate_value(get(), true)
+				end
 			end
+		else
+			sub_node = compile_subquery_exists(db, right, outer_node)
 		end
 		if expr.correlated then
-			set_check(checks, expr, {
+			local check = {
 				scan = sub_node,
-				check_exists = function()
-					sub_node.reset(node.args)
-					return sub_node.advance() ~= nil
-				end,
-				values = function()
+				ai_ci = ai_ci,
+			}
+			if membership then
+				check.values = function()
 					sub_node.reset(node.args)
 					return function()
 						if sub_node.advance() then
-							return sub_node,
-								eval_value(out_col, sub_node, cache)
+							return sub_node, value_get()
 						end
 					end
-				end,
-			})
+				end
+			else
+				check.check_exists = function()
+					sub_node.reset(node.args)
+					return sub_node.advance() ~= nil
+				end
+			end
+			set_check(checks, expr, check)
 		else
 			set_check(checks, expr, {
 				scan = sub_node,
 				uncorrelated = true,
-				out_col = out_col,
-				cache = cache,
+				value_get = value_get,
+				ai_ci = ai_ci,
 			})
 		end
 	else
@@ -3035,8 +3006,6 @@ the whole finished row.
 
 --TODO: a group nested inside another group, and a group base that
 doesn't correlate on a plain outer column, aren't wired up yet.
-group_by/having/distinct/order_by/limit aren't applied at runtime yet
-either.
 ]]
 --[[local]] function compile_step(db, rel, outer_node)
 	assert(rel.access and #rel.access >= 1, 'compile_step: rel.access missing')
@@ -3182,6 +3151,21 @@ function compile_union(db, rel, compile_input)
 	return node
 end
 
+local function apply_limit(node, rel)
+	if rel._limit ~= nil then
+		local n = rel._limit
+		if type(n) == 'table' and n[1] == 'param' then
+			n = {arg = n[2]}
+		end
+		local offset = rel._offset
+		if type(offset) == 'table' and offset[1] == 'param' then
+			offset = {arg = offset[2]}
+		end
+		node = node:limit(n, offset)
+	end
+	return node
+end
+
 function compile_terminal(db, rel, outer_node)
 	assert(rel.out_cols, 'rows()/rows_array()/first()/one()/must_one() require'
 		..' select() or group_by()')
@@ -3204,18 +3188,7 @@ function compile_terminal(db, rel, outer_node)
 	if rel.sort_needed then
 		node = node:sort(rel.sort_spec)
 	end
-	if rel._limit ~= nil then
-		local n = rel._limit
-		if type(n) == 'table' and n[1] == 'param' then
-			n = {arg = n[2]}
-		end
-		local offset = rel._offset
-		if type(offset) == 'table' and offset[1] == 'param' then
-			offset = {arg = offset[2]}
-		end
-		node = node:limit(n, offset)
-	end
-	return node
+	return apply_limit(node, rel)
 end
 
 --nesting a second call inside an unfinished iteration of the first
@@ -3260,18 +3233,13 @@ function Rel:must_one(shape, params)
 end
 
 --[[
-count()/exists() don't need select()/group_by() at all -- unlike
-rows()/first()/one()/must_one(), they can answer from compile_step()'s
-raw filtered/joined stream directly, no projection needed. group_by()
-still applies: a group's having() can depend on fully accumulated
-aggregates, so a group only "exists"/counts once it's finished
-(compile_group already applies having()). distinct() changes count()'s
-answer (fewer rows) but never exists()'s: a row surviving distinct()
-never disappears to zero, so exists() skips it entirely and just
-checks the raw stream for any match.
-neither respects order_by()/limit(): order never changes a count or
-an existence check, and limit()+count()/exists() together isn't a
-combination that this API composes (unlike a real SQL subquery LIMIT).
+Rel:count() and Rel:exists() read compile_step() directly when no later
+stage can change their answers. compile_group() still applies because
+having() can remove every finished group. distinct() changes Rel:count(),
+so compile_group_or_distinct() builds the output values that it needs.
+distinct() cannot remove the last row, so Rel:exists() skips it.
+Rel:count() and Rel:exists() ignore their own order_by()/limit();
+compile_subquery_exists() applies the limit of a relation operand.
 ]]
 local function count_items(node, args)
 	node.reset(args)
@@ -3289,19 +3257,19 @@ local function compile_group_or_distinct(db, rel)
 		local node = compile_union(db, rel, compile_terminal)
 		if rel.group_cols then
 			node = compile_group(node, rel)
-		elseif rel.distinct_cols then
+		end
+		if rel.distinct_cols then
 			node = node:distinct(rel.distinct_key_cols, true)
 		end
 		return node
 	end
 	local node = compile_step(db, rel)
-	if rel.group_cols then
-		return compile_group(node, rel)
-	end
+	if rel.group_cols then node = compile_group(node, rel) end
 	if rel.distinct_cols then
 		assert(rel.out_cols, 'distinct() requires select() or group_by()')
-		node = node:select(rel.output_descriptor)
-		return node:distinct(rel.distinct_key_cols, not rel.distinct_streaming)
+		if not rel.group_cols then node = node:select(rel.output_descriptor) end
+		node = node:distinct(rel.distinct_key_cols,
+			not rel.distinct_streaming)
 	end
 	return node
 end
@@ -3311,17 +3279,30 @@ function Rel:count(params)
 	return count_items(node, params)
 end
 
-local function compile_exists_node(db, rel)
+local function compile_exists_node(db, rel, outer_node)
+	local node
 	if rel.set_op then
-		local node = compile_union(db, rel, compile_terminal)
+		node = compile_union(db, rel, function(db, input)
+			return compile_terminal(db, input, outer_node)
+		end)
 		if rel.group_cols then node = compile_group(node, rel) end
-		return node
-	end
-	local node = compile_step(db, rel)
-	if rel.group_cols then
-		node = compile_group(node, rel)
+	else
+		node = compile_step(db, rel, outer_node)
+		if rel.group_cols then node = compile_group(node, rel) end
 	end
 	return node
+end
+
+function compile_subquery_exists(db, rel, outer_node)
+	local node = compile_exists_node(db, rel, outer_node)
+	if rel.distinct_cols and rel._offset ~= nil then
+		if not rel.group_cols and not rel.set_op then
+			node = node:select(rel.output_descriptor)
+		end
+		node = node:distinct(rel.distinct_key_cols,
+			not rel.distinct_streaming)
+	end
+	return apply_limit(node, rel)
 end
 
 function Rel:exists(params)
