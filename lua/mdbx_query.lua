@@ -466,7 +466,7 @@ local function bind_expr(expr, scope, out_cols, mode, allow_aggregate)
 		--aggregate exprs (count/sum/...) are only allowed in group_by().
 		assert(allow_aggregate,
 			'aggregate expressions are only allowed in group_by()')
-		bind_expr(expr[2], scope)
+		bind_expr(expr[2], scope, out_cols, mode)
 		return
 	elseif op == 'col' then
 		--skip if already bound: fk_expr() already set source/col.
@@ -1523,15 +1523,20 @@ other conditions as residual row checks.
 ]]
 local function choose_access(source, conditions, order_terms, prefer_order,
 	group_terms)
-	--rel sources have no pk or index metadata here.
-	--they scan the already-compiled inner rel.
-	--virtual tables have no pk or index metadata either: no physical
-	--storage means no seek, so every condition on them stays residual.
-	--neither has a physical scan node yet (compile_step()'s scan
-	--needs a real schema) -- reject here rather than let compile_step
-	--crash deep inside scan() on a false schema.
+	--a rel source has no pk or index metadata: it reads the rows of its
+	--already-compiled inner rel, so nothing here can seek it and every
+	--condition on it stays residual.
+	if source.rel then
+		local residual = {} --{condition...}
+		for _, cond in ipairs(conditions) do add(residual, cond) end
+		return {kind = 'rel', member = source.name, depth = 0,
+			rel = source.rel, residual = residual}
+	end
+	--virtual tables have no pk or index metadata either, and no scan node
+	--yet (compile_step()'s scan needs a real schema) -- reject here rather
+	--than let compile_step crash deep inside scan() on a false schema.
 	if not source.table or source.schema.virtual then
-		assertf(false, 'choose_access: %s: a relation/virtual source is not'
+		assertf(false, 'choose_access: %s: a virtual source is not'
 			..' implemented yet', source.name)
 	end
 	local eq, lo, hi, prefix, not_null, not_equal, in_ =
@@ -1954,8 +1959,10 @@ end
 
 	--BIND COLUMNS ------------------------------------------------------------
 
+	--a union has no sources: its group cols name its inputs' out cols.
+	local group_bind_mode = union_out_cols and 'out_col' or nil
 	for _, expr in ipairs(rel.group_cols or empty) do
-		bind_expr(expr, rel.scope, nil, nil, true)
+		bind_expr(expr, rel.scope, union_out_cols, group_bind_mode, true)
 	end
 	for _, expr in ipairs(rel.select_cols or empty) do
 		if rel.group_cols then
@@ -2038,7 +2045,11 @@ end
 	  once here, instead of recomputing it on every execution.
 	]]
 	rel.sort_needed = sort_actually_needed(rel)
-	rel.distinct_streaming = distinct_actually_streamable(rel)
+	if rel.union_rels then
+		rel.distinct_streaming = false
+	else
+		rel.distinct_streaming = distinct_actually_streamable(rel)
+	end
 	rel.group_streaming = group_actually_streamable(rel)
 
 	--COMPILE OUTPUT PIPELINE -------------------------------------------------
@@ -2076,7 +2087,8 @@ end
 	if rel.distinct_cols then
 		local cols = {}
 		for i, c in ipairs(dedup_key_cols(rel)) do
-			cols[i] = {member = c.source.name, col = c[3]}
+			cols[i] = {name = c.name, member = c.source and c.source.name,
+				col = c.source and c[3]}
 		end
 		rel.distinct_key_cols = cols
 	end
@@ -2117,10 +2129,16 @@ end
 --each step's {table,key,order,reverse} matches scan's own
 --scan.explain() exactly: both read plan.schema/plan.depth/plan.dir
 --through the same mdbx_scan_order(), no scanner ever built here.
+local explain_rel --fw. decl.
+
 local function explain_steps(access, into)
 	for _, step in ipairs(access) do
 		if step.nested then
 			explain_steps(step.nested, into)
+		elseif step.plan.kind == 'rel' then
+			local steps = {}
+			explain_rel(step.plan.rel, steps)
+			add(into, {source = step.source.name, rel = steps})
 		else
 			local plan = step.plan
 			local schema = plan.schema
@@ -2136,15 +2154,28 @@ local function explain_steps(access, into)
 	end
 end
 
+--a union has no access plan of its own: its steps are its inputs' steps,
+--in input order.
+function explain_rel(rel, into)
+	if rel.union_rels then
+		for _, input in ipairs(rel.union_rels) do
+			explain_rel(input, into)
+		end
+	else
+		explain_steps(rel.access, into)
+	end
+end
+
 function Rel:explain()
 	if not self.compiled then compile(self) end
-	assert(self.access, 'explain(): a union rel is not implemented yet')
 	local steps = {}
-	explain_steps(self.access, steps)
+	explain_rel(self, steps)
 	return steps
 end
 
 --EXECUTOR -------------------------------------------------------------------
+
+local compile_terminal --fw. decl.
 
 --[[
 compile_scan_param() maps one bound-value expr to a scan param.
@@ -2280,7 +2311,17 @@ end
 --union(), to dedupe by the row actually seeked rather than by the input
 --value (which would miss e.g. two different params resolving to the
 --same row, or an ai_ci spelling matching a param's resolved value).
-local function compile_table_scan(db, plan, outer_node, registry)
+local function compile_table_scan(db, plan, outer_node, registry, buffered)
+	if plan.kind == 'rel' then
+		local child = compile_terminal(db, plan.rel)
+		local scan
+		if buffered then
+			scan = child:materialized_scan(plan.member)
+		else
+			scan = child:streamed_scan(plan.member)
+		end
+		return scan, scan
+	end
 	if plan.kind == 'not_equal' then
 		local path = compile_scan_path(plan, outer_node, registry, '<')
 		local range_term = path[#path]
@@ -2317,19 +2358,10 @@ end
 local function null_value(v)
 	return v == nil or v == null
 end
---is x a column read (q.col()) that points at an ai_ci field? if so
---eval_value() already returned it folded and cmp_value() folds the
---other operand to match.
---x binds either straight to a source col (x.source set by bind_col()) or
---to an out_col by name (x.source nil, x.col set by bind_out_col() to the
---out_col's own expr -- having()/order_by() after group_by()/distinct()).
---the out_col still has its own .source when it's a plain column
---passthrough; a computed/aggregate out_col has neither and never folds.
-local function ai_ci_operand(x)
-	if type(x) ~= 'table' or x[1] ~= 'col' then return false end
-	local ref = x.source and x or x.col
-	if not ref or not ref.source then return false end
-	return ai_ci_col(ref.source.schema, ref[3])
+local function operand_ai_ci(cache, x)
+	local d = cache[x]
+	if d == nil then return false end
+	return d.ai_ci == true
 end
 --compare same-kind decoded values in key order: numbers numerically,
 --utf8 by byte order.
@@ -2338,21 +2370,15 @@ local function value_cmp(a, b)
 	return a < b and -1 or 1
 end
 --[[
-- read a value operand for a residual or having() check. a q.col()
-  operand comes back in comparison form: col_decoder(..., true) reads an
-  indexed ai_ci col straight from the folded index key, and an out_col
-  read is folded here.
+- read a value operand for a residual or having() check.
 - literals return themselves.
 - q.param() reads scan.args.
-- q.col() bound to a source (residual: where()/on_expr conditions)
-  reads through node:col_decoder(), memoized in cache -- the member
-  can differ from the step that owns the residual.
-- q.col() bound to an out_col instead (having(): compile()'s BIND
-  COLUMNS stage always binds having() by out_col name, never to a raw
-  source col) has no source to read through -- node is the aggregated
-  value row itself here, so this reads the field directly by name.
+- q.col() reads cache[x].get(), which compile_col_decoders() built from
+  node:col_decoder() ahead of the first advance(). the reader returns
+  the comparison form, so an indexed ai_ci col comes straight from the
+  index key.
 ]]
-local function eval_value(x, scan, row, cache)
+local function eval_value(x, scan, cache)
 	if type(x) ~= 'table' then return x end
 	if x[1] == 'param' then
 		local name = x[2]
@@ -2361,15 +2387,7 @@ local function eval_value(x, scan, row, cache)
 		return args[name]
 	end
 	if x[1] == 'col' then
-		if x.source then
-			local decode = cache[x]
-			if not decode then
-				decode = row:col_decoder(x.source.name, x[3], true)
-				cache[x] = decode
-			end
-			return decode()
-		end
-		return mdbx_collate_value(row[x.col.name], ai_ci_operand(x))
+		return cache[x].get()
 	end
 	error('unsupported residual operand: '..tostring(x[1]))
 end
@@ -2382,7 +2400,7 @@ end
 local function cmp_value(cache, x, v, fold)
 	if not fold or v == nil or v == null then return v end
 	if type(x) == 'table' and x[1] == 'col' then
-		if ai_ci_operand(x) then return v end
+		if operand_ai_ci(cache, x) then return v end
 		return mdbx_collate_value(v, true)
 	end
 	local memo = cache[x]
@@ -2402,42 +2420,42 @@ not_exists() and in_()/not_in() both look their checker up by the
 exists()/in_() expr node itself (not by source: the same source can
 appear in more than one occurrence).
 ]]
-local function eval_expr(expr, scan, row, checks, cache)
+local function eval_expr(expr, scan, checks, cache)
 	if type(expr) ~= 'table' then return expr end
 	local op, a, b = expr[1], expr[2], expr[3]
 	if op == 'param' or op == 'col' then
-		return eval_value(expr, scan, row, cache)
+		return eval_value(expr, scan, cache)
 	end
 	if op == 'and' then
 		for i = 2, #expr do
-			if not expr_passes(eval_expr(expr[i], scan, row, checks, cache)) then
+			if not expr_passes(eval_expr(expr[i], scan, checks, cache)) then
 				return false
 			end
 		end
 		return true
 	elseif op == 'or' then
 		for i = 2, #expr do
-			if expr_passes(eval_expr(expr[i], scan, row, checks, cache)) then
+			if expr_passes(eval_expr(expr[i], scan, checks, cache)) then
 				return true
 			end
 		end
 		return false
 	elseif op == 'is_null' then
-		return null_value(eval_expr(a, scan, row, checks, cache))
+		return null_value(eval_expr(a, scan, checks, cache))
 	elseif op == 'is_not_null' then
-		return not null_value(eval_expr(a, scan, row, checks, cache))
+		return not null_value(eval_expr(a, scan, checks, cache))
 	elseif op == 'starts' then
-		local v = eval_expr(a, scan, row, checks, cache)
-		local prefix = eval_expr(b, scan, row, checks, cache)
+		local v = eval_expr(a, scan, checks, cache)
+		local prefix = eval_expr(b, scan, checks, cache)
 		if null_value(v) or null_value(prefix) then return false end
 		if type(v) ~= 'string' then return false end
-		local fold = ai_ci_operand(a)
+		local fold = operand_ai_ci(cache, a)
 		v = cmp_value(cache, a, v, fold)
 		prefix = cmp_value(cache, b, prefix, fold)
 		return v:sub(1, #prefix) == prefix
 	elseif op == 'in' or op == 'not_in' then
-		local fold = ai_ci_operand(a)
-		local v = eval_expr(a, scan, row, checks, cache)
+		local fold = operand_ai_ci(cache, a)
+		local v = eval_expr(a, scan, checks, cache)
 		if null_value(v) then return false end
 		v = cmp_value(cache, a, v, fold)
 		local found = false
@@ -2465,11 +2483,11 @@ local function eval_expr(expr, scan, row, checks, cache)
 			found = cache[expr][v] ~= nil
 		else
 			local param_list = type(b) == 'table' and b[1] == 'param'
-			local values = param_list and eval_expr(b, scan, row, checks, cache)
+			local values = param_list and eval_expr(b, scan, checks, cache)
 				or b
 			for _, item in ipairs(values) do
 				local candidate = param_list and item
-					or eval_expr(item, scan, row, checks, cache)
+					or eval_expr(item, scan, checks, cache)
 				if candidate_matches(candidate, v, fold) then
 					found = true
 					break
@@ -2487,10 +2505,10 @@ local function eval_expr(expr, scan, row, checks, cache)
 		if op == 'exists' then return found end
 		return not found
 	end
-	local va = eval_expr(a, scan, row, checks, cache)
-	local vb = eval_expr(b, scan, row, checks, cache)
+	local va = eval_expr(a, scan, checks, cache)
+	local vb = eval_expr(b, scan, checks, cache)
 	if null_value(va) or null_value(vb) then return false end
-	local fold = ai_ci_operand(a) or ai_ci_operand(b)
+	local fold = operand_ai_ci(cache, a) or operand_ai_ci(cache, b)
 	va = cmp_value(cache, a, va, fold)
 	vb = cmp_value(cache, b, vb, fold)
 	if op == '=' then return va == vb
@@ -2502,8 +2520,8 @@ local function eval_expr(expr, scan, row, checks, cache)
 	else error('unsupported condition op: '..tostring(op)) end
 end
 --evaluate a where()/on_expr row check against the current row.
-local function eval_residual(expr, scan, row, checks, cache)
-	return expr_passes(eval_expr(expr, scan, row, checks, cache))
+local function eval_residual(expr, scan, checks, cache)
+	return expr_passes(eval_expr(expr, scan, checks, cache))
 end
 
 --TODO(predicate compilation): eval_expr/eval_value (past their exists()/
@@ -2539,16 +2557,23 @@ gets to it -- see mdbx_scan.lua's scan()/need_base().
 local function compile_col_decoders(expr, node, cache, registry)
 	if type(expr) ~= 'table' then return end
 	local op = expr[1]
-	if op == 'col' and expr.source then
+	if op == 'col' then
 		if not cache[expr] then
-			local decoder_node = registry and registry[expr.source.name] or node
-			cache[expr] = decoder_node:col_decoder(expr.source.name, expr[3], true)
+			local get, ai_ci
+			if expr.source then
+				local decoder_node = registry and registry[expr.source.name] or node
+				get, ai_ci = decoder_node:col_decoder(expr.source.name, expr[3], true)
+			else
+				get, ai_ci = node:col_decoder(expr.col.name, true)
+			end
+			cache[expr] = {get = get, ai_ci = ai_ci}
 		end
 	elseif op == 'exists' or op == 'not_exists' then
 		--expr[3] is the correlated sub-relation's own filter, checked
 		--against its own node by compile_exists_checker() -- not node's.
 	elseif op == 'in' or op == 'not_in' then
-		--expr[3], a sub-relation or a value list, is never node's to read.
+		--a sub-relation in expr[3] is never node's to read; a value list
+		--in expr[3] can hold q.col() items, which are.
 		compile_col_decoders(expr[2], node, cache, registry)
 		--a plain literal list (not a q.param() list, whose values aren't
 		--known until reset(args)) gets a hash set here instead of the
@@ -2562,7 +2587,7 @@ local function compile_col_decoders(expr, node, cache, registry)
 				if type(values[i]) == 'table' then all_literal = false; break end
 			end
 			if all_literal then
-				local fold = ai_ci_operand(expr[2])
+				local fold = operand_ai_ci(cache, expr[2])
 				local set = {}
 				for i = 1, #values do
 					local v = values[i]
@@ -2573,6 +2598,10 @@ local function compile_col_decoders(expr, node, cache, registry)
 					end
 				end
 				cache[expr] = set
+			else
+				for i = 1, #values do
+					compile_col_decoders(values[i], node, cache, registry)
+				end
 			end
 		end
 	else
@@ -2594,7 +2623,7 @@ function apply_residual(db, node, residual, checks, registry)
 	end
 	return node:filter(function()
 		for _, cond in ipairs(residual) do
-			if not eval_residual(cond.expr, node, node, checks, cache) then
+			if not eval_residual(cond.expr, node, checks, cache) then
 				return false
 			end
 		end
@@ -2602,26 +2631,27 @@ function apply_residual(db, node, residual, checks, registry)
 	end)
 end
 
---wrap node (a group_by() aggregate's value stream) in a filter
---checking every having_conditions entry; a no-op when there are none.
---eval_residual reads having()'s out_col-bound cols straight off
---node.row -- there's no pk/getter-backed node to read through at this
---stage. node.row is aggregate()'s own finished record (see
---Scan:aggregate), read directly instead of copying it out through
---get(); unlike get()/advance(), nothing downstream (sort()/distinct())
---reassigns it, so there's nothing to go stale.
---having()'s own exists()/in_() correlation (against the aggregated
---row's out_cols) isn't implemented -- compile_exists_checker() expects
---a pk/getter-backed node, not a value row -- so nothing here compiles
---checkers; if having() ever nests exists()/in_(), eval_expr's own
---assertf catches the missing check.
+--[[
+wrap node (a group_by() aggregate's value stream) in a filter checking
+every having_conditions entry; a no-op when there are none.
+compile()'s BIND COLUMNS stage binds having() by out_col name, so
+compile_col_decoders() builds each operand's reader from aggregate()'s
+own output col_decoder().
+having()'s own exists()/in_() correlation (against the aggregated
+row's out_cols) isn't implemented -- compile_exists_checker() expects
+a pk/getter-backed node, not a value row -- so nothing here compiles
+checkers; if having() ever nests exists()/in_(), eval_expr's own
+assertf catches the missing check.
+]]
 local function apply_having(node, having_conditions)
 	if #having_conditions == 0 then return node end
 	local cache = {}
+	for _, cond in ipairs(having_conditions) do
+		compile_col_decoders(cond.expr, node, cache)
+	end
 	return node:filter(function()
-		local row = node.row
 		for _, cond in ipairs(having_conditions) do
-			if not eval_residual(cond.expr, node, row, empty, cache) then
+			if not eval_residual(cond.expr, node, empty, cache) then
 				return false
 			end
 		end
@@ -2632,6 +2662,7 @@ end
 --COMPILE EXISTS CHECKERS -----------------------------------------------------
 
 local compile_step --fw. decl.
+local compile_union --fw. decl.
 
 local function set_check(checks, expr, check)
 	checks[expr] = check
@@ -2659,7 +2690,7 @@ local function reset_check(check, args)
 	if check.out_col then
 		local set = {}
 		while scan.advance() do
-			local v = eval_value(check.out_col, scan, scan, check.cache)
+			local v = eval_value(check.out_col, scan, check.cache)
 			if not null_value(v) then
 				set[v] = true
 			end
@@ -2746,8 +2777,6 @@ function compile_exists_checker(db, expr, node, checks, registry)
 	local right = (op == 'in' or op == 'not_in') and expr[3] or expr[2]
 	local outer_node = expr.correlated and node or nil
 	if inherits(right, Rel) then
-		assert(not right.union_rels,
-			'exists()/in_(): a union sub-relation is not implemented yet')
 		assert(not right.group_cols,
 			'exists()/in_(): group_by()/having() inside a sub-relation is'
 				..' not implemented yet')
@@ -2757,12 +2786,33 @@ function compile_exists_checker(db, expr, node, checks, registry)
 				and out_col.source,
 				'in_()/not_in(): sub-relation output must be one plain column')
 		end
-		local sub_node = compile_step(db, right, outer_node)
+		local sub_node
+		if right.union_rels then
+			--a union has no access plan: build each input the same way a
+			--plain sub-relation is built, then project so the union can
+			--answer for its out cols.
+			sub_node = compile_union(db, right, function(db, input)
+				assert(not input.group_cols,
+					'exists()/in_(): group_by() inside a union sub-relation'
+						..' is not implemented yet')
+				return compile_step(db, input, outer_node)
+					:select(input.output_descriptor)
+			end)
+		else
+			sub_node = compile_step(db, right, outer_node)
+		end
 		local cache = {}
 		--build out_col's decoder before the first advance(): a
 		--scan needs need_base() enabled ahead of advance() to
 		--read a base-only column.
-		if out_col then compile_col_decoders(out_col, sub_node, cache) end
+		if out_col then
+			if right.union_rels then
+				local get, ai_ci = sub_node:col_decoder(out_col.name, true)
+				cache[out_col] = {get = get, ai_ci = ai_ci}
+			else
+				compile_col_decoders(out_col, sub_node, cache)
+			end
+		end
 		if expr.correlated then
 			set_check(checks, expr, {
 				scan = sub_node,
@@ -2775,7 +2825,7 @@ function compile_exists_checker(db, expr, node, checks, registry)
 					return function()
 						if sub_node.advance() then
 							return sub_node,
-								eval_value(out_col, sub_node, sub_node, cache)
+								eval_value(out_col, sub_node, cache)
 						end
 					end
 				end,
@@ -2837,14 +2887,14 @@ every seek row fails the residual.
 local function compile_joined_step(db, node, step, checks, registry)
 	local plan = step.plan
 	local scanner, param_scanner =
-		compile_table_scan(db, plan, node, registry)
+		compile_table_scan(db, plan, node, registry, true)
 	registry[step.source.name] = param_scanner
 	local cache, accept
 	if #plan.residual > 0 then
 		cache = {}
 		accept = function(join)
 			for _, cond in ipairs(plan.residual) do
-				if not eval_residual(cond.expr, join, join, checks, cache) then
+				if not eval_residual(cond.expr, join, checks, cache) then
 					return false
 				end
 			end
@@ -2958,8 +3008,7 @@ either.
 				cache = {}
 				accept = function(join)
 					for _, cond in ipairs(conditions) do
-						if not eval_residual(cond.expr, join, join, checks,
-							cache)
+						if not eval_residual(cond.expr, join, checks, cache)
 						then
 							return false
 						end
@@ -3021,24 +3070,31 @@ entry per key col (so the key ends up in the output row) plus the
 real aggregate entries, all carrying rel.group_cols' own out_col
 names.
 ]]
+local function group_col_read(expr)
+	if expr.source then return expr.source.name, expr[3] end
+	return nil, expr.col.name
+end
+
 function split_group_cols(rel)
 	local key_cols, agg_list = {}, {}
 	for _, expr in ipairs(rel.group_cols) do
 		if AGGREGATE_OPS[expr[1]] then
 			local value_expr = expr[2]
 			assert(value_expr == nil
-				or (value_expr[1] == 'col' and value_expr.source),
+				or (value_expr[1] == 'col'
+					and (value_expr.source or value_expr.col)),
 				'group_by(): only plain column aggregate arguments are'
 					..' implemented yet')
+			local member, col
+			if value_expr then member, col = group_col_read(value_expr) end
 			add(agg_list, {name = expr.name, op = expr[1],
-				member = value_expr and value_expr.source.name,
-				col = value_expr and value_expr[3]})
+				member = member, col = col})
 		else
-			assert(expr[1] == 'col' and expr.source,
+			assert(expr[1] == 'col' and (expr.source or expr.col),
 				'group_by(): only plain column group keys are'
 					..' implemented yet')
-			add(key_cols, {name = expr.name, member = expr.source.name,
-				col = expr[3]})
+			local member, col = group_col_read(expr)
+			add(key_cols, {name = expr.name, member = member, col = col})
 		end
 	end
 	local full_agg = {}
@@ -3074,7 +3130,7 @@ local function compile_group(node, rel)
 end
 
 --compile_union() builds each input for one terminal and concatenates them.
-local function compile_union(db, rel, compile_input)
+function compile_union(db, rel, compile_input)
 	local node = compile_input(db, rel.union_rels[1])
 	for i = 2, #rel.union_rels do
 		node = node:union(compile_input(db, rel.union_rels[i]))
@@ -3082,7 +3138,7 @@ local function compile_union(db, rel, compile_input)
 	return node
 end
 
-local function compile_terminal(db, rel)
+function compile_terminal(db, rel)
 	assert(rel.out_cols, 'rows()/rows_array()/first()/one()/must_one() require'
 		..' select() or group_by()')
 	assert(not (rel.group_cols and rel.select_cols),
@@ -3090,6 +3146,7 @@ local function compile_terminal(db, rel)
 	local node
 	if rel.union_rels then
 		node = compile_union(db, rel, compile_terminal)
+		if rel.group_cols then node = compile_group(node, rel) end
 	elseif rel.group_cols then
 		node = compile_group(compile_step(db, rel), rel)
 	else
@@ -3178,9 +3235,23 @@ local function count_items(node, args)
 	return n
 end
 
-local function compile_group_or_distinct(db, rel)
+local compile_group_or_distinct --fw. decl.
+
+local function compile_union_input(db, rel)
+	local node = compile_group_or_distinct(db, rel)
+	if node.get then return node end
+	return node:select(rel.output_descriptor)
+end
+
+function compile_group_or_distinct(db, rel)
 	if rel.union_rels then
-		return compile_union(db, rel, compile_group_or_distinct)
+		local node = compile_union(db, rel, compile_union_input)
+		if rel.group_cols then
+			node = compile_group(node, rel)
+		elseif rel.distinct_cols then
+			node = node:distinct(rel.distinct_key_cols, true)
+		end
+		return node
 	end
 	local node = compile_step(db, rel)
 	if rel.group_cols then
@@ -3201,7 +3272,10 @@ end
 
 local function compile_exists_node(db, rel)
 	if rel.union_rels then
-		return compile_union(db, rel, compile_exists_node)
+		if not rel.group_cols then
+			return compile_union(db, rel, compile_exists_node)
+		end
+		return compile_group(compile_union(db, rel, compile_union_input), rel)
 	end
 	local node = compile_step(db, rel)
 	if rel.group_cols then

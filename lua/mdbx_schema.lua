@@ -122,15 +122,14 @@ TRIGGERS
 		{before|after}_delete = {fn1,...},  -- fn(db, old_row)
 	}
 
-	- firing triggers forces a decode_row per affected row.
+	- slows down inserts and deletes (one row decoding per row).
 
 GENERATED COLUMNS
 
 	- declared in paper schema with `as(fn)` where `fn(db, row) -> val|nil`.
-	- fires on every insert and every update.
-	- return nil to set default.
-	- called on alter table for new columns but not on restructuring.
-	- slows down updates because it needs to decode the row.
+	- called on every insert, update, and table restructuring.
+	- not for pk columns, but indexable.
+	- slows down inserts (one row re-encoding per row).
 
 STATE
 

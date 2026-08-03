@@ -2025,7 +2025,7 @@ function test.scan_distinct_null_and_false()
 
 		local scan = db:scan('bool_rows', 'flag asc')
 		scan:select{{name = 'ok', member = 'bool_rows', col = 'ok'}}
-		scan:distinct({{member = 'bool_rows', col = 'ok'}}, true)
+		scan:distinct({{name = 'ok', member = 'bool_rows', col = 'ok'}}, true)
 		local t = {}
 		for _, ok in scan:rows() do t[#t+1] = tostring(ok) end
 		sort(t)
@@ -2095,6 +2095,131 @@ function test.scan_sort_null_group_key()
 			t[#t+1] = tostring(g)..':'..cnt
 		end
 		assert(cat(t, ' ') == 'nil:2 1:1 2:1', cat(t, ' '))
+
+		db:commit()
+	end)
+end
+
+--OUTPUT-STAGE CURRENT ROW ----------------------------------------------------
+
+local function add_people(db)
+	db:begin'w'
+	db:create_table('people', {fields = {
+		{col = 'id'  , mdbx_type = 'u32', not_null = true},
+		{col = 'team', mdbx_type = 'utf8', maxlen = 16, not_null = true},
+		{col = 'name', mdbx_type = 'utf8', maxlen = 32, not_null = true,
+			mdbx_collation = 'utf8_ai_ci'},
+	}, pk = {'id'}})
+	for _, r in ipairs{
+		{id = 1, team = 'a', name = 'Zoe' },
+		{id = 2, team = 'a', name = 'ange'},
+		{id = 3, team = 'a', name = 'Ange'},
+		{id = 4, team = 'b', name = 'bob' },
+	} do db:insert('people', '{}', r) end
+	db:commit()
+end
+
+local function people_select(db)
+	local scan = db:scan('people', 'id asc')
+	scan:select{
+		{name = 'id'  , member = 'people', col = 'id'  },
+		{name = 'name', member = 'people', col = 'name'},
+	}
+	return scan
+end
+
+--a stage that redefines advance() owns the current row, so found() must
+--follow it: the cursor underneath is exhausted while sort()/distinct()/
+--aggregate() are still serving what they kept.
+function test.output_stage_found()
+	with_db('output_stage_found', function(db)
+		add_people(db)
+		db:begin'r'
+
+		local function count_found(scan)
+			scan.reset()
+			assert(not scan.found())
+			local n = 0
+			while scan.advance() do
+				assert(scan.found(), 'found() must hold on a served row')
+				n = n + 1
+			end
+			assert(not scan.found())
+			scan.close()
+			return n
+		end
+
+		assert(count_found(people_select(db):sort{{col = 'id'}}) == 4)
+		assert(count_found(people_select(db)
+			:distinct({{name = 'name'}}, true)) == 3)
+
+		local agg = db:scan('people', 'id asc')
+		agg:aggregate{{name = 'n', op = 'count'}}
+		assert(count_found(agg) == 1)
+
+		db:commit()
+	end)
+end
+
+--MEMBER SCAN -----------------------------------------------------------------
+
+--both member scans rename an output scan's cols under one alias.
+--streamed_scan() re-runs the child on every reset(); materialized_scan()
+--keeps the child's rows until close() and rewinds them, for an inner
+--side that an outer row loop re-reads.
+function test.streamed_scan_rereads_child()
+	with_db('streamed_scan_rereads_child', function(db)
+		add_people(db)
+		db:begin'r'
+
+		local m = people_select(db):streamed_scan'u'
+		local get = m:col_decoder('u', 'name')
+		local t = {}
+		for _ = 1, 2 do --a second run re-reads the child
+			m.reset()
+			while m.advance() do t[#t+1] = get() end
+		end
+		m.close()
+		assert(cat(t, ',') == 'Zoe,ange,Ange,bob,Zoe,ange,Ange,bob', cat(t, ','))
+
+		db:commit()
+	end)
+end
+
+function test.materialized_scan_rewinds_rows()
+	with_db('materialized_scan_rewinds_rows', function(db)
+		add_people(db)
+		db:begin'r'
+
+		local m = people_select(db):materialized_scan'u'
+		local get = m:col_decoder('u', 'name')
+		local folded = m:col_decoder('u', 'name', true)
+		local t, f = {}, {}
+		for _ = 1, 2 do --a second reset() rewinds the kept rows
+			m.reset()
+			while m.advance() do t[#t+1] = get(); f[#f+1] = folded() end
+		end
+		m.close()
+		assert(cat(t, ',') == 'Zoe,ange,Ange,bob,Zoe,ange,Ange,bob', cat(t, ','))
+		assert(cat(f, ',') == 'zoe,ange,ange,bob,zoe,ange,ange,bob', cat(f, ','))
+
+		db:commit()
+	end)
+end
+
+--col_decoder() answers for the alias only: the inner query's own member
+--names are not reachable from outside.
+function test.member_scan_unknown_member()
+	with_db('member_scan_unknown_member', function(db)
+		add_people(db)
+		db:begin'r'
+
+		local m = people_select(db):streamed_scan'u'
+		local ok, err = pcall(function()
+			return m:col_decoder('people', 'name')
+		end)
+		assert(not ok)
+		assert(tostring(err):find('unknown member', 1, true), err)
 
 		db:commit()
 	end)

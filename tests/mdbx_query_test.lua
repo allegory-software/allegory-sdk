@@ -2566,6 +2566,430 @@ function test.in_literal_descending_index_exec()
 	end)
 end
 
+--COLLATION THROUGH THE OUTPUT PIPELINE ---------------------------------------
+
+--every stage that keeps rows must still answer for its own out cols,
+--collation included. name is ai_ci, so spellings that differ only by
+--case compare equal; byte order would give a different answer for every
+--assert below.
+local function with_ai_ci_db(name, fn)
+	local file = test_file(name)
+	cleanup(file)
+	local db = mdbx_open(file)
+	local ok, err = xpcall(function()
+		db:begin'w'
+		db:create_table('people', {fields = {
+			{col = 'id'  , mdbx_type = 'u32', not_null = true},
+			{col = 'team', mdbx_type = 'utf8', maxlen = 16, not_null = true},
+			{col = 'name', mdbx_type = 'utf8', maxlen = 32, not_null = true,
+				mdbx_collation = 'utf8_ai_ci'},
+		}, pk = {'id'}})
+		for _, r in ipairs{
+			{id = 1, team = 'a', name = 'Zoe' },
+			{id = 2, team = 'a', name = 'ange'},
+			{id = 3, team = 'a', name = 'Ange'},
+			{id = 4, team = 'b', name = 'bob' },
+			{id = 5, team = 'b', name = 'Bob' },
+			{id = 6, team = 'b', name = 'CARL'},
+		} do db:insert('people', '{}', r) end
+		db:commit()
+		fn(db)
+	end, debug.traceback)
+	if db.env then db:close() end
+	cleanup(file)
+	assert(ok, err)
+end
+
+--min()/max() rank by the collated key and return the spelling stored on
+--the winning row. by byte order team a's max would be 'ange' (lowercase
+--sorts after 'Z') and team b's min would be 'Bob'.
+function test.min_max_ai_ci_exec()
+	with_ai_ci_db('min_max_ai_ci_exec', function(db)
+		db:atomic('r', function()
+			local t = {}
+			for _, row in db:from'people'
+				:group_by{'people.team team',
+					{{'min', q.col'people.name'}, 'lo'},
+					{{'max', q.col'people.name'}, 'hi'}}
+				:rows'{}'
+			do t[#t+1] = row.team..':'..row.lo..'/'..row.hi end
+			sort(t)
+			assert(cat(t, ',') == 'a:ange/Zoe,b:bob/CARL', cat(t, ','))
+		end)
+	end)
+end
+
+--order_by() on a select()ed out col sorts by the collated key. equal
+--keys tie, and sort() is not stable, so this checks the key sequence.
+function test.order_by_out_col_ai_ci_exec()
+	with_ai_ci_db('order_by_out_col_ai_ci_exec', function(db)
+		db:atomic('r', function()
+			local t = {}
+			for _, name in db:from'people'
+				:select'people.name name'
+				:order_by'name'
+				:rows()
+			do t[#t+1] = mdbx_collate_value(name, true) end
+			assert(cat(t, ',') == 'ange,ange,bob,bob,carl,zoe', cat(t, ','))
+		end)
+	end)
+end
+
+--distinct() on an ai_ci out col merges spellings that compare equal.
+function test.distinct_out_col_ai_ci_exec()
+	with_ai_ci_db('distinct_out_col_ai_ci_exec', function(db)
+		db:atomic('r', function()
+			local n = db:from'people':select'people.name name':distinct'name'
+				:count()
+			assert(n == 4, n)
+		end)
+	end)
+end
+
+--distinct() after group_by() keys by out col name. two aggregates reading
+--one source col share no name, so neither can stand in for the group key.
+function test.group_by_distinct_ai_ci_exec()
+	with_ai_ci_db('group_by_distinct_ai_ci_exec', function(db)
+		db:atomic('r', function()
+			local t = {}
+			for _, row in db:from'people'
+				:group_by{'people.name name',
+					{{'min', q.col'people.team'}, 'lo'},
+					{{'max', q.col'people.team'}, 'hi'}}
+				:distinct'name'
+				:rows'{}'
+			do t[#t+1] = mdbx_collate_value(row.name, true)..'/'..row.lo end
+			sort(t)
+			assert(cat(t, ',') == 'ange/a,bob/b,carl/b,zoe/a', cat(t, ','))
+		end)
+	end)
+end
+
+--having() compares a grouped ai_ci key against a literal in comparison
+--form, so a differently-spelled literal still matches.
+function test.having_ai_ci_exec()
+	with_ai_ci_db('having_ai_ci_exec', function(db)
+		db:atomic('r', function()
+			local t = {}
+			for _, team, lo in db:from'people'
+				:group_by{'people.team team',
+					{{'min', q.col'people.name'}, 'lo'}}
+				:having{'=', q.col'lo', 'ANGE'}
+				:rows()
+			do t[#t+1] = team..'/'..lo end
+			assert(cat(t, ',') == 'a/ange', cat(t, ','))
+		end)
+	end)
+end
+
+--union() inputs must agree on each out col's collation: the same name
+--reading an ai_ci col on one side and a plain col on the other would
+--dedup and sort inconsistently.
+function test.union_collation_mismatch()
+	with_ai_ci_db('union_collation_mismatch', function(db)
+		db:begin'w'
+		db:create_table('tags', {fields = {
+			{col = 'id'  , mdbx_type = 'u32', not_null = true},
+			{col = 'name', mdbx_type = 'utf8', maxlen = 32, not_null = true},
+		}, pk = {'id'}})
+		db:insert('tags', '{}', {id = 1, name = 'ange'})
+		db:commit()
+		db:atomic('r', function()
+			local rel = db:union(
+				db:from'people':select'people.name name',
+				db:from'tags':select'tags.name name')
+			local ok, err = pcall(function() return rel:rows_array'{}' end)
+			assert(not ok)
+			assert(tostring(err):find('collation differs', 1, true), err)
+		end)
+	end)
+end
+
+--a union deduplicates by out col name, and count() applies the outer
+--union's own distinct() instead of counting its inputs raw.
+function test.union_distinct_count_exec()
+	with_ai_ci_db('union_distinct_count_exec', function(db)
+		db:atomic('r', function()
+			local function names()
+				return db:from'people':select'people.name name'
+			end
+			local t = {}
+			for _, name in db:union(names(), names()):distinct():rows() do
+				t[#t+1] = mdbx_collate_value(name, true)
+			end
+			sort(t)
+			assert(cat(t, ',') == 'ange,bob,carl,zoe', cat(t, ','))
+			assert(db:union(names(), names()):distinct():count() == 4)
+		end)
+	end)
+end
+
+--a union's group cols name its inputs' out cols, since a union has no
+--sources of its own. grouping runs over the concatenated rows, always
+--hashed: a union promises no order for a streaming grouper to use.
+function test.union_group_by_exec()
+	with_ai_ci_db('union_group_by_exec', function(db)
+		db:atomic('r', function()
+			local function half(lo, hi)
+				return db:from'people'
+					:where{'>=', q.col'people.id', lo}
+					:where{'<=', q.col'people.id', hi}
+					:select'people.team team, people.id id'
+			end
+			local rel = db:union(half(1, 3), half(4, 6))
+				:group_by{'team team', {{'count'}, 'n'},
+					{{'max', q.col'id'}, 'hi'}}
+			assert(not rel:prepare().group_streaming)
+			local t = {}
+			for _, row in rel:rows'{}' do
+				t[#t+1] = row.team..':'..row.n..':'..row.hi
+			end
+			sort(t)
+			assert(cat(t, ',') == 'a:3:3,b:3:6', cat(t, ','))
+		end)
+	end)
+end
+
+--having() over a grouped union, and count()/exists() answering from the
+--grouped stream rather than the raw inputs.
+function test.union_having_exec()
+	with_ai_ci_db('union_having_exec', function(db)
+		db:atomic('r', function()
+			local function part(team)
+				return db:from'people':where{'=', q.col'people.team', team}
+					:select'people.team team, people.id id'
+			end
+			local function grouped()
+				return db:union(part'a', part'b')
+					:group_by{'team team', {{'count'}, 'n'}}
+			end
+			local t = {}
+			for _, team, n in grouped():having{'>', q.col'n', 2}:rows() do
+				t[#t+1] = team..':'..n
+			end
+			sort(t)
+			assert(cat(t, ',') == 'a:3,b:3', cat(t, ','))
+			assert(grouped():count() == 2)
+			assert(grouped():having{'>', q.col'n', 5}:count() == 0)
+			assert(grouped():having{'>', q.col'n', 5}:exists() == false)
+		end)
+	end)
+end
+
+--a union works as an exists() subquery: each input compiles like a plain
+--sub-relation, correlation included, and the concatenation is what the
+--checker resets per outer row.
+function test.union_exists_subquery_exec()
+	with_ai_ci_db('union_exists_subquery_exec', function(db)
+		db:atomic('r', function()
+			local function part(lo, hi)
+				return db:from'people p'
+					:where{'>=', q.col'p.id', lo}
+					:where{'<=', q.col'p.id', hi}
+					:where{'=', q.col'p.id', q.outer'people.id'}
+					:select'p.id id'
+			end
+			local function ids(expr)
+				local t = {}
+				for _, id in db:from'people':where(expr)
+					:select'people.id id':order_by'people.id':rows()
+				do t[#t+1] = id end
+				return cat(t, ',')
+			end
+			assert(ids(q.exists(db:union(part(1, 2), part(5, 6))))
+				== '1,2,5,6')
+			assert(ids(q.not_exists(db:union(part(1, 2), part(5, 6))))
+				== '3,4')
+		end)
+	end)
+end
+
+--in_()/not_in() over a union read its one out col by name, since a union
+--has no source col to read it from.
+function test.union_in_subquery_exec()
+	with_ai_ci_db('union_in_subquery_exec', function(db)
+		db:atomic('r', function()
+			local function part(lo, hi)
+				return db:from'people p'
+					:where{'>=', q.col'p.id', lo}
+					:where{'<=', q.col'p.id', hi}
+					:select'p.id id'
+			end
+			local function ids(expr)
+				local t = {}
+				for _, id in db:from'people':where(expr)
+					:select'people.id id':order_by'people.id':rows()
+				do t[#t+1] = id end
+				return cat(t, ',')
+			end
+			assert(ids{'in', q.col'people.id',
+				db:union(part(1, 2), part(5, 6))} == '1,2,5,6')
+			assert(ids{'not_in', q.col'people.id',
+				db:union(part(1, 2), part(5, 6))} == '3,4')
+		end)
+	end)
+end
+
+--a grand total over a union has no key cols, so aggregate() emits one
+--record with no grouping at all.
+function test.union_grand_total_exec()
+	with_ai_ci_db('union_grand_total_exec', function(db)
+		db:atomic('r', function()
+			local function half(lo, hi)
+				return db:from'people'
+					:where{'>=', q.col'people.id', lo}
+					:where{'<=', q.col'people.id', hi}
+					:select'people.id id'
+			end
+			local n, hi = db:union(half(1, 3), half(4, 6))
+				:group_by{{{'count'}, 'n'}, {{'max', q.col'id'}, 'hi'}}
+				:first()
+			assert(n == 6, n)
+			assert(hi == 6, hi)
+		end)
+	end)
+end
+
+--A QUERY USED AS A TABLE -----------------------------------------------------
+
+local function top_people(db)
+	return db:from'people'
+		:where{'~=', q.col'people.team', 'b'}
+		:select'people.id id, people.name name, people.team team'
+end
+
+--as the outermost source: read once, straight through.
+function test.rel_source_base_exec()
+	with_ai_ci_db('rel_source_base_exec', function(db)
+		db:atomic('r', function()
+			local t = {}
+			for _, id in db:from(top_people(db), 'u'):select'u.id id':rows() do
+				t[#t+1] = id
+			end
+			sort(t)
+			assert(cat(t, ',') == '1,2,3', cat(t, ','))
+		end)
+	end)
+end
+
+--a condition on a rel source col has no key to seek, so it stays a
+--residual check over the inner query's rows.
+function test.rel_source_residual_exec()
+	with_ai_ci_db('rel_source_residual_exec', function(db)
+		db:atomic('r', function()
+			local rel = db:from(top_people(db), 'u')
+				:where{'=', q.col'u.name', 'ZOE'}
+				:select'u.id id'
+				:prepare()
+			assert(rel.access[1].plan.kind == 'rel', rel.access[1].plan.kind)
+			assert(#rel.access[1].plan.residual == 1)
+			local t = {}
+			for _, id in rel:rows() do t[#t+1] = id end
+			assert(cat(t, ',') == '1', cat(t, ','))
+		end)
+	end)
+end
+
+--joined: the inner query is read once and rewound under each outer row.
+function test.rel_source_join_exec()
+	with_ai_ci_db('rel_source_join_exec', function(db)
+		db:atomic('r', function()
+			local t = {}
+			for _, id, name in db:from'people'
+				:join(top_people(db), 'u', {'=', q.col'people.id', q.col'u.id'})
+				:select'people.id id, u.name name'
+				:order_by'id'
+				:rows()
+			do t[#t+1] = id..'/'..name end
+			assert(cat(t, ',') == '1/Zoe,2/ange,3/Ange', cat(t, ','))
+		end)
+	end)
+end
+
+--left join: an outer row with no match in the inner query null-extends.
+function test.rel_source_left_join_exec()
+	with_ai_ci_db('rel_source_left_join_exec', function(db)
+		db:atomic('r', function()
+			local t = {}
+			for _, id, name in db:from'people'
+				:left_join(top_people(db), 'u',
+					{'=', q.col'people.id', q.col'u.id'})
+				:select'people.id id, u.name name'
+				:order_by'id'
+				:rows()
+			do t[#t+1] = id..'/'..tostring(name) end
+			assert(cat(t, ',') == '1/Zoe,2/ange,3/Ange,4/nil,5/nil,6/nil',
+				cat(t, ','))
+		end)
+	end)
+end
+
+--the inner query's rows live until the terminal closes, so a second run
+--with different args rebuilds them. checks the buffered (joined) side.
+function test.rel_source_params_exec()
+	with_ai_ci_db('rel_source_params_exec', function(db)
+		db:atomic('r', function()
+			local rel = db:from'people'
+				:join(db:from'people'
+					:where{'<=', q.col'people.id', q.param'MAX'}
+					:select'people.id id', 'u',
+					{'=', q.col'people.id', q.col'u.id'})
+				:select'people.id id'
+				:order_by'id'
+			local function ids(args)
+				local t = {}
+				for _, id in rel:rows(nil, args) do t[#t+1] = id end
+				return cat(t, ',')
+			end
+			assert(ids{MAX = 2} == '1,2', ids{MAX = 2})
+			assert(ids{MAX = 5} == '1,2,3,4,5', ids{MAX = 5})
+			assert(ids{MAX = 2} == '1,2', ids{MAX = 2})
+		end)
+	end)
+end
+
+--a union has no access plan of its own, so its steps are its inputs'
+--steps, both at the top level and nested under a rel step.
+function test.union_explain()
+	with_ai_ci_db('union_explain', function(db)
+		db:atomic('r', function()
+			local function half(lo, hi)
+				return db:from'people'
+					:where{'>=', q.col'people.id', lo}
+					:where{'<=', q.col'people.id', hi}
+					:select'people.id id'
+			end
+			local ex = db:union(half(1, 3), half(4, 6)):explain()
+			assert(#ex == 2, #ex)
+			assert(ex[1].table == 'people', ex[1].table)
+			assert(ex[2].table == 'people', ex[2].table)
+
+			local nested = db:from(db:union(half(1, 3), half(4, 6)), 'u')
+				:select'u.id id':explain()
+			assert(#nested == 1, #nested)
+			assert(nested[1].source == 'u', nested[1].source)
+			assert(#nested[1].rel == 2, #nested[1].rel)
+		end)
+	end)
+end
+
+--explain() nests the inner query's own steps under the rel step.
+function test.rel_source_explain()
+	with_ai_ci_db('rel_source_explain', function(db)
+		db:atomic('r', function()
+			local ex = db:from'people'
+				:join(top_people(db), 'u', {'=', q.col'people.id', q.col'u.id'})
+				:select'u.name name'
+				:explain()
+			assert(#ex == 2, #ex)
+			assert(ex[1].source == 'people', ex[1].source)
+			assert(ex[2].source == 'u', ex[2].source)
+			assert(#ex[2].rel == 1, #ex[2].rel)
+			assert(ex[2].rel[1].table == 'people', ex[2].rel[1].table)
+		end)
+	end)
+end
+
 local name = ...
 if name == 'mdbx_query_test' then name = nil end
 local tests = name and {name} or test

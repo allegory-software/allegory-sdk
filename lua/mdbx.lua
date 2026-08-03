@@ -85,6 +85,13 @@ QUERY
 DEBUG
 	mdbx_set_log_level(level)                  set MDBX log level (now is 'warn')
 
+CURSOR LIFETIME
+
+Cursors are txn-owned and automatically closed on txn end and later reused,
+so never use a cursor beyond txn boundaries or you might end up using an
+unrelated cursor! The good news is that you can abandon cursors (and the Lua
+objects that own cursors) and commit/abort will close the leaks.
+
 ]]
 
 if not ... then require'mdbx_test'; return end
@@ -641,8 +648,6 @@ end
 
 local Cur = {}; mdbx_cursor = Cur
 
---NOTE: cursors created with db:cursor_raw() are reused, so never use a cursor
---beyond transaction boundaries or you might end up using an unrelated cursor.
 local curp = new'MDBX_cursor*[1]'
 function Db:cursor_raw(tab)
 	local dbi = isnum(tab) and tab or self:dbi_raw(tab)
