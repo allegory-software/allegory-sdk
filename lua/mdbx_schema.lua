@@ -521,7 +521,7 @@ local function encode_val(self, schema, event, rec, rec_buf_sz, cols, as, ...)
 	return pp[0] - rec
 end
 
-local function apply_generated(db, event, schema, new_t)
+local function apply_gen_cols(db, event, schema, new_t)
 	for _, f in ipairs(schema.val_fields) do
 		if f.generate then
 			local val = f.generate(db, new_t)
@@ -906,11 +906,11 @@ local function layout_table_schema(schema)
 	schema.key_fields = key_fields
 	schema.val_fields = val_fields
 
-	local has_generated = false
+	local has_gen_cols = false
 	for _, f in ipairs(val_fields) do
-		if f.generate then has_generated = true; break end
+		if f.generate then has_gen_cols = true; break end
 	end
-	schema.has_generated = has_generated or nil
+	schema.has_gen_cols = has_gen_cols or nil
 
 	--compute key and val column layout.
 	for _,fields in ipairs{key_fields, val_fields} do
@@ -1736,9 +1736,9 @@ local function alter_values_in_place(self, dbi, old_schema, new_schema, event)
 	while ok do
 		local kk = alter_key_rec_buffer; copy(kk, k, k_sz)
 		decode_val_with_null(old_schema, v, v_sz, rec)
-		if new_schema.has_generated then
+		if new_schema.has_gen_cols then
 			decode_key(old_schema, k, k_sz, rec, '{}')
-			apply_generated(self, event, new_schema, rec)
+			apply_gen_cols(self, event, new_schema, rec)
 		end
 		local nv, nv_buf_sz =
 			val_rec_buffer(new_schema.val_fields.max_rec_size)
@@ -1763,8 +1763,8 @@ local function alter_via_temp_table(self, dbi, old_schema, new_schema, event)
 	for _, k, k_sz, v, v_sz in self:each_raw(dbi) do
 		decode_key(old_schema, k, k_sz, rec, '{}')
 		decode_val_with_null(old_schema, v, v_sz, rec)
-		if new_schema.has_generated then
-			apply_generated(self, event, new_schema, rec)
+		if new_schema.has_gen_cols then
+			apply_gen_cols(self, event, new_schema, rec)
 		end
 		local nk, nk_buf_sz =
 			alter_key_rec_buffer, MDBX_MAX_KEY_SIZE
@@ -2833,20 +2833,20 @@ local function cur_update(self, ix_cur, val_cols, ...)
 	end
 	local db = self.db
 	local old_t
-	if schema.triggers or schema.has_generated then
+	if schema.triggers or schema.has_gen_cols then
 		decode_key(schema, k, k_sz, t, '{}')
 		if schema.triggers then
 			old_t = decode_row(schema, k, k_sz, v0, v0_sz)
 			fire_triggers(schema, 'before_update', db, old_t, t)
 		end
-		if schema.has_generated then
-			apply_generated(db, 'c_update', schema, t)
+		if schema.has_gen_cols then
+			apply_gen_cols(db, 'c_update', schema, t)
 		end
 	end
 	local v_sz = encode_val(db, schema, 'c_update', v, v_buf_sz, val_cols, '{}', t)
 	if schema.fks then
 		--fk.cols may include pk cols; decode key into t (k is still valid pre-write).
-		if not schema.triggers and not schema.has_generated then
+		if not schema.triggers and not schema.has_gen_cols then
 			decode_key(schema, k, k_sz, t, '{}')
 		end
 		check_fks(db, 'c_update', schema, schema.cols, '{}', false, t)
@@ -2879,7 +2879,7 @@ local function put(self, flags, op, tab, cols, ...)
 		k, k_buf_sz, cols, as, ...)
 	if op == 'update' or op == 'upsert'
 		or schema.indexes or schema.fks
-		or schema.triggers or schema.has_generated
+		or schema.triggers or schema.has_gen_cols
 	then
 		local cur = self:cursor(dbi)
 		--insert skips the get: v0=nil by definition, NOOVERWRITE detects exists
@@ -2906,21 +2906,21 @@ local function put(self, flags, op, tab, cols, ...)
 					end
 				end
 			end
-			if schema.triggers or schema.has_generated then
+			if schema.triggers or schema.has_gen_cols then
 				local kk = put_k_buffer; copy(kk, k, k_sz); k = kk
 				decode_key(schema, k, k_sz, t, '{}')
 				if schema.triggers then
 					old_t = decode_row(schema, k, k_sz, v0, v0_sz)
 					fire_triggers(schema, 'before_update', self, old_t, t)
 				end
-				if schema.has_generated then
-					apply_generated(self, op, schema, t)
+				if schema.has_gen_cols then
+					apply_gen_cols(self, op, schema, t)
 				end
 				new_t = t
 			end
 			v_sz = encode_val(self, schema, op, v, v_buf_sz, val_cols, '{}', t)
 			if schema.fks then
-				if not schema.triggers and not schema.has_generated then
+				if not schema.triggers and not schema.has_gen_cols then
 					--pk not yet in t
 					for _, f in ipairs(schema.key_fields) do
 						t[f.col] = select_col(cols, as, f.col, ...)
@@ -2934,14 +2934,14 @@ local function put(self, flags, op, tab, cols, ...)
 		else --insert or upsert new record
 			v0, v0_sz = nil --no previous value (v0 currently holds the find_raw err)
 			v_sz = encode_val(self, schema, op, v, v_buf_sz, cols, as, ...)
-			if schema.triggers or schema.has_generated then
+			if schema.triggers or schema.has_gen_cols then
 				local kk = put_k_buffer; copy(kk, k, k_sz); k = kk
 				new_t = decode_row(schema, k, k_sz, v, v_sz)
 				if schema.triggers then
 					fire_triggers(schema, 'before_insert', self, new_t)
 				end
-				if schema.has_generated then
-					apply_generated(self, op, schema, new_t)
+				if schema.has_gen_cols then
+					apply_gen_cols(self, op, schema, new_t)
 				end
 				v_sz = encode_val(self, schema, op,
 					v, v_buf_sz, schema.val_cols, '{}', new_t)
