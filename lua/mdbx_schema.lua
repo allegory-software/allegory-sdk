@@ -522,8 +522,8 @@ local function encode_val(self, schema, event, rec, rec_buf_sz, cols, as, ...)
 	return pp[0] - rec
 end
 
-local function apply_generated(db, event, schema, new_t, fields)
-	for _, f in ipairs(fields or schema.val_fields) do
+local function apply_generated(db, event, schema, new_t)
+	for _, f in ipairs(schema.val_fields) do
 		if f.generate then
 			local val = f.generate(db, new_t)
 			if val == nil then val = resolve_null_val(schema, f) end
@@ -1730,18 +1730,16 @@ end
 
 local alter_key_rec_buffer = u8a(MDBX_MAX_KEY_SIZE)
 
-local function alter_values_in_place(
-	self, dbi, old_schema, new_schema, event, gen_fields
-)
+local function alter_values_in_place(self, dbi, old_schema, new_schema, event)
 	local cur = self:cursor_raw(dbi)
 	local ok, k, k_sz, v, v_sz = cur:first_raw()
 	local rec = {}
 	while ok do
 		local kk = alter_key_rec_buffer; copy(kk, k, k_sz)
 		decode_val_with_null(old_schema, v, v_sz, rec)
-		if gen_fields then
+		if new_schema.has_generated then
 			decode_key(old_schema, k, k_sz, rec, '{}')
-			apply_generated(self, event, new_schema, rec, gen_fields)
+			apply_generated(self, event, new_schema, rec)
 		end
 		local nv, nv_buf_sz =
 			val_rec_buffer(new_schema.val_fields.max_rec_size)
@@ -1754,9 +1752,7 @@ local function alter_values_in_place(
 	cur:close()
 end
 
-local function alter_via_temp_table(
-	self, dbi, old_schema, new_schema, event, gen_fields
-)
+local function alter_via_temp_table(self, dbi, old_schema, new_schema, event)
 
 	--create the replacement table and capture its sequence.
 	local temp_name = '$alter/'..uuid()
@@ -1768,8 +1764,8 @@ local function alter_via_temp_table(
 	for _, k, k_sz, v, v_sz in self:each_raw(dbi) do
 		decode_key(old_schema, k, k_sz, rec, '{}')
 		decode_val_with_null(old_schema, v, v_sz, rec)
-		if gen_fields then
-			apply_generated(self, event, new_schema, rec, gen_fields)
+		if new_schema.has_generated then
+			apply_generated(self, event, new_schema, rec)
 		end
 		local nk, nk_buf_sz =
 			alter_key_rec_buffer, MDBX_MAX_KEY_SIZE
@@ -1817,17 +1813,10 @@ function Db:alter_table(tab, src_schema)
 	local rewrite_keys =
 		schema.pk_change_affects(
 			old_schema, new_schema, MS.index_field_attrs)
-	local gen_fields --gather new generated fields to apply on new columns.
-	for _, f in ipairs(new_schema.val_fields) do
-		if f.generate and not old_schema.fields[f.col] then
-			gen_fields = gen_fields or {}
-			add(gen_fields, f)
-		end
-	end
 	if rewrite_keys then
-		alter_via_temp_table(self, dbi, old_schema, new_schema, event, gen_fields)
+		alter_via_temp_table(self, dbi, old_schema, new_schema, event)
 	elseif val_reencode_needed(old_schema, new_schema) then
-		alter_values_in_place(self, dbi, old_schema, new_schema, event, gen_fields)
+		alter_values_in_place(self, dbi, old_schema, new_schema, event)
 	end
 
 	--install the new schema graph.
