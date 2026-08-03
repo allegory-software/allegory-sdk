@@ -35,6 +35,8 @@ OUTPUT TERMINALS (after select() or aggregate())
 	scan:first      ([shape], [args]) -> vals... | row | nil
 	scan:one        ([shape], [args]) -> vals... | row | nil
 	scan:must_one   ([shape], [args]) -> vals... | row
+	scan:for_update () -> scan      drain and close, so the caller can write
+		while iterating; no-op if the rows are already kept. call it last.
 MEMBER SCAN (after select() or aggregate())
 	out cols read as alias.COL; the inner scan's own members are hidden.
 	scan:materialized_scan (alias) -> scan   keeps rows until close(),
@@ -1181,6 +1183,15 @@ end
 
 --SET OPERATIONS -------------------------------------------------------------
 
+--DB null becomes the null sentinel because a key is a table key here.
+local function hash_key(getters, n, scratch, space)
+	for i = 1, n do
+		local v = getters[i](); scratch[i] = v == nil and null or v
+	end
+	if n == 1 then return scratch[1] end
+	return space(unpack(scratch, 1, n))
+end
+
 local function set_filter(scan1, scan2, keep_matched, what)
 	local names = scan1.out_cols
 	assertf(names and scan2.out_cols,
@@ -1203,23 +1214,18 @@ local function set_filter(scan1, scan2, keep_matched, what)
 	local tuple_space, other, seen
 	--key is scratch, read into a set key immediately and never retained.
 	local key = {}
-	local function read(getters)
-		for i = 1, n do
-			local v = getters[i](); key[i] = v == nil and null or v
-		end
-		if n == 1 then return key[1] end
-		return tuple_space(unpack(key, 1, n))
-	end
 	scan.advance = function()
 		if not other then
 			tuple_space = n > 1 and tuples() or nil
 			other, seen = {}, {}
 			scan2.reset(scan.args)
-			while scan2.advance() do other[read(get2)] = true end
+			while scan2.advance() do
+				other[hash_key(get2, n, key, tuple_space)] = true
+			end
 			scan2.close()
 		end
 		while advance() do
-			local k = read(get1)
+			local k = hash_key(get1, n, key, tuple_space)
 			if not seen[k] and (other[k] ~= nil) == keep_matched then
 				seen[k] = true
 				return true
@@ -1445,6 +1451,22 @@ local function materialized_get(scan, row, out_row)
 	return scan, unpack(values, 1, n)
 end
 
+local function serve_row(scan)
+	local row
+	local col_decoder = scan.col_decoder
+	function scan.get(out_row)
+		return materialized_get(scan, row, out_row)
+	end
+	function scan:col_decoder(name, comparison)
+		local _, ai_ci = col_decoder(scan, name)
+		if comparison and ai_ci then
+			return function() return collate_value(row[name], true) end, true
+		end
+		return function() return row[name] end, ai_ci
+	end
+	return function(r) row = r end
+end
+
 local function output_row(scan, row, shape)
 	if shape == nil then return unpack(row, 1, #scan.out_cols) end
 	return row
@@ -1621,7 +1643,8 @@ sorts a value-record scan (the output of select()/aggregate()) by spec
 or a plain comparator fn(row_a, row_b). Materializes every row on first
 advance() (there's no way to know the right order without seeing them
 all), sorts once, then serves rows one at a time. null sorts before
-non-null ascending, after descending.
+non-null ascending, after descending. sort() does not keep input order
+among rows whose keys all compare equal: their order is unspecified.
 
 Only the value-record path from the old node system's value_sort is
 ported here: query2's compile_terminal always runs select()/aggregate()
@@ -1631,6 +1654,8 @@ isn't needed.
 
 scan.get() publishes the row table itself. scan.get(out_row) assigns every
 name in scan.out_cols, including nil.
+
+NOTE: Sort result is unstable!
 ]]
 function Scan:sort(spec)
 	local scan = self
@@ -1664,6 +1689,7 @@ function Scan:sort(spec)
 	--per-row wrapper table pairing a row with anything. key values for
 	--every row live in one flat array (stride ncols) instead of one
 	--small table per row.
+	local set_row = serve_row(scan)
 	local rows, keys, order, idx, found
 	local advance = scan.advance
 	scan.advance = function()
@@ -1706,30 +1732,19 @@ function Scan:sort(spec)
 		end
 		idx = idx + 1
 		if order[idx] == nil then found = nil; return end
+		set_row(rows[order[idx]])
 		found = true
 		return true
 	end
 	function scan.found()
 		return found
 	end
-	function scan.get(out_row)
-		return materialized_get(scan, rows[order[idx]], out_row)
-	end
-	local col_decoder = scan.col_decoder
-	function scan:col_decoder(name, comparison)
-		local _, col_ai_ci = col_decoder(scan, name)
-		if comparison and col_ai_ci then
-			return function()
-				return collate_value(rows[order[idx]][name], true)
-			end, true
-		end
-		return function() return rows[order[idx]][name] end, col_ai_ci
-	end
 	local reset = scan.reset
 	scan.reset = function(args)
 		reset(args)
 		rows, keys, order, idx, found = nil, nil, nil, nil, nil
 	end
+	scan.materialized = true
 	return scan
 end
 
@@ -1957,12 +1972,6 @@ function Scan:aggregate(agg, cols, hash)
 		return key
 	end
 	local bucket = bucket_getters and {}
-	local function bucket_key()
-		for i = 1, nkeys do
-			local v = bucket_getters[i](); bucket[i] = v == nil and null or v
-		end
-		return bucket
-	end
 
 	local done, output, group_i, found
 	local advance = scan.advance
@@ -1983,13 +1992,8 @@ function Scan:aggregate(agg, cols, hash)
 				local buckets, order = {}, {}
 				while advance() do
 					local key = read_key()
-					local bkey = bucket_key()
-					local t
-					if nkeys == 1 then
-						t = bkey[1]
-					else
-						t = tuple_space(unpack(bkey, 1, nkeys))
-					end
+					local t = hash_key(bucket_getters, nkeys, bucket,
+						tuple_space)
 					local acc = buckets[t]
 					if not acc then
 						acc = agg_init(agg)
@@ -2030,6 +2034,9 @@ function Scan:aggregate(agg, cols, hash)
 		reset(args)
 		done, output, group_i, found = false, nil, nil, nil
 	end
+	--the grand-total and hashed paths drain the input before emitting;
+	--the streamed one emits a group as it reaches it.
+	scan.materialized = not cols or hash
 
 	--terminal: raw per-row columns no longer exist once folded, only the
 	--agg's own named outputs are reachable.
@@ -2076,28 +2083,17 @@ function Scan:distinct(cols, hash)
 	--key is scratch, reused across calls: agg_step()/the bucket-key
 	--lookup both read it immediately and never retain it past that.
 	local key = {}
-	local function read_key()
-		for i = 1, nkeys do
-			local v = key_getters[i](); key[i] = v == nil and null or v
-		end
-		return key
-	end
 
 	local row, output, row_i, found
 	local advance, get = scan.advance, scan.get
+	local set_row = serve_row(scan)
 	scan.advance = function()
 		if not output then
 			local tuple_space = nkeys > 1 and tuples() or nil
 			local seen = {}
 			output = {}
 			while advance() do
-				local key = read_key()
-				local t
-				if nkeys == 1 then
-					t = key[1]
-				else
-					t = tuple_space(unpack(key, 1, nkeys))
-				end
+				local t = hash_key(key_getters, nkeys, key, tuple_space)
 				if not seen[t] then
 					seen[t] = true
 					local _, kept_row = get{}
@@ -2109,28 +2105,65 @@ function Scan:distinct(cols, hash)
 		row_i = row_i + 1
 		row = output[row_i]
 		if row == nil then found = nil; return end
+		set_row(row)
 		found = true
 		return true
 	end
 	function scan.found()
 		return found
 	end
-	function scan.get(out_row)
-		return materialized_get(scan, row, out_row)
-	end
-	local col_decoder = scan.col_decoder
-	function scan:col_decoder(name, comparison)
-		local _, col_ai_ci = col_decoder(scan, name)
-		if comparison and col_ai_ci then
-			return function() return collate_value(row[name], true) end, true
-		end
-		return function() return row[name] end, col_ai_ci
-	end
 	local reset = scan.reset
 	scan.reset = function(args)
 		reset(args)
 		output, row_i, found = nil, nil, nil
 	end
+	scan.materialized = true
+	return scan
+end
+
+--FOR UPDATE ----------------------------------------------------------------
+
+--[[
+for_update() drains the scan and closes it before serving a single row,
+so the caller can write while iterating: a scan that still has rows to
+produce can skip or revisit them once its table is written to, and that
+shows up as a wrong answer, not an error. a no-op on a scan that already
+keeps its rows. call it last -- anything added after it reads a scan that
+has already been closed.
+]]
+function Scan:for_update()
+	local scan = self
+	assert(scan.get, 'for_update: select()/aggregate() required first')
+	if scan.materialized then return scan end
+	local advance, get, close = scan.advance, scan.get, scan.close
+	local set_row = serve_row(scan)
+	local rows, row, row_i, found
+	scan.advance = function()
+		if not rows then
+			rows = {}
+			while advance() do
+				local _, r = get{}
+				rows[#rows + 1] = r
+			end
+			close()
+			row_i = 0
+		end
+		row_i = row_i + 1
+		row = rows[row_i]
+		if row == nil then found = nil; return end
+		set_row(row)
+		found = true
+		return true
+	end
+	function scan.found()
+		return found
+	end
+	local reset = scan.reset
+	scan.reset = function(args)
+		reset(args)
+		rows, row, row_i, found = nil, nil, nil, nil
+	end
+	scan.materialized = true
 	return scan
 end
 
@@ -2178,6 +2211,7 @@ function Scan:materialized_scan(alias)
 		rows = nil
 		child.close()
 	end
+	scan.materialized = true
 	function scan:col_decoder(member, col, folded)
 		assertf(member == alias, 'col_decoder: unknown member: %s',
 			tostring(member))

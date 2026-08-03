@@ -2161,6 +2161,68 @@ function test.output_stage_found()
 	end)
 end
 
+--FOR UPDATE ------------------------------------------------------------------
+
+--writing to a table while a scan of it is still producing rows can make
+--that scan revisit them: moving a row to the end of the index the cursor
+--walks brings the cursor back to it. for_update() drains first, so each
+--row comes out once.
+function test.for_update_writes_while_iterating()
+	with_db('for_update_writes_while_iterating', function(db)
+		db:begin'w'
+		db:create_table('moving', {fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 's' , mdbx_type = 'utf8', maxlen = 8, not_null = true,
+				nozero = true},
+		}, pk = {'id'}})
+		db:add_index('moving', {'s'})
+		local letters = {'a', 'b', 'c', 'd', 'e', 'f'}
+		for i = 1, 6 do
+			db:insert('moving', '{}', {id = i, s = letters[i]})
+		end
+		db:commit()
+
+		db:begin'w'
+		local scan = db:scan('moving/s', 's is_not_null')
+		scan:select{{name = 'id', member = 'moving', col = 'id'}}
+		scan:for_update()
+		local seen = {}
+		scan.reset()
+		while scan.advance() and #seen < 50 do
+			local _, row = scan.get{}
+			seen[#seen + 1] = row.id
+			db:update('moving', '{}', {id = row.id, s = 'z'..row.id})
+		end
+		scan.close()
+		db:commit()
+		sort(seen)
+		assert(cat(seen, ',') == '1,2,3,4,5,6', cat(seen, ','))
+	end)
+end
+
+--a stage that already keeps its rows says so, and for_update() leaves it
+--alone rather than buffering them a second time.
+function test.for_update_noop_when_materialized()
+	with_db('for_update_noop_when_materialized', function(db)
+		add_people(db)
+		db:begin'r'
+
+		local scan = people_select(db):sort{{col = 'id', desc = true}}
+		assert(scan.materialized)
+		assert(scan:for_update() == scan)
+		local t = {}
+		scan.reset()
+		while scan.advance() do
+			local _, row = scan.get{}
+			t[#t + 1] = row.id
+		end
+		scan.close()
+		assert(cat(t, ',') == '4,3,2,1', cat(t, ','))
+
+		db:commit()
+	end)
+end
+
 --MEMBER SCAN -----------------------------------------------------------------
 
 --both member scans rename an output scan's cols under one alias.

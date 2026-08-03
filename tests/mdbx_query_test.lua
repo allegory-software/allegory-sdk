@@ -2962,7 +2962,12 @@ function test.set_ops_pipeline_exec()
 				:group_by{{{'count'}, 'n'}}:first()
 			assert(n == 4, n)
 
-			assert(#part(1, 4):except(part(3, 6)):explain() == 2)
+			--one step for the set op, holding one step list per input.
+			local ex = part(1, 4):except(part(3, 6)):explain()
+			assert(#ex == 1 and ex[1].set_op == 'except', ex[1].set_op)
+			assert(#ex[1].inputs == 2, #ex[1].inputs)
+			assert(ex[1].inputs[1][1].table == 'people')
+			assert(ex[1].inputs[2][1].table == 'people')
 		end)
 	end)
 end
@@ -3181,15 +3186,17 @@ function test.union_explain()
 					:select'people.id id'
 			end
 			local ex = db:union(half(1, 3), half(4, 6)):explain()
-			assert(#ex == 2, #ex)
-			assert(ex[1].table == 'people', ex[1].table)
-			assert(ex[2].table == 'people', ex[2].table)
+			assert(#ex == 1 and ex[1].set_op == 'union', ex[1].set_op)
+			assert(#ex[1].inputs == 2, #ex[1].inputs)
+			assert(ex[1].inputs[1][1].table == 'people')
+			assert(ex[1].inputs[2][1].table == 'people')
 
 			local nested = db:from(db:union(half(1, 3), half(4, 6)), 'u')
 				:select'u.id id':explain()
 			assert(#nested == 1, #nested)
 			assert(nested[1].source == 'u', nested[1].source)
-			assert(#nested[1].rel == 2, #nested[1].rel)
+			assert(#nested[1].rel == 1, #nested[1].rel)
+			assert(nested[1].rel[1].set_op == 'union')
 		end)
 	end)
 end

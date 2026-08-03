@@ -67,13 +67,6 @@ PROFILING
 CONTROL
 	:prepare([terminal_kind])             compile now
 
-TODO: DML
-	:update(assignments [, opts]) -> dml   assignments: {col_name -> expr}
-	:delete([opts]) -> dml
-	dml:returning(out_cols) -> dml          output rows for changed target rows
-	dml:run([params]) -> n                  execute; return affected row count
-	dml:rows([params]) -> iterator -> row   execute; requires returning()
-
 ROW FORMATS (the `shape` arg of terminals):
 
 	rows()    ->  iter()  ->  val1,...
@@ -2191,13 +2184,17 @@ local function explain_steps(access, into)
 	end
 end
 
---a union has no access plan of its own: its steps are its inputs' steps,
---in input order.
+--a set-op rel has no access plan of its own, so it contributes one step
+--holding its inputs' steps, one list per input in input order. except()
+--and intersect() are not symmetric, so which input is which matters.
 function explain_rel(rel, into)
 	if rel.set_op then
-		for _, input in ipairs(rel.set_rels) do
-			explain_rel(input, into)
+		local inputs = {}
+		for i, input in ipairs(rel.set_rels) do
+			inputs[i] = {}
+			explain_rel(input, inputs[i])
 		end
+		add(into, {set_op = rel.set_op, inputs = inputs})
 	else
 		explain_steps(rel.access, into)
 	end
@@ -2663,21 +2660,42 @@ end
 --wrap node in a filter checking every unconsumed condition in
 --residual (choose_access()'s leftover where()/on_expr conditions for
 --this step); a no-op when residual is empty.
-function apply_residual(db, node, residual, checks, registry, outer_node)
-	if #residual == 0 then return node end
-	local cache = {}
-	for _, cond in ipairs(residual) do
-		compile_residual_checkers(db, cond.expr, node, checks, registry)
-		compile_col_decoders(cond.expr, node, cache, registry, outer_node)
-	end
-	return node:filter(function()
-		for _, cond in ipairs(residual) do
-			if not eval_residual(cond.expr, node, checks, cache) then
+--[[
+row_check(conditions) -> nil | accept, bind
+	accept() -> t|f                        per-row predicate
+	bind(db, node, checks, [registry], [outer_node])
+
+nil when there is nothing to check. accept() is built before bind() so a
+join can be handed its predicate before the join node it reads from
+exists; bind() then compiles that node's readers and exists()/in_()
+checkers into the cache accept() reads.
+]]
+local function row_check(conditions)
+	if #conditions == 0 then return end
+	local bound, cache, checks
+	local function accept()
+		for _, cond in ipairs(conditions) do
+			if not eval_residual(cond.expr, bound, checks, cache) then
 				return false
 			end
 		end
 		return true
-	end)
+	end
+	local function bind(db, node, node_checks, registry, outer_node)
+		bound, cache, checks = node, {}, node_checks
+		for _, cond in ipairs(conditions) do
+			compile_residual_checkers(db, cond.expr, node, node_checks, registry)
+			compile_col_decoders(cond.expr, node, cache, registry, outer_node)
+		end
+	end
+	return accept, bind
+end
+
+function apply_residual(db, node, residual, checks, registry, outer_node)
+	local accept, bind = row_check(residual)
+	if not accept then return node end
+	bind(db, node, checks, registry, outer_node)
+	return node:filter(accept)
 end
 
 --[[
@@ -2938,30 +2956,14 @@ local function compile_joined_step(db, node, step, checks, registry, outer_node)
 	local scanner, param_scanner =
 		compile_table_scan(db, plan, node, registry, true)
 	registry[step.source.name] = param_scanner
-	local cache, accept
-	if #plan.residual > 0 then
-		cache = {}
-		accept = function(join)
-			for _, cond in ipairs(plan.residual) do
-				if not eval_residual(cond.expr, join, checks, cache) then
-					return false
-				end
-			end
-			return true
-		end
-	end
+	local accept, bind = row_check(plan.residual)
 	local join
 	if step.join.op == 'left' then
 		join = db:left_join_scans(node, scanner, accept)
 	else
 		join = db:join_scans(node, scanner, accept)
 	end
-	if accept then
-		for _, cond in ipairs(plan.residual) do
-			compile_residual_checkers(db, cond.expr, join, checks)
-			compile_col_decoders(cond.expr, join, cache, nil, outer_node)
-		end
-	end
+	if bind then bind(db, join, checks, nil, outer_node) end
 	return join
 end
 
@@ -3053,27 +3055,9 @@ either.
 		local step = rel.access[i]
 		if step.nested then
 			local inner = compile_nested(db, step, checks, registry, node)
-			local conditions = step.match_conditions
-			local cache, accept
-			if #conditions > 0 then
-				cache = {}
-				accept = function(join)
-					for _, cond in ipairs(conditions) do
-						if not eval_residual(cond.expr, join, checks, cache)
-						then
-							return false
-						end
-					end
-					return true
-				end
-			end
+			local accept, bind = row_check(step.match_conditions)
 			local join = db:left_join_scans(node, inner, accept)
-			if accept then
-				for _, cond in ipairs(conditions) do
-					compile_residual_checkers(db, cond.expr, join, checks)
-					compile_col_decoders(cond.expr, join, cache, nil, outer_node)
-				end
-			end
+			if bind then bind(db, join, checks, nil, outer_node) end
 			node = join
 		else
 			assert(step.join, 'compile_step: expected a joined step')
