@@ -20,8 +20,10 @@ JOIN
 	:cross_join(...)              unconditional join; takes no on_expr
 	:semi_join(...)               :where(q.exists(table|rel,alias, on_expr))
 	:anti_join(...)               :where(q.not_exists(table|rel,alias, on_expr))
-SET
+SET (inputs must return the same out cols, with the same collations)
 	db:union(rel1,...) -> rel     union-all; use :distinct() to deduplicate
+	:intersect(rel) -> rel        rows in both, deduplicated
+	:except(rel) -> rel           rows in the left with no match, deduplicated
 GROUP
 	:group_by(out_cols)           {{q.col() | agg_expr, name}, ...}
 	:having(expr)                 post-group filter; requires :group_by()
@@ -63,8 +65,6 @@ CONTROL
 	:prepare([terminal_kind])             compile now
 
 TODO: SET OPERATIONS
-	:intersect(source)            set intersection over output cols
-	:except(source)               set difference over output cols
 	:lateral(source [, alias] [, opts])    dependent join; opts.left=left join
 TODO: DML
 	:update(assignments [, opts]) -> dml   assignments: {col_name -> expr}
@@ -192,8 +192,15 @@ function Db:from(rel, alias) --'TABLE [ALIAS]'|rel, [alias]
 end
 
 function Db:union(...) --rel1, ...
-	return object(Rel, {db = self, union_rels = {...}})
+	return object(Rel, {db = self, set_op = 'union', set_rels = {...}})
 end
+
+local function set_op_rel(self, op, rel)
+	assert(inherits(rel, Rel))
+	return object(Rel, {db = self.db, set_op = op, set_rels = {self, rel}})
+end
+function Rel:intersect (rel) return set_op_rel(self, 'intersect', rel) end
+function Rel:except    (rel) return set_op_rel(self, 'except'   , rel) end
 
 function Rel:where(expr)
 	add(attr(self, 'wheres'), expr)
@@ -281,6 +288,11 @@ local function exists_expr(op, rel, alias, on_expr)
 			rel = rel.db:from(rel, alias)
 			if on_expr then rel:where(on_expr) end
 			alias, on_expr = nil
+		else
+			--without an alias there is no name for on_expr to reach the
+			--sub-relation's out cols by.
+			assertf(not on_expr, '%s(): put the condition in the'
+				..' sub-relation\'s own where(), or pass an alias', op)
 		end
 	end
 	return {op, rel, on_expr, alias = alias}
@@ -655,7 +667,7 @@ local function resolve_sources(rel)
 			--a join group (unaliased relation join) may only have sources,
 			--joins, and where() -- nothing else merges into the parent.
 			assert(not (
-					join_rel.union_rels
+					join_rel.set_op
 				or join_rel.havings
 				or join_rel.select_cols
 				or join_rel.group_cols
@@ -1051,8 +1063,8 @@ local referenced_sources --fw. decl.
 --to a given source set can be detected (through_exists=false, see
 --references_outside() below).
 local function referenced_rel_sources(rel, found, sources, through_exists)
-	if rel.union_rels then
-		for _, input in ipairs(rel.union_rels) do
+	if rel.set_op then
+		for _, input in ipairs(rel.set_rels) do
 			referenced_rel_sources(input, found, sources, through_exists)
 		end
 		return
@@ -1910,16 +1922,16 @@ end
 	--RESOLVE SOURCES ---------------------------------------------------------
 
 	local sources, union_out_cols
-	if rel.union_rels then
-		--can't call db:from()/join() on a union rel.
-		assert(not rel.joins, 'union does not allow joins')
-		for _, input in ipairs(rel.union_rels) do
+	if rel.set_op then
+		--can't call db:from()/join() on a set-op rel.
+		assertf(not rel.joins, '%s does not allow joins', rel.set_op)
+		for _, input in ipairs(rel.set_rels) do
 			compile(input, parent_scope)
-			assert(input.out_cols,
-				'union input requires select() or group_by()')
+			assertf(input.out_cols,
+				'%s input requires select() or group_by()', rel.set_op)
 			if union_out_cols then
-				assert(same_out_cols(union_out_cols, input.out_cols),
-					'union inputs must return the same cols')
+				assertf(same_out_cols(union_out_cols, input.out_cols),
+					'%s inputs must return the same cols', rel.set_op)
 			else
 				union_out_cols = input.out_cols
 			end
@@ -2018,7 +2030,7 @@ end
 	--distinct() on a union (which the doc block above implies works) has
 	--no dedup strategy yet. probably always hash, since a union has no
 	--single natural_order to stream against.
-	if not rel.union_rels then
+	if not rel.set_op then
 		local base_source = rel.joins[1].right
 		local access = {} --{{source=,join=|false,plan=|nested=}...}
 		rel.access = access
@@ -2045,7 +2057,7 @@ end
 	  once here, instead of recomputing it on every execution.
 	]]
 	rel.sort_needed = sort_actually_needed(rel)
-	if rel.union_rels then
+	if rel.set_op then
 		rel.distinct_streaming = false
 	else
 		rel.distinct_streaming = distinct_actually_streamable(rel)
@@ -2157,8 +2169,8 @@ end
 --a union has no access plan of its own: its steps are its inputs' steps,
 --in input order.
 function explain_rel(rel, into)
-	if rel.union_rels then
-		for _, input in ipairs(rel.union_rels) do
+	if rel.set_op then
+		for _, input in ipairs(rel.set_rels) do
 			explain_rel(input, into)
 		end
 	else
@@ -2554,14 +2566,22 @@ whose col_decoder() needs a base-table lookup only decides to fetch it
 on advance(), which already ran for that row by the time eval_value()
 gets to it -- see mdbx_scan.lua's scan()/need_base().
 ]]
-local function compile_col_decoders(expr, node, cache, registry)
+local function decoder_node_for(name, node, registry, outer_node)
+	local scan = registry and registry[name]
+	if scan then return scan end
+	if node.member_scans and node.member_scans[name] then return node end
+	return outer_node or node
+end
+
+local function compile_col_decoders(expr, node, cache, registry, outer_node)
 	if type(expr) ~= 'table' then return end
 	local op = expr[1]
 	if op == 'col' then
 		if not cache[expr] then
 			local get, ai_ci
 			if expr.source then
-				local decoder_node = registry and registry[expr.source.name] or node
+				local decoder_node = decoder_node_for(expr.source.name, node,
+					registry, outer_node)
 				get, ai_ci = decoder_node:col_decoder(expr.source.name, expr[3], true)
 			else
 				get, ai_ci = node:col_decoder(expr.col.name, true)
@@ -2574,7 +2594,7 @@ local function compile_col_decoders(expr, node, cache, registry)
 	elseif op == 'in' or op == 'not_in' then
 		--a sub-relation in expr[3] is never node's to read; a value list
 		--in expr[3] can hold q.col() items, which are.
-		compile_col_decoders(expr[2], node, cache, registry)
+		compile_col_decoders(expr[2], node, cache, registry, outer_node)
 		--a plain literal list (not a q.param() list, whose values aren't
 		--known until reset(args)) gets a hash set here instead of the
 		--per-row linear scan eval_expr() would otherwise do.
@@ -2600,13 +2620,14 @@ local function compile_col_decoders(expr, node, cache, registry)
 				cache[expr] = set
 			else
 				for i = 1, #values do
-					compile_col_decoders(values[i], node, cache, registry)
+					compile_col_decoders(values[i], node, cache, registry,
+						outer_node)
 				end
 			end
 		end
 	else
 		for i = 2, #expr do
-			compile_col_decoders(expr[i], node, cache, registry)
+			compile_col_decoders(expr[i], node, cache, registry, outer_node)
 		end
 	end
 end
@@ -2614,12 +2635,12 @@ end
 --wrap node in a filter checking every unconsumed condition in
 --residual (choose_access()'s leftover where()/on_expr conditions for
 --this step); a no-op when residual is empty.
-function apply_residual(db, node, residual, checks, registry)
+function apply_residual(db, node, residual, checks, registry, outer_node)
 	if #residual == 0 then return node end
 	local cache = {}
 	for _, cond in ipairs(residual) do
 		compile_residual_checkers(db, cond.expr, node, checks, registry)
-		compile_col_decoders(cond.expr, node, cache, registry)
+		compile_col_decoders(cond.expr, node, cache, registry, outer_node)
 	end
 	return node:filter(function()
 		for _, cond in ipairs(residual) do
@@ -2787,8 +2808,8 @@ function compile_exists_checker(db, expr, node, checks, registry)
 				'in_()/not_in(): sub-relation output must be one plain column')
 		end
 		local sub_node
-		if right.union_rels then
-			--a union has no access plan: build each input the same way a
+		if right.set_op then
+			--a set-op rel has no access plan: build each input the same way a
 			--plain sub-relation is built, then project so the union can
 			--answer for its out cols.
 			sub_node = compile_union(db, right, function(db, input)
@@ -2806,7 +2827,7 @@ function compile_exists_checker(db, expr, node, checks, registry)
 		--scan needs need_base() enabled ahead of advance() to
 		--read a base-only column.
 		if out_col then
-			if right.union_rels then
+			if right.set_op then
 				local get, ai_ci = sub_node:col_decoder(out_col.name, true)
 				cache[out_col] = {get = get, ai_ci = ai_ci}
 			else
@@ -2884,7 +2905,7 @@ apply_residual() wraps inner before join_scans()/left_join_scans() decides
 whether the current outer row matched. left_join_scans() null-extends when
 every seek row fails the residual.
 ]]
-local function compile_joined_step(db, node, step, checks, registry)
+local function compile_joined_step(db, node, step, checks, registry, outer_node)
 	local plan = step.plan
 	local scanner, param_scanner =
 		compile_table_scan(db, plan, node, registry, true)
@@ -2910,7 +2931,7 @@ local function compile_joined_step(db, node, step, checks, registry)
 	if accept then
 		for _, cond in ipairs(plan.residual) do
 			compile_residual_checkers(db, cond.expr, join, checks)
-			compile_col_decoders(cond.expr, join, cache)
+			compile_col_decoders(cond.expr, join, cache, nil, outer_node)
 		end
 	end
 	return join
@@ -2943,14 +2964,15 @@ local function compile_nested(db, step, checks, outer_registry, outer_node)
 		'compile_step: nested group base must correlate on an outer column')
 	local scanner, param_scanner =
 		compile_table_scan(db, plan, outer_node, outer_registry)
-	local inner = apply_residual(db, scanner, plan.residual, checks)
+	local inner = apply_residual(db, scanner, plan.residual, checks, nil,
+		outer_node)
 	--the group's own inner correlations (nested[2..] against nested[1] or
 	--each other) are never referenced from outside the group, so they
 	--get their own fresh registry, seeded with the base's own scanner.
 	local registry = {[plan.member] = param_scanner}
 	for i = 2, #step.nested do
 		inner = compile_joined_step(db, inner, step.nested[i], checks,
-			registry)
+			registry, outer_node)
 	end
 	return inner
 end
@@ -2997,7 +3019,8 @@ either.
 	local base_scanner, param_scanner =
 		compile_table_scan(db, base_plan, outer_node, registry)
 	registry[base_plan.member] = param_scanner
-	local node = apply_residual(db, base_scanner, base_plan.residual, checks)
+	local node = apply_residual(db, base_scanner, base_plan.residual, checks,
+		nil, outer_node)
 	for i = 2, #rel.access do
 		local step = rel.access[i]
 		if step.nested then
@@ -3020,16 +3043,16 @@ either.
 			if accept then
 				for _, cond in ipairs(conditions) do
 					compile_residual_checkers(db, cond.expr, join, checks)
-					compile_col_decoders(cond.expr, join, cache)
+					compile_col_decoders(cond.expr, join, cache, nil, outer_node)
 				end
 			end
 			node = join
 		else
 			assert(step.join, 'compile_step: expected a joined step')
-			node = compile_joined_step(db, node, step, checks, registry)
+			node = compile_joined_step(db, node, step, checks, registry, outer_node)
 		end
 	end
-	node = apply_residual(db, node, rel.late_conditions, checks)
+	node = apply_residual(db, node, rel.late_conditions, checks, nil, outer_node)
 	if checks.first_reset then
 		local reset = node.reset
 		function node.reset(args)
@@ -3129,11 +3152,20 @@ local function compile_group(node, rel)
 	return apply_having(node, rel.having_conditions)
 end
 
---compile_union() builds each input for one terminal and concatenates them.
+--compile_set_op() builds each input for one terminal and combines them
+--per rel.set_op.
 function compile_union(db, rel, compile_input)
-	local node = compile_input(db, rel.union_rels[1])
-	for i = 2, #rel.union_rels do
-		node = node:union(compile_input(db, rel.union_rels[i]))
+	local op = rel.set_op
+	local node = compile_input(db, rel.set_rels[1])
+	for i = 2, #rel.set_rels do
+		local input = compile_input(db, rel.set_rels[i])
+		if op == 'union' then
+			node = node:union(input)
+		elseif op == 'intersect' then
+			node = node:intersect(input)
+		else
+			node = node:except(input)
+		end
 	end
 	return node
 end
@@ -3144,7 +3176,7 @@ function compile_terminal(db, rel)
 	assert(not (rel.group_cols and rel.select_cols),
 		'select() after group_by() is not implemented yet')
 	local node
-	if rel.union_rels then
+	if rel.set_op then
 		node = compile_union(db, rel, compile_terminal)
 		if rel.group_cols then node = compile_group(node, rel) end
 	elseif rel.group_cols then
@@ -3235,17 +3267,12 @@ local function count_items(node, args)
 	return n
 end
 
-local compile_group_or_distinct --fw. decl.
-
-local function compile_union_input(db, rel)
-	local node = compile_group_or_distinct(db, rel)
-	if node.get then return node end
-	return node:select(rel.output_descriptor)
-end
-
-function compile_group_or_distinct(db, rel)
-	if rel.union_rels then
-		local node = compile_union(db, rel, compile_union_input)
+--set-op inputs are built through compile_terminal() here too: an input's
+--own limit() decides what it returns, so skipping it would make count()
+--and exists() disagree with rows().
+local function compile_group_or_distinct(db, rel)
+	if rel.set_op then
+		local node = compile_union(db, rel, compile_terminal)
 		if rel.group_cols then
 			node = compile_group(node, rel)
 		elseif rel.distinct_cols then
@@ -3271,11 +3298,10 @@ function Rel:count(params)
 end
 
 local function compile_exists_node(db, rel)
-	if rel.union_rels then
-		if not rel.group_cols then
-			return compile_union(db, rel, compile_exists_node)
-		end
-		return compile_group(compile_union(db, rel, compile_union_input), rel)
+	if rel.set_op then
+		local node = compile_union(db, rel, compile_terminal)
+		if rel.group_cols then node = compile_group(node, rel) end
+		return node
 	end
 	local node = compile_step(db, rel)
 	if rel.group_cols then

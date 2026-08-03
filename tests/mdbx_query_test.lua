@@ -2850,6 +2850,172 @@ function test.union_grand_total_exec()
 	end)
 end
 
+--SET OPERATIONS --------------------------------------------------------------
+
+--intersect()/except() key on every out col in comparison form, so an
+--ai_ci col matches spellings that differ only by case, and both dedup:
+--they are set operations, not row-multiset ones.
+function test.set_ops_exec()
+	with_ai_ci_db('set_ops_exec', function(db)
+		local function part(lo, hi, col)
+			return db:from'people'
+				:where{'>=', q.col'people.id', lo}
+				:where{'<=', q.col'people.id', hi}
+				:select('people.'..col..' '..col)
+		end
+		local function vals(rel)
+			local t = {}
+			for _, v in rel:rows() do t[#t+1] = tostring(v) end
+			sort(t)
+			return cat(t, ',')
+		end
+		db:atomic('r', function()
+			assert(vals(part(1, 4, 'id'):intersect(part(3, 6, 'id')))
+				== '3,4')
+			assert(vals(part(1, 4, 'id'):except(part(3, 6, 'id')))
+				== '1,2')
+			--ids 2 and 3 are 'ange' and 'Ange': one key, one row out.
+			assert(vals(part(2, 3, 'name'):intersect(part(2, 3, 'name')))
+				== 'ange')
+			assert(vals(part(1, 3, 'name'):except(part(3, 3, 'name')))
+				== 'Zoe')
+			assert(part(1, 4, 'id'):except(part(3, 6, 'id')):count() == 2)
+			assert(part(1, 2, 'id'):intersect(part(5, 6, 'id')):exists()
+				== false)
+		end)
+	end)
+end
+
+--a set-op rel takes order_by()/limit()/group_by() on top like a union
+--does, and describes itself as its inputs' steps.
+function test.set_ops_pipeline_exec()
+	with_ai_ci_db('set_ops_pipeline_exec', function(db)
+		local function part(lo, hi)
+			return db:from'people'
+				:where{'>=', q.col'people.id', lo}
+				:where{'<=', q.col'people.id', hi}
+				:select'people.id id'
+		end
+		db:atomic('r', function()
+			local t = {}
+			for _, id in part(1, 5):intersect(part(2, 6))
+				:order_by'id desc':limit(2):rows()
+			do t[#t+1] = id end
+			assert(cat(t, ',') == '5,4', cat(t, ','))
+
+			local n = part(1, 5):except(part(5, 5))
+				:group_by{{{'count'}, 'n'}}:first()
+			assert(n == 4, n)
+
+			assert(#part(1, 4):except(part(3, 6)):explain() == 2)
+		end)
+	end)
+end
+
+--chaining keeps applying to the accumulated left side.
+function test.set_ops_chained_exec()
+	with_ai_ci_db('set_ops_chained_exec', function(db)
+		local function part(lo, hi)
+			return db:from'people'
+				:where{'>=', q.col'people.id', lo}
+				:where{'<=', q.col'people.id', hi}
+				:select'people.id id'
+		end
+		db:atomic('r', function()
+			local t = {}
+			for _, id in part(1, 5):except(part(1, 1)):except(part(5, 5))
+				:order_by'id':rows()
+			do t[#t+1] = id end
+			assert(cat(t, ',') == '2,3,4', cat(t, ','))
+		end)
+	end)
+end
+
+--an input's own limit() decides what that input returns, so count() and
+--exists() must build set-op inputs the same way rows() does.
+function test.set_op_input_limit_exec()
+	with_ai_ci_db('set_op_input_limit_exec', function(db)
+		local function part(lo, hi, lim)
+			local rel = db:from'people'
+				:where{'>=', q.col'people.id', lo}
+				:where{'<=', q.col'people.id', hi}
+				:select'people.id id'
+			if lim then rel:limit(lim) end
+			return rel
+		end
+		local function n_rows(rel)
+			local n = 0
+			for _ in rel:rows() do n = n + 1 end
+			return n
+		end
+		db:atomic('r', function()
+			assert(n_rows(db:union(part(1, 3, 2), part(4, 6))) == 5)
+			assert(db:union(part(1, 3, 2), part(4, 6)):count() == 5)
+			assert(n_rows(part(1, 5, 2):except(part(6, 6))) == 2)
+			assert(part(1, 5, 2):except(part(6, 6)):count() == 2)
+			assert(part(1, 5, 0):intersect(part(1, 5)):exists() == false)
+		end)
+	end)
+end
+
+--CORRELATION THROUGH ROW CHECKS ----------------------------------------------
+
+--a correlated condition that no key can seek (team has no index) falls
+--through to a row-by-row check, which reads the outer row the same way a
+--seek param does.
+function test.unseekable_correlation_exec()
+	with_ai_ci_db('unseekable_correlation_exec', function(db)
+		db:atomic('r', function()
+			local sub = db:from'people p'
+				:where{'=', q.col'p.team', q.outer'people.team'}
+				:where{'>', q.col'p.id', q.outer'people.id'}
+				:select'p.id id'
+			local t = {}
+			for _, id in db:from'people':where(q.exists(sub))
+				:select'people.id id':order_by'people.id':rows()
+			do t[#t+1] = id end
+			assert(cat(t, ',') == '1,2,4,5', cat(t, ','))
+		end)
+	end)
+end
+
+--exists(rel, alias, on_expr) wraps rel as an aliased rows source and puts
+--on_expr on the wrapper, so the condition is a row check over a query
+--used as a table, correlated against the outer row.
+function test.exists_aliased_rel_exec()
+	with_ai_ci_db('exists_aliased_rel_exec', function(db)
+		db:atomic('r', function()
+			local function sub()
+				return db:from'people p':where{'<=', q.col'p.id', 2}
+					:select'p.id id'
+			end
+			local t = {}
+			for _, id in db:from'people'
+				:where(q.exists(sub(), 'u',
+					{'=', q.col'u.id', q.col'people.id'}))
+				:select'people.id id':order_by'people.id':rows()
+			do t[#t+1] = id end
+			assert(cat(t, ',') == '1,2', cat(t, ','))
+		end)
+	end)
+end
+
+--a sub-relation has its own where() to hold a condition, and without an
+--alias there is no name for one written outside to reach its out cols by,
+--so that spelling is rejected instead of silently dropping the condition.
+function test.exists_rel_on_expr_needs_alias()
+	with_ai_ci_db('exists_rel_on_expr_needs_alias', function(db)
+		db:atomic('r', function()
+			local sub = db:from'people p':select'p.id id'
+			local ok, err = pcall(function()
+				return q.exists(sub, {'=', q.col'id', q.col'people.id'})
+			end)
+			assert(not ok)
+			assert(tostring(err):find('own where()', 1, true), err)
+		end)
+	end)
+end
+
 --A QUERY USED AS A TABLE -----------------------------------------------------
 
 local function top_people(db)
