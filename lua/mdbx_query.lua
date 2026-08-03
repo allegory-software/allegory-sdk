@@ -18,6 +18,9 @@ JOIN
 	:where_has(table, fk_cols, [filter])   q.exists(table) via FK
 	:where_hasnt(table, fk_cols, [filter]) q.not_exists(table) via FK
 	:cross_join(...)              unconditional join; takes no on_expr
+	:[left_]lateral(rel, alias, [on_expr])   dependent join: rel sees the
+	sources to its left and re-runs per outer row; its own limit() then
+	applies per outer row. correlate with q.outer() inside rel.
 	:semi_join(...)               :where(q.exists(table|rel,alias, on_expr))
 	:anti_join(...)               :where(q.not_exists(table|rel,alias, on_expr))
 SET (inputs must return the same out cols, with the same collations)
@@ -64,8 +67,6 @@ PROFILING
 CONTROL
 	:prepare([terminal_kind])             compile now
 
-TODO: SET OPERATIONS
-	:lateral(source [, alias] [, opts])    dependent join; opts.left=left join
 TODO: DML
 	:update(assignments [, opts]) -> dml   assignments: {col_name -> expr}
 	:delete([opts]) -> dml
@@ -248,6 +249,17 @@ end
 function Rel:join       (...) return join(self, 'inner', ...) end
 function Rel:left_join  (...) return join(self, 'left' , ...) end
 function Rel:cross_join (...) return join(self, 'cross', ...) end
+--a lateral join's rel sees the sources to its left and re-runs per outer
+--row, so it needs no on_expr: the correlation lives in the rel itself.
+local function lateral(self, op, rel, alias, on_expr)
+	assert(inherits(rel, Rel), 'lateral: a rel is required')
+	assert(isstr(alias), 'lateral: an alias is required')
+	add(attr(self, 'joins'), {op = op, right = rel, alias = alias,
+		on_expr = on_expr, lateral = true})
+	return self
+end
+function Rel:lateral      (...) return lateral(self, 'inner', ...) end
+function Rel:left_lateral (...) return lateral(self, 'left' , ...) end
 
 --EXPRESSIONS ----------------------------------------------------------------
 
@@ -634,21 +646,24 @@ end
 	}
 end
 
---compile a relation used as an aliased rows source.
-local function resolve_rel_source(rel, name, what)
-	compile(rel)
+--compile a relation used as an aliased rows source. a lateral source is
+--compiled in the enclosing scope, so its cols can bind to the sources
+--resolved before it -- the ones to its left.
+local function resolve_rel_source(rel, name, what, scope)
+	compile(rel, scope)
 	--only select()/group_by() give a relation named cols to use as a rows source.
 	local cols = assert(rel.out_cols, what..' requires select() or group_by()')
 	return {
 		rel = rel,
 		name = name,
 		cols = cols,
+		lateral = scope ~= nil,
 	}
 end
 
 --resolve sources and merge unaliased relation joins into this relation.
-local function resolve_sources(rel)
-	local sources = {}
+local function resolve_sources(rel, scope)
+	local sources = scope and scope.sources or {}
 	rel.sources = sources
 	assert(rel.joins and rel.joins[1], 'from() missing')
 	for i, join in ipairs(rel.joins) do
@@ -658,8 +673,10 @@ local function resolve_sources(rel)
 		elseif join.alias then
 			--the join alias becomes this source's name; the inner rel has no
 			--name of its own, only names for its own out_cols.
+			assert(not (join.lateral and i == 1), 'from(rel) cannot be lateral')
 			join.right = resolve_rel_source(join.right, join.alias,
-				i == 1 and 'from(rel)' or 'join(rel)')
+				i == 1 and 'from(rel)' or 'join(rel)',
+				join.lateral and scope or nil)
 			add_source(sources, join.right)
 		else
 			assert(i > 1, 'from(rel) requires alias')
@@ -677,6 +694,10 @@ local function resolve_sources(rel)
 			), 'join rel contains unsupported query parts')
 			--get join group's sources before moving its where() clauses.
 			local join_sources = resolve_sources(join_rel)
+			for _, join_source in ipairs(join_rel.joins) do
+				assert(not join_source.lateral,
+					'lateral inside a join group is not implemented yet')
+			end
 			--flatten join group: move its where() clauses out into rel.
 			if join_rel.wheres then
 				if join.op == 'left' then
@@ -1542,7 +1563,7 @@ local function choose_access(source, conditions, order_terms, prefer_order,
 		local residual = {} --{condition...}
 		for _, cond in ipairs(conditions) do add(residual, cond) end
 		return {kind = 'rel', member = source.name, depth = 0,
-			rel = source.rel, residual = residual}
+			rel = source.rel, lateral = source.lateral, residual = residual}
 	end
 	--virtual tables have no pk or index metadata either, and no scan node
 	--yet (compile_step()'s scan needs a real schema) -- reject here rather
@@ -1921,6 +1942,15 @@ end
 
 	--RESOLVE SOURCES ---------------------------------------------------------
 
+	--the scope exists before its sources are resolved so that a lateral
+	--join's rel compiles against the sources already added to it.
+	local scope = { --kept in rel because it's used by correlated subqueries.
+		db = rel.db,
+		sources = {},
+		parent = parent_scope,
+	}
+	rel.scope = scope
+
 	local sources, union_out_cols
 	if rel.set_op then
 		--can't call db:from()/join() on a set-op rel.
@@ -1936,10 +1966,10 @@ end
 				union_out_cols = input.out_cols
 			end
 		end
-		sources = {}
+		sources = scope.sources
 		rel.sources = sources
 	else
-		sources = resolve_sources(rel)
+		sources = resolve_sources(rel, scope)
 	end
 
 	--RESOLVE OUTPUT COLUMNS --------------------------------------------------
@@ -1951,12 +1981,7 @@ end
 
 	--BUILD SCOPES ------------------------------------------------------------
 
-	rel.scope = { --kept in rel because it's used by correlated subqueries.
-		db = rel.db,
-		sources = sources,
-		cols = union_out_cols,
-		parent = parent_scope,
-	}
+	scope.cols = union_out_cols
 	local group_scope
 	if rel.group_cols then
 		--new scope: binding after group_by() can only reach the grouped
@@ -2325,9 +2350,12 @@ end
 --same row, or an ai_ci spelling matching a param's resolved value).
 local function compile_table_scan(db, plan, outer_node, registry, buffered)
 	if plan.kind == 'rel' then
-		local child = compile_terminal(db, plan.rel)
+		--a lateral rel reads the outer row, so it re-runs per outer row
+		--instead of keeping the one result its non-lateral form would.
+		local child = compile_terminal(db, plan.rel,
+			plan.lateral and outer_node or nil)
 		local scan
-		if buffered then
+		if buffered and not plan.lateral then
 			scan = child:materialized_scan(plan.member)
 		else
 			scan = child:streamed_scan(plan.member)
@@ -3170,19 +3198,21 @@ function compile_union(db, rel, compile_input)
 	return node
 end
 
-function compile_terminal(db, rel)
+function compile_terminal(db, rel, outer_node)
 	assert(rel.out_cols, 'rows()/rows_array()/first()/one()/must_one() require'
 		..' select() or group_by()')
 	assert(not (rel.group_cols and rel.select_cols),
 		'select() after group_by() is not implemented yet')
 	local node
 	if rel.set_op then
-		node = compile_union(db, rel, compile_terminal)
+		node = compile_union(db, rel, function(db, input)
+			return compile_terminal(db, input, outer_node)
+		end)
 		if rel.group_cols then node = compile_group(node, rel) end
 	elseif rel.group_cols then
-		node = compile_group(compile_step(db, rel), rel)
+		node = compile_group(compile_step(db, rel, outer_node), rel)
 	else
-		node = compile_step(db, rel):select(rel.output_descriptor)
+		node = compile_step(db, rel, outer_node):select(rel.output_descriptor)
 	end
 	if rel.distinct_cols then
 		node = node:distinct(rel.distinct_key_cols, not rel.distinct_streaming)

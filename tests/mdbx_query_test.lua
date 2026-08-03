@@ -2850,6 +2850,61 @@ function test.union_grand_total_exec()
 	end)
 end
 
+--LATERAL ---------------------------------------------------------------------
+
+--a lateral rel sees the sources to its left and re-runs per outer row, so
+--its own limit() applies per outer row -- the top-1-per-group shape that a
+--plain rows source cannot express, since that one is read once.
+function test.lateral_exec()
+	with_ai_ci_db('lateral_exec', function(db)
+		db:atomic('r', function()
+			local top = db:from'people p'
+				:where{'=', q.col'p.team', q.outer'people.team'}
+				:select'p.id pid'
+				:order_by'pid desc':limit(1)
+			local t = {}
+			for _, id, pid in db:from'people'
+				:lateral(top, 'top')
+				:select'people.id id, top.pid pid'
+				:order_by'people.id':rows()
+			do t[#t+1] = id..':'..pid end
+			--every row's team top is 3 for team a and 6 for team b.
+			assert(cat(t, ',') == '1:3,2:3,3:3,4:6,5:6,6:6', cat(t, ','))
+		end)
+	end)
+end
+
+--left_lateral() null-extends an outer row whose lateral rel is empty.
+function test.left_lateral_exec()
+	with_ai_ci_db('left_lateral_exec', function(db)
+		db:atomic('r', function()
+			local higher = db:from'people p'
+				:where{'=', q.col'p.team', q.outer'people.team'}
+				:where{'>', q.col'p.id', q.outer'people.id'}
+				:select'p.id pid'
+				:order_by'pid':limit(1)
+			local t = {}
+			for _, id, pid in db:from'people'
+				:left_lateral(higher, 'nx')
+				:select'people.id id, nx.pid pid'
+				:order_by'people.id':rows()
+			do t[#t+1] = id..':'..tostring(pid) end
+			assert(cat(t, ',') == '1:2,2:3,3:nil,4:5,5:6,6:nil', cat(t, ','))
+		end)
+	end)
+end
+
+--a lateral rel needs an alias: its out cols are reached by name.
+function test.lateral_needs_alias()
+	with_ai_ci_db('lateral_needs_alias', function(db)
+		local ok, err = pcall(function()
+			return db:from'people':lateral(db:from'people p':select'p.id id')
+		end)
+		assert(not ok)
+		assert(tostring(err):find('alias is required', 1, true), err)
+	end)
+end
+
 --SET OPERATIONS --------------------------------------------------------------
 
 --intersect()/except() key on every out col in comparison form, so an
