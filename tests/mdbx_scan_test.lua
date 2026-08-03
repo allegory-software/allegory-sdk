@@ -1865,6 +1865,241 @@ function test.not_in_collates()
 	end)
 end
 
+--nulls and false bools ------------------------------------------------------
+
+--ok is null on 3 and 5 and false on 1 and 4; flag is a false pk col on
+--1, 3 and 5. every col is reachable both from the index and from the
+--base table.
+local function add_bool_data(db)
+	db:begin'w'
+	db:create_table('bool_rows', {fields = {
+		{col = 'flag', mdbx_type = 'bool', not_null = true},
+		{col = 'id', mdbx_type = 'u32', not_null = true},
+		{col = 'ok', mdbx_type = 'bool'},
+	}, pk = {'flag', 'id'}})
+	db:add_index('bool_rows', {'ok'})
+	for _, row in ipairs{
+		{flag = false, id = 1, ok = false},
+		{flag = true , id = 2, ok = true },
+		{flag = false, id = 3},
+		{flag = true , id = 4, ok = false},
+		{flag = false, id = 5},
+	} do
+		db:insert('bool_rows', '{}', row)
+	end
+	db:commit()
+end
+
+--a bool col holding false reads back as false, not as an empty col: one
+--case per record a col can be read from (index key, base key, base val).
+function test.scan_reads_false_bool()
+	with_db('scan_reads_false_bool', function(db)
+		add_bool_data(db)
+		db:begin'r'
+
+		local function reads(tbl, path, col)
+			local scan = db:scan(tbl, path)
+			local get = scan:col_decoder('bool_rows', col)
+			scan.reset()
+			local t = {}
+			while scan.advance() do t[#t+1] = tostring(get()) end
+			scan.close()
+			return cat(t, ',')
+		end
+
+		--ok is the index key.
+		local ix_key = reads('bool_rows/ok', 'ok asc', 'ok')
+		assert(ix_key == 'nil,nil,false,false,true', ix_key)
+		--flag is a pk col, read from the index's val rec.
+		local base_key = reads('bool_rows/ok', 'ok asc', 'flag')
+		assert(base_key == 'false,false,false,true,true', base_key)
+		--ok is a base-table val col.
+		local base_val = reads('bool_rows', 'flag asc', 'ok')
+		assert(base_val == 'false,nil,nil,true,false', base_val)
+
+		db:commit()
+	end)
+end
+
+--the same three reads through db:col_decoder(), the schema-level getter.
+function test.schema_col_decoder_reads_false_bool()
+	with_db('schema_col_decoder_reads_false_bool', function(db)
+		add_bool_data(db)
+		db:begin'r'
+
+		local function reads(tbl, path, col)
+			local scan = db:scan(tbl, path)
+			local get = scan_col_decoder(db, scan, col)
+			scan.reset()
+			local t = {}
+			while scan.advance() do t[#t+1] = tostring(get()) end
+			scan.close()
+			return cat(t, ',')
+		end
+
+		local ix_key = reads('bool_rows/ok', 'ok asc', 'ok')
+		assert(ix_key == 'nil,nil,false,false,true', ix_key)
+		local base_key = reads('bool_rows/ok', 'ok asc', 'flag')
+		assert(base_key == 'false,false,false,true,true', base_key)
+		local base_val = reads('bool_rows', 'flag asc', 'ok')
+		assert(base_val == 'false,nil,nil,true,false', base_val)
+
+		db:commit()
+	end)
+end
+
+--an unreached inner col yields exactly one value (nil), not zero values:
+--a getter's result has to survive being passed on as an argument.
+function test.unmatched_inner_getter_arity()
+	with_db('unmatched_inner_getter_arity', function(db)
+		build_join_spec_fixture(db)
+		db:begin'r'
+
+		local scan = db:scan('users', 'id asc', 'u')
+			:left_join'sessions@s.user_id = u.id'
+		local get_sid = scan:col_decoder('s', 'id')
+		local t = {}
+		scan.reset()
+		while scan.advance() do t[#t+1] = tostring(get_sid()) end
+		scan.close()
+		assert(cat(t, ',') == '11,12,13,nil', cat(t, ','))
+
+		local parent = db:scan('users', 'id asc', 'u')
+		local child = parent:join_scan'sessions@s.user_id = u.id'
+		local get_child_sid = child:col_decoder('s', 'id')
+		t = {}
+		parent.reset()
+		while parent.advance() do
+			child.reset()
+			child.advance()
+			t[#t+1] = tostring(get_child_sid())
+		end
+		child.close()
+		parent.close()
+		assert(cat(t, ',') == '11,13,nil', cat(t, ','))
+
+		db:commit()
+	end)
+end
+
+--a group key reads back the way select() reads the same col: an empty
+--col is nil, a false bool is false. hashed grouping must not merge them.
+function test.scan_group_keys_null_and_false()
+	with_db('scan_group_keys_null_and_false', function(db)
+		add_bool_data(db)
+		db:begin'r'
+
+		local cols = {{member = 'bool_rows', col = 'ok'}}
+		local function counts(hash)
+			local scan = db:scan('bool_rows/ok', 'ok asc')
+			if not hash then scan:group_by(cols) end
+			scan:aggregate({
+				{name = 'ok', op = 'key', part = 1},
+				{name = 'cnt', op = 'count'},
+			}, cols, hash)
+			local t = {}
+			for _, ok, cnt in scan:rows() do
+				t[#t+1] = tostring(ok)..':'..cnt
+			end
+			sort(t)
+			return cat(t, ' ')
+		end
+		local streamed, hashed = counts(false), counts(true)
+		assert(streamed == 'false:2 nil:2 true:1', streamed)
+		assert(hashed   == 'false:2 nil:2 true:1', hashed)
+
+		local sel = db:scan('bool_rows/ok', 'ok asc')
+		sel:select{{name = 'ok', member = 'bool_rows', col = 'ok'}}
+		local t = {}
+		for _, ok in sel:rows() do t[#t+1] = tostring(ok) end
+		assert(cat(t, ',') == 'nil,nil,false,false,true', cat(t, ','))
+
+		db:commit()
+	end)
+end
+
+function test.scan_distinct_null_and_false()
+	with_db('scan_distinct_null_and_false', function(db)
+		add_bool_data(db)
+		db:begin'r'
+
+		local scan = db:scan('bool_rows', 'flag asc')
+		scan:select{{name = 'ok', member = 'bool_rows', col = 'ok'}}
+		scan:distinct({{member = 'bool_rows', col = 'ok'}}, true)
+		local t = {}
+		for _, ok in scan:rows() do t[#t+1] = tostring(ok) end
+		sort(t)
+		assert(cat(t, ',') == 'false,nil,true', cat(t, ','))
+
+		db:commit()
+	end)
+end
+
+--'is' means the col may be null, so a nil arg asks for the null rows.
+--every other op still refuses a nil arg, so a misspelled arg name is
+--reported instead of silently matching nothing.
+function test.scan_is_nil_arg()
+	with_db('scan_is_nil_arg', function(db)
+		add_bool_data(db)
+		db:begin'r'
+
+		local function ids(spec, args)
+			local scan = db:scan('bool_rows/ok', spec)
+			local get = scan:col_decoder('bool_rows', 'id')
+			scan.reset(args)
+			local t = {}
+			while scan.advance() do t[#t+1] = get() end
+			scan.close()
+			return cat(t, ',')
+		end
+
+		assert(ids('ok is ?', {}) == '3,5')
+		assert(ids('ok is ?') == '3,5')
+		assert(ids('ok is ?', {null}) == '3,5')
+		assert(ids('ok is ?', {false}) == '1,4')
+
+		local ok, err = pcall(ids, 'ok = ?', {})
+		assert(not ok and tostring(err):find'missing arg', tostring(err))
+
+		db:commit()
+	end)
+end
+
+--sort() over aggregate() output: the null group's key is nil like any
+--other empty col, and sorts first ascending.
+function test.scan_sort_null_group_key()
+	with_db('scan_sort_null_group_key', function(db)
+		db:begin'w'
+		db:create_table('grp', {fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'g', mdbx_type = 'i32'},
+		}, pk = {'id'}})
+		local _, _, g_asc = db:add_index('grp', {'g'})
+		for _, r in ipairs{
+			{id = 1, g = 2}, {id = 2}, {id = 3, g = 1}, {id = 4},
+		} do db:insert('grp', '{}', r) end
+		db:commit()
+		db:begin'r'
+
+		local cols = {{member = 'grp', col = 'g'}}
+		local scan = db:scan(g_asc, 'g asc')
+		scan:group_by(cols)
+		scan:aggregate({
+			{name = 'g', op = 'key', part = 1},
+			{name = 'cnt', op = 'count'},
+		}, cols)
+		scan:sort{{field = 'g'}}
+
+		local t = {}
+		for _, g, cnt in scan:rows() do
+			t[#t+1] = tostring(g)..':'..cnt
+		end
+		assert(cat(t, ' ') == 'nil:2 1:1 2:1', cat(t, ' '))
+
+		db:commit()
+	end)
+end
+
 local name = ...
 if name == 'mdbx_scan_test' then name = nil end
 local tests = name and {name} or test

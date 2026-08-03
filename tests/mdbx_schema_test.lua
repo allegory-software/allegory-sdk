@@ -4588,6 +4588,33 @@ function test.alter_table_values_in_place()
 	end)
 end
 
+--a false bool is a value, not an empty col, so it survives the decode and
+--re-encode that an alter does on every row.
+function test.alter_table_keeps_false_bool()
+	with_db('alter_table_keeps_false_bool', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32' , not_null = true},
+			{col = 'a' , mdbx_type = 'bool', not_null = true},
+			{col = 'b' , mdbx_type = 'bool'},
+		}, pk = {'id'}})
+		db:insert('t', '{}', {id = 1, a = false, b = false})
+		db:insert('t', '{}', {id = 2, a = true})
+		db:alter_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32' , not_null = true},
+			{col = 'a' , mdbx_type = 'bool', not_null = true},
+			{col = 'b' , mdbx_type = 'bool'},
+			{col = 'c' , mdbx_type = 'u32' , mdbx_default = 5},
+		}, pk = {'id'}})
+		assert(db:find('t', 'a', 1) == false)
+		assert(db:find('t', 'b', 1) == false)
+		assert(db:find('t', 'a', 2) == true)
+		assert(db:is_null('t', 'b', 2) == true)
+		assert(num(db:find('t', 'c', 1)) == 5)
+		db:commit()
+	end)
+end
+
 --changing the PK encoding rewrites through a temporary DBI and preserves the
 --table sequence, so autoincrement continues after the existing rows.
 function test.alter_table_rewrites_keys()

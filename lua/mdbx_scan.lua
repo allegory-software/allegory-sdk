@@ -233,12 +233,9 @@ local function key_add_param(db, param, output_schema, slot, scan, op)
 				v = get()
 			elseif arg then
 				local args = scan.args
-				if args == nil then
-					assertf(false, 'missing arg: %s', arg)
-				end
-				v = args[arg]
+				v = args and args[arg]
 				if v == nil then
-					assertf(false, 'missing arg: %s', arg)
+					assertf(op == 'is', 'missing arg: %s', arg)
 				end
 			end
 			local len
@@ -827,7 +824,8 @@ function Db:scan(tbl, path, alias)
 			get = function()
 				local len = C.schema_get_key_rec(st, ki, key_rec,
 					key_decode_buffer, MDBX_MAX_KEY_SIZE, pout, nil)
-				return len ~= -1 and decode(pout[0], len) or nil
+				if len == -1 then return nil end
+				return decode(pout[0], len)
 			end
 		else
 			--col_decoder() reads original ai_ci text from the base table.
@@ -841,7 +839,8 @@ function Db:scan(tbl, path, alias)
 				get = function()
 					local len = C.schema_get_key_rec(st, ki, rec,
 						key_decode_buffer, MDBX_MAX_KEY_SIZE, pout, nil)
-					return len ~= -1 and decode(pout[0], len) or nil
+					if len == -1 then return nil end
+					return decode(pout[0], len)
 				end
 			else --col not in index: base-table lookup
 				local vi = field.val_index-1
@@ -852,7 +851,8 @@ function Db:scan(tbl, path, alias)
 				end
 				get = function()
 					local len = C.schema_get_val_rec(st, vi, rec, pout)
-					return len ~= -1 and decode(pout[0], len) or nil
+					if len == -1 then return nil end
+					return decode(pout[0], len)
 				end
 			end
 		end
@@ -1214,7 +1214,8 @@ local function join_scans(outer, inner, left, accept)
 		end
 		local get = inner:col_decoder(member, col, folded)
 		return function()
-			if inner_found() then return get() end
+			if not inner_found() then return nil end
+			return get()
 		end
 	end
 	function join.explain()
@@ -1254,7 +1255,8 @@ function Db:child_scan(parent, child)
 	function child:col_decoder(member, col, folded)
 		local get = decode(child, member, col, folded)
 		return function()
-			if child.found() then return get() end
+			if not child.found() then return nil end
+			return get()
 		end
 	end
 	return child
@@ -1586,8 +1588,8 @@ function Scan:sort(spec)
 						local av, bv = keys[ai + k], keys[bi + k]
 						if av ~= bv then
 							local p = spec[k]
-							local a_null = av == null or av == nil
-							local b_null = bv == null or bv == nil
+							local a_null = av == nil
+							local b_null = bv == nil
 							if a_null ~= b_null then
 								return p.desc and b_null or not p.desc and a_null
 							end
@@ -1636,15 +1638,13 @@ function Scan:group_by(cols)
 	local prev, done, has_current, has_prev, peeked
 	local function same_key()
 		for i = 1, ncols do
-			local v = getters[i](); if v == nil then v = null end
-			if prev[i] ~= v then return false end
+			if prev[i] ~= getters[i]() then return false end
 		end
 		return true
 	end
 	local function set_key()
 		for i = 1, ncols do
-			local v = getters[i](); if v == nil then v = null end
-			prev[i] = v
+			prev[i] = getters[i]()
 		end
 	end
 	local function adv(bk)
@@ -1691,7 +1691,7 @@ local function agg_step(acc, a, key, v)
 	local name = a.name
 	if a.op == 'key' then
 		acc[name] = key and key[a.part]
-	elseif v ~= nil and v ~= null then
+	elseif v ~= nil then
 		if a.op == 'count' then
 			acc[name] = acc[name] + 1
 		elseif a.op == 'sum' then
@@ -1789,14 +1789,14 @@ function Scan:aggregate(agg, cols, hash)
 	local key = {}
 	local function read_key()
 		for i = 1, nkeys do
-			local v = key_getters[i](); key[i] = v ~= nil and v or null
+			key[i] = key_getters[i]()
 		end
 		return key
 	end
 	local bucket = bucket_getters and {}
 	local function bucket_key()
 		for i = 1, nkeys do
-			local v = bucket_getters[i](); bucket[i] = v ~= nil and v or null
+			local v = bucket_getters[i](); bucket[i] = v == nil and null or v
 		end
 		return bucket
 	end
@@ -1820,8 +1820,12 @@ function Scan:aggregate(agg, cols, hash)
 				while advance() do
 					local key = read_key()
 					local bkey = bucket_key()
-					local t = nkeys == 1 and bkey[1]
-						or tuple_space(unpack(bkey, 1, nkeys))
+					local t
+					if nkeys == 1 then
+						t = bkey[1]
+					else
+						t = tuple_space(unpack(bkey, 1, nkeys))
+					end
 					local acc = buckets[t]
 					if not acc then
 						acc = agg_init(agg)
@@ -1897,7 +1901,7 @@ function Scan:distinct(cols, hash)
 	local key = {}
 	local function read_key()
 		for i = 1, nkeys do
-			local v = key_getters[i](); key[i] = v ~= nil and v or null
+			local v = key_getters[i](); key[i] = v == nil and null or v
 		end
 		return key
 	end
@@ -1911,8 +1915,12 @@ function Scan:distinct(cols, hash)
 			output = {}
 			while advance() do
 				local key = read_key()
-				local t = nkeys == 1 and key[1]
-					or tuple_space(unpack(key, 1, nkeys))
+				local t
+				if nkeys == 1 then
+					t = key[1]
+				else
+					t = tuple_space(unpack(key, 1, nkeys))
+				end
 				if not seen[t] then
 					seen[t] = true
 					local _, kept_row = get{}

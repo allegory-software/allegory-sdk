@@ -580,7 +580,11 @@ end
 local function decode_val_with_null(schema, v, v_sz, t)
 	for vi, f in ipairs(schema.val_fields) do
 		local len = C.schema_get_val(schema._st, vi-1, v, v_sz, pout)
-		t[f.col] = len ~= -1 and f.decode(pout[0], len) or null
+		if len == -1 then
+			t[f.col] = null
+		else
+			t[f.col] = f.decode(pout[0], len)
+		end
 	end
 end
 
@@ -664,7 +668,8 @@ function Db:col_decoder(schema, col, ix_key, pk, get_base_val)
 		return function()
 			local len = C.schema_get_key(st, ki, ix_key.data, ix_key.size,
 				out, out_sz, pout, nil)
-			return len ~= -1 and decode(pout[0], len) or nil
+			if len == -1 then return nil end
+			return decode(pout[0], len)
 		end
 	end
 	local base_schema = schema.val_schema or schema
@@ -674,14 +679,16 @@ function Db:col_decoder(schema, col, ix_key, pk, get_base_val)
 		return function()
 			local len = C.schema_get_key(st, ki, pk.data, pk.size,
 				out, out_sz, pout, nil)
-			return len ~= -1 and decode(pout[0], len) or nil
+			if len == -1 then return nil end
+			return decode(pout[0], len)
 		end
 	else
 		local st, vi, decode = base_schema._st, base_f.val_index-1, base_f.decode
 		return function()
 			local v, v_sz = get_base_val()
 			local len = C.schema_get_val(st, vi, v, v_sz, pout)
-			return len ~= -1 and decode(pout[0], len) or nil
+			if len == -1 then return nil end
+			return decode(pout[0], len)
 		end
 	end
 end
