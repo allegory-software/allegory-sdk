@@ -21,7 +21,7 @@ local function collect_ids(node, name, args)
 	local get_id = node:col_decoder(name, 'id')
 	node.reset(args)
 	local t = {}
-	while node.advance() do
+	while node.next() do
 		t[#t+1] = get_id()
 	end
 	node.close()
@@ -664,7 +664,7 @@ function test.inner_join_exec()
 			local get_s = node:col_decoder('sessions', 'id')
 			node.reset()
 			local t = {}
-			while node.advance() do
+			while node.next() do
 				t[#t+1] = get_u()..':'..get_s()
 			end
 			node.close()
@@ -689,7 +689,7 @@ function test.left_join_exec()
 			local get_s = node:col_decoder('sessions', 'id')
 			node.reset()
 			local t = {}
-			while node.advance() do
+			while node.next() do
 				t[#t+1] = get_u()..':'..(get_s() or '-')
 			end
 			node.close()
@@ -719,7 +719,7 @@ function test.left_join_chain_exec()
 			local get_g = node:col_decoder('tags', 'id')
 			node.reset()
 			local t = {}
-			while node.advance() do
+			while node.next() do
 				local u, s, e, g = get_u(), get_s(), get_e(), get_g()
 				t[#t+1] = u..':'..(s or '-')..':'..(e or '-')..':'..(g or '-')
 			end
@@ -751,7 +751,7 @@ function test.left_join_where_late_exec()
 			local get_s = node:col_decoder('sessions', 'id')
 			node.reset{SID = 11}
 			local t = {}
-			while node.advance() do
+			while node.next() do
 				t[#t+1] = get_u()..':'..(get_s() or '-')
 			end
 			node.close()
@@ -788,7 +788,7 @@ function test.left_join_group_exec()
 			local get_e = node:col_decoder('events', 'id')
 			node.reset()
 			local t = {}
-			while node.advance() do
+			while node.next() do
 				local u, s, e = get_u(), get_s(), get_e()
 				t[#t+1] = u..':'..(s or '-')..':'..(e or '-')
 			end
@@ -819,7 +819,7 @@ function test.inner_join_group_exec()
 			local get_e = node:col_decoder('events', 'id')
 			node.reset()
 			local t = {}
-			while node.advance() do
+			while node.next() do
 				local u, s, e = get_u(), get_s(), get_e()
 				t[#t+1] = u..':'..(s or '-')..':'..(e or '-')
 			end
@@ -849,7 +849,7 @@ function test.inner_join_chain_exec()
 			local get_e = node:col_decoder('events', 'id')
 			node.reset()
 			local t = {}
-			while node.advance() do
+			while node.next() do
 				t[#t+1] = get_u()..':'..get_s()..':'..get_e()
 			end
 			node.close()
@@ -884,7 +884,7 @@ function test.left_join_group_chain_exec()
 			local get_g = node:col_decoder('tags', 'id')
 			node.reset()
 			local t = {}
-			while node.advance() do
+			while node.next() do
 				local u, s, e, g = get_u(), get_s(), get_e(), get_g()
 				t[#t+1] = u..':'..(s or '-')..':'..(e or '-')..':'..(g or '-')
 			end
@@ -920,7 +920,7 @@ function test.left_join_group_internal_where_exec()
 			local get_e = node:col_decoder('events', 'id')
 			node.reset()
 			local t = {}
-			while node.advance() do
+			while node.next() do
 				t[#t+1] = get_u()..':'..(get_e() or '-')
 			end
 			node.close()
@@ -990,7 +990,7 @@ function test.inner_join_wide_fk_seek_exec()
 			local get_s = node:col_decoder('sessions', 'id')
 			node.reset()
 			local t = {}
-			while node.advance() do
+			while node.next() do
 				t[#t+1] = get_u()..':'..get_s()
 			end
 			node.close()
@@ -1016,7 +1016,7 @@ function test.left_join_wide_fk_no_match_exec()
 			local get_s = node:col_decoder('sessions', 'id')
 			node.reset()
 			local t = {}
-			while node.advance() do
+			while node.next() do
 				t[#t+1] = get_u()..':'..(get_s() and 'y' or 'n')
 			end
 			node.close()
@@ -1080,7 +1080,7 @@ function test.left_join_residual_unindexed_col_null_extends_exec()
 			local get_s = node:col_decoder('sessions', 'id')
 			node.reset()
 			local t = {}
-			while node.advance() do
+			while node.next() do
 				t[#t+1] = get_u()..':'..(get_s() and 'y' or 'n')
 			end
 			node.close()
@@ -1157,7 +1157,7 @@ function test.inner_join_residual_reads_outer_member_exec()
 			local get_s = node:col_decoder('sessions', 'id')
 			node.reset()
 			local t = {}
-			while node.advance() do
+			while node.next() do
 				t[#t+1] = get_u()..':'..get_s()
 			end
 			node.close()
@@ -1180,7 +1180,7 @@ function test.inner_join_child_to_parent_exec()
 			local get_u = node:col_decoder('users', 'id')
 			node.reset()
 			local t = {}
-			while node.advance() do
+			while node.next() do
 				t[#t+1] = get_s()..':'..get_u()
 			end
 			node.close()
@@ -1202,7 +1202,7 @@ function test.cross_join_exec()
 			local node = compile_step(db, rel)
 			node.reset()
 			local n = 0
-			while node.advance() do n = n + 1 end
+			while node.next() do n = n + 1 end
 			node.close()
 			--5 users x 5 sessions, every combination.
 			assert(n == 25, n)
@@ -1260,7 +1260,7 @@ function test.inner_join_self_fk_alias_exec()
 			local get_report = node:col_decoder('mgr', 'id')
 			node.reset()
 			local t = {}
-			while node.advance() do
+			while node.next() do
 				t[#t+1] = get_boss()..':'..get_report()
 			end
 			node.close()
@@ -1319,7 +1319,7 @@ function test.inner_join_composite_fk_partial_match_exec()
 			local node = compile_step(db, rel)
 			node.reset()
 			local n = 0
-			while node.advance() do n = n + 1 end
+			while node.next() do n = n + 1 end
 			node.close()
 			--2 a-rows (x=1,y=1 and x=1,y=2) x 2 b-rows (x=1,y=1 and
 			--x=1,y=2) -- the join only equates x, so every a-row pairs
@@ -1342,7 +1342,7 @@ function test.from_alias_exec()
 			local get_id = node:col_decoder('u', 'id')
 			node.reset()
 			local t = {}
-			while node.advance() do
+			while node.next() do
 				t[#t+1] = get_id()
 			end
 			node.close()

@@ -1,6 +1,6 @@
 --[[
 
-	mdbx_query: query builder over mdbx_schema.
+	MDBX query compiler over mdbx_scan.
 	Written by Cosmin Apreutesei. Public Domain.
 
 START
@@ -932,7 +932,7 @@ end
   varying natural order is enough for grouping (nothing needs to vary
   after it).
 - second way, needing no natural order at all: the terms cover the
-  base (driving) source's whole primary key. join_scans() emits one
+  base (driving) source's whole primary key. join() emits one
   base row's entire fan-out before moving to the next, so every row
   sharing one base row's identity comes out together regardless of
   the order of any joined source's scan.
@@ -1801,7 +1801,7 @@ local function build_access(joins, scheduled, access, sources,
 				collect_left_joined_sources(group.joins,
 					group_left_joined_sources)
 				--attribute_conditions() keeps source-local conditions on their
-				--internal scan; left_join_scans() checks the rest on the group.
+				--internal scan; left_join() checks the rest on the group.
 				attribute_conditions(picked.on_conditions, group.sources,
 					group_left_joined_sources)
 				local match_conditions = {} --{condition...}
@@ -1823,7 +1823,7 @@ local function build_access(joins, scheduled, access, sources,
 					group_conditions)
 				local base_plan = choose_access(base_source, conditions)
 				local base_residual = {} --{condition...}
-				--left_join_scans() checks base residuals that read an outer source.
+				--left_join() checks base residuals that read an outer source.
 				for _, cond in ipairs(base_plan.residual) do
 					local found = {}
 					referenced_sources(cond.expr, found, sources, true)
@@ -2403,7 +2403,7 @@ end
 - literals return themselves.
 - q.param() reads scan.args.
 - q.col() reads cache[x].get(), which compile_col_decoders() built from
-  node:col_decoder() ahead of the first advance(). the reader returns
+  node:col_decoder() ahead of the first next(). the reader returns
   the comparison form, so an indexed ai_ci col comes straight from the
   index key.
 ]]
@@ -2583,7 +2583,7 @@ closure runs, into the same cache eval_value() reads. Without this,
 eval_value()'s own cache[x] check builds the decoder lazily, on
 whichever row happens to evaluate this operand first; a scan
 whose col_decoder() needs a base-table lookup only decides to fetch it
-on advance(), which already ran for that row by the time eval_value()
+on next(), which already ran for that row by the time eval_value()
 gets to it -- see mdbx_scan.lua's scan()/need_base().
 ]]
 local function decoder_node_for(name, node, registry, outer_node)
@@ -2753,7 +2753,7 @@ local function reset_check(check, args)
 	scan.reset(args)
 	if check.value_get then
 		local set = {}
-		while scan.advance() do
+		while scan.next() do
 			local v = check.value_get()
 			if not null_value(v) then
 				set[v] = true
@@ -2761,7 +2761,7 @@ local function reset_check(check, args)
 		end
 		check.values_set = set
 	else
-		check.constant = scan.advance() ~= nil
+		check.constant = scan.next() ~= nil
 	end
 	scan.close()
 end
@@ -2856,7 +2856,7 @@ function compile_exists_checker(db, expr, node, checks, registry, outer_cache)
 				check.values = function()
 					sub_node.reset(node.args)
 					return function()
-						if sub_node.advance() then
+						if sub_node.next() then
 							return sub_node, value_get()
 						end
 					end
@@ -2864,7 +2864,7 @@ function compile_exists_checker(db, expr, node, checks, registry, outer_cache)
 			else
 				check.check_exists = function()
 					sub_node.reset(node.args)
-					return sub_node.advance() ~= nil
+					return sub_node.next() ~= nil
 				end
 			end
 			set_check(checks, expr, check)
@@ -2898,7 +2898,7 @@ function compile_exists_checker(db, expr, node, checks, registry, outer_cache)
 				scan = inner,
 				check_exists = function()
 					inner.reset(node.args)
-					return inner.advance() ~= nil
+					return inner.next() ~= nil
 				end,
 			})
 		else
@@ -2910,16 +2910,16 @@ end
 
 --[[
 chains one joined step onto node, the driver built so far, via
-db:join_scans()/left_join_scans(node, inner). db:join_scans() and
-db:left_join_scans() use only the Scan methods from both sides.
+node:join(inner)/node:left_join(inner). join() and left_join() use only
+the Scan methods from both sides.
 compile_joined_step() builds inner from plan through compile_scan_path()
 and correlates its seek params against node through compile_scan_param()'s
 registry lookup.
 compile_joined_step() adds the scanner to registry so a later step can
 read its current row.
 
-apply_residual() wraps inner before join_scans()/left_join_scans() decides
-whether the current outer row matched. left_join_scans() null-extends when
+apply_residual() wraps inner before join()/left_join() decides whether the
+current outer row matched. left_join() null-extends when
 every seek row fails the residual.
 ]]
 local function compile_joined_step(db, node, step, checks, registry, outer_node)
@@ -2930,9 +2930,9 @@ local function compile_joined_step(db, node, step, checks, registry, outer_node)
 	local accept, bind = row_check(plan.residual)
 	local join
 	if step.join.op == 'left' then
-		join = db:left_join_scans(node, scanner, accept)
+		join = node:left_join(scanner, accept)
 	else
-		join = db:join_scans(node, scanner, accept)
+		join = node:join(scanner, accept)
 	end
 	if bind then bind(db, join, checks, nil, outer_node) end
 	return join
@@ -2941,7 +2941,7 @@ end
 --[[
 builds a left-joined group's own chain (step.nested: the group's base
 step, plus any further joins inside the group) into a single node, for
-compile_step to wrap in left_join_scans() (no from_member: see below).
+compile_step to wrap in left_join() (no from_member: see below).
 compile_nested() requires plan.seek[1].expr to read an outer column
 (source_operand()/bucket_facts() set it during compile()'s BIND
 COLUMNS stage) -- compile_scan_path()/compile_scan_param() already turn
@@ -2951,7 +2951,7 @@ treatment than compile_joined_step() gives an ordinary step. This is
 why the old node system's nested_join from_member/reset_prefix
 mechanism (built for pk_scan's getter-seek, which couldn't otherwise
 read a live outer row per reset()) isn't needed here at all:
-left_join_scans()'s plain inner.reset() already re-evaluates the
+left_join()'s plain inner.reset() already re-evaluates the
 scan-param against outer_registry's live scanner on every outer row.
 ]]
 local function compile_nested(db, step, checks, outer_registry, outer_node)
@@ -2993,9 +2993,9 @@ Each step past the base chains onto whatever's been built so far:
 - a single, un-joined base step -> a scan, bound values read
   through compile_scan_param()'s {arg=}/{scan=,col=}/{get=}/{value=}.
 - a joined step -> compile_joined_step() builds a correlated scan
-  and wraps it in join_scans()/left_join_scans().
+  and wraps it in join()/left_join().
 - a left-joined group (step.nested) -> compile_nested() builds the
-  group's own chain, wrapped in left_join_scans(node_so_far, inner).
+  group's own chain, wrapped in node_so_far:left_join(inner).
 Every step's plan.residual (choose_access()'s leftover where()/on_expr
 conditions that the seek didn't consume) gets applied via apply_residual()
 right after that step's node is built. Once every step is chained on,
@@ -3025,7 +3025,7 @@ doesn't correlate on a plain outer column, aren't wired up yet.
 		if step.nested then
 			local inner = compile_nested(db, step, checks, registry, node)
 			local accept, bind = row_check(step.match_conditions)
-			local join = db:left_join_scans(node, inner, accept)
+			local join = node:left_join(inner, accept)
 			if bind then bind(db, join, checks, nil, outer_node) end
 			node = join
 		else
@@ -3244,7 +3244,7 @@ compile_subquery_exists() applies the limit of a relation operand.
 local function count_items(node, args)
 	node.reset(args)
 	local n = 0
-	while node.advance() do n = n + 1 end
+	while node.next() do n = n + 1 end
 	node.close()
 	return n
 end

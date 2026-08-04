@@ -1,6 +1,6 @@
 --[[
 
-	structured data and multi-key indexing for mdbx.
+	MDBX relational model.
 	Written by Cosmin Apreutsei. Public Domain.
 
 FEATURES

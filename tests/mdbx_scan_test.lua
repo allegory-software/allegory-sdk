@@ -89,7 +89,7 @@ end
 
 local function scan_values(scan, get)
 	local t = {}
-	while scan.advance() do t[#t + 1] = get() end
+	while scan.next() do t[#t + 1] = get() end
 	return cat(t, ',')
 end
 
@@ -164,9 +164,9 @@ function test.scan_access_paths()
 		get_id = scan_col_decoder(db, groups, 'id')
 		local grouped = {}
 		groups.reset()
-		while groups.advance_key() do
+		while groups.next_group() do
 			local pks = {get_tenant()..':'..get_id()}
-			while groups.advance_pk() do
+			while groups.next_in_group() do
 				pks[#pks + 1] = get_tenant()..':'..get_id()
 			end
 			grouped[#grouped + 1] = get_status()..'='..cat(pks, ',')
@@ -499,7 +499,7 @@ function test.scan_nil_null_and_false()
 			{'status', 'starts', {value = null}},
 		})
 		status_prefix.reset()
-		assert(not status_prefix.advance())
+		assert(not status_prefix.next())
 
 		active.close()
 		score_eq.close()
@@ -598,7 +598,7 @@ function test.scan_null_comparisons()
 			end}},
 		})
 		null_eq.reset()
-		assert(not id_bound_read and not null_eq.advance())
+		assert(not id_bound_read and not null_eq.next())
 
 		local max_score = null
 		local by_max = db:scan(score_asc, {
@@ -643,7 +643,7 @@ function test.scan_column_refs()
 			{'id', dir = 'asc'},
 		})
 		outer.reset()
-		assert(outer.advance())
+		assert(outer.next())
 
 		local same_status = db:scan('scan_rows/status', {
 			{'status', '=', {scan = outer, col = 'status'}},
@@ -667,7 +667,7 @@ function test.scan_column_refs()
 			return get_tenant()..':'..get_id()
 		end) == '1:1,1:3,2:1')
 
-		assert(outer.advance())
+		assert(outer.next())
 		same_active.reset()
 		assert(scan_values(same_active, function()
 			return get_tenant()..':'..get_id()
@@ -686,9 +686,9 @@ function test.scan_column_refs()
 			{'id', dir = 'asc'},
 		})
 		id_scan.reset()
-		assert(id_scan.advance())
-		assert(id_scan.advance())
-		assert(id_scan.advance())
+		assert(id_scan.next())
+		assert(id_scan.next())
+		assert(id_scan.next())
 		local tenant_id_scan = db:scan('scan_rows', {
 			{'tenant_id', '=', {scan = outer, col = 'tenant_id'}},
 			{'id', '=', {scan = id_scan, col = 'id'}},
@@ -706,7 +706,7 @@ function test.scan_column_refs()
 		same_score.reset()
 		assert(scan_values(same_score, get_id) == '2')
 		same_score.reset()
-		assert(same_score.advance())
+		assert(same_score.next())
 		local index_score = db:scan('scan_rows/score', {
 			{'score', '=', {scan = same_score, col = 'score'}},
 			{'tenant_id', dir = 'asc'},
@@ -716,7 +716,7 @@ function test.scan_column_refs()
 		index_score.reset()
 		assert(scan_values(index_score, get_id) == '2')
 		outer.reset()
-		assert(outer.advance())
+		assert(outer.next())
 		same_score.reset()
 		assert(scan_values(same_score, get_id) == '')
 
@@ -768,7 +768,7 @@ function test.scan_incompatible_decode()
 
 		local outer = db:scan('src', {{'tag', dir = 'asc'}})
 		outer.reset()
-		assert(outer.advance())
+		assert(outer.next())
 
 		--key-column source: src.tag (key_rec) -> dst/tag key (is_key_read).
 		local by_tag = db:scan('dst/tag', {
@@ -807,12 +807,12 @@ function test.scan_reuse()
 		local get_id = scan_col_decoder(db, scan, 'id')
 
 		scan.reset{'ready'}
-		assert(scan.advance() and get_id() == 1)
+		assert(scan.next() and get_id() == 1)
 		scan.reset{'done'}
 		assert(scan_values(scan, get_id) == '2')
 		scan.close()
 		scan.reset{'ready'}
-		assert(scan.advance() and get_id() == 1)
+		assert(scan.next() and get_id() == 1)
 		scan.close()
 		db:commit()
 
@@ -892,16 +892,16 @@ function test.join_scans_nested_group()
 
 		--sessions JOIN events JOIN tags, all inner: only session 11's
 		--events (21 has 2 tags, 22 has none) ever survive.
-		local se = db:join_scans(sessions, events)
-		local group = db:join_scans(se, tags)
+		local se = sessions:join(events)
+		local group = se:join(tags)
 		--the whole group left-joined onto users: user1 gets 2 real rows
 		--(via session 11/event 21/tags 31,32); users 2,3,4,5 each get one
 		--null-extended row.
-		local result = db:left_join_scans(users, group)
+		local result = users:left_join(group)
 
 		local t = {}
 		result.reset()
-		while result.advance() do
+		while result.next() do
 			local uid = users:col_decoder('users', 'id')()
 			if group.found() then
 				t[#t+1] = uid..':'..get_session_id()..':'..get_event_id()
@@ -928,13 +928,13 @@ function test.child_scan_basic()
 			{'user_id', '=', {scan = users, col = 'id'}},
 			{'id', dir = 'asc'},
 		})
-		db:child_scan(users, sessions)
+		users:child_scan(sessions)
 		local get_session_id = sessions:col_decoder('sessions', 'id')
 
 		--each(): inner-join sugar -- user 1 has 3 sessions, drives
 		--3 iterations; a user with none (below) yields nothing at all.
 		users.reset()
-		assert(users.advance())
+		assert(users.next())
 		local t = {}
 		for _ in sessions:each() do t[#t+1] = get_session_id() end
 		assert(cat(t, ',') == '11,12,13', cat(t, ','))
@@ -942,7 +942,7 @@ function test.child_scan_basic()
 		--left_rows(): user 3 has no sessions -- exactly one
 		--null-extended row, get_session_id() reading nil through the
 		--gated col_decoder.
-		while users.advance() and users:col_decoder('users', 'id')() ~= 3 do end
+		while users.next() and users:col_decoder('users', 'id')() ~= 3 do end
 		clear(t)
 		for _ in sessions:left_rows() do
 			t[#t+1] = sessions.found() and get_session_id() or '-'
@@ -959,7 +959,7 @@ function test.child_scan_basic()
 		end
 
 		--first()/exists(): user 4 has session 15.
-		while users.advance() and users:col_decoder('users', 'id')() ~= 4 do end
+		while users.next() and users:col_decoder('users', 'id')() ~= 4 do end
 		assert(sessions:exists())
 		assert(sessions:first() == 15)
 
@@ -986,9 +986,9 @@ function test.child_scan_nested_group()
 			{'event_id', '=', {scan = events, col = 'id'}},
 			{'id', dir = 'asc'},
 		})
-		db:child_scan(users, sessions)
-		db:child_scan(sessions, events)
-		db:child_scan(events, tags)
+		users:child_scan(sessions)
+		sessions:child_scan(events)
+		events:child_scan(tags)
 		local get_session_id = sessions:col_decoder('sessions', 'id')
 		local get_event_id = events:col_decoder('events', 'id')
 		local get_tag_id = tags:col_decoder('tags', 'id')
@@ -1063,10 +1063,10 @@ function test.scan_group_by()
 
 		local groups = {}
 		sessions.reset()
-		while sessions.advance() do
+		while sessions.next() do
 			local uid = get_user_id()
 			local ids = {get_id()}
-			while sessions.advance_pk() do ids[#ids+1] = get_id() end
+			while sessions.next_in_group() do ids[#ids+1] = get_id() end
 			groups[#groups+1] = uid..':'..cat(ids, ',')
 		end
 		assert(cat(groups, ' ') == '1:11,12,13 2:14 4:15', cat(groups, ' '))
@@ -1389,8 +1389,8 @@ function test.join_scan_nested_branches()
 		build_join_spec_fixture(db)
 		db:begin'r'
 		local users = db:scan('users', {{'id', dir = 'asc'}}, 'u')
-		local sessions = users:join_scan'sessions@s.user_id = u.id'
-		local sent = users:join_scan'messages@m.from_user_id = u.id'
+		local sessions = users:child_scan'sessions@s.user_id = u.id'
+		local sent = users:child_scan'messages@m.from_user_id = u.id'
 		local get_uid = users:col_decoder('u', 'id')
 		local get_sid = sessions:col_decoder('s', 'id')
 		local get_mid = sent:col_decoder('m', 'id')
@@ -1497,10 +1497,10 @@ function test.join_key_shortest_wins()
 		db:commit()
 		db:begin'r'
 		local u = db:scan('users', {{'id', dir = 'asc'}}, 'u')
-		local chosen = u:join_scan'tags@t.user_id = u.id'
+		local chosen = u:child_scan'tags@t.user_id = u.id'
 		assert(chosen.explain().key == 'tags/user_id',
 			chosen.explain().key)
-		local named = u:join_scan'tags/user_id,kind@t2.user_id = u.id'
+		local named = u:child_scan'tags/user_id,kind@t2.user_id = u.id'
 		assert(named.explain().key == 'tags/user_id,kind',
 			named.explain().key)
 		named.close()
@@ -1673,11 +1673,11 @@ function test.values_scan_in()
 			local drv = db:values_scan(vals)
 			local rows = db:scan('sessions/user_id',
 				{{'user_id', '=', {get = drv.get}}, {'id', dir = 'asc'}})
-			local scan = db:join_scans(drv, rows)
+			local scan = drv:join(rows)
 			local get_id = rows:col_decoder('sessions', 'id')
 			local t = {}
 			scan.reset(arg_list)
-			while scan.advance() do t[#t+1] = get_id() end
+			while scan.next() do t[#t+1] = get_id() end
 			scan.close()
 			return cat(t, ',')
 		end
@@ -1702,12 +1702,12 @@ function test.values_scan_reusable()
 		local drv = db:values_scan{arg = 'IDS'}
 		local rows = db:scan('sessions/user_id',
 			{{'user_id', '=', {get = drv.get}}, {'id', dir = 'asc'}})
-		local scan = db:join_scans(drv, rows)
+		local scan = drv:join(rows)
 		local get_id = rows:col_decoder('sessions', 'id')
 		local function run(ids)
 			local t = {}
 			scan.reset{IDS = ids}
-			while scan.advance() do t[#t+1] = get_id() end
+			while scan.next() do t[#t+1] = get_id() end
 			return cat(t, ',')
 		end
 		assert(run{1} == '11,12')
@@ -1902,7 +1902,7 @@ function test.scan_reads_false_bool()
 			local get = scan:col_decoder('bool_rows', col)
 			scan.reset()
 			local t = {}
-			while scan.advance() do t[#t+1] = tostring(get()) end
+			while scan.next() do t[#t+1] = tostring(get()) end
 			scan.close()
 			return cat(t, ',')
 		end
@@ -1932,7 +1932,7 @@ function test.schema_col_decoder_reads_false_bool()
 			local get = scan_col_decoder(db, scan, col)
 			scan.reset()
 			local t = {}
-			while scan.advance() do t[#t+1] = tostring(get()) end
+			while scan.next() do t[#t+1] = tostring(get()) end
 			scan.close()
 			return cat(t, ',')
 		end
@@ -1960,18 +1960,18 @@ function test.unmatched_inner_getter_arity()
 		local get_sid = scan:col_decoder('s', 'id')
 		local t = {}
 		scan.reset()
-		while scan.advance() do t[#t+1] = tostring(get_sid()) end
+		while scan.next() do t[#t+1] = tostring(get_sid()) end
 		scan.close()
 		assert(cat(t, ',') == '11,12,13,nil', cat(t, ','))
 
 		local parent = db:scan('users', 'id asc', 'u')
-		local child = parent:join_scan'sessions@s.user_id = u.id'
+		local child = parent:child_scan'sessions@s.user_id = u.id'
 		local get_child_sid = child:col_decoder('s', 'id')
 		t = {}
 		parent.reset()
-		while parent.advance() do
+		while parent.next() do
 			child.reset()
-			child.advance()
+			child.next()
 			t[#t+1] = tostring(get_child_sid())
 		end
 		child.close()
@@ -2048,7 +2048,7 @@ function test.scan_is_nil_arg()
 			local get = scan:col_decoder('bool_rows', 'id')
 			scan.reset(args)
 			local t = {}
-			while scan.advance() do t[#t+1] = get() end
+			while scan.next() do t[#t+1] = get() end
 			scan.close()
 			return cat(t, ',')
 		end
@@ -2128,7 +2128,7 @@ local function people_select(db)
 	return scan
 end
 
---a stage that redefines advance() owns the current row, so found() must
+--a stage that redefines next() owns the current row, so found() must
 --follow it: the cursor underneath is exhausted while sort()/distinct()/
 --aggregate() are still serving what they kept.
 function test.output_stage_found()
@@ -2140,7 +2140,7 @@ function test.output_stage_found()
 			scan.reset()
 			assert(not scan.found())
 			local n = 0
-			while scan.advance() do
+			while scan.next() do
 				assert(scan.found(), 'found() must hold on a served row')
 				n = n + 1
 			end
@@ -2188,7 +2188,7 @@ function test.for_update_writes_while_iterating()
 		scan:for_update()
 		local seen = {}
 		scan.reset()
-		while scan.advance() and #seen < 50 do
+		while scan.next() and #seen < 50 do
 			local _, row = scan.get{}
 			seen[#seen + 1] = row.id
 			db:update('moving', '{}', {id = row.id, s = 'z'..row.id})
@@ -2212,7 +2212,7 @@ function test.for_update_noop_when_materialized()
 		assert(scan:for_update() == scan)
 		local t = {}
 		scan.reset()
-		while scan.advance() do
+		while scan.next() do
 			local _, row = scan.get{}
 			t[#t + 1] = row.id
 		end
@@ -2239,7 +2239,7 @@ function test.streamed_scan_rereads_child()
 		local t = {}
 		for _ = 1, 2 do --a second run re-reads the child
 			m.reset()
-			while m.advance() do t[#t+1] = get() end
+			while m.next() do t[#t+1] = get() end
 		end
 		m.close()
 		assert(cat(t, ',') == 'Zoe,ange,Ange,bob,Zoe,ange,Ange,bob', cat(t, ','))
@@ -2259,7 +2259,7 @@ function test.materialized_scan_rewinds_rows()
 		local t, f = {}, {}
 		for _ = 1, 2 do --a second reset() rewinds the kept rows
 			m.reset()
-			while m.advance() do t[#t+1] = get(); f[#f+1] = folded() end
+			while m.next() do t[#t+1] = get(); f[#f+1] = folded() end
 		end
 		m.close()
 		assert(cat(t, ',') == 'Zoe,ange,Ange,bob,Zoe,ange,Ange,bob', cat(t, ','))

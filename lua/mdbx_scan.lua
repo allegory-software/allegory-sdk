@@ -1,66 +1,67 @@
 --[[
 
-	table scanner and scan composition over mdbx_schema.
+	MDBX table scanner over mdbx_schema.
 	Written by Cosmin Apreutesei. Public Domain.
 
-TABLE SCANNER
-	db:scan           (table, path|spec, [alias]) -> scan
-	scan.reset        (args)
-	scan.advance      ([by_key]) -> true | nil
-	scan.advance_pk   () -> true | nil
-	scan.advance_key  () -> true | nil
-	scan.found        () -> true | nil
-	scan.close        ()
-	scan.key_rec, scan.val_rec, scan.is_index, scan.steps_by_key
-SCAN COMPOSITION (any scan: db:scan, join, or child_scan result)
-	scan:each          (args) -> iter() -> true | nil
-	scan:try_first     (args) -> scan | nil
-	scan:exists        (args) -> true | false
-	scan:left_rows     (args) -> iter() -> scan | nil       null-extends
-	scan:select        (outputs) -> scan                    adds output terminals
-	scan.out_cols -> {'NAME',...}  scan.get(t) writes every key
-	scan:filter        (accept) -> scan             accept() reads getters
-	scan:filter        ('[MEMBER.]COL [NAME],...', accept) -> scan
-		accept(row) -> true|false; row holds the comparison form of each
-		col, so an ai_ci col reads folded -- compare to db:collate()
-	db:collate         (table, col, v) -> v         v in comparison form
-	scan:not_in        (col, values) -> scan
-	scan:union         (scan2) -> scan              concatenates scan2 rows
-	scan:intersect     (scan2) -> scan  rows in both, deduped (needs out cols)
-	scan:except        (scan2) -> scan  rows not in scan2, deduped (ditto)
-	scan:limit         (n|{arg='KEY'}, [offset|{arg='KEY'}]) -> scan
-OUTPUT TERMINALS (after select() or aggregate())
-	scan:rows       ([shape], [args]) -> iter() -> scan, vals... | row
-	scan:rows_array ([shape], [args]) -> {row1,...}
-	scan:first      ([shape], [args]) -> vals... | row | nil
-	scan:one        ([shape], [args]) -> vals... | row | nil
-	scan:must_one   ([shape], [args]) -> vals... | row
-	scan:for_update () -> scan      drain and close, so the caller can write
-		while iterating; no-op if the rows are already kept. call it last.
+TABLE SCAN
+	db:scan           (table, path|path_spec, [alias]) -> scan
+	- path_spec: 'COL =|is|>|>=|<|<=|starts|is_not_null ?|:KEY [asc|desc], ...'
+JOIN
+	scan:[left_]join  (join_spec|inner_scan, [accept]) -> new_join_scan
+	scan:child_scan   (join_spec|inner_scan) -> inner_scan
+	- join_spec: 'TABLE|INDEX[@ALIAS].COL[,COL...] = MEMBER.COL[,COL...]'
+FILTER
+	scan:filter       (['[MEMBER.]COL [NAME],...', ]fn); fn({col->val}) -> t|f
+	scan:not_in       ('[MEMBER.]COL', values)
+	scan:limit        (n|{arg = 'KEY'}, [offset|{arg = 'KEY'}])
+	db:collate        (table, col, v) -> v              get comparison value
+SELECT
+	scan:select       ('[MEMBER.]COL [NAME],...'|outputs)
+TERMINALS
+	scan:each         ([args]) -> iter() -> true | nil
+	scan:try_first    ([args]) -> scan | nil
+	scan:exists       ([args]) -> true | false
+	scan:left_rows    ([shape], [args]) -> iter() -> scan [, vals...|row]
+	scan:rows         ([shape], [args]) -> iter() -> scan, vals...|row
+	scan:rows_array   ([shape], [args]) -> {row1,...}
+	scan:first        ([shape], [args]) -> vals... | row | nil
+	scan:one          ([shape], [args]) -> vals... | row | nil
+	scan:must_one     ([shape], [args]) -> vals... | row
+ORDER
+	scan:sort      (spec|fn(row1, row2))
+GROUP
+	scan:group_by  (cols)
+	scan:aggregate (agg, [cols], [hash]) -> scan
+	scan:distinct  (cols, [hash]) -> scan; cols: {{name = NAME},...}
+SET OPS
+	scan:union      (scan2) -> new_union_scan     concatenates scan2 rows
+	scan:intersect  (scan2)        rows in both, deduped (needs output)
+	scan:except     (scan2)        rows not in scan2, deduped (needs output)
+UPDATE
+	scan:for_update ()   call it last: ensure all rows are loaded on first row.
+
+LOW-LEVEL API ----------------------------------------------------------------
+
+TABLE SCAN
+	scan.reset         ([args])
+	scan.next          ([by_group]) -> true | nil
+	scan.next_group    () -> true | nil
+	scan.next_in_group () -> true | nil
+	scan.found         () -> true | nil
+	scan.close         ()
+	scan:col_decoder   (member, col, [comparison]) -> getter, ai_ci
+	scan.key_rec, scan.val_rec, scan.is_index, scan.can_next_group
+MERGE UNION
+	scan:merge_union (scan2) -> scan      ordered, deduped merge
+OUTPUT SCAN (after select() or aggregate())
+	scan.out_cols -> {'NAME',...}
+	scan.get           ([row]) -> scan, vals... | scan, row
+	scan:col_decoder   (name, [comparison]) -> getter, ai_ci
 MEMBER SCAN (after select() or aggregate())
-	out cols read as alias.COL; the inner scan's own members are hidden.
-	scan:materialized_scan (alias) -> scan   keeps rows until close(),
-		rewinds them on reset()
-	scan:streamed_scan     (alias) -> scan   re-reads on every reset()
-JOINS
-	spec: 'TABLE|INDEX[@ALIAS].COL[,COL...] = MEMBER.COL[,COL...]'
-	left of '=' is the table added, right of '=' a member already in scan.
-	the added cols must be the leading cols of its pk or of one of its
-	indexes; fewer cols than the key seek a prefix. naming an INDEX picks
-	the key instead of searching for the shortest one that starts with cols.
-	scan:join       (spec) -> join
-	scan:left_join  (spec) -> join
-	scan:join_scan  (spec) -> child                 nested
-	scan.member_scans  -> {MEMBER -> leaf scan holding that member's row}
-JOIN ASSEMBLY
-	db:[left_]join_scans (outer, inner) -> join       inner/left join
-	db:child_scan        (parent, child) -> child     gates child on parent.found()
-	join.reset           (args)
-	join.advance         () -> true | nil
-	join.found           () -> true | nil             was inner reached?
-	child.reset          (args)                       skipped when parent not found
-	child.advance        ([by_key]) -> true | nil
-	child.found          () -> true | nil             was parent+child reached?
+	scan:materialized_scan (alias)        load rows and wrap scan as alias
+	scan:streamed_scan     (alias)        wrap scan as alias (hide members)
+JOIN
+	scan.member_scans    -> {MEMBER -> scan}
 
 ]]
 
@@ -505,7 +506,7 @@ function Db:scan(tbl, path, alias)
 	local key_n = #schema.key_fields
 	local exact_key = eq_n >= key_n
 	scan.is_index = is_index
-	scan.steps_by_key = not exact_key --an exact key has no next key to step to
+	scan.can_next_group = not exact_key --an exact key has no next key to step to
 	reverse = reverse or false
 	scan.reverse = reverse
 
@@ -515,7 +516,7 @@ function Db:scan(tbl, path, alias)
 	scan.key_rec = key_rec
 	scan.val_rec = val_rec
 
-	--base-table seeked (key, val) for uncovered columns, seeked by advance(),
+	--base-table seeked (key, val) for uncovered columns, seeked by next(),
 	--but you must call scan:need_base() to enable it.
 	local base_key_rec, base_val_rec
 
@@ -576,7 +577,7 @@ function Db:scan(tbl, path, alias)
 
 	--reset -------------------------------------------------------------------
 
-	--state between reset() and advance().
+	--state between reset() and next().
 	local limit_rec = MDBX_val()
 	local must_seek, has_limit, empty_scan, started, found
 
@@ -622,7 +623,7 @@ function Db:scan(tbl, path, alias)
 			and u8a(range_cap)
 
 		--eq prefix (+ range bound) -> seek key, then the limit to stop at;
-		--swapped for a reverse scan so advance() has one fixed role per side.
+		--swapped for a reverse scan so next() has one fixed role per side.
 		local function compute_bounds()
 			local psz = 0
 			if eq_write then
@@ -726,14 +727,14 @@ function Db:scan(tbl, path, alias)
 		end
 	end
 
-	--advance -----------------------------------------------------------------
+	--next --------------------------------------------------------------------
 
 	--direction-aware steps.
 	local step_op  = reverse and C.MDBX_PREV       or C.MDBX_NEXT
 	local dup_op   = reverse and C.MDBX_PREV_DUP   or C.MDBX_NEXT_DUP
 	local nodup_op = reverse and C.MDBX_PREV_NODUP or C.MDBX_NEXT_NODUP
 
-	--start-of-scan positioning and stepping ops for advance().
+	--start-of-scan positioning and stepping ops for next().
 	local seek_op, first_op, last_dup_op, next_op, next_pk_op, next_key_op
 	if exact_key and is_index then --index key is fixed; scan walks dup vals.
 		seek_op = reverse and C.MDBX_TO_EXACT_KEY_VALUE_LESSER_THAN
@@ -762,8 +763,8 @@ function Db:scan(tbl, path, alias)
 	local cur
 	local base_cur --base-table lookup state
 
-	local function advance(op)
-		assert(started ~= nil, 'advance: reset not called')
+	local function next_row(op)
+		assert(started ~= nil, 'next: reset not called')
 		found = nil
 		if not started then
 			started = true
@@ -791,15 +792,15 @@ function Db:scan(tbl, path, alias)
 		found = true
 		return true
 	end
-	function scan.advance(by_key)
-		local op; if by_key then op = next_key_op else op = next_op end
-		return advance(op)
+	function scan.next(by_group)
+		local op; if by_group then op = next_key_op else op = next_op end
+		return next_row(op)
 	end
-	function scan.advance_pk()
-		return advance(next_pk_op)
+	function scan.next_in_group()
+		return next_row(next_pk_op)
 	end
-	function scan.advance_key()
-		return advance(next_key_op)
+	function scan.next_group()
+		return next_row(next_key_op)
 	end
 	function scan.found()
 		return found
@@ -890,17 +891,17 @@ end
 
 function Scan:each(args)
 	self.reset(args)
-	return self.advance --since it returns true|nil
+	return self.next --since it returns true|nil
 end
 
 function Scan:try_first(args)
 	self.reset(args)
-	if self.advance() then return self end
+	if self.next() then return self end
 end
 
 function Scan:exists(args)
 	self.reset(args)
-	return self.advance() or false
+	return self.next() or false
 end
 
 --yields one row per reset() even when nothing is found (null-extended),
@@ -908,14 +909,16 @@ end
 function Scan:left_rows(args)
 	self.reset(args)
 	local first = true
+	local get = self.get
 	return function()
 		if first then
 			first = false
-			self.advance()
-			return self
-		elseif self.found() and self.advance() then
-			return self
+			self.next()
+		elseif not self.found() or not self.next() then
+			return
 		end
+		if get and self.found() then return get() end
+		return self
 	end
 end
 
@@ -971,14 +974,14 @@ function Scan:filter(cols, accept)
 			return test(row)
 		end
 	end
-	local advance = self.advance
+	local next_row = self.next
 	--advance until accept() approves the current row.
-	self.advance = function(by_key)
-		while advance(by_key) do
+	self.next = function(by_group)
+		while next_row(by_group) do
 			if accept() then return true end
 		end
 	end
-	self.steps_by_key = nil --a retry would jump past a same-key candidate
+	self.can_next_group = nil --a retry would jump past a same-key candidate
 	return self
 end
 
@@ -1016,11 +1019,11 @@ function Scan:union(scan2)
 		current_scan = scan1
 		found = nil
 	end
-	function scan.advance(by_key)
-		found = current_scan.advance(by_key)
+	function scan.next(by_group)
+		found = current_scan.next(by_group)
 		if not found and current_scan == scan1 then
 			current_scan = scan2
-			found = current_scan.advance(by_key)
+			found = current_scan.next(by_group)
 		end
 		return found
 	end
@@ -1070,13 +1073,13 @@ function Scan:union(scan2)
 		end
 	elseif not output1 and not output2 then
 		scan.member_scans = scan1.member_scans
-		scan.steps_by_key = scan1.steps_by_key and scan2.steps_by_key
-		function scan.advance_pk()
-			found = current_scan.advance_pk()
+		scan.can_next_group = scan1.can_next_group and scan2.can_next_group
+		function scan.next_in_group()
+			found = current_scan.next_in_group()
 			return found
 		end
-		function scan.advance_key()
-			return scan.advance(true)
+		function scan.next_group()
+			return scan.next(true)
 		end
 		function scan:col_decoder(member, col, folded)
 			local get1, ai_ci = scan1:col_decoder(member, col, folded)
@@ -1116,7 +1119,7 @@ function Scan:merge_union(scan2)
 	local scan = object(Scan)
 	scan.db = scan1.db
 	scan.member_scans = scan1.member_scans
-	scan.steps_by_key = scan1.steps_by_key and scan2.steps_by_key
+	scan.can_next_group = scan1.can_next_group and scan2.can_next_group
 	local has1, has2, adv1, adv2, current_scan, found
 
 	--publish the winning MDBX position for a further chained merge_union().
@@ -1131,9 +1134,9 @@ function Scan:merge_union(scan2)
 		has1, has2, found = false, false, false
 		adv1, adv2 = true, true
 	end
-	function scan.advance(by_key)
-		if adv1 then has1 = scan1.advance(by_key) end
-		if adv2 then has2 = scan2.advance(by_key) end
+	function scan.next(by_group)
+		if adv1 then has1 = scan1.next(by_group) end
+		if adv2 then has2 = scan2.next(by_group) end
 		if not has1 and not has2 then found = false; return end
 		local cmp
 		if has1 and has2 then
@@ -1155,11 +1158,11 @@ function Scan:merge_union(scan2)
 		found = true
 		return true
 	end
-	function scan.advance_pk()
-		return current_scan.advance_pk()
+	function scan.next_in_group()
+		return current_scan.next_in_group()
 	end
-	function scan.advance_key()
-		return scan.advance(true)
+	function scan.next_group()
+		return scan.next(true)
 	end
 	function scan.found()
 		return found
@@ -1210,21 +1213,21 @@ local function set_filter(scan1, scan2, keep_matched, what)
 	end
 
 	local scan = scan1
-	local advance = scan.advance
+	local next_row = scan.next
 	local tuple_space, other, seen
 	--key is scratch, read into a set key immediately and never retained.
 	local key = {}
-	scan.advance = function()
+	scan.next = function()
 		if not other then
 			tuple_space = n > 1 and tuples() or nil
 			other, seen = {}, {}
 			scan2.reset(scan.args)
-			while scan2.advance() do
+			while scan2.next() do
 				other[hash_key(get2, n, key, tuple_space)] = true
 			end
 			scan2.close()
 		end
-		while advance() do
+		while next_row() do
 			local k = hash_key(get1, n, key, tuple_space)
 			if not seen[k] and (other[k] ~= nil) == keep_matched then
 				seen[k] = true
@@ -1253,112 +1256,6 @@ function Scan:except(scan2)
 end
 
 --NESTED JOIN ----------------------------------------------------------------
-
---join.advance() advances inner under the current outer row, then moves to
---the next outer row once inner is exhausted.
-local function join_scans(outer, inner, left, accept)
-	local join = object(Scan)
-	join.db = outer.db
-	--col_decoder() resolves a member against outer first, so a duplicate
-	--would read the outer one and never say so.
-	join.member_scans = {}
-	for _, side in ipairs{outer, inner} do
-		for member, scan in pairs(side.member_scans or empty) do
-			assertf(not join.member_scans[member],
-				'join_scans: duplicate member: %s', member)
-			join.member_scans[member] = scan
-		end
-	end
-	local outer_found, inner_found = outer.found, inner.found
-	local advance_inner = inner.advance
-	if accept then
-		local advance = advance_inner
-		--advance_inner() skips rows that do not match the join condition.
-		advance_inner = function()
-			while advance() do
-				if accept(join) then return true end
-			end
-		end
-	end
-	local in_inner, args
-	function join.advance()
-		if in_inner then
-			if advance_inner() then return true end
-			in_inner = nil
-		end
-		while outer.advance() do
-			inner.reset(args)
-			if advance_inner() then
-				in_inner = true
-				return true
-			end
-			if left then return true end
-		end
-	end
-	function join.reset(reset_args)
-		args = reset_args
-		join.args = reset_args
-		outer.reset(reset_args)
-		in_inner = nil
-	end
-	join.found = left and outer_found or function()
-		return outer_found() and inner_found()
-	end
-	function join:col_decoder(member, col, folded)
-		if outer.member_scans[member] then
-			return outer:col_decoder(member, col, folded)
-		end
-		local get, ai_ci = inner:col_decoder(member, col, folded)
-		return function()
-			if not inner_found() then return nil end
-			return get()
-		end, ai_ci
-	end
-	function join.explain()
-		return {kind = left and 'left_join' or 'join',
-			outer.explain(), inner.explain()}
-	end
-	function join.close()
-		inner.close()
-		outer.close()
-	end
-	return join
-end
-
-function Db:join_scans(outer, inner, accept)
-	return join_scans(outer, inner, nil, accept)
-end
-function Db:left_join_scans(outer, inner, accept)
-	return join_scans(outer, inner, true, accept)
-end
-
---CHILD SCAN ---------------------------------------------------------------
-
---when parent has no row, reset(), advance(), col_decoder() must be no-ops
---to avoid reading the current row from the parent through the scan params.
-function Db:child_scan(parent, child)
-	local reset, advance, found = child.reset, child.advance, child.found
-	function child.reset(args)
-		if parent.found() then reset(args) end
-	end
-	function child.advance(by_key)
-		return parent.found() and advance(by_key)
-	end
-	function child.found()
-		return parent.found() and found()
-	end
-	local decode = child.col_decoder
-	function child:col_decoder(member, col, folded)
-		local get, ai_ci = decode(child, member, col, folded)
-		return function()
-			if not child.found() then return nil end
-			return get()
-		end, ai_ci
-	end
-	return child
-end
-
---JOIN BY SPEC ----------------------------------------------------------------
 
 local function inner_scan(outer, spec)
 	local db = outer.db
@@ -1425,14 +1322,109 @@ local function inner_scan(outer, spec)
 	return db:scan(key_schema.name, path, alias)
 end
 
-function Scan:join(spec)
-	return join_scans(self, inner_scan(self, spec))
+--join.next() advances inner under the current outer row, then moves to
+--the next outer row once inner is exhausted.
+local function join_scan(outer, inner, left, accept)
+	if isstr(inner) then inner = inner_scan(outer, inner) end
+	local join = object(Scan)
+	join.db = outer.db
+	--col_decoder() resolves a member against outer first, so a duplicate
+	--would read the outer one and never say so.
+	join.member_scans = {}
+	for _, side in ipairs{outer, inner} do
+		for member, scan in pairs(side.member_scans or empty) do
+			assertf(not join.member_scans[member],
+				'join: duplicate member: %s', member)
+			join.member_scans[member] = scan
+		end
+	end
+	local outer_found, inner_found = outer.found, inner.found
+	local next_inner = inner.next
+	if accept then
+		local next_row = next_inner
+		--next_inner() skips rows that do not match the join condition.
+		next_inner = function()
+			while next_row() do
+				if accept(join) then return true end
+			end
+		end
+	end
+	local in_inner, args
+	function join.next()
+		if in_inner then
+			if next_inner() then return true end
+			in_inner = nil
+		end
+		while outer.next() do
+			inner.reset(args)
+			if next_inner() then
+				in_inner = true
+				return true
+			end
+			if left then return true end
+		end
+	end
+	function join.reset(reset_args)
+		args = reset_args
+		join.args = reset_args
+		outer.reset(reset_args)
+		in_inner = nil
+	end
+	join.found = left and outer_found or function()
+		return outer_found() and inner_found()
+	end
+	function join:col_decoder(member, col, folded)
+		if outer.member_scans[member] then
+			return outer:col_decoder(member, col, folded)
+		end
+		local get, ai_ci = inner:col_decoder(member, col, folded)
+		return function()
+			if not inner_found() then return nil end
+			return get()
+		end, ai_ci
+	end
+	function join.explain()
+		return {kind = left and 'left_join' or 'join',
+			outer.explain(), inner.explain()}
+	end
+	function join.close()
+		inner.close()
+		outer.close()
+	end
+	return join
 end
-function Scan:left_join(spec)
-	return join_scans(self, inner_scan(self, spec), true)
+
+function Scan:join(inner, accept)
+	return join_scan(self, inner, nil, accept)
 end
-function Scan:join_scan(spec)
-	return self.db:child_scan(self, inner_scan(self, spec))
+function Scan:left_join(inner, accept)
+	return join_scan(self, inner, true, accept)
+end
+
+--when parent has no row, reset(), next(), col_decoder() must be no-ops
+--to avoid reading the current row from the parent through the scan params.
+function Scan:child_scan(child)
+	local parent = self
+	if isstr(child) then child = inner_scan(parent, child) end
+	local reset, next_row, found = child.reset, child.next, child.found
+	function child.reset(args)
+		if parent.found() then reset(args) end
+	end
+	function child.next(by_group)
+		return parent.found() and next_row(by_group)
+	end
+	function child.found()
+		return parent.found() and found()
+	end
+	local decode = child.col_decoder
+	function child:col_decoder(member, col, folded)
+		local get, ai_ci = decode(child, member, col, folded)
+		return function()
+			if not child.found() then return nil end
+			return get()
+		end, ai_ci
+	end
+	return child
 end
 
 --SELECT ---------------------------------------------------------------------
@@ -1491,7 +1483,7 @@ local function raw_rows(scan, shape, args)
 	local done = false
 	return function()
 		if done then return end
-		if not scan.advance() then done = true; scan.close(); return end
+		if not scan.next() then done = true; scan.close(); return end
 		if shape == '{}' then
 			local _, row = scan.get{}
 			return row
@@ -1572,6 +1564,7 @@ local function install_get(scan, names, read_value)
 	scan.must_one = output_must_one
 end
 
+--outputs: {{name = NAME, member = MEMBER, col = COL},...}
 function Scan:select(outputs)
 	local scan = self
 	assert(not scan.get)
@@ -1599,12 +1592,12 @@ function Scan:select(outputs)
 	return scan
 end
 
---unlike filter(), which skips a rejected row and keeps looking, advance()
+--unlike filter(), which skips a rejected row and keeps looking, next()
 --must stop outright once limit rows are yielded -- looking further would run
 --the underlying scan to exhaustion for a match that will never come.
 function Scan:limit(limit, offset)
 	local scan = self
-	local advance, reset = scan.advance, scan.reset
+	local next_row, reset = scan.next, scan.reset
 	local limit_arg = type(limit) == 'table' and limit.arg
 	local offset_arg = type(offset) == 'table' and offset.arg
 	local skipped, count
@@ -1622,13 +1615,13 @@ function Scan:limit(limit, offset)
 		skipped, count = 0, 0
 		reset(args)
 	end
-	self.advance = function(by_key)
+	self.next = function(by_group)
 		if count >= limit then return end
 		while skipped < offset do
-			if not advance(by_key) then return end
+			if not next_row(by_group) then return end
 			skipped = skipped + 1
 		end
-		if not advance(by_key) then return end
+		if not next_row(by_group) then return end
 		count = count + 1
 		return true
 	end
@@ -1641,7 +1634,7 @@ end
 sorts a value-record scan (the output of select()/aggregate()) by spec
 -- a list of {member=,col=} or {field=} entries (each optionally desc=),
 or a plain comparator fn(row_a, row_b). Materializes every row on first
-advance() (there's no way to know the right order without seeing them
+next() (there's no way to know the right order without seeing them
 all), sorts once, then serves rows one at a time. null sorts before
 non-null ascending, after descending. sort() does not keep input order
 among rows whose keys all compare equal: their order is unspecified.
@@ -1691,11 +1684,11 @@ function Scan:sort(spec)
 	--small table per row.
 	local set_row = serve_row(scan)
 	local rows, keys, order, idx, found
-	local advance = scan.advance
-	scan.advance = function()
+	local next_row = scan.next
+	scan.next = function()
 		if not order then
 			rows, keys = {}, {}
-			while advance() do
+			while next_row() do
 				local _, row = get{}
 				local i = #rows + 1
 				rows[i] = row
@@ -1750,19 +1743,12 @@ end
 
 --GROUP BY -------------------------------------------------------------------
 
---[[
-groups consecutive rows by decoded values in cols ({member=,col=}...);
-requires the scan already in that order. advance() and advance_pk() get
-new meanings the same way every other Scan mutator redefines advance():
-advance() lands on the first row of the next group (skipping the rest of
-the current one); advance_pk() walks the current group's remaining rows,
-one at a time, returning nil once the key changes without consuming that
-next row into itself -- the following advance() picks it up as the new
-group's first row.
-]]
+--cols: {{member = MEMBER, col = COL},...}
+--requires the scan already be sorted by cols!
+--next() iterates groups; next_in_group() iterates pks in current group.
 function Scan:group_by(cols)
-	local advance = self.advance
-	local by_key = self.steps_by_key
+	local next_row = self.next
+	local by_group = self.can_next_group
 	local ncols = #cols
 	local getters = {}
 	for i, c in ipairs(cols) do
@@ -1780,19 +1766,19 @@ function Scan:group_by(cols)
 			prev[i] = getters[i]()
 		end
 	end
-	local function adv(bk)
+	local function adv(bg)
 		if done then return false end
-		if not advance(bk) then done = true; return false end
+		if not next_row(bg) then done = true; return false end
 		return true
 	end
-	self.advance = function()
+	self.next = function()
 		has_current = false
 		if done then return end
 		if not peeked then
 			if not adv() then return end
 			if has_prev then
 				while same_key() do
-					if not adv(by_key) then return end
+					if not adv(by_group) then return end
 				end
 			end
 		end
@@ -1801,7 +1787,7 @@ function Scan:group_by(cols)
 		has_current = true
 		return true
 	end
-	function self.advance_pk()
+	function self.next_in_group()
 		if not has_current then return end
 		if not adv() then has_current = false; return end
 		if same_key() then return true end
@@ -1905,7 +1891,7 @@ group_by(cols) on the same scan and emits consecutive groups with O(1)
 memory. aggregate(agg, cols, true) accepts any input order, uses O(n groups)
 memory, and emits groups in first-occurrence order.
 
-aggregate() emits one record per advance(). scan.row contains that record so
+aggregate() emits one record per next(). scan.row contains that record so
 the caller can read every field without copying it through get().
 ]]
 function Scan:aggregate(agg, cols, hash)
@@ -1974,23 +1960,23 @@ function Scan:aggregate(agg, cols, hash)
 	local bucket = bucket_getters and {}
 
 	local done, output, group_i, found
-	local advance = scan.advance
+	local next_row = scan.next
 	if not cols then
-		scan.advance = function()
+		scan.next = function()
 			if done then found = nil; return end
 			done = true
 			local acc = agg_init(agg)
-			while advance() do accumulate(acc, nil) end
+			while next_row() do accumulate(acc, nil) end
 			scan.row = agg_finalize(agg, acc, ai_ci)
 			found = true
 			return true
 		end
 	elseif hash then
-		scan.advance = function()
+		scan.next = function()
 			if not output then
 				local tuple_space = nkeys > 1 and tuples() or nil
 				local buckets, order = {}, {}
-				while advance() do
+				while next_row() do
 					local key = read_key()
 					local t = hash_key(bucket_getters, nkeys, bucket,
 						tuple_space)
@@ -2015,12 +2001,12 @@ function Scan:aggregate(agg, cols, hash)
 			return true
 		end
 	else
-		scan.advance = function()
-			if not advance() then found = nil; return end
+		scan.next = function()
+			if not next_row() then found = nil; return end
 			local key = read_key()
 			local acc = agg_init(agg)
 			accumulate(acc, key)
-			while scan.advance_pk() do accumulate(acc, key) end
+			while scan.next_in_group() do accumulate(acc, key) end
 			scan.row = agg_finalize(agg, acc, ai_ci)
 			found = true
 			return true
@@ -2085,14 +2071,14 @@ function Scan:distinct(cols, hash)
 	local key = {}
 
 	local row, output, row_i, found
-	local advance, get = scan.advance, scan.get
+	local next_row, get = scan.next, scan.get
 	local set_row = serve_row(scan)
-	scan.advance = function()
+	scan.next = function()
 		if not output then
 			local tuple_space = nkeys > 1 and tuples() or nil
 			local seen = {}
 			output = {}
-			while advance() do
+			while next_row() do
 				local t = hash_key(key_getters, nkeys, key, tuple_space)
 				if not seen[t] then
 					seen[t] = true
@@ -2135,13 +2121,13 @@ function Scan:for_update()
 	local scan = self
 	assert(scan.get, 'for_update: select()/aggregate() required first')
 	if scan.materialized then return scan end
-	local advance, get, close = scan.advance, scan.get, scan.close
+	local next_row, get, close = scan.next, scan.get, scan.close
 	local set_row = serve_row(scan)
 	local rows, row, row_i, found
-	scan.advance = function()
+	scan.next = function()
 		if not rows then
 			rows = {}
-			while advance() do
+			while next_row() do
 				local _, r = get{}
 				rows[#rows + 1] = r
 			end
@@ -2183,21 +2169,21 @@ end
 function Scan:materialized_scan(alias)
 	local child = self
 	local scan = member_scan(child, alias, 'materialized_scan')
-	local advance, get = child.advance, child.get
+	local next_row, get = child.next, child.get
 	local rows, row, row_i, found
 	function scan.reset(args)
 		scan.args = args
 		if not rows then
 			child.reset(args)
 			rows = {}
-			while advance() do
+			while next_row() do
 				local _, r = get{}
 				rows[#rows + 1] = r
 			end
 		end
 		row, row_i, found = nil, 0, nil
 	end
-	function scan.advance()
+	function scan.next()
 		row_i = row_i + 1
 		row = rows[row_i]
 		if row == nil then found = nil; return end
@@ -2231,7 +2217,7 @@ function Scan:streamed_scan(alias)
 		scan.args = args
 		child.reset(args)
 	end
-	scan.advance = child.advance
+	scan.next = child.next
 	scan.found = child.found
 	scan.close = child.close
 	function scan:col_decoder(member, col, folded)
@@ -2270,7 +2256,7 @@ function Db:values_scan(values)
 		end
 		value_i = 0
 	end
-	function scan.advance()
+	function scan.next()
 		value_i = value_i + 1
 		return value_i <= #list or nil
 	end
@@ -2284,12 +2270,12 @@ function Db:values_scan(values)
 		return {kind = 'values'}
 	end
 
-	local function advance_row()
-		if scan.advance() then return scan end
+	local function next_row()
+		if scan.next() then return scan end
 	end
 	function scan.rows(self, args)
 		self.reset(args)
-		return advance_row
+		return next_row
 	end
 	function scan.close() end
 

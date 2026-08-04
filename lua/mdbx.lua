@@ -1,10 +1,10 @@
 --[[
 
-	libmdbx binding.
+	MDBX binding.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	libmdbx is a fast mmap-based MVCC key-value store in 40 KLOC of C code.
-	libmdbx provides ACID with SERIALIZABLE semantics, good for read-heavy loads.
+	MDBX is a fast mmap-based MVCC key-value store in 40 KLOC of C code.
+	MDBX provides ACID with SERIALIZABLE semantics, good for read-heavy loads.
 
 BINDING
 	- safe API (no use-after-free), uses our terminology (env -> db, DBI -> table).
