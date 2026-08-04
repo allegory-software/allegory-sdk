@@ -21,6 +21,7 @@ TERMINALS
 	scan:each         ([args]) -> iter() -> true | nil
 	scan:try_first    ([args]) -> scan | nil
 	scan:exists       ([args]) -> true | false
+	scan:count        ([args]) -> n
 	scan:left_rows    ([shape], [args]) -> iter() -> scan [, vals...|row]
 	scan:rows         ([shape], [args]) -> iter() -> scan, vals...|row
 	scan:rows_array   ([shape], [args]) -> {row1,...}
@@ -370,13 +371,28 @@ local Scan = {}
 
 local MDBX_val_size = sizeof'MDBX_val'
 
+--a col the leading depth fields fix holds one value for the whole scan,
+--so a path that names it again (an index key col that is also a pk col)
+--orders nothing the second time. an ai_ci col keeps its collated form in
+--an index key and its original text in the base key, so a bound cannot be
+--encoded against one past the index key: the order stops there.
 local function scan_order(schema, depth, reverse)
 	local order = {}
-	for i = depth + 1, #schema.path_fields do
-		local field = schema.path_fields[i]
-		local descending = not not field.descending
-		local dir = descending ~= reverse and 'desc' or 'asc'
-		order[#order + 1] = field.col..' '..dir
+	local fields = schema.path_fields
+	local seen = {}
+	reverse = not not reverse --descending ~= reverse below needs two bools
+	for i = 1, depth do seen[fields[i].col] = true end
+	for i = depth + 1, #fields do
+		local field = fields[i]
+		if field.mdbx_collation == 'utf8_ai_ci'
+			and not (schema.is_index and i <= #schema.key_fields)
+		then break end
+		if not seen[field.col] then
+			seen[field.col] = true
+			local descending = not not field.descending
+			local dir = descending ~= reverse and 'desc' or 'asc'
+			order[#order + 1] = field.col..' '..dir
+		end
 	end
 	return order
 end
@@ -1096,6 +1112,14 @@ end
 function Scan:exists(args)
 	self.reset(args)
 	return self.next() or false
+end
+
+function Scan:count(args)
+	self.reset(args)
+	local n = 0
+	while self.next() do n = n + 1 end
+	self.close()
+	return n
 end
 
 --yields one row per reset() even when nothing is found (null-extended),

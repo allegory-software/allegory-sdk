@@ -1772,6 +1772,68 @@ function test.scan_spec_errors()
 	end)
 end
 
+--an index over a col that is also a pk col repeats that col in the path.
+--the leading fields an exact match fixes hold one value for the whole
+--scan, so a later repeat of one orders nothing. an ai_ci col past the
+--index key holds its original text, which no bound can be encoded
+--against, so the order stops there.
+--count() reads every row, so it closes the scan like the other terminals
+--that drain it.
+function test.scan_count()
+	with_db('scan_count', function(db)
+		add_scan_data(db)
+		db:begin'r'
+		assert(db:scan('scan_rows', ''):count() == 5)
+		assert(db:scan('scan_rows', 'tenant_id = ?'):count{1} == 3)
+		assert(db:scan('scan_rows/status', 'status = ?'):count{'done'} == 1)
+		assert(db:scan('scan_rows', 'tenant_id = ?'):count{9} == 0)
+		local scan = db:scan('scan_rows', '')
+		assert(scan:count() == 5)
+		--closed and reset again: same answer.
+		assert(scan:count() == 5)
+		db:commit()
+	end)
+end
+
+function test.scan_order_repeats_and_cutoff()
+	with_db('scan_order_repeats_and_cutoff', function(db)
+		db:begin'w'
+		db:create_table('ord_rows', {fields = {
+			{col = 'tenant_id', mdbx_type = 'u32', not_null = true},
+			{col = 'id'       , mdbx_type = 'u32', not_null = true},
+			{col = 'status'   , mdbx_type = 'utf8', maxlen = 8,
+				nozero = true, not_null = true},
+		}, pk = {'tenant_id', 'id'}})
+		local _, _, ix = db:add_index('ord_rows', {'tenant_id', 'status'})
+		db:create_table('ord_names', {fields = {
+			{col = 'name', mdbx_type = 'utf8', maxlen = 16, nozero = true,
+				not_null = true, mdbx_collation = 'utf8_ai_ci'},
+			{col = 'n'   , mdbx_type = 'u32', not_null = true},
+		}, pk = {'name'}})
+		local _, _, name_ix = db:add_index('ord_names', {'n'})
+		db:commit()
+		db:begin'r'
+
+		local function order(tbl, depth, reverse)
+			return cat(mdbx_scan_order(db:table_schema(tbl), depth, reverse), ', ')
+		end
+
+		local cols = {}
+		for i, f in ipairs(db:table_schema(ix).path_fields) do cols[i] = f.col end
+		assert(cat(cols, ',') == 'tenant_id,status,tenant_id,id', cat(cols, ','))
+		assert(order(ix, 1, false) == 'status asc, id asc', order(ix, 1, false))
+		assert(order(ix, 1, true) == 'status desc, id desc', order(ix, 1, true))
+		assert(order(ix, 0, false) == 'tenant_id asc, status asc, id asc',
+			order(ix, 0, false))
+
+		--the index key holds n, then the pk holds the ai_ci name as the
+		--base table stores it, which a bound cannot be encoded against.
+		assert(order(name_ix, 0, false) == 'n asc', order(name_ix, 0, false))
+
+		db:commit()
+	end)
+end
+
 function test.explain_composites()
 	with_db('explain_composites', function(db)
 		build_join_spec_fixture(db)

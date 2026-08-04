@@ -3182,14 +3182,6 @@ distinct() cannot remove the last row, so Rel:exists() skips it.
 Rel:count() and Rel:exists() ignore their own order_by()/limit();
 compile_subquery_exists() applies the limit of a relation operand.
 ]]
-local function count_items(node, args)
-	node.reset(args)
-	local n = 0
-	while node.next() do n = n + 1 end
-	node.close()
-	return n
-end
-
 --set-op inputs are built through compile_terminal() here too: an input's
 --own limit() decides what it returns, so skipping it would make count()
 --and exists() disagree with rows().
@@ -3217,7 +3209,7 @@ end
 
 function Rel:count(params)
 	local node = get_or_build_node(self, '_count_node', compile_group_or_distinct)
-	return count_items(node, params)
+	return node:count(params)
 end
 
 local function compile_exists_node(db, rel, outer_node)
