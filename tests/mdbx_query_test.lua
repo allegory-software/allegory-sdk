@@ -477,6 +477,38 @@ function test.in_dynamic_order_by_exec()
 	end)
 end
 
+--a q.param() holding the whole list drives a seek: Db:scan()'s in_list
+--term reads the list off the args on every reset, so its length need not
+--be known when the plan is built.
+function test.in_param_list_seeks()
+	with_db('in_param_list_seeks', function(db)
+		db:atomic('r', function()
+			local rel = db:from('users')
+				:where({'in', q.col('users.id'), q.param('IDS')})
+				:select'users.id id'
+				:order_by'id'
+				:prepare()
+			assert(rel.access[1].plan.kind == 'in', rel.access[1].plan.kind)
+			assert(rel.access[1].plan.in_list_param)
+			--an index seek keeps key order, so order_by() needs no sort.
+			assert(not rel.sort_needed)
+			local function ids(list)
+				local t = {}
+				for _, row in ipairs(rel:rows_array('[]', {IDS = list})) do
+					t[#t+1] = row[1]
+				end
+				return cat(t, ',')
+			end
+			--the same plan runs with a different number of values each time.
+			assert(ids{4, 2} == '2,4')
+			assert(ids{5, 1, 3} == '1,3,5')
+			assert(ids{2, 2} == '2')
+			assert(ids{} == '')
+			assert(ids{99} == '')
+		end)
+	end)
+end
+
 --two distinct q.param() sources aren't compared at compile time (their
 --runtime values aren't known yet), and Scan:union() doesn't dedupe --
 --two seeks landing on the same row at runtime must not return it twice.

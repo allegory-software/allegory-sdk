@@ -1295,18 +1295,20 @@ local function bucket_facts(source, conditions)
 		if not cond.consumed then
 			local expr = cond.expr
 			if cond.kind == 'membership' then
-				--seekable only for in() against a plain literal list: a
-				--q.param() list has no length until reset(args), and a
-				--sub-relation's values aren't known without scanning it,
-				--so neither can become a fixed set of scan seeks.
+				--a sub-relation's values need scanning to be known, so they
+				--cannot drive a seek. a q.param() list can: Db:scan()'s
+				--in_list term reads its length from the args on every reset.
 				local left = expr[2]
 				if expr[1] == 'in' and type(left) == 'table'
 					and left[1] == 'col' and left.source == source
-					and type(expr[3]) == 'table' and expr[3][1] ~= 'param'
+					and type(expr[3]) == 'table'
 					and not inherits(expr[3], Rel)
 				then
 					local col = left[3]
-					if not in_[col] then in_[col] = {cond = cond, expr = expr[3]} end
+					if not in_[col] then
+						in_[col] = {cond = cond, expr = expr[3],
+							list_param = expr[3][1] == 'param'}
+					end
 				end
 			elseif cond.kind == 'equality' then
 				local col, val = source_operand(source, expr[2], expr[3])
@@ -1358,14 +1360,6 @@ local function bucket_facts(source, conditions)
 		end
 	end
 	return eq, lo, hi, prefix, not_null, not_equal, in_
-end
-
---is this col marked ai_ci? true or false either way, whether we're
---looking at the base table or an index -- every index just copies the
---flag straight from the table.
-local function ai_ci_col(schema, col)
-	local f = schema.fields[col]
-	return f and f.mdbx_collation == 'utf8_ai_ci'
 end
 
 --path_seekable() rejects ai_ci fields stored as original base-key text.
@@ -1667,6 +1661,7 @@ local function choose_access(source, conditions, order_terms, prefer_order,
 	elseif best_plan.kind == 'in' then
 		local fact = in_[best_plan.bound_col]
 		best_plan.in_values = fact.expr
+		best_plan.in_list_param = fact.list_param
 		fact.cond.consumed = true
 	end
 	local residual = {} --{condition...}
@@ -1713,14 +1708,6 @@ end
 - joined sources do not contribute global order.
 - group_by(), distinct(), and order_by() check this one fact.
 ]]
---true when every in_() value is a literal, not a q.param()/q.col() ref.
-local function all_literal_values(values)
-	for i = 1, #values do
-		if type(values[i]) == 'table' then return false end
-	end
-	return true
-end
-
 local function natural_order(step)
 	local plan = step.plan
 	--rel source: no guaranteed key order.
@@ -2212,15 +2199,19 @@ can reuse the source's encoded bytes when the layouts match. A not_equal()/
 in_() source is a union of scans, not one physical record, so it has no
 raw bytes to reuse -- compile_scan_param() reads it through col_decoder()
 same as when registry does not contain the source at all.
+pass want_value for a param the scan must read as a Lua value: an in_()
+list item, which Db:scan() sorts and dedupes before seeking anything.
 ]]
-local function compile_scan_param(expr, outer_node, registry)
+local function compile_scan_param(expr, outer_node, registry, want_value)
 	local op = type(expr) == 'table' and expr[1]
 	if op == 'param' then
 		return {arg = expr[2]}
 	elseif op == 'col' then
 		assert(expr.source)
 		local scan = registry and registry[expr.source.name]
-		if scan and scan.table then return {scan = scan, col = expr[3]} end
+		if scan and scan.table and not want_value then
+			return {scan = scan, col = expr[3]}
+		end
 		if scan then
 			return {get = scan:col_decoder(expr.source.name, expr[3])}
 		end
@@ -2241,13 +2232,20 @@ the caller passes nil at the top level and passes the outer node for a
 sub-relation. compile_scan_param() uses registry to find each joined
 member's scanner.
 ]]
-local function compile_scan_path(plan, outer_node, registry, not_equal_op)
+local function compile_scan_path(plan, outer_node, registry)
 	local fields = plan.schema.path_fields
 	local path = {}
 	for i = 1, plan.depth do
 		local fact = plan.seek[i]
 		path[i] = {fields[i].col, fact.op,
 			compile_scan_param(fact.expr, outer_node, registry)}
+	end
+	--plan.dir is which way the cursor runs; a path term's dir is which way
+	--its own col's values go, and for a desc-stored col those are opposite.
+	local bound_field = fields[plan.depth + 1]
+	local dir = plan.dir
+	if dir and bound_field and bound_field.descending then
+		dir = dir == 'asc' and 'desc' or 'asc'
 	end
 	if plan.kind == 'range' then
 		local term = {plan.bound_col}
@@ -2266,77 +2264,42 @@ local function compile_scan_path(plan, outer_node, registry, not_equal_op)
 			term[2] = plan.hi.op
 			term[3] = compile_scan_param(plan.hi.expr, outer_node, registry)
 		end
-		term.dir = plan.dir
+		term.dir = dir
 		path[#path + 1] = term
 	elseif plan.kind == 'not_equal' then
-		path[#path + 1] = {plan.bound_col, not_equal_op,
+		path[#path + 1] = {plan.bound_col, '~=',
 			compile_scan_param(plan.not_equal, outer_node, registry),
-			dir = plan.dir}
+			dir = dir}
 	elseif plan.kind == 'in' then
-		--term[3] (the param) is filled in per value by compile_table_scan().
-		path[#path + 1] = {plan.bound_col, '=', dir = plan.dir}
+		if plan.in_list_param then
+			--one arg holds every value: an in_list term, whose length
+			--Db:scan() reads on every reset.
+			path[#path + 1] = {plan.bound_col, 'in_list',
+				compile_scan_param(plan.in_values, outer_node, registry),
+				dir = dir}
+		else
+			local params = {}
+			for i, value in ipairs(plan.in_values) do
+				params[i] = compile_scan_param(value, outer_node, registry, true)
+			end
+			path[#path + 1] = {plan.bound_col, 'in', params, dir = dir}
+		end
 	elseif plan.kind == 'prefix' then
 		path[#path + 1] = {plan.bound_col, 'starts',
 			compile_scan_param(plan.prefix, outer_node, registry),
-			dir = plan.dir}
+			dir = dir}
 	elseif plan.dir and plan.depth < #fields then
-		path[#path + 1] = {fields[plan.depth + 1].col, dir = plan.dir}
+		path[#path + 1] = {fields[plan.depth + 1].col, dir = dir}
 	end
 	return path
 end
 
---drops a literal null (in_() never matches null, so it needs no seek)
---and literal duplicates (a repeated value would seek and yield the same
---rows twice), collating first when the bound col's collation folds --
---two spellings that fold to the same key are the same duplicate. a
---q.param()/q.col() item is always kept, since its
---runtime value isn't known here to compare -- compile_table_scan()
---dedupes those at scan time instead, via merge_union(). sorts
---to the bound col's own cursor order, by the same folded key, when
---every value is a literal, so the union's bound-column order stays
---monotonic across value boundaries like a single scan's -- left in
---given order when any value isn't a literal, since it can't be sorted
---without knowing it at runtime.
-local function ordered_in_values(plan)
-	local values = plan.in_values
-	local all_literal = all_literal_values(values)
-	local fold = ai_ci_col(plan.schema, plan.bound_col)
-	local seen, keys = {}, {}
-	local deduped = {}
-	for i = 1, #values do
-		local v = values[i]
-		if type(v) == 'table' then
-			deduped[#deduped + 1] = v
-		elseif v == nil or v == null then
-			--in() never matches null; drop it instead of seeking it.
-		else
-			local key = mdbx_collate_value(v, fold)
-			if not seen[key] then
-				seen[key] = true
-				keys[v] = key
-				deduped[#deduped + 1] = v
-			end
-		end
-	end
-	if not all_literal then return deduped end
-	local bound_field = plan.schema.path_fields[plan.depth + 1]
-	local desc = (not not bound_field.descending) ~= (plan.dir == 'desc')
-	sort(deduped, function(a, b)
-		local ka, kb = keys[a], keys[b]
-		return desc and ka > kb or ka < kb
-	end)
-	return deduped
-end
-
---compile_table_scan() uses two disjoint strict ranges for ~=, and a
---chain of disjoint exact seeks (one per value) for in_(). in_() values
---already known at compile time (ordered_in_values()) are pre-sorted and
---deduped, so their seeks union() in bound-column order with no overlap;
---a q.param()/q.col() value isn't known until reset(), so two such seeks
---can land on the same row at runtime -- merge_union() there instead of
---union(), to dedupe by the row actually seeked rather than by the input
---value (which would miss e.g. two different params resolving to the
---same row, or an ai_ci spelling matching a param's resolved value).
+--Db:scan() walks a ~= term as two disjoint sub-ranges and an in_() term
+--as one per value, all on one cursor, so both are a single scan here.
+--Db:scan() also sorts an in_() list into the bound col's own cursor
+--order and drops nulls and repeats, comparing by the col's collated
+--form, so it seeks once for two spellings that collate alike or two
+--params that resolve to the same value.
 local function compile_table_scan(db, plan, outer_node, registry, buffered)
 	if plan.kind == 'rel' then
 		--a lateral rel reads the outer row, so it re-runs per outer row
@@ -2348,28 +2311,6 @@ local function compile_table_scan(db, plan, outer_node, registry, buffered)
 			scan = child:materialized_scan(plan.member)
 		else
 			scan = child:streamed_scan(plan.member)
-		end
-		return scan, scan
-	end
-	if plan.kind == 'not_equal' then
-		local path = compile_scan_path(plan, outer_node, registry, '<')
-		local range_term = path[#path]
-		local less_scan = db:scan(plan.schema.name, path, plan.member)
-		range_term[2] = '>'
-		local greater_scan = db:scan(plan.schema.name, path, plan.member)
-		return less_scan:union(greater_scan)
-	end
-	if plan.kind == 'in' then
-		local values = ordered_in_values(plan)
-		local path = compile_scan_path(plan, outer_node, registry)
-		local term = path[#path]
-		local merge = not all_literal_values(values)
-		term[3] = compile_scan_param(values[1], outer_node, registry)
-		local scan = db:scan(plan.schema.name, path, plan.member)
-		for i = 2, #values do
-			term[3] = compile_scan_param(values[i], outer_node, registry)
-			local next_scan = db:scan(plan.schema.name, path, plan.member)
-			scan = merge and scan:merge_union(next_scan) or scan:union(next_scan)
 		end
 		return scan, scan
 	end

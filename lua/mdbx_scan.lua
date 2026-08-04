@@ -5,7 +5,7 @@
 
 TABLE SCAN
 	db:scan           (table, path|path_spec, [alias]) -> scan
-	- path_spec: 'COL =|is|>|>=|<|<=|starts|is_not_null ?|:KEY [asc|desc], ...'
+	- path_spec: 'COL =|is|>|>=|<|<=|starts|is_not_null|~=|in ?|:KEY [asc|desc], ...'
 JOIN
 	scan:[left_]join  (join_spec|inner_scan, [accept]) -> new_join_scan
 	scan:child_scan   (join_spec|inner_scan) -> inner_scan
@@ -96,20 +96,35 @@ The path is a sequence of terms:
 	{{'COL','='|'is',P}, ...,
 		{'COL','range'[,'>|>=',P][,'<|<=',P][,dir='asc|desc']}
 		| {'COL','starts',P[,dir='asc|desc']}
-		| {'COL','is_not_null'[,dir='asc|desc']},
+		| {'COL','is_not_null'[,dir='asc|desc']}
+		| {'COL','~=',P[,dir='asc|desc']}
+		| {'COL','in',{P,...}[,dir='asc|desc']}
+		| {'COL','in_list',P[,dir='asc|desc']},
 		{'COL',dir='asc|desc'},...}
 	P: {value=V} | {arg='KEY'} | {get=fn()} | {scan=S, col='COL'}
 
-So 0..N '='|'is' terms + 0..1 range/prefix/is_not_null term + 0..N dir terms.
+So 0..N '='|'is' terms + 0..1 bound term + 0..N dir terms.
+A bound term is 'range', 'starts', 'is_not_null', '~=', 'in' or 'in_list'.
 
 P is a param object telling how the value is supplied: by reading param.value
 or param.get(), via reset{[param.arg]}, or from the current row of another scan.
 
-'=', 'range' and 'starts' reject null, 'is' allows it. {scan=} needs '='.
+'=', 'range', 'starts' and '~=' reject null, 'is' allows it. nulls in 'in'
+lists are dropped. {scan=} needs '=' (it's used for nested joins).
+
+'~=' and 'in' each seek several disjoint sub-ranges with one cursor, in
+scan order: '~=' the rows below the value then the rows above it, 'in' one
+per value. 'in' sorts and dedupes its own values, so the list order the
+caller gives does not matter. 'in' takes one value per param, for a set of
+values that comes from that many places. 'in_list' takes every value of one
+param's own list value, for a set that can be a different size on every
+reset.
 
 Spec form:
-	'COL [=|is P], COL >|>= P <|<= P | starts P | is_not_null P [asc|desc], ...'
+	'COL [=|is P], COL >|>= P <|<= P | starts P | is_not_null P
+		| ~= P | in P [asc|desc], ...'
 	P: '?' positional arg | ':KEY' named arg
+	'in P' is the 'in_list' term: P's value is the list of values.
 
 Example:
 	'tenant_id = ?, id >= ? <= ? desc'
@@ -368,7 +383,7 @@ end
 mdbx_scan_order = scan_order
 
 local SPEC_OPS = {['='] = true, ['>'] = true, ['>='] = true,
-	['<'] = true, ['<='] = true, is = true, starts = true}
+	['<'] = true, ['<='] = true, ['~='] = true, is = true, starts = true}
 
 local function parse_scan_spec(spec)
 	local path = {}
@@ -378,23 +393,25 @@ local function parse_scan_spec(spec)
 		local next_tok = term_spec:gmatch'%S+'
 		local col = assertf(next_tok(), 'scan: %s: no col', spec)
 		local eq_op, eq_param, dir, lo_op, lo_param, hi_op, hi_param
+		local function param_of(tok, v)
+			if v == '?' then
+				argn = argn + 1
+				return {arg = argn}
+			end
+			local name = v and v:match'^:([%a_][%w_]*)$'
+			assertf(name, 'scan: %s: expected ? or :KEY'
+				..' after %s %s', spec, col, tok)
+			return {arg = name}
+		end
 		for tok in next_tok do
 			if tok == 'asc' or tok == 'desc' then
 				dir = tok
 			elseif tok == 'is_not_null' then
 				eq_op = 'is_not_null'
+			elseif tok == 'in' then --the arg holds the values
+				eq_op, eq_param = 'in_list', param_of(tok, next_tok())
 			elseif SPEC_OPS[tok] then
-				local v = next_tok()
-				local param
-				if v == '?' then
-					argn = argn + 1
-					param = {arg = argn}
-				else
-					local name = v and v:match'^:([%a_][%w_]*)$'
-					assertf(name, 'scan: %s: expected ? or :KEY'
-						..' after %s %s', spec, col, tok)
-					param = {arg = name}
-				end
+				local param = param_of(tok, next_tok())
 				if tok == '>' or tok == '>=' then
 					lo_op, lo_param = tok, param
 				elseif tok == '<' or tok == '<=' then
@@ -444,6 +461,9 @@ function Db:scan(tbl, path, alias)
 	local range_field
 	local is_not_null
 	local prefix_param
+	local not_equal_param
+	local in_params --one param per value
+	local in_list   --one param holding every value
 	local lo_op, lo_param
 	local hi_op, hi_param
 	for i, term in ipairs(path) do
@@ -467,6 +487,19 @@ function Db:scan(tbl, path, alias)
 			elseif op == 'is_not_null' then --{col, 'is_not_null'}
 				range_field = f
 				is_not_null = true
+			elseif op == '~=' then --{col, '~=', param}
+				range_field = f
+				not_equal_param = term[3]
+				assert(not_equal_param)
+				assert(not not_equal_param.scan)
+			elseif op == 'in' then --{col, 'in', {param1,...}}
+				range_field = f
+				in_params = term[3]
+				for _, p in ipairs(in_params) do assert(not p.scan) end
+			elseif op == 'in_list' then --{col, 'in_list', param}
+				range_field = f
+				in_list = term[3]
+				assert(not in_list.scan)
 			else --range or inequality
 				range_field = f
 				if op == 'range' then --{col, 'range', lo_op, param, hi_op, param}
@@ -529,17 +562,10 @@ function Db:scan(tbl, path, alias)
 		exact_key and not is_index and 0
 		or (exact_key and is_index) and eq_n - key_n
 		or eq_n
-	local lo_null, hi_null
-	--when the path rejects null without a non-null lower bound, start after
-	--DB null.
-	if range_field and not range_field.not_null
-		and (is_not_null or hi_param and not lo_param)
-	then
-		lo_op = '>'
-		lo_null = true
-	end
-	local has_bound = range_eq_n > 0 or lo_param or hi_param or prefix_param
-		or lo_null
+	--is there anything to seek to past the exact key?
+	local has_bound = range_eq_n > 0 or prefix_param or not_equal_param
+		or in_params or in_list or lo_param or hi_param
+		or (is_not_null and not range_field.not_null)
 
 	--param reading / encoder compilation --------------------------------------
 
@@ -575,26 +601,156 @@ function Db:scan(tbl, path, alias)
 		end
 	end
 
-	--reset -------------------------------------------------------------------
+	--reset & next_bounds ------------------------------------------------------
 
 	--state between reset() and next().
 	local limit_rec = MDBX_val()
 	local must_seek, has_limit, empty_scan, started, found
+	local next_bounds -- next_bounds() -> true, [seek, sz], [limit, sz] | nil
 
 	if has_bound then
+
+		--one entry per disjoint sub-range to walk, in scan order. when the
+		--range col is desc its bytes are inverted, so byte order is the
+		--reverse of value order, and a backward scan reverses that again.
+		local values_ascending = range_field
+			and (not not range_field.descending) == reverse
+		local ranges
+		local in_values --resolved values, indexed by range_order
+		local in_value  --the value the sub-range being seeked now looks for
+		if not_equal_param then
+			--everything below the value, and everything above it.
+			local below = {hi_op = '<', hi_param = not_equal_param}
+			local above = {lo_op = '>', lo_param = not_equal_param}
+			if values_ascending then
+				ranges = {below, above}
+			else
+				ranges = {above, below}
+			end
+		elseif in_params or in_list then
+			--one point sub-range per value, all seeked through the same spec:
+			--range_at() puts the value for the current sub-range in in_value,
+			--so the number of values can differ on every reset.
+			local read_in_value = function() return in_value end
+			ranges = {{lo_op = '>=', lo_param = {get = read_in_value},
+				hi_op = '<=', hi_param = {get = read_in_value}}}
+		else
+			ranges = {{lo_op = lo_op, lo_param = lo_param,
+				hi_op = hi_op, hi_param = hi_param}}
+		end
+		local any_bound
+		for _, r in ipairs(ranges) do
+			--when the path rejects null without a non-null lower bound, start
+			--after DB null.
+			if range_field and not range_field.not_null
+				and (is_not_null or r.hi_param and not r.lo_param)
+			then
+				r.lo_op = '>'
+				r.lo_null = true
+			end
+			any_bound = any_bound or r.lo_param or r.hi_param or r.lo_null
+		end
+		local range_i
+		local range_n = #ranges
+		--range_order[1..range_n] indexes ranges in the order they are walked.
+		local range_order = {}
+		for i = 1, range_n do range_order[i] = i end
+
+		--order_ranges(args) rebuilds range_order and range_n; nil when the
+		--order cannot change between resets.
+		local order_ranges
+
+		if in_params or in_list then
+			local ai_ci = range_field.mdbx_collation == 'utf8_ai_ci'
+			local keys = {}
+			local by_key = values_ascending
+				and function(a, b) return keys[a] < keys[b] end
+				or  function(a, b) return keys[a] > keys[b] end
+			in_values = {}
+			local function param_value(param, args)
+				if param.get then return param.get() end
+				if param.arg then return args and args[param.arg] end
+				return param.value
+			end
+			--DB null, and a value the args do not supply, are in no list.
+			order_ranges = function(args)
+				local n
+				if in_list then
+					local list = param_value(in_list, args)
+					n = #list
+					for i = 1, n do in_values[i] = list[i] end
+				else
+					n = #in_params
+					for i = 1, n do
+						in_values[i] = param_value(in_params[i], args)
+					end
+				end
+				local m = 0
+				for i = 1, n do
+					local v = in_values[i]
+					if v ~= nil and v ~= null then
+						m = m + 1
+						in_values[m] = v
+						keys[m] = collate_value(v, ai_ci)
+						range_order[m] = m
+					end
+				end
+				for i = m + 1, #range_order do range_order[i] = nil end
+				sort(range_order, by_key)
+				--drop repeats: compute_bounds() would seek the same rows twice.
+				local k, prev = 0
+				for i = 1, m do
+					local key = keys[range_order[i]]
+					if k == 0 or key ~= prev then
+						k = k + 1
+						range_order[k] = range_order[i]
+						prev = key
+					end
+				end
+				range_n = k
+			end
+			local fixed = true
+			if in_list then
+				fixed = not (in_list.get or in_list.arg)
+			else
+				for _, param in ipairs(in_params) do
+					if param.get or param.arg then fixed = false; break end
+				end
+			end
+			if fixed then --values are in already; sort them once.
+				order_ranges()
+				order_ranges = nil
+			end
+		end
+
+		--range_at(i) -> the sub-range spec to seek for step i.
+		local range_at
+		if in_params or in_list then
+			range_at = function(i)
+				in_value = in_values[range_order[i]]
+				return ranges[1]
+			end
+		else
+			range_at = function(i) return ranges[range_order[i]] end
+		end
+
 
 		if prefix_param then --prefix scans require a varsize string field.
 			assertf(range_field.maxlen and not range_field.padded,
 				'starts on field: %s', range_field.col)
 		end
 
-		if (hi_op or lo_op) and range_field.descending then
+		if range_field and range_field.descending then
 			--reverse range bounds for desc range col because bounds are in byte-order.
-			lo_op, hi_op =
-				hi_op and (hi_op == '<' and '>' or '>='),
-				lo_op and (lo_op == '>' and '<' or '<=')
-			lo_param, hi_param = hi_param, lo_param
-			lo_null, hi_null = hi_null, lo_null
+			for _, r in ipairs(ranges) do
+				if r.hi_op or r.lo_op then
+					r.lo_op, r.hi_op =
+						r.hi_op and (r.hi_op == '<' and '>' or '>='),
+						r.lo_op and (r.lo_op == '>' and '<' or '<=')
+					r.lo_param, r.hi_param = r.hi_param, r.lo_param
+					r.lo_null, r.hi_null = r.hi_null, r.lo_null
+				end
+			end
 		end
 
 		local range_schema = range_in_val and schema.val_schema or schema
@@ -608,67 +764,73 @@ function Db:scan(tbl, path, alias)
 				range_eq_i, range_eq_n)
 
 		--range bound fields, each appended after the eq prefix at the same slot.
-		local lo_write = bound_write(db, lo_param, range_schema, range_eq_n+1,
-			scan, lo_op)
-		local hi_write = bound_write(db, hi_param, range_schema, range_eq_n+1,
-			scan, hi_op)
 		local starts_write =
 			bound_write(db, prefix_param, range_schema, range_eq_n+1, scan,
 				'starts', true)
+		local shared = eq_write or starts_write
+		local need_seek, need_limit = shared, shared
+		for _, r in ipairs(ranges) do
+			r.lo_write = bound_write(db, r.lo_param, range_schema, range_eq_n+1,
+				scan, r.lo_op)
+			r.hi_write = bound_write(db, r.hi_param, range_schema, range_eq_n+1,
+				scan, r.hi_op)
+			need_seek  = need_seek  or r.lo_write or r.lo_null
+			need_limit = need_limit or r.hi_write or r.hi_null
+		end
 
 		local range_cap = range_schema.key_fields.max_rec_size
-		local seek_key = (eq_write or starts_write or lo_write or lo_null)
-			and u8a(range_cap)
-		local limit_key = (eq_write or starts_write or hi_write or hi_null)
-			and u8a(range_cap)
+		local seek_key  = need_seek  and u8a(range_cap)
+		local limit_key = need_limit and u8a(range_cap)
 
 		--eq prefix (+ range bound) -> seek key, then the limit to stop at;
 		--swapped for a reverse scan so next() has one fixed role per side.
-		local function compute_bounds()
+		--nothing means this sub-range holds no rows.
+		--compute_bounds(range) -> true, seek, seek_sz, limit, limit_sz
+		local function compute_bounds(r)
 			local psz = 0
 			if eq_write then
 				local data, sz = eq_write(seek_key)
-				if not data then empty_scan = true; return end
+				if not data then return end
 				psz = sz
 			end
 
 			local lo_data, lo_sz, hi_data, hi_sz
 			if starts_write then
 				local data, sz = starts_write(seek_key, psz)
-				if not data then empty_scan = true; return end
+				if not data then return end
 				lo_data, lo_sz = data, sz
 				copy(limit_key, data, sz)
 				hi_data, hi_sz = limit_key, increment_prefix(limit_key, sz)
 			else
 				if psz > 0 then copy(limit_key, seek_key, psz) end
-				if lo_write or lo_null then
+				if r.lo_write or r.lo_null then
 					local data, sz
-					if lo_write then
-						data, sz = lo_write(seek_key, psz)
+					if r.lo_write then
+						data, sz = r.lo_write(seek_key, psz)
 					else
 						data, sz = write_null_bound(range_schema,
 							range_eq_n + 1, seek_key, psz)
 					end
-					if not data then empty_scan = true; return end
+					if not data then return end
 					lo_data, lo_sz = data, sz
-					if lo_op == '>' then
+					if r.lo_op == '>' then
 						lo_sz = increment_prefix(data, sz)
-						if not lo_sz then empty_scan = true; return end
+						if not lo_sz then return end
 					end
 				elseif psz > 0 then
 					lo_data, lo_sz = seek_key, psz
 				end
-				if hi_write or hi_null then
+				if r.hi_write or r.hi_null then
 					local data, sz
-					if hi_write then
-						data, sz = hi_write(limit_key, psz)
+					if r.hi_write then
+						data, sz = r.hi_write(limit_key, psz)
 					else
 						data, sz = write_null_bound(range_schema,
 							range_eq_n + 1, limit_key, psz)
 					end
-					if not data then empty_scan = true; return end
+					if not data then return end
 					hi_data, hi_sz = data, sz
-					if hi_op == '<=' then
+					if r.hi_op == '<=' then
 						hi_sz = increment_prefix(data, sz)
 					end
 				elseif psz > 0 then
@@ -681,47 +843,56 @@ function Db:scan(tbl, path, alias)
 				hi_data, hi_sz = pad_data(hi_data, hi_sz, limit_key, pk_fixed_sz)
 			end
 			if reverse then
-				return hi_data, hi_sz, lo_data, lo_sz
+				return true, hi_data, hi_sz, lo_data, lo_sz
 			else
-				return lo_data, lo_sz, hi_data, hi_sz
+				return true, lo_data, lo_sz, hi_data, hi_sz
+			end
+		end
+
+		--skips the sub-ranges whose bounds cannot be formed.
+		next_bounds = function()
+			while range_i < range_n do
+				range_i = range_i + 1
+				local ok, seek_data, seek_sz, limit_data, limit_sz =
+					compute_bounds(range_at(range_i))
+				if ok then
+					return true, seek_data, seek_sz, limit_data, limit_sz
+				end
 			end
 		end
 
 		function scan.reset(args)
 			scan.args = args
 			empty_scan = false
-			local seek_data, seek_sz, limit_data, limit_sz
 			if exact_write and not exact_write() then
 				empty_scan = true
-			else
-				seek_data, seek_sz, limit_data, limit_sz = compute_bounds()
+			elseif order_ranges then
+				order_ranges(args)
 			end
-			if seek_sz then
-				range_rec.data = seek_data
-				range_rec.size = seek_sz
-				must_seek = true
-			else
-				must_seek = false
-			end
-			if limit_sz then
-				limit_rec.data = limit_data
-				limit_rec.size = limit_sz
-				has_limit = true
-			else
-				has_limit = false
-			end
+			range_i = 0
 			started = false
 			found = nil
 		end
+
 	else
 		--no range_eq/lo/hi/prefix past the exact key (or no key at all):
-		--must_seek and has_limit stay permanently false.
+		--the whole key, with no key to seek to and no limit to stop
+		--before. yielded tells seek_next() there is no second one, both
+		--when its own seek finds nothing and when next() runs out of rows.
+		local yielded
+		next_bounds = function()
+			if yielded then return end
+			yielded = true
+			return true
+		end
+
 		function scan.reset(args)
 			scan.args = args
 			empty_scan = false
 			if exact_write and not exact_write() then
 				empty_scan = true
 			end
+			yielded = false
 			started = false
 			found = nil
 		end
@@ -763,26 +934,49 @@ function Db:scan(tbl, path, alias)
 	local cur
 	local base_cur --base-table lookup state
 
+	--land on the first row the next bounds admit; when nothing lands, or
+	--the landing is already past the limit, try the bounds after those.
+	local function seek_next()
+		while true do
+			local ok, seek_data, seek_sz, limit_data, limit_sz = next_bounds()
+			if not ok then return end
+			must_seek = seek_sz ~= nil
+			has_limit = limit_sz ~= nil
+			if must_seek then
+				range_rec.data, range_rec.size = seek_data, seek_sz
+			end
+			if has_limit then
+				limit_rec.data, limit_rec.size = limit_data, limit_sz
+			end
+			if not cur then cur = db:cursor(schema.name) end
+			local start_op = must_seek and seek_op or first_op
+			local landed = cur:move_raw_into(start_op, key_rec, val_rec)
+			if landed and last_dup_op and not must_seek then
+				landed = cur:move_raw_into(last_dup_op, key_rec, val_rec)
+			end
+			if landed and not (has_limit and
+				(C.schema_key_cmp_rec(range_rec, limit_rec) < 0) == reverse)
+			then return true end
+		end
+	end
+
 	local function next_row(op)
 		assert(started ~= nil, 'next: reset not called')
 		found = nil
 		if not started then
 			started = true
 			if empty_scan then return end
-			if not cur then cur = db:cursor(schema.name) end
-			local start_op = must_seek and seek_op or first_op
-			if not cur:move_raw_into(start_op, key_rec, val_rec) then return end
-			if last_dup_op and not must_seek then
-				if not cur:move_raw_into(last_dup_op, key_rec, val_rec) then return end
-			end
+			if not seek_next() then return end
 		elseif op then
-			if not cur:move_raw_into(op, key_rec, val_rec) then return end
+			if not cur:move_raw_into(op, key_rec, val_rec)
+				or (has_limit and
+					(C.schema_key_cmp_rec(range_rec, limit_rec) < 0) == reverse)
+			then
+				if not seek_next() then return end
+			end
 		else --next_*op is nil, no advance or limit check.
 			return
 		end
-		if has_limit
-			and (C.schema_key_cmp_rec(range_rec, limit_rec) < 0) == reverse
-		then return end
 		if base_key_rec then
 			if not base_cur then base_cur = db:cursor(base_schema.name) end
 			copy(base_key_rec, val_rec, MDBX_val_size)

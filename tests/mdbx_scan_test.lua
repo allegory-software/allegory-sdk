@@ -633,6 +633,158 @@ function test.scan_null_comparisons()
 	end)
 end
 
+--with '~=', Db:scan() walks everything below the value then everything
+--above it. DB null is never <> a value, so a nullable col excludes its
+--nulls and a null param matches nothing.
+function test.scan_not_equal()
+	with_db('scan_not_equal', function(db)
+		db:begin'w'
+		db:create_table('ne_rows', {fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'g', mdbx_type = 'u32', not_null = true},
+			{col = 'score', mdbx_type = 'i32'},
+		}, pk = {'id'}})
+		local _, _, score_asc  = db:add_index('ne_rows', {'score'})
+		local _, _, score_desc = db:add_index('ne_rows', {'score',
+			desc = {true}})
+		local _, _, g_score    = db:add_index('ne_rows', {'g', 'score'})
+		for _, row in ipairs{
+			{id = 1, g = 1},
+			{id = 2, g = 1, score = -1},
+			{id = 3, g = 1, score = 10},
+			{id = 4, g = 1, score = 20},
+			{id = 5, g = 2},
+			{id = 6, g = 2, score = 10},
+		} do
+			db:insert('ne_rows', '{}', row)
+		end
+		db:commit()
+		db:begin'r'
+
+		local function ids(tbl, path, args)
+			local scan = db:scan(tbl, path)
+			local get = scan_col_decoder(db, scan, 'id')
+			scan.reset(args)
+			local s = scan_values(scan, get)
+			scan.close()
+			return s
+		end
+
+		assert(ids('ne_rows', 'id ~= ?', {3}) == '1,2,4,5,6')
+		assert(ids('ne_rows', 'id ~= ? desc', {3}) == '6,5,4,2,1')
+		assert(ids('ne_rows', 'id ~= ?', {99}) == '1,2,3,4,5,6')
+
+		--nulls come before non-null values in the key, and are not <> anything.
+		assert(ids(score_asc, 'score ~= ?', {10}) == '2,4')
+		assert(ids(score_asc, 'score ~= ? desc', {10}) == '4,2')
+		assert(ids(score_asc, 'score ~= ?', {-1}) == '3,6,4')
+		assert(ids(score_asc, 'score ~= ?', {null}) == '')
+
+		--a desc key holds the col inverted, so both the sub-range sides and
+		--the order they are walked in flip.
+		assert(ids(score_desc, 'score ~= ?', {10}) == '4,2')
+		assert(ids(score_desc, 'score ~= ? asc', {10}) == '2,4')
+
+		assert(ids(g_score, 'g = ?, score ~= ?', {1, 10}) == '2,4')
+		assert(ids(g_score, 'g = ?, score ~= ? desc', {1, 10}) == '4,2')
+		assert(ids(g_score, 'g = ?, score ~= ?', {2, 10}) == '')
+
+		db:commit()
+	end)
+end
+
+--with 'in', Db:scan() walks one point sub-range per value. Db:scan()
+--sorts and dedupes the values itself, so the list order the caller gives
+--does not matter, and a value that is DB null or that the args do not
+--supply is in no list.
+function test.scan_in_list()
+	with_db('scan_in_list', function(db)
+		db:begin'w'
+		db:create_table('in_rows', {fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'g', mdbx_type = 'u32', not_null = true},
+			{col = 'score', mdbx_type = 'i32'},
+		}, pk = {'id'}})
+		local _, _, score_asc  = db:add_index('in_rows', {'score'})
+		local _, _, score_desc = db:add_index('in_rows', {'score',
+			desc = {true}})
+		local _, _, g_score    = db:add_index('in_rows', {'g', 'score'})
+		for _, row in ipairs{
+			{id = 1, g = 1},
+			{id = 2, g = 1, score = -1},
+			{id = 3, g = 1, score = 10},
+			{id = 4, g = 1, score = 20},
+			{id = 5, g = 2},
+			{id = 6, g = 2, score = 10},
+		} do
+			db:insert('in_rows', '{}', row)
+		end
+		db:commit()
+		db:begin'r'
+
+		local function V(v) return {value = v} end
+		local function A(a) return {arg = a} end
+		local function ids(tbl, path, args)
+			local scan = db:scan(tbl, path)
+			local get = scan_col_decoder(db, scan, 'id')
+			scan.reset(args)
+			local s = scan_values(scan, get)
+			scan.close()
+			return s
+		end
+
+		assert(ids('in_rows', {{'id', 'in', {V(5), V(1), V(3)}}}) == '1,3,5')
+		assert(ids('in_rows',
+			{{'id', 'in', {V(5), V(1), V(3)}, dir = 'desc'}}) == '5,3,1')
+		assert(ids('in_rows',
+			{{'id', 'in', {V(3), V(1), V(3), V(1)}}}) == '1,3')
+		assert(ids('in_rows', {{'id', 'in', {V(9), V(1)}}}) == '1')
+		assert(ids('in_rows', {{'id', 'in', {V(null), V(2)}}}) == '2')
+
+		assert(ids('in_rows', {{'id', 'in', {A(1), A(2)}}}, {4, 2}) == '2,4')
+		assert(ids('in_rows', {{'id', 'in', {A(1), A(2)}}}, {2, 2}) == '2')
+		assert(ids('in_rows',
+			{{'id', 'in', {A(1), A(2)}, dir = 'desc'}}, {2, 4}) == '4,2')
+		--when the caller leaves an arg out, that value is dropped, not failed.
+		assert(ids('in_rows', {{'id', 'in', {A(1), A(2)}}}, {2}) == '2')
+
+		assert(ids(score_asc, {{'score', 'in', {V(20), V(10)}}}) == '3,6,4')
+		assert(ids(score_asc,
+			{{'score', 'in', {V(20), V(10)}, dir = 'desc'}}) == '4,6,3')
+		--a desc key holds the col inverted, so a backward walk gives
+		--ascending values with each value's pks in descending order.
+		assert(ids(score_desc, {{'score', 'in', {V(10), V(20)}}}) == '4,3,6')
+		assert(ids(score_desc,
+			{{'score', 'in', {V(10), V(20)}, dir = 'asc'}}) == '6,3,4')
+
+		assert(ids(g_score,
+			{{'g', '=', V(1)}, {'score', 'in', {V(20), V(10)}}}) == '3,4')
+		assert(ids(g_score,
+			{{'g', '=', V(2)}, {'score', 'in', {V(20), V(10)}}}) == '6')
+
+		--spec form: the arg holds the list of values. a scalar is not a
+		--set, so 'in 5' is not something the caller can write.
+		local ok = pcall(ids, 'in_rows', 'id in ?', {2})
+		assert(not ok)
+		assert(ids('in_rows', 'id in :ids', {ids = {5, 1, 3}}) == '1,3,5')
+		assert(ids('in_rows', 'id in :ids desc', {ids = {5, 1, 3}}) == '5,3,1')
+		assert(ids('in_rows', 'id in :ids', {ids = {}}) == '')
+		assert(ids('in_rows', 'id in ?', {{2}}) == '2')
+		assert(ids(g_score, 'g = ?, score in :ss', {1, ss = {20, 10}}) == '3,4')
+
+		--reset() with different args re-sorts the values.
+		local scan = db:scan('in_rows', {{'id', 'in', {A(1), A(2)}}})
+		local get = scan_col_decoder(db, scan, 'id')
+		scan.reset{1, 2}
+		assert(scan_values(scan, get) == '1,2')
+		scan.reset{5, 3}
+		assert(scan_values(scan, get) == '3,5')
+		scan.close()
+
+		db:commit()
+	end)
+end
+
 function test.scan_column_refs()
 	with_db('scan_column_refs', function(db)
 		add_scan_data(db)
