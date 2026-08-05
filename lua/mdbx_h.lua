@@ -674,7 +674,7 @@ typedef struct MDBX_chk_scope {
 typedef struct MDBX_chk_user_table_cookie MDBX_chk_user_table_cookie_t;
 
 struct MDBX_chk_histogram {
-	size_t amount, count, ones, pad;
+	size_t amount, count, le1_amount, le1_count;
 	struct {
 		size_t begin, end, amount, count;
 	} ranges[9];
@@ -687,17 +687,21 @@ typedef struct MDBX_chk_table {
 	int id;
 	size_t payload_bytes, lost_bytes;
 	struct {
-		size_t all, empty, other;
+		size_t all, empty, broken;
 		size_t branch, leaf;
 		size_t nested_branch, nested_leaf, nested_subleaf;
 	} pages;
 	struct {
-		struct MDBX_chk_histogram deep;
+		struct MDBX_chk_histogram height;
 		struct MDBX_chk_histogram large_pages;
-		struct MDBX_chk_histogram nested_tree;
+		struct MDBX_chk_histogram nested_height_or_gc_span_length;
 		struct MDBX_chk_histogram key_len;
 		struct MDBX_chk_histogram val_len;
 		struct MDBX_chk_histogram multival;
+		struct MDBX_chk_histogram tree_density;
+		struct MDBX_chk_histogram large_or_nested_density;
+		struct MDBX_chk_histogram page_age;
+		struct MDBX_chk_histogram pgno;
 	} histogram;
 } MDBX_chk_table_t;
 
@@ -714,6 +718,9 @@ typedef struct MDBX_chk_context {
 		size_t processed_pages, reclaimable_pages, gc_pages, alloc_pages, backed_pages;
 		size_t problems_meta, tree_problems, gc_tree_problems, kv_tree_problems, problems_gc, problems_kv, total_problems;
 		uint64_t steady_txnid, recent_txnid;
+		struct MDBX_chk_histogram histogram_page_age;
+		struct MDBX_chk_histogram histogram_pgno_payload;
+		struct MDBX_chk_histogram histogram_pgno_retained;
 		const MDBX_chk_table_t *const *tables;
 	} result;
 } MDBX_chk_context_t;

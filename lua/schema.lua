@@ -523,10 +523,12 @@ function schema.env.aka(old_names)
 	end
 end
 
-function schema.env.as(fn)
+function schema.env.as(gen_version, fn)
+	if isfunc(gen_version) then gen_version, fn = nil, gen_version end
 	assertf(isfunc(fn), 'function expected for as()')
 	return function(self, tbl, fld)
 		fld.generate = fn
+		fld.gen_version = gen_version
 	end
 end
 

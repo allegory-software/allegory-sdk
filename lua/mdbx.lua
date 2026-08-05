@@ -28,6 +28,7 @@ DATABASES
 	- opt.flags                                see MDBX_env_flags
 	db:[try_]close()                           close db (idempotent)
 	db:closed() -> t|f                         check if db is closed
+	db:check() -> true,0 | false,n             check database integrity
 	mdbx_max_key_size([table_flags]) -> n      get max key size in bytes
 	mdbx_delete(file_path, [flags])            delete a database
 TRANSACTIONS
@@ -246,6 +247,17 @@ function Db:try_close()
 	if not self.env then return true end
 	self:close()
 	return true
+end
+
+local mdbx_chk_callbacks = new'MDBX_chk_callbacks_t'
+function Db:check()
+	assert(self.env, 'closed')
+	assert(not self.txn, 'in transaction')
+	local ctx = new'MDBX_chk_context_t'
+	assert(self:tryz('db_check', C.mdbx_env_chk(self.env, mdbx_chk_callbacks,
+		ctx, C.MDBX_CHK_DEFAULTS, C.MDBX_chk_result, 0)))
+	local problem_count = num(ctx.result.total_problems)
+	return problem_count == 0, problem_count
 end
 
 function mdbx_max_key_size(flags)

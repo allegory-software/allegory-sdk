@@ -618,6 +618,80 @@ function test.nozero_field()
 	end)
 end
 
+--nozero only applies to arrays and strings, so a scalar field declaring it is
+--rejected when the table is layouted.
+function test.nozero_needs_maxlen()
+	with_db('nozero_needs_maxlen', function(db)
+		db:begin'w'
+		local ok, err = pcall(function()
+			db:create_table('t', {
+				name = 't',
+				fields = {
+					{col = 'id', mdbx_type = 'u32', not_null = true},
+					{col = 'v' , mdbx_type = 'u32', nozero = true},
+				},
+				pk = {'id'},
+			})
+		end)
+		assert(not ok)
+		assert(tostring(err):find('nozero needs maxlen: t.v', 1, true), tostring(err))
+		db:commit()
+	end)
+end
+
+--adding nozero re-encodes every record, so stored zero elements are rejected
+--and the alter rolls back with the old schema and rows intact.
+function test.alter_adds_nozero_rechecks_data()
+	with_db('alter_adds_nozero_rechecks_data', function(db)
+		db:begin'w'
+
+		--val col: rewritten in place.
+		db:create_table('v', {name = 'v', fields = {
+			{col = 'id', mdbx_type = 'u32' , not_null = true},
+			{col = 's' , mdbx_type = 'utf8', maxlen = 8},
+		}, pk = {'id'}})
+		db:insert('v', '{}', {id = 1, s = 'ab'})
+		db:insert('v', '{}', {id = 2, s = 'a\0b'})
+		local ok, err = try_schema(db, db.alter_table, 'v', {name = 'v', fields = {
+			{col = 'id', mdbx_type = 'u32' , not_null = true},
+			{col = 's' , mdbx_type = 'utf8', maxlen = 8, nozero = true},
+		}, pk = {'id'}})
+		assert(not ok and iserror(err, 'schema'), tostring(err))
+		assert(err.event == 't_alter' and err.table == 'v', tostring(err))
+		assert(err.col == 's', tostring(err.col))
+		assert(err.message == 'zero', tostring(err.message))
+		local _, schema = db:dbi_schema'v'
+		assert(schema.fields.s.nozero == nil)
+		assert(db:find('v', 's', 1) == 'ab', S(db:find('v', 's', 1)))
+		assert(db:find('v', 's', 2) == 'a\0b', S(db:find('v', 's', 2)))
+
+		--key col: rewritten through a temp table.
+		db:create_table('k', {name = 'k', fields = {
+			{col = 'a', mdbx_type = 'u8', maxlen = 4, padded = true, not_null = true},
+			{col = 'n', mdbx_type = 'u32'},
+		}, pk = {'a'}})
+		db:insert('k', '{}', {a = {1,2,3,4}, n = 10})
+		db:insert('k', '{}', {a = {1,0,2,3}, n = 20})
+		ok, err = try_schema(db, db.alter_table, 'k', {name = 'k', fields = {
+			{col = 'a', mdbx_type = 'u8', maxlen = 4, padded = true, not_null = true,
+				nozero = true},
+			{col = 'n', mdbx_type = 'u32'},
+		}, pk = {'a'}})
+		assert(not ok and iserror(err, 'schema'), tostring(err))
+		assert(err.event == 't_alter' and err.table == 'k', tostring(err))
+		assert(err.col == 'a', tostring(err.col))
+		assert(err.message == 'zero', tostring(err.message))
+		local _, schema = db:dbi_schema'k'
+		assert(schema.fields.a.nozero == nil)
+		assert(num(db:find('k', 'n', {1,2,3,4})) == 10)
+		assert(num(db:find('k', 'n', {1,0,2,3})) == 20)
+		for name in db:each_table() do
+			assert(not name:starts'$alter/', name)
+		end
+		db:commit()
+	end)
+end
+
 --create + reopen so the schema is reconstructed from $schema (loaded path),
 --then read back fixed, padded and varsize values.
 function test.reopen_roundtrip()
@@ -5162,6 +5236,238 @@ function test.generated_col_not_null()
 		local ok, err = try_mutation(db, db.insert, 't', 'id', 2)
 		assert(not ok and iserror(err, 'field'), tostring(err))
 		db:commit()
+	end)
+end
+
+--gen_version marks a generator's results as stale, so it needs a generator.
+function test.gen_version_needs_generator()
+	with_db('gen_version_needs_generator', function(db)
+		db:begin'w'
+		local ok, err = pcall(function()
+			db:create_table('t', {
+				name = 't',
+				fields = {
+					{col = 'id', mdbx_type = 'u32', not_null = true},
+					{col = 'v' , mdbx_type = 'u32', gen_version = 1},
+				},
+				pk = {'id'},
+			})
+		end)
+		assert(not ok)
+		assert(tostring(err):find('gen_version needs a generator: t.v', 1, true),
+			tostring(err))
+		db:commit()
+	end)
+end
+
+--bumping gen_version recomputes the column for every stored row; replacing
+--the generator without bumping leaves the stored values alone.
+function test.generated_col_version_recomputes()
+	with_db('generated_col_version_recomputes', function(db)
+		local function bang(db, new) return new.val and new.val:upper()..'!' end
+		local function spec(gen_version, fn)
+			return {
+				name = 't',
+				fields = {
+					{col = 'id'   , mdbx_type = 'u32' , not_null = true},
+					{col = 'val'  , mdbx_type = 'utf8', maxlen = 32},
+					{col = 'upper', mdbx_type = 'utf8', maxlen = 32,
+					 gen_version = gen_version, generate = fn},
+				},
+				pk = {'id'},
+			}
+		end
+		local sc = mdbx_schema()
+		sc.tables['t'] = spec(1, upper)
+		db.schema = sc
+		db:atomic('w', function()
+			db:without_schema(function() db:create_table('t', sc.tables['t']) end)
+		end)
+		db:begin'w'
+		db:insert('t', 'id val', 1, 'hello')
+		db:insert('t', 'id val', 2, 'world')
+		db:commit()
+
+		sc.tables['t'] = spec(1, bang)
+		db:atomic('w', function()
+			db:without_schema(function() db:alter_table('t', sc.tables['t']) end)
+		end)
+		db:begin'r'
+		assert(db:find('t', 'upper', 1) == 'HELLO')
+		assert(db:find('t', 'upper', 2) == 'WORLD')
+		db:commit()
+
+		sc.tables['t'] = spec(2, bang)
+		db:atomic('w', function()
+			db:without_schema(function() db:alter_table('t', sc.tables['t']) end)
+		end)
+		db:begin'r'
+		assert(db:find('t', 'upper', 1) == 'HELLO!')
+		assert(db:find('t', 'upper', 2) == 'WORLD!')
+		db:commit()
+	end)
+end
+
+--an index over a generated column is dropped and rebuilt around the
+--recompute, so lookups find the new values and not the old ones.
+function test.generated_col_version_rebuilds_index()
+	with_db('generated_col_version_rebuilds_index', function(db)
+		local function bang(db, new) return new.val:upper()..'!' end
+		local function spec(gen_version, fn)
+			return {
+				name = 't',
+				fields = {
+					{col = 'id'   , mdbx_type = 'u32' , not_null = true},
+					{col = 'val'  , mdbx_type = 'utf8', maxlen = 32,
+					 nozero = true, not_null = true},
+					{col = 'upper', mdbx_type = 'utf8', maxlen = 32,
+					 nozero = true, not_null = true,
+					 gen_version = gen_version, generate = fn},
+				},
+				pk = {'id'},
+				ixs = {['t/upper'] = {'upper'}},
+			}
+		end
+		local sc = mdbx_schema()
+		sc.tables['t'] = spec(1, upper)
+		db.schema = sc
+		db:sync_schema()
+		db:atomic('w', function()
+			db:insert('t', 'id val', 1, 'hello')
+		end)
+		db:atomic('r', function()
+			assert(num(db:must_find('t/upper', '{}', 'HELLO').id) == 1)
+		end)
+
+		sc.tables['t'] = spec(2, bang)
+		db:sync_schema()
+		db:atomic('r', function()
+			assert(db:find('t', 'upper', 1) == 'HELLO!')
+			assert(num(db:must_find('t/upper', '{}', 'HELLO!').id) == 1)
+			assert(not db:try_find('t/upper', nil, 'HELLO'))
+		end)
+	end)
+end
+
+--the rows a new table is declared with are inserted through the schema that
+--declared them, so their generated columns are computed like any other row's.
+function test.generated_col_initial_rows()
+	with_db('generated_col_initial_rows', function(db)
+		local sc = mdbx_schema()
+		sc.tables['t'] = {
+			name = 't',
+			fields = {
+				{col = 'id'   , mdbx_type = 'u32' , not_null = true},
+				{col = 'val'  , mdbx_type = 'utf8', maxlen = 32},
+				{col = 'upper', mdbx_type = 'utf8', maxlen = 32, generate = upper},
+			},
+			pk = {'id'},
+			rows = {{1, 'hello'}, {2, 'world'}},
+		}
+		db.schema = sc
+		db:sync_schema()
+		db:atomic('r', function()
+			assert(db:find('t', 'upper', 1) == 'HELLO')
+			assert(db:find('t', 'upper', 2) == 'WORLD')
+		end)
+	end)
+end
+
+--seed rows go in through the paper schema, so triggers fire for them too.
+function test.trigger_initial_rows()
+	with_db('trigger_initial_rows', function(db)
+		local log = {}
+		local sc = mdbx_schema()
+		sc.tables['t'] = {
+			name = 't',
+			fields = {
+				{col = 'id' , mdbx_type = 'u32' , not_null = true},
+				{col = 'val', mdbx_type = 'utf8', maxlen = 32},
+			},
+			pk = {'id'},
+			rows = {{1, 'hello'}},
+			triggers = {
+				before_insert = {function(db, new)
+					log[#log+1] = new.val
+					new.val = new.val and new.val:upper()
+				end},
+			},
+		}
+		db.schema = sc
+		db:sync_schema()
+		assert(#log == 1 and log[1] == 'hello', S(log[1]))
+		db:atomic('r', function()
+			assert(db:find('t', 'val', 1) == 'HELLO')
+		end)
+	end)
+end
+
+--seed rows are checked against the foreign keys they declare, so a table is
+--seeded after the tables it references, whatever their names sort like.
+function test.seed_rows_parents_first()
+	with_db('seed_rows_parents_first', function(db)
+		local sc = mdbx_schema()
+		sc.tables['a_child'] = {
+			name = 'a_child',
+			fields = {
+				{col = 'id' , mdbx_type = 'u32', not_null = true},
+				{col = 'pid', mdbx_type = 'u32', not_null = true},
+			},
+			pk = {'id'},
+			rows = {{1, 10}, {2, 10}},
+			fks = {pid = {table = 'a_child', cols = {'pid'},
+				ref_table = 'z_parent', ref_cols = {'id'}}},
+		}
+		sc.tables['z_parent'] = {
+			name = 'z_parent',
+			fields = {
+				{col = 'id', mdbx_type = 'u32', not_null = true},
+			},
+			pk = {'id'},
+			rows = {{10}},
+		}
+		db.schema = sc
+		db:sync_schema()
+		db:atomic('r', function()
+			assert(db:try_find('z_parent', nil, 10))
+			assert(num(db:find('a_child', 'pid', 1)) == 10)
+			assert(num(db:find('a_child', 'pid', 2)) == 10)
+		end)
+	end)
+end
+
+--two seeded tables referencing each other have no valid seeding order.
+function test.seed_rows_fk_cycle()
+	with_db('seed_rows_fk_cycle', function(db)
+		local sc = mdbx_schema()
+		sc.tables['a'] = {
+			name = 'a',
+			fields = {
+				{col = 'id' , mdbx_type = 'u32', not_null = true},
+				{col = 'bid', mdbx_type = 'u32'},
+			},
+			pk = {'id'},
+			rows = {{1, 1}},
+			fks = {bid = {table = 'a', cols = {'bid'},
+				ref_table = 'b', ref_cols = {'id'}}},
+		}
+		sc.tables['b'] = {
+			name = 'b',
+			fields = {
+				{col = 'id' , mdbx_type = 'u32', not_null = true},
+				{col = 'aid', mdbx_type = 'u32'},
+			},
+			pk = {'id'},
+			rows = {{1, 1}},
+			fks = {aid = {table = 'b', cols = {'aid'},
+				ref_table = 'a', ref_cols = {'id'}}},
+		}
+		db.schema = sc
+		local ok, err = pcall(db.sync_schema, db)
+		assert(not ok)
+		assert(tostring(err):find('fk cycle between seeded tables', 1, true),
+			tostring(err))
+		assert(db.txn == nil)
 	end)
 end
 

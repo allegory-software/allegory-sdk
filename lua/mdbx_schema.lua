@@ -126,8 +126,9 @@ TRIGGERS
 
 GENERATED COLUMNS
 
-	- declared in paper schema with `as(fn)` where `fn(db, row) -> val|nil`.
-	- called on every insert, update, and table restructuring.
+	- declared in paper schema with `as([version], fn)` where
+	  `fn(db, row) -> val|nil` (nil means set default).
+	- called on every insert, update, and table restructuring, so must be pure!
 	- not for pk columns, but indexable.
 	- slows down inserts (one row re-encoding per row).
 
@@ -842,6 +843,10 @@ local function layout_table_schema(schema)
 		f.col_pos = i
 		assertf(schema_col_types[f.mdbx_type] ~= nil,
 			'unknown type: %s for field: %s.%s', f.mdbx_type, table_name, f.col)
+		assertf(not f.nozero or f.maxlen,
+			'nozero needs maxlen: %s.%s', table_name, f.col)
+		assertf(not f.gen_version or f.generate,
+			'gen_version needs a generator: %s.%s', table_name, f.col)
 		local elem_ct = col_ct[f.mdbx_type] or f.mdbx_type
 		f.elem_size = sizeof(elem_ct)
 		assertf(f.elem_size < 2^8) --must fit 8 bit (see sort below)
@@ -1267,6 +1272,7 @@ function Db:save_table_schema(schema)
 				not_null = f.not_null,
 				mdbx_default = f.mdbx_default,
 				auto_increment = f.auto_increment,
+				gen_version = f.gen_version,
 				--computed attributes
 				elem_size = f.elem_size, --for validating custom types in the future.
 				descending = f.descending,
@@ -1420,7 +1426,7 @@ local function try_validate_table_schema(stored_schema, paper_schema)
 			cmp_keys(pf, sf, {
 				'key_index', 'val_index',
 				'col', 'col_pos', 'mdbx_type', 'maxlen', 'padded', 'nozero', 'not_null',
-				'elem_size', 'descending', 'mdbx_collation',
+				'elem_size', 'descending', 'mdbx_collation', 'gen_version',
 				'fixed_offset', 'offset',
 			}, errs, '%s.%s.%s', table_name, 'fields', k)
 		end
@@ -1615,6 +1621,7 @@ local paper_field_attrs = update({
 	not_null=1,
 	mdbx_default=1,
 	auto_increment=1,
+	gen_version=1,
 }, field_type_attrs)
 
 local function copy_base_schema(src, name)
@@ -1699,7 +1706,7 @@ local function check_alter_dependencies(self, old_schema, new_schema)
 	end
 end
 
-local alter_val_layout_attrs = {
+local alter_val_rewrite_attrs = {
 	'mdbx_type',
 	'maxlen',
 	'padded',
@@ -1709,6 +1716,7 @@ local alter_val_layout_attrs = {
 	'val_index',
 	'fixed_offset',
 	'offset',
+	'gen_version',
 }
 
 local function val_reencode_needed(old_schema, new_schema)
@@ -1720,7 +1728,7 @@ local function val_reencode_needed(old_schema, new_schema)
 	for _, old_f in ipairs(old_schema.val_fields) do
 		local new_f = new_schema.fields[old_f.col]
 		if not new_f or not new_f.val_index then return true end
-		for _, attr in ipairs(alter_val_layout_attrs) do
+		for _, attr in ipairs(alter_val_rewrite_attrs) do
 			if old_f[attr] ~= new_f[attr] then return true end
 		end
 	end
@@ -2495,7 +2503,7 @@ end
 MS.diff_field_attrs = update({col_pos=1}, paper_field_attrs)
 
 --a change to any of these on an indexed col forces the index to be rebuilt.
-MS.index_field_attrs = update({not_null=1}, field_type_attrs)
+MS.index_field_attrs = update({not_null=1, gen_version=1}, field_type_attrs)
 MS.fk_field_attrs = MS.index_field_attrs
 
 MS.supports_fks = true
@@ -2559,6 +2567,7 @@ function Db:sync_schema(src, opt)
 			ondelete = fk.ondelete,
 		}
 	end
+	local added_tables
 	local function sync()
 		local stored_sc = self:extract_schema()
 		local diff = schema.diff(stored_sc, src_sc)
@@ -2566,6 +2575,7 @@ function Db:sync_schema(src, opt)
 		if opt.dry then return end
 		local tables = diff.tables
 		if not tables then return end
+		added_tables = tables.add
 
 		--remove affected foreign keys before changing their tables or indexes.
 		for tbl_name, d in sortedpairs(tables.update or empty) do
@@ -2609,13 +2619,6 @@ function Db:sync_schema(src, opt)
 			end
 		end
 
-		--load initial rows before building indexes.
-		for tbl_name, tbl in sortedpairs(tables.add or empty) do
-			for _, row in ipairs(tbl.rows or empty) do
-				self:insert(tbl_name, '[]', row)
-			end
-		end
-
 		--build indexes after every table has its final record encoding.
 		for tbl_name, tbl in sortedpairs(tables.add or empty) do
 			for ix_name, ix in sortedpairs(tbl.ixs or empty) do
@@ -2644,8 +2647,39 @@ function Db:sync_schema(src, opt)
 			end
 		end
 	end
+	local function seed_rows()
+		local seed_tables = {}
+		for tbl_name, tbl in pairs(added_tables) do
+			if tbl.rows then seed_tables[tbl_name] = tbl end
+		end
+		local order = {}
+		local ordered, visiting = {}, {}
+		local function add_after_parents(tbl_name, child_name)
+			if ordered[tbl_name] then return end
+			assertf(not visiting[tbl_name],
+				'fk cycle between seeded tables: %s and %s', tbl_name, child_name)
+			visiting[tbl_name] = true
+			for _, fk in sortedpairs(seed_tables[tbl_name].fks or empty) do
+				if fk.ref_table ~= tbl_name and seed_tables[fk.ref_table] then
+					add_after_parents(fk.ref_table, tbl_name)
+				end
+			end
+			visiting[tbl_name] = nil
+			ordered[tbl_name] = true
+			add(order, tbl_name)
+		end
+		for tbl_name in sortedpairs(seed_tables) do
+			add_after_parents(tbl_name)
+		end
+		for _, tbl_name in ipairs(order) do
+			for _, row in ipairs(seed_tables[tbl_name].rows) do
+				self:insert(tbl_name, '[]', row)
+			end
+		end
+	end
 	self:atomic(opt.dry and 'r' or 'w', function()
 		self:without_schema(sync)
+		if added_tables then seed_rows() end
 	end)
 end
 

@@ -119,6 +119,16 @@ function test.close_aborts_nested_write_txns()
 	cleanup(file)
 end
 
+function test.check_clean_db()
+	with_db('check_clean_db', function(db)
+		db:begin'w'
+		put_string(db, 't', 'k', 'v')
+		db:commit()
+		local ok, problem_count = db:check()
+		assert(ok and problem_count == 0)
+	end)
+end
+
 function test.failed_commit_discards_txn_state()
 	with_db('failed_commit_discards_txn_state', function(db)
 		db:begin'w'

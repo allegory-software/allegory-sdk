@@ -12,7 +12,7 @@ JOIN
 	- join_spec: 'TABLE|INDEX[@ALIAS].COL[,COL...] = MEMBER.COL[,COL...]'
 FILTER
 	scan:filter       (['[MEMBER.]COL [NAME],...', ]fn); fn({col->val}) -> t|f
-	scan:in_|not_in   ('[MEMBER.]COL', values)
+	scan:in_|not_in   ('[MEMBER.]COL', values)   keep rows in/not-in list
 	scan:where_has[nt](join_spec|inner_scan)     keep rows with/without a match
 	scan:limit        (n|{arg = 'KEY'}, [offset|{arg = 'KEY'}])
 	db:collate        (table, col, v) -> v       get comparison value
@@ -622,7 +622,7 @@ function Db:scan(tbl, path, alias)
 
 	--state between reset() and next().
 	local limit_rec = MDBX_val()
-	local must_seek, has_limit, empty_scan, started, found
+	local has_limit, empty_scan, started, found
 	local next_bounds -- next_bounds() -> true, [seek, sz], [limit, sz] | nil
 
 	if has_bound then
@@ -655,7 +655,6 @@ function Db:scan(tbl, path, alias)
 			ranges = {{lo_op = lo_op, lo_param = lo_param,
 				hi_op = hi_op, hi_param = hi_param}}
 		end
-		local any_bound
 		for _, r in ipairs(ranges) do
 			--when the path rejects null without a non-null lower bound, start
 			--after DB null.
@@ -665,19 +664,20 @@ function Db:scan(tbl, path, alias)
 				r.lo_op = '>'
 				r.lo_null = true
 			end
-			any_bound = any_bound or r.lo_param or r.hi_param or r.lo_null
 		end
 		local range_i
 		local range_n = #ranges
-		--range_order[1..range_n] indexes ranges in the order they are walked.
-		local range_order = {}
-		for i = 1, range_n do range_order[i] = i end
 
 		--order_ranges(args) rebuilds range_order and range_n; nil when the
 		--order cannot change between resets.
 		local order_ranges
+		--range_at(i) -> the sub-range spec to seek for step i.
+		local range_at
 
 		if in_params or in_list then
+			--range_order[1..range_n] indexes in_values in the order they are
+			--walked; order_ranges() fills it.
+			local range_order = {}
 			local ai_ci = range_field.mdbx_collation == 'utf8_ai_ci'
 			local keys = {}
 			local by_key = values_ascending
@@ -738,19 +738,13 @@ function Db:scan(tbl, path, alias)
 				order_ranges()
 				order_ranges = nil
 			end
-		end
-
-		--range_at(i) -> the sub-range spec to seek for step i.
-		local range_at
-		if in_params or in_list then
 			range_at = function(i)
 				in_value = in_values[range_order[i]]
 				return ranges[1]
 			end
 		else
-			range_at = function(i) return ranges[range_order[i]] end
+			range_at = function(i) return ranges[i] end
 		end
-
 
 		if prefix_param then --prefix scans require a varsize string field.
 			assertf(range_field.maxlen and not range_field.padded,
@@ -959,7 +953,7 @@ function Db:scan(tbl, path, alias)
 		while true do
 			local ok, seek_data, seek_sz, limit_data, limit_sz = next_bounds()
 			if not ok then return end
-			must_seek = seek_sz ~= nil
+			local must_seek = seek_sz ~= nil
 			has_limit = limit_sz ~= nil
 			if must_seek then
 				range_rec.data, range_rec.size = seek_data, seek_sz
