@@ -409,6 +409,25 @@ function test.cursor_find_dup_raw()
 	end)
 end
 
+--dup_count() reads how many dups the current key has off the subtree,
+--so it does not step through them.
+function test.cursor_dup_count()
+	with_db('cursor_dup_count', function(db)
+		db:begin'w'
+		db:create_table_raw('d', mdbx.MDBX_DUPSORT)
+		for _, v in ipairs{'a', 'b', 'c'} do
+			assert(db:try_put_raw('d', 'k', 1, v, 1))
+		end
+		assert(db:try_put_raw('d', 'x', 1, 'q', 1))
+		local cur = db:cursor_raw('d')
+		assert(cur:find_raw('k', 1))
+		assert(cur:dup_count() == 3, cur:dup_count())
+		assert(cur:find_raw('x', 1))
+		assert(cur:dup_count() == 1, cur:dup_count())
+		db:abort()
+	end)
+end
+
 function test.cursor_del_returns_true()
 	with_db('cursor_del_returns_true', function(db)
 		db:begin'w'

@@ -80,6 +80,7 @@ QUERY
 	cur:find_multiple_raw    (k,k_sz)             -> true, v,v_sz | false,'not_found'
 	cur:current_multiple_raw ()                   -> true, v,v_sz | false,'not_found'
 	cur:next_multiple_raw    ()                   -> true, v,v_sz | false,'not_found'
+	cur:dup_count            ()                   -> n | false,'not_found'
 	cur:each[_reverse]_raw   ()       -> iter()   -> true, k,k_sz, v,v_sz
 	cur:each_from[_last]_raw (k,k_sz) -> iter()   -> cur, k,k_sz, v,v_sz
 DEBUG
@@ -802,6 +803,16 @@ end
 
 function Cur:current_multiple_raw()
 	return self:move_raw_v(C.MDBX_GET_MULTIPLE)
+end
+
+--how many dups the current key has (O(1) since dups are a subtree).
+local dup_count = new'size_t[1]'
+function Cur:dup_count()
+	check_cursor(self)
+	local rc = C.mdbx_cursor_count(self.c, dup_count)
+	if rc == 0 then return num(dup_count[0]) end
+	if rc == C.MDBX_ENODATA then return false, 'not_found' end
+	return self.db:tryz('c_count', rc)
 end
 
 function Cur:try_put_raw(k, k_sz, v, v_sz, flags)
