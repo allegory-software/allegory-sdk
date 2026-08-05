@@ -555,7 +555,7 @@ function Db:scan(tbl, path, alias)
 	local key_n = #schema.key_fields
 	local exact_key = eq_n >= key_n
 	scan.is_index = is_index
-	scan.can_next_group = not exact_key --an exact key has no next key to step to
+	scan.can_next_group = not exact_key --no groups when entire key is pinned
 	reverse = reverse or false
 	scan.reverse = reverse
 
@@ -617,7 +617,7 @@ function Db:scan(tbl, path, alias)
 		end
 	end
 
-	--reset & next_bounds ------------------------------------------------------
+	--reset & next_bounds -----------------------------------------------------
 
 	--state between reset() and next().
 	local limit_rec = MDBX_val()
@@ -772,7 +772,7 @@ function Db:scan(tbl, path, alias)
 		local range_schema = range_in_val and schema.val_schema or schema
 		--range_eq_i is where range eq columns start among the path's eq columns.
 		local range_eq_i = range_in_val and key_n + 1 or 1
-		local pk_fixed_sz = range_in_val and schema.dup_fixedsize
+		local dup_sz = range_in_val and schema.dup_fixedsize
 
 		--range key's eq prefix (shared by starts/lo/hi), when non-empty.
 		local eq_write = range_eq_n > 0
@@ -854,9 +854,9 @@ function Db:scan(tbl, path, alias)
 				end
 			end
 
-			if pk_fixed_sz then
-				lo_data, lo_sz = pad_data(lo_data, lo_sz, seek_key, pk_fixed_sz)
-				hi_data, hi_sz = pad_data(hi_data, hi_sz, limit_key, pk_fixed_sz)
+			if dup_sz then
+				lo_data, lo_sz = pad_data(lo_data, lo_sz, seek_key, dup_sz)
+				hi_data, hi_sz = pad_data(hi_data, hi_sz, limit_key, dup_sz)
 			end
 			if reverse then
 				return true, hi_data, hi_sz, lo_data, lo_sz
@@ -921,38 +921,40 @@ function Db:scan(tbl, path, alias)
 	local dup_op   = reverse and C.MDBX_PREV_DUP   or C.MDBX_NEXT_DUP
 	local nodup_op = reverse and C.MDBX_PREV_NODUP or C.MDBX_NEXT_NODUP
 
-	--start-of-scan positioning and stepping ops for next().
-	local seek_op, first_op, last_dup_op, next_op, next_pk_op, next_key_op
-	if exact_key and is_index then --index key is fixed; scan walks dup vals.
+	--figure out the right seek ops and stepping ops.
+	local seek_op, first_op, last_dup_op
+	local next_op, next_in_group_op, next_group_op
+	if exact_key and is_index then --index key is pinned; scan walks dup vals.
 		seek_op = reverse and C.MDBX_TO_EXACT_KEY_VALUE_LESSER_THAN
 			or C.MDBX_GET_BOTH_RANGE
 		first_op = C.MDBX_SET_KEY
 		--a reverse dup scan lands on the key, then walks to its last dup.
 		last_dup_op = reverse and C.MDBX_LAST_DUP or nil
 		next_op = dup_op
-		next_pk_op = dup_op
-		--index key is fixed, range is in the dup vals, so no next key to step to.
-		next_key_op = false
+		next_in_group_op = dup_op
+		--index key is pinned, range is in the dup vals, so no next key to step to.
+		next_group_op = false
 	elseif exact_key then --single base-table row, no stepping.
 		seek_op = reverse and C.MDBX_TO_KEY_LESSER_THAN or C.MDBX_SET_RANGE
 		first_op = C.MDBX_SET_KEY
 		next_op = false
-		next_pk_op = false
-		next_key_op = false
+		next_in_group_op = false
+		next_group_op = false
 	else --range/prefix/full scan: walk the whole key, dup groups included.
 		seek_op = reverse and C.MDBX_TO_KEY_LESSER_THAN or C.MDBX_SET_RANGE
 		first_op = reverse and C.MDBX_LAST or C.MDBX_FIRST
 		next_op = step_op
-		next_pk_op = is_index and dup_op
-		next_key_op = is_index and nodup_op or next_op
+		next_in_group_op = is_index and dup_op
+		next_group_op = is_index and nodup_op or next_op
 	end
 
 	local cur
 	local base_cur --base-table lookup state
 
-	--land on the first row the next bounds admit; when nothing lands, or
-	--the landing is already past the limit, try the bounds after those.
-	local function seek_next()
+	--move on the first row between the seek key and the limit key given by
+	--next_bounds(); when move finds no row there, or lands past the limit key,
+	--ask next_bounds() again.
+	local function seek_next() -- -> true | nil
 		while true do
 			local ok, seek_data, seek_sz, limit_data, limit_sz = next_bounds()
 			if not ok then return end
@@ -990,7 +992,7 @@ function Db:scan(tbl, path, alias)
 			then
 				if not seek_next() then return end
 			end
-		else --next_*op is nil, no advance or limit check.
+		else --op is nil, no advance or limit check.
 			return
 		end
 		if base_key_rec then
@@ -1003,18 +1005,41 @@ function Db:scan(tbl, path, alias)
 		return true
 	end
 	function scan.next(by_group)
-		local op; if by_group then op = next_key_op else op = next_op end
+		local op; if by_group then op = next_group_op else op = next_op end
 		return next_row(op)
 	end
 	function scan.next_in_group()
-		return next_row(next_pk_op)
+		return next_row(next_in_group_op)
 	end
 	function scan.next_group()
-		return next_row(next_key_op)
+		return next_row(next_group_op)
 	end
 	function scan.found()
 		return found
 	end
+
+	--use the stored row count for full scans and scans with an exact index key.
+	--if next() is replaced downstream, the slow Scan:count() is called instead.
+	local count_fast
+	if not has_bound and not exact_key then
+		count_fast = function() return db:table_entries(schema.name) end
+	elseif not has_bound and is_index then --exact index key: count its dups
+		count_fast = function(args)
+			scan.reset(args)
+			if not scan.next() then return 0 end
+			return cur:dup_count()
+		end
+	end
+	if count_fast then
+		local plain_next = scan.next
+		function scan:count(args)
+			if scan.next ~= plain_next then return Scan.count(self, args) end
+			local n = count_fast(args)
+			scan.close()
+			return n
+		end
+	end
+
 	function scan:need_base()
 		if base_key_rec then return end
 		assert(not started)

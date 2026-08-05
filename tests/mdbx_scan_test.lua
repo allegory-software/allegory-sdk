@@ -1778,15 +1778,30 @@ end
 --index key holds its original text, which no bound can be encoded
 --against, so the order stops there.
 --count() reads every row, so it closes the scan like the other terminals
---that drain it.
+--that drain it. a scan with no key and no bound, and an exact index key
+--with nothing bounding its dups, are read off the DB instead.
 function test.scan_count()
 	with_db('scan_count', function(db)
 		add_scan_data(db)
 		db:begin'r'
+		--read off the DB
 		assert(db:scan('scan_rows', ''):count() == 5)
-		assert(db:scan('scan_rows', 'tenant_id = ?'):count{1} == 3)
+		assert(db:scan('scan_rows/status', ''):count() == 5)
+		assert(db:scan('scan_rows/status', 'status = ?'):count{'ready'} == 4)
 		assert(db:scan('scan_rows/status', 'status = ?'):count{'done'} == 1)
+		assert(db:scan('scan_rows/status', 'status = ?'):count{'nope'} == 0)
+		--stepped
+		assert(db:scan('scan_rows', 'tenant_id = ?'):count{1} == 3)
 		assert(db:scan('scan_rows', 'tenant_id = ?'):count{9} == 0)
+		assert(db:scan('scan_rows', 'tenant_id = ?, id = ?'):count{1, 2} == 1)
+		--a stage that drops rows replaces next(), so the shortcut is off
+		--and count() steps instead.
+		local filtered = db:scan('scan_rows', '')
+		local get_tenant = scan_col_decoder(db, filtered, 'tenant_id')
+		filtered:filter(function() return get_tenant() == 1 end)
+		assert(filtered:count() == 3)
+		assert(db:scan('scan_rows', ''):limit(2):count() == 2)
+
 		local scan = db:scan('scan_rows', '')
 		assert(scan:count() == 5)
 		--closed and reset again: same answer.
