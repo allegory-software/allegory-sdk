@@ -12,9 +12,10 @@ JOIN
 	- join_spec: 'TABLE|INDEX[@ALIAS].COL[,COL...] = MEMBER.COL[,COL...]'
 FILTER
 	scan:filter       (['[MEMBER.]COL [NAME],...', ]fn); fn({col->val}) -> t|f
-	scan:not_in       ('[MEMBER.]COL', values)
+	scan:in_|not_in   ('[MEMBER.]COL', values)
+	scan:where_has[nt](join_spec|inner_scan)     keep rows with/without a match
 	scan:limit        (n|{arg = 'KEY'}, [offset|{arg = 'KEY'}])
-	db:collate        (table, col, v) -> v              get comparison value
+	db:collate        (table, col, v) -> v       get comparison value
 SELECT
 	scan:select       ('[MEMBER.]COL [NAME],...'|outputs)
 TERMINALS
@@ -22,8 +23,8 @@ TERMINALS
 	scan:try_first    ([args]) -> scan | nil
 	scan:exists       ([args]) -> true | false
 	scan:count        ([args]) -> n
-	scan:left_rows    ([shape], [args]) -> iter() -> scan [, vals...|row]
 	scan:rows         ([shape], [args]) -> iter() -> scan, vals...|row
+	scan:left_rows    ([shape], [args]) -> iter() -> scan [, vals...|row]
 	scan:rows_array   ([shape], [args]) -> {row1,...}
 	scan:first        ([shape], [args]) -> vals... | row | nil
 	scan:one          ([shape], [args]) -> vals... | row | nil
@@ -1228,21 +1229,32 @@ function Scan:filter(cols, accept)
 	return self
 end
 
-function Scan:not_in(col, values)
-	local members, cols = col_specs(self, col, 'not_in')
-	assertf(#cols == 1, 'not_in: one col expected, got %d', #cols)
-	local get, ai_ci = self:col_decoder(members[1], cols[1], true)
-	local excluded = {}
+--keep the rows whose col is in values, or the rows whose col is not,
+--comparing by the col's collated form. for a col that a path term can
+--seek, use the 'in' path term instead: this reads every row.
+local function membership_filter(scan, col, values, what, want)
+	local members, cols = col_specs(scan, col, what)
+	assertf(#cols == 1, '%s: one col expected, got %d', what, #cols)
+	local get, ai_ci = scan:col_decoder(members[1], cols[1], true)
+	local set = {}
 	for _, value in ipairs(values) do
-		excluded[collate_value(value, ai_ci)] = true
+		set[collate_value(value, ai_ci)] = true
 	end
-	self:filter(function()
+	scan:filter(function()
 		--map DB null to the public null sentinel.
 		local value = get()
 		value = value == nil and null or value
-		return not excluded[value]
+		return (set[value] ~= nil) == want
 	end)
-	return self
+	return scan
+end
+
+function Scan:in_(col, values)
+	return membership_filter(self, col, values, 'in_', true)
+end
+
+function Scan:not_in(col, values)
+	return membership_filter(self, col, values, 'not_in', false)
 end
 
 --UNION ----------------------------------------------------------------------
@@ -1646,6 +1658,30 @@ end
 
 --when parent has no row, reset(), next(), col_decoder() must be no-ops
 --to avoid reading the current row from the parent through the scan params.
+--keep the rows that have at least one matching child row, or the rows
+--that have none. no member and no col is added: the child is read only to
+--answer whether it has a row, and the scan closes it.
+local function has_filter(parent, child, want)
+	child = parent:child_scan(child)
+	parent:filter(function()
+		return child:exists(parent.args) == want
+	end)
+	local close = parent.close
+	function parent.close()
+		child.close()
+		close()
+	end
+	return parent
+end
+
+function Scan:where_has(child)
+	return has_filter(self, child, true)
+end
+
+function Scan:where_hasnt(child)
+	return has_filter(self, child, false)
+end
+
 function Scan:child_scan(child)
 	local parent = self
 	if isstr(child) then child = inner_scan(parent, child) end

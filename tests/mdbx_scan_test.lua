@@ -2094,6 +2094,90 @@ function test.not_in_collates()
 	end)
 end
 
+--where_has()/where_hasnt() read the child only to answer whether it has a
+--row, so no member and no col is added and the row is not multiplied.
+function test.where_has_hasnt()
+	with_db('where_has_hasnt', function(db)
+		build_join_fixture(db)
+		db:begin'r'
+		local function ids(scan)
+			local t = {}
+			for _, row in scan:rows'{}' do t[#t+1] = row.id end
+			scan.close()
+			return cat(t, ',')
+		end
+
+		--users 1, 2 and 4 have sessions; 3 and 5 have none.
+		assert(ids(db:scan('users', 'id asc')
+			:where_has'sessions/user_id.user_id = users.id'
+			:select'users.id id') == '1,2,4')
+		assert(ids(db:scan('users', 'id asc')
+			:where_hasnt'sessions/user_id.user_id = users.id'
+			:select'users.id id') == '3,5')
+
+		--user 1 has three sessions and still comes out once.
+		assert(db:scan('users', 'id = ?')
+			:where_has'sessions/user_id.user_id = users.id'
+			:count{1} == 1)
+
+		--an inner scan built by the caller works the same.
+		local users = db:scan('users', 'id asc')
+		local sessions = db:scan('sessions/user_id', {
+			{'user_id', '=', {scan = users, col = 'id'}},
+		})
+		assert(ids(users:where_has(sessions):select'users.id id') == '1,2,4')
+
+		--the child can be filtered first: only sessions 11 and 14 have
+		--events, so only their users are left.
+		local users2 = db:scan('users', 'id asc')
+		local sessions2 = db:scan('sessions/user_id', {
+			{'user_id', '=', {scan = users2, col = 'id'}},
+		}):where_has'events/session_id.session_id = sessions.id'
+		assert(ids(users2:where_has(sessions2):select'users.id id') == '1,2')
+
+		db:commit()
+	end)
+end
+
+--in_() keeps what not_in() drops, comparing the same way.
+function test.in_collates()
+	with_db('in_collates', function(db)
+		build_ci_fixture(db)
+		db:begin'r'
+		local function ids(scan)
+			local t = {}
+			for _, row in scan:rows'{}' do t[#t+1] = row.id end
+			scan.close()
+			return cat(t, ',')
+		end
+
+		--one literal spelling keeps every spelling that folds to it.
+		assert(ids(db:scan('people', 'id asc')
+			:in_('name', {'josé'})
+			:select'people.id id') == '1,2')
+
+		--same answer off the index, where the col is already folded.
+		assert(ids(db:scan('people/name', 'name')
+			:in_('name', {'josé'})
+			:select'people.id id') == '1,2')
+
+		--a non-ai_ci col is compared as-is.
+		assert(ids(db:scan('people', 'id asc')
+			:in_('age', {30, 50})
+			:select'people.id id') == '1,3')
+
+		--an empty list keeps nothing.
+		assert(ids(db:scan('people', 'id asc')
+			:in_('age', {})
+			:select'people.id id') == '')
+
+		local one = db:scan('people', 'id asc')
+		assert(not pcall(one.in_, one, 'age, id', {1}))
+		one.close()
+		db:commit()
+	end)
+end
+
 --nulls and false bools ------------------------------------------------------
 
 --ok is null on 3 and 5 and false on 1 and 4; flag is a false pk col on
