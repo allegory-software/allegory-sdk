@@ -5078,6 +5078,127 @@ function test.triggers_cursor_update()
 	end)
 end
 
+--a trigger that writes to another table reenters the write path. the outer
+--op's key and old value must survive that, so a cursor update must still
+--write its own row.
+function test.trigger_nested_write_keeps_cur_update_key()
+	with_db('trigger_nested_write_keeps_cur_update_key', function(db)
+		local sc = mdbx_schema()
+		sc.tables['u'] = {
+			name = 'u',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}},
+			pk = {'id'},
+		}
+		sc.tables['t'] = {
+			name = 't',
+			fields = {
+				{col = 'id', mdbx_type = 'u32', not_null = true},
+				{col = 'v' , mdbx_type = 'u32'},
+			},
+			pk = {'id'},
+			triggers = {before_update = {function(db) db:del('u', 77) end}},
+		}
+		db.schema = sc
+		db:atomic('w', function()
+			db:without_schema(function()
+				db:create_table('u', sc.tables['u'])
+				db:create_table('t', sc.tables['t'])
+			end)
+		end)
+		db:begin'w'
+		db:insert('u', '{}', {id = 77})
+		db:insert('t', '{}', {id = 1, v = 10})
+		local cur = db:cursor('t')
+		assert(cur:try_find(nil, 1))
+		cur:update('v', 20)
+		cur:close()
+		assert(db:find('t', 'v', 1) == 20)
+		assert(not db:exists('u', 77))
+		db:commit()
+	end)
+end
+
+--same for delete: the deleted row's key and value drive index cleanup after
+--the trigger ran, so the index must end up empty too.
+function test.trigger_nested_write_keeps_del_key()
+	with_db('trigger_nested_write_keeps_del_key', function(db)
+		local sc = mdbx_schema()
+		sc.tables['u'] = {
+			name = 'u',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}},
+			pk = {'id'},
+		}
+		sc.tables['t'] = {
+			name = 't',
+			fields = {
+				{col = 'id', mdbx_type = 'u32', not_null = true},
+				{col = 'v' , mdbx_type = 'u32', not_null = true},
+			},
+			pk = {'id'},
+			ixs = {['t/v'] = {'v'}},
+			triggers = {before_delete = {function(db) db:del('u', 77) end}},
+		}
+		db.schema = sc
+		db:atomic('w', function()
+			db:without_schema(function()
+				db:create_table('u', sc.tables['u'])
+				db:create_table('t', {name = 't',
+					fields = sc.tables['t'].fields, pk = sc.tables['t'].pk})
+				db:add_index('t', {'v'})
+			end)
+		end)
+		db:begin'w'
+		db:insert('u', '{}', {id = 77})
+		db:insert('t', '{}', {id = 1, v = 10})
+		db:del('t', 1)
+		assert(not db:exists('t', 1))
+		assert(not db:try_find('t/v', nil, 10))
+		local n = 0
+		for _ in db:each_raw't/v' do n = n + 1 end
+		assert(n == 0, n)
+		db:commit()
+	end)
+end
+
+--triggers nested two deep: every insert must land under its own key.
+function test.trigger_nested_inserts_keep_own_keys()
+	with_db('trigger_nested_inserts_keep_own_keys', function(db)
+		local sc = mdbx_schema()
+		local function spec(name, triggers)
+			return {
+				name = name,
+				fields = {
+					{col = 'id', mdbx_type = 'u32', not_null = true},
+					{col = 'v' , mdbx_type = 'u32'},
+				},
+				pk = {'id'},
+				triggers = triggers,
+			}
+		end
+		sc.tables['t3'] = spec('t3', {after_insert = {function() end}})
+		sc.tables['t2'] = spec('t2', {before_insert = {function(db)
+			db:insert('t3', '{}', {id = 33, v = 3})
+		end}})
+		sc.tables['t1'] = spec('t1', {before_insert = {function(db)
+			db:insert('t2', '{}', {id = 22, v = 2})
+		end}})
+		db.schema = sc
+		db:atomic('w', function()
+			db:without_schema(function()
+				for _, name in ipairs{'t1', 't2', 't3'} do
+					db:create_table(name, sc.tables[name])
+				end
+			end)
+		end)
+		db:begin'w'
+		db:insert('t1', '{}', {id = 11, v = 1})
+		assert(db:find('t1', 'v', 11) == 1)
+		assert(db:find('t2', 'v', 22) == 2)
+		assert(db:find('t3', 'v', 33) == 3)
+		db:commit()
+	end)
+end
+
 -- generated columns ---------------------------------------------------------
 
 --create a paper schema table with a generated column 'upper' = val:upper().
@@ -5468,6 +5589,275 @@ function test.seed_rows_fk_cycle()
 		assert(tostring(err):find('fk cycle between seeded tables', 1, true),
 			tostring(err))
 		assert(db.txn == nil)
+	end)
+end
+
+-- check constraints ---------------------------------------------------------
+
+--table with a lua_check on a val col and one on a key col.
+local function check_table(db, val_expr, val_error, key_expr)
+	local spec = {
+		name = 't',
+		fields = {
+			{col = 'code' , mdbx_type = 'utf8', maxlen = 8, nozero = true,
+			 not_null = true, lua_check = key_expr},
+			{col = 'price', mdbx_type = 'i32', lua_check = val_expr,
+			 lua_check_error = val_error},
+		},
+		pk = {'code'},
+	}
+	local sc = mdbx_schema()
+	sc.tables['t'] = spec
+	db.schema = sc
+	db:atomic('w', function()
+		db:without_schema(function() db:create_table('t', spec) end)
+	end)
+	return spec
+end
+
+local function check_field_error(err, event, col, message)
+	assert(iserror(err, 'field'), tostring(err))
+	assert(err.event == event, tostring(err.event))
+	assert(err.table == 't', tostring(err.table))
+	assert(err.col == col, tostring(err.col))
+	assert(err.message == message, tostring(err.message))
+end
+
+--every write path runs the check; the expression is the default message.
+function test.check_rejects_writes()
+	with_db('check_rejects_writes', function(db)
+		check_table(db, 'v > 0')
+		db:atomic('w', function()
+			db:insert('t', '{}', {code = 'a', price = 10})
+		end)
+		local ok, err = try_mutation(db, db.insert,
+			't', '{}', {code = 'b', price = -1})
+		assert(not ok)
+		check_field_error(err, 'insert', 'price', 'check: v > 0')
+		ok, err = try_mutation(db, db.update,
+			't', '{}', {code = 'a', price = 0})
+		assert(not ok)
+		check_field_error(err, 'update', 'price', 'check: v > 0')
+		ok, err = try_mutation(db, db.upsert,
+			't', '{}', {code = 'c', price = -5})
+		assert(not ok)
+		check_field_error(err, 'upsert', 'price', 'check: v > 0')
+		ok, err = try_mutation(db, db.put_records, 't', '{}',
+			{{code = 'd', price = -7}})
+		assert(not ok)
+		check_field_error(err, 'put_rec', 'price', 'check: v > 0')
+		db:atomic('r', function()
+			assert(db:find('t', 'price', 'a') == 10)
+			assert(not db:exists('t', 'b'))
+		end)
+	end)
+end
+
+--cur:update runs the check too.
+function test.check_rejects_cur_update()
+	with_db('check_rejects_cur_update', function(db)
+		check_table(db, 'v > 0')
+		db:atomic('w', function()
+			db:insert('t', '{}', {code = 'a', price = 10})
+		end)
+		local ok, err = try_mutation(db, function(db)
+			local cur = db:cursor('t')
+			assert(cur:try_find(nil, 'a'))
+			cur:update('price', -1)
+			cur:close()
+		end)
+		assert(not ok)
+		check_field_error(err, 'c_update', 'price', 'check: v > 0')
+	end)
+end
+
+--lua_check_error replaces the default message.
+function test.check_custom_error_message()
+	with_db('check_custom_error_message', function(db)
+		check_table(db, 'v > 0', 'price must be positive')
+		local ok, err = try_mutation(db, db.insert,
+			't', '{}', {code = 'a', price = -1})
+		assert(not ok)
+		check_field_error(err, 'insert', 'price', 'price must be positive')
+	end)
+end
+
+--a null value is not checked; not_null is what forbids it.
+function test.check_skipped_for_null()
+	with_db('check_skipped_for_null', function(db)
+		check_table(db, 'v > 0')
+		db:atomic('w', function()
+			db:insert('t', '{}', {code = 'a'})
+			db:insert('t', '{}', {code = 'b', price = null})
+		end)
+		db:atomic('r', function()
+			assert(db:find('t', 'price', 'a') == nil)
+			assert(db:is_null('t', 'price', 'b'))
+		end)
+	end)
+end
+
+--a key col's check runs wherever its key is encoded, lookups included.
+function test.check_on_key_col()
+	with_db('check_on_key_col', function(db)
+		check_table(db, nil, nil, '#v == 3')
+		db:atomic('w', function()
+			db:insert('t', '{}', {code = 'abc', price = 1})
+		end)
+		local ok, err = try_mutation(db, db.insert,
+			't', '{}', {code = 'ab', price = 1})
+		assert(not ok)
+		check_field_error(err, 'insert', 'code', 'check: #v == 3')
+		ok, err = try_mutation(db, db.find, 't', 'price', 'ab')
+		assert(not ok)
+		check_field_error(err, 'get', 'code', 'check: #v == 3')
+		ok, err = try_mutation(db, db.del, 't', 'ab')
+		assert(not ok)
+		check_field_error(err, 'del', 'code', 'check: #v == 3')
+		db:atomic('r', function()
+			assert(db:find('t', 'price', 'abc') == 1)
+		end)
+	end)
+end
+
+--the expression is stored, so it is enforced without a paper schema too.
+function test.check_enforced_from_stored_schema()
+	with_db_reopen('check_enforced_from_stored_schema', function(db)
+		check_table(db, 'v > 0')
+		db:atomic('w', function()
+			db:insert('t', '{}', {code = 'a', price = 10})
+		end)
+	end, function(db)
+		assert(db.schema == nil)
+		local ok, err = try_mutation(db, db.insert,
+			't', '{}', {code = 'b', price = -1})
+		assert(not ok)
+		check_field_error(err, 'insert', 'price', 'check: v > 0')
+		db:atomic('w', function()
+			db:insert('t', '{}', {code = 'b', price = 1})
+		end)
+	end)
+end
+
+--before_insert runs first, so a trigger can repair a value that would fail.
+function test.check_runs_after_before_insert_trigger()
+	with_db('check_runs_after_before_insert_trigger', function(db)
+		local spec = {
+			name = 't',
+			fields = {
+				{col = 'id'   , mdbx_type = 'u32', not_null = true},
+				{col = 'price', mdbx_type = 'i32', lua_check = 'v > 0'},
+			},
+			pk = {'id'},
+			triggers = {before_insert = {function(db, new)
+				if new.price and new.price < 1 then new.price = 1 end
+			end}},
+		}
+		local sc = mdbx_schema()
+		sc.tables['t'] = spec
+		db.schema = sc
+		db:atomic('w', function()
+			db:without_schema(function() db:create_table('t', spec) end)
+		end)
+		db:begin'w'
+		db:insert('t', '{}', {id = 1, price = -5})
+		assert(db:find('t', 'price', 1) == 1)
+		db:commit()
+	end)
+end
+
+--a generated column's value is checked, not the value that was written.
+function test.check_runs_after_generated_col()
+	with_db('check_runs_after_generated_col', function(db)
+		local spec = {
+			name = 't',
+			fields = {
+				{col = 'id'    , mdbx_type = 'u32', not_null = true},
+				{col = 'price' , mdbx_type = 'i32'},
+				{col = 'double', mdbx_type = 'i32', lua_check = 'v > 0',
+				 generate = function(db, new) return new.price * 2 end},
+			},
+			pk = {'id'},
+		}
+		local sc = mdbx_schema()
+		sc.tables['t'] = spec
+		db.schema = sc
+		db:atomic('w', function()
+			db:without_schema(function() db:create_table('t', spec) end)
+		end)
+		db:atomic('w', function() db:insert('t', '{}', {id = 1, price = 5}) end)
+		local ok, err = try_mutation(db, db.insert,
+			't', '{}', {id = 2, price = -5})
+		assert(not ok)
+		check_field_error(err, 'insert', 'double', 'check: v > 0')
+		db:atomic('r', function() assert(db:find('t', 'double', 1) == 10) end)
+	end)
+end
+
+--changing the expression validates the stored rows: a violated check fails
+--the migration and leaves the rows alone.
+function test.check_validates_existing_rows()
+	with_db('check_validates_existing_rows', function(db)
+		local spec = check_table(db, 'v > 0')
+		db:atomic('w', function()
+			db:insert('t', '{}', {code = 'a', price = 10})
+			db:insert('t', '{}', {code = 'b', price = 20})
+		end)
+		spec.fields[2].lua_check = 'v >= 10'
+		db:sync_schema()
+		spec.fields[2].lua_check = 'v > 15'
+		local ok, err = pcall(db.sync_schema, db)
+		assert(not ok)
+		assert(iserror(err, 'schema'), tostring(err))
+		assert(err.message == 'check: v > 15', tostring(err.message))
+		assert(db.txn == nil)
+		spec.fields[2].lua_check = 'v >= 10'
+		db:atomic('r', function()
+			assert(db:find('t', 'price', 'a') == 10)
+			assert(db:find('t', 'price', 'b') == 20)
+			assert_consistent(db, 'check_validates_existing_rows')
+		end)
+	end)
+end
+
+--a malformed expression is rejected when the table's schema is compiled.
+function test.check_invalid_expression()
+	with_db('check_invalid_expression', function(db)
+		local ok, err = pcall(check_table, db, 'v >')
+		assert(not ok)
+		assert(tostring(err):find('lua_check t.price:', 1, true), tostring(err))
+	end)
+end
+
+--an expression can only name v.
+function test.check_expression_unknown_name()
+	with_db('check_expression_unknown_name', function(db)
+		check_table(db, 'v > price')
+		local ok, err = pcall(db.atomic, db, 'w', db.insert, db,
+			't', '{}', {code = 'a', price = 1})
+		assert(not ok)
+		assert(tostring(err):find('lua_check: unknown name `price`', 1, true),
+			tostring(err))
+	end)
+end
+
+--lua_check() in a schema definition sets the field attr that mdbx reads.
+function test.check_declared_with_lua_check_flag()
+	with_db('check_declared_with_lua_check_flag', function(db)
+		local sc = mdbx_schema()
+		sc:import(function()
+			import'schema_std'
+			tables.t = {
+				id   , idpk,
+				price, int, lua_check('v > 0', 'price must be positive'),
+			}
+		end)
+		assert(sc.tables.t.fields.price.lua_check == 'v > 0')
+		db.schema = sc
+		db:sync_schema()
+		local ok, err = try_mutation(db, db.insert, 't', '{}', {price = -1})
+		assert(not ok)
+		check_field_error(err, 'insert', 'price', 'price must be positive')
 	end)
 end
 

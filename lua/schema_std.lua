@@ -75,6 +75,12 @@ do
 		return now()
 	end
 
+	function env.lua_check(expr, error_message)
+		return function()
+			return {lua_check = expr, lua_check_error = error_message}
+		end
+	end
+
 end
 
 local current_timestamp_symbol = setmetatable({'current_timestamp'}, {
