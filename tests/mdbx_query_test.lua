@@ -3377,6 +3377,301 @@ function test.rel_source_explain()
 	end)
 end
 
+--a list collation orders a col by the order its values are declared in,
+--whether the plan seeks on an index or checks rows one by one. values that
+--the list does not name sort after every named one, among themselves by text.
+function test.list_collation_order()
+	with_db('list_collation_order', function(db)
+		local sig = 'list\0open\0pending\0closed'
+		db:atomic('w', function()
+			db:create_table('tk', {fields = {
+				{col = 'id', mdbx_type = 'u32', not_null = true},
+				{col = 'st', mdbx_type = 'utf8', maxlen = 16, nozero = true,
+					not_null = true, mdbx_collation = sig},
+				{col = 'pr', mdbx_type = 'utf8', maxlen = 16, nozero = true,
+					not_null = true, mdbx_collation = 'list\0low\0high'},
+			}, pk = {'id'}})
+			db:add_index('tk', {'st'})
+			db:insert('tk', '{}', {id = 1, st = 'closed' , pr = 'high'})
+			db:insert('tk', '{}', {id = 2, st = 'open'   , pr = 'low' })
+			db:insert('tk', '{}', {id = 3, st = 'zzz'    , pr = 'high'})
+			db:insert('tk', '{}', {id = 4, st = 'pending', pr = 'low' })
+			db:insert('tk', '{}', {id = 5, st = 'aaa'    , pr = 'high'})
+		end)
+		db:atomic('r', function()
+			local function ids(rel)
+				return cat(collect_ids(compile_step(db, rel:prepare()), 'tk'), ',')
+			end
+			--alphabetically this would be aaa,closed,open,pending,zzz = 5,1,2,4,3
+			assert(ids(db:from('tk'):order_by'tk.st':select'tk.id id')
+				== '2,4,1,5,3')
+			--st is indexed, so this range is a seek.
+			assert(ids(db:from('tk')
+				:where({'>', q.col('tk.st'), 'open'})
+				:select'tk.id id') == '4,1,5,3')
+			--pr has no index, so this one is checked row by row.
+			assert(ids(db:from('tk')
+				:where({'>', q.col('tk.pr'), 'low'})
+				:select'tk.id id') == '1,3,5')
+			--a value the list does not name still compares by its own key.
+			assert(ids(db:from('tk')
+				:where({'=', q.col('tk.st'), 'zzz'})
+				:select'tk.id id') == '3')
+			--max reads the collation order but emits the stored value.
+			local top = db:from('tk')
+				:group_by{{{'max', q.col('tk.st')}, 'top'}}:one()
+			assert(top == 'zzz', tostring(top))
+			--a prefix reads the original text, not the rank bytes.
+			assert(ids(db:from('tk')
+				:where({'starts', q.col('tk.st'), 'p'})
+				:select'tk.id id') == '4')
+			assert(ids(db:from('tk')
+				:where({'starts', q.col('tk.st'), 'zz'})
+				:select'tk.id id') == '3')
+		end)
+	end)
+end
+
+--two cols with different collations have no shared order.
+function test.list_collation_refusals()
+	with_db('list_collation_refusals', function(db)
+		db:atomic('w', function()
+			db:create_table('tk', {fields = {
+				{col = 'id', mdbx_type = 'u32', not_null = true},
+				{col = 'st', mdbx_type = 'utf8', maxlen = 16, nozero = true,
+					not_null = true, mdbx_collation = 'list\0open\0closed'},
+				{col = 'pr', mdbx_type = 'utf8', maxlen = 16, nozero = true,
+					not_null = true, mdbx_collation = 'list\0low\0high'},
+			}, pk = {'id'}})
+			db:insert('tk', '{}', {id = 1, st = 'open', pr = 'low'})
+		end)
+		db:atomic('r', function()
+			--the refusal reads what each operand's decoder returns, so it
+			--lands when the step compiles, not when the rel prepares.
+			local function refused(msg, build)
+				local ok, err = pcall(build)
+				assert(not ok, 'expected a refusal: '..msg)
+				assert(tostring(err):find(msg, 1, true), tostring(err))
+			end
+			for _, op in ipairs{'=', '<'} do
+				refused('cols collate unlike', function()
+					local rel = db:from('tk')
+						:where({op, q.col('tk.st'), q.col('tk.pr')})
+						:select'tk.id id':prepare()
+					collect_ids(compile_step(db, rel), 'tk')
+				end)
+			end
+		end)
+	end)
+end
+
+function test.list_collation_reused_literal()
+	with_db('list_collation_reused_literal', function(db)
+		db:atomic('w', function()
+			db:create_table('tk', {fields = {
+				{col = 'id', mdbx_type = 'u32', not_null = true},
+				{col = 'a', mdbx_type = 'utf8', maxlen = 16, nozero = true,
+					not_null = true, mdbx_collation = 'list\0x\0y'},
+				{col = 'b', mdbx_type = 'utf8', maxlen = 16, nozero = true,
+					not_null = true, mdbx_collation = 'list\0y\0x'},
+			}, pk = {'id'}})
+			db:insert('tk', '{}', {id = 1, a = 'x', b = 'x'})
+		end)
+		db:atomic('r', function()
+			local rel = db:from('tk'):where({'and',
+				{'=', q.col('tk.a'), 'x'},
+				{'=', q.col('tk.b'), 'x'},
+			}):prepare()
+			assert(rel:count() == 1)
+		end)
+	end)
+end
+
+function test.list_collation_in_col_value()
+	with_db('list_collation_in_col_value', function(db)
+		db:atomic('w', function()
+			db:create_table('tk', {fields = {
+				{col = 'id', mdbx_type = 'u32', not_null = true},
+				{col = 'st', mdbx_type = 'utf8', maxlen = 16, nozero = true,
+					not_null = true,
+					mdbx_collation = 'list\0open\0closed'},
+			}, pk = {'id'}})
+			db:insert('tk', '{}', {id = 1, st = 'open'})
+		end)
+		db:atomic('r', function()
+			local rel = db:from('tk')
+				:where({'in', q.col('tk.st'), {q.col('tk.st')}})
+				:prepare()
+			assert(rel:count() == 1)
+		end)
+	end)
+end
+
+--COLLATION COVERAGE ---------------------------------------------------------
+
+local COLL_LIST = 'list\0open\0pending\0closed'
+
+local function coll_db(db)
+	db:atomic('w', function()
+		db:create_table('tk', {fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'st', mdbx_type = 'utf8', maxlen = 16, nozero = true,
+				not_null = true, mdbx_collation = COLL_LIST},
+			{col = 'nm', mdbx_type = 'utf8', maxlen = 16, nozero = true,
+				not_null = true, mdbx_collation = 'utf8_ai_ci'},
+			{col = 'pl', mdbx_type = 'utf8', maxlen = 16, nozero = true,
+				not_null = true},
+		}, pk = {'id'}})
+		db:insert('tk', '{}', {id = 1, st = 'closed' , nm = 'José', pl = 'jose'})
+		db:insert('tk', '{}', {id = 2, st = 'open'   , nm = 'Ana' , pl = 'ana'})
+		db:insert('tk', '{}', {id = 3, st = 'pending', nm = 'ANA' , pl = 'zoe'})
+	end)
+end
+
+--grouping and distinct bucket by the collation key, so values that collate
+--alike land in one group while the display value is what comes out.
+function test.collation_group_and_distinct()
+	with_db('collation_group_and_distinct', function(db)
+		coll_db(db)
+		db:atomic('r', function()
+			local n = 0
+			for _ in db:from('tk'):group_by{'tk.nm nm', {{'count'}, 'n'}}
+				:rows'[]'
+			do n = n + 1 end
+			--Ana and ANA collate alike, José does not.
+			assert(n == 2, tostring(n))
+			local m = 0
+			for _ in db:from('tk'):select'tk.nm nm':distinct():rows'[]' do
+				m = m + 1
+			end
+			assert(m == 2, tostring(m))
+		end)
+	end)
+end
+
+--min and max read the collation order and emit the stored value.
+function test.collation_min_max()
+	with_db('collation_min_max', function(db)
+		coll_db(db)
+		db:atomic('r', function()
+			local lo = db:from('tk'):group_by{{{'min', q.col('tk.st')}, 'v'}}:one()
+			local hi = db:from('tk'):group_by{{{'max', q.col('tk.st')}, 'v'}}:one()
+			assert(lo == 'open', tostring(lo))
+			assert(hi == 'closed', tostring(hi))
+		end)
+	end)
+end
+
+--a param is collated against the col it is compared to, like a literal.
+function test.collation_param()
+	with_db('collation_param', function(db)
+		coll_db(db)
+		db:atomic('r', function()
+			local rel = db:from('tk')
+				:where({'>', q.col('tk.st'), q.param'v'})
+				:select'tk.id id':prepare()
+			local node = compile_step(db, rel)
+			--no index on st, so these come back in pk order, not collation
+			--order; what matters is which rows pass.
+			local ids = collect_ids(node, 'tk', {v = 'open'})
+			assert(cat(ids, ',') == '1,3', cat(ids, ','))
+		end)
+	end)
+end
+
+--a col with a collation and one without fold together: the collated side
+--decides how both are read.
+function test.collation_mixed_compare()
+	with_db('collation_mixed_compare', function(db)
+		coll_db(db)
+		db:atomic('r', function()
+			local rel = db:from('tk')
+				:where({'=', q.col('tk.nm'), q.col('tk.pl')})
+				:select'tk.id id':prepare()
+			local ids = collect_ids(compile_step(db, rel), 'tk')
+			--José/jose and Ana/ana match; ANA/zoe does not.
+			assert(cat(ids, ',') == '1,2', cat(ids, ','))
+		end)
+	end)
+end
+
+function test.list_collation_in_raw_col_value()
+	with_db('list_collation_in_raw_col_value', function(db)
+		db:atomic('w', function()
+			db:create_table('ti', {fields = {
+				{col = 'id', mdbx_type = 'u32', not_null = true},
+				{col = 'a', mdbx_type = 'utf8', maxlen = 16, nozero = true,
+					not_null = true,
+					mdbx_collation = 'list\0open\0closed'},
+				{col = 'b', mdbx_type = 'utf8', maxlen = 16, nozero = true,
+					not_null = true},
+			}, pk = {'id'}})
+			db:insert('ti', '{}', {id = 1, a = 'open', b = 'open'})
+		end)
+		db:atomic('r', function()
+			local rel = db:from('ti')
+				:where({'in', q.col('ti.a'), {q.col('ti.b')}})
+				:prepare()
+			assert(rel:count() == 1)
+		end)
+	end)
+end
+
+--a union's two sides must agree on each output col's collation.
+function test.collation_union_refuses_unlike()
+	with_db('collation_union_refuses_unlike', function(db)
+		coll_db(db)
+		db:atomic('r', function()
+			local ok, err = pcall(function()
+				local a = db:scan('tk', 'id asc', 'a'):select'a.st v'
+				local b = db:scan('tk', 'id asc', 'b'):select'b.nm v'
+				a:union(b)
+			end)
+			assert(not ok, 'a union of unlike collations was accepted')
+			assert(tostring(err):find('collation differs', 1, true),
+				tostring(err))
+		end)
+	end)
+end
+
+--a value the enum's list does not name matches nothing rather than raising,
+--whether the plan seeks on an index or checks rows one by one.
+function test.lua_enum_wrong_value_in_query()
+	with_db('lua_enum_wrong_value_in_query', function(db)
+		local sc = mdbx_schema()
+		sc:import(function()
+			import'schema_std'
+			tables.tq = {
+				id, idpk,
+				st, lua_enum'open pending closed', ix,
+				pr, lua_enum'low high',
+			}
+		end)
+		db.schema = sc
+		db:sync_schema()
+		db:atomic('w', function()
+			db:insert('tq', '{}', {id = 1, st = 'open'   , pr = 'low' })
+			db:insert('tq', '{}', {id = 2, st = 'closed' , pr = 'high'})
+			db:insert('tq', '{}', {id = 3, st = 'pending', pr = 'high'})
+		end)
+		db:atomic('r', function()
+			local function ids(col, v)
+				local rel = db:from('tq'):where({'=', q.col('tq.'..col), v})
+					:select'tq.id id':prepare()
+				return cat(collect_ids(compile_step(db, rel), 'tq'), ',')
+			end
+			--st is indexed so this seeks; pr is not so it is checked per row.
+			assert(ids('st', 'nope') == '', ids('st', 'nope'))
+			assert(ids('pr', 'nope') == '', ids('pr', 'nope'))
+			assert(ids('st', 'open') == '1', ids('st', 'open'))
+			assert(ids('pr', 'high') == '2,3', ids('pr', 'high'))
+			--the order is the declared one, not alphabetical.
+			local rel = db:from('tq'):order_by'tq.st':select'tq.id id':prepare()
+			assert(cat(collect_ids(compile_step(db, rel), 'tq'), ',') == '1,3,2')
+		end)
+	end)
+end
+
 local name = ...
 if name == 'mdbx_query_test' then name = nil end
 local tests = name and {name} or test

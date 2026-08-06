@@ -51,14 +51,14 @@ TABLE SCAN
 	scan.next_in_group () -> true | nil
 	scan.found         () -> true | nil
 	scan.close         ()
-	scan:col_decoder   (member, col, [comparison]) -> getter, ai_ci
+	scan:col_decoder   (member, col, [comparison]) -> getter, collator
 	scan.key_rec, scan.val_rec, scan.is_index, scan.can_next_group
 MERGE UNION
 	scan:merge_union (scan2) -> scan      ordered, deduped merge
 OUTPUT SCAN (after select() or aggregate())
 	scan.out_cols -> {'NAME',...}
 	scan.get           ([row]) -> scan, vals... | scan, row
-	scan:col_decoder   (name, [comparison]) -> getter, ai_ci
+	scan:col_decoder   (name, [comparison]) -> getter, collator
 MEMBER SCAN (after select() or aggregate())
 	scan:materialized_scan (alias)        load rows and wrap scan as alias
 	scan:streamed_scan     (alias)        wrap scan as alias (hide members)
@@ -85,7 +85,6 @@ local pout = new'const u8*[1]'
 local key_decode_buffer = u8a(MDBX_MAX_KEY_SIZE)
 
 local key_reencode = mdbx_key_reencode
-local collate_value = mdbx_collate_value
 
 --TABLE SCANNER --------------------------------------------------------------
 
@@ -148,7 +147,7 @@ Why so complicated:
  - edge case: an upper-only range on a nullable column requires creating a
    synthetic lower bound because null values come before non-null values; the
 	same lower bound is used for is_not_null.
- - edge case: index columns with ai_ci do not contain the original text.
+ - edge case: collated index columns do not contain the original text.
  - a base-table value from an index scan needs a secondary base-table lookup
    if the column is not in the index (we call this "uncovered").
  - a scan param is valid only while its source scan has a current row.
@@ -182,8 +181,7 @@ local function scan_param_rec(db, param, output_field)
 	local field = param_schema.fields[param.col]
 	local rec
 	if field and field.key_index
-		and (field.mdbx_collation ~= 'utf8_ai_ci'
-			or output_field.mdbx_collation == 'utf8_ai_ci')
+		and field.key_collator == output_field.key_collator
 	then --field is in the index's key_rec and it's usable raw.
 		rec = scan.key_rec
 	else
@@ -226,7 +224,7 @@ local function direct_read_rec(db, schema, params)
 			or field.maxlen ~= output_field.maxlen
 			or field.padded ~= output_field.padded
 			or field.nozero ~= output_field.nozero
-			or field.mdbx_collation ~= output_field.mdbx_collation
+			or field.key_collator ~= output_field.key_collator
 		then
 			return
 		end
@@ -292,7 +290,7 @@ local function key_add_param(db, param, output_schema, slot, scan, op)
 			or field.maxlen ~= output_field.maxlen
 			or field.padded ~= output_field.padded
 			or field.nozero ~= output_field.nozero
-			or field.mdbx_collation ~= output_field.mdbx_collation
+			or field.key_collator ~= output_field.key_collator
 		then
 			local decode = field.decode
 			assertf(decode, 'incompatible: %s.%s -> %s.%s',
@@ -374,7 +372,7 @@ local MDBX_val_size = sizeof'MDBX_val'
 
 --a col the leading depth fields fix holds one value for the whole scan,
 --so a path that names it again (an index key col that is also a pk col)
---orders nothing the second time. an ai_ci col keeps its collated form in
+--orders nothing the second time. a collated col keeps its key form in
 --an index key and its original text in the base key, so a bound cannot be
 --encoded against one past the index key: the order stops there.
 local function scan_order(schema, depth, reverse)
@@ -385,7 +383,7 @@ local function scan_order(schema, depth, reverse)
 	for i = 1, depth do seen[fields[i].col] = true end
 	for i = depth + 1, #fields do
 		local field = fields[i]
-		if field.mdbx_collation == 'utf8_ai_ci'
+		if field.collator
 			and not (schema.is_index and i <= #schema.key_fields)
 		then break end
 		if not seen[field.col] then
@@ -678,7 +676,7 @@ function Db:scan(tbl, path, alias)
 			--range_order[1..range_n] indexes in_values in the order they are
 			--walked; order_ranges() fills it.
 			local range_order = {}
-			local ai_ci = range_field.mdbx_collation == 'utf8_ai_ci'
+			local coll = range_field.collator
 			local keys = {}
 			local by_key = values_ascending
 				and function(a, b) return keys[a] < keys[b] end
@@ -708,7 +706,7 @@ function Db:scan(tbl, path, alias)
 					if v ~= nil and v ~= null then
 						m = m + 1
 						in_values[m] = v
-						keys[m] = collate_value(v, ai_ci)
+						keys[m] = coll and coll.key(v) or v
 						range_order[m] = m
 					end
 				end
@@ -749,6 +747,11 @@ function Db:scan(tbl, path, alias)
 		if prefix_param then --prefix scans require a varsize string field.
 			assertf(range_field.maxlen and not range_field.padded,
 				'starts on field: %s', range_field.col)
+			--a prefix seeks the stored key bytes, so a collation that does
+			--not preserve prefixes cannot answer it.
+			local coll = range_field.key_collator
+			assertf(not coll or coll.prefix,
+				'starts on a %s field: %s', coll and coll.kind, range_field.col)
 		end
 
 		if range_field and range_field.descending then
@@ -1051,15 +1054,15 @@ function Db:scan(tbl, path, alias)
 
 	--col decoder -------------------------------------------------------------
 
-	--folded requests the column's ai_ci form instead of its display form.
+	--folded requests the column's collation key instead of its display form.
 	function scan:col_decoder(member, col, folded)
 		assertf(member == (alias or base_schema.name),
 			'col_decoder: unknown member: %s', tostring(member))
 		local field = schema.fields[col]
-		local indexed_ai_ci = schema.is_index and field and field.key_index
-			and field.mdbx_collation == 'utf8_ai_ci'
+		--an index key holds the collation key, not the original value.
+		local indexed_coll = field and field.key_collator
 		local get
-		if field and field.key_index and (not indexed_ai_ci or folded) then
+		if field and field.key_index and (not indexed_coll or folded) then
 			local st, ki, decode = schema._st, field.key_index-1, field.decode
 			get = function()
 				local len = C.schema_get_key_rec(st, ki, key_rec,
@@ -1068,7 +1071,7 @@ function Db:scan(tbl, path, alias)
 				return decode(pout[0], len)
 			end
 		else
-			--col_decoder() reads original ai_ci text from the base table.
+			--col_decoder() reads the original value from the base table.
 			field = base_schema.fields[col]
 			assertf(field, 'no field: %s.%s', schema.name, col)
 			local st = base_schema._st
@@ -1096,12 +1099,12 @@ function Db:scan(tbl, path, alias)
 				end
 			end
 		end
-		local ai_ci = field.mdbx_collation == 'utf8_ai_ci'
-		if folded and not indexed_ai_ci and ai_ci then
+		local coll = field.collator
+		if folded and not indexed_coll and coll then
 			local raw = get
-			get = function() return collate_value(raw(), true) end
+			get = function() return coll.key(raw()) end
 		end
-		return get, ai_ci
+		return get, coll
 	end
 
 	--explain -----------------------------------------------------------------
@@ -1229,10 +1232,10 @@ end
 local function membership_filter(scan, col, values, what, want)
 	local members, cols = col_specs(scan, col, what)
 	assertf(#cols == 1, '%s: one col expected, got %d', what, #cols)
-	local get, ai_ci = scan:col_decoder(members[1], cols[1], true)
+	local get, coll = scan:col_decoder(members[1], cols[1], true)
 	local set = {}
 	for _, value in ipairs(values) do
-		set[collate_value(value, ai_ci)] = true
+		set[coll and coll.key(value) or value] = true
 	end
 	scan:filter(function()
 		--map DB null to the public null sentinel.
@@ -1283,13 +1286,13 @@ function Scan:union(scan2)
 		local names1, names2 = scan1.out_cols, scan2.out_cols
 		assert(#names1 == #names2)
 		for i, name in ipairs(names1) do assert(name == names2[i]) end
-		local ai_ci = {}
+		local colls = {}
 		for _, name in ipairs(names1) do
-			local _, ai_ci1 = scan1:col_decoder(name)
-			local _, ai_ci2 = scan2:col_decoder(name)
-			assertf(ai_ci1 == ai_ci2,
+			local _, coll1 = scan1:col_decoder(name)
+			local _, coll2 = scan2:col_decoder(name)
+			assertf(coll1 == coll2,
 				'union: collation differs on output col: %s', name)
-			ai_ci[name] = ai_ci1
+			colls[name] = coll1
 		end
 		local get1, get2 = scan1.get, scan2.get
 		scan.out_cols = names1
@@ -1318,7 +1321,7 @@ function Scan:union(scan2)
 				else
 					return get2()
 				end
-			end, ai_ci[name]
+			end, colls[name]
 		end
 	elseif not output1 and not output2 then
 		scan.member_scans = scan1.member_scans
@@ -1331,7 +1334,7 @@ function Scan:union(scan2)
 			return scan.next(true)
 		end
 		function scan:col_decoder(member, col, folded)
-			local get1, ai_ci = scan1:col_decoder(member, col, folded)
+			local get1, coll = scan1:col_decoder(member, col, folded)
 			local get2 = scan2:col_decoder(member, col, folded)
 			return function()
 				if current_scan == scan1 then
@@ -1339,7 +1342,7 @@ function Scan:union(scan2)
 				else
 					return get2()
 				end
-			end, ai_ci
+			end, coll
 		end
 	end
 	function scan.explain()
@@ -1417,11 +1420,11 @@ function Scan:merge_union(scan2)
 		return found
 	end
 	function scan:col_decoder(member, col, folded)
-		local get1, ai_ci = scan1:col_decoder(member, col, folded)
+		local get1, coll = scan1:col_decoder(member, col, folded)
 		local get2 = scan2:col_decoder(member, col, folded)
 		return function()
 			if current_scan == scan1 then return get1() else return get2() end
-		end, ai_ci
+		end, coll
 	end
 	function scan.explain()
 		return {kind = 'merge_union', scan1.explain(), scan2.explain()}
@@ -1454,9 +1457,9 @@ local function set_filter(scan1, scan2, keep_matched, what)
 	for i, name in ipairs(names) do
 		assertf(name == scan2.out_cols[i],
 			'%s: inputs must return the same cols', what)
-		local g1, ai_ci1 = scan1:col_decoder(name, true)
-		local g2, ai_ci2 = scan2:col_decoder(name, true)
-		assertf(ai_ci1 == ai_ci2,
+		local g1, coll1 = scan1:col_decoder(name, true)
+		local g2, coll2 = scan2:col_decoder(name, true)
+		assertf(coll1 == coll2,
 			'%s: collation differs on out col: %s', what, name)
 		get1[i], get2[i] = g1, g2
 	end
@@ -1626,11 +1629,11 @@ local function join_scan(outer, inner, left, accept)
 		if outer.member_scans[member] then
 			return outer:col_decoder(member, col, folded)
 		end
-		local get, ai_ci = inner:col_decoder(member, col, folded)
+		local get, coll = inner:col_decoder(member, col, folded)
 		return function()
 			if not inner_found() then return nil end
 			return get()
-		end, ai_ci
+		end, coll
 	end
 	function join.explain()
 		return {kind = left and 'left_join' or 'join',
@@ -1691,11 +1694,11 @@ function Scan:child_scan(child)
 	end
 	local decode = child.col_decoder
 	function child:col_decoder(member, col, folded)
-		local get, ai_ci = decode(child, member, col, folded)
+		local get, coll = decode(child, member, col, folded)
 		return function()
 			if not child.found() then return nil end
 			return get()
-		end, ai_ci
+		end, coll
 	end
 	return child
 end
@@ -1723,11 +1726,11 @@ local function serve_row(scan)
 		return materialized_get(scan, row, out_row)
 	end
 	function scan:col_decoder(name, comparison)
-		local _, ai_ci = col_decoder(scan, name)
-		if comparison and ai_ci then
-			return function() return collate_value(row[name], true) end, true
+		local _, coll = col_decoder(scan, name)
+		if comparison and coll then
+			return function() return coll.key(row[name]) end, coll
 		end
-		return function() return row[name] end, ai_ci
+		return function() return row[name] end, coll
 	end
 	return function(r) row = r end
 end
@@ -1843,9 +1846,9 @@ function Scan:select(outputs)
 	assert(not scan.get)
 
 	local members, cols, names = col_specs(self, outputs, 'select')
-	local decoders, ai_ci, out_i = {}, {}, {}
+	local decoders, colls, out_i = {}, {}, {}
 	for i, member in ipairs(members) do
-		decoders[i], ai_ci[i] = self:col_decoder(member, cols[i])
+		decoders[i], colls[i] = self:col_decoder(member, cols[i])
 		out_i[names[i]] = i
 	end
 
@@ -1858,7 +1861,7 @@ function Scan:select(outputs)
 		if comparison then
 			return col_decoder(scan, members[i], cols[i], true)
 		end
-		return decoders[i], ai_ci[i]
+		return decoders[i], colls[i]
 	end
 
 	install_get(scan, names, function(i) return decoders[i]() end)
@@ -2082,7 +2085,7 @@ end
 --null v; key copies key[a.part] straight through instead of aggregating
 --a per-row value (a.part indexes the group_by() cols this aggregate()
 --call was given, not this function's own state).
-local function agg_step(acc, a, key, v, ai_ci)
+local function agg_step(acc, a, key, v, coll)
 	local name = a.name
 	if a.op == 'key' then
 		acc[name] = key and key[a.part]
@@ -2095,8 +2098,8 @@ local function agg_step(acc, a, key, v, ai_ci)
 			acc[name].sum = acc[name].sum + v
 			acc[name].n   = acc[name].n   + 1
 		elseif a.op == 'min' then
-			if ai_ci then
-				local k = collate_value(v, true)
+			if coll then
+				local k = coll.key(v)
 				local won = acc[name]
 				if won == nil then
 					acc[name] = {value = v, key = k}
@@ -2107,8 +2110,8 @@ local function agg_step(acc, a, key, v, ai_ci)
 				acc[name] = v
 			end
 		elseif a.op == 'max' then
-			if ai_ci then
-				local k = collate_value(v, true)
+			if coll then
+				local k = coll.key(v)
 				local won = acc[name]
 				if won == nil then
 					acc[name] = {value = v, key = k}
@@ -2131,13 +2134,13 @@ local function agg_init(agg)
 	end
 	return acc
 end
-local function agg_finalize(agg, acc, ai_ci)
+local function agg_finalize(agg, acc, colls)
 	local rec = {}
 	for _, a in ipairs(agg) do
 		if a.op == 'avg' then
 			local s = acc[a.name]
 			rec[a.name] = s.n > 0 and s.sum / s.n or nil
-		elseif ai_ci[a.name] and (a.op == 'min' or a.op == 'max') then
+		elseif colls[a.name] and (a.op == 'min' or a.op == 'max') then
 			local won = acc[a.name]
 			if won == nil then rec[a.name] = nil else rec[a.name] = won.value end
 		else
@@ -2177,14 +2180,14 @@ function Scan:aggregate(agg, cols, hash)
 		return self:col_decoder(c.col, comparison)
 	end
 
-	local getters, names, ai_ci = {}, {}, {}
+	local getters, names, colls = {}, {}, {}
 	for i, a in ipairs(agg) do
 		names[i] = a.name
 		if a.op ~= 'key' and (a.member or a.col) then
-			local get, col_ai_ci = col_reader(a)
+			local get, col_coll = col_reader(a)
 			getters[a.name] = get
 			if a.op == 'min' or a.op == 'max' then
-				ai_ci[a.name] = col_ai_ci
+				colls[a.name] = col_coll
 			end
 		end
 	end
@@ -2196,13 +2199,13 @@ function Scan:aggregate(agg, cols, hash)
 	if cols then
 		key_getters = {}
 		if hash then bucket_getters = {} end
-		local key_ai_ci = {}
+		local key_colls = {}
 		for i, c in ipairs(cols) do
-			key_getters[i], key_ai_ci[i] = col_reader(c)
+			key_getters[i], key_colls[i] = col_reader(c)
 			if hash then bucket_getters[i] = col_reader(c, true) end
 		end
 		for _, a in ipairs(agg) do
-			if a.op == 'key' then ai_ci[a.name] = key_ai_ci[a.part] end
+			if a.op == 'key' then colls[a.name] = key_colls[a.part] end
 		end
 		nkeys = #key_getters
 	end
@@ -2218,7 +2221,7 @@ function Scan:aggregate(agg, cols, hash)
 			elseif a.op ~= 'key' then
 				v = getters[a.name]()
 			end
-			agg_step(acc, a, key, v, ai_ci[a.name])
+			agg_step(acc, a, key, v, colls[a.name])
 		end
 	end
 	--key is scratch, reused across calls: agg_step()/the bucket-key
@@ -2240,7 +2243,7 @@ function Scan:aggregate(agg, cols, hash)
 			done = true
 			local acc = agg_init(agg)
 			while next_row() do accumulate(acc, nil) end
-			scan.row = agg_finalize(agg, acc, ai_ci)
+			scan.row = agg_finalize(agg, acc, colls)
 			found = true
 			return true
 		end
@@ -2263,7 +2266,7 @@ function Scan:aggregate(agg, cols, hash)
 				end
 				output = {}
 				for i, acc in ipairs(order) do
-					output[i] = agg_finalize(agg, acc, ai_ci)
+					output[i] = agg_finalize(agg, acc, colls)
 				end
 				group_i = 0
 			end
@@ -2280,7 +2283,7 @@ function Scan:aggregate(agg, cols, hash)
 			local acc = agg_init(agg)
 			accumulate(acc, key)
 			while scan.next_in_group() do accumulate(acc, key) end
-			scan.row = agg_finalize(agg, acc, ai_ci)
+			scan.row = agg_finalize(agg, acc, colls)
 			found = true
 			return true
 		end
@@ -2304,13 +2307,13 @@ function Scan:aggregate(agg, cols, hash)
 	function scan:col_decoder(name, comparison)
 		assertf(out_name[name], 'col_decoder: unknown output col: %s',
 			tostring(name))
-		local col_ai_ci = ai_ci[name] or false
-		if comparison and col_ai_ci then
+		local coll = colls[name]
+		if comparison and coll then
 			return function()
-				return collate_value(scan.row[name], true)
-			end, true
+				return coll.key(scan.row[name])
+			end, coll
 		end
-		return function() return scan.row[name] end, col_ai_ci
+		return function() return scan.row[name] end, coll
 	end
 
 	install_get(scan, names, function(i) return scan.row[names[i]] end)
@@ -2474,11 +2477,11 @@ function Scan:materialized_scan(alias)
 	function scan:col_decoder(member, col, folded)
 		assertf(member == alias, 'col_decoder: unknown member: %s',
 			tostring(member))
-		local _, ai_ci = child:col_decoder(col)
-		if folded and ai_ci then
-			return function() return collate_value(row[col], true) end, true
+		local _, coll = child:col_decoder(col)
+		if folded and coll then
+			return function() return coll.key(row[col]) end, coll
 		end
-		return function() return row[col] end, ai_ci
+		return function() return row[col] end, coll
 	end
 	return scan
 end
@@ -2508,7 +2511,8 @@ function Db:collate(tbl, col, v)
 	local base_schema = schema.val_schema or schema
 	local field = assertf(base_schema.fields[col] or schema.fields[col],
 		'collate: no col: %s.%s', tbl, col)
-	return collate_value(v, field.mdbx_collation == 'utf8_ai_ci')
+	local coll = field.collator
+	return coll and coll.key(v) or v
 end
 
 --VALUES SCAN ----------------------------------------------------------------

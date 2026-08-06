@@ -674,9 +674,9 @@ Returns f() -> decoded value for the current cursor position.
 function Db:col_decoder(schema, col, ix_key, pk, get_base_val)
 	local out, out_sz = key_decode_buffer, MDBX_MAX_KEY_SIZE
 	local ix_f = schema.is_index and schema.fields[col]
-	--an ai_ci index key stores lowercased, accent-stripped text, not the
-	--original; the original is only in the base table.
-	if ix_f and ix_f.mdbx_collation == 'utf8_ai_ci' then ix_f = nil end
+	--a collated index key stores the collation key, not the original value;
+	--the original is only in the base table.
+	if ix_f and ix_f.key_collator then ix_f = nil end
 	if ix_f then
 		local st, ki, decode = schema._st, ix_f.key_index-1, ix_f.decode
 		return function()
@@ -725,17 +725,15 @@ function Db:key_encoder(
 	local table_schema = schema.val_schema or schema
 	local col_reads = {} -- {st, field_index, record | false, elem_size, ...}
 	local key_prefix_schema, key_prefix_rec
-	local output_has_ai_ci
+	local output_is_collated
 	local all_cols_not_null = true
 	for i, col in ipairs(cols) do
-		output_has_ai_ci = output_has_ai_ci
-			or key_schema.key_fields[i].mdbx_collation == 'utf8_ai_ci'
+		output_is_collated = output_is_collated
+			or key_schema.key_fields[i].key_collator ~= nil
 		local field_schema = schema
 		local field = schema.fields[col]
 		local record = schema.is_index and ix_key or pk
-		if not field or not field.key_index
-			or field.mdbx_collation == 'utf8_ai_ci'
-		then
+		if not field or not field.key_index or field.key_collator then
 			field_schema = table_schema
 			field = table_schema.fields[col]
 			record = field.key_index and pk or nil
@@ -766,7 +764,7 @@ function Db:key_encoder(
 		end
 	end
 	-- rebuilding cannot apply utf8_ai_ci to base-table text.
-	assert(not output_has_ai_ci)
+	assert(not output_is_collated)
 
 	local out = key_rec_buffer
 	if key_prefix_schema then
@@ -804,6 +802,113 @@ function Db:key_encoder(
 	end
 end
 
+--COLLATIONS -----------------------------------------------------------------
+
+--fold a utf8 string to its ai_ci collation key: NFD-decompose + casefold +
+--stripmark, reencoded to utf8. lossy. returns (ptr, byte_len) into a reused
+--buffer that holds int32 codepoints during decompose, then the utf8 bytes.
+local ai_ci_buf = buffer(i32a)
+local ai_ci_opt = bor(UTF8_DECOMPOSE, UTF8_CASEFOLD, UTF8_STRIPMARK)
+local function encode_ai_ci(s, len)
+	local out, cap = ai_ci_buf(len + 1) --floor guess; the global buffer only grows
+	local n = num(utf8_decompose(s, len, out, cap, ai_ci_opt))
+	if n < 0 then return nil, n end
+	if n >= cap then --too small for the codepoints + utf8proc_reencode's nul terminator
+		out, cap = ai_ci_buf(n + 1)
+		n = utf8_decompose(s, len, out, cap, ai_ci_opt)
+	end
+	local sz = num(utf8_reencode(out, n, ai_ci_opt)) --in place: int32 cps -> utf8 bytes
+	assertf(sz >= 0, 'utf8_ai_ci: reencode failed (%d)', sz)
+	return out, sz
+end
+
+--turns a plain string into the same lowercased, accent-stripped form an
+--ai_ci index stores, for comparing/sorting by hand when there's no index
+--to do it for us. every comparison/dedup site that already knows (from
+--its own bound expression's source schema) whether a column folds must
+--read the value through this: v unchanged when v is null (the caller
+--decides what null means at that site) or fold is false; else v's
+--ai_ci-folded form.
+local function collate_value(v, fold)
+	if not fold or v == nil or v == null then return v end
+	local p, sz = encode_ai_ci(v, #v)
+	assertf(p, 'utf8_ai_ci: invalid utf8 (%d)', sz)
+	return ffi.string(p, sz)
+end
+mdbx_collate_value = collate_value
+
+--[[
+a collation orders values by mapping each one to a collation key: a byte
+string whose byte order is the collation's order. an index key col stores the
+collation key, the base table keeps the original value, so changing a
+collation rebuilds indexes but never rewrites rows.
+
+mdbx_collation is the collation's signature: 'KIND' or 'KIND\0ITEM\0ITEM...',
+which the kind reads back on its own. it identifies the collation everywhere:
+two cols compare and share raw key bytes only when their signatures match, and
+a changed signature rebuilds the indexes over that col.
+
+	collator.max_len (maxlen) -> max collation key len for an index key col
+	collator.key     (v) -> collation key | v (v is nil or null)
+	collator.write   (buf, val, len) -> len | nil, err
+	collator.prefix  -> true if a prefix of a value keys to a prefix of its key
+]]
+
+local collator_kinds = {}
+
+local collator = memoize(function(sig)
+	local i = sig:find('\0', 1, true)
+	local kind = i and sig:sub(1, i-1) or sig
+	local make = assertf(collator_kinds[kind], 'unknown collation: %s', sig)
+	local c = make(i and sig:sub(i+1) or nil)
+	c.kind = kind
+	return c
+end)
+
+function collator_kinds.utf8_ai_ci()
+	return {
+		prefix = true,
+		max_len = function(maxlen) return maxlen * 3 end,
+		key = function(v) return collate_value(v, true) end,
+		write = function(buf, val, len)
+			local p, sz = encode_ai_ci(val, len)
+			if not p then return nil, fmt('utf8_ai_ci: invalid utf8 (%d)', sz) end
+			copy(buf, p, sz)
+			return sz
+		end,
+	}
+end
+
+--a label's rank is its collation key; anything else sorts after every label
+--and lexicographically among its own kind.
+local unranked = 0xFF
+function collator_kinds.list(items)
+	local labels = collect(split(assert(items), '\0', 1, true))
+	local seen = {}
+	for _, label in ipairs(labels) do
+		assertf(#label > 0, 'empty collation value: %s', items)
+		assertf(not seen[label], 'duplicate collation value `%s`: %s', label, items)
+		seen[label] = true
+	end
+	assertf(#labels < unranked, 'too many collation values: %s', items)
+	local rank = index(labels)
+	return {
+		max_len = function(maxlen) return maxlen + 1 end,
+		key = function(v)
+			if v == nil or v == null then return v end
+			local i = rank[v]
+			return i and char(i) or char(unranked)..v
+		end,
+		write = function(buf, val, len)
+			local i = rank[val]
+			buf[0] = i or unranked
+			if i then return 1 end
+			copy(buf + 1, val, len)
+			return len + 1
+		end,
+	}
+end
+
 --SCHEMA LAYOUTING AND COMPILATION -------------------------------------------
 
 local format_ix_name, format_fk_name, index_schema, compile_index_schema --fw. decl.
@@ -826,10 +931,8 @@ end
 
 local function encoded_maxlen(schema, f)
 	local maxlen = f.maxlen
-	if schema.is_index and maxlen
-		and f.mdbx_type == 'utf8' and f.mdbx_collation == 'utf8_ai_ci'
-	then
-		return maxlen * 3
+	if schema.is_index and maxlen and f.mdbx_collation then
+		return collator(f.mdbx_collation).max_len(maxlen)
 	end
 	return maxlen
 end
@@ -866,6 +969,11 @@ local function layout_table_schema(schema)
 			'padded cannot have mdbx_collation: %s.%s', table_name, f.col)
 		assertf(not f.gen_version or f.generate,
 			'gen_version needs a generator: %s.%s', table_name, f.col)
+		if f.mdbx_collation then
+			assertf(f.mdbx_type == 'utf8' and f.maxlen,
+				'collation needs a varsize utf8 col: %s.%s', table_name, f.col)
+			collator(f.mdbx_collation)
+		end
 		local elem_ct = col_ct[f.mdbx_type] or f.mdbx_type
 		f.elem_size = sizeof(elem_ct)
 		assertf(f.elem_size < 2^8) --must fit 8 bit (see sort below)
@@ -1055,39 +1163,6 @@ end
 
 local S = function() end
 
---fold a utf8 string to its ai_ci collation key: NFD-decompose + casefold +
---stripmark, reencoded to utf8. lossy. returns (ptr, byte_len) into a reused
---buffer that holds int32 codepoints during decompose, then the utf8 bytes.
-local ai_ci_buf = buffer(i32a)
-local ai_ci_opt = bor(UTF8_DECOMPOSE, UTF8_CASEFOLD, UTF8_STRIPMARK)
-local function encode_ai_ci(s, len)
-	local out, cap = ai_ci_buf(len + 1) --floor guess; the global buffer only grows
-	local n = num(utf8_decompose(s, len, out, cap, ai_ci_opt))
-	if n < 0 then return nil, n end
-	if n >= cap then --too small for the codepoints + utf8proc_reencode's nul terminator
-		out, cap = ai_ci_buf(n + 1)
-		n = utf8_decompose(s, len, out, cap, ai_ci_opt)
-	end
-	local sz = num(utf8_reencode(out, n, ai_ci_opt)) --in place: int32 cps -> utf8 bytes
-	assertf(sz >= 0, 'utf8_ai_ci: reencode failed (%d)', sz)
-	return out, sz
-end
-
---turns a plain string into the same lowercased, accent-stripped form an
---ai_ci index stores, for comparing/sorting by hand when there's no index
---to do it for us. every comparison/dedup site that already knows (from
---its own bound expression's source schema) whether a column folds must
---read the value through this: v unchanged when v is null (the caller
---decides what null means at that site) or fold is false; else v's
---ai_ci-folded form.
-local function collate_value(v, fold)
-	if not fold or v == nil or v == null then return v end
-	local p, sz = encode_ai_ci(v, #v)
-	assertf(p, 'utf8_ai_ci: invalid utf8 (%d)', sz)
-	return ffi.string(p, sz)
-end
-mdbx_collate_value = collate_value
-
 local lua_check_env = setmetatable({}, {__index = function(_, k)
 	assertf(false, 'lua_check: unknown name `%s`', k)
 end})
@@ -1118,13 +1193,26 @@ local function compile_table_schema(schema)
 	schema.key_cols[S] = cat(schema.key_cols, ',')
 	schema.val_cols[S] = cat(schema.val_cols, ',')
 
+	--f.collator is how the col's values compare and every column with a
+	--collation needs one; f.key_collator is set only on columns where the
+	--stored key bytes are collation keys instead of the original value,
+	--which is only in index keys.
+	for _, f in ipairs(schema.fields) do
+		if f.mdbx_collation then
+			f.collator = collator(f.mdbx_collation)
+			if schema.is_index and f.key_index then
+				f.key_collator = f.collator
+			end
+		end
+	end
+
 	--compute key signature to check tables for raw key compatibility.
 	for _, f in ipairs(key_fields) do
 		schema.key_sig = (schema.key_sig and schema.key_sig..',' or '')
 			..f.mdbx_type..':'..(f.maxlen or '')
 			..':'..(f.padded and 'padded' or '')
 			..':'..(f.nozero and 'nozero' or '')
-			..':'..(f.mdbx_collation or '')
+			..':'..(f.key_collator and f.mdbx_collation or '')
 			..':'..(f.descending and 'desc' or '')
 			..':'..(f.not_null and 'not_null' or '')
 	end
@@ -1169,10 +1257,9 @@ local function compile_table_schema(schema)
 				local maxlen = f.maxlen
 				local nozero = f.nozero
 				local padded = f.padded
-				if schema.is_index and is_key
-					and f.mdbx_collation == 'utf8_ai_ci'
-				then
+				if f.key_collator then
 					local physical_maxlen = encoded_maxlen(schema, f)
+					local write = f.key_collator.write
 					function f.encode(db, event, buf, val)
 						assertf(typeof(val) == 'string')
 						local len = #val
@@ -1182,17 +1269,15 @@ local function compile_table_schema(schema)
 						if padded and len < maxlen then
 							db:check_col(event, schema.name, f.col, false, 'too_short')
 						end
-						local p, len = encode_ai_ci(val, len)
-						if not p then
-							db:check_col(event, schema.name, f.col, false,
-								fmt('utf8_ai_ci: invalid utf8 (%d)', len))
-						end
-						assert(len <= physical_maxlen)
 						if nozero and val:find('\0', 1, true) then
 							db:check_col(event, schema.name, f.col, false, 'zero')
 						end
-						copy(buf, p, len)
-						return len
+						local n, err = write(buf, val, len)
+						if not n then
+							db:check_col(event, schema.name, f.col, false, err)
+						end
+						assert(n <= physical_maxlen)
+						return n
 					end
 					function f.decode(p, len)
 						return str(p, len)
@@ -1809,6 +1894,11 @@ local function alter_values_in_place(self, dbi, old_schema, new_schema, event)
 	cur:close()
 end
 
+--a base key stores the original value, so a col's collation is not part of
+--its key encoding and changing one rewrites no keys.
+local key_rewrite_attrs = update({not_null=1}, field_type_attrs)
+key_rewrite_attrs.mdbx_collation = nil
+
 local function alter_via_temp_table(self, dbi, old_schema, new_schema, event)
 
 	--create the replacement table and capture its sequence.
@@ -1898,7 +1988,7 @@ function Db:alter_table(tab, src_schema)
 	local event = {type = 'schema', event = 't_alter', table = table_name}
 	local rewrite_keys =
 		schema.pk_change_affects(
-			old_schema, new_schema, MS.index_field_attrs)
+			old_schema, new_schema, key_rewrite_attrs)
 	local rewrite_vals = rewrite_keys
 		or val_reencode_needed(old_schema, new_schema)
 	if rewrite_keys then
@@ -2377,10 +2467,8 @@ function Db:add_index(val_table, ix)
 				'varsize key col must be nozero: %s.%s', val_schema.name, col)
 		end
 		local maxlen = f.maxlen
-		if maxlen and f.mdbx_type == 'utf8'
-			and f.mdbx_collation == 'utf8_ai_ci'
-		then
-			maxlen = maxlen * 3
+		if maxlen and f.mdbx_collation then
+			maxlen = collator(f.mdbx_collation).max_len(maxlen)
 		end
 		maxlen = maxlen and maxlen + (f.padded and 0 or 1) or 1
 		max_rec_size = max_rec_size + maxlen * f.elem_size

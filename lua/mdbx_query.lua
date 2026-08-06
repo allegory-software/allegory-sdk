@@ -281,6 +281,10 @@ end
 local AGGREGATE_OPS = {count = true, min = true, max = true, sum = true,
 	avg = true}
 
+--{op->true}: the ops that read their operands in collation order.
+local COMPARE_OPS = {['='] = true, ['~='] = true, ['<'] = true,
+	['<='] = true, ['>'] = true, ['>='] = true}
+
 local function exists_expr(op, rel, alias, on_expr)
 	if not isstr(alias) then --no alias, shift args
 		on_expr, alias = alias, nil
@@ -1362,11 +1366,12 @@ local function bucket_facts(source, conditions)
 	return eq, lo, hi, prefix, not_null, not_equal, in_
 end
 
---path_seekable() rejects ai_ci fields stored as original base-key text.
+--path_seekable() rejects collated fields stored as original base-key text.
+--a bound is encoded against the stored key bytes, so a collated col is only
+--seekable where those bytes are its collation key.
 local function path_seekable(schema, i)
 	local field = schema.path_fields[i]
-	return field.mdbx_collation ~= 'utf8_ai_ci'
-		or schema.is_index and i <= #schema.key_fields
+	return not field.collator or field.key_collator ~= nil
 end
 
 --eq_depth() counts leading path fields that '=' or 'is' can constrain.
@@ -1409,7 +1414,7 @@ end
 --[[
 try_key() fixes leading path fields with equality facts and then uses one
 prefix, range, or is_not_null fact on the next field.
-try_key() uses an ai_ci field for starts() only where path_seekable()
+try_key() uses a collated field for starts() only where path_seekable()
 allows it: inside an index key, where encode_key_prefix() folds the bound
 through the field's own encoder and the stored bytes are folded too.
 ]]
@@ -1422,7 +1427,10 @@ local function try_key(schema, eq, lo, hi, prefix, not_null, not_equal, in_)
 	else
 		local next_field = fields[depth + 1]
 		local col = next_field.col
-		if prefix[col] and path_seekable(schema, depth + 1) then
+		local next_coll = next_field.key_collator
+		if prefix[col] and path_seekable(schema, depth + 1)
+			and (not next_coll or next_coll.prefix)
+		then
 			plan = {kind = 'prefix', depth = depth, bound_col = col}
 		elseif path_seekable(schema, depth + 1) and in_[col] then
 			plan = {kind = 'in', depth = depth, bound_col = col}
@@ -1465,7 +1473,7 @@ local kind_rank = {
 --[[
 - key_order() marks equality fields as fixed and returns the remaining
   path_fields in cursor order.
-- key_order() stops before an ai_ci duplicate-PK field.
+- key_order() stops before a collated duplicate-PK field.
 - key_order() removes repeated ordinary cols from the duplicate PK suffix.
 - key_order() applies each field's stored direction and reverses every
   varying field when reverse is true.
@@ -2328,10 +2336,9 @@ end
 local function null_value(v)
 	return v == nil or v == null
 end
-local function operand_ai_ci(cache, x)
+local function operand_collator(cache, x)
 	local d = cache[x]
-	if d == nil then return false end
-	return d.ai_ci == true
+	return d and d.collator
 end
 --compare same-kind decoded values in key order: numbers numerically,
 --utf8 by byte order.
@@ -2345,7 +2352,7 @@ end
 - q.param() reads scan.args.
 - q.col() reads cache[x].get(), which compile_col_decoders() built from
   node:col_decoder() ahead of the first next(). the reader returns
-  the comparison form, so an indexed ai_ci col comes straight from the
+  the comparison form, so an indexed collated col comes straight from the
   index key.
 ]]
 local function eval_value(x, scan, cache)
@@ -2364,20 +2371,27 @@ end
 --does candidate match v? null never matches, in_()/not_in() alike -- v
 --is already collated (see eval_expr()'s in/not_in case), and a null
 --candidate collates to itself, which v (never null) can't equal.
-local function candidate_matches(candidate, v, fold)
-	return v == mdbx_collate_value(candidate, fold)
-end
-local function cmp_value(cache, x, v, fold)
-	if not fold or v == nil or v == null then return v end
-	if type(x) == 'table' and x[1] == 'col' then
-		if operand_ai_ci(cache, x) then return v end
-		return mdbx_collate_value(v, true)
+--a q.col() candidate is read in comparison form already; a literal or an
+--arg is not.
+local function candidate_matches(candidate, v, coll, collated)
+	if coll and not collated and candidate ~= nil and candidate ~= null then
+		candidate = coll.key(candidate)
 	end
+	return v == candidate
+end
+local function cmp_value(cache, x, v, coll)
+	if not coll or v == nil or v == null then return v end
+	if type(x) == 'table' and x[1] == 'col' then
+		if operand_collator(cache, x) then return v end
+		return coll.key(v)
+	end
+	--the same literal or arg can be compared against cols that collate
+	--differently, so the memo only holds for the collator that filled it.
 	local memo = cache[x]
-	if memo and memo[1] == v then return memo[2] end
-	local fv = mdbx_collate_value(v, true)
-	cache[x] = {v, fv}
-	return fv
+	if memo and memo[1] == v and memo[3] == coll then return memo[2] end
+	local cv = coll.key(v)
+	cache[x] = {v, cv, coll}
+	return cv
 end
 --[[
 evaluate a where()/on_expr row check against the current row. q.col()
@@ -2415,26 +2429,37 @@ local function eval_expr(expr, scan, checks, cache)
 	elseif op == 'is_not_null' then
 		return not null_value(eval_expr(a, scan, checks, cache))
 	elseif op == 'starts' then
-		local v = eval_expr(a, scan, checks, cache)
-		local prefix = eval_expr(b, scan, checks, cache)
+		--compile_col_decoders() left a text reader on an operand whose
+		--collation does not preserve prefixes; the rest test key bytes.
+		local read_a = cache[a] and cache[a].text_get
+		local read_b = cache[b] and cache[b].text_get
+		local v, prefix
+		if read_a then v = read_a() else v = eval_expr(a, scan, checks, cache) end
+		if read_b then
+			prefix = read_b()
+		else
+			prefix = eval_expr(b, scan, checks, cache)
+		end
 		if null_value(v) or null_value(prefix) then return false end
 		if type(v) ~= 'string' then return false end
-		local fold = operand_ai_ci(cache, a)
-		v = cmp_value(cache, a, v, fold)
-		prefix = cmp_value(cache, b, prefix, fold)
+		if not (read_a or read_b) then
+			local coll = operand_collator(cache, a)
+			v = cmp_value(cache, a, v, coll)
+			prefix = cmp_value(cache, b, prefix, coll)
+		end
 		return v:sub(1, #prefix) == prefix
 	elseif op == 'in' or op == 'not_in' then
 		local check
-		local ai_ci = operand_ai_ci(cache, a)
+		local coll = operand_collator(cache, a)
 		if inherits(b, Rel) then
 			check = assertf(checks[expr],
 				'eval_expr: in_() check not compiled for source: %s',
 				tostring(b.name))
-			ai_ci = ai_ci or check.ai_ci
+			coll = coll or check.collator
 		end
 		local v = eval_expr(a, scan, checks, cache)
 		if null_value(v) then return false end
-		v = cmp_value(cache, a, v, ai_ci)
+		v = cmp_value(cache, a, v, coll)
 		local found = false
 		if check then
 			if check.values_set then
@@ -2460,7 +2485,14 @@ local function eval_expr(expr, scan, checks, cache)
 			for _, item in ipairs(values) do
 				local candidate = param_list and item
 					or eval_expr(item, scan, checks, cache)
-				if candidate_matches(candidate, v, ai_ci) then
+				--a q.col() item is read in its own collation's form, so it
+				--needs no conversion when that is the form being compared,
+				--and cannot be converted into a different one.
+				local item_coll = not param_list
+					and operand_collator(cache, item) or nil
+				assertf(not (item_coll and coll) or item_coll == coll,
+					'cols collate unlike by `%s`: %s', op, tostring(item[3]))
+				if candidate_matches(candidate, v, coll, item_coll ~= nil) then
 					found = true
 					break
 				end
@@ -2480,9 +2512,9 @@ local function eval_expr(expr, scan, checks, cache)
 	local va = eval_expr(a, scan, checks, cache)
 	local vb = eval_expr(b, scan, checks, cache)
 	if null_value(va) or null_value(vb) then return false end
-	local fold = operand_ai_ci(cache, a) or operand_ai_ci(cache, b)
-	va = cmp_value(cache, a, va, fold)
-	vb = cmp_value(cache, b, vb, fold)
+	local coll = operand_collator(cache, a) or operand_collator(cache, b)
+	va = cmp_value(cache, a, va, coll)
+	vb = cmp_value(cache, b, vb, coll)
 	if op == '=' then return va == vb
 	elseif op == '~=' then return va ~= vb
 	elseif op == '<' then return value_cmp(va, vb) < 0
@@ -2539,15 +2571,33 @@ local function compile_col_decoders(expr, node, cache, registry, outer_node)
 	local op = expr[1]
 	if op == 'col' then
 		if not cache[expr] then
-			local get, ai_ci
+			local get, coll
 			if expr.source then
 				local decoder_node = decoder_node_for(expr.source.name, node,
 					registry, outer_node)
-				get, ai_ci = decoder_node:col_decoder(expr.source.name, expr[3], true)
+				get, coll =
+					decoder_node:col_decoder(expr.source.name, expr[3], true)
 			else
-				get, ai_ci = node:col_decoder(expr.col.name, true)
+				get, coll = node:col_decoder(expr.col.name, true)
 			end
-			cache[expr] = {get = get, ai_ci = ai_ci}
+			cache[expr] = {get = get, collator = coll}
+		end
+	elseif op == 'starts' then
+		for i = 2, 3 do
+			compile_col_decoders(expr[i], node, cache, registry, outer_node)
+			local d = cache[expr[i]]
+			--a collation that does not preserve prefixes tests the original
+			--text instead of the key bytes.
+			if d and d.collator and not d.collator.prefix then
+				local x = expr[i]
+				if x.source then
+					local decoder_node = decoder_node_for(x.source.name, node,
+						registry, outer_node)
+					d.text_get = decoder_node:col_decoder(x.source.name, x[3])
+				else
+					d.text_get = node:col_decoder(x.col.name)
+				end
+			end
 		end
 	elseif op == 'exists' or op == 'not_exists' then
 		--expr[3] is the correlated sub-relation's own filter, checked
@@ -2568,14 +2618,14 @@ local function compile_col_decoders(expr, node, cache, registry, outer_node)
 				if type(values[i]) == 'table' then all_literal = false; break end
 			end
 			if all_literal then
-				local fold = operand_ai_ci(cache, expr[2])
+				local coll = operand_collator(cache, expr[2])
 				local set = {}
 				for i = 1, #values do
 					local v = values[i]
 					--in()/not_in() never match null; skip it instead of
 					--collating it.
 					if v ~= nil and v ~= null then
-						set[mdbx_collate_value(v, fold)] = true
+						set[coll and coll.key(v) or v] = true
 					end
 				end
 				cache[expr] = set
@@ -2589,6 +2639,21 @@ local function compile_col_decoders(expr, node, cache, registry, outer_node)
 	else
 		for i = 2, #expr do
 			compile_col_decoders(expr[i], node, cache, registry, outer_node)
+		end
+		--two cols compare in the order of their collation, so they must
+		--share one. this reads what each operand's decoder actually returns,
+		--which a col reaching here through a rel or an aggregate output has
+		--no field to be asked for.
+		if COMPARE_OPS[op] then
+			local ca = operand_collator(cache, expr[2])
+			local cb = operand_collator(cache, expr[3])
+			if ca and cb and ca ~= cb then
+				local function name(x)
+					return type(x) == 'table' and (x[3] or x.name) or tostring(x)
+				end
+				assertf(false, 'cols collate unlike by `%s`: %s, %s', op,
+					name(expr[2]), name(expr[3]))
+			end
 		end
 	end
 end
@@ -2767,7 +2832,7 @@ function compile_exists_checker(db, expr, node, checks, registry, outer_cache)
 	local right = membership and expr[3] or expr[2]
 	local outer_node = expr.correlated and node or nil
 	if inherits(right, Rel) then
-		local out_col, value_get, value_ai_ci, ai_ci
+		local out_col, value_get, sub_coll, coll
 		local sub_node
 		if membership then
 			assert(right.out_cols and #right.out_cols == 1,
@@ -2776,13 +2841,16 @@ function compile_exists_checker(db, expr, node, checks, registry, outer_cache)
 			sub_node = compile_terminal(db, right, outer_node)
 			--col_decoder() runs before the first advance() so scan() can
 			--fetch a base-only output column.
-			value_get, value_ai_ci =
+			value_get, sub_coll =
 				sub_node:col_decoder(out_col.name, true)
-			ai_ci = operand_ai_ci(outer_cache, expr[2]) or value_ai_ci
-			if ai_ci and not value_ai_ci then
+			local outer_coll = operand_collator(outer_cache, expr[2])
+			assertf(not (outer_coll and sub_coll) or outer_coll == sub_coll,
+				'in_(): sub-relation col collates unlike: %s', out_col.name)
+			coll = outer_coll or sub_coll
+			if coll and not sub_coll then
 				local get = value_get
 				value_get = function()
-					return mdbx_collate_value(get(), true)
+					return coll.key(get())
 				end
 			end
 		else
@@ -2791,7 +2859,7 @@ function compile_exists_checker(db, expr, node, checks, registry, outer_cache)
 		if expr.correlated then
 			local check = {
 				scan = sub_node,
-				ai_ci = ai_ci,
+				collator = coll,
 			}
 			if membership then
 				check.values = function()
@@ -2814,7 +2882,7 @@ function compile_exists_checker(db, expr, node, checks, registry, outer_cache)
 				scan = sub_node,
 				uncorrelated = true,
 				value_get = value_get,
-				ai_ci = ai_ci,
+				collator = coll,
 			})
 		end
 	else

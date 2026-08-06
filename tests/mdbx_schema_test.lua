@@ -5861,6 +5861,328 @@ function test.check_declared_with_lua_check_flag()
 	end)
 end
 
+--reordering a list collation rebuilds the indexes over that col and leaves
+--every stored row byte-identical: the base table holds the original value.
+function test.list_collation_reorder_keeps_rows()
+	with_db('list_collation_reorder_keeps_rows', function(db)
+		local function spec(sig)
+			return {
+				name = 't',
+				fields = {
+					{col = 'id', mdbx_type = 'u32', not_null = true},
+					{col = 'st', mdbx_type = 'utf8', maxlen = 16, nozero = true,
+						not_null = true, mdbx_collation = sig},
+				},
+				pk = {'id'},
+				ixs = {['t/st'] = {'st'}},
+			}
+		end
+		local function rows()
+			local t = {}
+			for _, k, k_sz, v, v_sz in db:each_raw('t') do
+				t[#t+1] = ffi.string(k, k_sz)..'='..ffi.string(v, v_sz)
+			end
+			return cat(t, ' ')
+		end
+		local function index_order()
+			local t = {}
+			for _, k, k_sz, v, v_sz in db:each_raw('t/st') do
+				t[#t+1] = ffi.string(k, k_sz):byte(1)
+			end
+			return cat(t, ',')
+		end
+		local sc = mdbx_schema()
+		sc.tables['t'] = spec'list\0open\0pending\0closed'
+		db.schema = sc
+		db:sync_schema()
+		db:atomic('w', function()
+			db:insert('t', '{}', {id = 1, st = 'closed'})
+			db:insert('t', '{}', {id = 2, st = 'open'})
+			db:insert('t', '{}', {id = 3, st = 'pending'})
+		end)
+		local rows0, order0
+		db:atomic('r', function()
+			rows0, order0 = rows(), index_order()
+		end)
+		assert(order0 == '1,2,3', order0)
+
+		sc.tables['t'] = spec'list\0closed\0pending\0open'
+		db:sync_schema()
+		db:atomic('r', function()
+			assert(rows() == rows0, 'a reorder rewrote the base rows')
+			assert(index_order() == '1,2,3', index_order())
+			--open is last now, so the row it ranks 3rd is id 2.
+			assert(num(db:must_find('t/st', '{}', 'open').id) == 2)
+			assert(db:find('t', 'st', 1) == 'closed')
+		end)
+	end)
+end
+
+--COLLATION COVERAGE ---------------------------------------------------------
+
+local LIST = 'list\0open\0pending\0closed'
+
+--a unique index dedups by collation key, so two values that collate alike
+--collide even though they are stored differently.
+function test.collation_unique_index()
+	with_db('collation_unique_index', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'nm', mdbx_type = 'utf8', maxlen = 16, nozero = true,
+				not_null = true, mdbx_collation = 'utf8_ai_ci'},
+		}, pk = {'id'}})
+		db:add_index('t', {'nm', is_unique = true})
+		db:insert('t', '{}', {id = 1, nm = 'José'})
+		local ok, err = try_mutation(db, db.insert, 't', '{}', {id = 2, nm = 'JOSE'})
+		assert(not ok, 'a value colliding under the collation was accepted')
+		db:commit()
+	end)
+end
+
+--a descending collated key reverses the collation order, not the text order.
+function test.collation_descending_key()
+	with_db('collation_descending_key', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'st', mdbx_type = 'utf8', maxlen = 16, nozero = true,
+				not_null = true, mdbx_collation = LIST},
+		}, pk = {'id'}})
+		db:add_index('t', {'st', desc = {true}})
+		db:insert('t', '{}', {id = 1, st = 'open'})
+		db:insert('t', '{}', {id = 2, st = 'closed'})
+		db:insert('t', '{}', {id = 3, st = 'pending'})
+		--closed ranks last, so it comes first when the key is inverted.
+		local t = {}
+		for _, row in db:each('t/st:desc', '{}') do t[#t+1] = num(row.id) end
+		assert(cat(t, ',') == '2,3,1', cat(t, ','))
+		db:commit()
+	end)
+end
+
+--a collated col that is not the leading index col still keys on its
+--collation and leaves the leading col's bytes alone.
+function test.collation_composite_index()
+	with_db('collation_composite_index', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'grp', mdbx_type = 'u32', not_null = true},
+			{col = 'st' , mdbx_type = 'utf8', maxlen = 16, nozero = true,
+				not_null = true, mdbx_collation = LIST},
+		}, pk = {'id'}})
+		db:add_index('t', {'grp', 'st'})
+		db:insert('t', '{}', {id = 1, grp = 1, st = 'closed'})
+		db:insert('t', '{}', {id = 2, grp = 1, st = 'open'})
+		db:insert('t', '{}', {id = 3, grp = 2, st = 'pending'})
+		local t = {}
+		for _, row in db:each('t/grp,st', '{}') do t[#t+1] = num(row.id) end
+		assert(cat(t, ',') == '2,1,3', cat(t, ','))
+		db:commit()
+	end)
+end
+
+--a nullable collated col keeps null out of the collation's order entirely.
+function test.collation_nullable_index()
+	with_db('collation_nullable_index', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'st', mdbx_type = 'utf8', maxlen = 16, nozero = true,
+				mdbx_collation = LIST},
+		}, pk = {'id'}})
+		db:add_index('t', {'st'})
+		db:insert('t', '{}', {id = 1, st = 'closed'})
+		db:insert('t', '{}', {id = 2, st = null})
+		db:insert('t', '{}', {id = 3, st = 'open'})
+		local t = {}
+		for _, row in db:each('t/st', '{}') do t[#t+1] = num(row.id) end
+		assert(cat(t, ',') == '2,3,1', cat(t, ','))
+		assert(db:is_null('t', 'st', 2) == true)
+		db:commit()
+	end)
+end
+
+--a stored schema carries its collation, so a db reopened without a paper
+--schema still encodes and orders the same way.
+function test.collation_stored_schema_only()
+	with_db_reopen('collation_stored_schema_only', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'st', mdbx_type = 'utf8', maxlen = 16, nozero = true,
+				not_null = true, mdbx_collation = LIST},
+		}, pk = {'id'}})
+		db:add_index('t', {'st'})
+		db:insert('t', '{}', {id = 1, st = 'closed'})
+		db:insert('t', '{}', {id = 2, st = 'open'})
+		db:commit()
+	end, function(db)
+		db:begin'w'
+		local _, schema = db:dbi_schema't'
+		assert(schema.fields.st.mdbx_collation == LIST)
+		db:insert('t', '{}', {id = 3, st = 'pending'})
+		local t = {}
+		for _, row in db:each('t/st', '{}') do t[#t+1] = num(row.id) end
+		assert(cat(t, ',') == '2,3,1', cat(t, ','))
+		db:commit()
+	end)
+end
+
+--an fk over a collated col repacks the parent key into the child's fk index,
+--which only works when both sides key the same way.
+function test.collation_fk()
+	with_db('collation_fk', function(db)
+		db:begin'w'
+		db:create_table('parent', {name = 'parent', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'st', mdbx_type = 'utf8', maxlen = 16, nozero = true,
+				not_null = true, mdbx_collation = LIST},
+		}, pk = {'id'}})
+		db:create_table('child', {name = 'child', fields = {
+			{col = 'id' , mdbx_type = 'u32', not_null = true},
+			{col = 'pid', mdbx_type = 'u32', not_null = true},
+		}, pk = {'id'}})
+		db:add_fk{table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		db:insert('parent', '{}', {id = 1, st = 'open'})
+		db:insert('child', '{}', {id = 10, pid = 1})
+		local ok = try_mutation(db, db.insert, 'child', '{}', {id = 11, pid = 2})
+		assert(not ok, 'an fk to a missing parent was accepted')
+		db:commit()
+	end)
+end
+
+--lua_enum declares a text col ordered by its values and restricted to them.
+local function lua_enum_db(db, vals)
+	local sc = mdbx_schema()
+	sc:import(function()
+		import'schema_std'
+		tables.t = {
+			id, idpk,
+			st, lua_enum(vals), ix,
+		}
+	end)
+	db.schema = sc
+	db:sync_schema()
+	return sc
+end
+
+function test.lua_enum_declares_collation_and_check()
+	with_db('lua_enum_declares', function(db)
+		lua_enum_db(db, 'open pending closed')
+		db:atomic('w', function()
+			db:insert('t', '{}', {id = 1, st = 'closed'})
+			db:insert('t', '{}', {id = 2, st = 'open'})
+			db:insert('t', '{}', {id = 3, st = 'pending'})
+		end)
+		db:atomic('r', function()
+			local f = db:table_schema't'.fields.st
+			assert(f.mdbx_type == 'utf8', f.mdbx_type)
+			assert(f.maxlen == 7, tostring(f.maxlen)) --'pending'
+			assert(f.nozero == true)
+			assert(f.mdbx_collation == 'list\0open\0pending\0closed',
+				(f.mdbx_collation:gsub('%z', '|')))
+			--stored as text, ordered by the declared order.
+			assert(db:find('t', 'st', 1) == 'closed')
+			local t = {}
+			for _, row in db:each('t/st', '{}') do t[#t+1] = num(row.id) end
+			assert(cat(t, ',') == '2,3,1', cat(t, ','))
+		end)
+		--a value outside the list cannot be written.
+		local ok, err = try_mutation(db, db.insert, 't', '{}', {id = 4, st = 'nope'})
+		assert(not ok and iserror(err, 'field'), tostring(err))
+		assert(err.col == 'st' and err.message == 'enum', tostring(err))
+	end)
+end
+
+--reads never raise on a value the list does not name: it collates after every
+--named one, so it matches nothing, seeking or not.
+function test.lua_enum_wrong_value_reads()
+	with_db('lua_enum_wrong_value_reads', function(db)
+		lua_enum_db(db, 'open pending closed')
+		db:atomic('w', function()
+			db:insert('t', '{}', {id = 1, st = 'open'})
+		end)
+		db:atomic('r', function()
+			assert(db:try_find('t/st', nil, 'nope') == false)
+			assert(db:find('t', 'st', 1) == 'open')
+		end)
+	end)
+end
+
+--adding a value relaxes the check and reorders the index, leaving rows alone;
+--dropping one that rows still hold is refused.
+function test.lua_enum_list_edits()
+	with_db('lua_enum_list_edits', function(db)
+		lua_enum_db(db, 'open pending closed')
+		db:atomic('w', function()
+			db:insert('t', '{}', {id = 1, st = 'closed'})
+			db:insert('t', '{}', {id = 2, st = 'open'})
+		end)
+		local rows0
+		db:atomic('r', function()
+			local t = {}
+			for _, k, k_sz, v, v_sz in db:each_raw('t') do
+				t[#t+1] = ffi.string(k, k_sz)..'='..ffi.string(v, v_sz)
+			end
+			rows0 = cat(t, ' ')
+		end)
+		lua_enum_db(db, 'archived open pending closed')
+		db:atomic('r', function()
+			local t = {}
+			for _, k, k_sz, v, v_sz in db:each_raw('t') do
+				t[#t+1] = ffi.string(k, k_sz)..'='..ffi.string(v, v_sz)
+			end
+			assert(cat(t, ' ') == rows0, 'a list edit rewrote the rows')
+			assert(db:find('t', 'st', 1) == 'closed')
+		end)
+		local ok, err = pcall(lua_enum_db, db, 'open pending')
+		assert(not ok, 'dropping a value in use was accepted')
+		assert(tostring(err):find('enum', 1, true), tostring(err))
+		--the refused sync leaves its own paper schema installed; the db still
+		--holds what the last accepted one declared.
+		lua_enum_db(db, 'archived open pending closed')
+		db:atomic('r', function()
+			assert(db:find('t', 'st', 1) == 'closed')
+		end)
+	end)
+end
+
+--a value with a space is declared as a table and behaves like any other.
+function test.lua_enum_spaced_values()
+	with_db('lua_enum_spaced_values', function(db)
+		local sc = mdbx_schema()
+		sc:import(function()
+			import'schema_std'
+			tables.t = {
+				id, idpk,
+				st, lua_enum{'in progress', 'done', 'wont fix'}, ix,
+			}
+		end)
+		db.schema = sc
+		db:sync_schema()
+		db:atomic('w', function()
+			db:insert('t', '{}', {id = 1, st = 'done'})
+			db:insert('t', '{}', {id = 2, st = 'in progress'})
+			db:insert('t', '{}', {id = 3, st = 'wont fix'})
+		end)
+		db:atomic('r', function()
+			local f = db:table_schema't'.fields.st
+			assert(f.maxlen == 11, tostring(f.maxlen)) --'in progress'
+			assert(db:find('t', 'st', 2) == 'in progress')
+			local t = {}
+			for _, row in db:each('t/st', '{}') do t[#t+1] = num(row.id) end
+			assert(cat(t, ',') == '2,1,3', cat(t, ','))
+			assert(num(db:must_find('t/st', '{}', 'in progress').id) == 2)
+		end)
+		local ok, err = try_mutation(db, db.insert, 't', '{}',
+			{id = 4, st = 'in  progress'})
+		assert(not ok and err.message == 'enum', tostring(err))
+	end)
+end
+
 local name = ...
 if name == 'mdbx_schema_test' then name = nil end
 local tests = name and {name} or test

@@ -42,6 +42,34 @@ do
 		}
 	end
 
+	--text ordered by the declared order and restricted to it by a check.
+	--values come as words or, when a value contains spaces, as a table.
+	function env.lua_enum(vals)
+		vals = collect(words(vals))
+		local maxlen, checks = 0, {}
+		for i, v in ipairs(vals) do
+			assertf(not v:find('\0', 1, true),
+				'enum value with an embedded zero: %s', v)
+			if #v > maxlen then maxlen = #v end
+			checks[i] = _('v == %q', v)
+		end
+		return {is_type = true,
+			type = 'text', mdbx_type = 'utf8', maxlen = maxlen, nozero = true,
+			mdbx_collation = 'list\0'..cat(vals, '\0'),
+			lua_check = cat(checks, ' or '),
+			lua_check_error = 'enum',
+		}
+	end
+
+	function env.sort_order(vals) --order values by their declared order
+		vals = collect(words(vals))
+		for _, v in ipairs(vals) do
+			assertf(not v:find('\0', 1, true),
+				'collation value with an embedded zero: %s', v)
+		end
+		return {mdbx_collation = 'list\0'..cat(vals, '\0')}
+	end
+
 	function env.set(...) --mysql-specific `set` type
 		local vals = collect(words(cat({...}, ' ')))
 		return {is_type = true, type = 'set', mysql_type = 'set', set_values = vals,
