@@ -3672,6 +3672,54 @@ function test.lua_enum_wrong_value_in_query()
 	end)
 end
 
+function test.concat_aggregate()
+	with_db('concat_aggregate', function(db)
+		db:atomic('w', function()
+			db:create_table('ca', {fields = {
+				{col = 'id', mdbx_type = 'u32', not_null = true},
+				{col = 'grp', mdbx_type = 'utf8', maxlen = 8, nozero = true,
+					not_null = true},
+				{col = 'val', mdbx_type = 'utf8', maxlen = 8, nozero = true,
+					mdbx_collation = 'utf8_ai_ci'},
+			}, pk = {'id'}})
+			db:insert('ca', '{}', {id = 1, grp = 'x', val = 'A'})
+			db:insert('ca', '{}', {id = 2, grp = 'x', val = null})
+			db:insert('ca', '{}', {id = 3, grp = 'x', val = 'B'})
+			db:insert('ca', '{}', {id = 4, grp = 'y', val = null})
+		end)
+		db:atomic('r', function()
+			local vals = db:from('ca')
+				:group_by{{{'concat', q.col('ca.val'), '/'}, 'vals'}}
+				:one()
+			assert(vals == 'A/B', tostring(vals))
+			vals = db:from('ca')
+				:group_by{{{'concat', q.col('ca.val')}, 'vals'}}
+				:one()
+			assert(vals == 'AB', tostring(vals))
+
+			local n = 0
+			for _, row in db:from('ca'):group_by{
+				'ca.grp grp',
+				{{'concat', q.col('ca.val'), '/'}, 'vals'},
+			}:rows'{}' do
+				n = n + 1
+				if row.grp == 'x' then
+					assert(row.vals == 'A/B', tostring(row.vals))
+				else
+					assert(row.grp == 'y', tostring(row.grp))
+					assert(row.vals == nil, tostring(row.vals))
+				end
+			end
+			assert(n == 2, tostring(n))
+
+			local lower = db:from('ca')
+				:group_by{{{'concat', q.col('ca.val'), '/'}, 'vals'}}
+				:having({'=', q.col('vals'), 'a/b'})
+			assert(lower:count() == 0)
+		end)
+	end)
+end
+
 local name = ...
 if name == 'mdbx_query_test' then name = nil end
 local tests = name and {name} or test

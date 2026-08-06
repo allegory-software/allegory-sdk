@@ -52,6 +52,7 @@ EXPRESSIONS
 AGGREGATES (group_by() out_cols only)
 	{'count'[, val_expr]}         val_expr: literal | q.param() | q.col()
 	{'min'|'max'|'sum'|'avg', val_expr}
+	{'concat', q.col()[, separator]}     skips null; input order; no collation
 SELECT
 	:select(out_cols)             {'REL.COL [NAME]' | {q.col(), name}, ...}
 TERMINALS (materialization)
@@ -276,10 +277,8 @@ function q.between(expr, lo, hi)
 	return {'and', {'>=', expr, lo}, {'<=', expr, hi}}
 end
 
---{op->true}: 'count'/'min'/'max'/'sum'/'avg', the only ops group_by()
---allows as an aggregate output.
 local AGGREGATE_OPS = {count = true, min = true, max = true, sum = true,
-	avg = true}
+	avg = true, concat = true}
 
 --{op->true}: the ops that read their operands in collation order.
 local COMPARE_OPS = {['='] = true, ['~='] = true, ['<'] = true,
@@ -484,9 +483,7 @@ local function bind_expr(expr, scope, out_cols, mode, allow_aggregate)
 	if type(expr) ~= 'table' then return end
 	local op = expr[1]
 	if AGGREGATE_OPS[op] then
-		--aggregate exprs (count/sum/...) are only allowed in group_by().
-		assert(allow_aggregate,
-			'aggregate expressions are only allowed in group_by()')
+		assert(allow_aggregate, 'aggregates are only allowed in group_by()')
 		bind_expr(expr[2], scope, out_cols, mode)
 		return
 	elseif op == 'col' then
@@ -3076,8 +3073,7 @@ projected field, never a pre-distinct one).
 ]]
 --[[
 split rel.group_cols into plain group keys (op not in AGGREGATE_OPS)
-and aggregate outputs (q.count/min/max/sum/avg -- the only ops
-bind_expr allows through with allow_aggregate), building a
+and aggregate outputs (op in AGGREGATE_OPS), building a
 stream_aggregate/hash_aggregate 'agg' list: one synthetic {op = 'key'}
 entry per key col (so the key ends up in the output row) plus the
 real aggregate entries, all carrying rel.group_cols' own out_col
@@ -3100,8 +3096,10 @@ function split_group_cols(rel)
 					..' implemented yet')
 			local member, col
 			if value_expr then member, col = group_col_read(value_expr) end
-			add(agg_list, {name = expr.name, op = expr[1],
-				member = member, col = col})
+			local a = {name = expr.name, op = expr[1],
+				member = member, col = col}
+			if a.op == 'concat' then a.separator = expr[3] end
+			add(agg_list, a)
 		else
 			assert(expr[1] == 'col' and (expr.source or expr.col),
 				'group_by(): only plain column group keys are'

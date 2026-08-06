@@ -2081,10 +2081,6 @@ function Scan:group_by(cols)
 	return self
 end
 
---folds a value into acc for one agg entry a: count/sum/avg/min/max skip
---null v; key copies key[a.part] straight through instead of aggregating
---a per-row value (a.part indexes the group_by() cols this aggregate()
---call was given, not this function's own state).
 local function agg_step(acc, a, key, v, coll)
 	local name = a.name
 	if a.op == 'key' then
@@ -2097,6 +2093,8 @@ local function agg_step(acc, a, key, v, coll)
 		elseif a.op == 'avg' then
 			acc[name].sum = acc[name].sum + v
 			acc[name].n   = acc[name].n   + 1
+		elseif a.op == 'concat' then
+			add(acc[name], v)
 		elseif a.op == 'min' then
 			if coll then
 				local k = coll.key(v)
@@ -2129,6 +2127,7 @@ local function agg_init(agg)
 	for _, a in ipairs(agg) do
 		if a.op == 'count' then acc[a.name] = 0
 		elseif a.op == 'avg' then acc[a.name] = {sum = 0, n = 0}
+		elseif a.op == 'concat' then acc[a.name] = {}
 		else acc[a.name] = nil
 		end
 	end
@@ -2140,6 +2139,9 @@ local function agg_finalize(agg, acc, colls)
 		if a.op == 'avg' then
 			local s = acc[a.name]
 			rec[a.name] = s.n > 0 and s.sum / s.n or nil
+		elseif a.op == 'concat' then
+			local values = acc[a.name]
+			rec[a.name] = #values > 0 and cat(values, a.separator) or nil
 		elseif colls[a.name] and (a.op == 'min' or a.op == 'max') then
 			local won = acc[a.name]
 			if won == nil then rec[a.name] = nil else rec[a.name] = won.value end
@@ -2154,18 +2156,19 @@ end
 scan:aggregate(agg) -> scan
 scan:aggregate(agg, cols[, hash]) -> scan
 
-	agg = {{name=NAME, op=OP[, member=MEMBER, col=COL][, part=N]}, ...}
-	OP = 'sum' | 'avg' | 'min' | 'max' | 'count' | 'key'
+	agg = {{name=NAME, op=OP[, member=MEMBER, col=COL][, part=N]
+		[, separator=STRING]}, ...}
+	OP = 'sum' | 'avg' | 'min' | 'max' | 'count' | 'concat' | 'key'
 	cols = {{member=MEMBER, col=COL}, ...}
 
-aggregate() reads member.col for sum, avg, min, max, and count. aggregate()
-counts every row when member is absent. aggregate() copies cols[part] when
-op is 'key'.
-
 aggregate(agg) emits one grand-total record. aggregate(agg, cols) expects
-group_by(cols) on the same scan and emits consecutive groups with O(1)
-memory. aggregate(agg, cols, true) accepts any input order, uses O(n groups)
-memory, and emits groups in first-occurrence order.
+group_by(cols) on the same scan and emits consecutive groups.
+aggregate(agg, cols, true) accepts any input order and emits groups in
+first-occurrence order. with no {op='concat'}, aggregate(agg, cols) uses O(1)
+memory and aggregate(agg, cols, true) uses O(n groups) memory.
+with {op='concat'}, retains every non-nil member.col until it emits.
+aggregate(agg) and aggregate(agg, cols, true) retain all such values;
+aggregate(agg, cols) retains only values for the current group.
 
 aggregate() emits one record per next(). scan.row contains that record so
 the caller can read every field without copying it through get().
@@ -2300,8 +2303,7 @@ function Scan:aggregate(agg, cols, hash)
 	--the streamed one emits a group as it reaches it.
 	scan.materialized = not cols or hash
 
-	--terminal: raw per-row columns no longer exist once folded, only the
-	--agg's own named outputs are reachable.
+	--after aggregate(), col_decoder() only reaches agg's named outputs.
 	local out_name = {}
 	for _, name in ipairs(names) do out_name[name] = true end
 	function scan:col_decoder(name, comparison)
