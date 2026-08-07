@@ -12,7 +12,7 @@ The **server-side** is written in Lua and contains:
  * OS threads with synchronized queues.
  * the fastest libraries for hashing, encryption, compression, image codecs,
    image resizing, JSON and XML codecs, CSV parsing and XLSX generation.
- * ACID RDBMS engine based on the MDBX key-value store.
+ * RDBMS engine based on the MDBX key-value store.
  * database schema DSL with automatic schema sync.
  * ...and more, see full list of modules below.
 
@@ -121,6 +121,8 @@ to create build scripts for new libraries without using a build system.
   * [schema](lua/schema.lua)           - Database schema diff'ing and migrations
   * [mdbx](lua/mdbx.lua)               - MDBX database binding
   * [mdbx_schema](lua/mdbx_schema.lua) - Relational database engine over MDBX
+  * [mdbx_scan](lua/mdbx_scan.lua)     - Table scanner for MDBX
+  * [mdbx_query](lua/mdbx_query.lua)   - Query compiler for MDBX
 * __Raster Images__
   * [jpeg](lua/jpeg.lua)               - Fast JPEG decoding & encoding (based on [libjpeg-turbo](https://libjpeg-turbo.org/))
   * [png](lua/png.lua)                 - Fast PNG decoding & encoding (based on [libspng](https://libspng.org/))
