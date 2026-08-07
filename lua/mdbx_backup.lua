@@ -4,8 +4,8 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 API
-	db:backup(destination_file[, base_backup_file])
-	mdbx_restore(source_file, destination_file[, base_backup_file])
+	db:backup(dest_file[, base_backup_file])
+	mdbx_restore(src_file, dest_file[, base_backup_file])
 
 AS SCRIPT
 	luajit mdbx_backup.lua backup DB_FILE BACKUP_FILE [BASE_BACKUP_FILE]
@@ -282,21 +282,24 @@ function mdbx_restore(backup_file, db_file, base_backup_file)
 end
 
 if not package.loaded.mdbx_backup then
-	local command, source_file, destination_file, base_backup_file = ...
-	assert((command == 'backup' or command == 'restore')
-		and source_file and destination_file,
-		'\nUsage:\n\n'..
+	local command, src_file, dest_file, base_backup_file = ...
+	if not (
+		(command == 'backup' or command == 'restore')
+		and src_file and dest_file
+	) then
+		say('Usage:\n\n'..
 		'  luajit mdbx_backup.lua backup DB_FILE BACKUP_FILE [BASE_BACKUP_FILE]\n'..
-		'  luajit mdbx_backup.lua restore BACKUP_FILE DB_FILE [BASE_BACKUP_FILE]\n'
-	)
+		'  luajit mdbx_backup.lua restore BACKUP_FILE DB_FILE [BASE_BACKUP_FILE]\n')
+		exit()
+	end
 	run(function()
 		if command == 'backup' then
-			local db, err = mdbx_open(source_file, {readonly = true})
+			local db, err = mdbx_open(src_file, {readonly = true})
 			assertf(not err, 'cannot open database: %s', err)
-			db:backup(destination_file, base_backup_file)
+			db:backup(dest_file, base_backup_file)
 			db:close()
 		else
-			mdbx_restore(source_file, destination_file, base_backup_file)
+			mdbx_restore(src_file, dest_file, base_backup_file)
 		end
 	end)
 end
