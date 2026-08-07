@@ -23,7 +23,6 @@ USES
 
 CONFIG
 
-	ignore_interrupts
 	host
 	dev_email
 
@@ -73,7 +72,7 @@ local function xapp(...)
 
 	function app:run_server()
 		app.server = webb_http_server()
-		start(config('ignore_interrupts', true))
+		start()
 	end
 
 	function logging.rpc:close_all_sockets()
@@ -104,9 +103,9 @@ local function xapp(...)
 		return exit_code
 	end
 
-	config('main_module', function()
+	config{main_module = function()
 		checkfound(action(unpack(args())))
-	end)
+	end}
 
 	app.schema = schema.new()
 
@@ -118,7 +117,7 @@ local function xapp(...)
 	app.schema:import'schema_std'
 	app.schema:import'webb_auth'
 
-	config('db_schema', app.schema)
+	config{db_schema = app.schema}
 
 	cmd('install [forealz]', 'Install or migrate the app', function(opt, doit)
 		local dry = doit ~= 'forealz'

@@ -240,7 +240,8 @@ BUFFERS
 	  reset()                      start again
 	string_buffer() -> b           make a luajit string buffer, see https://luajit.org/ext_buffer.html
 CONFIG
-	config(k[, default]) -> v      get/set global config value
+	config(k[, default]) -> v      get global config value
+	config{k = v}                  set global config values
 	with_config(conf, f, ...) -> ...    run f with custom config table
 	load_config_file(file)         load config file
 	load_config_string(s)          load config from string
@@ -256,6 +257,9 @@ LANG
 ]=]
 
 if not ... then require'glue_test'; return end
+
+io.stdout:setvbuf'no'
+io.stderr:setvbuf'no'
 
 ffi = require'ffi'
 bit = require'bit'
@@ -2328,14 +2332,11 @@ do
 	function config(k, default)
 		if istab(k) then
 			for k, v in pairs(k) do
-				config(k, v)
+				conf[k] = v
 			end
 		else
 			local v = conf[k]
-			if v == nil then
-				v = default
-				conf[k] = v
-			end
+			if v == nil then return default end
 			return v
 		end
 	end

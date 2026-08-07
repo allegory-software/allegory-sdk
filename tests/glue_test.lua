@@ -1160,7 +1160,7 @@ do local v = bswap16(0x1234); test(v, 0x3412) end --bswap16
 --config ---------------------------------------------------------------------
 
 test(config('_test_key', 42), 42) --returns default
-test(config('_test_key'), 42) --returns stored value
+test(config('_test_key'), nil) --default is not stored
 test(config('_test_missing'), nil)
 config{_test_a = 10, _test_b = 20} --table form
 test(config('_test_a'), 10)
@@ -1179,7 +1179,7 @@ do --load_config_string
 	test(config('_test_lcs'), 555)
 end
 do --with_config: inner config doesn't leak
-	config('_test_wc2', 10)
+	config{_test_wc2 = 10}
 	local inner
 	with_config({_test_wc2 = 99}, function() inner = config('_test_wc2') end)
 	test(inner, 99)

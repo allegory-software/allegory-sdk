@@ -8,11 +8,11 @@ require'multipart'
 logging.filter.tls = true
 logging.debug = true
 
-config('smtp_host' , 'mail.bpnpart.com')
---config('smtp_tls'  , false)
-config('smtp_user' , 'admin@bpnpart.com')
-config('smtp_pass' , 'Bpnpart@0@0')
-config('smtp_debug', 'protocol stream')
+config{smtp_host = 'mail.bpnpart.com'}
+--config{smtp_tls  = false}
+config{smtp_user = 'admin@bpnpart.com'}
+config{smtp_pass = 'Bpnpart@0@0'}
+config{smtp_debug = 'protocol stream'}
 
 if os.getenv'AUTO' then
 	return

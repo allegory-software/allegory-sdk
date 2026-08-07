@@ -165,7 +165,6 @@ function daemon(...)
 	logging.env     = config'env'
 
 	function run_server() --fw. declared.
-		server_running = true
 		env('TZ', ':/etc/localtime')
 		--^^avoid having os.date() stat /etc/localtime.
 		logging:tofile(logfile)

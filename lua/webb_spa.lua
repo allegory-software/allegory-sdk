@@ -80,14 +80,16 @@ action['config.js'] = function()
 
 	--required config values must be initialized.
 	--NOTE: these must match the real defaults that are set in their places of usage.
-	config('app_name', scriptname)
-	config('default_lang', 'en')
-	config('root_action', 'en')
-	config('page_title_suffix', ' - '..host())
-	config('session_cookie_name', 'session')
+	local defaults = {
+		app_name            = scriptname,
+		default_lang        = 'en',
+		root_action         = 'en',
+		page_title_suffix   = ' - '..host(),
+		session_cookie_name = 'session',
+	}
 
 	for i,k in ipairs(client_configs) do
-		local v = config(k)
+		local v = config(k, defaults[k])
 		if v ~= nil then
 			out(format('config(%s, %s)\n', json_encode(k), json_encode(v)))
 		end

@@ -2,7 +2,7 @@ require'webb_auth'
 require'lang'
 
 rm_rf'/tmp/webb_auth_test'
-config('vardir', '/tmp/webb_auth_test')
+config{vardir = '/tmp/webb_auth_test'}
 mkdir('/tmp/webb_auth_test', true)
 
 local ok, err = pcall(function()

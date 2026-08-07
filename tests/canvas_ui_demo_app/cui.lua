@@ -1,12 +1,13 @@
---go @ sdk\bin\windows\luajit.exe cui.lua run
-
 require'webb_auth'
 
-config('http_host', '*')
-config('http_port', 8888)
-config('https_port', 4443)
---config('https_addr', false)
-config('project_dir', homedir())
+config{http_host = '*'}
+config{http_port = 8888}
+config{https_port = 4443}
+--config{https_addr = false}
+config{project_dir = homedir()}
+
+config{http_server_debug = 'requests'}
+require'cui_app'(...)
 
 auth_init()
 local st = auth_store()
@@ -17,9 +18,6 @@ st.with_lock('w', function()
 		st.add_host('localhost:4443', 1)
 	end
 end)
-
-config('http_server_debug', 'requests')
-require'cui_app'('run')--(...)
 
 logging.debug = true
 logging.verbose = config('verbose', true)

@@ -50,6 +50,7 @@ SCHEDULER
 	[try_]start()               keep polling until all threads finish
 	stop()                      stop polling
 	[try_]run(fn, ...) -> ...   run a function inside a thread
+	epoll_wait_count() -> n     how many timers/epollables/wait-jobs are waiting
 WAIT JOBS
 	wait_job() -> wj            make an interruptible async wait job
 	- wj:wait_until(t) -> ...   wait until clock()
@@ -325,6 +326,10 @@ local epolled = {} --{epollable_object1, ...}
 local free_slots = {} --{i1, ...}; indexes of free slots in epolled array.
 local in_epoll_wait = false --freelist consumption barrier
 local wait_count = 0
+
+function epoll_wait_count()
+	return wait_count
+end
 
 local epoll_ev = new'struct epoll_event'
 

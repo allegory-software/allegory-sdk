@@ -8,6 +8,7 @@ API
 	section([active, ]cmd+args, help[, descr], fn)    add a command to a section
 	cmd    ([active, ]cmd+args, help[, descr], fn)    add a command to the MISC section
 	cmdaction(...) -> action, opt, args, run_action   process cmdline options
+	cmddefault(cmd)                                   cmd to run when none is given
 	run_action(action, opt, args...) -> [exit_code]   how to call run_action
 	fn : function(opt, args...)                       cmd action handler
 
@@ -134,7 +135,13 @@ local function run_action(action, opt, ...)
 	else
 		say(' ERROR: Unknown command: %s', action:gsub('_', '-'))
 		usage()
+		return 1
 	end
+end
+
+local default_cmd = 'help'
+function cmddefault(cmd)
+	default_cmd = cmd
 end
 
 function cmdaction(...)
@@ -195,5 +202,5 @@ function cmdaction(...)
 	if repl(env'DEBUG'  , '', nil) then logging.debug   = true end
 	if repl(env'VERBOSE', '', nil) then logging.verbose = true end
 
-	return action or 'help', opt, args, run_action
+	return action or default_cmd, opt, args, run_action
 end

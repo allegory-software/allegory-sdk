@@ -5,7 +5,7 @@
 	TLS support in sock_bearssl.lua.
 
 ADDRESSES
-	[try_]sockaddr(addr, [port], [timeout]) -> sa  make a sockaddr from a string (see addr format)
+	[try_]sockaddr(addr, [port], [timeout]) -> sa  make a sockaddr from a string
 	[try_]sockaddrs(addr, [port], [timeout]) -> {sa1,...}  resolves to multiple IPs
 	sa:family() -> 'ip|ip6|unix'           socket family
 	sa:port() -> port|nil                  port (for ip/ip6 family)
@@ -47,9 +47,12 @@ UDP
 
 PROGRAMMING NOTES ------------------------------------------------------------
 
-The addr arg is either a sockaddr (sa) or a string of form:
+The `addr` arg is either a sockaddr (sa) or a string of form:
 
 	'IP', 'IP6', 'HOST', 'IP:PORT', 'IP6:PORT', 'HOST:PORT', 'unix:PATH'
+
+The `port` arg is actually `default_port`: a PORT in the addr string overrides
+it, and a sockaddr `addr` keeps its own port.
 
 Some error messages are normalized across platforms, like 'access_denied'
 and 'address_already_in_use' so they can be used in conditionals.
@@ -411,7 +414,7 @@ function sa:tostring()
 	return ip..(port and ':'..port or '')
 end
 
-metatype('struct sockaddr', {__index = sa, type = 'sockaddr'})
+metatype('struct sockaddr', {__index = sa, __tostring = sa.tostring, type = 'sockaddr'})
 
 --POSIX sockets --------------------------------------------------------------
 
@@ -598,7 +601,7 @@ function tcp:try_accept(opt, timeout)
 	self.next_i = (self.next_i or 0) + 1
 	s.i = self.next_i
 	live(s, 'accepted %s.%d %s fd=%d clients:%d',
-		self, s.i, accept_sa:tostring(), s.fd, self._sockets_n)
+		self, s.i, accept_sa, s.fd, self._sockets_n)
 	s._remote_addr = accept_sa
 	s.listen_socket = self
 	if timeout then
@@ -787,14 +790,14 @@ function tcp:try_connect(addr, port)
 	local resolve_timeout = self.send_expires and self.send_expires - clock()
 	local sa, err = try_sockaddr(addr, port, resolve_timeout)
 	if not sa then return nil, err end
-	log('', self.type, 'connect', '%-4s %s', self, sa:tostring())
+	log('', self.type, 'connect', '%-4s %s', self, sa)
 	local ok, err = socket_connect(self, sa)
 	if not ok then
 		if connect_actionable_errors[err] then return false, err end
 		self:check_net('connect', false, err)
 	end
 	self._remote_addr = sa
-	live(self, 'connected %s', sa:tostring())
+	live(self, 'connected %s', sa)
 	return true
 end
 tcp.connect = make_raising('connect', tcp.try_connect)

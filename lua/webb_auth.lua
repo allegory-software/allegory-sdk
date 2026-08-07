@@ -426,7 +426,7 @@ function login(a)
 		end)
 	end
 	local u = req.real_user
-	if not u and config('auto_create_user', true) then
+	if not u and config('auto_create_user', false) then
 		--doing this outside auth's transaction is ok, there's no race condition
 		--when creating a new user + session.
 		store.with_lock('w', function()

@@ -50,7 +50,7 @@ root action ('en') are also allowed in order to avoid the ?lang param.
 
 local aliases = {} --{alias={lang=, action=}}
 local aliases_json = {to_en = {}, to_lang = {}}
-config('aliases', aliases_json) --we pass those to the client
+config{aliases = aliases_json} --we pass those to the client
 
 local function action_name(action)
 	return action:gsub('-', '_')

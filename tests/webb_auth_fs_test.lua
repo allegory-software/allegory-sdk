@@ -3,7 +3,7 @@ require'webb_auth_fs'
 
 local testdir = '/tmp/webb_auth_fs_test'
 rm_rf(testdir)
-config('vardir', testdir)
+config{vardir = testdir}
 mkdir(testdir)
 
 function now()
