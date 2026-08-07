@@ -16,7 +16,8 @@ C="
 
 "
 
-SO=../../../bin/${DEBUG:+debug/}libmdbx.so
+BIN=../../../bin/${DEBUG:+debug/}
+SO=${BIN}libmdbx.so
 gcc -shared -o $SO mdbx.c \
 	${DEBUG:+-g -O0} \
 	${DEBUG:+-DMDBX_DEBUG=2} \
@@ -33,4 +34,12 @@ gcc -shared -o $SO mdbx.c \
 	-Wno-tautological-compare \
 	$C
 
-[[ $DEBUG ]] || strip $SO
+gcc -o ${BIN}mdbx_copy mdbx_copy.c \
+	${DEBUG:+-g -O0} \
+	-L$BIN -Wl,-rpath,'$ORIGIN' -lmdbx -pthread \
+	-Wall -Werror -Wextra -Wpedantic \
+	-Wno-error=attributes \
+	-Wno-unused-command-line-argument \
+	-Wno-tautological-compare
+
+[[ $DEBUG ]] || strip $SO ${BIN}mdbx_copy
