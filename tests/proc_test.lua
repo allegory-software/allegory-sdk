@@ -16,6 +16,8 @@ local test = setmetatable({}, {__newindex = function(self, k, v)
 	add(tests, k)
 end})
 
+local WNOHANG = 1
+
 function test.env()
 	env('zz', '123')
 	env('zZ', '567')
@@ -133,6 +135,32 @@ function test.kill()
 	print('exit code', p:exit_code())
 	--assert(p:exit_code() == 123)
 	p:forget()
+end
+
+function test.forget_reaps()
+	local forgotten_pid
+	run(function()
+		local waited = exec{'/bin/true'}
+		local forgotten = exec{'/bin/sleep', '.1'}
+		forgotten_pid = forgotten.pid
+		forgotten:forget()
+		assert(waited:wait() == 0)
+		waited:forget()
+	end)
+	local status = new'int[1]'
+	local reaped = C.waitpid(forgotten_pid, status, WNOHANG)
+	assertf(reaped == -1, 'forgotten process %d was not reaped: %d',
+		forgotten_pid, reaped)
+
+	local killed_pid
+	run(function()
+		local killed = exec{'/bin/sleep', '10'}
+		killed_pid = killed.pid
+		killed:try_close()
+	end)
+	local reaped = C.waitpid(killed_pid, status, WNOHANG)
+	assertf(reaped == -1, 'killed process %d was not reaped: %d',
+		killed_pid, reaped)
 end
 
 function test.pipe()

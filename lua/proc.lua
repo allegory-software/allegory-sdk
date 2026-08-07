@@ -420,9 +420,51 @@ local function _exec(t, env, dir, stdin, stdout, stderr, autokill, owner)
 	end
 end
 
+--[[
+Why so complicated?
+A Lua thread has to close owned resources on finish, including child processes,
+but kill(9) leaks the pid if we don't call waitipid() on it, but that is
+blocking which we can't afford, and close() is not allowed to epoll-wait.
+So we create a ripper thread that calls waitpid() non-blocking on SIGCHLD.
+The thread is created on-demand when calling forget() on a live process (which
+can happen because even kill(9) is queued in the kernel). The thread is owned
+by main.
+]]
+local forgotten_pids = {}
+local reaper_thread
+local function reap_forgotten()
+	for pid in pairs(forgotten_pids) do
+		local reaped
+		repeat
+			reaped = C.waitpid(pid, nil, WNOHANG)
+		until not (reaped < 0 and errno() == EINTR)
+		if reaped ~= 0 then forgotten_pids[pid] = nil end
+	end
+	return not next(forgotten_pids)
+end
+local function start_reaper()
+	if reaper_thread and reaper_thread:closed() then
+		reaper_thread = nil
+	end
+	if reaper_thread then return end
+	reaper_thread = on_signal('SIGCHLD', function()
+		if reap_forgotten() then return 'stop' end
+	end)
+	reaper_thread:onfinish(function() reaper_thread = nil end)
+	reaper_thread:setowner(mainthread())
+end
 function proc:forget()
 	local pid = self.pid
 	if not pid then return end --forget barrier
+	if not (self._exit_code or self._killed) then
+		forgotten_pids[pid] = true
+		if not reap_forgotten() then
+			start_reaper()
+			--second pass prevents a race: catches a child that exited between
+			--the first waitpid(..., WNOHANG) and blocking SIGCHLD.
+			if reap_forgotten() then reaper_thread:close() end
+		end
+	end
 	self.pid = false
 	_disown(self)
 	if pid then live(self, nil) end
@@ -446,7 +488,7 @@ function proc:kill(sig)
 end
 
 function proc:try_close()
-	if self.pid then
+	if self.pid and not (self._exit_code or self._killed) then
 		C.kill(self.pid, 9)
 	end
 	self:forget()
