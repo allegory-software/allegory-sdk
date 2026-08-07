@@ -1,3 +1,18 @@
+--[[
+
+	MDBX incremental backup.
+	Written by Cosmin Apreutesei. Public Domain.
+
+API
+	db:backup(destination_file[, base_backup_file])
+	mdbx_restore(source_file, destination_file[, base_backup_file])
+
+AS SCRIPT
+	luajit mdbx_backup.lua backup DB_FILE BACKUP_FILE [BASE_BACKUP_FILE]
+	luajit mdbx_backup.lua restore BACKUP_FILE DB_FILE [BASE_BACKUP_FILE]
+
+]]
+
 require'mdbx'
 require'fs'
 require'pbuffer'
@@ -270,10 +285,10 @@ if not package.loaded.mdbx_backup then
 	local command, source_file, destination_file, base_backup_file = ...
 	assert((command == 'backup' or command == 'restore')
 		and source_file and destination_file,
-		'usage: mdbx_backup.lua backup DB_FILE BACKUP_FILE '
-		..'[BASE_BACKUP_FILE]\n'
-		..'       mdbx_backup.lua restore BACKUP_FILE DB_FILE '
-		..'[BASE_BACKUP_FILE]')
+		'\nUsage:\n\n'..
+		'  luajit mdbx_backup.lua backup DB_FILE BACKUP_FILE [BASE_BACKUP_FILE]\n'..
+		'  luajit mdbx_backup.lua restore BACKUP_FILE DB_FILE [BASE_BACKUP_FILE]\n'
+	)
 	run(function()
 		if command == 'backup' then
 			local db, err = mdbx_open(source_file, {readonly = true})
@@ -281,8 +296,7 @@ if not package.loaded.mdbx_backup then
 			db:backup(destination_file, base_backup_file)
 			db:close()
 		else
-			mdbx_restore(source_file, destination_file,
-				base_backup_file)
+			mdbx_restore(source_file, destination_file, base_backup_file)
 		end
 	end)
 end
