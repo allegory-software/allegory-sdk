@@ -96,4 +96,19 @@ end
 
 action['404.html'] = action.en
 
+function cui_module(path)
+	local name = basename(path)
+	package.path = package.path .. ';' .. path .. '/?.lua'
+	local www = indir(path, 'www')
+	if exists(www) then wwwdir(www) end
+	load_config_file(indir(path, name..'.conf'))
+	if exists(indir(path, name..'.lua')) then
+		require(name)
+	end
+	local schema = name..'_schema.lua'
+	if exists(indir(path, schema)) then
+		db().schema:import(schema)
+	end
+end
+
 return webb_app
