@@ -1,0 +1,61 @@
+
+------------------------------------------------------------------------------
+
+- mdbx_schema.lua index search positions user supplied cursor on the base table.
+
+- REF: disallow DDL on idx tables (split ddl to internal vs API with barrier).
+
+- BUG CHECK & TEST COVERAGE:
+	- DDL:
+		- each method
+			- what it assumes
+			- what it updates
+			- what invariants
+			- what branches
+	- sync_schema
+		- coverage of diff cases
+	- scan / query
+		- correctnes tests
+		- subqueries re-run
+
+------------------------------------------------------------------------------
+EXPLOITING MDBX STRENGTHS
+------------------------------------------------------------------------------
+
+Changefeed / CDC via the commit sequence
+MDBX hands you a monotonic transaction id. If each commit records "rows touched at txn N" (or you keep a (txn_id, table, pk) log table written in the same txn), you get "what changed since N" for free. That one primitive powers:
+	cache invalidation
+	search-index / external-replica sync
+	offline/mobile sync (business apps always end up wanting this)
+	materialized-view refresh (next item)
+Single-writer is what makes this clean — there's a total order of commits, no gap/visibility races to reason about.
+
+------------------------------------------------------------------------------
+
+Always-consistent incremental aggregates
+Maintain rollups (counts, sums, running balances, per-customer totals) in the writer transaction as you mutate rows. In SQL, materialized views are either stale or expensive, and trigger-maintained summary tables race under concurrency. Single-writer means an incrementally-maintained aggregate is exact and contention-free by construction. For operational dashboards / running balances this is a genuine structural advantage, not a convenience.
+
+------------------------------------------------------------------------------
+
+Temporal / versioned rows + native audit
+Key rows by (entity_id, reverse_version) and never overwrite. Then:
+	audit log is intrinsic (every version is retained)
+	"as of" queries = seek to a version bound
+	combined with MVCC snapshots, long reports read a consistent past state without blocking the writer
+Bitemporal (valid-time + transaction-time) is a key-design choice rather than an engine feature. Most business domains (accounting, contracts, pricing) genuinely need this and fake it badly in SQL.
+
+------------------------------------------------------------------------------
+
+Tree API over materialized-path keys (parent_path || child_id)
+	whole subtree = prefix scan
+	ancestors = the path is literally in the key
+	move subtree = rewrite a key prefix range
+	depth-ordered traversal = free, because keys sort that way
+
+Partial & expression indexes. You have dupsort; letting an index predicate-filter (only index status='open') or index a computed value is a tiny extension with outsized value for hot operational queries.
+
+------------------------------------------------------------------------------
+
+Tenant/prefix partitioning. Tenant id as the leading key field → cheap per-tenant scans, bulk export, and atomic "delete tenant" as a drop-range. Cleaner than a tenant_id column the planner has to be coaxed into using.
+
+------------------------------------------------------------------------------
