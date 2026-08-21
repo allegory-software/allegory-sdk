@@ -37,7 +37,7 @@ SCHEMA
 
 CONFIG
 	auth_store          'fs'      user/session storage: 'fs' or 'mdbx'
-	auto_create_user    true      auto-create anonymous users for current session
+	auto_create_user    false     auto-create anonymous users for current session
 	allow_create_user   true      allow creating new users at all
 	auth_code_lifetime  600       one-time auth code lifetime (seconds)
 	auth_code_maxtry    5         max failed attempts before code is invalidated

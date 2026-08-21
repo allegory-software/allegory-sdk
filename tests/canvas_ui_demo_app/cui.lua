@@ -6,6 +6,10 @@ config{https_port = 4443}
 --config{https_addr = false}
 config{project_dir = homedir()}
 
+--dev mode: gen_auth_code.json returns the code to the browser; without a
+--mailer there would be no other way to get it.
+config{env = 'dev'}
+
 config{http_server_debug = 'requests'}
 require'cui_app'(...)
 
@@ -27,6 +31,12 @@ logging.filter.open = true
 
 app.main_file = 'cui_demo.js'
 wwwdir'../../canvas-ui/www'
+
+fontfile('mono'    , 'fonts/jetbrains-mono-nl-regular.woff2')
+fontfile('inter'   , 'fonts/inter-roman.var.woff2')
+fontfile('opensans', 'fonts/opensans.var.woff2')
+fontfile('las'     , 'icons/la-solid-900.woff2')
+fontfile('fas'     , 'icons/fa-solid-900.woff2')
 
 action.error = error
 

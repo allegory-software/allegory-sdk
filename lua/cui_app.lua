@@ -15,7 +15,7 @@ USAGE
 
 API
 
-	fontfile(name, path)          preload a font and declare its @font-face
+	fontfile(name, path, [desc])  preload a font and load it in the page
 
 USES
 
@@ -30,8 +30,8 @@ CONFIG
 local webb_app = require'webb_app'
 
 local fontfiles = {}
-function fontfile(name, path)
-	add(fontfiles, {name, path})
+function fontfile(name, path, desc)
+	add(fontfiles, {name, path, desc})
 end
 
 --tie webb to cui
@@ -44,23 +44,18 @@ function action.en()
 	vars.country = country()
 	vars.favicon_href = config('favicon_href', 'favicon.ico')
 	vars.preloads = {}
-	vars.css = {}
+	vars.fonts = {}
 	for _,t in ipairs(fontfiles) do
-		local name, path = unpack(t)
-		local ext = path_ext(path)
-		add(vars.preloads, format('\t<link rel="preload" href="/%s" as="font" type="font/%s" crossorigin>\n',
-			path, ext))
-		add(vars.css, format([[
-@font-face {
-	font-family: "%s";
-	src: url(/%s) format(%s);
-	font-display: block;
-}
-]], name, path, ext))
+		local name, path, desc = unpack(t, 1, 3)
+		local url = '/'..path
+		add(vars.preloads, format('\t<link rel="preload" href="%s" as="font" type="font/%s" crossorigin>\n',
+			url, path_ext(path)))
+		add(vars.fonts, format('ui.load_font(%s, %s%s)',
+			json(name), json(url), desc and ', '..json(desc) or ''))
 	end
 	vars.main_file = app.main_file
 	vars.preloads = cat(vars.preloads, '\n')
-	vars.css = cat(vars.css, '\n')
+	vars.fonts = cat(vars.fonts, '\n')
 	vars.user = json(user_json())
 	out((([[
 <html lang={{lang}} country={{country}} theme="{{theme}}"><head>
@@ -68,9 +63,6 @@ function action.en()
 	<title>{{title}}</title>
 	<link rel="icon" href="{{favicon_href}}">
 {{{preloads}}}
-	<style>
-{{{css}}}
-	</style>
 	<script src="/glue.js" global></script>
 	<script src="/ui.js" global></script>
 	<script src="/ui_validation.js" ></script>
@@ -78,9 +70,9 @@ function action.en()
 	<script src="/ui_grid.js" ></script>
 	<script src="/ui_code_edit.js" ></script>
 	<script src="/lezer.js" ></script>
-	<script src="/adapter.js" ></script>
 	<script src="/webrtc.js" ></script>
 	<script>
+{{{fonts}}}
 user = {{{user}}}
 	</script>
 	<script src="/{{main_file}}"></script>

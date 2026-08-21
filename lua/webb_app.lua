@@ -60,7 +60,8 @@ wwwdir'www'
 
 function user_json()
 	return {
-		signed_in = user() ~= nil, --not used but dummy attr to avoid empty []
+		--signed_in is always non-nil to avoid an empty table to encode as [].
+		signed_in = user() ~= nil and not user'anonymous',
 		anonymous = user'anonymous',
 		email = user'email',
 		phone = user'phone',

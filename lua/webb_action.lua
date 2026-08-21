@@ -240,8 +240,10 @@ local function action_handler(action, ...)
 			if max_age then
 				setheader('cache-control', _('max-age=%d', max_age))
 			end
-			ext = file_ext
 		end
+		--`action` is only the first path segment; run_action() needs the
+		--mime type of the whole path to pick the 404 action for it.
+		ext = file_ext
 	end
 
 	if not handler then
