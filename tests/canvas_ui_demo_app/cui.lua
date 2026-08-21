@@ -5,10 +5,7 @@ config{http_port = 8888}
 config{https_port = 4443}
 --config{https_addr = false}
 config{project_dir = homedir()}
-
---dev mode: gen_auth_code.json returns the code to the browser; without a
---mailer there would be no other way to get it.
-config{env = 'dev'}
+config{env = 'dev'} --if no email set, auth code goes to browser console.
 
 config{http_server_debug = 'requests'}
 require'cui_app'(...)
@@ -35,7 +32,8 @@ wwwdir'../../canvas-ui/www'
 fontfile('mono'    , 'fonts/jetbrains-mono-nl-regular.woff2')
 fontfile('inter'   , 'fonts/inter-roman.var.woff2')
 fontfile('opensans', 'fonts/opensans.var.woff2')
-fontfile('las'     , 'icons/la-solid-900.woff2')
+fontfile('ti'      , 'icons/tabler-icons.woff2')
+--ui_grid and ui_nav still draw hardcoded font-awesome codepoints.
 fontfile('fas'     , 'icons/fa-solid-900.woff2')
 
 action.error = error

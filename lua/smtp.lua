@@ -99,11 +99,11 @@ function smtp_connect(t)
 			self.f, req.from, req.to, req.headers and req.headers.subject,
 			kbytes(#req.message))
 		self.f:settimeout(self.sendmail_timeout)
-		send_line('MAIL FROM: %s', req.from)
+		send_line('MAIL FROM:<%s>', req.from)
 		check_reply'2..'
 		local to = isstr(req.to) and {req.to} or req.to
 		for i,to in ipairs(to) do
-			 send_line('RCPT TO: %s', to)
+			 send_line('RCPT TO:<%s>', to)
 			 check_reply'2..'
 		end
 		send_line'DATA'
@@ -120,7 +120,7 @@ function smtp_connect(t)
 		t[#t+1] = ''
 		local headers = concat(t, '\r\n')
 		self.f:send(headers)
-		local data = req.message:gsub('^%.', '..'):gsub('\n%.', '..')
+		local data = req.message:gsub('^%.', '..'):gsub('\n%.', '\n..')
 		self.f:send(data)
 		self.f:send'\r\n.\r\n'
 		check_reply'2..'

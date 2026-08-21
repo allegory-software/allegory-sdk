@@ -291,6 +291,11 @@ end
 
 local function run_action(fallback, action, handler, ext, ...)
 	setmime(ext)
+	--overrides the max-age set for static files above. without no-store the
+	--browser still caches heuristically when there's no etag and no max-age.
+	if config'env' == 'dev' then
+		setheader('cache-control', 'no-store')
+	end
 	local mime = mime_types[ext]
 	if not handler then
 		if not fallback then

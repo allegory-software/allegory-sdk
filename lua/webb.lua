@@ -308,7 +308,7 @@ function port()
 		or req().tcp.listen_socket:local_addr():port()
 end
 
-function email(user)
+function email(user) --TODO: wrong when host() has a port
 	return _('%s@%s', assert(user), host())
 end
 
@@ -349,6 +349,7 @@ allow      = checkfunc(403, 'Not allowed')
 check500   = checkfunc(500, 'Internal error')
 
 function check_etag(s)
+	if config'env' == 'dev' then return s end
 	if not method'GET' then return s end
 	if out_buffering() then return s end
 	local etag = xxhash128(s):hex()

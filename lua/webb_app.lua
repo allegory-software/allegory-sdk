@@ -18,15 +18,9 @@ API
 	app:run() -> exit_code
 	app:run_server()
 	app:run_cmd(cmd_name, cmd_run, cmd_opt, ...) -> exit_code
-	user_json() -> {signed_in=, anonymous=, email=, phone=}
 	db() -> db                             open the configured db
 	scan(tbl, [path], [alias]) -> scan     db():scan()
 	query('TABLE [ALIAS]'|rel, [alias]) -> rel   db():from()
-
-ACTIONS
-
-	gen_auth_code.json
-	login.json
 
 CONFIG
 
@@ -57,31 +51,6 @@ cmddefault'run'
 
 --configure webb_action static file loading.
 wwwdir'www'
-
-function user_json()
-	return {
-		--signed_in is always non-nil to avoid an empty table to encode as [].
-		signed_in = user() ~= nil and not user'anonymous',
-		anonymous = user'anonymous',
-		email = user'email',
-		phone = user'phone',
-	}
-end
-
-action['gen_auth_code.json'] = function()
-	checkarg(method'POST')
-	local email = checkarg(str_arg(post'email'))
-	local code = auth_gen_code{email = email}
-	return {email = email, code = config'env' == 'dev' and code or nil}
-end
-
-action['login.json'] = function()
-	checkarg(method'POST')
-	local email = checkarg(str_arg(post'email'))
-	local code = checkarg(str_arg(post'code'))
-	login{type = 'code', email = email, code = code}
-	return user_json()
-end
 
 local app_db
 function db()
