@@ -58,7 +58,7 @@ ui.login_window = function() {
 	ui.popup('login_window', 'window', 'screen', 'ic', '[]')
 		//ui.bg_dots('login_dots', 0.1)
 		ui.bb('bg0', null, 1, 'light')
-		ui.p(ui.em(3))
+		ui.mb(ui.em(6))
 		ui.focus_group(true, null, 'login')
 		ui.v(1, 0, 'c', 'c', 300)
 
@@ -90,9 +90,8 @@ ui.login_window = function() {
 				ui.end_scope()
 				ui.mt(ui.sp2())
 				ui.default_button('login_send_button')
-				if (ui.icon_button('login_send_button', 'mail-fast',
-					'Send authentication code', 1, 'c', null, null, null,
-					'button-primary'))
+				if (ui.primary_icon_button('login_send_button', 'mail-fast',
+					'Continue', 1, 's'))
 					post('/gen_auth_code.json', {email: email},
 						function(t) {
 							ui.state('login').email = t.email
@@ -109,8 +108,8 @@ ui.login_window = function() {
 				let code = ui.input('login_code', '', 0)
 				ui.mt(ui.sp2())
 				ui.default_button('login_signin_button')
-				if (ui.icon_button('login_signin_button', 'key',
-					'Sign in', 1, 'c', null, null, null, 'button-primary'))
+				if (ui.primary_icon_button('login_signin_button', 'key',
+					'Sign in', 1, 's'))
 					post('/login.json', {email: s.email, code: code},
 						function(new_user) {
 							user = new_user
