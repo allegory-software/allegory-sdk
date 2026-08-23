@@ -642,6 +642,9 @@ function test.starts_ai_ci_seek_exec()
 		db:insert('people', '{}', {id = 1, name = 'JOSÉ'})
 		db:insert('people', '{}', {id = 2, name = 'joseph'})
 		db:insert('people', '{}', {id = 3, name = 'Bob'})
+		db:insert('people', '{}', {id = 4, name = '가나'})
+		db:insert('people', '{}', {id = 5, name = '각나'})
+		db:insert('people', '{}', {id = 6, name = '가나'})
 		db:commit()
 		db:atomic('r', function()
 			local rel = db:from('people')
@@ -655,6 +658,17 @@ function test.starts_ai_ci_seek_exec()
 			local node = compile_step(db, rel)
 			local ids = collect_ids(node, 'people')
 			assert(cat(ids, ',') == '1,2', cat(ids, ','))
+
+			--starts() compares NFC ai_ci keys: the decomposed query becomes
+			--가, matching composed and decomposed 가나 but not the distinct
+			--syllable 각.
+			rel = db:from('people')
+				:where({'starts', q.col('people.name'), '가'})
+				:select'people.id id'
+				:prepare()
+			node = compile_step(db, rel)
+			ids = collect_ids(node, 'people')
+			assert(cat(ids, ',') == '4,6', cat(ids, ','))
 		end)
 	end)
 end

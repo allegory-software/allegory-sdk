@@ -804,20 +804,22 @@ end
 
 --COLLATIONS -----------------------------------------------------------------
 
---fold a utf8 string to its ai_ci collation key: NFD-decompose + casefold +
---stripmark, reencoded to utf8. lossy. returns (ptr, byte_len) into a reused
---buffer that holds int32 codepoints during decompose, then the utf8 bytes.
+--fold a utf8 string to its ai_ci collation key: canonical-decompose +
+--casefold + stripmark + NFC-recompose, reencoded to utf8. lossy. returns
+--(ptr, byte_len) into a reused buffer that holds int32 codepoints during
+--decompose, then the utf8 bytes.
 local ai_ci_buf = buffer(i32a)
-local ai_ci_opt = bor(UTF8_DECOMPOSE, UTF8_CASEFOLD, UTF8_STRIPMARK)
+local ai_ci_decompose_opt =
+	bor(UTF8_DECOMPOSE, UTF8_CASEFOLD, UTF8_STRIPMARK)
 local function encode_ai_ci(s, len)
 	local out, cap = ai_ci_buf(len + 1) --floor guess; the global buffer only grows
-	local n = num(utf8_decompose(s, len, out, cap, ai_ci_opt))
+	local n = num(utf8_decompose(s, len, out, cap, ai_ci_decompose_opt))
 	if n < 0 then return nil, n end
 	if n >= cap then --too small for the codepoints + utf8proc_reencode's nul terminator
 		out, cap = ai_ci_buf(n + 1)
-		n = utf8_decompose(s, len, out, cap, ai_ci_opt)
+		n = utf8_decompose(s, len, out, cap, ai_ci_decompose_opt)
 	end
-	local sz = num(utf8_reencode(out, n, ai_ci_opt)) --in place: int32 cps -> utf8 bytes
+	local sz = num(utf8_reencode(out, n, UTF8_COMPOSE)) --in place: int32 cps -> NFC utf8 bytes
 	assertf(sz >= 0, 'utf8_ai_ci: reencode failed (%d)', sz)
 	return out, sz
 end
@@ -851,7 +853,7 @@ a changed signature rebuilds the indexes over that col.
 	collator.max_len (maxlen) -> max collation key len for an index key col
 	collator.key     (v) -> collation key | v (v is nil or null)
 	collator.write   (buf, val, len) -> len | nil, err
-	collator.prefix  -> true if a prefix of a value keys to a prefix of its key
+	collator.prefix  -> true if starts() can use key prefixes
 ]]
 
 local collator_kinds = {}
@@ -868,7 +870,7 @@ end)
 function collator_kinds.utf8_ai_ci()
 	return {
 		prefix = true,
-		max_len = function(maxlen) return maxlen * 3 end,
+		max_len = function(maxlen) return maxlen * 2 end,
 		key = function(v) return collate_value(v, true) end,
 		write = function(buf, val, len)
 			local p, sz = encode_ai_ci(val, len)

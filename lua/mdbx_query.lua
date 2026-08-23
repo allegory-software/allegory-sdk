@@ -1411,9 +1411,8 @@ end
 --[[
 try_key() fixes leading path fields with equality facts and then uses one
 prefix, range, or is_not_null fact on the next field.
-try_key() uses a collated field for starts() only where path_seekable()
-allows it: inside an index key, where encode_key_prefix() folds the bound
-through the field's own encoder and the stored bytes are folded too.
+starts() can seek a collated index whose collation supports key prefixes;
+encode_key_prefix() folds the bound the same way as the stored key.
 ]]
 local function try_key(schema, eq, lo, hi, prefix, not_null, not_equal, in_)
 	local fields = schema.path_fields
@@ -2427,7 +2426,7 @@ local function eval_expr(expr, scan, checks, cache)
 		return not null_value(eval_expr(a, scan, checks, cache))
 	elseif op == 'starts' then
 		--compile_col_decoders() left a text reader on an operand whose
-		--collation does not preserve prefixes; the rest test key bytes.
+		--collation has no key prefixes; the rest test key bytes.
 		local read_a = cache[a] and cache[a].text_get
 		local read_b = cache[b] and cache[b].text_get
 		local v, prefix
@@ -2583,8 +2582,7 @@ local function compile_col_decoders(expr, node, cache, registry, outer_node)
 		for i = 2, 3 do
 			compile_col_decoders(expr[i], node, cache, registry, outer_node)
 			local d = cache[expr[i]]
-			--a collation that does not preserve prefixes tests the original
-			--text instead of the key bytes.
+			--without key prefixes, test the original text.
 			if d and d.collator and not d.collator.prefix then
 				local x = expr[i]
 				if x.source then

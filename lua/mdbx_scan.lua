@@ -747,8 +747,7 @@ function Db:scan(tbl, path, alias)
 		if prefix_param then --prefix scans require a varsize string field.
 			assertf(range_field.maxlen and not range_field.fixed,
 				'starts on field: %s', range_field.col)
-			--a prefix seeks the stored key bytes, so a collation that does
-			--not preserve prefixes cannot answer it.
+			--a collated prefix scan needs key prefixes.
 			local coll = range_field.key_collator
 			assertf(not coll or coll.prefix,
 				'starts on a %s field: %s', coll and coll.kind, range_field.col)

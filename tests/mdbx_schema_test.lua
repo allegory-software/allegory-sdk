@@ -4091,7 +4091,7 @@ function test.ai_ci_decompose_retry()
 	end)
 end
 
---the 3x physical-capacity factor must remain valid for the utf8proc Unicode
+--the 2x physical-capacity factor must remain valid for the utf8proc Unicode
 --data linked into this build.
 function test.ai_ci_max_expansion_factor()
 	local C = ffi.load'utf8proc'
@@ -4104,43 +4104,45 @@ function test.ai_ci_max_expansion_factor()
 			local inp_len = num(utf8_encode_char(cp, inp))
 			local n = num(utf8_decompose(inp, inp_len, out, 256, opt))
 			assertf(n >= 0 and n < 256, 'U+%04X: decompose returned %d', cp, n)
-			local out_len = num(utf8_reencode(out, n, opt))
-			assertf(out_len <= inp_len * 3,
-				'U+%04X: ai_ci expansion %d -> %d exceeds 3x',
+			local out_len = num(utf8_reencode(out, n, UTF8_COMPOSE))
+			assertf(out_len <= inp_len * 2,
+				'U+%04X: ai_ci expansion %d -> %d exceeds 2x',
 				cp, inp_len, out_len)
-			if out_len == inp_len * 3 then reaches_limit = true end
+			if out_len == inp_len * 2 then reaches_limit = true end
 		end
 	end
-	assert(reaches_limit, 'ai_ci expansion scan did not exercise the 3x limit')
+	assert(reaches_limit, 'ai_ci expansion scan did not exercise the 2x limit')
 end
 
 --maxlen limits input bytes; values retain their original text while generated
---index keys have 3x capacity for the worst-case folded form.
+--index keys have 2x capacity for the worst-case folded form.
 function test.ai_ci_folded_maxlen()
 	with_db_reopen('ai_ci_folded_maxlen', function(db)
 		db:begin'w'
 		db:create_table('val', {name = 'val', fields = {
 			{col = 'id', mdbx_type = 'u32', not_null = true},
-			{col = 's' , mdbx_type = 'utf8', maxlen = 3,
+			{col = 's' , mdbx_type = 'utf8', maxlen = 2,
 				nozero = true, not_null = true, mdbx_collation = 'utf8_ai_ci'},
 			{col = 'n' , mdbx_type = 'u32', not_null = true},
 		}, pk = {'id'}})
 		db:add_index('val', {'s', is_unique = true})
-		db:insert('val', '{}', {id = 1, s = '각', n = 1})
+		db:insert('val', '{}', {id = 1, s = 'և', n = 1})
 		db:update('val', '{id n}', {id = 1, n = 2})
 		local s = db:find('val', 's', 1)
-		assert(s == '각' and #s == 3, ('%q (%d)'):format(s, #s))
+		assert(s == 'և' and #s == 2, ('%q (%d)'):format(s, #s))
+		assert(mdbx_collate_value(s, true) == 'եւ')
+		assert(mdbx_collate_value('각', true) == '각') --NFC recomposes Hangul.
 		assert(num(db:find('val', 'n', 1)) == 2)
-		assert(num((db:must_find('val/s', '{}', '각')).id) == 1)
-		local ok, err = try_mutation(db, db.find, 'val/s', '{}', 'abcd')
+		assert(num((db:must_find('val/s', '{}', 'և')).id) == 1)
+		local ok, err = try_mutation(db, db.find, 'val/s', '{}', 'abc')
 		assert(not ok and iserror(err, 'field'), tostring(err))
 		db:commit()
 	end, function(db)
 		db:begin'r'
 		local s = db:find('val', 's', 1)
-		assert(s == '각' and #s == 3, ('%q (%d)'):format(s, #s))
+		assert(s == 'և' and #s == 2, ('%q (%d)'):format(s, #s))
 		assert(num(db:find('val', 'n', 1)) == 2)
-		assert(num((db:must_find('val/s', '{}', '각')).id) == 1)
+		assert(num((db:must_find('val/s', '{}', 'և')).id) == 1)
 		db:commit()
 	end)
 end
