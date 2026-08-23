@@ -333,18 +333,18 @@ end
 
 -- value layout edge cases ---------------------------------------------------
 
---padded fixed-size array placed (by col order) between two varsize vals.
+--fixed-size array placed (by col order) between two varsize vals.
 --regression guard for the val-field sort bug (fixed-size col must not land
 --in the dynamic-offset region and break the offset chain).
-function test.padded_array_value()
-	with_db('padded_array_value', function(db)
+function test.fixed_array_value()
+	with_db('fixed_array_value', function(db)
 		db:begin'w'
 		db:create_table('t', {
 			name = 't',
 			fields = {
 				{col = 'id', mdbx_type = 'u32', not_null = true},
 				{col = 's1', mdbx_type = 'utf8', maxlen = 8},
-				{col = 'a' , mdbx_type = 'u8'  , maxlen = 4, padded = true},
+				{col = 'a' , mdbx_type = 'u8'  , maxlen = 4, fixed = true},
 				{col = 's2', mdbx_type = 'utf8', maxlen = 8},
 			},
 			pk = {'id'},
@@ -667,13 +667,13 @@ function test.alter_adds_nozero_rechecks_data()
 
 		--key col: rewritten through a temp table.
 		db:create_table('k', {name = 'k', fields = {
-			{col = 'a', mdbx_type = 'u8', maxlen = 4, padded = true, not_null = true},
+			{col = 'a', mdbx_type = 'u8', maxlen = 4, fixed = true, not_null = true},
 			{col = 'n', mdbx_type = 'u32'},
 		}, pk = {'a'}})
 		db:insert('k', '{}', {a = {1,2,3,4}, n = 10})
 		db:insert('k', '{}', {a = {1,0,2,3}, n = 20})
 		ok, err = try_schema(db, db.alter_table, 'k', {name = 'k', fields = {
-			{col = 'a', mdbx_type = 'u8', maxlen = 4, padded = true, not_null = true,
+			{col = 'a', mdbx_type = 'u8', maxlen = 4, fixed = true, not_null = true,
 				nozero = true},
 			{col = 'n', mdbx_type = 'u32'},
 		}, pk = {'a'}})
@@ -693,7 +693,7 @@ function test.alter_adds_nozero_rechecks_data()
 end
 
 --create + reopen so the schema is reconstructed from $schema (loaded path),
---then read back fixed, padded and varsize values.
+--then read back scalar, fixed-size and varsize values.
 function test.reopen_roundtrip()
 	with_db_reopen('reopen_roundtrip', function(db)
 		db:begin'w'
@@ -702,7 +702,7 @@ function test.reopen_roundtrip()
 			fields = {
 				{col = 'id' , mdbx_type = 'u32', not_null = true},
 				{col = 'num', mdbx_type = 'i32'},
-				{col = 'a'  , mdbx_type = 'u8'  , maxlen = 3, padded = true},
+				{col = 'a'  , mdbx_type = 'u8'  , maxlen = 3, fixed = true},
 				{col = 's'  , mdbx_type = 'utf8', maxlen = 16},
 			},
 			pk = {'id'},
@@ -827,14 +827,14 @@ function test.key_embedded_zero_error()
 	end)
 end
 
---padded fixed-size array as a key field: round-trip, ordering, and reopen.
-function test.padded_array_key()
-	with_db_reopen('padded_array_key', function(db)
+--fixed-size array as a key field: round-trip, ordering, and reopen.
+function test.fixed_array_key()
+	with_db_reopen('fixed_array_key', function(db)
 		db:begin'w'
 		db:create_table('t', {
 			name = 't',
 			fields = {
-				{col = 'a', mdbx_type = 'u8', maxlen = 4, padded = true, not_null = true},
+				{col = 'a', mdbx_type = 'u8', maxlen = 4, fixed = true, not_null = true},
 				{col = 'v', mdbx_type = 'u32'},
 			},
 			pk = {'a'},
@@ -859,10 +859,10 @@ function test.padded_array_key()
 	end)
 end
 
---composite key with a u16 padded array + scalar, asc and desc: exercises
---byte-swap encoding on multi-byte padded array key fields.
-function test.padded_array_key_composite()
-	with_db('padded_array_key_composite', function(db)
+--composite key with a fixed u16 array + scalar, asc and desc: exercises
+--byte-swap encoding on multi-byte fixed array key fields.
+function test.fixed_array_key_composite()
+	with_db('fixed_array_key_composite', function(db)
 		db:begin'w'
 		for order in words'asc desc' do
 			local name = 'pk2:'..order
@@ -870,7 +870,7 @@ function test.padded_array_key_composite()
 			db:create_table(name, {
 				name = name,
 				fields = {
-					{col = 'a', mdbx_type = 'u16', maxlen = 2, padded = true, not_null = true},
+					{col = 'a', mdbx_type = 'u16', maxlen = 2, fixed = true, not_null = true},
 					{col = 'b', mdbx_type = 'u32', not_null = true},
 					{col = 'v', mdbx_type = 'u32'},
 				},
@@ -3885,7 +3885,7 @@ function test.add_fk_validates_definition()
 			{col = 'raw_ai'    , mdbx_type = 'utf8', maxlen = 8, nozero = true,
 				mdbx_collation = 'utf8_ai_ci'},
 			{col = 'short_code', mdbx_type = 'utf8', maxlen = 4, nozero = true},
-			{col = 'padded'    , mdbx_type = 'utf8', maxlen = 8, padded = true, nozero = true},
+			{col = 'fixed'     , mdbx_type = 'utf8', maxlen = 8, fixed = true, nozero = true},
 			{col = 'zero'      , mdbx_type = 'utf8', maxlen = 8},
 		}, pk = {'id'}})
 
@@ -3914,7 +3914,7 @@ function test.add_fk_validates_definition()
 		invalid(fk({'pid'}, 'parent_num', {'nope'}), 'ref column must be pk column')
 		invalid(fk({'pid_i32'}, 'parent_num', {'id'}), 'mdbx_type mismatch')
 		invalid(fk({'short_code'}, 'parent_text', {'code'}), 'maxlen mismatch')
-		invalid(fk({'padded'}, 'parent_text', {'code'}), 'padded mismatch')
+		invalid(fk({'fixed'}, 'parent_text', {'code'}), 'fixed mismatch')
 		invalid(fk({'zero'}, 'parent_text', {'code'}), 'nozero mismatch')
 		invalid(fk({'raw_ai'}, 'parent_text', {'code'}), 'mdbx_collation mismatch')
 		invalid(fk({'pid'}, 'parent_num', {'id'}, 'restrict'), 'invalid ondelete')

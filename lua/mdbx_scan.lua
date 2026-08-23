@@ -222,7 +222,7 @@ local function direct_read_rec(db, schema, params)
 		if field.key_index ~= i
 			or field.mdbx_type ~= output_field.mdbx_type
 			or field.maxlen ~= output_field.maxlen
-			or field.padded ~= output_field.padded
+			or field.fixed ~= output_field.fixed
 			or field.nozero ~= output_field.nozero
 			or field.key_collator ~= output_field.key_collator
 		then
@@ -288,7 +288,7 @@ local function key_add_param(db, param, output_schema, slot, scan, op)
 		--like the raw path, an absent (DB null) source aborts the key.
 		if field.mdbx_type ~= output_field.mdbx_type
 			or field.maxlen ~= output_field.maxlen
-			or field.padded ~= output_field.padded
+			or field.fixed ~= output_field.fixed
 			or field.nozero ~= output_field.nozero
 			or field.key_collator ~= output_field.key_collator
 		then
@@ -745,7 +745,7 @@ function Db:scan(tbl, path, alias)
 		end
 
 		if prefix_param then --prefix scans require a varsize string field.
-			assertf(range_field.maxlen and not range_field.padded,
+			assertf(range_field.maxlen and not range_field.fixed,
 				'starts on field: %s', range_field.col)
 			--a prefix seeks the stored key bytes, so a collation that does
 			--not preserve prefixes cannot answer it.

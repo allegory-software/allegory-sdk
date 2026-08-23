@@ -897,7 +897,7 @@ function diff:pp(opt)
 			prefix or '',
 			fld.not_null and '*' or '',
 			dots(fld.col, 16), fld.type or '',
-			fld.type == 'number' and not fld.digits and '['..fld.size..']'
+			fld.type == 'number' and not fld.digits and (fld.size and '['..fld.size..']' or '')
 			or fld.type == 'bool' and ''
 			or (fld.digits or '')..(fld.decimals and ','..fld.decimals or ''),
 			fld.type == 'number' and not fld.unsigned and '-' or '',

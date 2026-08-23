@@ -66,7 +66,7 @@ In-memory layout:
  - key records: fixed_size_cols, first_varsize_col, varoffset_cols (varsize or not).
  - val records: null_bits, dyn_offsets, fixed_size_cols, first_varsize_col, varsize_cols.
 
-fixed_size means scalar (len=1) or fixed-size array (zero-padded). The opposite
+fixed_size means scalar (len=1) or fixed-size array. The opposite
 is varsize for which len in the definition means max len. Varsize values are
 zero-terminated inside key records, so they are not 8-bit clean except the
 last column if it's ascending. In value records an offset table is used instead
@@ -85,7 +85,7 @@ encoded so that byte order matches numeric order.
 */
 typedef struct schema_col {
 	int   len; // for varsize cols it means max len.
-	bool8 fixed_size; // fixed size array (padded) or varsize.
+	bool8 fixed_size; // fixed-size array or varsize.
 	bool8 descending; // for key cols
 	bool8 nullable; // for key cols
 	u8    type; // schema_col_type

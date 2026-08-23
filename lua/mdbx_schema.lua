@@ -5,7 +5,7 @@
 
 FEATURES
 	- scalars: 8, 16, 32 bit int signed/unsigned; 32 and 64 bit floats; bool.
-	- arrays: fixed-size (zero-padded) and variable-size.
+	- arrays: fixed-size and variable-size.
 	- table/index keys: composite, with per-field ascending/descending order.
 	- null support (nulls come first in keys).
 	- auto-increment primary keys.
@@ -101,7 +101,7 @@ SCHEMA SPEC (create_table, alter_table)
 		fields = {
 			{
 				col=name, mdbx_type='u32|i32|u8|i8|u16|i16|f32|f64|utf8|bool',
-				[not_null=true], [maxlen=N], [nozero=true], [padded=true],
+				[not_null=true], [maxlen=N], [nozero=true], [fixed=true],
 
 			}, ...
 		},
@@ -253,7 +253,7 @@ typedef enum schema_col_type {
 
 typedef struct schema_col {
 	int   len; // for varsize cols it means max len.
-	bool8 fixed_size; // fixed size array (padded) or varsize.
+	bool8 fixed_size; // fixed-size array or varsize.
 	bool8 descending; // for key cols
 	bool8 nullable; // for key cols
 	u8    type; // schema_col_type
@@ -920,7 +920,7 @@ local format_ix_name, format_fk_name, index_schema, compile_index_schema --fw. d
 local field_type_attrs = {
 	mdbx_type=1, --scalar/element type; selects the encoding and element size
 	maxlen=1, --max array/string length
-	padded=1, --fixsize (padded to maxlen)
+	fixed=1, --exact-size array/string
 	nozero=1, --forbid embedded \0 (required on varsize cols if used as keys)
 	mdbx_collation=1, --not really a collation but enables utf8_ai_ci indexes.
 }
@@ -965,8 +965,8 @@ local function layout_table_schema(schema)
 			'unknown type: %s for field: %s.%s', f.mdbx_type, table_name, f.col)
 		assertf(not f.nozero or f.maxlen,
 			'nozero needs maxlen: %s.%s', table_name, f.col)
-		assertf(not f.padded or not f.mdbx_collation,
-			'padded cannot have mdbx_collation: %s.%s', table_name, f.col)
+		assertf(not f.fixed or not f.mdbx_collation,
+			'fixed cannot have mdbx_collation: %s.%s', table_name, f.col)
 		assertf(not f.gen_version or f.generate,
 			'gen_version needs a generator: %s.%s', table_name, f.col)
 		if f.mdbx_collation then
@@ -991,7 +991,7 @@ local function layout_table_schema(schema)
 		if not schema.is_index then
 			assertf(f.not_null, 'key col must be not_null: %s.%s', table_name, col)
 		end
-		if f.maxlen and not f.padded then
+		if f.maxlen and not f.fixed then
 			assertf(f.nozero, 'varsize key col must be nozero: %s.%s', table_name, col)
 		end
 		add(key_fields, f)
@@ -1027,8 +1027,8 @@ local function layout_table_schema(schema)
 	sort(val_fields, function(f1, f2)
 		--elem_size fits in 8 bit; field index fits in 16 bit; 8+16 = 24 bits,
 		--so any bit from bit 25+ can be used for extra conditions.
-		local i1 = (f1.maxlen and not f1.padded and 2^26 or 0) + (2^8-1 - f1.elem_size) * 2^16 + f1.col_pos
-		local i2 = (f2.maxlen and not f2.padded and 2^26 or 0) + (2^8-1 - f2.elem_size) * 2^16 + f2.col_pos
+		local i1 = (f1.maxlen and not f1.fixed and 2^26 or 0) + (2^8-1 - f1.elem_size) * 2^16 + f1.col_pos
+		local i2 = (f2.maxlen and not f2.fixed and 2^26 or 0) + (2^8-1 - f2.elem_size) * 2^16 + f2.col_pos
 		return i1 < i2
 	end)
 	for i,f in ipairs(val_fields) do
@@ -1053,7 +1053,7 @@ local function layout_table_schema(schema)
 		--find the number of fixsize fields.
 		local fixsize_n = #fields
 		for i,f in ipairs(fields) do
-			if f.maxlen and not f.padded then --first varsize field
+			if f.maxlen and not f.fixed then --first varsize field
 				fixsize_n = i-1
 				break
 			end
@@ -1063,7 +1063,7 @@ local function layout_table_schema(schema)
 		local max_rec_size = 0
 		for _,f in ipairs(fields) do
 			local maxlen = encoded_maxlen(schema, f)
-			maxlen = maxlen and maxlen + (f.padded and 0 or 1) or 1
+			maxlen = maxlen and maxlen + (f.fixed and 0 or 1) or 1
 			max_rec_size = max_rec_size + maxlen * f.elem_size
 			if is_key and not f.not_null then
 				max_rec_size = max_rec_size + 1
@@ -1210,7 +1210,7 @@ local function compile_table_schema(schema)
 	for _, f in ipairs(key_fields) do
 		schema.key_sig = (schema.key_sig and schema.key_sig..',' or '')
 			..f.mdbx_type..':'..(f.maxlen or '')
-			..':'..(f.padded and 'padded' or '')
+			..':'..(f.fixed and 'fixed' or '')
 			..':'..(f.nozero and 'nozero' or '')
 			..':'..(f.key_collator and f.mdbx_collation or '')
 			..':'..(f.descending and 'desc' or '')
@@ -1242,7 +1242,7 @@ local function compile_table_schema(schema)
 			local sc = fields._sc[kv_index-1]
 			sc.type = schema_col_types[f.mdbx_type]
 			sc.len = encoded_maxlen(schema, f) or 1
-			sc.fixed_size = f.maxlen and not f.padded and 0 or 1
+			sc.fixed_size = f.maxlen and not f.fixed and 0 or 1
 			sc.descending = f.descending and 1 or 0
 			sc.nullable = f.not_null and 0 or 1
 			sc.elem_size_shift = log2(f.elem_size)
@@ -1256,7 +1256,7 @@ local function compile_table_schema(schema)
 			if f.maxlen then --array
 				local maxlen = f.maxlen
 				local nozero = f.nozero
-				local padded = f.padded
+				local fixed = f.fixed
 				if f.key_collator then
 					local physical_maxlen = encoded_maxlen(schema, f)
 					local write = f.key_collator.write
@@ -1266,7 +1266,7 @@ local function compile_table_schema(schema)
 						if len > maxlen then
 							db:check_col(event, schema.name, f.col, false, 'too_long')
 						end
-						if padded and len < maxlen then
+						if fixed and len < maxlen then
 							db:check_col(event, schema.name, f.col, false, 'too_short')
 						end
 						if nozero and val:find('\0', 1, true) then
@@ -1289,7 +1289,7 @@ local function compile_table_schema(schema)
 						if len > maxlen then
 							db:check_col(event, schema.name, f.col, false, 'too_long')
 						end
-						if padded and len < maxlen then
+						if fixed and len < maxlen then
 							db:check_col(event, schema.name, f.col, false, 'too_short')
 						end
 						if nozero and val:find('\0', 1, true) then
@@ -1308,7 +1308,7 @@ local function compile_table_schema(schema)
 						if len > maxlen then
 							db:check_col(event, schema.name, f.col, false, 'too_long')
 						end
-						if padded and len < maxlen then
+						if fixed and len < maxlen then
 							db:check_col(event, schema.name, f.col, false, 'too_short')
 						end
 						local buf = cast(elemp_ct, buf)
@@ -1393,7 +1393,7 @@ function Db:save_table_schema(schema)
 				col_pos = f.col_pos, --in original schema fields array
 				mdbx_type = f.mdbx_type,
 				maxlen = f.maxlen,
-				padded = f.padded,
+				fixed = f.fixed,
 				nozero = f.nozero,
 				not_null = f.not_null,
 				mdbx_default = f.mdbx_default,
@@ -1553,7 +1553,7 @@ local function try_validate_table_schema(stored_schema, paper_schema)
 		if sf then
 			cmp_keys(pf, sf, {
 				'key_index', 'val_index',
-				'col', 'col_pos', 'mdbx_type', 'maxlen', 'padded', 'nozero', 'not_null',
+				'col', 'col_pos', 'mdbx_type', 'maxlen', 'fixed', 'nozero', 'not_null',
 				'elem_size', 'descending', 'mdbx_collation', 'gen_version',
 				'lua_check', 'lua_check_error', 'fixed_offset', 'offset',
 			}, errs, '%s.%s.%s', table_name, 'fields', k)
@@ -1844,7 +1844,7 @@ end
 local alter_val_rewrite_attrs = {
 	'mdbx_type',
 	'maxlen',
-	'padded',
+	'fixed',
 	'nozero',
 	'not_null',
 	'elem_size',
@@ -2279,7 +2279,7 @@ end
 	--used for the MDBX_DUPFIXED flag (table_flags) and bulk iteration (each_dup).
 	local dup_fixed = true
 	for _, f in ipairs(val_schema.key_fields) do
-		if f.maxlen and not f.padded then
+		if f.maxlen and not f.fixed then
 			dup_fixed = false
 			break
 		end
@@ -2462,7 +2462,7 @@ function Db:add_index(val_table, ix)
 				'unique index %s col must be not_null: %s.%s',
 				ix_name, val_schema.name, col)
 		end
-		if f.maxlen and not f.padded then
+		if f.maxlen and not f.fixed then
 			self:check_schema('i_add', val_schema.name, col, f.nozero,
 				'varsize key col must be nozero: %s.%s', val_schema.name, col)
 		end
@@ -2470,7 +2470,7 @@ function Db:add_index(val_table, ix)
 		if maxlen and f.mdbx_collation then
 			maxlen = collator(f.mdbx_collation).max_len(maxlen)
 		end
-		maxlen = maxlen and maxlen + (f.padded and 0 or 1) or 1
+		maxlen = maxlen and maxlen + (f.fixed and 0 or 1) or 1
 		max_rec_size = max_rec_size + maxlen * f.elem_size
 			+ (not ix.is_unique and not f.not_null and 1 or 0)
 	end
