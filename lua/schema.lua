@@ -315,9 +315,8 @@ local function add_fk(self, tbl, cols, ref_tbl_name, ondelete, onupdate, fld)
 	end
 end
 
---a function written inside a schema definition is created with the
---definition env, where every name resolves to its own name as a string.
---give it the globals back; one defined elsewhere keeps its own env.
+--functions created inside the schema DSL inherit the DSL env which is not
+--what we want the function's env to be, so we restore it.
 local function restore_env(self, fn)
 	if getfenv(fn) == self.env then setfenv(fn, _G) end
 	return fn
@@ -405,9 +404,10 @@ end
 
 local function import(self, k, sc)
 	local k1 = k:gsub('s$', '')
-	for k,v in pairs(sc[k]) do
-		assertf(not self[k], 'duplicate %s `%s`', k1, k)
-		self[k] = v
+	local dst = self[k]
+	for name,v in pairs(sc[k]) do
+		assertf(dst[name] == nil, 'duplicate %s `%s`', k1, name)
+		dst[name] = v
 	end
 end
 function schema:import(src)
@@ -531,12 +531,12 @@ function schema.env.aka(old_names)
 	end
 end
 
-function schema.env.as(gen_version, fn)
-	if isfunc(gen_version) then gen_version, fn = nil, gen_version end
+function schema.env.as(gen_fn_version, fn)
+	if isfunc(gen_fn_version) then gen_fn_version, fn = nil, gen_fn_version end
 	assertf(isfunc(fn), 'function expected for as()')
 	return function(self, tbl, fld)
-		fld.generate = restore_env(self, fn)
-		fld.gen_version = gen_version
+		fld.gen_fn = restore_env(self, fn)
+		fld.gen_fn_version = gen_fn_version
 	end
 end
 
@@ -786,7 +786,7 @@ local function diff_tables(self, t1, t0, sc0)
 	d.triggers = diff_maps(self, t1.triggers, t0.triggers, diff_triggers , nil, sc0, sc0.supports_triggers)
 	d.add_pk    = pk and pk.add    and pk.add.pk
 	d.remove_pk = pk and pk.remove and pk.remove.pk
-	if isempty(d) or t1.name ~= t0.name then return nil end
+	if isempty(d) and t1.name == t0.name then return nil end
 	d.old = t0
 	d.new = t1
 	return d

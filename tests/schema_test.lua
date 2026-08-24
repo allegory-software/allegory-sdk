@@ -137,4 +137,39 @@ do
 	assert(td.old.policy == nil and td.new.policy == 'strict')
 end
 
+--A pure table rename is an update, not an add/remove or an empty diff.
+do
+	local old = schema.new(update({}, opt))
+	local new = schema.new(update({}, opt))
+	old.tables.old_name = table_def('old_name', {
+		field('id', 'u32'),
+	}, {'id'})
+	new.tables.new_name = table_def('new_name', {
+		field('id', 'u32'),
+	}, {'id'})
+	new.tables.new_name.aka = {old_name = true}
+	local d = schema.diff(old, new)
+	local td = assert(d.tables.update.old_name)
+	assert(td.old == old.tables.old_name)
+	assert(td.new == new.tables.new_name)
+	assert(not d.tables.add and not d.tables.remove)
+end
+
+--Importing a schema populates its collections, not top-level schema fields.
+do
+	local src = schema.new(update({}, opt))
+	src.types.custom = {type = 'custom'}
+	src.tables.custom = table_def('custom', {
+		field('id', 'custom'),
+	}, {'id'})
+	src.procs.custom = {name = 'custom', args = {}}
+
+	local dst = schema.new(update({}, opt))
+	dst:import(src)
+	assert(dst.types.custom == src.types.custom)
+	assert(dst.tables.custom == src.tables.custom)
+	assert(dst.procs.custom == src.procs.custom)
+	assert(dst.custom == nil)
+end
+
 print'schema_diff ok'

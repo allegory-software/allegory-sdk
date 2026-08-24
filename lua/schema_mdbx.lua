@@ -45,7 +45,7 @@ do
 			type = 'enum', enum_values = vals,
 			mdbx_type = 'utf8', maxlen = maxlen, nozero = true,
 			mdbx_collation = 'list\0'..cat(vals, '\0'),
-			lua_check = cat(checks, ' or '),
+			check_expr = cat(checks, ' or '),
 			check_error = 'enum',
 		}
 	end
@@ -72,24 +72,24 @@ do
 		end
 	end
 
-	--`default` is the literal that the client shows for a new row; `lua_default`
+	--`default` is the literal that the client shows for a new row; `default_expr`
 	--is the same value as an expression, which is what the db stores and runs.
 	function env.default(v)
 		local expr = isstr(v) and string_format('%q', v) or tostring(v)
 		return function()
-			return {default = v, lua_default = expr}
+			return {default = v, default_expr = expr}
 		end
 	end
 
 	function env.check(expr, error_message)
 		return function()
-			return {lua_check = expr, check_error = error_message}
+			return {check_expr = expr, check_error = error_message}
 		end
 	end
 
 	function env.row_check(expr, error_message)
 		return function(_, tbl)
-			tbl.lua_row_check = expr
+			tbl.row_check_expr = expr
 			tbl.row_check_error = error_message
 		end
 	end
@@ -161,12 +161,12 @@ return function()
 	types.duration  = {u52, type = 'duration', align = 'right'}
 
 	types.ctime = {time, not_null, readonly = true,
-		lua_default = 'now()', en_text = 'Created At'}
+		default_expr = 'now()', en_text = 'Created At'}
 	types.mtime = {time, not_null, readonly = true,
-		lua_default = 'now()', on_update = time_now,
+		default_expr = 'now()', on_update_fn = time_now,
 		en_text = 'Last Modified At'}
 	types.atime = {time, not_null, readonly = true,
-		lua_default = 'now()', en_text = 'Last Accessed At'}
+		default_expr = 'now()', en_text = 'Last Accessed At'}
 
 	types.lang      = {str, maxlen = 2, fixed}
 	types.currency  = {str, maxlen = 3, fixed}
