@@ -743,7 +743,7 @@ function logging.rpc:collectgarbage()
 	local m0 = collectgarbage'count'
 	collectgarbage()
 	local m1 = collectgarbage'count'
-	logging.log('note', 'gc', 'collect', 'collected: %s', kbytes((m0 - m1) * 1024))
+	logging.log('note', 'gc', 'collect', 'collected: %s', format_kbytes((m0 - m1) * 1024))
 end
 
 function logging.rpc:jit_onoff(on)

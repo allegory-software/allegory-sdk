@@ -985,15 +985,15 @@ test(capitalize('foo bar baz'), 'Foo Bar Baz')
 test(html_escape('<b>"hi"</b>'), '&lt;b&gt;&quot;hi&quot;&lt;&#x2F;b&gt;')
 test(html_escape(nil), '')
 
---kbytes
-test(kbytes(0), '0B')
-test(kbytes(1024), '1K')
-test(kbytes(1024*1024), '1M')
-test(kbytes(1536, 1), '1.5K')
-test(kbytes(1), '1B')
-test(kbytes(1023), '1023B')
-test(kbytes(1024*1024*1024), '1G')
-test(kbytes(1024*1024*1024*1024), '1T')
+--format_kbytes
+test(format_kbytes(0), '0B')
+test(format_kbytes(1024), '1K')
+test(format_kbytes(1024*1024), '1M')
+test(format_kbytes(1536, 1), '1.5K')
+test(format_kbytes(1), '1B')
+test(format_kbytes(1023), '1023B')
+test(format_kbytes(1024*1024*1024), '1G')
+test(format_kbytes(1024*1024*1024*1024), '1T')
 
 --print_function -------------------------------------------------------------
 

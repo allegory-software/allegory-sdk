@@ -9,16 +9,17 @@ FEATURES
 	- table/index keys: composite, with per-field ascending/descending order.
 	- null support (nulls come first in keys).
 	- auto-increment primary keys.
-	- indexes: unique and non-unique, utf-8 ai_ci, nullable columns for non-unique.
+	- indexes: unique and non-unique, utf-8 ai_ci, nullable columns.
 	- foreign keys: cascade or set-null on delete; enforced on insert/update.
 	- triggers: Lua functions in schema fired before/after insert/update/delete.
-	- check constraints: Lua expressions stored in the db, enforced on encoding.
+	- column and row checks: Lua expressions stored in the db and enforced on writes.
 	- stored generated columns, generated via Lua functions declared in schema.
 	- automatic schema migration: run DDL to sync stored schema to paper schema.
 	- schema validation on table open: stored schema must match paper schema.
 LIMITATIONS
 	- varsize columns must have `nozero` (no embedded \0) to be used in indexes.
-	- columns must have `not_null` to be used in primary keys and unique indexes.
+	- unique indexes don't check rows with a null in an indexed column.
+	- primary key columns must be `not_null`.
 	- primary keys are immutable!
 	- utf8_ai_ci can only be used for index keys.
 	- fks: only to pk columns, no "restrict", no "onupdate" (pk is immutable).
@@ -100,12 +101,16 @@ SCHEMA SPEC (create_table, alter_table)
 	schema_spec: {
 		fields = {
 			{
-				col=name, mdbx_type='u32|i32|u8|i8|u16|i16|f32|f64|utf8|bool',
+				col=name, mdbx_type='u32|i32|u8|i8|u16|i16|f32|f64|utf8|binary|bool',
 				[not_null=true], [maxlen=N], [nozero=true], [fixed=true],
-
+				[mdbx_collation='utf8_ai_ci'|'list\0item...'], [scale=N],
+				[auto_increment=true], [lua_default=expr], [on_update=fn],
+				[generate=fn], [gen_version=N],
+				[lua_check=expr], [check_error=message],
 			}, ...
 		},
 		pk = {'col1', ...},
+		[lua_row_check=expr], [row_check_error=message],
 	}
 
 	NOTE: ixs and fks are NOT part of schema_spec! add them after create_table
@@ -123,15 +128,20 @@ TRIGGERS
 		{before|after}_delete = {fn1,...},  -- fn(db, old_row)
 	}
 
+	- complete mutation rows use `null` for SQL NULL; assigning nil applies the
+	  column default before generators and row checks.
 	- slows down inserts and deletes (one row decoding per row).
 
 CHECK CONSTRAINTS
 
-	- declared in paper schema with `lua_check(expr, [error_message])` where
+	- declared in paper schema with `check(expr, [error_message])` where
 	  `expr` is a Lua expression on `v`, the column's value, e.g. 'v > 0'.
+	- `row_check(expr, [error_message])` is a table-level declaration where
+	  `row` is the complete row, e.g. `row_check('row.lo <= row.hi')`.
 	- stored in the db, so they are enforced with or without a paper schema.
-	- not called for a null value.
-	- called wherever the column is encoded, lookup keys included (like maxlen).
+	- column checks are not called for a null value; row checks see `null`.
+	- column checks run wherever the column is encoded, lookup keys included.
+	- row checks run on structured writes, after before-triggers and generators.
 	- existing rows are validated when `expr` changes.
 
 GENERATED COLUMNS
@@ -141,6 +151,14 @@ GENERATED COLUMNS
 	- called on every insert, update, and table restructuring, so must be pure!
 	- not for pk columns, but indexable.
 	- slows down inserts (one row re-encoding per row).
+
+ON-UPDATE COLUMNS
+
+	- declared in paper schema with `on_update=fn` where `fn(f) -> val`.
+	- set on every structured update, ahead of before-triggers, so that a
+	  trigger can override the value; inserts use `lua_default` instead.
+	- not for pk columns.
+	- not stored, so not applied on a db opened without a paper schema.
 
 STATE
 
@@ -276,6 +294,8 @@ int schema_val_is_null(schema_table* tbl, int col_i,
 	const void* rec, int rec_size
 );
 
+int schema_key_has_null(schema_table* tbl, const void* rec);
+
 int schema_get_key(schema_table* tbl, int col_i,
 	const void* rec, int rec_size,
 	u8* out, int out_size,
@@ -350,6 +370,7 @@ mdbx_schema_find_u32_be = C.schema_find_u32_be
 
 local col_ct = {
 	utf8 = 'u8',
+	binary = 'u8',
 	bool = 'u8',
 }
 
@@ -363,6 +384,7 @@ local schema_col_types = {
 	f32    = C.schema_col_type_f32,
 	f64    = C.schema_col_type_f64,
 	utf8   = C.schema_col_type_u8,
+	binary = C.schema_col_type_u8,
 	bool   = C.schema_col_type_u8,
 }
 
@@ -435,26 +457,43 @@ local function select_col(cols, as, col, ...)
 end
 
 local function resolve_null_val(schema, f)
-	local default = f.mdbx_default
-	if isfunc(default) then
-		default = default(schema, f)
+	if f.default_fn then
+		return f.default_fn(f)
 	end
-	return default
+end
+
+local function resolve_row_val(schema, f, val)
+	if val == nil then val = resolve_null_val(schema, f) end
+	return val == nil and null or val
+end
+
+--A complete mutation row uses `null` for SQL NULL. Resolve a missing value or
+--one removed by a trigger to its default before generators and row checks.
+local function resolve_row_defaults(schema, row)
+	for _, f in ipairs(schema.val_fields) do
+		row[f.col] = resolve_row_val(schema, f, row[f.col])
+	end
 end
 
 local pp = new'u8*[1]'
 
+--`defaults` fills a missing key col from its default; pass it only when the
+--key is the key of a row being written. a lookup key with a missing col must
+--stay missing, or find/del land on the row that has the default value.
 local function encode_key(
-	self, schema, event, autoinc_f,
+	self, schema, event, autoinc_f, defaults,
 	rec, rec_buf_sz, cols, as, ...
-)
+) -- -> key_sz, [autoinc_val], [null_col]
 	if #schema.key_fields == 0 then return 0 end
 	local autoinc_v
+	local null_col --a key col encoded as null; only index keys can have one
 	pp[0] = rec
 	for ki,f in ipairs(schema.key_fields) do
 		local val = select_col(cols, as, f.col, ...)
-		if val == nil or val == null then
-			val = resolve_null_val(schema, f)
+		if val == nil then
+			if defaults then val = resolve_null_val(schema, f) end
+		elseif val == null then
+			val = nil
 		end
 		if val == nil and f == autoinc_f then
 			val = self:seq(schema.name, 1)
@@ -462,19 +501,21 @@ local function encode_key(
 		end
 		if val == nil then
 			if not f.not_null then
+				null_col = f.col
 				C.schema_key_add(schema._st, ki-1, rec, rec_buf_sz, -1, pp)
 			else
 				self:check_col(event, schema.name, f.col, false, 'null_key')
 			end
 		else
-			if f.check then
-				self:check_col(event, schema.name, f.col, f.check(val), f.check_error)
+			if f.check_fn and not f.check_fn(val) then
+				self:check_col(event, schema.name, f.col, false,
+					f.check_error or 'check: '..f.lua_check)
 			end
 			local len = f.encode(self, event, pp[0], val)
 			C.schema_key_add(schema._st, ki-1, rec, rec_buf_sz, len, pp)
 		end
 	end
-	return pp[0] - rec, autoinc_v
+	return pp[0] - rec, autoinc_v, null_col
 end
 mdbx_encode_key = encode_key
 
@@ -492,9 +533,7 @@ local function encode_key_prefix(
 	for ki = 1, n do
 		local f = schema.key_fields[ki]
 		local val = select(ki, ...)
-		if val == nil or val == null then
-			val = resolve_null_val(schema, f)
-		end
+		if val == null then val = nil end
 		if val == nil then
 			assert(not (partial and ki == n), 'partial key prefix is null')
 			if not f.not_null then
@@ -527,8 +566,9 @@ local function encode_val(self, schema, event, rec, rec_buf_sz, cols, as, ...)
 		if val == nil and f.not_null and not f.generate then
 			self:check_col(event, schema.name, f.col, false, 'not_null')
 		end
-		if val ~= nil and f.check then
-			self:check_col(event, schema.name, f.col, f.check(val), f.check_error)
+		if val ~= nil and f.check_fn and not f.check_fn(val) then
+			self:check_col(event, schema.name, f.col, false,
+				f.check_error or 'check: '..f.lua_check)
 		end
 		local len = val ~= nil and f.encode(self, event, pp[0], val) or -1
 		C.schema_val_add(schema._st, vi-1, rec, rec_buf_sz, len, pp)
@@ -536,16 +576,50 @@ local function encode_val(self, schema, event, rec, rec_buf_sz, cols, as, ...)
 	return pp[0] - rec
 end
 
+--advance the sequence past a key value that a write supplied itself, so that
+--auto-increment never hands out an id that a row already has.
+local function claim_seq(db, schema, val)
+	if val == nil or val == null then return end
+	local seq = db:seq(schema.name, 0)
+	if val + 1 > seq then
+		db:seq(schema.name, val + 1 - seq)
+	end
+end
+
 local function apply_gen_cols(db, event, schema, new_t)
 	for _, f in ipairs(schema.val_fields) do
 		if f.generate then
-			local val = f.generate(db, new_t)
-			if val == nil then val = resolve_null_val(schema, f) end
-			if (val == nil or val == null) and f.not_null then
+			local val = resolve_row_val(schema, f, f.generate(db, new_t))
+			if val == null and f.not_null then
 				db:check_col(event, schema.name, f.col, false, 'not_null')
 			end
 			new_t[f.col] = val
 		end
+	end
+end
+
+--called ahead of before-triggers so that a trigger can override the value.
+local function apply_on_update_cols(schema, t)
+	for _, f in ipairs(schema.val_fields) do
+		if f.on_update then
+			t[f.col] = f.on_update(f)
+		end
+	end
+end
+
+local function fail_row_check(db, event, schema)
+	local err = schema.row_check_error or 'row_check: '..schema.lua_row_check
+	if istab(event) then
+		db:check_schema(event.event, event.table, nil, false, err)
+	else
+		db:check_row(event, schema.name, false, err)
+	end
+end
+
+local function check_row_constraint(db, event, schema, row)
+	if not schema.row_check_fn then return end
+	if not schema.row_check_fn(row) then
+		fail_row_check(db, event, schema)
 	end
 end
 
@@ -925,6 +999,7 @@ local field_type_attrs = {
 	fixed=1, --exact-size array/string
 	nozero=1, --forbid embedded \0 (required on varsize cols if used as keys)
 	mdbx_collation=1, --not really a collation but enables utf8_ai_ci indexes.
+	scale=1, --scale 100 means stored value 1234 is interpreted as 12.34
 }
 
 local function valid_col_name(col)
@@ -971,6 +1046,8 @@ local function layout_table_schema(schema)
 			'fixed cannot have mdbx_collation: %s.%s', table_name, f.col)
 		assertf(not f.gen_version or f.generate,
 			'gen_version needs a generator: %s.%s', table_name, f.col)
+		assertf(not f.on_update or isfunc(f.on_update),
+			'on_update must be a function: %s.%s', table_name, f.col)
 		if f.mdbx_collation then
 			assertf(f.mdbx_type == 'utf8' and f.maxlen,
 				'collation needs a varsize utf8 col: %s.%s', table_name, f.col)
@@ -996,6 +1073,8 @@ local function layout_table_schema(schema)
 		if f.maxlen and not f.fixed then
 			assertf(f.nozero, 'varsize key col must be nozero: %s.%s', table_name, col)
 		end
+		assertf(not f.on_update,
+			'key col cannot have on_update: %s.%s', table_name, col)
 		add(key_fields, f)
 		f.key_index = #key_fields
 		if schema.pk.desc then
@@ -1045,6 +1124,12 @@ local function layout_table_schema(schema)
 		if f.generate then has_gen_cols = true; break end
 	end
 	schema.has_gen_cols = has_gen_cols or nil
+
+	local has_on_update_cols = false
+	for _, f in ipairs(val_fields) do
+		if f.on_update then has_on_update_cols = true; break end
+	end
+	schema.has_on_update_cols = has_on_update_cols or nil
 
 	--compute key and val column layout.
 	for _,fields in ipairs{key_fields, val_fields} do
@@ -1165,8 +1250,21 @@ end
 
 local S = function() end
 
-local lua_check_env = setmetatable({}, {__index = function(_, k)
+local lua_check_env = setmetatable({null = null}, {__index = function(_, k)
 	assertf(false, 'lua_check: unknown name `%s`', k)
+end})
+
+local lua_row_check_env = setmetatable({null = null}, {__index = function(_, k)
+	assertf(false, 'lua_row_check: unknown name `%s`', k)
+end})
+
+--the calls a lua_default expression is allowed to make. keep this short:
+--every name here is part of the stored schema format, since an expression
+--using it has to still compile when the db is opened by another build.
+local lua_default_env = setmetatable({
+	now = now,
+}, {__index = function(_, k)
+	assertf(false, 'lua_default: unknown name `%s`', k)
 end})
 
 local function compile_table_schema(schema)
@@ -1194,6 +1292,14 @@ local function compile_table_schema(schema)
 	schema.    cols[S] = cat(schema.    cols, ',')
 	schema.key_cols[S] = cat(schema.key_cols, ',')
 	schema.val_cols[S] = cat(schema.val_cols, ',')
+
+	if schema.lua_row_check then
+		local fn, err = loadstring(
+			'local row = ... return '..schema.lua_row_check,
+			fmt('=lua_row_check %s', schema.name))
+		assertf(fn, 'lua_row_check %s: %s', schema.name, err)
+		schema.row_check_fn = setfenv(fn, lua_row_check_env)
+	end
 
 	--f.collator is how the col's values compare and every column with a
 	--collation needs one; f.key_collator is set only on columns where the
@@ -1284,7 +1390,8 @@ local function compile_table_schema(schema)
 					function f.decode(p, len)
 						return str(p, len)
 					end
-				elseif f.mdbx_type == 'utf8' then --raw utf8 strings
+				elseif f.mdbx_type == 'utf8' or f.mdbx_type == 'binary' then
+					--raw text/binary strings
 					function f.encode(db, event, buf, val)
 						assertf(typeof(val) == 'string')
 						local len = #val
@@ -1354,8 +1461,14 @@ local function compile_table_schema(schema)
 				local fn, err = loadstring('local v = ... return '..f.lua_check,
 					fmt('=lua_check %s.%s', schema.name, f.col))
 				assertf(fn, 'lua_check %s.%s: %s', schema.name, f.col, err)
-				f.check = setfenv(fn, lua_check_env)
-				f.check_error = f.lua_check_error or 'check: '..f.lua_check
+				f.check_fn = setfenv(fn, lua_check_env)
+			end
+
+			if f.lua_default then
+				local fn, err = loadstring('local f = ... return '..f.lua_default,
+					fmt('=lua_default %s.%s', schema.name, f.col))
+				assertf(fn, 'lua_default %s.%s: %s', schema.name, f.col, err)
+				f.default_fn = setfenv(fn, lua_default_env)
 			end
 
 		end --for f in fields
@@ -1379,6 +1492,8 @@ function Db:save_table_schema(schema)
 	local t = {
 		format = 1, --layout format (the only one we have, implemented here)
 		dyn_offset_size = schema.dyn_offset_size,
+		lua_row_check = schema.lua_row_check,
+		row_check_error = schema.row_check_error,
 		key_fields = {max_rec_size = schema.key_fields.max_rec_size},
 		val_fields = {max_rec_size = schema.val_fields.max_rec_size},
 		is_unique = schema.is_unique,
@@ -1397,12 +1512,13 @@ function Db:save_table_schema(schema)
 				maxlen = f.maxlen,
 				fixed = f.fixed,
 				nozero = f.nozero,
+				scale = f.scale,
 				not_null = f.not_null,
-				mdbx_default = f.mdbx_default,
+				lua_default = f.lua_default,
 				auto_increment = f.auto_increment,
 				gen_version = f.gen_version,
 				lua_check = f.lua_check,
-				lua_check_error = f.lua_check_error,
+				check_error = f.check_error,
 				--computed attributes
 				elem_size = f.elem_size, --for validating custom types in the future.
 				descending = f.descending,
@@ -1544,6 +1660,7 @@ local function try_validate_table_schema(stored_schema, paper_schema)
 	--compare table attributes
 	cmp_keys(paper_schema, stored_schema, {
 		'dyn_offset_size', 'is_index', 'val_table',
+		'lua_row_check', 'row_check_error',
 	}, errs, '%s', table_name)
 
 	--compare field lists
@@ -1556,8 +1673,8 @@ local function try_validate_table_schema(stored_schema, paper_schema)
 			cmp_keys(pf, sf, {
 				'key_index', 'val_index',
 				'col', 'col_pos', 'mdbx_type', 'maxlen', 'fixed', 'nozero', 'not_null',
-				'elem_size', 'descending', 'mdbx_collation', 'gen_version',
-				'lua_check', 'lua_check_error', 'fixed_offset', 'offset',
+				'scale', 'elem_size', 'descending', 'mdbx_collation', 'gen_version',
+				'lua_check', 'check_error', 'lua_default', 'fixed_offset', 'offset',
 			}, errs, '%s.%s.%s', table_name, 'fields', k)
 		end
 	end
@@ -1749,14 +1866,16 @@ end
 --schema.diff() compares these with ~=, so a table or a function here would
 --differ on every sync; generate is copied by hand in copy_base_schema()
 --and stands in as gen_version.
+--on_update is a function too so it is copied by hand as well; changing it
+--is invisible to schema.diff().
 local paper_field_attrs = update({
 	col=1,
 	not_null=1,
-	mdbx_default=1,
+	lua_default=1,
 	auto_increment=1,
 	gen_version=1,
 	lua_check=1,
-	lua_check_error=1,
+	check_error=1,
 }, field_type_attrs)
 
 local function copy_base_schema(src, name)
@@ -1764,10 +1883,12 @@ local function copy_base_schema(src, name)
 		name = name or assert(src.name),
 		fields = {},
 		pk = imap(assert(src.pk)),
+		lua_row_check = src.lua_row_check,
+		row_check_error = src.row_check_error,
 	}
 	schema.pk.desc = imap(src.pk.desc)
 	for _, src_f in ipairs(assert(src.fields)) do
-		local f = {generate = src_f.generate}
+		local f = {generate = src_f.generate, on_update = src_f.on_update}
 		for k in pairs(paper_field_attrs) do
 			f[k] = src_f[k]
 		end
@@ -1848,6 +1969,7 @@ local alter_val_rewrite_attrs = {
 	'maxlen',
 	'fixed',
 	'nozero',
+	'scale',
 	'not_null',
 	'elem_size',
 	'val_index',
@@ -1874,17 +1996,51 @@ end
 
 local alter_key_rec_buffer = u8a(MDBX_MAX_KEY_SIZE)
 
+--a scaled col stores the value times its scale, so changing the scale has to
+--change the stored numbers too: decoding and re-encoding alone would keep the
+--same number, which now stands for a different amount.
+--going to a smaller scale drops digits, so the result is rounded.
+local function rescaled_cols(old_schema, new_schema)
+	local cols
+	for _, f in ipairs(new_schema.fields) do
+		local old_f = old_schema.fields[f.col]
+		local scale = f.scale or 1
+		local old_scale = old_f and old_f.scale or 1
+		if old_f and scale ~= old_scale then
+			cols = cols or {}
+			add(cols, {col = f.col, factor = scale / old_scale})
+		end
+	end
+	return cols
+end
+
+local function apply_rescale(cols, rec)
+	for _, c in ipairs(cols) do
+		local val = rec[c.col]
+		if val ~= nil and val ~= null then
+			rec[c.col] = round(val * c.factor)
+		end
+	end
+end
+
 local function alter_values_in_place(self, dbi, old_schema, new_schema, event)
 	local cur = self:cursor_raw(dbi)
 	local ok, k, k_sz, v, v_sz = cur:first_raw()
 	local rec = {}
+	local rescale = rescaled_cols(old_schema, new_schema)
 	while ok do
 		local kk = alter_key_rec_buffer; copy(kk, k, k_sz)
 		decode_val_with_null(old_schema, v, v_sz, rec)
-		if new_schema.has_gen_cols then
+		if rescale then
+			apply_rescale(rescale, rec)
+		end
+		if new_schema.has_gen_cols or new_schema.row_check_fn then
 			decode_key(old_schema, k, k_sz, rec, '{}')
+		end
+		if new_schema.has_gen_cols then
 			apply_gen_cols(self, event, new_schema, rec)
 		end
+		check_row_constraint(self, event, new_schema, rec)
 		local nv, nv_buf_sz =
 			val_rec_buffer(new_schema.val_fields.max_rec_size)
 		local nv_sz = encode_val(
@@ -1910,17 +2066,22 @@ local function alter_via_temp_table(self, dbi, old_schema, new_schema, event)
 
 	--reencode every key and value into the replacement table.
 	local rec = {}
+	local rescale = rescaled_cols(old_schema, new_schema)
 	for _, k, k_sz, v, v_sz in self:each_raw(dbi) do
 		decode_key(old_schema, k, k_sz, rec, '{}')
 		decode_val_with_null(old_schema, v, v_sz, rec)
+		if rescale then
+			apply_rescale(rescale, rec)
+		end
 		if new_schema.has_gen_cols then
 			apply_gen_cols(self, event, new_schema, rec)
 		end
+		check_row_constraint(self, event, new_schema, rec)
 		local nk, nk_buf_sz =
 			alter_key_rec_buffer, MDBX_MAX_KEY_SIZE
 		local nv, nv_buf_sz =
 			val_rec_buffer(new_schema.val_fields.max_rec_size)
-		local nk_sz = encode_key(self, new_schema, event, nil,
+		local nk_sz = encode_key(self, new_schema, event, nil, true,
 			nk, nk_buf_sz, new_schema.cols, '{}', rec)
 		local nv_sz = encode_val(
 			self, new_schema, event, nv, nv_buf_sz,
@@ -1944,7 +2105,7 @@ local function check_existing_rows(
 	local fields
 	for _, f in ipairs(new_schema.fields) do
 		local old_f = old_schema.fields[f.col]
-		if f.check and f.lua_check ~= (old_f and old_f.lua_check)
+		if f.check_fn and f.lua_check ~= (old_f and old_f.lua_check)
 			and not (f.key_index and rewrite_keys)
 			and not (f.val_index and rewrite_vals)
 		then
@@ -1952,18 +2113,31 @@ local function check_existing_rows(
 			add(fields, f)
 		end
 	end
-	if not fields then return end
+	local check_rows = new_schema.row_check_fn
+		and new_schema.lua_row_check ~= old_schema.lua_row_check
+		and not rewrite_keys and not rewrite_vals
+	if not fields and not check_rows then return end
 	local kb, kb_sz = key_decode_buffer, MDBX_MAX_KEY_SIZE
+	local row = check_rows and {}
 	local bad_f
 	for cur, k, k_sz, v, v_sz in self:each_raw(dbi) do
-		for _, f in ipairs(fields) do
+		for _, f in ipairs(fields or empty) do
 			local val = decode_ix_col(new_schema, f, k, k_sz, v, v_sz, kb, kb_sz)
-			if val ~= nil and not f.check(val) then bad_f = f; break end
+			if val ~= nil and not f.check_fn(val) then bad_f = f; break end
+		end
+		if not bad_f and check_rows then
+			decode_key(new_schema, k, k_sz, row, '{}')
+			decode_val_with_null(new_schema, v, v_sz, row)
+			if not new_schema.row_check_fn(row) then
+				cur:close()
+				fail_row_check(self, event, new_schema)
+			end
 		end
 		if bad_f then cur:close(); break end
 	end
 	if bad_f then
-		self:check_col(event, new_schema.name, bad_f.col, false, bad_f.check_error)
+		self:check_col(event, new_schema.name, bad_f.col, false,
+			bad_f.check_error or 'check: '..bad_f.lua_check)
 	end
 end
 
@@ -2239,10 +2413,6 @@ end
 	for _,col in ipairs(cols) do
 		local f = assertf(val_schema.fields[col],
 			'index: %s unknown field %s.%s', ix_name, val_schema.name, col)
-		if is_unique then
-			assertf(f.not_null, 'unique index %s col must be not_null: %s.%s',
-				ix_name, val_schema.name, col)
-		end
 		local ix_f = {
 			col = f.col,
 			not_null = f.not_null,
@@ -2326,12 +2496,14 @@ end
 		local xv, xv_buf_sz = val_rec_buffer(val_schema.key_fields.max_rec_size)
 		for cur, k, k_sz, v, v_sz in self:each_raw(val_table) do
 			decode_ix_into(k, k_sz, v, v_sz, dt)
-			local xk_sz = encode_key(self, ix_schema, event, nil,
-				xk, xk_buf_sz, cols, '[]', dt)
+			--a key with a null in it may repeat in a unique index.
+			local xk_sz, _, null_col = encode_key(self, ix_schema, event, nil,
+				false, xk, xk_buf_sz, cols, '[]', dt)
 			assert(k_sz <= xv_buf_sz, k_sz)
 			copy(xv, k, k_sz)
 			local ok = self:try_put_raw(ix_dbi, xk, xk_sz, xv, k_sz,
-				ix_schema.is_unique and C.MDBX_NOOVERWRITE or nil)
+				ix_schema.is_unique and not null_col
+					and C.MDBX_NOOVERWRITE or nil)
 			if not ok then
 				return false, 'duplicate_key'
 			end
@@ -2359,8 +2531,8 @@ end
 		--derive index key from v (key cols come from k, val cols from v)
 		local xk, xk_buf_sz = ix1_key_rec_buffer, MDBX_MAX_KEY_SIZE
 		decode_ix_into(k, k_sz, v, v_sz, dt)
-		local xk_sz = encode_key(self, ix_schema, 'i_update', nil,
-			xk, xk_buf_sz, cols, '[]', dt)
+		local xk_sz, _, null_col = encode_key(self, ix_schema, 'i_update', nil,
+			false, xk, xk_buf_sz, cols, '[]', dt)
 		clear(dt)
 
 		if v0 then --record updated: remove the old index record
@@ -2370,7 +2542,7 @@ end
 			local xk0, xk0_buf_sz = ix2_key_rec_buffer, MDBX_MAX_KEY_SIZE
 			decode_ix_into(k, k_sz, v0, v0_sz, dt0)
 			local xk0_sz = encode_key(self, ix_schema, 'i_update', nil,
-				xk0, xk0_buf_sz, cols, '[]', dt0)
+				false, xk0, xk0_buf_sz, cols, '[]', dt0)
 			clear(dt0)
 
 			--abort if index key didn't change
@@ -2388,18 +2560,18 @@ end
 
 		if cur then
 			return cur:try_put_raw(xk, xk_sz, k, k_sz,
-				unique and C.MDBX_NOOVERWRITE or nil)
+				unique and not null_col and C.MDBX_NOOVERWRITE or nil)
 		end
 		ix_dbi = ix_dbi or self:dbi_raw(ix_schema.name)
 		return self:try_put_raw(ix_dbi, xk, xk_sz, k, k_sz,
-			unique and C.MDBX_NOOVERWRITE or nil)
+			unique and not null_col and C.MDBX_NOOVERWRITE or nil)
 	end
 
 	function ix_schema.del(ix_schema, self, k, k_sz, v0, v0_sz)
 		local ix_dbi = self:dbi_raw(ix_schema.name)
 		local xk0, xk0_buf_sz = ix2_key_rec_buffer, MDBX_MAX_KEY_SIZE
 		decode_ix_into(k, k_sz, v0, v0_sz, dt0)
-		local xk0_sz = encode_key(self, ix_schema, 'i_del', nil,
+		local xk0_sz = encode_key(self, ix_schema, 'i_del', nil, false,
 			xk0, xk0_buf_sz, cols, '[]', dt0)
 		clear(dt0)
 		assert(self:try_del_raw(ix_dbi, xk0, xk0_sz, k, k_sz))
@@ -2433,7 +2605,10 @@ local function validate_unique_index(self, ix_schema)
 	local prev, prev_sz
 	for cur, k, k_sz in self:each_raw(ix_schema.name) do
 		if prev_sz then
-			if k_sz == prev_sz and memcmp(k, prev, k_sz) == 0 then
+			--a repeated key is a duplicate only when it has no null in it.
+			if k_sz == prev_sz and memcmp(k, prev, k_sz) == 0
+				and C.schema_key_has_null(ix_schema._st, k) == 0
+			then
 				cur:close()
 				return false, 'duplicate_key'
 			end
@@ -2459,11 +2634,6 @@ function Db:add_index(val_table, ix)
 		self:check_schema('i_add', val_schema.name, col, not seen[col],
 			'duplicate index field: %s.%s', val_schema.name, col)
 		seen[col] = true
-		if ix.is_unique then
-			self:check_schema('i_add', val_schema.name, col, f.not_null,
-				'unique index %s col must be not_null: %s.%s',
-				ix_name, val_schema.name, col)
-		end
 		if f.maxlen and not f.fixed then
 			self:check_schema('i_add', val_schema.name, col, f.nozero,
 				'varsize key col must be nozero: %s.%s', val_schema.name, col)
@@ -2474,7 +2644,7 @@ function Db:add_index(val_table, ix)
 		end
 		maxlen = maxlen and maxlen + (f.fixed and 0 or 1) or 1
 		max_rec_size = max_rec_size + maxlen * f.elem_size
-			+ (not ix.is_unique and not f.not_null and 1 or 0)
+			+ (not f.not_null and 1 or 0)
 	end
 	local ix_schema = index_schema(val_schema, ix, ix.is_unique)
 	local db_max_key_size = mdbx_max_key_size(table_flags(ix_schema))
@@ -2551,7 +2721,7 @@ local function check_existing_fk(self, event, schema, fk_name, fk)
 		end
 		if not skip then
 			local pk, pk_buf_sz = fk_key_buffer, MDBX_MAX_KEY_SIZE
-			local pk_sz = encode_key(self, ref_schema, event, nil,
+			local pk_sz = encode_key(self, ref_schema, event, nil, false,
 				pk, pk_buf_sz, ref_schema.key_cols, nil, unpack(vals, 1, n))
 			if not self:find_raw(ref_dbi, pk, pk_sz) then
 				cur:close()
@@ -2674,6 +2844,7 @@ end
 
 --field-diff attrs: a paper schema's field attrs plus col_pos (catches reordering).
 MS.diff_field_attrs = update({col_pos=1}, paper_field_attrs)
+MS.diff_table_attrs = {lua_row_check=1, row_check_error=1}
 
 --a change to any of these on an indexed col forces the index to be rebuilt.
 MS.index_field_attrs = update({not_null=1, gen_version=1}, field_type_attrs)
@@ -2786,7 +2957,7 @@ function Db:sync_schema(src, opt)
 					self:rename_column(tbl_name, old_col, fd.new.col)
 				end
 			end
-			if d.fields or d.remove_pk or d.add_pk then
+			if d.changed or d.fields or d.remove_pk or d.add_pk then
 				P('alter table: %s', tbl_name)
 				self:alter_table(tbl_name, d.new)
 			end
@@ -2895,8 +3066,18 @@ end
 local function decode_row(schema, k, k_sz, v, v_sz)
 	local t = {}
 	decode_key(schema, k, k_sz, t, '{}')
-	decode_val(schema, v, v_sz, t, schema.val_cols, '{}')
+	decode_val_with_null(schema, v, v_sz, t)
 	return t
+end
+
+local function new_row(schema, row, k, k_sz, cols, as, ...)
+	row = row or {}
+	decode_key(schema, k, k_sz, row, '{}')
+	for _, f in ipairs(schema.val_fields) do
+		row[f.col] = resolve_row_val(schema, f,
+			select_col(cols, as, f.col, ...))
+	end
+	return row
 end
 
 --[[
@@ -2922,7 +3103,7 @@ local function check_fks(self, event, schema, cols, as, full, ...)
 			local ref_dbi, ref_schema = self:dbi_schema(fk.ref_table)
 			assertf(ref_dbi, 'fk %s: ref table missing: %s', fk_name, fk.ref_table)
 			local pk, pk_buf_sz = fk_key_buffer, MDBX_MAX_KEY_SIZE
-			local pk_sz = encode_key(self, ref_schema, 'get', nil,
+			local pk_sz = encode_key(self, ref_schema, 'get', nil, false,
 				pk, pk_buf_sz, ref_schema.key_cols, nil, unpack(vals, 1, n))
 			if not self:find_raw(ref_dbi, pk, pk_sz) then
 				self:check_row(event, schema.name, false,
@@ -2940,7 +3121,7 @@ key is re-encoded on every call because a recursive cascade reuses the buffer.
 ]]
 local function first_referencing_child(self, ix_dbi, ix_schema, ...)
 	local xk, xk_buf_sz = del_fk_key_buffer, MDBX_MAX_KEY_SIZE
-	local xk_sz = encode_key(self, ix_schema, 'get', nil,
+	local xk_sz = encode_key(self, ix_schema, 'get', nil, false,
 		xk, xk_buf_sz, ix_schema.key_cols, nil, ...)
 	return self:find_raw(ix_dbi, xk, xk_sz)
 end
@@ -3031,7 +3212,7 @@ local function cur_update(self, ix_cur, val_cols, ...)
 	--decode the current value, override the given cols, then re-encode.
 	local val_cols = schema.val_cols
 	local t = {}
-	decode_val(schema, v0, v0_sz, t, val_cols, '{}')
+	decode_val_with_null(schema, v0, v0_sz, t)
 	for i=1,#cols do
 		local col = cols[i]
 		if val_cols[col] then --only value cols can be updated
@@ -3039,23 +3220,30 @@ local function cur_update(self, ix_cur, val_cols, ...)
 			if val ~= nil then t[col] = val end --nil = skip, null = null
 		end
 	end
+	if schema.has_on_update_cols then
+		apply_on_update_cols(schema, t)
+	end
 	local db = self.db
 	local old_t
-	if schema.triggers or schema.has_gen_cols then
+	if schema.triggers or schema.has_gen_cols or schema.row_check_fn then
 		decode_key(schema, k, k_sz, t, '{}')
 		if schema.triggers then
 			old_t = decode_row(schema, k, k_sz, v0, v0_sz)
 			fire_triggers(schema, 'before_update', db, old_t, t)
+			resolve_row_defaults(schema, t)
 		end
 		if schema.has_gen_cols then
 			apply_gen_cols(db, 'c_update', schema, t)
 		end
 	end
+	check_row_constraint(db, 'c_update', schema, t)
 	local v, v_buf_sz = val_rec_buffer(schema.val_fields.max_rec_size)
 	local v_sz = encode_val(db, schema, 'c_update', v, v_buf_sz, val_cols, '{}', t)
 	if schema.fks then
 		--fk.cols may include pk cols; decode key into t (k is still valid pre-write).
-		if not schema.triggers and not schema.has_gen_cols then
+		if not schema.triggers and not schema.has_gen_cols
+			and not schema.row_check_fn
+		then
 			decode_key(schema, k, k_sz, t, '{}')
 		end
 		check_fks(db, 'c_update', schema, schema.cols, '{}', false, t)
@@ -3078,9 +3266,17 @@ local function put(self, flags, op, tab, cols, ...)
 	check_cols(schema, cols, as == '{}' and (...))
 	cols = cols or schema.cols
 	local k, k_buf_sz = key_rec_buffer, MDBX_MAX_KEY_SIZE
+	--an update must name the row it updates; insert and upsert may complete
+	--the key from defaults, but only insert mints an auto-increment value.
+	local makes_row = op ~= 'update'
 	local autoinc_f = op == 'insert' and schema.autoinc_field
 	local k_sz, autoinc_v = encode_key(self, schema, op, autoinc_f,
-		k, k_buf_sz, cols, as, ...)
+		makes_row, k, k_buf_sz, cols, as, ...)
+	--autoinc_v means the value was minted, so the caller gave none to claim.
+	local seq_f = schema.autoinc_field
+	if seq_f and makes_row and not autoinc_v then
+		claim_seq(self, schema, select_col(cols, as, seq_f.col, ...))
+	end
 	if op == 'update' or op == 'upsert'
 		or schema.indexes or schema.fks
 		or schema.triggers or schema.has_gen_cols
@@ -3100,7 +3296,7 @@ local function put(self, flags, op, tab, cols, ...)
 			copy(v0, v0_unstable, v0_sz)
 			local val_cols = schema.val_cols
 			local t = {}
-			decode_val(schema, v0, v0_sz, t, val_cols, '{}')
+			decode_val_with_null(schema, v0, v0_sz, t)
 			for i=1,#cols do
 				local col = cols[i]
 				if val_cols[col] then --only value cols can be updated
@@ -3110,22 +3306,31 @@ local function put(self, flags, op, tab, cols, ...)
 					end
 				end
 			end
-			if schema.triggers or schema.has_gen_cols then
-				local kk = u8a(k_sz); copy(kk, k, k_sz); k = kk
+			if schema.has_on_update_cols then
+				apply_on_update_cols(schema, t)
+			end
+			if schema.triggers or schema.has_gen_cols or schema.row_check_fn then
+				if schema.triggers or schema.has_gen_cols then
+					local kk = u8a(k_sz); copy(kk, k, k_sz); k = kk
+				end
 				decode_key(schema, k, k_sz, t, '{}')
 				if schema.triggers then
 					old_t = decode_row(schema, k, k_sz, v0, v0_sz)
 					fire_triggers(schema, 'before_update', self, old_t, t)
+					resolve_row_defaults(schema, t)
 				end
 				if schema.has_gen_cols then
 					apply_gen_cols(self, op, schema, t)
 				end
-				new_t = t
+				if schema.triggers then new_t = t end
 			end
+			check_row_constraint(self, op, schema, t)
 			v, v_buf_sz = val_rec_buffer(schema.val_fields.max_rec_size)
 			v_sz = encode_val(self, schema, op, v, v_buf_sz, val_cols, '{}', t)
 			if schema.fks then
-				if not schema.triggers and not schema.has_gen_cols then
+				if not schema.triggers and not schema.has_gen_cols
+					and not schema.row_check_fn
+				then
 					--pk not yet in t
 					for _, f in ipairs(schema.key_fields) do
 						t[f.col] = select_col(cols, as, f.col, ...)
@@ -3138,33 +3343,28 @@ local function put(self, flags, op, tab, cols, ...)
 			self:check_row(op, schema.name, false, v0)
 		else --insert or upsert new record
 			v0, v0_sz = nil --no previous value (v0 currently holds the find_raw err)
-			if schema.triggers or schema.has_gen_cols then
-				local kk = u8a(k_sz); copy(kk, k, k_sz); k = kk
-				new_t = {}
-				decode_key(schema, k, k_sz, new_t, '{}')
-				for _, f in ipairs(schema.val_fields) do
-					local val = select_col(cols, as, f.col, ...)
-					if val == nil then
-						val = resolve_null_val(schema, f)
-					elseif val == null then
-						val = nil
-					end
-					new_t[f.col] = val
+			if schema.triggers or schema.has_gen_cols or schema.row_check_fn then
+				if schema.triggers or schema.has_gen_cols then
+					local kk = u8a(k_sz); copy(kk, k, k_sz); k = kk
 				end
+				new_t = new_row(schema, nil, k, k_sz, cols, as, ...)
 				if schema.triggers then
 					fire_triggers(schema, 'before_insert', self, new_t)
+					resolve_row_defaults(schema, new_t)
 				end
 				if schema.has_gen_cols then
 					apply_gen_cols(self, op, schema, new_t)
 				end
-				v, v_buf_sz = val_rec_buffer(schema.val_fields.max_rec_size)
+				check_row_constraint(self, op, schema, new_t)
+			end
+			v, v_buf_sz = val_rec_buffer(schema.val_fields.max_rec_size)
+			if schema.triggers or schema.has_gen_cols then
 				v_sz = encode_val(self, schema, op,
 					v, v_buf_sz, schema.val_cols, '{}', new_t)
 				if schema.fks then
 					check_fks(self, op, schema, schema.cols, '{}', true, new_t)
 				end
 			else
-				v, v_buf_sz = val_rec_buffer(schema.val_fields.max_rec_size)
 				v_sz = encode_val(self, schema, op, v, v_buf_sz, cols, as, ...)
 				if schema.fks then
 					--new row: full write (missing value means take default value).
@@ -3186,6 +3386,10 @@ local function put(self, flags, op, tab, cols, ...)
 			end
 		end
 	else --insert with no indexes to update or fks to check.
+		if schema.row_check_fn then
+			local row = new_row(schema, nil, k, k_sz, cols, as, ...)
+			check_row_constraint(self, op, schema, row)
+		end
 		local v, v_buf_sz = val_rec_buffer(schema.val_fields.max_rec_size)
 		local v_sz = encode_val(self, schema, op, v, v_buf_sz, cols, as, ...)
 		local ret, err = self:try_put_raw(dbi, k, k_sz, v, v_sz, flags)
@@ -3252,8 +3456,11 @@ function Db:del(tab, ...)
 	assertf(not (schema.is_index and not schema.is_unique),
 		'cannot delete through non-unique index: %s', schema.name)
 	local k, k_buf_sz = key_rec_buffer, MDBX_MAX_KEY_SIZE
-	local k_sz = encode_key(self, schema, 'del', nil,
+	local k_sz, _, null_col = encode_key(self, schema, 'del', nil, false,
 		k, k_buf_sz, schema.key_cols, nil, ...)
+	--a null index key can match many rows, so it names no row to delete.
+	assertf(not null_col, 'cannot delete through a null index key: %s.%s',
+		schema.name, null_col)
 	local cur = self:cursor(dbi)
 	local ok, err = cur:move_raw(C.MDBX_SET_KEY, k, k_sz)
 	if not ok then
@@ -3284,10 +3491,19 @@ function Db:put_records(tab, cols, rows)
 	cols = cols or schema.cols
 	local k, k_buf_sz = key_rec_buffer, MDBX_MAX_KEY_SIZE
 	local v, v_buf_sz = val_rec_buffer(schema.val_fields.max_rec_size)
+	local row = schema.row_check_fn and {}
 	for _,vals in ipairs(rows) do
 		if as == '{}' then check_cols(schema, nil, vals) end
-		local k_sz = encode_key(self, schema, 'put_rec', nil,
+		local k_sz = encode_key(self, schema, 'put_rec', nil, true,
 			k, k_buf_sz, cols, as, vals)
+		if schema.autoinc_field then
+			claim_seq(self, schema,
+				select_col(cols, as, schema.autoinc_field.col, vals))
+		end
+		if row then
+			new_row(schema, row, k, k_sz, cols, as, vals)
+			check_row_constraint(self, 'put_rec', schema, row)
+		end
 		local v_sz = encode_val(self, schema, 'put_rec',
 			v, v_buf_sz, cols, as, vals)
 		local ok, err = self:try_put_raw(dbi, k, k_sz, v, v_sz)
@@ -3368,7 +3584,7 @@ end
 
 local function find_raw_by_pk(self, dbi, schema, ...)
 	local k, k_buf_sz = key_rec_buffer, MDBX_MAX_KEY_SIZE
-	local k_sz = encode_key(self, schema, 'get', nil,
+	local k_sz = encode_key(self, schema, 'get', nil, false,
 		k, k_buf_sz, schema.key_cols, nil, ...)
 	return self:find_raw(dbi, k, k_sz)
 end
@@ -3376,7 +3592,7 @@ end
 function Cur:try_find(val_cols, ...)
 	local schema = assert(self.schema)
 	local k, k_buf_sz = key_rec_buffer, MDBX_MAX_KEY_SIZE
-	local k_sz = encode_key(self.db, schema, 'c_get', nil,
+	local k_sz = encode_key(self.db, schema, 'c_get', nil, false,
 		k, k_buf_sz, schema.key_cols, nil, ...)
 	local ok, v, v_sz = self:move_raw_v(C.MDBX_SET_KEY, k, k_sz)
 	if not ok then return false, v end

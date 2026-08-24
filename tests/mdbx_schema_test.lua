@@ -333,6 +333,52 @@ end
 
 -- value layout edge cases ---------------------------------------------------
 
+function test.binary_schema_types()
+	local sc = mdbx_schema()
+	sc:import(function()
+		import'schema_mdbx'
+		tables.t = {
+			id, idpk,
+			payload, binary,
+			digest, hash(4),
+		}
+	end)
+	local payload = sc.tables.t.fields.payload
+	local digest = sc.tables.t.fields.digest
+	assert(payload.mdbx_type == 'binary')
+	assert(payload.to_text('\0\xff', payload) == '00ff')
+	assert(digest.mdbx_type == 'binary')
+	assert(digest.fixed and digest.maxlen == 4)
+end
+
+--binary is an opaque byte string, including embedded zeroes.
+function test.binary_value()
+	with_db_reopen('binary_value', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id', mdbx_type = 'u32', not_null = true},
+				{col = 'b' , mdbx_type = 'binary', maxlen = 4},
+				{col = 'h' , mdbx_type = 'binary', maxlen = 4, fixed = true},
+			},
+			pk = {'id'},
+		})
+		db:insert('t', '{}', {id = 1, b = '\0\1\xfe\xff', h = 'hash'})
+		db:insert('t', '{}', {id = 2, b = '', h = '\0\0\0\0'})
+		assert(db:find('t', 'b', 1) == '\0\1\xfe\xff')
+		assert(db:find('t', 'b', 2) == '')
+		assert(db:find('t', 'h', 2) == '\0\0\0\0')
+		db:commit()
+	end, function(db)
+		db:begin'r'
+		local _, schema = db:dbi_schema't'
+		assert(schema.fields.b.mdbx_type == 'binary')
+		assert(db:find('t', 'b', 1) == '\0\1\xfe\xff')
+		db:commit()
+	end)
+end
+
 --fixed-size array placed (by col order) between two varsize vals.
 --regression guard for the val-field sort bug (fixed-size col must not land
 --in the dynamic-offset region and break the offset chain).
@@ -1235,12 +1281,6 @@ function test.keyability_rules()
 		assert(iserror(err, 'schema'), tostring(err))
 		assert(err.message:find('varsize key col must be nozero', 1, true), tostring(err))
 
-		ok, err = try_schema(db, db.add_index, 't', {'nz', is_unique = true})
-		assert(not ok)
-		assert(iserror(err, 'schema'), tostring(err))
-		assert(err.message:find('unique index', 1, true), tostring(err))
-		assert(err.message:find('must be not_null', 1, true), tostring(err))
-
 		ok, err = db:add_index('t', {'nz'})
 		assert(ok, tostring(err))
 		db:commit()
@@ -1295,6 +1335,107 @@ function test.unique_index()
 		--drop the index: duplicates allowed again
 		db:drop_index(ix_tbl)
 		assert(try_mutation(db, db.insert, 't', '{}', {id = 6, email = 'a@x', name = 'F'}))
+		db:commit()
+	end)
+end
+
+--unique index on a nullable col: null keys repeat, non-null keys don't,
+--updating into and out of null keeps both rules, and del needs a real key.
+function test.nullable_unique_index()
+	with_db('nullable_unique_index', function(db)
+		db:begin'w'
+		db:create_table('t', {
+			name = 't',
+			fields = {
+				{col = 'id'   , mdbx_type = 'u32' , not_null = true},
+				{col = 'email', mdbx_type = 'utf8', maxlen = 16, nozero = true},
+				{col = 'name' , mdbx_type = 'utf8', maxlen = 16},
+			},
+			pk = {'id'},
+		})
+		db:insert('t', '{}', {id = 1, email = 'a@x', name = 'A'})
+		db:insert('t', '{}', {id = 2, name = 'B'}) --null email
+		db:insert('t', '{}', {id = 3, name = 'C'}) --null email again
+
+		--the repeated null email doesn't stop the index from building
+		local ix_tbl = 't/email'
+		assert(db:add_index('t', {'email', is_unique = true}))
+		assert(db:table_exists(ix_tbl))
+
+		--more null emails are fine
+		assert(try_mutation(db, db.insert, 't', '{}', {id = 4, name = 'D'}))
+
+		--a repeated non-null email is still rejected
+		assert(try_mutation(db, db.insert, 't', '{}',
+			{id = 5, email = 'a@x', name = 'E'}) == false)
+		assert(not db:exists('t', 5))
+
+		--lookup through the index still finds the non-null key
+		local r = db:must_find(ix_tbl, '{}', 'a@x')
+		assert(num(r.id) == 1 and r.name == 'A', S(r.name))
+
+		--update into null frees the email for someone else
+		db:update('t', '{}', {id = 1, email = null})
+		assert(try_mutation(db, db.insert, 't', '{}',
+			{id = 6, email = 'a@x', name = 'F'}))
+
+		--update out of null hits the check
+		assert(try_mutation(db, db.update, 't', '{}',
+			{id = 2, email = 'a@x'}) == false)
+
+		--every null-email row survived
+		for _, id in ipairs{1, 2, 3, 4} do
+			assert(db:is_null('t', 'email', id), id)
+		end
+
+		--del through the index needs a key that names one row
+		db:del(ix_tbl, 'a@x')
+		assert(not db:exists('t', 6))
+		local ok, err = pcall(db.del, db, ix_tbl, nil)
+		assert(not ok)
+		assert(tostring(err):find('null index key', 1, true), tostring(err))
+		db:commit()
+	end)
+end
+
+--a fk's non-unique index promotes to unique in place: repeated null keys
+--don't block the promotion, a repeated non-null key does.
+function test.nullable_unique_index_promotion()
+	with_db('nullable_unique_index_promotion', function(db)
+		db:begin'w'
+		db:create_table('parent', {
+			name = 'parent',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}},
+			pk = {'id'},
+		})
+		db:create_table('child', {
+			name = 'child',
+			fields = {
+				{col = 'id' , mdbx_type = 'u32', not_null = true},
+				{col = 'pid', mdbx_type = 'u32'},
+			},
+			pk = {'id'},
+		})
+		db:insert('parent', '{}', {id = 1})
+		--add_fk builds a non-unique index on the nullable fk col.
+		db:add_fk{table = 'child', cols = {'pid'},
+			ref_table = 'parent', ref_cols = {'id'}}
+		db:insert('child', '{}', {id = 1, pid = 1})
+		db:insert('child', '{}', {id = 2}) --null pid
+		db:insert('child', '{}', {id = 3}) --null pid again
+		db:insert('child', '{}', {id = 4, pid = 1}) --dup pid
+
+		local ok, err = try_schema(db, db.add_index,
+			'child', {'pid', is_unique = true})
+		assert(not ok and iserror(err, 'schema'), tostring(err))
+		assert(err.message == 'duplicate_key', tostring(err.message))
+
+		--remove the dup pid: the repeated null pids don't stop the promotion
+		db:del('child', 4)
+		assert(db:add_index('child', {'pid', is_unique = true}))
+		assert(try_mutation(db, db.insert, 'child', '{}', {id = 5}))
+		assert(try_mutation(db, db.insert, 'child', '{}',
+			{id = 6, pid = 1}) == false)
 		db:commit()
 	end)
 end
@@ -2375,7 +2516,7 @@ function test.fk_default_check()
 			name = 'child',
 			fields = {
 				{col = 'id'  , mdbx_type = 'u32', not_null = true},
-				{col = 'dpid', mdbx_type = 'u32', mdbx_default = 7}, --defaults to parent 7
+				{col = 'dpid', mdbx_type = 'u32', lua_default = '7'}, --defaults to parent 7
 			},
 			pk = {'id'},
 		})
@@ -3447,6 +3588,28 @@ function test.autoinc_failure_rolls_back_sequence()
 	end)
 end
 
+--a key value given by the write advances the sequence past it, so a later
+--auto-increment insert cannot land on a row that is already there. a value
+--below the sequence leaves it alone.
+function test.autoinc_claims_written_ids()
+	with_db('autoinc_claims_written_ids', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true, auto_increment = true},
+			{col = 'v' , mdbx_type = 'u32'},
+		}, pk = {'id'}})
+		db:insert('t', '{}', {id = 1, v = 1})
+		db:insert('t', '{}', {id = 5, v = 5})
+		db:insert('t', '{}', {id = 3, v = 3})
+		assert(num(db:insert('t', '{}', {v = 6})) == 6)
+		db:upsert('t', '{}', {id = 20, v = 20})
+		assert(num(db:insert('t', '{}', {v = 21})) == 21)
+		db:put_records('t', '{}', {{id = 40, v = 40}})
+		assert(num(db:insert('t', '{}', {v = 41})) == 41)
+		db:commit()
+	end)
+end
+
 --cursor navigation: first/next walk ascending, last/prev walk descending, and
 --current returns the positioned row.
 function test.cursor_navigation()
@@ -3651,7 +3814,7 @@ function test.null_vs_default()
 		db:create_table('t', {name = 't', fields = {
 			{col = 'id' , mdbx_type = 'u32', not_null = true},
 			{col = 'opt', mdbx_type = 'u32'},                  --nullable, no default
-			{col = 'def', mdbx_type = 'u32', mdbx_default = 7}, --nullable with default
+			{col = 'def', mdbx_type = 'u32', lua_default = '7'}, --nullable with default
 		}, pk = {'id'}})
 		db:insert('t', '{}', {id = 1}) --neither opt nor def given
 		assert(db:is_null('t', 'opt', 1) == true , 'unset nullable -> null')
@@ -3662,6 +3825,14 @@ function test.null_vs_default()
 		assert(num(db:find('t', 'def', 2)) == 9)
 		db:insert('t', '{}', {id = 3, def = null})
 		assert(db:is_null('t', 'def', 3) == true, 'explicit null bypasses default')
+		--re-encoding an update must not apply a default to an existing null.
+		db:update('t', '{}', {id = 3, opt = 1})
+		assert(db:is_null('t', 'def', 3) == true)
+		local cur = db:cursor't'
+		assert(cur:try_find(nil, 3))
+		cur:update('opt', 2)
+		cur:close()
+		assert(db:is_null('t', 'def', 3) == true)
 		db:insert('t', '{}', {id = 4, opt = 5})
 		assert(db:is_null('t', 'opt', 4) == false and num(db:find('t', 'opt', 4)) == 5)
 		db:update('t', '{}', {id = 4, opt = null}) --set to null
@@ -4324,7 +4495,7 @@ function test.fk_default_full_write_operations()
 			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}}, pk = {'id'}})
 		db:create_table('child', {name = 'child', fields = {
 			{col = 'id' , mdbx_type = 'u32', not_null = true},
-			{col = 'pid', mdbx_type = 'u32', mdbx_default = 7},
+			{col = 'pid', mdbx_type = 'u32', lua_default = '7'},
 		}, pk = {'id'}})
 		db:add_fk{table = 'child', cols = {'pid'},
 			ref_table = 'parent', ref_cols = {'id'}}
@@ -4639,15 +4810,15 @@ function test.alter_table_values_in_place()
 		db:begin'w'
 		db:create_table('t', {name = 't', fields = {
 			{col = 'id', mdbx_type = 'u32', not_null = true},
-			{col = 'v' , mdbx_type = 'u32', mdbx_default = 7},
+			{col = 'v' , mdbx_type = 'u32', lua_default = '7'},
 		}, pk = {'id'}})
 		db:insert('t', '{}', {id = 1, v = null})
 		db:insert('t', '{}', {id = 2})
 		local dbi = db:dbi_raw't'
 		db:alter_table('t', {name = 't', fields = {
 			{col = 'id', mdbx_type = 'u32', not_null = true},
-			{col = 'v' , mdbx_type = 'u32', mdbx_default = 9},
-			{col = 'x' , mdbx_type = 'u32', mdbx_default = 5},
+			{col = 'v' , mdbx_type = 'u32', lua_default = '9'},
+			{col = 'x' , mdbx_type = 'u32', lua_default = '5'},
 		}, pk = {'id'}})
 		assert(db:dbi_raw't' == dbi, 'value-only alter replaced the DBI')
 		assert(db:is_null('t', 'v', 1) == true)
@@ -4680,7 +4851,7 @@ function test.alter_table_keeps_false_bool()
 			{col = 'id', mdbx_type = 'u32' , not_null = true},
 			{col = 'a' , mdbx_type = 'bool', not_null = true},
 			{col = 'b' , mdbx_type = 'bool'},
-			{col = 'c' , mdbx_type = 'u32' , mdbx_default = 5},
+			{col = 'c' , mdbx_type = 'u32' , lua_default = '5'},
 		}, pk = {'id'}})
 		assert(db:find('t', 'a', 1) == false)
 		assert(db:find('t', 'b', 1) == false)
@@ -4749,7 +4920,7 @@ function test.alter_table_rebinds_indexes()
 			{col = 'pid', mdbx_type = 'u32', not_null = true},
 			{col = 'tag', mdbx_type = 'u32', not_null = true},
 			{col = 'v'  , mdbx_type = 'u32'},
-			{col = 'x'  , mdbx_type = 'u32', mdbx_default = 7},
+			{col = 'x'  , mdbx_type = 'u32', lua_default = '7'},
 		}, pk = {'id'}})
 
 		db:update('child', '{v}', {id = 10, v = 30})
@@ -4957,6 +5128,47 @@ function test.triggers_events()
 		assert(log[5][1] == 'bd' and log[5][2] == 'WORLD')
 		assert(log[6][1] == 'ad' and log[6][2] == 'WORLD')
 		db:commit()
+	end)
+end
+
+--Complete rows passed through triggers and generators preserve SQL NULL, even
+--when the column has a default and the row is re-encoded.
+function test.mutation_rows_preserve_null()
+	with_db('mutation_rows_preserve_null', function(db)
+		local spec = {
+			name = 't',
+			fields = {
+				{col = 'id', mdbx_type = 'u32', not_null = true},
+				{col = 'v', mdbx_type = 'u32', lua_default = '7'},
+				{col = 'n', mdbx_type = 'u32'},
+				{col = 'copy', mdbx_type = 'u32', generate = function(db, new)
+					assert(new.v == null)
+					return new.n
+				end},
+			},
+			pk = {'id'},
+			triggers = {
+				before_insert = {function(db, new)
+					assert(new.v == null)
+				end},
+				before_update = {function(db, old, new)
+					assert(old.v == null and new.v == null)
+				end},
+			},
+		}
+		local sc = mdbx_schema()
+		sc.tables.t = spec
+		db.schema = sc
+		db:atomic('w', function()
+			db:without_schema(function() db:create_table('t', spec) end)
+		end)
+		db:atomic('w', function()
+			db:insert('t', '{}', {id = 1, v = null, n = 1})
+			assert(db:is_null('t', 'v', 1))
+			db:update('t', '{}', {id = 1, n = 2})
+			assert(db:is_null('t', 'v', 1))
+			assert(num(db:find('t', 'copy', 1)) == 2)
+		end)
 	end)
 end
 
@@ -5223,7 +5435,9 @@ local function gen_table(db, gen_fn)
 	end)
 end
 
-local function upper(db, new) return new.val and new.val:upper() end
+local function upper(db, new)
+	return new.val ~= null and new.val:upper() or nil
+end
 
 --generated column is computed on insert; stored value is the computed result.
 function test.generated_col_insert()
@@ -5594,6 +5808,202 @@ function test.seed_rows_fk_cycle()
 	end)
 end
 
+-- on-update columns ---------------------------------------------------------
+
+--create a paper schema table with an on-update col. see trigger_table() for
+--why the table is created inside without_schema().
+local function on_update_table(db, on_update, triggers)
+	local spec = {
+		name = 't',
+		fields = {
+			{col = 'id' , mdbx_type = 'u32' , not_null = true},
+			{col = 'val', mdbx_type = 'utf8', maxlen = 16},
+			{col = 'ver', mdbx_type = 'u32' , on_update = on_update},
+		},
+		pk = {'id'},
+		triggers = triggers,
+	}
+	local sc = mdbx_schema()
+	sc.tables['t'] = spec
+	db.schema = sc
+	db:atomic('w', function()
+		db:without_schema(function() db:create_table('t', spec) end)
+	end)
+end
+
+--counts its calls so that the assigned value shows which write set it.
+local function counter()
+	local n = 0 --calls so far
+	return function() n = n + 1; return n end
+end
+
+--set on every update but not on insert, on db:update and cur:update alike,
+--including an update that writes the values the row already has.
+function test.on_update_sets_col_on_updates_only()
+	with_db('on_update_sets_col_on_updates_only', function(db)
+		on_update_table(db, counter())
+		db:begin'w'
+		db:insert('t', '{}', {id = 1, val = 'a', ver = 0})
+		assert(num(db:find('t', 'ver', 1)) == 0)
+		db:update('t', '{}', {id = 1, val = 'b'})
+		assert(num(db:find('t', 'ver', 1)) == 1)
+		db:update('t', '{}', {id = 1, val = 'b'})
+		assert(num(db:find('t', 'ver', 1)) == 2)
+		local cur = db:cursor('t')
+		assert(cur:try_find(nil, 1))
+		cur:update('val', 'c')
+		cur:close()
+		assert(num(db:find('t', 'ver', 1)) == 3)
+		db:commit()
+	end)
+end
+
+--an update that names the col explicitly still gets the on-update value.
+function test.on_update_overrides_given_value()
+	with_db('on_update_overrides_given_value', function(db)
+		on_update_table(db, counter())
+		db:begin'w'
+		db:insert('t', '{}', {id = 1, val = 'a', ver = 77})
+		assert(num(db:find('t', 'ver', 1)) == 77)
+		db:update('t', '{}', {id = 1, ver = 99})
+		assert(num(db:find('t', 'ver', 1)) == 1)
+		db:commit()
+	end)
+end
+
+--the col is set before before-triggers run, so a trigger sees the new value
+--and can replace it.
+function test.on_update_runs_before_triggers()
+	with_db('on_update_runs_before_triggers', function(db)
+		on_update_table(db, counter(), {
+			before_update = {function(db, old_row, new_row)
+				assert(num(new_row.ver) == 1, S(new_row.ver))
+				new_row.ver = 42
+			end},
+		})
+		db:begin'w'
+		db:insert('t', '{}', {id = 1, val = 'a', ver = 0})
+		db:update('t', '{}', {id = 1, val = 'b'})
+		assert(num(db:find('t', 'ver', 1)) == 42)
+		db:commit()
+	end)
+end
+
+--on_update is rejected on a key col.
+function test.on_update_rejected_on_key_col()
+	with_db('on_update_rejected_on_key_col', function(db)
+		db:begin'w'
+		local ok, err = pcall(function()
+			db:create_table('t', {
+				name = 't',
+				fields = {
+					{col = 'id', mdbx_type = 'u32', not_null = true,
+					 on_update = function() return 1 end},
+				},
+				pk = {'id'},
+			})
+		end)
+		assert(not ok)
+		assert(tostring(err):find(
+			'key col cannot have on_update: t.id', 1, true), tostring(err))
+		db:commit()
+	end)
+end
+
+--on_update is rejected on layout when it is not a function.
+function test.on_update_must_be_a_function()
+	with_db('on_update_must_be_a_function', function(db)
+		db:begin'w'
+		local ok, err = pcall(function()
+			db:create_table('t', {
+				name = 't',
+				fields = {
+					{col = 'id' , mdbx_type = 'u32', not_null = true},
+					{col = 'ver', mdbx_type = 'u32', on_update = 'now'},
+				},
+				pk = {'id'},
+			})
+		end)
+		assert(not ok)
+		assert(tostring(err):find(
+			'on_update must be a function: t.ver', 1, true), tostring(err))
+		db:commit()
+	end)
+end
+
+-- key defaults --------------------------------------------------------------
+
+--a table whose pk col has a default, so a write can leave the key out.
+local function key_default_table(db)
+	db:create_table('t', {name = 't', fields = {
+		{col = 'id', mdbx_type = 'u32', not_null = true, lua_default = '7'},
+		{col = 'v' , mdbx_type = 'u32'},
+	}, pk = {'id'}})
+end
+
+--insert and upsert complete a missing key col from its default, so an upsert
+--with no key given updates the row that the default names.
+function test.key_default_completes_written_keys()
+	with_db('key_default_completes_written_keys', function(db)
+		db:begin'w'
+		key_default_table(db)
+		db:insert('t', '{}', {v = 100})
+		assert(num(db:find('t', 'v', 7)) == 100)
+		db:upsert('t', '{}', {v = 200})
+		assert(num(db:find('t', 'v', 7)) == 200)
+		db:commit()
+	end)
+end
+
+--a lookup key is never completed from a default: find, exists, del and update
+--fail on a missing key col instead of naming the row that holds the default.
+function test.key_default_not_used_for_lookups()
+	with_db('key_default_not_used_for_lookups', function(db)
+		db:atomic('w', function()
+			key_default_table(db)
+			db:insert('t', '{}', {id = 7, v = 100})
+		end)
+		for _, lookup in ipairs{
+			{event = 'get'   , call = function(db) return db:find('t', 'v') end},
+			{event = 'get'   , call = function(db) return db:exists('t') end},
+			{event = 'del'   , call = function(db) return db:del('t') end},
+			{event = 'update', call = function(db)
+				return db:update('t', '{}', {v = 1})
+			end},
+		} do
+			local ok, err = try_mutation(db, lookup.call)
+			assert(not ok, lookup.event)
+			assert(iserror(err, 'field'), tostring(err))
+			assert(err.event == lookup.event, tostring(err.event))
+			assert(err.table == 't' and err.col == 'id', tostring(err.col))
+			assert(err.message == 'null_key', tostring(err.message))
+		end
+		db:atomic('r', function()
+			assert(num(db:find('t', 'v', 7)) == 100)
+		end)
+	end)
+end
+
+--an explicit null is never completed from a default, on key cols as on val
+--cols: it names no row for a key col and is stored as NULL for a val col.
+function test.explicit_null_ignores_key_defaults()
+	with_db('explicit_null_ignores_key_defaults', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true, lua_default = '7'},
+			{col = 'v' , mdbx_type = 'u32', lua_default = '9'},
+		}, pk = {'id'}})
+		local ok, err = try_mutation(db, db.insert, 't', '{}', {id = null, v = 1})
+		assert(not ok)
+		assert(iserror(err, 'field'), tostring(err))
+		assert(err.col == 'id', tostring(err.col))
+		assert(err.message == 'null_key', tostring(err.message))
+		db:insert('t', '{}', {v = null})
+		assert(db:is_null('t', 'v', 7))
+		db:commit()
+	end)
+end
+
 -- check constraints ---------------------------------------------------------
 
 --table with a lua_check on a val col and one on a key col.
@@ -5604,7 +6014,7 @@ local function check_table(db, val_expr, val_error, key_expr)
 			{col = 'code' , mdbx_type = 'utf8', maxlen = 8, nozero = true,
 			 not_null = true, lua_check = key_expr},
 			{col = 'price', mdbx_type = 'i32', lua_check = val_expr,
-			 lua_check_error = val_error},
+			 check_error = val_error},
 		},
 		pk = {'code'},
 	}
@@ -5673,7 +6083,7 @@ function test.check_rejects_cur_update()
 	end)
 end
 
---lua_check_error replaces the default message.
+--check_error replaces the default message.
 function test.check_custom_error_message()
 	with_db('check_custom_error_message', function(db)
 		check_table(db, 'v > 0', 'price must be positive')
@@ -5843,15 +6253,15 @@ function test.check_expression_unknown_name()
 	end)
 end
 
---lua_check() in a schema definition sets the field attr that mdbx reads.
-function test.check_declared_with_lua_check_flag()
-	with_db('check_declared_with_lua_check_flag', function(db)
+--check() in a schema definition sets the field attr that mdbx reads.
+function test.check_declared_with_check_flag()
+	with_db('check_declared_with_check_flag', function(db)
 		local sc = mdbx_schema()
 		sc:import(function()
-			import'schema_std'
+			import'schema_mdbx'
 			tables.t = {
 				id   , idpk,
-				price, int, lua_check('v > 0', 'price must be positive'),
+				price, i32, check('v > 0', 'price must be positive'),
 			}
 		end)
 		assert(sc.tables.t.fields.price.lua_check == 'v > 0')
@@ -5860,6 +6270,249 @@ function test.check_declared_with_lua_check_flag()
 		local ok, err = try_mutation(db, db.insert, 't', '{}', {price = -1})
 		assert(not ok)
 		check_field_error(err, 'insert', 'price', 'price must be positive')
+	end)
+end
+
+-- row checks ---------------------------------------------------------------
+
+local function row_check_table(db, expr, error_message, triggers, generate)
+	local spec = {
+		name = 't',
+		fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'lo', mdbx_type = 'i32'},
+			{col = 'hi', mdbx_type = 'i32'},
+			{col = 'span', mdbx_type = 'i32', generate = generate},
+		},
+		pk = {'id'},
+		lua_row_check = expr,
+		row_check_error = error_message,
+		triggers = triggers,
+	}
+	local sc = mdbx_schema()
+	sc.tables['t'] = spec
+	db.schema = sc
+	db:atomic('w', function()
+		db:without_schema(function() db:create_table('t', spec) end)
+	end)
+	return spec
+end
+
+local function check_row_check_error(err, event, message)
+	assert(iserror(err, 'row'), tostring(err))
+	assert(err.event == event, tostring(err.event))
+	assert(err.table == 't', tostring(err.table))
+	assert(err.message == message, tostring(err.message))
+end
+
+--the table-level flag declares the expression and custom error message.
+function test.row_check_declared_with_flag()
+	with_db('row_check_declared_with_flag', function(db)
+		local sc = mdbx_schema()
+		sc:import(function()
+			import'schema_mdbx'
+			tables.t = {
+				row_check('row.lo <= row.hi', 'invalid range'),
+				id, idpk,
+				lo, i32,
+				hi, i32,
+			}
+		end)
+		local t = sc.tables.t
+		assert(t.lua_row_check == 'row.lo <= row.hi')
+		assert(t.row_check_error == 'invalid range')
+		db.schema = sc
+		db:sync_schema()
+		local ok, err = try_mutation(db, db.insert,
+			't', '{}', {id = 1, lo = 2, hi = 1})
+		assert(not ok)
+		check_row_check_error(err, 'insert', 'invalid range')
+	end)
+end
+
+--every write path receives the complete row and enforces the stored check.
+function test.row_check_rejects_writes()
+	with_db_reopen('row_check_rejects_writes', function(db)
+		row_check_table(db, 'row.lo == null or row.hi == null or row.lo <= row.hi')
+		db:atomic('w', function()
+			db:insert('t', '{}', {id = 1, lo = 1, hi = 3})
+			db:insert('t', '{}', {id = 5}) --nulls are visible as nil
+		end)
+		local tests = {
+			{'insert', db.insert, 't', '{}', {id = 2, lo = 4, hi = 3}},
+			{'update', db.update, 't', '{}', {id = 1, lo = 4}},
+			{'upsert', db.upsert, 't', '{}', {id = 3, lo = 4, hi = 3}},
+			{'put_rec', db.put_records, 't', '{}', {{id = 4, lo = 4, hi = 3}}},
+		}
+		for _, args in ipairs(tests) do
+			local event = remove(args, 1)
+			local ok, err = try_mutation(db, unpack(args))
+			assert(not ok, event)
+			check_row_check_error(err, event,
+				'row_check: row.lo == null or row.hi == null or row.lo <= row.hi')
+		end
+		local ok, err = try_mutation(db, function(db)
+			local cur = db:cursor't'
+			assert(cur:try_find(nil, 1))
+			cur:update('hi', 0)
+			cur:close()
+		end)
+		assert(not ok)
+		check_row_check_error(err, 'c_update',
+			'row_check: row.lo == null or row.hi == null or row.lo <= row.hi')
+	end, function(db)
+		assert(db.schema == nil)
+		local ok, err = try_mutation(db, db.insert,
+			't', '{}', {id = 2, lo = 2, hi = 1})
+		assert(not ok)
+		check_row_check_error(err, 'insert',
+			'row_check: row.lo == null or row.hi == null or row.lo <= row.hi')
+	end)
+end
+
+--before triggers and generated columns finish before the row is checked.
+function test.row_check_runs_after_triggers_and_generated_cols()
+	with_db('row_check_runs_after_triggers_and_generated_cols', function(db)
+		row_check_table(db,
+			'row.hi >= row.lo and row.span == row.hi - row.lo', nil, {
+			before_insert = {function(db, new)
+				if new.hi < new.lo then new.hi = new.lo end
+			end},
+		}, function(db, new)
+			return new.hi - new.lo
+		end)
+		db:atomic('w', function()
+			db:insert('t', '{}', {id = 1, lo = 5, hi = 2})
+		end)
+		db:atomic('r', function()
+			local row = db:must_find('t', '{}', 1)
+			assert(row.hi == 5 and row.span == 0)
+		end)
+	end)
+end
+
+--adding or changing a row check validates existing rows transactionally.
+function test.row_check_validates_existing_rows()
+	with_db('row_check_validates_existing_rows', function(db)
+		local spec = row_check_table(db)
+		db:atomic('w', function()
+			db:insert('t', '{}', {id = 1, lo = 1, hi = 3})
+			db:insert('t', '{}', {id = 2, lo = 3, hi = 2})
+			db:insert('t', '{}', {id = 3})
+		end)
+		spec.lua_row_check =
+			'row.lo == null or row.hi == null or row.lo <= row.hi'
+		local ok, err = pcall(db.sync_schema, db)
+		assert(not ok)
+		assert(iserror(err, 'schema'), tostring(err))
+		assert(err.message ==
+			'row_check: row.lo == null or row.hi == null or row.lo <= row.hi',
+			tostring(err.message))
+		assert(db.txn == nil)
+		spec.lua_row_check =
+			'row.lo == null or row.hi == null or row.lo <= row.hi + 1'
+		db:sync_schema()
+		db:atomic('r', function()
+			assert(db:find('t', 'lo', 2) == 3)
+		end)
+	end)
+end
+
+-- scale ---------------------------------------------------------------------
+
+--a scaled col stores the value times its scale, so the scale has to travel
+--with the schema or the stored numbers lose their meaning.
+function test.scale_stored_with_schema()
+	with_db_reopen('scale_stored_with_schema', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'm' , mdbx_type = 'f64', scale = 10^4},
+		}, pk = {'id'}})
+		db:insert('t', '{}', {id = 1, m = 12345600})
+		db:commit()
+	end, function(db)
+		db:begin'r'
+		local _, schema = db:dbi_schema't'
+		assert(schema.fields.m.scale == 10^4)
+		assert(num(db:find('t', 'm', 1)) == 12345600)
+		db:commit()
+	end)
+end
+
+--changing the scale changes what the stored numbers stand for, so the alter
+--multiplies them by the ratio instead of re-encoding them unchanged.
+function test.alter_table_rescales_values()
+	with_db_reopen('alter_table_rescales_values', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'm' , mdbx_type = 'f64', scale = 10^2},
+		}, pk = {'id'}})
+		local dbi = db:dbi_raw't'
+		db:insert('t', '{}', {id = 1, m = 1250})
+		db:insert('t', '{}', {id = 2, m = null})
+		db:alter_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'm' , mdbx_type = 'f64', scale = 10^4},
+		}, pk = {'id'}})
+		assert(db:dbi_raw't' == dbi, 'value-only alter replaced the DBI')
+		assert(num(db:find('t', 'm', 1)) == 125000)
+		assert(db:is_null('t', 'm', 2) == true)
+		db:commit()
+	end, function(db)
+		db:begin'r'
+		local _, schema = db:dbi_schema't'
+		assert(schema.fields.m.scale == 10^4)
+		assert(num(db:find('t', 'm', 1)) == 125000)
+		db:commit()
+	end)
+end
+
+--going to a smaller scale drops digits, so the rescaled value is rounded.
+function test.alter_table_rescales_down_rounding()
+	with_db('alter_table_rescales_down_rounding', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'm' , mdbx_type = 'f64', scale = 10^4},
+		}, pk = {'id'}})
+		db:insert('t', '{}', {id = 1, m = 125050}) -- 12.5050
+		db:insert('t', '{}', {id = 2, m = 125049}) -- 12.5049
+		db:alter_table('t', {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'm' , mdbx_type = 'f64', scale = 10^2},
+		}, pk = {'id'}})
+		assert(num(db:find('t', 'm', 1)) == 1251) -- 12.51
+		assert(num(db:find('t', 'm', 2)) == 1250) -- 12.50
+		db:commit()
+	end)
+end
+
+--a key col's scale is part of its key encoding, so changing it rewrites the
+--keys through the replacement table instead of the in-place value path.
+function test.alter_table_rescales_key()
+	with_db_reopen('alter_table_rescales_key', function(db)
+		db:begin'w'
+		db:create_table('t', {name = 't', fields = {
+			{col = 'm', mdbx_type = 'f64', not_null = true, scale = 10^2},
+			{col = 'v', mdbx_type = 'u32'},
+		}, pk = {'m'}})
+		local dbi = db:dbi_raw't'
+		db:insert('t', '{}', {m = 1250, v = 7})
+		db:alter_table('t', {name = 't', fields = {
+			{col = 'm', mdbx_type = 'f64', not_null = true, scale = 10^4},
+			{col = 'v', mdbx_type = 'u32'},
+		}, pk = {'m'}})
+		assert(db:dbi_raw't' ~= dbi, 'key alter kept the DBI')
+		assert(num(db:find('t', 'v', 125000)) == 7)
+		db:commit()
+	end, function(db)
+		db:begin'r'
+		local _, schema = db:dbi_schema't'
+		assert(schema.fields.m.scale == 10^4)
+		assert(num(db:find('t', 'v', 125000)) == 7)
+		db:commit()
 	end)
 end
 
@@ -6056,14 +6709,14 @@ function test.collation_fk()
 	end)
 end
 
---lua_enum declares a text col ordered by its values and restricted to them.
-local function lua_enum_db(db, vals)
+--enum declares a text col ordered by its values and restricted to them.
+local function enum_db(db, vals)
 	local sc = mdbx_schema()
 	sc:import(function()
-		import'schema_std'
+		import'schema_mdbx'
 		tables.t = {
 			id, idpk,
-			st, lua_enum(vals), ix,
+			st, enum(vals), ix,
 		}
 	end)
 	db.schema = sc
@@ -6071,9 +6724,9 @@ local function lua_enum_db(db, vals)
 	return sc
 end
 
-function test.lua_enum_declares_collation_and_check()
-	with_db('lua_enum_declares', function(db)
-		lua_enum_db(db, 'open pending closed')
+function test.enum_declares_collation_and_check()
+	with_db('enum_declares', function(db)
+		enum_db(db, 'open pending closed')
 		db:atomic('w', function()
 			db:insert('t', '{}', {id = 1, st = 'closed'})
 			db:insert('t', '{}', {id = 2, st = 'open'})
@@ -6101,9 +6754,9 @@ end
 
 --reads never raise on a value the list does not name: it collates after every
 --named one, so it matches nothing, seeking or not.
-function test.lua_enum_wrong_value_reads()
-	with_db('lua_enum_wrong_value_reads', function(db)
-		lua_enum_db(db, 'open pending closed')
+function test.enum_wrong_value_reads()
+	with_db('enum_wrong_value_reads', function(db)
+		enum_db(db, 'open pending closed')
 		db:atomic('w', function()
 			db:insert('t', '{}', {id = 1, st = 'open'})
 		end)
@@ -6116,9 +6769,9 @@ end
 
 --adding a value relaxes the check and reorders the index, leaving rows alone;
 --dropping one that rows still hold is refused.
-function test.lua_enum_list_edits()
-	with_db('lua_enum_list_edits', function(db)
-		lua_enum_db(db, 'open pending closed')
+function test.enum_list_edits()
+	with_db('enum_list_edits', function(db)
+		enum_db(db, 'open pending closed')
 		db:atomic('w', function()
 			db:insert('t', '{}', {id = 1, st = 'closed'})
 			db:insert('t', '{}', {id = 2, st = 'open'})
@@ -6131,7 +6784,7 @@ function test.lua_enum_list_edits()
 			end
 			rows0 = cat(t, ' ')
 		end)
-		lua_enum_db(db, 'archived open pending closed')
+		enum_db(db, 'archived open pending closed')
 		db:atomic('r', function()
 			local t = {}
 			for _, k, k_sz, v, v_sz in db:each_raw('t') do
@@ -6140,12 +6793,12 @@ function test.lua_enum_list_edits()
 			assert(cat(t, ' ') == rows0, 'a list edit rewrote the rows')
 			assert(db:find('t', 'st', 1) == 'closed')
 		end)
-		local ok, err = pcall(lua_enum_db, db, 'open pending')
+		local ok, err = pcall(enum_db, db, 'open pending')
 		assert(not ok, 'dropping a value in use was accepted')
 		assert(tostring(err):find('enum', 1, true), tostring(err))
 		--the refused sync leaves its own paper schema installed; the db still
 		--holds what the last accepted one declared.
-		lua_enum_db(db, 'archived open pending closed')
+		enum_db(db, 'archived open pending closed')
 		db:atomic('r', function()
 			assert(db:find('t', 'st', 1) == 'closed')
 		end)
@@ -6153,14 +6806,14 @@ function test.lua_enum_list_edits()
 end
 
 --a value with a space is declared as a table and behaves like any other.
-function test.lua_enum_spaced_values()
-	with_db('lua_enum_spaced_values', function(db)
+function test.enum_spaced_values()
+	with_db('enum_spaced_values', function(db)
 		local sc = mdbx_schema()
 		sc:import(function()
-			import'schema_std'
+			import'schema_mdbx'
 			tables.t = {
 				id, idpk,
-				st, lua_enum{'in progress', 'done', 'wont fix'}, ix,
+				st, enum{'in progress', 'done', 'wont fix'}, ix,
 			}
 		end)
 		db.schema = sc

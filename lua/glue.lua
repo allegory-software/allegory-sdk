@@ -130,7 +130,8 @@ STRINGS
 	subst(s, t) -> s               string interpolation pattern
 	capitalize(s) -> s             capitalize words
 	html_escape(s) -> s            escape HTML string
-	kbytes(x [,decimals]) -> s     format byte size in k/M/G/T-bytes
+	format_kbytes(x, [decimals], [mag]) -> s  format byte size in K/M/G/T-bytes
+	format_kcount(x, [decimals], [mag]) -> s  format a count in K/M/G/T
 STDOUT/ERR
 	print_function(write, [format], [newline]) -> f  create a print()-like function
 	printf(fmt, ...)               print with string formatting
@@ -1384,9 +1385,22 @@ local suffixes = {[0] = 'B', 'K', 'M', 'G', 'T', 'P', 'E'}
 local magnitudes = index(suffixes)
 local clamp, ln1024 = clamp, ln(1024)
 local decfmt = memoize(function(dec) return '%.'..dec..'f%s' end)
-function kbytes(x, dec, mag)
+function format_kbytes(x, dec, mag)
 	local i = mag and magnitudes[mag] or clamp(floor(ln(x) / ln1024), 0, #suffixes-1)
 	local z = x / 1024^i
+	local fmt = dec and dec ~= 0 and decfmt(dec) or '%.0f%s'
+	return format(fmt, z, suffixes[i])
+end
+end
+
+do
+local suffixes = {[0] = '', 'K', 'M', 'G', 'T', 'P', 'E'}
+local magnitudes = index(suffixes)
+local clamp, ln1000 = clamp, ln(1000)
+local decfmt = memoize(function(dec) return '%.'..dec..'f%s' end)
+function format_kcount(x, dec, mag)
+	local i = mag and magnitudes[mag] or clamp(floor(ln(x) / ln1000), 0, #suffixes-1)
+	local z = x / 1000^i
 	local fmt = dec and dec ~= 0 and decfmt(dec) or '%.0f%s'
 	return format(fmt, z, suffixes[i])
 end

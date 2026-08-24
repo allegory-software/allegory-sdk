@@ -1934,7 +1934,7 @@ function file_saver(file, file_perms, dir_perms, sync)
 			if sync then f:sync() end
 			f:close()
 			rename(tmpfile, file, nil, sync)
-			log('note', 'fs', 'save', '%s (%s)', file, kbytes(n))
+			log('note', 'fs', 'save', '%s (%s)', file, format_kbytes(n))
 		end
 	end
 	local function write(buf, sz)

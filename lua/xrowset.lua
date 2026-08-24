@@ -41,20 +41,19 @@
 		min              : n             min allowed value
 		max              : n             max allowed value
 		decimals         : n             number of decimals
-		maxlen           : n             max length in characters
+		maxlen           : n             max length in bytes
 		w                : px            default grid column width
 		min_w            : px            min grid column width
 		max_w            : px            max grid column width
-		display_width    : c             display width in characters
 		hour_step        : n             for the time picker
 		minute_step      : n             for the time picker
 		second_step      : n             for the time picker
 		precision        : 'd|s|ms'      date type precision
-		timeago          : f             format as relative time (see timeago())
-		duration_format  :               format for duration type (see duration())
-		filesize_decimals: 0             decimals, for filesize type
-		filesize_magnitude:              magnitude for filesize type
-		filesize_min     :               threshold for not making it gray
+		timeago          : f             format as relative time (see format_timeago())
+		duration_format  :               format for duration type (see format_duration())
+		magnitude        : 'K|M|G|..'   unit to pin to, filesize/count types
+		magnitude_decimals: n          decimals shown at that magnitude
+		gray_min         : n           filesize type: below this, draw gray
 
 		lookup_rowset_name:              lookup rowset name
 		lookup_cols      :               lookup rowset cols
@@ -106,11 +105,12 @@ local client_field_attrs = {
 	internal=1, hidden=1, readonly=1, null_text=1,
 	name=1, type=1, label=1, info=1, default=1, client_default=1, align=1,
 	enum_values=1, enum_texts=1, not_null=1, min=1, max=1, decimals=1, maxlen=1,
+	scale=1,
 	lookup_rowset_name=1, lookup_cols=1, display_col=1, name_col=1,
-	w=1, min_w=1, max_w=1, display_width=1,
+	w=1, min_w=1, max_w=1,
 	hour_step=1, minute_step=1, second_step=1, precision=1,
 	timeago=1, duration_format=1,
-	filesize_decimals=1, filesize_magnitude=1, filesize_min=1,
+	magnitude=1, magnitude_decimals=1, gray_min=1,
 }
 
 local rowset_tables = {} --{table -> {rowset->true}}
@@ -460,7 +460,7 @@ function virtual_rowset(init, ...)
 			local dts  = wb:add_format({num_format = country('date_format')..' hh:mm:ss'})
 			for i,field in ipairs(rs.fields) do
 				ws:write(0, i-1, field.label or capitalize(field.name), bold)
-				local w = field.display_width
+				local w = round(field.w / 10) --width in chars
 				w = field.hidden and 1 or w and min(32, w)
 				local fmt
 				if field.type == 'date' then

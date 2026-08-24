@@ -3650,15 +3650,15 @@ end
 
 --a value the enum's list does not name matches nothing rather than raising,
 --whether the plan seeks on an index or checks rows one by one.
-function test.lua_enum_wrong_value_in_query()
-	with_db('lua_enum_wrong_value_in_query', function(db)
+function test.enum_wrong_value_in_query()
+	with_db('enum_wrong_value_in_query', function(db)
 		local sc = mdbx_schema()
 		sc:import(function()
-			import'schema_std'
+			import'schema_mdbx'
 			tables.tq = {
 				id, idpk,
-				st, lua_enum'open pending closed', ix,
-				pr, lua_enum'low high',
+				st, enum'open pending closed', ix,
+				pr, enum'low high',
 			}
 		end)
 		db.schema = sc

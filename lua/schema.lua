@@ -36,7 +36,7 @@ databases with different engines.
 
 ## Usage
 
-See `schema_std.lua` for type definitions and `lang_schema()` in lang.lua
+See `schema_mdbx.lua` for type definitions and `lang_schema()` in lang.lua
 and `auth_schema()` in `webb_auth_mdbx.lua` for examples of table definitions.
 
 ### How this works / caveats
@@ -94,6 +94,7 @@ API
 	schema.pk_change_affects(old_tbl, new_tbl, attrs) -> changed, col
 schema.new() options:
 	engine                     engine name used for engine-specific attributes.
+	diff_table_attrs           {attr->true}: attributes included in table diffs.
 	diff_field_attrs           {attr->true}: attributes included in field diffs.
 	supports_fks               include foreign keys in schema diffs.
 	supports_checks            include checks in schema diffs.
@@ -288,12 +289,8 @@ local function add_ix(self, tbl, cols, unique)
 	assertf(not t[k], 'duplicate index `%s`', k)
 	check_cols('index', tbl, cols)
 	t[k] = cols
-	if unique then --apply `not_null` flag to fields.
+	if unique then
 		cols.is_unique = true
-		for _,col in ipairs(tbl.pk) do
-			local fld = tbl.fields[col]
-			fld.not_null = true
-		end
 	end
 end
 
@@ -316,6 +313,14 @@ local function add_fk(self, tbl, cols, ref_tbl_name, ondelete, onupdate, fld)
 	else --we'll resolve it when the table is defined later.
 		attr(attr(self, 'table_refs'), ref_tbl_name)[fk] = true
 	end
+end
+
+--a function written inside a schema definition is created with the
+--definition env, where every name resolves to its own name as a string.
+--give it the globals back; one defined elsewhere keeps its own env.
+local function restore_env(self, fn)
+	if getfenv(fn) == self.env then setfenv(fn, _G) end
+	return fn
 end
 
 do
@@ -379,13 +384,16 @@ do
 				if isstr(arg1) then --standalone: before_insert('usr', fn)
 					local tbl = assertf(self.tables[arg1],
 						'unknown table for trigger: %s', arg1)
-					add(attr(attr(tbl, 'triggers'), event), assertf(isfunc(arg2),
-						'function expected for %s.%s', arg1, event))
+					local fn = assertf(isfunc(arg2) and arg2,
+						'function expected for %s.%s', arg1, event)
+					add(attr(attr(tbl, 'triggers'), event),
+						restore_env(self, fn))
 				else --inline: before_insert(fn) -- returns a table-level flag
 					local fn = assertf(isfunc(arg1) and arg1,
 						'function expected for trigger %s', event)
 					return function(sc, tbl)
-						add(attr(attr(tbl, 'triggers'), event), fn)
+						add(attr(attr(tbl, 'triggers'), event),
+							restore_env(sc, fn))
 					end
 				end
 			end
@@ -527,7 +535,7 @@ function schema.env.as(gen_version, fn)
 	if isfunc(gen_version) then gen_version, fn = nil, gen_version end
 	assertf(isfunc(fn), 'function expected for as()')
 	return function(self, tbl, fld)
-		fld.generate = fn
+		fld.generate = restore_env(self, fn)
 		fld.gen_version = gen_version
 	end
 end
@@ -767,6 +775,9 @@ local function diff_tables(self, t1, t0, sc0)
 		return true
 	end
 	local d = {}
+	local table_attrs = sc0.diff_table_attrs
+	local td = table_attrs and diff_keys(self, t1, t0, table_attrs)
+	d.changed  = td and td.changed
 	d.fields   = diff_maps(self, t1.fields  , t0.fields  , diff_fields   , map_fields, sc0, true)
 	local pk   = diff_maps(self, {pk=t1.pk} , {pk=t0.pk} , diff_ixs      , nil, sc0, true)
 	d.ixs      = diff_maps(self, t1.ixs     , t0.ixs     , diff_ixs      , nil, sc0, true)
@@ -886,22 +897,21 @@ end
 --diff pretty-printing -------------------------------------------------------
 
 local function dots(s, n) return #s > n and s:sub(1, n-2)..'..' or s end
-local kbytes = function(x) return x and kbytes(x) or '' end
+local kbytes = function(x) return x and format_kbytes(x) or '' end
 local function P(...) print(_(...)) end
 function diff:pp(opt)
 	local BODY = self.engine..'_body'
 	print()
 	local function P_fld(fld, prefix)
-		P(' %1s %3s %-2s%-16s %-8s %4s%1s %6s %6s %-18s %s',
+		P(' %1s %3s %-2s%-16s %-8s %-5s %7s %-2s %6s %-18s %s',
 			fld.auto_increment and 'A' or '',
 			prefix or '',
 			fld.not_null and '*' or '',
 			dots(fld.col, 16), fld.type or '',
-			fld.type == 'number' and not fld.digits and (fld.size and '['..fld.size..']' or '')
-			or fld.type == 'bool' and ''
-			or (fld.digits or '')..(fld.decimals and ','..fld.decimals or ''),
-			fld.type == 'number' and not fld.unsigned and '-' or '',
-			kbytes(fld.size) or '', kbytes(fld.maxlen) or '',
+			fld[self.engine..'_type'] or '',
+			fld.scale and 'x'..fld.scale or '',
+			(fld.fixed and 'F' or '')..(fld.nozero and 'Z' or ''),
+			kbytes(fld.maxlen) or '',
 			fld[self.engine..'_collation'] or '',
 			repl(repl(fld[self.engine..'_default'], nil, fld.default), nil, '')
 		)
@@ -929,8 +939,8 @@ function diff:pp(opt)
 	end
 	if self.tables and self.tables.add then
 		for tbl_name, tbl in sortedpairs(self.tables.add) do
-			P(' %-24s %-8s %2s,%-1s%1s %6s %6s %-18s %s', '+ TABLE '..tbl_name,
-				'type', 'D', 'd', '-', 'size', 'maxlen', 'collation', 'default')
+			P(' %-24s %-8s %-5s %7s %-2s %6s %-18s %s', '+ TABLE '..tbl_name,
+				'type', self.engine, 'scale', 'FZ', 'maxlen', 'collation', 'default')
 			print(('-'):rep(80))
 			local pk = tbl.pk and index(tbl.pk)
 			for i,fld in ipairs(tbl.fields) do
@@ -979,6 +989,11 @@ function diff:pp(opt)
 			P(' ~ TABLE %s%s', old_tbl_name,
 				d.new.name ~= old_tbl_name and ' -> '..d.new.name or '')
 			print(('-'):rep(80))
+			if d.changed then
+				for k in sortedpairs(d.changed) do
+					P('       %-18s %s -> %s', k, d.old[k], d.new[k])
+				end
+			end
 			if d.fields and d.fields.add then
 				for col, fld in sortedpairs(d.fields.add) do
 					P_fld(fld, '+')

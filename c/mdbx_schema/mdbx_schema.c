@@ -119,6 +119,7 @@ int schema_get_key_rec(schema_table* tbl, int col_i,
 int schema_val_is_null(schema_table* tbl, int col_i,
 	const void* rec, int rec_size
 );
+int schema_key_has_null(schema_table* tbl, void* rec);
 int schema_get_val(schema_table* tbl, int col_i,
 	void* rec, int rec_size,
 	u8** pout
@@ -440,6 +441,19 @@ int schema_val_is_null(schema_table* tbl, int col_i,
 ) {
 	assert(get_val_col(tbl, col_i));
 	return val_is_null(col_i, rec, rec_size);
+}
+
+// true if any key col is null (key cols have no offset table, so each one
+// is found by stepping over the ones before it).
+int schema_key_has_null(schema_table* tbl, void* rec) {
+	u8* p = rec;
+	for (int col_i = 0; col_i < tbl->n_key_cols; col_i++) {
+		schema_col* col = &tbl->key_cols[col_i];
+		if (key_is_null(col, p))
+			return 1;
+		p += get_key_mem_size(tbl, col, p);
+	}
+	return 0;
 }
 
 int schema_get_key(schema_table* tbl, int col_i,

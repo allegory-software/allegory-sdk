@@ -23,9 +23,9 @@ LANG/COUNTRY/CURRENCY API
 DATE & TIME FORMATTING
 
 	date('*d[t][s]', [t], [country]) -> s      format date/time for (current) country
-	duration(s, ['approx[+s]'|'long']) -> s    format a duration in seconds
-	timeago([utc, ]t[, from_t]) -> s           format relative time
-	timeofday(['s']) -> s                      format time of day
+	format_duration(s, ['approx[+s]'|'long']) -> s  format a duration in seconds
+	format_timeago([utc, ]t[, from_t]) -> s    format relative time
+	format_timeofday(['s']) -> s               format time of day
 	week_start([country]) -> n                 week start in country; 0=Sunday
 
 LANG/COUNTRY/CURRENCY DB SCHEMA
@@ -615,8 +615,8 @@ function lang_schema()
 		rtl                 , bool0,
 		en_name             , name, not_null, uk(en_name),
 		name                , name, not_null, uk(name),
-		decimal_separator   , {str, maxlen = 4, size = 16, utf8_bin, not_null, default ','},
-		thousands_separator , {str, maxlen = 4, size = 16, utf8_bin, not_null, default '.'},
+		decimal_separator   , str, maxlen(8), not_null, default',',
+		thousands_separator , str, maxlen(8), not_null, default'.',
 		supported           , bool0,
 	}
 
@@ -624,7 +624,7 @@ function lang_schema()
 
 	tables.currency = {
 		currency    , currency, not_null, pk,
-		decimals    , int16, not_null,
+		decimals    , u8, not_null,
 		en_name     , name, not_null, uk(en_name),
 		symbol      , name,
 	}
@@ -636,8 +636,8 @@ function lang_schema()
 		lang        , lang, not_null, fk,
 		currency    , currency, fk,
 		imperial_system, bool0,
-		week_start_offset, int8, not_null, --Sun:0, Mon:1, Sat:-1, Fri:-2
-		date_format , {str, size = 10, maxlen = 10, ascii_bin, not_null},
+		week_start_offset, i8, not_null, --Sun:0, Mon:1, Sat:-1, Fri:-2
+		date_format , str, maxlen(10), not_null,
 		en_name     , name, not_null,
 	}
 
@@ -729,7 +729,7 @@ local
 	os_date, floor, format, now, type =
 	os.date, floor, format, now, type
 
-function timeofday(t, precision)
+function format_timeofday(t, precision)
 	local h = floor(t / 3600) % 24
 	local m = floor(t / 60) % 60
 	local s = t % 60
@@ -770,7 +770,7 @@ end
 
 do
 local t = {}
-function duration(s, fmt) -- approx[+s] | long | nil
+function format_duration(s, fmt) -- approx[+s] | long | nil
 	if fmt == 'approx' then
 		if s > 2 * 365 * 24 * 3600 then
 			return format(S('n_years', '%d years'), floor(s / (365 * 24 * 3600)))
@@ -816,13 +816,13 @@ end
 
 --format relative time, eg. `3 hours ago` or `in 2 weeks`.
 local lua_time = time
-function timeago(utc, time, from_time)
+function format_timeago(utc, time, from_time)
 	if type(utc) ~= 'boolean' then --shift arg#1
 		utc, time, from_time = false, utc, time
 	end
 	local s = (from_time or lua_time(utc)) - time
 	return format(s > 0 and S('time_ago', '%s ago') or S('time_in', 'in %s'),
-		duration(abs(s), 'approx'))
+		format_duration(abs(s), 'approx'))
 end
 
 function week_start(country_code) --Sun=0, Mon=1, Sat=-1, Fri=-2

@@ -97,7 +97,7 @@ function smtp_connect(t)
 	function self:sendmail(req)
 		log('note', 'smtp', 'sendmail', '%s from=%s to=%s subj="%s" msg#=%s',
 			self.f, req.from, req.to, req.headers and req.headers.subject,
-			kbytes(#req.message))
+			format_kbytes(#req.message))
 		self.f:settimeout(self.sendmail_timeout)
 		send_line('MAIL FROM:<%s>', req.from)
 		check_reply'2..'

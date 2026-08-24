@@ -114,7 +114,7 @@ local function xapp(...)
 	app.schema.env.null = null
 	app.schema.env.Sf = Sf
 
-	app.schema:import'schema_std'
+	app.schema:import'schema_mdbx'
 	app.schema:import'webb_auth'
 
 	config{db_schema = app.schema}
