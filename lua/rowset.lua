@@ -29,14 +29,15 @@
 		type             : 'number'|...  client-side type
 		label            : 'Foo Bar'     input-box label / grid column label
 		info             : '...'         input-box info / grid column info
-		default          : val           default value (if it's a constant)
+		client_default   : val           value that new rows start with
+		has_server_default: t            the server fills this in for new rows
 		internal         : t             cannot be made visible
 		hidden           : t             not visible by default
 		readonly         : f             cannot be changed
 		null_text        : ''            text for null value
 		align            : 'left'|'right'|'center' cell alignment
 		enum_values      : ['foo',...]   enum values
-		enum_texts       : ['bla',...]   enum texts in current language
+		enum_labels      : {v->label}    enum labels in current language
 		not_null         : t             can't be null
 		min              : n             min allowed value
 		max              : n             max allowed value
@@ -103,8 +104,9 @@ end
 
 local client_field_attrs = {
 	internal=1, hidden=1, readonly=1, null_text=1,
-	name=1, type=1, label=1, info=1, default=1, client_default=1, align=1,
-	enum_values=1, enum_texts=1, not_null=1, min=1, max=1, decimals=1, maxlen=1,
+	name=1, type=1, label=1, info=1, client_default=1, align=1,
+	has_server_default=1,
+	enum_values=1, enum_labels=1, not_null=1, min=1, max=1, decimals=1, maxlen=1,
 	scale=1,
 	lookup_rowset_name=1, lookup_cols=1, display_col=1, name_col=1,
 	w=1, min_w=1, max_w=1,
@@ -178,6 +180,9 @@ function virtual_rowset(init, ...)
 				add(computed_fields, f)
 				f.readonly = true
 			end
+			if f.default_expr or f.default_fn or f.auto_increment then
+				f.has_server_default = true
+			end
 
 			local client_field = {}
 			for k,v in pairs(f) do
@@ -218,7 +223,7 @@ function virtual_rowset(init, ...)
 			for k,v in pairs(f) do
 				local v = rs.fields[i][k]
 				if isfunc(v) then --value getter/generator
-					f[k] = v()
+					f[k] = v(rs.name)
 				end
 			end
 		end

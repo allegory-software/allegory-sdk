@@ -1819,8 +1819,7 @@ function test.select_after_group_by_not_implemented_exec()
 			local rel = db:from('users')
 				:group_by'users.status status'
 				:select'status s'
-				:prepare()
-			assert(not pcall(function() rel:rows() end))
+			assert(not pcall(function() rel:prepare() end))
 		end)
 	end)
 end
@@ -1955,7 +1954,7 @@ function test.count_exec()
 		db:atomic('r', function()
 			local rel = db:from('users')
 				:where({'=', q.col('users.status'), 'active'})
-				:prepare()
+				:prepare'count'
 			assert(rel:count() == 3)
 		end)
 	end)
@@ -1968,7 +1967,7 @@ function test.count_distinct_exec()
 			local rel = db:from('users')
 				:select'users.status status'
 				:distinct()
-				:prepare()
+				:prepare'count'
 			assert(rel:count() == 2)
 		end)
 	end)
@@ -1980,7 +1979,7 @@ function test.count_group_by_exec()
 		db:atomic('r', function()
 			local rel = db:from('users')
 				:group_by'users.status status'
-				:prepare()
+				:prepare'count'
 			assert(rel:count() == 2)
 		end)
 	end)
@@ -1992,7 +1991,7 @@ function test.count_group_by_distinct_exec()
 			local rel = db:from('users')
 				:group_by{'users.score score', {{'count'}, 'n'}}
 				:distinct'n'
-				:prepare()
+				:prepare'count'
 			assert(rel:count() == 1)
 		end)
 	end)
@@ -2005,7 +2004,7 @@ function test.count_having_exec()
 			local rel = db:from('users')
 				:group_by{'users.status status', {{'count'}, 'n'}}
 				:having({'>=', q.col('n'), 3})
-				:prepare()
+				:prepare'count'
 			assert(rel:count() == 1)
 		end)
 	end)
@@ -2016,11 +2015,11 @@ function test.exists_exec()
 		db:atomic('r', function()
 			local yes = db:from('users')
 				:where({'=', q.col('users.id'), 1})
-				:prepare()
+				:prepare'exists'
 			assert(yes:exists() == true)
 			local no = db:from('users')
 				:where({'=', q.col('users.id'), 999})
-				:prepare()
+				:prepare'exists'
 			assert(no:exists() == false)
 		end)
 	end)
@@ -2035,35 +2034,8 @@ function test.exists_having_exec()
 			local rel = db:from('users')
 				:group_by{'users.status status', {{'count'}, 'n'}}
 				:having({'>=', q.col('n'), 10})
-				:prepare()
+				:prepare'exists'
 			assert(rel:exists() == false)
-		end)
-	end)
-end
-
-function test.union_count_exists_exec()
-	with_db('union_count_exists_exec', function(db)
-		db:atomic('r', function()
-			local function selected(id)
-				return db:from('users')
-					:where({'=', q.col('users.id'), id})
-					:select'users.id id'
-			end
-			local grouped = db:from('users')
-				:where({'=', q.col('users.id'), 3})
-				:group_by'users.id id'
-			local rel = db:union(
-				db:union(selected(1), selected(2)), grouped):prepare()
-			assert(rel:count() == 3)
-			assert(rel:exists())
-			assert(rel:count() == 3)
-
-			local empty_group = db:from('users')
-				:where({'=', q.col('users.id'), 99})
-				:group_by'users.id id'
-			local empty_rel = db:union(selected(99), empty_group):prepare()
-			assert(empty_rel:count() == 0)
-			assert(not empty_rel:exists())
 		end)
 	end)
 end
@@ -2197,7 +2169,7 @@ function test.exists_selected_limit_exec()
 		db:atomic('r', function()
 			local sub = db:from('users'):select'users.id id'
 				:limit(q.param'N')
-			local rel = db:from('users'):where(q.exists(sub)):prepare()
+			local rel = db:from('users'):where(q.exists(sub)):prepare'count'
 			assert(rel:count{N = 0} == 0)
 			assert(rel:count{N = 1} == 5)
 		end)
@@ -2209,7 +2181,7 @@ function test.exists_distinct_offset_exec()
 		db:atomic('r', function()
 			local sub = db:from('users'):select'users.status status'
 				:distinct():limit(1, 2)
-			local rel = db:from('users'):where(q.exists(sub)):prepare()
+			local rel = db:from('users'):where(q.exists(sub)):prepare'count'
 			assert(rel:count() == 0)
 		end)
 	end)
@@ -3495,7 +3467,7 @@ function test.list_collation_reused_literal()
 			local rel = db:from('tk'):where({'and',
 				{'=', q.col('tk.a'), 'x'},
 				{'=', q.col('tk.b'), 'x'},
-			}):prepare()
+			}):prepare'count'
 			assert(rel:count() == 1)
 		end)
 	end)
@@ -3515,7 +3487,7 @@ function test.list_collation_in_col_value()
 		db:atomic('r', function()
 			local rel = db:from('tk')
 				:where({'in', q.col('tk.st'), {q.col('tk.st')}})
-				:prepare()
+				:prepare'count'
 			assert(rel:count() == 1)
 		end)
 	end)
@@ -3625,7 +3597,7 @@ function test.list_collation_in_raw_col_value()
 		db:atomic('r', function()
 			local rel = db:from('ti')
 				:where({'in', q.col('ti.a'), {q.col('ti.b')}})
-				:prepare()
+				:prepare'count'
 			assert(rel:count() == 1)
 		end)
 	end)

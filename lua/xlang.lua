@@ -82,22 +82,28 @@ local load_s_ids = memoize(function()
 		add(rs.rows, {tbl_type, tbl_name, col, attr, en_text, text})
 	end
 	local field_names = {}
-	for i,attr in ipairs{'text', 'info'} do
-		for tbl_name, tbl in sortedpairs(config'db_schema'.tables) do
-			for i, fld in ipairs(tbl.fields) do
-				local en_text = call(fld['en_'..attr])
-				S_ids_add_id('lua', 'field', _('%s:%s', attr, fld.col), en_text)
-				S_ids_add_id('lua', 'table', _('%s:%s.%s.table', attr, fld.col, tbl_name), en_text)
-			end
+	--kind is both the file that the id is grouped under and the id's suffix.
+	local function add_ids(attr, id_name, en_text, kind, container)
+		S_ids_add_id('lua', 'field', _('%s:%s', attr, id_name), en_text)
+		S_ids_add_id('lua', kind,
+			_('%s:%s.%s.%s', attr, id_name, container, kind), en_text)
+	end
+	local function add_field_ids(fld, id_name, kind, container)
+		for i, attr in ipairs{'label', 'info'} do
+			add_ids(attr, id_name, call(fld['en_'..attr]), kind, container)
 		end
-		for rs_name, rs in sortedpairs(rowset) do
-			if rs.client_fields then
-				for i, fld in ipairs(rs.client_fields) do
-					local en_text = call(fld['en_'..attr])
-					S_ids_add_id('lua', 'field', _('%s:%s', attr, fld.name), en_text)
-					S_ids_add_id('lua', 'rowset', _('%s:%s.%s.rowset', attr, fld.name, rs_name), en_text)
-				end
-			end
+		for v, en_text in sortedpairs(fld.en_enum_labels or empty) do
+			add_ids('enum_label', id_name..'.'..v, en_text, kind, container)
+		end
+	end
+	for tbl_name, tbl in sortedpairs(config'db_schema'.tables) do
+		for i, fld in ipairs(tbl.fields) do
+			add_field_ids(fld, fld.col, 'table', tbl_name)
+		end
+	end
+	for rs_name, rs in sortedpairs(rowset) do
+		for i, fld in ipairs(rs.fields or empty) do
+			add_field_ids(fld, fld.name, 'rowset', rs_name)
 		end
 	end
 
@@ -110,8 +116,8 @@ rowset.S = virtual_rowset(function(self, ...)
 	self.fields = {
 		{name = 'ext'       , readonly = true , },
 		{name = 'id'        , readonly = true , },
-		{name = 'en_text'   , readonly = true , text = text_in_english},
-		{name = 'text'      , readonly = false, text = text_in_current_language},
+		{name = 'en_text'   , readonly = true , label = text_in_english},
+		{name = 'text'      , readonly = false, label = text_in_current_language},
 		{name = 'files'     , readonly = true , },
 	}
 	self.pk = 'ext id'

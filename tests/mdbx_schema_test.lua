@@ -7128,10 +7128,10 @@ function test.expr_fn_helpers()
 			}
 		end)
 		local t = sc.tables.t
-		assert(t.fields.d.default == 0 and t.fields.d.default_fn)
-		assert(t.fields.e.default == 0 and t.fields.e.default_expr == '8')
+		assert(t.fields.d.client_default == 0 and t.fields.d.default_fn)
+		assert(t.fields.e.client_default == 0 and t.fields.e.default_expr == '8')
 		assert(t.fields.g.gen_expr == 'row.d + row.e')
-		assert(t.fields.client.default == false
+		assert(t.fields.client.client_default == false
 			and not t.fields.client.default_expr
 			and not t.fields.client.default_fn)
 		assert(t.fields.n.check_fn and not t.fields.n.check_expr)

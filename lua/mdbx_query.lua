@@ -66,7 +66,8 @@ TERMINALS (materialization)
 PROFILING
 	:explain() -> expl            explain plan
 CONTROL
-	:prepare([terminal_kind])             compile now
+	:prepare(['rows'|'count'|'exists'])   compile and build that terminal
+	rel.out_specs -> {NAME -> {[table=], [col=], [op=]}}  where out cols read from
 
 ROW FORMATS (the `shape` arg of terminals):
 
@@ -2127,15 +2128,13 @@ end
 	for _, cond in ipairs(rel.having_conditions) do
 		classify_exists_targets(cond.expr)
 	end
-
-	--TODO: once terminals exist, compile() needs a terminal_kind param
-	--and an assert here that rows()/first()/one()/must_one() require
-	--select() or group_by() (rel.out_cols) -- old file's needs_output
-	--check.
 end
 
-function Rel:prepare()
+--binds the rel to one terminal and builds its node, so rel.out_specs is there
+--before any row is read. only a 'rows' node reads cols, so only it has specs.
+function Rel:prepare(terminal_kind)
 	compile(self)
+	build_terminal_node(self, terminal_kind or 'rows')
 	return self
 end
 
@@ -3196,45 +3195,24 @@ function compile_terminal(db, rel, outer_node)
 	return apply_limit(node, rel)
 end
 
---nesting a second call inside an unfinished iteration of the first
---corrupts it -- prepare() a second rel instead.
-local function get_or_build_node(rel, field, builder)
-	if not rel.compiled then compile(rel) end
-	local node = rel[field]
-	if not node then
-		node = builder(rel.db, rel)
-		rel[field] = node
-	end
-	return node
-end
-
-local function make_output_scan(rel)
-	return get_or_build_node(rel, '_rows_node', compile_terminal)
-end
-
 function Rel:rows(shape, params)
-	local scan = make_output_scan(self)
-	return scan:rows(shape, params)
+	return build_terminal_node(self, 'rows'):rows(shape, params)
 end
 
 function Rel:rows_array(shape, params)
-	local scan = make_output_scan(self)
-	return scan:rows_array(shape, params)
+	return build_terminal_node(self, 'rows'):rows_array(shape, params)
 end
 
 function Rel:first(shape, params)
-	local scan = make_output_scan(self)
-	return scan:first(shape, params)
+	return build_terminal_node(self, 'rows'):first(shape, params)
 end
 
 function Rel:one(shape, params)
-	local scan = make_output_scan(self)
-	return scan:one(shape, params)
+	return build_terminal_node(self, 'rows'):one(shape, params)
 end
 
 function Rel:must_one(shape, params)
-	local scan = make_output_scan(self)
-	return scan:must_one(shape, params)
+	return build_terminal_node(self, 'rows'):must_one(shape, params)
 end
 
 --[[
@@ -3272,7 +3250,7 @@ local function compile_group_or_distinct(db, rel)
 end
 
 function Rel:count(params)
-	local node = get_or_build_node(self, '_count_node', compile_group_or_distinct)
+	local node = build_terminal_node(self, 'count')
 	return node:count(params)
 end
 
@@ -3303,8 +3281,29 @@ function compile_subquery_exists(db, rel, outer_node)
 end
 
 function Rel:exists(params)
-	local node = get_or_build_node(self, '_exists_node', compile_exists_node)
+	local node = build_terminal_node(self, 'exists')
 	local found = node:exists(params)
 	node.close()
 	return found
+end
+
+--a rel binds to one terminal kind, on prepare(kind) or on its first terminal
+--call. nesting a second call inside an unfinished iteration of the first
+--corrupts it -- prepare() a second rel instead.
+--[[local]] function build_terminal_node(rel, kind)
+	if rel.terminal_kind then
+		assertf(rel.terminal_kind == kind,
+			'rel is prepared for %s, not %s', rel.terminal_kind, kind)
+		return rel._node
+	end
+	if not rel.compiled then compile(rel) end
+	local builder =
+		    kind == 'rows'   and compile_terminal
+		or kind == 'count'  and compile_group_or_distinct
+		or kind == 'exists' and compile_exists_node
+	assertf(builder, 'unknown terminal kind: %s', kind)
+	rel._node = builder(rel.db, rel)
+	rel.terminal_kind = kind
+	rel.out_specs = rel._node.out_specs
+	return rel._node
 end

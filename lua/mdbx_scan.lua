@@ -57,6 +57,7 @@ MERGE UNION
 	scan:merge_union (scan2) -> scan      ordered, deduped merge
 OUTPUT SCAN (after select() or aggregate())
 	scan.out_cols -> {'NAME',...}
+	scan.out_specs -> {NAME -> {[table=], [col=], [op=]}}
 	scan.get           ([row]) -> scan, vals... | scan, row
 	scan:col_decoder   (name, [comparison]) -> getter, collator
 MEMBER SCAN (after select() or aggregate())
@@ -465,7 +466,8 @@ function Db:scan(tbl, path, alias)
 	local scan = object(Scan)
 	local base_schema = schema.val_schema or schema
 	scan.db = db
-	scan.table = schema.name
+	scan.table = schema.name --the index's own name when scanning an index
+	scan.base_table = base_schema.name
 	scan.member_scans = {[alias or base_schema.name] = scan}
 
 	--path parsing, validation, analysis --------------------------------------
@@ -1255,6 +1257,22 @@ end
 
 --UNION ----------------------------------------------------------------------
 
+--a spec survives the union only where both sides read the same col.
+local function same_out_specs(scan1, scan2)
+	local specs1, specs2 = scan1.out_specs, scan2.out_specs
+	if not (specs1 and specs2) then return end
+	local specs = {}
+	for i, name in ipairs(scan1.out_cols) do
+		local s1, s2 = specs1[name], specs2[name]
+		if s1 and s2 and s1.table == s2.table and s1.col == s2.col
+			and s1.op == s2.op
+		then
+			specs[name] = s1
+		end
+	end
+	return specs
+end
+
 function Scan:union(scan2)
 	local scan1 = self
 	local scan = object(Scan)
@@ -1295,6 +1313,7 @@ function Scan:union(scan2)
 		end
 		local get1, get2 = scan1.get, scan2.get
 		scan.out_cols = names1
+		scan.out_specs = same_out_specs(scan1, scan2)
 		scan.rows = scan1.rows
 		scan.rows_array = scan1.rows_array
 		scan.first = scan1.first
@@ -1375,6 +1394,7 @@ function Scan:merge_union(scan2)
 
 	--publish the winning MDBX position for a further chained merge_union().
 	scan.table = scan1.table
+	scan.base_table = scan1.base_table
 	scan.reverse = reverse
 	scan.is_index = scan1.is_index
 
@@ -1818,7 +1838,19 @@ local function output_must_one(scan, shape, args)
 	return output_row(scan, rows[1], shape)
 end
 
-local function install_get(scan, names, read_value)
+--a wrapped scan has no table, so its cols read through to the child's.
+local function member_col_src(member_scan, col) -- -> {table=, col=}
+	if member_scan.base_table then
+		return {table = member_scan.base_table, col = col}
+	end
+	local child = member_scan.child
+	local spec = child and (child.out_specs or empty)[col]
+	if spec and spec.table then
+		return {table = spec.table, col = spec.col}
+	end
+end
+
+local function install_get(scan, names, read_value, out_specs)
 	local n = #names
 	local values = {}
 	local function get(out_row)
@@ -1831,6 +1863,7 @@ local function install_get(scan, names, read_value)
 		end
 	end
 	scan.out_cols = names
+	scan.out_specs = out_specs
 	scan.get = get
 	scan.rows = output_rows
 	scan.rows_array = output_rows_array
@@ -1845,25 +1878,27 @@ function Scan:select(outputs)
 	assert(not scan.get)
 
 	local members, cols, names = col_specs(self, outputs, 'select')
-	local decoders, colls, out_i = {}, {}, {}
+	local decoders, colls, out_specs = {}, {}, {}
 	for i, member in ipairs(members) do
 		decoders[i], colls[i] = self:col_decoder(member, cols[i])
-		out_i[names[i]] = i
+		local src = member_col_src(scan.member_scans[member], cols[i])
+		out_specs[names[i]] = {i = i, member = member,
+			col = src and src.col, table = src and src.table}
 	end
 
 	local col_decoder = scan.col_decoder
 	function scan:col_decoder(member, col, folded)
 		if isstr(col) then return col_decoder(scan, member, col, folded) end
 		local name, comparison = member, col
-		local i = assertf(out_i[name], 'col_decoder: unknown output col: %s',
-			tostring(name))
+		local spec = assertf(out_specs[name],
+			'col_decoder: unknown output col: %s', tostring(name))
 		if comparison then
-			return col_decoder(scan, members[i], cols[i], true)
+			return col_decoder(scan, spec.member, spec.col, true)
 		end
-		return decoders[i], colls[i]
+		return decoders[spec.i], colls[spec.i]
 	end
 
-	install_get(scan, names, function(i) return decoders[i]() end)
+	install_get(scan, names, function(i) return decoders[i]() end, out_specs)
 	return scan
 end
 
@@ -2317,7 +2352,22 @@ function Scan:aggregate(agg, cols, hash)
 		return function() return scan.row[name] end, coll
 	end
 
-	install_get(scan, names, function(i) return scan.row[names[i]] end)
+	local up_specs = scan.out_specs or empty --upstream: install_get replaces it
+	local out_specs = {}
+	for i, a in ipairs(agg) do
+		--a key output reads the group_by col that its part indexes.
+		local c = a.op == 'key' and cols and cols[a.part] or a
+		local src
+		if c and c.col then
+			src = c.member
+				and member_col_src(scan.member_scans[c.member], c.col)
+				or not c.member and up_specs[c.col] --names an upstream output
+		end
+		out_specs[a.name] = {op = a.op,
+			table = src and src.table, col = src and src.col}
+	end
+
+	install_get(scan, names, function(i) return scan.row[names[i]] end, out_specs)
 	return scan
 end
 
@@ -2437,6 +2487,7 @@ local function member_scan(child, alias, what)
 	local scan = object(Scan)
 	scan.db = child.db
 	scan.member_scans = {[alias] = scan}
+	scan.child = child
 	function scan.explain()
 		return {kind = 'rel', member = alias, child.explain()}
 	end

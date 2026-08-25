@@ -22,6 +22,7 @@ local format_date = date
 
 local string_format = format
 local string_cat    = cat
+local math_floor    = floor
 
 local _G = _G
 local function restore_env(self, fn)
@@ -72,7 +73,8 @@ do
 
 	--text ordered by the declared order and restricted to it by a check.
 	--values come as words or, when a value contains spaces, as a table.
-	function env.enum(vals)
+	--enum('open closed', {open = 'Open', closed = 'Closed'}) -> english labels
+	function env.enum(vals, labels)
 		vals = collect(words(vals))
 		local maxlen, checks = 0, {}
 		for i, v in ipairs(vals) do
@@ -81,8 +83,14 @@ do
 			if #v > maxlen then maxlen = #v end
 			checks[i] = _('v == %q', v)
 		end
+		if labels then
+			local vals_set = index(vals)
+			for v in pairs(labels) do
+				assertf(vals_set[v], 'unknown enum value in labels: %s', v)
+			end
+		end
 		return {
-			type = 'enum', enum_values = vals,
+			type = 'enum', enum_values = vals, en_enum_labels = labels,
 			mdbx_type = 'utf8', maxlen = maxlen, nozero = true,
 			mdbx_collation = 'list\0'..cat(vals, '\0'),
 			check_expr = cat(checks, ' or '),
@@ -115,9 +123,9 @@ do
 	--Typed client-side value with an optional server-side expression or fn.
 	function env.default(v, server_default)
 		if server_default ~= nil then
-			return expr_fn_flag('default', server_default, {default = v})
+			return expr_fn_flag('default', server_default, {client_default = v})
 		end
-		return function() return {default = v} end
+		return function() return {client_default = v} end
 	end
 
 	function env.check(expr, error_message)
@@ -172,10 +180,10 @@ return function()
 	types.bool0 = {bool , not_null, default(false, 'false')}
 	types.bool1 = {bool , not_null, default(true , 'true' )}
 
-	types.i8  = {type = 'number', align = 'right', decimals = 0, min = -(2^ 7-1), max = 2^ 7, mdbx_type = 'i8'}
-	types.i16 = {type = 'number', align = 'right', decimals = 0, min = -(2^15-1), max = 2^15, mdbx_type = 'i16'}
-	types.i32 = {type = 'number', align = 'right', decimals = 0, min = -(2^31-1), max = 2^31, mdbx_type = 'i32'}
-	types.i52 = {type = 'number', align = 'right', decimals = 0, min = -(2^52-1), max = 2^51, mdbx_type = 'f64'}
+	types.i8  = {type = 'number', align = 'right', decimals = 0, min = -2^ 7, max = 2^ 7-1, mdbx_type = 'i8'}
+	types.i16 = {type = 'number', align = 'right', decimals = 0, min = -2^15, max = 2^15-1, mdbx_type = 'i16'}
+	types.i32 = {type = 'number', align = 'right', decimals = 0, min = -2^31, max = 2^31-1, mdbx_type = 'i32'}
+	types.i52 = {type = 'number', align = 'right', decimals = 0, min = -(2^52-1), max = 2^52-1, mdbx_type = 'f64'}
 	types.u8  = {i8 , min = 0, max = 2^ 8-1, mdbx_type = 'u8' }
 	types.u16 = {i16, min = 0, max = 2^16-1, mdbx_type = 'u16'}
 	types.u32 = {i32, min = 0, max = 2^32-1, mdbx_type = 'u32'}
@@ -185,7 +193,7 @@ return function()
 
 	types.id   = {u32, w = 40}
 	types.idpk = {id, pk, autoinc}
-	types.pos  = {id, en_text = 'Position in List'}
+	types.pos  = {id, en_label = 'Position in List'}
 
 	--for money and qty, scale can be dynamic and taken from currency / unit
 	--of measure, though some apps can normalize on a single scale.
@@ -197,12 +205,12 @@ return function()
 	types.filesize = {u52, type = 'filesize', align = 'right'}
 
 	--unix timestamps. max is the last second of year 9999.
-	types.date     = {u52, type = 'time', align = 'center', w = 80, precision = 'd',
+	types.time     = {u52, type = 'datetime', align = 'center', w = 140, precision = 'm',
 		min = 0, max = 253402300799}
-	types.time     = {date, w = 140, precision = 'm'}
 	types.time_s   = {time, w = 160, precision = 's'}
 	types.time_ms  = {time, w = 200, precision = 'ms'}
 	types.timeago  = {time_s, timeago = true}
+	types.date     = {time, type = 'date', w = 80, precision = 'd'}
 	--seconds since midnight.
 	types.timeofday = {u52, type = 'timeofday', align = 'center',
 		min = 0, max = 24*3600-1}
@@ -210,12 +218,12 @@ return function()
 	types.duration  = {u52, type = 'duration', align = 'right'}
 
 	types.ctime = {time, not_null, readonly = true, default(nil, 'now()'),
-		en_text = 'Created At'}
+		en_label = 'Created At'}
 	types.mtime = {time, not_null, readonly = true,
 		default(nil, 'now()'), on_update'now()',
-		en_text = 'Last Modified At'}
+		en_label = 'Last Modified At'}
 	types.atime = {time, not_null, readonly = true, default(nil, 'now()'),
-		en_text = 'Last Accessed At'}
+		en_label = 'Last Accessed At'}
 
 	types.lang      = {str, maxlen = 2, fixed}
 	types.currency  = {str, maxlen = 3, fixed}
@@ -224,9 +232,16 @@ return function()
 	types.secret_key  = {text, type = 'secret_key' , maxlen = 8192}
 	types.public_key  = {text, type = 'public_key' , maxlen = 8192}
 	types.private_key = {text, type = 'private_key', maxlen = 8192}
-
 	types.url   = {text, type = 'url', maxlen = 4096}
 	types.email = {str, type = 'email', maxlen = 128, ai_ci}
+	types.phone = {str, type = 'phone', maxlen = 32}
+	types.password = {text, type = 'password', maxlen = 128}
+	types.color = {str, type = 'color', maxlen = 32} --css color
+	types.icon  = {str, type = 'icon' , maxlen = 32} --icon name
+	types.col   = {str, type = 'col'  , maxlen = 64} --col name
+	types.tags  = {text, type = 'tags'} --space-separated words
+	types.place = {str, type = 'place', maxlen = 200} --google maps place id
+	types.button = {type = 'button'}
 
 	--field-type-based formatting ---------------------------------------------
 
@@ -262,6 +277,15 @@ return function()
 	function type_attrs.time.to_text(t, f)
 		if f.timeago then
 			return format_timeago(t)
+		elseif f.precision == 'ms' then
+			--os.date() has no fractional seconds so append them.
+			local s = format_date('%Y-%m-%d %H:%M:%S', t)
+			local frac = t - math_floor(t)
+			if frac == 0 then
+				return s
+			else
+				return s..(string_format('%.6f', frac):sub(2):gsub('0+$', ''))
+			end
 		else
 			return format_date(
 				f.precision == 's' and '%Y-%m-%d %H:%M:%S'
