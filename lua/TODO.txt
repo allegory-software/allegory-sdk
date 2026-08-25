@@ -26,9 +26,7 @@ WEBB
 
 MDBX
 ------------------------------------------------------------------------------
-* finish DDL
-* unit tests
-* mdbx_copy incremental + restore (trivial page-block diff, no rolling window.)
+* schema.lua - fix some ambiguities for multi-engine paper schema support
 
 
 MISSING MODULES

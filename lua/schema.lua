@@ -98,7 +98,7 @@ schema.new() options:
 	diff_field_attrs           {attr->true}: attributes included in field diffs.
 	supports_fks               include foreign keys in schema diffs.
 	supports_checks            include checks in schema diffs.
-	supports_triggers          include triggers in schema diffs.
+	supports_sql_triggers      include SQL triggers in schema diffs.
 	supports_procs             include procedures in schema diffs.
 	index_field_attrs          {attr->true}: field changes that require indexes
 	                           containing the field to be dropped and recreated.
@@ -166,11 +166,13 @@ local function parse_cols(self, t, dt, loc1, fld_ct)
 		dt_i = dt[t.after_col].col_pos + 1
 	end
 	local i = 1
-	while i <= #t do --[out], field_name, type_name, flag_name|{attr->val}, ...
-		if i == 1 and not isstr(t[1]) then --aka for renaming the table.
-			t[1](self, fld_ct)
+	if fld_ct.is_table then
+		while isfunc(t[i]) do --leading table flags.
+			t[i](self, fld_ct)
 			i = i + 1
 		end
+	end
+	while i <= #t do --[out], field_name, type_name, flag_name|{attr->val}, ...
 		local col, mode
 		if not fld_ct.is_table then --this is a proc param, not a table field.
 			mode = t[i]
@@ -202,6 +204,7 @@ end
 local function resolve_fk(fk, tbl, ref_tbl)
 	assertf(ref_tbl.pk, 'ref table `%s` has no PK', ref_tbl.name)
 	fk.ref_cols = extend({}, ref_tbl.pk)
+	fk.cols.desc = imap(ref_tbl.pk.desc)
 	--add convenience ref fields for automatic lookup in widgets.
 	if #fk.cols == 1 then
 		local fld = tbl.fields[fk.cols[1]]
@@ -315,13 +318,6 @@ local function add_fk(self, tbl, cols, ref_tbl_name, ondelete, onupdate, fld)
 	end
 end
 
---functions created inside the schema DSL inherit the DSL env which is not
---what we want the function's env to be, so we restore it.
-local function restore_env(self, fn)
-	if getfenv(fn) == self.env then setfenv(fn, _G) end
-	return fn
-end
-
 do
 	local function add_global(t, k, v)
 		assertf(not t.flags [k], 'global overshadows flag `%s`', k)
@@ -373,30 +369,6 @@ do
 		function env.trigger      (...) self:add_trigger  (...) end
 		function env.proc         (...) self:add_proc     (...) end
 		function env.add_cols     (...) self:add_cols     (...) end
-
-		for _, event in ipairs{
-			'before_insert', 'after_insert',
-			'before_update', 'after_update',
-			'before_delete', 'after_delete',
-		} do
-			env[event] = function(arg1, arg2)
-				if isstr(arg1) then --standalone: before_insert('usr', fn)
-					local tbl = assertf(self.tables[arg1],
-						'unknown table for trigger: %s', arg1)
-					local fn = assertf(isfunc(arg2) and arg2,
-						'function expected for %s.%s', arg1, event)
-					add(attr(attr(tbl, 'triggers'), event),
-						restore_env(self, fn))
-				else --inline: before_insert(fn) -- returns a table-level flag
-					local fn = assertf(isfunc(arg1) and arg1,
-						'function expected for trigger %s', event)
-					return function(sc, tbl)
-						add(attr(attr(tbl, 'triggers'), event),
-							restore_env(sc, fn))
-					end
-				end
-			end
-		end
 
 		return self
 	end
@@ -531,15 +503,6 @@ function schema.env.aka(old_names)
 	end
 end
 
-function schema.env.as(gen_fn_version, fn)
-	if isfunc(gen_fn_version) then gen_fn_version, fn = nil, gen_fn_version end
-	assertf(isfunc(fn), 'function expected for as()')
-	return function(self, tbl, fld)
-		fld.gen_fn = restore_env(self, fn)
-		fld.gen_fn_version = gen_fn_version
-	end
-end
-
 local function trigger_pos(tgs, when, op)
 	local i = 1
 	for _,tg in pairs(tgs) do
@@ -552,10 +515,10 @@ end
 function schema:add_trigger(name, when, op, tbl_name, ...)
 	name = _('%s_%s_%s%s', tbl_name, name, when:sub(1,1), op:sub(1,1))
 	local tbl = assertf(self.tables[tbl_name], 'unknown table `%s`', tbl_name)
-	local triggers = attr(tbl, 'triggers')
-	assertf(not triggers[name], 'duplicate trigger `%s`', name)
-	triggers[name] = update({name = name, when = when, op = op,
-		table = tbl_name, pos = trigger_pos(triggers, when, op)}, ...)
+	local sql_triggers = attr(tbl, 'sql_triggers')
+	assertf(not sql_triggers[name], 'duplicate trigger `%s`', name)
+	sql_triggers[name] = update({name = name, when = when, op = op,
+		table = tbl_name, pos = trigger_pos(sql_triggers, when, op)}, ...)
 end
 
 function schema:add_proc(name, args, ...)
@@ -750,7 +713,7 @@ local function diff_checks(self, c1, c0)
 	return b1 ~= b0
 end
 
-local function diff_triggers(self, t1, t0)
+local function diff_sql_triggers(self, t1, t0)
 	local BODY = self.engine..'_body'
 	return diff_keys(self, t1, t0, {
 		pos=1,
@@ -783,7 +746,9 @@ local function diff_tables(self, t1, t0, sc0)
 	d.ixs      = diff_maps(self, t1.ixs     , t0.ixs     , diff_ixs      , nil, sc0, true)
 	d.fks      = diff_maps(self, t1.fks     , t0.fks     , diff_fks      , nil, sc0, sc0.supports_fks     )
 	d.checks   = diff_maps(self, t1.checks  , t0.checks  , diff_checks   , nil, sc0, sc0.supports_checks  )
-	d.triggers = diff_maps(self, t1.triggers, t0.triggers, diff_triggers , nil, sc0, sc0.supports_triggers)
+	d.sql_triggers = diff_maps(self,
+		t1.sql_triggers, t0.sql_triggers, diff_sql_triggers,
+		nil, sc0, sc0.supports_sql_triggers)
 	d.add_pk    = pk and pk.add    and pk.add.pk
 	d.remove_pk = pk and pk.remove and pk.remove.pk
 	if isempty(d) and t1.name == t0.name then return nil end
@@ -964,7 +929,7 @@ function diff:pp(opt)
 					P('    CK   %s', ck[BODY] or ck.body)
 				end
 			end
-			local tgs = tbl.triggers
+			local tgs = tbl.sql_triggers
 			if tgs then
 				local function cmp_tg(tg1, tg2)
 					local a = tgs[tg1]
@@ -1049,13 +1014,13 @@ function diff:pp(opt)
 					P('   +FK   %s', format_fk(fk))
 				end
 			end
-			if d.triggers and d.triggers.remove then
-				for tg_name, tg in sortedpairs(d.triggers.remove) do
+			if d.sql_triggers and d.sql_triggers.remove then
+				for tg_name, tg in sortedpairs(d.sql_triggers.remove) do
 					P_tg(tg, '-')
 				end
 			end
-			if d.triggers and d.triggers.add then
-				for tg_name, tg in sortedpairs(d.triggers.add) do
+			if d.sql_triggers and d.sql_triggers.add then
+				for tg_name, tg in sortedpairs(d.sql_triggers.add) do
 					P_tg(tg, '+')
 				end
 			end

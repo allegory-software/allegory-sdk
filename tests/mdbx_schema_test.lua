@@ -6420,6 +6420,37 @@ local function counter()
 	return function() n = n + 1; return n end
 end
 
+--Unlike an on_update_fn, an on_update_expr is stored and still runs after the
+--database is reopened without a paper schema.
+function test.on_update_expr_stored_schema()
+	with_db_reopen('on_update_expr_stored_schema', function(db)
+		local spec = {
+			name = 't',
+			fields = {
+				{col = 'id' , mdbx_type = 'u32', not_null = true},
+				{col = 'val', mdbx_type = 'utf8', maxlen = 16},
+				{col = 'ver', mdbx_type = 'u32', on_update_expr = '42'},
+			},
+			pk = {'id'},
+		}
+		db:atomic('w', function()
+			db:create_table('t', spec)
+			db:insert('t', '{}', {id = 1, val = 'a', ver = 0})
+		end)
+		end, function(db)
+		db:atomic('r', function()
+			local stored = db:load_table_schema't'
+			assert(stored.fields.ver.on_update_expr == '42')
+		end)
+		db:atomic('w', function()
+			db:update('t', '{}', {id = 1, val = 'b'})
+		end)
+		db:atomic('r', function()
+			assert(num(db:find('t', 'ver', 1)) == 42)
+		end)
+	end)
+end
+
 --set on every update but not on insert, on db:update and cur:update alike,
 --including an update that writes the values the row already has.
 function test.on_update_sets_col_on_updates_only()
@@ -6590,20 +6621,18 @@ function test.on_update_value_reaches_row_check()
 	end)
 end
 
---on_update_fn is rejected on a key col.
+--paper-only on_update_fn restrictions are checked on compilation.
 function test.on_update_fn_rejected_on_key_col()
 	with_db('on_update_fn_rejected_on_key_col', function(db)
-		db:begin'w'
-		local ok, err = pcall(function()
-			db:create_table('t', {
-				name = 't',
-				fields = {
-					{col = 'id', mdbx_type = 'u32', not_null = true,
-					 on_update_fn = function() return 1 end},
-				},
-				pk = {'id'},
-			})
-		end)
+		local sc = mdbx_schema()
+		sc.tables.t = {name = 't', fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true,
+			 on_update_fn = function() return 1 end},
+		}, pk = {'id'}}
+		db.schema = sc
+		db:sync_schema()
+		db:begin'r'
+		local ok, err = pcall(db.table_schema, db, 't')
 		assert(not ok)
 		assert(tostring(err):find(
 			'key col cannot have on_update_fn: t.id', 1, true), tostring(err))
@@ -6611,24 +6640,27 @@ function test.on_update_fn_rejected_on_key_col()
 	end)
 end
 
---on_update_fn is rejected on layout when it is not a function.
+--A paper-only on_update_fn is rejected when the paper schema is compiled.
 function test.on_update_fn_must_be_a_function()
 	with_db('on_update_fn_must_be_a_function', function(db)
-		db:begin'w'
-		local ok, err = pcall(function()
-			db:create_table('t', {
-				name = 't',
-				fields = {
-					{col = 'id' , mdbx_type = 'u32', not_null = true},
-					{col = 'ver', mdbx_type = 'u32', on_update_fn = 'now'},
-				},
-				pk = {'id'},
-			})
+		local sc = mdbx_schema()
+		sc.tables.t = {
+			name = 't',
+			fields = {
+				{col = 'id' , mdbx_type = 'u32', not_null = true},
+				{col = 'ver', mdbx_type = 'u32', on_update_fn = 'now'},
+			},
+			pk = {'id'},
+		}
+		db.schema = sc
+		db:sync_schema()
+		local ok, err
+		db:atomic('r', function()
+			ok, err = pcall(db.dbi_schema, db, 't')
 		end)
 		assert(not ok)
 		assert(tostring(err):find(
 			'on_update_fn must be a function: t.ver', 1, true), tostring(err))
-		db:commit()
 	end)
 end
 
@@ -6952,7 +6984,7 @@ function test.check_validates_existing_rows()
 	end)
 end
 
---a malformed expression is rejected when the table's schema is compiled.
+--a malformed stored expression is rejected while the schema is layouted.
 function test.check_invalid_expression()
 	with_db('check_invalid_expression', function(db)
 		local ok, err = pcall(check_table, db, 'v >')
@@ -7047,6 +7079,96 @@ function test.row_check_declared_with_flag()
 			't', '{}', {id = 1, lo = 2, hi = 1})
 		assert(not ok)
 		check_row_check_error(err, 'insert', 'invalid range')
+	end)
+end
+
+--Multiple leading table flags are consumed before the first field. `aka` is a
+--table rename there (the same helper after a field is a column rename).
+function test.multiple_leading_table_flags()
+	local sc = mdbx_schema()
+	sc:import(function()
+		import'schema_mdbx'
+		tables.t = {
+			aka'old_t',
+			virtual,
+			row_check(function(row) return math.abs(row.id) > 0 end),
+			before_insert(function() return math.floor(1.9) end),
+			id, idpk,
+		}
+	end)
+	local t = sc.tables.t
+	assert(t.aka.old_t)
+	assert(t.virtual)
+	assert(t.row_check_fn{id = -1})
+	assert(#t.triggers.before_insert == 1)
+	assert(t.triggers.before_insert[1]() == 1)
+	assert(not t.fields.id.aka)
+end
+
+--Every stored-expression feature also accepts a paper-only function. Functions
+--declared inside the schema DSL get their normal global environment restored.
+function test.expr_fn_helpers()
+	with_db('expr_fn_helpers', function(db)
+		local sc = mdbx_schema()
+		sc:import(function()
+			import'schema_mdbx'
+			tables.t = {
+				id , idpk,
+				d  , u32, default(0, function() return math.floor(7.9) end),
+				e  , u32, default(0, '8'),
+				g  , u32, as'row.d + row.e',
+				client, bool, default(false),
+				n  , i32, check(function(v) return math.abs(v) < 10 end,
+					'bad n'),
+				ver, u32, on_update(function() return math.floor(42.9) end),
+				row_check(function(row)
+					return row.d == 7 and row.e == 8
+						and (row.n == null or row.n >= 0)
+				end, 'bad row'),
+			}
+		end)
+		local t = sc.tables.t
+		assert(t.fields.d.default == 0 and t.fields.d.default_fn)
+		assert(t.fields.e.default == 0 and t.fields.e.default_expr == '8')
+		assert(t.fields.g.gen_expr == 'row.d + row.e')
+		assert(t.fields.client.default == false
+			and not t.fields.client.default_expr
+			and not t.fields.client.default_fn)
+		assert(t.fields.n.check_fn and not t.fields.n.check_expr)
+		assert(t.fields.ver.on_update_fn and not t.fields.ver.on_update_expr)
+		assert(t.row_check_fn and not t.row_check_expr)
+		db.schema = sc
+		db:sync_schema()
+		db:atomic('w', function()
+			db:insert('t', '{}', {id = 1, n = 3})
+		end)
+		db:atomic('r', function()
+			local row = db:must_find('t', '{}', 1)
+			assert(num(row.d) == 7 and num(row.e) == 8 and num(row.g) == 15)
+		end)
+		local ok, err = try_mutation(db, db.insert,
+			't', '{}', {id = 2, n = 20})
+		assert(not ok)
+		check_field_error(err, 'insert', 'n', 'bad n')
+		ok, err = try_mutation(db, db.insert,
+			't', '{}', {id = 2, n = -3})
+		assert(not ok)
+		check_row_check_error(err, 'insert', 'bad row')
+		db:atomic('w', function()
+			db:update('t', '{}', {id = 1, n = 4})
+		end)
+		db:atomic('r', function()
+			assert(num(db:find('t', 'ver', 1)) == 42)
+		end)
+		db:atomic('r', function()
+			local stored = db:load_table_schema't'
+			assert(not stored.fields.d.default_fn)
+			assert(stored.fields.e.default_expr == '8')
+			assert(stored.fields.g.gen_expr == 'row.d + row.e')
+			assert(not stored.fields.n.check_fn)
+			assert(not stored.fields.ver.on_update_fn)
+			assert(not stored.row_check_fn)
+		end)
 	end)
 end
 

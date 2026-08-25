@@ -19,10 +19,50 @@ local
 	format_timeago, format_timeofday, format_duration
 
 local format_date = date
-local time_now = now
 
 local string_format = format
 local string_cat    = cat
+
+local _G = _G
+local function restore_env(self, fn)
+	if getfenv(fn) == self.env then setfenv(fn, _G) end
+	return fn
+end
+
+local function expr_fn_flag(name, v, attrs)
+	local is_fn = isfunc(v)
+	assertf(is_fn or isstr(v), '%s expression or function expected', name)
+	return function(self)
+		local t = update({}, attrs)
+		t[name..(is_fn and '_fn' or '_expr')] = v
+		if is_fn then restore_env(self, v) end
+		return t
+	end
+end
+
+local function install_trigger_helpers(self)
+	for _, event in ipairs{
+		'before_insert', 'after_insert',
+		'before_update', 'after_update',
+		'before_delete', 'after_delete',
+	} do
+		self.env[event] = function(arg1, arg2)
+			if isstr(arg1) then --standalone: before_insert('usr', fn)
+				local tbl = assertf(self.tables[arg1],
+					'unknown table for trigger: %s', arg1)
+				local fn = assertf(isfunc(arg2) and arg2,
+					'function expected for %s.%s', arg1, event)
+				add(attr(attr(tbl, 'triggers'), event), restore_env(self, fn))
+			else --inline: before_insert(fn) -- returns a table-level flag
+				local fn = assertf(isfunc(arg1) and arg1,
+					'function expected for trigger %s', event)
+				return function(sc, tbl)
+					add(attr(attr(tbl, 'triggers'), event), restore_env(sc, fn))
+				end
+			end
+		end
+	end
+end
 
 local env = {}
 do
@@ -59,7 +99,7 @@ do
 		return {mdbx_collation = 'list\0'..cat(vals, '\0')}
 	end
 
-	function env.hash(size) --fixed size so it's indexable
+	function env.hash(size) --small + fixed size makes it indexable
 		return function()
 			return {type = 'binary', mdbx_type = 'binary',
 				fixed = true, maxlen = size}
@@ -72,26 +112,34 @@ do
 		end
 	end
 
-	--`default` is the literal that the client shows for a new row; `default_expr`
-	--is the same value as an expression, which is what the db stores and runs.
-	function env.default(v)
-		local expr = isstr(v) and string_format('%q', v) or tostring(v)
-		return function()
-			return {default = v, default_expr = expr}
+	--Typed client-side value with an optional server-side expression or fn.
+	function env.default(v, server_default)
+		if server_default ~= nil then
+			return expr_fn_flag('default', server_default, {default = v})
 		end
+		return function() return {default = v} end
 	end
 
 	function env.check(expr, error_message)
-		return function()
-			return {check_expr = expr, check_error = error_message}
-		end
+		return expr_fn_flag('check', expr, {check_error = error_message})
 	end
 
 	function env.row_check(expr, error_message)
-		return function(_, tbl)
-			tbl.row_check_expr = expr
-			tbl.row_check_error = error_message
+		local flag = expr_fn_flag('row_check', expr,
+			{row_check_error = error_message})
+		return function(self, tbl)
+			update(tbl, flag(self))
 		end
+	end
+
+	function env.on_update(expr)
+		return expr_fn_flag('on_update', expr)
+	end
+
+	function env.as(gen_fn_version, expr)
+		if expr == nil then gen_fn_version, expr = nil, gen_fn_version end
+		assertf(not isstr(gen_fn_version), 'as(expr) does not take a version')
+		return expr_fn_flag('gen', expr, {gen_fn_version = gen_fn_version})
 	end
 
 end
@@ -99,8 +147,9 @@ end
 return function()
 
 	import(env)
+	install_trigger_helpers(self)
 
-	--table-level marker: place as the first entry in a table's field list.
+	--table-level marker: place before the fields or as a field flag.
 	--mdbx_query reads a virtual table's fields from the paper schema
 	--directly and never opens it as a physical table.
 	function virtual(self, tbl) tbl.virtual = true end
@@ -120,8 +169,8 @@ return function()
 	types.name   = {str, ai_ci}
 
 	types.bool  = {type = 'bool', w = 20, align = 'center', mdbx_type = 'bool'}
-	types.bool0 = {bool , not_null, default(false)}
-	types.bool1 = {bool , not_null, default(true )}
+	types.bool0 = {bool , not_null, default(false, 'false')}
+	types.bool1 = {bool , not_null, default(true , 'true' )}
 
 	types.i8  = {type = 'number', align = 'right', decimals = 0, min = -(2^ 7-1), max = 2^ 7, mdbx_type = 'i8'}
 	types.i16 = {type = 'number', align = 'right', decimals = 0, min = -(2^15-1), max = 2^15, mdbx_type = 'i16'}
@@ -144,7 +193,7 @@ return function()
 	types.money    = {f64, scale = 10^4, decimals = 2, min = -(10^15-1), max = 10^15-1} --  99 999 999 999 . 9999
 	types.qty      = {f64, scale = 10^6, decimals = 6, min = -(10^15-1), max = 10^15-1} --     999 999 999 . 999999
 	types.percent  = {f64, type = 'percent', scale = 10^2, decimals = 2, min = -(10^8-1), max = 10^8-1} -- 999 999 . 99
-	types.count    = {u52, type = 'count', default(0)}
+	types.count    = {u52, type = 'count', default(0, '0')}
 	types.filesize = {u52, type = 'filesize', align = 'right'}
 
 	--unix timestamps. max is the last second of year 9999.
@@ -160,13 +209,13 @@ return function()
 	types.timeofday_s = {timeofday, precision = 's'}
 	types.duration  = {u52, type = 'duration', align = 'right'}
 
-	types.ctime = {time, not_null, readonly = true,
-		default_expr = 'now()', en_text = 'Created At'}
+	types.ctime = {time, not_null, readonly = true, default(nil, 'now()'),
+		en_text = 'Created At'}
 	types.mtime = {time, not_null, readonly = true,
-		default_expr = 'now()', on_update_fn = time_now,
+		default(nil, 'now()'), on_update'now()',
 		en_text = 'Last Modified At'}
-	types.atime = {time, not_null, readonly = true,
-		default_expr = 'now()', en_text = 'Last Accessed At'}
+	types.atime = {time, not_null, readonly = true, default(nil, 'now()'),
+		en_text = 'Last Accessed At'}
 
 	types.lang      = {str, maxlen = 2, fixed}
 	types.currency  = {str, maxlen = 3, fixed}

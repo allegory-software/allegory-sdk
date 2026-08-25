@@ -36,8 +36,12 @@ TABLES
 
 This API extends the API in mdbx.lua so start there.
 
+SCHEMA
+	mdbx_schema      () -> schema                     create an MDBX paper schema
+	mdbx_{default,check,row_check,gen,on_update}_env  env for *_expr
 DDL
 	db:[try_]dbi      (name|dbi) -> dbi             open existing table (once)
+	db:[try_]dbi_schema (name|dbi) -> dbi,schema    open table and require schema
 	db:table_schema   (name|dbi) -> table_schema    get table schema (if any)
 	db:create_table   (name, schema_spec)           create table; no ixs/fks
 	db:alter_table    (name|dbi, schema_spec)       change field types/attrs
@@ -47,12 +51,12 @@ DDL
 	db:add_index      (name|dbi, ix_spec)           add index
 	db:drop_index     (ix_name)                     drop index
 	db:add_fk         (fk_spec)                     add foreign key constraint
-	db:drop_fk        (table_name, fk_cols)         drop fk; fk_cols='col1,col2...'
-	db:sync_schema    ([schema], [opt])             auto-migrate schema to .schema
+	db:drop_fk        (table_name, fk_name)         drop fk; name='col1,col2...'
+	db:sync_schema    ([schema|db], [opt])          migrate schema to .schema
 	db:extract_schema () -> schema                  extract schema
 	db:schema_diff    () -> diff                    diff stored vs .schema
 CURSORS
-	db:cursor         (name|dbi) -> cur      create cursor
+	db:cursor         (name|dbi) -> cur              create cursor
 UPDATE
 	db:insert         (name|dbi, [cols], keysvals...) -> seq  insert
 	db:update         (name|dbi, [cols], keysvals...)         update (must exist)
@@ -81,8 +85,16 @@ ENCODING / DECODING
 	cur:decode_kv  (k,k_sz, v,v_sz, [val_cols]) -> keysvals...
 	db:col_decoder (schema, col, ix_key, pk, get_base_val) -> get()
 	db:key_encoder (schema, cols, key_schema, ix_key, pk, get_base_val) -> enc()
+LOW-LEVEL / INTEGRATION API
+	MDBX_MAX_KEY_SIZE
+	mdbx_collate_value()
+	mdbx_encode_key()
+	mdbx_encode_key_prefix()
+	mdbx_key_reencode()
+	db:check_row()
+	db:check_col()
 
-COLUMS LISTS & IN/OUT VALUES FORMATS
+COLUMNS LISTS & IN/OUT VALUES FORMATS
 
 	cols format   |  vals...              | keysvals...
 	--------------+-----------------------+------------
@@ -104,13 +116,14 @@ SCHEMA SPEC (create_table, alter_table)
 				col=name, mdbx_type='u32|i32|u8|i8|u16|i16|f32|f64|utf8|binary|bool',
 				[not_null=true], [maxlen=N], [nozero=true], [fixed=true],
 				[mdbx_collation='utf8_ai_ci'|'list\0item...'], [scale=N],
-				[auto_increment=true], [default_expr=expr], [on_update_fn=fn],
-				[gen_fn=fn], [gen_fn_version=N],
-				[check_expr=expr], [check_error=message],
+				[auto_increment=true], [default_expr=expr], [default_fn=fn],
+				[on_update_expr=expr], [on_update_fn=fn],
+				[gen_expr=expr], [gen_fn=fn], [gen_fn_version=N],
+				[check_expr=expr], [check_fn=fn], [check_error=message],
 			}, ...
 		},
 		pk = {'col1', ...},
-		[row_check_expr=expr], [row_check_error=message],
+		[row_check_expr=expr], [row_check_fn=fn], [row_check_error=message],
 	}
 
 	NOTE: ixs and fks are NOT part of schema_spec! add them after create_table
@@ -119,6 +132,18 @@ SCHEMA SPEC (create_table, alter_table)
 	ix_spec:  {'col1', 'col2', ..., [is_unique=true]}
 	fk_spec:  {table='t', cols={'col',...}, ref_table='r', ref_cols={'col',...},
 					[ondelete='cascade'|'set null'], [onupdate='cascade']}
+
+PAPER-SCHEMA HELPERS (schema_mdbx.lua)
+	default         (value [, expr|fn])             client and optional server default
+	check           (expr|fn, [error_message])     column constraint
+	row_check       (expr|fn, [error_message])     table constraint
+	on_update       (expr|fn)                      server-side update value
+	as              (expr|fn) or (version, fn)     generated column value
+	enum             (values)                       ordered and checked text type
+	sort_order       (values)                       declared-order text collation
+	hash             (size)                         fixed-size binary type
+	maxlen           (n)                            set maximum field length
+	virtual                                          leading table marker
 
 TRIGGERS
 
@@ -136,33 +161,43 @@ TRIGGERS
 
 CHECK CONSTRAINTS
 
-	- declared in paper schema with `check(expr, [error_message])` where
-	  `expr` is a Lua expression on `v`, the column's value, e.g. 'v > 0'.
-	- `row_check(expr, [error_message])` is a table-level declaration where
-	  `row` is the complete row, e.g. `row_check('row.lo <= row.hi')`.
-	- stored in the db, so they are enforced with or without a paper schema.
+	- declared in paper schema with `check(expr|fn, [error_message])`, where an
+	  expression sees the column value as `v` and `fn(v) -> truthy`.
+	- `row_check(expr|fn, [error_message])` is the table-level form, where an
+	  expression sees the complete row as `row` and `fn(row) -> truthy`.
+	- expressions are stored and enforced with or without a paper schema;
+	  functions are paper-only.
 	- column checks are not called for a null value; row checks see `null`.
 	- column checks run wherever the column is encoded, lookup keys included.
 	- row checks run on structured writes, after before-triggers and gen_fns.
 	- existing rows are validated when `expr` changes.
 
+DEFAULTS
+
+	- `default(value [, expr|fn])` sets the typed client-side default and,
+	  optionally, the server default. expr can use `f` to get field attributes
+	  and may call `now()`; `fn(f) -> val|nil`.
+	- expr is stored in DB; fn is paper-schema only. you can't have both.
+
 GENERATED COLUMNS
 
-	- declared in paper schema with `as([version], fn)`, which sets the col's
-	  `gen_fn=fn` where `fn(db, row) -> val|nil` (nil means set default).
+	- `as(expr|fn)` or `as(version, fn)`, where expr can use `row` and `null`,
+	  and `fn(db, row) -> val|nil` (nil means set default).
+	- expr is stored in DB; fn is paper-schema only. changing expr recomputes
+	  stored rows; changing fn requires bumping its version to recompute them.
 	- called on every insert, update, and table restructuring, so must be pure!
 	- not for pk columns, but indexable.
 	- slows down inserts (one row re-encoding per row).
 
 ON-UPDATE COLUMNS
 
-	- declared in paper schema with `on_update_fn=fn` where
-	  `fn(f) -> val|nil` (nil means set default).
+	- `on_update(expr|fn)`, where expr can use `f` to get field attributes and
+	  may call `now()`, and `fn(f) -> val|nil` (nil means set default).
+	- expr is stored in DB; fn is paper-schema only. you can't have both.
 	- set on every structured update, ahead of before-triggers, so that a
-	  trigger can override the value; inserts use `default_expr` instead.
+	  trigger can override the value; inserts use the default instead.
 	- must not touch the db: it runs while the write holds shared buffers.
 	- not for pk columns.
-	- not stored, so not applied on a db opened without a paper schema.
 
 STATE
 
@@ -466,6 +501,12 @@ local function resolve_null_val(schema, f)
 	end
 end
 
+local function field_check_error(f)
+	return f.check_error
+		or f.check_expr and 'check: '..f.check_expr
+		or 'check'
+end
+
 local function resolve_row_val(schema, f, val)
 	if val == nil then val = resolve_null_val(schema, f) end
 	return val == nil and null or val
@@ -511,7 +552,7 @@ local function encode_key(
 		else
 			if f.check_fn and not f.check_fn(val) then
 				self:check_col(event, schema.name, f.col, false,
-					f.check_error or 'check: '..f.check_expr)
+					field_check_error(f))
 			end
 			local len = f.encode(self, event, pp[0], val)
 			C.schema_key_add(schema._st, ki-1, rec, rec_buf_sz, len, pp)
@@ -570,7 +611,7 @@ local function encode_val(self, schema, event, rec, rec_buf_sz, cols, as, ...)
 		end
 		if val ~= nil and f.check_fn and not f.check_fn(val) then
 			self:check_col(event, schema.name, f.col, false,
-				f.check_error or 'check: '..f.check_expr)
+				field_check_error(f))
 		end
 		local len = val ~= nil and f.encode(self, event, pp[0], val) or -1
 		C.schema_val_add(schema._st, vi-1, rec, rec_buf_sz, len, pp)
@@ -588,14 +629,14 @@ local function claim_seq(db, schema, val)
 	end
 end
 
-local function apply_col_gen_fns(db, event, schema, new_t)
+local function apply_col_gen_fns(db, event, schema, new_row)
 	for _, f in ipairs(schema.val_fields) do
 		if f.gen_fn then
-			local val = resolve_row_val(schema, f, f.gen_fn(db, new_t))
+			local val = resolve_row_val(schema, f, f.gen_fn(new_row, db))
 			if val == null and f.not_null then
 				db:check_col(event, schema.name, f.col, false, 'not_null')
 			end
-			new_t[f.col] = val
+			new_row[f.col] = val
 		end
 	end
 end
@@ -610,7 +651,9 @@ local function apply_on_update_cols(schema, t)
 end
 
 local function fail_row_check(db, event, schema)
-	local err = schema.row_check_error or 'row_check: '..schema.row_check_expr
+	local err = schema.row_check_error
+		or schema.row_check_expr and 'row_check: '..schema.row_check_expr
+		or 'row_check'
 	if istab(event) then
 		db:check_schema(event.event, event.table, nil, false, err)
 	else
@@ -1004,6 +1047,41 @@ local field_type_attrs = {
 	scale=1, --scale 100 means stored value 1234 is interpreted as 12.34
 }
 
+--One declaration per stored expression / paper function pair.
+--Keep the expression environments short: their names are part of the stored
+--schema format and must remain available across builds.
+local expr_fn_defs = {}
+local function expr_fn_def(name, local_names, env)
+	setmetatable(env, {__index = function(_, k)
+		assertf(false, '%s_expr: unknown name `%s`', name, k)
+	end})
+	local def = {name = name, local_names = local_names, env = env}
+	expr_fn_defs[name] = def
+	if name ~= 'row_check' then add(expr_fn_defs, def) end
+end
+mdbx_default_env    = {now = now}
+mdbx_check_env      = {null = null}
+mdbx_gen_env        = {null = null}
+mdbx_on_update_env  = {now = now}
+mdbx_row_check_env  = {null = null}
+expr_fn_def('default'  , 'f'  , mdbx_default_env)
+expr_fn_def('check'    , 'v'  , mdbx_check_env)
+expr_fn_def('gen'      , '_, row', mdbx_gen_env)
+expr_fn_def('on_update', 'f'  , mdbx_on_update_env)
+expr_fn_def('row_check', 'row', mdbx_row_check_env)
+
+local function compile_expr(t, name, loc)
+	local expr_attr = name..'_expr'
+	local expr = t[expr_attr]
+	if not expr then return end
+	local def = expr_fn_defs[name]
+	local fn, err = loadstring(
+		'local '..def.local_names..' = ...; return '..expr,
+		fmt('=%s %s', expr_attr, loc))
+	assertf(fn, '%s %s: %s', expr_attr, loc, err)
+	return setfenv(fn, def.env)
+end
+
 local function valid_col_name(col)
 	return isstr(col) and #col > 0 and not col:find'[^a-z0-9_]'
 end
@@ -1031,11 +1109,21 @@ local function layout_table_schema(schema)
 	schema.layouted = true
 
 	local table_name = assert(schema.name)
+	assertf(not (schema.row_check_expr and schema.row_check_fn),
+		'row_check cannot have both expr and fn: %s', table_name)
+	compile_expr(schema, 'row_check', table_name) --validate before storing.
 
 	--index fields by name, typecheck, check for inconsistencies.
 	for i,f in ipairs(schema.fields) do
 		assertf(valid_col_name(f.col),
 			'invalid field name: %s.%s', table_name, f.col)
+		local loc = table_name..'.'..f.col
+		for _, def in ipairs(expr_fn_defs) do
+			local name = def.name
+			assertf(not (f[name..'_expr'] and f[name..'_fn']),
+				'%s cannot have both expr and fn: %s', name, loc)
+			compile_expr(f, name, loc) --validate before storing.
+		end
 		assertf(not schema.fields[f.col] or schema.fields[f.col] == f,
 			'duplicate field name: %s.%s', table_name, f.col)
 		schema.fields[f.col] = f
@@ -1048,8 +1136,6 @@ local function layout_table_schema(schema)
 			'fixed cannot have mdbx_collation: %s.%s', table_name, f.col)
 		assertf(not f.gen_fn_version or f.gen_fn,
 			'gen_fn_version needs a gen_fn: %s.%s', table_name, f.col)
-		assertf(not f.on_update_fn or isfunc(f.on_update_fn),
-			'on_update_fn must be a function: %s.%s', table_name, f.col)
 		if f.mdbx_collation then
 			assertf(f.mdbx_type == 'utf8' and f.maxlen,
 				'collation needs a varsize utf8 col: %s.%s', table_name, f.col)
@@ -1075,8 +1161,8 @@ local function layout_table_schema(schema)
 		if f.maxlen and not f.fixed then
 			assertf(f.nozero, 'varsize key col must be nozero: %s.%s', table_name, col)
 		end
-		assertf(not f.on_update_fn,
-			'key col cannot have on_update_fn: %s.%s', table_name, col)
+		assertf(not f.on_update_expr,
+			'key col cannot have on_update_expr: %s.%s', table_name, col)
 		add(key_fields, f)
 		f.key_index = #key_fields
 		if schema.pk.desc then
@@ -1122,18 +1208,6 @@ local function layout_table_schema(schema)
 
 	schema.key_fields = key_fields
 	schema.val_fields = val_fields
-
-	local has_gen_fn = false
-	for _, f in ipairs(val_fields) do
-		if f.gen_fn then has_gen_fn = true; break end
-	end
-	schema.has_gen_fn = has_gen_fn or nil
-
-	local has_on_update_fns = false
-	for _, f in ipairs(val_fields) do
-		if f.on_update_fn then has_on_update_fns = true; break end
-	end
-	schema.has_on_update_fns = has_on_update_fns or nil
 
 	--compute key and val column layout.
 	for _,fields in ipairs{key_fields, val_fields} do
@@ -1254,28 +1328,26 @@ end
 
 local S = function() end
 
-local check_env = setmetatable({null = null}, {__index = function(_, k)
-	assertf(false, 'check_expr: unknown name `%s`', k)
-end})
-
-local row_check_env = setmetatable({null = null}, {__index = function(_, k)
-	assertf(false, 'row_check_expr: unknown name `%s`', k)
-end})
-
---the calls a default_expr is allowed to make. keep this short:
---every name here is part of the stored schema format, since an expression
---using it has to still compile when the db is opened by another build.
-local default_env = setmetatable({
-	now = now,
-}, {__index = function(_, k)
-	assertf(false, 'default_expr: unknown name `%s`', k)
-end})
-
 local function compile_table_schema(schema)
 
 	assert(schema.layouted)
 
 	if schema.compiled then return end
+	local table_name = schema.name
+	assertf(not schema.row_check_fn or isfunc(schema.row_check_fn),
+		'row_check_fn must be a function: %s', table_name)
+	for _, f in ipairs(schema.fields) do
+		local loc = table_name..'.'..f.col
+		for _, def in ipairs(expr_fn_defs) do
+			local name = def.name
+			assertf(not f[name..'_fn'] or isfunc(f[name..'_fn']),
+				'%s_fn must be a function: %s', name, loc)
+		end
+		assertf(not (f.key_index and f.on_update_fn),
+			'key col cannot have on_update_fn: %s', loc)
+		assertf(not (f == schema.autoinc_field and f.default_fn),
+			'auto_increment cannot have default_fn: %s', loc)
+	end
 	schema.compiled = true
 
 	local key_fields = schema.key_fields
@@ -1302,13 +1374,8 @@ local function compile_table_schema(schema)
 	schema.key_cols[S] = cat(schema.key_cols, ',')
 	schema.val_cols[S] = cat(schema.val_cols, ',')
 
-	if schema.row_check_expr then
-		local fn, err = loadstring(
-			'local row = ... return '..schema.row_check_expr,
-			fmt('=row_check_expr %s', schema.name))
-		assertf(fn, 'row_check_expr %s: %s', schema.name, err)
-		schema.row_check_fn = setfenv(fn, row_check_env)
-	end
+	schema.row_check_fn =
+		compile_expr(schema, 'row_check', schema.name) or schema.row_check_fn
 
 	--f.collator is how the col's values compare and every column with a
 	--collation needs one; f.key_collator is set only on columns where the
@@ -1466,23 +1533,23 @@ local function compile_table_schema(schema)
 				end
 			end
 
-			if f.check_expr then
-				local fn, err = loadstring('local v = ... return '..f.check_expr,
-					fmt('=check_expr %s.%s', schema.name, f.col))
-				assertf(fn, 'check_expr %s.%s: %s', schema.name, f.col, err)
-				f.check_fn = setfenv(fn, check_env)
-			end
-
-			if f.default_expr then
-				local fn, err = loadstring('local f = ... return '..f.default_expr,
-					fmt('=default_expr %s.%s', schema.name, f.col))
-				assertf(fn, 'default_expr %s.%s: %s', schema.name, f.col, err)
-				f.default_fn = setfenv(fn, default_env)
+			local loc = schema.name..'.'..f.col
+			for _, def in ipairs(expr_fn_defs) do
+				local name = def.name
+				f[name..'_fn'] = compile_expr(f, name, loc) or f[name..'_fn']
 			end
 
 		end --for f in fields
 
 	end --for fields in key_fields, val_fields
+
+	local has_gen_fn, has_on_update_fns = false, false
+	for _, f in ipairs(val_fields) do
+		if f.gen_fn then has_gen_fn = true end
+		if f.on_update_fn then has_on_update_fns = true end
+	end
+	schema.has_gen_fn = has_gen_fn or nil
+	schema.has_on_update_fns = has_on_update_fns or nil
 
 	if schema.is_index then
 		compile_index_schema(schema)
@@ -1525,9 +1592,11 @@ function Db:save_table_schema(schema)
 				not_null = f.not_null,
 				default_expr = f.default_expr,
 				auto_increment = f.auto_increment,
+				gen_expr = f.gen_expr,
 				gen_fn_version = f.gen_fn_version,
 				check_expr = f.check_expr,
 				check_error = f.check_error,
+				on_update_expr = f.on_update_expr,
 				--computed attributes
 				elem_size = f.elem_size, --for validating custom types in the future.
 				descending = f.descending,
@@ -1682,8 +1751,9 @@ local function try_validate_table_schema(stored_schema, paper_schema)
 			cmp_keys(pf, sf, {
 				'key_index', 'val_index',
 				'col', 'col_pos', 'mdbx_type', 'maxlen', 'fixed', 'nozero', 'not_null',
-				'scale', 'elem_size', 'descending', 'mdbx_collation', 'gen_fn_version',
-				'check_expr', 'check_error', 'default_expr', 'fixed_offset', 'offset',
+				'scale', 'elem_size', 'descending', 'mdbx_collation', 'gen_expr',
+				'gen_fn_version', 'check_expr', 'check_error', 'default_expr',
+				'on_update_expr', 'fixed_offset', 'offset',
 			}, errs, '%s.%s.%s', table_name, 'fields', k)
 		end
 	end
@@ -1878,9 +1948,11 @@ local paper_field_attrs = update({
 	not_null=1,
 	default_expr=1,
 	auto_increment=1,
+	gen_expr=1,
 	gen_fn_version=1,
 	check_expr=1,
 	check_error=1,
+	on_update_expr=1,
 }, field_type_attrs)
 
 local function copy_base_schema(src, name)
@@ -1889,13 +1961,16 @@ local function copy_base_schema(src, name)
 		fields = {},
 		pk = imap(assert(src.pk)),
 		row_check_expr = src.row_check_expr,
+		row_check_fn = not src.row_check_expr and src.row_check_fn or nil,
 		row_check_error = src.row_check_error,
 	}
 	schema.pk.desc = imap(src.pk.desc)
 	for _, src_f in ipairs(assert(src.fields)) do
 		local f = {
-			gen_fn = src_f.gen_fn,
-			on_update_fn = src_f.on_update_fn,
+			gen_fn = not src_f.gen_expr and src_f.gen_fn or nil,
+			default_fn = not src_f.default_expr and src_f.default_fn or nil,
+			check_fn = not src_f.check_expr and src_f.check_fn or nil,
+			on_update_fn = not src_f.on_update_expr and src_f.on_update_fn or nil,
 		}
 		for k in pairs(paper_field_attrs) do
 			f[k] = src_f[k]
@@ -1983,6 +2058,7 @@ local alter_val_rewrite_attrs = {
 	'val_index',
 	'fixed_offset',
 	'offset',
+	'gen_expr',
 	'gen_fn_version',
 }
 
@@ -2142,7 +2218,7 @@ local function check_existing_rows(
 	end
 	if bad_f then
 		self:check_col(event, new_schema.name, bad_f.col, false,
-			bad_f.check_error or 'check: '..bad_f.check_expr)
+			field_check_error(bad_f))
 	end
 end
 
@@ -2852,7 +2928,7 @@ MS.diff_field_attrs = update({col_pos=1}, paper_field_attrs)
 MS.diff_table_attrs = {row_check_expr=1, row_check_error=1}
 
 --a change to any of these on an indexed col forces the index to be rebuilt.
-MS.index_field_attrs = update({not_null=1, gen_fn_version=1}, field_type_attrs)
+MS.index_field_attrs = update({not_null=1, gen_expr=1, gen_fn_version=1}, field_type_attrs)
 MS.fk_field_attrs = MS.index_field_attrs
 
 MS.supports_fks = true
