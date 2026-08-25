@@ -182,7 +182,7 @@ DEFAULTS
 GENERATED COLUMNS
 
 	- `as(expr|fn)` or `as(version, fn)`, where expr can use `row` and `null`,
-	  and `fn(db, row) -> val|nil` (nil means set default).
+	  and `fn(row, db) -> val|nil` (nil means set default).
 	- expr is stored in DB; fn is paper-schema only. changing expr recomputes
 	  stored rows; changing fn requires bumping its version to recompute them.
 	- called on every insert, update, and table restructuring, so must be pure!
@@ -1066,7 +1066,7 @@ mdbx_on_update_env  = {now = now}
 mdbx_row_check_env  = {null = null}
 expr_fn_def('default'  , 'f'  , mdbx_default_env)
 expr_fn_def('check'    , 'v'  , mdbx_check_env)
-expr_fn_def('gen'      , '_, row', mdbx_gen_env)
+expr_fn_def('gen'      , 'row', mdbx_gen_env)
 expr_fn_def('on_update', 'f'  , mdbx_on_update_env)
 expr_fn_def('row_check', 'row', mdbx_row_check_env)
 

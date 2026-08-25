@@ -1,6 +1,5 @@
 
-require'xrowset'
-require'xrowset_sql'
+require'rowset'
 
 local function send_slowly(s, dt)
 	setheader('content-length', #s)

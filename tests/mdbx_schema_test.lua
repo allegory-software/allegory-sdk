@@ -5408,7 +5408,7 @@ function test.mutation_rows_preserve_null()
 				{col = 'id', mdbx_type = 'u32', not_null = true},
 				{col = 'v', mdbx_type = 'u32', default_expr = '7'},
 				{col = 'n', mdbx_type = 'u32'},
-				{col = 'copy', mdbx_type = 'u32', gen_fn = function(db, new)
+				{col = 'copy', mdbx_type = 'u32', gen_fn = function(new, db)
 					assert(new.v == null)
 					return new.n
 				end},
@@ -5847,7 +5847,7 @@ function test.trigger_insert_row_carries_minted_pk()
 				{col = 'id' , mdbx_type = 'u32', not_null = true,
 				 auto_increment = true},
 				{col = 'idc', mdbx_type = 'u32',
-				 gen_fn = function(db, new) return new.id end},
+				 gen_fn = function(new, db) return new.id end},
 			},
 			pk = {'id'},
 			row_check_expr = 'row.id ~= null',
@@ -5885,7 +5885,7 @@ function test.trigger_insert_row_carries_key_default()
 				{col = 'id' , mdbx_type = 'u32', not_null = true,
 				 default_expr = '7'},
 				{col = 'idc', mdbx_type = 'u32',
-				 gen_fn = function(db, new) return new.id end},
+				 gen_fn = function(new, db) return new.id end},
 			},
 			pk = {'id'},
 			triggers = {
@@ -6005,7 +6005,7 @@ local function gen_table(db, gen_fn)
 	end)
 end
 
-local function upper(db, new)
+local function upper(new, db)
 	return new.val ~= null and new.val:upper() or nil
 end
 
@@ -6062,7 +6062,7 @@ function test.generated_col_with_index()
 				{col = 'id',    mdbx_type = 'u32',  not_null = true},
 				{col = 'email', mdbx_type = 'utf8', maxlen = 64, nozero = true, not_null = true},
 				{col = 'lower', mdbx_type = 'utf8', maxlen = 64, nozero = true, not_null = true,
-				 gen_fn = function(db, new) return new.email:lower() end},
+				 gen_fn = function(new, db) return new.email:lower() end},
 			},
 			pk = {'id'},
 			ixs = {['t/lower'] = {'lower', is_unique = true}},
@@ -6184,7 +6184,7 @@ end
 --the gen_fn without bumping leaves the stored values alone.
 function test.generated_col_version_recomputes()
 	with_db('generated_col_version_recomputes', function(db)
-		local function bang(db, new) return new.val and new.val:upper()..'!' end
+		local function bang(new, db) return new.val and new.val:upper()..'!' end
 		local function spec(gen_fn_version, fn)
 			return {
 				name = 't',
@@ -6232,7 +6232,7 @@ end
 --recompute, so lookups find the new values and not the old ones.
 function test.generated_col_version_rebuilds_index()
 	with_db('generated_col_version_rebuilds_index', function(db)
-		local function bang(db, new) return new.val:upper()..'!' end
+		local function bang(new, db) return new.val:upper()..'!' end
 		local function spec(gen_fn_version, fn)
 			return {
 				name = 't',
@@ -6515,7 +6515,7 @@ function test.on_update_fn_nil_takes_default()
 				{col = 'id' , mdbx_type = 'u32', not_null = true},
 				{col = 'ver', mdbx_type = 'u32', default_expr = '7',
 				 on_update_fn = function() return nil end},
-				{col = 'g'  , mdbx_type = 'u32', gen_fn = function(db, new)
+				{col = 'g'  , mdbx_type = 'u32', gen_fn = function(new, db)
 					seen = new.ver
 					return 1
 				end},
@@ -6939,7 +6939,7 @@ function test.check_runs_after_generated_col()
 				{col = 'id'    , mdbx_type = 'u32', not_null = true},
 				{col = 'price' , mdbx_type = 'i32'},
 				{col = 'double', mdbx_type = 'i32', check_expr = 'v > 0',
-				 gen_fn = function(db, new) return new.price * 2 end},
+				 gen_fn = function(new, db) return new.price * 2 end},
 			},
 			pk = {'id'},
 		}
@@ -7137,37 +7137,24 @@ function test.expr_fn_helpers()
 		assert(t.fields.n.check_fn and not t.fields.n.check_expr)
 		assert(t.fields.ver.on_update_fn and not t.fields.ver.on_update_expr)
 		assert(t.row_check_fn and not t.row_check_expr)
+		assert(t.fields.d.default_fn(t.fields.d) == 7)
+		assert(t.fields.n.check_fn(-3))
+		assert(t.fields.ver.on_update_fn(t.fields.ver) == 42)
+		assert(t.row_check_fn{d = 7, e = 8, n = null})
 		db.schema = sc
 		db:sync_schema()
-		db:atomic('w', function()
-			db:insert('t', '{}', {id = 1, n = 3})
-		end)
 		db:atomic('r', function()
-			local row = db:must_find('t', '{}', 1)
-			assert(num(row.d) == 7 and num(row.e) == 8 and num(row.g) == 15)
-		end)
-		local ok, err = try_mutation(db, db.insert,
-			't', '{}', {id = 2, n = 20})
-		assert(not ok)
-		check_field_error(err, 'insert', 'n', 'bad n')
-		ok, err = try_mutation(db, db.insert,
-			't', '{}', {id = 2, n = -3})
-		assert(not ok)
-		check_row_check_error(err, 'insert', 'bad row')
-		db:atomic('w', function()
-			db:update('t', '{}', {id = 1, n = 4})
-		end)
-		db:atomic('r', function()
-			assert(num(db:find('t', 'ver', 1)) == 42)
-		end)
-		db:atomic('r', function()
+			local _, live = db:dbi_schema't'
+			assert(live.fields.n.check_error == 'bad n')
+			assert(live.row_check_error == 'bad row')
 			local stored = db:load_table_schema't'
 			assert(not stored.fields.d.default_fn)
 			assert(stored.fields.e.default_expr == '8')
 			assert(stored.fields.g.gen_expr == 'row.d + row.e')
-			assert(not stored.fields.n.check_fn)
+			assert(not stored.fields.n.check_fn and stored.fields.n.check_error == 'bad n')
 			assert(not stored.fields.ver.on_update_fn)
-			assert(not stored.row_check_fn)
+			assert(not stored.row_check_fn and stored.row_check_error == 'bad row')
+			assert(not db:schema_diff().tables)
 		end)
 	end)
 end
@@ -7228,7 +7215,7 @@ function test.row_check_runs_after_triggers_and_generated_cols()
 			before_insert = {function(db, new)
 				if new.hi < new.lo then new.hi = new.lo end
 			end},
-		}, function(db, new)
+		}, function(new, db)
 			return new.hi - new.lo
 		end)
 		db:atomic('w', function()
@@ -7343,7 +7330,7 @@ end
 --generated column derived from it is recomputed from the rescaled number.
 function test.alter_table_rescale_feeds_generated_col()
 	with_db('alter_table_rescale_feeds_generated_col', function(db)
-		local function twice(db, new)
+		local function twice(new, db)
 			return new.m ~= null and new.m * 2 or nil
 		end
 		local function spec(scale)

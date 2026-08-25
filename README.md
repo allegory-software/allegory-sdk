@@ -156,7 +156,7 @@ and non-opinionated. The opinionated part comes next.
   * [webb_action](lua/webb_action.lua) - Action-based routing with multi-language URL support
   * [webb_auth](lua/webb_auth.lua)     - Session-based authentication
   * [webb_spa](lua/webb_spa.lua)       - Single-page app scaffolding
-  * [xapp](lua/xapp.lua)               - App server for canvas-ui-based apps
+  * [webb_app](lua/webb_app.lua)       - Webb-based application server
 * __The Webb Web Framework / Client-side__
   * [webb_spa.js](www/webb_spa.js)     - client-side counterpart of [webb_spa.lua](lua/webb_spa.lua)
   * [mustache.js](www/mustache.js)     - [Logic-less templates](https://mustache.github.io/) rendered on the client

@@ -5,7 +5,7 @@
 
 LOADS
 
-	webb, webb_action, webb_auth, xrowset
+	webb, webb_action, webb_auth, rowset
 
 USAGE
 
@@ -39,7 +39,7 @@ require'cmdline'
 require'webb'
 require'webb_action'
 require'webb_auth'
-require'xrowset'
+require'rowset'
 
 local run_server --fw. decl.
 
