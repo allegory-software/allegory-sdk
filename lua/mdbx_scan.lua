@@ -6,6 +6,7 @@
 TABLE SCAN
 	db:scan           (table, path|path_spec, [alias]) -> scan
 	- path_spec: 'COL =|is|>|>=|<|<=|starts|is_not_null|~=|in ?|:KEY [asc|desc], ...'
+	scan.arg_fields -> {ARG->field}              arg to field mapping
 JOIN
 	scan:[left_]join  (join_spec|inner_scan, [accept]) -> new_join_scan
 	scan:child_scan   (join_spec|inner_scan) -> inner_scan
@@ -60,6 +61,7 @@ OUTPUT SCAN (after select() or aggregate())
 	scan.out_specs -> {NAME -> {[table=], [col=], [op=]}}
 	scan.get           ([row]) -> scan, vals... | scan, row
 	scan:col_decoder   (name, [comparison]) -> getter, collator
+	scan:null_value    (v)   v replaces a null col value (default: nil)
 MEMBER SCAN (after select() or aggregate())
 	scan:materialized_scan (alias)        load rows and wrap scan as alias
 	scan:streamed_scan     (alias)        wrap scan as alias (hide members)
@@ -459,6 +461,18 @@ local function parse_scan_spec(spec)
 	return path
 end
 
+local function add_arg_field(arg_fields, arg, field)
+	assertf(arg_fields[arg] == nil, 'duplicate arg: %s', arg)
+	arg_fields[arg] = field
+end
+
+local function merge_arg_fields(arg_fields1, arg_fields2)
+	for arg, field in pairs(arg_fields2) do
+		add_arg_field(arg_fields1, arg, field)
+	end
+	return arg_fields1
+end
+
 function Db:scan(tbl, path, alias)
 	local db = self
 	local schema = assert(db:table_schema(tbl))
@@ -469,6 +483,7 @@ function Db:scan(tbl, path, alias)
 	scan.table = schema.name --the index's own name when scanning an index
 	scan.base_table = base_schema.name
 	scan.member_scans = {[alias or base_schema.name] = scan}
+	scan.arg_fields = {}
 
 	--path parsing, validation, analysis --------------------------------------
 
@@ -551,6 +566,23 @@ function Db:scan(tbl, path, alias)
 			end
 		end
 	end
+
+	--an index key field holds the collation key, not the value, so the type
+	--comes from the base table.
+	local function add_path_arg(param, f)
+		local arg = param and param.arg
+		if not arg then return end
+		add_arg_field(scan.arg_fields, arg, base_schema.fields[f.col])
+	end
+	for i = 1, eq_n do add_path_arg(eq_params[i], schema.path_fields[i]) end
+	for _, param in ipairs(in_params or empty) do
+		add_path_arg(param, range_field)
+	end
+	add_path_arg(prefix_param   , range_field)
+	add_path_arg(not_equal_param, range_field)
+	add_path_arg(in_list        , range_field)
+	add_path_arg(lo_param       , range_field)
+	add_path_arg(hi_param       , range_field)
 
 	local is_index = schema.is_index
 	local key_n = #schema.key_fields
@@ -1277,6 +1309,7 @@ function Scan:union(scan2)
 	local scan1 = self
 	local scan = object(Scan)
 	scan.db = scan1.db
+	scan.arg_fields = merge_arg_fields(scan1.arg_fields, scan2.arg_fields)
 	local current_scan = scan1
 	local output1 = scan1.get ~= nil
 	local output2 = scan2.get ~= nil
@@ -1394,6 +1427,7 @@ function Scan:merge_union(scan2)
 	local reverse = scan1.reverse
 	local scan = object(Scan)
 	scan.db = scan1.db
+	scan.arg_fields = merge_arg_fields(scan1.arg_fields, scan2.arg_fields)
 	scan.member_scans = scan1.member_scans
 	scan.can_next_group = scan1.can_next_group and scan2.can_next_group
 	local has1, has2, adv1, adv2, current_scan, found
@@ -1605,6 +1639,7 @@ local function join_scan(outer, inner, left, accept)
 	if isstr(inner) then inner = inner_scan(outer, inner) end
 	local join = object(Scan)
 	join.db = outer.db
+	join.arg_fields = merge_arg_fields(outer.arg_fields, inner.arg_fields)
 	--col_decoder() resolves a member against outer first, so a duplicate
 	--would read the outer one and never say so.
 	join.member_scans = {}
@@ -1921,6 +1956,10 @@ function Scan:select(outputs)
 	return scan
 end
 
+--limit and offset are row counts, not cols, so they have no table field.
+local row_count_field = {type = 'number', min = 0, decimals = 0,
+	not_null = true}
+
 --unlike filter(), which skips a rejected row and keeps looking, next()
 --must stop outright once limit rows are yielded -- looking further would run
 --the underlying scan to exhaustion for a match that will never come.
@@ -1929,6 +1968,8 @@ function Scan:limit(limit, offset)
 	local next_row, reset = scan.next, scan.reset
 	local limit_arg = type(limit) == 'table' and limit.arg
 	local offset_arg = type(offset) == 'table' and offset.arg
+	if limit_arg  then add_arg_field(scan.arg_fields, limit_arg , row_count_field) end
+	if offset_arg then add_arg_field(scan.arg_fields, offset_arg, row_count_field) end
 	local skipped, count
 	scan.reset = function(args)
 		if limit_arg then
@@ -2505,6 +2546,7 @@ local function member_scan(child, alias, what)
 	assertf(child.get, '%s: select()/aggregate() required first', what)
 	local scan = object(Scan)
 	scan.db = child.db
+	scan.arg_fields = child.arg_fields
 	scan.member_scans = {[alias] = scan}
 	scan.child = child
 	function scan.explain()
@@ -2593,6 +2635,8 @@ function Db:values_scan(values)
 	scan.db = self
 	scan.member_scans = {}
 	local arg = values.arg
+	--the values are raw Lua values, so arg has no field to take a type from.
+	scan.arg_fields = {}
 	local list, value_i
 
 	function scan.reset(args)

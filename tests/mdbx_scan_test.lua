@@ -1868,13 +1868,14 @@ function test.explain_composites()
 			:left_join'sessions@s.user_id = u.id'
 		assert(left.explain().kind == 'left_join')
 
-		local a = db:scan('users', 'id = ?', 'a')
-		local b = db:scan('users', 'id = ?', 'b')
+		--each branch names its own arg: one arg can only be declared once.
+		local a = db:scan('users', 'id = :a', 'a')
+		local b = db:scan('users', 'id = :b', 'b')
 		e = a:union(b).explain()
 		assert(e.kind == 'union' and e[1].key == 'users' and #e == 2)
 
-		local c = db:scan('users', 'id = ?')
-		local d = db:scan('users', 'id = ?')
+		local c = db:scan('users', 'id = :c')
+		local d = db:scan('users', 'id = :d')
 		assert(c:merge_union(d).explain().kind == 'merge_union')
 
 		local deep = db:scan('messages', 'id asc', 'm')
