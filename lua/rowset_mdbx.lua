@@ -11,7 +11,8 @@ API
 
 	rowset.lookup_TABLE               same, created on first access
 
-SCAN ROWSET
+SCAN ROWSET OPTIONS
+
 	scan     fn(db) -> scan    required; must end in select()
 	pk       'col1 ...'        required; output names, not table cols
 	db       db                optional; defaults to the app db
@@ -19,19 +20,19 @@ SCAN ROWSET
 	plus every rowset.lua property (cols, hide_cols, ro_cols, rw_cols,
 	field_attrs, name_col, ...).
 
-	Fields come from the scan's output cols: an output that names a table col
-	takes that col's type, label, enum values, bounds and defaults from the
-	paper schema. An output with no table col (an expression, an aggregate)
-	is read-only and untyped.
+	Fields come from the scan's output cols. An output col that comes from a
+	table col gets its type, label, enum values, bounds and defaults from the
+	paper schema. One that doesn't -- an expression, an aggregate -- is
+	read-only and untyped.
 
 WRITING
 
-	The pk says the rowset's rows match one table's rows one-to-one, so that
-	is the table written. Its cols are writable, every other col is read-only.
-	Editing a joined-in table is that table's own rowset's job.
+	One table is written: the one whose rows match the rowset's rows
+	one-to-one, per the pk. Its cols are writable, every other col is
+	read-only. To edit a joined-in table, use that table's own rowset.
 
 	Saving runs in one write transaction with a child transaction per changed
-	row, so a row that fails rolls back alone.
+	row, so a failed row rolls back alone.
 
 ]]
 
@@ -43,7 +44,7 @@ local function rowset_db(rs)
 	return rs.db or db()
 end
 
---single-col fks are the ones a lookup rowset can stand in for.
+--a lookup rowset has a one-col key, so fks over several cols have none.
 local function fks_by_col(schema)
 	local fks = {}
 	for _, fk in pairs(schema.fks or empty) do
@@ -76,8 +77,8 @@ local function scan_args(param_vals)
 	return args
 end
 
---the one table whose rows the rowset's rows match one-to-one: every pk output
---must come from it, and together they must be exactly its pk.
+--the one table whose rows match the rowset's rows one-to-one: every pk output
+--col comes from it, and together they are exactly its pk.
 local function find_write_table(db, out_specs, pk)
 	local tbl, cols = nil, {}
 	for _, name in ipairs(pk) do
@@ -116,8 +117,8 @@ function scan_rowset(...)
 
 		local insert_row, update_row, delete_row, load_row --fw. decl.
 
-		--a scan needs a transaction to resolve its table schema, so it and
-		--everything read off it wait for the first request.
+		--building a scan resolves its table schema, which needs a transaction,
+		--so this runs on the first request rather than at load time.
 		function rs:prepare()
 			if scan then return end
 			local db = rowset_db(rs)
@@ -185,7 +186,8 @@ function scan_rowset(...)
 			rs.params = sort(params)
 
 			--reloading one row repeats the same output over a pk lookup, which
-			--only works while every output reads a col of the one member.
+			--is only possible with one member and every output col coming
+			--from a table col.
 			local member = next(scan.member_scans)
 			local outputs = write_table and not next(scan.member_scans, member)
 				and {}
@@ -212,15 +214,16 @@ function scan_rowset(...)
 			rs:init_fields(true)
 		end
 
-		--load_rows() and load_row() run in the transaction their caller opened:
-		--a load opens its own, a reload runs inside the save's write one.
+		--load_rows() and load_row() run in the transaction their caller opened.
+		--exec_load() opens one; a reload from apply_changes() is already
+		--inside the save's write transaction.
 		local exec_load = rs.exec_load
 		function rs:exec_load(...)
 			return rowset_db(rs):atomic('r', exec_load, self, ...)
 		end
 
-		--a run that died mid-iteration left the scan holding a cursor from a
-		--dead transaction; close() drops it before it can be seeked again.
+		--after a run that died mid-iteration the scan still holds a cursor from
+		--a dead transaction; close() drops it before the next seek.
 		function rs:load_rows(res, param_vals)
 			rs:prepare()
 			scan.close()
@@ -249,7 +252,7 @@ function scan_rowset(...)
 			rowset_db(rs):atomic('w', function()
 				local seq = rowset_db(rs):insert(write_table, '{}',
 					written_vals(vals))
-				--load_row() finds the row by pk, so a minted key must reach it.
+				--load_row() looks the row up by pk, so put a minted key in vals.
 				if seq and seq_name then vals[seq_name] = seq end
 				self:table_changed(write_table)
 			end)
@@ -277,8 +280,8 @@ function scan_rowset(...)
 			end)
 		end
 
-		--every row change runs in a child transaction of this one, so a row
-		--that fails rolls back without taking the rest of the batch with it.
+		--every row change runs in a child transaction of this one, so a failed
+		--row rolls back on its own and the rest of the batch still applies.
 		local apply_changes = rs.apply_changes
 		function rs:apply_changes(...)
 			rs:prepare()
@@ -319,10 +322,10 @@ end})
 
 --STARTUP VALIDATION ---------------------------------------------------------
 
---prepare every registered rowset, so a broken one shows up at startup instead
---of on its first request. run it after sync_schema(): resolving each scan's
---table schema is what does the checking. preparing a rowset registers the
---lookup rowsets its fk cols need, so keep going while new ones appear.
+--prepare every registered rowset, to fail at startup instead of on a first
+--request. run it after sync_schema(): the checking happens while resolving
+--each scan's table schema. preparing one rowset can register the lookup
+--rowsets for its fk cols, so keep going while new names appear.
 function prepare_rowsets()
 	db():atomic('r', function()
 		local prepared = {}
