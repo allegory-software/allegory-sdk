@@ -49,9 +49,6 @@
 [submodule "c/bcrypt/src"]
 	path = c/bcrypt/src
 	url = ../allegory-sdk-bcrypt.git
-[submodule "canvas-ui"]
-	path = canvas-ui
-	url = ../canvas-ui.git
 [submodule "c/mdbx/src"]
 	path = c/mdbx/src
 	url = ../allegory-sdk-libmdbx.git

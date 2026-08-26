@@ -27,7 +27,7 @@ logging.filter.open = true
 --errortype'http_response'.addtraceback = true
 
 app.main_file = 'cui_demo.js'
-wwwdir'../../canvas-ui/www'
+wwwdir'../../www'
 
 fontfile('mono'    , 'fonts/jetbrains-mono-nl-regular.woff2')
 fontfile('inter'   , 'fonts/inter-roman.var.woff2')

@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base href="../../../www/">
+<script>
+// Report boot/runtime failures to the CLI instead of leaving it to time out.
+;(function() {
+	let params = new URLSearchParams(location.search)
+	let result_id = params.get('result_id')
+	let reported = false
+	function report(error) {
+		if (reported || !result_id)
+			return
+		reported = true
+		fetch('/bench-result?result_id='+encodeURIComponent(result_id), {
+			method: 'POST',
+			headers: {'content-type': 'application/json'},
+			body: JSON.stringify({variant: 'benchmark_error', error}),
+		})
+	}
+	addEventListener('error', event => report(
+		`${event.message} at ${event.filename}:${event.lineno}:${event.colno}`))
+	addEventListener('unhandledrejection', event => report(
+		`unhandled rejection: ${event.reason?.stack || event.reason}`))
+	setTimeout(() => {
+		if (!window.BENCH_GRID_TEXT_DONE)
+			report('benchmark watchdog expired before results were published')
+	}, params.get('debug') == '1' ? 15000 : 120000)
+})()
+</script>
+<script src="glue.js" global></script>
+<!-- Served by run_grid_text_bench.mjs. It instruments a temporary copy. -->
+<script src="/bench-ui.js"></script>
+<script src="ui_validation.js"></script>
+<script src="ui_nav.js"></script>
+<script src="ui_grid.js"></script>
+<script>
+"use strict"
+
+ui.load_font('fas', 'icons/fa-solid-900.woff2')
+ui.DEBUG = false
+
+const params = new URLSearchParams(location.search)
+const variants = (params.get('sequence') || 'baseline').split(',')
+const result_id = params.get('result_id')
+const warmup_n = +(params.get('warmup') || 20)
+const sample_n = +(params.get('samples') || 80)
+const row_n = +(params.get('rows') || 1000)
+const col_n = +(params.get('cols') || 25)
+const col_w = +(params.get('col_w') || 80)
+const text_mode = params.get('text') || 'short'
+const scrolling = params.get('scroll') == '1'
+const interleave = params.get('interleave') == '1'
+const font_name = params.get('font') || 'Arial'
+
+ui.default_font = font_name
+
+let native_fill_text_n = 0
+let native_measure_text_n = 0
+const native_fill_text = CanvasRenderingContext2D.prototype.fillText
+const native_measure_text = CanvasRenderingContext2D.prototype.measureText
+
+function set_variant(variant) {
+	window.BENCH_GRID_TEXT_VARIANT = variant
+	CanvasRenderingContext2D.prototype.fillText = variant == 'no_fill_text'
+		? function() {}
+		: variant == 'count_calls'
+			? function(...args) {
+				native_fill_text_n++
+				return native_fill_text.apply(this, args)
+			}
+			: native_fill_text
+	CanvasRenderingContext2D.prototype.measureText = variant == 'count_calls'
+		? function(...args) {
+			native_measure_text_n++
+			return native_measure_text.apply(this, args)
+		}
+		: native_measure_text
+}
+set_variant(variants[0])
+
+let cell_text_n = 0
+let real_draw_text = ui.all_field_types.draw_text
+ui.all_field_types.draw_text = function(s, cx, row, full_width) {
+	if (cx)
+		cell_text_n++
+	if (window.BENCH_GRID_TEXT_VARIANT == 'no_cell_text')
+		return cx ? true : s
+	return real_draw_text.call(this, s, cx, row, full_width)
+}
+
+let fields = []
+for (let fi = 0; fi < col_n; fi++)
+	fields.push({name: 'c'+fi, label: 'Column '+fi, w: col_w})
+
+let rows = []
+for (let ri = 0; ri < row_n; ri++) {
+	let row = []
+	for (let fi = 0; fi < col_n; fi++) {
+		let overflowing = text_mode == 'long'
+			|| (text_mode == 'mixed' && (ri + fi) % 2 == 0)
+		row.push(text_mode == 'repeated'
+			? 'long overflowing cell value r0000c00'
+			: overflowing
+				? 'long overflowing cell value r'+ri+'c'+fi
+				: 'r'+ri+'c'+fi)
+	}
+	rows.push(row)
+}
+
+let rowset = {
+	pk: 'c0',
+	can_change_rows: false,
+	fields,
+	rows,
+}
+
+ui.main = function() {
+	ui.grid('bench_grid', {rowset})
+}
+
+let phase_i = 0
+let frame_i = 0
+let results = []
+const layout_phase_names = [
+	'reset',
+	'measure_x', 'position_x',
+	'measure_y', 'position_y',
+	'translate', 'frame_make', 'frame_layout', 'translate_other', 'register',
+	'native_measure_calls', 'native_measure_ms',
+]
+function make_sample_set() {
+	let layout_phases = {}
+	for (let name of layout_phase_names)
+		layout_phases[name] = []
+	return {make: [], layout: [], draw: [], total: [], layout_phases}
+}
+let samples = make_sample_set()
+let interleave_cycle_i = 0
+let interleave_step_i = 0
+let interleave_samples = variants.map(make_sample_set)
+
+function latest_graph_value(name) {
+	let g = ui.frame_graphs[name]
+	return g.values[(g.i + g.n - 1) % g.n] / g.mf
+}
+
+function stats(a) {
+	let b = [...a].sort((x, y) => x-y)
+	let sum = b.reduce((s, v) => s + v, 0)
+	let at = p => b[Math.min(b.length-1, Math.floor(p * b.length))]
+	return {
+		mean: sum / b.length,
+		p50: at(.50),
+		p95: at(.95),
+		p99: at(.99),
+		min: b[0],
+		max: b[b.length-1],
+	}
+}
+
+function add_timing_sample(sample_set) {
+	let make = latest_graph_value('frame_make_time')
+	let layout = latest_graph_value('frame_layout_time')
+	let draw = latest_graph_value('frame_draw_time')
+	sample_set.make.push(make)
+	sample_set.layout.push(layout)
+	sample_set.draw.push(draw)
+	sample_set.total.push(make + layout + draw)
+	let phases = window.BENCH_GRID_LAYOUT_PHASES
+	for (let name of layout_phase_names) {
+		let value = name == 'translate_other'
+			? Math.max(0, (phases?.translate ?? 0)
+				- (phases?.frame_make ?? 0) - (phases?.frame_layout ?? 0))
+			: phases?.[name] ?? 0
+		sample_set.layout_phases[name].push(value)
+	}
+}
+
+async function publish_results() {
+	let body = JSON.stringify(results.length == 1 ? results[0] : results)
+	let pre = document.createElement('pre')
+	pre.id = 'benchmark-result'
+	pre.textContent = body
+	document.body.appendChild(pre)
+	document.documentElement.dataset.benchmarkDone = '1'
+	window.BENCH_GRID_TEXT_DONE = true
+	if (result_id)
+		await fetch('/bench-result?result_id='+encodeURIComponent(result_id), {
+			method: 'POST',
+			headers: {'content-type': 'application/json'},
+			body,
+		})
+}
+
+ui.frame_changed = function() {
+	frame_i++
+	if (scrolling && !interleave) {
+		let scroll_state = ui.state('bench_grid.cells_scrollbox')
+		scroll_state.scroll_y = (scroll_state.scroll_y ?? 0) + 31
+	}
+	if (interleave) {
+		if (interleave_cycle_i >= warmup_n)
+			add_timing_sample(interleave_samples[phase_i])
+		interleave_step_i++
+		if (interleave_step_i == variants.length) {
+			interleave_step_i = 0
+			interleave_cycle_i++
+			if (scrolling) {
+				let scroll_state = ui.state('bench_grid.cells_scrollbox')
+				scroll_state.scroll_y = (scroll_state.scroll_y ?? 0) + 31
+			}
+		}
+		if (interleave_cycle_i < warmup_n + sample_n) {
+			// Rotate which variant runs first after each scroll update. This spreads
+			// cache-miss and scroll-update work evenly across variants.
+			phase_i = (interleave_cycle_i + interleave_step_i) % variants.length
+			set_variant(variants[phase_i])
+			setTimeout(ui.animate, 0)
+			return
+		}
+		for (let i = 0; i < variants.length; i++) {
+			let variant_samples = interleave_samples[i]
+			results.push(make_result(variants[i], variant_samples, frame_i))
+		}
+		publish_results()
+		return
+	}
+	if (frame_i > warmup_n)
+		add_timing_sample(samples)
+	if (frame_i < warmup_n + sample_n) {
+		setTimeout(ui.animate, 0)
+		return
+	}
+	results.push(make_result(variants[phase_i], samples, frame_i))
+	phase_i++
+	if (phase_i < variants.length) {
+		frame_i = 0
+		cell_text_n = 0
+		native_fill_text_n = 0
+		native_measure_text_n = 0
+		samples = make_sample_set()
+		set_variant(variants[phase_i])
+		setTimeout(ui.animate, 0)
+		return
+	}
+	publish_results()
+}
+
+function make_result(variant, variant_samples, call_frame_n) {
+	let layout_phases_ms = {}
+	for (let name of layout_phase_names)
+		layout_phases_ms[name] = stats(variant_samples.layout_phases[name])
+	let variant_frame_n = interleave ? warmup_n + sample_n : call_frame_n
+	let atlas_stats = window.BENCH_GRID_ATLAS_STATS?.[variant]
+	return {
+		variant,
+		browser: navigator.userAgent,
+		viewport: [innerWidth, innerHeight],
+		devicePixelRatio,
+		rows: row_n,
+		cols: col_n,
+		col_w,
+		text_mode,
+		font_name,
+		scrolling,
+		interleave,
+		warmup_n,
+		sample_n,
+		cell_text_calls_per_frame: cell_text_n / call_frame_n,
+		fill_text_calls_per_frame: variant == 'count_calls'
+			? native_fill_text_n / variant_frame_n : 0,
+		measure_text_calls_per_frame: variant == 'count_calls'
+			? native_measure_text_n / variant_frame_n : 0,
+		atlas_draws_per_frame: (atlas_stats?.draws ?? 0) / variant_frame_n,
+		atlas_rasterizations_per_frame: (atlas_stats?.misses ?? 0) / variant_frame_n,
+		make_ms: stats(variant_samples.make),
+		layout_ms: stats(variant_samples.layout),
+		layout_phases_ms,
+		draw_ms: stats(variant_samples.draw),
+		total_ms: stats(variant_samples.total),
+	}
+}
+</script>
+</head>
+<body></body>
+</html>

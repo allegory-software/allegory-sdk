@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script src=../www/glue.js global></script>
+<script src=../www/webrtc.js></script>
+<style>
+html, body {
+	margin: 0;
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+}
+body {
+	display: flex;
+}
+iframe {
+	flex: 1;
+	min-width: 0;
+	border: 0;
+}
+iframe.remote {
+	border-left: 1px solid red;
+}
+</style>
+</head>
+<body>
+<script>
+
+let signal_server = rtc.mock_signal_server()
+let source_frame = document.createElement('iframe')
+let viewer_frame = document.createElement('iframe')
+let loaded_frames = 0
+
+source_frame.className = 'local'
+viewer_frame.className = 'remote'
+
+function frame_loaded() {
+	loaded_frames++
+	if (loaded_frames < 2)
+		return
+	viewer_frame.contentWindow.demo_remote_viewer_init(signal_server)
+	source_frame.contentWindow.demo_remote_source_init(signal_server)
+}
+
+source_frame.onload = frame_loaded
+viewer_frame.onload = frame_loaded
+
+let demo = location.search.match('demo=([^&]+)')?.[1]
+let demo_arg = demo ? '&demo='+demo : ''
+source_frame.src = 'demo.html?remote=source'+demo_arg
+viewer_frame.src = 'demo.html?remote=viewer'+demo_arg
+
+document.body.appendChild(source_frame)
+document.body.appendChild(viewer_frame)
+
+</script>
+</body>
+</html>

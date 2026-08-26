@@ -1,6 +1,6 @@
 --[==[
 
-	Canvas-UI-based Application Server.
+	Canvas UI-based Application Server.
 	Written by Cosmin Apreutesei. Public Domain.
 
 LOADS

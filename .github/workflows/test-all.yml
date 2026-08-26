@@ -17,8 +17,5 @@ jobs:
       - name: Configure git safe.directory
         run: git config --global --add safe.directory $GITHUB_WORKSPACE
 
-      - name: Checkout canvas-ui submodule
-        run: git submodule update --init canvas-ui
-
       - name: Run tests
         run: tests/test-all

@@ -55,7 +55,6 @@ require'lang'
 
 local sdkdir = dirname(exedir())
 wwwdir(sdkdir..'/www')
-wwwdir(sdkdir..'/canvas-ui/www')
 
 local client_configs = {}
 

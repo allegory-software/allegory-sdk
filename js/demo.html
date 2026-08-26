@@ -1,0 +1,1205 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base href="../www/">
+<script src=glue.js global></script>
+<script src=ui.js></script>
+<script src=ui_validation.js></script>
+<script src=ui_nav.js></script>
+<script src=ui_grid.js></script>
+<script src=ui_code_edit.js></script>
+<script src=webrtc.js></script>
+<script src=lezer.js></script>
+<!--
+NOTE: Setting the background color for the html element before declaring
+the <body> element prevents the body from rendering white for a split second
+(and thus flickering when refreshing the page). This happens only in Chrome.
+-->
+<script>
+
+ui.load_font('tabler', 'icons/tabler-icons.woff2')
+//ui.load_font('far'   , 'icons/fa-regular-400.woff2')
+//ui.load_font('fas'   , 'icons/fa-solid-900.woff2')
+//ui.load_font('fab'   , 'icons/fa-brands-400.woff2')
+//ui.load_font('lar'   , 'icons/la-regular-400.woff2')
+//ui.load_font('las'   , 'icons/la-solid-900.woff2')
+//ui.load_font('lab'   , 'icons/la-brands-400.woff2')
+//ui.load_font('remix' , 'icons/remixicon.woff2')
+//ui.load_font('mio'   , 'icons/material-icons-outlined.woff2')
+// ui.load_font('mono'  , 'fonts/jetbrains-mono-nl-regular.woff2')
+ui.load_font('mono', 'fonts/jetbrains-mono-nl-regular.woff2')
+
+let demo_state = json_arg(load('demo_state')) ?? {}
+if (demo_state.theme)
+	ui.set_default_theme(demo_state.theme)
+
+ui.DEBUG      = demo_state.debug ?? true
+ui.TUI        = demo_state.tui   ?? false
+SELECTED_DEMO = location.search.match('demo=([^&]+)')?.[1] ?? demo_state.demo ?? 'tabs'
+REMOTE_DEMO   = location.search.match('remote=([^&]+)')?.[1]
+
+</script>
+<body>
+<script>
+
+function save_demo_state(k, v) {
+	demo_state[k] = v
+	save('demo_state', json(demo_state))
+}
+
+let tuts = []
+let demos = []
+
+demos.frame = `
+ui.scrollbox('sb1')
+	function on_measure(axis) {
+		return 9000
+	}
+	function on_frame(a, i, x, y, w, h, cx, cy, cw, ch) {
+		ui.m(cx-x, cy-y)
+		ui.stack('bb1', 0, 'l', 't', 100, 100)
+			ui.bb(ui.hit('bb1') ? ':green' : ':red')
+		ui.end_stack()
+	}
+	ui.frame(on_measure, on_frame)
+ui.end_scrollbox()
+`
+
+demos.silder = `
+ui.v(0, 0, 'c', 'c', 400)
+	ui.border(1, 'intense')
+	let p1 = ui.slider('slider1', 20, 40, 1, false)
+	//if (p != null)
+	//	pr(p)
+	let p2 = ui.slider('slider2')
+ui.end_v()
+`
+
+dd_items = ['item 1', 'item 2 that is longer than others', 'item 3']
+demos.dropdown = `
+ui.v(1, ui.sp(), 'c', 'c')
+	ui.h(1, ui.sp())
+		ui.label('dd1', 'dd1 label')
+		ui.state_init('dd1', 'i', 1)
+		ui.dropdown('dd1', dd_items)
+		ui.text('', 'or')
+		ui.dropdown('dd2', dd_items)
+		ui.text('', 'trail')
+	ui.end_h()
+ui.end_v()
+`
+
+let cal1_ranges = [
+	{from: 0, to: 1},
+	{from: 0, to: 1},
+]
+let cal_sel_days = []
+demos.calendar = `
+ui.m(ui.em(2))
+ui.h(1, ui.em())
+	let sel_day = ui.calendar('cal1', cal1_ranges, 0, 'l', 's')
+	if (sel_day != null)
+		cal_sel_days.push(sel_day)
+	ui.sb('cal1_sb')
+		ui.v(1, ui.sp05(), 'l', 't')
+		for (let day of cal_sel_days)
+			ui.text('', format_date(day))
+		ui.end_v()
+	ui.end_sb()
+ui.end_h()
+`
+
+demos.radio = `
+ui.v(0, ui.sp2(), 'c', 'c')
+for (let i = 0; i < 5; i++) {
+	ui.h(0, ui.sp(), 'c', 'c')
+		if (ui.radio('radio'+i, 'radio_group1'))
+			pr('checked', i)
+		ui.label('radio'+i, 'Radio '+i)
+	ui.end_h()
+}
+ui.end_v()
+`
+
+demos.toggle = `
+ui.h(0, ui.sp(), 'c', 'c')
+	let b = ui.toggle('toggle1')
+	if (b !== undefined)
+		pr('toggled', b)
+	ui.label('toggle1', 'Toggle me!')
+ui.end_h()
+`
+
+demos.checkbox = `
+ui.h(0, ui.sp(), 'c', 'c')
+	let b = ui.checkbox('cb1')
+	if (b !== undefined)
+		pr('toggled', b)
+	ui.label('cb1', 'Check me out!')
+ui.end_h()
+`
+
+tabs1 = [
+	{id: 'tab1', label:'Tab 1'},
+	{id: 'tab2', label:'Tab 2 looong'},
+	{id: 'tab3', label:'Tab 3'},
+	{id: 'tab4', label:'Tab 4 even longer'},
+	{id: 'tab5', label:'Tab 5'},
+	{id: 'tab6', label:'Tab 6'},
+]
+demos.tabs = `
+ui.m(ui.em(5))
+ui.stack('', 1, 's', 'c')
+	//ui.p(1)
+	ui.v()
+		ui.stack()
+			ui.bb('bg1')
+			let sel_tab = ui.tabs('tabs1', tabs1, 'tab2', 'tab2 tab3 tab4', 'tab3')
+		ui.end_stack()
+		ui.stack('', 1, 's', 's', null, 200)
+			ui.bb('bg0')
+		ui.end_stack()
+	ui.end_v()
+	//ui.border(1, 'intense')
+ui.end_stack()
+`
+
+demos.menu = `
+ui.m(ui.em(5))
+ui.menu('menu1', [
+	{id: 'item1', label: 'Item 1', shortcut: 'Ctrl + F'},
+	{id: 'item2', label: 'Item 2 looong', items: [
+		{id: 'item1.1', label: 'Item 2.1 long'},
+		{id: 'item1.2', label: 'Item 2.2', items: [
+			{id: 'item1.2.1', label: 'Item 1.2.1 long'},
+			{id: 'item1.2.2', label: 'Item 1.2.2'},
+		]},
+	]},
+	{id: 'item3', label: 'Item 3', items: [
+		{id: 'item3.1', label: 'Item 3.1 long'},
+		{id: 'item3.2', label: 'Item 3.2'},
+	]},
+], 'it', '[')
+`
+
+list1_items = []
+for (let i = 1; i <= 1000; i++)
+	list1_items.push('Item '+i)
+demos.list = `
+ui.sb('list1_sb', 1, null, null, 'c', 'c', 100, 300)
+	ui.list('list1', list1_items)
+ui.end_sb()
+`
+
+// grid
+
+{
+let fields = [{name: 'id', align: 'right', w: 40}]
+let rows = []
+for (let i = 1; i < 100; i++)
+	fields.push({name: 'c'+i, label: 'Field No. '+i, w: 40})
+for (let j = 1; j < 100; j++) {
+	let row = [j]
+	for (let i = 1; i <= fields.length; i++)
+		row.push('Cell '+j+','+i)
+	rows.push(row)
+}
+grid_rowset = {
+	pk: 'id', can_change_rows: false,
+	fields: fields,
+	rows: rows,
+}
+demos.grid = `
+ui.m(ui.em(2))
+ui.stack()
+	ui.grid('grid1', {rowset: grid_rowset})
+ui.end_stack()
+`
+}
+
+{
+function starts_with_a(s) {
+	return s.lower().starts('a') || 'Name must start with "A"'
+}
+let fields = [
+	{name: 'id'        , w:  80, min_w:  30, type: 'number', editable: false},
+	{name: 'index'     , w:  50, type: 'number', editable: false},
+	{name: 'active'    , w:  30, type: 'bool', true_text: 'x', false_text: ''},
+	{name: 'name'      , w: 150, min_w:  50, max_w: 400, validate: starts_with_a, filter_by: true},
+	{name: 'parent_id' , w:  50, min_w:  50, type: 'number', allow_null: true, editable: false, focusable: false},
+	{name: 'random_num', w: 130, allow_null: true, type: 'number', text: 'Random Number'},
+	{name: 'date'      , w: 120, allow_null: true, type: 'date', filter_by: true},
+]
+let rows = []
+for (let i = 0; i <= 10000; i++) {
+	let id         = i
+	let name       = 'record '+i
+	let parent_id  = i > 4 ? (i-1) % 5 : null
+	let random_num = floor(random() * 1e9)
+	let random_date = clamp(i * 24 * 3600 * 10, 0, time(3000, 0))
+	let active = i % 5 == 0
+	let row = [id, id, active, name, parent_id, random_num, random_date]
+	row.focusable = true // i % 100 >= 85
+	rows.push(row)
+}
+tree_rowset = {
+	fields: fields,
+	rows: rows,
+	pk: 'id',
+	parent_col: 'parent_id',
+	index_col: 'index',
+}
+demos.treegrid = `
+ui.m(ui.em(2))
+ui.stack()
+	ui.grid('treegrid', {
+		rowset: tree_rowset,
+		order_by: 'active name:desc',
+		//tree_col: 'name',
+		//can_edit: false,
+		can_change_header_visibility: true,
+		//can_focus_cells: false,
+		//order_by: 'parent_id name:desc',
+		can_move_rows: true,
+		//enter_edit_on_click_focused: false,
+		//can_change_parent: false,
+	})
+ui.end_stack()
+`
+}
+
+{
+let fields = [
+	{name: 'id'        , w:  50, min_w:  30, type: 'number', editable: false},
+	{name: 'name'      , w: 100},
+	{name: 'color'     , w:  50, label: 'Color that is long'},
+	{name: 'type'      , w:  50},
+	{name: 'good'      , w:  30, type: 'bool', true_text: 'Good', false_text: 'Bad', },
+	{name: 'climate'   , w:  50},
+]
+let rows = [
+	[1, 'Apple'    , 'Red'    , 'Fruit' , true  , 'Temperate'],
+	[2, 'Banana'   , 'Yellow' , 'Fruit' , true  , 'Tropical' ],
+	[3, 'Lemon'    , 'Yellow' , 'Fruit' , false , 'Tropical' ],
+	[4, 'Pear'     , 'Yellow' , 'Fruit' , false , 'Temperate'],
+	[5, 'Broccoli' , 'Green'  , 'Veggie', false , 'Temperate'],
+	[6, 'Pepper'   , 'Yellow' , 'Veggie', true  , 'Temperate'],
+	[7, 'Potato'   , 'Yellow' , 'Veggie', true  , 'Temperate'],
+	[8, 'Carrot'   , 'Orange' , 'Veggie', false , 'Temperate'],
+]
+food_rowset = {
+	fields: fields,
+	rows: rows,
+	pk: 'id',
+}
+grid_state = {}
+demos.grid_groups = `
+ui.m(ui.em(2))
+ui.stack()
+	ui.grid('groups_grid', {
+		rowset: food_rowset,
+		tree_col: 'name',
+		cols: 'name id color type good climate',
+		order_by: 'color type:desc',
+		//order_by: 'name id:desc',
+		// group_by: 'climate > type good > color',
+		// group_by: 'good type > climate color',
+		//group_by: 'climate type good color name',
+		group_by: 'color',
+		col_attrs: {'$$group': {w: 200}},
+		//group_by: 'type > color',
+		//can_edit: false,
+		can_change_header_visibility: true,
+		//can_focus_cells: false,
+		//order_by: 'parent_id name:desc',
+		can_move_rows: true,
+		//enter_edit_on_click_focused: false,
+		//can_change_parent: false,
+	})
+ui.end_stack()
+`
+}
+
+{
+let fields = [
+	{name: 'id'       , w:  40, type: 'number', align: 'right', editable: false},
+	{name: 'num'      , w:  90, type: 'number', decimals: 2},
+	{name: 'size'     , w:  90, type: 'filesize', magnitude_decimals: 1, gray_min: 1024},
+	{name: 'count'    , w:  70, type: 'count'},
+	{name: 'date'     , w: 100, type: 'date'},
+	{name: 'datetime' , w: 140, type: 'datetime'},
+	{name: 'time'     , w: 100, type: 'time'},
+	{name: 'timeofday', w:  90, type: 'timeofday', precision: 's'},
+	{name: 'dur'      , w:  90, type: 'duration'},
+	{name: 'active'   , w:  50, type: 'bool'},
+	{name: 'status'   , w:  90, type: 'enum', enum_labels: {open: 'Open', closed: 'Closed', pending: 'Pending'}},
+	{name: 'tags'     , w: 130, type: 'tags'},
+	{name: 'color'    , w:  60, type: 'color'},
+	{name: 'progress' , w: 120, type: 'percent', decimals: 0},
+	{name: 'icon'     , w:  50, type: 'icon'},
+	{name: 'place'    , w: 220, type: 'place'},
+	{name: 'url'      , w: 160, type: 'url'},
+	{name: 'phone'    , w: 120, type: 'phone'},
+	{name: 'email'    , w: 170, type: 'email'},
+	{name: 'password' , w: 110, type: 'password'},
+	{name: 'secret'   , w: 140, type: 'secret_key'},
+	{name: 'pubkey'   , w: 140, type: 'public_key'},
+	{name: 'privkey'  , w: 140, type: 'private_key'},
+	{name: 'col'      , w:  90, type: 'col'},
+	{name: 'action'   , w:  90, type: 'button'},
+]
+let rows = [
+	[1, 1234.5  , 800        ,   1234, time(2024,1,15), time(2024,1,15,9,30), time(2031,6,1)     , 8*3600+30*60 , 3725  , true , 'open'   , ['red', 'urgent'], '#e03131'                , 2500, 'plus'        , {place_id: 'p1', description: '1600 Amphitheatre Pkwy'}, 'https://example.com', '+1 555 0100', 'a@example.com', 'hunter2'      , 'sk_live_abc123' , 'ssh-rsa AAAAB3Nz', '-----BEGIN KEY---', 'name'   , null],
+	[2, 42      , 5_000_000  ,  98765, time(2024,6,1) , time(2024,6,1,14,0) , time(2032,1,1)     , 13*3600+15*60, 90000 , false, 'pending', ['blue']         , 'seagreen'               , 6000, 'check'       , 'Just a description, no pin'                             , 'example.org'        , '555-0101'   , 'b@example.org', 'correct-horse', 'sk_live_def456' , 'ssh-ed25519 AAAA', '-----BEGIN KEY---', 'ctime'  , null],
+	[3, 0       , 3_200_000_000, 2000000, time(2024,12,31), time(2024,12,31,23,59), time(2037,12,31), 0            , 0     , true , 'closed' , ['green', 'a', 'b'], 'rgb(30,144,255)'      , 10000, 'arrow_up'   , {place_id: 'p3', description: 'No pin greyed out below'}, 'http://sub.example.com/path', '555-0102', 'c@example.com', 's3cr3t'       , 'sk_live_ghi789' , 'ssh-rsa AAAAB3Nz', '-----BEGIN KEY---', 'id'     , null],
+	[4, -12.75  , 60         ,      7, time(2000,1,1) , time(2000,1,1,0,1)  , time(1970,1,2)     , 23*3600+59*60 , 61   , false, 'open'   , []               , '#111111'                , 0   , 'caret_right' , {description: 'Object without a place_id'}               , 'ftp://files.example.com', '555-0103', 'd@example.com', 'pw'           , 'sk_live_jkl012' , 'ssh-dss AAAAB3Nz', '-----BEGIN KEY---', 'status' , null],
+	[5, null    , null       ,   null, null           , null                , null               , null          , null , null , null     , null             , null                     , null, null          , null                                                       , null                 , null         , null           , null          , null             , null              , null              , null     , null],
+]
+grid_types_rowset = {
+	fields: fields,
+	rows: rows,
+	pk: 'id',
+}
+demos.grid_types = `
+ui.m(ui.em(2))
+ui.stack()
+	ui.grid('grid_types', {rowset: grid_types_rowset})
+ui.end_stack()
+`
+}
+
+tuts.text = `
+// text() shows a line of text.
+
+// how to call it: text(id, text, fr=1,
+//      align='center', valign='center',
+//      max_min_w=inf, min_w='auto', min_h='auto'
+//   )
+
+// max_min_w limits how much text can expand under min_w='auto' before being clipped.
+// the id is optional, we'll get back to that.
+
+ui.text('', 'Hello World!')
+`
+
+tuts.h = `
+// h() is a flexbox-like container that places its children horizontally.
+
+// how to call it: ui.h(fr=1, gap=0, align='stretch', valign='stretch', min_w=0, min_h=0)
+
+ui.h()
+	ui.text('', 'Hello', 1, 'c')
+	ui.text('', 'World', 1, 'c')
+ui.end()
+`
+
+tuts.v = `
+// v() is a flexbox-like container that places its children vertically.
+
+// how to call it: ui.v(fr=1, gap=0, align='stretch', valign='stretch', min_w=0, min_h=0)
+
+ui.v()
+	ui.text('', 'Hello')
+	ui.text('', 'World')
+ui.end()
+`
+
+tuts.stack = `
+// stack() is a container that places its children on top of each other,
+// expanding as needed to make them fit.
+
+// how to call it: ui.stack(id, fr=1, align='stretch', valign='stretch', min_w=0, min_h=0)
+
+ui.stack()
+	ui.text('', 'Hello')
+	ui.text('', 'World')
+ui.end()
+`
+
+tuts.bb = `
+// bb() puts a background and/or border on its container, which is usually a stack.
+
+// how to call it: bb(id, bg_color, border_sides, border_color, border_radius=0)
+//    border_sides can be true or 1 (all), null (none), or any combination of 'ltrb'.
+//    bg_color and border_color can be null (none).
+
+// ui.shadow() draws a box shadow on the next bb() call.
+
+ui.bg_style    ('*', 'crimson', 'normal', 348, .83, .47)
+ui.border_style('*', 'brown'  , 'normal',   0, .59, .41)
+
+ui.stack('', 0, 'c', 'c', 150, 50)
+	ui.shadow(2, 2, 5, 0, false, 'black')
+	ui.bb('crimson', null, 'ltrb', 'brown', null, 10)
+	ui.text('', 'Hello World!', 0, 'c')
+ui.end()
+`
+
+tuts.font_size = `
+// font(), font_size(), font_weight(), color() can be used
+// to style up the text in the current container.
+
+ui.v(0, 20, 'c', 'c')
+	ui.font_size(2)
+	ui.color(':teal')
+	ui.text('', 'Buongiorno!')
+	ui.h(0, 10, 'c')
+		// font and color changes are scoped.
+		// when this container ends, previus settings take effect.
+		ui.font('Serif')
+		ui.font_size(3.5)
+		ui.font_weight('bold')
+		ui.color(':green')
+		ui.text('', 'Hello')
+		ui.text('', 'World!')
+	ui.end()
+	// using the font size set above in this scope.
+	ui.text('', 'Buona notte!')
+ui.end()
+`
+
+demos.flex_align_gap = `
+ui.v(1, 30, 'c', 'c')
+
+	ui.h(1, 10, 'c', 'c')
+	for (let align of ['l', 'r', 'c', 's']) {
+		ui.v(1, 10)
+		for (let valign of ['t', 'b', 'c', 's']) {
+			ui.h(1, 10, 'c', 'c', 30, 30)
+				ui.border(1, 'intense')
+				for (let i = 1; i <= 3; i++) {
+					ui.stack('', 1, align, valign, 10, 10)
+						ui.bb('info')
+					ui.end_stack()
+				}
+			ui.end()
+		}
+		ui.end()
+	}
+	ui.end()
+
+	ui.h(1, 10, 'c', 'c')
+	for (let align of ['l', 'r', 'c', 's']) {
+		ui.v(1, 10)
+		for (let valign of ['t', 'b', 'c', 's']) {
+			ui.v(1, 10, 'c', 'c', 30, 30)
+				ui.border(1, 'intense')
+				for (let i = 1; i <= 3; i++) {
+					ui.stack('', 1, align, valign, 10, 10)
+						ui.bb('info')
+					ui.end_stack()
+				}
+			ui.end()
+		}
+		ui.end()
+	}
+	ui.end()
+
+ui.end()
+`
+
+demos.flex_fr_min_w = `
+ui.h(1, 30)
+for (let hv of ['h', 'v']) {
+	ui.hv(hv, 1, 10, 'c', 'c', 100, 100)
+		ui.stack('', 1)
+			ui.bb('info')
+		ui.end_stack()
+		ui.stack('', 2)
+			ui.bb('info')
+		ui.end_stack()
+		ui.stack('', 3)
+			ui.bb('info')
+		ui.end_stack()
+		ui.stack('', 4)
+			ui.bb('info')
+		ui.end_stack()
+		ui.stack('', 0, 's', 's', 100, 100)
+			ui.bb('info')
+		ui.end_stack()
+	ui.end()
+}
+ui.end_h()
+`
+
+demos.split = `
+ui.hsplit('hsplit1', .5)
+		ui.vsplit('vsplit1')
+				ui.hsplit('hsplit2', 100, 'px')
+						ui.text('', 'Fixed')
+					ui.splitter()
+						ui.text('', 'Mobile')
+				ui.end_hsplit()
+			ui.splitter()
+				ui.hsplit('hsplit3', 0.3)
+						ui.text('', '30%')
+					ui.splitter()
+						ui.text('', '70%')
+				ui.end_hsplit()
+		ui.end_vsplit()
+	ui.splitter()
+		ui.vsplit('vsplit2')
+				ui.hsplit('hsplit4', 200, 'px', ']')
+						ui.text('', 'Mobile')
+					ui.splitter()
+						ui.text('', 'Fixed')
+				ui.end_hsplit()
+			ui.splitter()
+				ui.hsplit('hsplit5', 0.3)
+						ui.text('', '30%')
+					ui.splitter()
+						ui.text('', '70%')
+				ui.end_hsplit()
+		ui.end_vsplit()
+ui.end_hsplit()
+`
+
+demos.word_wrap = `
+ui.hsplit('hsplit1', .8)
+		ui.v()
+
+			ui.p(20)
+			ui.stack()
+				ui.bb('bg2')
+				ui.text_wrapped('text1', \`
+					Were we in a Garden of Eden where land and other goods were infinitely
+					abundant, there would be no scarcity and, therefore, no need
+					for property rules; property concepts would be meaningless. The idea
+					of conflict, and the idea of rights, would not even arise. For example,
+					your taking my lawnmower would not really deprive me of it if I
+					could conjure up another in the blink of an eye. Lawnmower-taking
+					in these circumstances would not be theft. Property rights are not
+					applicable to things of infinite abundance, because there cannot be
+					conflict over such things.
+				\`, 0, 'c')
+			ui.end_stack()
+
+			ui.p(20)
+			ui.stack()
+				ui.bb('bg1')
+				ui.text_wrapped('text2', \`
+					The wrapped text pushes this flex cell down.
+				\`, 0, 'l')
+			ui.end_stack()
+
+			ui.p(20)
+			ui.stack()
+				ui.bb('bg2')
+				ui.text_wrapped('text3', \`
+					The wrapped text pushes this flex cell down.
+					Also, this is right-aligned.
+				\`, 0, 'r')
+			ui.end_stack()
+
+		ui.end_v()
+	ui.splitter()
+		ui.stack()
+			ui.text('', '<- Drag to wrap')
+		ui.end_stack()
+ui.end_hsplit()
+`
+
+demos.input = `
+ui.v(1, ui.sp(), 'l', 'c')
+	ui.h(1, ui.sp())
+		ui.label('input1', 'First Input')
+		ui.input('input1', 'Hello1 Hello1 Hello1 Hello1')
+	ui.end_h()
+	ui.h(1, ui.sp())
+		ui.label('input2', 'Second Input')
+		ui.input('input2', 'Hello2 Hello2')
+	ui.end_h()
+	ui.h(1, ui.sp())
+		//ui.label('input1', 'Third Input')
+		ui.input('input3', 'Hello3 Hello3 Hello3 Hello3')
+	ui.end_h()
+ui.end_v()
+`
+
+demos.bg_dots = `
+ui.bg_dots('dots1', 0.3)
+`
+
+demos.button = `
+ui.m(ui.sp2())
+ui.h(1, ui.sp2(), 's', 't')
+	if (ui.button_primary('btn1', 'Click me!', 0))
+		pr('clicked btn1!')
+	if (ui.button('btn2', 'Click me too!'))
+		pr('clicked btn2!')
+ui.end_h()
+`
+
+demos.popup = `
+ui.m(10)
+ui.v(1, 30, 'c', 'c')
+	let i = 1
+	for (let inner of ['', 'i']) {
+		ui.h(1, 0, 'c', 'c', 360, 180)
+			for (let align of ['c', '[', ']']) {
+				ui.m(40, 30)
+				ui.p(20, 20)
+				ui.stack('', 0, 'c', 'c', 70, 100)
+					ui.stack()
+						ui.bb('bg1')
+					ui.end_stack()
+					ui.border(1, 'light')
+					for (let side of ['t', 'r', 'b', 'l', 'c']) {
+						if (side != 'c' || inner) {
+							ui.m(10)
+							ui.p(10)
+							ui.popup('popup'+i++, null, null, inner+side, align, 10, 10)
+								ui.stack()
+									ui.bb('bg2')
+								ui.end_stack()
+								ui.border(1, 'intense')
+								ui.m(5)
+								ui.p(5)
+								ui.popup('popup'+i++, null, null, inner+side, align, 5, 5)
+									ui.stack()
+										ui.bb('bg2')
+									ui.end_stack()
+									ui.border(1, 'intense')
+								ui.end_popup()
+							ui.end_popup()
+						}
+					}
+				ui.end_stack()
+			}
+		ui.end_h()
+	}
+ui.end_v()
+`
+
+demos.bb_tooltip = `
+ui.sb('bb_tooltip_sb', 1)
+ui.stack('', 1, 'l', 't', 800, 800)
+	ui.bb('bg0')
+	let j = 0
+	for (let align of ['c', '[', ']']) {
+		let i = 0
+		for (let side of ['t', 'r', 'b', 'l']) {
+			let [x, y, p_i] = ui.drag_point('p'+j+i, 150+j*220, 100+i*140, 'red')
+			ui.popup('ttc'+j+i, null, p_i, 'ic', 'c', 50, 50)
+				ui.border(1, 'light')
+				ui.m(
+					side == 'l' || side == 'r' ? ui.sp2() : 0,
+					side == 't' || side == 'b' ? ui.sp2() : 0,
+				)
+				ui.m(10)
+				ui.popup('tt'+j+i, 'tooltip', null, side, align, 100, 50, 'change_side constrain')
+					ui.shadow(1, 1, 3, 0, false, ui.dark() ? 'black' : '#ccc')
+					ui.bb_tooltip('bg2', null, 'intense', null, ui.sp1())
+				ui.end_popup()
+			ui.end_popup()
+			i++
+		}
+		j++
+	}
+ui.end_stack()
+ui.end_sb()
+`
+
+demos.scrollbox = `
+
+ui.v(0, 30, 'c', 'c')
+
+	ui.h(0, 10, 'c', 'c')
+
+		// both scrollbars
+		ui.sb('sb1', 0, null, null, 'c', 'c', 100, 100)
+			ui.stack('', 0, 'l', 't', 300, 300)
+				ui.bb('bg1', null, 1, 'intense')
+			ui.end_stack()
+		ui.end_sb()
+
+		// max w/h before showing scrollbar
+		ui.sb('sb2', 0, 'scroll', 'scroll', 'c', 'c', 100, 100)
+			ui.stack('', 0, 'l', 't', 100, 100)
+				ui.bb('bg1', null, 1, 'intense')
+			ui.end_stack()
+		ui.end_sb()
+
+		// hide on x-axis
+		ui.sb('sb3', 0, 'hide', 'auto', 'c', 'c', 100, 100)
+			ui.stack('', 0, 'l', 't', 300, 300)
+				ui.bb('bg1', null, 1, 'intense')
+			ui.end_stack()
+		ui.end_sb()
+
+		// hide on y-axis
+		ui.sb('sb4', 0, 'auto', 'hide', 'c', 'c', 100, 100)
+			ui.stack('', 0, 'l', 't', 300, 300)
+				ui.bb('bg1', null, 1, 'intense')
+			ui.end_stack()
+		ui.end_sb()
+
+	ui.end_h()
+
+	ui.h(0, 10, 'c', 'c')
+
+		// contain on x-axis
+		ui.sb('sb5', 0, 'contain', 'auto', 'c', 'c', 100, 100)
+			ui.stack('', 0, 'l', 't', 200, 200)
+				ui.bb('bg1', null, 1, 'intense')
+			ui.end_stack()
+		ui.end_sb()
+
+		// contain on y-axis
+		ui.sb('sb6', 0, 'auto', 'contain', 'c', 'c', 100, 100)
+			ui.stack('', 0, 'l', 't', 200, 200)
+				ui.bb('bg1', null, 1, 'intense')
+			ui.end_stack()
+		ui.end_sb()
+
+	ui.end_h()
+
+ui.end_v()
+`
+
+demos.toolbox = `
+function tb_contents(tb) { // tb: toolbox id, prefixes the ids in here
+	ui.stack('', 1, 's', 's', 200, 300)
+		ui.m(ui.sp2())
+		ui.v(1, ui.sp(), 'c', 't')
+			ui.dropdown(tb+'_dd1', dd_items)
+			ui.dropdown(tb+'_dd2', dd_items)
+			ui.stack(tb+'_tt', 0, 'c', 'c', 100, 30)
+				ui.bb('bg2', null, 1, 'intense')
+				ui.text('', 'hover me', 1, 'c')
+				if (ui.hit(tb+'_tt')) {
+					ui.m(10)
+					ui.popup(tb+'_ttp', 'tooltip', null, 'r', 'c', 120, 40)
+						ui.shadow(1, 1, 3, 0, false, ui.dark() ? 'black' : '#ccc')
+						ui.bb_tooltip('bg2', null, 'intense', null, ui.sp1())
+						ui.p(ui.sp2(), ui.sp())
+						ui.text('', tb+' tooltip')
+					ui.end_popup()
+				}
+			ui.end_stack()
+		ui.end_v()
+	ui.end_stack()
+}
+ui.begin_toolboxes('tbdemo')
+ui.toolbox('tb1', "(1) I am left-aligned", '[', 't', 100, 100)
+	tb_contents('tb1')
+ui.end_toolbox()
+ui.toolbox('tb2', "(2) I am also left-aligned", '[', 't', 200, 150)
+	tb_contents('tb2')
+ui.end_toolbox()
+ui.toolbox('tb3', "(3) I am right-aligned", ']', 't', 100, 100)
+	tb_contents('tb3')
+ui.end_toolbox()
+ui.end_toolboxes()
+`
+
+demos.layers = `
+ui.m(ui.em(2))
+ui.sb('layers_sb', 1)
+	ui.stack('', 1, 'l', 't', 2000, 2000)
+		ui.popup('leyer1_popup', 'layer1', null, 'il', 'c', 100, 50,'change_side constrain')
+			ui.bb_tooltip('bg2', null, 'intense', null, ui.sp1())
+		ui.end_popup()
+		ui.popup('leyer1_popup', 'layer1', null, 'it', '[', 100, 50, 'change_side constrain')
+			ui.bb_tooltip('bg2', null, 'intense', null, ui.sp1())
+		ui.end_popup()
+		ui.bb('bg0')
+		ui.draw_layer('layer1')
+	ui.end_stack()
+ui.end_sb()
+`
+
+let test_template = {
+	t: 'v', fr: 2, gap: 20, e: [
+		{t: 'text', id: 't1', s: 'TP Hello!'},
+		{t: 'stack', id: 'st1', fr: 1, e: [
+			{t: 'bb', bg_color: 'bg3'},
+		]},
+	]}
+demos.template = `
+ui.template('tpl1', test_template)
+`
+
+demos.color_picker = `
+ui.p(ui.sp())
+ui.stack('', 0, 'c', 'c', 400)
+	ui.border(1, 'light')
+	ui.color_picker('cp1', 200, .75, .25)
+ui.end_stack()
+`
+
+// 240x160 so the fitted box is visibly wider than tall.
+img_data_src = 'data:image/svg+xml,'+encodeURIComponent(
+`<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160" viewBox="0 0 240 160">
+	<rect width="240" height="160" fill="#2d7ff9"/>
+	<circle cx="120" cy="80" r="60" fill="#ffd166"/>
+	<path d="M0 0 L240 160 M240 0 L0 160" stroke="#f4f1de" stroke-width="4"/>
+</svg>`)
+
+demos.img = `
+ui.m(ui.sp2())
+ui.h(1, ui.sp2(), 's', 's')
+
+	ui.v(1, ui.sp(), 's', 's')
+		ui.color('label')
+		ui.text('', 'data: src, height from aspect ratio', 0, 'l', 't')
+		ui.stack('', 1, 's', 's')
+			ui.bb('bg1', null, 1, 'intense')
+			ui.p(ui.sp())
+			ui.img(img_data_src, 1, 'c', 'c', -1)
+		ui.end_stack()
+	ui.end_v()
+
+	ui.v(1, ui.sp(), 's', 's')
+		ui.color('label')
+		ui.text('', 'fetched src, height capped at 120', 0, 'l', 't')
+		ui.stack('', 1, 's', 's')
+			ui.bb('bg1', null, 1, 'intense')
+			ui.p(ui.sp())
+			ui.img('../tests/sample.svg', 1, 'c', 'c', 120)
+		ui.end_stack()
+	ui.end_v()
+
+ui.end_h()
+`
+
+// screen sharing ------------------------------------------------------------
+
+let remote_offer_con, remote_answer_con
+
+ui.frame_changed = async function() {
+	let con = remote_offer_con ?? offer_con
+	if (!con) return
+	let cb = await ui.pack_frame()
+	con.send(cb)
+}
+
+listen('rtc', function(c) {
+	ui.animate()
+})
+
+let signal_server, offer_con
+
+window.demo_remote_source_init = function(signal_server) {
+	remote_offer_con = rtc.offer({signal_server: signal_server})
+	let p = ui.add_pointer()
+	remote_offer_con.recv = function(s) {
+		ui.process_shared_screen_input(p, json_arg(s))
+	}
+	remote_offer_con.connect('local')
+}
+
+window.demo_remote_viewer_init = function(signal_server) {
+	remote_answer_con = rtc.answer({signal_server: signal_server})
+	ui.animate()
+}
+
+function demo_share_screen_init() {
+	signal_server = signal_server || rtc.demo_signal_server()
+	if (!offer_con) {
+		offer_con = rtc.offer({signal_server: signal_server})
+		let p = ui.add_pointer()
+		offer_con.recv = function(s) {
+			ui.process_shared_screen_input(p, json_arg(s))
+		}
+	}
+}
+
+demos.share_screen = `
+ui.mt(ui.sp())
+ui.v(1, ui.sp())
+	ui.ml(ui.sp())
+	demo_share_screen_init()
+	ui.h(0, ui.sp())
+		ui.text('', 'My ID', 0)
+		let my_sid = offer_con.signal_con.sid
+		ui.state('sid').text = my_sid
+		ui.input('sid')
+		ui.text('', 'Other ID', 0)
+		let to_sid = ui.input('to_sid')
+		if (!offer_con.open && my_sid)
+			if (ui.button('btn_make_offer', 'Share Screen', 0, 'c', 'c', ui.em(10)))
+				offer_con.connect(to_sid)
+		if (offer_con.open)
+			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c', 'c', ui.em(10)))
+				offer_con.close()
+	ui.end_h()
+	ui.ml(ui.sp())
+	ui.h(0)
+		ui.text('', 'Status: ', 0)
+		ui.text('', offer_con.open ? 'Open' : 'Closed')
+	ui.end_h()
+ui.end_v()
+`
+
+let answer_con
+
+function demo_see_screen_init() {
+	signal_server = signal_server || rtc.demo_signal_server()
+	answer_con = answer_con || rtc.answer({signal_server: signal_server})
+}
+
+demos.see_screen = `
+
+ui.mt(ui.sp())
+ui.v(1, ui.sp())
+	ui.ml(ui.sp())
+	demo_see_screen_init()
+	ui.h(0, ui.sp())
+		ui.text('', 'My ID', 0)
+		let my_sid = answer_con.signal_con.sid
+		ui.state('sid').text = my_sid
+		ui.input('sid')
+		ui.text('', 'Other ID')
+		let to_sid = ui.input('to_sid')
+		if (!answer_con.open && my_sid)
+			if (ui.button('btn_accept_offer', 'See Screen', 0, 'c', 'c', ui.em(10)))
+				answer_con.connect(to_sid)
+		if (answer_con.open)
+			if (ui.button('btn_stop_seeing', 'Stop Seeing', 0, 'c', 'c', ui.em(10)))
+				answer_con.close()
+	ui.end_h()
+	ui.scrollbox('sb_shared_screen')
+		ui.border('t', 'light')
+		ui.shared_screen('ss1', answer_con)
+	ui.end_scrollbox()
+ui.end_v()
+
+`
+
+enter_see_this_screen = function() {
+	let signal_server = rtc.mock_signal_server()
+	let offer_con  = rtc.offer ({signal_server: signal_server, recv: pr})
+	let answer_con = rtc.answer({signal_server: signal_server, recv: pr})
+}
+
+if(0)
+demos.see_this_screen = `
+ui.mt(ui.sp())
+ui.v(1, ui.sp())
+	ui.ml(ui.sp())
+	ui.h(0, ui.sp())
+		ui.text('', 'My ID')
+		let my_sid = str(offer_con.signal_con.sid)
+		ui.state('offer_sid').text = my_sid
+		ui.input('offer_sid')
+		if (offer_con.open) {
+			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c', 'c', ui.em(10))) {
+				offer_con.close()
+			}
+		} else if (answer_con.open) {
+			if (ui.button('btn_stop_seeing', 'Stop Seeing', 0, 'c', 'c', ui.em(10))) {
+				answer_con.close()
+			}
+		} else {
+			if (my_sid) {
+				if (ui.button('btn_make_offer', 'Share Screen', 0, 'c', 'c', ui.em(10))) {
+					offer_con.connect(to_sid)
+				}
+			}
+			if (ui.button('btn_accept_offer', 'See Screen', 0, 'c', 'c', ui.em(10))) {
+				answer_con.connect(to_sid)
+			}
+		}
+
+		/*
+		ui.state('in_send').text = json(signal_queue.signals)
+		ui.input('in_send')
+		if (ui.button('btn_send')) {
+			signal_queue.signals.length = 0
+		}
+		let answer = ui.input('in_answer')
+
+		let in_recv = ui.input('in_recv')
+		if (ui.button('btn_recv')) {
+			for (let [id, k, v] of json_arg(in_recv)) {
+				rtc.signal_server.signal(id, k, v)
+			}
+		}
+		*/
+
+	ui.end_h()
+	ui.scrollbox('sb_shared_screen')
+		ui.border('t', 'light')
+		ui.shared_screen('ss1', answer_con)
+	ui.end_scrollbox()
+ui.end_v()
+`
+
+demos.ast_edit = `
+
+let ast = {
+	root: {
+		s: 'hello',
+		c: [
+			{s: ' '},
+			{s: 'cruel'},
+			{s: '\\n'},
+			{s: '   '},
+			{s: 'world'},
+		],
+	},
+}
+
+//ui.ast_edit('ast_edit1', ast, 1, 's', 's')
+
+`
+
+// document.documentElement.outerHTML
+window.code = `<!DOCTYPE html>
+<style attr=val>
+sel.sel #sel,sel[a=b] p:hover ::some :is(header) {
+	prop: val; /* css comment */
+	bla: 100%;
+}
+</style>
+<!--html comment -->
+<script>
+//syntax error 'not closed string
+let a = 1234.567e12 // number
+let b = "abc" // string
+a.b.c[12345] = cdef
+function f() {
+	if (a + 2 > 5)
+		return true /* comment */
+}
+let x = 1, y = 2, z = 3.2e6
+x += y * z / 2 % 4 ** 2 >>>= 5
+x++
+y--
+if ((x > y && y < z) || !false ?? true) {
+	let result = x === y ? x : z
+	const arr = [x, y, z]
+	class Foo {
+		#private = 42
+		getSecret() {
+			return this.#private
+		}
+	}
+	let func = (a, b) => a + b
+	let obj = {
+		key: func?.(x, y),
+		'@decorated': new Foo()
+	}
+	console.log(obj['@decorated'].getSecret())
+}
+<\/script>
+`
+
+demos.code_edit = `
+
+ui.code_edit('code_edit1', {code: code})
+
+`
+
+// demo ui -------------------------------------------------------------------
+
+let demos_array; {
+let t = {}
+for (let k in tuts)
+	t['tutorial_'+k] = tuts[k]
+assign(demos, t)
+demos_array = keys(demos)
+}
+
+let a_length = 0
+let a_strlen = 0
+function demo_main() {
+
+	ui.v()
+
+		ui.sb('top_bar_sb', 0, 'auto', 'contain')
+			ui.p(ui.sp())
+			ui.h(1, ui.sp2(), 's')
+				ui.border('b', 'light')
+
+				ui.color('label')
+				ui.text('', 'a.length', 0)
+				ui.color('link')
+				ui.text('', a_length+'', 0, 'r', 'c', 1/0, ui.em(3))
+
+				ui.color('label')
+				ui.text('', 'JSON', 0)
+				ui.color('link')
+				ui.text('', format_kbytes(a_strlen, 1), 0, 'r', 'c', 1/0, ui.em(3))
+
+				if (ui.button('btn_light', 'lights', 0)) {
+					ui.set_default_theme(ui.default_theme == 'light' ? 'dark' : 'light')
+					save_demo_state('theme', ui.default_theme)
+					ui.relayout()
+				}
+
+				if (ui.button('btn_debug', 'DEBUG', 0)) {
+					ui.DEBUG = !ui.DEBUG
+					save_demo_state('debug', ui.DEBUG)
+					ui.relayout()
+				}
+
+				if (ui.button('btn_tui', 'TUI', 0)) {
+					ui.TUI = !ui.TUI
+					save_demo_state('tui', ui.TUI)
+					ui.relayout()
+				}
+
+				ui.color('label')
+				ui.text('', 'canvas-ui v'+ui.VERSION, 1, 'r')
+
+			ui.end_h()
+		ui.end_sb()
+
+		ui.h()
+
+			ui.stack('', 0, 's', 's', ui.em(10))
+				ui.border('r', 'light')
+				ui.state_init('demos_list', 'focused_item_i', demos_array.indexOf(SELECTED_DEMO))
+				let i = ui.state('demos_list', 'focused_item_i')
+				SELECTED_DEMO = demos_array[i]
+				save_demo_state('demo', SELECTED_DEMO)
+				ui.sb('demos_list_sb')
+					let demo = ui.list('demos_list', demos_array)
+				ui.end_sb()
+			ui.end_stack()
+
+			let s = (demos[demo] ?? '').trim()
+
+			// ui.code_edit('code_edit1', {code: s ?? ''})
+
+			if (0) {
+				ui.sb('demo_code_sb', .5)
+					ui.bb('bg1', null, 'r', 'light')
+					ui.font('monospace')
+					ui.p(ui.sp4())
+					if (s)
+						ui.text_lines('demo_text', s, 0, 'l', 't')
+				ui.end_sb()
+			}
+
+			ui.stack()
+				if (s)
+					eval(s)
+			ui.end_stack()
+
+			if (ui.DEBUG)
+				ui.debug_pane()
+
+		ui.end_h()
+
+	ui.end_v()
+
+	a_length = ui.a.length
+}
+
+ui.main = demo_main
+
+if (REMOTE_DEMO == 'viewer')
+	ui.main = function() {
+		if (!remote_answer_con)
+			return
+		ui.shared_screen('remote_demo', remote_answer_con)
+		if (!remote_answer_con.open)
+			remote_answer_con.connect('local')
+	}
+
+</script>
+</body>
+</html>

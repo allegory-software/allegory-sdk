@@ -16,11 +16,9 @@ The **server-side** is written in Lua and contains:
  * database schema DSL with automatic schema sync.
  * ...and more, see full list of modules below.
 
-The **client-side** is [canvas-ui], an immediate-mode GUI (IMGUI) library
+The **client-side** is an immediate-mode [GUI library](CANVAS-UI.md)
 written in JavaScript with no dependencies, featuring an editable virtual grid,
 built-in screen sharing and more.
-
-[canvas-ui]: https://github.com/allegory-software/canvas-ui
 
 # Who is this for?
 
@@ -63,7 +61,7 @@ to create build scripts for new libraries without using a build system.
 # Server Modules
 
 * __Standard Library__
-  * [glue](lua/glue.lua)               - "Assorted lengths of wire" library
+  * [glue](lua/glue.lua)               - Standard utilities
   * [pp](lua/pp.lua)                   - Pretty printer and serializer
   * [errors](lua/errors.lua)           - Structured exceptions
   * [errors_io](lua/errors_io.lua)     - Exceptions for writing protocols
@@ -151,22 +149,22 @@ and non-opinionated. The opinionated part comes next.
 
 ## Web Framework
 
-* __The Webb Web Framework__
+* __The Web Framework__
   * [webb](lua/webb.lua)               - Procedural web framework
   * [webb_action](lua/webb_action.lua) - Action-based routing with multi-language URL support
   * [webb_auth](lua/webb_auth.lua)     - Session-based authentication
-  * [webb_spa](lua/webb_spa.lua)       - Single-page app scaffolding
   * [webb_app](lua/webb_app.lua)       - Webb-based application server
-* __The Webb Web Framework / Client-side__
-  * [webb_spa.js](www/webb_spa.js)     - client-side counterpart of [webb_spa.lua](lua/webb_spa.lua)
-  * [mustache.js](www/mustache.js)     - [Logic-less templates](https://mustache.github.io/) rendered on the client
-  * [glue.js](https://github.com/allegory-software/canvas-ui/blob/main/www/glue.js) - Utilities on the client side (part of [canvas-ui]).
-* __Support Libs__
-  * [jsmin](c/jsmin/jsmin.txt)         - JavaScript minification
-
-## UI Widgets
-
-Widgets are provided by [canvas-ui].
+  * [cui_app](lua/cui_app.lua)         - Canvas UI-based application server
+* __The Data Model__
+  * [rowset](lua/rowset.lua) - Model (server-side) for data-bound widgets
+  * [rowset_mdbx](lua/rowset_mdbx.lua) - MDBX-based rowsets
+  * [ui_nav.js](www/ui_nav.js) - Model (client-side) for data-bound widgets
+* __The Canvas UI Library__
+  * [glue.js](www/glue.js) - Standard utilities
+  * [ui.js](www/ui.js)     - Canvas UI system and core widgets
+  * [ui_grid.js](www/ui_grid.js) - Virtual data-bound grid widget
+  * [ui_charts.js](www/ui_charts.js) - Chart widgets
+  * [ui_code_edit.js](www/ui_code_edit.js) - Code editor widget
 
 # Working on the SDK
 

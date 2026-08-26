@@ -4,6 +4,7 @@ test.*
 /www/test.*
 .DS_Store
 .claude
+.codex
 .vscode
 CLAUDE.md
 AGENTS.md
