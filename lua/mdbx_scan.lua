@@ -1319,6 +1319,12 @@ function Scan:union(scan2)
 		scan.first = scan1.first
 		scan.one = scan1.one
 		scan.must_one = scan1.must_one
+		--scan.get delegates to the inputs, so the sentinel goes to both.
+		function scan:null_value(v)
+			scan1:null_value(v)
+			scan2:null_value(v)
+			return self
+		end
 		local function return_scan(_, ...)
 			return scan, ...
 		end
@@ -1853,14 +1859,27 @@ end
 local function install_get(scan, names, read_value, out_specs)
 	local n = #names
 	local values = {}
+	local null_v --value for a null col; nil leaves the col out of the row
 	local function get(out_row)
 		if out_row then
-			for i = 1, n do out_row[names[i]] = read_value(i) end
+			for i = 1, n do
+				local v = read_value(i)
+				if v == nil then v = null_v end
+				out_row[names[i]] = v
+			end
 			return scan, out_row
 		else
-			for i = 1, n do values[i] = read_value(i) end
+			for i = 1, n do
+				local v = read_value(i)
+				if v == nil then v = null_v end
+				values[i] = v
+			end
 			return scan, unpack(values, 1, n)
 		end
+	end
+	function scan:null_value(v)
+		null_v = v
+		return self
 	end
 	scan.out_cols = names
 	scan.out_specs = out_specs
