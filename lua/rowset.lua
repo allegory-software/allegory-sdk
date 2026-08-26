@@ -62,6 +62,7 @@
 		name_col         :               default display col when used as lookup rowset
 
 	Methods to implement:
+		prepare()                      build whatever the other methods need
 		load_rows(result, param_vals)
 		insert_row(vals)
 		update_row(vals)
@@ -117,6 +118,8 @@ local client_field_attrs = {
 
 local rowset_tables = {} --{table -> {rowset->true}}
 local push_rowset_changed_events --fw. decl.
+
+local row_errtypes = 'row field'
 
 function virtual_rowset(init, ...)
 
@@ -230,6 +233,7 @@ function virtual_rowset(init, ...)
 	end
 
 	rs.compute_row_vals = noop
+	rs.prepare = noop
 
 	local repl = repl
 
@@ -264,7 +268,7 @@ function virtual_rowset(init, ...)
 
 	local function reload_row(op, rt, row_values)
 		if not rs.load_row then return end
-		local ok, row = catch('db', rs.load_row, rs, row_values)
+		local ok, row = catch(row_errtypes, rs.load_row, rs, row_values)
 		if ok then
 			if op == 'insert' or op == 'update' then
 				if not row then
@@ -377,7 +381,7 @@ function virtual_rowset(init, ...)
 			if row.type == 'new' then
 				local can, err, field_errors = rs:can_add_row(row.values)
 				if can ~= false then
-					local ok, err = catch('db', rs.insert_row, self, row.values)
+					local ok, err = catch(row_errtypes, rs.insert_row, self, row.values)
 					if ok then
 						if reload_row('insert', rt, row.values) then
 							rowset_changed = true
@@ -396,7 +400,7 @@ function virtual_rowset(init, ...)
 			elseif row.type == 'update' then
 				local can, err, field_errors = rs:can_change_row(row.values)
 				if can ~= false then
-					local ok, err = catch('db', rs.update_row, self, row.values)
+					local ok, err = catch(row_errtypes, rs.update_row, self, row.values)
 					if ok then
 						--copy :foo:old to :foo so we can select the row back.
 						for k,v in pairs(row.values) do
@@ -422,7 +426,7 @@ function virtual_rowset(init, ...)
 			elseif row.type == 'remove' then
 				local can, err, field_errors = rs:can_remove_row(row.values)
 				if can ~= false then
-					local ok, err = catch('db', rs.delete_row, self, row.values)
+					local ok, err = catch(row_errtypes, rs.delete_row, self, row.values)
 					if ok then
 						if reload_row('delete', rt, row.values) then
 							rowset_changed = true
@@ -465,7 +469,7 @@ function virtual_rowset(init, ...)
 			local dts  = wb:add_format({num_format = country('date_format')..' hh:mm:ss'})
 			for i,field in ipairs(rs.fields) do
 				ws:write(0, i-1, field.label or capitalize(field.name), bold)
-				local w = round(field.w / 10) --width in chars
+				local w = field.w and round(field.w / 10) --width in chars
 				w = field.hidden and 1 or w and min(32, w)
 				local fmt
 				if field.type == 'date' then
