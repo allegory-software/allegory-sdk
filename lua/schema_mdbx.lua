@@ -147,7 +147,8 @@ do
 	function env.as(gen_fn_version, expr)
 		if expr == nil then gen_fn_version, expr = nil, gen_fn_version end
 		assertf(not isstr(gen_fn_version), 'as(expr) does not take a version')
-		return expr_fn_flag('gen', expr, {gen_fn_version = gen_fn_version})
+		return expr_fn_flag('gen', expr,
+			{gen_fn_version = gen_fn_version, readonly = true})
 	end
 
 end
