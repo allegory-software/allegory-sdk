@@ -289,6 +289,7 @@ TEXT
 	text_editable   (id, s, fr, align, valign, max_w, w, h, input_type)
 	text_lines      (id, s, fr, align, valign, max_w, w, h, editable)
 	text_wrapped    (id, s, fr, align, valign, max_w, w, h, editable)
+	mark_text       (i1, i2, [bg])   background behind [i1,i2) of the next text
 	select_text     (id, 'all'|'start'|'end')   place the caret in an editable text
 	text_selected   (id, 'all'|'start'|'end') -> t|f   where the caret is
 
@@ -1711,6 +1712,19 @@ function ui_cmd(cmd, ...args) {
 	return i
 }
 ui.cmd = ui_cmd
+
+// append args to the command at i, for slots that few of them need.
+// i must still be the last command: ui_cmd_box() records a second one when
+// scroll_to_view() was called before it.
+function ui_cmd_add_args(i, ...args) {
+	assert(cmd_last_i(a) == i)
+	a.length-- // drop prev_i
+	for (let v of args)
+		a.push(v)
+	let next_i = a.length+3 - i
+	a[i-2] = next_i
+	a.push(-next_i)
+}
 
 // print current recording
 ui.disas = function(a) {
@@ -4727,6 +4741,10 @@ const TEXT_ID         = BOX_ARGS+5
 const TEXT_S          = BOX_ARGS+6
 const TEXT_FLAGS      = BOX_ARGS+7
 const TEXT_INPUT_TYPE = BOX_ARGS+8
+// only present when TEXT_MARKED is set, see mark_text().
+const TEXT_MARK_I1    = BOX_ARGS+9
+const TEXT_MARK_I2    = BOX_ARGS+10
+const TEXT_MARK_BG    = BOX_ARGS+11
 
 // TEXT_FLAGS
 const TEXT_WRAP           =  3 // bits 0 and 1
@@ -4735,8 +4753,18 @@ const TEXT_WRAP_WORD      =  2 // bit 2
 const TEXT_EDITABLE       =  4 // bit 3
 const TEXT_FOCUSED        =  8 // bit 4
 const TEXT_FOCUSED_BY_KEY = 16 // bit 5
+const TEXT_MARKED         = 32 // bit 6
 
 const CMD_TEXT = cmd('text')
+
+// draw a background behind [i1, i2) of the next text, to show a match or a
+// selection. bg defaults to the `search` background style.
+let mark_i1, mark_i2, mark_bg
+ui.mark_text = function(i1, i2, bg) {
+	mark_i1 = i1
+	mark_i2 = i2
+	mark_bg = bg
+}
 
 ui.text = function(
 	id, s, fr, align, valign, max_w, w, h, wrap, editable, input_type
@@ -4758,7 +4786,8 @@ ui.text = function(
 		// before anything is typed.
 		s = ui.state(id).text ??= s
 	}
-	ui_cmd_box(CMD_TEXT, fr ?? 1, align ?? 'l', valign ?? 'c',
+	let marked = mark_i1 != null && mark_i2 > mark_i1
+	let i = ui_cmd_box(CMD_TEXT, fr ?? 1, align ?? 'l', valign ?? 'c',
 		w ?? -1, // -1=auto
 		h ?? -1, // -1=auto
 		0, // ascent
@@ -4771,9 +4800,13 @@ ui.text = function(
 		wrap // flags
 			| (editable ? TEXT_EDITABLE : 0)
 			| (ui.focused(id) ? TEXT_FOCUSED : 0)
-			| (ui.focused(id) && ui.focused_by_key ? TEXT_FOCUSED_BY_KEY : 0),
+			| (ui.focused(id) && ui.focused_by_key ? TEXT_FOCUSED_BY_KEY : 0)
+			| (marked ? TEXT_MARKED : 0),
 		input_type,
 	)
+	if (marked)
+		ui_cmd_add_args(i, mark_i1, mark_i2, mark_bg ?? 'search')
+	mark_i1 = null
 
 	return s
 }
@@ -5378,13 +5411,29 @@ draw[CMD_TEXT] = function(a, i) {
 	}
 
 	cx.textAlign = 'left'
-	cx.fillStyle = col
 
 	if (isstr(s)) {
 
+		cx.fillStyle = col
 		cx.fillText(s, x, y + asc)
 
+		// the background covers the text drawn under it, so the marked part
+		// can be redrawn on it without the two antialiased edges blending.
+		if (flags & TEXT_MARKED) {
+			let i1 = a[i+TEXT_MARK_I1]
+			let i2 = a[i+TEXT_MARK_I2]
+			let mark_s = s.slice(i1, i2)
+			let mark_x = x + measure_text(cx, s.slice(0, i1)).width
+			let bg = bg_color_hsl(a[i+TEXT_MARK_BG])
+			cx.fillStyle = bg[0]
+			cx.fillRect(mark_x, y, measure_text(cx, mark_s).width, asc + dsc)
+			cx.fillStyle = fg_color('text', null, bg_is_dark(bg) ? 'dark' : 'light')
+			cx.fillText(mark_s, mark_x, y + asc)
+		}
+
 	} else if (wrap == TEXT_WRAP_LINE) {
+
+		cx.fillStyle = col
 
 		for (let ss of s) {
 			cx.fillText(ss, x, y + asc)
@@ -5392,6 +5441,8 @@ draw[CMD_TEXT] = function(a, i) {
 		}
 
 	} else if (wrap == TEXT_WRAP_WORD) {
+
+		cx.fillStyle = col
 
 		let align = a[i+ALIGN]
 		let x0 = x
