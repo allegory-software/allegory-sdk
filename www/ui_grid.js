@@ -250,8 +250,11 @@ function init(id, e) {
 				let v = field.draw_editor(e.editor_id, input_val)
 				if (v !== input_val)
 					e.set_cell_val(row, field, v, {input: e})
-			} else
+			} else {
+				if (row == e.focused_row && field == e.quicksearch_field)
+					ui.mark_text(0, e.quicksearch_text.length)
 				e.draw_val(row, field, input_val, true, full_width)
+			}
 			ui.p(0)
 		ui.end_stack()
 
