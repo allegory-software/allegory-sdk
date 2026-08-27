@@ -5067,7 +5067,7 @@ count.to_input = number.to_text
 // dates ---------------------------------------------------------------------
 
 let date = {
-	align: 'center',
+	align: 'right',
 	is_time: true,
 	w: 80,
 	precision: 'd',
