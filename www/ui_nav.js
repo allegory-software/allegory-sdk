@@ -85,7 +85,10 @@ Field attributes:
 		client_default : default value/generator that new rows are initialized with.
 		has_server_default: the server fills this in, so it can be left empty.
 		readonly       : prevent editing.
-		editor         : f({nav:, col:, embedded: t|f}) -> editor instance
+		draw_editor    : f(id, v) -> v   draw the widget that edits v.
+
+		to_input       : f(v) -> s   value as editable text.
+		from_input     : f(s) -> v   editable text back to value (or undefined)
 
 		enum_values    : enum type: 'v1 ...' | ['v1', ...]
 		enum_labels    : enum type: {v->label}
@@ -125,8 +128,6 @@ Field attributes:
 		duration_format: see duration() in glue.js
 
 		button_options : button type: options to pass to button()
-
-		format         : value format when saving it as json (date/time types, etc.)
 
 	vlookup:
 
@@ -381,8 +382,10 @@ Editing cells:
 		stay_in_edit_mode
 		exit_edit_on_lost_focus
 	publishes:
-		e.editor                  always null until editing is implemented.
-		e.enter_edit([editor_state], [focus])
+		e.editing                 the focused cell is being edited.
+		e.editor_id               ui id the editor widget is drawn under.
+		e.enter_edit(['all'|'start'|'end'], [focus]) -> t|f
+		e.enter_exits_edit        enter closes the editor it opened.
 		e.exit_edit([{cancel: true}])
 		e.exit_row([{cancel: true}])
 	calls:
@@ -905,9 +908,8 @@ ui.nav = function(opt) {
 	e.enter_edit_on_click_focused = false
 	e.exit_edit_on_enter          = false
 	e.exit_edit_on_escape         = true
-	e.quick_edit                  = false
 	e.tab_navigation              = false
-	e.advance_on_enter            = 'next_cell' // next_row | next_cell | null
+	e.advance_on_enter            = 'next_row' // next_row | next_cell | null
 	e.auto_jump_cells             = true
 
 	e.save_on_add_row            = false
@@ -983,6 +985,11 @@ ui.nav = function(opt) {
 		let update_row_visibility = ev.row_visibility
 
 		let refocus_state
+
+		// e.editor_id is keyed on the focused cell's position: end the edit
+		// before anything renumbers the rows.
+		if (reset || update_rows || update_filters || update_row_order)
+			e.exit_edit()
 
 		if (reset) {
 
@@ -1951,8 +1958,8 @@ ui.nav = function(opt) {
 			)
 		}
 
-		let was_editing = ev.was_editing || !!e.editor
-		let focus_editor = ev.focus_editor || (e.editor && e.editor.has_focus)
+		let was_editing = ev.was_editing || e.editing
+		let focus_editor = ev.focus_editor || ui.focused(e.editor_id)
 		let enter_edit = ev.enter_edit || (was_editing && e.stay_in_edit_mode)
 		let editable = (ev.editable || enter_edit) && !ev.focus_non_editable_if_not_found
 		let expand_selection = ev.expand_selection && e.can_select_multiple
@@ -2092,14 +2099,8 @@ ui.nav = function(opt) {
 			qs_changed = true
 		}
 
-		/*
-		if (row_changed || sel_rows_changed || field_changed || qs_changed)
-			e.update({state: true})
-
-		if (enter_edit && ri != null && fi != null) {
-			e.update({enter_edit: [ev.editor_state, focus_editor || false]})
-		}
-		*/
+		if (enter_edit && ri != null && fi != null)
+			e.enter_edit(ev.caret_pos, focus_editor || false)
 
 		if (ev.make_visible != false)
 			if (e.focused_row)
@@ -2167,8 +2168,8 @@ ui.nav = function(opt) {
 
 	e.refocus_state = function(how) {
 		let fs = {how: how}
-		fs.was_editing = !!e.editor
-		fs.focus_editor = e.editor && e.editor.has_focus
+		fs.was_editing = e.editing
+		fs.focus_editor = ui.focused(e.editor_id)
 		fs.col = e.focused_field && e.focused_field.name
 		if (how == 'pk' || how == 'val') {
 			if (e.pk_fields)
@@ -3365,7 +3366,9 @@ ui.nav = function(opt) {
 		}
 
 		let errors = e.validate_cell(field, val)
-		val = field.validator.value
+		// text that doesn't parse stays in the cell, same as when loading.
+		if (!field.validator.parse_failed)
+			val = field.validator.value
 		let compare_vals = field.compare_vals || e.compare_vals
 		let old_val = e.cell_input_val(row, field)
 		if (!compare_vals(val, old_val))
@@ -3403,8 +3406,11 @@ ui.nav = function(opt) {
 
 		let field = fld(col)
 
+		// set_cell_val() routes nosave fields here, so val can be editor text.
+		// readonly fields have no validator and nothing to parse.
 		let errors = e.validate_cell(field, val)
-		val = field.validator.value
+		if (field.validator && !field.validator.parse_failed)
+			val = field.validator.value
 
 		let old_val = e.cell_val(row, field)
 
@@ -3449,7 +3455,11 @@ ui.nav = function(opt) {
 
 	// editing ----------------------------------------------------------------
 
-	e.editor = null
+	// the edited cell is the focused cell; the text and caret belong to the
+	// editor widget drawn under e.editor_id.
+	e.editing = false
+	e.enter_exits_edit = false
+	e.editor_id = null
 
 	e.do_cell_click = noop
 
@@ -3461,10 +3471,46 @@ ui.nav = function(opt) {
 		return false
 	}
 
-	// TODO: cell editing. `e.editor` stays null until this is implemented,
-	// which is what makes the grid treat every cell as not being edited.
-	e.enter_edit = return_false
-	e.exit_edit = noop
+	e.enter_edit = function(caret_pos, focus) {
+		if (e.editing)
+			return true
+		let row = e.focused_row
+		let field = e.focused_field
+		if (!row || !field)
+			return false
+		if (!e.can_change_val(row, field))
+			return false
+		e.editing = true
+		e.enter_exits_edit = false
+		e.editor_id = e.id + '.editor.' + e.row_index(row) + '.' + e.field_index(field)
+		// by key: that is what focuses the input element. a click can't, the
+		// input only appears a frame later.
+		if (focus !== false) {
+			ui.focus(e.editor_id, true)
+			ui.select_text(e.editor_id, caret_pos ?? 'all')
+		}
+		return true
+	}
+
+	e.exit_edit = function(ev) {
+		if (!e.editing)
+			return
+		let row = e.focused_row
+		let field = e.focused_field
+		// leaving because focus went elsewhere must not pull it back.
+		let take_focus = ui.focused(e.editor_id)
+		e.editing = false
+		e.enter_exits_edit = false
+		e.editor_id = null
+		if (ev && ev.cancel) {
+			if (row && field)
+				e.revert_cell(row, field, ev)
+		} else if (e.save_on_exit_edit) {
+			e.save(ev)
+		}
+		if (take_focus)
+			ui.focus(e.id)
+	}
 
 	e.revert_cell = function(row, field, ev) {
 		return e.reset_cell_val(row, field, e.cell_val(row, field), ev)
@@ -3669,9 +3715,8 @@ ui.nav = function(opt) {
 		// request to focus the new row implies being able to exit the
 		// focused row first. if that's not possible, the insert is aborted.
 		if (ev.focus_it) {
-			ev.was_editing  = !!e.editor
-			ev.editor_state = ev.editor_state || e.editor && e.editor.state && e.editor.editor_state()
-			ev.focus_editor = e.editor && e.editor.has_focus
+			ev.was_editing  = e.editing
+			ev.focus_editor = ui.focused(e.editor_id)
 			if (!e.focus_cell(false, false))
 				return 0
 		}
@@ -4877,6 +4922,25 @@ all_field_types.to_text = function(v) {
 	return String(v)
 }
 
+// to_input(v) -> s, inverse of from_input(s) -> v. filesize, count and date
+// override it: from_input() can't read back a magnitude suffix or a timeago text.
+all_field_types.to_input = function(v) {
+	return this.to_text(v)
+}
+
+// draw_editor(id, v) -> v   text box over to_input()/from_input(); a type
+// with its own widget overrides it. untouched text gives back the same v, so
+// a redraw is not an edit; text that doesn't parse comes back as itself.
+// same call as draw_text(), so the cell doesn't shift on entering edit.
+all_field_types.draw_editor = function(id, v) {
+	let s0 = v == null ? '' : this.to_input(v)
+	let s1 = ui.text_editable(id, s0, 0, this.align, 'c', null)
+	if (s1 === s0)
+		return v
+	let v1 = this.from_input ? this.from_input(s1) : s1
+	return v1 === undefined ? s1 : v1
+}
+
 all_field_types.fixed_width = 0
 
 all_field_types.draw_text = function(s, mode, row, full_width) {
@@ -4968,6 +5032,9 @@ filesize.to_text = function(s) {
 	return format_kbytes(x, dec, mag)
 }
 
+// from_input() doesn't read the magnitude suffix back.
+filesize.to_input = number.to_text
+
 filesize.draw = function(x, mode) {
 	let s = this.to_text(x)
 	if (mode) {
@@ -4995,6 +5062,8 @@ count.to_text = function(s) {
 	return format_kcount(x, dec, mag)
 }
 
+count.to_input = number.to_text
+
 // dates ---------------------------------------------------------------------
 
 let date = {
@@ -5002,10 +5071,9 @@ let date = {
 	is_time: true,
 	w: 80,
 	precision: 'd',
-	format: 'sql', // sql | time
 	min: parse_date('1000-01-01 00:00:00', 'SQL'),
 	max: parse_date('9999-12-31 23:59:59', 'SQL'),
-	from_input: function(s) { return parse_date(s, null, false, this.precision) },
+	from_input: function(s) { return parse_date(s, null, true, this.precision) },
 }
 field_types.date = date
 
@@ -5017,15 +5085,16 @@ date.to_text = function(v) {
 	return format_date(v, null, this.precision)
 }
 
+// timeago text doesn't parse back.
+date.to_input = function(v) {
+	if (!isnum(v)) // invalid
+		return str(v)
+	return format_date(v, null, this.precision)
+}
+
 let inh_draw = all_field_types.draw
 date.draw = function(v, mode) {
 	return inh_draw.call(this, v, mode)
-}
-
-date.to_json = function(t) {
-	if (this.format == 'sql')
-		return format_date(t, 'SQL', this.precision)
-	return t
 }
 
 let dt = assign({}, date, {precision: 'm', w: 140})
@@ -5045,7 +5114,7 @@ ts.w = 160
 let td = {
 	align: 'center',
 	is_timeofday: true,
-	from_input: function(s) { return parse_timeofday(s, false, this.precision) },
+	from_input: function(s) { return parse_timeofday(s, true, this.precision) },
 }
 field_types.timeofday = td
 

@@ -100,6 +100,9 @@ function init(id, e) {
 	let focused, shift, ctrl
 	let keydown = key => focused && ui.keydown(key)
 
+	// only asked while editing, so e.editor_id is set.
+	let caret_at = where => ui.text_selected(e.editor_id, where)
+
 	// utils
 
 	function field_has_indent(field) {
@@ -134,7 +137,7 @@ function init(id, e) {
 		let is_empty = input_val === ''
 		let sel_fields = e.selected_rows.get(row)
 		let selected = (isobject(sel_fields) ? sel_fields.has(field) : sel_fields) || false
-		let editing = !!e.editor && cell_focused
+		let editing = e.editing && cell_focused
 		let hovering = hit_zone == 'cell' && hit_ri == ri && hit_fi == fi
 		let full_width = !draw_stage && ((row_focused && field == e.focused_field) || hovering)
 
@@ -241,7 +244,14 @@ function init(id, e) {
 				// ui.treegrid_indent(indent_x)
 			}
 			ui.p(pad_l, 0, pad_r, 0)
-			e.draw_val(row, field, input_val, true, full_width)
+			// a drag overlay redraws the cell; it can't be a second widget
+			// under the same id.
+			if (editing && !draw_stage) {
+				let v = field.draw_editor(e.editor_id, input_val)
+				if (v !== input_val)
+					e.set_cell_val(row, field, v, {input: e})
+			} else
+				e.draw_val(row, field, input_val, true, full_width)
 			ui.p(0)
 		ui.end_stack()
 
@@ -428,9 +438,13 @@ function init(id, e) {
 		gcol_h = line_height + sp
 		gcol_gap = 1
 
+		if (e.editing && e.exit_edit_on_lost_focus && !ui.focused(e.editor_id))
+			e.exit_edit()
+
 		// set keyboard state
 
-		focused = ui.focused(id)
+		// editing moves the focus to the editor, but these keys are the grid's.
+		focused = ui.focused(id) || ui.focused(e.editor_id)
 		shift = ui.keypressed('shift')
 		ctrl  = ui.keypressed('ctrl')
 
@@ -828,7 +842,7 @@ function init(id, e) {
 			let click =
 				!e.enter_edit_on_click
 				&& !e.stay_in_edit_mode
-				&& !e.editor
+				&& !e.editing
 				&& e.cell_clickable(row, field)
 
 			if (e.focus_cell(hit_ri, hit_fi, 0, 0, {
@@ -840,7 +854,7 @@ function init(id, e) {
 						|| (e.enter_edit_on_click_focused && already_on_it)),
 				focus_editor: true,
 				focus_non_editable_if_not_found: true,
-				editor_state: click ? 'click' : 'select_all',
+				caret_pos: 'all',
 				expand_selection: shift,
 				invert_selection: ctrl,
 				input: e,
@@ -866,22 +880,21 @@ function init(id, e) {
 
 			let cols = keydown(left_arrow) ? -1 : 1
 
-			let move = !e.editor
+			let move = !e.editing
 				|| (e.auto_jump_cells && !shift && (!horiz || ctrl)
 					&& (!horiz
-						|| !e.editor.editor_state
 						|| ctrl
-							&& (e.editor.editor_state(cols < 0 ? 'left' : 'right')
-							|| e.editor.editor_state('all_selected'))
+							&& (caret_at(cols < 0 ? 'start' : 'end')
+							|| caret_at('all'))
 						))
 
 			if (move)
 				if (e.focus_next_cell(cols, {
-					editor_state: horiz
-						? (((e.editor && e.editor.editor_state) ? e.editor.editor_state('all_selected') : ctrl)
-							? 'select_all'
-							: cols > 0 ? 'left' : 'right')
-						: 'select_all',
+					caret_pos: horiz
+						? ((e.editing ? caret_at('all') : ctrl)
+							? 'all'
+							: cols > 0 ? 'start' : 'end')
+						: 'all',
 					expand_selection: shift,
 					input: e,
 				}))
@@ -896,7 +909,7 @@ function init(id, e) {
 
 			if (e.focus_next_cell(cols, {
 				auto_advance_row: true,
-				editor_state: cols > 0 ? 'left' : 'right',
+				caret_pos: cols > 0 ? 'start' : 'end',
 				input: e,
 			}))
 				return false
@@ -922,10 +935,10 @@ function init(id, e) {
 			if (e.is_last_row_focused() && e.focused_row) {
 				let row = e.focused_row
 				if (row.is_new && !e.is_row_user_modified(row)) {
-					let editing = !!e.editor
+					let editing = e.editing
 					if (e.remove_row(row, {input: e, refocus: true})) {
 						if (editing)
-							e.enter_edit('select_all')
+							e.enter_edit('all')
 						return false
 					}
 				}
@@ -942,19 +955,17 @@ function init(id, e) {
 		else if (keydown('end'     )) rows =  1/0
 		if (rows) {
 
-			let move = !e.editor
+			let move = !e.editing
 				|| (e.auto_jump_cells && !shift
 					&& (horiz
-						|| !e.editor.editor_state
 						|| (ctrl
-							&& (e.editor.editor_state(rows < 0 ? 'left' : 'right')
-							|| e.editor.editor_state('all_selected')))
+							&& (caret_at(rows < 0 ? 'start' : 'end')
+							|| caret_at('all')))
 						))
 
 			if (move)
 				if (e.focus_cell(true, true, rows, 0, {
-					editor_state: e.editor && e.editor.editor_state
-						&& (horiz ? e.editor.editor_state() : 'select_all'),
+					caret_pos: e.editing && !horiz ? 'all' : null,
 					expand_selection: shift,
 					input: e,
 				}))
@@ -963,8 +974,8 @@ function init(id, e) {
 		}
 
 		// F2: enter edit mode
-		if (!e.editor && keydown('f2')) {
-			e.enter_edit('select_all')
+		if (!e.editing && keydown('f2')) {
+			e.enter_edit('all')
 			return false
 		}
 
@@ -973,29 +984,29 @@ function init(id, e) {
 			if (e.quicksearch_text) {
 				e.quicksearch(e.quicksearch_text, e.focused_row, shift ? -1 : 1)
 				return false
-			} else if (e.hasclass('picker')) {
+			} else if (e.is_picker) {
 				e.pick_val()
 				return false
-			} else if (!e.editor) {
-				e.enter_edit('click')
+			} else if (!e.editing) {
+				e.enter_edit('all')
+				e.enter_exits_edit = true
 				return false
 			} else {
-				if (e.advance_on_enter == 'next_row')
-					e.focus_cell(true, true, 1, 0, {
-						input: e,
-						enter_edit: e.stay_in_edit_mode,
-						editor_state: 'select_all',
-						must_move: true,
-					})
-				else if (e.advance_on_enter == 'next_cell')
-					e.focus_next_cell(shift ? -1 : 1, {
-						input: e,
-						enter_edit: e.stay_in_edit_mode,
-						editor_state: 'select_all',
-						must_move: true,
-					})
-				else if (e.exit_edit_on_enter)
+				// enter advances along advance_on_enter's axis, ctrl along
+				// the other one, shift backwards.
+				if (e.enter_exits_edit) {
 					e.exit_edit()
+				} else if (e.advance_on_enter) {
+					let by_row = (e.advance_on_enter == 'next_row') != ctrl
+					let d = shift ? -1 : 1
+					let opt = {input: e, caret_pos: 'all', must_move: true}
+					if (by_row)
+						e.focus_cell(true, true, d, 0, opt)
+					else
+						e.focus_next_cell(d, opt)
+				} else if (e.exit_edit_on_enter) {
+					e.exit_edit()
+				}
 				return false
 			}
 		}
@@ -1006,10 +1017,9 @@ function init(id, e) {
 				e.quicksearch('')
 				return false
 			}
-			if (e.editor) {
+			if (e.editing) {
 				if (e.exit_edit_on_escape) {
 					e.exit_edit()
-					e.focus()
 					return false
 				}
 			} else if (e.focused_row && e.focused_field) {
@@ -1043,11 +1053,15 @@ function init(id, e) {
 
 		if (keydown('delete')) {
 
-			if (e.editor && e.editor.input_val == null)
+			// delete on an already-empty cell leaves edit mode. the key is
+			// spent on that, so it must not go on to delete rows as well.
+			if (e.editing && e.cell_input_val(e.focused_row, e.focused_field) == null) {
 				e.exit_edit({cancel: true})
+				return false
+			}
 
 			// delete: toggle-delete selected rows
-			if (!ctrl && !e.editor && e.remove_selected_rows({
+			if (!ctrl && !e.editing && e.remove_selected_rows({
 						input: e, refocus: true, toggle: true, confirm: true
 					}))
 				return false
@@ -1060,20 +1074,20 @@ function init(id, e) {
 
 		}
 
-		if (!e.editor && keydown(' ') && !e.quicksearch_text) {
+		if (!e.editing && keydown(' ') && !e.quicksearch_text) {
 			if (e.focused_row && (!e.can_focus_cells || e.focused_field == e.tree_field))
 				e.toggle_collapsed(e.focused_row, shift)
 			else if (e.focused_row && e.focused_field && e.cell_clickable(e.focused_row, e.focused_field))
-				e.enter_edit('click')
+				e.enter_edit('all')
 			return false
 		}
 
-		if (!e.editor && ctrl && keydown('a')) {
+		if (!e.editing && ctrl && keydown('a')) {
 			e.select_all_cells()
 			return false
 		}
 
-		if (!e.editor && keydown('backspace')) {
+		if (!e.editing && keydown('backspace')) {
 			if (e.quicksearch_text)
 				e.quicksearch(e.quicksearch_text.slice(0, -1), e.focused_row)
 			return false
@@ -1084,7 +1098,7 @@ function init(id, e) {
 			return false
 		}
 
-		if (ctrl && !e.editor) {
+		if (ctrl && !e.editing) {
 			if (keydown('c')) {
 				let row = e.focused_row
 				let fld = e.focused_field
@@ -1100,20 +1114,11 @@ function init(id, e) {
 			}
 		}
 
-		// TODO:
-		// printable characters: enter quick edit mode.
-		function keypress(c) {
-			if (e.quick_edit) {
-				if (!e.editor && e.focused_row && e.focused_field) {
-					e.enter_edit('select_all')
-					let v = e.focused_field.from_text(c)
-					e.set_cell_val(e.focused_row, e.focused_field, v)
-					return false
-				}
-			} else if (!e.editor) {
-				e.quicksearch(e.quicksearch_text + c, e.focused_row)
-				return false
-			}
+		// printable chars search. while editing they belong to the editor.
+		let typed = focused && !e.editing && ui.key_chars()
+		if (typed) {
+			e.quicksearch(e.quicksearch_text + typed, e.focused_row)
+			return false
 		}
 
 		})() === false) // if (ui.key_events.length) ...

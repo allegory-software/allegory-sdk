@@ -250,13 +250,10 @@ add_validation_rule({
 	rule     : (e) => S('validation_empty_rule'    , '{0} cannot be empty', e.label),
 })
 
-// NOTE: empty string converts to `true` even when setting the value from JS!
-// This is so that a html attr without value becomes `true`.
 add_validation_rule({
 	name     : 'bool',
 	vprops   : 'input_value',
 	applies  : (e) => e.is_bool,
-	parse    : (e, v) => isbool(v) ? v : bool_attr(v),
 	validate : (e, v) => isbool(v),
 	error    : (e, v) => S('validation_bool_error',
 		'{0} is not a boolean' , e.label),
@@ -268,7 +265,7 @@ add_validation_rule({
 	name     : 'number',
 	vprops   : 'input_value',
 	applies  : (e) => e.is_number,
-	parse    : (e, v) => isstr(v) ? num(v) : v,
+	parse    : (e, v) => isstr(v) ? e.from_input(v) : v,
 	validate : (e, v) => isnum(v),
 	error    : (e, v) => S('validation_num_error',
 		'{0} is not a number' , e.label),
@@ -479,7 +476,7 @@ add_validation_rule({
 	name     : 'time',
 	vprops   : 'input_value',
 	applies  : (e) => e.is_time,
-	parse    : (e, v) => parse_date(v, 'SQL', true, e.precision),
+	parse    : (e, v) => isstr(v) ? e.from_input(v) : v,
 	validate : return_true,
 	error    : (e, v) => S('validation_time_error', '{0}: invalid date', e.label),
 	rule     : (e) => S('validation_time_rule', '{0} must be a valid date'),
@@ -491,7 +488,7 @@ add_validation_rule({
 	name     : 'timeofday',
 	vprops   : 'input_value',
 	applies  : (e) => e.is_timeofday,
-	parse    : (e, v) => parse_timeofday(v, true, e.precision),
+	parse    : (e, v) => isstr(v) ? e.from_input(v) : v,
 	validate : return_true,
 	error    : (e, v) => S('validation_timeofday_error',
 		'{0}: invalid time of day', e.label),

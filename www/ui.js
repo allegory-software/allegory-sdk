@@ -106,6 +106,7 @@ KEYBOARD STATE
 	keydown         (key) -> t|f     check if a key was just pressed
 	keyup           (key) -> t|f     check if a key was just depressed
 	keypressed      (key) -> t|f     check if the active pointer's user holds a key
+	key_chars       () -> s          printable characters typed this frame
 	key_events      -> [['down'|'up', full_key, key, char, ctrl, alt, shift], ...]
 	capture_keys    ()    remove current keydown() and keyup() events
 	capture_keydown (key)   stop the browser from acting on a keydown
@@ -288,6 +289,8 @@ TEXT
 	text_editable   (id, s, fr, align, valign, max_w, w, h, input_type)
 	text_lines      (id, s, fr, align, valign, max_w, w, h, editable)
 	text_wrapped    (id, s, fr, align, valign, max_w, w, h, editable)
+	select_text     (id, 'all'|'start'|'end')   place the caret in an editable text
+	text_selected   (id, 'all'|'start'|'end') -> t|f   where the caret is
 
 	measure_text    (cx, s) -> {w:, asc:, dsc:, {actual|font}BoundingBox{Ascent|Descent|Left|Right}:, }
 
@@ -1273,6 +1276,15 @@ ui.keyup = function(key) {
 
 ui.keypressed = function(key) {
 	return ui.pointer.key_state.has(key)
+}
+
+// printable characters typed this frame
+ui.key_chars = function() {
+	let s = ''
+	for (let ev of ui.key_events)
+		if (ev[0] == 'down' && ev[3] != null)
+			s += ev[3]
+	return s
 }
 
 ui.keys_down   = () => key_downs.size
@@ -4742,7 +4754,9 @@ ui.text = function(
 	if (editable) {
 		keepalive(id)
 		ui.focusable(id)
-		s = ui.state(id, 'text') ?? s
+		// so that text_selected() has a text to measure the caret against
+		// before anything is typed.
+		s = ui.state(id).text ??= s
 	}
 	ui_cmd_box(CMD_TEXT, fr ?? 1, align ?? 'l', valign ?? 'c',
 		w ?? -1, // -1=auto
@@ -5060,24 +5074,63 @@ let prev_drawn_focused_input
 let drawn_focused_input
 let drawn_focused_by_key
 
+// place the caret: 'all' selects the text, 'start'/'end' put it before/after.
+// takes effect on the next frame.
+ui.select_text = function(id, where) {
+	ui.state(id).select_text = where
+}
+
+// -> t|f  where the caret is, in select_text() terms.
+ui.text_selected = function(id, where) {
+	let t = ui.state(id)
+	let n = (t.text ?? '').length
+	let a = t.anchor ?? 0 // selection start
+	let c = t.caret  ?? 0 // selection end
+	if (where == 'start')
+		return a == 0 && c == 0
+	if (where == 'end')
+		return a == n && c == n
+	if (where == 'all')
+		return n > 0 && (a == 0 && c == n || c == 0 && a == n)
+	return false
+}
+
+function apply_select_text(input) {
+	let s = ui.state(input._ui_id)
+	let where = s.select_text
+	if (!where)
+		return
+	s.select_text = null
+	let n = input.value.length
+	if (where == 'all')
+		input.setSelectionRange(0, n)
+	else if (where == 'start')
+		input.setSelectionRange(0, 0)
+	else
+		input.setSelectionRange(n, n)
+}
+
 // sync input elements based on what current frame did:
 // 1) same input focused (do nothing)
 // 2) diff input focused by key (focus and select-all)
 // 3) diff input focused by click (do nothing: the click placed the caret)
 // 4) no input focused (focus back the canvas).
+// select_text() can be asked for on any frame, not only when the focus moves.
 function sync_dom_focus() {
 	let input = drawn_focused_input
-	if (input == prev_drawn_focused_input)
-		return
-	if (input) {
-		if (drawn_focused_by_key) {
-			input.focus()
-			input.select()
+	if (input != prev_drawn_focused_input) {
+		if (input) {
+			if (drawn_focused_by_key) {
+				input.focus()
+				input.select()
+			}
+		} else if (document.activeElement == prev_drawn_focused_input) {
+			canvas.focus()
 		}
-	} else if (document.activeElement == prev_drawn_focused_input) {
-		canvas.focus()
+		prev_drawn_focused_input = input
 	}
-	prev_drawn_focused_input = input
+	if (input)
+		apply_select_text(input)
 }
 
 function input_free(s, id) {
