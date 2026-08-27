@@ -206,7 +206,7 @@ return function()
 	types.filesize = {u52, type = 'filesize', align = 'right'}
 
 	--unix timestamps. max is the last second of year 9999.
-	types.time     = {u52, type = 'datetime', align = 'center', w = 140, precision = 'm',
+	types.time     = {u52, type = 'datetime', align = 'right', w = 140, precision = 'm',
 		min = 0, max = 253402300799}
 	types.time_s   = {time, w = 160, precision = 's'}
 	types.time_ms  = {time, w = 200, precision = 'ms'}
