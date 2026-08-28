@@ -4620,8 +4620,6 @@ names its own font, not the `icon` alias, so they don't follow it).
 
 */
 
-ui.font_alias('icon', 'tabler')
-
 ui.icon_def('plus'       , 'tabler', '\ueb0b')
 ui.icon_def('caret_right', 'tabler', '\ueb5f')
 

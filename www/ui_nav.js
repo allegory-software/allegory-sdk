@@ -389,7 +389,8 @@ Editing cells:
 		e.exit_edit([{cancel: true}])
 		e.exit_row([{cancel: true}])
 	calls:
-		e.do_cell_click(ri, fi)
+		e.cell_clickable(row, field) -> t|f
+		e.do_cell_click(row, field, ev)
 
 Loading from server:
 	needs:
@@ -445,224 +446,8 @@ Picker:
 		e.draw_row(row, [mode]) -> true|s
 		e.pick_near_val()
 
-TODO -------------------------------------------------------------------------
-
-Where this is:
-
-	The nav came from a DOM toolkit and is being ported to the IMGUI in
-	three steps: clean up the nav, make input widgets data-bound, make the
-	grid editable. Step one is done -- nothing here is known-broken except
-	what is listed below. Steps two and three have not started; the widget
-	binding section further down is the spec for step two.
-
-Decisions already made, so they don't get argued a second time:
-
-	one nav updates from another by pulling, once per frame, not by being
-		told. a widget redraws every frame, so it reads e.ready,
-		e.focused_row, cell values and e.load_error straight off the nav
-		and needs no notification. a detail nav is itself drawn, so it can
-		recompute param_vals in its own frame. announce() stays only for
-		what app code outside the frame wants to know: notify, saved,
-		save_fail, nav_load_fail. there is no dirty set, no flush pass and
-		no hook in ui.js, and adding one would be going backwards.
-	adding and removing policy (can_add_rows, can_remove_rows,
-		row.can_remove) applies when ev.input is set, i.e. to the user, not
-		to code driving the nav. whether a row is dropped outright or
-		marked removed is a separate question, decided by whether there is
-		a server to save the removal to.
-	can_move_rows defaults true and combines the way adding and removing
-		do: the nav sets policy, the rowset can only veto it with an
-		explicit false.
-	lookup fields resolve at use. there is no bind step, so nothing can go
-		stale and nothing has to be re-bound when a lookup nav finishes
-		loading. only revalidation still wants a rows-generation counter.
-	shared lookup navs are owned by the shared_navs registry and
-		refcounted, keyed by rowset_name or rowset_url. an inline
-		lookup_rowset makes an anonymous nav owned by its one user.
-	hidden means "not in the default column set", so naming the col in cols
-		still shows it. internal means never.
-	the `mode` argument threaded through the draw chain is a flag, not a
-		context: truthy draws through ui.text(), falsy returns the text.
-	left alone on purpose: row_comparator's eval (it is unrolled, so
-		measure a large sort before replacing it with a loop), the
-		errors_no_messages sentinel, and focus_cell, which should not be
-		restructured until steps two and three say what it needs to be.
-
-	Checking a change: the demo builds real navs, so behavior can be
-	verified by constructing navs in the page and diffing the results
-	against the previous revision. Watch for the browser caching the js --
-	a file that hasn't changed in a while gets served without
-	revalidation, which looks exactly like an edit having no effect.
-
-Not implemented:
-
-	params / master-detail. design settled: a per-frame pull, no events.
-		recompute param_vals in the nav's frame, compare element-wise (it
-		uses json() now, fine per selection change, not per frame), fetch
-		when it changes, disable and abort in flight when a master has no
-		focused row.
-	revalidate a col when its lookup nav's rows change. rows are validated
-		at load time, before the lookup nav has landed, so an unknown fk is
-		never flagged. needs a rows-generation counter on the nav.
-	cell editing. what the DOM version did is listed further down.
-	load errors go nowhere: do_update_load_fail() is a noop stub and the
-		error is dropped, so nothing can show a failed load.
-	update_pos_field() for trees: both call sites pass no args, so tree row
-		positions are never renumbered.
-	diff_merge bails on trees.
-	multi-col lookup validation.
-
-Known defects:
-
-	a shared lookup nav can be collected mid-reset: free_field() unrefs
-		every old field before init_field() re-refs, so rc sits at 0 in
-		between and another nav's ref() can gc it. self-heals, since
-		shared_nav() rebuilds it, at the cost of a redundant re-fetch.
-	errors_no_messages is both a "not computed yet" flag and a real errors
-		array. splitting the flag from the value would make
-		cell_has_errors() a pure read.
-	key_index / next_key_index are never reset, so cell-state slot indices
-		accumulate across resets.
-	insert_rows gates can_actually_add_rows() on from_server; remove_rows
-		uses ev.input. they disagree about when policy applies.
-	same_fields compares name, not given_name, so a rowset with duplicate
-		column names never diff-merges. fails safe: full reload.
-	set_col_attr(col, 'hidden', true) sets the flag but nothing rebuilds
-		e.fields. same for internal and groupable. attrs the grid reads per
-		frame (w, align) are fine.
-	init_group_tree builds group labels with field.draw_text(val), which
-		passes the value through unformatted. wants field.draw or draw_val.
-	field.announce passes the field object as the event name, so the
-		validator's 'validate' announcement dispatches under
-		"[object Object]". silent no-op; nothing listens for it.
-	the /xrowset.events EventSource connects as soon as any named rowset
-		binds, and retries against a 404 when there is no server.
-
-Widget binding, from the DOM version's nav mixins (ui_nav_todo.js, removed):
-
-	a widget takes a nav either from the outside or by making its own from a
-		rowset or rowset_name. the internal one wins when both are there,
-		on the grounds that an external nav can go away at any time. the
-		widget is not ready until it has one, and a col-bound widget is not
-		ready until the col resolves to a field.
-	a bound input takes attrs from the field it binds to, so that e.g. a
-		number input picks up min, max and decimals from the field instead
-		of being configured twice, and follows them when they change.
-	range widgets bind two cols (col1, col2) of the same row as one widget.
-	typing into a bound input on an empty nav that can add rows inserts a
-		row first, so that the first keystroke starts a record.
-	a dropdown stays disabled until its lookup nav has loaded, which is now
-		just field.lookup_nav.ready.
-	a label finds the widget it labels by the field the widget is bound to.
-	tabname: a tab caption naming what the nav is showing, from the display
-		values of its selected rows (row_tabname / selected_rows_tabname),
-		falling back to the rowset name. e.announce('tabname_changed')
-		already fires; nothing produces the name.
-
-Design:
-
-	focus_cell is ~200 lines: focus, four selection modes, val-picking,
-		quicksearch reset and edit entry. left alone until data-bound
-		widgets and grid editing say what its interface needs to be.
-	expr_filter and row_comparator build functions with eval.
-	cell_input_val is ~90ns of a ~230ns plain cell draw (measured): it
-		resolves fld(col) twice and evaluates its default argument eagerly
-		on every call. largest per-cell cost in the nav.
-
-Field types:
-
-	the `mode` argument the draw chain passes around is only a flag: truthy
-		draws through ui.text(), falsy returns the text. icon.draw and
-		place.draw still use it as the old per-cell context object
-		(mode.font, mode.measure, mode.fillText, mode.fg_text) and also
-		call fontawesome_char(), which exists nowhere, so both throw.
-		filesize.draw no longer greys out is_small() sizes. bool.draw is
-		the ported one.
-	color.draw, percent.draw and btn.draw are stubs. btn.click should call
-		field.action(v, row, field).
-	a lookup col's null/empty placeholder uses the local field's align, not
-		the display field's, because draw_text() gets no route to the nav.
-
-FUNCTIONALITY REMOVED WITH THE DOM WIDGETS -----------------------------------
-
-The nav came from a DOM-based toolkit. Everything that built DOM is gone.
-What follows is only the part that was actual behavior, not the bookkeeping
-that went with it. Field-type editors are listed per type further down.
-
-Cell editing:
-	entering edit mode picked an editor per field type, or a lookup dropdown
-	when the field had a lookup rowset, and reused one editor instance per
-	field across rows.
-	editor_state 'click' first offered the click to e.do_cell_click() and
-	only opened an editor if the cell didn't handle it, which is how bool
-	and button cells toggled on a single click without entering edit mode.
-	editor_state was also carried across a row change so that moving down a
-	column kept the caret column and the selection.
-	exiting on cancel reverted the cell; exiting otherwise saved when
-	save_on_exit_edit was set; exit_edit_on_lost_focus exited when focus
-	moved elsewhere.
-	e.cell_clickable(row, field) and e.do_cell_click(ri, fi) are still here
-	and still describe which cells act on a plain click.
-
-Action bar:
-	reload, add, delete, move up, move down, cancel and save buttons over the
-	grid, shown when there were unsaved changes (or always, or never, per
-	action_band_visible).
-	the delete button's label counted the selected rows; the move buttons
-	appeared only when the nav allowed moving rows and were disabled with
-	e.can_actually_move_rows_error() as the reason when moving wasn't
-	currently possible; an info area summarised how many rows were selected,
-	added, modified and deleted.
-	all of it reads nav state that is still published, so it can be rebuilt
-	as a widget outside the nav.
-
-Loading overlay:
-	an overlay over the nav while loading, with a cancel button calling
-	e.abort_loading(), and on failure an error message with the response
-	body behind a more/less toggle plus retry and dismiss buttons.
-	e.do_update_loading/_load_progress/_load_slow/_load_fail are still called
-	and are the seam to rebuild this on.
-
-Row delete confirmation:
-	remove_rows() with ev.confirm still calls window.confirm(). It wants an
-	IMGUI modal instead.
-
-Notifications:
-	e.notify(type, message) only announces now. Nothing displays it.
-
-Export:
-	e.download_xlsx() fetched the rowset url with .json swapped for .xlsx and
-	clicked a hidden link. format_rowset_url(format) is still here.
-
-Field types, per type:
-	all       : a text editor.
-	password  : a masked editor.
-	number    : a numeric editor.
-	date      : a date editor, right-aligned, fixed (non-popup) when embedded
-	            in a cell.
-	timeofday : a time-of-day editor.
-	bool      : a checkbox, centered when embedded in a cell.
-	enum      : a dropdown over enum_values, one item per value.
-	tags      : a tag editor, fixed (non-popup) when embedded in a cell.
-	color     : a color dropdown, and a swatch as the display value.
-	icon      : an icon dropdown, and the icon itself as the display value.
-	percent   : a bar filled to the value with the value drawn over it.
-	place     : a Google Maps place editor; the display value was a pin plus
-	            the description, and clicking the pin opened the place by its
-	            place_id in a new tab. Greyed out when there was no place_id.
-	url       : the display value was a link, prefixed with http:// when the
-	            value had no scheme; double-clicking a cell opened it in a
-	            new tab instead of entering edit mode.
-	button    : a button per cell running field.action(val, row, field),
-	            configured by the button_options field attr.
-	secret_key: a mono-font single-line editor.
-	public_key, private_key: a mono-font multi-line editor.
-
-Also not DOM but not working either, so worth knowing while rebuilding the
-above: icon.draw and place.draw are written against the old per-cell canvas
-protocol and use the draw chain's `mode` flag as if it were that context
-object. They also call fontawesome_char(), which doesn't exist here.
-bool.draw is the one that was ported.
+State of the work -- what is done, what is not, and what was decided --
+is in js/TODO-AI.txt.
 
 --------------------------------------------------------------------------- */
 
@@ -3461,14 +3246,18 @@ ui.nav = function(opt) {
 	e.enter_exits_edit = false
 	e.editor_id = null
 
-	e.do_cell_click = noop
-
+	// cells that act on a click instead of opening an editor.
 	e.cell_clickable = function(row, field) {
-		if (field.type == 'bool')
-			return true
-		if (field.type == 'button')
+		if (!e.can_change_val(row, field))
+			return false
+		if (field.is_bool)
 			return true
 		return false
+	}
+
+	e.do_cell_click = function(row, field, ev) {
+		if (field.is_bool)
+			e.set_cell_val(row, field, !e.cell_input_val(row, field), ev)
 	}
 
 	e.enter_edit = function(caret_pos, focus) {
@@ -4899,8 +4688,11 @@ add_validation_rule({
 
 // icons drawn by field types, not by any one widget, so they live here
 // rather than in the grid's own icon aliases.
-ui.icon_def('check'  , 'tabler', '\uea5e')
-ui.icon_def('map_pin', 'tabler', '\ueae8')
+ui.icon_def('check'        , 'tabler', '\uea5e')
+ui.icon_def('map_pin'      , 'tabler', '\ueae8')
+ui.icon_def('box_unchecked', 'tabler', '\ueb2c')
+ui.icon_def('box_checked'  , 'tabler_filled', '\uf76d')
+//ui.icon_def('box_checked'  , 'tabler', '\ueb28')
 
 assign(all_field_types, {
 	default: null,
@@ -5149,15 +4941,19 @@ bool.draw_null = function(mode) {
 	}
 }
 
-bool.draw = function(v, mode) {
+// an editable cell shows the box so that it reads as something to click,
+// a readonly one only marks the true ones.
+bool.draw = function(v, mode, row) {
 	if (!isbool(v))
 		return bool.draw_null.call(this, mode)
-	if (mode) {
-		if (v)
-			ui.icon('', 'check', 0, this.align, 'c')
-	} else {
+	if (!mode)
 		return v ? S('true', 'true') : S('false', 'false')
-	}
+	let icon =
+		row && this.nav.can_change_val(row, this)
+			? (v ? 'box_checked' : 'box_unchecked')
+			: (v ? 'check' : null)
+	if (icon)
+		ui.icon('', icon, 0, this.align, 'c')
 }
 
 // enums ---------------------------------------------------------------------

@@ -842,18 +842,16 @@ function init(id, e) {
 				hit_ri == e.focused_row_index &&
 				hit_fi == e.focused_field_index
 
-			let click =
-				!e.enter_edit_on_click
-				&& !e.stay_in_edit_mode
-				&& !e.editing
-				&& e.cell_clickable(row, field)
+			// a clickable cell acts on the click instead of opening an editor.
+			let click = !hit_indent && !ctrl && !shift
+				&& !e.editing && e.cell_clickable(row, field)
 
 			if (e.focus_cell(hit_ri, hit_fi, 0, 0, {
 				must_not_move_col: true,
 				must_not_move_row: true,
 				enter_edit: !hit_indent
-					&& !ctrl && !shift
-					&& ((e.enter_edit_on_click || click)
+					&& !ctrl && !shift && !click
+					&& (e.enter_edit_on_click
 						|| (e.enter_edit_on_click_focused && already_on_it)),
 				focus_editor: true,
 				focus_non_editable_if_not_found: true,
@@ -862,6 +860,8 @@ function init(id, e) {
 				invert_selection: ctrl,
 				input: e,
 			})) {
+				if (click)
+					e.do_cell_click(row, field, {input: e})
 				// TODO:
 				//drag_op = 'row_move'
 			}
@@ -1081,7 +1081,7 @@ function init(id, e) {
 			if (e.focused_row && (!e.can_focus_cells || e.focused_field == e.tree_field))
 				e.toggle_collapsed(e.focused_row, shift)
 			else if (e.focused_row && e.focused_field && e.cell_clickable(e.focused_row, e.focused_field))
-				e.enter_edit('all')
+				e.do_cell_click(e.focused_row, e.focused_field, {input: e})
 			return false
 		}
 

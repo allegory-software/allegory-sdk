@@ -27,14 +27,23 @@ GRID
 	- local filtering
 
 
-GRID EDITING
+GRID EDITING (see TODO-AI.txt for why things are the way they are)
 ------------------------------------------------------------------------------
-- nav validation
+* nav validation
+* cell editing: enter/exit edit, text editor per field type
+* grid edit state colors (new, modified, deleted)
+* quicksearch + match highlight
+* bool cells: click/space toggle, boxed check when editable
+- enum cells: dropdown editor
+- lookup cells: dropdown over the lookup nav (they edit as the raw fk now)
+- date, color, icon, tags, place, url, button cells
 - bound input widgets
-- grid edit state colors (new, modified, deleted)
 - grid action bar
 - rowset_mdbx load/save + changed pk stream
 - nav (partial) refresh from changed pk stream
+- ctrl+C: copy_to_clipboard() doesn't exist
+- duration cells: no from_input(), typing stores the string
+- decide: empty editor on a type with from_input() -> null or ''
 
 
 UI API
