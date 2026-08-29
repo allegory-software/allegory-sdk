@@ -104,7 +104,7 @@ function init(id, e) {
 	let keydown = key => focused && ui.keydown(key)
 
 	function edit_selection() {
-		return ui.wanted_selection(e.editor_id, e.focused_field.align == 'right')
+		return ui.text_selection(e.editor_id, e.focused_field.align == 'right', true)
 	}
 
 	function caret_at_edge(d) {

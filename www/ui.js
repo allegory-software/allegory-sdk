@@ -291,8 +291,7 @@ TEXT
 	text_wrapped    (id, s, fr, align, valign, max_w, w, h, editable)
 	mark_text       (i1, i2, [bg])   background behind [i1,i2) of the next text
 	select_text     (id, i, len)         place the caret in an editable text
-	text_selection  (id, [from_end]) -> [i, len]   where the caret is
-	wanted_selection(id, [from_end]) -> [i, len]   ... or what was asked for
+	text_selection  (id, [from_end], [wanted]) -> [i, len]
 
 	measure_text    (cx, s) -> {w:, asc:, dsc:, {actual|font}BoundingBox{Ascent|Descent|Left|Right}:, }
 
@@ -5131,33 +5130,30 @@ ui.text_value = function(id) { // user-typed text
 // i >= 0 from the left, i < 0 from the right; -1 is 1 char past the last char.
 // len runs from i to the right: 0 = empty selection; 1/0 = select all.
 
-// where the caret is now, with `from_end` to help decide direction.
-ui.text_selection = function(id, from_end) {
-	let s = ui.state(id)
-	let n = (s.text ?? '').length
-	let a = s.anchor ?? 0 // the end it was made from
-	let c = s.caret  ?? 0 // the end it was dragged to
-	let i1 = min(a, c)
-	let i2 = max(a, c)
-	return [(i1 < i2 ? c > a : from_end) ? i1 - n - 1 : i1, i2 - i1]
-}
-
-// the selection last asked for, or where the caret is now if the user has
-// moved it since. what was asked for is kept un-clamped, so passing
-// it on through a text too short for it doesn't shorten it.
-ui.wanted_selection = function(id, from_end) {
-	let s = ui.state(id)
-	if (s.sel_i != null)
-		return [s.sel_i, s.sel_len]
-	return ui.text_selection(id, from_end)
-}
-
 // request to place the caret. takes effect on the next frame.
 ui.select_text = function(id, i, len) {
 	let s = ui.state(id)
 	s.sel_i = i
 	s.sel_len = len
 	s.sel_pending = true
+}
+
+ui.text_selection = function(id, from_end, wanted) {
+	if (wanted) {
+		// the selection requested by ui.select_text(). un-clamped, so passing
+		// it on through a text too short for it doesn't shorten it.
+		let s = ui.state(id)
+		if (s.sel_i != null)
+			return [s.sel_i, s.sel_len]
+	}
+	// where the caret is now. `from_end` helps decide the direction.
+	let s = ui.state(id)
+	let n = (s.text ?? '').length
+	let a = s.anchor ?? 0 // the end it was made from
+	let c = s.caret  ?? 0 // the end it was dragged to
+	let i1 = min(a, c)
+	let i2 = max(a, c)
+	return [(i1 != i2 ? c < a : from_end) ? i1 - n - 1 : i1, i2 - i1]
 }
 
 // the user moved the caret or typed: cancel the ui.select_text() request.
@@ -5168,9 +5164,9 @@ function forget_selection(s) {
 }
 
 // ctrl+A means select-all, including on a future text of a different length,
-// so make ui.wanted_selection() infinite length. the browser selects the text
-// itself, and the selectionchange that fires after this must not be taken for
-// a user event, so record the pair read_input_sel() will report for it.
+// so make ui.text_selection(wanted) infinite length. the browser selects the
+// text itself, and the selectionchange that fires after this must not be taken
+// for a user event, so record the pair read_input_sel() will report for it.
 function remember_select_all(input) {
 	let s = ui.state(input._ui_id)
 	s.sel_i = 0
