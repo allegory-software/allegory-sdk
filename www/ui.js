@@ -5274,8 +5274,8 @@ function input_text_changed() {
 function input_selection_changed() {
 	let s = ui.state(this._ui_id)
 	read_input_sel(s, this)
-	// setting a selection fires this too, reporting the positions it just
-	// set: that one moved nothing, so it doesn't cancel what was asked for.
+	// setSelectionRange() fires selectionchange, so we need to suppress
+	// forget_selection() then.
 	if (s.anchor != this._ui_anchor || s.caret != this._ui_caret)
 		forget_selection(s)
 	animate()

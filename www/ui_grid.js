@@ -185,7 +185,7 @@ function init(id, e) {
 		let by = e.cell_border_h_width
 
 		// state
-		let grid_focused = ui.focused(id)
+		let grid_focused = focused
 		let row_focused = e.focused_row == row
 		let cell_focused = row_focused && (!e.can_focus_cells || field == e.focused_field)
 		let disabled = e.is_cell_disabled(row, field)
