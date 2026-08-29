@@ -5133,10 +5133,10 @@ ui.text_value = function(id) { // user-typed text
 
 // where the caret is now, with `from_end` to help decide direction.
 ui.text_selection = function(id, from_end) {
-	let t = ui.state(id)
-	let n = (t.text ?? '').length
-	let a = t.anchor ?? 0 // the end it was made from
-	let c = t.caret  ?? 0 // the end it was dragged to
+	let s = ui.state(id)
+	let n = (s.text ?? '').length
+	let a = s.anchor ?? 0 // the end it was made from
+	let c = s.caret  ?? 0 // the end it was dragged to
 	let i1 = min(a, c)
 	let i2 = max(a, c)
 	return [(i1 < i2 ? c > a : from_end) ? i1 - n - 1 : i1, i2 - i1]
@@ -5146,9 +5146,9 @@ ui.text_selection = function(id, from_end) {
 // moved it since. what was asked for is kept un-clamped, so passing
 // it on through a text too short for it doesn't shorten it.
 ui.wanted_selection = function(id, from_end) {
-	let t = ui.state(id)
-	if (t.sel_i != null)
-		return [t.sel_i, t.sel_len]
+	let s = ui.state(id)
+	if (s.sel_i != null)
+		return [s.sel_i, s.sel_len]
 	return ui.text_selection(id, from_end)
 }
 

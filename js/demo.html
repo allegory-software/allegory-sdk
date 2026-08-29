@@ -368,8 +368,6 @@ grid_types_rowset = {
 	parent_col: 'parent_id',
 }
 
-// status first, the rest in the order the rowset declares them. the tree
-// field defaults to the first col, so the indent lands on status.
 grid_types_cols = ['tags'].concat(
 	fields.map(f => f.name).filter(s => s != 'tags'))
 demos.grid_types = `
