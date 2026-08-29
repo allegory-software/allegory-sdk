@@ -82,9 +82,9 @@ ui.v(1, ui.sp(), 'c', 'c')
 	ui.h(1, ui.sp())
 		ui.label('dd1', 'dd1 label')
 		ui.state_init('dd1', 'i', 1)
-		ui.dropdown('dd1', dd_items)
+		ui.list_dropdown('dd1', dd_items)
 		ui.text('', 'or')
-		ui.dropdown('dd2', dd_items)
+		ui.list_dropdown('dd2', dd_items)
 		ui.text('', 'trail')
 	ui.end_h()
 ui.end_v()
@@ -333,7 +333,11 @@ let fields = [
 	{name: 'timeofday', w:  90, type: 'timeofday', precision: 's'},
 	{name: 'dur'      , w:  90, type: 'duration'},
 	{name: 'active'   , w:  50, type: 'bool'},
-	{name: 'status'   , w:  90, type: 'enum', enum_labels: {open: 'Open', closed: 'Closed', pending: 'Pending'}},
+	{name: 'status'   , w:  90, type: 'enum',
+		enum_values: 'open closed pending',
+		enum_labels: {open: 'Open', closed: 'Closed', pending: 'Pending'},
+		align: 'right',
+	},
 	{name: 'tags'     , w: 130, type: 'tags'},
 	{name: 'color'    , w:  60, type: 'color'},
 	{name: 'progress' , w: 120, type: 'percent', decimals: 0},
@@ -348,23 +352,30 @@ let fields = [
 	{name: 'privkey'  , w: 140, type: 'private_key'},
 	{name: 'col'      , w:  90, type: 'col'},
 	{name: 'action'   , w:  90, type: 'button'},
+	{name: 'parent_id', type: 'number', internal: true},
 ]
 let rows = [
-	[1, 1234.5  , 800        ,   1234, time(2024,1,15), time(2024,1,15,9,30), time(2031,6,1)     , 8*3600+30*60 , 3725  , true , 'open'   , ['red', 'urgent'], '#e03131'                , 2500, 'plus'        , {place_id: 'p1', description: '1600 Amphitheatre Pkwy'}, 'https://example.com', '+1 555 0100', 'a@example.com', 'hunter2'      , 'sk_live_abc123' , 'ssh-rsa AAAAB3Nz', '-----BEGIN KEY---', 'name'   , null],
-	[2, 42      , 5_000_000  ,  98765, time(2024,6,1) , time(2024,6,1,14,0) , time(2032,1,1)     , 13*3600+15*60, 90000 , false, 'pending', ['blue']         , 'seagreen'               , 6000, 'check'       , 'Just a description, no pin'                             , 'example.org'        , '555-0101'   , 'b@example.org', 'correct-horse', 'sk_live_def456' , 'ssh-ed25519 AAAA', '-----BEGIN KEY---', 'ctime'  , null],
-	[3, 0       , 3_200_000_000, 2000000, time(2024,12,31), time(2024,12,31,23,59), time(2037,12,31), 0            , 0     , true , 'closed' , ['green', 'a', 'b'], 'rgb(30,144,255)'      , 10000, 'arrow_up'   , {place_id: 'p3', description: 'No pin greyed out below'}, 'http://sub.example.com/path', '555-0102', 'c@example.com', 's3cr3t'       , 'sk_live_ghi789' , 'ssh-rsa AAAAB3Nz', '-----BEGIN KEY---', 'id'     , null],
-	[4, -12.75  , 60         ,      7, time(2000,1,1) , time(2000,1,1,0,1)  , time(1970,1,2)     , 23*3600+59*60 , 61   , false, 'open'   , []               , '#111111'                , 0   , 'caret_right' , {description: 'Object without a place_id'}               , 'ftp://files.example.com', '555-0103', 'd@example.com', 'pw'           , 'sk_live_jkl012' , 'ssh-dss AAAAB3Nz', '-----BEGIN KEY---', 'status' , null],
-	[5, null    , null       ,   null, null           , null                , null               , null          , null , null , null     , null             , null                     , null, null          , null                                                       , null                 , null         , null           , null          , null             , null              , null              , null     , null],
+	[1, 1234.5  , 800        ,   1234, time(2024,1,15), time(2024,1,15,9,30), time(2031,6,1)     , 8*3600+30*60 , 3725  , true , 'open'   , ['red', 'urgent'], '#e03131'                , 2500, 'plus'        , {place_id: 'p1', description: '1600 Amphitheatre Pkwy'}, 'https://example.com', '+1 555 0100', 'a@example.com', 'hunter2'      , 'sk_live_abc123' , 'ssh-rsa AAAAB3Nz', '-----BEGIN KEY---', 'name'   , null, null],
+	[2, 42      , 5_000_000  ,  98765, time(2024,6,1) , time(2024,6,1,14,0) , time(2032,1,1)     , 13*3600+15*60, 90000 , false, 'pending', ['blue']         , 'seagreen'               , 6000, 'check'       , 'Just a description, no pin'                             , 'example.org'        , '555-0101'   , 'b@example.org', 'correct-horse', 'sk_live_def456' , 'ssh-ed25519 AAAA', '-----BEGIN KEY---', 'ctime'  , null, 1],
+	[3, 0       , 3_200_000_000, 2000000, time(2024,12,31), time(2024,12,31,23,59), time(2037,12,31), 0            , 0     , true , 'closed' , ['green', 'a', 'b'], 'rgb(30,144,255)'      , 10000, 'arrow_up'   , {place_id: 'p3', description: 'No pin greyed out below'}, 'http://sub.example.com/path', '555-0102', 'c@example.com', 's3cr3t'       , 'sk_live_ghi789' , 'ssh-rsa AAAAB3Nz', '-----BEGIN KEY---', 'id'     , null, 1],
+	[4, -12.75  , 60         ,      7, time(2000,1,1) , time(2000,1,1,0,1)  , time(1970,1,2)     , 23*3600+59*60 , 61   , false, 'open'   , []               , '#111111'                , 0   , 'caret_right' , {description: 'Object without a place_id'}               , 'ftp://files.example.com', '555-0103', 'd@example.com', 'pw'           , 'sk_live_jkl012' , 'ssh-dss AAAAB3Nz', '-----BEGIN KEY---', 'status' , null, 3],
+	[5, null    , null       ,   null, null           , null                , null               , null          , null , null , null     , null             , null                     , null, null          , null                                                       , null                 , null         , null           , null          , null             , null              , null              , null     , null, 4],
 ]
 grid_types_rowset = {
 	fields: fields,
 	rows: rows,
 	pk: 'id',
+	parent_col: 'parent_id',
 }
+
+// status first, the rest in the order the rowset declares them. the tree
+// field defaults to the first col, so the indent lands on status.
+grid_types_cols = ['tags'].concat(
+	fields.map(f => f.name).filter(s => s != 'tags'))
 demos.grid_types = `
 ui.m(ui.em(2))
 ui.stack()
-	ui.grid('grid_types', {rowset: grid_types_rowset})
+	ui.grid('grid_types', {rowset: grid_types_rowset, cols: grid_types_cols})
 ui.end_stack()
 `
 }
@@ -763,8 +774,8 @@ function tb_contents(tb) { // tb: toolbox id, prefixes the ids in here
 	ui.stack('', 1, 's', 's', 200, 300)
 		ui.m(ui.sp2())
 		ui.v(1, ui.sp(), 'c', 't')
-			ui.dropdown(tb+'_dd1', dd_items)
-			ui.dropdown(tb+'_dd2', dd_items)
+			ui.list_dropdown(tb+'_dd1', dd_items)
+			ui.list_dropdown(tb+'_dd2', dd_items)
 			ui.stack(tb+'_tt', 0, 'c', 'c', 100, 30)
 				ui.bb('bg2', null, 1, 'intense')
 				ui.text('', 'hover me', 1, 'c')

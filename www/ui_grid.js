@@ -96,14 +96,73 @@ function init(id, e) {
 		row_move_state = null
 	}
 
+	// config/state for field.update_editor() and field.draw_editor().
+	let editor_ev = {}
+
 	// keyboard state
 	let focused, shift, ctrl
 	let keydown = key => focused && ui.keydown(key)
 
-	// only asked while editing, so e.editor_id is set.
-	let caret_at = where => ui.text_selected(e.editor_id, where)
+	function edit_selection() {
+		return ui.wanted_selection(e.editor_id, e.focused_field.align == 'right')
+	}
 
-	// utils
+	function caret_at_edge(d) {
+		if (edit_selection()[1] == 1/0) // select-all: both ends are the edge
+			return true
+		let [i, len] = ui.text_selection(e.editor_id, d > 0)
+		return !len && i == (d < 0 ? 0 : -1)
+	}
+
+	// cross: move along the other axis than the advance_on_enter axis.
+	function advance_edit(cross, d) {
+		let by_row = (e.advance_on_enter == 'next_row') != cross
+		let opt = {input: e, sel_i: 0, sel_len: 1/0,
+			must_move: true, enter_edit: true}
+		if (by_row)
+			e.focus_cell(true, true, d, 0, opt)
+		else
+			e.focus_next_cell(d, opt)
+	}
+
+	// an edit that enter started is only exited by it; one started by F2 or
+	// by a click moves on. exit first: nowhere to move to still ends it.
+	function end_edit_like_enter(cross, d) {
+		if (e.enter_exits_edit || e.exit_edit_on_enter) {
+			e.exit_edit()
+		} else if (e.advance_on_enter) {
+			e.exit_edit()
+			advance_edit(cross, d)
+		}
+	}
+
+	// runs before any cell is drawn: a value set or an edit ended while the
+	// cells are being drawn leaves the cells drawn before it showing the
+	// value, the focused row and the edit from before. loops because
+	// end_edit_like_enter() can move the edit to another cell.
+	function update_editor() {
+		while (e.editing) {
+			let row = e.focused_row
+			let field = e.focused_field
+			let editor_id = e.editor_id
+			let v0 = e.cell_input_val(row, field)
+			editor_ev.exit_edit = false
+			editor_ev.cancel    = false
+			editor_ev.picked    = false
+			let v = field.update_editor(editor_id, v0, editor_ev)
+			if (v !== v0)
+				e.set_cell_val(row, field, v, {input: e})
+			if (editor_ev.exit_edit) {
+				let advance = editor_ev.picked
+					&& !e.enter_exits_edit && e.advance_on_enter
+				e.exit_edit({cancel: editor_ev.cancel, input: e})
+				if (advance)
+					advance_edit(false, 1)
+			}
+			if (e.editor_id == editor_id)
+				break
+		}
+	}
 
 	function field_has_indent(field) {
 		return horiz && field == e.tree_field
@@ -139,7 +198,9 @@ function init(id, e) {
 		let selected = (isobject(sel_fields) ? sel_fields.has(field) : sel_fields) || false
 		let editing = e.editing && cell_focused
 		let hovering = hit_zone == 'cell' && hit_ri == ri && hit_fi == fi
-		let full_width = !draw_stage && ((row_focused && field == e.focused_field) || hovering)
+		let full_width = !draw_stage
+			&& ((row_focused && field == e.focused_field) || hovering)
+			&& (field.align == 'left' || !field_has_indent(field))
 
 		let indent_x = 0
 		let collapsed
@@ -222,7 +283,7 @@ function init(id, e) {
 		let cell_x = x
 		let cell_w = w
 		// because we don't have overflow direction as a concept in the layout
-		// system (only text overflows at all and always to the right, which is
+		// system (only ui.text overflows and always to the right, which is
 		// only good for left align), we need to employ this hack to align the
 		// overflown cell correctly for right and center align.
 		if (full_width && field.align != 'left') {
@@ -243,17 +304,20 @@ function init(id, e) {
 				ui.icon('', collapsed ? 'node_collapsed' : 'node_expanded')
 				// ui.treegrid_indent(indent_x)
 			}
-			ui.p(pad_l, 0, pad_r, 0)
-			// a drag overlay redraws the cell; it can't be a second widget
-			// under the same id.
-			if (editing && !draw_stage) {
-				let v = field.draw_editor(e.editor_id, input_val)
-				if (v !== input_val)
-					e.set_cell_val(row, field, v, {input: e})
-			} else {
+			// a popup editor covers the cell instead of replacing it, and
+			// the popup can be moved off the cell to fit on screen.
+			if (!editing || draw_stage || field.edits_in_popup) {
+				ui.p(pad_l, 0, pad_r, 0)
 				if (row == e.focused_row && field == e.quicksearch_field)
 					ui.mark_text(0, e.quicksearch_text.length)
 				e.draw_val(row, field, input_val, true, full_width)
+				ui.p(0) // draw_val() draws nothing for a value with no text!
+			}
+			if (editing && !draw_stage) {
+				editor_ev.pad_l = pad_l
+				editor_ev.pad_r = pad_r
+				editor_ev.h     = h
+				field.draw_editor(e.editor_id, input_val, editor_ev)
 			}
 			ui.p(0)
 		ui.end_stack()
@@ -441,7 +505,9 @@ function init(id, e) {
 		gcol_h = line_height + sp
 		gcol_gap = 1
 
-		if (e.editing && e.exit_edit_on_lost_focus && !ui.focused(e.editor_id))
+		if (e.editing && e.exit_edit_on_lost_focus
+				&& !ui.focused(id) && !ui.focused(e.editor_id)
+				&& !ui.focus_inside(id))
 			e.exit_edit()
 
 		// set keyboard state
@@ -855,7 +921,7 @@ function init(id, e) {
 						|| (e.enter_edit_on_click_focused && already_on_it)),
 				focus_editor: true,
 				focus_non_editable_if_not_found: true,
-				caret_pos: 'all',
+				sel_i: 0, sel_len: 1/0,
 				expand_selection: shift,
 				invert_selection: ctrl,
 				input: e,
@@ -885,19 +951,21 @@ function init(id, e) {
 
 			let move = !e.editing
 				|| (e.auto_jump_cells && !shift && (!horiz || ctrl)
-					&& (!horiz
-						|| ctrl
-							&& (caret_at(cols < 0 ? 'start' : 'end')
-							|| caret_at('all'))
-						))
+					&& (!horiz || ctrl && caret_at_edge(cols)))
+
+			let all
+			if (!horiz) {
+				all = true
+			} else if (e.editing) {
+				all = edit_selection()[1] == 1/0
+			} else {
+				all = ctrl
+			}
 
 			if (move)
 				if (e.focus_next_cell(cols, {
-					caret_pos: horiz
-						? ((e.editing ? caret_at('all') : ctrl)
-							? 'all'
-							: cols > 0 ? 'start' : 'end')
-						: 'all',
+					sel_i: all ? 0 : cols > 0 ? 0 : -1,
+					sel_len: all ? 1/0 : 0,
 					expand_selection: shift,
 					input: e,
 				}))
@@ -912,7 +980,7 @@ function init(id, e) {
 
 			if (e.focus_next_cell(cols, {
 				auto_advance_row: true,
-				caret_pos: cols > 0 ? 'start' : 'end',
+				sel_i: cols > 0 ? 0 : -1, sel_len: 0,
 				input: e,
 			}))
 				return false
@@ -941,7 +1009,7 @@ function init(id, e) {
 					let editing = e.editing
 					if (e.remove_row(row, {input: e, refocus: true})) {
 						if (editing)
-							e.enter_edit('all')
+							e.enter_edit()
 						return false
 					}
 				}
@@ -960,15 +1028,14 @@ function init(id, e) {
 
 			let move = !e.editing
 				|| (e.auto_jump_cells && !shift
-					&& (horiz
-						|| (ctrl
-							&& (caret_at(rows < 0 ? 'start' : 'end')
-							|| caret_at('all')))
-						))
+					&& (horiz || ctrl && caret_at_edge(rows)))
+
+			let [sel_i, sel_len] = e.editing && horiz ? edit_selection() : [0, 1/0]
 
 			if (move)
 				if (e.focus_cell(true, true, rows, 0, {
-					caret_pos: e.editing && !horiz ? 'all' : null,
+					sel_i: sel_i,
+					sel_len: sel_len,
 					expand_selection: shift,
 					input: e,
 				}))
@@ -978,7 +1045,7 @@ function init(id, e) {
 
 		// F2: enter edit mode
 		if (!e.editing && keydown('f2')) {
-			e.enter_edit('all')
+			e.enter_edit()
 			return false
 		}
 
@@ -991,25 +1058,11 @@ function init(id, e) {
 				e.pick_val()
 				return false
 			} else if (!e.editing) {
-				e.enter_edit('all')
+				e.enter_edit()
 				e.enter_exits_edit = true
 				return false
 			} else {
-				// enter advances along advance_on_enter's axis, ctrl along
-				// the other one, shift backwards.
-				if (e.enter_exits_edit) {
-					e.exit_edit()
-				} else if (e.advance_on_enter) {
-					let by_row = (e.advance_on_enter == 'next_row') != ctrl
-					let d = shift ? -1 : 1
-					let opt = {input: e, caret_pos: 'all', must_move: true}
-					if (by_row)
-						e.focus_cell(true, true, d, 0, opt)
-					else
-						e.focus_next_cell(d, opt)
-				} else if (e.exit_edit_on_enter) {
-					e.exit_edit()
-				}
+				end_edit_like_enter(ctrl, shift ? -1 : 1)
 				return false
 			}
 		}
@@ -1127,9 +1180,14 @@ function init(id, e) {
 		})() === false) // if (ui.key_events.length) ...
 			ui.capture_keys()
 
+		update_editor()
+
 		// draw ----------------------------------------------------------------
 
 		ui.v(fr, 0, align, valign, min_w, min_h)
+
+			// so that focus_inside() answers for a picker's own widgets.
+			ui.focus_group(null, null, id)
 
 			// group-by bar
 
@@ -1326,6 +1384,8 @@ function init(id, e) {
 			ui.scrollbox(id+'.cells_scrollbox', 1, overflow, overflow, 's', 's')
 				ui.frame(noop, on_cellview_frame, 0, 'l', 't', cells_w, cells_h)
 			ui.end_scrollbox()
+
+			ui.end_focus_group()
 
 		ui.end_v()
 

@@ -126,7 +126,7 @@ SCOPES
 
 WIDGET STATE
 
-	keepalive       (id)                 keep another widget alive this frame
+	keepalive       (id, [update_fn])    keep another widget alive this frame
 	state           (id) -> state        get widget state
 	state_init      (id, k, v)           set widget state var if widget is alive
 	on_free         (id, free_fn)        add a widget gc hook
@@ -290,8 +290,9 @@ TEXT
 	text_lines      (id, s, fr, align, valign, max_w, w, h, editable)
 	text_wrapped    (id, s, fr, align, valign, max_w, w, h, editable)
 	mark_text       (i1, i2, [bg])   background behind [i1,i2) of the next text
-	select_text     (id, 'all'|'start'|'end')   place the caret in an editable text
-	text_selected   (id, 'all'|'start'|'end') -> t|f   where the caret is
+	select_text     (id, i, len)         place the caret in an editable text
+	text_selection  (id, [from_end]) -> [i, len]   where the caret is
+	wanted_selection(id, [from_end]) -> [i, len]   ... or what was asked for
 
 	measure_text    (cx, s) -> {w:, asc:, dsc:, {actual|font}BoundingBox{Ascent|Descent|Left|Right}:, }
 
@@ -1205,7 +1206,8 @@ ui.capture_keyup = function(key) {
 function make_key_event(p, ev_name, key) {
 	let char = key
 	key = key.toLowerCase()
-	if (key == 'control')
+	// cmd is what ctrl is on a mac, and it's the same shortcuts either way.
+	if (key == 'control' || key == 'meta')
 		key = 'ctrl'
 	let ctrl  = p.key_state.has('ctrl' ) && key != 'ctrl'
 	let alt   = p.key_state.has('alt'  ) && key != 'alt'
@@ -1294,14 +1296,17 @@ ui.key_changes = () => key_downs.size + key_ups.size
 
 // custom events -------------------------------------------------------------
 
+// events are id-based state that is cleared on ui.redraw() just like
+// click or keydown state.
 let event_state = map()
 
-ui.fire = function(ev, ...args) {
-	event_state.set(ev, args)
+ui.fire = function(id, ev, ...args) {
+	event_state.set(id+'.'+ev, args)
 }
 
-ui.listen = function(ev) {
-	return event_state.get(ev)
+ui.listen = function(id, ev) {
+	ui.state(id) // call update_fn if not already called, which calls fire().
+	return event_state.get(id+'.'+ev)
 }
 
 // scopes --------------------------------------------------------------------
@@ -1386,27 +1391,36 @@ or when the widget is created in the frame.
 let state_map      = map() // {id->state}
 let current_id_set = set() // {id}
 let remove_id_set  = set() // {id}
+let frame_gen = 0 // frame counter, for running state updates once per frame
 
 ui._state_map = state_map
 
-function keepalive(id, update_f) {
+function keepalive(id, update_fn) {
 	assert(id, 'id required')
 	current_id_set.add(id)
 	remove_id_set.delete(id)
 
-	if (update_f) {
+	if (update_fn) {
 		let s = ui.state(id)
-		s.update = update_f
+		s.update = update_fn
+		state_update(id, s)
 	}
 }
 ui.keepalive = keepalive
 
+// an update must run once per redraw in order to avoid acting on events
+// like mouse clicks more than once (one-shot state only gets cleared at the
+// end of the frame). the update is triggered by whichever comes first:
+// ui.state() or keepalive(). frame_gen keeps it from running twice on
+// ui.relayout().
 function state_update(id, s) {
-	let update_f = s.update
-	if (!update_f)
+	let update_fn = s.update
+	if (!update_fn)
 		return
-	update_f(id, s)
-	s.update = null
+	if (s.frame_gen == frame_gen)
+		return
+	s.frame_gen = frame_gen
+	update_fn(id, s)
 }
 
 ui.state = function(id, k) {
@@ -1868,7 +1882,7 @@ function position_rec(a, axis, ct_wh) {
 // do scrolling and popup positioning and offset all boxes (top-down, recursive).
 
 // NOTE: translate is not re-runnable by design, which enables:
-// - running on_frame callbacks which can read any edge inputs.
+// - running on_frame callbacks which can read one-shot state like click, etc.
 // - updating offsets by delta (popups do that),
 // ... but it also means you can't re-translate something if you need to,
 // so you can't implement a simple force_scroll() that would work inside the
@@ -2531,6 +2545,8 @@ function redraw_all() {
 	hit_state_map = sm
 	ui._hit_state_map = hit_state_map
 
+	frame_gen++
+
 	let relayout_count = 0
 	while (1) {
 		let t0, t1
@@ -2599,6 +2615,7 @@ function redraw_all() {
 			draw_frame(recs, layers, root_render_state_map)
 
 			sync_dom_focus()
+			sync_dom_selection()
 
 			for (let p of ui.pointers)
 				if (p != ui.local_pointer)
@@ -4780,8 +4797,7 @@ ui.text = function(
 	if (editable) {
 		keepalive(id)
 		ui.focusable(id)
-		// so that text_selected() has a text to measure the caret against
-		// before anything is typed.
+		// so that text_selection() works before the user types any text.
 		s = ui.state(id).text ??= s
 	}
 	let marked = mark_i1 != null && mark_i2 > mark_i1
@@ -5105,63 +5121,118 @@ let prev_drawn_focused_input
 let drawn_focused_input
 let drawn_focused_by_key
 
-// place the caret: 'all' selects the text, 'start'/'end' put it before/after.
-// takes effect on the next frame.
-ui.select_text = function(id, where) {
-	ui.state(id).select_text = where
+ui.text_value = function(id) { // user-typed text
+	return ui.state(id, 'text')
 }
 
-// -> t|f  where the caret is, in select_text() terms.
-ui.text_selected = function(id, where) {
+// selecting text ------------------------------------------------------------
+
+// A selection is (i, len): i is both caret position and selection anchor:
+// i >= 0 from the left, i < 0 from the right; -1 is 1 char past the last char.
+// len runs from i to the right: 0 = empty selection; 1/0 = select all.
+
+// where the caret is now, with `from_end` to help decide direction.
+ui.text_selection = function(id, from_end) {
 	let t = ui.state(id)
 	let n = (t.text ?? '').length
-	let a = t.anchor ?? 0 // selection start
-	let c = t.caret  ?? 0 // selection end
-	if (where == 'start')
-		return a == 0 && c == 0
-	if (where == 'end')
-		return a == n && c == n
-	if (where == 'all')
-		return n > 0 && (a == 0 && c == n || c == 0 && a == n)
-	return false
+	let a = t.anchor ?? 0 // the end it was made from
+	let c = t.caret  ?? 0 // the end it was dragged to
+	let i1 = min(a, c)
+	let i2 = max(a, c)
+	return [(i1 < i2 ? c > a : from_end) ? i1 - n - 1 : i1, i2 - i1]
+}
+
+// the selection last asked for, or where the caret is now if the user has
+// moved it since. what was asked for is kept un-clamped, so passing
+// it on through a text too short for it doesn't shorten it.
+ui.wanted_selection = function(id, from_end) {
+	let t = ui.state(id)
+	if (t.sel_i != null)
+		return [t.sel_i, t.sel_len]
+	return ui.text_selection(id, from_end)
+}
+
+// request to place the caret. takes effect on the next frame.
+ui.select_text = function(id, i, len) {
+	let s = ui.state(id)
+	s.sel_i = i
+	s.sel_len = len
+	s.sel_pending = true
+}
+
+// the user moved the caret or typed: cancel the ui.select_text() request.
+function forget_selection(s) {
+	s.sel_i = null
+	s.sel_len = null
+	s.sel_pending = false
+}
+
+// ctrl+A means select-all, including on a future text of a different length,
+// so make ui.wanted_selection() infinite length. the browser selects the text
+// itself, and the selectionchange that fires after this must not be taken for
+// a user event, so record the pair read_input_sel() will report for it.
+function remember_select_all(input) {
+	let s = ui.state(input._ui_id)
+	s.sel_i = 0
+	s.sel_len = 1/0
+	s.sel_pending = false
+	input._ui_anchor = 0
+	input._ui_caret = input.value.length
 }
 
 function apply_select_text(input) {
 	let s = ui.state(input._ui_id)
-	let where = s.select_text
-	if (!where)
+	if (!s.sel_pending)
 		return
-	s.select_text = null
+	s.sel_pending = false
 	let n = input.value.length
-	if (where == 'all')
-		input.setSelectionRange(0, n)
-	else if (where == 'start')
-		input.setSelectionRange(0, 0)
-	else
-		input.setSelectionRange(n, n)
+	let i = s.sel_i
+	// -1 is past the last char, so the count from the right is off by one.
+	let i1 = clamp(i >= 0 ? i : n + i + 1, 0, n)
+	let i2 = clamp(i1 + (s.sel_len ?? 0), i1, n)
+	// a negative i counts from the right, which is the end the selection was
+	// dragged towards, which is where the caret goes.
+	let backward = i >= 0
+	// this fires selectionchange event which must not be taken for a user
+	// event, so record the pair the way read_input_sel() will report it.
+	input._ui_anchor = backward ? i2 : i1
+	input._ui_caret  = backward ? i1 : i2
+	input.setSelectionRange(i1, i2, backward ? 'backward' : 'forward')
 }
 
-// sync input elements based on what current frame did:
+// input DOM elements --------------------------------------------------------
+
+// move the DOM focus to where the frame put it:
 // 1) same input focused (do nothing)
-// 2) diff input focused by key (focus and select-all)
+// 2) diff input focused by key (focus it, and select all of it by default)
 // 3) diff input focused by click (do nothing: the click placed the caret)
 // 4) no input focused (focus back the canvas).
-// select_text() can be asked for on any frame, not only when the focus moves.
 function sync_dom_focus() {
 	let input = drawn_focused_input
-	if (input != prev_drawn_focused_input) {
-		if (input) {
-			if (drawn_focused_by_key) {
-				input.focus()
-				input.select()
-			}
-		} else if (document.activeElement == prev_drawn_focused_input) {
-			canvas.focus()
+	if (input == prev_drawn_focused_input)
+		return
+	if (input) {
+		if (drawn_focused_by_key) {
+			input.focus()
+			let id = input._ui_id
+			if (!input._ui_ss_ids && !ui.state(id).sel_pending)
+				ui.select_text(id, 0, 1/0)
 		}
-		prev_drawn_focused_input = input
+	} else if (document.activeElement == prev_drawn_focused_input) {
+		canvas.focus()
 	}
-	if (input)
-		apply_select_text(input)
+	prev_drawn_focused_input = input
+}
+
+// give the focused input the selection asked for. can be asked for on any
+// frame, not only when the focus moves.
+function sync_dom_selection() {
+	let input = drawn_focused_input
+	if (!input || input._ui_ss_ids)
+		return
+	if (ui.keydown('a') && ui.keypressed('ctrl'))
+		remember_select_all(input)
+	apply_select_text(input)
 }
 
 function input_free(s, id) {
@@ -5196,12 +5267,21 @@ function read_input_sel(t, input) {
 	t.caret  = backward ? input.selectionStart : input.selectionEnd
 }
 
-// for input and selectionchange: typing and caret moves are one edit.
-function input_edit(ev) {
+function input_text_changed() {
 	let s = ui.state(this._ui_id)
-	if (ev.type == 'input')
-		s.text = this.value
+	s.text = this.value
 	read_input_sel(s, this)
+	forget_selection(s)
+	animate()
+}
+
+function input_selection_changed() {
+	let s = ui.state(this._ui_id)
+	read_input_sel(s, this)
+	// setting a selection fires this too, reporting the positions it just
+	// set: that one moved nothing, so it doesn't cancel what was asked for.
+	if (s.anchor != this._ui_anchor || s.caret != this._ui_caret)
+		forget_selection(s)
 	animate()
 }
 
@@ -5224,16 +5304,28 @@ function remote_input_blur() {
 // numbers each edit sent out; frames echo the last one applied.
 let edit_n = 0
 
-function remote_input_edit(ev) {
-	let t = {input: this._ui_id, event: 'input', value: this.value}
+function remote_input_send_edit(input, t) {
+	t.input = input._ui_id
+	t.event = 'input'
+	t.value = input.value
+	t.n = input._ui_n = ++edit_n
+	remote_input_send(input, t)
+}
+
+function remote_input_text_changed() {
+	let t = {}
 	read_input_sel(t, this)
-	// skip the selectionchange that applying a frame's selection fires.
-	// an input event always changed the text.
-	if (ev.type != 'input'
-			&& t.anchor == this._ui_anchor && t.caret == this._ui_caret)
+	remote_input_send_edit(this, t)
+}
+
+function remote_input_selection_changed() {
+	let t = {}
+	read_input_sel(t, this)
+	// setting a selection fires this too, reporting the positions it just
+	// set: that one moved nothing, so there is nothing to send.
+	if (t.anchor == this._ui_anchor && t.caret == this._ui_caret)
 		return
-	t.n = this._ui_n = ++edit_n
-	remote_input_send(this, t)
+	remote_input_send_edit(this, t)
 }
 
 // send on the outermost screen's connection; the other ids are the route.
@@ -5303,17 +5395,20 @@ function input_create(id, input_type) {
 		if (input_type)
 			input.setAttribute('type', input_type)
 		input.classList.add('ui-input')
-		let edit = remote ? remote_input_edit : input_edit
 		input.addEventListener('focus', remote ? remote_input_focus : input_focus)
 		input.addEventListener('blur' , remote ? remote_input_blur  : input_blur )
-		input.addEventListener('input', edit)
-		input.addEventListener('selectionchange', edit)
+		input.addEventListener('input', remote
+			? remote_input_text_changed : input_text_changed)
+		input.addEventListener('selectionchange', remote
+			? remote_input_selection_changed : input_selection_changed)
 		screen.appendChild(input)
 		s.input = input
 		s.free = input_free
 	}
 	return input
 }
+
+// text drawing and hit-testing ----------------------------------------------
 
 draw[CMD_TEXT] = function(a, i) {
 
@@ -6366,7 +6461,11 @@ function list_update(id, s) {
 	s.focused_item_changed = before_fi != fi ? fi_changed : false
 	s.item_picked = fi_changed == 'click' || (fi != null && ui.focused(id) && ui.keydown('enter'))
 }
-function hvlist(hv, id, items, fr, align, valign, item_align, item_valign, item_fr, max_w, min_w) {
+function hvlist(hv, id, items, fr, align, valign,
+	item_align, item_valign, item_fr,
+	max_w, min_w,
+	item_pad_l, item_pad_r, item_pad_y, item_h
+) {
 	let s = ui.state(id)
 	s.items = items
 	keepalive(id, list_update)
@@ -6374,7 +6473,7 @@ function hvlist(hv, id, items, fr, align, valign, item_align, item_valign, item_
 	let fi = s.focused_item_i ?? 0
 	let list_focused = ui.focused(id)
 	// reveal the focused item on tab-focusing the list and on arrow keys.
-	// a clicked item is already in view.
+	// a clicked item is excepted to avoid shifting it under the mouse pointer.
 	let reveal_fi = ui.focusing(id) || s.focused_item_changed == 'key'
 	let i = 0
 	hv = hv || 'v'
@@ -6382,10 +6481,11 @@ function hvlist(hv, id, items, fr, align, valign, item_align, item_valign, item_
 	ui.hv(hv, fr, 0, align ?? '[', valign ?? '[', min_w ?? 120)
 	for (let item of items) {
 		let item_id = id+'.'+i
-		ui.p(ui.sp(), ui.sp05())
+		ui.p(item_pad_l ?? ui.sp(), item_pad_y ?? ui.sp05(),
+			item_pad_r ?? item_pad_l ?? ui.sp())
 		if (fi == i && reveal_fi)
 			ui.scroll_to_view()
-		ui.stack(item_id, 0)
+		ui.stack(item_id, 0, 's', 's', null, item_h)
 			let item_focused = fi == i
 			ui.bb(
 				item_focused ? 'item' : 'bg',
@@ -6734,89 +6834,159 @@ ui.widget('polyline', {
 
 // dropdown ------------------------------------------------------------------
 
-ui.dropdown = function(id, items, fr, max_w, min_w, min_h) {
+/*
+	let open = ui.dropdown(id, [keep_open], [side])
+		... the value ...
+	ui.dropdown_picker()
+		if (open)
+			... the picker, under id+'.picker' ...
+	ui.end_dropdown()
 
-	keepalive(id)
-	ui.focusable(id)
-	let open = ui.state(id, 'open')
-	let foc_i = open ? ui.state(id+'.list', 'focused_item_i') : null
-	let sel_i = foc_i ?? ui.state(id, 'i') ?? 0
-	sel_i = ui.valid_list_index(sel_i, items)
-	ui.state(id).i = sel_i
+when closed only the value is drawn, in place. when open the value and the
+picker under the value are in a popup aligned to the caller's container:
+list_dropdown() draws a box of its own for it to align to, a grid cell aligns
+it to the cell and draws no value. `item_picked` state is set on value picked.
+*/
+
+// sets ui.state(id).open and .item_picked.
+function dropdown_update(id, s) {
+
+	let picker_id = id+'.picker'
+	let open = s.open
 
 	let click = hit(id) && ui.click
-	let picked = ui.state(id+'.list', 'item_picked')
+	let picked = ui.state(picker_id, 'item_picked')
+
 	let toggle = click
 		|| (ui.focused(id) && ui.keydown('enter'))
 		|| picked
 
 	if (toggle) {
 		open = !open
-	} else if (open && !ui.focused(id+'.list')) {
+	} else if (open && ui.keydown('escape')) {
 		open = false
-	} else if (open && ui.click && !hit(id) && !picked && !captured(id+'.list')) {
+	} else if (open && !ui.focused(picker_id)) {
 		open = false
+	} else if (open && ui.click && !hit(id) && !captured(picker_id)) {
+		open = false
+	} else if (s.keep_open) {
+		open = true
 	}
 
-	ui.state(id).open = open
+	s.open = open
+	s.picked = picked
 
-	// id+'.list' only exists while open, so focus must move off it when
+	// picker_id only exists while open, so focus must move off it when
 	// closing: tab can't find an id that isn't in the tab order.
-	if (toggle && open)
-		ui.focus(id+'.list')
-	else if (!open && ui.focused(id+'.list'))
+	if (open && !ui.focused(picker_id))
+		ui.focus(picker_id)
+	else if (!open && ui.focused(picker_id))
 		ui.focus(id)
+}
 
+let dd_open // decided in dropdown(), needed in dropdown_picker() and end_dropdown()
+
+// keep_open: no closed state, for an editor drawn only while its list is up.
+// escape, a click outside and a pick still close it.
+ui.dropdown = function(id, keep_open, side) {
+
+	assert(dd_open == null, 'nested dropdown')
+
+	let s = ui.state(id) // runs dropdown_update() if it hasn't run this frame
+	s.keep_open = keep_open
+	s.open ??= false
+	keepalive(id, dropdown_update)
+	let open = s.open
+	dd_open = open
+
+	if (open) {
+		ui.popup(id+'.popup', 'open', null, side ?? 'il', 's', 0, 0,
+			'constrain change_side')
+		ui.shadow('picker')
+		ui.bb('input') // background only: end_dropdown() draws the border
+	}
+
+	ui.v()
+
+		ui.focusable(id)
+		ui.stack(id)
+
+	return open
+}
+
+ui.dropdown_picker = function() {
+	ui.end_stack()
+	if (dd_open)
+		ui.stack()
+}
+
+ui.end_dropdown = function() {
+	let open = dd_open
+	dd_open = null
+	if (open)
+		ui.end_stack()
+	ui.end_v()
+	if (open) {
+		// last, so that the picker's item backgrounds don't paint over it.
+		ui.bb(null, null, 1, 'intense', 'hover')
+		ui.end_popup()
+	}
+}
+
+// dropdown over a list of strings, keeping the picked index in its own state.
+ui.list_dropdown = function(id, items, fr, max_w, min_w, min_h) {
+
+	let picker_id = id+'.picker'
+
+	// reading the state runs the decision for this frame.
+	let open = ui.state(id, 'open') ?? false
+
+	// open, the value follows the list's focused item; on a pick, that item
+	// is the value.
+	let foc_i = (open || ui.state(id, 'picked'))
+		? ui.state(picker_id, 'focused_item_i') : null
+	let sel_i = foc_i ?? ui.state(id, 'i') ?? 0
+	sel_i = ui.valid_list_index(sel_i, items)
+	ui.state(id).i = sel_i
+
+	// arrow keys move the selection with the list closed.
 	if (!open && ui.focused(id)) {
 		let d = ui.keydown('arrowup') && -1 || ui.keydown('arrowdown') && 1 || 0
 		if (d) {
 			sel_i = ui.valid_list_index(sel_i + d, items)
 			ui.state(id).i = sel_i
-			ui.state(id+'.list').focused_item_i = sel_i
+			ui.state(picker_id).focused_item_i = sel_i
 		}
 	}
 
-	let s = sel_i != null ? items[sel_i] : ''
-
 	ui.stack('', fr, 's', 's', min_w ?? ui.em(12), min_h)
 
-		// placeholder to align popup to it.
-		ui.m(1)
+	// empty box for the popup to align to, the size of the closed dropdown.
+	ui.p(ui.sp())
+	ui.text('', '', 0, 'l', 'c')
+
+	ui.dropdown(id)
+
+		if (!open)
+			ui.bb('input', null, 1, 'intense', ui.focused(id) ? 'hover' : null)
 		ui.p(ui.sp())
-		ui.text('', '', 0, 'l', 'c')
+		ui.h(0, ui.sp())
+			ui.text('', sel_i != null ? items[sel_i] : '', 1, 'l', 'c', max_w ?? ui.em(8))
+			ui.stack('', 0)
+				ui.polyline('', '0 4  7 11  14 4', false, null, null, 'label')
+			ui.end_stack()
+		ui.end_h()
 
-		if (open)
-			ui.popup(id+'.popup', 'open', null, 'il', 's', 0, 0, 'constrain change_side')
+	ui.dropdown_picker()
 
-			if (open)
-				ui.shadow('picker')
+		if (open) {
+			ui.state_init(picker_id, 'focused_item_i', sel_i)
+			// same padding as the value above, so the items are as tall.
+			ui.list(picker_id, items, 0, 's', 's', 'l', 'c', 0, max_w,
+				null, ui.sp(), ui.sp(), ui.sp())
+		}
 
-			ui.bb('input', null, 1, 'intense', ui.focused(id) || ui.focused(id+'.list') ? 'hover' : null)
-
-			ui.m(1)
-			ui.v()
-
-				ui.stack(id)
-					ui.p(ui.sp())
-					ui.h(0, ui.sp())
-						ui.text('', s, 1, 'l', 'c', max_w ?? ui.em(8))
-						ui.stack('', 0)
-							ui.polyline('', '0 4  7 11  14 4', false, null, null, 'label')
-						ui.end_stack()
-					ui.end_h()
-				ui.end_stack()
-
-				if (open) {
-					ui.stack()
-						ui.state_init(id+'.list', 'focused_item_i', sel_i)
-						ui.list(id+'.list', items, 0, 's', 's', 'l', 'c', 0, max_w)
-					ui.end_stack()
-				}
-
-			ui.end_v()
-
-		if (open)
-			ui.end_popup()
+	ui.end_dropdown()
 
 	ui.end_stack()
 }

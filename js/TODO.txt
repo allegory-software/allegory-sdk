@@ -34,7 +34,7 @@ GRID EDITING (see TODO-AI.txt for why things are the way they are)
 * grid edit state colors (new, modified, deleted)
 * quicksearch + match highlight
 * bool cells: click/space toggle, boxed check when editable
-- enum cells: dropdown editor
+* enum cells: dropdown editor
 - lookup cells: dropdown over the lookup nav (they edit as the raw fk now)
 - date, color, icon, tags, place, url, button cells
 - bound input widgets

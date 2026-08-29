@@ -6,10 +6,10 @@ Where this is:
 
 	The nav came from a DOM toolkit and is being ported to the IMGUI in
 	three steps: clean up the nav, make input widgets data-bound, make the
-	grid editable. Step one is done. Step three is done for text and bool
-	cells; the other field types still fall back to the text editor, and
-	the per-type list at the end is the spec for them. Step two has not
-	started; the widget binding section is its spec.
+	grid editable. Step one is done. Step three is done for text, bool and
+	enum cells; the other field types still fall back to the text editor,
+	and the per-type list at the end is the spec for them. Step two has
+	not started; the widget binding section is its spec.
 
 Decisions already made, so they don't get argued a second time:
 
@@ -61,6 +61,10 @@ Decisions already made, so they don't get argued a second time:
 		typed into a cell.
 	cells that act on a click (bool) go through cell_clickable() and
 		do_cell_click() and never open an editor.
+	an editor never drives the nav: it reads input in update_editor() and
+		reports, and the grid acts on the report before it draws any cell.
+		anything decided while the cells are being drawn shows up a frame
+		late, which is where every late-frame bug in this came from.
 
 	Checking a change: the demo builds real navs, so behavior can be
 	verified by constructing navs in the page and diffing the results
@@ -78,9 +82,11 @@ Not implemented:
 	revalidate a col when its lookup nav's rows change. rows are validated
 		at load time, before the lookup nav has landed, so an unknown fk is
 		never flagged. needs a rows-generation counter on the nav.
-	an editor for every field type but text and bool. enum and lookup want
-		a dropdown (ui.dropdown exists); a lookup cell edits as the raw fk
-		today, since the seed is to_input() of the cell's own value.
+	an editor for every field type but text, bool and enum. a lookup cell
+		edits as the raw fk today, since the seed is to_input() of the
+		cell's own value. its dropdown wants a picker drawn from the lookup
+		nav's rows, which is why ui.dropdown() lets the caller draw both
+		the closed value and the picker.
 	what an empty editor means for a type that has a from_input(): it
 		stores '' and flags it invalid, where null is probably right. ''
 		stays legitimate for text fields.
@@ -119,6 +125,12 @@ Known defects:
 		"[object Object]". silent no-op; nothing listens for it.
 	the /xrowset.events EventSource connects as soon as any named rowset
 		binds, and retries against a 404 when there is no server.
+
+	text selection rests on setSelectionRange() raising selectionchange,
+		and on that event arriving after the call. what keeps an applied
+		selection from being taken for the user's own is a comparison
+		against the positions that were set, which does nothing at all if
+		the event never comes.
 
 Widget binding, from the DOM version's nav mixins (ui_nav_todo.js, removed):
 
@@ -210,7 +222,7 @@ Export:
 	e.download_xlsx() fetched the rowset url with .json swapped for .xlsx and
 	clicked a hidden link. format_rowset_url(format) is still here.
 
-Field types, per type:
+Field types, per type. text, bool and enum are done; the rest is the spec.
 	all       : a text editor.
 	password  : a masked editor.
 	number    : a numeric editor.

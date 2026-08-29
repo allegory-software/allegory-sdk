@@ -85,7 +85,14 @@ Field attributes:
 		client_default : default value/generator that new rows are initialized with.
 		has_server_default: the server fills this in, so it can be left empty.
 		readonly       : prevent editing.
-		draw_editor    : f(id, v) -> v   draw the widget that edits v.
+		update_editor  : f(id, v, ev) -> v   read input, draw nothing. runs
+		                 before any cell is drawn. sets ev.exit_edit,
+		                 ev.cancel, ev.picked.
+		draw_editor    : f(id, v, ev)   draw the widget that edits v.
+		                 ev.pad_l, ev.pad_r, ev.h: the box the cell drew v
+		                 in. the cell has no vertical padding: it centers v
+		                 in its height instead.
+		edits_in_popup : draw_editor draws a popup: no editor in the cell.
 
 		to_input       : f(v) -> s   value as editable text.
 		from_input     : f(s) -> v   editable text back to value (or undefined)
@@ -384,7 +391,7 @@ Editing cells:
 	publishes:
 		e.editing                 the focused cell is being edited.
 		e.editor_id               ui id the editor widget is drawn under.
-		e.enter_edit(['all'|'start'|'end'], [focus]) -> t|f
+		e.enter_edit([sel_i, sel_len], [focus]) -> t|f
 		e.enter_exits_edit        enter closes the editor it opened.
 		e.exit_edit([{cancel: true}])
 		e.exit_row([{cancel: true}])
@@ -1049,7 +1056,9 @@ ui.nav = function(opt) {
 
 		// refocus
 
-		if (refocus_state)
+		// on free there is nothing to focus into, and the fields the state
+		// names are gone with the rowset.
+		if (rowset && refocus_state)
 			e.refocus(refocus_state)
 
 		if (reset)
@@ -1884,8 +1893,11 @@ ui.nav = function(opt) {
 			qs_changed = true
 		}
 
-		if (enter_edit && ri != null && fi != null)
-			e.enter_edit(ev.caret_pos, focus_editor || false)
+		// stay_in_edit_mode must not carry the edit onto a popup editor:
+		// that would pop its list open on every arrow key.
+		if (enter_edit && ri != null && fi != null
+				&& (ev.enter_edit || !e.fields[fi].edits_in_popup))
+			e.enter_edit(ev.sel_i, ev.sel_len, focus_editor || false)
 
 		if (ev.make_visible != false)
 			if (e.focused_row)
@@ -3260,7 +3272,8 @@ ui.nav = function(opt) {
 			e.set_cell_val(row, field, !e.cell_input_val(row, field), ev)
 	}
 
-	e.enter_edit = function(caret_pos, focus) {
+	// sel_i, sel_len: in ui.select_text() terms, all of it by default.
+	e.enter_edit = function(sel_i, sel_len, focus) {
 		if (e.editing)
 			return true
 		let row = e.focused_row
@@ -3274,9 +3287,13 @@ ui.nav = function(opt) {
 		e.editor_id = e.id + '.editor.' + e.row_index(row) + '.' + e.field_index(field)
 		// by key: that is what focuses the input element. a click can't, the
 		// input only appears a frame later.
+		if (sel_i == null) { // select all of it
+			sel_i = 0
+			sel_len = 1/0
+		}
 		if (focus !== false) {
 			ui.focus(e.editor_id, true)
-			ui.select_text(e.editor_id, caret_pos ?? 'all')
+			ui.select_text(e.editor_id, sel_i, sel_len)
 		}
 		return true
 	}
@@ -4720,17 +4737,24 @@ all_field_types.to_input = function(v) {
 	return this.to_text(v)
 }
 
-// draw_editor(id, v) -> v   text box over to_input()/from_input(); a type
-// with its own widget overrides it. untouched text gives back the same v, so
-// a redraw is not an edit; text that doesn't parse comes back as itself.
-// same call as draw_text(), so the cell doesn't shift on entering edit.
-all_field_types.draw_editor = function(id, v) {
+// text box over to_input()/from_input(); a type with its own widget
+// overrides both. untouched text gives back the same v, so a redraw is not
+// an edit; text that doesn't parse comes back as itself.
+all_field_types.update_editor = function(id, v, ev) {
+	let s1 = ui.text_value(id)
+	if (s1 === undefined) // draw_editor() hasn't run yet
+		return v
 	let s0 = v == null ? '' : this.to_input(v)
-	let s1 = ui.text_editable(id, s0, 0, this.align, 'c', null)
 	if (s1 === s0)
 		return v
 	let v1 = this.from_input ? this.from_input(s1) : s1
 	return v1 === undefined ? s1 : v1
+}
+
+// same call as draw_text(), so the cell doesn't shift on entering edit.
+all_field_types.draw_editor = function(id, v, ev) {
+	ui.p(ev.pad_l, 0, ev.pad_r, 0)
+	ui.text_editable(id, v == null ? '' : this.to_input(v), 0, this.align, 'c', null)
 }
 
 all_field_types.fixed_width = 0
@@ -4964,6 +4988,60 @@ field_types.enum = enm
 enm.to_text = function(v) {
 	let s = this.enum_labels ? this.enum_labels[v] : undefined
 	return s !== undefined ? s : v
+}
+
+enm.edits_in_popup = true
+
+// a dropdown over enum_values, up for as long as the edit is: the cell keeps
+// drawing its own value under it and there is no closed state.
+enm.update_editor = function(id, v, ev) {
+
+	assert(this.enum_values != null, this.name, ': enum col with no enum_values')
+
+	let picker_id = id+'.picker'
+	let vals = words(this.enum_values) // 'v1 ...' or ['v1', ...]
+
+	// reading the state runs the dropdown's decision for this frame.
+	let s = ui.state(id)
+
+	// the list keeps its focused item across openings: start it on v.
+	if (s.open === undefined)
+		ui.state(picker_id).focused_item_i = max(0, vals.indexOf(v))
+
+	// undefined until the dropdown is first drawn, which is not closed.
+	ev.exit_edit = s.open === false
+	ev.picked = s.picked
+
+	return s.picked ? vals[ui.state(picker_id, 'focused_item_i')] : v
+}
+
+enm.draw_editor = function(id, v, ev) {
+
+	let picker_id = id+'.picker'
+
+	// the list is up for as long as the edit is. anchored on the side v is
+	// aligned to, so v stays put when the list makes the popup wider than
+	// the cell.
+	let open = ui.dropdown(id, true, this.align == 'right' ? 'ir' : 'il')
+
+		if (open) {
+			ui.p(ev.pad_l, 0, ev.pad_r, 0)
+			ui.stack('', 0, 's', 's', null, ev.h)
+				this.draw(v, true)
+			ui.end_stack()
+		}
+
+	ui.dropdown_picker()
+
+		if (open) {
+			// the cell's own box: rows as tall as the cell, text where the
+			// cell put it.
+			let labels = words(this.enum_values).map(v => this.to_text(v))
+			ui.list(picker_id, labels, 0, 's', 's', this.align, 'c', 0,
+				null, null, ev.pad_l, ev.pad_r, 0, ev.h)
+		}
+
+	ui.end_dropdown()
 }
 
 // tag lists -----------------------------------------------------------------
