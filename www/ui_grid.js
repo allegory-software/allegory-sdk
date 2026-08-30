@@ -72,6 +72,9 @@ function init(id, e) {
 	// cells-view-height-sensitive thus set on frame callback
 	let page_row_count = 1
 
+	// cell to scroll into view on the next frame when geometry is known.
+	let scroll_to_ri, scroll_to_fi
+
 	// mouse state
 	let drag_state, dx, dy, cs
 	let gcol_mover
@@ -118,7 +121,7 @@ function init(id, e) {
 	function advance_edit(cross, d) {
 		let by_row = (e.advance_on_enter == 'next_row') != cross
 		let opt = {input: e, sel_i: 0, sel_len: 1/0,
-			must_move: true, enter_edit: true}
+			must_move: true, enter_edit: true, editor_popup_open: false}
 		if (by_row)
 			e.focus_cell(true, true, d, 0, opt)
 		else
@@ -128,7 +131,7 @@ function init(id, e) {
 	// an edit that enter started is only exited by it; one started by F2 or
 	// by a click moves on. exit first: nowhere to move to still ends it.
 	function end_edit_like_enter(cross, d) {
-		if (e.enter_exits_edit || e.exit_edit_on_enter) {
+		if (!e.advance_on_exit || e.exit_edit_on_enter) {
 			e.exit_edit()
 		} else if (e.advance_on_enter) {
 			e.exit_edit()
@@ -154,7 +157,7 @@ function init(id, e) {
 				e.set_cell_val(row, field, v, {input: e})
 			if (editor_ev.exit_edit) {
 				let advance = editor_ev.picked
-					&& !e.enter_exits_edit && e.advance_on_enter
+					&& e.advance_on_exit && e.advance_on_enter
 				e.exit_edit({cancel: editor_ev.cancel, input: e})
 				if (advance)
 					advance_edit(false, 1)
@@ -231,7 +234,7 @@ function init(id, e) {
 		else if (draw_stage == 'col_group')
 			bg = 'bg0'
 		if (editing) {
-			bg = 'item'
+			bg = 'bg0'
 			bgs = grid_focused ? 'item-focused focused' : 'item-focused'
 		} else if (cell_invalid) {
 			bg = 'item'
@@ -405,12 +408,12 @@ function init(id, e) {
 
 		}
 
-		if (foc_cell && foc_ri >= ri1 && foc_ri <= ri2 && foc_fi >= fi1 && foc_fi <= fi2) {
+		if (foc_cell && foc_ri >= ri1 && foc_ri < ri2 && foc_fi >= fi1 && foc_fi <= fi2) {
 			draw_cell(a, foc_ri, foc_fi, draw_stage)
 		}
 
 		// hit_cell can overlap foc_cell, so we draw it after it.
-		if (hit_cell && hit_ri >= ri1 && hit_ri <= ri2 && hit_fi >= fi1 && hit_fi <= fi2) {
+		if (hit_cell && hit_ri >= ri1 && hit_ri < ri2 && hit_fi >= fi1 && hit_fi <= fi2) {
 			draw_cell(a, hit_ri, hit_fi, draw_stage)
 		}
 
@@ -479,8 +482,8 @@ function init(id, e) {
 	}
 
 	e.scroll_to_cell = function(ri, fi) {
-		let [x, y, w, h] = cell_rect(ri, fi)
-		ui.scroll_to_view(id+'.cells_scrollbox', x, y, w, h)
+		scroll_to_ri = ri
+		scroll_to_fi = fi
 	}
 
 	// render grid ------------------------------------------------------------
@@ -502,7 +505,7 @@ function init(id, e) {
 		cell_h = round(line_height + 2 * sp + e.cell_border_h_width)
 		header_h = cell_h
 		gcol_w = 80 // group-bar column width
-		gcol_h = line_height + sp
+		gcol_h = round(line_height + sp)
 		gcol_gap = 1
 
 		if (e.editing && e.exit_edit_on_lost_focus
@@ -863,6 +866,15 @@ function init(id, e) {
 			cells_w += cw
 		}
 
+		if (scroll_to_ri != null) {
+			if (e.rows[scroll_to_ri] && e.fields[scroll_to_fi]) {
+				let [x, y, w, h] = cell_rect(scroll_to_ri, scroll_to_fi)
+				ui.scroll_to_view(id+'.cells_scrollbox', x, y, w, h)
+			}
+			scroll_to_ri = null
+			scroll_to_fi = null
+		}
+
 		// check hover/drag on cell view
 
 		if (!hit_zone) {
@@ -873,23 +885,25 @@ function init(id, e) {
 				let y0 = s.y
 				hit_ri = floor((ui.my - y0) / cell_h)
 				let row = e.rows[hit_ri]
-				for (let fi = 0; fi < e.fields.length; fi++) {
-					let [x1, y1, w, h] = cell_rect(hit_ri, fi)
-					let hit_dx = ui.mx - x1 - x0
-					let hit_dy = ui.my - y1 - y0
-					if (hit_dx >= 0 && hit_dx <= w) {
-						let field = e.fields[fi]
-						hit_zone = 'cell'
-						hit_fi = fi
-						hit_indent = false
-						if (row && field_has_indent(field)) {
-							let has_children = (row.child_rows?.length ?? 0) > 0
-							if (has_children) {
-								let indent_x = indent_offset(row_indent(row))
-								hit_indent = hit_dx <= indent_x
+				if (row) {
+					for (let fi = 0; fi < e.fields.length; fi++) {
+						let [x1, y1, w, h] = cell_rect(hit_ri, fi)
+						let hit_dx = ui.mx - x1 - x0
+						let hit_dy = ui.my - y1 - y0
+						if (hit_dx >= 0 && hit_dx <= w) {
+							let field = e.fields[fi]
+							hit_zone = 'cell'
+							hit_fi = fi
+							hit_indent = false
+							if (field_has_indent(field)) {
+								let has_children = (row.child_rows?.length ?? 0) > 0
+								if (has_children) {
+									let indent_x = indent_offset(row_indent(row))
+									hit_indent = hit_dx <= indent_x
+								}
 							}
+							break
 						}
-						break
 					}
 				}
 			}
@@ -927,6 +941,12 @@ function init(id, e) {
 				invert_selection: ctrl,
 				input: e,
 			})) {
+				// the picker is drawn inside the cells frame, so the dropdown
+				// has already read this state for this frame.
+				if (e.is_picker && !hit_indent) {
+					ui.state(id).item_picked = true
+					ui.relayout()
+				}
 				if (click)
 					e.do_cell_click(row, field, {input: e})
 				// TODO:
@@ -934,6 +954,11 @@ function init(id, e) {
 			}
 
 		}
+
+		// the click that precedes it focused the cell, and the dblclick event
+		// comes on the button-up, after the cell hit state is gone.
+		if (ui.dblclick && ui.hovers(id+'.cells'))
+			e.enter_edit()
 
 		// process keyboard input ----------------------------------------------
 
@@ -1046,7 +1071,7 @@ function init(id, e) {
 
 		// F2: enter edit mode
 		if (!e.editing && keydown('f2')) {
-			e.enter_edit()
+			e.enter_edit({advance_on_exit: true})
 			return false
 		}
 
@@ -1056,11 +1081,14 @@ function init(id, e) {
 				e.quicksearch(e.quicksearch_text, e.focused_row, shift ? -1 : 1)
 				return false
 			} else if (e.is_picker) {
-				e.pick_val()
+				ui.state(id).item_picked = true
+				ui.relayout()
 				return false
 			} else if (!e.editing) {
 				e.enter_edit()
-				e.enter_exits_edit = true
+				return false
+			} else if (e.focused_field.edits_in_popup && !e.editor_popup_open) {
+				e.editor_popup_open = true
 				return false
 			} else {
 				end_edit_like_enter(ctrl, shift ? -1 : 1)
@@ -1189,6 +1217,7 @@ function init(id, e) {
 
 			// so that focus_inside() answers for a picker's own widgets.
 			ui.focus_group(null, null, id)
+			ui.focusable(id)
 
 			// group-by bar
 
@@ -1400,8 +1429,11 @@ ui.grid = function(id, opt, fr, align, valign, min_w, min_h) {
 	let s = ui.state(id)
 	let nav = s.nav
 	if (!nav) {
-		nav = ui.nav(opt, s)
-		ui.on_free(id, () => nav.free())
+		nav = opt.nav
+		if (!nav) {
+			nav = ui.nav(opt, s)
+			ui.on_free(id, () => nav.free())
+		}
 		init(id, nav)
 		s.nav = nav
 	}

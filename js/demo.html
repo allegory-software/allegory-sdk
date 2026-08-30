@@ -36,8 +36,10 @@ if (demo_state.theme)
 
 ui.DEBUG      = demo_state.debug ?? true
 ui.TUI        = demo_state.tui   ?? false
-SELECTED_DEMO = location.search.match('demo=([^&]+)')?.[1] ?? demo_state.demo ?? 'tabs'
-REMOTE_DEMO   = location.search.match('remote=([^&]+)')?.[1]
+selected_demo = location.search.match('demo=([^&]+)')?.[1] ?? demo_state.demo ?? 'tabs'
+remote_demo   = location.search.match('remote=([^&]+)')?.[1]
+
+ui.focus('demos_list')
 
 </script>
 <body>
@@ -205,7 +207,7 @@ for (let j = 1; j < 100; j++) {
 		row.push('Cell '+j+','+i)
 	rows.push(row)
 }
-ui.rowsets.grid_rowset = {
+ui.rowsets.grid = {
 	pk: 'id', can_change_rows: false,
 	fields: fields,
 	rows: rows,
@@ -213,7 +215,7 @@ ui.rowsets.grid_rowset = {
 demos.grid = `
 ui.m(ui.em(2))
 ui.stack()
-	ui.grid('grid1', {rowset_name: 'grid_rowset'})
+	ui.grid('grid1', {rowset_name: 'grid'})
 ui.end_stack()
 `
 }
@@ -243,7 +245,7 @@ for (let i = 0; i <= 10000; i++) {
 	row.focusable = true // i % 100 >= 85
 	rows.push(row)
 }
-ui.rowsets.tree_rowset = {
+ui.rowsets.tree = {
 	fields: fields,
 	rows: rows,
 	pk: 'id',
@@ -254,7 +256,7 @@ demos.treegrid = `
 ui.m(ui.em(2))
 ui.stack()
 	ui.grid('treegrid', {
-		rowset_name: 'tree_rowset',
+		rowset_name: 'tree',
 		order_by: 'active name:desc',
 		//tree_col: 'name',
 		//can_edit: false,
@@ -270,6 +272,19 @@ ui.end_stack()
 }
 
 {
+ui.rowsets.grower = {
+	pk: 'id',
+	fields: [
+		{name: 'id'  , type: 'number'},
+		{name: 'name'},
+		{name: 'city'},
+	],
+	rows: [
+		[1, 'Orchard Bros' , 'Cluj'     ],
+		[2, 'Tropicana'    , 'Valencia' ],
+		[3, 'Green Fields' , 'Rotterdam'],
+	],
+}
 let fields = [
 	{name: 'id'        , w:  50, min_w:  30, type: 'number', editable: false},
 	{name: 'name'      , w: 100},
@@ -277,18 +292,20 @@ let fields = [
 	{name: 'type'      , w:  50},
 	{name: 'good'      , w:  30, type: 'bool', true_text: 'Good', false_text: 'Bad', },
 	{name: 'climate'   , w:  50},
+	{name: 'grower_id' , w: 110, type: 'number', label: 'Grower',
+		lookup_rowset_name: 'grower', display_col: 'name'},
 ]
 let rows = [
-	[1, 'Apple'    , 'Red'    , 'Fruit' , true  , 'Temperate'],
-	[2, 'Banana'   , 'Yellow' , 'Fruit' , true  , 'Tropical' ],
-	[3, 'Lemon'    , 'Yellow' , 'Fruit' , false , 'Tropical' ],
-	[4, 'Pear'     , 'Yellow' , 'Fruit' , false , 'Temperate'],
-	[5, 'Broccoli' , 'Green'  , 'Veggie', false , 'Temperate'],
-	[6, 'Pepper'   , 'Yellow' , 'Veggie', true  , 'Temperate'],
-	[7, 'Potato'   , 'Yellow' , 'Veggie', true  , 'Temperate'],
-	[8, 'Carrot'   , 'Orange' , 'Veggie', false , 'Temperate'],
+	[1, 'Apple'    , 'Red'    , 'Fruit' , true  , 'Temperate', 1],
+	[2, 'Banana'   , 'Yellow' , 'Fruit' , true  , 'Tropical' , 2],
+	[3, 'Lemon'    , 'Yellow' , 'Fruit' , false , 'Tropical' , 2],
+	[4, 'Pear'     , 'Yellow' , 'Fruit' , false , 'Temperate', 1],
+	[5, 'Broccoli' , 'Green'  , 'Veggie', false , 'Temperate', 3],
+	[6, 'Pepper'   , 'Yellow' , 'Veggie', true  , 'Temperate', 3],
+	[7, 'Potato'   , 'Yellow' , 'Veggie', true  , 'Temperate', null],
+	[8, 'Carrot'   , 'Orange' , 'Veggie', false , 'Temperate', 3],
 ]
-ui.rowsets.food_rowset = {
+ui.rowsets.food = {
 	fields: fields,
 	rows: rows,
 	pk: 'id',
@@ -298,9 +315,9 @@ demos.grid_groups = `
 ui.m(ui.em(2))
 ui.stack()
 	ui.grid('groups_grid', {
-		rowset_name: 'food_rowset',
+		rowset_name: 'food',
 		tree_col: 'name',
-		cols: 'name id color type good climate',
+		cols: 'name id color type good climate grower_id',
 		order_by: 'color type:desc',
 		//order_by: 'name id:desc',
 		// group_by: 'climate > type good > color',
@@ -361,7 +378,7 @@ let rows = [
 	[4, -12.75  , 60         ,      7, time(2000,1,1) , time(2000,1,1,0,1)  , time(1970,1,2)     , 23*3600+59*60 , 61   , false, 'open'   , []               , '#111111'                , 0   , 'caret_right' , {description: 'Object without a place_id'}               , 'ftp://files.example.com', '555-0103', 'd@example.com', 'pw'           , 'sk_live_jkl012' , 'ssh-dss AAAAB3Nz', '-----BEGIN KEY---', 'status' , null, 3],
 	[5, null    , null       ,   null, null           , null                , null               , null          , null , null , null     , null             , null                     , null, null          , null                                                       , null                 , null         , null           , null          , null             , null              , null              , null     , null, 4],
 ]
-ui.rowsets.grid_types_rowset = {
+ui.rowsets.grid_types = {
 	fields: fields,
 	rows: rows,
 	pk: 'id',
@@ -373,7 +390,7 @@ grid_types_cols = ['status', 'tags'].concat(
 demos.grid_types = `
 ui.m(ui.em(2))
 ui.stack()
-	ui.grid('grid_types', {rowset_name: 'grid_types_rowset', cols: grid_types_cols})
+	ui.grid('grid_types', {rowset_name: 'grid_types', cols: grid_types_cols})
 ui.end_stack()
 `
 }
@@ -1161,10 +1178,10 @@ function demo_main() {
 
 			ui.stack('', 0, 's', 's', ui.em(10))
 				ui.border('r', 'light')
-				ui.state_init('demos_list', 'focused_item_i', demos_array.indexOf(SELECTED_DEMO))
+				ui.state_init('demos_list', 'focused_item_i', demos_array.indexOf(selected_demo))
 				let i = ui.state('demos_list', 'focused_item_i')
-				SELECTED_DEMO = demos_array[i]
-				save_demo_state('demo', SELECTED_DEMO)
+				selected_demo = demos_array[i]
+				save_demo_state('demo', selected_demo)
 				ui.sb('demos_list_sb')
 					let demo = ui.list('demos_list', demos_array)
 				ui.end_sb()
@@ -1201,7 +1218,7 @@ function demo_main() {
 
 ui.main = demo_main
 
-if (REMOTE_DEMO == 'viewer')
+if (remote_demo == 'viewer')
 	ui.main = function() {
 		if (!remote_answer_con)
 			return

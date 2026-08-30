@@ -1133,6 +1133,7 @@ ui.capture = function(id) {
 	if (!hs)
 		return
 	ui.captured_id = id
+	focus_taken = true
 	assign(capture_state, hs)
 	ui.mx0 = ui.mx
 	ui.my0 = ui.my
@@ -1382,8 +1383,8 @@ the widget doesn't appear again on a future frame. State updates should be
 done inside an update callback registered with keepalive() so that the widget
 state can be updated in advance of the widget appearing in the frame in case
 the widget state is queried from outside before the widget appears in the frame.
-The update callback will be called once per frame, either due to a state access
-or when the widget is created in the frame.
+The update callback is called once per relayout pass, either due to a state
+access or when the widget is created in the frame.
 
 */
 
@@ -1410,8 +1411,8 @@ ui.keepalive = keepalive
 // an update must run once per redraw in order to avoid acting on events
 // like mouse clicks more than once (one-shot state only gets cleared at the
 // end of the frame). the update is triggered by whichever comes first:
-// ui.state() or keepalive(). frame_gen keeps it from running twice on
-// ui.relayout().
+// ui.state() or keepalive(). frame_gen keeps it from running twice per
+// relayout pass.
 function state_update(id, s) {
 	let update_fn = s.update
 	if (!update_fn)
@@ -1520,7 +1521,12 @@ ui.focused_id = null
 ui.focused_by_key = null
 let focusing_id
 
+// set when focus is taken or the mouse is captured this frame: a click that
+// does neither clears the focus.
+let focus_taken
+
 ui.focus = function(id, by_key) {
+	focus_taken = true
 	ui.focused_id = id
 	ui.focused_by_key = by_key
 	focusing_id = id
@@ -2544,8 +2550,6 @@ function redraw_all() {
 	hit_state_map = sm
 	ui._hit_state_map = hit_state_map
 
-	frame_gen++
-
 	let relayout_count = 0
 	while (1) {
 		let t0, t1
@@ -2633,6 +2637,12 @@ function redraw_all() {
 			capture_state = obj()
 		}
 
+		if (ui.click && !focus_taken) {
+			ui.focused_id = null
+			ui.relayout()
+		}
+		focus_taken = false
+
 		for (let p of ui.pointers)
 			reset_pointer_state(p)
 		reset_pointer_state(ui)
@@ -2642,6 +2652,9 @@ function redraw_all() {
 		ui.key_events.length = 0
 
 		event_state.clear()
+
+		// updates can run again now that they can't see the same edge state.
+		frame_gen++
 
 		focusing_id = null
 
@@ -6852,18 +6865,22 @@ function dropdown_update(id, s) {
 
 	let click = hit(id) && ui.click
 	let picked = ui.state(picker_id, 'item_picked')
+	if (picked) // consumed: an update that runs again must not toggle twice.
+		ui.state(picker_id).item_picked = false
 
-	let toggle = click
-		|| (ui.focused(id) && ui.keydown('enter'))
-		|| picked
+	let enter = ui.focused(id) && ui.keydown('enter')
 
+	let toggle = click || enter || picked
+
+	// a key acted on here is not for anyone drawn later this frame.
 	if (toggle) {
 		open = !open
+		if (enter)
+			ui.capture_keys()
 	} else if (open && ui.keydown('escape')) {
 		open = false
-	} else if (open && !ui.focused(picker_id)) {
-		open = false
-	} else if (open && ui.click && !hit(id) && !captured(picker_id)) {
+		ui.capture_keys()
+	} else if (open && !ui.focused(picker_id) && !ui.focus_inside(picker_id)) {
 		open = false
 	} else if (s.keep_open) {
 		open = true
