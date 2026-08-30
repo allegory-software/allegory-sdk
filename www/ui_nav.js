@@ -3,11 +3,10 @@
 	UI nav objects.
 	Written by Cosmin Apreutesei. Public Domain.
 
-A nav is an in-memory table with typed columns and rows. It can be populated
-from a rowset or manually. Once set up, rows can be sorted, filtered, grouped
-or form a tree, cells can be selected, values can be looked up, etc.
-A nav is the data model for the grid widget but it can also be used standalone
-as a shared data model sourcing multiple widgets (think lookup tables).
+A nav is an in-memory table with typed columns and rows populated from a rowset.
+Once set up, rows can be sorted, filtered, grouped or form a tree, cells can
+be selected, values can be looked up, etc. A nav is the data model for the grid
+widget.
 
 A rowset is a POD used to populate a nav. It contains field definitions and
 rows of values. It can come from a http server as JSON, or constructed in JS.
@@ -22,21 +21,14 @@ Rowset structure:
 
 Creating a nav:
 
-	ui.nav({rowset: {fields: ..., rows: ...}}) -> e
-
-		Assign a rowset directly in code.
-
 	ui.nav({rowset_name: NAME}) -> e
 
-		Loads the rowset from the server at /rowset.json/NAME.
+		Loads ui.rowsets[NAME], or the rowset from the server at
+		/rowset.json/NAME.
 
-	ui.nav({rowset_url: URL}) -> e
+Updating after changing nav props or field attrs:
 
-		Loads the rowset from the server at URL.
-
-Updating nav's properties efficiently:
-
-	e.update({k: v})
+	e.update(parts)
 
 Rowset attributes:
 
@@ -56,7 +48,7 @@ Sources of field attributes, in precedence order:
 	------------- -------------------------------------------------------------
 	nav           e.col_attrs = {COL: {ATTR: VAL}}
 	rowset        ui.rowset_col_attrs['ROWSET.COL'] = {ATTR: VAL}
-	rowset        e.rowset.fields = [{ATTR: VAL},...]
+	rowset        ui.rowsets[NAME].fields = [{ATTR: VAL},...]
 	field type    ui.field_types[TYPE] = {ATTR: VAL}
 	global        ui.all_field_types[ATTR] = VAL
 
@@ -138,7 +130,7 @@ Field attributes:
 
 	vlookup:
 
-		lookup_rowset[_name|_url]: rowset to look up values of this field into.
+		lookup_rowset_name: rowset to look up values of this field into.
 		lookup_nav     : nav to look up values of this field into.
 		lookup_cols    : field(s) in lookup_nav to look up values of local_cols into.
 		local_cols     : field(s) in this nav to get values from to lookup in lookup_nav.
@@ -185,10 +177,6 @@ Fields:
 	publishes:
 		e.all_fields_map[col] -> field
 		e.all_fields[fi] -> field
-		e.get_col_attr(col, attr) -> val
-		e.set_col_attr(col, attr, val)
-	announces:
-		^^field_changed(col, attr, v)
 
 Visible fields:
 	publishes:
@@ -366,8 +354,6 @@ Updating row state:
 		e.validate_row(row)
 
 Rowset state:
-	needs:
-		e.rowset                  assign a rowset directly.
 	publishes:
 		e.ready                   true after reset
 	announces:
@@ -402,7 +388,6 @@ Editing cells:
 Loading from server:
 	needs:
 		e.rowset_name
-		e.rowset_url
 	publishes:
 		e.reload()
 		e.abort_loading()
@@ -559,19 +544,9 @@ let gc = function() {
 	}
 }
 
-let prefix = (p, s) => s ? p + ':' + s : null
-
 ui.shared_nav = function(opt) {
 
-	let name = prefix('rowset_name', opt.rowset_name)
-		|| prefix('rowset_url', opt.rowset_url)
-
-	if (!name) { // anonymous i.e. not shareable: its one user owns it.
-		let ln = ui.nav(opt)
-		ln.ref = noop
-		ln.unref = function() { this.free() }
-		return ln
-	}
+	let name = opt.rowset_name
 
 	let ln = shared_navs[name]
 	if (!ln) {
@@ -642,44 +617,6 @@ ui.nav = function(opt) {
 	e.warn  = warn
 	e.debug = debug
 
-	// partial update of internal state based on multiple prop changes --------
-
-	let prop_parts = { // {prop->'sub_name1 ...'}
-		rowset          : 'reload',
-		rowset_name     : 'reload',
-		rowset_url      : 'reload',
-		cols            : 'fields',
-		val_col         : '',
-		pos_col         : '',
-		name_col        : 'reset',
-		display_col     : '',
-		quicksearch_col : '',
-		id_col          : 'reset',
-		parent_col      : 'reset',
-		tree_col        : 'reset',
-		order_by        : 'row_order',
-		group_by        : 'fields rows',
-		flat            : 'rows',
-		col_attrs       : 'fields',
-	}
-	for (let sub in prop_parts) {
-		let t = {}
-		for (let s of words(prop_parts[sub]))
-			t[s] = true
-		prop_parts[sub] = t
-	}
-
-	e.update = function(prop_vals, ev) {
-		let parts = {}
-		for (let k in prop_vals) {
-			if (e[k] !== prop_vals[k]) {
-				e[k] = prop_vals[k]
-				assign(parts, prop_parts[k])
-			}
-		}
-		update(parts, ev)
-	}
-
 	// behavior options -------------------------------------------------------
 
 	e.can_add_rows               = true
@@ -717,47 +654,31 @@ ui.nav = function(opt) {
 
 	let rowset, rowset_name, rowset_url
 
-	function bind_rowset_name(name, on) {
-		if (!name)
-			return
-		if (on) {
-			init_rowset_events()
-			attr(rowset_navs, name, set).add(e)
-		} else {
-			let navs = rowset_navs[name]
-			if (navs) {
-				navs.delete(e)
-				if (!navs.size)
-					delete rowset_navs[name]
-			}
-		}
-	}
-
 	e.free = function() {
+		let navs = rowset_navs[e.rowset_name]
+		if (navs) {
+			navs.delete(e)
+			if (!navs.size)
+				delete rowset_navs[e.rowset_name]
+		}
 		update({free: true, reload: true})
 	}
 
+	e.update = update
 	function update(ev) {
 
 		ev ??= empty
 
 		if (ev.reload) {
 
-			let old_rowset_name = rowset_name
-
-			rowset      = !ev.free && e.rowset || ev.rowset || null
-			rowset_url  = !ev.free && !e.rowset && e.rowset_url || null
-			rowset_name = !ev.free && !e.rowset && !e.rowset_url && e.rowset_name || null
-			rowset_url ??= rowset_name && '/rowset.json/' + rowset_name
+			rowset_name = !ev.free && e.rowset_name || null
+			rowset_url  = rowset_name && '/rowset.json/' + rowset_name
+			if (!rowset_name)
+				rowset = null
 
 			// if (!e.param_vals)
 			// 	rowset_url = null
 
-			// rebind named rowset if the name changed
-			if (rowset_name != old_rowset_name) {
-				bind_rowset_name(old_rowset_name, false)
-				bind_rowset_name(rowset_name, true)
-			}
 			// reload rowset if url is present
 			abort_all_requests()
 			if (rowset_url) {
@@ -839,6 +760,11 @@ ui.nav = function(opt) {
 			if (!e.name_field && e.pk_fields && e.pk_fields.length == 1)
 				e.name_field = e.pk_fields[0]
 
+			e.val_field = e.val_col != null ? optfld(e.val_col) : null
+			e.pos_field = rowset?.pos_col != null ? optfld(rowset.pos_col) : null
+			e.display_field =
+				(e.display_col != null && optfld(e.display_col)) || e.name_field
+
 			// init tree fields
 
 			e.id_field = check_field('id_col', rowset?.id_col)
@@ -881,9 +807,8 @@ ui.nav = function(opt) {
 			update_indices('invalidate')
 			e.all_rows = rowset && (
 						e.deserialize_all_row_states(e.row_states)
-					|| e.deserialize_all_row_vals(e.row_vals)
-					|| e.deserialize_all_row_vals(rowset?.row_vals)
-					|| rowset?.rows
+					|| e.deserialize_all_row_vals(e.row_vals ?? rowset.row_vals)
+					|| rowset.rows
 				) || []
 
 			// validate all rows
@@ -1124,13 +1049,6 @@ ui.nav = function(opt) {
 	e.optfld = optfld
 	e.optflds = optflds
 
-	// resolved on read: their cols can be set at any time, and there is no
-	// update part that would notice.
-	e.property('val_field'    , () => e.val_col != null ? optfld(e.val_col) : null)
-	e.property('pos_field'    , () => rowset?.pos_col != null ? optfld(rowset.pos_col) : null)
-	e.property('display_field', () =>
-		(e.display_col != null && optfld(e.display_col)) || e.name_field)
-
 	// -> the row with the same pk as `row`, or undefined.
 	e.find_row = function(row) {
 		if (!e.pk_fields)
@@ -1141,44 +1059,6 @@ ui.nav = function(opt) {
 		return e.lookup(e.pk, pk_vals)[0]
 	}
 	let pk_vals = []
-
-	// field attr initializers ------------------------------------------------
-
-	// ifa: derive other field state from an attr. runs both when the field is
-	// created and when the attr is set later.
-	// ifa_changed: act on the attr changing. only runs when it is set later:
-	// at field creation there is no nav state to bring up to date yet, and
-	// the update() that creates the fields rebuilds all of it anyway.
-
-	let ifa = {} // {attr->f(field, v)}
-	let ifa_changed = {} // {attr->f(field, v)}
-
-	ifa.label = function(field, v) {
-		if (v == null) {
-			let name = field.given_name || field.name
-			v = name && display_name(name)
-		}
-		field.label = v
-	}
-
-	ifa.enum_values = function(field, v) {
-		if (v == null) {
-			if (field.known_values)
-				field.known_values = null
-			return
-		}
-		field.known_values = set(words(v))
-	}
-
-	ifa_changed.filter       = refilter_rows
-	ifa_changed.exclude_vals = refilter_rows
-
-	// these decide which fields are visible and in what order, so changing
-	// one has to rebuild e.fields.
-	let refields = () => update({fields: true})
-	ifa_changed.hidden    = refields
-	ifa_changed.internal  = refields
-	ifa_changed.groupable = refields
 
 	// fields array matching 1:1 to row contents ------------------------------
 
@@ -1216,8 +1096,9 @@ ui.nav = function(opt) {
 
 		assign_opt(field, att, tt, f, rt, ct)
 
-		for (let k in ifa)
-			ifa[k](field, field[k])
+		field.label ??= display_name(field.given_name || name)
+		if (field.enum_values != null)
+			field.known_values = set(words(field.enum_values))
 
 		e.all_fields[fi] = field
 		e.all_fields_map[name] = field
@@ -1230,51 +1111,6 @@ ui.nav = function(opt) {
 			e.init_field(field)
 
 		return field
-	}
-
-	// v === undefined resets the attr to what the field was created with.
-	function set_field_attr(field, k, v) {
-
-		// the synthetic $group field has no rowset field def.
-		let f = rowset.fields[field.val_index] || empty
-
-		if (v === undefined) {
-
-			let name = field.given_name || field.name
-			let ct = e.col_attrs && e.col_attrs[name]
-			let rt = rowset_name && rowset_col_attrs[rowset_name+'.'+name]
-			let type = rt && rt.type || ct && ct.type || f.type
-			let tt = field_types[type]
-			let att = all_field_types
-
-			v = ct && ct[k]
-			v = v ?? (rt && rt[k])
-			v = v ?? f[k]
-			v = v ?? (tt && tt[k])
-			v = v ?? att[k]
-		}
-
-		if (field[k] === v)
-			return
-
-		field[k] = v
-
-		let init = ifa[k]
-		if (init)
-			init(field, v)
-
-		let changed = ifa_changed[k]
-		if (changed)
-			changed(field, v)
-
-	}
-
-	e.get_col_attr = function(col, k) {
-		return fld(col)[k]
-	}
-
-	e.set_col_attr = function(col, k, v) {
-		set_field_attr(fld(col), k, v)
 	}
 
 	e.on_init_field = function(f) {
@@ -1343,26 +1179,29 @@ ui.nav = function(opt) {
 
 	e.showhide_field = function(field, on, at_fi) {
 		let fields = showhide_field(field, on, at_fi)
-		if (fields)
-			e.update({cols: cols_from_fields(fields)})
+		if (fields) {
+			e.cols = cols_from_fields(fields)
+			update({fields: true})
+		}
 	}
 
 	e.move_field = function(fi, over_fi) {
 		let fields = move_field(fi, over_fi)
-		if (fields)
-			e.update({cols: cols_from_fields(fields)})
+		if (fields) {
+			e.cols = cols_from_fields(fields)
+			update({fields: true})
+		}
 	}
 
-	// to group by a col, compose the group_by string and e.update({group_by}).
 	e.ungroup_col = function(col, over_fi) {
 		assert(e.groups.cols.includes(col))
 		let fields = showhide_field(col, true, over_fi)
 		let col_groups = e.groups.col_groups
 			.map(cg => cg.filter(c => c != col))
 			.filter(cg => cg.length)
-		let group_by = format_group_defs(col_groups, e.groups.range_defs)
-		let cols = cols_from_fields(fields)
-		e.update({group_by, cols})
+		e.group_by = format_group_defs(col_groups, e.groups.range_defs)
+		e.cols = cols_from_fields(fields)
+		update({fields: true, rows: true})
 	}
 
 	/* params -----------------------------------------------------------------
@@ -1468,13 +1307,13 @@ ui.nav = function(opt) {
 	// A client_nav doesn't have a rowset binding. Instead, changes are saved
 	// to either row_vals or row_states. Also, it filters itself based on params.
 	function is_client_nav() {
-		return !rowset_url && (e.row_vals || e.row_states)
+		return !!ui.rowsets[rowset_name]
 	}
 
 	function params_changed() {
 		if (!update_param_vals())
 			return
-		if (!rowset_url) { // re-filter and re-focus.
+		if (is_client_nav()) { // re-filter and re-focus.
 			e.unfocus_focused_cell({cancel: true})
 			update({filters: true})
 			e.focus_cell()
@@ -1553,13 +1392,6 @@ ui.nav = function(opt) {
 		let index_fi = e.all_fields.length
 		for (let i = 0; i < e.rows.length; i++)
 			e.rows[i][index_fi] = i
-	}
-
-	// re-filter, keeping the focus on the same row if it's still visible.
-	function refilter_rows() {
-		let fs = e.refocus_state('row')
-		update({filters: true})
-		e.refocus(fs)
 	}
 
 	// editing utils ----------------------------------------------------------
@@ -2662,7 +2494,8 @@ ui.nav = function(opt) {
 			order_by_map.set(field, dir)
 		else
 			order_by_map.delete(field)
-		e.update({order_by: order_by_from_map()})
+		e.order_by = order_by_from_map()
+		update({row_order: true})
 	}
 
 	// filtering --------------------------------------------------------------
@@ -2827,7 +2660,7 @@ ui.nav = function(opt) {
 			is_row_visible = return_false
 			return
 		}
-		if (e.param_vals && !rowset_url && e.all_fields.length) {
+		if (e.param_vals && is_client_nav() && e.all_fields.length) {
 			let expr = ['&&']
 			// this is a detail nav that must filter itself based on param_vals.
 			// TODO: switch to dynamic lookup if reaching JS expression size limits.
@@ -3352,14 +3185,9 @@ ui.nav = function(opt) {
 	function init_field_own_lookup_nav(field) {
 		if (field.lookup_nav) // linked lookup nav (not owned).
 			return
-		if (  field.lookup_rowset
-			|| field.lookup_rowset_name
-			|| field.lookup_rowset_url
-		) {
+		if (field.lookup_rowset_name) {
 			field.lookup_nav = ui.shared_nav({
-				rowset      : field.lookup_rowset,
 				rowset_name : field.lookup_rowset_name,
-				rowset_url  : field.lookup_rowset_url,
 			})
 			field.own_lookup_nav = true
 			field.lookup_nav.ref()
@@ -4339,7 +4167,7 @@ ui.nav = function(opt) {
 	}
 
 	e.can_save_changes = function() {
-		return !!(e.rowset_url || e.static_rowset)
+		return !is_client_nav() || !!e.static_rowset
 	}
 
 	e.save = function(ev) {
@@ -4349,7 +4177,7 @@ ui.nav = function(opt) {
 			else
 				save_to_row_vals()
 			e.announce('saved')
-		} else if (e.rowset_url) {
+		} else if (!is_client_nav()) {
 			save_to_server(ev)
 		} else {
 			e.commit_changes()
@@ -4466,10 +4294,11 @@ ui.nav = function(opt) {
 		return t
 	}
 
-	e.serialize_row_vals = function(row) {
+	e.serialize_row_vals = function(row, cell_val) {
+		cell_val = cell_val ?? e.cell_input_val
 		let vals = {}
 		for (let field of e.all_fields) {
-			let v = e.cell_input_val(row, field)
+			let v = cell_val(row, field)
 			if (v !== undefined && !field.nosave)
 				vals[field.name] = v
 		}
@@ -4516,7 +4345,18 @@ ui.nav = function(opt) {
 					state.is_new = true
 				if (row.removed)
 					state.removed = true
-				state.vals = e.serialize_row_vals(row)
+				state.vals = e.serialize_row_vals(row, e.cell_val)
+				let cells
+				for (let key in key_index)
+					for (let field of e.all_fields) {
+						let v = e.cell_state(row, field, key)
+						if (v === undefined)
+							continue
+						cells ??= {}
+						attr(cells, field.name)[key] = v
+					}
+				if (cells)
+					state.cells = cells
 				rows.push(state)
 			}
 		}
@@ -4649,6 +4489,14 @@ ui.nav = function(opt) {
 
 	update({reset: true})
 	assign(e, opt)
+
+	assert(e.rowset_name, 'rowset_name required')
+
+	if (!ui.rowsets[e.rowset_name]) {
+		init_rowset_events()
+		attr(rowset_navs, e.rowset_name, set).add(e)
+	}
+
 	update({reload: true})
 
 	return e

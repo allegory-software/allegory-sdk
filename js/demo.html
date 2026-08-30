@@ -205,7 +205,7 @@ for (let j = 1; j < 100; j++) {
 		row.push('Cell '+j+','+i)
 	rows.push(row)
 }
-grid_rowset = {
+ui.rowsets.grid_rowset = {
 	pk: 'id', can_change_rows: false,
 	fields: fields,
 	rows: rows,
@@ -213,7 +213,7 @@ grid_rowset = {
 demos.grid = `
 ui.m(ui.em(2))
 ui.stack()
-	ui.grid('grid1', {rowset: grid_rowset})
+	ui.grid('grid1', {rowset_name: 'grid_rowset'})
 ui.end_stack()
 `
 }
@@ -243,7 +243,7 @@ for (let i = 0; i <= 10000; i++) {
 	row.focusable = true // i % 100 >= 85
 	rows.push(row)
 }
-tree_rowset = {
+ui.rowsets.tree_rowset = {
 	fields: fields,
 	rows: rows,
 	pk: 'id',
@@ -254,7 +254,7 @@ demos.treegrid = `
 ui.m(ui.em(2))
 ui.stack()
 	ui.grid('treegrid', {
-		rowset: tree_rowset,
+		rowset_name: 'tree_rowset',
 		order_by: 'active name:desc',
 		//tree_col: 'name',
 		//can_edit: false,
@@ -288,7 +288,7 @@ let rows = [
 	[7, 'Potato'   , 'Yellow' , 'Veggie', true  , 'Temperate'],
 	[8, 'Carrot'   , 'Orange' , 'Veggie', false , 'Temperate'],
 ]
-food_rowset = {
+ui.rowsets.food_rowset = {
 	fields: fields,
 	rows: rows,
 	pk: 'id',
@@ -298,7 +298,7 @@ demos.grid_groups = `
 ui.m(ui.em(2))
 ui.stack()
 	ui.grid('groups_grid', {
-		rowset: food_rowset,
+		rowset_name: 'food_rowset',
 		tree_col: 'name',
 		cols: 'name id color type good climate',
 		order_by: 'color type:desc',
@@ -361,19 +361,19 @@ let rows = [
 	[4, -12.75  , 60         ,      7, time(2000,1,1) , time(2000,1,1,0,1)  , time(1970,1,2)     , 23*3600+59*60 , 61   , false, 'open'   , []               , '#111111'                , 0   , 'caret_right' , {description: 'Object without a place_id'}               , 'ftp://files.example.com', '555-0103', 'd@example.com', 'pw'           , 'sk_live_jkl012' , 'ssh-dss AAAAB3Nz', '-----BEGIN KEY---', 'status' , null, 3],
 	[5, null    , null       ,   null, null           , null                , null               , null          , null , null , null     , null             , null                     , null, null          , null                                                       , null                 , null         , null           , null          , null             , null              , null              , null     , null, 4],
 ]
-grid_types_rowset = {
+ui.rowsets.grid_types_rowset = {
 	fields: fields,
 	rows: rows,
 	pk: 'id',
 	parent_col: 'parent_id',
 }
 
-grid_types_cols = ['tags'].concat(
-	fields.map(f => f.name).filter(s => s != 'tags'))
+grid_types_cols = ['status', 'tags'].concat(
+	fields.map(f => f.name).filter(s => s != 'tags' && s != 'status'))
 demos.grid_types = `
 ui.m(ui.em(2))
 ui.stack()
-	ui.grid('grid_types', {rowset: grid_types_rowset, cols: grid_types_cols})
+	ui.grid('grid_types', {rowset_name: 'grid_types_rowset', cols: grid_types_cols})
 ui.end_stack()
 `
 }

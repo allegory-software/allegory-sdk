@@ -827,7 +827,8 @@ function init(id, e) {
 							last_level = level
 							i++
 						}
-						e.update({group_by: t.join('')})
+						e.group_by = t.join('')
+						e.update({fields: true, rows: true})
 
 					} else if (mover.drop_pos != null) { // put it back in grid
 
