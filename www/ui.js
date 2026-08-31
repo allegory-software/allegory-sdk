@@ -1296,17 +1296,27 @@ ui.key_changes = () => key_downs.size + key_ups.size
 
 // custom events -------------------------------------------------------------
 
-// events are id-based state that is cleared on ui.redraw() just like
-// click or keydown state.
-let event_state = map()
+// events are id-based state are kept for this and next frame only, so that
+// a widget that listens to an event can still catch it if the widgets that
+// fired it appears later in the frame.
+let event_state = map() // {id.ev->[fire_frame_gen, args]}
 
 ui.fire = function(id, ev, ...args) {
-	event_state.set(id+'.'+ev, args)
+	event_state.set(id+'.'+ev, [frame_gen, args])
 }
 
 ui.listen = function(id, ev) {
 	ui.state(id) // call update_fn if not already called, which calls fire().
-	return event_state.get(id+'.'+ev)
+	return event_state.get(id+'.'+ev)?.[1]
+}
+
+ui.consume = function(id, ev) {
+	let k = id+'.'+ev
+	ui.state(id) // call update_fn if not already called, which calls fire().
+	let e = event_state.get(k)
+	if (!e) return
+	event_state.delete(k)
+	return e[1]
 }
 
 // scopes --------------------------------------------------------------------
@@ -2651,7 +2661,9 @@ function redraw_all() {
 		key_ups.clear()
 		ui.key_events.length = 0
 
-		event_state.clear()
+		for (let [k, e] of event_state)
+			if (e[0] < frame_gen)
+				event_state.delete(k)
 
 		// updates can run again now that they can't see the same edge state.
 		frame_gen++
@@ -5444,7 +5456,10 @@ draw[CMD_TEXT] = function(a, i) {
 	if (editable) {
 		let input = input_create(id, input_type)
 
-		let css_x = x  / dpr
+		let align = a[i+ALIGN]
+		let css_align = align == ALIGN_END ? 'right'
+			: align == ALIGN_CENTER ? 'center' : 'left'
+		let css_x = sx / dpr
 		let css_y = y  / dpr
 		let css_w = sw / dpr
 		let css_font_size = font_size / dpr
@@ -5486,6 +5501,10 @@ draw[CMD_TEXT] = function(a, i) {
 			input._ui_y = css_y
 			input._ui_w = css_w
 		}
+		if (input._ui_align != css_align) {
+			input.style.textAlign = css_align
+			input._ui_align = css_align
+		}
 		if (input._ui_opacity != opacity) {
 			input.style.opacity = opacity
 			input._ui_opacity = opacity
@@ -5512,12 +5531,23 @@ draw[CMD_TEXT] = function(a, i) {
 		cx.clip()
 	}
 
-	cx.textAlign = 'left'
+	let text_align = a[i+ALIGN]
+	let anchor_x
+	if (text_align == ALIGN_END) {
+		cx.textAlign = 'right'
+		anchor_x = sx + sw
+	} else if (text_align == ALIGN_CENTER && a[i+2] <= sw) {
+		cx.textAlign = 'center'
+		anchor_x = sx + sw / 2
+	} else {
+		cx.textAlign = 'left'
+		anchor_x = x
+	}
 
 	if (isstr(s)) {
 
 		cx.fillStyle = col
-		cx.fillText(s, x, y + asc)
+		cx.fillText(s, anchor_x, y + asc)
 
 		// the background covers the text drawn under it, so the marked part
 		// can be redrawn on it without the two antialiased edges blending.
@@ -5525,11 +5555,19 @@ draw[CMD_TEXT] = function(a, i) {
 			let i1 = a[i+TEXT_MARK_I1]
 			let i2 = a[i+TEXT_MARK_I2]
 			let mark_s = s.slice(i1, i2)
-			let mark_x = x + measure_text(cx, s.slice(0, i1)).width
+			let text_x
+			if (text_align == ALIGN_END)
+				text_x = anchor_x - measure_text(cx, s).width
+			else if (text_align == ALIGN_CENTER)
+				text_x = anchor_x - measure_text(cx, s).width / 2
+			else
+				text_x = anchor_x
+			let mark_x = text_x + measure_text(cx, s.slice(0, i1)).width
 			let bg = bg_color_hsl(a[i+TEXT_MARK_BG])
 			cx.fillStyle = bg[0]
 			cx.fillRect(mark_x, y, measure_text(cx, mark_s).width, asc + dsc)
 			cx.fillStyle = fg_color('text', null, bg_is_dark(bg) ? 'dark' : 'light')
+			cx.textAlign = 'left'
 			cx.fillText(mark_s, mark_x, y + asc)
 		}
 
@@ -5538,13 +5576,14 @@ draw[CMD_TEXT] = function(a, i) {
 		cx.fillStyle = col
 
 		for (let ss of s) {
-			cx.fillText(ss, x, y + asc)
+			cx.fillText(ss, anchor_x, y + asc)
 			y += asc + dsc + round(line_gap * font_size)
 		}
 
 	} else if (wrap == TEXT_WRAP_WORD) {
 
 		cx.fillStyle = col
+		cx.textAlign = 'left'
 
 		let align = a[i+ALIGN]
 		let x0 = x
@@ -6468,7 +6507,8 @@ function list_update(id, s) {
 	}
 	s.focused_item_i = fi
 	s.focused_item_changed = before_fi != fi ? fi_changed : false
-	s.item_picked = fi_changed == 'click' || (fi != null && ui.focused(id) && ui.keydown('enter'))
+	if (fi_changed == 'click' || (fi != null && ui.focused(id) && ui.keydown('enter')))
+		ui.fire(id, 'item_picked', fi)
 }
 function hvlist(hv, id, items, fr, align, valign,
 	item_align, item_valign, item_fr,
@@ -6841,32 +6881,28 @@ ui.widget('polyline', {
 	},
 })
 
-// dropdown ------------------------------------------------------------------
+/* dropdown ------------------------------------------------------------------
 
-/*
-	let open = ui.dropdown(id, [keep_open], [side])
+	let open = ui.dropdown(id, [side])
 		... the value ...
 	ui.dropdown_picker()
 		if (open)
 			... the picker, under id+'.picker' ...
 	ui.end_dropdown()
 
-when closed only the value is drawn, in place. when open the value and the
-picker under the value are in a popup aligned to the caller's container:
-list_dropdown() draws a box of its own for it to align to, a grid cell aligns
-it to the cell and draws no value. `item_picked` state is set on value picked.
 */
 
-// sets ui.state(id).open and .item_picked.
+// sets ui.state(id).open; fires 'picked', 'opened', 'closed'.
 function dropdown_update(id, s) {
 
 	let picker_id = id+'.picker'
-	let open = s.open
+	let was_open = s.open
+	let open = was_open
 
 	let click = hit(id) && ui.click
-	let picked = ui.state(picker_id, 'item_picked')
-	if (picked) // consumed: an update that runs again must not toggle twice.
-		ui.state(picker_id).item_picked = false
+	let picked_args = ui.consume(picker_id, 'item_picked')
+	let picked = !!picked_args
+	let want_open = !!ui.consume(id, 'open')
 
 	let enter = ui.focused(id) && ui.keydown('enter')
 
@@ -6882,12 +6918,17 @@ function dropdown_update(id, s) {
 		ui.capture_keys()
 	} else if (open && !ui.focused(picker_id) && !ui.focus_inside(picker_id)) {
 		open = false
-	} else if (s.keep_open) {
+	} else if (want_open) {
 		open = true
 	}
 
 	s.open = open
-	s.picked = picked
+	if (picked)
+		ui.fire(id, 'picked', ...picked_args)
+	if (!was_open && open)
+		ui.fire(id, 'opened')
+	if (was_open && !open)
+		ui.fire(id, 'closed', picked)
 
 	// picker_id only exists while open, so focus must move off it when
 	// closing: tab can't find an id that isn't in the tab order.
@@ -6899,14 +6940,12 @@ function dropdown_update(id, s) {
 
 let dd_open // decided in dropdown(), needed in dropdown_picker() and end_dropdown()
 
-// keep_open: no closed state, for an editor drawn only while its list is up.
-// escape, a click outside and a pick still close it.
-ui.dropdown = function(id, keep_open, side) {
+// opened by 'open' event.
+ui.dropdown = function(id, side) {
 
 	assert(dd_open == null, 'nested dropdown')
 
 	let s = ui.state(id) // runs dropdown_update() if it hasn't run this frame
-	s.keep_open = keep_open
 	s.open ??= false
 	keepalive(id, dropdown_update)
 	let open = s.open
@@ -6956,7 +6995,7 @@ ui.list_dropdown = function(id, items, fr, max_w, min_w, min_h) {
 
 	// open, the value follows the list's focused item; on a pick, that item
 	// is the value.
-	let foc_i = (open || ui.state(id, 'picked'))
+	let foc_i = (open || ui.listen(id, 'picked'))
 		? ui.state(picker_id, 'focused_item_i') : null
 	let sel_i = foc_i ?? ui.state(id, 'i') ?? 0
 	sel_i = ui.valid_list_index(sel_i, items)
@@ -6968,7 +7007,6 @@ ui.list_dropdown = function(id, items, fr, max_w, min_w, min_h) {
 		if (d) {
 			sel_i = ui.valid_list_index(sel_i + d, items)
 			ui.state(id).i = sel_i
-			ui.state(picker_id).focused_item_i = sel_i
 		}
 	}
 

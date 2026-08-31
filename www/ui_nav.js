@@ -77,11 +77,11 @@ Field attributes:
 		client_default : default value/generator that new rows are initialized with.
 		has_server_default: the server fills this in, so it can be left empty.
 		readonly       : prevent editing.
-		update_editor  : f(id, v, ev) -> v   read input, draw nothing. runs
-		                 before any cell is drawn. sets ev.exit_edit,
-		                 ev.cancel, ev.picked.
-		draw_editor    : f(id, v, ev)   draw the widget that edits v.
-		                 ev.pad_l, ev.pad_r, ev.h: the box the cell drew v
+		update_editor  : f(id, v) -> v   read input, draw nothing. runs
+		                 before any cell is drawn. an editor that ends the
+		                 edit fires 'closed' on id.
+		draw_editor    : f(id, v, pad_l, pad_r, h)   draw the widget that
+		                 edits v. pad_l, pad_r, h: the box the cell drew v
 		                 in. the cell has no vertical padding: it centers v
 		                 in its height instead.
 		edits_in_popup : draw_editor draws a popup: no editor in the cell.
@@ -377,10 +377,8 @@ Editing cells:
 	publishes:
 		e.editing                 the focused cell is being edited.
 		e.editor_id               ui id the editor widget is drawn under.
-		e.enter_edit([{sel_i:, sel_len:, focus:,
-			advance_on_exit:, editor_popup_open:}]) -> t|f
+		e.enter_edit([{sel_i:, sel_len:, focus:, advance_on_exit:}]) -> t|f
 		e.advance_on_exit         exiting this edit moves to the next cell.
-		e.editor_popup_open       a popup editor opens its popup right away.
 		e.exit_edit([{cancel: true}])
 		e.exit_row([{cancel: true}])
 	calls:
@@ -1747,11 +1745,11 @@ ui.nav = function(opt) {
 		// a carried edit must not pop a list open on every arrow key.
 		if (enter_edit && ri != null && fi != null)
 			e.enter_edit({
-				sel_i             : ev.sel_i,
-				sel_len           : ev.sel_len,
-				focus             : focus_editor || false,
-				advance_on_exit   : ev.advance_on_exit,
-				editor_popup_open : ev.editor_popup_open ?? !!ev.enter_edit,
+				sel_i           : ev.sel_i,
+				sel_len         : ev.sel_len,
+				focus           : focus_editor || false,
+				advance_on_exit : ev.advance_on_exit,
+				open_popup      : false,
 			})
 
 		if (ev.make_visible != false)
@@ -3112,7 +3110,6 @@ ui.nav = function(opt) {
 	// editor widget drawn under e.editor_id.
 	e.editing = false
 	e.advance_on_exit = false
-	e.editor_popup_open = true
 	e.editor_id = null
 
 	// cells that act on a click instead of opening an editor.
@@ -3131,8 +3128,11 @@ ui.nav = function(opt) {
 
 	// sel_i, sel_len: in ui.select_text() terms, all of it by default.
 	e.enter_edit = function(opt) {
-		if (e.editing)
+		if (e.editing) {
+			if (e.focused_field?.edits_in_popup && opt?.open_popup != false)
+				ui.fire(e.editor_id, 'open')
 			return true
+		}
 		let row = e.focused_row
 		let field = e.focused_field
 		if (!row || !field)
@@ -3140,9 +3140,10 @@ ui.nav = function(opt) {
 		if (!e.can_change_val(row, field))
 			return false
 		e.editing = true
-		e.advance_on_exit   = opt?.advance_on_exit   ?? false
-		e.editor_popup_open = opt?.editor_popup_open ?? true
+		e.advance_on_exit = opt?.advance_on_exit ?? false
 		e.editor_id = e.id + '.editor.' + e.row_index(row) + '.' + e.field_index(field)
+		if (field.edits_in_popup && opt?.open_popup != false)
+			ui.fire(e.editor_id, 'open')
 		let sel_i   = opt?.sel_i
 		let sel_len = opt?.sel_len
 		if (sel_i == null) { // select all of it
@@ -3167,7 +3168,6 @@ ui.nav = function(opt) {
 		let take_focus = ui.focused(e.editor_id)
 		e.editing = false
 		e.advance_on_exit = false
-		e.editor_popup_open = true
 		e.editor_id = null
 		if (ev && ev.cancel) {
 			if (row && field)
@@ -3215,8 +3215,9 @@ ui.nav = function(opt) {
 			return
 		if (field.lookup_rowset_name) {
 			field.lookup_nav = ui.shared_nav({
-				rowset_name : field.lookup_rowset_name,
-				is_picker   : true,
+				rowset_name     : field.lookup_rowset_name,
+				is_picker       : true,
+				can_focus_cells : false,
 			})
 			field.own_lookup_nav = true
 			field.lookup_nav.ref()
@@ -4587,6 +4588,8 @@ assign(all_field_types, {
 	maxlen: 256,
 	null_text : S('null_text', ''),
 	empty_text: S('empty_text', 'empty text'),
+	draws_text: true,
+	has_editor: true,
 })
 
 all_field_types.to_text = function(v) {
@@ -4602,7 +4605,7 @@ all_field_types.to_input = function(v) {
 // text box over to_input()/from_input(); a type with its own widget
 // overrides both. untouched text gives back the same v, so a redraw is not
 // an edit; text that doesn't parse comes back as itself.
-all_field_types.update_editor = function(id, v, ev) {
+all_field_types.update_editor = function(id, v) {
 	let s1 = ui.text_value(id)
 	if (s1 === undefined) // draw_editor() hasn't run yet
 		return v
@@ -4614,8 +4617,8 @@ all_field_types.update_editor = function(id, v, ev) {
 }
 
 // same call as draw_text(), so the cell doesn't shift on entering edit.
-all_field_types.draw_editor = function(id, v, ev) {
-	ui.p(ev.pad_l, 0, ev.pad_r, 0)
+all_field_types.draw_editor = function(id, v, pad_l, pad_r, h) {
+	ui.p(pad_l, 0, pad_r, 0)
 	ui.text_editable(id, v == null ? '' : this.to_input(v), 0, this.align, 'c', null)
 }
 
@@ -4814,8 +4817,12 @@ d.to_text = function(v) {
 
 // booleans ------------------------------------------------------------------
 
-let bool = {align: 'center', min_w: 20, w: 20, is_bool: true}
+// no editor: the value is toggled by click and space, and the cell keeps
+// drawing itself while an edit is carried through it.
+let bool = {align: 'center', min_w: 20, w: 20, is_bool: true,
+	draws_text: false, has_editor: false}
 field_types.bool = bool
+
 
 bool.draw_null = function(mode) {
 	if (mode) {
@@ -4856,43 +4863,32 @@ enm.edits_in_popup = true
 
 // a dropdown over enum_values, up for as long as the edit is: the cell keeps
 // drawing its own value under it and there is no closed state.
-enm.update_editor = function(id, v, ev) {
+enm.update_editor = function(id, v) {
 
 	assert(this.enum_values != null, this.name, ': enum col with no enum_values')
 
-	let picker_id = id+'.picker'
+	let picked = ui.consume(id, 'picked')
+	if (!picked)
+		return v
+
 	let vals = words(this.enum_values) // 'v1 ...' or ['v1', ...]
-
-	// reading the state runs the dropdown's decision for this frame.
-	let s = ui.state(id)
-
-	// the list keeps its focused item across openings: start it on v.
-	if (s.open === undefined)
-		ui.state(picker_id).focused_item_i = max(0, vals.indexOf(v))
-
-	// a carried edit starts closed, so only a list that was up and went
-	// down ends the edit.
-	if (s.open)
-		s.was_open = true
-	ev.exit_edit = s.was_open && s.open === false
-	ev.picked = s.picked
-
-	return s.picked ? vals[ui.state(picker_id, 'focused_item_i')] : v
+	return vals[picked[0]]
 }
 
-enm.draw_editor = function(id, v, ev) {
+enm.draw_editor = function(id, v, pad_l, pad_r, h) {
 
 	let picker_id = id+'.picker'
 
 	// the list is up for as long as the edit is. anchored on the side v is
 	// aligned to, so v stays put when the list makes the popup wider than
 	// the cell.
-	let open = ui.dropdown(id, this.nav.editor_popup_open,
+	let open = ui.dropdown(id,
 		this.align == 'right' ? 'ir' : 'il')
+	let opened = ui.consume(id, 'opened')
 
 		if (open) {
-			ui.p(ev.pad_l, 0, ev.pad_r, 0)
-			ui.stack('', 0, 's', 's', null, ev.h)
+			ui.p(pad_l, 0, pad_r, 0)
+			ui.stack('', 0, 's', 's', null, h)
 				this.draw(v, true)
 			ui.end_stack()
 		}
@@ -4900,11 +4896,17 @@ enm.draw_editor = function(id, v, ev) {
 	ui.dropdown_picker()
 
 		if (open) {
-			// the cell's own box: rows as tall as the cell, text where the
-			// cell put it.
-			let labels = words(this.enum_values).map(v => this.to_text(v))
-			ui.list(picker_id, labels, 0, 's', 's', this.align, 'c', 0,
-				null, null, ev.pad_l, ev.pad_r, 0, ev.h)
+			let s = ui.state(picker_id)
+			if (opened) {
+				let vals = words(this.enum_values) // 'v1 ...' or ['v1', ...]
+				// the list keeps its focused item across openings: start it on v.
+				s.focused_item_i = max(0, vals.indexOf(v))
+				// the cell's own box: rows as tall as the cell, text where the
+				// cell put it.
+				s.labels = vals.map(v => this.to_text(v))
+			}
+			ui.list(picker_id, s.labels, 0, 's', 's', this.align, 'c', 0,
+				null, null, pad_l, pad_r, 0, h)
 		}
 
 	ui.end_dropdown()
@@ -4937,64 +4939,55 @@ function type_editor(field) {
 	return field_types[field.type] || empty
 }
 
-lookup_editor.update_editor = function(id, v, ev) {
+lookup_editor.update_editor = function(id, v) {
 
 	if (!can_pick_lookup_val(this)) {
 		let f = type_editor(this).update_editor || all_field_types.update_editor
-		return f.call(this, id, v, ev)
+		return f.call(this, id, v)
 	}
 
 	let ln = this.lookup_nav
-	let picker_id = id+'.picker'
 
-	// reading the state runs the dropdown's decision for this frame.
-	let s = ui.state(id)
+	let picked = ui.consume(id, 'picked')
 
-	// start the picker on v's row, and reveal it once the grid is drawn.
-	if (s.open === undefined) {
-		let ln_row = this.nav.lookup_val(this.nav.focused_row, this, v)
-		if (ln_row)
-			ln.focus_cell(ln.row_index(ln_row), true)
-		s.reveal_picked_row = true
-	}
-
-	// undefined until the dropdown is first drawn, which is not closed.
-	if (s.open)
-		s.was_open = true
-	ev.exit_edit = s.was_open && s.open === false
-	ev.picked = s.picked
-
-	if (!s.picked)
+	if (!picked)
 		return v
 
-	let ln_row = ln.focused_row
+	let ln_row = picked[0]
 	return ln_row ? ln.cell_val(ln_row, lookup_val_field(this)) : v
 }
 
-lookup_editor.draw_editor = function(id, v, ev) {
+lookup_editor.draw_editor = function(id, v, pad_l, pad_r, h) {
 
 	if (!can_pick_lookup_val(this)) {
 		let f = type_editor(this).draw_editor || all_field_types.draw_editor
-		return f.call(this, id, v, ev)
+		return f.call(this, id, v, pad_l, pad_r, h)
 	}
 
 	let ln = this.lookup_nav
 	let picker_id = id+'.picker'
-	let s = ui.state(id)
 
-	let open = ui.dropdown(id, this.nav.editor_popup_open, 'b')
+	let open = ui.dropdown(id, 'b')
+	let opened = ui.consume(id, 'opened')
 
 	ui.dropdown_picker()
 
 		if (open) {
+			// start the picker on v's row, and reveal it once the grid is drawn.
+			if (opened) {
+				let ln_row = this.nav.lookup_val(this.nav.focused_row, this, v)
+				if (ln_row)
+					ln.focus_cell(ln.row_index(ln_row), true)
+			}
+			let resize_id = this.nav.id + '.' + this.name + '.lookup_popup'
+			let rs = ui.state(resize_id)
 			ui.grid(picker_id, {nav: ln},
-				0, 's', 's', ui.em(24), ui.em(12))
+				0, 's', 's', rs.min_w ?? ui.em(24), rs.min_h ?? ui.em(12))
+			ui.resizer(resize_id)
 			// the grid installs scroll_to_cell, so the focused row can only
 			// be revealed after it is drawn.
-			if (s.reveal_picked_row) {
+			if (opened)
 				ln.scroll_to_focused_cell()
-				s.reveal_picked_row = false
-			}
 		}
 
 	ui.end_dropdown()
