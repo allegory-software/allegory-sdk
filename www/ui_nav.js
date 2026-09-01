@@ -5018,6 +5018,52 @@ color.draw = function(v, mode) {
 	ui.end_stack()
 }
 
+color.edits_in_popup = true
+
+// a color_picker over v's hex, with a Pick/Cancel row under it: v only
+// changes when Pick is clicked, with whatever hex the picker last returned.
+color.update_editor = function(id, v) {
+	let picked = ui.consume(id, 'picked')
+	if (!picked)
+		return v
+	let [action, hex] = picked
+	return action == 'pick' ? hex : v
+}
+
+color.draw_editor = function(id, v, pad_l, pad_r, h) {
+
+	let picker_id = id+'.picker'
+
+	let open = ui.dropdown(id, 'b')
+	let opened = ui.consume(id, 'opened')
+
+	ui.dropdown_picker()
+
+		if (open) {
+			let [hue, sat, lum] = opened ? hex_to_hsl(v || '#808080') : []
+			let resize_id = this.nav.id + '.' + this.name + '.color_popup'
+			let rs = ui.state(resize_id)
+			ui.p(ui.sp2())
+			ui.v(0, ui.sp1(), null, null, rs.min_w ?? ui.em(22), rs.min_h ?? ui.em(22))
+				let hex = ui.color_picker(picker_id, hue, sat, lum)
+				ui.h(0, ui.sp05(), 'r')
+					ui.default_button(id+'.pick')
+					if (ui.primary_button(id+'.pick', S('pick', 'Pick'), 0)) {
+						ui.fire(picker_id, 'item_picked', 'pick', hex)
+						ui.relayout()
+					}
+					if (ui.button(id+'.cancel', S('cancel', 'Cancel'), 0)) {
+						ui.fire(picker_id, 'item_picked', 'cancel')
+						ui.relayout()
+					}
+				ui.end_h()
+			ui.end_v()
+			ui.resizer(resize_id)
+		}
+
+	ui.end_dropdown()
+}
+
 // percents ------------------------------------------------------------------
 
 // 50% at the default scale of 100 is stored as 5000.

@@ -385,6 +385,7 @@ const {
 	hsl_to_rgb_hex,
 	hsl_to_rgb_int,
 	hsl_to_rgba_int,
+	hex_to_hsl,
 	PI,
 	transform_point_x,
 	transform_point_y,
@@ -3076,10 +3077,15 @@ function ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h, ...args) {
 }
 
 ui.box_ct_widget = function(cmd_name, t) {
+	let ID = t.ID
+	function box_ct_hit(a, i, recs) {
+		return hit_ct(a, i, recs, ID != null ? a[i+ID] : null)
+	}
 	let ret = ui.box_widget(cmd_name, {
 		measure   : ct_stack_push    ,
 		position  : position_stacked ,
 		translate : translate_ct     ,
+		hit       : box_ct_hit       ,
 		...t,
 	}, true)
 	let cmd = cmd_name_map[cmd_name]
@@ -3185,6 +3191,18 @@ function hit_children(a, i, recs) {
 			return true
 		}
 		i = cmd_prev_i(a, i)
+	}
+}
+
+// id is optional: containers without one still hit their children.
+function hit_ct(a, i, recs, id) {
+	if (hit_children(a, i, recs)) {
+		hover(id)
+		return true
+	}
+	if (hit_box(a, i)) {
+		hover(id)
+		hit_template(a, i)
 	}
 }
 
@@ -3346,10 +3364,7 @@ translate[CMD_H] = translate_ct
 translate[CMD_V] = translate_ct
 
 function hit_flex(a, i, recs) {
-	if (hit_children(a, i, recs))
-		return true
-	if (hit_box(a, i))
-		hit_template(a, i)
+	return hit_ct(a, i, recs)
 }
 hittest[CMD_H] = hit_flex
 hittest[CMD_V] = hit_flex
@@ -3382,14 +3397,7 @@ ui.end_stack = function() { ui.end(CMD_STACK) }
 translate[CMD_STACK] = translate_ct
 
 hittest[CMD_STACK] = function(a, i, recs) {
-	if (hit_children(a, i, recs)) {
-		hover(a[i+STACK_ID])
-		return true
-	}
-	if (hit_box(a, i)) {
-		hover(a[i+STACK_ID])
-		hit_template(a, i)
-	}
+	return hit_ct(a, i, recs, a[i+STACK_ID])
 }
 
 /*
@@ -8487,6 +8495,8 @@ ui.box_ct_widget('aspect_box', {
 
 // color picker --------------------------------------------------------------
 
+let HEX_RE = /^#[0-9a-f]{6}$/i
+
 ui.color_picker = function(id, hue, sat, lum) {
 	hue = hue ?? 0
 	sat = sat ?? .5
@@ -8497,8 +8507,10 @@ ui.color_picker = function(id, hue, sat, lum) {
 				ui.hue_bar(id+'.hb', hue)
 			let hue_bar = ui.end_recording()
 			ui.start_recording()
-				hue = ui.state(id+'.hb', 'hue') ?? hue
-				ui.sat_lum_square(id+'.sl', hue, sat, lum)
+				ui.aspect_box(1, 1, 's', 't')
+					hue = ui.state(id+'.hb', 'hue') ?? hue
+					ui.sat_lum_square(id+'.sl', hue, sat, lum)
+				ui.end_aspect_box()
 			let sl_square = ui.end_recording()
 			sat = ui.state(id+'.sl', 'sat') ?? sat
 			lum = ui.state(id+'.sl', 'lum') ?? lum
@@ -8518,10 +8530,22 @@ ui.color_picker = function(id, hue, sat, lum) {
 		ui.end_h()
 		ui.h(0, 0, 's')
 			ui.label(id+'.input_rgb', 'HEX', .5)
-			s = hsl_to_rgb_hex(hue, sat, lum)
-			ui.input(id+'.input_rgb', s, 1)
+			let hex = hsl_to_rgb_hex(hue, sat, lum)
+			// keep the box in sync with hue_bar/sat_lum_square while the user
+			// isn't typing in it; only trust its text as an edit while focused.
+			if (!ui.focused(id+'.input_rgb'))
+				ui.state(id+'.input_rgb').text = hex
+			let hex1 = ui.input(id+'.input_rgb', hex, 1)
+			if (ui.focused(id+'.input_rgb') && hex1 != hex && HEX_RE.test(hex1)) {
+				;[hue, sat, lum] = hex_to_hsl(hex1)
+				ui.state(id+'.hb').hue = hue
+				ui.state(id+'.sl').sat = sat
+				ui.state(id+'.sl').lum = lum
+				hex = hex1
+			}
 		ui.end_h()
 	ui.end_v()
+	return hex
 }
 
 // bg_dots -------------------------------------------------------------------
