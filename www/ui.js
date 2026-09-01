@@ -254,8 +254,8 @@ CONTAINERS
 	frame           (id, on_measure, on_frame, fr, align, valign, min_w, min_h, ...args)
 	end             ()
 
-	scroll_to_view  ()                 scroll the box recorded next into view
-	scroll_to_view  (id, x, y, w, h)   scroll a rect of scrollbox id into view
+	scroll_to_view_next_box  ()
+	scroll_to_view_rect      (scrollbox_id, x, y, w, h)
 
 BORDER & BACKGROUND
 
@@ -1744,7 +1744,7 @@ ui.cmd = ui_cmd
 
 // append args to the command at i, for slots that few of them need.
 // i must still be the last command: ui_cmd_box() records a second one when
-// scroll_to_view() was called before it.
+	// scroll_to_view_next_box() was called before it.
 function ui_cmd_add_args(i, ...args) {
 	assert(cmd_last_i(a) == i)
 	a.length-- // drop prev_i
@@ -2175,10 +2175,10 @@ ui.focusable = function(id, order) {
 		return
 	}
 	ui_cmd(FOCUSABLE, id, order ?? 0)
-	// tabbing can move the focus to a widget that is scrolled out of view.
-	// focusable() is always called right before recording the widget's box.
+	// calling scroll_to_view_next_box() here means that focusable() must be
+	// called before the widget box is recorded.
 	if (ui.focusing(id))
-		ui.scroll_to_view()
+		ui.scroll_to_view_next_box()
 }
 
 // id is optional, only needed for tab_into().
@@ -2887,7 +2887,7 @@ reset_spacings()
 
 // box command
 
-// set by ui.scroll_to_view(null) to indicate that the next box needs
+// set by ui.scroll_to_view_next_box() to indicate that the next box needs
 // to be revealed by its scrollbox(es).
 let scroll_to_view_next
 
@@ -3074,7 +3074,7 @@ const CMD_END = cmd('end')
 
 ui.end = function(cmd) {
 	end_scope()
-	// bug: scroll_to_view() called but no box was recorded.
+	// bug: scroll_to_view_next_box() called but no box was recorded.
 	assert(!scroll_to_view_next, 'focusable widget recorded no box')
 	let i = assert(ct_stack.pop(), 'end command outside container')
 	if (cmd && a[i-1] != cmd)
@@ -3496,7 +3496,7 @@ position[CMD_SCROLLBOX] = function(a, i, axis, sx, sw) {
 is_flex_child[CMD_SCROLLBOX] = true
 
 // box scroll-to-view box. from box2d.lua.
-function scroll_to_view_rect(x, y, w, h, pw, ph, sx, sy) {
+function scroll_offsets_to_view_rect(x, y, w, h, pw, ph, sx, sy) {
 	let min_sx = -x
 	let min_sy = -y
 	let max_sx = -(x + w - pw)
@@ -3547,19 +3547,20 @@ function settle_scrollbox(a, i) {
 	let box = ui.state(id, 'scroll_to_view')
 	if (box) {
 		let [bx, by, bw, bh] = box
-		;[sx, sy] = scroll_to_view_rect(bx, by, bw, bh, w, h, sx, sy)
+		;[sx, sy] = scroll_offsets_to_view_rect(bx, by, bw, bh, w, h, sx, sy)
 		xstate.scroll_x = sx
 		ystate.scroll_y = sy
 		ui.state(id).scroll_to_view = null
 	}
 
-	// scroll to view the box asked for by ui.scroll_to_view(null).
+	// scroll to view the box asked for by ui.scroll_to_view_next_box().
 	// the index range check rejects a request left by a sibling scrollbox.
 	let j = scroll_to_view_i // requested box
 	if (j > i && j < i + a[i+BOX_CT_NEXT_EXT_I]) {
 		let bx = a[j+0] - a[i+0] // marked box coords, relative to the contents
 		let by = a[j+1] - a[i+1]
-		;[sx, sy] = scroll_to_view_rect(bx, by, a[j+2], a[j+3], w, h, sx, sy)
+		;[sx, sy] = scroll_offsets_to_view_rect(
+			bx, by, a[j+2], a[j+3], w, h, sx, sy)
 		xstate.scroll_x = sx
 		ystate.scroll_y = sy
 		// mark this scrollbox as scroll-to-view from here on, so that its
@@ -3656,21 +3657,24 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 
 const CMD_SCROLL_TO_VIEW = cmd('scroll_to_view')
 
-// scroll_to_view() -> reveal the box recorded next, in every scrollbox that
-//    contains it, innermost first. call it right before recording the box.
-// scroll_to_view(id, x, y, w, h) -> reveal a rect of scrollbox's contents,
-//    in that scrollbox alone. the rect is in contents coords.
+// scroll_to_view_next_box() -> reveal the box recorded next, in every
+//    scrollbox that contains it, innermost first. call it right before
+//    recording the box.
+// scroll_to_view_rect(scrollbox_id, x, y, w, h) -> reveal a rect of that
+//    scrollbox's contents. the rect is in contents coords.
 // a later request replaces an earlier one, so a widget can request an inner
 // box after focusable() already requested the widget's own box.
-ui.scroll_to_view = function(id, x, y, w, h) {
-	if (id == null)
-		scroll_to_view_next = true
-	else
-		ui.state(id).scroll_to_view = [x, y, w, h]
+ui.scroll_to_view_next_box = function() {
+	scroll_to_view_next = true
 }
 
-// box to scroll-to-view: set in position phase when the scroll_to_view()
-// request appears and later read by its scrollbox in the same position phase.
+ui.scroll_to_view_rect = function(scrollbox_id, x, y, w, h) {
+	ui.state(scrollbox_id).scroll_to_view = [x, y, w, h]
+}
+
+// box to scroll-to-view: set in position phase when
+// scroll_to_view_next_box() is called and later read by its scrollbox in the
+// same position phase.
 let scroll_to_view_i
 
 position[CMD_SCROLL_TO_VIEW] = function(a, i, axis) {
@@ -6533,7 +6537,7 @@ function hvlist(hv, id, items, fr, align, valign,
 		ui.p(item_pad_l ?? ui.sp(), item_pad_y ?? ui.sp05(),
 			item_pad_r ?? item_pad_l ?? ui.sp())
 		if (fi == i && reveal_fi)
-			ui.scroll_to_view()
+			ui.scroll_to_view_next_box()
 		ui.stack(item_id, 0, 's', 's', null, item_h)
 			let item_focused = fi == i
 			ui.bb(
@@ -7976,7 +7980,8 @@ ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 				s.day = sel_day
 				day_changed = true
 				let weeks_from_this_week = days(week(sel_day) - week(time())) / 7
-				ui.scroll_to_view(id, 0, (weeks_from_this_week + 1) * cell_h,
+				ui.scroll_to_view_rect(id, 0,
+					(weeks_from_this_week + 1) * cell_h,
 					cells_w, cell_h)
 				ui.capture_keys()
 			} else if (focused_range && e.can_change_range(focused_range)) {

@@ -863,7 +863,7 @@ function init(id, e) {
 		if (scroll_to_ri != null) {
 			if (e.rows[scroll_to_ri] && e.fields[scroll_to_fi]) {
 				let [x, y, w, h] = cell_rect(scroll_to_ri, scroll_to_fi)
-				ui.scroll_to_view(id+'.cells_scrollbox', x, y, w, h)
+				ui.scroll_to_view_rect(id+'.cells_scrollbox', x, y, w, h)
 			}
 			scroll_to_ri = null
 			scroll_to_fi = null

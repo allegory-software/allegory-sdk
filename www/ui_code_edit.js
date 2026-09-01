@@ -890,7 +890,7 @@ function code_edit_view(id, opt) {
 		undo_push_cursor()
 		find_landed = false
 		cursor = saved_cursor
-		ui.scroll_to_view(id+'.text_scrollbox', ...cursor_rect(cursor))
+		ui.scroll_to_view_rect(id+'.text_scrollbox', ...cursor_rect(cursor))
 	}
 
 	function set_cursor(
@@ -914,7 +914,7 @@ function code_edit_view(id, opt) {
 			cursor.sel_line = lines.length-1
 			cursor.sel_char = lines[cursor.sel_line].length
 		}
-		ui.scroll_to_view(id+'.text_scrollbox', ...cursor_rect(cursor))
+		ui.scroll_to_view_rect(id+'.text_scrollbox', ...cursor_rect(cursor))
 	}
 
 	function set_block_cursor(line, col, sel_line, sel_col) {
@@ -925,7 +925,7 @@ function code_edit_view(id, opt) {
 		cursor.col = col
 		cursor.sel_line = sel_line
 		cursor.sel_col = sel_col
-		ui.scroll_to_view(id+'.text_scrollbox', ...cursor_rect(cursor))
+		ui.scroll_to_view_rect(id+'.text_scrollbox', ...cursor_rect(cursor))
 	}
 
 	function insert_text(line, char, s, normalize_tabs) {

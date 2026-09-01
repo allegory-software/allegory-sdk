@@ -63,7 +63,7 @@ let ui = {
 	fg_style(){}, bg_style(){},
 	widget(){}, cmd(){}, keepalive(){}, on_free(){}, focus(){},
 	capture_keydown(){}, capture_keyup(){}, capture_tab(){},
-	scroll_to_view(){}, measure(){},
+	scroll_to_view_rect(){}, measure(){},
 	v(){}, end_v(){}, h(){}, end_h(){}, stack(){}, end_stack(){},
 	scrollbox(){}, end_scrollbox(){}, bb(){}, tabs(){},
 	code_edit_sidebar(){},
