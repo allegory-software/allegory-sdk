@@ -1531,8 +1531,8 @@ ui.focused_id = null
 ui.focused_by_key = null
 let focusing_id
 
-// set when focus is taken or the mouse is captured this frame: a click that
-// does neither clears the focus.
+// set when focus is taken, the mouse is captured, or a solid popup is
+// clicked: another click clears the focus.
 let focus_taken
 
 ui.focus = function(id, by_key) {
@@ -1817,21 +1817,15 @@ ui_layer('open'   , 4) // dropdowns, must cover tooltips
 ui_layer('handle' , 5) // dragged object
 
 let layer_stack = [] // [layer1_i, ...]
-let current_layer   // set while building
-let current_layer_i // set while drawing
+let current_layer // set while building
+
+let current_layer_rec
+let current_layer_ct_i
 
 function begin_layer(layer, ct_i, z_index) {
 	layer_stack.push(current_layer)
-	// NOTE: only adding the cmd to the layer if the current layer actually
-	// changes otherwise it will be drawn twice!
-	// TODO: because of the condition below, start_recording on a layer and
-	// play_recording on another layer is not supported: either support it
-	// or prevent it!
-	if (layer == current_layer)
-		return
 	current_layer = layer
 	set_layer(layer, ct_i, z_index)
-	return true
 }
 
 function end_layer() {
@@ -2006,22 +2000,25 @@ function draw_cmd(a, i, recs) {
 	}
 }
 
-function draw_layer(layer_i, indexes, recs) {
-	let prev_layer_i = current_layer_i
-	/*global*/ current_layer_i = layer_i
+function draw_layer(indexes, recs) {
+	let prev_rec  = current_layer_rec
+	let prev_ct_i = current_layer_ct_i
 	for (let k = 0, n = indexes.length; k < n; k += 3) {
 		reset_canvas()
 		let rec_i = indexes[k]
 		let i     = indexes[k+1]
 		let a = recs[rec_i]
+		/*global*/ current_layer_rec  = a
+		/*global*/ current_layer_ct_i = i
 		draw_cmd(a, i, recs)
 	}
-	current_layer_i = prev_layer_i
+	current_layer_rec  = prev_rec
+	current_layer_ct_i = prev_ct_i
 }
 
 function draw_layers(layers, recs) {
 	for (let layer of layers) {
-		draw_layer(layer.i, layer.indexes, recs)
+		draw_layer(layer.indexes, recs)
 		if (layer.layers?.length)
 			draw_layers(layer.layers, recs)
 	}
@@ -2030,14 +2027,16 @@ function draw_layers(layers, recs) {
 function draw_frame(recs, layers, sm1) {
 	let sm0 = render_state_map
 	render_state_map = assert(sm1)
-	let current_layer_i0 = current_layer_i
+	let current_layer_rec0  = current_layer_rec
+	let current_layer_ct_i0 = current_layer_ct_i
 
 	let theme_stack_length0 = theme_stack.length
 	theme_stack.push(theme)
 	theme = themes[ui.default_theme]
 
 	draw_layers(layers, recs)
-	assert(current_layer_i == current_layer_i0)
+	assert(current_layer_rec  == current_layer_rec0)
+	assert(current_layer_ct_i == current_layer_ct_i0)
 
 	theme = theme_stack.pop()
 	assert(theme_stack.length == theme_stack_length0)
@@ -2101,7 +2100,6 @@ function hover(id) {
 ui.hover = hover
 
 function hit_layer(layer, recs) {
-	/*global*/ current_layer = layer
 	// iterate layer's cointainers in reverse order.
 	let indexes = layer.indexes
 	for (let k = indexes.length-3; k >= 0; k -= 3) {
@@ -2109,6 +2107,8 @@ function hit_layer(layer, recs) {
 		let rec_i = indexes[k]
 		let i     = indexes[k+1]
 		let a = recs[rec_i]
+		/*global*/ current_layer_rec  = a
+		/*global*/ current_layer_ct_i = i
 		let hit_f = hittest[a[i-1]]
 		if (hit_f && !a.nohit_set?.has(i) && hit_f(a, i, recs))
 			return true
@@ -2141,7 +2141,6 @@ function hit_frame(recs, layers) {
 		return
 
 	hit_layers(layers, recs)
-	current_layer = null
 
 }
 
@@ -2154,16 +2153,16 @@ let FOCUSABLE_END   = 2 // groups only
 let FOCUSABLE_TRAP  = 3 // groups only
 let FOCUSABLE_DEFB  = 4 // groups only: default button id
 
-let focusables = []
+let focusables = [] // FOCUSABLE_SLOTS per entry, in tab order
 ui.focusables = focusables
 
-let open_focus_groups = []
-let focus_group_map = map() // {focus_group_id->focusables_i}
+let open_focus_groups = [] // group_i stack, while registering
+let focus_group_map = map() // {focus_group_id->group_i}
 let FOCUSABLE       = cmd('focusable')
 let FOCUS_GROUP     = cmd('focus_group')
 let END_FOCUS_GROUP = cmd('end_focus_group')
 
-let nofocus
+let nofocus // skip the next focusable()
 
 ui.nofocus = function() {
 	nofocus = true
@@ -2197,116 +2196,126 @@ register[FOCUSABLE] = function(a, i) {
 }
 
 register[FOCUS_GROUP] = function(a, i) {
-	let g = focusables.length // group index, i.e. where the group starts
-	open_focus_groups.push(g)
+	let group_i = focusables.length // where the group starts
+	open_focus_groups.push(group_i)
 	let id = a[i+2]
 	if (id != null)
-		focus_group_map.set(id, g)
+		focus_group_map.set(id, group_i)
 	focusables.push(null, a[i], 0, a[i+1], null)
 }
 
 register[END_FOCUS_GROUP] = function() {
-	let g = open_focus_groups.pop()
-	focusables[g+FOCUSABLE_END] = focusables.length
+	let group_i = open_focus_groups.pop()
+	focusables[group_i+FOCUSABLE_END] = focusables.length
 }
 
-let is_focus_group = k => focusables[k+FOCUSABLE_ID] == null
+let is_focus_group = i => focusables[i+FOCUSABLE_ID] == null
 
-function focus_group_start(g) {
-	return g == null ? 0 : g + FOCUSABLE_SLOTS
+function focus_group_start(group_i) {
+	return group_i == null ? 0 : group_i + FOCUSABLE_SLOTS
 }
 
-function focus_group_end(g) {
-	return g == null ? focusables.length : focusables[g+FOCUSABLE_END]
+function focus_group_end(group_i) {
+	return group_i == null ? focusables.length
+		: focusables[group_i+FOCUSABLE_END]
 }
 
-function next_focus_sibling_i(k) {
-	return is_focus_group(k) ? focusables[k+FOCUSABLE_END] : k + FOCUSABLE_SLOTS
+function next_focus_sibling_i(i) {
+	return is_focus_group(i) ? focusables[i+FOCUSABLE_END] : i + FOCUSABLE_SLOTS
 }
 
-function focus_group_of(k) {
-	let g = null
-	for (let j = 0; j < k; j += FOCUSABLE_SLOTS)
-		if (is_focus_group(j) && focusables[j+FOCUSABLE_END] > k)
-			g = j
-	return g
+function focus_group_of(i) {
+	let group_i = null
+	for (let j = 0; j < i; j += FOCUSABLE_SLOTS)
+		if (is_focus_group(j) && focusables[j+FOCUSABLE_END] > i)
+			group_i = j
+	return group_i
 }
 
 function focus_find(id) {
 	if (id == null)
 		return null
-	for (let k = 0; k < focusables.length; k += FOCUSABLE_SLOTS)
-		if (focusables[k+FOCUSABLE_ID] == id)
-			return k
+	for (let i = 0; i < focusables.length; i += FOCUSABLE_SLOTS)
+		if (focusables[i+FOCUSABLE_ID] == id)
+			return i
 	return null
 }
 
 ui.focus_inside = function(group_id) { // looks in prev. frame
-	let g = focus_group_map.get(group_id) // group index in focusables
-	if (g == null) return
-	let k = focus_find(ui.focused_id)
-	if (k == null) return
-	return k > g && k < focusables[g+FOCUSABLE_END]
+	let group_i = focus_group_map.get(group_id)
+	if (group_i == null) return
+	let i = focus_find(ui.focused_id)
+	if (i == null) return
+	return i > group_i && i < focusables[group_i+FOCUSABLE_END]
 }
 
-function pick_focus_sibling(g, order0, k0, back) {
-	let best_k = null
+function pick_focus_sibling(group_i, order0, i0, back) {
+	let best_i = null
 	let best_order
-	let end_i = focus_group_end(g)
-	for (let k = focus_group_start(g); k < end_i; k = next_focus_sibling_i(k)) {
-		let order = focusables[k+FOCUSABLE_ORDER]
-		if (k0 != null && !(back
-				? order < order0 || (order == order0 && k < k0)
-				: order > order0 || (order == order0 && k > k0)))
+	let end_i = focus_group_end(group_i)
+	for (let i = focus_group_start(group_i); i < end_i;
+			i = next_focus_sibling_i(i)) {
+		let order = focusables[i+FOCUSABLE_ORDER]
+		if (i0 != null && !(back
+				? order < order0 || (order == order0 && i < i0)
+				: order > order0 || (order == order0 && i > i0)))
 			continue
-		if (best_k == null || (back
-				? order > best_order || (order == best_order && k > best_k)
-				: order < best_order || (order == best_order && k < best_k))) {
-			best_k = k
+		if (best_i == null || (back
+				? order > best_order || (order == best_order && i > best_i)
+				: order < best_order || (order == best_order && i < best_i))) {
+			best_i = i
 			best_order = order
 		}
 	}
-	return best_k
+	return best_i
 }
 
-function first_focusable_in(g, back) {
-	let k = pick_focus_sibling(g, 0, null, back)
-	if (k == null)
+function first_focusable_in(group_i, back) {
+	let i = pick_focus_sibling(group_i, 0, null, back)
+	if (i == null)
 		return null
-	if (!is_focus_group(k))
-		return k
-	let inner_k = first_focusable_in(k, back)
-	if (inner_k != null)
-		return inner_k
-	return next_focusable_after(g, k, back)
+	if (!is_focus_group(i))
+		return i
+	let inner_i = first_focusable_in(i, back)
+	if (inner_i != null)
+		return inner_i
+	return next_focusable_after(group_i, i, back)
 }
 
-function next_focusable_after(g, k0, back) {
+function next_focusable_after(group_i, i0, back) {
 	while (1) {
-		let k = pick_focus_sibling(g, focusables[k0+FOCUSABLE_ORDER], k0, back)
-		if (k == null)
+		let i = pick_focus_sibling(group_i,
+			focusables[i0+FOCUSABLE_ORDER], i0, back)
+		if (i == null)
 			return null
-		if (!is_focus_group(k))
-			return k
-		let inner_k = first_focusable_in(k, back)
-		if (inner_k != null)
-			return inner_k
-		k0 = k
+		if (!is_focus_group(i))
+			return i
+		let inner_i = first_focusable_in(i, back)
+		if (inner_i != null)
+			return inner_i
+		i0 = i
 	}
 }
 
-// focusables are from the last frame, so this lands one frame after the
-// group first shows up.
+let focus_first_id // focus group to focus, resolved after register_rec
+
+function resolve_focus_first(group_id) {
+	let group_i = focus_group_map.get(group_id)
+	if (group_i == null)
+		return false
+	let i = first_focusable_in(group_i)
+	if (i == null)
+		return false
+	ui.focus(focusables[i+FOCUSABLE_ID])
+	return true
+}
+
+// tab order is only known after register_rec puts the secondary recordings
+// in their real order, so this records a request that resolves there.
 ui.focus_first = function(group_id) {
 	if (ui.focus_inside(group_id))
 		return
-	let g = focus_group_map.get(group_id)
-	if (g == null)
-		return
-	let k = first_focusable_in(g)
-	if (k == null)
-		return
-	ui.focus(focusables[k+FOCUSABLE_ID])
+	focus_first_id = group_id
 }
 
 // default button ------------------------------------------------------------
@@ -2322,9 +2331,9 @@ ui.default_button = function(id) {
 }
 
 register[DEFAULT_BUTTON] = function(a, i) {
-	let g = open_focus_groups.at(-1)
-	assert(g != null, 'default_button outside a focus group')
-	focusables[g+FOCUSABLE_DEFB] = a[i]
+	let group_i = open_focus_groups.at(-1)
+	assert(group_i != null, 'default_button outside a focus group')
+	focusables[group_i+FOCUSABLE_DEFB] = a[i]
 }
 
 // called by ui.button_state()
@@ -2333,13 +2342,13 @@ function submit_clicked(id) {
 		return
 	if (!ui.state(ui.focused_id, 'single_line_input'))
 		return
-	let k = focus_find(ui.focused_id)
-	if (k == null)
+	let i = focus_find(ui.focused_id)
+	if (i == null)
 		return
-	let g = focus_group_of(k)
-	if (g == null)
+	let group_i = focus_group_of(i)
+	if (group_i == null)
 		return
-	return focusables[g+FOCUSABLE_DEFB] == id
+	return focusables[group_i+FOCUSABLE_DEFB] == id
 }
 
 // tab capture ----------------------------------------------------------------
@@ -2360,28 +2369,28 @@ ui.tab_into = function(id) {
 
 function step_focus(back) {
 	if (tab_into_id != null) {
-		let g = focus_group_map.get(tab_into_id) // group index in focusables
+		let group_i = focus_group_map.get(tab_into_id)
 		tab_into_id = null
-		// g is null when the group was not recorded this frame: fall through
-		// to stepping from the focused widget.
-		if (g != null) {
-			let k = first_focusable_in(g, back)
-			if (k != null)
-				return k
+		// null when the group was not recorded this frame: fall through to
+		// stepping from the focused widget.
+		if (group_i != null) {
+			let i = first_focusable_in(group_i, back)
+			if (i != null)
+				return i
 		}
 	}
-	let k0 = focus_find(ui.focused_id)
-	if (k0 == null)
+	let i0 = focus_find(ui.focused_id)
+	if (i0 == null)
 		return first_focusable_in(null, back)
-	let g = focus_group_of(k0)
+	let group_i = focus_group_of(i0)
 	while (1) {
-		let k = next_focusable_after(g, k0, back)
-		if (k != null)
-			return k
-		if (g == null || focusables[g+FOCUSABLE_TRAP])
-			return first_focusable_in(g, back)
-		k0 = g
-		g = focus_group_of(k0)
+		let i = next_focusable_after(group_i, i0, back)
+		if (i != null)
+			return i
+		if (group_i == null || focusables[group_i+FOCUSABLE_TRAP])
+			return first_focusable_in(group_i, back)
+		i0 = group_i
+		group_i = focus_group_of(i0)
 	}
 }
 
@@ -2571,9 +2580,9 @@ function redraw_all() {
 		hit_frame(recs, layers)
 
 		if (ui.keydown('tab') && !tab_captured(ui.focused_id)) {
-			let k = step_focus(ui.keypressed('shift'))
-			if (k != null)
-				ui.focus(focusables[k+FOCUSABLE_ID], true)
+			let i = step_focus(ui.keypressed('shift'))
+			if (i != null)
+				ui.focus(focusables[i+FOCUSABLE_ID], true)
 		}
 		t1 = clock_ms()
 		frame_graph_push('frame_hit_time', t1 - t0)
@@ -2612,6 +2621,13 @@ function redraw_all() {
 		register_rec(a, 0)
 
 		assert(!open_focus_groups.length, 'unbalanced focus_group')
+
+		if (focus_first_id != null) {
+			let group_id = focus_first_id
+			focus_first_id = null
+			if (resolve_focus_first(group_id))
+				ui.relayout()
+		}
 
 		t1 = clock_ms()
 		frame_graph_push('frame_layout_time', t1 - t0)
@@ -2668,8 +2684,6 @@ function redraw_all() {
 		// updates can run again now that they can't see the same edge state.
 		frame_gen++
 
-		focusing_id = null
-
 		ui.window_focusing = false
 		ui.window_unfocusing = false
 
@@ -2681,6 +2695,10 @@ function redraw_all() {
 			break
 		}
 	}
+
+	// a discarded pass must not clear it: the widget that resolve_focus_first()
+	// focused is only built again on the pass after that.
+	focusing_id = null
 }
 
 // widget API ----------------------------------------------------------------
@@ -2750,13 +2768,12 @@ register[CMD_SET_LAYER] = function(a, i, rec_i) {
 let CMD_DRAW_LAYER = cmd('draw_layer')
 ui.draw_layer = function(layer) {
 	layer = ui_layer(layer)
-	ui_cmd(CMD_DRAW_LAYER, layer.i, layer.indexes)
+	ui_cmd(CMD_DRAW_LAYER, layer.indexes)
 }
 
 draw[CMD_DRAW_LAYER] = function(a, i, recs) {
-	let layer_i = a[i+0]
-	let indexes = a[i+1]
-	draw_layer(layer_i, indexes, recs)
+	let indexes = a[i+0]
+	draw_layer(indexes, recs)
 }
 
 // box widgets ---------------------------------------------------------------
@@ -3866,22 +3883,23 @@ function popup_parse_align(s) {
 
 const POPUP_FIT_CHANGE_SIDE = 1
 const POPUP_FIT_CONSTRAIN   = 2
+const POPUP_SOLID           = 4
 
 function popup_parse_flags(s) {
 	return (
 		(s.includes('change_side') ? POPUP_FIT_CHANGE_SIDE : 0) |
-		(s.includes('constrain'  ) ? POPUP_FIT_CONSTRAIN   : 0)
+		(s.includes('constrain'  ) ? POPUP_FIT_CONSTRAIN   : 0) |
+		(s.includes('solid'      ) ? POPUP_SOLID           : 0)
 	)
 }
 
 const POPUP_ID        = FR      // because fr is not used
 const POPUP_SIDE      = ALIGN   // because align is not used
 const POPUP_ALIGN     = ALIGN+1 // because valign is not used
-const POPUP_LAYER_I   = BOX_CT_ARGS+0
-const POPUP_TARGET_I  = BOX_CT_ARGS+1
-const POPUP_FLAGS     = BOX_CT_ARGS+2
-const POPUP_SIDE_REAL = BOX_CT_ARGS+3
-const POPUP_OX        = BOX_CT_ARGS+4 // offset x,y from where side+align put it
+const POPUP_TARGET_I  = BOX_CT_ARGS+0
+const POPUP_FLAGS     = BOX_CT_ARGS+1
+const POPUP_SIDE_REAL = BOX_CT_ARGS+2
+const POPUP_OX        = BOX_CT_ARGS+3 // offset x,y from where side+align put it
 
 const CMD_POPUP = cmd_ct('popup')
 
@@ -3904,7 +3922,7 @@ ui.popup = function(
 		null, // valign -> align
 		min_w, min_h,
 		// BOX_ARGS+0
-		layer.i, target_i, flags,
+		target_i, flags,
 		side, // side_real
 		ox ?? 0, oy ?? 0,
 	)
@@ -3913,11 +3931,10 @@ ui.popup = function(
 	a[i+POPUP_ID   ] = id
 	a[i+POPUP_SIDE ] = side
 	a[i+POPUP_ALIGN] = align
-	if (begin_layer(layer, i, z_index))
-		force_scope_vars()
+	begin_layer(layer, i, z_index)
+	force_scope_vars()
 	return i
 }
-
 ui.end_popup = function() { ui.end(CMD_POPUP) }
 
 function set_z_index(a, i, z_index) {
@@ -4153,18 +4170,24 @@ ui.popup_target_rect = function(a, i) {
 }
 
 draw[CMD_POPUP] = function(a, i) {
-	let popup_layer_i = a[i+POPUP_LAYER_I]
-	if (popup_layer_i != current_layer_i)
-		return true // not our layer, skip
+	if (a != current_layer_rec || i != current_layer_ct_i)
+		return true
 }
 
 hittest[CMD_POPUP] = function(a, i, recs) {
-	let popup_layer_i = a[i+POPUP_LAYER_I]
-	let popup_layer = layer_arr[popup_layer_i]
-	if (popup_layer != current_layer)
-		return // not our layer, skip
+	if (a != current_layer_rec || i != current_layer_ct_i)
+		return
+	let solid = a[i+POPUP_FLAGS] & POPUP_SOLID
 	if (hit_children(a, i, recs)) {
 		hover(a[i+POPUP_ID])
+		if (solid && ui.click)
+			focus_taken = true
+		return true
+	}
+	if (solid && hit_box(a, i)) {
+		hover(a[i+POPUP_ID])
+		if (ui.click)
+			focus_taken = true
 		return true
 	}
 }
@@ -5718,16 +5741,12 @@ frame.register = function(a, i) {
 }
 
 frame.draw = function(a, i, recs) {
-	let layer_i = a[i+FRAME_LAYER_I]
-	/*global*/ current_layer_i = layer_i
 	let rec_i = a[i+FRAME_REC_I]
 	let a1 = recs[rec_i]
 	draw_cmd(a1, 2, recs)
 }
 
 frame.hit = function(a, i, recs) {
-	let layer_i = a[i+FRAME_LAYER_I]
-	/*global*/ current_layer = layer_arr[layer_i]
 	let rec_i = a[i+FRAME_REC_I]
 	let a1 = recs[rec_i]
 	let hit_f = hittest[a1[1]]
@@ -6723,7 +6742,7 @@ ui.menu = function(id, items, side, align) {
 
 		function menu(level, items, side, align) {
 			let radius = 0 // ui.sp()
-			ui.popup(id, 'tooltip', null, side, align)
+			ui.popup(id, 'tooltip', null, side, align, null, null, 'constrain change_side')
 			ui.shadow('menu')
 			ui.bb('bg1', null, 1, 'light', null, radius)
 			ui.p(1)
@@ -6896,32 +6915,33 @@ ui.widget('polyline', {
 
 */
 
-// sets ui.state(id).open; fires 'picked', 'opened', 'closed'.
+// fires 'picked', 'opened', 'closed'. responds to 'open'. sets ui.state(id).open.
 function dropdown_update(id, s) {
 
 	let picker_id = id+'.picker'
+	let popup_id = id+'.popup'
 	let was_open = s.open
 	let open = was_open
 
-	let click = hit(id) && ui.click
+	let click = hit(id) && ui.click // id is the dropbox or the grid cell
 	let picked_args = ui.consume(picker_id, 'item_picked')
 	let picked = !!picked_args
 	let want_open = !!ui.consume(id, 'open')
 
 	let enter = ui.focused(id) && ui.keydown('enter')
 
-	let toggle = click || enter || picked
+	let toggle = click || enter
+	let escape = open && ui.keydown('escape') && ui.focus_inside(picker_id)
+	let click_outside = open && ui.click && !hit(popup_id)
 
-	// a key acted on here is not for anyone drawn later this frame.
-	if (toggle) {
+	if (picked || escape || click_outside) {
+		open = false
+		if (escape)
+			ui.capture_keys()
+	} else if (toggle) {
 		open = !open
 		if (enter)
 			ui.capture_keys()
-	} else if (open && ui.keydown('escape')) {
-		open = false
-		ui.capture_keys()
-	} else if (open && !ui.focused(picker_id) && !ui.focus_inside(picker_id)) {
-		open = false
 	} else if (want_open) {
 		open = true
 	}
@@ -6934,15 +6954,14 @@ function dropdown_update(id, s) {
 	if (was_open && !open)
 		ui.fire(id, 'closed', picked)
 
-	// picker_id only exists while open, so focus must move off it when
-	// closing: tab can't find an id that isn't in the tab order.
-	if (open && !ui.focused(picker_id))
-		ui.focus(picker_id)
-	else if (!open && ui.focused(picker_id))
+	if (!was_open && open)
+		ui.focus_first(picker_id)
+	if (was_open && !open && ui.focus_inside(picker_id))
 		ui.focus(id)
 }
 
 let dd_open // decided in dropdown(), needed in dropdown_picker() and end_dropdown()
+let dd_picker_id // focus group id of the open dropdown's picker
 
 // opened by 'open' event.
 ui.dropdown = function(id, side) {
@@ -6954,10 +6973,11 @@ ui.dropdown = function(id, side) {
 	keepalive(id, dropdown_update)
 	let open = s.open
 	dd_open = open
+	dd_picker_id = id+'.picker'
 
 	if (open) {
 		ui.popup(id+'.popup', 'open', null, side ?? 'il', 's', 0, 0,
-			'constrain change_side')
+			'constrain change_side solid')
 		ui.shadow('picker')
 		ui.bb('input') // background only: end_dropdown() draws the border
 	}
@@ -6972,15 +6992,19 @@ ui.dropdown = function(id, side) {
 
 ui.dropdown_picker = function() {
 	ui.end_stack()
-	if (dd_open)
+	if (dd_open) {
+		ui.focus_group(true, null, dd_picker_id)
 		ui.stack()
+	}
 }
 
 ui.end_dropdown = function() {
 	let open = dd_open
 	dd_open = null
-	if (open)
+	if (open) {
 		ui.end_stack()
+		ui.end_focus_group()
+	}
 	ui.end_v()
 	if (open) {
 		// last, so that the picker's item backgrounds don't paint over it.
@@ -6989,7 +7013,8 @@ ui.end_dropdown = function() {
 	}
 }
 
-// dropdown over a list of strings, keeping the picked index in its own state.
+// list_dropdown -------------------------------------------------------------
+
 ui.list_dropdown = function(id, items, fr, max_w, min_w, min_h) {
 
 	let picker_id = id+'.picker'
@@ -6999,9 +7024,9 @@ ui.list_dropdown = function(id, items, fr, max_w, min_w, min_h) {
 
 	// open, the value follows the list's focused item; on a pick, that item
 	// is the value.
-	let foc_i = (open || ui.listen(id, 'picked'))
+	let i = (open || ui.listen(id, 'picked'))
 		? ui.state(picker_id, 'focused_item_i') : null
-	let sel_i = foc_i ?? ui.state(id, 'i') ?? 0
+	let sel_i = i ?? ui.state(id, 'i') ?? 0
 	sel_i = ui.valid_list_index(sel_i, items)
 	ui.state(id).i = sel_i
 
@@ -7074,7 +7099,7 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 	let min_h = s.min_h
 
 	let i = ui.popup(id, 'window', target_i ?? 'screen',
-		valign_start ? 'it' : 'ib', align, min_w, min_h, 'constrain', null,
+		valign_start ? 'it' : 'ib', align, min_w, min_h, 'constrain solid', null,
 		ox, oy
 	)
 		ts.popups.set(id, i)

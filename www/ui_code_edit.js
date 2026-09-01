@@ -1587,7 +1587,7 @@ function code_edit_view(id, opt) {
 					if (find_open) {
 						ui.m(ui.sp2())
 						ui.p(ui.sp2(), ui.sp1())
-						ui.popup(id+'.find_popup', null, null, 'it', ']', 0, 0, 'constrain')
+						ui.popup(id+'.find_popup', null, null, 'it', ']', 0, 0, 'constrain solid')
 							ui.shadow(1, 1, 3, 0, false, ui.dark() ? 'black' : '#ccc')
 							ui.bb('bg2', null, 1, 'intense')
 							let fid = id+'.find_input'
