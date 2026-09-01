@@ -385,8 +385,8 @@ ui.rowsets.grid_types = {
 	parent_col: 'parent_id',
 }
 
-grid_types_cols = ['status', 'tags'].concat(
-	fields.map(f => f.name).filter(s => s != 'tags' && s != 'status'))
+grid_types_cols = 'status id color num size count date datetime time timeofday dur active tags progress icon place url phone email password secret pubkey privkey col action parent_id'
+
 demos.grid_types = `
 ui.m(ui.em(2))
 ui.stack()

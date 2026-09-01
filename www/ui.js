@@ -153,6 +153,29 @@ FOCUS STATE
 	window_unfocusing = t                   window is unfocusing this frame
 	window_focused    = t|f                 check if window is currently focused
 
+COMMAND RECORDING
+
+	start_recording ()
+	end_recording   () -> a1
+	play_recording  (a1)
+
+WIDGET DEFINITIONS
+
+	cmd             (cmd_id, ...args) -> i0
+
+	widget          (cmd_name, t, is_ct)
+	t.measure       : f(a, i, axis)    measure widget on axis (0 for x, 1 for y)
+	t.measure_end   : f(a, i, axis)    measure widget on axis at widget's end() call
+	t.position      : f(a, i, axis, x, w, ct_i)   position widget on axis
+	t.translate     : f(a, i, x, y)               translate widget
+	t.draw          : f(a, i, recs)     draw widget
+	t.draw_end      : f(a, i)           draw widget at widget's end() call
+	t.hit           : f(a, i, recs)     hit-test widget
+	t.is_flex_child : t|f     has fr at a[i+FR] and min_w/h at a[i+2+axis]
+	                          so it can be a child of a flex container.
+
+	measure         (id)        request that widget be measured; puts x,y,w,h in its state
+
 SPACINGS (MARGINS & PADDINGS)
 
 	rem             (rem) -> x   rem units to pixels
@@ -183,29 +206,6 @@ SPACINGS (MARGINS & PADDINGS)
 	m[argin_]h[oriz]    (m)
 	m[argin_]v[ert]     (m)
 
-COMMAND RECORDING
-
-	start_recording ()
-	end_recording   () -> a1
-	play_recording  (a1)
-
-WIDGET DEFINITIONS
-
-	cmd             (cmd_id, ...args) -> i0
-
-	widget          (cmd_name, t, is_ct)
-	t.measure       : f(a, i, axis)    measure widget on axis (0 for x, 1 for y)
-	t.measure_end   : f(a, i, axis)    measure widget on axis at widget's end() call
-	t.position      : f(a, i, axis, x, w, ct_i)   position widget on axis
-	t.translate     : f(a, i, x, y)               translate widget
-	t.draw          : f(a, i, recs)     draw widget
-	t.draw_end      : f(a, i)           draw widget at widget's end() call
-	t.hit           : f(a, i, recs)     hit-test widget
-	t.is_flex_child : t|f     has fr at a[i+FR] and min_w/h at a[i+2+axis]
-	                          so it can be a child of a flex container.
-
-	measure         (id)        request that widget be measured; puts x,y,w,h in its state
-
 BOX WIDGET DEFINITIONS
 
 	cmd_box         (cmd, fr, align, valign, min_w, min_h, ...args) -> i0
@@ -231,15 +231,6 @@ BOX WIDGET DEFINITIONS
 	last_i          () -> last_i  get the index of the last cmd in a
 
 	popup_target_rect (a, i)  use in draw callback to find a popup's target rect
-
-SCREEN SHARING
-
-	frame           (on_measure, on_frame, fr, align, valign, min_w, min_h)
-	shared_screen   (id, answer_con, fr, align, valign, min_w, min_h)
-	process_shared_screen_input (p, t)
-
-	pack_frame      () -> s     pack current frame for sending over the network
-	frame_changed   = noop      hook this for sending frames out
 
 CONTAINERS
 
@@ -326,9 +317,16 @@ OTHER
 	polyline        (id, points, closed, fill_color, fill_color_state, stroke_color, stroke_color_state)
 	resizer         (ct_id, id)
 
+SCREEN SHARING
+
+	shared_screen   (id, answer_con, fr, align, valign, min_w, min_h)
+	process_shared_screen_input (p, t)
+
+	pack_frame      () -> s     pack current frame for sending over the network
+	frame_changed   = noop      hook this for sending frames out
+
 TODO
 
-	tooltip         text  target  align  side  kind  icon_visible
 	toaster         side  align  timeout  spacing
 	checklist
 	action-band
@@ -7477,7 +7475,7 @@ radio.draw = function(a, i) {
 	// bullet
 
 	cx.beginPath()
-	cx.arc(cx1, cy1, h * (on ? .15 : 0), 0, 2 * PI) // TODO: animate radius
+	cx.arc(cx1, cy1, h * (on ? .15 : 0), 0, 2 * PI)
 	cx.closePath()
 	ui.set_shadow('button')
 	cx.fillStyle = bg_color('toggle-thumb', hs ? 'hover' : null)
