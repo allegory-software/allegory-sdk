@@ -6355,7 +6355,7 @@ ui.primary_icon_button = function(id, icon, s, fr, align, valign, min_w, min_h) 
 }
 
 ui.btn = ui.button
-ui.btn_pri = ui.button_primary
+ui.pri_btn = ui.primary_button
 
 // split ---------------------------------------------------------------------
 
