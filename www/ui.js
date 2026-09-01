@@ -1806,6 +1806,19 @@ function clear_layers() {
 	}
 }
 
+// binsearch cmp func for finding last insert position by z_index in flattened
+// array of (rec_i, i, z_index) tuples.
+let cmp_z_index = (a, i, v) => a[i*3+2] <= v
+
+function add_layer_index(layer, rec_i, ct_i, z_index) {
+	if (!z_index && !layer.indexes.at(-1)) { // common path, z-index not used
+		layer.indexes.push(rec_i, ct_i, z_index)
+	} else {
+		let insert_i = binsearch(layer.indexes, z_index, cmp_z_index, 0, layer.indexes.length / 3) * 3
+		layer.indexes.splice(insert_i, 0, rec_i, ct_i, z_index)
+	}
+}
+
 const layer_base =
 ui_layer('base'   , 0)
 ui_layer('window' , 1) // modals
@@ -1821,10 +1834,9 @@ let current_layer // set while building
 let current_layer_rec
 let current_layer_ct_i
 
-function begin_layer(layer, ct_i, z_index) {
+function begin_layer(layer) {
 	layer_stack.push(current_layer)
 	current_layer = layer
-	set_layer(layer, ct_i, z_index)
 }
 
 function end_layer() {
@@ -2595,8 +2607,9 @@ function redraw_all() {
 
 		begin_rec()
 		let i = ui.stack()
-		begin_layer(layer_base, i)
+		begin_layer(layer_base)
 		assert(rec_i == 0)
+		add_layer_index(layer_base, rec_i, i, 0)
 		ui.main()
 		reset_spacings()
 		ui.end()
@@ -2728,37 +2741,6 @@ ui.widget = function(cmd_name, t, is_ct) {
 		return wrapper
 	} else {
 		return _cmd
-	}
-}
-
-// set_layer command ---------------------------------------------------------
-
-// puts a cmd on a layer. the reason for generating a set_layer command
-// instead of just doing the work here is because we might be in a command
-// recording and thus we don't know the final ct_i after the recording is played.
-let CMD_SET_LAYER = cmd('set_layer')
-let SET_LAYER_Z_INDEX = 2
-function set_layer(layer, ct_i, z_index) {
-	ct_i ??= ui.ct_i()
-	let i = ui_cmd(CMD_SET_LAYER, layer.i, ct_i, z_index ?? 0)
-	a[i+1] -= i // make ct_i relative
-}
-
-// binsearch cmp func for finding last insert position by z_index in flattened
-// array of (rec_i, i, z_index) tuples.
-let cmp_z_index = (a, i, v) => a[i*3+2] <= v
-
-// doesn't have to happen on register, any phase before drawing will do.
-register[CMD_SET_LAYER] = function(a, i, rec_i) {
-	let layer_i = a[i+0]
-	let ct_i  = i+a[i+1]
-	let z_index = a[i+2]
-	let layer = layer_arr[layer_i]
-	if (!z_index && !layer.indexes.at(-1)) { // common path, z-index not used
-		layer.indexes.push(rec_i, ct_i, z_index)
-	} else {
-		let insert_i = binsearch(layer.indexes, z_index, cmp_z_index, 0, layer.indexes.length / 3) * 3
-		layer.indexes.splice(insert_i, 0, rec_i, ct_i, z_index)
 	}
 }
 
@@ -3902,10 +3884,12 @@ function popup_parse_flags(s) {
 const POPUP_ID        = FR      // because fr is not used
 const POPUP_SIDE      = ALIGN   // because align is not used
 const POPUP_ALIGN     = ALIGN+1 // because valign is not used
-const POPUP_TARGET_I  = BOX_CT_ARGS+0
-const POPUP_FLAGS     = BOX_CT_ARGS+1
-const POPUP_SIDE_REAL = BOX_CT_ARGS+2
-const POPUP_OX        = BOX_CT_ARGS+3 // offset x,y from where side+align put it
+const POPUP_LAYER_I   = BOX_CT_ARGS+0
+const POPUP_Z_INDEX   = BOX_CT_ARGS+1
+const POPUP_TARGET_I  = BOX_CT_ARGS+2
+const POPUP_FLAGS     = BOX_CT_ARGS+3
+const POPUP_SIDE_REAL = BOX_CT_ARGS+4
+const POPUP_OX        = BOX_CT_ARGS+5 // offset x,y from where side+align put it
 
 const CMD_POPUP = cmd_ct('popup')
 
@@ -3928,6 +3912,7 @@ ui.popup = function(
 		null, // valign -> align
 		min_w, min_h,
 		// BOX_ARGS+0
+		layer.i, z_index ?? 0,
 		target_i, flags,
 		side, // side_real
 		ox ?? 0, oy ?? 0,
@@ -3937,7 +3922,7 @@ ui.popup = function(
 	a[i+POPUP_ID   ] = id
 	a[i+POPUP_SIDE ] = side
 	a[i+POPUP_ALIGN] = align
-	begin_layer(layer, i, z_index)
+	begin_layer(layer)
 	force_scope_vars()
 	return i
 }
@@ -3945,9 +3930,7 @@ ui.end_popup = function() { ui.end(CMD_POPUP) }
 
 function set_z_index(a, i, z_index) {
 	assert(a[i-1] == CMD_POPUP)
-	i = cmd_next_i(a, i)
-	assert(a[i-1] == CMD_SET_LAYER)
-	a[i+SET_LAYER_Z_INDEX] = z_index
+	a[i+POPUP_Z_INDEX] = z_index
 }
 ui.set_z_index = set_z_index
 
@@ -4173,6 +4156,10 @@ ui.popup_target_rect = function(a, i) {
 	return out
 }
 
+}
+
+register[CMD_POPUP] = function(a, i, rec_i) {
+	add_layer_index(layer_arr[a[i+POPUP_LAYER_I]], rec_i, i, a[i+POPUP_Z_INDEX])
 }
 
 draw[CMD_POPUP] = function(a, i) {
