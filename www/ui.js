@@ -114,8 +114,8 @@ KEYBOARD STATE
 
 LAYERS
 
-	built-in layers : base handle window tooltip open
-	layer           (name, index)   define a new layer
+	built-in layers : base toolbox tooltip open overlay modal global_tooltip drag
+	layer           (name, [index], ['root modal'])  define a new layer
 
 SCOPES
 
@@ -140,10 +140,10 @@ FOCUS STATE
 	focus           (id)                    focus widget
 	focused         (id) -> t|f             check if widget is currently focused
 	focusing        (id) -> t|f             widget is focusing this frame
-	focusable       (id, [order])           add widget to the tab order
+	focusable       (id, [tab_order])       add widget to the tab order
 	nofocus         ()                      keep the next widget out of the tab order
 	capture_tab     (id, [back])            widget gets tab (shift-tab if back)
-	focus_group     ([trap], [order], [id]) begin a tab order group
+	focus_group     ([trap], [tab_order], [id]) begin a tab order group
 	end_focus_group ()                      end a tab order group
 	default_button  (id)                    enter in the group's inputs hits it
 	focus_inside    (group_id) -> t|f       focus is inside this focus group
@@ -654,6 +654,7 @@ ui.fg_color_rgba = lookup_color_rgba_int_func(fg_color_hsl)
 ui.fg_style('light', 'text'   , 'normal' ,   0, 0.00, 0.00)
 ui.fg_style('light', 'text'   , 'hover'  ,   0, 0.00, 0.30)
 ui.fg_style('light', 'text'   , 'active' ,   0, 0.00, 0.40)
+ui.fg_style('light', 'text'   , 'focused',   0, 0.00, 0.00)
 ui.fg_style('light', 'label'  , 'normal' ,   0, 0.00, 0.00)
 ui.fg_style('light', 'label'  , 'hover'  ,   0, 0.00, 0.00, 0.9)
 ui.fg_style('light', 'link'   , 'normal' , 222, 0.00, 0.50)
@@ -663,6 +664,7 @@ ui.fg_style('light', 'link'   , 'active' , 222, 1.00, 0.80)
 ui.fg_style('dark' , 'text'   , 'normal' ,   0, 0.00, 0.8)
 ui.fg_style('dark' , 'text'   , 'hover'  ,   0, 0.00, 1.00)
 ui.fg_style('dark' , 'text'   , 'active' ,   0, 0.00, 1.00)
+ui.fg_style('dark' , 'text'   , 'focused',   0, 0.00, 1.0)
 ui.fg_style('dark' , 'label'  , 'normal' ,   0, 0.00, 0.95, 0.7)
 ui.fg_style('dark' , 'label'  , 'hover'  ,   0, 0.00, 0.90, 0.9)
 ui.fg_style('dark' , 'link'   , 'normal' ,  26, 0.88, 0.60)
@@ -743,6 +745,7 @@ ui.bg_style('light', 'bg3'   , 'active' ,   0, 0.00, 0.80)
 ui.bg_style('light', 'alt'   , 'normal' ,   0, 0.00, 0.95) // bg alternate for grid cells
 ui.bg_style('light', 'smoke' , 'normal' ,   0, 0.00, 1.00, 0.80)
 ui.bg_style('light', 'input' , 'normal' ,   0, 0.00, 0.98)
+ui.bg_style('light', 'input' , 'focused',   0, 0.00, 1.00)
 ui.bg_style('light', 'input' , 'hover'  ,   0, 0.00, 0.94)
 ui.bg_style('light', 'input' , 'active' ,   0, 0.00, 0.90)
 
@@ -761,6 +764,7 @@ ui.bg_style('dark' , 'bg3'   , 'active' , 216, 0.28, 0.33)
 ui.bg_style('dark' , 'alt'   , 'normal' , 260, 0.28, 0.13)
 ui.bg_style('dark' , 'smoke' , 'normal' ,   0, 0.00, 0.00, 0.70)
 ui.bg_style('dark' , 'input' , 'normal' , 216, 0.28, 0.17)
+ui.bg_style('dark' , 'input' , 'focused', 216, 0.28, 0.08)
 ui.bg_style('dark' , 'input' , 'hover'  , 216, 0.28, 0.21)
 ui.bg_style('dark' , 'input' , 'active' , 216, 0.28, 0.25)
 
@@ -1777,56 +1781,84 @@ ui.disas = function(a) {
 let layer_map = {} // {name->layer}
 let layer_arr = [] // [layer1,...] in creation order
 
-let layers = [] // [layer1,...] in paint order
-
-function ui_layer(name, index) {
+function ui_layer(name, index, flags) {
 	if (!name)
 		return current_layer
 	let layer = layer_map[name]
 	if (!layer) {
-		layer = obj() // [popup1_i,...]
+		layer = obj()
 		layer.name = assert(name)
-		if (index != null)
-			insert(layers, index, layer)
 		layer_map[name] = layer
 		layer_arr.push(layer)
 		layer.i = layer_arr.length-1
-		if (!layer.indexes)
-			layer.indexes = [] // [rec1_i, ct1_i, z_index1, rec2_i, ct2_i, z_index2, ...]
+		layer.paint_order = index ?? 0
+		layer.root  = !!flags?.includes('root')
+		layer.modal = !!flags?.includes('modal')
 	}
 	return layer
 }
 ui.layer = ui_layer
 
-function clear_layers() {
-	for (let layer of layer_arr) {
-		layer.indexes.length = 0
-		if (layer.layers)
-			layer.layers.length = 0
+// each layer owns paint_order_band consecutive paint_order values and a
+// popup's z_index picks one of them.
+let paint_order_band = 0x10000
+
+let POPUPS_SLOTS       = 4
+let POPUPS_PAINT_ORDER = 0
+let POPUPS_REC_I       = 1
+let POPUPS_CT_I        = 2
+let POPUPS_INNER       = 3
+
+let popups_freelist = array_freelist()
+
+let root_popups = []
+// [current_popups, i past the popup's END, a] per popup that owns popups.
+let popups_stack = []
+let current_popups = root_popups
+
+function free_inner_popups(popups) {
+	for (let k = POPUPS_INNER, n = popups.length; k < n; k += POPUPS_SLOTS) {
+		let inner_popups = popups[k]
+		if (inner_popups) {
+			free_inner_popups(inner_popups)
+			inner_popups.length = 0
+			popups_freelist.free(inner_popups)
+		}
 	}
 }
 
-// binsearch cmp func for finding last insert position by z_index in flattened
-// array of (rec_i, i, z_index) tuples.
-let cmp_z_index = (a, i, v) => a[i*3+2] <= v
+function reset_popups() {
+	free_inner_popups(root_popups)
+	root_popups.length = 0
+	popups_stack.length = 0
+	current_popups = root_popups
+}
 
-function add_layer_index(layer, rec_i, ct_i, z_index) {
-	if (!z_index && !layer.indexes.at(-1)) { // common path, z-index not used
-		layer.indexes.push(rec_i, ct_i, z_index)
-	} else {
-		let insert_i = binsearch(layer.indexes, z_index, cmp_z_index, 0, layer.indexes.length / 3) * 3
-		layer.indexes.splice(insert_i, 0, rec_i, ct_i, z_index)
+function add_popup(popups, paint_order, rec_i, ct_i, inner_popups) {
+	// stop at the last entry that is not above paint_order, so that entries
+	// with an equal paint_order stay in the order they were added.
+	let k = popups.length
+	while (k) {
+		let j = k - POPUPS_SLOTS
+		if (popups[j+POPUPS_PAINT_ORDER] <= paint_order)
+			break
+		k = j
 	}
+	if (k == popups.length)
+		popups.push(paint_order, rec_i, ct_i, inner_popups)
+	else
+		popups.splice(k, 0, paint_order, rec_i, ct_i, inner_popups)
 }
 
 const layer_base =
-ui_layer('base'   , 0)
-ui_layer('window' , 1) // modals
-// all these below must be temporary to work with modals!
-ui_layer('overlay', 2) // temporary overlays that must show behind the dragged object.
-ui_layer('tooltip', 3)
-ui_layer('open'   , 4) // dropdowns, must cover tooltips
-ui_layer('handle' , 5) // dragged object
+ui_layer('base'    , 0)
+ui_layer('overlay' , 1) // focus rings, drag points: must cover siblings.
+ui_layer('error'   , 2) // persistent tooltips: not hover (tooltips are hover).
+ui_layer('toolbox' , 3, 'modal')
+ui_layer('open'    , 4, 'modal') // dropdowns, menus: must cover all non-modals.
+ui_layer('modal'   , 5, 'modal') // modals: must cover all other modals.
+ui_layer('tooltip' , 6, 'root') // tooltips: must cover all static.
+ui_layer('drag'    , 7, 'root') // dragged object: must cover everything.
 
 let layer_stack = [] // [layer1_i, ...]
 let current_layer // set while building
@@ -1924,6 +1956,10 @@ function translate_rec(a, x, y) {
 // each element that has it (linear scan).
 
 function register_rec(a, rec_i) {
+	// popups left open at the end of this rec are closed by it ending, not
+	// by a later popup, so put popups_stack and current_popups back here.
+	let popups_stack_n = popups_stack.length
+	let popups0 = current_popups
 	for (let i = 2, n = a.length; i < n; i = cmd_next_i(a, i)) {
 		let cmd = a[i-1]
 		let register_f = register[cmd]
@@ -1931,6 +1967,8 @@ function register_rec(a, rec_i) {
 			continue
 		register_f(a, i, rec_i)
 	}
+	popups_stack.length = popups_stack_n
+	current_popups = popups0
 }
 
 /* drawing phase -------------------------------------------------------------
@@ -2011,31 +2049,26 @@ function draw_cmd(a, i, recs) {
 	}
 }
 
-function draw_layer(indexes, recs) {
+function draw_popups(popups, recs) {
 	let prev_rec  = current_layer_rec
 	let prev_ct_i = current_layer_ct_i
-	for (let k = 0, n = indexes.length; k < n; k += 3) {
+	for (let k = 0, n = popups.length; k < n; k += POPUPS_SLOTS) {
 		reset_canvas()
-		let rec_i = indexes[k]
-		let i     = indexes[k+1]
+		let rec_i = popups[k+POPUPS_REC_I]
+		let i     = popups[k+POPUPS_CT_I]
 		let a = recs[rec_i]
 		/*global*/ current_layer_rec  = a
 		/*global*/ current_layer_ct_i = i
 		draw_cmd(a, i, recs)
+		let inner_popups = popups[k+POPUPS_INNER]
+		if (inner_popups)
+			draw_popups(inner_popups, recs)
 	}
 	current_layer_rec  = prev_rec
 	current_layer_ct_i = prev_ct_i
 }
 
-function draw_layers(layers, recs) {
-	for (let layer of layers) {
-		draw_layer(layer.indexes, recs)
-		if (layer.layers?.length)
-			draw_layers(layer.layers, recs)
-	}
-}
-
-function draw_frame(recs, layers, sm1) {
+function draw_frame(recs, popups, sm1) {
 	let sm0 = render_state_map
 	render_state_map = assert(sm1)
 	let current_layer_rec0  = current_layer_rec
@@ -2045,7 +2078,7 @@ function draw_frame(recs, layers, sm1) {
 	theme_stack.push(theme)
 	theme = themes[ui.default_theme]
 
-	draw_layers(layers, recs)
+	draw_popups(popups, recs)
 	assert(current_layer_rec  == current_layer_rec0)
 	assert(current_layer_ct_i == current_layer_ct_i0)
 
@@ -2110,13 +2143,15 @@ function hover(id) {
 }
 ui.hover = hover
 
-function hit_layer(layer, recs) {
-	// iterate layer's cointainers in reverse order.
-	let indexes = layer.indexes
-	for (let k = indexes.length-3; k >= 0; k -= 3) {
+function hit_popups(popups, recs) {
+	// iterate popups in reverse order.
+	for (let k = popups.length-POPUPS_SLOTS; k >= 0; k -= POPUPS_SLOTS) {
+		let inner_popups = popups[k+POPUPS_INNER]
+		if (inner_popups && hit_popups(inner_popups, recs))
+			return true
 		reset_canvas()
-		let rec_i = indexes[k]
-		let i     = indexes[k+1]
+		let rec_i = popups[k+POPUPS_REC_I]
+		let i     = popups[k+POPUPS_CT_I]
 		let a = recs[rec_i]
 		/*global*/ current_layer_rec  = a
 		/*global*/ current_layer_ct_i = i
@@ -2126,19 +2161,7 @@ function hit_layer(layer, recs) {
 	}
 }
 
-function hit_layers(layers, recs) {
-	// iterate layers in reverse order.
-	for (let j = layers.length-1; j >= 0; j--) {
-		let layer = layers[j]
-		if (layer.layers?.length)
-			if (hit_layers(layer.layers, recs))
-				return true
-		if (hit_layer(layer, recs))
-			return true
-	}
-}
-
-function hit_frame(recs, layers) {
+function hit_frame(recs, popups) {
 
 	ui.set_cursor()
 
@@ -2151,18 +2174,18 @@ function hit_frame(recs, layers) {
 	if (ui.mx == null)
 		return
 
-	hit_layers(layers, recs)
+	hit_popups(popups, recs)
 
 }
 
 // tab focusing --------------------------------------------------------------
 
-let FOCUSABLE_SLOTS = 5
-let FOCUSABLE_ID    = 0
-let FOCUSABLE_ORDER = 1
-let FOCUSABLE_END   = 2 // groups only
-let FOCUSABLE_TRAP  = 3 // groups only
-let FOCUSABLE_DEFB  = 4 // groups only: default button id
+let FOCUSABLE_SLOTS     = 5
+let FOCUSABLE_ID        = 0
+let FOCUSABLE_TAB_ORDER = 1
+let FOCUSABLE_END       = 2 // groups only
+let FOCUSABLE_TRAP      = 3 // groups only
+let FOCUSABLE_DEFB      = 4 // groups only: default button id
 
 let focusables = [] // FOCUSABLE_SLOTS per entry, in tab order
 ui.focusables = focusables
@@ -2179,12 +2202,12 @@ ui.nofocus = function() {
 	nofocus = true
 }
 
-ui.focusable = function(id, order) {
+ui.focusable = function(id, tab_order) {
 	if (nofocus) {
 		nofocus = false
 		return
 	}
-	ui_cmd(FOCUSABLE, id, order ?? 0)
+	ui_cmd(FOCUSABLE, id, tab_order ?? 0)
 	// calling scroll_to_view_next_box() here means that focusable() must be
 	// called before the widget box is recorded.
 	if (ui.focusing(id))
@@ -2192,8 +2215,8 @@ ui.focusable = function(id, order) {
 }
 
 // id is optional, only needed for tab_into().
-ui.focus_group = function(trap, order, id) {
-	ui_cmd(FOCUS_GROUP, order ?? 0, trap ? 1 : 0, id)
+ui.focus_group = function(trap, tab_order, id) {
+	ui_cmd(FOCUS_GROUP, tab_order ?? 0, trap ? 1 : 0, id)
 }
 
 ui.end_focus_group = function() {
@@ -2260,22 +2283,26 @@ ui.focus_inside = function(group_id) { // looks in prev. frame
 	return i > group_i && i < focusables[group_i+FOCUSABLE_END]
 }
 
-function pick_focus_sibling(group_i, order0, i0, back) {
+function pick_focus_sibling(group_i, tab_order0, i0, back) {
 	let best_i = null
-	let best_order
+	let best_tab_order
 	let end_i = focus_group_end(group_i)
 	for (let i = focus_group_start(group_i); i < end_i;
 			i = next_focus_sibling_i(i)) {
-		let order = focusables[i+FOCUSABLE_ORDER]
+		let tab_order = focusables[i+FOCUSABLE_TAB_ORDER]
 		if (i0 != null && !(back
-				? order < order0 || (order == order0 && i < i0)
-				: order > order0 || (order == order0 && i > i0)))
+				? tab_order < tab_order0
+					|| (tab_order == tab_order0 && i < i0)
+				: tab_order > tab_order0
+					|| (tab_order == tab_order0 && i > i0)))
 			continue
 		if (best_i == null || (back
-				? order > best_order || (order == best_order && i > best_i)
-				: order < best_order || (order == best_order && i < best_i))) {
+				? tab_order > best_tab_order
+					|| (tab_order == best_tab_order && i > best_i)
+				: tab_order < best_tab_order
+					|| (tab_order == best_tab_order && i < best_i))) {
 			best_i = i
-			best_order = order
+			best_tab_order = tab_order
 		}
 	}
 	return best_i
@@ -2296,7 +2323,7 @@ function first_focusable_in(group_i, back) {
 function next_focusable_after(group_i, i0, back) {
 	while (1) {
 		let i = pick_focus_sibling(group_i,
-			focusables[i0+FOCUSABLE_ORDER], i0, back)
+			focusables[i0+FOCUSABLE_TAB_ORDER], i0, back)
 		if (i == null)
 			return null
 		if (!is_focus_group(i))
@@ -2447,7 +2474,7 @@ async function pack_frame_json() {
 		anchor: state_map.get(ui.focused_id)?.anchor,
 		caret: state_map.get(ui.focused_id)?.caret,
 		recs: recs,
-		layers: layers,
+		popups: root_popups,
 	})
 	let b = tenc.encode(s)
 
@@ -2588,7 +2615,7 @@ function redraw_all() {
 
 		t0 = clock_ms()
 
-		hit_frame(recs, layers)
+		hit_frame(recs, root_popups)
 
 		if (ui.keydown('tab') && !tab_captured(ui.focused_id)) {
 			let i = step_focus(ui.keypressed('shift'))
@@ -2598,7 +2625,7 @@ function redraw_all() {
 		t1 = clock_ms()
 		frame_graph_push('frame_hit_time', t1 - t0)
 
-		clear_layers()
+		reset_popups()
 		free_recs()
 
 		t0 = clock_ms()
@@ -2609,7 +2636,7 @@ function redraw_all() {
 		let i = ui.stack()
 		begin_layer(layer_base)
 		assert(rec_i == 0)
-		add_layer_index(layer_base, rec_i, i, 0)
+		add_popup(root_popups, layer_base.paint_order * paint_order_band, rec_i, i, null)
 		ui.main()
 		reset_spacings()
 		ui.end()
@@ -2653,7 +2680,7 @@ function redraw_all() {
 
 			drawn_focused_input = null
 			drawn_focused_by_key = false
-			draw_frame(recs, layers, root_render_state_map)
+			draw_frame(recs, root_popups, root_render_state_map)
 
 			sync_dom_focus()
 			sync_dom_selection()
@@ -2742,19 +2769,6 @@ ui.widget = function(cmd_name, t, is_ct) {
 	} else {
 		return _cmd
 	}
-}
-
-// draw_layer command --------------------------------------------------------
-
-let CMD_DRAW_LAYER = cmd('draw_layer')
-ui.draw_layer = function(layer) {
-	layer = ui_layer(layer)
-	ui_cmd(CMD_DRAW_LAYER, layer.indexes)
-}
-
-draw[CMD_DRAW_LAYER] = function(a, i, recs) {
-	let indexes = a[i+0]
-	draw_layer(indexes, recs)
 }
 
 // box widgets ---------------------------------------------------------------
@@ -4159,7 +4173,26 @@ ui.popup_target_rect = function(a, i) {
 }
 
 register[CMD_POPUP] = function(a, i, rec_i) {
-	add_layer_index(layer_arr[a[i+POPUP_LAYER_I]], rec_i, i, a[i+POPUP_Z_INDEX])
+	// put back the current_popups of every popup whose END this one is past.
+	// entries from another rec belong to the scan that pushed them.
+	let n = popups_stack.length
+	while (n && popups_stack[n-1] == a && i >= popups_stack[n-2]) {
+		current_popups = popups_stack[n-3]
+		n -= 3
+	}
+	popups_stack.length = n
+	let layer = layer_arr[a[i+POPUP_LAYER_I]]
+	let z_index = a[i+POPUP_Z_INDEX]
+	assert(z_index >= 0 && z_index < paint_order_band,
+		'z_index out of range: ', z_index)
+	let inner_popups = layer.modal ? popups_freelist.alloc() : null
+	add_popup(layer.root ? root_popups : current_popups,
+		layer.paint_order * paint_order_band + z_index,
+		rec_i, i, inner_popups)
+	if (inner_popups) {
+		popups_stack.push(current_popups, i+a[i+BOX_CT_NEXT_EXT_I], a)
+		current_popups = inner_popups
+	}
 }
 
 draw[CMD_POPUP] = function(a, i) {
@@ -5922,7 +5955,7 @@ ss.draw = function(a, i) {
 					s1.free(s1, id)
 		}
 	}
-	draw_frame(t.recs, t.layers, s.render_state_map)
+	draw_frame(t.recs, t.popups, s.render_state_map)
 	draw_pointer(t, 0, 0)
 	cx.restore()
 	ss_ids.pop()
@@ -6035,7 +6068,7 @@ function template_add(t) {
 }
 
 function template_drag_point(id, ch_t, ct_i, ha, va) {
-	ui.popup('', 'handle', ct_i, ha, va)
+	ui.popup('', 'overlay', ct_i, ha, va)
 		ui.drag_point(id+'.'+ha+va, 0, 0, 'red')
 	ui.end_popup()
 }
@@ -6474,8 +6507,11 @@ ui.end_vsplit = function() { end_split('v') }
 
 ui.input = function(id, s, fr, w, h) {
 	ui.stack('', fr, 's', 's')
-		ui.bb('input', null, 1, 'intense', ui.focused(id) ? 'hover' : null)
+		ui.bb(
+			'input', ui.focused(id) ? 'focused' : null,
+			1, 'intense', ui.focused(id) ? 'hover' : null)
 		ui.p(ui.sp())
+		ui.color('text', ui.focused(id) ? 'focused' : null)
 		s = ui.text(id, s, 1, 'l', 'c', null, w ?? ui.em(12), h, null, true)
 	ui.end_stack()
 	ui.state(id).single_line_input = true
@@ -6484,7 +6520,7 @@ ui.input = function(id, s, fr, w, h) {
 
 ui.label = function(for_id, s, fr, align, valign) {
 	let id = for_id+'.label'
-	ui.color('text', (hit(id) || hit(for_id)) ? 'hover' : null)
+	ui.color('text')
 	ui.text(id, s, fr, align ?? 'l', valign ?? 'c')
 }
 
@@ -6621,16 +6657,16 @@ function visible_element_list(all, ID, INDEX, order, hidden) {
 
 // TODO: tabs_side  auto_focus
 
-ui.tabs = function(id, all_tabs, selected_tab, tab_order, hidden_tabs) {
+ui.tabs = function(id, all_tabs, selected_tab, tabs_order, hidden_tabs) {
 
 	let s = ui.state(id)
 	selected_tab = s.selected_tab ?? selected_tab
-	tab_order    = s.tab_order    ?? tab_order
+	tabs_order   = s.tabs_order   ?? tabs_order
 	hidden_tabs  = s.hidden_tabs  ?? hidden_tabs
 
 	let tabs = s.tabs
 	if (!tabs) {
-		tabs = visible_element_list(all_tabs, 'id', 'index', tab_order, hidden_tabs)
+		tabs = visible_element_list(all_tabs, 'id', 'index', tabs_order, hidden_tabs)
 		s.tabs = tabs
 	}
 
@@ -6669,9 +6705,9 @@ ui.tabs = function(id, all_tabs, selected_tab, tab_order, hidden_tabs) {
 		mover.move_element_update_dx(dx)
 	} else if (mover && drag_state == 'drop') {
 		array_move(tabs, drag_tab.index, 1, mover.over_i, true)
-		tab_order = tabs.map(tab => tab.id).join(' ')
-		s.tab_order = tab_order
-		tabs = visible_element_list(all_tabs, 'id', 'index', tab_order, hidden_tabs)
+		tabs_order = tabs.map(tab => tab.id).join(' ')
+		s.tabs_order = tabs_order
+		tabs = visible_element_list(all_tabs, 'id', 'index', tabs_order, hidden_tabs)
 		s.tabs = tabs
 		mover = null
 	}
@@ -6712,7 +6748,7 @@ ui.tabs = function(id, all_tabs, selected_tab, tab_order, hidden_tabs) {
 	if (!mover) {
 		if (ui.bare_icon_button(id+'.plus', 'plus', null, false)) {
 			all_tabs.push({id: 'newtab'+all_tabs.length, label: 'New Tab '+all_tabs.length})
-			tabs = visible_element_list(all_tabs, 'id', 'index', tab_order, hidden_tabs)
+			tabs = visible_element_list(all_tabs, 'id', 'index', tabs_order, hidden_tabs)
 			s.tabs = tabs
 			ui.relayout()
 		}
@@ -6735,7 +6771,7 @@ ui.menu = function(id, items, side, align) {
 
 		function menu(level, items, side, align) {
 			let radius = 0 // ui.sp()
-			ui.popup(id, 'tooltip', null, side, align, null, null, 'constrain change_side')
+			ui.popup(id, 'open', null, side, align, null, null, 'constrain change_side')
 			ui.shadow('menu')
 			ui.bb('bg1', null, 1, 'light', null, radius)
 			ui.p(1)
@@ -6925,7 +6961,9 @@ function dropdown_update(id, s) {
 
 	let toggle = click || enter
 	let escape = open && ui.keydown('escape') && ui.focus_inside(picker_id)
-	let click_outside = open && ui.click && !hit(popup_id)
+	// using hovers() is a hack to make the resizer work which captures the
+	// mouse and masks hit() (but it doesn't clear ui.click).
+	let click_outside = open && ui.click && !hovers(popup_id)
 
 	if (picked || escape || click_outside) {
 		open = false
@@ -7001,7 +7039,7 @@ ui.end_dropdown = function() {
 	ui.end_v()
 	if (open) {
 		// last, so that the picker's item backgrounds don't paint over it.
-		ui.bb(null, null, 1, 'intense', 'hover')
+		ui.bb(null, null, 1, 'intense')
 		ui.end_popup()
 	}
 }
@@ -7091,7 +7129,7 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 	let min_w = s.min_w
 	let min_h = s.min_h
 
-	let i = ui.popup(id, 'window', target_i ?? 'screen',
+	let i = ui.popup(id, 'toolbox', target_i ?? 'screen',
 		valign_start ? 'it' : 'ib', align, min_w, min_h, 'constrain solid', null,
 		ox, oy
 	)
@@ -7158,7 +7196,6 @@ ui.end_toolboxes = function() {
 		s.to_top = null
 	}
 	let z = 1
-	let window_layer = ui_layer('window')
 	for (let id of order) {
 		let popup_i = popups.get(id)
 		set_z_index(a, popup_i, z++)
@@ -7277,6 +7314,8 @@ ui.widget('resizer', {
 				ui.state(ct_id).min_h = min_h + dy
 			}
 		}
+
+		return !!dstate
 
 	},
 })
@@ -7668,7 +7707,8 @@ ui.box_widget('slider', {
 		if (!markers && (hs || captured(id))) {
 			ui.mb(10)
 			ui.p(ui.sp2(), ui.sp())
-			ui.popup(id+'.popup', 'tooltip', thumb_i, 't', 'c', 0, 0, 'change_side constrain')
+			ui.popup(id+'.popup', 'overlay', thumb_i,
+					't', 'c', 0, 0, 'change_side constrain')
 				ui.bb_tooltip('info', null, 'light', null, ui.sp05())
 				ui.text('', dec(ui.state(id, 'v'), decimals ?? 2))
 			ui.end_popup()
@@ -8282,21 +8322,26 @@ ui.box_widget('sat_lum_square', {
 			let sat_step = ui.keydown('arrowright') && 1 || ui.keydown('arrowleft') && -1
 			if (lum_step) {
 				let lum = ui.state(id, 'lum')
-				ui.state(id).lum = lum + (ui.keypressed('shift') ? 0.1 : 1) * 0.1 * lum_step
+				ui.state(id).lum = clamp(lum + (ui.keypressed('shift') ? 0.1 : 1) * 0.1 * lum_step, 0, 1)
 			}
 			if (sat_step) {
 				let sat = ui.state(id, 'sat')
-				ui.state(id).sat = sat + (ui.keypressed('shift') ? 0.1 : 1) * 0.1 * sat_step
+				ui.state(id).sat = clamp(sat + (ui.keypressed('shift') ? 0.1 : 1) * 0.1 * sat_step, 0, 1)
 			}
 		}
 
-		return ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
-			id,
-			hue,
-			hit(id, 'sat'),
-			hit(id, 'lum'),
-			ui.state(id, 'sat'),
-			ui.state(id, 'lum'))
+		ui.stack('', fr, align, valign, min_w, min_h)
+			let i = ui_cmd_box(cmd, null, null, null, 0, 0,
+				id,
+				hue,
+				hit(id, 'sat'),
+				hit(id, 'lum'),
+				ui.state(id, 'sat'),
+				ui.state(id, 'lum'))
+			if (ui.focused(id))
+				ui.focus_ring()
+		ui.end_stack()
+		return i
 	},
 
 	draw: function(a, i) {
@@ -8383,7 +8428,7 @@ ui.box_widget('hue_bar', {
 		let fr     = fr0     ?? 0
 		let align  = align0  ?? 's'
 		let valign = valign0 ?? 's'
-		let min_w  = min_w0  ?? ui.em(1)
+		let min_w  = min_w0  ?? ui.em(2)
 		let min_h  = min_h0  ?? 0
 		ui.clear_box_args()
 
@@ -8402,10 +8447,15 @@ ui.box_widget('hue_bar', {
 			}
 		}
 
-		return ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
-			id,
-			hit(id, 'hue'),
-			ui.state(id, 'hue'))
+		ui.stack('', fr, align, valign, min_w, min_h)
+			let i = ui_cmd_box(cmd, null, null, null, 0, 0,
+				id,
+				hit(id, 'hue'),
+				ui.state(id, 'hue'))
+			if (ui.focused(id))
+				ui.focus_ring()
+		ui.end_stack()
+		return i
 	},
 
 	draw: function(a, i) {
@@ -8481,13 +8531,14 @@ ui.box_ct_widget('aspect_box', {
 // color picker --------------------------------------------------------------
 
 let HEX_RE = /^#[0-9a-f]{6}$/i
+let HSL_RE = /^\s*([\d.]+)\s*\u00B0?\s*,\s*([\d.]+)\s*%?\s*,\s*([\d.]+)\s*%?\s*$/
 
 ui.color_picker = function(id, hue, sat, lum) {
 	hue = hue ?? 0
 	sat = sat ?? .5
 	lum = lum ?? .5
 	ui.v(1, ui.sp())
-		ui.h(1, ui.sp05())
+		ui.h(0, ui.sp05())
 			ui.start_recording()
 				ui.hue_bar(id+'.hb', hue)
 			let hue_bar = ui.end_recording()
@@ -8505,15 +8556,28 @@ ui.color_picker = function(id, hue, sat, lum) {
 			ui.play_recording(sl_square)
 			ui.play_recording(hue_bar)
 		ui.end_h()
-		ui.h(0, 0, 's')
+		ui.h(0, ui.sp(), 's')
 			ui.label(id+'.input_hsl', 'HSL', .5)
 			let s =
 				dec(hue)+'\u00B0, '+
 				dec(sat*100)+'%, '+
 				dec(lum*100)+'%'
-			ui.input(id+'.input_hsl', s, 1)
+			if (!ui.focused(id+'.input_hsl'))
+				ui.state(id+'.input_hsl').text = s
+			let s1 = ui.input(id+'.input_hsl', s, 1)
+			if (ui.focused(id+'.input_hsl') && s1 != s) {
+				let m = s1.match(HSL_RE)
+				if (m) {
+					hue = clamp(num(m[1])      , 0, 360)
+					sat = clamp(num(m[2]) / 100, 0, 1)
+					lum = clamp(num(m[3]) / 100, 0, 1)
+					ui.state(id+'.hb').hue = hue
+					ui.state(id+'.sl').sat = sat
+					ui.state(id+'.sl').lum = lum
+				}
+			}
 		ui.end_h()
-		ui.h(0, 0, 's')
+		ui.h(0, ui.sp(), 's')
 			ui.label(id+'.input_rgb', 'HEX', .5)
 			let hex = hsl_to_rgb_hex(hue, sat, lum)
 			// keep the box in sync with hue_bar/sat_lum_square while the user

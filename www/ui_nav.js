@@ -131,7 +131,6 @@ Field attributes:
 	vlookup:
 
 		lookup_rowset_name: rowset to look up values of this field into.
-		lookup_nav     : nav to look up values of this field into.
 		lookup_cols    : field(s) in lookup_nav to look up values of local_cols into.
 		local_cols     : field(s) in this nav to get values from to lookup in lookup_nav.
 		display_col    : field in lookup_nav to use as display value of this field.
@@ -1113,7 +1112,7 @@ ui.nav = function(opt) {
 		e.all_fields[fi] = field
 		e.all_fields_map[name] = field
 
-		init_field_own_lookup_nav(field)
+		init_field_lookup_nav(field)
 
 		if (field.lookup_nav)
 			assign(field, lookup_editor)
@@ -1133,7 +1132,7 @@ ui.nav = function(opt) {
 	function free_field(field) {
 		if (e.free_field)
 			e.free_field(field)
-		free_field_own_lookup_nav(field)
+		free_field_lookup_nav(field)
 	}
 
 	e.on_free_field = function(f) {
@@ -1759,7 +1758,10 @@ ui.nav = function(opt) {
 		return true
 	}
 
-	e.scroll_to_cell = noop
+	e.scroll_to_cell = function(ri, fi) {
+		e.scroll_to_ri = ri
+		e.scroll_to_fi = fi
+	}
 
 	e.scroll_to_focused_cell = function(fallback_to_first_cell) {
 		if (e.focused_row_index != null)
@@ -3210,26 +3212,26 @@ ui.nav = function(opt) {
 
 	// cell lookup display val ------------------------------------------------
 
-	function init_field_own_lookup_nav(field) {
-		if (field.lookup_nav) // linked lookup nav (not owned).
-			return
+	function init_field_lookup_nav(field) {
 		if (field.lookup_rowset_name) {
 			field.lookup_nav = ui.shared_nav({
 				rowset_name     : field.lookup_rowset_name,
 				is_picker       : true,
 				can_focus_cells : false,
+				can_add_rows    : false,
+				can_remove_rows : false,
+				can_change_rows : false,
+				can_move_rows   : false,
 			})
-			field.own_lookup_nav = true
 			field.lookup_nav.ref()
 		}
 	}
 
-	function free_field_own_lookup_nav(field) {
-		if (!field.own_lookup_nav)
+	function free_field_lookup_nav(field) {
+		if (!field.lookup_nav)
 			return
 		field.lookup_nav.unref()
 		field.lookup_nav = null
-		field.own_lookup_nav = null
 	}
 
 	function col_vals_changed(field) {
@@ -4548,7 +4550,7 @@ add_validation_rule({
 
 add_validation_rule({
 	name     : 'lookup',
-	props    : 'lookup_nav lookup_cols local_cols',
+	props    : 'lookup_rowset_name lookup_cols local_cols',
 	vprops   : 'input_value',
 	applies  : (field) => field.lookup_nav,
 	// TODO: multi-col lookup
@@ -4628,39 +4630,6 @@ all_field_types.draw_text = function(s, mode, row, full_width) {
 	if (!mode)
 		return s
 	ui.text('', s, 0, this.align, 'c', full_width ? null : 0)
-	/*
-	cx.font = cx.text_font
-	if (cx.measure) {
-		cx.measured_width = cx.measureText(s).width + this.fixed_width
-		return true
-	}
-	let x
-	if (this.align == 'right')
-		x = cx.cw
-	else if (this.align == 'center')
-		x = round(cx.cw / 2)
-	else
-		x = 0
-	let y = round(cx.ch / 2)
-	cx.textAlign = this.align
-	cx.textBaseline = 'middle'
-	cx.fillStyle = cx.fg_text
-	cx.fillText(s, x, y)
-	if (cx.quicksearch_len) {
-		let s1 = s.slice(0, cx.quicksearch_len)
-		let m = cx.measureText(s)
-		let ascent  = m.actualBoundingBoxAscent
-		let descent = m.actualBoundingBoxDescent
-		let w = ceil(cx.measureText(s1).width)
-		let h = cx.line_height
-		cx.fillStyle = cx.bg_search
-		cx.beginPath()
-		cx.rect(0, round(y - h / 2), w, h)
-		cx.fill()
-		cx.fillStyle = cx.fg_search
-		cx.fillText(s1, x, y)
-	}
-	*/
 	return true
 }
 
@@ -4984,10 +4953,6 @@ lookup_editor.draw_editor = function(id, v, pad_l, pad_r, h) {
 			ui.grid(picker_id, {nav: ln},
 				0, 's', 's', rs.min_w ?? ui.em(24), rs.min_h ?? ui.em(12))
 			ui.resizer(resize_id)
-			// the grid installs scroll_to_cell, so the focused row can only
-			// be revealed after it is drawn.
-			if (opened)
-				ln.scroll_to_focused_cell()
 		}
 
 	ui.end_dropdown()
@@ -5044,7 +5009,9 @@ color.draw_editor = function(id, v, pad_l, pad_r, h) {
 			let resize_id = this.nav.id + '.' + this.name + '.color_popup'
 			let rs = ui.state(resize_id)
 			ui.p(ui.sp2())
-			ui.v(0, ui.sp1(), null, null, rs.min_w ?? ui.em(22), rs.min_h ?? ui.em(22))
+			ui.v(0, ui.sp1(), null, null,
+				rs.min_w ?? ui.em(22),
+				null)
 				let hex = ui.color_picker(picker_id, hue, sat, lum)
 				ui.h(0, ui.sp05(), 'r')
 					ui.default_button(id+'.pick')

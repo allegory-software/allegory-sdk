@@ -72,9 +72,6 @@ function init(id, e) {
 	// cells-view-height-sensitive thus set on frame callback
 	let page_row_count = 1
 
-	// cell to scroll into view on the next frame when geometry is known.
-	let scroll_to_ri, scroll_to_fi
-
 	// mouse state
 	let drag_state, dx, dy, cs
 	let gcol_mover
@@ -231,8 +228,8 @@ function init(id, e) {
 		else if (draw_stage == 'col_group')
 			bg = 'bg0'
 		if (editing) {
-			bg = 'bg0'
-			bgs = grid_focused ? 'item-focused focused' : 'item-focused'
+			bg = 'input'
+			bgs = 'focused'
 		} else if (cell_invalid) {
 			bg = 'item'
 			bgs = grid_focused && cell_focused ? 'item-error item-focused' : 'item-error'
@@ -475,11 +472,6 @@ function init(id, e) {
 
 	}
 
-	e.scroll_to_cell = function(ri, fi) {
-		scroll_to_ri = ri
-		scroll_to_fi = fi
-	}
-
 	// render grid ------------------------------------------------------------
 
 	function group_bar_h() {
@@ -504,7 +496,7 @@ function init(id, e) {
 
 		if (e.editing && e.exit_edit_on_lost_focus
 				&& !ui.focused(id) && !ui.focused(e.editor_id)
-				&& !ui.focus_inside(id))
+				&& !ui.focus_inside(id+'.cells'))
 			e.exit_edit()
 
 		// set keyboard state
@@ -517,6 +509,9 @@ function init(id, e) {
 		// check mouse state ---------------------------------------------------
 
 		reset_mouse_state()
+
+		if (ui.click && ui.hovers(id))
+			ui.focus(id)
 
 		// hover or click on sort icons from colum header
 		for (let field of e.fields) {
@@ -860,15 +855,6 @@ function init(id, e) {
 			cells_w += cw
 		}
 
-		if (scroll_to_ri != null) {
-			if (e.rows[scroll_to_ri] && e.fields[scroll_to_fi]) {
-				let [x, y, w, h] = cell_rect(scroll_to_ri, scroll_to_fi)
-				ui.scroll_to_view_rect(id+'.cells_scrollbox', x, y, w, h)
-			}
-			scroll_to_ri = null
-			scroll_to_fi = null
-		}
-
 		// check hover/drag on cell view
 
 		if (!hit_zone) {
@@ -904,8 +890,6 @@ function init(id, e) {
 		}
 
 		if (drag_state == 'drag' && hit_zone == 'cell') {
-
-			ui.focus(id)
 
 			let row = e.rows[hit_ri]
 			let field = e.fields[hit_fi]
@@ -1218,13 +1202,23 @@ function init(id, e) {
 
 		update_editor()
 
+		if (e.scroll_to_ri != null) {
+			if (e.rows[e.scroll_to_ri] && e.fields[e.scroll_to_fi]) {
+				let [x, y, w, h] = cell_rect(e.scroll_to_ri, e.scroll_to_fi)
+				ui.scroll_to_view_rect(id+'.cells_scrollbox', x, y, w, h)
+			}
+			e.scroll_to_ri = null
+			e.scroll_to_fi = null
+		}
+
 		// draw ----------------------------------------------------------------
 
-		ui.v(fr, 0, align, valign, min_w, min_h)
+		ui.focusable(id)
+		ui.stack(id, fr, align, valign, min_w, min_h)
+		ui.v(1, 0, 's', 's')
 
 			// so that focus_inside() answers for a picker's own widgets.
-			ui.focus_group(null, null, id)
-			ui.focusable(id)
+			ui.focus_group(null, null, id+'.cells')
 
 			// group-by bar
 
@@ -1269,7 +1263,7 @@ function init(id, e) {
 						}
 
 						if (mover && col == hit_gcol) {
-							ui.popup(id+'.moving_gcol_popup', 'handle', group_bar_i, 'il', '[', 0, 0)
+							ui.popup(id+'.moving_gcol_popup', 'drag', group_bar_i, 'il', '[', 0, 0)
 							ui.nohit()
 						}
 
@@ -1425,6 +1419,7 @@ function init(id, e) {
 			ui.end_focus_group()
 
 		ui.end_v()
+		ui.end_stack()
 
 	}
 
