@@ -8428,7 +8428,7 @@ ui.box_widget('hue_bar', {
 		let fr     = fr0     ?? 0
 		let align  = align0  ?? 's'
 		let valign = valign0 ?? 's'
-		let min_w  = min_w0  ?? ui.em(2)
+		let min_w  = min_w0  ?? ui.em(1.5)
 		let min_h  = min_h0  ?? 0
 		ui.clear_box_args()
 
