@@ -8302,9 +8302,9 @@ ui.box_widget('sat_lum_square', {
 		let [dstate, dx, dy, cs] = ui.drag(id)
 		if (dstate == 'drag')
 			ui.focus(id)
-		if (dstate == 'drag' || dstate == 'dragging') {
-			sat = cs.sat
-			lum = cs.lum
+		if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop') {
+			sat = clamp(cs.sat + dx / (cs.w - 1), 0, 1)
+			lum = clamp(cs.lum - dy / (cs.h - 1), 0, 1)
 			ui.state(id).sat = sat
 			ui.state(id).lum = lum
 		}
@@ -8387,10 +8387,12 @@ ui.box_widget('sat_lum_square', {
 		let w = a[i+2]
 		let h = a[i+3]
 
-		let hs = ui.captured(id) || (hit_rect(x, y, w, h) && hover(id))
+		let hs = hit_rect(x, y, w, h) && hover(id)
 		if (hs) {
 			hs.sat = clamp(lerp(ui.mx - x, 0, w-1, 0, 1), 0, 1)
 			hs.lum = clamp(lerp(ui.my - y, h-1, 0, 0, 1), 0, 1)
+			hs.w = w
+			hs.h = h
 		}
 
 		return !!hs
@@ -8432,8 +8434,9 @@ ui.box_widget('hue_bar', {
 		let [dstate, dx, dy, cs] = ui.drag(id)
 		if (dstate == 'drag')
 			ui.focus(id)
-		if (dstate == 'drag' || dstate == 'dragging')
-			ui.state(id).hue = cs.hue
+		if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop')
+			ui.state(id).hue = round(clamp(
+				cs.hue + dy / (cs.h - 1) * 360, 0, 360))
 
 		if (ui.focused(id)) {
 			let step = ui.keydown('arrowup') && -1 || ui.keydown('arrowdown') && 1
@@ -8497,10 +8500,11 @@ ui.box_widget('hue_bar', {
 		let w = a[i+2]
 		let h = a[i+3]
 
-		let hs = ui.captured(id) || (hit_rect(x, y, w, h) && hover(id))
+		let hs = hit_rect(x, y, w, h) && hover(id)
 		if (hs) {
 			let hue = round(clamp(lerp(ui.my - y, 0, h - 1, 0, 360), 0, 360))
 			hs.hue = hue
+			hs.h = h
 			return true
 		}
 	},
