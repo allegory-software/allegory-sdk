@@ -7984,16 +7984,16 @@ ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 
 	let sel_day = s.day
 	let hit_day = num(ui.hit_match(id+'.day.'))
-	let day_changed
+	let clicked_day
 	if (hit_day) {
 		ui.hover(id).day = hit_day
 		let [dstate] = ui.drag(id+'.day.'+hit_day)
 		if (dstate == 'drag') {
 			ui.focus(id)
+			clicked_day = true
 			if (hit_day != sel_day) {
 				sel_day = hit_day
 				s.day = sel_day
-				day_changed = true
 			}
 		}
 	}
@@ -8034,7 +8034,6 @@ ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 			if (mode == 'day') {
 				sel_day = day(sel_day ?? time(), ddays)
 				s.day = sel_day
-				day_changed = true
 				let weeks_from_this_week = days(week(sel_day) - week(time())) / 7
 				ui.scroll_to_view_rect(id, 0,
 					(weeks_from_this_week + 1) * cell_h,
@@ -8072,6 +8071,15 @@ ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 		}
 	}
 
+	let picked_by_key = sel_day != null && ui.focused(id) && ui.keydown('enter')
+	let picked = clicked_day || picked_by_key
+	if (picked) {
+		ui.fire(id, 'item_picked', sel_day)
+		if (picked_by_key)
+			ui.capture_keys()
+		ui.relayout()
+	}
+
 	ui.v(fr, 0, align, valign, min_w, min_h ?? cell_h * 6)
 
 		let now = time()
@@ -8100,7 +8108,7 @@ ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 
 	ui.end_v()
 
-	return day_changed ? sel_day : null
+	return picked ? sel_day : null
 }
 
 // image ---------------------------------------------------------------------
