@@ -385,13 +385,15 @@ ui.rowsets.grid_types = {
 	parent_col: 'parent_id',
 }
 
-grid_types_cols = 'status id color num size count date datetime time timeofday dur active tags progress icon place url phone email password secret pubkey privkey col action parent_id'
+grid_types_cols = 'status date color id num size count datetime time timeofday dur active tags progress icon place url phone email password secret pubkey privkey col action parent_id'
 
 demos.grid_types = `
 ui.m(ui.em(2))
-ui.stack()
+ui.v(0)
 	ui.grid('grid_types', {rowset_name: 'grid_types', cols: grid_types_cols})
-ui.end_stack()
+	ui.h(1)
+	ui.end_h()
+ui.end_v()
 `
 }
 

@@ -126,7 +126,7 @@ SCOPES
 
 WIDGET STATE
 
-	keepalive       (id, [update_fn])    keep another widget alive this frame
+	keepalive       (id, [update_fn])    keep widget alive this frame
 	state           (id) -> state        get widget state
 	state_init      (id, k, v)           set widget state var if widget is alive
 	on_free         (id, free_fn)        add a widget gc hook
