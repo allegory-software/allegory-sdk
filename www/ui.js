@@ -1309,13 +1309,15 @@ ui.fire = function(id, ev, ...args) {
 }
 
 ui.listen = function(id, ev) {
-	ui.state(id) // call update_fn if not already called, which calls fire().
+	// call update_fn if not already called, which calls fire().
+	state_update(id, state_map.get(id))
 	return event_state.get(id+'.'+ev)?.[1]
 }
 
 ui.consume = function(id, ev) {
 	let k = id+'.'+ev
-	ui.state(id) // call update_fn if not already called, which calls fire().
+	// call update_fn if not already called, which calls fire().
+	state_update(id, state_map.get(id))
 	let e = event_state.get(k)
 	if (!e) return
 	event_state.delete(k)
@@ -1427,7 +1429,7 @@ ui.keepalive = keepalive
 // ui.state() or keepalive(). frame_gen keeps it from running twice per
 // relayout pass.
 function state_update(id, s) {
-	let update_fn = s.update
+	let update_fn = s?.update
 	if (!update_fn)
 		return
 	if (s.frame_gen == frame_gen)
@@ -2241,6 +2243,15 @@ register[FOCUS_GROUP] = function(a, i) {
 register[END_FOCUS_GROUP] = function() {
 	let group_i = open_focus_groups.pop()
 	focusables[group_i+FOCUSABLE_END] = focusables.length
+	let id = focusables[group_i+FOCUSABLE_DEFB]
+	if (id != null && ui.keydown('enter')) {
+		let focused_i = focus_find(ui.focused_id)
+		if (focused_i != null && focus_group_of(focused_i) == group_i) {
+			ui.fire(id, 'default_button_click')
+			ui.capture_keys()
+			animate()
+		}
+	}
 }
 
 let is_focus_group = i => focusables[i+FOCUSABLE_ID] == null
@@ -2358,10 +2369,6 @@ ui.focus_first = function(group_id) {
 
 // default button ------------------------------------------------------------
 
-// enter in a single-line input clicks its focus group's default button.
-// only ui.input() marks itself single-line, so a multi-line editable text
-// keeps enter for itself.
-
 let DEFAULT_BUTTON = cmd('default_button')
 
 ui.default_button = function(id) {
@@ -2372,21 +2379,6 @@ register[DEFAULT_BUTTON] = function(a, i) {
 	let group_i = open_focus_groups.at(-1)
 	assert(group_i != null, 'default_button outside a focus group')
 	focusables[group_i+FOCUSABLE_DEFB] = a[i]
-}
-
-// called by ui.button_state()
-function submit_clicked(id) {
-	if (!ui.keydown('enter'))
-		return
-	if (!ui.state(ui.focused_id, 'single_line_input'))
-		return
-	let i = focus_find(ui.focused_id)
-	if (i == null)
-		return
-	let group_i = focus_group_of(i)
-	if (group_i == null)
-		return
-	return focusables[group_i+FOCUSABLE_DEFB] == id
 }
 
 // tab capture ----------------------------------------------------------------
@@ -6284,10 +6276,13 @@ ui.button_stack = function(id, fr, align, valign, min_w, min_h) {
 ui.button_state = function(id) {
 	let cs = ui.capture(id)
 	let hs = hit(id) || (cs && hovers(id))
-	if (ui.focused(id) && (ui.keydown('enter') || ui.keydown(' ')))
+	if (ui.consume(id, 'default_button_click'))
 		return 'click'
-	if (submit_clicked(id))
+	if (ui.focused(id) && (ui.keydown('enter') || ui.keydown(' '))) {
+		if (ui.keydown('enter'))
+			ui.capture_keys()
 		return 'click'
+	}
 	return cs && hs ? ui.clickup ? 'click' : 'active'
 		: hs ? 'hover' : ui.focused(id) ? 'focused' : null
 }
@@ -6514,7 +6509,6 @@ ui.input = function(id, s, fr, w, h) {
 		ui.color('text', ui.focused(id) ? 'focused' : null)
 		s = ui.text(id, s, 1, 'l', 'c', null, w ?? ui.em(12), h, null, true)
 	ui.end_stack()
-	ui.state(id).single_line_input = true
 	return s
 }
 
@@ -6559,8 +6553,11 @@ function list_update(id, s) {
 	}
 	s.focused_item_i = fi
 	s.focused_item_changed = before_fi != fi ? fi_changed : false
-	if (fi_changed == 'click' || (fi != null && ui.focused(id) && ui.keydown('enter')))
+	let has_enter = fi != null && ui.focused(id) && ui.keydown('enter')
+	if (fi_changed == 'click' || has_enter)
 		ui.fire(id, 'item_picked', fi)
+	if (has_enter)
+		ui.capture_keys()
 }
 function hvlist(hv, id, items, fr, align, valign,
 	item_align, item_valign, item_fr,
