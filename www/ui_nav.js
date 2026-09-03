@@ -4948,11 +4948,9 @@ lookup_editor.draw_editor = function(id, v, pad_l, pad_r, h) {
 				if (ln_row)
 					ln.focus_cell(ln.row_index(ln_row), true)
 			}
-			let resize_id = this.nav.id + '.' + this.name + '.lookup_popup'
-			let rs = ui.state(resize_id)
-			ui.grid(picker_id, {nav: ln},
-				0, 's', 's', rs.min_w ?? ui.em(24), rs.min_h ?? ui.em(12))
-			ui.resizer(resize_id)
+			let resize_id = picker_id+'.resizer'
+			ui.grid(picker_id, {nav: ln}, 0, 's', 's')
+			ui.resizer(resize_id, ui.em(24), ui.em(12))
 		}
 
 	ui.end_dropdown()
@@ -5006,12 +5004,9 @@ color.draw_editor = function(id, v, pad_l, pad_r, h) {
 
 		if (open) {
 			let [hue, sat, lum] = opened ? hex_to_hsl(v || '#808080') : []
-			let resize_id = this.nav.id + '.' + this.name + '.color_popup'
-			let rs = ui.state(resize_id)
+			let resize_id = picker_id+'.resizer'
 			ui.p(ui.sp2())
-			ui.v(0, ui.sp1(), null, null,
-				rs.min_w ?? ui.em(22),
-				null)
+			ui.v(0, ui.sp1())
 				let hex = ui.color_picker(picker_id, hue, sat, lum)
 				ui.h(0, ui.sp05(), 'r')
 					ui.default_button(id+'.pick')
@@ -5025,7 +5020,7 @@ color.draw_editor = function(id, v, pad_l, pad_r, h) {
 					}
 				ui.end_h()
 			ui.end_v()
-			ui.resizer(resize_id)
+			ui.resizer(resize_id, ui.em(22), null, 'x')
 		}
 
 	ui.end_dropdown()

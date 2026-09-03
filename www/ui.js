@@ -315,7 +315,7 @@ OTHER
 
 	drag_point      (id, x, y, color)
 	polyline        (id, points, closed, fill_color, fill_color_state, stroke_color, stroke_color_state)
-	resizer         (ct_id, id)
+	resizer         (id, default_w, default_h, axis, max_w, max_h)
 
 SCREEN SHARING
 
@@ -7013,6 +7013,8 @@ ui.dropdown = function(id, side) {
 	dd_open = open
 	dd_picker_id = id+'.picker'
 
+	keepalive(dd_picker_id+'.resizer')
+
 	if (open) {
 		ui.popup(id+'.popup', 'open', null, side ?? 'il', 's', 0, 0,
 			'constrain change_side solid')
@@ -7099,9 +7101,11 @@ ui.list_dropdown = function(id, items, fr, max_w, min_w, min_h) {
 
 		if (open) {
 			ui.state_init(picker_id, 'focused_item_i', sel_i)
-			// same padding as the value above, so the items are as tall.
-			ui.list(picker_id, items, 0, 's', 's', 'l', 'c', 0, max_w,
-				null, ui.sp(), ui.sp(), ui.sp())
+			ui.scrollbox(picker_id+'.sb', 1, 'hide', 'auto', 's', 's')
+				ui.list(picker_id, items, 0, 's', 's', 'l', 'c', 0, max_w,
+					null, ui.sp(), ui.sp(), ui.sp())
+			ui.end_scrollbox()
+			ui.resizer(picker_id+'.resizer', null, ui.em(16), 'y')
 		}
 
 	ui.end_dropdown()
@@ -7133,11 +7137,8 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 	let oy = s.oy ?? (valign_start ? y0 : -y0)
 	if (dstate == 'drag') { cs.ox0 = ox; cs.oy0 = oy }
 	if (cs) { ox = cs.ox0 + dx; oy = cs.oy0 + dy }
-	let min_w = s.min_w
-	let min_h = s.min_h
-
 	let i = ui.popup(id, 'toolbox', target_i ?? 'screen',
-		valign_start ? 'it' : 'ib', align, min_w, min_h, 'constrain solid', null,
+		valign_start ? 'it' : 'ib', align, null, null, 'constrain solid', null,
 		ox, oy
 	)
 		ts.popups.set(id, i)
@@ -7252,33 +7253,57 @@ let cursors = {
 	bottom_left  : 'nesw-resize',
 }
 
+function resize_side(side, axis) {
+	if (axis == 'x')
+		return (side == 'right' || side == 'top_right'
+			|| side == 'bottom_right') ? 'right' : null
+	if (axis == 'y')
+		return (side == 'bottom' || side == 'bottom_left'
+			|| side == 'bottom_right') ? 'bottom' : null
+	return (side == 'right' || side == 'bottom'
+		|| side == 'bottom_right') ? side : null
+}
+
 ui.widget('resizer', {
-	create: function(cmd, ct_id, id) {
-		id = id || ct_id+'.resizer'
+	create: function(cmd, id, default_w, default_h, axis, max_w, max_h) {
 		keepalive(id)
-		return ui_cmd_box(cmd, 1, 's', 's', 0, 0, id, ct_id)
-	},
-	position: function(a, i, axis, x, w) {
-		a[i+0+axis] = x
-		a[i+2+axis] = w
-	},
-	translate: function(a, i, dx, dy) {
-		a[i+0] += dx
-		a[i+1] += dy
+		let ct_i = ui.ct_i()
+		let s = ui.state(id)
+		let [dstate, dx, dy, cs] = ui.drag(id)
+		if (dstate == 'hover')
+			ui.set_cursor(cursors[cs.side])
+		if (dstate == 'drag') {
+			let side = cs.side
+			if (side == 'right' || side == 'bottom_right')
+				cs.w0 = cs.measured_w
+			if (side == 'bottom' || side == 'bottom_right')
+				cs.h0 = cs.measured_h
+		}
+		if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop') {
+			let side = cs.side
+			ui.set_cursor(cursors[side])
+			if (side == 'right' || side == 'bottom_right')
+				s.w = min(cs.w0 + dx, max_w ?? 1/0)
+			if (side == 'bottom' || side == 'bottom_right')
+				s.h = min(cs.h0 + dy, max_h ?? 1/0)
+		}
+		a[ct_i+0] = s.w ?? default_w ?? a[ct_i+0]
+		a[ct_i+1] = s.h ?? default_h ?? a[ct_i+1]
+		return ui_cmd(cmd, ui.rel_ct_i(), id, axis ?? 'xy')
 	},
 	hit: function(a, i) {
 
-		let x = a[i+0]
-		let y = a[i+1]
-		let w = a[i+2]
-		let h = a[i+3]
-
-		let id    = a[i+BOX_ARGS+0]
-		let ct_id = a[i+BOX_ARGS+1]
+		let ct_i = i+a[i+0]
+		let id   = a[i+1]
+		let axis = a[i+2]
+		let x = a[ct_i+0]
+		let y = a[ct_i+1]
+		let w = a[ct_i+2]
+		let h = a[ct_i+3]
 
 		let borders = 2
 
-		let side = hit_sides(ui.mx, ui.my, 5, 5, x, y, w, h)
+		let side = resize_side(hit_sides(ui.mx, ui.my, 5, 5, x, y, w, h), axis)
 		if (side) {
 			let hs = hover(id)
 			hs.side = side
@@ -7288,41 +7313,7 @@ ui.widget('resizer', {
 			hs.measured_h = h + borders
 		}
 
-		let [dstate, dx, dy] = ui.drag(id)
-		let hs = hovers(id)
-		let cs = captured(id)
-		if (dstate == 'hover') {
-			let side = hs.side
-			ui.set_cursor(cursors[side])
-			return true
-		}
-		if (dstate == 'drag') {
-			let side = hs.side
-			ui.set_cursor(cursors[side])
-			cs.side = side
-			if (side == 'right' || side == 'bottom_right') {
-				let min_w = hs.measured_w
-				cs.min_w = min_w
-			}
-			if (side == 'bottom' || side == 'bottom_right') {
-				let min_h = hs.measured_h
-				cs.min_h = min_h
-			}
-		}
-		if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop') {
-			let side = cs.side
-			ui.set_cursor(cursors[side])
-			if (side == 'right' || side == 'bottom_right') {
-				let min_w = cs.min_w
-				ui.state(ct_id).min_w = min_w + dx
-			}
-			if (side == 'bottom' || side == 'bottom_right') {
-				let min_h = cs.min_h
-				ui.state(ct_id).min_h = min_h + dy
-			}
-		}
-
-		return !!dstate
+		return ui.captured_id == id || ui.captured_id == null && !!side
 
 	},
 })
