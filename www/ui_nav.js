@@ -5041,8 +5041,7 @@ percent.draw = function(p, mode, row, full_width) {
 	if (!mode)
 		return s
 	let f = clamp(p / this.scale / 100, 0, 1)
-	ui.m(ui.sp1(), 0)
-	ui.stack('', 0, 's', 'c', 0, ui.em(1))
+	ui.stack('', 0, 's', 'c', 0, 0)
 		ui.h(0, 0, 's', 's')
 			ui.stack('', f, 's', 's')
 				ui.bb('bg3')
