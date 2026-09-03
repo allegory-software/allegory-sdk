@@ -2182,12 +2182,13 @@ function hit_frame(recs, popups) {
 
 // tab focusing --------------------------------------------------------------
 
-let FOCUSABLE_SLOTS     = 5
-let FOCUSABLE_ID        = 0
-let FOCUSABLE_TAB_ORDER = 1
-let FOCUSABLE_END       = 2 // groups only
-let FOCUSABLE_TRAP      = 3 // groups only
-let FOCUSABLE_DEFB      = 4 // groups only: default button id
+let FOCUSABLE_SLOTS          = 6
+let FOCUSABLE_ID             = 0
+let FOCUSABLE_TAB_ORDER      = 1
+let FOCUSABLE_END            = 2 // groups only
+let FOCUSABLE_TRAP           = 3 // groups only
+let FOCUSABLE_DEFAULT_BUTTON = 4 // groups only: default button id
+let FOCUSABLE_CANCEL_BUTTON  = 5
 
 let focusables = [] // FOCUSABLE_SLOTS per entry, in tab order
 ui.focusables = focusables
@@ -2228,7 +2229,7 @@ ui.end_focus_group = function() {
 // must happen on register phase because that's when secondary recordings
 // are already in the layout in the right order.
 register[FOCUSABLE] = function(a, i) {
-	focusables.push(a[i], a[i+1], 0, 0, null)
+	focusables.push(a[i], a[i+1], 0, 0, null, null)
 }
 
 register[FOCUS_GROUP] = function(a, i) {
@@ -2237,17 +2238,20 @@ register[FOCUS_GROUP] = function(a, i) {
 	let id = a[i+2]
 	if (id != null)
 		focus_group_map.set(id, group_i)
-	focusables.push(null, a[i], 0, a[i+1], null)
+	focusables.push(null, a[i], 0, a[i+1], null, null)
 }
 
 register[END_FOCUS_GROUP] = function() {
 	let group_i = open_focus_groups.pop()
 	focusables[group_i+FOCUSABLE_END] = focusables.length
-	let id = focusables[group_i+FOCUSABLE_DEFB]
-	if (id != null && ui.keydown('enter')) {
+	let id = ui.keydown('enter')
+		? focusables[group_i+FOCUSABLE_DEFAULT_BUTTON] : null
+	if (id == null && ui.keydown('escape'))
+		id = focusables[group_i+FOCUSABLE_CANCEL_BUTTON]
+	if (id != null) {
 		let focused_i = focus_find(ui.focused_id)
 		if (focused_i != null && focus_group_of(focused_i) == group_i) {
-			ui.fire(id, 'default_button_click')
+			ui.fire(id, 'click')
 			ui.capture_keys()
 			animate()
 		}
@@ -2369,16 +2373,22 @@ ui.focus_first = function(group_id) {
 
 // default button ------------------------------------------------------------
 
-let DEFAULT_BUTTON = cmd('default_button')
+let GROUP_BUTTON = cmd('group_button')
 
 ui.default_button = function(id) {
-	ui_cmd(DEFAULT_BUTTON, id)
+	ui_cmd(GROUP_BUTTON, id, FOCUSABLE_DEFAULT_BUTTON)
 }
 
-register[DEFAULT_BUTTON] = function(a, i) {
+ui.cancel_button = function(id) {
+	ui_cmd(GROUP_BUTTON, id, FOCUSABLE_CANCEL_BUTTON)
+}
+
+register[GROUP_BUTTON] = function(a, i) {
 	let group_i = open_focus_groups.at(-1)
-	assert(group_i != null, 'default_button outside a focus group')
-	focusables[group_i+FOCUSABLE_DEFB] = a[i]
+	assert(group_i != null,
+		'default_button/cancel_button outside a focus group')
+	let button_slot = a[i+1]
+	focusables[group_i+button_slot] = a[i]
 }
 
 // tab capture ----------------------------------------------------------------
@@ -6276,7 +6286,7 @@ ui.button_stack = function(id, fr, align, valign, min_w, min_h) {
 ui.button_state = function(id) {
 	let cs = ui.capture(id)
 	let hs = hit(id) || (cs && hovers(id))
-	if (ui.consume(id, 'default_button_click'))
+	if (ui.consume(id, 'click'))
 		return 'click'
 	if (ui.focused(id) && (ui.keydown('enter') || ui.keydown(' '))) {
 		if (ui.keydown('enter'))
