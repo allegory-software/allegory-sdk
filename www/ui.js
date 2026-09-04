@@ -868,8 +868,10 @@ ui.resize = resize_canvas
 window.addEventListener('resize', resize_canvas)
 
 let raf_id
+let frame_no = 0
 function raf_animate() {
 	raf_id = null
+	frame_no++
 	let t0 = clock_ms()
 	redraw_all()
 	let t1 = clock_ms()
@@ -4789,19 +4791,29 @@ ui.line_gap = function(s) {
 }
 ui.lg = ui.line_gap
 
+let last_font_str
 function set_font(a, i) {
 	font = a[i]
-	cx.font = font_weight + ' ' + font_size + 'px ' + font
+	let s = font_weight + ' ' + font_size + 'px ' + font
+	if (s == last_font_str) return
+	last_font_str = s
+	cx.font = s
 }
 
 function set_font_size(a, i) {
 	font_size = a[i]
-	cx.font = font_weight + ' ' + font_size + 'px ' + font
+	let s = font_weight + ' ' + font_size + 'px ' + font
+	if (s == last_font_str) return
+	last_font_str = s
+	cx.font = s
 }
 
 function set_font_weight(a, i) {
 	font_weight = a[i]
-	cx.font = font_weight + ' ' + font_size + 'px ' + font
+	let s = font_weight + ' ' + font_size + 'px ' + font
+	if (s == last_font_str) return
+	last_font_str = s
+	cx.font = s
 }
 
 function set_line_gap(a, i) {
@@ -4929,12 +4941,9 @@ function see(m) {
 
 let measure_text; {
 let tm = map()
-let TSM = {}
 measure_text = function(cx, s) {
 	let fm = tm.get(cx.font)
-	if (!fm) { fm = map(); tm.set(cx.font, fm); fm.set(TSM, map()) }
-	let tsm = fm.get(TSM)
-	tsm.set(s, performance.now())
+	if (!fm) { fm = map(); tm.set(cx.font, fm) }
 	let m = fm.get(s)
 	if (!m) {
 		m = cx.measureText(s)
@@ -4944,18 +4953,16 @@ measure_text = function(cx, s) {
 			m.fontBoundingBoxDescent = 1.3 * m.actualBoundingBoxDescent
 		}
 	}
+	m._frame_no = frame_no
 	return m
 }
 ui.measure_text = measure_text
 
-runevery(120, function() {
-	let t = performance.now()
+runevery(60 * 2, function() {
 	let n = 0
 	for (let fm of tm.values()) {
-		let tsm = fm.get(TSM)
-		for (let [s, ts] of tsm) {
-			if (t - ts > 120) {
-				tsm.delete(s)
+		for (let [s, m] of fm) {
+			if (frame_no - m._frame_no > 60 * 60 * 4) {
 				fm.delete(s)
 				n++
 			}
