@@ -83,7 +83,7 @@ MOUSE STATE
 	mx0 my0         = mouse position when started dragging
 	update_mouse    ()   update mouse coords to current transform
 	hit_rect        (x, y, w, h) -> t|f
-	hit_bb          (x1, y1, x2, y2) -> t|f  ; bb means boundingbox
+	hit_bb          (x1, y1, x2, y2) -> t|f  ; bb means bounding box
 	hit_box         (a, i) -> t|f
 
 	captured_id     = id of widget that captured the mouse
@@ -1302,7 +1302,7 @@ ui.key_changes = () => key_downs.size + key_ups.size
 // events are id-based state are kept for this and next frame only, so that
 // a widget that listens to an event can still catch it if the widgets that
 // fired it appears later in the frame.
-let event_state = map() // {id.ev->[fire_frame_gen, args]}
+let event_state = map() // {id.ev->[frame_gen, args]}
 
 ui.fire = function(id, ev, ...args) {
 	event_state.set(id+'.'+ev, [frame_gen, args])
@@ -2718,8 +2718,8 @@ function redraw_all() {
 		key_ups.clear()
 		ui.key_events.length = 0
 
-		for (let [k, e] of event_state)
-			if (e[0] < frame_gen)
+		for (let [k, es] of event_state)
+			if (es[0] < frame_gen)
 				event_state.delete(k)
 
 		// updates can run again now that they can't see the same edge state.
@@ -3093,7 +3093,6 @@ const CMD_END = cmd('end')
 
 ui.end = function(cmd) {
 	end_scope()
-	// bug: scroll_to_view_next_box() called but no box was recorded.
 	assert(!scroll_to_view_next, 'focusable widget recorded no box')
 	let i = assert(ct_stack.pop(), 'end command outside container')
 	if (cmd && a[i-1] != cmd)
@@ -9015,33 +9014,6 @@ ui.live_move_mixin = function(e) {
 
 ui.debug_pane = function() {
 
-	if (0) {
-	ui.v(0, 0, 's', 's', 200)
-		ui.border('l', 'intense')
-
-		function fgr(graph_name, fr) {
-			ui.stack('', 0)
-				ui.bb('bg2')
-				ui.color('text')
-				ui.p(ui.sp())
-				ui.text('', graph_name, 0, 'l')
-			ui.end_stack()
-			ui.frame_graph(fr)
-		}
-		fgr('frame_time')
-		fgr('frame_make_time')
-		fgr('frame_layout_time')
-		fgr('frame_draw_time')
-		fgr('frame_hit_time')
-		if (1) {
-			fgr('frame_pack_time')
-			fgr('frame_compression')
-			fgr('frame_bandwidth')
-			fgr('frame_unpack_time')
-		}
-	ui.end_v()
-	}
-
 	if (1) {
 	ui.v(0, 0, 's', 's', 200)
 		ui.border('l', 'intense')
@@ -9068,6 +9040,8 @@ ui.debug_pane = function() {
 					ui.text('', id, 0, 'l')
 					for (let [k, v] of entries(s)) {
 						if (v === undefined)
+							continue
+						if (k == 'frame_gen')
 							continue
 						ui.ml(ui.sp2())
 						ui.h(0, ui.sp())
