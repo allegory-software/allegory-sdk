@@ -4742,11 +4742,6 @@ date.to_input = function(v) {
 	return format_date(v, null, this.precision)
 }
 
-let inh_draw = all_field_types.draw
-date.draw = function(v, mode) {
-	return inh_draw.call(this, v, mode)
-}
-
 let dt = assign({}, date, {precision: 'm', w: 140})
 field_types.datetime = dt
 

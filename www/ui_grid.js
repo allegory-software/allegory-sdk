@@ -14,6 +14,8 @@ const {
 	cx,
 } = ui
 
+ui.grid_fast_path = true
+
 /* icon aliases --------------------------------------------------------------
 
 The grid names its icons; the codepoints live here so that loading a
@@ -45,6 +47,79 @@ ui.widget('treegrid_indent', {
 		cx.beginPath()
 		cx.rect(x, y, w, h)
 		cx.fill()
+	},
+})
+
+// draw one whole grid column in a single command.
+// each visible cell gets (bg, bg state, fg, text).
+ui.widget('fast_field', {
+	create: ui.cmd,
+	translate: function(a, i, dx, dy) {
+		a[i+0] += dx
+		a[i+1] += dy
+	},
+	draw: function(a, i) {
+		let x        = a[i+0]
+		let y0       = a[i+1]
+		let w        = a[i+2]
+		let cell_h   = a[i+3]
+		let pad      = a[i+4]
+		let align    = a[i+5]
+		let baseline = a[i+6]
+		let n        = a[i+7]
+
+		// backgrounds and borders, which span the whole cell and so
+		// have to be drawn before the text clip narrows it to the padding.
+		let k = i + 8
+		for (let ri = 0; ri < n; ri++) {
+			let bg   = a[k+0]
+			let bgs  = a[k+1]
+			k += 4
+			let y = y0 + ri * cell_h
+			let fg_theme
+			if (bg) {
+				let c = ui.bg_color_hsl(bg, bgs)
+				let dark = c[5] ?? c[3] < .5
+				fg_theme = dark ? 'dark' : 'light'
+				cx.fillStyle = c[0]
+				cx.fillRect(x, y, w, cell_h)
+			}
+			cx.strokeStyle = ui.border_color('light', null, fg_theme)
+			cx.beginPath()
+			cx.moveTo(x, y + cell_h - .5)
+			cx.lineTo(x + w, y + cell_h - .5)
+			cx.stroke()
+		}
+
+		// text, cut at the padded box like ui.text() cuts it in a slow cell.
+		cx.save()
+		cx.beginPath()
+		cx.rect(x + pad, y0, w - 2 * pad, n * cell_h)
+		cx.clip()
+
+		cx.textAlign = align
+		let anchor_x =
+			align == 'right' ? x + w - pad :
+			align == 'center' ? x + w / 2 :
+			x + pad
+		k = i + 8
+		for (let ri = 0; ri < n; ri++) {
+			let bg   = a[k+0]
+			let bgs  = a[k+1]
+			let fg   = a[k+2]
+			let text = a[k+3]
+			k += 4
+			if (text) {
+				let fg_theme
+				if (bg) {
+					let c = ui.bg_color_hsl(bg, bgs)
+					fg_theme = (c[5] ?? c[3] < .5) ? 'dark' : 'light'
+				}
+				cx.fillStyle = ui.fg_color(fg, null, fg_theme)
+				cx.fillText(text, anchor_x, y0 + ri * cell_h + baseline)
+			}
+		}
+		cx.restore()
 	},
 })
 
@@ -174,15 +249,10 @@ function init(id, e) {
 		return row.depth ?? 0
 	}
 
-	function draw_cell_at(a, row, field, ri, fi, x, y, w, h, draw_stage) {
-
+	let CS = {}
+	function cell_state(row, field, ri, draw_stage) {
 		let input_val = e.cell_input_val(row, field)
 
-		// static geometry
-		let bx = e.cell_border_v_width
-		let by = e.cell_border_h_width
-
-		// state
 		let grid_focused = focused
 		let row_focused = e.focused_row == row
 		let cell_focused = row_focused && (!e.can_focus_cells || field == e.focused_field)
@@ -195,32 +265,7 @@ function init(id, e) {
 		let sel_fields = e.selected_rows.get(row)
 		let selected = (isobject(sel_fields) ? sel_fields.has(field) : sel_fields) || false
 		let editing = e.editing && cell_focused
-		let hovering = hit_zone == 'cell' && hit_ri == ri && hit_fi == fi
-		let full_width = !draw_stage
-			&& ((row_focused && field == e.focused_field) || hovering)
-			&& (field.align == 'left' || !field_has_indent(field))
 
-		let indent_x = 0
-		let collapsed
-		let has_children
-		if (field_has_indent(field)) {
-			indent_x = indent_offset(row_indent(row))
-			has_children = (row.child_rows?.length ?? 0) > 0
-			if (has_children)
-				collapsed = !!row.collapsed
-			let s = row_move_state
-			if (s) {
-				// show minus sign on adopting parent.
-				if (row == s.hit_parent_row && collapsed == null)
-					collapsed = false
-
-				// shift indent on moving rows so it gets under the adopting parent.
-				if (draw_stage == 'row_move')
-					indent_x += s.hit_indent_x - s.indent_x
-			}
-		}
-
-		// background & text color
 		let bg, bgs
 
 		if (draw_stage == 'col_move' || draw_stage == 'row_move')
@@ -272,6 +317,48 @@ function init(id, e) {
 			fg = 'label'
 		else
 			fg = 'text'
+
+		CS.input_val = input_val
+		CS.bg = bg
+		CS.bgs = bgs
+		CS.fg = fg
+		CS.editing = editing
+		CS.is_null = is_null
+		CS.is_empty = is_empty
+		return CS
+	}
+
+	function draw_cell_at(a, row, field, ri, fi, x, y, w, h, draw_stage) {
+
+		let cs = cell_state(row, field, ri, draw_stage)
+		let input_val = cs.input_val
+		let bg = cs.bg, bgs = cs.bgs, fg = cs.fg, editing = cs.editing
+
+		let row_focused = e.focused_row == row
+		let hovering = hit_zone == 'cell' && hit_ri == ri && hit_fi == fi
+		let full_width = !draw_stage
+			&& ((row_focused && field == e.focused_field) || hovering)
+			&& (field.align == 'left' || !field_has_indent(field))
+
+		let indent_x = 0
+		let collapsed
+		let has_children
+		if (field_has_indent(field)) {
+			indent_x = indent_offset(row_indent(row))
+			has_children = (row.child_rows?.length ?? 0) > 0
+			if (has_children)
+				collapsed = !!row.collapsed
+			let s = row_move_state
+			if (s) {
+				// show minus sign on adopting parent.
+				if (row == s.hit_parent_row && collapsed == null)
+					collapsed = false
+
+				// shift indent on moving rows so it gets under the adopting parent.
+				if (draw_stage == 'row_move')
+					indent_x += s.hit_indent_x - s.indent_x
+			}
+		}
 
 		// drawing
 		let sp2 = ui.sp2()
@@ -362,7 +449,24 @@ function init(id, e) {
 			if (foc_cell && hit_cell && hit_ri == foc_ri && hit_fi == foc_fi)
 				foc_cell = null
 
+			let edit_row_wide = e.editing && !e.can_focus_cells
+				&& e.focused_row_index >= ri1 && e.focused_row_index < ri2
+
+			for (let fi = fi1; fi < fi2; fi++) {
+				let field = e.fields[fi]
+				if (field._fast_draw == null)
+					field._fast_draw = field.draw == ui.all_field_types.draw
+						&& !field.lookup_nav && !field.null_lookup_col
+				field._fast_now = ui.grid_fast_path
+					&& field._fast_draw
+					&& !field_has_indent(field)
+					&& field != e.quicksearch_field
+					&& fi != hit_fi
+					&& fi != foc_fi
+					&& !edit_row_wide
+			}
 		}
+
 		let skip_moving_col = drag_op == 'col_move' && draw_stage == 'col'
 
 		for (let ri = ri1; ri < ri2; ri++) {
@@ -386,6 +490,10 @@ function init(id, e) {
 					continue
 
 				let field = e.fields[fi]
+
+				if (!draw_stage && field._fast_now)
+					continue
+
 				let x = field._x
 				let y = ry
 				let w = field._w
@@ -397,6 +505,35 @@ function init(id, e) {
 			if (row.removed)
 				draw_row_strike_line(row, ri, rx, ry, rw, rh, draw_stage)
 
+		}
+
+		if (!draw_stage) {
+			let sp2 = ui.sp2()
+			let m = ui.measure_text(cx, 'M')
+			let text_h = ceil(m.fontBoundingBoxAscent + m.fontBoundingBoxDescent)
+			let baseline = max(0, round((cell_h - text_h) / 2)) + round(m.fontBoundingBoxAscent)
+			for (let fi = fi1; fi < fi2; fi++) {
+				let field = e.fields[fi]
+				if (!field._fast_now)
+					continue
+				let align = field.align || 'left'
+				let cmd_i = ui.fast_field(field._x, ri1 * cell_h, field._w, cell_h,
+					sp2, align, baseline, ri2 - ri1)
+				for (let ri = ri1; ri < ri2; ri++) {
+					let row = rows[ri]
+					let cs = cell_state(row, field, ri, draw_stage)
+					let fg = cs.fg
+					let text
+					if (cs.is_null) {
+						text = field.null_text ?? ''
+					} else if (cs.is_empty) {
+						text = field.empty_text ?? ''
+					} else {
+						text = field.to_text(cs.input_val)
+					}
+					ui.cmd_add_args(cmd_i, cs.bg, cs.bgs, fg, text)
+				}
+			}
 		}
 
 		if (foc_cell && foc_ri >= ri1 && foc_ri < ri2 && foc_fi >= fi1 && foc_fi <= fi2) {

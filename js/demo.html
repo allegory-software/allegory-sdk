@@ -200,7 +200,10 @@ ui.end_sb()
 let fields = [{name: 'id', align: 'right', w: 40}]
 let rows = []
 for (let i = 1; i < 100; i++)
-	fields.push({name: 'c'+i, label: 'Field No. '+i, w: 40})
+	fields.push({
+		name: 'c'+i, label: 'Field No. '+i, w: 40,
+		align: i % 2 ? 'right' : 'left',
+	})
 for (let j = 1; j < 100; j++) {
 	let row = [j]
 	for (let i = 1; i <= fields.length; i++)
