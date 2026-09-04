@@ -801,7 +801,20 @@ function tb_contents(tb) { // tb: toolbox id, prefixes the ids in here
 				ui.text('', 'hover me', 1, 'c')
 				if (ui.hit(tb+'_tt')) {
 					ui.m(10)
-					ui.popup(tb+'_ttp', 'tooltip', null, 'r', 'c', 120, 40)
+					ui.popup(tb+'_ttp', 'error', null, 'r', 'c', 120, 40)
+						ui.shadow(1, 1, 3, 0, false, ui.dark() ? 'black' : '#ccc')
+						ui.bb_tooltip('bg2', null, 'intense', null, ui.sp1())
+						ui.p(ui.sp2(), ui.sp())
+						ui.text('', tb+' error')
+					ui.end_popup()
+				}
+			ui.end_stack()
+			ui.stack(tb+'_tt2', 0, 'c', 'c', 100, 30)
+				ui.bb('bg2', null, 1, 'intense')
+				ui.text('', 'hover me', 1, 'c')
+				if (ui.hit(tb+'_tt2')) {
+					ui.m(10)
+					ui.popup(tb+'_ttp2', 'tooltip', null, 'r', 'c', 120, 40)
 						ui.shadow(1, 1, 3, 0, false, ui.dark() ? 'black' : '#ccc')
 						ui.bb_tooltip('bg2', null, 'intense', null, ui.sp1())
 						ui.p(ui.sp2(), ui.sp())

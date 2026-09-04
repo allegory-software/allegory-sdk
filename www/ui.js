@@ -1789,41 +1789,29 @@ ui.disas = function(a) {
 // z-layers ------------------------------------------------------------------
 
 let layer_map = {} // {name->layer}
-let layer_arr = [] // [layer1,...] in creation order
 
-function ui_layer(name, index, flags) {
-	if (!name)
-		return current_layer
-	let layer = layer_map[name]
-	if (!layer) {
-		layer = obj()
-		layer.name = assert(name)
-		layer_map[name] = layer
-		layer_arr.push(layer)
-		layer.i = layer_arr.length-1
-		layer.paint_order = index ?? 0
-		layer.root  = !!flags?.includes('root')
-		layer.modal = !!flags?.includes('modal')
-	}
+ui.layer = function(name, z_index, flags) {
+	assert(!layer_map[name])
+	let layer = obj()
+	layer.name = assert(name)
+	layer_map[name] = layer
+	layer.z_index = z_index ?? 0 // z_index amongst layers, i.e. z_index band
+	layer.root  = !!flags?.includes('root')
+	layer.modal = !!flags?.includes('modal')
 	return layer
 }
-ui.layer = ui_layer
 
-// each layer owns paint_order_band consecutive paint_order values and a
-// popup's z_index picks one of them.
-let paint_order_band = 0x10000
+let z_index_band = 0x10000 // 64k popups per layer
 
-let POPUPS_SLOTS       = 4
-let POPUPS_PAINT_ORDER = 0
-let POPUPS_REC_I       = 1
-let POPUPS_CT_I        = 2
-let POPUPS_INNER       = 3
+let POPUPS_SLOTS   = 4
+let POPUPS_Z_INDEX = 0
+let POPUPS_REC_I   = 1
+let POPUPS_CT_I    = 2
+let POPUPS_INNER   = 3
 
 let popups_freelist = array_freelist()
 
 let root_popups = []
-// [current_popups, i past the popup's END, a] per popup that owns popups.
-let popups_stack = []
 let current_popups = root_popups
 
 function free_inner_popups(popups) {
@@ -1840,58 +1828,36 @@ function free_inner_popups(popups) {
 function reset_popups() {
 	free_inner_popups(root_popups)
 	root_popups.length = 0
-	popups_stack.length = 0
 	current_popups = root_popups
 }
 
-function add_popup(popups, paint_order, rec_i, ct_i, inner_popups) {
-	// stop at the last entry that is not above paint_order, so that entries
-	// with an equal paint_order stay in the order they were added.
+function add_popup(popups, z_index, rec_i, ct_i, inner_popups) {
 	let k = popups.length
 	while (k) {
 		let j = k - POPUPS_SLOTS
-		if (popups[j+POPUPS_PAINT_ORDER] <= paint_order)
+		if (popups[j+POPUPS_Z_INDEX] <= z_index) // <= preserves insert order
 			break
 		k = j
 	}
 	if (k == popups.length)
-		popups.push(paint_order, rec_i, ct_i, inner_popups)
+		popups.push(z_index, rec_i, ct_i, inner_popups)
 	else
-		popups.splice(k, 0, paint_order, rec_i, ct_i, inner_popups)
+		popups.splice(k, 0, z_index, rec_i, ct_i, inner_popups)
 }
 
 const layer_base =
-ui_layer('base'    , 0)
-ui_layer('overlay' , 1) // focus rings, drag points: must cover siblings.
-ui_layer('error'   , 2) // persistent tooltips: not hover (tooltips are hover).
-ui_layer('toolbox' , 3, 'modal')
-ui_layer('open'    , 4, 'modal') // dropdowns, menus: must cover all non-modals.
-ui_layer('modal'   , 5, 'modal') // modals: must cover all other modals.
-ui_layer('tooltip' , 6, 'root') // tooltips: must cover all static.
-ui_layer('drag'    , 7, 'root') // dragged object: must cover everything.
+ui.layer('base'    , 0)
+ui.layer('overlay' , 1) // focus rings, drag points: must cover siblings.
+ui.layer('error'   , 2) // persistent tooltips: not hover (tooltips are hover).
+ui.layer('toolbox' , 3, 'modal')
+ui.layer('open'    , 4, 'modal') // dropdowns, menus: must cover all non-modals.
+ui.layer('modal'   , 5, 'modal') // modals: must cover all other modals.
+ui.layer('tooltip' , 6, 'root') // tooltips: must cover all static.
+ui.layer('drag'    , 7, 'root') // dragged object: must cover everything.
 
-let layer_stack = [] // [layer1_i, ...]
-let current_layer // set while building
-
-let current_layer_rec
-let current_layer_ct_i
-
-function begin_layer(layer) {
-	layer_stack.push(current_layer)
-	current_layer = layer
-}
-
-function end_layer() {
-	current_layer = layer_stack.pop()
-}
-
-function layer_stack_check() {
-	if (layer_stack.length) {
-		for (let layer of layer_stack)
-			debug('layer', layer.name, 'not closed')
-		assert(false)
-	}
-}
+// current draw/hit popup, so we can skip draw/hit of nested popups.
+let current_popup_rec
+let current_popup_ct_i
 
 // rendering phases ----------------------------------------------------------
 
@@ -1966,10 +1932,6 @@ function translate_rec(a, x, y) {
 // each element that has it (linear scan).
 
 function register_rec(a, rec_i) {
-	// popups left open at the end of this rec are closed by it ending, not
-	// by a later popup, so put popups_stack and current_popups back here.
-	let popups_stack_n = popups_stack.length
-	let popups0 = current_popups
 	for (let i = 2, n = a.length; i < n; i = cmd_next_i(a, i)) {
 		let cmd = a[i-1]
 		let register_f = register[cmd]
@@ -1977,8 +1939,6 @@ function register_rec(a, rec_i) {
 			continue
 		register_f(a, i, rec_i)
 	}
-	popups_stack.length = popups_stack_n
-	current_popups = popups0
 }
 
 /* drawing phase -------------------------------------------------------------
@@ -2060,37 +2020,37 @@ function draw_cmd(a, i, recs) {
 }
 
 function draw_popups(popups, recs) {
-	let prev_rec  = current_layer_rec
-	let prev_ct_i = current_layer_ct_i
+	let prev_rec  = current_popup_rec
+	let prev_ct_i = current_popup_ct_i
 	for (let k = 0, n = popups.length; k < n; k += POPUPS_SLOTS) {
 		reset_canvas()
 		let rec_i = popups[k+POPUPS_REC_I]
 		let i     = popups[k+POPUPS_CT_I]
 		let a = recs[rec_i]
-		/*global*/ current_layer_rec  = a
-		/*global*/ current_layer_ct_i = i
+		/*global*/ current_popup_rec  = a
+		/*global*/ current_popup_ct_i = i
 		draw_cmd(a, i, recs)
 		let inner_popups = popups[k+POPUPS_INNER]
 		if (inner_popups)
 			draw_popups(inner_popups, recs)
 	}
-	current_layer_rec  = prev_rec
-	current_layer_ct_i = prev_ct_i
+	current_popup_rec  = prev_rec
+	current_popup_ct_i = prev_ct_i
 }
 
 function draw_frame(recs, popups, sm1) {
 	let sm0 = render_state_map
 	render_state_map = assert(sm1)
-	let current_layer_rec0  = current_layer_rec
-	let current_layer_ct_i0 = current_layer_ct_i
+	let current_popup_rec0  = current_popup_rec
+	let current_popup_ct_i0 = current_popup_ct_i
 
 	let theme_stack_length0 = theme_stack.length
 	theme_stack.push(theme)
 	theme = themes[ui.default_theme]
 
 	draw_popups(popups, recs)
-	assert(current_layer_rec  == current_layer_rec0)
-	assert(current_layer_ct_i == current_layer_ct_i0)
+	assert(current_popup_rec  == current_popup_rec0)
+	assert(current_popup_ct_i == current_popup_ct_i0)
 
 	theme = theme_stack.pop()
 	assert(theme_stack.length == theme_stack_length0)
@@ -2163,8 +2123,8 @@ function hit_popups(popups, recs) {
 		let rec_i = popups[k+POPUPS_REC_I]
 		let i     = popups[k+POPUPS_CT_I]
 		let a = recs[rec_i]
-		/*global*/ current_layer_rec  = a
-		/*global*/ current_layer_ct_i = i
+		/*global*/ current_popup_rec  = a
+		/*global*/ current_popup_ct_i = i
 		let hit_f = hittest[a[i-1]]
 		if (hit_f && !a.nohit_set?.has(i) && hit_f(a, i, recs))
 			return true
@@ -2592,7 +2552,6 @@ function layout_rec(a, x, y, w, h) {
 
 function frame_end_check() {
 	ct_stack_check()
-	layer_stack_check()
 	scope_stack_check()
 	rec_stack_check()
 }
@@ -2649,13 +2608,11 @@ function redraw_all() {
 
 		begin_rec()
 		let i = ui.stack()
-		begin_layer(layer_base)
 		assert(rec_i == 0)
-		add_popup(root_popups, layer_base.paint_order * paint_order_band, rec_i, i, null)
+		add_popup(root_popups, layer_base.z_index * z_index_band, rec_i, i, null)
 		ui.main()
 		reset_spacings()
 		ui.end()
-		end_layer()
 		frame_end_check()
 
 		t1 = clock_ms()
@@ -3120,10 +3077,6 @@ ui.end = function(cmd) {
 	a[end_i+0] -= end_i // make relative
 	let next_i = cmd_next_i(a, end_i)
 	a[i+BOX_CT_NEXT_EXT_I] = next_i-i // next_i but relative to the ct cmd at i
-
-	if (a[i-1] == CMD_POPUP) { // TOOD: make this non-specific
-		end_layer()
-	}
 }
 
 measure[CMD_END] = function(a, _, axis) {
@@ -3192,7 +3145,7 @@ function translate_ct(a, i, dx, dy) {
 
 function hit_children(a, i, recs) {
 
-	// hit direct children in reverse paint order.
+	// hit direct children in reverse z_index.
 	let ct_i = i
 	let next_ext_i = cmd_next_ext_i(a, i)
 	let end_i = cmd_prev_i(a, next_ext_i)
@@ -3916,15 +3869,15 @@ function popup_parse_flags(s) {
 	)
 }
 
-const POPUP_ID        = FR      // because fr is not used
-const POPUP_SIDE      = ALIGN   // because align is not used
-const POPUP_ALIGN     = ALIGN+1 // because valign is not used
-const POPUP_LAYER_I   = BOX_CT_ARGS+0
-const POPUP_Z_INDEX   = BOX_CT_ARGS+1
-const POPUP_TARGET_I  = BOX_CT_ARGS+2
-const POPUP_FLAGS     = BOX_CT_ARGS+3
-const POPUP_SIDE_REAL = BOX_CT_ARGS+4
-const POPUP_OX        = BOX_CT_ARGS+5 // offset x,y from where side+align put it
+const POPUP_ID         = FR      // because fr is not used
+const POPUP_SIDE       = ALIGN   // because align is not used
+const POPUP_ALIGN      = ALIGN+1 // because valign is not used
+const POPUP_LAYER_NAME = BOX_CT_ARGS+0 // establishes the layer band
+const POPUP_Z_INDEX    = BOX_CT_ARGS+1 // z_index in its layer band
+const POPUP_TARGET_I   = BOX_CT_ARGS+2
+const POPUP_FLAGS      = BOX_CT_ARGS+3
+const POPUP_SIDE_REAL  = BOX_CT_ARGS+4
+const POPUP_OX         = BOX_CT_ARGS+5 // offset x,y from where side+align put it
 
 const CMD_POPUP = cmd_ct('popup')
 
@@ -3933,7 +3886,7 @@ const CMD_POPUP = cmd_ct('popup')
 ui.popup = function(
 	id, layer, target, side, align, min_w, min_h, flags, z_index, ox, oy
 ) {
-	layer = ui_layer(layer)
+	layer = layer ? assert(layer_map[layer]) : layer_base
 	let target_i = target == 'screen' ? 0
 		: !target || target == 'container' ? ui.ct_i()
 		: assert(num(target), 'invalid target ', target)
@@ -3947,7 +3900,7 @@ ui.popup = function(
 		null, // valign -> align
 		min_w, min_h,
 		// BOX_ARGS+0
-		layer.i, z_index ?? 0,
+		layer.name, z_index ?? 0,
 		target_i, flags,
 		side, // side_real
 		ox ?? 0, oy ?? 0,
@@ -3957,7 +3910,6 @@ ui.popup = function(
 	a[i+POPUP_ID   ] = id
 	a[i+POPUP_SIDE ] = side
 	a[i+POPUP_ALIGN] = align
-	begin_layer(layer)
 	force_scope_vars()
 	return i
 }
@@ -4193,36 +4145,43 @@ ui.popup_target_rect = function(a, i) {
 
 }
 
+register[CMD_END] = function(a, end_i) {
+	let ct_i = end_i+a[end_i]
+	if (
+		current_popups.popup_rec == a &&
+		current_popups.popup_i == ct_i
+	)
+		current_popups = current_popups.parent_popups
+}
+
 register[CMD_POPUP] = function(a, i, rec_i) {
-	// put back the current_popups of every popup whose END this one is past.
-	// entries from another rec belong to the scan that pushed them.
-	let n = popups_stack.length
-	while (n && popups_stack[n-1] == a && i >= popups_stack[n-2]) {
-		current_popups = popups_stack[n-3]
-		n -= 3
-	}
-	popups_stack.length = n
-	let layer = layer_arr[a[i+POPUP_LAYER_I]]
+	let layer_name = a[i+POPUP_LAYER_NAME]
+	let layer = layer_map[layer_name]
+	a[i+POPUP_LAYER_NAME] = 0
 	let z_index = a[i+POPUP_Z_INDEX]
-	assert(z_index >= 0 && z_index < paint_order_band,
+	assert(z_index >= 0 && z_index < z_index_band,
 		'z_index out of range: ', z_index)
 	let inner_popups = layer.modal ? popups_freelist.alloc() : null
 	add_popup(layer.root ? root_popups : current_popups,
-		layer.paint_order * paint_order_band + z_index,
+		layer.z_index * z_index_band + z_index,
 		rec_i, i, inner_popups)
 	if (inner_popups) {
-		popups_stack.push(current_popups, i+a[i+BOX_CT_NEXT_EXT_I], a)
+		// hack: although inner_popus is serialized, its properties are not
+		// because it's an array.
+		inner_popups.parent_popups = current_popups
+		inner_popups.popup_i = i
+		inner_popups.popup_rec = a
 		current_popups = inner_popups
 	}
 }
 
 draw[CMD_POPUP] = function(a, i) {
-	if (a != current_layer_rec || i != current_layer_ct_i)
+	if (a != current_popup_rec || i != current_popup_ct_i)
 		return true
 }
 
 hittest[CMD_POPUP] = function(a, i, recs) {
-	if (a != current_layer_rec || i != current_layer_ct_i)
+	if (a != current_popup_rec || i != current_popup_ct_i)
 		return
 	let solid = a[i+POPUP_FLAGS] & POPUP_SOLID
 	if (hit_children(a, i, recs)) {
@@ -5712,8 +5671,7 @@ const FRAME_ON_MEASURE = BOX_ARGS+0
 const FRAME_ON_FRAME   = BOX_ARGS+1
 const FRAME_CT_I       = BOX_ARGS+2
 const FRAME_REC_I      = BOX_ARGS+3
-const FRAME_LAYER_I    = BOX_ARGS+4
-const FRAME_ARGS_I     = BOX_ARGS+5
+const FRAME_ARGS_I     = BOX_ARGS+4
 
 ui.FRAME_ARGS_I = FRAME_ARGS_I
 
@@ -5733,7 +5691,6 @@ frame.create = function(
 		on_measure, on_frame,
 		rel_ct_i,
 		null, // rec_i, unset (0 is the main record)
-		current_layer.i,
 		...args
 	)
 
@@ -5769,15 +5726,11 @@ frame.translate = function(a, i, dx, dy) {
 	let t0 = clock_ms()
 	let a0 = begin_rec()
 		a[i+FRAME_REC_I] = rec_i
-		let prev_layer = current_layer
-		let layer_i = a[i+FRAME_LAYER_I]
-		current_layer = layer_arr[layer_i]
 		ui.stack()
 			force_scope_vars()
 			on_frame(a, i, x, y, w, h, cx, cy, cw, ch)
 			reset_spacings()
-		ui.end_stack()
-		current_layer = prev_layer
+			ui.end_stack()
 		frame_end_check()
 	let a1 = end_rec(a0)
 	// pr(json(a1).length)
