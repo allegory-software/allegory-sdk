@@ -1739,11 +1739,16 @@ let cmd_prev_i = (a, i) => i+a[i-3] // index of prev cmd
 let cmd_last_i = (a) => cmd_prev_i(a, a.length+2) // index of last command in a
 let cmd_arg_end_i = (a, i) => cmd_next_i(a, i)-3 // index after the last arg
 
-function ui_cmd(cmd, ...args) {
+// `arguments` instead of `...args` avoids an array allocation.
+function ui_cmd(cmd) {
+	let n = arguments.length
 	let i = a.length+2 // abs index of this cmd's arg#1
-	let next_i = args.length+3 // rel index of next cmd's arg#1
+	let next_i = n+2 // rel index of next cmd's arg#1
 	let prev_i = -next_i // rel index of this cmd's arg#1, rel to next cmd's arg#1
-	a.push(next_i, cmd, ...args, prev_i)
+	a.push(next_i, cmd)
+	for (let j = 1; j < n; j++)
+		a.push(arguments[j])
+	a.push(prev_i)
 	return i
 }
 ui.cmd = ui_cmd
@@ -1751,15 +1756,17 @@ ui.cmd = ui_cmd
 // append args to the command at i, for slots that few of them need.
 // i must still be the last command: ui_cmd_box() records a second one when
 	// scroll_to_view_next_box() was called before it.
-function ui_cmd_add_args(i, ...args) {
+// `arguments` instead of `...args` to avoid an array allocation.
+function ui_cmd_add_args(i) {
 	assert(cmd_last_i(a) == i)
 	a.length-- // drop prev_i
-	for (let v of args)
-		a.push(v)
+	for (let j = 1, n = arguments.length; j < n; j++)
+		a.push(arguments[j])
 	let next_i = a.length+3 - i
 	a[i-2] = next_i
 	a.push(-next_i)
 }
+ui.cmd_add_args = ui_cmd_add_args
 
 // print current recording
 ui.disas = function(a) {
@@ -2766,17 +2773,13 @@ ui.widget = function(cmd_name, t, is_ct) {
 	is_flex_child [_cmd] = t.is_flex_child
 	let create = t.create
 	if (create) {
-		function wrapper(...args) {
-			return create(_cmd, ...args)
-		}
-		ui[cmd_name] = wrapper
+		// bind() to avoid `...args` which allocates.
+		let bound_create = create.bind(null, _cmd)
+		ui[cmd_name] = bound_create
 		let setstate = t.setstate
-		if (setstate) {
-			ui[cmd_name+'_state'] = function(...args) {
-				return setstate(_cmd, ...args)
-			}
-		}
-		return wrapper
+		if (setstate)
+			ui[cmd_name+'_state'] = setstate.bind(null, _cmd)
+		return bound_create
 	} else {
 		return _cmd
 	}
@@ -2797,7 +2800,7 @@ const FR         = 12 // all `is_flex_child` widgets: fraction from main-axis si
 const ALIGN      = 13 // vert. align at ALIGN+1
 const BOX_CT_NEXT_EXT_I = 15 // all container-boxes: next command after this one's END command.
 const BOX_CT_ARGS = 16 // first index after the ui_cmd_box_ct header.
-const BOX_ARGS    = 15 // first index after the ui_cmd_box header.
+const BOX_ARGS    = 16 // first index after the ui_cmd_box header.
 
 ui.PX1   = PX1
 ui.PX2   = PX2
@@ -2926,6 +2929,9 @@ function ui_cmd_box(cmd, fr, align, valign, min_w, min_h, ...args) {
 		round(max(0, fr ?? 1) * 1024),
 		parse_align  (align  ?? 's'),
 		parse_valign (valign ?? 's'),
+		// hack for ui_cmd_box_ct() to be able to call ui_cmd_box() with
+		// `arguments`. 2 extra bytes in json for each box for this.
+		0, // next_ext_i
 		...args
 	)
 	reset_spacings()
@@ -3071,12 +3077,9 @@ function cmd_next_ext_i(a, i) {
 }
 
 // NOTE: `ct` is short for container, which must end with ui.end().
-function ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h, ...args) {
+function ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h) {
 	begin_scope()
-	let i = ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
-		0, // next_ext_i
-		...args
-	)
+	let i = ui_cmd_box.apply(null, arguments)
 	ct_stack.push(i)
 	return i
 }
@@ -3223,8 +3226,9 @@ function ui_hv(cmd, fr, gap, align, valign, min_w, min_h) {
 const CMD_H = cmd_ct('h')
 const CMD_V = cmd_ct('v')
 
-ui.h = function(...args) { return ui_hv(CMD_H, ...args) }
-ui.v = function(...args) { return ui_hv(CMD_V, ...args) }
+// bind() avoids `...args` which allocates.
+ui.h = ui_hv.bind(null, CMD_H)
+ui.v = ui_hv.bind(null, CMD_V)
 ui.hv = function(hv, ...args) {
 	let cmd = assert(hv == 'h' ? CMD_H : hv == 'v' ? CMD_V : 0)
 	return ui_hv(cmd, ...args)

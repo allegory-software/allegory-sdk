@@ -173,9 +173,7 @@ function cursor_has_selection(cursor) {
 }
 
 ui.widget('code_edit_sidebar', {
-	create: function(...args) {
-		return ui.cmd(...args)
-	},
+	create: ui.cmd,
 	draw: function(a, i) {
 		let x0          = a[i+0]
 		let y0          = a[i+1]
@@ -224,9 +222,7 @@ ui.widget('code_edit_sidebar', {
 })
 
 ui.widget('code_edit_text', {
-	create: function(...args) {
-		return ui.cmd(...args)
-	},
+	create: ui.cmd,
 	draw: function(a, i) {
 		let x0          = a[i+0]
 		let y0          = a[i+1]
