@@ -4571,6 +4571,7 @@ add_validation_rule({
 // icons drawn by field types, not by any one widget, so they live here
 // rather than in the grid's own icon aliases.
 ui.icon_def('check'        , 'tabler', '\uea5e')
+ui.icon_def('calendar'     , 'tabler', '\uea53')
 ui.icon_def('map_pin'      , 'tabler', '\ueae8')
 ui.icon_def('box_unchecked', 'tabler', '\ueb2c')
 ui.icon_def('box_checked'  , 'tabler_filled', '\uf76d')
@@ -4753,6 +4754,59 @@ field_types.time = ts
 ts.has_time = true
 ts.precision = 's'
 ts.w = 160
+
+date.update_editor = function(id, v) {
+	let calendar_id = id+'.calendar'
+	let picked = ui.consume(calendar_id, 'picked')
+	if (picked) {
+		let [ts] = picked
+		ui.state(id).text = this.to_input(ts)
+		ui.focus(id)
+		return ts
+	}
+	return update_text_editor(this, id, v)
+}
+
+date.draw_editor = function(id, v, pad_l, pad_r, h) {
+	let calendar_id = id+'.calendar'
+	let picker_id = calendar_id+'.picker'
+	let editor_target_i = ui.stack('', 1, 's', 's')
+	ui.end_stack()
+
+	ui.popup('', 'overlay', editor_target_i, 'ir', 's')
+		ui.h(0, ui.sp05())
+			ui.bb('input', 'focused', 'b', 'light')
+			ui.p(pad_l, 0, 0, 0)
+			ui.icon(calendar_id, 'calendar', 0, 'l', 'c', null, null, h)
+			ui.p(0, 0, pad_r, 0)
+			ui.text_editable(id, v == null ? '' : this.to_input(v),
+				1, this.align, 'c')
+
+		ui.end_h()
+	ui.end_popup()
+
+	let is_open = ui.dropdown(calendar_id, 'b')
+	let opened = ui.consume(calendar_id, 'opened')
+
+	ui.dropdown_picker()
+
+		if (is_open) {
+			if (opened) {
+				let calendar_state = ui.state(picker_id)
+				let day0 = isnum(v) ? day(v) : day(time())
+				calendar_state.day = day0
+				calendar_state.scroll_y =
+					days(week(day0) - week(time())) / 7
+					* snap(ui.em(2.5), 2)
+			}
+			ui.calendar(picker_id, null)
+
+			let resize_id = picker_id+'.resizer'
+			ui.resizer(resize_id, null, null, 'y')
+		}
+
+	ui.end_dropdown()
+}
 
 // timeofday (MySQL TIME type) -----------------------------------------------
 
