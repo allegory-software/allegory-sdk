@@ -7335,22 +7335,17 @@ let TOGGLE_HOVER = 2
 
 let toggle = {}
 
-toggle.create = function(cmd, id, fr, align, valign, min_w, min_h) {
+toggle.create = function(cmd, id, on, fr, align, valign, min_w, min_h) {
 	keepalive(id)
 	let hs = hit(id) || hit(id+'.label')
-	let on = ui.state(id, 'on')
-	let changed_on
-	if (hs && ui.click) {
+	if (hs && ui.click)
 		on = !on
-		ui.state(id).on = on
-		changed_on = on
-	}
 	ui_cmd_box(cmd, fr, align ?? 'c', valign ?? 'c',
 		min_w ?? ui.em(2.5),
 		min_h ?? ui.em(1.5),
 		id,
 		(on ? TOGGLE_ON : 0) | (hs ? TOGGLE_HOVER : 0))
-	return changed_on
+	return on
 }
 toggle.ID = TOGGLE_ID
 
