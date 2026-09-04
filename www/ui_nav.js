@@ -1062,7 +1062,7 @@ ui.nav = function(opt) {
 	e.find_row = function(row) {
 		if (!e.pk_fields)
 			return
-		pk_vals.length = e.pk_fields.length
+		pk_vals.length = min(pk_vals.length, e.pk_fields.length)
 		for (let i = 0; i < e.pk_fields.length; i++)
 			pk_vals[i] = row[e.pk_fields[i].val_index]
 		return e.lookup(e.pk, pk_vals)[0]
@@ -3296,13 +3296,13 @@ ui.nav = function(opt) {
 		let lookup_cols = field.lookup_cols || ln.pk  ; if (!lookup_cols) return
 
 		if (!lookup_cols.includes(' ')) {
-			vals.length = 1
+			vals.length = min(vals.length, 1)
 			vals[0] = v
 			return ln.lookup(lookup_cols, vals)[0]
 		}
 
 		let fs = e.optflds(field.local_cols || lookup_cols) ; if (!fs) return
-		vals.length = fs.length
+		vals.length = min(vals.length, fs.length)
 		for (let i = 0; i < fs.length; i++)
 			vals[i] = fs[i] == field ? v : e.cell_input_val(row, fs[i])
 		return ln.lookup(lookup_cols, vals)[0]

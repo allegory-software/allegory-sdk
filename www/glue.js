@@ -119,6 +119,7 @@ ARRAYS
 	array([N]) -> a                        new Array(N)
 	empty_array -> []                      global empty array, read-only!
 	range(i, j, step, f) -> a
+	array_resize(a, n, [v]) -> a           resize to n, new slots get v
 	array_set(a, a1) -> s
 	extend(a, a1) -> a
 	insert(a, i, v) -> a
@@ -735,10 +736,18 @@ function range(i1, j, step, f) {
 	return a
 }
 
+function array_resize(a, n, v) {
+	if (n < a.length)
+		a.length = n
+	else
+		while (a.length < n)
+			a.push(v)
+	return a
+}
+
 function extend(a, a1) {
 	let i0 = a.length
 	let n = a1.length
-	a.length += n
 	for (let i = 0; i < n; i++)
 		a[i0+i] = a1[i]
 	return a
@@ -746,7 +755,7 @@ function extend(a, a1) {
 
 function array_set(a, a1) {
 	let n = a1.length
-	a.length = n
+	a.length = min(a.length, n)
 	for (let i = 0; i < n; i++)
 		a[i] = a1[i]
 	return a
@@ -769,7 +778,7 @@ function remove(a, i) {
 function insert_n(a, i0, n) {
 	if (n <= 0) return
 	let len_before = a.length
-	a.length += n
+	array_resize(a, len_before + n)
 	for (let i = len_before - 1; i >= i0; i--)
 		a[i + n] = a[i]
 }
@@ -2501,7 +2510,7 @@ push_log, push_log_if, pop_log, log, log_if, check,
 callable_constructor, inherit_properties,
 property, method, override, alias, override_property_setter, override_property_getter,
 subst, display_name, lower_ai_ci, find_ai_ci, escape_regexp, catany, catall, esc, words, wordset, captures,
-array, empty_array, range, extend, array_set,
+array, empty_array, range, array_resize, extend, array_set,
 insert, insert_n, remove, remove_n, remove_value, replace_value, remove_values, array_move, array_equals,
 binsearch, uniq_sorted, group_sorted, remove_duplicates,
 map, map_first_key, gen_id, map_assign,
@@ -2591,6 +2600,7 @@ Number.prototype.base       = m(format_base)
 
 property(Array.prototype, 'last', function get_last() { return this[this.length-1] })
 
+method(Array.prototype, 'resize           ', m(array_resize            ))
 method(Array.prototype, 'extend           ', m(extend                  ))
 method(Array.prototype, 'set              ', m(array_set               ))
 method(Array.prototype, 'insert           ', m(insert                  ))

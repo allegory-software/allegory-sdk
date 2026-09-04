@@ -1700,8 +1700,8 @@ function C(a, i) { return cmd_names[a[i-1]] }
 let max_cmd    =  0 // even numbers for non-containers (0 is reserved).
 let max_cmd_ct = -1 // odd numbers containers
 function unsparse(a, i) {
-	if (a[i] === undefined)
-		a[i] = null
+	while (a.length <= i)
+		a.push(null)
 }
 function unsparse_all(i) {
 	unsparse(measure       , i)
@@ -1725,7 +1725,7 @@ function cmd(name, is_ct) {
 		max_cmd += 2
 		cmd = max_cmd
 	}
-	unsparse_all(cmd-1)
+	unsparse_all(cmd)
 	cmd_names[cmd] = name
 	cmd_name_map[name] = cmd
 	return cmd
@@ -6770,13 +6770,11 @@ ui.menu = function(id, items, side, align) {
 				let last = i == items.length-1
 				let item_id = id+'.item.'+item.id
 				let hover = hit(item_id)
-				if (hover)
-					if (item.items?.length) {
+				if (hover) {
+					array_resize(open_items, level)
+					if (item.items?.length)
 						open_items[level] = item.id
-						open_items.length = level+1
-					} else {
-						open_items.length = level
-					}
+				}
 				let open = open_items[level] == item.id
 				ui.stack(item_id)
 					ui.pl(ui.rem(3))

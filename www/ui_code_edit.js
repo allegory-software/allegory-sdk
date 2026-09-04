@@ -484,7 +484,7 @@ function code_edit_view(id, opt) {
 
 	// compute line offsets, starting with the 2nd line!
 	function compute_line_offsets() {
-		line_offsets.length = lines.length-1
+		line_offsets.length = min(line_offsets.length, lines.length-1)
 		let pos = lines[0].length + newline.length
 		for (let i = 1, n = lines.length; i < n; i++) {
 			line_offsets[i-1] = pos
@@ -855,7 +855,7 @@ function code_edit_view(id, opt) {
 		s = normalize_newlines(s)
 		lines = text_lines(s)
 		// (re)init line_colors arrays.
-		line_colors.length = lines.length
+		line_colors.length = min(line_colors.length, lines.length)
 		for (let i = 0, n = lines.length; i < n; i++)
 			if (line_colors[i] != null)
 				line_colors[i].length = 0
@@ -1259,9 +1259,10 @@ function code_edit_view(id, opt) {
 		vline2 = max(0, min(vline2, lines.length - 1))
 
 		if (last_vline1 != vline1 || last_vline2 != vline2) {
-			vlines .length = vline2 - vline1 + 1
-			vcolors.length = vline2 - vline1 + 1
-			vfinds .length = vline2 - vline1 + 1
+			// shrink-then-set avoids making the array sparse forever.
+			vlines .length = min(vlines .length, vline2 - vline1 + 1)
+			vcolors.length = min(vcolors.length, vline2 - vline1 + 1)
+			vfinds .length = min(vfinds .length, vline2 - vline1 + 1)
 			for (let line = vline1; line <= vline2; line++) {
 				let s = lines[line]
 				let c = assert(line_colors[line])
