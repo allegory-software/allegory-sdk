@@ -1099,7 +1099,7 @@ ui.nav = function(opt) {
 
 		let ct = e.col_attrs && e.col_attrs[name]
 		let rt = rowset_name && rowset_col_attrs[rowset_name+'.'+name]
-		let type = rt && rt.type || ct && ct.type || f.type
+		let type = rt && rt.type || ct && ct.type || f.type || 'text'
 		let tt = field_types[type]
 		let att = all_field_types
 
@@ -2612,7 +2612,7 @@ ui.nav = function(opt) {
 				return v => v === n
 			}
 
-		} else if (!field.type) {
+		} else if (field.type == 'text') {
 
 			// exact match: =s
 			if (expr.startsWith('=')) {
@@ -3143,7 +3143,10 @@ ui.nav = function(opt) {
 			return false
 		e.editing = true
 		e.advance_on_exit = opt?.advance_on_exit ?? false
-		e.editor_id = e.id + '.editor.' + e.row_index(row) + '.' + e.field_index(field)
+		let editor_type = field.lookup_rowset_name || field.type
+		e.editor_id = editor_type + '.editor'
+		let cv = e.cell_input_val(row, field)
+		ui.set_text_value(e.editor_id, cv == null ? '' : field.to_input(cv))
 		if (field.edits_in_popup && opt?.open_popup != false)
 			ui.fire(e.editor_id, 'open')
 		let sel_i   = opt?.sel_i
@@ -4578,6 +4581,7 @@ ui.icon_def('box_checked'  , 'tabler_filled', '\uf76d')
 //ui.icon_def('box_checked'  , 'tabler', '\ueb28')
 
 assign(all_field_types, {
+	type: 'text',
 	default: null,
 	w: 100,
 	min_w: 22,
@@ -4605,18 +4609,17 @@ all_field_types.to_input = function(v) {
 	return this.to_text(v)
 }
 
-// text box over to_input()/from_input(); a type with its own widget
-// overrides both. untouched text gives back the same v, so a redraw is not
-// an edit; text that doesn't parse comes back as itself.
-all_field_types.update_editor = function(id, v) {
+function update_text_editor(field, id, v) {
 	let s1 = ui.text_value(id)
-	if (s1 === undefined) // draw_editor() hasn't run yet
+	let s0 = v == null ? '' : field.to_input(v)
+	if (s1 == s0)
 		return v
-	let s0 = v == null ? '' : this.to_input(v)
-	if (s1 === s0)
-		return v
-	let v1 = this.from_input ? this.from_input(s1) : s1
+	let v1 = field.from_input ? field.from_input(s1) : s1
 	return v1 === undefined ? s1 : v1
+}
+
+all_field_types.update_editor = function(id, v) {
+	return update_text_editor(this, id, v)
 }
 
 // same call as draw_text(), so the cell doesn't shift on entering edit.
@@ -4638,6 +4641,11 @@ all_field_types.draw = function(v, mode, row, full_width) {
 	let s = this.to_text(v)
 	return this.draw_text(s, mode, row, full_width)
 }
+
+// text ----------------------------------------------------------------------
+
+// the default type: all its behavior comes from all_field_types.
+field_types.text = {}
 
 // passwords -----------------------------------------------------------------
 

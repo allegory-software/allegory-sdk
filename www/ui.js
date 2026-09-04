@@ -2622,6 +2622,7 @@ function redraw_all() {
 		let t0, t1
 
 		want_relayout = false
+		focus_taken = false
 
 		t0 = clock_ms()
 
@@ -2632,6 +2633,9 @@ function redraw_all() {
 			if (i != null)
 				ui.focus(focusables[i+FOCUSABLE_ID], true)
 		}
+
+		let focused_id0 = ui.focused_id
+
 		t1 = clock_ms()
 		frame_graph_push('frame_hit_time', t1 - t0)
 
@@ -2678,11 +2682,14 @@ function redraw_all() {
 
 		assert(!open_focus_groups.length, 'unbalanced focus_group')
 
+		if (ui.focused_id && focus_find(ui.focused_id) == null)
+			ui.focus(null)
+
 		if (focus_first_id != null) {
 			let group_id = focus_first_id
 			focus_first_id = null
-			if (resolve_focus_first(group_id))
-				ui.relayout()
+			if (!resolve_focus_first(group_id))
+				warn('focus_first: no focusable in ', group_id)
 		}
 
 		t1 = clock_ms()
@@ -2690,6 +2697,12 @@ function redraw_all() {
 		frame_graph_push('frame_layout_time', t1 - t0 - frame_make_ms)
 
 		state_gc()
+
+		if (ui.click && !focus_taken)
+			ui.focus(null)
+
+		if (ui.focused_id != focused_id0)
+			ui.relayout()
 
 		if (!want_relayout) {
 			t0 = clock_ms()
@@ -2719,12 +2732,6 @@ function redraw_all() {
 			ui.captured_id = null
 			capture_state = obj()
 		}
-
-		if (ui.click && !focus_taken) {
-			ui.focused_id = null
-			ui.relayout()
-		}
-		focus_taken = false
 
 		for (let p of ui.pointers)
 			reset_pointer_state(p)
@@ -5221,6 +5228,10 @@ ui.text_value = function(id) { // user-typed text
 	return ui.state(id, 'text')
 }
 
+ui.set_text_value = function(id, s) {
+	ui.state(id).text = s
+}
+
 // selecting text ------------------------------------------------------------
 
 // A selection is (i, len): i is both caret position and selection anchor:
@@ -5302,19 +5313,19 @@ function apply_select_text(input) {
 // 4) no input focused (focus back the canvas).
 function sync_dom_focus() {
 	let input = drawn_focused_input
-	if (input == prev_drawn_focused_input)
-		return
+	let input0 = prev_drawn_focused_input
+	prev_drawn_focused_input = input
 	if (input) {
-		if (drawn_focused_by_key) {
-			input.focus()
+		if (document.activeElement != input)
+			input.focus({preventScroll: true})
+		if (input != input0 && drawn_focused_by_key) {
 			let id = input._ui_id
 			if (!input._ui_ss_ids && !ui.state(id).sel_pending)
 				ui.select_text(id, 0, 1/0)
 		}
-	} else if (document.activeElement == prev_drawn_focused_input) {
+	} else if (input != input0 && document.activeElement == input0) {
 		canvas.focus()
 	}
-	prev_drawn_focused_input = input
 }
 
 // give the focused input the selection asked for. can be asked for on any
@@ -5331,7 +5342,8 @@ function sync_dom_selection() {
 function input_free(s, id) {
 	let input = s.input
 	// canvas.focus() below blurs the input: don't report that blur back.
-	input.removeEventListener('blur', remote_input_blur)
+	input.removeEventListener('blur',
+		input._ui_ss_ids ? remote_input_blur : input_blur)
 	if (input == prev_drawn_focused_input) {
 		prev_drawn_focused_input = null
 		canvas.focus()
@@ -5348,8 +5360,8 @@ function input_blur(ev) {
 	// deactivating the window blurs the input, but focus didn't move.
 	if (!document.hasFocus())
 		return
-	if (ui.focused_id == this._ui_id)
-		ui.focused_id = null
+	if (ui.focused_id == this._ui_id && !ui.screen.contains(ev.relatedTarget))
+		ui.focus(null)
 	animate()
 }
 
@@ -5387,11 +5399,14 @@ function remote_input_focus() {
 	animate()
 }
 
-function remote_input_blur() {
+function remote_input_blur(ev) {
 	// deactivating the window blurs the input, but focus didn't move.
 	if (!document.hasFocus())
 		return
-	remote_input_send(this, {input: this._ui_id, event: 'blur'})
+	if (ui.focused_id == this._ui_ss_ids[0]
+			&& !ui.screen.contains(ev.relatedTarget))
+		ui.focus(null)
+	animate()
 }
 
 // numbers each edit sent out; frames echo the last one applied.
@@ -5437,9 +5452,6 @@ ui.process_shared_screen_input = function(p, t) {
 		if (t.event == 'focus') {
 			ui.focus(id)
 			animate()
-		} else if (t.event == 'blur' && ui.focused_id == id) {
-			ui.focused_id = null
-			animate()
 		}
 		ui.state(id, 'con').send(json(t))
 	} else if (t.event == 'pointer_state') {
@@ -5456,11 +5468,6 @@ ui.process_shared_screen_input = function(p, t) {
 	} else if (t.event == 'focus') {
 		ui.focus(t.input)
 		animate()
-	} else if (t.event == 'blur') {
-		if (ui.focused_id == t.input) {
-			ui.focused_id = null
-			animate()
-		}
 	} else if (t.event == 'input') {
 		let s = ui.state(t.input)
 		s.text = t.value

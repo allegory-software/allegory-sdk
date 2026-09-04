@@ -232,7 +232,7 @@ function init(id, e) {
 				if (advance)
 					advance_edit(false, 1)
 			}
-			if (e.editor_id == editor_id)
+			if (!e.editing || (e.focused_row == row && e.focused_field == field))
 				break
 		}
 	}
