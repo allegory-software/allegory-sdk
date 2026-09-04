@@ -1131,8 +1131,10 @@ assign(demos, t)
 demos_array = keys(demos)
 }
 
-let a_length = 0
-let a_strlen = 0
+ui.always_animate = false
+
+let recs_length = 0
+let recs_strlen = 0
 function demo_main() {
 
 	ui.v()
@@ -1143,14 +1145,14 @@ function demo_main() {
 				ui.border('b', 'light')
 
 				ui.color('label')
-				ui.text('', 'a.length', 0)
+				ui.text('', 'recs_length', 0)
 				ui.color('link')
-				ui.text('', a_length+'', 0, 'r', 'c', 1/0, ui.em(3))
+				ui.text('', recs_length+'', 0, 'r', 'c', 1/0, ui.em(3))
 
 				ui.color('label')
 				ui.text('', 'JSON', 0)
 				ui.color('link')
-				ui.text('', format_kbytes(a_strlen, 1), 0, 'r', 'c', 1/0, ui.em(3))
+				ui.text('', format_kbytes(recs_strlen, 1), 0, 'r', 'c', 1/0, ui.em(3))
 
 				if (ui.button('btn_light', 'lights', 0)) {
 					ui.set_default_theme(ui.default_theme == 'light' ? 'dark' : 'light')
@@ -1169,6 +1171,16 @@ function demo_main() {
 					save_demo_state('tui', ui.TUI)
 					ui.relayout()
 				}
+
+				if (ui.button('btn_animate', 'animate', 0)) {
+					ui.always_animate = !ui.always_animate
+				}
+				if (ui.always_animate)
+					ui.animate()
+
+				ui.text('', 'grid fast path', 0)
+				ui.grid_fast_path =
+					ui.toggle('btn_grid_fast', ui.grid_fast_path, 0)
 
 				ui.color('label')
 				ui.text('', 'canvas-ui v'+ui.VERSION, 1, 'r')
@@ -1215,7 +1227,7 @@ function demo_main() {
 
 	ui.end_v()
 
-	a_length = ui.a.length
+	recs_length = ui.recs_length
 }
 
 ui.main = demo_main
