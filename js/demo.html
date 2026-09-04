@@ -1194,8 +1194,10 @@ function demo_main() {
 				ui.border('r', 'light')
 				ui.state_init('demos_list', 'focused_item_i', demos_array.indexOf(selected_demo))
 				let i = ui.state('demos_list', 'focused_item_i')
+				let selected_demo0 = selected_demo
 				selected_demo = demos_array[i]
-				save_demo_state('demo', selected_demo)
+				if (selected_demo != selected_demo0)
+					save_demo_state('demo', selected_demo)
 				ui.sb('demos_list_sb')
 					let demo = ui.list('demos_list', demos_array)
 				ui.end_sb()
