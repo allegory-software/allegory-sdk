@@ -391,7 +391,7 @@ const {
 	day, week, weekday, weekday_name,
 } = glue
 
-let clock_ms = () => performance.now()
+let clock_ms = () => ui.DEBUG ? performance.now() : 0
 
 let array_freelist = () => freelist(array)
 
@@ -1648,7 +1648,6 @@ function begin_rec() {
 	assert(!scroll_to_view_next, 'focusable widget recorded no box')
 	let a0 = a
 	a = rec()
-	ui.a = a
 	rec_i = recs.length
 	recs.push(a)
 	return a0
@@ -2631,6 +2630,7 @@ function redraw_all() {
 		free_recs()
 
 		t0 = clock_ms()
+		frame_make_ms = 0
 
 		reset_canvas()
 
@@ -2646,12 +2646,18 @@ function redraw_all() {
 		frame_end_check()
 
 		t1 = clock_ms()
-		frame_graph_push('frame_make_time', t1 - t0)
+		let make_ms = t1 - t0
 
 		t0 = t1
 
 		let a = end_rec()
 		layout_rec(a, 0, 0, screen_w, screen_h)
+
+		if (ui.DEBUG) {
+			ui.recs_length = 0
+			for (let k = 0; k < recs.length; k++)
+				ui.recs_length += recs[k].length
+		}
 
 		// prev frame's focusables have to be available in layout_rec for
 		// focus_inside() to work, and have to be cleared before register_rec
@@ -2671,7 +2677,8 @@ function redraw_all() {
 		}
 
 		t1 = clock_ms()
-		frame_graph_push('frame_layout_time', t1 - t0)
+		frame_graph_push('frame_make_time', make_ms + frame_make_ms)
+		frame_graph_push('frame_layout_time', t1 - t0 - frame_make_ms)
 
 		state_gc()
 
@@ -5692,6 +5699,8 @@ const FRAME_ARGS_I     = BOX_ARGS+5
 
 ui.FRAME_ARGS_I = FRAME_ARGS_I
 
+let frame_make_ms = 0
+
 let frame = {}
 
 frame.create = function(
@@ -5739,6 +5748,7 @@ frame.translate = function(a, i, dx, dy) {
 	let ch = a[ct_i+3]
 
 	let on_frame = a[i+FRAME_ON_FRAME]
+	let t0 = clock_ms()
 	let a0 = begin_rec()
 		a[i+FRAME_REC_I] = rec_i
 		let prev_layer = current_layer
@@ -5753,6 +5763,7 @@ frame.translate = function(a, i, dx, dy) {
 		frame_end_check()
 	let a1 = end_rec(a0)
 	// pr(json(a1).length)
+	frame_make_ms += clock_ms() - t0
 
 	layout_rec(a1, x, y, w, h)
 
