@@ -372,14 +372,16 @@ let fields = [
 	{name: 'privkey'  , w: 140, type: 'private_key'},
 	{name: 'col'      , w:  90, type: 'col'},
 	{name: 'action'   , w:  90, type: 'button'},
+	{name: 'grower_id', w: 110, type: 'number', label: 'Grower',
+		lookup_rowset_name: 'grower', display_col: 'name'},
 	{name: 'parent_id', type: 'number', internal: true},
 ]
 let rows = [
-	[1, 1234.5  , 800        ,   1234, time(2024,1,15), time(2024,1,15,9,30), time(2031,6,1)     , 8*3600+30*60 , 3725  , true , 'open'   , ['red', 'urgent'], '#e03131'                , 2500, 'plus'        , {place_id: 'p1', description: '1600 Amphitheatre Pkwy'}, 'https://example.com', '+1 555 0100', 'a@example.com', 'hunter2'      , 'sk_live_abc123' , 'ssh-rsa AAAAB3Nz', '-----BEGIN KEY---', 'name'   , null, null],
-	[2, 42      , 5_000_000  ,  98765, time(2024,6,1) , time(2024,6,1,14,0) , time(2032,1,1)     , 13*3600+15*60, 90000 , false, 'pending', ['blue']         , '#2e8b57'                , 6000, 'check'       , 'Just a description, no pin'                             , 'example.org'        , '555-0101'   , 'b@example.org', 'correct-horse', 'sk_live_def456' , 'ssh-ed25519 AAAA', '-----BEGIN KEY---', 'ctime'  , null, 1],
-	[3, 0       , 3_200_000_000, 2000000, time(2024,12,31), time(2024,12,31,23,59), time(2037,12,31), 0            , 0     , true , 'closed' , ['green', 'a', 'b'], '#1e90ff'                , 10000, 'arrow_up'   , {place_id: 'p3', description: 'No pin greyed out below'}, 'http://sub.example.com/path', '555-0102', 'c@example.com', 's3cr3t'       , 'sk_live_ghi789' , 'ssh-rsa AAAAB3Nz', '-----BEGIN KEY---', 'id'     , null, 1],
-	[4, -12.75  , 60         ,      7, time(2000,1,1) , time(2000,1,1,0,1)  , time(1970,1,2)     , 23*3600+59*60 , 61   , false, 'open'   , []               , '#111111'                , 0   , 'caret_right' , {description: 'Object without a place_id'}               , 'ftp://files.example.com', '555-0103', 'd@example.com', 'pw'           , 'sk_live_jkl012' , 'ssh-dss AAAAB3Nz', '-----BEGIN KEY---', 'status' , null, 3],
-	[5, null    , null       ,   null, null           , null                , null               , null          , null , null , null     , null             , null                     , null, null          , null                                                       , null                 , null         , null           , null          , null             , null              , null              , null     , null, 4],
+	[1, 1234.5  , 800        ,   1234, time(2024,1,15), time(2024,1,15,9,30), time(2031,6,1)     , 8*3600+30*60 , 3725  , true , 'open'   , ['red', 'urgent'], '#e03131'                , 2500, 'plus'        , {place_id: 'p1', description: '1600 Amphitheatre Pkwy'}, 'https://example.com', '+1 555 0100', 'a@example.com', 'hunter2'      , 'sk_live_abc123' , 'ssh-rsa AAAAB3Nz', '-----BEGIN KEY---', 'name'   , null, 1, null],
+	[2, 42      , 5_000_000  ,  98765, time(2024,6,1) , time(2024,6,1,14,0) , time(2032,1,1)     , 13*3600+15*60, 90000 , false, 'pending', ['blue']         , '#2e8b57'                , 6000, 'check'       , 'Just a description, no pin'                             , 'example.org'        , '555-0101'   , 'b@example.org', 'correct-horse', 'sk_live_def456' , 'ssh-ed25519 AAAA', '-----BEGIN KEY---', 'ctime'  , null, 2, 1],
+	[3, 0       , 3_200_000_000, 2000000, time(2024,12,31), time(2024,12,31,23,59), time(2037,12,31), 0            , 0     , true , 'closed' , ['green', 'a', 'b'], '#1e90ff'                , 10000, 'arrow_up'   , {place_id: 'p3', description: 'No pin greyed out below'}, 'http://sub.example.com/path', '555-0102', 'c@example.com', 's3cr3t'       , 'sk_live_ghi789' , 'ssh-rsa AAAAB3Nz', '-----BEGIN KEY---', 'id'     , null, 3, 1],
+	[4, -12.75  , 60         ,      7, time(2000,1,1) , time(2000,1,1,0,1)  , time(1970,1,2)     , 23*3600+59*60 , 61   , false, 'open'   , []               , '#111111'                , 0   , 'caret_right' , {description: 'Object without a place_id'}               , 'ftp://files.example.com', '555-0103', 'd@example.com', 'pw'           , 'sk_live_jkl012' , 'ssh-dss AAAAB3Nz', '-----BEGIN KEY---', 'status' , null, 1, 3],
+	[5, null    , null       ,   null, null           , null                , null               , null          , null , null , null     , null             , null                     , null, null          , null                                                       , null                 , null         , null           , null          , null             , null              , null              , null     , null, null, 4],
 ]
 ui.rowsets.grid_types = {
 	fields: fields,
@@ -388,7 +390,7 @@ ui.rowsets.grid_types = {
 	parent_col: 'parent_id',
 }
 
-grid_types_cols = 'status date color id num size count datetime time timeofday dur active tags progress icon place url phone email password secret pubkey privkey col action parent_id'
+grid_types_cols = 'status date color grower_id id num size count datetime time timeofday dur active tags progress icon place url phone email password secret pubkey privkey col action parent_id'
 
 demos.grid_types = `
 ui.m(ui.em(2))
