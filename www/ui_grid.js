@@ -177,25 +177,23 @@ function init(id, e) {
 	let keydown = key => focused && ui.keydown(key)
 
 	function edit_selection() {
-		return ui.text_selection(e.editor_id, e.focused_field.align == 'right', true)
+		return e.focused_field.editor_selection(e.editor_id)
 	}
 
 	function caret_at_edge(d) {
-		if (edit_selection()[1] == 1/0) // select-all: both ends are the edge
-			return true
-		let [i, len] = ui.text_selection(e.editor_id, d > 0)
-		return !len && i == (d < 0 ? 0 : -1)
+		return e.focused_field.editor_caret_at_edge(e.editor_id, d)
 	}
 
 	// cross: move along the other axis than the advance_on_enter axis.
 	function advance_edit(cross, d) {
 		let by_row = (e.advance_on_enter == 'next_row') != cross
 		let opt = {input: e, sel_i: 0, sel_len: 1/0,
-			must_move: true, enter_edit: true}
+			must_move: true, enter_edit: true, advance_on_exit: true,
+			open_popup: true}
 		if (by_row)
-			e.focus_cell(true, true, d, 0, opt)
+			return e.focus_cell(true, true, d, 0, opt)
 		else
-			e.focus_next_cell(d, opt)
+			return e.focus_next_cell(d, opt)
 	}
 
 	// an edit that enter started is only exited by it; one started by F2 or
@@ -204,8 +202,8 @@ function init(id, e) {
 		if (!e.advance_on_exit || e.exit_edit_on_enter) {
 			e.exit_edit()
 		} else if (e.advance_on_enter) {
-			e.exit_edit()
-			advance_edit(cross, d)
+			if (!advance_edit(cross, d))
+				e.exit_edit()
 		}
 	}
 
@@ -224,11 +222,11 @@ function init(id, e) {
 			let v = field.update_editor(editor_id, v0)
 			if (v !== v0)
 				e.set_cell_val(row, field, v, {input: e})
-			let closed = ui.consume(editor_id, 'closed')
+			let closed = field.dropdown_closed(editor_id)
 			if (closed) {
 				let advance = closed[0]
 					&& e.advance_on_exit && e.advance_on_enter
-				e.exit_edit({input: e})
+				e.exit_edit({input: e, cancel: !closed[0]})
 				if (advance)
 					advance_edit(false, 1)
 			}
@@ -398,7 +396,9 @@ function init(id, e) {
 				ui.p(0) // draw_val() draws nothing for a value with no text!
 			}
 			if (editing && !draw_stage && field.has_editor) {
+				ui.focus_group(null, null, e.editor_id)
 				field.draw_editor(e.editor_id, input_val, pad_l, pad_r, h)
+				ui.end_focus_group()
 			}
 			ui.p(0)
 		ui.end_stack()
@@ -631,9 +631,11 @@ function init(id, e) {
 		gcol_h = round(line_height + sp)
 		gcol_gap = 1
 
-		if (e.editing && e.exit_edit_on_lost_focus
-				&& !ui.focused(id) && !ui.focused(e.editor_id)
-				&& !ui.focus_inside(id+'.cells'))
+		if (e.editing
+				&& !ui.focused(id)
+				&& !ui.focused(e.editor_id)
+				&& !ui.focus_inside(id+'.cells')
+			)
 			e.exit_edit()
 
 		// set keyboard state
@@ -1097,7 +1099,6 @@ function init(id, e) {
 		let clickable_cell = focused_row && focused_field
 			&& e.cell_clickable(focused_row, focused_field)
 		let has_editor = e.editing && focused_field?.has_editor
-			&& !focused_field.edits_in_popup
 
 		// same-row field navigation.
 		if (keydown(left_arrow) || keydown(right_arrow)) {
@@ -1200,9 +1201,12 @@ function init(id, e) {
 
 		}
 
-		// F2: enter edit mode
-		if (!e.editing && keydown('f2')) {
-			e.enter_edit({advance_on_exit: true})
+		// F2: enter edit mode, or toggle the dropdown of the edit in progress
+		if (keydown('f2')) {
+			if (e.editing)
+				focused_field.toggle_dropdown(e.editor_id)
+			else
+				e.enter_edit({advance_on_exit: true})
 			return false
 		}
 
@@ -1215,8 +1219,8 @@ function init(id, e) {
 				ui.fire(id, 'item_picked', focused_row)
 				ui.relayout()
 				return false
-			} else if (!e.editing || focused_field.edits_in_popup) {
-				e.enter_edit()
+			} else if (!e.editing) {
+				e.enter_edit({open_popup: !ctrl})
 				return false
 			} else {
 				end_edit_like_enter(ctrl, shift ? -1 : 1)
@@ -1232,7 +1236,7 @@ function init(id, e) {
 			}
 			if (e.editing) {
 				if (e.exit_edit_on_escape) {
-					e.exit_edit()
+					e.exit_edit({input: e, cancel: true})
 					return false
 				}
 			} else if (focused_row && focused_field) {

@@ -1462,16 +1462,29 @@ ui.state_init = function(id, k, v) {
 	s[k] = v
 }
 
+function free_state(id, s) {
+	assert(!(ui.captured_id == id), 'id removed while captured')
+	let free = s.free
+	if (free)
+		free(s, id)
+	state_map.delete(id)
+}
+
+ui.free = function(id) {
+	let s = state_map.get(id)
+	if (s)
+		free_state(id, s)
+	let prefix = id+'.'
+	for (let [id1, s1] of state_map)
+		if (id1.startsWith(prefix))
+			free_state(id1, s1)
+}
+
 function state_gc() {
 	for (let id of remove_id_set) {
 		let s = state_map.get(id)
-		if (!s)
-			continue
-		assert(!(ui.captured_id == id), 'id removed while captured')
-		let free = s.free
-		if (free)
-			free(s, id)
-		state_map.delete(id)
+		if (s)
+			free_state(id, s)
 	}
 	remove_id_set.clear()
 	let empty = remove_id_set
@@ -2875,12 +2888,33 @@ function reset_spacings() {
 }
 reset_spacings()
 
+// box args
+
+let fr0, align0, valign0, min_w0, min_h0
+
+ui.box_args = function(fr, align, valign, min_w, min_h) {
+	fr0     = fr
+	align0  = align
+	valign0 = valign
+	min_w0  = min_w
+	min_h0  = min_h
+}
+
+ui.clear_box_args = function() {
+	fr0     = null
+	align0  = null
+	valign0 = null
+	min_w0  = null
+	min_h0  = null
+}
+
 // box command
 
 // set by ui.scroll_to_view_next_box() to indicate that the next box needs
 // to be revealed by its scrollbox(es).
 let scroll_to_view_next
 
+// TODO: avoid `...args` which allocates!
 function ui_cmd_box(cmd, fr, align, valign, min_w, min_h, ...args) {
 	tui_snap_paddings()
 	let i = ui_cmd(cmd,
@@ -3881,8 +3915,8 @@ const POPUP_OX         = BOX_CT_ARGS+5 // offset x,y from where side+align put i
 
 const CMD_POPUP = cmd_ct('popup')
 
-// ox, oy shift the popup from where side and align put it, in screen
-// direction. margins stay a gap between the popup and its target.
+// ox, oy shift the popup from its final position, in screen direction.
+// margins put a gap between the popup and its target.
 ui.popup = function(
 	id, layer, target, side, align, min_w, min_h, flags, z_index, ox, oy
 ) {
@@ -6942,10 +6976,12 @@ function dropdown_update(id, s) {
 	let picked_args = ui.consume(picker_id, 'item_picked')
 	let picked = !!picked_args
 	let want_open = !!ui.consume(id, 'open')
+	let want_toggle = !!ui.consume(id, 'toggle')
 
 	let enter = ui.focused(id) && ui.keydown('enter')
+	let f2 = open && ui.keydown('f2') && ui.focus_inside(picker_id)
 
-	let toggle = click || enter
+	let toggle = click || enter || want_toggle || f2
 	let escape = open && ui.keydown('escape') && ui.focus_inside(picker_id)
 	// using hovers() is a hack to make the resizer work which captures the
 	// mouse and masks hit() (but it doesn't clear ui.click).
@@ -6957,7 +6993,7 @@ function dropdown_update(id, s) {
 			ui.capture_keys()
 	} else if (toggle) {
 		open = !open
-		if (enter)
+		if (enter || f2)
 			ui.capture_keys()
 	} else if (want_open) {
 		open = true
@@ -6968,8 +7004,10 @@ function dropdown_update(id, s) {
 		ui.fire(id, 'picked', ...picked_args)
 	if (!was_open && open)
 		ui.fire(id, 'opened')
-	if (was_open && !open)
+	if (was_open && !open) {
+		ui.free(picker_id)
 		ui.fire(id, 'closed', picked)
+	}
 
 	if (!was_open && open)
 		ui.focus_first(picker_id)
@@ -6991,8 +7029,6 @@ ui.dropdown = function(id, side) {
 	let open = s.open
 	dd_open = open
 	dd_picker_id = id+'.picker'
-
-	keepalive(dd_picker_id+'.resizer')
 
 	if (open) {
 		ui.popup(id+'.popup', 'open', null, side ?? 'il', 's', 0, 0,
@@ -7084,7 +7120,7 @@ ui.list_dropdown = function(id, items, fr, max_w, min_w, min_h) {
 				ui.list(picker_id, items, 0, 's', 's', 'l', 'c', 0, max_w,
 					null, ui.sp(), ui.sp(), ui.sp())
 			ui.end_scrollbox()
-			ui.resizer(picker_id+'.resizer', null, ui.em(16), 'y')
+			ui.resizer(id+'.resizer', null, ui.em(16), 'y')
 		}
 
 	ui.end_dropdown()
@@ -7538,24 +7574,6 @@ let SLIDER_STATE      = BOX_ARGS+9
 let SLIDER_HOVER   = 1
 let SLIDER_FOCUSED = 2
 
-let fr0, align0, valign0, min_w0, min_h0
-
-ui.box_args = function(fr, align, valign, min_w, min_h) {
-	fr0     = fr
-	align0  = align
-	valign0 = valign
-	min_w0  = min_w
-	min_h0  = min_h
-}
-
-ui.clear_box_args = function() {
-	fr0     = null
-	align0  = null
-	valign0 = null
-	min_w0  = null
-	min_h0  = null
-}
-
 ui.slider_mark_w_em = 2
 ui.slider_thumb_r_em = .6
 ui.slider_shaft_h_em = 0.2
@@ -7946,15 +7964,10 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 	ui.end_v()
 }
 
-ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
+function calendar_update(id, s) {
 
-	ui.focusable(id)
-	let s = ui.state(id)
+	let ranges = s.ranges
 	let h = s.h ?? 0
-	let cell_w = snap(ui.em(2.5), 2)
-	let cell_h = snap(ui.em(2.5), 2)
-	let cells_w = cell_w * 7
-	let cells_h = h * 2
 
 	let sel_day = s.day
 	let hit_day = num(ui.hit_match(id+'.day.'))
@@ -7971,6 +7984,8 @@ ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 			}
 		}
 	}
+
+	s.day_changed = false
 
 	if (ui.focused(id) && ui.keys_down()) {
 		let mode = 'day'
@@ -8008,10 +8023,7 @@ ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 			if (mode == 'day') {
 				sel_day = day(sel_day ?? time(), ddays)
 				s.day = sel_day
-				let weeks_from_this_week = days(week(sel_day) - week(time())) / 7
-				ui.scroll_to_view_rect(id, 0,
-					(weeks_from_this_week + 1) * cell_h,
-					cells_w, cell_h)
+				s.day_changed = true
 				ui.capture_keys()
 			} else if (focused_range && e.can_change_range(focused_range)) {
 				let r = focused_range
@@ -8047,11 +8059,34 @@ ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 
 	let picked_by_key = sel_day != null && ui.focused(id) && ui.keydown('enter')
 	let picked = clicked_day || picked_by_key
+	s.picked_day = picked ? sel_day : null
 	if (picked) {
 		ui.fire(id, 'item_picked', sel_day)
 		if (picked_by_key)
 			ui.capture_keys()
 		ui.relayout()
+	}
+}
+
+ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
+
+	ui.focusable(id)
+	let s = ui.state(id)
+	s.ranges = ranges
+	keepalive(id, calendar_update)
+
+	let h = s.h ?? 0
+	let cell_w = snap(ui.em(2.5), 2)
+	let cell_h = snap(ui.em(2.5), 2)
+	let cells_w = cell_w * 7
+
+	let sel_day = s.day
+
+	if (s.day_changed) {
+		let weeks_from_this_week = days(week(sel_day) - week(time())) / 7
+		ui.scroll_to_view_rect(id, 0,
+			(weeks_from_this_week + 1) * cell_h,
+			cells_w, cell_h)
 	}
 
 	ui.v(fr, 0, align, valign, min_w, min_h ?? cell_h * 6)
@@ -8082,7 +8117,7 @@ ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 
 	ui.end_v()
 
-	return picked ? sel_day : null
+	return s.picked_day
 }
 
 // image ---------------------------------------------------------------------
@@ -8261,11 +8296,35 @@ let SAT_LUM_HIT_LUM = BOX_ARGS+3
 let SAT_LUM_SEL_SAT = BOX_ARGS+4
 let SAT_LUM_SEL_LUM = BOX_ARGS+5
 
+function sat_lum_update(id, s) {
+
+	let [dstate, dx, dy, cs] = ui.drag(id)
+	if (dstate == 'drag')
+		ui.focus(id)
+	if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop') {
+		s.sat = clamp(cs.sat + dx / (cs.w - 1), 0, 1)
+		s.lum = clamp(cs.lum - dy / (cs.h - 1), 0, 1)
+	}
+
+	if (hit(id) && ui.click) {
+		ui.focus(id)
+		ui.capture(id)
+	}
+
+	if (ui.focused(id)) {
+		let lum_step = ui.keydown('arrowup'   ) && 1 || ui.keydown('arrowdown') && -1
+		let sat_step = ui.keydown('arrowright') && 1 || ui.keydown('arrowleft') && -1
+		if (lum_step)
+			s.lum = clamp(s.lum + (ui.keypressed('shift') ? 0.1 : 1) * 0.1 * lum_step, 0, 1)
+		if (sat_step)
+			s.sat = clamp(s.sat + (ui.keypressed('shift') ? 0.1 : 1) * 0.1 * sat_step, 0, 1)
+	}
+}
+
 ui.box_widget('sat_lum_square', {
 
 	create: function(cmd, id, hue, sat, lum) {
 
-		keepalive(id)
 		ui.focusable(id)
 
 		let fr     = fr0     ?? 1
@@ -8281,34 +8340,7 @@ ui.box_widget('sat_lum_square', {
 
 		ui.state_init(id, 'sat', sat)
 		ui.state_init(id, 'lum', lum)
-
-		let [dstate, dx, dy, cs] = ui.drag(id)
-		if (dstate == 'drag')
-			ui.focus(id)
-		if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop') {
-			sat = clamp(cs.sat + dx / (cs.w - 1), 0, 1)
-			lum = clamp(cs.lum - dy / (cs.h - 1), 0, 1)
-			ui.state(id).sat = sat
-			ui.state(id).lum = lum
-		}
-
-		if (hit(id) && ui.click) {
-			ui.focus(id)
-			ui.capture(id)
-		}
-
-		if (ui.focused(id)) {
-			let lum_step = ui.keydown('arrowup'   ) && 1 || ui.keydown('arrowdown') && -1
-			let sat_step = ui.keydown('arrowright') && 1 || ui.keydown('arrowleft') && -1
-			if (lum_step) {
-				let lum = ui.state(id, 'lum')
-				ui.state(id).lum = clamp(lum + (ui.keypressed('shift') ? 0.1 : 1) * 0.1 * lum_step, 0, 1)
-			}
-			if (sat_step) {
-				let sat = ui.state(id, 'sat')
-				ui.state(id).sat = clamp(sat + (ui.keypressed('shift') ? 0.1 : 1) * 0.1 * sat_step, 0, 1)
-			}
-		}
+		keepalive(id, sat_lum_update)
 
 		ui.stack('', fr, align, valign, min_w, min_h)
 			let i = ui_cmd_box(cmd, null, null, null, 0, 0,
@@ -8399,13 +8431,29 @@ let HUE_BAR_ID      = BOX_ARGS+0
 let HUE_BAR_HIT_HUE = BOX_ARGS+1
 let HUE_BAR_SEL_HUE = BOX_ARGS+2
 
+function hue_bar_update(id, s) {
+
+	let [dstate, dx, dy, cs] = ui.drag(id)
+	if (dstate == 'drag')
+		ui.focus(id)
+	if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop')
+		s.hue = round(clamp(cs.hue + dy / (cs.h - 1) * 360, 0, 360))
+
+	if (ui.focused(id)) {
+		let step = ui.keydown('arrowup') && -1 || ui.keydown('arrowdown') && 1
+		if (step)
+			s.hue = clamp(round(s.hue
+				+ (ui.keypressed('shift') ? 1 : 10) * step), 0, 360)
+	}
+}
+
 ui.box_widget('hue_bar', {
 
 	create: function(cmd, id, hue) {
 
-		keepalive(id)
 		ui.focusable(id)
 		ui.state_init(id, 'hue', hue)
+		keepalive(id, hue_bar_update)
 
 		let fr     = fr0     ?? 0
 		let align  = align0  ?? 's'
@@ -8413,22 +8461,6 @@ ui.box_widget('hue_bar', {
 		let min_w  = min_w0  ?? ui.em(1.5)
 		let min_h  = min_h0  ?? 0
 		ui.clear_box_args()
-
-		let [dstate, dx, dy, cs] = ui.drag(id)
-		if (dstate == 'drag')
-			ui.focus(id)
-		if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop')
-			ui.state(id).hue = round(clamp(
-				cs.hue + dy / (cs.h - 1) * 360, 0, 360))
-
-		if (ui.focused(id)) {
-			let step = ui.keydown('arrowup') && -1 || ui.keydown('arrowdown') && 1
-			if (step) {
-				let hue = ui.state(id, 'hue')
-				hue = clamp(round(hue + (ui.keypressed('shift') ? 1 : 10) * step), 0, 360)
-				ui.state(id).hue = hue
-			}
-		}
 
 		ui.stack('', fr, align, valign, min_w, min_h)
 			let i = ui_cmd_box(cmd, null, null, null, 0, 0,
@@ -8517,28 +8549,50 @@ ui.box_ct_widget('aspect_box', {
 let HEX_RE = /^#[0-9a-f]{6}$/i
 let HSL_RE = /^\s*([\d.]+)\s*\u00B0?\s*,\s*([\d.]+)\s*%?\s*,\s*([\d.]+)\s*%?\s*$/
 
+function color_picker_update(id, s) {
+
+	let hb = ui.state(id+'.hb')
+	let sl = ui.state(id+'.sl')
+	if (hb.hue == null || sl.sat == null || sl.lum == null)
+		return
+
+	let hsl_id = id+'.input_hsl'
+	if (ui.focused(hsl_id)) {
+		let m = (ui.state(hsl_id, 'text') ?? '').match(HSL_RE)
+		if (m) {
+			hb.hue = clamp(num(m[1])      , 0, 360)
+			sl.sat = clamp(num(m[2]) / 100, 0, 1)
+			sl.lum = clamp(num(m[3]) / 100, 0, 1)
+		}
+	}
+
+	let hex_id = id+'.input_rgb'
+	if (ui.focused(hex_id)) {
+		let hex = ui.state(hex_id, 'text')
+		if (hex != null && HEX_RE.test(hex))
+			;[hb.hue, sl.sat, sl.lum] = hex_to_hsl(hex)
+	}
+
+	s.hex = hsl_to_rgb_hex(hb.hue, sl.sat, sl.lum)
+}
+
 ui.color_picker = function(id, hue, sat, lum) {
 	hue = hue ?? 0
 	sat = sat ?? .5
 	lum = lum ?? .5
+	keepalive(id, color_picker_update)
 	ui.v(1, ui.sp())
 		ui.h(0, ui.sp05())
-			ui.start_recording()
-				ui.hue_bar(id+'.hb', hue)
-			let hue_bar = ui.end_recording()
-			ui.start_recording()
-				ui.aspect_box(1, 1, 's', 't')
-					hue = ui.state(id+'.hb', 'hue') ?? hue
-					ui.sat_lum_square(id+'.sl', hue, sat, lum)
-				ui.end_aspect_box()
-			let sl_square = ui.end_recording()
+			hue = ui.state(id+'.hb', 'hue') ?? hue
 			sat = ui.state(id+'.sl', 'sat') ?? sat
 			lum = ui.state(id+'.sl', 'lum') ?? lum
 			ui.aspect_box(1, 1, 's', 't')
 				ui.bb(':'+hsl(hue, sat, lum))
 			ui.end_aspect_box()
-			ui.play_recording(sl_square)
-			ui.play_recording(hue_bar)
+			ui.aspect_box(1, 1, 's', 't')
+				ui.sat_lum_square(id+'.sl', hue, sat, lum)
+			ui.end_aspect_box()
+			ui.hue_bar(id+'.hb', hue)
 		ui.end_h()
 		ui.h(0, ui.sp(), 's')
 			ui.label(id+'.input_hsl', 'HSL', .5)
@@ -8548,34 +8602,16 @@ ui.color_picker = function(id, hue, sat, lum) {
 				dec(lum*100)+'%'
 			if (!ui.focused(id+'.input_hsl'))
 				ui.state(id+'.input_hsl').text = s
-			let s1 = ui.input(id+'.input_hsl', s, 1)
-			if (ui.focused(id+'.input_hsl') && s1 != s) {
-				let m = s1.match(HSL_RE)
-				if (m) {
-					hue = clamp(num(m[1])      , 0, 360)
-					sat = clamp(num(m[2]) / 100, 0, 1)
-					lum = clamp(num(m[3]) / 100, 0, 1)
-					ui.state(id+'.hb').hue = hue
-					ui.state(id+'.sl').sat = sat
-					ui.state(id+'.sl').lum = lum
-				}
-			}
+			ui.input(id+'.input_hsl', s, 1)
 		ui.end_h()
 		ui.h(0, ui.sp(), 's')
 			ui.label(id+'.input_rgb', 'HEX', .5)
-			let hex = hsl_to_rgb_hex(hue, sat, lum)
+			let hex = ui.state(id, 'hex') ?? hsl_to_rgb_hex(hue, sat, lum)
 			// keep the box in sync with hue_bar/sat_lum_square while the user
 			// isn't typing in it; only trust its text as an edit while focused.
 			if (!ui.focused(id+'.input_rgb'))
 				ui.state(id+'.input_rgb').text = hex
-			let hex1 = ui.input(id+'.input_rgb', hex, 1)
-			if (ui.focused(id+'.input_rgb') && hex1 != hex && HEX_RE.test(hex1)) {
-				;[hue, sat, lum] = hex_to_hsl(hex1)
-				ui.state(id+'.hb').hue = hue
-				ui.state(id+'.sl').sat = sat
-				ui.state(id+'.sl').lum = lum
-				hex = hex1
-			}
+			ui.input(id+'.input_rgb', hex, 1)
 		ui.end_h()
 	ui.end_v()
 	return hex

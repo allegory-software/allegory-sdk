@@ -656,7 +656,6 @@ ui.nav = function(opt) {
 	e.save_on_exit_edit          = false
 	e.save_on_exit_row           = true
 
-	e.exit_edit_on_lost_focus    = false
 	e.save_row_states            = false
 
 	// init/update/free -------------------------------------------------------
@@ -1601,7 +1600,7 @@ ui.nav = function(opt) {
 		}
 
 		let was_editing = ev.was_editing || e.editing
-		let focus_editor = ev.focus_editor || ui.focused(e.editor_id)
+		let focus_editor = ev.focus_editor || is_editor_focused()
 		let enter_edit = ev.enter_edit || (was_editing && e.stay_in_edit_mode)
 		let editable = (ev.editable || enter_edit) && !ev.focus_non_editable_if_not_found
 		let expand_selection = ev.expand_selection && e.can_select_multiple
@@ -1726,6 +1725,8 @@ ui.nav = function(opt) {
 			let field0 = e.fields[fi0]
 			e.do_focus_cell(row, field, row0, field0)
 			e.announce('focused_cell_changed', row, field, row0, field0, ev)
+			if (e.is_picker)
+				ui.relayout()
 		}
 
 		let sel_rows_changed = map_keys_different(old_selected_rows, e.selected_rows)
@@ -1748,7 +1749,7 @@ ui.nav = function(opt) {
 				sel_len         : ev.sel_len,
 				focus           : focus_editor || false,
 				advance_on_exit : ev.advance_on_exit,
-				open_popup      : false,
+				open_popup      : ev.open_popup ?? false,
 			})
 
 		if (ev.make_visible != false)
@@ -1821,7 +1822,7 @@ ui.nav = function(opt) {
 	e.refocus_state = function(how) {
 		let fs = {how: how}
 		fs.was_editing = e.editing
-		fs.focus_editor = ui.focused(e.editor_id)
+		fs.focus_editor = is_editor_focused()
 		fs.col = e.focused_field && e.focused_field.name
 		if (how == 'pk' || how == 'val') {
 			if (e.pk_fields)
@@ -3128,11 +3129,16 @@ ui.nav = function(opt) {
 			e.set_cell_val(row, field, !e.cell_input_val(row, field), ev)
 	}
 
+	function is_editor_focused() {
+		return ui.focused(e.editor_id)
+			|| ui.focus_inside(e.editor_id)
+	}
+
 	// sel_i, sel_len: in ui.select_text() terms, all of it by default.
 	e.enter_edit = function(opt) {
 		if (e.editing) {
-			if (e.focused_field?.edits_in_popup && opt?.open_popup != false)
-				ui.fire(e.editor_id, 'open')
+			if (opt?.open_popup != false)
+				e.focused_field.open_dropdown(e.editor_id)
 			return true
 		}
 		let row = e.focused_row
@@ -3145,10 +3151,9 @@ ui.nav = function(opt) {
 		e.advance_on_exit = opt?.advance_on_exit ?? false
 		let editor_type = field.lookup_rowset_name || field.type
 		e.editor_id = editor_type + '.editor'
-		let cv = e.cell_input_val(row, field)
-		ui.set_text_value(e.editor_id, cv == null ? '' : field.to_input(cv))
-		if (field.edits_in_popup && opt?.open_popup != false)
-			ui.fire(e.editor_id, 'open')
+		field.init_editor(e.editor_id, e.cell_input_val(row, field))
+		if (opt?.open_popup != false)
+			field.open_dropdown(e.editor_id)
 		let sel_i   = opt?.sel_i
 		let sel_len = opt?.sel_len
 		if (sel_i == null) { // select all of it
@@ -3157,10 +3162,8 @@ ui.nav = function(opt) {
 		}
 		// by key: that is what focuses the input element. a click can't, the
 		// input only appears a frame later.
-		if (opt?.focus !== false) {
-			ui.focus(e.editor_id, true)
-			ui.select_text(e.editor_id, sel_i, sel_len)
-		}
+		if (opt?.focus !== false)
+			field.focus_editor(e.editor_id, sel_i, sel_len)
 		return true
 	}
 
@@ -3170,7 +3173,8 @@ ui.nav = function(opt) {
 		let row = e.focused_row
 		let field = e.focused_field
 		// leaving because focus went elsewhere must not pull it back.
-		let take_focus = ui.focused(e.editor_id)
+		let take_focus = is_editor_focused()
+		let editor_id = e.editor_id
 		e.editing = false
 		e.advance_on_exit = false
 		e.editor_id = null
@@ -3182,6 +3186,7 @@ ui.nav = function(opt) {
 		}
 		if (take_focus)
 			ui.focus(e.id)
+		ui.free(editor_id)
 	}
 
 	e.revert_cell = function(row, field, ev) {
@@ -3376,7 +3381,7 @@ ui.nav = function(opt) {
 		// focused row first. if that's not possible, the insert is aborted.
 		if (ev.focus_it) {
 			ev.was_editing  = e.editing
-			ev.focus_editor = ui.focused(e.editor_id)
+			ev.focus_editor = is_editor_focused()
 			if (!e.focus_cell(false, false))
 				return 0
 		}
@@ -4622,6 +4627,38 @@ all_field_types.update_editor = function(id, v) {
 	return update_text_editor(this, id, v)
 }
 
+all_field_types.init_editor = function(id, v) {
+	ui.set_text_value(id, v == null ? '' : this.to_input(v))
+}
+
+all_field_types.focus_editor = function(id, sel_i, sel_len) {
+	ui.focus(id, true)
+	ui.select_text(id, sel_i, sel_len)
+}
+
+all_field_types.editor_selection = function(id) {
+	return ui.text_selection(id, this.align == 'right', true)
+}
+
+all_field_types.editor_caret_at_edge = function(id, d) {
+	if (this.editor_selection(id)[1] == 1/0) // select-all: both ends are the edge
+		return true
+	let [i, len] = ui.text_selection(id, d > 0)
+	return !len && i == (d < 0 ? 0 : -1)
+}
+
+all_field_types.open_dropdown = function(id) {
+	ui.fire(id, 'open')
+}
+
+all_field_types.toggle_dropdown = function(id) {
+	ui.fire(id, 'toggle')
+}
+
+all_field_types.dropdown_closed = function(id) {
+	return ui.consume(id, 'closed')
+}
+
 // same call as draw_text(), so the cell doesn't shift on entering edit.
 all_field_types.draw_editor = function(id, v, pad_l, pad_r, h) {
 	ui.p(pad_l, 0, pad_r, 0)
@@ -4763,14 +4800,33 @@ ts.has_time = true
 ts.precision = 's'
 ts.w = 160
 
+date.open_dropdown = function(id) {
+	ui.fire(id+'.calendar', 'open')
+}
+
+date.toggle_dropdown = function(id) {
+	ui.fire(id+'.calendar', 'toggle')
+}
+
+date.dropdown_closed = function(id) {
+	return ui.consume(id+'.calendar', 'closed')
+}
+
 date.update_editor = function(id, v) {
 	let calendar_id = id+'.calendar'
+	let picker_id = calendar_id+'.picker'
 	let picked = ui.consume(calendar_id, 'picked')
 	if (picked) {
 		let [ts] = picked
 		ui.state(id).text = this.to_input(ts)
-		ui.focus(id)
 		return ts
+	}
+	if (ui.state(calendar_id, 'open')) {
+		let ts = ui.state(picker_id, 'day')
+		if (ts != null) {
+			ui.state(id).text = this.to_input(ts)
+			return ts
+		}
 	}
 	return update_text_editor(this, id, v)
 }
@@ -4809,7 +4865,7 @@ date.draw_editor = function(id, v, pad_l, pad_r, h) {
 			}
 			ui.calendar(picker_id, null)
 
-			let resize_id = picker_id+'.resizer'
+			let resize_id = calendar_id+'.resizer'
 			ui.resizer(resize_id, null, null, 'y')
 		}
 
@@ -4893,12 +4949,19 @@ enm.update_editor = function(id, v) {
 
 	assert(this.enum_values != null, this.name, ': enum col with no enum_values')
 
-	let picked = ui.consume(id, 'picked')
-	if (!picked)
-		return v
-
 	let vals = words(this.enum_values) // 'v1 ...' or ['v1', ...]
-	return vals[picked[0]]
+
+	let picked = ui.consume(id, 'picked')
+	if (picked)
+		return vals[picked[0]]
+
+	if (ui.state(id, 'open')) {
+		let i = ui.state(id+'.picker', 'focused_item_i')
+		if (i != null)
+			return vals[i]
+	}
+
+	return v
 }
 
 enm.draw_editor = function(id, v, pad_l, pad_r, h) {
@@ -4976,11 +5039,18 @@ lookup_editor.update_editor = function(id, v) {
 
 	let picked = ui.consume(id, 'picked')
 
-	if (!picked)
-		return v
+	if (picked) {
+		let ln_row = picked[0]
+		return ln_row ? ln.cell_val(ln_row, lookup_val_field(this)) : v
+	}
 
-	let ln_row = picked[0]
-	return ln_row ? ln.cell_val(ln_row, lookup_val_field(this)) : v
+	if (ui.state(id, 'open')) {
+		let ln_row = ln.focused_row
+		if (ln_row)
+			return ln.cell_val(ln_row, lookup_val_field(this))
+	}
+
+	return v
 }
 
 lookup_editor.draw_editor = function(id, v, pad_l, pad_r, h) {
@@ -5005,7 +5075,7 @@ lookup_editor.draw_editor = function(id, v, pad_l, pad_r, h) {
 				if (ln_row)
 					ln.focus_cell(ln.row_index(ln_row), true)
 			}
-			let resize_id = picker_id+'.resizer'
+			let resize_id = id+'.resizer'
 			ui.grid(picker_id, {nav: ln}, 0, 's', 's')
 			ui.resizer(resize_id, ui.em(24), ui.em(12))
 		}
@@ -5044,10 +5114,14 @@ color.edits_in_popup = true
 // changes when Pick is clicked, with whatever hex the picker last returned.
 color.update_editor = function(id, v) {
 	let picked = ui.consume(id, 'picked')
-	if (!picked)
-		return v
-	let [action, hex] = picked
-	return action == 'pick' ? hex : v
+	if (picked)
+		return picked[0]
+	if (ui.state(id, 'open')) {
+		let hex = ui.state(id+'.picker', 'hex')
+		if (hex != null)
+			return hex
+	}
+	return v
 }
 
 color.draw_editor = function(id, v, pad_l, pad_r, h) {
@@ -5061,18 +5135,18 @@ color.draw_editor = function(id, v, pad_l, pad_r, h) {
 
 		if (open) {
 			let [hue, sat, lum] = opened ? hex_to_hsl(v || '#808080') : []
-			let resize_id = picker_id+'.resizer'
+			let resize_id = id+'.resizer'
 			ui.p(ui.sp2())
 			ui.v(0, ui.sp1())
 				let hex = ui.color_picker(picker_id, hue, sat, lum)
 				ui.h(0, ui.sp05(), 'r')
 					ui.default_button(id+'.pick')
 					if (ui.primary_button(id+'.pick', S('pick', 'Pick'), 0)) {
-						ui.fire(picker_id, 'item_picked', 'pick', hex)
+						ui.fire(picker_id, 'item_picked', hex)
 						ui.relayout()
 					}
 					if (ui.button(id+'.cancel', S('cancel', 'Cancel'), 0)) {
-						ui.fire(picker_id, 'item_picked', 'cancel')
+						ui.fire(id, 'toggle')
 						ui.relayout()
 					}
 				ui.end_h()
