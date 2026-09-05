@@ -16,6 +16,8 @@ const {
 
 ui.grid_fast_path = true
 
+ui.capture_keydown('f1') // browser: help -> grid: key help
+
 /* icon aliases --------------------------------------------------------------
 
 The grid names its icons; the codepoints live here so that loading a
@@ -123,6 +125,56 @@ ui.widget('fast_field', {
 	},
 })
 
+let help_lines = [
+	'NAVIGATION:',
+	':',
+	'\u2190\u2191\u2192\u2193                       : move between cells',
+	'Shift+\u2190\u2191\u2192\u2193                 : extend the selection',
+	'Tab, Shift+Tab             : next and previous cell',
+	'PgUp/Dn                    : move one page',
+	'Home/End                   : first and last row',
+	':',
+	'EDITING:',
+	':',
+	'Enter                      : edit cell',
+	'Esc                        : cancel the edit',
+	'F2                         : edit cells vertically',
+	'Ctrl+ \u2190 \u2192 Enter            : move and edit cells as text',
+	'Insert                     : insert row',
+	'\u2193 on the last row          : add row',
+	'Ctrl+Insert                : insert a copy of the focused row',
+	'Delete                     : delete the selected rows',
+	'Ctrl+Delete                : set the selected cells to null',
+	'Space                      : toggle a checkbox, or expand a tree node',
+	'Ctrl+A                     : select all cells',
+	'Ctrl+C                     : copy the cell',
+	'Ctrl+S                     : save',
+	'Backspace                  : erase a search character',
+	'Typing                     : search',
+]
+
+function draw_help(id, target_i) {
+	ui.mb(10)
+	ui.p(ui.sp2(), ui.sp())
+	ui.popup(id+'.help', 'overlay', target_i, 'b', '[', 0, 0,
+		'change_side constrain')
+		ui.bb_tooltip('info', null, 'light', null, ui.sp05())
+		ui.v(0)
+			for (let line of help_lines) {
+				let ci = line.indexOf(':')
+				ui.h(0)
+					ui.scope()
+						ui.font('monospace')
+						ui.bold()
+						ui.text('', line.slice(0, ci), 0, 'l', 'c')
+					ui.end_scope()
+					ui.text('', line.slice(ci+1), 0, 'l', 'c')
+				ui.end_h()
+			}
+		ui.end_v()
+	ui.end_popup()
+}
+
 function init(id, e) {
 
 	e.id = id // for errors
@@ -156,6 +208,8 @@ function init(id, e) {
 	let hit_fi // field index
 	let hit_indent
 	let row_move_state
+
+	let help_open
 	let clicked_indent
 
 	function reset_mouse_state() {
@@ -177,7 +231,9 @@ function init(id, e) {
 	let keydown = key => focused && ui.keydown(key)
 
 	function edit_selection() {
-		return e.focused_field.editor_selection(e.editor_id)
+		return e.focused_field.has_editor
+			? e.focused_field.editor_selection(e.editor_id)
+			: [e.edit_sel_i, e.edit_sel_len]
 	}
 
 	function caret_at_edge(d) {
@@ -253,7 +309,8 @@ function init(id, e) {
 
 		let grid_focused = focused
 		let row_focused = e.focused_row == row
-		let cell_focused = row_focused && (!e.can_focus_cells || field == e.focused_field)
+		let field_focused = e.focused_field == field
+		let cell_focused = row_focused && (!e.can_focus_cells || field_focused)
 		let disabled = e.is_cell_disabled(row, field)
 		let is_new = row.is_new
 		let cell_invalid = e.cell_has_errors(row, field)
@@ -323,6 +380,9 @@ function init(id, e) {
 		CS.editing = editing
 		CS.is_null = is_null
 		CS.is_empty = is_empty
+		CS.row_focused = row_focused
+		CS.field_focused = field_focused
+		CS.cell_focused = cell_focused
 		return CS
 	}
 
@@ -331,11 +391,12 @@ function init(id, e) {
 		let cs = cell_state(row, field, ri, draw_stage)
 		let input_val = cs.input_val
 		let bg = cs.bg, bgs = cs.bgs, fg = cs.fg, editing = cs.editing
+		let row_focused = cs.row_focused
+		let field_focused = cs.field_focused
 
-		let row_focused = e.focused_row == row
 		let hovering = hit_zone == 'cell' && hit_ri == ri && hit_fi == fi
 		let full_width = !draw_stage
-			&& ((row_focused && field == e.focused_field) || hovering)
+			&& ((row_focused && field_focused) || hovering)
 			&& (field.align == 'left' || !field_has_indent(field))
 
 		let indent_x = 0
@@ -377,9 +438,13 @@ function init(id, e) {
 			}
 		}
 
+		// render help
 		ui.m(cell_x, y, 0, 0)
-		ui.stack('', 0, 'l', 't', cell_w, h)
+		let cell_i = ui.stack('', 0, 'l', 't', cell_w, h)
 			ui.bb(bg, bgs, draw_stage == 'col_move' ? 'lrb' : 'b', 'light')
+			if (help_open && !draw_stage && row_focused && field_focused)
+				draw_help(id, cell_i)
+
 			ui.color(fg)
 			if (has_children) {
 				ui.p(indent_x - sp2, 0, sp2, 0)
@@ -390,7 +455,7 @@ function init(id, e) {
 			// the popup can be moved off the cell to fit on screen.
 			if (!editing || draw_stage || field.edits_in_popup || !field.has_editor) {
 				ui.p(pad_l, 0, pad_r, 0)
-				if (row == e.focused_row && field == e.quicksearch_field)
+				if (row_focused && field == e.quicksearch_field)
 					ui.mark_text(0, e.quicksearch_text.length)
 				e.draw_val(row, field, input_val, true, full_width)
 				ui.p(0) // draw_val() draws nothing for a value with no text!
@@ -648,6 +713,9 @@ function init(id, e) {
 		// check mouse state ---------------------------------------------------
 
 		reset_mouse_state()
+
+		if (ui.click)
+			help_open = false
 
 		if (ui.click && ui.hovers(id))
 			ui.focus(id)
@@ -1100,6 +1168,9 @@ function init(id, e) {
 			&& e.cell_clickable(focused_row, focused_field)
 		let has_editor = e.editing && focused_field?.has_editor
 
+		if (keydown('f1'))
+			return false
+
 		// same-row field navigation.
 		if (keydown(left_arrow) || keydown(right_arrow)) {
 
@@ -1338,8 +1409,10 @@ function init(id, e) {
 			return false
 		}
 
-		})() === false) // if (ui.key_events.length) ...
+		})() === false) { // if (ui.key_events.length) ...
+			help_open = keydown('f1') && !help_open
 			ui.capture_keys()
+		}
 
 		update_editor()
 

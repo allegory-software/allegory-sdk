@@ -3114,6 +3114,8 @@ ui.nav = function(opt) {
 	e.editing = false
 	e.advance_on_exit = false
 	e.editor_id = null
+	e.edit_sel_i = 0
+	e.edit_sel_len = 1/0
 
 	// cells that act on a click instead of opening an editor.
 	e.cell_clickable = function(row, field) {
@@ -3137,7 +3139,7 @@ ui.nav = function(opt) {
 	// sel_i, sel_len: in ui.select_text() terms, all of it by default.
 	e.enter_edit = function(opt) {
 		if (e.editing) {
-			if (opt?.open_popup != false)
+			if (e.focused_field.has_editor && opt?.open_popup != false)
 				e.focused_field.open_dropdown(e.editor_id)
 			return true
 		}
@@ -3149,21 +3151,25 @@ ui.nav = function(opt) {
 			return false
 		e.editing = true
 		e.advance_on_exit = opt?.advance_on_exit ?? false
-		let editor_type = field.lookup_rowset_name || field.type
-		e.editor_id = editor_type + '.editor'
-		field.init_editor(e.editor_id, e.cell_input_val(row, field))
-		if (opt?.open_popup != false)
-			field.open_dropdown(e.editor_id)
 		let sel_i   = opt?.sel_i
 		let sel_len = opt?.sel_len
 		if (sel_i == null) { // select all of it
 			sel_i = 0
 			sel_len = 1/0
 		}
-		// by key: that is what focuses the input element. a click can't, the
-		// input only appears a frame later.
-		if (opt?.focus !== false)
-			field.focus_editor(e.editor_id, sel_i, sel_len)
+		e.edit_sel_i   = sel_i
+		e.edit_sel_len = sel_len
+		let editor_type = field.lookup_rowset_name || field.type
+		e.editor_id = editor_type + '.editor'
+		if (field.has_editor) {
+			field.init_editor(e.editor_id, e.cell_input_val(row, field))
+			if (opt?.open_popup != false)
+				field.open_dropdown(e.editor_id)
+			// by key: that is what focuses the input element. a click can't, the
+			// input only appears a frame later.
+			if (opt?.focus !== false)
+				field.focus_editor(e.editor_id, sel_i, sel_len)
+		}
 		return true
 	}
 
@@ -4679,6 +4685,18 @@ all_field_types.draw = function(v, mode, row, full_width) {
 	return this.draw_text(s, mode, row, full_width)
 }
 
+// an editor that is a dropdown has no caret to move within.
+
+let dropdown_editor = {}
+
+dropdown_editor.editor_selection = function(id) {
+	return [0, 1/0]
+}
+
+dropdown_editor.editor_caret_at_edge = function(id, d) {
+	return true
+}
+
 // text ----------------------------------------------------------------------
 
 // the default type: all its behavior comes from all_field_types.
@@ -4935,6 +4953,7 @@ bool.draw = function(v, mode, row) {
 
 let enm = {}
 field_types.enum = enm
+assign(enm, dropdown_editor)
 
 enm.to_text = function(v) {
 	let s = this.enum_labels ? this.enum_labels[v] : undefined
@@ -5005,7 +5024,7 @@ enm.draw_editor = function(id, v, pad_l, pad_r, h) {
 
 // editor for a field with a lookup nav, assigned by init_field: a lookup can
 // be on a field of any type, so it can't be a field type of its own.
-lookup_editor = {}
+lookup_editor = assign({}, dropdown_editor)
 
 lookup_editor.edits_in_popup = true
 
@@ -5098,6 +5117,7 @@ tags.to_text = function(v) {
 
 let color = {}
 field_types.color = color
+assign(color, dropdown_editor)
 
 color.draw = function(v, mode) {
 	if (!mode)
