@@ -2893,11 +2893,20 @@ reset_spacings()
 let fr0, align0, valign0, min_w0, min_h0
 
 ui.box_args = function(fr, align, valign, min_w, min_h) {
-	fr0     = fr
-	align0  = align
-	valign0 = valign
-	min_w0  = min_w
-	min_h0  = min_h
+	if (isobj(fr)) {
+		let t = fr
+		fr0     = t.fr
+		align0  = t.align
+		valign0 = t.valign
+		min_w0  = t.min_w
+		min_h0  = t.min_h
+	} else {
+		fr0     = fr
+		align0  = align
+		valign0 = valign
+		min_w0  = min_w
+		min_h0  = min_h
+	}
 }
 
 ui.clear_box_args = function() {
@@ -3045,12 +3054,8 @@ ui.hit_box = hit_box
 ui.box_widget = function(cmd_name, t, is_ct) {
 	let ID = t.ID
 	function box_hit(a, i) {
-		let x = a[i+0]
-		let y = a[i+1]
-		let w = a[i+2]
-		let h = a[i+3]
 		let id = a[i+ID]
-		if (hit_rect(x, y, w, h)) {
+		if (hit_box(a, i)) {
 			hover(id)
 			return true
 		}
@@ -4967,7 +4972,7 @@ ui.text = function(
 	id, s, fr, align, valign, max_w, w, h, wrap, editable, input_type
 ) {
 	// NOTE: w and h default to measured text size.
-	s = s ?? ''
+	s = String(s ?? '')
 	wrap = wrap == 'line' ? TEXT_WRAP_LINE : wrap == 'word' ? TEXT_WRAP_WORD : 0
 	if (wrap == TEXT_WRAP_LINE) {
  		if (s.includes('\n'))
@@ -6389,8 +6394,11 @@ ui.button_state = function(id) {
 			ui.capture_keys()
 		return 'click'
 	}
-	return cs && hs ? ui.clickup ? 'click' : 'active'
+	let state = cs && hs ? ui.clickup ? 'click' : 'active'
 		: hs ? 'hover' : ui.focused(id) ? 'focused' : null
+	if (state == 'click')
+		ui.relayout() // because most-often it will be needed.
+	return state
 }
 
 ui.button_bb = function(style, state) {
@@ -6485,37 +6493,41 @@ function split(hv, id, size, unit, fixed_side,
 	let snap_px = 50
 	let splitter_w = 1
 
+	fixed_side ??= 1
+	assert(fixed_side == 1 || fixed_side == 2)
+
 	let horiz = hv == 'h'
-	let W = horiz ? 'w' : 'h'
+	let W = horiz ? 'w' : 'h' // measured/main-axis size prop
 	let [state, dx, dy] = ui.drag(id)
 	keepalive(id)
 	let s = ui.state(id)
 	let cs = captured(id)
 	let measured_wh = cs?.[W] ?? s[W]
 	let max_size = (measured_wh ?? 1/0) - splitter_w
-	assert(!unit || unit == 'px' || unit == '%')
+	assert(!unit || unit == 'px' || unit == 'fr')
 	let fixed = unit == 'px'
 	if (fixed && measured_wh == null)
 		ui.relayout() // needed or `collapsed` may start out wrong and stay wrong.
 	size = s.size ?? size
-	let fr = fixed ? 0 : (size ?? 0.5)
-	let min_size = fixed ? size ?? 0 : 0
+	let side_fr  = fixed ? 0 : (size ?? 0.5) // fr/px of the fixed_side pane
+	let side_min = fixed ? size ?? 0 : 0
 	if (state && state != 'hover') {
 		if (state == 'drag')
 			cs[W] = s[W]
-		let size_px = fixed ? min_size : round(fr * max_size)
-		size_px += horiz ? dx : dy
+		let size_px = fixed ? side_min : round(side_fr * max_size)
+		let delta = horiz ? dx : dy
+		size_px += fixed_side == 2 ? -delta : delta // side 2 shrinks as the splitter moves toward it
 		if (size_px < snap_px)
 			size_px = 0
 		else if (size_px > max_size - snap_px)
 			size_px = max_size
 		size_px = min(size_px, max_size)
 		if (fixed)
-			min_size = size_px
+			side_min = size_px
 		else
-			fr = size_px / max_size
+			side_fr = size_px / max_size
 		if (state == 'drop')
-			s.size = fixed ? min_size : fr
+			s.size = fixed ? side_min : side_fr
 	}
 
 	ui[hv](split_fr, gap, align, valign, min_w, min_h)
@@ -6525,15 +6537,23 @@ function split(hv, id, size, unit, fixed_side,
 	ui.measure(id)
 
 	let collapsed = fixed
-		? min_size == 0 || (max_size != null && min_size == max_size)
-		: fr == 0 || fr == 1
+		? side_min == 0 || (max_size != null && side_min == max_size)
+		: side_fr == 0 || side_fr == 1
+
+	let other_fr = fixed ? 1 : 1 - side_fr
+
+	let [fr1, min1, fr2, min2] = fixed_side == 1
+		? [side_fr, side_min, other_fr, 0]
+		: [other_fr, 0, side_fr, side_min]
 
 	scope_set('split'   , hv)
 	scope_set('split_id', id)
 	scope_set('split_collapsed', collapsed)
-	scope_set('split_fr2', fixed ? 1 : 1 - fr)
+	scope_set('split_fr2' , fr2)
+	scope_set('split_min2', min2)
 
-	ui.sb(id+'.scrollbox1', fr, null, null, null, null, min_size)
+	ui.sb(id+'.scrollbox1', fr1, null, null, null, null,
+		horiz ? min1 : null, horiz ? null : min1)
 
 	return size
 }
@@ -6546,19 +6566,26 @@ ui.splitter = function() {
 
 	let hv = scope_get('split')
 	let id = scope_get('split_id')
+	let horiz = hv == 'h'
 	let collapsed = scope_get('split_collapsed')
 	let fr2 = scope_get('split_fr2')
+	let min2 = scope_get('split_min2')
 	let st = hit(id) ? 'hover' : null
 
 	if (hv == 'h') {
+		// hack: the native ew-resize cursor icon reads visually left-skewed,
+		// so shift the hit area right without moving the rendered line.
+		let hit_dx = 4
 		ui.stack('', 0, 'l', 's', 1, 0)
 			ui.popup('', null, null, 'it', '[]')
-				ui.ml(-hit_distance / 2)
+				ui.ml(-hit_distance / 2 + hit_dx)
 				ui.stack(id, 0, 'l', 's', hit_distance)
+					ui.ml(-hit_dx)
 					ui.stack('', 1, 'c', 's')
 						ui.border('l', 'intense', st)
 					ui.end_stack()
 					if (collapsed) {
+						ui.ml(-hit_dx)
 						ui.stack('', 1, 'c', 'c', 5, 2*ui.sp8())
 							ui.border('lr', 'intense', st)
 						ui.end_stack()
@@ -6584,7 +6611,8 @@ ui.splitter = function() {
 		ui.end_stack()
 	}
 
-	ui.sb(id+'.scrollbox2', fr2)
+	ui.sb(id+'.scrollbox2', fr2, null, null, null, null,
+		horiz ? min2 : null, horiz ? null : min2)
 }
 
 function end_split(hv) {
@@ -6606,6 +6634,9 @@ ui.end_vsplit = function() { end_split('v') }
 
 // text-input ----------------------------------------------------------------
 
+ui.input_min_w_em = 6
+ui.em_input = () => ui.em(ui.input_min_w_em)
+
 ui.input = function(id, s, fr, w, h) {
 	ui.stack('', fr, 's', 's')
 		ui.bb(
@@ -6613,7 +6644,7 @@ ui.input = function(id, s, fr, w, h) {
 			1, 'intense', ui.focused(id) ? 'hover' : null)
 		ui.p(ui.sp())
 		ui.color('text', ui.focused(id) ? 'focused' : null)
-		s = ui.text(id, s, 1, 'l', 'c', null, w ?? ui.em(12), h, null, true)
+		s = ui.text(id, s, 1, 'l', 'c', null, w ?? ui.em_input(), h, null, true)
 	ui.end_stack()
 	return s
 }
@@ -7180,7 +7211,7 @@ ui.list_dropdown = function(id, items, fr, max_w, min_w, min_h) {
 		}
 	}
 
-	ui.stack('', fr, 's', 's', min_w ?? ui.em(12), min_h)
+	ui.stack('', fr, 's', 's', min_w ?? ui.em_input(), min_h)
 
 	// empty box for the popup to align to, the size of the closed dropdown.
 	ui.p(ui.sp())
@@ -7192,7 +7223,8 @@ ui.list_dropdown = function(id, items, fr, max_w, min_w, min_h) {
 			ui.bb('input', null, 1, 'intense', ui.focused(id) ? 'hover' : null)
 		ui.p(ui.sp())
 		ui.h(0, ui.sp())
-			ui.text('', sel_i != null ? items[sel_i] : '', 1, 'l', 'c', max_w ?? ui.em(8))
+			ui.text('', sel_i != null ? items[sel_i] : '', 1, 'l', 'c',
+				max_w ?? ui.em(8))
 			ui.stack('', 0)
 				ui.polyline('', '0 4  7 11  14 4', false, null, null, 'label')
 			ui.end_stack()
@@ -7441,8 +7473,8 @@ toggle.create = function(cmd, id, on, fr, align, valign, min_w, min_h) {
 	if (hs && ui.click)
 		on = !on
 	ui_cmd_box(cmd, fr, align ?? 'c', valign ?? 'c',
-		min_w ?? ui.em(2.5),
-		min_h ?? ui.em(1.5),
+		min_w ?? ui.em(2.25),
+		min_h ?? ui.em(1.25),
 		id,
 		(on ? TOGGLE_ON : 0) | (hs ? TOGGLE_HOVER : 0))
 	return on
@@ -7735,7 +7767,7 @@ ui.box_widget('slider', {
 		let fr = fr0 ?? 1
 		let align = align0 ?? 's'
 		let valign = valign0 ?? 'c'
-		let min_w = min_w0 ?? ui.em(12)
+		let min_w = min_w0 ?? ui.em_input()
 		let min_h = min_h0 ?? ui.em((markers ? 2.8 : 1.2))
 		ui.clear_box_args()
 
@@ -7758,7 +7790,7 @@ ui.box_widget('slider', {
 
 		ui.stack()
 
-			ui.m(markers ? ui.sp8() : ui.sp2(), ui.sp2())
+			ui.p(markers ? ui.sp8() : ui.sp2(), ui.sp05())
 			let i = ui_cmd_box(cmd, fr, align, valign,
 				min_w,
 				min_h,
@@ -7780,9 +7812,9 @@ ui.box_widget('slider', {
 		ui.end_stack()
 
 		if (!markers && (hs || captured(id))) {
-			ui.mb(10)
+			ui.m(ui.sp2())
 			ui.p(ui.sp2(), ui.sp())
-			ui.popup(id+'.popup', 'overlay', thumb_i,
+			ui.popup(id+'.popup', 'tooltip', thumb_i,
 					't', 'c', 0, 0, 'change_side constrain')
 				ui.bb_tooltip('info', null, 'light', null, ui.sp05())
 				ui.text('', dec(ui.state(id, 'v'), decimals ?? 2))
@@ -7802,7 +7834,7 @@ ui.box_widget('slider', {
 
 		if (captured(id)) {
 			let thumb_r = ui.em(ui.slider_thumb_r_em)
-			let margin_x = thumb_r
+			let margin_x = 0
 			let x = a[i+0] + margin_x
 			let w = a[i+2] - 2*margin_x
 			p = clamp((ui.mx - x) / w, 0, 1)
@@ -7824,7 +7856,7 @@ ui.box_widget('slider', {
 		let shaft_h = round(ui.em(ui.slider_shaft_h_em))
 		let r = round(shaft_h / 2) // shaft corner radius
 		let thumb_r = ui.em(ui.slider_thumb_r_em)
-		let margin_x = thumb_r
+		let margin_x = 0
 		let thumb_cx = x + margin_x + p * (w - 2 * margin_x)
 		let thumb_cy = y + h - 2*thumb_r
 
@@ -7852,7 +7884,7 @@ ui.box_widget('slider', {
 		let shaft_h = round(ui.em(ui.slider_shaft_h_em))
 		let r = round(shaft_h / 2) // shaft corner radius
 		let thumb_r = ui.em(ui.slider_thumb_r_em)
-		let margin_x = thumb_r
+		let margin_x = 0
 
 		y += h - r - thumb_r
 		x += margin_x
