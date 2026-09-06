@@ -3113,22 +3113,24 @@ ui.end = function(cmd) {
 	a[i+BOX_CT_NEXT_EXT_I] = next_i-i // next_i but relative to the ct cmd at i
 }
 
+function ct_measure_end(a, i, axis) {
+	let main_axis = is_main_axis(a[i-1], axis)
+	let user_min_w = a[i+0+axis]
+	let min_w      = a[i+2+axis]
+	if (main_axis)
+		min_w = max(0, min_w - a[i+FLEX_GAP]) // remove last element's gap
+	min_w = max(min_w, user_min_w) + spacings(a, i, axis)
+	a[i+2+axis] = min_w
+	add_ct_min_wh(a, axis, min_w)
+}
+
 measure[CMD_END] = function(a, _, axis) {
 	let i = assert(ct_stack.pop(), 'end command outside a container')
-	let cmd = a[i-1]
-	let measure_end_f = measure_end[cmd]
-	if (measure_end_f) {
+	let measure_end_f = measure_end[a[i-1]]
+	if (measure_end_f)
 		measure_end_f(a, i, axis)
-	} else {
-		let main_axis = is_main_axis(cmd, axis)
-		let user_min_w = a[i+0+axis]
-		let min_w      = a[i+2+axis]
-		if (main_axis)
-			min_w = max(0, min_w - a[i+FLEX_GAP]) // remove last element's gap
-		min_w = max(min_w, user_min_w) + spacings(a, i, axis)
-		a[i+2+axis] = min_w
-		add_ct_min_wh(a, axis, min_w)
-	}
+	else
+		ct_measure_end(a, i, axis)
 }
 
 draw[CMD_END] = function(a, end_i) {
@@ -3233,7 +3235,7 @@ ui.end_v = function() { ui.end(CMD_V) }
 
 function is_main_axis(cmd, axis) {
 	return (
-		(cmd == CMD_V ? 1 : 2) == axis ||
+		(cmd == CMD_V || cmd == CMD_V_TABSTOPS ? 1 : 2) == axis ||
 		(cmd == CMD_H ? 0 : 2) == axis
 	)
 }
@@ -3370,6 +3372,77 @@ function hit_flex(a, i, recs) {
 }
 hittest[CMD_H] = hit_flex
 hittest[CMD_V] = hit_flex
+
+// tabstops ------------------------------------------------------------------
+
+const CMD_V_TABSTOPS = cmd_ct('v_tabstops')
+
+ui.v_tabstops = ui_hv.bind(null, CMD_V_TABSTOPS)
+ui.end_v_tabstops = function() { ui.end(CMD_V_TABSTOPS) }
+
+let tabstop_ws = []
+
+function align_tabstops(a, i) {
+
+	let n_cols = 0
+	let row_i = cmd_next_i(a, i)
+	while (a[row_i-1] != CMD_END) {
+		if (a[row_i-1] == CMD_H) {
+			let col_i = 0
+			let cell_i = cmd_next_i(a, row_i)
+			while (a[cell_i-1] != CMD_END) {
+				if (is_flex_child[a[cell_i-1]]) {
+					let w = a[cell_i+2]
+					if (col_i < n_cols) {
+						tabstop_ws[col_i] = max(tabstop_ws[col_i], w)
+					} else {
+						tabstop_ws[col_i] = w
+						n_cols = col_i+1
+					}
+					col_i++
+				}
+				cell_i = cmd_next_ext_i(a, cell_i)
+			}
+		}
+		row_i = cmd_next_ext_i(a, row_i)
+	}
+
+	row_i = cmd_next_i(a, i)
+	while (a[row_i-1] != CMD_END) {
+		if (a[row_i-1] == CMD_H) {
+			let col_i = 0
+			let row_w = 0
+			let cell_i = cmd_next_i(a, row_i)
+			while (a[cell_i-1] != CMD_END) {
+				if (is_flex_child[a[cell_i-1]]) {
+					let w = tabstop_ws[col_i]
+					a[cell_i+2] = w
+					row_w += w
+					col_i++
+				}
+				cell_i = cmd_next_ext_i(a, cell_i)
+			}
+			row_w += max(0, col_i-1) * a[row_i+FLEX_GAP]
+			row_w = max(row_w, a[row_i+0]) + spacings(a, row_i, 0)
+			a[row_i+2] = row_w
+			a[i+2] = max(a[i+2], row_w)
+		}
+		row_i = cmd_next_ext_i(a, row_i)
+	}
+
+}
+
+measure       [CMD_V_TABSTOPS] = ct_stack_push
+position      [CMD_V_TABSTOPS] = position_flex
+translate     [CMD_V_TABSTOPS] = translate_ct
+hittest       [CMD_V_TABSTOPS] = hit_flex
+is_flex_child [CMD_V_TABSTOPS] = true
+
+measure_end[CMD_V_TABSTOPS] = function(a, i, axis) {
+	if (axis == 0)
+		align_tabstops(a, i)
+	ct_measure_end(a, i, axis)
+}
 
 // stack ---------------------------------------------------------------------
 
@@ -4395,6 +4468,14 @@ draw[CMD_BB_TOOLTIP] = function(a, i) {
 	// in case `m` was too big...
 	tx = clamp(tx, tx1, tx2)
 	ty = clamp(ty, ty1, ty2)
+	if (side == T)
+		ty = max(ty, y2)
+	else if (side == B)
+		ty = min(ty, y1)
+	else if (side == L)
+		tx = max(tx, x2)
+	else if (side == R)
+		tx = min(tx, x1)
 
 	if (bg_color) {
 		set_bg_color(bg_color, bg_color_state)

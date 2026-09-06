@@ -126,52 +126,78 @@ ui.widget('fast_field', {
 })
 
 let help_lines = [
-	'NAVIGATION:',
-	':',
-	'\u2190\u2191\u2192\u2193                       : move between cells',
-	'Shift+\u2190\u2191\u2192\u2193                 : extend the selection',
-	'Tab, Shift+Tab             : next and previous cell',
-	'PgUp/Dn                    : move one page',
-	'Home/End                   : first and last row',
-	':',
-	'EDITING:',
-	':',
-	'Enter                      : edit cell',
-	'Esc                        : cancel the edit',
-	'F2                         : edit cells vertically',
-	'Ctrl+ \u2190 \u2192 Enter            : move and edit cells as text',
-	'Insert                     : insert row',
-	'\u2193 on the last row          : add row',
-	'Ctrl+Insert                : insert a copy of the focused row',
-	'Delete                     : delete the selected rows',
-	'Ctrl+Delete                : set the selected cells to null',
-	'Space                      : toggle a checkbox, or expand a tree node',
-	'Ctrl+A                     : select all cells',
-	'Ctrl+C                     : copy the cell',
-	'Ctrl+S                     : save',
-	'Backspace                  : erase a search character',
-	'Typing                     : search',
+	'Move',
+	'',
+	'\u2190\u2191\u2192\u2193: Move between cells',
+	'PgUp/PgDn: Jump page',
+	'Home/End: Jump to beginning / end',
+	'',
+	'Select',
+	'',
+	'Shift+\u2190\u2191\u2192\u2193: Select range',
+	'Shift+Click: Select range',
+	'Ctrl+Click: Select / unselect cell',
+	'Ctrl+A: Select all cells',
+	'',
+	'Edit',
+	'',
+	'Enter: Enter / exit cell edit mode',
+	'F2: Enter / exit vertical edit mode',
+	'Ctrl+Enter: Enter / exit quick-edit mode',
+	'Ctrl+\u2190\u2192: Move & quick-edit cells',
+	'Esc: Cancel the edit',
+	'Ctrl+Delete: Empty the cells',
+	'Space: Toggle checkbox / expand tree node',
+	'',
+	'Add & Remove Rows',
+	'',
+	'Insert: Insert row',
+	'\u2193 on last row: Add row',
+	'Ctrl+Insert: Insert a copy of the focused row',
+	'Delete: Delete the selected rows',
+	'',
+	'Copy & Paste',
+	'',
+	'Ctrl+C: Copy the cell',
+	'Ctrl+S: Save',
+	'',
+	'Quick Search',
+	'',
+	'Just type: Search in column',
 ]
 
 function draw_help(id, target_i) {
-	ui.mb(10)
-	ui.p(ui.sp2(), ui.sp())
+	ui.m(ui.sp2())
+	ui.p(ui.sp4())
 	ui.popup(id+'.help', 'overlay', target_i, 'b', '[', 0, 0,
 		'change_side constrain')
-		ui.bb_tooltip('info', null, 'light', null, ui.sp05())
-		ui.v(0)
+		ui.bb_tooltip('bg2', null, 'light', null, ui.sp05())
+		ui.v_tabstops(0)
 			for (let line of help_lines) {
 				let ci = line.indexOf(':')
-				ui.h(0)
-					ui.scope()
-						ui.font('monospace')
+				let t = ci == -1 ? line : null
+				let key = !t ? line.slice(0, ci).trim() : ''
+				let desc = !t ? line.slice(ci+2).trim() : ''
+				ui.scope()
+				if (t) {
 						ui.bold()
-						ui.text('', line.slice(0, ci), 0, 'l', 'c')
-					ui.end_scope()
-					ui.text('', line.slice(ci+1), 0, 'l', 'c')
-				ui.end_h()
+						ui.color('text')
+						ui.font_size(1.25)
+						ui.text('', t, 0, 'l', 'c')
+				} else {
+					ui.pv(ui.sp025())
+					ui.h(0, ui.sp4())
+						ui.bold()
+						ui.color('text', 'active')
+						ui.text('', key, 0, 'l', 'c')
+						ui.nobold()
+						ui.color('text')
+						ui.text('', desc, 0, 'l', 'c')
+					ui.end_h()
+				}
+				ui.end_scope()
 			}
-		ui.end_v()
+		ui.end_v_tabstops()
 	ui.end_popup()
 }
 
