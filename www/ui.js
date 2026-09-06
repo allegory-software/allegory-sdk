@@ -6667,7 +6667,8 @@ function list_update(id, s) {
 	if (has_enter)
 		ui.capture_keys()
 }
-function hvlist(hv, id, items, sel_i, fr, align, valign,
+function hvlist(hv, id, items, sel_i,
+	fr, align, valign,
 	item_align, item_valign, item_fr,
 	max_w, min_w,
 	item_pad_l, item_pad_r, item_pad_y, item_h
@@ -7200,9 +7201,8 @@ ui.list_dropdown = function(id, items, fr, max_w, min_w, min_h) {
 	ui.dropdown_picker()
 
 		if (open) {
-			ui.state_init(picker_id, 'focused_item_i', sel_i)
 			ui.scrollbox(picker_id+'.sb', 1, 'hide', 'auto', 's', 's')
-				ui.list(picker_id, items, 0, 's', 's', 'l', 'c', 0, max_w,
+				ui.list(picker_id, items, sel_i, 0, 's', 's', 'l', 'c', 0, max_w,
 					null, ui.sp(), ui.sp(), ui.sp())
 			ui.end_scrollbox()
 			ui.resizer(id+'.resizer', null, ui.em(16), 'y')
@@ -8072,6 +8072,18 @@ function calendar_update(id, s) {
 
 	s.day_changed = false
 
+	let yi = ui.consume(id+'.year' , 'item_changed')?.[0]
+	let mi = ui.consume(id+'.month', 'item_changed')?.[0]
+	if (yi != null || mi != null) {
+		let d = sel_day ?? day(time())
+		let y = yi != null ? s.year0 + yi : year_of(d)
+		let m = mi != null ? mi + 1 : month_of(d)
+		let last_month_day = month_day_of(month(time(y, m, 1), 1) - 1)
+		sel_day = time(y, m, min(month_day_of(d), last_month_day))
+		s.day = sel_day
+		s.day_changed = true
+	}
+
 	if (ui.focused(id) && ui.keys_down()) {
 		let mode = 'day'
 		let focused_range
@@ -8153,6 +8165,10 @@ function calendar_update(id, s) {
 	}
 }
 
+let months = []
+for (let i = 0; i < 12; i ++)
+	months[i] = month_name(time(2000, i+1, 1))
+
 ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 
 	ui.focusable(id)
@@ -8174,33 +8190,54 @@ ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 			cells_w, cell_h)
 	}
 
-	ui.v(fr, 0, align, valign, min_w, min_h ?? cell_h * 6)
+	ui.h(fr)
 
-		let now = time()
-		let week0 = week(now)
-
-		// week days header
-		ui.h(0)
-		ui.bb('bg1', null, 'b', 'intense')
-		for (let weekday = 0; weekday < 7; weekday++) {
-			let s = weekday_name(day(week0, weekday), 'short', lang()).slice(0, 1).toUpperCase()
-			ui.stack('', 0, null, null, cell_w, cell_h)
-				ui.pr(rem(1))
-				ui.text('', s, 0, 'r', 'c')
-			ui.end_stack()
+		let shown_day = sel_day ?? day(time())
+		let shown_year = year_of(shown_day)
+		let this_year = year_of(time())
+		let year0 = (shown_year >= this_year - 6 && shown_year <= this_year + 5)
+			? this_year - 6 : shown_year - 6
+		if (s.year0 != year0) {
+			let years = s.years ?? []
+			for (let i = 0; i < 12; i++)
+				years[i] = (year0 + i)+''
+			s.years = years
+			s.year0 = year0
 		}
-		ui.end_h()
+		ui.list(id+'.year', s.years, shown_year - year0,
+			0, null, null, null, null, null, null, ui.em(6))
+		ui.list(id+'.month', months, month_of(shown_day) - 1,
+			0, null, null, null, null, null, null, ui.em(6))
 
-		// days in virtual scrollbox
-		ui.scrollbox(id, 1, null, 'infinite')
-		ui.measure(id)
-			ui.bb('bg0')
-			ui.frame(noop, on_calendar_frame, 1, null, null, 0, 0,
-				id, ranges,
-		)
-		ui.end_scrollbox()
+		ui.v(0, 0, align, valign, min_w, min_h ?? cell_h * 6)
 
-	ui.end_v()
+			let now = time()
+			let week0 = week(now)
+
+			// week days header
+			ui.h(0)
+			ui.bb('bg1', null, 'b', 'intense')
+			for (let weekday = 0; weekday < 7; weekday++) {
+				let s = weekday_name(day(week0, weekday), 'short', lang()).slice(0, 1).toUpperCase()
+				ui.stack('', 0, null, null, cell_w, cell_h)
+					ui.pr(rem(1))
+					ui.text('', s, 0, 'r', 'c')
+				ui.end_stack()
+			}
+			ui.end_h()
+
+			// days in virtual scrollbox
+			ui.scrollbox(id, 1, null, 'infinite')
+			ui.measure(id)
+				ui.bb('bg0')
+				ui.frame(noop, on_calendar_frame, 1, null, null, 0, 0,
+					id, ranges,
+			)
+			ui.end_scrollbox()
+
+		ui.end_v()
+
+	ui.end_h()
 
 	return s.picked_day
 }

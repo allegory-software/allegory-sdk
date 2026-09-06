@@ -5007,13 +5007,13 @@ enm.draw_editor = function(id, v, pad_l, pad_r, h) {
 			let s = ui.state(picker_id)
 			if (opened) {
 				let vals = words(this.enum_values) // 'v1 ...' or ['v1', ...]
-				// the list keeps its focused item across openings: start it on v.
-				s.focused_item_i = max(0, vals.indexOf(v))
+				s.vals = vals
 				// the cell's own box: rows as tall as the cell, text where the
 				// cell put it.
 				s.labels = vals.map(v => this.to_text(v))
 			}
-			ui.list(picker_id, s.labels, 0, 's', 's', this.align, 'c', 0,
+			ui.list(picker_id, s.labels, max(0, s.vals.indexOf(v)),
+				0, 's', 's', this.align, 'c', 0,
 				null, null, pad_l, pad_r, 0, h)
 		}
 
