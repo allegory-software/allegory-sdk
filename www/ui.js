@@ -309,7 +309,7 @@ UI TEMPLATE EDITOR
 
 LIST
 
-	[h|v|hv]list    (id, items, fr, align, valign, item_align, item_valign, item_fr, max_w, min_w)
+	[h|v|hv]list    (id, items, sel_i, fr, align, valign, item_align, item_valign, item_fr, max_w, min_w) -> sel_i
 
 OTHER
 
@@ -6659,18 +6659,22 @@ function list_update(id, s) {
 	}
 	s.focused_item_i = fi
 	s.focused_item_changed = before_fi != fi ? fi_changed : false
+	if (s.focused_item_changed)
+		ui.fire(id, 'item_changed', fi)
 	let has_enter = fi != null && ui.focused(id) && ui.keydown('enter')
 	if (fi_changed == 'click' || has_enter)
 		ui.fire(id, 'item_picked', fi)
 	if (has_enter)
 		ui.capture_keys()
 }
-function hvlist(hv, id, items, fr, align, valign,
+function hvlist(hv, id, items, sel_i, fr, align, valign,
 	item_align, item_valign, item_fr,
 	max_w, min_w,
 	item_pad_l, item_pad_r, item_pad_y, item_h
 ) {
-	let s = ui.state(id)
+	let s = state_map.get(id) ?? ui.state(id)
+	if (sel_i != null)
+		s.focused_item_i = ui.valid_list_index(sel_i, items)
 	s.items = items
 	keepalive(id, list_update)
 	ui.focusable(id)
@@ -6682,7 +6686,7 @@ function hvlist(hv, id, items, fr, align, valign,
 	let i = 0
 	hv = hv || 'v'
 	assert(hv == 'v' || hv == 'h')
-	ui.hv(hv, fr, 0, align ?? '[', valign ?? '[', min_w ?? 120)
+	ui.hv(hv, fr, 0, align  ?? hv == 'v' ? 's' : '[', '[', min_w)
 	for (let item of items) {
 		let item_id = id+'.'+i
 		ui.p(item_pad_l ?? ui.sp(), item_pad_y ?? ui.sp05(),
@@ -6710,11 +6714,11 @@ function hvlist(hv, id, items, fr, align, valign,
 		i++
 	}
 	ui.end()
-	return items[fi]
+	return s.focused_item_i
 }
 ui.hvlist = hvlist
-ui.vlist = function(...args) { return hvlist('v', ...args) }
-ui.hlist = function(...args) { return hvlist('h', ...args) }
+ui.vlist = hvlist.bind(null, 'v')
+ui.hlist = hvlist.bind(null, 'h')
 ui.list = ui.vlist
 
 // tabs ----------------------------------------------------------------------

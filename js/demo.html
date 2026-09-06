@@ -1210,15 +1210,15 @@ function demo_main() {
 
 			ui.stack('', 0, 's', 's', ui.em(10))
 				ui.border('r', 'light')
-				ui.state_init('demos_list', 'focused_item_i', demos_array.indexOf(selected_demo))
-				let i = ui.state('demos_list', 'focused_item_i')
-				let selected_demo0 = selected_demo
-				selected_demo = demos_array[i]
-				if (selected_demo != selected_demo0)
-					save_demo_state('demo', selected_demo)
 				ui.sb('demos_list_sb')
-					let demo = ui.list('demos_list', demos_array)
+					let i = ui.list('demos_list', demos_array,
+						demos_array.indexOf(selected_demo))
 				ui.end_sb()
+				let demo = demos_array[i]
+				if (demo != selected_demo) {
+					selected_demo = demo
+					save_demo_state('demo', demo)
+				}
 			ui.end_stack()
 
 			let s = (demos[demo] ?? '').trim()
