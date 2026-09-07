@@ -1,1 +1,0 @@
-/home/cosmin/sdk/git-stats.sh
