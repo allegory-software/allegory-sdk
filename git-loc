@@ -4,56 +4,83 @@ set -e
 set -f
 set -o pipefail
 
+git config --local alias.loc \
+	'!cd "$GIT_PREFIX" && "$(git rev-parse --show-toplevel)/git-loc"'
+
 months_back=
-repo=.
+file=
 if [[ $# -gt 0 ]]; then
 	if [[ $1 == 0 ]]; then
 		printf "%s\n" "months_back must be positive" >&2
 		exit 2
 	elif [[ $1 =~ ^[1-9][0-9]*$ ]]; then
 		months_back=$1
-		repo=${2:-.}
+		file=${2:-}
 	else
-		repo=$1
+		file=$1
 	fi
 fi
 
-repo_root=$(git -C "$repo" rev-parse --show-toplevel)
+git rev-parse --show-toplevel >/dev/null
+pathspec=()
+if [[ $file ]]; then
+	pathspec=("$file")
+fi
+
+count_lines() {
+	local commit=$1
+	{
+		git grep -I -h -c '^' "$commit" -- "${pathspec[@]}" ||
+			[[ $? == 1 ]]
+	} | awk '{total += $1} END {print total + 0}'
+}
+
 current_month=$(date +%Y-%m-01)
 month_end=$(date -d "$current_month +1 month" +%Y-%m-01)
 if [[ $months_back ]]; then
 	month_start=$(date -d "$current_month -$((months_back - 1)) months" \
 		+%Y-%m-01)
 else
-	month_start=$(git -C "$repo_root" log \
-		--format=%cd --date=format:%Y-%m-01 | tail -n 1)
+	month_start=$(git log --format=%cd --date=format:%Y-%m-01 \
+		-- "${pathspec[@]}" | tail -n 1)
 fi
 if [[ ! $month_start ]]; then
-	printf "%s\n" "repository has no commits" >&2
+	printf "%s\n" "no commits found" >&2
 	exit 1
 fi
 
 month_value=$month_start
 month_list=
+line_list=
 month_count=0
 while [[ $month_value < $month_end ]]; do
 	month_list+="${month_value:0:7} "
-	month_value=$(date -d "$month_value +1 month" +%Y-%m-01)
+	next_month=$(date -d "$month_value +1 month" +%Y-%m-01)
+	month_commit=$(git rev-list -n 1 --before="$next_month" HEAD)
+	if [[ $month_commit ]]; then
+		line_list+="$(count_lines "$month_commit") "
+	else
+		line_list+="0 "
+	fi
+	month_value=$next_month
 	((month_count += 1))
 done
 
-printf "%-7s %8s %5s %14s\n" \
-	"month" "commits" "days" "lines_changed"
+printf "%-7s %8s %5s %8s %8s %8s\n" \
+	"month" "commits" "days" "-lines" "+lines" "lines"
 
-git -C "$repo_root" log \
+git log \
 	--since="$month_start" \
 	--before="$month_end" \
 	--numstat \
 	--format="commit %cd" \
-	--date=format:%Y-%m-%d |
-	awk -v month_list="$month_list" -v month_count="$month_count" '
+	--date=format:%Y-%m-%d \
+	-- "${pathspec[@]}" |
+	awk -v month_list="$month_list" -v line_list="$line_list" \
+		-v month_count="$month_count" '
 	BEGIN {
 		split(month_list, month_values, " ")
+		split(line_list, line_values, " ")
 	}
 
 	$1 == "commit" {
@@ -64,7 +91,8 @@ git -C "$repo_root" log \
 	}
 
 	$1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ {
-		lines_changed[commit_month] += ($1 > $2 ? $1 : $2)
+		lines_added[commit_month] += $1
+		lines_removed[commit_month] += $2
 	}
 
 	END {
@@ -77,9 +105,10 @@ git -C "$repo_root" log \
 					day_count++
 				}
 			}
-			printf "%s %8d %5d %14d\n", month_value, \
+			printf "%s %8d %5d %8d %8d %8d\n", month_value, \
 				commits[month_value], day_count, \
-				lines_changed[month_value]
+				lines_removed[month_value], lines_added[month_value], \
+				line_values[month_index]
 		}
 	}
 '
