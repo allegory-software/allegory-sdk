@@ -309,7 +309,8 @@ UI TEMPLATE EDITOR
 
 LIST
 
-	[h|v|hv]list    (id, items, focused_i, fr, align, valign, item_align, item_valign, item_fr, max_w, min_w) -> focused_i
+	[h|v|hv]list    (id, items, focused_i, fr, align, valign,
+	                 item_align, item_valign, item_fr, max_w, min_w) -> focused_i
 
 OTHER
 
