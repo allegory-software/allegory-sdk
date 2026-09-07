@@ -7085,8 +7085,8 @@ ui.widget('polyline', {
 
 /* dropdown ------------------------------------------------------------------
 
-	let open = ui.dropdown(id, [side], [tab_out])
-		... the value, and ui.focusable(id) if the box is the control ...
+	let open = ui.dropdown(id, [side], [tab_out], [is_control])
+		... the value ...
 	ui.dropdown_picker()
 		if (open)
 			... the picker, under id+'.picker' ...
@@ -7094,6 +7094,7 @@ ui.widget('polyline', {
 
 	tab_out: let tab leave the picker instead of cycling inside it, for a
 	picker that is one control with the value next to it.
+	is_control: register and restore id as the control. defaults to true.
 
 */
 
@@ -7147,7 +7148,7 @@ function dropdown_update(id, s) {
 		ui.focus_first(picker_id)
 	}
 	if (was_open && !open && ui.focus_inside(picker_id))
-		ui.focus(s.focused_id0)
+		ui.focus(s.is_control !== false ? id : s.focused_id0)
 }
 
 let dd_open // decided in dropdown(), needed in dropdown_picker() and end_dropdown()
@@ -7156,11 +7157,12 @@ let dd_tab_out // decided in dropdown(), needed in dropdown_picker()
 let dd_popup_id, dd_side // given to dropdown(), needed in dropdown_picker()
 
 // opened by 'open' event.
-ui.dropdown = function(id, side, tab_out) {
+ui.dropdown = function(id, side, tab_out, is_control) {
 
 	assert(dd_open == null, 'nested dropdown')
 
 	let s = ui.state(id) // runs dropdown_update() if it hasn't run this frame
+	s.is_control = is_control !== false
 	s.open ??= false
 	keepalive(id, dropdown_update)
 	let open = s.open
@@ -7172,6 +7174,8 @@ ui.dropdown = function(id, side, tab_out) {
 
 	ui.v()
 
+		if (s.is_control)
+			ui.focusable(id)
 		ui.stack(id)
 
 	return open
@@ -7228,7 +7232,6 @@ ui.list_dropdown = function(id, items, sel_i, fr, max_w, min_w, min_h) {
 
 	ui.dropdown(id)
 
-		ui.focusable(id)
 		ui.bb('input', null, 1, 'intense', ui.focused(id) ? 'hover' : null)
 		ui.p(ui.sp())
 		ui.h(0, ui.sp())

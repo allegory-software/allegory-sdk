@@ -4851,7 +4851,7 @@ date.draw_editor = function(id, v, pad_l, pad_r, h) {
 		ui.end_h()
 	ui.end_popup()
 
-	let is_open = ui.dropdown(calendar_id, 'b', true)
+	let is_open = ui.dropdown(calendar_id, 'b', true, false)
 	let opened = ui.consume(calendar_id, 'opened')
 
 	ui.dropdown_picker()
