@@ -290,7 +290,7 @@ INPUT
 
 	button          (id, s, fr, align, valign, min_w, min_h, style)
 	icon_button     (id, icon, [s], fr, align, valign, min_w, min_h, style)
-	input           (id, s, fr, min_w, min_h)
+	input           (id, s, fr, min_w, min_h, [readonly])
 	label           (for_id, s, fr, align, valign)
 	radio_label     (for_id, for_group_id, s, fr, align, valign)
 	list_dropdown   (id, items, sel_i, fr, max_w, min_w, min_h) -> sel_i
@@ -4956,6 +4956,7 @@ const TEXT_EDITABLE       =  4 // bit 3
 const TEXT_FOCUSED        =  8 // bit 4
 const TEXT_FOCUSED_BY_KEY = 16 // bit 5
 const TEXT_MARKED         = 32 // bit 6
+const TEXT_READONLY       = 64 // bit 7
 
 const CMD_TEXT = cmd('text')
 
@@ -4969,7 +4970,8 @@ ui.mark_text = function(i1, i2, bg) {
 }
 
 ui.text = function(
-	id, text, fr, align, valign, max_w, w, h, wrap, editable, input_type
+	id, text, fr, align, valign, max_w, w, h, wrap, editable, input_type,
+	readonly
 ) {
 	// NOTE: w and h default to measured text size.
 	text = String(text ?? '')
@@ -5003,6 +5005,7 @@ ui.text = function(
 		text,
 		wrap // flags
 			| (editable ? TEXT_EDITABLE : 0)
+			| (readonly ? TEXT_READONLY : 0)
 			| (ui.focused(id) ? TEXT_FOCUSED : 0)
 			| (ui.focused(id) && ui.focused_by_key ? TEXT_FOCUSED_BY_KEY : 0)
 			| (marked ? TEXT_MARKED : 0),
@@ -5014,8 +5017,11 @@ ui.text = function(
 
 	return text
 }
-ui.text_editable = function(id, s, fr, align, valign, max_w, w, h, input_type) {
-	return ui.text(id, s, fr, align, valign, max_w, w, h, null, true, input_type)
+ui.text_editable = function(
+	id, s, fr, align, valign, max_w, w, h, input_type, readonly
+) {
+	return ui.text(id, s, fr, align, valign, max_w, w, h,
+		null, true, input_type, readonly)
 }
 ui.text_lines = function(id, s, fr, align, valign, max_w, w, h, editable) {
 	return ui.text(id, s, fr, align, valign, max_w, w, h, 'line', editable)
@@ -5603,6 +5609,7 @@ draw[CMD_TEXT] = function(a, i) {
 	let input_type = a[i+TEXT_INPUT_TYPE]
 	let wrap     = flags & TEXT_WRAP
 	let editable = flags & TEXT_EDITABLE
+	let readonly = !!(flags & TEXT_READONLY)
 	let focused  = flags & TEXT_FOCUSED
 	let by_key   = flags & TEXT_FOCUSED_BY_KEY
 	if (ss_ids.length)
@@ -5612,6 +5619,8 @@ draw[CMD_TEXT] = function(a, i) {
 
 	if (editable) {
 		let input = input_create(id, input_type)
+		if (input.readOnly != readonly)
+			input.readOnly = readonly
 
 		let align = a[i+ALIGN]
 		let css_align = align == ALIGN_END ? 'right'
@@ -6639,14 +6648,15 @@ ui.end_vsplit = function() { end_split('v') }
 ui.input_min_w_em = 6
 ui.em_input = () => ui.em(ui.input_min_w_em)
 
-ui.input = function(id, s, fr, w, h) {
+ui.input = function(id, s, fr, w, h, readonly) {
 	ui.stack('', fr, 's', 's')
 		ui.bb(
 			'input', ui.focused(id) ? 'focused' : null,
 			1, 'intense', ui.focused(id) ? 'hover' : null)
 		ui.p(ui.sp())
 		ui.color('text', ui.focused(id) ? 'focused' : null)
-		s = ui.text(id, s, 1, 'l', 'c', null, w ?? ui.em_input(), h, null, true)
+		s = ui.text(id, s, 1, 'l', 'c', null, w ?? ui.em_input(), h,
+			null, true, null, readonly)
 	ui.end_stack()
 	return s
 }
