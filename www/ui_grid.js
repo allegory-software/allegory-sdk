@@ -1229,20 +1229,6 @@ function init(id, e) {
 
 		}
 
-		// Tab/Shift+Tab cell navigation.
-		if (keydown('tab') && e.tab_navigation) {
-
-			let cols = shift ? -1 : 1
-
-			if (e.focus_next_cell(cols, {
-				auto_advance_row: true,
-				sel_i: cols > 0 ? 0 : -1, sel_len: 0,
-				input: e,
-			}))
-				return false
-
-		}
-
 		// insert with the arrow down key on the last focusable row.
 		if (keydown(down_arrow) && !shift) {
 			if (!e.save_on_add_row) { // not really compatible behavior...

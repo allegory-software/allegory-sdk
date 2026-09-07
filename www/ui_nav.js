@@ -645,7 +645,6 @@ ui.nav = function(opt) {
 	e.enter_edit_on_click_focused = false
 	e.exit_edit_on_enter          = false
 	e.exit_edit_on_escape         = true
-	e.tab_navigation              = false
 	e.advance_on_enter            = 'next_row' // next_row | next_cell | null
 	e.auto_jump_cells             = true
 
