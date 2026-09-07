@@ -77,13 +77,12 @@ Field attributes:
 		client_default : default value/generator that new rows are initialized with.
 		has_server_default: the server fills this in, so it can be left empty.
 		readonly       : prevent editing.
-		update_editor  : f(id, v) -> v   read input, draw nothing. runs
-		                 before any cell is drawn. an editor that ends the
-		                 edit fires 'closed' on id.
-		draw_editor    : f(id, v, pad_l, pad_r, h)   draw the widget that
-		                 edits v. pad_l, pad_r, h: the box the cell drew v
-		                 in. the cell has no vertical padding: it centers v
-		                 in its height instead.
+		draw_editor    : f(id, v, pad_l, pad_r, h) -> v   draw the widgets
+		                 that edit v and give back what the user made of it.
+		                 pad_l, pad_r, h: the box the cell drew v in. the
+		                 cell has no vertical padding: it centers v in its
+		                 height instead. an editor that ends the edit fires
+		                 'closed' on id.
 		edits_in_popup : draw_editor draws a popup: no editor in the cell.
 
 		to_input       : f(v) -> s   value as editable text.
@@ -3116,6 +3115,7 @@ ui.nav = function(opt) {
 	e.editor_id = null
 	e.edit_sel_i = 0
 	e.edit_sel_len = 1/0
+	e.edit_text = null
 
 	// cells that act on a click instead of opening an editor.
 	e.cell_clickable = function(row, field) {
@@ -3162,7 +3162,8 @@ ui.nav = function(opt) {
 		let editor_type = field.lookup_rowset_name || field.type
 		e.editor_id = editor_type + '.editor'
 		if (field.has_editor) {
-			field.init_editor(e.editor_id, e.cell_input_val(row, field))
+			let v = e.cell_input_val(row, field)
+			e.edit_text = v == null ? '' : field.to_input(v)
 			if (opt?.open_popup != false)
 				field.open_dropdown(e.editor_id)
 			// by key: that is what focuses the input element. a click can't, the
@@ -3184,6 +3185,7 @@ ui.nav = function(opt) {
 		e.editing = false
 		e.advance_on_exit = false
 		e.editor_id = null
+		e.edit_text = null
 		if (ev && ev.cancel) {
 			if (row && field)
 				e.revert_cell(row, field, ev)
@@ -4620,21 +4622,23 @@ all_field_types.to_input = function(v) {
 	return this.to_text(v)
 }
 
-function update_text_editor(field, id, v) {
-	let s1 = ui.text_value(id)
+// what the nav's edit text means as a value: the parse, or the text itself
+// when it doesn't parse, same as when loading.
+function text_val(field, s) {
+	let v = field.from_input ? field.from_input(s) : s
+	return v === undefined ? s : v
+}
+
+// draw the editor's input box: hand it the nav's edit text, refreshed when v
+// moved on its own, and take back what the user has typed. -> v
+function draw_text_editor(field, id, v, fr, align, valign, max_w, w, h) {
+	let e = field.nav
 	let s0 = v == null ? '' : field.to_input(v)
-	if (s1 == s0)
-		return v
-	let v1 = field.from_input ? field.from_input(s1) : s1
-	return v1 === undefined ? s1 : v1
-}
-
-all_field_types.update_editor = function(id, v) {
-	return update_text_editor(this, id, v)
-}
-
-all_field_types.init_editor = function(id, v) {
-	ui.set_text_value(id, v == null ? '' : this.to_input(v))
+	if (text_val(field, e.edit_text) !== v)
+		e.edit_text = s0
+	e.edit_text = ui.text_editable(id, e.edit_text,
+		fr, align ?? field.align, valign ?? 'c', max_w, w, h)
+	return e.edit_text == s0 ? v : text_val(field, e.edit_text)
 }
 
 all_field_types.focus_editor = function(id, sel_i, sel_len) {
@@ -4668,7 +4672,7 @@ all_field_types.dropdown_closed = function(id) {
 // same call as draw_text(), so the cell doesn't shift on entering edit.
 all_field_types.draw_editor = function(id, v, pad_l, pad_r, h) {
 	ui.p(pad_l, 0, pad_r, 0)
-	ui.text_editable(id, v == null ? '' : this.to_input(v), 0, this.align, 'c', null)
+	return draw_text_editor(this, id, v, 0, this.align, 'c', null)
 }
 
 all_field_types.fixed_width = 0
@@ -4830,25 +4834,6 @@ date.dropdown_closed = function(id) {
 	return ui.consume(id+'.calendar', 'closed')
 }
 
-date.update_editor = function(id, v) {
-	let calendar_id = id+'.calendar'
-	let picker_id = calendar_id+'.picker'
-	let picked = ui.consume(calendar_id, 'picked')
-	if (picked) {
-		let [ts] = picked
-		ui.state(id).text = this.to_input(ts)
-		return ts
-	}
-	if (ui.state(calendar_id, 'open')) {
-		let ts = ui.state(picker_id, 'day')
-		if (ts != null) {
-			ui.state(id).text = this.to_input(ts)
-			return ts
-		}
-	}
-	return update_text_editor(this, id, v)
-}
-
 date.draw_editor = function(id, v, pad_l, pad_r, h) {
 	let calendar_id = id+'.calendar'
 	let picker_id = calendar_id+'.picker'
@@ -4861,33 +4846,38 @@ date.draw_editor = function(id, v, pad_l, pad_r, h) {
 			ui.p(pad_l, 0, 0, 0)
 			ui.icon(calendar_id, 'calendar', 0, 'l', 'c', null, null, h)
 			ui.p(0, 0, pad_r, 0)
-			ui.text_editable(id, v == null ? '' : this.to_input(v),
-				1, this.align, 'c')
+			v = draw_text_editor(this, id, v, 1, this.align, 'c')
 
 		ui.end_h()
 	ui.end_popup()
 
-	let is_open = ui.dropdown(calendar_id, 'b')
+	let is_open = ui.dropdown(calendar_id, 'b', true)
 	let opened = ui.consume(calendar_id, 'opened')
 
 	ui.dropdown_picker()
 
 		if (is_open) {
 			if (opened) {
-				let calendar_state = ui.state(picker_id)
 				let day0 = isnum(v) ? day(v) : day(time())
-				calendar_state.day = day0
-				calendar_state.scroll_y =
+				ui.state(picker_id).scroll_y =
 					days(week(day0) - week(time())) / 7
 					* snap(ui.em(2.5), 2)
 			}
-			ui.calendar(picker_id, null)
+			// the calendar only moves v when the user moves the calendar:
+			// it can't show a value that isn't a date, so it gives back the
+			// null it was given.
+			let day0 = isnum(v) ? day(v) : null
+			let day1 = ui.calendar(picker_id, day0, null)
+			if (day1 !== day0)
+				v = day1
 
 			let resize_id = calendar_id+'.resizer'
 			ui.resizer(resize_id, null, null, 'y')
 		}
 
 	ui.end_dropdown()
+
+	return v
 }
 
 // timeofday (MySQL TIME type) -----------------------------------------------
@@ -4964,26 +4954,9 @@ enm.edits_in_popup = true
 
 // a dropdown over enum_values, up for as long as the edit is: the cell keeps
 // drawing its own value under it and there is no closed state.
-enm.update_editor = function(id, v) {
+enm.draw_editor = function(id, v, pad_l, pad_r, h) {
 
 	assert(this.enum_values != null, this.name, ': enum col with no enum_values')
-
-	let vals = words(this.enum_values) // 'v1 ...' or ['v1', ...]
-
-	let picked = ui.consume(id, 'picked')
-	if (picked)
-		return vals[picked[0]]
-
-	if (ui.state(id, 'open')) {
-		let i = ui.state(id+'.picker', 'focused_item_i')
-		if (i != null)
-			return vals[i]
-	}
-
-	return v
-}
-
-enm.draw_editor = function(id, v, pad_l, pad_r, h) {
 
 	let picker_id = id+'.picker'
 
@@ -5005,19 +4978,21 @@ enm.draw_editor = function(id, v, pad_l, pad_r, h) {
 
 		if (open) {
 			let s = ui.state(picker_id)
-			if (opened) {
-				let vals = words(this.enum_values) // 'v1 ...' or ['v1', ...]
-				s.vals = vals
+			let vals = words(this.enum_values) // 'v1 ...' or ['v1', ...]
+			if (opened)
 				// the cell's own box: rows as tall as the cell, text where the
 				// cell put it.
 				s.labels = vals.map(v => this.to_text(v))
-			}
-			ui.list(picker_id, s.labels, max(0, s.vals.indexOf(v)),
+			let i = ui.list(picker_id, s.labels, max(0, vals.indexOf(v)),
 				0, 's', 's', this.align, 'c', 0,
 				null, null, pad_l, pad_r, 0, h)
+			if (i != null)
+				v = vals[i]
 		}
 
 	ui.end_dropdown()
+
+	return v
 }
 
 // lookup dropdowns ----------------------------------------------------------
@@ -5047,31 +5022,6 @@ function type_editor(field) {
 	return field_types[field.type] || empty
 }
 
-lookup_editor.update_editor = function(id, v) {
-
-	if (!can_pick_lookup_val(this)) {
-		let f = type_editor(this).update_editor || all_field_types.update_editor
-		return f.call(this, id, v)
-	}
-
-	let ln = this.lookup_nav
-
-	let picked = ui.consume(id, 'picked')
-
-	if (picked) {
-		let ln_row = picked[0]
-		return ln_row ? ln.cell_val(ln_row, lookup_val_field(this)) : v
-	}
-
-	if (ui.state(id, 'open')) {
-		let ln_row = ln.focused_row
-		if (ln_row)
-			return ln.cell_val(ln_row, lookup_val_field(this))
-	}
-
-	return v
-}
-
 lookup_editor.draw_editor = function(id, v, pad_l, pad_r, h) {
 
 	if (!can_pick_lookup_val(this)) {
@@ -5097,9 +5047,15 @@ lookup_editor.draw_editor = function(id, v, pad_l, pad_r, h) {
 			let resize_id = id+'.resizer'
 			ui.grid(picker_id, {nav: ln}, 0, 's', 's')
 			ui.resizer(resize_id, ui.em(24), ui.em(12))
+			// the picker grid settles its own focused row while drawing.
+			let ln_row = ln.focused_row
+			if (ln_row)
+				v = ln.cell_val(ln_row, lookup_val_field(this))
 		}
 
 	ui.end_dropdown()
+
+	return v
 }
 
 // tag lists -----------------------------------------------------------------
@@ -5132,18 +5088,6 @@ color.edits_in_popup = true
 
 // a color_picker over v's hex, with a Pick/Cancel row under it: v only
 // changes when Pick is clicked, with whatever hex the picker last returned.
-color.update_editor = function(id, v) {
-	let picked = ui.consume(id, 'picked')
-	if (picked)
-		return picked[0]
-	if (ui.state(id, 'open')) {
-		let hex = ui.state(id+'.picker', 'hex')
-		if (hex != null)
-			return hex
-	}
-	return v
-}
-
 color.draw_editor = function(id, v, pad_l, pad_r, h) {
 
 	let picker_id = id+'.picker'
@@ -5159,6 +5103,7 @@ color.draw_editor = function(id, v, pad_l, pad_r, h) {
 			ui.p(ui.sp2())
 			ui.v(0, ui.sp1())
 				let hex = ui.color_picker(picker_id, hue, sat, lum)
+				v = hex
 				ui.h(0, ui.sp05(), 'r')
 					ui.default_button(id+'.pick')
 					if (ui.primary_button(id+'.pick', S('pick', 'Pick'), 0)) {
@@ -5175,6 +5120,8 @@ color.draw_editor = function(id, v, pad_l, pad_r, h) {
 		}
 
 	ui.end_dropdown()
+
+	return v
 }
 
 // percents ------------------------------------------------------------------

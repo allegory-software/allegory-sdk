@@ -289,21 +289,17 @@ function init(id, e) {
 		}
 	}
 
-	// runs before any cell is drawn: a value set or an edit ended while the
-	// cells are being drawn leaves the cells drawn before it showing the
-	// value, the focused row and the edit from before. loops because
-	// end_edit_like_enter() can move the edit to another cell.
-	function update_editor() {
+	// runs before any cell is drawn: an edit ended while the cells are being
+	// drawn leaves the cells drawn before it showing the focused row and the
+	// edit from before. loops because end_edit_like_enter() can move the
+	// edit to another cell.
+	function close_editor() {
 		while (e.editing) {
 			let row = e.focused_row
 			let field = e.focused_field
 			if (!field.has_editor)
 				break
 			let editor_id = e.editor_id
-			let v0 = e.cell_input_val(row, field)
-			let v = field.update_editor(editor_id, v0)
-			if (v !== v0)
-				e.set_cell_val(row, field, v, {input: e})
 			let closed = field.dropdown_closed(editor_id)
 			if (closed) {
 				let advance = closed[0]
@@ -487,9 +483,14 @@ function init(id, e) {
 				ui.p(0) // draw_val() draws nothing for a value with no text!
 			}
 			if (editing && !draw_stage && field.has_editor) {
-				ui.focus_group(null, null, e.editor_id)
-				field.draw_editor(e.editor_id, input_val, pad_l, pad_r, h)
+				ui.focus_group(true, null, e.editor_id)
+				let v = field.draw_editor(e.editor_id, input_val, pad_l, pad_r, h)
 				ui.end_focus_group()
+				if (v !== input_val) {
+					e.set_cell_val(row, field, v, {input: e})
+					if (field.edits_in_popup)
+						ui.relayout()
+				}
 			}
 			ui.p(0)
 		ui.end_stack()
@@ -1440,7 +1441,7 @@ function init(id, e) {
 			ui.capture_keys()
 		}
 
-		update_editor()
+		close_editor()
 
 		if (e.scroll_to_ri != null) {
 			if (e.rows[e.scroll_to_ri] && e.fields[e.scroll_to_fi]) {

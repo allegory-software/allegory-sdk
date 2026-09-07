@@ -79,14 +79,16 @@ ui.end_v()
 `
 
 dd_items = ['item 1', 'item 2 that is longer than others', 'item 3']
+dd1_i = 1
+dd2_i = 0
+tb_dd_i = {}
 demos.dropdown = `
 ui.v(1, ui.sp(), 'c', 'c')
 	ui.h(1, ui.sp())
 		ui.label('dd1', 'dd1 label')
-		ui.state_init('dd1', 'i', 1)
-		ui.list_dropdown('dd1', dd_items)
+		dd1_i = ui.list_dropdown('dd1', dd_items, dd1_i)
 		ui.text('', 'or')
-		ui.list_dropdown('dd2', dd_items)
+		dd2_i = ui.list_dropdown('dd2', dd_items, dd2_i)
 		ui.text('', 'trail')
 	ui.end_h()
 ui.end_v()
@@ -97,12 +99,14 @@ let cal1_ranges = [
 	{from: 0, to: 1},
 ]
 let cal_sel_days = []
+cal1_day = null
 demos.calendar = `
 ui.m(ui.em(2))
 ui.h(1, ui.em())
-	let sel_day = ui.calendar('cal1', cal1_ranges, 0, 'l', 's')
-	if (sel_day != null)
-		cal_sel_days.push(sel_day)
+	cal1_day = ui.calendar('cal1', cal1_day, cal1_ranges, 0, 'l', 's')
+	let picked = ui.consume('cal1', 'item_picked')
+	if (picked)
+		cal_sel_days.push(picked[0])
 	ui.sb('cal1_sb')
 		ui.v(1, ui.sp05(), 'l', 't')
 		for (let day of cal_sel_days)
@@ -186,11 +190,12 @@ ui.menu('menu1', [
 `
 
 list1_items = []
+list1_i = 0
 for (let i = 1; i <= 1000; i++)
 	list1_items.push('Item '+i)
 demos.list = `
 ui.sb('list1_sb', 1, null, null, 'c', 'c', 100, 300)
-	ui.list('list1', list1_items)
+	list1_i = ui.list('list1', list1_items, list1_i)
 ui.end_sb()
 `
 
@@ -412,6 +417,7 @@ for (let i = 0; i < grid_demo_source_fields.length; i++)
 grid_demo_base_cols = grid_types_cols.split(/\s+/).filter(
 	col => col != 'parent_id')
 grid_demo_first_cols = grid_demo_base_cols
+first_col_i = 0
 grid_demo_base_field_count = grid_demo_source_fields.length
 
 make_grid_demo_parent_ids = function(row_count, tree_depth) {
@@ -556,8 +562,6 @@ if (ui.state(tree_depth_slider_id, 'p') == null)
 	ui.slider_set_value(tree_depth_slider_id, 0, 8, 4)
 let tree_depth = round(ui.slider_value(tree_depth_slider_id, 0, 8))
 
-let first_col_state = ui.state('grid_config_first_col')
-let first_col_i = first_col_state.i ?? 0
 let first_col = grid_demo_first_cols[first_col_i]
 
 state.row_count = row_count
@@ -646,10 +650,10 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 
 		ui.h(1, ui.sp1())
 			ui.text('', 'Col #1', 0, 'l')
-			ui.list_dropdown('grid_config_first_col', grid_demo_first_cols)
-			let first_col_list_i = ui.state('grid_config_first_col', 'i')
-			if (first_col_list_i != null) {
-				state.first_col = grid_demo_first_cols[first_col_list_i]
+			first_col_i = ui.list_dropdown('grid_config_first_col',
+				grid_demo_first_cols, first_col_i)
+			if (first_col_i != null) {
+				state.first_col = grid_demo_first_cols[first_col_i]
 				first_col = state.first_col
 			}
 		ui.end_h()
@@ -929,19 +933,22 @@ ui.hsplit('hsplit1', .8)
 ui.end_hsplit()
 `
 
+input1_text = 'Hello1 Hello1 Hello1 Hello1'
+input2_text = 'Hello2 Hello2'
+input3_text = 'Hello3 Hello3 Hello3 Hello3'
 demos.input = `
 ui.v(1, ui.sp(), 'l', 'c')
 	ui.h(1, ui.sp())
 		ui.label('input1', 'First Input')
-		ui.input('input1', 'Hello1 Hello1 Hello1 Hello1')
+		input1_text = ui.input('input1', input1_text)
 	ui.end_h()
 	ui.h(1, ui.sp())
 		ui.label('input2', 'Second Input')
-		ui.input('input2', 'Hello2 Hello2')
+		input2_text = ui.input('input2', input2_text)
 	ui.end_h()
 	ui.h(1, ui.sp())
 		//ui.label('input1', 'Third Input')
-		ui.input('input3', 'Hello3 Hello3 Hello3 Hello3')
+		input3_text = ui.input('input3', input3_text)
 	ui.end_h()
 ui.end_v()
 `
@@ -1092,8 +1099,8 @@ function tb_contents(tb) { // tb: toolbox id, prefixes the ids in here
 	ui.stack('', 1, 's', 's', 200, 300)
 		ui.m(ui.sp2())
 		ui.v(1, ui.sp(), 'c', 't')
-			ui.list_dropdown(tb+'_dd1', dd_items)
-			ui.list_dropdown(tb+'_dd2', dd_items)
+			tb_dd_i[tb+'1'] = ui.list_dropdown(tb+'_dd1', dd_items, tb_dd_i[tb+'1'])
+			tb_dd_i[tb+'2'] = ui.list_dropdown(tb+'_dd2', dd_items, tb_dd_i[tb+'2'])
 			ui.stack(tb+'_tt', 0, 'c', 'c', 100, 30)
 				ui.bb('bg2', null, 1, 'intense')
 				ui.text('', 'hover me', 1, 'c')
@@ -1248,6 +1255,7 @@ function demo_share_screen_init() {
 	}
 }
 
+to_sid = ''
 demos.share_screen = `
 ui.mt(ui.sp())
 ui.v(1, ui.sp())
@@ -1256,10 +1264,9 @@ ui.v(1, ui.sp())
 	ui.h(0, ui.sp())
 		ui.text('', 'My ID', 0)
 		let my_sid = offer_con.signal_con.sid
-		ui.state('sid').text = my_sid
-		ui.input('sid')
+		ui.input('sid', my_sid)
 		ui.text('', 'Other ID', 0)
-		let to_sid = ui.input('to_sid')
+		to_sid = ui.input('to_sid', to_sid)
 		if (!offer_con.open && my_sid)
 			if (ui.button('btn_make_offer', 'Share Screen', 0, 'c', 'c', ui.em(10)))
 				offer_con.connect(to_sid)
@@ -1291,10 +1298,9 @@ ui.v(1, ui.sp())
 	ui.h(0, ui.sp())
 		ui.text('', 'My ID', 0)
 		let my_sid = answer_con.signal_con.sid
-		ui.state('sid').text = my_sid
-		ui.input('sid')
+		ui.input('sid', my_sid)
 		ui.text('', 'Other ID')
-		let to_sid = ui.input('to_sid')
+		to_sid = ui.input('to_sid', to_sid)
 		if (!answer_con.open && my_sid)
 			if (ui.button('btn_accept_offer', 'See Screen', 0, 'c', 'c', ui.em(10)))
 				answer_con.connect(to_sid)
@@ -1324,8 +1330,7 @@ ui.v(1, ui.sp())
 	ui.h(0, ui.sp())
 		ui.text('', 'My ID')
 		let my_sid = str(offer_con.signal_con.sid)
-		ui.state('offer_sid').text = my_sid
-		ui.input('offer_sid')
+		ui.input('offer_sid', my_sid)
 		if (offer_con.open) {
 			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c', 'c', ui.em(10))) {
 				offer_con.close()

@@ -293,7 +293,7 @@ INPUT
 	input           (id, s, fr, min_w, min_h)
 	label           (for_id, s, fr, align, valign)
 	radio_label     (for_id, for_group_id, s, fr, align, valign)
-	dropdown        (id, items, fr, max_w, min_w, min_h)
+	list_dropdown   (id, items, sel_i, fr, max_w, min_w, min_h) -> sel_i
 	toggle          (id, fr, align, valign, min_w, min_h)
 	checkbox        (cmd, id, fr, align, valign, min_w, min_h)
 
@@ -309,7 +309,7 @@ UI TEMPLATE EDITOR
 
 LIST
 
-	[h|v|hv]list    (id, items, sel_i, fr, align, valign, item_align, item_valign, item_fr, max_w, min_w) -> sel_i
+	[h|v|hv]list    (id, items, focused_i, fr, align, valign, item_align, item_valign, item_fr, max_w, min_w) -> focused_i
 
 OTHER
 
@@ -4969,23 +4969,26 @@ ui.mark_text = function(i1, i2, bg) {
 }
 
 ui.text = function(
-	id, s, fr, align, valign, max_w, w, h, wrap, editable, input_type
+	id, text, fr, align, valign, max_w, w, h, wrap, editable, input_type
 ) {
 	// NOTE: w and h default to measured text size.
-	s = String(s ?? '')
+	text = String(text ?? '')
 	wrap = wrap == 'line' ? TEXT_WRAP_LINE : wrap == 'word' ? TEXT_WRAP_WORD : 0
 	if (wrap == TEXT_WRAP_LINE) {
- 		if (s.includes('\n'))
-			s = s.split('\n')
+		if (text.includes('\n'))
+			text = text.split('\n')
 	} else if (wrap == TEXT_WRAP_WORD) {
 		keepalive(id)
-		s = word_wrapper(id, s)
+		text = word_wrapper(id, text)
 	}
 	if (editable) {
 		keepalive(id)
 		ui.focusable(id)
-		// so that text_selection() works before the user types any text.
-		s = ui.state(id).text ??= s
+		let s = ui.state(id)
+		if (s.prev_text !== text || s.text == null)
+			s.text = text
+		text = s.text
+		s.prev_text = text
 	}
 	let marked = mark_i1 != null && mark_i2 > mark_i1
 	let i = ui_cmd_box(CMD_TEXT, fr ?? 1, align ?? 'l', valign ?? 'c',
@@ -4997,7 +5000,7 @@ ui.text = function(
 		max_w ?? -1, // -1=inf
 		0, // text_h
 		id,
-		s,
+		text,
 		wrap // flags
 			| (editable ? TEXT_EDITABLE : 0)
 			| (ui.focused(id) ? TEXT_FOCUSED : 0)
@@ -5009,7 +5012,7 @@ ui.text = function(
 		ui_cmd_add_args(i, mark_i1, mark_i2, mark_bg ?? 'search')
 	mark_i1 = null
 
-	return s
+	return text
 }
 ui.text_editable = function(id, s, fr, align, valign, max_w, w, h, input_type) {
 	return ui.text(id, s, fr, align, valign, max_w, w, h, null, true, input_type)
@@ -5305,10 +5308,6 @@ let drawn_focused_by_key
 
 ui.text_value = function(id) { // user-typed text
 	return ui.state(id, 'text')
-}
-
-ui.set_text_value = function(id, s) {
-	ui.state(id).text = s
 }
 
 // selecting text ------------------------------------------------------------
@@ -5621,27 +5620,33 @@ draw[CMD_TEXT] = function(a, i) {
 		let css_y = y  / dpr
 		let css_w = sw / dpr
 		let css_font_size = font_size / dpr
-		let opacity = focused ? 1 : 0
-		// the frame is a round trip behind what was typed here, so take its
-		// text only once it echoes back the last edit sent. a local input
-		// never sends, so _ui_n stays 0 and the frame always wins.
-		if (document.activeElement != input
-				|| (ss_frame?.n ?? 0) >= input._ui_n) {
-			if (input.value != s)
+		let css_opacity = focused ? '1' : '0'
+		if (
+			document.activeElement != input ||
+			(ss_frame?.n ?? 0) >= input._ui_n
+		) {
+			if (input.value != s) {
 				input.value = s
+				let backward = input.selectionDirection == 'backward'
+				input._ui_anchor = backward ? input.selectionEnd : input.selectionStart
+				input._ui_caret  = backward ? input.selectionStart : input.selectionEnd
+			}
 			let anchor = ss_frame?.anchor
 			let caret  = ss_frame?.caret
-			if (focused && anchor != null
-					&& (anchor != input._ui_anchor || caret != input._ui_caret)) {
+			if (
+				focused && anchor != null
+				&& (anchor != input._ui_anchor || caret != input._ui_caret)
+			) {
 				input.setSelectionRange(min(anchor, caret), max(anchor, caret),
 					anchor > caret ? 'backward' : 'forward')
 				input._ui_anchor = anchor
 				input._ui_caret = caret
 			}
 		}
-		if (input._ui_font != font
-				|| input._ui_font_weight != font_weight
-				|| input._ui_font_size != css_font_size) {
+		if (  input._ui_font        != font
+			|| input._ui_font_weight != font_weight
+			|| input._ui_font_size   != css_font_size
+		) {
 			input.style.fontFamily = font
 			input.style.fontWeight = font_weight
 			input.style.fontSize   = css_font_size+'px'
@@ -5649,9 +5654,10 @@ draw[CMD_TEXT] = function(a, i) {
 			input._ui_font_weight = font_weight
 			input._ui_font_size   = css_font_size
 		}
-		if (input._ui_x != css_x
-				|| input._ui_y != css_y
-				|| input._ui_w != css_w) {
+		if (  input._ui_x != css_x
+			|| input._ui_y != css_y
+			|| input._ui_w != css_w
+		) {
 			input.style.left  = css_x+'px'
 			input.style.top   = css_y+'px'
 			input.style.width = css_w+'px'
@@ -5659,14 +5665,10 @@ draw[CMD_TEXT] = function(a, i) {
 			input._ui_y = css_y
 			input._ui_w = css_w
 		}
-		if (input._ui_align != css_align) {
+		if (input.style.textAlign != css_align)
 			input.style.textAlign = css_align
-			input._ui_align = css_align
-		}
-		if (input._ui_opacity != opacity) {
-			input.style.opacity = opacity
-			input._ui_opacity = opacity
-		}
+		if (input.style.opacity != css_opacity)
+			input.style.opacity = css_opacity
 
 		if (focused) {
 			drawn_focused_input = input
@@ -6669,7 +6671,7 @@ ui.valid_list_index = function(i, items) {
 
 function list_update(id, s) {
 	let items  = s.items
-	let fi     = s.focused_item_i
+	let fi     = s.focused_i
 	let before_fi = fi
 	let d = ui.focused(id) && (
 			ui.keydown('arrowdown') &&  1 ||
@@ -6688,29 +6690,29 @@ function list_update(id, s) {
 		}
 		i++
 	}
-	s.focused_item_i = fi
+	s.focused_i = fi
 	s.focused_item_changed = before_fi != fi ? fi_changed : false
-	if (s.focused_item_changed)
-		ui.fire(id, 'item_changed', fi)
 	let has_enter = fi != null && ui.focused(id) && ui.keydown('enter')
 	if (fi_changed == 'click' || has_enter)
 		ui.fire(id, 'item_picked', fi)
 	if (has_enter)
 		ui.capture_keys()
 }
-function hvlist(hv, id, items, sel_i,
+function hvlist(hv, id, items, focused_i,
 	fr, align, valign,
 	item_align, item_valign, item_fr,
 	max_w, min_w,
 	item_pad_l, item_pad_r, item_pad_y, item_h
 ) {
-	let s = state_map.get(id) ?? ui.state(id)
-	if (sel_i != null)
-		s.focused_item_i = ui.valid_list_index(sel_i, items)
+	let s = ui.state(id)
+	focused_i = ui.valid_list_index(focused_i ?? 0, items)
+	if (s.prev_focused_i !== focused_i || s.focused_i == null)
+		s.focused_i = focused_i
 	s.items = items
 	keepalive(id, list_update)
 	ui.focusable(id)
-	let fi = s.focused_item_i ?? 0
+	let fi = s.focused_i ?? 0
+	s.prev_focused_i = s.focused_i
 	let list_focused = ui.focused(id)
 	// reveal the focused item on tab-focusing the list and on arrow keys.
 	// a clicked item is excepted to avoid shifting it under the mouse pointer.
@@ -6746,7 +6748,7 @@ function hvlist(hv, id, items, sel_i,
 		i++
 	}
 	ui.end()
-	return s.focused_item_i
+	return s.focused_i
 }
 ui.hvlist = hvlist
 ui.vlist = hvlist.bind(null, 'v')
@@ -7072,12 +7074,15 @@ ui.widget('polyline', {
 
 /* dropdown ------------------------------------------------------------------
 
-	let open = ui.dropdown(id, [side])
-		... the value ...
+	let open = ui.dropdown(id, [side], [tab_out])
+		... the value, and ui.focusable(id) if the box is the control ...
 	ui.dropdown_picker()
 		if (open)
 			... the picker, under id+'.picker' ...
 	ui.end_dropdown()
+
+	tab_out: let tab leave the picker instead of cycling inside it, for a
+	picker that is one control with the value next to it.
 
 */
 
@@ -7126,17 +7131,21 @@ function dropdown_update(id, s) {
 		ui.fire(id, 'closed', picked)
 	}
 
-	if (!was_open && open)
+	if (!was_open && open) {
+		s.focused_id0 = ui.focused_id
 		ui.focus_first(picker_id)
+	}
 	if (was_open && !open && ui.focus_inside(picker_id))
-		ui.focus(id)
+		ui.focus(s.focused_id0)
 }
 
 let dd_open // decided in dropdown(), needed in dropdown_picker() and end_dropdown()
 let dd_picker_id // focus group id of the open dropdown's picker
+let dd_tab_out // decided in dropdown(), needed in dropdown_picker()
+let dd_popup_id, dd_side // given to dropdown(), needed in dropdown_picker()
 
 // opened by 'open' event.
-ui.dropdown = function(id, side) {
+ui.dropdown = function(id, side, tab_out) {
 
 	assert(dd_open == null, 'nested dropdown')
 
@@ -7146,17 +7155,12 @@ ui.dropdown = function(id, side) {
 	let open = s.open
 	dd_open = open
 	dd_picker_id = id+'.picker'
-
-	if (open) {
-		ui.popup(id+'.popup', 'open', null, side ?? 'il', 's', 0, 0,
-			'constrain change_side solid')
-		ui.shadow('picker')
-		ui.bb('input') // background only: end_dropdown() draws the border
-	}
+	dd_tab_out = tab_out
+	dd_popup_id = id+'.popup'
+	dd_side = side
 
 	ui.v()
 
-		ui.focusable(id)
 		ui.stack(id)
 
 	return open
@@ -7165,7 +7169,11 @@ ui.dropdown = function(id, side) {
 ui.dropdown_picker = function() {
 	ui.end_stack()
 	if (dd_open) {
-		ui.focus_group(true, null, dd_picker_id)
+		ui.popup(dd_popup_id, 'open', null, dd_side ?? 'il', 's', 0, 0,
+			'constrain change_side solid')
+		ui.shadow('picker')
+		ui.bb('input') // background only: end_dropdown() draws the border
+		ui.focus_group(!dd_tab_out, null, dd_picker_id)
 		ui.stack()
 	}
 }
@@ -7176,51 +7184,41 @@ ui.end_dropdown = function() {
 	if (open) {
 		ui.end_stack()
 		ui.end_focus_group()
-	}
-	ui.end_v()
-	if (open) {
 		// last, so that the picker's item backgrounds don't paint over it.
 		ui.bb(null, null, 1, 'intense')
 		ui.end_popup()
 	}
+	ui.end_v()
 }
 
 // list_dropdown -------------------------------------------------------------
 
-ui.list_dropdown = function(id, items, fr, max_w, min_w, min_h) {
+ui.list_dropdown = function(id, items, sel_i, fr, max_w, min_w, min_h) {
 
 	let picker_id = id+'.picker'
+
+	// the value follows the list's focused item while the list is up. read it
+	// before the dropdown's own decision, which frees the list on a pick.
+	let picker_i = ui.state(picker_id, 'focused_i')
 
 	// reading the state runs the decision for this frame.
 	let open = ui.state(id, 'open') ?? false
 
-	// open, the value follows the list's focused item; on a pick, that item
-	// is the value.
-	let i = (open || ui.listen(id, 'picked'))
-		? ui.state(picker_id, 'focused_item_i') : null
-	let sel_i = i ?? ui.state(id, 'i') ?? 0
-	sel_i = ui.valid_list_index(sel_i, items)
-	ui.state(id).i = sel_i
+	sel_i = ui.valid_list_index(picker_i ?? sel_i ?? 0, items)
 
 	// arrow keys move the selection with the list closed.
 	if (!open && ui.focused(id)) {
 		let d = ui.keydown('arrowup') && -1 || ui.keydown('arrowdown') && 1 || 0
-		if (d) {
+		if (d)
 			sel_i = ui.valid_list_index(sel_i + d, items)
-			ui.state(id).i = sel_i
-		}
 	}
 
 	ui.stack('', fr, 's', 's', min_w ?? ui.em_input(), min_h)
 
-	// empty box for the popup to align to, the size of the closed dropdown.
-	ui.p(ui.sp())
-	ui.text('', '', 0, 'l', 'c')
-
 	ui.dropdown(id)
 
-		if (!open)
-			ui.bb('input', null, 1, 'intense', ui.focused(id) ? 'hover' : null)
+		ui.focusable(id)
+		ui.bb('input', null, 1, 'intense', ui.focused(id) ? 'hover' : null)
 		ui.p(ui.sp())
 		ui.h(0, ui.sp())
 			ui.text('', sel_i != null ? items[sel_i] : '', 1, 'l', 'c',
@@ -7243,6 +7241,8 @@ ui.list_dropdown = function(id, items, fr, max_w, min_w, min_h) {
 	ui.end_dropdown()
 
 	ui.end_stack()
+
+	return sel_i
 }
 
 // toolbox widget ------------------------------------------------------------
@@ -8086,7 +8086,24 @@ function calendar_update(id, s) {
 	let ranges = s.ranges
 	let h = s.h ?? 0
 
+	let day0 = s.day
 	let sel_day = s.day
+
+	if (s.year0 != null) { // the lists have drawn
+		let d = sel_day ?? day(time())
+		let yi0 = year_of(d) - s.year0
+		let mi0 = month_of(d) - 1
+		let yi = ui.state(id+'.year' , 'focused_i') ?? yi0
+		let mi = ui.state(id+'.month', 'focused_i') ?? mi0
+		if (yi !== yi0 || mi !== mi0) {
+			let y = s.year0 + yi
+			let m = mi + 1
+			let last_month_day = month_day_of(month(time(y, m, 1), 1) - 1)
+			sel_day = time(y, m, min(month_day_of(d), last_month_day))
+			s.day = sel_day
+		}
+	}
+
 	let hit_day = num(ui.hit_match(id+'.day.'))
 	let clicked_day
 	if (hit_day) {
@@ -8100,20 +8117,6 @@ function calendar_update(id, s) {
 				s.day = sel_day
 			}
 		}
-	}
-
-	s.day_changed = false
-
-	let yi = ui.consume(id+'.year' , 'item_changed')?.[0]
-	let mi = ui.consume(id+'.month', 'item_changed')?.[0]
-	if (yi != null || mi != null) {
-		let d = sel_day ?? day(time())
-		let y = yi != null ? s.year0 + yi : year_of(d)
-		let m = mi != null ? mi + 1 : month_of(d)
-		let last_month_day = month_day_of(month(time(y, m, 1), 1) - 1)
-		sel_day = time(y, m, min(month_day_of(d), last_month_day))
-		s.day = sel_day
-		s.day_changed = true
 	}
 
 	if (ui.focused(id) && ui.keys_down()) {
@@ -8152,7 +8155,6 @@ function calendar_update(id, s) {
 			if (mode == 'day') {
 				sel_day = day(sel_day ?? time(), ddays)
 				s.day = sel_day
-				s.day_changed = true
 				ui.capture_keys()
 			} else if (focused_range && e.can_change_range(focused_range)) {
 				let r = focused_range
@@ -8188,39 +8190,42 @@ function calendar_update(id, s) {
 
 	let picked_by_key = sel_day != null && ui.focused(id) && ui.keydown('enter')
 	let picked = clicked_day || picked_by_key
-	s.picked_day = picked ? sel_day : null
 	if (picked) {
 		ui.fire(id, 'item_picked', sel_day)
 		if (picked_by_key)
 			ui.capture_keys()
-		ui.relayout()
 	}
+	if (picked || s.day !== day0)
+		ui.relayout()
 }
 
 let months = []
 for (let i = 0; i < 12; i ++)
 	months[i] = month_name(time(2000, i+1, 1))
 
-ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
+ui.calendar = function(id, sel_day, ranges, fr, align, valign, min_w, min_h) {
 
 	ui.focusable(id)
 	let s = ui.state(id)
 	s.ranges = ranges
 	keepalive(id, calendar_update)
+	if (s.prev_day !== sel_day)
+		s.day = sel_day
 
 	let h = s.h ?? 0
 	let cell_w = snap(ui.em(2.5), 2)
 	let cell_h = snap(ui.em(2.5), 2)
 	let cells_w = cell_w * 7
 
-	let sel_day = s.day
+	sel_day = s.day
 
-	if (s.day_changed) {
+	if (s.prev_day !== sel_day && sel_day != null) {
 		let weeks_from_this_week = days(week(sel_day) - week(time())) / 7
 		ui.scroll_to_view_rect(id, 0,
 			(weeks_from_this_week + 1) * cell_h,
 			cells_w, cell_h)
 	}
+	s.prev_day = sel_day
 
 	ui.h(fr)
 
@@ -8271,7 +8276,7 @@ ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 
 	ui.end_h()
 
-	return s.picked_day
+	return s.day
 }
 
 // image ---------------------------------------------------------------------
@@ -8735,6 +8740,7 @@ ui.color_picker = function(id, hue, sat, lum) {
 	sat = sat ?? .5
 	lum = lum ?? .5
 	keepalive(id, color_picker_update)
+	let s = ui.state(id)
 	ui.v(1, ui.sp())
 		ui.h(0, ui.sp05())
 			hue = ui.state(id+'.hb', 'hue') ?? hue
@@ -8750,22 +8756,23 @@ ui.color_picker = function(id, hue, sat, lum) {
 		ui.end_h()
 		ui.h(0, ui.sp(), 's')
 			ui.label(id+'.input_hsl', 'HSL', .5)
-			let s =
-				dec(hue)+'\u00B0, '+
-				dec(sat*100)+'%, '+
-				dec(lum*100)+'%'
+			// keep the box in sync with hue_bar/sat_lum_square while the user
+			// isn't typing in it; only trust its text as an edit while focused.
 			if (!ui.focused(id+'.input_hsl'))
-				ui.state(id+'.input_hsl').text = s
-			ui.input(id+'.input_hsl', s, 1)
+				s.hsl_text =
+					dec(hue)+'\u00B0, '+
+					dec(sat*100)+'%, '+
+					dec(lum*100)+'%'
+			s.hsl_text = ui.input(id+'.input_hsl', s.hsl_text, 1)
 		ui.end_h()
 		ui.h(0, ui.sp(), 's')
 			ui.label(id+'.input_rgb', 'HEX', .5)
-			let hex = ui.state(id, 'hex') ?? hsl_to_rgb_hex(hue, sat, lum)
+			let hex = s.hex ?? hsl_to_rgb_hex(hue, sat, lum)
 			// keep the box in sync with hue_bar/sat_lum_square while the user
 			// isn't typing in it; only trust its text as an edit while focused.
 			if (!ui.focused(id+'.input_rgb'))
-				ui.state(id+'.input_rgb').text = hex
-			ui.input(id+'.input_rgb', hex, 1)
+				s.hex_text = hex
+			s.hex_text = ui.input(id+'.input_rgb', s.hex_text, 1)
 		ui.end_h()
 	ui.end_v()
 	return hex
