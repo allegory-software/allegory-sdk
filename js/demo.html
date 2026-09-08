@@ -528,7 +528,6 @@ state.can_change_parent ??= true
 state.auto_focus_first_cell ??= true
 state.enter_edit_on_click ??= false
 state.enter_edit_on_click_focused ??= false
-state.tab_navigation ??= false
 state.auto_jump_cells ??= true
 state.stay_in_edit_mode ??= true
 state.auto_advance_row ??= false
@@ -598,7 +597,6 @@ let grid_opt = {
 	auto_focus_first_cell: state.auto_focus_first_cell,
 	enter_edit_on_click: state.enter_edit_on_click,
 	enter_edit_on_click_focused: state.enter_edit_on_click_focused,
-	tab_navigation: state.tab_navigation,
 	auto_jump_cells: state.auto_jump_cells,
 	stay_in_edit_mode: state.stay_in_edit_mode,
 	auto_advance_row: state.auto_advance_row,
@@ -683,8 +681,6 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 			'Edit on click', 'enter_edit_on_click')
 		grid_config_toggle('grid_config_enter_edit_on_click_focused',
 			'Edit focused cell on click', 'enter_edit_on_click_focused')
-		grid_config_toggle('grid_config_tab_navigation',
-			'Tab between cells', 'tab_navigation')
 		grid_config_toggle('grid_config_auto_jump_cells',
 			'Jump across cells', 'auto_jump_cells')
 		grid_config_toggle('grid_config_stay_in_edit_mode',
@@ -1264,7 +1260,7 @@ ui.v(1, ui.sp())
 	ui.h(0, ui.sp())
 		ui.text('', 'My ID', 0)
 		let my_sid = offer_con.signal_con.sid
-		ui.input('sid', my_sid)
+		ui.input('sid', my_sid, null, null, null, true)
 		ui.text('', 'Other ID', 0)
 		to_sid = ui.input('to_sid', to_sid)
 		if (!offer_con.open && my_sid)
@@ -1298,7 +1294,7 @@ ui.v(1, ui.sp())
 	ui.h(0, ui.sp())
 		ui.text('', 'My ID', 0)
 		let my_sid = answer_con.signal_con.sid
-		ui.input('sid', my_sid)
+		ui.input('sid', my_sid, null, null, null, true)
 		ui.text('', 'Other ID')
 		to_sid = ui.input('to_sid', to_sid)
 		if (!answer_con.open && my_sid)
@@ -1330,7 +1326,7 @@ ui.v(1, ui.sp())
 	ui.h(0, ui.sp())
 		ui.text('', 'My ID')
 		let my_sid = str(offer_con.signal_con.sid)
-		ui.input('offer_sid', my_sid)
+		ui.input('offer_sid', my_sid, null, null, null, true)
 		if (offer_con.open) {
 			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c', 'c', ui.em(10))) {
 				offer_con.close()
@@ -1476,19 +1472,16 @@ function demo_main() {
 				if (ui.button('btn_light', 'lights', 0)) {
 					ui.set_default_theme(ui.default_theme == 'light' ? 'dark' : 'light')
 					save_demo_state('theme', ui.default_theme)
-					ui.relayout()
 				}
 
 				if (ui.button('btn_debug', 'DEBUG', 0)) {
 					ui.DEBUG = !ui.DEBUG
 					save_demo_state('debug', ui.DEBUG)
-					ui.relayout()
 				}
 
 				if (ui.button('btn_tui', 'TUI', 0)) {
 					ui.TUI = !ui.TUI
 					save_demo_state('tui', ui.TUI)
-					ui.relayout()
 				}
 
 				if (ui.button('btn_animate', 'animate', 0)) {
