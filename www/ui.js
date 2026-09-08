@@ -7239,6 +7239,21 @@ ui.end_dropdown = function() {
 
 // list_dropdown -------------------------------------------------------------
 
+const chevron_points = [0, 4, 7, 11, 14, 4]
+
+function draw_value_row(items, item_i, row_id, pad, chevron_w, max_w) {
+	ui.stack(row_id ?? '', 0)
+		ui.p(pad)
+		ui.h(0, pad)
+			ui.text('', item_i != null ? items[item_i] : '', 1, 'l', 'c',
+				max_w ?? ui.em(8))
+			ui.stack('', 0, null, null, chevron_w)
+				ui.polyline('', chevron_points, false, null, null, 'label')
+			ui.end_stack()
+		ui.end_h()
+	ui.end_stack()
+}
+
 ui.list_dropdown = function(id, items, sel_i, fr, max_w, min_w, min_h) {
 
 	let picker_id = id+'.picker'
@@ -7247,40 +7262,49 @@ ui.list_dropdown = function(id, items, sel_i, fr, max_w, min_w, min_h) {
 	// before the dropdown's own decision, which frees the list on a pick.
 	let picker_i = ui.state(picker_id, 'focused_i')
 
+	let value_id = id+'.value'
+	if (hit(value_id) && ui.click)
+		ui.fire(id, 'toggle')
+
 	// reading the state runs the decision for this frame.
 	let open = ui.state(id, 'open') ?? false
 
-	sel_i = ui.valid_list_index(picker_i ?? sel_i ?? 0, items)
+	let s = ui.state(id)
+	if (!open || s.value_i == null)
+		s.value_i = ui.valid_list_index(sel_i ?? 0, items)
+	sel_i = ui.valid_list_index(picker_i ?? s.value_i, items)
 
 	// arrow keys move the selection with the list closed.
 	if (!open && ui.focused(id)) {
 		let d = ui.keydown('arrowup') && -1 || ui.keydown('arrowdown') && 1 || 0
-		if (d)
+		if (d) {
 			sel_i = ui.valid_list_index(sel_i + d, items)
+			s.value_i = sel_i
+		}
 	}
+
+	let pad = ui.sp()
+	let chevron_w = ui.em(1)
 
 	ui.stack('', fr, 's', 's', min_w ?? ui.em_input(), min_h)
 
 	ui.dropdown(id)
 
-		ui.bb('input', null, 1, 'intense', ui.focused(id) ? 'hover' : null)
-		ui.p(ui.sp())
-		ui.h(0, ui.sp())
-			ui.text('', sel_i != null ? items[sel_i] : '', 1, 'l', 'c',
-				max_w ?? ui.em(8))
-			ui.stack('', 0)
-				ui.polyline('', '0 4  7 11  14 4', false, null, null, 'label')
-			ui.end_stack()
-		ui.end_h()
+		if (!open)
+			ui.bb('input', null, 1, 'intense', ui.focused(id) ? 'hover' : null)
+		draw_value_row(items, s.value_i, null, pad, chevron_w, max_w)
 
 	ui.dropdown_picker()
 
 		if (open) {
-			ui.scrollbox(picker_id+'.sb', 1, 'hide', 'auto', 's', 's')
-				ui.list(picker_id, items, sel_i, 0, 's', 's', 'l', 'c', 0, max_w,
-					null, ui.sp(), ui.sp(), ui.sp())
-			ui.end_scrollbox()
-			ui.resizer(id+'.resizer', null, ui.em(16), 'y')
+			ui.v()
+				draw_value_row(items, sel_i, value_id, pad, chevron_w, max_w)
+				ui.scrollbox(picker_id+'.sb', 1, 'contain', 'auto', 's', 's')
+					ui.list(picker_id, items, sel_i, 0, 's', 's', 'l', 'c', 0, max_w,
+						null, pad, pad * 2 + chevron_w, pad)
+				ui.end_scrollbox()
+				ui.resizer(id+'.resizer', null, ui.em(16), 'y')
+			ui.end_v()
 		}
 
 	ui.end_dropdown()
@@ -7298,7 +7322,7 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 	let  align_start =  parse_align( align || '[') == ALIGN_START
 	let valign_start = parse_valign(valign || 't') == ALIGN_START
 	let ts = ui.state(assert(scope_get('toolboxes_id'), 'begin_toolboxes missing'))
-	if (hit(id) && ui.click) {
+	if (hit_inside(id) && ui.click) {
 		ts.to_top = id
 		ui.tab_into(id)
 	}

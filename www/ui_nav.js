@@ -4962,8 +4962,7 @@ enm.draw_editor = function(id, v, pad_l, pad_r, h) {
 	// the list is up for as long as the edit is. anchored on the side v is
 	// aligned to, so v stays put when the list makes the popup wider than
 	// the cell.
-	let open = ui.dropdown(id,
-		this.align == 'right' ? 'ir' : 'il')
+	let open = ui.dropdown(id, 'b')
 	let opened = ui.consume(id, 'opened')
 
 		if (open) {
