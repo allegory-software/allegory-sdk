@@ -2932,10 +2932,16 @@ ui.clear_box_args = function() {
 // to be revealed by its scrollbox(es).
 let scroll_to_view_next
 
-// TODO: avoid `...args` which allocates!
-function ui_cmd_box(cmd, fr, align, valign, min_w, min_h, ...args) {
+function ui_cmd_box(cmd, fr, align, valign, min_w, min_h) {
+	let argc = 6 // number of named args, change this if you add more args!
 	tui_snap_paddings()
-	let i = ui_cmd(cmd,
+
+	// see "format of a command recording array" above to understand this.
+	// we're inlining ui_cmd() here to avoid `...args` which allocates.
+	let i = a.length+2
+	a.push(
+		0, // next_i, filled in below
+		cmd,
 		min_w ?? 0, // user min_w in measuring phase; x in positioning phase
 		min_h ?? 0, // user min_h in measuring phase; y in positioning phase
 		0, // children's min_w -> min_w in measuring phase; w in positioning phase
@@ -2948,8 +2954,13 @@ function ui_cmd_box(cmd, fr, align, valign, min_w, min_h, ...args) {
 		// hack for ui_cmd_box_ct() to be able to call ui_cmd_box() with
 		// `arguments`. 2 extra bytes in json for each box for this.
 		0, // next_ext_i
-		...args
 	)
+	for (let j = argc, n = arguments.length; j < n; j++)
+		a.push(arguments[j])
+	let next_i = a.length+3 - i
+	a[i-2] = next_i
+	a.push(-next_i)
+
 	reset_spacings()
 	if (scroll_to_view_next) {
 		scroll_to_view_next = false
