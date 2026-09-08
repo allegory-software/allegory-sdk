@@ -1724,7 +1724,7 @@ ui.nav = function(opt) {
 			e.do_focus_cell(row, field, row0, field0)
 			e.announce('focused_cell_changed', row, field, row0, field0, ev)
 			if (e.is_picker)
-				ui.relayout()
+				ui.rebuild('focused_cell_changed')
 		}
 
 		let sel_rows_changed = map_keys_different(old_selected_rows, e.selected_rows)
@@ -5107,11 +5107,11 @@ color.draw_editor = function(id, v, pad_l, pad_r, h) {
 					ui.default_button(id+'.pick')
 					if (ui.primary_button(id+'.pick', S('pick', 'Pick'), 0)) {
 						ui.fire(picker_id, 'item_picked', hex)
-						ui.relayout()
+						ui.rebuild('item_picked')
 					}
 					if (ui.button(id+'.cancel', S('cancel', 'Cancel'), 0)) {
 						ui.fire(id, 'toggle')
-						ui.relayout()
+						ui.rebuild('toggle')
 					}
 				ui.end_h()
 			ui.end_v()

@@ -489,7 +489,7 @@ function init(id, e) {
 				if (v !== input_val) {
 					e.set_cell_val(row, field, v, {input: e})
 					if (field.edits_in_popup)
-						ui.relayout()
+						ui.rebuild('cell_val_changed')
 				}
 			}
 			ui.p(0)
@@ -1163,7 +1163,7 @@ function init(id, e) {
 				// has already read this state for this frame.
 				if (e.is_picker && !hit_indent) {
 					ui.fire(id, 'item_picked', row)
-					ui.relayout()
+					ui.rebuild('item_picked')
 				}
 				if (click)
 					e.do_cell_click(row, field, {input: e})
@@ -1301,7 +1301,7 @@ function init(id, e) {
 				return false
 			} else if (e.is_picker) {
 				ui.fire(id, 'item_picked', focused_row)
-				ui.relayout()
+				ui.rebuild('item_picked')
 				return false
 			} else if (!e.editing) {
 				e.enter_edit({open_popup: !ctrl})

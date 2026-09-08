@@ -59,7 +59,7 @@ RENDERING
 	cx              = access to canvas context for drawing
 	screen          = access to canvas container div
 	animate         ()  request another animation frame
-	relayout        ()  request another layout pass in this frame
+	rebuild         (label)  request another build/layout pass in this frame
 	resize          ()  resize canvas and request another animation frame
 
 MOUSE STATE
@@ -1305,10 +1305,10 @@ ui.key_changes = () => key_downs.size + key_ups.size
 // events are id-based state are kept for this and next frame only, so that
 // a widget that listens to an event can still catch it if the widgets that
 // fired it appears later in the frame.
-let event_state = map() // {id.ev->[frame_gen, args]}
+let event_state = map() // {id.ev->[frame_build_no, args]}
 
 ui.fire = function(id, ev, ...args) {
-	event_state.set(id+'.'+ev, [frame_gen, args])
+	event_state.set(id+'.'+ev, [frame_build_no, args])
 }
 
 ui.listen = function(id, ev) {
@@ -1401,7 +1401,7 @@ the widget doesn't appear again on a future frame. State updates should be
 done inside an update callback registered with keepalive() so that the widget
 state can be updated in advance of the widget appearing in the frame in case
 the widget state is queried from outside before the widget appears in the frame.
-The update callback is called once per relayout pass, either due to a state
+The update callback is called once per rebuild pass, either due to a state
 access or when the widget is created in the frame.
 
 */
@@ -1409,7 +1409,7 @@ access or when the widget is created in the frame.
 let state_map      = map() // {id->state}
 let current_id_set = set() // {id}
 let remove_id_set  = set() // {id}
-let frame_gen = 0 // frame counter, for running state updates once per frame
+let frame_build_no = 0 // frame counter, for running state updates once per frame
 
 ui._state_map = state_map
 
@@ -1429,15 +1429,15 @@ ui.keepalive = keepalive
 // an update must run once per redraw in order to avoid acting on events
 // like mouse clicks more than once (one-shot state only gets cleared at the
 // end of the frame). the update is triggered by whichever comes first:
-// ui.state() or keepalive(). frame_gen keeps it from running twice per
-// relayout pass.
+// ui.state() or keepalive(). frame_build_no keeps it from running twice per
+// rebuild pass.
 function state_update(id, s) {
 	let update_fn = s?.update
 	if (!update_fn)
 		return
-	if (s.frame_gen == frame_gen)
+	if (s.frame_build_no == frame_build_no)
 		return
-	s.frame_gen = frame_gen
+	s.frame_build_no = frame_build_no
 	update_fn(id, s)
 }
 
@@ -1573,8 +1573,6 @@ ui.focusing = function(id) {
 }
 
 window.addEventListener('blur', function(ev) {
-	ui.window_unfocusing = true
-	ui.window_focused = false
 	ui.local_pointer.key_state.clear()
 	key_downs.clear()
 	key_ups.clear()
@@ -1582,11 +1580,7 @@ window.addEventListener('blur', function(ev) {
 	animate()
 })
 
-ui.window_focused = document.hasFocus()
-
 window.addEventListener('focus', function(ev) {
-	ui.window_focusing = true
-	ui.window_focused = true
 	animate()
 })
 
@@ -2235,7 +2229,7 @@ register[END_FOCUS_GROUP] = function() {
 		if (focused_i != null && focus_group_of(focused_i) == group_i) {
 			ui.fire(id, 'click')
 			ui.capture_keys()
-			animate()
+			ui.rebuild()
 		}
 	}
 }
@@ -2536,13 +2530,21 @@ register[CMD_MEASURE] = function(a, i) {
 
 // animation frame -----------------------------------------------------------
 
-let want_relayout
+let want_rebuild
+let rebuild_for = [] // [label1,...]
 
 // NOTE: this must only be called conditionally on a condition that is
-// guaranteed to be false after relayout, or you risk a relayout loop, which
-// itself is guarded against with a warning and refusal to relayout again.
-ui.relayout = function() {
-	want_relayout = true
+// guaranteed to be false on rebuild because rebuild() calls are ignored on
+// the rebuild pass and you get a warning. The label arg helps when you can't
+// guarantee: calling rebuild() with the same lebel in the rebuild pass will
+// be ignored without the warning.
+ui.rebuild = function(label) {
+	if (label) {
+		if (rebuild_for.includes(label))
+			return
+		rebuild_for.push(label)
+	}
+	want_rebuild = true
 }
 
 function layout_rec(a, x, y, w, h) {
@@ -2584,17 +2586,18 @@ function redraw_all() {
 
 	// hit_enter() and hit_leave() compare against the last frame that was drawn,
 	// so hit_state_map moves to prev_hit_state_map once per frame, outside the
-	// relayout loop below.
+	// rebuild loop below.
 	let sm = prev_hit_state_map
 	prev_hit_state_map = hit_state_map
 	hit_state_map = sm
 	ui._hit_state_map = hit_state_map
 
-	let relayout_count = 0
+	rebuild_for.length = 0
+	let rebuild_count = 0
 	while (1) {
 		let t0, t1
 
-		want_relayout = false
+		want_rebuild = false
 		focus_taken = false
 
 		t0 = clock_ms()
@@ -2673,9 +2676,9 @@ function redraw_all() {
 			ui.focus(null)
 
 		if (ui.focused_id != focused_id0)
-			ui.relayout()
+			ui.rebuild('focus')
 
-		if (!want_relayout) {
+		if (!want_rebuild) {
 			t0 = clock_ms()
 
 			cx.clearRect(0, 0, canvas.width, canvas.height)
@@ -2713,20 +2716,17 @@ function redraw_all() {
 		ui.key_events.length = 0
 
 		for (let [k, es] of event_state)
-			if (es[0] < frame_gen)
+			if (es[0] < frame_build_no)
 				event_state.delete(k)
 
 		// updates can run again now that they can't see the same edge state.
-		frame_gen++
+		frame_build_no++
 
-		ui.window_focusing = false
-		ui.window_unfocusing = false
-
-		if (!want_relayout)
+		if (!want_rebuild)
 			break
-		relayout_count++
-		if (relayout_count > 2) {
-			warn('relayout loop detected')
+		rebuild_count++
+		if (rebuild_count > 1) {
+			warn('rebuild loop detected')
 			break
 		}
 	}
@@ -4183,7 +4183,7 @@ translate[CMD_POPUP] = function(a, i) {
 	if (flags & POPUP_FIT_CHANGE_SIDE) {
 
 		// if popup doesn't fit the screen, first try to change its side
-		// or alignment and relayout, and if that doesn't work, its offset.
+		// or alignment and rebuild, and if that doesn't work, its offset.
 
 		let d = screen_margin
 		let out_x1 = x < d
@@ -6138,7 +6138,7 @@ function template_select_node(id, root_t, node_t, node_i) {
 	selected_template_id = id
 	selected_template_root_t = root_t
 	selected_template_node_t = node_t
-	ui.relayout()
+	ui.rebuild('select_node')
 }
 
 function template_find_node(a, i, t, t_i) {
@@ -6399,17 +6399,19 @@ ui.button_stack = function(id, fr, align, valign, min_w, min_h) {
 ui.button_state = function(id) {
 	let cs = ui.capture(id)
 	let hs = hit(id) || (cs && hovers(id))
-	if (ui.consume(id, 'click'))
-		return 'click'
-	if (ui.focused(id) && (ui.keydown('enter') || ui.keydown(' '))) {
+	let state
+	if (ui.consume(id, 'click')) {
+		state = 'click'
+	} else if (ui.focused(id) && (ui.keydown('enter') || ui.keydown(' '))) {
 		if (ui.keydown('enter'))
 			ui.capture_keys()
-		return 'click'
+		state = 'click'
+	} else {
+		state = cs && hs ? ui.clickup ? 'click' : 'active'
+			: hs ? 'hover' : ui.focused(id) ? 'focused' : null
 	}
-	let state = cs && hs ? ui.clickup ? 'click' : 'active'
-		: hs ? 'hover' : ui.focused(id) ? 'focused' : null
 	if (state == 'click')
-		ui.relayout() // because most-often it will be needed.
+		ui.rebuild('click')
 	return state
 }
 
@@ -6519,7 +6521,7 @@ function split(hv, id, size, unit, fixed_side,
 	assert(!unit || unit == 'px' || unit == 'fr')
 	let fixed = unit == 'px'
 	if (fixed && measured_wh == null)
-		ui.relayout() // needed or `collapsed` may start out wrong and stay wrong.
+		ui.rebuild('measure') // needed or `collapsed` may start out wrong and stay wrong.
 	size = s.size ?? size
 	let side_fr  = fixed ? 0 : (size ?? 0.5) // fr/px of the fixed_side pane
 	let side_min = fixed ? size ?? 0 : 0
@@ -6902,7 +6904,7 @@ ui.tabs = function(id, all_tabs, selected_tab, tabs_order, hidden_tabs) {
 			all_tabs.push({id: 'newtab'+all_tabs.length, label: 'New Tab '+all_tabs.length})
 			tabs = visible_element_list(all_tabs, 'id', 'index', tabs_order, hidden_tabs)
 			s.tabs = tabs
-			ui.relayout()
+			ui.rebuild('tabs_changed')
 		}
 	}
 	ui.end_h()
@@ -8210,7 +8212,7 @@ function calendar_update(id, s) {
 			ui.capture_keys()
 	}
 	if (picked || s.day !== day0)
-		ui.relayout()
+		ui.rebuild('day_changed')
 }
 
 let months = []
@@ -8303,7 +8305,7 @@ function create_image(src, data) { // called from async callback!
 		s.image = image
 		s.data = data
 		s.loading = false
-		animate() // relayout() won't work as we're not in ui.main() here!
+		animate() // rebuild() won't work as we're not in ui.main() here!
 	}
 }
 

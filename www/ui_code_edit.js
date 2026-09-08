@@ -1607,7 +1607,7 @@ function code_edit_view(id, opt) {
 									if (ui.bare_icon_button(id+'.find_close', 'close', null, 0)) {
 										close_find()
 										ui.focus(id)
-										ui.relayout()
+										ui.rebuild('close_find')
 									}
 								ui.end_h()
 								if (find_replace) {
@@ -1626,11 +1626,11 @@ function code_edit_view(id, opt) {
 								if (ui.keydown('escape')) {
 									close_find()
 									ui.focus(id)
-									ui.relayout()
+									ui.rebuild('close_find')
 								}
 								if (ui.keydown('ctrl f') || ui.keydown('ctrl h')) {
 									find_replace = ui.keydown('ctrl h')
-									ui.relayout()
+									ui.rebuild('find_replace')
 								}
 								if (ui.keydown('enter')) {
 									if (ui.focused(rid))
