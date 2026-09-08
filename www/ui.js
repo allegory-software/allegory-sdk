@@ -90,7 +90,8 @@ MOUSE STATE
 	capture         (id) -> captured_state_map         capture the mouse
 	captured        (id) -> captured_state_map | null  get captured state if mouse is captured
 
-	hit             (id[, k) -> hs|v|null  hit state map if mouse hovers widget and not captured
+	hit             (id[, k) -> hs|v|null  hit state map if widget is the innermost hit and not captured
+	hit_inside      (id[, k) -> hs|v|null  hit state map if mouse hovers widget and not captured
 	hit_enter       (id) -> t|f            mouse started hovering widget
 	hit_leave       (id) -> t|f            mouse stopped hovering widget
 	hovers          (id) -> hs|null        hit state map if mouse hovers widget incl. if mouse captured
@@ -2081,9 +2082,19 @@ function hit(id, k) { // looks in prev. frame
 	assert(!render_state_map, 'hit() called while rendering')
 	if (ui.captured_id != null) // unavailable while captured
 		return
+	if (hit_id !== id) // an inner widget took the hit
+		return
 	return hovers(id, k)
 }
 ui.hit = hit
+
+function hit_inside(id, k) { // looks in prev. frame
+	assert(!render_state_map, 'hit_inside() called while rendering')
+	if (ui.captured_id != null) // unavailable while captured
+		return
+	return hovers(id, k)
+}
+ui.hit_inside = hit_inside
 
 ui.hit_enter = function(id) {
 	assert(!render_state_map, 'hit_enter() called while rendering')
@@ -2099,16 +2110,12 @@ ui.hit_leave = function(id) {
 	return !hit_state_map.has(id) && prev_hit_state_map.has(id)
 }
 
-function hit_id() { // innermost hit widget
-	for (let id of hit_state_map.keys())
-		return id
-}
-ui.hit_id = hit_id
+let hit_id // innermost hit widget
+ui.hit_id = () => hit_id
 
 function hit_match(prefix) {
-	let id = hit_id()
-	if (id && id.startsWith(prefix))
-		return id.substring(prefix.length)
+	if (hit_id && hit_id.startsWith(prefix))
+		return hit_id.substring(prefix.length)
 }
 ui.hit_match = hit_match
 
@@ -2123,6 +2130,7 @@ function set_hit(id) {
 	if (!s) {
 		s = obj()
 		hit_state_map.set(id, s)
+		hit_id ??= id
 	}
 	return s
 }
@@ -2155,6 +2163,7 @@ function hit_frame(recs, popups) {
 
 	hit_template_i1 = null
 	hit_state_map.clear()
+	hit_id = null
 
 	if (ui.mx == null)
 		return
@@ -3703,7 +3712,7 @@ function settle_scrollbox(a, i) {
 		let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
 
 		// wheel scrolling
-		if (axis && ui.wheel_dy && hit(id) && (visible || y_id)) {
+		if (axis && ui.wheel_dy && hit_inside(id) && (visible || y_id)) {
 			sy = sy + ui.wheel_dy
 			if (!infinite_y)
 				sy = max(0, min(sy, ch - h))
@@ -6177,7 +6186,7 @@ function template_find_node(a, i, t, t_i) {
 function hit_template(a, i) {
 	let id = hit_template_id
 	if (id && i >= hit_template_i0 && i < hit_template_i1) {
-		let hs = hit(id)
+		let hs = hit_inside(id)
 		if (!hs)
 			return
 		let root_t = hs.root
@@ -8058,7 +8067,7 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 		today = day(today, today_local < today ? -1 : 1)
 
 	let sel_day = ui.state(id, 'day')
-	let hit_day = ui.hit(id) && num(ui.hit_match(id+'.day.'))
+	let hit_day = ui.hit_inside(id) && num(ui.hit_match(id+'.day.'))
 
 	let calendar_focused = ui.focused(id)
 
