@@ -90,12 +90,13 @@ MOUSE STATE
 	capture         (id) -> captured_state_map         capture the mouse
 	captured        (id) -> captured_state_map | null  get captured state if mouse is captured
 
-	hit             (id[, k) -> hit_state_map | v | null    get hit state map if mouse hovers widget and not captured
-	hit_enter       (id) -> t|f                  mouse started hovering widget
-	hit_leave       (id) -> t|f                  mouse stopped hovering widget
-	hovers          (id) -> hit_state_map | null   get hit state map if mouse hovers widget incl. if mouse captured
-	hover           (id) -> hit_state_map       declare that mouse hovers widget
-	nohit           ()      exclude last command from hit-testing
+	hit             (id[, k) -> hs|v|null  hit state map if mouse hovers widget and not captured
+	hit_enter       (id) -> t|f            mouse started hovering widget
+	hit_leave       (id) -> t|f            mouse stopped hovering widget
+	hovers          (id) -> hs|null        hit state map if mouse hovers widget incl. if mouse captured
+	hit_id          () -> id|null          innermost hit widget
+	set_hit         (id) -> hs             declare that mouse hovers widget
+	nohit           ()                     exclude last command from hit-testing
 
 	drag            (id, move, dx0, dy0) -> [null|hover|drag|dragging|drop, dx, dy]
 
@@ -149,9 +150,6 @@ FOCUS STATE
 	focus_inside    (group_id) -> t|f       focus is inside this focus group
 	focus_first     (group_id)              focus first widget unless focus is inside
 	tab_into        (id)                    next tab enters this focus group
-	window_focusing   = t                   window is focusing this frame
-	window_unfocusing = t                   window is unfocusing this frame
-	window_focused    = t|f                 check if window is currently focused
 
 COMMAND RECORDING
 
@@ -2072,8 +2070,6 @@ function draw_frame(recs, popups, sm1) {
 let hit_state_map      = map() // {id->state}
 let prev_hit_state_map = map() // {id->state}
 
-ui._hit_state_map = hit_state_map
-
 function hovers(id, k) {
 	if (!id) return
 	let s = hit_state_map.get(id)
@@ -2103,14 +2099,25 @@ ui.hit_leave = function(id) {
 	return !hit_state_map.has(id) && prev_hit_state_map.has(id)
 }
 
+function hit_id() { // innermost hit widget
+	for (let id of hit_state_map.keys())
+		return id
+}
+ui.hit_id = hit_id
+
 function hit_match(prefix) {
-	for (let [id] of hit_state_map)
-		if (id.startsWith(prefix))
-			return id.substring(prefix.length)
+	let id = hit_id()
+	if (id && id.startsWith(prefix))
+		return id.substring(prefix.length)
 }
 ui.hit_match = hit_match
 
-function hover(id) {
+let hit_phase
+
+function set_hit(id) {
+	assert(hit_phase, 'set_hit() outside the hit phase')
+	// ^^ because set_hit() must be called in reverse paint order and only
+	// hit phase calls hit callbacks in that order.
 	if (!id) return
 	let s = hit_state_map.get(id)
 	if (!s) {
@@ -2119,7 +2126,7 @@ function hover(id) {
 	}
 	return s
 }
-ui.hover = hover
+ui.set_hit = set_hit
 
 function hit_popups(popups, recs) {
 	// iterate popups in reverse order.
@@ -2152,7 +2159,9 @@ function hit_frame(recs, popups) {
 	if (ui.mx == null)
 		return
 
+	hit_phase = true
 	hit_popups(popups, recs)
+	hit_phase = false
 
 }
 
@@ -2590,7 +2599,6 @@ function redraw_all() {
 	let sm = prev_hit_state_map
 	prev_hit_state_map = hit_state_map
 	hit_state_map = sm
-	ui._hit_state_map = hit_state_map
 
 	rebuild_for.length = 0
 	let rebuild_count = 0
@@ -3057,7 +3065,7 @@ ui.box_widget = function(cmd_name, t, is_ct) {
 	function box_hit(a, i) {
 		let id = a[i+ID]
 		if (hit_box(a, i)) {
-			hover(id)
+			set_hit(id)
 			return true
 		}
 	}
@@ -3206,11 +3214,11 @@ function hit_children(a, i, recs) {
 // id is optional: containers without one still hit their children.
 function hit_ct(a, i, recs, id) {
 	if (hit_children(a, i, recs)) {
-		hover(id)
+		set_hit(id)
 		return true
 	}
 	if (hit_box(a, i)) {
-		hover(id)
+		set_hit(id)
 		hit_template(a, i)
 	}
 }
@@ -3891,8 +3899,6 @@ hittest[CMD_SCROLLBOX] = function(a, i, recs) {
 	if (!hit_box(a, i))
 		return
 
-	hover(id)
-
 	hit_template(a, i)
 
 	// test the scrollbars
@@ -3902,12 +3908,15 @@ hittest[CMD_SCROLLBOX] = function(a, i, recs) {
 			continue
 		if (!hit_rect(tx, ty, tw, th))
 			continue
-		hover(id+'.scrollbar'+axis)
+		set_hit(id+'.scrollbar'+axis)
+		set_hit(id)
 		return true
 	}
 
 	// test the children
 	hit_children(a, i, recs)
+
+	set_hit(id)
 
 	return true
 }
@@ -4298,13 +4307,13 @@ hittest[CMD_POPUP] = function(a, i, recs) {
 		return
 	let solid = a[i+POPUP_FLAGS] & POPUP_SOLID
 	if (hit_children(a, i, recs)) {
-		hover(a[i+POPUP_ID])
+		set_hit(a[i+POPUP_ID])
 		if (solid && ui.click)
 			focus_taken = true
 		return true
 	}
 	if (solid && hit_box(a, i)) {
-		hover(a[i+POPUP_ID])
+		set_hit(a[i+POPUP_ID])
 		if (ui.click)
 			focus_taken = true
 		return true
@@ -5791,7 +5800,7 @@ draw[CMD_TEXT] = function(a, i) {
 
 hittest[CMD_TEXT] = function(a, i) {
 	if (hit_box(a, i)) {
-		hover(a[i+TEXT_ID])
+		set_hit(a[i+TEXT_ID])
 		hit_template(a, i)
 		return true
 	}
@@ -6007,7 +6016,7 @@ ss.hit = function(a, i) {
 	let cs = captured(id)
 	let hs
 	if (hit_rect(a[i+0], a[i+1], a[i+2], a[i+3]))
-		hs = hover(id)
+		hs = set_hit(id)
 	if (!hs && !cs)
 		return
 	if (hs) {
@@ -6222,7 +6231,7 @@ ui.box_widget('template_overlay', {
 			hit_template_id = id
 			hit_template_i0 = i0
 			hit_template_i1 = i1
-			hover(id).root = t
+			set_hit(id).root = t
 		}
 	},
 	draw: function(a, i) {
@@ -6378,7 +6387,7 @@ ui.widget('drag_point', {
 		let y  = a[i+1]
 		let id = a[i+ID]
 		if (hit_rect(x-r, y-r, 2*r, 2*r)) {
-			hover(id)
+			set_hit(id)
 			return true
 		}
 	},
@@ -7079,7 +7088,7 @@ ui.widget('polyline', {
 		let pi2 = cmd_arg_end_i(a, i)
 		set_points(cx, x0, y0, a, pi1, pi2, closed)
 		if (cx.isPointInPath(ui.mx, ui.my)) {
-			hover(id)
+			set_hit(id)
 			return true
 		}
 	},
@@ -7453,7 +7462,7 @@ ui.widget('resizer', {
 
 		let side = resize_side(hit_sides(ui.mx, ui.my, 5, 5, x, y, w, h), axis)
 		if (side) {
-			let hs = hover(id)
+			let hs = set_hit(id)
 			hs.side = side
 			hs.measured_x = x
 			hs.measured_y = y
@@ -7659,7 +7668,7 @@ radio.hit = function(a, i) {
 	let id = a[i+TOGGLE_ID]
 	let group_id = a[i+RADIO_GROUP_ID]
 	if (hit_rect(x, y, w, h)) {
-		hover(group_id).id = id
+		set_hit(group_id).id = id
 		return true
 	}
 }
@@ -8038,7 +8047,7 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 		today = day(today, today_local < today ? -1 : 1)
 
 	let sel_day = ui.state(id, 'day')
-	let hit_day = ui.hit(id, 'day')
+	let hit_day = ui.hit(id) && num(ui.hit_match(id+'.day.'))
 
 	let calendar_focused = ui.focused(id)
 
@@ -8123,7 +8132,6 @@ function calendar_update(id, s) {
 	let hit_day = num(ui.hit_match(id+'.day.'))
 	let clicked_day
 	if (hit_day) {
-		ui.hover(id).day = hit_day
 		let [dstate] = ui.drag(id+'.day.'+hit_day)
 		if (dstate == 'drag') {
 			ui.focus(id)
@@ -8577,7 +8585,7 @@ ui.box_widget('sat_lum_square', {
 		let w = a[i+2]
 		let h = a[i+3]
 
-		let hs = hit_rect(x, y, w, h) && hover(id)
+		let hs = hit_rect(x, y, w, h) && set_hit(id)
 		if (hs) {
 			hs.sat = clamp(lerp(ui.mx - x, 0, w-1, 0, 1), 0, 1)
 			hs.lum = clamp(lerp(ui.my - y, h-1, 0, 0, 1), 0, 1)
@@ -8690,7 +8698,7 @@ ui.box_widget('hue_bar', {
 		let w = a[i+2]
 		let h = a[i+3]
 
-		let hs = hit_rect(x, y, w, h) && hover(id)
+		let hs = hit_rect(x, y, w, h) && set_hit(id)
 		if (hs) {
 			let hue = round(clamp(lerp(ui.my - y, 0, h - 1, 0, 360), 0, 360))
 			hs.hue = hue
@@ -9234,7 +9242,7 @@ ui.debug_pane = function() {
 					for (let [k, v] of entries(s)) {
 						if (v === undefined)
 							continue
-						if (k == 'frame_gen')
+						if (k == 'frame_build_no')
 							continue
 						ui.ml(ui.sp2())
 						ui.h(0, ui.sp())
@@ -9259,7 +9267,7 @@ ui.debug_pane = function() {
 		ui.end_stack()
 		ui.scrollbox('demo_hit_states_sb', .5)
 			ui.v(0, 0, 's', '[')
-				for (let [id, s] of ui._hit_state_map) {
+				for (let [id, s] of hit_state_map) {
 					ui.p(ui.sp(), ui.sp05())
 					ui.color('link')
 					ui.text('', isstr(id) ? id : typeof id, 0, 'l')
