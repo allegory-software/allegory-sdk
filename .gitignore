@@ -2,6 +2,7 @@
 /tests/*.log
 test.*
 /www/test.*
+/.temp
 .DS_Store
 .claude
 .codex
