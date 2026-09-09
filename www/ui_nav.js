@@ -5086,6 +5086,10 @@ color.draw = function(v, mode) {
 
 color.edits_in_popup = true
 
+color.editor_value = function(id, v) {
+	return ui.state(id+'.picker', 'hex') ?? v
+}
+
 // a color_picker over v's hex, with a Pick/Cancel row under it: v only
 // changes when Pick is clicked, with whatever hex the picker last returned.
 color.draw_editor = function(id, v, pad_l, pad_r, h) {

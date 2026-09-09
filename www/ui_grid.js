@@ -1419,6 +1419,11 @@ function init(id, e) {
 				e.exit_edit({input: e, cancel: !ev.picked})
 				if (advance)
 					advance_edit(false, 1)
+			} else if (field.editor_value) {
+				let v0 = e.cell_input_val(row, field)
+				let v1 = field.editor_value(editor_id, v0)
+				if (v1 !== v0)
+					e.set_cell_val(row, field, v1, {input: e})
 			}
 			if (!e.editing || (e.focused_row == row && e.focused_field == field))
 				break
