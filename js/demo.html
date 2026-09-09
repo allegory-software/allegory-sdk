@@ -971,9 +971,11 @@ demos.popup = `
 ui.m(10)
 ui.v(1, 30, 'c', 'c')
 	let i = 1
-	for (let inner of ['', 'i']) {
+	for (let kind of ['', 'i', 'is']) {
+		let inner = kind[0] == 'i'
+		let side_stretch = kind == 'is'
 		ui.h(1, 0, 'c', 'c', 360, 180)
-			for (let align of ['c', '[', ']']) {
+			for (let align of ['c', '[', ']', '[s', ']s']) {
 				ui.m(40, 30)
 				ui.p(20, 20)
 				ui.stack('', 0, 'c', 'c', 70, 100)
@@ -983,16 +985,17 @@ ui.v(1, 30, 'c', 'c')
 					ui.border(1, 'light')
 					for (let side of ['t', 'r', 'b', 'l', 'c']) {
 						if (side != 'c' || inner) {
+							let sd = side_stretch ? 'i'+side+'s' : kind+side
 							ui.m(10)
 							ui.p(10)
-							ui.popup('popup'+i++, null, null, inner+side, align, 10, 10)
+							ui.popup('popup'+i++, null, null, sd, align, 10, 10)
 								ui.stack()
 									ui.bb('bg2')
 								ui.end_stack()
 								ui.border(1, 'intense')
 								ui.m(5)
 								ui.p(5)
-								ui.popup('popup'+i++, null, null, inner+side, align, 5, 5)
+								ui.popup('popup'+i++, null, null, sd, align, 5, 5)
 									ui.stack()
 										ui.bb('bg2')
 									ui.end_stack()

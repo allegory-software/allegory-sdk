@@ -3943,26 +3943,44 @@ hittest[CMD_SCROLLBOX] = function(a, i, recs) {
 
 // popup ---------------------------------------------------------------------
 
-const POPUP_SIDE_CENTER       = 0 // only POPUP_SIDE_INNER_CENTER is valid!
-const POPUP_SIDE_LR           = 2
-const POPUP_SIDE_TB           = 4
-const POPUP_SIDE_INNER        = 8
-const POPUP_SIDE_LEFT         = POPUP_SIDE_LR + 0
-const POPUP_SIDE_RIGHT        = POPUP_SIDE_LR + 1
-const POPUP_SIDE_TOP          = POPUP_SIDE_TB + 0
-const POPUP_SIDE_BOTTOM       = POPUP_SIDE_TB + 1
-const POPUP_SIDE_INNER_CENTER = POPUP_SIDE_INNER + POPUP_SIDE_CENTER
+const POPUP_START             = 0
+const POPUP_END               = 1
+const POPUP_CENTER            = 2
+const POPUP_ANCHOR_MASK       = 3
+const POPUP_SIDE_LR           = 4
+const POPUP_SIDE_TB           = 8
+const POPUP_SIDE_INNER        = 16
+const POPUP_STRETCH           = 32
+const POPUP_SIDE_LEFT         = POPUP_SIDE_LR + POPUP_START
+const POPUP_SIDE_RIGHT        = POPUP_SIDE_LR + POPUP_END
+const POPUP_SIDE_TOP          = POPUP_SIDE_TB + POPUP_START
+const POPUP_SIDE_BOTTOM       = POPUP_SIDE_TB + POPUP_END
 const POPUP_SIDE_INNER_LEFT   = POPUP_SIDE_INNER + POPUP_SIDE_LEFT
 const POPUP_SIDE_INNER_RIGHT  = POPUP_SIDE_INNER + POPUP_SIDE_RIGHT
 const POPUP_SIDE_INNER_TOP    = POPUP_SIDE_INNER + POPUP_SIDE_TOP
 const POPUP_SIDE_INNER_BOTTOM = POPUP_SIDE_INNER + POPUP_SIDE_BOTTOM
+const POPUP_SIDE_INNER_CENTER =
+	POPUP_SIDE_INNER + POPUP_SIDE_LR + POPUP_CENTER
 
-const POPUP_ALIGN_CENTER  = 0
-const POPUP_ALIGN_START   = 1
-const POPUP_ALIGN_END     = 2
-const POPUP_ALIGN_STRETCH = 3
+let parsed_stretch = 0
+function popup_parse_stretch(s) {
+	parsed_stretch = POPUP_STRETCH
+	if (s.endsWith('-stretch'))
+		return s.slice(0, -8)
+	if (s.length > 1 && s.endsWith('s'))
+		return s.slice(0, -1)
+	parsed_stretch = 0
+	return s
+}
 
 function popup_parse_side(s) {
+	let side = popup_parse_side_name(popup_parse_stretch(s))
+	assert(!parsed_stretch || (side & POPUP_SIDE_INNER),
+		'stretch on an outer side ', s)
+	return side + parsed_stretch
+}
+
+function popup_parse_side_name(s) {
 	if (s == '['           ) return POPUP_SIDE_LEFT
 	if (s == ']'           ) return POPUP_SIDE_RIGHT
 	if (s == 'l'           ) return POPUP_SIDE_LEFT
@@ -3987,15 +4005,19 @@ function popup_parse_side(s) {
 }
 
 function popup_parse_align(s) {
-	if (s == 'c'      ) return POPUP_ALIGN_CENTER
-	if (s == '['      ) return POPUP_ALIGN_START
-	if (s == ']'      ) return POPUP_ALIGN_END
-	if (s == '[]'     ) return POPUP_ALIGN_STRETCH
-	if (s == 's'      ) return POPUP_ALIGN_STRETCH
-	if (s == 'center' ) return POPUP_ALIGN_CENTER
-	if (s == 'start'  ) return POPUP_ALIGN_START
-	if (s == 'end'    ) return POPUP_ALIGN_END
-	if (s == 'stretch') return POPUP_ALIGN_STRETCH
+	if (s == '[]'     ) s = '[s'
+	if (s == 's'      ) s = '[s'
+	if (s == 'stretch') s = 'start-stretch'
+	return popup_parse_align_name(popup_parse_stretch(s)) + parsed_stretch
+}
+
+function popup_parse_align_name(s) {
+	if (s == 'c'      ) return POPUP_CENTER
+	if (s == '['      ) return POPUP_START
+	if (s == ']'      ) return POPUP_END
+	if (s == 'center' ) return POPUP_CENTER
+	if (s == 'start'  ) return POPUP_START
+	if (s == 'end'    ) return POPUP_END
 	assert(false, 'invalid align ', s)
 }
 
@@ -4077,12 +4099,12 @@ let screen_margin = 10
 // NOTE: sw is always 0 because popups have fr=0, so we don't use it.
 position[CMD_POPUP] = function(a, i, axis, sx, sw) {
 
-	// stretched popups stretch to the dimensions of their target.
 	let target_i = a[i+POPUP_TARGET_I]
 	let side     = a[i+POPUP_SIDE]
 	let align    = a[i+POPUP_ALIGN]
 	if (target_i) target_i += i // make absolute
-	if (side && align == POPUP_ALIGN_STRETCH) {
+	let side_axis = (side & POPUP_SIDE_LR) ? 0 : 1
+	if ((axis == side_axis ? side : align) & POPUP_STRETCH) {
 		if (!target_i) {
 			a[i+2+axis] = axis ? screen_h : screen_w
 		} else {
@@ -4141,54 +4163,28 @@ function get_popup_target_rect(a, i) {
 
 }
 
+function popup_axis_pos(anchor, is_inner, t1, t2, size) {
+	if (anchor == POPUP_START)
+		return is_inner ? t1 : t1 - size
+	if (anchor == POPUP_END)
+		return is_inner ? t2 - size : t2
+	return t1 + round((t2 - t1 - size) / 2)
+}
+
 let x, y
 function position_popup(w, h, side, align) {
 
-	let tw = tx2 - tx1
-	let th = ty2 - ty1
+	let side_anchor  = side  & POPUP_ANCHOR_MASK
+	let align_anchor = align & POPUP_ANCHOR_MASK
+	let is_inner = side & POPUP_SIDE_INNER
 
-	if (side == POPUP_SIDE_RIGHT) {
-		x = tx2
-		y = ty1
-	} else if (side == POPUP_SIDE_LEFT) {
-		x = tx1 - w
-		y = ty1
-	} else if (side == POPUP_SIDE_TOP) {
-		x = tx1
-		y = ty1 - h
-	} else if (side == POPUP_SIDE_BOTTOM) {
-		x = tx1
-		y = ty2
-	} else if (side == POPUP_SIDE_INNER_RIGHT) {
-		x = tx2 - w
-		y = ty1
-	} else if (side == POPUP_SIDE_INNER_LEFT) {
-		x = tx1
-		y = ty1
-	} else if (side == POPUP_SIDE_INNER_TOP) {
-		x = tx1
-		y = ty1
-	} else if (side == POPUP_SIDE_INNER_BOTTOM) {
-		x = tx1
-		y = ty2 - h
-	} else if (side == POPUP_SIDE_INNER_CENTER) {
-		x = tx1 + round((tw - w) / 2)
-		y = ty1 + round((th - h) / 2)
+	if (side & POPUP_SIDE_LR) {
+		x = popup_axis_pos(side_anchor, is_inner, tx1, tx2, w)
+		y = popup_axis_pos(align_anchor, true, ty1, ty2, h)
 	} else {
-		assert(false)
+		x = popup_axis_pos(align_anchor, true, tx1, tx2, w)
+		y = popup_axis_pos(side_anchor, is_inner, ty1, ty2, h)
 	}
-
-	let sdx = side & POPUP_SIDE_LR
-	let sdy = side & POPUP_SIDE_TB
-
-	if (align == POPUP_ALIGN_CENTER && sdy)
-		x += round((tw - w) / 2)
-	else if (align == POPUP_ALIGN_CENTER && sdx)
-		y += round((th - h) / 2)
-	else if (align == POPUP_ALIGN_END && sdy)
-		x += tw - w
-	else if (align == POPUP_ALIGN_END && sdx)
-		y += th - h
 
 }
 
@@ -4221,14 +4217,18 @@ translate[CMD_POPUP] = function(a, i) {
 		let out_y2 = y + h > (bh - d)
 
 		let side0 = side
-		if (side == POPUP_SIDE_BOTTOM && out_y2)
-			side = POPUP_SIDE_TOP
-		 else if (side == POPUP_SIDE_TOP && out_y1)
-			side = POPUP_SIDE_BOTTOM
-		 else if (side == POPUP_SIDE_RIGHT && out_x2)
-			side = POPUP_SIDE_LEFT
-		 else if (side == POPUP_SIDE_LEFT && out_x1)
-			side = POPUP_SIDE_RIGHT
+		let anchor = side & POPUP_ANCHOR_MASK
+		let is_inner = side & POPUP_SIDE_INNER
+		if (anchor != POPUP_CENTER) {
+			let is_start_edge = is_inner
+				? anchor == POPUP_END
+				: anchor == POPUP_START
+			let out = (side & POPUP_SIDE_LR)
+				? (is_start_edge ? out_x1 : out_x2)
+				: (is_start_edge ? out_y1 : out_y2)
+			if (out)
+				side ^= 1
+		}
 
 		if (side != side0) {
 			position_popup(w, h, side, align)
@@ -4343,11 +4343,11 @@ hittest[CMD_POPUP] = function(a, i, recs) {
 // tooltip background & border -----------------------------------------------
 
 function tooltip_tip_cut_center(x1, x2, align, r, d) {
-	if (align == POPUP_ALIGN_START)
+	if (align == POPUP_START)
 		return x1+r + d/2
-	else if (align == POPUP_ALIGN_END)
+	else if (align == POPUP_END)
 		return x2-r - d/2
-	else if (align == POPUP_ALIGN_CENTER)
+	else if (align == POPUP_CENTER)
 		return x2-r - (x2-x1-2*r)/2
 }
 function tooltip_path(cx, x1, y1, x2, y2, side, tx, ty, b1x, b1y, b2x, b2y, r, d) {
@@ -4419,15 +4419,15 @@ draw[CMD_BB_TOOLTIP] = function(a, i) {
 	let border_color_state = a[i+4]
 	let r                  = a[i+5] / 128 // border radius
 
-	let side  = a[ct_i+POPUP_SIDE_REAL]
-	let align = a[ct_i+POPUP_ALIGN]
+	let side  = a[ct_i+POPUP_SIDE_REAL] & ~POPUP_STRETCH
+	let align = a[ct_i+POPUP_ALIGN] & POPUP_ANCHOR_MASK
 
 	let T = POPUP_SIDE_TOP
 	let B = POPUP_SIDE_BOTTOM
 	let L = POPUP_SIDE_LEFT
 	let R = POPUP_SIDE_RIGHT
-	let S = POPUP_ALIGN_START
-	let E = POPUP_ALIGN_END
+	let S = POPUP_START
+	let E = POPUP_END
 
 	let m = ui.sp2() // margin away from the target's corners.
 	let d = ui.sp2() // tooltip's tip base width.
@@ -4459,7 +4459,7 @@ draw[CMD_BB_TOOLTIP] = function(a, i) {
 	} else if (side == R && align == E) {
 		tx = tx2
 		ty = ty2 - m
-	} else if (align == POPUP_ALIGN_CENTER) {
+	} else if (align == POPUP_CENTER) {
 		if (side & POPUP_SIDE_TB) {
 			tx = tx1 + (tx2 - tx1) / 2
 			ty = side == T ? ty1 : ty2
@@ -6620,7 +6620,7 @@ ui.splitter = function() {
 		// so shift the hit area right without moving the rendered line.
 		let hit_dx = 4
 		ui.stack('', 0, 'l', 's', 1, 0)
-			ui.popup('', null, null, 'it', '[]')
+			ui.popup('', null, null, 'il', 's')
 				ui.ml(-hit_distance / 2 + hit_dx)
 				ui.stack(id, 0, 'l', 's', hit_distance)
 					ui.ml(-hit_dx)
@@ -6638,7 +6638,7 @@ ui.splitter = function() {
 		ui.end_stack()
 	} else {
 		ui.stack('', 0, 's', 't', 0, 1)
-			ui.popup('', null, null, 'it', '[]')
+			ui.popup('', null, null, 'it', 's')
 				ui.mt(-hit_distance / 2)
 				ui.stack(id, 0, 's', 't', 0, hit_distance)
 					ui.stack('', 1, 's', 'c')
@@ -7116,7 +7116,7 @@ ui.widget('polyline', {
 
 /* dropdown ------------------------------------------------------------------
 
-	let open = ui.dropdown(id, [side], [tab_out], [is_control])
+	let open = ui.dropdown(id, [side], [align], [tab_out], [is_control])
 		... the value ...
 	ui.dropdown_picker()
 		if (open)
@@ -7186,9 +7186,10 @@ let dd_open // decided in dropdown(), needed in dropdown_picker() and end_dropdo
 let dd_picker_id // focus group id of the open dropdown's picker
 let dd_tab_out // decided in dropdown(), needed in dropdown_picker()
 let dd_popup_id, dd_side // given to dropdown(), needed in dropdown_picker()
+let dd_align
 
 // opened by 'open' event.
-ui.dropdown = function(id, side, tab_out, is_control) {
+ui.dropdown = function(id, side, align, tab_out, is_control) {
 
 	assert(dd_open == null, 'nested dropdown')
 
@@ -7202,6 +7203,7 @@ ui.dropdown = function(id, side, tab_out, is_control) {
 	dd_tab_out = tab_out
 	dd_popup_id = id+'.popup'
 	dd_side = side
+	dd_align = align
 
 	ui.v()
 
@@ -7215,8 +7217,8 @@ ui.dropdown = function(id, side, tab_out, is_control) {
 ui.dropdown_picker = function() {
 	ui.end_stack()
 	if (dd_open) {
-		ui.popup(dd_popup_id, 'open', null, dd_side ?? 'il', 's', 0, 0,
-			'constrain change_side solid')
+		ui.popup(dd_popup_id, 'open', null, dd_side ?? 'it', dd_align ?? 's',
+			0, 0, 'constrain change_side solid')
 		ui.shadow('picker')
 		ui.bb('input') // background only: end_dropdown() draws the border
 		ui.focus_group(!dd_tab_out, null, dd_picker_id)
@@ -8060,7 +8062,7 @@ ui.focus_ring = function(id) {
 	if (!ui.focused_by_key)
 		return
 	ui.m(-2)
-	ui.popup('', 'overlay', null, 'ic', 's')
+	ui.popup('', 'overlay', null, 'ics', 's')
 		ui.bb(null, null, 1, 'max')
 	ui.end_popup()
 }

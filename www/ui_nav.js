@@ -4839,7 +4839,7 @@ date.draw_editor = function(id, v, pad_l, pad_r, h) {
 	let editor_target_i = ui.stack('', 1, 's', 's')
 	ui.end_stack()
 
-	ui.popup('', 'overlay', editor_target_i, 'ir', 's')
+	ui.popup('', 'overlay', editor_target_i, 'irs', 's')
 		ui.h(0, ui.sp05())
 			ui.bb('input', 'focused', 'b', 'light')
 			ui.p(pad_l, 0, 0, 0)
@@ -4850,7 +4850,8 @@ date.draw_editor = function(id, v, pad_l, pad_r, h) {
 		ui.end_h()
 	ui.end_popup()
 
-	let is_open = ui.dropdown(calendar_id, 'b', true, false)
+	let is_open = ui.dropdown(calendar_id, 'b',
+		this.align == 'right' ? 'cs' : 'cs', true, false)
 	let opened = ui.consume(calendar_id, 'opened')
 
 	ui.dropdown_picker()
@@ -4962,7 +4963,8 @@ enm.draw_editor = function(id, v, pad_l, pad_r, h) {
 	// the list is up for as long as the edit is. anchored on the side v is
 	// aligned to, so v stays put when the list makes the popup wider than
 	// the cell.
-	let open = ui.dropdown(id, 'b')
+	let open = ui.dropdown(id, 'b',
+		this.align == 'right' ? ']s' : '[s')
 	let opened = ui.consume(id, 'opened')
 
 		if (open) {
