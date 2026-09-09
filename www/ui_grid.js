@@ -1428,6 +1428,8 @@ function init(id, e) {
 		}
 
 		close_editor()
+		if (!ui.window_focused() || ui.window_focusing)
+			e.exit_edit()
 
 		if (e.scroll_to_ri != null) {
 			if (e.rows[e.scroll_to_ri] && e.fields[e.scroll_to_fi]) {

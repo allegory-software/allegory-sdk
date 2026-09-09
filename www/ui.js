@@ -151,6 +151,7 @@ FOCUS STATE
 	focus_inside    (group_id) -> t|f       focus is inside this focus group
 	focus_first     (group_id)              focus first widget unless focus is inside
 	tab_into        (id)                    next tab enters this focus group
+	window_focused -> t|f                   browser window has focus
 
 COMMAND RECORDING
 
@@ -1571,15 +1572,19 @@ ui.focusing = function(id) {
 	return id && focusing_id == id
 }
 
+ui.window_focused = () => document.hasFocus()
+
 window.addEventListener('blur', function(ev) {
 	ui.local_pointer.key_state.clear()
 	key_downs.clear()
 	key_ups.clear()
 	ui.key_events.length = 0
+	// NOTE: won't always fire an animation frame when tabbing out!
 	animate()
 })
 
 window.addEventListener('focus', function(ev) {
+	ui.window_focusing = true
 	animate()
 })
 
@@ -2731,6 +2736,7 @@ function redraw_all() {
 		key_downs.clear()
 		key_ups.clear()
 		ui.key_events.length = 0
+		ui.window_focusing = false
 
 		for (let [k, es] of event_state)
 			if (es[0] < frame_build_no)
