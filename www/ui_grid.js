@@ -289,30 +289,6 @@ function init(id, e) {
 		}
 	}
 
-	// runs before any cell is drawn: an edit ended while the cells are being
-	// drawn leaves the cells drawn before it showing the focused row and the
-	// edit from before. loops because end_edit_like_enter() can move the
-	// edit to another cell.
-	function close_editor() {
-		while (e.editing) {
-			let row = e.focused_row
-			let field = e.focused_field
-			if (!field.has_editor)
-				break
-			let editor_id = e.editor_id
-			let closed = field.dropdown_closed(editor_id)
-			if (closed) {
-				let advance = closed[0]
-					&& e.advance_on_exit && e.advance_on_enter
-				e.exit_edit({input: e, cancel: !closed[0]})
-				if (advance)
-					advance_edit(false, 1)
-			}
-			if (!e.editing || (e.focused_row == row && e.focused_field == field))
-				break
-		}
-	}
-
 	function field_has_indent(field) {
 		return horiz && field == e.tree_field
 	}
@@ -1427,9 +1403,26 @@ function init(id, e) {
 			ui.capture_keys()
 		}
 
-		close_editor()
 		if (!ui.window_focused() || ui.window_focusing)
 			e.exit_edit()
+
+		while (e.editing) {
+			let row = e.focused_row
+			let field = e.focused_field
+			if (!field.has_editor)
+				break
+			let editor_id = e.editor_id
+			let ev = field.dropdown_closed(editor_id)
+			if (ev) {
+				let advance = ev.picked
+					&& e.advance_on_exit && e.advance_on_enter
+				e.exit_edit({input: e, cancel: !ev.picked})
+				if (advance)
+					advance_edit(false, 1)
+			}
+			if (!e.editing || (e.focused_row == row && e.focused_field == field))
+				break
+		}
 
 		if (e.scroll_to_ri != null) {
 			if (e.rows[e.scroll_to_ri] && e.fields[e.scroll_to_fi]) {
