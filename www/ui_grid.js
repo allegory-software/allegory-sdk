@@ -1162,7 +1162,7 @@ function init(id, e) {
 				// the picker is drawn inside the cells frame, so the dropdown
 				// has already read this state for this frame.
 				if (e.is_picker && !hit_indent) {
-					ui.fire(id, 'item_picked', row)
+					ui.fire(id, 'item_picked', {row: row})
 					ui.rebuild('item_picked')
 				}
 				if (click)
@@ -1300,7 +1300,7 @@ function init(id, e) {
 				e.quicksearch(e.quicksearch_text, focused_row, shift ? -1 : 1)
 				return false
 			} else if (e.is_picker) {
-				ui.fire(id, 'item_picked', focused_row)
+				ui.fire(id, 'item_picked', {row: focused_row})
 				ui.rebuild('item_picked')
 				return false
 			} else if (!e.editing) {

@@ -906,7 +906,7 @@ function system_in_dark_mode() {
 }
 
 window.matchMedia('(prefers-color-scheme: dark)')
-	.addEventListener('change', function(e) {
+	.addEventListener('change', function(ev) {
 		ui.set_default_theme()
 	})
 
@@ -1225,14 +1225,14 @@ function make_key_event(p, ev_name, key) {
 	return [ev_name, prefix + key, key, char, ctrl, alt, shift]
 }
 
-function apply_key_event(p, e) {
-	let ev_name  = e[0]
-	let full_key = e[1]
-	let key      = e[2]
+function apply_key_event(p, ev) {
+	let ev_name  = ev[0]
+	let full_key = ev[1]
+	let key      = ev[2]
 	let key_set = ev_name == 'down' ? key_downs : key_ups
 	key_set.add(key)
 	key_set.add(full_key)
-	ui.key_events.push(e)
+	ui.key_events.push(ev)
 	if (ev_name == 'down')
 		p.key_state.add(key)
 	else
@@ -1241,16 +1241,16 @@ function apply_key_event(p, e) {
 	animate()
 }
 
-function process_key(ev, ev_name, key) {
+function process_key(dom_ev, ev_name, key) {
 	let p = ui.local_pointer
-	let e = make_key_event(p, ev_name, key)
-	apply_key_event(p, e)
-	let full_key = e[1]
-	let key_low  = e[2] // lowercased key
+	let ev = make_key_event(p, ev_name, key)
+	apply_key_event(p, ev)
+	let full_key = ev[1]
+	let key_low  = ev[2] // lowercased key
 	let captured = ev_name == 'down' ? captured_keydowns : captured_keyups
-	if (ev && (key_low == 'tab' || captured[full_key])) {
+	if (dom_ev && (key_low == 'tab' || captured[full_key])) {
 		// this allows us to supress some (but not all) browser key events.
-		ev.preventDefault()
+		dom_ev.preventDefault()
 	}
 }
 document.addEventListener('keydown', function(ev) {
@@ -1260,7 +1260,7 @@ document.addEventListener('keyup', function(ev) {
 	process_key(ev, 'up', ev.key)
 })
 
-document.addEventListener('paste', async function(e) {
+document.addEventListener('paste', async function(ev) {
 	// getting the clipboard contents and setting keydown of pseudo-key 'paste'.
 	ui.clipboard_text = await navigator.clipboard.readText()
 	process_key(null, 'down', 'paste')
@@ -1307,24 +1307,24 @@ ui.key_changes = () => key_downs.size + key_ups.size
 // fired it appears later in the frame.
 let event_state = map() // {id.ev->[frame_build_no, args]}
 
-ui.fire = function(id, ev, ...args) {
-	event_state.set(id+'.'+ev, [frame_build_no, args])
+ui.fire = function(id, name, ev) {
+	event_state.set(id+'.'+name, {frame_build_no: frame_build_no, ...ev})
 }
 
-ui.listen = function(id, ev) {
+ui.listen = function(id, name) {
 	// call update_fn if not already called, which calls fire().
 	state_update(id, state_map.get(id))
-	return event_state.get(id+'.'+ev)?.[1]
+	return event_state.get(id+'.'+name)
 }
 
-ui.consume = function(id, ev) {
-	let k = id+'.'+ev
+ui.consume = function(id, name) {
+	let k = id+'.'+name
 	// call update_fn if not already called, which calls fire().
 	state_update(id, state_map.get(id))
-	let e = event_state.get(k)
-	if (!e) return
+	let ev = event_state.get(k)
+	if (!ev) return
 	event_state.delete(k)
-	return e[1]
+	return ev
 }
 
 // scopes --------------------------------------------------------------------
@@ -2739,7 +2739,7 @@ function redraw_all() {
 		ui.window_focusing = false
 
 		for (let [k, es] of event_state)
-			if (es[0] < frame_build_no)
+			if (es.frame_build_no < frame_build_no)
 				event_state.delete(k)
 
 		// updates can run again now that they can't see the same edge state.
@@ -6010,8 +6010,8 @@ ss.create = function(cmd, id, answer_con, fr, align, valign, min_w, min_h) {
 		answer_con.send(json({event: 'key_state', keys: [...keys]}))
 	}
 	if (ui.focused(id)) {
-		for (let e of ui.key_events)
-			answer_con.send(json({event: 'key', key_event: e}))
+		for (let ev of ui.key_events)
+			answer_con.send(json({event: 'key', key_event: ev}))
 		ui.capture_keys()
 	}
 	let mx = answer_con.frame && hs && ui.mx != null ? ui.mx - hs.x : null
@@ -6742,7 +6742,7 @@ function list_update(id, s) {
 	s.focused_item_changed = before_fi != fi ? fi_changed : false
 	let has_enter = fi != null && ui.focused(id) && ui.keydown('enter')
 	if (fi_changed == 'click' || has_enter)
-		ui.fire(id, 'item_picked', fi)
+		ui.fire(id, 'item_picked', {fi: fi})
 	if (has_enter)
 		ui.capture_keys()
 }
@@ -7144,8 +7144,8 @@ function dropdown_update(id, s) {
 	let open = was_open
 
 	let click = hit(id) && ui.click // id is the dropbox or the grid cell
-	let picked_args = ui.consume(picker_id, 'item_picked')
-	let picked = !!picked_args
+	let ev = ui.consume(picker_id, 'item_picked')
+	let picked = !!ev
 	let want_open = !!ui.consume(id, 'open')
 	let want_toggle = !!ui.consume(id, 'toggle')
 
@@ -7172,12 +7172,12 @@ function dropdown_update(id, s) {
 
 	s.open = open
 	if (picked)
-		ui.fire(id, 'picked', ...picked_args)
+		ui.fire(id, 'picked', ev)
 	if (!was_open && open)
 		ui.fire(id, 'opened')
 	if (was_open && !open) {
 		ui.free(picker_id)
-		ui.fire(id, 'closed', picked)
+		ui.fire(id, 'closed', {picked: picked})
 	}
 
 	if (!was_open && open) {
@@ -8267,7 +8267,7 @@ function calendar_update(id, s) {
 	let picked_by_key = sel_day != null && ui.focused(id) && ui.keydown('enter')
 	let picked = clicked_day || picked_by_key
 	if (picked) {
-		ui.fire(id, 'item_picked', sel_day)
+		ui.fire(id, 'item_picked', {day: sel_day})
 		if (picked_by_key)
 			ui.capture_keys()
 	}

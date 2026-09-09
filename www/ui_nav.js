@@ -5107,7 +5107,7 @@ color.draw_editor = function(id, v, pad_l, pad_r, h) {
 				ui.h(0, ui.sp05(), 'r')
 					ui.default_button(id+'.pick')
 					if (ui.primary_button(id+'.pick', S('pick', 'Pick'), 0)) {
-						ui.fire(picker_id, 'item_picked', hex)
+						ui.fire(picker_id, 'item_picked', {color: hex})
 						ui.rebuild('item_picked')
 					}
 					if (ui.button(id+'.cancel', S('cancel', 'Cancel'), 0)) {
