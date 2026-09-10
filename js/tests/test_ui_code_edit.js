@@ -31,7 +31,8 @@ let cmps_src = glue_src.slice(
 	glue_src.indexOf('function binsearch'))
 
 let glue = cmps_src +
-	['insert', 'remove', 'insert_n', 'binsearch'].map(glue_fn).join('\n')
+	['array_resize', 'insert', 'remove', 'insert_n', 'binsearch']
+		.map(glue_fn).join('\n')
 
 let Lezer = {
 	parsers: {html: {parse: () => ({})}},
@@ -61,7 +62,7 @@ let ui = {
 		clearRect(){}, beginPath(){}, rect(){}, clip(){}},
 	caret_w: 2,
 	fg_style(){}, bg_style(){},
-	widget(){}, cmd(){}, keepalive(){}, on_free(){}, focus(){},
+	widget(){}, cmd(){}, keepalive(){}, on_free(){}, focus(){}, focusable(){},
 	capture_keydown(){}, capture_keyup(){}, capture_tab(){},
 	scroll_to_view_rect(){}, measure(){},
 	v(){}, end_v(){}, h(){}, end_h(){}, stack(){}, end_stack(){},
@@ -80,6 +81,7 @@ let ui = {
 	state,
 	drag: () => [drag_state, 0, 0, state('drag')],
 	key: k => !!keys[k],
+	keypressed: k => !!keys[k],
 	mx: 0, my: 0,
 	get key_events() { return key_events },
 	get clipboard_text() { return clipboard_text },

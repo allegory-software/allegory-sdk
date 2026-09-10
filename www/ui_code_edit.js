@@ -40,7 +40,7 @@ IMPL. NOTES
 
 (function () {
 "use strict"
-const G = window
+const _G = window
 
 const {
 	cx,
@@ -1363,7 +1363,6 @@ function code_edit_view(id, opt) {
 		if (ui.focused(id)) {
 
 			ui.capture_tab(id)
-			ui.capture_tab(id, true)
 
 			for (let [event, full_key, key, key_char, ctrl, alt, shift] of ui.key_events) {
 				if (event != 'down')
@@ -1552,8 +1551,7 @@ function code_edit_view(id, opt) {
 
 		// build editor
 
-		// not tab-focusable because then tab traps you in the editor.
-		// ui.focusable(id)
+		ui.focusable(id)
 		ui.v(1, 0, 's', 's', min_w, min_h)
 			let tabs = [
 				{id: 'tab1', label:'Tab 1'},
@@ -1648,23 +1646,15 @@ function code_edit_view(id, opt) {
 
 	}
 
-	e.free = function() {}
-
 	reset_editor(opt.code)
 
 	return e
 }
 
 ui.code_edit = function(id, opt, min_w, min_h) {
-	ui.keepalive(id)
 	let s = ui.state(id)
-	let view = s.view
-	if (!view) {
-		view = code_edit_view(id, opt)
-		ui.on_free(id, () => view.free())
-		s.view = view
-	}
-	view.render(min_w, min_h)
+	s.view ??= code_edit_view(id, opt)
+	s.view.render(min_w, min_h)
 }
 
 }()) // module function

@@ -538,7 +538,7 @@ state.auto_advance_row ??= false
 state.exit_edit_on_escape ??= true
 
 let rows_slider_id = 'grid_config_rows_slider'
-if (ui.state(rows_slider_id, 'p') == null)
+if (ui.state_of(rows_slider_id, 'p') == null)
 	ui.slider_set_value(rows_slider_id, 0, 1000000, 100)
 let row_count = round(ui.slider_value(rows_slider_id, 0, 1000000))
 
@@ -548,7 +548,7 @@ let col_max = row_count
 		floor(1000000 / row_count)))
 	: grid_demo_base_field_count + 1000
 let col_slider_id = 'grid_config_duplicates_slider'
-if (ui.state(col_slider_id, 'p') == null)
+if (ui.state_of(col_slider_id, 'p') == null)
 	ui.slider_set_value(
 		col_slider_id, grid_demo_base_field_count, col_max,
 		grid_demo_base_field_count)
@@ -561,7 +561,7 @@ if (col_count > col_max) {
 }
 
 let tree_depth_slider_id = 'grid_config_tree_depth_slider'
-if (ui.state(tree_depth_slider_id, 'p') == null)
+if (ui.state_of(tree_depth_slider_id, 'p') == null)
 	ui.slider_set_value(tree_depth_slider_id, 0, 8, 4)
 let tree_depth = round(ui.slider_value(tree_depth_slider_id, 0, 8))
 
@@ -573,8 +573,6 @@ state.tree_depth = tree_depth
 state.first_col = first_col
 
 if (!state.rowset_name || state.recreate) {
-	if (state.grid_id)
-		ui.free(state.grid_id)
 	if (state.rowset_name)
 		delete ui.rowsets[state.rowset_name]
 	state.generation = (state.generation ?? 0) + 1
@@ -606,13 +604,13 @@ let grid_opt = {
 	auto_advance_row: state.auto_advance_row,
 	exit_edit_on_escape: state.exit_edit_on_escape,
 }
-let grid_nav = ui.state(state.grid_id, 'nav')
+let grid_nav = ui.state_of(state.grid_id, 'nav')
 if (grid_nav)
 	grid_nav.auto_expand = state.auto_expand
 
 ui.hsplit('grid_config_split', 300, 'px', 2)
 ui.grid(state.grid_id, grid_opt)
-grid_nav = ui.state(state.grid_id, 'nav')
+grid_nav = ui.state_of(state.grid_id, 'nav')
 if (grid_nav)
 	grid_nav.auto_expand = state.auto_expand
 
@@ -1144,22 +1142,6 @@ ui.toolbox('tb3', "(3) I am right-aligned", ']', 't', 100, 100)
 	tb_contents('tb3')
 ui.end_toolbox()
 ui.end_toolboxes()
-`
-
-demos.layers = `
-ui.m(ui.em(2))
-ui.sb('layers_sb', 1)
-	ui.stack('', 1, 'l', 't', 2000, 2000)
-		ui.popup('leyer1_popup', 'layer1', null, 'il', 'c', 100, 50,'change_side constrain')
-			ui.bb_tooltip('bg2', null, 'intense', null, ui.sp1())
-		ui.end_popup()
-		ui.popup('leyer1_popup', 'layer1', null, 'it', '[', 100, 50, 'change_side constrain')
-			ui.bb_tooltip('bg2', null, 'intense', null, ui.sp1())
-		ui.end_popup()
-		ui.bb('bg0')
-		ui.draw_layer('layer1')
-	ui.end_stack()
-ui.end_sb()
 `
 
 let test_template = {

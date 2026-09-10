@@ -442,8 +442,8 @@ is in js/TODO-AI.txt.
 
 (function () {
 "use strict"
-const G = window
-const ui = G.ui
+const _G = window
+const ui = _G.ui
 
 const {
 	num, bool, isarray, isstr,
@@ -620,8 +620,8 @@ ui.nav = function(opt) {
 		return property(this, name, get, set)
 	}
 
-	function warn (...args) { G.warn (e.id, ':', ...args) }
-	function debug(...args) { G.debug(e.id, ':', ...args) }
+	function warn (...args) { _G.warn (e.id, ':', ...args) }
+	function debug(...args) { _G.debug(e.id, ':', ...args) }
 	e.warn  = warn
 	e.debug = debug
 
@@ -3193,7 +3193,8 @@ ui.nav = function(opt) {
 		}
 		if (take_focus)
 			ui.focus(e.id)
-		ui.free(editor_id)
+		if (field?.has_editor)
+			field.close_dropdown(editor_id)
 	}
 
 	e.revert_cell = function(row, field, ev) {
@@ -4660,6 +4661,10 @@ all_field_types.open_dropdown = function(id) {
 	ui.fire(id, 'open')
 }
 
+all_field_types.close_dropdown = function(id) {
+	ui.fire(id, 'close')
+}
+
 all_field_types.toggle_dropdown = function(id) {
 	ui.fire(id, 'toggle')
 }
@@ -4823,6 +4828,10 @@ ts.w = 160
 
 date.open_dropdown = function(id) {
 	ui.fire(id+'.calendar', 'open')
+}
+
+date.close_dropdown = function(id) {
+	ui.fire(id+'.calendar', 'close')
 }
 
 date.toggle_dropdown = function(id) {
@@ -5087,7 +5096,9 @@ color.draw = function(v, mode) {
 color.edits_in_popup = true
 
 color.editor_value = function(id, v) {
-	return ui.state(id+'.picker', 'hex') ?? v
+	if (!ui.state_of(id, 'open'))
+		return v
+	return ui.state_of(id+'.picker', 'hex') ?? v
 }
 
 // a color_picker over v's hex, with a Pick/Cancel row under it: v only

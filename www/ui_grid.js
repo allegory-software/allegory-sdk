@@ -1,8 +1,14 @@
+/*
+
+	UI editable virtual tree grid.
+	Written by Cosmin Apreutesei. Public Domain.
+
+*/
 
 (function () {
 "use strict"
-const G = window
-const ui = G.ui
+const _G = window
+const ui = _G.ui
 
 const {
 	pr,
@@ -699,6 +705,8 @@ function init(id, e) {
 		gcol_h = round(line_height + sp)
 		gcol_gap = 1
 
+		ui.focusable(id)
+
 		if (e.editing
 				&& !ui.focused(id)
 				&& !ui.focused(e.editor_id)
@@ -720,7 +728,7 @@ function init(id, e) {
 		if (ui.click)
 			help_open = false
 
-		if (ui.click && ui.hovers(id))
+		if (ui.click && ui.hit_inside(id))
 			ui.focus(id)
 
 		// hover or click on sort icons from colum header
@@ -853,6 +861,7 @@ function init(id, e) {
 				}
 				// hit group column
 				let col_id = id+'.gcol.'+col
+				ui.state(col_id)
 				;[drag_state, dx, dy, cs] = ui.drag(col_id)
 				if (drag_state) {
 					hit_zone = 'gcol'
@@ -1440,7 +1449,6 @@ function init(id, e) {
 
 		// draw ----------------------------------------------------------------
 
-		ui.focusable(id)
 		ui.stack(id, fr, align, valign, min_w, min_h)
 		ui.v(1, 0, 's', 's')
 
@@ -1654,7 +1662,6 @@ function init(id, e) {
 
 ui.grid = function(id, opt, fr, align, valign, min_w, min_h) {
 
-	ui.keepalive(id)
 	let s = ui.state(id)
 	let nav = s.nav
 	if (!nav) {
