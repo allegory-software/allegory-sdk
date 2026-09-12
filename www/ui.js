@@ -863,9 +863,14 @@ window.addEventListener('resize', resize_canvas)
 
 let raf_id
 let frame_no = 0
-function raf_animate() {
+let raf_t0
+function raf_animate(raf_t) {
 	raf_id = null
 	frame_no++
+	let raf_dt = raf_t0 != null ? raf_t - raf_t0 : 0
+	raf_dt = raf_dt < 32 ? raf_dt : 20
+	frame_graph_push('frame_delta_time', raf_dt)
+	raf_t0 = raf_t
 	let t0 = clock_ms()
 	redraw_all()
 	let t1 = clock_ms()
@@ -8427,11 +8432,12 @@ function frame_graph_push(name, v) {
 }
 ui.frame_graph_push = frame_graph_push
 
-frame_graph('frame_time'       , '#fff', 'ms'  , 1, 0,  1/60 * 1000)
-frame_graph('frame_make_time'  , '#0f0', 'ms'  , 1, 0,  1/60 * 1000)
-frame_graph('frame_layout_time', '#00f', 'ms'  , 1, 0,  1/60 * 1000)
-frame_graph('frame_draw_time'  , '#f00', 'ms'  , 1, 0,  1/60 * 1000)
-frame_graph('frame_hit_time'   , '#f0f', 'ms'  , 1, 0,  1/60 * 1000)
+frame_graph('frame_delta_time' , '#666', 'ms'  , 1, 0,  2/60 * 1000)
+frame_graph('frame_time'       , '#fff', 'ms'  , 1, 0,  2/60 * 1000)
+frame_graph('frame_make_time'  , '#0f0', 'ms'  , 1, 0,  2/60 * 1000)
+frame_graph('frame_layout_time', '#00f', 'ms'  , 1, 0,  2/60 * 1000)
+frame_graph('frame_draw_time'  , '#f00', 'ms'  , 1, 0,  2/60 * 1000)
+frame_graph('frame_hit_time'   , '#f0f', 'ms'  , 1, 0,  2/60 * 1000)
 frame_graph('frame_bandwidth'  , '', 'Mbps', 1, 0,     5) // 3Mbps=3G; 5Mbps=720p@60fps
 frame_graph('frame_compression', '', '%'   , 0, 0,   100)
 frame_graph('frame_pack_time'  , '', 'ms'  , 1, 0,    10)
