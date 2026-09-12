@@ -86,6 +86,7 @@ dd_items = [
 dd1_i = 1
 dd2_i = 0
 tb_dd_i = {}
+tb_input_text = {}
 demos.dropdown = `
 ui.v(1, ui.sp(), 'c', 'c')
 	ui.h(1, ui.sp())
@@ -759,9 +760,11 @@ tuts.bb = `
 
 ui.bg_style    ('*', 'crimson', 'normal', 348, .83, .47)
 ui.border_style('*', 'brown'  , 'normal',   0, .59, .41)
+ui.shadow_style('light', 'demo_bb', 2, 2, 5, 0, false, 0, 0, 0, 1)
+ui.shadow_style('dark',  'demo_bb', 2, 2, 5, 0, false, 0, 0, 0, 1)
 
 ui.stack('', 0, 'c', 'c', 150, 50)
-	ui.shadow(2, 2, 5, 0, false, 'black')
+	ui.shadow('demo_bb')
 	ui.bb('crimson', null, 'ltrb', 'brown', null, 10)
 	ui.text('', 'Hello World!', 0, 'c')
 ui.end()
@@ -1010,6 +1013,8 @@ ui.end_v()
 `
 
 demos.bb_tooltip = `
+ui.shadow_style('light', 'demo_tooltip', 1, 1, 3, 0, false, 0, 0, .8, 1)
+ui.shadow_style('dark',  'demo_tooltip', 1, 1, 3, 0, false, 0, 0,  0, 1)
 ui.sb('bb_tooltip_sb', 1)
 ui.stack('', 1, 'l', 't', 800, 800)
 	ui.bb('bg0')
@@ -1026,7 +1031,7 @@ ui.stack('', 1, 'l', 't', 800, 800)
 				)
 				ui.m(10)
 				ui.popup('tt'+j+i, 'tooltip', null, side, align, 100, 50, 'change_side constrain')
-					ui.shadow(1, 1, 3, 0, false, ui.dark() ? 'black' : '#ccc')
+					ui.shadow('demo_tooltip')
 					ui.bb_tooltip('bg2', null, 'intense', null, ui.sp1())
 				ui.end_popup()
 			ui.end_popup()
@@ -1096,10 +1101,13 @@ ui.end_v()
 `
 
 demos.toolbox = `
+ui.shadow_style('light', 'demo_tooltip', 1, 1, 3, 0, false, 0, 0, .8, 1)
+ui.shadow_style('dark',  'demo_tooltip', 1, 1, 3, 0, false, 0, 0,  0, 1)
 function tb_contents(tb) { // tb: toolbox id, prefixes the ids in here
 	ui.stack('', 1, 's', 's', 200, 300)
 		ui.m(ui.sp2())
 		ui.v(1, ui.sp(), 'c', 't')
+			tb_input_text[tb] = ui.input(tb+'_input', tb_input_text[tb] ?? 'type here')
 			tb_dd_i[tb+'1'] = ui.list_dropdown(tb+'_dd1', dd_items, tb_dd_i[tb+'1'])
 			tb_dd_i[tb+'2'] = ui.list_dropdown(tb+'_dd2', dd_items, tb_dd_i[tb+'2'])
 			ui.stack(tb+'_tt', 0, 'c', 'c', 100, 30)
@@ -1108,7 +1116,7 @@ function tb_contents(tb) { // tb: toolbox id, prefixes the ids in here
 				if (ui.hit(tb+'_tt')) {
 					ui.m(10)
 					ui.popup(tb+'_ttp', 'error', null, 'r', 'c', 120, 40)
-						ui.shadow(1, 1, 3, 0, false, ui.dark() ? 'black' : '#ccc')
+						ui.shadow('demo_tooltip')
 						ui.bb_tooltip('bg2', null, 'intense', null, ui.sp1())
 						ui.p(ui.sp2(), ui.sp())
 						ui.text('', tb+' error')
@@ -1121,7 +1129,7 @@ function tb_contents(tb) { // tb: toolbox id, prefixes the ids in here
 				if (ui.hit(tb+'_tt2')) {
 					ui.m(10)
 					ui.popup(tb+'_ttp2', 'tooltip', null, 'r', 'c', 120, 40)
-						ui.shadow(1, 1, 3, 0, false, ui.dark() ? 'black' : '#ccc')
+						ui.shadow('demo_tooltip')
 						ui.bb_tooltip('bg2', null, 'intense', null, ui.sp1())
 						ui.p(ui.sp2(), ui.sp())
 						ui.text('', tb+' tooltip')

@@ -425,9 +425,9 @@ theme_make('dark' , true)
 
 /// current theme
 
-let theme
+let theme // only set in draw phase
 ui.get_theme = () => theme
-ui.dark = () => theme.is_dark
+ui.dark = () => themes[ui.default_theme].is_dark
 
 /// color state parsing
 
@@ -883,11 +883,12 @@ ui.default_theme = document.documentElement.getAttribute('theme') ?? 'light'
 ui.default_font  = document.documentElement.getAttribute('font' ) ?? 'Arial'
 function set_screen_bg() {
 	theme = themes[ui.default_theme]
-	document.documentElement.style.background = bg_color('bg')
+	let color = bg_color('bg')
+	theme = null
+	document.documentElement.style.background = color
 }
 ui.set_default_theme = function(theme) {
-	if (!theme)
-		theme = system_in_dark_mode() ? 'dark' : 'light'
+	theme ??= system_in_dark_mode() ? 'dark' : 'light'
 	ui.default_theme = theme
 	set_screen_bg()
 }
@@ -1561,8 +1562,7 @@ function reset_tui() {
 }
 
 function reset_canvas() {
-	if (!dpr) return // resize_canvas() wasn't called yet (shouldn't happen).
-	theme = themes[ui.default_theme]
+	assert(dpr)
 	color = 'text'
 	color_state = 0
 	font = ui.TUI ? 'monospace' : ui.default_font
@@ -2004,6 +2004,7 @@ ui.local_state = function(id, k) {
 let theme_stack = []
 
 function draw_cmd(a, i, recs) {
+	let prev_ts_len = theme_stack.length
 	let next_ext_i = cmd_next_ext_i(a, i)
 	while (i < next_ext_i) {
 
@@ -2022,6 +2023,7 @@ function draw_cmd(a, i, recs) {
 			i += a[i-2] // next_i
 		}
 	}
+	assert(theme_stack.length == prev_ts_len)
 }
 
 function draw_popups(popups, recs) {
@@ -2049,22 +2051,20 @@ function draw_frame(recs, popups, sm1) {
 	let current_popup_rec0  = current_popup_rec
 	let current_popup_ct_i0 = current_popup_ct_i
 
-	let theme_stack_length0 = theme_stack.length
-	theme_stack.push(theme)
-	theme = themes[ui.default_theme]
-
 	draw_popups(popups, recs)
 	assert(current_popup_rec  == current_popup_rec0)
 	assert(current_popup_ct_i == current_popup_ct_i0)
-
-	theme = theme_stack.pop()
-	assert(theme_stack.length == theme_stack_length0)
 
 	render_state_gc(render_state_map)
 	render_state_map = sm0
 }
 
 /// hit-testing phase --------------------------------------------------------
+
+let hit_id // innermost hit widget
+
+let hit_focus_id // innermost focusable that was clicked to be focused
+let hit_focus_kept // click-to-focus prevented by widget with keep_focus()
 
 let hit_state_map      = map() // {id->state}
 let prev_hit_state_map = map() // {id->state}
@@ -2637,7 +2637,10 @@ function redraw_all() {
 
 			drawn_focused_input = null
 			drawn_focused_by_key = false
+
+			theme = themes[ui.default_theme]
 			draw_frame(recs, root_popups, root_render_state_map)
+			theme = null
 
 			sync_dom_focus()
 			sync_dom_selection()
@@ -4509,19 +4512,17 @@ ui.shadow_style('dark', 'picker'  ,  0,  2, 15, 1, false, 0, 0, 0, .8)
 
 const CMD_SHADOW = cmd('shadow')
 
-ui.shadow = function(x, y, blur, spread, inset, color) {
-	if (isstr(x))
-		x = assert(theme.shadow[x])
-	if (isarray(x))
-		[x, y, blur, spread, inset, color] = x
-	ui_cmd(CMD_SHADOW, x, y, blur, spread, inset ? 1 : 0, color)
+ui.shadow = function(s) {
+	assert(isstr(s))
+	ui_cmd(CMD_SHADOW, s)
 }
 
 let shadow_set
 
 // TODO: use spread & inset
 ui.set_shadow = function(s) {
-	let [x, y, blur, spread, inset, color] = assert(theme.shadow[s], 'unknown shadow ', s)
+	let [x, y, blur, spread, inset, color] =
+		assert(theme.shadow[s], 'unknown shadow ', s)
 	cx.shadowBlur    = blur
 	cx.shadowOffsetX = x
 	cx.shadowOffsetY = y
@@ -4530,13 +4531,7 @@ ui.set_shadow = function(s) {
 }
 
 draw[CMD_SHADOW] = function(a, i) {
-	cx.shadowOffsetX = a[i+0]
-	cx.shadowOffsetY = a[i+1]
-	cx.shadowBlur    = a[i+2]
-	// TODO: use a[i+3] spread
-	// TODO: use a[i+4] inset
-	cx.shadowColor   = a[i+5]
-	shadow_set = true
+	ui.set_shadow(a[i+0])
 }
 
 function reset_shadow() {
