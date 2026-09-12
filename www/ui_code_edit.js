@@ -273,7 +273,7 @@ ui.widget('code_edit_text', {
 		cx.globalCompositeOperation = 'source-atop'
 
 		// draw highlighting rectangles.
-		let fg_colors = ui.get_theme().fg[0] // get all fg colors once
+		let fg_colors = ui.get_theme().fg.get(0) // get all fg colors once
 		let text_color = fg_colors.text
 		for (let line = vline1; line <= vline2; line++) {
 			let s = vlines[line - vline1]

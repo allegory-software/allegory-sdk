@@ -56,6 +56,8 @@ THEME API
 
 RENDERING
 
+	ui.main         frame build hook
+
 	cx              = access to canvas context for drawing
 	screen          = access to canvas container div
 	animate         ()  request another animation frame
@@ -869,11 +871,9 @@ ui.resize = resize_canvas
 window.addEventListener('resize', resize_canvas)
 
 let raf_id
-let frame_no = 0
 let raf_t0
 function raf_animate(raf_t) {
 	raf_id = null
-	frame_no++
 	let raf_dt = raf_t0 != null ? raf_t - raf_t0 : 0
 	raf_dt = raf_dt < 32 ? raf_dt : 20
 	frame_graph_push('frame_delta_time', raf_dt)
@@ -1429,7 +1429,7 @@ the widget doesn't appear again on a future frame. State updates can be done
 in an update callback registered with ui.state() so that the widget state can
 be updated in advance of the widget appearing in the frame in case the widget
 state is needed before the widget appears in the frame. The update callback
-is called once per rebuild pass, either due to a state access from outside or
+is called once per build pass, either due to a state access from outside or
 when the widget is created in the frame.
 */
 
@@ -1437,22 +1437,17 @@ let state_map      = map() // {id->state}
 let current_id_set = set() // {id}
 let remove_id_set  = set() // {id}
 
-// frame build counter, used for:
-// 1) preventing state updates from running twice in the same build pass.
-// 2) removing events older than current build pass at the end of the pass.
-let frame_build_no = 0
-
 // an update must run once per build pass in order to avoid acting on events
 // like mouse clicks more than once (one-shot state only gets cleared at the
 // end of the frame). the update is triggered by ui.state() or ui.state_of().
-// frame_build_no keeps it from running twice per rebuild pass.
+// build_no keeps it from running twice per build pass.
 function state_update(id, s) {
 	let update_fn = s?.update
 	if (!update_fn)
 		return
-	if (s.frame_build_no == frame_build_no)
+	if (s.build_no == build_no)
 		return
-	s.frame_build_no = frame_build_no
+	s.build_no = build_no
 	update_fn(id, s)
 }
 
@@ -2489,6 +2484,12 @@ translate[NOHIT] = function(a, i) {
 
 // ANIMATION FRAME LOOP ------------------------------------------------------
 
+// frame build counter, used for:
+// 1) preventing state updates from running twice in the same build pass.
+// 2) removing events older than current build pass at the end of the pass.
+// 3) expiring text measure cache entries.
+let build_no = 0
+
 let want_rebuild
 let rebuild_for = [] // [label1,...]
 
@@ -2682,11 +2683,11 @@ function redraw_all() {
 		ui.window_focusing = false
 
 		for (let [k, es] of event_state)
-			if (es.frame_build_no < frame_build_no)
+			if (es.build_no < build_no)
 				event_state.delete(k)
 
 		// updates can run again now that they can't see the same edge state.
-		frame_build_no++
+		build_no++
 
 		if (!want_rebuild)
 			break
@@ -3192,6 +3193,9 @@ function hit_ct(a, i, recs, id) {
 	if (hit_box(a, i)) {
 		set_hit(id)
 		hit_template(a, i)
+		// an id means that the app hit-tests this box, so it takes the hit.
+		// nohit() opts out.
+		return !!id
 	}
 }
 
@@ -3199,7 +3203,8 @@ function hit_ct(a, i, recs, id) {
 
 const CMD_MEASURE = cmd('measure')
 
-// measure current container after layouting and put it in ui.state(into_id).
+// measure current container after layouting and put the result in
+// ui.state(into_id) keys: x, y, w, h.
 ui.measure = function(into_id) {
 	let i = ui_cmd(CMD_MEASURE, into_id, ui.ct_i())
 	a[i+1] -= i // make ct_i relative
@@ -5029,7 +5034,7 @@ measure_text = function(cx, s) {
 			m.fontBoundingBoxDescent = 1.3 * m.actualBoundingBoxDescent
 		}
 	}
-	m._frame_no = frame_no
+	m._build_no = build_no
 	return m
 }
 ui.measure_text = measure_text
@@ -5038,7 +5043,7 @@ runevery(60 * 2, function() {
 	let n = 0
 	for (let fm of tm.values()) {
 		for (let [s, m] of fm) {
-			if (frame_no - m._frame_no > 60 * 60 * 4) {
+			if (build_no - m._build_no > 60 * 60 * 4) {
 				fm.delete(s)
 				n++
 			}
@@ -6978,7 +6983,7 @@ checkbox.draw = function(a, i) {
 	cx.lineCap = 'round'
 	cx.lineJoin = 'round'
 	cx.setLineDash([20])
-	cx.lineDashOffset = on ? 0 : 20 // TODO: animate
+	cx.lineDashOffset = on ? 0 : 20
 	cx.stroke()
 	cx.restore()
 
