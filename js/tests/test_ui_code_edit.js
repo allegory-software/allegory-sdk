@@ -44,6 +44,7 @@ let Lezer = {
 let key_events = []
 let clipboard_text = ''
 let drag_state = null
+let empty_cs = {}
 let keys = {}
 let captured = null
 let states = new Map()
@@ -61,7 +62,7 @@ let ui = {
 	cx: {font: '', save(){}, restore(){}, fillRect(){}, fillText(){},
 		clearRect(){}, beginPath(){}, rect(){}, clip(){}},
 	caret_w: 2,
-	fg_style(){}, bg_style(){},
+	fg_style(){}, bg_style(){}, icon_def(){},
 	widget(){}, cmd(){}, keepalive(){}, on_free(){}, focus(){}, focusable(){},
 	capture_keydown(){}, capture_keyup(){}, capture_tab(){},
 	scroll_to_view_rect(){}, measure(){},
@@ -79,7 +80,13 @@ let ui = {
 	em: n => Math.round((n ?? 1) * FONT_SIZE),
 	focused: () => true,
 	state,
-	drag: () => [drag_state, 0, 0, state('drag')],
+	drag: () => !drag_state ? empty_cs : Object.assign(state('drag'), {
+		hover    : drag_state == 'hover',
+		drag     : drag_state == 'drag',
+		dragging : drag_state != 'hover',
+		drop     : drag_state == 'drop',
+		dx: 0, dy: 0,
+	}),
 	key: k => !!keys[k],
 	keypressed: k => !!keys[k],
 	mx: 0, my: 0,

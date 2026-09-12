@@ -47,6 +47,10 @@ const {
 	caret_w = 2,
 } = ui
 
+ui.icon_def('arrow_up'      , 'tabler', '\uea25')
+ui.icon_def('arrow_down'    , 'tabler', '\uea16')
+ui.icon_def('close'         , 'tabler', '\ueb55')
+
 //           theme    name        state       h     s     L    a
 // ---------------------------------------------------------------------------
 ui.fg_style('light', 'keyword'  , 'normal', 240, 1.00, 0.35)
@@ -1323,14 +1327,14 @@ function code_edit_view(id, opt) {
 			+ caret_w)
 		let text_h = lines.length * line_h
 
-		let [drag_state] = ui.drag(id+'.text_contentbox')
-		if (drag_state == 'drag')
+		let cs = ui.drag(id+'.text_contentbox')
+		if (cs.drag)
 			ui.focus(id)
 
 		// move cursor and select text based on mouse clicking and dragging.
 
 		hit_line = null
-		if (drag_state) {
+		if (cs.hover || cs.dragging) {
 			let text_state = ui.state(id+'.text_contentbox')
 			let x = text_state.x
 			let y = text_state.y
@@ -1339,12 +1343,12 @@ function code_edit_view(id, opt) {
 			let line_s = lines[hit_line]
 			let hit_col = floor((ui.mx - x + char_w / 2) / char_w)
 			let hit_char = col_to_char(hit_col, line_s, tab_width)
-			if (drag_state != 'hover') {
-				undo_group = drag_state == 'dragging' ? 'ignore' : 'drag'
+			if (cs.dragging) {
+				undo_group = cs.drag || cs.drop ? 'drag' : 'ignore'
 				if (ui.keypressed('ctrl')) {
 					set_block_mode(true)
-					let sel_line = drag_state == 'drag' ? hit_line : cursor.sel_line
-					let sel_col  = drag_state == 'drag' ? hit_col  : cursor.sel_col
+					let sel_line = cs.drag ? hit_line : cursor.sel_line
+					let sel_col  = cs.drag ? hit_col  : cursor.sel_col
 					let bline1 = min(hit_line, sel_line)
 					let bline2 = max(hit_line, sel_line)
 					if (block_col_ok(hit_col, bline1, bline2)
@@ -1352,7 +1356,7 @@ function code_edit_view(id, opt) {
 						set_block_cursor(hit_line, hit_col, sel_line, sel_col)
 				} else {
 					set_block_mode(false)
-					set_cursor(hit_line, hit_char, drag_state != 'drag')
+					set_cursor(hit_line, hit_char, !cs.drag)
 				}
 			}
 			undo_group = null
@@ -1583,7 +1587,7 @@ function code_edit_view(id, opt) {
 						ui.m(ui.sp2())
 						ui.p(ui.sp2(), ui.sp1())
 						ui.popup(id+'.find_popup', null, null, 'it', ']', 0, 0, 'constrain solid')
-							ui.shadow(1, 1, 3, 0, false, ui.dark() ? 'black' : '#ccc')
+							ui.shadow('menu')
 							ui.bb('bg2', null, 1, 'intense')
 							let fid = id+'.find_input'
 							let rid = id+'.replace_input'
@@ -1596,10 +1600,10 @@ function code_edit_view(id, opt) {
 										find_scan()
 									}
 									ui.nofocus()
-									if (ui.bare_icon_button(id+'.find_prev', 'arrow-up', null, 0))
+									if (ui.bare_icon_button(id+'.find_prev', 'arrow_up', null, 0))
 										goto_match(-1)
 									ui.nofocus()
-									if (ui.bare_icon_button(id+'.find_next', 'arrow-down', null, 0))
+									if (ui.bare_icon_button(id+'.find_next', 'arrow_down', null, 0))
 										goto_match(1)
 									ui.nofocus()
 									if (ui.bare_icon_button(id+'.find_close', 'close', null, 0)) {
