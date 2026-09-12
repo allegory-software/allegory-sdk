@@ -399,23 +399,22 @@ let array_freelist = () => freelist(array)
 
 //// THEMES ------------------------------------------------------------------
 
+// Themes allow viewing a remote shared screen in the client's own color scheme,
+// so they can only set colors, never geometry, so that the screen shows
+// identical geometry to both users otherwise you won't know what you click on!
+
 /// theme objects
 
-function array_of_objs(n) {
-	let a = []
-	for (let i = 0; i < n; i++)
-		a.push({})
-	return a
+function color_state_map() {
+	return new Map([[0, {}]]) // state 0 (normal) always present as fallback
 }
 function theme_make(name, is_dark) {
 	themes[name] = {
 		is_dark : is_dark,
 		name    : name,
-		// TODO: 255 seems excessive, though it's probably still faster
-		// than a hashmap access, dunno...
-		fg     : array_of_objs(255),
-		border : array_of_objs(255),
-		bg     : array_of_objs(255),
+		fg     : color_state_map(),
+		border : color_state_map(),
+		bg     : color_state_map(),
 		shadow : {},
 	}
 }
@@ -499,15 +498,20 @@ function def_color_func(k) {
 		let states = themes[theme][k]
 		if (state == '*') { // copy all states of a color
 			assert(isstr(h), 'expected color name to copy for all states')
-			for (let state_i = 0; state_i < states.length; state_i++) {
-				let color = states[state_i][h]
+			for (let [state_i, state_colors] of states) {
+				let color = state_colors[h]
 				if (color != null)
-					states[state_i][name] = color
+					state_colors[name] = color
 			}
 			return
 		}
 		let state_i = parse_state(state)
-		states[state_i][name] = isnum(h)
+		let state_colors = states.get(state_i)
+		if (!state_colors) {
+			state_colors = {}
+			states.set(state_i, state_colors)
+		}
+		state_colors[name] = isnum(h)
 			? [hsl(h, s, L, a), h, s, L, a, is_dark]
 			: isarray(h) ? h : ui[k+'_color_hsl'](h, s ?? state_i, L ?? theme)
 	}
@@ -525,11 +529,12 @@ function lookup_color_hsl_func(k) {
 	return function(name, state, theme1) {
 		let state_i = parse_state(state)
 		theme1 = theme1 ? themes[theme1] : theme
-		let c = theme1[k][state_i][name] ?? theme1[k][0][name]
+		let state_colors = theme1[k].get(state_i)
+		let c = (state_colors && state_colors[name]) ?? theme1[k].get(0)[name]
 		if (!c) {
 			warn('no ', k, ' for (', name, ', ',
 				repl(state, 0, 'normal'), ', ', theme1.name, ')')
-			c = theme1[k][0][default_name]
+			c = theme1[k].get(0)[default_name]
 		}
 		return c
 	}
