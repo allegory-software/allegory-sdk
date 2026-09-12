@@ -1005,13 +1005,11 @@ function reset_pointer_state(p) {
 	p.trackpad = false
 	p.mouseenter = false
 	p.mouseleave = false
-	p.changed = false
 }
 
 function update_mouse(ev) {
 	ui.local_pointer.mx = round(ev.clientX * dpr)
 	ui.local_pointer.my = round(ev.clientY * dpr)
-	ui.local_pointer.changed = true
 }
 
 canvas.addEventListener('pointerdown', function(ev) {
@@ -1064,6 +1062,7 @@ canvas.addEventListener('pointerleave', function(ev) {
 	}
 	ui.local_pointer.activate()
 	ui.set_cursor()
+	apply_cursor()
 	animate()
 })
 
@@ -2154,8 +2153,6 @@ function hit_popups(popups, recs) {
 
 function hit_frame(recs, popups) {
 
-	ui.set_cursor()
-
 	hit_frame_template()
 
 	hit_state_map.clear()
@@ -2551,6 +2548,10 @@ function redraw_all() {
 		focus_taken = false
 
 		t0 = clock_ms()
+
+		// can be changed in hit phase or in build phase.
+		// applied once at the end of the frame.
+		ui.set_cursor()
 
 		hit_frame(recs, root_popups)
 
