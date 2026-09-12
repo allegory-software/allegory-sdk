@@ -1329,15 +1329,13 @@ ui.fire = function(id, name, ev) {
 }
 
 ui.listen = function(id, name) {
-	// call update_fn if not already called, which calls fire().
-	state_update(id, state_map.get(id))
+	ui.state_of(id) // fire() may be called inside id's update callback
 	return event_state.get(id+'.'+name)
 }
 
 ui.consume = function(id, name) {
 	let k = id+'.'+name
-	// call update_fn if not already called, which calls fire().
-	state_update(id, state_map.get(id))
+	ui.state_of(id)  // fire() may be called inside id's update callback
 	let ev = event_state.get(k)
 	if (!ev) return
 	event_state.delete(k)
