@@ -616,13 +616,13 @@ ui.fg_style('dark' , 'link'   , 'normal' ,  26, 0.88, 0.60)
 ui.fg_style('dark' , 'link'   , 'hover'  ,  26, 0.99, 0.70)
 ui.fg_style('dark' , 'link'   , 'active' ,  26, 0.99, 0.80)
 
-ui.fg_style('light', 'marker' , 'normal' ,   0, 0.00, 0.5) // TODO
-ui.fg_style('light', 'marker' , 'hover'  ,   0, 0.00, 0.5) // TODO
-ui.fg_style('light', 'marker' , 'active' ,   0, 0.00, 0.5) // TODO
+ui.fg_style('light', 'marker' , 'normal' ,  61, 1.00, 0.35)
+ui.fg_style('light', 'marker' , 'hover'  ,  61, 1.00, 0.42)
+ui.fg_style('light', 'marker' , 'active' ,  61, 1.00, 0.48)
 
 ui.fg_style('dark' , 'marker' , 'normal' ,  61, 1.00, 0.57)
-ui.fg_style('dark' , 'marker' , 'hover'  ,  61, 1.00, 0.57) // TODO
-ui.fg_style('dark' , 'marker' , 'active' ,  61, 1.00, 0.57) // TODO
+ui.fg_style('dark' , 'marker' , 'hover'  ,  61, 1.00, 0.65)
+ui.fg_style('dark' , 'marker' , 'active' ,  61, 1.00, 0.72)
 
 ui.fg_style('light', 'button-danger', 'normal', 0, 0.54, 0.43)
 ui.fg_style('dark' , 'button-danger', 'normal', 0, 0.54, 0.43)
@@ -648,7 +648,7 @@ ui.border_style('light', 'light'   , 'hover'  ,   0,    0,    0, 0.30)
 ui.border_style('light', 'intense' , 'normal' ,   0,    0,    0, 0.30)
 ui.border_style('light', 'intense' , 'hover'  ,   0,    0,    0, 0.40)
 ui.border_style('light', 'max'     , 'normal' ,   0,    0,    0, 1.00)
-ui.border_style('light', 'marker'  , 'normal' ,  61, 1.00, 0.57, 1.00) // TODO
+ui.border_style('light', 'marker'  , 'normal' ,  61, 1.00, 0.35, 1.00)
 
 ui.border_style('dark' , 'light'   , 'normal' ,   0,    0,    1, 0.09)
 ui.border_style('dark' , 'light'   , 'hover'  ,   0,    0,    1, 0.03)
