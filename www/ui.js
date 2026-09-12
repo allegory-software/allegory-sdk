@@ -497,11 +497,22 @@ function def_color_func(k) {
 		}
 		let states = themes[theme][k]
 		if (state == '*') { // copy all states of a color
-			assert(isstr(h), 'expected color name to copy for all states')
-			for (let [state_i, state_colors] of states) {
-				let color = state_colors[h]
-				if (color != null)
-					state_colors[name] = color
+			let src_kind = k
+			let src_name = h
+			if (isarray(h)) // eg. ui.bg_style('*', 'text', '*', ['fg', 'text'])
+				[src_kind, src_name] = h
+			else
+				assert(isstr(h), 'expected color name to copy for all states')
+			for (let [state_i, src_state_colors] of themes[theme][src_kind]) {
+				let color = src_state_colors[src_name]
+				if (color == null)
+					continue
+				let dst_state_colors = states.get(state_i)
+				if (!dst_state_colors) {
+					dst_state_colors = {}
+					states.set(state_i, dst_state_colors)
+				}
+				dst_state_colors[name] = color
 			}
 			return
 		}
@@ -713,12 +724,8 @@ ui.bg_style('dark' , 'input' , 'focused', 216, 0.28, 0.08)
 ui.bg_style('dark' , 'input' , 'hover'  , 216, 0.28, 0.21)
 ui.bg_style('dark' , 'input' , 'active' , 216, 0.28, 0.25)
 
-// TODO: see if we can find a declarative way to copy fg colors to bg in bulk.
-for (let theme of ['light', 'dark']) {
-	for (let state of ['normal', 'hover', 'active'])
-		for (let fg of ['text', 'link', 'marker'])
-			ui.bg_style(theme, fg, state, fg_color_hsl(fg, state, theme))
-}
+for (let name of ['text', 'link', 'marker'])
+	ui.bg_style('*', name, '*', ['fg', name])
 
 ui.bg_style('light', 'scrollbar', 'normal' ,   0, 0.00, 0.70, 0.5)
 ui.bg_style('light', 'scrollbar', 'hover'  ,   0, 0.00, 0.75, 0.8)
