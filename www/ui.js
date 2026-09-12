@@ -1424,15 +1424,16 @@ when the widget is created in the frame.
 let state_map      = map() // {id->state}
 let current_id_set = set() // {id}
 let remove_id_set  = set() // {id}
-let frame_build_no = 0 // frame counter, for running state updates once per frame
 
-ui._state_map = state_map
+// frame build counter, used for:
+// 1) preventing state updates from running twice in the same build pass.
+// 2) removing events older than current build pass at the end of the pass.
+let frame_build_no = 0
 
-// an update must run once per redraw in order to avoid acting on events
+// an update must run once per build pass in order to avoid acting on events
 // like mouse clicks more than once (one-shot state only gets cleared at the
-// end of the frame). the update is triggered by whichever comes first:
-// ui.state() or ui.state_of(). frame_build_no keeps it from running twice per
-// rebuild pass.
+// end of the frame). the update is triggered by ui.state() or ui.state_of().
+// frame_build_no keeps it from running twice per rebuild pass.
 function state_update(id, s) {
 	let update_fn = s?.update
 	if (!update_fn)
