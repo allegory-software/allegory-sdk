@@ -23,7 +23,7 @@ THEME DEFINITIONS
 
 	* = fg | border | bg
    *_style         (theme, name, state, h, s, L, a, is_dark)      define a color
-	shadow_style    (theme, name, x, y, blur, spread, inset, h, s, L, a)  define a shadow
+	shadow_style    (theme, name, x, y, blur, h, s, L, a)  define a shadow
 
 BUILT-IN STYLES
 
@@ -4497,30 +4497,30 @@ draw[CMD_BB_TOOLTIP] = function(a, i) {
 
 //// BOX SHADOW --------------------------------------------------------------
 
-ui.shadow_style = function(theme, name, x, y, blur, spread, inset, h, s, L, a) {
+ui.shadow_style = function(theme, name, x, y, blur, h, s, L, a) {
 	themes[theme].shadow[name] = [
-		x, y, blur, spread, inset,
+		x, y, blur,
 		hsl(h, s, L, a), h, s, L, a
 	]
 }
 
-//               theme    name        x   y  bl sp  inset  h  s  L  a
+//               theme    name        x   y  bl  h  s  L  a
 // ---------------------------------------------------------------------------
-ui.shadow_style('light', 'tooltip' ,  2,  2,  9, 0, false, 0, 0, 0, 0x44 / 0xff)
-ui.shadow_style('light', 'toolbox' ,  1,  1,  4, 0, false, 0, 0, 0, 0xaa / 0xff)
-ui.shadow_style('light', 'menu'    ,  0,  5, 16, 0, false, 0, 0, 0, 0x33 / 0xff)
-ui.shadow_style('light', 'button'  ,  0,  0,  2, 0, false, 0, 0, 0, 0x11 / 0xff)
-ui.shadow_style('light', 'thumb'   ,  0,  0,  2, 0, false, 0, 0, 0, 0xbb / 0xff)
-ui.shadow_style('light', 'modal'   ,  2,  5, 10, 0, false, 0, 0, 0, 0x88 / 0xff)
-ui.shadow_style('light', 'picker'  ,  0,  5, 10, 1, false, 0, 0, 0, 0x22 / 0xff) // large fuzzy shadow
+ui.shadow_style('light', 'tooltip' ,  2,  2,  9, 0, 0, 0, 0x44 / 0xff)
+ui.shadow_style('light', 'toolbox' ,  1,  1,  4, 0, 0, 0, 0xaa / 0xff)
+ui.shadow_style('light', 'menu'    ,  0,  5, 16, 0, 0, 0, 0x33 / 0xff)
+ui.shadow_style('light', 'button'  ,  0,  0,  2, 0, 0, 0, 0x11 / 0xff)
+ui.shadow_style('light', 'thumb'   ,  0,  0,  2, 0, 0, 0, 0xbb / 0xff)
+ui.shadow_style('light', 'modal'   ,  2,  5, 10, 0, 0, 0, 0x88 / 0xff)
+ui.shadow_style('light', 'picker'  ,  0,  5, 10, 0, 0, 0, 0x22 / 0xff) // large fuzzy shadow
 
-ui.shadow_style('dark', 'tooltip' ,  2,  2,  9, 0, false, 0, 0, 0, 0x44 / 0xff)
-ui.shadow_style('dark', 'toolbox' ,  1,  1,  4, 0, false, 0, 0, 0, 0xaa / 0xff)
-ui.shadow_style('dark', 'menu'    ,  1,  1,  9, 0, false, 0, 0, 0, 0xff / 0xff)
-ui.shadow_style('dark', 'button'  ,  0,  0,  2, 0, false, 0, 0, 0, 0xff / 0xff)
-ui.shadow_style('dark', 'thumb'   ,  1,  1,  2, 0, false, 0, 0, 0, 0xaa / 0xff)
-ui.shadow_style('dark', 'modal'   ,  2,  5, 10, 0, false, 0, 0, 0, 0x88 / 0xff)
-ui.shadow_style('dark', 'picker'  ,  0,  2, 15, 1, false, 0, 0, 0, .8)
+ui.shadow_style('dark', 'tooltip' ,  2,  2,  9, 0, 0, 0, 0x44 / 0xff)
+ui.shadow_style('dark', 'toolbox' ,  1,  1,  4, 0, 0, 0, 0xaa / 0xff)
+ui.shadow_style('dark', 'menu'    ,  1,  1,  9, 0, 0, 0, 0xff / 0xff)
+ui.shadow_style('dark', 'button'  ,  0,  0,  2, 0, 0, 0, 0xff / 0xff)
+ui.shadow_style('dark', 'thumb'   ,  1,  1,  2, 0, 0, 0, 0xaa / 0xff)
+ui.shadow_style('dark', 'modal'   ,  2,  5, 10, 0, 0, 0, 0x88 / 0xff)
+ui.shadow_style('dark', 'picker'  ,  0,  2, 15, 0, 0, 0, .8)
 
 const CMD_SHADOW = cmd('shadow')
 
@@ -4531,9 +4531,8 @@ ui.shadow = function(s) {
 
 let shadow_set
 
-// TODO: use spread & inset
 ui.set_shadow = function(s) {
-	let [x, y, blur, spread, inset, color] =
+	let [x, y, blur, color] =
 		assert(theme.shadow[s], 'unknown shadow ', s)
 	cx.shadowBlur    = blur
 	cx.shadowOffsetX = x
