@@ -34,7 +34,17 @@ let loaded_frames = 0
 source_frame.className = 'local'
 viewer_frame.className = 'remote'
 
+function forward_iframe_errors(iframe) {
+	iframe.contentWindow.addEventListener('error', function(ev) {
+		console.error(iframe.className+' iframe:', ev.error ?? ev.message)
+	})
+	iframe.contentWindow.addEventListener('unhandledrejection', function(ev) {
+		console.error(iframe.className+' iframe:', ev.reason)
+	})
+}
+
 function frame_loaded() {
+	forward_iframe_errors(this)
 	loaded_frames++
 	if (loaded_frames < 2)
 		return
