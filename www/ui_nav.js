@@ -5120,14 +5120,8 @@ color.build_editor = function(id, v, pad_l, pad_r, h) {
 				v = hex
 				ui.h(0, ui.sp05(), 'r')
 					ui.default_button(id+'.pick')
-					if (ui.primary_button(id+'.pick', S('pick', 'Pick'), 0)) {
-						ui.fire(picker_id, 'item_picked', {color: hex})
-						ui.rebuild('item_picked')
-					}
-					if (ui.button(id+'.cancel', S('cancel', 'Cancel'), 0)) {
-						ui.fire(id, 'toggle')
-						ui.rebuild('toggle')
-					}
+					ui.primary_button(id+'.pick', S('pick', 'Pick'), 0)
+					ui.button(id+'.cancel', S('cancel', 'Cancel'), 0)
 				ui.end_h()
 			ui.end_v()
 			ui.resizer(resize_id, ui.em(22), null, 'x')

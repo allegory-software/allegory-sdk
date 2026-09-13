@@ -1677,8 +1677,9 @@ function free_recs() {
 
 let a // current recording
 
-let cmd_names = []
+let cmd_names = [] // [[CMD]=NAME]: command's name
 let cmd_name_map = obj()
+let id_slot = [] // [[CMD]=ID]: command's ID arg index, if any
 
 function C(a, i) { return cmd_names[a[i-1]] }
 
@@ -1699,6 +1700,7 @@ function unsparse_all(i) {
 	unsparse(hittest       , i)
 	unsparse(is_flex_child , i)
 	unsparse(cmd_names     , i)
+	unsparse(id_slot       , i)
 }
 function cmd(name, is_ct) {
 	assert(cmd_name_map[name] == null, 'duplicate command ', name)
@@ -2555,6 +2557,7 @@ function redraw_all() {
 	hit_state_map = sm
 
 	rebuild_for.length = 0
+	ui._frame_drawn = false
 	let rebuild_count = 0
 	while (1) {
 		let t0, t1
@@ -2665,6 +2668,7 @@ function redraw_all() {
 			t1 = clock_ms()
 			frame_graph_push('frame_draw_time', t1 - t0)
 
+			ui._frame_drawn = true
 			ui.frame_changed()
 		}
 
@@ -2694,7 +2698,7 @@ function redraw_all() {
 		if (!want_rebuild)
 			break
 		rebuild_count++
-		pr('rebuild_count', rebuild_count)
+		pr('rebuild')
 		if (rebuild_count > 1) {
 			warn('rebuild loop detected')
 			break
@@ -2723,6 +2727,7 @@ ui.widget = function(cmd_name, t, is_ct) {
 	draw_end      [_cmd] = t.draw_end
 	hittest       [_cmd] = t.hit
 	is_flex_child [_cmd] = t.is_flex_child
+	id_slot       [_cmd] = t.ID
 	let create = t.create
 	if (create) {
 		// bind() to avoid `...args` which allocates.
@@ -3466,6 +3471,7 @@ measure_end[CMD_V_TABSTOPS] = function(a, i, axis) {
 const STACK_ID = BOX_CT_ARGS+0
 
 const CMD_STACK = cmd_ct('stack')
+id_slot[CMD_STACK] = STACK_ID
 
 ui.stack = function(id, fr, align, valign, min_w, min_h) {
 	return ui_cmd_box_ct(CMD_STACK, fr, align, valign, min_w, min_h,
@@ -3535,6 +3541,7 @@ function parse_sb_overflow(s) {
 }
 
 const CMD_SCROLLBOX = cmd_ct('scrollbox')
+id_slot[CMD_SCROLLBOX] = SB_ID
 
 ui.scrollbox = function(
 	id, fr, overflow_x, overflow_y, align, valign,
@@ -3900,7 +3907,7 @@ hittest[CMD_SCROLLBOX] = function(a, i, recs) {
 			continue
 		if (!hit_rect(tx, ty, tw, th))
 			continue
-		set_hit(id+'.scrollbar'+axis)
+		set_hit(id+'.scrollbar_'+axis)
 		set_hit(id)
 		return true
 	}
@@ -4945,6 +4952,7 @@ const TEXT_MARKED         = 32 // bit 6
 const TEXT_READONLY       = 64 // bit 7
 
 const CMD_TEXT = cmd('text')
+id_slot[CMD_TEXT] = TEXT_ID
 
 // draw a background behind [i1, i2) of the next text, to show a match or a
 // selection. bg defaults to the `search` background style.
@@ -5982,6 +5990,8 @@ let SS_FOCUSED = 1
 
 let ss = {}
 
+ss.ID = SS_ID
+
 function ss_send_pointer(s, mx, my) {
 	let p = s.sent_pointer
 	let inside   = mx != null
@@ -6147,6 +6157,7 @@ let COLOR = ARGS+0
 let ID    = ARGS+1
 let out = [0, 0, null]
 ui.widget('drag_point', {
+	ID: ID,
 	create: function(cmd, id, x, y, color) {
 		color ??= 'red'
 		ui.state(id)
@@ -6217,12 +6228,11 @@ ui.widget('drag_point', {
 
 ui.button_stack = function(id, fr, align, valign, min_w, min_h) {
 	ui.focusable(id)
+	ui.keep_focus(id)
 	ui.stack(id, fr, align ?? 's', valign ?? 'c', min_w, min_h ?? ui.em(1.5))
 }
 
-ui.button_state = function(id) {
-	ui.state(id)
-	ui.keep_focus(id)
+function button_update(id, s) {
 	let cs = captured(id)
 	let hs = hit(id)
 	let state
@@ -6236,9 +6246,9 @@ ui.button_state = function(id) {
 		state = cs && hs ? ui.clickup ? 'click' : 'active'
 			: hs ? 'hover' : ui.focused(id) ? 'focused' : null
 	}
+	s.state = state
 	if (state == 'click')
 		ui.rebuild('click')
-	return state
 }
 
 ui.button_bb = function(style, state) {
@@ -6285,7 +6295,7 @@ ui.icon_button = function(
 	min_w ??= ui.em(1.5) // force w
 	min_h ??= ui.em(1.5) // force h
 	ui.button_stack(id, fr, align, valign, min_w, min_h)
-	let state = ui.button_state(id)
+	let state = ui.state(id, button_update).state
 	ui.button_bb(style, state)
 	let [icon_font, icon_text] = assert(icons[icon], 'unknown icon ', icon)
 	if (s == null) {
@@ -6307,7 +6317,7 @@ ui.bare_icon_button = function(id, icon, s, fr, align, valign, min_w, min_h) {
 
 ui.button = function(id, s, fr, align, valign, min_w, min_h, style) {
 	ui.button_stack(id, fr, align ?? 'l', valign ?? 'c', min_w, min_h)
-	let state = ui.button_state(id)
+	let state = ui.state(id, button_update).state
 	ui.button_bb(style, state)
 	ui.p(ui.sp2(), 0)
 	ui.button_text(s, state)
@@ -6674,21 +6684,26 @@ ui.radio_label = function(for_id, for_group_id, s, fr, align, valign) {
 
 */
 
-// fires 'picked', 'opened', 'closed'. responds to 'open', 'close', 'toggle'.
+// fires 'picked', 'opened', 'closed'. responds to 'open', 'close', 'toggle',
+// and to a click on the picker's id+'.pick' and id+'.cancel' buttons.
 // sets ui.state(id).open.
 function dropdown_update(id, s) {
 
 	let picker_id = id+'.picker'
 	let popup_id = id+'.popup'
+	let pick_button_id = id+'.pick'
+	let cancel_button_id = id+'.cancel'
 	let was_open = s.open
 	let open = was_open
 
 	let click = clicked(id) // id is the dropbox or the grid cell
 	let ev = ui.consume(picker_id, 'item_picked')
+		|| (ui.state_of(pick_button_id, 'state') == 'click' ? obj() : null)
 	let picked = !!ev
 	let want_open = !!ui.consume(id, 'open')
 	let want_close = !!ui.consume(id, 'close')
 	let want_toggle = !!ui.consume(id, 'toggle')
+		|| ui.state_of(cancel_button_id, 'state') == 'click'
 
 	let enter = ui.focused(id) && ui.keydown('enter')
 	let f2 = open && ui.keydown('f2') && ui.focus_inside(picker_id)
@@ -7889,6 +7904,8 @@ function sat_lum_update(id, s) {
 
 ui.box_widget('sat_lum_square', {
 
+	ID: SAT_LUM_ID,
+
 	create: function(cmd, id, hue, sat, lum) {
 
 		ui.focusable(id)
@@ -8016,6 +8033,8 @@ function hue_bar_update(id, s) {
 }
 
 ui.box_widget('hue_bar', {
+
+	ID: HUE_BAR_ID,
 
 	create: function(cmd, id, hue) {
 
@@ -9398,6 +9417,54 @@ function template_editor(id, t, ch_t) {
 	ui.end_toolbox()
 
 	ui.end_toolboxes()
+}
+
+//// AUTOMATED TESTING API ---------------------------------------------------
+
+// nothing in here is part of the widget API: it exists so that a test can
+// drive the ui from code and read back what each frame did.
+
+ui._state_map = state_map
+
+// what the last frame did: _rebuild_for holds the labels of every rebuild
+// asked for in it and _frame_drawn whether it drew, which redraw_all() sets.
+// a frame draws only when it exits the rebuild loop with nothing more asked
+// for, so _frame_drawn false means it gave up with another pass pending.
+// _build_no counts build passes, so its delta across a frame is how many
+// passes that frame took.
+ui._rebuild_for = rebuild_for
+ui._build_no = () => build_no
+
+// run one frame now instead of on the next animation frame.
+ui._redraw = function() {
+	if (raf_id) {
+		cancelAnimationFrame(raf_id)
+		raf_id = null
+	}
+	redraw_all()
+}
+
+// put the pointer over a widget without knowing where it is on screen. the
+// widget must have been laid out in the last frame. the hit phase of the
+// next frame then resolves the same chain of ids that it would for a real
+// pointer at that spot.
+ui._point_at = function(id) {
+	for (let k = 0; k < recs.length; k++) {
+		let ra = recs[k]
+		let i = 2
+		while (i < ra.length) {
+			let si = id_slot[ra[i-1]]
+			if (si != null && ra[i+si] === id) {
+				let p = ui.local_pointer
+				p.mx = ra[i+0] + ra[i+2] / 2
+				p.my = ra[i+1] + ra[i+3] / 2
+				p.activate()
+				return true
+			}
+			i = cmd_next_i(ra, i)
+		}
+	}
+	return false
 }
 
 }()) // module function
