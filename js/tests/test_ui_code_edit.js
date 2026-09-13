@@ -87,6 +87,7 @@ let ui = {
 		drop     : drag_state == 'drop',
 		dx: 0, dy: 0,
 	}),
+	drag_or_hit: () => drag_state ? ui.drag() : null,
 	key: k => !!keys[k],
 	keypressed: k => !!keys[k],
 	mx: 0, my: 0,

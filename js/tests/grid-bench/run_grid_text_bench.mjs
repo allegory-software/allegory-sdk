@@ -54,6 +54,7 @@ let bench_atlas_pages = []
 let bench_atlas_current_pages = obj()
 let bench_word_runs_cache = map()
 let bench_word_width_cache = map()
+let G = window
 let bench_atlas_stats = G.BENCH_GRID_ATLAS_STATS = obj()
 let bench_layout_phases = G.BENCH_GRID_LAYOUT_PHASES = obj()
 let bench_layout_native_measure_n = 0
@@ -229,22 +230,27 @@ function bench_fit_text_ratio(cx, s, sw, text_w) {
 \t\t\tclip = false
 \t}`)
 	source = replace_once(source,
-		'\t\tcx.fillText(s, x, y + asc)',
-		`\t\tif (bench_variant == 'atlas_slot_crop'
+		'\t\tcx.fillText(s, anchor_x, y + asc)',
+		`\t\tlet bench_text_x = anchor_x
+		if (text_align == ALIGN_END)
+			bench_text_x -= w
+		else if (text_align == ALIGN_CENTER && a[i+2] <= sw)
+			bench_text_x -= w / 2
+		if (bench_variant == 'atlas_slot_crop'
 				|| bench_variant == 'atlas_slot_small_crop')
-			bench_atlas_draw_slot(cx, s, x, y, w, sx, sw, asc, dsc)
+			bench_atlas_draw_slot(cx, s, bench_text_x, y, w, sx, sw, asc, dsc)
 		else if (bench_variant == 'atlas_words_crop'
 \t\t\t\t|| bench_variant == 'atlas_words_small_crop')
-\t\t\tbench_atlas_draw_words(cx, s, x, y, sx, sw, asc, dsc)
+\t\t\tbench_atlas_draw_words(cx, s, bench_text_x, y, sx, sw, asc, dsc)
 \t\telse if (bench_variant == 'atlas_clip'
 \t\t\t\t|| bench_variant == 'atlas_crop'
 \t\t\t\t|| bench_variant == 'atlas_small_crop')
-\t\t\tbench_atlas_draw(cx, s, x, y, w, sx, sw, asc, dsc,
+\t\t\tbench_atlas_draw(cx, s, bench_text_x, y, w, sx, sw, asc, dsc,
 \t\t\t\tbench_variant != 'atlas_clip')
 \t\telse if (bench_variant == 'max_width' && w > sw)
-\t\t\tcx.fillText(s, x, y + asc, sw)
+\t\t\tcx.fillText(s, anchor_x, y + asc, sw)
 \t\telse
-\t\t\tcx.fillText(s, x, y + asc)`)
+\t\t\tcx.fillText(s, anchor_x, y + asc)`)
 	source = replace_once(source,
 		`function layout_rec(a, x, y, w, h) {
 	reset_canvas()
@@ -322,9 +328,9 @@ function bench_fit_text_ratio(cx, s, sw, text_w) {
 \t\tbench_layout_phases.native_measure_calls = bench_layout_native_measure_n
 \t\tbench_layout_phases.native_measure_ms = bench_layout_native_measure_ms`)
 	source = replace_once(source,
-		'\t\t\ton_frame(a, i, x, y, w, h, cx, cy, cw, ch)',
+		'\t\t\ton_build(a, i, x, y, w, h, cx, cy, cw, ch)',
 		`\t\t\tlet bench_frame_make_t0 = clock_ms()
-\t\t\ton_frame(a, i, x, y, w, h, cx, cy, cw, ch)
+\t\t\ton_build(a, i, x, y, w, h, cx, cy, cw, ch)
 \t\t\tbench_layout_phases.frame_make += clock_ms() - bench_frame_make_t0`)
 	source = replace_once(source,
 		'\tlayout_rec(a1, x, y, w, h)',

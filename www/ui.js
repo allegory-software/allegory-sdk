@@ -79,7 +79,7 @@ MOUSE STATE
 	clickup         active pointer de-clicked
 	dblclick        active pointer double-clicked
 	wheel_dy        active pointer wheel delta
-	trackpad        active pointer is a trackpad
+	trackpad        active pointer wheel delta is from is a trackpad
 
 	local_pointer   = default pointer that tracks the local mouse and keyboard
 	mx0 my0         = mouse position when started dragging
@@ -88,20 +88,24 @@ MOUSE STATE
 	hit_bb          (x1, y1, x2, y2) -> t|f  ; bb means bounding box
 	hit_box         (a, i) -> t|f
 
-	captured_id     = id of widget that captured the mouse
-	capture         (id) -> captured_state_map         capture the mouse
-	captured        (id) -> captured_state_map | null  get captured state if mouse is captured
+	captured_id     = id of the widget that mouse is down on
+	captured        (id) -> cs | null  get captured state if mouse is captured
 
-	hit             (id[, k) -> hs|v|null  hit state map if widget is the innermost hit and not captured
-	hit_inside      (id[, k) -> hs|v|null  hit state map if mouse hovers widget and not captured
+	hit             (id[, k) -> hs|v|null  hit state if id is directly hit or dragging
+	clicked         (id[, k) -> hs|v|null  hit state if id was clicked this frame
+	dblclicked      (id[, k) -> hs|v|null  hit state if id was double-clicked
 	hit_enter       (id) -> t|f            mouse started hovering widget
 	hit_leave       (id) -> t|f            mouse stopped hovering widget
-	hovers          (id) -> hs|null        hit state map if mouse hovers widget incl. if mouse captured
-	hit_id          () -> id|null          innermost hit widget
+	hovers          (id) -> hs|null        hit state if mouse hovers or dragging over id
 	set_hit         (id) -> hs             declare that mouse hovers widget
 	nohit           ()                     exclude last command from hit-testing
 
-	drag            (id, move, dx0, dy0) -> [null|hover|drag|dragging|drop, dx, dy]
+	drag            (id, ['x'|'y'|'xy']) -> cs|null  drag state if id is captured
+	                cs.drag       first frame of the drag
+	                cs.dragging   every frame from drag to drop
+	                cs.drop       last frame of the drag
+	                cs.dx,dy      how far the mouse moved since the press
+	drag_or_hit     (id) -> cs|hs|null  drag(id), else hit(id)
 
 	set_cursor      (cursor)   set cursor for this frame
 
@@ -146,7 +150,8 @@ FOCUS STATE
 	focused         (id) -> t|f             check if widget is currently focused
 	focusing        (id) -> t|f             widget is focusing this frame
 	focusable       (id, [tab_order])       add widget to the tab order
-	nofocus         ()                      keep the next widget out of the tab order
+	nofocus         ()                      declare the next widget not tab-focusable
+	keep_focus      (id)                    declare widget not click-focusable
 	capture_tab     (id)                    widget gets tab and shift-tab
 	focus_group     ([trap], [tab_order], [id]) begin a tab order group
 	end_focus_group ()                      end a tab order group
@@ -245,7 +250,7 @@ CONTAINERS
 	hsplit | vsplit (id, size, unit, fixed_side, split_fr, gap, align, valign, min_w, min_h)
 	splitter        ()
 	toolbox         (id, title, align, valign, x0, y0, target_i)
-	frame           (id, on_measure, on_frame, fr, align, valign, min_w, min_h, ...args)
+	frame           (id, on_measure, on_build, fr, align, valign, min_w, min_h, ...args)
 	end             ()
 
 	scroll_to_view_next_box  ()
@@ -1113,76 +1118,46 @@ ui.update_mouse = function() {
 
 /// mouse capture state
 
-let capture_state = obj()
+let capture_state
 
-ui.capture = function(id) {
-	if (!id)
-		return
-	if (ui.captured_id != null)
-		if (ui.captured_id == id)
-			return capture_state
-		else
-			return
-	if (!ui.click)
-		return
-	let hs = hovers(id)
-	if (!hs)
-		return
-	ui.state(id)
+function capture(id) {
 	ui.captured_id = id
-	focus_taken = true
-	assign(capture_state, hs)
+	capture_state = assign(obj(), hovers(id))
 	ui.mx0 = ui.mx
 	ui.my0 = ui.my
-	return capture_state
 }
 
 function captured(id) {
 	return id && ui.captured_id == id && capture_state || null
 }
-ui.captured = captured
 
 function release_capture() {
 	ui.captured_id = null
-	capture_state = obj()
+	capture_state = null
 	ui.click = false
 	ui.pointer.click = false
 }
 
 /// drag & drop
 
-{
-let out = [null, 0, 0, null]
 ui.drag = function(id, axis) {
+	let cs = captured(id)
+	if (!cs)
+		return null
 	let move_x = !axis || axis == 'x' || axis == 'xy'
 	let move_y = !axis || axis == 'y' || axis == 'xy'
-	let cs = captured(id)
-	let state = null
-	let dx = 0
-	let dy = 0
-	if (cs) {
-		if (move_x) { dx = ui.mx - ui.mx0 }
-		if (move_y) { dy = ui.my - ui.my0 }
-		state = ui.clickup ? 'drop' : 'dragging'
-		cs.drag_state = state
-	} else {
-		cs = hit(id)
-		if (cs) {
-			if (ui.click) {
-				cs = ui.capture(id)
-				if (cs)
-					state = 'drag'
-			} else
-				state = 'hover'
-		}
-	}
-	out[0] = state
-	out[1] = dx
-	out[2] = dy
-	out[3] = cs
-	return out
+	cs.dx = move_x ? ui.mx - ui.mx0 : 0
+	cs.dy = move_y ? ui.my - ui.my0 : 0
+	cs.drag = ui.click // the hit phase captured it this frame
+	cs.dragging = true
+	cs.drop = ui.clickup
+	return cs
 }
+
+function drag_or_hit(id) {
+	return ui.drag(id) || hit(id)
 }
+ui.drag_or_hit = drag_or_hit
 
 /// setting the cursor icon
 
@@ -1334,10 +1309,10 @@ ui.key_changes = () => key_downs.size + key_ups.size
 // that a widget that listens to an event can still catch it if the widgets
 // that fired it appears later in the frame.
 
-let event_state = map() // {id.ev->[frame_build_no, args]}
+let event_state = map() // {id.ev->[build_no, args]}
 
 ui.fire = function(id, name, ev) {
-	event_state.set(id+'.'+name, {frame_build_no: frame_build_no, ...ev})
+	event_state.set(id+'.'+name, {build_no: build_no, ...ev})
 }
 
 ui.listen = function(id, name) {
@@ -1920,7 +1895,7 @@ function position_rec(a, axis, ct_wh) {
 // do scrolling and popup positioning and offset all boxes (top-down, recursive).
 
 // NOTE: translate is not re-runnable by design, which enables:
-// - running on_frame callbacks which can read one-shot state like click, etc.
+// - running on_build callbacks which can read one-shot state like click, etc.
 // - updating offsets by delta (popups do that),
 // ... but it also means you can't re-translate something if you need to,
 // so you can't implement a simple force_scroll() that would work inside the
@@ -2068,9 +2043,6 @@ function draw_frame(recs, popups, sm1) {
 
 let hit_id // innermost hit widget
 
-let hit_focus_id // innermost focusable that was clicked to be focused
-let hit_focus_kept // click-to-focus prevented by widget with keep_focus()
-
 let hit_state_map      = map() // {id->state}
 let prev_hit_state_map = map() // {id->state}
 
@@ -2083,21 +2055,24 @@ ui.hovers = hovers
 
 function hit(id, k) { // looks in prev. frame
 	assert(!render_state_map, 'hit() called while rendering')
-	if (ui.captured_id != null) // unavailable while captured
-		return
-	if (hit_id !== id) // an inner widget took the hit
+	if (ui.captured_id != null) {
+		if (ui.captured_id != id) // another widget captured the mouse
+			return
+	} else if (hit_id !== id) // an inner widget took the hit
 		return
 	return hovers(id, k)
 }
 ui.hit = hit
 
-function hit_inside(id, k) { // looks in prev. frame
-	assert(!render_state_map, 'hit_inside() called while rendering')
-	if (ui.captured_id != null) // unavailable while captured
-		return
-	return hovers(id, k)
+function clicked(id, k) {
+	return ui.click && hit(id, k)
 }
-ui.hit_inside = hit_inside
+ui.clicked = clicked
+
+function dblclicked(id, k) {
+	return ui.dblclick && hit(id, k)
+}
+ui.dblclicked = dblclicked
 
 ui.hit_enter = function(id) {
 	assert(!render_state_map, 'hit_enter() called while rendering')
@@ -2113,9 +2088,6 @@ ui.hit_leave = function(id) {
 	return !hit_state_map.has(id) && prev_hit_state_map.has(id)
 }
 
-let hit_id // innermost hit widget
-ui.hit_id = () => hit_id
-
 function hit_match(prefix) {
 	if (hit_id && hit_id.startsWith(prefix))
 		return hit_id.substring(prefix.length)
@@ -2126,8 +2098,8 @@ let hit_phase
 
 function set_hit(id) {
 	assert(hit_phase, 'set_hit() outside the hit phase')
-	// ^^ because set_hit() must be called in reverse paint order and only
-	// hit phase calls hit callbacks in that order.
+	// ^^ because set_hit() must be called in reverse paint order so that
+	// hit_state_map contains entries ordered from inner to outer.
 	if (!id) return
 	let s = hit_state_map.get(id)
 	if (!s) {
@@ -2159,12 +2131,15 @@ function hit_popups(popups, recs) {
 
 function hit_frame(recs, popups) {
 
-	hit_frame_template()
+	hit_frame_template_reset()
 
+	// reset hit state. set by set_hit() calls from hit callbacks.
 	hit_state_map.clear()
 	hit_id = null
+
 	if (ui.mx == null)
 		return
+
 	hit_phase = true
 	hit_popups(popups, recs)
 	hit_phase = false
@@ -2177,12 +2152,7 @@ ui.focused_id = null
 ui.focused_by_key = null
 let focusing_id
 
-// set when focus is taken, the mouse is captured, or a solid popup is
-// clicked: another click clears the focus.
-let focus_taken
-
 ui.focus = function(id, by_key) {
-	focus_taken = true
 	ui.focused_id = id
 	ui.focused_by_key = by_key
 	focusing_id = id
@@ -2383,6 +2353,14 @@ function next_focusable_after(group_i, i0, back) {
 
 let focus_first_id // focus group to focus, resolved after register_rec
 
+// tab order is not fully known during build, so this is recording a request
+// to be solved at the end of the build.
+ui.focus_first = function(group_id) {
+	if (ui.focus_inside(group_id))
+		return
+	focus_first_id = group_id
+}
+
 function resolve_focus_first(group_id) {
 	let group_i = focus_group_map.get(group_id)
 	if (group_i == null)
@@ -2394,12 +2372,38 @@ function resolve_focus_first(group_id) {
 	return true
 }
 
-// tab order is only known after register_rec puts the secondary recordings
-// in their real order, so this records a request that resolves there.
-ui.focus_first = function(group_id) {
-	if (ui.focus_inside(group_id))
-		return
-	focus_first_id = group_id
+/// tab-to-focus -------------------------------------------------------------
+
+function focus_on_tab() {
+	if (ui.keydown('tab') && !tab_captured(ui.focused_id)) {
+		let i = step_focus(ui.keypressed('shift'))
+		if (i != null) {
+			ui.focus(focusables[i+FOCUSABLE_ID], true)
+			consume_key_down('tab')
+		}
+	}
+}
+
+/// click-to-focus -----------------------------------------------------------
+
+// mark widget as not click-focusable so clicking on it does not steal focus.
+ui.keep_focus = function(id) {
+	ui.state(id).keep_focus = true
+}
+
+function focus_on_click() {
+	if (!ui.click) return
+	for (let id of hit_state_map.keys()) { // reverse paint order
+		// prevent focus stealing or clearing (scrollbar, etc.)
+		if (state_map.get(id)?.keep_focus)
+			return
+		if (focus_find(id) != null) { // click-to-focus
+			ui.focus(id)
+			return
+		}
+	}
+	// clicked outside a focusable, clear focus.
+	ui.focus(null)
 }
 
 /// default button -----------------------------------------------------------
@@ -2474,7 +2478,7 @@ ui.nohit = function(ct_i) {
 	a[i] -= i // make it relative
 }
 
-// doesn't have to happen on translate, any phase before hit-testing will do.
+// doesn't have to happen on translate, any phase will do.
 translate[NOHIT] = function(a, i) {
 	let ct_i = i+a[i]
 	if (!a.nohit_set)
@@ -2493,11 +2497,10 @@ let build_no = 0
 let want_rebuild
 let rebuild_for = [] // [label1,...]
 
-// NOTE: this must only be called conditionally on a condition that is
-// guaranteed to be false on rebuild because rebuild() calls are ignored on
-// the rebuild pass and you get a warning. The label arg helps when you can't
-// guarantee: calling rebuild() with the same lebel in the rebuild pass will
-// be ignored without the warning.
+// NOTE: call this only on a condition that is guaranteed false on a second
+// build i.e. the caller must resolve whatever triggered the call so it cannot
+// fire again. a label does not help with this: a repeat call with the same
+// label turns into a silent no-op, it doesn't triggers another pass!
 ui.rebuild = function(label) {
 	if (label) {
 		if (rebuild_for.includes(label))
@@ -2557,7 +2560,6 @@ function redraw_all() {
 		let t0, t1
 
 		want_rebuild = false
-		focus_taken = false
 
 		t0 = clock_ms()
 
@@ -2567,15 +2569,14 @@ function redraw_all() {
 
 		hit_frame(recs, root_popups)
 
-		if (ui.keydown('tab') && !tab_captured(ui.focused_id)) {
-			let i = step_focus(ui.keypressed('shift'))
-			if (i != null) {
-				ui.focus(focusables[i+FOCUSABLE_ID], true)
-				consume_key_down('tab')
-			}
-		}
+		// auto capture pointer on click
+		if (ui.click && ui.captured_id == null && hit_id != null)
+			capture(hit_id)
 
-		let focused_id0 = ui.focused_id
+		focus_on_click()
+		focus_on_tab()
+
+		let prev_focused_id = ui.focused_id
 
 		t1 = clock_ms()
 		frame_graph_push('frame_hit_time', t1 - t0)
@@ -2621,9 +2622,11 @@ function redraw_all() {
 
 		assert(!open_focus_groups.length, 'unbalanced focus_group')
 
+		// clear invalid focus id
 		if (ui.focused_id && focus_find(ui.focused_id) == null)
 			ui.focus(null)
 
+		// focus first
 		if (focus_first_id != null) {
 			let group_id = focus_first_id
 			focus_first_id = null
@@ -2631,17 +2634,14 @@ function redraw_all() {
 				warn('focus_first: no focusable in ', group_id)
 		}
 
+		if (ui.focused_id != prev_focused_id) // focus changed in build phase
+			ui.rebuild('focus')
+
 		t1 = clock_ms()
 		frame_graph_push('frame_make_time', make_ms + frame_make_ms)
 		frame_graph_push('frame_layout_time', t1 - t0 - frame_make_ms)
 
 		state_gc()
-
-		if (ui.click && !focus_taken)
-			ui.focus(null)
-
-		if (ui.focused_id != focused_id0)
-			ui.rebuild('focus')
 
 		if (!want_rebuild) {
 			t0 = clock_ms()
@@ -2670,6 +2670,7 @@ function redraw_all() {
 
 		reset_canvas()
 
+		// auto release pointer capture on clickup
 		if (ui.clickup && ui.captured_id != null)
 			release_capture()
 
@@ -2680,6 +2681,7 @@ function redraw_all() {
 		key_downs.clear()
 		key_ups.clear()
 		ui.key_events.length = 0
+
 		ui.window_focusing = false
 
 		for (let [k, es] of event_state)
@@ -2701,8 +2703,10 @@ function redraw_all() {
 
 	apply_cursor()
 
-	// a discarded pass must not clear it: the widget that resolve_focus_first()
-	// focused is only built again on the pass after that.
+	// focusing_id resets once per frame, after the rebuild loop, not once per
+	// build pass: resolve_focus_first() runs after register, so the widget's
+	// ui.focusable() call for this pass already ran before focus changed. only
+	// the next pass's build calls ui.focusable() again and reveals the widget.
 	focusing_id = null
 }
 
@@ -3680,9 +3684,10 @@ function settle_scrollbox(a, i) {
 
 		let sbar_id = id+'.scrollbar'+axis
 		ui.state(sbar_id)
+		ui.keep_focus(sbar_id)
 
 		// wheel scrolling
-		if (axis && ui.wheel_dy && hit_inside(id) && (visible || y_id)) {
+		if (axis && ui.wheel_dy && hovers(id) && !ui.pressed && (visible || y_id)) {
 			sy = sy + ui.wheel_dy
 			if (!infinite_y)
 				sy = max(0, min(sy, ch - h))
@@ -3696,6 +3701,8 @@ function settle_scrollbox(a, i) {
 		let hs
 		if (cs) {
 			if (!axis) {
+				if (ui.click) // the hit phase captured it this frame
+					cs.psx0 = psx
 				let psx0 = cs.psx0
 				let dpsx = (ui.mx - ui.mx0) / (w - tw)
 				sx = round((psx0 + dpsx) * (cw - w))
@@ -3703,6 +3710,8 @@ function settle_scrollbox(a, i) {
 					sx = max(0, min(sx, cw - w))
 				xstate.scroll_x = sx
 			} else {
+				if (ui.click) // the hit phase captured it this frame
+					cs.psy0 = psy
 				let psy0 = cs.psy0
 				let dpsy = (ui.my - ui.my0) / (h - th)
 				sy = round((psy0 + dpsy) * (ch - h))
@@ -3714,12 +3723,6 @@ function settle_scrollbox(a, i) {
 			hs = hit(sbar_id)
 			if (!hs)
 				continue
-			let cs = ui.capture(sbar_id)
-			if (cs)
-				if (!axis)
-					cs.psx0 = psx
-				else
-					cs.psy0 = psy
 		}
 
 		// bits 0..1 = horiz state; bits 2..3 = vert. state.
@@ -4027,6 +4030,11 @@ ui.popup = function(
 	align = popup_parse_align (align ?? 'c')
 	flags = popup_parse_flags (flags ?? '')
 
+	// the hit phase gives a solid popup the clicks that land on its own box,
+	// so a click on its padding must not clear the focus from its contents.
+	if (id && (flags & POPUP_SOLID))
+		ui.keep_focus(id)
+
 	let i = ui_cmd_box_ct(CMD_POPUP,
 		null, // fr -> id
 		null, // align -> side
@@ -4297,14 +4305,10 @@ hittest[CMD_POPUP] = function(a, i, recs) {
 	let solid = a[i+POPUP_FLAGS] & POPUP_SOLID
 	if (hit_children(a, i, recs)) {
 		set_hit(a[i+POPUP_ID])
-		if (solid && ui.click)
-			focus_taken = true
 		return true
 	}
 	if (solid && hit_box(a, i)) {
 		set_hit(a[i+POPUP_ID])
-		if (ui.click)
-			focus_taken = true
 		return true
 	}
 }
@@ -5793,7 +5797,7 @@ hittest[CMD_TEXT] = function(a, i) {
 // frames to scroll long content at constant speed.
 
 const FRAME_ON_MEASURE = BOX_ARGS+0
-const FRAME_ON_FRAME   = BOX_ARGS+1
+const FRAME_ON_BUILD   = BOX_ARGS+1
 const FRAME_CT_I       = BOX_ARGS+2
 const FRAME_REC_I      = BOX_ARGS+3
 const FRAME_ARGS_I     = BOX_ARGS+4
@@ -5805,7 +5809,7 @@ let frame_make_ms = 0
 let frame = {}
 
 frame.create = function(
-	cmd, on_measure, on_frame, fr, align, valign, min_w, min_h, ...args
+	cmd, on_measure, on_build, fr, align, valign, min_w, min_h, ...args
 ) {
 
 	let ct_i = ui.ct_i()
@@ -5813,7 +5817,7 @@ frame.create = function(
 	assert(a[ct_i-1] == CMD_SCROLLBOX, 'frame is not inside a scrollbox')
 
 	return ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
-		on_measure, on_frame,
+		on_measure, on_build,
 		rel_ct_i,
 		null, // rec_i, unset (0 is the main record)
 		...args
@@ -5847,13 +5851,13 @@ frame.translate = function(a, i, dx, dy) {
 	let cw = a[ct_i+2]
 	let ch = a[ct_i+3]
 
-	let on_frame = a[i+FRAME_ON_FRAME]
+	let on_build = a[i+FRAME_ON_BUILD]
 	let t0 = clock_ms()
 	let a0 = begin_rec()
 		a[i+FRAME_REC_I] = rec_i
 		ui.stack()
 			force_scope_vars()
-			on_frame(a, i, x, y, w, h, cx, cy, cw, ch)
+			on_build(a, i, x, y, w, h, cx, cy, cw, ch)
 			reset_spacings()
 			ui.end_stack()
 		frame_end_check()
@@ -5865,7 +5869,7 @@ frame.translate = function(a, i, dx, dy) {
 
 	// callbacks are not serializable so we have to clean them up from the rec.
 	a[i+FRAME_ON_MEASURE] = null
-	a[i+FRAME_ON_FRAME] = null
+	a[i+FRAME_ON_BUILD] = null
 
 }
 
@@ -6020,6 +6024,7 @@ ss.create = function(cmd, id, answer_con, fr, align, valign, min_w, min_h) {
 	ui.state(id)
 	ui.focusable(id)
 	ui.capture_tab(id)
+	ui.measure(id)
 	let s = ui.state(id)
 	if (s.con != answer_con) {
 		if (s.con)
@@ -6036,10 +6041,6 @@ ss.create = function(cmd, id, answer_con, fr, align, valign, min_w, min_h) {
 	}
 
 	let hs = captured(id) || hit(id)
-	if (hs && ui.click) {
-		ui.focus(id)
-		hs = ui.capture(id) || hs
-	}
 	let keys = ui.focused(id) ? ui.pointer.key_state : empty_set
 	if (!s.sent_keys || !set_equals(s.sent_keys, keys)) {
 		s.sent_keys = set(keys)
@@ -6050,8 +6051,8 @@ ss.create = function(cmd, id, answer_con, fr, align, valign, min_w, min_h) {
 			answer_con.send(json({event: 'key', key_event: ev}))
 		ui.capture_keys()
 	}
-	let mx = answer_con.frame && hs && ui.mx != null ? ui.mx - hs.x : null
-	let my = answer_con.frame && hs && ui.my != null ? ui.my - hs.y : null
+	let mx = answer_con.frame && hs && ui.mx != null ? ui.mx - s.x : null
+	let my = answer_con.frame && hs && ui.my != null ? ui.my - s.y : null
 	ss_send_pointer(s, mx, my)
 
 	return ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
@@ -6075,21 +6076,10 @@ ss.hit = function(a, i) {
 	if (!a[i+SS_FRAME])
 		return
 	let id = a[i+SS_ID]
-	let cs = captured(id)
-	let hs
-	if (hit_rect(a[i+0], a[i+1], a[i+2], a[i+3]))
-		hs = set_hit(id)
-	if (!hs && !cs)
-		return
-	if (hs) {
-		hs.x = a[i+0]
-		hs.y = a[i+1]
+	if (hit_rect(a[i+0], a[i+1], a[i+2], a[i+3])) {
+		set_hit(id)
+		return true
 	}
-	if (cs) {
-		cs.x = a[i+0]
-		cs.y = a[i+1]
-	}
-	return true
 }
 
 let ss_ids = [] // attached to remote DOM inputs for routing through nested shared screens.
@@ -6164,14 +6154,16 @@ ui.widget('drag_point', {
 		ui.state_init(id, 'y', y)
 		x = ui.state_of(id, 'x')
 		y = ui.state_of(id, 'y')
-		let [state, dx, dy] = ui.drag(id)
-		if (state == 'dragging' || state == 'drop') {
-			x += dx
-			y += dy
-		}
-		if (state == 'drop') {
-			ui.state(id).x = x
-			ui.state(id).y = y
+		let cs = ui.drag(id)
+		if (cs) {
+			if (cs.dragging) {
+				x += cs.dx
+				y += cs.dy
+			}
+			if (cs.drop) {
+				ui.state(id).x = x
+				ui.state(id).y = y
+			}
 		}
 
 		// NOTE: we're making it a zero-sized box because it's freely movable.
@@ -6230,8 +6222,9 @@ ui.button_stack = function(id, fr, align, valign, min_w, min_h) {
 
 ui.button_state = function(id) {
 	ui.state(id)
-	let cs = ui.capture(id)
-	let hs = hit(id) || (cs && hovers(id))
+	ui.keep_focus(id)
+	let cs = captured(id)
+	let hs = hit(id)
 	let state
 	if (ui.consume(id, 'click')) {
 		state = 'click'
@@ -6345,11 +6338,11 @@ function split(hv, id, size, unit, fixed_side,
 
 	let horiz = hv == 'h'
 	let W = horiz ? 'w' : 'h' // measured/main-axis size prop
-	let [state, dx, dy] = ui.drag(id)
+	let cs = ui.drag_or_hit(id)
 	ui.state(id)
+	ui.keep_focus(id)
 	let s = ui.state(id)
-	let cs = captured(id)
-	let measured_wh = cs?.[W] ?? s[W]
+	let measured_wh = (cs?.dragging ? cs[W] : null) ?? s[W]
 	let max_size = (measured_wh ?? 1/0) - splitter_w
 	assert(!unit || unit == 'px' || unit == 'fr')
 	let fixed = unit == 'px'
@@ -6358,11 +6351,11 @@ function split(hv, id, size, unit, fixed_side,
 	size = s.size ?? size
 	let side_fr  = fixed ? 0 : (size ?? 0.5) // fr/px of the fixed_side pane
 	let side_min = fixed ? size ?? 0 : 0
-	if (state && state != 'hover') {
-		if (state == 'drag')
+	if (cs?.dragging) {
+		if (cs.drag)
 			cs[W] = s[W]
 		let size_px = fixed ? side_min : round(side_fr * max_size)
-		let delta = horiz ? dx : dy
+		let delta = horiz ? cs.dx : cs.dy
 		size_px += fixed_side == 2 ? -delta : delta // side 2 shrinks as the splitter moves toward it
 		if (size_px < snap_px)
 			size_px = 0
@@ -6373,13 +6366,13 @@ function split(hv, id, size, unit, fixed_side,
 			side_min = size_px
 		else
 			side_fr = size_px / max_size
-		if (state == 'drop')
+		if (cs.drop)
 			s.size = fixed ? side_min : side_fr
 	}
 
 	ui[hv](split_fr, gap, align, valign, min_w, min_h)
 
-	if (state)
+	if (cs)
 		ui.set_cursor(horiz ? 'ew-resize' : 'ns-resize')
 	ui.measure(id)
 
@@ -6563,7 +6556,7 @@ function list_update(id, s) {
 	let i = 0
 	for (let item of items) {
 		let item_id = id+'.'+i
-		if (hit(item_id) && ui.click) {
+		if (clicked(item_id)) {
 			ui.focus(id)
 			fi = i
 			fi_changed = 'click'
@@ -6690,7 +6683,7 @@ function dropdown_update(id, s) {
 	let was_open = s.open
 	let open = was_open
 
-	let click = hit(id) && ui.click // id is the dropbox or the grid cell
+	let click = clicked(id) // id is the dropbox or the grid cell
 	let ev = ui.consume(picker_id, 'item_picked')
 	let picked = !!ev
 	let want_open = !!ui.consume(id, 'open')
@@ -6729,11 +6722,11 @@ function dropdown_update(id, s) {
 		ui.fire(id, 'closed', {picked: picked})
 
 	if (!was_open && open) {
-		s.focused_id0 = ui.focused_id
+		s.prev_focused_id = ui.focused_id
 		ui.focus_first(picker_id)
 	}
 	if (was_open && !open && ui.focus_inside(picker_id))
-		ui.focus(s.is_control !== false ? id : s.focused_id0)
+		ui.focus(s.is_control !== false ? id : s.prev_focused_id)
 }
 
 let dd_open // decided in dropdown(), needed in dropdown_picker() and end_dropdown()
@@ -6817,7 +6810,7 @@ ui.list_dropdown = function(id, items, sel_i, fr, max_w, min_w, min_h) {
 	let picker_i = ui.state_of(picker_id, 'focused_i')
 
 	let value_id = id+'.value'
-	if (hit(value_id) && ui.click)
+	if (clicked(value_id))
 		ui.fire(id, 'toggle')
 
 	// reading the state runs the decision for this frame.
@@ -7188,12 +7181,6 @@ ui.box_widget('slider', {
 		ui.clear_box_args()
 
 		let hs = hit(id)
-		let click = hs && ui.click
-
-		if (click) {
-			ui.focus(id)
-			ui.capture(id)
-		}
 
 		if (ui.focused(id)) {
 			let d = ui.keydown('arrowright') && 1 || ui.keydown('arrowleft') && -1
@@ -7438,7 +7425,7 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 		today = day(today, today_local < today ? -1 : 1)
 
 	let sel_day = ui.state_of(id, 'day')
-	let hit_day = ui.hit_inside(id) && num(ui.hit_match(id+'.day.'))
+	let hit_day = ui.hovers(id) && num(ui.hit_match(id+'.day.'))
 
 	let calendar_focused = ui.focused(id)
 
@@ -7523,14 +7510,20 @@ function calendar_update(id, s) {
 	let hit_day = num(ui.hit_match(id+'.day.'))
 	let clicked_day
 	if (hit_day) {
-		let [dstate] = ui.drag(id+'.day.'+hit_day)
-		if (dstate == 'drag') {
-			ui.focus(id)
-			clicked_day = true
-			if (hit_day != sel_day) {
-				sel_day = hit_day
-				s.day = sel_day
+		let cs = ui.drag(id+'.day.'+hit_day)
+		// the press sets the day and the release fires the pick, so that an
+		// editor built around the calendar reads the new day on a frame
+		// where its dropdown is still open.
+		if (cs) {
+			if (cs.drag) {
+				ui.focus(id)
+				if (hit_day != sel_day) {
+					sel_day = hit_day
+					s.day = sel_day
+				}
 			}
+			if (cs.drop)
+				clicked_day = true
 		}
 	}
 
@@ -7874,17 +7867,14 @@ let SAT_LUM_SEL_LUM = BOX_ARGS+5
 
 function sat_lum_update(id, s) {
 
-	let [dstate, dx, dy, cs] = ui.drag(id)
-	if (dstate == 'drag')
-		ui.focus(id)
-	if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop') {
-		s.sat = clamp(cs.sat + dx / (cs.w - 1), 0, 1)
-		s.lum = clamp(cs.lum - dy / (cs.h - 1), 0, 1)
-	}
-
-	if (hit(id) && ui.click) {
-		ui.focus(id)
-		ui.capture(id)
+	let cs = ui.drag(id)
+	if (cs) {
+		if (cs.drag)
+			ui.focus(id)
+		if (cs.dragging) {
+			s.sat = clamp(cs.sat + cs.dx / (cs.w - 1), 0, 1)
+			s.lum = clamp(cs.lum - cs.dy / (cs.h - 1), 0, 1)
+		}
 	}
 
 	if (ui.focused(id)) {
@@ -8009,11 +7999,13 @@ let HUE_BAR_SEL_HUE = BOX_ARGS+2
 
 function hue_bar_update(id, s) {
 
-	let [dstate, dx, dy, cs] = ui.drag(id)
-	if (dstate == 'drag')
-		ui.focus(id)
-	if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop')
-		s.hue = round(clamp(cs.hue + dy / (cs.h - 1) * 360, 0, 360))
+	let cs = ui.drag(id)
+	if (cs) {
+		if (cs.drag)
+			ui.focus(id)
+		if (cs.dragging)
+			s.hue = round(clamp(cs.hue + cs.dy / (cs.h - 1) * 360, 0, 360))
+	}
 
 	if (ui.focused(id)) {
 		let step = ui.keydown('arrowup') && -1 || ui.keydown('arrowdown') && 1
@@ -8724,14 +8716,14 @@ ui.debug_pane = function() {
 		ui.end_stack()
 		ui.scrollbox('demo_id_states_sb')
 			ui.v(0, 0, 's', '[')
-				for (let [id, s] of ui._state_map) {
+				for (let [id, s] of state_map) {
 					ui.p(ui.sp(), ui.sp05())
 					ui.color('link')
 					ui.text('', id, 0, 'l')
 					for (let [k, v] of entries(s)) {
 						if (v === undefined)
 							continue
-						if (k == 'frame_build_no')
+						if (k == 'build_no')
 							continue
 						ui.ml(ui.sp2())
 						ui.h(0, ui.sp())
@@ -8784,7 +8776,7 @@ ui.debug_pane = function() {
 		ui.scrollbox('demo_captured_state_sb', .5)
 			ui.v(0, 0, 's', '[')
 				if (ui.captured_id)
-					for (let [k, v] of entries(ui.captured(ui.captured_id))) {
+					for (let [k, v] of entries(captured(ui.captured_id))) {
 						ui.ml(ui.sp2())
 						ui.h(1, ui.sp())
 							let s = isobject(v) || isfunc(v) ? '<'+(typeof v)+'>' : str(v)
@@ -8873,40 +8865,42 @@ ui.tabs = function(id, all_tabs, selected_tab, tabs_order, hidden_tabs) {
 	ui.sb(id, 1, 'auto', 'contain')
 	ui.h(0, 0, 'l', 't')
 
-	let drag_state, dx, dy, cs
+	let cs = null
 	let drag_tab_id, drag_tab
 	for (drag_tab of tabs) {
 		drag_tab_id = id+'.tab'+drag_tab.index
-		;[drag_state, dx, dy, cs] = ui.drag(drag_tab_id)
-		if (drag_state) break
+		cs = ui.drag_or_hit(drag_tab_id)
+		if (cs) break
 	}
 
-	let mover = cs?.mover
-	if (!mover && drag_state == 'drag') {
-		selected_tab = drag_tab
-		ui.state(id).selected_tab = selected_tab.id
-	} else if (!mover && drag_state == 'dragging' && abs(dx) > 10) {
-		mover = ui.live_move_mixin()
-		cs.mover = mover
-		mover.movable_element_size = function(vi) {
-			let tab = tabs[vi]
-			let tab_id = id+'.tab'+tab.index
-			let w = ui.state_of(tab_id, 'w')
-			return w
+	let mover = cs && cs.mover
+	if (cs) {
+		if (!mover && cs.drag) {
+			selected_tab = drag_tab
+			ui.state(id).selected_tab = selected_tab.id
+		} else if (!mover && cs.dragging && !cs.drop && abs(cs.dx) > 10) {
+			mover = ui.live_move_mixin()
+			cs.mover = mover
+			mover.movable_element_size = function(vi) {
+				let tab = tabs[vi]
+				let tab_id = id+'.tab'+tab.index
+				let w = ui.state_of(tab_id, 'w')
+				return w
+			}
+			mover.set_movable_element_pos = function(i, x, moving, vi) {
+				// not using mover's positions, just mover.over_i
+			}
+			mover.move_element_start(drag_tab.index, 1, 0, tabs.length)
+		} else if (mover && cs.dragging && !cs.drop) {
+			mover.move_element_update_dx(cs.dx)
+		} else if (mover && cs.drop) {
+			array_move(tabs, drag_tab.index, 1, mover.over_i, true)
+			tabs_order = tabs.map(tab => tab.id).join(' ')
+			s.tabs_order = tabs_order
+			tabs = visible_element_list(all_tabs, 'id', 'index', tabs_order, hidden_tabs)
+			s.tabs = tabs
+			mover = null
 		}
-		mover.set_movable_element_pos = function(i, x, moving, vi) {
-			// not using mover's positions, just mover.over_i
-		}
-		mover.move_element_start(drag_tab.index, 1, 0, tabs.length)
-	} else if (mover && drag_state == 'dragging') {
-		mover.move_element_update_dx(dx)
-	} else if (mover && drag_state == 'drop') {
-		array_move(tabs, drag_tab.index, 1, mover.over_i, true)
-		tabs_order = tabs.map(tab => tab.id).join(' ')
-		s.tabs_order = tabs_order
-		tabs = visible_element_list(all_tabs, 'id', 'index', tabs_order, hidden_tabs)
-		s.tabs = tabs
-		mover = null
 	}
 
 	for (let j = 0, n = tabs.length; j < n; j++) {
@@ -8923,12 +8917,12 @@ ui.tabs = function(id, all_tabs, selected_tab, tabs_order, hidden_tabs) {
 		let moving = mover && tab == drag_tab
 		if (moving) {
 			ui.popup('', 'overlay', null, 'it', '[')
-			ui.ml(max(0, mover.x0 + dx))
+			ui.ml(max(0, mover.x0 + cs.dx))
 		}
 		ui.stack(tab_id)
 		ui.measure(tab_id)
 			let sel = tab == selected_tab
-			let hover = drag_state == 'hover' && drag_tab == tab || moving
+			let hover = cs && !cs.dragging && drag_tab == tab || moving
 			ui.bb('bg1', hover ? 'hover' : null)
 			ui.p(ui.sp2())
 			ui.text('', tab.label)
@@ -8964,13 +8958,12 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 	let  align_start =  parse_align( align || '[') == ALIGN_START
 	let valign_start = parse_valign(valign || 't') == ALIGN_START
 	let ts = ui.state(assert(scope_get('toolboxes_id'), 'begin_toolboxes missing'))
-	if (hit_inside(id) && ui.click) {
+	if (hovers(id) && ui.click) {
 		ts.to_top = id
 		ui.tab_into(id)
 	}
 	ui.state(id+'.title')
-	let [dstate, dx, dy] = ui.drag(id+'.title')
-	let cs = captured(id+'.title') // null unless dragging
+	let cs = ui.drag(id+'.title')
 	let s = ui.state(id)
 	// ox, oy: offset from the target edges that align and valign anchor the
 	// toolbox to, so that it keeps its distance from them when they move.
@@ -8979,8 +8972,8 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 	// found them so that the grabbed point stays under the mouse.
 	let ox = s.ox ?? ( align_start ? x0 : -x0)
 	let oy = s.oy ?? (valign_start ? y0 : -y0)
-	if (dstate == 'drag') { cs.ox0 = ox; cs.oy0 = oy }
-	if (cs) { ox = cs.ox0 + dx; oy = cs.oy0 + dy }
+	if (cs?.drag) { cs.ox0 = ox; cs.oy0 = oy }
+	if (cs?.dragging) { ox = cs.ox0 + cs.dx; oy = cs.oy0 + cs.dy }
 	let i = ui.popup(id, 'toolbox', target_i ?? 'screen',
 		valign_start ? 'it' : 'ib', align, null, null, 'constrain solid', null,
 		ox, oy
@@ -9113,23 +9106,25 @@ ui.widget('resizer', {
 		ui.state(id)
 		let ct_i = ui.ct_i()
 		let s = ui.state(id)
-		let [dstate, dx, dy, cs] = ui.drag(id)
-		if (dstate == 'hover')
-			ui.set_cursor(cursors[cs.side])
-		if (dstate == 'drag') {
-			let side = cs.side
-			if (side == 'right' || side == 'bottom_right')
-				cs.w0 = cs.measured_w
-			if (side == 'bottom' || side == 'bottom_right')
-				cs.h0 = cs.measured_h
-		}
-		if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop') {
-			let side = cs.side
-			ui.set_cursor(cursors[side])
-			if (side == 'right' || side == 'bottom_right')
-				s.w = min(cs.w0 + dx, max_w ?? 1/0)
-			if (side == 'bottom' || side == 'bottom_right')
-				s.h = min(cs.h0 + dy, max_h ?? 1/0)
+		let cs = ui.drag_or_hit(id)
+		if (cs) {
+			if (!cs.dragging)
+				ui.set_cursor(cursors[cs.side])
+			if (cs.drag) {
+				let side = cs.side
+				if (side == 'right' || side == 'bottom_right')
+					cs.w0 = cs.measured_w
+				if (side == 'bottom' || side == 'bottom_right')
+					cs.h0 = cs.measured_h
+			}
+			if (cs.dragging) {
+				let side = cs.side
+				ui.set_cursor(cursors[side])
+				if (side == 'right' || side == 'bottom_right')
+					s.w = min(cs.w0 + cs.dx, max_w ?? 1/0)
+				if (side == 'bottom' || side == 'bottom_right')
+					s.h = min(cs.h0 + cs.dy, max_h ?? 1/0)
+			}
 		}
 		a[ct_i+0] = s.w ?? default_w ?? a[ct_i+0]
 		a[ct_i+1] = s.h ?? default_h ?? a[ct_i+1]
@@ -9157,7 +9152,7 @@ ui.widget('resizer', {
 			hs.measured_h = h + borders
 		}
 
-		return ui.captured_id == id || ui.captured_id == null && !!side
+		return !!side
 
 	},
 })
@@ -9216,7 +9211,7 @@ let selected_template_id
 let selected_template_root_t
 let selected_template_node_t
 
-function hit_frame_template() {
+function hit_frame_template_reset() {
 	hit_template_id = null
 	hit_template_i0 = null
 	hit_template_i1 = null
@@ -9245,13 +9240,13 @@ function template_find_node(a, i, t, t_i) {
 function hit_template(a, i) {
 	let id = hit_template_id
 	if (id && i >= hit_template_i0 && i < hit_template_i1) {
-		let hs = hit_inside(id)
+		let hs = hovers(id)
 		if (!hs)
 			return
 		let root_t = hs.root
 		let node_t = template_find_node(a, i, root_t, hit_template_i0)
 		hs.node = node_t
-		if (ui.clickup)
+		if (ui.click)
 			template_select_node(id, root_t, node_t)
 		return true
 	}

@@ -80,13 +80,13 @@ function set_variant(variant) {
 set_variant(variants[0])
 
 let cell_text_n = 0
-let real_draw_text = ui.all_field_types.draw_text
-ui.all_field_types.draw_text = function(s, cx, row, full_width) {
-	if (cx)
+let real_build_text = ui.all_field_types.build_text
+ui.all_field_types.build_text = function(s, mode, row, full_width) {
+	if (mode)
 		cell_text_n++
 	if (window.BENCH_GRID_TEXT_VARIANT == 'no_cell_text')
-		return cx ? true : s
-	return real_draw_text.call(this, s, cx, row, full_width)
+		return mode ? true : s
+	return real_build_text.call(this, s, mode, row, full_width)
 }
 
 let fields = []

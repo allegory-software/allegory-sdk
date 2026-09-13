@@ -172,7 +172,7 @@ let help_lines = [
 	'Just type: Search in column',
 ]
 
-function draw_help(id, target_i) {
+function build_help(id, target_i) {
 	ui.m(ui.sp2())
 	ui.p(ui.sp4())
 	ui.popup(id+'.help', 'overlay', target_i, 'b', '[', 0, 0,
@@ -232,7 +232,7 @@ function init(id, e) {
 	let page_row_count = 1
 
 	// mouse state
-	let drag_state, dx, dy, cs
+	let ps
 	let gcol_mover
 	let hit_zone // sort_icon, col_divider, col, gcol, cell
 	let drag_op  // col_move, col_group, row_move
@@ -249,10 +249,7 @@ function init(id, e) {
 		hit_ri = null
 		hit_fi = null
 		hit_indent = null
-		drag_state = null
-		dx = null
-		dy = null
-		cs = null
+		ps = null
 		drag_op = null
 		gcol_mover = null
 		row_move_state = null
@@ -308,7 +305,7 @@ function init(id, e) {
 	}
 
 	let CS = {}
-	function cell_state(row, field, ri, draw_stage) {
+	function cell_state(row, field, ri, build_stage) {
 		let input_val = e.cell_input_val(row, field)
 
 		let grid_focused = focused
@@ -327,9 +324,9 @@ function init(id, e) {
 
 		let bg, bgs
 
-		if (draw_stage == 'col_move' || draw_stage == 'row_move')
+		if (build_stage == 'col_move' || build_stage == 'row_move')
 			bg = 'bg2'
-		else if (draw_stage == 'col_group')
+		else if (build_stage == 'col_group')
 			bg = 'bg0'
 		if (editing) {
 			bg = 'input'
@@ -370,7 +367,7 @@ function init(id, e) {
 		}
 
 		let fg
-		if (draw_stage == 'col_group')
+		if (build_stage == 'col_group')
 			fg = 'faint'
 		else if (is_null || is_empty || disabled)
 			fg = 'label'
@@ -390,16 +387,16 @@ function init(id, e) {
 		return CS
 	}
 
-	function draw_cell_at(a, row, field, ri, fi, x, y, w, h, draw_stage) {
+	function build_cell_at(a, row, field, ri, fi, x, y, w, h, build_stage) {
 
-		let cs = cell_state(row, field, ri, draw_stage)
+		let cs = cell_state(row, field, ri, build_stage)
 		let input_val = cs.input_val
 		let bg = cs.bg, bgs = cs.bgs, fg = cs.fg, editing = cs.editing
 		let row_focused = cs.row_focused
 		let field_focused = cs.field_focused
 
 		let hovering = hit_zone == 'cell' && hit_ri == ri && hit_fi == fi
-		let full_width = !draw_stage
+		let full_width = !build_stage
 			&& ((row_focused && field_focused) || hovering)
 			&& (field.align == 'left' || !field_has_indent(field))
 
@@ -418,12 +415,12 @@ function init(id, e) {
 					collapsed = false
 
 				// shift indent on moving rows so it gets under the adopting parent.
-				if (draw_stage == 'row_move')
+				if (build_stage == 'row_move')
 					indent_x += s.hit_indent_x - s.indent_x
 			}
 		}
 
-		// drawing
+		// frame building
 		let sp2 = ui.sp2()
 		let pad_l = sp2 + indent_x
 		let pad_r = sp2
@@ -433,7 +430,7 @@ function init(id, e) {
 		// system (only ui.text overflows and always to the right, which is
 		// only good for left align), we need to employ this hack to align the
 		// overflown cell correctly for right and center align.
-		if (full_width && field.draws_text && field.align != 'left') {
+		if (full_width && field.builds_text && field.align != 'left') {
 			let s = e.cell_text_val(row, field)
 			if (s) {
 				cell_w = max(w, ceil(ui.measure_text(cx, s).width) + pad_l + pad_r)
@@ -445,9 +442,9 @@ function init(id, e) {
 		// render help
 		ui.m(cell_x, y, 0, 0)
 		let cell_i = ui.stack('', 0, 'l', 't', cell_w, h)
-			ui.bb(bg, bgs, draw_stage == 'col_move' ? 'lrb' : 'b', 'light')
-			if (help_open && !draw_stage && row_focused && field_focused)
-				draw_help(id, cell_i)
+			ui.bb(bg, bgs, build_stage == 'col_move' ? 'lrb' : 'b', 'light')
+			if (help_open && !build_stage && row_focused && field_focused)
+				build_help(id, cell_i)
 
 			ui.color(fg)
 			if (has_children) {
@@ -457,16 +454,16 @@ function init(id, e) {
 			}
 			// a popup editor covers the cell instead of replacing it, and
 			// the popup can be moved off the cell to fit on screen.
-			if (!editing || draw_stage || field.edits_in_popup || !field.has_editor) {
+			if (!editing || build_stage || field.edits_in_popup || !field.has_editor) {
 				ui.p(pad_l, 0, pad_r, 0)
 				if (row_focused && field == e.quicksearch_field)
 					ui.mark_text(0, e.quicksearch_text.length)
-				e.draw_val(row, field, input_val, true, full_width)
-				ui.p(0) // draw_val() draws nothing for a value with no text!
+				e.build_val(row, field, input_val, true, full_width)
+				ui.p(0) // build_val() builds nothing for a value with no text!
 			}
-			if (editing && !draw_stage && field.has_editor) {
+			if (editing && !build_stage && field.has_editor) {
 				ui.focus_group(true, null, e.editor_id)
-				let v = field.draw_editor(e.editor_id, input_val, pad_l, pad_r, h)
+				let v = field.build_editor(e.editor_id, input_val, pad_l, pad_r, h)
 				ui.end_focus_group()
 				if (v !== input_val) {
 					e.set_cell_val(row, field, v, {input: e})
@@ -497,18 +494,18 @@ function init(id, e) {
 	}
 	}
 
-	function draw_cell(a, ri, fi, draw_stage) {
+	function build_cell(a, ri, fi, build_stage) {
 		let [x, y, w, h] = cell_rect(ri, fi)
 		let row   = e.rows[ri]
 		let field = e.fields[fi]
-		draw_cell_at(a, row, field, ri, fi, x, y, w, h, draw_stage)
+		build_cell_at(a, row, field, ri, fi, x, y, w, h, build_stage)
 	}
 
-	function draw_cells_range(a, x0, y0, rows, ri1, ri2, fi1, fi2, draw_stage) {
+	function build_cells_range(a, x0, y0, rows, ri1, ri2, fi1, fi2, build_stage) {
 
 		let hit_cell, foc_cell, foc_ri, foc_fi
 
-		if (!draw_stage) {
+		if (!build_stage) {
 
 			foc_ri = e.focused_row_index
 			foc_fi = e.focused_field_index
@@ -519,7 +516,7 @@ function init(id, e) {
 
 			foc_cell = foc_ri != null && foc_fi != null
 
-			// when foc_cell and hit_cell are the same, don't draw them twice.
+			// when foc_cell and hit_cell are the same, don't build them twice.
 			if (foc_cell && hit_cell && hit_ri == foc_ri && hit_fi == foc_fi)
 				foc_cell = null
 
@@ -528,11 +525,11 @@ function init(id, e) {
 
 			for (let fi = fi1; fi < fi2; fi++) {
 				let field = e.fields[fi]
-				if (field._fast_draw == null)
-					field._fast_draw = field.draw == ui.all_field_types.draw
+				if (field._fast_build == null)
+					field._fast_build = field.build == ui.all_field_types.build
 						&& !field.lookup_nav && !field.null_lookup_col
 				field._fast_now = ui.grid_fast_path
-					&& field._fast_draw
+					&& field._fast_build
 					&& !field_has_indent(field)
 					&& field != e.quicksearch_field
 					&& fi != hit_fi
@@ -541,7 +538,7 @@ function init(id, e) {
 			}
 		}
 
-		let skip_moving_col = drag_op == 'col_move' && draw_stage == 'col'
+		let skip_moving_col = drag_op == 'col_move' && build_stage == 'col'
 
 		for (let ri = ri1; ri < ri2; ri++) {
 
@@ -565,7 +562,7 @@ function init(id, e) {
 
 				let field = e.fields[fi]
 
-				if (!draw_stage && field._fast_now)
+				if (!build_stage && field._fast_now)
 					continue
 
 				let x = field._x
@@ -573,15 +570,15 @@ function init(id, e) {
 				let w = field._w
 				let h = rh
 
-				draw_cell_at(a, row, field, ri, fi, x, y, w, h, draw_stage)
+				build_cell_at(a, row, field, ri, fi, x, y, w, h, build_stage)
 			}
 
 			if (row.removed)
-				draw_row_strike_line(row, ri, rx, ry, rw, rh, draw_stage)
+				build_row_strike_line(row, ri, rx, ry, rw, rh, build_stage)
 
 		}
 
-		if (!draw_stage) {
+		if (!build_stage) {
 			let sp2 = ui.sp2()
 			let m = ui.measure_text(cx, 'M')
 			let text_h = ceil(m.fontBoundingBoxAscent + m.fontBoundingBoxDescent)
@@ -595,7 +592,7 @@ function init(id, e) {
 					sp2, align, baseline, ri2 - ri1)
 				for (let ri = ri1; ri < ri2; ri++) {
 					let row = rows[ri]
-					let cs = cell_state(row, field, ri, draw_stage)
+					let cs = cell_state(row, field, ri, build_stage)
 					let fg = cs.fg
 					let text
 					if (cs.is_null) {
@@ -611,12 +608,12 @@ function init(id, e) {
 		}
 
 		if (foc_cell && foc_ri >= ri1 && foc_ri < ri2 && foc_fi >= fi1 && foc_fi <= fi2) {
-			draw_cell(a, foc_ri, foc_fi, draw_stage)
+			build_cell(a, foc_ri, foc_fi, build_stage)
 		}
 
-		// hit_cell can overlap foc_cell, so we draw it after it.
+		// hit_cell can overlap foc_cell, so we build it after it.
 		if (hit_cell && hit_ri >= ri1 && hit_ri < ri2 && hit_fi >= fi1 && hit_fi <= fi2) {
-			draw_cell(a, hit_ri, hit_fi, draw_stage)
+			build_cell(a, hit_ri, hit_fi, build_stage)
 		}
 
 	}
@@ -658,7 +655,7 @@ function init(id, e) {
 		let bx = e.cell_border_v_width
 		let by = e.cell_border_h_width
 
-		// draw cells
+		// build cells
 
 		ui.stack(id+'.cells')
 		ui.measure(id+'.cells')
@@ -667,16 +664,16 @@ function init(id, e) {
 		y = by + sy
 
 		if (drag_op == 'row_move') {
-			// draw fixed rows first and moving rows above them.
+			// build fixed rows first and moving rows above them.
 			let s = row_move_state
-			draw_cells_range(a, x, y, e.rows, s.vri1, s.vri2, fi1, fi2, 'row')
-			draw_cells_range(s.rows, s.move_vri1, s.move_vri2, fi1, fi2, 'row_move')
+			build_cells_range(a, x, y, e.rows, s.vri1, s.vri2, fi1, fi2, 'row')
+			build_cells_range(s.rows, s.move_vri1, s.move_vri2, fi1, fi2, 'row_move')
 		} else if (drag_op == 'col_move' || drag_op == 'col_group') {
-			// draw fixed cols first and moving cols above them.
-			draw_cells_range(a, x, y, e.rows, ri1, ri2, fi1, fi2, 'col')
-			draw_cells_range(a, x, y, e.rows, ri1, ri2, hit_fi, hit_fi + 1, drag_op)
+			// build fixed cols first and moving cols above them.
+			build_cells_range(a, x, y, e.rows, ri1, ri2, fi1, fi2, 'col')
+			build_cells_range(a, x, y, e.rows, ri1, ri2, hit_fi, hit_fi + 1, drag_op)
 		} else {
-			draw_cells_range(a, x, y, e.rows, ri1, ri2, fi1, fi2)
+			build_cells_range(a, x, y, e.rows, ri1, ri2, fi1, fi2)
 		}
 
 		ui.end_stack()
@@ -728,18 +725,15 @@ function init(id, e) {
 		if (ui.click)
 			help_open = false
 
-		if (ui.click && ui.hit_inside(id))
-			ui.focus(id)
-
 		// hover or click on sort icons from colum header
 		for (let field of e.fields) {
 			let icon_id = id+'.sort_icon.'+field.name
-			;[drag_state] = ui.drag(icon_id)
-			if (drag_state) {
+			ps = ui.drag_or_hit(icon_id)
+			if (ps) {
 				hit_zone = 'sort_icon'
 				hit_fi = field.index
 				ui.set_cursor('pointer')
-				if (drag_state == 'drag')
+				if (ps.drag)
 					e.set_order_by_dir(field, 'toggle', shift)
 				break
 			}
@@ -747,8 +741,8 @@ function init(id, e) {
 
 		// hover or drag on on column header
 		if (!hit_zone) {
-			;[drag_state, dx, dy, cs] = ui.drag(id+'.header')
-			if (drag_state == 'hover' || drag_state == 'drag') {
+			ps = ui.drag_or_hit(id+'.header')
+			if (ps && (ps.drag || !ps.dragging)) {
 				let x0 = ui.state(id+'.header').x
 				for (let field of e.fields) {
 					let x = field._x + x0
@@ -760,36 +754,33 @@ function init(id, e) {
 					} else if (ui.mx >= x && ui.mx <= x + w) {
 						hit_zone = 'col'
 						hit_fi = field.index
-						if (drag_state == 'drag')
-							cs.dx = ui.mx - x0 - field._x
+						if (ps.drag)
+							ps.grab_dx = ui.mx - x0 - field._x
 						break
 					}
 				}
-				cs.zone = hit_zone
-				cs.field_index = hit_fi
-			} else if (drag_state) {
-				hit_zone = cs.zone
-				hit_fi   = cs.field_index
-				drag_op  = cs.op
+				ps.zone = hit_zone
+				ps.field_index = hit_fi
+			} else if (ps?.dragging) {
+				hit_zone = ps.zone
+				hit_fi   = ps.field_index
+				drag_op  = ps.op
 			}
 		}
 
 		// column resize
 		if (hit_zone == 'col_divider') {
 			let field = e.fields[hit_fi]
-			if (drag_state == 'drag') {
-				cs.w0 = field.w
-				drag_state == 'dragging'
-			}
-			if (drag_state == 'dragging') {
-				field.w = clamp(cs.w0 + dx, field.min_w, field.max_w)
-			}
+			if (ps.drag)
+				ps.w0 = field.w
+			if (ps.dragging)
+				field.w = clamp(ps.w0 + ps.dx, field.min_w, field.max_w)
 			ui.set_cursor('ew-resize')
 		}
 
 		// column drag horizontally => start column move
-		if (hit_zone == 'col' && !drag_op && drag_state == 'dragging'
-			&& abs(dx) > 10
+		if (hit_zone == 'col' && !drag_op && ps.dragging && !ps.drop
+			&& abs(ps.dx) > 10
 			&& e.fields[hit_fi].movable
 		) {
 
@@ -808,22 +799,22 @@ function init(id, e) {
 				e.fields[0].is_group_field ? 1 : 0, e.fields.length)
 
 			drag_op = 'col_move'
-			cs.op = drag_op
-			cs.mover = mover
+			ps.op = drag_op
+			ps.mover = mover
 		}
 
 		// column move
 		if (drag_op == 'col_move') {
 
-			let mover = cs.mover
+			let mover = ps.mover
 
 			let x0 = ui.state(id+'.header').x
-			let mx = ui.mx - x0 - cs.dx
+			let mx = ui.mx - x0 - ps.grab_dx
 
 			mover.move_element_update(horiz ? mx : my)
 			e.scroll_to_cell(hit_ri ?? 0, hit_fi)
 
-			if (drag_state == 'drop') {
+			if (ps.drop) {
 				let over_fi = mover.move_element_stop() // sets x of moved element.
 				e.move_field(hit_fi, over_fi)
 
@@ -835,13 +826,13 @@ function init(id, e) {
 
 		// drag column vertically towards group-bar => column move to group
 		let col_group_start
-		if (hit_zone == 'col' && !drag_op && drag_state == 'dragging'
-			&& (ui.hovers(id+'.group_bar') || -dy > 10)
+		if (hit_zone == 'col' && !drag_op && ps.dragging && !ps.drop
+			&& (ui.hovers(id+'.group_bar') || -ps.dy > 10)
 			&& e.fields[hit_fi].groupable
 		) {
 			col_group_start = true
 			drag_op = 'col_group'
-			cs.op = drag_op
+			ps.op = drag_op
 		}
 
 		// hover or drag group-bar column
@@ -850,20 +841,20 @@ function init(id, e) {
 			for (let col of e.groups.cols || empty_array) {
 				// hit sort icon
 				let icon_id = id+'.sort_icon.'+col
-				;[drag_state, dx, dy, cs] = ui.drag(icon_id)
-				if (drag_state) {
+				ps = ui.drag_or_hit(icon_id)
+				if (ps) {
 					hit_zone = 'sort_icon'
 					hit_gcol = col
 					ui.set_cursor('pointer')
-					if (drag_state == 'drag')
+					if (ps.drag)
 						e.set_order_by_dir(col, 'toggle', shift)
 					break
 				}
 				// hit group column
 				let col_id = id+'.gcol.'+col
 				ui.state(col_id)
-				;[drag_state, dx, dy, cs] = ui.drag(col_id)
-				if (drag_state) {
+				ps = ui.drag_or_hit(col_id)
+				if (ps) {
 					hit_zone = 'gcol'
 					hit_gcol = col
 					break
@@ -877,7 +868,7 @@ function init(id, e) {
 		// move group-bar column OR drag header column over the group-bar
 		if (hit_zone == 'gcol' || drag_op == 'col_group') {
 
-			let gcol_move_start = hit_zone == 'gcol' && drag_state == 'drag'
+			let gcol_move_start = hit_zone == 'gcol' && ps.drag
 			let start = gcol_move_start || col_group_start
 			let mover
 
@@ -885,7 +876,7 @@ function init(id, e) {
 
 				gcol_mover = ui.live_move_mixin()
 				mover = gcol_mover
-				cs.mover = gcol_mover
+				ps.mover = gcol_mover
 
 				mover.cols = [...(e.groups.cols || empty_array)]
 				mover.range_defs = assign({}, e.groups.range_defs)
@@ -957,20 +948,20 @@ function init(id, e) {
 				}
 
 			} else {
-				gcol_mover = cs.mover
+				gcol_mover = ps.mover
 				mover = gcol_mover
 			}
 
-			if (drag_state != 'hover') {
+			if (ps.dragging) {
 
 				// drag column over the group-by header or over the grid's column header.
-				mover.move_element_update(mover.x0 + dx)
+				mover.move_element_update(mover.x0 + ps.dx)
 				let vi = mover.is[mover.col_def.index]
 				let level = mover.levels[vi]
 				let min_level = mover.min_levels[vi]
 				let max_level = mover.max_levels[vi]
-				let mx = mover.x0 + dx
-				let my = mover.y0 + dy
+				let mx = mover.x0 + ps.dx
+				let my = mover.y0 + ps.dy
 				level = clamp(round(my / sp2), min_level, max_level)
 				let min_y = min_level * sp2 - ui.sp4()
 				let max_y = max_level * sp2 + ui.sp4()
@@ -1007,7 +998,7 @@ function init(id, e) {
 					}
 				}
 
-				if (drag_state == 'drop') {
+				if (ps.drop) {
 
 					if (mover.drop_level != null) { // move it between other group columns
 
@@ -1077,8 +1068,8 @@ function init(id, e) {
 		// check hover/drag on cell view
 
 		if (!hit_zone) {
-			;[drag_state, dx, dy] = ui.drag(id+'.cells')
-			if (drag_state == 'hover' || drag_state == 'drag') {
+			ps = ui.drag_or_hit(id+'.cells')
+			if (ps && (ps.drag || !ps.dragging)) {
 				let s = ui.state(id+'.cells')
 				let x0 = s.x
 				let y0 = s.y
@@ -1108,7 +1099,7 @@ function init(id, e) {
 			}
 		}
 
-		if (drag_state == 'drag' && hit_zone == 'cell') {
+		if (hit_zone == 'cell' && ps.drag) {
 
 			let row = e.rows[hit_ri]
 			let field = e.fields[hit_fi]
@@ -1144,7 +1135,7 @@ function init(id, e) {
 				invert_selection: ctrl,
 				input: e,
 			})) {
-				// the picker is drawn inside the cells frame, so the dropdown
+				// the picker is built inside the cells frame, so the dropdown
 				// has already read this state for this frame.
 				if (e.is_picker && !hit_indent) {
 					ui.fire(id, 'item_picked', {row: row})
@@ -1158,9 +1149,7 @@ function init(id, e) {
 
 		}
 
-		// the click that precedes it focused the cell, and the dblclick event
-		// comes on the button-up, after the cell hit state is gone.
-		if (ui.dblclick && ui.hovers(id+'.cells')
+		if (ui.dblclicked(id+'.cells')
 			&& !clicked_indent && e.focused_field?.has_editor)
 			e.enter_edit()
 
@@ -1447,7 +1436,7 @@ function init(id, e) {
 			e.scroll_to_fi = null
 		}
 
-		// draw ----------------------------------------------------------------
+		// build ---------------------------------------------------------------
 
 		ui.stack(id, fr, align, valign, min_w, min_h)
 		ui.v(1, 0, 's', 's')
@@ -1483,16 +1472,16 @@ function init(id, e) {
 							if (col == hit_gcol) {
 								if (mover.drop_level == null) {
 									// dragging outside the columns area
-									x = mover.x0 + dx
-									y = mover.y0 + dy
+									x = mover.x0 + ps.dx
+									y = mover.y0 + ps.dy
 								} else {
 									let place_x = vi * (w + 1)
 									ui.m(sp2 + place_x - 1, sp2 + y - 1, 0, 0)
 									ui.stack('', 0, 'l', 't', w + 2, h + 2)
 										ui.border(1, 'marker', null, 0, 'dashes')
 									ui.end_stack()
-									x = mover.x0 + dx
-									y = mover.y0 + dy
+									x = mover.x0 + ps.dx
+									y = mover.y0 + ps.dy
 								}
 							}
 						}
@@ -1506,13 +1495,11 @@ function init(id, e) {
 						let field = e.fld(col)
 						ui.m(sp2 + x, sp2 + y, 0, 0)
 						ui.stack(col_id, 1, 'l', 't', w, h)
-							ui.bb('bg1',
-									hit_gcol == col && (
-										drag_state == 'hover'    && 'hover' ||
-										drag_state == 'drop'     && 'hover' ||
-										drag_state == 'dragging' && (hit_zone != 'sort_icon' ? 'active' : 'hover') ||
-										drag_state == 'drag'     && (hit_zone != 'sort_icon' ? 'active' : 'hover')) || null,
-								1, 'intense')
+							let bgs = hit_gcol == col && (
+								!ps.dragging || ps.drop ? 'hover'
+									: hit_zone != 'sort_icon' ? 'active' : 'hover'
+								) || null
+							ui.bb('bg1', bgs, 1, 'intense')
 							ui.p(sp2, ui.sp075())
 							ui.h(1, sp)
 
@@ -1547,7 +1534,7 @@ function init(id, e) {
 
 			// column header
 
-			function draw_header_cell(field, noclip) {
+			function build_header_cell(field, noclip) {
 				ui.m(field._x, 0, 0, 0)
 				ui.p(sp2, 0)
 				ui.h(0, sp, 'l', 't', field._w - 2 * sp2, header_h)
@@ -1611,11 +1598,11 @@ function init(id, e) {
 					for (let field of e.fields) {
 						if (col_move && hit_fi === field.index)
 							continue
-						draw_header_cell(field)
+						build_header_cell(field)
 					}
 					if (col_move) {
 						let field = e.fields[hit_fi]
-						draw_header_cell(field)
+						build_header_cell(field)
 					}
 
 					// group column drop arrows

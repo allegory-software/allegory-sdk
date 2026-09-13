@@ -1327,14 +1327,14 @@ function code_edit_view(id, opt) {
 			+ caret_w)
 		let text_h = lines.length * line_h
 
-		let cs = ui.drag(id+'.text_contentbox')
-		if (cs.drag)
+		let cs = ui.drag_or_hit(id+'.text_contentbox')
+		if (cs?.drag)
 			ui.focus(id)
 
 		// move cursor and select text based on mouse clicking and dragging.
 
 		hit_line = null
-		if (cs.hover || cs.dragging) {
+		if (cs) {
 			let text_state = ui.state(id+'.text_contentbox')
 			let x = text_state.x
 			let y = text_state.y

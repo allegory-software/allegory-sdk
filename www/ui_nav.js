@@ -77,13 +77,13 @@ Field attributes:
 		client_default : default value/generator that new rows are initialized with.
 		has_server_default: the server fills this in, so it can be left empty.
 		readonly       : prevent editing.
-		draw_editor    : f(id, v, pad_l, pad_r, h) -> v   draw the widgets
+		build_editor   : f(id, v, pad_l, pad_r, h) -> v   build the widgets
 		                 that edit v and give back what the user made of it.
 		                 pad_l, pad_r, h: the box the cell drew v in. the
 		                 cell has no vertical padding: it centers v in its
 		                 height instead. an editor that ends the edit fires
 		                 'closed' on id.
-		edits_in_popup : draw_editor draws a popup: no editor in the cell.
+		edits_in_popup : build_editor builds a popup: no editor in the cell.
 
 		to_input       : f(v) -> s   value as editable text.
 		from_input     : f(s) -> v   editable text back to value (or undefined)
@@ -105,12 +105,11 @@ Field attributes:
 
 	formatting:
 
-		draw           : f(v, mode, [row]) -> true   draw the value.
-		draw           : f(v, pe, [row]) -> true  render value into parent element.
-		draw           : f(v    , [row]) -> s     return plain text display value.
+		build          : f(v, mode, [row]) -> true   build the value.
+		build          : f(v, [row]) -> s            return plain text display value.
 
-		draw_text      : f(s, [mode], [row]) -> true|s    draw or return text.
-		draw_null      : f([mode], [row]) -> true|s       draw or return text.
+		build_text    : f(s, [mode], [row]) -> true|s    build or return text.
+		build_null    : f([mode], [row]) -> true|s       build or return text.
 
 		align          : 'left'|'right'|'center'
 		attr           : custom value for html attribute `field`, for styling
@@ -423,17 +422,17 @@ Loading & saving from/to memory:
 	cals
 		e.do_save_row(vals) -> true | 'skip'
 
-Cell display val, text val and drawing:
+Cell display val, text val and building:
 	publishes:
-		e.draw_val([row], field, v, [mode]) -> true|s
-		e.draw_cell(row, field, [mode]) -> true|s
+		e.build_val([row], field, v, [mode]) -> true|s
+		e.build_cell(row, field, [mode]) -> true|s
 	announces:
 		^^col_vals_changed(field)
 
 Picker:
 	publishes:
 		e.display_col
-		e.draw_row(row, [mode]) -> true|s
+		e.build_row(row, [mode]) -> true|s
 
 State of the work -- what is done, what is not, and what was decided --
 is in js/TODO-AI.txt.
@@ -1936,7 +1935,7 @@ ui.nav = function(opt) {
 			range_val = return_arg
 
 			range_label = function(v, i, row) {
-				return e.draw_cell(row, fld(cols_arr[i]))
+				return e.build_cell(row, fld(cols_arr[i]))
 			}
 
 		}
@@ -2155,7 +2154,7 @@ ui.nav = function(opt) {
 				for (let col of words(group.key_cols)) {
 					let field = fld(col)
 					let val = group.key_vals[i++]
-					row[group_fi].push(field.draw_text(val))
+					row[group_fi].push(field.build_text(val))
 					row[field.val_index] = val // for sorting of group rows
 				}
 				row[group_fi] = row[group_fi].join(' / ')
@@ -3281,7 +3280,7 @@ ui.nav = function(opt) {
 
 	// cell value multi-target rendering --------------------------------------
 
-	function draw_null_lookup_val(row, field, mode) {
+	function build_null_lookup_val(row, field, mode) {
 		if (!row || !field.null_lookup_col) return
 		let nf = e.all_fields_map[field.null_lookup_col]  ; if (!nf || !nf.lookup_cols) return
 		let ln = nf.lookup_nav                            ; if (!ln) return
@@ -3289,10 +3288,10 @@ ui.nav = function(opt) {
 		let ln_row = e.lookup_val(row, nf, nv)            ; if (!ln_row) return
 		let dcol = field.null_display_col ?? field.name
 		let df = ln.all_fields_map[dcol]                  ; if (!df) return
-		return ln.draw_cell(ln_row, df, mode)
+		return ln.build_cell(ln_row, df, mode)
 	}
 
-	// a lookup cell draws the display field's value, so the column aligns
+	// a lookup cell builds the display field's value, so the column aligns
 	// the way that field does, not the way the local foreign-key field does.
 	e.field_align = function(field) {
 		return lookup_display_field(field)?.align ?? field.align
@@ -3322,24 +3321,24 @@ ui.nav = function(opt) {
 	}
 	}
 
-	e.draw_val = function(row, field, v, mode, full_width) {
+	e.build_val = function(row, field, v, mode, full_width) {
 
 		if (v == null) {
-			let s = draw_null_lookup_val(row, field, mode)
+			let s = build_null_lookup_val(row, field, mode)
 			if (s) return s
 
-			if (field.draw_null)
-				return field.draw_null(mode, row)
+			if (field.build_null)
+				return field.build_null(mode, row)
 
 			s = field.null_text
-			if (s) return field.draw_text(s, mode)
+			if (s) return field.build_text(s, mode)
 
 			return
 		}
 
 		if (v === '') {
 			if (field.empty_text)
-				return field.draw_text(field.empty_text, mode)
+				return field.build_text(field.empty_text, mode)
 			return
 		}
 
@@ -3347,17 +3346,17 @@ ui.nav = function(opt) {
 		if (ln_row) {
 			let df = lookup_display_field(field)
 			if (df)
-				return field.lookup_nav.draw_cell(ln_row, df, mode)
+				return field.lookup_nav.build_cell(ln_row, df, mode)
 		}
 
-		return field.draw(v, mode, row, full_width)
+		return field.build(v, mode, row, full_width)
 	}
 
-	e.draw_cell = function(row, field, mode) {
-		return e.draw_val(row, field, e.cell_input_val(row, field), mode)
+	e.build_cell = function(row, field, mode) {
+		return e.build_val(row, field, e.cell_input_val(row, field), mode)
 	}
 
-	e.cell_text_val = e.draw_cell
+	e.cell_text_val = e.build_cell
 
 	// row adding & removing --------------------------------------------------
 
@@ -4511,13 +4510,13 @@ ui.nav = function(opt) {
 	// e.prop('row_display_val_template', {private: true})
 	// e.prop('row_display_val_template_name', {attr: 'row_display_val_template'})
 
-	e.draw_row = function(row, mode) { // stub
+	e.build_row = function(row, mode) { // stub
 		if (!row)
 			return
 		let field = e.display_field
 		if (!field)
-			return e.draw_text('no display field', mode)
-		return e.draw_cell(row, field, mode)
+			return e.build_text('no display field', mode)
+		return e.build_cell(row, field, mode)
 	}
 
 	update({reset: true})
@@ -4608,7 +4607,7 @@ assign(all_field_types, {
 	maxlen: 256,
 	null_text : S('null_text', ''),
 	empty_text: S('empty_text', 'empty text'),
-	draws_text: true,
+	builds_text: true,
 	has_editor: true,
 })
 
@@ -4629,9 +4628,9 @@ function text_val(field, s) {
 	return v === undefined ? s : v
 }
 
-// draw the editor's input box: hand it the nav's edit text, refreshed when v
+// build the editor's input box: hand it the nav's edit text, refreshed when v
 // moved on its own, and take back what the user has typed. -> v
-function draw_text_editor(field, id, v, fr, align, valign, max_w, w, h) {
+function build_text_editor(field, id, v, fr, align, valign, max_w, w, h) {
 	let e = field.nav
 	let s0 = v == null ? '' : field.to_input(v)
 	if (text_val(field, e.edit_text) !== v)
@@ -4673,24 +4672,24 @@ all_field_types.dropdown_closed = function(id) {
 	return ui.consume(id, 'closed')
 }
 
-// same call as draw_text(), so the cell doesn't shift on entering edit.
-all_field_types.draw_editor = function(id, v, pad_l, pad_r, h) {
+// same call as build_text(), so the cell doesn't shift on entering edit.
+all_field_types.build_editor = function(id, v, pad_l, pad_r, h) {
 	ui.p(pad_l, 0, pad_r, 0)
-	return draw_text_editor(this, id, v, 0, this.align, 'c', null)
+	return build_text_editor(this, id, v, 0, this.align, 'c', null)
 }
 
 all_field_types.fixed_width = 0
 
-all_field_types.draw_text = function(s, mode, row, full_width) {
+all_field_types.build_text = function(s, mode, row, full_width) {
 	if (!mode)
 		return s
 	ui.text('', s, 0, this.align, 'c', full_width ? null : 0)
 	return true
 }
 
-all_field_types.draw = function(v, mode, row, full_width) {
+all_field_types.build = function(v, mode, row, full_width) {
 	let s = this.to_text(v)
-	return this.draw_text(s, mode, row, full_width)
+	return this.build_text(s, mode, row, full_width)
 }
 
 // an editor that is a dropdown has no caret to move within.
@@ -4757,12 +4756,12 @@ filesize.to_text = function(s) {
 // from_input() doesn't read the magnitude suffix back.
 filesize.to_input = number.to_text
 
-filesize.draw = function(x, mode) {
+filesize.build = function(x, mode) {
 	let s = this.to_text(x)
 	if (mode) {
 		if (this.is_small(x))
 			ui.color('label')
-		return this.draw_text(s, mode)
+		return this.build_text(s, mode)
 	}
 	return s
 }
@@ -4842,7 +4841,7 @@ date.dropdown_closed = function(id) {
 	return ui.consume(id+'.calendar', 'closed')
 }
 
-date.draw_editor = function(id, v, pad_l, pad_r, h) {
+date.build_editor = function(id, v, pad_l, pad_r, h) {
 	let calendar_id = id+'.calendar'
 	let picker_id = calendar_id+'.picker'
 	let editor_target_i = ui.stack('', 1, 's', 's')
@@ -4854,7 +4853,7 @@ date.draw_editor = function(id, v, pad_l, pad_r, h) {
 			ui.p(pad_l, 0, 0, 0)
 			ui.icon(calendar_id, 'calendar', 0, 'l', 'c', null, null, h)
 			ui.p(0, 0, pad_r, 0)
-			v = draw_text_editor(this, id, v, 1, this.align, 'c')
+			v = build_text_editor(this, id, v, 1, this.align, 'c')
 
 		ui.end_h()
 	ui.end_popup()
@@ -4917,17 +4916,17 @@ d.to_text = function(v) {
 // booleans ------------------------------------------------------------------
 
 // no editor: the value is toggled by click and space, and the cell keeps
-// drawing itself while an edit is carried through it.
+// building itself while an edit is carried through it.
 let bool = {align: 'center', min_w: 20, w: 20, is_bool: true,
-	draws_text: false, has_editor: false}
+	builds_text: false, has_editor: false}
 field_types.bool = bool
 
 
-bool.draw_null = function(mode) {
+bool.build_null = function(mode) {
 	if (mode) {
 		// let text_font = cx.text_font
 		// cx.text_font = cx.icon_font
-		// all_field_types.draw.call(this, '\uf0c8', cx)
+		// all_field_types.build.call(this, '\uf0c8', cx)
 		// cx.text_font = text_font
 		// return true
 	}
@@ -4935,9 +4934,9 @@ bool.draw_null = function(mode) {
 
 // an editable cell shows the box so that it reads as something to click,
 // a readonly one only marks the true ones.
-bool.draw = function(v, mode, row) {
+bool.build = function(v, mode, row) {
 	if (!isbool(v))
-		return bool.draw_null.call(this, mode)
+		return bool.build_null.call(this, mode)
 	if (!mode)
 		return v ? S('true', 'true') : S('false', 'false')
 	let icon =
@@ -4962,8 +4961,8 @@ enm.to_text = function(v) {
 enm.edits_in_popup = true
 
 // a dropdown over enum_values, up for as long as the edit is: the cell keeps
-// drawing its own value under it and there is no closed state.
-enm.draw_editor = function(id, v, pad_l, pad_r, h) {
+// building its own value under it and there is no closed state.
+enm.build_editor = function(id, v, pad_l, pad_r, h) {
 
 	assert(this.enum_values != null, this.name, ': enum col with no enum_values')
 
@@ -4979,7 +4978,7 @@ enm.draw_editor = function(id, v, pad_l, pad_r, h) {
 		if (open) {
 			ui.p(pad_l, 0, pad_r, 0)
 			ui.stack('', 0, 's', 's', null, h)
-				this.draw(v, true)
+				this.build(v, true)
 			ui.end_stack()
 		}
 
@@ -5031,10 +5030,10 @@ function type_editor(field) {
 	return field_types[field.type] || empty
 }
 
-lookup_editor.draw_editor = function(id, v, pad_l, pad_r, h) {
+lookup_editor.build_editor = function(id, v, pad_l, pad_r, h) {
 
 	if (!can_pick_lookup_val(this)) {
-		let f = type_editor(this).draw_editor || all_field_types.draw_editor
+		let f = type_editor(this).build_editor || all_field_types.build_editor
 		return f.call(this, id, v, pad_l, pad_r, h)
 	}
 
@@ -5056,7 +5055,7 @@ lookup_editor.draw_editor = function(id, v, pad_l, pad_r, h) {
 			let resize_id = id+'.resizer'
 			ui.grid(picker_id, {nav: ln}, 0, 's', 's')
 			ui.resizer(resize_id, ui.em(24), ui.em(12))
-			// the picker grid settles its own focused row while drawing.
+			// the picker grid settles its own focused row while building.
 			let ln_row = ln.focused_row
 			if (ln_row)
 				v = ln.cell_val(ln_row, lookup_val_field(this))
@@ -5084,7 +5083,7 @@ let color = {}
 field_types.color = color
 assign(color, dropdown_editor)
 
-color.draw = function(v, mode) {
+color.build = function(v, mode) {
 	if (!mode)
 		return v
 	ui.m(ui.sp1(), 0)
@@ -5103,7 +5102,7 @@ color.editor_value = function(id, v) {
 
 // a color_picker over v's hex, with a Pick/Cancel row under it: v only
 // changes when Pick is clicked, with whatever hex the picker last returned.
-color.draw_editor = function(id, v, pad_l, pad_r, h) {
+color.build_editor = function(id, v, pad_l, pad_r, h) {
 
 	let picker_id = id+'.picker'
 
@@ -5149,7 +5148,7 @@ percent.to_text = function(p) {
 	return isnum(p) ? dec(p / this.scale, this.decimals) + '%' : p
 }
 
-percent.draw = function(p, mode, row, full_width) {
+percent.build = function(p, mode, row, full_width) {
 	let s = this.to_text(p)
 	if (!mode)
 		return s
@@ -5163,7 +5162,7 @@ percent.draw = function(p, mode, row, full_width) {
 				ui.bb('bg0')
 			ui.end_stack()
 		ui.end_h()
-		this.draw_text(s, mode, row, full_width)
+		this.build_text(s, mode, row, full_width)
 	ui.end_stack()
 }
 
@@ -5172,7 +5171,7 @@ percent.draw = function(p, mode, row, full_width) {
 let icon = {align: 'center'}
 field_types.icon = icon
 
-icon.draw = function(v, mode) {
+icon.build = function(v, mode) {
 	if (!mode)
 		return this.to_text(v)
 	ui.icon('', v, 0, this.align, 'c')
@@ -5189,7 +5188,7 @@ let place = {}
 field_types.place = place
 
 // place vals are {place_id:, description:} or a plain description string.
-place.draw = function(v, mode, row, full_width) {
+place.build = function(v, mode, row, full_width) {
 	let place_id = isobject(v) && v.place_id
 	let descr = isobject(v) ? v.description : v || ''
 	if (!mode)
@@ -5197,7 +5196,7 @@ place.draw = function(v, mode, row, full_width) {
 	ui.color(place_id ? 'text' : 'label')
 	ui.h(0, ui.sp05())
 		ui.icon('', 'map_pin', 0, this.align, 'c')
-		this.draw_text(descr, mode, row, full_width)
+		this.build_text(descr, mode, row, full_width)
 	ui.end_h()
 }
 
@@ -5227,8 +5226,8 @@ email.validator_email = {
 let btn = {align: 'center', readonly: true}
 field_types.button = btn
 
-// TODO: btn.draw, and btn.click calling field.action(v, row, field).
-btn.draw = function(v, mode) {
+// TODO: btn.build, and btn.click calling field.action(v, row, field).
+btn.build = function(v, mode) {
 	// TODO
 }
 
