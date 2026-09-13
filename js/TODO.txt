@@ -1,3 +1,7 @@
+UI TODO
+------------------------------------------------------------------------------
+
+
 LEGEND
 ------------------------------------------------------------------------------
 * means done
@@ -49,7 +53,6 @@ GRID EDITING (see TODO-AI.txt for why things are the way they are)
 UI API
 ------------------------------------------------------------------------------
 - drag & drop between windows
-- layer trees (solves modal piercing)
 - remove scopes and automatic container scopes and replace them with
 	begin_font() end_font()
 	begin_bold() end_bold()
@@ -58,6 +61,8 @@ UI API
 - bb on text?
 - bb on scrollbox?
 - negative margins?
+- make ui embeddable:
+	- screen, canvas, cx, screen_w, screen_h, dpr, ui.font_size_normal
 
 
 SCREEN SHARING
@@ -132,6 +137,7 @@ IMGUI STATUS
 	* word-wrapping
 	- flex direction
 	- flex item order
+	* flex tabstops
 	- grid fr stretch
 	- grid min-w/h grow
 	- grid align

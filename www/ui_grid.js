@@ -184,12 +184,13 @@ function build_help(id, target_i) {
 				let t = ci == -1 ? line : null
 				let key = !t ? line.slice(0, ci).trim() : ''
 				let desc = !t ? line.slice(ci+2).trim() : ''
-				ui.scope()
 				if (t) {
+						ui.scope()
 						ui.bold()
 						ui.color('text')
 						ui.font_size(1.25)
 						ui.text('', t, 0, 'l', 'c')
+						ui.end_scope()
 				} else {
 					ui.pv(ui.sp025())
 					ui.h(0, ui.sp4())
@@ -201,7 +202,6 @@ function build_help(id, target_i) {
 						ui.text('', desc, 0, 'l', 'c')
 					ui.end_h()
 				}
-				ui.end_scope()
 			}
 		ui.end_v_tabstops()
 	ui.end_popup()
