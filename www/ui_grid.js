@@ -1030,7 +1030,7 @@ function init(id, e) {
 							i++
 						}
 						e.group_by = t.join('')
-						e.update({fields: true, rows: true})
+						e.update_parts({fields: true, rows: true})
 
 					} else if (mover.drop_pos != null) { // put it back in grid
 
@@ -1647,21 +1647,15 @@ function init(id, e) {
 
 }
 
-ui.grid = function(id, opt, fr, align, valign, min_w, min_h) {
-
-	let s = ui.state(id)
-	let nav = s.nav
+function create_grid(id, opt) {
+	let nav = opt.nav
 	if (!nav) {
-		nav = opt.nav
-		if (!nav) {
-			nav = ui.nav(opt, s)
-			ui.on_free(id, () => nav.free())
-		}
-		init(id, nav)
-		s.nav = nav
+		nav = ui.nav(opt)
+		ui.on_free(id, nav.free)
 	}
-	nav.render(fr, align, valign, min_w, min_h)
-
+	init(id, nav)
+	return nav
 }
+ui.grid = ui.stateful_widget(create_grid)
 
 }()) // module function

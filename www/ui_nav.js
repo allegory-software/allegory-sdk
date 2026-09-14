@@ -28,7 +28,7 @@ Creating a nav:
 
 Updating after changing nav props or field attrs:
 
-	e.update(parts)
+	e.update_parts(parts)
 
 Rowset attributes:
 
@@ -666,11 +666,13 @@ ui.nav = function(opt) {
 			if (!navs.size)
 				delete rowset_navs[e.rowset_name]
 		}
-		update({free: true, reload: true})
+		update_parts({free: true, reload: true})
 	}
 
-	e.update = update
-	function update(ev) {
+	// ev: reload, reset, free,
+	//   fields, rows, filters, row_order, row_visibility, input
+	e.update_parts = update_parts
+	function update_parts(ev) {
 
 		ev ??= empty
 
@@ -1189,7 +1191,7 @@ ui.nav = function(opt) {
 		let fields = showhide_field(field, on, at_fi)
 		if (fields) {
 			e.cols = cols_from_fields(fields)
-			update({fields: true})
+			update_parts({fields: true})
 		}
 	}
 
@@ -1197,7 +1199,7 @@ ui.nav = function(opt) {
 		let fields = move_field(fi, over_fi)
 		if (fields) {
 			e.cols = cols_from_fields(fields)
-			update({fields: true})
+			update_parts({fields: true})
 		}
 	}
 
@@ -1209,7 +1211,7 @@ ui.nav = function(opt) {
 			.filter(cg => cg.length)
 		e.group_by = format_group_defs(col_groups, e.groups.range_defs)
 		e.cols = cols_from_fields(fields)
-		update({fields: true, rows: true})
+		update_parts({fields: true, rows: true})
 	}
 
 	/* params -----------------------------------------------------------------
@@ -1323,7 +1325,7 @@ ui.nav = function(opt) {
 			return
 		if (is_client_nav()) { // re-filter and re-focus.
 			e.unfocus_focused_cell({cancel: true})
-			update({filters: true})
+			update_parts({filters: true})
 			e.focus_cell()
 		} else {
 			e.reload()
@@ -2189,7 +2191,7 @@ ui.nav = function(opt) {
 	// tree -------------------------------------------------------------------
 
 	// flat row list: every row is a root with no children. is_tree and
-	// is_grouped are decided in update() and are not touched here.
+	// is_grouped are decided in update_parts() and are not touched here.
 	function reset_tree() {
 		for (let row of e.all_rows) {
 			row.child_rows = null
@@ -2362,7 +2364,7 @@ ui.nav = function(opt) {
 		else
 			for (let row of e.child_rows)
 				set_collapsed(row, collapsed, recursive)
-		update({row_visibility: true})
+		update_parts({row_visibility: true})
 	}
 
 	e.toggle_collapsed = function(row, recursive) {
@@ -2516,7 +2518,7 @@ ui.nav = function(opt) {
 		else
 			order_by_map.delete(field)
 		e.order_by = order_by_from_map()
-		update({row_order: true})
+		update_parts({row_order: true})
 	}
 
 	// filtering --------------------------------------------------------------
@@ -3615,7 +3617,7 @@ ui.nav = function(opt) {
 				update_row_index()
 			} else {
 				e.all_rows = e.all_rows.filter(row => !removed_rows.has(row))
-				update({row_visibility: true})
+				update_parts({row_visibility: true})
 			}
 
 			if (ev.input)
@@ -3996,7 +3998,7 @@ ui.nav = function(opt) {
 			return
 
 		if (e.param_vals === false) { // no master selection: show nothing.
-			update({filters: true})
+			update_parts({filters: true})
 			return
 		}
 
@@ -4046,7 +4048,7 @@ ui.nav = function(opt) {
 		rowset = rs
 		e._rowset = rs // for inspection
 		//update_subs('reset')
-		update({reset: true})
+		update_parts({reset: true})
 		ui.animate()
 	}
 
@@ -4519,7 +4521,7 @@ ui.nav = function(opt) {
 		return e.build_cell(row, field, mode)
 	}
 
-	update({reset: true})
+	update_parts({reset: true})
 	assign(e, opt)
 
 	assert(e.rowset_name, 'rowset_name required')
@@ -4529,7 +4531,7 @@ ui.nav = function(opt) {
 		attr(rowset_navs, e.rowset_name, set).add(e)
 	}
 
-	update({reload: true})
+	update_parts({reload: true})
 
 	return e
 }
