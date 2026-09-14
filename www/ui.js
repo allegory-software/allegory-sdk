@@ -2268,18 +2268,6 @@ register[FOCUS_GROUP] = function(a, i) {
 register[END_FOCUS_GROUP] = function() {
 	let group_i = open_focus_groups.pop()
 	focusables[group_i+FOCUSABLE_END] = focusables.length
-	let id = ui.keydown('enter')
-		? focusables[group_i+FOCUSABLE_DEFAULT_BUTTON] : null
-	if (id == null && ui.keydown('escape'))
-		id = focusables[group_i+FOCUSABLE_CANCEL_BUTTON]
-	if (id != null) {
-		let focused_i = focus_find(ui.focused_id)
-		if (focused_i != null && focus_group_of(focused_i) == group_i) {
-			ui.fire(id, 'click')
-			ui.capture_keys()
-			ui.rebuild()
-		}
-	}
 }
 
 let is_focus_group = i => focusables[i+FOCUSABLE_ID] == null
@@ -2449,6 +2437,23 @@ register[GROUP_BUTTON] = function(a, i) {
 	focusables[group_i+button_slot] = a[i]
 }
 
+function click_default_button() {
+	let i = focus_find(ui.focused_id)
+	if (i == null)
+		return
+	let group_i = focus_group_of(i)
+	if (group_i == null)
+		return
+	let id = ui.keydown('enter')
+		? focusables[group_i+FOCUSABLE_DEFAULT_BUTTON] : null
+	if (id == null && ui.keydown('escape'))
+		id = focusables[group_i+FOCUSABLE_CANCEL_BUTTON]
+	if (id == null)
+		return
+	ui.fire(id, 'click')
+	ui.capture_keys()
+}
+
 /// tab capture --------------------------------------------------------------
 
 ui.capture_tab = function(id) {
@@ -2599,6 +2604,7 @@ function redraw_all() {
 
 		focus_on_click()
 		focus_on_tab()
+		click_default_button()
 
 		let prev_focused_id = ui.focused_id
 
