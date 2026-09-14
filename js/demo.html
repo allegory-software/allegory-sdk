@@ -71,10 +71,11 @@ ui.scrollbox('sb1')
 ui.end_scrollbox()
 `
 
+slider1_v = 30
 demos.silder = `
 ui.v(0, 0, 'c', 'c', 400)
 	ui.border(1, 'intense')
-	let p1 = ui.slider('slider1', 20, 40, 1, false)
+	slider1_v = ui.slider('slider1', slider1_v, 20, 40, 1, false)
 	//if (p != null)
 	//	pr(p)
 	let p2 = ui.slider('slider2')
@@ -124,32 +125,30 @@ ui.h(1, ui.em())
 ui.end_h()
 `
 
+radio_sel_i = 0
 demos.radio = `
 ui.v(0, ui.sp2(), 'c', 'c')
 for (let i = 0; i < 5; i++) {
 	ui.h(0, ui.sp(), 'c', 'c')
-		if (ui.radio('radio'+i, 'radio_group1'))
-			pr('checked', i)
+		radio_sel_i = ui.radio('radio'+i, 'radio_group1', i, radio_sel_i)
 		ui.label('radio'+i, 'Radio '+i)
 	ui.end_h()
 }
 ui.end_v()
 `
 
+toggle1_on = false
 demos.toggle = `
 ui.h(0, ui.sp(), 'c', 'c')
-	let b = ui.toggle('toggle1')
-	if (b !== undefined)
-		pr('toggled', b)
+	toggle1_on = ui.toggle('toggle1', toggle1_on)
 	ui.label('toggle1', 'Toggle me!')
 ui.end_h()
 `
 
+cb1_checked = false
 demos.checkbox = `
 ui.h(0, ui.sp(), 'c', 'c')
-	let b = ui.checkbox('cb1')
-	if (b !== undefined)
-		pr('toggled', b)
+	cb1_checked = ui.checkbox('cb1', cb1_checked)
 	ui.label('cb1', 'Check me out!')
 ui.end_h()
 `
@@ -542,38 +541,22 @@ state.auto_advance_row ??= false
 state.exit_edit_on_escape ??= true
 
 let rows_slider_id = 'grid_config_rows_slider'
-if (ui.state_of(rows_slider_id, 'p') == null)
-	ui.slider_set_value(rows_slider_id, 0, 1000000, 100)
-let row_count = round(ui.slider_value(rows_slider_id, 0, 1000000))
+state.row_count ??= 100
 
-let col_max = row_count
+let col_max = state.row_count
 	? max(grid_demo_base_field_count, min(
 		grid_demo_base_field_count + 1000,
-		floor(1000000 / row_count)))
+		floor(1000000 / state.row_count)))
 	: grid_demo_base_field_count + 1000
 let col_slider_id = 'grid_config_duplicates_slider'
-if (ui.state_of(col_slider_id, 'p') == null)
-	ui.slider_set_value(
-		col_slider_id, grid_demo_base_field_count, col_max,
-		grid_demo_base_field_count)
-let col_count = round(ui.slider_value(
-	col_slider_id, grid_demo_base_field_count, col_max))
-if (col_count > col_max) {
-	col_count = col_max
-	ui.slider_set_value(
-		col_slider_id, grid_demo_base_field_count, col_max, col_count)
-}
+state.col_count ??= grid_demo_base_field_count
+state.col_count = min(state.col_count, col_max)
 
 let tree_depth_slider_id = 'grid_config_tree_depth_slider'
-if (ui.state_of(tree_depth_slider_id, 'p') == null)
-	ui.slider_set_value(tree_depth_slider_id, 0, 8, 4)
-let tree_depth = round(ui.slider_value(tree_depth_slider_id, 0, 8))
+state.tree_depth ??= 4
 
 let first_col = grid_demo_first_cols[first_col_i]
 
-state.row_count = row_count
-state.col_count = col_count
-state.tree_depth = tree_depth
 state.first_col = first_col
 
 if (!state.rowset_name || state.recreate) {
@@ -626,31 +609,27 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 		ui.v_tabstops(0)
 		ui.h(1, ui.sp1())
 			ui.text('', 'Rows', 0)
-			ui.slider(rows_slider_id, 1, 1000000, 0, false)
-			state.row_count = round(ui.slider_value(
-				rows_slider_id, 0, 1000000))
-			ui.text('', row_count, 2, 'r')
+			state.row_count = round(ui.slider(
+				rows_slider_id, state.row_count, 1, 1000000, 0, false))
+			ui.text('', state.row_count, 2, 'r')
 		ui.end_h()
 
 		ui.h(1, ui.sp1())
 			ui.text('', 'Cols', 0)
-			ui.slider(col_slider_id, grid_demo_base_field_count, col_max, 0, false)
-			state.col_count = min(col_max, max(
-				grid_demo_base_field_count,
-				round(ui.slider_value(
-					col_slider_id, grid_demo_base_field_count, col_max))))
-			ui.text('', col_count+' / '+col_max, 2, 'r')
+			state.col_count = round(ui.slider(
+				col_slider_id, state.col_count, grid_demo_base_field_count, col_max, 0, false))
+			ui.text('', state.col_count+' / '+col_max, 2, 'r')
 		ui.end_h()
 
 		ui.h(1, ui.sp1())
 			ui.text('', 'Tree depth', 0, 'l')
-			ui.slider(tree_depth_slider_id, 0, 8, 0, false)
-			state.tree_depth = round(ui.slider_value(tree_depth_slider_id, 0, 8))
-			ui.text('', tree_depth, 2, 'r')
+			state.tree_depth = round(ui.slider(
+				tree_depth_slider_id, state.tree_depth, 0, 8, 0, false))
+			ui.text('', state.tree_depth, 2, 'r')
 		ui.end_h()
 
 		ui.end_v_tabstops()
-		ui.text('', 'Cells: '+row_count * col_count, 0, 'l')
+		ui.text('', 'Cells: '+state.row_count * state.col_count, 0, 'l')
 
 		ui.h(1, ui.sp1())
 			ui.text('', 'Col #1', 0, 'l')

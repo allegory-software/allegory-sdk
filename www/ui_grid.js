@@ -240,6 +240,7 @@ function init(id, e) {
 	let drag_op  // col_move, col_group, row_move
 	let hit_ri // row index
 	let hit_fi // field index
+	let hit_gcol // group-bar column name
 	let hit_indent
 	let row_move_state
 
@@ -822,7 +823,6 @@ function init(id, e) {
 		}
 
 		// hover or drag group-bar column
-		let hit_gcol
 		if (!hit_zone) {
 			for (let col of e.groups.cols || empty_array) {
 				// hit sort icon

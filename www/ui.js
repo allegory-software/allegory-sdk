@@ -4476,6 +4476,9 @@ draw[CMD_BB_TOOLTIP] = function(a, i) {
 		}
 	}
 
+	tx += a[ct_i+POPUP_OX+0]
+	ty += a[ct_i+POPUP_OX+1]
+
 	// find tooltip tip's base points.
 	let bx, by // tip's center point between its two base points.
 	let b1x, b1y
@@ -6509,6 +6512,27 @@ ui.vsplit = function(...args) { return split('v', ...args) }
 ui.end_hsplit = function() { end_split('h') }
 ui.end_vsplit = function() { end_split('v') }
 
+//// SECTION -----------------------------------------------------------------
+
+ui.begin_section = function(id, title) {
+	if (ui.clicked(id)) {
+		let s = ui.state(id)
+		s.open = !s.open
+	}
+	ui.v()
+		ui.stack(id)
+			ui.h()
+				ui.icon('', 'chevron')
+				ui.text('', title)
+			ui.end_h()
+		ui.end_stack()
+	return s.open
+}
+
+ui.end_section = function() {
+	ui.end_v()
+}
+
 //// MENU --------------------------------------------------------------------
 
 ui.icon_def('caret_right', 'tabler', '\ueb5f')
@@ -6830,7 +6854,7 @@ ui.end_dropdown = function() {
 
 //// LIST_DROPDOWN -----------------------------------------------------------
 
-const chevron_points = [0, 4, 7, 11, 14, 4]
+const chevron_points = [0.5, 4.5, 7, 11, 13.5, 4.5]
 
 function draw_value_row(items, item_i, row_id, pad, chevron_w, max_w) {
 	ui.stack(row_id ?? '', 0)
@@ -6971,8 +6995,8 @@ ui.box_widget('toggle', toggle)
 
 let checkbox = {...toggle}
 
-checkbox.create = function(cmd, id, fr, align, valign, min_w, min_h) {
-	return toggle.create(cmd, id, fr, align, valign,
+checkbox.create = function(cmd, id, on, fr, align, valign, min_w, min_h) {
+	return toggle.create(cmd, id, on, fr, align, valign,
 		min_w ?? ui.em(1.5),
 		min_h ?? ui.em(1.5),
 	)
@@ -7007,12 +7031,10 @@ checkbox.draw = function(a, i) {
 	cx.beginPath()
 	cx.save()
 	cx.translate(x, y)
-	cx.scale(1/w, 1/h)
-	cx.scale(20, 20)
-	cx.translate(1, 0)
-	cx.moveTo(4, 11)
-	cx.lineTo(8, 15)
-	cx.lineTo(16, 6)
+	cx.translate(0.5, 0.5)
+	cx.moveTo(5, 11)
+	cx.lineTo(9, 15)
+	cx.lineTo(18, 6)
 	cx.strokeStyle = fg
 	cx.lineWidth = 1.5
 	cx.lineCap = 'round'
@@ -7032,26 +7054,22 @@ let radio = {...checkbox}
 
 let RADIO_GROUP_ID = BOX_ARGS+2
 
-//|| hit(id+'.label')
-radio.create = function(cmd, id, group_id, fr, align, valign, min_w, min_h) {
+radio.create = function(cmd, id, group_id, own_val, sel_val, fr, align, valign, min_w, min_h) {
 	ui.state(id)
 	ui.state(group_id)
-	let clicked = (hit(group_id) || hit(group_id+'.label')) && ui.click
-	let clicked_id = clicked && hit(group_id, 'id')
-	let on = clicked ? clicked_id == id && !ui.state_of(id, 'on') : null
-	if (clicked) {
-		ui.state(id).on = false
-		ui.set_state_of(clicked_id, 'on', true)
-	}
+	let label_hit = hit(id+'.label') && ui.click
+	let dot_hit = hit(group_id) && ui.click
+	let clicked_id = label_hit ? id : (dot_hit && hit(group_id, 'id'))
+	let clicked = !!clicked_id
+	let selected = clicked ? clicked_id == id : own_val === sel_val
 	let hs = hit(id) || hit(id+'.label')
-	let selected = ui.state_of(id, 'on')
 	ui_cmd_box(cmd, fr, align ?? 'c', valign ?? 'c',
 		min_w ?? ui.em(1.5),
 		min_h ?? ui.em(1.5),
 		id,
 		(selected ? TOGGLE_ON : 0) | (hs ? TOGGLE_HOVER : 0),
 		group_id)
-	return on
+	return (clicked && clicked_id == id) ? own_val : sel_val
 }
 
 radio.draw = function(a, i) {
@@ -7071,7 +7089,7 @@ radio.draw = function(a, i) {
 
 	cx.beginPath()
 	cx.arc(cx1, cy1, h * .5, 0, 2 * PI)
-	cx.fillStyle = bg_color('toggle', hs ? 'hover' : null)
+	cx.fillStyle = bg_color('toggle', on ? 'item-selected' : hs ? 'hover' : null)
 	cx.fill()
 
 	// bullet
@@ -7136,8 +7154,7 @@ let SLIDER_P          = BOX_ARGS+4 // progress in 0..1
 let SLIDER_MARKERS    = BOX_ARGS+5
 let SLIDER_SCALE_BASE = BOX_ARGS+6
 let SLIDER_SCALES     = BOX_ARGS+7
-let SLIDER_THUMB_I    = BOX_ARGS+8
-let SLIDER_STATE      = BOX_ARGS+9
+let SLIDER_STATE      = BOX_ARGS+8
 
 let SLIDER_HOVER   = 1
 let SLIDER_FOCUSED = 2
@@ -7145,24 +7162,6 @@ let SLIDER_FOCUSED = 2
 ui.slider_mark_w_em = 2
 ui.slider_thumb_r_em = .6
 ui.slider_shaft_h_em = 0.2
-
-ui.slider_progress = function(id) {
-	return ui.state_of(id, 'p') ?? .5
-}
-
-ui.slider_value = function(id, from, to) {
-	return lerp(ui.slider_progress(id), 0, 1, from ?? 0, to ?? 1)
-}
-
-ui.slider_set_progress = function(id, p) {
-	p = clamp(p, 0, 1)
-	ui.state(id).p = p
-}
-
-ui.slider_set_value = function(id, from, to, v) {
-	let p = lerp(v, from ?? 0, to ?? 1, 0, 1)
-	ui.slider_set_progress(id, p)
-}
 
 function dot(x, y) {
 	cx.beginPath()
@@ -7208,9 +7207,9 @@ function a_rect(a, i) {
 
 ui.box_widget('slider', {
 
-	create: function(cmd, id, from, to, decimals, markers, scale_base, scales) {
+	create: function(cmd, id, value, from, to, decimals, markers, scale_base, scales) {
 
-		ui.state(id)
+		let s = ui.state(id)
 		ui.focusable(id)
 
 		markers = (markers ?? 1) ? 1 : 0
@@ -7222,20 +7221,31 @@ ui.box_widget('slider', {
 		let min_h = min_h0 ?? ui.em((markers ? 2.8 : 1.2))
 		ui.clear_box_args()
 
-		let hs = hit(id)
+		let pad_x = markers ? ui.sp8() : ui.sp2()
+		let track_x = (s.x ?? 0) + pad_x
+		let track_w = (s.w ?? 0) - 2*pad_x
 
-		if (ui.focused(id)) {
-			let d = ui.keydown('arrowright') && 1 || ui.keydown('arrowleft') && -1
-			if (d) {
-				let p = ui.slider_progress(id)
-				p += d * (ui.keypressed('shift') ? .01 : .1)
-				ui.slider_set_progress(id, p)
-			}
+		let cs = captured(id)
+		let d = ui.focused(id) &&
+			(ui.keydown('arrowright') && 1 || ui.keydown('arrowleft') && -1)
+
+		if (cs) {
+			s.p = clamp((ui.mx - track_x) / track_w, 0, 1)
+		} else if (d) {
+			let p = (s.p ?? .5) + d * (ui.keypressed('shift') ? .01 : .1)
+			s.p = clamp(p, 0, 1)
+		} else if (value != null) {
+			s.p = clamp(lerp(value, from ?? 0, to ?? 1, 0, 1), 0, 1)
 		}
+
+		let p = s.p ?? .5
+		s.v = lerp(p, 0, 1, from ?? 0, to ?? 1)
+
+		let hs = hit(id)
 
 		ui.stack()
 
-			ui.p(markers ? ui.sp8() : ui.sp2(), ui.sp05())
+			ui.p(pad_x, ui.sp05())
 			let i = ui_cmd_box(cmd, fr, align, valign,
 				min_w,
 				min_h,
@@ -7243,75 +7253,36 @@ ui.box_widget('slider', {
 				from ?? 0,
 				to ?? 1,
 				decimals ?? 2,
-				0, // p
+				round(p * 32767),
 				markers,
 				scale_base ?? 10,
 				scales ?? 0,
-				0, // thumb_i
 				(hs ? SLIDER_HOVER : 0) | (ui.focused(id) ? SLIDER_FOCUSED : 0),
 			)
 
-			let thumb_i = ui.stack('', 0, 'l', 't'); ui.end_stack()
-			a[i+SLIDER_THUMB_I] = thumb_i - i // make relative
+			ui.measure(id)
 
 		ui.end_stack()
 
-		if (!markers && (hs || captured(id))) {
+		if (!markers && (hs || cs)) {
 			ui.m(ui.sp2())
 			ui.p(ui.sp2(), ui.sp())
-			ui.popup(id+'.popup', 'tooltip', thumb_i,
-					't', 'c', 0, 0, 'change_side constrain')
+			let ox = round((p - .5) * track_w)
+			ui.popup(id+'.popup', 'tooltip', i,
+					't', 'c', 0, 0, 'change_side constrain', null, ox)
 				ui.bb_tooltip('info', null, 'light', null, ui.sp05())
-				ui.text('', dec(ui.state_of(id, 'v'), decimals ?? 2))
+				ui.text('', dec(s.v, decimals ?? 2))
 			ui.end_popup()
 		}
+
+		if (value == null)
+			return
+
+		return lerp(p, 0, 1, from ?? 0, to ?? 1)
 
 	},
 
 	ID: SLIDER_ID,
-
-	translate: function(a, i, dx, dy) {
-		a[i+0] += dx
-		a[i+1] += dy
-		let id = a[i+SLIDER_ID]
-
-		let p = ui.state_of(id, 'p') ?? .5
-
-		if (captured(id)) {
-			let thumb_r = ui.em(ui.slider_thumb_r_em)
-			let margin_x = 0
-			let x = a[i+0] + margin_x
-			let w = a[i+2] - 2*margin_x
-			p = clamp((ui.mx - x) / w, 0, 1)
-			ui.state(id).p = p
-		}
-
-		let from  = a[i+SLIDER_FROM]
-		let to    = a[i+SLIDER_TO]
-		let v = lerp(p, 0, 1, from, to)
-		ui.state(id).v = v
-
-		a[i+SLIDER_P] = round(p * 32767)
-
-		// find thumb's center point and position the thumb anchor stack.
-		let x = a[i+0]
-		let y = a[i+1]
-		let w = a[i+2]
-		let h = a[i+3]
-		let shaft_h = round(ui.em(ui.slider_shaft_h_em))
-		let r = round(shaft_h / 2) // shaft corner radius
-		let thumb_r = ui.em(ui.slider_thumb_r_em)
-		let margin_x = 0
-		let thumb_cx = x + margin_x + p * (w - 2 * margin_x)
-		let thumb_cy = y + h - 2*thumb_r
-
-		let thumb_i = i + a[i+SLIDER_THUMB_I]
-
-		// HACK: set position of thumb_i manually.
-		a[thumb_i+0] = thumb_cx
-		a[thumb_i+1] = thumb_cy
-
-	},
 
 	draw: function(a, i) {
 
