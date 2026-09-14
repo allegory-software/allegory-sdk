@@ -4578,8 +4578,49 @@ add_validation_rule({
 		'{0} value unknown', field_name(field)),
 })
 
-/* field type definitions ----------------------------------------------------
+// field type definitions ----------------------------------------------------
 
+/*
+
+Displaying a value:
+
+	to_text        : f(v) -> s             display value
+	to_input       : f(v) -> s             value as editable text
+	from_input     : f(s) -> v             parse editable text
+	build          : f(v, mode, [row], [full_width]) -> true|s
+	build_text     : f(s, [mode], [row], [full_width]) -> true|s
+	build_null     : f([mode], [row]) -> true|s
+
+	mode: falsy = return the value as plain text.
+	mode: truty = build value widget.
+
+	- grid calls build_null() for null.
+	- grid calls build_text() for null_text and empty_text.
+	- grid calls build() for normal values.
+
+Editing a value:
+
+	has_editor     : the cell enters edit mode. false for bool, which the
+	                 user toggles by click and space instead.
+	build_editor   : f(id, v, pad_l, pad_r, h) -> v
+	edits_in_popup : build_editor builds a popup, so the cell keeps drawing
+	                 the value under it.
+	editor_value   : f(id, v) -> v   what the editor has made of v so far.
+	                 on every build pass in which dropdown_closed returns
+	                 nothing, the grid calls this and writes the result to
+	                 the cell when it differs from what the cell holds.
+
+	focus_editor         : f(id, sel_i, sel_len)
+	editor_selection     : f(id) -> [i, len]
+	editor_caret_at_edge : f(id, d) -> true|false   d is -1 or 1
+
+Dropdown editors:
+
+	open_dropdown  : f(id)
+	close_dropdown : f(id)
+	toggle_dropdown: f(id)
+	dropdown_closed: f(id) -> ev   the grid ends the edit when this returns
+	                 an event, cancelling it unless ev.picked.
 
 */
 
@@ -4639,7 +4680,14 @@ function build_text_editor(field, id, v, fr, align, valign, max_w, w, h) {
 		e.edit_text = s0
 	e.edit_text = ui.text_editable(id, e.edit_text,
 		fr, align ?? field.align, valign ?? 'c', max_w, w, h)
-	return e.edit_text == s0 ? v : text_val(field, e.edit_text)
+}
+
+function text_editor_value(field, id, v) {
+	let s = ui.state_of(id)
+	if (!s || s.text == null)
+		return v
+	let s0 = v == null ? '' : field.to_input(v)
+	return s.text == s0 ? v : text_val(field, s.text)
 }
 
 all_field_types.focus_editor = function(id, sel_i, sel_len) {
@@ -4677,7 +4725,11 @@ all_field_types.dropdown_closed = function(id) {
 // same call as build_text(), so the cell doesn't shift on entering edit.
 all_field_types.build_editor = function(id, v, pad_l, pad_r, h) {
 	ui.p(pad_l, 0, pad_r, 0)
-	return build_text_editor(this, id, v, 0, this.align, 'c', null)
+	build_text_editor(this, id, v, 0, this.align, 'c', null)
+}
+
+all_field_types.editor_value = function(id, v) {
+	return text_editor_value(this, id, v)
 }
 
 all_field_types.fixed_width = 0
@@ -4855,7 +4907,7 @@ date.build_editor = function(id, v, pad_l, pad_r, h) {
 			ui.p(pad_l, 0, 0, 0)
 			ui.icon(calendar_id, 'calendar', 0, 'l', 'c', null, null, h)
 			ui.p(0, 0, pad_r, 0)
-			v = build_text_editor(this, id, v, 1, this.align, 'c')
+			build_text_editor(this, id, v, 1, this.align, 'c')
 
 		ui.end_h()
 	ui.end_popup()
@@ -4877,16 +4929,20 @@ date.build_editor = function(id, v, pad_l, pad_r, h) {
 			// it can't show a value that isn't a date, so it gives back the
 			// null it was given.
 			let day0 = isnum(v) ? day(v) : null
-			let day1 = ui.calendar(picker_id, day0, null)
-			if (day1 !== day0)
-				v = day1
+			ui.calendar(picker_id, day0, null)
 
 			let resize_id = calendar_id+'.resizer'
 			ui.resizer(resize_id, null, null, 'y')
 		}
 
 	ui.end_dropdown()
+}
 
+date.editor_value = function(id, v) {
+	v = text_editor_value(this, id, v)
+	let s = ui.state_of(id+'.calendar.picker')
+	if (s && s.day !== s.prev_day)
+		return s.day
 	return v
 }
 
@@ -4993,16 +5049,19 @@ enm.build_editor = function(id, v, pad_l, pad_r, h) {
 				// the cell's own box: rows as tall as the cell, text where the
 				// cell put it.
 				s.labels = vals.map(v => this.to_text(v))
-			let i = ui.list(picker_id, s.labels, max(0, vals.indexOf(v)),
+			ui.list(picker_id, s.labels, max(0, vals.indexOf(v)),
 				0, 's', 's', this.align, 'c', 0,
 				null, null, pad_l, pad_r, 0, h)
-			if (i != null)
-				v = vals[i]
 		}
 
 	ui.end_dropdown()
+}
 
-	return v
+enm.editor_value = function(id, v) {
+	let i = ui.state_of(id+'.picker', 'focused_i')
+	if (i == null)
+		return v
+	return words(this.enum_values)[i] ?? v
 }
 
 // lookup dropdowns ----------------------------------------------------------
@@ -5036,7 +5095,8 @@ lookup_editor.build_editor = function(id, v, pad_l, pad_r, h) {
 
 	if (!can_pick_lookup_val(this)) {
 		let f = type_editor(this).build_editor || all_field_types.build_editor
-		return f.call(this, id, v, pad_l, pad_r, h)
+		f.call(this, id, v, pad_l, pad_r, h)
+		return
 	}
 
 	let ln = this.lookup_nav
@@ -5057,15 +5117,23 @@ lookup_editor.build_editor = function(id, v, pad_l, pad_r, h) {
 			let resize_id = id+'.resizer'
 			ui.grid(picker_id, {nav: ln}, 0, 's', 's')
 			ui.resizer(resize_id, ui.em(24), ui.em(12))
-			// the picker grid settles its own focused row while building.
-			let ln_row = ln.focused_row
-			if (ln_row)
-				v = ln.cell_val(ln_row, lookup_val_field(this))
 		}
 
 	ui.end_dropdown()
+}
 
-	return v
+lookup_editor.editor_value = function(id, v) {
+	if (!can_pick_lookup_val(this)) {
+		let f = type_editor(this).editor_value || all_field_types.editor_value
+		return f.call(this, id, v)
+	}
+	if (!ui.state_of(id+'.picker'))
+		return v
+	let ln = this.lookup_nav
+	let ln_row = ln.focused_row
+	if (!ln_row)
+		return v
+	return ln.cell_val(ln_row, lookup_val_field(this))
 }
 
 // tag lists -----------------------------------------------------------------
@@ -5097,8 +5165,6 @@ color.build = function(v, mode) {
 color.edits_in_popup = true
 
 color.editor_value = function(id, v) {
-	if (!ui.state_of(id, 'open'))
-		return v
 	return ui.state_of(id+'.picker', 'hex') ?? v
 }
 
@@ -5118,8 +5184,7 @@ color.build_editor = function(id, v, pad_l, pad_r, h) {
 			let resize_id = id+'.resizer'
 			ui.p(ui.sp2())
 			ui.v(0, ui.sp1())
-				let hex = ui.color_picker(picker_id, hue, sat, lum)
-				v = hex
+				ui.color_picker(picker_id, hue, sat, lum)
 				ui.h(0, ui.sp05(), 'r')
 					ui.default_button(id+'.pick')
 					ui.primary_button(id+'.pick', S('pick', 'Pick'), 0)
@@ -5130,8 +5195,6 @@ color.build_editor = function(id, v, pad_l, pad_r, h) {
 		}
 
 	ui.end_dropdown()
-
-	return v
 }
 
 // percents ------------------------------------------------------------------

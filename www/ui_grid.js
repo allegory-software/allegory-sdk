@@ -220,6 +220,8 @@ function init(id, e) {
 	let horiz = true
 
 	// context-sensitive thus set on each frame
+	let sp
+	let sp2
 	let font_size
 	let line_height
 	let cells_w
@@ -463,13 +465,8 @@ function init(id, e) {
 			}
 			if (editing && !build_stage && field.has_editor) {
 				ui.focus_group(true, null, e.editor_id)
-				let v = field.build_editor(e.editor_id, input_val, pad_l, pad_r, h)
+				field.build_editor(e.editor_id, input_val, pad_l, pad_r, h)
 				ui.end_focus_group()
-				if (v !== input_val) {
-					e.set_cell_val(row, field, v, {input: e})
-					if (field.edits_in_popup)
-						ui.rebuild('cell_val_changed')
-				}
 			}
 			ui.p(0)
 		ui.end_stack()
@@ -688,21 +685,10 @@ function init(id, e) {
 		return 2 * sp2 + gcol_h + levels * sp2 + 2
 	}
 
-	e.render = function(fr, align, valign, min_w, min_h) {
+	e.update = function() {
 
-		// set layout vars
-
-		let sp  = ui.sp1()
-		let sp2 = ui.sp2()
-		font_size = ui.get_font_size()
-		line_height = font_size * 1
-		cell_h = round(line_height + 2 * sp + e.cell_border_h_width)
-		header_h = cell_h
-		gcol_w = 80 // group-bar column width
-		gcol_h = round(line_height + sp)
-		gcol_gap = 1
-
-		ui.focusable(id)
+		if (cell_h == null)
+			return
 
 		if (e.editing
 				&& !ui.focused(id)
@@ -1053,18 +1039,6 @@ function init(id, e) {
 		else if (drag_op == 'col_move')
 			ui.set_cursor('grabbing')
 
-		// layout fields and compute cell grid size
-
-		cells_w = 0
-		for (let field of e.fields) {
-			let w = clamp(field.w, field.min_w, field.max_w)
-			let cw = w + 2 * sp2
-			if (drag_op != 'col_move')
-				field._x = cells_w
-			field._w = cw
-			cells_w += cw
-		}
-
 		// check hover/drag on cell view
 
 		if (!hit_zone) {
@@ -1411,20 +1385,49 @@ function init(id, e) {
 				break
 			let editor_id = e.editor_id
 			let ev = field.dropdown_closed(editor_id)
+			let v0 = e.cell_input_val(row, field)
+			let v1 = field.editor_value(editor_id, v0)
+			if (v1 !== v0)
+				e.set_cell_val(row, field, v1, {input: e})
 			if (ev) {
 				let advance = ev.picked
 					&& e.advance_on_exit && e.advance_on_enter
 				e.exit_edit({input: e, cancel: !ev.picked})
 				if (advance)
 					advance_edit(false, 1)
-			} else if (field.editor_value) {
-				let v0 = e.cell_input_val(row, field)
-				let v1 = field.editor_value(editor_id, v0)
-				if (v1 !== v0)
-					e.set_cell_val(row, field, v1, {input: e})
 			}
 			if (!e.editing || (e.focused_row == row && e.focused_field == field))
 				break
+		}
+
+	}
+
+	e.build = function(id, opt, fr, align, valign, min_w, min_h) {
+
+		// set layout vars
+
+		sp  = ui.sp1()
+		sp2 = ui.sp2()
+		font_size = ui.get_font_size()
+		line_height = font_size * 1
+		cell_h = round(line_height + 2 * sp + e.cell_border_h_width)
+		header_h = cell_h
+		gcol_w = 80 // group-bar column width
+		gcol_h = round(line_height + sp)
+		gcol_gap = 1
+
+		ui.focusable(id)
+
+		// layout fields and compute cell grid size
+
+		cells_w = 0
+		for (let field of e.fields) {
+			let w = clamp(field.w, field.min_w, field.max_w)
+			let cw = w + 2 * sp2
+			if (drag_op != 'col_move')
+				field._x = cells_w
+			field._w = cw
+			cells_w += cw
 		}
 
 		if (e.scroll_to_ri != null) {
