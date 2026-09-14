@@ -3928,7 +3928,7 @@ hittest[CMD_SCROLLBOX] = function(a, i, recs) {
 			continue
 		if (!hit_rect(tx, ty, tw, th))
 			continue
-		set_hit(id+'.scrollbar_'+axis)
+		set_hit(id+'.scrollbar'+axis)
 		set_hit(id)
 		return true
 	}
