@@ -1500,6 +1500,27 @@ ui.on_free = function(id, free1) {
 	}
 }
 
+// widget builder for complex, stateful widgets that stay in state.e and
+// expose build(...args) and update() methods.
+// the constructor is also called at build-time.
+ui.stateful_widget = function(create) {
+	return function() { // id, ...build_args
+		let id = arguments[0]
+		assert(isstr(id), 'id required')
+		let e
+		let s = ui.state_of(id)
+		if (!s) {
+			e = create.apply(null, arguments)
+			s = ui.state(id, e.update)
+			s.e = e
+		} else {
+			ui.state(id) // keep alive
+			e = s.e
+		}
+		e.build.apply(e, arguments)
+	}
+}
+
 //// TUI ---------------------------------------------------------------------
 
 ui.TUI = false
