@@ -5473,6 +5473,28 @@ function input_focus(ev) {
 	animate()
 }
 
+function input_pointerdown(ev) {
+	update_mouse(ev)
+	if (ev.button == 0) {
+		ui.local_pointer.click = true
+		ui.local_pointer.pressed = true
+		this.setPointerCapture(ev.pointerId)
+	}
+	ui.local_pointer.activate()
+	animate()
+}
+
+function input_pointerup(ev) {
+	update_mouse(ev)
+	if (ev.button == 0) {
+		ui.local_pointer.pressed = false
+		ui.local_pointer.clickup = true
+		this.releasePointerCapture(ev.pointerId)
+	}
+	ui.local_pointer.activate()
+	animate()
+}
+
 function input_blur(ev) {
 	// deactivating the window blurs the input, but focus didn't move.
 	if (!document.hasFocus())
@@ -5617,6 +5639,8 @@ function input_create(id, input_type) {
 		input.classList.add('ui-input')
 		input.addEventListener('focus', remote ? remote_input_focus : input_focus)
 		input.addEventListener('blur' , remote ? remote_input_blur  : input_blur )
+		input.addEventListener('pointerdown', input_pointerdown)
+		input.addEventListener('pointerup'  , input_pointerup  )
 		input.addEventListener('input', remote
 			? remote_input_text_changed : input_text_changed)
 		input.addEventListener('selectionchange', remote
