@@ -936,6 +936,70 @@ ui.v(1, ui.sp(), 'l', 'c')
 ui.end_v()
 `
 
+num_slider1_value = 25
+demos.num_slider = `
+ui.v(0, ui.sp(), 'c', 'c', 300)
+	ui.box_args(0)
+	num_slider1_value = ui.num_slider(
+		'num_slider1', num_slider1_value, 0, 100, 2)
+ui.end_v()
+`
+
+demos.input_controls = `
+ui.v_tabstops(0, ui.sp2(), 'c', 'c')
+	ui.h(0, ui.sp2())
+		ui.label('input1', 'Input', 0)
+		input1_text = ui.input('input1', input1_text)
+	ui.end_h()
+	ui.h(0, ui.sp2())
+		ui.label('dd1', 'Dropdown', 0)
+		dd1_i = ui.list_dropdown('dd1', dd_items, dd1_i)
+	ui.end_h()
+	ui.h(0, ui.sp2())
+		ui.label('num_slider1', 'Number slider', 0)
+		num_slider1_value = ui.num_slider(
+			'num_slider1', num_slider1_value, 0, 100, 2)
+	ui.end_h()
+	ui.h(0, ui.sp2())
+		ui.label('slider1', 'Slider', 0)
+		slider1_v = ui.slider('slider1', slider1_v, 20, 40, 1, false)
+	ui.end_h()
+
+	ui.h(0, ui.sp4())
+		ui.box()
+		ui.h(0, ui.sp2())
+			cb1_checked = ui.checkbox('cb1', cb1_checked)
+			ui.label('cb1', 'Checkbox', 1)
+		ui.end_h()
+	ui.end_h()
+	ui.h(0, ui.sp4())
+		ui.box()
+		ui.h(0, ui.sp2())
+			toggle1_on = ui.toggle('toggle1', toggle1_on)
+			ui.label('toggle1', 'Toggle', 1)
+		ui.end_h()
+	ui.end_h()
+	ui.h(0, ui.sp4())
+		ui.text('', 'Radio', 0, 'l', 't')
+		ui.v(0, ui.sp2())
+			for (let i = 0; i < 3; i++) {
+				ui.h(0, ui.sp2())
+					radio_sel_i = ui.radio(
+						'radio'+i, 'radio_group1', i, radio_sel_i)
+					ui.label('radio'+i, 'Radio '+(i+1))
+				ui.end_h()
+			}
+		ui.end_v()
+	ui.end_h()
+	ui.h(0, ui.sp2(), 'c')
+		ui.button('btn1', 'Button', 0)
+		ui.primary_button('btn2', 'Primary', 0)
+		ui.icon_button('btn_plus', 'plus', null, 0)
+	ui.end_h()
+
+ui.end_v_tabstops()
+`
+
 demos.bg_dots = `
 ui.bg_dots('dots1', 0.3)
 `
@@ -1423,7 +1487,6 @@ demos_array = keys(demos)
 
 ui.always_animate = false
 
-let recs_length = 0
 let recs_strlen = 0
 function demo_main() {
 
@@ -1437,7 +1500,8 @@ function demo_main() {
 				ui.color('label')
 				ui.text('', 'recs_length', 0)
 				ui.color('link')
-				ui.text('', recs_length+'', 0, 'r', 'c', 1/0, ui.em(3))
+				ui.text('', ui.DEBUG ? ui.recs_length+'' : 'n/a',
+					0, 'r', 'c', 1/0, ui.em(3))
 
 				ui.color('label')
 				ui.text('', 'JSON', 0)
@@ -1515,8 +1579,6 @@ function demo_main() {
 		ui.end_h()
 
 	ui.end_v()
-
-	recs_length = ui.recs_length
 }
 
 ui.main = demo_main

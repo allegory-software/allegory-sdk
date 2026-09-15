@@ -300,7 +300,6 @@ INPUT
 	icon_button     (id, icon, [s], fr, align, valign, min_w, min_h, style)
 	input           (id, s, fr, min_w, min_h, [readonly])
 	label           (for_id, s, fr, align, valign)
-	radio_label     (for_id, for_group_id, s, fr, align, valign)
 	list_dropdown   (id, items, sel_i, fr, max_w, min_w, min_h) -> sel_i
 	toggle          (id, fr, align, valign, min_w, min_h)
 	checkbox        (cmd, id, fr, align, valign, min_w, min_h)
@@ -3492,6 +3491,15 @@ measure_end[CMD_V_TABSTOPS] = function(a, i, axis) {
 		align_tabstops(a, i)
 	ct_measure_end(a, i, axis)
 }
+
+//// BOX ---------------------------------------------------------------------
+
+// just an empty box used as an empty element for v_tabstops.
+ui.box_widget('box', {
+	create: function(cmd, fr, align, valign, min_w, min_h) {
+		return ui_cmd_box(cmd, fr ?? 0, align, valign, min_w, min_h)
+	},
+})
 
 //// STACK -------------------------------------------------------------------
 
@@ -6695,6 +6703,10 @@ ui.input_min_w_em = 6
 ui.em_input = () => ui.em(ui.input_min_w_em)
 
 ui.input = function(id, s, fr, w, h, readonly) {
+	if (clicked(id+'.label')) {
+		ui.focus(id)
+		ui.select_text(id, 0, 1/0)
+	}
 	ui.stack('', fr, 's', 's')
 		ui.bb(
 			'input', ui.focused(id) ? 'focused' : null,
@@ -6709,14 +6721,10 @@ ui.input = function(id, s, fr, w, h, readonly) {
 
 ui.label = function(for_id, s, fr, align, valign) {
 	let id = for_id+'.label'
-	ui.color('text')
-	ui.text(id, s, fr, align ?? 'l', valign ?? 'c')
-}
-
-ui.radio_label = function(for_id, for_group_id, s, fr, align, valign) {
-	let id = for_id+'.label'
-	ui.color('text', (hit(id) || hit(for_id)) ? 'hover' : null)
-	ui.text(id, s, fr, align ?? 'l', valign ?? 'c')
+	ui.scope()
+		ui.color('text', hit(id) ? 'hover' : null)
+		ui.text(id, s, fr, align ?? 'l', valign ?? 'c')
+	ui.end_scope()
 }
 
 //// NUM SLIDER --------------------------------------------------------------
@@ -6729,6 +6737,8 @@ function num_slider_update(id, s) {
 	let v = (s.editing ? num(ui.text_value(input_id)) : null) ?? s.value
 	let p = clamp(lerp(v, from, to, 0, 1), 0, 1)
 
+	if (clicked(id+'.label'))
+		ui.focus(id)
 	let focused = ui.focused(s.editing ? input_id : id)
 	if (focused && (ui.keydown('f2') || ui.keydown('enter'))) {
 		s.editing = !s.editing
@@ -6840,7 +6850,8 @@ function dropdown_update(id, s) {
 	let was_open = s.open
 	let open = was_open
 
-	let click = clicked(id) // id is the dropbox or the grid cell
+	let click = clicked(id) || clicked(id+'.label')
+	// id is the dropbox or the grid cell
 	let ev = ui.consume(picker_id, 'item_picked')
 		|| (ui.state_of(pick_button_id, 'state') == 'click' ? obj() : null)
 	let picked = !!ev
@@ -7030,21 +7041,35 @@ ui.bg_style('*', 'toggle-thumb', '*', 'text')
 let TOGGLE_ID    = BOX_ARGS+0
 let TOGGLE_STATE = BOX_ARGS+1
 
-let TOGGLE_ON    = 1
-let TOGGLE_HOVER = 2
+let TOGGLE_ON      = 1
+let TOGGLE_HOVER   = 2
+let TOGGLE_FOCUSED = 4
+
+ui.capture_keydown(' ')
+
+// pill shape shared by toggle's own body and its larger focus ring.
+function toggle_path(cx, x, y, w, h) {
+	cx.beginPath()
+	cx.roundRect(x, y, w, h, 1000)
+}
 
 let toggle = {}
 
 toggle.create = function(cmd, id, on, fr, align, valign, min_w, min_h) {
 	ui.state(id)
+	ui.focusable(id)
 	let hs = hit(id) || hit(id+'.label')
-	if (hs && ui.click)
+	let focused = ui.focused(id)
+	if ((hs && ui.click) || (focused && ui.keydown(' ')))
 		on = !on
-	ui_cmd_box(cmd, fr, align ?? 'c', valign ?? 'c',
+	else if (focused && ui.keydown('delete'))
+		on = null
+	ui_cmd_box(cmd, fr ?? 0, align ?? 'c', valign ?? 'c',
 		min_w ?? ui.em(2.25),
 		min_h ?? ui.em(1.25),
 		id,
-		(on ? TOGGLE_ON : 0) | (hs ? TOGGLE_HOVER : 0))
+		(on ? TOGGLE_ON : 0) | (hs ? TOGGLE_HOVER : 0) |
+			(focused && ui.focused_by_key ? TOGGLE_FOCUSED : 0))
 	return on
 }
 toggle.ID = TOGGLE_ID
@@ -7058,11 +7083,21 @@ toggle.draw = function(a, i) {
 	let flags = a[i+TOGGLE_STATE]
 	let on = flags & TOGGLE_ON
 	let hs = flags & TOGGLE_HOVER
+	let focused = flags & TOGGLE_FOCUSED
+
+	// focus ring
+
+	if (focused) {
+		let m = 3
+		toggle_path(cx, x - m, y - m, w + 2*m, h + 2*m)
+		cx.strokeStyle = border_color('max', null)
+		cx.lineWidth = 1
+		cx.stroke()
+	}
 
 	// button
 
-	cx.beginPath()
-	cx.roundRect(x, y, w, h, 1000)
+	toggle_path(cx, x, y, w, h)
 	let state =
 		(on ? STATE_ITEM_SELECTED : 0) |
 		(hs ? STATE_HOVER         : 0)
@@ -7089,7 +7124,7 @@ ui.box_widget('toggle', toggle)
 let checkbox = {...toggle}
 
 checkbox.create = function(cmd, id, on, fr, align, valign, min_w, min_h) {
-	return toggle.create(cmd, id, on, fr, align, valign,
+	return toggle.create(cmd, id, on, fr ?? 0, align, valign,
 		min_w ?? ui.em(1.5),
 		min_h ?? ui.em(1.5),
 	)
@@ -7104,6 +7139,7 @@ checkbox.draw = function(a, i) {
 	let flags = a[i+TOGGLE_STATE]
 	let on = flags & TOGGLE_ON
 	let hs = flags & TOGGLE_HOVER
+	let focused = flags & TOGGLE_FOCUSED
 
 	let state =
 		(on ? STATE_ITEM_SELECTED : 0) |
@@ -7111,6 +7147,17 @@ checkbox.draw = function(a, i) {
 	let bg = bg_color_hsl('toggle', state)
 	let fg = fg_color('text', hs ? 'hover' : null, bg_is_dark(bg) ? 'dark' : 'light')
 	bg = bg[0]
+
+	// focus ring
+
+	if (focused) {
+		let m = 3
+		cx.beginPath()
+		cx.roundRect(x - m, y - m, w + 2*m, h + 2*m, 2 + m)
+		cx.strokeStyle = border_color('max', null)
+		cx.lineWidth = 1
+		cx.stroke()
+	}
 
 	// check box
 
@@ -7147,21 +7194,36 @@ let radio = {...checkbox}
 
 let RADIO_GROUP_ID = BOX_ARGS+2
 
-radio.create = function(cmd, id, group_id, own_val, sel_val, fr, align, valign, min_w, min_h) {
+radio.create = function(cmd,
+	id, group_id, own_val, sel_val,
+	fr, align, valign, min_w, min_h
+) {
 	ui.state(id)
 	ui.state(group_id)
+	ui.focusable(id)
 	let label_hit = hit(id+'.label') && ui.click
 	let dot_hit = hit(group_id) && ui.click
+	let focused = ui.focused(id)
 	let clicked_id = label_hit ? id : (dot_hit && hit(group_id, 'id'))
+	if (!clicked_id && focused && ui.keydown(' ')) {
+		clicked_id = id
+		ui.rebuild('radio_pick')
+	}
 	let clicked = !!clicked_id
 	let selected = clicked ? clicked_id == id : own_val === sel_val
 	let hs = hit(id) || hit(id+'.label')
-	ui_cmd_box(cmd, fr, align ?? 'c', valign ?? 'c',
+	let del = focused && ui.keydown('delete')
+	if (del)
+		ui.rebuild('radio_pick')
+	ui_cmd_box(cmd, fr ?? 0, align ?? 'c', valign ?? 'c',
 		min_w ?? ui.em(1.5),
 		min_h ?? ui.em(1.5),
 		id,
-		(selected ? TOGGLE_ON : 0) | (hs ? TOGGLE_HOVER : 0),
+		(selected ? TOGGLE_ON : 0) | (hs ? TOGGLE_HOVER : 0) |
+			(focused && ui.focused_by_key ? TOGGLE_FOCUSED : 0),
 		group_id)
+	if (del)
+		return null
 	return (clicked && clicked_id == id) ? own_val : sel_val
 }
 
@@ -7174,9 +7236,20 @@ radio.draw = function(a, i) {
 	let flags = a[i+TOGGLE_STATE]
 	let on = flags & TOGGLE_ON
 	let hs = flags & TOGGLE_HOVER
+	let focused = flags & TOGGLE_FOCUSED
 
 	let cx1 = x + w / 2
 	let cy1 = y + h / 2
+
+	// focus ring
+
+	if (focused) {
+		cx.beginPath()
+		cx.arc(cx1, cy1, h * .5 + 3, 0, 2 * PI)
+		cx.strokeStyle = border_color('max', null)
+		cx.lineWidth = 1
+		cx.stroke()
+	}
 
 	// button
 
@@ -7206,6 +7279,7 @@ radio.hit = function(a, i) {
 	let group_id = a[i+RADIO_GROUP_ID]
 	if (hit_rect(x, y, w, h)) {
 		set_hit(group_id).id = id
+		set_hit(id)
 		return true
 	}
 }
@@ -7304,6 +7378,8 @@ ui.box_widget('slider', {
 
 		let s = ui.state(id)
 		ui.focusable(id)
+		if (clicked(id+'.label'))
+			ui.focus(id)
 
 		markers = (markers ?? 1) ? 1 : 0
 
@@ -8806,7 +8882,6 @@ ui.live_move_mixin = function(e) {
 
 ui.debug_pane = function() {
 
-	if (1) {
 	ui.v(0, 0, 's', 's', 200)
 		ui.border('l', 'intense')
 
@@ -8908,7 +8983,6 @@ ui.debug_pane = function() {
 		ui.end_stack()
 
 	ui.end_v()
-	}
 }
 
 //// TABS --------------------------------------------------------------------
