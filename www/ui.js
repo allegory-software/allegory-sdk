@@ -6719,6 +6719,99 @@ ui.radio_label = function(for_id, for_group_id, s, fr, align, valign) {
 	ui.text(id, s, fr, align ?? 'l', valign ?? 'c')
 }
 
+//// NUM SLIDER --------------------------------------------------------------
+
+function num_slider_update(id, s) {
+	let input_id = id+'.input'
+	let from = s.from
+	let to = s.to
+	let decimals = s.decimals
+	let v = (s.editing ? num(ui.text_value(input_id)) : null) ?? s.value
+	let p = clamp(lerp(v, from, to, 0, 1), 0, 1)
+
+	let focused = ui.focused(s.editing ? input_id : id)
+	if (focused && (ui.keydown('f2') || ui.keydown('enter'))) {
+		s.editing = !s.editing
+		if (s.editing) {
+			ui.state(input_id).text = dec(s.value, decimals)
+			ui.select_text(input_id, 0, 1/0)
+			ui.focus(input_id)
+		} else {
+			ui.focus(id)
+		}
+		ui.capture_keys()
+	} else if (s.editing && !focused) {
+		s.editing = false
+	}
+
+	if (!s.editing) {
+		let cs = captured(id)
+		let d = focused &&
+			(ui.keydown('arrowright') && 1 ||
+				ui.keydown('arrowleft') && -1)
+		if (cs) {
+			p = clamp((ui.mx - s.x) / s.w, 0, 1)
+		} else if (d) {
+			p = clamp(p + d * (ui.keypressed('shift') ? .01 : .1), 0, 1)
+		}
+		if (hit(id) || cs)
+			ui.set_cursor('ew-resize')
+	}
+	s.value = lerp(p, 0, 1, from, to)
+}
+
+ui.num_slider = function(id, value, from, to, decimals) {
+	let s = ui.state(id)
+	from ??= 0
+	to ??= 1
+	decimals ??= 2
+	if (s.prev_value !== value || s.value == null)
+		s.value = value
+	s.from = from
+	s.to = to
+	s.decimals = decimals
+	ui.state(id, num_slider_update)
+
+	let p = clamp(lerp(s.value, from, to, 0, 1), 0, 1)
+	s.value = lerp(p, 0, 1, from, to)
+	s.prev_value = s.value
+	let input_id = id+'.input'
+	let focused = ui.focused(s.editing ? input_id : id)
+	if (!s.editing)
+		ui.focusable(id)
+
+	let fr = fr0 ?? 1
+	let align = align0 ?? 's'
+	let valign = valign0 ?? 'c'
+	let min_w = min_w0 ?? ui.em_input()
+	let min_h = min_h0
+	ui.clear_box_args()
+
+	ui.stack(id, fr, align, valign, min_w, min_h)
+		ui.bb(
+			'input', focused ? 'focused' : null,
+			1, 'intense', focused ? 'hover' : null)
+		ui.p(1)
+		ui.h(0, 0, 's', 's')
+			ui.stack('', p, 's', 's')
+				ui.bb('bg3')
+			ui.end_stack()
+			ui.stack('', 1 - p, 's', 's')
+			ui.end_stack()
+		ui.end_h()
+		ui.p(ui.sp())
+		ui.color('text', focused ? 'focused' : null)
+		if (s.editing)
+			ui.text(input_id, ui.text_value(input_id), 1, 'r', 'c',
+				null, 0, null, null, true)
+		else
+			ui.text('', dec(s.value, decimals), 1, 'r', 'c', null, 0)
+		ui.measure(id)
+	ui.end_stack()
+
+	return s.value
+}
+
 //// DROPDOWN ----------------------------------------------------------------
 
 /*
