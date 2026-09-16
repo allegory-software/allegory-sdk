@@ -9235,6 +9235,7 @@ ui.end_toolboxes = function() {
 				s.to_top = id
 	let to_top_id = s.to_top
 	if (to_top_id || !order.length) {
+		let prev_top_id = order.at(-1)
 		for (let id of order) // remove toolboxes that have been removed
 			if (!popups.has(id))
 				remove_value(order, id)
@@ -9249,6 +9250,8 @@ ui.end_toolboxes = function() {
 				array_move(order, src_i, 1, dst_i)
 			}
 		}
+		if (prev_top_id != order.at(-1) && ui.focus_inside(prev_top_id))
+			ui.focus(null)
 		s.to_top = null
 	}
 	let z = 1
