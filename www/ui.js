@@ -6894,8 +6894,6 @@ function dropdown_update(id, s) {
 
 	let toggle = click || enter || want_toggle || f2
 	let escape = open && ui.keydown('escape') && ui.focus_inside(picker_id)
-	// using hovers() is a hack to make the resizer work which captures the
-	// mouse and masks hit() (but it doesn't clear ui.click).
 	let click_outside = open && ui.click && !hovers(popup_id)
 
 	if (picked || escape || click_outside) {
