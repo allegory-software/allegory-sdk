@@ -1239,7 +1239,9 @@ function process_key(dom_ev, ev_name, key) {
 	let full_key = ev[1]
 	let key_low  = ev[2] // lowercased key
 	let captured = ev_name == 'down' ? captured_keydowns : captured_keyups
-	if (dom_ev && (key_low == 'tab' || captured[full_key])) {
+	if (dom_ev && (key_low == 'tab' ||
+		(captured[full_key] && dom_ev.target != drawn_focused_input))
+	) {
 		// this allows us to supress some (but not all) browser key events.
 		dom_ev.preventDefault()
 	}
