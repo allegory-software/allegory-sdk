@@ -23,7 +23,7 @@ THEME DEFINITIONS
 
 	* = fg | border | bg
    *_style         (theme, name, state, h, s, L, a, is_dark)      define a color
-	shadow_style    (theme, name, x, y, blur, h, s, L, a)  define a shadow
+	shadow_style    (theme, name, x, y, blur, h, s, L, a, [inset])  define a shadow
 
 BUILT-IN STYLES
 
@@ -260,7 +260,7 @@ BORDER & BACKGROUND
 
 	bb              (bg_color, bg_color_state, sides, border_color, border_color_state, border_radius)
 	bb_tooltip      (bg_color, bg_color_state,        border_color, border_color_state, border_radius)
-	shadow          (x, y, blur, spread, inset, color)
+	shadow          (shadow_name)
 
 	bg_dots         (id, speed)
 
@@ -4540,7 +4540,7 @@ draw[CMD_BB_TOOLTIP] = function(a, i) {
 			side, tx, ty, b1x, b1y, b2x, b2y, r, d)
 		cx.fill()
 	}
-	if (shadow_set)
+	if (cur_shadow)
 		reset_shadow()
 	if (border_color) {
 		cx.strokeStyle = ui_border_color(border_color, border_color_state)
@@ -4555,10 +4555,10 @@ draw[CMD_BB_TOOLTIP] = function(a, i) {
 
 //// BOX SHADOW --------------------------------------------------------------
 
-ui.shadow_style = function(theme, name, x, y, blur, h, s, L, a) {
+ui.shadow_style = function(theme, name, x, y, blur, h, s, L, a, inset) {
 	themes[theme].shadow[name] = [
 		x, y, blur,
-		hsl(h, s, L, a), h, s, L, a
+		hsl(h, s, L, a), h, s, L, a, inset
 	]
 }
 
@@ -4587,27 +4587,50 @@ ui.shadow = function(s) {
 	ui_cmd(CMD_SHADOW, s)
 }
 
-let shadow_set
+const SHADOW_INSET = 8
+
+let cur_shadow
+
+function set_drop_shadow(st) {
+	cx.shadowOffsetX = st[0]
+	cx.shadowOffsetY = st[1]
+	cx.shadowBlur    = st[2]
+	cx.shadowColor   = st[3]
+}
 
 ui.set_shadow = function(s) {
-	let [x, y, blur, color] =
-		assert(theme.shadow[s], 'unknown shadow ', s)
-	cx.shadowBlur    = blur
-	cx.shadowOffsetX = x
-	cx.shadowOffsetY = y
-	cx.shadowColor   = color
-	shadow_set = true
+	let st = assert(theme.shadow[s], 'unknown shadow ', s)
+	assert(!st[SHADOW_INSET], 'inset shadow outside bb: ', s)
+	set_drop_shadow(st)
+	cur_shadow = st
 }
 
 draw[CMD_SHADOW] = function(a, i) {
-	ui.set_shadow(a[i+0])
+	let s = a[i+0]
+	let st = assert(theme.shadow[s], 'unknown shadow ', s)
+	if (!st[SHADOW_INSET])
+		set_drop_shadow(st)
+	cur_shadow = st
+}
+
+function draw_inset_shadow(st, x, y, w, h, sides, r) {
+	let m = st[2] + max(abs(st[0]), abs(st[1])) + 1
+	cx.save()
+	bg_path(cx, x, y, x + w, y + h, sides, r)
+	cx.clip()
+	bg_path(cx, x, y, x + w, y + h, sides, r)
+	cx.rect(x - m, y - m, w + 2*m, h + 2*m)
+	set_drop_shadow(st)
+	cx.fillStyle = '#000'
+	cx.fill('evenodd')
+	cx.restore()
 }
 
 function reset_shadow() {
 	cx.shadowBlur    = 0
 	cx.shadowOffsetX = 0
 	cx.shadowOffsetY = 0
-	shadow_set = false
+	cur_shadow = null
 }
 
 //// BACKGROUND & BORDER -----------------------------------------------------
@@ -4756,13 +4779,15 @@ draw[CMD_BB] = function(a, i) {
 		set_bg_color(bg_color, bg_color_state)
 		bg_path(cx, x, y, x + w, y + h, border_sides, border_radius)
 		cx.fill()
+		if (cur_shadow?.[SHADOW_INSET])
+			draw_inset_shadow(cur_shadow, x, y, w, h, border_sides, border_radius)
 	}
-	if (shadow_set)
+	if (cur_shadow)
 		reset_shadow()
 	if (border_sides && border_color) {
 		cx.strokeStyle = ui_border_color(border_color, border_color_state)
 		cx.lineCap = 'square'
-		border_path(cx, x + .5, y + .5, x + w - .5, y + h - .5, border_sides, border_radius)
+		border_path(cx, x+.5, y+.5, x+w-.5, y+h-.5, border_sides, border_radius)
 		if (border_dash)
 			cx.setLineDash(border_dashes[border_dash])
 		cx.stroke()
