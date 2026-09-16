@@ -7034,7 +7034,8 @@ ui.list_dropdown = function(id, items, sel_i, fr, max_w, min_w, min_h) {
 	ui.dropdown(id)
 
 		if (!open)
-			ui.bb('input', null, 1, 'intense', ui.focused(id) ? 'hover' : null)
+			ui.bb('input', ui.focused(id) ? 'focused' : null,
+				1, 'intense', ui.focused(id) ? 'hover' : null)
 		draw_value_row(items, s.value_i, null, pad, chevron_w, max_w)
 
 	ui.dropdown_picker()
