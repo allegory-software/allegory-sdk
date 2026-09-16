@@ -2464,7 +2464,7 @@ ui.capture_tab = function(id) {
 }
 
 function tab_captured(id) {
-	return !!ui.state_of(id, 'capture_tab')
+	return !!state_map.get(id)?.capture_tab
 }
 
 let tab_into_id // focus group that the next tab must move into
