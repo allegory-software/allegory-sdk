@@ -6876,7 +6876,10 @@ function dropdown_update(id, s) {
 	let was_open = s.open
 	let open = was_open
 
-	let click = clicked(id) || clicked(id+'.label')
+	if (clicked(id+'.label'))
+		ui.focus(id)
+
+	let click = clicked(id)
 	// id is the dropbox or the grid cell
 	let ev = ui.consume(picker_id, 'item_picked')
 		|| (ui.state_of(pick_button_id, 'state') == 'click' ? obj() : null)
