@@ -2173,10 +2173,12 @@ function hit_frame(recs, popups) {
 //// FOCUSING ----------------------------------------------------------------
 
 ui.focused_id = null
-ui.focused_by_key = null
+ui.focused_by_key = false
 let focusing_id
 
 ui.focus = function(id, by_key) {
+	if (ui.focused_id == id)
+		return
 	ui.focused_id = id
 	ui.focused_by_key = by_key
 	focusing_id = id
@@ -4781,6 +4783,17 @@ hittest[CMD_BB] = function(a, i) {
 	}
 }
 
+//// FOCUS RING --------------------------------------------------------------
+
+ui.focus_ring = function(id) {
+	if (id && !(ui.focused(id) && ui.focused_by_key))
+		return
+	ui.m(-2)
+	ui.popup('', 'overlay', null, 'ics', 's')
+		ui.bb(null, null, 1, 'max')
+	ui.end_popup()
+}
+
 //// TEXT STATE --------------------------------------------------------------
 
 const CMD_COLOR = cmd('color')
@@ -6318,15 +6331,14 @@ function button_update(id, s) {
 ui.button_bb = function(style, state) {
 	state = repl(state, 'click', 'hover')
 	style = style ?? 'button'
-	if (!style) { // false, 0, '' means no border
-		if (state == 'focused')
-			ui.focus_ring()
+	if (state)
+		ui.focus_ring()
+	if (!style) // means no border
 		return
-	}
 	ui.shadow('button')
 	let radius = ui.sp05()
-	ui.bb(style, repl(state, 'focused', null),
-		1, 'intense', repl(state, 'focused', 'hover'), radius)
+	let bg_state = repl(state, 'focused', null)
+	ui.bb(style, bg_state, 1, 'intense', null, radius)
 }
 
 ui.button_text = function(s, state, w, h) {
@@ -6704,14 +6716,14 @@ function hvlist(hv, id, items, focused_i,
 						? 'item-focused item-selected focused'
 						: 'item-focused item-selected'
 					: null
-			)
+	)
 			ui.color('text', hit(item_id) ? 'hover' : null)
 			ui.text('', item, item_fr,
 				item_align  ?? (hv == 'v' ? 'l' : 'c'),
 				item_valign ?? 'c',
 				max_w)
-			if (list_focused && item_focused)
-				ui.focus_ring()
+			if (item_focused)
+				ui.focus_ring(id)
 		ui.end_stack()
 		i++
 	}
@@ -7493,6 +7505,7 @@ ui.box_widget('slider', {
 		let state   = a[i+SLIDER_STATE]
 		let hs      = state & SLIDER_HOVER
 		let focused = state & SLIDER_FOCUSED
+		let by_key  = state & SLIDER_FOCUSED_BY_KEY
 
 		let shaft_h = round(ui.em(ui.slider_shaft_h_em))
 		let r = round(shaft_h / 2) // shaft corner radius
@@ -7516,7 +7529,7 @@ ui.box_widget('slider', {
 		cx.fill()
 
 		bg_path(cx, x + .5 - r, y + .5, x + w - .5 + r, y + 2*r - .5, BORDER_SIDE_ALL, 1000)
-		cx.strokeStyle = border_color('light', null)
+		cx.strokeStyle = border_color('light')
 		cx.stroke()
 
 		// draw focus ring under thumb
@@ -7526,6 +7539,12 @@ ui.box_widget('slider', {
 			cx.beginPath()
 			cx.arc(thumb_cx, thumb_cy, thumb_r * 2, 0, 2 * PI)
 			cx.fill()
+			if (by_key) {
+				cx.beginPath()
+				cx.arc(thumb_cx, thumb_cy, thumb_r * 2 - 2, 0, 2 * PI)
+				cx.strokeStyle = ui.border_color('max')
+				cx.stroke()
+			}
 		}
 
 		// draw thumb
@@ -7599,15 +7618,6 @@ ui.box_widget('slider', {
 })
 
 //// CALENDAR ----------------------------------------------------------------
-
-ui.focus_ring = function(id) {
-	if (!ui.focused_by_key)
-		return
-	ui.m(-2)
-	ui.popup('', 'overlay', null, 'ics', 's')
-		ui.bb(null, null, 1, 'max')
-	ui.end_popup()
-}
 
 function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 
