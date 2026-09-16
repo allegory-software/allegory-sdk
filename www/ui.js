@@ -7392,8 +7392,9 @@ let SLIDER_SCALE_BASE = BOX_ARGS+6
 let SLIDER_SCALES     = BOX_ARGS+7
 let SLIDER_STATE      = BOX_ARGS+8
 
-let SLIDER_HOVER   = 1
-let SLIDER_FOCUSED = 2
+let SLIDER_HOVER          = 1
+let SLIDER_FOCUSED        = 2
+let SLIDER_FOCUSED_BY_KEY = 4
 
 ui.slider_mark_w_em = 2
 ui.slider_thumb_r_em = .6
@@ -7495,7 +7496,9 @@ ui.box_widget('slider', {
 				markers,
 				scale_base ?? 10,
 				scales ?? 0,
-				(hs ? SLIDER_HOVER : 0) | (ui.focused(id) ? SLIDER_FOCUSED : 0),
+				(hs ? SLIDER_HOVER : 0)
+					| (ui.focused(id) ? SLIDER_FOCUSED : 0)
+					| (ui.focused(id) && ui.focused_by_key ? SLIDER_FOCUSED_BY_KEY : 0)
 			)
 
 			ui.measure(id)
