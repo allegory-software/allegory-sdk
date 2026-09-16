@@ -6318,6 +6318,10 @@ function button_update(id, s) {
 	} else if (ui.focused(id) && (ui.keydown('enter') || ui.keydown(' '))) {
 		if (ui.keydown('enter'))
 			ui.capture_keys()
+		state = 'active'
+	} else if (ui.focused(id) && (ui.keyup('enter') || ui.keyup(' '))) {
+		if (ui.keyup('enter'))
+			ui.capture_keys()
 		state = 'click'
 	} else {
 		state = cs && hs ? ui.clickup ? 'click' : 'active'
