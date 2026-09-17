@@ -8527,8 +8527,9 @@ function color_picker_update(id, s) {
 	let hex_id = id+'.input_rgb'
 	if (ui.focused(hex_id)) {
 		let hex = ui.state_of(hex_id, 'text')
-		if (hex != null && HEX_RE.test(hex))
-			;[hb.hue, sl.sat, sl.lum] = hex_to_hsl(hex)
+		if (hex != null && HEX_RE.test(hex)) {
+			[hb.hue, sl.sat, sl.lum] = hex_to_hsl(hex)
+		}
 	}
 
 	s.hex = hsl_to_rgb_hex(hb.hue, sl.sat, sl.lum)

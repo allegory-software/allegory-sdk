@@ -4693,6 +4693,8 @@ function text_editor_value(field, id, v) {
 	if (!s || s.text == null)
 		return v
 	let s0 = v == null ? '' : field.to_input(v)
+	if (s.prev_text !== s0)
+		return v
 	return s.text == s0 ? v : text_val(field, s.text)
 }
 
