@@ -7189,6 +7189,8 @@ let toggle = {}
 toggle.create = function(cmd, id, on, fr, align, valign, min_w, min_h) {
 	ui.state(id)
 	ui.focusable(id)
+	if (clicked(id+'.label'))
+		ui.focus(id)
 	let hs = hit(id) || hit(id+'.label')
 	let focused = ui.focused(id)
 	if ((hs && ui.click) || (focused && ui.keydown(' ')))
@@ -7333,6 +7335,8 @@ radio.create = function(cmd,
 	ui.state(group_id)
 	ui.focusable(id)
 	let label_hit = hit(id+'.label') && ui.click
+	if (label_hit)
+		ui.focus(id)
 	let dot_hit = hit(group_id) && ui.click
 	let focused = ui.focused(id)
 	let clicked_id = label_hit ? id : (dot_hit && hit(group_id, 'id'))
