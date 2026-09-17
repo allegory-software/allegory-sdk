@@ -3885,10 +3885,16 @@ scrollbar_rect = function(a, i, axis, state) {
 	let thickness = ui.scrollbar_thickness
 	let thickness_active = state ? ui.scrollbar_thickness_active : thickness
 	let visible, tx, ty, tw, th
-	let h_visible = pw < 1
-		&& (overflow_x == SB_OVERFLOW_SCROLL || overflow_x == SB_OVERFLOW_AUTO)
-	let v_visible = ph < 1
-		&& (overflow_y == SB_OVERFLOW_SCROLL || overflow_y == SB_OVERFLOW_AUTO)
+	let h_visible = pw < 1 && (
+			   overflow_x == SB_OVERFLOW_SCROLL
+			|| overflow_x == SB_OVERFLOW_AUTO
+			|| overflow_x == SB_OVERFLOW_INFINITE
+		)
+	let v_visible = ph < 1 && (
+			   overflow_y == SB_OVERFLOW_SCROLL
+			|| overflow_y == SB_OVERFLOW_AUTO
+			|| overflow_y == SB_OVERFLOW_INFINITE
+		)
 	let both_visible = h_visible && v_visible && 1 || 0
 	let bar_min_len = round(2 * ui.font_size_normal)
 	if (!axis) {
@@ -7750,9 +7756,7 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 
 			ui.stack(id+'.day.'+d, 0, 'l', 't', cell_w, cell_h)
 
-				if (d == today) {
-					ui.bb('marker')
-				} else if (d == sel_day) {
+				if (d == sel_day) {
 
 					ui.bb('item', calendar_focused
 						? 'item-focused item-selected focused'
@@ -7762,13 +7766,12 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 					if (calendar_focused)
 						ui.focus_ring()
 
-				} else if (d == hit_day) {
-					ui.bb('bg1', 'hover')
 				} else if (m % 2) {
 					ui.bb('alt')
 				}
 				//ui.bb('bg2', null, 'ltb', 'intense', null, 1/0)
 				ui.pr(ui.em(0.65))
+				ui.color('text', d == hit_day ? 'active' : null)
 				ui.text('', n+'', 0, 'r', 'c')
 				if (n == 1) {
 					ui.mt(ui.em(1.5))
@@ -7781,6 +7784,13 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 					ui.xsmall()
 					ui.color('marker')
 					let s = ' ' + year_of(d)
+					ui.text('', s, 0, 'c', 'c')
+				}
+				if (d == today) {
+					ui.mb(ui.em(1.5))
+					ui.xsmall()
+					ui.color('marker')
+					let s = S('today', 'today').toUpperCase()
 					ui.text('', s, 0, 'c', 'c')
 				}
 			ui.end_stack()
@@ -8035,6 +8045,15 @@ function date_input_update(id, s) {
 
 	let cal_id = id+'.calendar'
 
+	if (ui.focused(id) && (ui.keydown('f2') || ui.keydown('enter'))) {
+		ui.fire(cal_id, 'toggle')
+		ui.capture_keys()
+	} else if (ui.focused(id) && ui.keydown('escape')
+		&& state_map.get(cal_id)?.open) {
+		ui.fire(cal_id, 'close')
+		ui.capture_keys()
+	}
+
 	for (let name of ['open', 'close', 'toggle']) {
 		let ev = ui.consume(id, name)
 		if (ev)
@@ -8061,20 +8080,25 @@ ui.date_input = function(id, v, opt, fr, align, valign, min_w, min_h) {
 
 	let focused = ui.focused(id)
 	let open = ui.dropdown(cal_id, 'b', 'cs', true, false)
+	ui.focus_group(open, null, id)
 
 	let opened = ui.consume(cal_id, 'opened')
 	if (opened)
 		ui.fire(id, 'opened', opened)
-	for (let name of ['closed', 'picked']) {
-		let ev = ui.consume(cal_id, name)
-		if (ev)
-			ui.fire(id, name, ev)
+	let closed_ev = ui.consume(cal_id, 'closed')
+	if (closed_ev)
+		ui.fire(id, 'closed', closed_ev)
+	let picked_ev = ui.consume(cal_id, 'picked')
+	if (picked_ev) {
+		ui.focus(id)
+		ui.select_text(id, 0, 1/0)
+		ui.fire(id, 'picked', picked_ev)
 	}
 
 	let [value, text] = date_input_state(id, v, opt)
 	s.value = value
 
-		ui.stack('', fr, 's', 's')
+		ui.stack(id, fr, 's', 's')
 			ui.bb('input', focused ? 'focused' : null,
 				1, 'intense', focused ? 'hover' : null)
 			ui.h(0, 0, 's', 's', min_w ?? ui.em_input(), min_h)
@@ -8103,6 +8127,7 @@ ui.date_input = function(id, v, opt, fr, align, valign, min_w, min_h) {
 		}
 
 	ui.end_dropdown()
+	ui.end_focus_group()
 
 	return value
 }
