@@ -5522,7 +5522,6 @@ function input_pointerdown(ev) {
 	if (ev.button == 0) {
 		ui.local_pointer.click = true
 		ui.local_pointer.pressed = true
-		this.setPointerCapture(ev.pointerId)
 	}
 	ui.local_pointer.activate()
 	animate()
@@ -5533,7 +5532,6 @@ function input_pointerup(ev) {
 	if (ev.button == 0) {
 		ui.local_pointer.pressed = false
 		ui.local_pointer.clickup = true
-		this.releasePointerCapture(ev.pointerId)
 	}
 	ui.local_pointer.activate()
 	animate()
@@ -5621,6 +5619,18 @@ function remote_input_selection_changed() {
 	remote_input_send_edit(this, t)
 }
 
+function document_selection_changed() {
+	let input = document.activeElement
+	if (!input?._ui_id)
+		return
+	if (input._ui_ss_ids)
+		remote_input_selection_changed.call(input)
+	else
+		input_selection_changed.call(input)
+}
+
+document.addEventListener('selectionchange', document_selection_changed)
+
 // send on the outermost screen's connection; the other ids are the route.
 function remote_input_send(input, t) {
 	let ids = input._ui_ss_ids
@@ -5687,8 +5697,6 @@ function input_create(id, input_type) {
 		input.addEventListener('pointerup'  , input_pointerup  )
 		input.addEventListener('input', remote
 			? remote_input_text_changed : input_text_changed)
-		input.addEventListener('selectionchange', remote
-			? remote_input_selection_changed : input_selection_changed)
 		screen.appendChild(input)
 		s.input = input
 		s.free = input_free
