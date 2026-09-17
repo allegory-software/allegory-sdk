@@ -1120,6 +1120,12 @@ ui.nav = function(opt) {
 		if (e.init_field)
 			e.init_field(field)
 
+		// re-creating the field after all properties are set creates a single
+		// hidden class for all fields (shaves off 0.1ms on a full screen grid).
+		field = {...field}
+		e.all_fields[fi] = field
+		e.all_fields_map[name] = field
+
 		return field
 	}
 
