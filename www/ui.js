@@ -3653,8 +3653,8 @@ is_flex_child[CMD_SCROLLBOX] = true
 function scroll_offsets_to_view_rect(x, y, w, h, pw, ph, sx, sy) {
 	let min_sx = -x
 	let min_sy = -y
-	let max_sx = -(x + w - pw)
-	let max_sy = -(y + h - ph)
+	let max_sx = max(min_sx, -(x + w - pw))
+	let max_sy = max(min_sy, -(y + h - ph))
 	return [
 		-clamp(-sx, min_sx, max_sx),
 		-clamp(-sy, min_sy, max_sy)
@@ -3711,10 +3711,18 @@ function settle_scrollbox(a, i) {
 	// the index range check rejects a request left by a sibling scrollbox.
 	let j = scroll_to_view_i // requested box
 	if (j > i && j < i + a[i+BOX_CT_NEXT_EXT_I]) {
+		let px1 = a[j+PX1+0]
+		let py1 = a[j+PX1+1]
+		let px2 = a[j+PX2+0]
+		let py2 = a[j+PX2+1]
 		let bx = a[j+0] - a[i+0] // marked box coords, relative to the contents
 		let by = a[j+1] - a[i+1]
+		bx -= px1
+		by -= py1
+		let bw = a[j+2] + px1 + px2
+		let bh = a[j+3] + py1 + py2
 		;[sx, sy] = scroll_offsets_to_view_rect(
-			bx, by, a[j+2], a[j+3], w, h, sx, sy)
+			bx, by, bw, bh, w, h, sx, sy)
 		xstate.scroll_x = sx
 		ystate.scroll_y = sy
 		// mark this scrollbox as scroll-to-view from here on, so that its
