@@ -50,6 +50,21 @@ function save_demo_state(k, v) {
 	save('demo_state', json(demo_state))
 }
 
+function load_split_size(id) {
+	let size = demo_state[id+'_size']
+	ui.state_init(id, 'size', size == 'inf' ? 1/0 : size)
+}
+
+function save_split_size(id) {
+	if (ui.clickup && ui.captured_id == id) {
+		let size = ui.state_of(id, 'size')
+		if (size == 1/0)
+			size = 'inf'
+		if (size != demo_state[id+'_size'])
+			save_demo_state(id+'_size', size)
+	}
+}
+
 let tuts = []
 let demos = []
 
@@ -595,7 +610,9 @@ let grid_nav = ui.state_of(state.grid_id, 'nav')
 if (grid_nav)
 	grid_nav.auto_expand = state.auto_expand
 
+load_split_size('grid_config_split')
 ui.hsplit('grid_config_split', 300, 'px', 2)
+save_split_size('grid_config_split')
 ui.grid(state.grid_id, grid_opt)
 grid_nav = ui.state_of(state.grid_id, 'nav')
 if (grid_nav)
@@ -1552,37 +1569,39 @@ function demo_main() {
 
 		ui.h()
 
-			ui.stack('', 0, 's', 's', ui.em(10))
-				ui.border('r', 'light')
-				ui.sb('demos_list_sb')
-					let i = ui.list('demos_list', demos_array,
-						demos_array.indexOf(selected_demo))
-				ui.end_sb()
+			load_split_size('demos_split')
+			ui.hsplit('demos_split', ui.em(10), 'px')
+			save_split_size('demos_split')
+				let i = ui.list('demos_list', demos_array,
+					demos_array.indexOf(selected_demo))
 				let demo = demos_array[i]
 				if (demo != selected_demo) {
 					selected_demo = demo
 					save_demo_state('demo', demo)
 				}
-			ui.end_stack()
+			ui.splitter()
+				ui.h()
 
-			let s = (demos[demo] ?? '').trim()
+					let s = (demos[demo] ?? '').trim()
 
-			// ui.code_edit('code_edit1', {code: s ?? ''})
+					// ui.code_edit('code_edit1', {code: s ?? ''})
 
-			if (0) {
-				ui.sb('demo_code_sb', .5)
-					ui.bb('bg1', null, 'r', 'light')
-					ui.font('monospace')
-					ui.p(ui.sp4())
-					if (s)
-						ui.text_lines('demo_text', s, 0, 'l', 't')
-				ui.end_sb()
-			}
+					if (0) {
+						ui.sb('demo_code_sb', .5)
+							ui.bb('bg1', null, 'r', 'light')
+							ui.font('monospace')
+							ui.p(ui.sp4())
+							if (s)
+								ui.text_lines('demo_text', s, 0, 'l', 't')
+						ui.end_sb()
+					}
 
-			ui.stack()
-				if (s)
-					eval(s)
-			ui.end_stack()
+					ui.stack()
+						if (s)
+							eval(s)
+					ui.end_stack()
+				ui.end_h()
+			ui.end_hsplit()
 
 			if (ui.DEBUG)
 				ui.debug_pane()
