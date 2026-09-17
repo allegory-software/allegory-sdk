@@ -301,6 +301,9 @@ INPUT
 	input           (id, s, fr, min_w, min_h, [readonly])
 	label           (for_id, s, fr, align, valign)
 	list_dropdown   (id, items, sel_i, fr, max_w, min_w, min_h) -> sel_i
+	date_input      (id, v, [opt], fr, align, valign, min_w, min_h) -> v
+	                 opt: {precision:, min:, max:, readonly:,
+	                       to_input: f(v) -> s, from_input: f(s) -> v}
 	toggle          (id, fr, align, valign, min_w, min_h)
 	checkbox        (cmd, id, fr, align, valign, min_w, min_h)
 
@@ -5737,9 +5740,19 @@ draw[CMD_TEXT] = function(a, i) {
 		let align = a[i+ALIGN]
 		let css_align = align == ALIGN_END ? 'right'
 			: align == ALIGN_CENTER ? 'center' : 'left'
-		let css_x = sx / dpr
-		let css_y = y  / dpr
-		let css_w = sw / dpr
+		let px1 = a[i+PX1+0]
+		let px2 = a[i+PX2+0]
+		let py1 = a[i+PX1+1]
+		let py2 = a[i+PX2+1]
+		let css_x   = (sx - px1) / dpr
+		let css_y   = (y  - py1) / dpr
+		let css_w   = (sw + px1 + px2) / dpr
+		let css_h   = (a[i+3] + py1 + py2) / dpr
+		let css_lh  = a[i+3] / dpr
+		let css_px1 = px1 / dpr
+		let css_px2 = px2 / dpr
+		let css_py1 = py1 / dpr
+		let css_py2 = py2 / dpr
 		let css_font_size = font_size / dpr
 		let css_opacity = focused ? '1' : '0'
 		if (
@@ -5778,13 +5791,29 @@ draw[CMD_TEXT] = function(a, i) {
 		if (  input._ui_x != css_x
 			|| input._ui_y != css_y
 			|| input._ui_w != css_w
+			|| input._ui_h != css_h
+			|| input._ui_px1 != css_px1
+			|| input._ui_px2 != css_px2
+			|| input._ui_py1 != css_py1
+			|| input._ui_py2 != css_py2
 		) {
-			input.style.left  = css_x+'px'
-			input.style.top   = css_y+'px'
-			input.style.width = css_w+'px'
+			input.style.left          = css_x+'px'
+			input.style.top           = css_y+'px'
+			input.style.width         = css_w+'px'
+			input.style.height        = css_h+'px'
+			input.style.lineHeight    = css_lh+'px'
+			input.style.paddingLeft   = css_px1+'px'
+			input.style.paddingRight  = css_px2+'px'
+			input.style.paddingTop    = css_py1+'px'
+			input.style.paddingBottom = css_py2+'px'
 			input._ui_x = css_x
 			input._ui_y = css_y
 			input._ui_w = css_w
+			input._ui_h = css_h
+			input._ui_px1 = css_px1
+			input._ui_px2 = css_px2
+			input._ui_py1 = css_py1
+			input._ui_py2 = css_py2
 		}
 		if (input.style.textAlign != css_align)
 			input.style.textAlign = css_align
@@ -7948,6 +7977,118 @@ ui.calendar = function(id, sel_day, ranges, fr, align, valign, min_w, min_h) {
 	ui.end_h()
 
 	return s.day
+}
+
+//// DATE INPUT --------------------------------------------------------------
+
+function date_input_text(v, opt) {
+	if (opt && opt.to_input)
+		return opt.to_input(v)
+	if (!isnum(v))
+		return str(v)
+	return format_date(v, null, opt && opt.precision || 'd')
+}
+
+function date_input_value(s, opt) {
+	if (opt && opt.from_input) {
+		let v = opt.from_input(s)
+		return v === undefined ? s : v
+	}
+	let v = parse_date(s, null, true, opt && opt.precision || 'd')
+	return v === undefined ? s : v
+}
+
+function date_input_state(id, v, opt) {
+
+	let cal_id = id+'.calendar'
+	let v_text = v == null ? '' : date_input_text(v, opt)
+
+	if (ui.state_of(cal_id, 'open')) {
+		let d = ui.state_of(cal_id+'.picker', 'day')
+		if (d != null && d !== (isnum(v) ? day(v) : null))
+			return [d, date_input_text(d, opt)]
+	} else if (ui.focused(id)) {
+		let text = ui.state_of(id, 'text')
+		if (text != null && text != v_text)
+			return [date_input_value(text, opt), text]
+	}
+	return [v, v_text]
+}
+
+function date_input_update(id, s) {
+
+	let cal_id = id+'.calendar'
+
+	for (let name of ['open', 'close', 'toggle']) {
+		let ev = ui.consume(id, name)
+		if (ev)
+			ui.fire(cal_id, name, ev)
+	}
+
+	s.value = date_input_state(id, s.v, s.opt)[0]
+}
+
+ui.date_input = function(id, v, opt, fr, align, valign, min_w, min_h) {
+
+	let cal_id = id+'.calendar'
+	let picker_id = cal_id+'.picker'
+
+	let s = ui.state(id)
+	s.v = v
+	s.opt = opt
+	ui.state(id, date_input_update)
+
+	if (clicked(id+'.label')) {
+		ui.focus(id)
+		ui.select_text(id, 0, 1/0)
+	}
+
+	let focused = ui.focused(id)
+	let open = ui.dropdown(cal_id, 'b', 'cs', true, false)
+
+	let opened = ui.consume(cal_id, 'opened')
+	if (opened)
+		ui.fire(id, 'opened', opened)
+	for (let name of ['closed', 'picked']) {
+		let ev = ui.consume(cal_id, name)
+		if (ev)
+			ui.fire(id, name, ev)
+	}
+
+	let [value, text] = date_input_state(id, v, opt)
+	s.value = value
+
+		ui.stack('', fr, 's', 's')
+			ui.bb('input', focused ? 'focused' : null,
+				1, 'intense', focused ? 'hover' : null)
+			ui.h(0, 0, 's', 's', min_w ?? ui.em_input(), min_h)
+				ui.p(ui.sp(), ui.sp(), 0, ui.sp())
+				ui.icon(cal_id, 'calendar', 0, 'l', 'c')
+				ui.p(ui.sp05(), ui.sp(), ui.sp(), ui.sp())
+				ui.color('text', focused ? 'focused' : null)
+				ui.text_editable(id, text, 1,
+					align ?? 'r', valign ?? 'c', null, null, null,
+					null, opt && opt.readonly)
+			ui.end_h()
+		ui.end_stack()
+
+	ui.dropdown_picker()
+
+		if (open) {
+			let sel_day = isnum(value) ? day(value) : null
+			if (opened) {
+				let day0 = sel_day ?? day(time())
+				ui.state(picker_id).scroll_y =
+					days(week(day0) - week(time())) / 7
+					* snap(ui.em(2.5), 2)
+			}
+			ui.calendar(picker_id, sel_day, null)
+			ui.resizer(cal_id+'.resizer', null, null, 'y')
+		}
+
+	ui.end_dropdown()
+
+	return value
 }
 
 //// IMAGE -------------------------------------------------------------------
