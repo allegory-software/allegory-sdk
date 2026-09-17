@@ -30,7 +30,7 @@ BUILT-IN STYLES
 	fg              : text label link button-danger
 	bg              : bg bg0 bg1 bg2 bg3 item toggle row
 	border          : light intense
-	shadow          : button menu modal picker thumb tooltip
+	shadow          : button button-active menu modal picker thumb tooltip
 
 BUILT-IN STYLE STATES
 
@@ -4568,6 +4568,7 @@ ui.shadow_style('light', 'tooltip' ,  2,  2,  9, 0, 0, 0, 0x44 / 0xff)
 ui.shadow_style('light', 'toolbox' ,  1,  1,  4, 0, 0, 0, 0xaa / 0xff)
 ui.shadow_style('light', 'menu'    ,  0,  5, 16, 0, 0, 0, 0x33 / 0xff)
 ui.shadow_style('light', 'button'  ,  0,  0,  2, 0, 0, 0, 0x11 / 0xff)
+ui.shadow_style('light', 'button-active', 2, 3, 8, 0, 0, 0, 0x44 / 0xff, true)
 ui.shadow_style('light', 'thumb'   ,  0,  0,  2, 0, 0, 0, 0xbb / 0xff)
 ui.shadow_style('light', 'modal'   ,  2,  5, 10, 0, 0, 0, 0x88 / 0xff)
 ui.shadow_style('light', 'picker'  ,  0,  5, 10, 0, 0, 0, 0x22 / 0xff) // large fuzzy shadow
@@ -4576,6 +4577,7 @@ ui.shadow_style('dark', 'tooltip' ,  2,  2,  9, 0, 0, 0, 0x44 / 0xff)
 ui.shadow_style('dark', 'toolbox' ,  1,  1,  4, 0, 0, 0, 0xaa / 0xff)
 ui.shadow_style('dark', 'menu'    ,  1,  1,  9, 0, 0, 0, 0xff / 0xff)
 ui.shadow_style('dark', 'button'  ,  0,  0,  2, 0, 0, 0, 0xff / 0xff)
+ui.shadow_style('dark', 'button-active', 1, 3, 8, 0, 0, 0, 0xaa / 0xff, true)
 ui.shadow_style('dark', 'thumb'   ,  1,  1,  2, 0, 0, 0, 0xaa / 0xff)
 ui.shadow_style('dark', 'modal'   ,  2,  5, 10, 0, 0, 0, 0x88 / 0xff)
 ui.shadow_style('dark', 'picker'  ,  0,  2, 15, 0, 0, 0, .8)
@@ -4811,7 +4813,9 @@ hittest[CMD_BB] = function(a, i) {
 //// FOCUS RING --------------------------------------------------------------
 
 ui.focus_ring = function(id) {
-	if (id && !(ui.focused(id) && ui.focused_by_key))
+	if (!ui.focused_by_key)
+		return
+	if (id && !ui.focused(id))
 		return
 	ui.m(-2)
 	ui.popup('', 'overlay', null, 'ics', 's')
@@ -6332,6 +6336,7 @@ ui.button_stack = function(id, fr, align, valign, min_w, min_h) {
 	ui.focusable(id)
 	ui.keep_focus(id)
 	ui.stack(id, fr, align ?? 's', valign ?? 'c', min_w, min_h ?? ui.em(1.5))
+	ui.focus_ring(id)
 }
 
 function button_update(id, s) {
@@ -6360,11 +6365,9 @@ function button_update(id, s) {
 ui.button_bb = function(style, state) {
 	state = repl(state, 'click', 'hover')
 	style = style ?? 'button'
-	if (state)
-		ui.focus_ring()
 	if (!style) // means no border
 		return
-	ui.shadow('button')
+	ui.shadow(state == 'active' ? 'button-active' : 'button')
 	let radius = ui.sp05()
 	let bg_state = repl(state, 'focused', null)
 	ui.bb(style, bg_state, 1, 'intense', null, radius)
