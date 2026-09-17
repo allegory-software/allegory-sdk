@@ -6494,7 +6494,6 @@ function split(hv, id, size, unit, fixed_side,
 	let horiz = hv == 'h'
 	let W = horiz ? 'w' : 'h' // measured/main-axis size prop
 	let cs = ui.drag_or_hit(id)
-	ui.state(id)
 	ui.keep_focus(id)
 	let s = ui.state(id)
 	let measured_wh = (cs?.dragging ? cs[W] : null) ?? s[W]
@@ -6510,6 +6509,8 @@ function split(hv, id, size, unit, fixed_side,
 		if (cs.drag)
 			cs[W] = s[W]
 		let size_px = fixed ? side_min : round(side_fr * max_size)
+		if (fixed && side_min == 1/0)
+			size_px = max_size
 		let delta = horiz ? cs.dx : cs.dy
 		size_px += fixed_side == 2 ? -delta : delta // side 2 shrinks as the splitter moves toward it
 		if (size_px < snap_px)
@@ -6522,7 +6523,9 @@ function split(hv, id, size, unit, fixed_side,
 		else
 			side_fr = size_px / max_size
 		if (cs.drop)
-			s.size = fixed ? side_min : side_fr
+			s.size = fixed
+				? side_min != 0 && side_min == max_size ? 1/0 : side_min
+				: side_fr
 	}
 
 	ui[hv](split_fr, gap, align, valign, min_w, min_h)
@@ -6532,10 +6535,15 @@ function split(hv, id, size, unit, fixed_side,
 	ui.measure(id)
 
 	let collapsed = fixed
-		? side_min == 0 || (max_size != null && side_min == max_size)
+		? side_min == 0 || side_min == 1/0 || side_min == max_size
 		: side_fr == 0 || side_fr == 1
 
 	let other_fr = fixed ? 1 : 1 - side_fr
+	if (fixed && side_min == 1/0) {
+		side_fr = 1
+		side_min = 0
+		other_fr = 0
+	}
 
 	let [fr1, min1, fr2, min2] = fixed_side == 1
 		? [side_fr, side_min, other_fr, 0]
