@@ -81,8 +81,8 @@ Field attributes:
 		                 that edit v and give back what the user made of it.
 		                 pad_l, pad_r, h: the box the cell drew v in. the
 		                 cell has no vertical padding: it centers v in its
-		                 height instead. an editor that ends the edit fires
-		                 'closed' on id.
+		                 height instead. an editor with a picker ends the
+		                 edit by closing it.
 		edits_in_popup : build_editor builds a popup: no editor in the cell.
 
 		to_input       : f(v) -> s   value as editable text.
@@ -3145,8 +3145,9 @@ ui.nav = function(opt) {
 	// sel_i, sel_len: in ui.select_text() terms, all of it by default.
 	e.enter_edit = function(opt) {
 		if (e.editing) {
-			if (e.focused_field.has_editor && opt?.open_popup != false)
-				e.focused_field.open_dropdown(e.editor_id)
+			if (e.focused_field.has_editor && (opt?.open_popup != false
+					|| e.focused_field.edits_in_popup))
+				e.focused_field.open_dropdown?.(e.editor_id)
 			return true
 		}
 		let row = e.focused_row
@@ -3170,8 +3171,8 @@ ui.nav = function(opt) {
 		if (field.has_editor) {
 			let v = e.cell_input_val(row, field)
 			e.edit_text = v == null ? '' : field.to_input(v)
-			if (opt?.open_popup != false)
-				field.open_dropdown(e.editor_id)
+			if (opt?.open_popup != false || field.edits_in_popup)
+				field.open_dropdown?.(e.editor_id)
 			// by key: that is what focuses the input element. a click can't, the
 			// input only appears a frame later.
 			if (opt?.focus !== false)
@@ -3201,7 +3202,7 @@ ui.nav = function(opt) {
 		if (take_focus)
 			ui.focus(e.id)
 		if (field?.has_editor)
-			field.close_dropdown(editor_id)
+			field.close_dropdown?.(editor_id)
 	}
 
 	e.revert_cell = function(row, field, ev) {
@@ -4611,10 +4612,13 @@ Editing a value:
 	build_editor   : f(id, v, pad_l, pad_r, h) -> v
 	edits_in_popup : build_editor builds a popup, so the cell keeps drawing
 	                 the value under it.
-	editor_value   : f(id, v) -> v   what the editor has made of v so far.
-	                 on every build pass in which dropdown_closed returns
-	                 nothing, the grid calls this and writes the result to
-	                 the cell when it differs from what the cell holds.
+	editor_value   : f(id, v) -> v   what the picker has made of v so far.
+	                 only editors with a picker implement it: the grid calls
+	                 it once per frame and writes the result to the cell when
+	                 it differs from what the cell holds. typed text doesn't
+	                 come through here: the grid reads it from the input box
+	                 at the start of its update and writes it to the cell
+	                 there.
 
 	focus_editor         : f(id, sel_i, sel_len)
 	editor_selection     : f(id) -> [i, len]
@@ -4625,8 +4629,11 @@ Dropdown editors:
 	open_dropdown  : f(id)
 	close_dropdown : f(id)
 	toggle_dropdown: f(id)
-	dropdown_closed: f(id) -> ev   the grid ends the edit when this returns
-	                 an event, cancelling it unless ev.picked.
+	dropdown_open  : f(id) -> t|f  is the picker up.
+	dropdown_picked: f(id) -> t|f  did the picker close in this pass, and did
+	                 that close come from picking.
+	                 the grid ends the edit when the picker goes from open to
+	                 closed, cancelling it unless it was picked.
 
 */
 
@@ -4670,32 +4677,10 @@ all_field_types.to_input = function(v) {
 	return this.to_text(v)
 }
 
-// what the nav's edit text means as a value: the parse, or the text itself
-// when it doesn't parse, same as when loading.
-function text_val(field, s) {
-	let v = field.from_input ? field.from_input(s) : s
-	return v === undefined ? s : v
-}
-
-// build the editor's input box: hand it the nav's edit text, refreshed when v
-// moved on its own, and take back what the user has typed. -> v
-function build_text_editor(field, id, v, fr, align, valign, max_w, w, h) {
+function build_text_editor(field, id, fr, align, valign, max_w, w, h) {
 	let e = field.nav
-	let s0 = v == null ? '' : field.to_input(v)
-	if (text_val(field, e.edit_text) !== v)
-		e.edit_text = s0
-	e.edit_text = ui.text_editable(id, e.edit_text,
+	ui.text_editable(id, e.edit_text,
 		fr, align ?? field.align, valign ?? 'c', max_w, w, h)
-}
-
-function text_editor_value(field, id, v) {
-	let s = ui.state_of(id)
-	if (!s || s.text == null)
-		return v
-	let s0 = v == null ? '' : field.to_input(v)
-	if (s.prev_text !== s0)
-		return v
-	return s.text == s0 ? v : text_val(field, s.text)
 }
 
 all_field_types.focus_editor = function(id, sel_i, sel_len) {
@@ -4714,30 +4699,10 @@ all_field_types.editor_caret_at_edge = function(id, d) {
 	return !len && i == (d < 0 ? 0 : -1)
 }
 
-all_field_types.open_dropdown = function(id) {
-	ui.fire(id, 'open')
-}
-
-all_field_types.close_dropdown = function(id) {
-	ui.fire(id, 'close')
-}
-
-all_field_types.toggle_dropdown = function(id) {
-	ui.fire(id, 'toggle')
-}
-
-all_field_types.dropdown_closed = function(id) {
-	return ui.consume(id, 'closed')
-}
-
 // same call as build_text(), so the cell doesn't shift on entering edit.
 all_field_types.build_editor = function(id, v, pad_l, pad_r, h) {
 	ui.p(pad_l, 0, pad_r, 0)
-	build_text_editor(this, id, v, 0, this.align, 'c', null)
-}
-
-all_field_types.editor_value = function(id, v) {
-	return text_editor_value(this, id, v)
+	build_text_editor(this, id, 0, this.align, 'c', null)
 }
 
 all_field_types.fixed_width = 0
@@ -4766,6 +4731,26 @@ dropdown_editor.editor_caret_at_edge = function(id, d) {
 	return true
 }
 
+dropdown_editor.open_dropdown = function(id) {
+	ui.set_dropdown_open(id, true)
+}
+
+dropdown_editor.close_dropdown = function(id) {
+	ui.set_dropdown_open(id, false)
+}
+
+dropdown_editor.toggle_dropdown = function(id) {
+	ui.set_dropdown_open(id, !ui.dropdown_open(id))
+}
+
+dropdown_editor.dropdown_open = function(id) {
+	return ui.dropdown_open(id)
+}
+
+dropdown_editor.dropdown_picked = function(id) {
+	return ui.dropdown_picked(id)
+}
+
 // text ----------------------------------------------------------------------
 
 // the default type: all its behavior comes from all_field_types.
@@ -4788,6 +4773,11 @@ number.from_input = function(s) {
 number.to_text = function(s) {
 	let x = num(s)
 	return x != null ? dec(x / this.scale, this.decimals) : s
+}
+
+number.to_input = function(s) {
+	let x = num(s)
+	return x != null ? str(x / this.scale) : s
 }
 
 // file sizes ----------------------------------------------------------------
@@ -4888,19 +4878,23 @@ ts.precision = 's'
 ts.w = 160
 
 date.open_dropdown = function(id) {
-	ui.fire(id+'.calendar', 'open')
+	ui.set_dropdown_open(id+'.calendar', true)
 }
 
 date.close_dropdown = function(id) {
-	ui.fire(id+'.calendar', 'close')
+	ui.set_dropdown_open(id+'.calendar', false)
 }
 
 date.toggle_dropdown = function(id) {
-	ui.fire(id+'.calendar', 'toggle')
+	ui.set_dropdown_open(id+'.calendar', !ui.dropdown_open(id+'.calendar'))
 }
 
-date.dropdown_closed = function(id) {
-	return ui.consume(id+'.calendar', 'closed')
+date.dropdown_open = function(id) {
+	return ui.dropdown_open(id+'.calendar')
+}
+
+date.dropdown_picked = function(id) {
+	return ui.dropdown_picked(id+'.calendar')
 }
 
 date.build_editor = function(id, v, pad_l, pad_r, h) {
@@ -4910,19 +4904,22 @@ date.build_editor = function(id, v, pad_l, pad_r, h) {
 	ui.end_stack()
 
 	ui.popup('', 'overlay', editor_target_i, 'irs', 's')
-		ui.h(0, ui.sp05())
-			ui.bb('input', 'focused', 'b', 'light')
-			ui.p(pad_l, 0, 0, 0)
-			ui.icon(calendar_id, 'calendar', 0, 'l', 'c', null, null, h)
-			ui.p(0, 0, pad_r, 0)
-			build_text_editor(this, id, v, 1, this.align, 'c')
-
-		ui.end_h()
-	ui.end_popup()
 
 	let is_open = ui.dropdown(calendar_id, 'b',
-		this.align == 'right' ? 'cs' : 'cs', true, false)
-	let opened = ui.consume(calendar_id, 'opened')
+		this.align == 'right' ? 'cs' : 'cs')
+	if (!is_open && ui.focus_inside(picker_id))
+		ui.focus(id)
+	let opened = ui.dropdown_opened(calendar_id)
+
+		ui.stack(id, 1, 's', 's')
+			ui.bb('input', 'focused', 'b', 'light')
+			ui.h(0, ui.sp05())
+				ui.p(pad_l, 0, 0, 0)
+				ui.icon(calendar_id, 'calendar', 0, 'l', 'c', null, null, h)
+				ui.p(0, 0, pad_r, 0)
+				build_text_editor(this, id, 1, this.align, 'c')
+			ui.end_h()
+		ui.end_stack()
 
 	ui.dropdown_picker()
 
@@ -4944,10 +4941,11 @@ date.build_editor = function(id, v, pad_l, pad_r, h) {
 		}
 
 	ui.end_dropdown()
+
+	ui.end_popup()
 }
 
 date.editor_value = function(id, v) {
-	v = text_editor_value(this, id, v)
 	let s = ui.state_of(id+'.calendar.picker')
 	if (s && s.day !== s.prev_day)
 		return s.day
@@ -5037,9 +5035,10 @@ enm.build_editor = function(id, v, pad_l, pad_r, h) {
 	// the list is up for as long as the edit is. anchored on the side v is
 	// aligned to, so v stays put when the list makes the popup wider than
 	// the cell.
+	ui.focusable(id)
 	let open = ui.dropdown(id, 'b',
 		this.align == 'right' ? ']s' : '[s')
-	let opened = ui.consume(id, 'opened')
+	let opened = ui.dropdown_opened(id)
 
 		if (open) {
 			ui.p(pad_l, 0, pad_r, 0)
@@ -5110,8 +5109,9 @@ lookup_editor.build_editor = function(id, v, pad_l, pad_r, h) {
 	let ln = this.lookup_nav
 	let picker_id = id+'.picker'
 
+	ui.focusable(id)
 	let open = ui.dropdown(id, 'b')
-	let opened = ui.consume(id, 'opened')
+	let opened = ui.dropdown_opened(id)
 
 	ui.dropdown_picker()
 
@@ -5132,8 +5132,8 @@ lookup_editor.build_editor = function(id, v, pad_l, pad_r, h) {
 
 lookup_editor.editor_value = function(id, v) {
 	if (!can_pick_lookup_val(this)) {
-		let f = type_editor(this).editor_value || all_field_types.editor_value
-		return f.call(this, id, v)
+		let f = type_editor(this).editor_value
+		return f ? f.call(this, id, v) : v
 	}
 	if (!ui.state_of(id+'.picker'))
 		return v
@@ -5142,6 +5142,36 @@ lookup_editor.editor_value = function(id, v) {
 	if (!ln_row)
 		return v
 	return ln.cell_val(ln_row, lookup_val_field(this))
+}
+
+lookup_editor.open_dropdown = function(id) {
+	if (!can_pick_lookup_val(this))
+		return
+	ui.set_dropdown_open(id, true)
+}
+
+lookup_editor.close_dropdown = function(id) {
+	if (!can_pick_lookup_val(this))
+		return
+	ui.set_dropdown_open(id, false)
+}
+
+lookup_editor.toggle_dropdown = function(id) {
+	if (!can_pick_lookup_val(this))
+		return
+	ui.set_dropdown_open(id, !ui.dropdown_open(id))
+}
+
+lookup_editor.dropdown_open = function(id) {
+	if (!can_pick_lookup_val(this))
+		return
+	return ui.dropdown_open(id)
+}
+
+lookup_editor.dropdown_picked = function(id) {
+	if (!can_pick_lookup_val(this))
+		return
+	return ui.dropdown_picked(id)
 }
 
 // tag lists -----------------------------------------------------------------
@@ -5182,17 +5212,16 @@ color.build_editor = function(id, v, pad_l, pad_r, h) {
 
 	let picker_id = id+'.picker'
 
+	ui.focusable(id)
 	let open = ui.dropdown(id, 'b')
-	let opened = ui.consume(id, 'opened')
 
 	ui.dropdown_picker()
 
 		if (open) {
-			let [hue, sat, lum] = opened ? hex_to_hsl(v || '#808080') : []
 			let resize_id = id+'.resizer'
 			ui.p(ui.sp2())
 			ui.v(0, ui.sp1())
-				ui.color_picker(picker_id, hue, sat, lum)
+				ui.color_picker(picker_id, v)
 				ui.h(0, ui.sp05(), 'r')
 					ui.default_button(id+'.pick')
 					ui.primary_button(id+'.pick', S('pick', 'Pick'), 0)

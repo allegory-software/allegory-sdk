@@ -128,9 +128,8 @@ demos.calendar = `
 ui.m(ui.em(2))
 ui.h(1, ui.em())
 	cal1_day = ui.calendar('cal1', cal1_day, cal1_ranges, 0, 'l', 's')
-	let ev = ui.consume('cal1', 'item_picked')
-	if (ev)
-		cal_sel_days.push(ev.day)
+	if (ui.dropdown_picked('cal1'))
+		cal_sel_days.push(cal1_day)
 	ui.sb('cal1_sb')
 		ui.v(1, ui.sp05(), 'l', 't')
 		for (let day of cal_sel_days)
@@ -964,6 +963,7 @@ ui.end_v()
 
 date_input1_v = parse_date('2026-03-14', 'SQL')
 date_input3_v = parse_date('2026-09-17 13:45:00', 'SQL')
+color_input1_v = '#1e90ff'
 demos.input_controls = `
 ui.v_tabstops(0, ui.sp2(), 'c', 'c')
 	ui.h(0, ui.sp2())
@@ -982,6 +982,10 @@ ui.v_tabstops(0, ui.sp2(), 'c', 'c')
 		ui.label('date_input3', 'Date & time', 0)
 		date_input3_v = ui.date_input('date_input3', date_input3_v,
 			{precision: 'm'})
+	ui.end_h()
+	ui.h(0, ui.sp2())
+		ui.label('color_input1', 'Color', 0)
+		color_input1_v = ui.color_input('color_input1', color_input1_v)
 	ui.end_h()
 	ui.h(0, ui.sp2())
 		ui.label('num_slider1', 'Number slider', 0)
@@ -1414,7 +1418,7 @@ ui.v(1, ui.sp())
 		}
 
 		/*
-		ui.state('in_send').text = json(signal_queue.signals)
+		ui.state('in_send').value = json(signal_queue.signals)
 		ui.input('in_send')
 		if (ui.button('btn_send')) {
 			signal_queue.signals.length = 0

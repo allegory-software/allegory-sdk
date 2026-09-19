@@ -138,6 +138,7 @@ WIDGET STATE
 	state_of        (id[, k]) -> state | v | nil   get another widget's state
 	set_state_of    (id, k, v)           set another widget's state var, if alive
 	state_init      (id, k, v)           set widget state var if widget is alive
+	value           (id) -> v            what the input holds right now
 	on_free         (id, free_fn)        add a widget gc hook
 	render_state    (id) -> state        get render-local widget state
 	local_state     (id[, k]) -> state | v | nil   widget state in a draw callback,
@@ -306,10 +307,11 @@ INPUT
 	                       to_input: f(v) -> s, from_input: f(s) -> v}
 	toggle          (id, fr, align, valign, min_w, min_h)
 	checkbox        (cmd, id, fr, align, valign, min_w, min_h)
+	color_input     (id, v, fr, align, valign, min_w, min_h) -> v
 
 COLOR PICKER
 
-	color_picker    (id, hue, sat, lum)
+	color_picker    (id, hex) -> hex
 	sat_lum_square  (id, hue, sat, lum)
 	hue_bar         (id, hue)
 
@@ -1307,32 +1309,6 @@ ui.keys_down   = () => key_downs.size
 ui.keys_up     = () => key_ups.size
 ui.key_changes = () => key_downs.size + key_ups.size
 
-//// INTER-FRAME EVENTS ------------------------------------------------------
-
-// Events are id-based state that is kept for this and next frame only, so
-// that a widget that listens to an event can still catch it if the widgets
-// that fired it appears later in the frame.
-
-let event_state = map() // {id.ev->[build_no, args]}
-
-ui.fire = function(id, name, ev) {
-	event_state.set(id+'.'+name, {build_no: build_no, ...ev})
-}
-
-ui.listen = function(id, name) {
-	ui.state_of(id) // fire() may be called inside id's update callback
-	return event_state.get(id+'.'+name)
-}
-
-ui.consume = function(id, name) {
-	let k = id+'.'+name
-	ui.state_of(id)  // fire() may be called inside id's update callback
-	let ev = event_state.get(k)
-	if (!ev) return
-	event_state.delete(k)
-	return ev
-}
-
 //// SCOPES ------------------------------------------------------------------
 
 let scope_stack = []
@@ -1468,6 +1444,11 @@ ui.state_init = function(id, k, v) {
 	let s = ui.state(id)
 	if (s[k] != null) return
 	s[k] = v
+}
+
+// what the input holds right now, current in any order inside a pass.
+ui.value = function(id) {
+	return ui.state_of(id, 'value')
 }
 
 function free_state(id, s) {
@@ -2443,6 +2424,10 @@ register[GROUP_BUTTON] = function(a, i) {
 	focusables[group_i+button_slot] = a[i]
 }
 
+// focus group's default button or cancel button that was "clicked" by
+// pressing Enter or Escape key inside an input in the group.
+let clicked_button_id
+
 function click_default_button() {
 	let i = focus_find(ui.focused_id)
 	if (i == null)
@@ -2456,7 +2441,7 @@ function click_default_button() {
 		id = focusables[group_i+FOCUSABLE_CANCEL_BUTTON]
 	if (id == null)
 		return
-	ui.fire(id, 'click')
+	clicked_button_id = id
 	ui.capture_keys()
 }
 
@@ -2718,12 +2703,9 @@ function redraw_all() {
 		key_downs.clear()
 		key_ups.clear()
 		ui.key_events.length = 0
+		clicked_button_id = null
 
 		ui.window_focusing = false
-
-		for (let [k, es] of event_state)
-			if (es.build_no < build_no)
-				event_state.delete(k)
 
 		// updates can run again now that they can't see the same edge state.
 		build_no++
@@ -5080,9 +5062,9 @@ ui.text = function(
 		ui.state(id)
 		ui.focusable(id)
 		let s = ui.state(id)
-		if (s.prev_text !== text || s.text == null)
-			s.text = text
-		text = s.text
+		if (s.prev_text !== text)
+			s.value = text
+		text = s.value
 		s.prev_text = text
 	}
 	let marked = mark_i1 != null && mark_i2 > mark_i1
@@ -5405,10 +5387,6 @@ let prev_drawn_focused_input
 let drawn_focused_input
 let drawn_focused_by_key
 
-ui.text_value = function(id) { // user-typed text
-	return ui.state_of(id, 'text')
-}
-
 /// selecting text -----------------------------------------------------------
 
 // A selection is (i, len): i is both caret position and selection anchor:
@@ -5433,7 +5411,7 @@ ui.text_selection = function(id, from_end, wanted) {
 	}
 	// where the caret is now. `from_end` helps decide the direction.
 	let s = ui.state(id)
-	let n = (s.text ?? '').length
+	let n = (s.value ?? '').length
 	let a = s.anchor ?? 0 // the end it was made from
 	let c = s.caret  ?? 0 // the end it was dragged to
 	let i1 = min(a, c)
@@ -5573,7 +5551,7 @@ function read_input_sel(t, input) {
 function input_text_changed() {
 	let s = ui.state_of(this._ui_id)
 	if (!s) return
-	s.text = this.value
+	s.value = this.value
 	read_input_sel(s, this)
 	forget_selection(s)
 	animate()
@@ -5683,7 +5661,7 @@ ui.process_shared_screen_input = function(p, t) {
 	} else if (t.event == 'input') {
 		let s = ui.state_of(t.input)
 		if (!s) return
-		s.text = t.value
+		s.value = t.value
 		s.anchor = t.anchor
 		s.caret = t.caret
 		applied_edit_n = t.n
@@ -6394,7 +6372,7 @@ function button_update(id, s) {
 	let cs = captured(id)
 	let hs = hit(id)
 	let state
-	if (ui.consume(id, 'click')) {
+	if (clicked_button_id == id) {
 		state = 'click'
 	} else if (ui.focused(id) && (ui.keydown('enter') || ui.keydown(' '))) {
 		if (ui.keydown('enter'))
@@ -6764,8 +6742,7 @@ function list_update(id, s) {
 	s.focused_i = fi
 	s.focused_item_changed = before_fi != fi ? fi_changed : false
 	let has_enter = fi != null && ui.focused(id) && ui.keydown('enter')
-	if (fi_changed == 'click' || has_enter)
-		ui.fire(id, 'item_picked', {fi: fi})
+	s.picked = fi_changed == 'click' || !!has_enter
 	if (has_enter)
 		ui.capture_keys()
 }
@@ -6863,7 +6840,7 @@ function num_slider_update(id, s) {
 	let from = s.from
 	let to = s.to
 	let decimals = s.decimals
-	let v = (s.editing ? num(ui.text_value(input_id)) : null) ?? s.value
+	let v = (s.editing ? num(ui.value(input_id)) : null) ?? s.value
 	let p = clamp(lerp(v, from, to, 0, 1), 0, 1)
 
 	if (clicked(id+'.label'))
@@ -6872,7 +6849,7 @@ function num_slider_update(id, s) {
 	if (focused && (ui.keydown('f2') || ui.keydown('enter'))) {
 		s.editing = !s.editing
 		if (s.editing) {
-			ui.state(input_id).text = dec(s.value, decimals)
+			ui.state(input_id).value = dec(s.value, decimals)
 			ui.select_text(input_id, 0, 1/0)
 			ui.focus(input_id)
 		} else {
@@ -6941,7 +6918,7 @@ ui.num_slider = function(id, value, from, to, decimals) {
 		ui.p(ui.sp())
 		ui.color('text', focused ? 'focused' : null)
 		if (s.editing)
-			ui.text(input_id, ui.text_value(input_id), 1, 'r', 'c',
+			ui.text(input_id, ui.value(input_id), 1, 'r', 'c',
 				null, 0, null, null, true)
 		else
 			ui.text('', dec(s.value, decimals), 1, 'r', 'c', null, 0)
@@ -6954,48 +6931,84 @@ ui.num_slider = function(id, value, from, to, decimals) {
 //// DROPDOWN ----------------------------------------------------------------
 
 /*
-	let open = ui.dropdown(id, [side], [align], [tab_out], [is_control])
+	let open = ui.dropdown(id, [side], [align], [update])
 		... the value ...
 	ui.dropdown_picker()
 		if (open)
 			... the picker, under id+'.picker' ...
 	ui.end_dropdown()
 
-	tab_out: let tab leave the picker instead of cycling inside it, for a
-	picker that is one control with the value next to it.
-	is_control: register and restore id as the control. defaults to true.
+	while the picker is up, tab cycles inside the dropdown: its box and its
+	picker, so put whatever the control is made of inside the box.
+
+	opening focuses the picker. closing focuses nothing: the caller that
+	wants the focus back calls ui.focus() when the picker is closed and
+	ui.focus_inside(id+'.picker') still says the focus is in it.
 
 */
 
-// fires 'picked', 'opened', 'closed'. responds to 'open', 'close', 'toggle',
-// and to a click on the picker's id+'.pick' and id+'.cancel' buttons.
-// sets ui.state(id).open.
+function set_dropdown_open(id, s, open, picked) {
+	if (!!s.open == !!open)
+		return
+	s.open = open
+	if (open) {
+		s.opened = true
+		ui.focus_first(id+'.picker')
+	} else {
+		s.closed = true
+		s.picked = !!picked
+	}
+}
+
+ui.set_dropdown_open = function(id, open) {
+	set_dropdown_open(id, ui.state(id, dropdown_update), open)
+}
+
+ui.dropdown_open = function(id) {
+	return !!ui.state_of(id, 'open')
+}
+
+ui.dropdown_opened = function(id) {
+	return !!ui.state_of(id, 'opened')
+}
+
+ui.dropdown_closed = function(id) {
+	return !!ui.state_of(id, 'closed')
+}
+
+ui.dropdown_picked = function(id) {
+	return !!ui.state_of(id, 'picked')
+}
+
+// sets ui.state(id).opened, .closed and .picked in the pass in which the
+// dropdown opened or closed. responds to ui.set_dropdown_open() and to a
+// click on the picker's id+'.pick' and id+'.cancel' buttons. sets
+// ui.state(id).open.
 function dropdown_update(id, s) {
 
 	let picker_id = id+'.picker'
 	let popup_id = id+'.popup'
 	let pick_button_id = id+'.pick'
 	let cancel_button_id = id+'.cancel'
-	let was_open = s.open
-	let open = was_open
+	let open = s.open
+
+	s.opened = false
+	s.closed = false
+	s.picked = false
 
 	if (clicked(id+'.label'))
 		ui.focus(id)
 
 	let click = clicked(id)
 	// id is the dropbox or the grid cell
-	let ev = ui.consume(picker_id, 'item_picked')
-		|| (ui.state_of(pick_button_id, 'state') == 'click' ? obj() : null)
-	let picked = !!ev
-	let want_open = !!ui.consume(id, 'open')
-	let want_close = !!ui.consume(id, 'close')
-	let want_toggle = !!ui.consume(id, 'toggle')
-		|| ui.state_of(cancel_button_id, 'state') == 'click'
+	let picked = ui.dropdown_picked(picker_id)
+		|| ui.state_of(pick_button_id, 'state') == 'click'
+	let cancel = ui.state_of(cancel_button_id, 'state') == 'click'
 
 	let enter = ui.focused(id) && ui.keydown('enter')
 	let f2 = open && ui.keydown('f2') && ui.focus_inside(picker_id)
 
-	let toggle = click || enter || want_toggle || f2
+	let toggle = click || enter || cancel || f2
 	let escape = open && ui.keydown('escape') && ui.focus_inside(picker_id)
 	let click_outside = open && ui.click && !hovers(popup_id)
 
@@ -7007,55 +7020,38 @@ function dropdown_update(id, s) {
 		open = !open
 		if (enter || f2)
 			ui.capture_keys()
-	} else if (want_open) {
-		open = true
-	} else if (want_close) {
-		open = false
 	}
 
-	s.open = open
-	if (picked)
-		ui.fire(id, 'picked', ev)
-	if (!was_open && open)
-		ui.fire(id, 'opened')
-	if (was_open && !open)
-		ui.fire(id, 'closed', {picked: picked})
+	set_dropdown_open(id, s, open, picked)
 
-	if (!was_open && open) {
-		s.prev_focused_id = ui.focused_id
-		ui.focus_first(picker_id)
-	}
-	if (was_open && !open && ui.focus_inside(picker_id))
-		ui.focus(s.is_control !== false ? id : s.prev_focused_id)
+	if (s.widget_update)
+		s.widget_update(id, s)
 }
 
 let dd_open // decided in dropdown(), needed in dropdown_picker() and end_dropdown()
 let dd_picker_id // focus group id of the open dropdown's picker
-let dd_tab_out // decided in dropdown(), needed in dropdown_picker()
 let dd_popup_id, dd_side // given to dropdown(), needed in dropdown_picker()
 let dd_align
 
-// opened by 'open' event.
-ui.dropdown = function(id, side, align, tab_out, is_control) {
+// opened by ui.set_dropdown_open().
+ui.dropdown = function(id, side, align, update) {
 
 	assert(dd_open == null, 'nested dropdown')
 
 	let s = ui.state(id) // runs dropdown_update() if it hasn't run this frame
-	s.is_control = is_control !== false
 	s.open ??= false
+	s.widget_update = update
 	ui.state(id, dropdown_update)
 	let open = s.open
 	dd_open = open
 	dd_picker_id = id+'.picker'
-	dd_tab_out = tab_out
 	dd_popup_id = id+'.popup'
 	dd_side = side
 	dd_align = align
 
 	ui.v()
 
-		if (s.is_control)
-			ui.focusable(id)
+		ui.focus_group(open, null, id)
 		ui.stack(id)
 
 	return open
@@ -7068,7 +7064,7 @@ ui.dropdown_picker = function() {
 			0, 0, 'constrain change_side solid')
 		ui.shadow('picker')
 		ui.bb('input') // background only: end_dropdown() draws the border
-		ui.focus_group(!dd_tab_out, null, dd_picker_id)
+		ui.focus_group(false, null, dd_picker_id)
 		ui.stack()
 	}
 }
@@ -7083,6 +7079,7 @@ ui.end_dropdown = function() {
 		ui.bb(null, null, 1, 'intense')
 		ui.end_popup()
 	}
+	ui.end_focus_group()
 	ui.end_v()
 }
 
@@ -7111,22 +7108,25 @@ ui.list_dropdown = function(id, items, sel_i, fr, max_w, min_w, min_h) {
 
 	let value_id = id+'.value'
 	if (clicked(value_id))
-		ui.fire(id, 'toggle')
+		ui.set_dropdown_open(id, !ui.dropdown_open(id))
 
 	// reading the state runs the decision for this frame.
 	let open = ui.state_of(id, 'open') ?? false
 
+	if (!open && ui.focus_inside(picker_id))
+		ui.focus(id)
+
 	let s = ui.state(id)
-	if (!open || s.value_i == null)
-		s.value_i = ui.valid_list_index(sel_i ?? 0, items)
-	sel_i = ui.valid_list_index(picker_i ?? s.value_i, items)
+	if (!open || s.value == null)
+		s.value = ui.valid_list_index(sel_i ?? 0, items)
+	sel_i = ui.valid_list_index(picker_i ?? s.value, items)
 
 	// arrow keys move the selection with the list closed.
 	if (!open && ui.focused(id)) {
 		let d = ui.keydown('arrowup') && -1 || ui.keydown('arrowdown') && 1 || 0
 		if (d) {
 			sel_i = ui.valid_list_index(sel_i + d, items)
-			s.value_i = sel_i
+			s.value = sel_i
 		}
 	}
 
@@ -7135,12 +7135,13 @@ ui.list_dropdown = function(id, items, sel_i, fr, max_w, min_w, min_h) {
 
 	ui.stack('', fr, 's', 's', min_w ?? ui.em_input(), min_h)
 
+	ui.focusable(id)
 	ui.dropdown(id)
 
 		if (!open)
 			ui.bb('input', ui.focused(id) ? 'focused' : null,
 				1, 'intense', ui.focused(id) ? 'hover' : null)
-		draw_value_row(items, s.value_i, null, pad, chevron_w, max_w)
+		draw_value_row(items, s.value, null, pad, chevron_w, max_w)
 
 	ui.dropdown_picker()
 
@@ -7197,6 +7198,7 @@ toggle.create = function(cmd, id, on, fr, align, valign, min_w, min_h) {
 		on = !on
 	else if (focused && ui.keydown('delete'))
 		on = null
+	ui.state(id).value = on
 	ui_cmd_box(cmd, fr ?? 0, align ?? 'c', valign ?? 'c',
 		min_w ?? ui.em(2.25),
 		min_h ?? ui.em(1.25),
@@ -7544,7 +7546,7 @@ ui.box_widget('slider', {
 		}
 
 		let p = s.p ?? .5
-		s.v = lerp(p, 0, 1, from ?? 0, to ?? 1)
+		s.value = lerp(p, 0, 1, from ?? 0, to ?? 1)
 
 		let hs = hit(id)
 
@@ -7578,7 +7580,7 @@ ui.box_widget('slider', {
 			ui.popup(id+'.popup', 'tooltip', i,
 					't', 'c', 0, 0, 'change_side constrain', null, ox)
 				ui.bb_tooltip('info', null, 'light', null, ui.sp05())
-				ui.text('', dec(s.v, decimals ?? 2))
+				ui.text('', dec(s.value, decimals ?? 2))
 			ui.end_popup()
 		}
 
@@ -7920,11 +7922,9 @@ function calendar_update(id, s) {
 
 	let picked_by_key = sel_day != null && ui.focused(id) && ui.keydown('enter')
 	let picked = clicked_day || picked_by_key
-	if (picked) {
-		ui.fire(id, 'item_picked', {day: sel_day})
-		if (picked_by_key)
-			ui.capture_keys()
-	}
+	s.picked = !!picked
+	if (picked && picked_by_key)
+		ui.capture_keys()
 	if (picked || s.day !== day0)
 		ui.rebuild('day_changed')
 }
@@ -8031,14 +8031,15 @@ function date_input_value(s, opt) {
 function date_input_state(id, v, opt) {
 
 	let cal_id = id+'.calendar'
+	let input_id = id+'.input'
 	let v_text = v == null ? '' : date_input_text(v, opt)
 
 	if (ui.state_of(cal_id, 'open')) {
 		let d = ui.state_of(cal_id+'.picker', 'day')
 		if (d != null && d !== (isnum(v) ? day(v) : null))
 			return [d, date_input_text(d, opt)]
-	} else if (ui.focused(id)) {
-		let text = ui.state_of(id, 'text')
+	} else if (ui.focused(input_id)) {
+		let text = ui.value(input_id)
 		if (text != null && text != v_text)
 			return [date_input_value(text, opt), text]
 	}
@@ -8048,20 +8049,15 @@ function date_input_state(id, v, opt) {
 function date_input_update(id, s) {
 
 	let cal_id = id+'.calendar'
+	let input_id = id+'.input'
 
-	if (ui.focused(id) && (ui.keydown('f2') || ui.keydown('enter'))) {
-		ui.fire(cal_id, 'toggle')
+	if (ui.focused(input_id) && (ui.keydown('f2') || ui.keydown('enter'))) {
+		ui.set_dropdown_open(cal_id, !ui.dropdown_open(cal_id))
 		ui.capture_keys()
-	} else if (ui.focused(id) && ui.keydown('escape')
+	} else if (ui.focused(input_id) && ui.keydown('escape')
 		&& state_map.get(cal_id)?.open) {
-		ui.fire(cal_id, 'close')
+		ui.set_dropdown_open(cal_id, false)
 		ui.capture_keys()
-	}
-
-	for (let name of ['open', 'close', 'toggle']) {
-		let ev = ui.consume(id, name)
-		if (ev)
-			ui.fire(cal_id, name, ev)
 	}
 
 	s.value = date_input_state(id, s.v, s.opt)[0]
@@ -8071,6 +8067,7 @@ ui.date_input = function(id, v, opt, fr, align, valign, min_w, min_h) {
 
 	let cal_id = id+'.calendar'
 	let picker_id = cal_id+'.picker'
+	let input_id = id+'.input'
 
 	let s = ui.state(id)
 	s.v = v
@@ -8078,25 +8075,19 @@ ui.date_input = function(id, v, opt, fr, align, valign, min_w, min_h) {
 	ui.state(id, date_input_update)
 
 	if (clicked(id+'.label')) {
-		ui.focus(id)
-		ui.select_text(id, 0, 1/0)
+		ui.focus(input_id)
+		ui.select_text(input_id, 0, 1/0)
 	}
 
-	let focused = ui.focused(id)
-	let open = ui.dropdown(cal_id, 'b', 'cs', true, false)
-	ui.focus_group(open, null, id)
+	let focused = ui.focused(input_id)
+	let open = ui.dropdown(cal_id, 'b', 'cs')
+	if (!open && ui.focus_inside(picker_id))
+		ui.focus(input_id)
 
-	let opened = ui.consume(cal_id, 'opened')
-	if (opened)
-		ui.fire(id, 'opened', opened)
-	let closed_ev = ui.consume(cal_id, 'closed')
-	if (closed_ev)
-		ui.fire(id, 'closed', closed_ev)
-	let picked_ev = ui.consume(cal_id, 'picked')
-	if (picked_ev) {
-		ui.focus(id)
-		ui.select_text(id, 0, 1/0)
-		ui.fire(id, 'picked', picked_ev)
+	let opened = ui.dropdown_opened(cal_id)
+	if (ui.dropdown_picked(cal_id)) {
+		ui.focus(input_id)
+		ui.select_text(input_id, 0, 1/0)
 	}
 
 	let [value, text] = date_input_state(id, v, opt)
@@ -8110,7 +8101,7 @@ ui.date_input = function(id, v, opt, fr, align, valign, min_w, min_h) {
 				ui.icon(cal_id, 'calendar', 0, 'l', 'c')
 				ui.p(ui.sp05(), ui.sp(), ui.sp(), ui.sp())
 				ui.color('text', focused ? 'focused' : null)
-				ui.text_editable(id, text, 1,
+				ui.text_editable(input_id, text, 1,
 					align ?? 'r', valign ?? 'c', null, null, null,
 					null, opt && opt.readonly)
 			ui.end_h()
@@ -8131,7 +8122,6 @@ ui.date_input = function(id, v, opt, fr, align, valign, min_w, min_h) {
 		}
 
 	ui.end_dropdown()
-	ui.end_focus_group()
 
 	return value
 }
@@ -8355,8 +8345,9 @@ ui.box_widget('sat_lum_square', {
 		sat = sat ?? .5
 		lum = lum ?? .5
 
-		ui.state_init(id, 'sat', sat)
-		ui.state_init(id, 'lum', lum)
+		let s = ui.state(id)
+		s.sat = sat
+		s.lum = lum
 		ui.state(id, sat_lum_update)
 
 		ui.stack('', fr, align, valign, min_w, min_h)
@@ -8473,7 +8464,7 @@ ui.box_widget('hue_bar', {
 	create: function(cmd, id, hue) {
 
 		ui.focusable(id)
-		ui.state_init(id, 'hue', hue)
+		ui.state(id).hue = hue
 		ui.state(id, hue_bar_update)
 
 		let fr     = fr0     ?? 0
@@ -8552,74 +8543,169 @@ ui.box_widget('hue_bar', {
 let HEX_RE = /^#[0-9a-f]{6}$/i
 let HSL_RE = /^\s*([\d.]+)\s*\u00B0?\s*,\s*([\d.]+)\s*%?\s*,\s*([\d.]+)\s*%?\s*$/
 
-function color_picker_update(id, s) {
-
-	let hb = ui.state_of(id+'.hb')
-	let sl = ui.state_of(id+'.sl')
-	if (!hb || !sl || hb.hue == null || sl.sat == null || sl.lum == null)
-		return
-
-	let hsl_id = id+'.input_hsl'
-	if (ui.focused(hsl_id)) {
-		let m = (ui.state_of(hsl_id, 'text') ?? '').match(HSL_RE)
-		if (m) {
-			hb.hue = clamp(num(m[1])      , 0, 360)
-			sl.sat = clamp(num(m[2]) / 100, 0, 1)
-			sl.lum = clamp(num(m[3]) / 100, 0, 1)
-		}
-	}
-
-	let hex_id = id+'.input_rgb'
-	if (ui.focused(hex_id)) {
-		let hex = ui.state_of(hex_id, 'text')
-		if (hex != null && HEX_RE.test(hex)) {
-			[hb.hue, sl.sat, sl.lum] = hex_to_hsl(hex)
-		}
-	}
-
-	s.hex = hsl_to_rgb_hex(hb.hue, sl.sat, sl.lum)
+function hsl_to_text(hue, sat, lum) {
+	return dec(hue)+'\u00B0, '+dec(sat*100)+'%, '+dec(lum*100)+'%'
 }
 
-ui.color_picker = function(id, hue, sat, lum) {
-	hue = hue ?? 0
-	sat = sat ?? .5
-	lum = lum ?? .5
-	ui.state(id, color_picker_update)
+function set_picker_color(s, hue, sat, lum) {
+	s.hue = hue
+	s.sat = sat
+	s.lum = lum
+	s.hex = hsl_to_rgb_hex(hue, sat, lum)
+}
+
+function set_picker_input_texts(s) {
+	s.hsl_text = hsl_to_text(s.hue, s.sat, s.lum)
+	s.hex_text = s.hex
+}
+
+function color_picker_update(id, s) {
+
+	let hue0 = s.hue
+	let sat0 = s.sat
+	let lum0 = s.lum
+	let hsl_text0 = s.hsl_text
+	let hex_text0 = s.hex_text
+
+	let hsl_text = ui.value(id+'.input_hsl')
+	if (hsl_text != null && hsl_text != hsl_text0) {
+		s.hsl_text = hsl_text
+		let m = hsl_text.match(HSL_RE)
+		if (m) {
+			set_picker_color(s,
+				clamp(num(m[1])      , 0, 360),
+				clamp(num(m[2]) / 100, 0, 1),
+				clamp(num(m[3]) / 100, 0, 1))
+			s.hex_text = s.hex
+		}
+	}
+
+	let hex_text = ui.value(id+'.input_hex')
+	if (hex_text != null && hex_text != hex_text0) {
+		s.hex_text = hex_text
+		if (HEX_RE.test(hex_text)) {
+			let [hue, sat, lum] = hex_to_hsl(hex_text)
+			set_picker_color(s, hue, sat, lum)
+			s.hsl_text = hsl_to_text(hue, sat, lum)
+		}
+	}
+
+	let hb = ui.state_of(id+'.hb')
+	if (hb && hb.hue != hue0) {
+		set_picker_color(s, hb.hue, s.sat, s.lum)
+		set_picker_input_texts(s)
+	}
+
+	let sl = ui.state_of(id+'.sl')
+	if (sl && (sl.sat != sat0 || sl.lum != lum0)) {
+		set_picker_color(s, s.hue, sl.sat, sl.lum)
+		set_picker_input_texts(s)
+	}
+}
+
+ui.color_picker = function(id, hex) {
 	let s = ui.state(id)
+	if (hex != s.hex) {
+		let [hue, sat, lum] = hex_to_hsl(HEX_RE.test(hex) ? hex : '#808080')
+		s.hue = hue
+		s.sat = sat
+		s.lum = lum
+		s.hex = hex
+		s.hsl_text = hsl_to_text(hue, sat, lum)
+		s.hex_text = hex
+	}
+	ui.state(id, color_picker_update)
 	ui.v(1, ui.sp())
 		ui.h(0, ui.sp05())
-			hue = ui.state_of(id+'.hb', 'hue') ?? hue
-			sat = ui.state_of(id+'.sl', 'sat') ?? sat
-			lum = ui.state_of(id+'.sl', 'lum') ?? lum
 			ui.aspect_box(1, 1, 's', 't')
-				ui.bb(':'+hsl(hue, sat, lum))
+				ui.bb(':'+hsl(s.hue, s.sat, s.lum))
 			ui.end_aspect_box()
 			ui.aspect_box(1, 1, 's', 't')
-				ui.sat_lum_square(id+'.sl', hue, sat, lum)
+				ui.sat_lum_square(id+'.sl', s.hue, s.sat, s.lum)
 			ui.end_aspect_box()
-			ui.hue_bar(id+'.hb', hue)
-		ui.end_h()
-		ui.h(0, ui.sp(), 's')
-			ui.label(id+'.input_hsl', 'HSL', .5)
-			// keep the box in sync with hue_bar/sat_lum_square while the user
-			// isn't typing in it; only trust its text as an edit while focused.
-			if (!ui.focused(id+'.input_hsl'))
-				s.hsl_text =
-					dec(hue)+'\u00B0, '+
-					dec(sat*100)+'%, '+
-					dec(lum*100)+'%'
-			s.hsl_text = ui.input(id+'.input_hsl', s.hsl_text, 1)
-		ui.end_h()
-		ui.h(0, ui.sp(), 's')
-			ui.label(id+'.input_rgb', 'HEX', .5)
-			let hex = s.hex ?? hsl_to_rgb_hex(hue, sat, lum)
-			// keep the box in sync with hue_bar/sat_lum_square while the user
-			// isn't typing in it; only trust its text as an edit while focused.
-			if (!ui.focused(id+'.input_rgb'))
-				s.hex_text = hex
-			s.hex_text = ui.input(id+'.input_rgb', s.hex_text, 1)
+			ui.hue_bar(id+'.hb', s.hue)
+			ui.end_h()
+			ui.h(0, ui.sp(), 's')
+				let hsl_id = id+'.input_hsl'
+				ui.label(hsl_id, 'HSL', .5)
+				ui.input(hsl_id, s.hsl_text, 1)
+			ui.end_h()
+			ui.h(0, ui.sp(), 's')
+				let hex_id = id+'.input_hex'
+				ui.label(hex_id, 'HEX', .5)
+				ui.input(hex_id, s.hex_text, 1)
 		ui.end_h()
 	ui.end_v()
+	return s.hex
+}
+
+//// COLOR INPUT -------------------------------------------------------------
+
+function color_input_hex(id, s, v) {
+	if (s.opened)
+		s.hex_before_open = v // use caller value before open for cancel
+	let picker_hex = ui.state_of(id+'.picker', 'hex')
+	let hex = v // use caller value
+	if (s.open) {
+		if (v != s.prev_hex)
+			s.hex_before_open = v // use new caller value for cancel
+		else if (picker_hex != null)
+			hex = picker_hex // use picker value
+	} else if (s.closed) {
+		hex = s.picked ? picker_hex ?? v : s.hex_before_open
+	}
+
+	s.value = hex
+	return hex
+}
+
+function color_input_update(id, s) {
+	color_input_hex(id, s, s.v)
+}
+
+ui.color_input = function(id, v, fr, align, valign, min_w, min_h) {
+
+	let picker_id = id+'.picker'
+
+	let s = ui.state(id)
+	s.v = v
+
+	ui.stack('', fr, 's', 's', min_w ?? ui.em_input(), min_h)
+
+	ui.focusable(id)
+	let open = ui.dropdown(id, 'b', null, color_input_update)
+	if (!open && ui.focus_inside(picker_id))
+		ui.focus(id)
+
+	let hex = color_input_hex(id, s, v)
+	s.prev_hex = hex
+
+		ui.bb('input', ui.focused(id) ? 'focused' : null,
+			1, 'intense', ui.focused(id) ? 'hover' : null)
+		ui.m(ui.sp(), ui.sp())
+		ui.stack('', 1, align ?? 's', valign ?? 'c', null, ui.em(1))
+			ui.bb(':'+hex)
+		ui.end_stack()
+
+	ui.dropdown_picker()
+
+		if (open) {
+			ui.p(ui.sp2())
+			ui.v(0, ui.sp1())
+				ui.color_picker(picker_id, hex)
+				ui.h(0, ui.sp05(), 'r')
+					ui.default_button(id+'.pick')
+					ui.primary_button(id+'.pick', S('pick', 'Pick'), 0)
+					ui.button(id+'.cancel', S('cancel', 'Cancel'), 0)
+				ui.end_h()
+			ui.end_v()
+			ui.resizer(id+'.resizer', ui.em(22), null, 'x')
+		}
+
+	ui.end_dropdown()
+
+	ui.end_stack()
+
 	return hex
 }
 
@@ -9301,7 +9387,7 @@ ui.icon_def('plus', 'tabler', '\ueb0b')
 ui.tabs = function(id, all_tabs, selected_tab, tabs_order, hidden_tabs) {
 
 	let s = ui.state(id)
-	selected_tab = s.selected_tab ?? selected_tab
+	selected_tab = s.value ?? selected_tab
 	tabs_order   = s.tabs_order   ?? tabs_order
 	hidden_tabs  = s.hidden_tabs  ?? hidden_tabs
 
@@ -9329,7 +9415,7 @@ ui.tabs = function(id, all_tabs, selected_tab, tabs_order, hidden_tabs) {
 	if (cs) {
 		if (!mover && cs.drag) {
 			selected_tab = drag_tab
-			ui.state(id).selected_tab = selected_tab.id
+			ui.state(id).value = selected_tab.id
 		} else if (!mover && cs.dragging && !cs.drop && abs(cs.dx) > 10) {
 			mover = ui.live_move_mixin()
 			cs.mover = mover

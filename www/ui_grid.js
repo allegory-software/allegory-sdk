@@ -688,8 +688,16 @@ function init(id, e) {
 
 	e.update = function() {
 
+		ui.state(id).picked = false
+
 		if (cell_h == null)
 			return
+
+		let text = ui.value(e.editor_id)
+		if (text != null && text !== e.edit_text) {
+			e.edit_text = text
+			e.set_cell_val(e.focused_row, e.focused_field, text, {input: e})
+		}
 
 		if (e.editing
 				&& !ui.focused(id)
@@ -1109,12 +1117,8 @@ function init(id, e) {
 				invert_selection: ctrl,
 				input: e,
 			})) {
-				// the picker is built inside the cells frame, so the dropdown
-				// has already read this state for this frame.
-				if (e.is_picker && !hit_indent) {
-					ui.fire(id, 'item_picked', {row: row})
-					ui.rebuild('item_picked')
-				}
+				if (e.is_picker && !hit_indent)
+					ui.state(id).picked = true
 				if (click)
 					e.do_cell_click(row, field, {input: e})
 				// TODO:
@@ -1236,7 +1240,7 @@ function init(id, e) {
 		// F2: enter edit mode, or toggle the dropdown of the edit in progress
 		if (keydown('f2')) {
 			if (e.editing)
-				focused_field.toggle_dropdown(e.editor_id)
+				focused_field.toggle_dropdown?.(e.editor_id)
 			else
 				e.enter_edit({advance_on_exit: true})
 			return false
@@ -1248,8 +1252,7 @@ function init(id, e) {
 				e.quicksearch(e.quicksearch_text, focused_row, shift ? -1 : 1)
 				return false
 			} else if (e.is_picker) {
-				ui.fire(id, 'item_picked', {row: focused_row})
-				ui.rebuild('item_picked')
+				ui.state(id).picked = true
 				return false
 			} else if (!e.editing) {
 				e.enter_edit({open_popup: !ctrl})
@@ -1378,26 +1381,40 @@ function init(id, e) {
 		if (!ui.window_focused() || ui.window_focusing)
 			e.exit_edit()
 
-		while (e.editing) {
+		// if editing with an editor:
+		// - write editor's value to the cell.
+		// - exit edit when the editor's dropdown is closed, reverting unless
+		// value picked.
+		// - on advance_on_exit + advance_on_enter + pick, move to next cell.
+		// the grid builds the editor later in this frame, so until then the
+		// editor's state is that of the cell that the edit came from: the
+		// grid must not read the editor on the frame that it moves the edit
+		// to another cell.
+		if (e.editing && e.focused_field.has_editor) {
 			let row = e.focused_row
 			let field = e.focused_field
-			if (!field.has_editor)
-				break
 			let editor_id = e.editor_id
-			let ev = field.dropdown_closed(editor_id)
-			let v0 = e.cell_input_val(row, field)
-			let v1 = field.editor_value(editor_id, v0)
-			if (v1 !== v0)
-				e.set_cell_val(row, field, v1, {input: e})
-			if (ev) {
-				let advance = ev.picked
+			let has_picked_val
+			if (field.editor_value) {
+				let v0 = e.cell_input_val(row, field)
+				let v1 = field.editor_value(editor_id, v0)
+				if (v1 !== v0) {
+					e.edit_text = v1 == null ? '' : field.to_input(v1)
+					e.set_cell_val(row, field, v1, {input: e})
+					has_picked_val = true
+				}
+			}
+			let open = field.dropdown_open?.(editor_id)
+			let closed = open === false
+				&& (field.edits_in_popup || has_picked_val)
+			if (closed) {
+				let picked = field.dropdown_picked(editor_id)
+				let advance = picked
 					&& e.advance_on_exit && e.advance_on_enter
-				e.exit_edit({input: e, cancel: !ev.picked})
+				e.exit_edit({input: e, cancel: !picked})
 				if (advance)
 					advance_edit(false, 1)
 			}
-			if (!e.editing || (e.focused_row == row && e.focused_field == field))
-				break
 		}
 
 	}
