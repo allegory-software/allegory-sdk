@@ -7199,20 +7199,28 @@ function toggle_path(cx, x, y, w, h) {
 
 let toggle = {}
 
-toggle.create = function(cmd, id, on, fr, align, valign, min_w, min_h,
-	bg, bg_state
-) {
-	ui.state(id)
-	ui.focusable(id)
+function toggle_update(id, s) {
 	if (clicked(id+'.label'))
 		ui.focus(id)
 	let hs = hit(id) || hit(id+'.label')
 	let focused = ui.focused(id)
 	if ((hs && ui.click) || (focused && ui.keydown(' ')))
-		on = !on
+		s.value = !s.value
 	else if (focused && ui.keydown('delete'))
-		on = null
-	ui.state(id).value = on
+		s.value = null
+}
+
+toggle.create = function(cmd, id, on, fr, align, valign, min_w, min_h,
+	bg, bg_state
+) {
+	let s = ui.state(id, toggle_update)
+	ui.focusable(id)
+	if (s.prev_value !== on)
+		s.value = on
+	on = s.value
+	s.prev_value = on
+	let hs = hit(id) || hit(id+'.label')
+	let focused = ui.focused(id)
 	ui_cmd_box(cmd, fr ?? 0, align ?? 'c', valign ?? 'c',
 		min_w ?? ui.em(2.25),
 		min_h ?? ui.em(1.25),
