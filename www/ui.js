@@ -5023,7 +5023,6 @@ const TEXT_MARK_I2    = BOX_ARGS+10
 const TEXT_MARK_BG    = BOX_ARGS+11
 
 // TEXT_FLAGS
-const TEXT_WRAP           =  3 // bits 0..1
 const TEXT_WRAP_LINE      =  1 // bit 1
 const TEXT_WRAP_WORD      =  2 // bit 2
 const TEXT_EDITABLE       =  4 // bit 3
@@ -5304,8 +5303,7 @@ function word_wrapper(id, text) {
 }
 
 measure[CMD_TEXT] = function(a, i, axis) {
-	let wrap = a[i+TEXT_FLAGS] & TEXT_WRAP
-	if (wrap == TEXT_WRAP_WORD) {
+	if (a[i+TEXT_FLAGS] & TEXT_WRAP_WORD) {
 		// word-wrapping is the reason for splitting the layouting algorithm
 		// into interlaced per-axis measuring and positioning phases.
 		let id = a[i+TEXT_ID]
@@ -5374,8 +5372,7 @@ measure[CMD_TEXT] = function(a, i, axis) {
 
 position[CMD_TEXT] = function(a, i, axis, sx, sw) {
 	if (!axis) {
-		let wrap = a[i+TEXT_FLAGS] & TEXT_WRAP
-		if (wrap == TEXT_WRAP_WORD) {
+		if (a[i+TEXT_FLAGS] & TEXT_WRAP_WORD) {
 			let ww = a[i+TEXT_S]
 			ww.wrap(sw)
 			a[i+2] = ww.w
@@ -5732,7 +5729,6 @@ draw[CMD_TEXT] = function(a, i) {
 	let id         = a[i+TEXT_ID]
 	let flags      = a[i+TEXT_FLAGS]
 	let input_type = a[i+TEXT_INPUT_TYPE]
-	let wrap     = flags & TEXT_WRAP
 	let editable = flags & TEXT_EDITABLE
 	let readonly = !!(flags & TEXT_READONLY)
 	let focused  = flags & TEXT_FOCUSED
@@ -5889,7 +5885,7 @@ draw[CMD_TEXT] = function(a, i) {
 			cx.fillText(mark_s, mark_x, y + asc)
 		}
 
-	} else if (wrap == TEXT_WRAP_LINE) {
+	} else if (flags & TEXT_WRAP_LINE) {
 
 		cx.fillStyle = col
 
@@ -5898,7 +5894,7 @@ draw[CMD_TEXT] = function(a, i) {
 			y += asc + dsc + round(line_gap * font_size)
 		}
 
-	} else if (wrap == TEXT_WRAP_WORD) {
+	} else if (flags & TEXT_WRAP_WORD) {
 
 		cx.fillStyle = col
 		cx.textAlign = 'left'
