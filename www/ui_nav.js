@@ -4642,11 +4642,17 @@ Dropdown editors:
 // icons drawn by field types, not by any one widget, so they live here
 // rather than in the grid's own icon aliases.
 ui.icon_def('check'        , 'tabler', '\uea5e')
+ui.icon_def('x'            , 'tabler', '\ueb55')
 ui.icon_def('calendar'     , 'tabler', '\uea53')
 ui.icon_def('map_pin'      , 'tabler', '\ueae8')
 ui.icon_def('box_unchecked', 'tabler', '\ueb2c')
 ui.icon_def('box_checked'  , 'tabler_filled', '\uf76d')
 //ui.icon_def('box_checked'  , 'tabler', '\ueb28')
+
+ui.fg_style('light', 'error'   , 'normal',   0, 0.85, 0.45)
+ui.fg_style('dark' , 'error'   , 'normal',   0, 0.85, 0.65)
+ui.fg_style('light', 'modified', 'normal', 120, 1.00, 0.35)
+ui.fg_style('dark' , 'modified', 'normal', 120, 0.59, 0.65)
 
 assign(all_field_types, {
 	type: 'text',
@@ -4703,6 +4709,15 @@ all_field_types.editor_caret_at_edge = function(id, d) {
 all_field_types.build_editor = function(id, v, pad_l, pad_r, h) {
 	ui.p(pad_l, 0, pad_r, 0)
 	build_text_editor(this, id, 0, this.align, 'c', null)
+}
+
+// returns the value to write to the cell, or undefined for no change.
+all_field_types.build_input = function(id, v,
+	bg, bg_state, readonly, min_w, min_h
+) {
+	let s = v == null ? '' : this.to_input(v)
+	let s1 = ui.input(id, s, 1, min_w, min_h, readonly, bg, bg_state)
+	return s1 !== s ? s1 : undefined
 }
 
 all_field_types.fixed_width = 0
@@ -4897,6 +4912,14 @@ date.dropdown_picked = function(id) {
 	return ui.dropdown_picked(id+'.calendar')
 }
 
+date.build_input = function(id, v,
+	bg, bg_state, readonly, min_w, min_h
+) {
+	let v1 = ui.date_input(id, isnum(v) ? v : null, this, 1,
+		this.align, 'c', min_w, min_h, bg, bg_state)
+	return v1 !== v ? v1 : undefined
+}
+
 date.build_editor = function(id, v, pad_l, pad_r, h) {
 	let calendar_id = id+'.calendar'
 	let picker_id = calendar_id+'.picker'
@@ -4985,6 +5008,14 @@ let bool = {align: 'center', min_w: 20, w: 20, is_bool: true,
 	builds_text: false, has_editor: false}
 field_types.bool = bool
 
+
+bool.build_input = function(id, v,
+	bg, bg_state, readonly, min_w, min_h
+) {
+	let v1 = ui.checkbox(id, v, 0, this.align ?? 'c', 'c',
+		min_w, min_h, bg, bg_state)
+	return v1 !== v ? v1 : undefined
+}
 
 bool.build_null = function(mode) {
 	if (mode) {
@@ -5200,6 +5231,13 @@ color.build = function(v, mode) {
 	ui.end_stack()
 }
 
+color.build_input = function(id, v,
+	bg, bg_state, readonly, min_w, min_h
+) {
+	let v1 = ui.color_input(id, v, 1, min_w, min_h, bg, bg_state)
+	return v1 !== v ? v1 : undefined
+}
+
 color.edits_in_popup = true
 
 color.editor_value = function(id, v) {
@@ -5339,6 +5377,74 @@ field_types.secret_key  = {}
 field_types.public_key  = {}
 field_types.private_key = {}
 
+}
+
+// nav-bound inputs ----------------------------------------------------------
+
+ui.nav_input = function(id, opt, fr, align, valign, min_w, min_h) {
+
+	let e = opt.nav
+	let field = e && e.optfld(opt.col)
+	let row = field ? e.focused_row : null
+
+	let v = row ? e.cell_input_val(row, field) : null
+
+	let bg = opt.bg
+	let bg_state = opt.bg_state
+	let escape = row && ui.focus_inside(id+'.focus_group') && ui.keydown('escape')
+	let picker_open = escape && field.dropdown_open?.(id)
+	if (escape && !picker_open) {
+		e.revert_cell(row, field, {input: e})
+		v = e.cell_input_val(row, field)
+		ui.capture_keys()
+	}
+	let has_error = row && e.cell_has_errors(row, field)
+	let is_modified = row && e.cell_modified(row, field)
+
+	// with no row there's no value to show: an empty text box stands in for
+	// whatever control the field type would build.
+	let build_input = row ? field.build_input : all_field_types.build_input
+
+	ui.h(fr, ui.sp05(), align ?? 's', valign ?? 's')
+	let box_i = ui.stack('', 1, 's', 's')
+
+	if (opt.pad_l != null || opt.pad_r != null)
+			ui.p(opt.pad_l ?? 0, 0, opt.pad_r ?? 0, 0)
+
+		ui.focus_group(null, null, id+'.focus_group')
+		let v1 = build_input.call(field ?? all_field_types,
+			id, v, bg, bg_state, !row, min_w, opt.h ?? min_h)
+		if (row && v1 !== undefined)
+			e.set_cell_val(row, field, v1, {input: e})
+		ui.end_focus_group()
+
+		if (row && has_error && ui.focused(id)) {
+			ui.p(ui.sp2(), ui.sp())
+			ui.popup(id+'.error', 'tooltip', box_i, 'b', 'l',
+				0, 0, 'change_side constrain')
+				ui.bb_tooltip('error', null, 'error', null, ui.sp05())
+				ui.v(0, ui.sp05())
+					for (let err of e.cell_errors(row, field))
+						if (err.failed)
+							ui.text('', err.error, 0, 'l', 'c')
+				ui.end_v()
+			ui.end_popup()
+		}
+
+	ui.end_stack()
+	ui.pl(ui.sp05())
+	if (has_error) {
+		ui.color('error')
+		ui.icon('', 'x', 0, 'c', 'c', ui.em(1))
+	} else if (is_modified) {
+		ui.color('modified')
+		ui.icon('', 'check', 0, 'c', 'c', ui.em(1))
+	} else {
+		ui.box(0, ui.em(1))
+	}
+	ui.end_h()
+
+	return row ? e.cell_input_val(row, field) : null
 }
 
 // reload push-notifications -------------------------------------------------

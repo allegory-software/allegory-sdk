@@ -1,25 +1,25 @@
-UI TODO
-------------------------------------------------------------------------------
-
-
-LEGEND
-------------------------------------------------------------------------------
-* means done
-- means TODO
-
-
 BUGS
 ------------------------------------------------------------------------------
 - text hit clip (repro: hover to the right of the first grid gcol)
-- set_cursor() must be set in draw? hittest? does it matter?
-- box_widget box_hit -> use hit_box
+
+
+INPUTS
+------------------------------------------------------------------------------
+- calendar range / multi-range
+- date+time/period/range/multi-range inputs
+- tags-input
+- textarea input
+
+
+NAV INPUTS
+------------------------------------------------------------------------------
+- validation
+-
 
 
 GRID
 ------------------------------------------------------------------------------
-- lookup navs
 - vertical grid
-- quicksearch
 - filter bar
 - move rows: flat/tree/group
 - move rows outside grid
@@ -31,17 +31,13 @@ GRID
 	- local filtering
 
 
-GRID EDITING (see TODO-AI.txt for why things are the way they are)
+GRID EDITING
 ------------------------------------------------------------------------------
-* nav validation
-* cell editing: enter/exit edit, text editor per field type
-* grid edit state colors (new, modified, deleted)
-* quicksearch + match highlight
-* bool cells: click/space toggle, boxed check when editable
-* enum cells: dropdown editor
-- lookup cells: dropdown over the lookup nav (they edit as the raw fk now)
-- date, color, icon, tags, place, url, button cells
-- bound input widgets
+- icon cells
+- tags cells
+- place cells
+- url cells
+- button cells
 - grid action bar
 - rowset_mdbx load/save + changed pk stream
 - nav (partial) refresh from changed pk stream
@@ -50,16 +46,31 @@ GRID EDITING (see TODO-AI.txt for why things are the way they are)
 - decide: empty editor on a type with from_input() -> null or ''
 
 
+GRAPHS
+------------------------------------------------------------------------------
+- ??
+
+
+MENU
+------------------------------------------------------------------------------
+- decompose to allow custom content for item
+- h() with key binding icon or text
+
+
+TABLIST
+------------------------------------------------------------------------------
+- add/close/move + drag & drop
+
+
 UI API
 ------------------------------------------------------------------------------
+- text selection: drag-select with mouse
 - drag & drop between windows
 - remove scopes and automatic container scopes and replace them with
 	begin_font() end_font()
 	begin_bold() end_bold()
 	- careful with begin_rec()
 	- careful with frames
-- bb on text?
-- bb on scrollbox?
 - negative margins?
 - make ui embeddable:
 	- screen, canvas, cx, screen_w, screen_h, dpr, ui.font_size_normal
@@ -77,26 +88,42 @@ SCREEN SHARING
 	- screen share window -- move/resize/dock
 
 
-TODO WIDGETS
+PERSISTENCE
 ------------------------------------------------------------------------------
-- calendar range / multi-range
-- tablist add/close/move + drag & drop
-- menu with custom content for item
-- graphs
-- tags-input
-- date/time/period/range/multi-range inputs
+- splitter state
+- grid customizations:
+	- col list
+	- col widths
+	- dropdown editors
+		- picker resized w/h
+		-
 
 
-TODO IDE vs CODE
+LAYOUTING
 ------------------------------------------------------------------------------
-- dock + tablist + custom buttons + floating windows +
+- flex direction
+- flex item order
+- grid fr stretch
+- grid min-w/h grow
+- grid align
+- grid gap
+
+
+ANIMATIONS
+------------------------------------------------------------------------------
+- transition animations
+
+
+IDE vs CODE
+------------------------------------------------------------------------------
+- dock + tablist + custom buttons + floating windows
 - form builder (free positioning + anchors)
 	- property editor
 - schema builder
 - query builder
 
 
-TODO FORM BUILDER
+FORM BUILDER
 ------------------------------------------------------------------------------
 - forms list
 - widget bar
@@ -110,57 +137,6 @@ TODO FORM BUILDER
 	- set anchors
 	- snap-align to elements and snap to grid
 	- embed form
-
-
-IMGUI STATUS
-------------------------------------------------------------------------------
-- drawing
-	* global z-index
-	* local z-index
-	- layer stacking tree
-	* text
-	* bg-color
-	* border
-	* box-shadow
-	* images (incl. svg)
-- layouting
-	* min width & height
-	* flexbox fr stretch
-	* flexbox min-w/h grow
-	* flexbox align
-	* flexbox gap
-	* stack
-	* padding
-	* margin
-	* text min-w/h
-	* popup layouting
-	* word-wrapping
-	- flex direction
-	- flex item order
-	* flex tabstops
-	- grid fr stretch
-	- grid min-w/h grow
-	- grid align
-	- grid gap
-	- transition animations
-- mouse
-	* hit-test rect
-	* hit state
-	* hit parents
-	* capturing
-	* capture state
-	* drag & drop
-- keyboard
-	* focused state
-	* tab focusing
-	- event bubbling
-- text selection
-	- drag-select with mouse
-- text(area) input
-	* put it behind the canvas with correct width & height
-		- route keyboard events to it
-		* redraw it on canvas with offset and selection
-		- reuse a single global input object for all inputs
 
 
 ------------------------------------------------------------------------------

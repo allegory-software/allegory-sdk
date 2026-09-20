@@ -299,15 +299,17 @@ INPUT
 
 	button          (id, s, fr, align, valign, min_w, min_h, style)
 	icon_button     (id, icon, [s], fr, align, valign, min_w, min_h, style)
-	input           (id, s, fr, min_w, min_h, [readonly])
+	input           (id, s, fr, min_w, min_h, [readonly], [bg], [bg_state])
 	label           (for_id, s, fr, align, valign)
 	list_dropdown   (id, items, sel_i, fr, max_w, min_w, min_h) -> sel_i
-	date_input      (id, v, [opt], fr, align, valign, min_w, min_h) -> v
+	date_input      (id, v, [opt], fr, align, valign, min_w, min_h,
+	                 [bg], [bg_state]) -> v
 	                 opt: {precision:, min:, max:, readonly:,
 	                       to_input: f(v) -> s, from_input: f(s) -> v}
-	toggle          (id, fr, align, valign, min_w, min_h)
-	checkbox        (cmd, id, fr, align, valign, min_w, min_h)
-	color_input     (id, v, fr, align, valign, min_w, min_h) -> v
+	toggle          (id, on, fr, align, valign, min_w, min_h, [bg], [bg_state])
+	checkbox        (id, on, fr, align, valign, min_w, min_h, [bg], [bg_state])
+	color_input     (id, v, fr, min_w, min_h, [bg], [bg_state]) -> v
+	                 bg false draws no background and no border
 
 COLOR PICKER
 
@@ -2228,7 +2230,6 @@ ui.focusable = function(id, tab_order) {
 		ui.scroll_to_view_next_box()
 }
 
-// id is optional, only needed for tab_into().
 ui.focus_group = function(trap, tab_order, id) {
 	ui_cmd(FOCUS_GROUP, tab_order ?? 0, trap ? 1 : 0, id)
 }
@@ -3480,10 +3481,10 @@ measure_end[CMD_V_ALIGNED] = function(a, i, axis) {
 
 //// BOX ---------------------------------------------------------------------
 
-// just an empty box used as an empty element for v_aligned.
+// just an empty box used as an empty place in v_aligned or to reserve space.
 ui.box_widget('box', {
-	create: function(cmd, fr, align, valign, min_w, min_h) {
-		return ui_cmd_box(cmd, fr ?? 0, align, valign, min_w, min_h)
+	create: function(cmd, fr, min_w, min_h) {
+		return ui_cmd_box(cmd, fr ?? 0, 's', 's', min_w, min_h)
 	},
 })
 
@@ -6816,18 +6817,19 @@ ui.list = ui.vlist
 ui.input_min_w_em = 6
 ui.em_input = () => ui.em(ui.input_min_w_em)
 
-ui.input = function(id, s, fr, w, h, readonly) {
+ui.input = function(id, s, fr, w, h, readonly, bg, bg_state) {
 	if (clicked(id+'.label')) {
 		ui.focus(id)
 		ui.select_text(id, 0, 1/0)
 	}
 	ui.stack('', fr, 's', 's')
-		ui.bb(
-			'input', ui.focused(id) ? 'focused' : null,
-			1, 'intense', ui.focused(id) ? 'hover' : null)
+		if (bg !== false)
+			ui.bb(
+				bg ?? 'input', bg ? bg_state : ui.focused(id) ? 'focused' : null,
+				1, 'intense', ui.focused(id) ? 'hover' : null)
 		ui.p(ui.sp())
 		ui.color('text', ui.focused(id) ? 'focused' : null)
-		s = ui.text(id, s, 1, 'l', 'c', null, w ?? ui.em_input(), h,
+		s = ui.text(id, s, 1, 's', 'c', null, w ?? ui.em_input(), h,
 			null, true, null, readonly)
 	ui.end_stack()
 	return s
@@ -7178,8 +7180,10 @@ ui.bg_style('*', 'toggle'      , 'normal item-selected', 'link', 'normal')
 ui.bg_style('*', 'toggle'      , 'hover  item-selected', 'link', 'hover' )
 ui.bg_style('*', 'toggle-thumb', '*', 'text')
 
-let TOGGLE_ID    = BOX_ARGS+0
-let TOGGLE_STATE = BOX_ARGS+1
+let TOGGLE_ID       = BOX_ARGS+0
+let TOGGLE_STATE    = BOX_ARGS+1
+let TOGGLE_BG       = BOX_ARGS+2
+let TOGGLE_BG_STATE = BOX_ARGS+3
 
 let TOGGLE_ON      = 1
 let TOGGLE_HOVER   = 2
@@ -7195,7 +7199,9 @@ function toggle_path(cx, x, y, w, h) {
 
 let toggle = {}
 
-toggle.create = function(cmd, id, on, fr, align, valign, min_w, min_h) {
+toggle.create = function(cmd, id, on, fr, align, valign, min_w, min_h,
+	bg, bg_state
+) {
 	ui.state(id)
 	ui.focusable(id)
 	if (clicked(id+'.label'))
@@ -7212,7 +7218,8 @@ toggle.create = function(cmd, id, on, fr, align, valign, min_w, min_h) {
 		min_h ?? ui.em(1.25),
 		id,
 		(on ? TOGGLE_ON : 0) | (hs ? TOGGLE_HOVER : 0) |
-			(focused && ui.focused_by_key ? TOGGLE_FOCUSED : 0))
+			(focused && ui.focused_by_key ? TOGGLE_FOCUSED : 0),
+		bg ?? 0, parse_state(bg_state))
 	return on
 }
 toggle.ID = TOGGLE_ID
@@ -7244,7 +7251,9 @@ toggle.draw = function(a, i) {
 	let state =
 		(on ? STATE_ITEM_SELECTED : 0) |
 		(hs ? STATE_HOVER         : 0)
-	cx.fillStyle = ui_bg_color('toggle', state)
+	let bg_name = a[i+TOGGLE_BG]
+	cx.fillStyle = ui_bg_color(bg_name || 'toggle',
+		bg_name ? a[i+TOGGLE_BG_STATE] : state)
 	cx.fill()
 
 	// thumb
@@ -7266,10 +7275,13 @@ ui.box_widget('toggle', toggle)
 
 let checkbox = {...toggle}
 
-checkbox.create = function(cmd, id, on, fr, align, valign, min_w, min_h) {
+checkbox.create = function(cmd, id, on, fr, align, valign, min_w, min_h,
+	bg, bg_state
+) {
 	return toggle.create(cmd, id, on, fr ?? 0, align, valign,
 		min_w ?? ui.em(1.5),
 		min_h ?? ui.em(1.5),
+		bg, bg_state
 	)
 }
 
@@ -7287,7 +7299,9 @@ checkbox.draw = function(a, i) {
 	let state =
 		(on ? STATE_ITEM_SELECTED : 0) |
 		(hs ? STATE_HOVER         : 0)
-	let bg = bg_color_hsl('toggle', state)
+	let bg_name = a[i+TOGGLE_BG]
+	let bg = bg_color_hsl(bg_name || 'toggle',
+		bg_name ? a[i+TOGGLE_BG_STATE] : state)
 	let fg = fg_color('text', hs ? 'hover' : null, bg_is_dark(bg) ? 'dark' : 'light')
 	bg = bg[0]
 
@@ -8071,7 +8085,9 @@ function date_input_update(id, s) {
 	s.value = date_input_state(id, s.v, s.opt)[0]
 }
 
-ui.date_input = function(id, v, opt, fr, align, valign, min_w, min_h) {
+ui.date_input = function(id, v, opt, fr, align, valign, min_w, min_h,
+	bg, bg_state
+) {
 
 	let cal_id = id+'.calendar'
 	let picker_id = cal_id+'.picker'
@@ -8100,17 +8116,21 @@ ui.date_input = function(id, v, opt, fr, align, valign, min_w, min_h) {
 
 	let [value, text] = date_input_state(id, v, opt)
 	s.value = value
+	let input_align = parse_align(align ?? 'r')
+	input_align = input_align == ALIGN_END ? 'sr'
+		: input_align == ALIGN_CENTER ? 'sc' : 's'
 
 		ui.stack(id, fr, 's', 's')
-			ui.bb('input', focused ? 'focused' : null,
-				1, 'intense', focused ? 'hover' : null)
+			if (bg !== false)
+				ui.bb(bg ?? 'input', bg ? bg_state : focused ? 'focused' : null,
+					1, 'intense', focused ? 'hover' : null)
 			ui.h(0, 0, 's', 's', min_w ?? ui.em_input(), min_h)
 				ui.p(ui.sp(), ui.sp(), 0, ui.sp())
 				ui.icon(cal_id, 'calendar', 0, 'l', 'c')
 				ui.p(ui.sp05(), ui.sp(), ui.sp(), ui.sp())
 				ui.color('text', focused ? 'focused' : null)
 				ui.text_editable(input_id, text, 1,
-					align ?? 'r', valign ?? 'c', null, null, null,
+					input_align, valign ?? 'c', null, null, null,
 					null, opt && opt.readonly)
 			ui.end_h()
 		ui.end_stack()
@@ -8613,7 +8633,7 @@ function color_picker_update(id, s) {
 
 ui.color_picker = function(id, hex) {
 	let s = ui.state(id)
-	if (hex != s.hex) {
+	if (hex !== s.hex) {
 		let [hue, sat, lum] = hex_to_hsl(HEX_RE.test(hex) ? hex : '#808080')
 		s.hue = hue
 		s.sat = sat
@@ -8663,6 +8683,9 @@ function color_input_hex(id, s, v) {
 		hex = s.picked ? picker_hex ?? v : s.hex_before_open
 	}
 
+	if (ui.focused(id) && ui.keydown('delete'))
+		hex = null
+
 	s.value = hex
 	return hex
 }
@@ -8671,14 +8694,14 @@ function color_input_update(id, s) {
 	color_input_hex(id, s, s.v)
 }
 
-ui.color_input = function(id, v, fr, align, valign, min_w, min_h) {
+ui.color_input = function(id, v, fr, min_w, min_h, bg, bg_state) {
 
 	let picker_id = id+'.picker'
 
 	let s = ui.state(id)
 	s.v = v
 
-	ui.stack('', fr, 's', 's', min_w ?? ui.em_input(), min_h)
+	ui.stack('', fr, 's', 's', min_w ?? ui.em_input(), min_h ?? ui.em(1.5))
 
 	ui.focusable(id)
 	let open = ui.dropdown(id, 'b', null, color_input_update)
@@ -8688,11 +8711,14 @@ ui.color_input = function(id, v, fr, align, valign, min_w, min_h) {
 	let hex = color_input_hex(id, s, v)
 	s.prev_hex = hex
 
-		ui.bb('input', ui.focused(id) ? 'focused' : null,
-			1, 'intense', ui.focused(id) ? 'hover' : null)
+		if (bg !== false)
+			ui.bb(bg ?? 'input',
+				bg ? bg_state : ui.focused(id) ? 'focused' : null,
+				1, 'intense', ui.focused(id) ? 'hover' : null)
 		ui.m(ui.sp(), ui.sp())
-		ui.stack('', 1, align ?? 's', valign ?? 'c', null, ui.em(1))
-			ui.bb(':'+hex)
+		ui.stack('', 1, 's', 'c', null, ui.em(1))
+			if (hex != null)
+				ui.bb(':'+hex)
 		ui.end_stack()
 
 	ui.dropdown_picker()

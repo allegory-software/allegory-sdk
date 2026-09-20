@@ -87,13 +87,14 @@ ui.end_scrollbox()
 `
 
 slider1_v = 30
+slider2_v = .5
 demos.silder = `
 ui.v(0, 0, 'c', 'c', 400)
 	ui.border(1, 'intense')
 	slider1_v = ui.slider('slider1', slider1_v, 20, 40, 1, false)
 	//if (p != null)
 	//	pr(p)
-	let p2 = ui.slider('slider2')
+	slider2_v = ui.slider('slider2', slider2_v)
 ui.end_v()
 `
 
@@ -1247,14 +1248,6 @@ let test_template = {
 	]}
 demos.template = `
 ui.template('tpl1', test_template)
-`
-
-demos.color_picker = `
-ui.p(ui.sp())
-ui.stack('', 0, 'c', 'c', 400)
-	ui.border(1, 'light')
-	ui.color_picker('cp1', 200, .75, .25)
-ui.end_stack()
 `
 
 // 240x160 so the fitted box is visibly wider than tall.
