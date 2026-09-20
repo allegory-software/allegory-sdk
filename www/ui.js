@@ -5023,7 +5023,7 @@ const TEXT_MARK_I2    = BOX_ARGS+10
 const TEXT_MARK_BG    = BOX_ARGS+11
 
 // TEXT_FLAGS
-const TEXT_WRAP           =  3 // bits 0 and 1
+const TEXT_WRAP           =  3 // bits 0..1
 const TEXT_WRAP_LINE      =  1 // bit 1
 const TEXT_WRAP_WORD      =  2 // bit 2
 const TEXT_EDITABLE       =  4 // bit 3
@@ -5031,6 +5031,8 @@ const TEXT_FOCUSED        =  8 // bit 4
 const TEXT_FOCUSED_BY_KEY = 16 // bit 5
 const TEXT_MARKED         = 32 // bit 6
 const TEXT_READONLY       = 64 // bit 7
+const TEXT_ALIGN_RIGHT    = 128 // bit 8
+const TEXT_ALIGN_CENTER   = 256 // bit 9
 
 const CMD_TEXT = cmd('text')
 id_slot[CMD_TEXT] = TEXT_ID
@@ -5068,7 +5070,22 @@ ui.text = function(
 		s.prev_text = text
 	}
 	let marked = mark_i1 != null && mark_i2 > mark_i1
-	let i = ui_cmd_box(CMD_TEXT, fr ?? 1, align ?? 'l', valign ?? 'c',
+	let box_align = align ?? 'l'
+	let text_align = 0
+	if (box_align == 'sr' || box_align == 'stretch-right') {
+		box_align = 's'
+		text_align = TEXT_ALIGN_RIGHT
+	} else if (box_align == 'sc' || box_align == 'stretch-center') {
+		box_align = 's'
+		text_align = TEXT_ALIGN_CENTER
+	} else {
+		box_align = parse_align(box_align)
+		if (box_align == ALIGN_END)
+			text_align = TEXT_ALIGN_RIGHT
+		else if (box_align == ALIGN_CENTER)
+			text_align = TEXT_ALIGN_CENTER
+	}
+	let i = ui_cmd_box(CMD_TEXT, fr ?? 1, box_align, valign ?? 'c',
 		w ?? -1, // -1=auto
 		h ?? -1, // -1=auto
 		0, // ascent
@@ -5079,6 +5096,7 @@ ui.text = function(
 		id,
 		text,
 		wrap // flags
+			| text_align
 			| (editable ? TEXT_EDITABLE : 0)
 			| (readonly ? TEXT_READONLY : 0)
 			| (ui.focused(id) ? TEXT_FOCUSED : 0)
@@ -5729,9 +5747,8 @@ draw[CMD_TEXT] = function(a, i) {
 		if (input.readOnly != readonly)
 			input.readOnly = readonly
 
-		let align = a[i+ALIGN]
-		let css_align = align == ALIGN_END ? 'right'
-			: align == ALIGN_CENTER ? 'center' : 'left'
+		let css_align = flags & TEXT_ALIGN_RIGHT ? 'right'
+			: flags & TEXT_ALIGN_CENTER ? 'center' : 'left'
 		let px1 = a[i+PX1+0]
 		let px2 = a[i+PX2+0]
 		let py1 = a[i+PX1+1]
@@ -5833,12 +5850,11 @@ draw[CMD_TEXT] = function(a, i) {
 		cx.clip()
 	}
 
-	let text_align = a[i+ALIGN]
 	let anchor_x
-	if (text_align == ALIGN_END) {
+	if (flags & TEXT_ALIGN_RIGHT) {
 		cx.textAlign = 'right'
 		anchor_x = sx + sw
-	} else if (text_align == ALIGN_CENTER && a[i+2] <= sw) {
+	} else if (flags & TEXT_ALIGN_CENTER && a[i+2] <= sw) {
 		cx.textAlign = 'center'
 		anchor_x = sx + sw / 2
 	} else {
@@ -5858,9 +5874,9 @@ draw[CMD_TEXT] = function(a, i) {
 			let i2 = a[i+TEXT_MARK_I2]
 			let mark_s = s.slice(i1, i2)
 			let text_x
-			if (text_align == ALIGN_END)
+			if (flags & TEXT_ALIGN_RIGHT)
 				text_x = anchor_x - measure_text(cx, s).width
-			else if (text_align == ALIGN_CENTER)
+			else if (flags & TEXT_ALIGN_CENTER)
 				text_x = anchor_x - measure_text(cx, s).width / 2
 			else
 				text_x = anchor_x
@@ -5887,7 +5903,6 @@ draw[CMD_TEXT] = function(a, i) {
 		cx.fillStyle = col
 		cx.textAlign = 'left'
 
-		let align = a[i+ALIGN]
 		let x0 = x
 		let ww = s
 
@@ -5898,9 +5913,9 @@ draw[CMD_TEXT] = function(a, i) {
 			let i2     = ww.lines[k+2] ?? ww.words.length
 
 			let x
-			if (align == ALIGN_END)
+			if (flags & TEXT_ALIGN_RIGHT)
 				x = x0 + w - line_w
-			else if (align == ALIGN_CENTER)
+			else if (flags & TEXT_ALIGN_CENTER)
 				x = x0 + round((w - line_w) / 2)
 			else
 				x = x0
