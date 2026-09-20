@@ -178,7 +178,7 @@ function build_help(id, target_i) {
 	ui.popup(id+'.help', 'overlay', target_i, 'b', '[', 0, 0,
 		'change_side constrain')
 		ui.bb_tooltip('bg2', null, 'light', null, ui.sp05())
-		ui.v_tabstops(0)
+		ui.v_aligned(0)
 			for (let line of help_lines) {
 				let ci = line.indexOf(':')
 				let t = ci == -1 ? line : null
@@ -203,7 +203,7 @@ function build_help(id, target_i) {
 					ui.end_h()
 				}
 			}
-		ui.end_v_tabstops()
+		ui.end_v_aligned()
 	ui.end_popup()
 }
 

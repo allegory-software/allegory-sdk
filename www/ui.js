@@ -244,7 +244,7 @@ BOX WIDGET DEFINITIONS
 CONTAINERS
 
 	hv              ('h'|'v', fr, gap, align, valign, min_w, min_h)
-	h | v           (fr, gap, align, valign, min_w, min_h)
+	h | v[_aligned] (fr, gap, align, valign, min_w, min_h)
 	stack           (id, fr, align, valign, min_w, min_h)
 	sb | scrollbox  (id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy, x_id, y_id)
 	popup           (id, layer, target_i, side, align, min_w, min_h, flags, z_index, ox, oy)
@@ -3269,7 +3269,7 @@ ui.end_v = function() { ui.end(CMD_V) }
 
 function is_main_axis(cmd, axis) {
 	return (
-		(cmd == CMD_V || cmd == CMD_V_TABSTOPS ? 1 : 2) == axis ||
+		(cmd == CMD_V || cmd == CMD_V_ALIGNED ? 1 : 2) == axis ||
 		(cmd == CMD_H ? 0 : 2) == axis
 	)
 }
@@ -3407,15 +3407,12 @@ function hit_flex(a, i, recs) {
 hittest[CMD_H] = hit_flex
 hittest[CMD_V] = hit_flex
 
-//// TABSTOPS ----------------------------------------------------------------
+//// V_ALIGNED ---------------------------------------------------------------
 
-const CMD_V_TABSTOPS = cmd_ct('v_tabstops')
+const CMD_V_ALIGNED = cmd_ct('v_aligned')
 
-ui.v_tabstops = ui_hv.bind(null, CMD_V_TABSTOPS)
-ui.end_v_tabstops = function() { ui.end(CMD_V_TABSTOPS) }
-
-ui.tabstops = ui.v_tabstops
-ui.end_tabstops = ui.end_v_tabstops
+ui.v_aligned = ui_hv.bind(null, CMD_V_ALIGNED)
+ui.end_v_aligned = function() { ui.end(CMD_V_ALIGNED) }
 
 let tabstop_ws = []
 
@@ -3469,13 +3466,13 @@ function align_tabstops(a, i) {
 
 }
 
-measure       [CMD_V_TABSTOPS] = ct_stack_push
-position      [CMD_V_TABSTOPS] = position_flex
-translate     [CMD_V_TABSTOPS] = translate_ct
-hittest       [CMD_V_TABSTOPS] = hit_flex
-is_flex_child [CMD_V_TABSTOPS] = true
+measure       [CMD_V_ALIGNED] = ct_stack_push
+position      [CMD_V_ALIGNED] = position_flex
+translate     [CMD_V_ALIGNED] = translate_ct
+hittest       [CMD_V_ALIGNED] = hit_flex
+is_flex_child [CMD_V_ALIGNED] = true
 
-measure_end[CMD_V_TABSTOPS] = function(a, i, axis) {
+measure_end[CMD_V_ALIGNED] = function(a, i, axis) {
 	if (axis == 0)
 		align_tabstops(a, i)
 	ct_measure_end(a, i, axis)
@@ -3483,7 +3480,7 @@ measure_end[CMD_V_TABSTOPS] = function(a, i, axis) {
 
 //// BOX ---------------------------------------------------------------------
 
-// just an empty box used as an empty element for v_tabstops.
+// just an empty box used as an empty element for v_aligned.
 ui.box_widget('box', {
 	create: function(cmd, fr, align, valign, min_w, min_h) {
 		return ui_cmd_box(cmd, fr ?? 0, align, valign, min_w, min_h)
