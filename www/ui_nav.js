@@ -5409,7 +5409,7 @@ ui.nav_input = function(id, opt, fr, align, valign, min_w, min_h) {
 	let box_i = ui.stack('', 1, 's', 's')
 
 	if (opt.pad_l != null || opt.pad_r != null)
-			ui.p(opt.pad_l ?? 0, 0, opt.pad_r ?? 0, 0)
+		ui.p(opt.pad_l ?? 0, 0, opt.pad_r ?? 0, 0)
 
 		ui.focus_group(null, null, id+'.focus_group')
 		let v1 = build_input.call(field ?? all_field_types,
