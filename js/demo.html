@@ -143,12 +143,14 @@ ui.end_h()
 radio_sel_i = 0
 demos.radio = `
 ui.v(0, ui.sp2(), 'c', 'c')
+ui.begin_radio_group('radio_group1')
 for (let i = 0; i < 5; i++) {
 	ui.h(0, ui.sp(), 'c', 'c')
-		radio_sel_i = ui.radio('radio'+i, 'radio_group1', i, radio_sel_i)
+		ui.radio('radio'+i, 'radio_group1', i)
 		ui.label('radio'+i, 'Radio '+i)
 	ui.end_h()
 }
+radio_sel_i = ui.end_radio_group('radio_group1', radio_sel_i)
 ui.end_v()
 `
 
@@ -722,6 +724,10 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 		input1_text = ui.input('input1', input1_text)
 	ui.end_h()
 	ui.h(0, ui.sp2())
+		ui.label('input2', 'Input R', 0)
+		input2_text = ui.input('input2', input2_text, 1, null, 'sr')
+	ui.end_h()
+	ui.h(0, ui.sp2())
 		ui.label('dd1', 'Dropdown', 0)
 		dd1_i = ui.list_dropdown('dd1', dd_items, dd1_i)
 	ui.end_h()
@@ -765,13 +771,14 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 	ui.h(0, ui.sp4())
 		ui.text('', 'Radio', 0, 'l', 't')
 		ui.v(0, ui.sp2())
+			ui.begin_radio_group('radio_group1')
 			for (let i = 0; i < 3; i++) {
 				ui.h(0, ui.sp2())
-					radio_sel_i = ui.radio(
-						'radio'+i, 'radio_group1', i, radio_sel_i)
+					ui.radio('radio'+i, 'radio_group1', i)
 					ui.label('radio'+i, 'Radio '+(i+1))
 				ui.end_h()
 			}
+			radio_sel_i = ui.end_radio_group('radio_group1', radio_sel_i)
 		ui.end_v()
 	ui.end_h()
 	ui.h(0, ui.sp2(), 'c')
@@ -1016,7 +1023,7 @@ ui.hsplit('hsplit1', .8)
 ui.end_hsplit()
 `
 
-input1_text = 'Hello1 Hello1 Hello1 Hello1'
+input1_text = 'Hello1 Hello1'
 input2_text = 'Hello2 Hello2'
 input3_text = 'Hello3 Hello3 Hello3 Hello3'
 demos.input = `

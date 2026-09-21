@@ -3170,7 +3170,7 @@ ui.nav = function(opt) {
 		e.editor_id = editor_type + '.editor'
 		if (field.has_editor) {
 			let v = e.cell_input_val(row, field)
-			e.edit_text = v == null ? '' : field.to_input(v)
+			e.edit_text = v == null ? null : field.to_input(v)
 			if (opt?.open_popup != false || field.edits_in_popup)
 				field.open_dropdown?.(e.editor_id)
 			// by key: that is what focuses the input element. a click can't, the
@@ -4711,13 +4711,11 @@ all_field_types.build_editor = function(id, v, pad_l, pad_r, h) {
 	build_text_editor(this, id, 0, this.align, 'c', null)
 }
 
-// returns the value to write to the cell, or undefined for no change.
-all_field_types.build_input = function(id, v,
-	bg, bg_state, readonly, min_w, min_h
-) {
-	let s = v == null ? '' : this.to_input(v)
-	let s1 = ui.input(id, s, 1, min_w, min_h, readonly, bg, bg_state)
-	return s1 !== s ? s1 : undefined
+// builds the control under `id`; nav_input reads what the user made of it
+// with ui.input_value(id).
+all_field_types.build_input = function(id, v, readonly, min_w) {
+	ui.input(id, v == null ? null : this.to_input(v),
+		1, min_w, null, readonly)
 }
 
 all_field_types.fixed_width = 0
@@ -4912,12 +4910,8 @@ date.dropdown_picked = function(id) {
 	return ui.dropdown_picked(id+'.calendar')
 }
 
-date.build_input = function(id, v,
-	bg, bg_state, readonly, min_w, min_h
-) {
-	let v1 = ui.date_input(id, isnum(v) ? v : null, this, 1,
-		this.align, 'c', min_w, min_h, bg, bg_state)
-	return v1 !== v ? v1 : undefined
+date.build_input = function(id, v, readonly, min_w) {
+	ui.date_input(id, v, this, 1, this.align, 'c', min_w)
 }
 
 date.build_editor = function(id, v, pad_l, pad_r, h) {
@@ -4969,10 +4963,8 @@ date.build_editor = function(id, v, pad_l, pad_r, h) {
 }
 
 date.editor_value = function(id, v) {
-	let s = ui.state_of(id+'.calendar.picker')
-	if (s && s.day !== s.prev_day)
-		return s.day
-	return v
+	let day = ui.input_value(id+'.calendar.picker')
+	return day !== undefined ? day : v
 }
 
 // timeofday (MySQL TIME type) -----------------------------------------------
@@ -5009,12 +5001,8 @@ let bool = {align: 'center', min_w: 20, w: 20, is_bool: true,
 field_types.bool = bool
 
 
-bool.build_input = function(id, v,
-	bg, bg_state, readonly, min_w, min_h
-) {
-	let v1 = ui.checkbox(id, v, 0, this.align ?? 'c', 'c',
-		min_w, min_h, bg, bg_state)
-	return v1 !== v ? v1 : undefined
+bool.build_input = function(id, v, readonly, min_w) {
+	ui.checkbox(id, v, 0, this.align ?? 'c', 'c', min_w)
 }
 
 bool.build_null = function(mode) {
@@ -5096,7 +5084,7 @@ enm.build_editor = function(id, v, pad_l, pad_r, h) {
 }
 
 enm.editor_value = function(id, v) {
-	let i = ui.state_of(id+'.picker', 'focused_i')
+	let i = ui.value(id+'.picker')
 	if (i == null)
 		return v
 	return words(this.enum_values)[i] ?? v
@@ -5231,17 +5219,15 @@ color.build = function(v, mode) {
 	ui.end_stack()
 }
 
-color.build_input = function(id, v,
-	bg, bg_state, readonly, min_w, min_h
-) {
-	let v1 = ui.color_input(id, v, 1, min_w, min_h, bg, bg_state)
-	return v1 !== v ? v1 : undefined
+color.build_input = function(id, v, readonly, min_w) {
+	ui.color_input(id, v, 1, min_w)
 }
 
 color.edits_in_popup = true
 
 color.editor_value = function(id, v) {
-	return ui.state_of(id+'.picker', 'hex') ?? v
+	let hex = ui.input_value(id+'.picker')
+	return hex !== undefined ? hex : v
 }
 
 // a color_picker over v's hex, with a Pick/Cancel row under it: v only
@@ -5381,7 +5367,7 @@ field_types.private_key = {}
 
 // nav-bound inputs ----------------------------------------------------------
 
-ui.nav_input = function(id, opt, fr, align, valign, min_w, min_h) {
+ui.nav_input = function(id, opt, fr, align, valign, min_w) {
 
 	let e = opt.nav
 	let field = e && e.optfld(opt.col)
@@ -5389,8 +5375,6 @@ ui.nav_input = function(id, opt, fr, align, valign, min_w, min_h) {
 
 	let v = row ? e.cell_input_val(row, field) : null
 
-	let bg = opt.bg
-	let bg_state = opt.bg_state
 	let escape = row && ui.focus_inside(id+'.focus_group') && ui.keydown('escape')
 	let picker_open = escape && field.dropdown_open?.(id)
 	if (escape && !picker_open) {
@@ -5412,8 +5396,9 @@ ui.nav_input = function(id, opt, fr, align, valign, min_w, min_h) {
 		ui.p(opt.pad_l ?? 0, 0, opt.pad_r ?? 0, 0)
 
 		ui.focus_group(null, null, id+'.focus_group')
-		let v1 = build_input.call(field ?? all_field_types,
-			id, v, bg, bg_state, !row, min_w, opt.h ?? min_h)
+		build_input.call(field ?? all_field_types,
+			id, v, !row, min_w)
+		let v1 = ui.input_value(id)
 		if (row && v1 !== undefined)
 			e.set_cell_val(row, field, v1, {input: e})
 		ui.end_focus_group()
