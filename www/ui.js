@@ -3351,6 +3351,7 @@ function position_flex(a, i, axis, sx, sw) {
 		i = next_i
 		let ct_sx = sx
 		let ct_sw = sw
+		let exact_x = sx
 		while (a[i-1] != CMD_END) {
 			if (is_flex_child[a[i-1]]) {
 
@@ -3362,17 +3363,18 @@ function position_flex(a, i, axis, sx, sw) {
 				let sw
 				if (min_w > flex_w) { // overflow
 					sw = min_w
+					exact_x += min_w
 				} else {
 					let free_w = flex_w - min_w
 					let free_p = free_w / total_free_w
 					let shrink_w = total_overflow_w * free_p
 					if (shrink_w != shrink_w) // total_free_w == 0
 						shrink_w = 0
-					sw = floor(flex_w - shrink_w)
+					exact_x += flex_w - shrink_w
+					sw = round(exact_x) - sx
 				}
 
-
-				// let the last child eat up any rounding errors.
+				// the last child ends on the container's edge.
 				if (is_last_flex_child(a, i))
 					sw = ct_sw - (sx - ct_sx)
 
@@ -3381,6 +3383,7 @@ function position_flex(a, i, axis, sx, sw) {
 				position_f(a, i, axis, sx, sw)
 
 				sx += sw + gap
+				exact_x += gap
 
 			} else {
 
