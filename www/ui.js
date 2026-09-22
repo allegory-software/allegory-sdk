@@ -8102,23 +8102,24 @@ function date_input_update(id, s) {
 
 	s.input_value = undefined
 
-	let cal_id = id+'.calendar'
-	let picker_id = cal_id+'.picker'
+	let picker_id = id+'.picker'
 	let input_id = id+'.input'
 
+	ui.dropdown_update(id, s)
+
 	if (ui.focused(input_id) && (ui.keydown('f2') || ui.keydown('enter'))) {
-		ui.set_dropdown_open(cal_id, !ui.dropdown_open(cal_id))
+		ui.set_dropdown_open(id, !ui.dropdown_open(id))
 		ui.capture_keys()
 	} else if (ui.focused(input_id) && ui.keydown('escape')
-		&& ui.dropdown_open(cal_id)) {
-		ui.set_dropdown_open(cal_id, false)
+		&& ui.dropdown_open(id)) {
+		ui.set_dropdown_open(id, false)
 		ui.capture_keys()
 	}
 
-	if (ui.dropdown_opened(cal_id))
+	if (ui.dropdown_opened(id))
 		s.revert_value = s.value
-	else if (ui.dropdown_closed(cal_id))
-		s.input_value = ui.dropdown_picked(cal_id)
+	else if (ui.dropdown_closed(id))
+		s.input_value = ui.dropdown_picked(id)
 			? ui.value(picker_id) : s.revert_value
 
 	let text = ui.input_value(input_id)
@@ -8132,8 +8133,7 @@ function date_input_update(id, s) {
 
 ui.date_input = function(id, v, opt, fr, align, valign, min_w) {
 
-	let cal_id = id+'.calendar'
-	let picker_id = cal_id+'.picker'
+	let picker_id = id+'.picker'
 	let input_id = id+'.input'
 
 	let s = ui.state(id)
@@ -8147,12 +8147,12 @@ ui.date_input = function(id, v, opt, fr, align, valign, min_w) {
 	}
 
 	let focused = ui.focused(input_id)
-	let open = ui.dropdown(cal_id, 'b', 'cs')
+	let open = ui.dropdown(id, 'b', 'cs')
 	if (!open && ui.focus_inside(picker_id))
 		ui.focus(input_id)
 
-	let opened = ui.dropdown_opened(cal_id)
-	if (ui.dropdown_picked(cal_id)) {
+	let opened = ui.dropdown_opened(id)
+	if (ui.dropdown_picked(id)) {
 		ui.focus(input_id)
 		ui.select_text(input_id, 0, 1/0)
 	}
@@ -8168,12 +8168,12 @@ ui.date_input = function(id, v, opt, fr, align, valign, min_w) {
 	input_align = input_align == ALIGN_END ? 'sr'
 		: input_align == ALIGN_CENTER ? 'sc' : 's'
 
-		ui.stack(id, fr, 's', 's')
+		ui.stack(input_id, fr, 's', 's')
 			ui.bb('input', focused ? 'focused' : null,
 				1, 'intense', focused ? 'hover' : null)
 			ui.h(0, 0, 's', 's', min_w ?? ui.em_input())
 				ui.p(ui.sp(), ui.sp(), 0, ui.sp())
-				ui.icon(cal_id, 'calendar', 0, 'l', 'c')
+				ui.icon(id, 'calendar', 0, 'l', 'c')
 				ui.p(ui.sp05(), ui.sp(), ui.sp(), ui.sp())
 				ui.color('text', focused ? 'focused' : null)
 				ui.text_editable(input_id, text, 1,
@@ -8193,7 +8193,7 @@ ui.date_input = function(id, v, opt, fr, align, valign, min_w) {
 					* snap(ui.em(2.5), 2)
 			}
 			ui.calendar(picker_id, sel_day, null)
-			ui.resizer(cal_id+'.resizer', null, null, 'y')
+			ui.resizer(id+'.resizer', null, null, 'y')
 		}
 
 	ui.end_dropdown()
