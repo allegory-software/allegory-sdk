@@ -894,172 +894,174 @@ end
 
 -- text colors ---------------------------------------------------------------
 
-ui.fg_style = def_color_func'fg'
+ui.fg_def = def_color_func'fg'
 ui.fg_color = lookup_color_func'fg'
 
 --           theme    name     state       h     s     L
 ------------------------------------------------------------------------------
-ui.fg_style('light', 'text'   , 'normal' ,   0, 0.00, 0.00)
-ui.fg_style('light', 'text'   , 'hover'  ,   0, 0.00, 0.30)
-ui.fg_style('light', 'text'   , 'active' ,   0, 0.00, 0.40)
-ui.fg_style('light', 'label'  , 'normal' ,   0, 0.00, 0.00)
-ui.fg_style('light', 'label'  , 'hover'  ,   0, 0.00, 0.00)
-ui.fg_style('light', 'link'   , 'normal' , 222, 0.00, 0.50)
-ui.fg_style('light', 'link'   , 'hover'  , 222, 1.00, 0.70)
-ui.fg_style('light', 'link'   , 'active' , 222, 1.00, 0.80)
+ui.fg_def('light', 'text'   , 'normal' ,   0, 0.00, 0.00)
+ui.fg_def('light', 'text'   , 'hover'  ,   0, 0.00, 0.30)
+ui.fg_def('light', 'text'   , 'active' ,   0, 0.00, 0.40)
+ui.fg_def('light', 'heading', 'normal' ,   0, 0.00, 0.15)
+ui.fg_def('light', 'label'  , 'normal' ,   0, 0.00, 0.00)
+ui.fg_def('light', 'label'  , 'hover'  ,   0, 0.00, 0.00)
+ui.fg_def('light', 'link'   , 'normal' , 222, 0.00, 0.50)
+ui.fg_def('light', 'link'   , 'hover'  , 222, 1.00, 0.70)
+ui.fg_def('light', 'link'   , 'active' , 222, 1.00, 0.80)
 
-ui.fg_style('dark' , 'title'  , 'normal' ,   0, 0.00, 0.90)
-ui.fg_style('dark' , 'title'  , 'hover'  ,   0, 0.00, 1.00)
-ui.fg_style('dark' , 'title'  , 'active' ,   0, 0.00, 1.00)
-ui.fg_style('dark' , 'text'   , 'normal' ,   0, 0.00, 0.90)
-ui.fg_style('dark' , 'text'   , 'hover'  ,   0, 0.00, 1.00)
-ui.fg_style('dark' , 'text'   , 'active' ,   0, 0.00, 1.00)
-ui.fg_style('dark' , 'label'  , 'normal' ,   0, 0.00, 0.80)
-ui.fg_style('dark' , 'label'  , 'hover'  ,   0, 0.00, 1.00)
-ui.fg_style('dark' , 'label'  , 'active' ,   0, 0.00, 1.00)
-ui.fg_style('dark' , 'link'   , 'normal' ,  26, 0.88, 0.60)
-ui.fg_style('dark' , 'link'   , 'hover'  ,  26, 0.99, 0.70)
-ui.fg_style('dark' , 'link'   , 'active' ,  26, 0.99, 0.80)
+ui.fg_def('dark' , 'title'  , 'normal' ,   0, 0.00, 0.90)
+ui.fg_def('dark' , 'title'  , 'hover'  ,   0, 0.00, 1.00)
+ui.fg_def('dark' , 'title'  , 'active' ,   0, 0.00, 1.00)
+ui.fg_def('dark' , 'text'   , 'normal' ,   0, 0.00, 0.90)
+ui.fg_def('dark' , 'text'   , 'hover'  ,   0, 0.00, 1.00)
+ui.fg_def('dark' , 'text'   , 'active' ,   0, 0.00, 1.00)
+ui.fg_def('dark' , 'heading', 'normal' ,   0, 0.00, 0.80)
+ui.fg_def('dark' , 'label'  , 'normal' ,   0, 0.00, 0.80)
+ui.fg_def('dark' , 'label'  , 'hover'  ,   0, 0.00, 1.00)
+ui.fg_def('dark' , 'label'  , 'active' ,   0, 0.00, 1.00)
+ui.fg_def('dark' , 'link'   , 'normal' ,  26, 0.88, 0.60)
+ui.fg_def('dark' , 'link'   , 'hover'  ,  26, 0.99, 0.70)
+ui.fg_def('dark' , 'link'   , 'active' ,  26, 0.99, 0.80)
 
-ui.fg_style('light', 'marker' , 'normal' ,   0, 0.00, 0.5) -- TODO
-ui.fg_style('light', 'marker' , 'hover'  ,   0, 0.00, 0.5) -- TODO
-ui.fg_style('light', 'marker' , 'active' ,   0, 0.00, 0.5) -- TODO
+ui.fg_def('light', 'marker' , 'normal' ,   0, 0.00, 0.5) -- TODO
+ui.fg_def('light', 'marker' , 'hover'  ,   0, 0.00, 0.5) -- TODO
+ui.fg_def('light', 'marker' , 'active' ,   0, 0.00, 0.5) -- TODO
 
-ui.fg_style('dark' , 'marker' , 'normal' ,  61, 1.00, 0.57)
-ui.fg_style('dark' , 'marker' , 'hover'  ,  61, 1.00, 0.57) -- TODO
-ui.fg_style('dark' , 'marker' , 'active' ,  61, 1.00, 0.57) -- TODO
+ui.fg_def('dark' , 'marker' , 'normal' ,  61, 1.00, 0.57)
+ui.fg_def('dark' , 'marker' , 'hover'  ,  61, 1.00, 0.57) -- TODO
+ui.fg_def('dark' , 'marker' , 'active' ,  61, 1.00, 0.57) -- TODO
 
-ui.fg_style('light', 'button-danger', 'normal', 0, 0.54, 0.43)
-ui.fg_style('dark' , 'button-danger', 'normal', 0, 0.54, 0.43)
+ui.fg_def('light', 'button-danger', 'normal', 0, 0.54, 0.43)
+ui.fg_def('dark' , 'button-danger', 'normal', 0, 0.54, 0.43)
 
-ui.fg_style('light', 'faint' , 'normal' ,  0, 0.00, 0.70)
-ui.fg_style('dark' , 'faint' , 'normal' ,  0, 0.00, 0.30)
+ui.fg_def('light', 'faint' , 'normal' ,  0, 0.00, 0.70)
+ui.fg_def('dark' , 'faint' , 'normal' ,  0, 0.00, 0.30)
 
 -- border colors -------------------------------------------------------------
 
-ui.border_style = def_color_func'border'
+ui.border_def = def_color_func'border'
 ui.border_color = lookup_color_func'border'
 
 --               theme    name        state       h     s     L
 ------------------------------------------------------------------------------
-ui.border_style('light', 'light'   , 'normal' ,   0,    0,    0)
-ui.border_style('light', 'light'   , 'hover'  ,   0,    0,    0)
-ui.border_style('light', 'intense' , 'normal' ,   0,    0,    0)
-ui.border_style('light', 'intense' , 'hover'  ,   0,    0,    0)
-ui.border_style('light', 'max'     , 'normal' ,   0,    0,    0)
-ui.border_style('light', 'marker'  , 'normal' ,  61, 1.00, 0.57) -- TODO
+ui.border_def('light', 'light'   , 'normal' ,   0,    0,    0)
+ui.border_def('light', 'light'   , 'hover'  ,   0,    0,    0)
+ui.border_def('light', 'intense' , 'normal' ,   0,    0,    0)
+ui.border_def('light', 'intense' , 'hover'  ,   0,    0,    0)
+ui.border_def('light', 'max'     , 'normal' ,   0,    0,    0)
+ui.border_def('light', 'marker'  , 'normal' ,  61, 1.00, 0.57) -- TODO
 
-ui.border_style('dark' , 'light'   , 'normal' ,   0,    0, 0.35)
-ui.border_style('dark' , 'light'   , 'hover'  ,   0,    0, 0.55)
-ui.border_style('dark' , 'light'   , 'active' ,   0,    0, 0.75)
-ui.border_style('dark' , 'intense' , 'normal' ,   0,    0, 0.20)
-ui.border_style('dark' , 'intense' , 'hover'  ,   0,    0, 0.40)
-ui.border_style('dark' , 'max'     , 'normal' ,   0,    0, 1.00)
-ui.border_style('dark' , 'marker'  , 'normal' ,  61, 1.00, 0.57)
+ui.border_def('dark' , 'light'   , 'normal' ,   0,    0, 0.35)
+ui.border_def('dark' , 'light'   , 'hover'  ,   0,    0, 0.55)
+ui.border_def('dark' , 'light'   , 'active' ,   0,    0, 0.75)
+ui.border_def('dark' , 'intense' , 'normal' ,   0,    0, 0.20)
+ui.border_def('dark' , 'intense' , 'hover'  ,   0,    0, 0.40)
+ui.border_def('dark' , 'max'     , 'normal' ,   0,    0, 1.00)
+ui.border_def('dark' , 'marker'  , 'normal' ,  61, 1.00, 0.57)
 
 -- background colors ---------------------------------------------------------
 
-ui.bg_style = def_color_func'bg'
+ui.bg_def = def_color_func'bg'
 ui.bg_color = lookup_color_func'bg'
 
 --           theme    name      state       h     s     L
 ------------------------------------------------------------------------------
-ui.bg_style('light', 'bg0'   , 'normal' ,   0, 0.00, 0.98)
-ui.bg_style('light', 'bg'    , 'normal' ,   0, 0.00, 1.00)
-ui.bg_style('light', 'bg'    , 'hover'  ,   0, 0.00, 0.95)
-ui.bg_style('light', 'bg'    , 'active' ,   0, 0.00, 0.93)
-ui.bg_style('light', 'bg1'   , 'normal' ,   0, 0.00, 0.95)
-ui.bg_style('light', 'bg1'   , 'hover'  ,   0, 0.00, 0.93)
-ui.bg_style('light', 'bg1'   , 'active' ,   0, 0.00, 0.90)
-ui.bg_style('light', 'bg2'   , 'normal' ,   0, 0.00, 0.85)
-ui.bg_style('light', 'bg2'   , 'hover'  ,   0, 0.00, 0.82)
-ui.bg_style('light', 'bg3'   , 'normal' ,   0, 0.00, 0.70)
-ui.bg_style('light', 'bg3'   , 'hover'  ,   0, 0.00, 0.75)
-ui.bg_style('light', 'bg3'   , 'active' ,   0, 0.00, 0.80)
-ui.bg_style('light', 'alt'   , 'normal' ,   0, 0.00, 0.95) -- bg alternate for grid cells
-ui.bg_style('light', 'smoke' , 'normal' ,   0, 0.00, 1.00)
-ui.bg_style('light', 'input' , 'normal' ,   0, 0.00, 0.98)
-ui.bg_style('light', 'input' , 'hover'  ,   0, 0.00, 0.94)
-ui.bg_style('light', 'input' , 'active' ,   0, 0.00, 0.90)
+ui.bg_def('light', 'bg0'   , 'normal' ,   0, 0.00, 0.98)
+ui.bg_def('light', 'bg'    , 'normal' ,   0, 0.00, 1.00)
+ui.bg_def('light', 'bg'    , 'hover'  ,   0, 0.00, 0.95)
+ui.bg_def('light', 'bg'    , 'active' ,   0, 0.00, 0.93)
+ui.bg_def('light', 'bg1'   , 'normal' ,   0, 0.00, 0.95)
+ui.bg_def('light', 'bg1'   , 'hover'  ,   0, 0.00, 0.93)
+ui.bg_def('light', 'bg1'   , 'active' ,   0, 0.00, 0.90)
+ui.bg_def('light', 'bg2'   , 'normal' ,   0, 0.00, 0.85)
+ui.bg_def('light', 'bg2'   , 'hover'  ,   0, 0.00, 0.82)
+ui.bg_def('light', 'bg3'   , 'normal' ,   0, 0.00, 0.70)
+ui.bg_def('light', 'bg3'   , 'hover'  ,   0, 0.00, 0.75)
+ui.bg_def('light', 'bg3'   , 'active' ,   0, 0.00, 0.80)
+ui.bg_def('light', 'alt'   , 'normal' ,   0, 0.00, 0.95) -- bg alternate for grid cells
+ui.bg_def('light', 'smoke' , 'normal' ,   0, 0.00, 1.00)
+ui.bg_def('light', 'input' , 'normal' ,   0, 0.00, 0.98)
+ui.bg_def('light', 'input' , 'hover'  ,   0, 0.00, 0.94)
+ui.bg_def('light', 'input' , 'active' ,   0, 0.00, 0.90)
 
-ui.bg_style('dark' , 'bg0'   , 'normal' , 216, 0.28, 0.08)
-ui.bg_style('dark' , 'bg'    , 'normal' , 216, 0.00, 0.10)
-ui.bg_style('dark' , 'bg'    , 'hover'  , 216, 0.00, 0.25)
-ui.bg_style('dark' , 'bg'    , 'active' , 216, 0.00, 0.14)
-ui.bg_style('dark' , 'bg1'   , 'normal' , 216, 0.28, 0.15)
-ui.bg_style('dark' , 'bg1'   , 'hover'  , 216, 0.28, 0.19)
-ui.bg_style('dark' , 'bg1'   , 'active' , 216, 0.28, 0.22)
-ui.bg_style('dark' , 'bg2'   , 'normal' , 216, 0.28, 0.22)
-ui.bg_style('dark' , 'bg2'   , 'hover'  , 216, 0.28, 0.25)
-ui.bg_style('dark' , 'bg3'   , 'normal' , 216, 0.28, 0.29)
-ui.bg_style('dark' , 'bg3'   , 'hover'  , 216, 0.28, 0.31)
-ui.bg_style('dark' , 'bg3'   , 'active' , 216, 0.28, 0.33)
-ui.bg_style('dark' , 'alt'   , 'normal' , 260, 0.28, 0.13)
-ui.bg_style('dark' , 'smoke' , 'normal' ,   0, 0.00, 0.00)
-ui.bg_style('dark' , 'input' , 'normal' , 216, 0.28, 0.17)
-ui.bg_style('dark' , 'input' , 'hover'  , 216, 0.28, 0.21)
-ui.bg_style('dark' , 'input' , 'active' , 216, 0.28, 0.25)
+ui.bg_def('dark' , 'bg0'   , 'normal' , 216, 0.28, 0.08)
+ui.bg_def('dark' , 'bg'    , 'normal' , 216, 0.00, 0.10)
+ui.bg_def('dark' , 'bg'    , 'hover'  , 216, 0.00, 0.25)
+ui.bg_def('dark' , 'bg'    , 'active' , 216, 0.00, 0.14)
+ui.bg_def('dark' , 'bg1'   , 'normal' , 216, 0.28, 0.15)
+ui.bg_def('dark' , 'bg1'   , 'hover'  , 216, 0.28, 0.19)
+ui.bg_def('dark' , 'bg1'   , 'active' , 216, 0.28, 0.22)
+ui.bg_def('dark' , 'bg2'   , 'normal' , 216, 0.28, 0.22)
+ui.bg_def('dark' , 'bg2'   , 'hover'  , 216, 0.28, 0.25)
+ui.bg_def('dark' , 'bg3'   , 'normal' , 216, 0.28, 0.29)
+ui.bg_def('dark' , 'bg3'   , 'hover'  , 216, 0.28, 0.31)
+ui.bg_def('dark' , 'bg3'   , 'active' , 216, 0.28, 0.33)
+ui.bg_def('dark' , 'alt'   , 'normal' , 260, 0.28, 0.13)
+ui.bg_def('dark' , 'smoke' , 'normal' ,   0, 0.00, 0.00)
+ui.bg_def('dark' , 'input' , 'normal' , 216, 0.28, 0.17)
+ui.bg_def('dark' , 'input' , 'hover'  , 216, 0.28, 0.21)
+ui.bg_def('dark' , 'input' , 'active' , 216, 0.28, 0.25)
 
 -- TODO: see if we can find a declarative way to copy fg colors to bg in bulk.
 for _,theme in ipairs{'light', 'dark'} do
 	for _,state in ipairs{'normal', 'hover', 'active'} do
 		for _,fg in ipairs{'text', 'link', 'marker'} do
-			ui.bg_style(theme, fg, state, ui.fg_color(fg, state, theme))
+			ui.bg_def(theme, fg, state, ui.fg_color(fg, state, theme))
 		end
 	end
 end
 
-ui.bg_style('light', 'scrollbar', 'normal' ,   0, 0.00, 0.70, 0.5)
-ui.bg_style('light', 'scrollbar', 'hover'  ,   0, 0.00, 0.75, 0.8)
-ui.bg_style('light', 'scrollbar', 'active' ,   0, 0.00, 0.80, 0.8)
+ui.bg_def('light', 'scrollbar', 'normal' ,   0, 0.00, 0.70, 0.5)
+ui.bg_def('light', 'scrollbar', 'hover'  ,   0, 0.00, 0.75, 0.8)
+ui.bg_def('light', 'scrollbar', 'active' ,   0, 0.00, 0.80, 0.8)
 
-ui.bg_style('dark' , 'scrollbar', 'normal' , 216, 0.28, 0.37, 0.5)
-ui.bg_style('dark' , 'scrollbar', 'hover'  , 216, 0.28, 0.41, 0.8)
-ui.bg_style('dark' , 'scrollbar', 'active' , 216, 0.28, 0.45, 0.8)
+ui.bg_def('dark' , 'scrollbar', 'normal' , 216, 0.28, 0.37, 0.5)
+ui.bg_def('dark' , 'scrollbar', 'hover'  , 216, 0.28, 0.41, 0.8)
+ui.bg_def('dark' , 'scrollbar', 'active' , 216, 0.28, 0.45, 0.8)
 
-ui.bg_style('*', 'button'        , '*' , 'bg')
-ui.bg_style('*', 'button-primary', '*' , 'link')
+ui.bg_def('*', 'button'        , '*' , 'bg')
+ui.bg_def('*', 'button-primary', '*' , 'link')
 
-ui.bg_style('*', 'search' , 'normal',  60,  1.00, 0.80) -- quicksearch text bg
-ui.bg_style('*', 'info'   , 'normal', 200,  1.00, 0.30) -- info bubbles
-ui.bg_style('*', 'warn'   , 'normal',  39,  1.00, 0.50) -- warning bubbles
-ui.bg_style('*', 'error'  , 'normal',   0,  0.54, 0.43) -- error bubbles
+ui.bg_def('*', 'search' , 'normal',  60,  1.00, 0.80) -- quicksearch text bg
+ui.bg_def('*', 'info'   , 'normal', 200,  1.00, 0.30) -- info bubbles
+ui.bg_def('*', 'warn'   , 'normal',  39,  1.00, 0.50) -- warning bubbles
+ui.bg_def('*', 'error'  , 'normal',   0,  0.54, 0.43) -- error bubbles
 
 -- input value states
-ui.bg_style('light', 'item', 'new'           , 240, 1.00, 0.97)
-ui.bg_style('light', 'item', 'modified'      , 120, 1.00, 0.93)
-ui.bg_style('light', 'item', 'new modified'  , 180, 0.55, 0.87)
+ui.bg_def('light', 'item', 'new'           , 240, 1.00, 0.97)
+ui.bg_def('light', 'item', 'modified'      , 120, 1.00, 0.93)
+ui.bg_def('light', 'item', 'new modified'  , 180, 0.55, 0.87)
 
-ui.bg_style('dark' , 'item', 'new'           , 240, 0.35, 0.27)
-ui.bg_style('dark' , 'item', 'modified'      , 120, 0.59, 0.24)
-ui.bg_style('dark' , 'item', 'new modified'  , 157, 0.18, 0.20)
+ui.bg_def('dark' , 'item', 'new'           , 240, 0.35, 0.27)
+ui.bg_def('dark' , 'item', 'modified'      , 120, 0.59, 0.24)
+ui.bg_def('dark' , 'item', 'new modified'  , 157, 0.18, 0.20)
 
 -- grid cell & row states. these need to be opaque!
-ui.bg_style('light', 'item', 'item-focused'                       ,   0, 0.00, 0.93)
-ui.bg_style('light', 'item', 'item-selected'                      ,   0, 0.00, 0.91)
-ui.bg_style('light', 'item', 'item-focused item-selected'         ,   0, 0.00, 0.87)
-ui.bg_style('light', 'item', 'item-focused focused'               ,   0, 0.00, 0.87)
-ui.bg_style('light', 'item', 'item-focused item-selected focused' , 139 / 239 * 360, 141 / 240, 206 / 240)
-ui.bg_style('light', 'item', 'item-selected focused'              , 139 / 239 * 360, 150 / 240, 217 / 240)
-ui.bg_style('light', 'item', 'item-error'                         ,   0, 0.54, 0.43)
-ui.bg_style('light', 'item', 'item-error item-focused'            ,   0, 1.00, 0.60)
+ui.bg_def('light', 'item', 'item-focused'                       ,   0, 0.00, 0.93)
+ui.bg_def('light', 'item', 'item-selected'                      ,   0, 0.00, 0.91)
+ui.bg_def('light', 'item', 'item-focused item-selected'         ,   0, 0.00, 0.87)
+ui.bg_def('light', 'item', 'item-focused focused'               ,   0, 0.00, 0.87)
+ui.bg_def('light', 'item', 'item-focused item-selected focused' , 139 / 239 * 360, 141 / 240, 206 / 240)
+ui.bg_def('light', 'item', 'item-selected focused'              , 139 / 239 * 360, 150 / 240, 217 / 240)
+ui.bg_def('light', 'item', 'item-error'                         ,   0, 0.54, 0.43)
+ui.bg_def('light', 'item', 'item-error item-focused'            ,   0, 1.00, 0.60)
 
-ui.bg_style('light', 'row' , 'item-focused focused'               , 139 / 239 * 360, 150 / 240, 231 / 240)
-ui.bg_style('light', 'row' , 'item-focused'                       , 139 / 239 * 360,   0 / 240, 231 / 240)
-ui.bg_style('light', 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
+ui.bg_def('light', 'row' , 'item-focused focused'               , 139 / 239 * 360, 150 / 240, 231 / 240)
+ui.bg_def('light', 'row' , 'item-focused'                       , 139 / 239 * 360,   0 / 240, 231 / 240)
+ui.bg_def('light', 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
 
-ui.bg_style('dark' , 'item', 'item-focused'                       , 195, 0.06, 0.12)
-ui.bg_style('dark' , 'item', 'item-selected'                      ,   0, 0.00, 0.20)
-ui.bg_style('dark' , 'item', 'item-focused item-selected'         , 208, 0.11, 0.23)
-ui.bg_style('dark' , 'item', 'item-focused focused'               ,   0, 0.00, 0.23)
-ui.bg_style('dark' , 'item', 'item-focused item-selected focused' , 211, 0.62, 0.24)
-ui.bg_style('dark' , 'item', 'item-selected focused'              , 211, 0.62, 0.19)
-ui.bg_style('dark' , 'item', 'item-error'                         ,   0, 0.54, 0.43)
-ui.bg_style('dark' , 'item', 'item-error item-focused'            ,   0, 1.00, 0.60)
+ui.bg_def('dark' , 'item', 'item-focused'                       , 195, 0.06, 0.12)
+ui.bg_def('dark' , 'item', 'item-selected'                      ,   0, 0.00, 0.20)
+ui.bg_def('dark' , 'item', 'item-focused item-selected'         , 208, 0.11, 0.23)
+ui.bg_def('dark' , 'item', 'item-focused focused'               ,   0, 0.00, 0.23)
+ui.bg_def('dark' , 'item', 'item-focused item-selected focused' , 211, 0.62, 0.24)
+ui.bg_def('dark' , 'item', 'item-selected focused'              , 211, 0.62, 0.19)
+ui.bg_def('dark' , 'item', 'item-error'                         ,   0, 0.54, 0.43)
+ui.bg_def('dark' , 'item', 'item-error item-focused'            ,   0, 1.00, 0.60)
 
-ui.bg_style('dark' , 'row' , 'item-focused focused'               , 212, 0.61, 0.13)
-ui.bg_style('dark' , 'row' , 'item-focused'                       ,   0, 0.00, 0.13)
-ui.bg_style('dark' , 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
+ui.bg_def('dark' , 'row' , 'item-focused focused'               , 212, 0.61, 0.13)
+ui.bg_def('dark' , 'row' , 'item-focused'                       ,   0, 0.00, 0.13)
+ui.bg_def('dark' , 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
 
 --[[ widget state ------------------------------------------------------------
 
