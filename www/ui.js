@@ -278,6 +278,7 @@ ui.alpha_adjust = alpha_adjust
 // Concrete colors can also be specified by prefixing them with a `:` (for
 // light colors) or `*` (for dark colors), eg. `:#fff`, `*red`, etc. but that
 // throws away the ability to HSL-adjust the color.
+// Colors can be copied by specifying (name, [state], [theme], [is_dark]).
 
 function def_color_func(k) {
 	function def_color(theme, name, state, h, s, L, a, is_dark) {
@@ -313,9 +314,14 @@ function def_color_func(k) {
 			state_colors = {}
 			states.set(state_i, state_colors)
 		}
-		state_colors[name] = isnum(h)
-			? [hsl(h, s, L, a), h, s, L, a, is_dark]
-			: isarray(h) ? h : ui[k+'_color_hsl'](h, s ?? state_i, L ?? theme)
+		if (isnum(h)) { // h, s, L, a, [is_dark]
+			state_colors[name] = [hsl(h, s, L, a), h, s, L, a, is_dark]
+		} else if (isarray(h)) { // color object
+			state_colors[name] = h
+		} else { // name, [state], [theme], [is_dark]
+			let c = ui[k+'_color_hsl'](h, s ?? state_i, L ?? theme)
+			state_colors[name] = [c[0], c[1], c[2], c[3], c[4], a ?? c[5]]
+		}
 	}
 	return def_color
 }
@@ -396,18 +402,18 @@ ui.fg_color = fg_color
 ui.fg_color_rgb  = lookup_color_rgb_int_func(fg_color_hsl)
 ui.fg_color_rgba = lookup_color_rgba_int_func(fg_color_hsl)
 
-//           theme    name       state       h     s     L    a
+//           theme    name       state     h     s     L    a
 // ---------------------------------------------------------------------------
-ui.fg_def('light', 'text'   , 'normal' ,   0, 0.00, 0.00)
-ui.fg_def('light', 'text'   , 'hover'  ,   0, 0.00, 0.30)
-ui.fg_def('light', 'text'   , 'active' ,   0, 0.00, 0.40)
+ui.fg_def('light', 'text'   , 'normal' ,   0, 0.00, 0.35)
+ui.fg_def('light', 'text'   , 'hover'  ,   0, 0.00, 0.10)
+ui.fg_def('light', 'text'   , 'active' ,   0, 0.00, 0.00)
 ui.fg_def('light', 'text'   , 'focused',   0, 0.00, 0.00)
 ui.fg_def('light', 'heading', 'normal' ,   0, 0.00, 0.55)
 ui.fg_def('light', 'label'  , 'normal' ,   0, 0.00, 0.00)
 ui.fg_def('light', 'label'  , 'hover'  ,   0, 0.00, 0.00, 0.9)
-ui.fg_def('light', 'link'   , 'normal' , 222, 0.00, 0.50)
-ui.fg_def('light', 'link'   , 'hover'  , 222, 1.00, 0.70)
-ui.fg_def('light', 'link'   , 'active' , 222, 1.00, 0.80)
+ui.fg_def('light', 'link'   , 'normal' , 252, 0.50, 0.50, 1, true)
+ui.fg_def('light', 'link'   , 'hover'  , 252, 0.50, 0.40, 1, true)
+ui.fg_def('light', 'link'   , 'active' , 252, 0.50, 0.30, 1, true)
 
 ui.fg_def('dark' , 'text'   , 'normal' ,   0, 0.00, 0.8)
 ui.fg_def('dark' , 'text'   , 'hover'  ,   0, 0.00, 1.00)
@@ -491,7 +497,7 @@ ui.bg_def('light', 'bg2'   , 'hover'  ,   0, 0.00, 0.82)
 ui.bg_def('light', 'bg3'   , 'normal' ,   0, 0.00, 0.70)
 ui.bg_def('light', 'bg3'   , 'hover'  ,   0, 0.00, 0.75)
 ui.bg_def('light', 'bg3'   , 'active' ,   0, 0.00, 0.80)
-ui.bg_def('light', 'alt'   , 'normal' ,   0, 0.00, 0.95) // grid cell alternate
+ui.bg_def('light', 'alt'   , 'normal' ,   0, 0.00, 0.98) // grid cell alternate
 ui.bg_def('light', 'smoke' , 'normal' ,   0, 0.00, 1.00, 0.80)
 ui.bg_def('light', 'input' , 'normal' ,   0, 0.00, 0.98)
 ui.bg_def('light', 'input' , 'focused',   0, 0.00, 1.00)
@@ -528,6 +534,7 @@ ui.bg_def('dark' , 'scrollbar', 'normal' , 216, 0.28, 0.37, 0.5)
 ui.bg_def('dark' , 'scrollbar', 'hover'  , 216, 0.28, 0.39, 0.8)
 ui.bg_def('dark' , 'scrollbar', 'active' , 216, 0.28, 0.41, 0.8)
 
+ui.bg_def('*', 'button'        , '*' , 'bg')
 ui.bg_def('*', 'button'        , '*' , 'bg')
 ui.bg_def('*', 'button-primary', '*' , 'link')
 
@@ -3831,8 +3838,8 @@ draw[CMD_SCROLLBOX] = function(a, i) {
 	cx.clip()
 }
 
-ui.scrollbar_thickness = 6
-ui.scrollbar_thickness_active = 12
+ui.scrollbar_thickness = 4
+ui.scrollbar_thickness_active = 10
 
 let scrollbar_rect; {
 let r = [false, 0, 0, 0, 0]
@@ -3855,8 +3862,8 @@ scrollbar_rect = function(a, i, axis, state) {
 	let psy = sy / (ch - h)
 	let pw = w / cw
 	let ph = h / ch
-	let thickness = ui.scrollbar_thickness
-	let thickness_active = state ? ui.scrollbar_thickness_active : thickness
+	let thickness = ui.scrollbar_thickness * dpr
+	let thickness_active = state ? ui.scrollbar_thickness_active * dpr : thickness
 	let visible, tx, ty, tw, th
 	let h_visible = pw < 1 && (
 			   overflow_x == SB_OVERFLOW_SCROLL
@@ -7368,9 +7375,11 @@ ui.box_widget('slider', slider)
 //// TOGGLE ------------------------------------------------------------------
 
 ui.bg_def('*', 'toggle'      , '*', 'bg2')
-ui.bg_def('*', 'toggle'      , 'normal item-selected', 'link', 'normal')
-ui.bg_def('*', 'toggle'      , 'hover  item-selected', 'link', 'hover' )
 ui.bg_def('*', 'toggle-thumb', '*', 'text')
+ui.bg_def('light', 'toggle', 'item-selected'      , 'link', 'normal')
+ui.bg_def('light', 'toggle', 'hover item-selected', 'link', 'hover' )
+ui.bg_def('dark' , 'toggle', 'item-selected'      , 'link', 'normal')
+ui.bg_def('dark' , 'toggle', 'hover item-selected', 'link', 'hover' )
 
 let TOGGLE_ID    = BOX_ARGS+0
 let TOGGLE_STATE = BOX_ARGS+1
@@ -7431,8 +7440,9 @@ toggle.draw = function(a, i) {
 	let hs = flags & TOGGLE_HOVER
 	let focused = flags & TOGGLE_FOCUSED
 
-	// focus ring
+	let prev_theme = theme
 
+	// focus ring
 	if (focused) {
 		let m = 3
 		toggle_path(cx, x - m, y - m, w + 2*m, h + 2*m)
@@ -7442,25 +7452,25 @@ toggle.draw = function(a, i) {
 	}
 
 	// button
-
 	toggle_path(cx, x, y, w, h)
 	let state =
 		(on ? STATE_ITEM_SELECTED : 0) |
 		(hs ? STATE_HOVER         : 0)
-	cx.fillStyle = ui_bg_color('toggle', state)
+	set_bg_color('toggle', state)
 	cx.fill()
 
 	// thumb
-
 	cx.beginPath()
 	let cx1 = on ? x + w - h / 2 : x + h / 2
 	let cy1 = y + h / 2
 	cx.arc(cx1, cy1, h * .35, 0, 2 * PI)
 	cx.closePath()
 	ui.set_shadow('button')
-	cx.fillStyle = ui_bg_color('toggle-thumb', hs ? 'hover' : null)
+	cx.fillStyle = bg_color('toggle-thumb', hs ? 'hover' : null)
 	cx.fill()
 	reset_shadow()
+
+	theme = prev_theme
 }
 
 ui.box_widget('toggle', toggle)
@@ -7488,45 +7498,44 @@ checkbox.draw = function(a, i) {
 	let state =
 		(on ? STATE_ITEM_SELECTED : 0) |
 		(hs ? STATE_HOVER         : 0)
-	let bg = bg_color_hsl('toggle', state)
-	let fg = fg_color('text', hs ? 'hover' : null, bg_is_dark(bg) ? 'dark' : 'light')
-	bg = bg[0]
 
 	// focus ring
-
 	if (focused) {
 		let m = 3
 		cx.beginPath()
-		cx.roundRect(x - m, y - m, w + 2*m, h + 2*m, 2 + m)
+		cx.roundRect(x - m, y - m, w + 2*m, h + 2*m, 2 + m * dpr)
 		cx.strokeStyle = border_color('max', null)
 		cx.lineWidth = 1
 		cx.stroke()
 	}
 
-	// check box
+	let prev_theme = theme
 
+	// check box
 	cx.beginPath()
-	cx.roundRect(x, y, w, h, 2)
-	cx.fillStyle = bg
+	cx.roundRect(x, y, w, h, 2 * dpr)
+	set_bg_color('toggle', state)
 	cx.fill()
 
 	// check mark
+	if (on) {
+		cx.beginPath()
+		cx.save()
+		cx.translate(x, y)
+		cx.translate(0.5, 0.5)
+		cx.scale(dpr, dpr)
+		cx.moveTo( 3,  8)
+		cx.lineTo( 7, 15)
+		cx.lineTo(18,  4)
+		cx.strokeStyle = fg_color('text', hs ? 'hover' : null)
+		cx.lineWidth = 1.5
+		cx.lineCap = 'round'
+		cx.lineJoin = 'round'
+		cx.stroke()
+		cx.restore()
+	}
 
-	cx.beginPath()
-	cx.save()
-	cx.translate(x, y)
-	cx.translate(0.5, 0.5)
-	cx.moveTo(5, 11)
-	cx.lineTo(9, 15)
-	cx.lineTo(18, 6)
-	cx.strokeStyle = fg
-	cx.lineWidth = 1.5
-	cx.lineCap = 'round'
-	cx.lineJoin = 'round'
-	cx.setLineDash([20])
-	cx.lineDashOffset = on ? 0 : 20
-	cx.stroke()
-	cx.restore()
+	theme = prev_theme
 
 }
 
@@ -7608,15 +7617,15 @@ radio.draw = function(a, i) {
 		cx.stroke()
 	}
 
-	// button
+	let prev_theme = theme
 
+	// button
 	cx.beginPath()
 	cx.arc(cx1, cy1, h * .5, 0, 2 * PI)
-	cx.fillStyle = bg_color('toggle', on ? 'item-selected' : hs ? 'hover' : null)
+	set_bg_color('toggle', on ? 'item-selected' : hs ? 'hover' : null)
 	cx.fill()
 
 	// bullet
-
 	cx.beginPath()
 	cx.arc(cx1, cy1, h * (on ? .15 : 0), 0, 2 * PI)
 	cx.closePath()
@@ -7625,6 +7634,7 @@ radio.draw = function(a, i) {
 	cx.fill()
 	reset_shadow()
 
+	theme = prev_theme
 }
 
 radio.hit = function(a, i) {
@@ -8882,8 +8892,8 @@ ui.widget('polyline', {
 				x2 += hlw
 				y2 += hlw
 			}
-			add_ct_min_wh(a, 0, x2-x1)
-			add_ct_min_wh(a, 1, y2-y1)
+			add_ct_min_wh(a, 0, (x2-x1) * dpr)
+			add_ct_min_wh(a, 1, (y2-y1) * dpr)
 		}
 	},
 	draw: function(a, i) {
@@ -8898,18 +8908,22 @@ ui.widget('polyline', {
 		let stroke_color       = a[i+POLYLINE_STROKE_COLOR]
 		let stroke_color_state = a[i+POLYLINE_STROKE_COLOR_STATE]
 		let line_width         = a[i+POLYLINE_LINE_WIDTH]
+		cx.save()
+		cx.translate(x0, y0)
+		cx.scale(dpr, dpr)
 		if (fill_color) {
-			set_points(cx, x0, y0, a, pi1, pi2, closed, 0)
+			set_points(cx, 0, 0, a, pi1, pi2, closed, 0)
 			cx.fillStyle = bg_color(fill_color, fill_color_state)
 			cx.fill()
 		}
 		if (stroke_color) {
-			set_points(cx, x0, y0, a, pi1, pi2, closed, line_width / 2)
+			set_points(cx, 0, 0, a, pi1, pi2, closed, line_width / 2)
 			cx.strokeStyle = fg_color(stroke_color, stroke_color_state)
 			cx.lineWidth = line_width
 			cx.stroke()
 			cx.lineWidth = 1
 		}
+		cx.restore()
 	},
 	hit: function(a, i) {
 		let id = a[i+0]

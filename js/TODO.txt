@@ -3,10 +3,11 @@ BUGS
 - text hit clip (repro: hover to the right of the first grid gcol)
 - slider tooltip doesn't follow thumb center exactly
 - resizer moves a little on click even when no mouse move
-- ui.input doesn't clip the text
 - ui.date_input: enter to close while focused on input cancels instead of pick.
-- vertical splitter line is 2 px to the right.
-
+- splitter doesn't collapse right.
+- toolbox: cursor shows I for input that is behind toolbox
+- checkbox, chevron: doesn't scale to dpr
+- grid: some values in size/place columns are shown in diff text state color
 
 INPUTS
 ------------------------------------------------------------------------------

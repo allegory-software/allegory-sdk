@@ -71,21 +71,6 @@ let demos = []
 ui.shadow_def('light', 'demo_tooltip', 1, 1, 3, 0, 0, .8, 1)
 ui.shadow_def('dark',  'demo_tooltip', 1, 1, 3, 0, 0,  0, 1)
 
-demos.frame = `
-ui.scrollbox('sb1')
-	function on_measure(axis) {
-		return 9000
-	}
-	function on_frame(a, i, x, y, w, h, cx, cy, cw, ch) {
-		ui.m(cx-x, cy-y)
-		ui.stack('bb1', 0, 'l', 't', 100, 100)
-			ui.bb(ui.hit('bb1') ? ':green' : ':red')
-		ui.end_stack()
-	}
-	ui.frame(on_measure, on_frame)
-ui.end_scrollbox()
-`
-
 slider1_v = 30
 slider2_v = .5
 demos.silder = `
@@ -181,11 +166,18 @@ ui.end_h()
 `
 
 cb1_checked = false
+cb2_checked = true
 demos.checkbox = `
-ui.h(0, ui.sp(), 'c', 'c')
-	cb1_checked = ui.checkbox('cb1', cb1_checked)
-	ui.label('cb1', 'Check me out!')
-ui.end_h()
+ui.v(0, ui.sp2(), 'c', 'c')
+	ui.h(0, ui.sp(), 'l', 'c')
+		cb1_checked = ui.checkbox('cb1', cb1_checked)
+		ui.label('cb1', 'Check me out!')
+	ui.end_h()
+	ui.h(0, ui.sp(), 'l', 'c')
+		cb2_checked = ui.checkbox('cb2', cb2_checked)
+		ui.label('cb2', 'Check me out too!')
+	ui.end_h()
+ui.end_v()
 `
 
 tabs1 = [
@@ -780,7 +772,14 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 		ui.box()
 		ui.h(0, ui.sp2(), 'l')
 			cb1_checked = ui.checkbox('cb1', cb1_checked)
-			ui.label('cb1', 'Checkbox', 1)
+			ui.label('cb1', 'Checkbox 1', 1)
+		ui.end_h()
+	ui.end_h()
+	ui.h(0, ui.sp4())
+		ui.box()
+		ui.h(0, ui.sp2(), 'l')
+			cb2_checked = ui.checkbox('cb2', cb2_checked)
+			ui.label('cb2', 'Checkbox 2', 1)
 		ui.end_h()
 	ui.end_h()
 	ui.h(0, ui.sp4())
