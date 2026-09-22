@@ -7726,8 +7726,8 @@ function list_dropdown_update(id, s) {
 
 	if (s.opened)
 		s.revert_value = s.value
-	else if (s.closed && !s.picked)
-		s.input_value = s.revert_value
+	else if (s.closed)
+		s.input_value = s.picked ? ui.value(picker_id) : s.revert_value
 
 	let picker_i = ui.input_value(picker_id)
 	if (picker_i !== undefined)
@@ -8114,8 +8114,9 @@ function date_input_update(id, s) {
 
 	if (ui.dropdown_opened(cal_id))
 		s.revert_value = s.value
-	else if (ui.dropdown_closed(cal_id) && !ui.dropdown_picked(cal_id))
-		s.input_value = s.revert_value
+	else if (ui.dropdown_closed(cal_id))
+		s.input_value = ui.dropdown_picked(cal_id)
+			? ui.value(picker_id) : s.revert_value
 
 	let text = ui.input_value(input_id)
 	if (text !== undefined)
