@@ -13,7 +13,9 @@ const ui = _G.ui
 const {
 	pr,
 	isobject,
-	round, min, max, floor, ceil,
+	round, min, max, floor, ceil, abs, clamp,
+	array_move, assign, copy_to_clipboard, empty_array,
+	noop,
 } = glue
 
 const {
@@ -399,9 +401,10 @@ function init(id, e) {
 		let field_focused = cs.field_focused
 
 		let hovering = hit_zone == 'cell' && hit_ri == ri && hit_fi == fi
+		let align = e.field_align(field)
 		let full_width = !build_stage
 			&& ((row_focused && field_focused) || hovering)
-			&& (field.align == 'left' || !field_has_indent(field))
+			&& (align == 'left' || !field_has_indent(field))
 
 		let indent_x = 0
 		let collapsed
@@ -429,16 +432,17 @@ function init(id, e) {
 		let pad_r = sp2
 		let cell_x = x
 		let cell_w = w
-		// because we don't have overflow direction as a concept in the layout
-		// system (only ui.text overflows and always to the right, which is
-		// only good for left align), we need to employ this hack to align the
-		// overflown cell correctly for right and center align.
-		if (full_width && field.builds_text && field.align != 'left') {
+		// because ui.text doesn't support overflow direction (ui.text overflows
+		// always to the right), we need to expand the overflown cell and shift
+		// it left for right and center align.
+		if (full_width && field.builds_text) {
 			let s = e.cell_text_val(row, field)
 			if (s) {
 				cell_w = max(w, ceil(ui.measure_text(cx, s).width) + pad_l + pad_r)
 				let overflow = cell_w - w
-				cell_x = x - (field.align == 'center' ? round(overflow / 2) : overflow)
+				cell_x = x - (
+					align == 'center' ? round(overflow / 2) :
+					align == 'right' ? overflow : 0)
 			}
 		}
 

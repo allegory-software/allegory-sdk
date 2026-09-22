@@ -37,15 +37,15 @@ const G = window
 const ui = G.ui
 
 const {
-	isstr, repl,
-	property,
+	isstr, isnum, isbool, repl,
+	property, attr,
 	assert,
 	obj, map,
 	wordset,
 	empty_array,
 	return_true,
 	words, uniq_sorted, try_json_arg,
-	assign,
+	assign, str, warn,
 	announce,
 	S,
 } = glue

@@ -445,20 +445,24 @@ const _G = window
 const ui = _G.ui
 
 const {
-	num, bool, isarray, isstr,
+	num, dec, bool, isarray, isstr, isnum, isbool, isobject,
 	assert,
 	strict_sign, round, abs, clamp,
-	set, map, words, array_move,
+	set, map, words, array_move, captures, count_keys,
 	do_before, do_after, property, override,
-	assign, assign_opt, attr, empty,
+	assign, assign_opt, attr, empty, empty_array,
 	remove, insert,
-	noop, return_true, return_arg,
+	noop, return_true, return_arg, return_false,
 	memoize,
 	S,
 	display_name,
-	parse_date, format_date,
+	parse_date, format_date, parse_timeofday,
 	format_base,
 	format_kbytes, format_kcount, format_timeofday, format_timeago, format_duration,
+	clock, day, days, floor, isfunc, json, max, min, month, month_year,
+	pr, random, remove_value, snap, str, time, url_format, url_parse, week,
+	wrap, year, year_of,
+	announce, href, ajax,
 } = glue
 
 // utilities ------------------------------------------------------------------
@@ -3289,7 +3293,7 @@ ui.nav = function(opt) {
 
 	// cell value multi-target rendering --------------------------------------
 
-	function build_null_lookup_val(row, field, mode) {
+	function build_null_lookup_val(row, field, mode, full_width) {
 		if (!row || !field.null_lookup_col) return
 		let nf = e.all_fields_map[field.null_lookup_col]  ; if (!nf || !nf.lookup_cols) return
 		let ln = nf.lookup_nav                            ; if (!ln) return
@@ -3297,7 +3301,7 @@ ui.nav = function(opt) {
 		let ln_row = e.lookup_val(row, nf, nv)            ; if (!ln_row) return
 		let dcol = field.null_display_col ?? field.name
 		let df = ln.all_fields_map[dcol]                  ; if (!df) return
-		return ln.build_cell(ln_row, df, mode)
+		return ln.build_cell(ln_row, df, mode, full_width)
 	}
 
 	// a lookup cell builds the display field's value, so the column aligns
@@ -3333,7 +3337,7 @@ ui.nav = function(opt) {
 	e.build_val = function(row, field, v, mode, full_width) {
 
 		if (v == null) {
-			let s = build_null_lookup_val(row, field, mode)
+			let s = build_null_lookup_val(row, field, mode, full_width)
 			if (s) return s
 
 			if (field.build_null)
@@ -3355,14 +3359,15 @@ ui.nav = function(opt) {
 		if (ln_row) {
 			let df = lookup_display_field(field)
 			if (df)
-				return field.lookup_nav.build_cell(ln_row, df, mode)
+				return field.lookup_nav.build_cell(ln_row, df, mode, full_width)
 		}
 
 		return field.build(v, mode, row, full_width)
 	}
 
-	e.build_cell = function(row, field, mode) {
-		return e.build_val(row, field, e.cell_input_val(row, field), mode)
+	e.build_cell = function(row, field, mode, full_width) {
+		return e.build_val(row, field, e.cell_input_val(row, field),
+			mode, full_width)
 	}
 
 	e.cell_text_val = e.build_cell
@@ -4647,12 +4652,11 @@ ui.icon_def('calendar'     , 'tabler', '\uea53')
 ui.icon_def('map_pin'      , 'tabler', '\ueae8')
 ui.icon_def('box_unchecked', 'tabler', '\ueb2c')
 ui.icon_def('box_checked'  , 'tabler_filled', '\uf76d')
-//ui.icon_def('box_checked'  , 'tabler', '\ueb28')
 
-ui.fg_style('light', 'error'   , 'normal',   0, 0.85, 0.45)
-ui.fg_style('dark' , 'error'   , 'normal',   0, 0.85, 0.65)
-ui.fg_style('light', 'modified', 'normal', 120, 1.00, 0.35)
-ui.fg_style('dark' , 'modified', 'normal', 120, 0.59, 0.65)
+ui.fg_def('light', 'error'   , 'normal',   0, 0.85, 0.45)
+ui.fg_def('dark' , 'error'   , 'normal',   0, 0.85, 0.65)
+ui.fg_def('light', 'modified', 'normal', 120, 1.00, 0.35)
+ui.fg_def('dark' , 'modified', 'normal', 120, 0.59, 0.65)
 
 assign(all_field_types, {
 	type: 'text',
@@ -5209,6 +5213,7 @@ tags.to_text = function(v) {
 let color = {}
 field_types.color = color
 assign(color, dropdown_editor)
+color.builds_text = false
 
 color.build = function(v, mode) {
 	if (!mode)

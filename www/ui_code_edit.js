@@ -43,6 +43,13 @@ IMPL. NOTES
 const _G = window
 
 const {
+	assert,
+	binsearch, insert_n,
+	noop, assign, ceil, clamp, escape_regexp, floor, isarray,
+	max, min, remove_value, round,
+} = glue
+
+const {
 	cx,
 	caret_w = 2,
 } = ui
@@ -53,25 +60,25 @@ ui.icon_def('close'         , 'tabler', '\ueb55')
 
 //           theme    name        state       h     s     L    a
 // ---------------------------------------------------------------------------
-ui.fg_style('light', 'keyword'  , 'normal', 240, 1.00, 0.35)
-ui.fg_style('light', 'string'   , 'normal',   5, 0.85, 0.40)
-ui.fg_style('light', 'number'   , 'normal',   5, 0.80, 0.45)
-ui.fg_style('light', 'symbol'   , 'normal', 240, 1.00, 0.20)
-ui.fg_style('light', 'comment'  , 'normal', 100, 0.00, 0.45)
-ui.fg_style('light', 'error'    , 'normal',   0, 0.85, 0.45)
+ui.fg_def('light', 'keyword'  , 'normal', 240, 1.00, 0.35)
+ui.fg_def('light', 'string'   , 'normal',   5, 0.85, 0.40)
+ui.fg_def('light', 'number'   , 'normal',   5, 0.80, 0.45)
+ui.fg_def('light', 'symbol'   , 'normal', 240, 1.00, 0.20)
+ui.fg_def('light', 'comment'  , 'normal', 100, 0.00, 0.45)
+ui.fg_def('light', 'error'    , 'normal',   0, 0.85, 0.45)
 
-ui.fg_style('dark' , 'keyword'  , 'normal',  60, 0.95, 0.60)
-ui.fg_style('dark' , 'string'   , 'normal',   5, 0.95, 0.60)
-ui.fg_style('dark' , 'number'   , 'normal',   5, 0.95, 0.70)
-ui.fg_style('dark' , 'symbol'   , 'normal',   0, 1.00, 1.00)
-ui.fg_style('dark' , 'comment'  , 'normal', 140, 0.85, 0.30)
-ui.fg_style('dark' , 'error'    , 'normal',   0, 0.85, 0.65)
+ui.fg_def('dark' , 'keyword'  , 'normal',  60, 0.95, 0.60)
+ui.fg_def('dark' , 'string'   , 'normal',   5, 0.95, 0.60)
+ui.fg_def('dark' , 'number'   , 'normal',   5, 0.95, 0.70)
+ui.fg_def('dark' , 'symbol'   , 'normal',   0, 1.00, 1.00)
+ui.fg_def('dark' , 'comment'  , 'normal', 140, 0.85, 0.30)
+ui.fg_def('dark' , 'error'    , 'normal',   0, 0.85, 0.65)
 
-ui.bg_style('light', 'find', 'normal' ,   0, 0.00, 0.93)
-ui.bg_style('light', 'find', 'focused', 209, 0.55, 0.92)
+ui.bg_def('light', 'find', 'normal' ,   0, 0.00, 0.93)
+ui.bg_def('light', 'find', 'focused', 209, 0.55, 0.92)
 
-ui.bg_style('dark' , 'find', 'normal' , 208, 0.08, 0.16)
-ui.bg_style('dark' , 'find', 'focused', 211, 0.50, 0.17)
+ui.bg_def('dark' , 'find', 'normal' , 208, 0.08, 0.16)
+ui.bg_def('dark' , 'find', 'focused', 211, 0.50, 0.17)
 
 ui.capture_keydown('ctrl f'  ) // browser: find -> editor: find
 ui.capture_keyup  ('ctrl f'  ) // browser: find -> editor: find
@@ -1594,7 +1601,7 @@ function code_edit_view(id, opt) {
 							ui.focus_group(true)
 							ui.v(0, ui.sp05())
 								ui.h(0, ui.sp05())
-									find_text = ui.input(fid, find_text, 0)
+									find_text = ui.input(fid, find_text, 0) ?? ''
 									if (find_text != last_find_text) {
 										last_find_text = find_text
 										find_scan()
@@ -1614,7 +1621,7 @@ function code_edit_view(id, opt) {
 								ui.end_h()
 								if (find_replace) {
 									ui.h(0, ui.sp05())
-										replace_text = ui.input(rid, replace_text, 0)
+										replace_text = ui.input(rid, replace_text, 0) ?? ''
 										ui.nofocus()
 										if (ui.button(id+'.replace', 'Replace', 0))
 											replace_match()

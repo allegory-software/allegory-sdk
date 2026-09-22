@@ -3,334 +3,69 @@
 	Canvas IMGUI library.
 	Written by Cosmin Apreutesei. Public Domain.
 
-LOADING
+USAGE (see js/demo.html):
 
-	<script src=glue.js [global] [extend]>
-	<script src=ui.js [global]>
+	<script src=glue.js>
+	<script src=ui.js>
+	<script>
+		ui.main = function() {
+			if (ui.button('button1', 'OK'))
+				alert('Hello!')
+		}
+	</script>
 
-	global flag:   dump the `ui` namespace into `window`.
-
-GLOBLAS
-
-	scrollbar_thickness         = 6
-	scrollbar_thickness_active  = 12
-	font_size_normal            = 12
-
-THEME DEFINITIONS
-
-	default_theme   = 'dark'
-	default_font    = 'Arial'
-
-	* = fg | border | bg
-   *_style         (theme, name, state, h, s, L, a, is_dark)      define a color
-	shadow_style    (theme, name, x, y, blur, h, s, L, a, [inset])  define a shadow
-
-BUILT-IN STYLES
-
-	fg              : text label link button-danger
-	bg              : bg bg0 bg1 bg2 bg3 item toggle row
-	border          : light intense
-	shadow          : button button-active menu modal picker thumb tooltip
-
-BUILT-IN STYLE STATES
-
-	general         : normal hover active focused
-	list item       : item-selected item-focused item-error
-	grid cell       : new modified
-
-THEME API
-
-	* = fg | border | bg
-	*_color         (name, [state], [theme]) -> css_color                 get theme color for fillStyle/strokeStyle
-	*_color_hsl     (name, [state], [theme]) -> [css_color, h, s, L, a]   get theme color for hsl_adjust()
-	*_color_rgb     (name, [state], [theme]) -> 0xRRGGBB                  get theme color for WebGL, ignoring alpha
-	*_color_rgba    (name, [state], [theme]) -> 0xRRGGBBAA                get theme color for WebGL, with alpha
-	bg_is_dark      (bg_color) -> t|f                                     based on this, text is white or black
-	dark            () -> t|f
-	get_theme       () -> theme
-	hsl             (h, s, L, a) -> css_color     CSS color from HSL
-	hsl_adjust      (c, h, s, L, a) -> css_color  CSS color from color with h, s, L adjusted
-	alpha_adjust    (c, a) -> css_color           CSS color from color with alpha adjusted
-
-	set_shadow      (name)  use in draw callback to set a shadow
-
-RENDERING
-
-	ui.main         frame build hook
-
-	cx              = access to canvas context for drawing
-	screen          = access to canvas container div
-	animate         ()  request another animation frame
-	rebuild         (label)  request another build/layout pass in this frame
-	resize          ()  resize canvas and request another animation frame
-
-MOUSE STATE
-
-	pointers        [p1, ...]
-	add_pointer     () -> pointer
-	pointer         -> p    active pointer
-
-	mx              active pointer x-coord, transformed
-	my              active pointer y-coord, transformed
-	mx_notrans      active pointer x-coord
-	my_notrans      active pointer y-coord
-	pressed         active pointer pressed
-	click           active pointer clicked
-	clickup         active pointer de-clicked
-	dblclick        active pointer double-clicked
-	wheel_dy        active pointer wheel delta
-	trackpad        active pointer wheel delta is from is a trackpad
-
-	local_pointer   = default pointer that tracks the local mouse and keyboard
-	mx0 my0         = mouse position when started dragging
-	update_mouse    ()   update mouse coords to current transform
-	hit_rect        (x, y, w, h) -> t|f
-	hit_bb          (x1, y1, x2, y2) -> t|f  ; bb means bounding box
-	hit_box         (a, i) -> t|f
-
-	captured_id     = id of the widget that mouse is down on
-	captured        (id) -> cs | null  get captured state if mouse is captured
-
-	hit             (id[, k]) -> hs|v|null hit state if id is directly hit or dragging
-	clicked         (id) -> hs|v|null  hit state if id was clicked this frame
-	dblclicked      (id) -> hs|v|null  hit state if id was double-clicked
-	hit_enter       (id) -> t|f            mouse started hovering widget
-	hit_leave       (id) -> t|f            mouse stopped hovering widget
-	hovers          (id) -> hs|null        hit state if mouse hovers or dragging over id
-	set_hit         (id) -> hs             declare that mouse hovers widget
-	nohit           ()                     exclude last command from hit-testing
-
-	drag            (id, ['x'|'y'|'xy']) -> cs|null  drag state if id is captured
-	                cs.drag       first frame of the drag
-	                cs.dragging   every frame from drag to drop
-	                cs.drop       last frame of the drag
-	                cs.dx,dy      how far the mouse moved since the press
-	drag_or_hit     (id) -> cs|hs|null  drag(id), else hit(id)
-
-	set_cursor      (cursor)   set cursor for this frame
-
-KEYBOARD STATE
-
-	keydown         (key) -> t|f     check if a key was just pressed
-	keyup           (key) -> t|f     check if a key was just depressed
-	keypressed      (key) -> t|f     check if the active pointer's user holds a key
-	key_chars       () -> s          printable characters typed this frame
-	key_events      -> [['down'|'up', full_key, key, char, ctrl, alt, shift], ...]
-	capture_keys    ()    remove current keydown() and keyup() events
-	capture_keydown (key)   stop the browser from acting on a keydown
-	capture_keyup   (key)   stop the browser from acting on a keyup
-
-LAYERS
-
-	built-in layers : base toolbox tooltip open overlay modal global_tooltip drag
-	layer           (name, [index], ['root modal'])  define a new layer
-
-SCOPES
-
-	scope           ()
-	end_scope       ()
-	scope_set       (k, v)
-	scope_get       (k) -> v
-
-WIDGET STATE
-
-	state           (id, [update_fn]) -> state     get own state and keep it alive
-	state_of        (id[, k]) -> state | v | nil   get another widget's state
-	set_state_of    (id, k, v)           set another widget's state var, if alive
-	state_init      (id, k, v)           set widget state var if widget is alive
-	value           (id) -> v            what the input holds right now
-	on_free         (id, free_fn)        add a widget gc hook
-	render_state    (id) -> state        get render-local widget state
-	local_state     (id[, k]) -> state | v | nil   widget state in a draw callback,
-	                                     nil if the frame came from another machine
-
-FOCUS STATE
-
-	focused_id      = id                    id of focused widget
-	focus           (id)                    focus widget
-	focused         (id) -> t|f             check if widget is currently focused
-	focusing        (id) -> t|f             widget is focusing this frame
-	focusable       (id, [tab_order])       add widget to the tab order
-	nofocus         ()                      declare the next widget not tab-focusable
-	keep_focus      (id)                    declare widget not click-focusable
-	capture_tab     (id)                    widget gets tab and shift-tab
-	focus_group     ([trap], [tab_order], [id]) begin a tab order group
-	end_focus_group ()                      end a tab order group
-	default_button  (id)                    enter in the group's inputs hits it
-	focus_inside    (group_id) -> t|f       focus is inside this focus group
-	focus_first     (group_id)              focus first widget unless focus is inside
-	tab_into        (id)                    next tab enters this focus group
-	window_focused -> t|f                   browser window has focus
-
-COMMAND RECORDING
-
-	start_recording ()
-	end_recording   () -> a1
-	play_recording  (a1)
-
-WIDGET DEFINITIONS
-
-	cmd             (cmd_id, ...args) -> i0
-
-	widget          (cmd_name, t, is_ct)
-	t.measure       : f(a, i, axis)    measure widget on axis (0 for x, 1 for y)
-	t.measure_end   : f(a, i, axis)    measure widget on axis at widget's end() call
-	t.position      : f(a, i, axis, x, w, ct_i)   position widget on axis
-	t.translate     : f(a, i, x, y)               translate widget
-	t.draw          : f(a, i, recs)     draw widget
-	t.draw_end      : f(a, i)           draw widget at widget's end() call
-	t.hit           : f(a, i, recs)     hit-test widget
-	t.is_flex_child : t|f     has fr at a[i+FR] and min_w/h at a[i+2+axis]
-	                          so it can be a child of a flex container.
-
-	measure         (id)        request that widget be measured; puts x,y,w,h in its state
-
-SPACINGS (MARGINS & PADDINGS)
-
-	rem             (rem) -> x   rem units to pixels
-	em              (em) -> x    em units to pixels
-
-	sp025           () -> rem( .125)
-	sp05            () -> rem( .25)
-	sp075           () -> rem( .375)
-	sp              () -> rem( .5)
-	sp1             () -> rem( .5)
-	sp2             () => rem( .75)
-	sp4             () => rem(1)
-	sp8             () => rem(2)
-
-	p[adding]           ([px1], [py1], [px2], [py2])
-	p[adding_]l[eft]    (p)
-	p[adding_]r[ight]   (p)
-	p[adding_]t[op]     (p)
-	p[adding_]b[ottom]  (p)
-	p[adding_]h[oriz]   (p)
-	p[adding_]v[ert]    (p)
-
-	m[argin]            ([mx1], [my1], [mx2], [my2])
-	m[argin_]l[eft]     (m)
-	m[argin_]r[ight]    (m)
-	m[argin_]t[op]      (m)
-	m[argin_]b[ottom]   (m)
-	m[argin_]h[oriz]    (m)
-	m[argin_]v[ert]     (m)
-
-BOX WIDGET DEFINITIONS
-
-	cmd_box         (cmd, fr, align, valign, min_w, min_h, ...args) -> i0
-	box_widget      (cmd_name, t, is_ct)   define a box widget
-	box_ct_widget   (cmd_name, t)          define a container box widget
-
-	PX1             = index offset in a for x1 padding; y1 padding at PX1+1
-	PX2             = index offset in a for x2 padding; y1 padding at PX2+1
-	MX1             = index offset in a for x1 margin; y1 margin at MX1+1
-	MX2             = index offset in a for x2 margin; y2 margin at MX2+1
-	FR              = index offset in a for fr
-	ALIGN           = index offset in a for align
-	S               = index offset in a for arg#1 after ui_cmd_box_ct args
-
-	add_ct_min_wh   (a, axis, w)   use in measure callback to declare min width/height
-
-	align_x         (a, i, axis, sx, sw)  use in position callback
-	align_w         (a, i, axis, sx, sw)  use in position callback
-	inner_x         (a, i, axis, ct_x)    use in position callback
-	inner_w         (a, i, axis, ct_x)    use in position callback
-
-	ct_i            () -> ct_i    get container index in a; use in widget creation and in measure callback
-	last_i          () -> last_i  get the index of the last cmd in a
-
-	popup_target_rect (a, i)  use in draw callback to find a popup's target rect
+	Documentation is inline, search for "////" to navigate major topics and
+	"///" for sections within a topic. All APIs are in the `ui` namespace, but
+	not all APIs can be used in app code (i.e. in the build phase). Some APIs
+	are only useful for creating widgets and some only work in certain
+	rendering phases. The docs should be clear about that. Below is only the
+	hi-level app code API using built-in widgets.
 
 CONTAINERS
 
-	hv              ('h'|'v', fr, gap, align, valign, min_w, min_h)
-	h | v[_aligned] (fr, gap, align, valign, min_w, min_h)
-	stack           (id, fr, align, valign, min_w, min_h)
-	sb | scrollbox  (id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy, x_id, y_id)
-	popup           (id, layer, target_i, side, align, min_w, min_h, flags, z_index, ox, oy)
-	hsplit | vsplit (id, size, unit, fixed_side, split_fr, gap, align, valign, min_w, min_h)
-	splitter        ()
-	toolbox         (id, title, align, valign, x0, y0, target_i)
-	frame           (id, on_measure, on_build, fr, align, valign, min_w, min_h, ...args)
-	end             ()
-
-	scroll_to_view_next_box  ()
-	scroll_to_view_rect      (scrollbox_id, x, y, w, h)
-
-BORDER & BACKGROUND
-
-	bb              (bg_color, bg_color_state, sides, border_color, border_color_state, border_radius)
-	bb_tooltip      (bg_color, bg_color_state,        border_color, border_color_state, border_radius)
-	shadow          (shadow_name)
-
-	bg_dots         (id, speed)
-
-TEXT
-
-	color           (color, color_state)
-	font            (font|alias)
-	font_alias      (alias, font)
-	icon_def        (name, font, codepoint|ligature)
-	icon            (id, name, fr, align, valign, max_w, w, h)
-	fs | font_size  (size)
-	font_weight     (weight)
-	bold            ()
-	nobold          ()
-	lg | line_gap   (gap)
-	xsmall          ()      ui.font_size(.72  )
-	small           ()      ui.font_size(.8125)
-	smaller         ()      ui.font_size(.875 )
-	large           ()      ui.font_size(1.125)
-	xlarge          ()      ui.font_size(1.5  )
-
-	get_font_size   () -> font_size
-
-	text            (id, s, fr, align, valign, max_w, w, h, 'line'|'word'|0, editable, input_type)
-	text_editable   (id, s, fr, align, valign, max_w, w, h, input_type)
-	text_lines      (id, s, fr, align, valign, max_w, w, h, editable)
-	text_wrapped    (id, s, fr, align, valign, max_w, w, h, editable)
-	mark_text       (i1, i2, [bg])   background behind [i1,i2) of the next text
-	select_text     (id, i, len)         place the caret in an editable text
-	text_selection  (id, [from_end], [wanted]) -> [i, len]
-
-	measure_text    (cx, s) -> {w:, asc:, dsc:, {actual|font}BoundingBox{Ascent|Descent|Left|Right}:, }
+	ui.h|v[_aligned] (fr, gap, align, valign, min_w, min_h)
+	ui.stack         (id, fr, align, valign, min_w, min_h)
+	ui.sb|scrollbox  (id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy, x_id, y_id)
+	ui.popup         (id, layer, target_i, side, align, min_w, min_h, flags, z_index, ox, oy)
+	ui.{h|v}split    (id, size, unit, fixed_side, split_fr, gap, align, valign, min_w, min_h)
+	ui.toolbox       (id, title, align, valign, x0, y0, target_i)
+	ui.frame         (id, on_measure, on_build, fr, align, valign, min_w, min_h, ...args)
 
 INPUT
 
-	button          (id, s, fr, align, valign, min_w, min_h, style)
-	icon_button     (id, icon, [s], fr, align, valign, min_w, min_h, style)
-	input           (id, s, fr, w, [text_align], [readonly])
-	label           (for_id, s, fr, align, valign)
-	list_dropdown   (id, items, sel_i, fr, max_w, min_w) -> sel_i
-	date_input      (id, v, [opt], fr, align, valign, min_w) -> v
-	                 opt: {precision:, min:, max:, readonly:,
+	ui.button          (id, s, fr, align, valign, min_w, min_h, style)
+	ui.icon_button     (id, icon, [s], fr, align, valign, min_w, min_h, style)
+	ui.label           (for_id, s, fr, align, valign)
+	ui.input           (id, s, fr, w, [text_align], [readonly])
+	ui.list_dropdown   (id, items, sel_i, fr, max_w, min_w) -> sel_i
+	ui.toggle          (id, on, fr, align, valign, min_w)
+	ui.checkbox        (id, on, fr, align, valign, min_w)
+	ui.date_input      (id, v, [opt], fr, align, valign, min_w) -> v
+	                   opt: {precision:, min:, max:, readonly:,
 	                       to_input: f(v) -> s, from_input: f(s) -> v}
-	toggle          (id, on, fr, align, valign, min_w)
-	checkbox        (id, on, fr, align, valign, min_w)
-	color_input     (id, v, fr, min_w) -> v
+	ui.color_input     (id, v, fr, min_w) -> v
 
 LIST
 
-	[h|v|hv]list    (id, items, focused_i, fr, align, valign,
-	                 item_align, item_valign, item_fr, max_w, min_w) -> focused_i
+	ui.[h|v|hv]list    (id, items, focused_i, fr, align, valign,
+	                   item_align, item_valign, item_fr, max_w, min_w) -> focused_i
 
 OTHER
 
-	drag_point      (id, x, y, color)
-	polyline        (id, points, closed, fill_color, fill_color_state, stroke_color, stroke_color_state)
-	resizer         (id, default_w, default_h, axis, max_w, max_h)
+	ui.drag_point      (id, x, y, color)
+	ui.polyline        (id, points, closed, fill_color, fill_color_state, stroke_color, stroke_color_state)
+	ui.resizer         (id, default_w, default_h, axis, max_w, max_h)
 
-SCREEN SHARING
+RENDERING CONTROL
 
-	shared_screen   (id, answer_con, fr, align, valign, min_w, min_h)
-	process_shared_screen_input (p, t)
+	ui.animate ()         request another animation frame
+	ui.rebuild ([label])  request another build/layout pass in this frame
+	ui.resize  ()         resize canvas and request another animation frame
 
-	pack_frame      () -> s     pack current frame for sending over the network
-	frame_changed   = noop      hook this for sending frames out
+SCROLLING INTO VIEW
 
-UI TEMPLATE EDITOR
-
-	template        (id, t, ...stack_args)
+	ui.scroll_to_view_next_box  ()
+	ui.scroll_to_view_rect      (scrollbox_id, x, y, w, h)
 
 TODO
 
@@ -366,6 +101,8 @@ TODO
 "use strict"
 const _G = window
 
+// the <script global> attribute dumps the `ui` namespace into `window`
+// for less typing and more name clashing.
 let script_attr = k => document.currentScript.hasAttribute(k)
 let ui = script_attr('global') || script_attr('ui-global') ? window : {}
 _G.ui = ui
@@ -376,11 +113,12 @@ ui.VERSION = 1 // frozen at 1 until this comment is gone!
 
 const {
 	repl,
-	isarray, isstr, isnum,
+	isarray, isstr, isnum, isobj, isobject, isfunc, obj,
 	assert, warn, pr, debug, trace,
-	floor, ceil, round, max, min, abs, clamp, logbase, lerp,
-	dec, num, str, json, json_arg,
-	set, map, array, attr,
+	floor, ceil, round, max, min, abs, clamp, snap, logbase, lerp, random,
+	dec, num, str, json, json_arg, words,
+	set, map, array, array_resize, array_move, empty_array, attr,
+	empty_set, set_equals,
 	assign, entries, insert, remove_value,
 	noop, return_true, do_after, do_before,
 	runafter,
@@ -395,7 +133,11 @@ const {
 	transform_point_x,
 	transform_point_y,
 	runevery,
-	day, week, weekday, weekday_name,
+	day, week, month, weekday, year_of, month_of, month_day_of, days,
+	weekday_name, month_name, time,
+	parse_date, format_date,
+	lang, S,
+	get,
 } = glue
 
 let clock_ms = () => ui.DEBUG ? performance.now() : 0
@@ -404,9 +146,53 @@ let array_freelist = () => freelist(array)
 
 //// THEMES ------------------------------------------------------------------
 
-// Themes allow viewing a remote shared screen in the client's own color scheme,
-// so they can only set colors, never geometry, so that the screen shows
-// identical geometry to both users otherwise you won't know what you click on!
+/*
+
+Themes allow viewing a remote shared screen in the client's own color scheme,
+so they can only set colors, never geometry, so that the screen shows
+identical geometry to both users otherwise you won't know what you click on!
+
+DEFAULTS
+
+	ui.default_theme = 'dark'
+	ui.default_font  = 'Arial'
+	ui.dark([theme]) -> t|f
+
+DEFINING COLORS
+
+	* = fg | border | bg
+	ui.*_def      (theme, name, state, h, s, L, a, is_dark)       define a color
+	ui.shadow_def (theme, name, x, y, blur, h, s, L, a, [inset])  define a shadow
+
+BUILT-IN COLORS
+
+	fg      : text label link button-danger
+	bg      : bg bg0 bg1 bg2 bg3 item toggle row
+	border  : light intense
+	shadow  : button button-active menu modal picker thumb tooltip
+
+BUILT-IN COLOR STATES
+
+	general     : normal hover active focused
+	list items  : item-selected item-focused item-error
+	grid cells  : new modified
+
+THEME API (to be used exclusively in the drawing phase)
+
+	* = fg | border | bg
+	ui.*_color      (name, [state], [theme]) -> css_color   for fillStyle/strokeStyle
+	ui.*_color_hsl  (name, [state], [theme]) -> [css_color, h, s, L, a]   for hsl_adjust()
+	ui.*_color_rgb  (name, [state], [theme]) -> 0xRRGGBB    for WebGL, ignoring alpha
+	ui.*_color_rgba (name, [state], [theme]) -> 0xRRGGBBAA  for WebGL, with alpha
+	ui.bg_is_dark   (bg_color) -> t|f                       should text be white on this bg?
+	ui.get_theme    () -> theme
+	ui.hsl          (h, s, L, a) -> css_color     from HSL
+	ui.hsl_adjust   (c, h, s, L, a) -> css_color  from color c with adjusted h, s, L
+	ui.alpha_adjust (c, a) -> css_color           from color c with adjusted alpha
+
+	ui.set_shadow (name)   set cx.shadowColor etc. for painting a shadow
+
+*/
 
 /// theme objects
 
@@ -432,7 +218,7 @@ theme_make('dark' , true)
 
 let theme // only set in draw phase
 ui.get_theme = () => theme
-ui.dark = () => themes[ui.default_theme].is_dark
+ui.dark = (theme) => themes[theme ?? ui.default_theme].is_dark
 
 /// color state parsing
 
@@ -504,7 +290,7 @@ function def_color_func(k) {
 		if (state == '*') { // copy all states of a color
 			let src_kind = k
 			let src_name = h
-			if (isarray(h)) // eg. ui.bg_style('*', 'text', '*', ['fg', 'text'])
+			if (isarray(h)) // eg. ui.bg_def('*', 'text', '*', ['fg', 'text'])
 				[src_kind, src_name] = h
 			else
 				assert(isstr(h), 'expected color name to copy for all states')
@@ -602,7 +388,7 @@ function set_bg_color(color, state) {
 
 /// text colors --------------------------------------------------------------
 
-ui.fg_style = def_color_func('fg')
+ui.fg_def = def_color_func('fg')
 let fg_color_hsl = lookup_color_hsl_func('fg')
 let fg_color = lookup_color_func(fg_color_hsl)
 ui.fg_color_hsl = fg_color_hsl
@@ -612,43 +398,45 @@ ui.fg_color_rgba = lookup_color_rgba_int_func(fg_color_hsl)
 
 //           theme    name       state       h     s     L    a
 // ---------------------------------------------------------------------------
-ui.fg_style('light', 'text'   , 'normal' ,   0, 0.00, 0.00)
-ui.fg_style('light', 'text'   , 'hover'  ,   0, 0.00, 0.30)
-ui.fg_style('light', 'text'   , 'active' ,   0, 0.00, 0.40)
-ui.fg_style('light', 'text'   , 'focused',   0, 0.00, 0.00)
-ui.fg_style('light', 'label'  , 'normal' ,   0, 0.00, 0.00)
-ui.fg_style('light', 'label'  , 'hover'  ,   0, 0.00, 0.00, 0.9)
-ui.fg_style('light', 'link'   , 'normal' , 222, 0.00, 0.50)
-ui.fg_style('light', 'link'   , 'hover'  , 222, 1.00, 0.70)
-ui.fg_style('light', 'link'   , 'active' , 222, 1.00, 0.80)
+ui.fg_def('light', 'text'   , 'normal' ,   0, 0.00, 0.00)
+ui.fg_def('light', 'text'   , 'hover'  ,   0, 0.00, 0.30)
+ui.fg_def('light', 'text'   , 'active' ,   0, 0.00, 0.40)
+ui.fg_def('light', 'text'   , 'focused',   0, 0.00, 0.00)
+ui.fg_def('light', 'heading', 'normal' ,   0, 0.00, 0.55)
+ui.fg_def('light', 'label'  , 'normal' ,   0, 0.00, 0.00)
+ui.fg_def('light', 'label'  , 'hover'  ,   0, 0.00, 0.00, 0.9)
+ui.fg_def('light', 'link'   , 'normal' , 222, 0.00, 0.50)
+ui.fg_def('light', 'link'   , 'hover'  , 222, 1.00, 0.70)
+ui.fg_def('light', 'link'   , 'active' , 222, 1.00, 0.80)
 
-ui.fg_style('dark' , 'text'   , 'normal' ,   0, 0.00, 0.8)
-ui.fg_style('dark' , 'text'   , 'hover'  ,   0, 0.00, 1.00)
-ui.fg_style('dark' , 'text'   , 'active' ,   0, 0.00, 1.00)
-ui.fg_style('dark' , 'text'   , 'focused',   0, 0.00, 1.0)
-ui.fg_style('dark' , 'label'  , 'normal' ,   0, 0.00, 0.95, 0.7)
-ui.fg_style('dark' , 'label'  , 'hover'  ,   0, 0.00, 0.90, 0.9)
-ui.fg_style('dark' , 'link'   , 'normal' ,  26, 0.88, 0.60)
-ui.fg_style('dark' , 'link'   , 'hover'  ,  26, 0.99, 0.70)
-ui.fg_style('dark' , 'link'   , 'active' ,  26, 0.99, 0.80)
+ui.fg_def('dark' , 'text'   , 'normal' ,   0, 0.00, 0.8)
+ui.fg_def('dark' , 'text'   , 'hover'  ,   0, 0.00, 1.00)
+ui.fg_def('dark' , 'text'   , 'active' ,   0, 0.00, 1.00)
+ui.fg_def('dark' , 'text'   , 'focused',   0, 0.00, 1.0)
+ui.fg_def('dark' , 'heading', 'normal' ,   0, 0.00, 0.65)
+ui.fg_def('dark' , 'label'  , 'normal' ,   0, 0.00, 0.95, 0.7)
+ui.fg_def('dark' , 'label'  , 'hover'  ,   0, 0.00, 0.90, 0.9)
+ui.fg_def('dark' , 'link'   , 'normal' ,  26, 0.88, 0.60)
+ui.fg_def('dark' , 'link'   , 'hover'  ,  26, 0.99, 0.70)
+ui.fg_def('dark' , 'link'   , 'active' ,  26, 0.99, 0.80)
 
-ui.fg_style('light', 'marker' , 'normal' ,  61, 1.00, 0.35)
-ui.fg_style('light', 'marker' , 'hover'  ,  61, 1.00, 0.42)
-ui.fg_style('light', 'marker' , 'active' ,  61, 1.00, 0.48)
+ui.fg_def('light', 'marker' , 'normal' ,  61, 1.00, 0.35)
+ui.fg_def('light', 'marker' , 'hover'  ,  61, 1.00, 0.42)
+ui.fg_def('light', 'marker' , 'active' ,  61, 1.00, 0.48)
 
-ui.fg_style('dark' , 'marker' , 'normal' ,  61, 1.00, 0.57)
-ui.fg_style('dark' , 'marker' , 'hover'  ,  61, 1.00, 0.65)
-ui.fg_style('dark' , 'marker' , 'active' ,  61, 1.00, 0.72)
+ui.fg_def('dark' , 'marker' , 'normal' ,  61, 1.00, 0.57)
+ui.fg_def('dark' , 'marker' , 'hover'  ,  61, 1.00, 0.65)
+ui.fg_def('dark' , 'marker' , 'active' ,  61, 1.00, 0.72)
 
-ui.fg_style('light', 'button-danger', 'normal', 0, 0.54, 0.43)
-ui.fg_style('dark' , 'button-danger', 'normal', 0, 0.54, 0.43)
+ui.fg_def('light', 'button-danger', 'normal', 0, 0.54, 0.43)
+ui.fg_def('dark' , 'button-danger', 'normal', 0, 0.54, 0.43)
 
-ui.fg_style('light', 'faint' , 'normal' ,  0, 0.00, 0.70)
-ui.fg_style('dark' , 'faint' , 'normal' ,  0, 0.00, 0.30)
+ui.fg_def('light', 'faint' , 'normal' ,  0, 0.00, 0.70)
+ui.fg_def('dark' , 'faint' , 'normal' ,  0, 0.00, 0.30)
 
 /// border colors ------------------------------------------------------------
 
-ui.border_style = def_color_func('border')
+ui.border_def = def_color_func('border')
 let border_color_hsl = lookup_color_hsl_func('border')
 let border_color = lookup_color_func(border_color_hsl)
 let ui_border_color = border_color
@@ -659,23 +447,23 @@ ui.border_color_rgba = lookup_color_rgba_int_func(border_color_hsl)
 
 //               theme    name        state       h     s     L     a
 // ---------------------------------------------------------------------------
-ui.border_style('light', 'light'   , 'normal' ,   0,    0,    0, 0.10)
-ui.border_style('light', 'light'   , 'hover'  ,   0,    0,    0, 0.30)
-ui.border_style('light', 'intense' , 'normal' ,   0,    0,    0, 0.30)
-ui.border_style('light', 'intense' , 'hover'  ,   0,    0,    0, 0.40)
-ui.border_style('light', 'max'     , 'normal' ,   0,    0,    0, 1.00)
-ui.border_style('light', 'marker'  , 'normal' ,  61, 1.00, 0.35, 1.00)
+ui.border_def('light', 'light'   , 'normal' ,   0,    0,    0, 0.10)
+ui.border_def('light', 'light'   , 'hover'  ,   0,    0,    0, 0.30)
+ui.border_def('light', 'intense' , 'normal' ,   0,    0,    0, 0.30)
+ui.border_def('light', 'intense' , 'hover'  ,   0,    0,    0, 0.40)
+ui.border_def('light', 'max'     , 'normal' ,   0,    0,    0, 1.00)
+ui.border_def('light', 'marker'  , 'normal' ,  61, 1.00, 0.35, 1.00)
 
-ui.border_style('dark' , 'light'   , 'normal' ,   0,    0,    1, 0.09)
-ui.border_style('dark' , 'light'   , 'hover'  ,   0,    0,    1, 0.03)
-ui.border_style('dark' , 'intense' , 'normal' ,   0,    0,    1, 0.20)
-ui.border_style('dark' , 'intense' , 'hover'  ,   0,    0,    1, 0.40)
-ui.border_style('dark' , 'max'     , 'normal' ,   0,    0,    1, 1.00)
-ui.border_style('dark' , 'marker'  , 'normal' ,  61, 1.00, 0.57, 1.00)
+ui.border_def('dark' , 'light'   , 'normal' ,   0,    0,    1, 0.09)
+ui.border_def('dark' , 'light'   , 'hover'  ,   0,    0,    1, 0.03)
+ui.border_def('dark' , 'intense' , 'normal' ,   0,    0,    1, 0.20)
+ui.border_def('dark' , 'intense' , 'hover'  ,   0,    0,    1, 0.40)
+ui.border_def('dark' , 'max'     , 'normal' ,   0,    0,    1, 1.00)
+ui.border_def('dark' , 'marker'  , 'normal' ,  61, 1.00, 0.57, 1.00)
 
 /// background colors --------------------------------------------------------
 
-ui.bg_style = def_color_func('bg')
+ui.bg_def = def_color_func('bg')
 let bg_color_hsl = lookup_color_hsl_func('bg')
 let bg_color = lookup_color_func(bg_color_hsl)
 let ui_bg_color = bg_color
@@ -691,104 +479,110 @@ ui.bg_is_dark = bg_is_dark
 
 //           theme    name      state       h     s     L     a
 // -------------------------------------------------------------
-ui.bg_style('light', 'bg0'   , 'normal' ,   0, 0.00, 0.98)
-ui.bg_style('light', 'bg'    , 'normal' ,   0, 0.00, 1.00)
-ui.bg_style('light', 'bg'    , 'hover'  ,   0, 0.00, 0.95)
-ui.bg_style('light', 'bg'    , 'active' ,   0, 0.00, 0.93)
-ui.bg_style('light', 'bg1'   , 'normal' ,   0, 0.00, 0.95)
-ui.bg_style('light', 'bg1'   , 'hover'  ,   0, 0.00, 0.93)
-ui.bg_style('light', 'bg1'   , 'active' ,   0, 0.00, 0.90)
-ui.bg_style('light', 'bg2'   , 'normal' ,   0, 0.00, 0.85)
-ui.bg_style('light', 'bg2'   , 'hover'  ,   0, 0.00, 0.82)
-ui.bg_style('light', 'bg3'   , 'normal' ,   0, 0.00, 0.70)
-ui.bg_style('light', 'bg3'   , 'hover'  ,   0, 0.00, 0.75)
-ui.bg_style('light', 'bg3'   , 'active' ,   0, 0.00, 0.80)
-ui.bg_style('light', 'alt'   , 'normal' ,   0, 0.00, 0.95) // grid cell alternate
-ui.bg_style('light', 'smoke' , 'normal' ,   0, 0.00, 1.00, 0.80)
-ui.bg_style('light', 'input' , 'normal' ,   0, 0.00, 0.98)
-ui.bg_style('light', 'input' , 'focused',   0, 0.00, 1.00)
-ui.bg_style('light', 'input' , 'hover'  ,   0, 0.00, 0.94)
-ui.bg_style('light', 'input' , 'active' ,   0, 0.00, 0.90)
+ui.bg_def('light', 'bg0'   , 'normal' ,   0, 0.00, 0.98)
+ui.bg_def('light', 'bg'    , 'normal' ,   0, 0.00, 1.00)
+ui.bg_def('light', 'bg'    , 'hover'  ,   0, 0.00, 0.95)
+ui.bg_def('light', 'bg'    , 'active' ,   0, 0.00, 0.93)
+ui.bg_def('light', 'bg1'   , 'normal' ,   0, 0.00, 0.95)
+ui.bg_def('light', 'bg1'   , 'hover'  ,   0, 0.00, 0.93)
+ui.bg_def('light', 'bg1'   , 'active' ,   0, 0.00, 0.90)
+ui.bg_def('light', 'bg2'   , 'normal' ,   0, 0.00, 0.85)
+ui.bg_def('light', 'bg2'   , 'hover'  ,   0, 0.00, 0.82)
+ui.bg_def('light', 'bg3'   , 'normal' ,   0, 0.00, 0.70)
+ui.bg_def('light', 'bg3'   , 'hover'  ,   0, 0.00, 0.75)
+ui.bg_def('light', 'bg3'   , 'active' ,   0, 0.00, 0.80)
+ui.bg_def('light', 'alt'   , 'normal' ,   0, 0.00, 0.95) // grid cell alternate
+ui.bg_def('light', 'smoke' , 'normal' ,   0, 0.00, 1.00, 0.80)
+ui.bg_def('light', 'input' , 'normal' ,   0, 0.00, 0.98)
+ui.bg_def('light', 'input' , 'focused',   0, 0.00, 1.00)
+ui.bg_def('light', 'input' , 'hover'  ,   0, 0.00, 0.94)
+ui.bg_def('light', 'input' , 'active' ,   0, 0.00, 0.90)
 
-ui.bg_style('dark' , 'bg0'   , 'normal' , 216, 0.28, 0.08)
-ui.bg_style('dark' , 'bg'    , 'normal' , 216, 0.28, 0.10)
-ui.bg_style('dark' , 'bg'    , 'hover'  , 216, 0.28, 0.12)
-ui.bg_style('dark' , 'bg'    , 'active' , 216, 0.28, 0.14)
-ui.bg_style('dark' , 'bg1'   , 'normal' , 216, 0.28, 0.15)
-ui.bg_style('dark' , 'bg1'   , 'hover'  , 216, 0.28, 0.19)
-ui.bg_style('dark' , 'bg1'   , 'active' , 216, 0.28, 0.22)
-ui.bg_style('dark' , 'bg2'   , 'normal' , 216, 0.28, 0.22)
-ui.bg_style('dark' , 'bg2'   , 'hover'  , 216, 0.28, 0.25)
-ui.bg_style('dark' , 'bg3'   , 'normal' , 216, 0.28, 0.29)
-ui.bg_style('dark' , 'bg3'   , 'hover'  , 216, 0.28, 0.31)
-ui.bg_style('dark' , 'bg3'   , 'active' , 216, 0.28, 0.33)
-ui.bg_style('dark' , 'alt'   , 'normal' , 260, 0.28, 0.13)
-ui.bg_style('dark' , 'smoke' , 'normal' ,   0, 0.00, 0.00, 0.70)
-ui.bg_style('dark' , 'input' , 'normal' , 216, 0.28, 0.17)
-ui.bg_style('dark' , 'input' , 'focused', 216, 0.28, 0.08)
-ui.bg_style('dark' , 'input' , 'hover'  , 216, 0.28, 0.21)
-ui.bg_style('dark' , 'input' , 'active' , 216, 0.28, 0.25)
+ui.bg_def('dark' , 'bg0'   , 'normal' , 216, 0.28, 0.08)
+ui.bg_def('dark' , 'bg'    , 'normal' , 216, 0.28, 0.10)
+ui.bg_def('dark' , 'bg'    , 'hover'  , 216, 0.28, 0.12)
+ui.bg_def('dark' , 'bg'    , 'active' , 216, 0.28, 0.14)
+ui.bg_def('dark' , 'bg1'   , 'normal' , 216, 0.28, 0.15)
+ui.bg_def('dark' , 'bg1'   , 'hover'  , 216, 0.28, 0.19)
+ui.bg_def('dark' , 'bg1'   , 'active' , 216, 0.28, 0.22)
+ui.bg_def('dark' , 'bg2'   , 'normal' , 216, 0.28, 0.22)
+ui.bg_def('dark' , 'bg2'   , 'hover'  , 216, 0.28, 0.25)
+ui.bg_def('dark' , 'bg3'   , 'normal' , 216, 0.28, 0.29)
+ui.bg_def('dark' , 'bg3'   , 'hover'  , 216, 0.28, 0.31)
+ui.bg_def('dark' , 'bg3'   , 'active' , 216, 0.28, 0.33)
+ui.bg_def('dark' , 'alt'   , 'normal' , 260, 0.28, 0.13)
+ui.bg_def('dark' , 'smoke' , 'normal' ,   0, 0.00, 0.00, 0.70)
+ui.bg_def('dark' , 'input' , 'normal' , 216, 0.28, 0.17)
+ui.bg_def('dark' , 'input' , 'focused', 216, 0.28, 0.08)
+ui.bg_def('dark' , 'input' , 'hover'  , 216, 0.28, 0.21)
+ui.bg_def('dark' , 'input' , 'active' , 216, 0.28, 0.25)
 
 for (let name of ['text', 'link', 'marker'])
-	ui.bg_style('*', name, '*', ['fg', name])
+	ui.bg_def('*', name, '*', ['fg', name])
 
-ui.bg_style('light', 'scrollbar', 'normal' ,   0, 0.00, 0.70, 0.5)
-ui.bg_style('light', 'scrollbar', 'hover'  ,   0, 0.00, 0.75, 0.8)
-ui.bg_style('light', 'scrollbar', 'active' ,   0, 0.00, 0.80, 0.8)
+ui.bg_def('light', 'scrollbar', 'normal' ,   0, 0.00, 0.70, 0.5)
+ui.bg_def('light', 'scrollbar', 'hover'  ,   0, 0.00, 0.75, 0.8)
+ui.bg_def('light', 'scrollbar', 'active' ,   0, 0.00, 0.80, 0.8)
 
-ui.bg_style('dark' , 'scrollbar', 'normal' , 216, 0.28, 0.37, 0.5)
-ui.bg_style('dark' , 'scrollbar', 'hover'  , 216, 0.28, 0.39, 0.8)
-ui.bg_style('dark' , 'scrollbar', 'active' , 216, 0.28, 0.41, 0.8)
+ui.bg_def('dark' , 'scrollbar', 'normal' , 216, 0.28, 0.37, 0.5)
+ui.bg_def('dark' , 'scrollbar', 'hover'  , 216, 0.28, 0.39, 0.8)
+ui.bg_def('dark' , 'scrollbar', 'active' , 216, 0.28, 0.41, 0.8)
 
-ui.bg_style('*', 'button'        , '*' , 'bg')
-ui.bg_style('*', 'button-primary', '*' , 'link')
+ui.bg_def('*', 'button'        , '*' , 'bg')
+ui.bg_def('*', 'button-primary', '*' , 'link')
 
-ui.bg_style('*', 'search' , 'normal',  60,  1.00, 0.80) // quicksearch text bg
-ui.bg_style('*', 'info'   , 'normal', 200,  1.00, 0.30) // info bubbles
-ui.bg_style('*', 'warn'   , 'normal',  39,  1.00, 0.50) // warning bubbles
-ui.bg_style('*', 'error'  , 'normal',   0,  0.54, 0.43) // error bubbles
+ui.bg_def('*', 'search' , 'normal',  60,  1.00, 0.80) // quicksearch text bg
+ui.bg_def('*', 'info'   , 'normal', 200,  1.00, 0.30) // info bubbles
+ui.bg_def('*', 'warn'   , 'normal',  39,  1.00, 0.50) // warning bubbles
+ui.bg_def('*', 'error'  , 'normal',   0,  0.54, 0.43) // error bubbles
 
 // input value states
-ui.bg_style('light', 'item', 'new'           , 240, 1.00, 0.97)
-ui.bg_style('light', 'item', 'modified'      , 120, 1.00, 0.93)
-ui.bg_style('light', 'item', 'new modified'  , 180, 0.55, 0.87)
+ui.bg_def('light', 'item', 'new'           , 240, 1.00, 0.97)
+ui.bg_def('light', 'item', 'modified'      , 120, 1.00, 0.93)
+ui.bg_def('light', 'item', 'new modified'  , 180, 0.55, 0.87)
 
-ui.bg_style('dark' , 'item', 'new'           , 240, 0.35, 0.27)
-ui.bg_style('dark' , 'item', 'modified'      , 120, 0.59, 0.24)
-ui.bg_style('dark' , 'item', 'new modified'  , 157, 0.18, 0.20)
+ui.bg_def('dark' , 'item', 'new'           , 240, 0.35, 0.27)
+ui.bg_def('dark' , 'item', 'modified'      , 120, 0.59, 0.24)
+ui.bg_def('dark' , 'item', 'new modified'  , 157, 0.18, 0.20)
 
 // grid cell & row states. these need to be opaque!
-ui.bg_style('light', 'item', 'item-focused'                       ,   0, 0.00, 0.93)
-ui.bg_style('light', 'item', 'item-selected'                      ,   0, 0.00, 0.91)
-ui.bg_style('light', 'item', 'item-focused item-selected'         ,   0, 0.00, 0.87)
-ui.bg_style('light', 'item', 'item-focused focused'               ,   0, 0.00, 0.87)
-ui.bg_style('light', 'item', 'item-focused item-selected focused' , 139 / 239 * 360, 141 / 240, 206 / 240)
-ui.bg_style('light', 'item', 'item-selected focused'              , 139 / 239 * 360, 150 / 240, 217 / 240)
-ui.bg_style('light', 'item', 'item-error'                         ,   0, 0.54, 0.43)
-ui.bg_style('light', 'item', 'item-error item-focused'            ,   0, 1.00, 0.60)
+ui.bg_def('light', 'item', 'item-focused'                       ,   0, 0.00, 0.93)
+ui.bg_def('light', 'item', 'item-selected'                      ,   0, 0.00, 0.91)
+ui.bg_def('light', 'item', 'item-focused item-selected'         ,   0, 0.00, 0.87)
+ui.bg_def('light', 'item', 'item-focused focused'               ,   0, 0.00, 0.87)
+ui.bg_def('light', 'item', 'item-focused item-selected focused' , 139 / 239 * 360, 141 / 240, 206 / 240)
+ui.bg_def('light', 'item', 'item-selected focused'              , 139 / 239 * 360, 150 / 240, 217 / 240)
+ui.bg_def('light', 'item', 'item-error'                         ,   0, 0.54, 0.43)
+ui.bg_def('light', 'item', 'item-error item-focused'            ,   0, 1.00, 0.60)
 
-ui.bg_style('light', 'row' , 'item-focused focused'               , 139 / 239 * 360, 150 / 240, 231 / 240)
-ui.bg_style('light', 'row' , 'item-focused'                       , 139 / 239 * 360,   0 / 240, 231 / 240)
-ui.bg_style('light', 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
+ui.bg_def('light', 'row' , 'item-focused focused'               , 139 / 239 * 360, 150 / 240, 231 / 240)
+ui.bg_def('light', 'row' , 'item-focused'                       , 139 / 239 * 360,   0 / 240, 231 / 240)
+ui.bg_def('light', 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
 
-ui.bg_style('dark' , 'item', 'item-focused'                       , 195, 0.06, 0.12)
-ui.bg_style('dark' , 'item', 'item-selected'                      ,   0, 0.00, 0.20)
-ui.bg_style('dark' , 'item', 'item-focused item-selected'         , 208, 0.11, 0.23)
-ui.bg_style('dark' , 'item', 'item-focused focused'               ,   0, 0.00, 0.23)
-ui.bg_style('dark' , 'item', 'item-focused item-selected focused' , 211, 0.62, 0.24)
-ui.bg_style('dark' , 'item', 'item-selected focused'              , 211, 0.62, 0.19)
-ui.bg_style('dark' , 'item', 'item-error'                         ,   0, 0.54, 0.43)
-ui.bg_style('dark' , 'item', 'item-error item-focused'            ,   0, 1.00, 0.60)
+ui.bg_def('dark' , 'item', 'item-focused'                       , 195, 0.06, 0.12)
+ui.bg_def('dark' , 'item', 'item-selected'                      ,   0, 0.00, 0.20)
+ui.bg_def('dark' , 'item', 'item-focused item-selected'         , 208, 0.11, 0.23)
+ui.bg_def('dark' , 'item', 'item-focused focused'               ,   0, 0.00, 0.23)
+ui.bg_def('dark' , 'item', 'item-focused item-selected focused' , 211, 0.62, 0.24)
+ui.bg_def('dark' , 'item', 'item-selected focused'              , 211, 0.62, 0.19)
+ui.bg_def('dark' , 'item', 'item-error'                         ,   0, 0.54, 0.43)
+ui.bg_def('dark' , 'item', 'item-error item-focused'            ,   0, 1.00, 0.60)
 
-ui.bg_style('dark' , 'row' , 'item-focused focused'               , 212, 0.61, 0.13)
-ui.bg_style('dark' , 'row' , 'item-focused'                       ,   0, 0.00, 0.13)
-ui.bg_style('dark' , 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
+ui.bg_def('dark' , 'row' , 'item-focused focused'               , 212, 0.61, 0.13)
+ui.bg_def('dark' , 'row' , 'item-focused'                       ,   0, 0.00, 0.13)
+ui.bg_def('dark' , 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
 
 //// CANVAS SETUP ------------------------------------------------------------
 
-// There's only one global canvas stretched to the entire viewport for now
-// since we're not planning to have our canvas-based UI embedded in a normal
-// HTML page any time soon.
+/*
+
+There's only one global canvas stretched to the entire viewport for now
+since we're not planning to have our canvas-based UI embedded in a normal
+HTML page any time soon.
+
+	ui.screen          access to canvas container div
+
+*/
 
 function css(s) {
 	let style = document.createElement('style')
@@ -867,7 +661,7 @@ function resize_canvas() {
 	canvas.style.height = (screen_h / dpr) + 'px'
 	canvas.width  = screen_w
 	canvas.height = screen_h
-	ui.font_size_normal = 12 * dpr
+	font_size_normal = ui.font_size_normal * dpr
 	animate()
 }
 ui.resize = resize_canvas
@@ -948,14 +742,61 @@ document.addEventListener('DOMContentLoaded', async function() {
 
 //// MOUSE HANDLING ----------------------------------------------------------
 
-// We support multiple pointers for screen sharing / remote control situations
-// but only one can be active at any one time, so two users can't hover two
-// things at the same time and can't drag multiple things at the same time,
-// and other users can't use the mouse while one user is dragging something.
-//
-// "true" multiple pointer support may sound cool, but it would complicate
-// mouse handling *for every widget*, and it would be a nightmare to figure
-// out what ops are allowed in the UI while one user is dragging something.
+/*
+
+We support multiple pointers for screen sharing / remote control situations
+but only one can be active at any one time, so two users can't hover two
+things at the same time and can't drag multiple things at the same time,
+and other users can't use the mouse while one user is dragging something.
+
+"true" multiple pointer support may sound cool, but it would complicate
+mouse handling *for every widget*, and it would be a nightmare to figure
+out what ops are allowed in the UI while one user is dragging something.
+
+	ui.pointers        [p1, ...]
+	ui.add_pointer     () -> pointer
+	ui.pointer         -> p    active pointer
+
+	ui.mx              active pointer x-coord, transformed
+	ui.my              active pointer y-coord, transformed
+	ui.mx_notrans      active pointer x-coord
+	ui.my_notrans      active pointer y-coord
+	ui.pressed         active pointer pressed
+	ui.click           active pointer clicked
+	ui.clickup         active pointer de-clicked
+	ui.dblclick        active pointer double-clicked
+	ui.wheel_dy        active pointer wheel delta
+	ui.trackpad        active pointer wheel delta is from is a trackpad
+
+	ui.local_pointer   = default pointer that tracks the local mouse and keyboard
+	ui.mx0 my0         = mouse position when started dragging
+	ui.update_mouse    ()   update mouse coords to current transform
+	ui.hit_rect        (x, y, w, h) -> t|f
+	ui.hit_bb          (x1, y1, x2, y2) -> t|f  ; bb means bounding box
+	ui.hit_box         (a, i) -> t|f
+
+	ui.captured_id     = id of the widget that mouse is down on
+	ui.captured        (id) -> cs | null  get captured state if mouse is captured
+
+	ui.hit             (id[, k]) -> hs|v|null hit state if id is directly hit or dragging
+	ui.clicked         (id) -> hs|v|null  hit state if id was clicked this frame
+	ui.dblclicked      (id) -> hs|v|null  hit state if id was double-clicked
+	ui.hit_enter       (id) -> t|f            mouse started hovering widget
+	ui.hit_leave       (id) -> t|f            mouse stopped hovering widget
+	ui.hovers          (id) -> hs|null        hit state if mouse hovers or dragging over id
+	ui.set_hit         (id) -> hs             declare that mouse hovers widget
+	ui.nohit           ()                     exclude last command from hit-testing
+
+	ui.drag            (id, ['x'|'y'|'xy']) -> cs|null  drag state if id is captured
+	     cs.drag       first frame of the drag
+	     cs.dragging   every frame from drag to drop
+	     cs.drop       last frame of the drag
+	     cs.dx,dy      how far the mouse moved since the press
+	ui.drag_or_hit     (id) -> cs|hs|null  drag(id), else hit(id)
+
+	ui.set_cursor      (cursor)   set cursor for this frame
+
+*/
 
 ui.pointers = []
 
@@ -1178,6 +1019,23 @@ function apply_cursor() {
 
 //// KEYBOARD HANDLING -------------------------------------------------------
 
+/*
+
+	ui.keydown         (key) -> t|f     check if a key was just pressed
+	ui.keyup           (key) -> t|f     check if a key was just depressed
+	ui.keypressed      (key) -> t|f     check if the active pointer's user holds a key
+
+	ui.key_chars () -> s          printable characters typed this frame
+	ui.key_events -> [['down'|'up', full_key, key, char, ctrl, alt, shift], ...]
+	ui.keys_down () -> n
+	ui.keys_up   () -> n
+
+	ui.capture_keys    ()    remove current keydown() and keyup() events
+	ui.capture_keydown (key)   stop the browser from acting on a keydown
+	ui.capture_keyup   (key)   stop the browser from acting on a keyup
+
+*/
+
 let key_downs = set()
 let key_ups   = set()
 
@@ -1301,9 +1159,22 @@ function consume_key_down(key) {
 
 ui.keys_down   = () => key_downs.size
 ui.keys_up     = () => key_ups.size
-ui.key_changes = () => key_downs.size + key_ups.size
 
 //// SCOPES ------------------------------------------------------------------
+
+/*
+
+USER API
+
+	ui.scope     ()
+	ui.end_scope ()
+
+WIDGET API
+
+	ui.scope_set (k, v)
+	ui.scope_get (k) -> v
+
+*/
 
 let scope_stack = []
 let scope = null
@@ -1368,9 +1239,10 @@ function scope_stack_check() {
 ui.scope = begin_scope
 ui.end_scope = end_scope
 
-//// ID STATES ---------------------------------------------------------------
+//// WIDGET STATE ------------------------------------------------------------
 
 /*
+
 Persistence between frames is kept in per-id state objects. Widgets need to
 call ui.state(id) otherwise their state is garbage-collected at the end
 of the frame. Widgets can also register a `free` callback to be called if
@@ -1380,6 +1252,13 @@ be updated in advance of the widget appearing in the frame in case the widget
 state is needed before the widget appears in the frame. The update callback
 is called once per build pass, either due to a state access from outside or
 when the widget is created in the frame.
+
+	ui.state           (id, [update_fn]) -> state     get own state and keep it alive
+	ui.state_of        (id[, k]) -> state | v | nil   get another widget's state
+	ui.set_state_of    (id, k, v)           set another widget's state var, if alive
+	ui.state_init      (id, k, v)           set widget state var if widget is alive
+	ui.on_free         (id, free_fn)        add a widget gc hook
+
 */
 
 let state_map      = map() // {id->state}
@@ -1440,29 +1319,6 @@ ui.state_init = function(id, k, v) {
 	s[k] = v
 }
 
-// what the input holds right now, current in any order inside a pass for
-// what the user did to it, but not for a value the caller supplies later in
-// the pass.
-ui.value = function(id) {
-	let s = ui.state_of(id)
-	if (!s)
-		return
-	return s.input_value !== undefined ? s.input_value : s.value
-}
-
-ui.input_value = function(id) {
-	return ui.state_of(id, 'input_value')
-}
-
-ui.set_value = function(s, value) {
-	if (s.input_value !== undefined)
-		value = s.input_value
-	else if (value !== s.value)
-		s.revert_value = value
-	s.value = value
-	return value
-}
-
 function free_state(id, s) {
 	if (ui.captured_id == id)
 		release_capture()
@@ -1518,7 +1374,7 @@ ui.stateful_widget = function(create) {
 	}
 }
 
-//// TUI ---------------------------------------------------------------------
+//// TUI STYLE ---------------------------------------------------------------
 
 ui.TUI = false
 
@@ -1564,7 +1420,7 @@ function reset_canvas() {
 	color = 'text'
 	color_state = 0
 	font = ui.TUI ? 'monospace' : ui.default_font
-	font_size = ui.font_size_normal
+	font_size = font_size_normal
 	font_weight = 'normal'
 	line_gap = 0.5
 	scope_set('color', color)
@@ -1599,6 +1455,14 @@ function ct_stack_check() {
 }
 
 /// command recordings -------------------------------------------------------
+
+/*
+
+	ui.start_recording ()
+	ui.end_recording   () -> a1
+	ui.play_recording  (a1)
+
+*/
 
 let rec_freelist = array_freelist()
 
@@ -1645,6 +1509,8 @@ function rec_stack_check() {
 }
 
 /// secondary command recordings ---------------------------------------------
+
+// only used internally by ui.frame callbacks.
 
 let recs = []
 let rec_i
@@ -1795,6 +1661,12 @@ ui.disas = function(a) {
 
 let layer_map = {} // {name->layer}
 
+//	ui.layer(name, [z_index], ['root modal'])
+//
+//   root flag  : popups on this layer are in the root stacking context.
+//   modal flag : popups on this layer create their own stacking context.
+//   no flags   : popups on this layer don't create a stacking context.
+//
 ui.layer = function(name, z_index, flags) {
 	assert(!layer_map[name])
 	let layer = obj()
@@ -1850,19 +1722,21 @@ function add_popup(popups, z_index, rec_i, ct_i, inner_popups) {
 		popups.splice(k, 0, z_index, rec_i, ct_i, inner_popups)
 }
 
+// current draw/hit popup, so we can skip draw/hit of nested popups.
+let current_popup_rec
+let current_popup_ct_i
+
+/// built-in layers ----------------------------------------------------------
+
 const layer_base =
 ui.layer('base'    , 0)
 ui.layer('overlay' , 1) // focus rings, drag points: must cover siblings.
 ui.layer('error'   , 2) // persistent tooltips: not hover (tooltips are hover).
-ui.layer('toolbox' , 3, 'modal')
+ui.layer('toolbox' , 3, 'modal') // toolboxes
 ui.layer('open'    , 4, 'modal') // dropdowns, menus: must cover all non-modals.
 ui.layer('modal'   , 5, 'modal') // modals: must cover all other modals.
 ui.layer('tooltip' , 6, 'root') // tooltips: must cover all static.
 ui.layer('drag'    , 7, 'root') // dragged object: must cover everything.
-
-// current draw/hit popup, so we can skip draw/hit of nested popups.
-let current_popup_rec
-let current_popup_ct_i
 
 //// RENDERING PHASES --------------------------------------------------------
 
@@ -1947,10 +1821,17 @@ function register_rec(a, rec_i) {
 /// drawing phase ------------------------------------------------------------
 
 /*
+
 Drawing phase is the only phase that can run on a remote machine on a received
 and deserialized frame object, so ui.state(), ui.hit() state, ui.captured_id,
 etc. don't work here. Drawing can keep local inter-frame state with
 ui.render_state().
+
+	ui.render_state    (id) -> state      get render-local widget state
+	ui.local_state     (id[, k]) -> state | v | nil
+
+	ui.cx       access to canvas 2D context
+
 */
 
 function create_render_state_map() {
@@ -2165,6 +2046,26 @@ function hit_frame(recs, popups) {
 }
 
 //// FOCUSING ----------------------------------------------------------------
+
+/*
+
+	ui.focused_id      = id                    id of focused widget
+	ui.focus           (id)                    focus widget
+	ui.focused         (id) -> t|f             check if widget is currently focused
+	ui.focusing        (id) -> t|f             widget is focusing this frame
+	ui.focusable       (id, [tab_order])       add widget to the tab order
+	ui.nofocus         ()                      declare the next widget not tab-focusable
+	ui.keep_focus      (id)                    declare widget not click-focusable
+	ui.capture_tab     (id)                    widget gets tab and shift-tab
+	ui.focus_group     ([trap], [tab_order], [id]) begin a tab order group
+	ui.end_focus_group ()                      end a tab order group
+	ui.default_button  (id)                    enter in the group's inputs hits it
+	ui.focus_inside    (group_id) -> t|f       focus is inside this focus group
+	ui.focus_first     (group_id)              focus first widget unless focus is inside
+	ui.tab_into        (id)                    next tab enters this focus group
+	ui.window_focused -> t|f                   browser window has focus
+
+*/
 
 ui.focused_id = null
 ui.focused_by_key = false
@@ -2740,6 +2641,24 @@ function redraw_all() {
 
 //// WIDGETS -----------------------------------------------------------------
 
+/*
+
+	ui.widget(name, {
+		measure       : f(a, i, axis)    measure widget on axis (0 for x, 1 for y)
+		measure_end   : f(a, i, axis)    measure widget on axis at widget's end() call
+		position      : f(a, i, axis, x, w, ct_i)   position widget on axis
+		translate     : f(a, i, x, y)     translate widget
+		draw          : f(a, i, recs)     draw widget
+		draw_end      : f(a, i)           draw widget at widget's end() call
+		hit           : f(a, i, recs)     hit-test widget
+		is_flex_child : t|f               has fr at a[i+FR] and min_w/h at a[i+2+axis]
+										          so it can be a child of a flex container.
+	}, is_ct) -> create
+
+	ui.measure(into_id)   measure container and put x,y,w,h in state of into_id.
+
+*/
+
 ui.widget = function(cmd_name, t, is_ct) {
 	let _cmd = cmd(cmd_name, is_ct)
 	measure       [_cmd] = t.measure
@@ -2765,9 +2684,70 @@ ui.widget = function(cmd_name, t, is_ct) {
 
 //// BOX WIDGETS -------------------------------------------------------------
 
-// a box has min_w, min_h, margin, padding, align, valign, and also `fr`
-// if it's is_flex_child. a box can also be a container.
-// it's x,y,w,h are calculated by the layouting system using the above.
+/*
+
+A box has min_w, min_h, margin, padding, align, valign, and also `fr`
+if it's is_flex_child. a box can also be a container.
+it's x,y,w,h are calculated by the layouting system using the above.
+
+CREATE
+	ui.box_widget      (cmd_name, t, is_ct)   define a box widget
+	ui.box_ct_widget   (cmd_name, t)          define a container box widget
+
+	ui.PX1    = index offset in a for x1 padding; y1 padding at PX1+1
+	ui.PX2    = index offset in a for x2 padding; y1 padding at PX2+1
+	ui.MX1    = index offset in a for x1 margin; y1 margin at MX1+1
+	ui.MX2    = index offset in a for x2 margin; y2 margin at MX2+1
+	ui.FR     = index offset in a for fr
+	ui.ALIGN  = index offset in a for align
+	ui.S      = index offset in a for arg#1 after ui_cmd_box_ct args
+
+	ui.ct_i   () -> ct_i    get container index in a
+	ui.last_i () -> last_i  get the index of the last cmd in a
+
+MEASURE
+	ui.add_ct_min_wh (a, axis, w)    declare min width/height
+
+POSITION
+	ui.align_x (a, i, axis, sx, sw)
+	ui.align_w (a, i, axis, sx, sw)
+	ui.inner_x (a, i, axis, ct_x)
+	ui.inner_w (a, i, axis, ct_x)
+
+DRAW
+	ui.popup_target_rect (a, i)  find a popup's target rect
+
+USER API: MARGINS & PADDINGS
+
+	rem (rem) -> x   rem units to pixels
+	em  (em) -> x    em units to pixels
+
+	sp025 () -> rem( .125)
+	sp05  () -> rem( .25)
+	sp075 () -> rem( .375)
+	sp    () -> rem( .5)
+	sp1   () -> rem( .5)
+	sp2   () -> rem( .75)
+	sp4   () -> rem(1)
+	sp8   () -> rem(2)
+
+	p[adding]           ([px1], [py1], [px2], [py2])
+	p[adding_]l[eft]    (p)
+	p[adding_]r[ight]   (p)
+	p[adding_]t[op]     (p)
+	p[adding_]b[ottom]  (p)
+	p[adding_]h[oriz]   (p1, [p2])
+	p[adding_]v[ert]    (p1, [p2])
+
+	m[argin]            ([mx1], [my1], [mx2], [my2])
+	m[argin_]l[eft]     (m)
+	m[argin_]r[ight]    (m)
+	m[argin_]t[op]      (m)
+	m[argin_]b[ottom]   (m)
+	m[argin_]h[oriz]    (m1, [m2])
+	m[argin_]v[ert]     (m1, [m2])
+
+*/
 
 const PX1        =  4
 const PX2        =  6
@@ -2835,7 +2815,7 @@ function parse_valign(s) {
 let px1, px2, py1, py2
 let mx1, mx2, my1, my2
 
-ui.rem = rem => round((rem ?? 1) * ui.font_size_normal)
+ui.rem = rem => round((rem ?? 1) * font_size_normal)
 ui. em =  em => round((em  ?? 1) * font_size)
 
 let em  = ui.em
@@ -2860,8 +2840,10 @@ ui.padding_left   = function(p) { px1 = p }; ui.pl = ui.padding_left
 ui.padding_right  = function(p) { px2 = p }; ui.pr = ui.padding_right
 ui.padding_top    = function(p) { py1 = p }; ui.pt = ui.padding_top
 ui.padding_bottom = function(p) { py2 = p }; ui.pb = ui.padding_bottom
-ui.padding_horiz  = function(p) { px1 = p; px2 = p }; ui.ph = ui.padding_horiz
-ui.padding_vert   = function(p) { py1 = p; py2 = p }; ui.pv = ui.padding_vert
+ui.padding_horiz  = function(p1, p2) { px1 = p1; px2 = p2 ?? p1 }
+ui.padding_vert   = function(p1, p2) { py1 = p1; py2 = p2 ?? p1 }
+ui.ph = ui.padding_horiz
+ui.pv = ui.padding_vert
 
 ui.margin = function(_mx1, _my1, _mx2, _my2) {
 	mx1 = _mx1 ?? 0
@@ -2874,8 +2856,10 @@ ui.margin_left   = function(m) { mx1 = m }; ui.ml = ui.margin_left
 ui.margin_right  = function(m) { mx2 = m }; ui.mr = ui.margin_right
 ui.margin_top    = function(m) { my1 = m }; ui.mt = ui.margin_top
 ui.margin_bottom = function(m) { my2 = m }; ui.mb = ui.margin_bottom
-ui.margin_horiz  = function(p) { mx1 = p; mx2 = p }; ui.mh = ui.margin_horiz
-ui.margin_vert   = function(p) { my1 = p; my2 = p }; ui.mv = ui.margin_vert
+ui.margin_horiz  = function(p1, p2) { mx1 = p1; mx2 = p2 ?? p1 }
+ui.margin_vert   = function(p1, p2) { my1 = p1; my2 = p2 ?? p1 }
+ui.mh = ui.margin_horiz
+ui.mv = ui.margin_vert
 
 function reset_spacings() {
 	px1 = 0
@@ -3098,6 +3082,7 @@ function ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h) {
 	ct_stack.push(i)
 	return i
 }
+ui.cmd_box_ct = ui_cmd_box_ct
 
 ui.box_ct_widget = function(cmd_name, t) {
 	let ID = t.ID
@@ -3884,7 +3869,7 @@ scrollbar_rect = function(a, i, axis, state) {
 			|| overflow_y == SB_OVERFLOW_INFINITE
 		)
 	let both_visible = h_visible && v_visible && 1 || 0
-	let bar_min_len = round(2 * ui.font_size_normal)
+	let bar_min_len = round(2 * font_size_normal)
 	if (!axis) {
 		visible = h_visible
 		if (visible) {
@@ -4560,7 +4545,7 @@ draw[CMD_BB_TOOLTIP] = function(a, i) {
 
 //// BOX SHADOW --------------------------------------------------------------
 
-ui.shadow_style = function(theme, name, x, y, blur, h, s, L, a, inset) {
+ui.shadow_def = function(theme, name, x, y, blur, h, s, L, a, inset) {
 	themes[theme].shadow[name] = [
 		x, y, blur,
 		hsl(h, s, L, a), h, s, L, a, inset
@@ -4569,23 +4554,23 @@ ui.shadow_style = function(theme, name, x, y, blur, h, s, L, a, inset) {
 
 //               theme    name        x   y  bl  h  s  L  a
 // ---------------------------------------------------------------------------
-ui.shadow_style('light', 'tooltip' ,  2,  2,  9, 0, 0, 0, 0x44 / 0xff)
-ui.shadow_style('light', 'toolbox' ,  1,  1,  4, 0, 0, 0, 0xaa / 0xff)
-ui.shadow_style('light', 'menu'    ,  0,  5, 16, 0, 0, 0, 0x33 / 0xff)
-ui.shadow_style('light', 'button'  ,  0,  0,  2, 0, 0, 0, 0x11 / 0xff)
-ui.shadow_style('light', 'button-active', 2, 3, 8, 0, 0, 0, 0x44 / 0xff, true)
-ui.shadow_style('light', 'thumb'   ,  0,  0,  2, 0, 0, 0, 0xbb / 0xff)
-ui.shadow_style('light', 'modal'   ,  2,  5, 10, 0, 0, 0, 0x88 / 0xff)
-ui.shadow_style('light', 'picker'  ,  0,  5, 10, 0, 0, 0, 0x22 / 0xff) // large fuzzy shadow
+ui.shadow_def('light', 'tooltip' ,  2,  2,  9, 0, 0, 0, 0x44 / 0xff)
+ui.shadow_def('light', 'toolbox' ,  1,  1,  4, 0, 0, 0, 0xaa / 0xff)
+ui.shadow_def('light', 'menu'    ,  0,  5, 16, 0, 0, 0, 0x33 / 0xff)
+ui.shadow_def('light', 'button'  ,  0,  0,  2, 0, 0, 0, 0x11 / 0xff)
+ui.shadow_def('light', 'button-active', 2, 3, 8, 0, 0, 0, 0x44 / 0xff, true)
+ui.shadow_def('light', 'thumb'   ,  0,  0,  2, 0, 0, 0, 0xbb / 0xff)
+ui.shadow_def('light', 'modal'   ,  2,  5, 10, 0, 0, 0, 0x88 / 0xff)
+ui.shadow_def('light', 'picker'  ,  0,  5, 10, 0, 0, 0, 0x22 / 0xff) // large fuzzy shadow
 
-ui.shadow_style('dark', 'tooltip' ,  2,  2,  9, 0, 0, 0, 0x44 / 0xff)
-ui.shadow_style('dark', 'toolbox' ,  1,  1,  4, 0, 0, 0, 0xaa / 0xff)
-ui.shadow_style('dark', 'menu'    ,  1,  1,  9, 0, 0, 0, 0xff / 0xff)
-ui.shadow_style('dark', 'button'  ,  0,  0,  2, 0, 0, 0, 0xff / 0xff)
-ui.shadow_style('dark', 'button-active', 1, 3, 8, 0, 0, 0, 0xaa / 0xff, true)
-ui.shadow_style('dark', 'thumb'   ,  1,  1,  2, 0, 0, 0, 0xaa / 0xff)
-ui.shadow_style('dark', 'modal'   ,  2,  5, 10, 0, 0, 0, 0x88 / 0xff)
-ui.shadow_style('dark', 'picker'  ,  0,  2, 15, 0, 0, 0, .8)
+ui.shadow_def('dark', 'tooltip' ,  2,  2,  9, 0, 0, 0, 0x44 / 0xff)
+ui.shadow_def('dark', 'toolbox' ,  1,  1,  4, 0, 0, 0, 0xaa / 0xff)
+ui.shadow_def('dark', 'menu'    ,  1,  1,  9, 0, 0, 0, 0xff / 0xff)
+ui.shadow_def('dark', 'button'  ,  0,  0,  2, 0, 0, 0, 0xff / 0xff)
+ui.shadow_def('dark', 'button-active', 1, 3, 8, 0, 0, 0, 0xaa / 0xff, true)
+ui.shadow_def('dark', 'thumb'   ,  1,  1,  2, 0, 0, 0, 0xaa / 0xff)
+ui.shadow_def('dark', 'modal'   ,  2,  5, 10, 0, 0, 0, 0x88 / 0xff)
+ui.shadow_def('dark', 'picker'  ,  0,  2, 15, 0, 0, 0, .8)
 
 const CMD_SHADOW = cmd('shadow')
 
@@ -4685,7 +4670,9 @@ ui.bb = function(
 		border_dash ?? null,
 	)
 }
-
+ui.bg = function(bg_color, bg_color_state) {
+	return ui.bb(bg_color, bg_color_state)
+}
 ui.border = function(
 	border_sides, border_color, border_color_state, border_radius, border_dash
 ) {
@@ -4830,6 +4817,37 @@ ui.focus_ring = function(id) {
 
 //// TEXT PROPERTIES ---------------------------------------------------------
 
+/*
+
+TEXT DEFAULTS
+
+	ui.font_size_normal = 12                 set default font size
+
+DEFINING FONTS
+
+	font_alias  (alias, font)
+
+TEXT PROPERTIES
+
+	color           (color, [color_state])
+	font            (font|alias)
+	fs | font_size  (size)
+	font_weight     (weight)
+	bold            ()
+	nobold          ()
+	lg | line_gap   (gap)
+	xsmall          ()      ui.font_size(.72  )
+	small           ()      ui.font_size(.8125)
+	smaller         ()      ui.font_size(.875 )
+	large           ()      ui.font_size(1.125)
+	xlarge          ()      ui.font_size(1.5  )
+
+	get_font_size   () -> font_size
+
+
+
+*/
+
 const CMD_COLOR = cmd('color')
 
 function force_color(s, state) {
@@ -4881,27 +4899,8 @@ ui.font = function(s) {
 	force_font(s)
 }
 
-// text is a codepoint, or the icon's name for a font that ligates names:
-// material icons ligates, tabler and font awesome don't.
-let icons = obj() // {name -> [font, text]}
-
-ui.icon_def = function(name, font, text) {
-	icons[name] = [font, text]
-}
-
-ui.icon = function(id, name, fr, align, valign, max_w, w, h) {
-	let [font, text] = assert(icons[name], 'unknown icon ', name)
-	ui.scope()
-	ui.font(font)
-	ui.text(id, text, fr, align, valign, max_w, w, h)
-	ui.end_scope()
-}
-
-ui.xsmall  = function() { ui.font_size(.72   ) }
-ui.small   = function() { ui.font_size(.8125 ) }
-ui.smaller = function() { ui.font_size(.875  ) }
-ui.large   = function() { ui.font_size(1.125 ) }
-ui.xlarge  = function() { ui.font_size(1.5   ) }
+ui.font_size_normal = 12
+let font_size_normal // set in reset_screen()
 
 const CMD_FONT_SIZE = cmd('font_size')
 
@@ -4917,10 +4916,16 @@ function end_font_size(ended_scope) {
 	font_size = s
 }
 ui.font_size = function(x) {
-	if (ui.font_size_normal * font_size == x) return
-	force_font_size(ui.font_size_normal * x)
+	if (font_size_normal * font_size == x) return
+	force_font_size(font_size_normal * x)
 }
 ui.fs = ui.font_size
+
+ui.xsmall  = function() { ui.font_size(.72   ) }
+ui.small   = function() { ui.font_size(.8125 ) }
+ui.smaller = function() { ui.font_size(.875  ) }
+ui.large   = function() { ui.font_size(1.125 ) }
+ui.xlarge  = function() { ui.font_size(1.5   ) }
 
 const CMD_FONT_WEIGHT = cmd('font_weight')
 
@@ -5012,7 +5017,60 @@ function force_scope_vars() {
 	force_line_gap(line_gap)
 }
 
+//// INPUT STATE -------------------------------------------------------------
+
+/*
+
+	ui.value       (id) -> v               what the input holds right now
+	ui.input_value (id) -> v | undefined   interaction value, if interacted thi frame
+	ui.set_value   (state, v)
+
+*/
+
+// what the input holds right now, current in any order inside a pass for
+// what the user did to it, but not for a value the caller supplies later in
+// the pass.
+ui.value = function(id) {
+	let s = ui.state_of(id)
+	if (!s)
+		return
+	return s.input_value !== undefined ? s.input_value : s.value
+}
+
+ui.input_value = function(id) {
+	return ui.state_of(id, 'input_value')
+}
+
+ui.set_value = function(s, value) {
+	if (s.input_value !== undefined)
+		value = s.input_value
+	else if (value !== s.value)
+		s.revert_value = value
+	s.value = value
+	return value
+}
+
 //// TEXT BOX ----------------------------------------------------------------
+
+/*
+TEXT BOXES
+
+	ui.text            (id, s, fr, align, valign, max_w, w, h, 'line'|'word'|0, editable, input_type)
+	ui.text_editable   (id, s, fr, align, valign, max_w, w, h, input_type)
+	ui.text_lines      (id, s, fr, align, valign, max_w, w, h, editable)
+	ui.text_wrapped    (id, s, fr, align, valign, max_w, w, h, editable)
+
+TEXT STATE API
+
+	ui.mark_text       (i1, i2, [bg])   put a bg behind [i1,i2) of the next text
+	ui.select_text     (id, i, len)     place the caret in an editable text
+	ui.text_selection  (id, [from_end], [wanted]) -> [i, len]
+
+TEXT HELPERS
+
+	ui.measure_text (cx, s) -> {w:, asc:, dsc:, {actual|font}BoundingBox{Ascent|Descent|Left|Right}:, }
+
+*/
 
 const TEXT_ASC        = BOX_ARGS+0
 const TEXT_DSC        = BOX_ARGS+1
@@ -5056,9 +5114,12 @@ function editable_text_update(id, s) {
 	s.input_value = undefined
 }
 
+// max_w : clip text beyond max_w. makes sense when w is not given.
+// w     : fixate box width, clip text beyond it; default is text width.
+// so by default text has dynamic w, and you can first cap it then fixate it.
 ui.text = function(
-	id, text, fr, align, valign, max_w, w, h, wrap, editable, input_type,
-	readonly
+	id, text, fr, align, valign, max_w, w, h, wrap,
+	editable, input_type, readonly
 ) {
 	// NOTE: w and h default to measured text size.
 	text = String(text ?? '')
@@ -5131,6 +5192,14 @@ ui.text_lines = function(id, s, fr, align, valign, max_w, w, h, editable) {
 }
 ui.text_wrapped = function(id, s, fr, align, valign, max_w, w, h, editable) {
 	return ui.text(id, s, fr, align, valign, max_w, w, h, 'word', editable)
+}
+ui.h1 = function(s, align) {
+	ui.scope()
+	ui.font_size(1.75)
+	ui.bold()
+	ui.color('heading')
+	ui.text('', s, 0, align)
+	ui.end_scope()
 }
 
 function see(m) {
@@ -5747,7 +5816,7 @@ draw[CMD_TEXT] = function(a, i) {
 	if (ss_ids.length)
 		focused = focused && ss_focused
 
-	let col = ui.fg_color(color, color_state)
+	let col = fg_color(color, color_state)
 
 	if (editable) {
 		let input = input_create(id, input_type)
@@ -5861,7 +5930,7 @@ draw[CMD_TEXT] = function(a, i) {
 	if (flags & TEXT_ALIGN_RIGHT) {
 		cx.textAlign = 'right'
 		anchor_x = sx + sw
-	} else if (flags & TEXT_ALIGN_CENTER && a[i+2] <= sw) {
+	} else if (flags & TEXT_ALIGN_CENTER) {
 		cx.textAlign = 'center'
 		anchor_x = sx + sw / 2
 	} else {
@@ -5949,6 +6018,24 @@ hittest[CMD_TEXT] = function(a, i) {
 		hit_template(a, i)
 		return true
 	}
+}
+
+//// ICONS -------------------------------------------------------------------
+
+// text is a codepoint, or the icon's name for a font that ligates names:
+// material icons ligates, tabler and font awesome don't.
+let icons = obj() // {name -> [font, text]}
+
+ui.icon_def = function(name, font, text) {
+	icons[name] = [font, text]
+}
+
+ui.icon = function(id, name, fr, align, valign, max_w, w, h) {
+	let [font, text] = assert(icons[name], 'unknown icon ', name)
+	ui.scope()
+	ui.font(font)
+	ui.text(id, text, fr, align, valign, max_w, w, h)
+	ui.end_scope()
 }
 
 //// FRAME -------------------------------------------------------------------
@@ -6138,6 +6225,13 @@ async function unpack_frame(cb) {
 }
 
 //// SHARED SCREEN -----------------------------------------------------------
+
+/*
+	ui.shared_screen   (id, answer_con, fr, align, valign, min_w, min_h)
+	ui.process_shared_screen_input (p, t)
+	ui.pack_frame      () -> s     pack current frame for sending over the network
+	ui.frame_changed   = noop      hook this for sending frames out
+*/
 
 let SS_ID    = BOX_ARGS+0
 let SS_FRAME = BOX_ARGS+1
@@ -6497,7 +6591,7 @@ ui.pri_btn = ui.primary_button
 
 // a hit edge is a hit area stretched around a vert/horiz edge.
 function hit_v_edge(id, hit_dx) {
-	let hit_distance = 10
+	let hit_distance = ui.sp1()
 	// hack: the native ew-resize cursor icon reads visually left-skewed,
 	// so shift the hit area right without moving the rendered line.
 	hit_dx ??= 0
@@ -6512,7 +6606,7 @@ function end_hit_v_edge() {
 }
 
 function hit_h_edge(id, hit_dx) {
-	let hit_distance = 10
+	let hit_distance = ui.sp1()
 	hit_dx ??= 0
 	ui.popup(id, null, null, 'it', 's', null, hit_distance, 'solid',
 		null, null, -hit_distance / 2 + hit_dx)
@@ -6605,6 +6699,12 @@ function split(hv, id, size, unit, fixed_side,
 	return size
 }
 
+// bias split edge hit area towards the right/bottom for two reasons:
+// 1) the left/top side usually contains a scrollbar and the split hit area
+// is on top so it interferes with that scrollbar.
+// 2) the <-> cursor icon is anchored wrong (at least in Chrome).
+let split_edge_hit_bias = 4
+
 ui.splitter = function() {
 
 	ui.end_sb()
@@ -6618,32 +6718,25 @@ ui.splitter = function() {
 	let st = hit(id) ? 'hover' : null
 
 	if (hv == 'h') {
-		// hack: the native ew-resize cursor icon reads visually left-skewed,
-		// so shift the hit area right without moving the rendered line.
-		let hit_dx = 0
 		ui.stack('', 0, 'l', 's', 1, 0)
-			ui.stack('', 1, 'c', 's')
-				ui.border('l', 'intense', st)
-			ui.end_stack()
+			ui.border('l', 'intense', st)
+			hit_v_edge(id, split_edge_hit_bias)
 			if (collapsed) {
 				ui.stack('', 1, 'c', 'c', 5, 2*ui.sp8())
 					ui.border('lr', 'intense', st)
 				ui.end_stack()
 			}
-			hit_v_edge(id, hit_dx)
 			end_hit_v_edge()
 		ui.end_stack()
 	} else {
 		ui.stack('', 0, 's', 't', 0, 1)
-			ui.stack('', 1, 's', 'c')
-				ui.border('t', 'intense', st)
-			ui.end_stack()
-			if (collapsed) {
-				ui.stack('', 1, 'c', 'c', 2*ui.sp8(), 5)
-					ui.border('tb', 'intense', st)
-				ui.end_stack()
-			}
-			hit_h_edge(id)
+			ui.border('t', 'intense', st)
+			hit_h_edge(id, split_edge_hit_bias)
+				if (collapsed) {
+					ui.stack('', 1, 'c', 'c', 2*ui.sp8(), 4)
+						ui.border('tb', 'intense', st)
+					ui.end_stack()
+				}
 			end_hit_h_edge()
 		ui.end_stack()
 	}
@@ -6858,8 +6951,12 @@ ui.label = function(for_id, s, fr, align, valign) {
 
 //// INPUT -------------------------------------------------------------------
 
-ui.input_min_w_em = 6
-ui.em_input = () => ui.em(ui.input_min_w_em)
+ui.input_min_w_em = 10
+ui.input_max_w_em = 12
+ui.input_max_popup_w_em = 24
+ui.em_input           = () => ui.em(ui.input_min_w_em)
+ui.em_input_max       = () => ui.em(ui.input_max_w_em)
+ui.em_input_max_popup = () => ui.em(ui.input_max_popup_w_em)
 
 ui.input = function(id, s, fr, w, text_align, readonly) {
 	if (clicked(id+'.label')) {
@@ -7270,10 +7367,10 @@ ui.box_widget('slider', slider)
 
 //// TOGGLE ------------------------------------------------------------------
 
-ui.bg_style('*', 'toggle'      , '*', 'bg2')
-ui.bg_style('*', 'toggle'      , 'normal item-selected', 'link', 'normal')
-ui.bg_style('*', 'toggle'      , 'hover  item-selected', 'link', 'hover' )
-ui.bg_style('*', 'toggle-thumb', '*', 'text')
+ui.bg_def('*', 'toggle'      , '*', 'bg2')
+ui.bg_def('*', 'toggle'      , 'normal item-selected', 'link', 'normal')
+ui.bg_def('*', 'toggle'      , 'hover  item-selected', 'link', 'hover' )
+ui.bg_def('*', 'toggle-thumb', '*', 'text')
 
 let TOGGLE_ID    = BOX_ARGS+0
 let TOGGLE_STATE = BOX_ARGS+1
@@ -7578,6 +7675,8 @@ function set_dropdown_open(id, s, open, picked) {
 	}
 }
 
+// TODO: doesn't work on first frame because the update callback clears the
+// opened flag! Grid calls this on first frame before building the editor.
 ui.set_dropdown_open = function(id, open) {
 	set_dropdown_open(id, ui.state(id), open)
 }
@@ -7702,12 +7801,15 @@ ui.end_dropdown = function() {
 
 const chevron_points = [0.5, 4.5, 7, 11, 13.5, 4.5]
 
-function draw_value_row(items, item_i, row_id, pad, chevron_w, max_w) {
+function draw_value_row(items, item_i, row_id, pad, chevron_w, max_w, w) {
 	ui.stack(row_id ?? '', 0)
 		ui.p(pad)
 		ui.h(0, pad)
-			ui.text('', item_i != null ? items[item_i] : '', 1, 'l', 'c',
-				max_w ?? ui.em(6))
+			let s = item_i != null ? items[item_i] : ''
+			ui.text('', s, 1, 'l', 'c',
+				max_w ?? ui.em_input_max(),
+				w == -1 ? w : (w ?? ui.em_input()) - chevron_w,
+			)
 			ui.stack('', 0, null, null, chevron_w)
 				ui.polyline('', chevron_points, false, null, null, 'label')
 			ui.end_stack()
@@ -7736,6 +7838,9 @@ function list_dropdown_update(id, s) {
 	if (picker_i !== undefined)
 		s.input_value = picker_i
 
+	if (ui.keydown('delete') && (ui.focused(id) || ui.focus_inside(id)))
+		s.input_value = null
+
 	// arrow keys move the selection with the list closed.
 	if (!s.open && ui.focused(id)) {
 		let d = ui.keydown('arrowup') && -1 || ui.keydown('arrowdown') && 1 || 0
@@ -7747,7 +7852,7 @@ function list_dropdown_update(id, s) {
 	}
 }
 
-ui.list_dropdown = function(id, items, sel_i, fr, max_w, min_w) {
+ui.list_dropdown = function(id, items, sel_i, fr, max_w, w) {
 
 	let picker_id = id+'.picker'
 	let value_id = id+'.value'
@@ -7755,7 +7860,7 @@ ui.list_dropdown = function(id, items, sel_i, fr, max_w, min_w) {
 	let pad = ui.sp()
 	let chevron_w = ui.em(1)
 
-	ui.stack('', fr, 's', 's', min_w ?? ui.em_input())
+	ui.stack('', fr, 's', 's')
 
 	ui.focusable(id)
 	let s = ui.state(id)
@@ -7769,7 +7874,9 @@ ui.list_dropdown = function(id, items, sel_i, fr, max_w, min_w) {
 		if (!open)
 			ui.bb('input', ui.focused(id) ? 'focused' : null,
 				1, 'intense', ui.focused(id) ? 'hover' : null)
-		draw_value_row(items, sel_i, null, pad, chevron_w, max_w)
+		draw_value_row(items, sel_i, null, pad, chevron_w,
+			max_w ?? ui.em_input_max(),
+			w)
 
 	ui.dropdown_picker()
 
@@ -7777,8 +7884,10 @@ ui.list_dropdown = function(id, items, sel_i, fr, max_w, min_w) {
 			ui.v()
 				draw_value_row(items, sel_i, value_id, pad, chevron_w, max_w)
 				ui.scrollbox(picker_id+'.sb', 1, 'contain', 'auto', 's', 's')
-					ui.list(picker_id, items, sel_i, 0, 's', 's', 'l', 'c', 0, max_w,
-						null, pad, pad * 2 + chevron_w, pad)
+					ui.list(picker_id, items, sel_i, 0, 's', 's', 'l', 'c', 0,
+						max_w ?? ui.em_input_max_popup(),
+						null,
+						pad, pad * 2 + chevron_w, pad)
 				ui.end_scrollbox()
 				ui.resizer(id+'.resizer', null, ui.em(16), 'y')
 			ui.end_v()
@@ -7789,6 +7898,12 @@ ui.list_dropdown = function(id, items, sel_i, fr, max_w, min_w) {
 	ui.end_stack()
 
 	return sel_i
+}
+
+// dropdowns have fixed w by default that aligns with inputs.
+// these inline dropdowns have dynamic width for use inline inside text.
+ui.list_dropdown_inline = function(id, items, sel_i, fr, max_w) {
+	return ui.list_dropdown(id, items, sel_i, fr, max_w, -1)
 }
 
 //// CALENDAR ----------------------------------------------------------------
@@ -8493,7 +8608,7 @@ function gradient_slider(draw_gradient, name, max_value, key_step,
 				ui.focus_group(false, null, id)
 					ui.focusable(id)
 					ui.stack()
-						ui.cmd_box(cmd, null, null, null, ui.em(6), 0,
+						ui_cmd_box(cmd, null, null, null, ui.em(6), 0,
 							id, hue, sat, hit_p, value_p)
 						if (ui.focused(id))
 							ui.focus_ring()

@@ -62,7 +62,7 @@ let ui = {
 	cx: {font: '', save(){}, restore(){}, fillRect(){}, fillText(){},
 		clearRect(){}, beginPath(){}, rect(){}, clip(){}},
 	caret_w: 2,
-	fg_style(){}, bg_style(){}, icon_def(){},
+	fg_def(){}, bg_def(){}, icon_def(){},
 	widget(){}, cmd(){}, keepalive(){}, on_free(){}, focus(){}, focusable(){},
 	capture_keydown(){}, capture_keyup(){}, capture_tab(){},
 	scroll_to_view_rect(){}, measure(){},

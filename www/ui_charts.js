@@ -25,6 +25,11 @@ SHAPES
 "use strict"
 let G = window
 
+const {
+	abs, ceil, floor, max, min, round, lerp, logbase, rad, PI,
+	catany, words, obj, map, noop, empty_array,
+	point_around,
+} = glue
 
 css('.chart', 'S shrinks p clip v')
 
