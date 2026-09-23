@@ -472,6 +472,7 @@ function init(id, e) {
 			if (editing && !build_stage && field.has_editor) {
 				ui.focus_group(true, null, e.editor_id)
 				field.build_editor(e.editor_id, input_val, pad_l, pad_r, h)
+				e.want_dropdown_open = false
 				ui.end_focus_group()
 			}
 			ui.p(0)
@@ -1409,8 +1410,7 @@ function init(id, e) {
 					has_picked_val = true
 				}
 			}
-			let open = field.dropdown_open?.(editor_id)
-			let closed = open === false
+			let closed = field.dropdown_closed?.(editor_id)
 				&& (field.edits_in_popup || has_picked_val)
 			if (closed) {
 				let picked = field.dropdown_picked(editor_id)

@@ -7660,12 +7660,12 @@ ui.box_widget('radio', radio)
 //// DROPDOWN ----------------------------------------------------------------
 
 /*
-	let open = ui.dropdown(id, [side], [align], [update])
+	let open = ui.dropdown(id, [update], [want_open])
 		... the value ...
-	ui.dropdown_picker()
+	ui.dropdown_picker(id, [side], [align])
 		if (open)
 			... the picker, under id+'.picker' ...
-	ui.end_dropdown()
+	ui.end_dropdown(id)
 
 	while the picker is up, tab cycles inside the dropdown: its box and its
 	picker, so put whatever the control is made of inside the box.
@@ -7689,10 +7689,10 @@ function set_dropdown_open(id, s, open, picked) {
 	}
 }
 
-// TODO: doesn't work on first frame because the update callback clears the
-// opened flag! Grid calls this on first frame before building the editor.
 ui.set_dropdown_open = function(id, open) {
-	set_dropdown_open(id, ui.state(id), open)
+	let s = ui.state_of(id)
+	assert(s, 'set_dropdown_open(): dropdown not built: ', id)
+	set_dropdown_open(id, s, open)
 }
 
 ui.dropdown_open = function(id) {
@@ -7756,26 +7756,16 @@ ui.dropdown_update = function(id, s) {
 	set_dropdown_open(id, s, open, picked)
 }
 
-let dd_open // decided in dropdown(), needed in dropdown_picker() and end_dropdown()
-let dd_picker_id // focus group id of the open dropdown's picker
-let dd_popup_id, dd_side // given to dropdown(), needed in dropdown_picker()
-let dd_align
-
 // opened by ui.set_dropdown_open().
-ui.dropdown = function(id, side, align, update) {
-
-	assert(dd_open == null, 'nested dropdown')
+ui.dropdown = function(id, update, want_open) {
 
 	let s = ui.state(id, update)
 	if (!s.update)
 		ui.state(id, ui.dropdown_update)
 	s.open ??= false
+	if (want_open)
+		set_dropdown_open(id, s, true)
 	let open = s.open
-	dd_open = open
-	dd_picker_id = id+'.picker'
-	dd_popup_id = id+'.popup'
-	dd_side = side
-	dd_align = align
 
 	ui.v()
 
@@ -7785,22 +7775,20 @@ ui.dropdown = function(id, side, align, update) {
 	return open
 }
 
-ui.dropdown_picker = function() {
+ui.dropdown_picker = function(id, side, align) {
 	ui.end_stack()
-	if (dd_open) {
-		ui.popup(dd_popup_id, 'open', null, dd_side ?? 'it', dd_align ?? 's',
+	if (ui.state_of(id, 'open')) {
+		ui.popup(id+'.popup', 'open', null, side ?? 'it', align ?? 's',
 			0, 0, 'constrain change_side solid')
 		ui.shadow('picker')
 		ui.bb('input') // background only: end_dropdown() draws the border
-		ui.focus_group(false, null, dd_picker_id)
+		ui.focus_group(false, null, id+'.picker')
 		ui.stack()
 	}
 }
 
-ui.end_dropdown = function() {
-	let open = dd_open
-	dd_open = null
-	if (open) {
+ui.end_dropdown = function(id) {
+	if (ui.state_of(id, 'open')) {
 		ui.end_stack()
 		ui.end_focus_group()
 		// last, so that the picker's item backgrounds don't paint over it.
@@ -7879,7 +7867,7 @@ ui.list_dropdown = function(id, items, sel_i, fr, max_w, w) {
 	ui.focusable(id)
 	let s = ui.state(id)
 	s.items = items
-	let open = ui.dropdown(id, null, null, list_dropdown_update)
+	let open = ui.dropdown(id, list_dropdown_update)
 	sel_i = ui.set_value(s, sel_i)
 
 	if (!open && ui.focus_inside(picker_id))
@@ -7892,7 +7880,7 @@ ui.list_dropdown = function(id, items, sel_i, fr, max_w, w) {
 			max_w ?? ui.em_input_max(),
 			w)
 
-	ui.dropdown_picker()
+	ui.dropdown_picker(id)
 
 		if (open) {
 			ui.v()
@@ -7907,7 +7895,7 @@ ui.list_dropdown = function(id, items, sel_i, fr, max_w, w) {
 			ui.end_v()
 		}
 
-	ui.end_dropdown()
+	ui.end_dropdown(id)
 
 	ui.end_stack()
 
@@ -8276,7 +8264,7 @@ ui.date_input = function(id, v, opt, fr, align, valign, min_w) {
 	}
 
 	let focused = ui.focused(input_id)
-	let open = ui.dropdown(id, 'b', 'cs')
+	let open = ui.dropdown(id)
 	if (!open && ui.focus_inside(picker_id))
 		ui.focus(input_id)
 
@@ -8311,7 +8299,7 @@ ui.date_input = function(id, v, opt, fr, align, valign, min_w) {
 			ui.end_h()
 		ui.end_stack()
 
-	ui.dropdown_picker()
+	ui.dropdown_picker(id, 'b', 'cs')
 
 		if (open) {
 			let sel_day = isnum(value) ? day(value) : null
@@ -8325,7 +8313,7 @@ ui.date_input = function(id, v, opt, fr, align, valign, min_w) {
 			ui.resizer(id+'.resizer', null, null, 'y')
 		}
 
-	ui.end_dropdown()
+	ui.end_dropdown(id)
 
 	return value
 }
@@ -8797,7 +8785,7 @@ ui.color_input = function(id, value, fr, min_w) {
 	ui.stack('', fr, 's', 's', min_w ?? ui.em_input(), ui.em(1.5))
 
 	ui.focusable(id)
-	let open = ui.dropdown(id, 'b')
+	let open = ui.dropdown(id)
 	if (!open && ui.focus_inside(picker_id))
 		ui.focus(id)
 
@@ -8811,7 +8799,7 @@ ui.color_input = function(id, value, fr, min_w) {
 				ui.bb(':'+value)
 		ui.end_stack()
 
-	ui.dropdown_picker()
+	ui.dropdown_picker(id, 'b')
 
 		if (open) {
 			ui.p(ui.sp2())
@@ -8826,7 +8814,7 @@ ui.color_input = function(id, value, fr, min_w) {
 			ui.resizer(id+'.resizer', ui.em(22), null, 'x')
 		}
 
-	ui.end_dropdown()
+	ui.end_dropdown(id)
 
 	ui.end_stack()
 

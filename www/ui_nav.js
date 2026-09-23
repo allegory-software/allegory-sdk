@@ -3125,6 +3125,7 @@ ui.nav = function(opt) {
 	e.edit_sel_i = 0
 	e.edit_sel_len = 1/0
 	e.edit_text = null
+	e.want_dropdown_open = false
 
 	// cells that act on a click instead of opening an editor.
 	e.cell_clickable = function(row, field) {
@@ -3174,8 +3175,8 @@ ui.nav = function(opt) {
 		if (field.has_editor) {
 			let v = e.cell_input_val(row, field)
 			e.edit_text = v == null ? null : field.to_input(v)
-			if (opt?.open_popup != false || field.edits_in_popup)
-				field.open_dropdown?.(e.editor_id)
+			e.want_dropdown_open = opt?.open_popup != false
+				|| !!field.edits_in_popup
 			// by key: that is what focuses the input element. a click can't, the
 			// input only appears a frame later.
 			if (opt?.focus !== false)
@@ -3196,6 +3197,7 @@ ui.nav = function(opt) {
 		e.advance_on_exit = false
 		e.editor_id = null
 		e.edit_text = null
+		e.want_dropdown_open = false
 		if (ev && ev.cancel) {
 			if (row && field)
 				e.revert_cell(row, field, ev)
@@ -4763,6 +4765,10 @@ dropdown_editor.dropdown_open = function(id) {
 	return ui.dropdown_open(id)
 }
 
+dropdown_editor.dropdown_closed = function(id) {
+	return ui.dropdown_closed(id)
+}
+
 dropdown_editor.dropdown_picked = function(id) {
 	return ui.dropdown_picked(id)
 }
@@ -4910,6 +4916,10 @@ date.dropdown_open = function(id) {
 	return ui.dropdown_open(id+'.calendar')
 }
 
+date.dropdown_closed = function(id) {
+	return ui.dropdown_closed(id+'.calendar')
+}
+
 date.dropdown_picked = function(id) {
 	return ui.dropdown_picked(id+'.calendar')
 }
@@ -4926,8 +4936,7 @@ date.build_editor = function(id, v, pad_l, pad_r, h) {
 
 	ui.popup('', 'overlay', editor_target_i, 'irs', 's')
 
-	let is_open = ui.dropdown(calendar_id, 'b',
-		this.align == 'right' ? 'cs' : 'cs')
+	let is_open = ui.dropdown(calendar_id, null, this.nav.want_dropdown_open)
 	if (!is_open && ui.focus_inside(picker_id))
 		ui.focus(id)
 	let opened = ui.dropdown_opened(calendar_id)
@@ -4942,7 +4951,8 @@ date.build_editor = function(id, v, pad_l, pad_r, h) {
 			ui.end_h()
 		ui.end_stack()
 
-	ui.dropdown_picker()
+	ui.dropdown_picker(calendar_id, 'b',
+		this.align == 'right' ? 'cs' : 'cs')
 
 		if (is_open) {
 			if (opened) {
@@ -4961,7 +4971,7 @@ date.build_editor = function(id, v, pad_l, pad_r, h) {
 			ui.resizer(resize_id, null, null, 'y')
 		}
 
-	ui.end_dropdown()
+	ui.end_dropdown(calendar_id)
 
 	ui.end_popup()
 }
@@ -5059,8 +5069,7 @@ enm.build_editor = function(id, v, pad_l, pad_r, h) {
 	// aligned to, so v stays put when the list makes the popup wider than
 	// the cell.
 	ui.focusable(id)
-	let open = ui.dropdown(id, 'b',
-		this.align == 'right' ? ']s' : '[s')
+	let open = ui.dropdown(id, null, this.nav.want_dropdown_open)
 	let opened = ui.dropdown_opened(id)
 
 		if (open) {
@@ -5070,7 +5079,7 @@ enm.build_editor = function(id, v, pad_l, pad_r, h) {
 			ui.end_stack()
 		}
 
-	ui.dropdown_picker()
+	ui.dropdown_picker(id, 'b', this.align == 'right' ? ']s' : '[s')
 
 		if (open) {
 			let s = ui.state(picker_id)
@@ -5084,7 +5093,7 @@ enm.build_editor = function(id, v, pad_l, pad_r, h) {
 				null, null, pad_l, pad_r, 0, h)
 		}
 
-	ui.end_dropdown()
+	ui.end_dropdown(id)
 }
 
 enm.editor_value = function(id, v) {
@@ -5133,10 +5142,10 @@ lookup_editor.build_editor = function(id, v, pad_l, pad_r, h) {
 	let picker_id = id+'.picker'
 
 	ui.focusable(id)
-	let open = ui.dropdown(id, 'b')
+	let open = ui.dropdown(id, null, this.nav.want_dropdown_open)
 	let opened = ui.dropdown_opened(id)
 
-	ui.dropdown_picker()
+	ui.dropdown_picker(id, 'b')
 
 		if (open) {
 			// start the picker on v's row, and reveal it once the grid is drawn.
@@ -5150,7 +5159,7 @@ lookup_editor.build_editor = function(id, v, pad_l, pad_r, h) {
 			ui.resizer(resize_id, ui.em(24), ui.em(12))
 		}
 
-	ui.end_dropdown()
+	ui.end_dropdown(id)
 }
 
 lookup_editor.editor_value = function(id, v) {
@@ -5189,6 +5198,12 @@ lookup_editor.dropdown_open = function(id) {
 	if (!can_pick_lookup_val(this))
 		return
 	return ui.dropdown_open(id)
+}
+
+lookup_editor.dropdown_closed = function(id) {
+	if (!can_pick_lookup_val(this))
+		return
+	return ui.dropdown_closed(id)
 }
 
 lookup_editor.dropdown_picked = function(id) {
@@ -5242,9 +5257,9 @@ color.build_editor = function(id, v, pad_l, pad_r, h) {
 	let picker_id = id+'.picker'
 
 	ui.focusable(id)
-	let open = ui.dropdown(id, 'b')
+	let open = ui.dropdown(id, null, this.nav.want_dropdown_open)
 
-	ui.dropdown_picker()
+	ui.dropdown_picker(id, 'b')
 
 		if (open) {
 			let resize_id = id+'.resizer'
@@ -5260,7 +5275,7 @@ color.build_editor = function(id, v, pad_l, pad_r, h) {
 			ui.resizer(resize_id, ui.em(22), null, 'x')
 		}
 
-	ui.end_dropdown()
+	ui.end_dropdown(id)
 }
 
 // percents ------------------------------------------------------------------
@@ -5382,8 +5397,8 @@ ui.nav_input = function(id, opt, fr, align, valign, min_w) {
 	let v = row ? e.cell_input_val(row, field) : null
 
 	let escape = row && ui.focus_inside(id+'.focus_group') && ui.keydown('escape')
-	let picker_open = escape && field.dropdown_open?.(id)
-	if (escape && !picker_open) {
+	let picker_closed = escape && ui.dropdown_closed(id)
+	if (escape && !picker_closed) {
 		e.revert_cell(row, field, {input: e})
 		v = e.cell_input_val(row, field)
 		ui.capture_keys()
