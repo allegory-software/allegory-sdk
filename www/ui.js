@@ -6635,7 +6635,6 @@ function split(hv, id, size, unit, fixed_side,
 	split_fr, gap, align, valign, min_w, min_h,
 ) {
 
-	let snap_px = 50
 	let splitter_w = 1
 
 	fixed_side ??= 1
@@ -6649,11 +6648,12 @@ function split(hv, id, size, unit, fixed_side,
 	let max_size = (measured_wh ?? 1/0) - splitter_w
 	assert(!unit || unit == 'px' || unit == 'fr')
 	let fixed = unit == 'px'
+	let snap_px = fixed ? 50 * dpr : 50
 	if (fixed && measured_wh == null)
 		ui.rebuild('measure') // needed or `collapsed` may start out wrong and stay wrong.
 	size = s.size ?? size
 	let side_fr  = fixed ? 0 : (size ?? 0.5) // fr/px of the fixed_side pane
-	let side_min = fixed ? size ?? 0 : 0
+	let side_min = fixed ? (size ?? 0) * dpr : 0
 	if (cs?.dragging) {
 		if (cs.drag)
 			cs[W] = s[W]
@@ -6673,7 +6673,7 @@ function split(hv, id, size, unit, fixed_side,
 			side_fr = size_px / max_size
 		if (cs.drop)
 			s.size = fixed
-				? side_min != 0 && side_min == max_size ? 1/0 : side_min
+				? side_min != 0 && side_min == max_size ? 1/0 : side_min / dpr
 				: side_fr
 	}
 
