@@ -402,43 +402,46 @@ ui.fg_color = fg_color
 ui.fg_color_rgb  = lookup_color_rgb_int_func(fg_color_hsl)
 ui.fg_color_rgba = lookup_color_rgba_int_func(fg_color_hsl)
 
-//           theme    name       state     h     s     L    a
+//         theme    name       state       h     s     L    a
 // ---------------------------------------------------------------------------
 ui.fg_def('light', 'text'   , 'normal' ,   0, 0.00, 0.35)
 ui.fg_def('light', 'text'   , 'hover'  ,   0, 0.00, 0.10)
 ui.fg_def('light', 'text'   , 'active' ,   0, 0.00, 0.00)
 ui.fg_def('light', 'text'   , 'focused',   0, 0.00, 0.00)
-ui.fg_def('light', 'heading', 'normal' ,   0, 0.00, 0.55)
-ui.fg_def('light', 'label'  , 'normal' ,   0, 0.00, 0.00)
-ui.fg_def('light', 'label'  , 'hover'  ,   0, 0.00, 0.00, 0.9)
-ui.fg_def('light', 'link'   , 'normal' , 252, 0.50, 0.50, 1, true)
-ui.fg_def('light', 'link'   , 'hover'  , 252, 0.50, 0.40, 1, true)
-ui.fg_def('light', 'link'   , 'active' , 252, 0.50, 0.30, 1, true)
-
 ui.fg_def('dark' , 'text'   , 'normal' ,   0, 0.00, 0.8)
 ui.fg_def('dark' , 'text'   , 'hover'  ,   0, 0.00, 1.00)
 ui.fg_def('dark' , 'text'   , 'active' ,   0, 0.00, 1.00)
 ui.fg_def('dark' , 'text'   , 'focused',   0, 0.00, 1.0)
-ui.fg_def('dark' , 'heading', 'normal' ,   0, 0.00, 0.65)
+
+ui.fg_def('light', 'label'  , 'normal' ,   0, 0.00, 0.00)
+ui.fg_def('light', 'label'  , 'hover'  ,   0, 0.00, 0.00, 0.9)
 ui.fg_def('dark' , 'label'  , 'normal' ,   0, 0.00, 0.95, 0.7)
 ui.fg_def('dark' , 'label'  , 'hover'  ,   0, 0.00, 0.90, 0.9)
+
 ui.fg_def('dark' , 'link'   , 'normal' ,  26, 0.88, 0.60)
 ui.fg_def('dark' , 'link'   , 'hover'  ,  26, 0.99, 0.70)
 ui.fg_def('dark' , 'link'   , 'active' ,  26, 0.99, 0.80)
+ui.fg_def('light', 'link'   , 'normal' , 252, 0.50, 0.50, 1, true)
+ui.fg_def('light', 'link'   , 'hover'  , 252, 0.50, 0.40, 1, true)
+ui.fg_def('light', 'link'   , 'active' , 252, 0.50, 0.30, 1, true)
+
+ui.fg_def('light', 'heading', 'normal' ,   0, 0.00, 0.55)
+ui.fg_def('dark' , 'heading', 'normal' , 252, 0.10, 0.55)
+
+ui.fg_def('light', 'faint'  , 'normal' ,   0, 0.00, 0.70)
+ui.fg_def('dark' , 'faint'  , 'normal' ,   0, 0.00, 0.30)
 
 ui.fg_def('light', 'marker' , 'normal' ,  61, 1.00, 0.35)
 ui.fg_def('light', 'marker' , 'hover'  ,  61, 1.00, 0.42)
 ui.fg_def('light', 'marker' , 'active' ,  61, 1.00, 0.48)
-
 ui.fg_def('dark' , 'marker' , 'normal' ,  61, 1.00, 0.57)
 ui.fg_def('dark' , 'marker' , 'hover'  ,  61, 1.00, 0.65)
 ui.fg_def('dark' , 'marker' , 'active' ,  61, 1.00, 0.72)
 
+ui.fg_def('*', 'button', 'normal' , 'text', 'active')
+
 ui.fg_def('light', 'button-danger', 'normal', 0, 0.54, 0.43)
 ui.fg_def('dark' , 'button-danger', 'normal', 0, 0.54, 0.43)
-
-ui.fg_def('light', 'faint' , 'normal' ,  0, 0.00, 0.70)
-ui.fg_def('dark' , 'faint' , 'normal' ,  0, 0.00, 0.30)
 
 /// border colors ------------------------------------------------------------
 
@@ -451,7 +454,7 @@ ui.border_color = border_color
 ui.border_color_rgb  = lookup_color_rgb_int_func(border_color_hsl)
 ui.border_color_rgba = lookup_color_rgba_int_func(border_color_hsl)
 
-//               theme    name        state       h     s     L     a
+//             theme    name        state       h     s     L     a
 // ---------------------------------------------------------------------------
 ui.border_def('light', 'light'   , 'normal' ,   0,    0,    0, 0.10)
 ui.border_def('light', 'light'   , 'hover'  ,   0,    0,    0, 0.30)
@@ -523,6 +526,9 @@ ui.bg_def('dark' , 'input' , 'focused', 216, 0.28, 0.08)
 ui.bg_def('dark' , 'input' , 'hover'  , 216, 0.28, 0.21)
 ui.bg_def('dark' , 'input' , 'active' , 216, 0.28, 0.25)
 
+// disable alt color. comment this to get it back.
+ui.bg_def('*' , 'alt', 'normal' , 'bg')
+
 for (let name of ['text', 'link', 'marker'])
 	ui.bg_def('*', name, '*', ['fg', name])
 
@@ -534,8 +540,7 @@ ui.bg_def('dark' , 'scrollbar', 'normal' , 216, 0.28, 0.37, 0.5)
 ui.bg_def('dark' , 'scrollbar', 'hover'  , 216, 0.28, 0.39, 0.8)
 ui.bg_def('dark' , 'scrollbar', 'active' , 216, 0.28, 0.41, 0.8)
 
-ui.bg_def('*', 'button'        , '*' , 'bg')
-ui.bg_def('*', 'button'        , '*' , 'bg')
+ui.bg_def('*', 'button'        , '*' , 'bg1')
 ui.bg_def('*', 'button-primary', '*' , 'link')
 
 ui.bg_def('*', 'search' , 'normal',  60,  1.00, 0.80) // quicksearch text bg
@@ -636,6 +641,7 @@ body {
 	border: 0;
 	background: none;
 	outline: none;
+	cursor: inherit;
 }
 
 `)
@@ -875,29 +881,31 @@ function update_mouse(ev) {
 	ui.local_pointer.my = round(ev.clientY * dpr)
 }
 
-canvas.addEventListener('pointerdown', function(ev) {
+screen.addEventListener('pointerdown', function(ev) {
 	update_mouse(ev)
 	if (ev.button == 0) {
 		ui.local_pointer.click = true
 		ui.local_pointer.pressed = true
-		this.setPointerCapture(ev.pointerId)
+		if (ev.target == canvas)
+			canvas.setPointerCapture(ev.pointerId)
 	}
 	ui.local_pointer.activate()
 	animate()
 })
 
-canvas.addEventListener('pointerup', function(ev) {
+screen.addEventListener('pointerup', function(ev) {
 	update_mouse(ev)
 	if (ev.button == 0) {
 		ui.local_pointer.pressed = false
 		ui.local_pointer.clickup = true
-		this.releasePointerCapture(ev.pointerId)
+		if (ev.target == canvas)
+			canvas.releasePointerCapture(ev.pointerId)
 	}
 	ui.local_pointer.activate()
 	animate()
 })
 
-canvas.addEventListener('dblclick', function(ev) {
+screen.addEventListener('dblclick', function(ev) {
 	update_mouse(ev)
 	if (ev.button == 0) {
 		ui.local_pointer.dblclick = true
@@ -906,19 +914,19 @@ canvas.addEventListener('dblclick', function(ev) {
 	animate()
 })
 
-canvas.addEventListener('pointermove', function(ev) {
+screen.addEventListener('pointermove', function(ev) {
 	update_mouse(ev)
 	ui.local_pointer.activate()
 	animate()
 })
 
-canvas.addEventListener('pointerenter', function(ev) {
+screen.addEventListener('pointerenter', function(ev) {
 	update_mouse(ev)
 	ui.local_pointer.activate()
 	animate()
 })
 
-canvas.addEventListener('pointerleave', function(ev) {
+screen.addEventListener('pointerleave', function(ev) {
 	if (ui.pointer != ui.local_pointer || ui.captured_id == null) {
 		ui.local_pointer.mx = null
 		ui.local_pointer.my = null
@@ -930,8 +938,8 @@ canvas.addEventListener('pointerleave', function(ev) {
 })
 
 // NOTE: wheelDeltaY is 150 in chrome and 120 if FF. Browser developers...
-canvas.addEventListener('wheel', function(ev) {
-	ui.local_pointer.wheel_dy = ev.deltaY
+screen.addEventListener('wheel', function(ev) {
+	ui.local_pointer.wheel_dy = ev.deltaY * dpr
 	if (!ui.local_pointer.wheel_dy)
 		return
 	ui.local_pointer.trackpad = ev.wheelDeltaY === -ev.deltaY * 3
@@ -1014,12 +1022,15 @@ ui.set_cursor = function(cursor) {
 
 function apply_cursor() {
 	let cursor = cur_cursor ?? 'initial'
+	let screen_cursor = cursor == 'initial' ? 'default' : cursor
 	// when the mouse is captured, setting the cursor for the element that
 	// is hovered doesn't work anymore, so we use this hack instead.
 	let root_style = document.documentElement.style
 	let root_cursor = ui.captured_id ? cursor : ''
 	if (root_style.cursor != root_cursor)
 		root_style.setProperty('cursor', root_cursor, 'important')
+	if (screen.style.cursor != screen_cursor)
+		screen.style.cursor = screen_cursor
 	if (canvas.style.cursor != cursor)
 		canvas.style.cursor = cursor
 }
@@ -1384,6 +1395,14 @@ ui.stateful_widget = function(create) {
 //// TUI STYLE ---------------------------------------------------------------
 
 ui.TUI = false
+
+ui.set_tui = function(on) {
+	if (ui.TUI == on)
+		return
+	ui.TUI = on
+	reset_tui()
+	ui.rebuild('TUI')
+}
 
 function ceil_center(x, w) {
 	return ((x + w * .5) / w) * w - (w * .5)
@@ -5066,6 +5085,9 @@ TEXT BOXES
 	ui.text_editable   (id, s, fr, align, valign, max_w, w, h, input_type)
 	ui.text_lines      (id, s, fr, align, valign, max_w, w, h, editable)
 	ui.text_wrapped    (id, s, fr, align, valign, max_w, w, h, editable)
+	ui.heading(size, s, [align])
+	hi.h1(s, [align])
+	ui.h2(s, [align])
 
 TEXT STATE API
 
@@ -5200,14 +5222,16 @@ ui.text_lines = function(id, s, fr, align, valign, max_w, w, h, editable) {
 ui.text_wrapped = function(id, s, fr, align, valign, max_w, w, h, editable) {
 	return ui.text(id, s, fr, align, valign, max_w, w, h, 'word', editable)
 }
-ui.h1 = function(s, align) {
+ui.heading = function(font_size, s, align) {
 	ui.scope()
-	ui.font_size(1.75)
+	ui.font_size(font_size)
 	ui.bold()
 	ui.color('heading')
 	ui.text('', s, 0, align)
 	ui.end_scope()
 }
+ui.h1 = (s, align) => ui.heading(2.00, s, align)
+ui.h2 = (s, align) => ui.heading(1.75, s, align)
 
 function see(m) {
 	let t = {}
@@ -5614,26 +5638,6 @@ function input_focus(ev) {
 	animate()
 }
 
-function input_pointerdown(ev) {
-	update_mouse(ev)
-	if (ev.button == 0) {
-		ui.local_pointer.click = true
-		ui.local_pointer.pressed = true
-	}
-	ui.local_pointer.activate()
-	animate()
-}
-
-function input_pointerup(ev) {
-	update_mouse(ev)
-	if (ev.button == 0) {
-		ui.local_pointer.pressed = false
-		ui.local_pointer.clickup = true
-	}
-	ui.local_pointer.activate()
-	animate()
-}
-
 function input_blur(ev) {
 	// deactivating the window blurs the input, but focus didn't move.
 	if (!document.hasFocus())
@@ -5790,8 +5794,6 @@ function input_create(id, input_type) {
 		input.classList.add('ui-input')
 		input.addEventListener('focus', remote ? remote_input_focus : input_focus)
 		input.addEventListener('blur' , remote ? remote_input_blur  : input_blur )
-		input.addEventListener('pointerdown', input_pointerdown)
-		input.addEventListener('pointerup'  , input_pointerup  )
 		input.addEventListener('input', remote
 			? remote_input_text_changed : input_text_changed)
 		screen.appendChild(input)
@@ -6021,6 +6023,8 @@ draw[CMD_TEXT] = function(a, i) {
 
 hittest[CMD_TEXT] = function(a, i) {
 	if (hit_box(a, i)) {
+		if (a[i+TEXT_FLAGS] & TEXT_EDITABLE)
+			ui.set_cursor('text')
 		set_hit(a[i+TEXT_ID])
 		hit_template(a, i)
 		return true
@@ -6529,7 +6533,7 @@ ui.button_text = function(s, state, w, h) {
 	state = repl(state, 'click', 'hover')
 	h ??= ui.em(2.2) // force h
 	ui.bold()
-	ui.color('text', state)
+	ui.color('button', state)
 	ui.text('', s, 0, 'c', 'c', null, w, h)
 }
 
@@ -7375,7 +7379,7 @@ ui.box_widget('slider', slider)
 //// TOGGLE ------------------------------------------------------------------
 
 ui.bg_def('*', 'toggle'      , '*', 'bg2')
-ui.bg_def('*', 'toggle-thumb', '*', 'text')
+ui.bg_def('*', 'toggle-thumb', 'normal', 'text', 'active')
 ui.bg_def('light', 'toggle', 'item-selected'      , 'link', 'normal')
 ui.bg_def('light', 'toggle', 'hover item-selected', 'link', 'hover' )
 ui.bg_def('dark' , 'toggle', 'item-selected'      , 'link', 'normal')
@@ -7527,7 +7531,7 @@ checkbox.draw = function(a, i) {
 		cx.moveTo( 3,  8)
 		cx.lineTo( 7, 15)
 		cx.lineTo(18,  4)
-		cx.strokeStyle = fg_color('text', hs ? 'hover' : null)
+		cx.strokeStyle = bg_color('toggle-thumb', hs ? 'hover' : null)
 		cx.lineWidth = 1.5
 		cx.lineCap = 'round'
 		cx.lineJoin = 'round'

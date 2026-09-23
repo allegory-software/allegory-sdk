@@ -253,6 +253,7 @@ function init(id, e) {
 		hit_zone = null
 		hit_ri = null
 		hit_fi = null
+		hit_gcol = null
 		hit_indent = null
 		ps = null
 		drag_op = null

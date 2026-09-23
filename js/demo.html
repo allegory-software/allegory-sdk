@@ -1407,7 +1407,7 @@ ui.main = function() {
 				}
 
 				if (ui.button('btn_tui', 'TUI', 0)) {
-					ui.TUI = !ui.TUI
+					ui.set_tui(!ui.TUI)
 					save_demo_state('tui', ui.TUI)
 				}
 

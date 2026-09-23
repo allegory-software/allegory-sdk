@@ -1,13 +1,14 @@
 BUGS
 ------------------------------------------------------------------------------
-- text hit clip (repro: hover to the right of the first grid gcol)
+GLITCHES:
 - slider tooltip doesn't follow thumb center exactly
 - resizer moves a little on click even when no mouse move
+- splitter doesn't collapse completely (double-border shows).
+- grid: shrinking col to min makes separator border disappear
+
+BEHAVIOR:
 - ui.date_input: enter to close while focused on input cancels instead of pick.
-- splitter doesn't collapse right.
-- toolbox: cursor shows I for input that is behind toolbox
-- checkbox, chevron: doesn't scale to dpr
-- grid: some values in size/place columns are shown in diff text state color
+
 
 INPUTS
 ------------------------------------------------------------------------------

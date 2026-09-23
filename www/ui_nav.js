@@ -903,10 +903,9 @@ ui.nav = function(opt) {
 
 			// init tree field
 			if (e.is_tree) {
-				e.tree_field = check_field('tree_col',
-					e.tree_col ?? rowset?.tree_col)
-				if (e.is_tree && !e.tree_field)
-					e.tree_field = e.fields[0]
+				let col = e.tree_col ?? rowset?.tree_col
+				e.tree_field = check_field('tree_col', col) ?? e.fields[0]
+				e.tree_field.align = 'left'
 			}
 
 			// remove references to invisible fields.
@@ -4828,8 +4827,9 @@ filesize.to_input = number.to_text
 filesize.build = function(x, mode) {
 	let s = this.to_text(x)
 	if (mode) {
-		if (this.is_small(x))
-			ui.color('label')
+		// TODO: requires a faint color AND a scope
+		// if (this.is_small(x))
+		//	ui.color('label')
 		return this.build_text(s, mode)
 	}
 	return s
@@ -5318,7 +5318,8 @@ place.build = function(v, mode, row, full_width) {
 	let descr = isobject(v) ? v.description : v || ''
 	if (!mode)
 		return descr
-	ui.color(place_id ? 'text' : 'label')
+	// TODO: needs scope
+	// ui.color(place_id ? 'text' : 'label')
 	ui.h(0, ui.sp05())
 		ui.icon('', 'map_pin', 0, this.align, 'c')
 		this.build_text(descr, mode, row, full_width)
