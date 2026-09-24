@@ -36,6 +36,7 @@ if (demo_state.theme)
 	ui.set_default_theme(demo_state.theme)
 
 ui.DEBUG      = demo_state.debug ?? true
+ui.DEBUG_PANE = true
 ui.TUI        = demo_state.tui   ?? false
 selected_demo = location.search.match('demo=([^&]+)')?.[1] ?? demo_state.demo ?? 'tabs'
 remote_demo   = location.search.match('remote=([^&]+)')?.[1]
@@ -1463,7 +1464,7 @@ ui.main = function() {
 				ui.end_h()
 			ui.end_hsplit()
 
-			if (ui.DEBUG)
+			if (ui.DEBUG && ui.DEBUG_PANE)
 				ui.debug_pane()
 
 		ui.end_h()
