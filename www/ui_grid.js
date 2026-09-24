@@ -22,7 +22,7 @@ const {
 	cx,
 } = ui
 
-ui.grid_fast_path = true
+ui.GRID_FAST_PATH = true
 
 ui.capture_keydown('f1') // browser: help -> grid: key help
 
@@ -521,7 +521,7 @@ function init(id, e) {
 				if (field._fast_build == null)
 					field._fast_build = field.build == ui.all_field_types.build
 						&& !field.lookup_nav && !field.null_lookup_col
-				field._fast_now = ui.grid_fast_path
+				field._fast_now = ui.GRID_FAST_PATH
 					&& field._fast_build
 					&& !field_has_indent(field)
 					&& field != e.quicksearch_field
