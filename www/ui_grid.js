@@ -41,29 +41,21 @@ ui.icon_def('sort_none'     , 'tabler', '\ueb5a')
 ui.icon_def('arrow_up'      , 'tabler', '\uea25')
 ui.icon_def('arrow_down'    , 'tabler', '\uea16')
 
-ui.widget('treegrid_indent', {
-	create: function(cmd, indent, state) {
-		return ui.cmd(cmd, ui.ct_i(), indent, state)
-	},
-	draw: function(a, i) {
-		let ct_i   = a[i+0]
-		let indent = a[i+1]
-		let state  = a[i+2]
-		let x = a[ct_i+0]
-		let y = a[ct_i+1]
-		let w = a[ct_i+2]
-		let h = a[ct_i+3]
-		cx.fillStyle = 'red'
-		cx.beginPath()
-		cx.rect(x, y, w, h)
-		cx.fill()
-	},
-})
-
 // draw one whole grid column in a single command.
 // each visible cell gets (bg, bg state, fg, text).
 ui.widget('fast_field', {
-	create: ui.cmd,
+	create: function(cmd, x, y0, w, cell_h, pad, align, baseline, n) {
+		let i = ui.cmd_begin(cmd)
+		ui.cmd_add_arg(x)
+		ui.cmd_add_arg(y0)
+		ui.cmd_add_arg(w)
+		ui.cmd_add_arg(cell_h)
+		ui.cmd_add_arg(pad)
+		ui.cmd_add_arg(align)
+		ui.cmd_add_arg(baseline)
+		ui.cmd_add_arg(n)
+		return i
+	},
 	translate: function(a, i, dx, dy) {
 		a[i+0] += dx
 		a[i+1] += dy
@@ -187,12 +179,10 @@ function build_help(id, target_i) {
 				let key = !t ? line.slice(0, ci).trim() : ''
 				let desc = !t ? line.slice(ci+2).trim() : ''
 				if (t) {
-						ui.scope()
 						ui.bold()
 						ui.color('text')
 						ui.font_size(1.25)
 						ui.text('', t, 0, 'l', 'c')
-						ui.end_scope()
 				} else {
 					ui.pv(ui.sp025())
 					ui.h(0, ui.sp4())
@@ -454,11 +444,10 @@ function init(id, e) {
 			if (help_open && !build_stage && row_focused && field_focused)
 				build_help(id, cell_i)
 
-			ui.color(fg)
 			if (has_children) {
 				ui.p(indent_x - sp2, 0, sp2, 0)
+				ui.color(fg)
 				ui.icon('', collapsed ? 'node_collapsed' : 'node_expanded')
-				// ui.treegrid_indent(indent_x)
 			}
 			// a popup editor covers the cell instead of replacing it, and
 			// the popup can be moved off the cell to fit on screen.
@@ -466,7 +455,7 @@ function init(id, e) {
 				ui.p(pad_l, 0, pad_r, 0)
 				if (row_focused && field == e.quicksearch_field)
 					ui.mark_text(0, e.quicksearch_text.length)
-				e.build_val(row, field, input_val, true, full_width)
+				e.build_val(row, field, input_val, true, fg, full_width)
 				ui.p(0) // build_val() builds nothing for a value with no text!
 			}
 			if (editing && !build_stage && field.has_editor) {
@@ -606,8 +595,12 @@ function init(id, e) {
 					} else {
 						text = field.to_text(cs.input_val)
 					}
-					ui.cmd_add_args(cmd_i, cs.bg, cs.bgs, fg, text)
+					ui.cmd_add_arg(cs.bg)
+					ui.cmd_add_arg(cs.bgs)
+					ui.cmd_add_arg(fg)
+					ui.cmd_add_arg(text)
 				}
+				ui.cmd_end(cmd_i)
 			}
 		}
 
@@ -1430,7 +1423,7 @@ function init(id, e) {
 
 		sp  = ui.sp1()
 		sp2 = ui.sp2()
-		font_size = ui.get_font_size()
+		font_size = ui.em(1)
 		line_height = font_size * 1
 		cell_h = round(line_height + 2 * sp + e.cell_border_h_width)
 		header_h = cell_h
@@ -1533,7 +1526,6 @@ function init(id, e) {
 								// sort icon
 								let icon_id = id+'.sort_icon.'+col
 								if (field.sortable) {
-									ui.scope()
 									let dir = e.sort_dir(field)
 									ui.color(dir ? 'label' : 'faint',
 										(hit_zone == 'sort_icon' && hit_gcol == col) ? 'hover' : null)
@@ -1543,7 +1535,6 @@ function init(id, e) {
 										dir          && (pri ? 'sort_desc' : 'sort_desc') ||
 										'sort_none'
 									, 0)
-									ui.end_scope()
 								}
 							ui.end_h()
 						ui.end_stack()
@@ -1571,9 +1562,6 @@ function init(id, e) {
 						col_move ? 'bg2' : col_group ? 'bg0' : 'bg1', null,
 						col_move ? 'blr' : 'br', 'intense')
 
-					if (col_group)
-						ui.color('faint')
-
 					let max_min_w = noclip ? null : max(0,
 						field._w
 							- 2 * sp2
@@ -1583,29 +1571,29 @@ function init(id, e) {
 					let pri = e.sort_priority(field)
 					let align = e.field_align(field)
 
-					if (align != 'right')
+					if (align != 'right') {
+						ui.color(col_group ? 'faint' : null)
 						ui.text('', field.label, 1, align, 'c', max_min_w)
+					}
 
 					let icon_id = id+'.sort_icon.'+field.name
 
 					if (field.sortable) {
-						ui.scope()
-
-						if (!col_group)
-							ui.color(dir ? 'label' : 'faint',
-								(hit_zone == 'sort_icon' && hit_fi == field.index) ? 'hover' : null)
+						ui.color(dir && !col_group ? 'label' : 'faint',
+							!col_group && hit_zone == 'sort_icon' && hit_fi == field.index
+								? 'hover' : null)
 
 						ui.icon(icon_id,
 							dir == 'asc' && (pri ? 'sort_asc'  : 'sort_asc' ) ||
 							dir          && (pri ? 'sort_desc' : 'sort_desc') ||
 							'sort_none'
 						, 0)
-
-						ui.end_scope()
 					}
 
-					if (align == 'right')
+					if (align == 'right') {
+						ui.color(col_group ? 'faint' : null)
 						ui.text('', field.label, 1, align, 'c', max_min_w)
+					}
 
 				ui.end_h()
 			}
@@ -1637,16 +1625,12 @@ function init(id, e) {
 						ui.ml(x)
 						ui.stack('', 0, 'l', 't', 0, header_h)
 							ui.popup('', 'overlay', null, 't', 'c')
-								ui.scope()
 								ui.color('marker')
 								ui.icon('', 'arrow_down')
-								ui.end_scope()
 							ui.end_popup()
 							ui.popup('', 'overlay', null, 'b', 'c')
-								ui.scope()
 								ui.color('marker')
 								ui.icon('', 'arrow_up')
-								ui.end_scope()
 							ui.end_popup()
 						ui.end_stack()
 					}

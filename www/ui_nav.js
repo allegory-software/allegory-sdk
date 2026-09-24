@@ -105,11 +105,11 @@ Field attributes:
 
 	formatting:
 
-		build          : f(v, mode, [row]) -> true   build the value.
+		build          : f(v, mode, [fg], [row]) -> true   build the value.
 		build          : f(v, [row]) -> s            return plain text display value.
 
-		build_text    : f(s, [mode], [row]) -> true|s    build or return text.
-		build_null    : f([mode], [row]) -> true|s       build or return text.
+		build_text    : f(s, [mode], [fg], [row]) -> true|s    build or return text.
+		build_null    : f([mode], [fg], [row]) -> true|s       build or return text.
 
 		align          : 'left'|'right'|'center'
 		attr           : custom value for html attribute `field`, for styling
@@ -424,8 +424,8 @@ Loading & saving from/to memory:
 
 Cell display val, text val and building:
 	publishes:
-		e.build_val([row], field, v, [mode]) -> true|s
-		e.build_cell(row, field, [mode]) -> true|s
+		e.build_val([row], field, v, [mode], [fg]) -> true|s
+		e.build_cell(row, field, [mode], [fg]) -> true|s
 	announces:
 		^^col_vals_changed(field)
 
@@ -3294,7 +3294,7 @@ ui.nav = function(opt) {
 
 	// cell value multi-target rendering --------------------------------------
 
-	function build_null_lookup_val(row, field, mode, full_width) {
+	function build_null_lookup_val(row, field, mode, fg, full_width) {
 		if (!row || !field.null_lookup_col) return
 		let nf = e.all_fields_map[field.null_lookup_col]  ; if (!nf || !nf.lookup_cols) return
 		let ln = nf.lookup_nav                            ; if (!ln) return
@@ -3302,7 +3302,7 @@ ui.nav = function(opt) {
 		let ln_row = e.lookup_val(row, nf, nv)            ; if (!ln_row) return
 		let dcol = field.null_display_col ?? field.name
 		let df = ln.all_fields_map[dcol]                  ; if (!df) return
-		return ln.build_cell(ln_row, df, mode, full_width)
+		return ln.build_cell(ln_row, df, mode, fg, full_width)
 	}
 
 	// a lookup cell builds the display field's value, so the column aligns
@@ -3335,24 +3335,24 @@ ui.nav = function(opt) {
 	}
 	}
 
-	e.build_val = function(row, field, v, mode, full_width) {
+	e.build_val = function(row, field, v, mode, fg, full_width) {
 
 		if (v == null) {
-			let s = build_null_lookup_val(row, field, mode, full_width)
+			let s = build_null_lookup_val(row, field, mode, fg, full_width)
 			if (s) return s
 
 			if (field.build_null)
-				return field.build_null(mode, row)
+				return field.build_null(mode, fg, row)
 
 			s = field.null_text
-			if (s) return field.build_text(s, mode)
+			if (s) return field.build_text(s, mode, fg)
 
 			return
 		}
 
 		if (v === '') {
 			if (field.empty_text)
-				return field.build_text(field.empty_text, mode)
+				return field.build_text(field.empty_text, mode, fg)
 			return
 		}
 
@@ -3360,15 +3360,15 @@ ui.nav = function(opt) {
 		if (ln_row) {
 			let df = lookup_display_field(field)
 			if (df)
-				return field.lookup_nav.build_cell(ln_row, df, mode, full_width)
+				return field.lookup_nav.build_cell(ln_row, df, mode, fg, full_width)
 		}
 
-		return field.build(v, mode, row, full_width)
+		return field.build(v, mode, fg, row, full_width)
 	}
 
-	e.build_cell = function(row, field, mode, full_width) {
+	e.build_cell = function(row, field, mode, fg, full_width) {
 		return e.build_val(row, field, e.cell_input_val(row, field),
-			mode, full_width)
+			mode, fg, full_width)
 	}
 
 	e.cell_text_val = e.build_cell
@@ -4600,9 +4600,9 @@ Displaying a value:
 	to_text        : f(v) -> s             display value
 	to_input       : f(v) -> s             value as editable text
 	from_input     : f(s) -> v             parse editable text
-	build          : f(v, mode, [row], [full_width]) -> true|s
-	build_text     : f(s, [mode], [row], [full_width]) -> true|s
-	build_null     : f([mode], [row]) -> true|s
+	build          : f(v, mode, [fg], [row], [full_width]) -> true|s
+	build_text     : f(s, [mode], [fg], [row], [full_width]) -> true|s
+	build_null     : f([mode], [fg], [row]) -> true|s
 
 	mode: falsy = return the value as plain text.
 	mode: truty = build value widget.
@@ -4725,16 +4725,17 @@ all_field_types.build_input = function(id, v, readonly, min_w) {
 
 all_field_types.fixed_width = 0
 
-all_field_types.build_text = function(s, mode, row, full_width) {
+all_field_types.build_text = function(s, mode, fg, row, full_width) {
 	if (!mode)
 		return s
+	ui.color(fg)
 	ui.text('', s, 0, this.align, 'c', full_width ? null : 0)
 	return true
 }
 
-all_field_types.build = function(v, mode, row, full_width) {
+all_field_types.build = function(v, mode, fg, row, full_width) {
 	let s = this.to_text(v)
-	return this.build_text(s, mode, row, full_width)
+	return this.build_text(s, mode, fg, row, full_width)
 }
 
 // an editor that is a dropdown has no caret to move within.
@@ -4830,13 +4831,13 @@ filesize.to_text = function(s) {
 // from_input() doesn't read the magnitude suffix back.
 filesize.to_input = number.to_text
 
-filesize.build = function(x, mode) {
+filesize.build = function(x, mode, fg) {
 	let s = this.to_text(x)
 	if (mode) {
 		// TODO: requires a faint color AND a scope
 		// if (this.is_small(x))
 		//	ui.color('label')
-		return this.build_text(s, mode)
+		return this.build_text(s, mode, fg)
 	}
 	return s
 }
@@ -5031,7 +5032,7 @@ bool.build_null = function(mode) {
 
 // an editable cell shows the box so that it reads as something to click,
 // a readonly one only marks the true ones.
-bool.build = function(v, mode, row) {
+bool.build = function(v, mode, fg, row) {
 	if (!isbool(v))
 		return bool.build_null.call(this, mode)
 	if (!mode)
@@ -5040,8 +5041,10 @@ bool.build = function(v, mode, row) {
 		row && this.nav.can_change_val(row, this)
 			? (v ? 'box_checked' : 'box_unchecked')
 			: (v ? 'check' : null)
-	if (icon)
+	if (icon) {
+		ui.color(fg)
 		ui.icon('', icon, 0, this.align, 'c')
+	}
 }
 
 // enums ---------------------------------------------------------------------
@@ -5288,7 +5291,7 @@ percent.to_text = function(p) {
 	return isnum(p) ? dec(p / this.scale, this.decimals) + '%' : p
 }
 
-percent.build = function(p, mode, row, full_width) {
+percent.build = function(p, mode, fg, row, full_width) {
 	let s = this.to_text(p)
 	if (!mode)
 		return s
@@ -5302,7 +5305,7 @@ percent.build = function(p, mode, row, full_width) {
 				ui.bb('bg0')
 			ui.end_stack()
 		ui.end_h()
-		this.build_text(s, mode, row, full_width)
+		this.build_text(s, mode, fg, row, full_width)
 	ui.end_stack()
 }
 
@@ -5311,9 +5314,10 @@ percent.build = function(p, mode, row, full_width) {
 let icon = {align: 'center'}
 field_types.icon = icon
 
-icon.build = function(v, mode) {
+icon.build = function(v, mode, fg) {
 	if (!mode)
 		return this.to_text(v)
+	ui.color(fg)
 	ui.icon('', v, 0, this.align, 'c')
 }
 
@@ -5328,7 +5332,7 @@ let place = {}
 field_types.place = place
 
 // place vals are {place_id:, description:} or a plain description string.
-place.build = function(v, mode, row, full_width) {
+place.build = function(v, mode, fg, row, full_width) {
 	let place_id = isobject(v) && v.place_id
 	let descr = isobject(v) ? v.description : v || ''
 	if (!mode)
@@ -5336,8 +5340,9 @@ place.build = function(v, mode, row, full_width) {
 	// TODO: needs scope
 	// ui.color(place_id ? 'text' : 'label')
 	ui.h(0, ui.sp05())
+		ui.color(fg)
 		ui.icon('', 'map_pin', 0, this.align, 'c')
-		this.build_text(descr, mode, row, full_width)
+		this.build_text(descr, mode, fg, row, full_width)
 	ui.end_h()
 }
 

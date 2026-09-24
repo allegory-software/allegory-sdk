@@ -10,13 +10,14 @@ let G = window
 let rtc = {}
 G.rtc = rtc
 
-let {
+const {
 	min, max,
 	set,
-	debug, pr, clock, json, json_arg, noop,
+	assert, debug, pr, clock, json, json_arg, noop,
 	runafter, runevery,
 	announce,
 	assign,
+	post,
 } = glue
 
 rtc.DEBUG = 1

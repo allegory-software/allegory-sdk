@@ -1316,7 +1316,7 @@ function code_edit_view(id, opt) {
 
 		// set layout vars
 
-		font_size = ui.get_font_size()
+		font_size = ui.em(1)
 		line_h = round(font_size * 1.5)
 		{
 			let font0 = cx.font

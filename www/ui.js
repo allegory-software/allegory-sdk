@@ -60,7 +60,6 @@ RENDERING CONTROL
 
 	ui.animate ()         request another animation frame
 	ui.rebuild ([label])  request another build/layout pass in this frame
-	ui.resize  ()         resize canvas and request another animation frame
 
 SCROLLING INTO VIEW
 
@@ -154,9 +153,9 @@ identical geometry to both users otherwise you won't know what you click on!
 
 DEFAULTS
 
-	ui.default_theme = 'dark'
-	ui.default_font  = 'Arial'
+	ui.default_theme -> 'dark'
 	ui.dark([theme]) -> t|f
+	ui.set_default_theme(theme)
 
 DEFINING COLORS
 
@@ -164,20 +163,7 @@ DEFINING COLORS
 	ui.*_def      (theme, name, state, h, s, L, a, is_dark)       define a color
 	ui.shadow_def (theme, name, x, y, blur, h, s, L, a, [inset])  define a shadow
 
-BUILT-IN COLORS
-
-	fg      : text label link button-danger
-	bg      : bg bg0 bg1 bg2 bg3 item toggle row
-	border  : light intense
-	shadow  : button button-active menu modal picker thumb tooltip
-
-BUILT-IN COLOR STATES
-
-	general     : normal hover active focused
-	list items  : item-selected item-focused item-error
-	grid cells  : new modified
-
-THEME API (to be used exclusively in the drawing phase)
+THEME API, to be used exclusively in the drawing phase!
 
 	* = fg | border | bg
 	ui.*_color      (name, [state], [theme]) -> css_color   for fillStyle/strokeStyle
@@ -220,16 +206,14 @@ let theme // only set in draw phase
 ui.get_theme = () => theme
 ui.dark = (theme) => themes[theme ?? ui.default_theme].is_dark
 
-/// color state parsing
-
 const STATE_HOVER         =   1
 const STATE_ACTIVE        =   2
 const STATE_FOCUSED       =   4
-const STATE_ITEM_SELECTED =   8
-const STATE_ITEM_FOCUSED  =  16
-const STATE_ITEM_ERROR    =  32
-const STATE_NEW           =  64
-const STATE_MODIFIED      = 128
+const STATE_ITEM_SELECTED =   8 // list items
+const STATE_ITEM_FOCUSED  =  16 // list items
+const STATE_ITEM_ERROR    =  32 // list items
+const STATE_NEW           =  64 // grid cells
+const STATE_MODIFIED      = 128 // grid cells
 
 let parse_state_combis = memoize(function(s) {
 	s = ' '+s
@@ -593,6 +577,7 @@ since we're not planning to have our canvas-based UI embedded in a normal
 HTML page any time soon.
 
 	ui.screen          access to canvas container div
+	ui.resize()        resize canvas and request another animation frame
 
 */
 
@@ -679,27 +664,6 @@ function resize_canvas() {
 }
 ui.resize = resize_canvas
 window.addEventListener('resize', resize_canvas)
-
-let raf_id
-let raf_t0
-function raf_animate(raf_t) {
-	raf_id = null
-	let raf_dt = raf_t0 != null ? raf_t - raf_t0 : 0
-	raf_dt = raf_dt < 32 ? raf_dt : 20
-	frame_graph_push('frame_delta_time', raf_dt)
-	raf_t0 = raf_t
-	let t0 = clock_ms()
-	redraw_all()
-	let t1 = clock_ms()
-	frame_graph_push('frame_time', t1 - t0)
-}
-let ready
-function animate() {
-	if (raf_id) return
-	if (!ready) return
-	raf_id = requestAnimationFrame(raf_animate)
-}
-ui.animate = animate
 
 ui.default_theme = document.documentElement.getAttribute('theme') ?? 'light'
 ui.default_font  = document.documentElement.getAttribute('font' ) ?? 'Arial'
@@ -1178,85 +1142,6 @@ function consume_key_down(key) {
 ui.keys_down   = () => key_downs.size
 ui.keys_up     = () => key_ups.size
 
-//// SCOPES ------------------------------------------------------------------
-
-/*
-
-USER API
-
-	ui.scope     ()
-	ui.end_scope ()
-
-WIDGET API
-
-	ui.scope_set (k, v)
-	ui.scope_get (k) -> v
-
-*/
-
-let scope_stack = []
-let scope = null
-
-function begin_scope() {
-	scope_stack.push(scope)
-	// scope creation is delayed to first call of scope_set().
-	// TODO: could COW be faster here with deep scopes?
-	// TODO: would parallel per-key stacks be faster here instead of one stack of maps?
-	scope = null
-}
-
-function end_scope() {
-	let ended_scope = scope
-	scope = scope_stack.pop()
-	if (ended_scope) {
-		end_color(ended_scope)
-		end_font(ended_scope)
-		end_font_size(ended_scope)
-		end_font_weight(ended_scope)
-		end_line_gap(ended_scope)
-	}
-}
-
-function scope_get(k) {
-	// look in current scope
-	if (scope) {
-		let v = scope[k]
-		if (v !== undefined)
-			return v
-	}
-	// look in parent scopes
-	for (let i = scope_stack.length-1; i >= 0; i--) {
-		let scope = scope_stack[i]
-		if (scope) {
-			let v = scope[k]
-			if (v !== undefined)
-				return v
-		}
-	}
-}
-ui.scope_get = scope_get
-
-function scope_set(k, v) {
-	scope = scope ?? obj()
-	scope[k] = v
-}
-ui.scope_set = scope_set
-
-function scope_prev_diff_var(ended_scope, k) {
-	let v = ended_scope[k]
-	if (v === undefined) return
-	let v0 = scope_get(k)
-	if (v === v0) return
-	return v0
-}
-
-function scope_stack_check() {
-	assert(!scope_stack.length, 'scope not closed')
-}
-
-ui.scope = begin_scope
-ui.end_scope = end_scope
-
 //// WIDGET STATE ------------------------------------------------------------
 
 /*
@@ -1424,16 +1309,12 @@ function tui_snap_paddings() {
 
 //// FRAME BUILDING ----------------------------------------------------------
 
-let color, color_state, font, font_size, font_weight, line_gap
-
-ui.get_font_size = () => font_size
-
 ui.TUI = false
 let tui_cell_w
 let tui_cell_h
 function reset_tui() {
 	if (!ui.TUI) return
-	cx.font = font_size + 'px monospace'
+	cx.font = font_size_normal + 'px monospace'
 	let m = measure_text(cx, '0')
 	let asc = m.actualBoundingBoxAscent
 	let dsc = m.actualBoundingBoxDescent
@@ -1443,21 +1324,11 @@ function reset_tui() {
 
 function reset_canvas() {
 	assert(dpr)
-	color = 'text'
-	color_state = 0
-	font = ui.TUI ? 'monospace' : ui.default_font
-	font_size = font_size_normal
-	font_weight = 'normal'
-	line_gap = 0.5
-	scope_set('color', color)
-	scope_set('color_state', color_state)
-	scope_set('theme', theme)
-	scope_set('font', font)
-	scope_set('font_size', font_size)
-	scope_set('font_weight', font_weight)
-	scope_set('line_gap', line_gap)
+	default_font = ui.TUI ? 'monospace' : ui.default_font
 	reset_tui()
-	cx.font = font_weight + ' ' + font_size + 'px ' + font
+	default_font_str = 'normal ' + font_size_normal + 'px ' + default_font
+	last_font_str = default_font_str
+	cx.font = default_font_str
 	reset_shadow()
 }
 
@@ -1469,8 +1340,8 @@ let ct_stack = [] // [ct_i1,...]
 ui.ct_stack = ct_stack
 
 ui.ct_i = () => assert(ct_stack.at(-1), 'no container')
-ui.rel_ct_i = () => ui.ct_i() - (a.length+2)
-ui.last_i = () => cmd_last_i(a)
+ui.rel_ct_i = () => ui.ct_i() - (n+2)
+ui.last_i = () => cmd_last_i()
 
 function ct_stack_check() {
 	if (ct_stack.length) {
@@ -1498,7 +1369,6 @@ function rec() {
 }
 
 function free_rec(a) {
-	a.length = 0
 	if (a.nohit_set)
 		a.nohit_set.clear()
 	rec_freelist.free(a)
@@ -1511,14 +1381,17 @@ let rec_stack = []
 ui.start_recording = function() {
 	assert(!scroll_to_view_next, 'focusable widget recorded no box')
 	let a1 = rec()
-	rec_stack.push(a, ct_stack.length)
+	rec_stack.push(a, n, ct_stack.length)
 	a = a1
+	n = 0
 }
 
 ui.end_recording = function() {
 	assert(!scroll_to_view_next, 'focusable widget recorded no box')
 	let ct_stack_len = rec_stack.pop()
+	a.length = n
 	let a1 = a
+	n = rec_stack.pop()
 	a = rec_stack.pop()
 	assert(ct_stack.length == ct_stack_len,
 		'recording must open and close its own containers')
@@ -1526,7 +1399,8 @@ ui.end_recording = function() {
 }
 
 ui.play_recording = function(a1) {
-	a.push(...a1)
+	for (let j = 0; j < a1.length; j++)
+		a[n++] = a1[j]
 	free_rec(a1)
 }
 
@@ -1536,7 +1410,7 @@ function rec_stack_check() {
 
 /// secondary command recordings ---------------------------------------------
 
-// only used internally by ui.frame callbacks.
+// only used internally by redraw_all and ui.frame callbacks.
 
 let recs = []
 let rec_i
@@ -1545,6 +1419,7 @@ function begin_rec() {
 	assert(!scroll_to_view_next, 'focusable widget recorded no box')
 	let a0 = a
 	a = rec()
+	n = 0
 	rec_i = recs.length
 	recs.push(a)
 	return a0
@@ -1552,14 +1427,16 @@ function begin_rec() {
 
 function end_rec(a0) {
 	assert(!scroll_to_view_next, 'focusable widget recorded no box')
+	a.length = n
 	let a1 = a
 	a = a0
+	n = a0?.length
 	return a1
 }
 
 function free_recs() {
-	for (let a of recs)
-		free_rec(a)
+	for (let k = recs.length-1; k >= 0; k--)
+		free_rec(recs[k])
 	recs.length = 0
 }
 
@@ -1586,6 +1463,7 @@ function free_recs() {
 // having to reoffset the indexes.
 
 let a // current recording
+let n = 0 // current recording's length
 
 let cmd_names = [] // [[CMD]=NAME]: command's name
 let cmd_name_map = obj()
@@ -1633,37 +1511,41 @@ function cmd_ct(name) {
 
 let cmd_next_i = (a, i) => i+a[i-2] // index of next cmd
 let cmd_prev_i = (a, i) => i+a[i-3] // index of prev cmd
-let cmd_last_i = (a) => cmd_prev_i(a, a.length+2) // index of last command in a
+let cmd_last_i = () => cmd_prev_i(a, n+2) // index of last command in a
 let cmd_arg_end_i = (a, i) => cmd_next_i(a, i)-3 // index after the last arg
 
-// `arguments` instead of `...args` avoids an array allocation.
-function ui_cmd(cmd) {
-	let n = arguments.length
-	let i = a.length+2 // abs index of this cmd's arg#1
-	let next_i = n+2 // rel index of next cmd's arg#1
+function ui_cmd_begin(cmd) {
+	a[n++] = 0 // next_i, filled in by ui_cmd_end()
+	a[n++] = cmd
+	return n // cmd_i: abs index of this cmd's arg#1
+}
+
+function ui_cmd_end(i) {
+	let next_i = n+3 - i
+	a[i-2] = next_i
+	a[n++] = -next_i
+}
+
+function ui_cmd_add_arg(v) {
+	a[n++] = v
+}
+
+function ui_cmd(cmd, ...args) {
+	let i = n+2 // abs index of this cmd's arg#1
+	let next_i = args.length+3 // rel index of next cmd's arg#1
 	let prev_i = -next_i // rel index of this cmd's arg#1, rel to next cmd's arg#1
-	a.push(next_i, cmd)
-	for (let j = 1; j < n; j++)
-		a.push(arguments[j])
-	a.push(prev_i)
+	a[n++] = next_i
+	a[n++] = cmd
+	for (let j = 0; j < args.length; j++)
+		a[n++] = args[j]
+	a[n++] = prev_i
 	return i
 }
-ui.cmd = ui_cmd
 
-// append args to the command at i, for slots that few of them need.
-// i must still be the last command: ui_cmd_box() records a second one when
-	// scroll_to_view_next_box() was called before it.
-// `arguments` instead of `...args` to avoid an array allocation.
-function ui_cmd_add_args(i) {
-	assert(cmd_last_i(a) == i)
-	a.length-- // drop prev_i
-	for (let j = 1, n = arguments.length; j < n; j++)
-		a.push(arguments[j])
-	let next_i = a.length+3 - i
-	a[i-2] = next_i
-	a.push(-next_i)
-}
-ui.cmd_add_args = ui_cmd_add_args
+ui.cmd_begin = ui_cmd_begin
+ui.cmd_end = ui_cmd_end
+ui.cmd_add_arg = ui_cmd_add_arg
+ui.cmd = ui_cmd
 
 // print current recording
 ui.disas = function(a) {
@@ -1856,7 +1738,7 @@ ui.render_state().
 	ui.render_state    (id) -> state      get render-local widget state
 	ui.local_state     (id[, k]) -> state | v | nil
 
-	ui.cx       access to canvas 2D context
+	ui.cx       the canvas 2D context to draw with
 
 */
 
@@ -2158,7 +2040,10 @@ ui.focusable = function(id, tab_order) {
 		nofocus = false
 		return
 	}
-	ui_cmd(FOCUSABLE, id, tab_order ?? 0)
+	let i = ui_cmd_begin(FOCUSABLE)
+	a[n++] = id
+	a[n++] = tab_order ?? 0
+	ui_cmd_end(i)
 	// calling scroll_to_view_next_box() here means that focusable() must be
 	// called before the widget box is recorded.
 	if (ui.focusing(id))
@@ -2166,11 +2051,15 @@ ui.focusable = function(id, tab_order) {
 }
 
 ui.focus_group = function(trap, tab_order, id) {
-	ui_cmd(FOCUS_GROUP, tab_order ?? 0, trap ? 1 : 0, id)
+	let i = ui_cmd_begin(FOCUS_GROUP)
+	a[n++] = tab_order ?? 0
+	a[n++] = trap ? 1 : 0
+	a[n++] = id
+	ui_cmd_end(i)
 }
 
 ui.end_focus_group = function() {
-	ui_cmd(END_FOCUS_GROUP)
+	ui_cmd_end(ui_cmd_begin(END_FOCUS_GROUP))
 }
 
 // must happen on register phase because that's when secondary recordings
@@ -2308,6 +2197,33 @@ function resolve_focus_first(group_id) {
 
 /// tab-to-focus -------------------------------------------------------------
 
+function step_focus(back) {
+	if (tab_into_id != null) {
+		let group_i = focus_group_map.get(tab_into_id)
+		tab_into_id = null
+		// null when the group was not recorded this frame: fall through to
+		// stepping from the focused widget.
+		if (group_i != null) {
+			let i = first_focusable_in(group_i, back)
+			if (i != null)
+				return i
+		}
+	}
+	let i0 = focus_find(ui.focused_id)
+	if (i0 == null)
+		return first_focusable_in(null, back)
+	let group_i = focus_group_of(i0)
+	while (1) {
+		let i = next_focusable_after(group_i, i0, back)
+		if (i != null)
+			return i
+		if (group_i == null || focusables[group_i+FOCUSABLE_TRAP])
+			return first_focusable_in(group_i, back)
+		i0 = group_i
+		group_i = focus_group_of(i0)
+	}
+}
+
 function focus_on_tab() {
 	if (ui.keydown('tab') && !tab_captured(ui.focused_id)) {
 		let i = step_focus(ui.keypressed('shift'))
@@ -2340,16 +2256,22 @@ function focus_on_click() {
 	ui.focus(null)
 }
 
-/// default button -----------------------------------------------------------
+/// default buttons ----------------------------------------------------------
 
 let GROUP_BUTTON = cmd('group_button')
 
 ui.default_button = function(id) {
-	ui_cmd(GROUP_BUTTON, id, FOCUSABLE_DEFAULT_BUTTON)
+	let i = ui_cmd_begin(GROUP_BUTTON)
+	a[n++] = id
+	a[n++] = FOCUSABLE_DEFAULT_BUTTON
+	ui_cmd_end(i)
 }
 
 ui.cancel_button = function(id) {
-	ui_cmd(GROUP_BUTTON, id, FOCUSABLE_CANCEL_BUTTON)
+	let i = ui_cmd_begin(GROUP_BUTTON)
+	a[n++] = id
+	a[n++] = FOCUSABLE_CANCEL_BUTTON
+	ui_cmd_end(i)
 }
 
 register[GROUP_BUTTON] = function(a, i) {
@@ -2397,40 +2319,14 @@ ui.tab_into = function(id) {
 	tab_into_id = id
 }
 
-function step_focus(back) {
-	if (tab_into_id != null) {
-		let group_i = focus_group_map.get(tab_into_id)
-		tab_into_id = null
-		// null when the group was not recorded this frame: fall through to
-		// stepping from the focused widget.
-		if (group_i != null) {
-			let i = first_focusable_in(group_i, back)
-			if (i != null)
-				return i
-		}
-	}
-	let i0 = focus_find(ui.focused_id)
-	if (i0 == null)
-		return first_focusable_in(null, back)
-	let group_i = focus_group_of(i0)
-	while (1) {
-		let i = next_focusable_after(group_i, i0, back)
-		if (i != null)
-			return i
-		if (group_i == null || focusables[group_i+FOCUSABLE_TRAP])
-			return first_focusable_in(group_i, back)
-		i0 = group_i
-		group_i = focus_group_of(i0)
-	}
-}
-
 /// nohit command ------------------------------------------------------------
 
 let NOHIT = cmd('nohit')
 ui.nohit = function(ct_i) {
 	ct_i ??= ui.ct_i()
-	let i = ui_cmd(NOHIT, ct_i)
-	a[i] -= i // make it relative
+	let i = ui_cmd_begin(NOHIT)
+	a[n++] = ct_i - i // make it relative
+	ui_cmd_end(i)
 }
 
 // doesn't have to happen on translate, any phase will do.
@@ -2443,10 +2339,16 @@ translate[NOHIT] = function(a, i) {
 
 //// ANIMATION FRAME LOOP ----------------------------------------------------
 
+/*
+
+	ui.animate ()         request another animation frame
+	ui.rebuild ([label])  request another build/layout pass in this frame
+
+*/
+
 // frame build counter, used for:
 // 1) preventing state updates from running twice in the same build pass.
-// 2) removing events older than current build pass at the end of the pass.
-// 3) expiring text measure cache entries.
+// 2) expiring text measure cache entries.
 let build_no = 0
 
 let want_rebuild
@@ -2486,8 +2388,10 @@ function layout_rec(a, x, y, w, h) {
 
 function frame_end_check() {
 	ct_stack_check()
-	scope_stack_check()
 	rec_stack_check()
+	split_stack_check()
+	toolbox_stack_check()
+	text_flags_check()
 }
 
 ui.frame_changed = noop
@@ -2665,6 +2569,27 @@ function redraw_all() {
 	focusing_id = null
 }
 
+let raf_id
+let raf_t0
+function raf_animate(raf_t) {
+	raf_id = null
+	let raf_dt = raf_t0 != null ? raf_t - raf_t0 : 0
+	raf_dt = raf_dt < 32 ? raf_dt : 20
+	frame_graph_push('frame_delta_time', raf_dt)
+	raf_t0 = raf_t
+	let t0 = clock_ms()
+	redraw_all()
+	let t1 = clock_ms()
+	frame_graph_push('frame_time', t1 - t0)
+}
+let ready
+function animate() {
+	if (raf_id) return
+	if (!ready) return
+	raf_id = requestAnimationFrame(raf_animate)
+}
+ui.animate = animate
+
 //// WIDGETS -----------------------------------------------------------------
 
 /*
@@ -2726,7 +2651,6 @@ CREATE
 	ui.MX2    = index offset in a for x2 margin; y2 margin at MX2+1
 	ui.FR     = index offset in a for fr
 	ui.ALIGN  = index offset in a for align
-	ui.S      = index offset in a for arg#1 after ui_cmd_box_ct args
 
 	ui.ct_i   () -> ct_i    get container index in a
 	ui.last_i () -> last_i  get the index of the last cmd in a
@@ -2745,17 +2669,16 @@ DRAW
 
 USER API: MARGINS & PADDINGS
 
-	rem (rem) -> x   rem units to pixels
 	em  (em) -> x    em units to pixels
 
-	sp025 () -> rem( .125)
-	sp05  () -> rem( .25)
-	sp075 () -> rem( .375)
-	sp    () -> rem( .5)
-	sp1   () -> rem( .5)
-	sp2   () -> rem( .75)
-	sp4   () -> rem(1)
-	sp8   () -> rem(2)
+	sp025 () -> em( .125)
+	sp05  () -> em( .25)
+	sp075 () -> em( .375)
+	sp    () -> em( .5)
+	sp1   () -> em( .5)
+	sp2   () -> em( .75)
+	sp4   () -> em(1)
+	sp8   () -> em(2)
 
 	p[adding]           ([px1], [py1], [px2], [py2])
 	p[adding_]l[eft]    (p)
@@ -2783,8 +2706,8 @@ const MX2        = 10
 const FR         = 12 // all `is_flex_child` widgets: fraction from main-axis size.
 const ALIGN      = 13 // vert. align at ALIGN+1
 const BOX_CT_NEXT_SIB_I = 15 // all container-boxes: next command after this one's END command.
-const BOX_CT_ARGS = 16 // first index after the ui_cmd_box_ct header.
-const BOX_ARGS    = 16 // first index after the ui_cmd_box header.
+const BOX_CT_ARGS = 16 // first index after the ui_cmd_box_ct_begin header.
+const BOX_ARGS    = 15 // first index after the ui_cmd_box header.
 
 ui.PX1   = PX1
 ui.PX2   = PX2
@@ -2841,11 +2764,9 @@ function parse_valign(s) {
 let px1, px2, py1, py2
 let mx1, mx2, my1, my2
 
-ui.rem = rem => round((rem ?? 1) * font_size_normal)
-ui. em =  em => round((em  ?? 1) * font_size)
+ui.em = em => round((em ?? 1) * font_size_normal)
 
-let em  = ui.em
-let rem = ui.rem
+let em = ui.em
 ui.sp025 = () => em( .125)
 ui.sp05  = () => em( .25)
 ui.sp075 = () => em( .375)
@@ -2934,44 +2855,41 @@ ui.clear_box_args = function() {
 // to be revealed by its scrollbox(es).
 let scroll_to_view_next
 
-function ui_cmd_box(cmd, fr, align, valign, min_w, min_h) {
-	let argc = 6 // number of named args, change this if you add more args!
+function ui_cmd_box_begin(cmd, fr, align, valign, min_w, min_h) {
 	tui_snap_paddings()
 
 	// see "format of a command recording array" above to understand this.
-	// we're inlining ui_cmd() here to avoid `...args` which allocates.
-	let i = a.length+2
-	a.push(
-		0, // next_i, filled in below
-		cmd,
-		min_w ?? 0, // user min_w in measuring phase; x in positioning phase
-		min_h ?? 0, // user min_h in measuring phase; y in positioning phase
-		0, // children's min_w -> min_w in measuring phase; w in positioning phase
-		0, // children's min_h -> min_h in measuring phase; h in positioning phase
-		px1, py1, px2, py2,
-		mx1, my1, mx2, my2,
-		max(0, fr ?? 1),
-		parse_align  (align  ?? 's'),
-		parse_valign (valign ?? 's'),
-		// hack for ui_cmd_box_ct() to be able to call ui_cmd_box() with
-		// `arguments`. 2 extra bytes in json for each box for this.
-		0, // next_sib_i
-	)
-	for (let j = argc, n = arguments.length; j < n; j++)
-		a.push(arguments[j])
-	let next_i = a.length+3 - i
-	a[i-2] = next_i
-	a.push(-next_i)
+	let i = ui_cmd_begin(cmd)
+	a[n++] = min_w ?? 0 // user min_w in measure phase; x in position phase
+	a[n++] = min_h ?? 0 // user min_h in measure phase; y in position phase
+	a[n++] = 0 // children's min_w -> min_w in measure phase; w in position phase
+	a[n++] = 0 // children's min_h -> min_h in measure phase; h in position phase
+	a[n++] = px1; a[n++] = py1; a[n++] = px2; a[n++] = py2
+	a[n++] = mx1; a[n++] = my1; a[n++] = mx2; a[n++] = my2
+	a[n++] = max(0, fr ?? 1)
+	a[n++] = parse_align  (align  ?? 's')
+	a[n++] = parse_valign (valign ?? 's')
+	return i
+}
 
+function ui_cmd_box_end(i) {
+	ui_cmd_end(i)
 	reset_spacings()
 	if (scroll_to_view_next) {
 		scroll_to_view_next = false
-		let j = ui_cmd(CMD_SCROLL_TO_VIEW, i)
-		a[j+0] -= j // make the requested box index relative
+		let j = ui_cmd_begin(CMD_SCROLL_TO_VIEW)
+		a[n++] = i - j // make the requested box index relative
+		ui_cmd_end(j)
 	}
+}
+
+ui.cmd_box = function(cmd, fr, align, valign, min_w, min_h, ...args) {
+	let i = ui_cmd_box_begin(cmd, fr, align, valign, min_w, min_h)
+	for (let j = 0; j < args.length; j++)
+		a[n++] = args[j]
+	ui_cmd_box_end(i)
 	return i
 }
-ui.cmd_box = ui_cmd_box
 
 /// box measure phase
 
@@ -3102,13 +3020,24 @@ function cmd_next_sibling_i(a, i) {
 }
 
 // NOTE: `ct` is short for container, which must end with ui.end().
-function ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h) {
-	begin_scope()
-	let i = ui_cmd_box.apply(null, arguments)
-	ct_stack.push(i)
+function ui_cmd_box_ct_begin(cmd, fr, align, valign, min_w, min_h) {
+	let i = ui_cmd_box_begin(cmd, fr, align, valign, min_w, min_h)
+	a[n++] = 0 // next_sib_i
 	return i
 }
-ui.cmd_box_ct = ui_cmd_box_ct
+
+function ui_cmd_box_ct_end(i) {
+	ui_cmd_box_end(i)
+	ct_stack.push(i)
+}
+
+ui.cmd_box_ct = function(cmd, fr, align, valign, min_w, min_h, ...args) {
+	let i = ui_cmd_box_ct_begin(cmd, fr, align, valign, min_w, min_h)
+	for (let j = 0; j < args.length; j++)
+		a[n++] = args[j]
+	ui_cmd_box_ct_end(i)
+	return i
+}
 
 ui.box_ct_widget = function(cmd_name, t) {
 	let ID = t.ID
@@ -3130,13 +3059,13 @@ ui.box_ct_widget = function(cmd_name, t) {
 const CMD_END = cmd('end')
 
 ui.end = function(cmd) {
-	end_scope()
 	assert(!scroll_to_view_next, 'focusable widget recorded no box')
 	let i = assert(ct_stack.pop(), 'end command outside container')
 	if (cmd && a[i-1] != cmd)
 		assert(false, 'closing ', cmd_names[cmd], ' instead of ', C(a, i))
-	let end_i = ui_cmd(CMD_END, i)
-	a[end_i+0] -= end_i // make relative
+	let end_i = ui_cmd_begin(CMD_END)
+	a[n++] = i - end_i // make relative
+	ui_cmd_end(end_i)
 	let next_i = cmd_next_i(a, end_i)
 	a[i+BOX_CT_NEXT_SIB_I] = next_i-i // next_i but relative to the ct cmd at i
 }
@@ -3247,8 +3176,10 @@ const CMD_MEASURE = cmd('measure')
 // measure current container after layouting and put the result in
 // ui.state(into_id) keys: x, y, w, h.
 ui.measure = function(into_id) {
-	let i = ui_cmd(CMD_MEASURE, into_id, ui.ct_i())
-	a[i+1] -= i // make ct_i relative
+	let i = ui_cmd_begin(CMD_MEASURE)
+	a[n++] = into_id
+	a[n++] = ui.ct_i() - i // make ct_i relative
+	ui_cmd_end(i)
 }
 
 register[CMD_MEASURE] = function(a, i) {
@@ -3265,9 +3196,10 @@ register[CMD_MEASURE] = function(a, i) {
 const FLEX_GAP = BOX_CT_ARGS+0
 
 function ui_hv(cmd, fr, gap, align, valign, min_w, min_h) {
-	return ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
-		gap ?? 0,
-	)
+	let i = ui_cmd_box_ct_begin(cmd, fr, align, valign, min_w, min_h)
+	a[n++] = gap ?? 0
+	ui_cmd_box_ct_end(i)
+	return i
 }
 
 const CMD_H = cmd_ct('h')
@@ -3503,7 +3435,9 @@ measure_end[CMD_V_ALIGNED] = function(a, i, axis) {
 // just an empty box used as an empty place in v_aligned or to reserve space.
 ui.box_widget('box', {
 	create: function(cmd, fr, min_w, min_h) {
-		return ui_cmd_box(cmd, fr ?? 0, 's', 's', min_w, min_h)
+		let i = ui_cmd_box_begin(cmd, fr ?? 0, 's', 's', min_w, min_h)
+		ui_cmd_box_end(i)
+		return i
 	},
 })
 
@@ -3515,8 +3449,10 @@ const CMD_STACK = cmd_ct('stack')
 id_slot[CMD_STACK] = STACK_ID
 
 ui.stack = function(id, fr, align, valign, min_w, min_h) {
-	return ui_cmd_box_ct(CMD_STACK, fr, align, valign, min_w, min_h,
-		id || '')
+	let i = ui_cmd_box_ct_begin(CMD_STACK, fr, align, valign, min_w, min_h)
+	a[n++] = id || ''
+	ui_cmd_box_ct_end(i)
+	return i
 }
 
 measure[CMD_STACK] = ct_stack_push
@@ -3543,8 +3479,10 @@ hittest[CMD_STACK] = function(a, i, recs) {
 
 ui.box_ct_widget('aspect_box', {
 	create: function(cmd, aspect, fr, align, valign, min_w, min_h) {
-		return ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
-			aspect ?? 1)
+		let i = ui_cmd_box_ct_begin(cmd, fr, align, valign, min_w, min_h)
+		a[n++] = aspect ?? 1
+		ui_cmd_box_ct_end(i)
+		return i
 	},
 	measure: function(a, i, axis) {
 		ct_stack_push(a, i)
@@ -3600,16 +3538,16 @@ ui.scrollbox = function(
 	if (sx != null) xstate.scroll_x = sx
 	if (sy != null) ystate.scroll_y = sy
 
-	let i = ui_cmd_box_ct(CMD_SCROLLBOX, fr, align, valign, min_w, min_h,
-		overflow_x,
-		overflow_y,
-		0, 0, // content w, h
-		id,
-		0, 0, // computed scroll x, y
-		0, // state
-		x_id,
-		y_id,
-	)
+	let i = ui_cmd_box_ct_begin(CMD_SCROLLBOX, fr, align, valign, min_w, min_h)
+	a[n++] = overflow_x
+	a[n++] = overflow_y
+	a[n++] = 0; a[n++] = 0 // content w, h
+	a[n++] = id
+	a[n++] = 0; a[n++] = 0 // computed scroll x, y
+	a[n++] = 0 // state
+	a[n++] = x_id
+	a[n++] = y_id
+	ui_cmd_box_ct_end(i)
 
 	return i
 }
@@ -4097,23 +4035,23 @@ ui.popup = function(
 	if (id && (flags & POPUP_SOLID))
 		ui.keep_focus(id)
 
-	let i = ui_cmd_box_ct(CMD_POPUP,
+	let i = ui_cmd_box_ct_begin(CMD_POPUP,
 		null, // fr -> id
 		null, // align -> side
 		null, // valign -> align
 		min_w, min_h,
-		// BOX_ARGS+0
-		layer.name, z_index ?? 0,
-		target_i, flags,
-		side, // side_real
-		ox ?? 0, oy ?? 0,
 	)
+	// BOX_CT_ARGS+0
+	a[n++] = layer.name; a[n++] = z_index ?? 0
+	a[n++] = target_i; a[n++] = flags
+	a[n++] = side // side_real
+	a[n++] = ox ?? 0; a[n++] = oy ?? 0
+	ui_cmd_box_ct_end(i)
 	if (target_i)
 		a[i+POPUP_TARGET_I] -= i // make relative
 	a[i+POPUP_ID   ] = id
 	a[i+POPUP_SIDE ] = side
 	a[i+POPUP_ALIGN] = align
-	force_scope_vars()
 	return i
 }
 ui.end_popup = function() { ui.end(CMD_POPUP) }
@@ -4428,10 +4366,15 @@ ui.bb_tooltip = function(
 	let ct_i = ui.ct_i()
 	let rel_ct_i = ui.rel_ct_i()
 	assert(a[ct_i-1] == CMD_POPUP, 'bb_tooltip container must be a popup')
-	return ui_cmd(CMD_BB_TOOLTIP, rel_ct_i, bg_color ?? 0, parse_state(bg_color_state),
-		border_color ?? 0, parse_state(border_color_state),
-		round((border_radius ?? 0) * 128),
-	)
+	let i = ui_cmd_begin(CMD_BB_TOOLTIP)
+	a[n++] = rel_ct_i
+	a[n++] = bg_color ?? 0
+	a[n++] = parse_state(bg_color_state)
+	a[n++] = border_color ?? 0
+	a[n++] = parse_state(border_color_state)
+	a[n++] = round((border_radius ?? 0) * 128)
+	ui_cmd_end(i)
+	return i
 }
 
 cx.fillStyle = bg_color
@@ -4602,7 +4545,9 @@ const CMD_SHADOW = cmd('shadow')
 
 ui.shadow = function(s) {
 	assert(isstr(s))
-	ui_cmd(CMD_SHADOW, s)
+	let i = ui_cmd_begin(CMD_SHADOW)
+	a[n++] = s
+	ui_cmd_end(i)
 }
 
 const SHADOW_INSET = 8
@@ -4690,11 +4635,16 @@ ui.bb = function(
 ) {
 	if (border_dash)
 		assert(border_dashes[border_dash], 'invalid border dash ', border_dash)
-	ui_cmd(CMD_BB, ui.rel_ct_i(), bg_color ?? 0, parse_state(bg_color_state),
-		parse_border_sides(border_sides), border_color ?? 0, parse_state(border_color_state),
-		round((border_radius ?? 0) * 128),
-		border_dash ?? null,
-	)
+	let i = ui_cmd_begin(CMD_BB)
+	a[n++] = ui.ct_i() - i
+	a[n++] = bg_color ?? 0
+	a[n++] = parse_state(bg_color_state)
+	a[n++] = parse_border_sides(border_sides)
+	a[n++] = border_color ?? 0
+	a[n++] = parse_state(border_color_state)
+	a[n++] = round((border_radius ?? 0) * 128)
+	a[n++] = border_dash ?? null
+	ui_cmd_end(i)
 }
 ui.bg = function(bg_color, bg_color_state) {
 	return ui.bb(bg_color, bg_color_state)
@@ -4845,73 +4795,49 @@ ui.focus_ring = function(id) {
 
 /*
 
-TEXT DEFAULTS
-
-	ui.font_size_normal = 12                 set default font size
-
 DEFINING FONTS
 
-	font_alias  (alias, font)
+	ui.load_font   (name, url, desc)      load a font
+	ui.font_alias  (alias, name)          alias a loaded font
 
-TEXT PROPERTIES
+USER API, affects only the next ui.text() call.
 
-	color           (color, [color_state])
-	font            (font|alias)
-	fs | font_size  (size)
-	font_weight     (weight)
-	bold            ()
-	nobold          ()
-	lg | line_gap   (gap)
-	xsmall          ()      ui.font_size(.72  )
-	small           ()      ui.font_size(.8125)
-	smaller         ()      ui.font_size(.875 )
-	large           ()      ui.font_size(1.125)
-	xlarge          ()      ui.font_size(1.5  )
-
-	get_font_size   () -> font_size
-
-
+	ui.color           (color, [color_state])
+	ui.font            (font|alias)
+	ui.fs | font_size  (size)
+	ui.font_weight     (weight)
+	ui.bold            ()
+	ui.nobold          ()
+	ui.lg | line_gap   (gap)
+	ui.xsmall          ()
+	ui.small           ()
+	ui.smaller         ()
+	ui.large           ()
+	ui.xlarge          ()
 
 */
 
-const CMD_COLOR = cmd('color')
+ui.font_size_normal = 12
+ui.default_font  = 'Arial'
 
-function force_color(s, state) {
-	if (color != s)
-		scope_set('color', s)
-	if (color_state != state)
-		scope_set('color_state', state)
-	ui_cmd(CMD_COLOR, s, state)
-	color = s
-	color_state = state
+let text_flags = 0
+let text_color, text_color_state
+let text_font, text_font_size, text_font_weight, text_line_gap
+
+function text_flags_check() {
+	assert(!text_flags, 'text property set with no ui.text() after it')
 }
+
 ui.color = function(s, state) {
-	state = state ?? 0
-	if (color == s && color_state == state) return
-	force_color(s, state)
-}
-function end_color(ended_scope) {
-	let s     = scope_prev_diff_var(ended_scope, 'color')
-	let state = scope_prev_diff_var(ended_scope, 'color_state')
-	if (s === undefined && state === undefined) return
-	if (s !== undefined) color = s; else s = color
-	if (state !== undefined) color_state = state; else state = color_state
-	ui_cmd(CMD_COLOR, s, state)
+	text_color = s
+	text_color_state = state
+	text_flags &= ~(TEXT_COLOR | TEXT_COLOR_STATE)
+	if (s && s != 'text')
+		text_flags |= TEXT_COLOR
+	if (state)
+		text_flags |= TEXT_COLOR_STATE
 }
 
-const CMD_FONT = cmd('font')
-
-function force_font(s) {
-	scope_set('font', s)
-	ui_cmd(CMD_FONT, s)
-	font = s
-}
-function end_font(ended_scope) {
-	let s = scope_prev_diff_var(ended_scope, 'font')
-	if (s === undefined) return
-	ui_cmd(CMD_FONT, s)
-	font = s
-}
 // ui.font() looks this up first; a name that's not in here is used as-is.
 let font_aliases = obj()
 
@@ -4921,29 +4847,19 @@ ui.font_alias = function(alias, font) {
 
 ui.font = function(s) {
 	s = font_aliases[s] ?? s
-	if (font == s) return
-	force_font(s)
+	text_font = s
+	text_flags &= ~TEXT_FONT
+	if (s && s != default_font)
+		text_flags |= TEXT_FONT
 }
 
-ui.font_size_normal = 12
 let font_size_normal // set in reset_screen()
 
-const CMD_FONT_SIZE = cmd('font_size')
-
-function force_font_size(s) {
-	scope_set('font_size', s)
-	ui_cmd(CMD_FONT_SIZE, s)
-	font_size = s
-}
-function end_font_size(ended_scope) {
-	let s = scope_prev_diff_var(ended_scope, 'font_size')
-	if (s === undefined) return
-	ui_cmd(CMD_FONT_SIZE, s)
-	font_size = s
-}
 ui.font_size = function(x) {
-	if (font_size_normal * font_size == x) return
-	force_font_size(font_size_normal * x)
+	text_font_size = font_size_normal * x
+	text_flags &= ~TEXT_FONT_SIZE
+	if (x != null && x != 1)
+		text_flags |= TEXT_FONT_SIZE
 }
 ui.fs = ui.font_size
 
@@ -4953,94 +4869,52 @@ ui.smaller = function() { ui.font_size(.875  ) }
 ui.large   = function() { ui.font_size(1.125 ) }
 ui.xlarge  = function() { ui.font_size(1.5   ) }
 
-const CMD_FONT_WEIGHT = cmd('font_weight')
-
-function force_font_weight(s) {
-	scope_set('font_weight', s)
-	ui_cmd(CMD_FONT_WEIGHT, s)
-	font_weight = s
-}
-function end_font_weight(ended_scope) {
-	let s = scope_prev_diff_var(ended_scope, 'font_weight')
-	if (s === undefined) return
-	ui_cmd(CMD_FONT_WEIGHT, s)
-	font_weight = s
-}
 ui.font_weight = function(s) {
-	if (font_weight == s) return
-	force_font_weight(s)
+	text_font_weight = s
+	text_flags &= ~TEXT_FONT_WEIGHT
+	if (s && s != 'normal')
+		text_flags |= TEXT_FONT_WEIGHT
 }
 ui.bold   = function() { ui.font_weight('bold') }
 ui.nobold = function() { ui.font_weight('normal') }
 
-const CMD_LINE_GAP = cmd('line_gap')
-
-function force_line_gap(s) {
-	scope_set('line_gap', s)
-	ui_cmd(CMD_LINE_GAP, round(s * 1024))
-	line_gap = s
-}
-function end_line_gap(ended_scope) {
-	let s = scope_prev_diff_var(ended_scope, 'line_gap')
-	if (s === undefined) return
-	ui_cmd(CMD_LINE_GAP, round(s * 1024))
-	line_gap = s
-}
 ui.line_gap = function(s) {
-	if (line_gap == s) return
-	force_line_gap(s)
+	text_line_gap = s
+	text_flags &= ~TEXT_LINE_GAP
+	if (s != null && s != 0.5)
+		text_flags |= TEXT_LINE_GAP
 }
 ui.lg = ui.line_gap
 
+let default_font
+let default_font_str
 let last_font_str
-function set_font(a, i) {
-	font = a[i]
-	let s = font_weight + ' ' + font_size + 'px ' + font
+
+let cur_color, cur_color_state, cur_font, cur_font_size, cur_font_weight
+let cur_line_gap
+
+function read_text_args(a, i, flags) {
+	let arg_i = i+TEXT_ARGS_I
+	cur_color       = flags & TEXT_COLOR       ? a[arg_i++] : 'text'
+	cur_color_state = flags & TEXT_COLOR_STATE ? a[arg_i++] : null
+	cur_font        = flags & TEXT_FONT        ? a[arg_i++] : default_font
+	cur_font_size   = flags & TEXT_FONT_SIZE   ? a[arg_i++] : font_size_normal
+	cur_font_weight = flags & TEXT_FONT_WEIGHT ? a[arg_i++] : 'normal'
+	cur_line_gap    = flags & TEXT_LINE_GAP    ? a[arg_i++] : 0.5
+	return arg_i
+}
+
+function set_text_font() {
+	let s = cur_font_weight + ' ' + cur_font_size + 'px ' + cur_font
 	if (s == last_font_str) return
 	last_font_str = s
 	cx.font = s
 }
 
-function set_font_size(a, i) {
-	font_size = a[i]
-	let s = font_weight + ' ' + font_size + 'px ' + font
-	if (s == last_font_str) return
-	last_font_str = s
-	cx.font = s
-}
-
-function set_font_weight(a, i) {
-	font_weight = a[i]
-	let s = font_weight + ' ' + font_size + 'px ' + font
-	if (s == last_font_str) return
-	last_font_str = s
-	cx.font = s
-}
-
-function set_line_gap(a, i) {
-	line_gap = a[i] / 1024
-}
-
-measure[CMD_FONT] = set_font
-measure[CMD_FONT_SIZE] = set_font_size
-measure[CMD_FONT_WEIGHT] = set_font_weight
-measure[CMD_LINE_GAP] = set_line_gap
-
-draw[CMD_COLOR] = function(a, i) {
-	color       = a[i+0]
-	color_state = a[i+1]
-}
-draw[CMD_FONT] = set_font
-draw[CMD_FONT_SIZE] = set_font_size
-draw[CMD_FONT_WEIGHT] = set_font_weight
-draw[CMD_LINE_GAP] = set_line_gap
-
-function force_scope_vars() {
-	force_color(color, color_state)
-	force_font(font)
-	force_font_size(font_size)
-	force_font_weight(font_weight)
-	force_line_gap(line_gap)
+function reset_text_font() {
+	if (last_font_str == default_font_str) return
+	last_font_str = default_font_str
+	cx.font = default_font_str
 }
 
 //// INPUT STATE -------------------------------------------------------------
@@ -5109,22 +4983,26 @@ const TEXT_H          = BOX_ARGS+4
 const TEXT_ID         = BOX_ARGS+5
 const TEXT_S          = BOX_ARGS+6
 const TEXT_FLAGS      = BOX_ARGS+7
-const TEXT_INPUT_TYPE = BOX_ARGS+8
-// only present when TEXT_MARKED is set, see mark_text().
-const TEXT_MARK_I1    = BOX_ARGS+9
-const TEXT_MARK_I2    = BOX_ARGS+10
-const TEXT_MARK_BG    = BOX_ARGS+11
+const TEXT_ARGS_I     = BOX_ARGS+8
 
-// TEXT_FLAGS
-const TEXT_WRAP_LINE      =  1 // bit 1
-const TEXT_WRAP_WORD      =  2 // bit 2
-const TEXT_EDITABLE       =  4 // bit 3
-const TEXT_FOCUSED        =  8 // bit 4
-const TEXT_FOCUSED_BY_KEY = 16 // bit 5
-const TEXT_MARKED         = 32 // bit 6
-const TEXT_READONLY       = 64 // bit 7
-const TEXT_ALIGN_RIGHT    = 128 // bit 8
-const TEXT_ALIGN_CENTER   = 256 // bit 9
+// TEXT_FLAGS BITS
+const TEXT_WRAP_LINE      = 2**0
+const TEXT_WRAP_WORD      = 2**1
+const TEXT_EDITABLE       = 2**2
+const TEXT_FOCUSED        = 2**3
+const TEXT_FOCUSED_BY_KEY = 2**4
+const TEXT_MARKED         = 2**5
+const TEXT_READONLY       = 2**6
+const TEXT_ALIGN_RIGHT    = 2**7
+const TEXT_ALIGN_CENTER   = 2**8
+const TEXT_COLOR          = 2**9
+const TEXT_COLOR_STATE    = 2**10
+const TEXT_FONT           = 2**11
+const TEXT_FONT_SIZE      = 2**12
+const TEXT_FONT_WEIGHT    = 2**13
+const TEXT_LINE_GAP       = 2**14
+
+const TEXT_FONT_FLAGS = TEXT_FONT | TEXT_FONT_SIZE | TEXT_FONT_WEIGHT
 
 const CMD_TEXT = cmd('text')
 id_slot[CMD_TEXT] = TEXT_ID
@@ -5136,6 +5014,9 @@ ui.mark_text = function(i1, i2, bg) {
 	mark_i1 = i1
 	mark_i2 = i2
 	mark_bg = bg
+	text_flags &= ~TEXT_MARKED
+	if (i1 != null && i2 > i1)
+		text_flags |= TEXT_MARKED
 }
 
 // NOTE: called between frames so hit testing is not availble here!
@@ -5169,7 +5050,6 @@ ui.text = function(
 		s.value = value
 		text = value ?? ''
 	}
-	let marked = mark_i1 != null && mark_i2 > mark_i1
 	let box_align = align ?? 'l'
 	let text_align = 0
 	if (box_align == 'sr' || box_align == 'stretch-right') {
@@ -5185,28 +5065,45 @@ ui.text = function(
 		else if (box_align == ALIGN_CENTER)
 			text_align = TEXT_ALIGN_CENTER
 	}
-	let i = ui_cmd_box(CMD_TEXT, fr ?? 1, box_align, valign ?? 'c',
+	let i = ui_cmd_box_begin(CMD_TEXT, fr ?? 1, box_align, valign ?? 'c',
 		w ?? -1, // -1=auto
 		h ?? -1, // -1=auto
-		0, // ascent
-		0, // descent
-		0, // text_x
-		max_w ?? -1, // -1=inf
-		0, // text_h
-		id,
-		text,
-		wrap // flags
-			| text_align
-			| (editable ? TEXT_EDITABLE : 0)
-			| (readonly ? TEXT_READONLY : 0)
-			| (ui.focused(id) ? TEXT_FOCUSED : 0)
-			| (ui.focused(id) && ui.focused_by_key ? TEXT_FOCUSED_BY_KEY : 0)
-			| (marked ? TEXT_MARKED : 0),
-		input_type,
 	)
-	if (marked)
-		ui_cmd_add_args(i, mark_i1, mark_i2, mark_bg ?? 'search')
-	mark_i1 = null
+	a[n++] = 0 // ascent
+	a[n++] = 0 // descent
+	a[n++] = 0 // text_x
+	a[n++] = max_w ?? -1 // -1=inf
+	a[n++] = 0 // text_h
+	a[n++] = id
+	a[n++] = text
+	a[n++] = wrap // flags
+		| text_align
+		| (editable ? TEXT_EDITABLE : 0)
+		| (readonly ? TEXT_READONLY : 0)
+		| (ui.focused(id) ? TEXT_FOCUSED : 0)
+		| (ui.focused(id) && ui.focused_by_key ? TEXT_FOCUSED_BY_KEY : 0)
+		| text_flags
+	if (text_flags & TEXT_COLOR)
+		a[n++] = text_color
+	if (text_flags & TEXT_COLOR_STATE)
+		a[n++] = text_color_state
+	if (text_flags & TEXT_FONT)
+		a[n++] = text_font
+	if (text_flags & TEXT_FONT_SIZE)
+		a[n++] = text_font_size
+	if (text_flags & TEXT_FONT_WEIGHT)
+		a[n++] = text_font_weight
+	if (text_flags & TEXT_LINE_GAP)
+		a[n++] = text_line_gap
+	if (editable)
+		a[n++] = input_type
+	if (text_flags & TEXT_MARKED) {
+		a[n++] = mark_i1
+		a[n++] = mark_i2
+		a[n++] = mark_bg ?? 'search'
+	}
+	ui_cmd_box_end(i)
+	text_flags = 0
 
 	return editable ? value : text
 }
@@ -5223,12 +5120,10 @@ ui.text_wrapped = function(id, s, fr, align, valign, max_w, w, h, editable) {
 	return ui.text(id, s, fr, align, valign, max_w, w, h, 'word', editable)
 }
 ui.heading = function(font_size, s, align) {
-	ui.scope()
 	ui.font_size(font_size)
 	ui.bold()
 	ui.color('heading')
 	ui.text('', s, 0, align)
-	ui.end_scope()
 }
 ui.h1 = (s, align) => ui.heading(2.00, s, align)
 ui.h2 = (s, align) => ui.heading(1.75, s, align)
@@ -5357,13 +5252,13 @@ function create_word_wrapper() {
 	}
 
 	let last_ct_w, last_line_gap
-	ww.wrap = function(ct_w, align) {
+	ww.wrap = function(ct_w, gap) {
 		if (!s)
 			return
-		if (ct_w == last_ct_w && line_gap * font_size == last_line_gap)
+		if (ct_w == last_ct_w && gap == last_line_gap)
 			return
 		last_ct_w = ct_w
-		last_line_gap = line_gap * font_size
+		last_line_gap = gap
 		lines.length = 0
 		let line_w = 0
 		let max_line_w = 0
@@ -5386,7 +5281,7 @@ function create_word_wrapper() {
 		let line_count = lines.length / 2
 		ww.w = ceil(max_line_w)
 		ww.h = line_count * ceil(ww.asc + ww.dsc)
-			+ (line_count-1) * round(line_gap * font_size)
+			+ (line_count-1) * round(gap)
 	}
 
 	ww.clear = function() {
@@ -5414,12 +5309,15 @@ function word_wrapper(id, text) {
 }
 
 measure[CMD_TEXT] = function(a, i, axis) {
-	if (a[i+TEXT_FLAGS] & TEXT_WRAP_WORD) {
-		// word-wrapping is the reason for splitting the layouting algorithm
-		// into interlaced per-axis measuring and positioning phases.
-		let id = a[i+TEXT_ID]
-		let ww = a[i+TEXT_S]
-		if (!axis) {
+	let flags = a[i+TEXT_FLAGS]
+	if (!axis) {
+		read_text_args(a, i, flags)
+		if (flags & TEXT_FONT_FLAGS)
+			set_text_font()
+		if (flags & TEXT_WRAP_WORD) {
+			// word-wrapping is the reason for splitting the layouting algorithm
+			// into interlaced per-axis measuring and positioning phases.
+			let ww = a[i+TEXT_S]
 			ww.measure()
 			let w = a[i+0]
 			let max_w = a[i+TEXT_W]
@@ -5431,50 +5329,53 @@ measure[CMD_TEXT] = function(a, i, axis) {
 			a[i+TEXT_ASC] = round(ww.asc)
 			a[i+TEXT_DSC] = round(ww.dsc)
 		} else {
-			let h = a[i+1]
-			if (h == -1)
-				h = ww.h
-			a[i+3] = h // min_h = h
-			a[i+TEXT_H] = ww.h
-		}
-	} else if (!axis) {
-		// measure everything once on the x-axis phase.
-		let s = a[i+TEXT_S]
-		let asc
-		let dsc
-		let text_w
-		let text_h
-		if (isstr(s)) { // single-line
-			let m = measure_text(cx, s)
-			asc = m.fontBoundingBoxAscent
-			dsc = m.fontBoundingBoxDescent
-			text_w = ceil(m.width)
-			text_h = ceil(asc+dsc)
-		} else { // multi-line, pre-wrapped
-			text_w = 0
-			text_h = 0
-			for (let ss of s) {
-				let m = measure_text(cx, ss)
+			// measure everything once on the x-axis phase.
+			let s = a[i+TEXT_S]
+			let asc
+			let dsc
+			let text_w
+			let text_h
+			if (isstr(s)) { // single-line
+				let m = measure_text(cx, s)
 				asc = m.fontBoundingBoxAscent
 				dsc = m.fontBoundingBoxDescent
-				text_w = max(text_w, ceil(m.width))
-				text_h += ceil(asc+dsc)
+				text_w = ceil(m.width)
+				text_h = ceil(asc+dsc)
+			} else { // multi-line, pre-wrapped
+				text_w = 0
+				text_h = 0
+				for (let ss of s) {
+					let m = measure_text(cx, ss)
+					asc = m.fontBoundingBoxAscent
+					dsc = m.fontBoundingBoxDescent
+					text_w = max(text_w, ceil(m.width))
+					text_h += ceil(asc+dsc)
+				}
+				text_h += (s.length-1) * round(cur_line_gap * cur_font_size)
 			}
-			text_h += (s.length-1) * round(line_gap * font_size)
+			let w = a[i+0]
+			let h = a[i+1]
+			let max_w = a[i+TEXT_W]
+			if (h == -1) h = text_h
+			if (w == -1) w = text_w
+			if (max_w != -1)
+				w = min(max_w, w)
+			a[i+2] = w // min_w = w
+			a[i+3] = h // min_h = h
+			a[i+TEXT_ASC] = round(asc)
+			a[i+TEXT_DSC] = round(dsc)
+			a[i+TEXT_W] = text_w + spacings(a, i, 0)
+			a[i+TEXT_H] = text_h + spacings(a, i, 1)
 		}
-		let w = a[i+0]
+		if (flags & TEXT_FONT_FLAGS)
+			reset_text_font()
+	} else if (flags & TEXT_WRAP_WORD) {
+		let ww = a[i+TEXT_S]
 		let h = a[i+1]
-		let max_w = a[i+TEXT_W]
-		if (h == -1) h = text_h
-		if (w == -1) w = text_w
-		if (max_w != -1)
-			w = min(max_w, w)
-		a[i+2] = w // min_w = w
+		if (h == -1)
+			h = ww.h
 		a[i+3] = h // min_h = h
-		a[i+TEXT_ASC] = round(asc)
-		a[i+TEXT_DSC] = round(dsc)
-		a[i+TEXT_W] = text_w + spacings(a, i, 0)
-		a[i+TEXT_H] = text_h + spacings(a, i, 1)
+		a[i+TEXT_H] = ww.h
 	}
 	a[i+2+axis] += spacings(a, i, axis)
 	let w = a[i+2+axis]
@@ -5483,9 +5384,11 @@ measure[CMD_TEXT] = function(a, i, axis) {
 
 position[CMD_TEXT] = function(a, i, axis, sx, sw) {
 	if (!axis) {
-		if (a[i+TEXT_FLAGS] & TEXT_WRAP_WORD) {
+		let flags = a[i+TEXT_FLAGS]
+		if (flags & TEXT_WRAP_WORD) {
+			read_text_args(a, i, flags)
 			let ww = a[i+TEXT_S]
-			ww.wrap(sw)
+			ww.wrap(sw, cur_line_gap * cur_font_size)
 			a[i+2] = ww.w
 		} else {
 			a[i+2] = a[i+TEXT_W] // we're positioning text_w, not w!
@@ -5817,7 +5720,6 @@ draw[CMD_TEXT] = function(a, i) {
 	let sw         = a[i+TEXT_W]
 	let id         = a[i+TEXT_ID]
 	let flags      = a[i+TEXT_FLAGS]
-	let input_type = a[i+TEXT_INPUT_TYPE]
 	let editable = flags & TEXT_EDITABLE
 	let readonly = !!(flags & TEXT_READONLY)
 	let focused  = flags & TEXT_FOCUSED
@@ -5825,7 +5727,9 @@ draw[CMD_TEXT] = function(a, i) {
 	if (ss_ids.length)
 		focused = focused && ss_focused
 
-	let col = fg_color(color, color_state)
+	let arg_i = read_text_args(a, i, flags)
+	let input_type = editable ? a[arg_i++] : null
+	let col = fg_color(cur_color, cur_color_state)
 
 	if (editable) {
 		let input = input_create(id, input_type)
@@ -5847,7 +5751,7 @@ draw[CMD_TEXT] = function(a, i) {
 		let css_px2 = px2 / dpr
 		let css_py1 = py1 / dpr
 		let css_py2 = py2 / dpr
-		let css_font_size = font_size / dpr
+		let css_font_size = cur_font_size / dpr
 		let css_opacity = focused ? '1' : '0'
 		if (
 			document.activeElement != input ||
@@ -5871,15 +5775,15 @@ draw[CMD_TEXT] = function(a, i) {
 				input._ui_caret = caret
 			}
 		}
-		if (  input._ui_font        != font
-			|| input._ui_font_weight != font_weight
+		if (  input._ui_font        != cur_font
+			|| input._ui_font_weight != cur_font_weight
 			|| input._ui_font_size   != css_font_size
 		) {
-			input.style.fontFamily = font
-			input.style.fontWeight = font_weight
+			input.style.fontFamily = cur_font
+			input.style.fontWeight = cur_font_weight
 			input.style.fontSize   = css_font_size+'px'
-			input._ui_font        = font
-			input._ui_font_weight = font_weight
+			input._ui_font        = cur_font
+			input._ui_font_weight = cur_font_weight
 			input._ui_font_size   = css_font_size
 		}
 		if (  input._ui_x != css_x
@@ -5925,6 +5829,9 @@ draw[CMD_TEXT] = function(a, i) {
 		}
 	}
 
+	if (flags & TEXT_FONT_FLAGS)
+		set_text_font()
+
 	let clip = w > sw
 
 	if (clip) {
@@ -5955,8 +5862,8 @@ draw[CMD_TEXT] = function(a, i) {
 		// the background covers the text drawn under it, so the marked part
 		// can be redrawn on it without the two antialiased edges blending.
 		if (flags & TEXT_MARKED) {
-			let i1 = a[i+TEXT_MARK_I1]
-			let i2 = a[i+TEXT_MARK_I2]
+			let i1 = a[arg_i+0]
+			let i2 = a[arg_i+1]
 			let mark_s = s.slice(i1, i2)
 			let text_x
 			if (flags & TEXT_ALIGN_RIGHT)
@@ -5966,7 +5873,7 @@ draw[CMD_TEXT] = function(a, i) {
 			else
 				text_x = anchor_x
 			let mark_x = text_x + measure_text(cx, s.slice(0, i1)).width
-			let bg = bg_color_hsl(a[i+TEXT_MARK_BG])
+			let bg = bg_color_hsl(a[arg_i+2])
 			cx.fillStyle = bg[0]
 			cx.fillRect(mark_x, y, measure_text(cx, mark_s).width, asc + dsc)
 			cx.fillStyle = fg_color('text', null, bg_is_dark(bg) ? 'dark' : 'light')
@@ -5980,7 +5887,7 @@ draw[CMD_TEXT] = function(a, i) {
 
 		for (let ss of s) {
 			cx.fillText(ss, anchor_x, y + asc)
-			y += asc + dsc + round(line_gap * font_size)
+			y += asc + dsc + round(cur_line_gap * cur_font_size)
 		}
 
 	} else if (flags & TEXT_WRAP_WORD) {
@@ -6012,12 +5919,15 @@ draw[CMD_TEXT] = function(a, i) {
 				x += w1 + ww.sp_w
 			}
 
-			y += asc + dsc + round(line_gap * font_size)
+			y += asc + dsc + round(cur_line_gap * cur_font_size)
 		}
 	}
 
 	if (clip)
 		cx.restore()
+
+	if (flags & TEXT_FONT_FLAGS)
+		reset_text_font()
 
 }
 
@@ -6043,10 +5953,8 @@ ui.icon_def = function(name, font, text) {
 
 ui.icon = function(id, name, fr, align, valign, max_w, w, h) {
 	let [font, text] = assert(icons[name], 'unknown icon ', name)
-	ui.scope()
 	ui.font(font)
 	ui.text(id, text, fr, align, valign, max_w, w, h)
-	ui.end_scope()
 }
 
 //// FRAME -------------------------------------------------------------------
@@ -6079,7 +5987,7 @@ frame.create = function(
 	let rel_ct_i = ui.rel_ct_i()
 	assert(a[ct_i-1] == CMD_SCROLLBOX, 'frame is not inside a scrollbox')
 
-	return ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
+	return ui.cmd_box(cmd, fr, align, valign, min_w, min_h,
 		on_measure, on_build,
 		rel_ct_i,
 		null, // rec_i, unset (0 is the main record)
@@ -6119,7 +6027,6 @@ frame.translate = function(a, i, dx, dy) {
 	let a0 = begin_rec()
 		a[i+FRAME_REC_I] = rec_i
 		ui.stack()
-			force_scope_vars()
 			on_build(a, i, x, y, w, h, cx, cy, cw, ch)
 			reset_spacings()
 			ui.end_stack()
@@ -6327,12 +6234,13 @@ ss.create = function(cmd, id, answer_con, fr, align, valign, min_w, min_h) {
 	let my = answer_con.frame && hs && ui.my != null ? ui.my - s.y : null
 	ss_send_pointer(s, mx, my)
 
-	return ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
-		id,
-		answer_con.frame,
-		// The renderer needs this to decide if nested DOM inputs can be active.
-		ui.focused(id) ? SS_FOCUSED : 0,
-	)
+	let i = ui_cmd_box_begin(cmd, fr, align, valign, min_w, min_h)
+	a[n++] = id
+	a[n++] = answer_con.frame
+	// The renderer needs this to decide if nested DOM inputs can be active.
+	a[n++] = ui.focused(id) ? SS_FOCUSED : 0
+	ui_cmd_box_end(i)
+	return i
 
 }
 
@@ -6440,13 +6348,16 @@ ui.widget('drag_point', {
 		}
 
 		// NOTE: we're making it a zero-sized box because it's freely movable.
-		let i = ui_cmd(cmd, x, y,
-			0, 0, // w, h
-			0, 0, 0, 0, // p
-			0, 0, 0, 0, // m
-			0, // fr
-			color, id,
-		)
+		let i = ui_cmd_begin(cmd)
+		a[n++] = x
+		a[n++] = y
+		a[n++] = 0; a[n++] = 0 // w, h
+		a[n++] = 0; a[n++] = 0; a[n++] = 0; a[n++] = 0 // p
+		a[n++] = 0; a[n++] = 0; a[n++] = 0; a[n++] = 0 // m
+		a[n++] = 0 // fr
+		a[n++] = color
+		a[n++] = id
+		ui_cmd_end(i)
 		out[0] = x
 		out[1] = y
 		out[2] = i
@@ -6539,12 +6450,10 @@ ui.button_text = function(s, state, w, h) {
 
 ui.button_icon = function(font, icon, state, w, h) {
 	state = repl(state, 'click', 'hover')
-	ui.scope()
-		ui.font(font)
-		ui.font_size(1.5)
-		ui.color('text', state)
-		ui.text('', icon)
-	ui.end_scope()
+	ui.font(font)
+	ui.font_size(1.5)
+	ui.color('text', state)
+	ui.text('', icon)
 }
 
 ui.end_button_stack = function(state) {
@@ -6631,6 +6540,12 @@ function end_hit_h_edge() {
 
 //// SPLIT -------------------------------------------------------------------
 
+let split_stack = []
+
+function split_stack_check() {
+	assert(!split_stack.length, 'split not closed')
+}
+
 function split(hv, id, size, unit, fixed_side,
 	split_fr, gap, align, valign, min_w, min_h,
 ) {
@@ -6698,11 +6613,7 @@ function split(hv, id, size, unit, fixed_side,
 		? [side_fr, side_min, other_fr, 0]
 		: [other_fr, 0, side_fr, side_min]
 
-	scope_set('split'   , hv)
-	scope_set('split_id', id)
-	scope_set('split_collapsed', collapsed)
-	scope_set('split_fr2' , fr2)
-	scope_set('split_min2', min2)
+	split_stack.push(hv, id, collapsed, fr2, min2)
 
 	ui.sb(id+'.scrollbox1', fr1, null, null, null, null,
 		horiz ? min1 : null, horiz ? null : min1)
@@ -6720,12 +6631,13 @@ ui.splitter = function() {
 
 	ui.end_sb()
 
-	let hv = scope_get('split')
-	let id = scope_get('split_id')
+	let n = split_stack.length
+	let hv        = split_stack[n-5]
+	let id        = split_stack[n-4]
+	let collapsed = split_stack[n-3]
+	let fr2       = split_stack[n-2]
+	let min2      = split_stack[n-1]
 	let horiz = hv == 'h'
-	let collapsed = scope_get('split_collapsed')
-	let fr2 = scope_get('split_fr2')
-	let min2 = scope_get('split_min2')
 	let st = hit(id) ? 'hover' : null
 
 	if (hv == 'h') {
@@ -6764,6 +6676,7 @@ function end_split(hv) {
 		ui.end_h()
 	else
 		ui.end_v()
+	split_stack.length -= 5
 
 }
 
@@ -6776,10 +6689,9 @@ ui.end_vsplit = function() { end_split('v') }
 //// SECTION -----------------------------------------------------------------
 
 ui.begin_section = function(id, title) {
-	if (ui.clicked(id)) {
-		let s = ui.state(id)
+	let s = ui.state(id)
+	if (ui.clicked(id))
 		s.open = !s.open
-	}
 	ui.v()
 		ui.stack(id)
 			ui.h()
@@ -6826,8 +6738,8 @@ ui.menu = function(id, items, side, align) {
 				}
 				let open = open_items[level] == item.id
 				ui.stack(item_id)
-					ui.pl(ui.rem(3))
-					ui.pr(ui.rem(1))
+					ui.pl(ui.em(3))
+					ui.pr(ui.em(1))
 					ui.pt(ui.sp2())
 					ui.pb(ui.sp2() + (first ? 1 : 0))
 					ui.bb(
@@ -6954,10 +6866,8 @@ ui.list = ui.vlist
 // a label is a clickable text that focuses an input.
 ui.label = function(for_id, s, fr, align, valign) {
 	let id = for_id+'.label'
-	ui.scope()
-		ui.color('text', hit(id) ? 'hover' : null)
-		ui.text(id, s, fr, align ?? 'l', valign ?? 'c')
-	ui.end_scope()
+	ui.color('text', hit(id) ? 'hover' : null)
+	ui.text(id, s, fr, align ?? 'l', valign ?? 'c')
 }
 
 //// INPUT -------------------------------------------------------------------
@@ -7217,21 +7127,19 @@ slider.create = function(
 	ui.stack()
 
 		ui.p(pad_x, ui.sp05())
-		let i = ui_cmd_box(cmd, fr, align, valign,
-			min_w,
-			min_h,
-			id,
-			from,
-			to,
-			decimals,
-			round(p * 32767),
-			markers,
-			scale_base ?? 10,
-			scales ?? 0,
-			(hs ? SLIDER_HOVER : 0)
-				| (focused ? SLIDER_FOCUSED : 0)
-				| (focused && ui.focused_by_key ? SLIDER_FOCUSED_BY_KEY : 0)
-		)
+		let i = ui_cmd_box_begin(cmd, fr, align, valign, min_w, min_h)
+		a[n++] = id
+		a[n++] = from
+		a[n++] = to
+		a[n++] = decimals
+		a[n++] = round(p * 32767)
+		a[n++] = markers
+		a[n++] = scale_base ?? 10
+		a[n++] = scales ?? 0
+		a[n++] = (hs ? SLIDER_HOVER : 0)
+			| (focused ? SLIDER_FOCUSED : 0)
+			| (focused && ui.focused_by_key ? SLIDER_FOCUSED_BY_KEY : 0)
+		ui_cmd_box_end(i)
 
 		ui.measure(id)
 
@@ -7420,10 +7328,12 @@ function toggle_create(cmd, id, on, fr, align, valign, min_w, min_h) {
 	on = ui.set_value(s, on)
 	let hs = hit(id) || hit(id+'.label')
 	let focused = ui.focused(id)
-	ui_cmd_box(cmd, fr ?? 0, align ?? 'c', valign ?? 'c',
-		min_w, min_h, id,
-		(on ? TOGGLE_ON : 0) | (hs ? TOGGLE_HOVER : 0) |
-			(focused && ui.focused_by_key ? TOGGLE_FOCUSED : 0))
+	let i = ui_cmd_box_begin(cmd, fr ?? 0, align ?? 'c', valign ?? 'c',
+		min_w, min_h)
+	a[n++] = id
+	a[n++] = (on ? TOGGLE_ON : 0) | (hs ? TOGGLE_HOVER : 0) |
+		(focused && ui.focused_by_key ? TOGGLE_FOCUSED : 0)
+	ui_cmd_box_end(i)
 	return on
 }
 
@@ -7584,13 +7494,14 @@ radio.create = function(cmd,
 	let del = focused && ui.keydown('delete')
 	if (del)
 		ui.rebuild('radio_pick')
-	ui_cmd_box(cmd, fr ?? 0, align ?? 'c', valign ?? 'c',
+	let i = ui_cmd_box_begin(cmd, fr ?? 0, align ?? 'c', valign ?? 'c',
 		min_w ?? ui.em(1.5),
-		min_h ?? ui.em(1.5),
-		id,
-		(selected ? TOGGLE_ON : 0) | (hs ? TOGGLE_HOVER : 0) |
-			(focused && ui.focused_by_key ? TOGGLE_FOCUSED : 0),
-		group_id)
+		min_h ?? ui.em(1.5))
+	a[n++] = id
+	a[n++] = (selected ? TOGGLE_ON : 0) | (hs ? TOGGLE_HOVER : 0) |
+		(focused && ui.focused_by_key ? TOGGLE_FOCUSED : 0)
+	a[n++] = group_id
+	ui_cmd_box_end(i)
 	if (clicked && clicked_id == id)
 		ui.state(group_id).input_value = own_val
 	else if (del)
@@ -8174,7 +8085,7 @@ ui.calendar = function(id, sel_day, ranges, fr, align, valign, min_w, min_h) {
 			for (let weekday = 0; weekday < 7; weekday++) {
 				let s = weekday_name(day(week0, weekday), 'short', lang()).slice(0, 1).toUpperCase()
 				ui.stack('', 0, null, null, cell_w, cell_h)
-					ui.pr(rem(1))
+					ui.pr(em(1))
 					ui.text('', s, 0, 'r', 'c')
 				ui.end_stack()
 			}
@@ -8356,11 +8267,11 @@ img.create = function(cmd, src, fr, align, valign, max_min_h, min_w, min_h) {
 		}
 	}
 
-	let i = ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
-		src,
-		max_min_h ?? 0, // -1=inf
-		data ?? '',
-	)
+	let i = ui_cmd_box_begin(cmd, fr, align, valign, min_w, min_h)
+	a[n++] = src
+	a[n++] = max_min_h ?? 0 // -1=inf
+	a[n++] = data ?? ''
+	ui_cmd_box_end(i)
 
 	return i
 
@@ -8610,8 +8521,13 @@ function gradient_slider(draw_gradient, name, max_value, key_step,
 				ui.focus_group(false, null, id)
 					ui.focusable(id)
 					ui.stack()
-						ui_cmd_box(cmd, null, null, null, ui.em(6), 0,
-							id, hue, sat, hit_p, value_p)
+						let i = ui_cmd_box_begin(cmd, null, null, null, ui.em(6), 0)
+						a[n++] = id
+						a[n++] = hue
+						a[n++] = sat
+						a[n++] = hit_p
+						a[n++] = value_p
+						ui_cmd_box_end(i)
 						if (ui.focused(id))
 							ui.focus_ring()
 					ui.end_stack()
@@ -8854,10 +8770,19 @@ ui.widget('polyline', {
 		assert(points.length % 2 == 0, 'invalid point array')
 		if (!points.length)
 			return
-		return ui_cmd(cmd, id, ui.rel_ct_i(), (closed ?? 0) ? 1 : 0,
-			fill_color   ?? 0, parse_state(fill_color_state  ),
-			stroke_color ?? 0, parse_state(stroke_color_state), line_width ?? 1,
-			...points)
+		let i = ui_cmd_begin(cmd)
+		a[n++] = id
+		a[n++] = ui.ct_i() - i
+		a[n++] = (closed ?? 0) ? 1 : 0
+		a[n++] = fill_color   ?? 0
+		a[n++] = parse_state(fill_color_state  )
+		a[n++] = stroke_color ?? 0
+		a[n++] = parse_state(stroke_color_state)
+		a[n++] = line_width ?? 1
+		for (let j = 0; j < points.length; j++)
+			a[n++] = points[j]
+		ui_cmd_end(i)
+		return i
 	},
 	measure: function(a, i, axis) {
 		if (!axis) {
@@ -8961,7 +8886,12 @@ ui.widget('bg_dots', {
 
 	create: function(cmd, id, speed) {
 		assert(id, 'id required')
-		return ui_cmd(cmd, id, ui.rel_ct_i(), round((speed ?? 1) * 1024))
+		let i = ui_cmd_begin(cmd)
+		a[n++] = id
+		a[n++] = ui.ct_i() - i
+		a[n++] = round((speed ?? 1) * 1024)
+		ui_cmd_end(i)
+		return i
 	},
 
 	draw: function(a, i) {
@@ -9148,7 +9078,7 @@ function draw_graph(x0, y0, w, h, g, with_agg) {
 		cx.fillStyle = fg_color('label')
 		let y1 = y0 + ui.em()
 		let x1 = x0 + ui.sp()
-		cx.font = font_weight + ' ' + (font_size * .75) + 'px ' + font
+		cx.font = 'normal ' + (font_size_normal * .75) + 'px ' + default_font
 		cx.textAlign = 'left'
 		let y = y1
 		let x = x1
@@ -9171,8 +9101,9 @@ function draw_graph(x0, y0, w, h, g, with_agg) {
 
 ui.box_widget('frame_graph_overlapped', {
 	create: function(cmd, fr, align, valign, min_w, min_h) {
-		ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
-			overlapped_frame_graphs)
+		let i = ui_cmd_box_begin(cmd, fr, align, valign, min_w, min_h)
+		a[n++] = overlapped_frame_graphs
+		ui_cmd_box_end(i)
 		//ui.animate()
 	},
 	draw: function(a, i) {
@@ -9188,8 +9119,10 @@ ui.box_widget('frame_graph_overlapped', {
 
 ui.box_widget('frame_graph', {
 	create: function(cmd, name, fr, align, valign, min_w, min_h) {
-		ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
-			name, ui.frame_graphs[name])
+		let i = ui_cmd_box_begin(cmd, fr, align, valign, min_w, min_h)
+		a[n++] = name
+		a[n++] = ui.frame_graphs[name]
+		ui_cmd_box_end(i)
 		//ui.animate()
 	},
 	draw: function(a, i) {
@@ -9197,7 +9130,7 @@ ui.box_widget('frame_graph', {
 		let y0 = a[i+1]
 		let w  = a[i+2]
 		let h  = a[i+3]
-		let g    = a[i+BOX_CT_ARGS+0]
+		let g    = a[i+BOX_ARGS+1]
 		if (!g) return
 		draw_graph(x0, y0, w, h, g, true)
 	},
@@ -9606,12 +9539,19 @@ ui.tabs = function(id, all_tabs, selected_tab, tabs_order, hidden_tabs) {
 
 //// TOOLBOX -----------------------------------------------------------------
 
+let toolbox_stack = []
+
+function toolbox_stack_check() {
+	assert(!toolbox_stack.length, 'toolbox not closed')
+}
+
 ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 
 	ui.state(id)
 	let  align_start =  parse_align( align || '[') == ALIGN_START
 	let valign_start = parse_valign(valign || 't') == ALIGN_START
-	let ts = ui.state(assert(scope_get('toolboxes_id'), 'begin_toolboxes missing'))
+	let tid = assert(toolbox_stack.at(-1), 'begin_toolboxes missing')
+	let ts = ui.state(tid)
 	if (hovers(id) && ui.click) {
 		ts.to_top = id
 		ui.tab_into(id)
@@ -9637,7 +9577,7 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 		//ui.p(1)
 		ui.bb('bg1', null, 1, 'intense')//, null, ui.sp075())
 		ui.stack()
-			scope_set('toolbox_id', id)
+			toolbox_stack.push(id, tid)
 			ui.v() // title / body split
 				ui.h(0) // title bar
 					ui.stack(id+'.title')
@@ -9649,7 +9589,8 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 }
 
 ui.end_toolbox = function() {
-	let id = scope_get('toolbox_id')
+	let id = toolbox_stack.at(-2)
+	toolbox_stack.length -= 2
 			ui.end_v()
 			ui.resizer(id)
 		ui.end_stack()
@@ -9660,11 +9601,11 @@ ui.end_toolbox = function() {
 ui.begin_toolboxes = function(tid) {
 	assert(tid, 'toolboxes id required')
 	attr(ui.state(tid), 'popups', map).clear()
-	scope_set('toolboxes_id', tid)
+	toolbox_stack.push(tid)
 }
 
 ui.end_toolboxes = function() {
-	let tid = assert(scope_get('toolboxes_id'), 'begin_toolboxes missing')
+	let tid = assert(toolbox_stack.pop(), 'begin_toolboxes missing')
 	let s = ui.state(tid)
 	let popups = s.popups
 	if (!popups.size) return
@@ -9785,7 +9726,12 @@ ui.widget('resizer', {
 		}
 		a[ct_i+0] = s.w ?? default_w ?? a[ct_i+0]
 		a[ct_i+1] = s.h ?? default_h ?? a[ct_i+1]
-		return ui_cmd(cmd, ui.rel_ct_i(), id, axis ?? 'xy')
+		let i = ui_cmd_begin(cmd)
+		a[n++] = ui.ct_i() - i
+		a[n++] = id
+		a[n++] = axis ?? 'xy'
+		ui_cmd_end(i)
+		return i
 	},
 	hit: function(a, i) {
 
@@ -9913,7 +9859,7 @@ function template_add(t) {
 	let cmd = cmd_name_map[t.t]
 	let targs_f = assert(targs[t.t], 'unknown type ', t.t)
 	let args = targs_f(t)
-	t.i = a.length + 2
+	t.i = n + 2
 	ui[t.t](...args)
 	if (t.e)
 		for (let ch_t of t.e)
@@ -9930,9 +9876,9 @@ function template_drag_point(id, ch_t, ct_i, ha, va) {
 
 ui.template = function(id, t, ...stack_args) {
 	ui.stack('', ...stack_args)
-	let i0 = a.length+2 // index of first cmd's arg#1
+	let i0 = n+2 // index of first cmd's arg#1
 	template_add(t)
-	let i1 = a.length+2 // index of next cmd's arg#1
+	let i1 = n+2 // index of next cmd's arg#1
 	ui.template_overlay(id, t, i0, i1)
 	let ch_t = selected_template_node_t
 	let ch_i = ch_t && ch_t.i
@@ -9951,7 +9897,13 @@ ui.template = function(id, t, ...stack_args) {
 
 ui.box_widget('template_overlay', {
 	create: function(cmd, id, t, i0, i1) {
-		return ui_cmd_box(cmd, 1, 's', 's', 0, 0, id, t, i0, i1)
+		let i = ui_cmd_box_begin(cmd, 1, 's', 's', 0, 0)
+		a[n++] = id
+		a[n++] = t
+		a[n++] = i0
+		a[n++] = i1
+		ui_cmd_box_end(i)
+		return i
 	},
 	hit: function(a, i) {
 		let id = a[i+BOX_ARGS+0]
