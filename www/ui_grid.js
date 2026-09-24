@@ -80,13 +80,13 @@ ui.widget('fast_field', {
 			let y = y0 + ri * cell_h
 			let fg_theme
 			if (bg) {
-				let c = ui.bg_color_hsl(bg, bgs)
+				let c = ui.color_hsl(bg, bgs)
 				let dark = c[5] ?? c[3] < .5
 				fg_theme = dark ? 'dark' : 'light'
 				cx.fillStyle = c[0]
 				cx.fillRect(x, y, w, cell_h)
 			}
-			cx.strokeStyle = ui.border_color('light', null, fg_theme)
+			cx.strokeStyle = ui.color_css('light', null, fg_theme)
 			cx.beginPath()
 			cx.moveTo(x, y + cell_h - .5)
 			cx.lineTo(x + w, y + cell_h - .5)
@@ -114,10 +114,10 @@ ui.widget('fast_field', {
 			if (text) {
 				let fg_theme
 				if (bg) {
-					let c = ui.bg_color_hsl(bg, bgs)
+					let c = ui.color_hsl(bg, bgs)
 					fg_theme = (c[5] ?? c[3] < .5) ? 'dark' : 'light'
 				}
-				cx.fillStyle = ui.fg_color(fg, null, fg_theme)
+				cx.fillStyle = ui.color_css(fg, null, fg_theme)
 				cx.fillText(text, anchor_x, y0 + ri * cell_h + baseline)
 			}
 		}

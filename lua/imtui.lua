@@ -816,9 +816,7 @@ local function theme_make(name, is_dark)
 	themes[name] = {
 		is_dark = is_dark,
 		name    = name,
-		fg      = {}, --{state->color_def}
-		border  = {}, --{state->color_def}
-		bg      = {}, --{state->color_def}
+		colors  = {}, --{state->color_def}
 	}
 end
 
@@ -845,223 +843,207 @@ end
 
 --colors are specified by (theme, name, state) with 'normal' state as fallback.
 --when defining a color for `hover`, `active` gets the same color if not defined.
-local function def_color_func(k)
-	local function def_color(theme, name, state, h, s, L, is_dark)
-		if theme == '*' then -- define color for all themes
-			for theme_name in pairs(themes) do
-				def_color(theme_name, name, state, h, s, L, is_dark)
-			end
-			return
+local function def_color(theme, name, state, h, s, L, is_dark)
+	if theme == '*' then -- define color for all themes
+		for theme_name in pairs(themes) do
+			def_color(theme_name, name, state, h, s, L, is_dark)
 		end
-		local states = themes[theme][k]
-		if state == '*' then -- copy all states of a color
-			local src_name = h
-			assert(isstr(h), 'expected color name to copy for all states')
-			for state, colors in pairs(states) do
-				colors[name] = colors[src_name]
-			end
-			return
+		return
+	end
+	local states = themes[theme].colors
+	if state == '*' then -- copy all states of a color
+		local src_name = h
+		assert(isstr(h), 'expected color name to copy for all states')
+		for state, colors in pairs(states) do
+			colors[name] = colors[src_name]
 		end
-		local state = parse_state(state)
-		if istab(L) then --color def to copy
-			states[state][name] = L
-		else
-			local ansi_color = hsl_to_color(h, s, L)
-			local color = {ansi_color, is_dark or L < .5}
-			attr(states, state)[name] = color
-			if state == 'hover' and not attr(states, 'active')[name] then
-				states.active[name] = color
-			end
+		return
+	end
+	local state = parse_state(state)
+	if istab(L) then --color def to copy
+		states[state][name] = L
+	else
+		local ansi_color = hsl_to_color(h, s, L)
+		local color = {ansi_color, is_dark or L < .5}
+		attr(states, state)[name] = color
+		if state == 'hover' and not attr(states, 'active')[name] then
+			states.active[name] = color
 		end
 	end
-	return def_color
 end
+ui.color_def = def_color
 
-local function lookup_color_func(k)
-	return function(name, state, theme1)
-		state = parse_state(state)
-		theme1 = theme1 and themes[theme1] or theme
-		local t = theme1[k]
-		local tc = t[state]
-		local c = tc and tc[name] or t.normal[name]
-		if not c then
-			assert(false, 'no ' .. k .. ' for (' .. name .. ', ' ..
-				state .. ', ' .. theme1.name .. ')')
-		end
-		return c[1], c[2], c
+local function lookup_color(name, state, theme1)
+	state = parse_state(state)
+	theme1 = theme1 and themes[theme1] or theme
+	local t = theme1.colors
+	local tc = t[state]
+	local c = tc and tc[name] or t.normal[name]
+	if not c then
+		assert(false, 'no color for (' .. name .. ', ' ..
+			state .. ', ' .. theme1.name .. ')')
 	end
+	return c[1], c[2], c
 end
 
 -- text colors ---------------------------------------------------------------
 
-ui.fg_def = def_color_func'fg'
-ui.fg_color = lookup_color_func'fg'
+ui.fg_color = lookup_color
 
 --           theme    name     state       h     s     L
 ------------------------------------------------------------------------------
-ui.fg_def('light', 'text'   , 'normal' ,   0, 0.00, 0.00)
-ui.fg_def('light', 'text'   , 'hover'  ,   0, 0.00, 0.30)
-ui.fg_def('light', 'text'   , 'active' ,   0, 0.00, 0.40)
-ui.fg_def('light', 'heading', 'normal' ,   0, 0.00, 0.15)
-ui.fg_def('light', 'label'  , 'normal' ,   0, 0.00, 0.00)
-ui.fg_def('light', 'label'  , 'hover'  ,   0, 0.00, 0.00)
-ui.fg_def('light', 'link'   , 'normal' , 222, 0.00, 0.50)
-ui.fg_def('light', 'link'   , 'hover'  , 222, 1.00, 0.70)
-ui.fg_def('light', 'link'   , 'active' , 222, 1.00, 0.80)
+ui.color_def('light', 'text'   , 'normal' ,   0, 0.00, 0.00)
+ui.color_def('light', 'text'   , 'hover'  ,   0, 0.00, 0.30)
+ui.color_def('light', 'text'   , 'active' ,   0, 0.00, 0.40)
+ui.color_def('light', 'heading', 'normal' ,   0, 0.00, 0.15)
+ui.color_def('light', 'label'  , 'normal' ,   0, 0.00, 0.00)
+ui.color_def('light', 'label'  , 'hover'  ,   0, 0.00, 0.00)
+ui.color_def('light', 'link'   , 'normal' , 222, 0.00, 0.50)
+ui.color_def('light', 'link'   , 'hover'  , 222, 1.00, 0.70)
+ui.color_def('light', 'link'   , 'active' , 222, 1.00, 0.80)
 
-ui.fg_def('dark' , 'title'  , 'normal' ,   0, 0.00, 0.90)
-ui.fg_def('dark' , 'title'  , 'hover'  ,   0, 0.00, 1.00)
-ui.fg_def('dark' , 'title'  , 'active' ,   0, 0.00, 1.00)
-ui.fg_def('dark' , 'text'   , 'normal' ,   0, 0.00, 0.90)
-ui.fg_def('dark' , 'text'   , 'hover'  ,   0, 0.00, 1.00)
-ui.fg_def('dark' , 'text'   , 'active' ,   0, 0.00, 1.00)
-ui.fg_def('dark' , 'heading', 'normal' ,   0, 0.00, 0.80)
-ui.fg_def('dark' , 'label'  , 'normal' ,   0, 0.00, 0.80)
-ui.fg_def('dark' , 'label'  , 'hover'  ,   0, 0.00, 1.00)
-ui.fg_def('dark' , 'label'  , 'active' ,   0, 0.00, 1.00)
-ui.fg_def('dark' , 'link'   , 'normal' ,  26, 0.88, 0.60)
-ui.fg_def('dark' , 'link'   , 'hover'  ,  26, 0.99, 0.70)
-ui.fg_def('dark' , 'link'   , 'active' ,  26, 0.99, 0.80)
+ui.color_def('dark' , 'title'  , 'normal' ,   0, 0.00, 0.90)
+ui.color_def('dark' , 'title'  , 'hover'  ,   0, 0.00, 1.00)
+ui.color_def('dark' , 'title'  , 'active' ,   0, 0.00, 1.00)
+ui.color_def('dark' , 'text'   , 'normal' ,   0, 0.00, 0.90)
+ui.color_def('dark' , 'text'   , 'hover'  ,   0, 0.00, 1.00)
+ui.color_def('dark' , 'text'   , 'active' ,   0, 0.00, 1.00)
+ui.color_def('dark' , 'heading', 'normal' ,   0, 0.00, 0.80)
+ui.color_def('dark' , 'label'  , 'normal' ,   0, 0.00, 0.80)
+ui.color_def('dark' , 'label'  , 'hover'  ,   0, 0.00, 1.00)
+ui.color_def('dark' , 'label'  , 'active' ,   0, 0.00, 1.00)
+ui.color_def('dark' , 'link'   , 'normal' ,  26, 0.88, 0.60)
+ui.color_def('dark' , 'link'   , 'hover'  ,  26, 0.99, 0.70)
+ui.color_def('dark' , 'link'   , 'active' ,  26, 0.99, 0.80)
 
-ui.fg_def('light', 'marker' , 'normal' ,   0, 0.00, 0.5) -- TODO
-ui.fg_def('light', 'marker' , 'hover'  ,   0, 0.00, 0.5) -- TODO
-ui.fg_def('light', 'marker' , 'active' ,   0, 0.00, 0.5) -- TODO
+ui.color_def('light', 'marker' , 'normal' ,   0, 0.00, 0.5) -- TODO
+ui.color_def('light', 'marker' , 'hover'  ,   0, 0.00, 0.5) -- TODO
+ui.color_def('light', 'marker' , 'active' ,   0, 0.00, 0.5) -- TODO
 
-ui.fg_def('dark' , 'marker' , 'normal' ,  61, 1.00, 0.57)
-ui.fg_def('dark' , 'marker' , 'hover'  ,  61, 1.00, 0.57) -- TODO
-ui.fg_def('dark' , 'marker' , 'active' ,  61, 1.00, 0.57) -- TODO
+ui.color_def('dark' , 'marker' , 'normal' ,  61, 1.00, 0.57)
+ui.color_def('dark' , 'marker' , 'hover'  ,  61, 1.00, 0.57) -- TODO
+ui.color_def('dark' , 'marker' , 'active' ,  61, 1.00, 0.57) -- TODO
 
-ui.fg_def('light', 'button-danger', 'normal', 0, 0.54, 0.43)
-ui.fg_def('dark' , 'button-danger', 'normal', 0, 0.54, 0.43)
+ui.color_def('light', 'button-danger', 'normal', 0, 0.54, 0.43)
+ui.color_def('dark' , 'button-danger', 'normal', 0, 0.54, 0.43)
 
-ui.fg_def('light', 'faint' , 'normal' ,  0, 0.00, 0.70)
-ui.fg_def('dark' , 'faint' , 'normal' ,  0, 0.00, 0.30)
+ui.color_def('light', 'faint' , 'normal' ,  0, 0.00, 0.70)
+ui.color_def('dark' , 'faint' , 'normal' ,  0, 0.00, 0.30)
 
 -- border colors -------------------------------------------------------------
 
-ui.border_def = def_color_func'border'
-ui.border_color = lookup_color_func'border'
+ui.border_color = lookup_color
 
 --               theme    name        state       h     s     L
 ------------------------------------------------------------------------------
-ui.border_def('light', 'light'   , 'normal' ,   0,    0,    0)
-ui.border_def('light', 'light'   , 'hover'  ,   0,    0,    0)
-ui.border_def('light', 'intense' , 'normal' ,   0,    0,    0)
-ui.border_def('light', 'intense' , 'hover'  ,   0,    0,    0)
-ui.border_def('light', 'max'     , 'normal' ,   0,    0,    0)
-ui.border_def('light', 'marker'  , 'normal' ,  61, 1.00, 0.57) -- TODO
+ui.color_def('light', 'light'   , 'normal' ,   0,    0,    0)
+ui.color_def('light', 'light'   , 'hover'  ,   0,    0,    0)
+ui.color_def('light', 'intense' , 'normal' ,   0,    0,    0)
+ui.color_def('light', 'intense' , 'hover'  ,   0,    0,    0)
+ui.color_def('light', 'max'     , 'normal' ,   0,    0,    0)
+ui.color_def('light', 'marker-border', 'normal', 61, 1.00, 0.57) -- TODO
 
-ui.border_def('dark' , 'light'   , 'normal' ,   0,    0, 0.35)
-ui.border_def('dark' , 'light'   , 'hover'  ,   0,    0, 0.55)
-ui.border_def('dark' , 'light'   , 'active' ,   0,    0, 0.75)
-ui.border_def('dark' , 'intense' , 'normal' ,   0,    0, 0.20)
-ui.border_def('dark' , 'intense' , 'hover'  ,   0,    0, 0.40)
-ui.border_def('dark' , 'max'     , 'normal' ,   0,    0, 1.00)
-ui.border_def('dark' , 'marker'  , 'normal' ,  61, 1.00, 0.57)
+ui.color_def('dark' , 'light'   , 'normal' ,   0,    0, 0.35)
+ui.color_def('dark' , 'light'   , 'hover'  ,   0,    0, 0.55)
+ui.color_def('dark' , 'light'   , 'active' ,   0,    0, 0.75)
+ui.color_def('dark' , 'intense' , 'normal' ,   0,    0, 0.20)
+ui.color_def('dark' , 'intense' , 'hover'  ,   0,    0, 0.40)
+ui.color_def('dark' , 'max'     , 'normal' ,   0,    0, 1.00)
+ui.color_def('dark' , 'marker-border', 'normal', 61, 1.00, 0.57)
 
 -- background colors ---------------------------------------------------------
 
-ui.bg_def = def_color_func'bg'
-ui.bg_color = lookup_color_func'bg'
+ui.bg_color = lookup_color
 
 --           theme    name      state       h     s     L
 ------------------------------------------------------------------------------
-ui.bg_def('light', 'bg0'   , 'normal' ,   0, 0.00, 0.98)
-ui.bg_def('light', 'bg'    , 'normal' ,   0, 0.00, 1.00)
-ui.bg_def('light', 'bg'    , 'hover'  ,   0, 0.00, 0.95)
-ui.bg_def('light', 'bg'    , 'active' ,   0, 0.00, 0.93)
-ui.bg_def('light', 'bg1'   , 'normal' ,   0, 0.00, 0.95)
-ui.bg_def('light', 'bg1'   , 'hover'  ,   0, 0.00, 0.93)
-ui.bg_def('light', 'bg1'   , 'active' ,   0, 0.00, 0.90)
-ui.bg_def('light', 'bg2'   , 'normal' ,   0, 0.00, 0.85)
-ui.bg_def('light', 'bg2'   , 'hover'  ,   0, 0.00, 0.82)
-ui.bg_def('light', 'bg3'   , 'normal' ,   0, 0.00, 0.70)
-ui.bg_def('light', 'bg3'   , 'hover'  ,   0, 0.00, 0.75)
-ui.bg_def('light', 'bg3'   , 'active' ,   0, 0.00, 0.80)
-ui.bg_def('light', 'alt'   , 'normal' ,   0, 0.00, 0.95) -- bg alternate for grid cells
-ui.bg_def('light', 'smoke' , 'normal' ,   0, 0.00, 1.00)
-ui.bg_def('light', 'input' , 'normal' ,   0, 0.00, 0.98)
-ui.bg_def('light', 'input' , 'hover'  ,   0, 0.00, 0.94)
-ui.bg_def('light', 'input' , 'active' ,   0, 0.00, 0.90)
+ui.color_def('light', 'bg0'   , 'normal' ,   0, 0.00, 0.98)
+ui.color_def('light', 'bg'    , 'normal' ,   0, 0.00, 1.00)
+ui.color_def('light', 'bg'    , 'hover'  ,   0, 0.00, 0.95)
+ui.color_def('light', 'bg'    , 'active' ,   0, 0.00, 0.93)
+ui.color_def('light', 'bg1'   , 'normal' ,   0, 0.00, 0.95)
+ui.color_def('light', 'bg1'   , 'hover'  ,   0, 0.00, 0.93)
+ui.color_def('light', 'bg1'   , 'active' ,   0, 0.00, 0.90)
+ui.color_def('light', 'bg2'   , 'normal' ,   0, 0.00, 0.85)
+ui.color_def('light', 'bg2'   , 'hover'  ,   0, 0.00, 0.82)
+ui.color_def('light', 'bg3'   , 'normal' ,   0, 0.00, 0.70)
+ui.color_def('light', 'bg3'   , 'hover'  ,   0, 0.00, 0.75)
+ui.color_def('light', 'bg3'   , 'active' ,   0, 0.00, 0.80)
+ui.color_def('light', 'alt'   , 'normal' ,   0, 0.00, 0.95) -- bg alternate for grid cells
+ui.color_def('light', 'smoke' , 'normal' ,   0, 0.00, 1.00)
+ui.color_def('light', 'input' , 'normal' ,   0, 0.00, 0.98)
+ui.color_def('light', 'input' , 'hover'  ,   0, 0.00, 0.94)
+ui.color_def('light', 'input' , 'active' ,   0, 0.00, 0.90)
 
-ui.bg_def('dark' , 'bg0'   , 'normal' , 216, 0.28, 0.08)
-ui.bg_def('dark' , 'bg'    , 'normal' , 216, 0.00, 0.10)
-ui.bg_def('dark' , 'bg'    , 'hover'  , 216, 0.00, 0.25)
-ui.bg_def('dark' , 'bg'    , 'active' , 216, 0.00, 0.14)
-ui.bg_def('dark' , 'bg1'   , 'normal' , 216, 0.28, 0.15)
-ui.bg_def('dark' , 'bg1'   , 'hover'  , 216, 0.28, 0.19)
-ui.bg_def('dark' , 'bg1'   , 'active' , 216, 0.28, 0.22)
-ui.bg_def('dark' , 'bg2'   , 'normal' , 216, 0.28, 0.22)
-ui.bg_def('dark' , 'bg2'   , 'hover'  , 216, 0.28, 0.25)
-ui.bg_def('dark' , 'bg3'   , 'normal' , 216, 0.28, 0.29)
-ui.bg_def('dark' , 'bg3'   , 'hover'  , 216, 0.28, 0.31)
-ui.bg_def('dark' , 'bg3'   , 'active' , 216, 0.28, 0.33)
-ui.bg_def('dark' , 'alt'   , 'normal' , 260, 0.28, 0.13)
-ui.bg_def('dark' , 'smoke' , 'normal' ,   0, 0.00, 0.00)
-ui.bg_def('dark' , 'input' , 'normal' , 216, 0.28, 0.17)
-ui.bg_def('dark' , 'input' , 'hover'  , 216, 0.28, 0.21)
-ui.bg_def('dark' , 'input' , 'active' , 216, 0.28, 0.25)
+ui.color_def('dark' , 'bg0'   , 'normal' , 216, 0.28, 0.08)
+ui.color_def('dark' , 'bg'    , 'normal' , 216, 0.00, 0.10)
+ui.color_def('dark' , 'bg'    , 'hover'  , 216, 0.00, 0.25)
+ui.color_def('dark' , 'bg'    , 'active' , 216, 0.00, 0.14)
+ui.color_def('dark' , 'bg1'   , 'normal' , 216, 0.28, 0.15)
+ui.color_def('dark' , 'bg1'   , 'hover'  , 216, 0.28, 0.19)
+ui.color_def('dark' , 'bg1'   , 'active' , 216, 0.28, 0.22)
+ui.color_def('dark' , 'bg2'   , 'normal' , 216, 0.28, 0.22)
+ui.color_def('dark' , 'bg2'   , 'hover'  , 216, 0.28, 0.25)
+ui.color_def('dark' , 'bg3'   , 'normal' , 216, 0.28, 0.29)
+ui.color_def('dark' , 'bg3'   , 'hover'  , 216, 0.28, 0.31)
+ui.color_def('dark' , 'bg3'   , 'active' , 216, 0.28, 0.33)
+ui.color_def('dark' , 'alt'   , 'normal' , 260, 0.28, 0.13)
+ui.color_def('dark' , 'smoke' , 'normal' ,   0, 0.00, 0.00)
+ui.color_def('dark' , 'input' , 'normal' , 216, 0.28, 0.17)
+ui.color_def('dark' , 'input' , 'hover'  , 216, 0.28, 0.21)
+ui.color_def('dark' , 'input' , 'active' , 216, 0.28, 0.25)
 
--- TODO: see if we can find a declarative way to copy fg colors to bg in bulk.
-for _,theme in ipairs{'light', 'dark'} do
-	for _,state in ipairs{'normal', 'hover', 'active'} do
-		for _,fg in ipairs{'text', 'link', 'marker'} do
-			ui.bg_def(theme, fg, state, ui.fg_color(fg, state, theme))
-		end
-	end
-end
+ui.color_def('light', 'scrollbar', 'normal' ,   0, 0.00, 0.70, 0.5)
+ui.color_def('light', 'scrollbar', 'hover'  ,   0, 0.00, 0.75, 0.8)
+ui.color_def('light', 'scrollbar', 'active' ,   0, 0.00, 0.80, 0.8)
 
-ui.bg_def('light', 'scrollbar', 'normal' ,   0, 0.00, 0.70, 0.5)
-ui.bg_def('light', 'scrollbar', 'hover'  ,   0, 0.00, 0.75, 0.8)
-ui.bg_def('light', 'scrollbar', 'active' ,   0, 0.00, 0.80, 0.8)
+ui.color_def('dark' , 'scrollbar', 'normal' , 216, 0.28, 0.37, 0.5)
+ui.color_def('dark' , 'scrollbar', 'hover'  , 216, 0.28, 0.41, 0.8)
+ui.color_def('dark' , 'scrollbar', 'active' , 216, 0.28, 0.45, 0.8)
 
-ui.bg_def('dark' , 'scrollbar', 'normal' , 216, 0.28, 0.37, 0.5)
-ui.bg_def('dark' , 'scrollbar', 'hover'  , 216, 0.28, 0.41, 0.8)
-ui.bg_def('dark' , 'scrollbar', 'active' , 216, 0.28, 0.45, 0.8)
+ui.color_def('*', 'button-bg'     , '*' , 'bg')
+ui.color_def('*', 'button-primary', '*' , 'link')
 
-ui.bg_def('*', 'button'        , '*' , 'bg')
-ui.bg_def('*', 'button-primary', '*' , 'link')
-
-ui.bg_def('*', 'search' , 'normal',  60,  1.00, 0.80) -- quicksearch text bg
-ui.bg_def('*', 'info'   , 'normal', 200,  1.00, 0.30) -- info bubbles
-ui.bg_def('*', 'warn'   , 'normal',  39,  1.00, 0.50) -- warning bubbles
-ui.bg_def('*', 'error'  , 'normal',   0,  0.54, 0.43) -- error bubbles
+ui.color_def('*', 'search' , 'normal',  60,  1.00, 0.80) -- quicksearch text bg
+ui.color_def('*', 'info'   , 'normal', 200,  1.00, 0.30) -- info bubbles
+ui.color_def('*', 'warn'   , 'normal',  39,  1.00, 0.50) -- warning bubbles
+ui.color_def('*', 'error'  , 'normal',   0,  0.54, 0.43) -- error bubbles
 
 -- input value states
-ui.bg_def('light', 'item', 'new'           , 240, 1.00, 0.97)
-ui.bg_def('light', 'item', 'modified'      , 120, 1.00, 0.93)
-ui.bg_def('light', 'item', 'new modified'  , 180, 0.55, 0.87)
+ui.color_def('light', 'item', 'new'           , 240, 1.00, 0.97)
+ui.color_def('light', 'item', 'modified'      , 120, 1.00, 0.93)
+ui.color_def('light', 'item', 'new modified'  , 180, 0.55, 0.87)
 
-ui.bg_def('dark' , 'item', 'new'           , 240, 0.35, 0.27)
-ui.bg_def('dark' , 'item', 'modified'      , 120, 0.59, 0.24)
-ui.bg_def('dark' , 'item', 'new modified'  , 157, 0.18, 0.20)
+ui.color_def('dark' , 'item', 'new'           , 240, 0.35, 0.27)
+ui.color_def('dark' , 'item', 'modified'      , 120, 0.59, 0.24)
+ui.color_def('dark' , 'item', 'new modified'  , 157, 0.18, 0.20)
 
 -- grid cell & row states. these need to be opaque!
-ui.bg_def('light', 'item', 'item-focused'                       ,   0, 0.00, 0.93)
-ui.bg_def('light', 'item', 'item-selected'                      ,   0, 0.00, 0.91)
-ui.bg_def('light', 'item', 'item-focused item-selected'         ,   0, 0.00, 0.87)
-ui.bg_def('light', 'item', 'item-focused focused'               ,   0, 0.00, 0.87)
-ui.bg_def('light', 'item', 'item-focused item-selected focused' , 139 / 239 * 360, 141 / 240, 206 / 240)
-ui.bg_def('light', 'item', 'item-selected focused'              , 139 / 239 * 360, 150 / 240, 217 / 240)
-ui.bg_def('light', 'item', 'item-error'                         ,   0, 0.54, 0.43)
-ui.bg_def('light', 'item', 'item-error item-focused'            ,   0, 1.00, 0.60)
+ui.color_def('light', 'item', 'item-focused'                       ,   0, 0.00, 0.93)
+ui.color_def('light', 'item', 'item-selected'                      ,   0, 0.00, 0.91)
+ui.color_def('light', 'item', 'item-focused item-selected'         ,   0, 0.00, 0.87)
+ui.color_def('light', 'item', 'item-focused focused'               ,   0, 0.00, 0.87)
+ui.color_def('light', 'item', 'item-focused item-selected focused' , 139 / 239 * 360, 141 / 240, 206 / 240)
+ui.color_def('light', 'item', 'item-selected focused'              , 139 / 239 * 360, 150 / 240, 217 / 240)
+ui.color_def('light', 'item', 'item-error'                         ,   0, 0.54, 0.43)
+ui.color_def('light', 'item', 'item-error item-focused'            ,   0, 1.00, 0.60)
 
-ui.bg_def('light', 'row' , 'item-focused focused'               , 139 / 239 * 360, 150 / 240, 231 / 240)
-ui.bg_def('light', 'row' , 'item-focused'                       , 139 / 239 * 360,   0 / 240, 231 / 240)
-ui.bg_def('light', 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
+ui.color_def('light', 'row' , 'item-focused focused'               , 139 / 239 * 360, 150 / 240, 231 / 240)
+ui.color_def('light', 'row' , 'item-focused'                       , 139 / 239 * 360,   0 / 240, 231 / 240)
+ui.color_def('light', 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
 
-ui.bg_def('dark' , 'item', 'item-focused'                       , 195, 0.06, 0.12)
-ui.bg_def('dark' , 'item', 'item-selected'                      ,   0, 0.00, 0.20)
-ui.bg_def('dark' , 'item', 'item-focused item-selected'         , 208, 0.11, 0.23)
-ui.bg_def('dark' , 'item', 'item-focused focused'               ,   0, 0.00, 0.23)
-ui.bg_def('dark' , 'item', 'item-focused item-selected focused' , 211, 0.62, 0.24)
-ui.bg_def('dark' , 'item', 'item-selected focused'              , 211, 0.62, 0.19)
-ui.bg_def('dark' , 'item', 'item-error'                         ,   0, 0.54, 0.43)
-ui.bg_def('dark' , 'item', 'item-error item-focused'            ,   0, 1.00, 0.60)
+ui.color_def('dark' , 'item', 'item-focused'                       , 195, 0.06, 0.12)
+ui.color_def('dark' , 'item', 'item-selected'                      ,   0, 0.00, 0.20)
+ui.color_def('dark' , 'item', 'item-focused item-selected'         , 208, 0.11, 0.23)
+ui.color_def('dark' , 'item', 'item-focused focused'               ,   0, 0.00, 0.23)
+ui.color_def('dark' , 'item', 'item-focused item-selected focused' , 211, 0.62, 0.24)
+ui.color_def('dark' , 'item', 'item-selected focused'              , 211, 0.62, 0.19)
+ui.color_def('dark' , 'item', 'item-error'                         ,   0, 0.54, 0.43)
+ui.color_def('dark' , 'item', 'item-error item-focused'            ,   0, 1.00, 0.60)
 
-ui.bg_def('dark' , 'row' , 'item-focused focused'               , 212, 0.61, 0.13)
-ui.bg_def('dark' , 'row' , 'item-focused'                       ,   0, 0.00, 0.13)
-ui.bg_def('dark' , 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
+ui.color_def('dark' , 'row' , 'item-focused focused'               , 212, 0.61, 0.13)
+ui.color_def('dark' , 'row' , 'item-focused'                       ,   0, 0.00, 0.13)
+ui.color_def('dark' , 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
 
 --[[ widget state ------------------------------------------------------------
 

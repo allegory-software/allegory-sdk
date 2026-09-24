@@ -4654,10 +4654,10 @@ ui.icon_def('map_pin'      , 'tabler', '\ueae8')
 ui.icon_def('box_unchecked', 'tabler', '\ueb2c')
 ui.icon_def('box_checked'  , 'tabler_filled', '\uf76d')
 
-ui.fg_def('light', 'error'   , 'normal',   0, 0.85, 0.45)
-ui.fg_def('dark' , 'error'   , 'normal',   0, 0.85, 0.65)
-ui.fg_def('light', 'modified', 'normal', 120, 1.00, 0.35)
-ui.fg_def('dark' , 'modified', 'normal', 120, 0.59, 0.65)
+ui.color_def('light', 'error-text', 'normal',   0, 0.85, 0.45)
+ui.color_def('dark' , 'error-text', 'normal',   0, 0.85, 0.65)
+ui.color_def('light', 'modified', 'normal', 120, 1.00, 0.35)
+ui.color_def('dark' , 'modified', 'normal', 120, 0.59, 0.65)
 
 assign(all_field_types, {
 	type: 'text',
@@ -5445,7 +5445,7 @@ ui.nav_input = function(id, opt, fr, align, valign, min_w) {
 	ui.end_stack()
 	ui.pl(ui.sp05())
 	if (has_error) {
-		ui.color('error')
+		ui.color('error-text')
 		ui.icon('', 'x', 0, 'c', 'c', ui.em(1))
 	} else if (is_modified) {
 		ui.color('modified')

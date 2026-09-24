@@ -159,17 +159,15 @@ DEFAULTS
 
 DEFINING COLORS
 
-	* = fg | border | bg
-	ui.*_def      (theme, name, state, h, s, L, a, is_dark)       define a color
+	ui.color_def  (theme, name, state, h, s, L, a, is_dark)       define a color
 	ui.shadow_def (theme, name, x, y, blur, h, s, L, a, [inset])  define a shadow
 
 THEME API, to be used exclusively in the drawing phase!
 
-	* = fg | border | bg
-	ui.*_color      (name, [state], [theme]) -> css_color   for fillStyle/strokeStyle
-	ui.*_color_hsl  (name, [state], [theme]) -> [css_color, h, s, L, a]   for hsl_adjust()
-	ui.*_color_rgb  (name, [state], [theme]) -> 0xRRGGBB    for WebGL, ignoring alpha
-	ui.*_color_rgba (name, [state], [theme]) -> 0xRRGGBBAA  for WebGL, with alpha
+	ui.color_css  (name, [state], [theme]) -> css_color   for fillStyle/strokeStyle
+	ui.color_hsl  (name, [state], [theme]) -> [css_color, h, s, L, a]   for hsl_adjust()
+	ui.color_rgb  (name, [state], [theme]) -> 0xRRGGBB    for WebGL, ignoring alpha
+	ui.color_rgba (name, [state], [theme]) -> 0xRRGGBBAA  for WebGL, with alpha
 	ui.bg_is_dark   (bg_color) -> t|f                       should text be white on this bg?
 	ui.get_theme    () -> theme
 	ui.hsl          (h, s, L, a) -> css_color     from HSL
@@ -189,9 +187,7 @@ function theme_make(name, is_dark) {
 	themes[name] = {
 		is_dark : is_dark,
 		name    : name,
-		fg     : color_state_map(),
-		border : color_state_map(),
-		bg     : color_state_map(),
+		colors  : color_state_map(),
 		shadow : {},
 	}
 }
@@ -264,99 +260,91 @@ ui.alpha_adjust = alpha_adjust
 // throws away the ability to HSL-adjust the color.
 // Colors can be copied by specifying (name, [state], [theme], [is_dark]).
 
-function def_color_func(k) {
-	function def_color(theme, name, state, h, s, L, a, is_dark) {
-		if (theme == '*') { // define color for all themes
-			for (let theme_name in themes)
-				def_color(theme_name, name, state, h, s, L, a, is_dark)
-			return
-		}
-		let states = themes[theme][k]
-		if (state == '*') { // copy all states of a color
-			let src_kind = k
-			let src_name = h
-			if (isarray(h)) // eg. ui.bg_def('*', 'text', '*', ['fg', 'text'])
-				[src_kind, src_name] = h
-			else
-				assert(isstr(h), 'expected color name to copy for all states')
-			for (let [state_i, src_state_colors] of themes[theme][src_kind]) {
-				let color = src_state_colors[src_name]
-				if (color == null)
-					continue
-				let dst_state_colors = states.get(state_i)
-				if (!dst_state_colors) {
-					dst_state_colors = {}
-					states.set(state_i, dst_state_colors)
-				}
-				dst_state_colors[name] = color
-			}
-			return
-		}
-		let state_i = parse_state(state)
-		let state_colors = states.get(state_i)
-		if (!state_colors) {
-			state_colors = {}
-			states.set(state_i, state_colors)
-		}
-		if (isnum(h)) { // h, s, L, a, [is_dark]
-			state_colors[name] = [hsl(h, s, L, a), h, s, L, a, is_dark]
-		} else if (isarray(h)) { // color object
-			state_colors[name] = h
-		} else { // name, [state], [theme], [is_dark]
-			let c = ui[k+'_color_hsl'](h, s ?? state_i, L ?? theme)
-			state_colors[name] = [c[0], c[1], c[2], c[3], c[4], a ?? c[5]]
-		}
+function color_def(theme, name, state, h, s, L, a, is_dark) {
+	if (theme == '*') { // define color for all themes
+		for (let theme_name in themes)
+			color_def(theme_name, name, state, h, s, L, a, is_dark)
+		return
 	}
-	return def_color
+	let states = themes[theme].colors
+	if (state == '*') { // copy all states of a color
+		assert(isstr(h), 'expected color name to copy for all states')
+		for (let [state_i, src_state_colors] of states) {
+			let color = src_state_colors[h]
+			if (color == null)
+				continue
+			let dst_state_colors = states.get(state_i)
+			if (!dst_state_colors) {
+				dst_state_colors = {}
+				states.set(state_i, dst_state_colors)
+			}
+			dst_state_colors[name] = color
+		}
+		return
+	}
+	let state_i = parse_state(state)
+	let state_colors = states.get(state_i)
+	if (!state_colors) {
+		state_colors = {}
+		states.set(state_i, state_colors)
+	}
+	if (isnum(h)) { // h, s, L, a, [is_dark]
+		state_colors[name] = [hsl(h, s, L, a), h, s, L, a, is_dark]
+	} else if (isarray(h)) { // color object
+		state_colors[name] = h
+	} else { // name, [state], [theme], [is_dark]
+		let theme1 = themes[L ?? theme]
+		let source_state_i = parse_state(s ?? state_i)
+		let source_state_colors = theme1.colors.get(source_state_i)
+		let c = (source_state_colors && source_state_colors[h]) ??
+			theme1.colors.get(0)[h]
+		state_colors[name] = [c[0], c[1], c[2], c[3], c[4], a ?? c[5]]
+	}
 }
+ui.color_def = color_def
 
 /// color lookups
 
-// default color to fall back to when a name isn't found in the theme, per
-// kind, so a missing/misspelled color name doesn't crash the whole frame.
-let default_color_name = {fg: 'text', bg: 'bg', border: 'light'}
-
-function lookup_color_hsl_func(k) {
-	let default_name = default_color_name[k]
-	return function(name, state, theme1) {
-		let state_i = parse_state(state)
-		theme1 = theme1 ? themes[theme1] : theme
-		let state_colors = theme1[k].get(state_i)
-		let c = (state_colors && state_colors[name]) ?? theme1[k].get(0)[name]
-		if (!c) {
-			warn('no ', k, ' for (', name, ', ',
-				repl(state, 0, 'normal'), ', ', theme1.name, ')')
-			c = theme1[k].get(0)[default_name]
-		}
-		return c
+// default color to fall back to when a name isn't found in the theme, so a
+// missing/misspelled color name doesn't crash the whole frame.
+function color_hsl(name, state, theme1) {
+	let state_i = parse_state(state)
+	theme1 = theme1 ? themes[theme1] : theme
+	let state_colors = theme1.colors.get(state_i)
+	let c = (state_colors && state_colors[name]) ??
+		theme1.colors.get(0)[name]
+	if (!c) {
+		warn('no color for (', name, ', ',
+			repl(state, 0, 'normal'), ', ', theme1.name, ')')
+		c = theme1.colors.get(0).error
 	}
+	return c
 }
 
 let CC_COLON = ':'.charCodeAt(0) // prefix for light colors
 let CC_STAR  = '*'.charCodeAt(0) // prefix for dark colors
 
-function lookup_color_func(hsl_color) {
-	return function(name, state, theme) {
-		if (name.charCodeAt(0) == CC_COLON) { // custom color
-			return name.slice(1)
-		}
-		return hsl_color(name, state, theme)[0]
+function color_css(name, state, theme1) {
+	if (name.charCodeAt(0) == CC_COLON) { // custom color
+		return name.slice(1)
 	}
+	return color_hsl(name, state, theme1)[0]
 }
 
-function lookup_color_rgb_int_func(hsl_color) {
-	return function(name, state, theme) {
-		let c = hsl_color(name, state, theme)
-		return hsl_to_rgb_int(c[1], c[2], c[3])
-	}
+function color_rgb_int(name, state, theme1) {
+	let c = color_hsl(name, state, theme1)
+	return hsl_to_rgb_int(c[1], c[2], c[3])
 }
 
-function lookup_color_rgba_int_func(hsl_color) {
-	return function(name, state, theme) {
-		let c = hsl_color(name, state, theme)
-		return hsl_to_rgba_int(c[1], c[2], c[3], c[4])
-	}
+function color_rgba_int(name, state, theme1) {
+	let c = color_hsl(name, state, theme1)
+	return hsl_to_rgba_int(c[1], c[2], c[3], c[4])
 }
+
+ui.color_css = color_css
+ui.color_hsl = color_hsl
+ui.color_rgb = color_rgb_int
+ui.color_rgba = color_rgba_int
 
 /// set fillStyle and set theme based on whether the bg is dark or light!
 
@@ -368,7 +356,7 @@ function set_bg_color(color, state) {
 		dark = c == CC_STAR
 		color = color.slice(1)
 	} else {
-		let c = bg_color_hsl(color, state)
+		let c = color_hsl(color, state)
 		dark = c[5] ?? c[3] < .5
 		color = c[0]
 	}
@@ -378,92 +366,66 @@ function set_bg_color(color, state) {
 
 /// text colors --------------------------------------------------------------
 
-ui.fg_def = def_color_func('fg')
-let fg_color_hsl = lookup_color_hsl_func('fg')
-let fg_color = lookup_color_func(fg_color_hsl)
-ui.fg_color_hsl = fg_color_hsl
-ui.fg_color = fg_color
-ui.fg_color_rgb  = lookup_color_rgb_int_func(fg_color_hsl)
-ui.fg_color_rgba = lookup_color_rgba_int_func(fg_color_hsl)
-
 //         theme    name       state       h     s     L    a
 // ---------------------------------------------------------------------------
-ui.fg_def('light', 'text'   , 'normal' ,   0, 0.00, 0.35)
-ui.fg_def('light', 'text'   , 'hover'  ,   0, 0.00, 0.10)
-ui.fg_def('light', 'text'   , 'active' ,   0, 0.00, 0.00)
-ui.fg_def('light', 'text'   , 'focused',   0, 0.00, 0.00)
-ui.fg_def('dark' , 'text'   , 'normal' ,   0, 0.00, 0.8)
-ui.fg_def('dark' , 'text'   , 'hover'  ,   0, 0.00, 1.00)
-ui.fg_def('dark' , 'text'   , 'active' ,   0, 0.00, 1.00)
-ui.fg_def('dark' , 'text'   , 'focused',   0, 0.00, 1.0)
+ui.color_def('light', 'text'   , 'normal' ,   0, 0.00, 0.35)
+ui.color_def('light', 'text'   , 'hover'  ,   0, 0.00, 0.10)
+ui.color_def('light', 'text'   , 'active' ,   0, 0.00, 0.00)
+ui.color_def('light', 'text'   , 'focused',   0, 0.00, 0.00)
+ui.color_def('dark' , 'text'   , 'normal' ,   0, 0.00, 0.8)
+ui.color_def('dark' , 'text'   , 'hover'  ,   0, 0.00, 1.00)
+ui.color_def('dark' , 'text'   , 'active' ,   0, 0.00, 1.00)
+ui.color_def('dark' , 'text'   , 'focused',   0, 0.00, 1.0)
 
-ui.fg_def('light', 'label'  , 'normal' ,   0, 0.00, 0.00)
-ui.fg_def('light', 'label'  , 'hover'  ,   0, 0.00, 0.00, 0.9)
-ui.fg_def('dark' , 'label'  , 'normal' ,   0, 0.00, 0.95, 0.7)
-ui.fg_def('dark' , 'label'  , 'hover'  ,   0, 0.00, 0.90, 0.9)
+ui.color_def('light', 'label'  , 'normal' ,   0, 0.00, 0.00)
+ui.color_def('light', 'label'  , 'hover'  ,   0, 0.00, 0.00, 0.9)
+ui.color_def('dark' , 'label'  , 'normal' ,   0, 0.00, 0.95, 0.7)
+ui.color_def('dark' , 'label'  , 'hover'  ,   0, 0.00, 0.90, 0.9)
 
-ui.fg_def('dark' , 'link'   , 'normal' ,  26, 0.88, 0.60)
-ui.fg_def('dark' , 'link'   , 'hover'  ,  26, 0.99, 0.70)
-ui.fg_def('dark' , 'link'   , 'active' ,  26, 0.99, 0.80)
-ui.fg_def('light', 'link'   , 'normal' , 252, 0.50, 0.50, 1, true)
-ui.fg_def('light', 'link'   , 'hover'  , 252, 0.50, 0.40, 1, true)
-ui.fg_def('light', 'link'   , 'active' , 252, 0.50, 0.30, 1, true)
+ui.color_def('dark' , 'link'   , 'normal' ,  26, 0.88, 0.60)
+ui.color_def('dark' , 'link'   , 'hover'  ,  26, 0.99, 0.70)
+ui.color_def('dark' , 'link'   , 'active' ,  26, 0.99, 0.80)
+ui.color_def('light', 'link'   , 'normal' , 252, 0.50, 0.50, 1, true)
+ui.color_def('light', 'link'   , 'hover'  , 252, 0.50, 0.40, 1, true)
+ui.color_def('light', 'link'   , 'active' , 252, 0.50, 0.30, 1, true)
 
-ui.fg_def('light', 'heading', 'normal' ,   0, 0.00, 0.55)
-ui.fg_def('dark' , 'heading', 'normal' , 252, 0.10, 0.55)
+ui.color_def('light', 'heading', 'normal' ,   0, 0.00, 0.55)
+ui.color_def('dark' , 'heading', 'normal' , 252, 0.10, 0.55)
 
-ui.fg_def('light', 'faint'  , 'normal' ,   0, 0.00, 0.70)
-ui.fg_def('dark' , 'faint'  , 'normal' ,   0, 0.00, 0.30)
+ui.color_def('light', 'faint'  , 'normal' ,   0, 0.00, 0.70)
+ui.color_def('dark' , 'faint'  , 'normal' ,   0, 0.00, 0.30)
 
-ui.fg_def('light', 'marker' , 'normal' ,  61, 1.00, 0.35)
-ui.fg_def('light', 'marker' , 'hover'  ,  61, 1.00, 0.42)
-ui.fg_def('light', 'marker' , 'active' ,  61, 1.00, 0.48)
-ui.fg_def('dark' , 'marker' , 'normal' ,  61, 1.00, 0.57)
-ui.fg_def('dark' , 'marker' , 'hover'  ,  61, 1.00, 0.65)
-ui.fg_def('dark' , 'marker' , 'active' ,  61, 1.00, 0.72)
+ui.color_def('light', 'marker' , 'normal' ,  61, 1.00, 0.35)
+ui.color_def('light', 'marker' , 'hover'  ,  61, 1.00, 0.42)
+ui.color_def('light', 'marker' , 'active' ,  61, 1.00, 0.48)
+ui.color_def('dark' , 'marker' , 'normal' ,  61, 1.00, 0.57)
+ui.color_def('dark' , 'marker' , 'hover'  ,  61, 1.00, 0.65)
+ui.color_def('dark' , 'marker' , 'active' ,  61, 1.00, 0.72)
 
-ui.fg_def('*', 'button', 'normal' , 'text', 'active')
+ui.color_def('*', 'button-text', 'normal' , 'text', 'active')
 
-ui.fg_def('light', 'button-danger', 'normal', 0, 0.54, 0.43)
-ui.fg_def('dark' , 'button-danger', 'normal', 0, 0.54, 0.43)
+ui.color_def('light', 'button-danger', 'normal', 0, 0.54, 0.43)
+ui.color_def('dark' , 'button-danger', 'normal', 0, 0.54, 0.43)
 
 /// border colors ------------------------------------------------------------
 
-ui.border_def = def_color_func('border')
-let border_color_hsl = lookup_color_hsl_func('border')
-let border_color = lookup_color_func(border_color_hsl)
-let ui_border_color = border_color
-ui.border_color_hsl = border_color_hsl
-ui.border_color = border_color
-ui.border_color_rgb  = lookup_color_rgb_int_func(border_color_hsl)
-ui.border_color_rgba = lookup_color_rgba_int_func(border_color_hsl)
-
 //             theme    name        state       h     s     L     a
 // ---------------------------------------------------------------------------
-ui.border_def('light', 'light'   , 'normal' ,   0,    0,    0, 0.10)
-ui.border_def('light', 'light'   , 'hover'  ,   0,    0,    0, 0.30)
-ui.border_def('light', 'intense' , 'normal' ,   0,    0,    0, 0.30)
-ui.border_def('light', 'intense' , 'hover'  ,   0,    0,    0, 0.40)
-ui.border_def('light', 'max'     , 'normal' ,   0,    0,    0, 1.00)
-ui.border_def('light', 'marker'  , 'normal' ,  61, 1.00, 0.35, 1.00)
+ui.color_def('light', 'light'   , 'normal' ,   0,    0,    0, 0.10)
+ui.color_def('light', 'light'   , 'hover'  ,   0,    0,    0, 0.30)
+ui.color_def('light', 'intense' , 'normal' ,   0,    0,    0, 0.30)
+ui.color_def('light', 'intense' , 'hover'  ,   0,    0,    0, 0.40)
+ui.color_def('light', 'max'     , 'normal' ,   0,    0,    0, 1.00)
+ui.color_def('light', 'marker'  , 'normal' ,  61, 1.00, 0.35, 1.00)
 
-ui.border_def('dark' , 'light'   , 'normal' ,   0,    0,    1, 0.09)
-ui.border_def('dark' , 'light'   , 'hover'  ,   0,    0,    1, 0.03)
-ui.border_def('dark' , 'intense' , 'normal' ,   0,    0,    1, 0.20)
-ui.border_def('dark' , 'intense' , 'hover'  ,   0,    0,    1, 0.40)
-ui.border_def('dark' , 'max'     , 'normal' ,   0,    0,    1, 1.00)
-ui.border_def('dark' , 'marker'  , 'normal' ,  61, 1.00, 0.57, 1.00)
+ui.color_def('dark' , 'light'   , 'normal' ,   0,    0,    1, 0.09)
+ui.color_def('dark' , 'light'   , 'hover'  ,   0,    0,    1, 0.03)
+ui.color_def('dark' , 'intense' , 'normal' ,   0,    0,    1, 0.20)
+ui.color_def('dark' , 'intense' , 'hover'  ,   0,    0,    1, 0.40)
+ui.color_def('dark' , 'max'     , 'normal' ,   0,    0,    1, 1.00)
+ui.color_def('dark' , 'marker'  , 'normal' ,  61, 1.00, 0.57, 1.00)
 
 /// background colors --------------------------------------------------------
-
-ui.bg_def = def_color_func('bg')
-let bg_color_hsl = lookup_color_hsl_func('bg')
-let bg_color = lookup_color_func(bg_color_hsl)
-let ui_bg_color = bg_color
-ui.bg_color = bg_color
-ui.bg_color_hsl = bg_color_hsl
-ui.bg_color_rgb  = lookup_color_rgb_int_func(bg_color_hsl)
-ui.bg_color_rgba = lookup_color_rgba_int_func(bg_color_hsl)
 
 function bg_is_dark(bg_color) {
 	return isarray(bg_color) ? (bg_color[5] ?? bg_color[3] < .5) : theme.is_dark
@@ -472,101 +434,98 @@ ui.bg_is_dark = bg_is_dark
 
 //           theme    name      state       h     s     L     a
 // -------------------------------------------------------------
-ui.bg_def('light', 'bg0'   , 'normal' ,   0, 0.00, 0.98)
-ui.bg_def('light', 'bg'    , 'normal' ,   0, 0.00, 1.00)
-ui.bg_def('light', 'bg'    , 'hover'  ,   0, 0.00, 0.95)
-ui.bg_def('light', 'bg'    , 'active' ,   0, 0.00, 0.93)
-ui.bg_def('light', 'bg1'   , 'normal' ,   0, 0.00, 0.95)
-ui.bg_def('light', 'bg1'   , 'hover'  ,   0, 0.00, 0.93)
-ui.bg_def('light', 'bg1'   , 'active' ,   0, 0.00, 0.90)
-ui.bg_def('light', 'bg2'   , 'normal' ,   0, 0.00, 0.85)
-ui.bg_def('light', 'bg2'   , 'hover'  ,   0, 0.00, 0.82)
-ui.bg_def('light', 'bg3'   , 'normal' ,   0, 0.00, 0.70)
-ui.bg_def('light', 'bg3'   , 'hover'  ,   0, 0.00, 0.75)
-ui.bg_def('light', 'bg3'   , 'active' ,   0, 0.00, 0.80)
-ui.bg_def('light', 'alt'   , 'normal' ,   0, 0.00, 0.98) // grid cell alternate
-ui.bg_def('light', 'smoke' , 'normal' ,   0, 0.00, 1.00, 0.80)
-ui.bg_def('light', 'input' , 'normal' ,   0, 0.00, 0.98)
-ui.bg_def('light', 'input' , 'focused',   0, 0.00, 1.00)
-ui.bg_def('light', 'input' , 'hover'  ,   0, 0.00, 0.94)
-ui.bg_def('light', 'input' , 'active' ,   0, 0.00, 0.90)
+ui.color_def('light', 'bg0'   , 'normal' ,   0, 0.00, 0.98)
+ui.color_def('light', 'bg'    , 'normal' ,   0, 0.00, 1.00)
+ui.color_def('light', 'bg'    , 'hover'  ,   0, 0.00, 0.95)
+ui.color_def('light', 'bg'    , 'active' ,   0, 0.00, 0.93)
+ui.color_def('light', 'bg1'   , 'normal' ,   0, 0.00, 0.95)
+ui.color_def('light', 'bg1'   , 'hover'  ,   0, 0.00, 0.93)
+ui.color_def('light', 'bg1'   , 'active' ,   0, 0.00, 0.90)
+ui.color_def('light', 'bg2'   , 'normal' ,   0, 0.00, 0.85)
+ui.color_def('light', 'bg2'   , 'hover'  ,   0, 0.00, 0.82)
+ui.color_def('light', 'bg3'   , 'normal' ,   0, 0.00, 0.70)
+ui.color_def('light', 'bg3'   , 'hover'  ,   0, 0.00, 0.75)
+ui.color_def('light', 'bg3'   , 'active' ,   0, 0.00, 0.80)
+ui.color_def('light', 'alt'   , 'normal' ,   0, 0.00, 0.98) // grid cell alternate
+ui.color_def('light', 'smoke' , 'normal' ,   0, 0.00, 1.00, 0.80)
+ui.color_def('light', 'input' , 'normal' ,   0, 0.00, 0.98)
+ui.color_def('light', 'input' , 'focused',   0, 0.00, 1.00)
+ui.color_def('light', 'input' , 'hover'  ,   0, 0.00, 0.94)
+ui.color_def('light', 'input' , 'active' ,   0, 0.00, 0.90)
 
-ui.bg_def('dark' , 'bg0'   , 'normal' , 216, 0.28, 0.08)
-ui.bg_def('dark' , 'bg'    , 'normal' , 216, 0.28, 0.10)
-ui.bg_def('dark' , 'bg'    , 'hover'  , 216, 0.28, 0.12)
-ui.bg_def('dark' , 'bg'    , 'active' , 216, 0.28, 0.14)
-ui.bg_def('dark' , 'bg1'   , 'normal' , 216, 0.28, 0.15)
-ui.bg_def('dark' , 'bg1'   , 'hover'  , 216, 0.28, 0.19)
-ui.bg_def('dark' , 'bg1'   , 'active' , 216, 0.28, 0.22)
-ui.bg_def('dark' , 'bg2'   , 'normal' , 216, 0.28, 0.22)
-ui.bg_def('dark' , 'bg2'   , 'hover'  , 216, 0.28, 0.25)
-ui.bg_def('dark' , 'bg3'   , 'normal' , 216, 0.28, 0.29)
-ui.bg_def('dark' , 'bg3'   , 'hover'  , 216, 0.28, 0.31)
-ui.bg_def('dark' , 'bg3'   , 'active' , 216, 0.28, 0.33)
-ui.bg_def('dark' , 'alt'   , 'normal' , 260, 0.28, 0.13)
-ui.bg_def('dark' , 'smoke' , 'normal' ,   0, 0.00, 0.00, 0.70)
-ui.bg_def('dark' , 'input' , 'normal' , 216, 0.28, 0.17)
-ui.bg_def('dark' , 'input' , 'focused', 216, 0.28, 0.08)
-ui.bg_def('dark' , 'input' , 'hover'  , 216, 0.28, 0.21)
-ui.bg_def('dark' , 'input' , 'active' , 216, 0.28, 0.25)
+ui.color_def('dark' , 'bg0'   , 'normal' , 216, 0.28, 0.08)
+ui.color_def('dark' , 'bg'    , 'normal' , 216, 0.28, 0.10)
+ui.color_def('dark' , 'bg'    , 'hover'  , 216, 0.28, 0.12)
+ui.color_def('dark' , 'bg'    , 'active' , 216, 0.28, 0.14)
+ui.color_def('dark' , 'bg1'   , 'normal' , 216, 0.28, 0.15)
+ui.color_def('dark' , 'bg1'   , 'hover'  , 216, 0.28, 0.19)
+ui.color_def('dark' , 'bg1'   , 'active' , 216, 0.28, 0.22)
+ui.color_def('dark' , 'bg2'   , 'normal' , 216, 0.28, 0.22)
+ui.color_def('dark' , 'bg2'   , 'hover'  , 216, 0.28, 0.25)
+ui.color_def('dark' , 'bg3'   , 'normal' , 216, 0.28, 0.29)
+ui.color_def('dark' , 'bg3'   , 'hover'  , 216, 0.28, 0.31)
+ui.color_def('dark' , 'bg3'   , 'active' , 216, 0.28, 0.33)
+ui.color_def('dark' , 'alt'   , 'normal' , 260, 0.28, 0.13)
+ui.color_def('dark' , 'smoke' , 'normal' ,   0, 0.00, 0.00, 0.70)
+ui.color_def('dark' , 'input' , 'normal' , 216, 0.28, 0.17)
+ui.color_def('dark' , 'input' , 'focused', 216, 0.28, 0.08)
+ui.color_def('dark' , 'input' , 'hover'  , 216, 0.28, 0.21)
+ui.color_def('dark' , 'input' , 'active' , 216, 0.28, 0.25)
 
 // disable alt color. comment this to get it back.
-ui.bg_def('*' , 'alt', 'normal' , 'bg')
+ui.color_def('*' , 'alt', 'normal' , 'bg')
 
-for (let name of ['text', 'link', 'marker'])
-	ui.bg_def('*', name, '*', ['fg', name])
+ui.color_def('light', 'scrollbar', 'normal' ,   0, 0.00, 0.70, 0.5)
+ui.color_def('light', 'scrollbar', 'hover'  ,   0, 0.00, 0.75, 0.8)
+ui.color_def('light', 'scrollbar', 'active' ,   0, 0.00, 0.80, 0.8)
 
-ui.bg_def('light', 'scrollbar', 'normal' ,   0, 0.00, 0.70, 0.5)
-ui.bg_def('light', 'scrollbar', 'hover'  ,   0, 0.00, 0.75, 0.8)
-ui.bg_def('light', 'scrollbar', 'active' ,   0, 0.00, 0.80, 0.8)
+ui.color_def('dark' , 'scrollbar', 'normal' , 216, 0.28, 0.37, 0.5)
+ui.color_def('dark' , 'scrollbar', 'hover'  , 216, 0.28, 0.39, 0.8)
+ui.color_def('dark' , 'scrollbar', 'active' , 216, 0.28, 0.41, 0.8)
 
-ui.bg_def('dark' , 'scrollbar', 'normal' , 216, 0.28, 0.37, 0.5)
-ui.bg_def('dark' , 'scrollbar', 'hover'  , 216, 0.28, 0.39, 0.8)
-ui.bg_def('dark' , 'scrollbar', 'active' , 216, 0.28, 0.41, 0.8)
+ui.color_def('*', 'button-bg'     , '*' , 'bg1')
+ui.color_def('*', 'button-primary', '*' , 'link')
 
-ui.bg_def('*', 'button'        , '*' , 'bg1')
-ui.bg_def('*', 'button-primary', '*' , 'link')
-
-ui.bg_def('*', 'search' , 'normal',  60,  1.00, 0.80) // quicksearch text bg
-ui.bg_def('*', 'info'   , 'normal', 200,  1.00, 0.30) // info bubbles
-ui.bg_def('*', 'warn'   , 'normal',  39,  1.00, 0.50) // warning bubbles
-ui.bg_def('*', 'error'  , 'normal',   0,  0.54, 0.43) // error bubbles
+ui.color_def('*', 'search' , 'normal',  60,  1.00, 0.80) // quicksearch text bg
+ui.color_def('*', 'info'   , 'normal', 200,  1.00, 0.30) // info bubbles
+ui.color_def('*', 'warn'   , 'normal',  39,  1.00, 0.50) // warning bubbles
+ui.color_def('*', 'error'  , 'normal',   0,  0.54, 0.43) // error bubbles
 
 // input value states
-ui.bg_def('light', 'item', 'new'           , 240, 1.00, 0.97)
-ui.bg_def('light', 'item', 'modified'      , 120, 1.00, 0.93)
-ui.bg_def('light', 'item', 'new modified'  , 180, 0.55, 0.87)
+ui.color_def('light', 'item', 'new'           , 240, 1.00, 0.97)
+ui.color_def('light', 'item', 'modified'      , 120, 1.00, 0.93)
+ui.color_def('light', 'item', 'new modified'  , 180, 0.55, 0.87)
 
-ui.bg_def('dark' , 'item', 'new'           , 240, 0.35, 0.27)
-ui.bg_def('dark' , 'item', 'modified'      , 120, 0.59, 0.24)
-ui.bg_def('dark' , 'item', 'new modified'  , 157, 0.18, 0.20)
+ui.color_def('dark' , 'item', 'new'           , 240, 0.35, 0.27)
+ui.color_def('dark' , 'item', 'modified'      , 120, 0.59, 0.24)
+ui.color_def('dark' , 'item', 'new modified'  , 157, 0.18, 0.20)
 
 // grid cell & row states. these need to be opaque!
-ui.bg_def('light', 'item', 'item-focused'                       ,   0, 0.00, 0.93)
-ui.bg_def('light', 'item', 'item-selected'                      ,   0, 0.00, 0.91)
-ui.bg_def('light', 'item', 'item-focused item-selected'         ,   0, 0.00, 0.87)
-ui.bg_def('light', 'item', 'item-focused focused'               ,   0, 0.00, 0.87)
-ui.bg_def('light', 'item', 'item-focused item-selected focused' , 139 / 239 * 360, 141 / 240, 206 / 240)
-ui.bg_def('light', 'item', 'item-selected focused'              , 139 / 239 * 360, 150 / 240, 217 / 240)
-ui.bg_def('light', 'item', 'item-error'                         ,   0, 0.54, 0.43)
-ui.bg_def('light', 'item', 'item-error item-focused'            ,   0, 1.00, 0.60)
+ui.color_def('light', 'item', 'item-focused'                       ,   0, 0.00, 0.93)
+ui.color_def('light', 'item', 'item-selected'                      ,   0, 0.00, 0.91)
+ui.color_def('light', 'item', 'item-focused item-selected'         ,   0, 0.00, 0.87)
+ui.color_def('light', 'item', 'item-focused focused'               ,   0, 0.00, 0.87)
+ui.color_def('light', 'item', 'item-focused item-selected focused' , 139 / 239 * 360, 141 / 240, 206 / 240)
+ui.color_def('light', 'item', 'item-selected focused'              , 139 / 239 * 360, 150 / 240, 217 / 240)
+ui.color_def('light', 'item', 'item-error'                         ,   0, 0.54, 0.43)
+ui.color_def('light', 'item', 'item-error item-focused'            ,   0, 1.00, 0.60)
 
-ui.bg_def('light', 'row' , 'item-focused focused'               , 139 / 239 * 360, 150 / 240, 231 / 240)
-ui.bg_def('light', 'row' , 'item-focused'                       , 139 / 239 * 360,   0 / 240, 231 / 240)
-ui.bg_def('light', 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
+ui.color_def('light', 'row' , 'item-focused focused'               , 139 / 239 * 360, 150 / 240, 231 / 240)
+ui.color_def('light', 'row' , 'item-focused'                       , 139 / 239 * 360,   0 / 240, 231 / 240)
+ui.color_def('light', 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
 
-ui.bg_def('dark' , 'item', 'item-focused'                       , 195, 0.06, 0.12)
-ui.bg_def('dark' , 'item', 'item-selected'                      ,   0, 0.00, 0.20)
-ui.bg_def('dark' , 'item', 'item-focused item-selected'         , 208, 0.11, 0.23)
-ui.bg_def('dark' , 'item', 'item-focused focused'               ,   0, 0.00, 0.23)
-ui.bg_def('dark' , 'item', 'item-focused item-selected focused' , 211, 0.62, 0.24)
-ui.bg_def('dark' , 'item', 'item-selected focused'              , 211, 0.62, 0.19)
-ui.bg_def('dark' , 'item', 'item-error'                         ,   0, 0.54, 0.43)
-ui.bg_def('dark' , 'item', 'item-error item-focused'            ,   0, 1.00, 0.60)
+ui.color_def('dark' , 'item', 'item-focused'                       , 195, 0.06, 0.12)
+ui.color_def('dark' , 'item', 'item-selected'                      ,   0, 0.00, 0.20)
+ui.color_def('dark' , 'item', 'item-focused item-selected'         , 208, 0.11, 0.23)
+ui.color_def('dark' , 'item', 'item-focused focused'               ,   0, 0.00, 0.23)
+ui.color_def('dark' , 'item', 'item-focused item-selected focused' , 211, 0.62, 0.24)
+ui.color_def('dark' , 'item', 'item-selected focused'              , 211, 0.62, 0.19)
+ui.color_def('dark' , 'item', 'item-error'                         ,   0, 0.54, 0.43)
+ui.color_def('dark' , 'item', 'item-error item-focused'            ,   0, 1.00, 0.60)
 
-ui.bg_def('dark' , 'row' , 'item-focused focused'               , 212, 0.61, 0.13)
-ui.bg_def('dark' , 'row' , 'item-focused'                       ,   0, 0.00, 0.13)
-ui.bg_def('dark' , 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
+ui.color_def('dark' , 'row' , 'item-focused focused'               , 212, 0.61, 0.13)
+ui.color_def('dark' , 'row' , 'item-focused'                       ,   0, 0.00, 0.13)
+ui.color_def('dark' , 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
 
 //// CANVAS SETUP ------------------------------------------------------------
 
@@ -669,7 +628,7 @@ ui.default_theme = document.documentElement.getAttribute('theme') ?? 'light'
 ui.default_font  = document.documentElement.getAttribute('font' ) ?? 'Arial'
 function set_screen_bg() {
 	theme = themes[ui.default_theme]
-	let color = bg_color('bg')
+	let color = color_css('bg')
 	theme = null
 	document.documentElement.style.background = color
 }
@@ -3878,7 +3837,7 @@ draw_end[CMD_SCROLLBOX] = function(a, i) {
 
 		cx.beginPath()
 		cx.rect(tx, ty, tw, th)
-		cx.fillStyle = bg_color('scrollbar', state)
+		cx.fillStyle = color_css('scrollbar', state)
 		cx.fill()
 
 	}
@@ -4377,8 +4336,6 @@ ui.bb_tooltip = function(
 	return i
 }
 
-cx.fillStyle = bg_color
-
 draw[CMD_BB_TOOLTIP] = function(a, i) {
 	let ct_i = i+a[i+BB_TOOLTIP_CT_I]
 
@@ -4502,7 +4459,7 @@ draw[CMD_BB_TOOLTIP] = function(a, i) {
 	if (cur_shadow)
 		reset_shadow()
 	if (border_color) {
-		cx.strokeStyle = ui_border_color(border_color, border_color_state)
+		cx.strokeStyle = color_css(border_color, border_color_state)
 		cx.lineCap = 'square'
 		tooltip_path(cx, x + .5, y + .5, x + w - .5, y + h - .5,
 			side, tx, ty, b1x, b1y, b2x, b2y, r, d)
@@ -4755,7 +4712,7 @@ draw[CMD_BB] = function(a, i) {
 	if (cur_shadow)
 		reset_shadow()
 	if (border_sides && border_color) {
-		cx.strokeStyle = ui_border_color(border_color, border_color_state)
+		cx.strokeStyle = color_css(border_color, border_color_state)
 		cx.lineCap = 'square'
 		border_path(cx, x+.5, y+.5, x+w-.5, y+h-.5, border_sides, border_radius)
 		if (border_dash)
@@ -5729,7 +5686,7 @@ draw[CMD_TEXT] = function(a, i) {
 
 	let arg_i = read_text_args(a, i, flags)
 	let input_type = editable ? a[arg_i++] : null
-	let col = fg_color(cur_color, cur_color_state)
+	let col = color_css(cur_color, cur_color_state)
 
 	if (editable) {
 		let input = input_create(id, input_type)
@@ -5873,10 +5830,10 @@ draw[CMD_TEXT] = function(a, i) {
 			else
 				text_x = anchor_x
 			let mark_x = text_x + measure_text(cx, s.slice(0, i1)).width
-			let bg = bg_color_hsl(a[arg_i+2])
+			let bg = color_hsl(a[arg_i+2])
 			cx.fillStyle = bg[0]
 			cx.fillRect(mark_x, y, measure_text(cx, mark_s).width, asc + dsc)
-			cx.fillStyle = fg_color('text', null, bg_is_dark(bg) ? 'dark' : 'light')
+			cx.fillStyle = color_css('text', null, bg_is_dark(bg) ? 'dark' : 'light')
 			cx.textAlign = 'left'
 			cx.fillText(mark_s, mark_x, y + asc)
 		}
@@ -6276,7 +6233,7 @@ ss.draw = function(a, i) {
 		let m = measure_text(cx, err)
 		let asc = m.actualBoundingBoxAscent
 		let dsc = m.actualBoundingBoxDescent
-		cx.fillStyle = fg_color('button-danger')
+		cx.fillStyle = color_css('button-danger')
 		cx.textAlign = 'center'
 		cx.fillText(err, a[i+0] + a[i+2] / 2, a[i+1] + (a[i+3] + asc - dsc) / 2)
 		return
@@ -6431,7 +6388,7 @@ function button_update(id, s) {
 
 ui.button_bb = function(style, state) {
 	state = repl(state, 'click', 'hover')
-	style = style ?? 'button'
+	style = style ?? 'button-bg'
 	if (!style) // means no border
 		return
 	ui.shadow(state == 'active' ? 'button-active' : 'button')
@@ -6444,7 +6401,7 @@ ui.button_text = function(s, state, w, h) {
 	state = repl(state, 'click', 'hover')
 	h ??= ui.em(2.2) // force h
 	ui.bold()
-	ui.color('button', state)
+	ui.color('button-text', state)
 	ui.text('', s, 0, 'c', 'c', null, w, h)
 }
 
@@ -7188,20 +7145,20 @@ slider.draw = function(a, i) {
 
 	// draw shaft
 	bg_path(cx, x - r, y, x + w + r, y + 2*r, BORDER_SIDE_ALL, 1000)
-	cx.fillStyle = bg_color('bg2', hs ? 'hover' : null)
+	cx.fillStyle = color_css('bg2', hs ? 'hover' : null)
 	cx.fill()
 
 	bg_path(cx, x - r, y, thumb_cx, y + 2*r, BORDER_SIDE_ALL, 1000)
-	cx.fillStyle = bg_color('link', hs ? 'hover' : null)
+	cx.fillStyle = color_css('link', hs ? 'hover' : null)
 	cx.fill()
 
 	bg_path(cx, x + .5 - r, y + .5, x + w - .5 + r, y + 2*r - .5, BORDER_SIDE_ALL, 1000)
-	cx.strokeStyle = border_color('light')
+	cx.strokeStyle = color_css('light')
 	cx.stroke()
 
 	// draw focus ring under thumb
 	if (focused) {
-		let hsl_color = bg_color_hsl('item', 'item-focused item-selected focused')
+		let hsl_color = color_hsl('item', 'item-focused item-selected focused')
 		cx.fillStyle = hsl_adjust(hsl_color, 1, 1, 1, .5)
 		cx.beginPath()
 		cx.arc(thumb_cx, thumb_cy, thumb_r * 2, 0, 2 * PI)
@@ -7209,13 +7166,13 @@ slider.draw = function(a, i) {
 		if (by_key) {
 			cx.beginPath()
 			cx.arc(thumb_cx, thumb_cy, thumb_r * 2 - 2, 0, 2 * PI)
-			cx.strokeStyle = ui.border_color('max')
+			cx.strokeStyle = ui.color_css('max')
 			cx.stroke()
 		}
 	}
 
 	// draw thumb
-	cx.fillStyle = fg_color('link', hs ? 'hover' : null)
+	cx.fillStyle = color_css('link', hs ? 'hover' : null)
 	ui.set_shadow('button')
 	cx.beginPath()
 	cx.arc(thumb_cx, thumb_cy, thumb_r, 0, 2 * PI)
@@ -7234,7 +7191,7 @@ slider.draw = function(a, i) {
 		let [step, min, max] = compute_step_and_range(
 			max_n, from, to, scale_base, scales, decimals)
 
-		let hsl_color = fg_color_hsl('label')
+		let hsl_color = color_hsl('label')
 		cx.textAlign = 'center'
 		let m = measure_text(cx, ' ')
 		let asc = m.fontBoundingBoxAscent
@@ -7266,8 +7223,8 @@ slider.draw = function(a, i) {
 		// show a marker for the current value
 		{
 			let x = vx
-			cx.fillStyle   = fg_color('text')
-			cx.strokeStyle = fg_color('text')
+			cx.fillStyle   = color_css('text')
+			cx.strokeStyle = color_css('text')
 
 			cx.beginPath()
 			cx.moveTo(x, round(y - ui.em(1.0)) + .5)
@@ -7286,12 +7243,12 @@ ui.box_widget('slider', slider)
 
 //// TOGGLE ------------------------------------------------------------------
 
-ui.bg_def('*', 'toggle'      , '*', 'bg2')
-ui.bg_def('*', 'toggle-thumb', 'normal', 'text', 'active')
-ui.bg_def('light', 'toggle', 'item-selected'      , 'link', 'normal')
-ui.bg_def('light', 'toggle', 'hover item-selected', 'link', 'hover' )
-ui.bg_def('dark' , 'toggle', 'item-selected'      , 'link', 'normal')
-ui.bg_def('dark' , 'toggle', 'hover item-selected', 'link', 'hover' )
+ui.color_def('*', 'toggle'      , '*', 'bg2')
+ui.color_def('*', 'toggle-thumb', 'normal', 'text', 'active')
+ui.color_def('light', 'toggle', 'item-selected'      , 'link', 'normal')
+ui.color_def('light', 'toggle', 'hover item-selected', 'link', 'hover' )
+ui.color_def('dark' , 'toggle', 'item-selected'      , 'link', 'normal')
+ui.color_def('dark' , 'toggle', 'hover item-selected', 'link', 'hover' )
 
 let TOGGLE_ID    = BOX_ARGS+0
 let TOGGLE_STATE = BOX_ARGS+1
@@ -7360,7 +7317,7 @@ toggle.draw = function(a, i) {
 	if (focused) {
 		let m = 3
 		toggle_path(cx, x - m, y - m, w + 2*m, h + 2*m)
-		cx.strokeStyle = border_color('max', null)
+		cx.strokeStyle = color_css('max', null)
 		cx.lineWidth = 1
 		cx.stroke()
 	}
@@ -7380,7 +7337,7 @@ toggle.draw = function(a, i) {
 	cx.arc(cx1, cy1, h * .35, 0, 2 * PI)
 	cx.closePath()
 	ui.set_shadow('button')
-	cx.fillStyle = bg_color('toggle-thumb', hs ? 'hover' : null)
+	cx.fillStyle = color_css('toggle-thumb', hs ? 'hover' : null)
 	cx.fill()
 	reset_shadow()
 
@@ -7418,7 +7375,7 @@ checkbox.draw = function(a, i) {
 		let m = 3
 		cx.beginPath()
 		cx.roundRect(x - m, y - m, w + 2*m, h + 2*m, 2 + m * dpr)
-		cx.strokeStyle = border_color('max', null)
+		cx.strokeStyle = color_css('max', null)
 		cx.lineWidth = 1
 		cx.stroke()
 	}
@@ -7441,7 +7398,7 @@ checkbox.draw = function(a, i) {
 		cx.moveTo( 3,  8)
 		cx.lineTo( 7, 15)
 		cx.lineTo(18,  4)
-		cx.strokeStyle = bg_color('toggle-thumb', hs ? 'hover' : null)
+		cx.strokeStyle = color_css('toggle-thumb', hs ? 'hover' : null)
 		cx.lineWidth = 1.5
 		cx.lineCap = 'round'
 		cx.lineJoin = 'round'
@@ -7527,7 +7484,7 @@ radio.draw = function(a, i) {
 	if (focused) {
 		cx.beginPath()
 		cx.arc(cx1, cy1, h * .5 + 3, 0, 2 * PI)
-		cx.strokeStyle = border_color('max', null)
+		cx.strokeStyle = color_css('max', null)
 		cx.lineWidth = 1
 		cx.stroke()
 	}
@@ -7545,7 +7502,7 @@ radio.draw = function(a, i) {
 	cx.arc(cx1, cy1, h * (on ? .15 : 0), 0, 2 * PI)
 	cx.closePath()
 	ui.set_shadow('button')
-	cx.fillStyle = bg_color('toggle-thumb', hs ? 'hover' : null)
+	cx.fillStyle = color_css('toggle-thumb', hs ? 'hover' : null)
 	cx.fill()
 	reset_shadow()
 
@@ -8429,7 +8386,7 @@ function draw_gradient_cursor(x, y, w, h, p, alpha) {
 	let cursor_x = round(x + p * (w-1)) + .5
 	let cursor_w = ui.sp05()
 	let cursor_h = ui.sp05()
-	cx.fillStyle = ui.alpha_adjust(ui.fg_color_hsl('text'), alpha)
+	cx.fillStyle = ui.alpha_adjust(ui.color_hsl('text'), alpha)
 	cx.beginPath()
 	cx.moveTo(cursor_x, y)
 	cx.lineTo(cursor_x-cursor_w, y-cursor_h)
@@ -8830,12 +8787,12 @@ ui.widget('polyline', {
 		cx.scale(dpr, dpr)
 		if (fill_color) {
 			set_points(cx, 0, 0, a, pi1, pi2, closed, 0)
-			cx.fillStyle = bg_color(fill_color, fill_color_state)
+			cx.fillStyle = color_css(fill_color, fill_color_state)
 			cx.fill()
 		}
 		if (stroke_color) {
 			set_points(cx, 0, 0, a, pi1, pi2, closed, line_width / 2)
-			cx.strokeStyle = fg_color(stroke_color, stroke_color_state)
+			cx.strokeStyle = color_css(stroke_color, stroke_color_state)
 			cx.lineWidth = line_width
 			cx.stroke()
 			cx.lineWidth = 1
@@ -8942,7 +8899,7 @@ ui.widget('bg_dots', {
 		cx.rect(0, 0, w, h)
 		cx.clip()
 
-		cx.fillStyle = hsl_adjust(fg_color_hsl('label'), 1, 1, 0.5, 1)
+		cx.fillStyle = hsl_adjust(color_hsl('label'), 1, 1, 0.5, 1)
 		for (let t of dots) {
 			if (t != dots.mouse_dot) {
 				cx.beginPath()
@@ -8952,7 +8909,7 @@ ui.widget('bg_dots', {
 			}
 		}
 
-		let c = fg_color_hsl('label')
+		let c = color_hsl('label')
 		cx.lineWidth = 0.8
 		for (let i = 0; i < dots.length; i++) {
 			for (let j = i+1; j < dots.length; j++) {
@@ -9070,12 +9027,12 @@ function draw_graph(x0, y0, w, h, g, with_agg) {
 			cx.lineTo(x, y)
 	}
 	avg = sum / n
-	cx.strokeStyle = g.color ?? fg_color('link')
+	cx.strokeStyle = g.color ?? color_css('link')
 	cx.stroke()
 
 	if (with_agg) {
 
-		cx.fillStyle = fg_color('label')
+		cx.fillStyle = color_css('label')
 		let y1 = y0 + ui.em()
 		let x1 = x0 + ui.sp()
 		cx.font = 'normal ' + (font_size_normal * .75) + 'px ' + default_font
@@ -9290,7 +9247,6 @@ ui.debug_pane = function() {
 
 		ui.stack('', 0)
 			ui.bb('bg2')
-			ui.color('text')
 			ui.p(ui.sp())
 			ui.text('', 'PROFILE', 0, 'l')
 		ui.end_stack()
@@ -9298,7 +9254,6 @@ ui.debug_pane = function() {
 
 		ui.stack('', 0)
 			ui.bb('bg2')
-			ui.color('text')
 			ui.p(ui.sp())
 			ui.text('', 'ID STATES', 0, 'l')
 		ui.end_stack()
@@ -9316,7 +9271,6 @@ ui.debug_pane = function() {
 						ui.ml(ui.sp2())
 						ui.h(0, ui.sp())
 							let s = isobject(v) || isfunc(v) ? '<'+(typeof v)+'>' : str(v)
-							ui.color('text')
 							ui.text('', k, 1, 'l', 'c', 1/0, 0)
 							if (isobject(v) || isfunc(v))
 								ui.color('label')
@@ -9330,7 +9284,6 @@ ui.debug_pane = function() {
 		ui.border(1, 'light')
 		ui.stack('', 0)
 			ui.bb('bg2')
-			ui.color('text')
 			ui.p(ui.sp())
 			ui.text('', 'HIT STATES', 0, 'l')
 		ui.end_stack()
@@ -9344,7 +9297,6 @@ ui.debug_pane = function() {
 						ui.ml(ui.sp2())
 						ui.h(0, ui.sp())
 							let s = isobject(v) || isfunc(v) ? '<'+(typeof v)+'>' : str(v)
-							ui.color('text')
 							ui.text('', k, 1, 'l', 'c', 1/0, 0)
 							if (isobject(v) || isfunc(v))
 								ui.color('label')
@@ -9368,7 +9320,6 @@ ui.debug_pane = function() {
 						ui.ml(ui.sp2())
 						ui.h(1, ui.sp())
 							let s = isobject(v) || isfunc(v) ? '<'+(typeof v)+'>' : str(v)
-							ui.color('text')
 							ui.text('', k, 1, 'l', 'c', 1/0, 0)
 							if (isobject(v) || isfunc(v))
 								ui.color('label')

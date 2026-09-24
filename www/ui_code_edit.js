@@ -60,25 +60,25 @@ ui.icon_def('close'         , 'tabler', '\ueb55')
 
 //           theme    name        state       h     s     L    a
 // ---------------------------------------------------------------------------
-ui.fg_def('light', 'keyword'  , 'normal', 240, 1.00, 0.35)
-ui.fg_def('light', 'string'   , 'normal',   5, 0.85, 0.40)
-ui.fg_def('light', 'number'   , 'normal',   5, 0.80, 0.45)
-ui.fg_def('light', 'symbol'   , 'normal', 240, 1.00, 0.20)
-ui.fg_def('light', 'comment'  , 'normal', 100, 0.00, 0.45)
-ui.fg_def('light', 'error'    , 'normal',   0, 0.85, 0.45)
+ui.color_def('light', 'keyword'  , 'normal', 240, 1.00, 0.35)
+ui.color_def('light', 'string'   , 'normal',   5, 0.85, 0.40)
+ui.color_def('light', 'number'   , 'normal',   5, 0.80, 0.45)
+ui.color_def('light', 'symbol'   , 'normal', 240, 1.00, 0.20)
+ui.color_def('light', 'comment'  , 'normal', 100, 0.00, 0.45)
+ui.color_def('light', 'error-text', 'normal',   0, 0.85, 0.45)
 
-ui.fg_def('dark' , 'keyword'  , 'normal',  60, 0.95, 0.60)
-ui.fg_def('dark' , 'string'   , 'normal',   5, 0.95, 0.60)
-ui.fg_def('dark' , 'number'   , 'normal',   5, 0.95, 0.70)
-ui.fg_def('dark' , 'symbol'   , 'normal',   0, 1.00, 1.00)
-ui.fg_def('dark' , 'comment'  , 'normal', 140, 0.85, 0.30)
-ui.fg_def('dark' , 'error'    , 'normal',   0, 0.85, 0.65)
+ui.color_def('dark' , 'keyword'  , 'normal',  60, 0.95, 0.60)
+ui.color_def('dark' , 'string'   , 'normal',   5, 0.95, 0.60)
+ui.color_def('dark' , 'number'   , 'normal',   5, 0.95, 0.70)
+ui.color_def('dark' , 'symbol'   , 'normal',   0, 1.00, 1.00)
+ui.color_def('dark' , 'comment'  , 'normal', 140, 0.85, 0.30)
+ui.color_def('dark' , 'error-text', 'normal',   0, 0.85, 0.65)
 
-ui.bg_def('light', 'find', 'normal' ,   0, 0.00, 0.93)
-ui.bg_def('light', 'find', 'focused', 209, 0.55, 0.92)
+ui.color_def('light', 'find', 'normal' ,   0, 0.00, 0.93)
+ui.color_def('light', 'find', 'focused', 209, 0.55, 0.92)
 
-ui.bg_def('dark' , 'find', 'normal' , 208, 0.08, 0.16)
-ui.bg_def('dark' , 'find', 'focused', 211, 0.50, 0.17)
+ui.color_def('dark' , 'find', 'normal' , 208, 0.08, 0.16)
+ui.color_def('dark' , 'find', 'focused', 211, 0.50, 0.17)
 
 ui.capture_keydown('ctrl f'  ) // browser: find -> editor: find
 ui.capture_keyup  ('ctrl f'  ) // browser: find -> editor: find
@@ -220,7 +220,7 @@ ui.widget('code_edit_sidebar', {
 
 		cx.font = font_size+'px tabler'
 		cx.textAlign = 'center'
-		cx.fillStyle = ui.fg_color('marker')
+		cx.fillStyle = ui.color_css('marker')
 
 		let bx = x0 + margin_l / 2
 		for (let line of bookmarks)
@@ -266,7 +266,7 @@ ui.widget('code_edit_text', {
 
 		// draw the text.
 		cx.textAlign = 'left'
-		cx.fillStyle = ui.fg_color('text')
+		cx.fillStyle = ui.color_css('text')
 		for (let line = vline1; line <= vline2; line++) {
 			let s = vlines[line - vline1]
 			// using tab_width-1 because tabs take one char with fillText().
@@ -280,8 +280,8 @@ ui.widget('code_edit_text', {
 		cx.globalCompositeOperation = 'source-atop'
 
 		// draw highlighting rectangles.
-		let fg_colors = ui.get_theme().fg.get(0) // get all fg colors once
-		let text_color = fg_colors.text
+		let colors = ui.get_theme().colors.get(0)
+		let text_color = colors.text
 		for (let line = vline1; line <= vline2; line++) {
 			let s = vlines[line - vline1]
 			let c = vcolors[line - vline1]
@@ -293,7 +293,7 @@ ui.widget('code_edit_text', {
 				let y = y0 + line * line_h
 				let w = round(cw * char_w)
 				let h = line_h
-				let color_hsl = (fg_colors[color] ?? text_color)[0]
+				let color_hsl = (colors[color] ?? text_color)[0]
 				cx.fillStyle = color_hsl
 				cx.fillRect(x, y, w, h)
 			}
@@ -305,7 +305,7 @@ ui.widget('code_edit_text', {
 
 		// draw caret.
 		if (focused) {
-			cx.fillStyle = ui.fg_color('text')
+			cx.fillStyle = ui.color_css('text')
 			if (cursor.block) {
 				let bline1 = max(min(cursor.line, cursor.sel_line), vline1)
 				let bline2 = min(max(cursor.line, cursor.sel_line), vline2)
@@ -328,7 +328,7 @@ ui.widget('code_edit_text', {
 		let tail_width = round(font_size * .25)
 		let sline1 = min(cursor.sel_line, cursor.line)
 		let sline2 = max(cursor.sel_line, cursor.line)
-		let sel_color = ui.bg_color('item', focused
+		let sel_color = ui.color_css('item', focused
 			? 'focused item-focused item-selected'
 			: 'item-focused item-selected')
 		if (cursor.block && cursor.col != cursor.sel_col
@@ -401,7 +401,7 @@ ui.widget('code_edit_text', {
 		}
 
 		// draw find matches.
-		cx.fillStyle = ui.bg_color('find', focused ? 'focused' : null)
+		cx.fillStyle = ui.color_css('find', focused ? 'focused' : null)
 		for (let line = vline1; line <= vline2; line++) {
 			let f = vfinds[line - vline1]
 			for (let i = 0, n = f.length; i < n; i += 2) {
@@ -416,12 +416,12 @@ ui.widget('code_edit_text', {
 
 		// draw find landing line.
 		if (find_landed) {
-			cx.fillStyle = ui.bg_color('bg1')
+			cx.fillStyle = ui.color_css('bg1')
 			cx.fillRect(vx, y0 + cursor.line * line_h, vw, line_h)
 		}
 
 		// draw background.
-		cx.fillStyle = ui.bg_color('bg0')
+		cx.fillStyle = ui.color_css('bg0')
 		cx.fillRect(vx, vy, vw, vh)
 
 		cx.restore()
@@ -1208,7 +1208,7 @@ function code_edit_view(id, opt) {
 			line_colors[line].length = 0
 		Lezer.highlightTree(syntax_tree, Lezer.classHighlighter,
 		function(from, to, classes) {
-			let color = classes.includes('tok-invalid') ? 'error' : null
+			let color = classes.includes('tok-invalid') ? 'error-text' : null
 			for (let cls of classes.split(' ')) {
 				color = color || token_colors[cls]
 				if (color)
