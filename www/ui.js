@@ -1215,9 +1215,11 @@ ui.on_free = function(id, free1) {
 	}
 }
 
-// widget builder for complex, stateful widgets that stay in state.e and
-// expose build(...args) and update() methods.
-// the constructor is also called at build-time.
+// widget builder for widgets that are made from a closure that creates both
+// the build function and the update function which allows them to coordinate
+// via shared upvalues instead of via state(id) like usual. not important for
+// small widgets but for big widgets like the grid it's much nicer to keep the
+// state internal with faster access and declared and initialized in one place.
 ui.stateful_widget = function(create) {
 	return function() { // id, ...build_args
 		let id = arguments[0]
@@ -1229,7 +1231,6 @@ ui.stateful_widget = function(create) {
 			s = ui.state(id, e.update)
 			s.e = e
 		} else {
-			ui.state(id) // keep alive
 			e = s.e
 		}
 		e.build.apply(e, arguments)
