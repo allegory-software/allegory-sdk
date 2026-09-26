@@ -736,6 +736,15 @@ num_slider1_field = ui.create_field({
 	slider_max: 100,
 	decimals: 2,
 })
+slider1_field = ui.create_field({
+	type: 'number',
+	min: 20,
+	max: 40,
+	slider_min: 0,
+	slider_max: 100,
+	decimals: 1,
+	slider_markers: false,
+})
 color_input1_v = '#1e90ff'
 demos.input_controls = `
 ui.v_aligned(0, ui.sp2(), 'c', 'c')
@@ -775,7 +784,7 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 	ui.end_h()
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('slider1', 'Slider', 0)
-		slider1_v = ui.slider('slider1', slider1_v, 20, 40, 1, false)
+		slider1_v = ui.slider('slider1', slider1_v, slider1_field)
 	ui.end_h()
 
 	ui.h(0, ui.sp4())

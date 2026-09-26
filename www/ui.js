@@ -7027,8 +7027,8 @@ function compute_step_and_range(wanted_n, min, max, scale_base, scales, decimals
 }
 
 let SLIDER_ID         = BOX_ARGS+0
-let SLIDER_FROM       = BOX_ARGS+1
-let SLIDER_TO         = BOX_ARGS+2
+let SLIDER_MIN        = BOX_ARGS+1 // display range slider_min, not min
+let SLIDER_MAX        = BOX_ARGS+2 // display range slider_max, not max
 let SLIDER_DECIMALS   = BOX_ARGS+3
 let SLIDER_P          = BOX_ARGS+4 // progress
 let SLIDER_MARKERS    = BOX_ARGS+5
@@ -7057,8 +7057,11 @@ function slider_update(id, s) {
 	if (clicked(id+'.label'))
 		ui.focus(id)
 
-	let from = s.from
-	let to = s.to
+	let field = s.field
+	let slider_min = field.slider_min ?? field.min ?? 0
+	let slider_max = field.slider_max ?? field.max ?? 1
+	let p_min = slider_p(field.min ?? slider_min, slider_min, slider_max)
+	let p_max = slider_p(field.max ?? slider_max, slider_min, slider_max)
 	let track_x = (s.x ?? 0) + s.pad_x
 	let track_w = (s.w ?? 0) - 2*s.pad_x
 
@@ -7068,27 +7071,45 @@ function slider_update(id, s) {
 		(ui.keydown('arrowright') && 1 || ui.keydown('arrowleft') && -1)
 
 	if (cs) {
-		let p = clamp((ui.mx - track_x) / track_w, 0, 1)
-		s.input_value = lerp(p, 0, 1, from, to)
+		let p = clamp((ui.mx - track_x) / track_w, p_min, p_max)
+		s.input_value = lerp(p, 0, 1, slider_min, slider_max)
 	} else if (d) {
-		let p = slider_p(s.value, from, to)
+		let p = slider_p(s.value, slider_min, slider_max)
 			+ d * (ui.keypressed('shift') ? .01 : .1)
-		s.input_value = lerp(clamp(p, 0, 1), 0, 1, from, to)
+		s.input_value = lerp(clamp(p, p_min, p_max), 0, 1,
+			slider_min, slider_max)
 	} else if (focused && ui.keydown('delete')) {
 		s.input_value = null
 	}
 }
 slider.create = function(
-	cmd, id, value, from, to, decimals, markers, scale_base, scales
+	cmd, id, value, field_or_min, max, decimals, markers, scale_base, scales
 ) {
 
 	let s = ui.state(id)
+	let field
+	if (isobj(field_or_min)) {
+		field = field_or_min
+	} else {
+		field = s.field ??= ui.create_field({
+			type: 'number',
+			min: field_or_min ?? 0,
+			max: max ?? 1,
+			decimals: decimals ?? 2,
+			slider_markers: markers ?? true,
+			slider_scale_base: scale_base ?? 10,
+			slider_scales: scales,
+		})
+	}
+	s.field = field
 	ui.focusable(id)
 
-	markers = (markers ?? 1) ? 1 : 0
-	from ??= 0
-	to ??= 1
-	decimals ??= 2
+	let slider_min = field.slider_min ?? field.min ?? 0
+	let slider_max = field.slider_max ?? field.max ?? 1
+	decimals = field.decimals ?? 2
+	markers = (field.slider_markers ?? true) ? 1 : 0
+	scale_base = field.slider_scale_base ?? 10
+	scales = field.slider_scales ?? 0
 
 	let fr = fr0 ?? 1
 	let align = align0 ?? 's'
@@ -7099,13 +7120,13 @@ slider.create = function(
 
 	let pad_x = markers ? ui.sp8() : ui.sp2()
 
-	s.from = from
-	s.to = to
 	s.pad_x = pad_x
 	ui.state(id, slider_update)
 	value = ui.set_value(s, value)
 
-	let p = slider_p(value, from, to)
+	let p_min = slider_p(field.min ?? slider_min, slider_min, slider_max)
+	let p_max = slider_p(field.max ?? slider_max, slider_min, slider_max)
+	let p = clamp(slider_p(value, slider_min, slider_max), p_min, p_max)
 	let hs = hit(id)
 	let cs = captured(id)
 	let focused = ui.focused(id)
@@ -7115,8 +7136,8 @@ slider.create = function(
 		ui.p(pad_x, ui.sp05())
 		let i = ui_cmd_box_begin(cmd, fr, align, valign, min_w, min_h)
 		a[n++] = id
-		a[n++] = from
-		a[n++] = to
+		a[n++] = slider_min
+		a[n++] = slider_max
 		a[n++] = decimals
 		a[n++] = round(p * 32767)
 		a[n++] = markers
@@ -7210,15 +7231,15 @@ slider.draw = function(a, i) {
 
 	if (markers) {
 
-		let from       = a[i+SLIDER_FROM]
-		let to         = a[i+SLIDER_TO]
+		let slider_min = a[i+SLIDER_MIN]
+		let slider_max = a[i+SLIDER_MAX]
 		let scale_base = a[i+SLIDER_SCALE_BASE]
 		let scales     = a[i+SLIDER_SCALES]
 		let decimals   = a[i+SLIDER_DECIMALS]
 
 		let max_n = floor(w / ui.em(ui.slider_mark_w_em))
 		let [step, min, max] = compute_step_and_range(
-			max_n, from, to, scale_base, scales, decimals)
+			max_n, slider_min, slider_max, scale_base, scales, decimals)
 
 		let hsl_color = color_hsl('label')
 		cx.textAlign = 'center'
@@ -7227,11 +7248,11 @@ slider.draw = function(a, i) {
 		let dsc = m.fontBoundingBoxDescent
 		let x0 = x
 
-		let v = lerp(p, 0, 1, from, to)
-		let vx = round(x0 + lerp(v, from, to, 0, w)) + .5
+		let v = lerp(p, 0, 1, slider_min, slider_max)
+		let vx = round(x0 + lerp(v, slider_min, slider_max, 0, w)) + .5
 
 		for (let v = min; v <= max; v += step) {
-			let x = round(x0 + lerp(v, from, to, 0, w)) + .5
+			let x = round(x0 + lerp(v, slider_min, slider_max, 0, w)) + .5
 
 			// shadow markers that are too close to the current value.
 			let alpha = clamp(abs(vx - x) / ui.em(3) - .7, 0, 1)

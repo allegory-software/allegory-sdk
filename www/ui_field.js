@@ -53,6 +53,9 @@ Field attributes:
 
 		slider_min     : slider min, defaults to min.
 		slider_max     : slider max, defaults to max.
+		slider_markers : show markers (true).
+		slider_scale_base : marker scale base (10).
+		slider_scales  : marker scale multiples ([1, 2, 2.5, 5]).
 
 */
 

@@ -48,6 +48,9 @@
 		max_w            : px            max grid column width
 		slider_min       : n             slider display range min
 		slider_max       : n             slider display range max
+		slider_markers   : b             show slider markers
+		slider_scale_base: n             slider marker scale base
+		slider_scales    : {n...}        slider marker scale multiples
 		hour_step        : n             for the time picker
 		minute_step      : n             for the time picker
 		second_step      : n             for the time picker
@@ -110,7 +113,8 @@ local client_field_attrs = {
 	name=1, type=1, label=1, info=1, client_default=1, align=1,
 	has_server_default=1,
 	enum_values=1, enum_labels=1, not_null=1, min=1, max=1, decimals=1, maxlen=1,
-	slider_min = 1, slider_max = 1,
+	slider_min = 1, slider_max = 1, slider_markers = 1,
+	slider_scale_base = 1, slider_scales = 1,
 	scale=1,
 	lookup_rowset_name=1, lookup_cols=1, display_col=1, name_col=1,
 	w=1, min_w=1, max_w=1,
