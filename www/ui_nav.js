@@ -4635,7 +4635,7 @@ all_field_types.build_editor = function(id, v, pad_l, pad_r, h) {
 // builds the control under `id`; nav_input reads what the user made of it
 // with ui.input_value(id).
 all_field_types.build_input = function(id, v, readonly, min_w) {
-	ui.input(id, v, 1, min_w, null, readonly ? readonly_text_field : this)
+	ui.input(id, v, readonly ? readonly_text_field : this, 1, min_w)
 }
 
 let readonly_text_field = ui.create_field({readonly: true})
@@ -4790,7 +4790,7 @@ date.editor_value = function(id, v) {
 let bool = field_types.bool
 
 bool.build_input = function(id, v, readonly, min_w) {
-	ui.checkbox(id, v, 0, this.align ?? 'c', 'c', min_w)
+	ui.checkbox(id, v, this, 0, this.align ?? 'c', 'c', min_w)
 }
 
 bool.build_null = function(mode) {
@@ -4997,7 +4997,7 @@ color.build = function(v, mode) {
 }
 
 color.build_input = function(id, v, readonly, min_w) {
-	ui.color_input(id, v, 1, min_w)
+	ui.color_input(id, v, this, 1, min_w)
 }
 
 color.edits_in_popup = true
@@ -5022,7 +5022,7 @@ color.build_editor = function(id, v, pad_l, pad_r, h) {
 			let resize_id = id+'.resizer'
 			ui.p(ui.sp2())
 			ui.v(0, ui.sp1())
-				ui.color_picker(picker_id, v)
+				ui.color_picker(picker_id, v, this)
 				ui.h(0, ui.sp05(), 'r')
 					ui.default_button(id+'.pick')
 					ui.primary_button(id+'.pick', S('pick', 'Pick'), 0)

@@ -1601,7 +1601,7 @@ function code_edit_view(id, opt) {
 							ui.focus_group(true)
 							ui.v(0, ui.sp05())
 								ui.h(0, ui.sp05())
-									find_text = ui.input(fid, find_text, 0) ?? ''
+									find_text = ui.input(fid, find_text, null, 0) ?? ''
 									if (find_text != last_find_text) {
 										last_find_text = find_text
 										find_scan()
@@ -1621,7 +1621,8 @@ function code_edit_view(id, opt) {
 								ui.end_h()
 								if (find_replace) {
 									ui.h(0, ui.sp05())
-										replace_text = ui.input(rid, replace_text, 0) ?? ''
+										replace_text = ui.input(
+											rid, replace_text, null, 0) ?? ''
 										ui.nofocus()
 										if (ui.button(id+'.replace', 'Replace', 0))
 											replace_match()

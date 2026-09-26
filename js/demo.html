@@ -74,10 +74,17 @@ ui.shadow_def('dark',  'demo_tooltip', 1, 1, 3, 0, 0,  0, 1)
 
 slider1_v = 30
 slider2_v = .5
+slider_demo_field = ui.create_field({
+	type: 'number',
+	min: 20,
+	max: 40,
+	decimals: 1,
+	slider_markers: false,
+})
 demos.silder = `
 ui.v(0, 0, 'c', 'c', 400)
 	ui.border(1, 'intense')
-	slider1_v = ui.slider('slider1', slider1_v, 20, 40, 1, false)
+	slider1_v = ui.slider('slider1', slider1_v, slider_demo_field)
 	//if (p != null)
 	//	pr(p)
 	slider2_v = ui.slider('slider2', slider2_v)
@@ -147,7 +154,7 @@ ui.end_h()
 radio_sel_i = 0
 demos.radio = `
 ui.v(0, ui.sp2(), 'c', 'c')
-ui.begin_radio_group('radio_group1')
+ui.radio_group('radio_group1')
 for (let i = 0; i < 5; i++) {
 	ui.h(0, ui.sp(), 'c', 'c')
 		ui.radio('radio'+i, 'radio_group1', i)
@@ -562,6 +569,14 @@ state.exit_edit_on_escape ??= true
 
 let rows_slider_id = 'grid_config_rows_slider'
 state.row_count ??= 100
+state.rows_slider_field ??= ui.create_field({
+	type: 'number',
+	min: 1,
+	max: 1000000,
+	decimals: 0,
+	slider_markers: false,
+})
+let rows_slider_field = state.rows_slider_field
 
 let col_max = state.row_count
 	? max(grid_demo_base_field_count, min(
@@ -569,11 +584,27 @@ let col_max = state.row_count
 		floor(1000000 / state.row_count)))
 	: grid_demo_base_field_count + 1000
 let col_slider_id = 'grid_config_duplicates_slider'
+state.col_slider_field ??= ui.create_field({
+	type: 'number',
+	min: grid_demo_base_field_count,
+	max: col_max,
+	decimals: 0,
+	slider_markers: false,
+})
+let col_slider_field = state.col_slider_field
 state.col_count ??= grid_demo_base_field_count
 state.col_count = min(state.col_count, col_max)
 
 let tree_depth_slider_id = 'grid_config_tree_depth_slider'
 state.tree_depth ??= 4
+state.tree_depth_slider_field ??= ui.create_field({
+	type: 'number',
+	min: 0,
+	max: 8,
+	decimals: 0,
+	slider_markers: false,
+})
+let tree_depth_slider_field = state.tree_depth_slider_field
 
 let first_col = grid_demo_first_cols[first_col_i]
 
@@ -652,21 +683,21 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 		ui.h(1, ui.sp1())
 			ui.text('', 'Rows', 0)
 			state.row_count = round(ui.slider(
-				rows_slider_id, state.row_count, 1, 1000000, 0, false))
+				rows_slider_id, state.row_count, rows_slider_field))
 			ui.text('', state.row_count, 2, 'r')
 		ui.end_h()
 
 		ui.h(1, ui.sp1())
 			ui.text('', 'Cols', 0)
 			state.col_count = round(ui.slider(
-				col_slider_id, state.col_count, grid_demo_base_field_count, col_max, 0, false))
+				col_slider_id, state.col_count, col_slider_field))
 			ui.text('', state.col_count+' / '+col_max, 2, 'r')
 		ui.end_h()
 
 		ui.h(1, ui.sp1())
 			ui.text('', 'Tree depth', 0, 'l')
 			state.tree_depth = round(ui.slider(
-				tree_depth_slider_id, state.tree_depth, 0, 8, 0, false))
+				tree_depth_slider_id, state.tree_depth, tree_depth_slider_field))
 			ui.text('', state.tree_depth, 2, 'r')
 		ui.end_h()
 
@@ -686,7 +717,7 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 		function grid_config_toggle(id, label, key) {
 			ui.h(1, ui.sp(), 's', 'c')
 				ui.label(id, label, 1, 'l', 'c')
-				state[key] = ui.toggle(id, state[key], 0)
+				state[key] = ui.toggle(id, state[key], null, 0)
 			ui.end_h()
 		}
 
@@ -754,7 +785,7 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 	ui.end_h()
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('input2', 'Input R', 0)
-		input2_text = ui.input('input2', input2_text, 1, null, 'sr')
+		input2_text = ui.input('input2', input2_text, null, 1, null, 'sr')
 	ui.end_h()
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('dd1', 'Dropdown', 0)
@@ -811,7 +842,7 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 	ui.h(0, ui.sp4(), 'l')
 		ui.text('', 'Radio', 0, 'l', 't')
 		ui.v(0, ui.sp2())
-			ui.begin_radio_group('radio_group1')
+			ui.radio_group('radio_group1')
 			for (let i = 0; i < 3; i++) {
 				ui.h(0, ui.sp2(), 'l')
 					ui.radio('radio'+i, 'radio_group1', i)
@@ -1229,7 +1260,7 @@ ui.v(1, ui.sp())
 	ui.h(0, ui.sp())
 		ui.text('', 'My ID', 0)
 		let my_sid = offer_con.signal_con.sid
-		ui.input('sid', my_sid, null, null, null, sid_field)
+		ui.input('sid', my_sid, sid_field)
 		ui.text('', 'Other ID', 0)
 		to_sid = ui.input('to_sid', to_sid)
 		if (!offer_con.open && my_sid)
@@ -1263,7 +1294,7 @@ ui.v(1, ui.sp())
 	ui.h(0, ui.sp())
 		ui.text('', 'My ID', 0)
 		let my_sid = answer_con.signal_con.sid
-		ui.input('sid', my_sid, null, null, null, sid_field)
+		ui.input('sid', my_sid, sid_field)
 		ui.text('', 'Other ID')
 		to_sid = ui.input('to_sid', to_sid)
 		if (!answer_con.open && my_sid)
@@ -1295,7 +1326,7 @@ ui.v(1, ui.sp())
 	ui.h(0, ui.sp())
 		ui.text('', 'My ID')
 		let my_sid = str(offer_con.signal_con.sid)
-		ui.input('offer_sid', my_sid, null, null, null, offer_sid_field)
+		ui.input('offer_sid', my_sid, offer_sid_field)
 		if (offer_con.open) {
 			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c', 'c', ui.em(10))) {
 				offer_con.close()
@@ -1440,7 +1471,7 @@ ui.main = function() {
 
 				ui.text('', 'grid fast path', 0)
 				ui.GRID_FAST_PATH =
-					ui.toggle('btn_grid_fast', ui.GRID_FAST_PATH, 0)
+					ui.toggle('btn_grid_fast', ui.GRID_FAST_PATH, null, 0)
 
 				ui.color('label')
 				ui.text('', 'canvas-ui v'+ui.VERSION, 1, 'r')

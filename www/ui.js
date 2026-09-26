@@ -36,13 +36,14 @@ INPUT
 	ui.button          (id, s, fr, align, valign, min_w, min_h, style)
 	ui.icon_button     (id, icon, [s], fr, align, valign, min_w, min_h, style)
 	ui.label           (for_id, s, fr, align, valign)
-	ui.input           (id, v, fr, w, [text_align], [field], [no_box]) -> v
+	ui.input           (id, v, [field], fr, w, [text_align], [no_box]) -> v
 	ui.list_dropdown   (id, items, sel_i, fr, max_w, min_w) -> sel_i
-	ui.toggle          (id, on, fr, align, valign, min_w)
-	ui.checkbox        (id, on, fr, align, valign, min_w)
+	ui.toggle          (id, on, [field], fr, align, valign, min_w)
+	ui.checkbox        (id, on, [field], fr, align, valign, min_w)
 	ui.date_input      (id, v, [field], fr, align, valign, min_w) -> v
-	ui.color_input     (id, v, fr, min_w) -> v
-	ui.num_slider      (id, v, [field_or_min], [max], [decimals]) -> v
+	ui.color_input     (id, v, [field], fr, min_w) -> v
+	ui.num_slider      (id, v, [field]) -> v
+	ui.slider          (id, v, [field]) -> v
 
 LIST
 
@@ -300,7 +301,6 @@ function color_def(theme, name, state, h, s, L, a, is_dark) {
 		state_colors[name] = [c[0], c[1], c[2], c[3], c[4], a ?? c[5]]
 	}
 }
-ui.color_def = color_def
 
 /// color lookups
 
@@ -340,11 +340,6 @@ function color_rgba_int(name, state, theme1) {
 	return hsl_to_rgba_int(c[1], c[2], c[3], c[4])
 }
 
-ui.color_css = color_css
-ui.color_hsl = color_hsl
-ui.color_rgb = color_rgb_int
-ui.color_rgba = color_rgba_int
-
 /// set fillStyle and set theme based on whether the bg is dark or light!
 
 function set_bg_color(color, state) {
@@ -362,6 +357,18 @@ function set_bg_color(color, state) {
 	theme = dark ? themes.dark : themes.light
 	cx.fillStyle = color
 }
+
+function bg_is_dark(bg_color) {
+	return isarray(bg_color) ? (bg_color[5] ?? bg_color[3] < .5) : theme.is_dark
+}
+
+ui.color_def = color_def
+ui.color_css = color_css
+ui.color_hsl = color_hsl
+ui.color_rgb = color_rgb_int
+ui.color_rgba = color_rgba_int
+ui.set_bg_color = set_bg_color
+ui.bg_is_dark = bg_is_dark
 
 /// text colors --------------------------------------------------------------
 
@@ -425,11 +432,6 @@ ui.color_def('dark' , 'max'     , 'normal' ,   0,    0,    1, 1.00)
 ui.color_def('dark' , 'marker'  , 'normal' ,  61, 1.00, 0.57, 1.00)
 
 /// background colors --------------------------------------------------------
-
-function bg_is_dark(bg_color) {
-	return isarray(bg_color) ? (bg_color[5] ?? bg_color[3] < .5) : theme.is_dark
-}
-ui.bg_is_dark = bg_is_dark
 
 //           theme    name      state       h     s     L     a
 // -------------------------------------------------------------
@@ -4880,7 +4882,7 @@ function reset_text_font() {
 
 	ui.value       (id) -> v               what the input holds right now
 	ui.input_value (id) -> v | undefined   interaction value, if interacted thi frame
-	ui.set_value   (state, v)
+	ui.set_value   (state, v, [field])
 
 */
 
@@ -4898,12 +4900,15 @@ ui.input_value = function(id) {
 	return ui.state_of(id, 'input_value')
 }
 
-ui.set_value = function(s, value) {
+ui.set_value = function(s, value, field) {
+	let value0 = s.value
 	if (s.input_value !== undefined)
 		value = s.input_value
-	else if (value !== s.value)
+	else if (value !== value0)
 		s.revert_value = value
 	s.value = value
+	if (field && (s.input_value !== undefined || value !== value0))
+		field.validator.validate(value)
 	return value
 }
 
@@ -5072,8 +5077,11 @@ ui.text = function(
 ui.text_editable = function(
 	id, value, fr, align, valign, max_w, w, h, field
 ) {
-	if (!field)
-		field = ui.state(id).field ??= ui.create_field()
+	if (!field) {
+		let s = ui.state(id)
+		s.field ??= ui.create_field()
+		field = s.field
+	}
 	return ui.text(id, value, fr, align, valign, max_w, w, h, null, field)
 }
 ui.text_lines = function(id, s, fr, align, valign, max_w, w, h) {
@@ -6850,7 +6858,7 @@ ui.em_input           = () => ui.em(ui.input_min_w_em)
 ui.em_input_max       = () => ui.em(ui.input_max_w_em)
 ui.em_input_max_popup = () => ui.em(ui.input_max_popup_w_em)
 
-ui.input = function(id, value, fr, w, text_align, field, no_box) {
+ui.input = function(id, value, field, fr, w, text_align, no_box) {
 	if (clicked(id+'.label')) {
 		ui.focus(id)
 		ui.select_text(id, 0, 1/0)
@@ -6878,15 +6886,20 @@ function num_slider_update(id, s) {
 
 	let input_id = id+'.input'
 	let field = s.field
+
+	if (clicked(id+'.label'))
+		ui.focus(id)
+	if (field.readonly)
+		return
+
 	let from = field.slider_min ?? field.min ?? 0
 	let to = field.slider_max ?? field.max ?? 1
 	let p_min = slider_p(field.min ?? from, from, to)
 	let p_max = slider_p(field.max ?? to, from, to)
-
-	if (clicked(id+'.label'))
-		ui.focus(id)
 	let focused = ui.focused(s.editing ? input_id : id)
-	if (focused && (ui.keydown('f2') || ui.keydown('enter') || ui.dblclicked(id))) {
+	if (focused
+		&& (ui.keydown('f2') || ui.keydown('enter') || ui.dblclicked(id))
+	) {
 		s.editing = !s.editing
 		if (s.editing) {
 			ui.select_text(input_id, 0, 1/0)
@@ -6931,26 +6944,19 @@ function num_slider_update(id, s) {
 			ui.set_cursor('ew-resize')
 	}
 }
-ui.num_slider = function(
-	id, value, field_or_min, max, decimals
-) {
+ui.num_slider = function(id, value, field) {
 	let s = ui.state(id)
-	let field
-	if (isobj(field_or_min)) {
-		field = field_or_min
-	} else {
-		field = s.field ??= ui.create_field({
-			type: 'number',
-			min: field_or_min ?? 0,
-			max: max ?? 1,
-			decimals: decimals ?? 2,
-		})
-	}
+	field ??= s.field ?? ui.create_field({
+		type: 'number',
+		min: 0,
+		max: 1,
+		decimals: 2,
+	})
 	s.field = field
 	let from = field.slider_min ?? field.min ?? 0
 	let to = field.slider_max ?? field.max ?? 1
 	s = ui.state(id, num_slider_update)
-	value = ui.set_value(s, value)
+	value = ui.set_value(s, value, s.editing ? null : field)
 
 	let p_min = slider_p(field.min ?? from, from, to)
 	let p_max = slider_p(field.max ?? to, from, to)
@@ -7058,6 +7064,8 @@ function slider_update(id, s) {
 		ui.focus(id)
 
 	let field = s.field
+	if (field.readonly)
+		return
 	let slider_min = field.slider_min ?? field.min ?? 0
 	let slider_max = field.slider_max ?? field.max ?? 1
 	let p_min = slider_p(field.min ?? slider_min, slider_min, slider_max)
@@ -7082,34 +7090,24 @@ function slider_update(id, s) {
 		s.input_value = null
 	}
 }
-slider.create = function(
-	cmd, id, value, field_or_min, max, decimals, markers, scale_base, scales
-) {
+slider.create = function(cmd, id, value, field) {
 
 	let s = ui.state(id)
-	let field
-	if (isobj(field_or_min)) {
-		field = field_or_min
-	} else {
-		field = s.field ??= ui.create_field({
-			type: 'number',
-			min: field_or_min ?? 0,
-			max: max ?? 1,
-			decimals: decimals ?? 2,
-			slider_markers: markers ?? true,
-			slider_scale_base: scale_base ?? 10,
-			slider_scales: scales,
-		})
-	}
+	field ??= s.field ?? ui.create_field({
+		type: 'number',
+		min: 0,
+		max: 1,
+		decimals: 2,
+	})
 	s.field = field
 	ui.focusable(id)
 
 	let slider_min = field.slider_min ?? field.min ?? 0
 	let slider_max = field.slider_max ?? field.max ?? 1
-	decimals = field.decimals ?? 2
-	markers = (field.slider_markers ?? true) ? 1 : 0
-	scale_base = field.slider_scale_base ?? 10
-	scales = field.slider_scales ?? 0
+	let decimals = field.decimals ?? 2
+	let markers = (field.slider_markers ?? true) ? 1 : 0
+	let scale_base = field.slider_scale_base ?? 10
+	let scales = field.slider_scales ?? 0
 
 	let fr = fr0 ?? 1
 	let align = align0 ?? 's'
@@ -7122,7 +7120,7 @@ slider.create = function(
 
 	s.pad_x = pad_x
 	ui.state(id, slider_update)
-	value = ui.set_value(s, value)
+	value = ui.set_value(s, value, field)
 
 	let p_min = slider_p(field.min ?? slider_min, slider_min, slider_max)
 	let p_max = slider_p(field.max ?? slider_max, slider_min, slider_max)
@@ -7321,6 +7319,8 @@ function toggle_update(id, s) {
 	s.input_value = undefined
 	if (clicked(id+'.label'))
 		ui.focus(id)
+	if (s.field.readonly)
+		return
 	let hs = hit(id) || hit(id+'.label')
 	let focused = ui.focused(id)
 	if ((hs && ui.click) || (focused && ui.keydown(' ')))
@@ -7329,10 +7329,13 @@ function toggle_update(id, s) {
 		s.input_value = null
 }
 
-function toggle_create(cmd, id, on, fr, align, valign, min_w, min_h) {
-	let s = ui.state(id, toggle_update)
+function toggle_create(cmd, id, on, field, fr, align, valign, min_w, min_h) {
+	let s = ui.state(id)
+	field ??= s.field ?? ui.create_field({type: 'bool'})
+	s.field = field
+	s = ui.state(id, toggle_update)
 	ui.focusable(id)
-	on = ui.set_value(s, on)
+	on = ui.set_value(s, on, field)
 	let hs = hit(id) || hit(id+'.label')
 	let focused = ui.focused(id)
 	let i = ui_cmd_box_begin(cmd, fr ?? 0, align ?? 'c', valign ?? 'c',
@@ -7344,8 +7347,8 @@ function toggle_create(cmd, id, on, fr, align, valign, min_w, min_h) {
 	return on
 }
 
-toggle.create = function(cmd, id, on, fr, align, valign, min_w) {
-	return toggle_create(cmd, id, on, fr, align, valign,
+toggle.create = function(cmd, id, on, field, fr, align, valign, min_w) {
+	return toggle_create(cmd, id, on, field, fr, align, valign,
 		min_w ?? ui.em(2.25), ui.em(1.25))
 }
 toggle.ID = TOGGLE_ID
@@ -7400,8 +7403,8 @@ ui.box_widget('toggle', toggle)
 
 let checkbox = {...toggle}
 
-checkbox.create = function(cmd, id, on, fr, align, valign, min_w) {
-	return toggle_create(cmd, id, on, fr ?? 0, align, valign,
+checkbox.create = function(cmd, id, on, field, fr, align, valign, min_w) {
+	return toggle_create(cmd, id, on, field, fr ?? 0, align, valign,
 		min_w ?? ui.em(1.5), ui.em(1.5))
 }
 
@@ -7469,7 +7472,7 @@ let radio = {...checkbox}
 let RADIO_GROUP_ID = BOX_ARGS+2
 
 function radio_group_update(id, s) { s.input_value = undefined }
-ui.begin_radio_group = function(group_id) {
+ui.radio_group = function(group_id) {
 	ui.state(group_id, radio_group_update)
 }
 ui.end_radio_group = function(group_id, sel_val) {
@@ -8119,13 +8122,16 @@ ui.calendar = function(id, sel_day, ranges, fr, align, valign, min_w, min_h) {
 function date_input_update(id, s) {
 
 	s.input_value = undefined
+	if (s.field.readonly)
+		return
 
 	let picker_id = id+'.picker'
 	let input_id = id+'.input'
 
 	ui.dropdown_update(id, s)
 
-	if (ui.focused(input_id) && (ui.keydown('f2') || ui.keydown('enter'))) {
+	if (ui.focused(input_id)
+		&& (ui.keydown('f2') || ui.keydown('enter'))) {
 		ui.set_dropdown_open(id, !ui.dropdown_open(id))
 		ui.capture_keys()
 	} else if (ui.focused(input_id) && ui.keydown('escape')
@@ -8155,7 +8161,8 @@ ui.date_input = function(id, v, field, fr, align, valign, min_w) {
 	let input_id = id+'.input'
 
 	let s = ui.state(id)
-	field ??= s.field ??= ui.create_field({type: 'date'})
+	field ??= s.field ?? ui.create_field({type: 'date'})
+	s.field = field
 	ui.state(id, date_input_update)
 
 	if (clicked(id+'.label')) {
@@ -8373,8 +8380,6 @@ const GRADIENT_SLIDER_SAT     = BOX_ARGS+2
 const GRADIENT_SLIDER_HIT_P   = BOX_ARGS+3
 const GRADIENT_SLIDER_VALUE_P = BOX_ARGS+4
 
-const COLOR_HEX_RE = /^#[0-9a-f]{6}$/i
-
 function make_gradient_draw_fn(draw_pixel) {
 	return function(idata, hue, sat) {
 		if (idata.ready && idata.hue == hue && idata.sat == sat)
@@ -8471,7 +8476,7 @@ function gradient_slider(draw_gradient, name, max_value, key_step,
 
 		let text = ui.input_value(id+'.input')
 		if (text !== undefined)
-			s.input_value = text == null ? null : num(text) ?? text
+			s.input_value = text
 	}
 
 	ui.box_widget(name, {
@@ -8481,7 +8486,15 @@ function gradient_slider(draw_gradient, name, max_value, key_step,
 		create: function(cmd, id, value, hue, sat, fr, align, valign,
 			min_w, min_h
 		) {
-			let s = ui.state(id, update)
+			let s = ui.state(id)
+			s.field ??= ui.create_field({
+				type: 'number',
+				min: 0,
+				max: max_value,
+				decimals: display_decimals,
+			})
+			let field = s.field
+			s = ui.state(id, update)
 			let prev_value = s.value
 			value = ui.set_value(s, value)
 			if (is_slider_value(value))
@@ -8514,7 +8527,7 @@ function gradient_slider(draw_gradient, name, max_value, key_step,
 						if (ui.focused(id))
 							ui.focus_ring()
 					ui.end_stack()
-					ui.input(input_id, text, 0, ui.em(3), 'sr')
+					ui.input(input_id, text, field, 0, ui.em(3), 'sr')
 				ui.end_focus_group()
 			ui.end_h()
 			return value
@@ -8598,12 +8611,15 @@ function color_picker_update(id, s) {
 		s.input_value = text
 }
 
-ui.color_picker = function(id, hex) {
+ui.color_picker = function(id, hex, field) {
 	let hue_id = id+'.hue'
 	let sat_id = id+'.sat'
 	let lum_id = id+'.lum'
 	let hex_id = id+'.hex'
-	let s = ui.state(id, color_picker_update)
+	let s = ui.state(id)
+	field ??= s.field ?? ui.create_field({type: 'color'})
+	s.field = field
+	s = ui.state(id, color_picker_update)
 	let prev_hex = s.value
 	let has_input_value = s.input_value !== undefined
 	let value = ui.set_value(s, hex)
@@ -8614,13 +8630,14 @@ ui.color_picker = function(id, hex) {
 	let lum_s = ui.state_of(lum_id)
 	let hex_input_value = ui.input_value(hex_id)
 	let want_reset = !hue_s || has_caller_value_change
-		|| hex_input_value !== undefined && COLOR_HEX_RE.test(hex_input_value)
+		|| hex_input_value !== undefined
+			&& field.from_input(hex_input_value) !== undefined
 	let hue = hue_s?.valid_value
 	let sat = sat_s?.valid_value
 	let lum = lum_s?.valid_value
 	if (want_reset)
 		[hue, sat, lum] = hex_to_hsl(
-			COLOR_HEX_RE.test(value) ? value : '#808080')
+			field.from_input(value) !== undefined ? value : '#808080')
 	let hue_value = get_color_component_value(hue_id, hue, want_reset)
 	let sat_value = get_color_component_value(sat_id, sat, want_reset)
 	let lum_value = get_color_component_value(lum_id, lum, want_reset)
@@ -8651,7 +8668,7 @@ ui.color_picker = function(id, hex) {
 		ui.end_h()
 		ui.h(0, ui.sp1(), 's', 'c')
 			ui.label(hex_id, 'HEX', 0)
-			ui.input(hex_id, text, 1)
+			ui.input(hex_id, text, field, 1)
 		ui.end_h()
 	ui.end_v_aligned()
 
@@ -8660,6 +8677,9 @@ ui.color_picker = function(id, hex) {
 
 function color_input_update(id, s) {
 	s.input_value = undefined
+	if (s.field.readonly)
+		return
+
 	ui.dropdown_update(id, s)
 
 	let picker_id = id+'.picker'
@@ -8677,9 +8697,12 @@ function color_input_update(id, s) {
 	if (ui.focused(id) && ui.keydown('delete'))
 		s.input_value = null
 }
-ui.color_input = function(id, value, fr, min_w) {
+ui.color_input = function(id, value, field, fr, min_w) {
 	let picker_id = id+'.picker'
-	let s = ui.state(id, color_input_update)
+	let s = ui.state(id)
+	field ??= s.field ?? ui.create_field({type: 'color'})
+	s.field = field
+	s = ui.state(id, color_input_update)
 
 	ui.stack('', fr, 's', 's', min_w ?? ui.em_input(), ui.em(1.5))
 
@@ -8688,13 +8711,13 @@ ui.color_input = function(id, value, fr, min_w) {
 	if (!open && ui.focus_inside(picker_id))
 		ui.focus(id)
 
-	value = ui.set_value(s, value)
+	value = ui.set_value(s, value, open ? null : field)
 
 		ui.bb('input', ui.focused(id) ? 'focused' : null,
 			1, 'intense', ui.focused(id) ? 'hover' : null)
 		ui.m(ui.sp(), ui.sp())
 		ui.stack('', 1, 's', 'c', null, ui.em(1))
-			if (COLOR_HEX_RE.test(value))
+			if (field.from_input(value) !== undefined)
 				ui.bb(':'+value)
 		ui.end_stack()
 
@@ -8703,7 +8726,7 @@ ui.color_input = function(id, value, fr, min_w) {
 		if (open) {
 			ui.p(ui.sp2())
 			ui.v(0, ui.sp1())
-				ui.color_picker(picker_id, value)
+				ui.color_picker(picker_id, value, field)
 				ui.h(0, ui.sp05(), 'r')
 					ui.default_button(id+'.pick')
 					ui.primary_button(id+'.pick', S('pick', 'Pick'), 0)

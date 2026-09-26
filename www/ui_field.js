@@ -263,16 +263,6 @@ ui.add_validation_rule({
 })
 
 ui.add_validation_rule({
-	name     : 'checked_value',
-	applies  : (e) => e.checked_value !== undefined || e.unchecked_value !== undefined,
-	validate : (e, v) => v == e.checked_value || v == e.unchecked_value,
-	error    : (e, v) => S('validation_checked_value_error',
-		'{0} is not {1} or {2}' , e.label, e.checked_value, e.unchecked_value),
-	rule     : (e) => S('validation_checked_value_rule' ,
-		'{0} must be {1} or {2}', e.label, e.checked_value, e.unchecked_value),
-})
-
-ui.add_validation_rule({
 	name     : 'range_values_valid',
 	applies  : (e) => e.is_range,
 	validate : (e, v) => !e.invalid1 && !e.invalid2,
@@ -727,9 +717,25 @@ tags.to_text = function(v) {
 	return isarray(v) ? v.join(' ') : v
 }
 
-let color = {}
+//// COLOR -------------------------------------------------------------------
+
+let color = {is_color: true}
 field_types.color = color
 color.builds_text = false
+
+color.from_input = function(s) {
+	return /^#[0-9a-f]{6}$/i.test(s) ? s : undefined
+}
+
+ui.add_validation_rule({
+	name     : 'color',
+	applies  : (e) => e.is_color,
+	validate : return_true,
+	error    : (e, v) => S('validation_color_error',
+		'{0} is not #rrggbb', e.label),
+	rule     : (e) => S('validation_color_rule',
+		'{0} must be #rrggbb', e.label),
+})
 
 //// PERCENT -----------------------------------------------------------------
 

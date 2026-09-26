@@ -87,7 +87,7 @@ assert.equal(upper_field.validator.value, 'ABC')
 assert.equal(upper_field.validator.parse('abc'), 'ABC')
 
 function input(value, field = number_field) {
-	return ui.input('amount', value, null, null, null, field)
+	return ui.input('amount', value, field)
 }
 function edit(text) {
 	ctx.next_pass()
@@ -186,16 +186,16 @@ other_field.validator.validate(null)
 assert.equal(other_field.validator.failed, false)
 
 const password_field = ui.create_field({type: 'password', readonly: true})
-ui.input('password', 'secret', null, null, null, password_field)
+ui.input('password', 'secret', password_field)
 assert.equal(ui.record.input_type, 'password')
 assert(ui.record.flags & vm.runInContext('TEXT_READONLY', ctx))
 assert(ui.record.flags & vm.runInContext('TEXT_EDITABLE', ctx))
 
-ui.input('upper', 'ONE', null, null, null, upper_field)
+ui.input('upper', 'ONE', upper_field)
 assert.equal(ui.record.text, 'one')
 edit_input('upper', 'two')
 assert.equal(ui.input_value('upper'), 'TWO')
-assert.equal(ui.input('upper', 'ONE', null, null, null, upper_field), 'TWO')
+assert.equal(ui.input('upper', 'ONE', upper_field), 'TWO')
 assert.equal(ui.record.text, 'two')
 
 ui.input('plain', 'abc')
