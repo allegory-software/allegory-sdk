@@ -692,11 +692,9 @@ function init(id, e) {
 		if (cell_h == null)
 			return
 
-		let text = ui.value(e.editor_id)
-		if (text !== undefined && text !== e.edit_text) {
-			e.edit_text = text
-			e.set_cell_val(e.focused_row, e.focused_field, text, {input: e})
-		}
+		let value = ui.input_value(e.editor_id)
+		if (value !== undefined)
+			e.set_cell_val(e.focused_row, e.focused_field, value, {input: e})
 
 		if (e.editing
 				&& !ui.focused(id)
@@ -1398,7 +1396,6 @@ function init(id, e) {
 				let v0 = e.cell_input_val(row, field)
 				let v1 = field.editor_value(editor_id, v0)
 				if (v1 !== v0) {
-					e.edit_text = v1 == null ? null : field.to_input(v1)
 					e.set_cell_val(row, field, v1, {input: e})
 					has_picked_val = true
 				}

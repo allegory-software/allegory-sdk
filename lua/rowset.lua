@@ -35,28 +35,28 @@
 		hidden           : t             not visible by default
 		readonly         : f             cannot be changed
 		null_text        : ''            text for null value
-		align            : 'left'|'right'|'center' cell alignment
+		align            : 'left'|'right'|'center'   cell alignment
 		enum_values      : ['foo',...]   enum values
 		enum_labels      : {v->label}    enum labels in current language
 		not_null         : t             can't be null
 		min              : n             min allowed value
 		max              : n             max allowed value
-		slider_min       : n             slider min, defaults to min
-		slider_max       : n             slider max, defaults to max
 		decimals         : n             number of decimals
 		maxlen           : n             max length in bytes
 		w                : px            default grid column width
 		min_w            : px            min grid column width
 		max_w            : px            max grid column width
+		slider_min       : n             slider display range min
+		slider_max       : n             slider display range max
 		hour_step        : n             for the time picker
 		minute_step      : n             for the time picker
 		second_step      : n             for the time picker
 		precision        : 'd|s|ms'      date type precision
 		timeago          : f             format as relative time (see format_timeago())
 		duration_format  :               format for duration type (see format_duration())
-		magnitude        : 'K|M|G|..'   unit to pin to, filesize/count types
-		magnitude_decimals: n          decimals shown at that magnitude
-		gray_min         : n           filesize type: below this, draw gray
+		magnitude        : 'K|M|G|..'    unit to pin to, filesize/count types
+		magnitude_decimals: n            decimals shown at that magnitude
+		gray_min         : n             filesize type: below this, draw gray
 
 		lookup_rowset_name:              lookup rowset name
 		lookup_cols      :               lookup rowset cols

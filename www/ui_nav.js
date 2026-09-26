@@ -1,4 +1,4 @@
-/* ---------------------------------------------------------------------------
+/*
 
 	UI nav objects.
 	Written by Cosmin Apreutesei. Public Domain.
@@ -52,12 +52,11 @@ Sources of field attributes, in precedence order:
 	field type    ui.field_types[TYPE] = {ATTR: VAL}
 	global        ui.all_field_types[ATTR] = VAL
 
-Field attributes:
+Nav field attributes:
 
 	identification:
 
 		name           : field name (defaults to field's numeric index)
-		type           : for choosing a field preset: number, bool, etc.
 
 	rendering:
 
@@ -76,7 +75,6 @@ Field attributes:
 
 		client_default : default value/generator that new rows are initialized with.
 		has_server_default: the server fills this in, so it can be left empty.
-		readonly       : prevent editing.
 		build_editor   : f(id, v, pad_l, pad_r, h) -> v   build the widgets
 		                 that edit v and give back what the user made of it.
 		                 pad_l, pad_r, h: the box the cell drew v in. the
@@ -85,44 +83,12 @@ Field attributes:
 		                 edit by closing it.
 		edits_in_popup : build_editor builds a popup: no editor in the cell.
 
-		to_input       : f(v) -> s   value as editable text.
-		from_input     : f(s) -> v   editable text back to value (or undefined)
-
-		enum_values    : enum type: 'v1 ...' | ['v1', ...]
-		enum_labels    : enum type: {v->label}
-		enum_info      : enum type: {v->info}
-
-	validation:
-
-		not_null       : don't allow null (false).
-		required       : don't allow null (false).
-		maxlen         : max text length (256).
-
-		min            : min value (0).
-		max            : max value (inf).
-		decimals       : max number of decimals (0).
-		scale          : number type: value is stored times this (1).
-
 	formatting:
 
 		build          : f(v, mode, [fg], [row]) -> true   build the value.
-		build          : f(v, [row]) -> s            return plain text display value.
 
 		build_text    : f(s, [mode], [fg], [row]) -> true|s    build or return text.
 		build_null    : f([mode], [fg], [row]) -> true|s       build or return text.
-
-		align          : 'left'|'right'|'center'
-		attr           : custom value for html attribute `field`, for styling
-		null_text      : plain text display value for null
-		empty_text     : plain text display value for ''
-
-		magnitude          : filesize, count types: unit to pin to ('K', 'M', ...)
-		magnitude_decimals : filesize, count types: decimals at that magnitude
-		gray_min           : filesize type: below this, the value draws gray
-
-		precision      : date, datetime, time, timeofday types
-
-		duration_format: see duration() in glue.js
 
 		button_options : button type: options to pass to button()
 
@@ -478,8 +444,8 @@ function map_keys_different(m1, m2) {
 
 // global field defs ---------------------------------------------------------
 
-let field_types      = ui.field_types      = {} // {TYPE->{K: V}}
-let all_field_types  = ui.all_field_types  = {} // {K: V}
+let field_types = ui.field_types
+let all_field_types = ui.all_field_types
 let rowset_col_attrs = ui.rowset_col_attrs = {} // {ROWSET.COL->{K:V}}
 
 // rowsets defined in JS, looked up by the same name a server rowset would
@@ -732,7 +698,7 @@ ui.nav = function(opt) {
 			e.changed_rows = null // set(row)
 			rows_moved = false
 
-			e.row_validator = create_validator(e)
+			e.row_validator = ui.create_validator(e)
 
 			// free all fields
 
@@ -789,16 +755,16 @@ ui.nav = function(opt) {
 				if (field.readonly)
 					continue
 
-				field.validator = create_validator(field)
-
 				// field.validator_NAME = rule adds a rule named NAME.
+				let own_rules = []
 				for (let k in field) {
 					if (k.startsWith('validator_')) {
 						let rule = field[k]
 						rule.name = k.replace(/^validator_/, '')
-						field.validator.add_rule(rule)
+						own_rules.push(rule)
 					}
 				}
+				field.validator = ui.create_validator(field, own_rules)
 
 				// parsing these here after we have a parser as they depend on type.
 				if (field.min != null) field.min = field.validator.parse(field.min)
@@ -1072,12 +1038,6 @@ ui.nav = function(opt) {
 
 	// fields array matching 1:1 to row contents ------------------------------
 
-	// the field is the subject of the event, not its name: listeners get
-	// (nav, field, ...) the same way a nav event gives them (nav, ...).
-	function field_announce(ev, ...args) {
-		e.announce(ev, this, ...args)
-	}
-
 	function init_field(f, fi) {
 
 		let field = {}
@@ -1117,8 +1077,6 @@ ui.nav = function(opt) {
 
 		if (field.lookup_nav)
 			assign(field, lookup_editor)
-
-		field.announce = field_announce // for validator
 
 		if (e.init_field)
 			e.init_field(field)
@@ -3124,7 +3082,6 @@ ui.nav = function(opt) {
 	e.editor_id = null
 	e.edit_sel_i = 0
 	e.edit_sel_len = 1/0
-	e.edit_text = null
 	e.want_dropdown_open = false
 
 	// cells that act on a click instead of opening an editor.
@@ -3173,8 +3130,6 @@ ui.nav = function(opt) {
 		let editor_type = field.lookup_rowset_name || field.type
 		e.editor_id = editor_type + '.editor'
 		if (field.has_editor) {
-			let v = e.cell_input_val(row, field)
-			e.edit_text = v == null ? null : field.to_input(v)
 			e.want_dropdown_open = opt?.open_popup != false
 				|| !!field.edits_in_popup
 			// by key: that is what focuses the input element. a click can't, the
@@ -3196,7 +3151,6 @@ ui.nav = function(opt) {
 		e.editing = false
 		e.advance_on_exit = false
 		e.editor_id = null
-		e.edit_text = null
 		e.want_dropdown_open = false
 		if (ev && ev.cancel) {
 			if (row && field)
@@ -4564,7 +4518,7 @@ function field_value(e, v) {
 	return str(v)
 }
 
-add_validation_rule({
+ui.add_validation_rule({
 	name: 'pk',
 	props: 'pk',
 	applies  : (e) => e.pk,
@@ -4578,7 +4532,7 @@ add_validation_rule({
 			e.pk_fields.map(field => field.label).join(' + ')),
 })
 
-add_validation_rule({
+ui.add_validation_rule({
 	name     : 'lookup',
 	props    : 'lookup_rowset_name lookup_cols local_cols',
 	vprops   : 'input_value',
@@ -4595,11 +4549,8 @@ add_validation_rule({
 
 /*
 
-Displaying a value:
+Displaying a grid value:
 
-	to_text        : f(v) -> s             display value
-	to_input       : f(v) -> s             value as editable text
-	from_input     : f(s) -> v             parse editable text
 	build          : f(v, mode, [fg], [row], [full_width]) -> true|s
 	build_text     : f(s, [mode], [fg], [row], [full_width]) -> true|s
 	build_null     : f([mode], [fg], [row]) -> true|s
@@ -4659,41 +4610,6 @@ ui.color_def('dark' , 'error-text', 'normal',   0, 0.85, 0.65)
 ui.color_def('light', 'modified', 'normal', 120, 1.00, 0.35)
 ui.color_def('dark' , 'modified', 'normal', 120, 0.59, 0.65)
 
-assign(all_field_types, {
-	type: 'text',
-	default: null,
-	w: 100,
-	min_w: 22,
-	max_w: 2000,
-	align: 'left',
-	not_null: false,
-	required: false,
-	sortable: true,
-	movable: true,
-	groupable: true,
-	maxlen: 256,
-	null_text : S('null_text', ''),
-	empty_text: S('empty_text', 'empty text'),
-	builds_text: true,
-	has_editor: true,
-})
-
-all_field_types.to_text = function(v) {
-	return String(v)
-}
-
-// to_input(v) -> s, inverse of from_input(s) -> v. filesize, count and date
-// override it: from_input() can't read back a magnitude suffix or a timeago text.
-all_field_types.to_input = function(v) {
-	return this.to_text(v)
-}
-
-function build_text_editor(field, id, fr, align, valign, max_w, w, h) {
-	let e = field.nav
-	ui.text_editable(id, e.edit_text,
-		fr, align ?? field.align, valign ?? 'c', max_w, w, h)
-}
-
 all_field_types.focus_editor = function(id, sel_i, sel_len) {
 	ui.focus(id, true)
 	ui.select_text(id, sel_i, sel_len)
@@ -4713,15 +4629,16 @@ all_field_types.editor_caret_at_edge = function(id, d) {
 // same call as build_text(), so the cell doesn't shift on entering edit.
 all_field_types.build_editor = function(id, v, pad_l, pad_r, h) {
 	ui.p(pad_l, 0, pad_r, 0)
-	build_text_editor(this, id, 0, this.align, 'c', null)
+	ui.text_editable(id, v, 0, this.align, 'c', null, null, null, this)
 }
 
 // builds the control under `id`; nav_input reads what the user made of it
 // with ui.input_value(id).
 all_field_types.build_input = function(id, v, readonly, min_w) {
-	ui.input(id, v == null ? null : this.to_input(v),
-		1, min_w, null, readonly)
+	ui.input(id, v, 1, min_w, null, readonly ? readonly_text_field : this)
 }
+
+let readonly_text_field = ui.create_field({readonly: true})
 
 all_field_types.fixed_width = 0
 
@@ -4774,62 +4691,7 @@ dropdown_editor.dropdown_picked = function(id) {
 	return ui.dropdown_picked(id)
 }
 
-// text ----------------------------------------------------------------------
-
-// the default type: all its behavior comes from all_field_types.
-field_types.text = {}
-
-// passwords -----------------------------------------------------------------
-
-field_types.password = {}
-
-// numbers -------------------------------------------------------------------
-
-let number = {align: 'right', decimals: 0, scale: 1, is_number: true}
-field_types.number = number
-
-number.from_input = function(s) {
-	let x = num(s)
-	return x != null ? x * this.scale : x
-}
-
-number.to_text = function(s) {
-	let x = num(s)
-	return x != null ? dec(x / this.scale, this.decimals) : s
-}
-
-number.to_input = function(s) {
-	let x = num(s)
-	return x != null ? str(x / this.scale) : s
-}
-
-// file sizes ----------------------------------------------------------------
-
-let filesize = assign({}, number)
-field_types.filesize = filesize
-
-// small means the value displays as 0 at this field's magnitude_decimals
-// and magnitude, e.g. an 800-byte value forced to display in MB.
-filesize.is_small = function(x) {
-	if (x == null)
-		return true
-	let min = this.gray_min
-	if (min != null)
-		return x < min
-	return num(this.to_text(x)) === 0
-}
-
-filesize.to_text = function(s) {
-	let x = num(s)
-	if (x == null)
-		return s
-	let mag = this.magnitude
-	let dec = this.magnitude_decimals || 0
-	return format_kbytes(x, dec, mag)
-}
-
-// from_input() doesn't read the magnitude suffix back.
-filesize.to_input = number.to_text
+let filesize = field_types.filesize
 
 filesize.build = function(x, mode, fg) {
 	let s = this.to_text(x)
@@ -4842,64 +4704,7 @@ filesize.build = function(x, mode, fg) {
 	return s
 }
 
-filesize.scale_base = 1024
-filesize.scales = [1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200, 250, 500]
-
-// counts --------------------------------------------------------------------
-
-let count = assign({}, number)
-field_types.count = count
-
-count.to_text = function(s) {
-	let x = num(s)
-	if (x == null)
-		return s
-	let mag = this.magnitude
-	let dec = this.magnitude_decimals || 0
-	return format_kcount(x, dec, mag)
-}
-
-count.to_input = number.to_text
-
-// dates ---------------------------------------------------------------------
-
-let date = {
-	align: 'right',
-	is_time: true,
-	w: 80,
-	precision: 'd',
-	min: parse_date('1000-01-01 00:00:00', 'SQL'),
-	max: parse_date('9999-12-31 23:59:59', 'SQL'),
-	from_input: function(s) { return parse_date(s, null, true, this.precision) },
-}
-field_types.date = date
-
-date.to_text = function(v) {
-	if (!isnum(v)) // invalid
-		return str(v)
-	if (this.timeago)
-		return format_timeago(v)
-	return format_date(v, null, this.precision)
-}
-
-// timeago text doesn't parse back.
-date.to_input = function(v) {
-	if (!isnum(v)) // invalid
-		return str(v)
-	return format_date(v, null, this.precision)
-}
-
-let dt = assign({}, date, {precision: 'm', w: 140})
-field_types.datetime = dt
-
-// timestamps ----------------------------------------------------------------
-
-let ts = assign({}, date)
-field_types.time = ts
-
-ts.has_time = true
-ts.precision = 's'
-ts.w = 160
+let date = field_types.date
 
 date.open_dropdown = function(id) {
 	ui.set_dropdown_open(id+'.calendar', true)
@@ -4948,7 +4753,7 @@ date.build_editor = function(id, v, pad_l, pad_r, h) {
 				ui.p(pad_l, 0, 0, 0)
 				ui.icon(calendar_id, 'calendar', 0, 'l', 'c', null, null, h)
 				ui.p(0, 0, pad_r, 0)
-				build_text_editor(this, id, 1, this.align, 'c')
+				ui.text_editable(id, v, 1, this.align, 'c', null, null, null, this)
 			ui.end_h()
 		ui.end_stack()
 
@@ -4982,39 +4787,7 @@ date.editor_value = function(id, v) {
 	return day !== undefined ? day : v
 }
 
-// timeofday (MySQL TIME type) -----------------------------------------------
-
-let td = {
-	align: 'center',
-	is_timeofday: true,
-	from_input: function(s) { return parse_timeofday(s, true, this.precision) },
-}
-field_types.timeofday = td
-
-td.to_text = function(v) {
-	if (!isnum(v)) // invalid
-		return str(v)
-	return format_timeofday(v, this.precision)
-}
-
-// duration ------------------------------------------------------------------
-
-let d = {align: 'right', is_duration: true}
-field_types.duration = d
-
-d.to_text = function(v) {
-	if (!isnum(v)) return v // invalid
-	return format_duration(v, this.duration_format)
-}
-
-// booleans ------------------------------------------------------------------
-
-// no editor: the value is toggled by click and space, and the cell keeps
-// building itself while an edit is carried through it.
-let bool = {align: 'center', min_w: 20, w: 20, is_bool: true,
-	builds_text: false, has_editor: false}
-field_types.bool = bool
-
+let bool = field_types.bool
 
 bool.build_input = function(id, v, readonly, min_w) {
 	ui.checkbox(id, v, 0, this.align ?? 'c', 'c', min_w)
@@ -5049,14 +4822,8 @@ bool.build = function(v, mode, fg, row) {
 
 // enums ---------------------------------------------------------------------
 
-let enm = {}
-field_types.enum = enm
+let enm = field_types.enum
 assign(enm, dropdown_editor)
-
-enm.to_text = function(v) {
-	let s = this.enum_labels ? this.enum_labels[v] : undefined
-	return s !== undefined ? s : v
-}
 
 enm.edits_in_popup = true
 
@@ -5215,23 +4982,10 @@ lookup_editor.dropdown_picked = function(id) {
 	return ui.dropdown_picked(id)
 }
 
-// tag lists -----------------------------------------------------------------
-
-let tags = {}
-field_types.tags = tags
-
-tags.tags_format = 'words' // words | array
-
-tags.to_text = function(v) {
-	return isarray(v) ? v.join(' ') : v
-}
-
 // colors --------------------------------------------------------------------
 
-let color = {}
-field_types.color = color
+let color = field_types.color
 assign(color, dropdown_editor)
-color.builds_text = false
 
 color.build = function(v, mode) {
 	if (!mode)
@@ -5281,15 +5035,7 @@ color.build_editor = function(id, v, pad_l, pad_r, h) {
 	ui.end_dropdown(id)
 }
 
-// percents ------------------------------------------------------------------
-
-// 50% at the default scale of 100 is stored as 5000.
-let percent = assign({}, number, {scale: 100, decimals: 2})
-field_types.percent = percent
-
-percent.to_text = function(p) {
-	return isnum(p) ? dec(p / this.scale, this.decimals) + '%' : p
-}
+let percent = field_types.percent
 
 percent.build = function(p, mode, fg, row, full_width) {
 	let s = this.to_text(p)
@@ -5311,8 +5057,7 @@ percent.build = function(p, mode, fg, row, full_width) {
 
 // icons ---------------------------------------------------------------------
 
-let icon = {align: 'center'}
-field_types.icon = icon
+let icon = field_types.icon
 
 icon.build = function(v, mode, fg) {
 	if (!mode)
@@ -5321,15 +5066,7 @@ icon.build = function(v, mode, fg) {
 	ui.icon('', v, 0, this.align, 'c')
 }
 
-// columns -------------------------------------------------------------------
-
-let col = {}
-field_types.col = col
-
-// google maps places --------------------------------------------------------
-
-let place = {}
-field_types.place = place
+let place = field_types.place
 
 // place vals are {place_id:, description:} or a plain description string.
 place.build = function(v, mode, fg, row, full_width) {
@@ -5346,31 +5083,9 @@ place.build = function(v, mode, fg, row, full_width) {
 	ui.end_h()
 }
 
-// URLs ----------------------------------------------------------------------
-
-let url = {}
-field_types.url = url
-
-// phone numbers -------------------------------------------------------------
-
-let phone = {}
-field_types.phone = phone
-
-// emails --------------------------------------------------------------------
-
-let email = {}
-field_types.email = email
-
-email.validator_email = {
-	validate : (e, v) => v.includes('@'),
-	error    : (e, v) => S('validation_error_email', 'Not a valid email.'),
-	rule     : (e) => S('validation_rule_email', 'Email must be valid.'),
-}
-
 // buttons -------------------------------------------------------------------
 
-let btn = {align: 'center', readonly: true}
-field_types.button = btn
+let btn = field_types.button
 
 // TODO: btn.build, and btn.click calling field.action(v, row, field).
 btn.build = function(v, mode) {
@@ -5381,13 +5096,6 @@ btn.click = function() {
 	// TODO
 }
 
-// public_key, secret_key, private_key ---------------------------------------
-
-// TODO: these want a mono-font editor: single-line for secret_key,
-// multi-line for public_key and private_key.
-field_types.secret_key  = {}
-field_types.public_key  = {}
-field_types.private_key = {}
 
 }
 

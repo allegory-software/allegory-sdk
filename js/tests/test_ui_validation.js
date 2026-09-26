@@ -2,27 +2,43 @@ const fs = require('fs')
 const vm = require('vm')
 const path = require('path')
 
-const SRC = path.join(__dirname, '..', '..', 'www', 'ui_validation.js')
+const SRC = path.join(__dirname, '..', '..', 'www', 'ui_field.js')
 
 let ctx = {
 	console,
 	TextEncoder,
 	ui: {},
 	glue: {
+		assign: Object.assign,
+		assign_opt: Object.assign,
+		noop: () => {},
+		display_name: s => s,
+		set: () => new Set(),
+		num: Number,
+		isnum: v => typeof v == 'number',
 		isstr: v => typeof v == 'string',
+		isbool: v => typeof v == 'boolean',
+		isarray: Array.isArray,
+		str: String,
+		dec: String,
 		repl: (v, v0, v1) => v === v0 ? v1 : v,
-		property: () => {},
 		assert: v => { if (!v) throw new Error('assertion failed'); return v },
 		obj: () => Object.create(null),
 		map: () => new Map(),
-		wordset: s => Object.fromEntries((s || '').split(/\s+/).filter(Boolean).map(k => [k, true])),
 		empty_array: [],
 		return_true: () => true,
 		words: s => (s || '').split(/\s+/).filter(Boolean),
 		uniq_sorted: a => a,
 		try_json_arg: JSON.parse,
-		assign: Object.assign,
-		announce: () => {},
+		warn: () => {},
+		format_kbytes: String,
+		format_kcount: String,
+		format_date: String,
+		parse_date: () => 0,
+		parse_timeofday: () => 0,
+		format_timeofday: String,
+		format_duration: String,
+		format_timeago: String,
 		S: (k, s) => s,
 	},
 }
@@ -31,7 +47,7 @@ ctx.window = ctx
 vm.createContext(ctx)
 vm.runInContext(fs.readFileSync(SRC, 'utf8'), ctx, {filename: SRC})
 
-let rules = ctx.validation_rules
+let rules = ctx.ui.validation_rules
 let failed = 0
 
 function eq(got, want, what) {

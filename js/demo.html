@@ -4,7 +4,7 @@
 <base href="../www/">
 <script src=glue.js></script>
 <script src=ui.js></script>
-<script src=ui_validation.js></script>
+<script src=ui_field.js></script>
 <script src=ui_nav.js></script>
 <script src=ui_grid.js></script>
 <script src=ui_code_edit.js></script>
@@ -727,6 +727,15 @@ ui.end_hsplit()
 
 date_input1_v = parse_date('2026-03-14', 'SQL')
 date_input3_v = parse_date('2026-09-17 13:45:00', 'SQL')
+date_input3_field = ui.create_field({type: 'datetime'})
+num_slider1_field = ui.create_field({
+	type: 'number',
+	min: 10,
+	max: 90,
+	slider_min: 0,
+	slider_max: 100,
+	decimals: 2,
+})
 color_input1_v = '#1e90ff'
 demos.input_controls = `
 ui.v_aligned(0, ui.sp2(), 'c', 'c')
@@ -753,7 +762,7 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('date_input3', 'Date & time', 0)
 		date_input3_v = ui.date_input('date_input3', date_input3_v,
-			{precision: 'm'})
+			date_input3_field)
 	ui.end_h()
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('color_input1', 'Color', 0)
@@ -762,7 +771,7 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('num_slider1', 'Number slider', 0)
 		num_slider1_value = ui.num_slider(
-			'num_slider1', num_slider1_value, 0, 100, 2)
+			'num_slider1', num_slider1_value, num_slider1_field)
 	ui.end_h()
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('slider1', 'Slider', 0)
@@ -914,7 +923,7 @@ demos.num_slider = `
 ui.v(0, ui.sp(), 'c', 'c', 300)
 	ui.box_args(0)
 	num_slider1_value = ui.num_slider(
-		'num_slider1', num_slider1_value, 0, 100, 2)
+		'num_slider1', num_slider1_value, num_slider1_field)
 ui.end_v()
 `
 
@@ -1200,6 +1209,8 @@ function demo_share_screen_init() {
 	}
 }
 
+let sid_field = ui.create_field({readonly: true})
+let offer_sid_field = ui.create_field({readonly: true})
 to_sid = ''
 demos.share_screen = `
 ui.mt(ui.sp())
@@ -1209,7 +1220,7 @@ ui.v(1, ui.sp())
 	ui.h(0, ui.sp())
 		ui.text('', 'My ID', 0)
 		let my_sid = offer_con.signal_con.sid
-		ui.input('sid', my_sid, null, null, null, true)
+		ui.input('sid', my_sid, null, null, null, sid_field)
 		ui.text('', 'Other ID', 0)
 		to_sid = ui.input('to_sid', to_sid)
 		if (!offer_con.open && my_sid)
@@ -1243,7 +1254,7 @@ ui.v(1, ui.sp())
 	ui.h(0, ui.sp())
 		ui.text('', 'My ID', 0)
 		let my_sid = answer_con.signal_con.sid
-		ui.input('sid', my_sid, null, null, null, true)
+		ui.input('sid', my_sid, null, null, null, sid_field)
 		ui.text('', 'Other ID')
 		to_sid = ui.input('to_sid', to_sid)
 		if (!answer_con.open && my_sid)
@@ -1275,7 +1286,7 @@ ui.v(1, ui.sp())
 	ui.h(0, ui.sp())
 		ui.text('', 'My ID')
 		let my_sid = str(offer_con.signal_con.sid)
-		ui.input('offer_sid', my_sid, null, null, null, true)
+		ui.input('offer_sid', my_sid, null, null, null, offer_sid_field)
 		if (offer_con.open) {
 			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c', 'c', ui.em(10))) {
 				offer_con.close()

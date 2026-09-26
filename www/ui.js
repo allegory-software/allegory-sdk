@@ -36,14 +36,13 @@ INPUT
 	ui.button          (id, s, fr, align, valign, min_w, min_h, style)
 	ui.icon_button     (id, icon, [s], fr, align, valign, min_w, min_h, style)
 	ui.label           (for_id, s, fr, align, valign)
-	ui.input           (id, s, fr, w, [text_align], [readonly])
+	ui.input           (id, v, fr, w, [text_align], [field], [no_box]) -> v
 	ui.list_dropdown   (id, items, sel_i, fr, max_w, min_w) -> sel_i
 	ui.toggle          (id, on, fr, align, valign, min_w)
 	ui.checkbox        (id, on, fr, align, valign, min_w)
-	ui.date_input      (id, v, [opt], fr, align, valign, min_w) -> v
-	                   opt: {precision:, min:, max:, readonly:,
-	                       to_input: f(v) -> s, from_input: f(s) -> v}
+	ui.date_input      (id, v, [field], fr, align, valign, min_w) -> v
 	ui.color_input     (id, v, fr, min_w) -> v
+	ui.num_slider      (id, v, [field_or_min], [max], [decimals]) -> v
 
 LIST
 
@@ -4913,10 +4912,10 @@ ui.set_value = function(s, value) {
 /*
 TEXT BOXES
 
-	ui.text            (id, s, fr, align, valign, max_w, w, h, 'line'|'word'|0, editable, input_type)
-	ui.text_editable   (id, s, fr, align, valign, max_w, w, h, input_type)
-	ui.text_lines      (id, s, fr, align, valign, max_w, w, h, editable)
-	ui.text_wrapped    (id, s, fr, align, valign, max_w, w, h, editable)
+	ui.text            (id, v, fr, align, valign, max_w, w, h, wrap, field)
+	ui.text_editable   (id, v, fr, align, valign, max_w, w, h, field)
+	ui.text_lines      (id, v, fr, align, valign, max_w, w, h)
+	ui.text_wrapped    (id, v, fr, align, valign, max_w, w, h)
 	ui.heading(size, s, [align])
 	hi.h1(s, [align])
 	ui.h2(s, [align])
@@ -4983,14 +4982,28 @@ function editable_text_update(id, s) {
 }
 
 // max_w : clip text beyond max_w. makes sense when w is not given.
-// w     : fixate box width, clip text beyond it; default is text width.
+// w, h  : fixate box w/h, clip text beyond it; default is measured text w/h.
 // so by default text has dynamic w, and you can first cap it then fixate it.
 ui.text = function(
-	id, text, fr, align, valign, max_w, w, h, wrap,
-	editable, input_type, readonly
+	id, value, fr, align, valign, max_w, w, h, wrap, field
 ) {
-	// NOTE: w and h default to measured text size.
-	text = String(text ?? '')
+	let text
+	if (field) { // editable
+		let s = ui.state(id, editable_text_update)
+		ui.focusable(id)
+		let value0 = s.value
+		let field0 = s.field
+		s.field = field
+		value = ui.set_value(s, repl(value ?? null, '', null))
+		if (s.text === undefined || s.input_value === undefined
+				&& (value !== value0 || field != field0)) {
+			s.text = value == null ? '' : field.to_input(value)
+			field.validator?.validate(value)
+		}
+		text = s.text
+	} else {
+		text = String(value ?? '')
+	}
 	wrap = wrap == 'line' ? TEXT_WRAP_LINE : wrap == 'word' ? TEXT_WRAP_WORD : 0
 	if (wrap == TEXT_WRAP_LINE) {
 		if (text.includes('\n'))
@@ -4998,15 +5011,6 @@ ui.text = function(
 	} else if (wrap == TEXT_WRAP_WORD) {
 		ui.state(id)
 		text = word_wrapper(id, text)
-	}
-	let value
-	if (editable) {
-		let s = ui.state(id, editable_text_update)
-		ui.focusable(id)
-		value = s.input_value !== undefined
-			? s.input_value : repl(text, '', null)
-		s.value = value
-		text = value ?? ''
 	}
 	let box_align = align ?? 'l'
 	let text_align = 0
@@ -5036,8 +5040,8 @@ ui.text = function(
 	a[n++] = text
 	a[n++] = wrap // flags
 		| text_align
-		| (editable ? TEXT_EDITABLE : 0)
-		| (readonly ? TEXT_READONLY : 0)
+		| (field ? TEXT_EDITABLE : 0)
+		| (field?.readonly ? TEXT_READONLY : 0)
 		| (ui.focused(id) ? TEXT_FOCUSED : 0)
 		| (ui.focused(id) && ui.focused_by_key ? TEXT_FOCUSED_BY_KEY : 0)
 		| text_flags
@@ -5053,8 +5057,8 @@ ui.text = function(
 		a[n++] = text_font_weight
 	if (text_flags & TEXT_LINE_GAP)
 		a[n++] = text_line_gap
-	if (editable)
-		a[n++] = input_type
+	if (field)
+		a[n++] = field.input_type
 	if (text_flags & TEXT_MARKED) {
 		a[n++] = mark_i1
 		a[n++] = mark_i2
@@ -5063,19 +5067,20 @@ ui.text = function(
 	ui_cmd_box_end(i)
 	text_flags = 0
 
-	return editable ? value : text
+	return field ? value : text
 }
 ui.text_editable = function(
-	id, s, fr, align, valign, max_w, w, h, input_type, readonly
+	id, value, fr, align, valign, max_w, w, h, field
 ) {
-	return ui.text(id, s, fr, align, valign, max_w, w, h,
-		null, true, input_type, readonly)
+	if (!field)
+		field = ui.state(id).field ??= ui.create_field()
+	return ui.text(id, value, fr, align, valign, max_w, w, h, null, field)
 }
-ui.text_lines = function(id, s, fr, align, valign, max_w, w, h, editable) {
-	return ui.text(id, s, fr, align, valign, max_w, w, h, 'line', editable)
+ui.text_lines = function(id, s, fr, align, valign, max_w, w, h) {
+	return ui.text(id, s, fr, align, valign, max_w, w, h, 'line')
 }
-ui.text_wrapped = function(id, s, fr, align, valign, max_w, w, h, editable) {
-	return ui.text(id, s, fr, align, valign, max_w, w, h, 'word', editable)
+ui.text_wrapped = function(id, s, fr, align, valign, max_w, w, h) {
+	return ui.text(id, s, fr, align, valign, max_w, w, h, 'word')
 }
 ui.heading = function(font_size, s, align) {
 	ui.font_size(font_size)
@@ -5398,7 +5403,7 @@ ui.text_selection = function(id, from_end, wanted) {
 	}
 	// where the caret is now. `from_end` helps decide the direction.
 	let s = ui.state(id)
-	let n = (ui.value(id) ?? '').length
+	let n = (s.text ?? '').length
 	let a = s.anchor ?? 0 // the end it was made from
 	let c = s.caret  ?? 0 // the end it was dragged to
 	let i1 = min(a, c)
@@ -5515,10 +5520,18 @@ function read_input_sel(t, input) {
 	t.caret  = backward ? input.selectionStart : input.selectionEnd
 }
 
+function set_text_input_value(s, text) {
+	s.text = text
+	let input_value = repl(text, '', null)
+	let validator = s.field.validator
+	validator.validate(input_value)
+	s.input_value = validator.parse_failed ? input_value : validator.value
+}
+
 function input_text_changed() {
 	let s = ui.state_of(this._ui_id)
 	if (!s) return
-	s.input_value = repl(this.value, '', null)
+	set_text_input_value(s, this.value)
 	read_input_sel(s, this)
 	forget_selection(s)
 	animate()
@@ -5628,7 +5641,7 @@ ui.process_shared_screen_input = function(p, t) {
 	} else if (t.event == 'input') {
 		let s = ui.state_of(t.input)
 		if (!s) return
-		s.input_value = repl(t.value, '', null)
+		set_text_input_value(s, t.value)
 		s.anchor = t.anchor
 		s.caret = t.caret
 		applied_edit_n = t.n
@@ -6837,22 +6850,24 @@ ui.em_input           = () => ui.em(ui.input_min_w_em)
 ui.em_input_max       = () => ui.em(ui.input_max_w_em)
 ui.em_input_max_popup = () => ui.em(ui.input_max_popup_w_em)
 
-ui.input = function(id, s, fr, w, text_align, readonly) {
+ui.input = function(id, value, fr, w, text_align, field, no_box) {
 	if (clicked(id+'.label')) {
 		ui.focus(id)
 		ui.select_text(id, 0, 1/0)
 	}
-	ui.stack('', fr, 's', 's')
-		ui.bb(
-			'input', ui.focused(id) ? 'focused' : null,
-			1, 'intense', ui.focused(id) ? 'hover' : null)
+	let focused = ui.focused(id)
+	if (!no_box) {
+		ui.stack('', fr, 's', 's')
+		ui.bb('input', focused ? 'focused' : null,
+			1, 'intense', focused ? 'hover' : null)
 		ui.p(ui.sp())
-		ui.color('text', ui.focused(id) ? 'focused' : null)
-		s = ui.text(id, s, 1, text_align ?? 's', 'c', null,
-			w ?? ui.em_input(), null,
-			null, true, null, readonly)
-	ui.end_stack()
-	return s
+		ui.color('text', focused ? 'focused' : null)
+	}
+	value = ui.text_editable(id, value, no_box ? fr : 1,
+		text_align ?? 's', 'c', null, w ?? ui.em_input(), null, field)
+	if (!no_box)
+		ui.end_stack()
+	return value
 }
 
 //// NUM_SLIDER --------------------------------------------------------------
@@ -6862,9 +6877,11 @@ function num_slider_update(id, s) {
 	s.input_value = undefined
 
 	let input_id = id+'.input'
-	let from = s.from
-	let to = s.to
-	let decimals = s.decimals
+	let field = s.field
+	let from = field.slider_min ?? field.min ?? 0
+	let to = field.slider_max ?? field.max ?? 1
+	let p_min = slider_p(field.min ?? from, from, to)
+	let p_max = slider_p(field.max ?? to, from, to)
 
 	if (clicked(id+'.label'))
 		ui.focus(id)
@@ -6872,8 +6889,6 @@ function num_slider_update(id, s) {
 	if (focused && (ui.keydown('f2') || ui.keydown('enter') || ui.dblclicked(id))) {
 		s.editing = !s.editing
 		if (s.editing) {
-			ui.state(input_id).value =
-				isnum(s.value) ? dec(s.value, decimals) : s.value
 			ui.select_text(input_id, 0, 1/0)
 			ui.focus(input_id)
 		} else {
@@ -6888,9 +6903,9 @@ function num_slider_update(id, s) {
 		s.editing = false
 	}
 
-	let box_v = ui.input_value(input_id)
-	if (box_v !== undefined)
-		s.input_value = box_v == null ? null : num(box_v) ?? box_v
+	let value = ui.input_value(input_id)
+	if (value !== undefined)
+		s.input_value = value
 
 	if (!s.editing) {
 		let cs = ui.drag(id+'.handle')
@@ -6899,14 +6914,15 @@ function num_slider_update(id, s) {
 				ui.keydown('arrowleft') && -1)
 		if (cs) {
 			if (cs.drag) {
-				cs.x0 = lerp(slider_p(s.value, from, to), 0, 1, 0, s.w)
+				let p = clamp(slider_p(s.value, from, to), p_min, p_max)
+				cs.x0 = lerp(p, 0, 1, 0, s.w)
 				ui.focus(id)
 			}
-			let p = clamp((cs.x0 + cs.dx) / s.w, 0, 1)
+			let p = clamp((cs.x0 + cs.dx) / s.w, p_min, p_max)
 			s.input_value = lerp(p, 0, 1, from, to)
 		} else if (d) {
 			let p = clamp(slider_p(s.value, from, to)
-				+ d * (ui.keypressed('shift') ? .01 : .1), 0, 1)
+				+ d * (ui.keypressed('shift') ? .01 : .1), p_min, p_max)
 			s.input_value = lerp(p, 0, 1, from, to)
 		} else if (focused && ui.keydown('delete')) {
 			s.input_value = null
@@ -6915,20 +6931,30 @@ function num_slider_update(id, s) {
 			ui.set_cursor('ew-resize')
 	}
 }
-ui.num_slider = function(id, value, from, to, decimals) {
+ui.num_slider = function(
+	id, value, field_or_min, max, decimals
+) {
 	let s = ui.state(id)
-	from ??= 0
-	to ??= 1
-	decimals ??= 2
-	s.from = from
-	s.to = to
-	s.decimals = decimals
+	let field
+	if (isobj(field_or_min)) {
+		field = field_or_min
+	} else {
+		field = s.field ??= ui.create_field({
+			type: 'number',
+			min: field_or_min ?? 0,
+			max: max ?? 1,
+			decimals: decimals ?? 2,
+		})
+	}
+	s.field = field
+	let from = field.slider_min ?? field.min ?? 0
+	let to = field.slider_max ?? field.max ?? 1
 	s = ui.state(id, num_slider_update)
-	let v0 = s.value
 	value = ui.set_value(s, value)
-	let replaced = s.editing && s.input_value === undefined && value !== v0
 
-	let p = slider_p(value, from, to)
+	let p_min = slider_p(field.min ?? from, from, to)
+	let p_max = slider_p(field.max ?? to, from, to)
+	let p = clamp(slider_p(value, from, to), p_min, p_max)
 	let input_id = id+'.input'
 	let focused = ui.focused(s.editing ? input_id : id)
 	if (!s.editing)
@@ -6940,7 +6966,7 @@ ui.num_slider = function(id, value, from, to, decimals) {
 	let min_w = min_w0 ?? ui.em_input()
 	ui.clear_box_args()
 
-	let formatted = isnum(value) ? dec(value, decimals) : value
+	let text = field.to_text(value)
 
 	ui.stack(id, fr, align, valign, min_w)
 		ui.bb(
@@ -6948,7 +6974,9 @@ ui.num_slider = function(id, value, from, to, decimals) {
 			1, 'intense', focused ? 'hover' : null)
 		ui.p(1)
 		ui.h(0, 0, 's', 's')
-			ui.stack('', p, 's', 's')
+			ui.stack('', p_min, 's', 's')
+			ui.end_stack()
+			ui.stack('', p - p_min, 's', 's')
 				ui.bb('bg3')
 			ui.end_stack()
 			ui.stack('', 1 - p, 's', 's')
@@ -6961,10 +6989,10 @@ ui.num_slider = function(id, value, from, to, decimals) {
 		ui.p(ui.sp())
 		ui.color('text', focused ? 'focused' : null)
 		if (s.editing)
-			ui.text(input_id, replaced ? formatted : ui.value(input_id),
-				1, 'r', 'c', null, 0, null, null, true)
+			ui.text_editable(input_id, value, 1, 'r', 'c', null, 0, null,
+				field)
 		else
-			ui.text('', formatted, 1, 'r', 'c', null, 0)
+			ui.text('', text, 1, 'r', 'c', null, 0)
 		ui.measure(id)
 	ui.end_stack()
 
@@ -8067,23 +8095,6 @@ ui.calendar = function(id, sel_day, ranges, fr, align, valign, min_w, min_h) {
 
 //// DATE INPUT --------------------------------------------------------------
 
-function date_input_text(v, opt) {
-	if (opt && opt.to_input)
-		return opt.to_input(v)
-	if (!isnum(v))
-		return str(v)
-	return format_date(v, null, opt && opt.precision || 'd')
-}
-
-function date_input_value(s, opt) {
-	if (opt && opt.from_input) {
-		let v = opt.from_input(s)
-		return v === undefined ? s : v
-	}
-	let v = parse_date(s, null, true, opt && opt.precision || 'd')
-	return v === undefined ? s : v
-}
-
 function date_input_update(id, s) {
 
 	s.input_value = undefined
@@ -8108,23 +8119,22 @@ function date_input_update(id, s) {
 		s.input_value = ui.dropdown_picked(id)
 			? ui.value(picker_id) : s.revert_value
 
-	let text = ui.input_value(input_id)
-	if (text !== undefined)
-		s.input_value = text == null ? null : date_input_value(text, s.opt)
+	let value = ui.input_value(input_id)
+	if (value !== undefined)
+		s.input_value = value
 
 	let d = ui.input_value(picker_id)
 	if (d !== undefined)
 		s.input_value = d
 }
 
-ui.date_input = function(id, v, opt, fr, align, valign, min_w) {
+ui.date_input = function(id, v, field, fr, align, valign, min_w) {
 
 	let picker_id = id+'.picker'
 	let input_id = id+'.input'
 
 	let s = ui.state(id)
-	s.opt = opt
-	let v0 = s.value
+	field ??= s.field ??= ui.create_field({type: 'date'})
 	ui.state(id, date_input_update)
 
 	if (clicked(id+'.label')) {
@@ -8145,11 +8155,6 @@ ui.date_input = function(id, v, opt, fr, align, valign, min_w) {
 
 	let value = ui.set_value(s, v)
 
-	let box_text = ui.value(input_id)
-	let from_box = ui.input_value(input_id) !== undefined
-	let text = (!from_box && value !== v0) || box_text === undefined
-		? (value == null ? null : date_input_text(value, opt))
-		: box_text
 	let input_align = parse_align(align ?? 'r')
 	input_align = input_align == ALIGN_END ? 'sr'
 		: input_align == ALIGN_CENTER ? 'sc' : 's'
@@ -8162,9 +8167,8 @@ ui.date_input = function(id, v, opt, fr, align, valign, min_w) {
 				ui.icon(id, 'calendar', 0, 'l', 'c')
 				ui.p(ui.sp05(), ui.sp(), ui.sp(), ui.sp())
 				ui.color('text', focused ? 'focused' : null)
-				ui.text_editable(input_id, text, 1,
-					input_align, valign ?? 'c', null, null, null,
-					null, opt && opt.readonly)
+				ui.text_editable(input_id, value, 1,
+					input_align, valign ?? 'c', null, null, null, field)
 			ui.end_h()
 		ui.end_stack()
 
