@@ -134,16 +134,16 @@ SCHEMA SPEC (create_table, alter_table)
 					[ondelete='cascade'|'set null'], [onupdate='cascade']}
 
 PAPER-SCHEMA HELPERS (schema_mdbx.lua)
-	default         (value [, expr|fn])             client and optional server default
+	default         (value [, expr|fn])            client and optional server default
 	check           (expr|fn, [error_message])     column constraint
 	row_check       (expr|fn, [error_message])     table constraint
 	on_update       (expr|fn)                      server-side update value
 	as              (expr|fn) or (version, fn)     generated column value
-	enum             (values)                       ordered and checked text type
-	sort_order       (values)                       declared-order text collation
-	hash             (size)                         fixed-size binary type
-	maxlen           (n)                            set maximum field length
-	virtual                                          leading table marker
+	enum            (values)                       ordered and checked text type
+	sort_order      (values)                       declared-order text collation
+	hash            (size)                         fixed-size binary type
+	maxlen          (n)                            set maximum field length
+	virtual                                        leading table marker
 
 TRIGGERS
 

@@ -1072,6 +1072,22 @@ local function S_text(attr, en_text, name, col, tbl_name, rowset_name)
 	return id and S(id, en_text) or en_text
 end
 
+local function resolve_enum_texts(t, en_attr, attr, text_attr, opt)
+	if not t[en_attr] then return end
+	t[attr] = function(rowset_name)
+		local name, col = t.name or t.col, t.col or t.name
+		local texts = {}
+		for i, v in ipairs(t.enum_values) do
+			texts[v] = S_text(text_attr, t[en_attr][v],
+				name..'.'..v, col..'.'..v, t.table, rowset_name)
+		end
+		return texts
+	end
+	if opt and opt.translate then
+		t[attr] = t[attr]()
+	end
+end
+
 function schema:resolve_type(t, opt) --{attr = val, flag1, ...}
 
 	resolve_type(self, t, t, 1, #t, empty, true, true)
@@ -1091,20 +1107,8 @@ function schema:resolve_type(t, opt) --{attr = val, flag1, ...}
 	end
 
 	--enum ids carry the value after the col.
-	if t.en_enum_labels then
-		t.enum_labels = function(rowset_name)
-			local name, col = t.name or t.col, t.col or t.name
-			local labels = {}
-			for i, v in ipairs(t.enum_values) do
-				labels[v] = S_text('enum_label', t.en_enum_labels[v],
-					name..'.'..v, col..'.'..v, t.table, rowset_name)
-			end
-			return labels
-		end
-		if opt and opt.translate then
-			t.enum_labels = t.enum_labels()
-		end
-	end
+	resolve_enum_texts(t, 'en_enum_labels', 'enum_labels', 'enum_label', opt)
+	resolve_enum_texts(t, 'en_enum_info', 'enum_info', 'enum_info', opt)
 
 	return t
 end

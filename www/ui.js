@@ -210,6 +210,7 @@ const STATE_ITEM_FOCUSED  =  16 // list items
 const STATE_ITEM_ERROR    =  32 // list items
 const STATE_NEW           =  64 // grid cells
 const STATE_MODIFIED      = 128 // grid cells
+const STATE_READONLY      = 256
 
 let parse_state_combis = memoize(function(s) {
 	s = ' '+s
@@ -222,6 +223,7 @@ let parse_state_combis = memoize(function(s) {
 	if (s.includes(' item-error'   )) b |= STATE_ITEM_ERROR
 	if (s.includes(' new'          )) b |= STATE_NEW
 	if (s.includes(' modified'     )) b |= STATE_MODIFIED
+	if (s.includes(' readonly'     )) b |= STATE_READONLY
 	return b
 })
 function parse_state(s) {
@@ -378,10 +380,12 @@ ui.color_def('light', 'text'   , 'normal' ,   0, 0.00, 0.35)
 ui.color_def('light', 'text'   , 'hover'  ,   0, 0.00, 0.10)
 ui.color_def('light', 'text'   , 'active' ,   0, 0.00, 0.00)
 ui.color_def('light', 'text'   , 'focused',   0, 0.00, 0.00)
-ui.color_def('dark' , 'text'   , 'normal' ,   0, 0.00, 0.8)
+ui.color_def('light', 'text'   , 'readonly',  0, 0.00, 0.50)
+ui.color_def('dark' , 'text'   , 'normal' ,   0, 0.00, 0.80)
 ui.color_def('dark' , 'text'   , 'hover'  ,   0, 0.00, 1.00)
 ui.color_def('dark' , 'text'   , 'active' ,   0, 0.00, 1.00)
-ui.color_def('dark' , 'text'   , 'focused',   0, 0.00, 1.0)
+ui.color_def('dark' , 'text'   , 'focused',   0, 0.00, 1.00)
+ui.color_def('dark' , 'text'   , 'readonly',  0, 0.00, 0.60)
 
 ui.color_def('light', 'label'  , 'normal' ,   0, 0.00, 0.00)
 ui.color_def('light', 'label'  , 'hover'  ,   0, 0.00, 0.00, 0.9)
@@ -421,6 +425,7 @@ ui.color_def('light', 'light'   , 'normal' ,   0,    0,    0, 0.10)
 ui.color_def('light', 'light'   , 'hover'  ,   0,    0,    0, 0.30)
 ui.color_def('light', 'intense' , 'normal' ,   0,    0,    0, 0.30)
 ui.color_def('light', 'intense' , 'hover'  ,   0,    0,    0, 0.40)
+ui.color_def('light', 'intense' , 'focused',   0,    0,    0, 0.30)
 ui.color_def('light', 'max'     , 'normal' ,   0,    0,    0, 1.00)
 ui.color_def('light', 'marker'  , 'normal' ,  61, 1.00, 0.35, 1.00)
 
@@ -428,50 +433,57 @@ ui.color_def('dark' , 'light'   , 'normal' ,   0,    0,    1, 0.09)
 ui.color_def('dark' , 'light'   , 'hover'  ,   0,    0,    1, 0.03)
 ui.color_def('dark' , 'intense' , 'normal' ,   0,    0,    1, 0.20)
 ui.color_def('dark' , 'intense' , 'hover'  ,   0,    0,    1, 0.40)
+ui.color_def('dark' , 'intense' , 'focused',   0,    0,    1, 0.25)
 ui.color_def('dark' , 'max'     , 'normal' ,   0,    0,    1, 1.00)
 ui.color_def('dark' , 'marker'  , 'normal' ,  61, 1.00, 0.57, 1.00)
 
 /// background colors --------------------------------------------------------
 
-//           theme    name      state       h     s     L     a
+//            theme    name      state        h     s     L     a
 // -------------------------------------------------------------
-ui.color_def('light', 'bg0'   , 'normal' ,   0, 0.00, 0.98)
-ui.color_def('light', 'bg'    , 'normal' ,   0, 0.00, 1.00)
-ui.color_def('light', 'bg'    , 'hover'  ,   0, 0.00, 0.95)
-ui.color_def('light', 'bg'    , 'active' ,   0, 0.00, 0.93)
-ui.color_def('light', 'bg1'   , 'normal' ,   0, 0.00, 0.95)
-ui.color_def('light', 'bg1'   , 'hover'  ,   0, 0.00, 0.93)
-ui.color_def('light', 'bg1'   , 'active' ,   0, 0.00, 0.90)
-ui.color_def('light', 'bg2'   , 'normal' ,   0, 0.00, 0.85)
-ui.color_def('light', 'bg2'   , 'hover'  ,   0, 0.00, 0.82)
-ui.color_def('light', 'bg3'   , 'normal' ,   0, 0.00, 0.70)
-ui.color_def('light', 'bg3'   , 'hover'  ,   0, 0.00, 0.75)
-ui.color_def('light', 'bg3'   , 'active' ,   0, 0.00, 0.80)
-ui.color_def('light', 'alt'   , 'normal' ,   0, 0.00, 0.98) // grid cell alternate
-ui.color_def('light', 'smoke' , 'normal' ,   0, 0.00, 1.00, 0.80)
-ui.color_def('light', 'input' , 'normal' ,   0, 0.00, 0.98)
-ui.color_def('light', 'input' , 'focused',   0, 0.00, 1.00)
-ui.color_def('light', 'input' , 'hover'  ,   0, 0.00, 0.94)
-ui.color_def('light', 'input' , 'active' ,   0, 0.00, 0.90)
+ui.color_def('light', 'bg0'   , 'normal'  ,   0, 0.00, 0.98)
+ui.color_def('light', 'bg'    , 'normal'  ,   0, 0.00, 1.00)
+ui.color_def('light', 'bg'    , 'hover'   ,   0, 0.00, 0.95)
+ui.color_def('light', 'bg'    , 'active'  ,   0, 0.00, 0.93)
+ui.color_def('light', 'bg1'   , 'normal'  ,   0, 0.00, 0.95)
+ui.color_def('light', 'bg1'   , 'hover'   ,   0, 0.00, 0.93)
+ui.color_def('light', 'bg1'   , 'active'  ,   0, 0.00, 0.90)
+ui.color_def('light', 'bg2'   , 'normal'  ,   0, 0.00, 0.85)
+ui.color_def('light', 'bg2'   , 'hover'   ,   0, 0.00, 0.82)
+ui.color_def('light', 'bg3'   , 'normal'  ,   0, 0.00, 0.70)
+ui.color_def('light', 'bg3'   , 'hover'   ,   0, 0.00, 0.75)
+ui.color_def('light', 'bg3'   , 'active'  ,   0, 0.00, 0.80)
+ui.color_def('light', 'bg3'   , 'readonly',   0, 0.00, 0.85)
+ui.color_def('light', 'alt'   , 'normal'  ,   0, 0.00, 0.98) // grid cell alternate
+ui.color_def('light', 'smoke' , 'normal'  ,   0, 0.00, 1.00, 0.80)
+ui.color_def('light', 'input' , 'normal'  ,   0, 0.00, 0.98)
+ui.color_def('light', 'input' , 'focused' ,   0, 0.00, 1.00)
+ui.color_def('light', 'input' , 'hover'   ,   0, 0.00, 0.94)
+ui.color_def('light', 'input' , 'active'  ,   0, 0.00, 0.90)
+ui.color_def('light', 'input' , 'readonly',   0, 0.00, 0.90)
+ui.color_def('light', 'input' , 'readonly focused', 0, 0.00, 0.90)
 
-ui.color_def('dark' , 'bg0'   , 'normal' , 216, 0.28, 0.08)
-ui.color_def('dark' , 'bg'    , 'normal' , 216, 0.28, 0.10)
-ui.color_def('dark' , 'bg'    , 'hover'  , 216, 0.28, 0.12)
-ui.color_def('dark' , 'bg'    , 'active' , 216, 0.28, 0.14)
-ui.color_def('dark' , 'bg1'   , 'normal' , 216, 0.28, 0.15)
-ui.color_def('dark' , 'bg1'   , 'hover'  , 216, 0.28, 0.19)
-ui.color_def('dark' , 'bg1'   , 'active' , 216, 0.28, 0.22)
-ui.color_def('dark' , 'bg2'   , 'normal' , 216, 0.28, 0.22)
-ui.color_def('dark' , 'bg2'   , 'hover'  , 216, 0.28, 0.25)
-ui.color_def('dark' , 'bg3'   , 'normal' , 216, 0.28, 0.29)
-ui.color_def('dark' , 'bg3'   , 'hover'  , 216, 0.28, 0.31)
-ui.color_def('dark' , 'bg3'   , 'active' , 216, 0.28, 0.33)
-ui.color_def('dark' , 'alt'   , 'normal' , 260, 0.28, 0.13)
-ui.color_def('dark' , 'smoke' , 'normal' ,   0, 0.00, 0.00, 0.70)
-ui.color_def('dark' , 'input' , 'normal' , 216, 0.28, 0.17)
-ui.color_def('dark' , 'input' , 'focused', 216, 0.28, 0.08)
-ui.color_def('dark' , 'input' , 'hover'  , 216, 0.28, 0.21)
-ui.color_def('dark' , 'input' , 'active' , 216, 0.28, 0.25)
+ui.color_def('dark' , 'bg0'   , 'normal'  , 216, 0.28, 0.08)
+ui.color_def('dark' , 'bg'    , 'normal'  , 216, 0.28, 0.10)
+ui.color_def('dark' , 'bg'    , 'hover'   , 216, 0.28, 0.12)
+ui.color_def('dark' , 'bg'    , 'active'  , 216, 0.28, 0.14)
+ui.color_def('dark' , 'bg1'   , 'normal'  , 216, 0.28, 0.15)
+ui.color_def('dark' , 'bg1'   , 'hover'   , 216, 0.28, 0.19)
+ui.color_def('dark' , 'bg1'   , 'active'  , 216, 0.28, 0.22)
+ui.color_def('dark' , 'bg2'   , 'normal'  , 216, 0.28, 0.22)
+ui.color_def('dark' , 'bg2'   , 'hover'   , 216, 0.28, 0.25)
+ui.color_def('dark' , 'bg3'   , 'normal'  , 216, 0.28, 0.29)
+ui.color_def('dark' , 'bg3'   , 'hover'   , 216, 0.28, 0.31)
+ui.color_def('dark' , 'bg3'   , 'active'  , 216, 0.28, 0.33)
+ui.color_def('dark' , 'bg3'   , 'readonly', 216, 0.15, 0.25)
+ui.color_def('dark' , 'alt'   , 'normal'  , 260, 0.28, 0.13)
+ui.color_def('dark' , 'smoke' , 'normal'  ,   0, 0.00, 0.00, 0.70)
+ui.color_def('dark' , 'input' , 'normal'  , 216, 0.28, 0.17)
+ui.color_def('dark' , 'input' , 'focused' , 216, 0.28, 0.08)
+ui.color_def('dark' , 'input' , 'hover'   , 216, 0.28, 0.21)
+ui.color_def('dark' , 'input' , 'active'  , 216, 0.28, 0.25)
+ui.color_def('dark' , 'input' , 'readonly', 216, 0.28, 0.21)
+ui.color_def('dark' , 'input' , 'readonly focused', 216, 0.28, 0.21)
 
 // disable alt color. comment this to get it back.
 ui.color_def('*' , 'alt', 'normal' , 'bg')
@@ -4789,7 +4801,7 @@ function text_flags_check() {
 
 ui.color = function(s, state) {
 	text_color = s
-	text_color_state = state
+	text_color_state = parse_state(state)
 	text_flags &= ~(TEXT_COLOR | TEXT_COLOR_STATE)
 	if (s && s != 'text')
 		text_flags |= TEXT_COLOR
@@ -5708,7 +5720,8 @@ draw[CMD_TEXT] = function(a, i) {
 
 	let arg_i = read_text_args(a, i, flags)
 	let input_type = editable ? a[arg_i++] : null
-	let col = color_css(cur_color, cur_color_state)
+	let color = color_css(cur_color,
+		(readonly ? STATE_READONLY : 0) | cur_color_state)
 
 	if (editable) {
 		let input = input_create(id, input_type)
@@ -5800,9 +5813,9 @@ draw[CMD_TEXT] = function(a, i) {
 		if (focused) {
 			drawn_focused_input = input
 			drawn_focused_by_key = by_key
-			if (input._ui_color != col) {
-				input.style.color = col
-				input._ui_color = col
+			if (input._ui_color != color) {
+				input.style.color = color
+				input._ui_color = color
 			}
 			return
 		}
@@ -5835,7 +5848,7 @@ draw[CMD_TEXT] = function(a, i) {
 
 	if (isstr(s)) {
 
-		cx.fillStyle = col
+		cx.fillStyle = color
 		cx.fillText(s, anchor_x, y + asc)
 
 		// the background covers the text drawn under it, so the marked part
@@ -5862,7 +5875,7 @@ draw[CMD_TEXT] = function(a, i) {
 
 	} else if (flags & TEXT_WRAP_LINE) {
 
-		cx.fillStyle = col
+		cx.fillStyle = color
 
 		for (let ss of s) {
 			cx.fillText(ss, anchor_x, y + asc)
@@ -5871,7 +5884,7 @@ draw[CMD_TEXT] = function(a, i) {
 
 	} else if (flags & TEXT_WRAP_WORD) {
 
-		cx.fillStyle = col
+		cx.fillStyle = color
 		cx.textAlign = 'left'
 
 		let x0 = x
@@ -6866,10 +6879,12 @@ ui.input = function(id, value, field, fr, w, text_align, no_box) {
 	let focused = ui.focused(id)
 	if (!no_box) {
 		ui.stack('', fr, 's', 's')
-		ui.bb('input', focused ? 'focused' : null,
-			1, 'intense', focused ? 'hover' : null)
+		let state =
+			(field.readonly ? STATE_READONLY : 0)
+			| (focused ? STATE_FOCUSED : 0)
+		ui.bb('input', state, 1, 'intense', state)
 		ui.p(ui.sp())
-		ui.color('text', focused ? 'focused' : null)
+		ui.color('text', state)
 	}
 	value = ui.text_editable(id, value, no_box ? fr : 1,
 		text_align ?? 's', 'c', null, w ?? ui.em_input(), null, field)
@@ -6887,8 +6902,14 @@ function num_slider_update(id, s) {
 	let input_id = id+'.input'
 	let field = s.field
 
-	if (clicked(id+'.label'))
-		ui.focus(id)
+	if (clicked(id+'.label')) {
+		if (field.readonly) {
+			ui.focus(input_id)
+			ui.select_text(input_id, 0, 1/0)
+		} else {
+			ui.focus(id)
+		}
+	}
 	if (field.readonly)
 		return
 
@@ -6925,6 +6946,7 @@ function num_slider_update(id, s) {
 		let d = focused &&
 			(ui.keydown('arrowright') && 1 ||
 				ui.keydown('arrowleft') && -1)
+		let input_value
 		if (cs) {
 			if (cs.drag) {
 				let p = clamp(slider_p(s.value, from, to), p_min, p_max)
@@ -6932,14 +6954,16 @@ function num_slider_update(id, s) {
 				ui.focus(id)
 			}
 			let p = clamp((cs.x0 + cs.dx) / s.w, p_min, p_max)
-			s.input_value = lerp(p, 0, 1, from, to)
+			input_value = lerp(p, 0, 1, from, to)
 		} else if (d) {
 			let p = clamp(slider_p(s.value, from, to)
 				+ d * (ui.keypressed('shift') ? .01 : .1), p_min, p_max)
-			s.input_value = lerp(p, 0, 1, from, to)
+			input_value = lerp(p, 0, 1, from, to)
 		} else if (focused && ui.keydown('delete')) {
-			s.input_value = null
+			input_value = null
 		}
+		if (input_value !== undefined)
+			s.input_value = snap_slider_value(input_value, field, from, to)
 		if (hit(id+'.handle') || cs)
 			ui.set_cursor('ew-resize')
 	}
@@ -6962,8 +6986,9 @@ ui.num_slider = function(id, value, field) {
 	let p_max = slider_p(field.max ?? to, from, to)
 	let p = clamp(slider_p(value, from, to), p_min, p_max)
 	let input_id = id+'.input'
-	let focused = ui.focused(s.editing ? input_id : id)
-	if (!s.editing)
+	let show_input = s.editing || field.readonly
+	let focused = ui.focused(show_input ? input_id : id)
+	if (!show_input)
 		ui.focusable(id)
 
 	let fr = fr0 ?? 1
@@ -6975,30 +7000,31 @@ ui.num_slider = function(id, value, field) {
 	let text = field.to_text(value)
 
 	ui.stack(id, fr, align, valign, min_w)
-		ui.bb(
-			'input', focused ? 'focused' : null,
-			1, 'intense', focused ? 'hover' : null)
+		let state =
+			(field.readonly ? STATE_READONLY : 0)
+			| (focused ? STATE_FOCUSED : 0)
+		ui.bb('input', state, 1, 'intense', state)
 		ui.p(1)
 		ui.h(0, 0, 's', 's')
 			ui.stack('', p_min, 's', 's')
 			ui.end_stack()
 			ui.stack('', p - p_min, 's', 's')
-				ui.bb('bg3')
+				ui.bb('bg3', field.readonly ? 'readonly' : null)
 			ui.end_stack()
 			ui.stack('', 1 - p, 's', 's')
-				if (!s.editing) {
+				if (!show_input) {
 					hit_v_edge(id+'.handle')
 					end_hit_v_edge()
 				}
 			ui.end_stack()
 		ui.end_h()
 		ui.p(ui.sp())
-		ui.color('text', focused ? 'focused' : null)
-		if (s.editing)
-			ui.text_editable(input_id, value, 1, 'r', 'c', null, 0, null,
+		ui.color('text', state)
+		if (show_input)
+			ui.text_editable(input_id, value, 1, 'sr', 'c', null, 0, null,
 				field)
 		else
-			ui.text('', text, 1, 'r', 'c', null, 0)
+			ui.text('', text, 1, 'sr', 'c', null, 0)
 		ui.measure(id)
 	ui.end_stack()
 
@@ -7007,20 +7033,21 @@ ui.num_slider = function(id, value, field) {
 
 //// SLIDER ------------------------------------------------------------------
 
-function compute_step_and_range(wanted_n, min, max, scale_base, scales, decimals) {
+function compute_step_and_range(
+	wanted_n, min, max, scale_base, scales, min_step
+) {
 	scale_base = scale_base || 10
 	scales = scales || [1, 2, 2.5, 5]
 	let d = max - min
 	let min_scale_exp = floor((d ? logbase(d, scale_base) : 0) - 2)
 	let max_scale_exp = floor((d ? logbase(d, scale_base) : 0) + 2)
 	let n0, step
-	let step_multiple = decimals != null ? 10**(-decimals) : null
 	for (let scale_exp = min_scale_exp; scale_exp <= max_scale_exp; scale_exp++) {
 		for (let scale of scales) {
 			let step1 = scale_base ** scale_exp * scale
 			let n = d / step1
 			if (n0 == null || abs(n - wanted_n) < n0) {
-				if (step_multiple == null || floor(step1 / step_multiple) == step1 / step_multiple) {
+				if (floor(step1 / min_step) == step1 / min_step) {
 					n0 = n
 					step = step1
 				}
@@ -7040,11 +7067,13 @@ let SLIDER_P          = BOX_ARGS+4 // progress
 let SLIDER_MARKERS    = BOX_ARGS+5
 let SLIDER_SCALE_BASE = BOX_ARGS+6
 let SLIDER_SCALES     = BOX_ARGS+7
-let SLIDER_STATE      = BOX_ARGS+8
+let SLIDER_SCALE      = BOX_ARGS+8
+let SLIDER_STATE      = BOX_ARGS+9
 
 let SLIDER_HOVER          = 1
 let SLIDER_FOCUSED        = 2
 let SLIDER_FOCUSED_BY_KEY = 4
+let SLIDER_READONLY       = 8
 
 ui.slider_mark_w_em = 2
 ui.slider_thumb_r_em = .6
@@ -7054,6 +7083,15 @@ let slider = {ID: SLIDER_ID}
 
 function slider_p(value, from, to) {
 	return isnum(value) ? clamp(lerp(value, from, to, 0, 1), 0, 1) : .5
+}
+
+function snap_slider_value(value, field, from, to) {
+	if (value != null) {
+		let step = field.scale * 10**-(field.decimals ?? 2)
+		value = round(value / step) * step
+		value = clamp(value, field.min ?? from, field.max ?? to)
+	}
+	return value
 }
 
 function slider_update(id, s) {
@@ -7077,18 +7115,21 @@ function slider_update(id, s) {
 	let focused = ui.focused(id)
 	let d = focused &&
 		(ui.keydown('arrowright') && 1 || ui.keydown('arrowleft') && -1)
+	let value
 
 	if (cs) {
 		let p = clamp((ui.mx - track_x) / track_w, p_min, p_max)
-		s.input_value = lerp(p, 0, 1, slider_min, slider_max)
+		value = lerp(p, 0, 1, slider_min, slider_max)
 	} else if (d) {
 		let p = slider_p(s.value, slider_min, slider_max)
 			+ d * (ui.keypressed('shift') ? .01 : .1)
-		s.input_value = lerp(clamp(p, p_min, p_max), 0, 1,
+		value = lerp(clamp(p, p_min, p_max), 0, 1,
 			slider_min, slider_max)
 	} else if (focused && ui.keydown('delete')) {
-		s.input_value = null
+		value = null
 	}
+	if (value !== undefined)
+		s.input_value = snap_slider_value(value, field, slider_min, slider_max)
 }
 slider.create = function(cmd, id, value, field) {
 
@@ -7125,8 +7166,8 @@ slider.create = function(cmd, id, value, field) {
 	let p_min = slider_p(field.min ?? slider_min, slider_min, slider_max)
 	let p_max = slider_p(field.max ?? slider_max, slider_min, slider_max)
 	let p = clamp(slider_p(value, slider_min, slider_max), p_min, p_max)
-	let hs = hit(id)
-	let cs = captured(id)
+	let hs = !field.readonly && hit(id)
+	let cs = !field.readonly && captured(id)
 	let focused = ui.focused(id)
 
 	ui.stack()
@@ -7141,9 +7182,11 @@ slider.create = function(cmd, id, value, field) {
 		a[n++] = markers
 		a[n++] = scale_base ?? 10
 		a[n++] = scales ?? 0
+		a[n++] = field.scale
 		a[n++] = (hs ? SLIDER_HOVER : 0)
 			| (focused ? SLIDER_FOCUSED : 0)
 			| (focused && ui.focused_by_key ? SLIDER_FOCUSED_BY_KEY : 0)
+			| (field.readonly ? SLIDER_READONLY : 0)
 		ui_cmd_box_end(i)
 
 		ui.measure(id)
@@ -7158,7 +7201,7 @@ slider.create = function(cmd, id, value, field) {
 		ui.popup(id+'.popup', 'tooltip', i,
 				't', 'c', 0, 0, 'change_side constrain', null, ox)
 			ui.bb_tooltip('info', null, 'light', null, ui.sp05())
-			ui.text('', dec(value, decimals))
+			ui.text('', field.to_text(value))
 		ui.end_popup()
 	}
 
@@ -7175,9 +7218,12 @@ slider.draw = function(a, i) {
 	let p       = a[i+SLIDER_P] / 32767
 	let markers = a[i+SLIDER_MARKERS]
 	let state   = a[i+SLIDER_STATE]
-	let hs      = state & SLIDER_HOVER
+	let readonly = state & SLIDER_READONLY
+	let hs      = !readonly && state & SLIDER_HOVER
 	let focused = state & SLIDER_FOCUSED
 	let by_key  = state & SLIDER_FOCUSED_BY_KEY
+	let color_state = STATE_ITEM_SELECTED |
+		(readonly ? STATE_READONLY : hs ? STATE_HOVER : 0)
 
 	let shaft_h = round(ui.em(ui.slider_shaft_h_em))
 	let r = round(shaft_h / 2) // shaft corner radius
@@ -7193,11 +7239,11 @@ slider.draw = function(a, i) {
 
 	// draw shaft
 	bg_path(cx, x - r, y, x + w + r, y + 2*r, BORDER_SIDE_ALL, 1000)
-	cx.fillStyle = color_css('bg2', hs ? 'hover' : null)
+	cx.fillStyle = color_css('bg2', color_state)
 	cx.fill()
 
 	bg_path(cx, x - r, y, thumb_cx, y + 2*r, BORDER_SIDE_ALL, 1000)
-	cx.fillStyle = color_css('link', hs ? 'hover' : null)
+	cx.fillStyle = color_css('toggle', color_state)
 	cx.fill()
 
 	bg_path(cx, x + .5 - r, y + .5, x + w - .5 + r, y + 2*r - .5, BORDER_SIDE_ALL, 1000)
@@ -7220,7 +7266,7 @@ slider.draw = function(a, i) {
 	}
 
 	// draw thumb
-	cx.fillStyle = color_css('link', hs ? 'hover' : null)
+	cx.fillStyle = color_css('toggle', color_state)
 	ui.set_shadow('button')
 	cx.beginPath()
 	cx.arc(thumb_cx, thumb_cy, thumb_r, 0, 2 * PI)
@@ -7233,11 +7279,13 @@ slider.draw = function(a, i) {
 		let slider_max = a[i+SLIDER_MAX]
 		let scale_base = a[i+SLIDER_SCALE_BASE]
 		let scales     = a[i+SLIDER_SCALES]
+		let scale      = a[i+SLIDER_SCALE]
 		let decimals   = a[i+SLIDER_DECIMALS]
+		let min_step = scale * 10**-decimals
 
 		let max_n = floor(w / ui.em(ui.slider_mark_w_em))
 		let [step, min, max] = compute_step_and_range(
-			max_n, slider_min, slider_max, scale_base, scales, decimals)
+			max_n, slider_min, slider_max, scale_base, scales, min_step)
 
 		let hsl_color = color_hsl('label')
 		cx.textAlign = 'center'
@@ -7264,7 +7312,7 @@ slider.draw = function(a, i) {
 			cx.lineTo(x, round(y - ui.em(0.6)) + .5)
 			cx.stroke()
 
-			let s = dec(v, decimals)
+			let s = dec(v / scale, decimals)
 			cx.fillText(s, x, y - ui.em(1.2)) //  - asc - dsc)
 		}
 
@@ -7279,7 +7327,7 @@ slider.draw = function(a, i) {
 			cx.lineTo(x, round(y - ui.em(0.6)) + .5)
 			cx.stroke()
 
-			let s = dec(v, decimals)
+			let s = dec(v / scale, decimals)
 			cx.fillText(s, x, y - ui.em(1.2)) //  - asc - dsc)
 		}
 
@@ -7291,12 +7339,14 @@ ui.box_widget('slider', slider)
 
 //// TOGGLE ------------------------------------------------------------------
 
-ui.color_def('*', 'toggle'      , '*', 'bg2')
-ui.color_def('*', 'toggle-thumb', 'normal', 'text', 'active')
-ui.color_def('light', 'toggle', 'item-selected'      , 'link', 'normal')
-ui.color_def('light', 'toggle', 'hover item-selected', 'link', 'hover' )
-ui.color_def('dark' , 'toggle', 'item-selected'      , 'link', 'normal')
-ui.color_def('dark' , 'toggle', 'hover item-selected', 'link', 'hover' )
+ui.color_def('*', 'toggle'      , '*'                   , 'bg2')
+ui.color_def('*', 'toggle-thumb', 'normal'              , 'text', 'active')
+ui.color_def('light', 'toggle', 'item-selected'         , 'link', 'normal')
+ui.color_def('light', 'toggle', 'hover item-selected'   , 'link', 'hover' )
+ui.color_def('dark' , 'toggle', 'item-selected'         , 'link', 'normal')
+ui.color_def('dark' , 'toggle', 'hover item-selected'   , 'link', 'hover' )
+ui.color_def('light', 'toggle', 'readonly item-selected', 0, 0, 0.3)
+ui.color_def('dark' , 'toggle', 'readonly item-selected', 0, 0, 0.5)
 
 let TOGGLE_ID    = BOX_ARGS+0
 let TOGGLE_STATE = BOX_ARGS+1
@@ -7304,6 +7354,7 @@ let TOGGLE_STATE = BOX_ARGS+1
 let TOGGLE_ON      = 1
 let TOGGLE_HOVER   = 2
 let TOGGLE_FOCUSED = 4
+let TOGGLE_READONLY = 8
 
 ui.capture_keydown(' ')
 
@@ -7342,7 +7393,8 @@ function toggle_create(cmd, id, on, field, fr, align, valign, min_w, min_h) {
 		min_w, min_h)
 	a[n++] = id
 	a[n++] = (on ? TOGGLE_ON : 0) | (hs ? TOGGLE_HOVER : 0) |
-		(focused && ui.focused_by_key ? TOGGLE_FOCUSED : 0)
+		(focused && ui.focused_by_key ? TOGGLE_FOCUSED : 0) |
+		(field.readonly ? TOGGLE_READONLY : 0)
 	ui_cmd_box_end(i)
 	return on
 }
@@ -7361,7 +7413,8 @@ toggle.draw = function(a, i) {
 	let h = a[i+3]
 	let flags = a[i+TOGGLE_STATE]
 	let on = flags & TOGGLE_ON
-	let hs = flags & TOGGLE_HOVER
+	let readonly = flags & TOGGLE_READONLY
+	let hs = !readonly && flags & TOGGLE_HOVER
 	let focused = flags & TOGGLE_FOCUSED
 
 	let prev_theme = theme
@@ -7379,7 +7432,8 @@ toggle.draw = function(a, i) {
 	toggle_path(cx, x, y, w, h)
 	let state =
 		(on ? STATE_ITEM_SELECTED : 0) |
-		(hs ? STATE_HOVER         : 0)
+		(hs ? STATE_HOVER         : 0) |
+		(readonly ? STATE_READONLY : 0)
 	set_bg_color('toggle', state)
 	cx.fill()
 
@@ -7390,7 +7444,8 @@ toggle.draw = function(a, i) {
 	cx.arc(cx1, cy1, h * .35, 0, 2 * PI)
 	cx.closePath()
 	ui.set_shadow('button')
-	cx.fillStyle = color_css('toggle-thumb', hs ? 'hover' : null)
+	cx.fillStyle = color_css('toggle-thumb',
+		readonly ? STATE_READONLY : hs ? STATE_HOVER : 0)
 	cx.fill()
 	reset_shadow()
 
@@ -7416,12 +7471,14 @@ checkbox.draw = function(a, i) {
 	let h = a[i+3]
 	let flags = a[i+TOGGLE_STATE]
 	let on = flags & TOGGLE_ON
-	let hs = flags & TOGGLE_HOVER
+	let readonly = flags & TOGGLE_READONLY
+	let hs = !readonly && flags & TOGGLE_HOVER
 	let focused = flags & TOGGLE_FOCUSED
 
 	let state =
 		(on ? STATE_ITEM_SELECTED : 0) |
-		(hs ? STATE_HOVER         : 0)
+		(hs ? STATE_HOVER         : 0) |
+		(readonly ? STATE_READONLY : 0)
 
 	// focus ring
 	if (focused) {
@@ -7451,7 +7508,8 @@ checkbox.draw = function(a, i) {
 		cx.moveTo( 3,  8)
 		cx.lineTo( 7, 15)
 		cx.lineTo(18,  4)
-		cx.strokeStyle = color_css('toggle-thumb', hs ? 'hover' : null)
+		cx.strokeStyle = color_css('toggle-thumb',
+			readonly ? STATE_READONLY : hs ? STATE_HOVER : 0)
 		cx.lineWidth = 1.5
 		cx.lineCap = 'round'
 		cx.lineJoin = 'round'
@@ -8188,13 +8246,15 @@ ui.date_input = function(id, v, field, fr, align, valign, min_w) {
 		: input_align == ALIGN_CENTER ? 'sc' : 's'
 
 		ui.stack(input_id, fr, 's', 's')
-			ui.bb('input', focused ? 'focused' : null,
-				1, 'intense', focused ? 'hover' : null)
-			ui.h(0, 0, 's', 's', min_w ?? ui.em_input())
-				ui.p(ui.sp(), ui.sp(), 0, ui.sp())
+			let state =
+				(field.readonly ? STATE_READONLY : 0)
+				| (focused ? STATE_FOCUSED : 0)
+			ui.bb('input', state, 1, 'intense', state)
+			ui.p(ui.sp())
+			ui.h(0, ui.sp05(), 's', 's', min_w ?? ui.em_input())
+				ui.color('text', state)
 				ui.icon(id, 'calendar', 0, 'l', 'c')
-				ui.p(ui.sp05(), ui.sp(), ui.sp(), ui.sp())
-				ui.color('text', focused ? 'focused' : null)
+				ui.color('text', state)
 				ui.text_editable(input_id, value, 1,
 					input_align, valign ?? 'c', null, null, null, field)
 			ui.end_h()
@@ -8713,8 +8773,10 @@ ui.color_input = function(id, value, field, fr, min_w) {
 
 	value = ui.set_value(s, value, open ? null : field)
 
-		ui.bb('input', ui.focused(id) ? 'focused' : null,
-			1, 'intense', ui.focused(id) ? 'hover' : null)
+		let state =
+			(field.readonly ? STATE_READONLY : 0)
+			| (ui.focused(id) ? STATE_FOCUSED : 0)
+		ui.bb('input', state, 1, 'intense', state)
 		ui.m(ui.sp(), ui.sp())
 		ui.stack('', 1, 's', 'c', null, ui.em(1))
 			if (field.from_input(value) !== undefined)

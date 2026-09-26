@@ -16,7 +16,7 @@ Field attributes:
 		to_input       : f(v) -> s   value as editable text.
 		from_input     : f(s) -> v   editable text back to value (or undefined)
 
-		enum_values    : enum type: 'v1 ...' | ['v1', ...]
+		enum_values    : enum type: ['v1', ...]
 		enum_labels    : enum type: {v->label}
 		enum_info      : enum type: {v->info}
 
@@ -523,7 +523,7 @@ number.to_text = function(s) {
 
 number.to_input = function(s) {
 	let x = num(s)
-	return x != null ? str(x / this.scale) : s
+	return x != null ? dec(x / this.scale, this.decimals) : s
 }
 
 ui.add_validation_rule({
@@ -696,8 +696,6 @@ ui.add_validation_rule({
 		'{0} must be a boolean', e.label),
 })
 
-
-
 let enm = {}
 field_types.enum = enm
 
@@ -798,8 +796,10 @@ ui.create_field = function(opt) {
 	let field = assign_opt({}, all_field_types,
 		field_types[opt?.type ?? 'text'], opt)
 	field.label ??= display_name(field.name || field.type)
-	if (field.enum_values != null)
-		field.known_values = set(words(field.enum_values))
+	if (field.enum_values != null) {
+		field.enum_values = words(field.enum_values)
+		field.known_values = set(field.enum_values)
+	}
 	let own_rules = []
 	for (let k in field) {
 		if (k.startsWith('validator_')) {

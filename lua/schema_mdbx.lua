@@ -74,7 +74,7 @@ do
 	--text ordered by the declared order and restricted to it by a check.
 	--values come as words or, when a value contains spaces, as a table.
 	--enum('open closed', {open = 'Open', closed = 'Closed'}) -> english labels
-	function env.enum(vals, labels)
+	function env.enum(vals, labels, info)
 		vals = collect(words(vals))
 		local maxlen, checks = 0, {}
 		for i, v in ipairs(vals) do
@@ -83,14 +83,18 @@ do
 			if #v > maxlen then maxlen = #v end
 			checks[i] = _('v == %q', v)
 		end
-		if labels then
+		if labels or info then
 			local vals_set = index(vals)
-			for v in pairs(labels) do
+			for v in pairs(labels or empty) do
 				assertf(vals_set[v], 'unknown enum value in labels: %s', v)
+			end
+			for v in pairs(info or empty) do
+				assertf(vals_set[v], 'unknown enum value in info: %s', v)
 			end
 		end
 		return {
-			type = 'enum', enum_values = vals, en_enum_labels = labels,
+			type = 'enum', enum_values = vals,
+			en_enum_labels = labels, en_enum_info = info,
 			mdbx_type = 'utf8', maxlen = maxlen, nozero = true,
 			mdbx_collation = 'list\0'..cat(vals, '\0'),
 			check_expr = cat(checks, ' or '),

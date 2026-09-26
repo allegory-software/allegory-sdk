@@ -38,10 +38,12 @@
 		align            : 'left'|'right'|'center'   cell alignment
 		enum_values      : ['foo',...]   enum values
 		enum_labels      : {v->label}    enum labels in current language
+		enum_info        : {v->info}     enum info in current language
 		not_null         : t             can't be null
 		min              : n             min allowed value
 		max              : n             max allowed value
 		decimals         : n             number of decimals
+		scale            : n             scale for fixed-point decimal numbers
 		maxlen           : n             max length in bytes
 		w                : px            default grid column width
 		min_w            : px            min grid column width
@@ -112,10 +114,10 @@ local client_field_attrs = {
 	internal=1, hidden=1, readonly=1, null_text=1,
 	name=1, type=1, label=1, info=1, client_default=1, align=1,
 	has_server_default=1,
-	enum_values=1, enum_labels=1, not_null=1, min=1, max=1, decimals=1, maxlen=1,
-	slider_min = 1, slider_max = 1, slider_markers = 1,
-	slider_scale_base = 1, slider_scales = 1,
-	scale=1,
+	enum_values=1, enum_labels=1, enum_info=1, not_null=1, min=1, maxlen=1,
+	scale=1, decimals=1,
+	slider_min = 1, slider_max = 1,
+	slider_markers = 1, slider_scale_base = 1, slider_scales = 1,
 	lookup_rowset_name=1, lookup_cols=1, display_col=1, name_col=1,
 	w=1, min_w=1, max_w=1,
 	hour_step=1, minute_step=1, second_step=1, precision=1,

@@ -38,8 +38,9 @@ if (demo_state.theme)
 ui.DEBUG      = demo_state.debug ?? true
 ui.DEBUG_PANE = true
 ui.TUI        = demo_state.tui   ?? false
-selected_demo = location.search.match('demo=([^&]+)')?.[1] ?? demo_state.demo ?? 'tabs'
-remote_demo   = location.search.match('remote=([^&]+)')?.[1]
+let selected_demo = location.search.match('demo=([^&]+)')?.[1]
+	?? demo_state.demo ?? 'tabs'
+let remote_demo = location.search.match('remote=([^&]+)')?.[1]
 
 ui.focus('demos_list')
 
@@ -72,38 +73,38 @@ let demos = []
 ui.shadow_def('light', 'demo_tooltip', 1, 1, 3, 0, 0, .8, 1)
 ui.shadow_def('dark',  'demo_tooltip', 1, 1, 3, 0, 0,  0, 1)
 
-slider1_v = 30
-slider2_v = .5
-slider_demo_field = ui.create_field({
+{
+let slider1_v = 30
+let slider2_v = .5
+let slider_demo_field = ui.create_field({
 	type: 'number',
 	min: 20,
 	max: 40,
 	decimals: 1,
 	slider_markers: false,
 })
-demos.silder = `
+demos.silder = function() {
 ui.v(0, 0, 'c', 'c', 400)
 	ui.border(1, 'intense')
 	slider1_v = ui.slider('slider1', slider1_v, slider_demo_field)
-	//if (p != null)
-	//	pr(p)
 	slider2_v = ui.slider('slider2', slider2_v)
 ui.end_v()
-`
+}
+}
 
-dd_items = [
+{
+let dd_items = [
 	'item 1',
 	'item 2 that is a lot longer than the others',
 	'item 3',
-	'item 4 that is so damn long even the popup will clip it before it looks ridiculous',
+	'item 4 that is so damn long even the popup will clip it before '
+	+'it looks ridiculous',
 ]
-dd1_i = 1
-dd2_i = 0
-tb_dd_i = {}
-tb_input_text = {}
-dd3_i = 1
-dd4_i = 0
-demos.dropdown = `
+let dd1_i = 1
+let dd2_i = 0
+let dd3_i = 1
+let dd4_i = 0
+demos.dropdown = function() {
 ui.p(ui.sp8())
 ui.v(1, ui.sp(), 's', 'c')
 	ui.mv(ui.sp8(), ui.sp2())
@@ -128,15 +129,17 @@ ui.v(1, ui.sp(), 's', 'c')
 		ui.end_h()
 	ui.end_v_aligned()
 ui.end_v()
-`
+}
+}
 
+{
 let cal1_ranges = [
 	{from: 0, to: 1},
 	{from: 0, to: 1},
 ]
 let cal_sel_days = []
-cal1_day = null
-demos.calendar = `
+let cal1_day = null
+demos.calendar = function() {
 ui.m(ui.em(2))
 ui.h(1, ui.em())
 	cal1_day = ui.calendar('cal1', cal1_day, cal1_ranges, 0, 'l', 's')
@@ -149,10 +152,12 @@ ui.h(1, ui.em())
 		ui.end_v()
 	ui.end_sb()
 ui.end_h()
-`
+}
+}
 
-radio_sel_i = 0
-demos.radio = `
+{
+let radio_sel_i = 0
+demos.radio = function() {
 ui.v(0, ui.sp2(), 'c', 'c')
 ui.radio_group('radio_group1')
 for (let i = 0; i < 5; i++) {
@@ -163,19 +168,23 @@ for (let i = 0; i < 5; i++) {
 }
 radio_sel_i = ui.end_radio_group('radio_group1', radio_sel_i)
 ui.end_v()
-`
+}
+}
 
-toggle1_on = false
-demos.toggle = `
+{
+let toggle1_on = false
+demos.toggle = function() {
 ui.h(0, ui.sp(), 'c', 'c')
 	toggle1_on = ui.toggle('toggle1', toggle1_on)
 	ui.label('toggle1', 'Toggle me!')
 ui.end_h()
-`
+}
+}
 
-cb1_checked = false
-cb2_checked = true
-demos.checkbox = `
+{
+let cb1_checked = false
+let cb2_checked = true
+demos.checkbox = function() {
 ui.v(0, ui.sp2(), 'c', 'c')
 	ui.h(0, ui.sp(), 'l', 'c')
 		cb1_checked = ui.checkbox('cb1', cb1_checked)
@@ -186,9 +195,11 @@ ui.v(0, ui.sp2(), 'c', 'c')
 		ui.label('cb2', 'Check me out too!')
 	ui.end_h()
 ui.end_v()
-`
+}
+}
 
-tabs1 = [
+{
+let tabs1 = [
 	{id: 'tab1', label:'Tab 1'},
 	{id: 'tab2', label:'Tab 2 looong'},
 	{id: 'tab3', label:'Tab 3'},
@@ -196,7 +207,7 @@ tabs1 = [
 	{id: 'tab5', label:'Tab 5'},
 	{id: 'tab6', label:'Tab 6'},
 ]
-demos.tabs = `
+demos.tabs = function() {
 ui.m(ui.em(5))
 ui.stack('', 1, 's', 'c')
 	//ui.p(1)
@@ -211,9 +222,11 @@ ui.stack('', 1, 's', 'c')
 	ui.end_v()
 	//ui.border(1, 'intense')
 ui.end_stack()
-`
+}
+}
 
-demos.menu = `
+{
+demos.menu = function() {
 ui.m(ui.em(5))
 ui.menu('menu1', [
 	{id: 'item1', label: 'Item 1', shortcut: 'Ctrl + F'},
@@ -229,96 +242,19 @@ ui.menu('menu1', [
 		{id: 'item3.2', label: 'Item 3.2'},
 	]},
 ], 'it', '[')
-`
+}
+}
 
-list1_items = []
-list1_i = 0
+{
+let list1_items = []
+let list1_i = 0
 for (let i = 1; i <= 1000; i++)
 	list1_items.push('Item '+i)
-demos.list = `
+demos.list = function() {
 ui.sb('list1_sb', 1, null, null, 'c', 'c', 100, 300)
 	list1_i = ui.list('list1', list1_items, list1_i)
 ui.end_sb()
-`
-
-// grid
-
-{
-let fields = [{name: 'id', align: 'right', w: 40}]
-let rows = []
-for (let i = 1; i < 100; i++)
-	fields.push({
-		name: 'c'+i, label: 'Field No. '+i, w: 40,
-		align: i % 2 ? 'right' : 'left',
-	})
-for (let j = 1; j < 100; j++) {
-	let row = [j]
-	for (let i = 1; i <= fields.length; i++)
-		row.push('Cell '+j+','+i)
-	rows.push(row)
 }
-ui.rowsets.grid = {
-	pk: 'id', can_change_rows: false,
-	fields: fields,
-	rows: rows,
-}
-demos.grid = `
-ui.m(ui.em(2))
-ui.stack()
-	ui.grid('grid1', {rowset_name: 'grid'})
-ui.end_stack()
-`
-}
-
-{
-function starts_with_a(s) {
-	return s.lower().starts('a') || 'Name must start with "A"'
-}
-let fields = [
-	{name: 'id'        , w:  80, min_w:  30, type: 'number', editable: false},
-	{name: 'index'     , w:  50, type: 'number', editable: false},
-	{name: 'active'    , w:  30, type: 'bool', true_text: 'x', false_text: ''},
-	{name: 'name'      , w: 150, min_w:  50, max_w: 400, validate: starts_with_a, filter_by: true},
-	{name: 'parent_id' , w:  50, min_w:  50, type: 'number', allow_null: true, editable: false, focusable: false},
-	{name: 'random_num', w: 130, allow_null: true, type: 'number', text: 'Random Number'},
-	{name: 'date'      , w: 120, allow_null: true, type: 'date', filter_by: true},
-]
-let rows = []
-for (let i = 0; i <= 10000; i++) {
-	let id         = i
-	let name       = 'record '+i
-	let parent_id  = i > 4 ? (i-1) % 5 : null
-	let random_num = floor(random() * 1e9)
-	let random_date = clamp(i * 24 * 3600 * 10, 0, time(3000, 0))
-	let active = i % 5 == 0
-	let row = [id, id, active, name, parent_id, random_num, random_date]
-	row.focusable = true // i % 100 >= 85
-	rows.push(row)
-}
-ui.rowsets.tree = {
-	fields: fields,
-	rows: rows,
-	pk: 'id',
-	parent_col: 'parent_id',
-	index_col: 'index',
-}
-demos.treegrid = `
-ui.m(ui.em(2))
-ui.stack()
-	ui.grid('treegrid', {
-		rowset_name: 'tree',
-		order_by: 'active name:desc',
-		//tree_col: 'name',
-		//can_edit: false,
-		can_change_header_visibility: true,
-		//can_focus_cells: false,
-		//order_by: 'parent_id name:desc',
-		can_move_rows: true,
-		//enter_edit_on_click_focused: false,
-		//can_change_parent: false,
-	})
-ui.end_stack()
-`
 }
 
 {
@@ -360,8 +296,8 @@ ui.rowsets.food = {
 	rows: rows,
 	pk: 'id',
 }
-grid_state = {}
-demos.grid_groups = `
+let grid_state = {}
+demos.grid_groups = function() {
 ui.m(ui.em(2))
 ui.stack()
 	ui.grid('groups_grid', {
@@ -385,7 +321,7 @@ ui.stack()
 		//can_change_parent: false,
 	})
 ui.end_stack()
-`
+}
 }
 
 {
@@ -437,24 +373,23 @@ ui.rowsets.grid_types = {
 	parent_col: 'parent_id',
 }
 
-grid_types_cols = 'status date color grower_id id num size count datetime time timeofday dur active tags progress icon place url phone email password secret pubkey privkey col action parent_id'
-
 }
 
 {
+let grid_types_cols = 'status date color grower_id id num size count datetime time timeofday dur active tags progress icon place url phone email password secret pubkey privkey col action parent_id'
 let grid_demo_source = ui.rowsets.grid_types
 let grid_demo_source_fields = grid_demo_source.fields
 let grid_demo_source_rows = grid_demo_source.rows
 let grid_demo_source_field_i = {}
 for (let i = 0; i < grid_demo_source_fields.length; i++)
 	grid_demo_source_field_i[grid_demo_source_fields[i].name] = i
-grid_demo_base_cols = grid_types_cols.split(/\s+/).filter(
+let grid_demo_base_cols = grid_types_cols.split(/\s+/).filter(
 	col => col != 'parent_id')
-grid_demo_first_cols = grid_demo_base_cols
-first_col_i = 0
-grid_demo_base_field_count = grid_demo_source_fields.length
+let grid_demo_first_cols = grid_demo_base_cols
+let first_col_i = 0
+let grid_demo_base_field_count = grid_demo_source_fields.length
 
-make_grid_demo_parent_ids = function(row_count, tree_depth) {
+function make_grid_demo_parent_ids(row_count, tree_depth) {
 	let parent_ids = Array(row_count).fill(null)
 	if (!row_count || !tree_depth)
 		return parent_ids
@@ -550,7 +485,7 @@ function make_grid_demo_rowset(
 	}
 }
 
-demos.grid_config = `
+demos.grid = function() {
 let state = ui.state('grid_config_state')
 state.tree ??= true
 state.groups ??= false
@@ -753,39 +688,87 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 	ui.end_v()
 ui.end_scrollbox()
 ui.end_hsplit()
-`
+}
 }
 
-date_input1_v = parse_date('2026-03-14', 'SQL')
-date_input3_v = parse_date('2026-09-17 13:45:00', 'SQL')
-date_input3_field = ui.create_field({type: 'datetime'})
-num_slider1_field = ui.create_field({
+{
+let input1_text = 'Hello1 Hello1'
+let input2_text = 'Hello2 Hello2'
+let dd_items = [
+	'item 1',
+	'item 2 that is a lot longer than the others',
+	'item 3',
+	'item 4 that is so damn long even the popup will clip it before '
+	+'it looks ridiculous',
+]
+let dd1_i = 1
+let dd2_i = 0
+let radio_sel_i = 0
+let toggle1_on = false
+let cb1_checked = false
+let cb2_checked = true
+let slider1_v = 3000
+let num_slider1_value = 2500
+let date_input1_v = parse_date('2026-03-14', 'SQL')
+let date_input3_v = parse_date('2026-09-17 13:45:00', 'SQL')
+let input1_field = ui.create_field()
+let input2_field = ui.create_field()
+let date_input1_field = ui.create_field({type: 'date'})
+let date_input3_field = ui.create_field({type: 'datetime'})
+let num_slider1_field = ui.create_field({
 	type: 'number',
-	min: 10,
-	max: 90,
+	min: 1000,
+	max: 9000,
 	slider_min: 0,
-	slider_max: 100,
+	slider_max: 10000,
+	scale: 100,
 	decimals: 2,
 })
-slider1_field = ui.create_field({
+let slider1_field = ui.create_field({
 	type: 'number',
-	min: 20,
-	max: 40,
+	min: 2000,
+	max: 4000,
 	slider_min: 0,
-	slider_max: 100,
-	decimals: 1,
+	slider_max: 10000,
+	scale: 100,
+	decimals: 2,
 	slider_markers: false,
 })
-color_input1_v = '#1e90ff'
-demos.input_controls = `
+let color_input1_v = '#1e90ff'
+let color_input1_field = ui.create_field({type: 'color'})
+let cb1_field = ui.create_field({type: 'bool'})
+let cb2_field = ui.create_field({type: 'bool'})
+let toggle1_field = ui.create_field({type: 'bool'})
+let input_controls_fields = [
+	input1_field,
+	input2_field,
+	date_input1_field,
+	date_input3_field,
+	color_input1_field,
+	num_slider1_field,
+	slider1_field,
+	cb1_field,
+	cb2_field,
+	toggle1_field,
+]
+let input_controls_readonly = false
+demos.input_controls = function() {
 ui.v_aligned(0, ui.sp2(), 'c', 'c')
 	ui.h(0, ui.sp2(), 'l')
+		ui.label('input_controls_readonly', 'Readonly', 0)
+		input_controls_readonly = ui.checkbox(
+			'input_controls_readonly', input_controls_readonly)
+	ui.end_h()
+	for (let field of input_controls_fields)
+		field.readonly = input_controls_readonly
+	ui.h(0, ui.sp2(), 'l')
 		ui.label('input1', 'Input', 0)
-		input1_text = ui.input('input1', input1_text)
+		input1_text = ui.input('input1', input1_text, input1_field)
 	ui.end_h()
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('input2', 'Input R', 0)
-		input2_text = ui.input('input2', input2_text, null, 1, null, 'sr')
+		input2_text = ui.input('input2', input2_text, input2_field,
+			1, null, 'sr')
 	ui.end_h()
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('dd1', 'Dropdown', 0)
@@ -797,7 +780,8 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 	ui.end_h()
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('date_input1', 'Date', 0)
-		date_input1_v = ui.date_input('date_input1', date_input1_v)
+		date_input1_v = ui.date_input('date_input1', date_input1_v,
+			date_input1_field)
 	ui.end_h()
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('date_input3', 'Date & time', 0)
@@ -806,7 +790,8 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 	ui.end_h()
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('color_input1', 'Color', 0)
-		color_input1_v = ui.color_input('color_input1', color_input1_v)
+		color_input1_v = ui.color_input('color_input1', color_input1_v,
+			color_input1_field)
 	ui.end_h()
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('num_slider1', 'Number slider', 0)
@@ -821,21 +806,21 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 	ui.h(0, ui.sp4())
 		ui.box()
 		ui.h(0, ui.sp2(), 'l')
-			cb1_checked = ui.checkbox('cb1', cb1_checked)
+			cb1_checked = ui.checkbox('cb1', cb1_checked, cb1_field)
 			ui.label('cb1', 'Checkbox 1', 1)
 		ui.end_h()
 	ui.end_h()
 	ui.h(0, ui.sp4())
 		ui.box()
 		ui.h(0, ui.sp2(), 'l')
-			cb2_checked = ui.checkbox('cb2', cb2_checked)
+			cb2_checked = ui.checkbox('cb2', cb2_checked, cb2_field)
 			ui.label('cb2', 'Checkbox 2', 1)
 		ui.end_h()
 	ui.end_h()
 	ui.h(0, ui.sp4())
 		ui.box()
 		ui.h(0, ui.sp2(), 'l')
-			toggle1_on = ui.toggle('toggle1', toggle1_on)
+			toggle1_on = ui.toggle('toggle1', toggle1_on, toggle1_field)
 			ui.label('toggle1', 'Toggle', 1)
 		ui.end_h()
 	ui.end_h()
@@ -859,9 +844,11 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 	ui.end_h()
 
 ui.end_v_aligned()
-`
+}
+}
 
-demos.split = `
+{
+demos.split = function() {
 ui.hsplit('hsplit1', .5)
 		ui.vsplit('vsplit1')
 				ui.hsplit('hsplit2', 100, 'px')
@@ -891,16 +878,18 @@ ui.hsplit('hsplit1', .5)
 				ui.end_hsplit()
 		ui.end_vsplit()
 ui.end_hsplit()
-`
+}
+}
 
-demos.word_wrap = `
+{
+demos.word_wrap = function() {
 ui.hsplit('hsplit1', .8)
 		ui.v()
 
 			ui.p(20)
 			ui.stack()
 				ui.bb('bg2')
-				ui.text_wrapped('text1', \`
+				ui.text_wrapped('text1', `
 					Were we in a Garden of Eden where land and other goods were infinitely
 					abundant, there would be no scarcity and, therefore, no need
 					for property rules; property concepts would be meaningless. The idea
@@ -910,24 +899,24 @@ ui.hsplit('hsplit1', .8)
 					in these circumstances would not be theft. Property rights are not
 					applicable to things of infinite abundance, because there cannot be
 					conflict over such things.
-				\`, 0, 'c')
+				`, 0, 'c')
 			ui.end_stack()
 
 			ui.p(20)
 			ui.stack()
 				ui.bb('bg1')
-				ui.text_wrapped('text2', \`
+				ui.text_wrapped('text2', `
 					The wrapped text pushes this flex cell down.
-				\`, 0, 'l')
+				`, 0, 'l')
 			ui.end_stack()
 
 			ui.p(20)
 			ui.stack()
 				ui.bb('bg2')
-				ui.text_wrapped('text3', \`
+				ui.text_wrapped('text3', `
 					The wrapped text pushes this flex cell down.
 					Also, this is right-aligned.
-				\`, 0, 'r')
+				`, 0, 'r')
 			ui.end_stack()
 
 		ui.end_v()
@@ -936,12 +925,14 @@ ui.hsplit('hsplit1', .8)
 			ui.text('', '<- Drag to wrap')
 		ui.end_stack()
 ui.end_hsplit()
-`
+}
+}
 
-input1_text = 'Hello1 Hello1'
-input2_text = 'Hello2 Hello2'
-input3_text = 'Hello3 Hello3 Hello3 Hello3'
-demos.input = `
+{
+let input1_text = 'Hello1 Hello1'
+let input2_text = 'Hello2 Hello2'
+let input3_text = 'Hello3 Hello3 Hello3 Hello3'
+demos.input = function() {
 ui.v(1, ui.sp(), 'l', 'c')
 	ui.h(1, ui.sp())
 		ui.label('input1', 'First Input')
@@ -956,22 +947,36 @@ ui.v(1, ui.sp(), 'l', 'c')
 		input3_text = ui.input('input3', input3_text)
 	ui.end_h()
 ui.end_v()
-`
+}
+}
 
-num_slider1_value = 25
-demos.num_slider = `
+{
+let num_slider1_value = 25
+let num_slider1_field = ui.create_field({
+	type: 'number',
+	min: 10,
+	max: 90,
+	slider_min: 0,
+	slider_max: 100,
+	decimals: 2,
+})
+demos.num_slider = function() {
 ui.v(0, ui.sp(), 'c', 'c', 300)
 	ui.box_args(0)
 	num_slider1_value = ui.num_slider(
 		'num_slider1', num_slider1_value, num_slider1_field)
 ui.end_v()
-`
+}
+}
 
-demos.bg_dots = `
+{
+demos.bg_dots = function() {
 ui.bg_dots('dots1', 0.3)
-`
+}
+}
 
-demos.button = `
+{
+demos.button = function() {
 ui.m(ui.sp2())
 ui.h(1, ui.sp2(), 's', 't')
 	if (ui.primary_button('btn1', 'Click me!', 0))
@@ -979,9 +984,11 @@ ui.h(1, ui.sp2(), 's', 't')
 	if (ui.button('btn2', 'Click me too!'))
 		pr('clicked btn2!')
 ui.end_h()
-`
+}
+}
 
-demos.popup = `
+{
+demos.popup = function() {
 ui.m(10)
 ui.v(1, 30, 'c', 'c')
 	let i = 1
@@ -1023,9 +1030,11 @@ ui.v(1, 30, 'c', 'c')
 		ui.end_h()
 	}
 ui.end_v()
-`
+}
+}
 
-demos.bb_tooltip = `
+{
+demos.bb_tooltip = function() {
 ui.sb('bb_tooltip_sb', 1)
 ui.stack('', 1, 'l', 't', 800, 800)
 	ui.bb('bg0')
@@ -1052,9 +1061,11 @@ ui.stack('', 1, 'l', 't', 800, 800)
 	}
 ui.end_stack()
 ui.end_sb()
-`
+}
+}
 
-demos.scrollbox = `
+{
+demos.scrollbox = function() {
 
 ui.v(0, 30, 'c', 'c')
 
@@ -1109,9 +1120,20 @@ ui.v(0, 30, 'c', 'c')
 	ui.end_h()
 
 ui.end_v()
-`
+}
+}
 
-demos.toolbox = `
+{
+let tb_dd_i = {}
+let tb_input_text = {}
+let dd_items = [
+	'item 1',
+	'item 2 that is a lot longer than the others',
+	'item 3',
+	'item 4 that is so damn long even the popup will clip it before '
+	+'it looks ridiculous',
+]
+demos.toolbox = function() {
 function tb_contents(tb) { // tb: toolbox id, prefixes the ids in here
 	ui.stack('', 1, 's', 's', 200, 300)
 		ui.m(ui.sp2())
@@ -1159,8 +1181,10 @@ ui.toolbox('tb3', "(3) I am right-aligned", ']', 't', 100, 100)
 	tb_contents('tb3')
 ui.end_toolbox()
 ui.end_toolboxes()
-`
+}
+}
 
+{
 let test_template = {
 	t: 'v', fr: 2, gap: 20, e: [
 		{t: 'text', id: 't1', s: 'TP Hello!'},
@@ -1168,19 +1192,21 @@ let test_template = {
 			{t: 'bb', bg_color: 'bg3'},
 		]},
 	]}
-demos.template = `
+demos.template = function() {
 ui.template('tpl1', test_template)
-`
+}
+}
 
 // 240x160 so the fitted box is visibly wider than tall.
-img_data_src = 'data:image/svg+xml,'+encodeURIComponent(
+{
+let img_data_src = 'data:image/svg+xml,'+encodeURIComponent(
 `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160" viewBox="0 0 240 160">
 	<rect width="240" height="160" fill="#2d7ff9"/>
 	<circle cx="120" cy="80" r="60" fill="#ffd166"/>
 	<path d="M0 0 L240 160 M240 0 L0 160" stroke="#f4f1de" stroke-width="4"/>
 </svg>`)
 
-demos.img = `
+demos.img = function() {
 ui.m(ui.sp2())
 ui.h(1, ui.sp2(), 's', 's')
 
@@ -1205,7 +1231,8 @@ ui.h(1, ui.sp2(), 's', 's')
 	ui.end_v()
 
 ui.end_h()
-`
+}
+}
 
 // screen sharing ------------------------------------------------------------
 
@@ -1238,6 +1265,7 @@ window.demo_remote_viewer_init = function(signal_server) {
 	ui.animate()
 }
 
+{
 function demo_share_screen_init() {
 	signal_server = signal_server || rtc.demo_signal_server()
 	if (!offer_con) {
@@ -1250,9 +1278,8 @@ function demo_share_screen_init() {
 }
 
 let sid_field = ui.create_field({readonly: true})
-let offer_sid_field = ui.create_field({readonly: true})
-to_sid = ''
-demos.share_screen = `
+let to_sid = ''
+demos.share_screen = function() {
 ui.mt(ui.sp())
 ui.v(1, ui.sp())
 	ui.ml(ui.sp())
@@ -1276,16 +1303,20 @@ ui.v(1, ui.sp())
 		ui.text('', offer_con.open ? 'Open' : 'Closed')
 	ui.end_h()
 ui.end_v()
-`
+}
+}
 
 let answer_con
 
+{
 function demo_see_screen_init() {
 	signal_server = signal_server || rtc.demo_signal_server()
 	answer_con = answer_con || rtc.answer({signal_server: signal_server})
 }
 
-demos.see_screen = `
+let sid_field = ui.create_field({readonly: true})
+let to_sid = ''
+demos.see_screen = function() {
 
 ui.mt(ui.sp())
 ui.v(1, ui.sp())
@@ -1310,16 +1341,19 @@ ui.v(1, ui.sp())
 	ui.end_scrollbox()
 ui.end_v()
 
-`
+}
+}
 
-enter_see_this_screen = function() {
+if(0) {
+function enter_see_this_screen() {
 	let signal_server = rtc.mock_signal_server()
 	let offer_con  = rtc.offer ({signal_server: signal_server, recv: pr})
 	let answer_con = rtc.answer({signal_server: signal_server, recv: pr})
 }
 
-if(0)
-demos.see_this_screen = `
+let offer_sid_field = ui.create_field({readonly: true})
+let to_sid = ''
+demos.see_this_screen = function() {
 ui.mt(ui.sp())
 ui.v(1, ui.sp())
 	ui.ml(ui.sp())
@@ -1368,10 +1402,12 @@ ui.v(1, ui.sp())
 		ui.shared_screen('ss1', answer_con)
 	ui.end_scrollbox()
 ui.end_v()
-`
+}
+}
 
 // document.documentElement.outerHTML
-window.code = `<!DOCTYPE html>
+{
+let code = `<!DOCTYPE html>
 <style attr=val>
 sel.sel #sel,sel[a=b] p:hover ::some :is(header) {
 	prop: val; /* css comment */
@@ -1411,11 +1447,12 @@ if ((x > y && y < z) || !false ?? true) {
 <\/script>
 `
 
-demos.code_edit = `
+demos.code_edit = function() {
 
 ui.code_edit('code_edit1', {code: code})
 
-`
+}
+}
 
 // demo ui -------------------------------------------------------------------
 
@@ -1494,23 +1531,26 @@ ui.main = function() {
 			ui.splitter()
 				ui.h()
 
-					let s = (demos[demo] ?? '').trim()
+					let demo_fn = demos[demo]
 
-					// ui.code_edit('code_edit1', {code: s ?? ''})
+					// ui.code_edit('code_edit1', {
+					// 	code: demo_fn?.toString() ?? '',
+					// })
 
 					if (0) {
 						ui.sb('demo_code_sb', .5)
 							ui.bb('bg1', null, 'r', 'light')
 							ui.font('monospace')
 							ui.p(ui.sp4())
-							if (s)
-								ui.text_lines('demo_text', s, 0, 'l', 't')
+							if (demo_fn)
+								ui.text_lines('demo_text', demo_fn.toString(),
+									0, 'l', 't')
 						ui.end_sb()
 					}
 
 					ui.stack()
-						if (s)
-							eval(s)
+						if (demo_fn)
+							demo_fn()
 					ui.end_stack()
 				ui.end_h()
 			ui.end_hsplit()

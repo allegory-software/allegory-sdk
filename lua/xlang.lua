@@ -95,6 +95,9 @@ local load_s_ids = memoize(function()
 		for v, en_text in sortedpairs(fld.en_enum_labels or empty) do
 			add_ids('enum_label', id_name..'.'..v, en_text, kind, container)
 		end
+		for v, en_text in sortedpairs(fld.en_enum_info or empty) do
+			add_ids('enum_info', id_name..'.'..v, en_text, kind, container)
+		end
 	end
 	for tbl_name, tbl in sortedpairs(config'db_schema'.tables) do
 		for i, fld in ipairs(tbl.fields) do

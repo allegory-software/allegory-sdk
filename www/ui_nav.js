@@ -1067,8 +1067,10 @@ ui.nav = function(opt) {
 		assign_opt(field, att, tt, f, rt, ct)
 
 		field.label ??= display_name(field.given_name || name)
-		if (field.enum_values != null)
-			field.known_values = set(words(field.enum_values))
+		if (field.enum_values != null) {
+			field.enum_values = words(field.enum_values)
+			field.known_values = set(field.enum_values)
+		}
 
 		e.all_fields[fi] = field
 		e.all_fields_map[name] = field
@@ -4870,7 +4872,7 @@ enm.editor_value = function(id, v) {
 	let i = ui.value(id+'.picker')
 	if (i == null)
 		return v
-	return words(this.enum_values)[i] ?? v
+	return this.enum_values[i] ?? v
 }
 
 // lookup dropdowns ----------------------------------------------------------
