@@ -280,8 +280,6 @@ ui.widget('code_edit_text', {
 		cx.globalCompositeOperation = 'source-atop'
 
 		// draw highlighting rectangles.
-		let colors = ui.get_theme().colors.get(0)
-		let text_color = colors.text
 		for (let line = vline1; line <= vline2; line++) {
 			let s = vlines[line - vline1]
 			let c = vcolors[line - vline1]
@@ -293,8 +291,7 @@ ui.widget('code_edit_text', {
 				let y = y0 + line * line_h
 				let w = round(cw * char_w)
 				let h = line_h
-				let color_hsl = (colors[color] ?? text_color)[0]
-				cx.fillStyle = color_hsl
+				cx.fillStyle = ui.color_css(color)
 				cx.fillRect(x, y, w, h)
 			}
 		}

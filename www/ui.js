@@ -126,7 +126,6 @@ const {
 	assign, entries, insert, remove_value,
 	noop, return_true, do_after, do_before,
 	runafter,
-	memoize,
 	freelist,
 	hsl_to_rgb_out,
 	hsl_to_rgb_hex,
@@ -186,15 +185,13 @@ THEME API, to be used exclusively in the drawing phase!
 
 /// theme objects
 
-function color_state_map() {
-	return new Map([[0, {}]]) // state 0 (normal) always present as fallback
-}
 function theme_make(name, is_dark) {
 	themes[name] = {
-		is_dark : is_dark,
-		name    : name,
-		colors  : color_state_map(),
-		shadow : {},
+		is_dark     : is_dark,
+		name        : name,
+		color_rules : map(), // {color_name->[color_id, ...]}
+		colors      : map(), // {color_id * 512 + state, color}
+		shadow      : {},
 	}
 }
 let themes = {}
@@ -209,9 +206,9 @@ themes.light.light_theme = themes.light
 /// current theme
 
 let screen_theme // root theme
-let theme // only set in draw phase, mainly by set_bg_color()
-ui.theme = () => theme
-ui.theme_is_dark = (theme1) => themes[theme1 ?? theme].is_dark
+let cur_theme // only set in draw phase, mainly by set_bg_color()
+ui.theme = () => cur_theme
+ui.theme_is_dark = (theme) => themes[theme ?? cur_theme].is_dark
 
 /// color utils
 
@@ -252,27 +249,34 @@ const STATE_NEW           = 2**7 // grid cells
 const STATE_MODIFIED      = 2**8 // grid cells
 const COLOR_STATE_ALL     = 2**9-1
 
-let parse_state_combis = memoize(function(s) {
-	s = ' '+s
-	let b = 0
-	if (s.includes(' hover'        )) b |= STATE_HOVER
-	if (s.includes(' active'       )) b |= STATE_ACTIVE
-	if (s.includes(' focused'      )) b |= STATE_FOCUSED
-	if (s.includes(' item-selected')) b |= STATE_ITEM_SELECTED
-	if (s.includes(' item-focused' )) b |= STATE_ITEM_FOCUSED
-	if (s.includes(' item-error'   )) b |= STATE_ITEM_ERROR
-	if (s.includes(' new'          )) b |= STATE_NEW
-	if (s.includes(' modified'     )) b |= STATE_MODIFIED
-	if (s.includes(' readonly'     )) b |= STATE_READONLY
-	return b
-})
+function parse_state_name(name) {
+	if (name == 'hover'        ) return STATE_HOVER
+	if (name == 'active'       ) return STATE_ACTIVE
+	if (name == 'focused'      ) return STATE_FOCUSED
+	if (name == 'readonly'     ) return STATE_READONLY
+	if (name == 'item-selected') return STATE_ITEM_SELECTED
+	if (name == 'item-focused' ) return STATE_ITEM_FOCUSED
+	if (name == 'item-error'   ) return STATE_ITEM_ERROR
+	if (name == 'new'          ) return STATE_NEW
+	if (name == 'modified'     ) return STATE_MODIFIED
+}
+
+let state_combi_bits = map()
 function parse_state(s) {
 	if (!s) return 0
 	if (isnum(s)) return s
 	if (s == 'normal') return 0
-	if (s == 'hover' ) return STATE_HOVER
-	if (s == 'active') return STATE_ACTIVE
-	return parse_state_combis(s)
+	let state_bits = state_combi_bits.get(s)
+	if (!state_bits) {
+		state_bits = 0
+		for (let state_name of words(s)) {
+			let state_bit1 = parse_state_name(state_name)
+			assert(state_bit1, 'unknown color state ', state_name)
+			state_bits |= state_bit1
+		}
+		state_combi_bits.set(s, state_bits)
+	}
+	return state_bits
 }
 
 /// color definitions
@@ -284,22 +288,41 @@ function parse_state(s) {
 // throws away the ability to HSL-adjust the color.
 // Colors can be copied by specifying (name, [state], [theme], [is_dark]).
 
-function assert_color_state(state, allow_all) {
+function parse_color_state(state) {
 	assert(state == null || isstr(state) || isnum(state), 'invalid color state')
-	if (state == '*') {
-		assert(allow_all, '* allowed only to copy all color states')
-	} else if (isstr(state)) {
-		let state_bits = 0
-		let state_words = words(state)
-		assert(state_words.length, 'invalid color state')
-		for (let state_word of state_words) {
-			if (state_word == 'normal') continue
-			let state_bit = parse_state(state_word)
-			assert(state_bit, 'unknown color state ', state_word)
-			assert(!(state_bits & state_bit), 'duplicate color state ', state_word)
-			state_bits |= state_bit
+	assert(state != '*', '* allowed only to copy all color states')
+	if (state == null || state == 'normal')
+		return [0, 0]
+	if (isnum(state)) {
+		assert(
+			state >= 0 &&
+			state <= COLOR_STATE_ALL &&
+			state == (state | 0),
+			'invalid color state')
+		return [state, 0]
+	}
+	let required_bits = 0
+	let forbidden_bits = 0
+	let state_words = words(state)
+	assert(state_words.length, 'invalid color state')
+	for (let state_word of state_words) {
+		let is_forbidden = state_word.startsWith('!')
+		let state_name = is_forbidden ? state_word.slice(1) : state_word
+		if (state_name == 'normal')
+			continue
+		let state_bit1 = parse_state_name(state_name)
+		assert(state_bit1, 'unknown color state ', state_name)
+		if (is_forbidden) {
+			assert(!(forbidden_bits & state_bit1), 'duplicate color state ', state_name)
+			assert(!(required_bits & state_bit1), 'contradictory color state ', state_name)
+			forbidden_bits |= state_bit1
+		} else {
+			assert(!(required_bits & state_bit1), 'duplicate color state ', state_name)
+			assert(!(forbidden_bits & state_bit1), 'contradictory color state ', state_name)
+			required_bits |= state_bit1
 		}
 	}
+	return [required_bits, forbidden_bits]
 }
 
 function assert_color_obj(color) {
@@ -314,86 +337,110 @@ function assert_color_obj(color) {
 		'invalid color object')
 }
 
-function color_def(theme, name, state, h, s, L, a, is_dark) {
-	assert(isstr(theme), 'invalid color theme')
+function resolve_color(color_rules, state_bits) {
+	let color
+	if (color_rules) {
+		for (let i = 1, n = color_rules.length; i < n; i += 3) {
+			let required_bits = color_rules[i+0]
+			let forbidden_bits = color_rules[i+1]
+			let rule_color     = color_rules[i+2]
+			if (
+				(state_bits & required_bits) == required_bits &&
+				!(state_bits & forbidden_bits)
+			)
+				color = rule_color
+		}
+		if (!color && state_bits) {
+			for (let i = 1, n = color_rules.length; i < n; i += 3) {
+				let required_bits = color_rules[i+0]
+				let rule_color     = color_rules[i+2]
+				if (!required_bits)
+					color = rule_color
+			}
+		}
+	}
+	return color
+}
+
+function color_def(theme_name, name, state, h, s, L, a, is_dark) {
+	assert(isstr(theme_name), 'invalid color theme')
 	assert(isstr(name) && name, 'invalid color name')
-	assert_color_state(state, true)
-	if (theme == '*') { // define color for all themes
+	if (theme_name == '*') { // define color for all themes
 		for (let theme_name in themes)
 			color_def(theme_name, name, state, h, s, L, a, is_dark)
 		return
 	}
-	let theme1 = themes[theme]
-	assert(theme1, 'unknown color theme ', theme)
-	let states = theme1.colors
-	if (state == '*') { // copy all states of a color
+	let theme = themes[theme_name]
+	assert(theme, 'unknown color theme ', theme_name)
+	if (state == '*') { // copy every state definition of a color
 		assert(isstr(h) && h, 'expected color name to copy for all states')
 		assert(s == null && L == null && a == null && is_dark == null,
 			'color state copy has extra arguments')
-		let copied = false
-		for (let [state_i, src_state_colors] of states) {
-			let color = src_state_colors[h]
-			if (color == null)
-				continue
-			let dst_state_colors = states.get(state_i)
-			if (!dst_state_colors) {
-				dst_state_colors = {}
-				states.set(state_i, dst_state_colors)
-			}
-			dst_state_colors[name] = color
-			copied = true
-		}
-		assert(copied, 'unknown color ', h)
+		let src_color_rules = theme.color_rules.get(h)
+		assert(src_color_rules, 'unknown color ', h)
+		let color_rules = theme.color_rules.get(name)
+		let color_id = color_rules ? color_rules[0] : theme.color_rules.size
+		color_rules = src_color_rules.slice()
+		color_rules[0] = color_id
+		theme.color_rules.set(name, color_rules)
+		theme.colors.clear()
 		return
 	}
-	let state_i = parse_state(state)
-	let state_colors = states.get(state_i)
-	if (!state_colors) {
-		state_colors = {}
-		states.set(state_i, state_colors)
-	}
+	let [required_bits, forbidden_bits] = parse_color_state(state)
+	let color
 	if (isnum(h)) { // h, s, L, a, [is_dark]
 		assert(isnum(s) && isnum(L), 'invalid HSL color')
 		assert(a == null || isnum(a), 'invalid HSL color alpha')
 		assert(is_dark == null || isbool(is_dark), 'invalid is_dark')
-		state_colors[name] = [hsl(h, s, L, a), h, s, L, a, is_dark]
+		color = [hsl(h, s, L, a), h, s, L, a, is_dark]
 	} else if (isarray(h)) { // color object
 		assert_color_obj(h)
-		state_colors[name] = h
-	} else { // name, [state], [theme], [is_dark]
-		let src_name    = h
-		let src_state   = s
-		let src_theme   = L
-		let src_is_dark = a
+		color = h
+	} else { // name, [state], [theme], [is_dark] (i.e. copy color)
+		let src_name       = h
+		let src_state      = s
+		let src_theme_name = L
+		let src_is_dark    = a
 		assert(isstr(src_name) && src_name, 'invalid src color name')
-		assert(src_state != '*', '* cannot be a src color state')
-		assert_color_state(s)
-		assert(src_theme == null || isstr(src_theme), 'invalid src color theme')
+		assert(src_theme_name == null || isstr(src_theme_name), 'invalid src color theme')
 		assert(src_is_dark == null || isbool(src_is_dark), 'invalid src color is_dark')
-		src_theme = themes[src_theme ?? theme]
-		assert(src_theme, 'unknown color theme ', L ?? theme)
-		let source_state_i = parse_state(s ?? state_i)
-		let source_state_colors = src_theme.colors.get(source_state_i)
-		let c = (source_state_colors && source_state_colors[h]) ??
-			src_theme.colors.get(0)[h]
+		let src_theme = src_theme_name ? themes[src_theme_name] : theme
+		assert(src_theme, 'unknown color theme ', src_theme_name)
+		let [source_state_bits] = parse_color_state(src_state ?? state)
+		let src_color_rules = src_theme.color_rules.get(src_name)
+		let c = resolve_color(src_color_rules, source_state_bits)
 		assert(c, 'unknown color ', h)
-		state_colors[name] = [c[0], c[1], c[2], c[3], c[4], a ?? c[5]]
+		color = [c[0], c[1], c[2], c[3], c[4], a ?? c[5]]
 	}
+	let color_rules = theme.color_rules.get(name)
+	if (!color_rules) {
+		color_rules = [theme.color_rules.size]
+		theme.color_rules.set(name, color_rules)
+	}
+	color_rules.push(required_bits, forbidden_bits, color)
+	theme.colors.clear()
 }
 
 /// color lookups
 
 // default color to fall back to when a name isn't found in the theme, so a
 // missing/misspelled color name doesn't crash the whole frame.
-function color_obj(name, state, theme1) {
-	let state_i = parse_state(state)
-	theme1 = theme1 ? themes[theme1] : theme
-	let state_colors = theme1.colors.get(state_i)
-	let c = (state_colors && state_colors[name]) ??
-		theme1.colors.get(0)[name]
+function color_obj(name, state, theme_name) {
+	let state_bits = parse_state(state) & COLOR_STATE_ALL
+	let theme = theme_name ? themes[theme_name] : cur_theme
+	let color_rules = theme.color_rules.get(name)
+	let color_id = color_rules && color_rules[0]
+	let color_key = color_id != null &&
+		color_id * (COLOR_STATE_ALL + 1) + state_bits
+	let c = color_key != null && theme.colors.get(color_key)
 	if (!c) {
-		warn_once('no color for ' + name + ',' + state + ',' + theme1.name)
-		c = theme1.colors.get(0).error
+		c = resolve_color(color_rules, state_bits)
+		if (c)
+			theme.colors.set(color_key, c)
+	}
+	if (!c) {
+		warn_once('no color for ' + name + ',' + state + ',' + theme.name)
+		c = resolve_color(theme.color_rules.get('error'), 0)
 	}
 	return c
 }
@@ -401,23 +448,23 @@ function color_obj(name, state, theme1) {
 let CC_COLON = ':'.charCodeAt(0) // prefix for light colors
 let CC_STAR  = '*'.charCodeAt(0) // prefix for dark colors
 
-function color_css(name, state, theme1) {
+function color_css(name, state, theme_name) {
 	if (name.charCodeAt(0) == CC_COLON) { // custom color
 		return name.slice(1)
 	}
-	return color_obj(name, state, theme1)[0]
+	return color_obj(name, state, theme_name)[0]
 }
 function bg_is_dark(bg_color) {
-	return isarray(bg_color) ? (bg_color[5] ?? bg_color[3] < .5) : theme.is_dark
+	return isarray(bg_color) ? (bg_color[5] ?? bg_color[3] < .5) : cur_theme.is_dark
 }
 
-function color_rgb_int(name, state, theme1) {
-	let c = color_obj(name, state, theme1)
+function color_rgb_int(name, state, theme_name) {
+	let c = color_obj(name, state, theme_name)
 	return hsl_to_rgb_int(c[1], c[2], c[3])
 }
 
-function color_rgba_int(name, state, theme1) {
-	let c = color_obj(name, state, theme1)
+function color_rgba_int(name, state, theme_name) {
+	let c = color_obj(name, state, theme_name)
 	return hsl_to_rgba_int(c[1], c[2], c[3], c[4])
 }
 
@@ -435,7 +482,7 @@ function set_bg_color(color, state) {
 		dark = c[5] ?? c[3] < .5
 		color = c[0]
 	}
-	theme = dark ? theme.dark_theme : theme.light_theme
+	cur_theme = dark ? cur_theme.dark_theme : cur_theme.light_theme
 	cx.fillStyle = color
 }
 
@@ -452,14 +499,14 @@ ui.bg_is_dark = bg_is_dark
 //            theme    name       state       h     s     L    a
 // ---------------------------------------------------------------------------
 ui.color_def('light', 'text'   , 'normal' ,   0, 0.00, 0.35)
+ui.color_def('light', 'text'   , 'focused',   0, 0.00, 0.00)
 ui.color_def('light', 'text'   , 'hover'  ,   0, 0.00, 0.10)
 ui.color_def('light', 'text'   , 'active' ,   0, 0.00, 0.00)
-ui.color_def('light', 'text'   , 'focused',   0, 0.00, 0.00)
 ui.color_def('light', 'text'   , 'readonly',  0, 0.00, 0.50)
 ui.color_def('dark' , 'text'   , 'normal' ,   0, 0.00, 0.80)
+ui.color_def('dark' , 'text'   , 'focused',   0, 0.00, 1.00)
 ui.color_def('dark' , 'text'   , 'hover'  ,   0, 0.00, 1.00)
 ui.color_def('dark' , 'text'   , 'active' ,   0, 0.00, 1.00)
-ui.color_def('dark' , 'text'   , 'focused',   0, 0.00, 1.00)
 ui.color_def('dark' , 'text'   , 'readonly',  0, 0.00, 0.60)
 
 ui.color_def('light', 'label'  , 'normal' ,   0, 0.00, 0.00)
@@ -494,16 +541,16 @@ ui.color_def('dark' , 'marker' , 'active' ,  61, 1.00, 0.72)
 ui.color_def('light', 'light'   , 'normal' ,   0,    0,    0, 0.10)
 ui.color_def('light', 'light'   , 'hover'  ,   0,    0,    0, 0.30)
 ui.color_def('light', 'intense' , 'normal' ,   0,    0,    0, 0.10)
-ui.color_def('light', 'intense' , 'hover'  ,   0,    0,    0, 0.40)
 ui.color_def('light', 'intense' , 'focused',   0,    0,    0, 0.30)
+ui.color_def('light', 'intense' , 'hover'  ,   0,    0,    0, 0.40)
 ui.color_def('light', 'max'     , 'normal' ,   0,    0,    0, 1.00)
 ui.color_def('light', 'marker'  , 'normal' ,  61, 1.00, 0.35, 1.00)
 
 ui.color_def('dark' , 'light'   , 'normal' ,   0,    0,    1, 0.06)
 ui.color_def('dark' , 'light'   , 'hover'  ,   0,    0,    1, 0.03)
 ui.color_def('dark' , 'intense' , 'normal' ,   0,    0,    1, 0.08)
-ui.color_def('dark' , 'intense' , 'hover'  ,   0,    0,    1, 0.40)
 ui.color_def('dark' , 'intense' , 'focused',   0,    0,    1, 0.25)
+ui.color_def('dark' , 'intense' , 'hover'  ,   0,    0,    1, 0.40)
 ui.color_def('dark' , 'max'     , 'normal' ,   0,    0,    1, 1.00)
 ui.color_def('dark' , 'marker'  , 'normal' ,  61, 1.00, 0.57, 1.00)
 
@@ -531,7 +578,6 @@ ui.color_def('light', 'input' , 'focused' ,   0, 0.00, 1.00)
 ui.color_def('light', 'input' , 'hover'   ,   0, 0.00, 0.94)
 ui.color_def('light', 'input' , 'active'  ,   0, 0.00, 0.90)
 ui.color_def('light', 'input' , 'readonly',   0, 0.00, 0.90)
-ui.color_def('light', 'input' , 'readonly focused', 0, 0.00, 0.90)
 
 ui.color_def('dark' , 'bg0'   , 'normal'  , 216, 0.28, 0.08)
 ui.color_def('dark' , 'bg'    , 'normal'  , 216, 0.28, 0.10)
@@ -553,7 +599,6 @@ ui.color_def('dark' , 'input' , 'focused' , 216, 0.28, 0.08)
 ui.color_def('dark' , 'input' , 'hover'   , 216, 0.28, 0.21)
 ui.color_def('dark' , 'input' , 'active'  , 216, 0.28, 0.25)
 ui.color_def('dark' , 'input' , 'readonly', 216, 0.28, 0.21)
-ui.color_def('dark' , 'input' , 'readonly focused', 216, 0.28, 0.21)
 
 // disable alt color. comment this to get it back.
 ui.color_def('*' , 'alt', 'normal' , 'bg')
@@ -586,17 +631,15 @@ ui.color_def('light', 'item', 'item-selected'                      ,   0, 0.00, 
 ui.color_def('light', 'item', 'item-focused item-selected'         ,   0, 0.00, 0.87)
 ui.color_def('light', 'item', 'item-focused focused'               ,   0, 0.00, 0.87)
 ui.color_def('light', 'item', 'item-focused item-selected focused' , 139 / 239 * 360, 141 / 240, 206 / 240)
-ui.color_def('light', 'item', 'item-selected focused'              , 139 / 239 * 360, 150 / 240, 217 / 240)
+ui.color_def('light', 'item', 'item-selected focused !item-focused',
+	139 / 239 * 360, 150 / 240, 217 / 240)
 ui.color_def('light', 'item', 'item-error'                         ,   0, 0.54, 0.43)
 ui.color_def('light', 'item', 'item-error item-focused'            ,   0, 1.00, 0.60)
 
 ui.color_def('light', 'item', 'readonly'                           ,   0, 0.00, 0.93)
-ui.color_def('light', 'item', 'readonly focused'                   ,   0, 0.00, 0.93)
-ui.color_def('light', 'item', 'readonly item-focused item-selected',   0, 0.00, 0.93)
-ui.color_def('light', 'item', 'readonly item-focused item-selected focused', 0, 0.00, 0.93)
 
-ui.color_def('light', 'row' , 'item-focused focused'               , 139 / 239 * 360, 150 / 240, 231 / 240)
 ui.color_def('light', 'row' , 'item-focused'                       , 139 / 239 * 360,   0 / 240, 231 / 240)
+ui.color_def('light', 'row' , 'item-focused focused'               , 139 / 239 * 360, 150 / 240, 231 / 240)
 ui.color_def('light', 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
 
 ui.color_def('dark' , 'item', 'item-focused'                       , 195, 0.06, 0.12)
@@ -604,27 +647,14 @@ ui.color_def('dark' , 'item', 'item-selected'                      ,   0, 0.00, 
 ui.color_def('dark' , 'item', 'item-focused item-selected'         , 208, 0.11, 0.23)
 ui.color_def('dark' , 'item', 'item-focused focused'               ,   0, 0.00, 0.23)
 ui.color_def('dark' , 'item', 'item-focused item-selected focused' , 211, 0.62, 0.24)
-ui.color_def('dark' , 'item', 'item-selected focused'              , 211, 0.62, 0.19)
+ui.color_def('dark' , 'item', 'item-selected focused !item-focused',
+	211, 0.62, 0.19)
 ui.color_def('dark' , 'item', 'item-error'                         ,   0, 0.54, 0.43)
 ui.color_def('dark' , 'item', 'item-error item-focused'            ,   0, 1.00, 0.60)
 
-ui.color_def('dark' , 'row' , 'item-focused focused'               , 212, 0.61, 0.13)
 ui.color_def('dark' , 'row' , 'item-focused'                       ,   0, 0.00, 0.13)
+ui.color_def('dark' , 'row' , 'item-focused focused'               , 212, 0.61, 0.13)
 ui.color_def('dark' , 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
-
-// TODO: remove these after css refactoring
-ui.color_def('*', 'bg', 'hover focused', 'bg', 'hover')
-ui.color_def('*', 'text', 'hover focused', 'text', 'hover')
-ui.color_def('*', 'text', 'item-focused item-selected focused',
-	'text', 'focused')
-ui.color_def('*', 'text', 'hover item-focused item-selected',
-	'text', 'hover')
-ui.color_def('*', 'text', 'hover item-focused item-selected focused',
-	'text', 'hover')
-ui.color_def('*', 'item', 'hover item-focused item-selected',
-	'item', 'item-focused item-selected')
-ui.color_def('*', 'item', 'hover item-focused item-selected focused',
-	'item', 'item-focused item-selected focused')
 
 // toggle, checkbox, radio, slider, enum_toggle
 ui.color_def('*'    , 'toggle', '*'                     , 'bg2')
@@ -737,7 +767,8 @@ screen.appendChild(canvas)
 let cx = canvas.getContext('2d')
 ui.cx = cx
 
-let screen_w, screen_h, dpr
+let screen_w, screen_h, screen_dpr
+let dpr // frame's dpr (comes with the frame in remote views)
 
 function resize_canvas() {
 	let dpr1 = devicePixelRatio
@@ -747,6 +778,7 @@ function resize_canvas() {
 	if (screen_w == w && screen_h == h && dpr == dpr1)
 		return
 	dpr = dpr1
+	screen_dpr = dpr1
 	screen_w = w
 	screen_h = h
 	canvas.style.width  = (screen_w / dpr) + 'px'
@@ -762,9 +794,9 @@ window.addEventListener('resize', resize_canvas)
 let screen_theme_name = document.documentElement.getAttribute('theme') ?? 'light'
 ui.default_font       = document.documentElement.getAttribute('font' ) ?? 'Arial'
 function set_screen_bg() {
-	theme = screen_theme
+	cur_theme = screen_theme
 	let color = color_css('bg')
-	theme = null
+	cur_theme = null
 	document.documentElement.style.background = color
 }
 ui.set_screen_theme = function(name) {
@@ -1403,8 +1435,6 @@ function tui_snap_paddings() {
 	my2 = tui_padding_y(my2)
 }
 
-//// FRAME BUILDING ----------------------------------------------------------
-
 ui.TUI = false
 let tui_cell_w
 let tui_cell_h
@@ -1417,6 +1447,8 @@ function reset_tui() {
 	tui_cell_w = m.width
 	tui_cell_h = asc + dsc
 }
+
+//// FRAME BUILDING ----------------------------------------------------------
 
 function reset_canvas() {
 	assert(dpr)
@@ -1888,15 +1920,15 @@ function draw_cmd(a, i, recs) {
 
 		let cmd = a[i-1]
 		if (cmd & 1) // container
-			theme_stack.push(theme)
+			theme_stack.push(cur_theme)
 		else if (cmd == CMD_END)
-			theme = theme_stack.pop()
+			cur_theme = theme_stack.pop()
 
 		let draw_f = draw[cmd]
 		if (draw_f && draw_f(a, i, recs)) {
 			i = cmd_next_sibling_i(a, i)
 			if (cmd & 1) // container
-				theme = theme_stack.pop()
+				cur_theme = theme_stack.pop()
 		} else {
 			i += a[i-2] // next_i
 		}
@@ -2603,9 +2635,9 @@ function redraw_all() {
 			drawn_focused_input = null
 			drawn_focused_by_key = false
 
-			theme = screen_theme
+			cur_theme = screen_theme
 			draw_frame(recs, root_popups, root_render_state_map)
-			theme = null
+			cur_theme = null
 
 			sync_dom_focus()
 			sync_dom_selection()
@@ -4635,8 +4667,8 @@ draw[CMD_BB_TOOLTIP] = function(a, i) {
 
 //// BOX SHADOW --------------------------------------------------------------
 
-ui.shadow_def = function(theme, name, x, y, blur, h, s, L, a, inset) {
-	themes[theme].shadow[name] = [
+ui.shadow_def = function(theme_name, name, x, y, blur, h, s, L, a, inset) {
+	themes[theme_name].shadow[name] = [
 		x, y, blur,
 		hsl(h, s, L, a), h, s, L, a, inset
 	]
@@ -4686,7 +4718,7 @@ function set_drop_shadow(st) {
 }
 
 function set_shadow(s) {
-	let st = assert(theme.shadow[s], 'unknown shadow ', s)
+	let st = assert(cur_theme.shadow[s], 'unknown shadow ', s)
 	assert(!st[SHADOW_INSET], 'inset shadow outside bb: ', s)
 	set_drop_shadow(st)
 	cur_shadow = st
@@ -4704,7 +4736,7 @@ ui.reset_shadow = reset_shadow
 
 draw[CMD_SHADOW] = function(a, i) {
 	let s = a[i+0]
-	let st = assert(theme.shadow[s], 'unknown shadow ', s)
+	let st = assert(cur_theme.shadow[s], 'unknown shadow ', s)
 	if (!st[SHADOW_INSET])
 		set_drop_shadow(st)
 	cur_shadow = st
@@ -5890,16 +5922,16 @@ draw[CMD_TEXT] = function(a, i) {
 		let px2 = a[i+PX2+0]
 		let py1 = a[i+PX1+1]
 		let py2 = a[i+PX2+1]
-		let css_x   = (sx - px1) / dpr
-		let css_y   = (y  - py1) / dpr
-		let css_w   = (sw + px1 + px2) / dpr
-		let css_h   = (a[i+3] + py1 + py2) / dpr
-		let css_lh  = a[i+3] / dpr
-		let css_px1 = px1 / dpr
-		let css_px2 = px2 / dpr
-		let css_py1 = py1 / dpr
-		let css_py2 = py2 / dpr
-		let css_font_size = cur_font_size / dpr
+		let css_x   = (sx - px1) / screen_dpr
+		let css_y   = (y  - py1) / screen_dpr
+		let css_w   = (sw + px1 + px2) / screen_dpr
+		let css_h   = (a[i+3] + py1 + py2) / screen_dpr
+		let css_lh  = a[i+3] / screen_dpr
+		let css_px1 = px1 / screen_dpr
+		let css_px2 = px2 / screen_dpr
+		let css_py1 = py1 / screen_dpr
+		let css_py2 = py2 / screen_dpr
+		let css_font_size = cur_font_size / screen_dpr
 		let css_opacity = focused ? '1' : '0'
 		if (
 			document.activeElement != input ||
@@ -6230,6 +6262,8 @@ async function pack_frame_json() {
 		id: screen_id,
 		w: screen_w,
 		h: screen_h,
+		dpr: screen_dpr,
+		font_size_normal: font_size_normal,
 		mx: ui.local_pointer.mx,
 		my: ui.local_pointer.my,
 		n: applied_edit_n,
@@ -6434,10 +6468,14 @@ ss.draw = function(a, i) {
 	let h = a[i+3]
 	let ss_focused0 = ss_focused
 	let ss_frame0 = ss_frame
+	let dpr0 = dpr
+	let font_size_normal0 = font_size_normal
 	ss_ids.push(id)
 	ss_screen_ids.push(t.id)
 	ss_frame = t
 	ss_focused = ss_focused0 && (a[i+SS_STATE] & SS_FOCUSED)
+	dpr = t.dpr
+	font_size_normal = t.font_size_normal
 	// the frame can be bigger than the box the layout gave us, and only what's
 	// inside the box is hit-tested by ss.hit.
 	cx.save()
@@ -6461,6 +6499,8 @@ ss.draw = function(a, i) {
 	ss_screen_ids.pop()
 	ss_frame = ss_frame0
 	ss_focused = ss_focused0
+	dpr = dpr0
+	font_size_normal = font_size_normal0
 
 }
 

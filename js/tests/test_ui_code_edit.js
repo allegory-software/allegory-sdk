@@ -73,7 +73,6 @@ let ui = {
 	frame(draw_fn, frame_fn) { frame_fn(null, 0, 0, 0, 400, 400, 0, 0, 400, 400) },
 	get_font_size: () => FONT_SIZE,
 	measure_text: () => ({width: CHAR_W, fontBoundingBoxDescent: 2}),
-	get_theme: () => ({colors: new Map([[0, {}]])}),
 	color_css: () => '#000',
 	sp025: () => 1, sp05: () => 2, sp1: () => 4,
 	em: n => Math.round((n ?? 1) * FONT_SIZE),
