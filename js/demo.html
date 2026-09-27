@@ -100,10 +100,11 @@ let dd_items = [
 	'item 4 that is so damn long even the popup will clip it before '
 	+'it looks ridiculous',
 ]
-let dd1_i = 1
-let dd2_i = 0
-let dd3_i = 1
-let dd4_i = 0
+let dd1_value = dd_items[1]
+let dd2_value = dd_items[0]
+let dd3_value = dd_items[1]
+let dd4_value = dd_items[0]
+let dropdown_field = ui.create_field({type: 'enum', enum_values: dd_items})
 demos.dropdown = function() {
 ui.p(ui.sp8())
 ui.v(1, ui.sp(), 's', 'c')
@@ -111,9 +112,11 @@ ui.v(1, ui.sp(), 's', 'c')
 	ui.h1('Inside text')
 	ui.h(0, ui.sp())
 		ui.label('dd1', 'dd1 label', 0)
-		dd1_i = ui.list_dropdown_inline('dd1', dd_items, dd1_i)
+		dd1_value = ui.list_dropdown_inline(
+			'dd1', dd_items, dd1_value, dropdown_field)
 		ui.text('', 'or', 0)
-		dd2_i = ui.list_dropdown_inline('dd2', dd_items, dd2_i)
+		dd2_value = ui.list_dropdown_inline(
+			'dd2', dd_items, dd2_value, dropdown_field)
 		ui.text('', 'trail', 0)
 	ui.end_h()
 	ui.mv(ui.sp8(), ui.sp2())
@@ -121,11 +124,13 @@ ui.v(1, ui.sp(), 's', 'c')
 	ui.v_aligned(0, ui.sp(), 'l')
 		ui.h(0, ui.sp())
 			ui.label('dd3', 'dd3 label')
-			dd3_i = ui.list_dropdown('dd3', dd_items, dd3_i)
+			dd3_value = ui.list_dropdown(
+				'dd3', dd_items, dd3_value, dropdown_field)
 		ui.end_h()
 		ui.h(0, ui.sp())
 			ui.label('dd4', 'dd4 label')
-			dd4_i = ui.list_dropdown('dd4', dd_items, dd4_i)
+			dd4_value = ui.list_dropdown(
+				'dd4', dd_items, dd4_value, dropdown_field)
 		ui.end_h()
 	ui.end_v_aligned()
 ui.end_v()
@@ -247,12 +252,12 @@ ui.menu('menu1', [
 
 {
 let list1_items = []
-let list1_i = 0
 for (let i = 1; i <= 1000; i++)
 	list1_items.push('Item '+i)
+let list1_value = list1_items[0]
 demos.list = function() {
 ui.sb('list1_sb', 1, null, null, 'c', 'c', 100, 300)
-	list1_i = ui.list('list1', list1_items, list1_i)
+	list1_value = ui.list('list1', list1_items, list1_value)
 ui.end_sb()
 }
 }
@@ -386,7 +391,11 @@ for (let i = 0; i < grid_demo_source_fields.length; i++)
 let grid_demo_base_cols = grid_types_cols.split(/\s+/).filter(
 	col => col != 'parent_id')
 let grid_demo_first_cols = grid_demo_base_cols
-let first_col_i = 0
+let first_col = grid_demo_first_cols[0]
+let grid_demo_first_col_field = ui.create_field({
+	type: 'enum',
+	enum_values: grid_demo_first_cols,
+})
 let grid_demo_base_field_count = grid_demo_source_fields.length
 
 function make_grid_demo_parent_ids(row_count, tree_depth) {
@@ -541,8 +550,6 @@ state.tree_depth_slider_field ??= ui.create_field({
 })
 let tree_depth_slider_field = state.tree_depth_slider_field
 
-let first_col = grid_demo_first_cols[first_col_i]
-
 state.first_col = first_col
 
 if (!state.rowset_name || state.recreate) {
@@ -641,10 +648,10 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 
 		ui.h(1, ui.sp1())
 			ui.text('', 'Col #1', 0, 'l')
-			first_col_i = ui.list_dropdown('grid_config_first_col',
-				grid_demo_first_cols, first_col_i)
-			if (first_col_i != null) {
-				state.first_col = grid_demo_first_cols[first_col_i]
+			first_col = ui.list_dropdown('grid_config_first_col',
+				grid_demo_first_cols, first_col, grid_demo_first_col_field)
+			if (first_col != null) {
+				state.first_col = first_col
 				first_col = state.first_col
 			}
 		ui.end_h()
@@ -701,8 +708,9 @@ let dd_items = [
 	'item 4 that is so damn long even the popup will clip it before '
 	+'it looks ridiculous',
 ]
-let dd1_i = 1
-let dd2_i = 0
+let dd1_value = dd_items[1]
+let dd2_value = dd_items[0]
+let enum_toggle_value = 'one'
 let radio_sel_i = 0
 let toggle1_on = false
 let cb1_checked = false
@@ -715,6 +723,11 @@ let input1_field = ui.create_field()
 let input2_field = ui.create_field()
 let date_input1_field = ui.create_field({type: 'date'})
 let date_input3_field = ui.create_field({type: 'datetime'})
+let enum_input_field = ui.create_field({type: 'enum', enum_values: dd_items})
+let enum_toggle_field = ui.create_field({
+	type: 'enum',
+	enum_values: 'one two three',
+})
 let num_slider1_field = ui.create_field({
 	type: 'number',
 	min: 1000,
@@ -744,6 +757,8 @@ let input_controls_fields = [
 	input2_field,
 	date_input1_field,
 	date_input3_field,
+	enum_input_field,
+	enum_toggle_field,
 	color_input1_field,
 	num_slider1_field,
 	slider1_field,
@@ -772,11 +787,16 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 	ui.end_h()
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('dd1', 'Dropdown', 0)
-		dd1_i = ui.list_dropdown('dd1', dd_items, dd1_i)
+		dd1_value = ui.enum_input('dd1', dd1_value, enum_input_field)
 	ui.end_h()
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('dd2', 'Dropdown R', 0)
-		dd2_i = ui.list_dropdown('dd2', dd_items, dd2_i)
+		dd2_value = ui.enum_input('dd2', dd2_value, enum_input_field)
+	ui.end_h()
+	ui.h(0, ui.sp2(), 'l')
+		ui.label('enum_toggle1', 'Enum toggle', 0)
+		enum_toggle_value = ui.enum_toggle(
+			'enum_toggle1', enum_toggle_value, enum_toggle_field)
 	ui.end_h()
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('date_input1', 'Date', 0)
@@ -1124,7 +1144,7 @@ ui.end_v()
 }
 
 {
-let tb_dd_i = {}
+let tb_dd_values = {}
 let tb_input_text = {}
 let dd_items = [
 	'item 1',
@@ -1133,14 +1153,17 @@ let dd_items = [
 	'item 4 that is so damn long even the popup will clip it before '
 	+'it looks ridiculous',
 ]
+let dropdown_field = ui.create_field({type: 'enum', enum_values: dd_items})
 demos.toolbox = function() {
 function tb_contents(tb) { // tb: toolbox id, prefixes the ids in here
 	ui.stack('', 1, 's', 's', 200, 300)
 		ui.m(ui.sp2())
 		ui.v(1, ui.sp(), 'c', 't')
 			tb_input_text[tb] = ui.input(tb+'_input', tb_input_text[tb] ?? 'type here')
-			tb_dd_i[tb+'1'] = ui.list_dropdown(tb+'_dd1', dd_items, tb_dd_i[tb+'1'])
-			tb_dd_i[tb+'2'] = ui.list_dropdown(tb+'_dd2', dd_items, tb_dd_i[tb+'2'])
+			tb_dd_values[tb+'1'] = ui.list_dropdown(
+				tb+'_dd1', dd_items, tb_dd_values[tb+'1'], dropdown_field)
+			tb_dd_values[tb+'2'] = ui.list_dropdown(
+				tb+'_dd2', dd_items, tb_dd_values[tb+'2'], dropdown_field)
 			ui.stack(tb+'_tt', 0, 'c', 'c', 100, 30)
 				ui.bb('bg2', null, 1, 'intense')
 				ui.text('', 'hover me', 1, 'c')
@@ -1521,9 +1544,7 @@ ui.main = function() {
 			load_split_size('demos_split')
 			ui.hsplit('demos_split', ui.em(10), 'px')
 			save_split_size('demos_split')
-				let i = ui.list('demos_list', demos_array,
-					demos_array.indexOf(selected_demo))
-				let demo = demos_array[i]
+				let demo = ui.list('demos_list', demos_array, selected_demo)
 				if (demo != selected_demo) {
 					selected_demo = demo
 					save_demo_state('demo', demo)

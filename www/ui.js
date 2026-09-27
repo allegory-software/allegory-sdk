@@ -37,7 +37,9 @@ INPUT
 	ui.icon_button     (id, icon, [s], fr, align, valign, min_w, min_h, style)
 	ui.label           (for_id, s, fr, align, valign)
 	ui.input           (id, v, [field], fr, w, [text_align], [no_box]) -> v
-	ui.list_dropdown   (id, items, sel_i, fr, max_w, min_w) -> sel_i
+	ui.list_dropdown   (id, items, value, [field], fr, max_w, min_w) -> value
+	ui.enum_input      (id, value, field, fr, max_w, min_w) -> value
+	ui.enum_toggle     (id, value, field, fr, align, valign, min_w) -> value
 	ui.toggle          (id, on, [field], fr, align, valign, min_w)
 	ui.checkbox        (id, on, [field], fr, align, valign, min_w)
 	ui.date_input      (id, v, [field], fr, align, valign, min_w) -> v
@@ -47,8 +49,9 @@ INPUT
 
 LIST
 
-	ui.[h|v|hv]list    (id, items, focused_i, fr, align, valign,
-	                   item_align, item_valign, item_fr, max_w, min_w) -> focused_i
+	ui.[h|v|hv]list    (id, items, value, [field], fr, align, valign,
+	                    item_align, item_valign, item_fr, max_w, min_w,
+	                    item_pad_l, item_pad_r, item_pad_y, item_h) -> value
 
 OTHER
 
@@ -539,6 +542,20 @@ ui.color_def('dark' , 'item', 'item-error item-focused'            ,   0, 1.00, 
 ui.color_def('dark' , 'row' , 'item-focused focused'               , 212, 0.61, 0.13)
 ui.color_def('dark' , 'row' , 'item-focused'                       ,   0, 0.00, 0.13)
 ui.color_def('dark' , 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
+
+// toggle, checkbox, radio, slider
+ui.color_def('*'    , 'toggle'      , '*'               , 'bg2')
+ui.color_def('*'    , 'toggle-thumb', 'normal'          , 'text', 'active')
+ui.color_def('light', 'toggle', 'item-selected'         , 'link', 'normal')
+ui.color_def('light', 'toggle', 'hover item-selected'   , 'link', 'hover' )
+ui.color_def('dark' , 'toggle', 'item-selected'         , 'link', 'normal')
+ui.color_def('dark' , 'toggle', 'hover item-selected'   , 'link', 'hover' )
+ui.color_def('light', 'toggle', 'readonly item-selected', 0, 0, 0.3)
+ui.color_def('dark' , 'toggle', 'readonly item-selected', 0, 0, 0.5)
+
+// enum_toggle
+ui.color_def('*', 'toggle', 'item-focused item-selected focused', 'toggle', 'item-selected')
+ui.color_def('*', 'toggle', 'item-focused item-selected'        , 'toggle', 'item-selected')
 
 //// CANVAS SETUP ------------------------------------------------------------
 
@@ -6770,74 +6787,89 @@ ui.valid_list_index = function(i, items) {
 
 function list_update(id, s) {
 	s.input_value = undefined
+	if (s.field?.readonly) {
+		s.focused_item_changed = false
+		s.picked = false
+		return
+	}
 	let items  = s.items
-	let fi0 = s.value
-	let fi = fi0
+	let value0 = s.value
+	let value = value0
+	let next_key = s.hv == 'h' ? 'arrowright' : 'arrowdown'
+	let prev_key = s.hv == 'h' ? 'arrowleft' : 'arrowup'
 	let d = ui.focused(id) && (
-			ui.keydown('arrowdown') &&  1 ||
-			ui.keydown('arrowup'  ) && -1
+			ui.keydown(next_key) &&  1 ||
+			ui.keydown(prev_key) && -1
 		) || 0
-	let fi_changed = d && 'key'
-	if (d)
-		fi = ui.valid_list_index(
-			fi != null ? fi + d : d >= 0 ? 0 : items.length-1, items)
+	let item_changed = d && 'key'
+	if (d) {
+		let item_i = items.indexOf(value)
+		item_i = ui.valid_list_index(
+			item_i >= 0 ? item_i + d : d >= 0 ? 0 : items.length-1,
+			items)
+		value = item_i != null ? items[item_i] : null
+	}
 	let i = 0
 	for (let item of items) {
 		let item_id = id+'.'+i
 		if (clicked(item_id)) {
 			ui.focus(id)
-			fi = i
-			fi_changed = 'click'
+			value = item
+			item_changed = 'click'
 		}
 		i++
 	}
-	if (fi_changed)
-		s.input_value = fi
-	s.focused_item_changed = fi0 !== fi ? fi_changed : false
-	let has_enter = fi != null && ui.focused(id) && ui.keydown('enter')
-	s.picked = fi_changed == 'click' || !!has_enter
+	if (item_changed)
+		s.input_value = value
+	s.focused_item_changed = value0 !== value ? item_changed : false
+	let has_enter = value != null && ui.focused(id) && ui.keydown('enter')
+	s.picked = item_changed == 'click' || !!has_enter
 	if (has_enter)
 		ui.capture_keys()
 }
-function hvlist(hv, id, items, focused_i,
+function hvlist(hv, id, items, value, field,
 	fr, align, valign,
 	item_align, item_valign, item_fr,
 	max_w, min_w,
-	item_pad_l, item_pad_r, item_pad_y, item_h
+	item_pad_l, item_pad_r, item_pad_y, item_h,
+	custom_item_bg_color, custom_item_color
 ) {
+	hv = hv || 'v'
+	assert(hv == 'v' || hv == 'h')
 	let s = ui.state(id)
 	s.items = items
+	s.field = field
+	s.hv = hv
 	ui.state(id, list_update)
-	focused_i = ui.set_value(s, focused_i)
+	value = ui.set_value(s, value, field)
 	ui.focusable(id)
-	let fi = focused_i
 	let list_focused = ui.focused(id)
 	// reveal the focused item on tab-focusing the list and on arrow keys.
 	// a clicked item is excepted to avoid shifting it under the mouse pointer.
 	let reveal_fi = ui.focusing(id) || s.focused_item_changed == 'key'
 	let i = 0
-	hv = hv || 'v'
-	assert(hv == 'v' || hv == 'h')
 	ui.hv(hv, fr, 0, align  ?? hv == 'v' ? 's' : '[', '[', min_w)
 	for (let item of items) {
 		let item_id = id+'.'+i
 		ui.p(item_pad_l ?? ui.sp(), item_pad_y ?? ui.sp05(),
 			item_pad_r ?? item_pad_l ?? ui.sp())
-		if (fi == i && reveal_fi)
+		if (item === value && reveal_fi)
 			ui.scroll_to_view_next_box()
 		ui.stack(item_id, 0, 's', 's', null, item_h)
-			let item_focused = fi == i
-			ui.bb(
-				item_focused ? 'item' : 'bg',
-				item_focused
-					? list_focused
-						? 'item-focused item-selected focused'
-						: 'item-focused item-selected'
-					: null
-	)
-			ui.color('text', hit(item_id) ? 'hover' : null)
-			ui.text('', item, item_fr,
-				item_align  ?? (hv == 'v' ? 'l' : 'c'),
+			let item_focused = item === value
+			let item_bg_color = custom_item_bg_color ?? (item_focused ? 'item' : 'bg')
+			let item_bg_color_state = item_focused
+				? list_focused
+					? 'item-focused item-selected focused'
+					: 'item-focused item-selected'
+				: null
+			ui.bb(item_bg_color, item_bg_color_state)
+			let item_color = custom_item_color ?? 'text'
+			let item_color_state = field?.readonly ? 'readonly'
+				: hit(item_id) ? 'hover' : null
+			ui.color(item_color, item_color_state)
+			ui.text('', field ? field.to_text(item) : item, item_fr,
+				item_align ?? field?.align ?? (hv == 'v' ? 'l' : 'c'),
 				item_valign ?? 'c',
 				max_w)
 			if (item_focused)
@@ -6846,7 +6878,7 @@ function hvlist(hv, id, items, focused_i,
 		i++
 	}
 	ui.end()
-	return focused_i
+	return value
 }
 ui.hvlist = hvlist
 ui.vlist = hvlist.bind(null, 'v')
@@ -7339,15 +7371,6 @@ ui.box_widget('slider', slider)
 
 //// TOGGLE ------------------------------------------------------------------
 
-ui.color_def('*', 'toggle'      , '*'                   , 'bg2')
-ui.color_def('*', 'toggle-thumb', 'normal'              , 'text', 'active')
-ui.color_def('light', 'toggle', 'item-selected'         , 'link', 'normal')
-ui.color_def('light', 'toggle', 'hover item-selected'   , 'link', 'hover' )
-ui.color_def('dark' , 'toggle', 'item-selected'         , 'link', 'normal')
-ui.color_def('dark' , 'toggle', 'hover item-selected'   , 'link', 'hover' )
-ui.color_def('light', 'toggle', 'readonly item-selected', 0, 0, 0.3)
-ui.color_def('dark' , 'toggle', 'readonly item-selected', 0, 0, 0.5)
-
 let TOGGLE_ID    = BOX_ARGS+0
 let TOGGLE_STATE = BOX_ARGS+1
 
@@ -7780,14 +7803,17 @@ ui.end_dropdown = function(id) {
 
 //// LIST_DROPDOWN -----------------------------------------------------------
 
-const chevron_points = [0.5, 4.5, 7, 11, 13.5, 4.5]
+const chevron_points = [0.5, 3.5, 7, 10, 13.5, 3.5]
 
-function draw_value_row(items, item_i, row_id, pad, chevron_w, max_w, w) {
+function draw_value_row(value, field, row_id,
+	pad, chevron_w, max_w, w
+) {
 	ui.stack(row_id ?? '', 0)
 		ui.p(pad)
 		ui.h(0, pad)
-			let s = item_i != null ? items[item_i] : ''
-			ui.text('', s, 1, 'l', 'c',
+			ui.text('', value == null ? ''
+				: field ? field.to_text(value) : value,
+				1, 'l', 'c',
 				max_w ?? ui.em_input_max(),
 				w == -1 ? w : (w ?? ui.em_input()) - chevron_w,
 			)
@@ -7801,6 +7827,8 @@ function draw_value_row(items, item_i, row_id, pad, chevron_w, max_w, w) {
 function list_dropdown_update(id, s) {
 
 	s.input_value = undefined
+	if (s.field?.readonly)
+		return
 
 	let picker_id = id+'.picker'
 	let items = s.items
@@ -7815,9 +7843,9 @@ function list_dropdown_update(id, s) {
 	else if (s.closed)
 		s.input_value = s.picked ? ui.value(picker_id) : s.revert_value
 
-	let picker_i = ui.input_value(picker_id)
-	if (picker_i !== undefined)
-		s.input_value = picker_i
+	let picker_value = ui.input_value(picker_id)
+	if (picker_value !== undefined)
+		s.input_value = picker_value
 
 	if (ui.keydown('delete') && (ui.focused(id) || ui.focus_inside(id)))
 		s.input_value = null
@@ -7826,14 +7854,16 @@ function list_dropdown_update(id, s) {
 	if (!s.open && ui.focused(id)) {
 		let d = ui.keydown('arrowup') && -1 || ui.keydown('arrowdown') && 1 || 0
 		if (d) {
-			let i = s.value
-			s.input_value = ui.valid_list_index(
-				i != null ? i + d : d >= 0 ? 0 : items.length-1, items)
+			let item_i = items.indexOf(s.value)
+			item_i = ui.valid_list_index(
+				item_i >= 0 ? item_i + d : d >= 0 ? 0 : items.length-1,
+				items)
+			s.input_value = item_i != null ? items[item_i] : null
 		}
 	}
 }
 
-ui.list_dropdown = function(id, items, sel_i, fr, max_w, w) {
+ui.list_dropdown = function(id, items, value, field, fr, max_w, w) {
 
 	let picker_id = id+'.picker'
 	let value_id = id+'.value'
@@ -7846,16 +7876,20 @@ ui.list_dropdown = function(id, items, sel_i, fr, max_w, w) {
 	ui.focusable(id)
 	let s = ui.state(id)
 	s.items = items
+	s.field = field
 	let open = ui.dropdown(id, list_dropdown_update)
-	sel_i = ui.set_value(s, sel_i)
+	value = ui.set_value(s, value, open ? null : field)
 
 	if (!open && ui.focus_inside(picker_id))
 		ui.focus(id)
 
+		let state =
+			(field?.readonly ? STATE_READONLY : 0)
+			| (ui.focused(id) ? STATE_FOCUSED : 0)
 		if (!open)
-			ui.bb('input', ui.focused(id) ? 'focused' : null,
-				1, 'intense', ui.focused(id) ? 'hover' : null)
-		draw_value_row(items, sel_i, null, pad, chevron_w,
+			ui.bb('input', state, 1, 'intense', state)
+		ui.color('text', state)
+		draw_value_row(value, field, null, pad, chevron_w,
 			max_w ?? ui.em_input_max(),
 			w)
 
@@ -7863,9 +7897,12 @@ ui.list_dropdown = function(id, items, sel_i, fr, max_w, w) {
 
 		if (open) {
 			ui.v()
-				draw_value_row(items, sel_i, value_id, pad, chevron_w, max_w)
+				ui.color('text', state)
+				draw_value_row(value, field, value_id,
+					pad, chevron_w, max_w)
 				ui.scrollbox(picker_id+'.sb', 1, 'contain', 'auto', 's', 's')
-					ui.list(picker_id, items, sel_i, 0, 's', 's', 'l', 'c', 0,
+					ui.list(picker_id, items, value, field, 0,
+						's', 's', null, 'c', 0,
 						max_w ?? ui.em_input_max_popup(),
 						null,
 						pad, pad * 2 + chevron_w, pad)
@@ -7878,13 +7915,27 @@ ui.list_dropdown = function(id, items, sel_i, fr, max_w, w) {
 
 	ui.end_stack()
 
-	return sel_i
+	return value
 }
 
 // dropdowns have fixed w by default that aligns with inputs.
 // these inline dropdowns have dynamic width for use inline inside text.
-ui.list_dropdown_inline = function(id, items, sel_i, fr, max_w) {
-	return ui.list_dropdown(id, items, sel_i, fr, max_w, -1)
+ui.list_dropdown_inline = function(id, items, value, field, fr, max_w) {
+	return ui.list_dropdown(id, items, value, field, fr, max_w, -1)
+}
+
+ui.enum_input = function(id, value, field, fr, max_w, w) {
+	return ui.list_dropdown(id, field.enum_values, value, field, fr, max_w, w)
+}
+
+ui.enum_toggle = function(id, value, field, fr, align, valign, min_w) {
+	return ui.hlist(id, field.enum_values, value, field,
+		fr ?? 0, align ?? 'l', valign,
+		null, null, 0, // item_align, item_valign, item_fr
+		null, min_w,
+		null, null, null, null, // item_pad_l, item_pad_r, item_pad_y, item_h
+		'toggle', 'button-text'
+	)
 }
 
 //// CALENDAR ----------------------------------------------------------------
@@ -7988,12 +8039,13 @@ function calendar_update(id, s) {
 	let sel_day = s.value
 
 	if (s.year0 != null) { // the lists have drawn
-		let yi = ui.input_value(id+'.year' )
-		let mi = ui.input_value(id+'.month')
-		if (yi !== undefined || mi !== undefined) {
+		let year_value = ui.input_value(id+'.year' )
+		let month_value = ui.input_value(id+'.month')
+		if (year_value !== undefined || month_value !== undefined) {
 			let d = sel_day ?? day(time())
-			let y = s.year0 + (yi ?? year_of(d) - s.year0)
-			let m = (mi ?? month_of(d) - 1) + 1
+			let y = year_value ?? year_of(d)
+			let m = month_value != null
+				? months.indexOf(month_value) + 1 : month_of(d)
 			let last_month_day = month_day_of(month(time(y, m, 1), 1) - 1)
 			sel_day = time(y, m, min(month_day_of(d), last_month_day))
 			s.input_value = sel_day
@@ -8133,13 +8185,13 @@ ui.calendar = function(id, sel_day, ranges, fr, align, valign, min_w, min_h) {
 		if (s.year0 != year0) {
 			let years = s.years ?? []
 			for (let i = 0; i < 12; i++)
-				years[i] = (year0 + i)+''
+				years[i] = year0 + i
 			s.years = years
 			s.year0 = year0
 		}
-		ui.list(id+'.year', s.years, shown_year - year0,
+		ui.list(id+'.year', s.years, shown_year, null,
 			0, null, null, null, null, null, null, ui.em(6))
-		ui.list(id+'.month', months, month_of(shown_day) - 1,
+		ui.list(id+'.month', months, months[month_of(shown_day) - 1], null,
 			0, null, null, null, null, null, null, ui.em(6))
 
 		ui.v(0, 0, align, valign, min_w, min_h ?? cell_h * 6)

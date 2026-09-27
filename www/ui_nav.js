@@ -4842,7 +4842,6 @@ enm.build_editor = function(id, v, pad_l, pad_r, h) {
 	// the cell.
 	ui.focusable(id)
 	let open = ui.dropdown(id, null, this.nav.want_dropdown_open)
-	let opened = ui.dropdown_opened(id)
 
 		if (open) {
 			ui.p(pad_l, 0, pad_r, 0)
@@ -4854,13 +4853,8 @@ enm.build_editor = function(id, v, pad_l, pad_r, h) {
 	ui.dropdown_picker(id, 'b', this.align == 'right' ? ']s' : '[s')
 
 		if (open) {
-			let s = ui.state(picker_id)
 			let vals = words(this.enum_values) // 'v1 ...' or ['v1', ...]
-			if (opened)
-				// the cell's own box: rows as tall as the cell, text where the
-				// cell put it.
-				s.labels = vals.map(v => this.to_text(v))
-			ui.list(picker_id, s.labels, max(0, vals.indexOf(v)),
+			ui.list(picker_id, vals, v, this,
 				0, 's', 's', this.align, 'c', 0,
 				null, null, pad_l, pad_r, 0, h)
 		}
@@ -4869,10 +4863,10 @@ enm.build_editor = function(id, v, pad_l, pad_r, h) {
 }
 
 enm.editor_value = function(id, v) {
-	let i = ui.value(id+'.picker')
-	if (i == null)
+	let value = ui.value(id+'.picker')
+	if (value == null)
 		return v
-	return this.enum_values[i] ?? v
+	return value
 }
 
 // lookup dropdowns ----------------------------------------------------------
