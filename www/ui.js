@@ -282,7 +282,8 @@ function parse_state(s) {
 /// color definitions
 
 // Colors are defined in HSL so they can be adjusted if needed. Colors are
-// specified by (theme, name, state) with state 0 (normal) as fallback.
+// specified by (theme, name, [state]) where state is 'STATE !STATE ...',
+// a combination of include and exclude rules (defaults to 'normal').
 // Concrete colors can also be specified by prefixing them with a `:` (for
 // light colors) or `*` (for dark colors), eg. `:#fff`, `*red`, etc. but that
 // throws away the ability to HSL-adjust the color.
