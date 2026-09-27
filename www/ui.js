@@ -7253,11 +7253,12 @@ let SLIDER_MIN        = BOX_ARGS+1 // display range slider_min, not min
 let SLIDER_MAX        = BOX_ARGS+2 // display range slider_max, not max
 let SLIDER_DECIMALS   = BOX_ARGS+3
 let SLIDER_P          = BOX_ARGS+4 // progress
-let SLIDER_MARKERS    = BOX_ARGS+5
-let SLIDER_SCALE_BASE = BOX_ARGS+6
-let SLIDER_SCALES     = BOX_ARGS+7
-let SLIDER_SCALE      = BOX_ARGS+8
-let SLIDER_STATE      = BOX_ARGS+9
+let SLIDER_P_MIN      = BOX_ARGS+5
+let SLIDER_MARKERS    = BOX_ARGS+6
+let SLIDER_SCALE_BASE = BOX_ARGS+7
+let SLIDER_SCALES     = BOX_ARGS+8
+let SLIDER_SCALE      = BOX_ARGS+9
+let SLIDER_STATE      = BOX_ARGS+10
 
 let SLIDER_HOVER          = 1
 let SLIDER_FOCUSED        = 2
@@ -7368,6 +7369,7 @@ slider.create = function(cmd, id, value, field) {
 		a[n++] = slider_max
 		a[n++] = decimals
 		a[n++] = round(p * 32767)
+		a[n++] = round(p_min * 32767)
 		a[n++] = markers
 		a[n++] = scale_base ?? 10
 		a[n++] = scales ?? 0
@@ -7405,6 +7407,7 @@ slider.draw = function(a, i) {
 	let h = a[i+3]
 
 	let p       = a[i+SLIDER_P] / 32767
+	let p_min   = a[i+SLIDER_P_MIN] / 32767
 	let markers = a[i+SLIDER_MARKERS]
 	let state   = a[i+SLIDER_STATE]
 	let readonly = state & SLIDER_READONLY
@@ -7431,7 +7434,7 @@ slider.draw = function(a, i) {
 	cx.fillStyle = color_css('bg2', color_state)
 	cx.fill()
 
-	bg_path(cx, x - r, y, thumb_cx, y + 2*r, BORDER_SIDE_ALL, 1000)
+	bg_path(cx, x + p_min * w - r, y, thumb_cx, y + 2*r, BORDER_SIDE_ALL, 1000)
 	cx.fillStyle = color_css('toggle', color_state)
 	cx.fill()
 
