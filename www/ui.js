@@ -3224,7 +3224,10 @@ function is_last_flex_child(a, i) {
 	}
 }
 
-function position_flex(a, i, axis, sx, sw) {
+function position_flex(a, i, axis, sx, sw, cell_w_i) {
+
+	if (cell_w_i == null)
+		cell_w_i = 2+axis
 
 	sx = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
 	sw = inner_w(a, i, axis, align_w(a, i, axis, sw))
@@ -3265,7 +3268,7 @@ function position_flex(a, i, axis, sx, sw) {
 		while (a[i-1] != CMD_END) {
 			if (is_flex_child[a[i-1]]) {
 
-				let min_w = a[i+2+axis]
+				let min_w = a[i+cell_w_i]
 				let fr    = a[i+FR]
 
 				let flex_w = total_w * fr / total_fr
@@ -3288,7 +3291,7 @@ function position_flex(a, i, axis, sx, sw) {
 		while (a[i-1] != CMD_END) {
 			if (is_flex_child[a[i-1]]) {
 
-				let min_w = a[i+2+axis]
+				let min_w = a[i+cell_w_i]
 				let fr    = a[i+FR]
 
 				// compute item's stretched width.
@@ -3392,7 +3395,7 @@ function align_tabstops(a, i) {
 			while (a[cell_i-1] != CMD_END) {
 				if (is_flex_child[a[cell_i-1]]) {
 					let w = tabstop_ws[col_i]
-					a[cell_i+2] = w
+					a[cell_i+0] = w
 					row_w += w
 					col_i++
 				}
@@ -3408,17 +3411,38 @@ function align_tabstops(a, i) {
 
 }
 
-measure       [CMD_V_ALIGNED] = ct_stack_push
-position      [CMD_V_ALIGNED] = position_flex
-translate     [CMD_V_ALIGNED] = translate_ct
-hittest       [CMD_V_ALIGNED] = hit_flex
-is_flex_child [CMD_V_ALIGNED] = true
-
+measure[CMD_V_ALIGNED] = ct_stack_push
 measure_end[CMD_V_ALIGNED] = function(a, i, axis) {
 	if (axis == 0)
 		align_tabstops(a, i)
 	ct_measure_end(a, i, axis)
 }
+
+position[CMD_V_ALIGNED] = function(a, i, axis, sx, sw) {
+	if (axis) {
+		position_flex(a, i, axis, sx, sw)
+	} else {
+		sx = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
+		sw = inner_w(a, i, axis, align_w(a, i, axis, sw))
+		a[i+0] = sx
+		a[i+2] = sw
+		let row_i = cmd_next_i(a, i)
+		while (a[row_i-1] != CMD_END) {
+			if (a[row_i-1] == CMD_H) {
+				position_flex(a, row_i, axis, sx, sw, 0)
+			} else {
+				let position_f = position[a[row_i-1]]
+				if (position_f)
+					position_f(a, row_i, axis, sx, sw)
+			}
+			row_i = cmd_next_sibling_i(a, row_i)
+		}
+	}
+}
+
+translate[CMD_V_ALIGNED] = translate_ct
+hittest[CMD_V_ALIGNED] = hit_flex
+is_flex_child[CMD_V_ALIGNED] = true
 
 //// BOX ---------------------------------------------------------------------
 
@@ -3684,7 +3708,7 @@ function settle_scrollbox(a, i) {
 		let cs = captured(sbar_id)
 		let hs
 		if (cs) {
-			if (!axis) {
+			if (axis == 0) {
 				if (ui.click) // the hit phase captured it this frame
 					cs.psx0 = psx
 				let psx0 = cs.psx0
@@ -3824,7 +3848,7 @@ scrollbar_rect = function(a, i, axis, state) {
 		)
 	let both_visible = h_visible && v_visible && 1 || 0
 	let bar_min_len = round(2 * font_size_normal)
-	if (!axis) {
+	if (axis == 0) {
 		visible = h_visible
 		if (visible) {
 			let bw = w - both_visible * thickness
@@ -5310,7 +5334,7 @@ function word_wrapper(id, text) {
 
 measure[CMD_TEXT] = function(a, i, axis) {
 	let flags = a[i+TEXT_FLAGS]
-	if (!axis) {
+	if (axis == 0) {
 		read_text_args(a, i, flags)
 		if (flags & TEXT_FONT_FLAGS)
 			set_text_font()
@@ -5383,7 +5407,7 @@ measure[CMD_TEXT] = function(a, i, axis) {
 }
 
 position[CMD_TEXT] = function(a, i, axis, sx, sw) {
-	if (!axis) {
+	if (axis == 0) {
 		let flags = a[i+TEXT_FLAGS]
 		if (flags & TEXT_WRAP_WORD) {
 			read_text_args(a, i, flags)
@@ -8380,7 +8404,7 @@ img.create = function(cmd, src, fr, align, valign, max_min_h, min_w, min_h) {
 }
 
 img.measure = function(a, i, axis) {
-	if (!axis) return // can't impose a width (min_w still works)
+	if (axis == 0) return // can't impose a width (min_w still works)
 
 	let sw        = a[i+2]
 	let src       = a[i+BOX_ARGS+0]
@@ -8400,7 +8424,7 @@ img.measure = function(a, i, axis) {
 }
 
 img.position = function(a, i, axis, sx, sw) {
-	if (!axis) {
+	if (axis == 0) {
 		// can't compute x,w until we know min_h, so assume align is stretch.
 		a[i+0+0] = inner_x(a, i, 0, sx)
 		a[i+2+0] = inner_w(a, i, 0, sw)
@@ -8905,7 +8929,7 @@ ui.widget('polyline', {
 		return i
 	},
 	measure: function(a, i, axis) {
-		if (!axis) {
+		if (axis == 0) {
 			let stroke_color = a[i+POLYLINE_STROKE_COLOR]
 			let line_width   = a[i+POLYLINE_LINE_WIDTH]
 			let pi1 = i+POLYLINE_POINTS
