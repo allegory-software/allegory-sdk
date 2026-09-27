@@ -7293,12 +7293,13 @@ let SLIDER_MIN        = BOX_ARGS+1 // display range slider_min, not min
 let SLIDER_MAX        = BOX_ARGS+2 // display range slider_max, not max
 let SLIDER_DECIMALS   = BOX_ARGS+3
 let SLIDER_P          = BOX_ARGS+4 // progress
-let SLIDER_P_MIN      = BOX_ARGS+5
-let SLIDER_MARKERS    = BOX_ARGS+6
-let SLIDER_SCALE_BASE = BOX_ARGS+7
-let SLIDER_SCALES     = BOX_ARGS+8
-let SLIDER_SCALE      = BOX_ARGS+9
-let SLIDER_STATE      = BOX_ARGS+10
+let SLIDER_FIELD_MIN  = BOX_ARGS+5
+let SLIDER_FIELD_MAX  = BOX_ARGS+6
+let SLIDER_MARKERS    = BOX_ARGS+7
+let SLIDER_SCALE_BASE = BOX_ARGS+8
+let SLIDER_SCALES     = BOX_ARGS+9
+let SLIDER_SCALE      = BOX_ARGS+10
+let SLIDER_STATE      = BOX_ARGS+11
 
 let SLIDER_HOVER          = 1
 let SLIDER_FOCUSED        = 2
@@ -7409,7 +7410,8 @@ slider.create = function(cmd, id, value, field) {
 		a[n++] = slider_max
 		a[n++] = decimals
 		a[n++] = round(p * 32767)
-		a[n++] = round(p_min * 32767)
+		a[n++] = field.min ?? slider_min
+		a[n++] = field.max ?? slider_max
 		a[n++] = markers
 		a[n++] = scale_base ?? 10
 		a[n++] = scales ?? 0
@@ -7446,8 +7448,16 @@ slider.draw = function(a, i) {
 	let w = a[i+2]
 	let h = a[i+3]
 
+	let slider_min = a[i+SLIDER_MIN]
+	let slider_max = a[i+SLIDER_MAX]
+	let field_min  = a[i+SLIDER_FIELD_MIN]
+	let field_max  = a[i+SLIDER_FIELD_MAX]
+	let scale      = a[i+SLIDER_SCALE]
+	let decimals   = a[i+SLIDER_DECIMALS]
+	let min_step = scale * 10**-decimals
+
 	let p       = a[i+SLIDER_P] / 32767
-	let p_min   = a[i+SLIDER_P_MIN] / 32767
+	let p_min   = slider_p(field_min, slider_min, slider_max)
 	let markers = a[i+SLIDER_MARKERS]
 	let state   = a[i+SLIDER_STATE]
 	let readonly = state & SLIDER_READONLY
@@ -7469,15 +7479,34 @@ slider.draw = function(a, i) {
 	let thumb_cx = x + p * w
 	let thumb_cy = y + r
 
-	// draw shaft
+	// draw shaft bg
 	bg_path(cx, x - r, y, x + w + r, y + 2*r, BORDER_SIDE_ALL, 1000)
 	cx.fillStyle = color_css('bg2', color_state)
 	cx.fill()
 
+	// draw snapping dots
+	if (min_step / (slider_max - slider_min) * w > 8 * dpr) {
+		let v1 = max(field_min, slider_min)
+		let v2 = min(field_max, slider_max)
+		let k1 = floor(v1 / min_step) + 1
+		let k2 = ceil(v2 / min_step) - 1
+		cx.beginPath()
+		for (let k = k1 - 1; k <= k2 + 1; k++) {
+			let v = k < k1 ? v1 : k > k2 ? v2 : k * min_step
+			let dot_x = x + lerp(v, slider_min, slider_max, 0, w)
+			cx.moveTo(dot_x + shaft_h, thumb_cy)
+			cx.arc(dot_x, thumb_cy, .75 * dpr, 0, 2 * PI)
+		}
+		cx.fillStyle = color_css('thumb')
+		cx.fill()
+	}
+
+	// draw hot shaft
 	bg_path(cx, x + p_min * w - r, y, thumb_cx, y + 2*r, BORDER_SIDE_ALL, 1000)
 	cx.fillStyle = color_css('toggle', color_state)
 	cx.fill()
 
+	// draw shaft border
 	bg_path(cx, x + .5 - r, y + .5, x + w - .5 + r, y + 2*r - .5, BORDER_SIDE_ALL, 1000)
 	cx.strokeStyle = color_css('light')
 	cx.stroke()
@@ -7507,13 +7536,8 @@ slider.draw = function(a, i) {
 
 	if (markers) {
 
-		let slider_min = a[i+SLIDER_MIN]
-		let slider_max = a[i+SLIDER_MAX]
 		let scale_base = a[i+SLIDER_SCALE_BASE]
 		let scales     = a[i+SLIDER_SCALES]
-		let scale      = a[i+SLIDER_SCALE]
-		let decimals   = a[i+SLIDER_DECIMALS]
-		let min_step = scale * 10**-decimals
 
 		let max_n = floor(w / ui.em(ui.slider_mark_w_em))
 		let [step, min, max] = compute_step_and_range(
