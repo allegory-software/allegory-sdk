@@ -22,7 +22,7 @@ const {
 } = glue
 
 // NOTE: Setting the background color for the html element by calling
-// ui.set_default_theme() (also called when ui.js is loaded) before declaring
+// ui.set_screen_theme() (also called when ui.js is loaded) before declaring
 // the <body> element prevents the body from rendering white for a split second
 // (and thus flickering when refreshing the page). This happens only in Chrome.
 
@@ -33,7 +33,7 @@ ui.load_font('mono'          , 'fonts/jetbrains-mono-nl-regular.woff2')
 
 let demo_state = json_arg(load('demo_state')) ?? {}
 if (demo_state.theme)
-	ui.set_default_theme(demo_state.theme)
+	ui.set_screen_theme(demo_state.theme)
 
 ui.DEBUG      = demo_state.debug ?? true
 ui.DEBUG_PANE = true
@@ -713,6 +713,7 @@ let dd2_value = dd_items[0]
 let enum_toggle_value = 'one'
 let radio_sel_i = 0
 let toggle1_on = false
+let toggle2_on = true
 let cb1_checked = false
 let cb2_checked = true
 let slider1_v = 3000
@@ -752,6 +753,7 @@ let color_input1_field = ui.create_field({type: 'color'})
 let cb1_field = ui.create_field({type: 'bool'})
 let cb2_field = ui.create_field({type: 'bool'})
 let toggle1_field = ui.create_field({type: 'bool'})
+let toggle2_field = ui.create_field({type: 'bool'})
 let input_controls_fields = [
 	input1_field,
 	input2_field,
@@ -765,6 +767,7 @@ let input_controls_fields = [
 	cb1_field,
 	cb2_field,
 	toggle1_field,
+	toggle2_field,
 ]
 let input_controls_readonly = false
 demos.input_controls = function() {
@@ -772,7 +775,7 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('input_controls_readonly', 'Readonly', 0)
 		input_controls_readonly = ui.checkbox(
-			'input_controls_readonly', input_controls_readonly)
+			'input_controls_readonly', input_controls_readonly, null, 0, 'l')
 	ui.end_h()
 	for (let field of input_controls_fields)
 		field.readonly = input_controls_readonly
@@ -796,7 +799,7 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('enum_toggle1', 'Enum toggle', 0)
 		enum_toggle_value = ui.enum_toggle(
-			'enum_toggle1', enum_toggle_value, enum_toggle_field)
+			'enum_toggle1', enum_toggle_value, enum_toggle_field, 1, 's')
 	ui.end_h()
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('date_input1', 'Date', 0)
@@ -841,7 +844,14 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 		ui.box()
 		ui.h(0, ui.sp2(), 'l')
 			toggle1_on = ui.toggle('toggle1', toggle1_on, toggle1_field)
-			ui.label('toggle1', 'Toggle', 1)
+			ui.label('toggle1', 'Toggle 1', 1)
+		ui.end_h()
+	ui.end_h()
+	ui.h(0, ui.sp4())
+		ui.box()
+		ui.h(0, ui.sp2(), 'l')
+			toggle2_on = ui.toggle('toggle2', toggle2_on, toggle2_field)
+			ui.label('toggle2', 'Toggle 2', 1)
 		ui.end_h()
 	ui.end_h()
 	ui.h(0, ui.sp4(), 'l')
@@ -858,9 +868,12 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 		ui.end_v()
 	ui.end_h()
 	ui.h(0, ui.sp2())
-		ui.button('btn1', 'Button', 0)
-		ui.primary_button('btn2', 'Primary', 0)
-		ui.icon_button('btn_plus', 'plus', null, 0)
+		ui.button('btn1', 'Button',
+			0, 'l', 'c', 0, 0, null, input_controls_readonly)
+		ui.primary_button('btn2', 'Primary',
+			0, 'l', 'c', 0, 0, input_controls_readonly)
+		ui.icon_button('btn_plus', 'plus', null,
+			0, 'l', 'c', 0, 0, null, input_controls_readonly)
 	ui.end_h()
 
 ui.end_v_aligned()
@@ -1509,8 +1522,8 @@ ui.main = function() {
 				ui.text('', format_kbytes(recs_strlen, 1), 0, 'r', 'c', 1/0, ui.em(3))
 
 				if (ui.button('btn_light', 'lights', 0)) {
-					ui.set_default_theme(ui.default_theme == 'light' ? 'dark' : 'light')
-					save_demo_state('theme', ui.default_theme)
+					ui.set_screen_theme(ui.screen_theme() == 'light' ? 'dark' : 'light')
+					save_demo_state('theme', ui.screen_theme())
 				}
 
 				if (ui.button('btn_debug', 'DEBUG', 0)) {

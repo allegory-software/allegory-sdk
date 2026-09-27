@@ -33,8 +33,10 @@ CONTAINERS
 
 INPUT
 
-	ui.button          (id, s, fr, align, valign, min_w, min_h, style)
-	ui.icon_button     (id, icon, [s], fr, align, valign, min_w, min_h, style)
+	ui.[primary_]button
+	                   (id, s, fr, align, valign, min_w, min_h, style, readonly)
+	ui.[primary_|bare_]icon_button
+	                   (id, icon, [s], fr, align, valign, min_w, min_h, style, readonly)
 	ui.label           (for_id, s, fr, align, valign)
 	ui.input           (id, v, [field], fr, w, [text_align], [no_box]) -> v
 	ui.list_dropdown   (id, items, value, [field], fr, max_w, min_w) -> value
@@ -115,8 +117,8 @@ ui.VERSION = 1 // frozen at 1 until this comment is gone!
 
 const {
 	repl,
-	isarray, isstr, isnum, isobj, isobject, isfunc, obj,
-	assert, warn, pr, debug, trace,
+	isarray, isstr, isnum, isobj, isobject, isfunc, isbool, obj,
+	assert, warn, warn_once, pr, debug, trace,
 	floor, ceil, round, max, min, abs, clamp, snap, logbase, lerp, random,
 	dec, num, str, json, json_arg, words,
 	set, map, array, array_resize, array_move, empty_array, attr,
@@ -154,25 +156,26 @@ Themes allow viewing a remote shared screen in the client's own color scheme,
 so they can only set colors, never geometry, so that the screen shows
 identical geometry to both users otherwise you won't know what you click on!
 
-DEFAULTS
+SCREEN THEME
 
-	ui.default_theme -> 'dark'
-	ui.dark([theme]) -> t|f
-	ui.set_default_theme(theme)
+	ui.screen_theme() -> 'dark'
+	ui.set_screen_theme(theme)
 
 DEFINING COLORS
 
-	ui.color_def  (theme, name, state, h, s, L, a, is_dark)       define a color
-	ui.shadow_def (theme, name, x, y, blur, h, s, L, a, [inset])  define a shadow
+	ui.color_def  (theme, name, state, h, s, L, a, is_dark)          define color
+	ui.color_def  (theme, name, state, name, state, theme, is_dark)  copy color
+	ui.shadow_def (theme, name, x, y, blur, h, s, L, a, [inset])     define shadow
 
 THEME API, to be used exclusively in the drawing phase!
 
+	ui.color_obj  (name, [state], [theme]) -> [css_color, h, s, L, a]
 	ui.color_css  (name, [state], [theme]) -> css_color   for fillStyle/strokeStyle
-	ui.color_hsl  (name, [state], [theme]) -> [css_color, h, s, L, a]   for hsl_adjust()
 	ui.color_rgb  (name, [state], [theme]) -> 0xRRGGBB    for WebGL, ignoring alpha
 	ui.color_rgba (name, [state], [theme]) -> 0xRRGGBBAA  for WebGL, with alpha
-	ui.bg_is_dark   (bg_color) -> t|f                       should text be white on this bg?
-	ui.get_theme    () -> theme
+	ui.bg_is_dark   (bg_color) -> t|f     should text be white on this bg?
+	ui.theme_is_dark([theme]) -> t|f      is (current) theme dark?
+	ui.theme        () -> theme
 	ui.hsl          (h, s, L, a) -> css_color     from HSL
 	ui.hsl_adjust   (c, h, s, L, a) -> css_color  from color c with adjusted h, s, L
 	ui.alpha_adjust (c, a) -> css_color           from color c with adjusted alpha
@@ -197,23 +200,57 @@ function theme_make(name, is_dark) {
 let themes = {}
 ui.themes = themes
 theme_make('light', false)
-theme_make('dark' , true)
+theme_make('dark' , true )
+themes.dark .dark_theme  = themes.dark
+themes.dark .light_theme = themes.light
+themes.light.dark_theme  = themes.dark
+themes.light.light_theme = themes.light
 
 /// current theme
 
-let theme // only set in draw phase
-ui.get_theme = () => theme
-ui.dark = (theme) => themes[theme ?? ui.default_theme].is_dark
+let screen_theme // root theme
+let theme // only set in draw phase, mainly by set_bg_color()
+ui.theme = () => theme
+ui.theme_is_dark = (theme1) => themes[theme1 ?? theme].is_dark
 
-const STATE_HOVER         =   1
-const STATE_ACTIVE        =   2
-const STATE_FOCUSED       =   4
-const STATE_ITEM_SELECTED =   8 // list items
-const STATE_ITEM_FOCUSED  =  16 // list items
-const STATE_ITEM_ERROR    =  32 // list items
-const STATE_NEW           =  64 // grid cells
-const STATE_MODIFIED      = 128 // grid cells
-const STATE_READONLY      = 256
+/// color utils
+
+function hsl(h, s, L, a) {
+	return `hsla(${dec(h)}, ${dec(s * 100)}%, ${dec(L * 100)}%, ${a ?? 1})`
+}
+
+function hsl_adjust(c, h, s, L, a) {
+	return hsl(c[1] * h, c[2] * s, c[3] * L, (c[4] ?? 1) * (a ?? 1))
+}
+
+function hsl_adjust_obj(c, h, s, L, a) {
+	h = c[1] * h
+	s = c[2] * s
+	L = c[3] * L
+	a = (c[4] ?? 1) * (a ?? 1)
+	return [hsl(h, s, L, a), h, s, L, a]
+}
+
+function alpha_adjust(c, a) {
+	return hsl(c[1], c[2], c[3], (c[4] ?? 1) * a)
+}
+
+ui.hsl = hsl
+ui.hsl_adjust = hsl_adjust
+ui.alpha_adjust = alpha_adjust
+
+/// color states
+
+const STATE_HOVER         = 2**0
+const STATE_ACTIVE        = 2**1
+const STATE_FOCUSED       = 2**2
+const STATE_READONLY      = 2**3
+const STATE_ITEM_SELECTED = 2**4 // list items
+const STATE_ITEM_FOCUSED  = 2**5 // list items
+const STATE_ITEM_ERROR    = 2**6 // list items
+const STATE_NEW           = 2**7 // grid cells
+const STATE_MODIFIED      = 2**8 // grid cells
+const COLOR_STATE_ALL     = 2**9-1
 
 let parse_state_combis = memoize(function(s) {
 	s = ' '+s
@@ -238,24 +275,6 @@ function parse_state(s) {
 	return parse_state_combis(s)
 }
 
-/// color utils
-
-function hsl(h, s, L, a) {
-	return `hsla(${dec(h)}, ${dec(s * 100)}%, ${dec(L * 100)}%, ${a ?? 1})`
-}
-
-function hsl_adjust(c, h, s, L, a) {
-	return hsl(c[1] * h, c[2] * s, c[3] * L, (c[4] ?? 1) * (a ?? 1))
-}
-
-function alpha_adjust(c, a) {
-	return hsl(c[1], c[2], c[3], (c[4] ?? 1) * a)
-}
-
-ui.hsl = hsl
-ui.hsl_adjust = hsl_adjust
-ui.alpha_adjust = alpha_adjust
-
 /// color definitions
 
 // Colors are defined in HSL so they can be adjusted if needed. Colors are
@@ -265,15 +284,53 @@ ui.alpha_adjust = alpha_adjust
 // throws away the ability to HSL-adjust the color.
 // Colors can be copied by specifying (name, [state], [theme], [is_dark]).
 
+function assert_color_state(state, allow_all) {
+	assert(state == null || isstr(state) || isnum(state), 'invalid color state')
+	if (state == '*') {
+		assert(allow_all, '* allowed only to copy all color states')
+	} else if (isstr(state)) {
+		let state_bits = 0
+		let state_words = words(state)
+		assert(state_words.length, 'invalid color state')
+		for (let state_word of state_words) {
+			if (state_word == 'normal') continue
+			let state_bit = parse_state(state_word)
+			assert(state_bit, 'unknown color state ', state_word)
+			assert(!(state_bits & state_bit), 'duplicate color state ', state_word)
+			state_bits |= state_bit
+		}
+	}
+}
+
+function assert_color_obj(color) {
+	assert(
+		isarray(color) &&
+		isstr(color[0]) &&
+		isnum(color[1]) &&
+		isnum(color[2]) &&
+		isnum(color[3]) &&
+		(color[4] == null || isnum(color[4])) &&
+		(color[5] == null || isbool(color[5])),
+		'invalid color object')
+}
+
 function color_def(theme, name, state, h, s, L, a, is_dark) {
+	assert(isstr(theme), 'invalid color theme')
+	assert(isstr(name) && name, 'invalid color name')
+	assert_color_state(state, true)
 	if (theme == '*') { // define color for all themes
 		for (let theme_name in themes)
 			color_def(theme_name, name, state, h, s, L, a, is_dark)
 		return
 	}
-	let states = themes[theme].colors
+	let theme1 = themes[theme]
+	assert(theme1, 'unknown color theme ', theme)
+	let states = theme1.colors
 	if (state == '*') { // copy all states of a color
-		assert(isstr(h), 'expected color name to copy for all states')
+		assert(isstr(h) && h, 'expected color name to copy for all states')
+		assert(s == null && L == null && a == null && is_dark == null,
+			'color state copy has extra arguments')
+		let copied = false
 		for (let [state_i, src_state_colors] of states) {
 			let color = src_state_colors[h]
 			if (color == null)
@@ -284,7 +341,9 @@ function color_def(theme, name, state, h, s, L, a, is_dark) {
 				states.set(state_i, dst_state_colors)
 			}
 			dst_state_colors[name] = color
+			copied = true
 		}
+		assert(copied, 'unknown color ', h)
 		return
 	}
 	let state_i = parse_state(state)
@@ -294,15 +353,30 @@ function color_def(theme, name, state, h, s, L, a, is_dark) {
 		states.set(state_i, state_colors)
 	}
 	if (isnum(h)) { // h, s, L, a, [is_dark]
+		assert(isnum(s) && isnum(L), 'invalid HSL color')
+		assert(a == null || isnum(a), 'invalid HSL color alpha')
+		assert(is_dark == null || isbool(is_dark), 'invalid is_dark')
 		state_colors[name] = [hsl(h, s, L, a), h, s, L, a, is_dark]
 	} else if (isarray(h)) { // color object
+		assert_color_obj(h)
 		state_colors[name] = h
 	} else { // name, [state], [theme], [is_dark]
-		let theme1 = themes[L ?? theme]
+		let src_name    = h
+		let src_state   = s
+		let src_theme   = L
+		let src_is_dark = a
+		assert(isstr(src_name) && src_name, 'invalid src color name')
+		assert(src_state != '*', '* cannot be a src color state')
+		assert_color_state(s)
+		assert(src_theme == null || isstr(src_theme), 'invalid src color theme')
+		assert(src_is_dark == null || isbool(src_is_dark), 'invalid src color is_dark')
+		src_theme = themes[src_theme ?? theme]
+		assert(src_theme, 'unknown color theme ', L ?? theme)
 		let source_state_i = parse_state(s ?? state_i)
-		let source_state_colors = theme1.colors.get(source_state_i)
+		let source_state_colors = src_theme.colors.get(source_state_i)
 		let c = (source_state_colors && source_state_colors[h]) ??
-			theme1.colors.get(0)[h]
+			src_theme.colors.get(0)[h]
+		assert(c, 'unknown color ', h)
 		state_colors[name] = [c[0], c[1], c[2], c[3], c[4], a ?? c[5]]
 	}
 }
@@ -311,15 +385,14 @@ function color_def(theme, name, state, h, s, L, a, is_dark) {
 
 // default color to fall back to when a name isn't found in the theme, so a
 // missing/misspelled color name doesn't crash the whole frame.
-function color_hsl(name, state, theme1) {
+function color_obj(name, state, theme1) {
 	let state_i = parse_state(state)
 	theme1 = theme1 ? themes[theme1] : theme
 	let state_colors = theme1.colors.get(state_i)
 	let c = (state_colors && state_colors[name]) ??
 		theme1.colors.get(0)[name]
 	if (!c) {
-		warn('no color for (', name, ', ',
-			repl(state, 0, 'normal'), ', ', theme1.name, ')')
+		warn_once('no color for ' + name + ',' + state + ',' + theme1.name)
 		c = theme1.colors.get(0).error
 	}
 	return c
@@ -332,16 +405,19 @@ function color_css(name, state, theme1) {
 	if (name.charCodeAt(0) == CC_COLON) { // custom color
 		return name.slice(1)
 	}
-	return color_hsl(name, state, theme1)[0]
+	return color_obj(name, state, theme1)[0]
+}
+function bg_is_dark(bg_color) {
+	return isarray(bg_color) ? (bg_color[5] ?? bg_color[3] < .5) : theme.is_dark
 }
 
 function color_rgb_int(name, state, theme1) {
-	let c = color_hsl(name, state, theme1)
+	let c = color_obj(name, state, theme1)
 	return hsl_to_rgb_int(c[1], c[2], c[3])
 }
 
 function color_rgba_int(name, state, theme1) {
-	let c = color_hsl(name, state, theme1)
+	let c = color_obj(name, state, theme1)
 	return hsl_to_rgba_int(c[1], c[2], c[3], c[4])
 }
 
@@ -355,21 +431,17 @@ function set_bg_color(color, state) {
 		dark = c == CC_STAR
 		color = color.slice(1)
 	} else {
-		let c = color_hsl(color, state)
+		let c = color_obj(color, state)
 		dark = c[5] ?? c[3] < .5
 		color = c[0]
 	}
-	theme = dark ? themes.dark : themes.light
+	theme = dark ? theme.dark_theme : theme.light_theme
 	cx.fillStyle = color
 }
 
-function bg_is_dark(bg_color) {
-	return isarray(bg_color) ? (bg_color[5] ?? bg_color[3] < .5) : theme.is_dark
-}
-
 ui.color_def = color_def
+ui.color_obj = color_obj
 ui.color_css = color_css
-ui.color_hsl = color_hsl
 ui.color_rgb = color_rgb_int
 ui.color_rgba = color_rgba_int
 ui.set_bg_color = set_bg_color
@@ -377,7 +449,7 @@ ui.bg_is_dark = bg_is_dark
 
 /// text colors --------------------------------------------------------------
 
-//         theme    name       state       h     s     L    a
+//            theme    name       state       h     s     L    a
 // ---------------------------------------------------------------------------
 ui.color_def('light', 'text'   , 'normal' ,   0, 0.00, 0.35)
 ui.color_def('light', 'text'   , 'hover'  ,   0, 0.00, 0.10)
@@ -415,26 +487,21 @@ ui.color_def('dark' , 'marker' , 'normal' ,  61, 1.00, 0.57)
 ui.color_def('dark' , 'marker' , 'hover'  ,  61, 1.00, 0.65)
 ui.color_def('dark' , 'marker' , 'active' ,  61, 1.00, 0.72)
 
-ui.color_def('*', 'button-text', 'normal' , 'text', 'active')
-
-ui.color_def('light', 'button-danger', 'normal', 0, 0.54, 0.43)
-ui.color_def('dark' , 'button-danger', 'normal', 0, 0.54, 0.43)
-
 /// border colors ------------------------------------------------------------
 
-//             theme    name        state       h     s     L     a
+//            theme    name        state       h     s     L     a
 // ---------------------------------------------------------------------------
 ui.color_def('light', 'light'   , 'normal' ,   0,    0,    0, 0.10)
 ui.color_def('light', 'light'   , 'hover'  ,   0,    0,    0, 0.30)
-ui.color_def('light', 'intense' , 'normal' ,   0,    0,    0, 0.30)
+ui.color_def('light', 'intense' , 'normal' ,   0,    0,    0, 0.10)
 ui.color_def('light', 'intense' , 'hover'  ,   0,    0,    0, 0.40)
 ui.color_def('light', 'intense' , 'focused',   0,    0,    0, 0.30)
 ui.color_def('light', 'max'     , 'normal' ,   0,    0,    0, 1.00)
 ui.color_def('light', 'marker'  , 'normal' ,  61, 1.00, 0.35, 1.00)
 
-ui.color_def('dark' , 'light'   , 'normal' ,   0,    0,    1, 0.09)
+ui.color_def('dark' , 'light'   , 'normal' ,   0,    0,    1, 0.06)
 ui.color_def('dark' , 'light'   , 'hover'  ,   0,    0,    1, 0.03)
-ui.color_def('dark' , 'intense' , 'normal' ,   0,    0,    1, 0.20)
+ui.color_def('dark' , 'intense' , 'normal' ,   0,    0,    1, 0.08)
 ui.color_def('dark' , 'intense' , 'hover'  ,   0,    0,    1, 0.40)
 ui.color_def('dark' , 'intense' , 'focused',   0,    0,    1, 0.25)
 ui.color_def('dark' , 'max'     , 'normal' ,   0,    0,    1, 1.00)
@@ -499,9 +566,6 @@ ui.color_def('dark' , 'scrollbar', 'normal' , 216, 0.28, 0.37, 0.5)
 ui.color_def('dark' , 'scrollbar', 'hover'  , 216, 0.28, 0.39, 0.8)
 ui.color_def('dark' , 'scrollbar', 'active' , 216, 0.28, 0.41, 0.8)
 
-ui.color_def('*', 'button-bg'     , '*' , 'bg1')
-ui.color_def('*', 'button-primary', '*' , 'link')
-
 ui.color_def('*', 'search' , 'normal',  60,  1.00, 0.80) // quicksearch text bg
 ui.color_def('*', 'info'   , 'normal', 200,  1.00, 0.30) // info bubbles
 ui.color_def('*', 'warn'   , 'normal',  39,  1.00, 0.50) // warning bubbles
@@ -526,6 +590,11 @@ ui.color_def('light', 'item', 'item-selected focused'              , 139 / 239 *
 ui.color_def('light', 'item', 'item-error'                         ,   0, 0.54, 0.43)
 ui.color_def('light', 'item', 'item-error item-focused'            ,   0, 1.00, 0.60)
 
+ui.color_def('light', 'item', 'readonly'                           ,   0, 0.00, 0.93)
+ui.color_def('light', 'item', 'readonly focused'                   ,   0, 0.00, 0.93)
+ui.color_def('light', 'item', 'readonly item-focused item-selected',   0, 0.00, 0.93)
+ui.color_def('light', 'item', 'readonly item-focused item-selected focused', 0, 0.00, 0.93)
+
 ui.color_def('light', 'row' , 'item-focused focused'               , 139 / 239 * 360, 150 / 240, 231 / 240)
 ui.color_def('light', 'row' , 'item-focused'                       , 139 / 239 * 360,   0 / 240, 231 / 240)
 ui.color_def('light', 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
@@ -543,19 +612,55 @@ ui.color_def('dark' , 'row' , 'item-focused focused'               , 212, 0.61, 
 ui.color_def('dark' , 'row' , 'item-focused'                       ,   0, 0.00, 0.13)
 ui.color_def('dark' , 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
 
-// toggle, checkbox, radio, slider
-ui.color_def('*'    , 'toggle'      , '*'               , 'bg2')
-ui.color_def('*'    , 'toggle-thumb', 'normal'          , 'text', 'active')
+// TODO: remove these after css refactoring
+ui.color_def('*', 'bg', 'hover focused', 'bg', 'hover')
+ui.color_def('*', 'text', 'hover focused', 'text', 'hover')
+ui.color_def('*', 'text', 'item-focused item-selected focused',
+	'text', 'focused')
+ui.color_def('*', 'text', 'hover item-focused item-selected',
+	'text', 'hover')
+ui.color_def('*', 'text', 'hover item-focused item-selected focused',
+	'text', 'hover')
+ui.color_def('*', 'item', 'hover item-focused item-selected',
+	'item', 'item-focused item-selected')
+ui.color_def('*', 'item', 'hover item-focused item-selected focused',
+	'item', 'item-focused item-selected focused')
+
+// toggle, checkbox, radio, slider, enum_toggle
+ui.color_def('*'    , 'toggle', '*'                     , 'bg2')
 ui.color_def('light', 'toggle', 'item-selected'         , 'link', 'normal')
 ui.color_def('light', 'toggle', 'hover item-selected'   , 'link', 'hover' )
-ui.color_def('dark' , 'toggle', 'item-selected'         , 'link', 'normal')
-ui.color_def('dark' , 'toggle', 'hover item-selected'   , 'link', 'hover' )
-ui.color_def('light', 'toggle', 'readonly item-selected', 0, 0, 0.3)
-ui.color_def('dark' , 'toggle', 'readonly item-selected', 0, 0, 0.5)
+ui.color_def('dark' , 'toggle', 'item-selected'         , 'link', 'normal', 'dark', true)
+ui.color_def('dark' , 'toggle', 'hover item-selected'   , 'link', 'hover' , 'dark', true)
+
+// desaturate selected toggle bg color when readonly
+ui.color_def('light', 'toggle', 'readonly item-selected',
+	hsl_adjust_obj(color_obj('toggle', 'item-selected', 'dark'), 1, 0, 0.6))
+ui.color_def('dark' , 'toggle', 'readonly item-selected',
+	hsl_adjust_obj(color_obj('toggle', 'item-selected', 'dark'), 1, 0, 0.7))
+
+// toggle thumb is text with more contrast
+ui.color_def('*'    , 'thumb' , 'normal'   , 'text', 'active'  , 'dark')
+ui.color_def('light', 'thumb' , 'readonly' , 'text', 'active'  , 'dark')
+ui.color_def('dark' , 'thumb' , 'readonly' , 'text', 'normal'  , 'dark')
 
 // enum_toggle
-ui.color_def('*', 'toggle', 'item-focused item-selected focused', 'toggle', 'item-selected')
-ui.color_def('*', 'toggle', 'item-focused item-selected'        , 'toggle', 'item-selected')
+ui.color_def('*', 'toggle', 'item-focused item-selected focused' , 'toggle', 'item-selected')
+ui.color_def('*', 'toggle', 'item-focused item-selected'         , 'toggle', 'item-selected')
+ui.color_def('*', 'toggle', 'item-focused item-selected readonly', 'toggle', 'readonly item-selected')
+
+ui.color_def('*', 'toggle-text', 'normal'  , 'text', 'normal')
+ui.color_def('*', 'toggle-text', 'hover'   , 'text', 'normal')
+ui.color_def('*', 'toggle-text', 'item-focused item-selected'                 , 'text', 'active')
+ui.color_def('*', 'toggle-text', 'item-focused item-selected hover'           , 'text', 'active')
+ui.color_def('*', 'toggle-text', 'item-focused item-selected focused'         , 'text', 'active')
+ui.color_def('*', 'toggle-text', 'item-focused item-selected focused hover'   , 'text', 'active')
+ui.color_def('*', 'toggle-text', 'readonly'                                   , 'text', 'readonly')
+ui.color_def('*', 'toggle-text', 'readonly focused'                           , 'text', 'normal')
+ui.color_def('*', 'toggle-text', 'readonly item-focused item-selected'        , 'text', 'normal')
+ui.color_def('*', 'toggle-text', 'readonly item-focused item-selected focused', 'text', 'active')
+//ui.color_def('*', 'toggle-text' , 'readonly item-selected' , 'text', 'normal')
+//ui.color_def('*', 'toggle-text' , 'readonly focused'       , 'text', 'normal')
 
 //// CANVAS SETUP ------------------------------------------------------------
 
@@ -654,19 +759,20 @@ function resize_canvas() {
 ui.resize = resize_canvas
 window.addEventListener('resize', resize_canvas)
 
-ui.default_theme = document.documentElement.getAttribute('theme') ?? 'light'
-ui.default_font  = document.documentElement.getAttribute('font' ) ?? 'Arial'
+let screen_theme_name = document.documentElement.getAttribute('theme') ?? 'light'
+ui.default_font       = document.documentElement.getAttribute('font' ) ?? 'Arial'
 function set_screen_bg() {
-	theme = themes[ui.default_theme]
+	theme = screen_theme
 	let color = color_css('bg')
 	theme = null
 	document.documentElement.style.background = color
 }
-ui.set_default_theme = function(theme) {
-	theme ??= system_in_dark_mode() ? 'dark' : 'light'
-	ui.default_theme = theme
+ui.set_screen_theme = function(name) {
+	name ??= system_in_dark_mode() ? 'dark' : 'light'
+	screen_theme = themes[name]
 	set_screen_bg()
 }
+ui.screen_theme = () => screen_theme.name
 
 function system_in_dark_mode() {
 	let mql = window.matchMedia
@@ -676,11 +782,11 @@ function system_in_dark_mode() {
 
 window.matchMedia('(prefers-color-scheme: dark)')
 	.addEventListener('change', function(ev) {
-		ui.set_default_theme()
+		ui.set_screen_theme()
 	})
 
 // prevent flicker on load by setting the screen's background color now.
-ui.set_default_theme()
+ui.set_screen_theme()
 set_screen_bg()
 
 /// font loading
@@ -1432,25 +1538,35 @@ function free_recs() {
 
 /// current command recording ------------------------------------------------
 
-// Format of a command recording array:
-//
-//  next_i, cmd, arg1..n, prev_i; next_i, cmd, arg1..n, prev_i; ...
-//    |            ^        |                    ^
-//    |            +--------+                    |
-//    +------------------------------------------+
-//
-// With next_i and prev_i we can walk back and forth between commands,
-// always landing at the command's arg#1. From the arg#1 index then we have
-// the command code at a[i-1], next command's arg#1 at i+a[i-2] and prev
-// command's arg#1 at i+a[i-3]. To walk the command array as a tree, we check
-// when a container starts with `a[i-1] & 1` (all containers have even codes)
-// and when it ends with `a[i-1] == CMD_END` (all containers end with the same
-// "end" command). To skip all container's children and jump to the next
-// sibling we use cmd_next_sibling_i(). To go back to the container's command
-// from its "end" command, we use i+a[i].
-// NOTE: Using relative indexes everywhere allows creating command recordings
-// that are relocatable, i.e. can be moved into other recordings without
-// having to reoffset the indexes.
+/*
+
+Format of a command recording array:
+
+ next_i, cmd, arg1..n, prev_i; next_i, cmd, arg1..n, prev_i; ...
+   |            ^        |                    ^
+   |            +--------+                    |
+   +------------------------------------------+
+
+With next_i and prev_i we can walk back and forth between commands,
+always landing at the command's arg#1. From the arg#1 index then we have
+the command code at a[i-1], next command's arg#1 at i+a[i-2] and prev
+command's arg#1 at i+a[i-3]. To walk the command array as a tree, we check
+when a container starts with `a[i-1] & 1` (all containers have even codes)
+and when it ends with `a[i-1] == CMD_END` (all containers end with the same
+"end" command). To skip all container's children and jump to the next
+sibling we use cmd_next_sibling_i(). To go back to the container's command
+from its "end" command, we use i+a[i].
+
+NOTE: Using relative indexes everywhere allows creating command recordings
+that are relocatable, i.e. can be moved into other recordings without
+having to reoffset the indexes.
+
+NOTE: commands can be vararg (most aren't), and can reuse their arg slots
+throughout the rendering phases for different purposes to keep the rec short.
+Before drawing phase the rec must be cleaned-up so it's serializable, and
+ideally won't contain many sub-objects, long fractional numbers, etc.
+
+*/
 
 let a // current recording
 let n = 0 // current recording's length
@@ -1459,15 +1575,17 @@ let cmd_names = [] // [[CMD]=NAME]: command's name
 let cmd_name_map = obj()
 let id_slot = [] // [[CMD]=ID]: command's ID arg index, if any
 
-function C(a, i) { return cmd_names[a[i-1]] }
+function C(a, i) { return cmd_names[a[i-1]] } // cmd name for debugging
 
-let max_cmd    =  0 // even numbers for non-containers (0 is reserved).
-let max_cmd_ct = -1 // odd numbers containers
+let max_cmd    =  0 // even cmd ids are non-containers (0 is reserved).
+let max_cmd_ct = -1 // odd cmd ids are containers
 function unsparse(a, i) {
 	while (a.length <= i)
 		a.push(null)
 }
 function unsparse_all(i) {
+	// since cmd ids are sparse because of the even/odd cmd_id allocation,
+	// we must keep all per-cmd_id arrays dense manually on every cmd def.
 	unsparse(measure       , i)
 	unsparse(measure_end   , i)
 	unsparse(position      , i)
@@ -1520,6 +1638,7 @@ function ui_cmd_add_arg(v) {
 	a[n++] = v
 }
 
+// convenient vs cmd_begin/cmd_add_arg/cmd_end, but `...args` allocates!
 function ui_cmd(cmd, ...args) {
 	let i = n+2 // abs index of this cmd's arg#1
 	let next_i = args.length+3 // rel index of next cmd's arg#1
@@ -1536,24 +1655,6 @@ ui.cmd_begin = ui_cmd_begin
 ui.cmd_end = ui_cmd_end
 ui.cmd_add_arg = ui_cmd_add_arg
 ui.cmd = ui_cmd
-
-// print current recording
-ui.disas = function(a) {
-	let i = 2
-	while (i < a.length) {
-		let cmd_num = a[i-1]
-		let cmd = cmd_names[cmd_num]
-		let i1 = cmd_arg_end_i(a, i)
-		let args = a.slice(i, i1)
-		if (cmd == 'end')
-			console.groupEnd()
-		if (cmd_num & 1)
-			console.group(cmd, ...args)
-		else
-			console.log(cmd, ...args)
-		i = cmd_next_i(a, i)
-	}
-}
 
 //// LAYERS ------------------------------------------------------------------
 
@@ -2502,7 +2603,7 @@ function redraw_all() {
 			drawn_focused_input = null
 			drawn_focused_by_key = false
 
-			theme = themes[ui.default_theme]
+			theme = screen_theme
 			draw_frame(recs, root_popups, root_render_state_map)
 			theme = null
 
@@ -2614,7 +2715,7 @@ ui.widget = function(cmd_name, t, is_ct) {
 	id_slot       [_cmd] = t.ID
 	let create = t.create
 	if (create) {
-		// bind() to avoid `...args` which allocates.
+		// bind() avoids `...args` which allocates.
 		let bound_create = create.bind(null, _cmd)
 		ui[cmd_name] = bound_create
 		return bound_create
@@ -2627,9 +2728,15 @@ ui.widget = function(cmd_name, t, is_ct) {
 
 /*
 
-A box has min_w, min_h, margin, padding, align, valign, and also `fr`
+A box has min_w, min_h, margin, padding, align, valign, and also fr
 if it's is_flex_child. a box can also be a container.
 it's x,y,w,h are calculated by the layouting system using the above.
+
+The command's first 4 slots hold params at first, then are used as scratch
+memory through different phases and end up storing the box's final x,y,w,h.
+
+Flexboxes keep min_w/min_h in slots 0,1, keep measured
+min_w/min_h in slots 2,3 and reuse slots 0,1 for v_aligned min_w/min_h, etc.
 
 CREATE
 	ui.box_widget      (cmd_name, t, is_ct)   define a box widget
@@ -2692,9 +2799,9 @@ const PX1        =  4
 const PX2        =  6
 const MX1        =  8
 const MX2        = 10
-
 const FR         = 12 // all `is_flex_child` widgets: fraction from main-axis size.
 const ALIGN      = 13 // vert. align at ALIGN+1
+
 const BOX_CT_NEXT_SIB_I = 15 // all container-boxes: next command after this one's END command.
 const BOX_CT_ARGS = 16 // first index after the ui_cmd_box_ct_begin header.
 const BOX_ARGS    = 15 // first index after the ui_cmd_box header.
@@ -2873,6 +2980,7 @@ function ui_cmd_box_end(i) {
 	}
 }
 
+// convenient vs cmd_box_begin/cmd_add_arg/cmd_box_end but `...args` allocates!
 ui.cmd_box = function(cmd, fr, align, valign, min_w, min_h, ...args) {
 	let i = ui_cmd_box_begin(cmd, fr, align, valign, min_w, min_h)
 	for (let j = 0; j < args.length; j++)
@@ -3006,7 +3114,7 @@ function cmd_next_sibling_i(a, i) {
 	let cmd = a[i-1]
 	if (cmd & 1) // container
 		return i+a[i+BOX_CT_NEXT_SIB_I]
-	return cmd_next_i(a, i)
+	return i+a[i-2] // cmd_next_i
 }
 
 // NOTE: `ct` is short for container, which must end with ui.end().
@@ -3021,6 +3129,7 @@ function ui_cmd_box_ct_end(i) {
 	ct_stack.push(i)
 }
 
+// convenient vs cmd_box_ct_begin/cmd_add_arg/cmd_box_ct_end but `...args` allocates!
 ui.cmd_box_ct = function(cmd, fr, align, valign, min_w, min_h, ...args) {
 	let i = ui_cmd_box_ct_begin(cmd, fr, align, valign, min_w, min_h)
 	for (let j = 0; j < args.length; j++)
@@ -4533,25 +4642,28 @@ ui.shadow_def = function(theme, name, x, y, blur, h, s, L, a, inset) {
 	]
 }
 
-//               theme    name        x   y  bl  h  s  L  a
+//             theme    name        x   y  bl  h  s  L  a
 // ---------------------------------------------------------------------------
-ui.shadow_def('light', 'tooltip' ,  2,  2,  9, 0, 0, 0, 0x44 / 0xff)
-ui.shadow_def('light', 'toolbox' ,  1,  1,  4, 0, 0, 0, 0xaa / 0xff)
-ui.shadow_def('light', 'menu'    ,  0,  5, 16, 0, 0, 0, 0x33 / 0xff)
-ui.shadow_def('light', 'button'  ,  0,  0,  2, 0, 0, 0, 0x11 / 0xff)
-ui.shadow_def('light', 'button-active', 2, 3, 8, 0, 0, 0, 0x44 / 0xff, true)
-ui.shadow_def('light', 'thumb'   ,  0,  0,  2, 0, 0, 0, 0xbb / 0xff)
-ui.shadow_def('light', 'modal'   ,  2,  5, 10, 0, 0, 0, 0x88 / 0xff)
-ui.shadow_def('light', 'picker'  ,  0,  5, 10, 0, 0, 0, 0x22 / 0xff) // large fuzzy shadow
+ui.shadow_def('light', 'tooltip' ,  2,  2,  9, 0, 0, 0, 0.26)
+ui.shadow_def('light', 'toolbox' ,  1,  1,  4, 0, 0, 0, 0.66)
+ui.shadow_def('light', 'menu'    ,  0,  5, 16, 0, 0, 0, 0.20)
+ui.shadow_def('light', 'button'  ,  0,  0,  2, 0, 0, 0, 0.06)
+ui.shadow_def('light', 'thumb'   ,  0,  0,  2, 0, 0, 0, 0.66)
+ui.shadow_def('light', 'modal'   ,  2,  5, 10, 0, 0, 0, 0.53)
+ui.shadow_def('light', 'picker'  ,  0,  5, 10, 0, 0, 0, 0.13) // large fuzzy shadow
 
-ui.shadow_def('dark', 'tooltip' ,  2,  2,  9, 0, 0, 0, 0x44 / 0xff)
-ui.shadow_def('dark', 'toolbox' ,  1,  1,  4, 0, 0, 0, 0xaa / 0xff)
-ui.shadow_def('dark', 'menu'    ,  1,  1,  9, 0, 0, 0, 0xff / 0xff)
-ui.shadow_def('dark', 'button'  ,  0,  0,  2, 0, 0, 0, 0xff / 0xff)
-ui.shadow_def('dark', 'button-active', 1, 3, 8, 0, 0, 0, 0xaa / 0xff, true)
-ui.shadow_def('dark', 'thumb'   ,  1,  1,  2, 0, 0, 0, 0xaa / 0xff)
-ui.shadow_def('dark', 'modal'   ,  2,  5, 10, 0, 0, 0, 0x88 / 0xff)
-ui.shadow_def('dark', 'picker'  ,  0,  2, 15, 0, 0, 0, .8)
+ui.shadow_def('dark' , 'tooltip' ,  2,  2,  9, 0, 0, 0, 0.26)
+ui.shadow_def('dark' , 'toolbox' ,  1,  1,  4, 0, 0, 0, 0.66)
+ui.shadow_def('dark' , 'menu'    ,  1,  1,  9, 0, 0, 0, 1.00)
+ui.shadow_def('dark' , 'button'  ,  0,  0,  2, 0, 0, 0, 1.00)
+ui.shadow_def('dark' , 'thumb'   ,  1,  1,  3, 0, 0, 0, 0.66)
+ui.shadow_def('dark' , 'modal'   ,  2,  5, 10, 0, 0, 0, 0.53)
+ui.shadow_def('dark' , 'picker'  ,  0,  2, 15, 0, 0, 0, 0.80)
+
+//             theme    name            x   y  bl  h  s  L  a     inset
+// ---------------------------------------------------------------------------
+ui.shadow_def('light', 'button-active', 2,  3,  8, 0, 0, 0, 0.26, true)
+ui.shadow_def('dark' , 'button-active', 1,  3,  8, 0, 0, 0, 0.66, true)
 
 const CMD_SHADOW = cmd('shadow')
 
@@ -4573,12 +4685,22 @@ function set_drop_shadow(st) {
 	cx.shadowColor   = st[3]
 }
 
-ui.set_shadow = function(s) {
+function set_shadow(s) {
 	let st = assert(theme.shadow[s], 'unknown shadow ', s)
 	assert(!st[SHADOW_INSET], 'inset shadow outside bb: ', s)
 	set_drop_shadow(st)
 	cur_shadow = st
 }
+
+function reset_shadow() {
+	cx.shadowBlur    = 0
+	cx.shadowOffsetX = 0
+	cx.shadowOffsetY = 0
+	cur_shadow = null
+}
+
+ui.set_shadow = set_shadow
+ui.reset_shadow = reset_shadow
 
 draw[CMD_SHADOW] = function(a, i) {
 	let s = a[i+0]
@@ -4601,13 +4723,6 @@ function draw_inset_shadow(st, x, y, w, h, sides, r) {
 	cx.restore()
 }
 
-function reset_shadow() {
-	cx.shadowBlur    = 0
-	cx.shadowOffsetX = 0
-	cx.shadowOffsetY = 0
-	cur_shadow = null
-}
-
 //// BACKGROUND & BORDER -----------------------------------------------------
 
 const BORDER_SIDE_T = 1
@@ -4627,7 +4742,7 @@ function parse_border_sides(s) {
 		(s.includes('t') ? BORDER_SIDE_T : 0) |
 		(s.includes('b') ? BORDER_SIDE_B : 0)
 	)
-	if (s.startsWith('-'))
+	if (s.startsWith('-')) // exclude: '-b' means all sides except bottom
 		b = ~b & BORDER_SIDE_ALL
 	return b
 }
@@ -5906,10 +6021,10 @@ draw[CMD_TEXT] = function(a, i) {
 			else
 				text_x = anchor_x
 			let mark_x = text_x + measure_text(cx, s.slice(0, i1)).width
-			let bg = color_hsl(a[arg_i+2])
+			let bg = color_obj(a[arg_i+2])
 			cx.fillStyle = bg[0]
 			cx.fillRect(mark_x, y, measure_text(cx, mark_s).width, asc + dsc)
-			cx.fillStyle = color_css('text', null, bg_is_dark(bg) ? 'dark' : 'light')
+			cx.fillStyle = color_css('text')
 			cx.textAlign = 'left'
 			cx.fillText(mark_s, mark_x, y + asc)
 		}
@@ -6065,7 +6180,6 @@ frame.translate = function(a, i, dx, dy) {
 			ui.end_stack()
 		frame_end_check()
 	let a1 = end_rec(a0)
-	// pr(json(a1).length)
 	frame_make_ms += clock_ms() - t0
 
 	layout_rec(a1, x, y, w, h)
@@ -6428,6 +6542,19 @@ ui.widget('drag_point', {
 
 //// BUTTON ------------------------------------------------------------------
 
+ui.color_def('*', 'button-text', 'normal'   , 'text', 'active')
+ui.color_def('*', 'button-text', 'readonly' , 'text', 'readonly')
+
+ui.color_def('light', 'button-danger', 'normal', 0, 0.54, 0.43)
+ui.color_def('dark' , 'button-danger', 'normal', 0, 0.54, 0.43)
+
+ui.color_def('*'    , 'button'        , '*'        , 'bg1')
+ui.color_def('*'    , 'button-primary', '*'        , 'link')
+ui.color_def('light', 'button'        , 'readonly' , 0, 0, 0.90)
+ui.color_def('dark' , 'button'        , 'readonly' , 0, 0, 0.18)
+ui.color_def('light', 'button-primary', 'readonly' , 0, 0, 0.90)
+ui.color_def('dark' , 'button-primary', 'readonly' , 0, 0, 0.18)
+
 // NOTE: the button is activated only if the mouse button was released while
 // over the button, and only if it was pressed while over the button, even
 // though the mouse _is_ captured.
@@ -6464,7 +6591,7 @@ function button_update(id, s) {
 
 ui.button_bb = function(style, state) {
 	state = repl(state, 'click', 'hover')
-	style = style ?? 'button-bg'
+	style = style ?? 'button'
 	if (!style) // means no border
 		return
 	ui.shadow(state == 'active' ? 'button-active' : 'button')
@@ -6496,45 +6623,47 @@ ui.end_button_stack = function(state) {
 
 // s is the label, or null for an icon-only button.
 ui.icon_button = function(
-	id, icon, s, fr, align, valign, min_w, min_h, style
+	id, icon, text, fr, align, valign, min_w, min_h, style, readonly
 ) {
 	min_w ??= ui.em(1.5) // force w
 	min_h ??= ui.em(1.5) // force h
 	ui.button_stack(id, fr, align, valign, min_w, min_h)
-	let state = ui.state(id, button_update).state
+	let s = ui.state(id, button_update)
+	let state = readonly ? 'readonly' : s.state
 	ui.button_bb(style, state)
 	let [icon_font, icon_text] = assert(icons[icon], 'unknown icon ', icon)
-	if (s == null) {
+	if (text == null) {
 		ui.button_icon(icon_font, icon_text, state)
 	} else {
 		ui.p(ui.sp1(), 0)
 		ui.h(0, ui.sp1(), 'c')
 			ui.button_icon(icon_font, icon_text, state)
-			ui.button_text(s, state)
+			ui.button_text(text, state)
 		ui.end_h()
 	}
 	let clicked = ui.end_button_stack(state)
 	return clicked
 }
 
-ui.bare_icon_button = function(id, icon, s, fr, align, valign, min_w, min_h) {
-	return ui.icon_button(id, icon, s, fr, align, valign, min_w, min_h, '')
+ui.bare_icon_button = function(id, icon, s, fr, align, valign, min_w, min_h, readonly) {
+	return ui.icon_button(id, icon, s, fr, align, valign, min_w, min_h, '', readonly)
 }
 
-ui.button = function(id, s, fr, align, valign, min_w, min_h, style) {
+ui.button = function(id, text, fr, align, valign, min_w, min_h, style, readonly) {
 	ui.button_stack(id, fr, align ?? 'l', valign ?? 'c', min_w, min_h)
-	let state = ui.state(id, button_update).state
+	let s = ui.state(id, button_update)
+	let state = readonly ? 'readonly' : s.state
 	ui.button_bb(style, state)
 	ui.p(ui.sp2(), 0)
-	ui.button_text(s, state)
+	ui.button_text(text, state)
 	return ui.end_button_stack(state)
 }
 
-ui.primary_button = function(id, s, fr, align, valign, min_w, min_h) {
-	return ui.button(id, s, fr, align, valign, min_w, min_h, 'button-primary')
+ui.primary_button = function(id, s, fr, align, valign, min_w, min_h, readonly) {
+	return ui.button(id, s, fr, align, valign, min_w, min_h, 'button-primary', readonly)
 }
-ui.primary_icon_button = function(id, icon, s, fr, align, valign, min_w, min_h) {
-	return ui.icon_button(id, icon, s, fr, align, valign, min_w, min_h, 'button-primary')
+ui.primary_icon_button = function(id, icon, s, fr, align, valign, min_w, min_h, readonly) {
+	return ui.icon_button(id, icon, s, fr, align, valign, min_w, min_h, 'button-primary', readonly)
 }
 
 ui.btn = ui.button
@@ -6855,7 +6984,7 @@ function hvlist(hv, id, items, value, field,
 	fr, align, valign,
 	item_align, item_valign, item_fr,
 	max_w, min_w,
-	item_pad_l, item_pad_r, item_pad_y, item_h,
+	item_pad_l, item_pad_r, item_pad_y, item_h, item_gap,
 	custom_item_bg_color, custom_item_color
 ) {
 	hv = hv || 'v'
@@ -6871,28 +7000,32 @@ function hvlist(hv, id, items, value, field,
 	// reveal the focused item on tab-focusing the list and on arrow keys.
 	// a clicked item is excepted to avoid shifting it under the mouse pointer.
 	let reveal_fi = ui.focusing(id) || s.focused_item_changed == 'key'
+	ui.hv(hv, fr, item_gap, align ?? (hv == 'v' ? 's' : '['), '[', min_w)
 	let i = 0
-	ui.hv(hv, fr, 0, align  ?? hv == 'v' ? 's' : '[', '[', min_w)
 	for (let item of items) {
 		let item_id = id+'.'+i
-		ui.p(item_pad_l ?? ui.sp(), item_pad_y ?? ui.sp05(),
+		ui.p(
+			item_pad_l ?? ui.sp(),
+			item_pad_y ?? ui.sp05(),
 			item_pad_r ?? item_pad_l ?? ui.sp())
 		if (item === value && reveal_fi)
 			ui.scroll_to_view_next_box()
-		ui.stack(item_id, 0, 's', 's', null, item_h)
+		ui.stack(item_id, item_fr, 's', 's', null, item_h)
+			let ro = field?.readonly
 			let item_focused = item === value
+			let item_color_state =
+				(ro ? STATE_READONLY : 0)
+				| (!ro && hit(item_id) ? STATE_HOVER : 0)
+				| (list_focused ? STATE_FOCUSED : 0)
+				| (item_focused ? STATE_ITEM_FOCUSED | STATE_ITEM_SELECTED : 0)
 			let item_bg_color = custom_item_bg_color ?? (item_focused ? 'item' : 'bg')
-			let item_bg_color_state = item_focused
-				? list_focused
-					? 'item-focused item-selected focused'
-					: 'item-focused item-selected'
-				: null
-			ui.bb(item_bg_color, item_bg_color_state)
+			// TODO: remove this rounded corners hack
+			let sides = item_gap ? (!i ? '-r' : i == items.length-1 ? '-l' : null) : null
+			ui.bb(item_bg_color, item_color_state, sides, null, null, ui.sp05())
 			let item_color = custom_item_color ?? 'text'
-			let item_color_state = field?.readonly ? 'readonly'
-				: hit(item_id) ? 'hover' : null
 			ui.color(item_color, item_color_state)
-			ui.text('', field ? field.to_text(item) : item, item_fr,
+			ui.text('', field ? field.to_text(item) : item,
+				0,
 				item_align ?? field?.align ?? (hv == 'v' ? 'l' : 'c'),
 				item_valign ?? 'c',
 				max_w)
@@ -7308,22 +7441,22 @@ slider.draw = function(a, i) {
 
 	// draw focus ring under thumb
 	if (focused) {
-		let hsl_color = color_hsl('item', 'item-focused item-selected focused')
-		cx.fillStyle = hsl_adjust(hsl_color, 1, 1, 1, .5)
+		let color = color_obj('item', 'item-focused item-selected focused')
+		cx.fillStyle = hsl_adjust(color, 1, 1, 1, .5)
 		cx.beginPath()
 		cx.arc(thumb_cx, thumb_cy, thumb_r * 2, 0, 2 * PI)
 		cx.fill()
 		if (by_key) {
 			cx.beginPath()
 			cx.arc(thumb_cx, thumb_cy, thumb_r * 2 - 2, 0, 2 * PI)
-			cx.strokeStyle = ui.color_css('max')
+			cx.strokeStyle = color_css('max')
 			cx.stroke()
 		}
 	}
 
 	// draw thumb
 	cx.fillStyle = color_css('toggle', color_state)
-	ui.set_shadow('button')
+	set_shadow('button')
 	cx.beginPath()
 	cx.arc(thumb_cx, thumb_cy, thumb_r, 0, 2 * PI)
 	cx.fill()
@@ -7343,7 +7476,7 @@ slider.draw = function(a, i) {
 		let [step, min, max] = compute_step_and_range(
 			max_n, slider_min, slider_max, scale_base, scales, min_step)
 
-		let hsl_color = color_hsl('label')
+		let color = color_obj('label')
 		cx.textAlign = 'center'
 		let m = measure_text(cx, ' ')
 		let asc = m.fontBoundingBoxAscent
@@ -7359,7 +7492,7 @@ slider.draw = function(a, i) {
 			// shadow markers that are too close to the current value.
 			let alpha = clamp(abs(vx - x) / ui.em(3) - .7, 0, 1)
 
-			let c = hsl_adjust(hsl_color, 1, 1, 1, alpha)
+			let c = hsl_adjust(color, 1, 1, 1, alpha)
 			cx.fillStyle  = c
 			cx.strokeStyle = c
 
@@ -7464,8 +7597,6 @@ toggle.draw = function(a, i) {
 	let hs = !readonly && flags & TOGGLE_HOVER
 	let focused = flags & TOGGLE_FOCUSED
 
-	let prev_theme = theme
-
 	// focus ring
 	if (focused) {
 		let m = 3
@@ -7481,7 +7612,7 @@ toggle.draw = function(a, i) {
 		(on ? STATE_ITEM_SELECTED : 0) |
 		(hs ? STATE_HOVER         : 0) |
 		(readonly ? STATE_READONLY : 0)
-	set_bg_color('toggle', state)
+	cx.fillStyle = color_css('toggle', state)
 	cx.fill()
 
 	// thumb
@@ -7490,13 +7621,12 @@ toggle.draw = function(a, i) {
 	let cy1 = y + h / 2
 	cx.arc(cx1, cy1, h * .35, 0, 2 * PI)
 	cx.closePath()
-	ui.set_shadow('button')
-	cx.fillStyle = color_css('toggle-thumb',
+	set_shadow('thumb')
+	cx.fillStyle = color_css('thumb',
 		readonly ? STATE_READONLY : hs ? STATE_HOVER : 0)
 	cx.fill()
 	reset_shadow()
 
-	theme = prev_theme
 }
 
 ui.box_widget('toggle', toggle)
@@ -7507,7 +7637,7 @@ let checkbox = {...toggle}
 
 checkbox.create = function(cmd, id, on, field, fr, align, valign, min_w) {
 	return toggle_create(cmd, id, on, field, fr ?? 0, align, valign,
-		min_w ?? ui.em(1.5), ui.em(1.5))
+		min_w ?? ui.em(1.2), ui.em(1.2))
 }
 
 checkbox.draw = function(a, i) {
@@ -7531,18 +7661,16 @@ checkbox.draw = function(a, i) {
 	if (focused) {
 		let m = 3
 		cx.beginPath()
-		cx.roundRect(x - m, y - m, w + 2*m, h + 2*m, 2 + m * dpr)
+		cx.roundRect(x - m, y - m, w + 2*m, h + 2*m, 1 + m * dpr)
 		cx.strokeStyle = color_css('max', null)
 		cx.lineWidth = 1
 		cx.stroke()
 	}
 
-	let prev_theme = theme
-
 	// check box
 	cx.beginPath()
-	cx.roundRect(x, y, w, h, 2 * dpr)
-	set_bg_color('toggle', state)
+	cx.roundRect(x, y, w, h, 2.5 * dpr)
+	cx.fillStyle = color_css('toggle', state)
 	cx.fill()
 
 	// check mark
@@ -7553,18 +7681,17 @@ checkbox.draw = function(a, i) {
 		cx.translate(0.5, 0.5)
 		cx.scale(dpr, dpr)
 		cx.moveTo( 3,  8)
-		cx.lineTo( 7, 15)
-		cx.lineTo(18,  4)
-		cx.strokeStyle = color_css('toggle-thumb',
+		cx.lineTo( 5, 10)
+		cx.lineTo(11,  3)
+		cx.strokeStyle = color_css('thumb',
 			readonly ? STATE_READONLY : hs ? STATE_HOVER : 0)
-		cx.lineWidth = 1.5
+		cx.lineWidth = 2
 		cx.lineCap = 'round'
 		cx.lineJoin = 'round'
+		set_shadow('thumb')
 		cx.stroke()
 		cx.restore()
 	}
-
-	theme = prev_theme
 
 }
 
@@ -7638,7 +7765,6 @@ radio.draw = function(a, i) {
 	let cy1 = y + h / 2
 
 	// focus ring
-
 	if (focused) {
 		cx.beginPath()
 		cx.arc(cx1, cy1, h * .5 + 3, 0, 2 * PI)
@@ -7647,24 +7773,23 @@ radio.draw = function(a, i) {
 		cx.stroke()
 	}
 
-	let prev_theme = theme
-
 	// button
 	cx.beginPath()
-	cx.arc(cx1, cy1, h * .5, 0, 2 * PI)
-	set_bg_color('toggle', on ? 'item-selected' : hs ? 'hover' : null)
+	cx.arc(cx1, cy1, h * .4, 0, 2 * PI)
+	cx.fillStyle = color_css('toggle', on ? 'item-selected' : hs ? 'hover' : null)
 	cx.fill()
 
 	// bullet
-	cx.beginPath()
-	cx.arc(cx1, cy1, h * (on ? .15 : 0), 0, 2 * PI)
-	cx.closePath()
-	ui.set_shadow('button')
-	cx.fillStyle = color_css('toggle-thumb', hs ? 'hover' : null)
-	cx.fill()
-	reset_shadow()
+	if (on) {
+		cx.beginPath()
+		cx.arc(cx1, cy1, h * (on ? .2 : 0), 0, 2 * PI)
+		cx.closePath()
+		set_shadow('thumb')
+		cx.fillStyle = color_css('thumb', hs ? 'hover' : null)
+		cx.fill()
+		reset_shadow()
+	}
 
-	theme = prev_theme
 }
 
 radio.hit = function(a, i) {
@@ -7953,12 +8078,14 @@ ui.enum_input = function(id, value, field, fr, max_w, w) {
 }
 
 ui.enum_toggle = function(id, value, field, fr, align, valign, min_w) {
+	ui.mv(ui.sp05())
 	return ui.hlist(id, field.enum_values, value, field,
 		fr ?? 0, align ?? 'l', valign,
-		null, null, 0, // item_align, item_valign, item_fr
+		'c', 'c', 1, // item_align, item_valign, item_fr
 		null, min_w,
-		null, null, null, null, // item_pad_l, item_pad_r, item_pad_y, item_h
-		'toggle', 'button-text'
+		// item_pad_l, item_pad_r, item_pad_y, item_h, item_gap
+		null, null, null, null, 2,
+		'toggle', 'toggle-text' // item_bg_color, item_bg_state
 	)
 }
 
@@ -8553,7 +8680,7 @@ function draw_gradient_cursor(x, y, w, h, p, alpha) {
 	let cursor_x = round(x + p * (w-1)) + .5
 	let cursor_w = ui.sp05()
 	let cursor_h = ui.sp05()
-	cx.fillStyle = ui.alpha_adjust(ui.color_hsl('text'), alpha)
+	cx.fillStyle = alpha_adjust(color_obj('text'), alpha)
 	cx.beginPath()
 	cx.moveTo(cursor_x, y)
 	cx.lineTo(cursor_x-cursor_w, y-cursor_h)
@@ -9086,7 +9213,7 @@ ui.widget('bg_dots', {
 		cx.rect(0, 0, w, h)
 		cx.clip()
 
-		cx.fillStyle = hsl_adjust(color_hsl('label'), 1, 1, 0.5, 1)
+		cx.fillStyle = hsl_adjust(color_obj('label'), 1, 1, 0.5, 1)
 		for (let t of dots) {
 			if (t != dots.mouse_dot) {
 				cx.beginPath()
@@ -9096,7 +9223,7 @@ ui.widget('bg_dots', {
 			}
 		}
 
-		let c = color_hsl('label')
+		let color = color_obj('label')
 		cx.lineWidth = 0.8
 		for (let i = 0; i < dots.length; i++) {
 			for (let j = i+1; j < dots.length; j++) {
@@ -9105,7 +9232,7 @@ ui.widget('bg_dots', {
 				let dp = point_distance(t1, t2) / max_distance
 				if (dp < 1) {
 					let alpha = (1 - dp) / 2
-					cx.strokeStyle = hsl_adjust(c, 1, 1, 0.5, alpha)
+					cx.strokeStyle = hsl_adjust(color, 1, 1, 0.5, alpha)
 					cx.beginPath()
 					cx.moveTo(t1.x, t1.y)
 					cx.lineTo(t2.x, t2.y)
