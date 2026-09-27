@@ -544,7 +544,6 @@ ui.color_def('light', 'intense' , 'normal' ,   0,    0,    0, 0.10)
 ui.color_def('light', 'intense' , 'focused',   0,    0,    0, 0.30)
 ui.color_def('light', 'intense' , 'hover'  ,   0,    0,    0, 0.40)
 ui.color_def('light', 'max'     , 'normal' ,   0,    0,    0, 1.00)
-ui.color_def('light', 'marker'  , 'normal' ,  61, 1.00, 0.35, 1.00)
 
 ui.color_def('dark' , 'light'   , 'normal' ,   0,    0,    1, 0.06)
 ui.color_def('dark' , 'light'   , 'hover'  ,   0,    0,    1, 0.03)
@@ -552,7 +551,6 @@ ui.color_def('dark' , 'intense' , 'normal' ,   0,    0,    1, 0.08)
 ui.color_def('dark' , 'intense' , 'focused',   0,    0,    1, 0.25)
 ui.color_def('dark' , 'intense' , 'hover'  ,   0,    0,    1, 0.40)
 ui.color_def('dark' , 'max'     , 'normal' ,   0,    0,    1, 1.00)
-ui.color_def('dark' , 'marker'  , 'normal' ,  61, 1.00, 0.57, 1.00)
 
 /// background colors --------------------------------------------------------
 
@@ -675,16 +673,12 @@ ui.color_def('light', 'thumb' , 'readonly' , 'text', 'active'  , 'dark')
 ui.color_def('dark' , 'thumb' , 'readonly' , 'text', 'normal'  , 'dark')
 
 // enum_toggle
-ui.color_def('*', 'toggle', 'item-focused item-selected focused' , 'toggle', 'item-selected')
 ui.color_def('*', 'toggle', 'item-focused item-selected'         , 'toggle', 'item-selected')
 ui.color_def('*', 'toggle', 'item-focused item-selected readonly', 'toggle', 'readonly item-selected')
 
 ui.color_def('*', 'toggle-text', 'normal'  , 'text', 'normal')
 ui.color_def('*', 'toggle-text', 'hover'   , 'text', 'normal')
 ui.color_def('*', 'toggle-text', 'item-focused item-selected'                 , 'text', 'active')
-ui.color_def('*', 'toggle-text', 'item-focused item-selected hover'           , 'text', 'active')
-ui.color_def('*', 'toggle-text', 'item-focused item-selected focused'         , 'text', 'active')
-ui.color_def('*', 'toggle-text', 'item-focused item-selected focused hover'   , 'text', 'active')
 ui.color_def('*', 'toggle-text', 'readonly'                                   , 'text', 'readonly')
 ui.color_def('*', 'toggle-text', 'readonly focused'                           , 'text', 'normal')
 ui.color_def('*', 'toggle-text', 'readonly item-focused item-selected'        , 'text', 'normal')
