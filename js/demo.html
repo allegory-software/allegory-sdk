@@ -161,17 +161,11 @@ ui.end_h()
 }
 
 {
-let radio_sel_i = 0
+let radio_items = ['Radio 0', 'Radio 1', 'Radio 2', 'Radio 3', 'Radio 4']
+let radio_value = radio_items[0]
 demos.radio = function() {
 ui.v(0, ui.sp2(), 'c', 'c')
-ui.radio_group('radio_group1')
-for (let i = 0; i < 5; i++) {
-	ui.h(0, ui.sp(), 'c', 'c')
-		ui.radio('radio'+i, 'radio_group1', i)
-		ui.label('radio'+i, 'Radio '+i)
-	ui.end_h()
-}
-radio_sel_i = ui.end_radio_group('radio_group1', radio_sel_i)
+radio_value = ui.radio_list('radio_list1', radio_items, radio_value)
 ui.end_v()
 }
 }
@@ -701,6 +695,7 @@ ui.end_hsplit()
 {
 let input1_text
 let input2_text
+let password1_text
 let dd_items = [
 	'item 1',
 	'item 2 that is a lot longer than the others',
@@ -711,7 +706,8 @@ let dd_items = [
 let dd1_value
 let dd2_value
 let enum_toggle_value
-let radio_sel_i
+let radio_items = ['Radio 1', 'Radio 2', 'Radio 3']
+let radio_value
 let toggle1_on
 let toggle2_on
 let cb1_checked
@@ -722,6 +718,11 @@ let date_input1_v
 let date_input3_v
 let input1_field = ui.create_field()
 let input2_field = ui.create_field()
+let password1_field = ui.create_field({
+	type: 'password',
+	min_len: 8,
+	conditions: 'lower upper digit symbol',
+})
 let date_input1_field = ui.create_field({type: 'date'})
 let date_input3_field = ui.create_field({type: 'datetime'})
 let enum_input_field = ui.create_field({type: 'enum', enum_values: dd_items})
@@ -731,6 +732,7 @@ let enum_toggle_field = ui.create_field({
 })
 let num_slider1_field = ui.create_field({
 	type: 'number',
+	name: 'Num1',
 	min: 1000,
 	max: 9000,
 	slider_min: 0,
@@ -757,6 +759,7 @@ let toggle2_field = ui.create_field({type: 'bool'})
 let input_controls_fields = [
 	input1_field,
 	input2_field,
+	password1_field,
 	date_input1_field,
 	date_input3_field,
 	enum_input_field,
@@ -773,10 +776,11 @@ let input_controls_readonly = false
 function set_input_controls_values(value) {
 	input1_text = value
 	input2_text = value
+	password1_text = value
 	dd1_value = value
 	dd2_value = value
 	enum_toggle_value = value
-	radio_sel_i = value
+	radio_value = value
 	toggle1_on = value
 	toggle2_on = value
 	cb1_checked = value
@@ -790,10 +794,11 @@ function set_input_controls_values(value) {
 function reset_input_controls_values() {
 	input1_text = 'Hello1 Hello1'
 	input2_text = 'Hello2 Hello2'
+	password1_text = 'secret'
 	dd1_value = dd_items[1]
 	dd2_value = dd_items[0]
 	enum_toggle_value = 'one'
-	radio_sel_i = 0
+	radio_value = radio_items[0]
 	toggle1_on = false
 	toggle2_on = true
 	cb1_checked = false
@@ -830,6 +835,15 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 			1, null, 'sr')
 	ui.end_h()
 	ui.h(0, ui.sp2(), 'l')
+		ui.label('password1', 'Password', 0)
+		password1_text = ui.password_input('password1', password1_text,
+			password1_field)
+	ui.end_h()
+	ui.h(0, ui.sp2(), 'l')
+		ui.box()
+		ui.error_label('password1', 'all')
+	ui.end_h()
+	ui.h(0, ui.sp2(), 'l')
 		ui.label('dd1', 'Dropdown', 0)
 		dd1_value = ui.enum_input('dd1', dd1_value, enum_input_field)
 	ui.end_h()
@@ -861,6 +875,10 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 		ui.label('num_slider1', 'Number slider', 0)
 		num_slider1_value = ui.num_slider(
 			'num_slider1', num_slider1_value, num_slider1_field)
+	ui.end_h()
+	ui.h(0, ui.sp2(), 'l')
+		ui.box()
+		ui.error_label('num_slider1', 'all')
 	ui.end_h()
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('slider1', 'Slider', 0)
@@ -897,16 +915,7 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 	ui.end_h()
 	ui.h(0, ui.sp4(), 'l')
 		ui.text('', 'Radio', 0, 'l', 't')
-		ui.v(0, ui.sp2())
-			ui.radio_group('radio_group1')
-			for (let i = 0; i < 3; i++) {
-				ui.h(0, ui.sp2(), 'l')
-					ui.radio('radio'+i, 'radio_group1', i)
-					ui.label('radio'+i, 'Radio '+(i+1))
-				ui.end_h()
-			}
-			radio_sel_i = ui.end_radio_group('radio_group1', radio_sel_i)
-		ui.end_v()
+		radio_value = ui.radio_list('radio_list1', radio_items, radio_value)
 	ui.end_h()
 	ui.h(0, ui.sp2())
 		ui.button('btn1', 'Button',

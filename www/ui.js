@@ -38,12 +38,18 @@ INPUT
 	ui.[primary_|bare_]icon_button
 	                   (id, icon, [s], fr, align, valign, min_w, min_h, style, readonly)
 	ui.label           (for_id, s, fr, align, valign)
+	ui.error_label     (for_id, ['first_error'|'all_errors'|'all_checked'],
+	                    fr, align, valign)
 	ui.input           (id, v, [field], fr, w, [text_align], [no_box]) -> v
+	ui.password_input  (id, v, [field], fr, w, [text_align], [no_box]) -> v
 	ui.list_dropdown   (id, items, value, [field], fr, align, max_w, min_w) -> value
 	ui.enum_input      (id, value, field, fr, align, max_w, min_w) -> value
 	ui.enum_toggle     (id, value, field, fr, align, valign, min_w) -> value
 	ui.toggle          (id, on, [field], fr, align, valign, min_w)
 	ui.checkbox        (id, on, [field], fr, align, valign, min_w)
+	ui.radio_group     (id, value, [field]) -> value
+	ui.radio           (id, own_val, fr, align, valign, min_w, min_h)
+	ui.end_radio_group ()
 	ui.date_input      (id, v, [field], fr, align, valign, min_w) -> v
 	ui.color_input     (id, v, [field], fr, min_w) -> v
 	ui.num_slider      (id, v, [field]) -> v
@@ -54,6 +60,7 @@ LIST
 	ui.[h|v|hv]list    (id, items, value, [field], fr, align, valign,
 	                    item_align, item_valign, item_fr, max_w, min_w,
 	                    item_pad_l, item_pad_r, item_pad_y, item_h) -> value
+	ui.radio_list      (id, items, value, [field], hv, fr, align, valign) -> value
 
 OTHER
 
@@ -126,6 +133,7 @@ const {
 	assign, entries, insert, remove_value,
 	noop, return_true, do_after, do_before,
 	runafter,
+	copy_to_clipboard,
 	freelist,
 	hsl_to_rgb_out,
 	hsl_to_rgb_hex,
@@ -614,6 +622,7 @@ ui.color_def('*', 'search' , 'normal',  60,  1.00, 0.80) // quicksearch text bg
 ui.color_def('*', 'info'   , 'normal', 200,  1.00, 0.30) // info bubbles
 ui.color_def('*', 'warn'   , 'normal',  39,  1.00, 0.50) // warning bubbles
 ui.color_def('*', 'error'  , 'normal',   0,  0.54, 0.43) // error bubbles
+ui.color_def('*', 'green'  , 'normal', 120,  0.59, 0.24) // green light text
 
 // input value states
 ui.color_def('light', 'item', 'new'           , 240, 1.00, 0.97)
@@ -5107,6 +5116,11 @@ ui.set_value = function(s, value, field) {
 	return value
 }
 
+function copy_input_value(field, v) {
+	if (v != null)
+		copy_to_clipboard(field ? field.to_input(v) : String(v))
+}
+
 //// TEXT BOX ----------------------------------------------------------------
 
 /*
@@ -5477,7 +5491,8 @@ function word_wrapper(id, text) {
 measure[CMD_TEXT] = function(a, i, axis) {
 	let flags = a[i+TEXT_FLAGS]
 	if (axis == 0) {
-		read_text_args(a, i, flags)
+		let arg_i = read_text_args(a, i, flags)
+		let input_type = flags & TEXT_EDITABLE ? a[arg_i] : null
 		if (flags & TEXT_FONT_FLAGS)
 			set_text_font()
 		if (flags & TEXT_WRAP_WORD) {
@@ -5502,10 +5517,11 @@ measure[CMD_TEXT] = function(a, i, axis) {
 			let text_w
 			let text_h
 			if (isstr(s)) { // single-line
-				let m = measure_text(cx, s)
+				let is_password = input_type == 'password'
+				let m = measure_text(cx, is_password ? '\u{2022}' : s)
 				asc = m.fontBoundingBoxAscent
 				dsc = m.fontBoundingBoxDescent
-				text_w = ceil(m.width)
+				text_w = ceil(is_password ? m.width * s.length : m.width)
 				text_h = ceil(asc+dsc)
 			} else { // multi-line, pre-wrapped
 				text_w = 0
@@ -6003,6 +6019,9 @@ draw[CMD_TEXT] = function(a, i) {
 			return
 		}
 	}
+
+	if (input_type == 'password')
+		s = '\u{2022}'.repeat(s.length)
 
 	if (flags & TEXT_FONT_FLAGS)
 		set_text_font()
@@ -7086,6 +7105,40 @@ ui.label = function(for_id, s, fr, align, valign) {
 	ui.text(id, s, fr, align ?? 'l', valign ?? 'c')
 }
 
+//// ERROR_LABEL -------------------------------------------------------------
+
+ui.error_label = function(for_id, mode, fr, align, valign) {
+	mode ??= 'first_error'
+	let validator = ui.state_of(for_id, 'field')?.validator
+	ui.v(fr, ui.sp05(), align ?? 'l', valign ?? 'c')
+	let text_n = 0
+	for (let result of validator?.results ?? empty_array) {
+		let is_shown = mode == 'all' ? true
+			: mode == 'all_checked' ? result.checked
+			: result.failed && (mode == 'all_errors' || !text_n)
+		if (!is_shown)
+			continue
+		ui.h(0, ui.sp05(), 's', 'c')
+			if (result.failed) {
+				ui.color('error')
+				ui.icon('', 'x', 0, 'c', 'c', null, ui.em())
+			} else if (result.checked) {
+				ui.color('green')
+				ui.icon('', 'check', 0, 'c', 'c', null, ui.em())
+			} else {
+				ui.box(0, ui.em())
+			}
+			ui.color(result.failed ? 'error' : 'text')
+			let err = result.failed ? result.error : result.rule_text
+			ui.text('', err, 0, 's', 'c')
+		ui.end_h()
+		text_n++
+	}
+	if (!text_n)
+		ui.text('', '')
+	ui.end_v()
+}
+
 //// INPUT -------------------------------------------------------------------
 
 ui.input_min_w_em = 10
@@ -7117,6 +7170,11 @@ ui.input = function(id, value, field, fr, w, text_align, no_box) {
 	return value
 }
 
+ui.password_input = function(id, value, field, fr, w, text_align, no_box) {
+	field ??= ui.state_of(id, 'field') ?? ui.create_field({type: 'password'})
+	return ui.input(id, value, field, fr, w, text_align, no_box)
+}
+
 //// NUM_SLIDER --------------------------------------------------------------
 
 function num_slider_update(id, s) {
@@ -7134,6 +7192,8 @@ function num_slider_update(id, s) {
 			ui.focus(id)
 		}
 	}
+	if (ui.focused(id) && ui.keydown('ctrl c'))
+		copy_input_value(field, s.value)
 	if (field.readonly)
 		return
 
@@ -7328,6 +7388,8 @@ function slider_update(id, s) {
 		ui.focus(id)
 
 	let field = s.field
+	if (ui.focused(id) && ui.keydown('ctrl c'))
+		copy_input_value(field, s.value)
 	if (field.readonly)
 		return
 	let slider_min = field.slider_min ?? field.min ?? 0
@@ -7780,53 +7842,60 @@ ui.box_widget('checkbox', checkbox)
 
 let radio = {...checkbox}
 
-let RADIO_GROUP_ID = BOX_ARGS+2
+let radio_group_stack = []
 
-function radio_group_update(id, s) { s.input_value = undefined }
-ui.radio_group = function(group_id) {
-	ui.state(group_id, radio_group_update)
+function radio_group_update(group_id, s) {
+	s.input_value = undefined
+	let del = ui.keydown('delete')
+	if (!ui.click && !ui.keydown(' ') && !del)
+		return
+	let id = ui.click ? ui.captured_id : ui.focused_id
+	let is_label = ui.click && id?.endsWith('.label')
+	if (is_label)
+		id = id.slice(0, -6)
+	let radio_s = ui.state_of(id)
+	if (radio_s?.radio_group_id != group_id)
+		return
+	if (is_label)
+		ui.focus(id)
+	if (s.field.readonly)
+		return
+	s.input_value = del ? null : radio_s.own_val
 }
-ui.end_radio_group = function(group_id, sel_val) {
+ui.radio_group = function(group_id, value, field) {
 	let s = ui.state(group_id)
-	return ui.set_value(s, sel_val)
+	field ??= s.field ?? ui.create_field({type: 'enum'})
+	s.field = field
+	s = ui.state(group_id, radio_group_update)
+	value = ui.set_value(s, value, field)
+	radio_group_stack.push(group_id)
+	return value
+}
+ui.end_radio_group = function() {
+	radio_group_stack.pop()
 }
 
 radio.create = function(cmd,
-	id, group_id, own_val,
+	id, own_val,
 	fr, align, valign, min_w, min_h
 ) {
-	ui.state(id)
-	ui.state(group_id)
+	let group_id = radio_group_stack.at(-1)
+	let s = ui.state(id)
+	s.radio_group_id = group_id
+	s.own_val = own_val
 	ui.focusable(id)
-	let sel_val = ui.value(group_id)
-	let label_hit = hit(id+'.label') && ui.click
-	if (label_hit)
-		ui.focus(id)
-	let dot_hit = hit(group_id) && ui.click
-	let focused = ui.focused(id)
-	let clicked_id = label_hit ? id : (dot_hit && hit(group_id, 'id'))
-	if (!clicked_id && focused && ui.keydown(' ')) {
-		clicked_id = id
-		ui.rebuild('radio_pick')
-	}
-	let clicked = !!clicked_id
-	let selected = clicked ? clicked_id == id : own_val === sel_val
+	let readonly = ui.state_of(group_id, 'field').readonly
+	let selected = own_val === ui.value(group_id)
 	let hs = hit(id) || hit(id+'.label')
-	let del = focused && ui.keydown('delete')
-	if (del)
-		ui.rebuild('radio_pick')
+	let focused = ui.focused(id)
 	let i = ui_cmd_box_begin(cmd, fr ?? 0, align ?? 'c', valign ?? 'c',
 		min_w ?? ui.em(1.5),
 		min_h ?? ui.em(1.5))
 	a[n++] = id
 	a[n++] = (selected ? TOGGLE_ON : 0) | (hs ? TOGGLE_HOVER : 0) |
-		(focused && ui.focused_by_key ? TOGGLE_FOCUSED : 0)
-	a[n++] = group_id
+		(focused && ui.focused_by_key ? TOGGLE_FOCUSED : 0) |
+		(readonly ? TOGGLE_READONLY : 0)
 	ui_cmd_box_end(i)
-	if (clicked && clicked_id == id)
-		ui.state(group_id).input_value = own_val
-	else if (del)
-		ui.state(group_id).input_value = null
 }
 
 radio.draw = function(a, i) {
@@ -7837,7 +7906,8 @@ radio.draw = function(a, i) {
 	let h = a[i+3]
 	let flags = a[i+TOGGLE_STATE]
 	let on = flags & TOGGLE_ON
-	let hs = flags & TOGGLE_HOVER
+	let readonly = flags & TOGGLE_READONLY
+	let hs = !readonly && flags & TOGGLE_HOVER
 	let focused = flags & TOGGLE_FOCUSED
 
 	let cx1 = x + w / 2
@@ -7855,7 +7925,9 @@ radio.draw = function(a, i) {
 	// button
 	cx.beginPath()
 	cx.arc(cx1, cy1, h * .4, 0, 2 * PI)
-	cx.fillStyle = color_css('toggle', on ? 'item-selected' : hs ? 'hover' : null)
+	cx.fillStyle = color_css('toggle',
+		(on ? STATE_ITEM_SELECTED : hs ? STATE_HOVER : 0) |
+		(readonly ? STATE_READONLY : 0))
 	cx.fill()
 
 	// bullet
@@ -7864,28 +7936,32 @@ radio.draw = function(a, i) {
 		cx.arc(cx1, cy1, h * (on ? .2 : 0), 0, 2 * PI)
 		cx.closePath()
 		set_shadow('thumb')
-		cx.fillStyle = color_css('thumb', hs ? 'hover' : null)
+		cx.fillStyle = color_css('thumb',
+			readonly ? STATE_READONLY : hs ? STATE_HOVER : 0)
 		cx.fill()
 		reset_shadow()
 	}
 
 }
 
-radio.hit = function(a, i) {
-	let x = a[i+0]
-	let y = a[i+1]
-	let w = a[i+2]
-	let h = a[i+3]
-	let id = a[i+TOGGLE_ID]
-	let group_id = a[i+RADIO_GROUP_ID]
-	if (hit_rect(x, y, w, h)) {
-		set_hit(group_id).id = id
-		set_hit(id)
-		return true
-	}
-}
-
 ui.box_widget('radio', radio)
+
+ui.radio_list = function(id, items, value, field, hv, fr, align, valign) {
+	value = ui.radio_group(id, value, field)
+	ui.hv(hv ?? 'v', fr, ui.sp2(), align, valign)
+	let i = 0
+	for (let item of items) {
+		let radio_id = id+'.'+i
+		ui.h(0, ui.sp(), 'l', 'c')
+			ui.radio(radio_id, item)
+			ui.label(radio_id, field ? field.to_text(item) : item)
+		ui.end_h()
+		i++
+	}
+	ui.end()
+	ui.end_radio_group()
+	return value
+}
 
 //// DROPDOWN ----------------------------------------------------------------
 
@@ -8062,6 +8138,8 @@ function draw_value_row(value, field, row_id,
 function list_dropdown_update(id, s) {
 
 	s.input_value = undefined
+	if (ui.focused(id) && ui.keydown('ctrl c'))
+		copy_input_value(s.field, s.value)
 	if (s.field?.readonly)
 		return
 
@@ -9031,6 +9109,8 @@ ui.color_picker = function(id, hex, field) {
 
 function color_input_update(id, s) {
 	s.input_value = undefined
+	if (ui.focused(id) && ui.keydown('ctrl c'))
+		copy_input_value(s.field, s.value)
 	if (s.field.readonly)
 		return
 

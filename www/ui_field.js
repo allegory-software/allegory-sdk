@@ -112,7 +112,7 @@ ui.add_validation_rule = function(rule) {
 ui.create_validator = function(e, own_rules = empty_array) {
 
 	let rules = []
-	let parse
+	let parse_rule
 	let results = []
 	let checked = map()
 
@@ -138,8 +138,8 @@ ui.create_validator = function(e, own_rules = empty_array) {
 			}
 		}
 		if (rule.parse) {
-			assert(!parse, 'duplicate validation rule with a parse')
-			parse = rule.parse
+			assert(!parse_rule, 'duplicate validation rule with a parse')
+			parse_rule = rule
 		}
 		rules.push(rule)
 		checked.set(rule, true)
@@ -162,19 +162,13 @@ ui.create_validator = function(e, own_rules = empty_array) {
 
 	validator.parse = function(v) {
 		if (v == null) return null
-		if (parse) return parse(e, v)
-		if (isstr(v) && e.from_input) return e.from_input(v)
+		if (parse_rule) return parse_rule.parse(e, v)
 		return v
 	}
 
 	validator.validate = function(v) {
-		v = validator.parse(v)
-		let parse_failed = v === undefined
-		for (let rule of rules) {
-			if (parse_failed) {
-				rule._failed = true
-				continue // if parse failed, subsequent rules cannot run!
-			}
+		let parse_failed = false
+		next_rule: for (let rule of rules) {
 			if (rule._failed)
 				continue
 			if (rule._checked)
@@ -182,12 +176,18 @@ ui.create_validator = function(e, own_rules = empty_array) {
 			if (v == null && !rule.check_null)
 				continue
 			for (let req_rule_name of rule.requires) {
-				if (ui.validation_rules[req_rule_name]._failed) {
-					rule._failed = true
-					continue
-				}
+				let req_rule = ui.validation_rules[req_rule_name]
+				if (!req_rule._checked || req_rule._failed)
+					continue next_rule
 			}
-			let failed = !rule.validate(e, v)
+			let failed
+			if (rule == parse_rule) {
+				v = rule.parse(e, v)
+				parse_failed = v === undefined
+				failed = parse_failed || !rule.validate(e, v)
+			} else {
+				failed = !rule.validate(e, v)
+			}
 			rule._checked = true
 			rule._failed = failed
 		}
@@ -235,9 +235,9 @@ function add_scalar_rules(type) {
 		applies  : (e) => e.min != null,
 		validate : (e, v) => v >= e.min,
 		error    : (e, v) => S('validation_min_error',
-			'{0} is smaller than {1}', e.label, field_value(e, e.min)),
+			'{0} is < {1}', e.label, field_value(e, e.min)),
 		rule     : (e) => S('validation_min_rule',
-			'{0} must be larger than or equal to {1}', e.label, field_value(e, e.min)),
+			'{0} must be >= {1}', e.label, field_value(e, e.min)),
 	})
 
 	ui.add_validation_rule({
@@ -246,9 +246,9 @@ function add_scalar_rules(type) {
 		applies  : (e) => e.max != null,
 		validate : (e, v) => v <= e.max,
 		error    : (e, v) => S('validation_max_error',
-			'{0} is larger than {1}', e.label, field_value(e, e.max)),
+			'{0} is > {1}', e.label, field_value(e, e.max)),
 		rule     : (e) => S('validation_max_rule',
-			'{0} must be smaller than or equal to {1}', e.label, field_value(e, e.max)),
+			'{0} must be <= {1}', e.label, field_value(e, e.max)),
 	})
 
 }
@@ -285,7 +285,7 @@ ui.add_validation_rule({
 		|| e.value2 - e.value1 >= e.min_range,
 	error    : (e, v) => S('validation_min_range_error', 'Range is too small'),
 	rule     : (e) => S('validation_min_range_rule' ,
-		'Range must be larger than or equal to {0}', field_value(e, e.min_range)),
+		'Range must be >= {0}', field_value(e, e.min_range)),
 })
 
 ui.add_validation_rule({
@@ -295,7 +295,7 @@ ui.add_validation_rule({
 		|| e.value2 - e.value1 <= e.max_range,
 	error    : (e, v) => S('validation_max_range_error', 'Range is too large'),
 	rule     : (e) => S('validation_max_range_rule' ,
-		'Range must be smaller than or equal to {0}', field_value(e, e.max_range)),
+		'Range must be < or equal {0}', field_value(e, e.max_range)),
 })
 
 ui.add_validation_rule({
@@ -327,7 +327,7 @@ ui.add_validation_rule({
 	error    : (e, v) => S('validation_maxlen_error',
 		'{0} is too long', e.label),
 	rule     : (e) => S('validation_maxlen_rule',
-		'{0} must be at most {1} UTF-8 bytes', e.label, e.maxlen),
+		'{0} must be at most {1} bytes', e.label, e.maxlen),
 })
 
 ui.add_validation_rule({
@@ -402,7 +402,7 @@ ui.add_validation_rule({
 		|| e.value2 - e.value1 >= e.min_range - 24 * 3600,
 	error    : (e, v) => S('validation_date_min_range_error', 'Range is too small'),
 	rule     : (e) => S('validation_date_min_range_rule' ,
-		'Range must be larger than or equal to {0}', field_value(e, e.min_range)),
+		'Range must be >= {0}', field_value(e, e.min_range)),
 })
 
 ui.add_validation_rule({
@@ -412,7 +412,7 @@ ui.add_validation_rule({
 		|| e.value2 - e.value1 <= e.max_range - 24 * 3600,
 	error    : (e, v) => S('validation_date_max_range_error', 'Range is too large'),
 	rule     : (e) => S('validation_date_max_range_rule' ,
-		'Range must be smaller than or equal to {0}', field_value(e, e.max_range)),
+		'Range must be <= {0}', field_value(e, e.max_range)),
 })
 
 ui.add_validation_rule({
@@ -526,10 +526,13 @@ number.to_input = function(s) {
 	return x != null ? dec(x / this.scale, this.decimals) : s
 }
 
+let number_re = /^\s*[-+]?(\d+\.?\d*|\.\d+)\s*$/
+
 ui.add_validation_rule({
 	name     : 'number',
 	applies  : (e) => e.is_number,
-	parse    : (e, v) => isstr(v) ? e.from_input(v) : v,
+	parse    : (e, v) => !isstr(v) ? v
+		: number_re.test(v) ? e.from_input(v) : undefined,
 	validate : (e, v) => isnum(v),
 	error    : (e, v) => S('validation_num_error',
 		'{0} is not a number' , e.label),
@@ -728,6 +731,7 @@ color.from_input = function(s) {
 ui.add_validation_rule({
 	name     : 'color',
 	applies  : (e) => e.is_color,
+	parse    : (e, v) => isstr(v) ? e.from_input(v) : v,
 	validate : return_true,
 	error    : (e, v) => S('validation_color_error',
 		'{0} is not #rrggbb', e.label),

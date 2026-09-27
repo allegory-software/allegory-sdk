@@ -85,10 +85,8 @@ appears, under the same condition that builds the child. Storing the
 parent's own data on a child's state between frames is not this exception.
 
 An id with no widget behind it is a shared namespace, and any code that
-knows the id may call ui.state() on it. radio's group_id is one: each of the
-N buttons reads and writes it and no button owns it. The toolboxes
-container's id is another. An id is a shared namespace only while no code
-registers an update on it.
+knows the id may call ui.state() on it. The toolboxes container's id is one.
+An id is a shared namespace only while no code registers an update on it.
 
 
 EDGES
@@ -150,20 +148,20 @@ THE INPUT CONTRACT
 ------------------------------------------------------------------------------
 
 An input is a widget that takes a value from the caller and returns one:
-text, input, toggle, checkbox, slider, num_slider, date_input, color_input.
+text, input, toggle, checkbox, slider, num_slider, radio_group, radio_list,
+date_input, color_input.
 
 tabs is not an input: its selected tab is view state, not a value the caller
 publishes through ui.value(id) or ui.input_value(id).
 
-sat_lum_square, hue_bar, radio, list, list_dropdown, calendar and
+sat_lum_square, hue_bar, list, list_dropdown, calendar and
 color_picker behave the same way and publish the same way, so ui.value(id)
 and ui.input_value(id) answer for them too. They are not inputs only in the
 sense that a caller is not expected to reach for them by id: the widget that
 builds one takes its return value. calendar is date_input's own picker the
 same way color_picker is color_input's: date_input normalizes the value to a
 day number or null before it ever reaches calendar, so calendar itself never
-has to accept or preserve a value it cannot interpret. The radio group widget
-that carries the value interface does not exist yet.
+has to accept or preserve a value it cannot interpret.
 
 There is no uncontrolled shape. The caller passes a value on every frame.
 
