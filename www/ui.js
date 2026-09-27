@@ -39,8 +39,8 @@ INPUT
 	                   (id, icon, [s], fr, align, valign, min_w, min_h, style, readonly)
 	ui.label           (for_id, s, fr, align, valign)
 	ui.input           (id, v, [field], fr, w, [text_align], [no_box]) -> v
-	ui.list_dropdown   (id, items, value, [field], fr, max_w, min_w) -> value
-	ui.enum_input      (id, value, field, fr, max_w, min_w) -> value
+	ui.list_dropdown   (id, items, value, [field], fr, align, max_w, min_w) -> value
+	ui.enum_input      (id, value, field, fr, align, max_w, min_w) -> value
 	ui.enum_toggle     (id, value, field, fr, align, valign, min_w) -> value
 	ui.toggle          (id, on, [field], fr, align, valign, min_w)
 	ui.checkbox        (id, on, [field], fr, align, valign, min_w)
@@ -7597,6 +7597,7 @@ let TOGGLE_ON      = 1
 let TOGGLE_HOVER   = 2
 let TOGGLE_FOCUSED = 4
 let TOGGLE_READONLY = 8
+let TOGGLE_NULL    = 16
 
 ui.capture_keydown(' ')
 
@@ -7634,7 +7635,8 @@ function toggle_create(cmd, id, on, field, fr, align, valign, min_w, min_h) {
 	let i = ui_cmd_box_begin(cmd, fr ?? 0, align ?? 'c', valign ?? 'c',
 		min_w, min_h)
 	a[n++] = id
-	a[n++] = (on ? TOGGLE_ON : 0) | (hs ? TOGGLE_HOVER : 0) |
+	a[n++] = (on ? TOGGLE_ON : 0) | (on == null ? TOGGLE_NULL : 0) |
+		(hs ? TOGGLE_HOVER : 0) |
 		(focused && ui.focused_by_key ? TOGGLE_FOCUSED : 0) |
 		(field.readonly ? TOGGLE_READONLY : 0)
 	ui_cmd_box_end(i)
@@ -7710,6 +7712,7 @@ checkbox.draw = function(a, i) {
 	let h = a[i+3]
 	let flags = a[i+TOGGLE_STATE]
 	let on = flags & TOGGLE_ON
+	let is_null = flags & TOGGLE_NULL
 	let readonly = flags & TOGGLE_READONLY
 	let hs = !readonly && flags & TOGGLE_HOVER
 	let focused = flags & TOGGLE_FOCUSED
@@ -7735,23 +7738,37 @@ checkbox.draw = function(a, i) {
 	cx.fillStyle = color_css('toggle', state)
 	cx.fill()
 
-	// check mark
-	if (on) {
+	// check mark or question mark
+	if (on || is_null) {
 		cx.beginPath()
 		cx.save()
 		cx.translate(x, y)
 		cx.translate(0.5, 0.5)
 		cx.scale(dpr, dpr)
-		cx.moveTo( 3,  8)
-		cx.lineTo( 5, 10)
-		cx.lineTo(11,  3)
-		cx.strokeStyle = color_css('thumb',
-			readonly ? STATE_READONLY : hs ? STATE_HOVER : 0)
+		if (on) { // draw a check shape
+			cx.moveTo( 3,  8)
+			cx.lineTo( 5, 10)
+			cx.lineTo(11,  3)
+		} else if (is_null) { // draw a "?"
+			cx.moveTo(4, 5)
+			cx.bezierCurveTo(4, 2, 10, 2, 10, 5)
+			cx.bezierCurveTo(10, 7, 7, 7, 7, 9)
+		}
+		let color = color_css('thumb',
+			(readonly ? STATE_READONLY : 0)
+			| (hs ? STATE_HOVER : 0))
+		cx.strokeStyle = color
+		cx.fillStyle = color
 		cx.lineWidth = 2
 		cx.lineCap = 'round'
 		cx.lineJoin = 'round'
 		set_shadow('thumb')
 		cx.stroke()
+		if (is_null) { // draw the "?" dot
+			cx.beginPath()
+			cx.arc(7, 11, 1, 0, 2 * PI)
+			cx.fill()
+		}
 		cx.restore()
 	}
 
@@ -8017,20 +8034,27 @@ ui.end_dropdown = function(id) {
 const chevron_points = [0.5, 3.5, 5, 8, 9.5, 3.5]
 
 function draw_value_row(value, field, row_id,
-	pad, chevron_w, max_w, w
+	pad, chevron_w, max_w, w, align
 ) {
 	ui.stack(row_id ?? '', 0)
 		ui.p(pad)
 		ui.h(0, pad)
+			if (align == 'r') {
+				ui.stack('', 0, null, null, chevron_w)
+					ui.polyline('', chevron_points, false, null, null, 'label')
+				ui.end_stack()
+			}
 			ui.text('', value == null ? ''
 				: field ? field.to_text(value) : value,
-				1, 'l', 'c',
+				1, align, 'c',
 				max_w ?? ui.em_input_max(),
 				w == -1 ? w : (w ?? ui.em_input()) - chevron_w,
 			)
-			ui.stack('', 0, null, null, chevron_w)
-				ui.polyline('', chevron_points, false, null, null, 'label')
-			ui.end_stack()
+			if (align == 'l') {
+				ui.stack('', 0, null, null, chevron_w)
+					ui.polyline('', chevron_points, false, null, null, 'label')
+				ui.end_stack()
+			}
 		ui.end_h()
 	ui.end_stack()
 }
@@ -8074,13 +8098,15 @@ function list_dropdown_update(id, s) {
 	}
 }
 
-ui.list_dropdown = function(id, items, value, field, fr, max_w, w) {
+ui.list_dropdown = function(id, items, value, field, fr, align, max_w, w) {
 
 	let picker_id = id+'.picker'
 	let value_id = id+'.value'
 
 	let pad = ui.sp()
 	let chevron_w = ui.em(1)
+	align = align ?? 'l'
+	assert(align == 'l' || align == 'r', 'invalid list dropdown align')
 
 	ui.stack('', fr, 's', 's')
 
@@ -8102,21 +8128,23 @@ ui.list_dropdown = function(id, items, value, field, fr, max_w, w) {
 		ui.color('text', state)
 		draw_value_row(value, field, null, pad, chevron_w,
 			max_w ?? ui.em_input_max(),
-			w)
+			w, align)
 
-	ui.dropdown_picker(id)
+	ui.dropdown_picker(id, null, align == 'r' ? ']s' : 's')
 
 		if (open) {
 			ui.v()
 				ui.color('text', state)
 				draw_value_row(value, field, value_id,
-					pad, chevron_w, max_w)
+					pad, chevron_w, max_w, null, align)
 				ui.scrollbox(picker_id+'.sb', 1, 'contain', 'auto', 's', 's')
 					ui.list(picker_id, items, value, field, 0,
-						's', 's', null, 'c', 0,
+						's', 's', align, 'c', 0,
 						max_w ?? ui.em_input_max_popup(),
 						null,
-						pad, pad * 2 + chevron_w, pad)
+						align == 'r' ? pad * 2 + chevron_w : pad,
+						align == 'l' ? pad * 2 + chevron_w : pad,
+						pad)
 				ui.end_scrollbox()
 				ui.resizer(id+'.resizer', null, ui.em(16), 'y')
 			ui.end_v()
@@ -8131,12 +8159,14 @@ ui.list_dropdown = function(id, items, value, field, fr, max_w, w) {
 
 // dropdowns have fixed w by default that aligns with inputs.
 // these inline dropdowns have dynamic width for use inline inside text.
-ui.list_dropdown_inline = function(id, items, value, field, fr, max_w) {
-	return ui.list_dropdown(id, items, value, field, fr, max_w, -1)
+ui.list_dropdown_inline = function(id, items, value, field,
+	fr, align, max_w) {
+	return ui.list_dropdown(id, items, value, field, fr, align, max_w, -1)
 }
 
-ui.enum_input = function(id, value, field, fr, max_w, w) {
-	return ui.list_dropdown(id, field.enum_values, value, field, fr, max_w, w)
+ui.enum_input = function(id, value, field, fr, align, max_w, w) {
+	return ui.list_dropdown(id, field.enum_values, value, field,
+		fr, align, max_w, w)
 }
 
 ui.enum_toggle = function(id, value, field, fr, align, valign, min_w) {

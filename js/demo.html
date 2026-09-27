@@ -699,8 +699,8 @@ ui.end_hsplit()
 }
 
 {
-let input1_text = 'Hello1 Hello1'
-let input2_text = 'Hello2 Hello2'
+let input1_text
+let input2_text
 let dd_items = [
 	'item 1',
 	'item 2 that is a lot longer than the others',
@@ -708,18 +708,18 @@ let dd_items = [
 	'item 4 that is so damn long even the popup will clip it before '
 	+'it looks ridiculous',
 ]
-let dd1_value = dd_items[1]
-let dd2_value = dd_items[0]
-let enum_toggle_value = 'one'
-let radio_sel_i = 0
-let toggle1_on = false
-let toggle2_on = true
-let cb1_checked = false
-let cb2_checked = true
-let slider1_v = 3000
-let num_slider1_value = 2500
-let date_input1_v = parse_date('2026-03-14', 'SQL')
-let date_input3_v = parse_date('2026-09-17 13:45:00', 'SQL')
+let dd1_value
+let dd2_value
+let enum_toggle_value
+let radio_sel_i
+let toggle1_on
+let toggle2_on
+let cb1_checked
+let cb2_checked
+let slider1_v
+let num_slider1_value
+let date_input1_v
+let date_input3_v
 let input1_field = ui.create_field()
 let input2_field = ui.create_field()
 let date_input1_field = ui.create_field({type: 'date'})
@@ -748,7 +748,7 @@ let slider1_field = ui.create_field({
 	decimals: 2,
 	slider_markers: false,
 })
-let color_input1_v = '#1e90ff'
+let color_input1_v
 let color_input1_field = ui.create_field({type: 'color'})
 let cb1_field = ui.create_field({type: 'bool'})
 let cb2_field = ui.create_field({type: 'bool'})
@@ -770,12 +770,53 @@ let input_controls_fields = [
 	toggle2_field,
 ]
 let input_controls_readonly = false
+function set_input_controls_values(value) {
+	input1_text = value
+	input2_text = value
+	dd1_value = value
+	dd2_value = value
+	enum_toggle_value = value
+	radio_sel_i = value
+	toggle1_on = value
+	toggle2_on = value
+	cb1_checked = value
+	cb2_checked = value
+	slider1_v = value
+	num_slider1_value = value
+	date_input1_v = value
+	date_input3_v = value
+	color_input1_v = value
+}
+function reset_input_controls_values() {
+	input1_text = 'Hello1 Hello1'
+	input2_text = 'Hello2 Hello2'
+	dd1_value = dd_items[1]
+	dd2_value = dd_items[0]
+	enum_toggle_value = 'one'
+	radio_sel_i = 0
+	toggle1_on = false
+	toggle2_on = true
+	cb1_checked = false
+	cb2_checked = true
+	slider1_v = 3000
+	num_slider1_value = 2500
+	date_input1_v = parse_date('2026-03-14', 'SQL')
+	date_input3_v = parse_date('2026-09-17 13:45:00', 'SQL')
+	color_input1_v = '#1e90ff'
+}
+reset_input_controls_values()
 demos.input_controls = function() {
 ui.v_aligned(0, ui.sp2(), 'c', 'c')
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('input_controls_readonly', 'Readonly', 0)
-		input_controls_readonly = ui.checkbox(
-			'input_controls_readonly', input_controls_readonly, null, 0, 'l')
+		ui.h(0, ui.sp())
+			input_controls_readonly = ui.checkbox(
+				'input_controls_readonly', input_controls_readonly, null, 0, 'l')
+			if (ui.button('input_controls_reset', 'Reset'))
+				reset_input_controls_values()
+			if (ui.button('input_controls_set_null', 'Set null'))
+				set_input_controls_values(null)
+		ui.end_h()
 	ui.end_h()
 	for (let field of input_controls_fields)
 		field.readonly = input_controls_readonly
@@ -794,7 +835,7 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 	ui.end_h()
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('dd2', 'Dropdown R', 0)
-		dd2_value = ui.enum_input('dd2', dd2_value, enum_input_field)
+		dd2_value = ui.enum_input('dd2', dd2_value, enum_input_field, 1, 'r')
 	ui.end_h()
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('enum_toggle1', 'Enum toggle', 0)
@@ -870,10 +911,12 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 	ui.h(0, ui.sp2())
 		ui.button('btn1', 'Button',
 			0, 'l', 'c', 0, 0, null, input_controls_readonly)
-		ui.primary_button('btn2', 'Primary',
-			0, 'l', 'c', 0, 0, input_controls_readonly)
-		ui.icon_button('btn_plus', 'plus', null,
-			0, 'l', 'c', 0, 0, null, input_controls_readonly)
+		ui.h(0, ui.sp())
+			ui.primary_button('btn2', 'Primary',
+				0, 'l', 'c', 0, 0, input_controls_readonly)
+			ui.icon_button('btn_plus', 'plus', 'Icon',
+				0, 'l', 'c', 0, 0, null, input_controls_readonly)
+		ui.end_h()
 	ui.end_h()
 
 ui.end_v_aligned()
