@@ -7988,11 +7988,11 @@ ui.dropdown = function(id, update, want_open) {
 	return open
 }
 
-ui.dropdown_picker = function(id, side, align) {
+ui.dropdown_picker = function(id, side, align, yoffset) {
 	ui.end_stack()
 	if (ui.state_of(id, 'open')) {
 		ui.popup(id+'.popup', 'open', null, side ?? 'it', align ?? 's',
-			0, 0, 'constrain change_side solid')
+			0, 0, 'constrain change_side solid', null, null, yoffset)
 		ui.shadow('picker')
 		ui.bb('input') // background only: end_dropdown() draws the border
 		ui.focus_group(false, null, id+'.picker')
@@ -8014,7 +8014,7 @@ ui.end_dropdown = function(id) {
 
 //// LIST_DROPDOWN -----------------------------------------------------------
 
-const chevron_points = [0.5, 3.5, 7, 10, 13.5, 3.5]
+const chevron_points = [0.5, 3.5, 5, 8, 9.5, 3.5]
 
 function draw_value_row(value, field, row_id,
 	pad, chevron_w, max_w, w
@@ -8525,7 +8525,7 @@ ui.date_input = function(id, v, field, fr, align, valign, min_w) {
 			ui.end_h()
 		ui.end_stack()
 
-	ui.dropdown_picker(id, 'b', 'cs')
+	ui.dropdown_picker(id, 'b', 'cs', ui.sp05())
 
 		if (open) {
 			let sel_day = isnum(value) ? day(value) : null
@@ -8837,12 +8837,12 @@ function gradient_slider(draw_gradient, name, max_value, key_step,
 			let value_p = slider_p(
 				is_slider_value(value) ? value : s.valid_value)
 
-			ui.h(fr ?? 0, ui.sp1(), align, valign,
-				min_w, min_h ?? ui.em(1.5))
+			ui.h(fr ?? 0, ui.sp1(), align, valign, min_w, min_h)
 				ui.focus_group(false, null, id)
 					ui.focusable(id)
 					ui.stack()
-						let i = ui_cmd_box_begin(cmd, null, null, null, ui.em(6), 0)
+						let i = ui_cmd_box_begin(cmd, null, null, 'c',
+							ui.em(6), max(min_h ?? 0, ui.em(1.5)))
 						a[n++] = id
 						a[n++] = hue
 						a[n++] = sat
@@ -8988,8 +8988,7 @@ ui.color_picker = function(id, hex, field) {
 		ui.end_h()
 		ui.h(0, ui.sp1(), 's', 'c')
 			ui.label(lum_id, 'Luminosity', 0)
-			ui.lum_slider(lum_id, lum_value,
-				gradient_hue, gradient_sat, 1)
+			ui.lum_slider(lum_id, lum_value, gradient_hue, gradient_sat, 1)
 		ui.end_h()
 		ui.h(0, ui.sp1(), 's', 'c')
 			ui.label(hex_id, 'HEX', 0)
@@ -9048,7 +9047,7 @@ ui.color_input = function(id, value, field, fr, min_w) {
 				ui.bb(':'+value)
 		ui.end_stack()
 
-	ui.dropdown_picker(id, 'b')
+	ui.dropdown_picker(id, 'b', '[', ui.sp05())
 
 		if (open) {
 			ui.p(ui.sp2())
