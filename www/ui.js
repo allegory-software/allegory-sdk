@@ -7016,6 +7016,10 @@ function list_update(id, s) {
 			items)
 		value = item_i != null ? items[item_i] : null
 	}
+	if (ui.focused(id) && ui.keydown('delete')) {
+		value = null
+		item_changed = 'key'
+	}
 	let i = 0
 	for (let item of items) {
 		let item_id = id+'.'+i
