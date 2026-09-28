@@ -716,6 +716,7 @@ let slider1_v
 let num_slider1_value
 let date_input1_v
 let date_input3_v
+let lookup1_value
 let input1_field = ui.create_field()
 let input2_field = ui.create_field()
 let password1_field = ui.create_field({
@@ -723,12 +724,21 @@ let password1_field = ui.create_field({
 	min_len: 8,
 	conditions: 'lower upper digit symbol',
 })
+let lookup1_field = ui.create_field({
+	type: 'number',
+	lookup_rowset_name: 'grower',
+	display_col: 'name',
+})
 let date_input1_field = ui.create_field({type: 'date'})
 let date_input3_field = ui.create_field({type: 'datetime'})
 let enum_input_field = ui.create_field({type: 'enum', enum_values: dd_items})
 let enum_toggle_field = ui.create_field({
 	type: 'enum',
 	enum_values: 'one two three',
+})
+let radio_list1_field = ui.create_field({
+	type: 'enum',
+	enum_values: radio_items,
 })
 let num_slider1_field = ui.create_field({
 	type: 'number',
@@ -760,10 +770,12 @@ let input_controls_fields = [
 	input1_field,
 	input2_field,
 	password1_field,
+	lookup1_field,
 	date_input1_field,
 	date_input3_field,
 	enum_input_field,
 	enum_toggle_field,
+	radio_list1_field,
 	color_input1_field,
 	num_slider1_field,
 	slider1_field,
@@ -777,6 +789,7 @@ function set_input_controls_values(value) {
 	input1_text = value
 	input2_text = value
 	password1_text = value
+	lookup1_value = value
 	dd1_value = value
 	dd2_value = value
 	enum_toggle_value = value
@@ -795,6 +808,7 @@ function reset_input_controls_values() {
 	input1_text = 'Hello1 Hello1'
 	input2_text = 'Hello2 Hello2'
 	password1_text = 'secret'
+	lookup1_value = 2
 	dd1_value = dd_items[1]
 	dd2_value = dd_items[0]
 	enum_toggle_value = 'one'
@@ -842,6 +856,11 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 	ui.h(0, ui.sp2(), 'l')
 		ui.box()
 		ui.error_label('password1', 'all')
+	ui.end_h()
+	ui.h(0, ui.sp2(), 'l')
+		ui.label('lookup1', 'Lookup', 0)
+		lookup1_value = ui.lookup_input('lookup1', lookup1_value,
+			lookup1_field)
 	ui.end_h()
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('dd1', 'Dropdown', 0)
@@ -915,7 +934,8 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 	ui.end_h()
 	ui.h(0, ui.sp4(), 'l')
 		ui.text('', 'Radio', 0, 'l', 't')
-		radio_value = ui.radio_list('radio_list1', radio_items, radio_value)
+		radio_value = ui.radio_list('radio_list1', radio_items, radio_value,
+			radio_list1_field)
 	ui.end_h()
 	ui.h(0, ui.sp2())
 		ui.button('btn1', 'Button',

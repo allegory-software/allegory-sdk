@@ -1405,7 +1405,7 @@ ui.stateful_widget = function(create) {
 		} else {
 			e = s.e
 		}
-		e.build.apply(e, arguments)
+		return e.build.apply(e, arguments)
 	}
 }
 
@@ -8025,17 +8025,22 @@ ui.dropdown_picked = function(id) {
 // dropdown opened or closed. responds to ui.set_dropdown_open() and to a
 // click on the picker's id+'.pick' and id+'.cancel' buttons. sets
 // ui.state(id).open.
-ui.dropdown_update = function(id, s) {
+ui.dropdown_update = function(id, s, disabled) {
+
+	s.opened = false
+	s.closed = false
+	s.picked = false
+
+	if (disabled) {
+		set_dropdown_open(id, s, false)
+		return
+	}
 
 	let picker_id = id+'.picker'
 	let popup_id = id+'.popup'
 	let pick_button_id = id+'.pick'
 	let cancel_button_id = id+'.cancel'
 	let open = s.open
-
-	s.opened = false
-	s.closed = false
-	s.picked = false
 
 	if (clicked(id+'.label'))
 		ui.focus(id)
@@ -8138,27 +8143,30 @@ function draw_value_row(value, field, row_id,
 		ui.end_h()
 	ui.end_stack()
 }
+ui.draw_value_row = draw_value_row
 
 function list_dropdown_update(id, s) {
 
 	s.input_value = undefined
 	if (ui.focused(id) && ui.keydown('ctrl c'))
 		copy_input_value(s.field, s.value)
-	if (s.field?.readonly)
-		return
+	let readonly = s.field?.readonly
 
 	let picker_id = id+'.picker'
 	let items = s.items
 
-	ui.dropdown_update(id, s)
+	ui.dropdown_update(id, s, readonly)
 
-	if (clicked(id+'.value'))
+	if (!readonly && clicked(id+'.value'))
 		set_dropdown_open(id, s, !s.open, true)
 
 	if (s.opened)
 		s.revert_value = s.value
 	else if (s.closed)
 		s.input_value = s.picked ? ui.value(picker_id) : s.revert_value
+
+	if (readonly)
+		return
 
 	let picker_value = ui.input_value(picker_id)
 	if (picker_value !== undefined)
@@ -8557,22 +8565,21 @@ ui.calendar = function(id, sel_day, ranges, fr, align, valign, min_w, min_h) {
 function date_input_update(id, s) {
 
 	s.input_value = undefined
-	if (s.field.readonly)
-		return
+	let readonly = s.field.readonly
 
 	let picker_id = id+'.picker'
 	let input_id = id+'.input'
 
-	ui.dropdown_update(id, s)
+	ui.dropdown_update(id, s, readonly)
 
-	if (ui.focused(input_id)
-		&& (ui.keydown('f2') || ui.keydown('enter'))) {
-		ui.set_dropdown_open(id, !ui.dropdown_open(id))
-		ui.capture_keys()
-	} else if (ui.focused(input_id) && ui.keydown('escape')
-		&& ui.dropdown_open(id)) {
-		ui.set_dropdown_open(id, false)
-		ui.capture_keys()
+	if (!readonly && ui.focused(input_id)) {
+		if (ui.keydown('f2') || ui.keydown('enter')) {
+			ui.set_dropdown_open(id, !ui.dropdown_open(id))
+			ui.capture_keys()
+		} else if (ui.keydown('escape') && ui.dropdown_open(id)) {
+			ui.set_dropdown_open(id, false)
+			ui.capture_keys()
+		}
 	}
 
 	if (ui.dropdown_opened(id))
@@ -8580,6 +8587,9 @@ function date_input_update(id, s) {
 	else if (ui.dropdown_closed(id))
 		s.input_value = ui.dropdown_picked(id)
 			? ui.value(picker_id) : s.revert_value
+
+	if (readonly)
+		return
 
 	let value = ui.input_value(input_id)
 	if (value !== undefined)
@@ -9115,10 +9125,9 @@ function color_input_update(id, s) {
 	s.input_value = undefined
 	if (ui.focused(id) && ui.keydown('ctrl c'))
 		copy_input_value(s.field, s.value)
-	if (s.field.readonly)
-		return
+	let readonly = s.field.readonly
 
-	ui.dropdown_update(id, s)
+	ui.dropdown_update(id, s, readonly)
 
 	let picker_id = id+'.picker'
 	if (ui.dropdown_opened(id)) {
@@ -9126,13 +9135,13 @@ function color_input_update(id, s) {
 	} else if (ui.dropdown_closed(id)) {
 		s.input_value = ui.dropdown_picked(id)
 			? ui.value(picker_id) : s.revert_value
-	} else {
+	} else if (!readonly) {
 		let picker_value = ui.input_value(picker_id)
 		if (picker_value !== undefined)
 			s.input_value = picker_value
 	}
 
-	if (ui.focused(id) && ui.keydown('delete'))
+	if (!readonly && ui.focused(id) && ui.keydown('delete'))
 		s.input_value = null
 }
 ui.color_input = function(id, value, field, fr, min_w) {

@@ -687,7 +687,10 @@ function init(id, e) {
 
 	e.update = function() {
 
-		ui.state(id).picked = false
+		let s = ui.state(id)
+		s.picked = false
+		s.input_value = undefined
+		let has_input = false
 
 		if (cell_h == null)
 			return
@@ -1114,8 +1117,9 @@ function init(id, e) {
 				invert_selection: ctrl,
 				input: e,
 			})) {
+				has_input = true
 				if (e.is_picker && !hit_indent)
-					ui.state(id).picked = true
+					s.picked = true
 				if (click)
 					e.do_cell_click(row, field, {input: e})
 				// TODO:
@@ -1165,7 +1169,8 @@ function init(id, e) {
 				all = ctrl
 			}
 
-			if (move)
+			if (move) {
+				has_input = true
 				if (e.focus_next_cell(cols, {
 					sel_i: all ? 0 : cols > 0 ? 0 : -1,
 					sel_len: all ? 1/0 : 0,
@@ -1175,6 +1180,7 @@ function init(id, e) {
 					input: e,
 				}))
 					return false
+			}
 
 		}
 
@@ -1223,7 +1229,8 @@ function init(id, e) {
 
 			let [sel_i, sel_len] = e.editing && horiz ? edit_selection() : [0, 1/0]
 
-			if (move)
+			if (move) {
+				has_input = true
 				if (e.focus_cell(true, true, rows, 0, {
 					sel_i: sel_i,
 					sel_len: sel_len,
@@ -1231,6 +1238,7 @@ function init(id, e) {
 					input: e,
 				}))
 					return false
+			}
 
 		}
 
@@ -1246,10 +1254,12 @@ function init(id, e) {
 		// Enter: toggle edit mode, and navigate on exit
 		if (keydown('enter')) {
 			if (e.quicksearch_text) {
+				has_input = true
 				e.quicksearch(e.quicksearch_text, focused_row, shift ? -1 : 1)
 				return false
 			} else if (e.is_picker) {
-				ui.state(id).picked = true
+				has_input = true
+				s.picked = true
 				return false
 			} else if (!e.editing) {
 				e.enter_edit({open_popup: !ctrl})
@@ -1271,7 +1281,7 @@ function init(id, e) {
 					e.exit_edit({input: e, cancel: true})
 					return false
 				}
-			} else if (focused_row && focused_field) {
+			} else if (!e.is_picker && focused_row && focused_field) {
 				let row = focused_row
 				if (row.is_new && !e.is_row_user_modified(row, true))
 					e.remove_row(row, {input: e, refocus: true})
@@ -1301,6 +1311,11 @@ function init(id, e) {
 		}
 
 		if (keydown('delete')) {
+
+			if (e.is_picker) {
+				s.input_value = null
+				return false
+			}
 
 			// delete on an already-empty cell leaves edit mode. the key is
 			// spent on that, so it must not go on to delete rows as well.
@@ -1337,8 +1352,10 @@ function init(id, e) {
 		}
 
 		if (!e.editing && keydown('backspace')) {
-			if (e.quicksearch_text)
+			if (e.quicksearch_text) {
+				has_input = true
 				e.quicksearch(e.quicksearch_text.slice(0, -1), focused_row)
+			}
 			return false
 		}
 
@@ -1366,6 +1383,7 @@ function init(id, e) {
 		// printable chars search. while editing they belong to the editor.
 		let typed = focused && !e.editing && ui.key_chars()
 		if (typed) {
+			has_input = true
 			e.quicksearch(e.quicksearch_text + typed, focused_row)
 			return false
 		}
@@ -1374,6 +1392,9 @@ function init(id, e) {
 			help_open = keydown('f1') && !help_open
 			ui.capture_keys()
 		}
+
+		if (e.is_picker && has_input)
+			s.input_value = e.focused_row ?? null
 
 		if (!ui.window_focused() || ui.window_focusing)
 			e.exit_edit()
@@ -1415,6 +1436,16 @@ function init(id, e) {
 	}
 
 	e.build = function(id, opt, fr, align, valign, min_w, min_h) {
+
+		let value
+		if (e.is_picker) {
+			value = ui.set_value(ui.state(id), opt.value)
+			let ri = value ? e.row_index(value) : false
+			if (e.rows[ri] != value)
+				ri = false
+			if (e.focused_row != e.rows[ri])
+				e.focus_cell(ri, true)
+		}
 
 		// set layout vars
 
@@ -1648,6 +1679,8 @@ function init(id, e) {
 
 		ui.end_v()
 		ui.end_stack()
+
+		return value
 
 	}
 
