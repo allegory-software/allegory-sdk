@@ -4605,17 +4605,10 @@ Dropdown editors:
 
 // icons drawn by field types, not by any one widget, so they live here
 // rather than in the grid's own icon aliases.
-ui.icon_def('check'        , 'tabler', '\uea5e')
-ui.icon_def('x'            , 'tabler', '\ueb55')
 ui.icon_def('calendar'     , 'tabler', '\uea53')
 ui.icon_def('map_pin'      , 'tabler', '\ueae8')
 ui.icon_def('box_unchecked', 'tabler', '\ueb2c')
 ui.icon_def('box_checked'  , 'tabler_filled', '\uf76d')
-
-ui.color_def('light', 'error-text', 'normal',   0, 0.85, 0.45)
-ui.color_def('dark' , 'error-text', 'normal',   0, 0.85, 0.65)
-ui.color_def('light', 'modified', 'normal', 120, 1.00, 0.35)
-ui.color_def('dark' , 'modified', 'normal', 120, 0.59, 0.65)
 
 ui.all_field_types.focus_editor = function(id, sel_i, sel_len) {
 	ui.focus(id, true)
@@ -4638,14 +4631,6 @@ ui.all_field_types.build_editor = function(id, v, pad_l, pad_r, h) {
 	ui.p(pad_l, 0, pad_r, 0)
 	ui.text_editable(id, v, 0, this.align, 'c', null, null, null, this)
 }
-
-// builds the control under `id`; nav_input reads what the user made of it
-// with ui.input_value(id).
-ui.all_field_types.build_input = function(id, v, readonly, min_w) {
-	ui.input(id, v, readonly ? readonly_text_field : this, 1, min_w)
-}
-
-let readonly_text_field = ui.create_field({readonly: true})
 
 ui.all_field_types.fixed_width = 0
 
@@ -4737,10 +4722,6 @@ date.dropdown_picked = function(id) {
 	return ui.dropdown_picked(id+'.calendar')
 }
 
-date.build_input = function(id, v, readonly, min_w) {
-	ui.date_input(id, v, this, 1, this.align, 'c', min_w)
-}
-
 date.build_editor = function(id, v, pad_l, pad_r, h) {
 	let calendar_id = id+'.calendar'
 	let picker_id = calendar_id+'.picker'
@@ -4795,10 +4776,6 @@ date.editor_value = function(id, v) {
 }
 
 let bool = ui.field_types.bool
-
-bool.build_input = function(id, v, readonly, min_w) {
-	ui.checkbox(id, v, this, 0, this.align ?? 'c', 'c', min_w)
-}
 
 bool.build_null = function(mode) {
 	if (mode) {
@@ -4988,10 +4965,6 @@ color.build = function(v, mode) {
 	ui.end_stack()
 }
 
-color.build_input = function(id, v, readonly, min_w) {
-	ui.color_input(id, v, this, 1, min_w)
-}
-
 color.edits_in_popup = true
 
 color.editor_value = function(id, v) {
@@ -5094,7 +5067,7 @@ function lookup_input_update(id, s) {
 	s.input_value = undefined
 	let field = s.field
 	let ln = s.lookup_nav
-	let disabled = field.readonly || !can_pick_lookup_val(field, ln)
+	let disabled = s.readonly || !can_pick_lookup_val(field, ln)
 
 	ui.dropdown_update(id, s, disabled)
 
@@ -5109,7 +5082,8 @@ function lookup_input_update(id, s) {
 				? ln.cell_val(ln_row, lookup_val_field(field, ln)) : null
 	}
 
-	if (!disabled && ui.focused(id) && ui.keydown('delete'))
+	if (!disabled && !field.not_null && ui.focused(id)
+		&& ui.keydown('delete'))
 		s.input_value = null
 }
 
@@ -5117,7 +5091,7 @@ function free_lookup_input(s) {
 	s.lookup_nav.unref()
 }
 
-ui.lookup_input = function(id, value, field, fr, min_w) {
+ui.lookup_input = function(id, value, field, fr, min_w, readonly) {
 	let picker_id = id+'.picker'
 	let s = ui.state(id)
 	if (!s.lookup_nav) {
@@ -5125,7 +5099,9 @@ ui.lookup_input = function(id, value, field, fr, min_w) {
 		s.lookup_nav.ref()
 		ui.on_free(id, free_lookup_input)
 	}
+	readonly ??= field.readonly
 	s.field = field
+	s.readonly = readonly
 	s = ui.state(id, lookup_input_update)
 	let ln = s.lookup_nav
 
@@ -5157,9 +5133,9 @@ ui.lookup_input = function(id, value, field, fr, min_w) {
 	if (text != null && ui.focused(id) && ui.keydown('ctrl c'))
 		copy_to_clipboard(text)
 
-		let readonly = field.readonly || !can_pick_lookup_val(field, ln)
+		let disabled = readonly || !can_pick_lookup_val(field, ln)
 		let focused = ui.focused(id)
-		let state = readonly
+		let state = disabled
 			? (focused ? 'readonly focused' : 'readonly')
 			: (focused ? 'focused' : null)
 		ui.bb('input', state, 1, 'intense', state)
@@ -5179,73 +5155,6 @@ ui.lookup_input = function(id, value, field, fr, min_w) {
 	ui.end_stack()
 
 	return value
-}
-
-//// NAV_INPUT ---------------------------------------------------------------
-
-ui.nav_input = function(id, opt, fr, align, valign, min_w) {
-
-	let e = opt.nav
-	let field = e && e.optfld(opt.col)
-	let row = field ? e.focused_row : null
-
-	let v = row ? e.cell_input_val(row, field) : null
-
-	let escape = row && ui.focus_inside(id+'.focus_group') && ui.keydown('escape')
-	let picker_closed = escape && ui.dropdown_closed(id)
-	if (escape && !picker_closed) {
-		e.revert_cell(row, field, {input: e})
-		v = e.cell_input_val(row, field)
-		ui.capture_keys()
-	}
-	let has_error = row && e.cell_has_errors(row, field)
-	let is_modified = row && e.cell_modified(row, field)
-
-	// with no row there's no value to show: an empty text box stands in for
-	// whatever control the field type would build.
-	let build_input = row ? field.build_input : ui.all_field_types.build_input
-
-	ui.h(fr, ui.sp05(), align ?? 's', valign ?? 's')
-	let box_i = ui.stack('', 1, 's', 's')
-
-	if (opt.pad_l != null || opt.pad_r != null)
-		ui.p(opt.pad_l ?? 0, 0, opt.pad_r ?? 0, 0)
-
-		ui.focus_group(null, null, id+'.focus_group')
-		build_input.call(field ?? ui.all_field_types,
-			id, v, !row, min_w)
-		let v1 = ui.input_value(id)
-		if (row && v1 !== undefined)
-			e.set_cell_val(row, field, v1, {input: e})
-		ui.end_focus_group()
-
-		if (row && has_error && ui.focused(id)) {
-			ui.p(ui.sp2(), ui.sp())
-			ui.popup(id+'.error', 'tooltip', box_i, 'b', 'l',
-				0, 0, 'change_side constrain')
-				ui.bb_tooltip('error', null, 'error', null, ui.sp05())
-				ui.v(0, ui.sp05())
-					for (let err of e.cell_errors(row, field))
-						if (err.failed)
-							ui.text('', err.error, 0, 'l', 'c')
-				ui.end_v()
-			ui.end_popup()
-		}
-
-	ui.end_stack()
-	ui.pl(ui.sp05())
-	if (has_error) {
-		ui.color('error-text')
-		ui.icon('', 'x', 0, 'c', 'c', ui.em(1))
-	} else if (is_modified) {
-		ui.color('modified')
-		ui.icon('', 'check', 0, 'c', 'c', ui.em(1))
-	} else {
-		ui.box(0, ui.em(1))
-	}
-	ui.end_h()
-
-	return row ? e.cell_input_val(row, field) : null
 }
 
 //// RELOAD PUSH NOTIFICATIONS -----------------------------------------------

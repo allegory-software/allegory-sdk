@@ -16,11 +16,15 @@ INPUTS
 - date+time/period/range/multi-range inputs
 - tags-input
 - textarea input
+- LATER: label inside box / no_box arg for composed boxes
+	- problem: for dropdown picker to be anchored such that value row
+	  aligns with picker's, question is who does the padding,
+	  the box or the dropdown?
+	- problem: passing state between API fragment (input_box()/end_input_box())
 
 
 NAV INPUTS
 ------------------------------------------------------------------------------
-- validation
 -
 
 

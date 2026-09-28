@@ -23,7 +23,6 @@ Field attributes:
 	validation:
 
 		not_null       : don't allow null (false).
-		required       : don't allow null (false).
 		maxlen         : max text length (256).
 
 		min            : min value (0).
@@ -256,7 +255,7 @@ function add_scalar_rules(type) {
 ui.add_validation_rule({
 	name     : 'required',
 	check_null: true,
-	applies  : (e) => e.not_null || e.required,
+	applies  : (e) => e.not_null,
 	validate : (e, v) => v != null || e.has_server_default,
 	error    : (e, v) => S('validation_empty_error', '{0} is required', e.label),
 	rule     : (e) => S('validation_empty_rule'    , '{0} cannot be empty', e.label),
@@ -470,13 +469,14 @@ let field_types      = ui.field_types      = {} // {TYPE->{K: V}}
 let all_field_types  = ui.all_field_types  = {} // {K: V}
 assign(all_field_types, {
 	type: 'text',
+	control: 'input',
+	build_input: ui.build_input,
 	default: null,
 	w: 100,
 	min_w: 22,
 	max_w: 2000,
 	align: 'left',
 	not_null: false,
-	required: false,
 	sortable: true,
 	movable: true,
 	groupable: true,
@@ -504,7 +504,7 @@ field_types.text = {}
 
 //// PASSWORD ----------------------------------------------------------------
 
-field_types.password = {input_type: 'password'}
+field_types.password = {input_type: 'password', control: 'password_input'}
 
 //// NUMBER ------------------------------------------------------------------
 
@@ -593,6 +593,7 @@ count.to_input = number.to_text
 //// DATE --------------------------------------------------------------------
 
 let date = {
+	control: 'date_input',
 	align: 'right',
 	is_time: true,
 	w: 80,
@@ -686,7 +687,7 @@ d.to_text = function(v) {
 // no editor: the value is toggled by click and space, and the cell keeps
 // building itself while an edit is carried through it.
 let bool = {align: 'center', min_w: 20, w: 20, is_bool: true,
-	builds_text: false, has_editor: false}
+	builds_text: false, has_editor: false, control: 'checkbox'}
 field_types.bool = bool
 
 ui.add_validation_rule({
@@ -699,7 +700,7 @@ ui.add_validation_rule({
 		'{0} must be a boolean', e.label),
 })
 
-let enm = {}
+let enm = {control: 'enum_input'}
 field_types.enum = enm
 
 enm.to_text = function(v) {
@@ -720,7 +721,7 @@ tags.to_text = function(v) {
 
 //// COLOR -------------------------------------------------------------------
 
-let color = {is_color: true}
+let color = {is_color: true, control: 'color_input'}
 field_types.color = color
 color.builds_text = false
 

@@ -28,6 +28,8 @@ CONTAINERS
 	ui.sb|scrollbox  (id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy, x_id, y_id)
 	ui.popup         (id, layer, target_i, side, align, min_w, min_h, flags, z_index, ox, oy)
 	ui.{h|v}split    (id, size, unit, fixed_side, split_fr, gap, align, valign, min_w, min_h)
+	ui.hvsplit       (hv, id, size, unit, fixed_side, split_fr, gap, align,
+	                  valign, min_w, min_h)
 	ui.toolbox       (id, title, align, valign, x0, y0, target_i)
 	ui.frame         (id, on_measure, on_build, fr, align, valign, min_w, min_h, ...args)
 
@@ -38,29 +40,31 @@ INPUT
 	ui.[primary_|bare_]icon_button
 	                   (id, icon, [s], fr, align, valign, min_w, min_h, style, readonly)
 	ui.label           (for_id, s, fr, align, valign)
-	ui.error_label     (for_id, ['first_error'|'all_errors'|'all_checked'],
-	                    fr, align, valign)
-	ui.input           (id, v, [field], fr, w, [text_align], [no_box]) -> v
-	ui.password_input  (id, v, [field], fr, w, [text_align], [no_box]) -> v
-	ui.list_dropdown   (id, items, value, [field], fr, align, max_w, min_w) -> value
-	ui.enum_input      (id, value, field, fr, align, max_w, min_w) -> value
-	ui.enum_toggle     (id, value, field, fr, align, valign, min_w) -> value
-	ui.toggle          (id, on, [field], fr, align, valign, min_w)
-	ui.checkbox        (id, on, [field], fr, align, valign, min_w)
-	ui.radio_group     (id, value, [field]) -> value
+	ui.error_label     (for_id, 'first_error'|'all_errors'|'all_checked', fr, align, valign)
+	ui.input           (id, v, field, fr, w, text_align, no_box, readonly) -> v
+	ui.password_input  (id, v, field, fr, w, text_align, no_box, readonly) -> v
+	ui.list_dropdown   (id, items, value, field, fr, align, max_w, min_w, readonly) -> value
+	ui.enum_input      (id, value, field, fr, align, max_w, min_w, readonly) -> value
+	ui.enum_toggle     (id, value, field, fr, align, valign, min_w, readonly) -> value
+	ui.toggle          (id, on, field, fr, align, valign, min_w, readonly) -> on
+	ui.checkbox        (id, on, field, fr, align, valign, min_w, readonly) -> on
+	ui.radio_group     (id, value, field, readonly) -> value
 	ui.radio           (id, own_val, fr, align, valign, min_w, min_h)
 	ui.end_radio_group ()
-	ui.date_input      (id, v, [field], fr, align, valign, min_w) -> v
-	ui.color_input     (id, v, [field], fr, min_w) -> v
-	ui.num_slider      (id, v, [field]) -> v
-	ui.slider          (id, v, [field]) -> v
+	ui.date_input      (id, v, field, fr, align, valign, min_w, readonly) -> v
+	ui.color_input     (id, v, field, fr, min_w, readonly) -> v
+	ui.num_slider      (id, v, field, readonly) -> v
+	ui.slider          (id, v, field, readonly) -> v
+	ui.field_input     (id, v, opt) -> v
+	ui.nav_input       (id, opt) -> v
 
 LIST
 
-	ui.[h|v|hv]list    (id, items, value, [field], fr, align, valign,
+	ui.[h|v|hv]list    (id, items, value, field, fr, align, valign,
 	                    item_align, item_valign, item_fr, max_w, min_w,
-	                    item_pad_l, item_pad_r, item_pad_y, item_h) -> value
-	ui.radio_list      (id, items, value, [field], hv, fr, align, valign) -> value
+	                    item_pad_l, item_pad_r, item_pad_y, item_h, item_gap,
+	                    custom_item_bg_color, custom_item_color, readonly) -> value
+	ui.radio_list      (id, items, value, field, hv, fr, align, valign, readonly]) -> value
 
 OTHER
 
@@ -543,6 +547,11 @@ ui.color_def('dark' , 'marker' , 'normal' ,  61, 1.00, 0.57)
 ui.color_def('dark' , 'marker' , 'hover'  ,  61, 1.00, 0.65)
 ui.color_def('dark' , 'marker' , 'active' ,  61, 1.00, 0.72)
 
+ui.color_def('light', 'error-text', 'normal',   0, 0.85, 0.45)
+ui.color_def('dark' , 'error-text', 'normal',   0, 0.85, 0.65)
+ui.color_def('light', 'green-text', 'normal', 120, 0.59, 0.24)
+ui.color_def('dark' , 'green-text', 'normal', 120, 0.59, 0.54)
+
 /// border colors ------------------------------------------------------------
 
 //            theme    name        state       h     s     L     a
@@ -622,7 +631,6 @@ ui.color_def('*', 'search' , 'normal',  60,  1.00, 0.80) // quicksearch text bg
 ui.color_def('*', 'info'   , 'normal', 200,  1.00, 0.30) // info bubbles
 ui.color_def('*', 'warn'   , 'normal',  39,  1.00, 0.50) // warning bubbles
 ui.color_def('*', 'error'  , 'normal',   0,  0.54, 0.43) // error bubbles
-ui.color_def('*', 'green'  , 'normal', 120,  0.59, 0.24) // green light text
 
 // input value states
 ui.color_def('light', 'item', 'new'           , 240, 1.00, 0.97)
@@ -4104,13 +4112,6 @@ function popup_parse_stretch(s) {
 	return s
 }
 
-function popup_parse_side(s) {
-	let side = popup_parse_side_name(popup_parse_stretch(s))
-	assert(!parsed_stretch || (side & POPUP_SIDE_INNER),
-		'stretch on an outer side ', s)
-	return side + parsed_stretch
-}
-
 function popup_parse_side_name(s) {
 	if (s == '['           ) return POPUP_SIDE_LEFT
 	if (s == ']'           ) return POPUP_SIDE_RIGHT
@@ -4135,11 +4136,11 @@ function popup_parse_side_name(s) {
 	assert(false, 'invalid popup side ', s)
 }
 
-function popup_parse_align(s) {
-	if (s == '[]'     ) s = '[s'
-	if (s == 's'      ) s = '[s'
-	if (s == 'stretch') s = 'start-stretch'
-	return popup_parse_align_name(popup_parse_stretch(s)) + parsed_stretch
+function popup_parse_side(s) {
+	let side = popup_parse_side_name(popup_parse_stretch(s))
+	assert(!parsed_stretch || (side & POPUP_SIDE_INNER),
+		'stretch on an outer side ', s)
+	return side + parsed_stretch
 }
 
 function popup_parse_align_name(s) {
@@ -4150,6 +4151,13 @@ function popup_parse_align_name(s) {
 	if (s == 'start'  ) return POPUP_START
 	if (s == 'end'    ) return POPUP_END
 	assert(false, 'invalid align ', s)
+}
+
+function popup_parse_align(s) {
+	if (s == '[]'     ) s = '[s'
+	if (s == 's'      ) s = '[s'
+	if (s == 'stretch') s = 'start-stretch'
+	return popup_parse_align_name(popup_parse_stretch(s)) + parsed_stretch
 }
 
 const POPUP_FIT_CHANGE_SIDE = 1
@@ -4980,7 +4988,7 @@ USER API, affects only the next ui.text() call.
 
 */
 
-ui.font_size_normal = 12
+ui.font_size_normal = 13
 ui.default_font  = 'Arial'
 
 let text_flags = 0
@@ -5126,13 +5134,13 @@ function copy_input_value(field, v) {
 /*
 TEXT BOXES
 
-	ui.text            (id, v, fr, align, valign, max_w, w, h, wrap, field)
-	ui.text_editable   (id, v, fr, align, valign, max_w, w, h, field)
+	ui.text            (id, v, fr, align, valign, max_w, w, h, wrap, field, readonly)
+	ui.text_editable   (id, v, fr, align, valign, max_w, w, h, field, readonly)
 	ui.text_lines      (id, v, fr, align, valign, max_w, w, h)
 	ui.text_wrapped    (id, v, fr, align, valign, max_w, w, h)
-	ui.heading(size, s, [align])
-	hi.h1(s, [align])
-	ui.h2(s, [align])
+	ui.heading (size, s, align)
+	hi.h1      (s, align)
+	ui.h2      (s, align)
 
 TEXT STATE API
 
@@ -5143,6 +5151,7 @@ TEXT STATE API
 TEXT HELPERS
 
 	ui.measure_text (cx, s) -> {w:, asc:, dsc:, {actual|font}BoundingBox{Ascent|Descent|Left|Right}:, }
+	ui.line_h       () -> h    height of a line of text in the normal font
 
 */
 
@@ -5199,7 +5208,7 @@ function editable_text_update(id, s) {
 // w, h  : fixate box w/h, clip text beyond it; default is measured text w/h.
 // so by default text has dynamic w, and you can first cap it then fixate it.
 ui.text = function(
-	id, value, fr, align, valign, max_w, w, h, wrap, field
+	id, value, fr, align, valign, max_w, w, h, wrap, field, readonly
 ) {
 	let text
 	if (field) { // editable
@@ -5255,7 +5264,7 @@ ui.text = function(
 	a[n++] = wrap // flags
 		| text_align
 		| (field ? TEXT_EDITABLE : 0)
-		| (field?.readonly ? TEXT_READONLY : 0)
+		| ((readonly ?? field?.readonly) ? TEXT_READONLY : 0)
 		| (ui.focused(id) ? TEXT_FOCUSED : 0)
 		| (ui.focused(id) && ui.focused_by_key ? TEXT_FOCUSED_BY_KEY : 0)
 		| text_flags
@@ -5284,14 +5293,15 @@ ui.text = function(
 	return field ? value : text
 }
 ui.text_editable = function(
-	id, value, fr, align, valign, max_w, w, h, field
+	id, value, fr, align, valign, max_w, w, h, field, readonly
 ) {
 	if (!field) {
 		let s = ui.state(id)
 		s.field ??= ui.create_field()
 		field = s.field
 	}
-	return ui.text(id, value, fr, align, valign, max_w, w, h, null, field)
+	return ui.text(id, value, fr, align, valign, max_w, w, h, null, field,
+		readonly)
 }
 ui.text_lines = function(id, s, fr, align, valign, max_w, w, h) {
 	return ui.text(id, s, fr, align, valign, max_w, w, h, 'line')
@@ -5334,6 +5344,11 @@ measure_text = function(cx, s) {
 	return m
 }
 ui.measure_text = measure_text
+
+ui.line_h = function() {
+	let m = measure_text(cx, '')
+	return ceil(m.fontBoundingBoxAscent + m.fontBoundingBoxDescent)
+}
 
 runevery(60 * 2, function() {
 	let n = 0
@@ -6884,10 +6899,11 @@ ui.splitter = function() {
 		horiz ? min2 : null, horiz ? null : min2)
 }
 
-function end_split(hv) {
+function end_split() {
 
 	ui.end_sb()
 
+	let hv = split_stack[split_stack.length-5]
 	if (hv == 'h')
 		ui.end_h()
 	else
@@ -6898,9 +6914,11 @@ function end_split(hv) {
 
 ui.hsplit = function(...args) { return split('h', ...args) }
 ui.vsplit = function(...args) { return split('v', ...args) }
+ui.hvsplit = split
 
-ui.end_hsplit = function() { end_split('h') }
-ui.end_vsplit = function() { end_split('v') }
+ui.end_hsplit = end_split
+ui.end_vsplit = end_split
+ui.end_hvsplit = end_split
 
 //// SECTION -----------------------------------------------------------------
 
@@ -6994,7 +7012,7 @@ ui.valid_list_index = function(i, items) {
 
 function list_update(id, s) {
 	s.input_value = undefined
-	if (s.field?.readonly) {
+	if (s.readonly) {
 		s.focused_item_changed = false
 		s.picked = false
 		return
@@ -7016,7 +7034,7 @@ function list_update(id, s) {
 			items)
 		value = item_i != null ? items[item_i] : null
 	}
-	if (ui.focused(id) && ui.keydown('delete')) {
+	if (!s.field?.not_null && ui.focused(id) && ui.keydown('delete')) {
 		value = null
 		item_changed = 'key'
 	}
@@ -7043,13 +7061,15 @@ function hvlist(hv, id, items, value, field,
 	item_align, item_valign, item_fr,
 	max_w, min_w,
 	item_pad_l, item_pad_r, item_pad_y, item_h, item_gap,
-	custom_item_bg_color, custom_item_color
+	custom_item_bg_color, custom_item_color, readonly
 ) {
 	hv = hv || 'v'
 	assert(hv == 'v' || hv == 'h')
+	readonly ??= field?.readonly
 	let s = ui.state(id)
 	s.items = items
 	s.field = field
+	s.readonly = readonly
 	s.hv = hv
 	ui.state(id, list_update)
 	value = ui.set_value(s, value, field)
@@ -7069,11 +7089,10 @@ function hvlist(hv, id, items, value, field,
 		if (item === value && reveal_fi)
 			ui.scroll_to_view_next_box()
 		ui.stack(item_id, item_fr, 's', 's', null, item_h)
-			let ro = field?.readonly
 			let item_focused = item === value
 			let item_color_state =
-				(ro ? STATE_READONLY : 0)
-				| (!ro && hit(item_id) ? STATE_HOVER : 0)
+				(readonly ? STATE_READONLY : 0)
+				| (!readonly && hit(item_id) ? STATE_HOVER : 0)
 				| (list_focused ? STATE_FOCUSED : 0)
 				| (item_focused ? STATE_ITEM_FOCUSED | STATE_ITEM_SELECTED : 0)
 			let item_bg_color = custom_item_bg_color ?? (item_focused ? 'item' : 'bg')
@@ -7111,12 +7130,19 @@ ui.label = function(for_id, s, fr, align, valign) {
 
 //// ERROR_LABEL -------------------------------------------------------------
 
+function input_errors(id) {
+	let s = ui.state_of(id+'.field_input')
+	if (s?.nav)
+		return (s.row && s.nav.cell_errors(s.row, s.field)) ?? empty_array
+	let field = s?.field ?? ui.state_of(id, 'field')
+	return field?.validator?.results ?? empty_array
+}
+
 ui.error_label = function(for_id, mode, fr, align, valign) {
 	mode ??= 'first_error'
-	let validator = ui.state_of(for_id, 'field')?.validator
 	ui.v(fr, ui.sp05(), align ?? 'l', valign ?? 'c')
 	let text_n = 0
-	for (let result of validator?.results ?? empty_array) {
+	for (let result of input_errors(for_id)) {
 		let is_shown = mode == 'all' ? true
 			: mode == 'all_checked' ? result.checked
 			: result.failed && (mode == 'all_errors' || !text_n)
@@ -7124,22 +7150,24 @@ ui.error_label = function(for_id, mode, fr, align, valign) {
 			continue
 		ui.h(0, ui.sp05(), 's', 'c')
 			if (result.failed) {
-				ui.color('error')
-				ui.icon('', 'x', 0, 'c', 'c', null, ui.em())
+				ui.color('error-text')
+				ui.icon('', 'x', 0, 'c', 'c', ui.em(), ui.em())
 			} else if (result.checked) {
-				ui.color('green')
-				ui.icon('', 'check', 0, 'c', 'c', null, ui.em())
+				ui.color('green-text')
+				ui.icon('', 'check', 0, 'c', 'c', ui.em(), ui.em())
 			} else {
-				ui.box(0, ui.em())
+				ui.box(0, ui.em(), ui.em())
 			}
-			ui.color(result.failed ? 'error' : 'text')
+			ui.small()
+			ui.color(result.failed ? 'error-text'
+				: result.checked ? 'text' : 'text')
 			let err = result.failed ? result.error : result.rule_text
 			ui.text('', err, 0, 's', 'c')
 		ui.end_h()
 		text_n++
 	}
 	if (!text_n)
-		ui.text('', '')
+		ui.box(0, 0, ui.line_h())
 	ui.end_v()
 }
 
@@ -7152,31 +7180,251 @@ ui.em_input           = () => ui.em(ui.input_min_w_em)
 ui.em_input_max       = () => ui.em(ui.input_max_w_em)
 ui.em_input_max_popup = () => ui.em(ui.input_max_popup_w_em)
 
-ui.input = function(id, value, field, fr, w, text_align, no_box) {
+ui.input = function(id, value, field, fr, w, text_align, no_box, readonly) {
 	if (clicked(id+'.label')) {
 		ui.focus(id)
 		ui.select_text(id, 0, 1/0)
 	}
+	readonly ??= field?.readonly
 	let focused = ui.focused(id)
 	if (!no_box) {
 		ui.stack('', fr, 's', 's')
 		let state =
-			(field.readonly ? STATE_READONLY : 0)
+			(readonly ? STATE_READONLY : 0)
 			| (focused ? STATE_FOCUSED : 0)
 		ui.bb('input', state, 1, 'intense', state)
 		ui.p(ui.sp())
 		ui.color('text', state)
 	}
 	value = ui.text_editable(id, value, no_box ? fr : 1,
-		text_align ?? 's', 'c', null, w ?? ui.em_input(), null, field)
+		text_align ?? 's', 'c', null, w ?? ui.em_input(), null, field,
+		readonly)
 	if (!no_box)
 		ui.end_stack()
 	return value
 }
 
-ui.password_input = function(id, value, field, fr, w, text_align, no_box) {
+ui.password_input = function(
+	id, value, field, fr, w, text_align, no_box, readonly
+) {
 	field ??= ui.state_of(id, 'field') ?? ui.create_field({type: 'password'})
-	return ui.input(id, value, field, fr, w, text_align, no_box)
+	return ui.input(id, value, field, fr, w, text_align, no_box, readonly)
+}
+
+ui.icon_def('check', 'tabler', '\uea5e')
+ui.icon_def('x', 'tabler', '\ueb55')
+
+//// FIELD_INPUT -------------------------------------------------------------
+
+/*
+
+	ui.field_input (id, v, opt) -> v
+	ui.nav_input   (id, opt) -> v
+
+field_input builds a field's control with its label and a status icon: an x
+for a validation error, a check mark for a modified cell. nav_input builds
+the control for a cell of a nav, and an empty readonly text box when there
+is no row. Both read fr, align, valign, min_w and min_h from ui.box_args().
+
+opt:
+
+	field      : field_input: the field to edit.
+	nav, col   : nav_input: the nav and the column to edit.
+	row        : nav_input: the row to edit (nav.focused_row), null for none.
+	control    : the control to build (field.control, or 'lookup_input' for
+	             a lookup field): 'input', 'password_input', 'checkbox',
+	             'toggle', 'date_input', 'color_input', 'lookup_input',
+	             'enum_input', 'enum_toggle', 'list_dropdown', 'radio_list',
+	             'num_slider', 'slider'.
+	label_pos  : 't'|'top', 'l'|'left', 'lr'|'left-right-align' (on the
+	             left, right-aligned), 'hide' or null (no label). A checkbox
+	             or toggle always shows its label next to it.
+	errors     : 'tooltip' (default): show the errors in a tooltip while the
+	             focus is inside the control or the pointer is over the status
+	             icon. Any other value: no tooltip.
+	text_align : input, password_input, date_input, enum_input, list_dropdown.
+	w          : min width of the control (not radio_list).
+	max_w      : enum_input, list_dropdown: max width.
+	items      : list_dropdown, radio_list: the items (field.enum_values).
+	hv         : radio_list: 'h'|'v'.
+	pad_l      : left padding of the control.
+	pad_r      : right padding of the control.
+
+*/
+
+// builds the control under `id`; nav_input reads what the user made of it
+// with ui.input_value(id).
+ui.build_input = function(id, value, opt, control, readonly) {
+	if (control == 'input') {
+		value = ui.input(id, value, this,
+			1, opt.w, opt.text_align, null, readonly)
+	} else if (control == 'password_input') {
+		value = ui.password_input(id, value, this,
+			1, opt.w, opt.text_align, null, readonly)
+	} else if (control == 'checkbox') {
+		value = ui.checkbox(id, value, this, 0, 'l', 'c', opt.w, readonly)
+	} else if (control == 'toggle') {
+		value = ui.toggle(id, value, this, 0, 'l', 'c', opt.w, readonly)
+	} else if (control == 'date_input') {
+		value = ui.date_input(id, value, this,
+			1, opt.text_align ?? this.align, 'c', opt.w, readonly)
+	} else if (control == 'color_input') {
+		value = ui.color_input(id, value, this, 1, opt.w, readonly)
+	} else if (control == 'lookup_input') {
+		value = ui.lookup_input(id, value, this, 1, opt.w, readonly)
+	} else if (control == 'enum_input') {
+		value = ui.enum_input(id, value, this,
+			1, opt.text_align, opt.max_w, opt.w, readonly)
+	} else if (control == 'enum_toggle') {
+		value = ui.enum_toggle(id, value, this,
+			1, 's', 'c', opt.w, readonly)
+	} else if (control == 'list_dropdown') {
+		value = ui.list_dropdown(id, opt.items ?? this.enum_values,
+			value, this, 1, opt.text_align, opt.max_w, opt.w, readonly)
+	} else if (control == 'radio_list') {
+		value = ui.radio_list(id, opt.items ?? this.enum_values,
+			value, this, opt.hv, 1, 'l', 'c', readonly)
+	} else if (control == 'num_slider') {
+		ui.box_args(1, 's', 'c', opt.w)
+		value = ui.num_slider(id, value, this, readonly)
+	} else if (control == 'slider') {
+		ui.box_args(1, 's', 'c', opt.w)
+		value = ui.slider(id, value, this, readonly)
+	} else {
+		assert(false, 'unknown input control: ', control)
+	}
+	return value
+}
+
+let readonly_text_field
+
+function build_input_row(id, value, opt, is_bound) {
+	let fr = fr0 ?? 1
+	let align = align0 ?? 's'
+	let valign = valign0 ?? 's'
+	let min_w = min_w0
+	let min_h = min_h0
+	ui.clear_box_args()
+
+	let s = ui.state(id+'.field_input')
+	let nav = is_bound ? opt.nav : null
+	let field = is_bound ? nav?.optfld(opt.col) : opt.field
+	let row = is_bound && field
+		? (opt.row === undefined ? nav.focused_row : opt.row) : null
+	s.nav = nav
+	s.row = row
+	s.field = field
+
+	let focus_id = id+'.focus_group'
+	if (row) {
+		ui.state_of(id)
+		if (ui.focus_inside(focus_id) && ui.keydown('escape')) {
+			nav.revert_cell(row, field, {input: nav})
+			ui.capture_keys()
+		}
+		value = nav.cell_input_val(row, field)
+	}
+
+	let control = field && (opt.control
+		?? (field.lookup_rowset_name ? 'lookup_input' : field.control))
+	let is_bool_control = control == 'checkbox' || control == 'toggle'
+
+	let label_pos = opt.label_pos
+	let is_label_top = label_pos == 't' || label_pos == 'top'
+	let is_label_r_aligned = label_pos == 'lr'
+		|| label_pos == 'left-right-align'
+	let is_label_left = label_pos == 'l' || label_pos == 'left'
+		|| is_label_r_aligned
+	assert(label_pos == null || label_pos == 'hide'
+		|| is_label_top || is_label_left, 'invalid label_pos ', label_pos)
+	let has_outer_ct = is_label_left || is_label_top || is_bool_control
+	let gap = is_bool_control ? ui.sp2() : ui.sp05()
+	if (has_outer_ct) {
+		let hv = is_label_left ? 'h' : 'v'
+		let label_gap = is_label_left ? ui.sp2() : ui.sp05()
+		ui.hv(hv, fr, label_gap, align, valign, min_w, min_h)
+		if (is_bool_control) {
+			if (is_label_left)
+				ui.box()
+		} else {
+			ui.label(id, field?.label, 0, is_label_r_aligned ? 'r' : 'l', 'c')
+		}
+		ui.h(1, gap, 's', 's')
+	} else {
+		ui.h(fr, gap, align, valign, min_w, min_h)
+	}
+	if (control == 'toggle')
+		ui.label(id, field.label, 1, 'l', 'c')
+	let box_i = ui.stack('', is_bool_control ? 0 : 1, 's', 's')
+
+	if (opt.pad_l != null || opt.pad_r != null)
+		ui.p(opt.pad_l ?? 0, 0, opt.pad_r ?? 0, 0)
+
+		ui.focus_group(null, null, focus_id)
+		// with no row there's no value to show: an empty text box stands in for
+		// whatever control the field type would build.
+		if (is_bound && !row) {
+			readonly_text_field ??= ui.create_field({readonly: true})
+			value = ui.input(id, null, readonly_text_field, 1, opt.w)
+		} else {
+			let readonly = row && !nav.can_change_val(row, field)
+			value = field.build_input(id, value, opt, control, readonly)
+		}
+		if (row) {
+			let input_value = ui.input_value(id)
+			if (input_value !== undefined)
+				nav.set_cell_val(row, field, input_value, {input: nav})
+			value = nav.cell_input_val(row, field)
+		}
+		ui.end_focus_group()
+
+		let has_error = is_bound
+			? row && nav.cell_has_errors(row, field) : field.validator.failed
+		let is_modified = row && nav.cell_modified(row, field)
+		let status_id = id+'.status'
+		if (has_error && (opt.errors ?? 'tooltip') == 'tooltip'
+			&& (ui.focus_inside(focus_id) || hovers(status_id))) {
+			ui.mv(ui.sp())
+			ui.p(ui.sp2(), ui.sp())
+			ui.popup(id+'.error', 'tooltip', box_i, 'b', '[',
+				0, 0, 'change_side constrain')
+				ui.bb_tooltip('error', null, 'error', null, ui.sp05())
+				ui.v(0, ui.sp05())
+					for (let err of input_errors(id))
+						if (err.failed) {
+							ui.color('text', 'active')
+							ui.text('', err.error, 0, 'l', 'c')
+						}
+				ui.end_v()
+			ui.end_popup()
+		}
+
+	ui.end_stack()
+	if (control == 'checkbox')
+		ui.label(id, field.label, 1, 'l', 'c')
+	ui.pl(ui.sp05())
+	if (has_error) {
+		ui.color('error-text')
+		ui.icon(status_id, 'x', 0, 'c', 'c', null, ui.em(1))
+	} else if (is_modified) {
+		ui.color('green-text')
+		ui.icon(status_id, 'check', 0, 'c', 'c', null, ui.em(1))
+	} else {
+		ui.box(0, ui.em(1))
+	}
+	ui.end_h()
+	if (has_outer_ct)
+		ui.end()
+
+	return value
+}
+
+ui.field_input = function(id, value, opt) {
+	return build_input_row(id, value, opt, false)
+}
+
+ui.nav_input = function(id, opt) {
+	return build_input_row(id, null, opt, true)
 }
 
 //// NUM_SLIDER --------------------------------------------------------------
@@ -7189,7 +7437,7 @@ function num_slider_update(id, s) {
 	let field = s.field
 
 	if (clicked(id+'.label')) {
-		if (field.readonly) {
+		if (s.readonly) {
 			ui.focus(input_id)
 			ui.select_text(input_id, 0, 1/0)
 		} else {
@@ -7198,7 +7446,7 @@ function num_slider_update(id, s) {
 	}
 	if (ui.focused(id) && ui.keydown('ctrl c'))
 		copy_input_value(field, s.value)
-	if (field.readonly)
+	if (s.readonly)
 		return
 
 	let from = field.slider_min ?? field.min ?? 0
@@ -7256,7 +7504,7 @@ function num_slider_update(id, s) {
 			ui.set_cursor('ew-resize')
 	}
 }
-ui.num_slider = function(id, value, field) {
+ui.num_slider = function(id, value, field, readonly) {
 	let s = ui.state(id)
 	field ??= s.field ?? ui.create_field({
 		type: 'number',
@@ -7264,7 +7512,9 @@ ui.num_slider = function(id, value, field) {
 		max: 1,
 		decimals: 2,
 	})
+	readonly ??= field.readonly
 	s.field = field
+	s.readonly = readonly
 	let from = field.slider_min ?? field.min ?? 0
 	let to = field.slider_max ?? field.max ?? 1
 	s = ui.state(id, num_slider_update)
@@ -7274,7 +7524,7 @@ ui.num_slider = function(id, value, field) {
 	let p_max = slider_p(field.max ?? to, from, to)
 	let p = clamp(slider_p(value, from, to), p_min, p_max)
 	let input_id = id+'.input'
-	let show_input = s.editing || field.readonly
+	let show_input = s.editing || readonly
 	let focused = ui.focused(show_input ? input_id : id)
 	if (!show_input)
 		ui.focusable(id)
@@ -7287,9 +7537,9 @@ ui.num_slider = function(id, value, field) {
 
 	let text = field.to_text(value)
 
-	ui.stack(id, fr, align, valign, min_w)
+	ui.stack(id, fr, align, valign)
 		let state =
-			(field.readonly ? STATE_READONLY : 0)
+			(readonly ? STATE_READONLY : 0)
 			| (focused ? STATE_FOCUSED : 0)
 		ui.bb('input', state, 1, 'intense', state)
 		ui.p(1)
@@ -7297,7 +7547,7 @@ ui.num_slider = function(id, value, field) {
 			ui.stack('', p_min, 's', 's')
 			ui.end_stack()
 			ui.stack('', p - p_min, 's', 's')
-				ui.bb('bg3', field.readonly ? 'readonly' : null)
+				ui.bb('bg3', readonly ? 'readonly' : null)
 			ui.end_stack()
 			ui.stack('', 1 - p, 's', 's')
 				if (!show_input) {
@@ -7309,10 +7559,10 @@ ui.num_slider = function(id, value, field) {
 		ui.p(ui.sp())
 		ui.color('text', state)
 		if (show_input)
-			ui.text_editable(input_id, value, 1, 'sr', 'c', null, 0, null,
-				field)
+			ui.text_editable(input_id, value, 1, 'sr', 'c', null, min_w, null,
+				field, readonly)
 		else
-			ui.text('', text, 1, 'sr', 'c', null, 0)
+			ui.text('', text, 1, 'sr', 'c', null, min_w)
 		ui.measure(id)
 	ui.end_stack()
 
@@ -7394,7 +7644,7 @@ function slider_update(id, s) {
 	let field = s.field
 	if (ui.focused(id) && ui.keydown('ctrl c'))
 		copy_input_value(field, s.value)
-	if (field.readonly)
+	if (s.readonly)
 		return
 	let slider_min = field.slider_min ?? field.min ?? 0
 	let slider_max = field.slider_max ?? field.max ?? 1
@@ -7417,13 +7667,13 @@ function slider_update(id, s) {
 			+ d * (ui.keypressed('shift') ? .01 : .1)
 		value = lerp(clamp(p, p_min, p_max), 0, 1,
 			slider_min, slider_max)
-	} else if (focused && ui.keydown('delete')) {
+	} else if (!field.not_null && focused && ui.keydown('delete')) {
 		value = null
 	}
 	if (value !== undefined)
 		s.input_value = snap_slider_value(value, field, slider_min, slider_max)
 }
-slider.create = function(cmd, id, value, field) {
+slider.create = function(cmd, id, value, field, readonly) {
 
 	let s = ui.state(id)
 	field ??= s.field ?? ui.create_field({
@@ -7432,7 +7682,9 @@ slider.create = function(cmd, id, value, field) {
 		max: 1,
 		decimals: 2,
 	})
+	readonly ??= field.readonly
 	s.field = field
+	s.readonly = readonly
 	ui.focusable(id)
 
 	let slider_min = field.slider_min ?? field.min ?? 0
@@ -7458,8 +7710,8 @@ slider.create = function(cmd, id, value, field) {
 	let p_min = slider_p(field.min ?? slider_min, slider_min, slider_max)
 	let p_max = slider_p(field.max ?? slider_max, slider_min, slider_max)
 	let p = clamp(slider_p(value, slider_min, slider_max), p_min, p_max)
-	let hs = !field.readonly && hit(id)
-	let cs = !field.readonly && captured(id)
+	let hs = !readonly && hit(id)
+	let cs = !readonly && captured(id)
 	let focused = ui.focused(id)
 
 	ui.stack()
@@ -7480,7 +7732,7 @@ slider.create = function(cmd, id, value, field) {
 		a[n++] = (hs ? SLIDER_HOVER : 0)
 			| (focused ? SLIDER_FOCUSED : 0)
 			| (focused && ui.focused_by_key ? SLIDER_FOCUSED_BY_KEY : 0)
-			| (field.readonly ? SLIDER_READONLY : 0)
+			| (readonly ? SLIDER_READONLY : 0)
 		ui_cmd_box_end(i)
 
 		ui.measure(id)
@@ -7679,20 +7931,24 @@ function toggle_update(id, s) {
 	s.input_value = undefined
 	if (clicked(id+'.label'))
 		ui.focus(id)
-	if (s.field.readonly)
+	if (s.readonly)
 		return
 	let hs = hit(id) || hit(id+'.label')
 	let focused = ui.focused(id)
 	if ((hs && ui.click) || (focused && ui.keydown(' ')))
 		s.input_value = !s.value
-	else if (focused && ui.keydown('delete'))
+	else if (!s.field.not_null && focused && ui.keydown('delete'))
 		s.input_value = null
 }
 
-function toggle_create(cmd, id, on, field, fr, align, valign, min_w, min_h) {
+function toggle_create(
+	cmd, id, on, field, fr, align, valign, min_w, min_h, readonly
+) {
 	let s = ui.state(id)
 	field ??= s.field ?? ui.create_field({type: 'bool'})
+	readonly ??= field.readonly
 	s.field = field
+	s.readonly = readonly
 	s = ui.state(id, toggle_update)
 	ui.focusable(id)
 	on = ui.set_value(s, on, field)
@@ -7704,14 +7960,16 @@ function toggle_create(cmd, id, on, field, fr, align, valign, min_w, min_h) {
 	a[n++] = (on ? TOGGLE_ON : 0) | (on == null ? TOGGLE_NULL : 0) |
 		(hs ? TOGGLE_HOVER : 0) |
 		(focused && ui.focused_by_key ? TOGGLE_FOCUSED : 0) |
-		(field.readonly ? TOGGLE_READONLY : 0)
+		(readonly ? TOGGLE_READONLY : 0)
 	ui_cmd_box_end(i)
 	return on
 }
 
-toggle.create = function(cmd, id, on, field, fr, align, valign, min_w) {
+toggle.create = function(
+	cmd, id, on, field, fr, align, valign, min_w, readonly
+) {
 	return toggle_create(cmd, id, on, field, fr, align, valign,
-		min_w ?? ui.em(2.25), ui.em(1.25))
+		min_w ?? ui.em(2.25), ui.em(1.25), readonly)
 }
 toggle.ID = TOGGLE_ID
 
@@ -7765,9 +8023,11 @@ ui.box_widget('toggle', toggle)
 
 let checkbox = {...toggle}
 
-checkbox.create = function(cmd, id, on, field, fr, align, valign, min_w) {
-	return toggle_create(cmd, id, on, field, fr ?? 0, align, valign,
-		min_w ?? ui.em(1.2), ui.em(1.2))
+checkbox.create = function(
+	cmd, id, on, field, fr, align, valign, min_w, readonly
+) {
+	return toggle_create(cmd, id, on, field, fr ?? 0, align ?? 'l', valign,
+		min_w ?? ui.em(1.2), ui.em(1.2), readonly)
 }
 
 checkbox.draw = function(a, i) {
@@ -7850,7 +8110,7 @@ let radio_group_stack = []
 
 function radio_group_update(group_id, s) {
 	s.input_value = undefined
-	let del = ui.keydown('delete')
+	let del = !s.field.not_null && ui.keydown('delete')
 	if (!ui.click && !ui.keydown(' ') && !del)
 		return
 	let id = ui.click ? ui.captured_id : ui.focused_id
@@ -7862,14 +8122,15 @@ function radio_group_update(group_id, s) {
 		return
 	if (is_label)
 		ui.focus(id)
-	if (s.field.readonly)
+	if (s.readonly)
 		return
 	s.input_value = del ? null : radio_s.own_val
 }
-ui.radio_group = function(group_id, value, field) {
+ui.radio_group = function(group_id, value, field, readonly) {
 	let s = ui.state(group_id)
 	field ??= s.field ?? ui.create_field({type: 'enum'})
 	s.field = field
+	s.readonly = readonly ?? field.readonly
 	s = ui.state(group_id, radio_group_update)
 	value = ui.set_value(s, value, field)
 	radio_group_stack.push(group_id)
@@ -7888,7 +8149,7 @@ radio.create = function(cmd,
 	s.radio_group_id = group_id
 	s.own_val = own_val
 	ui.focusable(id)
-	let readonly = ui.state_of(group_id, 'field').readonly
+	let readonly = ui.state_of(group_id, 'readonly')
 	let selected = own_val === ui.value(group_id)
 	let hs = hit(id) || hit(id+'.label')
 	let focused = ui.focused(id)
@@ -7950,8 +8211,10 @@ radio.draw = function(a, i) {
 
 ui.box_widget('radio', radio)
 
-ui.radio_list = function(id, items, value, field, hv, fr, align, valign) {
-	value = ui.radio_group(id, value, field)
+ui.radio_list = function(
+	id, items, value, field, hv, fr, align, valign, readonly
+) {
+	value = ui.radio_group(id, value, field, readonly)
 	ui.hv(hv ?? 'v', fr, ui.sp2(), align, valign)
 	let i = 0
 	for (let item of items) {
@@ -8150,7 +8413,7 @@ function list_dropdown_update(id, s) {
 	s.input_value = undefined
 	if (ui.focused(id) && ui.keydown('ctrl c'))
 		copy_input_value(s.field, s.value)
-	let readonly = s.field?.readonly
+	let readonly = s.readonly
 
 	let picker_id = id+'.picker'
 	let items = s.items
@@ -8172,7 +8435,8 @@ function list_dropdown_update(id, s) {
 	if (picker_value !== undefined)
 		s.input_value = picker_value
 
-	if (ui.keydown('delete') && (ui.focused(id) || ui.focus_inside(id)))
+	if (!s.field?.not_null && ui.keydown('delete')
+		&& (ui.focused(id) || ui.focus_inside(id)))
 		s.input_value = null
 
 	// arrow keys move the selection with the list closed.
@@ -8188,7 +8452,9 @@ function list_dropdown_update(id, s) {
 	}
 }
 
-ui.list_dropdown = function(id, items, value, field, fr, align, max_w, w) {
+ui.list_dropdown = function(
+	id, items, value, field, fr, align, max_w, w, readonly
+) {
 
 	let picker_id = id+'.picker'
 	let value_id = id+'.value'
@@ -8201,9 +8467,11 @@ ui.list_dropdown = function(id, items, value, field, fr, align, max_w, w) {
 	ui.stack('', fr, 's', 's')
 
 	ui.focusable(id)
+	readonly ??= field?.readonly
 	let s = ui.state(id)
 	s.items = items
 	s.field = field
+	s.readonly = readonly
 	let open = ui.dropdown(id, list_dropdown_update)
 	value = ui.set_value(s, value, open ? null : field)
 
@@ -8211,7 +8479,7 @@ ui.list_dropdown = function(id, items, value, field, fr, align, max_w, w) {
 		ui.focus(id)
 
 		let state =
-			(field?.readonly ? STATE_READONLY : 0)
+			(readonly ? STATE_READONLY : 0)
 			| (ui.focused(id) ? STATE_FOCUSED : 0)
 		if (!open)
 			ui.bb('input', state, 1, 'intense', state)
@@ -8254,12 +8522,14 @@ ui.list_dropdown_inline = function(id, items, value, field,
 	return ui.list_dropdown(id, items, value, field, fr, align, max_w, -1)
 }
 
-ui.enum_input = function(id, value, field, fr, align, max_w, w) {
+ui.enum_input = function(id, value, field, fr, align, max_w, w, readonly) {
 	return ui.list_dropdown(id, field.enum_values, value, field,
-		fr, align, max_w, w)
+		fr, align, max_w, w, readonly)
 }
 
-ui.enum_toggle = function(id, value, field, fr, align, valign, min_w) {
+ui.enum_toggle = function(
+	id, value, field, fr, align, valign, min_w, readonly
+) {
 	ui.mv(ui.sp05())
 	return ui.hlist(id, field.enum_values, value, field,
 		fr ?? 0, align ?? 'l', valign,
@@ -8267,7 +8537,8 @@ ui.enum_toggle = function(id, value, field, fr, align, valign, min_w) {
 		null, min_w,
 		// item_pad_l, item_pad_r, item_pad_y, item_h, item_gap
 		null, null, null, null, 2,
-		'toggle', 'toggle-text' // item_bg_color, item_bg_state
+		'toggle', 'toggle-text', // item_bg_color, item_bg_state
+		readonly
 	)
 }
 
@@ -8565,7 +8836,7 @@ ui.calendar = function(id, sel_day, ranges, fr, align, valign, min_w, min_h) {
 function date_input_update(id, s) {
 
 	s.input_value = undefined
-	let readonly = s.field.readonly
+	let readonly = s.readonly
 
 	let picker_id = id+'.picker'
 	let input_id = id+'.input'
@@ -8600,14 +8871,16 @@ function date_input_update(id, s) {
 		s.input_value = d
 }
 
-ui.date_input = function(id, v, field, fr, align, valign, min_w) {
+ui.date_input = function(id, v, field, fr, align, valign, min_w, readonly) {
 
 	let picker_id = id+'.picker'
 	let input_id = id+'.input'
 
 	let s = ui.state(id)
 	field ??= s.field ?? ui.create_field({type: 'date'})
+	readonly ??= field.readonly
 	s.field = field
+	s.readonly = readonly
 	ui.state(id, date_input_update)
 
 	if (clicked(id+'.label')) {
@@ -8634,7 +8907,7 @@ ui.date_input = function(id, v, field, fr, align, valign, min_w) {
 
 		ui.stack(input_id, fr, 's', 's')
 			let state =
-				(field.readonly ? STATE_READONLY : 0)
+				(readonly ? STATE_READONLY : 0)
 				| (focused ? STATE_FOCUSED : 0)
 			ui.bb('input', state, 1, 'intense', state)
 			ui.p(ui.sp())
@@ -8643,7 +8916,8 @@ ui.date_input = function(id, v, field, fr, align, valign, min_w) {
 				ui.icon(id, 'calendar', 0, 'l', 'c')
 				ui.color('text', state)
 				ui.text_editable(input_id, value, 1,
-					input_align, valign ?? 'c', null, null, null, field)
+					input_align, valign ?? 'c', null, null, null, field,
+					readonly)
 			ui.end_h()
 		ui.end_stack()
 
@@ -9125,7 +9399,7 @@ function color_input_update(id, s) {
 	s.input_value = undefined
 	if (ui.focused(id) && ui.keydown('ctrl c'))
 		copy_input_value(s.field, s.value)
-	let readonly = s.field.readonly
+	let readonly = s.readonly
 
 	ui.dropdown_update(id, s, readonly)
 
@@ -9144,14 +9418,16 @@ function color_input_update(id, s) {
 	if (!readonly && ui.focused(id) && ui.keydown('delete'))
 		s.input_value = null
 }
-ui.color_input = function(id, value, field, fr, min_w) {
+ui.color_input = function(id, value, field, fr, min_w, readonly) {
 	let picker_id = id+'.picker'
 	let s = ui.state(id)
 	field ??= s.field ?? ui.create_field({type: 'color'})
+	readonly ??= field.readonly
 	s.field = field
+	s.readonly = readonly
 	s = ui.state(id, color_input_update)
 
-	ui.stack('', fr, 's', 's', min_w ?? ui.em_input(), ui.em(1.5))
+	ui.stack('', fr, 's', 's')
 
 	ui.focusable(id)
 	let open = ui.dropdown(id)
@@ -9161,11 +9437,12 @@ ui.color_input = function(id, value, field, fr, min_w) {
 	value = ui.set_value(s, value, open ? null : field)
 
 		let state =
-			(field.readonly ? STATE_READONLY : 0)
+			(readonly ? STATE_READONLY : 0)
 			| (ui.focused(id) ? STATE_FOCUSED : 0)
+
 		ui.bb('input', state, 1, 'intense', state)
-		ui.m(ui.sp(), ui.sp())
-		ui.stack('', 1, 's', 'c', null, ui.em(1))
+		ui.m(ui.sp())
+		ui.stack('', 1, 's', 'c', min_w ?? ui.em_input(), ui.line_h())
 			if (field.from_input(value) !== undefined)
 				ui.bb(':'+value)
 		ui.end_stack()

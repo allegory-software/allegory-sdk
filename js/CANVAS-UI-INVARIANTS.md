@@ -47,6 +47,13 @@ runs it, whether that is the widget itself or some other code.
 That is the mechanism for reading a widget before it builds itself. A widget
 that appears later in the frame is readable earlier through its update.
 
+On the frame a widget first appears, no state object exists for its id and
+its update is not registered yet, so ui.state_of(id) returns nothing and
+runs nothing. That is the right answer. The hit phase ran over the previous
+frame's records, which do not include the widget, and the browser has no
+element of it to write into, so nothing can have happened to it yet: it has
+no edge and no input value to report.
+
 State survives between frames only while some code touches its id every
 frame.
 

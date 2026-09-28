@@ -348,7 +348,8 @@ let fields = [
 	{name: 'url'      , w: 160, type: 'url'},
 	{name: 'phone'    , w: 120, type: 'phone'},
 	{name: 'email'    , w: 170, type: 'email'},
-	{name: 'password' , w: 110, type: 'password'},
+	{name: 'password' , w: 110, type: 'password', min_len: 8,
+		conditions: 'lower upper digit symbol'},
 	{name: 'secret'   , w: 140, type: 'secret_key'},
 	{name: 'pubkey'   , w: 140, type: 'public_key'},
 	{name: 'privkey'  , w: 140, type: 'private_key'},
@@ -356,14 +357,34 @@ let fields = [
 	{name: 'action'   , w:  90, type: 'button'},
 	{name: 'grower_id', w: 110, type: 'number', label: 'Grower',
 		lookup_rowset_name: 'grower', display_col: 'name'},
+	{name: 'text'       , w: 120, label: 'Text'},
+	{name: 'text_r'     , w: 120, label: 'Text R'},
+	{name: 'status_r'   , w:  90, type: 'enum', label: 'Status R',
+		enum_values: 'open closed pending',
+		enum_labels: {open: 'Open', closed: 'Closed', pending: 'Pending'},
+		align: 'right',
+	},
+	{name: 'enum_toggle', w:  90, type: 'enum', label: 'Enum toggle',
+		enum_values: 'one two three'},
+	{name: 'radio'      , w:  90, type: 'enum', label: 'Radio',
+		enum_values: ['Radio 1', 'Radio 2', 'Radio 3']},
+	{name: 'num_slider' , w: 100, type: 'number', label: 'Number slider',
+		min: 1000, max: 9000, slider_min: 0, slider_max: 10000, scale: 100,
+		decimals: 2},
+	{name: 'slider'     , w: 100, type: 'number', label: 'Slider',
+		min: 2000, max: 4000, slider_min: 0, slider_max: 10000, scale: 100,
+		decimals: 2, slider_markers: false},
+	{name: 'active2'    , w:  50, type: 'bool', label: 'Checkbox 2'},
+	{name: 'toggle'     , w:  50, type: 'bool', label: 'Toggle'},
+	{name: 'toggle2'    , w:  50, type: 'bool', label: 'Toggle 2'},
 	{name: 'parent_id', type: 'number', internal: true},
 ]
 let rows = [
-	[1, 1234.5  , 800        ,   1234, time(2024,1,15), time(2024,1,15,9,30), time(2031,6,1)     , 8*3600+30*60 , 3725  , true , 'open'   , ['red', 'urgent'], '#e03131'                , 2500, 'plus'        , {place_id: 'p1', description: '1600 Amphitheatre Pkwy'}, 'https://example.com', '+1 555 0100', 'a@example.com', 'hunter2'      , 'sk_live_abc123' , 'ssh-rsa AAAAB3Nz', '-----BEGIN KEY---', 'name'   , null, 1, null],
-	[2, 42      , 5_000_000  ,  98765, time(2024,6,1) , time(2024,6,1,14,0) , time(2032,1,1)     , 13*3600+15*60, 90000 , false, 'pending', ['blue']         , '#2e8b57'                , 6000, 'check'       , 'Just a description, no pin'                             , 'example.org'        , '555-0101'   , 'b@example.org', 'correct-horse', 'sk_live_def456' , 'ssh-ed25519 AAAA', '-----BEGIN KEY---', 'ctime'  , null, 2, 1],
-	[3, 0       , 3_200_000_000, 2000000, time(2024,12,31), time(2024,12,31,23,59), time(2037,12,31), 0            , 0     , true , 'closed' , ['green', 'a', 'b'], '#1e90ff'                , 10000, 'arrow_up'   , {place_id: 'p3', description: 'No pin greyed out below'}, 'http://sub.example.com/path', '555-0102', 'c@example.com', 's3cr3t'       , 'sk_live_ghi789' , 'ssh-rsa AAAAB3Nz', '-----BEGIN KEY---', 'id'     , null, 3, 1],
-	[4, -12.75  , 60         ,      7, time(2000,1,1) , time(2000,1,1,0,1)  , time(1970,1,2)     , 23*3600+59*60 , 61   , false, 'open'   , []               , '#111111'                , 0   , 'caret_right' , {description: 'Object without a place_id'}               , 'ftp://files.example.com', '555-0103', 'd@example.com', 'pw'           , 'sk_live_jkl012' , 'ssh-dss AAAAB3Nz', '-----BEGIN KEY---', 'status' , null, 1, 3],
-	[5, null    , null       ,   null, null           , null                , null               , null          , null , null , null     , null             , null                     , null, null          , null                                                       , null                 , null         , null           , null          , null             , null              , null              , null     , null, null, 4],
+	[1, 1234.5  , 800        ,   1234, time(2024,1,15), time(2024,1,15,9,30), time(2031,6,1)     , 8*3600+30*60 , 3725  , true , 'open'   , ['red', 'urgent'], '#e03131'                , 2500, 'plus'        , {place_id: 'p1', description: '1600 Amphitheatre Pkwy'}, 'https://example.com', '+1 555 0100', 'a@example.com', 'hunter2'      , 'sk_live_abc123' , 'ssh-rsa AAAAB3Nz', '-----BEGIN KEY---', 'name'   , null, 1, 'Hello1 Hello1', 'Hello2 Hello2', 'pending', 'one'  , 'Radio 1', 2500, 3000, false, false, true , null],
+	[2, 42      , 5_000_000  ,  98765, time(2024,6,1) , time(2024,6,1,14,0) , time(2032,1,1)     , 13*3600+15*60, 90000 , false, 'pending', ['blue']         , '#2e8b57'                , 6000, 'check'       , 'Just a description, no pin'                             , 'example.org'        , '555-0101'   , 'b@example.org', 'correct-horse', 'sk_live_def456' , 'ssh-ed25519 AAAA', '-----BEGIN KEY---', 'ctime'  , null, 2, 'Lorem ipsum'  , 'Dolor sit'    , 'open'   , 'two'  , 'Radio 2', 5000, 2500, true , true , false, 1],
+	[3, 0       , 3_200_000_000, 2000000, time(2024,12,31), time(2024,12,31,23,59), time(2037,12,31), 0            , 0     , true , 'closed' , ['green', 'a', 'b'], '#1e90ff'                , 10000, 'arrow_up'   , {place_id: 'p3', description: 'No pin greyed out below'}, 'http://sub.example.com/path', '555-0102', 'c@example.com', 's3cr3t'       , 'sk_live_ghi789' , 'ssh-rsa AAAAB3Nz', '-----BEGIN KEY---', 'id'     , null, 3, 'Foo bar'      , 'Baz qux'      , 'closed' , 'three', 'Radio 3', 7500, 3500, false, false, true , 1],
+	[4, -12.75  , 60         ,      7, time(2000,1,1) , time(2000,1,1,0,1)  , time(1970,1,2)     , 23*3600+59*60 , 61   , false, 'open'   , []               , '#111111'                , 0   , 'caret_right' , {description: 'Object without a place_id'}               , 'ftp://files.example.com', '555-0103', 'd@example.com', 'pw'           , 'sk_live_jkl012' , 'ssh-dss AAAAB3Nz', '-----BEGIN KEY---', 'status' , null, 1, 'Short'        , 'Right'        , 'open'   , 'one'  , 'Radio 1', 1000, 4000, true , true , false, 3],
+	[5, null    , null       ,   null, null           , null                , null               , null          , null , null , null     , null             , null                     , null, null          , null                                                       , null                 , null         , null           , null          , null             , null              , null              , null     , null, null, null           , null           , null     , null   , null     , null, null, null , null , null , 4],
 ]
 ui.rowsets.grid_types = {
 	fields: fields,
@@ -375,7 +396,7 @@ ui.rowsets.grid_types = {
 }
 
 {
-let grid_types_cols = 'status date color grower_id id num size count datetime time timeofday dur active tags progress icon place url phone email password secret pubkey privkey col action parent_id'
+let grid_types_cols = 'status date color grower_id id num size count datetime time timeofday dur active tags progress icon place url phone email password secret pubkey privkey col action text text_r status_r enum_toggle radio num_slider slider active2 toggle toggle2 parent_id'
 let grid_demo_source = ui.rowsets.grid_types
 let grid_demo_source_fields = grid_demo_source.fields
 let grid_demo_source_rows = grid_demo_source.rows
@@ -488,6 +509,51 @@ function make_grid_demo_rowset(
 	}
 }
 
+let grid_config_input_opt = {
+	email      : {},
+	text       : {},
+	text_r     : {text_align: 'sr'},
+	password   : {errors: 'label'},
+	grower_id  : {},
+	status     : {},
+	status_r   : {text_align: 'r'},
+	enum_toggle: {control: 'enum_toggle'},
+	radio      : {control: 'radio_list'},
+	date       : {},
+	datetime   : {},
+	color      : {},
+	num_slider : {control: 'num_slider', errors: 'label'},
+	slider     : {control: 'slider'},
+	active     : {},
+	active2    : {},
+	toggle     : {control: 'toggle'},
+	toggle2    : {control: 'toggle'},
+}
+for (let col in grid_config_input_opt)
+	grid_config_input_opt[col].col = col
+let grid_config_label_pos_field = ui.create_field({
+	type: 'enum',
+	enum_values: ['left', 'left-right-align', 'top', 'hide'],
+	null_text: 'None',
+})
+let grid_config_split_field = ui.create_field({
+	type: 'enum',
+	enum_values: ['v', 'h'],
+	enum_labels: {v: 'Split V', h: 'Split H'},
+	not_null: true,
+})
+
+function set_grid_config_null(nav) {
+	let row = nav.focused_row
+	if (!row)
+		return
+	for (let col in grid_config_input_opt) {
+		let field = nav.optfld(col)
+		if (nav.can_change_val(row, field))
+			nav.set_cell_val(row, field, null, {input: nav})
+	}
+}
+
 demos.grid = function() {
 let state = ui.state('grid_config_state')
 state.tree ??= true
@@ -504,6 +570,9 @@ state.auto_jump_cells ??= true
 state.stay_in_edit_mode ??= true
 state.auto_advance_row ??= false
 state.exit_edit_on_escape ??= true
+state.readonly ??= false
+state.label_pos ??= 'left'
+state.split_hv ??= 'v'
 
 let rows_slider_id = 'grid_config_rows_slider'
 state.row_count ??= 100
@@ -577,8 +646,9 @@ let grid_opt = {
 	stay_in_edit_mode: state.stay_in_edit_mode,
 	auto_advance_row: state.auto_advance_row,
 	exit_edit_on_escape: state.exit_edit_on_escape,
+	can_change_rows: !state.readonly,
 }
-let grid_nav = ui.state_of(state.grid_id, 'nav')
+let grid_nav = ui.state_of(state.grid_id, 'e')
 if (grid_nav)
 	grid_nav.auto_expand = state.auto_expand
 
@@ -586,7 +656,28 @@ load_split_size('grid_config_split')
 ui.hsplit('grid_config_split', 300, 'px', 2)
 save_split_size('grid_config_split')
 
-ui.vsplit('grid_config_form_split')
+ui.v()
+ui.p(ui.sp())
+ui.h(0, ui.sp2(), 'l')
+	ui.label('grid_config_readonly', 'Readonly', 0)
+	ui.h(0, ui.sp(), 'l')
+		state.readonly = ui.checkbox('grid_config_readonly',
+			state.readonly, null, 0, 'l')
+		if (ui.button('grid_config_reset', 'Reset') && grid_nav)
+			grid_nav.revert_changes()
+		if (ui.button('grid_config_set_null', 'Set null') && grid_nav)
+			set_grid_config_null(grid_nav)
+	ui.end_h()
+	ui.label('grid_config_label_pos', 'Labels', 0)
+	state.label_pos = ui.enum_toggle('grid_config_label_pos',
+		state.label_pos, grid_config_label_pos_field)
+	state.split_hv = ui.enum_toggle('grid_config_split_hv',
+		state.split_hv, grid_config_split_field)
+ui.end_h()
+if (grid_nav)
+	grid_nav.can_change_rows = !state.readonly
+
+ui.hvsplit(state.split_hv, 'grid_config_form_split')
 	save_split_size('grid_config_form_split')
 	ui.grid(state.grid_id, grid_opt)
 	grid_nav = ui.state_of(state.grid_id, 'e')
@@ -595,20 +686,26 @@ ui.vsplit('grid_config_form_split')
 ui.splitter()
 	ui.m(ui.sp8())
 	ui.v_aligned(1, ui.sp2(), 'l', 't', ui.em(16))
-		function grid_config_nav_input(col, label) {
-			ui.h(1, ui.sp2(), 's', 'c')
-				ui.label('grid_config_'+col, label, 0)
-				if (grid_nav)
-					ui.nav_input('grid_config_'+col,
-						{nav: grid_nav, col: col}, 1)
-			ui.end_h()
-		}
-		grid_config_nav_input('email' , 'Email')
-		grid_config_nav_input('date'  , 'Date')
-		grid_config_nav_input('color' , 'Color')
-		grid_config_nav_input('active', 'Active')
+		let is_label_left = state.label_pos == 'left'
+			|| state.label_pos == 'left-right-align'
+		if (grid_nav)
+			for (let col in grid_config_input_opt) {
+				let opt = grid_config_input_opt[col]
+				opt.nav = grid_nav
+				opt.label_pos = state.label_pos
+				ui.box_args(1, 's', 'c')
+				ui.nav_input('grid_config_'+col, opt)
+				if (opt.errors == 'label') {
+					ui.h(0, ui.sp2(), 'l')
+						if (is_label_left)
+							ui.box()
+						ui.error_label('grid_config_'+col, 'all')
+					ui.end_h()
+				}
+			}
 	ui.end_v_aligned()
-ui.end_vsplit()
+ui.end_hvsplit()
+ui.end_v()
 
 ui.splitter()
 ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
@@ -717,8 +814,8 @@ let num_slider1_value
 let date_input1_v
 let date_input3_v
 let lookup1_value
-let input1_field = ui.create_field()
-let input2_field = ui.create_field()
+let input1_field = ui.create_field({label: 'Input'})
+let input2_field = ui.create_field({label: 'Input R'})
 let password1_field = ui.create_field({
 	type: 'password',
 	min_len: 8,
@@ -726,23 +823,31 @@ let password1_field = ui.create_field({
 })
 let lookup1_field = ui.create_field({
 	type: 'number',
+	label: 'Lookup',
 	lookup_rowset_name: 'grower',
 	display_col: 'name',
 })
 let date_input1_field = ui.create_field({type: 'date'})
-let date_input3_field = ui.create_field({type: 'datetime'})
-let enum_input_field = ui.create_field({type: 'enum', enum_values: dd_items})
+let date_input3_field = ui.create_field({
+	type: 'datetime', label: 'Date & time',
+})
+let enum_input_field = ui.create_field({
+	type: 'enum', label: 'Dropdown', enum_values: dd_items,
+})
 let enum_toggle_field = ui.create_field({
 	type: 'enum',
+	label: 'Enum toggle',
 	enum_values: 'one two three',
 })
 let radio_list1_field = ui.create_field({
 	type: 'enum',
+	label: 'Radio',
 	enum_values: radio_items,
 })
 let num_slider1_field = ui.create_field({
 	type: 'number',
 	name: 'Num1',
+	label: 'Number slider',
 	min: 1000,
 	max: 9000,
 	slider_min: 0,
@@ -752,6 +857,7 @@ let num_slider1_field = ui.create_field({
 })
 let slider1_field = ui.create_field({
 	type: 'number',
+	label: 'Slider',
 	min: 2000,
 	max: 4000,
 	slider_min: 0,
@@ -762,10 +868,10 @@ let slider1_field = ui.create_field({
 })
 let color_input1_v
 let color_input1_field = ui.create_field({type: 'color'})
-let cb1_field = ui.create_field({type: 'bool'})
-let cb2_field = ui.create_field({type: 'bool'})
-let toggle1_field = ui.create_field({type: 'bool'})
-let toggle2_field = ui.create_field({type: 'bool'})
+let cb1_field = ui.create_field({type: 'bool', label: 'Checkbox 1'})
+let cb2_field = ui.create_field({type: 'bool', label: 'Checkbox 2'})
+let toggle1_field = ui.create_field({type: 'bool', label: 'Toggle 1'})
+let toggle2_field = ui.create_field({type: 'bool', label: 'Toggle 2'})
 let input_controls_fields = [
 	input1_field,
 	input2_field,
@@ -784,7 +890,36 @@ let input_controls_fields = [
 	toggle1_field,
 	toggle2_field,
 ]
+let input_controls_opt = {
+	input1: {field: input1_field},
+	input2: {field: input2_field, text_align: 'sr'},
+	password1: {field: password1_field, errors: 'label'},
+	lookup1: {field: lookup1_field},
+	dd1: {field: enum_input_field},
+	dd2: {field: enum_input_field, text_align: 'r'},
+	enum_toggle1: {field: enum_toggle_field, control: 'enum_toggle'},
+	radio_list1: {field: radio_list1_field, control: 'radio_list'},
+	date_input1: {field: date_input1_field},
+	date_input3: {field: date_input3_field},
+	color_input1: {field: color_input1_field},
+	num_slider1: {
+		field: num_slider1_field,
+		control: 'num_slider',
+		errors: 'label',
+	},
+	slider1: {field: slider1_field, control: 'slider'},
+	cb1: {field: cb1_field},
+	cb2: {field: cb2_field},
+	toggle1: {field: toggle1_field, control: 'toggle'},
+	toggle2: {field: toggle2_field, control: 'toggle'},
+}
 let input_controls_readonly = false
+let input_controls_label_pos = 'left'
+let input_controls_label_field = ui.create_field({
+	type: 'enum',
+	enum_values: ['left', 'left-right-align', 'top', 'hide'],
+	null_text: 'None',
+})
 function set_input_controls_values(value) {
 	input1_text = value
 	input2_text = value
@@ -825,7 +960,9 @@ function reset_input_controls_values() {
 }
 reset_input_controls_values()
 demos.input_controls = function() {
-ui.v_aligned(0, ui.sp2(), 'c', 'c')
+ui.m(ui.sp4())
+ui.v()
+	ui.v_aligned(0, ui.sp2(), 'c', 'c')
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('input_controls_readonly', 'Readonly', 0)
 		ui.h(0, ui.sp(), 'l')
@@ -837,118 +974,95 @@ ui.v_aligned(0, ui.sp2(), 'c', 'c')
 				set_input_controls_values(null)
 		ui.end_h()
 	ui.end_h()
+	ui.h(0, ui.sp2(), 'l')
+		ui.label('input_controls_label_pos', 'Labels', 0)
+		input_controls_label_pos = ui.enum_toggle('input_controls_label_pos',
+			input_controls_label_pos, input_controls_label_field)
+	ui.end_h()
+
 	for (let field of input_controls_fields)
 		field.readonly = input_controls_readonly
+	for (let id in input_controls_opt)
+		input_controls_opt[id].label_pos = input_controls_label_pos
+	let is_label_left = input_controls_label_pos == 'left'
+		|| input_controls_label_pos == 'left-right-align'
+
+	ui.end_v_aligned()
+	ui.v_aligned(0, ui.sp2(), 'c', 'c')
+
+	ui.box_args(0, 'l')
+	input1_text = ui.field_input('input1', input1_text,
+		input_controls_opt.input1)
+	ui.box_args(0, 'l')
+	input2_text = ui.field_input('input2', input2_text,
+		input_controls_opt.input2)
+	ui.box_args(0, 'l')
+	password1_text = ui.field_input('password1', password1_text,
+		input_controls_opt.password1)
 	ui.h(0, ui.sp2(), 'l')
-		ui.label('input1', 'Input', 0)
-		input1_text = ui.input('input1', input1_text, input1_field)
-	ui.end_h()
-	ui.h(0, ui.sp2(), 'l')
-		ui.label('input2', 'Input R', 0)
-		input2_text = ui.input('input2', input2_text, input2_field,
-			1, null, 'sr')
-	ui.end_h()
-	ui.h(0, ui.sp2(), 'l')
-		ui.label('password1', 'Password', 0)
-		password1_text = ui.password_input('password1', password1_text,
-			password1_field)
-	ui.end_h()
-	ui.h(0, ui.sp2(), 'l')
-		ui.box()
+		if (is_label_left)
+			ui.box()
 		ui.error_label('password1', 'all')
 	ui.end_h()
+	ui.box_args(0, 'l')
+	lookup1_value = ui.field_input('lookup1', lookup1_value,
+		input_controls_opt.lookup1)
+	ui.box_args(0, 'l')
+	dd1_value = ui.field_input('dd1', dd1_value, input_controls_opt.dd1)
+	ui.box_args(0, 'l')
+	dd2_value = ui.field_input('dd2', dd2_value, input_controls_opt.dd2)
+	ui.box_args(0, 'l')
+	enum_toggle_value = ui.field_input('enum_toggle1', enum_toggle_value,
+		input_controls_opt.enum_toggle1)
+	ui.box_args(0, 'l')
+	date_input1_v = ui.field_input('date_input1', date_input1_v,
+		input_controls_opt.date_input1)
+	ui.box_args(0, 'l')
+	date_input3_v = ui.field_input('date_input3', date_input3_v,
+		input_controls_opt.date_input3)
+	ui.box_args(0, 'l')
+	color_input1_v = ui.field_input('color_input1', color_input1_v,
+		input_controls_opt.color_input1)
+	ui.box_args(0, 'l')
+	num_slider1_value = ui.field_input('num_slider1', num_slider1_value,
+		input_controls_opt.num_slider1)
 	ui.h(0, ui.sp2(), 'l')
-		ui.label('lookup1', 'Lookup', 0)
-		lookup1_value = ui.lookup_input('lookup1', lookup1_value,
-			lookup1_field)
-	ui.end_h()
-	ui.h(0, ui.sp2(), 'l')
-		ui.label('dd1', 'Dropdown', 0)
-		dd1_value = ui.enum_input('dd1', dd1_value, enum_input_field)
-	ui.end_h()
-	ui.h(0, ui.sp2(), 'l')
-		ui.label('dd2', 'Dropdown R', 0)
-		dd2_value = ui.enum_input('dd2', dd2_value, enum_input_field, 1, 'r')
-	ui.end_h()
-	ui.h(0, ui.sp2(), 'l')
-		ui.label('enum_toggle1', 'Enum toggle', 0)
-		enum_toggle_value = ui.enum_toggle(
-			'enum_toggle1', enum_toggle_value, enum_toggle_field, 1, 's')
-	ui.end_h()
-	ui.h(0, ui.sp2(), 'l')
-		ui.label('date_input1', 'Date', 0)
-		date_input1_v = ui.date_input('date_input1', date_input1_v,
-			date_input1_field)
-	ui.end_h()
-	ui.h(0, ui.sp2(), 'l')
-		ui.label('date_input3', 'Date & time', 0)
-		date_input3_v = ui.date_input('date_input3', date_input3_v,
-			date_input3_field)
-	ui.end_h()
-	ui.h(0, ui.sp2(), 'l')
-		ui.label('color_input1', 'Color', 0)
-		color_input1_v = ui.color_input('color_input1', color_input1_v,
-			color_input1_field)
-	ui.end_h()
-	ui.h(0, ui.sp2(), 'l')
-		ui.label('num_slider1', 'Number slider', 0)
-		num_slider1_value = ui.num_slider(
-			'num_slider1', num_slider1_value, num_slider1_field)
-	ui.end_h()
-	ui.h(0, ui.sp2(), 'l')
-		ui.box()
+		if (is_label_left)
+			ui.box()
 		ui.error_label('num_slider1', 'all')
 	ui.end_h()
-	ui.h(0, ui.sp2(), 'l')
-		ui.label('slider1', 'Slider', 0)
-		slider1_v = ui.slider('slider1', slider1_v, slider1_field)
-	ui.end_h()
-
-	ui.h(0, ui.sp4())
-		ui.box()
-		ui.h(0, ui.sp2(), 'l')
-			cb1_checked = ui.checkbox('cb1', cb1_checked, cb1_field)
-			ui.label('cb1', 'Checkbox 1', 1)
-		ui.end_h()
-	ui.end_h()
-	ui.h(0, ui.sp4())
-		ui.box()
-		ui.h(0, ui.sp2(), 'l')
-			cb2_checked = ui.checkbox('cb2', cb2_checked, cb2_field)
-			ui.label('cb2', 'Checkbox 2', 1)
-		ui.end_h()
-	ui.end_h()
-	ui.h(0, ui.sp4())
-		ui.box()
-		ui.h(0, ui.sp2(), 'l')
-			toggle1_on = ui.toggle('toggle1', toggle1_on, toggle1_field)
-			ui.label('toggle1', 'Toggle 1', 1)
-		ui.end_h()
-	ui.end_h()
-	ui.h(0, ui.sp4())
-		ui.box()
-		ui.h(0, ui.sp2(), 'l')
-			toggle2_on = ui.toggle('toggle2', toggle2_on, toggle2_field)
-			ui.label('toggle2', 'Toggle 2', 1)
-		ui.end_h()
-	ui.end_h()
-	ui.h(0, ui.sp4(), 'l')
-		ui.text('', 'Radio', 0, 'l', 't')
-		radio_value = ui.radio_list('radio_list1', radio_items, radio_value,
-			radio_list1_field)
-	ui.end_h()
+	ui.box_args(0, 'l')
+	slider1_v = ui.field_input('slider1', slider1_v,
+		input_controls_opt.slider1)
+	ui.box_args(0, 'l')
+	cb1_checked = ui.field_input('cb1', cb1_checked, input_controls_opt.cb1)
+	ui.box_args(0, 'l')
+	cb2_checked = ui.field_input('cb2', cb2_checked, input_controls_opt.cb2)
+	ui.box_args(0, 'l')
+	toggle1_on = ui.field_input('toggle1', toggle1_on,
+		input_controls_opt.toggle1)
+	ui.box_args(0, 'l')
+	toggle2_on = ui.field_input('toggle2', toggle2_on,
+		input_controls_opt.toggle2)
+	ui.box_args(0, 'l')
+	radio_value = ui.field_input('radio_list1', radio_value,
+		input_controls_opt.radio_list1)
 	ui.h(0, ui.sp2())
-		ui.button('btn1', 'Button',
-			0, 'l', 'c', 0, 0, null, input_controls_readonly)
-		ui.h(0, ui.sp())
-			ui.primary_button('btn2', 'Primary',
-				0, 'l', 'c', 0, 0, input_controls_readonly)
-			ui.icon_button('btn_plus', 'plus', 'Icon',
+		if (is_label_left)
+			ui.box()
+		ui.h()
+			ui.button('btn1', 'Button',
 				0, 'l', 'c', 0, 0, null, input_controls_readonly)
+			ui.h(0, ui.sp())
+				ui.primary_button('btn2', 'Primary',
+					0, 'l', 'c', 0, 0, input_controls_readonly)
+				ui.icon_button('btn_plus', 'plus', 'Icon',
+					0, 'l', 'c', 0, 0, null, input_controls_readonly)
+			ui.end_h()
 		ui.end_h()
 	ui.end_h()
-
-ui.end_v_aligned()
+	ui.end_v_aligned()
+ui.end_v()
 }
 }
 
