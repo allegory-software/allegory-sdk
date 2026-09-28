@@ -1437,6 +1437,8 @@ function init(id, e) {
 
 	e.build = function(id, opt, fr, align, valign, min_w, min_h) {
 
+		e.set_param_vals(opt.param_vals)
+
 		let value
 		if (e.is_picker) {
 			value = ui.set_value(ui.state(id), opt.value)

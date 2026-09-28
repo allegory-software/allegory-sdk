@@ -164,7 +164,7 @@ Indexing:
 
 Master-detail:
 	needs:
-		e.params <- 'NAV_ID.[COL1=]PARAM1,[COL2=]PARAM2 WIDGET_ID=PARAM ...'
+		e.set_param_vals([{COL1: VAL1, ...}, ...] | false | null)
 
 Tree:
 	state:
@@ -416,7 +416,7 @@ const {
 	num, dec, isarray, isstr, isnum, isbool, isobject,
 	assert,
 	strict_sign, round, abs, clamp,
-	set, map, words, array_move, captures, count_keys,
+	set, map, words, keys, array_move, captures, count_keys,
 	do_before, do_after, property, override,
 	assign, assign_opt, attr, empty, empty_array,
 	remove, insert,
@@ -1195,100 +1195,8 @@ ui.nav = function(opt) {
 	/*
 	- supports server-side filtering for server-based navs.
 	- supports client-side filtering for client-side navs.
-	- supports multiple param navs and multiple params per param nav.
 	- new rows get assigned current param values on matching fields.
-	- cascade-updates foreign keys when master rows are updated.
-	- cascade-removes rows when master rows are removed.
 	*/
-
-	/*
-	e.prop('params', {parse: parse_params}) // "ID1.[COL1=]PARAM1,[COL2=]PARAM2,... ..."
-	e.set_params = params_changed
-	*/
-
-	function parse_params(params_s) {
-		if (!params_s)
-			return null
-		let pm = map() // {[nav_id|nav]->{col->param}}
-		for (let param_s of words(params_s)) {
-			let p = param_s.split('.')
-			let id = p[0]
-			let maps_s = p[1]
-			let m = map() // {col->param}
-			for (let map_s of maps_s.split(',')) {
-				let p = map_s.split('=')
-				let col = p[0] || map_s
-				let param = p[1] || col
-				m.set(col, param)
-			}
-			pm.set(id, m)
-		}
-		return pm
-	}
-
-	function collect_param_vals() {
-		if (!e.params)
-			return null
-		let pv
-		for (let [param_nav, pmap] of e.params) {
-			let te = isstr(param_nav) ? window[param_nav] : param_nav
-			if (!te)
-				return false
-			let pv1 = []
-			if (te.isnav) {
-				if (!te.ready)
-					return false
-				if (!te.selected_rows.size)
-					return false
-				for (let [row] of te.selected_rows) {
-					let vals = {}
-					for (let [col, param] of pmap) {
-						let field = te.fld(col)
-						if (!field) {
-							warn('param nav is missing col', col)
-							return false
-						}
-						let v = te.cell_val(row, field)
-						vals[param] = v
-					}
-					pv1.push(vals)
-				}
-			} else {
-				warn('param widget is not a nav', te.id)
-				return false
-			}
-			if (!pv) {
-				pv = pv1
-			} else {
-				// cross-join the param val set from a secondary master nav
-				// with the current param val set, eg. given two param val sets
-				// `pv = v1 || v2` and `pv1 = v3 || v4`, then `pv && pv1` expands to
-				// `(v1 && v3) || (v1 && v4) || (v2 && v3) || (v2 && v4)`.
-				let pv0 = pv
-				pv = []
-				for (let vals1 of pv1)
-					for (let vals0 of pv0) {
-						pv.push(assign({}, vals0, vals1))
-					}
-			}
-		}
-
-		return pv
-	}
-
-	function update_param_vals() {
-		let pv0 = e.param_vals
-		let pv1 = collect_param_vals()
-		// check if new param vals are the same as the old ones to avoid
-		// reloading the rowset if the params didn't really change.
-		if (pv1 === pv0 || json(pv1) == json(pv0))
-			return
-		e.param_vals = pv1
-		e.disable('no_param_vals', pv1 === false)
-		e.announce('tabname_changed')
-		e.announce('params_changed')
-		return true
-	}
 
 	// A client_nav doesn't have a rowset binding. Instead, changes are saved
 	// to either row_vals or row_states. Also, it filters itself based on params.
@@ -1296,9 +1204,13 @@ ui.nav = function(opt) {
 		return !!ui.rowsets[rowset_name]
 	}
 
-	function params_changed() {
-		if (!update_param_vals())
+	e.set_param_vals = function(param_vals) {
+		// check if new param vals are the same as the old ones to avoid
+		// reloading the rowset if the params didn't really change.
+		if (param_vals === e.param_vals
+			|| json(param_vals) == json(e.param_vals))
 			return
+		e.param_vals = param_vals
 		if (is_client_nav()) { // re-filter and re-focus.
 			e.unfocus_focused_cell({cancel: true})
 			update_parts({filters: true})
@@ -1307,66 +1219,6 @@ ui.nav = function(opt) {
 			e.reload()
 		}
 	}
-
-	function is_param_nav(te) {
-		return e.params.has(te) || (te.id && e.params.has(te.id))
-	}
-
-	/*
-	e.listen('selected_rows_changed', function(te) {
-		if (!e.params)
-			return
-		if (!is_param_nav(te))
-			return
-		params_changed()
-	})
-
-	e.listen('cell_state_changed', function(te, row, field, changes) {
-		if (!('val' in changes))
-			return
-		if (!is_param_nav(te))
-			return
-		if (!update_param_vals())
-			return
-		if (is_client_nav()) { // cascade-update foreign keys.
-			let pmap = e.params.get(te) || e.params.get(te.id)
-			let col = pmap.get(field.name)
-			if (!col)
-				return
-			let our_field = fld(col)
-			for (let row of e.all_rows)
-				if (e.cell_val(row, field) === old_val)
-					e.set_cell_val(row, field, val)
-		} else {
-			e.reload()
-		}
-	})
-
-	function param_vals_match(master_nav, e, params, master_row, row) {
-		for (let [master_col, col] of params) {
-			let master_field = master_nav.all_fields_map[master_col]
-			let master_val = master_nav.cell_val(master_row, master_field)
-			let field = e.all_fields_map[col]
-			let val = e.cell_val(row, field)
-			if (master_val !== val)
-				return false
-		}
-		return true
-	}
-	e.listen('row_state_changed', function(te, master_row, removed) {
-		if (!is_param_nav(te))
-			return
-		if (is_client_nav()) { // cascade-remove detail rows.
-			let params = param_map(e.params)
-			for (let row of e.all_rows)
-				if (param_vals_match(this, e, params, master_row, row)) {
-					e.begin_set_state(row)
-					e.set_row_state('removed', removed, false)
-					e.end_set_state()
-				}
-		}
-	})
-	*/
 
 	/// filtered and custom-sorted subset of all_rows -------------------------
 
@@ -3884,8 +3736,9 @@ ui.nav = function(opt) {
 	function param_vals_filter() {
 		if (!e.param_vals)
 			return
-		if (e.params.size == 1) {
-			let col = e.params.get(e.params.first_key)[0]
+		let cols = keys(e.param_vals[0])
+		if (cols.length == 1) {
+			let col = cols[0]
 			return json(e.param_vals.map(vals => vals[col]))
 		} else {
 			return json(e.param_vals)

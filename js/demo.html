@@ -542,6 +542,38 @@ let grid_config_split_field = ui.create_field({
 	enum_labels: {v: 'Split V', h: 'Split H'},
 	not_null: true,
 })
+let grid_config_rows_field = ui.create_field({
+	type: 'enum',
+	enum_values: [1000, 10000, 100000, 1000000],
+	enum_labels: {1000: '1000', 10000: '10k', 100000: '100k', 1000000: '1M'},
+	not_null: true,
+})
+let grid_config_cols_field = ui.create_field({
+	type: 'enum',
+	enum_values: [grid_demo_base_field_count, 100, 1000],
+	enum_labels: {100: '100', 1000: '1K'},
+	not_null: true,
+})
+
+let grid_config_detail_rows = []
+for (let master_id = 1; master_id <= 20; master_id++)
+	for (let k = 1; k <= 3; k++)
+		grid_config_detail_rows.push([
+			grid_config_detail_rows.length + 1,
+			master_id,
+			'Item '+master_id+'.'+k,
+			master_id * k % 10,
+		])
+ui.rowsets.grid_config_detail = {
+	pk: 'id',
+	fields: [
+		{name: 'id'       , w:  50, type: 'number', editable: false},
+		{name: 'master_id', w:  70, type: 'number', label: 'Master'},
+		{name: 'name'     , w: 120},
+		{name: 'qty'      , w:  60, type: 'number'},
+	],
+	rows: grid_config_detail_rows,
+}
 
 function set_grid_config_null(nav) {
 	let row = nav.focused_row
@@ -570,35 +602,14 @@ state.auto_jump_cells ??= true
 state.stay_in_edit_mode ??= true
 state.auto_advance_row ??= false
 state.exit_edit_on_escape ??= true
+state.validate_on_load ??= true
 state.readonly ??= false
 state.label_pos ??= 'left'
 state.split_hv ??= 'v'
 
-let rows_slider_id = 'grid_config_rows_slider'
-state.row_count ??= 100
-state.rows_slider_field ??= ui.create_field({
-	type: 'number',
-	min: 1,
-	max: 1000000,
-	decimals: 0,
-	slider_markers: false,
-})
-let rows_slider_field = state.rows_slider_field
-
-let col_max = state.row_count
-	? max(grid_demo_base_field_count, min(
-		grid_demo_base_field_count + 1000,
-		floor(1000000 / state.row_count)))
-	: grid_demo_base_field_count + 1000
-let col_slider_id = 'grid_config_duplicates_slider'
-state.col_slider_field ??= ui.create_field({
-	type: 'number',
-	min: grid_demo_base_field_count,
-	max: col_max,
-	decimals: 0,
-	slider_markers: false,
-})
-let col_slider_field = state.col_slider_field
+state.row_count ??= 1000
+let col_max = max(grid_demo_base_field_count,
+	floor(1000000 / state.row_count))
 state.col_count ??= grid_demo_base_field_count
 state.col_count = min(state.col_count, col_max)
 
@@ -646,6 +657,7 @@ let grid_opt = {
 	stay_in_edit_mode: state.stay_in_edit_mode,
 	auto_advance_row: state.auto_advance_row,
 	exit_edit_on_escape: state.exit_edit_on_escape,
+	validate_on_load: state.validate_on_load,
 	can_change_rows: !state.readonly,
 }
 let grid_nav = ui.state_of(state.grid_id, 'e')
@@ -679,10 +691,20 @@ if (grid_nav)
 
 ui.hvsplit(state.split_hv, 'grid_config_form_split')
 	save_split_size('grid_config_form_split')
-	ui.grid(state.grid_id, grid_opt)
-	grid_nav = ui.state_of(state.grid_id, 'e')
-	if (grid_nav)
-		grid_nav.auto_expand = state.auto_expand
+	ui.hvsplit(state.split_hv == 'h' ? 'v' : 'h', 'grid_config_detail_split')
+		save_split_size('grid_config_detail_split')
+		ui.grid(state.grid_id, grid_opt)
+		grid_nav = ui.state_of(state.grid_id, 'e')
+		if (grid_nav)
+			grid_nav.auto_expand = state.auto_expand
+	ui.splitter()
+		let master_row_id = grid_nav?.focused_row_cell_val('id')
+		ui.grid('grid_config_detail', {
+			rowset_name: 'grid_config_detail',
+			param_vals: grid_nav?.focused_row
+				? [{master_id: master_row_id}] : false,
+		})
+	ui.end_hvsplit()
 ui.splitter()
 	ui.m(ui.sp8())
 	ui.v_aligned(1, ui.sp2(), 'l', 't', ui.em(16))
@@ -715,16 +737,14 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 		ui.v_aligned(0)
 		ui.h(1, ui.sp1())
 			ui.text('', 'Rows', 0)
-			state.row_count = round(ui.slider(
-				rows_slider_id, state.row_count, rows_slider_field))
-			ui.text('', state.row_count, 2, 'r')
+			state.row_count = ui.enum_toggle('grid_config_rows',
+				state.row_count, grid_config_rows_field)
 		ui.end_h()
 
 		ui.h(1, ui.sp1())
 			ui.text('', 'Cols', 0)
-			state.col_count = round(ui.slider(
-				col_slider_id, state.col_count, col_slider_field))
-			ui.text('', state.col_count+' / '+col_max, 2, 'r')
+			state.col_count = ui.enum_toggle('grid_config_cols',
+				state.col_count, grid_config_cols_field)
 		ui.end_h()
 
 		ui.h(1, ui.sp1())
@@ -780,6 +800,8 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 			'Advance to next row', 'auto_advance_row')
 		grid_config_toggle('grid_config_exit_edit_on_escape',
 			'Escape exits editing', 'exit_edit_on_escape')
+		grid_config_toggle('grid_config_validate_on_load',
+			'Validate on load', 'validate_on_load')
 
 		if (ui.primary_button('grid_config_recreate', 'Recreate grid'))
 			state.recreate = true
