@@ -349,6 +349,8 @@ Editing cells:
 		e.do_cell_click(row, field, ev)
 
 Loading from server:
+	config:
+		e.validate_on_load        true
 	needs:
 		e.rowset_name
 	publishes:
@@ -627,6 +629,8 @@ ui.nav = function(opt) {
 
 	e.save_row_states            = false
 
+	e.validate_on_load           = true
+
 	/// init/update/free ------------------------------------------------------
 
 	let rowset, rowset_name, rowset_url
@@ -792,28 +796,29 @@ ui.nav = function(opt) {
 
 			// validate all rows
 
-			for (let row of e.all_rows) {
-				let cells_failed
-				for (let field of e.all_fields) {
-					if (field.readonly)
-						continue
-					if (field.validator) {
-						let iv = e.cell_input_val(row, field)
-						let failed = !field.validator.validate(iv, false)
-						if (!field.validator.parse_failed)
-							row[field.val_index] = field.validator.value
-						if (failed) {
-							e.set_cell_state_for(row, field, 'errors', errors_no_messages)
-							cells_failed = true
+			if (e.validate_on_load)
+				for (let row of e.all_rows) {
+					let cells_failed
+					for (let field of e.all_fields) {
+						if (field.readonly)
+							continue
+						if (field.validator) {
+							let iv = e.cell_input_val(row, field)
+							let failed = !field.validator.validate(iv, false)
+							if (!field.validator.parse_failed)
+								row[field.val_index] = field.validator.value
+							if (failed) {
+								e.set_cell_state_for(row, field, 'errors', errors_no_messages)
+								cells_failed = true
+							}
 						}
 					}
+					let row_failed = !e.row_validator.validate(row, false)
+					if (cells_failed || row_failed)
+						e.set_row_state_for(row, 'invalid', true)
+					if (row_failed)
+						e.set_row_state_for(row, 'errors', errors_no_messages)
 				}
-				let row_failed = !e.row_validator.validate(row, false)
-				if (cells_failed || row_failed)
-					e.set_row_state_for(row, 'invalid', true)
-				if (row_failed)
-					e.set_row_state_for(row, 'errors', errors_no_messages)
-			}
 
 			update_fields = true
 			update_rows = true

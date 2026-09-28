@@ -64,7 +64,7 @@ const ui = window.ui
 
 const {
 	assign, assign_opt, noop, display_name, words, set,
-	num, isnum, isstr, isbool, isarray, isobj, str, dec, repl,
+	num, isnum, isstr, isbool, isarray, isobj, str, dec, repl, utf8_len,
 	attr, assert, obj, map, empty_array, return_true,
 	uniq_sorted, try_json_arg, warn,
 	format_kbytes, format_kcount, format_date, parse_date,
@@ -84,7 +84,8 @@ We don't like abstractions around here but this one buys us many things:
 	is part of validation to allow you to be specific about error message when
 	parsing fails (i.e. tell the user in what way is their syntax wrong).
 - null values are filtered automatically.
-- result contains all the messages with `failed` and `checked` status on each.
+- result contains all the messages (none if with_messages is false) with
+	`failed` and `checked` status on each.
 - it makes no garbage on re-validation so you can validate huge lists fast.
 - entire objects can be validated the same way simple values are, so it also
 	works for validating ranges, db records, etc. as a unit.
@@ -98,7 +99,7 @@ output:
 	parse_failed
 	first_failed_result
 methods:
-	validate([ev]) -> valid?
+	validate(v, [with_messages]) -> valid?
 
 */
 
@@ -165,7 +166,8 @@ ui.create_validator = function(e, own_rules = empty_array) {
 		return v
 	}
 
-	validator.validate = function(v) {
+	validator.validate = function(v, with_messages) {
+		let has_messages = with_messages != false
 		let parse_failed = false
 		next_rule: for (let rule of rules) {
 			if (rule._failed)
@@ -199,8 +201,8 @@ ui.create_validator = function(e, own_rules = empty_array) {
 			result.checked = rule._checked || false
 			result.failed  = rule._failed || false
 			result.rule    = rule
-			result.error   = rule.error(e, v)
-			result.rule_text = rule.rule(e)
+			result.error   = has_messages ? rule.error(e, v) : null
+			result.rule_text = has_messages ? rule.rule(e) : null
 			if (rule._failed && !this.failed) {
 				this.failed = true
 				this.first_failed_result = result
@@ -317,12 +319,11 @@ ui.add_validation_rule({
 		'{0} must be at most {1} characters', e.label, e.max_len),
 })
 
-let utf8_encoder = new TextEncoder()
-
 ui.add_validation_rule({
 	name     : 'maxlen',
 	applies  : (e) => e.maxlen != null,
-	validate : (e, v) => !isstr(v) || utf8_encoder.encode(v).length <= e.maxlen,
+	validate : (e, v) => !isstr(v) || v.length <= e.maxlen
+		&& (v.length * 3 <= e.maxlen || utf8_len(v) <= e.maxlen),
 	error    : (e, v) => S('validation_maxlen_error',
 		'{0} is too long', e.label),
 	rule     : (e) => S('validation_maxlen_rule',
