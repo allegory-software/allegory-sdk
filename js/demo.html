@@ -31,18 +31,21 @@ ui.load_font('tabler'        , 'icons/tabler-icons.woff2')
 ui.load_font('tabler_filled' , 'icons/tabler-icons-filled.woff2')
 ui.load_font('mono'          , 'fonts/jetbrains-mono-nl-regular.woff2')
 
-let demo_state = json_arg(load('demo_state')) ?? {}
 ui.saved_state = json_arg(load('ui_saved_state')) ?? {}
 ui.save_state_delay = 0
 ui.save_unsaved_state = function(saved_state) {
 	save('ui_saved_state', json(saved_state))
 }
-if (demo_state.theme)
-	ui.set_screen_theme(demo_state.theme)
+let demo_toggle_field = ui.create_field({type: 'bool', not_null: true})
+ui.saved_value('btn_light'  , ui.screen_theme() == 'light', demo_toggle_field)
+ui.saved_value('btn_debug'  , true , demo_toggle_field)
+ui.saved_value('btn_tui'    , false, demo_toggle_field)
+ui.saved_value('btn_animate', false, demo_toggle_field)
+ui.set_screen_theme(ui.value('btn_light') ? 'light' : 'dark')
 
-ui.DEBUG      = demo_state.debug ?? true
+ui.DEBUG      = ui.value('btn_debug')
 ui.DEBUG_PANE = true
-ui.TUI        = demo_state.tui   ?? false
+ui.TUI        = ui.value('btn_tui')
 ui.saved_value('demos_list', 'tabs')
 let url_demo = location.search.match('demo=([^&]+)')?.[1]
 if (url_demo)
@@ -54,11 +57,6 @@ ui.focus('demos_list')
 </script>
 <body>
 <script>
-
-function save_demo_state(k, v) {
-	demo_state[k] = v
-	save('demo_state', json(demo_state))
-}
 
 let demos = []
 
@@ -358,6 +356,10 @@ let fields = [
 	},
 	{name: 'enum_toggle', w:  90, type: 'enum', label: 'Enum toggle',
 		enum_values: 'one two three'},
+	{name: 'enum_list'  , w: 120, type: 'enum_list', label: 'Enum list',
+		enum_values: 'one two three'},
+	{name: 'enum_list2' , w: 120, type: 'enum_list', label: 'Enum list 2',
+		enum_values: 'one two three'},
 	{name: 'radio'      , w:  90, type: 'enum', label: 'Radio',
 		enum_values: ['Radio 1', 'Radio 2', 'Radio 3']},
 	{name: 'num_slider' , w: 100, type: 'number', label: 'Number slider',
@@ -372,11 +374,11 @@ let fields = [
 	{name: 'parent_id', type: 'number', internal: true},
 ]
 let rows = [
-	[1, 1234.5  , 800        ,   1234, time(2024,1,15), time(2024,1,15,9,30), time(2031,6,1)     , 8*3600+30*60 , 3725  , true , 'open'   , ['red', 'urgent'], '#e03131'                , 2500, 'plus'        , {place_id: 'p1', description: '1600 Amphitheatre Pkwy'}, 'https://example.com', '+1 555 0100', 'a@example.com', 'hunter2'      , 'sk_live_abc123' , 'ssh-rsa AAAAB3Nz', '-----BEGIN KEY---', 'name'   , null, 1, 'Hello1 Hello1', 'Hello2 Hello2', 'pending', 'one'  , 'Radio 1', 2500, 3000, false, false, true , null],
-	[2, 42      , 5_000_000  ,  98765, time(2024,6,1) , time(2024,6,1,14,0) , time(2032,1,1)     , 13*3600+15*60, 90000 , false, 'pending', ['blue']         , '#2e8b57'                , 6000, 'check'       , 'Just a description, no pin'                             , 'example.org'        , '555-0101'   , 'b@example.org', 'correct-horse', 'sk_live_def456' , 'ssh-ed25519 AAAA', '-----BEGIN KEY---', 'ctime'  , null, 2, 'Lorem ipsum'  , 'Dolor sit'    , 'open'   , 'two'  , 'Radio 2', 5000, 2500, true , true , false, 1],
-	[3, 0       , 3_200_000_000, 2000000, time(2024,12,31), time(2024,12,31,23,59), time(2037,12,31), 0            , 0     , true , 'closed' , ['green', 'a', 'b'], '#1e90ff'                , 10000, 'arrow_up'   , {place_id: 'p3', description: 'No pin greyed out below'}, 'http://sub.example.com/path', '555-0102', 'c@example.com', 's3cr3t'       , 'sk_live_ghi789' , 'ssh-rsa AAAAB3Nz', '-----BEGIN KEY---', 'id'     , null, 3, 'Foo bar'      , 'Baz qux'      , 'closed' , 'three', 'Radio 3', 7500, 3500, false, false, true , 1],
-	[4, -12.75  , 60         ,      7, time(2000,1,1) , time(2000,1,1,0,1)  , time(1970,1,2)     , 23*3600+59*60 , 61   , false, 'open'   , []               , '#111111'                , 0   , 'caret_right' , {description: 'Object without a place_id'}               , 'ftp://files.example.com', '555-0103', 'd@example.com', 'pw'           , 'sk_live_jkl012' , 'ssh-dss AAAAB3Nz', '-----BEGIN KEY---', 'status' , null, 1, 'Short'        , 'Right'        , 'open'   , 'one'  , 'Radio 1', 1000, 4000, true , true , false, 3],
-	[5, null    , null       ,   null, null           , null                , null               , null          , null , null , null     , null             , null                     , null, null          , null                                                       , null                 , null         , null           , null          , null             , null              , null              , null     , null, null, null           , null           , null     , null   , null     , null, null, null , null , null , 4],
+	[1, 1234.5  , 800        ,   1234, time(2024,1,15), time(2024,1,15,9,30), time(2031,6,1)     , 8*3600+30*60 , 3725  , true , 'open'   , ['red', 'urgent'], '#e03131'                , 2500, 'plus'        , {place_id: 'p1', description: '1600 Amphitheatre Pkwy'}, 'https://example.com', '+1 555 0100', 'a@example.com', 'hunter2'      , 'sk_live_abc123' , 'ssh-rsa AAAAB3Nz', '-----BEGIN KEY---', 'name'   , null, 1, 'Hello1 Hello1', 'Hello2 Hello2', 'pending', 'one'  , 5, 2, 'Radio 1', 2500, 3000, false, false, true , null],
+	[2, 42      , 5_000_000  ,  98765, time(2024,6,1) , time(2024,6,1,14,0) , time(2032,1,1)     , 13*3600+15*60, 90000 , false, 'pending', ['blue']         , '#2e8b57'                , 6000, 'check'       , 'Just a description, no pin'                             , 'example.org'        , '555-0101'   , 'b@example.org', 'correct-horse', 'sk_live_def456' , 'ssh-ed25519 AAAA', '-----BEGIN KEY---', 'ctime'  , null, 2, 'Lorem ipsum'  , 'Dolor sit'    , 'open'   , 'two'  , 2, 5, 'Radio 2', 5000, 2500, true , true , false, 1],
+	[3, 0       , 3_200_000_000, 2000000, time(2024,12,31), time(2024,12,31,23,59), time(2037,12,31), 0            , 0     , true , 'closed' , ['green', 'a', 'b'], '#1e90ff'                , 10000, 'arrow_up'   , {place_id: 'p3', description: 'No pin greyed out below'}, 'http://sub.example.com/path', '555-0102', 'c@example.com', 's3cr3t'       , 'sk_live_ghi789' , 'ssh-rsa AAAAB3Nz', '-----BEGIN KEY---', 'id'     , null, 3, 'Foo bar'      , 'Baz qux'      , 'closed' , 'three', 7, null, 'Radio 3', 7500, 3500, false, false, true , 1],
+	[4, -12.75  , 60         ,      7, time(2000,1,1) , time(2000,1,1,0,1)  , time(1970,1,2)     , 23*3600+59*60 , 61   , false, 'open'   , []               , '#111111'                , 0   , 'caret_right' , {description: 'Object without a place_id'}               , 'ftp://files.example.com', '555-0103', 'd@example.com', 'pw'           , 'sk_live_jkl012' , 'ssh-dss AAAAB3Nz', '-----BEGIN KEY---', 'status' , null, 1, 'Short'        , 'Right'        , 'open'   , 'one'  , null, 7, 'Radio 1', 1000, 4000, true , true , false, 3],
+	[5, null    , null       ,   null, null           , null                , null               , null          , null , null , null     , null             , null                     , null, null          , null                                                       , null                 , null         , null           , null          , null             , null              , null              , null     , null, null, null           , null           , null     , null   , null, null, null     , null, null, null , null , null , 4],
 ]
 ui.rowsets.grid_types = {
 	fields: fields,
@@ -388,7 +390,7 @@ ui.rowsets.grid_types = {
 }
 
 {
-let grid_types_cols = 'status date color grower_id id num size count datetime time timeofday dur active tags progress icon place url phone email password secret pubkey privkey col action text text_r status_r enum_toggle radio num_slider slider active2 toggle toggle2 parent_id'
+let grid_types_cols = 'status date color grower_id id num size count datetime time timeofday dur active tags progress icon place url phone email password secret pubkey privkey col action text text_r status_r enum_toggle enum_list enum_list2 radio num_slider slider active2 toggle toggle2 parent_id'
 let grid_demo_source = ui.rowsets.grid_types
 let grid_demo_source_fields = grid_demo_source.fields
 let grid_demo_source_rows = grid_demo_source.rows
@@ -510,6 +512,8 @@ let grid_config_input_opt = {
 	status     : {},
 	status_r   : {text_align: 'r'},
 	enum_toggle: {control: 'enum_toggle'},
+	enum_list  : {},
+	enum_list2 : {control: 'enum_input'},
 	radio      : {control: 'radio_list'},
 	date       : {},
 	datetime   : {},
@@ -675,25 +679,20 @@ ui.hsplit('grid_config_split', 300, 'px', 2)
 ui.v()
 ui.p(ui.sp())
 ui.h(0, ui.sp2(), 'l')
-	ui.label('grid_config_readonly', 'Readonly', 0)
-	ui.h(0, ui.sp(), 'l')
-		ui.checkbox('grid_config_readonly', null, null, 0, 'l')
-		if (ui.button('grid_config_reset', 'Reset') && grid_nav)
-			grid_nav.revert_changes()
-		if (ui.button('grid_config_set_null', 'Set null') && grid_nav)
-			set_grid_config_null(grid_nav)
-	ui.end_h()
-	ui.label('grid_config_label_pos', 'Labels', 0)
-	let label_pos = ui.enum_toggle('grid_config_label_pos',
-		null, grid_config_label_pos_field)
+	ui.toggle_button('grid_config_readonly', null, 'Readonly', null, 0)
+	if (ui.button('grid_config_reset', 'Reset') && grid_nav)
+		grid_nav.revert_changes()
+	if (ui.button('grid_config_set_null', 'Set null') && grid_nav)
+		set_grid_config_null(grid_nav)
 	let split_hv = ui.enum_toggle('grid_config_split_hv',
 		null, grid_config_split_field)
+	let split_vh = split_hv == 'h' ? 'v' : 'h'
 ui.end_h()
 if (grid_nav)
 	grid_nav.can_change_rows = !readonly
 
-ui.hvsplit(split_hv, 'grid_config_form_split')
-	ui.hvsplit(split_hv == 'h' ? 'v' : 'h', 'grid_config_detail_split')
+ui.hvsplit(split_hv, 'grid_config_form_split_'+split_hv)
+	ui.hvsplit(split_vh, 'grid_config_detail_split_'+split_vh)
 		ui.grid(state.grid_id, grid_opt)
 		grid_nav = ui.state_of(state.grid_id, 'e')
 		if (grid_nav)
@@ -707,26 +706,36 @@ ui.hvsplit(split_hv, 'grid_config_form_split')
 		})
 	ui.end_hvsplit()
 ui.splitter()
-	ui.m(ui.sp8())
-	ui.v_aligned(1, ui.sp2(), 'l', 't', ui.em(16))
-		let is_label_left = label_pos == 'left'
-			|| label_pos == 'left-right-align'
-		if (grid_nav)
-			for (let col in grid_config_input_opt) {
-				let opt = grid_config_input_opt[col]
-				opt.nav = grid_nav
-				opt.label_pos = label_pos
-				ui.box_args(1, 's', 'c')
-				ui.nav_input('grid_config_'+col, opt)
-				if (opt.errors == 'label') {
-					ui.h(0, ui.sp2(), 'l')
-						if (is_label_left)
-							ui.box()
-						ui.error_label('grid_config_'+col, 'all')
-					ui.end_h()
+	ui.v()
+	ui.p(ui.sp())
+	ui.h(0, ui.sp2(), 'l')
+		ui.label('grid_config_label_pos', 'Labels', 0)
+		let label_pos = ui.enum_toggle('grid_config_label_pos',
+			null, grid_config_label_pos_field)
+	ui.end_h()
+	ui.scrollbox('grid_config_form_sb', 1, 'auto', 'auto', 's', 's')
+		ui.m(ui.sp4())
+		ui.v_aligned(1, ui.sp2(), 'l', 't', ui.em(16))
+			let is_label_left = label_pos == 'left'
+				|| label_pos == 'left-right-align'
+			if (grid_nav)
+				for (let col in grid_config_input_opt) {
+					let opt = grid_config_input_opt[col]
+					opt.nav = grid_nav
+					opt.label_pos = label_pos
+					ui.box_args(1, 's', 'c')
+					ui.nav_input('grid_config_'+col, opt)
+					if (opt.errors == 'label') {
+						ui.h(0, ui.sp2(), 'l')
+							if (is_label_left)
+								ui.box()
+							ui.error_label('grid_config_'+col, 'all')
+						ui.end_h()
+					}
 				}
-			}
-	ui.end_v_aligned()
+		ui.end_v_aligned()
+	ui.end_scrollbox()
+	ui.end_v()
 ui.end_hvsplit()
 ui.end_v()
 
@@ -1699,12 +1708,15 @@ assign(demos, t)
 demos_array = keys(demos)
 }
 
-ui.always_animate = false
-
 let recs_strlen = 0
 ui.main = function() {
 
 	ui.GRID_FAST_PATH = ui.value('grid_config_fast_path')
+	ui.DEBUG = ui.value('btn_debug')
+	ui.set_tui(ui.value('btn_tui'))
+	let lights = ui.value('btn_light')
+	if (lights != (ui.screen_theme() == 'light'))
+		ui.set_screen_theme(lights ? 'light' : 'dark')
 
 	ui.v()
 
@@ -1724,25 +1736,11 @@ ui.main = function() {
 				ui.color('link')
 				ui.text('', format_kbytes(recs_strlen, 1), 0, 'r', 'c', 1/0, ui.em(3))
 
-				if (ui.button('btn_light', 'lights', 0)) {
-					ui.set_screen_theme(ui.screen_theme() == 'light' ? 'dark' : 'light')
-					save_demo_state('theme', ui.screen_theme())
-				}
-
-				if (ui.button('btn_debug', 'DEBUG', 0)) {
-					ui.DEBUG = !ui.DEBUG
-					save_demo_state('debug', ui.DEBUG)
-				}
-
-				if (ui.button('btn_tui', 'TUI', 0)) {
-					ui.set_tui(!ui.TUI)
-					save_demo_state('tui', ui.TUI)
-				}
-
-				if (ui.button('btn_animate', 'animate', 0)) {
-					ui.always_animate = !ui.always_animate
-				}
-				if (ui.always_animate)
+				ui.toggle_button('btn_light', null, 'lights', demo_toggle_field, 0)
+				ui.toggle_button('btn_debug', null, 'DEBUG', demo_toggle_field, 0)
+				ui.toggle_button('btn_tui', null, 'TUI', demo_toggle_field, 0)
+				if (ui.toggle_button('btn_animate', null, 'animate',
+						demo_toggle_field, 0))
 					ui.animate()
 
 				ui.color('label')

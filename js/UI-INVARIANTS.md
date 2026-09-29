@@ -265,9 +265,14 @@ closes without a pick. It moves it forward on the frame the dropdown opens
 rather than on the frame the user commits: by then the committed value is
 already the input's own value, whereas on the commit frame it still lives in
 the picker, in a different place for each input. The
-dropdown supplies the three moments -- opened, closed, picked -- and holds
-no value, because the value's owner is the input. In date_input the
+dropdown supplies the four moments -- opened, closed, picked, canceled -- and
+holds no value, because the value's owner is the input. In date_input the
 dropdown's own id carries no value at all, so it could not hold one.
+
+A multi-select input takes that value back only when the user cancels, with
+Escape or the cancel button. Every change in its picker is a toggle the user
+chose, so when the dropdown closes any other way, the input keeps the
+toggles.
 
 While the picker is up, the input reports what the user has moved to, not
 what it held when the picker opened, so a caller reading the input follows

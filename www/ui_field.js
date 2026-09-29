@@ -66,7 +66,7 @@ const {
 	assign, assign_opt, noop, display_name, words, set,
 	num, isnum, isstr, isbool, isarray, isobj, str, dec, repl, utf8_len,
 	attr, assert, obj, map, empty_array, return_true,
-	uniq_sorted, try_json_arg, warn,
+	warn,
 	format_kbytes, format_kcount, format_date, parse_date,
 	parse_timeofday, format_timeofday, format_duration, format_timeago, S,
 } = glue
@@ -426,40 +426,11 @@ ui.add_validation_rule({
 })
 
 ui.add_validation_rule({
-	name     : 'values',
-	applies  : (e) => e.is_values,
-	parse    : (e, v) => {
-		v = isstr(v) ? (v.trim().startsWith('[') ? try_json_arg(v) : words(v)) : v
-		return uniq_sorted(v.sort())
-	},
-	validate : return_true,
-	error    : (e, v) => S('validation_values_error',
-		'{0}: invalid values list', e.label),
-	rule     : (e) => S('validation_values_rule',
-		'{0} must be a valid values list', e.label),
-})
-
-function invalid_values(e, v) {
-	if (v == null)
-		return 'null'
-	let a = []
-	for (let s of v)
-		if (!e.known_values.has(s))
-			a.push(s)
-	return a.join(', ')
-}
-ui.add_validation_rule({
 	name     : 'values_known',
-	requires : 'values',
-	applies  : (e) => e.known_values,
-	validate : (e, v) => {
-		for (let s of v)
-			if (!e.known_values.has(s))
-				return false
-		return true
-	},
+	applies  : (e) => e.is_values,
+	validate : (e, v) => v === (v & ((1 << e.enum_values.length) - 1)),
 	error    : (e, v) => S('validation_values_known_error',
-		'{0}: unknown values: {1}', e.label, invalid_values(e, v)),
+		'{0}: unknown values: {1}', e.label, field_value(e, v)),
 	rule     : (e) => S('validation_values_known_rule',
 		'{0} must contain only known values', e.label),
 })
@@ -707,6 +678,42 @@ field_types.enum = enm
 enm.to_text = function(v) {
 	let s = this.enum_labels ? this.enum_labels[v] : undefined
 	return s !== undefined ? s : v
+}
+
+enm.enum_items = function() {
+	return this.enum_values
+}
+
+let enum_list = {is_values: true, control: 'enum_toggle'}
+field_types.enum_list = enum_list
+
+enum_list.to_text = function(v) {
+	this.value_texts ??= new Map()
+	let s = this.value_texts.get(v)
+	if (s === undefined) {
+		let texts = []
+		for (let i = 0; i < 31; i++)
+			if (v & (1 << i))
+				texts.push(i < this.enum_values.length
+					? enm.to_text.call(this, this.enum_values[i]) : i)
+		s = texts.join(', ')
+		this.value_texts.set(v, s)
+	}
+	return s
+}
+
+enum_list.enum_items = function() {
+	assert(this.enum_values.length <= 31,
+		this.label, ': enum_list with more than 31 enum_values')
+	return this.item_masks ??= this.enum_values.map((v, i) => 1 << i)
+}
+
+enum_list.has_item = function(v, item) {
+	return (v & item) != 0
+}
+
+enum_list.toggle_item = function(v, item) {
+	return (v ^ item) || (this.not_null ? v : null)
 }
 
 //// TAGS --------------------------------------------------------------------

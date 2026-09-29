@@ -48,6 +48,7 @@ INPUT
 	ui.enum_toggle     (id, value, field, fr, align, valign, min_w, readonly) -> value
 	ui.toggle          (id, on, field, fr, align, valign, min_w, readonly) -> on
 	ui.checkbox        (id, on, field, fr, align, valign, min_w, readonly) -> on
+	ui.toggle_button   (id, on, text, field, fr, align, valign, min_w, readonly) -> on
 	ui.radio_group     (id, value, field, readonly) -> value
 	ui.radio           (id, own_val, fr, align, valign, min_w, min_h)
 	ui.end_radio_group ()
@@ -696,11 +697,11 @@ ui.color_def('*', 'toggle', 'item-focused item-selected readonly', 'toggle', 're
 
 ui.color_def('*', 'toggle-text', 'normal'  , 'text', 'normal')
 ui.color_def('*', 'toggle-text', 'hover'   , 'text', 'normal')
-ui.color_def('*', 'toggle-text', 'item-focused item-selected'                 , 'text', 'active')
+ui.color_def('*', 'toggle-text', 'item-selected'                              , 'text', 'active')
 ui.color_def('*', 'toggle-text', 'readonly'                                   , 'text', 'readonly')
 ui.color_def('*', 'toggle-text', 'readonly focused'                           , 'text', 'normal')
-ui.color_def('*', 'toggle-text', 'readonly item-focused item-selected'        , 'text', 'normal')
-ui.color_def('*', 'toggle-text', 'readonly item-focused item-selected focused', 'text', 'active')
+ui.color_def('*', 'toggle-text', 'readonly item-selected'                     , 'text', 'normal')
+ui.color_def('*', 'toggle-text', 'readonly item-selected focused'             , 'text', 'active')
 //ui.color_def('*', 'toggle-text' , 'readonly item-selected' , 'text', 'normal')
 //ui.color_def('*', 'toggle-text' , 'readonly focused'       , 'text', 'normal')
 
@@ -1437,21 +1438,18 @@ ui.save_state_delay = 1
 ui.save_unsaved_state = noop
 
 let value_defaults = map()
-let value_enum_fields = map()
 
 ui.saved_value = function(id, default_value, field) {
 	value_defaults.set(id, default_value)
-	if (field?.known_values)
-		value_enum_fields.set(id, field)
+	let t = ui.saved_state[id]
+	if (field && t?.value !== undefined
+			&& !field.validator.validate(t.value, false))
+		delete t.value
 }
 
 function read_saved_value(id) {
 	let v = ui.saved_state[id]?.value
-	let field = value_enum_fields.get(id)
-	if (v === undefined || field && (v === null
-			? field.not_null : !field.known_values.has(v)))
-		v = value_defaults.get(id)
-	return v
+	return v !== undefined ? v : value_defaults.get(id)
 }
 
 ui.set_saved_value = function(id, v) {
@@ -7101,8 +7099,19 @@ ui.menu = function(id, items, side, align) {
 
 //// LIST --------------------------------------------------------------------
 
-ui.valid_list_index = function(i, items) {
+function valid_list_index(i, items) {
 	return items.length ? clamp(i, 0, items.length-1) : null
+}
+
+function next_list_item(items, item, d) {
+	let i = items.indexOf(item)
+	i = i >= 0 ? i + d : d >= 0 ? 0 : items.length-1
+	i = valid_list_index(i, items)
+	return i != null ? items[i] : null
+}
+
+function pick_list_item(field, value, item) {
+	return field?.is_values ? field.toggle_item(value, item) : item
 }
 
 function list_update(id, s) {
@@ -7112,42 +7121,55 @@ function list_update(id, s) {
 		s.picked = false
 		return
 	}
-	let items  = s.items
-	let value0 = s.value
-	let value = value0
+	let items = s.items
+	let field = s.field
+	let is_multi = field?.is_values
+	let value = s.value
+	let focused = ui.focused(id)
+	let focused_item0 = s.focused_item
+	let focused_item = focused_item0
 	let next_key = s.hv == 'h' ? 'arrowright' : 'arrowdown'
 	let prev_key = s.hv == 'h' ? 'arrowleft' : 'arrowup'
-	let d = ui.focused(id) && (
+	let d = focused && (
 			ui.keydown(next_key) &&  1 ||
 			ui.keydown(prev_key) && -1
 		) || 0
-	let item_changed = d && 'key'
+	let focused_item_changed = d && 'key'
+	let value_changed
 	if (d) {
-		let item_i = items.indexOf(value)
-		item_i = ui.valid_list_index(
-			item_i >= 0 ? item_i + d : d >= 0 ? 0 : items.length-1,
-			items)
-		value = item_i != null ? items[item_i] : null
+		focused_item = next_list_item(items, focused_item, d)
+		if (!is_multi) {
+			value = focused_item
+			value_changed = 'key'
+		}
 	}
-	if (!s.field?.not_null && ui.focused(id) && ui.keydown('delete')) {
+	if (focused && focused_item != null && ui.keydown(' ')) {
+		value = pick_list_item(field, value, focused_item)
+		value_changed = 'key'
+	}
+	if (!field?.not_null && focused && ui.keydown('delete')) {
 		value = null
-		item_changed = 'key'
+		value_changed = 'key'
 	}
 	let i = 0
 	for (let item of items) {
 		let item_id = id+'.'+i
 		if (clicked(item_id)) {
 			ui.focus(id)
-			value = item
-			item_changed = 'click'
+			focused_item = item
+			focused_item_changed = 'click'
+			value = pick_list_item(field, value, item)
+			value_changed = 'click'
 		}
 		i++
 	}
-	if (item_changed)
+	if (value_changed)
 		s.input_value = value
-	s.focused_item_changed = value0 !== value ? item_changed : false
+	s.focused_item_changed = focused_item0 !== focused_item
+		? focused_item_changed : false
+	s.focused_item = focused_item
 	let has_enter = value != null && ui.focused(id) && ui.keydown('enter')
-	s.picked = item_changed == 'click' || !!has_enter
+	s.picked = !is_multi && value_changed == 'click' || !!has_enter
 	if (has_enter)
 		ui.capture_keys()
 }
@@ -7168,12 +7190,24 @@ function hvlist(hv, id, items, value, field,
 	s.hv = hv
 	ui.state(id, list_update)
 	value = set_value(id, s, value, field)
+	let is_multi = field?.is_values
+	let focused_item = s.focused_item
+	if (!is_multi && items.includes(value))
+		focused_item = value
+	else if (!items.includes(focused_item))
+		focused_item = is_multi
+			? items.find(item => field.has_item(value, item)) ?? items[0]
+			: null
+	s.focused_item = focused_item
 	ui.focusable(id)
 	let list_focused = ui.focused(id)
 	// reveal the focused item on tab-focusing the list and on arrow keys.
 	// a clicked item is excepted to avoid shifting it under the mouse pointer.
 	let reveal_fi = ui.focusing(id) || s.focused_item_changed == 'key'
-	ui.hv(hv, fr, item_gap, align ?? (hv == 'v' ? 's' : '['), '[', min_w)
+	ui.hv(hv, fr, item_gap,
+		align  ?? (hv == 'v' ? 's' : '['),
+		valign ?? (hv == 'v' ? '[' : 'c'),
+		min_w)
 	let i = 0
 	for (let item of items) {
 		let item_id = id+'.'+i
@@ -7181,16 +7215,20 @@ function hvlist(hv, id, items, value, field,
 			item_pad_l ?? ui.sp(),
 			item_pad_y ?? ui.sp05(),
 			item_pad_r ?? item_pad_l ?? ui.sp())
-		if (item === value && reveal_fi)
+		if (item === focused_item && reveal_fi)
 			ui.scroll_to_view_next_box()
 		ui.stack(item_id, item_fr, 's', 's', null, item_h)
-			let item_focused = item === value
+			let item_focused = item === focused_item
+			let item_selected = is_multi
+				? field.has_item(value, item) : item === value
 			let item_color_state =
 				(readonly ? STATE_READONLY : 0)
 				| (!readonly && hit(item_id) ? STATE_HOVER : 0)
 				| (list_focused ? STATE_FOCUSED : 0)
-				| (item_focused ? STATE_ITEM_FOCUSED | STATE_ITEM_SELECTED : 0)
-			let item_bg_color = custom_item_bg_color ?? (item_focused ? 'item' : 'bg')
+				| (item_focused ? STATE_ITEM_FOCUSED : 0)
+				| (item_selected ? STATE_ITEM_SELECTED : 0)
+			let item_bg_color = custom_item_bg_color
+				?? (item_focused || item_selected ? 'item' : 'bg')
 			// TODO: remove this rounded corners hack
 			let sides = item_gap ? (!i ? '-r' : i == items.length-1 ? '-l' : null) : null
 			ui.bb(item_bg_color, item_color_state, sides, null, null, ui.sp05())
@@ -7328,9 +7366,9 @@ opt:
 	row        : nav_input: the row to edit (nav.focused_row), null for none.
 	control    : the control to build (field.control, or 'lookup_input' for
 	             a lookup field): 'input', 'password_input', 'checkbox',
-	             'toggle', 'date_input', 'color_input', 'lookup_input',
-	             'enum_input', 'enum_toggle', 'list_dropdown', 'radio_list',
-	             'num_slider', 'slider'.
+	             'toggle', 'toggle_button', 'date_input', 'color_input',
+	             'lookup_input', 'enum_input', 'enum_toggle', 'list_dropdown',
+	             'radio_list', 'num_slider', 'slider'.
 	label_pos  : 't'|'top', 'l'|'left', 'lr'|'left-right-align' (on the
 	             left, right-aligned), 'hide' or null (no label). A checkbox
 	             or toggle always shows its label next to it.
@@ -7340,7 +7378,7 @@ opt:
 	text_align : input, password_input, date_input, enum_input, list_dropdown.
 	w          : min width of the control (not radio_list).
 	max_w      : enum_input, list_dropdown: max width.
-	items      : list_dropdown, radio_list: the items (field.enum_values).
+	items      : list_dropdown, radio_list: the items (field.enum_items()).
 	hv         : radio_list: 'h'|'v'.
 	pad_l      : left padding of the control.
 	pad_r      : right padding of the control.
@@ -7360,6 +7398,9 @@ ui.build_input = function(id, value, opt, control, readonly) {
 		value = ui.checkbox(id, value, this, 0, 'l', 'c', opt.w, readonly)
 	} else if (control == 'toggle') {
 		value = ui.toggle(id, value, this, 0, 'l', 'c', opt.w, readonly)
+	} else if (control == 'toggle_button') {
+		value = ui.toggle_button(id, value, this.label, this,
+			0, 'l', 'c', opt.w, readonly)
 	} else if (control == 'date_input') {
 		value = ui.date_input(id, value, this,
 			1, opt.text_align ?? this.align, 'c', opt.w, readonly)
@@ -7374,10 +7415,10 @@ ui.build_input = function(id, value, opt, control, readonly) {
 		value = ui.enum_toggle(id, value, this,
 			1, 's', 'c', opt.w, readonly)
 	} else if (control == 'list_dropdown') {
-		value = ui.list_dropdown(id, opt.items ?? this.enum_values,
+		value = ui.list_dropdown(id, opt.items ?? this.enum_items(),
 			value, this, 1, opt.text_align, opt.max_w, opt.w, readonly)
 	} else if (control == 'radio_list') {
-		value = ui.radio_list(id, opt.items ?? this.enum_values,
+		value = ui.radio_list(id, opt.items ?? this.enum_items(),
 			value, this, opt.hv, 1, 'l', 'c', readonly)
 	} else if (control == 'num_slider') {
 		ui.box_args(1, 's', 'c', opt.w)
@@ -7423,6 +7464,7 @@ function build_input_row(id, value, opt, is_bound) {
 	let control = field && (opt.control
 		?? (field.lookup_rowset_name ? 'lookup_input' : field.control))
 	let is_bool_control = control == 'checkbox' || control == 'toggle'
+		|| control == 'toggle_button'
 
 	let label_pos = opt.label_pos
 	let is_label_top = label_pos == 't' || label_pos == 'top'
@@ -8036,17 +8078,24 @@ function toggle_update(id, s) {
 		s.input_value = null
 }
 
-function toggle_create(
-	cmd, id, on, field, fr, align, valign, min_w, min_h, readonly
-) {
+function set_toggle_state(id, on, field, readonly) {
 	let s = ui.state(id)
 	field ??= s.field ?? ui.create_field({type: 'bool'})
 	readonly ??= field.readonly
 	s.field = field
 	s.readonly = readonly
 	s = ui.state(id, toggle_update)
+	set_value(id, s, on, field)
+	return s
+}
+
+function toggle_create(
+	cmd, id, on, field, fr, align, valign, min_w, min_h, readonly
+) {
+	let s = set_toggle_state(id, on, field, readonly)
 	ui.focusable(id)
-	on = set_value(id, s, on, field)
+	on = s.value
+	readonly = s.readonly
 	let hs = hit(id) || hit(id+'.label')
 	let focused = ui.focused(id)
 	let i = ui_cmd_box_begin(cmd, fr ?? 0, align ?? 'c', valign ?? 'c',
@@ -8197,6 +8246,25 @@ checkbox.draw = function(a, i) {
 
 ui.box_widget('checkbox', checkbox)
 
+ui.toggle_button = function(
+	id, on, text, field, fr, align, valign, min_w, readonly
+) {
+	// ui.mv(ui.sp05()) // make it match other inputs
+	ui.p(ui.sp(), ui.sp05())
+	ui.button_stack(id, fr, align ?? 'l', valign ?? 'c', min_w, 0)
+	let s = set_toggle_state(id, on, field, readonly)
+	let state =
+		(s.readonly ? STATE_READONLY : 0)
+		| (!s.readonly && hit(id) ? STATE_HOVER : 0)
+		| (ui.focused(id) ? STATE_FOCUSED : 0)
+		| (s.value ? STATE_ITEM_SELECTED : 0)
+	ui.bb('toggle', state, 'all', null, null, ui.sp05())
+	ui.color('toggle-text', state)
+	ui.text('', text, 0, 'c', 'c')
+	ui.end_stack()
+	return s.value
+}
+
 //// RADIO -------------------------------------------------------------------
 
 let radio = {...checkbox}
@@ -8344,7 +8412,7 @@ ui.radio_list = function(
 
 */
 
-function set_dropdown_open(id, s, open, picked) {
+function set_dropdown_open(id, s, open, picked, canceled) {
 	if (!!s.open == !!open)
 		return
 	s.open = open
@@ -8354,6 +8422,7 @@ function set_dropdown_open(id, s, open, picked) {
 	} else {
 		s.closed = true
 		s.picked = !!picked
+		s.canceled = !!canceled
 	}
 }
 
@@ -8379,15 +8448,16 @@ ui.dropdown_picked = function(id) {
 	return !!ui.state_of(id, 'picked')
 }
 
-// sets ui.state(id).opened, .closed and .picked in the pass in which the
-// dropdown opened or closed. responds to ui.set_dropdown_open() and to a
-// click on the picker's id+'.pick' and id+'.cancel' buttons. sets
+// sets ui.state(id).opened, .closed, .picked and .canceled in the pass in
+// which the dropdown opened or closed. responds to ui.set_dropdown_open() and
+// to a click on the picker's id+'.pick' and id+'.cancel' buttons. sets
 // ui.state(id).open.
 ui.dropdown_update = function(id, s, disabled) {
 
 	s.opened = false
 	s.closed = false
 	s.picked = false
+	s.canceled = false
 
 	if (disabled) {
 		set_dropdown_open(id, s, false)
@@ -8426,7 +8496,7 @@ ui.dropdown_update = function(id, s, disabled) {
 			ui.capture_keys()
 	}
 
-	set_dropdown_open(id, s, open, picked)
+	set_dropdown_open(id, s, open, picked, escape || cancel)
 }
 
 // opened by ui.set_dropdown_open().
@@ -8512,16 +8582,21 @@ function list_dropdown_update(id, s) {
 
 	let picker_id = id+'.picker'
 	let items = s.items
+	let is_multi = s.field?.is_values
 
 	ui.dropdown_update(id, s, readonly)
 
 	if (!readonly && clicked(id+'.value'))
 		set_dropdown_open(id, s, !s.open, true)
 
-	if (s.opened)
+	if (s.opened) {
 		s.revert_value = s.value
-	else if (s.closed)
-		s.input_value = s.picked ? ui.value(picker_id) : s.revert_value
+	} else if (s.closed) {
+		if (!is_multi)
+			s.input_value = s.picked ? ui.value(picker_id) : s.revert_value
+		else if (s.canceled)
+			s.input_value = s.revert_value
+	}
 
 	if (readonly)
 		return
@@ -8535,15 +8610,10 @@ function list_dropdown_update(id, s) {
 		s.input_value = null
 
 	// arrow keys move the selection with the list closed.
-	if (!s.open && ui.focused(id)) {
+	if (!is_multi && !s.open && ui.focused(id)) {
 		let d = ui.keydown('arrowup') && -1 || ui.keydown('arrowdown') && 1 || 0
-		if (d) {
-			let item_i = items.indexOf(s.value)
-			item_i = ui.valid_list_index(
-				item_i >= 0 ? item_i + d : d >= 0 ? 0 : items.length-1,
-				items)
-			s.input_value = item_i != null ? items[item_i] : null
-		}
+		if (d)
+			s.input_value = next_list_item(items, s.value, d)
 	}
 }
 
@@ -8618,16 +8688,16 @@ ui.list_dropdown_inline = function(id, items, value, field,
 }
 
 ui.enum_input = function(id, value, field, fr, align, max_w, w, readonly) {
-	return ui.list_dropdown(id, field.enum_values, value, field,
+	return ui.list_dropdown(id, field.enum_items(), value, field,
 		fr, align, max_w, w, readonly)
 }
 
 ui.enum_toggle = function(
 	id, value, field, fr, align, valign, min_w, readonly
 ) {
-	ui.mv(ui.sp05())
-	return ui.hlist(id, field.enum_values, value, field,
-		fr ?? 0, align ?? 'l', valign,
+	// ui.mv(ui.sp05()) // make it match other inputs
+	return ui.hlist(id, field.enum_items(), value, field,
+		fr ?? 0, align ?? 'l', valign ?? 'c',
 		'c', 'c', 1, // item_align, item_valign, item_fr
 		null, min_w,
 		// item_pad_l, item_pad_r, item_pad_y, item_h, item_gap

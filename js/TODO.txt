@@ -6,6 +6,8 @@ GLITCHES:
 - splitter doesn't collapse completely (double-border shows).
 - grid: shrinking col to min makes separator border disappear
 - scrollbar only hits on scroll thumb
+- when list_dropdown picker popup changes anchor side to the top, the row
+value should be on the bottom :facepalm:
 
 BEHAVIOR:
 - ui.date_input: enter to close while focused on input cancels instead of pick.
@@ -23,6 +25,7 @@ INPUTS
 	  the box or the dropdown?
 	- problem: passing state between API fragment (input_box()/end_input_box())
 
+- multi-select lookup_input
 
 NAV INPUTS
 ------------------------------------------------------------------------------
