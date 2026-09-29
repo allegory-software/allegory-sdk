@@ -54,6 +54,13 @@ frame's records, which do not include the widget, and the browser has no
 element of it to write into, so nothing can have happened to it yet: it has
 no edge and no input value to report.
 
+A stored input is the exception. When code calls ui.store() right before
+building an input, the input keeps its value in ui.settings under its id, and
+ui.value(id) answers from there while no state exists for that id. The input
+takes the stored value in place of the caller's on every frame, and the
+caller gets it back as the return value; the caller's value is only a default
+for when the store has none.
+
 State survives between frames only while some code touches its id every
 frame.
 
@@ -170,7 +177,8 @@ same way color_picker is color_input's: date_input normalizes the value to a
 day number or null before it ever reaches calendar, so calendar itself never
 has to accept or preserve a value it cannot interpret.
 
-There is no uncontrolled shape. The caller passes a value on every frame.
+There is no uncontrolled shape, except a stored input (see WIDGET STATE).
+The caller passes a value on every frame.
 
 null is a value -- database null, no value at all. Every input accepts null
 and returns it, and the user clears an input to null with the Delete key
@@ -180,7 +188,8 @@ box that was given nothing. Drawing null differently is not done yet,
 except in a slider: with no value it draws its thumb in the middle.
 
 An input ignores the caller's value on any frame in which the user
-interacted with it, and takes the caller's value on every other frame. It
+interacted with it, and takes the caller's value on every other frame; a
+stored input takes the stored value instead while the store has one. It
 returns what it holds, on every call.
 
 The user interacted when the widget itself read an input event addressed to
@@ -327,12 +336,6 @@ Cosmin decides these; do not fill them in by reading code.
 	early to put them back in order by hand. Found 2026-09-18. A queue that
 	holds key events and text changes together, consumed in order, would
 	settle it.
-
-- ui.value(id) and ui.input_value(id) read one state object, named by id.
-	A widget built out of others may end up copying its children's values
-	into its own state only so that those two can answer for it. If that
-	starts happening, the fix is to make them methods that read the
-	children directly, not to copy. Found 2026-09-20.
 
 - A parent seeds a child's state with ui.state(), which also keeps the id
 	alive -- a side effect the parent has no reason to cause. ui.state_of()
