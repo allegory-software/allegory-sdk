@@ -136,7 +136,7 @@ const {
 	empty_set, set_equals,
 	assign, entries, insert, remove_value,
 	noop, return_true, do_after, do_before,
-	runafter,
+	runafter, timer,
 	copy_to_clipboard,
 	freelist,
 	hsl_to_rgb_out,
@@ -1415,6 +1415,80 @@ ui.stateful_widget = function(create) {
 		}
 		return e.build.apply(e, arguments)
 	}
+}
+
+//// SAVED STATE -------------------------------------------------------------
+
+/*
+
+APP API
+	ui.saved_state <-> {id->{k->v}}      per-id saved widget state
+	ui.save_unsaved_state (saved_state) app hook to persist saved state
+	ui.save_state_delay <- n             seconds to wait before saving
+	ui.set_saved_value (id, v)           set a saved input's value
+WIDGET API
+	ui.save_state (id, k, v)             save a state var
+	ui.saved_value (id, default, [field]) define a saved input with a default
+
+*/
+
+ui.saved_state = obj()
+ui.save_state_delay = 1
+ui.save_unsaved_state = noop
+
+let value_defaults = map()
+let value_enum_fields = map()
+
+ui.saved_value = function(id, default_value, field) {
+	value_defaults.set(id, default_value)
+	if (field?.known_values)
+		value_enum_fields.set(id, field)
+}
+
+function read_saved_value(id) {
+	let v = ui.saved_state[id]?.value
+	let field = value_enum_fields.get(id)
+	if (v === undefined || field && (v === null
+			? field.not_null : !field.known_values.has(v)))
+		v = value_defaults.get(id)
+	return v
+}
+
+ui.set_saved_value = function(id, v) {
+	assert(value_defaults.has(id), 'not a saved value: ', id)
+	ui.save_state(id, 'value', v)
+}
+
+let saved_state_changed
+let has_unsaved_state
+
+function save_unsaved_state() {
+	has_unsaved_state = false
+	ui.save_unsaved_state(ui.saved_state)
+}
+let save_unsaved_state_after = timer(save_unsaved_state)
+
+window.addEventListener('pagehide', function() {
+	if (!has_unsaved_state)
+		return
+	save_unsaved_state_after(null)
+	save_unsaved_state()
+})
+
+ui.save_state = function(id, k, v) {
+	let t = attr(ui.saved_state, id)
+	if (t[k] === v)
+		return
+	t[k] = v
+	saved_state_changed = true
+}
+
+function schedule_save_unsaved_state() {
+	if (!saved_state_changed)
+		return
+	saved_state_changed = false
+	has_unsaved_state = true
+	save_unsaved_state_after(ui.save_state_delay)
 }
 
 //// TUI STYLE ---------------------------------------------------------------
@@ -2696,6 +2770,7 @@ function redraw_all() {
 	}
 
 	apply_cursor()
+	schedule_save_unsaved_state()
 
 	// focusing_id resets once per frame, after the rebuild loop, not once per
 	// build pass: resolve_focus_first() runs after register, so the widget's
@@ -3669,7 +3744,7 @@ const SB_CW        = BOX_CT_ARGS+2 // content w,h
 const SB_ID        = BOX_CT_ARGS+4
 const SB_SX        = BOX_CT_ARGS+5 // scroll x,y
 const SB_STATE     = BOX_CT_ARGS+7
-const SB_SCROLL_ID = BOX_CT_ARGS+8 // x_id,y_id: state ids sync'ed scrollboxes
+const SB_SCROLL_ID = BOX_CT_ARGS+8 // x_id,y_id: state ids for sync'ed scrollboxes
 
 const SB_OVERFLOW_AUTO     = 0
 const SB_OVERFLOW_HIDE     = 1
@@ -5088,13 +5163,13 @@ function reset_text_font() {
 	cx.font = default_font_str
 }
 
-//// INPUT STATE -------------------------------------------------------------
+//// INPUT VALUE -------------------------------------------------------------
 
 /*
 
 	ui.value       (id) -> v               what the input holds right now
 	ui.input_value (id) -> v | undefined   interaction value, if interacted thi frame
-	ui.set_value   (state, v, [field])
+	ui.set_value   (id, state, v, [field])
 
 */
 
@@ -5103,26 +5178,38 @@ function reset_text_font() {
 // the pass.
 ui.value = function(id) {
 	let s = ui.state_of(id)
-	if (!s)
-		return
-	return s.input_value !== undefined ? s.input_value : s.value
+	if (s?.input_value !== undefined)
+		return s.input_value
+	else if (value_defaults.has(id))
+		return read_saved_value(id)
+	else
+		return s?.value
 }
 
 ui.input_value = function(id) {
 	return ui.state_of(id, 'input_value')
 }
 
-ui.set_value = function(s, value, field) {
+function set_value(id, s, value, field) {
 	let value0 = s.value
-	if (s.input_value !== undefined)
+	let is_saved = value_defaults.has(id)
+	assert(!is_saved || value == null, 'saved input takes no value: ', id)
+	if (s.input_value !== undefined) {
 		value = s.input_value
-	else if (value !== value0)
-		s.revert_value = value
+		if (is_saved)
+			ui.save_state(id, 'value', value)
+	} else {
+		if (is_saved)
+			value = read_saved_value(id)
+		if (value !== value0)
+			s.revert_value = value
+	}
 	s.value = value
 	if (field && (s.input_value !== undefined || value !== value0))
 		field.validator.validate(value)
 	return value
 }
+ui.set_value = set_value
 
 function copy_input_value(field, v) {
 	if (v != null)
@@ -5217,7 +5304,7 @@ ui.text = function(
 		let value0 = s.value
 		let field0 = s.field
 		s.field = field
-		value = ui.set_value(s, repl(value ?? null, '', null))
+		value = set_value(id, s, repl(value ?? null, '', null))
 		if (s.text === undefined || s.input_value === undefined
 				&& (value !== value0 || field != field0)) {
 			s.text = value == null ? '' : field.to_input(value)
@@ -6425,7 +6512,7 @@ ss.create = function(cmd, id, answer_con, fr, align, valign, min_w, min_h) {
 		s.free = ss_free
 		answer_con.recv = async function(cb) {
 			answer_con.frame = await unpack_frame(cb)
-			ui.animate()
+			animate()
 		}
 	}
 
@@ -6797,7 +6884,13 @@ function split(hv, id, size, unit, fixed_side,
 	let snap_px = fixed ? 50 * dpr : 50
 	if (fixed && measured_wh == null)
 		ui.rebuild('measure') // needed or `collapsed` may start out wrong and stay wrong.
-	size = s.size ?? size
+	if (s.size != null) {
+		size = s.size
+	} else {
+		let saved_size = ui.saved_state[id]?.size
+		if (saved_size != null)
+			size = saved_size == 'inf' ? 1/0 : saved_size
+	}
 	let side_fr  = fixed ? 0 : (size ?? 0.5) // fr/px of the fixed_side pane
 	let side_min = fixed ? (size ?? 0) * dpr : 0
 	if (cs?.dragging) {
@@ -6817,10 +6910,12 @@ function split(hv, id, size, unit, fixed_side,
 			side_min = size_px
 		else
 			side_fr = size_px / max_size
-		if (cs.drop)
+		if (cs.drop) {
 			s.size = fixed
 				? side_min != 0 && side_min == max_size ? 1/0 : side_min / dpr
 				: side_fr
+			ui.save_state(id, 'size', s.size == 1/0 ? 'inf' : s.size)
+		}
 	}
 
 	ui[hv](split_fr, gap, align, valign, min_w, min_h)
@@ -7072,7 +7167,7 @@ function hvlist(hv, id, items, value, field,
 	s.readonly = readonly
 	s.hv = hv
 	ui.state(id, list_update)
-	value = ui.set_value(s, value, field)
+	value = set_value(id, s, value, field)
 	ui.focusable(id)
 	let list_focused = ui.focused(id)
 	// reveal the focused item on tab-focusing the list and on arrow keys.
@@ -7518,7 +7613,7 @@ ui.num_slider = function(id, value, field, readonly) {
 	let from = field.slider_min ?? field.min ?? 0
 	let to = field.slider_max ?? field.max ?? 1
 	s = ui.state(id, num_slider_update)
-	value = ui.set_value(s, value, s.editing ? null : field)
+	value = set_value(id, s, value, s.editing ? null : field)
 
 	let p_min = slider_p(field.min ?? from, from, to)
 	let p_max = slider_p(field.max ?? to, from, to)
@@ -7705,7 +7800,7 @@ slider.create = function(cmd, id, value, field, readonly) {
 
 	s.pad_x = pad_x
 	ui.state(id, slider_update)
-	value = ui.set_value(s, value, field)
+	value = set_value(id, s, value, field)
 
 	let p_min = slider_p(field.min ?? slider_min, slider_min, slider_max)
 	let p_max = slider_p(field.max ?? slider_max, slider_min, slider_max)
@@ -7951,7 +8046,7 @@ function toggle_create(
 	s.readonly = readonly
 	s = ui.state(id, toggle_update)
 	ui.focusable(id)
-	on = ui.set_value(s, on, field)
+	on = set_value(id, s, on, field)
 	let hs = hit(id) || hit(id+'.label')
 	let focused = ui.focused(id)
 	let i = ui_cmd_box_begin(cmd, fr ?? 0, align ?? 'c', valign ?? 'c',
@@ -8132,7 +8227,7 @@ ui.radio_group = function(group_id, value, field, readonly) {
 	s.field = field
 	s.readonly = readonly ?? field.readonly
 	s = ui.state(group_id, radio_group_update)
-	value = ui.set_value(s, value, field)
+	value = set_value(group_id, s, value, field)
 	radio_group_stack.push(group_id)
 	return value
 }
@@ -8473,7 +8568,7 @@ ui.list_dropdown = function(
 	s.field = field
 	s.readonly = readonly
 	let open = ui.dropdown(id, list_dropdown_update)
-	value = ui.set_value(s, value, open ? null : field)
+	value = set_value(id, s, value, open ? null : field)
 
 	if (!open && ui.focus_inside(picker_id))
 		ui.focus(id)
@@ -8765,7 +8860,7 @@ ui.calendar = function(id, sel_day, ranges, fr, align, valign, min_w, min_h) {
 	s.ranges = ranges
 	let day0 = s.value
 	ui.state(id, calendar_update)
-	sel_day = ui.set_value(s, sel_day)
+	sel_day = set_value(id, s, sel_day)
 
 	let h = s.h ?? 0
 	let cell_w = snap(ui.em(2.5), 2)
@@ -8899,7 +8994,7 @@ ui.date_input = function(id, v, field, fr, align, valign, min_w, readonly) {
 		ui.select_text(input_id, 0, 1/0)
 	}
 
-	let value = ui.set_value(s, v)
+	let value = set_value(id, s, v)
 
 	let input_align = parse_align(align ?? 'r')
 	input_align = input_align == ALIGN_END ? 'sr'
@@ -9217,7 +9312,7 @@ function gradient_slider(draw_gradient, name, max_value, key_step,
 			let field = s.field
 			s = ui.state(id, update)
 			let prev_value = s.value
-			value = ui.set_value(s, value)
+			value = set_value(id, s, value)
 			if (is_slider_value(value))
 				s.valid_value = value
 
@@ -9343,7 +9438,7 @@ ui.color_picker = function(id, hex, field) {
 	s = ui.state(id, color_picker_update)
 	let prev_hex = s.value
 	let has_input_value = s.input_value !== undefined
-	let value = ui.set_value(s, hex)
+	let value = set_value(id, s, hex)
 	let has_caller_value_change = !has_input_value && value !== prev_hex
 
 	let hue_s = ui.state_of(hue_id)
@@ -9434,7 +9529,7 @@ ui.color_input = function(id, value, field, fr, min_w, readonly) {
 	if (!open && ui.focus_inside(picker_id))
 		ui.focus(id)
 
-	value = ui.set_value(s, value, open ? null : field)
+	value = set_value(id, s, value, open ? null : field)
 
 		let state =
 			(readonly ? STATE_READONLY : 0)
@@ -9725,7 +9820,7 @@ ui.widget('bg_dots', {
 
 		cx.restore()
 
-		ui.animate()
+		animate()
 	},
 
 })
@@ -9836,7 +9931,6 @@ ui.box_widget('frame_graph_overlapped', {
 		let i = ui_cmd_box_begin(cmd, fr, align, valign, min_w, min_h)
 		a[n++] = overlapped_frame_graphs
 		ui_cmd_box_end(i)
-		//ui.animate()
 	},
 	draw: function(a, i) {
 		let x0 = a[i+0]
@@ -9855,7 +9949,6 @@ ui.box_widget('frame_graph', {
 		a[n++] = name
 		a[n++] = ui.frame_graphs[name]
 		ui_cmd_box_end(i)
-		//ui.animate()
 	},
 	draw: function(a, i) {
 		let x0 = a[i+0]

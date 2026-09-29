@@ -1,7 +1,7 @@
 CANVAS-UI ARCHITECTURE ISSUES AND SOLUTIONS
 ==============================================================================
 
-THE I-DEPEND-ON-A-WIDGET-NOT-BUILT-YET PROBLEM
+THE "I DEPEND ON A WIDGET NOT BUILT YET" PROBLEM
 ------------------------------------------------------------------------------
 i.e. widgets depending on the state of other widgets that appear later in the
 frame. IMGUI makes it worse, but the problem itself is not IMGUI-specific.
@@ -39,7 +39,7 @@ NOTE: layers only work with popups because you want layers when things overlap
 and only popups do that (other boxes don't overflow).
 
 
-THE I-CHANGED-A-WIDGET-ALREADY-BUILT PROBLEM
+THE "I CHANGED A WIDGET ALREADY BUILT" PROBLEM
 ------------------------------------------------------------------------------
 * solution: forced re-layouting without redrawing with ui.relayout():
 	* CON: doubles the layout time so we can't do it on mouse move or animations.
@@ -47,6 +47,12 @@ THE I-CHANGED-A-WIDGET-ALREADY-BUILT PROBLEM
 	  on the second pass (in practice conditions are edge events so it's ok).
 	* PRO: makes update callbacks work on the first frame by asking for
 	  a second frame.
+
+
+THE WIDGET STORED STATE PROBLEM
+------------------------------------------------------------------------------
+A widget needs a setting before the widget that is editing that setting has run.
+It needs the default on first use, the stored value afterward, and the user’s latest edit during interaction.
 
 
 THE MEASURE-WHILE-BUILDING PROBLEM

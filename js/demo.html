@@ -32,14 +32,21 @@ ui.load_font('tabler_filled' , 'icons/tabler-icons-filled.woff2')
 ui.load_font('mono'          , 'fonts/jetbrains-mono-nl-regular.woff2')
 
 let demo_state = json_arg(load('demo_state')) ?? {}
+ui.saved_state = json_arg(load('ui_saved_state')) ?? {}
+ui.save_state_delay = 0
+ui.save_unsaved_state = function(saved_state) {
+	save('ui_saved_state', json(saved_state))
+}
 if (demo_state.theme)
 	ui.set_screen_theme(demo_state.theme)
 
 ui.DEBUG      = demo_state.debug ?? true
 ui.DEBUG_PANE = true
 ui.TUI        = demo_state.tui   ?? false
-let selected_demo = location.search.match('demo=([^&]+)')?.[1]
-	?? demo_state.demo ?? 'tabs'
+ui.saved_value('demos_list', 'tabs')
+let url_demo = location.search.match('demo=([^&]+)')?.[1]
+if (url_demo)
+	attr(ui.saved_state, 'demos_list').value = url_demo
 let remote_demo = location.search.match('remote=([^&]+)')?.[1]
 
 ui.focus('demos_list')
@@ -51,21 +58,6 @@ ui.focus('demos_list')
 function save_demo_state(k, v) {
 	demo_state[k] = v
 	save('demo_state', json(demo_state))
-}
-
-function load_split_size(id) {
-	let size = demo_state[id+'_size']
-	ui.state_init(id, 'size', size == 'inf' ? 1/0 : size)
-}
-
-function save_split_size(id) {
-	if (ui.clickup && ui.captured_id == id) {
-		let size = ui.state_of(id, 'size')
-		if (size == 1/0)
-			size = 'inf'
-		if (size != demo_state[id+'_size'])
-			save_demo_state(id+'_size', size)
-	}
 }
 
 let demos = []
@@ -406,10 +398,10 @@ for (let i = 0; i < grid_demo_source_fields.length; i++)
 let grid_demo_base_cols = grid_types_cols.split(/\s+/).filter(
 	col => col != 'parent_id')
 let grid_demo_first_cols = grid_demo_base_cols
-let first_col = grid_demo_first_cols[0]
 let grid_demo_first_col_field = ui.create_field({
 	type: 'enum',
 	enum_values: grid_demo_first_cols,
+	not_null: true,
 })
 let grid_demo_base_field_count = grid_demo_source_fields.length
 
@@ -555,6 +547,32 @@ let grid_config_cols_field = ui.create_field({
 	not_null: true,
 })
 
+ui.saved_value('grid_config_tree', true)
+ui.saved_value('grid_config_groups', false)
+ui.saved_value('grid_config_auto_expand', false)
+ui.saved_value('grid_config_can_focus_cells', true)
+ui.saved_value('grid_config_can_select_multiple', true)
+ui.saved_value('grid_config_can_select_non_siblings', true)
+ui.saved_value('grid_config_can_change_parent', true)
+ui.saved_value('grid_config_auto_focus_first_cell', true)
+ui.saved_value('grid_config_enter_edit_on_click', false)
+ui.saved_value('grid_config_enter_edit_on_click_focused', false)
+ui.saved_value('grid_config_auto_jump_cells', true)
+ui.saved_value('grid_config_stay_in_edit_mode', true)
+ui.saved_value('grid_config_auto_advance_row', false)
+ui.saved_value('grid_config_exit_edit_on_escape', true)
+ui.saved_value('grid_config_validate_on_load', true)
+ui.saved_value('grid_config_readonly', false)
+ui.saved_value('grid_config_label_pos', 'left', grid_config_label_pos_field)
+ui.saved_value('grid_config_split_hv', 'v', grid_config_split_field)
+ui.saved_value('grid_config_rows', 1000, grid_config_rows_field)
+ui.saved_value('grid_config_cols', grid_demo_base_field_count,
+	grid_config_cols_field)
+ui.saved_value('grid_config_tree_depth_slider', 4)
+ui.saved_value('grid_config_first_col', grid_demo_first_cols[0],
+	grid_demo_first_col_field)
+ui.saved_value('grid_config_fast_path', ui.GRID_FAST_PATH)
+
 let grid_config_detail_rows = []
 for (let master_id = 1; master_id <= 20; master_id++)
 	for (let k = 1; k <= 3; k++)
@@ -588,33 +606,17 @@ function set_grid_config_null(nav) {
 
 demos.grid = function() {
 let state = ui.state('grid_config_state')
-state.tree ??= true
-state.groups ??= false
-state.auto_expand ??= false
-state.can_focus_cells ??= true
-state.can_select_multiple ??= true
-state.can_select_non_siblings ??= true
-state.can_change_parent ??= true
-state.auto_focus_first_cell ??= true
-state.enter_edit_on_click ??= false
-state.enter_edit_on_click_focused ??= false
-state.auto_jump_cells ??= true
-state.stay_in_edit_mode ??= true
-state.auto_advance_row ??= false
-state.exit_edit_on_escape ??= true
-state.validate_on_load ??= true
-state.readonly ??= false
-state.label_pos ??= 'left'
-state.split_hv ??= 'v'
 
-state.row_count ??= 1000
+let row_count = ui.value('grid_config_rows')
 let col_max = max(grid_demo_base_field_count,
-	floor(1000000 / state.row_count))
-state.col_count ??= grid_demo_base_field_count
-state.col_count = min(state.col_count, col_max)
+	floor(1000000 / row_count))
+let col_count = ui.value('grid_config_cols')
+if (col_count > col_max) {
+	col_count = col_max
+	ui.set_saved_value('grid_config_cols', col_count)
+}
 
 let tree_depth_slider_id = 'grid_config_tree_depth_slider'
-state.tree_depth ??= 4
 state.tree_depth_slider_field ??= ui.create_field({
 	type: 'number',
 	min: 0,
@@ -623,8 +625,11 @@ state.tree_depth_slider_field ??= ui.create_field({
 	slider_markers: false,
 })
 let tree_depth_slider_field = state.tree_depth_slider_field
+let tree_depth = round(ui.value(tree_depth_slider_id))
 
-state.first_col = first_col
+let first_col = ui.value('grid_config_first_col')
+let readonly = ui.value('grid_config_readonly')
+let auto_expand = ui.value('grid_config_auto_expand')
 
 if (!state.rowset_name || state.recreate) {
 	if (state.rowset_name)
@@ -632,10 +637,10 @@ if (!state.rowset_name || state.recreate) {
 	state.generation = (state.generation ?? 0) + 1
 	state.rowset_name = 'grid_config_rowset_'+state.generation
 	ui.rowsets[state.rowset_name] = make_grid_demo_rowset(
-		state.row_count,
-		state.tree_depth,
-		state.first_col,
-		state.col_count)
+		row_count,
+		tree_depth,
+		first_col,
+		col_count)
 	state.grid_id = 'grid_config_grid_'+state.generation
 	state.recreate = false
 }
@@ -643,60 +648,56 @@ if (!state.rowset_name || state.recreate) {
 let group_col = first_col == 'status' ? 'color' : 'status'
 let grid_opt = {
 	rowset_name: state.rowset_name,
-	flat: !state.tree,
-	tree_col: state.first_col,
-	group_by: state.groups ? group_col : null,
-	can_focus_cells: state.can_focus_cells,
-	can_select_multiple: state.can_select_multiple,
-	can_select_non_siblings: state.can_select_non_siblings,
-	can_change_parent: state.can_change_parent,
-	auto_focus_first_cell: state.auto_focus_first_cell,
-	enter_edit_on_click: state.enter_edit_on_click,
-	enter_edit_on_click_focused: state.enter_edit_on_click_focused,
-	auto_jump_cells: state.auto_jump_cells,
-	stay_in_edit_mode: state.stay_in_edit_mode,
-	auto_advance_row: state.auto_advance_row,
-	exit_edit_on_escape: state.exit_edit_on_escape,
-	validate_on_load: state.validate_on_load,
-	can_change_rows: !state.readonly,
+	flat: !ui.value('grid_config_tree'),
+	tree_col: first_col,
+	group_by: ui.value('grid_config_groups') ? group_col : null,
+	can_focus_cells: ui.value('grid_config_can_focus_cells'),
+	can_select_multiple: ui.value('grid_config_can_select_multiple'),
+	can_select_non_siblings: ui.value('grid_config_can_select_non_siblings'),
+	can_change_parent: ui.value('grid_config_can_change_parent'),
+	auto_focus_first_cell: ui.value('grid_config_auto_focus_first_cell'),
+	enter_edit_on_click: ui.value('grid_config_enter_edit_on_click'),
+	enter_edit_on_click_focused:
+		ui.value('grid_config_enter_edit_on_click_focused'),
+	auto_jump_cells: ui.value('grid_config_auto_jump_cells'),
+	stay_in_edit_mode: ui.value('grid_config_stay_in_edit_mode'),
+	auto_advance_row: ui.value('grid_config_auto_advance_row'),
+	exit_edit_on_escape: ui.value('grid_config_exit_edit_on_escape'),
+	validate_on_load: ui.value('grid_config_validate_on_load'),
+	can_change_rows: !readonly,
 }
 let grid_nav = ui.state_of(state.grid_id, 'e')
 if (grid_nav)
-	grid_nav.auto_expand = state.auto_expand
+	grid_nav.auto_expand = auto_expand
 
-load_split_size('grid_config_split')
 ui.hsplit('grid_config_split', 300, 'px', 2)
-save_split_size('grid_config_split')
 
 ui.v()
 ui.p(ui.sp())
 ui.h(0, ui.sp2(), 'l')
 	ui.label('grid_config_readonly', 'Readonly', 0)
 	ui.h(0, ui.sp(), 'l')
-		state.readonly = ui.checkbox('grid_config_readonly',
-			state.readonly, null, 0, 'l')
+		ui.checkbox('grid_config_readonly', null, null, 0, 'l')
 		if (ui.button('grid_config_reset', 'Reset') && grid_nav)
 			grid_nav.revert_changes()
 		if (ui.button('grid_config_set_null', 'Set null') && grid_nav)
 			set_grid_config_null(grid_nav)
 	ui.end_h()
 	ui.label('grid_config_label_pos', 'Labels', 0)
-	state.label_pos = ui.enum_toggle('grid_config_label_pos',
-		state.label_pos, grid_config_label_pos_field)
-	state.split_hv = ui.enum_toggle('grid_config_split_hv',
-		state.split_hv, grid_config_split_field)
+	let label_pos = ui.enum_toggle('grid_config_label_pos',
+		null, grid_config_label_pos_field)
+	let split_hv = ui.enum_toggle('grid_config_split_hv',
+		null, grid_config_split_field)
 ui.end_h()
 if (grid_nav)
-	grid_nav.can_change_rows = !state.readonly
+	grid_nav.can_change_rows = !readonly
 
-ui.hvsplit(state.split_hv, 'grid_config_form_split')
-	save_split_size('grid_config_form_split')
-	ui.hvsplit(state.split_hv == 'h' ? 'v' : 'h', 'grid_config_detail_split')
-		save_split_size('grid_config_detail_split')
+ui.hvsplit(split_hv, 'grid_config_form_split')
+	ui.hvsplit(split_hv == 'h' ? 'v' : 'h', 'grid_config_detail_split')
 		ui.grid(state.grid_id, grid_opt)
 		grid_nav = ui.state_of(state.grid_id, 'e')
 		if (grid_nav)
-			grid_nav.auto_expand = state.auto_expand
+			grid_nav.auto_expand = auto_expand
 	ui.splitter()
 		let master_row_id = grid_nav?.focused_row_cell_val('id')
 		ui.grid('grid_config_detail', {
@@ -708,13 +709,13 @@ ui.hvsplit(state.split_hv, 'grid_config_form_split')
 ui.splitter()
 	ui.m(ui.sp8())
 	ui.v_aligned(1, ui.sp2(), 'l', 't', ui.em(16))
-		let is_label_left = state.label_pos == 'left'
-			|| state.label_pos == 'left-right-align'
+		let is_label_left = label_pos == 'left'
+			|| label_pos == 'left-right-align'
 		if (grid_nav)
 			for (let col in grid_config_input_opt) {
 				let opt = grid_config_input_opt[col]
 				opt.nav = grid_nav
-				opt.label_pos = state.label_pos
+				opt.label_pos = label_pos
 				ui.box_args(1, 's', 'c')
 				ui.nav_input('grid_config_'+col, opt)
 				if (opt.errors == 'label') {
@@ -737,71 +738,63 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 		ui.v_aligned(0)
 		ui.h(1, ui.sp1())
 			ui.text('', 'Rows', 0)
-			state.row_count = ui.enum_toggle('grid_config_rows',
-				state.row_count, grid_config_rows_field)
+			ui.enum_toggle('grid_config_rows', null, grid_config_rows_field)
 		ui.end_h()
 
 		ui.h(1, ui.sp1())
 			ui.text('', 'Cols', 0)
-			state.col_count = ui.enum_toggle('grid_config_cols',
-				state.col_count, grid_config_cols_field)
+			ui.enum_toggle('grid_config_cols', null, grid_config_cols_field)
 		ui.end_h()
 
 		ui.h(1, ui.sp1())
 			ui.text('', 'Tree depth', 0, 'l')
-			state.tree_depth = round(ui.slider(
-				tree_depth_slider_id, state.tree_depth, tree_depth_slider_field))
-			ui.text('', state.tree_depth, 2, 'r')
+			ui.slider(tree_depth_slider_id, null, tree_depth_slider_field)
+			ui.text('', tree_depth, 2, 'r')
 		ui.end_h()
 
 		ui.end_v_aligned()
-		ui.text('', 'Cells: '+state.row_count * state.col_count, 0, 'l')
+		ui.text('', 'Cells: '+row_count * col_count, 0, 'l')
 
 		ui.h(1, ui.sp1())
 			ui.text('', 'Col #1', 0, 'l')
-			first_col = ui.list_dropdown('grid_config_first_col',
-				grid_demo_first_cols, first_col, grid_demo_first_col_field)
-			if (first_col != null) {
-				state.first_col = first_col
-				first_col = state.first_col
-			}
+			ui.list_dropdown('grid_config_first_col',
+				grid_demo_first_cols, null, grid_demo_first_col_field)
 		ui.end_h()
 
-		function grid_config_toggle(id, label, key) {
+		function grid_config_toggle(id, label) {
 			ui.h(1, ui.sp(), 's', 'c')
 				ui.label(id, label, 1, 'l', 'c')
-				state[key] = ui.toggle(id, state[key], null, 0)
+				ui.toggle(id, null, null, 0)
 			ui.end_h()
 		}
 
-		grid_config_toggle('grid_config_tree', 'Tree', 'tree')
-		grid_config_toggle('grid_config_groups', 'Groups', 'groups')
-		grid_config_toggle('grid_config_auto_expand',
-			'Expand cells', 'auto_expand')
-		grid_config_toggle('grid_config_can_focus_cells',
-			'Focus cells', 'can_focus_cells')
+		grid_config_toggle('grid_config_tree', 'Tree')
+		grid_config_toggle('grid_config_groups', 'Groups')
+		grid_config_toggle('grid_config_auto_expand', 'Expand cells')
+		grid_config_toggle('grid_config_can_focus_cells', 'Focus cells')
 		grid_config_toggle('grid_config_can_select_multiple',
-			'Multiple selection', 'can_select_multiple')
+			'Multiple selection')
 		grid_config_toggle('grid_config_can_select_non_siblings',
-			'Select across parents', 'can_select_non_siblings')
+			'Select across parents')
 		grid_config_toggle('grid_config_can_change_parent',
-			'Change tree parents', 'can_change_parent')
+			'Change tree parents')
 		grid_config_toggle('grid_config_auto_focus_first_cell',
-			'Focus first cell', 'auto_focus_first_cell')
+			'Focus first cell')
 		grid_config_toggle('grid_config_enter_edit_on_click',
-			'Edit on click', 'enter_edit_on_click')
+			'Edit on click')
 		grid_config_toggle('grid_config_enter_edit_on_click_focused',
-			'Edit focused cell on click', 'enter_edit_on_click_focused')
+			'Edit focused cell on click')
 		grid_config_toggle('grid_config_auto_jump_cells',
-			'Jump across cells', 'auto_jump_cells')
+			'Jump across cells')
 		grid_config_toggle('grid_config_stay_in_edit_mode',
-			'Stay in edit mode', 'stay_in_edit_mode')
+			'Stay in edit mode')
 		grid_config_toggle('grid_config_auto_advance_row',
-			'Advance to next row', 'auto_advance_row')
+			'Advance to next row')
 		grid_config_toggle('grid_config_exit_edit_on_escape',
-			'Escape exits editing', 'exit_edit_on_escape')
+			'Escape exits editing')
 		grid_config_toggle('grid_config_validate_on_load',
-			'Validate on load', 'validate_on_load')
+			'Validate on load')
+		grid_config_toggle('grid_config_fast_path', 'Grid fast path')
 
 		if (ui.primary_button('grid_config_recreate', 'Recreate grid'))
 			state.recreate = true
@@ -1711,6 +1704,8 @@ ui.always_animate = false
 let recs_strlen = 0
 ui.main = function() {
 
+	ui.GRID_FAST_PATH = ui.value('grid_config_fast_path')
+
 	ui.v()
 
 		ui.sb('top_bar_sb', 0, 'auto', 'contain')
@@ -1750,10 +1745,6 @@ ui.main = function() {
 				if (ui.always_animate)
 					ui.animate()
 
-				ui.text('', 'grid fast path', 0)
-				ui.GRID_FAST_PATH =
-					ui.toggle('btn_grid_fast', ui.GRID_FAST_PATH, null, 0)
-
 				ui.color('label')
 				ui.text('', 'canvas-ui v'+ui.VERSION, 1, 'r')
 
@@ -1762,14 +1753,8 @@ ui.main = function() {
 
 		ui.h()
 
-			load_split_size('demos_split')
 			ui.hsplit('demos_split', ui.em(10), 'px')
-			save_split_size('demos_split')
-				let demo = ui.list('demos_list', demos_array, selected_demo)
-				if (demo != selected_demo) {
-					selected_demo = demo
-					save_demo_state('demo', demo)
-				}
+				let demo = ui.list('demos_list', demos_array)
 			ui.splitter()
 				ui.h()
 

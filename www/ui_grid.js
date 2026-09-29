@@ -1441,7 +1441,7 @@ function init(id, e) {
 
 		let value
 		if (e.is_picker) {
-			value = ui.set_value(ui.state(id), opt.value)
+			value = ui.set_value(id, ui.state(id), opt.value)
 			let ri = value ? e.row_index(value) : false
 			if (e.rows[ri] != value)
 				ri = false

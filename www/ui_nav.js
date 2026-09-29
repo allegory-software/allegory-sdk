@@ -4970,7 +4970,7 @@ ui.lookup_input = function(id, value, field, fr, min_w, readonly) {
 	if (!open && ui.focus_inside(picker_id))
 		ui.focus(id)
 
-	value = ui.set_value(s, value, open ? null : field)
+	value = ui.set_value(id, s, value, open ? null : field)
 
 	let val_field = lookup_val_field(field, ln)
 	let display_field = lookup_display_field(field, ln)

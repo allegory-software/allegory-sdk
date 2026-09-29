@@ -54,12 +54,14 @@ frame's records, which do not include the widget, and the browser has no
 element of it to write into, so nothing can have happened to it yet: it has
 no edge and no input value to report.
 
-A stored input is the exception. When code calls ui.store() right before
-building an input, the input keeps its value in ui.settings under its id, and
-ui.value(id) answers from there while no state exists for that id. The input
-takes the stored value in place of the caller's on every frame, and the
-caller gets it back as the return value; the caller's value is only a default
-for when the store has none.
+A stored input is the exception. When the app calls ui.saved_value(id,
+default) before any code reads id, the input keeps its value in
+ui.saved_state under its id, and ui.value(id) answers from there, or with the
+default while the store has none, whether or not state exists for that id.
+The input takes that value in place of the caller's on every frame, and the
+caller gets it back as the return value; the input ignores the caller's
+value. The input writes ui.saved_state only on a frame in which the user
+interacted with it.
 
 State survives between frames only while some code touches its id every
 frame.
@@ -189,8 +191,8 @@ except in a slider: with no value it draws its thumb in the middle.
 
 An input ignores the caller's value on any frame in which the user
 interacted with it, and takes the caller's value on every other frame; a
-stored input takes the stored value instead while the store has one. It
-returns what it holds, on every call.
+stored input takes the stored value instead, or its default while the store
+has none. It returns what it holds, on every call.
 
 The user interacted when the widget itself read an input event addressed to
 it -- a click, a drag, a key -- or when the browser wrote into it between
