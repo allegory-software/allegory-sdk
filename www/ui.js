@@ -4504,6 +4504,14 @@ translate[CMD_POPUP] = function(a, i) {
 			a[i+POPUP_SIDE_REAL] = side
 		}
 
+		let id = a[i+POPUP_ID]
+		if (id) {
+			let s = ui.state(id)
+			if (side != (s.side ?? side0))
+				ui.rebuild('popup_side')
+			s.side = side
+		}
+
 	}
 
 	// step from the margin rect to the border rect, which is the rect that
@@ -8519,10 +8527,14 @@ ui.list_dropdown = function(
 	ui.dropdown_picker(id, null, align == 'r' ? ']s' : 's')
 
 		if (open) {
+			let is_popup_above = ui.state_of(id+'.popup', 'side')
+				== POPUP_SIDE_INNER_BOTTOM
 			ui.v()
-				ui.color('text', state)
-				draw_value_row(value, field, value_id,
-					pad, chevron_w, max_w, null, align)
+				if (!is_popup_above) {
+					ui.color('text', state)
+					draw_value_row(value, field, value_id,
+						pad, chevron_w, max_w, null, align)
+				}
 				ui.scrollbox(picker_id+'.sb', 1, 'contain', 'auto', 's', 's')
 					ui.list(picker_id, items, value, field, 0,
 						's', 's', align, 'c', 0,
@@ -8531,6 +8543,11 @@ ui.list_dropdown = function(
 						align == 'l' ? pad * 2 + chevron_w : pad,
 						pad)
 				ui.end_scrollbox()
+				if (is_popup_above) {
+					ui.color('text', state)
+					draw_value_row(value, field, value_id,
+						pad, chevron_w, max_w, null, align)
+				}
 				ui.resizer(id+'.resizer', null, ui.em(16), 'y')
 			ui.end_v()
 		}

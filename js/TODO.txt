@@ -3,8 +3,6 @@ BUGS
 GLITCHES:
 - slider tooltip doesn't follow thumb center exactly
 - resizer moves a little on click even when no mouse move
-- when list_dropdown picker popup changes anchor side to the top, the row
-value should be on the bottom :facepalm:
 
 BEHAVIOR:
 - ui.date_input: enter to close while focused on input cancels instead of pick.
