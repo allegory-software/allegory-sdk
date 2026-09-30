@@ -3,8 +3,6 @@ BUGS
 GLITCHES:
 - slider tooltip doesn't follow thumb center exactly
 - resizer moves a little on click even when no mouse move
-- grid: shrinking col to min makes separator border disappear
-- scrollbar only hits on scroll thumb
 - when list_dropdown picker popup changes anchor side to the top, the row
 value should be on the bottom :facepalm:
 

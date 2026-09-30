@@ -64,8 +64,8 @@ Nav field attributes:
 		internal       : field cannot be made visible in a grid (false).
 		hidden         : field is hidden by default but can be made visible (false).
 		w              : field's width.
-		min_w          : field's minimum width, in pixels.
-		max_w          : field's maximum width, in pixels.
+		min_w          : field's minimum width, in em.
+		max_w          : field's maximum width, in em.
 
 	navigation:
 
@@ -729,7 +729,7 @@ ui.nav = function(id, opt) {
 				for (let fi = 0; fi < rowset.fields.length; fi++)
 					init_field(rowset.fields[fi], fi)
 				e.group_field = init_field({
-					hidden: true, name: '$group', label: 'Group', w: 160,
+					hidden: true, name: '$group', label: 'Group', w: 12,
 					is_group_field: true, movable: false, groupable: false,
 					build: build_group_label,
 				}, rowset.fields.length)

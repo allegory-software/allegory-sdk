@@ -181,7 +181,7 @@ return function()
 	types.str    = {text, maxlen = 200, nozero}
 	types.name   = {str, ai_ci}
 
-	types.bool  = {type = 'bool', w = 20, align = 'center', mdbx_type = 'bool'}
+	types.bool  = {type = 'bool', w = 2, align = 'center', mdbx_type = 'bool'}
 	types.bool0 = {bool , not_null, default(false, 'false')}
 	types.bool1 = {bool , not_null, default(true , 'true' )}
 
@@ -196,7 +196,7 @@ return function()
 	types.f32 = {type = 'number' , align = 'right', mdbx_type = 'f32'}
 	types.f64 = {type = 'number' , align = 'right', mdbx_type = 'f64'}
 
-	types.id   = {u32, w = 40}
+	types.id   = {u32, w = 3}
 	types.idpk = {id, pk, autoinc}
 	types.pos  = {id, en_label = 'Position in List'}
 
@@ -210,12 +210,12 @@ return function()
 	types.filesize = {u52, type = 'filesize', align = 'right'}
 
 	--unix timestamps. max is the last second of year 9999.
-	types.time     = {u52, type = 'datetime', align = 'right', w = 140, precision = 'm',
+	types.time     = {u52, type = 'datetime', align = 'right', w = 11, precision = 'm',
 		min = 0, max = 253402300799}
-	types.time_s   = {time, w = 160, precision = 's'}
-	types.time_ms  = {time, w = 200, precision = 'ms'}
+	types.time_s   = {time, w = 12, precision = 's'}
+	types.time_ms  = {time, w = 15, precision = 'ms'}
 	types.timeago  = {time_s, timeago = true}
-	types.date     = {time, type = 'date', w = 80, precision = 'd'}
+	types.date     = {time, type = 'date', w = 6, precision = 'd'}
 	--seconds since midnight.
 	types.timeofday = {u52, type = 'timeofday', align = 'center',
 		min = 0, max = 24*3600-1}

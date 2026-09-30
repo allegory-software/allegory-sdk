@@ -163,7 +163,7 @@ function virtual_rowset(init, ...)
 		if rs.pos_col then
 			local pos_field = assert(rs.fields[rs.pos_col])
 			if not pos_field.w then
-				pos_field.w = 40
+				pos_field.w = 3
 			end
 			rs.can_move_rows = true
 		end
@@ -480,7 +480,7 @@ function virtual_rowset(init, ...)
 			local dts  = wb:add_format({num_format = country('date_format')..' hh:mm:ss'})
 			for i,field in ipairs(rs.fields) do
 				ws:write(0, i-1, field.label or capitalize(field.name), bold)
-				local w = field.w and round(field.w / 10) --width in chars
+				local w = field.w and round(field.w * 1.3) --width in chars
 				w = field.hidden and 1 or w and min(32, w)
 				local fmt
 				if field.type == 'date' then

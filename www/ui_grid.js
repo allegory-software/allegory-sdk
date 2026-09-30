@@ -292,6 +292,14 @@ function init(id, e) {
 		return horiz && field == e.tree_field
 	}
 
+	function sort_icon_w(field) {
+		return field.sortable ? 2 * sp2 : 0
+	}
+
+	function col_min_w(field) {
+		return max(field.min_w * font_size, sort_icon_w(field))
+	}
+
 	function indent_offset(indent) {
 		return floor(font_size * 1.5 + (font_size * 1.2) * indent)
 	}
@@ -768,9 +776,10 @@ function init(id, e) {
 		if (hit_zone == 'col_divider') {
 			let field = e.fields[hit_fi]
 			if (ps.drag)
-				ps.w0 = field.w
+				ps.w0 = field.w * font_size
 			if (ps.dragging)
-				field.w = clamp(ps.w0 + ps.dx, field.min_w, field.max_w)
+				field.w = clamp(ps.w0 + ps.dx,
+					col_min_w(field), field.max_w * font_size) / font_size
 			if (ps.drop)
 				e.save_col_w(field)
 			ui.set_cursor('col-resize')
@@ -1470,7 +1479,8 @@ function init(id, e) {
 
 		cells_w = 0
 		for (let field of e.fields) {
-			let w = clamp(field.w, field.min_w, field.max_w)
+			let w = clamp(field.w * font_size,
+				col_min_w(field), field.max_w * font_size)
 			let cw = w + 2 * sp2
 			if (drag_op != 'col_move')
 				field._x = cells_w
@@ -1602,7 +1612,7 @@ function init(id, e) {
 					let max_min_w = noclip ? null : max(0,
 						field._w
 							- 2 * sp2
-							- (field.sortable ? 2 * sp2 : 0)
+							- sort_icon_w(field)
 					)
 					let dir = e.sort_dir(field)
 					let pri = e.sort_priority(field)

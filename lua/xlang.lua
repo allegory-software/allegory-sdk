@@ -179,7 +179,7 @@ rowset.lang = sql_rowset{
 		]],
 	pk = 'lang',
 	field_attrs = {
-		lang    = {w = 40, readonly = true},
+		lang    = {w = 3, readonly = true},
 		en_name = {readonly = true},
 		name    = {readonly = true},
 	},

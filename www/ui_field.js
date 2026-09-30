@@ -444,9 +444,9 @@ assign(all_field_types, {
 	control: 'input',
 	build_input: ui.build_input,
 	default: null,
-	w: 100,
-	min_w: 22,
-	max_w: 2000,
+	w: 8,
+	min_w: 2,
+	max_w: 154,
 	align: 'left',
 	not_null: false,
 	sortable: true,
@@ -568,7 +568,7 @@ let date = {
 	control: 'date_input',
 	align: 'right',
 	is_time: true,
-	w: 80,
+	w: 6,
 	precision: 'd',
 	min: parse_date('1000-01-01 00:00:00', 'SQL'),
 	max: parse_date('9999-12-31 23:59:59', 'SQL'),
@@ -591,7 +591,7 @@ date.to_input = function(v) {
 	return format_date(v, null, this.precision)
 }
 
-let dt = assign({}, date, {precision: 'm', w: 140})
+let dt = assign({}, date, {precision: 'm', w: 11})
 field_types.datetime = dt
 
 //// TIME --------------------------------------------------------------------
@@ -601,7 +601,7 @@ field_types.time = ts
 
 ts.has_time = true
 ts.precision = 's'
-ts.w = 160
+ts.w = 12
 
 ui.add_validation_rule({
 	name     : 'time',
@@ -658,7 +658,7 @@ d.to_text = function(v) {
 
 // no editor: the value is toggled by click and space, and the cell keeps
 // building itself while an edit is carried through it.
-let bool = {align: 'center', min_w: 20, w: 20, is_bool: true,
+let bool = {align: 'center', min_w: 2, w: 2, is_bool: true,
 	builds_text: false, has_editor: false, control: 'checkbox'}
 field_types.bool = bool
 
