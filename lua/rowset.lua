@@ -123,6 +123,8 @@ local client_field_attrs = {
 	hour_step=1, minute_step=1, second_step=1, precision=1,
 	timeago=1, duration_format=1,
 	magnitude=1, magnitude_decimals=1, gray_min=1,
+	max = 1, control = 1, empty_text = 1, focusable = 1, sortable = 1,
+	local_cols = 1, null_lookup_col = 1, nosave = 1,
 }
 
 local rowset_tables = {} --{table -> {rowset->true}}

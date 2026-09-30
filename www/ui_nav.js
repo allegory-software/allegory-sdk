@@ -21,7 +21,7 @@ Rowset structure:
 
 Creating a nav:
 
-	ui.nav({rowset_name: NAME}) -> e
+	ui.nav(id, {rowset_name: NAME}) -> e
 
 		Loads ui.rowsets[NAME], or the rowset from the server at
 		/rowset.json/NAME.
@@ -522,7 +522,7 @@ ui.shared_nav = function(opt) {
 
 	let ln = shared_navs[name]
 	if (!ln) {
-		ln = ui.nav(opt)
+		ln = ui.nav('shared_nav.'+name, opt)
 		ln.shared_name = name // for gc() to drop the right key
 		ln.rc = 0
 		ln.ref = function() {
@@ -565,9 +565,10 @@ let errors_no_messages = []
 errors_no_messages.failed = true
 errors_no_messages.client_side = true
 
-ui.nav = function(opt) {
+ui.nav = function(id, opt) {
 
-	let e = {}
+	assert(id, 'nav id required')
+	let e = {id}
 
 	/// instance utils --------------------------------------------------------
 
@@ -646,7 +647,8 @@ ui.nav = function(opt) {
 	}
 
 	// ev: reload, reset, free,
-	//   fields, rows, filters, row_order, row_visibility, input
+	//   fields, cols, group_by, rows, filters, row_order, row_visibility,
+	//   input
 	e.update_parts = update_parts
 	function update_parts(ev) {
 
@@ -827,6 +829,11 @@ ui.nav = function(opt) {
 		// init visible fields
 
 		if (update_fields) {
+
+			if (ev.cols)
+				ui.save_state(e.id, 'cols', e.cols)
+			if (ev.group_by)
+				ui.save_state(e.id, 'group_by', e.group_by)
 
 			e.fields = []
 
@@ -1073,6 +1080,10 @@ ui.nav = function(opt) {
 
 		assign_opt(field, att, tt, f, rt, ct)
 
+		let saved_w = ui.saved_state[e.id+'.col_ws']?.[name]
+		if (saved_w != null)
+			field.w = saved_w
+
 		field.label ??= display_name(field.given_name || name)
 		if (field.enum_values != null) {
 			field.enum_values = words(field.enum_values)
@@ -1163,11 +1174,15 @@ ui.nav = function(opt) {
 		return fields
 	}
 
+	e.save_col_w = function(field) {
+		ui.save_state(e.id+'.col_ws', field.name, field.w)
+	}
+
 	e.showhide_field = function(field, on, at_fi) {
 		let fields = showhide_field(field, on, at_fi)
 		if (fields) {
 			e.cols = cols_from_fields(fields)
-			update_parts({fields: true})
+			update_parts({fields: true, cols: true})
 		}
 	}
 
@@ -1175,7 +1190,7 @@ ui.nav = function(opt) {
 		let fields = move_field(fi, over_fi)
 		if (fields) {
 			e.cols = cols_from_fields(fields)
-			update_parts({fields: true})
+			update_parts({fields: true, cols: true})
 		}
 	}
 
@@ -1187,7 +1202,7 @@ ui.nav = function(opt) {
 			.filter(cg => cg.length)
 		e.group_by = format_group_defs(col_groups, e.groups.range_defs)
 		e.cols = cols_from_fields(fields)
-		update_parts({fields: true, rows: true})
+		update_parts({fields: true, rows: true, cols: true, group_by: true})
 	}
 
 	/// params ----------------------------------------------------------------
@@ -2689,7 +2704,7 @@ ui.nav = function(opt) {
 	e.cell_errors     = (row, col, with_messages) => {
 		let field = fld(col)
 		let errors = e.cell_state(row, field, 'errors')
-		if (errors == errors_no_messages && with_messages != false) {
+		if ((!errors || errors == errors_no_messages) && with_messages != false) {
 			let val = e.cell_input_val(row, field)
 			errors = e.validate_cell(field, val)
 			e.set_cell_state_for(row, field, 'errors', errors)
@@ -4360,6 +4375,12 @@ ui.nav = function(opt) {
 	assign(e, opt)
 	assert(e.rowset_name, 'rowset_name required')
 
+	let saved = ui.saved_state[e.id]
+	if (saved?.cols !== undefined)
+		e.cols = saved.cols
+	if (saved?.group_by !== undefined)
+		e.group_by = saved.group_by
+
 	if (!ui.rowsets[e.rowset_name]) {
 		init_rowset_events()
 		attr(rowset_navs, e.rowset_name, set).add(e)
@@ -4387,7 +4408,6 @@ function field_value(e, v) {
 
 ui.add_validation_rule({
 	name: 'pk',
-	props: 'pk',
 	applies  : (e) => e.pk,
 	validate : (e, row) => {
 		let rows = e.lookup(e.pk, e.cell_input_vals(row, e.pk)).filter(row1 => row1 != row)
@@ -4401,8 +4421,6 @@ ui.add_validation_rule({
 
 ui.add_validation_rule({
 	name     : 'lookup',
-	props    : 'lookup_rowset_name lookup_cols local_cols',
-	vprops   : 'input_value',
 	applies  : (field) => field.lookup_nav,
 	// TODO: multi-col lookup
 	validate : (field, v) => !!field.nav.lookup_val(null, field, v),

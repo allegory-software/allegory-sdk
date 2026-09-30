@@ -100,7 +100,6 @@ SCREEN SHARING
 
 PERSISTENCE
 ------------------------------------------------------------------------------
-- splitter state
 - grid customizations:
 	- col list
 	- col widths

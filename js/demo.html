@@ -507,7 +507,7 @@ let grid_config_input_opt = {
 	email      : {},
 	text       : {},
 	text_r     : {text_align: 'sr'},
-	password   : {errors: 'label'},
+	password   : {errors: 'tooltip', error_mode: 'all_errors'},
 	grower_id  : {},
 	status     : {},
 	status_r   : {text_align: 'r'},
@@ -518,7 +518,7 @@ let grid_config_input_opt = {
 	date       : {},
 	datetime   : {},
 	color      : {},
-	num_slider : {control: 'num_slider', errors: 'label'},
+	num_slider : {control: 'num_slider', errors: 'label', error_mode: 'all'},
 	slider     : {control: 'slider'},
 	active     : {},
 	active2    : {},
@@ -552,7 +552,6 @@ let grid_config_cols_field = ui.create_field({
 })
 
 ui.saved_value('grid_config_tree', true)
-ui.saved_value('grid_config_groups', false)
 ui.saved_value('grid_config_auto_expand', false)
 ui.saved_value('grid_config_can_focus_cells', true)
 ui.saved_value('grid_config_can_select_multiple', true)
@@ -635,26 +634,20 @@ let first_col = ui.value('grid_config_first_col')
 let readonly = ui.value('grid_config_readonly')
 let auto_expand = ui.value('grid_config_auto_expand')
 
-if (!state.rowset_name || state.recreate) {
-	if (state.rowset_name)
-		delete ui.rowsets[state.rowset_name]
-	state.generation = (state.generation ?? 0) + 1
-	state.rowset_name = 'grid_config_rowset_'+state.generation
-	ui.rowsets[state.rowset_name] = make_grid_demo_rowset(
+if (!ui.rowsets.grid_config_rowset || state.recreate) {
+	ui.rowsets.grid_config_rowset = make_grid_demo_rowset(
 		row_count,
 		tree_depth,
 		first_col,
 		col_count)
-	state.grid_id = 'grid_config_grid_'+state.generation
+	ui.free_state('grid_config_grid')
 	state.recreate = false
 }
 
-let group_col = first_col == 'status' ? 'color' : 'status'
 let grid_opt = {
-	rowset_name: state.rowset_name,
+	rowset_name: 'grid_config_rowset',
 	flat: !ui.value('grid_config_tree'),
 	tree_col: first_col,
-	group_by: ui.value('grid_config_groups') ? group_col : null,
 	can_focus_cells: ui.value('grid_config_can_focus_cells'),
 	can_select_multiple: ui.value('grid_config_can_select_multiple'),
 	can_select_non_siblings: ui.value('grid_config_can_select_non_siblings'),
@@ -670,7 +663,7 @@ let grid_opt = {
 	validate_on_load: ui.value('grid_config_validate_on_load'),
 	can_change_rows: !readonly,
 }
-let grid_nav = ui.state_of(state.grid_id, 'e')
+let grid_nav = ui.state_of('grid_config_grid', 'e')
 if (grid_nav)
 	grid_nav.auto_expand = auto_expand
 
@@ -693,8 +686,8 @@ if (grid_nav)
 
 ui.hvsplit(split_hv, 'grid_config_form_split_'+split_hv)
 	ui.hvsplit(split_vh, 'grid_config_detail_split_'+split_vh)
-		ui.grid(state.grid_id, grid_opt)
-		grid_nav = ui.state_of(state.grid_id, 'e')
+		ui.grid('grid_config_grid', grid_opt)
+		grid_nav = ui.state_of('grid_config_grid', 'e')
 		if (grid_nav)
 			grid_nav.auto_expand = auto_expand
 	ui.splitter()
@@ -716,22 +709,13 @@ ui.splitter()
 	ui.scrollbox('grid_config_form_sb', 1, 'auto', 'auto', 's', 's')
 		ui.m(ui.sp4())
 		ui.v_aligned(1, ui.sp2(), 'l', 't', ui.em(16))
-			let is_label_left = label_pos == 'left'
-				|| label_pos == 'left-right-align'
 			if (grid_nav)
 				for (let col in grid_config_input_opt) {
 					let opt = grid_config_input_opt[col]
 					opt.nav = grid_nav
 					opt.label_pos = label_pos
-					ui.box_args(1, 's', 'c')
+					ui.box_args(1, 'l', 'c')
 					ui.nav_input('grid_config_'+col, opt)
-					if (opt.errors == 'label') {
-						ui.h(0, ui.sp2(), 'l')
-							if (is_label_left)
-								ui.box()
-							ui.error_label('grid_config_'+col, 'all')
-						ui.end_h()
-					}
 				}
 		ui.end_v_aligned()
 	ui.end_scrollbox()
@@ -778,7 +762,6 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 		}
 
 		grid_config_toggle('grid_config_tree', 'Tree')
-		grid_config_toggle('grid_config_groups', 'Groups')
 		grid_config_toggle('grid_config_auto_expand', 'Expand cells')
 		grid_config_toggle('grid_config_can_focus_cells', 'Focus cells')
 		grid_config_toggle('grid_config_can_select_multiple',
@@ -917,7 +900,7 @@ let input_controls_fields = [
 let input_controls_opt = {
 	input1: {field: input1_field},
 	input2: {field: input2_field, text_align: 'sr'},
-	password1: {field: password1_field, errors: 'label'},
+	password1: {field: password1_field, errors: 'label', error_mode: 'all'},
 	lookup1: {field: lookup1_field},
 	dd1: {field: enum_input_field},
 	dd2: {field: enum_input_field, text_align: 'r'},
@@ -930,6 +913,7 @@ let input_controls_opt = {
 		field: num_slider1_field,
 		control: 'num_slider',
 		errors: 'label',
+		error_mode: 'all',
 	},
 	slider1: {field: slider1_field, control: 'slider'},
 	cb1: {field: cb1_field},
@@ -1023,11 +1007,6 @@ ui.v()
 	ui.box_args(0, 'l')
 	password1_text = ui.field_input('password1', password1_text,
 		input_controls_opt.password1)
-	ui.h(0, ui.sp2(), 'l')
-		if (is_label_left)
-			ui.box()
-		ui.error_label('password1', 'all')
-	ui.end_h()
 	ui.box_args(0, 'l')
 	lookup1_value = ui.field_input('lookup1', lookup1_value,
 		input_controls_opt.lookup1)
@@ -1050,11 +1029,6 @@ ui.v()
 	ui.box_args(0, 'l')
 	num_slider1_value = ui.field_input('num_slider1', num_slider1_value,
 		input_controls_opt.num_slider1)
-	ui.h(0, ui.sp2(), 'l')
-		if (is_label_left)
-			ui.box()
-		ui.error_label('num_slider1', 'all')
-	ui.end_h()
 	ui.box_args(0, 'l')
 	slider1_v = ui.field_input('slider1', slider1_v,
 		input_controls_opt.slider1)

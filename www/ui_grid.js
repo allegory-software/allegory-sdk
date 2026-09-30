@@ -201,8 +201,6 @@ function build_help(id, target_i) {
 
 function init(id, e) {
 
-	e.id = id // for errors
-
 	e.cell_border_v_width = 0
 	e.cell_border_h_width = 1
 
@@ -770,6 +768,8 @@ function init(id, e) {
 				ps.w0 = field.w
 			if (ps.dragging)
 				field.w = clamp(ps.w0 + ps.dx, field.min_w, field.max_w)
+			if (ps.drop)
+				e.save_col_w(field)
 			ui.set_cursor('ew-resize')
 		}
 
@@ -1024,7 +1024,7 @@ function init(id, e) {
 							i++
 						}
 						e.group_by = t.join('')
-						e.update_parts({fields: true, rows: true})
+						e.update_parts({fields: true, rows: true, group_by: true})
 
 					} else if (mover.drop_pos != null) { // put it back in grid
 
@@ -1691,7 +1691,7 @@ function init(id, e) {
 function create_grid(id, opt) {
 	let nav = opt.nav
 	if (!nav) {
-		nav = ui.nav(opt)
+		nav = ui.nav(id, opt)
 		ui.on_free(id, nav.free)
 	}
 	init(id, nav)
