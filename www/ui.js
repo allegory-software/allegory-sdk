@@ -620,13 +620,19 @@ ui.color_def('dark' , 'input' , 'readonly', 216, 0.28, 0.21)
 // disable alt color. comment this to get it back.
 ui.color_def('*' , 'alt', 'normal' , 'bg')
 
-ui.color_def('light', 'scrollbar', 'normal' ,   0, 0.00, 0.70, 0.5)
-ui.color_def('light', 'scrollbar', 'hover'  ,   0, 0.00, 0.75, 0.8)
-ui.color_def('light', 'scrollbar', 'active' ,   0, 0.00, 0.80, 0.8)
+ui.color_def('light', 'scrollbar', 'normal' ,   0, 0.00, 0.70, 0.1)
+ui.color_def('light', 'scrollbar', 'hover'  ,   0, 0.00, 0.70, 0.2)
 
-ui.color_def('dark' , 'scrollbar', 'normal' , 216, 0.28, 0.37, 0.5)
-ui.color_def('dark' , 'scrollbar', 'hover'  , 216, 0.28, 0.39, 0.8)
-ui.color_def('dark' , 'scrollbar', 'active' , 216, 0.28, 0.41, 0.8)
+ui.color_def('dark' , 'scrollbar', 'normal' , 216, 0.28, 0.37, 0.1)
+ui.color_def('dark' , 'scrollbar', 'hover'  , 216, 0.28, 0.37, 0.2)
+
+ui.color_def('light', 'scrollbar-thumb', 'normal' ,   0, 0.00, 0.70, 0.5)
+ui.color_def('light', 'scrollbar-thumb', 'hover'  ,   0, 0.00, 0.75, 0.8)
+ui.color_def('light', 'scrollbar-thumb', 'active' ,   0, 0.00, 0.80, 0.8)
+
+ui.color_def('dark' , 'scrollbar-thumb', 'normal' , 216, 0.28, 0.37, 0.5)
+ui.color_def('dark' , 'scrollbar-thumb', 'hover'  , 216, 0.28, 0.39, 0.8)
+ui.color_def('dark' , 'scrollbar-thumb', 'active' , 216, 0.28, 0.41, 0.8)
 
 ui.color_def('*', 'search' , 'normal',  60,  1.00, 0.80) // quicksearch text bg
 ui.color_def('*', 'info'   , 'normal', 200,  1.00, 0.30) // info bubbles
@@ -3936,7 +3942,8 @@ function settle_scrollbox(a, i) {
 	let hit_state = 0
 	for (let axis = 0; axis < 2; axis++) {
 
-		let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
+		let [visible, tx, ty, tw, th, bx, by, bw, bh] =
+			scrollbar_rect(a, i, axis)
 
 		let sbar_id = id+'.scrollbar'+axis
 		ui.state(sbar_id)
@@ -3958,18 +3965,18 @@ function settle_scrollbox(a, i) {
 		if (cs) {
 			if (axis == 0) {
 				if (ui.click) // the hit phase captured it this frame
-					cs.psx0 = psx
+					cs.psx0 = cs.jump_ps ?? psx
 				let psx0 = cs.psx0
-				let dpsx = (ui.mx - ui.mx0) / (w - tw)
+				let dpsx = (ui.mx - ui.mx0) / (bw - tw)
 				sx = round((psx0 + dpsx) * (cw - w))
 				if (!infinite_x)
 					sx = max(0, min(sx, cw - w))
 				xstate.scroll_x = sx
 			} else {
 				if (ui.click) // the hit phase captured it this frame
-					cs.psy0 = psy
+					cs.psy0 = cs.jump_ps ?? psy
 				let psy0 = cs.psy0
-				let dpsy = (ui.my - ui.my0) / (h - th)
+				let dpsy = (ui.my - ui.my0) / (bh - th)
 				sy = round((psy0 + dpsy) * (ch - h))
 				if (!infinite_y)
 					sy = max(0, min(sy, ch - h))
@@ -4057,11 +4064,11 @@ draw[CMD_SCROLLBOX] = function(a, i) {
 	cx.clip()
 }
 
-ui.scrollbar_thickness = 4
-ui.scrollbar_thickness_active = 10
+ui.scrollbar_thickness = 14
+ui.scrollbar_thickness_active = 14
 
 let scrollbar_rect; {
-let r = [false, 0, 0, 0, 0]
+let r = [false, 0, 0, 0, 0, 0, 0, 0, 0]
 scrollbar_rect = function(a, i, axis, state) {
 	let x  = a[i+0]
 	let y  = a[i+1]
@@ -4083,7 +4090,7 @@ scrollbar_rect = function(a, i, axis, state) {
 	let ph = h / ch
 	let thickness = ui.scrollbar_thickness * dpr
 	let thickness_active = state ? ui.scrollbar_thickness_active * dpr : thickness
-	let visible, tx, ty, tw, th
+	let visible, tx, ty, tw, th, bx, by, bw, bh
 	let h_visible = pw < 1 && (
 			   overflow_x == SB_OVERFLOW_SCROLL
 			|| overflow_x == SB_OVERFLOW_AUTO
@@ -4099,7 +4106,10 @@ scrollbar_rect = function(a, i, axis, state) {
 	if (axis == 0) {
 		visible = h_visible
 		if (visible) {
-			let bw = w - both_visible * thickness
+			bw = w - both_visible * thickness
+			bh = thickness_active
+			bx = 0
+			by = h - bh
 			tw = max(min(bar_min_len, bw), pw * bw)
 			th = thickness_active
 			tx = psx * (bw - tw)
@@ -4108,7 +4118,10 @@ scrollbar_rect = function(a, i, axis, state) {
 	} else {
 		visible = v_visible
 		if (visible) {
-			let bh = h - both_visible * thickness
+			bh = h - both_visible * thickness
+			bw = thickness_active
+			bx = w - bw
+			by = 0
 			th = max(min(bar_min_len, bh), ph * bh)
 			tw = thickness_active
 			ty = psy * (bh - th)
@@ -4120,6 +4133,10 @@ scrollbar_rect = function(a, i, axis, state) {
 	r[2] = y + ty
 	r[3] = tw
 	r[4] = th
+	r[5] = x + bx
+	r[6] = y + by
+	r[7] = bw
+	r[8] = bh
 	return r
 }
 }
@@ -4131,16 +4148,25 @@ draw_end[CMD_SCROLLBOX] = function(a, i) {
 	for (let axis = 0; axis < 2; axis++) {
 
 		let state = (a[i+SB_STATE] >> (2 * axis)) & 3
-		state = state == 2 && 'active' || state && 'hover' || null
+		state = state == 2 && STATE_ACTIVE + STATE_HOVER || state && 'hover' || null
 
-		let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis, state)
+		let [visible, tx, ty, tw, th, bx, by, bw, bh] =
+			scrollbar_rect(a, i, axis, state)
 
 		if (!visible)
 			continue
 
+		// draw the track
 		cx.beginPath()
-		cx.rect(tx, ty, tw, th)
-		cx.fillStyle = color_css('scrollbar', state)
+		cx.rect(bx, by, bw, bh)
+		cx.fillStyle = color_css('scrollbar', state && 'hover')
+		cx.fill()
+
+		// draw the thumb
+		let m = 3 * dpr
+		cx.beginPath()
+		cx.roundRect(tx + m, ty + m, tw - 2*m, th - 2*m, 1000)
+		cx.fillStyle = color_css('scrollbar-thumb', state)
 		cx.fill()
 
 	}
@@ -4157,12 +4183,17 @@ hittest[CMD_SCROLLBOX] = function(a, i, recs) {
 
 	// test the scrollbars
 	for (let axis = 0; axis < 2; axis++) {
-		let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis, 'hover')
+		let [visible, tx, ty, tw, th, bx, by, bw, bh] =
+			scrollbar_rect(a, i, axis, 'hover')
 		if (!visible)
 			continue
-		if (!hit_rect(tx, ty, tw, th))
+		if (!hit_rect(bx, by, bw, bh))
 			continue
-		set_hit(id+'.scrollbar'+axis)
+		let hs = set_hit(id+'.scrollbar'+axis)
+		if (!hit_rect(tx, ty, tw, th))
+			hs.jump_ps = axis
+				? clamp((ui.my - by - th / 2) / (bh - th), 0, 1)
+				: clamp((ui.mx - bx - tw / 2) / (bw - tw), 0, 1)
 		set_hit(id)
 		return true
 	}
@@ -6968,7 +6999,7 @@ function split(hv, id, size, unit, fixed_side,
 // bias split edge hit area towards the right/bottom because the left/top side
 // usually contains a scrollbar and the split hit area  is on top so it
 // interferes with that scrollbar.
-let split_edge_hit_bias = 0
+let split_edge_hit_bias = 3
 let split_thumb_hit_w = 4
 
 ui.splitter = function() {
