@@ -26,6 +26,7 @@ CONTAINERS
 	ui.h|v[_aligned] (fr, gap, align, valign)
 	ui.stack         (id, fr, align, valign)
 	ui.sb|scrollbox  (id, fr, overflow_x, overflow_y, align, valign, sx, sy, x_id, y_id)
+	ui.sb_max_wh     (w, h)
 	ui.popup         (id, layer, target_i, side, align, flags, z_index, ox, oy)
 	ui.{h|v}split    (id, size, unit, fixed_side, split_fr, gap, align, valign)
 	ui.hvsplit       (hv, id, size, unit, fixed_side, split_fr, gap, align,
@@ -71,7 +72,7 @@ OTHER
 
 	ui.drag_point      (id, x, y, color)
 	ui.polyline        (id, points, closed, fill_color, fill_color_state, stroke_color, stroke_color_state)
-	ui.resizer         (id, default_w, default_h, axis, max_w, max_h)
+	ui.resizer         (id, edges, max_w, max_h)
 
 RENDERING CONTROL
 
@@ -628,11 +629,9 @@ ui.color_def('dark' , 'scrollbar', 'hover'  , 216, 0.28, 0.37, 0.2)
 
 ui.color_def('light', 'scrollbar-thumb', 'normal' ,   0, 0.00, 0.70, 0.5)
 ui.color_def('light', 'scrollbar-thumb', 'hover'  ,   0, 0.00, 0.75, 0.8)
-ui.color_def('light', 'scrollbar-thumb', 'active' ,   0, 0.00, 0.80, 0.8)
 
 ui.color_def('dark' , 'scrollbar-thumb', 'normal' , 216, 0.28, 0.37, 0.5)
 ui.color_def('dark' , 'scrollbar-thumb', 'hover'  , 216, 0.28, 0.39, 0.8)
-ui.color_def('dark' , 'scrollbar-thumb', 'active' , 216, 0.28, 0.41, 0.8)
 
 ui.color_def('*', 'search' , 'normal',  60,  1.00, 0.80) // quicksearch text bg
 ui.color_def('*', 'info'   , 'normal', 200,  1.00, 0.30) // info bubbles
@@ -3772,6 +3771,7 @@ const SB_ID        = BOX_CT_ARGS+4
 const SB_SX        = BOX_CT_ARGS+5 // scroll x,y
 const SB_STATE     = BOX_CT_ARGS+7
 const SB_SCROLL_ID = BOX_CT_ARGS+8 // x_id,y_id: state ids for sync'ed scrollboxes
+const SB_MAX_W     = BOX_CT_ARGS+10 // max w,h
 
 const SB_OVERFLOW_AUTO     = 0
 const SB_OVERFLOW_HIDE     = 1
@@ -3790,6 +3790,10 @@ function parse_sb_overflow(s) {
 
 const CMD_SCROLLBOX = cmd_ct('scrollbox')
 id_slot[CMD_SCROLLBOX] = SB_ID
+
+let next_sb_max_w, next_sb_max_h
+
+ui.sb_max_wh = function(w, h) { next_sb_max_w = w; next_sb_max_h = h }
 
 ui.scrollbox = function(
 	id, fr, overflow_x, overflow_y, align, valign, sx, sy, x_id, y_id
@@ -3815,6 +3819,10 @@ ui.scrollbox = function(
 	a[n++] = 0 // state
 	a[n++] = x_id
 	a[n++] = y_id
+	a[n++] = next_sb_max_w ?? 0
+	a[n++] = next_sb_max_h ?? 0
+	next_sb_max_w = null
+	next_sb_max_h = null
 	ui_cmd_box_ct_end(i)
 
 	return i
@@ -3831,7 +3839,8 @@ measure_end[CMD_SCROLLBOX] = function(a, i, axis) {
 	let co_min_w   = a[i+2+axis] // content min_w
 	let overflow = a[i+SB_OVERFLOW+axis]
 	let contain = overflow == SB_OVERFLOW_CONTAIN
-	let sb_min_w = max(contain ? co_min_w : 0, user_min_w) // scrollbox min_w
+	let max_w = contain ? 1/0 : a[i+SB_MAX_W+axis]
+	let sb_min_w = max(min(co_min_w, max_w), user_min_w) // scrollbox min_w
 	sb_min_w += spacings(a, i, axis)
 	a[i+SB_CW+axis] = co_min_w
 	a[i+2+axis] = sb_min_w
@@ -4159,7 +4168,7 @@ draw_end[CMD_SCROLLBOX] = function(a, i) {
 		// draw the track
 		cx.beginPath()
 		cx.rect(bx, by, bw, bh)
-		cx.fillStyle = color_css('scrollbar', state && 'hover')
+		cx.fillStyle = color_css('scrollbar', state)
 		cx.fill()
 
 		// draw the thumb
@@ -4363,6 +4372,8 @@ measure_end[CMD_POPUP] = function(a, i, axis) {
 }
 
 let screen_margin = 10
+
+ui.popup_max_w = () => screen_w - 2 * screen_margin
 
 // NOTE: popup positioning is done later in the translation phase.
 // NOTE: sw is always 0 because popups have fr=0, so we don't use it.
@@ -8387,7 +8398,7 @@ ui.dropdown = function(id, update, want_open) {
 	return open
 }
 
-ui.dropdown_picker = function(id, side, align, yoffset) {
+ui.dropdown_picker = function(id, side, align, yoffset, min_w, min_h) {
 	ui.end_stack()
 	if (ui.state_of(id, 'open')) {
 		ui.popup(id+'.popup', 'open', null, side ?? 'it', align ?? 's',
@@ -8395,6 +8406,7 @@ ui.dropdown_picker = function(id, side, align, yoffset) {
 		ui.shadow('picker')
 		ui.bb('input') // background only: end_dropdown() draws the border
 		ui.focus_group(false, null, id+'.picker')
+		ui.min_wh(min_w, min_h)
 		ui.stack()
 	}
 }
@@ -8535,20 +8547,27 @@ ui.list_dropdown = function(
 					draw_value_row(value, field, value_id,
 						pad, chevron_w, max_w, null, align)
 				}
-				ui.scrollbox(picker_id+'.sb', 1, 'contain', 'auto', 's', 's')
-					ui.list(picker_id, items, value, field, 0,
-						's', 's', align, 'c', 0,
-						max_w ?? ui.em_input_max_popup(),
-						align == 'r' ? pad * 2 + chevron_w : pad,
-						align == 'l' ? pad * 2 + chevron_w : pad,
-						pad)
-				ui.end_scrollbox()
+				let resizer_id = id+'.resizer'
+				let picker_max_h = ui.em(16)
+				ui.stack('', 1, 's', 's')
+					ui.sb_max_wh(null,
+						ui.state_of(resizer_id, 'h') ?? picker_max_h)
+					ui.scrollbox(picker_id+'.sb', 1, 'contain', 'auto', 's', 's')
+						ui.list(picker_id, items, value, field, 0,
+							's', 's', align, 'c', 0,
+							max_w ?? ui.em_input_max_popup(),
+							align == 'r' ? pad * 2 + chevron_w : pad,
+							align == 'l' ? pad * 2 + chevron_w : pad,
+							pad)
+					ui.end_scrollbox()
+					ui.resizer(resizer_id, is_popup_above ? 't' : 'b',
+						null, picker_max_h)
+				ui.end_stack()
 				if (is_popup_above) {
 					ui.color('text', state)
 					draw_value_row(value, field, value_id,
 						pad, chevron_w, max_w, null, align)
 				}
-				ui.resizer(id+'.resizer', null, ui.em(16), 'y')
 			ui.end_v()
 		}
 
@@ -8977,7 +8996,8 @@ ui.date_input = function(id, v, field, fr, align, valign, readonly) {
 			ui.end_h()
 		ui.end_stack()
 
-	ui.dropdown_picker(id, 'b', 'cs', ui.sp05())
+	ui.dropdown_picker(id, 'b', 'cs', ui.sp05(),
+		null, ui.state_of(id+'.resizer', 'h'))
 
 		if (open) {
 			let sel_day = isnum(value) ? day(value) : null
@@ -8988,7 +9008,7 @@ ui.date_input = function(id, v, field, fr, align, valign, readonly) {
 					* snap(ui.em(2.5), 2)
 			}
 			ui.calendar(picker_id, sel_day, null)
-			ui.resizer(id+'.resizer', null, null, 'y')
+			ui.resizer(id+'.resizer', 'b')
 		}
 
 	ui.end_dropdown(id)
@@ -9506,7 +9526,8 @@ ui.color_input = function(id, value, field, fr, readonly) {
 				ui.bb(':'+value)
 		ui.end_stack()
 
-	ui.dropdown_picker(id, 'b', '[', ui.sp05())
+	ui.dropdown_picker(id, 'b', '[', ui.sp05(),
+		ui.state_of(id+'.resizer', 'w') ?? ui.em(22))
 
 		if (open) {
 			ui.p(ui.sp2())
@@ -9518,7 +9539,7 @@ ui.color_input = function(id, value, field, fr, readonly) {
 					ui.button(id+'.cancel', S('cancel', 'Cancel'), 0)
 				ui.end_h()
 			ui.end_v()
-			ui.resizer(id+'.resizer', ui.em(22), null, 'x')
+			ui.resizer(id+'.resizer', 'r')
 		}
 
 	ui.end_dropdown(id)
@@ -10655,6 +10676,9 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 		ui.focus_group(null, null, id)
 		//ui.p(1)
 		ui.bb('bg1', null, 1, 'intense')//, null, ui.sp075())
+		ui.min_wh(
+			ui.state_of(id+'.resizer', 'w'),
+			ui.state_of(id+'.resizer', 'h'))
 		ui.stack()
 			toolbox_stack.push(id, tid)
 			ui.v() // title / body split
@@ -10671,7 +10695,7 @@ ui.end_toolbox = function() {
 	let id = toolbox_stack.at(-2)
 	toolbox_stack.length -= 2
 			ui.end_v()
-			ui.resizer(id)
+			ui.resizer(id+'.resizer')
 		ui.end_stack()
 		ui.end_focus_group()
 	ui.end_popup()
@@ -10739,99 +10763,101 @@ function hit(x0, y0, d1, d2, x, y, w, h) {
 
 function hit_sides(x0, y0, d1, d2, x, y, w, h) {
 	if (hit(x0, y0, d1, d2, x, y, 0, 0))
-		return 'top_left'
+		return 'tl'
 	else if (hit(x0, y0, d1, d2, x + w, y, 0, 0))
-		return 'top_right'
+		return 'tr'
 	else if (hit(x0, y0, d1, d2, x, y + h, 0, 0))
-		return 'bottom_left'
+		return 'bl'
 	else if (hit(x0, y0, d1, d2, x + w, y + h, 0, 0))
-		return 'bottom_right'
+		return 'br'
 	else if (hit(x0, y0, d1, d2, x, y, w, 0))
-		return 'top'
+		return 't'
 	else if (hit(x0, y0, d1, d2, x, y + h, w, 0))
-		return 'bottom'
+		return 'b'
 	else if (hit(x0, y0, d1, d2, x, y, 0, h))
-		return 'left'
+		return 'l'
 	else if (hit(x0, y0, d1, d2, x + w, y, 0, h))
-		return 'right'
+		return 'r'
 }
 
 let cursors = {
-	bottom       : 'ns-resize',
-	right        : 'ew-resize',
-	bottom_right : 'nwse-resize',
-	top          : 'ns-resize',
-	left         : 'ew-resize',
-	top_left     : 'nwse-resize',
-	top_right    : 'nesw-resize',
-	bottom_left  : 'nesw-resize',
+	b  : 'ns-resize',
+	r  : 'ew-resize',
+	br : 'nwse-resize',
+	t  : 'ns-resize',
+	l  : 'ew-resize',
+	tl : 'nwse-resize',
+	tr : 'nesw-resize',
+	bl : 'nesw-resize',
 }
 
-function resize_side(side, axis) {
-	if (axis == 'x')
-		return (side == 'right' || side == 'top_right'
-			|| side == 'bottom_right') ? 'right' : null
-	if (axis == 'y')
-		return (side == 'bottom' || side == 'bottom_left'
-			|| side == 'bottom_right') ? 'bottom' : null
-	return (side == 'right' || side == 'bottom'
-		|| side == 'bottom_right') ? side : null
+function resize_side(side, edges) {
+	if (!side)
+		return
+	let has_edge1 = edges.includes(side[0])
+	let has_edge2 = side.length > 1 && edges.includes(side[1])
+	if (has_edge1 && has_edge2)
+		return side
+	if (has_edge1)
+		return side[0]
+	if (has_edge2)
+		return side[1]
+}
+
+function resizer_update(id, s) {
+	let cs = drag_or_hit(id)
+	if (!cs)
+		return
+	if (!cs.dragging)
+		ui.set_cursor(cursors[cs.side])
+	if (cs.drag) {
+		cs.w0 = cs.measured_w
+		cs.h0 = cs.measured_h
+	}
+	if (cs.dragging) {
+		let side = cs.side
+		ui.set_cursor(cursors[side])
+		if (side.includes('r'))
+			s.w = min(cs.w0 + cs.dx, s.max_w ?? 1/0)
+		if (side.includes('l'))
+			s.w = min(cs.w0 - cs.dx, s.max_w ?? 1/0)
+		if (side.includes('b'))
+			s.h = min(cs.h0 + cs.dy, s.max_h ?? 1/0)
+		if (side.includes('t'))
+			s.h = min(cs.h0 - cs.dy, s.max_h ?? 1/0)
+	}
 }
 
 ui.widget('resizer', {
-	create: function(cmd, id, default_w, default_h, axis, max_w, max_h) {
-		ui.state(id)
-		let ct_i = ui.ct_i()
-		let s = ui.state(id)
-		let cs = drag_or_hit(id)
-		if (cs) {
-			if (!cs.dragging)
-				ui.set_cursor(cursors[cs.side])
-			if (cs.drag) {
-				let side = cs.side
-				if (side == 'right' || side == 'bottom_right')
-					cs.w0 = cs.measured_w
-				if (side == 'bottom' || side == 'bottom_right')
-					cs.h0 = cs.measured_h
-			}
-			if (cs.dragging) {
-				let side = cs.side
-				ui.set_cursor(cursors[side])
-				if (side == 'right' || side == 'bottom_right')
-					s.w = min(cs.w0 + cs.dx, max_w ?? 1/0)
-				if (side == 'bottom' || side == 'bottom_right')
-					s.h = min(cs.h0 + cs.dy, max_h ?? 1/0)
-			}
-		}
-		a[ct_i+0] = s.w ?? default_w ?? a[ct_i+0]
-		a[ct_i+1] = s.h ?? default_h ?? a[ct_i+1]
+	create: function(cmd, id, edges, max_w, max_h) {
+		let s = ui.state(id, resizer_update)
+		s.max_w = max_w
+		s.max_h = max_h
 		let i = ui_cmd_begin(cmd)
 		a[n++] = ui.ct_i() - i
 		a[n++] = id
-		a[n++] = axis ?? 'xy'
+		a[n++] = edges ?? 'rb'
 		ui_cmd_end(i)
 		return i
 	},
 	hit: function(a, i) {
 
-		let ct_i = i+a[i+0]
-		let id   = a[i+1]
-		let axis = a[i+2]
+		let ct_i  = i+a[i+0]
+		let id    = a[i+1]
+		let edges = a[i+2]
 		let x = a[ct_i+0]
 		let y = a[ct_i+1]
 		let w = a[ct_i+2]
 		let h = a[ct_i+3]
 
-		let borders = 2
-
-		let side = resize_side(hit_sides(ui.mx, ui.my, 5, 5, x, y, w, h), axis)
+		let side = resize_side(hit_sides(ui.mx, ui.my, 5, 5, x, y, w, h), edges)
 		if (side) {
 			let hs = set_hit(id)
 			hs.side = side
 			hs.measured_x = x
 			hs.measured_y = y
-			hs.measured_w = w + borders
-			hs.measured_h = h + borders
+			hs.measured_w = w
+			hs.measured_h = h
 		}
 
 		return !!side

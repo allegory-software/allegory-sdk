@@ -4635,8 +4635,10 @@ date.build_editor = function(id, v, pad_l, pad_r, h, align) {
 			ui.end_h()
 		ui.end_stack()
 
+	let resize_id = calendar_id+'.resizer'
 	ui.dropdown_picker(calendar_id, 'b',
-		align == 'right' ? 'cs' : 'cs')
+		align == 'right' ? 'cs' : 'cs', null,
+		null, ui.state_of(resize_id, 'h'))
 
 		if (is_open) {
 			if (opened) {
@@ -4651,8 +4653,7 @@ date.build_editor = function(id, v, pad_l, pad_r, h, align) {
 			let day0 = isnum(v) ? day(v) : null
 			ui.calendar(picker_id, day0, null)
 
-			let resize_id = calendar_id+'.resizer'
-			ui.resizer(resize_id, null, null, 'y')
+			ui.resizer(resize_id, 'b')
 		}
 
 	ui.end_dropdown(calendar_id)
@@ -4786,9 +4787,9 @@ lookup_editor.build_editor = function(id, v, pad_l, pad_r, h, align) {
 
 		if (open) {
 			let ln_row = this.nav.lookup_val(this.nav.focused_row, this, v)
-			let resize_id = id+'.resizer'
-			ui.grid(picker_id, {nav: ln, value: ln_row ?? null}, 0, 's', 's')
-			ui.resizer(resize_id, ui.em(24), ui.em(12))
+			ui.grid(picker_id, {nav: ln, value: ln_row ?? null,
+				max_w: ui.popup_max_w(), max_h: ui.em(12), resizable: true},
+				0, 's', 's')
 		}
 
 	ui.end_dropdown(id)
@@ -4873,10 +4874,11 @@ color.build_editor = function(id, v, pad_l, pad_r, h) {
 	ui.focusable(id)
 	let open = ui.dropdown(id, null, this.nav.want_dropdown_open)
 
-	ui.dropdown_picker(id, 'b')
+	let resize_id = id+'.resizer'
+	ui.dropdown_picker(id, 'b', null, null,
+		ui.state_of(resize_id, 'w') ?? ui.em(22))
 
 		if (open) {
-			let resize_id = id+'.resizer'
 			ui.p(ui.sp2())
 			ui.v(0, ui.sp1())
 				ui.color_picker(picker_id, v, this)
@@ -4886,7 +4888,7 @@ color.build_editor = function(id, v, pad_l, pad_r, h) {
 					ui.button(id+'.cancel', S('cancel', 'Cancel'), 0)
 				ui.end_h()
 			ui.end_v()
-			ui.resizer(resize_id, ui.em(22), null, 'x')
+			ui.resizer(resize_id, 'r')
 		}
 
 	ui.end_dropdown(id)
@@ -5039,8 +5041,9 @@ ui.lookup_input = function(id, value, field, fr, readonly) {
 	ui.dropdown_picker(id, 'b')
 
 		if (open) {
-			ui.grid(picker_id, {nav: ln, value: ln_row || null}, 0, 's', 's')
-			ui.resizer(id+'.resizer', ui.em(24), ui.em(12))
+			ui.grid(picker_id, {nav: ln, value: ln_row || null,
+				max_w: ui.popup_max_w(), max_h: ui.em(12), resizable: true},
+				0, 's', 's')
 		}
 
 	ui.end_dropdown(id)

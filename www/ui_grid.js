@@ -1691,10 +1691,19 @@ function init(id, e) {
 
 			let cells_h = e.rows.length * cell_h
 			let overflow = e.auto_expand ? 'contain' : 'auto'
-			ui.scrollbox(id+'.cells_scrollbox', 1, overflow, overflow, 's', 's')
-				ui.min_wh(cells_w, cells_h)
-				ui.frame(noop, on_cellview_frame, 0, 'l', 't')
-			ui.end_scrollbox()
+			let resizer_id = id+'.resizer'
+			ui.stack('', 1, 's', 's')
+				ui.sb_max_wh(
+					ui.state_of(resizer_id, 'w') ?? opt.max_w,
+					ui.state_of(resizer_id, 'h') ?? opt.max_h)
+				ui.scrollbox(id+'.cells_scrollbox', 1, overflow, overflow,
+					's', 's')
+					ui.min_wh(cells_w, cells_h)
+					ui.frame(noop, on_cellview_frame, 0, 'l', 't')
+				ui.end_scrollbox()
+				if (opt.resizable)
+					ui.resizer(resizer_id, null, opt.max_w, opt.max_h)
+			ui.end_stack()
 
 			ui.end_focus_group()
 
