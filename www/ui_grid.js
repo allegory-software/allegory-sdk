@@ -255,12 +255,14 @@ function init(id, e) {
 
 	function edit_selection() {
 		return e.focused_field.has_editor
-			? e.focused_field.editor_selection(e.editor_id)
+			? e.focused_field.editor_selection(e.editor_id,
+				e.field_align(e.focused_field))
 			: [e.edit_sel_i, e.edit_sel_len]
 	}
 
 	function caret_at_edge(d) {
-		return e.focused_field.editor_caret_at_edge(e.editor_id, d)
+		return e.focused_field.editor_caret_at_edge(e.editor_id, d,
+			e.field_align(e.focused_field))
 	}
 
 	// cross: move along the other axis than the advance_on_enter axis.
@@ -454,12 +456,12 @@ function init(id, e) {
 				ui.p(pad_l, 0, pad_r, 0)
 				if (row_focused && field == e.quicksearch_field)
 					ui.mark_text(0, e.quicksearch_text.length)
-				e.build_val(row, field, input_val, true, fg, full_width)
+				e.build_val(row, field, input_val, true, fg, full_width, align)
 				ui.p(0) // build_val() builds nothing for a value with no text!
 			}
 			if (editing && !build_stage && field.has_editor) {
 				ui.focus_group(true, null, e.editor_id)
-				field.build_editor(e.editor_id, input_val, pad_l, pad_r, h)
+				field.build_editor(e.editor_id, input_val, pad_l, pad_r, h, align)
 				e.want_dropdown_open = false
 				ui.end_focus_group()
 			}
@@ -771,7 +773,7 @@ function init(id, e) {
 				field.w = clamp(ps.w0 + ps.dx, field.min_w, field.max_w)
 			if (ps.drop)
 				e.save_col_w(field)
-			ui.set_cursor('ew-resize')
+			ui.set_cursor('col-resize')
 		}
 
 		// column drag horizontally => start column move
@@ -1458,7 +1460,7 @@ function init(id, e) {
 		line_height = font_size * 1
 		cell_h = round(line_height + 2 * sp + e.cell_border_h_width)
 		header_h = cell_h
-		gcol_w = 80 // group-bar column width
+		gcol_w = ui.em(6) // group-bar column width
 		gcol_h = round(line_height + sp)
 		gcol_gap = 1
 

@@ -6844,6 +6844,7 @@ function hit_v_edge(id, hit_dx) {
 	// hack: the native ew-resize cursor icon reads visually left-skewed,
 	// so shift the hit area right without moving the rendered line.
 	hit_dx ??= 0
+	hit_dx *= dpr
 	ui.min_w(hit_distance)
 	ui.popup(id, null, null, 'il', 's', 'solid',
 		null, -hit_distance / 2 + hit_dx)
@@ -6858,6 +6859,7 @@ function end_hit_v_edge() {
 function hit_h_edge(id, hit_dx) {
 	let hit_distance = ui.sp1()
 	hit_dx ??= 0
+	hit_dx *= dpr
 	ui.min_h(hit_distance)
 	ui.popup(id, null, null, 'it', 's', 'solid',
 		null, null, -hit_distance / 2 + hit_dx)
@@ -6934,7 +6936,7 @@ function split(hv, id, size, unit, fixed_side,
 	ui[hv](split_fr, gap, align, valign)
 
 	if (cs)
-		ui.set_cursor(horiz ? 'ew-resize' : 'ns-resize')
+		ui.set_cursor(horiz ? 'col-resize' : 'row-resize')
 	ui.measure(id)
 
 	let collapsed = fixed
@@ -6960,10 +6962,9 @@ function split(hv, id, size, unit, fixed_side,
 	return size
 }
 
-// bias split edge hit area towards the right/bottom for two reasons:
-// 1) the left/top side usually contains a scrollbar and the split hit area
-// is on top so it interferes with that scrollbar.
-// 2) the <-> cursor icon is anchored wrong (at least in Chrome).
+// bias split edge hit area towards the right/bottom because the left/top side
+// usually contains a scrollbar and the split hit area  is on top so it
+// interferes with that scrollbar.
 let split_edge_hit_bias = 4
 
 ui.splitter = function() {

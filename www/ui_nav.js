@@ -75,11 +75,11 @@ Nav field attributes:
 
 		client_default : default value/generator that new rows are initialized with.
 		has_server_default: the server fills this in, so it can be left empty.
-		build_editor   : f(id, v, pad_l, pad_r, h) -> v   build the widgets
-		                 that edit v and give back what the user made of it.
-		                 pad_l, pad_r, h: the box the cell drew v in. the
-		                 cell has no vertical padding: it centers v in its
-		                 height instead. an editor with a picker ends the
+		build_editor   : f(id, v, pad_l, pad_r, h, align) -> v   build the
+		                 widgets that edit v and give back what the user made
+		                 of it. pad_l, pad_r, h: the box the cell drew v in.
+		                 the cell has no vertical padding: it centers v in
+		                 its height instead. an editor with a picker ends the
 		                 edit by closing it.
 		edits_in_popup : build_editor builds a popup: no editor in the cell.
 
@@ -647,8 +647,8 @@ ui.nav = function(id, opt) {
 	}
 
 	// ev: reload, reset, free,
-	//   fields, cols, group_by, rows, filters, row_order, row_visibility,
-	//   input
+	//   fields, cols, group_by, rows, filters, row_order, order_by,
+	//   row_visibility, input
 	e.update_parts = update_parts
 	function update_parts(ev) {
 
@@ -731,6 +731,7 @@ ui.nav = function(id, opt) {
 				e.group_field = init_field({
 					hidden: true, name: '$group', label: 'Group', w: 160,
 					is_group_field: true, movable: false, groupable: false,
+					build: build_group_label,
 				}, rowset.fields.length)
 			}
 
@@ -836,6 +837,7 @@ ui.nav = function(id, opt) {
 				ui.save_state(e.id, 'group_by', e.group_by)
 
 			e.fields = []
+			e.tree_field = null
 
 			// init group-by view mode
 			let was_grouped = e.is_grouped
@@ -846,13 +848,6 @@ ui.nav = function(id, opt) {
 				e.fields.push(e.tree_field)
 			}
 			if (was_grouped != e.is_grouped)
-				update_rows = true
-
-			// init tree view mode
-			let was_tree = e.is_tree
-			e.can_be_tree = !!(e.id_field && e.parent_field && !e.tree_field?.hidden)
-			e.is_tree = e.can_be_tree && !e.flat && !e.is_grouped
-			if (was_tree != e.is_tree)
 				update_rows = true
 
 			// add visible fields
@@ -881,12 +876,19 @@ ui.nav = function(id, opt) {
 			}
 			update_field_index()
 
-			// init tree field
-			if (e.is_tree) {
+			// init tree view mode
+			let was_tree = e.is_tree
+			e.can_be_tree = !!(e.id_field && e.parent_field)
+			e.is_tree = false
+			if (e.can_be_tree && !e.flat && !e.is_grouped) {
 				let col = e.tree_col ?? rowset?.tree_col
-				e.tree_field = check_field('tree_col', col) ?? e.fields[0]
-				e.tree_field.align = 'left'
+				let field = check_field('tree_col', col) ?? e.fields[0]
+				e.is_tree = field?.index != null
+				if (e.is_tree)
+					e.tree_field = field
 			}
+			if (was_tree != e.is_tree)
+				update_rows = true
 
 			// remove references to invisible fields.
 			if (e.focused_field && e.focused_field.index == null)
@@ -932,6 +934,9 @@ ui.nav = function(id, opt) {
 		}
 
 		if (update_row_order) {
+
+			if (ev.order_by)
+				ui.save_state(e.id, 'order_by', e.order_by)
 
 			update_field_sort_order()
 
@@ -1983,6 +1988,16 @@ ui.nav = function(id, opt) {
 		return {...group_defs, root: group_rows(group_defs, rows, group_label_sep)}
 	}
 
+	function build_group_label(key_vals, mode, fg, row, full_width, align) {
+		let s
+		let cols = e.groups.col_groups[row.depth]
+		for (let i = 0; i < cols.length; i++) {
+			let t = e.build_val(row, fld(cols[i]), key_vals[i]) ?? ''
+			s = i ? s + ' / ' + t : t
+		}
+		return this.build_text(s, mode, fg, row, full_width, align)
+	}
+
 	function init_group_tree() {
 
 		e.groups.root = group_rows(e.groups, e.all_rows)
@@ -1995,14 +2010,12 @@ ui.nav = function(id, opt) {
 
 				row = []
 				let i = 0
-				row[group_fi] = []
+				row[group_fi] = group.key_vals
 				for (let col of words(group.key_cols)) {
 					let field = fld(col)
 					let val = group.key_vals[i++]
-					row[group_fi].push(field.build_text(val))
 					row[field.val_index] = val // for sorting of group rows
 				}
-				row[group_fi] = row[group_fi].join(' / ')
 
 				row.parent_row = parent_row
 				row.depth = depth
@@ -2133,6 +2146,7 @@ ui.nav = function(id, opt) {
 			warn('Circular refs detected. Cannot present data as a tree.')
 			e.can_be_tree = false
 			e.is_tree = false
+			e.tree_field = null
 			reset_tree()
 			return
 		}
@@ -2168,24 +2182,12 @@ ui.nav = function(id, opt) {
 
 	/// row collapsing --------------------------------------------------------
 
-	function set_parent_collapsed(row, collapsed) {
-		if (!row.child_rows)
-			return
-		for (let child_row of row.child_rows) {
-			child_row.parent_collapsed = collapsed
-			if (!child_row.collapsed)
-				set_parent_collapsed(child_row, collapsed)
-		}
-	}
-
 	function set_collapsed_all(row, collapsed) {
 		if (!row.child_rows)
 			return
 		row.collapsed = collapsed
-		for (let child_row of row.child_rows) {
-			child_row.parent_collapsed = collapsed
+		for (let child_row of row.child_rows)
 			set_collapsed_all(child_row, collapsed)
-		}
 	}
 
 	function set_collapsed(row, collapsed, recursive) {
@@ -2193,10 +2195,8 @@ ui.nav = function(id, opt) {
 			return
 		if (recursive)
 			set_collapsed_all(row, collapsed)
-		else if (row.collapsed != collapsed) {
+		else
 			row.collapsed = collapsed
-			set_parent_collapsed(row, collapsed)
-		}
 	}
 
 	e.set_collapsed = function(row, collapsed, recursive) {
@@ -2284,9 +2284,9 @@ ui.nav = function(id, opt) {
 
 	function add_visible_child_rows(rows) {
 		for (let row of rows)
-			if (e.is_row_visible(row)) {
+			if (is_row_visible(row)) {
 				e.rows.push(row)
-				if (row.child_rows)
+				if (row.child_rows && !row.collapsed)
 					add_visible_child_rows(row.child_rows)
 			}
 	}
@@ -2341,7 +2341,7 @@ ui.nav = function(id, opt) {
 		let a = []
 		for (let [field, dir] of order_by_map)
 			a.push(field.name + (dir == 'asc' ? '' : ':desc'))
-		return a.length ? a.join(' ') : undefined
+		return a.length ? a.join(' ') : null
 	}
 
 	e.set_order_by_dir = function(field, dir, keep_others) {
@@ -2361,7 +2361,7 @@ ui.nav = function(id, opt) {
 		else
 			order_by_map.delete(field)
 		e.order_by = order_by_from_map()
-		update_parts({row_order: true})
+		update_parts({row_order: true, order_by: true})
 	}
 
 	/// filtering -------------------------------------------------------------
@@ -2566,8 +2566,12 @@ ui.nav = function(id, opt) {
 	}
 
 	e.is_row_visible = function(row) {
-		if ((e.is_tree || e.is_grouped) && row.parent_collapsed)
-			return false
+		let parent_row = row.parent_row
+		while (parent_row) {
+			if (parent_row.collapsed)
+				return false
+			parent_row = parent_row.parent_row
+		}
 		return is_row_visible(row)
 	}
 
@@ -3116,7 +3120,7 @@ ui.nav = function(id, opt) {
 
 	/// cell value multi-target rendering -------------------------------------
 
-	function build_null_lookup_val(row, field, mode, fg, full_width) {
+	function build_null_lookup_val(row, field, mode, fg, full_width, align) {
 		if (!row || !field.null_lookup_col) return
 		let nf = e.all_fields_map[field.null_lookup_col]  ; if (!nf || !nf.lookup_cols) return
 		let ln = nf.lookup_nav                            ; if (!ln) return
@@ -3124,12 +3128,14 @@ ui.nav = function(id, opt) {
 		let ln_row = e.lookup_val(row, nf, nv)            ; if (!ln_row) return
 		let dcol = field.null_display_col ?? field.name
 		let df = ln.all_fields_map[dcol]                  ; if (!df) return
-		return ln.build_cell(ln_row, df, mode, fg, full_width)
+		return ln.build_cell(ln_row, df, mode, fg, full_width, align)
 	}
 
 	// a lookup cell builds the display field's value, so the column aligns
 	// the way that field does, not the way the local foreign-key field does.
 	e.field_align = function(field) {
+		if (field == e.tree_field)
+			return 'left'
 		return lookup_display_field(field)?.align ?? field.align
 	}
 
@@ -3157,24 +3163,26 @@ ui.nav = function(id, opt) {
 	}
 	}
 
-	e.build_val = function(row, field, v, mode, fg, full_width) {
+	e.build_val = function(row, field, v, mode, fg, full_width, align) {
 
 		if (v == null) {
-			let s = build_null_lookup_val(row, field, mode, fg, full_width)
+			let s = build_null_lookup_val(row, field, mode, fg, full_width,
+				align)
 			if (s) return s
 
 			if (field.build_null)
-				return field.build_null(mode, fg, row)
+				return field.build_null(mode, fg, row, align)
 
 			s = field.null_text
-			if (s) return field.build_text(s, mode, fg)
+			if (s) return field.build_text(s, mode, fg, null, null, align)
 
 			return
 		}
 
 		if (v === '') {
 			if (field.empty_text)
-				return field.build_text(field.empty_text, mode, fg)
+				return field.build_text(field.empty_text, mode, fg,
+					null, null, align)
 			return
 		}
 
@@ -3182,15 +3190,16 @@ ui.nav = function(id, opt) {
 		if (ln_row) {
 			let df = lookup_display_field(field)
 			if (df)
-				return field.lookup_nav.build_cell(ln_row, df, mode, fg, full_width)
+				return field.lookup_nav.build_cell(ln_row, df, mode, fg,
+					full_width, align)
 		}
 
-		return field.build(v, mode, fg, row, full_width)
+		return field.build(v, mode, fg, row, full_width, align)
 	}
 
-	e.build_cell = function(row, field, mode, fg, full_width) {
+	e.build_cell = function(row, field, mode, fg, full_width, align) {
 		return e.build_val(row, field, e.cell_input_val(row, field),
-			mode, fg, full_width)
+			mode, fg, full_width, align)
 	}
 
 	e.cell_text_val = e.build_cell
@@ -4380,6 +4389,8 @@ ui.nav = function(id, opt) {
 		e.cols = saved.cols
 	if (saved?.group_by !== undefined)
 		e.group_by = saved.group_by
+	if (saved?.order_by !== undefined)
+		e.order_by = saved.order_by
 
 	if (!ui.rowsets[e.rowset_name]) {
 		init_rowset_events()
@@ -4436,9 +4447,9 @@ ui.add_validation_rule({
 
 Displaying a grid value:
 
-	build          : f(v, mode, [fg], [row], [full_width]) -> true|s
-	build_text     : f(s, [mode], [fg], [row], [full_width]) -> true|s
-	build_null     : f([mode], [fg], [row]) -> true|s
+	build          : f(v, mode, [fg], [row], [full_width], [align]) -> true|s
+	build_text     : f(s, [mode], [fg], [row], [full_width], [align]) -> true|s
+	build_null     : f([mode], [fg], [row], [align]) -> true|s
 
 	mode: falsy = return the value as plain text.
 	mode: truty = build value widget.
@@ -4451,7 +4462,7 @@ Editing a value:
 
 	has_editor     : the cell enters edit mode. false for bool, which the
 	                 user toggles by click and space instead.
-	build_editor   : f(id, v, pad_l, pad_r, h) -> v
+	build_editor   : f(id, v, pad_l, pad_r, h, align) -> v
 	edits_in_popup : build_editor builds a popup, so the cell keeps drawing
 	                 the value under it.
 	editor_value   : f(id, v) -> v   what the picker has made of v so far.
@@ -4463,8 +4474,8 @@ Editing a value:
 	                 there.
 
 	focus_editor         : f(id, sel_i, sel_len)
-	editor_selection     : f(id) -> [i, len]
-	editor_caret_at_edge : f(id, d) -> true|false   d is -1 or 1
+	editor_selection     : f(id, align) -> [i, len]
+	editor_caret_at_edge : f(id, d, align) -> true|false   d is -1 or 1
 
 Dropdown editors:
 
@@ -4491,36 +4502,38 @@ ui.all_field_types.focus_editor = function(id, sel_i, sel_len) {
 	ui.select_text(id, sel_i, sel_len)
 }
 
-ui.all_field_types.editor_selection = function(id) {
-	return ui.text_selection(id, this.align == 'right', true)
+ui.all_field_types.editor_selection = function(id, align) {
+	return ui.text_selection(id, align == 'right', true)
 }
 
-ui.all_field_types.editor_caret_at_edge = function(id, d) {
-	if (this.editor_selection(id)[1] == 1/0) // select-all: both ends are the edge
+ui.all_field_types.editor_caret_at_edge = function(id, d, align) {
+	// select-all: both ends are the edge
+	if (this.editor_selection(id, align)[1] == 1/0)
 		return true
 	let [i, len] = ui.text_selection(id, d > 0)
 	return !len && i == (d < 0 ? 0 : -1)
 }
 
 // same call as build_text(), so the cell doesn't shift on entering edit.
-ui.all_field_types.build_editor = function(id, v, pad_l, pad_r, h) {
+ui.all_field_types.build_editor = function(id, v, pad_l, pad_r, h, align) {
 	ui.p(pad_l, 0, pad_r, 0)
-	ui.text_editable(id, v, 0, this.align, 'c', null, this)
+	ui.text_editable(id, v, 0, align, 'c', null, this)
 }
 
 ui.all_field_types.fixed_width = 0
 
-ui.all_field_types.build_text = function(s, mode, fg, row, full_width) {
+ui.all_field_types.build_text = function(s, mode, fg, row, full_width,
+	align) {
 	if (!mode)
 		return s
 	ui.color(fg)
-	ui.text('', s, 0, this.align, 'c', full_width ? null : 0)
+	ui.text('', s, 0, align, 'c', full_width ? null : 0)
 	return true
 }
 
-ui.all_field_types.build = function(v, mode, fg, row, full_width) {
+ui.all_field_types.build = function(v, mode, fg, row, full_width, align) {
 	let s = this.to_text(v)
-	return this.build_text(s, mode, fg, row, full_width)
+	return this.build_text(s, mode, fg, row, full_width, align)
 }
 
 // an editor that is a dropdown has no caret to move within.
@@ -4561,13 +4574,13 @@ dropdown_editor.dropdown_picked = function(id) {
 
 let filesize = ui.field_types.filesize
 
-filesize.build = function(x, mode, fg) {
+filesize.build = function(x, mode, fg, row, full_width, align) {
 	let s = this.to_text(x)
 	if (mode) {
 		// TODO: requires a faint color AND a scope
 		// if (this.is_small(x))
 		//	ui.color('label')
-		return this.build_text(s, mode, fg)
+		return this.build_text(s, mode, fg, null, null, align)
 	}
 	return s
 }
@@ -4598,7 +4611,7 @@ date.dropdown_picked = function(id) {
 	return ui.dropdown_picked(id+'.calendar')
 }
 
-date.build_editor = function(id, v, pad_l, pad_r, h) {
+date.build_editor = function(id, v, pad_l, pad_r, h, align) {
 	let calendar_id = id+'.calendar'
 	let picker_id = calendar_id+'.picker'
 	let editor_target_i = ui.stack('', 1, 's', 's')
@@ -4618,12 +4631,12 @@ date.build_editor = function(id, v, pad_l, pad_r, h) {
 				ui.text_h(h)
 				ui.icon(calendar_id, 'calendar', 0)
 				ui.p(0, 0, pad_r, 0)
-				ui.text_editable(id, v, 1, this.align, 'c', null, this)
+				ui.text_editable(id, v, 1, align, 'c', null, this)
 			ui.end_h()
 		ui.end_stack()
 
 	ui.dropdown_picker(calendar_id, 'b',
-		this.align == 'right' ? 'cs' : 'cs')
+		align == 'right' ? 'cs' : 'cs')
 
 		if (is_open) {
 			if (opened) {
@@ -4666,7 +4679,7 @@ bool.build_null = function(mode) {
 
 // an editable cell shows the box so that it reads as something to click,
 // a readonly one only marks the true ones.
-bool.build = function(v, mode, fg, row) {
+bool.build = function(v, mode, fg, row, full_width, align) {
 	if (!isbool(v))
 		return bool.build_null.call(this, mode)
 	if (!mode)
@@ -4677,7 +4690,7 @@ bool.build = function(v, mode, fg, row) {
 			: (v ? 'check' : null)
 	if (icon) {
 		ui.color(fg)
-		ui.icon('', icon, 0, this.align, 'c')
+		ui.icon('', icon, 0, align, 'c')
 	}
 }
 
@@ -4690,7 +4703,7 @@ enm.edits_in_popup = true
 
 // a dropdown over enum_values, up for as long as the edit is: the cell keeps
 // building its own value under it and there is no closed state.
-enm.build_editor = function(id, v, pad_l, pad_r, h) {
+enm.build_editor = function(id, v, pad_l, pad_r, h, align) {
 
 	assert(this.enum_values != null, this.name, ': enum col with no enum_values')
 
@@ -4706,16 +4719,16 @@ enm.build_editor = function(id, v, pad_l, pad_r, h) {
 			ui.p(pad_l, 0, pad_r, 0)
 			ui.min_h(h)
 			ui.stack('', 0)
-				this.build(v, true)
+				this.build(v, true, null, null, null, align)
 			ui.end_stack()
 		}
 
-	ui.dropdown_picker(id, 'b', this.align == 'right' ? ']s' : '[s')
+	ui.dropdown_picker(id, 'b', align == 'right' ? ']s' : '[s')
 
 		if (open) {
 			let vals = words(this.enum_values) // 'v1 ...' or ['v1', ...]
 			ui.list(picker_id, vals, v, this,
-				0, 's', 's', this.align, 'c', 0,
+				0, 's', 's', align, 'c', 0,
 				null, pad_l, pad_r, 0, h)
 		}
 
@@ -4755,11 +4768,11 @@ function type_editor(field) {
 	return ui.field_types[field.type] || empty
 }
 
-lookup_editor.build_editor = function(id, v, pad_l, pad_r, h) {
+lookup_editor.build_editor = function(id, v, pad_l, pad_r, h, align) {
 
 	if (!can_pick_lookup_val(this)) {
 		let f = type_editor(this).build_editor || ui.all_field_types.build_editor
-		f.call(this, id, v, pad_l, pad_r, h)
+		f.call(this, id, v, pad_l, pad_r, h, align)
 		return
 	}
 
@@ -4881,7 +4894,7 @@ color.build_editor = function(id, v, pad_l, pad_r, h) {
 
 let percent = ui.field_types.percent
 
-percent.build = function(p, mode, fg, row, full_width) {
+percent.build = function(p, mode, fg, row, full_width, align) {
 	let s = this.to_text(p)
 	if (!mode)
 		return s
@@ -4895,7 +4908,7 @@ percent.build = function(p, mode, fg, row, full_width) {
 				ui.bb('bg0')
 			ui.end_stack()
 		ui.end_h()
-		this.build_text(s, mode, fg, row, full_width)
+		this.build_text(s, mode, fg, row, full_width, align)
 	ui.end_stack()
 }
 
@@ -4903,17 +4916,17 @@ percent.build = function(p, mode, fg, row, full_width) {
 
 let icon = ui.field_types.icon
 
-icon.build = function(v, mode, fg) {
+icon.build = function(v, mode, fg, row, full_width, align) {
 	if (!mode)
 		return this.to_text(v)
 	ui.color(fg)
-	ui.icon('', v, 0, this.align, 'c')
+	ui.icon('', v, 0, align, 'c')
 }
 
 let place = ui.field_types.place
 
 // place vals are {place_id:, description:} or a plain description string.
-place.build = function(v, mode, fg, row, full_width) {
+place.build = function(v, mode, fg, row, full_width, align) {
 	let place_id = isobject(v) && v.place_id
 	let descr = isobject(v) ? v.description : v || ''
 	if (!mode)
@@ -4922,8 +4935,8 @@ place.build = function(v, mode, fg, row, full_width) {
 	// ui.color(place_id ? 'text' : 'label')
 	ui.h(0, ui.sp05())
 		ui.color(fg)
-		ui.icon('', 'map_pin', 0, this.align, 'c')
-		this.build_text(descr, mode, fg, row, full_width)
+		ui.icon('', 'map_pin', 0, align, 'c')
+		this.build_text(descr, mode, fg, row, full_width, align)
 	ui.end_h()
 }
 
