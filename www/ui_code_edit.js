@@ -1569,7 +1569,7 @@ function code_edit_view(id, opt) {
 				let sel_tab = ui.tabs(id+'.tabs', tabs, 'tab1')
 			ui.end_stack()
 			ui.min_h(1)
-			ui.stack('', 0, 's', 's')
+			ui.stack('', 0)
 				ui.bb('bg2')
 			ui.end_stack()
 			ui.h(1, ui.sp025())
@@ -1580,7 +1580,7 @@ function code_edit_view(id, opt) {
 					ui.scrollbox(id+'.sidebar_scrollbox', 0, 'hide', 'hide',
 						's', 's', null, null, null, id+'.text_scrollbox')
 						ui.min_wh(sidebar_w, text_h)
-						ui.frame(noop, on_sidebar_frame, 0, 's', 's')
+						ui.frame(noop, on_sidebar_frame, 0)
 					ui.end_scrollbox()
 				ui.end_stack()
 
@@ -1588,7 +1588,7 @@ function code_edit_view(id, opt) {
 
 					ui.scrollbox(id+'.text_scrollbox', 1, 'auto', 'scroll')
 						ui.min_wh(text_w, text_h)
-						ui.frame(noop, on_text_frame, 1, 's', 's')
+						ui.frame(noop, on_text_frame)
 					ui.end_scrollbox()
 
 					if (find_open) {

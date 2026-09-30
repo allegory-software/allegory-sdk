@@ -4616,7 +4616,7 @@ date.build_editor = function(id, v, pad_l, pad_r, h) {
 			ui.h(0, ui.sp05())
 				ui.p(pad_l, 0, 0, 0)
 				ui.text_h(h)
-				ui.icon(calendar_id, 'calendar', 0, 'l', 'c')
+				ui.icon(calendar_id, 'calendar', 0)
 				ui.p(0, 0, pad_r, 0)
 				ui.text_editable(id, v, 1, this.align, 'c', null, this)
 			ui.end_h()
@@ -4705,7 +4705,7 @@ enm.build_editor = function(id, v, pad_l, pad_r, h) {
 		if (open) {
 			ui.p(pad_l, 0, pad_r, 0)
 			ui.min_h(h)
-			ui.stack('', 0, 's', 's')
+			ui.stack('', 0)
 				this.build(v, true)
 			ui.end_stack()
 		}

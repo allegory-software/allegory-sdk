@@ -208,7 +208,7 @@ ui.stack('', 1, 's', 'c')
 			let sel_tab = ui.tabs('tabs1', tabs1, 'tab2', 'tab2 tab3 tab4', 'tab3')
 		ui.end_stack()
 		ui.min_h(200)
-		ui.stack('', 1, 's', 's')
+		ui.stack()
 			ui.bb('bg0')
 		ui.end_stack()
 	ui.end_v()
@@ -688,7 +688,7 @@ ui.end_h()
 if (grid_nav)
 	grid_nav.can_change_rows = !readonly
 
-ui.hvsplit(split_hv, 'grid_config_form_split_'+split_hv, .25, 'fr', 2)
+ui.hvsplit(split_hv, 'grid_config_form_split_'+split_hv, 350, 'px', 2)
 	ui.hvsplit(split_vh, 'grid_config_detail_split_'+split_vh, .25, 'fr', 2)
 		ui.grid('grid_config_grid', grid_opt)
 		grid_nav = ui.state_of('grid_config_grid', 'e')
@@ -1275,7 +1275,7 @@ ui.stack('', 1, 'l', 't')
 		for (let side of ['t', 'r', 'b', 'l']) {
 			let [x, y, p_i] = ui.drag_point('p'+j+i, 150+j*220, 100+i*140, 'red')
 			ui.min_wh(50, 50)
-			ui.popup('ttc'+j+i, null, p_i, 'ic', 'c')
+			ui.popup('ttc'+j+i, null, p_i, 'ic')
 				ui.border(1, 'light')
 				ui.m(
 					side == 'l' || side == 'r' ? ui.sp2() : 0,
@@ -1382,7 +1382,7 @@ let dropdown_field = ui.create_field({type: 'enum', enum_values: dd_items})
 demos.toolbox = function() {
 function tb_contents(tb) { // tb: toolbox id, prefixes the ids in here
 	ui.min_wh(200, 300)
-	ui.stack('', 1, 's', 's')
+	ui.stack()
 		ui.m(ui.sp2())
 		ui.v(1, ui.sp(), 'c', 't')
 			tb_input_text[tb] = ui.input(tb+'_input', tb_input_text[tb] ?? 'type here')
@@ -1397,7 +1397,7 @@ function tb_contents(tb) { // tb: toolbox id, prefixes the ids in here
 				if (ui.hit(tb+'_tt')) {
 					ui.m(10)
 					ui.min_wh(120, 40)
-					ui.popup(tb+'_ttp', 'error', null, 'r', 'c')
+					ui.popup(tb+'_ttp', 'error', null, 'r')
 						ui.shadow('demo_tooltip')
 						ui.bb_tooltip('bg2', null, 'intense', null, ui.sp1())
 						ui.p(ui.sp2(), ui.sp())
@@ -1412,7 +1412,7 @@ function tb_contents(tb) { // tb: toolbox id, prefixes the ids in here
 				if (ui.hit(tb+'_tt2')) {
 					ui.m(10)
 					ui.min_wh(120, 40)
-					ui.popup(tb+'_ttp2', 'tooltip', null, 'r', 'c')
+					ui.popup(tb+'_ttp2', 'tooltip', null, 'r')
 						ui.shadow('demo_tooltip')
 						ui.bb_tooltip('bg2', null, 'intense', null, ui.sp1())
 						ui.p(ui.sp2(), ui.sp())
@@ -1548,12 +1548,12 @@ ui.v(1, ui.sp())
 		to_sid = ui.input('to_sid', to_sid)
 		if (!offer_con.open && my_sid) {
 			ui.min_w(ui.em(10))
-			if (ui.button('btn_make_offer', 'Share Screen', 0, 'c', 'c'))
+			if (ui.button('btn_make_offer', 'Share Screen', 0, 'c'))
 				offer_con.connect(to_sid)
 		}
 		if (offer_con.open) {
 			ui.min_w(ui.em(10))
-			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c', 'c'))
+			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c'))
 				offer_con.close()
 		}
 	ui.end_h()
@@ -1590,12 +1590,12 @@ ui.v(1, ui.sp())
 		to_sid = ui.input('to_sid', to_sid)
 		if (!answer_con.open && my_sid) {
 			ui.min_w(ui.em(10))
-			if (ui.button('btn_accept_offer', 'See Screen', 0, 'c', 'c'))
+			if (ui.button('btn_accept_offer', 'See Screen', 0, 'c'))
 				answer_con.connect(to_sid)
 		}
 		if (answer_con.open) {
 			ui.min_w(ui.em(10))
-			if (ui.button('btn_stop_seeing', 'Stop Seeing', 0, 'c', 'c'))
+			if (ui.button('btn_stop_seeing', 'Stop Seeing', 0, 'c'))
 				answer_con.close()
 		}
 	ui.end_h()
@@ -1627,23 +1627,23 @@ ui.v(1, ui.sp())
 		ui.input('offer_sid', my_sid, offer_sid_field)
 		if (offer_con.open) {
 			ui.min_w(ui.em(10))
-			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c', 'c')) {
+			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c')) {
 				offer_con.close()
 			}
 		} else if (answer_con.open) {
 			ui.min_w(ui.em(10))
-			if (ui.button('btn_stop_seeing', 'Stop Seeing', 0, 'c', 'c')) {
+			if (ui.button('btn_stop_seeing', 'Stop Seeing', 0, 'c')) {
 				answer_con.close()
 			}
 		} else {
 			if (my_sid) {
 				ui.min_w(ui.em(10))
-				if (ui.button('btn_make_offer', 'Share Screen', 0, 'c', 'c')) {
+				if (ui.button('btn_make_offer', 'Share Screen', 0, 'c')) {
 					offer_con.connect(to_sid)
 				}
 			}
 			ui.min_w(ui.em(10))
-			if (ui.button('btn_accept_offer', 'See Screen', 0, 'c', 'c')) {
+			if (ui.button('btn_accept_offer', 'See Screen', 0, 'c')) {
 				answer_con.connect(to_sid)
 			}
 		}

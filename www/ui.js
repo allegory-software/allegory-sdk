@@ -6846,7 +6846,7 @@ function hit_v_edge(id, hit_dx) {
 	hit_dx ??= 0
 	ui.min_w(hit_distance)
 	ui.popup(id, null, null, 'il', 's', 'solid',
-		null, -hit_distance / 2 + hit_dx, null)
+		null, -hit_distance / 2 + hit_dx)
 		ui.ml(-hit_dx)
 		ui.stack('', 1, 's', 's')
 }
@@ -6981,7 +6981,7 @@ ui.splitter = function() {
 
 	if (hv == 'h') {
 		ui.min_w(1)
-		ui.stack('', 0, 'l', 's')
+		ui.stack('', 0, 'l')
 			ui.border('l', 'intense', st)
 			hit_v_edge(id, split_edge_hit_bias)
 			if (collapsed) {
@@ -7311,7 +7311,7 @@ ui.error_label = function(for_id, mode, fr, align, valign) {
 				ui.icon('', 'check', 0, 'c', 'c', ui.em())
 			} else {
 				ui.min_wh(ui.em(), ui.em())
-				ui.box(0)
+				ui.box()
 			}
 			ui.small()
 			ui.color(result.failed ? 'error-text'
@@ -7323,7 +7323,7 @@ ui.error_label = function(for_id, mode, fr, align, valign) {
 	}
 	if (!text_n) {
 		ui.min_h(ui.line_h())
-		ui.box(0)
+		ui.box()
 	}
 	ui.end_v()
 }
@@ -8907,7 +8907,7 @@ ui.date_input = function(id, v, field, fr, align, valign, readonly) {
 			ui.bb('input', state, 1, 'intense', state)
 			ui.p(ui.sp())
 			ui.min_w(min_w)
-			ui.h(0, ui.sp05(), 's', 's')
+			ui.h(0, ui.sp05())
 				ui.color('text', state)
 				ui.icon(id, 'calendar', 0, 'l', 'c')
 				ui.color('text', state)
@@ -9660,14 +9660,14 @@ function build_input_row(id, value, opt, is_bound) {
 	if (has_error) {
 		ui.color('error-text')
 		ui.text_w(ui.em(1))
-		ui.icon(status_id, 'x', 0, 'c', 'c')
+		ui.icon(status_id, 'x', 0, 'c')
 	} else if (is_modified) {
 		ui.color('green-text')
 		ui.text_w(ui.em(1))
-		ui.icon(status_id, 'check', 0, 'c', 'c')
+		ui.icon(status_id, 'check', 0, 'c')
 	} else {
 		ui.min_w(ui.em(1))
-		ui.box(0)
+		ui.box()
 	}
 	ui.end_h()
 	if (has_outer_ct)
@@ -10235,7 +10235,7 @@ ui.live_move_mixin = function(e) {
 ui.debug_pane = function(full) {
 
 	ui.min_w(200 * dpr)
-	ui.v(0, 0, 's', 's')
+	ui.v(0)
 		ui.border('l', 'intense')
 
 		ui.stack('', 0)
@@ -10988,7 +10988,7 @@ function template_editor(id, t, ch_t) {
 
 	ui.toolbox(id+'.tree_toolbox', 'Tree', ']', 't', 100, 100)
 		ui.min_wh(150, 200)
-		ui.scrollbox(id+'.tree_toolbox_sb', 1)
+		ui.scrollbox(id+'.tree_toolbox_sb')
 			ui.p(10)
 			ui.v(1, 0, 's', 't')
 				draw_node(id, t, t, 0)
@@ -10998,7 +10998,7 @@ function template_editor(id, t, ch_t) {
 
 	ui.toolbox(id+'.prop_toolbox', 'Props', ']', 't', 100, 400)
 		ui.min_wh(150, 200)
-		ui.scrollbox(id+'.prop_toolbox_sb', 1)
+		ui.scrollbox(id+'.prop_toolbox_sb')
 			ui.v(1, 0, 's', 't')
 			let defs = tprops[ch_t.t]
 			for (let k in defs) {
