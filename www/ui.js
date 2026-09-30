@@ -6939,12 +6939,15 @@ function split(hv, id, size, unit, fixed_side,
 		ui.set_cursor(horiz ? 'col-resize' : 'row-resize')
 	ui.measure(id)
 
-	let collapsed = fixed
-		? side_min == 0 || side_min == 1/0 || side_min == max_size
-		: side_fr == 0 || side_fr == 1
+	let other_side = 3 - fixed_side
+	let collapsed_side = null
+	if (fixed ? side_min == 0 : side_fr == 0)
+		collapsed_side = fixed_side
+	else if (fixed ? side_min == 1/0 || side_min == max_size : side_fr == 1)
+		collapsed_side = other_side
 
 	let other_fr = fixed ? 1 : 1 - side_fr
-	if (fixed && side_min == 1/0) {
+	if (fixed && collapsed_side == other_side) {
 		side_fr = 1
 		side_min = 0
 		other_fr = 0
@@ -6954,7 +6957,7 @@ function split(hv, id, size, unit, fixed_side,
 		? [side_fr, side_min, other_fr, 0]
 		: [other_fr, 0, side_fr, side_min]
 
-	split_stack.push(hv, id, collapsed, fr2, min2)
+	split_stack.push(hv, id, collapsed_side, fr2, min2)
 
 	ui.min_wh(horiz ? min1 : null, horiz ? null : min1)
 	ui.sb(id+'.scrollbox1', fr1)
@@ -6965,48 +6968,57 @@ function split(hv, id, size, unit, fixed_side,
 // bias split edge hit area towards the right/bottom because the left/top side
 // usually contains a scrollbar and the split hit area  is on top so it
 // interferes with that scrollbar.
-let split_edge_hit_bias = 4
+let split_edge_hit_bias = 0
+let split_thumb_hit_w = 4
 
 ui.splitter = function() {
 
 	ui.end_sb()
 
 	let n = split_stack.length
-	let hv        = split_stack[n-5]
-	let id        = split_stack[n-4]
-	let collapsed = split_stack[n-3]
-	let fr2       = split_stack[n-2]
-	let min2      = split_stack[n-1]
+	let hv             = split_stack[n-5]
+	let id             = split_stack[n-4]
+	let collapsed_side = split_stack[n-3]
+	let fr2            = split_stack[n-2]
+	let min2           = split_stack[n-1]
 	let horiz = hv == 'h'
 	let st = drag_or_hit(id) ? 'hover' : null
 
-	if (hv == 'h') {
-		ui.min_w(1)
-		ui.stack('', 0, 'l')
+	let splitter_w = collapsed_side ? 0 : 1
+	ui.min_wh(horiz ? splitter_w : null, horiz ? null : splitter_w)
+	ui.stack('', 0, horiz ? 'l' : 's', horiz ? 's' : 't')
+		if (collapsed_side) {
+			let hit_w = split_thumb_hit_w * dpr
+			let popup_offset = collapsed_side == 1 ? -hit_w : hit_w
+			let popup_side = horiz
+				? (collapsed_side == 1 ? 'il' : 'ir')
+				: (collapsed_side == 1 ? 'it' : 'ib')
+			let thumb_thickness = ui.sp2() + hit_w
+			let thumb_length = 2*ui.sp8()
+			ui.popup('', 'overlay', null, popup_side, 'c', null, null,
+				horiz ? popup_offset : 0, horiz ? 0 : popup_offset)
+				ui.min_wh(
+					horiz ? thumb_thickness : thumb_length,
+					horiz ? thumb_length : thumb_thickness)
+				ui.stack(id, 1, 'c', 'c')
+					ui[horiz ? 'mh' : 'mv'](
+						collapsed_side == 1 ? hit_w : 0,
+						collapsed_side == 1 ? 0 : hit_w)
+					ui.stack('', 1, 's', 's')
+						ui.bg('bg2', st)
+					ui.end_stack()
+				ui.end_stack()
+			ui.end_popup()
+		} else if (horiz) {
 			ui.border('l', 'intense', st)
 			hit_v_edge(id, split_edge_hit_bias)
-			if (collapsed) {
-				ui.min_wh(5, 2*ui.sp8())
-				ui.stack('', 1, 'c', 'c')
-					ui.border('lr', 'intense', st)
-				ui.end_stack()
-			}
 			end_hit_v_edge()
-		ui.end_stack()
-	} else {
-		ui.min_h(1)
-		ui.stack('', 0, 's', 't')
+		} else {
 			ui.border('t', 'intense', st)
 			hit_h_edge(id, split_edge_hit_bias)
-				if (collapsed) {
-					ui.min_wh(2*ui.sp8(), 4)
-					ui.stack('', 1, 'c', 'c')
-						ui.border('tb', 'intense', st)
-					ui.end_stack()
-				}
 			end_hit_h_edge()
-		ui.end_stack()
-	}
+		}
+	ui.end_stack()
 
 	ui.min_wh(horiz ? min2 : null, horiz ? null : min2)
 	ui.sb(id+'.scrollbox2', fr2)
