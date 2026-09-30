@@ -10664,10 +10664,15 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 	// x0, y0 are distances from those edges, the offsets are screen-directed.
 	// the popup keeps ox, oy on screen, the drag moves from where the grab
 	// found them so that the grabbed point stays under the mouse.
-	let ox = s.ox ?? ( align_start ? x0 : -x0)
-	let oy = s.oy ?? (valign_start ? y0 : -y0)
+	let saved = ui.saved_state[id]
+	let ox = s.ox ?? (saved?.ox != null ? saved.ox * dpr :  align_start ? x0 : -x0)
+	let oy = s.oy ?? (saved?.oy != null ? saved.oy * dpr : valign_start ? y0 : -y0)
 	if (cs?.drag) { cs.ox0 = ox; cs.oy0 = oy }
 	if (cs?.dragging) { ox = cs.ox0 + cs.dx; oy = cs.oy0 + cs.dy }
+	if (cs?.drop) {
+		ui.save_state(id, 'ox', ox / dpr)
+		ui.save_state(id, 'oy', oy / dpr)
+	}
 	let i = ui.popup(id, 'toolbox', target_i ?? 'screen',
 		valign_start ? 'it' : 'ib', align, 'constrain solid', null,
 		ox, oy
@@ -10676,9 +10681,13 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 		ui.focus_group(null, null, id)
 		//ui.p(1)
 		ui.bb('bg1', null, 1, 'intense')//, null, ui.sp075())
+		let w = ui.state_of(id+'.resizer', 'w')
+		let h = ui.state_of(id+'.resizer', 'h')
+		if (w != null) ui.save_state(id, 'w', w / dpr)
+		if (h != null) ui.save_state(id, 'h', h / dpr)
 		ui.min_wh(
-			ui.state_of(id+'.resizer', 'w'),
-			ui.state_of(id+'.resizer', 'h'))
+			w ?? (saved?.w != null ? saved.w * dpr : null),
+			h ?? (saved?.h != null ? saved.h * dpr : null))
 		ui.stack()
 			toolbox_stack.push(id, tid)
 			ui.v() // title / body split

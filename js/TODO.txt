@@ -1,8 +1,6 @@
 BUGS
 ------------------------------------------------------------------------------
 GLITCHES:
-- slider tooltip doesn't follow thumb center exactly
-- resizer moves a little on click even when no mouse move
 
 BEHAVIOR:
 - ui.date_input: enter to close while focused on input cancels instead of pick.
