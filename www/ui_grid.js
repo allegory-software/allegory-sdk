@@ -169,7 +169,7 @@ let help_lines = [
 function build_help(id, target_i) {
 	ui.m(ui.sp2())
 	ui.p(ui.sp4())
-	ui.popup(id+'.help', 'overlay', target_i, 'b', '[', 0, 0,
+	ui.popup(id+'.help', 'overlay', target_i, 'b', '[',
 		'change_side constrain')
 		ui.bb_tooltip('bg2', null, 'light', null, ui.sp05())
 		ui.v_aligned(0)
@@ -437,7 +437,8 @@ function init(id, e) {
 
 		// render help
 		ui.m(cell_x, y, 0, 0)
-		let cell_i = ui.stack('', 0, 'l', 't', cell_w, h)
+		ui.min_wh(cell_w, h)
+		let cell_i = ui.stack('', 0, 'l', 't')
 			ui.bb(bg, bgs, build_stage == 'col_move' ? 'lrb' : 'b', 'light')
 			if (help_open && !build_stage && row_focused && field_focused)
 				build_help(id, cell_i)
@@ -1435,7 +1436,7 @@ function init(id, e) {
 
 	}
 
-	e.build = function(id, opt, fr, align, valign, min_w, min_h) {
+	e.build = function(id, opt, fr, align, valign) {
 
 		e.set_param_vals(opt.param_vals)
 
@@ -1486,7 +1487,7 @@ function init(id, e) {
 
 		// build ---------------------------------------------------------------
 
-		ui.stack(id, fr, align, valign, min_w, min_h)
+		ui.stack(id, fr, align, valign)
 		ui.v(1, 0, 's', 's')
 
 			// so that focus_inside() answers for a picker's own widgets.
@@ -1499,7 +1500,8 @@ function init(id, e) {
 				|| drag_op == 'col_group'
 			) {
 
-				let group_bar_i = ui.sb(id+'.group_bar', 0, 'hide', 'hide', 's', 't', null, group_bar_h())
+				ui.min_h(group_bar_h())
+				let group_bar_i = ui.sb(id+'.group_bar', 0, 'hide', 'hide', 's', 't')
 					ui.bb('bg2', null, 'b', 'light')
 
 					let mover = gcol_mover
@@ -1525,7 +1527,8 @@ function init(id, e) {
 								} else {
 									let place_x = vi * (w + 1)
 									ui.m(sp2 + place_x - 1, sp2 + y - 1, 0, 0)
-									ui.stack('', 0, 'l', 't', w + 2, h + 2)
+									ui.min_wh(w + 2, h + 2)
+									ui.stack('', 0, 'l', 't')
 										ui.border(1, 'marker', null, 0, 'dashes')
 									ui.end_stack()
 									x = mover.x0 + ps.dx
@@ -1535,14 +1538,15 @@ function init(id, e) {
 						}
 
 						if (mover && col == hit_gcol) {
-							ui.popup(id+'.moving_gcol_popup', 'drag', group_bar_i, 'il', '[', 0, 0)
+							ui.popup(id+'.moving_gcol_popup', 'drag', group_bar_i, 'il', '[')
 							ui.nohit()
 						}
 
 						let col_id = id+'.gcol.'+col
 						let field = e.fld(col)
 						ui.m(sp2 + x, sp2 + y, 0, 0)
-						ui.stack(col_id, 1, 'l', 't', w, h)
+						ui.min_wh(w, h)
+						ui.stack(col_id, 1, 'l', 't')
 							let bgs = hit_gcol == col && (
 								!ps.dragging || ps.drop ? 'hover'
 									: hit_zone != 'sort_icon' ? 'active' : 'hover'
@@ -1583,7 +1587,8 @@ function init(id, e) {
 			function build_header_cell(field, noclip) {
 				ui.m(field._x, 0, 0, 0)
 				ui.p(sp2, 0)
-				ui.h(0, sp, 'l', 't', field._w - 2 * sp2, header_h)
+				ui.min_wh(field._w - 2 * sp2, header_h)
+				ui.h(0, sp, 'l', 't')
 
 					let col_move  = drag_op == 'col_move'  && hit_fi == field.index
 					let col_group = drag_op == 'col_group' && hit_gcol == field.name
@@ -1630,7 +1635,7 @@ function init(id, e) {
 
 			ui.scrollbox(id+'.header', 0,
 				e.auto_expand ? 'contain' : 'hide', 'contain',
-				null, null, null, null, null, null, id+'.cells_scrollbox')
+				null, null, null, null, id+'.cells_scrollbox')
 
 				ui.stack(id+'.header')
 				ui.measure(id+'.header')
@@ -1653,7 +1658,8 @@ function init(id, e) {
 					if (gcol_mover?.drop_pos != null) {
 						let x = e.fields[gcol_mover.drop_pos]?._x ?? cells_w
 						ui.ml(x)
-						ui.stack('', 0, 'l', 't', 0, header_h)
+						ui.min_h(header_h)
+						ui.stack('', 0, 'l', 't')
 							ui.popup('', 'overlay', null, 't', 'c')
 								ui.color('marker')
 								ui.icon('', 'arrow_down')
@@ -1674,7 +1680,8 @@ function init(id, e) {
 			let cells_h = e.rows.length * cell_h
 			let overflow = e.auto_expand ? 'contain' : 'auto'
 			ui.scrollbox(id+'.cells_scrollbox', 1, overflow, overflow, 's', 's')
-				ui.frame(noop, on_cellview_frame, 0, 'l', 't', cells_w, cells_h)
+				ui.min_wh(cells_w, cells_h)
+				ui.frame(noop, on_cellview_frame, 0, 'l', 't')
 			ui.end_scrollbox()
 
 			ui.end_focus_group()

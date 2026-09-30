@@ -16,7 +16,7 @@ const {
 	obj, json, json_arg, load, save,
 	random, clamp, min, max, floor, ceil, round,
 	time, assign, keys,
-	parse_date, format_kbytes, format_date,
+	parse_date, format_date,
 	listen,
 	pr,
 } = glue
@@ -38,15 +38,16 @@ ui.save_unsaved_state = function(saved_state) {
 }
 let demo_toggle_field = ui.create_field({type: 'bool', not_null: true})
 ui.saved_value('btn_light'  , ui.screen_theme() == 'light', demo_toggle_field)
-ui.saved_value('btn_debug'  , true , demo_toggle_field)
+ui.saved_value('btn_debug'  , false, demo_toggle_field)
 ui.saved_value('btn_tui'    , false, demo_toggle_field)
 ui.saved_value('btn_animate', false, demo_toggle_field)
+ui.saved_value('btn_pack'   , false, demo_toggle_field)
+ui.saved_value('btn_panes'  , true , demo_toggle_field)
 ui.set_screen_theme(ui.value('btn_light') ? 'light' : 'dark')
 
 ui.DEBUG      = ui.value('btn_debug')
-ui.DEBUG_PANE = true
 ui.TUI        = ui.value('btn_tui')
-ui.saved_value('demos_list', 'tabs')
+ui.saved_value('demos_list', 'grid')
 let url_demo = location.search.match('demo=([^&]+)')?.[1]
 if (url_demo)
 	attr(ui.saved_state, 'demos_list').value = url_demo
@@ -74,7 +75,8 @@ let slider_demo_field = ui.create_field({
 	slider_markers: false,
 })
 demos.silder = function() {
-ui.v(0, 0, 'c', 'c', 400)
+ui.min_w(400)
+ui.v(0, 0, 'c', 'c')
 	ui.border(1, 'intense')
 	slider1_v = ui.slider('slider1', slider1_v, slider_demo_field)
 	slider2_v = ui.slider('slider2', slider2_v)
@@ -205,7 +207,8 @@ ui.stack('', 1, 's', 'c')
 			ui.bb('bg1')
 			let sel_tab = ui.tabs('tabs1', tabs1, 'tab2', 'tab2 tab3 tab4', 'tab3')
 		ui.end_stack()
-		ui.stack('', 1, 's', 's', null, 200)
+		ui.min_h(200)
+		ui.stack('', 1, 's', 's')
 			ui.bb('bg0')
 		ui.end_stack()
 	ui.end_v()
@@ -240,7 +243,8 @@ for (let i = 1; i <= 1000; i++)
 	list1_items.push('Item '+i)
 let list1_value = list1_items[0]
 demos.list = function() {
-ui.sb('list1_sb', 1, null, null, 'c', 'c', 100, 300)
+ui.min_wh(100, 300)
+ui.sb('list1_sb', 1, null, null, 'c', 'c')
 	list1_value = ui.list('list1', list1_items, list1_value)
 ui.end_sb()
 }
@@ -567,7 +571,7 @@ ui.saved_value('grid_config_exit_edit_on_escape', true)
 ui.saved_value('grid_config_validate_on_load', true)
 ui.saved_value('grid_config_readonly', false)
 ui.saved_value('grid_config_label_pos', 'left', grid_config_label_pos_field)
-ui.saved_value('grid_config_split_hv', 'v', grid_config_split_field)
+ui.saved_value('grid_config_split_hv', 'h', grid_config_split_field)
 ui.saved_value('grid_config_rows', 1000, grid_config_rows_field)
 ui.saved_value('grid_config_cols', grid_demo_base_field_count,
 	grid_config_cols_field)
@@ -684,8 +688,8 @@ ui.end_h()
 if (grid_nav)
 	grid_nav.can_change_rows = !readonly
 
-ui.hvsplit(split_hv, 'grid_config_form_split_'+split_hv)
-	ui.hvsplit(split_vh, 'grid_config_detail_split_'+split_vh)
+ui.hvsplit(split_hv, 'grid_config_form_split_'+split_hv, .25, 'fr', 2)
+	ui.hvsplit(split_vh, 'grid_config_detail_split_'+split_vh, .25, 'fr', 2)
 		ui.grid('grid_config_grid', grid_opt)
 		grid_nav = ui.state_of('grid_config_grid', 'e')
 		if (grid_nav)
@@ -708,7 +712,8 @@ ui.splitter()
 	ui.end_h()
 	ui.scrollbox('grid_config_form_sb', 1, 'auto', 'auto', 's', 's')
 		ui.m(ui.sp4())
-		ui.v_aligned(1, ui.sp2(), 'l', 't', ui.em(16))
+		ui.min_w(ui.em(16))
+		ui.v_aligned(1, ui.sp2(), 'l', 't')
 			if (grid_nav)
 				for (let col in grid_config_input_opt) {
 					let opt = grid_config_input_opt[col]
@@ -1049,13 +1054,16 @@ ui.v()
 		if (is_label_left)
 			ui.box()
 		ui.h()
+			ui.min_wh(0, 0)
 			ui.button('btn1', 'Button',
-				0, 'l', 'c', 0, 0, null, input_controls_readonly)
+				0, 'l', 'c', null, input_controls_readonly)
 			ui.h(0, ui.sp())
+				ui.min_wh(0, 0)
 				ui.primary_button('btn2', 'Primary',
-					0, 'l', 'c', 0, 0, input_controls_readonly)
+					0, 'l', 'c', input_controls_readonly)
+				ui.min_wh(0, 0)
 				ui.icon_button('btn_plus', 'plus', 'Icon',
-					0, 'l', 'c', 0, 0, null, input_controls_readonly)
+					0, 'l', 'c', null, input_controls_readonly)
 			ui.end_h()
 		ui.end_h()
 	ui.end_h()
@@ -1178,7 +1186,8 @@ let num_slider1_field = ui.create_field({
 	decimals: 2,
 })
 demos.num_slider = function() {
-ui.v(0, ui.sp(), 'c', 'c', 300)
+ui.min_w(300)
+ui.v(0, ui.sp(), 'c', 'c')
 	ui.box_args(0)
 	num_slider1_value = ui.num_slider(
 		'num_slider1', num_slider1_value, num_slider1_field)
@@ -1212,11 +1221,13 @@ ui.v(1, 30, 'c', 'c')
 	for (let kind of ['', 'i', 'is']) {
 		let inner = kind[0] == 'i'
 		let side_stretch = kind == 'is'
-		ui.h(1, 0, 'c', 'c', 360, 180)
+		ui.min_wh(360, 180)
+		ui.h(1, 0, 'c', 'c')
 			for (let align of ['c', '[', ']', '[s', ']s']) {
 				ui.m(40, 30)
 				ui.p(20, 20)
-				ui.stack('', 0, 'c', 'c', 70, 100)
+				ui.min_wh(70, 100)
+				ui.stack('', 0, 'c', 'c')
 					ui.stack()
 						ui.bb('bg1')
 					ui.end_stack()
@@ -1226,14 +1237,16 @@ ui.v(1, 30, 'c', 'c')
 							let sd = side_stretch ? 'i'+side+'s' : kind+side
 							ui.m(10)
 							ui.p(10)
-							ui.popup('popup'+i++, null, null, sd, align, 10, 10)
+							ui.min_wh(10, 10)
+							ui.popup('popup'+i++, null, null, sd, align)
 								ui.stack()
 									ui.bb('bg2')
 								ui.end_stack()
 								ui.border(1, 'intense')
 								ui.m(5)
 								ui.p(5)
-								ui.popup('popup'+i++, null, null, sd, align, 5, 5)
+								ui.min_wh(5, 5)
+								ui.popup('popup'+i++, null, null, sd, align)
 									ui.stack()
 										ui.bb('bg2')
 									ui.end_stack()
@@ -1253,21 +1266,24 @@ ui.end_v()
 {
 demos.bb_tooltip = function() {
 ui.sb('bb_tooltip_sb', 1)
-ui.stack('', 1, 'l', 't', 800, 800)
+ui.min_wh(800, 800)
+ui.stack('', 1, 'l', 't')
 	ui.bb('bg0')
 	let j = 0
 	for (let align of ['c', '[', ']']) {
 		let i = 0
 		for (let side of ['t', 'r', 'b', 'l']) {
 			let [x, y, p_i] = ui.drag_point('p'+j+i, 150+j*220, 100+i*140, 'red')
-			ui.popup('ttc'+j+i, null, p_i, 'ic', 'c', 50, 50)
+			ui.min_wh(50, 50)
+			ui.popup('ttc'+j+i, null, p_i, 'ic', 'c')
 				ui.border(1, 'light')
 				ui.m(
 					side == 'l' || side == 'r' ? ui.sp2() : 0,
 					side == 't' || side == 'b' ? ui.sp2() : 0,
 				)
 				ui.m(10)
-				ui.popup('tt'+j+i, 'tooltip', null, side, align, 100, 50, 'change_side constrain')
+				ui.min_wh(100, 50)
+				ui.popup('tt'+j+i, 'tooltip', null, side, align, 'change_side constrain')
 					ui.shadow('demo_tooltip')
 					ui.bb_tooltip('bg2', null, 'intense', null, ui.sp1())
 				ui.end_popup()
@@ -1289,29 +1305,37 @@ ui.v(0, 30, 'c', 'c')
 	ui.h(0, 10, 'c', 'c')
 
 		// both scrollbars
-		ui.sb('sb1', 0, null, null, 'c', 'c', 100, 100)
-			ui.stack('', 0, 'l', 't', 300, 300)
+		ui.min_wh(100, 100)
+		ui.sb('sb1', 0, null, null, 'c', 'c')
+			ui.min_wh(300, 300)
+			ui.stack('', 0, 'l', 't')
 				ui.bb('bg1', null, 1, 'intense')
 			ui.end_stack()
 		ui.end_sb()
 
 		// max w/h before showing scrollbar
-		ui.sb('sb2', 0, 'scroll', 'scroll', 'c', 'c', 100, 100)
-			ui.stack('', 0, 'l', 't', 100, 100)
+		ui.min_wh(100, 100)
+		ui.sb('sb2', 0, 'scroll', 'scroll', 'c', 'c')
+			ui.min_wh(100, 100)
+			ui.stack('', 0, 'l', 't')
 				ui.bb('bg1', null, 1, 'intense')
 			ui.end_stack()
 		ui.end_sb()
 
 		// hide on x-axis
-		ui.sb('sb3', 0, 'hide', 'auto', 'c', 'c', 100, 100)
-			ui.stack('', 0, 'l', 't', 300, 300)
+		ui.min_wh(100, 100)
+		ui.sb('sb3', 0, 'hide', 'auto', 'c', 'c')
+			ui.min_wh(300, 300)
+			ui.stack('', 0, 'l', 't')
 				ui.bb('bg1', null, 1, 'intense')
 			ui.end_stack()
 		ui.end_sb()
 
 		// hide on y-axis
-		ui.sb('sb4', 0, 'auto', 'hide', 'c', 'c', 100, 100)
-			ui.stack('', 0, 'l', 't', 300, 300)
+		ui.min_wh(100, 100)
+		ui.sb('sb4', 0, 'auto', 'hide', 'c', 'c')
+			ui.min_wh(300, 300)
+			ui.stack('', 0, 'l', 't')
 				ui.bb('bg1', null, 1, 'intense')
 			ui.end_stack()
 		ui.end_sb()
@@ -1321,15 +1345,19 @@ ui.v(0, 30, 'c', 'c')
 	ui.h(0, 10, 'c', 'c')
 
 		// contain on x-axis
-		ui.sb('sb5', 0, 'contain', 'auto', 'c', 'c', 100, 100)
-			ui.stack('', 0, 'l', 't', 200, 200)
+		ui.min_wh(100, 100)
+		ui.sb('sb5', 0, 'contain', 'auto', 'c', 'c')
+			ui.min_wh(200, 200)
+			ui.stack('', 0, 'l', 't')
 				ui.bb('bg1', null, 1, 'intense')
 			ui.end_stack()
 		ui.end_sb()
 
 		// contain on y-axis
-		ui.sb('sb6', 0, 'auto', 'contain', 'c', 'c', 100, 100)
-			ui.stack('', 0, 'l', 't', 200, 200)
+		ui.min_wh(100, 100)
+		ui.sb('sb6', 0, 'auto', 'contain', 'c', 'c')
+			ui.min_wh(200, 200)
+			ui.stack('', 0, 'l', 't')
 				ui.bb('bg1', null, 1, 'intense')
 			ui.end_stack()
 		ui.end_sb()
@@ -1353,7 +1381,8 @@ let dd_items = [
 let dropdown_field = ui.create_field({type: 'enum', enum_values: dd_items})
 demos.toolbox = function() {
 function tb_contents(tb) { // tb: toolbox id, prefixes the ids in here
-	ui.stack('', 1, 's', 's', 200, 300)
+	ui.min_wh(200, 300)
+	ui.stack('', 1, 's', 's')
 		ui.m(ui.sp2())
 		ui.v(1, ui.sp(), 'c', 't')
 			tb_input_text[tb] = ui.input(tb+'_input', tb_input_text[tb] ?? 'type here')
@@ -1361,12 +1390,14 @@ function tb_contents(tb) { // tb: toolbox id, prefixes the ids in here
 				tb+'_dd1', dd_items, tb_dd_values[tb+'1'], dropdown_field)
 			tb_dd_values[tb+'2'] = ui.list_dropdown(
 				tb+'_dd2', dd_items, tb_dd_values[tb+'2'], dropdown_field)
-			ui.stack(tb+'_tt', 0, 'c', 'c', 100, 30)
+			ui.min_wh(100, 30)
+			ui.stack(tb+'_tt', 0, 'c', 'c')
 				ui.bb('bg2', null, 1, 'intense')
 				ui.text('', 'hover me', 1, 'c')
 				if (ui.hit(tb+'_tt')) {
 					ui.m(10)
-					ui.popup(tb+'_ttp', 'error', null, 'r', 'c', 120, 40)
+					ui.min_wh(120, 40)
+					ui.popup(tb+'_ttp', 'error', null, 'r', 'c')
 						ui.shadow('demo_tooltip')
 						ui.bb_tooltip('bg2', null, 'intense', null, ui.sp1())
 						ui.p(ui.sp2(), ui.sp())
@@ -1374,12 +1405,14 @@ function tb_contents(tb) { // tb: toolbox id, prefixes the ids in here
 					ui.end_popup()
 				}
 			ui.end_stack()
-			ui.stack(tb+'_tt2', 0, 'c', 'c', 100, 30)
+			ui.min_wh(100, 30)
+			ui.stack(tb+'_tt2', 0, 'c', 'c')
 				ui.bb('bg2', null, 1, 'intense')
 				ui.text('', 'hover me', 1, 'c')
 				if (ui.hit(tb+'_tt2')) {
 					ui.m(10)
-					ui.popup(tb+'_ttp2', 'tooltip', null, 'r', 'c', 120, 40)
+					ui.min_wh(120, 40)
+					ui.popup(tb+'_ttp2', 'tooltip', null, 'r', 'c')
 						ui.shadow('demo_tooltip')
 						ui.bb_tooltip('bg2', null, 'intense', null, ui.sp1())
 						ui.p(ui.sp2(), ui.sp())
@@ -1460,9 +1493,12 @@ let remote_offer_con, remote_answer_con
 
 ui.frame_changed = async function() {
 	let con = remote_offer_con ?? offer_con
-	if (!con) return
+	if (!con && !is_packing) return
 	let cb = await ui.pack_frame()
-	con.send(cb)
+	if (con)
+		con.send(cb)
+	if (is_packing)
+		await ui.unpack_frame(cb)
 }
 
 listen('rtc', function(c) {
@@ -1510,12 +1546,16 @@ ui.v(1, ui.sp())
 		ui.input('sid', my_sid, sid_field)
 		ui.text('', 'Other ID', 0)
 		to_sid = ui.input('to_sid', to_sid)
-		if (!offer_con.open && my_sid)
-			if (ui.button('btn_make_offer', 'Share Screen', 0, 'c', 'c', ui.em(10)))
+		if (!offer_con.open && my_sid) {
+			ui.min_w(ui.em(10))
+			if (ui.button('btn_make_offer', 'Share Screen', 0, 'c', 'c'))
 				offer_con.connect(to_sid)
-		if (offer_con.open)
-			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c', 'c', ui.em(10)))
+		}
+		if (offer_con.open) {
+			ui.min_w(ui.em(10))
+			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c', 'c'))
 				offer_con.close()
+		}
 	ui.end_h()
 	ui.ml(ui.sp())
 	ui.h(0)
@@ -1548,12 +1588,16 @@ ui.v(1, ui.sp())
 		ui.input('sid', my_sid, sid_field)
 		ui.text('', 'Other ID')
 		to_sid = ui.input('to_sid', to_sid)
-		if (!answer_con.open && my_sid)
-			if (ui.button('btn_accept_offer', 'See Screen', 0, 'c', 'c', ui.em(10)))
+		if (!answer_con.open && my_sid) {
+			ui.min_w(ui.em(10))
+			if (ui.button('btn_accept_offer', 'See Screen', 0, 'c', 'c'))
 				answer_con.connect(to_sid)
-		if (answer_con.open)
-			if (ui.button('btn_stop_seeing', 'Stop Seeing', 0, 'c', 'c', ui.em(10)))
+		}
+		if (answer_con.open) {
+			ui.min_w(ui.em(10))
+			if (ui.button('btn_stop_seeing', 'Stop Seeing', 0, 'c', 'c'))
 				answer_con.close()
+		}
 	ui.end_h()
 	ui.scrollbox('sb_shared_screen')
 		ui.border('t', 'light')
@@ -1582,20 +1626,24 @@ ui.v(1, ui.sp())
 		let my_sid = str(offer_con.signal_con.sid)
 		ui.input('offer_sid', my_sid, offer_sid_field)
 		if (offer_con.open) {
-			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c', 'c', ui.em(10))) {
+			ui.min_w(ui.em(10))
+			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c', 'c')) {
 				offer_con.close()
 			}
 		} else if (answer_con.open) {
-			if (ui.button('btn_stop_seeing', 'Stop Seeing', 0, 'c', 'c', ui.em(10))) {
+			ui.min_w(ui.em(10))
+			if (ui.button('btn_stop_seeing', 'Stop Seeing', 0, 'c', 'c')) {
 				answer_con.close()
 			}
 		} else {
 			if (my_sid) {
-				if (ui.button('btn_make_offer', 'Share Screen', 0, 'c', 'c', ui.em(10))) {
+				ui.min_w(ui.em(10))
+				if (ui.button('btn_make_offer', 'Share Screen', 0, 'c', 'c')) {
 					offer_con.connect(to_sid)
 				}
 			}
-			if (ui.button('btn_accept_offer', 'See Screen', 0, 'c', 'c', ui.em(10))) {
+			ui.min_w(ui.em(10))
+			if (ui.button('btn_accept_offer', 'See Screen', 0, 'c', 'c')) {
 				answer_con.connect(to_sid)
 			}
 		}
@@ -1682,7 +1730,7 @@ assign(demos, t)
 demos_array = keys(demos)
 }
 
-let recs_strlen = 0
+let is_packing = false
 ui.main = function() {
 
 	ui.GRID_FAST_PATH = ui.value('grid_config_fast_path')
@@ -1699,23 +1747,20 @@ ui.main = function() {
 			ui.h(1, ui.sp2(), 's')
 				ui.border('b', 'light')
 
-				ui.color('label')
-				ui.text('', 'recs_length', 0)
-				ui.color('link')
-				ui.text('', ui.DEBUG ? ui.recs_length+'' : 'n/a',
-					0, 'r', 'c', 1/0, ui.em(3))
-
-				ui.color('label')
-				ui.text('', 'JSON', 0)
-				ui.color('link')
-				ui.text('', format_kbytes(recs_strlen, 1), 0, 'r', 'c', 1/0, ui.em(3))
-
 				ui.toggle_button('btn_light', null, 'lights', demo_toggle_field, 0)
 				ui.toggle_button('btn_debug', null, 'DEBUG', demo_toggle_field, 0)
 				ui.toggle_button('btn_tui', null, 'TUI', demo_toggle_field, 0)
 				if (ui.toggle_button('btn_animate', null, 'animate',
 						demo_toggle_field, 0))
 					ui.animate()
+				is_packing = ui.toggle_button('btn_pack', null, 'pack',
+					demo_toggle_field, 0)
+				ui.toggle_button('btn_panes', null, 'panes', demo_toggle_field, 0)
+
+				if (ui.button('btn_reset', 'reset', 0)) {
+					localStorage.clear()
+					location.reload()
+				}
 
 				ui.color('label')
 				ui.text('', 'canvas-ui v'+ui.VERSION, 1, 'r')
@@ -1754,8 +1799,8 @@ ui.main = function() {
 				ui.end_h()
 			ui.end_hsplit()
 
-			if (ui.DEBUG && ui.DEBUG_PANE)
-				ui.debug_pane()
+			if (ui.DEBUG)
+				ui.debug_pane(ui.value('btn_panes'))
 
 		ui.end_h()
 

@@ -1309,7 +1309,7 @@ function code_edit_view(id, opt) {
 		ui.end_stack()
 	}
 
-	e.render = function(min_w, min_h) {
+	e.render = function() {
 
 		// set layout vars
 
@@ -1560,7 +1560,7 @@ function code_edit_view(id, opt) {
 		// build editor
 
 		ui.focusable(id)
-		ui.v(1, 0, 's', 's', min_w, min_h)
+		ui.v(1, 0, 's', 's')
 			let tabs = [
 				{id: 'tab1', label:'Tab 1'},
 				{id: 'tab2', label:'Tab 2'},
@@ -1568,29 +1568,33 @@ function code_edit_view(id, opt) {
 			ui.stack('', 0)
 				let sel_tab = ui.tabs(id+'.tabs', tabs, 'tab1')
 			ui.end_stack()
-			ui.stack('', 0, 's', 's', 0, 1)
+			ui.min_h(1)
+			ui.stack('', 0, 's', 's')
 				ui.bb('bg2')
 			ui.end_stack()
 			ui.h(1, ui.sp025())
 
 				ui.stack('', 0)
 					ui.bb('bg1')
+					ui.min_w(sidebar_w)
 					ui.scrollbox(id+'.sidebar_scrollbox', 0, 'hide', 'hide',
-						's', 's', sidebar_w, 0, null, null, null, id+'.text_scrollbox')
-						ui.frame(noop, on_sidebar_frame, 0, 's', 's', sidebar_w, text_h)
+						's', 's', null, null, null, id+'.text_scrollbox')
+						ui.min_wh(sidebar_w, text_h)
+						ui.frame(noop, on_sidebar_frame, 0, 's', 's')
 					ui.end_scrollbox()
 				ui.end_stack()
 
 				ui.stack('', 1, 's', 's')
 
 					ui.scrollbox(id+'.text_scrollbox', 1, 'auto', 'scroll')
-						ui.frame(noop, on_text_frame, 1, 's', 's', text_w, text_h)
+						ui.min_wh(text_w, text_h)
+						ui.frame(noop, on_text_frame, 1, 's', 's')
 					ui.end_scrollbox()
 
 					if (find_open) {
 						ui.m(ui.sp2())
 						ui.p(ui.sp2(), ui.sp1())
-						ui.popup(id+'.find_popup', null, null, 'it', ']', 0, 0, 'constrain solid')
+						ui.popup(id+'.find_popup', null, null, 'it', ']', 'constrain solid')
 							ui.shadow('menu')
 							ui.bb('bg2', null, 1, 'intense')
 							let fid = id+'.find_input'
@@ -1660,10 +1664,10 @@ function code_edit_view(id, opt) {
 	return e
 }
 
-ui.code_edit = function(id, opt, min_w, min_h) {
+ui.code_edit = function(id, opt) {
 	let s = ui.state(id)
 	s.view ??= code_edit_view(id, opt)
-	s.view.render(min_w, min_h)
+	s.view.render()
 }
 
 }()) // module function

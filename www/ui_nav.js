@@ -4505,7 +4505,7 @@ ui.all_field_types.editor_caret_at_edge = function(id, d) {
 // same call as build_text(), so the cell doesn't shift on entering edit.
 ui.all_field_types.build_editor = function(id, v, pad_l, pad_r, h) {
 	ui.p(pad_l, 0, pad_r, 0)
-	ui.text_editable(id, v, 0, this.align, 'c', null, null, null, this)
+	ui.text_editable(id, v, 0, this.align, 'c', null, this)
 }
 
 ui.all_field_types.fixed_width = 0
@@ -4615,9 +4615,10 @@ date.build_editor = function(id, v, pad_l, pad_r, h) {
 			ui.bb('input', 'focused', 'b', 'light')
 			ui.h(0, ui.sp05())
 				ui.p(pad_l, 0, 0, 0)
-				ui.icon(calendar_id, 'calendar', 0, 'l', 'c', null, null, h)
+				ui.text_h(h)
+				ui.icon(calendar_id, 'calendar', 0, 'l', 'c')
 				ui.p(0, 0, pad_r, 0)
-				ui.text_editable(id, v, 1, this.align, 'c', null, null, null, this)
+				ui.text_editable(id, v, 1, this.align, 'c', null, this)
 			ui.end_h()
 		ui.end_stack()
 
@@ -4703,7 +4704,8 @@ enm.build_editor = function(id, v, pad_l, pad_r, h) {
 
 		if (open) {
 			ui.p(pad_l, 0, pad_r, 0)
-			ui.stack('', 0, 's', 's', null, h)
+			ui.min_h(h)
+			ui.stack('', 0, 's', 's')
 				this.build(v, true)
 			ui.end_stack()
 		}
@@ -4714,7 +4716,7 @@ enm.build_editor = function(id, v, pad_l, pad_r, h) {
 			let vals = words(this.enum_values) // 'v1 ...' or ['v1', ...]
 			ui.list(picker_id, vals, v, this,
 				0, 's', 's', this.align, 'c', 0,
-				null, null, pad_l, pad_r, 0, h)
+				null, pad_l, pad_r, 0, h)
 		}
 
 	ui.end_dropdown(id)
@@ -4836,7 +4838,8 @@ color.build = function(v, mode) {
 	if (!mode)
 		return v
 	ui.m(ui.sp1(), 0)
-	ui.stack('', 0, 's', 'c', null, ui.em(1))
+	ui.min_h(ui.em(1))
+	ui.stack('', 0, 's', 'c')
 		ui.bb(':' + v)
 	ui.end_stack()
 }
@@ -4883,7 +4886,7 @@ percent.build = function(p, mode, fg, row, full_width) {
 	if (!mode)
 		return s
 	let f = clamp(p / this.scale / 100, 0, 1)
-	ui.stack('', 0, 's', 'c', 0, 0)
+	ui.stack('', 0, 's', 'c')
 		ui.h(0, 0, 's', 's')
 			ui.stack('', f, 's', 's')
 				ui.bb('bg3')
@@ -4967,7 +4970,7 @@ function free_lookup_input(s) {
 	s.lookup_nav.unref()
 }
 
-ui.lookup_input = function(id, value, field, fr, min_w, readonly) {
+ui.lookup_input = function(id, value, field, fr, readonly) {
 	let picker_id = id+'.picker'
 	let s = ui.state(id)
 	if (!s.lookup_nav) {
@@ -4981,7 +4984,8 @@ ui.lookup_input = function(id, value, field, fr, min_w, readonly) {
 	s = ui.state(id, lookup_input_update)
 	let ln = s.lookup_nav
 
-	ui.stack('', fr, 's', 's', min_w ?? ui.em_input())
+	ui.default_min_w(ui.em_input())
+	ui.stack('', fr, 's', 's')
 
 	ui.focusable(id)
 	let open = ui.dropdown(id)
