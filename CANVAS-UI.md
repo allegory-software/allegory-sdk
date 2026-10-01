@@ -1,6 +1,6 @@
 NOTE: This is in the works! Check out the [demo] to see how we're progressing.
 
-[demo]: js/demo.html
+[demo]: https://allegory-software.github.io/allegory-sdk/www/ui-demo.html
 
 # :computer_mouse: Canvas UI
 
