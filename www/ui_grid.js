@@ -41,15 +41,19 @@ ui.icon_def('sort_none'     , 'tabler', '\ueb5a')
 ui.icon_def('arrow_up'      , 'tabler', '\uea25')
 ui.icon_def('arrow_down'    , 'tabler', '\uea16')
 
-// draw one whole grid column in a single command.
-// each visible cell gets (bg, bg state, fg, text).
+// draw all the visible cells of one field in a single command.
+// each cell gets (bg, bg_state, fg, text).
 ui.widget('fast_field', {
-	create: function(cmd, x, y0, w, cell_h, pad, align, baseline, n) {
+	create: function(cmd, x0, y0, w, cell_h, cell_dx, cell_dy,
+		pad, align, baseline, n
+	) {
 		let i = ui.cmd_begin(cmd)
-		ui.cmd_add_arg(x)
+		ui.cmd_add_arg(x0)
 		ui.cmd_add_arg(y0)
 		ui.cmd_add_arg(w)
 		ui.cmd_add_arg(cell_h)
+		ui.cmd_add_arg(cell_dx)
+		ui.cmd_add_arg(cell_dy)
 		ui.cmd_add_arg(pad)
 		ui.cmd_add_arg(align)
 		ui.cmd_add_arg(baseline)
@@ -61,23 +65,26 @@ ui.widget('fast_field', {
 		a[i+1] += dy
 	},
 	draw: function(a, i) {
-		let x        = a[i+0]
+		let x0       = a[i+0]
 		let y0       = a[i+1]
 		let w        = a[i+2]
 		let cell_h   = a[i+3]
-		let pad      = a[i+4]
-		let align    = a[i+5]
-		let baseline = a[i+6]
-		let n        = a[i+7]
+		let cell_dx  = a[i+4]
+		let cell_dy  = a[i+5]
+		let pad      = a[i+6]
+		let align    = a[i+7]
+		let baseline = a[i+8]
+		let n        = a[i+9]
 
 		// backgrounds and borders, which span the whole cell and so
 		// have to be drawn before the text clip narrows it to the padding.
-		let k = i + 8
+		let k = i + 10
 		for (let ri = 0; ri < n; ri++) {
 			let bg   = a[k+0]
 			let bgs  = a[k+1]
 			k += 4
-			let y = y0 + ri * cell_h
+			let x = x0 + ri * cell_dx
+			let y = y0 + ri * cell_dy
 			let fg_theme
 			if (bg) {
 				let c = ui.color_obj(bg, bgs)
@@ -94,17 +101,20 @@ ui.widget('fast_field', {
 		}
 
 		// text, cut at the padded box like ui.text() cuts it in a slow cell.
-		cx.save()
-		cx.beginPath()
-		cx.rect(x + pad, y0, w - 2 * pad, n * cell_h)
-		cx.clip()
+		let has_one_clip = cell_dx == 0
+		if (has_one_clip) {
+			cx.save()
+			cx.beginPath()
+			cx.rect(x0 + pad, y0, w - 2 * pad, n * cell_h)
+			cx.clip()
+		}
 
 		cx.textAlign = align
-		let anchor_x =
-			align == 'right' ? x + w - pad :
-			align == 'center' ? x + w / 2 :
-			x + pad
-		k = i + 8
+		let anchor_dx =
+			align == 'right' ? w - pad :
+			align == 'center' ? w / 2 :
+			pad
+		k = i + 10
 		for (let ri = 0; ri < n; ri++) {
 			let bg   = a[k+0]
 			let bgs  = a[k+1]
@@ -112,61 +122,85 @@ ui.widget('fast_field', {
 			let text = a[k+3]
 			k += 4
 			if (text) {
+				let x = x0 + ri * cell_dx
+				let y = y0 + ri * cell_dy
 				let fg_theme
 				if (bg) {
 					let c = ui.color_obj(bg, bgs)
 					fg_theme = (c[5] ?? c[3] < .5) ? 'dark' : 'light'
 				}
 				cx.fillStyle = ui.color_css(fg, null, fg_theme)
-				cx.fillText(text, anchor_x, y0 + ri * cell_h + baseline)
+				if (has_one_clip) {
+					cx.fillText(text, x + anchor_dx, y + baseline)
+				} else {
+					cx.save()
+					cx.beginPath()
+					cx.rect(x + pad, y, w - 2 * pad, cell_h)
+					cx.clip()
+					cx.fillText(text, x + anchor_dx, y + baseline)
+					cx.restore()
+				}
 			}
 		}
-		cx.restore()
+		if (has_one_clip)
+			cx.restore()
 	},
 })
 
-let help_lines = [
-	'Move',
-	'',
-	'\u2190\u2191\u2192\u2193: Move between cells',
-	'PgUp/PgDn: Jump page',
-	'Home/End: Jump to beginning / end',
-	'',
-	'Select',
-	'',
-	'Shift+\u2190\u2191\u2192\u2193: Select range',
-	'Shift+Click: Select range',
-	'Ctrl+Click: Select / unselect cell',
-	'Ctrl+A: Select all cells',
-	'',
-	'Edit',
-	'',
-	'Enter: Enter / exit cell edit mode',
-	'F2: Enter / exit vertical edit mode',
-	'Ctrl+Enter: Enter / exit quick-edit mode',
-	'Ctrl+\u2190\u2192: Move & quick-edit cells',
-	'Esc: Cancel the edit',
-	'Ctrl+Delete: Empty the cells',
-	'Space: Toggle checkbox / expand tree node',
-	'',
-	'Add & Remove Rows',
-	'',
-	'Insert: Insert row',
-	'\u2193 on last row: Add row',
-	'Ctrl+Insert: Insert a copy of the focused row',
-	'Delete: Delete the selected rows',
-	'',
-	'Copy & Paste',
-	'',
-	'Ctrl+C: Copy the cell',
-	'Ctrl+S: Save',
-	'',
-	'Quick Search',
-	'',
-	'Just type: Search in column',
-]
+function make_help_lines(horiz) {
+	return [
+		'Move',
+		'',
+		'\u2190\u2191\u2192\u2193: Move between cells',
+		'PgUp/PgDn: Jump page',
+		'Home/End: Jump to beginning / end',
+		'',
+		'Select',
+		'',
+		'Shift+\u2190\u2191\u2192\u2193: Select range',
+		'Shift+Click: Select range',
+		'Ctrl+Click: Select / unselect cell',
+		'Ctrl+A: Select all cells',
+		'',
+		'Edit',
+		'',
+		'Enter: Enter / exit cell edit mode',
+		'F2: Enter / exit vertical edit mode',
+		'Ctrl+Enter: Enter / exit quick-edit mode',
+		horiz
+			? 'Ctrl+\u2190\u2192: Move & quick-edit cells'
+			: 'Ctrl+\u2191\u2193: Move & quick-edit cells',
+		'Esc: Cancel the edit',
+		'Ctrl+Delete: Empty the cells',
+		horiz
+			? 'Space: Toggle checkbox / expand tree node'
+			: 'Space: Toggle checkbox',
+		'',
+		'Add & Remove Rows',
+		'',
+		'Insert: Insert row',
+		horiz
+			? '\u2193 on last row: Add row'
+			: '\u2192 on last row: Add row',
+		'Ctrl+Insert: Insert a copy of the focused row',
+		'Delete: Delete the selected rows',
+		'',
+		'Copy & Paste',
+		'',
+		'Ctrl+C: Copy the cell',
+		'Ctrl+S: Save',
+		'',
+		'Quick Search',
+		'',
+		horiz
+			? 'Just type: Search in column'
+			: 'Just type: Search in row',
+	]
+}
+let horiz_help_lines    = make_help_lines(true)
+let vertical_help_lines = make_help_lines(false)
 
-function build_help(id, target_i) {
+function build_help(id, target_i, help_lines) {
 	ui.m(ui.sp2())
 	ui.p(ui.sp4())
 	ui.popup(id+'.help', 'overlay', target_i, 'b', '[',
@@ -204,10 +238,15 @@ function init(id, e) {
 	e.cell_border_v_width = 0
 	e.cell_border_h_width = 1
 
-	e.auto_expand         = false  // expand cells instead of scrollboxing them
-	e.group_bar_visible   = 'auto' // auto | always | no
+	e.auto_expand       ??= false  // expand cells instead of scrollboxing them
+	e.vertical_layout   ??= false
+	e.header_align      ??= 'l'
+	e.group_bar_visible ??= 'auto' // auto | always | no
 
-	let horiz = true
+	e.row_w    = ui.saved_state[id]?.row_w    ?? 12
+	e.header_w = ui.saved_state[id]?.header_w ?? 10
+
+	let horiz = !e.vertical_layout
 
 	// context-sensitive thus set on each frame
 	let sp
@@ -215,7 +254,10 @@ function init(id, e) {
 	let font_size
 	let line_height
 	let cells_w
+	let cells_h
 	let cell_h
+	let row_w // vertical layout
+	let header_w // vertical layout
 	let header_h
 	let gcol_w
 	let gcol_h
@@ -226,7 +268,8 @@ function init(id, e) {
 	// mouse state
 	let ps
 	let gcol_mover
-	let hit_zone // sort_icon, col_divider, col, gcol, cell
+	let hit_zone // sort_icon, col_divider, header_divider, row_divider,
+	             // col, gcol, cell
 	let drag_op  // col_move, col_group, row_move
 	let hit_ri // row index
 	let hit_fi // field index
@@ -289,7 +332,7 @@ function init(id, e) {
 	}
 
 	function field_has_indent(field) {
-		return horiz && field == e.tree_field
+		return field == e.tree_field
 	}
 
 	function sort_icon_w(field) {
@@ -298,6 +341,10 @@ function init(id, e) {
 
 	function col_min_w(field) {
 		return max(field.min_w * font_size, sort_icon_w(field))
+	}
+
+	function clamp_vertical_w(w) {
+		return clamp(w, 2 * font_size, 50 * font_size)
 	}
 
 	function indent_offset(indent) {
@@ -449,9 +496,11 @@ function init(id, e) {
 		ui.m(cell_x, y, 0, 0)
 		ui.min_wh(cell_w, h)
 		let cell_i = ui.stack('', 0, 'l', 't')
-			ui.bb(bg, bgs, build_stage == 'col_move' ? 'lrb' : 'b', 'light')
+			ui.bb(bg, bgs,
+				build_stage == 'col_move' ? (horiz ? 'lrb' : 'tb') : 'b', 'light')
 			if (help_open && !build_stage && row_focused && field_focused)
-				build_help(id, cell_i)
+				build_help(id, cell_i,
+					horiz ? horiz_help_lines : vertical_help_lines)
 
 			if (has_children) {
 				ui.p(indent_x - sp2, 0, sp2, 0)
@@ -483,15 +532,20 @@ function init(id, e) {
 	let r = [0, 0, 0, 0]
 	cell_rect = function(ri, fi) {
 		let field = e.fields[fi]
-		let ry = ri * cell_h
-		let x = field._x
-		let y = ry
-		let w = field._w
-		let h = cell_h
+		let x, y, w
+		if (horiz) {
+			x = field._x
+			y = ri * cell_h
+			w = field._w
+		} else {
+			x = ri * row_w
+			y = field._y
+			w = row_w
+		}
 		r[0] = x
 		r[1] = y
 		r[2] = w
-		r[3] = h
+		r[3] = cell_h
 		return r
 	}
 	}
@@ -546,10 +600,18 @@ function init(id, e) {
 
 			let row = rows[ri]
 
-			let rx = x0
-			let ry = ri * cell_h
-			let rw = cells_w
-			let rh = cell_h
+			let rx, ry, rw, rh
+			if (horiz) {
+				rx = x0
+				ry = ri * cell_h
+				rw = cells_w
+				rh = cell_h
+			} else {
+				rx = ri * row_w
+				ry = y0
+				rw = row_w
+				rh = cells_h
+			}
 
 			let row_is_foc = foc_cell && foc_ri == ri
 			let row_is_hit = hit_cell && hit_ri == ri
@@ -567,10 +629,10 @@ function init(id, e) {
 				if (!build_stage && field._fast_now)
 					continue
 
-				let x = field._x
-				let y = ry
-				let w = field._w
-				let h = rh
+				let x = horiz ? field._x : rx
+				let y = horiz ? ry : field._y
+				let w = horiz ? field._w : rw
+				let h = cell_h
 
 				build_cell_at(a, row, field, ri, fi, x, y, w, h, build_stage)
 			}
@@ -590,8 +652,11 @@ function init(id, e) {
 				if (!field._fast_now)
 					continue
 				let align = field.align || 'left'
-				let cmd_i = ui.fast_field(field._x, ri1 * cell_h, field._w, cell_h,
-					sp2, align, baseline, ri2 - ri1)
+				let cmd_i = horiz
+					? ui.fast_field(field._x, ri1 * cell_h, field._w, cell_h,
+						0, cell_h, sp2, align, baseline, ri2 - ri1)
+					: ui.fast_field(ri1 * row_w, field._y, row_w, cell_h,
+						row_w, 0, sp2, align, baseline, ri2 - ri1)
 				for (let ri = ri1; ri < ri2; ri++) {
 					let row = rows[ri]
 					let cs = cell_state(row, field, ri, build_stage)
@@ -626,8 +691,6 @@ function init(id, e) {
 
 	function on_cellview_frame(a, _i, x, y, w, h, vx, vy, vw, vh) {
 
-		page_row_count = floor(vh / cell_h)
-
 		let sx = vx - x
 		let sy = vy - y
 
@@ -636,11 +699,13 @@ function init(id, e) {
 		let rn // number of rows fully or partially in the viewport.
 		let ri1, ri2 // visible row range.
 		if (horiz) {
+			page_row_count = floor(vh / cell_h)
 			ri1 = floor(sy / cell_h)
 		} else {
-			ri1 = floor(sx / cell_w)
+			page_row_count = floor(vw / row_w)
+			ri1 = floor(sx / row_w)
 		}
-		rn = floor(vh / cell_h) + 2 // 2 is right, think it!
+		rn = page_row_count + 2 // 2 is right, think it!
 		ri2 = ri1 + rn
 		ri1 = max(0, min(ri1, e.rows.length - 1))
 		ri2 = max(0, min(ri2, e.rows.length))
@@ -648,13 +713,23 @@ function init(id, e) {
 		// find the visible field range
 
 		let fi1, fi2 // visible field range.
-		for (let field of e.fields) {
-			let fx = field._x + x
-			let fw = field._w
-			if (fi1 == null && fx + fw >= vx)
-				fi1 = field.index
-			if (fi2 == null && fx > vx + vw)
-				fi2 = field.index
+		if (horiz) {
+			for (let field of e.fields) {
+				let fx = field._x + x
+				let fw = field._w
+				if (fi1 == null && fx + fw >= vx)
+					fi1 = field.index
+				if (fi2 == null && fx > vx + vw)
+					fi2 = field.index
+			}
+		} else {
+			for (let field of e.fields) {
+				let fy = field._y + y
+				if (fi1 == null && fy + cell_h >= vy)
+					fi1 = field.index
+				if (fi2 == null && fy > vy + vh)
+					fi2 = field.index
+			}
 		}
 		fi2 = fi2 ?? e.fields.length
 
@@ -747,20 +822,40 @@ function init(id, e) {
 		if (!hit_zone) {
 			ps = ui.drag_or_hit(id+'.header')
 			if (ps && (ps.drag || !ps.dragging)) {
-				let x0 = ui.state(id+'.header').x
-				for (let field of e.fields) {
-					let x = field._x + x0
-					let w = field._w
-					if (ui.mx >= x + w - 5 && ui.mx <= x + w + 5) {
-						hit_zone = 'col_divider'
-						hit_fi = field.index
-						break
-					} else if (ui.mx >= x && ui.mx <= x + w) {
-						hit_zone = 'col'
-						hit_fi = field.index
-						if (ps.drag)
-							ps.grab_dx = ui.mx - x0 - field._x
-						break
+				if (horiz) {
+					let x0 = ui.state(id+'.header').x
+					for (let field of e.fields) {
+						let x = field._x + x0
+						let w = field._w
+						if (ui.mx >= x + w - 5 && ui.mx <= x + w + 5) {
+							hit_zone = 'col_divider'
+							hit_fi = field.index
+							break
+						} else if (ui.mx >= x && ui.mx <= x + w) {
+							hit_zone = 'col'
+							hit_fi = field.index
+							if (ps.drag)
+								ps.grab_dx = ui.mx - x0 - field._x
+							break
+						}
+					}
+				} else {
+					let s = ui.state(id+'.header')
+					let x0 = s.x
+					let y0 = s.y
+					if (ui.mx >= x0 + header_w - 5) {
+						hit_zone = 'header_divider'
+					} else {
+						for (let field of e.fields) {
+							let y = field._y + y0
+							if (ui.my >= y && ui.my <= y + cell_h) {
+								hit_zone = 'col'
+								hit_fi = field.index
+								if (ps.drag)
+									ps.grab_dy = ui.my - y0 - field._y
+								break
+							}
+						}
 					}
 				}
 				ps.zone = hit_zone
@@ -772,34 +867,24 @@ function init(id, e) {
 			}
 		}
 
-		// column resize
-		if (hit_zone == 'col_divider') {
-			let field = e.fields[hit_fi]
-			if (ps.drag)
-				ps.w0 = field.w * font_size
-			if (ps.dragging)
-				field.w = clamp(ps.w0 + ps.dx,
-					col_min_w(field), field.max_w * font_size) / font_size
-			if (ps.drop)
-				e.save_col_w(field)
-			ui.set_cursor('col-resize')
-		}
-
-		// column drag horizontally => start column move
+		// column drag horizontally (vertically in vertical layout)
+		// => start column move
 		if (hit_zone == 'col' && !drag_op && ps.dragging && !ps.drop
-			&& abs(ps.dx) > 10
+			&& abs(horiz ? ps.dx : ps.dy) > 10
 			&& e.fields[hit_fi].movable
 		) {
 
 			let mover = ui.live_move_mixin()
 
 			mover.movable_element_size = function(fi) {
-				let [x, y, w, h] = cell_rect(0, fi)
-				return horiz ? e.fields[fi]._w : h
+				return horiz ? e.fields[fi]._w : cell_h
 			}
 
-			mover.set_movable_element_pos = function(fi, x, moving) {
-				e.fields[fi]._x = x
+			mover.set_movable_element_pos = function(fi, pos, moving) {
+				if (horiz)
+					e.fields[fi]._x = pos
+				else
+					e.fields[fi]._y = pos
 			}
 
 			mover.move_element_start(hit_fi, 1,
@@ -815,14 +900,20 @@ function init(id, e) {
 
 			let mover = ps.mover
 
-			let x0 = ui.state(id+'.header').x
-			let mx = ui.mx - x0 - ps.grab_dx
-
-			mover.move_element_update(horiz ? mx : my)
+			if (horiz) {
+				let x0 = ui.state(id+'.header').x
+				let mx = ui.mx - x0 - ps.grab_dx
+				mover.move_element_update(mx)
+			} else {
+				let y0 = ui.state(id+'.header').y
+				let my = ui.my - y0 - ps.grab_dy
+				mover.move_element_update(my)
+			}
 			e.scroll_to_cell(hit_ri ?? 0, hit_fi)
 
 			if (ps.drop) {
-				let over_fi = mover.move_element_stop() // sets x of moved element.
+				// sets x (y in vertical layout) of moved element.
+				let over_fi = mover.move_element_stop()
 				e.move_field(hit_fi, over_fi)
 
 				// reset drag state but preserve hover state
@@ -833,7 +924,7 @@ function init(id, e) {
 
 		// drag column vertically towards group-bar => column move to group
 		let col_group_start
-		if (hit_zone == 'col' && !drag_op && ps.dragging && !ps.drop
+		if (horiz && hit_zone == 'col' && !drag_op && ps.dragging && !ps.drop
 			&& (ui.hovers(id+'.group_bar') || -ps.dy > 10)
 			&& e.fields[hit_fi].groupable
 		) {
@@ -1067,14 +1158,32 @@ function init(id, e) {
 				let s = ui.state(id+'.cells')
 				let x0 = s.x
 				let y0 = s.y
-				hit_ri = floor((ui.my - y0) / cell_h)
-				let row = e.rows[hit_ri]
+				let divider_zone = null
+				if (!horiz) {
+					let header_x2 = ui.state(id+'.header').x + header_w
+					if (ui.mx <= header_x2 + 5)
+						divider_zone = 'header_divider'
+					else if (abs(ui.mx - (x0 + row_w)) <= 5)
+						divider_zone = 'row_divider'
+				}
+				ps.zone = divider_zone
+				hit_zone = divider_zone
+				let row
+				if (!hit_zone) {
+					hit_ri = horiz
+						? floor((ui.my - y0) / cell_h)
+						: floor((ui.mx - x0) / row_w)
+					row = e.rows[hit_ri]
+				}
 				if (row) {
 					for (let fi = 0; fi < e.fields.length; fi++) {
 						let [x1, y1, w, h] = cell_rect(hit_ri, fi)
 						let hit_dx = ui.mx - x1 - x0
 						let hit_dy = ui.my - y1 - y0
-						if (hit_dx >= 0 && hit_dx <= w) {
+						let is_hit = horiz
+							? hit_dx >= 0 && hit_dx <= w
+							: hit_dy >= 0 && hit_dy <= h
+						if (is_hit) {
 							let field = e.fields[fi]
 							hit_zone = 'cell'
 							hit_fi = fi
@@ -1090,7 +1199,38 @@ function init(id, e) {
 						}
 					}
 				}
+			} else if (ps?.dragging && ps.zone) {
+				hit_zone = ps.zone
 			}
+		}
+
+		// column resize
+		if (hit_zone == 'col_divider') {
+			let field = e.fields[hit_fi]
+			if (ps.drag)
+				ps.w0 = field.w * font_size
+			if (ps.dragging)
+				field.w = clamp(ps.w0 + ps.dx,
+					col_min_w(field), field.max_w * font_size) / font_size
+			if (ps.drop)
+				e.save_col_w(field)
+			ui.set_cursor('col-resize')
+		} else if (hit_zone == 'header_divider') {
+			if (ps.drag)
+				ps.w0 = e.header_w * font_size
+			if (ps.dragging)
+				e.header_w = clamp_vertical_w(ps.w0 + ps.dx) / font_size
+			if (ps.drop)
+				ui.save_state(id, 'header_w', e.header_w)
+			ui.set_cursor('col-resize')
+		} else if (hit_zone == 'row_divider') {
+			if (ps.drag)
+				ps.w0 = e.row_w * font_size
+			if (ps.dragging)
+				e.row_w = clamp_vertical_w(ps.w0 + ps.dx) / font_size
+			if (ps.drop)
+				ui.save_state(id, 'row_w', e.row_w)
+			ui.set_cursor('col-resize')
 		}
 
 		if (hit_zone == 'cell' && ps.drag) {
@@ -1140,7 +1280,7 @@ function init(id, e) {
 
 		}
 
-		if (ui.dblclicked(id+'.cells')
+		if (ui.dblclicked(id+'.cells') && hit_zone == 'cell'
 			&& !clicked_indent && e.focused_field?.has_editor)
 			e.enter_edit()
 
@@ -1196,8 +1336,19 @@ function init(id, e) {
 
 		}
 
+		let rows
+		if      (keydown(up_arrow  )) rows = -1
+		else if (keydown(down_arrow)) rows =  1
+		else if (keydown('pageup'  )) rows = -(ctrl ? 1/0 : page_row_count)
+		else if (keydown('pagedown')) rows =  (ctrl ? 1/0 : page_row_count)
+		else if (keydown('home'    )) rows = -1/0
+		else if (keydown('end'     )) rows =  1/0
+		let move_rows = rows && (!has_editor
+			|| (e.auto_jump_cells && !shift
+				&& (horiz || ctrl && caret_at_edge(rows))))
+
 		// insert with the arrow down key on the last focusable row.
-		if (keydown(down_arrow) && !shift) {
+		if (move_rows && keydown(down_arrow) && !shift) {
 			if (!e.save_on_add_row) { // not really compatible behavior...
 				if (e.is_last_row_focused() && e.can_actually_add_rows()) {
 					if (e.insert_rows(1, {
@@ -1211,7 +1362,7 @@ function init(id, e) {
 		}
 
 		// remove last row with the arrow up key if not edited.
-		if (keydown(up_arrow)) {
+		if (move_rows && keydown(up_arrow)) {
 			if (e.is_last_row_focused() && focused_row) {
 				let row = focused_row
 				if (row.is_new && !e.is_row_user_modified(row)) {
@@ -1226,31 +1377,18 @@ function init(id, e) {
 		}
 
 		// row navigation.
-		let rows
-		if      (keydown(up_arrow  )) rows = -1
-		else if (keydown(down_arrow)) rows =  1
-		else if (keydown('pageup'  )) rows = -(ctrl ? 1/0 : page_row_count)
-		else if (keydown('pagedown')) rows =  (ctrl ? 1/0 : page_row_count)
-		else if (keydown('home'    )) rows = -1/0
-		else if (keydown('end'     )) rows =  1/0
-		if (rows) {
-
-			let move = !has_editor
-				|| (e.auto_jump_cells && !shift
-					&& (horiz || ctrl && caret_at_edge(rows)))
+		if (move_rows) {
 
 			let [sel_i, sel_len] = e.editing && horiz ? edit_selection() : [0, 1/0]
 
-			if (move) {
-				has_input = true
-				if (e.focus_cell(true, true, rows, 0, {
-					sel_i: sel_i,
-					sel_len: sel_len,
-					expand_selection: shift,
-					input: e,
-				}))
-					return false
-			}
+			has_input = true
+			if (e.focus_cell(true, true, rows, 0, {
+				sel_i: sel_i,
+				sel_len: sel_len,
+				expand_selection: shift,
+				input: e,
+			}))
+				return false
 
 		}
 
@@ -1468,6 +1606,8 @@ function init(id, e) {
 		font_size = ui.em(1)
 		line_height = font_size * 1
 		cell_h = round(line_height + 2 * sp + e.cell_border_h_width)
+		row_w    = clamp_vertical_w(e.row_w    * font_size) + 2 * sp2
+		header_w = clamp_vertical_w(e.header_w * font_size) + 2 * sp2
 		header_h = cell_h
 		gcol_w = ui.em(6) // group-bar column width
 		gcol_h = round(line_height + sp)
@@ -1478,14 +1618,25 @@ function init(id, e) {
 		// layout fields and compute cell grid size
 
 		cells_w = 0
-		for (let field of e.fields) {
-			let w = clamp(field.w * font_size,
-				col_min_w(field), field.max_w * font_size)
-			let cw = w + 2 * sp2
-			if (drag_op != 'col_move')
-				field._x = cells_w
-			field._w = cw
-			cells_w += cw
+		cells_h = 0
+		if (horiz) {
+			for (let field of e.fields) {
+				let w = clamp(field.w * font_size,
+					col_min_w(field), field.max_w * font_size)
+				let cw = w + 2 * sp2
+				if (drag_op != 'col_move')
+					field._x = cells_w
+				field._w = cw
+				cells_w += cw
+			}
+			cells_h = e.rows.length * cell_h
+		} else {
+			for (let field of e.fields) {
+				if (drag_op != 'col_move')
+					field._y = cells_h
+				cells_h += cell_h
+			}
+			cells_w = e.rows.length * row_w
 		}
 
 		if (e.scroll_to_ri != null) {
@@ -1500,17 +1651,18 @@ function init(id, e) {
 		// build ---------------------------------------------------------------
 
 		ui.stack(id, fr, align, valign)
-		ui.v(1, 0, 's', 's')
+		ui.hv(horiz ? 'v' : 'h', 1, 0, 's', 's')
 
 			// so that focus_inside() answers for a picker's own widgets.
 			ui.focus_group(null, null, id+'.cells')
 
 			// group-by bar
 
-			if (e.group_bar_visible == 'always'
+			if (horiz && (
+				e.group_bar_visible == 'always'
 				|| e.group_bar_visible == 'auto' && e.groups.cols.length
 				|| drag_op == 'col_group'
-			) {
+			)) {
 
 				ui.min_h(group_bar_h())
 				let group_bar_i = ui.sb(id+'.group_bar', 0, 'hide', 'hide', 's', 't')
@@ -1597,9 +1749,18 @@ function init(id, e) {
 			// column header
 
 			function build_header_cell(field, noclip) {
-				ui.m(field._x, 0, 0, 0)
+				let w, h
+				if (horiz) {
+					ui.m(field._x, 0, 0, 0)
+					w = field._w
+					h = header_h
+				} else {
+					ui.m(0, field._y, 0, 0)
+					w = header_w
+					h = cell_h
+				}
 				ui.p(sp2, 0)
-				ui.min_wh(field._w - 2 * sp2, header_h)
+				ui.min_wh(w - 2 * sp2, h)
 				ui.h(0, sp, 'l', 't')
 
 					let col_move  = drag_op == 'col_move'  && hit_fi == field.index
@@ -1607,18 +1768,22 @@ function init(id, e) {
 
 					ui.bb(
 						col_move ? 'bg2' : col_group ? 'bg0' : 'bg1', null,
-						col_move ? 'blr' : 'br', 'intense')
+						col_move ? (horiz ? 'blr' : 'tbr') : 'br', 'intense')
 
-					let max_min_w = noclip ? null : max(0,
-						field._w
-							- 2 * sp2
-							- sort_icon_w(field)
-					)
+					let max_min_w = noclip ? null
+						: max(0, w - 2 * sp2 - sort_icon_w(field))
 					let dir = e.sort_dir(field)
 					let pri = e.sort_priority(field)
-					let align = e.field_align(field)
+					let align, is_right_aligned
+					if (horiz) {
+						align = e.field_align(field)
+						is_right_aligned = align == 'right'
+					} else {
+						align = e.header_align
+						is_right_aligned = align == 'r'
+					}
 
-					if (align != 'right') {
+					if (!is_right_aligned) {
 						ui.color(col_group ? 'faint' : null)
 						ui.text('', field.label, 1, align, 'c', max_min_w)
 					}
@@ -1637,7 +1802,7 @@ function init(id, e) {
 						, 0)
 					}
 
-					if (align == 'right') {
+					if (is_right_aligned) {
 						ui.color(col_group ? 'faint' : null)
 						ui.text('', field.label, 1, align, 'c', max_min_w)
 					}
@@ -1645,16 +1810,22 @@ function init(id, e) {
 				ui.end_h()
 			}
 
-			ui.scrollbox(id+'.header', 0,
-				e.auto_expand ? 'contain' : 'hide', 'contain',
-				null, null, null, null, id+'.cells_scrollbox')
+			let header_overflow = e.auto_expand ? 'contain' : 'hide'
+			if (horiz)
+				ui.scrollbox(id+'.header', 0,
+					header_overflow, 'contain',
+					null, null, null, null, id+'.cells_scrollbox')
+			else
+				ui.scrollbox(id+'.header', 0,
+					'contain', header_overflow,
+					null, null, null, null, null, id+'.cells_scrollbox')
 
 				ui.stack(id+'.header')
 				ui.measure(id+'.header')
 
 					let col_move = drag_op == 'col_move'
 
-					ui.bb('bg1', null, 'b', 'intense')
+					ui.bb('bg1', null, horiz ? 'b' : 'r', 'intense')
 					for (let field of e.fields) {
 						if (col_move && hit_fi === field.index)
 							continue
@@ -1689,7 +1860,6 @@ function init(id, e) {
 
 			// cells frame
 
-			let cells_h = e.rows.length * cell_h
 			let overflow = e.auto_expand ? 'contain' : 'auto'
 			let resizer_id = id+'.resizer'
 			ui.stack('', 1, 's', 's')
@@ -1707,7 +1877,7 @@ function init(id, e) {
 
 			ui.end_focus_group()
 
-		ui.end_v()
+		ui.end_hv()
 		ui.end_stack()
 
 		return value

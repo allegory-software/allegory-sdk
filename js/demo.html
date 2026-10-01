@@ -557,6 +557,7 @@ let grid_config_cols_field = ui.create_field({
 
 ui.saved_value('grid_config_tree', true)
 ui.saved_value('grid_config_auto_expand', false)
+ui.saved_value('grid_config_vertical_layout', false)
 ui.saved_value('grid_config_can_focus_cells', true)
 ui.saved_value('grid_config_can_select_multiple', true)
 ui.saved_value('grid_config_can_select_non_siblings', true)
@@ -666,6 +667,7 @@ let grid_opt = {
 	exit_edit_on_escape: ui.value('grid_config_exit_edit_on_escape'),
 	validate_on_load: ui.value('grid_config_validate_on_load'),
 	can_change_rows: !readonly,
+	vertical_layout: ui.value('grid_config_vertical_layout'),
 }
 let grid_nav = ui.state_of('grid_config_grid', 'e')
 if (grid_nav)
@@ -766,17 +768,25 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 			ui.end_h()
 		}
 
+		ui.color('marker')
+		ui.text('', 'Display', 0, 'l')
 		grid_config_toggle('grid_config_tree', 'Tree')
+		grid_config_toggle('grid_config_vertical_layout', 'Vertical layout')
 		grid_config_toggle('grid_config_auto_expand', 'Expand cells')
+		grid_config_toggle('grid_config_fast_path', 'Grid fast path')
+
+		ui.color('marker')
+		ui.text('', 'Focus & selection', 0, 'l')
 		grid_config_toggle('grid_config_can_focus_cells', 'Focus cells')
+		grid_config_toggle('grid_config_auto_focus_first_cell',
+			'Focus first cell')
 		grid_config_toggle('grid_config_can_select_multiple',
 			'Multiple selection')
 		grid_config_toggle('grid_config_can_select_non_siblings',
 			'Select across parents')
-		grid_config_toggle('grid_config_can_change_parent',
-			'Change tree parents')
-		grid_config_toggle('grid_config_auto_focus_first_cell',
-			'Focus first cell')
+
+		ui.color('marker')
+		ui.text('', 'Editing', 0, 'l')
 		grid_config_toggle('grid_config_enter_edit_on_click',
 			'Edit on click')
 		grid_config_toggle('grid_config_enter_edit_on_click_focused',
@@ -789,9 +799,13 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 			'Advance to next row')
 		grid_config_toggle('grid_config_exit_edit_on_escape',
 			'Escape exits editing')
+
+		ui.color('marker')
+		ui.text('', 'Data', 0, 'l')
+		grid_config_toggle('grid_config_can_change_parent',
+			'Change tree parents')
 		grid_config_toggle('grid_config_validate_on_load',
 			'Validate on load')
-		grid_config_toggle('grid_config_fast_path', 'Grid fast path')
 
 		if (ui.primary_button('grid_config_recreate', 'Recreate grid'))
 			state.recreate = true

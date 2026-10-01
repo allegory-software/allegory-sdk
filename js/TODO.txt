@@ -8,17 +8,36 @@ BEHAVIOR:
 
 INPUTS
 ------------------------------------------------------------------------------
+- autocomplete for any input
+
+- list quicksearch
+
 - calendar range / multi-range
 - date+time/period/range/multi-range inputs
+
 - tags-input
+
 - textarea input
+
+- lookup_input:
+	- multi-select with checkboxes
+	- write checks to detail nav
+
+- list_dropdown:
+	- multi-select with checkboxes
+	- write checks to detail nav
+	- quicksearch
+
+- compact vs normal form
+- smart round corners
+- review/refactor: validation state kept in field.validator
+
 - LATER: label inside box / no_box arg for composed boxes
 	- problem: for dropdown picker to be anchored such that value row
 	  aligns with picker's, question is who does the padding,
 	  the box or the dropdown?
 	- problem: passing state between API fragment (input_box()/end_input_box())
 
-- multi-select lookup_input
 
 NAV INPUTS
 ------------------------------------------------------------------------------
@@ -27,16 +46,15 @@ NAV INPUTS
 
 GRID
 ------------------------------------------------------------------------------
-- vertical grid
-- filter bar
 - move rows: flat/tree/group
 - move rows outside grid
 	- to other grid
+- filter bar
 - copy-to-clipboard (csv)
 - paste csv (+assistant)
 - context menu
-- master-detail (params)
-	- local filtering
+- params parser
+	- combined server-side + client-side filtering
 
 
 GRID EDITING
@@ -70,6 +88,10 @@ TABLIST
 - add/close/move + drag & drop
 
 
+DOCKING
+------------------------------------------------------------------------------
+
+
 UI API
 ------------------------------------------------------------------------------
 - text selection: drag-select with mouse
@@ -91,18 +113,9 @@ SCREEN SHARING
 	- screen share window -- move/resize/dock
 
 
-PERSISTENCE
-------------------------------------------------------------------------------
-- grid customizations:
-	- col list
-	- col widths
-	- dropdown editors
-		- picker resized w/h
-		-
-
-
 LAYOUTING
 ------------------------------------------------------------------------------
+- col spans for v_aligned
 - flex direction
 - flex item order
 - grid fr stretch

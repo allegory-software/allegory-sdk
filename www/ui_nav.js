@@ -841,7 +841,7 @@ ui.nav = function(id, opt) {
 
 			// init group-by view mode
 			let was_grouped = e.is_grouped
-			e.groups = parse_group_defs(e.group_by)
+			e.groups = parse_group_defs(e.vertical_layout ? null : e.group_by)
 			e.is_grouped = e.groups.fields.length > 0
 			if (e.is_grouped) {
 				e.tree_field = fld('$group')
@@ -880,7 +880,9 @@ ui.nav = function(id, opt) {
 			let was_tree = e.is_tree
 			e.can_be_tree = !!(e.id_field && e.parent_field)
 			e.is_tree = false
-			if (e.can_be_tree && !e.flat && !e.is_grouped) {
+			if (e.can_be_tree && !e.flat && !e.vertical_layout
+				&& !e.is_grouped
+			) {
 				let col = e.tree_col ?? rowset?.tree_col
 				let field = check_field('tree_col', col) ?? e.fields[0]
 				e.is_tree = field?.index != null

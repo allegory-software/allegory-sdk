@@ -3449,16 +3449,21 @@ function ui_hv(cmd, fr, gap, align, valign) {
 const CMD_H = cmd_ct('h')
 const CMD_V = cmd_ct('v')
 
-// bind() avoids `...args` which allocates.
 ui.h = ui_hv.bind(null, CMD_H)
 ui.v = ui_hv.bind(null, CMD_V)
-ui.hv = function(hv, ...args) {
-	let cmd = assert(hv == 'h' ? CMD_H : hv == 'v' ? CMD_V : 0)
-	return ui_hv(cmd, ...args)
-}
-
 ui.end_h = function() { ui.end(CMD_H) }
 ui.end_v = function() { ui.end(CMD_V) }
+
+ui.hv = function(hv, fr, gap, align, valign) {
+	let cmd = assert(hv == 'h' ? CMD_H : hv == 'v' ? CMD_V : 0)
+	return ui_hv(cmd, fr, gap, align, valign)
+}
+ui.end_hv = function() {
+	let i = assert(ct_stack.at(-1), 'end command outside container')
+	if (!(a[i-1] == CMD_H || a[i-1] == CMD_V))
+		assert(false, 'closing h or v instead of ', C(a, i))
+	ui.end()
+}
 
 function is_main_axis(cmd, axis) {
 	return (
