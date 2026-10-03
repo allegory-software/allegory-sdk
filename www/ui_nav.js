@@ -3332,7 +3332,7 @@ ui.nav = function(id, opt) {
 		if (rows_added) {
 			update_row_index()
 			if (ev.input)
-				update_pos_field() // TODO: tree
+				update_all_pos_fields()
 			e.announce('rows_added', added_rows)
 			e.announce('rows_changed')
 		}
@@ -3501,7 +3501,7 @@ ui.nav = function(id, opt) {
 			update_parts({row_visibility: true})
 
 			if (ev.input)
-				update_pos_field() // TODO: tree
+				update_all_pos_fields()
 
 			e.announce('rows_removed', removed_rows)
 
@@ -3599,30 +3599,19 @@ ui.nav = function(id, opt) {
 		return n
 	}
 
-	function update_pos_field_for_children_of(row) {
+	function update_pos_field_for_children_of(row, recursive) {
+		if (!e.pos_field || order_by_map.size || e.is_grouped)
+			return
 		let index = 1
-		let min_parent_count = row ? row.depth + 1 : 0
-		for (let ri = row ? e.row_index(row) + 1 : 0; ri < e.rows.length; ri++) {
-			let child_row = e.rows[ri]
-			if (child_row.depth < min_parent_count)
-				break
-			if (child_row.parent_row == row)
-				e.set_cell_val(child_row, e.pos_field, index++)
+		for (let child_row of (row || e).child_rows) {
+			e.set_cell_val(child_row, e.pos_field, index++)
+			if (recursive && child_row.child_rows)
+				update_pos_field_for_children_of(child_row, true)
 		}
 	}
 
-	function update_pos_field(old_parent_row, parent_row) {
-		if (!e.pos_field)
-			return
-		if (e.is_tree) {
-			update_pos_field_for_children_of(old_parent_row)
-			if (parent_row != old_parent_row)
-				update_pos_field_for_children_of(parent_row)
-		} else {
-			let index = 1
-			for (let ri = 0; ri < e.rows.length; ri++)
-				e.set_cell_val(e.rows[ri], e.pos_field, index++)
-		}
+	function update_all_pos_fields() {
+		update_pos_field_for_children_of(null, true)
 	}
 
 	function move_rows_state(focused_ri, selected_ri, ev) {
@@ -3741,7 +3730,9 @@ ui.nav = function(id, opt) {
 
 			update_row_index()
 
-			update_pos_field(old_parent_row, parent_row)
+			update_pos_field_for_children_of(old_parent_row)
+			if (parent_row != old_parent_row)
+				update_pos_field_for_children_of(parent_row)
 
 			if (e.save_on_move_row)
 				e.save(ev)
