@@ -3694,9 +3694,8 @@ ui.nav = function(id, opt) {
 
 			// move top siblings to new parent.
 			if (old_parent_row != parent_row) {
-				let parent_count = rows[0].depth
 				for (let row of rows)
-					if (row.depth == parent_count) // sibling of top row
+					if (row.parent_row == old_parent_row) // sibling of top row
 						change_row_parent(row, parent_row)
 			} else if (e.is_tree) {
 				let child_rows = (parent_row || e).child_rows

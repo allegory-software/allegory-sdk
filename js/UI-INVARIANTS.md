@@ -343,6 +343,9 @@ that parent's complete child array, or in the root array for root records,
 before copying stored order and numbering positions. The nav moves each
 record together with its subtree, including collapsed children.
 
+When changing parent, the nav reparents the selected sibling records
+and keeps their descendants attached to them.
+
 Positions. With pos_col and no explicit sort or grouping, the nav numbers
 complete sibling lists from 1. It includes records hidden by filtering or
 collapse. UI inserts and physical removals renumber every sibling list;
