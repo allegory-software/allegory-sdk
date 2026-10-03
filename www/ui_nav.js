@@ -3698,6 +3698,20 @@ ui.nav = function(id, opt) {
 				for (let row of rows)
 					if (row.depth == parent_count) // sibling of top row
 						change_row_parent(row, parent_row)
+			} else if (e.is_tree) {
+				let child_rows = (parent_row || e).child_rows
+				let child_ri = child_rows.indexOf(rows[0])
+				let move_child_count = 0
+				for (let row of rows)
+					if (row.parent_row == parent_row)
+						move_child_count++
+				let next_row = e.rows[insert_ri + move_n]
+				let insert_child_ri = next_row
+					&& next_row.parent_row == parent_row
+					? child_rows.indexOf(next_row) : child_rows.length
+				if (insert_child_ri > child_ri)
+					insert_child_ri -= move_child_count
+				array_move(child_rows, child_ri, move_child_count, insert_child_ri)
 			}
 
 			update_row_index()
@@ -3712,7 +3726,8 @@ ui.nav = function(id, opt) {
 					function add_child_rows(rows) {
 						for (let row of rows) {
 							e.all_rows.push(row)
-							add_child_rows(row.child_rows)
+							if (row.child_rows)
+								add_child_rows(row.child_rows)
 						}
 					}
 					add_child_rows(e.child_rows)

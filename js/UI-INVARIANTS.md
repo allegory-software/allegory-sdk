@@ -338,11 +338,16 @@ On a flat move in custom order, the nav commits the full display order as
 stored order. With separate arrays, it moves child_rows and copies it into
 all_rows. With one array, it moves all_rows directly.
 
+On a same-parent tree move, the nav moves the selected sibling records in
+that parent's complete child array, or in the root array for root records,
+before copying stored order and numbering positions. The nav moves each
+record together with its subtree, including collapsed children.
+
 Positions. With pos_col and no explicit sort or grouping, the nav numbers
 complete sibling lists from 1. It includes records hidden by filtering or
 collapse. UI inserts and physical removals renumber every sibling list;
-moves renumber the old and new parents' lists. The nav skips position
-numbering while explicitly sorted or grouped.
+moves renumber the old and new parents' lists. The nav does not renumber
+existing positions while explicitly sorted or grouped.
 
 Keys. There is no nullable pk. The server keeps pks immutable and marks pk
 fields readonly; the client does not enforce that. A new row with no key
@@ -393,8 +398,12 @@ itself, and removes a group row once no rows are left in it.
 
 Inserting. The nav refuses to insert a row under a parent marked for
 deletion. When inserting into a sorted grid, the nav keeps the new row at
-the insertion position. In a flat or tree nav, it inserts before the same
-existing row in stored order and in full sibling order.
+the insertion position. Without an explicit sort, it inserts before the
+same existing row in stored order and in full sibling order. While
+explicitly sorted, UI inserts append in stored order under the same parent.
+With pos_col, the nav initializes their positions after all existing
+siblings, including hidden records. It preserves the chosen insertion
+point in full displayed sibling order and in visible rows.
 
 
 WHEN A FIX DOESN'T FIT
