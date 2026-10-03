@@ -346,6 +346,10 @@ record together with its subtree, including collapsed children.
 When changing parent, the nav reparents the selected sibling records
 and keeps their descendants attached to them.
 
+When rebuilding the tree, the nav uses current input parent values,
+with loaded values for unchanged cells, so unsaved parent changes are
+preserved.
+
 Positions. With pos_col and no explicit sort or grouping, the nav numbers
 complete sibling lists from 1. It includes records hidden by filtering or
 collapse. UI inserts and physical removals renumber every sibling list;

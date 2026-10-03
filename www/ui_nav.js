@@ -2133,9 +2133,8 @@ ui.nav = function(id, opt) {
 			row.depth = null
 		}
 
-		let p_fi = e.parent_field.val_index
 		for (let row of e.all_rows) {
-			let parent_id = row[p_fi]
+			let parent_id = e.cell_input_val(row, e.parent_field)
 			let parent_row
 			if (parent_id != null)
 				parent_row = e.lookup(e.id_field.name, [parent_id])[0]
