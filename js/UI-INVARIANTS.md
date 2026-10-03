@@ -338,6 +338,12 @@ On a flat move in custom order, the nav commits the full display order as
 stored order. With separate arrays, it moves child_rows and copies it into
 all_rows. With one array, it moves all_rows directly.
 
+Positions. With pos_col and no explicit sort or grouping, the nav numbers
+complete sibling lists from 1. It includes records hidden by filtering or
+collapse. UI inserts and physical removals renumber every sibling list;
+moves renumber the old and new parents' lists. The nav skips position
+numbering while explicitly sorted or grouped.
+
 Keys. There is no nullable pk. The server keeps pks immutable and marks pk
 fields readonly; the client does not enforce that. A new row with no key
 yet is a valid row. The nav checks pk uniqueness when it validates a row,

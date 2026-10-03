@@ -3228,12 +3228,21 @@ ui.nav = function(id, opt) {
 
 		let rows_added, rows_updated
 		let added_rows = set()
-		let all_ri = at_row && !e.is_grouped
+		let is_sorted_insert = ev.input && order_by_map.size > 0
+		let all_ri = at_row && !e.is_grouped && !is_sorted_insert
 			? e.all_rows.indexOf(at_row) : e.all_rows.length
 		let child_rows = !e.is_grouped && (parent_row || e).child_rows
 		let child_ri
 		if (child_rows && child_rows != e.all_rows)
 			child_ri = at_row ? child_rows.indexOf(at_row) : child_rows.length
+
+		let max_position = 0
+		if (is_sorted_insert && e.pos_field)
+			for (let child_row of child_rows) {
+				let position = e.cell_input_val(child_row, e.pos_field)
+				if (position > max_position)
+					max_position = position
+			}
 
 		// TODO: move row to different parent.
 		assert(!e.is_tree || !from_server, 'NYI')
@@ -3293,6 +3302,9 @@ ui.nav = function(id, opt) {
 
 				if (e.init_row)
 					e.init_row(row, ri, ev)
+
+				if (is_sorted_insert && e.pos_field)
+					row[e.pos_field.val_index] = ++max_position
 
 				if (!from_server)
 					row.is_new = true
