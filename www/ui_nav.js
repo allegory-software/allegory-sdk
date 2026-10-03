@@ -1291,11 +1291,11 @@ ui.nav = function(id, opt) {
 			e.rows[i][index_fi] = i
 	}
 
-	function clear_row_index() {
-		if (!e.rows)
+	function clear_row_index(rows = e.rows) {
+		if (!rows)
 			return
 		let index_fi = e.all_fields.length
-		for (let row of e.rows)
+		for (let row of rows)
 			row[index_fi] = undefined
 	}
 
@@ -3687,14 +3687,18 @@ ui.nav = function(id, opt) {
 
 		state.finish = function(insert_ri, parent_row) {
 
-			e.rows.splice(insert_ri, 0, ...rows)
+			let next_row = e.rows[insert_ri]
+			let is_shown = !e.is_tree || !parent_row?.collapsed
+			if (is_shown)
+				e.rows.splice(insert_ri, 0, ...rows)
+			else
+				clear_row_index(rows)
 
 			let old_parent_row = rows[0].parent_row
 
 			// move top siblings to new parent.
 			if (old_parent_row != parent_row) {
 				let child_rows = (parent_row || e).child_rows
-				let next_row = e.rows[insert_ri + move_n]
 				let child_ri = next_row && next_row.parent_row == parent_row
 					? child_rows.indexOf(next_row) : child_rows?.length ?? 0
 				for (let row of rows)
@@ -3707,7 +3711,6 @@ ui.nav = function(id, opt) {
 				for (let row of rows)
 					if (row.parent_row == parent_row)
 						move_child_count++
-				let next_row = e.rows[insert_ri + move_n]
 				let insert_child_ri = next_row
 					&& next_row.parent_row == parent_row
 					? child_rows.indexOf(next_row) : child_rows.length
@@ -3762,6 +3765,9 @@ ui.nav = function(id, opt) {
 			update_pos_field_for_children_of(old_parent_row)
 			if (parent_row != old_parent_row)
 				update_pos_field_for_children_of(parent_row)
+
+			if (!is_shown)
+				e.focus_cell(false, false, 0, 0, {select: 'deselect_hidden'})
 
 			if (e.save_on_move_row)
 				e.save(ev)

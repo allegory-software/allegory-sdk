@@ -348,6 +348,11 @@ sibling rows and keeps their descendants attached to them. It inserts
 them at the chosen position in the new parent's complete child array
 before numbering positions or rebuilding client stored order.
 
+When reparenting into a collapsed parent, the nav keeps the parent
+collapsed and leaves the moved rows out of visible rows. It clears their
+visible indices and clears hidden focus and selection through
+focus_cell(). Expanded destinations show the moved rows.
+
 When rebuilding the tree, the nav uses current input parent values,
 with loaded values for unchanged cells, so unsaved parent changes are
 preserved.
