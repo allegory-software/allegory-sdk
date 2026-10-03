@@ -109,7 +109,7 @@ ui.add_validation_rule = function(rule) {
 	ui.validation_rules[rule.name] = rule
 }
 
-ui.create_validator = function(e, own_rules = empty_array) {
+ui.create_validator = function(e, own_rules = empty_array, no_global_rules) {
 
 	let rules = []
 	let parse_rule
@@ -155,8 +155,9 @@ ui.create_validator = function(e, own_rules = empty_array) {
 		return add_rule(rule)
 	}
 
-	for (let rule_name in ui.validation_rules)
-		add_global_rule(rule_name)
+	if (!no_global_rules)
+		for (let rule_name in ui.validation_rules)
+			add_global_rule(rule_name)
 	for (let rule of own_rules)
 		add_rule(rule)
 

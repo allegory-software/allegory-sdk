@@ -1,9 +1,21 @@
 BUGS
 ------------------------------------------------------------------------------
 GLITCHES:
+- BUG: drag right on grid picker (it won't work but max_w will be recorded),
+then drag right from last column to resize it -- it will stop on that
+invisible max_w from the first drag.
+- ctrl+arrows opens dropdowns which stops navigation (it shouldn't).
 
 BEHAVIOR:
 - ui.date_input: enter to close while focused on input cancels instead of pick.
+- ui.create_validator skips own rules that have no applies(), so
+	email.validator_email is never checked.
+- grid Escape on a cell: replace `!e.is_picker` with: drop an unchanged new
+	row; else revert only if can_change_val(row, field); else leave the key.
+
+CLEANUP:
+- ui_nav insert_rows: the "insert is aborted" path after
+	focus_cell(false, false) can't happen on a loaded nav.
 
 
 INPUTS
@@ -46,10 +58,10 @@ NAV INPUTS
 
 GRID
 ------------------------------------------------------------------------------
+- filter bar
 - move rows: flat/tree/group
 - move rows outside grid
 	- to other grid
-- filter bar
 - copy-to-clipboard (csv)
 - paste csv (+assistant)
 - context menu

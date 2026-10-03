@@ -1170,8 +1170,8 @@ ui.key_events = [] // [key_event1, ...]
 
 // keys that the app handles itself so the browser must not act on them.
 // capture is app-wide, so widget modules register at load time.
-let captured_keydowns = obj()
-let captured_keyups   = obj()
+let captured_keydowns = obj() // {full_key->true}
+let captured_keyups   = obj() // {full_key->true}
 
 ui.capture_keydown = function(key) {
 	captured_keydowns[key] = true
@@ -1222,9 +1222,10 @@ function process_key(dom_ev, ev_name, key) {
 	apply_key_event(p, ev)
 	let full_key = ev[1]
 	let key_low  = ev[2] // lowercased key
+	let char     = ev[3]
 	let captured = ev_name == 'down' ? captured_keydowns : captured_keyups
 	if (dom_ev && (key_low == 'tab' ||
-		(captured[full_key] && dom_ev.target != drawn_focused_input))
+		(captured[full_key] && (dom_ev.target != drawn_focused_input || !char)))
 	) {
 		// this allows us to supress some (but not all) browser key events.
 		dom_ev.preventDefault()

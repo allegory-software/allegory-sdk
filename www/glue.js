@@ -725,7 +725,7 @@ function wordset(s) {
 
 function captures(s, re) {
 	let m = s.match(re)
-	if (m) m.remove(0)
+	if (m) m.shift()
 	return m || empty_array
 }
 

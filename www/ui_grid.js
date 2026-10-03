@@ -16,6 +16,7 @@ const {
 	round, min, max, floor, ceil, abs, clamp,
 	array_move, assign, copy_to_clipboard, empty_array,
 	noop,
+	S,
 } = glue
 
 const {
@@ -200,6 +201,29 @@ function make_help_lines(horiz) {
 let horiz_help_lines    = make_help_lines(true)
 let vertical_help_lines = make_help_lines(false)
 
+let number_filter_help_lines = [
+	'Number & Date Filter',
+	'',
+	'n: Equal to n (a number or a date)',
+	'a..b: From a to b',
+	'>n >=n <n <=n: Compare with n',
+	'!filter: Negate the filter',
+	'Invalid filter: Shows no rows',
+]
+
+let text_filter_help_lines = [
+	'Text Filter',
+	'',
+	'text: Contains text',
+	'^text: Starts with text',
+	'text$: Ends with text',
+	'=text: Equal to text',
+	'=: Empty',
+	'~text: Contains text, with ^ and $ taken literally',
+	'!filter: Negate the filter',
+	'Letter case: Ignored',
+]
+
 function build_help(id, target_i, help_lines) {
 	ui.m(ui.sp2())
 	ui.p(ui.sp4())
@@ -242,6 +266,7 @@ function init(id, e) {
 	e.vertical_layout   ??= false
 	e.header_align      ??= 'l'
 	e.group_bar_visible ??= 'auto' // auto | always | no
+	e.filter_bar_visible ??= false
 
 	e.row_w    = ui.saved_state[id]?.row_w    ?? 12
 	e.header_w = ui.saved_state[id]?.header_w ?? 10
@@ -278,6 +303,7 @@ function init(id, e) {
 	let row_move_state
 
 	let help_open
+	let filter_help_field
 	let clicked_indent
 
 	function reset_mouse_state() {
@@ -345,6 +371,29 @@ function init(id, e) {
 
 	function clamp_vertical_w(w) {
 		return clamp(w, 2 * font_size, 50 * font_size)
+	}
+
+	function filter_box_id(field) {
+		return id+'.filter.'+field.name
+	}
+
+	function build_filter_cell(field) {
+		if (horiz) {
+			ui.m(field._x, 0, 0, 0)
+			ui.min_w(field._w)
+		} else {
+			ui.m(0, field._y, 0, 0)
+			ui.min_wh(header_w, cell_h)
+		}
+		let cell_i = ui.stack('', 0, 'l', 't')
+			if (field == filter_help_field)
+				build_help(id+'.filter', cell_i,
+					field.filter_field.is_number_filter
+						? number_filter_help_lines : text_filter_help_lines)
+			ui.box_args(1, 's', 's')
+			ui.field_input(filter_box_id(field), field.filter,
+				{field: field.filter_field, w: 0})
+		ui.end_stack()
 	}
 
 	function indent_offset(indent) {
@@ -782,6 +831,25 @@ function init(id, e) {
 		let value = ui.input_value(e.editor_id)
 		if (value !== undefined)
 			e.set_cell_val(e.focused_row, e.focused_field, value, {input: e})
+
+		let filter_focused_field = null
+		if (e.filter_bar_visible)
+			for (let field of e.fields) {
+				let filter_text = ui.input_value(filter_box_id(field))
+				if (filter_text !== undefined)
+					e.set_col_filter(field, filter_text)
+				if (ui.focused(filter_box_id(field)))
+					filter_focused_field = field
+			}
+		if (filter_focused_field != filter_help_field || ui.click)
+			filter_help_field = null
+		if (filter_focused_field && ui.keydown('f1')) {
+			filter_help_field = filter_help_field ? null : filter_focused_field
+			ui.capture_keys()
+		} else if (filter_help_field && ui.keydown('escape')) {
+			filter_help_field = null
+			ui.capture_keys()
+		}
 
 		if (e.editing
 				&& !ui.focused(id)
@@ -1265,8 +1333,7 @@ function init(id, e) {
 				focus_editor: true,
 				focus_non_editable_if_not_found: true,
 				sel_i: 0, sel_len: 1/0,
-				expand_selection: shift,
-				invert_selection: ctrl,
+				select: shift ? 'expand' : ctrl ? 'invert' : null,
 				input: e,
 			})) {
 				has_input = true
@@ -1326,7 +1393,7 @@ function init(id, e) {
 				if (e.focus_next_cell(cols, {
 					sel_i: all ? 0 : cols > 0 ? 0 : -1,
 					sel_len: all ? 1/0 : 0,
-					expand_selection: shift,
+					select: shift ? 'expand' : null,
 					enter_edit: ctrl,
 					focus_editor: ctrl,
 					input: e,
@@ -1352,6 +1419,7 @@ function init(id, e) {
 			if (!e.save_on_add_row) { // not really compatible behavior...
 				if (e.is_last_row_focused() && e.can_actually_add_rows()) {
 					if (e.insert_rows(1, {
+						op: 'insert',
 						input: e,
 						focus_it: true,
 					})) {
@@ -1385,7 +1453,7 @@ function init(id, e) {
 			if (e.focus_cell(true, true, rows, 0, {
 				sel_i: sel_i,
 				sel_len: sel_len,
-				expand_selection: shift,
+				select: shift ? 'expand' : null,
 				input: e,
 			}))
 				return false
@@ -1431,6 +1499,8 @@ function init(id, e) {
 					e.exit_edit({input: e, cancel: true})
 					return false
 				}
+			} else if (e.remove_selected_rows({input: e, op: 'undelete'})) {
+				return false
 			} else if (!e.is_picker && focused_row && focused_field) {
 				let row = focused_row
 				if (row.is_new && !e.is_row_user_modified(row, true))
@@ -1452,6 +1522,7 @@ function init(id, e) {
 			}
 
 			if (e.insert_rows(insert_arg, {
+				op: 'insert',
 				input: e,
 				at_focused_row: true,
 				focus_it: true,
@@ -1474,11 +1545,19 @@ function init(id, e) {
 				return false
 			}
 
-			// delete: toggle-delete selected rows
-			if (!ctrl && !e.editing && e.remove_selected_rows({
-						input: e, refocus: true, toggle: true, confirm: true
-					}))
-				return false
+			// delete: delete selected rows, asking first unless the selection
+			// is a single new row.
+			if (!ctrl && !e.editing && e.selected_rows.size) {
+				if (!e.can_actually_remove_rows())
+					return false
+				let n = e.selected_rows.size
+				let is_one_new_row = n == 1
+					&& e.selected_rows.keys().next().value.is_new
+				if ((is_one_new_row || confirm(S('delete_records_confirmation',
+						'Are you sure you want to delete {0:record:records}?', n)))
+					&& e.remove_selected_rows({input: e, refocus: true}))
+					return false
+			}
 
 			// ctrl_delete: set selected cells to null.
 			if (ctrl) {
@@ -1653,9 +1732,6 @@ function init(id, e) {
 		ui.stack(id, fr, align, valign)
 		ui.hv(horiz ? 'v' : 'h', 1, 0, 's', 's')
 
-			// so that focus_inside() answers for a picker's own widgets.
-			ui.focus_group(null, null, id+'.cells')
-
 			// group-by bar
 
 			if (horiz && (
@@ -1791,15 +1867,19 @@ function init(id, e) {
 					let icon_id = id+'.sort_icon.'+field.name
 
 					if (field.sortable) {
-						ui.color(dir && !col_group ? 'label' : 'faint',
-							!col_group && hit_zone == 'sort_icon' && hit_fi == field.index
-								? 'hover' : null)
-
-						ui.icon(icon_id,
-							dir == 'asc' && (pri ? 'sort_asc'  : 'sort_asc' ) ||
-							dir          && (pri ? 'sort_desc' : 'sort_desc') ||
-							'sort_none'
-						, 0)
+						if (e.rows.length > 1 || dir) {
+							ui.color(dir && !col_group ? 'label' : 'faint',
+								!col_group && hit_zone == 'sort_icon' && hit_fi == field.index
+									? 'hover' : null)
+							ui.icon(icon_id,
+								dir == 'asc' && (pri ? 'sort_asc'  : 'sort_asc' ) ||
+								dir          && (pri ? 'sort_desc' : 'sort_desc') ||
+								'sort_none'
+							, 0)
+						} else {
+							ui.min_w(ui.em(1))
+							ui.box()
+						}
 					}
 
 					if (is_right_aligned) {
@@ -1857,6 +1937,30 @@ function init(id, e) {
 				ui.end_stack()
 
 			ui.end_scrollbox()
+
+			// filter bar
+
+			if (e.filter_bar_visible) {
+				if (horiz)
+					ui.scrollbox(id+'.filter_bar', 0,
+						header_overflow, 'contain',
+						null, null, null, null, id+'.cells_scrollbox')
+				else
+					ui.scrollbox(id+'.filter_bar', 0,
+						'contain', header_overflow,
+						null, null, null, null, null, id+'.cells_scrollbox')
+
+					ui.stack('')
+						ui.bb('bg1', null, horiz ? 'b' : 'r', 'intense')
+						for (let field of e.fields)
+							build_filter_cell(field)
+					ui.end_stack()
+
+				ui.end_scrollbox()
+			}
+
+			// so that focus_inside() answers for a picker's own widgets.
+			ui.focus_group(null, null, id+'.cells')
 
 			// cells frame
 

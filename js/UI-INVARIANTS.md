@@ -321,6 +321,76 @@ frames. Freeing the widget's state removes the element.
 ui.value(id) is the text that widget holds right now.
 
 
+NAV
+------------------------------------------------------------------------------
+
+Order. The nav uses custom order (pos_col) only while no sort and no filter
+are set. With a sort or a filter it uses sorted order, where hidden rows are
+fine.
+
+In flat mode, child_rows and all_rows are initially the same array. The nav
+copies all_rows into child_rows for the first sort. It reuses that copy for
+explicit sorts and pos_col ordering, and rebuilds visible rows from it.
+The nav sorts child_rows and keeps all_rows in stored order. On clearing
+the sort, it restores stored order into the copy before pos_col ordering.
+
+On a flat move in custom order, the nav commits the full display order as
+stored order. With separate arrays, it moves child_rows and copies it into
+all_rows. With one array, it moves all_rows directly.
+
+Keys. There is no nullable pk. The server keeps pks immutable and marks pk
+fields readonly; the client does not enforce that. A new row with no key
+yet is a valid row. The nav checks pk uniqueness when it validates a row,
+only for new rows and rows the user edited, and skips the check for a row
+with no key yet. e.lookup() by null returns the rows whose value is null.
+
+Ops. A function's mode is an explicit op, never inferred from another option
+such as ev.input. insert_rows takes op: 'insert' (the default) or 'upsert';
+it looks for an existing row by pk only for 'upsert', and the grid passes
+'insert'. remove_rows takes op: 'delete' (the default) or 'undelete'.
+
+Parameters. A detail nav takes whichever values it needs from the focused
+row of each master nav. When inserting a row, the detail nav fills the
+row's parameter fields with the current parameter values.
+
+Server consistency. The server keeps the tree consistent, with a foreign
+key or without: it rejects removing a row that still has children, or it
+removes them too. Keeping the tree consistent is not the client's job.
+
+Focus and selection. focus_cell() owns focus and selection. All other code
+changes them by calling focus_cell() with options that say what it wants,
+never by writing the fields itself. Only visible rows and cols can be
+focused or selected: a hidden focused row or a hidden selected row is a
+bug. On a plain move, focus_cell() selects the focused cell and nothing
+else. After a filter change or a collapse it resets the selection to the
+focused cell; after any other change to the visible rows or cols it drops
+only what is now hidden. The code that changes the visible rows chooses
+which, through update_parts(). On Ctrl+A the grid focuses the first cell
+and selects all rows.
+
+Deleting. On Delete the grid marks the selected rows for deletion; on
+Escape it undeletes the marked rows among them. There is no toggle. The
+grid asks before deleting, counting the selected rows, except for a single
+new row. can_remove_row() decides for the user only; code that drives the
+nav is not checked.
+
+A record can be removed only if every record under it can be. When the user
+may not remove a record, the nav keeps that record's ancestors too.
+remove_rows with op 'undelete' unmarks only marked records, and their
+marked parents too, so that no kept record is left under a deleted parent.
+The nav drops a deleted new row outright, since the server has nothing to
+delete. The nav sends deletes to the server children first.
+
+Group rows are not records. Deleting a group row means deleting the rows
+grouped under it: the nav never marks, queues or drops the group row
+itself, and removes a group row once no rows are left in it.
+
+Inserting. The nav refuses to insert a row under a parent marked for
+deletion. When inserting into a sorted grid, the nav keeps the new row at
+the insertion position. In a flat or tree nav, it inserts before the same
+existing row in stored order and in full sibling order.
+
+
 WHEN A FIX DOESN'T FIT
 ------------------------------------------------------------------------------
 

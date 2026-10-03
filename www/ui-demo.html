@@ -13,7 +13,7 @@
 <script>
 
 const {
-	obj, json, json_arg, load, save,
+	obj, json, json_arg, load, save, attr,
 	random, clamp, min, max, floor, ceil, round,
 	time, assign, keys,
 	parse_date, format_date,
@@ -544,8 +544,8 @@ let grid_config_split_field = ui.create_field({
 })
 let grid_config_rows_field = ui.create_field({
 	type: 'enum',
-	enum_values: [1000, 10000, 100000, 1000000],
-	enum_labels: {1000: '1000', 10000: '10k', 100000: '100k', 1000000: '1M'},
+	enum_values: [1, 1000, 10000, 100000, 1000000],
+	enum_labels: {1: '1', 1000: '1000', 10000: '10k', 100000: '100k', 1000000: '1M'},
 	not_null: true,
 })
 let grid_config_cols_field = ui.create_field({
@@ -558,6 +558,7 @@ let grid_config_cols_field = ui.create_field({
 ui.saved_value('grid_config_tree', true)
 ui.saved_value('grid_config_auto_expand', false)
 ui.saved_value('grid_config_vertical_layout', false)
+ui.saved_value('grid_config_filter_bar', false)
 ui.saved_value('grid_config_can_focus_cells', true)
 ui.saved_value('grid_config_can_select_multiple', true)
 ui.saved_value('grid_config_can_select_non_siblings', true)
@@ -638,6 +639,7 @@ let tree_depth = round(ui.value(tree_depth_slider_id))
 let first_col = ui.value('grid_config_first_col')
 let readonly = ui.value('grid_config_readonly')
 let auto_expand = ui.value('grid_config_auto_expand')
+let filter_bar_visible = ui.value('grid_config_filter_bar')
 
 if (!ui.rowsets.grid_config_rowset || state.recreate) {
 	ui.rowsets.grid_config_rowset = make_grid_demo_rowset(
@@ -668,10 +670,13 @@ let grid_opt = {
 	validate_on_load: ui.value('grid_config_validate_on_load'),
 	can_change_rows: !readonly,
 	vertical_layout: ui.value('grid_config_vertical_layout'),
+	filter_bar_visible: filter_bar_visible,
 }
 let grid_nav = ui.state_of('grid_config_grid', 'e')
-if (grid_nav)
+if (grid_nav) {
 	grid_nav.auto_expand = auto_expand
+	grid_nav.filter_bar_visible = filter_bar_visible
+}
 
 ui.hsplit('grid_config_split', 300, 'px', 2)
 
@@ -773,6 +778,7 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 		grid_config_toggle('grid_config_tree', 'Tree')
 		grid_config_toggle('grid_config_vertical_layout', 'Vertical layout')
 		grid_config_toggle('grid_config_auto_expand', 'Expand cells')
+		grid_config_toggle('grid_config_filter_bar', 'Filter bar')
 		grid_config_toggle('grid_config_fast_path', 'Grid fast path')
 
 		ui.color('marker')
