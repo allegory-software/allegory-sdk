@@ -2164,7 +2164,7 @@ ui.nav = function(id, opt) {
 		return is_parent_of(row.parent_row, check_row)
 	}
 
-	function change_row_parent(row, parent_row) {
+	function change_row_parent(row, parent_row, at_ri) {
 		if (!e.is_tree)
 			return
 		if (parent_row == row.parent_row)
@@ -2176,7 +2176,7 @@ ui.nav = function(id, opt) {
 		e.set_cell_val(row, e.parent_field, parent_id)
 
 		detach_row_from_tree(row)
-		add_row_to_tree(row, parent_row)
+		add_row_to_tree(row, parent_row, at_ri)
 
 		init_depth_for_row(row, parent_row ? parent_row.depth + 1 : 0)
 	}
@@ -3693,9 +3693,13 @@ ui.nav = function(id, opt) {
 
 			// move top siblings to new parent.
 			if (old_parent_row != parent_row) {
+				let child_rows = (parent_row || e).child_rows
+				let next_row = e.rows[insert_ri + move_n]
+				let child_ri = next_row && next_row.parent_row == parent_row
+					? child_rows.indexOf(next_row) : child_rows?.length ?? 0
 				for (let row of rows)
 					if (row.parent_row == old_parent_row) // sibling of top row
-						change_row_parent(row, parent_row)
+						change_row_parent(row, parent_row, child_ri++)
 			} else if (e.is_tree) {
 				let child_rows = (parent_row || e).child_rows
 				let child_ri = child_rows.indexOf(rows[0])

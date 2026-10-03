@@ -343,8 +343,10 @@ that parent's complete child array, or in the root array for root records,
 before copying stored order and numbering positions. The nav moves each
 record together with its subtree, including collapsed children.
 
-When changing parent, the nav reparents the selected sibling records
-and keeps their descendants attached to them.
+When changing parent in an unsorted tree, the nav reparents the selected
+sibling rows and keeps their descendants attached to them. It inserts
+them at the chosen position in the new parent's complete child array
+before numbering positions or rebuilding client stored order.
 
 When rebuilding the tree, the nav uses current input parent values,
 with loaded values for unchanged cells, so unsaved parent changes are
