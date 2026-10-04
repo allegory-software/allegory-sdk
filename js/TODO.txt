@@ -12,6 +12,7 @@ BEHAVIOR:
 	email.validator_email is never checked.
 - grid Escape on a cell: replace `!e.is_picker` with: drop an unchanged new
 	row; else revert only if can_change_val(row, field); else leave the key.
+- glue req.send_async calls an undefined on('done', ...) (eslint no-undef).
 
 CLEANUP:
 - ui_nav insert_rows: the "insert is aborted" path after

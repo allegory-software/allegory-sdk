@@ -843,11 +843,19 @@ function remove_values(a, cond) {
 // move the n elements at i1 to a new position which is an index in the
 // array as it stands after the removal of the elements to be moved,
 // or, if using `before` flag, before the removal of the elements to be moved.
-// TODO: splice is limited to 64K args!
 function array_move(a, i1, n, insert_i, before) {
 	if (before && insert_i > i1)
 		insert_i--
-	a.splice(insert_i, 0, ...a.splice(i1, n))
+	let moved = a.slice(i1, i1 + n)
+	// only the elements between source and destination shift, by n.
+	if (insert_i < i1)
+		for (let i = i1 - 1; i >= insert_i; i--)
+			a[i + n] = a[i]
+	else
+		for (let i = i1 + n; i < insert_i + n; i++)
+			a[i - n] = a[i]
+	for (let i = 0; i < n; i++)
+		a[insert_i + i] = moved[i]
 	return insert_i
 }
 

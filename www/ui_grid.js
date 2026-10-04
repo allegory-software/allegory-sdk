@@ -1517,7 +1517,7 @@ function init(id, e) {
 
 			if (ctrl && focused_row) { // add a row filled with focused row's values
 				let row = e.serialize_row_vals(focused_row)
-				e.pk_fields.map((f) => delete row[f.name])
+				e.pk_fields?.map((f) => delete row[f.name])
 				insert_arg = [row]
 			}
 

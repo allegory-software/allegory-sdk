@@ -342,7 +342,8 @@ state.can_drop(insert_ri, parent_row). The helper checks the drop range,
 can_change_parent, and parent eligibility when changing parent. For a
 same-parent move, it requires client array order or pos_col. The helper
 does not repeat drag-start permission checks. The nav assumes an allowed
-destination at completion.
+destination at completion. The helper also rejects parent changes when
+the parent column is readonly. Same-parent reordering remains available.
 
 start_move_selected_rows() reads the actual selected rows. It moves a
 consecutive sequence of siblings with their subtrees and refuses gaps

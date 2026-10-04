@@ -223,7 +223,6 @@ focusing and selection:
 	announces:
 		^^focused_row_changed(row, row0, ev)
 		^^focused_cell_changed(row, field, row0, field0, ev)
-		^^selected_rows_changed()
 
 Scrolling:
 	publishes:
@@ -265,7 +264,7 @@ Row adding, removing, moving:
 		e.remove_selected_rows(ev)
 		e.insert_rows([{col->val}, ...], ev)
 		e.insert_row({col->val}, ev)
-		e.start_move_selected_rows(ev) -> state; state.finish()
+		e.start_move_selected_rows(ev) -> state; state.finish(); state.cancel()
 	calls:
 		e.can_remove_row(row, ev)
 		e.init_row(row, ri, ev)
@@ -419,7 +418,7 @@ const {
 	set, map, words, keys, array_move, array_set, captures, count_keys,
 	do_before, do_after, property, override,
 	assign, assign_opt, attr, empty, empty_array,
-	remove, insert, remove_values,
+	remove, insert, insert_n, remove_n, extend, remove_values,
 	noop, return_true, return_arg, return_false,
 	memoize,
 	S,
@@ -432,15 +431,6 @@ const {
 	wrap, year, year_of,
 	announce, href, ajax, copy_to_clipboard,
 } = glue
-
-function map_keys_different(m1, m2) {
-	if (m1.size != m2.size)
-		return true
-	for (let k1 of m1.keys())
-		if (!m2.has(k1))
-			return true
-	return false
-}
 
 //// ROWSETS -----------------------------------------------------------------
 
@@ -627,6 +617,7 @@ ui.nav = function(id, opt) {
 	e.save_on_input              = false
 	e.save_on_exit_edit          = false
 	e.save_on_exit_row           = true
+	e.save_on_move_row           = true
 
 	e.save_row_states            = false
 
@@ -704,7 +695,6 @@ ui.nav = function(id, opt) {
 			refocus_col = e.focused_field?.name
 
 			e.unfocus_focused_cell({cancel: true, input: ev && ev.input})
-			clear_row_index()
 			e.rows = null
 
 			e.changed_rows = null // set(row)
@@ -900,7 +890,6 @@ ui.nav = function(id, opt) {
 		if (update_rows) {
 
 			reset_quicksearch()
-			clear_row_index()
 			e.rows = null
 
 			update_filters = true
@@ -948,7 +937,6 @@ ui.nav = function(id, opt) {
 
 		// filter after sort so we can re-filter on the same sort order.
 		if (update_row_visibility) {
-			clear_row_index()
 			e.rows = []
 			add_visible_child_rows(e.child_rows)
 			update_row_index()
@@ -1282,21 +1270,15 @@ ui.nav = function(id, opt) {
 	/// filtered and custom-sorted subset of all_rows -------------------------
 
 	e.row_index = function(row) {
-		return row && row[e.all_fields.length]
+		let ri = row && row[e.all_fields.length]
+		// hidden row: its old index points at another row.
+		return e.rows?.[ri] === row ? ri : null
 	}
 
 	function update_row_index() {
 		let index_fi = e.all_fields.length
 		for (let i = 0; i < e.rows.length; i++)
 			e.rows[i][index_fi] = i
-	}
-
-	function clear_row_index(rows = e.rows) {
-		if (!rows)
-			return
-		let index_fi = e.all_fields.length
-		for (let row of rows)
-			row[index_fi] = undefined
 	}
 
 	/// editing utils ---------------------------------------------------------
@@ -1544,7 +1526,6 @@ ui.nav = function(id, opt) {
 		if (e.focused_field != null)
 			e.last_focused_col = e.focused_field.name
 
-		let old_selected_rows = map(e.selected_rows)
 		let ri1, ri2, fi1, fi2
 		if (select == 'deselect_hidden') {
 			// hidden rows and hidden cols leave the selection.
@@ -1648,9 +1629,6 @@ ui.nav = function(id, opt) {
 				ui.rebuild('focused_cell_changed')
 		}
 
-		if (map_keys_different(old_selected_rows, e.selected_rows))
-			selected_rows_changed()
-
 		if (ev.quicksearch_text) {
 			e.quicksearch_text = ev.quicksearch_text
 			e.quicksearch_field = ev.quicksearch_field
@@ -1711,10 +1689,6 @@ ui.nav = function(id, opt) {
 			make_visible: false,
 			preserve_quicksearch: true,
 		})
-	}
-
-	function selected_rows_changed() {
-		e.announce('selected_rows_changed')
 	}
 
 	e.is_row_selected = function(row) {
@@ -1986,7 +1960,7 @@ ui.nav = function(id, opt) {
 				let depth = col_group.length-1
 				flatten(t, [], [], depth, add_group, group, level)
 			} else { // last group level, t is the array of rows.
-				group.push(...t)
+				extend(group, t)
 			}
 		}
 		flatten(tree, [], [], depth, add_group, root, 0)
@@ -2112,25 +2086,26 @@ ui.nav = function(id, opt) {
 		return n
 	}
 
-	function detach_row_from_tree(row) {
-		let parent_row = row.parent_row
-		let child_rows = (parent_row || e).child_rows
-		if (!child_rows)
-			return
-		remove_value(child_rows, row)
-		row.parent_row = null
-		row.depth = null
-		if (parent_row && !parent_row.child_rows?.length) {
-			if (parent_row.is_group_row) // empty group: remove
-				detach_row_from_tree(parent_row)
-			else
-				parent_row.collapsed = null
+	function detach_rows_from_tree(rows) {
+		let parent_rows = set()
+		for (let row of rows) {
+			parent_rows.add(row.parent_row)
+			row.parent_row = null
+			row.depth = null
 		}
-	}
-
-	function remove_row_from_tree(row) {
-		detach_row_from_tree(row)
-		row.child_rows = null
+		let empty_groups = set()
+		for (let parent_row of parent_rows) {
+			let child_rows = (parent_row || e).child_rows
+			remove_values(child_rows, row => rows.has(row))
+			if (parent_row && !child_rows.length) {
+				if (parent_row.is_group_row) // empty group: remove
+					empty_groups.add(parent_row)
+				else
+					parent_row.collapsed = null
+			}
+		}
+		if (empty_groups.size)
+			detach_rows_from_tree(empty_groups)
 	}
 
 	function add_row_to_tree(row, parent_row, at_ri) {
@@ -2178,23 +2153,6 @@ ui.nav = function(id, opt) {
 		if (row.parent_row == check_row)
 			return true
 		return is_parent_of(row.parent_row, check_row)
-	}
-
-	function change_row_parent(row, parent_row, at_ri) {
-		if (!e.is_tree)
-			return
-		if (parent_row == row.parent_row)
-			return
-		assert(parent_row != row)
-		assert(!parent_row || !is_parent_of(parent_row, row))
-
-		let parent_id = parent_row ? e.cell_val(parent_row, e.id_field) : null
-		e.set_cell_val(row, e.parent_field, parent_id)
-
-		detach_row_from_tree(row)
-		add_row_to_tree(row, parent_row, at_ri)
-
-		init_depth_for_row(row, parent_row ? parent_row.depth + 1 : 0)
 	}
 
 	/// row collapsing --------------------------------------------------------
@@ -2831,7 +2789,7 @@ ui.nav = function(id, opt) {
 			let errors = e.cell_errors(row, field, false)
 			if (errors && !errors.client_side)
 				errors = null // server-side errors must be cleared.
-			if (!errors || row.is_new || e.cell_modified(row, field)) {
+			if (!errors) {
 				let val = e.cell_input_val(row, field)
 				errors = e.validate_cell(field, val)
 				e.set_cell_state(field, 'errors', errors)
@@ -2877,6 +2835,11 @@ ui.nav = function(id, opt) {
 		if (field.readonly)
 			return
 
+		// unchanged value: nothing to validate.
+		let old_val = e.cell_input_val(row, field)
+		if (val === old_val)
+			return
+
 		if (field.nosave) {
 			e.reset_cell_val(row, field, val, ev)
 			return
@@ -2887,7 +2850,6 @@ ui.nav = function(id, opt) {
 		if (!field.validator.parse_failed)
 			val = field.validator.value
 		let compare_vals = field.compare_vals || e.compare_vals
-		let old_val = e.cell_input_val(row, field)
 		if (!compare_vals(val, old_val))
 			return
 		let invalid = errors.failed
@@ -2923,13 +2885,18 @@ ui.nav = function(id, opt) {
 
 		let field = fld(col)
 
+		// unchanged, no server errors to replace: nothing to validate.
+		let old_val = e.cell_val(row, field)
+		let old_errors = e.cell_state(row, field, 'errors')
+		if (val === old_val && val === e.cell_input_val(row, field)
+				&& (!old_errors || old_errors.client_side))
+			return false
+
 		// set_cell_val() routes nosave fields here, so val can be editor text.
 		// readonly fields have no validator and nothing to parse.
 		let errors = e.validate_cell(field, val)
 		if (field.validator && !field.validator.parse_failed)
 			val = field.validator.value
-
-		let old_val = e.cell_val(row, field)
 
 		e.begin_set_state(row, ev)
 
@@ -3517,9 +3484,13 @@ ui.nav = function(id, opt) {
 			let all_rows = e.all_rows
 			e.all_rows = all_rows.filter(row => !removed_rows.has(row))
 			if (e.is_tree || e.is_grouped) {
+				let top_rows = set()
 				for (let row of removed_rows)
 					if (!removed_rows.has(row.parent_row))
-						remove_row_from_tree(row)
+						top_rows.add(row)
+				detach_rows_from_tree(top_rows)
+				for (let row of top_rows)
+					row.child_rows = null
 			} else if (e.child_rows == all_rows) {
 				e.child_rows = e.all_rows
 			} else {
@@ -3729,7 +3700,8 @@ ui.nav = function(id, opt) {
 			if (insert_ri < state.ri1 || insert_ri > state.ri2)
 				return false
 			let is_parent_change = parent_row != state.parent_row
-			if (is_parent_change && !e.can_change_parent)
+			if (is_parent_change
+				&& (!e.can_change_parent || e.parent_field.readonly))
 				return false
 			if (is_parent_change && parent_row
 				&& !e.row_can_have_children(parent_row))
@@ -3737,25 +3709,51 @@ ui.nav = function(id, opt) {
 			return is_parent_change || is_client_nav() || e.pos_field != null
 		}
 
+		function insert_moved_rows(insert_ri) {
+			insert_n(e.rows, insert_ri, rows.length)
+			for (let i = 0; i < rows.length; i++)
+				e.rows[insert_ri + i] = rows[i]
+		}
+
 		state.finish = function(insert_ri, parent_row) {
 
 			let next_row = e.rows[insert_ri]
 			let is_shown = !e.is_tree || !parent_row?.collapsed
 			if (is_shown)
-				e.rows.splice(insert_ri, 0, ...rows)
-			else
-				clear_row_index(rows)
+				insert_moved_rows(insert_ri)
 
 			let old_parent_row = rows[0].parent_row
 
 			// move top siblings to new parent.
-			if (old_parent_row != parent_row) {
-				let child_rows = (parent_row || e).child_rows
-				let child_ri = next_row && next_row.parent_row == parent_row
-					? child_rows.indexOf(next_row) : child_rows?.length ?? 0
+			if (e.is_tree && old_parent_row != parent_row) {
+				let old_child_rows = (old_parent_row || e).child_rows
+				let move_child_count = 0
 				for (let row of rows)
-					if (row.parent_row == old_parent_row) // sibling of top row
-						change_row_parent(row, parent_row, child_ri++)
+					if (row.parent_row == old_parent_row) { // sibling of top row
+						assert(parent_row != row)
+						assert(!parent_row || !is_parent_of(parent_row, row))
+						move_child_count++
+					}
+				remove_n(old_child_rows, old_child_rows.indexOf(rows[0]),
+					move_child_count)
+				if (old_parent_row && !old_child_rows.length)
+					old_parent_row.collapsed = null
+				let parent = parent_row || e
+				parent.child_rows ??= []
+				let child_rows = parent.child_rows
+				let child_ri = next_row && next_row.parent_row == parent_row
+					? child_rows.indexOf(next_row) : child_rows.length
+				insert_n(child_rows, child_ri, move_child_count)
+				let parent_id = parent_row
+					? e.cell_val(parent_row, e.id_field) : null
+				let depth = parent_row ? parent_row.depth + 1 : 0
+				for (let row of rows)
+					if (row.parent_row == old_parent_row) {
+						child_rows[child_ri++] = row
+						row.parent_row = parent_row
+						init_depth_for_row(row, depth)
+						e.set_cell_val(row, e.parent_field, parent_id)
+					}
 			} else if (e.is_tree) {
 				let child_rows = (parent_row || e).child_rows
 				let child_ri = child_rows.indexOf(rows[0])
@@ -3812,8 +3810,6 @@ ui.nav = function(id, opt) {
 				}
 			}
 
-			update_row_index()
-
 			update_pos_field_for_children_of(old_parent_row)
 			if (parent_row != old_parent_row)
 				update_pos_field_for_children_of(parent_row)
@@ -3826,12 +3822,24 @@ ui.nav = function(id, opt) {
 
 		}
 
+		// rows back where they were cut from: indices are still valid.
+		state.cancel = function() {
+			insert_moved_rows(move_ri1)
+		}
+
+		function finish_or_cancel(insert_ri) {
+			if (state.can_drop(insert_ri, parent_row))
+				state.finish(insert_ri, parent_row)
+			else
+				state.cancel()
+		}
+
 		state.finish_up = function() {
-			state.finish(move_ri1 - 1, parent_row)
+			finish_or_cancel(move_ri1 - 1)
 		}
 
 		state.finish_down = function() {
-			state.finish(move_ri1 + 1, parent_row)
+			finish_or_cancel(move_ri1 + 1)
 		}
 
 		return state
