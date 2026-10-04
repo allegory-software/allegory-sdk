@@ -159,6 +159,8 @@ Indexing:
 		ix.tree() -> index_tree
 		ix.lookup(vals) -> [row1,...]
 		e.lookup(cols, vals, [range_defs]) -> [row1, ...]
+		e.invalidate_indexes([field])
+		e.indexes_add_row(row)
 		e.group_rows(group_by, [range_defs], rows, [group_label_sep]) -> {root:,...}
 
 Master-detail:
@@ -782,7 +784,7 @@ ui.nav = function(id, opt) {
 
 			e.load_error = null
 			e.do_update_load_fail(false)
-			update_indices('invalidate')
+			e.invalidate_indexes()
 			e.all_rows = rowset && (
 						e.deserialize_all_row_states(e.row_states)
 					|| e.deserialize_all_row_vals(e.row_vals ?? rowset.row_vals)
@@ -1774,7 +1776,9 @@ ui.nav = function(id, opt) {
 
 		}
 
-		function add_row(row) {
+		idx.add_row = function(row) {
+			if (!tree)
+				return
 			let last_fi = fis.at(-1)
 			let t0 = tree
 			let i = 0
@@ -1796,29 +1800,14 @@ ui.nav = function(id, opt) {
 			fis = cols_arr.map(fld).map(f => f.val_index)
 			tree = map()
 			for (let row of (rows || e.all_rows))
-				add_row(row)
+				idx.add_row(row)
 		}
 
-		idx.invalidate = function() {
+		idx.invalidate = function(field) {
+			if (field && !cols_arr.includes(field.name))
+				return
 			tree = null
 			fis = null
-		}
-
-		idx.row_added = function(row) {
-			if (!tree)
-				idx.rebuild()
-			else
-				add_row(row)
-		}
-
-		idx.row_removed = function(row) {
-			// TODO:
-			idx.invalidate()
-		}
-
-		idx.val_changed = function(row, field, val) {
-			// TODO:
-			idx.invalidate()
 		}
 
 		idx.lookup = function(vals) {
@@ -1867,9 +1856,14 @@ ui.nav = function(id, opt) {
 		return e.tree_index(cols, range_defs).lookup(v)
 	}
 
-	function update_indices(method, ...args) {
-		for (let cols in indices)
-			indices[cols][method](...args)
+	e.invalidate_indexes = function(field) {
+		for (let k in indices)
+			indices[k].invalidate(field)
+	}
+
+	e.indexes_add_row = function(row) {
+		for (let k in indices)
+			indices[k].add_row(row)
 	}
 
 	/// groups ----------------------------------------------------------------
@@ -2915,7 +2909,7 @@ ui.nav = function(id, opt) {
 			row_unchanged(row)
 
 		if (val !== old_val)
-			update_indices('val_changed', row, field, val)
+			e.invalidate_indexes(field)
 
 		return e.end_set_state()
 	}
@@ -3314,7 +3308,7 @@ ui.nav = function(id, opt) {
 					child_rows.push(row)
 				}
 
-				update_indices('row_added', row)
+				e.indexes_add_row(row)
 
 				if (e.is_row_visible(row)) {
 					e.rows.push(row)
@@ -3411,7 +3405,7 @@ ui.nav = function(id, opt) {
 			removed_rows.add(row)
 			if (e.free_row)
 				e.free_row(row, ev)
-			update_indices('row_removed', row)
+			e.invalidate_indexes()
 			row.removed = true
 		}
 
