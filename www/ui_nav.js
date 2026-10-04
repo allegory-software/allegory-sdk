@@ -200,7 +200,7 @@ focusing and selection:
 			ev.enter_edit
 			ev.editable
 			ev.focus_non_editable_if_not_found
-			ev.select: 'expand' | 'invert' | 'deselect_hidden' | 'all'
+			ev.select: 'expand' | 'invert' | 'deselect_hidden' | 'all' | 'set'
 			ev.select_all_fi
 			ev.quicksearch_text
 			ev.preserve_quicksearch
@@ -1563,6 +1563,13 @@ ui.nav = function(id, opt) {
 				e.selected_row = null
 				e.selected_field = null
 			}
+		} else if (select == 'set') {
+			ri1 = ev.select_ri1
+			ri2 = ev.select_ri2 - 1
+			fi1 = 0
+			fi2 = e.fields.length-1
+			e.selected_row = null
+			e.selected_field = null
 		} else if (select == 'all') {
 			ri1 = 0
 			ri2 = e.rows.length-1
@@ -3635,12 +3642,23 @@ ui.nav = function(id, opt) {
 		update_pos_field_for_children_of(null, true)
 	}
 
-	function move_rows_state(focused_ri, selected_ri, ev) {
+	e.start_move_selected_rows = function(ev) {
 
 		assert(!e.is_grouped)
 
-		let move_ri1 = min(focused_ri, selected_ri)
-		let move_ri2 = max(focused_ri, selected_ri)
+		if (!e.selected_rows.size)
+			return
+		let move_ri1 =  1/0
+		let move_ri2 = -1/0
+		for (let row of e.selected_rows.keys()) {
+			let ri = e.row_index(row)
+			move_ri1 = min(move_ri1, ri)
+			move_ri2 = max(move_ri2, ri)
+		}
+
+		// refuse to move flat selections with gaps in them.
+		if (!e.is_tree && move_ri2 - move_ri1 + 1 != e.selected_rows.size)
+			return
 
 		let top_row = e.rows[move_ri1]
 		let parent_row = top_row.parent_row
@@ -3649,24 +3667,28 @@ ui.nav = function(id, opt) {
 
 		if (e.is_tree) {
 
-			let min_parent_count = top_row.depth
+			let ri = move_ri1
 
-			// extend selection with all visible children which must be moved along.
-			// another way to compute this would be to find the last selected sibling
-			// of top_row and select up to all its extended_child_row_count().
+			// based on top row, add selected siblings all visible descendants.
+			// refuse move if there are unselected siblings.
+			// refuse move if there rows under unrelated parents are selected.
 			while (1) {
-				let row = e.rows[move_ri2]
+				let row = e.rows[ri]
 				if (!row)
 					break
-				if (row.depth <= min_parent_count) // sibling or unrelated
-					break
-				move_ri2++
+				if (row.depth > top_row.depth) { // descendant of top row: add to selection
+					ri++
+				} else { // sibling or unrelated
+					if (ri >= move_ri2) // non-child beyond selection: stop
+						break
+					if (row.depth < top_row.depth) // selected unrelated: refuse
+						return
+					if (!e.selected_rows.has(row)) // not-selected sibling: refuse
+						return
+					ri++
+				}
 			}
-
-			// check to see that all selected rows are siblings or children of the first row.
-			for (let ri = move_ri1; ri < move_ri2; ri++)
-				if (e.rows[ri].depth < min_parent_count)
-					return
+			move_ri2 = ri
 
 		}
 
@@ -3684,6 +3706,12 @@ ui.nav = function(id, opt) {
 			ri2 = parent_ri + 1 + e.expanded_child_row_count(parent_ri)
 		}
 		ri2 -= move_n // adjust to after removal.
+
+		e.focus_cell(true, true, 0, 0, {
+			select: 'set',
+			select_ri1: move_ri1,
+			select_ri2: move_ri2,
+		})
 
 		let rows = e.rows.splice(move_ri1, move_n)
 
@@ -3809,18 +3837,16 @@ ui.nav = function(id, opt) {
 		return state
 	}
 
-	e.start_move_selected_rows = function(ev) {
-		let focused_ri  = e.focused_row_index
-		let selected_ri = e.selected_row_index ?? focused_ri
-		return move_rows_state(focused_ri, selected_ri, ev)
-	}
-
 	e.move_selected_rows_up = function(ev) {
-		e.start_move_selected_rows(ev).finish_up()
+		let state = e.start_move_selected_rows(ev)
+		if (state)
+			state.finish_up()
 	}
 
 	e.move_selected_rows_down = function(ev) {
-		e.start_move_selected_rows(ev).finish_down()
+		let state = e.start_move_selected_rows(ev)
+		if (state)
+			state.finish_down()
 	}
 
 	/// ajax requests ---------------------------------------------------------

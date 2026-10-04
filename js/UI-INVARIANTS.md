@@ -344,6 +344,15 @@ same-parent move, it requires client array order or pos_col. The helper
 does not repeat drag-start permission checks. The nav assumes an allowed
 destination at completion.
 
+start_move_selected_rows() reads the actual selected rows. It moves a
+consecutive sequence of siblings with their subtrees and refuses gaps
+containing unselected siblings or selections spanning unrelated parents.
+Selected descendants move with their selected ancestor. Before detaching
+the visible move range, it calls focus_cell() with select: 'set' to expand
+the actual selection and keep focus unchanged. On refusal, it returns no
+state and leaves the arrays unchanged. The up/down helpers finish only a
+move that started.
+
 In flat mode, child_rows and all_rows are initially the same array. The nav
 copies all_rows into child_rows for the first sort. It reuses that copy for
 explicit sorts and pos_col ordering, and rebuilds visible rows from it.
@@ -408,6 +417,14 @@ focused cell; after any other change to the visible rows or cols it drops
 only what is now hidden. The code that changes the visible rows chooses
 which, through update_parts(). On Ctrl+A the grid focuses the first cell
 and selects all rows.
+
+focus_cell(true, true, 0, 0, {select: 'set', select_ri1, select_ri2})
+replaces the selection with the given visible row range, keeping focus
+unchanged. select_ri1 is inclusive and select_ri2 is exclusive. The nav
+applies the existing selection restrictions. In row-select mode, it stores
+true for each selected row. In cell-select mode, it stores a set of all
+selectable visible fields for each selected row. It clears the previous
+selection anchor.
 
 Deleting. On Delete the grid marks the selected rows for deletion; on
 Escape it undeletes the marked rows among them. There is no toggle. The
