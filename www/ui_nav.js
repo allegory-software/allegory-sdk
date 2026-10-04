@@ -2771,7 +2771,8 @@ ui.nav = function(id, opt) {
 	}
 
 	e.row_can_have_children = function(row) {
-		return row.can_have_children != false
+		return row.can_have_children != false && !row.removed
+			&& e.cell_val(row, e.id_field) != null
 	}
 
 	e.row_errors = function(row) {
