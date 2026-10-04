@@ -331,6 +331,10 @@ fine.
 The nav prohibits moving rows while grouped. It rejects direct move
 calls before changing arrays.
 
+For flat server navs without pos_col, can_actually_move_rows() disables
+movement. The server saves row order through pos_col. Client navs can
+save array order.
+
 For tree drop targets, row_can_have_children() rejects rows marked for
 deletion, rows with no loaded id, and rows with can_have_children false.
 The grid chooses allowed destinations, enforcing the drop range and

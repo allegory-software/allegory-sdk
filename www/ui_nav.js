@@ -1348,6 +1348,8 @@ ui.nav = function(id, opt) {
 			return false
 		if (e.can_be_tree && !e.is_tree)
 			return false
+		if (!e.is_tree && !e.pos_field && !is_client_nav())
+			return false
 		return true
 	}
 
@@ -1362,6 +1364,9 @@ ui.nav = function(id, opt) {
 		if (e.can_be_tree && !e.is_tree)
 			return S('cannot_move_records_tree_is_flat',
 				'Cannot move records in a tree while the grid is not shown as a tree')
+		if (!e.is_tree && !e.pos_field && !is_client_nav())
+			return S('cannot_move_rows_without_pos',
+				'Saving row order requires a position column')
 		if (!e.selected_rows.size)
 			return S('no_records_selected', 'No records selected')
 	}
