@@ -427,7 +427,7 @@ const {
 	format_base,
 	format_kbytes, format_kcount, format_timeofday, format_timeago, format_duration,
 	clock, day, days, floor, isfunc, json, max, min, month, month_year,
-	pr, random, remove_value, snap, str, time, url_format, url_parse, week,
+	pr, random, snap, str, time, url_format, url_parse, week,
 	wrap, year, year_of,
 	announce, href, ajax, copy_to_clipboard,
 } = glue
@@ -3215,9 +3215,13 @@ ui.nav = function(id, opt) {
 		let all_ri = at_row && !e.is_grouped && !is_sorted_insert
 			? e.all_rows.indexOf(at_row) : e.all_rows.length
 		let child_rows = !e.is_grouped && (parent_row || e).child_rows
-		let child_ri
-		if (child_rows && child_rows != e.all_rows)
+		let child_ri, child_rows_n
+		if (child_rows && child_rows != e.all_rows) {
 			child_ri = at_row ? child_rows.indexOf(at_row) : child_rows.length
+			child_rows_n = child_rows.length
+		}
+		let all_rows_n = e.all_rows.length
+		let rows_n = e.rows.length
 
 		let max_position = 0
 		if (is_sorted_insert && e.pos_field)
@@ -3291,14 +3295,14 @@ ui.nav = function(id, opt) {
 
 				if (!from_server)
 					row.is_new = true
-				insert(e.all_rows, all_ri++, row)
+				e.all_rows.push(row)
 				assign(row, ev.row_state)
 				added_rows.add(row)
 				rows_added = true
 
 				if (e.is_tree) {
 					row.child_rows = []
-					add_row_to_tree(row, parent_row || null, child_ri++)
+					add_row_to_tree(row, parent_row || null)
 					if (row.parent_row) {
 						// set parent id to be the id of the parent row.
 						let parent_id = e.cell_val(row.parent_row, e.id_field)
@@ -3307,13 +3311,13 @@ ui.nav = function(id, opt) {
 					init_depth_for_row(row,
 						row.parent_row ? row.parent_row.depth + 1 : 0)
 				} else if (child_ri != null) {
-					insert(child_rows, child_ri++, row)
+					child_rows.push(row)
 				}
 
 				update_indices('row_added', row)
 
 				if (e.is_row_visible(row)) {
-					insert(e.rows, ri, row)
+					e.rows.push(row)
 					ri++
 				}
 
@@ -3325,6 +3329,13 @@ ui.nav = function(id, opt) {
 		}
 
 		if (rows_added) {
+			// the loop appended the new rows: move them into place.
+			array_move(e.all_rows, all_rows_n, e.all_rows.length - all_rows_n,
+				all_ri)
+			if (child_ri != null)
+				array_move(child_rows, child_rows_n,
+					child_rows.length - child_rows_n, child_ri)
+			array_move(e.rows, rows_n, e.rows.length - rows_n, ri1)
 			update_row_index()
 			if (ev.input)
 				update_all_pos_fields()

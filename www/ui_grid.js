@@ -1672,8 +1672,6 @@ function init(id, e) {
 		if (e.is_picker) {
 			value = ui.set_value(id, ui.state(id), opt.value)
 			let ri = value ? e.row_index(value) : false
-			if (e.rows[ri] != value)
-				ri = false
 			if (e.focused_row != e.rows[ri])
 				e.focus_cell(ri, true)
 		}
