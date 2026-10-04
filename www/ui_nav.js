@@ -1770,10 +1770,6 @@ ui.nav = function(id, opt) {
 
 			range_val = return_arg
 
-			range_label = function(v, i, row) {
-				return e.build_cell(row, fld(cols_arr[i]))
-			}
-
 		}
 
 		idx.add_row = function(row) {
@@ -1788,7 +1784,8 @@ ui.nav = function(id, opt) {
 				if (!t1) {
 					t1 = fi == last_fi ? [] : map()
 					t0.set(v, t1)
-					t1.label = range_label(v, i, row)
+					if (range_label)
+						t1.label = range_label(v, i, row)
 				}
 				t0 = t1
 				i++
@@ -2862,10 +2859,7 @@ ui.nav = function(id, opt) {
 		// fire change events now that the state is fully updated.
 		e.end_set_state()
 
-		if (row_modified)
-			row_changed(row)
-		else if (!row.is_new)
-			row_unchanged(row)
+		update_changed_rows(row)
 
 		// save rowset if necessary & possible.
 		if (!invalid)
@@ -2905,8 +2899,7 @@ ui.nav = function(id, opt) {
 		}
 		e.set_row_state('modified', cells_modified(row), false)
 
-		if (!row.modified)
-			row_unchanged(row)
+		update_changed_rows(row)
 
 		if (val !== old_val)
 			e.invalidate_indexes(field)
@@ -3415,10 +3408,7 @@ ui.nav = function(id, opt) {
 			if (row.removed == !is_undelete)
 				return
 			row.removed = !is_undelete
-			if (row.removed)
-				row_changed(row)
-			else if (!row.modified)
-				row_unchanged(row)
+			update_changed_rows(row)
 			has_changed_marks = true
 		}
 
@@ -3486,8 +3476,7 @@ ui.nav = function(id, opt) {
 			// detach after the walks because they iterate child_rows. skip rows
 			// whose parent was dropped too: their subtree is detached with the
 			// parent.
-			let all_rows = e.all_rows
-			e.all_rows = all_rows.filter(row => !removed_rows.has(row))
+			remove_values(e.all_rows, row => removed_rows.has(row))
 			if (e.is_tree || e.is_grouped) {
 				let top_rows = set()
 				for (let row of removed_rows)
@@ -3496,9 +3485,7 @@ ui.nav = function(id, opt) {
 				detach_rows_from_tree(top_rows)
 				for (let row of top_rows)
 					row.child_rows = null
-			} else if (e.child_rows == all_rows) {
-				e.child_rows = e.all_rows
-			} else {
+			} else if (e.child_rows != e.all_rows) {
 				remove_values(e.child_rows, row => removed_rows.has(row))
 			}
 
@@ -3782,15 +3769,16 @@ ui.nav = function(id, opt) {
 				// we move rows around, we need to move them in e.all_rows too.
 				if (e.is_tree) {
 					// rebuild e.all_rows from the updated tree.
-					e.all_rows = []
+					let all_ri = 0
 					function add_child_rows(rows) {
 						for (let row of rows) {
-							e.all_rows.push(row)
+							e.all_rows[all_ri++] = row
 							if (row.child_rows)
 								add_child_rows(row.child_rows)
 						}
 					}
 					add_child_rows(e.child_rows)
+					e.all_rows.length = all_ri
 				} else {
 					if (e.is_grouped && e.param_vals) {
 						// move visible rows to the top of the unfiltered rows array
@@ -4048,6 +4036,14 @@ ui.nav = function(id, opt) {
 		e.changed_rows.delete(row)
 		if (!e.changed_rows.size)
 			e.changed_rows = null
+	}
+
+	// new, removed or modified: queued for saving.
+	function update_changed_rows(row) {
+		if (row.is_new || row.removed || row.modified)
+			row_changed(row)
+		else
+			row_unchanged(row)
 	}
 
 	function pack_changes() {
