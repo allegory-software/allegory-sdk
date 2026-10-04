@@ -1343,7 +1343,8 @@ ui.nav = function(id, opt) {
 			return false
 		if (in_general)
 			return true
-		if (e.order_by || e.is_filtered || !e.selected_rows.size)
+		if (e.order_by || e.is_filtered || e.is_grouped
+			|| !e.selected_rows.size)
 			return false
 		if (e.can_be_tree && !e.is_tree)
 			return false
@@ -1355,6 +1356,9 @@ ui.nav = function(id, opt) {
 			return S('cannot_move_records_sorted', 'Cannot move records while they are sorted')
 		if (e.is_filtered)
 			return S('cannot_move_records_filtered', 'Cannot move records while they are filtered')
+		if (e.is_grouped)
+			return S('cannot_move_rows_grouped',
+				'Cannot move rows while they are grouped')
 		if (e.can_be_tree && !e.is_tree)
 			return S('cannot_move_records_tree_is_flat',
 				'Cannot move records in a tree while the grid is not shown as a tree')
@@ -3626,6 +3630,8 @@ ui.nav = function(id, opt) {
 	}
 
 	function move_rows_state(focused_ri, selected_ri, ev) {
+
+		assert(!e.is_grouped)
 
 		let move_ri1 = min(focused_ri, selected_ri)
 		let move_ri2 = max(focused_ri, selected_ri)

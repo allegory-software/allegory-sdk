@@ -328,6 +328,9 @@ Order. The nav uses custom order (pos_col) only while no sort and no filter
 are set. With a sort or a filter it uses sorted order, where hidden rows are
 fine.
 
+The nav prohibits moving rows while grouped. It rejects direct move
+calls before changing arrays.
+
 In flat mode, child_rows and all_rows are initially the same array. The nav
 copies all_rows into child_rows for the first sort. It reuses that copy for
 explicit sorts and pos_col ordering, and rebuilds visible rows from it.
