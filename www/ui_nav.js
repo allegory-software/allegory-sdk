@@ -3697,6 +3697,18 @@ ui.nav = function(id, opt) {
 			ri2: ri2,
 		}
 
+		state.can_drop = function(insert_ri, parent_row) {
+			if (insert_ri < state.ri1 || insert_ri > state.ri2)
+				return false
+			let is_parent_change = parent_row != state.parent_row
+			if (is_parent_change && !e.can_change_parent)
+				return false
+			if (is_parent_change && parent_row
+				&& !e.row_can_have_children(parent_row))
+				return false
+			return is_parent_change || is_client_nav() || e.pos_field != null
+		}
+
 		state.finish = function(insert_ri, parent_row) {
 
 			let next_row = e.rows[insert_ri]

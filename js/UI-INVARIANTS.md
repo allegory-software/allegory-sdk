@@ -337,8 +337,12 @@ save array order.
 
 For tree drop targets, row_can_have_children() rejects rows marked for
 deletion, rows with no loaded id, and rows with can_have_children false.
-The grid chooses allowed destinations, enforcing the drop range and
-can_change_parent. The nav assumes an allowed destination at completion.
+The grid chooses allowed destinations through
+state.can_drop(insert_ri, parent_row). The helper checks the drop range,
+can_change_parent, and parent eligibility when changing parent. For a
+same-parent move, it requires client array order or pos_col. The helper
+does not repeat drag-start permission checks. The nav assumes an allowed
+destination at completion.
 
 In flat mode, child_rows and all_rows are initially the same array. The nav
 copies all_rows into child_rows for the first sort. It reuses that copy for
