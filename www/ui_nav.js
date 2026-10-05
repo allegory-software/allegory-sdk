@@ -3780,18 +3780,6 @@ ui.nav = function(id, opt) {
 					add_child_rows(e.child_rows)
 					e.all_rows.length = all_ri
 				} else {
-					if (e.is_grouped && e.param_vals) {
-						// move visible rows to the top of the unfiltered rows array
-						// so that move_ri1, move_ri2 and insert_ri point to the same rows
-						// in both unfiltered and filtered arrays.
-						let r1 = []
-						let r2 = []
-						for (let ri = 0; ri < e.all_rows.length; ri++) {
-							let visible = e.is_row_visible(e.all_rows[ri])
-							;(visible ? r1 : r2).push(e.all_rows[ri])
-						}
-						e.all_rows = [].concat(r1, r2)
-					}
 					if (!e.is_grouped && e.child_rows != e.all_rows) {
 						array_move(e.child_rows, move_ri1, move_n, insert_ri)
 						array_set(e.all_rows, e.child_rows)

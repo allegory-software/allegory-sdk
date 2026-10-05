@@ -470,6 +470,151 @@ all_field_types.to_input = function(v) {
 	return this.to_text(v)
 }
 
+//// COLUMN STORAGE ----------------------------------------------------------
+
+// how a nav stores one column of values, by row slot ri:
+//   load_col(vals, cap) -> col   vals: the column as the server sends it.
+//   grow_col(col, cap) -> col    a column with room for cap rows.
+//   get(col, ri) -> v
+//   set(col, ri, v)
+//   write_sort_keys(col, ris, n, field, keys0, keys1) -> word_n
+//     radix sort keys of the rows ris[0..n), as 1 or 2 Uint32 words per row:
+//     the least significant word in keys0, the other one in keys1.
+//   compare_cell(col, ri, v, field) -> -1|0|1   in sort key order.
+// null comes first in sort key order.
+
+function compare_vals(v1, v2) {
+	return v1 !== v2 ? (v1 < v2 ? -1 : 1) : 0
+}
+
+function grow_typed_col(col, cap) {
+	let col1 = new col.constructor(cap)
+	col1.set(col)
+	return col1
+}
+
+let array_storage = {
+	load_col: (vals, cap) => vals,
+	grow_col: (col, cap) => col, // a JS array grows on its own
+	get     : (col, ri) => col[ri],
+	set     : (col, ri, v) => { col[ri] = v },
+	// key: the value's rank among the distinct values sorted by the field's
+	// compare_vals; 0 for null.
+	write_sort_keys: function(col, ris, n, field, keys0) {
+		let ranks = map() // {v -> rank}
+		let vals = [] // distinct non-null values
+		for (let i = 0; i < n; i++) {
+			let v = col[ris[i]]
+			if (v != null && !ranks.has(v)) {
+				ranks.set(v, 0)
+				vals.push(v)
+			}
+		}
+		let compare = field.compare_vals
+		vals.sort(compare ? (v1, v2) => compare(v1, v2, field) : compare_vals)
+		for (let rank = 0; rank < vals.length; rank++)
+			ranks.set(vals[rank], rank + 1)
+		for (let i = 0; i < n; i++) {
+			let v = col[ris[i]]
+			keys0[i] = v == null ? 0 : ranks.get(v)
+		}
+		return 1
+	},
+	compare_cell: function(col, ri, v, field) {
+		let v1 = col[ri]
+		if (v1 == null)
+			return v == null ? 0 : -1
+		if (v == null)
+			return 1
+		return (field.compare_vals ?? compare_vals)(v1, v, field)
+	},
+}
+
+// null is NaN: JSON numbers are never NaN.
+let f64_storage = {
+	load_col: function(vals, cap) {
+		let col = new Float64Array(cap)
+		for (let ri = 0; ri < vals.length; ri++) {
+			let v = vals[ri]
+			col[ri] = v == null ? NaN : v
+		}
+		return col
+	},
+	grow_col: grow_typed_col,
+	get: function(col, ri) {
+		let v = col[ri]
+		return v !== v ? null : v
+	},
+	set: function(col, ri, v) {
+		col[ri] = v == null ? NaN : v
+	},
+	// key: the double's bits made unsigned-sortable (negative: flip all bits;
+	// positive: flip the sign bit); 0 for null.
+	write_sort_keys: function(col, ris, n, field, keys0, keys1) {
+		let bits = new Uint32Array(col.buffer, col.byteOffset, col.length * 2)
+		for (let i = 0; i < n; i++) {
+			let ri = ris[i]
+			let lo_word = bits[2 * ri] // little endian: low word first
+			let hi_word = bits[2 * ri + 1]
+			if (col[ri] !== col[ri]) {
+				keys0[i] = 0
+				keys1[i] = 0
+			} else if (hi_word & 0x80000000) {
+				keys0[i] = ~lo_word
+				keys1[i] = ~hi_word
+			} else {
+				keys0[i] = lo_word
+				keys1[i] = hi_word | 0x80000000
+			}
+		}
+		return 2
+	},
+	compare_cell: function(col, ri, v, field) {
+		let v1 = col[ri]
+		if (v1 !== v1)
+			return v == null ? 0 : -1
+		if (v == null)
+			return 1
+		return compare_vals(v1, v)
+	},
+}
+
+// 0: false, 1: true, 2: null.
+let bool_storage = {
+	load_col: function(vals, cap) {
+		let col = new Uint8Array(cap)
+		for (let ri = 0; ri < vals.length; ri++) {
+			let v = vals[ri]
+			col[ri] = v == null ? 2 : v ? 1 : 0
+		}
+		return col
+	},
+	grow_col: grow_typed_col,
+	get: function(col, ri) {
+		let v = col[ri]
+		return v == 2 ? null : v == 1
+	},
+	set: function(col, ri, v) {
+		col[ri] = v == null ? 2 : v ? 1 : 0
+	},
+	// key: 0 for null, 1 for false, 2 for true.
+	write_sort_keys: function(col, ris, n, field, keys0) {
+		for (let i = 0; i < n; i++) {
+			let v = col[ris[i]]
+			keys0[i] = v == 2 ? 0 : v + 1
+		}
+		return 1
+	},
+	compare_cell: function(col, ri, v, field) {
+		let v1 = col[ri]
+		let key1 = v1 == 2 ? 0 : v1 + 1
+		let key2 = v == null ? 0 : v ? 2 : 1
+		return compare_vals(key1, key2)
+	},
+}
+
+all_field_types.col_storage = array_storage
+
 //// TEXT --------------------------------------------------------------------
 
 // the default type: all its behavior comes from all_field_types.
@@ -481,7 +626,8 @@ field_types.password = {input_type: 'password', control: 'password_input'}
 
 //// NUMBER ------------------------------------------------------------------
 
-let number = {align: 'right', decimals: 0, scale: 1, is_number: true}
+let number = {align: 'right', decimals: 0, scale: 1, is_number: true,
+	col_storage: f64_storage}
 field_types.number = number
 
 number.from_input = function(s) {
@@ -574,6 +720,7 @@ let date = {
 	min: parse_date('1000-01-01 00:00:00', 'SQL'),
 	max: parse_date('9999-12-31 23:59:59', 'SQL'),
 	from_input: function(s) { return parse_date(s, null, true, this.precision) },
+	col_storage: f64_storage,
 }
 field_types.date = date
 
@@ -622,6 +769,7 @@ let td = {
 	align: 'center',
 	is_timeofday: true,
 	from_input: function(s) { return parse_timeofday(s, true, this.precision) },
+	col_storage: f64_storage,
 }
 field_types.timeofday = td
 
@@ -647,7 +795,7 @@ add_scalar_rules('timeofday')
 
 //// DURATION ----------------------------------------------------------------
 
-let d = {align: 'right', is_duration: true}
+let d = {align: 'right', is_duration: true, col_storage: f64_storage}
 field_types.duration = d
 
 d.to_text = function(v) {
@@ -660,7 +808,8 @@ d.to_text = function(v) {
 // no editor: the value is toggled by click and space, and the cell keeps
 // building itself while an edit is carried through it.
 let bool = {align: 'center', min_w: 2, w: 2, is_bool: true,
-	builds_text: false, has_editor: false, control: 'checkbox'}
+	builds_text: false, has_editor: false, control: 'checkbox',
+	col_storage: bool_storage}
 field_types.bool = bool
 
 ui.add_validation_rule({
@@ -685,7 +834,8 @@ enm.enum_items = function() {
 	return this.enum_values
 }
 
-let enum_list = {is_values: true, control: 'enum_toggle'}
+let enum_list = {is_values: true, control: 'enum_toggle',
+	col_storage: f64_storage}
 field_types.enum_list = enum_list
 
 enum_list.to_text = function(v) {

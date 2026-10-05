@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base href="../../../www/">
+<script>
+// errors end the run instead of leaving the runner to time out.
+function bench_post(path, data) {
+	return fetch('/'+path, {
+		method: 'POST',
+		headers: {'content-type': 'application/json'},
+		body: JSON.stringify(data),
+	})
+}
+addEventListener('error', ev => bench_post('bench-done',
+	{error: `${ev.message} at ${ev.filename}:${ev.lineno}:${ev.colno}`}))
+</script>
+<script src="glue.js" global></script>
+<script src="ui.js"></script>
+<script src="ui_field.js"></script>
+<script src="ui_nav2.js"></script>
+<script src="/js/tests/nav-bench/bench_lib.js"></script>
+<script src="/js/tests/nav-bench/nav2_bench.js"></script>
+</head>
+<body></body>
+</html>
