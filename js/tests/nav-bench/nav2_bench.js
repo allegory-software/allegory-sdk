@@ -1,9 +1,10 @@
 "use strict"
 ;(function() {
 
-const {assert, noop} = glue
+const {assert, assign, noop} = glue
 const {
-	row_n, rand_int, make_fields, make_row, make_flat_rows, bench,
+	row_n, rand_int, str1_vals, make_fields, make_row, make_flat_rows,
+	make_tree, bench,
 } = bench_lib
 
 ui.main = noop
@@ -11,13 +12,26 @@ ui.main = noop
 /// data ---------------------------------------------------------------------
 
 // the same rows as nav_bench.js, sent one array per column.
-function make_flat_rowset() {
+function make_rowset(rows, attrs) {
 	let fields = make_fields()
 	let col_vals = fields.map(() => [])
-	for (let row of make_flat_rows())
+	for (let row of rows)
 		for (let fi = 0; fi < fields.length; fi++)
 			col_vals[fi].push(row[fi])
-	return {fields: fields, col_vals: col_vals, pk: 'id'}
+	return assign({fields: fields, col_vals: col_vals, pk: 'id'}, attrs)
+}
+
+function make_flat_rowset() {
+	return make_rowset(make_flat_rows(), {pos_col: 'pos'})
+}
+
+// a flat pos nav's rows have strictly increasing pos in stored order.
+function check_pos_order(nav) {
+	let pos_fi = nav.pos_field.fi
+	for (let i = 1; i < nav.row_n; i++)
+		assert(nav.cell_val(nav.base_ris[i], pos_fi)
+			> nav.cell_val(nav.base_ris[i - 1], pos_fi),
+			'pos: out of order at ', i)
 }
 
 /// checks -------------------------------------------------------------------
@@ -295,11 +309,269 @@ async function bench_flat() {
 	nav.revert_changes()
 	assert(nav.changed_n == 0 && nav.row_n == row_n
 		&& nav.lookup('id', [5]) == id5_ri, 'revert: new rows left')
+
+	await bench_group_by(nav)
+	await bench_move(nav)
+}
+
+async function bench_move(nav) {
+
+	await bench('flat: move 1000 rows top to bottom',
+		() => Array.from(nav.base_ris.subarray(0, 1000)),
+		ris => nav.move_rows(ris, null, 0xFFFFFFFF),
+		(ok, ris) => {
+			assert(ok && nav.base_ris[nav.row_n - 1] == ris[999],
+				'move: rows not moved')
+			check_pos_order(nav)
+		})
+
+	// 60 single-row inserts at one spot run out of doubles between two
+	// neighbors, so the list gets renumbered; the order holds throughout.
+	let at_ri = nav.base_ris[nav.row_n >> 1]
+	for (let i = 0; i < 60; i++)
+		nav.insert_rows([make_row(null, null, null)], at_ri)
+	check_pos_order(nav)
+	nav.revert_changes()
+	check_pos_order(nav)
+}
+
+// each data row under the group holding its str2, under the group holding
+// its str1; one top group per str1 value.
+function check_groups(nav) {
+	let str1_fi = nav.all_fields_map.str1.fi
+	let str2_fi = nav.all_fields_map.str2.fi
+	let top_n = 0 // top groups
+	for (let i = 0; i < nav.visible_n; i++) {
+		let ri = nav.visible_ris[i]
+		let p = nav.parent_ri[ri]
+		if (p == 0xFFFFFFFF) {
+			top_n++
+		} else if (nav.depth[ri] == 2) {
+			assert(nav.cell_val(p, str2_fi) == nav.cell_val(ri, str2_fi)
+				&& nav.cell_val(nav.parent_ri[p], str1_fi)
+					== nav.cell_val(ri, str1_fi), 'group by: row in wrong group')
+		}
+	}
+	assert(top_n == str1_vals.length, 'group by: wrong top group count')
+}
+
+async function bench_group_by(nav) {
+
+	let group_by = 'str1 > str2'
+
+	await bench('flat: group by str1 > str2',
+		() => nav.set_group_by(null),
+		() => nav.set_group_by(group_by),
+		() => check_groups(nav))
+
+	let group_n = nav.group_ris.length
+
+	await bench('flat: collapse all groups',
+		() => nav.set_collapsed(null, false, true),
+		() => nav.set_collapsed(null, true, true),
+		() => assert(nav.visible_n == str1_vals.length,
+			'collapse all: rows still visible'))
+
+	await bench('flat: expand all groups',
+		() => nav.set_collapsed(null, true, true),
+		() => nav.set_collapsed(null, false, true),
+		() => assert(nav.visible_n == nav.row_n + group_n,
+			'expand all: rows still hidden'))
+
+	// insert into a group: the new row gets the group's key cells; key cells
+	// can't be edited; removing a group row marks the rows under it.
+	let str1_fi = nav.all_fields_map.str1.fi
+	let str2_fi = nav.all_fields_map.str2.fi
+	// a data row: two levels of groups put data rows at depth 2.
+	let at_i = nav.visible_n >> 1 // index into visible_ris
+	while (nav.depth[nav.visible_ris[at_i]] != 2)
+		at_i++
+	let at_ri = nav.visible_ris[at_i]
+	assert(!nav.insert_rows([null], nav.parent_ri[at_ri]).length,
+		'insert at a group row: not refused')
+	let [new_ri] = nav.insert_rows([make_row(null, null, null)], at_ri)
+	assert(nav.parent_ri[new_ri] == nav.parent_ri[at_ri]
+		&& nav.cell_val(new_ri, str2_fi) == nav.cell_val(at_ri, str2_fi),
+		'insert in group: wrong group or keys')
+	nav.set_cell_val(new_ri, str1_fi, 'x')
+	assert(nav.cell_val(new_ri, str1_fi) != 'x', 'group key edited')
+	check_groups(nav)
+	// the group holds the new row, which is dropped, not marked.
+	let group_ri = nav.parent_ri[at_ri]
+	let child_n = nav.desc_count[group_ri]
+	nav.remove_rows([group_ri])
+	assert(nav.changed_n == child_n - 1, 'remove group: rows not marked')
+	nav.revert_changes()
+	assert(nav.changed_n == 0, 'revert: changes left')
+
+	// group by is refused while a key column has an edited cell, and only
+	// then.
+	nav.set_group_by(null)
+	let ri = nav.visible_ris[0]
+	nav.set_cell_val(ri, str1_fi, 'x')
+	assert(!nav.set_group_by(group_by) && !nav.is_grouped,
+		'group by with an edited key cell: not refused')
+	assert(nav.set_group_by('str2') && nav.is_grouped,
+		'group by with edits in other columns: refused')
+	nav.set_group_by(null)
+	nav.revert_changes()
+
+	await bench('flat: ungroup',
+		() => nav.set_group_by(group_by),
+		() => nav.set_group_by(null),
+		() => assert(!nav.is_grouped && nav.visible_n == nav.row_n
+			&& nav.parent_ri[nav.visible_ris[0]] == 0xFFFFFFFF,
+			'ungroup: groups left'))
+
+	// a ranged level: num1 (0..999999) in buckets of 100000, plus null.
+	nav.set_group_by('num1/100000')
+	nav.set_collapsed(null, true, true)
+	assert(nav.visible_n == 11, 'ranged group by: wrong bucket count')
+	nav.set_group_by(null)
+}
+
+// every visible row one level under its parent, the parent shown before it,
+// and its parent_ri the row holding its parent_id.
+function check_tree(nav) {
+	let id_fi = nav.id_field.fi
+	let pid_fi = nav.parent_field.fi
+	for (let i = 0; i < nav.visible_n; i++) {
+		let ri = nav.visible_ris[i]
+		let p = nav.parent_ri[ri]
+		if (p == 0xFFFFFFFF) {
+			assert(nav.depth[ri] == 0, 'tree: root not at depth 0')
+		} else {
+			assert(nav.depth[ri] == nav.depth[p] + 1
+				&& nav.visible_i[p] < i
+				&& nav.cell_val(p, id_fi) == nav.cell_val(ri, pid_fi),
+				'tree: wrong parent at ', i)
+		}
+	}
+}
+
+async function bench_tree() {
+
+	let nav, tree
+
+	await bench('tree: init',
+		() => {
+			tree = make_tree()
+			return make_rowset(tree.rows,
+				{id_col: 'id', parent_col: 'parent_id'})
+		},
+		rs => {
+			nav = ui.nav2({can_change_parent: true})
+			nav.load(rs)
+		},
+		() => assert(nav.is_tree && nav.visible_n == row_n,
+			'init: not a tree or wrong row count'))
+
+	check_tree(nav)
+
+	await bench('tree: collapse all',
+		() => nav.set_collapsed(null, false, true),
+		() => nav.set_collapsed(null, true, true),
+		() => assert(nav.visible_n == tree.root_n,
+			'collapse all: rows still visible'))
+
+	await bench('tree: expand all',
+		() => nav.set_collapsed(null, true, true),
+		() => nav.set_collapsed(null, false, true),
+		() => assert(nav.visible_n == nav.row_n,
+			'expand all: rows still hidden'))
+
+	let root_ri = nav.lookup('id', [tree.largest_root_id])
+	let desc_n = tree.largest_root_desc_n
+	assert(nav.desc_count[root_ri] == desc_n, 'tree: wrong descendant count')
+
+	await bench(`tree: collapse root (${desc_n} desc)`,
+		() => nav.set_collapsed(root_ri, false),
+		() => nav.set_collapsed(root_ri, true),
+		() => assert(nav.visible_n == nav.row_n - desc_n,
+			'collapse: descendants still visible'))
+
+	await bench(`tree: expand root (${desc_n} desc)`,
+		() => nav.set_collapsed(root_ri, true),
+		() => nav.set_collapsed(root_ri, false),
+		() => assert(nav.visible_n == nav.row_n,
+			'expand: descendants still hidden'))
+
+	await bench('tree: sort by num1',
+		() => nav.set_order_by(null),
+		() => nav.set_order_by('num1'),
+		() => check_tree(nav))
+
+	await bench('tree: unsort',
+		() => nav.set_order_by('num1'),
+		() => nav.set_order_by(null),
+		() => check_tree(nav))
+
+	let num2_vals = nav.col_vals[nav.all_fields_map.num2.fi]
+	function num2_in_range(ri) {
+		let v = num2_vals[ri]
+		return v >= 0 && v <= 500000
+	}
+
+	await bench('tree: filter num2 0..500000',
+		() => nav.set_filter(null),
+		() => nav.set_filter(num2_in_range),
+		() => {
+			assert(nav.visible_n > 0 && nav.visible_n < nav.row_n,
+				'filter: no effect')
+			check_tree(nav)
+		})
+
+	await bench('tree: unfilter',
+		() => nav.set_filter(num2_in_range),
+		() => nav.set_filter(null),
+		() => assert(nav.visible_n == nav.row_n, 'unfilter: rows hidden'))
+
+	await bench(`tree: remove root subtree (mark)`,
+		() => {
+			nav.remove_rows([root_ri], 'undelete')
+			return nav.changed_n
+		},
+		() => nav.remove_rows([root_ri]),
+		(ret, changed_n) => assert(nav.changed_n == changed_n + desc_n + 1,
+			'remove subtree: rows not marked'))
+	nav.remove_rows([root_ri], 'undelete')
+	assert(nav.changed_n == 0, 'undelete subtree: rows still marked')
+
+	// flat view, and an insert next to a child, which gets its parent.
+	nav.set_flat(true)
+	assert(!nav.is_tree && nav.visible_n == nav.row_n
+		&& nav.depth[nav.visible_ris[nav.visible_n - 1]] == 0, 'flat view')
+	nav.set_flat(false)
+	check_tree(nav)
+	let child_ri = nav.tree_ris[nav.tree_i[root_ri] + 1]
+	let [new_ri] = nav.insert_rows([make_row(null, null, null)], child_ri)
+	assert(nav.parent_ri[new_ri] == root_ri, 'insert: wrong parent')
+	check_tree(nav)
+
+	// a parent change needs no pos_col: move child_ri between two roots.
+	let other_root_ri = nav.lookup('id', [tree.largest_root_id == 1 ? 2 : 1])
+	await bench('tree: move a subtree to another parent',
+		() => nav.parent_ri[child_ri] == root_ri ? other_root_ri : root_ri,
+		parent_ri => nav.move_rows([child_ri], null, parent_ri),
+		(ok, parent_ri) => {
+			assert(ok && nav.parent_ri[child_ri] == parent_ri,
+				'move: wrong parent')
+			check_tree(nav)
+		})
+	// reverting the move puts the subtree back under its loaded parent.
+	nav.revert_changes()
+	assert(nav.parent_ri[child_ri] == root_ri, 'revert move: wrong parent')
+	check_tree(nav)
+
+	let desc_ri = nav.tree_ris[nav.tree_i[root_ri] + 1] // under root_ri now
+	assert(!nav.move_rows([root_ri], null, desc_ri),
+		'move into own subtree: not refused')
 }
 
 async function run() {
 	assert(row_n >= 1000, 'rows must be at least 1000')
 	await bench_flat()
+	await bench_tree()
 }
 
 addEventListener('load', () => run().then(
