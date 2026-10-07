@@ -4,7 +4,9 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 	Properties to set:
-		fields           : {field1, ...} field list (required)
+		fields           : [field1, ...] fields (required)
+		rows             : [row1,...]    values: rows[ri][fi] = val
+		col_vals         : [vals1,...]   values: col_vals[fi][ri] = val
 		pk               : 'col1 ...'    primary key (required)
 		uks              : ['col1 ...',] unique keys (to validate on the client)
 		field_attrs      : {col->field}  extra field attributes
@@ -34,12 +36,13 @@
 		internal         : t             cannot be made visible
 		hidden           : t             not visible by default
 		readonly         : f             cannot be changed
+		nosave           : f             client-side; should not be saved
+		not_null         : t             can't be null
 		null_text        : ''            text for null value
 		align            : 'left'|'right'|'center'   cell alignment
 		enum_values      : ['foo',...]   enum values
 		enum_labels      : {v->label}    enum labels in current language
 		enum_info        : {v->info}     enum info in current language
-		not_null         : t             can't be null
 		min              : n             min allowed value
 		max              : n             max allowed value
 		decimals         : n             number of decimals
@@ -75,6 +78,12 @@
 		update_row(vals)
 		delete_row(vals)
 		load_row(vals)
+		reserve_ids(n) -> {id1,...}    optional; single auto-inc pk only
+
+	A rowset with reserve_ids() gets new rows with the pk already in vals: an
+	id that reserve_ids() returned. insert_row() must treat an existing row
+	with that id as the same insert sent again, whose response was lost: it
+	inserts nothing, and load_row() loads the existing row back.
 
 	Methods to call:
 		rowset_changed(rowset_name)
@@ -264,6 +273,7 @@ function virtual_rowset(init, ...)
 			can_remove_rows = rs.can_remove_rows,
 			can_change_rows = rs.can_change_rows,
 			can_move_rows = rs.can_move_rows,
+			reserves_ids = rs.reserve_ids and true or nil,
 			fields = rs.client_fields,
 			pk = rs.pk,
 			pos_col = rs.pos_col,
@@ -555,6 +565,16 @@ function virtual_rowset(init, ...)
 			end
 		end
 		return rs:apply_changes(post.changes, post.update_id)
+	end
+
+	--the client asks for ids before its first save of new rows, so that a
+	--resent insert carries the same id and the backend can recognize it.
+	function rs:exec_reserve_ids(params, post)
+		rs:prepare()
+		checkfound(rs.reserve_ids, 'command not found')
+		local n = checkarg(tonumber(post.n))
+		checkarg(n >= 1 and n <= 1000 and n == floor(n))
+		return {ids = rs:reserve_ids(n)}
 	end
 
 	init(rs, ...)

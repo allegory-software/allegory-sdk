@@ -34,6 +34,11 @@ WRITING
 	Saving runs in one write transaction with a child transaction per changed
 	row, so a failed row rolls back alone.
 
+	When the write table's pk is its auto-inc col alone, the client reserves
+	ids before saving new rows (reserve_ids() advances the table's sequence),
+	and a new row whose id is already in the table was inserted before: the
+	insert is skipped.
+
 ]]
 
 require'rowset'
@@ -114,8 +119,11 @@ function scan_rowset(...)
 		local key_names = {}  --{NAME,...} outputs holding write_table's pk
 		local key_cols  = {}  --{COL,...}  the pk cols themselves
 		local seq_name        --output holding write_table's auto-inc col
+		local seq_col         --write_table's auto-inc col
+		local is_seq_pk       --the auto-inc col is the whole pk: ids reservable
 
 		local insert_row, update_row, delete_row, load_row --fw. decl.
+		local reserve_ids --fw. decl.
 
 		--building a scan resolves its table schema, which needs a transaction,
 		--so this runs on the first request rather than at load time.
@@ -162,9 +170,13 @@ function scan_rowset(...)
 				end
 				local seq_field = schema.autoinc_field
 				seq_name = seq_field and name_of_col[seq_field.col]
+				seq_col = seq_field and seq_field.col
+				is_seq_pk = seq_name ~= nil and #key_names == 1
+					and key_names[1] == seq_name
 				rs.insert_row = insert_row
 				rs.update_row = update_row
 				rs.delete_row = delete_row
+				if is_seq_pk then rs.reserve_ids = reserve_ids end
 			end
 
 			--so the client shows and picks a name instead of a raw fk value.
@@ -250,11 +262,29 @@ function scan_rowset(...)
 
 		--[[local]] function insert_row(self, vals)
 			rowset_db(rs):atomic('w', function()
-				local seq = rowset_db(rs):insert(write_table, '{}',
-					written_vals(vals))
+				local db = rowset_db(rs)
+				--a supplied id comes from reserve_ids(): a row with it is this
+				--client's earlier insert, whose response was lost.
+				local id = is_seq_pk and vals[seq_name] or nil
+				if id ~= nil and db:exists(write_table, id) then return end
+				local t = written_vals(vals)
+				--written_vals() leaves the pk col out when it's read-only.
+				if id ~= nil then t[seq_col] = id end
+				local seq = db:insert(write_table, '{}', t)
 				--load_row() looks the row up by pk, so put a minted key in vals.
 				if seq and seq_name then vals[seq_name] = seq end
 				self:table_changed(write_table)
+			end)
+		end
+
+		--db:seq() advances the sequence by n, so no auto-inc insert takes the
+		--returned ids.
+		--[[local]] function reserve_ids(self, n)
+			return rowset_db(rs):atomic('w', function()
+				local first_id = rowset_db(rs):seq(write_table, n)
+				local ids = {}
+				for i = 1, n do ids[i] = first_id + i - 1 end
+				return ids
 			end)
 		end
 

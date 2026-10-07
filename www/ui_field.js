@@ -56,6 +56,9 @@ Field attributes:
 		slider_scale_base : marker scale base (10).
 		slider_scales  : marker scale multiples ([1, 2, 2.5, 5]).
 
+
+NOTE: use obj() instead of {} for maps to prevent map['constructor'].
+
 */
 
 (function () {
@@ -64,9 +67,9 @@ const ui = window.ui
 
 const {
 	assign, assign_opt, noop, display_name, words, set,
-	num, isnum, isstr, isbool, isarray, isobj, str, dec, repl, utf8_len,
-	attr, assert, obj, map, empty_array, return_true,
-	warn,
+	num, isnum, isstr, isbool, isarray, isobj, str, dec, repl, utf8_len, floor,
+	assert, obj, map, empty_array, empty, return_true,
+	warn, warn_if,
 	format_kbytes, format_kcount, format_date, parse_date,
 	parse_timeofday, format_timeofday, format_duration, format_timeago, S,
 } = glue
@@ -127,7 +130,7 @@ ui.create_validator = function(e, own_rules = empty_array, no_global_rules) {
 			'validation rule require cycle: {0}', rule.name)
 		if (checked.get(rule))
 			return true
-		if (!(rule.applies && rule.applies(e)))
+		if (rule.applies && !rule.applies(e))
 			return
 		checked.set(rule, false) // means checking...
 		rule.requires = words(rule.requires || '')
@@ -160,6 +163,19 @@ ui.create_validator = function(e, own_rules = empty_array, no_global_rules) {
 			add_global_rule(rule_name)
 	for (let rule of own_rules)
 		add_rule(rule)
+	for (let rule of rules) {
+		let result = obj()
+		result.checked = false
+		result.failed = false
+		result.rule = rule
+		result.error = null
+		result.rule_text = null
+		results.push(result)
+	}
+	let required_results = rules.map(rule => rule.requires.length
+		? rule.requires.map(name =>
+			results[rules.indexOf(ui.validation_rules[name])])
+		: empty_array)
 
 	validator.parse = function(v) {
 		if (v == null) return null
@@ -168,18 +184,19 @@ ui.create_validator = function(e, own_rules = empty_array, no_global_rules) {
 	}
 
 	validator.validate = function(v, with_messages) {
-		let has_messages = with_messages != false
+		let first_failed_result = null
 		let parse_failed = false
-		next_rule: for (let rule of rules) {
-			if (rule._failed)
-				continue
-			if (rule._checked)
-				continue
+		next_rule: for (let i = 0, n = results.length; i < n; i++) {
+			let result = results[i]
+			let rule = result.rule
+			result.checked = false
+			result.failed = false
+			result.error = null
+			result.rule_text = null
 			if (v == null && !rule.check_null)
 				continue
-			for (let req_rule_name of rule.requires) {
-				let req_rule = ui.validation_rules[req_rule_name]
-				if (!req_rule._checked || req_rule._failed)
+			for (let req_result of required_results[i]) {
+				if (!req_result?.checked || req_result.failed)
 					continue next_rule
 			}
 			let failed
@@ -190,28 +207,21 @@ ui.create_validator = function(e, own_rules = empty_array, no_global_rules) {
 			} else {
 				failed = !rule.validate(e, v)
 			}
-			rule._checked = true
-			rule._failed = failed
+			result.checked = true
+			result.failed = failed
+			if (failed && !first_failed_result)
+				first_failed_result = result
 		}
-		results.length = rules.length
-		this.failed = false
-		this.first_failed_result = null
-		for (let i = 0, n = rules.length; i < n; i++) {
-			let rule = rules[i]
-			let result = attr(results, i)
-			result.checked = rule._checked || false
-			result.failed  = rule._failed || false
-			result.rule    = rule
-			result.error   = has_messages ? rule.error(e, v) : null
-			result.rule_text = has_messages ? rule.rule(e) : null
-			if (rule._failed && !this.failed) {
-				this.failed = true
-				this.first_failed_result = result
+		this.failed = !!first_failed_result
+		this.first_failed_result = first_failed_result
+		let has_messages = with_messages != false
+			&& (with_messages != 'failed' || this.failed)
+		if (has_messages)
+			for (let result of results) {
+				let rule = result.rule
+				result.error = rule.error(e, v)
+				result.rule_text = rule.rule(e)
 			}
-			// clean up scratch pad.
-			rule._checked = null
-			rule._failed  = null
-		}
 		this.parse_failed = parse_failed
 		this.value = repl(v, undefined, null)
 		return !this.failed
@@ -436,40 +446,6 @@ ui.add_validation_rule({
 		'{0} must contain only known values', e.label),
 })
 
-//// ALL FIELD TYPES ---------------------------------------------------------
-
-let field_types      = ui.field_types      = {} // {TYPE->{K: V}}
-let all_field_types  = ui.all_field_types  = {} // {K: V}
-assign(all_field_types, {
-	type: 'text',
-	control: 'input',
-	build_input: ui.build_input,
-	default: null,
-	w: 8,
-	min_w: 2,
-	max_w: 154,
-	align: 'left',
-	not_null: false,
-	sortable: true,
-	movable: true,
-	groupable: true,
-	maxlen: 256,
-	null_text : S('null_text', ''),
-	empty_text: S('empty_text', 'empty text'),
-	builds_text: true,
-	has_editor: true,
-})
-
-all_field_types.to_text = function(v) {
-	return String(v)
-}
-
-// to_input(v) -> s, inverse of from_input(s) -> v. filesize, count and date
-// override it: from_input() can't read back a magnitude suffix or a timeago text.
-all_field_types.to_input = function(v) {
-	return this.to_text(v)
-}
-
 //// COLUMN STORAGE ----------------------------------------------------------
 
 // how a nav stores one column of values, by row slot ri:
@@ -481,6 +457,9 @@ all_field_types.to_input = function(v) {
 //     radix sort keys of the rows ris[0..n), as 1 or 2 Uint32 words per row:
 //     the least significant word in keys0, the other one in keys1.
 //   compare_cell(col, ri, v, field) -> -1|0|1   in sort key order.
+//   copy_changed(col, ris, src_col, src_is, n, field, changed_ks) -> count
+//     for k in [0..n): where src_col[src_is[k]] differs from col[ris[k]],
+//     copy it there and put k in changed_ks. src_col is made by load_col().
 // null comes first in sort key order.
 
 function compare_vals(v1, v2) {
@@ -491,6 +470,25 @@ function grow_typed_col(col, cap) {
 	let col1 = new col.constructor(cap)
 	col1.set(col)
 	return col1
+}
+
+// two NaNs are two f64 nulls: the same value. for other values the NaN test
+// is always false, so this function serves all three storages.
+function copy_changed(col, ris, src_col, src_is, n, field, changed_ks) {
+	let compare = field.compare_vals
+	let changed_n = 0
+	for (let k = 0; k < n; k++) {
+		let ri = ris[k]
+		let v0 = col[ri]
+		let v = src_col[src_is[k]]
+		if (compare ? compare(v0, v, field)
+			: v0 !== v && (v0 === v0 || v === v)
+		) {
+			col[ri] = v
+			changed_ks[changed_n++] = k
+		}
+	}
+	return changed_n
 }
 
 let array_storage = {
@@ -512,8 +510,17 @@ let array_storage = {
 		}
 		let compare = field.compare_vals
 		vals.sort(compare ? (v1, v2) => compare(v1, v2, field) : compare_vals)
-		for (let rank = 0; rank < vals.length; rank++)
-			ranks.set(vals[rank], rank + 1)
+		if (compare) {
+			let rank = 0
+			for (let i = 0; i < vals.length; i++) {
+				if (i == 0 || compare(vals[i - 1], vals[i], field) != 0)
+					rank++
+				ranks.set(vals[i], rank)
+			}
+		} else {
+			for (let rank = 0; rank < vals.length; rank++)
+				ranks.set(vals[rank], rank + 1)
+		}
 		for (let i = 0; i < n; i++) {
 			let v = col[ris[i]]
 			keys0[i] = v == null ? 0 : ranks.get(v)
@@ -528,6 +535,7 @@ let array_storage = {
 			return 1
 		return (field.compare_vals ?? compare_vals)(v1, v, field)
 	},
+	copy_changed: copy_changed,
 }
 
 // null is NaN: JSON numbers are never NaN.
@@ -577,6 +585,7 @@ let f64_storage = {
 			return 1
 		return compare_vals(v1, v)
 	},
+	copy_changed: copy_changed,
 }
 
 // 0: false, 1: true, 2: null.
@@ -611,6 +620,85 @@ let bool_storage = {
 		let key2 = v == null ? 0 : v ? 2 : 1
 		return compare_vals(key1, key2)
 	},
+	copy_changed: copy_changed,
+}
+
+//// ALL FIELD TYPES ---------------------------------------------------------
+
+function check_field_options(field, checks, nav_id) {
+	let name = field.name || field.type
+	for (let k in checks)
+		if (warn_if(!checks[k](field[k]), nav_id,
+			'field:', name, 'invalid option:', k, field[k]))
+			return false
+	return true
+}
+
+function allow_null(check) {
+	return v => v == null || check(v)
+}
+
+let optional_bool = allow_null(isbool)
+let optional_num = allow_null(isnum)
+let optional_str = allow_null(isstr)
+let optional_obj = allow_null(isobj)
+let field_config_checks = {
+	name: optional_str,
+	label: optional_str,
+	info: optional_str,
+	internal: optional_bool,
+	hidden: optional_bool,
+	readonly: optional_bool,
+	nosave: optional_bool,
+	not_null: optional_bool,
+	has_server_default: optional_bool,
+	sortable: optional_bool,
+	min: optional_num,
+	max: optional_num,
+	null_text: optional_str,
+	empty_text: optional_str,
+	align: v => v == null || v == 'left' || v == 'right' || v == 'center',
+	enum_values: allow_null(v => isarray(v) || isstr(v)),
+	maxlen: allow_null(v => isnum(v) && v >= 0 && v == floor(v)),
+	w: optional_num,
+	min_w: optional_num,
+	max_w: optional_num,
+}
+
+let field_types      = ui.field_types      = obj() // {TYPE->{K: V}}
+let all_field_types  = ui.all_field_types  = obj() // {K: V}
+assign(all_field_types, {
+	type: 'text',
+	control: 'input',
+	build_input: ui.build_input,
+	default: null,
+	w: 8,
+	min_w: 2,
+	max_w: 154,
+	align: 'left',
+	not_null: false,
+	sortable: true,
+	movable: true,
+	groupable: true,
+	maxlen: 256,
+	null_text : S('null_text', ''),
+	empty_text: S('empty_text', 'empty text'),
+	builds_text: true,
+	has_editor: true,
+})
+
+all_field_types.to_text = function(v) {
+	return String(v)
+}
+
+// to_input(v) -> s, inverse of from_input(s) -> v. filesize, count and date
+// override it: from_input() can't read back a magnitude suffix or a timeago text.
+all_field_types.to_input = function(v) {
+	return this.to_text(v)
+}
+
+all_field_types.check_config = function(nav_id) {
+	return check_field_options(this, this.config_checks ?? empty, nav_id)
 }
 
 all_field_types.col_storage = array_storage
@@ -629,6 +717,20 @@ field_types.password = {input_type: 'password', control: 'password_input'}
 let number = {align: 'right', decimals: 0, scale: 1, is_number: true,
 	col_storage: f64_storage}
 field_types.number = number
+
+function check_integer(v, min_val, max_val) {
+	return isnum(v) && v >= min_val && v <= max_val && v == floor(v)
+}
+
+number.config_checks = {
+	decimals: v => v == null || check_integer(v, 0, 6),
+	scale: v => check_integer(v, 1, 1e6),
+	slider_min: optional_num,
+	slider_max: optional_num,
+	slider_markers: optional_bool,
+	slider_scale_base: optional_num,
+	slider_scales: allow_null(v => isarray(v) && v.every(isnum)),
+}
 
 number.from_input = function(s) {
 	let x = num(s)
@@ -667,6 +769,13 @@ add_scalar_rules('number')
 let filesize = assign({}, number)
 field_types.filesize = filesize
 
+let magnitudes = set(words('K M G T P E'))
+filesize.config_checks = assign({}, number.config_checks, {
+	magnitude_decimals: v => v == null || check_integer(v, 0, 3),
+	magnitude: v => v == null || magnitudes.has(v),
+	gray_min: optional_num,
+})
+
 // small means the value displays as 0 at this field's magnitude_decimals
 // and magnitude, e.g. an 800-byte value forced to display in MB.
 filesize.is_small = function(x) {
@@ -698,6 +807,8 @@ filesize.scales = [1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200, 250, 500]
 let count = assign({}, number)
 field_types.count = count
 
+count.config_checks = filesize.config_checks
+
 count.to_text = function(s) {
 	let x = num(s)
 	if (x == null)
@@ -723,6 +834,12 @@ let date = {
 	col_storage: f64_storage,
 }
 field_types.date = date
+
+let date_precisions = set(words('d m s ms'))
+date.config_checks = {
+	precision: v => v == null || date_precisions.has(v),
+	timeago: optional_bool,
+}
 
 date.to_text = function(v) {
 	if (!isnum(v)) // invalid
@@ -773,6 +890,11 @@ let td = {
 }
 field_types.timeofday = td
 
+let timeofday_precisions = set(words('m s ms'))
+td.config_checks = {
+	precision: v => v == null || timeofday_precisions.has(v),
+}
+
 td.to_text = function(v) {
 	if (!isnum(v)) // invalid
 		return str(v)
@@ -797,6 +919,11 @@ add_scalar_rules('timeofday')
 
 let d = {align: 'right', is_duration: true, col_storage: f64_storage}
 field_types.duration = d
+
+let duration_formats = set(words('approx approx+s long'))
+d.config_checks = {
+	duration_format: v => v == null || duration_formats.has(v),
+}
 
 d.to_text = function(v) {
 	if (!isnum(v)) return v // invalid
@@ -825,6 +952,12 @@ ui.add_validation_rule({
 let enm = {control: 'enum_input'}
 field_types.enum = enm
 
+enm.config_checks = {
+	enum_values: v => v != null,
+	enum_labels: optional_obj,
+	enum_info: optional_obj,
+}
+
 enm.to_text = function(v) {
 	let s = this.enum_labels ? this.enum_labels[v] : undefined
 	return s !== undefined ? s : v
@@ -837,6 +970,12 @@ enm.enum_items = function() {
 let enum_list = {is_values: true, control: 'enum_toggle',
 	col_storage: f64_storage}
 field_types.enum_list = enum_list
+
+enum_list.config_checks = {
+	enum_values: v => isarray(v) && v.length <= 31,
+	enum_labels: optional_obj,
+	enum_info: optional_obj,
+}
 
 enum_list.to_text = function(v) {
 	this.value_texts ??= new Map()
@@ -956,14 +1095,21 @@ field_types.private_key = {}
 
 //// create_field() ----------------------------------------------------------
 
-ui.create_field = function(opt) {
-	let field = assign_opt({}, all_field_types,
-		field_types[opt?.type ?? 'text'], opt)
+ui.create_field = function(opt, nav_id = '') {
+	let type = opt?.type ?? 'text'
+	if (warn_if(!field_types[type], nav_id, 'field:', opt?.name, 'unknown type:', type))
+		return null
+	let field_type = field_types[type]
+	let field = assign_opt({}, all_field_types, field_type, opt)
 	field.label ??= display_name(field.name || field.type)
+	if (!check_field_options(field, field_config_checks, nav_id))
+		return null
 	if (field.enum_values != null) {
 		field.enum_values = words(field.enum_values)
 		field.known_values = set(field.enum_values)
 	}
+	if (!field.check_config(nav_id))
+		return null
 	let own_rules = []
 	for (let k in field) {
 		if (k.startsWith('validator_')) {
@@ -973,8 +1119,6 @@ ui.create_field = function(opt) {
 		}
 	}
 	field.validator = ui.create_validator(field, own_rules)
-	if (field.min != null) field.min = field.validator.parse(field.min)
-	if (field.max != null) field.max = field.validator.parse(field.max)
 	return field
 }
 

@@ -1083,7 +1083,9 @@ local function compile_expr(t, name, loc)
 end
 
 local function valid_col_name(col)
-	return isstr(col) and #col > 0 and not col:find'[^a-z0-9_]'
+	return isstr(col) and #col > 0
+		and not col:find'^[0-9]'
+		and not col:find'[^a-z0-9_]'
 end
 
 local function encoded_maxlen(schema, f)

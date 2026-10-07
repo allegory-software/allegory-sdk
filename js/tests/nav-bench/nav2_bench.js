@@ -59,10 +59,12 @@ async function bench_flat() {
 	await bench('flat: init',
 		() => make_flat_rowset(),
 		rs => {
-			nav = ui.nav2()
+			nav = ui.nav2('flat')
 			nav.load(rs)
 		},
 		() => assert(nav.visible_n == row_n, 'init: wrong row count'))
+
+	await bench_slot_retirement(nav)
 
 	await bench('flat: sort by num1',
 		() => nav.set_order_by(null),
@@ -207,6 +209,39 @@ async function bench_flat() {
 		'filter: selection not reset')
 	nav.set_filter(null)
 
+	let str3_fi = nav.all_fields_map.str3.fi
+
+	// no word starts with 'x': the walk reads every visible row.
+	await bench('flat: quicksearch, no match',
+		() => nav.focus_cell(first_ri(), str3_fi),
+		() => nav.quicksearch('x', str3_fi),
+		ri => assert(ri == null && nav.focused_ri == first_ri(),
+			'quicksearch: matched or moved'))
+
+	// the walk starts at the focused row and ignores case; with offset 1 and
+	// -1 it finds the next and the previous match. focus_cell() on another
+	// cell and set_cell_val() on the focused cell end the quicksearch.
+	let qs_ri = nav.visible_ris[5] // row to find
+	let s = nav.cell_val(qs_ri, str3_fi).slice(0, 2).toUpperCase() // typed
+	let starts_with_s = ri =>
+		nav.cell_val(ri, str3_fi).startsWith(s.toLowerCase())
+	nav.focus_cell(qs_ri, str3_fi)
+	assert(nav.quicksearch(s, str3_fi) == qs_ri && nav.quicksearch_text == s,
+		'quicksearch: focused row not matched')
+	let next_ri = nav.quicksearch(s, str3_fi, 1)
+	assert(next_ri != null && nav.visible_i[next_ri] > 5
+		&& starts_with_s(next_ri), 'quicksearch: wrong next match')
+	for (let i = 6; i < nav.visible_i[next_ri]; i++)
+		assert(!starts_with_s(nav.visible_ris[i]), 'quicksearch: match skipped')
+	assert(nav.quicksearch(s, str3_fi, -1) == qs_ri,
+		'quicksearch: wrong previous match')
+	nav.focus_cell(nav.visible_ris[6], str3_fi)
+	assert(nav.quicksearch_text == '', 'quicksearch: focus moved, text kept')
+	nav.quicksearch(s, str3_fi)
+	nav.set_cell_val(nav.focused_ri, str3_fi, 'x')
+	assert(nav.quicksearch_text == '', 'quicksearch: cell edited, text kept')
+	nav.revert_changes()
+
 	let num3_fi = nav.all_fields_map.num3.fi
 
 	function edit_random_rows(n) {
@@ -226,7 +261,7 @@ async function bench_flat() {
 		() => assert(nav.changed_n == 0, 'revert: rows still changed'))
 
 	// edits: changed rows sort first in base order, pass any filter, keep
-	// text that doesn't parse, and break the pk check on a duplicate id.
+	// text that doesn't parse, and accept duplicate ids for server checking.
 	edit_random_rows(1000)
 	nav.set_order_by('num1')
 	let changed_n = nav.changed_n
@@ -243,12 +278,30 @@ async function bench_flat() {
 	nav.set_cell_val(ri, num3_fi, 'abc')
 	assert(nav.cell_val(ri, num3_fi) == 'abc'
 		&& nav.cell_errors[num3_fi][ri].failed, 'edit: invalid text lost')
+	assert(!nav.validate_row(ri), 'validate row: invalid cell accepted')
+	nav.revert_cell(ri, num3_fi)
 	let id_fi = nav.all_fields_map.id.fi
 	nav.set_cell_val(ri, id_fi, nav.cell_val(nav.visible_ris[1], id_fi))
-	assert(!nav.validate_row(ri), 'validate row: duplicate pk not caught')
+	assert(nav.validate_row(ri), 'validate row: duplicate pk rejected')
 	nav.revert_changes()
 	assert(nav.changed_n == 0 && nav.validate_row(ri)
 		&& nav.cell_val(ri, num3_fi) != 'abc', 'revert: edits left')
+
+	// every row has an id to clear; pos cells are refused.
+	let pos_fi = nav.pos_field.fi
+	await bench('flat: set null on selection (1000 rows)',
+		() => {
+			nav.revert_changes()
+			nav.focus_cell(nav.visible_ris[0], first_fi)
+			nav.focus_cell(nav.visible_ris[999], last_fi, 'expand')
+		},
+		() => nav.set_null_selected_cells({input: true}),
+		() => {
+			let ri = nav.visible_ris[500]
+			assert(nav.changed_n == 1000 && nav.cell_val(ri, num3_fi) == null
+				&& nav.cell_val(ri, pos_fi) != null, 'set null: wrong cells')
+		})
+	nav.revert_changes()
 
 	// new rows get null ids: the server assigns them.
 	function make_new_rows(n) {
@@ -266,6 +319,8 @@ async function bench_flat() {
 			(ris, ctx) => assert(ris.length == n
 				&& nav.row_n == ctx.row_n + n && nav.visible_n == nav.row_n,
 				'insert: rows not inserted'))
+
+	nav.revert_changes()
 
 	// the first row_n slots hold the loaded rows, none of them new.
 	let step = Math.floor(row_n / 1000)
@@ -310,8 +365,282 @@ async function bench_flat() {
 	assert(nav.changed_n == 0 && nav.row_n == row_n
 		&& nav.lookup('id', [5]) == id5_ri, 'revert: new rows left')
 
+	// a reload where the server changed num3 in 1000 rows.
+	await bench('flat: merge rowset (1000 changed rows)',
+		() => {
+			let rs = make_flat_rowset()
+			for (let i = 0; i < 1000; i++)
+				rs.col_vals[num3_fi][i * step] = -1
+			return rs
+		},
+		rs => nav.diff_merge(rs),
+		() => assert(nav.row_n == row_n && nav.changed_n == 0
+			&& nav.cell_val(nav.lookup('id', [1]), num3_fi) == -1,
+			'merge: wrong rows'))
+
 	await bench_group_by(nav)
 	await bench_move(nav)
+}
+
+async function bench_slot_retirement(nav) {
+	let num3_fi = nav.all_fields_map.num3.fi
+	for (let has_selection of [false, true])
+		await bench(has_selection
+				? 'flat: drop 1000 edited selected rows'
+				: 'flat: drop 1000 edited rows',
+			() => {
+				let rows = []
+				for (let i = 0; i < 1000; i++)
+					rows.push(make_row(5, null, null))
+				let ris = nav.insert_rows(rows, null)
+				for (let ri of ris) {
+					nav.set_cell_val(ri, num3_fi, 'abc')
+					nav.validate_row(ri)
+				}
+				if (has_selection) {
+					nav.focus_cell(ris[0], num3_fi)
+					nav.focus_cell(ris[999], num3_fi, 'expand')
+				}
+				return {ris: ris, row_n: nav.row_n}
+			},
+			ctx => nav.remove_rows(ctx.ris),
+			(ret, ctx) => {
+				assert(nav.row_n == ctx.row_n - 1000 && nav.changed_n == 0,
+					'drop edited: rows not dropped')
+				check_retired_slots(nav, ctx.ris)
+			})
+
+	await bench('flat: insert 1000 rows into freed slots',
+		() => {
+			let rows = []
+			for (let i = 0; i < 1000; i++)
+				rows.push(make_row(null, null, null))
+			let ris = nav.insert_rows(rows, null)
+			nav.remove_rows(ris)
+			return {rows: rows, slot_n: nav.slot_n}
+		},
+		ctx => nav.insert_rows(ctx.rows, null),
+		(ris, ctx) => {
+			assert(ris.length == 1000 && nav.slot_n == ctx.slot_n,
+				'insert: freed slots not reused')
+			nav.remove_rows(ris)
+		})
+}
+
+function check_retired_slots(nav, ris) {
+	let free_ris = new Set(nav.free_ris)
+	assert(free_ris.size == nav.free_ris.length,
+		'free slots: a slot was freed twice')
+	for (let ri of ris) {
+		assert(free_ris.has(ri) && nav.visible_i[ri] == 0xFFFFFFFF
+			&& nav.row_flags[ri] == 0 && nav.row_errors[ri] == null,
+			'free slot: row state left')
+		for (let fi = 0; fi < nav.all_fields.length; fi++)
+			assert(nav.input_vals[fi]?.[ri] === undefined
+				&& nav.cell_errors[fi]?.[ri] === undefined,
+				'free slot: cell state left')
+		let word_i = ri * nav.mask_word_n
+		for (let w = 0; w < nav.mask_word_n; w++)
+			assert(!nav.changed_mask[word_i + w]
+				&& !nav.sel_mask[word_i + w], 'free slot: cell bits left')
+	}
+}
+
+function check_slot_retirement() {
+	let nav = ui.nav2('slot_retirement')
+	nav.load({
+		fields: [
+			{name: 'id', type: 'number'},
+			{name: 'parent_id', type: 'number'},
+			{name: 'num1', type: 'number'},
+		],
+		col_vals: [[1, 2], [null, 1], [10, 20]],
+		pk: 'id',
+		parent_col: 'parent_id',
+	})
+	let [new_ri] = nav.insert_rows([[3, null, 30]], 1)
+	nav.set_cell_val(new_ri, 2, 'abc')
+	nav.focus_cell(0, 2)
+	nav.focus_cell(new_ri, 2, 'invert')
+	nav.remove_rows([0, new_ri])
+	check_retired_slots(nav, [new_ri])
+	assert(nav.changed_n == 2 && nav.focused_ri == null
+		&& nav.is_cell_selected(0, 2), 'drop: surviving selection changed')
+	let ris = nav.insert_rows([[4], [5]])
+	assert(ris[0] != ris[1] && nav.cell_val(ris[0], 0) == 4
+		&& nav.cell_val(ris[1], 0) == 5, 'insert: two rows share a slot')
+
+	nav.load({
+		fields: [{name: 'a'}, {name: 'b'}],
+		col_vals: [['x', 'y'], ['z', 'z']],
+		pk: 'a',
+	})
+	nav.set_group_by('a')
+	nav.focus_cell(0, 0)
+	nav.focus_cell(nav.group_ris[1], 0, 'invert')
+	nav.set_group_by('b')
+	assert(nav.focused_ri == null && nav.is_cell_selected(0, 0),
+		'regroup: surviving selection changed')
+	for (let ri of nav.group_ris)
+		assert(!nav.is_cell_selected(ri, 0), 'regroup: new group selected')
+
+	nav.load({
+		fields: [{name: 'a'}, {name: 'b'}],
+		col_vals: [[], []],
+		pk: 'a',
+	})
+	let [ri] = nav.insert_rows([['x', 'y']])
+	nav.set_group_by('a > b')
+	let group_ris = nav.group_ris.slice()
+	nav.focus_cell(group_ris[0], 0)
+	nav.remove_rows([group_ris[0], ri])
+	check_retired_slots(nav, [ri, ...group_ris])
+	assert(nav.row_n == 0 && nav.group_ris.length == 0
+		&& nav.changed_n == 0 && nav.focused_ri == null,
+		'drop: empty groups left')
+}
+
+// policy options refuse the user's calls (ev.input) and never app code.
+function check_policy() {
+	let user = {input: true} // ev of a user's call
+	let nav = ui.nav2('policy')
+	nav.load({
+		fields: [
+			{name: 'id', type: 'number'},
+			{name: 'a'},
+			{name: 'b', readonly: true},
+		],
+		col_vals: [[1, 2], ['x', 'y'], ['x', 'y']],
+		pk: 'id',
+	})
+
+	nav.set_row_flag(0, 'no_change', true)
+	nav.set_cell_val(0, 1, 'z', user)
+	nav.set_cell_val(1, 2, 'z', user)
+	assert(nav.changed_n == 0, 'policy: user edit not refused')
+	nav.set_cell_val(0, 1, 'z')
+	nav.set_cell_val(1, 2, 'z')
+	assert(nav.cell_val(0, 1) == 'z' && nav.cell_val(1, 2) == 'z',
+		'policy: app edit refused')
+	nav.revert_changes()
+
+	nav.set_row_flag(1, 'no_remove', true)
+	nav.remove_rows([1], 'delete', user)
+	assert(nav.changed_n == 0, 'policy: user removal not refused')
+	nav.remove_rows([1])
+	assert(nav.changed_n == 1, 'policy: app removal refused')
+	nav.revert_changes()
+
+	nav.can_add_rows = false
+	assert(!nav.insert_rows([null], null, user).length,
+		'policy: user insert not refused')
+	assert(nav.insert_rows([null], null).length == 1,
+		'policy: app insert refused')
+	nav.revert_changes()
+
+	// the user can't move while filtered, nor without pos_col.
+	nav.set_filter(() => true)
+	assert(!nav.move_rows([0], null, 0xFFFFFFFF, user),
+		'policy: user move not refused')
+	assert(nav.move_rows([0], null, 0xFFFFFFFF) && nav.base_ris[1] == 0,
+		'policy: app move refused')
+}
+
+let save_fields = [
+	{name: 'id', type: 'number'},
+	{name: 'a'},
+	{name: 'b', type: 'number'},
+]
+
+// saving without a server: pack_changes() builds the batch and
+// apply_result() takes rowset.lua's answer to it.
+function check_saving() {
+	let nav = ui.nav2('saving')
+	nav.load({
+		fields: save_fields,
+		col_vals: [[1, 2, 3], ['x', 'y', 'z'], [10, 20, 30]],
+		pk: 'id',
+	})
+
+	// an unset cell is undefined; null is a value; revert unsets it again.
+	let [new_ri] = nav.insert_rows([[undefined, 'n']])
+	assert(nav.cell_val(new_ri, 2) === undefined, 'unset: not undefined')
+	nav.set_cell_val(new_ri, 2, null)
+	assert(nav.cell_val(new_ri, 2) === null, 'unset: null not kept')
+	nav.revert_cell(new_ri, 2)
+	assert(nav.cell_val(new_ri, 2) === undefined, 'unset: revert kept null')
+
+	// backwards in stored order; unset cells and unedited cells left out.
+	nav.set_cell_val(0, 1, 'x2')
+	nav.remove_rows([1])
+	let batch = nav.pack_changes()
+	let [t_new, t_remove, t_update] = batch.rows
+	assert(batch.ris.join() == [new_ri, 1, 0].join()
+		&& t_new.type == 'new' && t_new.values.a == 'n'
+		&& !('id' in t_new.values) && !('b' in t_new.values)
+		&& t_remove.type == 'remove' && t_remove.values['id:old'] == 2
+		&& t_update.type == 'update' && t_update.values.a == 'x2'
+		&& t_update.values['id:old'] == 1 && !('b' in t_update.values),
+		'pack: wrong batch')
+
+	// an edit made in flight stays on top of the server's value.
+	nav.set_cell_val(0, 1, 'x3')
+	nav.apply_result(batch, {rows: [
+		{values: [4, 'n', 7]},
+		{remove: true},
+		{values: [1, 'x2', 10]},
+	]})
+	assert(nav.row_n == 3 && nav.changed_n == 1
+		&& nav.cell_val(new_ri, 0) == 4 && nav.cell_val(new_ri, 2) == 7
+		&& nav.lookup('id', [4]) == new_ri && nav.lookup('id', [2]) == null
+		&& nav.cell_val(0, 1) == 'x3', 'ack: wrong rows')
+
+	// an error leaves the row changed and invalid.
+	batch = nav.pack_changes()
+	nav.apply_result(batch, {rows: [{error: 'no', field_errors: {a: 'bad'}}]})
+	assert(nav.changed_n == 1 && nav.row_errors[0] && nav.cell_errors[1][0]
+		&& !nav.validate_row(0), 'ack: error lost')
+	nav.revert_changes()
+
+	// a row dropped in flight: the ack skips its slot.
+	let [new_ri2] = nav.insert_rows([[undefined, 'm']])
+	batch = nav.pack_changes()
+	nav.revert_row(new_ri2)
+	nav.apply_result(batch, {rows: [{values: [5, 'm', null]}]})
+	assert(nav.row_n == 3 && nav.changed_n == 0,
+		'ack: dropped row not skipped')
+}
+
+// diff_merge(): matched rows take the server's values under their edits,
+// rows new on the server are added, rows gone from it are dropped, and new
+// rows stay.
+function check_merge() {
+	let nav = ui.nav2('merge')
+	nav.load({
+		fields: save_fields,
+		col_vals: [[1, 2, 3], ['x', 'y', 'z'], [10, 20, 30]],
+		pk: 'id',
+	})
+	nav.set_cell_val(0, 1, 'x1')
+	nav.set_cell_val(1, 1, 'y1')
+	nav.insert_rows([[undefined, 'n']])
+	nav.diff_merge({
+		fields: save_fields,
+		rows: [[1, 'x', 11], [2, 'y1', 20], [4, 'w', 40]],
+		pk: 'id',
+	})
+	let ri4 = nav.lookup('id', [4])
+	assert(nav.row_n == 4 && nav.lookup('id', [3]) == null
+		&& ri4 != null && nav.cell_val(ri4, 1) == 'w',
+		'merge: rows not added or dropped')
+	assert(nav.cell_val(0, 1) == 'x1' && nav.cell_val(0, 2) == 11
+		&& nav.cell_val(1, 1) == 'y1' && nav.changed_n == 2,
+		'merge: edits or values wrong')
+
+	// other columns: load.
+	nav.diff_merge({fields: [{name: 'id', type: 'number'}], rows: [[7]],
+		pk: 'id'})
+	assert(nav.row_n == 1 && nav.changed_n == 0, 'merge: other columns merged')
 }
 
 async function bench_move(nav) {
@@ -423,6 +752,17 @@ async function bench_group_by(nav) {
 			&& nav.parent_ri[nav.visible_ris[0]] == 0xFFFFFFFF,
 			'ungroup: groups left'))
 
+	await bench('flat: ungroup with selection',
+		() => {
+			nav.set_group_by(group_by)
+			nav.focus_cell(nav.group_ris[0], str1_fi)
+			nav.focus_cell(nav.group_ris[nav.group_ris.length - 1],
+				str1_fi, 'expand')
+		},
+		() => nav.set_group_by(null),
+		() => assert(!nav.is_grouped && nav.focused_ri == null,
+			'ungroup: freed group still focused'))
+
 	// a ranged level: num1 (0..999999) in buckets of 100000, plus null.
 	nav.set_group_by('num1/100000')
 	nav.set_collapsed(null, true, true)
@@ -460,7 +800,7 @@ async function bench_tree() {
 				{id_col: 'id', parent_col: 'parent_id'})
 		},
 		rs => {
-			nav = ui.nav2({can_change_parent: true})
+			nav = ui.nav2('tree', {can_change_parent: true})
 			nav.load(rs)
 		},
 		() => assert(nav.is_tree && nav.visible_n == row_n,
@@ -537,6 +877,23 @@ async function bench_tree() {
 	nav.remove_rows([root_ri], 'undelete')
 	assert(nav.changed_n == 0, 'undelete subtree: rows still marked')
 
+	let first_child_ri = nav.tree_ris[nav.tree_i[root_ri] + 1]
+	await bench('tree: remove subtree with 1000 new rows',
+		() => {
+			let rows = []
+			for (let i = 0; i < 1000; i++)
+				rows.push(make_row(null, null, null))
+			nav.insert_rows(rows, first_child_ri)
+			return nav.row_n
+		},
+		() => nav.remove_rows([root_ri]),
+		(ret, row_n) => {
+			assert(nav.row_n == row_n - 1000,
+				'remove subtree: new rows not dropped')
+			nav.remove_rows([root_ri], 'undelete')
+			assert(nav.changed_n == 0, 'undelete subtree: changes left')
+		})
+
 	// flat view, and an insert next to a child, which gets its parent.
 	nav.set_flat(true)
 	assert(!nav.is_tree && nav.visible_n == nav.row_n
@@ -568,8 +925,255 @@ async function bench_tree() {
 		'move into own subtree: not refused')
 }
 
+function make_index_nav(n, positions) {
+	let ids = new Float64Array(n)
+	let pos_vals = new Float64Array(n)
+	for (let ri = 0; ri < n; ri++) {
+		ids[ri] = ri + 1
+		pos_vals[ri] = ri + 1
+	}
+	if (positions)
+		pos_vals.set(positions)
+	let nav = ui.nav2('index')
+	nav.load({
+		fields: [
+			{name: 'id', type: 'number'},
+			{name: 'pos', type: 'number'},
+		],
+		col_vals: [ids, pos_vals],
+		pk: 'id',
+		pos_col: 'pos',
+	})
+	return nav
+}
+
+function check_indexes() {
+	for (let reuse_slots of [false, true]) {
+		let nav = make_index_nav(3)
+		if (reuse_slots)
+			nav.remove_rows(nav.insert_rows([[4], [5]]))
+		nav.lookup('pos', [1])
+		nav.lookup('id pos', [1, 1])
+		let pos_index = nav.indexes.get('pos')
+		let id_pos_index = nav.indexes.get('id pos')
+		let ris = nav.insert_rows([[4], [5]], 1)
+		assert(nav.indexes.get('pos') == pos_index
+			&& nav.indexes.get('id pos') == id_pos_index,
+			'insert: existing indexes invalidated')
+		for (let ri of ris)
+			assert(nav.lookup('pos', [nav.cell_val(ri, 1)]) == ri,
+				'insert: wrong position lookup')
+	}
+	let nav = make_index_nav(3, [1, 1 + Number.EPSILON, 3])
+	nav.lookup('pos', [1])
+	let pos_index = nav.indexes.get('pos')
+	let [ri] = nav.insert_rows([[4]], 1)
+	assert(nav.indexes.get('pos') == pos_index
+		&& nav.lookup('pos', [nav.cell_val(ri, 1)]) == ri,
+		'renumber fresh rows: existing index invalidated or lookup failed')
+
+	nav = make_index_nav(3, [1, 1 + Number.EPSILON, 3])
+	let [new_ri] = nav.insert_rows([[4]])
+	nav.lookup('pos', [4])
+	nav.lookup('id pos', [4, 4])
+	nav.lookup('id', [4])
+	let id_index = nav.indexes.get('id')
+	nav.insert_rows([[5]], 1)
+	assert(!nav.indexes.has('pos') && !nav.indexes.has('id pos')
+		&& nav.indexes.get('id') == id_index,
+		'renumber existing new rows: wrong index invalidation')
+	assert(nav.lookup('pos', [5]) == new_ri,
+		'renumber existing new rows: wrong position lookup')
+
+	nav = make_index_nav(3)
+	;[new_ri] = nav.insert_rows([[4]], 1)
+	nav.lookup('pos', [1])
+	nav.lookup('id', [4])
+	id_index = nav.indexes.get('id')
+	assert(nav.move_rows([new_ri], null, 0xFFFFFFFF), 'move refused')
+	assert(!nav.indexes.has('pos')
+		&& nav.indexes.get('id') == id_index
+		&& nav.lookup('pos', [4]) == new_ri,
+		'move new row: wrong index invalidation or lookup')
+
+	nav = make_index_nav(3)
+	nav.lookup('pos', [1])
+	pos_index = nav.indexes.get('pos')
+	nav.move_rows([0], null, 0xFFFFFFFF)
+	assert(nav.indexes.get('pos') == pos_index
+		&& nav.lookup('pos', [1]) == 0,
+		'move saved row: loaded-value index changed')
+
+	nav = ui.nav2('index_tree')
+	nav.load({
+		fields: [
+			{name: 'id', type: 'number'},
+			{name: 'parent_id', type: 'number'},
+			{name: 'pos', type: 'number'},
+		],
+		col_vals: [[1, 2, 3], [null, null, 1], [1, 2, 1]],
+		pk: 'id', id_col: 'id', parent_col: 'parent_id', pos_col: 'pos',
+	})
+	;[new_ri] = nav.insert_rows([[4]], 2)
+	nav.lookup('parent_id', [1])
+	nav.lookup('parent_id pos', [1, 1])
+	id_index = nav.indexes.get('id')
+	assert(nav.move_rows([new_ri], null, 1), 'parent change refused')
+	assert(!nav.indexes.has('parent_id')
+		&& !nav.indexes.has('parent_id pos')
+		&& nav.indexes.get('id') == id_index
+		&& nav.lookup('parent_id', [2]) == new_ri
+		&& nav.lookup('parent_id pos', [2, 1]) == new_ri,
+		'parent change: wrong index invalidation or lookup')
+}
+
+async function bench_indexes() {
+	for (let n of [1, 1000])
+		for (let cols of [null, 'id', 'pos', 'id pos']) {
+			let label = cols || 'no'
+			for (let do_lookup of cols?.includes('pos')
+				? [false, true] : [false])
+				await bench(`indexes: insert ${n}, ${label} index`
+					+ (do_lookup ? ' + lookup' : ''),
+					() => {
+						let nav = make_index_nav(row_n)
+						if (cols)
+							nav.lookup(cols, cols == 'id pos' ? [1, 1] : [1])
+						let rows = Array.from({length: n},
+							(_, i) => [row_n + i + 1])
+						return {nav: nav, rows: rows}
+					},
+					ctx => {
+						let nav = ctx.nav
+						let ris = nav.insert_rows(ctx.rows, row_n >> 1)
+						ctx.ris = ris
+						if (do_lookup) {
+							let ri = ris[0]
+							let vals = cols == 'id pos'
+								? [nav.cell_val(ri, 0), nav.cell_val(ri, 1)]
+								: [nav.cell_val(ri, 1)]
+							return nav.lookup(cols, vals)
+						}
+					},
+					(ret, ctx) => {
+						assert(ctx.nav.row_n == row_n + n,
+							'indexed insert: wrong row count')
+						if (do_lookup)
+							assert(ret == ctx.ris[0],
+								'indexed insert: lookup failed')
+					})
+		}
+
+	await bench('indexes: insert 1000 reused slots + lookup',
+		() => {
+			let nav = make_index_nav(row_n)
+			let rows = Array.from({length: 1000}, (_, i) => [row_n + i + 1])
+			nav.remove_rows(nav.insert_rows(rows))
+			nav.lookup('pos', [1])
+			return {nav: nav, rows: rows}
+		},
+		ctx => {
+			ctx.ris = ctx.nav.insert_rows(ctx.rows, row_n >> 1)
+			return ctx.nav.lookup('pos', [ctx.nav.cell_val(ctx.ris[0], 1)])
+		},
+		(ret, ctx) => assert(ret == ctx.ris[0], 'reused slots: lookup failed'))
+
+	await bench('indexes: move 1000 new rows and lookup',
+		() => {
+			let nav = make_index_nav(row_n)
+			let rows = Array.from({length: 1000}, (_, i) => [row_n + i + 1])
+			let ris = nav.insert_rows(rows, row_n >> 1)
+			nav.lookup('pos', [1])
+			return {nav: nav, ris: ris}
+		},
+		ctx => {
+			assert(ctx.nav.move_rows(ctx.ris, null, 0xFFFFFFFF), 'move refused')
+			return ctx.nav.lookup('pos', [ctx.nav.cell_val(ctx.ris[0], 1)])
+		},
+		(ret, ctx) => assert(ret == ctx.ris[0], 'move: position lookup failed'))
+}
+
+function check_validation() {
+	let nav = ui.nav2('validation')
+	nav.load({
+		fields: [
+			{name: 'required', type: 'number', not_null: true,
+				client_default: null},
+			{name: 'server_value', type: 'number', not_null: true,
+				has_server_default: true},
+			{name: 'readonly_value', readonly: true, not_null: true,
+				client_default: 'ok'},
+			{name: 'num', type: 'number'},
+		],
+		col_vals: [[1], [null], ['ok'], [2]],
+		pk: 'required',
+	})
+	assert(nav.validate_row(0), 'validate: saved row rejected')
+	let [ri] = nav.insert_rows([null])
+	assert(!nav.validate_row(ri) && nav.cell_errors[0][ri].failed,
+		'validate: untouched required cell accepted')
+	assert(!nav.cell_errors[1]?.[ri] && !nav.cell_errors[2]?.[ri],
+		'validate: defaulted cell rejected')
+	assert(nav.changed_n == 1 && nav.input_vals.length == 0
+		&& nav.cell_val(ri, 0) == null,
+		'validate: row values or edits changed')
+	nav.set_cell_val(ri, 0, 3)
+	assert(nav.validate_row(ri) && !nav.cell_errors[0][ri],
+		'validate: required cell error retained')
+	nav.set_cell_val(ri, 3, 'abc')
+	assert(!nav.validate_row(ri) && nav.cell_val(ri, 3) == 'abc',
+		'validate: invalid edited text lost or accepted')
+	nav.revert_cell(ri, 3)
+	assert(nav.validate_row(ri), 'validate: reverted optional cell rejected')
+	nav.revert_cell(ri, 0)
+	assert(!nav.validate_row(ri), 'validate: reverted required cell accepted')
+	nav.remove_rows([ri])
+	;[ri] = nav.insert_rows([null])
+	assert(!nav.validate_row(ri), 'validate: reused slot skipped validation')
+}
+
+async function bench_validation() {
+	for (let mode of ['saved', 'new', 'new repeated', 'new invalid'])
+		await bench('validate: 1000 ' + mode + ' rows, 20 fields',
+			() => {
+				let rows = []
+				for (let i = 0; i < 1000; i++) {
+					let row = make_row(i + 1, null, null)
+					row[3] = mode == 'new invalid' ? null : 1
+					rows.push(row)
+				}
+				let is_new = mode != 'saved'
+				let rs = make_rowset(is_new ? [] : rows)
+				rs.fields[3].not_null = true
+				let nav = ui.nav2('validate_' + mode)
+				nav.load(rs)
+				let ris = is_new ? nav.insert_rows(rows) : nav.base_ris
+				if (mode == 'new repeated')
+					for (let ri of ris)
+						nav.validate_row(ri)
+				return {nav: nav, ris: ris}
+			},
+			ctx => {
+				let valid_n = 0
+				for (let ri of ctx.ris)
+					if (ctx.nav.validate_row(ri))
+						valid_n++
+				return valid_n
+			},
+			valid_n => assert(valid_n == (mode == 'new invalid' ? 0 : 1000),
+				'validate: wrong valid row count'))
+}
+
 async function run() {
 	assert(row_n >= 1000, 'rows must be at least 1000')
+	check_validation()
+	await bench_validation()
+	check_indexes()
+	await bench_indexes()
+	check_slot_retirement()
+	check_policy()
+	check_saving()
+	check_merge()
 	await bench_flat()
 	await bench_tree()
 }

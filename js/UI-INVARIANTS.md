@@ -383,6 +383,18 @@ When rebuilding the tree, the nav uses current input parent values,
 with loaded values for unchanged cells, so unsaved parent changes are
 preserved.
 
+In nav2, after walking a tree, the nav checks whether it reached every data
+row. On a cycle, it warns, clears parent links, disables tree capability
+and displays all rows flat. It does this on initial tree load and when
+entering tree view after a flat load. In flat view, the nav does not walk
+the hierarchy or check for cycles.
+
+In nav2, the nav gives values in array columns the same sort rank when the
+field's compare_vals function considers them equal. It uses later sort
+columns to order those rows and preserves row order when all requested keys
+are equal. The nav uses the same comparator equality for lookup comparisons
+and for sort ranks.
+
 Positions. With pos_col and no explicit sort or grouping, the nav numbers
 complete sibling lists from 1. It includes records hidden by filtering or
 collapse. UI inserts and physical removals renumber every sibling list;
@@ -391,14 +403,73 @@ existing positions while explicitly sorted or grouped.
 
 Keys. There is no nullable pk. The server keeps pks immutable and marks pk
 fields readonly; the client does not enforce that. A new row with no key
-yet is a valid row. The nav checks pk uniqueness when it validates a row,
-only for new rows and rows the user edited, and skips the check for a row
-with no key yet. e.lookup() by null returns the rows whose value is null.
+yet is a valid row. In ui_nav.js, the nav checks pk uniqueness when it
+validates a row, only for new rows and rows the user edited, and skips the
+check for a row with no key yet. e.lookup() by null returns the rows whose
+value is null. In nav2, the server checks pk uniqueness; the nav does not
+check for duplicate keys.
 
-Ops. A function's mode is an explicit op, never inferred from another option
-such as ev.input. insert_rows takes op: 'insert' (the default) or 'upsert';
-it looks for an existing row by pk only for 'upsert', and the grid passes
-'insert'. remove_rows takes op: 'delete' (the default) or 'undelete'.
+In nav2, load() requires a PK with at least one column, for both local
+and server rowsets.
+
+ui.nav2(id, opt) requires an ID and stores it as e.id. The nav includes its
+ID in warnings and passes it to field creation.
+
+In nav2, the nav checks field creation and structural column references
+before replacing loaded state. On invalid configuration, it warns and
+ignores the entire load. It preserves existing rows, edits, selection and
+saving state. It rejects rowsets without fields, rowsets with missing or
+duplicate field names, and rowsets with unknown referenced columns.
+pos_col, id_col and parent_col each specify one column name. The nav resolves
+each to one field. Only the PK accepts a list of columns.
+
+ui.create_field(opt, nav_id) warns and returns null on invalid field
+configuration. The caller can pass nav_id for warning messages.
+Field types can define config_checks, a table of functions by option name.
+Each function accepts the option value and returns whether it is valid.
+Field creation checks the table and reports the nav ID, field name, option
+name and invalid value. The client checks the options against its own
+supported operations; the server enforces its schema constraints separately.
+Numeric scale must be an integer from 1 to 1000000. Decimals must be an
+integer from 0 to 6; magnitude_decimals must be an integer from 0 to 3.
+
+In nav2, write_cell() replaces a new row's column value and clears the
+cell's unset bit and pending edit. The nav reads the assigned value through
+cell_val(), including an ID assigned during reservation. The nav still
+counts the row as changed because it is new. For saved rows, write_cell()
+stores an edit.
+
+In nav2, validate_row() validates every current cell value of a new row,
+including untouched and unset cells, except unset cells with
+has_server_default. The nav skips all field validators for those cells,
+including rules with check_null. The nav stores cell errors and preserves
+the cell values and edit state during validation. The required validator
+accepts null when has_server_default is true and rejects null and undefined
+otherwise. For saved rows, validate_row() uses the stored cell and row errors.
+
+validator.validate(v, 'failed') formats result messages only when at least
+one rule fails. It still parses and validates once and preserves result
+statuses. In nav2, the nav requests this mode for cell validation and copies
+results only for failed cells.
+
+When selecting rules, the validator treats a missing applies() predicate
+as true. When a rule defines applies(), the validator uses its result.
+
+Each validator stores check status in its own result records. The validator
+creates those records and resolves dependencies during creation. It checks
+rules in dependency order and updates their records directly. It formats
+messages in a separate pass only when the selected mode requests them.
+
+Ops. A function's mode -- the operation it performs, such as insert or
+upsert, delete or undelete -- is an explicit op, never inferred from another
+option such as ev.input. insert_rows takes op: 'insert' (the default) or
+'upsert'; it looks for an existing row by pk only for 'upsert', and the grid
+passes 'insert'. remove_rows takes op: 'delete' (the default) or 'undelete'.
+
+Policy. ev.input is not a mode: it marks a call that the user made. Policy
+options (can_add_rows, can_remove_rows, can_change_rows, can_move_rows, a
+row's no_change and no_remove, and the like) stop only those calls. App code
+calls without ev.input, and policy options never stop it.
 
 Parameters. A detail nav takes whichever values it needs from the focused
 row of each master nav. When inserting a row, the detail nav fills the
@@ -427,6 +498,53 @@ true for each selected row. In cell-select mode, it stores a set of all
 selectable visible fields for each selected row. It clears the previous
 selection anchor.
 
+In nav2, the nav frees each removed row slot once, after compacting stored
+rows and indexes or while removing group rows. The nav clears the row's edits
+and errors when freeing its slot. Before reusing a slot, the nav commits the
+selection rectangle, clears the removed row's visible index, and calls
+focus_cell(ri, fi, 'deselect_hidden'). The nav preserves selection on
+surviving rows.
+
+In nav2, a data row is changed when it is new, marked for deletion, or has
+an edited cell. The nav counts all such rows in changed_n. Only saving is
+affected by no_save. When setting no_save, the nav preserves the row's
+values, its changed bits, and changed_n.
+
+For an explicit sort, the nav places changed data rows first in stored order
+before rebuilding the tree and visible rows. The nav sorts unchanged data
+rows by the requested order. When filtering, the nav marks every changed
+data row as passing the filter. The nav includes no_save rows in both
+operations.
+
+revert_changes() drops new rows, unmarks deleted rows, and reverts edited
+cells, including on no_save rows. The nav clears the edits before discarding
+the input_vals and cell_errors arrays.
+
+In nav2, the nav refuses enabling or changing grouping in tree view, or
+with pending changes in a tree-capable nav, including in flat view. For an
+ordinary flat nav, it refuses grouping with edited grouping columns. The
+nav always allows ungrouping.
+
+In nav2, calendar range grouping uses column[/offset]/unit/frequency,
+with month or year as the unit. Frequency and offset are measured in that
+calendar unit. The nav calculates continuous UTC interval boundaries from
+January 1970 plus the offset. It does not restart monthly intervals each
+January. Group keys are timestamps at the start of the intervals.
+For example, date/1/month/3
+groups February-April, May-July, August-October and November-January.
+
+In nav2, numeric range grouping uses column[/offset]/frequency. Offset and
+frequency are measured in the column's units. The nav calculates interval
+boundaries from offset plus multiples of frequency and uses interval starts
+as group keys. For amount/5/10, the nav groups value 17 under key 15.
+
+In nav2, lookup indexes use column storage, not pending edited values. When
+inserting rows, the nav initializes their positions before adding them to
+indexes and preserves existing cached indexes. When moving or renumbering
+an already inserted new row, the nav invalidates cached indexes using the
+written column. It rebuilds each invalidated index on its next use. It
+preserves indexes using only other columns.
+
 Deleting. On Delete the grid marks the selected rows for deletion; on
 Escape it undeletes the marked rows among them. There is no toggle. The
 grid asks before deleting, counting the selected rows, except for a single
@@ -444,11 +562,12 @@ Group rows are not records. Deleting a group row means deleting the rows
 grouped under it: the nav never marks, queues or drops the group row
 itself, and removes a group row once no rows are left in it.
 
-Inserting. The nav refuses to insert a row under a parent marked for
-deletion. When inserting into a sorted grid, the nav keeps the new row at
-the insertion position. Without an explicit sort, it inserts before the
-same existing row in stored order and in full sibling order. While
-explicitly sorted, UI inserts append in stored order under the same parent.
+Inserting. The nav refuses to insert a row for the user under a parent
+marked for deletion. When inserting into a sorted grid, the nav keeps the
+new row at the insertion position. Without an explicit sort, it inserts
+before the same existing row in stored order and in full sibling order.
+While explicitly sorted, UI inserts append in stored order under the same
+parent.
 With pos_col, the nav initializes their positions after all existing
 siblings, including hidden records. It preserves the chosen insertion
 point in full displayed sibling order and in visible rows.
@@ -473,13 +592,9 @@ Cosmin decides these; do not fill them in by reading code.
 	an editable text reach the widget's state through the browser's input
 	event instead of that list. So the grid cannot tell that a character
 	came before the Enter that ends the edit, and it takes the box's text
-	early to put them back in order by hand. Found 2026-09-18. A queue that
-	holds key events and text changes together, consumed in order, would
-	settle it.
+	early to put them back in order by hand. A queue that holds key events
+	and text changes together, consumed in order, would settle it.
+	For now, we'll just assume that frames can't render slower than typing.
 
-- A parent seeds a child's state with ui.state(), which also keeps the id
-	alive -- a side effect the parent has no reason to cause. ui.state_of()
-	would drop every one of those writes, because on the frame the child
-	first appears there is no state object yet, so the parent has to call
-	ui.state() today. The alternative is a call that passes the value into
-	the child's build.
+- A parent seeds a child's state with ui.state(). That also keeps the id
+	alive, that's ok, but prefer to pass the value into the child's build.

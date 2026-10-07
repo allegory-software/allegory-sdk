@@ -211,6 +211,13 @@ async function bench_flat() {
 		() => assert(nav.selected_rows.size == nav.rows.length,
 			'extend selection: not all rows selected'))
 
+	// no word starts with 'x': the walk reads every visible row.
+	await bench('flat: quicksearch, no match',
+		() => nav.focus_cell(0, 'str3'),
+		() => nav.quicksearch('x', nav.focused_row),
+		() => assert(nav.focused_row_index == 0
+			&& nav.focused_field.name == 'str3', 'quicksearch: focus moved'))
+
 	await bench('flat: update cell (per call)', null,
 		() => {
 			for (let i = 0; i < 1000; i++)
@@ -219,6 +226,32 @@ async function bench_flat() {
 		},
 		() => assert(nav.changed_rows?.size, 'update: no changed rows'),
 		1000)
+
+	await bench('flat: set null on selection (1000 rows)',
+		() => {
+			nav.revert_changes()
+			nav.focus_cell(0, 0)
+			nav.focus_cell(999, nav.fields.length-1, 0, 0, {select: 'expand'})
+		},
+		() => nav.set_null_selected_cells({input: nav}),
+		() => assert(nav.changed_rows.size == 1000
+			&& nav.cell_input_val(nav.rows[500], 'num3') == null,
+			'set null: wrong cells'))
+	nav.revert_changes()
+
+	// a reload where the server changed num3 (index 5) in 1000 rows.
+	await bench('flat: merge rowset (1000 changed rows)',
+		() => {
+			let rs = make_flat_rowset(true)
+			let step = floor(row_n / 1000)
+			for (let i = 0; i < 1000; i++)
+				rs.rows[i * step][5] = -1
+			return rs
+		},
+		rs => nav.diff_merge(rs),
+		is_merged => assert(is_merged
+			&& nav.cell_val(nav.lookup('id', [1])[0], 'num3') == -1,
+			'merge: wrong rows'))
 
 	await bench_insert_and_remove(nav, 'flat: ')
 

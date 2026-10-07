@@ -455,6 +455,12 @@ let warn  = console.warn
 let debug = console.debug
 let trace = console.trace
 
+function warn_if(v, ...args) {
+	if (v)
+		warn(...args)
+	return v
+}
+
 let warns = {}
 function warn_once(...args) {
 	let k = [...args].join(' ')
@@ -2532,7 +2538,7 @@ random,
 PI, sin, cos, tan, rad, deg, asin, acos, atan, atan2,
 format_base, dec,
 noop, return_true, return_false, return_arg, wrap, do_before, do_after,
-pr, _, warn, warn_once, debug, trace, trace_if, assert,
+pr, _, warn, warn_if, warn_once, debug, trace, trace_if, assert,
 push_log, push_log_if, pop_log, log, log_if, check,
 callable_constructor, inherit_properties,
 property, method, override, alias, override_property_setter, override_property_getter,

@@ -1,0 +1,298 @@
+NAV SAVE AND CHANGE PROPAGATION
+==============================================================================
+
+This is the plan for saving the records that users edit in the browser,
+and for showing each user the changes that other users make. The code
+today is in www/ui_nav2.js, www/ui_field.js, lua/rowset.lua,
+lua/rowset_mdbx.lua, and the db write path in lua/mdbx_schema.lua (not
+read yet).
+
+PROBLEM and REQUIREMENTS say what the system must do, in terms of users
+and their data. IMPLEMENTATION lists ideas for how to do it. None of the
+ideas is decided, and we can replace any of them with a better one.
+
+A label names the same item for good, even when the list changes.
+DECIDE marks a question for Cosmin.
+
+
+PROBLEM
+==============================================================================
+
+Several users edit the same tables in the browser at the same time. Server
+code changes the data too. Requests and responses get lost on the network.
+Users paste thousands of rows from a spreadsheet, as new records or as
+changes to existing records.
+
+P1. Speed. The user edits and saves big tables and huge pastes without
+	waiting. When another user changes one record, the user's browser does
+	work for that one record, not for the whole table.
+P2. Correctness. If two users edit the same data, or a request or a
+	response gets lost, the system never duplicates a record, never loses a
+	saved change, and never shows the user something false.
+P3. Completeness. Every user who has some data open sees every change to
+	it, whoever made the change: another user or server code.
+P4. Access. A user receives only the data that the user is allowed to see.
+
+
+REQUIREMENTS
+==============================================================================
+
+R1. RECORD KEYS
+------------------------------------------------------------------------------
+
+- Every record has a key. A key is one of two kinds:
+	1. A number that the system generates. The user never types it.
+	2. A value that the user types: a fact from outside the system, such
+		as a product code, or a fk from inside. The user must fill in every
+		part of it.
+- A new record gets its key before the user saves it.
+- A saved record's key never changes. The user can set the key only on a
+	new record.
+- Keys are unique. The user can't save a new record if another record in
+	the user's view has the same key. This includes records marked for
+	deletion.
+- If two users enter the same typed key, they mean the same record. The
+	second save updates it.
+
+
+R2. SAVING
+------------------------------------------------------------------------------
+
+- If a save fails, or its response gets lost, the user can send it again.
+	The second attempt never duplicates a record, and never fails because of
+	the first attempt.
+- If two users save the same record, the last save wins. This holds for
+	whole records and for single fields:
+	- If another user deletes a record, the record is gone for everyone,
+		even for a user who is editing it.
+	- If another user saves a field, the field gets the new value. If the
+		user changed that field too, the user's change stays on top of it,
+		pending.
+	- A save sends only the fields that the user changed, so it overwrites
+		only those fields.
+- If the user saves changes to a record that another user deleted, the
+	record disappears from the user's view.
+- If the user deletes a record that another user already deleted, the
+	user gets no error.
+- A save inserts a parent before its children, and deletes the children
+	before the parent. Later: it also inserts a record before the records
+	that refer to it.
+- If a save fails, the next save by the user sends its changes again.
+	Until then the changes stay pending.
+
+
+R3. SEEING OTHERS' CHANGES
+------------------------------------------------------------------------------
+
+- When a change is saved, by a user or by server code, every user who has
+	that data open receives it. If the server rolls a change back, nobody
+	receives it.
+- The server sends only the changed records. If it can't, the user's view
+	loads again in full.
+- A user receives only the records that the user is allowed to see.
+- Views that the server filters are out of scope.
+
+
+R4. WHAT THE USER SEES
+------------------------------------------------------------------------------
+
+- If another user saves a record with the same key as a record that this
+	user is still creating, the two become one record. Where this user's
+	values differ from the saved ones, this user's values stay as pending
+	changes.
+- If another user deletes a record, the record disappears from this
+	user's view, even while this user is editing it.
+- If the user deletes a new record while its save is underway, the record
+	stays, as a saved record, because the server saved it. The record is
+	instead marked for deletion for the next save. Reverting a new record
+	removes it, so the same holds for a revert. While the save is underway,
+	the record stays in view, marked for deletion: its fate is uncertain.
+	When the answer arrives:
+	- the insert succeeded: the record stays marked for deletion.
+	- the insert failed: the record was never saved, so the record goes
+		away.
+	- the answer is lost: the record stays marked for deletion. The next
+		save sends the delete, and a delete of a missing record is not an
+		error (R2).
+- If another user changes a field after this user changed it, the field
+	gets a mark. The mark stays if the user changes the field again. The
+	mark goes away when the user saves or undoes the field, or when the
+	user's value equals the new saved value.
+- After the user saves, the saved records stay where they are until the
+	user sorts or filters again. When other users change records, the
+	records move to their place right away: by the filter, the sort, the
+	groups and the tree.
+
+
+R5. PERFORMANCE
+------------------------------------------------------------------------------
+
+- Small, frequent changes from other users are the common case. The
+	browser's work for them is proportional to the change.
+- A paste of 10k rows, as new records or as changes, stays fast at every
+	step: the paste, the save, and the update of the other users' views.
+
+
+IMPLEMENTATION (speculative)
+==============================================================================
+
+I0. TODAY
+------------------------------------------------------------------------------
+
+- After a save, the server pushes 'NAME update_id...' to every events
+	connection, for every rowset that reads a written table. Every other
+	nav on those rowsets then reloads the whole rowset and merges all of it.
+- The code that writes a row reports "table T changed", with no key.
+	rowset_mdbx.lua's insert, update and delete call table_changed(). If
+	some code writes and doesn't call table_changed(), nobody hears of the
+	write. App code can call the global rowset_changed() and
+	table_changed(); nothing in lua/ calls them today.
+- If the rowset doesn't set reserves_ids, the nav sends new rows without a
+	pk. If the save's response gets lost, the next save sends the rows
+	again, and the server inserts them a second time.
+- diff_merge() leaves a new row new when it matches a server row by pk.
+	The ack code skips a row that the nav dropped while the row was in
+	flight.
+
+
+I1. KEYS AND SAVE
+------------------------------------------------------------------------------
+
+- lua/rowset.lua sends the field attribute auto_increment to the client,
+	through client_field_attrs, and lists it in the header. The header also
+	says that a rowset must have reserve_ids() if its pk is one
+	auto_increment field. The nav trusts auto_increment to mean that the
+	server can reserve ids, and doesn't check it.
+- Remove reserves_ids: from the load result, from www/ui_nav2.js's rowset
+	options, from the nav, and from the nav's head comment.
+- www/ui_field.js accepts auto_increment as a boolean field option.
+- The nav's load() accepts the pk in two cases:
+	1. one number field with auto_increment. The nav reserves ids before
+		the save.
+	2. every pk field is not_null and has no has_server_default.
+	In any other case, load() warns and stops.
+- Save ops on the server:
+	- insert: if a row with the pk exists, write over it. Today
+		lua/rowset_mdbx.lua skips the insert.
+	- update of a pk: refuse it.
+	- update of a missing row: answer that the row is gone.
+	- delete of a missing row: no error.
+	reserve_ids() stays tied to the auto-inc pk.
+- Unique pks on save: look up each new row's pk in the pk index. The pk
+	index reads only the columns, and a new row's typed pk is an edit, so
+	the index misses it. So also compare the new rows of the batch with
+	each other.
+- Batch order: today pack_changes() walks tree_ris backwards. That order
+	suits deletes. Inserts need a forward walk.
+
+DECIDE I1a. Which parts of a 10k-row save get their own bench and target?
+- The id requests: 1000 ids per request, one request after another.
+- The server loads each saved row back, with one scan per row.
+- The whole save runs in one write transaction, and other writers wait.
+
+
+I2. CHANGE CAPTURE ON THE SERVER
+------------------------------------------------------------------------------
+
+- First, read the write and commit path of lua/mdbx_schema.lua.
+- The db write path records every write: the table, the key, and the
+	kind of write (insert, update or delete). It publishes the writes only
+	when the transaction commits. rs:apply_changes() runs each row in a
+	child transaction and rolls a failed row back, and the writes of a
+	rolled-back row must not be published.
+- The db write path gives each commit with writes a change number. The
+	numbers increase in commit order. Two possible sources:
+	- A counter in the server process. It restarts at 0, so the numbers
+		need a restart marker, such as the server's start time.
+	- MDBX's transaction id, if mdbx_schema.lua exposes it. It survives
+		restarts, and it has gaps. The gaps don't matter if the nav asks for
+		the changes since N.
+- The server keeps the recent changes in memory: number, table, key and
+	kind. The db is not for churn. After a restart the list is empty, and
+	every nav does one full reload.
+- Remove the table_changed() calls from rowset_mdbx.lua. Keep
+	rowset_changed() for rowsets whose rows don't come from a db table,
+	such as rowset.rowsets in lua/rowset.lua. A call to it makes the navs
+	do a full reload.
+
+DECIDE I2a. Which rule drops old changes from the list: keep the last X
+changes, or keep the changes of the last T minutes?
+
+
+I3. PUSH AND FETCH
+------------------------------------------------------------------------------
+
+- When a table changes, the server pushes the name of each rowset that
+	reads the table, with the new change number. The push carries no row
+	values, because the server sends every rowset's notifications to every
+	events connection.
+- The nav fetches the changes since its number through rowset.json. That
+	way rowset.lua checks the rowset's allow. One global change number is
+	enough.
+- The rowset turns the changed table keys into rowset rows:
+	- a key of its write table: load_row() loads the row by pk.
+	- a key that is no longer in the table: a delete.
+	The rowset answers with the full rowset in these cases:
+	- a key of another table that the rowset reads;
+	- a rowset without a write table, or without load_row();
+	- a nav whose number is older than the oldest kept change.
+- The server puts the change number of its commit in the save ack. The
+	nav uses it to recognize its own save. Remove update_ids and
+	own_update_ids.
+
+
+I4. ONE APPLY PATH IN THE NAV
+------------------------------------------------------------------------------
+
+- One function applies a change set: rows with values (inserts and
+	updates), and pks to delete. It finds the rows by pk. A push, a save
+	ack and a full reload all use it. The ack code adds its errors on top.
+- For a full reload, today's walk computes the change set. It deletes the
+	rows that are missing from the rowset, except new rows.
+- While a save is in flight, the nav holds the change sets, as it holds
+	reloads today.
+- The field mark: server_changed_mask, Uint32 x W per row, like
+	changed_mask. A merge or an ack sets the bit when it writes a different
+	server value under an edit that stays. A merge into a new row sets it
+	too.
+- Do work only for the rows in the change set:
+
+	step          today                for the change set only
+	------------  -------------------  ------------------------------------
+	filter        every row            the changed rows; the other rows'
+	                                   cells didn't change
+	tree parents  every row            rows with a changed parent_id, added
+	                                   rows, and the children of added rows
+	                                   (needs a lookup of rows by parent_id)
+	groups        removed and rebuilt  needs a lookup of groups by key
+	sort          full radix sort      merge the changed rows in, or a full
+	                                   radix sort (see I5)
+	stages 3-5    full passes          full passes
+
+
+I5. MERGE COST
+------------------------------------------------------------------------------
+
+- Write the benches first, in js/tests/nav-bench/nav2_bench.js: a merge
+	that adds 10k rows, a merge that drops 10k rows, and an insert of 10k
+	rows. Add change-set merges once I4 exists.
+- Indexes: today add_to_indexes() sorts the k added rows with a compare
+	function, then does a binary search per row. That is about
+	k log k + k log n compare calls, each through the column storage.
+	- pk index: merge the added rows in with one pass and no search. The
+		walk visits the added rows in pk order. Sort a change set's added
+		rows by pk first.
+	- other indexes: above some k, drop them, and let the next lookup
+		rebuild them with the radix sort. Below that k, merge. Measure the
+		threshold. insert_rows() uses the same code.
+- Add rows column by column, with direct array writes. The incoming column
+	and the nav's column use the same storage. copy_changed() already
+	relies on that.
+
+
+ORDER
+------------------------------------------------------------------------------
+
+Proposed order: I1; the I5 benches; I4, fed by the full reload and the
+save ack; the rest of I5; I2 and I3. With each step, update the head
+comment of www/ui_nav2.js.
