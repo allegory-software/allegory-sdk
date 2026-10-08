@@ -92,11 +92,13 @@ do
 				assertf(vals_set[v], 'unknown enum value in info: %s', v)
 			end
 		end
+		local collation = 'list\0'..cat(vals, '\0')
 		return {
 			type = 'enum', enum_values = vals,
 			en_enum_labels = labels, en_enum_info = info,
 			mdbx_type = 'utf8', maxlen = maxlen, nozero = true,
-			mdbx_collation = 'list\0'..cat(vals, '\0'),
+			mdbx_collation = collation,
+			sort_collation = collation,
 			check_expr = cat(checks, ' or '),
 			check_error = 'enum',
 		}
@@ -108,7 +110,8 @@ do
 			assertf(not v:find('\0', 1, true),
 				'collation value with an embedded zero: %s', v)
 		end
-		return {mdbx_collation = 'list\0'..cat(vals, '\0')}
+		local collation = 'list\0'..cat(vals, '\0')
+		return {mdbx_collation = collation, sort_collation = collation}
 	end
 
 	function env.hash(size) --small + fixed size makes it indexable
@@ -168,11 +171,12 @@ return function()
 	function virtual(self, tbl) tbl.virtual = true end
 
 	flags.hidden   = {hidden = true}
+	flags.internal = {internal = true}
 	flags.not_null = {not_null = true}
 	flags.autoinc  = {auto_increment = true, readonly = true}
 	flags.nozero   = {nozero = true} --no embedded zeroes allowed
 	flags.fixed    = {fixed = true} --fixed size: allows indexing without nozero
-	flags.ai_ci    = {mdbx_collation = 'utf8_ai_ci'}
+	flags.ai_ci    = {mdbx_collation = 'utf8_ai_ci', sort_collation = 'ai_ci'}
 
 	--non-indexable varsize types
 	types.text   = {type = 'text', mdbx_type = 'utf8', maxlen = 4096}
@@ -198,7 +202,7 @@ return function()
 
 	types.id   = {u32, w = 3}
 	types.idpk = {id, pk, autoinc}
-	types.pos  = {id, en_label = 'Position in List'}
+	types.pos  = {f64, internal}
 
 	--for money and qty, scale can be dynamic and taken from currency / unit
 	--of measure, though some apps can normalize on a single scale.

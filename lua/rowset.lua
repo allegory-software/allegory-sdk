@@ -3,75 +3,93 @@
 	Server-side rowsets for nav-based widgets.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	Properties to set:
+Rowset attributes (* = server-only):
+
+	REQUIRED
 		fields           : [field1, ...] fields (required)
-		rows             : [row1,...]    values: rows[ri][fi] = val
+		rows             : [row1,...]    values: rows[ri][fi] = val, or:
 		col_vals         : [vals1,...]   values: col_vals[fi][ri] = val
 		pk               : 'col1 ...'    primary key (required)
-		uks              : ['col1 ...',] unique keys (to validate on the client)
-		field_attrs      : {col->field}  extra field attributes
+	OPTIONAL
+	*	field_attrs      : {col->field}  extra field attributes
 		cols             : 'col1 ...'    default visible columns list
-		hide_cols        : 'col1 ...'    columns hidden by default
-		ro_cols          : 'col1 ...'    read-only columns
-		rw_cols          : 'col1 ...'    read-write columns
+	*	hide_cols        : 'col1 ...'    columns hidden by default
 		pos_col          : 'col'         pos column for manual ordering of rows
+		params           : 'par1 ...'    param names for server-side filtering
+		name_col         : 'col'         default display_col in lookup rowsets
+		uks              : ['col1 ...',] unique keys (to validate on the client)
+	TREE
 		id_col           : 'col'         id column for tree-building
 		parent_col       : 'col'         parent column for tree-building
-		name_col         : 'col'         default display_col in lookup rowsets
 		tree_col         : 'col'         tree column (the one with [+] icons)
-		params           : 'par1 ...'    param names for server-side filtering
+	ACCESS
+	*	ro_cols          : 'col1 ...'    read-only columns
+	*	rw_cols          : 'col1 ...'    read-write columns
 		can_add_rows     : f             allow adding new rows
 		can_remove_rows  : f             allow removing rows
 		can_change_rows  : f             allow editing existing rows
 		can_move_rows    : f             allos changing rows' position in the rowset
-		allow            : f|'r1 ...'    allow only if current user has a matching role
+	*	allow            : f|'r1 ...'    allow only if current user has a matching role
 
-	Field attributes sent to client:
-		name             : 'col'         name for use in code
+Field attributes:
+
+	REQUIRED
+		name             : 'col'         for identification and referencing
 		type             : 'number'|...  client-side type
+	DISPLAY
 		label            : 'Foo Bar'     input-box label / grid column label
 		info             : '...'         input-box info / grid column info
-		client_default   : val           value that new rows start with
-		has_server_default: t            the server fills this in for new rows
+		align            : 'left'|'right'|'center'   cell alignment
+		w                : px            default grid column width
+		min_w            : px            min grid column width
+		max_w            : px            max grid column width
+		null_text        : ''            text for null
+		empty_text       : ''            text for ''
 		internal         : t             cannot be made visible
 		hidden           : t             not visible by default
+	EDITING
+		client_default   : val           value that new rows start with
+		has_server_default: t            the server fills this in for new rows
 		readonly         : f             cannot be changed
 		nosave           : f             client-side; should not be saved
 		not_null         : t             can't be null
-		null_text        : ''            text for null value
-		align            : 'left'|'right'|'center'   cell alignment
-		enum_values      : ['foo',...]   enum values
-		enum_labels      : {v->label}    enum labels in current language
-		enum_info        : {v->info}     enum info in current language
+	TEXT
+		maxlen           : n             max length in bytes
+		sort_collation   : signature     'ai_ci' or 'list\0ITEM1\0ITEM2...'
+	NUMBER
 		min              : n             min allowed value
 		max              : n             max allowed value
 		decimals         : n             number of decimals
 		scale            : n             scale for fixed-point decimal numbers
-		maxlen           : n             max length in bytes
-		w                : px            default grid column width
-		min_w            : px            min grid column width
-		max_w            : px            max grid column width
 		slider_min       : n             slider display range min
 		slider_max       : n             slider display range max
 		slider_markers   : b             show slider markers
 		slider_scale_base: n             slider marker scale base
 		slider_scales    : {n...}        slider marker scale multiples
+	ENUM
+		enum_values      : ['foo',...]   enum values
+		enum_labels      : {v->label}    enum labels in current language
+		enum_info        : {v->info}     enum info in current language
+	DATE/TIME/TIMEOFDAY
 		hour_step        : n             for the time picker
 		minute_step      : n             for the time picker
 		second_step      : n             for the time picker
 		precision        : 'd|s|ms'      date type precision
 		timeago          : f             format as relative time (see format_timeago())
+	DURATION
 		duration_format  :               format for duration type (see format_duration())
+	FILESIZE
 		magnitude        : 'K|M|G|..'    unit to pin to, filesize/count types
 		magnitude_decimals: n            decimals shown at that magnitude
 		gray_min         : n             filesize type: below this, draw gray
-
+	LOOKUP
 		lookup_rowset_name:              lookup rowset name
 		lookup_cols      :               lookup rowset cols
 		display_col      :               lookup display col
 		name_col         :               default display col when used as lookup rowset
 
-	Methods to implement:
+Rowset methods:
+
 		prepare()                      build whatever the other methods need
 		load_rows(result, param_vals)
 		insert_row(vals)
@@ -85,14 +103,16 @@
 	with that id as the same insert sent again, whose response was lost: it
 	inserts nothing, and load_row() loads the existing row back.
 
-	Methods to call:
+Methods to call:
+
 		rowset_changed(rowset_name)
 		table_changed(table_name)
 
-	Sets by default:
-		- `can_[add|change|remove]_rows` are set to false on missing row update methods.
-		- `pos_col` and `parent_col` are set to hidden by default.
-		- on client-side, `id_col` is set to pk if pk is single-column.
+Sets by default:
+
+	- `can_[add|change|remove]_rows` are set to false on missing row update methods.
+	- `pos_col` and `parent_col` are set to hidden by default.
+	- on client-side, `id_col` is set to pk if pk is single-column.
 
 GLOBALS
 	rowset_changed(rowset_name, [update_id])
@@ -100,7 +120,7 @@ GLOBALS
 ACTIONS
 
 	rowset.json               named rowsets action
-	xrowset.events            rowset-refresh push-notifications
+	rowset.events             rowset-refresh push-notifications
 
 ]]
 
@@ -630,7 +650,7 @@ end
 	end
 end
 
-action['xrowset.events'] = function()
+action['rowset.events'] = function()
 	setheader('cache-control', 'no-cache')
 	setconnectionclose()
 	setcompress(false)

@@ -3,59 +3,50 @@
 	UI field objects.
 	Written by Cosmin Apreutesei. Public Domain.
 
-Field attributes:
+Field attributes (* = client-only):
 
-	identification:
-
-		type           : for choosing a field preset: number, bool, etc.
-
-	editing:
-
+	REQUIRED
+		name           : for identification and referencing.
+		type           : for choosing a field definition: number, bool, etc.
+	STORAGE
+	*	col_storage    : see "column storage" below.
+	DISPLAY
+		align          : 'left'|'right'|'center'
+		null_text      : plain text display value for null
+		empty_text     : plain text display value for ''
+	*	to_text        : f(v) -> s   plain text display value.
+	EDITING
 		readonly       : prevent editing.
-		input_type     : input element type.
-		to_input       : f(v) -> s   value as editable text.
-		from_input     : f(s) -> v   editable text back to value (or undefined)
-
-		enum_values    : enum type: ['v1', ...]
-		enum_labels    : enum type: {v->label}
-		enum_info      : enum type: {v->info}
-
-	validation:
-
 		not_null       : don't allow null (false).
+	*	to_input       : f(v) -> s   value as editable text.
+	*	from_input     : f(s) -> v   editable text back to value (or undefined)
+	*	input_type     : input element type.
+	*	validator_NAME : custom validation rule
+	TEXT
 		maxlen         : max text length (256).
-
+		sort_collation : 'ai_ci' or 'list\0ITEM1\0ITEM2...'
+	NUMBER
 		min            : min value (0).
 		max            : max value (inf).
 		decimals       : max number of decimals (0).
 		scale          : number type: value is stored times this (1).
-
-		validator_NAME : custom validation rule
-
-	display:
-
-		to_text        : f(v) -> s   plain text display value.
-		align          : 'left'|'right'|'center'
-		attr           : custom value for html attribute `field`, for styling
-		null_text      : plain text display value for null
-		empty_text     : plain text display value for ''
-
-		magnitude          : filesize, count types: unit to pin to ('K', 'M', ...)
-		magnitude_decimals : filesize, count types: decimals at that magnitude
-		gray_min           : filesize type: below this, the value draws gray
-
-		precision      : date, datetime, time, timeofday types
-
-		duration_format: see duration() in glue.js
-
-	slider:
-
 		slider_min     : slider min, defaults to min.
 		slider_max     : slider max, defaults to max.
 		slider_markers : show markers (true).
 		slider_scale_base : marker scale base (10).
 		slider_scales  : marker scale multiples ([1, 2, 2.5, 5]).
-
+	ENUM
+		enum_values    : enum type: ['v1', ...]
+		enum_labels    : enum type: {v->label}
+		enum_info      : enum type: {v->info}
+	DATE/TIME/TIMEOFDAY
+		precision      : date, datetime, time, timeofday types
+	DURATION
+		duration_format: see duration() in glue.js
+	FILESIZE
+		magnitude          : filesize, count types: unit to pin to ('K', 'M', ...)
+		magnitude_decimals : filesize, count types: decimals at that magnitude
+		gray_min           : filesize type: below this, the value draws gray
 
 NOTE: use obj() instead of {} for maps to prevent map['constructor'].
 
@@ -83,15 +74,15 @@ We don't like abstractions around here but this one buys us many things:
 - rules apply automatically, no need to specify which to apply where.
 - a validator can depend on, i.e. require that other rules pass first.
 - a validator can parse the input value so that subsequent rules operate
-	on the parsed value, thus only having to parse the value once. also, parsing
-	is part of validation to allow you to be specific about error message when
-	parsing fails (i.e. tell the user in what way is their syntax wrong).
+  on the parsed value, thus only having to parse the value once. also, parsing
+  is part of validation to allow you to be specific about error message when
+  parsing fails (i.e. tell the user in what way is their syntax wrong).
 - null values are filtered automatically.
 - result contains all the messages (none if with_messages is false) with
-	`failed` and `checked` status on each.
+  `failed` and `checked` status on each.
 - it makes no garbage on re-validation so you can validate huge lists fast.
 - entire objects can be validated the same way simple values are, so it also
-	works for validating ranges, db records, etc. as a unit.
+  works for validating ranges, db records, etc. as a unit.
 - it's not that much code for all of that.
 
 output:
@@ -232,7 +223,6 @@ ui.create_validator = function(e, own_rules = empty_array, no_global_rules) {
 
 // NOTE: this must work with values that are unparsed and invalid!
 function field_value(e, v) {
-	if (e.draw) return e.draw(v) ?? '' // field renders itself
 	if (v == null) return S('null', 'null')
 	if (isstr(v)) return v // string or failed to parse, show as is.
 	if (e.to_text) return e.to_text(v)
@@ -448,23 +438,31 @@ ui.add_validation_rule({
 
 //// COLUMN STORAGE ----------------------------------------------------------
 
-// how a nav stores one column of values, by row slot ri:
-//   load_col(vals, cap) -> col   vals: the column as the server sends it.
-//   grow_col(col, cap) -> col    a column with room for cap rows.
-//   get(col, ri) -> v
-//   set(col, ri, v)
-//   write_sort_keys(col, ris, n, field, keys0, keys1) -> word_n
-//     radix sort keys of the rows ris[0..n), as 1 or 2 Uint32 words per row:
-//     the least significant word in keys0, the other one in keys1.
-//   compare_cell(col, ri, v, field) -> -1|0|1   in sort key order.
-//   copy_changed(col, ris, src_col, src_is, n, field, changed_ks) -> count
-//     for k in [0..n): where src_col[src_is[k]] differs from col[ris[k]],
-//     copy it there and put k in changed_ks. src_col is made by load_col().
-// null comes first in sort key order.
+/*
+
+Efficient storage for one column of values, using typed arrays for scalars
+and JS arrays for strings.
+
+	load_col(col_vals, cap) -> col   load rowset col_vals
+	grow_col(col, cap) -> col        grow col array
+	get(col, ri) -> v                get col val
+	set(col, ri, v)                  set col val
+	write_sort_keys(col, ris, n, field, keys0, keys1) -> word_n
+		radix sort keys of the rows ris[0..n), as 1 or 2 Uint32 words per row:
+		the least significant word in keys0, the other one in keys1.
+	compare_cell(col, ri, v) -> -1|0|1            sort comparator
+	copy_changed(col, ris, src_col, src_is, n, changed_ks) -> count
+		for k in [0..n): where src_col[src_is[k]] differs from col[ris[k]],
+		copy it there and put k in changed_ks. src_col is made by load_col().
+		null comes first in sort key order.
+
+*/
 
 function compare_vals(v1, v2) {
 	return v1 !== v2 ? (v1 < v2 ? -1 : 1) : 0
 }
+
+let base_collator_compare
 
 function grow_typed_col(col, cap) {
 	let col1 = new col.constructor(cap)
@@ -474,16 +472,13 @@ function grow_typed_col(col, cap) {
 
 // two NaNs are two f64 nulls: the same value. for other values the NaN test
 // is always false, so this function serves all three storages.
-function copy_changed(col, ris, src_col, src_is, n, field, changed_ks) {
-	let compare = field.compare_vals
+function copy_changed(col, ris, src_col, src_is, n, changed_ks) {
 	let changed_n = 0
 	for (let k = 0; k < n; k++) {
 		let ri = ris[k]
 		let v0 = col[ri]
 		let v = src_col[src_is[k]]
-		if (compare ? compare(v0, v, field)
-			: v0 !== v && (v0 === v0 || v === v)
-		) {
+		if (v0 !== v && (v0 === v0 || v === v)) {
 			col[ri] = v
 			changed_ks[changed_n++] = k
 		}
@@ -496,8 +491,7 @@ let array_storage = {
 	grow_col: (col, cap) => col, // a JS array grows on its own
 	get     : (col, ri) => col[ri],
 	set     : (col, ri, v) => { col[ri] = v },
-	// key: the value's rank among the distinct values sorted by the field's
-	// compare_vals; 0 for null.
+	// key: the value's rank among the distinct values; null is key 0. 1 word.
 	write_sort_keys: function(col, ris, n, field, keys0) {
 		let ranks = map() // {v -> rank}
 		let vals = [] // distinct non-null values
@@ -508,16 +502,34 @@ let array_storage = {
 				vals.push(v)
 			}
 		}
-		let compare = field.compare_vals
-		vals.sort(compare ? (v1, v2) => compare(v1, v2, field) : compare_vals)
-		if (compare) {
+		if (field.sort_collation == 'ai_ci') {
+			base_collator_compare ??= new Intl.Collator(undefined,
+				{sensitivity: 'base'}).compare
+			vals.sort(base_collator_compare)
 			let rank = 0
 			for (let i = 0; i < vals.length; i++) {
-				if (i == 0 || compare(vals[i - 1], vals[i], field) != 0)
+				if (i == 0 || base_collator_compare(
+					vals[i - 1], vals[i]) != 0)
 					rank++
 				ranks.set(vals[i], rank)
 			}
+		} else if (field.sort_collation?.startsWith('list\0')) {
+			let items = field.sort_collation.slice(5).split('\0')
+			let item_ranks = map() // {listed value -> rank}
+			for (let i = 0; i < items.length; i++)
+				item_ranks.set(items[i], i + 1)
+			let unlisted_vals = []
+			for (let v of vals) {
+				if (item_ranks.has(v))
+					ranks.set(v, item_ranks.get(v))
+				else
+					unlisted_vals.push(v)
+			}
+			unlisted_vals.sort(compare_vals)
+			for (let i = 0; i < unlisted_vals.length; i++)
+				ranks.set(unlisted_vals[i], items.length + i + 1)
 		} else {
+			vals.sort(compare_vals)
 			for (let rank = 0; rank < vals.length; rank++)
 				ranks.set(vals[rank], rank + 1)
 		}
@@ -527,13 +539,13 @@ let array_storage = {
 		}
 		return 1
 	},
-	compare_cell: function(col, ri, v, field) {
+	compare_cell: function(col, ri, v) {
 		let v1 = col[ri]
 		if (v1 == null)
 			return v == null ? 0 : -1
 		if (v == null)
 			return 1
-		return (field.compare_vals ?? compare_vals)(v1, v, field)
+		return compare_vals(v1, v)
 	},
 	copy_changed: copy_changed,
 }
@@ -557,7 +569,7 @@ let f64_storage = {
 		col[ri] = v == null ? NaN : v
 	},
 	// key: the double's bits made unsigned-sortable (negative: flip all bits;
-	// positive: flip the sign bit); 0 for null.
+	// positive: flip the sign bit); 0 for null. 2 words.
 	write_sort_keys: function(col, ris, n, field, keys0, keys1) {
 		let bits = new Uint32Array(col.buffer, col.byteOffset, col.length * 2)
 		for (let i = 0; i < n; i++) {
@@ -577,7 +589,7 @@ let f64_storage = {
 		}
 		return 2
 	},
-	compare_cell: function(col, ri, v, field) {
+	compare_cell: function(col, ri, v) {
 		let v1 = col[ri]
 		if (v1 !== v1)
 			return v == null ? 0 : -1
@@ -606,7 +618,7 @@ let bool_storage = {
 	set: function(col, ri, v) {
 		col[ri] = v == null ? 2 : v ? 1 : 0
 	},
-	// key: 0 for null, 1 for false, 2 for true.
+	// key: 0 for null, 1 for false, 2 for true. 1 word.
 	write_sort_keys: function(col, ris, n, field, keys0) {
 		for (let i = 0; i < n; i++) {
 			let v = col[ris[i]]
@@ -614,7 +626,7 @@ let bool_storage = {
 		}
 		return 1
 	},
-	compare_cell: function(col, ri, v, field) {
+	compare_cell: function(col, ri, v) {
 		let v1 = col[ri]
 		let key1 = v1 == 2 ? 0 : v1 + 1
 		let key2 = v == null ? 0 : v ? 2 : 1
@@ -626,10 +638,9 @@ let bool_storage = {
 //// ALL FIELD TYPES ---------------------------------------------------------
 
 function check_field_options(field, checks, nav_id) {
-	let name = field.name || field.type
 	for (let k in checks)
 		if (warn_if(!checks[k](field[k]), nav_id,
-			'field:', name, 'invalid option:', k, field[k]))
+			'field:', field.name, 'invalid option:', k, field[k]))
 			return false
 	return true
 }
@@ -655,6 +666,8 @@ let field_config_checks = {
 	sortable: optional_bool,
 	min: optional_num,
 	max: optional_num,
+	sort_collation: v => v == null || isstr(v)
+		&& (v == 'ai_ci' || v.startsWith('list\0')),
 	null_text: optional_str,
 	empty_text: optional_str,
 	align: v => v == null || v == 'left' || v == 'right' || v == 'center',
@@ -691,8 +704,7 @@ all_field_types.to_text = function(v) {
 	return String(v)
 }
 
-// to_input(v) -> s, inverse of from_input(s) -> v. filesize, count and date
-// override it: from_input() can't read back a magnitude suffix or a timeago text.
+// to_input(v) -> s (format), inverse of from_input(s) -> v (parse).
 all_field_types.to_input = function(v) {
 	return this.to_text(v)
 }
@@ -1097,11 +1109,13 @@ field_types.private_key = {}
 
 ui.create_field = function(opt, nav_id = '') {
 	let type = opt?.type ?? 'text'
-	if (warn_if(!field_types[type], nav_id, 'field:', opt?.name, 'unknown type:', type))
+	if (warn_if(!opt.name, nav_id, 'unnamed field'))
+		return null
+	if (warn_if(!field_types[type], nav_id, 'field:', opt.name, 'unknown type:', type))
 		return null
 	let field_type = field_types[type]
 	let field = assign_opt({}, all_field_types, field_type, opt)
-	field.label ??= display_name(field.name || field.type)
+	field.label ??= display_name(field.name)
 	if (!check_field_options(field, field_config_checks, nav_id))
 		return null
 	if (field.enum_values != null) {

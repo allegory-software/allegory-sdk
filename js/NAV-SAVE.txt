@@ -79,6 +79,9 @@ R2. SAVING
 	that refer to it.
 - If a save fails, the next save by the user sends its changes again.
 	Until then the changes stay pending.
+- The server saves or rejects each record on its own. A rejected record
+	keeps its pending changes, and the user sees the error on the record or
+	on the field.
 
 
 R3. SEEING OTHERS' CHANGES
@@ -88,7 +91,10 @@ R3. SEEING OTHERS' CHANGES
 	that data open receives it. If the server rolls a change back, nobody
 	receives it.
 - The server sends only the changed records. If it can't, the user's view
-	loads again in full.
+	has to load again in full. A full reload is the last resort: it costs
+	work for the whole table. The user asks for it, with a refresh button
+	in the grid; the nav doesn't do it on its own. The user's pending
+	changes and new records survive a full reload.
 - A user receives only the records that the user is allowed to see.
 - Views that the server filters are out of scope.
 
@@ -115,20 +121,25 @@ R4. WHAT THE USER SEES
 		save sends the delete, and a delete of a missing record is not an
 		error (R2).
 - If another user changes a field after this user changed it, the field
-	gets a mark. The mark stays if the user changes the field again. The
-	mark goes away when the user saves or undoes the field, or when the
-	user's value equals the new saved value.
-- After the user saves, the saved records stay where they are until the
-	user sorts or filters again. When other users change records, the
-	records move to their place right away: by the filter, the sort, the
-	groups and the tree.
+	takes the new saved value, and this user's change stays on top of it,
+	pending. The field gets no mark: long edits, such as a multi-line text,
+	may need other measures later, such as a diff.
+- If the user changes a record while its save is underway, the new change
+	stays pending on top of the saved values when the answer arrives.
+- A record stays visible and in place, outside the sort and the filter,
+	while it has pending changes or a save underway, whoever changes it.
+	When the save answer arrives, the saved record still stays where it is.
+	Any later change to the record from the server moves it to its place
+	right away: by the filter, the sort, the groups and the tree.
 
 
 R5. PERFORMANCE
 ------------------------------------------------------------------------------
 
 - Small, frequent changes from other users are the common case. The
-	browser's work for them is proportional to the change.
+	browser's work for them is proportional to the change. That is the
+	target; there is no number beyond it. Sparse pos values keep moves from
+	rewriting the pos of many records.
 - A paste of 10k rows, as new records or as changes, stays fast at every
 	step: the paste, the save, and the update of the other users' views.
 
@@ -185,10 +196,10 @@ I1. KEYS AND SAVE
 - Batch order: today pack_changes() walks tree_ris backwards. That order
 	suits deletes. Inserts need a forward walk.
 
-DECIDE I1a. Which parts of a 10k-row save get their own bench and target?
-- The id requests: 1000 ids per request, one request after another.
-- The server loads each saved row back, with one scan per row.
-- The whole save runs in one write transaction, and other writers wait.
+I1a. Bench a 10k-row save end to end: write to an actual mdbx table, and
+time everything from the paste to the ack, including the id requests,
+loading each saved row back, and the time spent waiting to open the write
+transaction, since mdbx runs one writer at a time.
 
 
 I2. CHANGE CAPTURE ON THE SERVER
@@ -209,11 +220,11 @@ I2. CHANGE CAPTURE ON THE SERVER
 		the changes since N.
 - The server keeps the recent changes in memory: number, table, key and
 	kind. The db is not for churn. After a restart the list is empty, and
-	every nav does one full reload.
+	every nav needs a full reload.
 - Remove the table_changed() calls from rowset_mdbx.lua. Keep
 	rowset_changed() for rowsets whose rows don't come from a db table,
-	such as rowset.rowsets in lua/rowset.lua. A call to it makes the navs
-	do a full reload.
+	such as rowset.rowsets in lua/rowset.lua. A call to it tells the navs
+	that they need a full reload.
 
 DECIDE I2a. Which rule drops old changes from the list: keep the last X
 changes, or keep the changes of the last T minutes?
@@ -232,13 +243,18 @@ I3. PUSH AND FETCH
 - The rowset turns the changed table keys into rowset rows:
 	- a key of its write table: load_row() loads the row by pk.
 	- a key that is no longer in the table: a delete.
-	The rowset answers with the full rowset in these cases:
+	In these cases the rowset can't send only the changes, and answers that
+	the nav needs a full reload; the grid then shows the refresh button:
 	- a key of another table that the rowset reads;
 	- a rowset without a write table, or without load_row();
 	- a nav whose number is older than the oldest kept change.
-- The server puts the change number of its commit in the save ack. The
-	nav uses it to recognize its own save. Remove update_ids and
-	own_update_ids.
+- The nav doesn't need to recognize its own save. Remove update_ids and
+	own_update_ids. When the fetch brings back the nav's own save, the save
+	answer has already written those values, so the merge changes nothing
+	and moves nothing (I4). If the save answer got lost, the fetch brings
+	the values like any other change.
+- Deleted parents: the nav removes the children of a deleted parent
+	itself.
 
 
 I4. ONE APPLY PATH IN THE NAV
@@ -250,11 +266,13 @@ I4. ONE APPLY PATH IN THE NAV
 - For a full reload, today's walk computes the change set. It deletes the
 	rows that are missing from the rowset, except new rows.
 - While a save is in flight, the nav holds the change sets, as it holds
-	reloads today.
-- The field mark: server_changed_mask, Uint32 x W per row, like
-	changed_mask. A merge or an ack sets the bit when it writes a different
-	server value under an edit that stays. A merge into a new row sets it
-	too.
+	reloads today. Otherwise a fetch could bring the nav's own save before
+	the save answer, and move the saved rows.
+- The save answer writes its values and moves no row. A merge puts in
+	place only the rows whose values it changed, except rows that had
+	pending changes before the merge. The check uses the state before the
+	merge: when a save answer got lost, the merge itself clears the edits
+	that match the server's values.
 - Do work only for the rows in the change set:
 
 	step          today                for the change set only

@@ -108,23 +108,41 @@ INDEX QUERYING
 	All query ops that return values accept index tables named TABLE/COL1,COL2
 	as input and lookup and decode values form the base table automatically.
 
-SCHEMA SPEC (create_table, alter_table)
+SCHEMA SPEC (create_table, alter_table; * = shared semantics with ui*.js)
 
 	schema_spec: {
-		fields = {
-			{
-				col=name, mdbx_type='u32|i32|u8|i8|u16|i16|f32|f64|utf8|binary|bool',
-				[not_null=true], [maxlen=N], [nozero=true], [fixed=true],
-				[mdbx_collation='utf8_ai_ci'|'list\0item...'], [scale=N],
-				[auto_increment=true], [default_expr=expr], [default_fn=fn],
-				[on_update_expr=expr], [on_update_fn=fn],
-				[gen_expr=expr], [gen_fn=fn], [gen_fn_version=N],
-				[check_expr=expr], [check_fn=fn], [check_error=message],
-			}, ...
-		},
+		fields = {field1, ...},
 		pk = {'col1', ...},
-		[row_check_expr=expr], [row_check_fn=fn], [row_check_error=message],
+		row_check_expr = expr,
+		row_check_fn = fn,
+		row_check_error = message,
 	}
+
+	field: {
+		col = name,                 column name
+	LAYOUT
+		mdbx_type = type,           'u32|i32|u8|i8|u16|i16|f32|f64|utf8|binary|bool'
+	*	not_null = true,            reject null values
+	*	maxlen = N,                 maximum string bytes or array elements
+		nozero = true,              reject \0 bytes or zero array elements
+		fixed = true,               require exactly maxlen bytes or elements
+		mdbx_collation = signature, index key order: 'utf8_ai_ci' or 'list\0item...'
+	*	scale = N,                  100 means 1234 represents 12.34
+	AUTOMATION
+		auto_increment = true,      assign next sequence value if omitted
+		default_expr = expr,        default expression for an omitted value
+		default_fn = fn,            default function for an omitted value
+		on_update_expr = expr,      set value when row is updated
+		on_update_fn = fn,          function form of on_update_expr
+		gen_expr = expr,            generate value from the row
+		gen_fn = fn,                function form of gen_expr
+		gen_fn_version = N,         bump to rewrite stored generated values
+		check_expr = expr,          reject value when the expression is false
+		check_fn = fn,              function form of check_expr
+		check_error = message,      error text when a check fails
+	}
+
+IX & FK SPEC
 
 	NOTE: ixs and fks are NOT part of schema_spec! add them after create_table
 	via add_index/add_fk.
@@ -134,6 +152,7 @@ SCHEMA SPEC (create_table, alter_table)
 					[ondelete='cascade'|'set null'], [onupdate='cascade']}
 
 PAPER-SCHEMA HELPERS (schema_mdbx.lua)
+
 	default         (value [, expr|fn])            client and optional server default
 	check           (expr|fn, [error_message])     column constraint
 	row_check       (expr|fn, [error_message])     table constraint
