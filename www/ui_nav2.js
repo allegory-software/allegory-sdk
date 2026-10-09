@@ -3,10 +3,10 @@
 	UI nav objects v2.
 	Written by Cosmin Apreutesei. Public Domain.
 
-A nav is an in-memory table with typed columns and rows, populated from a
-rowset*. Once set up, rows can be sorted, filtered, grouped, form a tree,
-added, removed, moved at different positions, cells can be focused, selected,
-modified, etc. A nav is the data model for the grid widget.
+A nav is an in-memory table with columns and rows, populated from a rowset*.
+Once set up, rows can be sorted, filtered, grouped, form a tree, added, removed,
+moved at different positions, cells can be focused, selected, modified, etc.
+A nav is the data model for the grid widget.
 
 *A rowset is a POD containing field definitions and cell values. It can come
 from a http server as JSON, or constructed in JS. Rowset spec is scattered
@@ -32,16 +32,12 @@ DATA STRUCTURES --------------------------------------------------------------
 The nav gives every row a slot number ri (row index) at load or insert and
 keeps it until the row is deleted and the slot is reused. The nav stores every
 per-row fact in a typed array indexed by ri, and every ordered list of rows as
-a Uint32Array of ri's. No op writes back into row objects: an op writes entries
-at known ri's, or makes sequential passes over typed arrays.
+a Uint32Array of ri's.
 
 	n          number of rows
 	k          number of rows passed to an op
-	i          index into visible_ris
-	fi         column index, fixed for the nav's life; bit fi of sel_mask
-	           and changed_mask is column fi, so moving, hiding or showing
-	           a column needs no remap
-	W          ceil(number of columns / 32)
+	fi         field index in static all_fields (not in changing visible_fields)
+	W          number of uint32s (i.e. words) needed per row for bitmasks
 	NONE       0xFFFFFFFF
 	tree nav   nav with id and parent_id columns, shown as tree or flat
 	data row   row from the rowset or inserted by the user
@@ -138,11 +134,11 @@ EDITING
 	changed_n      number       number of changed rows
 CELL FOCUS & SELECTION
 	focused_ri     number       focused row; null when no row is focused
-	focused_fi     number       focused column
+	focused_fi     number       focused field
 	sel_anchor_ri  number       selection rectangle from the anchor cell to
 	sel_anchor_fi  number       the end cell, not yet written into sel_mask;
 	sel_end_ri     number       it spans the visible rows and the visible
-	sel_end_fi     number       columns between the two cells
+	sel_end_fi     number       fields between the two cells
 	has_sel_bits   boolean      false: sel_mask is all zero, so clearing it
 VISIBILE ROWS
 	visible_n      number       number of visible rows (visible_ris).
@@ -157,8 +153,8 @@ The nav also builds these indexes:
 
 	field(s)           when                     why
 	-----------------  ------------------------ -------------------------------
-	id_field           on load for trees        finding a row's parent
-	pk                 on diff_merge            matching incoming rows to existing rows
+	id_field           on load for trees        find parents
+	pk                 on diff_merge            find existing rows
 	any                lookup()                 user asked
 
 An index is a Uint32Array of ris sorted by cols with radix sort. A lookup is
@@ -180,227 +176,222 @@ The nav updates stored rows, sort order, tree order, filter results and
 visible rows in five stages. After writing state, the nav runs the stages
 needed to update the displayed rows.
 
-Stage 1: stored order
-- load, insert, move, drop and merge write base_ris directly. Reverting or
-  accepting server changes to pos_col or parent_id cells also sorts it.
+1: stored order
+	- load, insert, move, drop and merge write base_ris directly. Reverting or
+	  accepting server changes to pos_col or parent_id cells also sorts it.
 
-Stage 2: e.set_order_by()
-- sort base_ris into sorted_ris.
-- order_by = null        : no sort, use base_ris as sorted_ris.
-- order_by = column list : use radix sort in O(n) rows per digit.
-- order_by = cmp fn      : use sort(cmp) in O(n log n).
+2: e.set_order_by()
+	- sort base_ris into sorted_ris.
+	- order_by = null        : no sort, use base_ris as sorted_ris.
+	- order_by = column list : use radix sort in O(n) rows per digit.
+	- order_by = cmp fn      : use sort(cmp) in O(n log n).
 
-Stage 3: update_tree_ris()
-- read sorted_ris, group_ris, parent_ri, is_tree and is_grouped.
-- build first_child_ri and next_sibling_ri.
-- visit parents before descendants to write tree_ris, tree_i, tree_n and depth,
-  then count descendants in desc_count. O(n).
-- on a cycle, warn, disable tree view, clear parent_ri and show rows flat.
-- in flat view without groups, use sorted_ris directly as tree_ris and set
-  depth and desc_count to zero.
+3: update_tree_ris()
+	- read sorted_ris, group_ris, parent_ri, is_tree and is_grouped.
+	- build first_child_ri and next_sibling_ri.
+	- visit parents before descendants to write tree_ris, tree_i, tree_n and
+	  depth, then count descendants in desc_count. O(n).
+	- on a cycle, warn, disable tree view, clear parent_ri and show rows flat.
+	- in flat view without groups, use sorted_ris directly as tree_ris and set
+	  depth and desc_count to zero.
 
-Stage 4: update_pass_desc()
-- read is_pass, tree_ris, parent_ri, is_tree and is_grouped.
-- set has_pass_desc for parents with passing descendants. O(n).
+4: update_pass_desc()
+	- read is_pass, tree_ris, parent_ri, is_tree and is_grouped.
+	- set has_pass_desc for parents with passing descendants. O(n).
 
-Stage 5: update_visible_ris()
-- read tree_ris, desc_count, is_pass, has_pass_desc, is_collapsed.
-- write visible_ris, visible_i and visible_n.
-- keeps the previous visible order in prev_visible_ris and prev_visible_n.
-- read and update focused_ri, focused_fi, quicksearch_text, sel_mask,
-  has_sel_bits, sel_anchor_ri, sel_anchor_fi, sel_end_ri and sel_end_fi to
-  clear hidden focus and selection. O(n) in the worst case.
+5: update_visible_ris()
+	- read tree_ris, desc_count, is_pass, has_pass_desc, is_collapsed.
+	- write visible_ris, visible_i and visible_n.
+	- keeps the previous visible order in prev_visible_ris.
+	- read and update focused_ri, focused_fi, quicksearch_text, sel_mask,
+	  has_sel_bits, sel_anchor_ri, sel_anchor_fi, sel_end_ri and sel_end_fi to
+	  clear hidden focus and selection. O(n) in the worst case.
 
 Outside these stages:
-- load, group, ungroup, move and merge write parent_ri.
-- grouping creates group_ris. ungrouping and drop_empty_groups() shifts it.
+	- load, group, ungroup, move and merge write parent_ri.
+	- grouping creates group_ris. ungrouping and drop_empty_groups() shifts it.
 
 GRID OPS ---------------------------------------------------------------------
 
 SORT
-- run stages 2-5.
+	- run stages 2-5.
 
 UNSORT
-- set sorted_ris to base_ris.
-- run stages 3-5.
+	- set sorted_ris to base_ris.
+	- run stages 3-5.
 
 FILTER
-- set is_pass from fn(ri) for each data row; keep it set for new and changed
-  rows until save.
-- run stages 4-5.
+	- set is_pass from fn(ri) for each data row; keep it set for new and
+	  changed rows until save.
+	- run stages 4-5.
 
 COLLAPSE/EXPAND
-- set or clear is_collapsed on the row and, with recursive, its subtree.
-- run stage 5.
-
-COLLAPSE/EXPAND ALL
-- set or clear is_collapsed on roots, or on every row with recursive.
-- run stage 5.
+	- set or clear is_collapsed on the row and its subtree.
+	- run stage 5.
 
 TOGGLE TREE/FLAT VIEW
-- run stages 3-5.
+	- run stages 3-5.
 
 GROUP
-- read key columns, not input_vals.
-- use each column cell as the level key; for ranged columns, use its bucket
-  (number step, month or year).
-- sort data rows by level keys; create a group at each level where the key
-  changes from the previous row.
-- allocate one row slot per group; set is_group, key cells, is_pass and parent_ri.
-  ranged group keys use the bucket's first value; other cells are null.
-- set each data row's parent_ri to its innermost group; set group_ris in key
-  order.
-- run stages 3-5. Group labels use key cells and the level's range.
+	- read key columns, not input_vals. use each column cell as the level key;
+	  for ranged columns, use its bucket (number step, month or year).
+	- sort data rows by level keys; create a group at each level where the key
+	  changes from the previous row.
+	- alloc a row slot per group; set is_group, key cells, is_pass and parent_ri.
+	  ranged group keys use the bucket's first value; other cells are null.
+	- set each data row's parent_ri to its innermost group; set group_ris in
+	  key order.
+	- run stages 3-5. Group labels use key cells and the level's range.
 
 UNGROUP
-- free group row slots and empty group_ris.
-- if tree, rebuild parent_ri from parent_id through the id index, else set
-  parent_ri to NONE.
-- run stages 3-5.
+	- free group row slots and empty group_ris.
+	- if tree, rebuild parent_ri from parent_id through the id index, else set
+	  parent_ri to NONE.
+	- run stages 3-5.
 
 LOOKUP
-- build the index on the first lookup; use binary search to find vals in cols.
-- return ri or none; O(log n).
+	- build the index on the first lookup; use binary search to find vals in cols.
+	- return ri or none; O(log n).
 
 SELECT
-- all    : set the selection rect; focus the first cell. O(1).
-- none   : clear sel_mask and the selection rect. O(n).
-- extend : move the selection rect's end cell; O(1).
-- set    : set sel_mask bits. start a new rect.
+	- all    : set the selection rect; focus the first cell. O(1).
+	- none   : clear sel_mask and the selection rect. O(n).
+	- extend : move the selection rect's end cell; O(1).
+	- set    : set sel_mask bits. start a new rect.
 
 HIDE COLUMN
-- clear bit fi from every row's sel_mask.
+	- clear bit fi from every row's sel_mask.
 
 FOCUS
-- move through visible_ris from visible_i[focused_ri], skipping no_focus rows.
+	- move through visible_ris from visible_i[focused_ri], skipping no_focus rows.
 
 QUICKSEARCH s fi
-- search visible_ris from the focused row, wrapping around.
+	- search visible_ris from the focused row, wrapping around.
 
 EDITING OPS ------------------------------------------------------------------
 
 UPDATE CELL
-- write input_vals[fi][ri] and set cell's changed_mask bit; clear it when the
-  value is set to the server value.
-- validate the cell: write or clear cell_errors[fi][ri]; set is_invalid from
-  cell and row errors. set is_pass.
-- O(1); no stage runs.
+	- write input_vals[fi][ri] and set cell's changed_mask bit; clear it when the
+	  value is set to the server value.
+	- validate the cell: write or clear cell_errors[fi][ri]; set is_invalid from
+	  cell and row errors. set is_pass.
+	- O(1); no stage runs.
 
 REVERT CELL
-- clear the changed_mask bit, input_vals entry and cell_errors entry.
-- run stages 3-5 when reverting pos_col or parent_id; otherwise no stage runs.
+	- clear the changed_mask bit, input_vals entry and cell_errors entry.
+	- run stages 3-5 when reverting pos_col or parent_id; otherwise no stage runs.
 
 UNSET CELL
-- a cell in a new row with no value and no client_default at insert is unset;
-  cell_val is undefined and save omits it.
-- validate row checks it unless the field has a server default.
-- an edit, including null, gives it a value; revert cell makes it unset again.
+	- a cell in a new row with no value and no client_default at insert is unset;
+	  cell_val is undefined and save omits it.
+	- validate row checks it unless the field has a server default.
+	- an edit, including null, gives it a value; revert cell makes it unset again.
 
 REVERT ROW
-- drop a new row; otherwise revert each edited cell.
-- run stages 3-5 when dropping a new row or reverting pos_col or parent_id.
+	- drop a new row; otherwise revert each edited cell.
+	- run stages 3-5 when dropping a new row or reverting pos_col or parent_id.
 
 REVERT ALL
-- scan base_ris for changed rows; drop new rows in one pass and undelete and
-  revert other rows.
-- drop input_vals and cell_errors arrays.
-- run stages 3-5 when the scan drops new rows or reverts pos_col or parent_id changes.
-- O(n).
+	- scan base_ris for changed rows; drop new rows in one pass and undelete and
+	  revert other rows.
+	- drop input_vals and cell_errors arrays.
+	- run stages 3-5 when the scan drops new rows or reverts pos_col or parent_id changes.
+	- O(n).
 
 VALIDATE ROW
-- run when focus leaves an edited or new row, and during save.
-- validate every cell of a new row; set is_invalid from cell_errors and row_errors.
+	- run when focus leaves an edited or new row, and during save.
+	- validate every cell of a new row; set is_invalid from cell_errors and row_errors.
 
 INSERT k ROWS AT i
-- allocate k slots from free_ris, then from the end; reset their entries.
-- set is_new and is_pass; copy parent_ri and parent_id from the row at i.
-- when grouped, find the tree parent through the id index and copy group keys.
-- unsorted: splice rows into base_ris before i; assign pos values between
-  neighbors on pos_col navs.
-- sorted: splice rows into sorted_ris before i and append them to base_ris;
-  assign pos values after their siblings on pos_col navs.
-- merge rows into indexes.
-- run stages 3-5.
+	- allocate k slots from free_ris, then from the end; reset their entries.
+	- set is_new and is_pass; copy parent_ri and parent_id from the row at i.
+	- when grouped, find the tree parent through the id index and copy group keys.
+	- unsorted: splice rows into base_ris before i; assign pos values between
+	  neighbors on pos_col navs.
+	- sorted: splice rows into sorted_ris before i and append them to base_ris;
+	  assign pos values after their siblings on pos_col navs.
+	- merge rows into indexes.
+	- run stages 3-5.
 
 DELETE k ROWS
-- mark rows is_removed; in tree or grouped view, mark their subtrees too.
-- never mark a group row; mark the rows below it instead.
-- keep marked rows visible.
-- drop new rows.
-- run stages 3-5 when new rows are dropped; otherwise no stage runs.
+	- mark rows is_removed; in tree or grouped view, mark their subtrees too.
+	- never mark a group row; mark the rows below it instead.
+	- keep marked rows visible.
+	- drop new rows.
+	- run stages 3-5 when new rows are dropped; otherwise no stage runs.
 
 UNDELETE k ROWS
-- clear is_removed on marked rows and their marked ancestors.
+	- clear is_removed on marked rows and their marked ancestors.
 
 DROP ROWS
-- remove the rows from base_ris and sorted_ris, return slots to free_ris.
-- remove rows from indexes; clear input_vals, cell_errors, row_errors.
-- free groups left without rows and remove them from group_ris.
-- run stages 3-5.
+	- remove the rows from base_ris and sorted_ris, return slots to free_ris.
+	- remove rows from indexes; clear input_vals, cell_errors, row_errors.
+	- free groups left without rows and remove them from group_ris.
+	- run stages 3-5.
 
 MOVE k ROWS TO i
-- remove rows from base_ris and insert them before i
-- write parent_ri and parent_id for rows changing parent.
-- assign pos_col values between neighbors or renumber the sibling list 1..ms.
-- write pos and parent_id changes as input_vals edits; write col_vals on new rows.
-- run stages 3-5.
+	- remove rows from base_ris and insert them before i
+	- write parent_ri and parent_id for rows changing parent.
+	- assign pos_col values between neighbors or renumber the sibling list 1..ms.
+	- write pos and parent_id changes as input_vals edits; write col_vals on new rows.
+	- run stages 3-5.
 
 SERVER OPS -------------------------------------------------------------------
 
 LOAD
-- copy cell values from rowset into storage via field.col_storage.load_col().
-- set base_ris to 0..n-1 and sort it by pos_col if any.
-- build tree: fill parent_ri by matching parent_id (roots get ri=NONE).
-- run stages 3-5.
+	- copy cell values from rowset into storage via field.col_storage.load_col().
+	- set base_ris to 0..n-1 and sort it by pos_col if any.
+	- build tree: fill parent_ri by matching parent_id (roots get ri=NONE).
+	- run stages 3-5.
 
 SAVE
-- Send requests to rowset_name one at a time; queue another save until the
-  current request is acknowledged.
-- With reserves_ids, reserve ids for new rows without ids before saving; a
-  resent insert then carries the same id and the server skips it.
-- Scan tree_ris backwards for changed rows; skip group rows, no_save rows,
-  rows awaiting a save reply and rows failing validation, except rows
-  marked for deletion.
-- Send new rows without unset cells, changed rows with pk:old and changed_mask
-  cells, and removed rows with pk:old. Children go before parents.
-- Wait for the server's reply before finishing the batch. Keep rows changed
-  if the request fails.
-- O(n); does not run a stage.
+	- Send requests to rowset_name one at a time; queue another save until the
+	  current request is acknowledged.
+	- With reserves_ids, reserve ids for new rows without ids before saving; a
+	  resent insert then carries the same id and the server skips it.
+	- Scan tree_ris backwards for changed rows; skip group rows, no_save rows,
+	  rows awaiting a save reply and rows failing validation, except rows
+	  marked for deletion.
+	- Send new rows without unset cells, changed rows with pk:old and changed_mask
+	  cells, and removed rows with pk:old. Children go before parents.
+	- Wait for the server's reply before finishing the batch. Keep rows changed
+	  if the request fails.
+	- O(n); does not run a stage.
 
 SAVE ACK
-- Process sent rows by position. Drop removed rows; record row_errors and
-  cell_errors on errors and leave the row changed.
-- Otherwise write server values, or sent values, into columns; edits equal to
-  column values stop counting as edits; clear is_new and unset bits.
-- Skip rows dropped before the server replied; invalidate indexes for written
-  columns.
-- when changed_n reaches 0, drop input_vals and cell_errors arrays.
-- run stages 3-5 when rows are dropped or pos_col or parent_id changes;
-  otherwise no stage runs.
+	- Process sent rows by position. Drop removed rows; record row_errors and
+	  cell_errors on errors and leave the row changed.
+	- Otherwise write server values, or sent values, into columns; edits equal to
+	  column values stop counting as edits; clear is_new and unset bits.
+	- Skip rows dropped before the server replied; invalidate indexes for written
+	  columns.
+	- when changed_n reaches 0, drop input_vals and cell_errors arrays.
+	- run stages 3-5 when rows are dropped or pos_col or parent_id changes;
+	  otherwise no stage runs.
 
 MERGE ROWSET
-- Run on reload; load instead when columns or keys differ.
-- Radix-sort incoming rows by pk and merge them against the pk index.
-- For matched saved rows, copy changed cells column by column with
-  col_storage.copy_changed. Update edits and quicksearch only for copied
-  cells.
-- Leave a matched new row new when its reserved id matches; the next save
-  resends it and the server skips the insert.
-- Append unmatched incoming rows to base_ris as saved rows; drop unmatched
-  rows that aren't new.
-- Invalidate indexes for written columns; merge added rows into other indexes.
-- When filtered, recompute is_pass for rows that aren't changed.
-- When grouped, rebuild groups.
-- Rebuild tree parents only when rows are added or dropped, or id or parent_id
-  changes. Restore pos order when rows are added or pos changes. Run stage 2
-  when rows are added or any column changes.
-- Run stages 3-5; O(n).
+	- Run on reload; load instead when columns or keys differ.
+	- Radix-sort incoming rows by pk and merge them against the pk index.
+	- For matched saved rows, copy changed cells column by column with
+	  col_storage.copy_changed. Update edits and quicksearch only for copied
+	  cells.
+	- Leave a matched new row new when its reserved id matches; the next save
+	  resends it and the server skips the insert.
+	- Append unmatched incoming rows to base_ris as saved rows; drop unmatched
+	  rows that aren't new.
+	- Invalidate indexes for written columns; merge added rows into other indexes.
+	- When filtered, recompute is_pass for rows that aren't changed.
+	- When grouped, rebuild groups.
+	- Rebuild tree parents only when rows are added or dropped, or id or parent_id
+	  changes. Restore pos order when rows are added or pos changes. Run stage 2
+	  when rows are added or any column changes.
+	- Run stages 3-5; O(n).
 
 RELOAD
-- Load rowset from rowset_name the first time; merge it on later reloads.
-- Wait for the save request to finish before reloading.
-- Reload on server notifications unless all update_ids are from our saves.
-- Run the stages needed by load or merge rowset.
+	- Load rowset from rowset_name the first time; merge it on later reloads.
+	- Wait for the save request to finish before reloading.
+	- Reload on server notifications unless all update_ids are from our saves.
+	- Run the stages needed by load or merge rowset.
 
 IMPLEMENTATION PLAN ----------------------------------------------------------
 
@@ -475,51 +466,6 @@ let row_config_bits = {
 	no_save  : ROW_NO_SAVE,
 }
 
-//// GROUPING ---------------------------------------------------------------
-
-let group_level_sep_re = /\s*>\s*/ // between group-by levels
-let last_segment_re = /\/[^\/]+$/ // '/...' at the end of a ranged column
-let range_unit_re = /\/(month|year)$/
-
-// for range {freq:, unit:, offset:}, return a function `f(v) -> start` that
-// returns the start of the range that contains v`; use numeric ranges
-// when unit is absent, or calendar ranges for 'month' and 'year' units.
-// return null when no range is specified.
-function range_bucket_func(range) {
-	let freq = range.freq
-	let unit = range.unit
-	if (unit && freq == null)
-		freq = 1
-	let offset = range.offset || 0
-	let bucket_func = null
-	if (freq) {
-		if (!unit)
-			bucket_func = v => floor((v - offset) / freq) * freq + offset
-		else if (unit == 'month') {
-			if (freq == 1)
-				bucket_func = v => month(v)
-			else
-				bucket_func = v => {
-					let month_count = (year_of(v) - 1970) * 12 + month_of(v) - 1
-					return month(v,
-						floor((month_count - offset) / freq) * freq
-							+ offset - month_count)
-				}
-		} else if (unit == 'year') {
-			if (freq == 1)
-				bucket_func = v => year(v)
-			else
-				bucket_func = v => {
-					let year_count = year_of(v) - 1970
-					return year(v,
-						floor((year_count - offset) / freq) * freq
-							+ offset - year_count)
-				}
-		}
-	}
-	return bucket_func
-}
-
 //// COMMON HELPERS ----------------------------------------------------------
 
 // set or clear the bits in mask at a[i], where a is any typed array.
@@ -565,13 +511,130 @@ function between(x, a, b) {
 	return a <= b ? x >= a && x <= b : x >= b && x <= a
 }
 
-//// ROWSET SUPPORT ----------------------------------------------------------
+//// GROUPING HELPERS --------------------------------------------------------
 
-let invalid_col_name_re = /^[0-9]|[^a-z0-9_]/
+let group_level_sep_re = /\s*>\s*/ // between group-by levels
+let last_segment_re = /\/[^\/]+$/ // '/...' at the end of a ranged column
+let range_unit_re = /\/(month|year)$/
 
-function is_col_name(col) {
-	return isstr(col) && col.length > 0 && !invalid_col_name_re.test(col)
+// for range {freq:, unit:, offset:}, return a function `f(v) -> start` that
+// returns the start of the range that contains v`; use numeric ranges
+// when unit is absent, or calendar ranges for 'month' and 'year' units.
+// return null when no range is specified.
+function range_bucket_func(range) {
+	let freq = range.freq
+	let unit = range.unit
+	if (unit && freq == null)
+		freq = 1
+	let offset = range.offset || 0
+	let bucket_func = null
+	if (freq) {
+		if (!unit)
+			bucket_func = v => floor((v - offset) / freq) * freq + offset
+		else if (unit == 'month') {
+			if (freq == 1)
+				bucket_func = v => month(v)
+			else
+				bucket_func = v => {
+					let month_count = (year_of(v) - 1970) * 12 + month_of(v) - 1
+					return month(v,
+						floor((month_count - offset) / freq) * freq
+							+ offset - month_count)
+				}
+		} else if (unit == 'year') {
+			if (freq == 1)
+				bucket_func = v => year(v)
+			else
+				bucket_func = v => {
+					let year_count = year_of(v) - 1970
+					return year(v,
+						floor((year_count - offset) / freq) * freq
+							+ offset - year_count)
+				}
+		}
+	}
+	return bucket_func
 }
+
+//// RADIX SORT -------------------------------------------------------------
+
+/*
+Sort the first n entries of ris by sort_fields.
+- sort_fields = [{field:, desc:, [col:]}, ...].
+- sort by the last field first so that earlier fields take priority.
+- for each field, sort by successive groups of 16 bits, lowest first.
+- in each pass, keep rows with equal keys in their previous order.
+- use two alternating arrays: each pass reads ris from one array and writes
+  them into the other and then swaps them. returns the array containing the
+  final order; the caller must use the returned array.
+*/
+let counts
+function radix_sort(col_vals, ris, n, sort_fields) {
+	if (n < 2)
+		return ris
+	let ris1 = new Uint32Array(n) // row indices for the next pass
+	let keys  = [new Uint32Array(n), new Uint32Array(n)] // keys by ris
+	let keys1 = [new Uint32Array(n), new Uint32Array(n)] // next keys
+	counts ??= new Uint32Array(65536) // rows per digit value
+	for (let sfi = sort_fields.length - 1; sfi >= 0; sfi--) {
+
+		// build this field's sort keys. Use col when supplied: for ranged
+		// grouping, the nav passes each range's starting value in col.
+		let {field, desc, col} = sort_fields[sfi]
+		let word_n = field.col_storage.write_sort_keys(
+			col ?? col_vals[field.fi], ris, n, field, keys[0], keys[1])
+
+		// invert the keys for descending order, with null last.
+		if (desc)
+			for (let w = 0; w < word_n; w++) {
+				let k = keys[w]
+				for (let i = 0; i < n; i++)
+					k[i] = ~k[i]
+			}
+
+		// process each key 16 bits at a time, starting with the lowest word
+		// and with its lowest bits.
+		for (let w = 0; w < word_n; w++) {
+			for (let shift = 0; shift <= 16; shift += 16) {
+				let k = keys[w]
+
+				// count the rows per digit value.
+				counts.fill(0)
+				for (let i = 0; i < n; i++)
+					counts[(k[i] >>> shift) & 0xFFFF]++
+				// skip this pass if every row has the same digit.
+				if (counts[(k[0] >>> shift) & 0xFFFF] == n)
+					continue
+
+				// replace each count with the first output index for that digit.
+				let sum = 0 // rows with smaller digits
+				for (let d = 0; d < 65536; d++) {
+					let c = counts[d]
+					counts[d] = sum
+					sum += c
+				}
+
+				// copy each row index together with the key words needed by
+				// later passes, from w onward.
+				for (let i = 0; i < n; i++) {
+					let j = counts[(k[i] >>> shift) & 0xFFFF]++ // target index
+					ris1[j] = ris[i]
+					for (let w2 = w; w2 < word_n; w2++)
+						keys1[w2][j] = keys[w2][i]
+				}
+
+				// swap the arrays to read the sorted values in the next pass.
+				let t = ris; ris = ris1; ris1 = t
+				for (let w2 = w; w2 < word_n; w2++) {
+					let t = keys[w2]; keys[w2] = keys1[w2]; keys1[w2] = t
+				}
+			}
+		}
+	}
+	return ris
+}
+
+//// ROWSET NOTIFICATIONS ----------------------------------------------------
 
 let rowset_listeners = {} // {rowset_name -> Set(fn(update_ids))}
 
@@ -590,87 +653,534 @@ let listen_rowset_events = memoize(function() {
 	}
 })
 
+//// NAV ---------------------------------------------------------------------
+
 ui.nav2 = function(id, opt) {
 
 	assert(id, 'nav id required')
 	let e = assign({}, opt)
 	e.id = id
 
-	/// radix sort ------------------------------------------------------------
+	let cap
+	let slot_n
+	let free_ris
+	let indexes
+	let first_child_ri
+	let next_sibling_ri
+	let group_fis
+	let has_sel_bits
+	let sel_anchor_ri
+	let sel_anchor_fi
+	let sel_end_ri
+	let sel_end_fi
+	let prev_visible_ris
 
-	/*
-	Sort the first n entries of ris by sort_fields.
-	- sort_fields = [{field:, desc:, [col:]}, ...].
-	- sort by the last field first so that earlier fields take priority.
-	- for each field, sort by successive groups of 16 bits, lowest first.
-	- in each pass, keep rows with equal keys in their previous order.
-	- use two alternating arrays: each pass reads ris from one array and writes
-	  them into the other and then swaps them. returns the array containing the
-	  final order; the caller must use the returned array.
-	*/
-	function radix_sort(ris, n, sort_fields) {
-		if (n < 2)
-			return ris
-		let ris1 = new Uint32Array(n) // row indices for the next pass
-		let keys  = [new Uint32Array(n), new Uint32Array(n)] // keys by ris
-		let keys1 = [new Uint32Array(n), new Uint32Array(n)] // next keys
-		let counts = new Uint32Array(65536) // rows per digit value
-		for (let sfi = sort_fields.length - 1; sfi >= 0; sfi--) {
+	e.get_debug_state = function() {
+		return {
+			cap: cap,
+			slot_n: slot_n,
+			free_ris: free_ris,
+			indexes: indexes,
+			first_child_ri: first_child_ri,
+			next_sibling_ri: next_sibling_ri,
+			group_fis: group_fis,
+			has_sel_bits: has_sel_bits,
+			sel_anchor_ri: sel_anchor_ri,
+			sel_anchor_fi: sel_anchor_fi,
+			sel_end_ri: sel_end_ri,
+			sel_end_fi: sel_end_fi,
+			prev_visible_ris: prev_visible_ris,
+		}
+	}
 
-			// build this field's sort keys. Use col when supplied: for ranged
-			// grouping, the nav passes each range's starting value in col.
-			let {field, desc, col} = sort_fields[sfi]
-			let word_n = field.col_storage.write_sort_keys(
-				col ?? e.col_vals[field.fi], ris, n, field, keys[0], keys[1])
+	/// indexes ---------------------------------------------------------------
 
-			// invert the keys for descending order, with null last.
-			if (desc)
-				for (let w = 0; w < word_n; w++) {
-					let k = keys[w]
-					for (let i = 0; i < n; i++)
-						k[i] = ~k[i]
+	// 'col1 col2 ...' -> [field1, ...]
+	function col_fields(cols) {
+		return words(cols).map(col =>
+			assert(e.all_fields_map[col], 'unknown column: ', col))
+	}
+
+	function invalidate_indexes(field) {
+		for (let cols of indexes.keys())
+			if (indexes.get(cols).fields.includes(field))
+				indexes.delete(cols)
+	}
+
+	// Return {fields:, ris:}, with data row indices sorted by cols. Build and
+	// cache the index on first use.
+	function get_index(cols) {
+		let index = indexes.get(cols)
+		if (!index) {
+			let fields = col_fields(cols)
+			let sort_fields = fields.map(field => ({field: field, desc: false}))
+			index = {
+				fields: fields, // [field1, ...]
+				ris: radix_sort(e.col_vals,
+					e.base_ris.slice(0, e.row_n), e.row_n,
+					sort_fields), // data rows' ri's, sorted by fields
+			}
+			indexes.set(cols, index)
+		}
+		return index
+	}
+
+	// Compare ri's cells with vals using fields in order. Return -1, 0 or 1.
+	function compare_row(ri, fields, vals) {
+		for (let i = 0; i < fields.length; i++) {
+			let field = fields[i]
+			let r = field.col_storage.compare_cell(
+				e.col_vals[field.fi], ri, vals[i])
+			if (r)
+				return r
+		}
+		return 0
+	}
+
+	// Compare ri1 with ri2 using fields in order. Return -1, 0 or 1.
+	function compare_rows(ri1, ri2, fields) {
+		for (let field of fields) {
+			let col = e.col_vals[field.fi]
+			let r = field.col_storage.compare_cell(col, ri1,
+				field.col_storage.get(col, ri2))
+			if (r)
+				return r
+		}
+		return 0
+	}
+
+	// Find the insertion index in ris after all rows with keys equal to ri's.
+	function upper_bound(ris, ri, fields) {
+		let i1 = 0 // first index into ris still in the search
+		let i2 = ris.length // end index into ris of the search
+		while (i1 < i2) {
+			let i = (i1 + i2) >>> 1
+			if (compare_rows(ris[i], ri, fields) <= 0)
+				i1 = i + 1
+			else
+				i2 = i
+		}
+		return i1
+	}
+
+	// Add ris to each index after existing rows with equal keys. Use a binary
+	// search for each new row and copy the rows in one pass.
+	function add_to_indexes(ris) {
+		if (!ris.length)
+			return
+		for (let index of indexes.values()) {
+			let fields = index.fields
+
+			// sort the new rows by key, then merge them into the old rows in
+			// one pass.
+			let new_ris = Array.from(ris).sort(
+				(ri1, ri2) => compare_rows(ri1, ri2, fields))
+			let old_ris = index.ris
+			let merged = new Uint32Array(old_ris.length + new_ris.length)
+			let m = 0 // next index into merged
+			let i1 = 0 // next index into old_ris to copy
+			for (let ri of new_ris) {
+				let i2 = upper_bound(old_ris, ri, fields)
+				merged.set(old_ris.subarray(i1, i2), m)
+				m += i2 - i1
+				merged[m++] = ri
+				i1 = i2
+			}
+			merged.set(old_ris.subarray(i1), m)
+			index.ris = merged
+		}
+	}
+
+	// -> ri of the first row whose cols hold vals, or null.
+	e.lookup = function(cols, vals) {
+		let {fields, ris} = get_index(cols)
+		let i1 = 0 // first index into ris still in the search
+		let i2 = ris.length // end index into ris of the search
+		while (i1 < i2) {
+			let i = (i1 + i2) >>> 1
+			if (compare_row(ris[i], fields, vals) < 0)
+				i1 = i + 1
+			else
+				i2 = i
+		}
+		return i1 < ris.length && compare_row(ris[i1], fields, vals) == 0
+			? ris[i1] : null
+	}
+
+	/// focus and selection ---------------------------------------------------
+
+	function clear_sel_mask() {
+		if (has_sel_bits) {
+			e.sel_mask.fill(0)
+			has_sel_bits = false
+		}
+	}
+
+	function set_rect(anchor_ri, anchor_fi, end_ri, end_fi) {
+		sel_anchor_ri = anchor_ri
+		sel_anchor_fi = anchor_fi
+		sel_end_ri = end_ri
+		sel_end_fi = end_fi
+	}
+
+	// Return the rectangle's row and column positions in visible_ris and
+	// fields.
+	function rect_bounds() { // -> [row_i1, row_i2, col_i1, col_i2], inclusive
+		let row_i1 = e.visible_i[sel_anchor_ri]
+		let row_i2 = e.visible_i[sel_end_ri]
+		let col_i1 = e.all_fields[sel_anchor_fi].index
+		let col_i2 = e.all_fields[sel_end_fi].index
+		return [
+			Math.min(row_i1, row_i2), Math.max(row_i1, row_i2),
+			Math.min(col_i1, col_i2), Math.max(col_i1, col_i2),
+		]
+	}
+
+	// Set the sel_mask bits for every cell in the rectangle. Use each visible
+	// column's fi. Visit each row once.
+	function commit_rect() {
+		if (sel_anchor_ri == null)
+			return
+		let [row_i1, row_i2, col_i1, col_i2] = rect_bounds()
+
+		// Build the selection bits for the rectangle's columns.
+		let word_n = e.mask_word_n
+		let col_mask = new Uint32Array(word_n) // fi bits of the columns
+		for (let col_i = col_i1; col_i <= col_i2; col_i++) {
+			let fi = e.visible_fields[col_i].fi
+			col_mask[fi >>> 5] |= 1 << (fi & 31)
+		}
+
+		// add those bits to each row of the rectangle.
+		let sel_mask = e.sel_mask
+		for (let i = row_i1; i <= row_i2; i++) {
+			let word_i = e.visible_ris[i] * word_n // first word of the row
+			for (let w = 0; w < word_n; w++)
+				sel_mask[word_i + w] |= col_mask[w]
+		}
+
+		// Clear the rectangle after recording its selected cells in sel_mask.
+		has_sel_bits = true
+		set_rect(null, null, null, null)
+	}
+
+	// With select null, select only the focused cell. With 'expand', select
+	// from the rectangle's anchor or the focused cell to (ri, fi). With
+	// 'invert', toggle (ri, fi) and keep the rest. With 'all', focus the first
+	// cell and select all cells.
+	e.focus_cell = function(ri, fi, select) {
+		// a hidden row can't be focused.
+		if (ri != null && e.visible_i[ri] == NONE)
+			ri = null
+
+		// change the selection according to select.
+		if (select == 'deselect_hidden') {
+			if (has_sel_bits) {
+				// Deselect hidden rows. Check the previous visible rows because
+				// only those rows can have selected cells.
+				let prev_ris = e.visible_ris
+				for (let i = 0; i < e.visible_n; i++) {
+					let ri = prev_ris[i]
+					if (e.visible_i[ri] == NONE)
+						clear_row_mask(e.sel_mask, ri)
 				}
+			}
+		} else if (select == 'all') {
+			clear_sel_mask()
+			let has_cells = e.visible_n > 0 && e.visible_fields.length > 0
+			ri = has_cells ? e.visible_ris[0] : null
+			fi = has_cells ? e.visible_fields[0].fi : null
+			if (has_cells)
+				set_rect(ri, fi, e.visible_ris[e.visible_n - 1],
+					e.visible_fields[e.visible_fields.length - 1].fi)
+			else
+				set_rect(null, null, null, null)
+		} else if (select == 'expand') {
+			if (sel_anchor_ri != null)
+				set_rect(sel_anchor_ri, sel_anchor_fi, ri, fi)
+			else if (e.focused_ri != null)
+				set_rect(e.focused_ri, e.focused_fi, ri, fi)
+			else
+				set_rect(ri, fi, ri, fi)
+		} else if (select == 'invert') {
+			commit_rect()
+			let word_i = ri * e.mask_word_n + (fi >>> 5) // word of the cell
+			e.sel_mask[word_i] ^= 1 << (fi & 31)
+			has_sel_bits = true
+		} else {
+			clear_sel_mask()
+			set_rect(ri, fi, ri, fi)
+		}
 
-			// process each key 16 bits at a time, starting with the lowest word
-			// and with its lowest bits.
-			for (let w = 0; w < word_n; w++) {
-				for (let shift = 0; shift <= 16; shift += 16) {
-					let k = keys[w]
+		// End quicksearch when focusing another cell.
+		if (ri != e.focused_ri || fi != e.focused_fi)
+			e.quicksearch_text = ''
+		e.focused_ri = ri
+		e.focused_fi = fi
+	}
 
-					// count the rows per digit value.
-					counts.fill(0)
-					for (let i = 0; i < n; i++)
-						counts[(k[i] >>> shift) & 0xFFFF]++
-					// skip this pass if every row has the same digit.
-					if (counts[(k[0] >>> shift) & 0xFFFF] == n)
-						continue
+	e.is_cell_selected = function(ri, fi) {
+		if (cell_bit(e.sel_mask, ri, fi))
+			return true
 
-					// replace each count with the first output index for that digit.
-					let sum = 0 // rows with smaller digits
-					for (let d = 0; d < 65536; d++) {
-						let c = counts[d]
-						counts[d] = sum
-						sum += c
-					}
+		// Check the selection rectangle if the cell has no bit in sel_mask. Use
+		// its visible row and column positions.
+		if (sel_anchor_ri == null || e.visible_i[ri] == NONE)
+			return false
+		let visible_i = e.visible_i
+		let all_fields = e.all_fields
+		return between(visible_i[ri],
+				visible_i[sel_anchor_ri], visible_i[sel_end_ri])
+			&& between(all_fields[fi].index,
+				all_fields[sel_anchor_fi].index, all_fields[sel_end_fi].index)
+	}
 
-					// copy each row index together with the key words needed by
-					// later passes, from w onward.
-					for (let i = 0; i < n; i++) {
-						let j = counts[(k[i] >>> shift) & 0xFFFF]++ // target index
-						ris1[j] = ris[i]
-						for (let w2 = w; w2 < word_n; w2++)
-							keys1[w2][j] = keys[w2][i]
-					}
+	// Call fn(ri) for each row with a selected cell, in display order. Check
+	// only visible rows because hidden rows cannot be selected.
+	e.each_selected_row = function(fn) {
+		commit_rect()
+		if (!has_sel_bits)
+			return
+		let word_n = e.mask_word_n
+		let sel_mask = e.sel_mask
+		for (let i = 0; i < e.visible_n; i++) {
+			let ri = e.visible_ris[i]
+			for (let w = 0; w < word_n; w++)
+				if (sel_mask[ri * word_n + w]) {
+					fn(ri)
+					break
+				}
+		}
+	}
 
-					// swap the arrays to read the sorted values in the next pass.
-					let t = ris; ris = ris1; ris1 = t
-					for (let w2 = w; w2 < word_n; w2++) {
-						let t = keys[w2]; keys[w2] = keys1[w2]; keys1[w2] = t
-					}
+	/// row orders ------------------------------------------------------------
+
+	let tree_ris_buf // separate tree order buffer; unused in flat view
+
+	// Set parent_ri from the parent_id column. Sort rows by parent_id and
+	// compare them with the id index in order. Use no parent when no id
+	// matches.
+	function set_tree_parents() {
+		let id_field = e.id_field
+		let parent_field = e.parent_field
+		let id_ris = get_index(id_field.name).ris // rows sorted by id
+		let pid_ris = radix_sort(e.col_vals,
+			e.base_ris.slice(0, e.row_n), e.row_n,
+			[{field: parent_field, desc: false}]) // rows sorted by parent_id
+		let id_col = e.col_vals[id_field.fi]
+		let pid_col = e.col_vals[parent_field.fi]
+		let i = 0 // index into id_ris
+		for (let j = 0; j < e.row_n; j++) {
+			let ri = pid_ris[j]
+			let parent_id = parent_field.col_storage.get(pid_col, ri)
+			let parent_ri = NONE
+			if (parent_id != null) {
+				while (i < id_ris.length && id_field.col_storage.compare_cell(
+					id_col, id_ris[i], parent_id) < 0)
+				{
+					i++
+				}
+				if (i < id_ris.length && id_field.col_storage.compare_cell(
+					id_col, id_ris[i], parent_id) == 0)
+				{
+					parent_ri = id_ris[i]
+				}
+			}
+			e.parent_ri[ri] = parent_ri
+		}
+	}
+
+	function update_is_tree() {
+		e.is_tree = e.can_be_tree && !e.flat && !e.is_grouped // tree view
+	}
+
+	// Stage 3. Build child lists from sorted_ris and group_ris. Visit each
+	// parent before its children to write tree_ris, tree_i and depth. Count
+	// descendants by visiting the rows backward. In flat view, use sorted_ris
+	// directly as tree_ris.
+	function update_tree_ris() {
+		let n = e.row_n
+		if (!(e.is_tree || e.is_grouped)) {
+			e.tree_ris = e.sorted_ris
+			e.tree_n = n
+			e.depth.fill(0)
+			e.desc_count.fill(0)
+			return
+		}
+
+		// build each row's child list, in sort order.
+		let parent_ri = e.parent_ri
+		let first_root_ri = NONE
+		let ris_lists = [e.sorted_ris.subarray(0, n), e.group_ris]
+		// Process data rows and group rows separately. Each group has only data
+		// rows or only subgroups as children.
+		for (let ris of ris_lists)
+			for (let i = 0; i < ris.length; i++)
+				first_child_ri[ris[i]] = NONE
+		for (let ris of ris_lists) {
+			// Visit rows backward and prepend each one to preserve their order.
+			for (let i = ris.length - 1; i >= 0; i--) {
+				let ri = ris[i]
+				let p = parent_ri[ri]
+				if (p == NONE) {
+					next_sibling_ri[ri] = first_root_ri
+					first_root_ri = ri
+				} else {
+					next_sibling_ri[ri] = first_child_ri[p]
+					first_child_ri[p] = ri
 				}
 			}
 		}
-		return ris
+
+		// Visit each parent before its children. Record each row's position and
+		// depth.
+		let tree_ris = tree_ris_buf
+		let tree_i = e.tree_i
+		let depth = e.depth
+		let desc_count = e.desc_count
+		let tree_n = 0 // rows reached
+		let d = 0 // depth of ri
+		let ri = first_root_ri
+		while (ri != NONE) {
+			tree_i[ri] = tree_n
+			tree_ris[tree_n++] = ri
+			depth[ri] = d
+			desc_count[ri] = 0
+			if (first_child_ri[ri] != NONE) {
+				ri = first_child_ri[ri]
+				d++
+			} else {
+				// Find a next sibling. If this row has none, try its parent and
+				// continue upward.
+				while (ri != NONE && next_sibling_ri[ri] == NONE) {
+					ri = parent_ri[ri]
+					d--
+				}
+				if (ri != NONE)
+					ri = next_sibling_ri[ri]
+			}
+		}
+
+		// Count descendants backward so that each child has its count before
+		// adding it to the parent's count.
+		for (let i = tree_n - 1; i >= 0; i--) {
+			let ri = tree_ris[i]
+			let p = parent_ri[ri]
+			if (p != NONE)
+				desc_count[p] += desc_count[ri] + 1
+		}
+		e.tree_ris = tree_ris
+		e.tree_n = tree_n
+
+		// Check for cycles by comparing the number of rows visited with the
+		// total row count.
+		if (e.is_tree && tree_n < n) {
+			warn(e.id, 'circular parent refs: showing the rows flat')
+			e.can_be_tree = false
+			e.parent_ri.fill(NONE)
+			update_is_tree()
+			update_tree_ris()
+		}
+	}
+
+	// Stage 4. Mark parents with descendants passing the filter. Visit
+	// tree_ris backward to check descendants before their parents.
+	function update_pass_desc() {
+		let tree_ris = e.tree_ris
+		let row_flags = e.row_flags
+		for (let i = 0; i < e.tree_n; i++)
+			row_flags[tree_ris[i]] &= ~ROW_PASS_DESC
+		if (!(e.is_tree || e.is_grouped))
+			return
+		let parent_ri = e.parent_ri
+		for (let i = e.tree_n - 1; i >= 0; i--) {
+			let ri = tree_ris[i]
+			let p = parent_ri[ri]
+			if (p != NONE && row_flags[ri] & (ROW_PASS | ROW_PASS_DESC))
+				row_flags[p] |= ROW_PASS_DESC
+		}
+	}
+
+	// Stage 5. Build the visible row order and keep the previous order in the
+	// other buffer. With reset_sel, select only the focused cell after
+	// filtering or collapsing. Clear focus if the focused row is hidden. To
+	// choose a nearby row, the UI must read visible_i before the operation.
+	function update_visible_ris(reset_sel) {
+		// Record or clear the selection rectangle before changing visible
+		// positions.
+		if (reset_sel)
+			set_rect(null, null, null, null)
+		else
+			commit_rect()
+
+		// Write visible rows into the other buffer. Skip a row and its
+		// descendants if none pass the filter. Include a collapsed row without
+		// its descendants.
+		let ris = prev_visible_ris
+		let visible_i  = e.visible_i
+		let tree_ris   = e.tree_ris
+		let row_flags  = e.row_flags
+		let desc_count = e.desc_count
+		visible_i.fill(NONE)
+		let n = 0 // visible row count
+		for (let i = 0; i < e.tree_n; ) {
+			let ri = tree_ris[i]
+			let flags = row_flags[ri]
+			if (!(flags & (ROW_PASS | ROW_PASS_DESC))) {
+				i += desc_count[ri] + 1
+			} else {
+				visible_i[ri] = n
+				ris[n++] = ri
+				i += flags & ROW_COLLAPSED ? desc_count[ri] + 1 : 1
+			}
+		}
+
+		// Clear focus from hidden rows. Deselect hidden rows, or select only
+		// the focused cell with reset_sel.
+		e.focus_cell(e.focused_ri, e.focused_fi,
+			reset_sel ? null : 'deselect_hidden')
+
+		// show the new list; keep the old buffer for the next run.
+		prev_visible_ris   = e.visible_ris
+		e.visible_ris = ris
+		e.visible_n = n
+	}
+
+	function update_tree_and_visible_ris() { // stages 3-5
+		update_tree_ris()
+		update_pass_desc()
+		update_visible_ris()
+	}
+
+	/// collapse/expand -------------------------------------------------------
+
+	// Collapse or expand ri. With recursive, include its descendants. With ri
+	// null, change all roots, or all rows if recursive is set.
+	e.set_collapsed = function(ri, collapsed, recursive) {
+		if (!(e.is_tree || e.is_grouped))
+			return
+		let row_flags = e.row_flags
+		if (ri == null) {
+			for (let i = 0; i < e.tree_n; i++) {
+				let ri1 = e.tree_ris[i]
+				if (recursive || e.depth[ri1] == 0)
+					set_bits(row_flags, ri1, ROW_COLLAPSED, collapsed)
+			}
+		} else if (recursive) {
+			let i2 = e.tree_i[ri] + e.desc_count[ri] // last of the subtree
+			for (let i = e.tree_i[ri]; i <= i2; i++)
+				set_bits(row_flags, e.tree_ris[i], ROW_COLLAPSED, collapsed)
+		} else {
+			set_bits(row_flags, ri, ROW_COLLAPSED, collapsed)
+		}
+		update_visible_ris(true)
+	}
+
+	// Show a tree nav's rows as a flat list.
+	e.set_flat = function(flat) {
+		e.flat = flat // flat view of a tree nav
+		update_is_tree()
+		update_tree_and_visible_ris()
 	}
 
 	/// sorting ---------------------------------------------------------------
@@ -721,7 +1231,7 @@ ui.nav2 = function(id, opt) {
 				e.base_ris.slice(0, e.row_n).sort(order_by))
 		} else if (sort_fields?.length) {
 			e.order_by = order_by
-			e.sorted_ris = move_changed_rows_first(radix_sort(
+			e.sorted_ris = move_changed_rows_first(radix_sort(e.col_vals,
 				e.base_ris.slice(0, e.row_n), e.row_n, sort_fields))
 		} else {
 			e.order_by = null
@@ -746,6 +1256,248 @@ ui.nav2 = function(id, opt) {
 		}
 		update_pass_desc()
 		update_visible_ris(true)
+	}
+
+	/// quicksearch -----------------------------------------------------------
+
+	// End quicksearch after writing the focused cell, since its text may no
+	// longer start with the typed prefix.
+	function end_quicksearch_at(ri, fi) {
+		if (ri == e.focused_ri && fi == e.focused_fi)
+			e.quicksearch_text = ''
+	}
+
+	// Search column fi for text starting with s, ignoring case. Pass '' to end
+	// quicksearch. With offset 0 (the default), search forward from the
+	// focused row; with 1, start at the next row; with -1, search backward
+	// from the previous row. If no row is focused, start as if the first row
+	// were focused. Continue from the other end after reaching either end.
+	// Skip no_focus rows. Focus the first matching row and return its ri, or
+	// return null if none matched.
+	e.quicksearch = function(s, fi, offset) {
+		if (!s) {
+			e.quicksearch_text = ''
+			return null
+		}
+		let field = e.all_fields[fi]
+		let s_lower = s.toLowerCase()
+		let n = e.visible_n
+		let dir = offset < 0 ? -1 : 1 // walk direction
+		// Add n to keep i nonnegative when searching backward. Use i % n to
+		// read each row.
+		let i = (e.focused_ri != null ? e.visible_i[e.focused_ri] : 0)
+			+ (offset ?? 0) + n // index into visible_ris, before % n
+		for (let k = 0; k < n; k++, i += dir) {
+			let ri = e.visible_ris[i % n]
+			if (!(e.row_flags[ri] & ROW_NO_FOCUS)
+				&& cell_text(ri, field).toLowerCase().startsWith(s_lower)
+			) {
+				e.focus_cell(ri, fi)
+				e.quicksearch_text = s
+				return ri
+			}
+		}
+		return null
+	}
+
+	/// grouping --------------------------------------------------------------
+
+	// Parse group_by as 'col1 col2 > col3 ...', with '>' between levels and
+	// spaces between columns in a level. For ranged columns, accept
+	// 'col[/offset][/unit]/freq' and group values by range. Return [[{field:,
+	// bucket_func:}, ...], ...], one array per level. Ignore unknown columns,
+	// columns that cannot be grouped, and empty levels.
+	function parse_group_by(group_by) {
+		let levels = []
+		for (let level_expr of group_by.split(group_level_sep_re)) {
+			let level = []
+			for (let col of words(level_expr)) {
+				let range = {} // {freq:, unit:, offset:}
+
+				// Read and remove the range arguments from the end: freq, then
+				// unit, then offset.
+				col = col.replace(last_segment_re,
+					k => { range.freq = num(k.substring(1)); return '' })
+				col = col.replace(range_unit_re,
+					k => { range.unit = k.substring(1); return '' })
+				col = col.replace(last_segment_re,
+					k => { range.offset = num(k.substring(1)); return '' })
+				let field = e.all_fields_map[col]
+				if (field?.groupable)
+					level.push({
+						field: field,
+						bucket_func: range_bucket_func(range),
+					})
+			}
+			if (level.length)
+				levels.push(level)
+		}
+		return levels
+	}
+
+	// Sort data rows by grouping columns. Create a group whenever a value
+	// differs from the previous row's. Store the group keys in its cells,
+	// using range starts for ranged columns, and null in the other cells.
+	function add_groups(levels) {
+		let n = e.row_n
+		let base_ris = e.base_ris
+
+		// Collect the sort keys for each level. For ranged columns, write range
+		// starts into a separate column.
+		let key_fields = [] // [{field:, col:, desc:}, ...]: all levels' keys
+		let level_ends = [] // end index into key_fields, by level
+		for (let level of levels) {
+			for (let {field, bucket_func} of level) {
+				// Keep col to read existing data rows, even if alloc_slot()
+				// replaces the column arrays. Write new group cells to
+				// e.col_vals.
+				let col = e.col_vals[field.fi]
+				if (bucket_func) {
+					let bucket_col = new Float64Array(cap) // range start by ri
+					for (let i = 0; i < n; i++) {
+						let ri = base_ris[i]
+						let v = field.col_storage.get(col, ri)
+						bucket_col[ri] = v == null ? NaN : bucket_func(v)
+					}
+					col = bucket_col
+				}
+				key_fields.push({field: field, col: col, desc: false})
+			}
+			level_ends.push(key_fields.length)
+		}
+
+		let level_n = levels.length
+		// Return the first grouping level with different keys for ri1 and ri2.
+		function first_diff_level(ri1, ri2) {
+			let k = 0 // index into key_fields
+			for (let level = 0; level < level_n; level++)
+				for (; k < level_ends[level]; k++) {
+					let {field, col} = key_fields[k]
+					let storage = field.col_storage
+					let v2 = storage.get(col, ri2)
+					if (storage.compare_cell(col, ri1, v2))
+						return level
+				}
+			return level_n
+		}
+
+		// Sort and visit the data rows. Find the first level differing from the
+		// previous row, then create new groups at that level and below it.
+		let ris = radix_sort(e.col_vals, base_ris.slice(0, n), n, key_fields)
+		let group_ris = [] // group slots in key order
+		let open_ris = [] // the open group, by level
+		for (let i = 0; i < n; i++) {
+			let ri = ris[i]
+			let level1 = i ? first_diff_level(ri, ris[i - 1]) : 0
+			for (let level = level1; level < level_n; level++) {
+				let group_ri = alloc_slot()
+				e.row_flags[group_ri] = ROW_GROUP
+				e.parent_ri[group_ri] = level ? open_ris[level - 1] : NONE
+
+				// Set the group cells to null, then copy the keys for this level
+				// and for the levels above it from the group's first row.
+				for (let field of e.all_fields)
+					field.col_storage.set(e.col_vals[field.fi], group_ri, null)
+				for (let k = 0; k < level_ends[level]; k++) {
+					let {field, col} = key_fields[k]
+					let storage = field.col_storage
+					storage.set(e.col_vals[field.fi], group_ri,
+						storage.get(col, ri))
+				}
+				open_ris[level] = group_ri
+				group_ris.push(group_ri)
+			}
+
+			// put the data row under the innermost open group.
+			e.parent_ri[ri] = open_ris[level_n - 1]
+		}
+		e.group_ris = Uint32Array.from(group_ris)
+		group_fis = new Set(key_fields.map(kf => kf.field.fi))
+		e.is_grouped = true
+	}
+
+	// Free all group row slots for reuse.
+	function remove_groups() {
+		commit_rect()
+		for (let ri of e.group_ris)
+			free_slot(ri)
+		e.group_ris = new Uint32Array(0)
+		group_fis = new Set()
+		e.is_grouped = false
+	}
+
+	// Free groups with no rows left. Visit group_ris backward to check
+	// subgroups before their parents.
+	function drop_empty_groups() {
+		// count the data rows directly under each group.
+		let child_n = new Uint32Array(cap) // kept children by group
+		for (let i = 0; i < e.row_n; i++)
+			child_n[e.parent_ri[e.base_ris[i]]]++
+
+		// free the empty groups, and count each kept group as a child of its
+		// parent group.
+		let is_dropped = new Uint8Array(cap) // 1: group being dropped
+		for (let i = e.group_ris.length - 1; i >= 0; i--) {
+			let ri = e.group_ris[i]
+			let p = e.parent_ri[ri]
+			if (!child_n[ri]) {
+				is_dropped[ri] = 1
+				free_slot(ri)
+			} else if (p != NONE) {
+				child_n[p]++
+			}
+		}
+		e.group_ris = e.group_ris.subarray(0,
+			compact_list(e.group_ris, e.group_ris.length, is_dropped))
+	}
+
+	// Check for edits in grouping columns. Skip columns without input_vals
+	// because no cells in those columns have pending edits.
+	function has_edited_keys(levels) {
+		for (let level of levels)
+			for (let {field} of level) {
+				let fi = field.fi
+				if (!e.input_vals[fi])
+					continue
+				for (let i = 0; i < e.row_n; i++)
+					if (cell_bit(e.changed_mask, e.base_ris[i], fi))
+						return true
+			}
+		return false
+	}
+
+	// Use the syntax accepted by parse_group_by(), or pass null to ungroup.
+	// Refuse grouping in tree view or with pending changes in a tree nav.
+	// Refuse edited grouping columns in a flat nav because the nav groups by
+	// stored values. Return true if applied.
+	e.set_group_by = function(group_by) {
+		let levels = group_by ? parse_group_by(group_by) : []
+		if (levels.length && (e.is_tree || e.can_be_tree && e.changed_n
+			|| has_edited_keys(levels)))
+			return false
+
+		// Remove current groups. Before regrouping, unfocus and deselect old
+		// group rows so that add_groups() can reuse their slots. When
+		// ungrouping, restore tree parents or clear the parents for a flat nav.
+		if (e.is_grouped) {
+			remove_groups()
+			if (levels.length) {
+				e.focus_cell(e.focused_ri, e.focused_fi, 'deselect_hidden')
+			} else if (e.can_be_tree) {
+				set_tree_parents()
+			} else {
+				for (let i = 0; i < e.row_n; i++)
+					e.parent_ri[e.base_ris[i]] = NONE
+			}
+		}
+
+		// add the new groups, if any, and update the rows shown.
+		e.group_by = levels.length ? group_by : null // group-by spec, or null
+		if (levels.length)
+			add_groups(levels)
+		update_is_tree()
+		update_tree_and_visible_ris()
+		return true
 	}
 
 	/// cell values, edits and validation -------------------------------------
@@ -880,7 +1632,7 @@ ui.nav2 = function(id, opt) {
 			return false
 		if (e.can_be_tree && (fi == e.id_field.fi || fi == e.parent_field.fi))
 			return false
-		if (e.is_grouped && e.group_fis.has(fi)) // grouped-by col while grouped
+		if (e.is_grouped && group_fis.has(fi)) // grouped-by col while grouped
 			return false
 		return true
 	}
@@ -984,7 +1736,25 @@ ui.nav2 = function(id, opt) {
 		e.cell_errors = [] // cell errors by fi, then ri
 	}
 
-	/// policy ----------------------------------------------------------------
+	// Set selected cells to null through set_cell_val(), with the usual edit
+	// restrictions.
+	e.set_null_selected_cells = function(ev) {
+		let word_n = e.mask_word_n
+		let sel_mask = e.sel_mask
+		e.each_selected_row(ri => {
+			for (let w = 0; w < word_n; w++) {
+				let bits = sel_mask[ri * word_n + w] // selected cells of the word
+				// Find the column for the lowest set bit, then clear that bit.
+				while (bits) {
+					let fi = w * 32 + 31 - Math.clz32(bits & -bits)
+					e.set_cell_val(ri, fi, null, ev)
+					bits &= bits - 1
+				}
+			}
+		})
+	}
+
+	/// editing policy --------------------------------------------------------
 
 	// Check these permissions only on calls from the user, with ev.input.
 	e.can_add_rows    ??= true // the user may insert rows
@@ -1012,80 +1782,39 @@ ui.nav2 = function(id, opt) {
 		return is_cell_editable(ri, fi)
 	}
 
-	// the user may insert rows.
-	e.can_actually_add_rows = function() {
-		return e.can_add_rows && e.rowset_can_add_rows
-	}
-
-	// the user may remove rows.
-	e.can_actually_remove_rows = function() {
-		return e.can_remove_rows && e.rowset_can_remove_rows
-	}
-
-	// Allow the user to move sibling rows with their descendants only while
-	// unsorted, unfiltered and ungrouped. Require tree view for a tree nav.
-	// Require pos_col to reorder siblings. To change parents, require
-	// can_change_parent and a writable parent_id. Refuse a new parent that is
-	// new, marked for deletion, or among the moved rows and their descendants.
-	e.can_actually_move_rows = function(ris, parent_ri) {
-		if (!(e.can_move_rows && e.rowset_can_move_rows))
-			return false
-		if (e.filter || e.can_be_tree && !e.is_tree)
-			return false
-
-		// the rows must be siblings.
-		let old_parent_ri = e.parent_ri[ris[0]]
-		for (let ri of ris)
-			if (e.parent_ri[ri] != old_parent_ri)
-				return false
-
-		// Require a pos column to reorder siblings. To change parents, require
-		// a writable parent_id and a parent not marked for deletion.
-		if (parent_ri == old_parent_ri) {
-			if (!e.pos_field)
-				return false
-		} else if (!e.is_tree || !e.can_change_parent
-			|| e.parent_field.readonly
-			|| parent_ri != NONE && e.row_flags[parent_ri] & ROW_REMOVED
-		) {
-			return false
-		}
-		return is_move_valid(ris, parent_ri)
-	}
-
 	/// row slots and inserting -----------------------------------------------
 
 	// Grow every array indexed by ri to cap slots. Keep the existing values.
-	function set_capacity(cap) {
+	function set_capacity(cap1) {
 		let word_n = e.mask_word_n
 		e.col_vals = e.all_fields.map(field =>
-			field.col_storage.grow_col(e.col_vals[field.fi], cap))
-		e.row_flags        = grow_typed(e.row_flags       , cap)
-		e.parent_ri        = grow_typed(e.parent_ri       , cap)
-		e.first_child_ri   = grow_typed(e.first_child_ri  , cap)
-		e.next_sibling_ri  = grow_typed(e.next_sibling_ri , cap)
-		e.depth            = grow_typed(e.depth           , cap)
-		e.desc_count       = grow_typed(e.desc_count      , cap)
-		e.tree_i           = grow_typed(e.tree_i          , cap)
-		tree_ris_buf       = grow_typed(tree_ris_buf      , cap)
-		e.visible_i        = grow_typed(e.visible_i       , cap)
-		e.visible_ris      = grow_typed(e.visible_ris     , cap)
-		e.prev_visible_ris = grow_typed(e.prev_visible_ris, cap)
-		e.sel_mask         = grow_typed(e.sel_mask        , cap * word_n)
-		e.changed_mask     = grow_typed(e.changed_mask    , cap * word_n)
-		e.unset_mask       = grow_typed(e.unset_mask      , cap * word_n)
-		e.cap = cap
+			field.col_storage.grow_col(e.col_vals[field.fi], cap1))
+		e.row_flags        = grow_typed(e.row_flags       , cap1)
+		e.parent_ri        = grow_typed(e.parent_ri       , cap1)
+		first_child_ri     = grow_typed(first_child_ri  , cap1)
+		next_sibling_ri    = grow_typed(next_sibling_ri , cap1)
+		e.depth            = grow_typed(e.depth           , cap1)
+		e.desc_count       = grow_typed(e.desc_count      , cap1)
+		e.tree_i           = grow_typed(e.tree_i          , cap1)
+		tree_ris_buf       = grow_typed(tree_ris_buf      , cap1)
+		e.visible_i        = grow_typed(e.visible_i       , cap1)
+		e.visible_ris      = grow_typed(e.visible_ris     , cap1)
+		prev_visible_ris   = grow_typed(prev_visible_ris, cap1)
+		e.sel_mask         = grow_typed(e.sel_mask        , cap1 * word_n)
+		e.changed_mask     = grow_typed(e.changed_mask    , cap1 * word_n)
+		e.unset_mask       = grow_typed(e.unset_mask      , cap1 * word_n)
+		cap = cap1
 	}
 
 	// allocate a row slot. reuse a freed slot before extending the arrays.
 	function alloc_slot() {
 		let ri
-		if (e.free_ris.length) {
-			ri = e.free_ris.pop()
+		if (free_ris.length) {
+			ri = free_ris.pop()
 		} else {
-			if (e.slot_n == e.cap)
-				set_capacity(Math.max(1, e.cap * 2))
-			ri = e.slot_n++
+			if (slot_n == cap)
+				set_capacity(Math.max(1, cap * 2))
+			ri = slot_n++
 			e.parent_ri[ri] = NONE
 		}
 		return ri
@@ -1116,7 +1845,7 @@ ui.nav2 = function(id, opt) {
 			set_cell_errors(ri, fi, null)
 		}
 		e.row_errors[ri] = undefined
-		e.free_ris.push(ri)
+		free_ris.push(ri)
 	}
 
 	// Accept rows as [[v1, ...] | null, ...], with cells in fi order. Use
@@ -1127,11 +1856,12 @@ ui.nav2 = function(id, opt) {
 	// base_ris. In a tree nav, use the same parent as at_ri. When grouped,
 	// require a data row and copy its group keys. Refuse insertion under a new
 	// parent because it has no id yet. With ev.input, also refuse a parent
-	// marked for deletion or a call denied by can_actually_add_rows().
+	// marked for deletion or denied by policy.
 	e.insert_rows = function(rows, at_ri, ev) {
 		let none = new Uint32Array(0) // refused: no rows
-		if (ev?.input && !e.can_actually_add_rows())
-			return none
+		if (ev?.input)
+			if (!e.can_add_rows || !e.rowset_can_add_rows)
+				return none
 
 		// Use at_ri's parent, or no parent when inserting at the end. When
 		// grouped, look up the tree parent using at_ri's parent_id cell.
@@ -1195,7 +1925,7 @@ ui.nav2 = function(id, opt) {
 			// Copy the grouping values from at_ri so that the new row belongs to
 			// the same group, including for ranged columns.
 			if (e.is_grouped)
-				for (let fi of e.group_fis) {
+				for (let fi of group_fis) {
 					let field = e.all_fields[fi]
 					field.col_storage.set(e.col_vals[fi], ri, col_val(at_ri, fi))
 					set_cell_bit(e.unset_mask, ri, fi, false)
@@ -1227,7 +1957,7 @@ ui.nav2 = function(id, opt) {
 		return ris
 	}
 
-	/// pos_col row positions -------------------------------------------------
+	/// row moving ------------------------------------------------------------
 
 	// Write a pos or parent_id cell during a move, without the edit
 	// restrictions or validation in set_cell_val(). Write directly to column
@@ -1338,13 +2068,11 @@ ui.nav2 = function(id, opt) {
 			}
 		}
 		let was_unsorted = e.sorted_ris == e.base_ris
-		e.base_ris = radix_sort(e.base_ris, e.row_n,
+		e.base_ris = radix_sort(e.col_vals, e.base_ris, e.row_n,
 			[{field: field, desc: false, col: col}])
 		if (was_unsorted)
 			e.sorted_ris = e.base_ris
 	}
-
-	/// moving ----------------------------------------------------------------
 
 	// Refuse moves while sorted or grouped. To change parents, require a tree
 	// nav and refuse a new row as parent because it has no id yet. Refuse a
@@ -1370,6 +2098,37 @@ ui.nav2 = function(id, opt) {
 		return true
 	}
 
+	// Allow the user to move sibling rows with their descendants only while
+	// unsorted, unfiltered and ungrouped. Require tree view for a tree nav.
+	// Require pos_col to reorder siblings. To change parents, require
+	// can_change_parent and a writable parent_id. Refuse a new parent that is
+	// new, marked for deletion, or among the moved rows and their descendants.
+	e.can_actually_move_rows = function(ris, parent_ri) {
+		if (!(e.can_move_rows && e.rowset_can_move_rows))
+			return false
+		if (e.filter || e.can_be_tree && !e.is_tree)
+			return false
+
+		// the rows must be siblings.
+		let old_parent_ri = e.parent_ri[ris[0]]
+		for (let ri of ris)
+			if (e.parent_ri[ri] != old_parent_ri)
+				return false
+
+		// Require a pos column to reorder siblings. To change parents, require
+		// a writable parent_id and a parent not marked for deletion.
+		if (parent_ri == old_parent_ri) {
+			if (!e.pos_field)
+				return false
+		} else if (!e.is_tree || !e.can_change_parent
+			|| e.parent_field.readonly
+			|| parent_ri != NONE && e.row_flags[parent_ri] & ROW_REMOVED
+		) {
+			return false
+		}
+		return is_move_valid(ris, parent_ri)
+	}
+
 	// Move ris before at_ri under parent_ri, or under no parent for NONE. With
 	// at_ri null, append after the parent's children. Assign pos values
 	// between the new neighbors. Return false if is_move_valid() refuses the
@@ -1383,7 +2142,7 @@ ui.nav2 = function(id, opt) {
 
 		// take the rows out of the stored order.
 		let k = ris.length
-		let is_moved = new Uint8Array(e.cap) // 1: row being moved
+		let is_moved = new Uint8Array(cap) // 1: row being moved
 		for (let ri of ris)
 			is_moved[ri] = 1
 		let n = compact_list(e.base_ris, e.row_n, is_moved)
@@ -1412,21 +2171,21 @@ ui.nav2 = function(id, opt) {
 		return true
 	}
 
-	/// deleting rows ---------------------------------------------------------
+	/// row removing ------------------------------------------------------------
 
 	// Remove the rows from every list and index. Free their slots for reuse.
 	function drop_rows(ris) {
 		commit_rect()
 
 		// take the rows out of the row orders and the indexes.
-		let is_dropped = new Uint8Array(e.cap) // 1: row being dropped
+		let is_dropped = new Uint8Array(cap) // 1: row being dropped
 		for (let ri of ris)
 			is_dropped[ri] = 1
 		let row_n = compact_list(e.base_ris, e.row_n, is_dropped)
 		if (e.sorted_ris != e.base_ris)
 			compact_list(e.sorted_ris, e.row_n, is_dropped)
 		e.row_n = row_n
-		for (let index of e.indexes.values())
+		for (let index of indexes.values())
 			index.ris = index.ris.subarray(0,
 				compact_list(index.ris, index.ris.length, is_dropped))
 
@@ -1517,8 +2276,8 @@ ui.nav2 = function(id, opt) {
 
 	// With op 'delete' (the default), mark rows for deletion and drop new
 	// rows. In tree or grouped view, include their descendants. With
-	// 'undelete', clear the marks. With ev.input, refuse deletion if
-	// can_actually_remove_rows() returns false, and keep rows with no_remove.
+	// 'undelete', clear the marks. With ev.input, refuse deletion if policy
+	// demands it, and keep rows with no_remove.
 	e.remove_rows = function(ris, op, ev) {
 		let has_parents = e.is_tree || e.is_grouped
 		if (op == 'undelete') {
@@ -1527,10 +2286,10 @@ ui.nav2 = function(id, opt) {
 					unmark_subtree_removed(ri)
 				else
 					unmark_removed(ri)
-		} else if (!ev?.input || e.can_actually_remove_rows()) {
+		} else if (!ev?.input || (e.can_remove_rows && e.rowset_can_remove_rows)) {
 			let new_ris = [] // new rows to drop
 			if (has_parents) {
-				let is_kept = new Uint8Array(e.cap) // see mark_subtree_removed()
+				let is_kept = new Uint8Array(cap) // see mark_subtree_removed()
 				for (let ri of ris)
 					mark_subtree_removed(ri, new_ris, is_kept, ev?.input)
 			} else {
@@ -1892,7 +2651,7 @@ ui.nav2 = function(id, opt) {
 		let pk = rs.pk
 		if (isarray(pk)) {
 			for (let col of pk)
-				if (!is_col_name(col))
+				if (!check_col_name(col))
 					return false
 			pk = pk.join(' ')
 		} else if (!isstr(pk)) {
@@ -1940,7 +2699,7 @@ ui.nav2 = function(id, opt) {
 		let in_is = new Uint32Array(m) // incoming row indexes, by pk
 		for (let i = 0; i < m; i++)
 			in_is[i] = i
-		in_is = radix_sort(in_is, m, e.pk_fields.map(field =>
+		in_is = radix_sort(e.col_vals, in_is, m, e.pk_fields.map(field =>
 			({field: field, desc: false, col: in_col_vals[field.fi]})))
 
 		// Compare the nav's rows with incoming rows in primary key order. Drop
@@ -2116,767 +2875,11 @@ ui.nav2 = function(id, opt) {
 		save_req = null
 	}
 
-	/// focus and selection ---------------------------------------------------
-
-	function clear_sel_mask() {
-		if (e.has_sel_bits) {
-			e.sel_mask.fill(0)
-			e.has_sel_bits = false
-		}
-	}
-
-	function set_rect(anchor_ri, anchor_fi, end_ri, end_fi) {
-		e.sel_anchor_ri = anchor_ri
-		e.sel_anchor_fi = anchor_fi
-		e.sel_end_ri = end_ri
-		e.sel_end_fi = end_fi
-	}
-
-	// Return the rectangle's row and column positions in visible_ris and
-	// fields.
-	function rect_bounds() { // -> [row_i1, row_i2, col_i1, col_i2], inclusive
-		let row_i1 = e.visible_i[e.sel_anchor_ri]
-		let row_i2 = e.visible_i[e.sel_end_ri]
-		let col_i1 = e.all_fields[e.sel_anchor_fi].index
-		let col_i2 = e.all_fields[e.sel_end_fi].index
-		return [
-			Math.min(row_i1, row_i2), Math.max(row_i1, row_i2),
-			Math.min(col_i1, col_i2), Math.max(col_i1, col_i2),
-		]
-	}
-
-	// Set the sel_mask bits for every cell in the rectangle. Use each visible
-	// column's fi. Visit each row once.
-	function commit_rect() {
-		if (e.sel_anchor_ri == null)
-			return
-		let [row_i1, row_i2, col_i1, col_i2] = rect_bounds()
-
-		// Build the selection bits for the rectangle's columns.
-		let word_n = e.mask_word_n
-		let col_mask = new Uint32Array(word_n) // fi bits of the columns
-		for (let col_i = col_i1; col_i <= col_i2; col_i++) {
-			let fi = e.fields[col_i].fi
-			col_mask[fi >>> 5] |= 1 << (fi & 31)
-		}
-
-		// add those bits to each row of the rectangle.
-		let sel_mask = e.sel_mask
-		for (let i = row_i1; i <= row_i2; i++) {
-			let word_i = e.visible_ris[i] * word_n // first word of the row
-			for (let w = 0; w < word_n; w++)
-				sel_mask[word_i + w] |= col_mask[w]
-		}
-
-		// Clear the rectangle after recording its selected cells in sel_mask.
-		e.has_sel_bits = true
-		set_rect(null, null, null, null)
-	}
-
-	// With select null, select only the focused cell. With 'expand', select
-	// from the rectangle's anchor or the focused cell to (ri, fi). With
-	// 'invert', toggle (ri, fi) and keep the rest. With 'all', focus the first
-	// cell and select all cells.
-	e.focus_cell = function(ri, fi, select) {
-		// a hidden row can't be focused.
-		if (ri != null && e.visible_i[ri] == NONE)
-			ri = null
-
-		// change the selection according to select.
-		if (select == 'deselect_hidden') {
-			if (e.has_sel_bits) {
-				// Deselect hidden rows. Check the previous visible rows because
-				// only those rows can have selected cells.
-				let prev_ris = e.visible_ris
-				for (let i = 0; i < e.visible_n; i++) {
-					let ri = prev_ris[i]
-					if (e.visible_i[ri] == NONE)
-						clear_row_mask(e.sel_mask, ri)
-				}
-			}
-		} else if (select == 'all') {
-			clear_sel_mask()
-			let has_cells = e.visible_n > 0 && e.fields.length > 0
-			ri = has_cells ? e.visible_ris[0] : null
-			fi = has_cells ? e.fields[0].fi : null
-			if (has_cells)
-				set_rect(ri, fi, e.visible_ris[e.visible_n - 1],
-					e.fields[e.fields.length - 1].fi)
-			else
-				set_rect(null, null, null, null)
-		} else if (select == 'expand') {
-			if (e.sel_anchor_ri != null)
-				set_rect(e.sel_anchor_ri, e.sel_anchor_fi, ri, fi)
-			else if (e.focused_ri != null)
-				set_rect(e.focused_ri, e.focused_fi, ri, fi)
-			else
-				set_rect(ri, fi, ri, fi)
-		} else if (select == 'invert') {
-			commit_rect()
-			let word_i = ri * e.mask_word_n + (fi >>> 5) // word of the cell
-			e.sel_mask[word_i] ^= 1 << (fi & 31)
-			e.has_sel_bits = true
-		} else {
-			clear_sel_mask()
-			set_rect(ri, fi, ri, fi)
-		}
-
-		// End quicksearch when focusing another cell.
-		if (ri != e.focused_ri || fi != e.focused_fi)
-			e.quicksearch_text = ''
-		e.focused_ri = ri
-		e.focused_fi = fi
-	}
-
-	e.is_cell_selected = function(ri, fi) {
-		if (cell_bit(e.sel_mask, ri, fi))
-			return true
-
-		// Check the selection rectangle if the cell has no bit in sel_mask. Use
-		// its visible row and column positions.
-		if (e.sel_anchor_ri == null || e.visible_i[ri] == NONE)
-			return false
-		let visible_i = e.visible_i
-		let all_fields = e.all_fields
-		return between(visible_i[ri],
-				visible_i[e.sel_anchor_ri], visible_i[e.sel_end_ri])
-			&& between(all_fields[fi].index,
-				all_fields[e.sel_anchor_fi].index, all_fields[e.sel_end_fi].index)
-	}
-
-	// Call fn(ri) for each row with a selected cell, in display order. Check
-	// only visible rows because hidden rows cannot be selected.
-	e.each_selected_row = function(fn) {
-		commit_rect()
-		if (!e.has_sel_bits)
-			return
-		let word_n = e.mask_word_n
-		let sel_mask = e.sel_mask
-		for (let i = 0; i < e.visible_n; i++) {
-			let ri = e.visible_ris[i]
-			for (let w = 0; w < word_n; w++)
-				if (sel_mask[ri * word_n + w]) {
-					fn(ri)
-					break
-				}
-		}
-	}
-
-	// Set selected cells to null through set_cell_val(), with the usual edit
-	// restrictions.
-	e.set_null_selected_cells = function(ev) {
-		let word_n = e.mask_word_n
-		let sel_mask = e.sel_mask
-		e.each_selected_row(ri => {
-			for (let w = 0; w < word_n; w++) {
-				let bits = sel_mask[ri * word_n + w] // selected cells of the word
-				// Find the column for the lowest set bit, then clear that bit.
-				while (bits) {
-					let fi = w * 32 + 31 - Math.clz32(bits & -bits)
-					e.set_cell_val(ri, fi, null, ev)
-					bits &= bits - 1
-				}
-			}
-		})
-	}
-
-	/// quicksearch -----------------------------------------------------------
-
-	// End quicksearch after writing the focused cell, since its text may no
-	// longer start with the typed prefix.
-	function end_quicksearch_at(ri, fi) {
-		if (ri == e.focused_ri && fi == e.focused_fi)
-			e.quicksearch_text = ''
-	}
-
-	// Search column fi for text starting with s, ignoring case. Pass '' to end
-	// quicksearch. With offset 0 (the default), search forward from the
-	// focused row; with 1, start at the next row; with -1, search backward
-	// from the previous row. If no row is focused, start as if the first row
-	// were focused. Continue from the other end after reaching either end.
-	// Skip no_focus rows. Focus the first matching row and return its ri, or
-	// return null if none matched.
-	e.quicksearch = function(s, fi, offset) {
-		if (!s) {
-			e.quicksearch_text = ''
-			return null
-		}
-		let field = e.all_fields[fi]
-		let s_lower = s.toLowerCase()
-		let n = e.visible_n
-		let dir = offset < 0 ? -1 : 1 // walk direction
-		// Add n to keep i nonnegative when searching backward. Use i % n to
-		// read each row.
-		let i = (e.focused_ri != null ? e.visible_i[e.focused_ri] : 0)
-			+ (offset ?? 0) + n // index into visible_ris, before % n
-		for (let k = 0; k < n; k++, i += dir) {
-			let ri = e.visible_ris[i % n]
-			if (!(e.row_flags[ri] & ROW_NO_FOCUS)
-				&& cell_text(ri, field).toLowerCase().startsWith(s_lower)
-			) {
-				e.focus_cell(ri, fi)
-				e.quicksearch_text = s
-				return ri
-			}
-		}
-		return null
-	}
-
-	/// indexes ---------------------------------------------------------------
-
-	// 'col1 col2 ...' -> [field1, ...]
-	function col_fields(cols) {
-		return words(cols).map(col =>
-			assert(e.all_fields_map[col], 'unknown column: ', col))
-	}
-
-	function invalidate_indexes(field) {
-		for (let cols of e.indexes.keys())
-			if (e.indexes.get(cols).fields.includes(field))
-				e.indexes.delete(cols)
-	}
-
-	// Return {fields:, ris:}, with data row indices sorted by cols. Build and
-	// cache the index on first use.
-	function get_index(cols) {
-		let index = e.indexes.get(cols)
-		if (!index) {
-			let fields = col_fields(cols)
-			let sort_fields = fields.map(field => ({field: field, desc: false}))
-			index = {
-				fields: fields, // [field1, ...]
-				ris: radix_sort(e.base_ris.slice(0, e.row_n), e.row_n,
-					sort_fields), // data rows' ri's, sorted by fields
-			}
-			e.indexes.set(cols, index)
-		}
-		return index
-	}
-
-	// Compare ri's cells with vals using fields in order. Return -1, 0 or 1.
-	function compare_row(ri, fields, vals) {
-		for (let i = 0; i < fields.length; i++) {
-			let field = fields[i]
-			let r = field.col_storage.compare_cell(
-				e.col_vals[field.fi], ri, vals[i])
-			if (r)
-				return r
-		}
-		return 0
-	}
-
-	// Compare ri1 with ri2 using fields in order. Return -1, 0 or 1.
-	function compare_rows(ri1, ri2, fields) {
-		for (let field of fields) {
-			let col = e.col_vals[field.fi]
-			let r = field.col_storage.compare_cell(col, ri1,
-				field.col_storage.get(col, ri2))
-			if (r)
-				return r
-		}
-		return 0
-	}
-
-	// Find the insertion index in ris after all rows with keys equal to ri's.
-	function upper_bound(ris, ri, fields) {
-		let i1 = 0 // first index into ris still in the search
-		let i2 = ris.length // end index into ris of the search
-		while (i1 < i2) {
-			let i = (i1 + i2) >>> 1
-			if (compare_rows(ris[i], ri, fields) <= 0)
-				i1 = i + 1
-			else
-				i2 = i
-		}
-		return i1
-	}
-
-	// Add ris to each index after existing rows with equal keys. Use a binary
-	// search for each new row and copy the rows in one pass.
-	function add_to_indexes(ris) {
-		if (!ris.length)
-			return
-		for (let index of e.indexes.values()) {
-			let fields = index.fields
-
-			// sort the new rows by key, then merge them into the old rows in
-			// one pass.
-			let new_ris = Array.from(ris).sort(
-				(ri1, ri2) => compare_rows(ri1, ri2, fields))
-			let old_ris = index.ris
-			let merged = new Uint32Array(old_ris.length + new_ris.length)
-			let m = 0 // next index into merged
-			let i1 = 0 // next index into old_ris to copy
-			for (let ri of new_ris) {
-				let i2 = upper_bound(old_ris, ri, fields)
-				merged.set(old_ris.subarray(i1, i2), m)
-				m += i2 - i1
-				merged[m++] = ri
-				i1 = i2
-			}
-			merged.set(old_ris.subarray(i1), m)
-			index.ris = merged
-		}
-	}
-
-	// -> ri of the first row whose cols hold vals, or null.
-	e.lookup = function(cols, vals) {
-		let {fields, ris} = get_index(cols)
-		let i1 = 0 // first index into ris still in the search
-		let i2 = ris.length // end index into ris of the search
-		while (i1 < i2) {
-			let i = (i1 + i2) >>> 1
-			if (compare_row(ris[i], fields, vals) < 0)
-				i1 = i + 1
-			else
-				i2 = i
-		}
-		return i1 < ris.length && compare_row(ris[i1], fields, vals) == 0
-			? ris[i1] : null
-	}
-
-	/// grouping --------------------------------------------------------------
-
-	// Parse group_by as 'col1 col2 > col3 ...', with '>' between levels and
-	// spaces between columns in a level. For ranged columns, accept
-	// 'col[/offset][/unit]/freq' and group values by range. Return [[{field:,
-	// bucket_func:}, ...], ...], one array per level. Ignore unknown columns,
-	// columns that cannot be grouped, and empty levels.
-	function parse_group_by(group_by) {
-		let levels = []
-		for (let level_expr of group_by.split(group_level_sep_re)) {
-			let level = []
-			for (let col of words(level_expr)) {
-				let range = {} // {freq:, unit:, offset:}
-
-				// Read and remove the range arguments from the end: freq, then
-				// unit, then offset.
-				col = col.replace(last_segment_re,
-					k => { range.freq = num(k.substring(1)); return '' })
-				col = col.replace(range_unit_re,
-					k => { range.unit = k.substring(1); return '' })
-				col = col.replace(last_segment_re,
-					k => { range.offset = num(k.substring(1)); return '' })
-				let field = e.all_fields_map[col]
-				if (field?.groupable)
-					level.push({
-						field: field,
-						bucket_func: range_bucket_func(range),
-					})
-			}
-			if (level.length)
-				levels.push(level)
-		}
-		return levels
-	}
-
-	// Sort data rows by grouping columns. Create a group whenever a value
-	// differs from the previous row's. Store the group keys in its cells,
-	// using range starts for ranged columns, and null in the other cells.
-	function add_groups(levels) {
-		let n = e.row_n
-		let base_ris = e.base_ris
-
-		// Collect the sort keys for each level. For ranged columns, write range
-		// starts into a separate column.
-		let key_fields = [] // [{field:, col:, desc:}, ...]: all levels' keys
-		let level_ends = [] // end index into key_fields, by level
-		for (let level of levels) {
-			for (let {field, bucket_func} of level) {
-				// Keep col to read existing data rows, even if alloc_slot()
-				// replaces the column arrays. Write new group cells to
-				// e.col_vals.
-				let col = e.col_vals[field.fi]
-				if (bucket_func) {
-					let bucket_col = new Float64Array(e.cap) // range start by ri
-					for (let i = 0; i < n; i++) {
-						let ri = base_ris[i]
-						let v = field.col_storage.get(col, ri)
-						bucket_col[ri] = v == null ? NaN : bucket_func(v)
-					}
-					col = bucket_col
-				}
-				key_fields.push({field: field, col: col, desc: false})
-			}
-			level_ends.push(key_fields.length)
-		}
-
-		let level_n = levels.length
-		// Return the first grouping level with different keys for ri1 and ri2.
-		function first_diff_level(ri1, ri2) {
-			let k = 0 // index into key_fields
-			for (let level = 0; level < level_n; level++)
-				for (; k < level_ends[level]; k++) {
-					let {field, col} = key_fields[k]
-					let storage = field.col_storage
-					let v2 = storage.get(col, ri2)
-					if (storage.compare_cell(col, ri1, v2))
-						return level
-				}
-			return level_n
-		}
-
-		// Sort and visit the data rows. Find the first level differing from the
-		// previous row, then create new groups at that level and below it.
-		let ris = radix_sort(base_ris.slice(0, n), n, key_fields)
-		let group_ris = [] // group slots in key order
-		let open_ris = [] // the open group, by level
-		for (let i = 0; i < n; i++) {
-			let ri = ris[i]
-			let level1 = i ? first_diff_level(ri, ris[i - 1]) : 0
-			for (let level = level1; level < level_n; level++) {
-				let group_ri = alloc_slot()
-				e.row_flags[group_ri] = ROW_GROUP
-				e.parent_ri[group_ri] = level ? open_ris[level - 1] : NONE
-
-				// Set the group cells to null, then copy the keys for this level
-				// and for the levels above it from the group's first row.
-				for (let field of e.all_fields)
-					field.col_storage.set(e.col_vals[field.fi], group_ri, null)
-				for (let k = 0; k < level_ends[level]; k++) {
-					let {field, col} = key_fields[k]
-					let storage = field.col_storage
-					storage.set(e.col_vals[field.fi], group_ri,
-						storage.get(col, ri))
-				}
-				open_ris[level] = group_ri
-				group_ris.push(group_ri)
-			}
-
-			// put the data row under the innermost open group.
-			e.parent_ri[ri] = open_ris[level_n - 1]
-		}
-		e.group_ris = Uint32Array.from(group_ris)
-		e.group_fis = new Set(key_fields.map(kf => kf.field.fi))
-		e.is_grouped = true
-	}
-
-	// Free all group row slots for reuse.
-	function remove_groups() {
-		commit_rect()
-		for (let ri of e.group_ris)
-			free_slot(ri)
-		e.group_ris = new Uint32Array(0)
-		e.group_fis = new Set()
-		e.is_grouped = false
-	}
-
-	// Free groups with no rows left. Visit group_ris backward to check
-	// subgroups before their parents.
-	function drop_empty_groups() {
-		// count the data rows directly under each group.
-		let child_n = new Uint32Array(e.cap) // kept children by group
-		for (let i = 0; i < e.row_n; i++)
-			child_n[e.parent_ri[e.base_ris[i]]]++
-
-		// free the empty groups, and count each kept group as a child of its
-		// parent group.
-		let is_dropped = new Uint8Array(e.cap) // 1: group being dropped
-		for (let i = e.group_ris.length - 1; i >= 0; i--) {
-			let ri = e.group_ris[i]
-			let p = e.parent_ri[ri]
-			if (!child_n[ri]) {
-				is_dropped[ri] = 1
-				free_slot(ri)
-			} else if (p != NONE) {
-				child_n[p]++
-			}
-		}
-		e.group_ris = e.group_ris.subarray(0,
-			compact_list(e.group_ris, e.group_ris.length, is_dropped))
-	}
-
-	// Check for edits in grouping columns. Skip columns without input_vals
-	// because no cells in those columns have pending edits.
-	function has_edited_keys(levels) {
-		for (let level of levels)
-			for (let {field} of level) {
-				let fi = field.fi
-				if (!e.input_vals[fi])
-					continue
-				for (let i = 0; i < e.row_n; i++)
-					if (cell_bit(e.changed_mask, e.base_ris[i], fi))
-						return true
-			}
-		return false
-	}
-
-	// Use the syntax accepted by parse_group_by(), or pass null to ungroup.
-	// Refuse grouping in tree view or with pending changes in a tree nav.
-	// Refuse edited grouping columns in a flat nav because the nav groups by
-	// stored values. Return true if applied.
-	e.set_group_by = function(group_by) {
-		let levels = group_by ? parse_group_by(group_by) : []
-		if (levels.length && (e.is_tree || e.can_be_tree && e.changed_n
-			|| has_edited_keys(levels)))
-			return false
-
-		// Remove current groups. Before regrouping, unfocus and deselect old
-		// group rows so that add_groups() can reuse their slots. When
-		// ungrouping, restore tree parents or clear the parents for a flat nav.
-		if (e.is_grouped) {
-			remove_groups()
-			if (levels.length) {
-				e.focus_cell(e.focused_ri, e.focused_fi, 'deselect_hidden')
-			} else if (e.can_be_tree) {
-				set_tree_parents()
-			} else {
-				for (let i = 0; i < e.row_n; i++)
-					e.parent_ri[e.base_ris[i]] = NONE
-			}
-		}
-
-		// add the new groups, if any, and update the rows shown.
-		e.group_by = levels.length ? group_by : null // group-by spec, or null
-		if (levels.length)
-			add_groups(levels)
-		update_is_tree()
-		update_tree_and_visible_ris()
-		return true
-	}
-
-	/// row orders ------------------------------------------------------------
-
-	let tree_ris_buf // separate tree order buffer; unused in flat view
-
-	// Set parent_ri from the parent_id column. Sort rows by parent_id and
-	// compare them with the id index in order. Use no parent when no id
-	// matches.
-	function set_tree_parents() {
-		let id_field = e.id_field
-		let parent_field = e.parent_field
-		let id_ris = get_index(id_field.name).ris // rows sorted by id
-		let pid_ris = radix_sort(e.base_ris.slice(0, e.row_n), e.row_n,
-			[{field: parent_field, desc: false}]) // rows sorted by parent_id
-		let id_col = e.col_vals[id_field.fi]
-		let pid_col = e.col_vals[parent_field.fi]
-		let i = 0 // index into id_ris
-		for (let j = 0; j < e.row_n; j++) {
-			let ri = pid_ris[j]
-			let parent_id = parent_field.col_storage.get(pid_col, ri)
-			let parent_ri = NONE
-			if (parent_id != null) {
-				while (i < id_ris.length && id_field.col_storage.compare_cell(
-					id_col, id_ris[i], parent_id) < 0)
-				{
-					i++
-				}
-				if (i < id_ris.length && id_field.col_storage.compare_cell(
-					id_col, id_ris[i], parent_id) == 0)
-				{
-					parent_ri = id_ris[i]
-				}
-			}
-			e.parent_ri[ri] = parent_ri
-		}
-	}
-
-	function update_is_tree() {
-		e.is_tree = e.can_be_tree && !e.flat && !e.is_grouped // tree view
-	}
-
-	// Stage 3. Build child lists from sorted_ris and group_ris. Visit each
-	// parent before its children to write tree_ris, tree_i and depth. Count
-	// descendants by visiting the rows backward. In flat view, use sorted_ris
-	// directly as tree_ris.
-	function update_tree_ris() {
-		let n = e.row_n
-		if (!(e.is_tree || e.is_grouped)) {
-			e.tree_ris = e.sorted_ris
-			e.tree_n = n
-			e.depth.fill(0)
-			e.desc_count.fill(0)
-			return
-		}
-
-		// build each row's child list, in sort order.
-		let parent_ri = e.parent_ri
-		let first_child_ri = e.first_child_ri
-		let next_sibling_ri = e.next_sibling_ri
-		let first_root_ri = NONE
-		let ris_lists = [e.sorted_ris.subarray(0, n), e.group_ris]
-		// Process data rows and group rows separately. Each group has only data
-		// rows or only subgroups as children.
-		for (let ris of ris_lists)
-			for (let i = 0; i < ris.length; i++)
-				first_child_ri[ris[i]] = NONE
-		for (let ris of ris_lists) {
-			// Visit rows backward and prepend each one to preserve their order.
-			for (let i = ris.length - 1; i >= 0; i--) {
-				let ri = ris[i]
-				let p = parent_ri[ri]
-				if (p == NONE) {
-					next_sibling_ri[ri] = first_root_ri
-					first_root_ri = ri
-				} else {
-					next_sibling_ri[ri] = first_child_ri[p]
-					first_child_ri[p] = ri
-				}
-			}
-		}
-
-		// Visit each parent before its children. Record each row's position and
-		// depth.
-		let tree_ris = tree_ris_buf
-		let tree_i = e.tree_i
-		let depth = e.depth
-		let desc_count = e.desc_count
-		let tree_n = 0 // rows reached
-		let d = 0 // depth of ri
-		let ri = first_root_ri
-		while (ri != NONE) {
-			tree_i[ri] = tree_n
-			tree_ris[tree_n++] = ri
-			depth[ri] = d
-			desc_count[ri] = 0
-			if (first_child_ri[ri] != NONE) {
-				ri = first_child_ri[ri]
-				d++
-			} else {
-				// Find a next sibling. If this row has none, try its parent and
-				// continue upward.
-				while (ri != NONE && next_sibling_ri[ri] == NONE) {
-					ri = parent_ri[ri]
-					d--
-				}
-				if (ri != NONE)
-					ri = next_sibling_ri[ri]
-			}
-		}
-
-		// Count descendants backward so that each child has its count before
-		// adding it to the parent's count.
-		for (let i = tree_n - 1; i >= 0; i--) {
-			let ri = tree_ris[i]
-			let p = parent_ri[ri]
-			if (p != NONE)
-				desc_count[p] += desc_count[ri] + 1
-		}
-		e.tree_ris = tree_ris
-		e.tree_n = tree_n
-
-		// Check for cycles by comparing the number of rows visited with the
-		// total row count.
-		if (e.is_tree && tree_n < n) {
-			warn(e.id, 'circular parent refs: showing the rows flat')
-			e.can_be_tree = false
-			e.parent_ri.fill(NONE)
-			update_is_tree()
-			update_tree_ris()
-		}
-	}
-
-	// Stage 4. Mark parents with descendants passing the filter. Visit
-	// tree_ris backward to check descendants before their parents.
-	function update_pass_desc() {
-		let tree_ris = e.tree_ris
-		let row_flags = e.row_flags
-		for (let i = 0; i < e.tree_n; i++)
-			row_flags[tree_ris[i]] &= ~ROW_PASS_DESC
-		if (!(e.is_tree || e.is_grouped))
-			return
-		let parent_ri = e.parent_ri
-		for (let i = e.tree_n - 1; i >= 0; i--) {
-			let ri = tree_ris[i]
-			let p = parent_ri[ri]
-			if (p != NONE && row_flags[ri] & (ROW_PASS | ROW_PASS_DESC))
-				row_flags[p] |= ROW_PASS_DESC
-		}
-	}
-
-	function update_tree_and_visible_ris() { // stages 3-5
-		update_tree_ris()
-		update_pass_desc()
-		update_visible_ris()
-	}
-
-	// Collapse or expand ri. With recursive, include its descendants. With ri
-	// null, change all roots, or all rows if recursive is set.
-	e.set_collapsed = function(ri, collapsed, recursive) {
-		if (!(e.is_tree || e.is_grouped))
-			return
-		let row_flags = e.row_flags
-		if (ri == null) {
-			for (let i = 0; i < e.tree_n; i++) {
-				let ri1 = e.tree_ris[i]
-				if (recursive || e.depth[ri1] == 0)
-					set_bits(row_flags, ri1, ROW_COLLAPSED, collapsed)
-			}
-		} else if (recursive) {
-			let i2 = e.tree_i[ri] + e.desc_count[ri] // last of the subtree
-			for (let i = e.tree_i[ri]; i <= i2; i++)
-				set_bits(row_flags, e.tree_ris[i], ROW_COLLAPSED, collapsed)
-		} else {
-			set_bits(row_flags, ri, ROW_COLLAPSED, collapsed)
-		}
-		update_visible_ris(true)
-	}
-
-	// Show a tree nav's rows as a flat list.
-	e.set_flat = function(flat) {
-		e.flat = flat // flat view of a tree nav
-		update_is_tree()
-		update_tree_and_visible_ris()
-	}
-
-	// Stage 5. Build the visible row order and keep the previous order in the
-	// other buffer. With reset_sel, select only the focused cell after
-	// filtering or collapsing. Clear focus if the focused row is hidden. To
-	// choose a nearby row, the UI must read visible_i before the operation.
-	function update_visible_ris(reset_sel) {
-		// Record or clear the selection rectangle before changing visible
-		// positions.
-		if (reset_sel)
-			set_rect(null, null, null, null)
-		else
-			commit_rect()
-
-		// Write visible rows into the other buffer. Skip a row and its
-		// descendants if none pass the filter. Include a collapsed row without
-		// its descendants.
-		let ris = e.prev_visible_ris
-		let visible_i  = e.visible_i
-		let tree_ris   = e.tree_ris
-		let row_flags  = e.row_flags
-		let desc_count = e.desc_count
-		visible_i.fill(NONE)
-		let n = 0 // visible row count
-		for (let i = 0; i < e.tree_n; ) {
-			let ri = tree_ris[i]
-			let flags = row_flags[ri]
-			if (!(flags & (ROW_PASS | ROW_PASS_DESC))) {
-				i += desc_count[ri] + 1
-			} else {
-				visible_i[ri] = n
-				ris[n++] = ri
-				i += flags & ROW_COLLAPSED ? desc_count[ri] + 1 : 1
-			}
-		}
-
-		// Clear focus from hidden rows. Deselect hidden rows, or select only
-		// the focused cell with reset_sel.
-		e.focus_cell(e.focused_ri, e.focused_fi,
-			reset_sel ? null : 'deselect_hidden')
-
-		// show the new list; keep the old buffer for the next run.
-		e.prev_visible_ris = e.visible_ris
-		e.prev_visible_n = e.visible_n
-		e.visible_ris = ris
-		e.visible_n = n
-	}
-
 	/// loading ---------------------------------------------------------------
-
-	function load_col_field(col, all_fields_map) {
-		let field = is_col_name(col) && all_fields_map[col]
-		if (warn_if(!field, e.id, 'unknown column:', col))
-			return null
-		return field
-	}
 
 	// Convert row arrays to col_n column arrays.
 	function rows_to_cols(rows, col_n) {
-		if (warn_if(!isarray(rows), e.id, 'rows must be an array'))
+		if (warn_if(!isarray(rows), e.id, 'invalid rows'))
 			return null
 		let cols = []
 		for (let fi = 0; fi < col_n; fi++)
@@ -2891,7 +2894,7 @@ ui.nav2 = function(id, opt) {
 		return cols
 	}
 
-	// Accept server values as one array per row or one array per column.
+	// accept server values as one array per row or one array per column.
 	function rowset_col_vals(rs, col_n) {
 		if (rs.col_vals == null)
 			return rows_to_cols(rs.rows, col_n)
@@ -2899,11 +2902,31 @@ ui.nav2 = function(id, opt) {
 			e.id, 'invalid col_vals'))
 			return null
 		for (let fi = 0; fi < col_n; fi++) {
-			let col = cols[fi]
-			if (warn_if(!isarray(col), e.id, 'invalid col_vals:', fi))
+			let col_vals = rs.col_vals[fi]
+			if (warn_if(!(isarray(col_vals)
+				|| col_vals instanceof Float64Array
+				|| col_vals instanceof Uint8Array),
+				e.id, 'invalid col_vals:', fi))
 				return null
 		}
-		return cols
+		return rs.col_vals
+	}
+
+	let invalid_col_name_re = /^[0-9]|[^a-z0-9_]/
+
+	function check_col_name(col) {
+		let ok = isstr(col) && col.length > 0 && !invalid_col_name_re.test(col)
+		warn_if(!ok, e.id, 'invalid field name: ', col)
+		return ok
+	}
+
+	function col_field(col, all_fields_map) {
+		if (col == null || !check_col_name(col))
+			return
+		let field = all_fields_map[col]
+		if (warn_if(!field, e.id, 'unknown column:', col))
+			return null
+		return field
 	}
 
 	// Accept rs with fields and either col_vals or rows. After accepting the
@@ -2922,15 +2945,16 @@ ui.nav2 = function(id, opt) {
 		for (let fi = 0; fi < rs.fields.length; fi++) {
 			let field_opt = rs.fields[fi]
 			let name = field_opt?.name
-			if (warn_if(!(is_col_name(name) && !all_fields_map[name]),
-				e.id, 'invalid or duplicate field name:', name))
+			if (!check_col_name(name))
+				return
+			if (warn_if(all_fields_map[name], e.id, 'duplicate field name:', name))
 				return
 			let field = ui.create_field(field_opt, e.id)
 			if (!field)
 				return
 			field.fi = fi // column index
 			all_fields.push(field)
-			all_fields_map[field.name] = field
+			all_fields_map[name] = field
 		}
 
 		// find the pk columns (required) and the pos, id and parent columns.
@@ -2942,21 +2966,18 @@ ui.nav2 = function(id, opt) {
 			return
 		let pk_fields = []
 		for (let col of pk_cols) {
-			if (warn_if(!is_col_name(col), e.id,
-				'invalid pk column:', col))
+			if (!check_col_name(col))
 				return
 			let field = all_fields_map[col]
 			if (warn_if(!field, e.id, 'unknown column:', col))
 				return
 			pk_fields.push(field)
 		}
-		let pos_field = rs.pos_col == null
-			? null : load_col_field(rs.pos_col, all_fields_map)
+		let pos_field = col_field(rs.pos_col, all_fields_map)
 		let id_field = rs.id_col == null
 			? pk_fields.length == 1 ? pk_fields[0] : null
-			: load_col_field(rs.id_col, all_fields_map)
-		let parent_field = rs.parent_col == null
-			? null : load_col_field(rs.parent_col, all_fields_map)
+			: col_field(rs.id_col, all_fields_map)
+		let parent_field = col_field(rs.parent_col, all_fields_map)
 		if (rs.pos_col != null && !pos_field
 			|| rs.id_col != null && !id_field
 			|| rs.parent_col != null && !parent_field)
@@ -2966,8 +2987,9 @@ ui.nav2 = function(id, opt) {
 		if (!col_vals)
 			return
 		let n = col_vals[0].length // row count
+		let cap1 = n + 1
 		let e_col_vals = all_fields.map(field =>
-			field.col_storage.load_col(col_vals[field.fi], n))
+			field.col_storage.load_col(col_vals[field.fi], cap1))
 
 		// Ignore the pending save's reply and clear any waiting save or reload
 		// before replacing the rows.
@@ -2981,37 +3003,39 @@ ui.nav2 = function(id, opt) {
 		e.row_n = n // data row count
 		e.col_vals = e_col_vals // column values by fi, then ri
 
-		e.row_flags        = new Uint16Array(n) // ROW_* bits by ri
-		e.parent_ri        = new Uint32Array(n).fill(NONE) // parent, or NONE
-		e.first_child_ri   = new Uint32Array(n) // set by stage 3
-		e.next_sibling_ri  = new Uint32Array(n) // set by stage 3
-		e.depth            = new Uint16Array(n) // indent level by ri
-		e.desc_count       = new Uint32Array(n) // descendant count by ri
-		e.tree_i           = new Uint32Array(n) // index in tree_ris by ri
-		tree_ris_buf       = new Uint32Array(n)
-		e.visible_i        = new Uint32Array(n) // index in visible_ris by ri
-		e.visible_ris      = new Uint32Array(n) // ri's shown, in order
-		e.prev_visible_ris = new Uint32Array(n) // visible_ris before stage 5
+		cap = cap1 // capacity of every ri-indexed array (+1 for 1 free insert)
+		e.row_flags        = new Uint16Array(cap) // ROW_* bits by ri
+		e.parent_ri        = new Uint32Array(cap).fill(NONE) // parent, or NONE
+		first_child_ri     = new Uint32Array(cap) // set by stage 3
+		next_sibling_ri    = new Uint32Array(cap) // set by stage 3
+		e.depth            = new Uint16Array(cap) // indent level by ri
+		e.desc_count       = new Uint32Array(cap) // descendant count by ri
+		e.tree_i           = new Uint32Array(cap) // index in tree_ris by ri
+		tree_ris_buf       = new Uint32Array(cap)
+		e.visible_i        = new Uint32Array(cap) // index in visible_ris by ri
+		e.visible_ris      = new Uint32Array(cap) // ri's shown, in order
+		prev_visible_ris   = new Uint32Array(cap) // visible_ris before stage 5
 		e.visible_n = 0 // length of visible_ris
 
 		// Include every row before applying a filter.
 		e.filter = null // filter function, or null
 		e.row_flags.fill(ROW_PASS)
 
+		// Stage 1: init base_ris and sorted_ris.
 		e.base_ris = new Uint32Array(n) // ri's in stored order
 		for (let ri = 0; ri < n; ri++)
 			e.base_ris[ri] = ri
 		e.pos_field = pos_field
 		// Use pos order as stored order when pos_col is set.
 		if (e.pos_field)
-			e.base_ris = radix_sort(e.base_ris, n,
+			e.base_ris = radix_sort(e.col_vals, e.base_ris, n,
 				[{field: e.pos_field, desc: false}])
 
 		// Use the same array for both orders when unsorted.
 		e.order_by = null // sort columns, sort function, or null
 		e.sorted_ris = e.base_ris // data rows' ri's in sort order
 
-		e.indexes = map() // {cols -> {fields:, ris:}}, built on first lookup
+		indexes = map() // {cols -> {fields:, ris:}}, built on first lookup
 		e.pk = pk // 'col1 ...'
 		e.pk_fields = pk_fields // [field1, ...]
 
@@ -3022,27 +3046,26 @@ ui.nav2 = function(id, opt) {
 		e.rowset_can_move_rows   = rs.can_move_rows   != false // user moves
 		e.reserves_ids = !!rs.reserves_ids // reserve ids before saving new rows
 
-		e.fields = e.all_fields.slice() // visible columns, in display order
-		for (let i = 0; i < e.fields.length; i++)
-			e.fields[i].index = i // position in fields
+		e.visible_fields = e.all_fields.slice() // visible columns, in display order
+		for (let i = 0; i < e.visible_fields.length; i++)
+			e.visible_fields[i].index = i // position in fields
 		e.mask_word_n = (e.all_fields.length + 31) >>> 5 // W: words per row
-		e.sel_mask = new Uint32Array(n * e.mask_word_n) // selected cells' bits
-		e.has_sel_bits = false // false: sel_mask is all zero
+		e.sel_mask = new Uint32Array(cap * e.mask_word_n) // selected cells' bits
+		has_sel_bits = false // false: sel_mask is all zero
 		e.focused_ri = null // focused row, or null
 		e.focused_fi = null // focused column
 		e.quicksearch_text = '' // typed prefix of the focused cell's text
 		set_rect(null, null, null, null) // no selection rectangle
 
-		e.changed_mask = new Uint32Array(n * e.mask_word_n) // edited cells
-		e.unset_mask = new Uint32Array(n * e.mask_word_n) // server default
+		e.changed_mask = new Uint32Array(cap * e.mask_word_n) // edited cells
+		e.unset_mask = new Uint32Array(cap * e.mask_word_n) // server default
 		e.changed_n = 0 // number of changed rows
 		e.input_vals = [] // edited values by fi, then ri
 		e.cell_errors = [] // cell errors by fi, then ri
 		e.row_errors = [] // row errors by ri
 
-		e.cap = n // capacity of every ri-indexed array
-		e.slot_n = n // slots ever used, free ones included
-		e.free_ris = [] // freed slots, used as a stack
+		slot_n = n // slots ever used, free ones included
+		free_ris = [] // freed slots, used as a stack
 
 		e.id_field = id_field
 		e.parent_field = parent_field
@@ -3051,7 +3074,7 @@ ui.nav2 = function(id, opt) {
 		e.group_by = null // group-by spec, or null
 		e.is_grouped = false
 		e.group_ris = new Uint32Array(0) // group row indices in key order
-		e.group_fis = new Set() // the group-by key columns' fi's
+		group_fis = new Set() // the group-by key columns' fi's
 		update_is_tree()
 		if (e.can_be_tree)
 			set_tree_parents()

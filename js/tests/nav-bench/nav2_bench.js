@@ -123,7 +123,7 @@ async function bench_flat() {
 	let id_field = nav.all_fields_map.id
 
 	await bench('flat: build pk index',
-		() => nav.indexes.delete('id'),
+		() => nav.get_debug_state().indexes.delete('id'),
 		() => nav.lookup('id', [1]),
 		ri => assert(nav.col_vals[id_field.fi][ri] == 1,
 			'build pk index: wrong row'))
@@ -146,18 +146,18 @@ async function bench_flat() {
 		},
 		1000)
 
-	let field_n = nav.fields.length
+	let field_n = nav.visible_fields.length
 	let first_ri = () => nav.visible_ris[0]
 	let last_ri = () => nav.visible_ris[nav.visible_n - 1]
-	let first_fi = nav.fields[0].fi
-	let last_fi = nav.fields[field_n - 1].fi
-	let mid_fi = nav.fields[field_n >> 1].fi
+	let first_fi = nav.visible_fields[0].fi
+	let last_fi = nav.visible_fields[field_n - 1].fi
+	let mid_fi = nav.visible_fields[field_n >> 1].fi
 
 	await bench('flat: focus random cell (per call)', null,
 		() => {
 			for (let i = 0; i < 1000; i++)
 				nav.focus_cell(nav.visible_ris[rand_int(nav.visible_n)],
-					nav.fields[rand_int(field_n)].fi)
+					nav.visible_fields[rand_int(field_n)].fi)
 		},
 		() => assert(nav.focused_ri != null, 'focus: no focused row'),
 		1000)
@@ -417,19 +417,20 @@ async function bench_slot_retirement(nav) {
 				rows.push(make_row(null, null, null))
 			let ris = nav.insert_rows(rows, null)
 			nav.remove_rows(ris)
-			return {rows: rows, slot_n: nav.slot_n}
+			return {rows: rows, slot_n: nav.get_debug_state().slot_n}
 		},
 		ctx => nav.insert_rows(ctx.rows, null),
 		(ris, ctx) => {
-			assert(ris.length == 1000 && nav.slot_n == ctx.slot_n,
+			assert(ris.length == 1000
+				&& nav.get_debug_state().slot_n == ctx.slot_n,
 				'insert: freed slots not reused')
 			nav.remove_rows(ris)
 		})
 }
 
 function check_retired_slots(nav, ris) {
-	let free_ris = new Set(nav.free_ris)
-	assert(free_ris.size == nav.free_ris.length,
+	let free_ris = new Set(nav.get_debug_state().free_ris)
+	assert(free_ris.size == nav.get_debug_state().free_ris.length,
 		'free slots: a slot was freed twice')
 	for (let ri of ris) {
 		assert(free_ris.has(ri) && nav.visible_i[ri] == 0xFFFFFFFF
@@ -954,11 +955,11 @@ function check_indexes() {
 			nav.remove_rows(nav.insert_rows([[4], [5]]))
 		nav.lookup('pos', [1])
 		nav.lookup('id pos', [1, 1])
-		let pos_index = nav.indexes.get('pos')
-		let id_pos_index = nav.indexes.get('id pos')
+		let pos_index = nav.get_debug_state().indexes.get('pos')
+		let id_pos_index = nav.get_debug_state().indexes.get('id pos')
 		let ris = nav.insert_rows([[4], [5]], 1)
-		assert(nav.indexes.get('pos') == pos_index
-			&& nav.indexes.get('id pos') == id_pos_index,
+		assert(nav.get_debug_state().indexes.get('pos') == pos_index
+			&& nav.get_debug_state().indexes.get('id pos') == id_pos_index,
 			'insert: existing indexes invalidated')
 		for (let ri of ris)
 			assert(nav.lookup('pos', [nav.cell_val(ri, 1)]) == ri,
@@ -966,9 +967,9 @@ function check_indexes() {
 	}
 	let nav = make_index_nav(3, [1, 1 + Number.EPSILON, 3])
 	nav.lookup('pos', [1])
-	let pos_index = nav.indexes.get('pos')
+	let pos_index = nav.get_debug_state().indexes.get('pos')
 	let [ri] = nav.insert_rows([[4]], 1)
-	assert(nav.indexes.get('pos') == pos_index
+	assert(nav.get_debug_state().indexes.get('pos') == pos_index
 		&& nav.lookup('pos', [nav.cell_val(ri, 1)]) == ri,
 		'renumber fresh rows: existing index invalidated or lookup failed')
 
@@ -977,10 +978,11 @@ function check_indexes() {
 	nav.lookup('pos', [4])
 	nav.lookup('id pos', [4, 4])
 	nav.lookup('id', [4])
-	let id_index = nav.indexes.get('id')
+	let id_index = nav.get_debug_state().indexes.get('id')
 	nav.insert_rows([[5]], 1)
-	assert(!nav.indexes.has('pos') && !nav.indexes.has('id pos')
-		&& nav.indexes.get('id') == id_index,
+	assert(!nav.get_debug_state().indexes.has('pos')
+		&& !nav.get_debug_state().indexes.has('id pos')
+		&& nav.get_debug_state().indexes.get('id') == id_index,
 		'renumber existing new rows: wrong index invalidation')
 	assert(nav.lookup('pos', [5]) == new_ri,
 		'renumber existing new rows: wrong position lookup')
@@ -989,18 +991,18 @@ function check_indexes() {
 	;[new_ri] = nav.insert_rows([[4]], 1)
 	nav.lookup('pos', [1])
 	nav.lookup('id', [4])
-	id_index = nav.indexes.get('id')
+	id_index = nav.get_debug_state().indexes.get('id')
 	assert(nav.move_rows([new_ri], null, 0xFFFFFFFF), 'move refused')
-	assert(!nav.indexes.has('pos')
-		&& nav.indexes.get('id') == id_index
+	assert(!nav.get_debug_state().indexes.has('pos')
+		&& nav.get_debug_state().indexes.get('id') == id_index
 		&& nav.lookup('pos', [4]) == new_ri,
 		'move new row: wrong index invalidation or lookup')
 
 	nav = make_index_nav(3)
 	nav.lookup('pos', [1])
-	pos_index = nav.indexes.get('pos')
+	pos_index = nav.get_debug_state().indexes.get('pos')
 	nav.move_rows([0], null, 0xFFFFFFFF)
-	assert(nav.indexes.get('pos') == pos_index
+	assert(nav.get_debug_state().indexes.get('pos') == pos_index
 		&& nav.lookup('pos', [1]) == 0,
 		'move saved row: loaded-value index changed')
 
@@ -1017,11 +1019,11 @@ function check_indexes() {
 	;[new_ri] = nav.insert_rows([[4]], 2)
 	nav.lookup('parent_id', [1])
 	nav.lookup('parent_id pos', [1, 1])
-	id_index = nav.indexes.get('id')
+	id_index = nav.get_debug_state().indexes.get('id')
 	assert(nav.move_rows([new_ri], null, 1), 'parent change refused')
-	assert(!nav.indexes.has('parent_id')
-		&& !nav.indexes.has('parent_id pos')
-		&& nav.indexes.get('id') == id_index
+	assert(!nav.get_debug_state().indexes.has('parent_id')
+		&& !nav.get_debug_state().indexes.has('parent_id pos')
+		&& nav.get_debug_state().indexes.get('id') == id_index
 		&& nav.lookup('parent_id', [2]) == new_ri
 		&& nav.lookup('parent_id pos', [2, 1]) == new_ri,
 		'parent change: wrong index invalidation or lookup')
