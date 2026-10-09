@@ -18,6 +18,8 @@ BEHAVIOR:
 - ui_nav create_index and ui_nav2 range_bucket_func: the number bucket
 	(floor((v - offset) / freq) + offset) * freq multiplies offset by freq;
 	freq 10, offset 5, v 17 gives 60 instead of 15.
+- ui_grid build_cells_range calls build_row_strike_line(), which nothing
+	defines, so drawing a row marked for deletion throws.
 
 CLEANUP:
 - ui_nav insert_rows: the "insert is aborted" path after

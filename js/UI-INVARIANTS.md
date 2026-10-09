@@ -435,7 +435,7 @@ integer from 0 to 6; magnitude_decimals must be an integer from 0 to 3.
 
 In nav2, write_cell() replaces a new row's column value and clears the
 cell's unset bit and pending edit. The nav reads the assigned value through
-cell_val(), including an ID assigned during reservation. The nav still
+cell_input_val(), including an ID assigned during reservation. The nav still
 counts the row as changed because it is new. For saved rows, write_cell()
 stores an edit.
 
