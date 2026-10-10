@@ -443,17 +443,17 @@ ui.add_validation_rule({
 Efficient storage for one column of values, using typed arrays for scalars
 and JS arrays for strings.
 
-	load_col(col_vals, cap) -> col   load rowset col_vals
-	grow_col(col, cap) -> col        grow col array
-	get(col, ri) -> v                get col val
-	set(col, ri, v)                  set col val
-	write_sort_keys(col, ris, n, field, keys0, keys1) -> word_n
+	load_col(src_vals, cap) -> vals   load rowset values
+	grow_col(vals, cap) -> vals        grow vals array
+	get(vals, ri) -> v                get value
+	set(vals, ri, v)                  set value
+	write_sort_keys(vals, ris, n, field, keys0, keys1) -> word_n
 		radix sort keys of the rows ris[0..n), as 1 or 2 Uint32 words per row:
 		the least significant word in keys0, the other one in keys1.
-	compare_cell(col, ri, v) -> -1|0|1            sort comparator
-	copy_changed(col, ris, src_col, src_is, n, changed_ks) -> count
-		for k in [0..n): where src_col[src_is[k]] differs from col[ris[k]],
-		copy it there and put k in changed_ks. src_col is made by load_col().
+	compare_cell(vals, ri, v) -> -1|0|1            sort comparator
+	copy_changed(vals, ris, src_vals, src_is, n, changed_ks) -> count
+		for k in [0..n): where src_vals[src_is[k]] differs from vals[ris[k]],
+		copy it there and put k in changed_ks. src_vals is made by load_col().
 		null comes first in sort key order.
 
 */
@@ -464,22 +464,22 @@ function compare_vals(v1, v2) {
 
 let base_collator_compare
 
-function grow_typed_col(col, cap) {
-	let col1 = new col.constructor(cap)
-	col1.set(col)
-	return col1
+function grow_typed_col(vals, cap) {
+	let vals1 = new vals.constructor(cap)
+	vals1.set(vals)
+	return vals1
 }
 
 // two NaNs are two f64 nulls: the same value. for other values the NaN test
 // is always false, so this function serves all three storages.
-function copy_changed(col, ris, src_col, src_is, n, changed_ks) {
+function copy_changed(vals, ris, src_vals, src_is, n, changed_ks) {
 	let changed_n = 0
 	for (let k = 0; k < n; k++) {
 		let ri = ris[k]
-		let v0 = col[ri]
-		let v = src_col[src_is[k]]
+		let v0 = vals[ri]
+		let v = src_vals[src_is[k]]
 		if (v0 !== v && (v0 === v0 || v === v)) {
-			col[ri] = v
+			vals[ri] = v
 			changed_ks[changed_n++] = k
 		}
 	}
@@ -488,30 +488,30 @@ function copy_changed(col, ris, src_col, src_is, n, changed_ks) {
 
 let array_storage = {
 	load_col: (vals, cap) => vals,
-	grow_col: (col, cap) => col, // a JS array grows on its own
-	get     : (col, ri) => col[ri],
-	set     : (col, ri, v) => { col[ri] = v },
+	grow_col: (vals, cap) => vals, // a JS array grows on its own
+	get     : (vals, ri) => vals[ri],
+	set     : (vals, ri, v) => { vals[ri] = v },
 	// key: the value's rank among the distinct values; null is key 0. 1 word.
-	write_sort_keys: function(col, ris, n, field, keys0) {
+	write_sort_keys: function(vals, ris, n, field, keys0) {
 		let ranks = map() // {v -> rank}
-		let vals = [] // distinct non-null values
+		let distinct_vals = [] // distinct non-null values
 		for (let i = 0; i < n; i++) {
-			let v = col[ris[i]]
+			let v = vals[ris[i]]
 			if (v != null && !ranks.has(v)) {
 				ranks.set(v, 0)
-				vals.push(v)
+				distinct_vals.push(v)
 			}
 		}
 		if (field.sort_collation == 'ai_ci') {
 			base_collator_compare ??= new Intl.Collator(undefined,
 				{sensitivity: 'base'}).compare
-			vals.sort(base_collator_compare)
+			distinct_vals.sort(base_collator_compare)
 			let rank = 0
-			for (let i = 0; i < vals.length; i++) {
+			for (let i = 0; i < distinct_vals.length; i++) {
 				if (i == 0 || base_collator_compare(
-					vals[i - 1], vals[i]) != 0)
+					distinct_vals[i - 1], distinct_vals[i]) != 0)
 					rank++
-				ranks.set(vals[i], rank)
+				ranks.set(distinct_vals[i], rank)
 			}
 		} else if (field.sort_collation?.startsWith('list\0')) {
 			let items = field.sort_collation.slice(5).split('\0')
@@ -519,7 +519,7 @@ let array_storage = {
 			for (let i = 0; i < items.length; i++)
 				item_ranks.set(items[i], i + 1)
 			let unlisted_vals = []
-			for (let v of vals) {
+			for (let v of distinct_vals) {
 				if (item_ranks.has(v))
 					ranks.set(v, item_ranks.get(v))
 				else
@@ -529,18 +529,18 @@ let array_storage = {
 			for (let i = 0; i < unlisted_vals.length; i++)
 				ranks.set(unlisted_vals[i], items.length + i + 1)
 		} else {
-			vals.sort(compare_vals)
-			for (let rank = 0; rank < vals.length; rank++)
-				ranks.set(vals[rank], rank + 1)
+			distinct_vals.sort(compare_vals)
+			for (let rank = 0; rank < distinct_vals.length; rank++)
+				ranks.set(distinct_vals[rank], rank + 1)
 		}
 		for (let i = 0; i < n; i++) {
-			let v = col[ris[i]]
+			let v = vals[ris[i]]
 			keys0[i] = v == null ? 0 : ranks.get(v)
 		}
 		return 1
 	},
-	compare_cell: function(col, ri, v) {
-		let v1 = col[ri]
+	compare_cell: function(vals, ri, v) {
+		let v1 = vals[ri]
 		if (v1 == null)
 			return v == null ? 0 : -1
 		if (v == null)
@@ -552,31 +552,32 @@ let array_storage = {
 
 // null is NaN: JSON numbers are never NaN.
 let f64_storage = {
-	load_col: function(vals, cap) {
-		let col = new Float64Array(cap)
-		for (let ri = 0; ri < vals.length; ri++) {
-			let v = vals[ri]
-			col[ri] = v == null ? NaN : v
+	load_col: function(src_vals, cap) {
+		let vals = new Float64Array(cap)
+		for (let ri = 0; ri < src_vals.length; ri++) {
+			let v = src_vals[ri]
+			vals[ri] = v == null ? NaN : v
 		}
-		return col
+		return vals
 	},
 	grow_col: grow_typed_col,
-	get: function(col, ri) {
-		let v = col[ri]
+	get: function(vals, ri) {
+		let v = vals[ri]
 		return v !== v ? null : v
 	},
-	set: function(col, ri, v) {
-		col[ri] = v == null ? NaN : v
+	set: function(vals, ri, v) {
+		vals[ri] = v == null ? NaN : v
 	},
 	// key: the double's bits made unsigned-sortable (negative: flip all bits;
 	// positive: flip the sign bit); 0 for null. 2 words.
-	write_sort_keys: function(col, ris, n, field, keys0, keys1) {
-		let bits = new Uint32Array(col.buffer, col.byteOffset, col.length * 2)
+	write_sort_keys: function(vals, ris, n, field, keys0, keys1) {
+		let bits = new Uint32Array(vals.buffer, vals.byteOffset,
+			vals.length * 2)
 		for (let i = 0; i < n; i++) {
 			let ri = ris[i]
 			let lo_word = bits[2 * ri] // little endian: low word first
 			let hi_word = bits[2 * ri + 1]
-			if (col[ri] !== col[ri]) {
+			if (vals[ri] !== vals[ri]) {
 				keys0[i] = 0
 				keys1[i] = 0
 			} else if (hi_word & 0x80000000) {
@@ -589,8 +590,8 @@ let f64_storage = {
 		}
 		return 2
 	},
-	compare_cell: function(col, ri, v) {
-		let v1 = col[ri]
+	compare_cell: function(vals, ri, v) {
+		let v1 = vals[ri]
 		if (v1 !== v1)
 			return v == null ? 0 : -1
 		if (v == null)
@@ -602,32 +603,32 @@ let f64_storage = {
 
 // 0: false, 1: true, 2: null.
 let bool_storage = {
-	load_col: function(vals, cap) {
-		let col = new Uint8Array(cap)
-		for (let ri = 0; ri < vals.length; ri++) {
-			let v = vals[ri]
-			col[ri] = v == null ? 2 : v ? 1 : 0
+	load_col: function(src_vals, cap) {
+		let vals = new Uint8Array(cap)
+		for (let ri = 0; ri < src_vals.length; ri++) {
+			let v = src_vals[ri]
+			vals[ri] = v == null ? 2 : v ? 1 : 0
 		}
-		return col
+		return vals
 	},
 	grow_col: grow_typed_col,
-	get: function(col, ri) {
-		let v = col[ri]
+	get: function(vals, ri) {
+		let v = vals[ri]
 		return v == 2 ? null : v == 1
 	},
-	set: function(col, ri, v) {
-		col[ri] = v == null ? 2 : v ? 1 : 0
+	set: function(vals, ri, v) {
+		vals[ri] = v == null ? 2 : v ? 1 : 0
 	},
 	// key: 0 for null, 1 for false, 2 for true. 1 word.
-	write_sort_keys: function(col, ris, n, field, keys0) {
+	write_sort_keys: function(vals, ris, n, field, keys0) {
 		for (let i = 0; i < n; i++) {
-			let v = col[ris[i]]
+			let v = vals[ris[i]]
 			keys0[i] = v == 2 ? 0 : v + 1
 		}
 		return 1
 	},
-	compare_cell: function(col, ri, v) {
-		let v1 = col[ri]
+	compare_cell: function(vals, ri, v) {
+		let v1 = vals[ri]
 		let key1 = v1 == 2 ? 0 : v1 + 1
 		let key2 = v == null ? 0 : v ? 2 : 1
 		return compare_vals(key1, key2)

@@ -380,7 +380,7 @@ visible indices and clears hidden focus and selection through
 focus_cell(). Expanded destinations show the moved rows.
 
 When rebuilding the tree, the nav uses current input parent values,
-with loaded values for unchanged cells, so unsaved parent changes are
+with loaded values for unmodified cells, so unsaved parent changes are
 preserved.
 
 In nav2, after walking a tree, the nav checks whether it reached every data
@@ -436,7 +436,7 @@ integer from 0 to 6; magnitude_decimals must be an integer from 0 to 3.
 In nav2, write_cell() replaces a new row's column value and clears the
 cell's unset bit and pending edit. The nav reads the assigned value through
 cell_input_val(), including an ID assigned during reservation. The nav still
-counts the row as changed because it is new. For saved rows, write_cell()
+counts the row as modified because it is new. For saved rows, write_cell()
 stores an edit.
 
 In nav2, validate_row() validates every current cell value of a new row,
@@ -487,7 +487,7 @@ bug. On a plain move, focus_cell() selects the focused cell and nothing
 else. After a filter change or a collapse it resets the selection to the
 focused cell; after any other change to the visible rows or cols it drops
 only what is now hidden. The code that changes the visible rows chooses
-which, through update_parts(). On Ctrl+A the grid focuses the first cell
+which, through update_parts(). On Ctrl+A the grid keeps focus unchanged
 and selects all rows.
 
 focus_cell(true, true, 0, 0, {select: 'set', select_ri1, select_ri2})
@@ -505,14 +505,14 @@ selection rectangle, clears the removed row's visible index, and calls
 focus_cell(ri, fi, 'deselect_hidden'). The nav preserves selection on
 surviving rows.
 
-In nav2, a data row is changed when it is new, marked for deletion, or has
-an edited cell. The nav counts all such rows in changed_n. Only saving is
+In nav2, a data row is modified when it is new, marked for deletion, or has
+an edited cell. The nav counts all such rows in modified_n. Only saving is
 affected by no_save. When setting no_save, the nav preserves the row's
-values, its changed bits, and changed_n.
+values, its modified bits, and modified_n.
 
-For an explicit sort, the nav places changed data rows first in stored order
-before rebuilding the tree and visible rows. The nav sorts unchanged data
-rows by the requested order. When filtering, the nav marks every changed
+For an explicit sort, the nav places modified data rows first in stored order
+before rebuilding the tree and visible rows. The nav sorts unmodified data
+rows by the requested order. When filtering, the nav marks every modified
 data row as passing the filter. The nav includes no_save rows in both
 operations.
 
@@ -571,6 +571,39 @@ parent.
 With pos_col, the nav initializes their positions after all existing
 siblings, including hidden records. It preserves the chosen insertion
 point in full displayed sibling order and in visible rows.
+
+Editing. The nav owns the edit state: whether the focused cell is being
+edited, the text selection to start with, and whether to open the editor's
+dropdown. The grid owns the editor widget. Each frame the grid compares the
+nav's edit state with the editor it built: it removes the editor of an edit
+that ended and focuses the editor of an edit that started. The nav never
+calls ui functions. In row-select mode the nav keeps no focused field, so
+the user cannot edit.
+
+The nav ends the edit before any operation that changes rows, fields or
+values: sort, filter, collapse, flat view, grouping, insert, remove,
+undelete, move, revert, set null and load. focus_cell() ends it when
+the focus moves to another cell. Ending the edit commits it. Only Escape
+reverts the edited cell.
+
+Focus changes do not end edits. Stage 5 and the nav's own operations
+write focus and selection through set_focus(), which also reports focus
+changes by setting focus_changed. The grid clears it during build after
+queuing a scroll request for the current focus and requesting a rebuild.
+
+Saving is manual: the app or the UI calls save(). The nav validates the
+row on every cell edit, so a new row shows its missing required values
+after the first edit.
+
+The nav never hides an edited cell. Filters keep modified rows, sorting puts
+them first, and set_collapsed() leaves a row expanded while a modified row is
+in its subtree. Hiding a column with edits is refused. diff_merge() still
+drops a saved row that the server no longer has, edits included.
+
+diff_merge() keeps the edit open. It ends the edit only before it drops the
+edited row. When it applies the filter again, it keeps the edited row
+passing. When the server moves a modified row or the edited row under a
+collapsed parent, it expands that row's ancestors.
 
 
 WHEN A FIX DOESN'T FIT

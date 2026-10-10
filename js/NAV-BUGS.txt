@@ -1,0 +1,861 @@
+NAV ROW BUGS
+==============================================================================
+
+Review of the nav's rows as a collection: the full rowset (all_rows), the
+visible list (e.rows), the tree and group structure, focus and selection,
+insert, delete and save. Code: www/ui_nav.js, www/ui_grid.js.
+
+State: every FIXED item is in the working tree, not committed.
+Cosmin tests the grid himself.
+
+Before working on an item, read the NAV section of js/UI-INVARIANTS.md:
+the rules Cosmin set while fixing the items below are there.
+
+After discussing an item, update its status here. Record settled NAV rules
+in js/UI-INVARIANTS.md when needed.
+
+A label means the same item for good, even when the list changes.
+DECIDE: a question for Cosmin.
+
+
+NAV INSERT/MOVE ROW OPS
+==============================================================================
+
+Review of www/ui_nav.js and www/ui_grid.js, 2026-10-03.
+Source inspection only. Cosmin tests the grid interactively.
+
+Gestures in scope:
+
+- Insert: insert before the focused record, under the same parent.
+- Down at the bottom: append a record. For a filtered flat nav, append to
+	the complete list. Continuing the last tree parent's children is N1.
+- Drop between rows: move between siblings at the indicated tree depth.
+- Drop on a record: move as a child of that record.
+
+The grid has not connected row dragging yet. Move findings below describe
+the existing nav code used to implement these gestures, not working mouse
+interactions today.
+
+Directions from this discussion:
+
+- Keep temporary insertion placement until the next visible-row rebuild.
+- Prefer keeping unsaved new rows visible through ordinary column filters.
+- Consider displaying new rows with missing keys or positions first within
+	their parent after a rebuild; see N7.
+
+In the current invariants, insertion placement lasts until the next sort
+and custom movement is prohibited while filtered. Update those rules after
+deciding the new behavior and before implementing it.
+
+
+OBVIOUS BUGS / GAPS
+------------------------------------------------------------------------------
+
+A4. Connect row dragging and preserve tree sibling order after a drop.
+	Status: PARTIAL. Sibling ordering is implemented for same-parent moves
+	and for parent changes.
+	Done: in unsorted trees with pos_col or client-side array order, place
+	moved siblings at the drop position in the complete child array before
+	copying stored order and numbering positions. Retain their complete
+	subtrees, including collapsed children. Root moves use the root array.
+	Cost: same-parent moves use O(s) sibling searches and array shifts, plus
+	a scan of the moved visible rows to count siblings. array_move creates
+	a temporary array containing the moved siblings. When changing parent,
+	the nav removes the k siblings from the old child array with one shift
+	and inserts them into the new one with one shift. No added
+	allocations. Existing visible-index updates and the client-tree
+	stored-order rebuild cost O(n).
+	Remaining: connect drag start, destination preview, drop and
+	cancellation. Use state.can_drop(insert_ri, parent_row) when choosing
+	drop targets, and state.cancel() to cancel. Between start and finish,
+	row_index() returns null for the cut rows and the rows after them:
+	start_move_selected_rows() cuts e.rows without updating indices.
+	User: drag a row between siblings or onto another row, then trigger a
+	visible-row rebuild.
+	Current: the grid never starts a row drag or completes a drop. Server
+	tree navs keep all_rows unchanged; client tree navs rebuild it from
+	child_rows. On flat moves in custom order, finish() commits display
+	order to all_rows.
+	Source: www/ui_nav.js:2176,3720,3738,3739.
+
+B1. Hidden records after filtered insertion or without a detail master.
+	User: press Insert or Down while a column filter excludes a blank row,
+	or press Insert in a detail grid with no selected master.
+	Current: the nav adds the record to all_rows but omits it from visible
+	rows. It can focus the old record again, allowing repeated Down to add
+	hidden records, which a server grid saves. With param_vals false, the
+	nav hides every insert and cannot fill the missing master values.
+	Required: apply the preferred unsaved-row visibility rule to ordinary
+	column filters, immediately and during later rebuilds. Refuse UI
+	insertion without a detail master.
+	DECIDE: confirm keeping unsaved new rows visible through column filters.
+	Source: www/ui_nav.js:1273,2525,2549,3247,3319,3340.
+
+A13. Temporary insertion placement after a visibility-only rebuild.
+	Requested behavior change; A2 remains fixed under the current rule.
+	User: insert while sorted, then change a filter or collapse another row.
+	Current: the nav also inserts at that position in child_rows. Rebuilding
+	visible rows from child_rows, the nav retains that position without
+	sorting.
+	Required for the requested lifetime: rebuild from ordinary display
+	ordering; retain no insertion-position history beyond the rebuild.
+	Source: www/ui_nav.js:3305,3314,949.
+
+A12. Server sibling reordering without pos_col is not persistent.
+	Status: PARTIAL.
+	Done: can_actually_move_rows() disables movement in flat server navs
+	without pos_col and reports that saving row order requires a position
+	column. Client navs can still move rows using array order.
+	state.can_drop(insert_ri, parent_row) checks the allowed range, parent
+	permission and parent eligibility. Without client array order or
+	pos_col, the helper permits only a parent change. The grid supplies
+	the destination parent; the visible index alone is ambiguous in trees.
+	Cost: O(1) per target with no allocations. One function per drag.
+	Remaining: query the helper when connecting grid drop targets in A4.
+	User: reorder server rows between siblings, save, then reload.
+	Current: the grid has not connected row dragging. finish() assumes
+	an allowed destination and does not repeat the target checks.
+	Source: www/ui_nav.js:1351,1367,3708.
+
+
+NICE-TO-HAVE
+------------------------------------------------------------------------------
+
+N1. Continue the last sibling list with Down at the bottom of a tree.
+	User: focus the last visible child and press Down to add another child
+	under the same parent.
+	Current: the grid passes no anchor, so the nav appends a root record.
+	Needed: derive the parent from the focused row and append to its complete
+	sibling list. This is a chosen behavior change, not a current invariant.
+	Source: www/ui_grid.js:1421; www/ui_nav.js:3213,3235.
+
+N2. Reorder while filtered, including client detail navs.
+	User: filter the grid and drag a visible record between visible siblings.
+	Current: the nav prohibits every filtered move.
+	Needed: resolve the visible destination to complete sibling order and
+	move only the selected records, keeping unselected hidden records in
+	relative order. After removing the filter, the nav must display that
+	complete order.
+	Source: www/ui_nav.js:1315,3731.
+
+N3. Insert or reorder within one leaf group.
+	User: focus a row in a leaf group and press Insert, or drag a row
+	between other rows in that group.
+	Current: the nav prohibits grouped insertion and movement (A6).
+	Needed: for insertion, fill grouped values from the focused row and
+	attach through the grouping code. For movement, update row order within
+	the same group and under the same real tree parent, with editable order
+	displayed.
+	Source: www/ui_nav.js:1273,3232,1995,1341.
+
+N4. Drop onto an exact-value group header to change grouped values.
+	User: drag a row onto another group's header.
+	Current: the nav has no group-aware completion for this gesture.
+	Needed: update the actual grouped fields and row order, and refresh
+	group membership, while preserving real tree parentage. Require
+	writable grouped fields. For a range group, decide which actual field
+	value to assign before enabling that destination.
+	Source: www/ui_nav.js:1964,1995,3688.
+
+N5. Change parent while explicitly sorted.
+	User: sort a tree, then drop a record onto another parent.
+	Current: the nav prohibits every sorted move.
+	Needed: allow the parent change and place the subtree using the current
+	sort under the destination. Keep sibling reordering by drops between
+	rows unavailable while sorted.
+	Source: www/ui_nav.js:1315,2137,2249.
+
+N6. Drag a noncontiguous selection.
+	User: Ctrl-select separated siblings and drag them together.
+	Current: the move code represents one contiguous visible range.
+	Needed: operate on selected records, preserve their relative editable
+	order, include complete subtrees, and exclude selected descendants whose
+	ancestors are already moving. B11 currently refuses these selections.
+	Source: www/ui_nav.js:1538,3627,3761.
+
+N7. Keep incomplete new rows easy to find after rebuilding.
+	User: insert a record with missing key or position values, then change
+	the sort or trigger another visible-row rebuild before completing it.
+	Current: the nav has no common rule for putting such records first.
+	Needed: display those unsaved new records first within their parent.
+	Use current row state; retain no previous insertion-position history.
+	Source: www/ui_nav.js:3297,939,952.
+
+N8. Avoid work on every row for a small insertion or drop.
+	User: insert one record or drag it one sibling away in a million-row nav.
+	Current: the nav rewrites all visible indices; movement can also copy
+	all_rows or rebuild it from the tree, and renumber positions.
+	Needed: choose order storage and visible indexing together.
+	With an internal position slot alone, the nav still shifts arrays and
+	updates indices. With dense positions, it can need many field updates.
+	Current work is O(n), with n the number of records, in these paths.
+	Source: www/ui_nav.js:1257,3707,3732,3741,3613.
+
+
+NEXT
+------------------------------------------------------------------------------
+Order agreed for the open items:
+
+1. Order group: A3, A7.
+2. F1 (decided, see FIXED).
+3. Gaps, later: row moves (A4, A5, A6), B4, saving (S1, S2, S3).
+
+B1 is deferred at Cosmin's request.
+
+Current: A1 and A2 are fixed. In flat mode, child_rows and all_rows are
+the same array until the nav copies all_rows for the first sort. On a flat
+move in custom order, finish() moves child_rows and copies it into all_rows
+if they are separate arrays; otherwise it moves all_rows directly. Cost
+with separate arrays: one O(n) copy.
+
+Approval is pending for tree sibling order during moves so that we can
+finish A3: without it the nav would write the old positions after a tree
+move. The approved move scope was flat only.
+
+Pending, not a bug: rewrite the comments added in the last session in the
+terse "condition: action" style (e.g. "empty group: remove"). Waiting for
+Cosmin's go.
+
+
+A. ORDER AND POSITIONS (open)
+------------------------------------------------------------------------------
+A5. finish_up/finish_down move rows by one visible row, not one sibling:
+	with can_change_parent, a first child goes above its parent, a row moved
+	past a sibling with expanded children goes inside that sibling's
+	subtree. API only.
+	Status: PARTIAL.
+	Done: both helpers call state.can_drop() and, when it refuses,
+	state.cancel(), which puts the cut rows back where they were. The top
+	row no longer goes second-to-last.
+A7. diff_merge appends rows that are new on the server to the end of the
+	visible list, ignoring sort and pos. Rows whose values changed are not
+	re-sorted or re-filtered, except that a merge that also removes a row
+	re-filters everything.
+	Status: PARTIAL.
+	Done: private binsearch_rows(rows, row, cmp) skips pinned rows and returns
+	the insertion index after equal unpinned rows. The unpinned rows must
+	already be sorted by cmp. No callers or pin writers yet.
+	Cost: O(log n + p), where p is the number of pinned rows encountered;
+	O(n) in the worst case. No allocations.
+	Remaining: choose when to release pins and integrate per-row merge
+	placement. Update local new, modified or currently edited rows in place,
+	keeping their visibility and position. Apply filters and ordering to
+	new server rows and to unmodified rows outside the current edit.
+
+
+B. VISIBILITY AND FOCUS (open)
+------------------------------------------------------------------------------
+B4. A server push in tree or grouped mode: diff_merge refuses, so the nav
+	does a full reset and loses the collapse state.
+
+
+S. SAVING (open, later)
+------------------------------------------------------------------------------
+S1. pack_changes skips a row whose save request is in flight. Nothing
+	retries a failed save.
+S2. An edit made while the row's save is in flight is lost: apply_result
+	clears modified, takes the row out of changed_rows, and overwrites the
+	input value if the server returns values.
+S3. With two save requests in flight, the server may process the later one
+	first, e.g. a parent's delete before its child's. The server keeps the
+	tree consistent, so the result is a spurious error, not a broken tree.
+S7. validate_row() reuses stored client results, so a lookup value that
+	was valid when set is not re-checked at save. Nothing revalidates a
+	column when its lookup nav's rows change (TODO at
+	www/ui_nav.js:3085).
+
+
+P. PERFORMANCE AT 1M ROWS (open)
+------------------------------------------------------------------------------
+P4. update_row_index() writes into every visible row on every insert and
+	move: 18 ms at 1M rows in memory order, 83 ms after a sort (measured).
+	On removal, collapse and filtering, update_parts() also rebuilds e.rows
+	from the whole tree. Proposal: a block index next to e.rows, blocks of
+	~1000 rows, each row storing its block and its offset in the block; on
+	insert or removal the code rewrites one block and the block starts.
+	See N8.
+	Source: www/ui_nav.js:1278,939.
+P6. update_all_pos_fields() calls set_cell_val() on every row on every UI
+	insert and UI removal with pos_col. With dense positions, after an
+	insert near the top the nav changes and saves n positions.
+	DECIDE: dense or sparse positions. See N8, A3.
+	Source: www/ui_nav.js:3612.
+P8. A static rowset's save() serializes every row, and the nav saves on
+	every row exit by default.
+	Source: www/ui_nav.js:4410.
+P9. Rows become holey arrays: the code writes the row index slot and the
+	cell-state slots past the end of the row, leaving gaps. In a
+	measurement, packed rows were no faster (first index write 129 ms vs
+	134 ms at 1M rows; later passes the same).
+	DECIDE: keep rows packed anyway?
+
+
+FIXED (working tree, not committed)
+------------------------------------------------------------------------------
+P1. insert_rows() inserted each row at its position in all_rows, the child
+	list and e.rows, one splice per row and array: O(k * (n + v)). Now the
+	loop appends the new rows and the code moves each run into place once
+	after it. Several rows inserted under a parent with no children no
+	longer come out reversed.
+F1. For an in-page rowset, all_rows is ui.rowsets[NAME].rows itself.
+	Decided: the nav modifies that array. insert_rows, remove_rows and a
+	move in a client tree nav (finish(), which refills it from the tree)
+	modify it in place. Flat sorting uses a separate display copy (A1
+	fixed).
+P5. remove_rows() copied all_rows with all_rows.filter(). Now it removes
+	the rows in place with remove_values(): ~28 ms vs ~36 ms at 1M rows
+	(measured), and no new 1M-element array.
+S6. diff_merge dropped a row marked for deletion from changed_rows when a
+	merged value of that row changed: reset_cell_val() called
+	row_unchanged() for any row that was not modified, removed rows
+	included, so save() never sent the delete. Now set_cell_val(),
+	reset_cell_val() and set_mark() call update_changed_rows(), which keeps
+	new, removed and modified rows in changed_rows.
+P3. idx.rebuild() called build_cell() for every new key to make a label;
+	for a pk or id index that is once per row, and nothing read those
+	labels. Now an index without range_defs computes no labels. Indexes
+	with range_defs (group_rows(), read by the charts) keep them.
+P2. diff_merge rebuilt the pk index once per changed row: idx.val_changed()
+	invalidated every index whatever the field, and find_row() for the next
+	server row rebuilt the pk index: O(changed rows * n). Now
+	reset_cell_val() calls idx.invalidate(field), which invalidates only an
+	index whose columns include the field. val_changed() and row_removed()
+	are gone.
+A11. For unsorted tree moves with or without pos_col, state.can_drop()
+	rejects parent changes when the parent column is readonly. Same-parent
+	reordering remains available. The nav assumes an allowed destination
+	at completion; grid target wiring remains in A4.
+	Cost: one O(1) check per target, no allocations.
+	Source: www/ui_nav.js:3733.
+
+E2. Ctrl+Insert clones the focused row without requiring a declared primary
+	key. The grid removes key values only when pk_fields is present.
+	Cost: O(k) for k key fields, no extra allocations. The grid uses a loop
+	instead of allocating an unused array with map().
+	Source: www/ui_grid.js:1518,1520.
+
+S5. The nav initializes save_on_move_row to true, matching the documented
+	default. On move completion, it calls the existing save operation.
+	Callers can still disable this with save_on_move_row: false.
+	Cost: one initialization assignment, no new allocations. Move completion
+	runs the existing save operation by default.
+	Source: www/ui_nav.js:376,630,3825,4503.
+
+B11. start_move_selected_rows() derives the move range from actual
+	selected rows, including Ctrl-selection. It moves consecutive siblings
+	with their subtrees and rejects gaps containing unselected siblings
+	or selections spanning unrelated parents before changing arrays.
+	Selected descendants move with their selected ancestor. Before detaching
+	the visible move range, the nav calls focus_cell() with select: 'set'
+	to expand the actual selection while keeping focus unchanged. The nav
+	applies existing selection restrictions and selects all selectable
+	visible fields in cell-select mode. The up/down helpers finish only a
+	move that started.
+	Cost: range derivation was O(1) and is now O(s), for s selected rows.
+	Flat gap detection is O(1) after that scan. Tree range validation is
+	O(m), for m visible moved rows, with one selection lookup per sibling.
+	start_move_selected_rows() creates the move context directly. One
+	forward tree walk validates siblings and includes their descendants.
+	Setting the selection adds O(m) work in row-select mode, or O(m * f)
+	work and m field sets in cell-select mode, for f visible fields.
+	focus_cell() also copies the old selection into a temporary map of s
+	rows. The tree walk advances past selected siblings as well as children.
+	No added row arrays or per-frame work. Grid wiring remains in A4;
+	noncontiguous movement remains N6.
+	Source: www/ui_nav.js:1566,3645,3672,3710,3840,3846.
+
+A10. For reparenting in an unsorted tree, with or without pos_col,
+	row_can_have_children() rejects rows marked for deletion and rows
+	without a loaded id. It still rejects can_have_children false.
+	The grid chooses allowed destinations and enforces the drop range
+	and can_change_parent. The nav assumes an allowed destination;
+	it does not repeat the grid's checks at completion.
+	Grid wiring remains in A4. Cost: constant-time checks, no allocations.
+	Source: www/ui_nav.js:2773.
+
+A6. The nav prohibits moves while grouped, with or without pos_col,
+	and reports grouping as the disabled reason. Direct move calls fail
+	before changing arrays. Cost: constant-time checks, no added row arrays
+	or state. Grouped moves remain nice-to-have work in N3 and N4.
+	Source: www/ui_nav.js:1346,1360,3634.
+
+B10. On a drop into a collapsed parent in an unsorted tree, with pos_col
+	or client-side array order, the nav keeps the parent collapsed and
+	leaves the moved rows hidden. The nav clears their visible indices and
+	clears hidden focus and selection through focus_cell. Expanded
+	destinations still show the moved rows.
+	Cost: O(m) index clearing for m moved visible rows, plus existing
+	visible-index updates. Focus cleanup copies the current selection.
+	No full visibility rebuild or added row arrays.
+	Source: www/ui_nav.js:3697,3701,3776.
+
+A3. Incorrect position numbering after insertion, removal or movement.
+	Status: FIXED.
+	Done: number complete sibling lists, including filtered or collapsed
+	rows. Insert/remove renumbers every sibling list; moves renumber the
+	old and new parents' lists. Skip renumbering while explicitly sorted or
+	grouped. Sorted UI inserts append in stored order under the same parent
+	and get successive positions above the existing sibling maximum. The
+	nav keeps their chosen visible insertion point.
+	Cost: full renumbering is O(n). Finding the maximum for sorted insertion
+	is O(s) once per batch, for s siblings. Neither operation copies arrays.
+	User: insert while sorted or filtered, insert a tree child, or drop onto
+	a collapsed parent with existing children.
+	Original: update_pos_field ran after every UI insert and after removals
+	that dropped rows, without checking the mode. The nav renumbered rows
+	in visible display order, overwriting custom order or assigning positions
+	already used by hidden rows. After tree insertion, it renumbered only
+	roots, leaving a new child's position unset. After a drop onto a
+	collapsed parent, it omitted the existing hidden children.
+	Source: www/ui_nav.js:3234,3310,3617.
+
+A9. When rebuilding the tree, the nav reads each row's current parent
+	value, using the loaded value when unchanged. The nav preserves unsaved
+	parent changes after clearing sorting. The rebuild remains O(n), with
+	an extra edited-value lookup per row and no added allocations.
+	Source: www/ui_nav.js:2141.
+A8. When changing parent, the nav identifies the moved siblings by
+	their original parent instead of their changing depth. The nav reparents
+	those siblings and keeps their descendants attached. The code scans
+	the moved rows once, with no added allocations.
+	Source: www/ui_nav.js:3711.
+A14. When rebuilding stored order after a client-tree move, the nav recurses
+	only into records with child_rows. The nav includes loaded leaves and
+	continues without iterating null. Parent-before-children order is
+	preserved. Cost remains O(n), with no added allocations.
+	Source: www/ui_nav.js:3740.
+A1. In flat mode, child_rows and all_rows are the same array until the nav
+	copies all_rows for the first sort. The nav reuses that copy for explicit
+	sorts and pos_col ordering. When no explicit sort is set and the copy
+	exists, the nav restores stored order into it before pos_col ordering.
+	It keeps all_rows in stored order, including for static saving.
+A2. insert_rows inserts before the chosen existing row in all_rows and in
+	the full sibling array, including the flat display copy. The nav preserves
+	that position when rebuilding visibility. While sorted, the nav keeps the
+	new row at the insertion position until the next sort.
+B3. Regrouping cleared focus and selection though the rows were the same
+	objects. All focus and selection writes go through focus_cell(); after
+	every rebuild of rows or fields, update_parts calls it once: stay on
+	the focused cell or unfocus a hidden one, and drop hidden rows and cols
+	from the selection (select: 'deselect_hidden'), or reset the selection
+	to the focused cell when the caller passes clear_selection.
+B6. Ctrl+A selected all rows without focusing one: select_all_cells now
+	focuses the first cell and selects all through focus_cell(select:
+	'all').
+B7. Typing in the filter bar dropped selected rows keystroke by keystroke,
+	so the final selection depended on the typing order: set_col_filter and
+	set_collapsed (when collapsing) pass clear_selection.
+B8. update_fields wrote focus and selection outside focus_cell() when a
+	column got hidden. When the focused col gets hidden, focus_cell() now
+	moves the focus to the first col (exit_edit included). This also fixes
+	a throw in the grid when the edited col got hidden (editing stayed on
+	with focused_field null).
+B9. A reload whose rowset lacked the previously focused column crashed in
+	fld(). refocus is merged into update_parts and looks the column up with
+	optfld(); first_focusable_cell resolves last_focused_col leniently.
+C1. The $group field is readonly; set_null_selected_cells skips cells that
+	can_change_val refuses; remove_rows treats a listed group row as the
+	rows grouped under it, so Delete and Escape on a group row delete or
+	undelete the whole group. remove_rows no longer confirms: the grid asks
+	about the selected rows.
+C2. Removing the last row of a group left the empty group row on screen:
+	detach_row_from_tree now detaches a group row that it empties, walking
+	up through nested groups.
+C3. On clearing the sort in grouped mode, restore_group_row_order rebuilds
+	the grouping result and refills the existing child arrays. It keeps
+	the group rows, their collapse state, focus and selection.
+D1. Toggle-delete flipped each descendant on its own. Toggle is gone:
+	Delete always marks, and Escape (not editing) undeletes the selection
+	with remove_rows op: 'undelete'.
+D2. Marking a parent also marked its unsaved children, and pack_changes
+	sent them as inserts. The delete walk now drops new records outright.
+D3. Deletes went out parent-first. pack_changes skips a removed row whose
+	parent is removed, and for any other removed row first packs its
+	removed descendants depth-first (skipping rows whose save is in
+	flight).
+D4. pack_changes validated removed rows, so a removed row with an invalid
+	edit was never deleted. It now sends removes without validating.
+D5. Unmarking a child under a marked parent kept the child and deleted the
+	parent. Undelete also unmarks the marked ancestors, and acts only on
+	marked records.
+D9. Insert under a parent marked for deletion added a row that could never
+	be saved: insert_rows refuses it.
+E1. User inserts went through insert-or-update, so in a detail grid the
+	second Insert updated the first keyless new row instead of adding one.
+	insert_rows takes op: 'insert' (default) or 'upsert' (diff_merge). The
+	pk rule checks only new and modified rows, and passes a row with no
+	key yet. The row validator is created after e.pk is set, so the pk
+	rule applies from the first load.
+S4. (was D7) A new row under a marked parent was dropped even while its
+	insert request was in flight. remove_rows walks each selected subtree
+	children-first: a record goes only if every record under it went, and
+	can_remove_row decides each record for UI calls.
+
+
+DROPPED
+------------------------------------------------------------------------------
+B2 (the grid focuses the collapsed row), C4 (no code inserts into a grouped
+nav), A6's "the move API skips the check", D10 (deleting descendants the
+nav hasn't loaded: the server keeps the tree consistent, by rejecting the
+delete or by recursing), D6 and D8 (both came from Delete undeleting,
+which is gone with toggle).
+
+B5 (retracted: parameter values were mistaken for selected parent records.
+On insertion, the detail nav fills the new row with its parameter values).
+
+P7 (sort with the keys read first: the comparator reads both rows on every
+compare. Reading each row's keys once into arrays, sorting an index array
+and writing the rows back measured, at 1M rows in one list, 1.7 s -> 0.7 s
+on a string column and 0.9 s -> 0.5 s on a number column, allocation and
+fill included. Trees with small sibling lists gained nothing. Dropped for
+the ~12 MB that each big sort would allocate).
+
+
+NAV2 SLOT RETIREMENT
+==============================================================================
+
+NAV2-D1. Removing a parent and a selected new descendant queued that
+	descendant twice. drop_rows() freed its slot twice and decremented its
+	modified count twice. A later insertion could assign one slot to two
+	rows and loop forever during tree traversal.
+	Status: FIXED.
+	The nav compacts row lists and indexes before freeing data row slots.
+	It clears each row's removal mask entry when freeing the slot, so
+	each data row is freed once. free_slot() clears edits, errors and
+	modified bits and updates modified_n. All group removals use the same
+	operation.
+	Cost: existing compaction scans, plus one pass over requested rows
+	and O(k * f) cleanup for dropping k rows with f fields; no new arrays.
+	The nav clears sparse state on removal instead of on slot reuse.
+	Source: www/ui_nav2.js:930,1158.
+
+NAV2-F1. Regrouping and grouped merges could reuse a focused or selected
+	group slot before clearing references to the removed group.
+	Status: FIXED.
+	The nav commits the selection rectangle before freeing slots and
+	clears their visible indices. focus_cell() with 'deselect_hidden'
+	clears hidden focus and selection before slot reuse. The nav keeps
+	the old visible list until cleanup finishes.
+	Cost: one extra old-visible-row scan when regrouping with selection
+	bits. Ordinary visibility updates use their existing scan. No new
+	state or arrays.
+	When ungrouping, the nav cleans selection only after rebuilding
+	visible rows; no group slots are reused during that operation.
+	During merges, the nav removes old groups and deleted data rows,
+	clears hidden focus and selection, then allocates new rows and groups.
+	The nav rebuilds the tree and visible rows once at the end. Standalone
+	removals rebuild immediately after drop_rows().
+	Cost for grouped merges without deletions: one extra old-visible-row
+	scan when selection bits are present. Merges with deletions use their
+	existing two selection scans and one tree and visible-row rebuild.
+	Source: www/ui_nav2.js:1356,1832,1985.
+
+The nav2 benchmark includes edited and selected row drops, insertion into
+freed slots, ungrouping with selection, and subtree drops with new rows.
+Untimed checks cover overlapping deletions, empty groups, and preserved
+selection on surviving data rows. The benchmark reverts insertion changes
+before timing removal of loaded rows.
+
+NAV2-E1. After editing a no_save row, revert_changes() skipped the row but
+	discarded input_vals. It left modified bits set, so cell_val() read a
+	missing input_vals column and crashed. Sorting and filtering also
+	treated local changes to no_save rows as unchanged.
+	Status: FIXED.
+	is_row_modified() includes all local changes. modified_n counts new,
+	removed and edited data rows regardless of no_save. set_row_flag()
+	does not update modified_n. Only saving is affected by no_save.
+	Cost: no new state or arrays. With only no_save changes, sorting now
+	uses the existing two row scans and 4-byte-per-row array. Filtering
+	checks local changes, and reverting processes the modified rows.
+	Source: www/ui_nav2.js:694,836,1296.
+
+NAV2-G1. After an unsaved parent move, grouping in flat view and then
+	ungrouping rebuilt tree parents from the loaded parent column. The nav
+	restored the old parent while cell_val() still returned the edited one.
+	Status: FIXED.
+	The nav refuses enabling or changing grouping with any pending changes
+	in a tree-capable nav, including in flat view. For ordinary flat navs,
+	it keeps the refusal for edited grouping columns. Ungrouping is allowed.
+	Cost: one constant-time check, no new state or allocations. No added row
+	scans; the nav skips the grouping-column scan on this refusal.
+	Source: www/ui_nav2.js:1807,1832.
+
+NAV2-I1. Moving a new row writes its position and parent_id directly into
+	column storage. Existing lookup indexes keep their old row order, so
+	lookup() can miss the row or return the wrong first matching row.
+	Position renumbering during insertion can also change an existing new
+	row's indexed position.
+	Status: FIXED.
+	When write_cell() writes an already indexed new row's column, the nav
+	invalidates cached indexes using that field. get_index() rebuilds them
+	on their next use. Insertion initializes fresh slots before merging them
+	into indexes. Position assignment uses their range in base_ris to skip
+	invalidation for those slots, including during position renumbering.
+	Cost: constant-time checks, no new arrays. Writes to already indexed new
+	rows scan cached index fields. The next use of each affected index
+	rebuilds all its rows and allocates sort buffers. Ordinary insertion
+	preserves cached indexes unless it renumbers an existing new row.
+	Measured: headless Chrome, 1M rows, 9 repeats, median ms. Inserting 1000
+	rows and looking up a position took 102.4 with unconditional invalidation,
+	46.8 with fresh-slot initialization, and 48.9 before the index fix.
+	With a composite id/pos index, insertion and lookup took 138.5 vs 46.7.
+	Reusing 1000 freed slots with position lookup took 62.0 vs 8.4.
+	Moving 1000 indexed new rows and looking up a position still rebuilds
+	the index: 42.8 vs 43.2. A 21-repeat insertion-only comparison with a
+	position index took 47.1 before the index fix and 44.1 with the fix.
+	The full nav2 benchmark completed at 1M rows, 5 repeats, with all checks
+	passing. The benchmark includes fresh and reused slot insertion,
+	composite indexes, indexed new-row moves and position lookup. Untimed
+	checks cover both renumbering cases, parent changes and saved-row moves.
+	Source: www/ui_nav2.js:1053,1064,1090,1572.
+
+NAV2-K1. The primary-key validator accepts a row when lookup() returns
+	that row. If another row has the same key, the validator still accepts
+	the first matching row. An inserted duplicate can be first when the nav
+	builds its primary-key index after insertion.
+	Status: CLOSED. The server checks primary-key uniqueness. Removed
+	nav2's primary-key rule and row validator. validate_row() refreshes
+	the invalid flag from cell and row errors without checking uniqueness.
+	No excluded_ri argument or edited-key tracking was added. The nav also
+	avoids stale uniqueness errors on other rows after a key edit.
+	Cost: removes the primary-key lookup and row-validator allocations.
+	Updated the benchmark to accept duplicate keys while still rejecting
+	invalid cell values during row validation.
+
+NAV2-V1. Untouched required cells on new rows were not validated.
+	Insertion wrote defaults into columns without storing cell errors;
+	validate_row() only read cached errors and accepted an empty required
+	cell. Status: FIXED. validate_row() validates every current cell value
+	of new rows and stores errors, preserving values and edit state.
+	Saved-row validation still reads cached errors. Server defaults are
+	checked by the existing cell validators.
+	Cost: one pass over every field of each new row validated, with the
+	existing cell-validator calls and error-result allocations. No scan
+	of other rows and no additional persistent state.
+	The benchmark checks untouched required cells, server and client
+	defaults, invalid edited text, correction, revert and reused slots.
+	Measured in headless Chrome, 21 repeats, median ms per 1000 rows with
+	20 fields. First new-row validation: 0.1 before vs 76.8 after. Repeated
+	new-row validation: 0.1 vs 72.6. Invalid new rows: 0.1 vs 75.1. Saved
+	rows: 0.1 vs 0.2. Before the fix, new-row validation skipped cell checks.
+	The focused validation checks passed. The existing cell validator
+	formats messages for successful rules and copies all results even
+	when the cell is valid.
+	Source: www/ui_nav2.js:731; js/tests/nav-bench/nav2_bench.js:968,1005.
+
+NAV2-V2. New-row validation formatted messages and copied rule results
+	for valid cells. Status: FIXED. Added validator.validate(v, 'failed')
+	to format messages only when at least one rule fails. Nav2 requests
+	this mode and copies results only for failed cells. Validation still
+	runs once per cell. The existing omitted, true and false message modes
+	are preserved.
+	Cost: constant checks in the existing rule loop, no new scan or array.
+	Nav2 still creates one empty error array per valid cell but no longer
+	formats its messages or copies its rule results.
+	Measured in headless Chrome, 21 repeats, median ms per 1000 rows with
+	20 fields. First new-row validation: 79.7 before vs 16.6 after.
+	Repeated new-row validation: 72.1 vs 6.7. Invalid new rows: 76.4 vs 19.2.
+	Saved rows: 0.2 vs 0.2. Existing focused validation checks passed.
+	Source: www/ui_field.js:170; www/ui_nav2.js:714.
+
+NAV2-V3. Successful validation copied check status from shared rule
+	definitions into result records and cleared the shared flags in a
+	second pass. Status: FIXED. Each validator creates its result records
+	and resolves dependencies during creation. validate() updates those
+	records directly and runs a second pass only to format messages.
+	Result fields and message modes are preserved.
+	Cost: result records are allocated during creation instead of first
+	validation, plus private dependency arrays. Resolving each dependency
+	searches the rules list once during creation. No new per-call allocation.
+	Measured in headless Chrome, 21 repeats, median ms per 1000 rows with
+	20 fields. First new-row validation: 16.1 before vs 8.0 after.
+	Repeated new-row validation: 7.0 vs 4.8. Invalid new rows: 20.0 vs 13.7.
+	Saved rows: 0.2 vs 0.2.
+	A separate 41-repeat comparison measured creation of 1000 number fields
+	with required/min/max rules: 9.9 before vs 11.0 after. Validation of 1000
+	valid values without messages: 0.7 vs 0.6. For values below the minimum
+	with failed-only messages: 5.9 vs 7.4. Other message cases were close.
+	The validator clears message fields before formatting messages, adding
+	writes to the message path. This regression remains unresolved.
+	The 28 result snapshots matched across default, true, false and failed
+	message modes, including parse failure, null and dependency failure.
+	JavaScript syntax and diff checks passed.
+	Source: www/ui_field.js:163,183.
+
+NAV2-G2. Calendar range grouping ignored frequency. A month range always
+	grouped by individual months, and a year range by individual years.
+	Status: FIXED. The nav rounds calendar month or year counts from January
+	1970 to the requested frequency, then stores each interval's UTC start
+	as its group key. The nav shifts boundaries by offset months or years.
+	It does not restart monthly intervals each January.
+	Cost: multi-month grouping reads the UTC year and month and performs
+	arithmetic per row; multi-year grouping reads the UTC year and performs
+	arithmetic per row. For single-month and single-year grouping, the nav
+	still calls the existing date helpers directly. No added scan or
+	allocation.
+	Measured in headless Chrome, 1M rows, 9 repeats, median ms. Month/1:
+	928.1 before vs 911.2 after. Month/3: 868.6 vs 965.7. Month/5: 853.1
+	vs 913.5. Month/3 with offset 1: 758.2 vs 928.1. Month/5 with offset -2:
+	942.2 vs 951.8. Year/1: 983.6 vs 916.6. Year/5: 982.2 vs 1010.1.
+	Year/3 with offset 1: 1082.1 vs 1008.3. Before the fix, multi-unit
+	requests produced single-unit groups. Calendar interval calculation adds
+	work in those cases; single-unit grouping has no added work.
+	Boundary checks covered year transitions, dates before 1970, leap day,
+	year 50, nulls, positive offsets and negative offsets. Syntax and diff
+	checks passed.
+	Source: www/ui_nav2.js:468; js/UI-INVARIANTS.md:481.
+
+NAV2-T1. Loading a cyclic hierarchy in flat view skips cycle detection.
+	update_tree_ris() sets tree_n to row_n without walking parent links,
+	so load() accepts the cycle. Switching to tree view then excludes rows
+	in the cycle from the tree and visible lists.
+	Status: FIXED. The nav checks the reached count at the end of the
+	existing tree walk. It keeps the existing warning and flat fallback
+	when the walk cannot reach every row, including after a flat load.
+	It does not check cycles while displaying rows flat.
+	Cost: one constant-time check after a tree walk, no added scan or
+	allocation. Flat load has no added work. No benchmark required.
+	Syntax and diff checks passed. Verification was by source inspection;
+	no runtime checks were run.
+	Source: www/ui_nav2.js:1968,2025.
+
+NAV2-S1. Array storage assigns different sort ranks to distinct values
+	considered equal by the field's custom comparator. Radix sorting then
+	orders those values by different keys instead of preserving equality.
+	In a multi-column sort, the nav ignores the later sort columns between
+	those values. Lookup indexes can disagree with compare_cell() too.
+	Status: FIXED. The storage gives adjacent values equal under the custom
+	comparator the same rank. The default comparator keeps its existing
+	rank loop.
+	Cost: one extra comparator call per adjacent pair of distinct stored
+	values in columns with custom comparators, inside the existing rank
+	loop. No new arrays. The default rank loop has no added work per value.
+	Measured in headless Chrome, 1M rows, 9 paired repeats, alternating
+	before and after in one browser. The sort used text and number columns.
+	With 10000 distinct values, median ms before vs after: default 146.8
+	vs 143.9; custom lexical 146.3 vs 141.4; custom ignoring letter case
+	158.0 vs 152.4. With 1M distinct values: default 1003.8 vs 902.3;
+	custom lexical 967.7 vs 1115.8; custom ignoring letter case 2039.9
+	vs 2246.1. Median paired time ratios measured custom regressions of
+	15.8% and 11.1% at 1M distinct values. Default sorting did not regress
+	in the paired comparison. Separate-process runs varied substantially.
+	Earlier 9-repeat runs also covered 10 distinct values; custom sorting
+	took about 66 ms before and after.
+	The benchmark reproduced incorrect secondary-key order and failed lookup
+	before the fix. After the fix, ordering and lookup checks passed,
+	including descending order, nulls and stable order for equal keys.
+	Syntax and diff checks passed.
+	Source: www/ui_field.js:521,525,545; www/ui_nav2.js:571.
+
+NAV2-P1. Use supplied sorted PK order without allocating a row index array.
+	Status: DROPPED. The user requires at least a 2x gain and mainly uses
+	integer PKs. At 1M rows, integer tree load took 207.8 ms before and
+	160.4 ms with the hint. In a 19-repeat warmed comparison, 100000 cached
+	integer lookups took 101.2 ms before, 105.8 ms with ordinary indexes,
+	and 87.5 ms with the hint. Deferred allocation added about 2 ms to the
+	first insertion and physical removal. The gains were below 2x.
+	The pk_sorted implementation and its invariants were removed. Earlier
+	fixes and user edits were preserved. Benchmark artifacts remain in
+	/tmp/nav2-pk-sorted-uf7k32wb.
+
+NAV2-G3. Numeric grouping offsets are parsed as units. For amount/5/10,
+	parse_group_by() stores unit '5' and no offset, so range_bucket_func()
+	returns no bucket function and the nav groups the raw values.
+	The numeric bucket formula also multiplies offset by frequency:
+	freq 10, offset 5, value 17 computes 60 instead of 15.
+	Status: FIXED. The parser consumes month or year as the optional unit,
+	then parses the numeric offset. The nav adds offset after multiplying
+	the bucket number by frequency.
+	Cost: one shared regex for parsing units; unchanged per-row arithmetic,
+	with no added scan or allocation on already-correct grouping paths.
+	Previously ignored numeric offsets now use the existing bucket scan
+	and column allocation. No new loop was added. No benchmark required.
+	Verification: source inspection only; no runtime tests were run.
+	Source: www/ui_nav2.js:496,2241,2272; js/TODO.txt:18.
+
+NAV2-V4. create_validator() skips rules without applies(), including the
+	email rule selected by create_field(). A non-null email value without
+	'@' therefore passes validation when no other rule rejects it.
+	Status: FIXED. The validator skips a rule only when its applies()
+	predicate is present and returns false. It includes rules without
+	applies(), subject to the existing dependency checks.
+	Cost: no added scan or allocation for previously selected rules.
+	For each newly included rule, the validator allocates its existing
+	result and dependency records during creation and calls its check
+	during validation. For email, the check is includes('@').
+	Verification: source inspection, syntax and diff checks only;
+	no runtime tests or benchmark were run.
+	Source: www/ui_field.js:130,956,985,991; www/ui_nav2.js:810.
+
+NAV2-SAVE1. ID reservation can repeat forever for a new row with a pending
+	null key edit. Insert with an unspecified key, then set that key to null
+	through set_cell_val(). reserve_ids() writes the allocated ID into the
+	column through write_cell(), but leaves the changed bit and null edit.
+	cell_val() still returns null, so save() requests another ID each time
+	the preceding reservation succeeds, without sending the insert.
+	Status: FIXED. When write_cell() writes a new row's cell, it clears
+	any pending edit for that cell as part of replacing its value.
+	Cost: one changed-bit check per internal write to a new row; clear the
+	bit and the sparse input entry only when an edit exists. No new scan or
+	allocation. Saved-row writes remain edits. No benchmark required.
+	Verification: source inspection, syntax and diff checks only;
+	no runtime tests or benchmark were run.
+	Source: www/ui_nav2.js:794,848,1198,1697,1733.
+
+NAV2-M1. Reloading a rowset without a primary key crashes. load() accepts
+	missing pk and sets pk_fields to null. On the next load of the same
+	columns, reload() calls diff_merge(). is_same_rowset() accepts matching
+	missing keys, then diff_merge() calls map() on null pk_fields.
+	Status: FIXED. The user requires a PK on every load, for local and server
+	rowsets. load() resolves pk_fields and refuses an empty key. pk_fields is
+	always a non-empty array after load.
+	Cost: one constant-time check per load; no extra scans or
+	allocations.
+	No benchmark required.
+	Verification: source inspection, syntax and diff checks only;
+	no runtime tests or benchmark were run.
+	Source: www/ui_nav2.js:2672,2673,2674.
+
+NAV2-V5. validate_row() skipped unset cells on new rows before calling
+	field validators. Required cells without server defaults therefore
+	passed validation when omitted during insertion.
+	Status: FIXED. The nav skips cell validation only for unset cells with
+	has_server_default. It validates other unset values through the existing
+	field validators. The required validator rejects null and undefined
+	unless has_server_default is true. The nav preserves unset values
+	and omits them from insert payloads after validation succeeds.
+	Cost: one additional validator call per unset cell without a server
+	default during new-row validation, and one condition per cell validated.
+	Failed cells allocate their existing error results; valid cells allocate
+	no error results. No added scan or state.
+	Verification: source inspection, syntax and diff checks only;
+	no runtime tests or benchmark were run.
+	Source: www/ui_nav2.js:807,836,1499; www/ui_field.js:266.
+
+NAV2-L1. Invalid rowset configuration could throw after load() had
+	replaced loaded state and cleared saving state. Invalid numeric precision
+	and enum-list configuration could also throw during later field use.
+	Status: FIXED. The nav prepares fields and resolves structural column
+	references before replacing its state. It warns and ignores the load on
+	field refusal, empty fields, missing or duplicate field names, missing
+	PK, or unknown referenced columns. Field creation refuses unknown types,
+	invalid enum_values, and options unsupported by the client formatters.
+	Field types expose config_checks, functions by option name returning
+	whether the value is valid. create_field() checks that table, warns with
+	the nav ID, field name, option name and invalid value, and returns null
+	on refusal. The nav checks and resolves each column reference once.
+	Numeric option checks accept integer scale from 1 to 1000000, decimals
+	from 0 to 6, and magnitude_decimals from 0 to 3. They use isnum(), bounds
+	and floor(). Field type and name maps use obj() and plain lookups.
+	ui.nav2(id, opt) stores its required ID as e.id and includes it in
+	warnings. It passes that ID to create_field(opt, nav_id) for field
+	warnings.
+	Cost: static check tables and supported-value sets created once, a short
+	loop and function calls per field, and one resolver function per nav.
+	Field creation calls warn_if() per option instead of once per field,
+	with its rest-argument array per call.
+	Column parsing and lookups happen once per configured reference on load.
+	Position and tree column options resolve directly to fields; only the PK
+	allocates a field array. No added row scan or hot-loop work.
+	Verification: source inspection, syntax and diff checks only;
+	no runtime tests or benchmark were run.

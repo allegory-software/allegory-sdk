@@ -32,13 +32,14 @@ DATA STRUCTURES --------------------------------------------------------------
 The nav gives every row a slot number ri (row index) at load or insert and
 keeps it until the row is deleted and the slot is reused. The nav stores every
 per-row fact in a typed array indexed by ri, and every ordered list of rows as
-a Uint32Array of ri's.
+a Uint32Array of ris.
 
 	n          number of rows
 	k          number of rows passed to an op
-	fi         field index in static all_fields (not in changing visible_fields)
+	ri         row index; NONE = 0xFFFFFFFF
+	fi         field index in stable all_fields
+	vfi        field index in visible_fields
 	W          number of uint32s (i.e. words) needed per row for bitmasks
-	NONE       0xFFFFFFFF
 	tree nav   nav with id and parent_id columns, shown as tree or flat
 	data row   row from the rowset or inserted by the user
 	group row  synthetic row made by group-by, never saved
@@ -57,7 +58,7 @@ and compares a cell with a value in sort key order.
 
 The columns hold the values last seen on the server. An edited cell's value
 is input_vals[fi][ri] instead, which can be text that didn't parse;
-changed_mask says which cells are edited.
+modified_mask says which cells are edited.
 
 The nav grows all ri-indexed typed arrays together by doubling, and takes new
 slots from free_ris (the free list of removed rows) first.
@@ -73,7 +74,7 @@ ROW VISIBILITY
 CELL SELECTION
 	sel_mask         Uint32 x W  one bit per selected cell
 CELL EDITING
-	changed_mask     Uint32 x W  one bit per edited cell; nonzero: changed
+	modified_mask     Uint32 x W  one bit per edited cell; nonzero: modified
 	unset_mask       Uint32 x W  one bit per unset new row cell (see unset cell)
 	input_vals[fi]   String      edited values (on-demand, sparse)
 	cell_errors[fi]  Array       cell validation errors (on-demand, sparse)
@@ -84,9 +85,9 @@ TREE
 	next_sibling_ri  Uint32      next sibling, in current order
 	depth            Uint16      indent level
 	desc_count       Uint32      number of descendants
-	tree_i           Uint32      index into tree_ris
+	tree_i           Uint32      index in tree_ris
 
-Lists of rows, each a Uint32Array of ri's, shifted when rows are deleted:
+Row lists, each a Uint32Array of ris, shifted when rows are deleted:
 
 	base_ris       all rows in stored order or pos_col order if nav has pos_col
 	sorted_ris     all rows in current sort order
@@ -126,13 +127,13 @@ FIELDS
 	fields         Array[vfi]   visible columns in display order
 	field.fi       number       field index in all_fields array
 	field.vfi      number       field index in visible_fields array
-	mask_word_n    number       W: words per row in sel_mask and changed_mask
+	mask_word_n    number       W: words per row in sel_mask and modified_mask
 ROW ALLOCATION
 	cap            number       capacity of every ri-indexed array
 	slot_n         number       row slots ever used, free ones included
 	free_ris       Array        free row slots, used as a stack
 EDITING
-	changed_n      number       number of changed rows
+	modified_n      number       number of modified rows
 CELL FOCUS & SELECTION
 	focused_ri     number       focused row; null when no row is focused
 	focused_fi     number       focused field
@@ -223,7 +224,7 @@ UNSORT
 
 FILTER
 	- set is_pass from fn(ri) for each data row; keep it set for new and
-	  changed rows until save.
+	  modified rows until save.
 	- run stages 4-5.
 
 COLLAPSE/EXPAND
@@ -272,14 +273,14 @@ QUICKSEARCH s fi
 EDITING OPS ------------------------------------------------------------------
 
 UPDATE CELL
-	- write input_vals[fi][ri] and set cell's changed_mask bit; clear it when the
+	- write input_vals[fi][ri] and set cell's modified_mask bit; clear it when the
 	  value is set to the server value.
 	- validate the cell: write or clear cell_errors[fi][ri]; set is_invalid from
 	  cell and row errors. set is_pass.
 	- O(1); no stage runs.
 
 REVERT CELL
-	- clear the changed_mask bit, input_vals entry and cell_errors entry.
+	- clear the modified_mask bit, input_vals entry and cell_errors entry.
 	- run stages 3-5 when reverting pos_col or parent_id; otherwise no stage runs.
 
 UNSET CELL
@@ -293,7 +294,7 @@ REVERT ROW
 	- run stages 3-5 when dropping a new row or reverting pos_col or parent_id.
 
 REVERT ALL
-	- scan base_ris for changed rows; drop new rows in one pass and undelete and
+	- scan base_ris for modified rows; drop new rows in one pass and undelete and
 	  revert other rows.
 	- drop input_vals and cell_errors arrays.
 	- run stages 3-5 when the scan drops new rows or reverts pos_col or parent_id changes.
@@ -350,30 +351,30 @@ SAVE
 	  current request is acknowledged.
 	- With reserves_ids, reserve ids for new rows without ids before saving; a
 	  resent insert then carries the same id and the server skips it.
-	- Scan tree_ris backwards for changed rows; skip group rows, no_save rows,
+	- Scan tree_ris backwards for modified rows; skip group rows, no_save rows,
 	  rows awaiting a save reply and rows failing validation, except rows
 	  marked for deletion.
-	- Send new rows without unset cells, changed rows with pk:old and changed_mask
+	- Send new rows without unset cells, modified rows with pk:old and modified_mask
 	  cells, and removed rows with pk:old. Children go before parents.
-	- Wait for the server's reply before finishing the batch. Keep rows changed
+	- Wait for the server's reply before finishing the batch. Keep rows modified
 	  if the request fails.
 	- O(n); does not run a stage.
 
 SAVE ACK
 	- Process sent rows by position. Drop removed rows; record row_errors and
-	  cell_errors on errors and leave the row changed.
+	  cell_errors on errors and leave the row modified.
 	- Otherwise write server values, or sent values, into columns; edits equal to
 	  column values stop counting as edits; clear is_new and unset bits.
 	- Skip rows dropped before the server replied; invalidate indexes for written
 	  columns.
-	- when changed_n reaches 0, drop input_vals and cell_errors arrays.
+	- when modified_n reaches 0, drop input_vals and cell_errors arrays.
 	- run stages 3-5 when rows are dropped or pos_col or parent_id changes;
 	  otherwise no stage runs.
 
 MERGE ROWSET
 	- Run on reload; load instead when columns or keys differ.
 	- Radix-sort incoming rows by pk and merge them against the pk index.
-	- For matched saved rows, copy changed cells column by column with
+	- For matched saved rows, copy modified cells column by column with
 	  col_storage.copy_changed. Update edits and quicksearch only for copied
 	  cells.
 	- Leave a matched new row new when its reserved id matches; the next save
@@ -381,7 +382,7 @@ MERGE ROWSET
 	- Append unmatched incoming rows to base_ris as saved rows; drop unmatched
 	  rows that aren't new.
 	- Invalidate indexes for written columns; merge added rows into other indexes.
-	- When filtered, recompute is_pass for rows that aren't changed.
+	- When filtered, recompute is_pass for rows that aren't modified.
 	- When grouped, rebuild groups.
 	- Rebuild tree parents only when rows are added or dropped, or id or parent_id
 	  changes. Restore pos order when rows are added or pos changes. Run stage 2
@@ -394,41 +395,6 @@ RELOAD
 	- Reload on server notifications unless all update_ids are from our saves.
 	- Run the stages needed by load or merge rowset.
 
-IMPLEMENTATION PLAN ----------------------------------------------------------
-
-For each step, add its operations to js/tests/nav-bench/nav2_bench.js.
-Compare them with the same operations on ui_nav.js in nav_bench.js.
-
-	step  content                                       bench ops
-	----  --------------------------------------------  ----------------------
-	1     column storage, column-major load, base_ris,  init
-	      stage 5 on flat navs
-	2     stage 2: radix sort by columns, cmp sort,     sort, unsort, build
-	      unsort; indexes as sorted ri arrays, lookup   pk index, lookup
-	3     filter: is_pass, stages 4-5                   filter, unfilter
-	4     focus and selection: sel_mask, rectangle,     focus, select all,
-	      iterate selection                             select none, extend
-	                                                    selection
-	5     edits: input_vals, changed_mask, changed_n,   update cell
-	      validate cell and row, revert
-	6     capacity growth, insert, delete, undelete,    insert, remove
-	      drop rows, free_ris, index upkeep, setter
-	      for the row config flags (no_focus, ...)
-	7     tree: id index, parent_ri, stages 3-4,        tree init, collapse/
-	      collapse/expand, tree/flat view               expand one and all,
-	                                                    tree sort and filter
-	8     group by with ranged levels, ungroup          group by, collapse/
-	                                                    expand all groups,
-	                                                    ungroup
-	9     move, sparse pos, pos order at load           move
-	10    quicksearch, set null on selection            quicksearch
-	11    save, save ack, merge rowset                  -
-	12    grid integration: ui_grid.js reads the nav    -
-	      through e.rows and row objects today. also:
-	      row-select mode (can_focus_cells: false),
-	      the search for a focusable cell, editing,
-	      group labels
-
 */
 
 ;(function () {
@@ -436,9 +402,9 @@ Compare them with the same operations on ui_nav.js in nav_bench.js.
 const ui = window.ui
 
 const {
-	assign, assert, isfunc, isstr, isarray, isobj, words, obj, map,
+	assign, assert, isfunc, isstr, isarray, isobj, words, obj, map, empty,
 	warn, warn_if,
-	num, floor, abs, clamp, strict_sign, month, year, month_of, year_of,
+	num, floor, abs, min, max, clamp, strict_sign, month, year, month_of, year_of,
 	memoize, ajax, href,
 } = glue
 
@@ -458,7 +424,6 @@ const ROW_NO_CHANGE = 2**7  // row's cells can't be edited
 const ROW_NO_REMOVE = 2**8  // row can't be deleted
 const ROW_NO_SAVE   = 2**9  // row is never saved
 const ROW_GROUP     = 2**10 // row is a synthetic group row
-const ROW_SELECTED  = 2**11 // row is selected, in row-select mode
 
 // bit names accepted by set_row_flag()
 let row_config_bits = {
@@ -486,7 +451,7 @@ function grow_typed(a, n) {
 // entries. Return list, or a larger copy if there is not enough room.
 function insert_into_list(list, len, i, ris, k) {
 	if (len + k > list.length)
-		list = grow_typed(list, Math.max(len + k, list.length * 2))
+		list = grow_typed(list, max(len + k, list.length * 2))
 	list.copyWithin(i + k, i, len)
 	list.set(ris.subarray(0, k), i)
 	return list
@@ -562,7 +527,7 @@ function range_bucket_func(range) {
 
 /*
 Sort the first n entries of ris by sort_fields.
-- sort_fields = [{field:, desc:, [col:]}, ...].
+- sort_fields = [{field:, desc:, [vals:]}, ...].
 - sort by the last field first so that earlier fields take priority.
 - for each field, sort by successive groups of 16 bits, lowest first.
 - in each pass, keep rows with equal keys in their previous order.
@@ -574,17 +539,18 @@ let counts
 function radix_sort(col_vals, ris, n, sort_fields) {
 	if (n < 2)
 		return ris
-	let ris1 = new Uint32Array(n) // row indices for the next pass
+	let ris1 = new Uint32Array(n) // ris for the next pass
 	let keys  = [new Uint32Array(n), new Uint32Array(n)] // keys by ris
 	let keys1 = [new Uint32Array(n), new Uint32Array(n)] // next keys
 	counts ??= new Uint32Array(65536) // rows per digit value
 	for (let sfi = sort_fields.length - 1; sfi >= 0; sfi--) {
 
-		// build this field's sort keys. Use col when supplied: for ranged
-		// grouping, the nav passes each range's starting value in col.
-		let {field, desc, col} = sort_fields[sfi]
+		// build this field's sort keys. Use vals when supplied: for ranged
+		// grouping, the nav passes each range's starting value in vals.
+		let {field, desc, vals} = sort_fields[sfi]
+		vals ??= col_vals[field.fi]
 		let word_n = field.col_storage.write_sort_keys(
-			col ?? col_vals[field.fi], ris, n, field, keys[0], keys[1])
+			vals, ris, n, field, keys[0], keys[1])
 
 		// invert the keys for descending order, with null last.
 		if (desc)
@@ -663,19 +629,124 @@ ui.nav = function(id, opt) {
 	let e = assign({}, opt)
 	e.id = id
 
-	let cap
-	let slot_n
-	let free_ris
-	let indexes
-	let first_child_ri
-	let next_sibling_ri
-	let group_fis
-	let has_sel_bits
-	let sel_anchor_ri
-	let sel_anchor_fi
-	let sel_end_ri
-	let sel_end_fi
-	let prev_visible_ris
+	// permissions for calls from UI, with ev.input.
+	e.can_add_rows    ??= true
+	e.can_remove_rows ??= true
+	e.can_change_rows ??= true
+	e.can_move_rows   ??= true
+
+	// rowset permissions, checked along with nav permissions for UI calls
+	e.rowset_can_add_rows    = null
+	e.rowset_can_remove_rows = null
+	e.rowset_can_change_rows = null
+	e.rowset_can_move_rows   = null
+
+	// focus and selection modes
+	e.cell_select_mode     ??= true // cell-select vs row-select mode
+	e.can_select_multiple  ??= true // false: select the focused cell only
+	e.can_select_non_siblings ??= true // false: can select siblings only
+
+	// editing modes
+	e.auto_advance_row     ??= false // wrap around on left/right keys
+	e.stay_in_edit_mode    ??= true
+	e.enter_edit_on_click  ??= false
+	e.enter_edit_on_click_focused ??= false
+	e.exit_edit_on_enter   ??= false
+	e.exit_edit_on_escape  ??= true
+	e.advance_on_enter     ??= 'next_row' // next_row | next_cell | null
+	e.auto_jump_cells      ??= true // move between cells at text ends
+
+	// fields
+	e.all_fields = null
+	e.all_fields_map = null
+	e.visible_fields = null
+	e.pk = null // 'col1 ...'
+	e.pk_fields = null // [field1, ...]
+	e.pos_field = null
+	e.id_field = null
+	e.parent_field = null
+	e.tree_field = null
+	e.mask_word_n = null // how many 32-bit words per row for bitmasks
+	let rowset_fields = null // fields loaded from the rowset
+	let rowset_cols = null // visible cols when the cols option is not set
+	let rowset_tree_col = null // tree col when tree_col is not set
+	let group_field = null
+
+	// rows
+	e.row_n = null // data row count
+	e.col_vals = null // column values by fi, then ri
+	e.row_flags = null // ROW_* bits by ri
+	e.parent_ri = null // parent, or NONE
+	e.depth = null // indent level by ri
+	e.desc_count = null // descendant count by ri
+	e.tree_i = null // index in tree_ris by ri
+	e.visible_i = null // index in visible_ris by ri
+	e.base_ris = null // ris in stored order
+	e.sorted_ris = null // ris in sort order
+	e.tree_ris = null
+	e.tree_n = null
+	e.visible_ris = null // visible ris in display order
+	e.visible_n = null // length of visible_ris
+	let cap = null
+	let slot_n = null // number of slots, including freed ones
+	let free_ris = null // freed slots, used as a stack
+	let first_child_ri = null // set by stage 3
+	let next_sibling_ri = null // set by stage 3
+	let tree_ris_buf = null // ris in tree order; unused in flat view
+	let prev_visible_ris = null // visible_ris before stage 5
+
+	// sorting, filtering, tree and grouping
+	e.order_by = null // sort columns, sort function, or null
+	e.filter = null // filter function, or null
+	e.can_be_tree = null
+	e.is_tree = null
+	e.flat ??= false // flat view of a tree nav
+	e.group_by = null // group-by spec
+	e.is_grouped = null
+	e.group_ris = null // group ris in key order
+	let group_fis = null // field indices of the grouping columns
+
+	// indexes
+	let indexes = null // {cols -> {fields:, ris:}}, built on first lookup
+
+	// focus and selection
+	e.focused_ri = null // focused row, or null
+	e.focused_fi = null // focused column
+	e.focus_changed = false // edge event: set by nav, reset by grid
+	// last focused field, kept when no field is focused
+	e.last_focused_fi = null
+	e.sel_mask = null // selected cells' bits
+	e.quicksearch_text = null // typed prefix of the focused cell's text
+	let has_sel_bits = null // false: sel_mask is all zero
+	let all_fields_mask = null // one bit per field
+	let visible_fields_mask = null // one bit per visible field
+	let sel_anchor_ri = null
+	let sel_anchor_fi = null
+	let sel_end_ri = null
+	let sel_end_fi = null
+
+	// editing state
+	e.editing = false // the focused cell is being edited
+	e.advance_on_exit = false // move to the next cell when the edit ends
+	e.edit_sel_i = 0 // start of the initial text selection
+	e.edit_sel_len = 1/0
+	e.edit_open_popup = false // grid opens the dropdown when the edit starts
+	e.modified_mask = null // edited cells
+	e.unset_mask = null // server default
+	e.modified_n = null // number of modified rows
+	e.input_vals = null // edited values by fi, then ri
+	e.cell_errors = null // cell errors by fi, then ri
+	e.row_errors = null // row errors by ri
+
+	// saving and loading
+	e.reserves_ids = null // reserve ids before saving new rows
+	let save_req = null // pending id or save request, or null
+	let save_batch = null // pending batch: {rows: [...], ris: [...]}
+	let saving_ris = map() // batch row positions: {ri -> index}
+	let want_save = false // save requested during a pending request
+	let want_reload = false // reload requested during a pending request
+	let own_update_ids = new Set() // ids of this nav's saves
+	let load_req = null // pending load request, or null
 
 	e.get_debug_state = function() {
 		return {
@@ -687,11 +758,17 @@ ui.nav = function(id, opt) {
 			next_sibling_ri: next_sibling_ri,
 			group_fis: group_fis,
 			has_sel_bits: has_sel_bits,
+			all_fields_mask: all_fields_mask,
+			visible_fields_mask: visible_fields_mask,
 			sel_anchor_ri: sel_anchor_ri,
 			sel_anchor_fi: sel_anchor_fi,
 			sel_end_ri: sel_end_ri,
 			sel_end_fi: sel_end_fi,
 			prev_visible_ris: prev_visible_ris,
+			rowset_fields: rowset_fields,
+			rowset_cols: rowset_cols,
+			rowset_tree_col: rowset_tree_col,
+			group_field: group_field,
 		}
 	}
 
@@ -709,49 +786,47 @@ ui.nav = function(id, opt) {
 				indexes.delete(cols)
 	}
 
-	// Return {fields:, ris:}, with data row indices sorted by cols. Build and
-	// cache the index on first use.
 	function get_index(cols) {
 		let index = indexes.get(cols)
 		if (!index) {
 			let fields = col_fields(cols)
 			let sort_fields = fields.map(field => ({field: field, desc: false}))
+			let ris = e.base_ris.slice(0, e.row_n)
+			ris = radix_sort(e.col_vals, ris, e.row_n, sort_fields)
 			index = {
 				fields: fields, // [field1, ...]
-				ris: radix_sort(e.col_vals,
-					e.base_ris.slice(0, e.row_n), e.row_n,
-					sort_fields), // data rows' ri's, sorted by fields
+				ris: ris, // ris, sorted by cols
 			}
 			indexes.set(cols, index)
 		}
 		return index
 	}
 
-	// Compare ri's cells with vals using fields in order. Return -1, 0 or 1.
-	function compare_row(ri, fields, vals) {
+	// compare ri's cells with vals using fields in order. return -1, 0 or 1.
+	function compare_row(ri, fields, key_vals) {
 		for (let i = 0; i < fields.length; i++) {
 			let field = fields[i]
-			let r = field.col_storage.compare_cell(
-				e.col_vals[field.fi], ri, vals[i])
+			let vals = e.col_vals[field.fi]
+			let r = field.col_storage.compare_cell(vals, ri, key_vals[i])
 			if (r)
 				return r
 		}
 		return 0
 	}
 
-	// Compare ri1 with ri2 using fields in order. Return -1, 0 or 1.
+	// compare ri1 with ri2 using fields in order. Return -1, 0 or 1.
 	function compare_rows(ri1, ri2, fields) {
 		for (let field of fields) {
-			let col = e.col_vals[field.fi]
-			let r = field.col_storage.compare_cell(col, ri1,
-				field.col_storage.get(col, ri2))
+			let vals = e.col_vals[field.fi]
+			let r = field.col_storage.compare_cell(vals, ri1,
+				field.col_storage.get(vals, ri2))
 			if (r)
 				return r
 		}
 		return 0
 	}
 
-	// Find the insertion index in ris after all rows with keys equal to ri's.
+	// find the insertion index in ris after all rows with keys equal to ris.
 	function upper_bound(ris, ri, fields) {
 		let i1 = 0 // first index into ris still in the search
 		let i2 = ris.length // end index into ris of the search
@@ -765,8 +840,8 @@ ui.nav = function(id, opt) {
 		return i1
 	}
 
-	// Add ris to each index after existing rows with equal keys. Use a binary
-	// search for each new row and copy the rows in one pass.
+	// add multiple ris to each index after existing rows with equal keys.
+	// use binary search for each new row and copy the rows in one pass.
 	function add_to_indexes(ris) {
 		if (!ris.length)
 			return
@@ -775,8 +850,8 @@ ui.nav = function(id, opt) {
 
 			// sort the new rows by key, then merge them into the old rows in
 			// one pass.
-			let new_ris = Array.from(ris).sort(
-				(ri1, ri2) => compare_rows(ri1, ri2, fields))
+			let new_ris = Uint32Array.from(ris)
+			new_ris.sort((ri1, ri2) => compare_rows(ri1, ri2, fields))
 			let old_ris = index.ris
 			let merged = new Uint32Array(old_ris.length + new_ris.length)
 			let m = 0 // next index into merged
@@ -811,7 +886,15 @@ ui.nav = function(id, opt) {
 
 	/// focus and selection ---------------------------------------------------
 
-	function clear_sel_mask() {
+	// return a mask with one bit per field (32 fields per mask element).
+	function fields_mask(fields) {
+		let mask = new Uint32Array(e.mask_word_n)
+		for (let field of fields)
+			mask[field.fi >>> 5] |= 1 << (field.fi & 31)
+		return mask
+	}
+
+	function clear_sel() {
 		if (has_sel_bits) {
 			e.sel_mask.fill(0)
 			has_sel_bits = false
@@ -825,118 +908,190 @@ ui.nav = function(id, opt) {
 		sel_end_fi = end_fi
 	}
 
-	// Return the rectangle's row and column positions in visible_ris and
-	// fields.
-	function rect_bounds() { // -> [row_i1, row_i2, col_i1, col_i2], inclusive
+	// return the rectangle's row positions in visible_ris.
+	function rect_rows() { // -> [row_i1, row_i2], inclusive
 		let row_i1 = e.visible_i[sel_anchor_ri]
 		let row_i2 = e.visible_i[sel_end_ri]
-		let col_i1 = e.all_fields[sel_anchor_fi].vfi
-		let col_i2 = e.all_fields[sel_end_fi].vfi
-		return [
-			Math.min(row_i1, row_i2), Math.max(row_i1, row_i2),
-			Math.min(col_i1, col_i2), Math.max(col_i1, col_i2),
-		]
+		return [min(row_i1, row_i2), max(row_i1, row_i2)]
 	}
 
-	// Set the sel_mask bits for every cell in the rectangle. Use each visible
-	// column's fi. Visit each row once.
+	// return a column mask for the selection rectangle. in row-select mode,
+	// include all fields. in cell-select mode, include only visible,
+	// focusable fields between the anchor cell and the end cell.
+	function rect_col_mask() {
+		let col_mask
+		if (!e.cell_select_mode) {
+			col_mask = all_fields_mask
+		} else {
+			let col_i1 = e.all_fields[sel_anchor_fi].vfi
+			let col_i2 = e.all_fields[sel_end_fi].vfi
+			col_mask = new Uint32Array(e.mask_word_n)
+			for (let col_i = min(col_i1, col_i2);
+				col_i <= max(col_i1, col_i2); col_i++
+			) {
+				let field = e.visible_fields[col_i]
+				if (is_rect_field(field))
+					col_mask[field.fi >>> 5] |= 1 << (field.fi & 31)
+			}
+		}
+		return col_mask
+	}
+
+	// exclude rows with no_focus from the selection rectangle. When
+	// can_select_non_siblings is false, include only siblings of the anchor.
+	function is_rect_row(ri) {
+		return !(e.row_flags[ri] & ROW_NO_FOCUS)
+			&& (e.can_select_non_siblings
+				|| e.parent_ri[ri] == e.parent_ri[sel_anchor_ri])
+	}
+
+	function is_rect_field(field) {
+		return field.focusable != false
+	}
+
+	// record the selected cells in sel_mask, then clear the rectangle.
 	function commit_rect() {
 		if (sel_anchor_ri == null)
 			return
-		let [row_i1, row_i2, col_i1, col_i2] = rect_bounds()
-
-		// Build the selection bits for the rectangle's columns.
+		let [row_i1, row_i2] = rect_rows()
+		let col_mask = rect_col_mask()
 		let word_n = e.mask_word_n
-		let col_mask = new Uint32Array(word_n) // fi bits of the columns
-		for (let col_i = col_i1; col_i <= col_i2; col_i++) {
-			let fi = e.visible_fields[col_i].fi
-			col_mask[fi >>> 5] |= 1 << (fi & 31)
-		}
-
-		// add those bits to each row of the rectangle.
 		let sel_mask = e.sel_mask
 		for (let i = row_i1; i <= row_i2; i++) {
-			let word_i = e.visible_ris[i] * word_n // first word of the row
+			let ri = e.visible_ris[i]
+			if (!is_rect_row(ri))
+				continue
+			let word_i = ri * word_n // first word of the row
 			for (let w = 0; w < word_n; w++)
 				sel_mask[word_i + w] |= col_mask[w]
 		}
 
-		// Clear the rectangle after recording its selected cells in sel_mask.
+		// Clear the rectangle after recording its selection.
 		has_sel_bits = true
 		set_rect(null, null, null, null)
 	}
 
-	// With select null, select only the focused cell. With 'expand', select
-	// from the rectangle's anchor or the focused cell to (ri, fi). With
-	// 'invert', toggle (ri, fi) and keep the rest. With 'all', focus the first
-	// cell and select all cells.
-	e.focus_cell = function(ri, fi, select) {
-		// a hidden row can't be focused.
+	// Clear the selection of hidden rows. Check the previous visible rows
+	// because only those rows can be selected.
+	function deselect_hidden_rows() {
+		if (!has_sel_bits)
+			return
+		let prev_ris = e.visible_ris
+		for (let i = 0; i < e.visible_n; i++) {
+			let ri = prev_ris[i]
+			if (e.visible_i[ri] == NONE)
+				clear_row_mask(e.sel_mask, ri)
+		}
+	}
+
+	// set focus and selection.
+	// select:
+	//   null     : reset to focused cell or row.
+	//   'expand' : select from sel_anchor_ri/fi or focused_ri/fi to ri,fi.
+	//   'invert' : toggle ri,fi only.
+	//   'all'    : select all cells.
+	//   'deselect_hidden': deselect hidden rows only.
+	// 'expand' and 'invert' behave as null when can_select_multiple = false.
+	function set_focus(ri, fi, select) {
+		// a hidden row or field can't be focused.
 		if (ri != null && e.visible_i[ri] == NONE)
 			ri = null
+		if (fi != null && e.all_fields[fi].vfi == null)
+			fi = null
+
+		// to select a cell, we need both ri and fi. To select a row, only ri.
+		let has_target = ri != null && (fi != null || !e.cell_select_mode)
+		if ((select == 'expand' || select == 'invert')
+			&& (!e.can_select_multiple || !has_target))
+			select = null
 
 		// change the selection according to select.
 		if (select == 'deselect_hidden') {
-			if (has_sel_bits) {
-				// Deselect hidden rows. Check the previous visible rows because
-				// only those rows can have selected cells.
-				let prev_ris = e.visible_ris
-				for (let i = 0; i < e.visible_n; i++) {
-					let ri = prev_ris[i]
-					if (e.visible_i[ri] == NONE)
-						clear_row_mask(e.sel_mask, ri)
-				}
-			}
+			deselect_hidden_rows()
 		} else if (select == 'all') {
-			clear_sel_mask()
+			clear_sel()
 			let has_cells = e.visible_n > 0 && e.visible_fields.length > 0
-			ri = has_cells ? e.visible_ris[0] : null
-			fi = has_cells ? e.visible_fields[0].fi : null
 			if (has_cells)
-				set_rect(ri, fi, e.visible_ris[e.visible_n - 1],
+				set_rect(e.visible_ris[0], e.visible_fields[0].fi,
+					e.visible_ris[e.visible_n - 1],
 					e.visible_fields[e.visible_fields.length - 1].fi)
 			else
 				set_rect(null, null, null, null)
 		} else if (select == 'expand') {
+			let has_focused_target = e.focused_ri != null
+				&& (e.focused_fi != null || !e.cell_select_mode)
 			if (sel_anchor_ri != null)
 				set_rect(sel_anchor_ri, sel_anchor_fi, ri, fi)
-			else if (e.focused_ri != null)
+			else if (has_focused_target)
 				set_rect(e.focused_ri, e.focused_fi, ri, fi)
 			else
 				set_rect(ri, fi, ri, fi)
 		} else if (select == 'invert') {
+			// toggle all fields of the row in row-select mode, else the cell.
 			commit_rect()
-			let word_i = ri * e.mask_word_n + (fi >>> 5) // word of the cell
-			e.sel_mask[word_i] ^= 1 << (fi & 31)
+			let word_n = e.mask_word_n
+			if (!e.cell_select_mode) {
+				let word_i = ri * word_n // first word of the row
+				for (let w = 0; w < word_n; w++)
+					e.sel_mask[word_i + w] ^= all_fields_mask[w]
+			} else {
+				let word_i = ri * word_n + (fi >>> 5) // word of the cell
+				e.sel_mask[word_i] ^= 1 << (fi & 31)
+			}
 			has_sel_bits = true
 		} else {
-			clear_sel_mask()
-			set_rect(ri, fi, ri, fi)
+			clear_sel()
+			if (has_target)
+				set_rect(ri, fi, ri, fi)
+			else
+				set_rect(null, null, null, null)
 		}
 
+		// In row-select mode the user focuses rows, so no field is focused.
+		if (!e.cell_select_mode)
+			fi = null
+
 		// End quicksearch when focusing another cell.
-		if (ri != e.focused_ri || fi != e.focused_fi)
+		let has_focus_changed = ri != e.focused_ri || fi != e.focused_fi
+		if (has_focus_changed)
 			e.quicksearch_text = ''
 		e.focused_ri = ri
 		e.focused_fi = fi
+		if (fi != null)
+			e.last_focused_fi = fi
+		if (has_focus_changed)
+			e.focus_changed = true
 	}
 
+	// Use the selection modes of set_focus(). End the edit before focusing
+	// another cell or selecting 'all'.
+	e.focus_cell = function(ri, fi, select) {
+		if (ri != e.focused_ri || fi != e.focused_fi || select == 'all')
+			e.exit_edit()
+		set_focus(ri, fi, select)
+	}
+
+	// In row-select mode, every field of a selected row is selected.
 	e.is_cell_selected = function(ri, fi) {
 		if (cell_bit(e.sel_mask, ri, fi))
 			return true
 
 		// Check the selection rectangle if the cell has no bit in sel_mask. Use
-		// its visible row and column positions.
+		// its visible row and column positions. In row-select mode the
+		// rectangle covers all fields.
 		if (sel_anchor_ri == null || e.visible_i[ri] == NONE)
 			return false
 		let vi = e.visible_i
 		let af = e.all_fields
 		return between(vi[ri], vi[sel_anchor_ri], vi[sel_end_ri])
-			&& between(af[fi].vfi, af[sel_anchor_fi].vfi, af[sel_end_fi].vfi)
+			&& is_rect_row(ri)
+			&& (!e.cell_select_mode
+				|| between(af[fi].vfi, af[sel_anchor_fi].vfi, af[sel_end_fi].vfi)
+					&& is_rect_field(af[fi]))
 	}
 
-	// Call fn(ri) for each row with a selected cell, in display order. Check
-	// only visible rows because hidden rows cannot be selected.
+	// call fn(ri) for each row with a selected cell, in display order.
+	// check only visible rows because hidden rows cannot be selected.
 	e.each_selected_row = function(fn) {
 		commit_rect()
 		if (!has_sel_bits)
@@ -945,11 +1100,12 @@ ui.nav = function(id, opt) {
 		let sel_mask = e.sel_mask
 		for (let i = 0; i < e.visible_n; i++) {
 			let ri = e.visible_ris[i]
-			for (let w = 0; w < word_n; w++)
+			for (let w = 0; w < word_n; w++) {
 				if (sel_mask[ri * word_n + w]) {
 					fn(ri)
 					break
 				}
+			}
 		}
 	}
 
@@ -964,26 +1120,26 @@ ui.nav = function(id, opt) {
 		let id_field = e.id_field
 		let parent_field = e.parent_field
 		let id_ris = get_index(id_field.name).ris // rows sorted by id
-		let pid_ris = radix_sort(e.col_vals,
-			e.base_ris.slice(0, e.row_n), e.row_n,
-			[{field: parent_field, desc: false}]) // rows sorted by parent_id
-		let id_col = e.col_vals[id_field.fi]
-		let pid_col = e.col_vals[parent_field.fi]
+		let sort_fields = [{field: parent_field, desc: false}]
+		let pid_ris = e.base_ris.slice(0, e.row_n)
+		pid_ris = radix_sort(e.col_vals, pid_ris, e.row_n, sort_fields)
+		let id_vals = e.col_vals[id_field.fi]
+		let parent_vals = e.col_vals[parent_field.fi]
 		let i = 0 // index into id_ris
+		let id_cmp = id_field.col_storage.compare_cell
 		for (let j = 0; j < e.row_n; j++) {
 			let ri = pid_ris[j]
-			let parent_id = parent_field.col_storage.get(pid_col, ri)
+			let parent_id = parent_field.col_storage.get(parent_vals, ri)
 			let parent_ri = NONE
 			if (parent_id != null) {
-				while (i < id_ris.length && id_field.col_storage.compare_cell(
-					id_col, id_ris[i], parent_id) < 0)
-				{
+				while (i < id_ris.length) {
+					let cmp = id_cmp(id_vals, id_ris[i], parent_id)
+					if (cmp >= 0) {
+						if (cmp == 0)
+							parent_ri = id_ris[i]
+						break
+					}
 					i++
-				}
-				if (i < id_ris.length && id_field.col_storage.compare_cell(
-					id_col, id_ris[i], parent_id) == 0)
-				{
-					parent_ri = id_ris[i]
 				}
 			}
 			e.parent_ri[ri] = parent_ri
@@ -992,6 +1148,13 @@ ui.nav = function(id, opt) {
 
 	function update_is_tree() {
 		e.is_tree = e.can_be_tree && !e.flat && !e.is_grouped // tree view
+		let tree_col = e.tree_col ?? rowset_tree_col
+		let tree_col_field = e.all_fields_map[tree_col]
+		// the field that shows the indent and the collapse button
+		e.tree_field = e.is_grouped ? group_field
+			: !e.is_tree ? null
+			: tree_col_field?.vfi != null ? tree_col_field
+			: e.visible_fields[0] ?? null
 	}
 
 	// Stage 3. Build child lists from sorted_ris and group_ris. Visit each
@@ -1105,7 +1268,7 @@ ui.nav = function(id, opt) {
 	// other buffer. With reset_sel, select only the focused cell after
 	// filtering or collapsing. Clear focus if the focused row is hidden. To
 	// choose a nearby row, the UI must read visible_i before the operation.
-	function update_visible_ris(reset_sel) {
+	function update_visible_ris(reset_sel = true) {
 		// Record or clear the selection rectangle before changing visible
 		// positions.
 		if (reset_sel)
@@ -1135,48 +1298,59 @@ ui.nav = function(id, opt) {
 			}
 		}
 
-		// Clear focus from hidden rows. Deselect hidden rows, or select only
-		// the focused cell with reset_sel.
-		e.focus_cell(e.focused_ri, e.focused_fi,
+		set_focus(e.focused_ri, e.focused_fi,
 			reset_sel ? null : 'deselect_hidden')
 
 		// show the new list; keep the old buffer for the next run.
-		prev_visible_ris   = e.visible_ris
+		prev_visible_ris = e.visible_ris
 		e.visible_ris = ris
 		e.visible_n = n
 	}
 
-	function update_tree_and_visible_ris() { // stages 3-5
+	function update_tree_and_visible_ris(reset_sel) { // stages 3-5
 		update_tree_ris()
 		update_pass_desc()
-		update_visible_ris()
+		update_visible_ris(reset_sel)
 	}
 
 	/// collapse/expand -------------------------------------------------------
 
-	// Collapse or expand ri. With recursive, include its descendants. With ri
-	// null, change all roots, or all rows if recursive is set.
+	// mark parents of modified rows in tree_ris[i1 .. i2]. Visit children
+	// before parents so that we also mark ancestors.
+	function modified_desc_rows(i1, i2) { // -> Uint8Array by ri
+		let has_modified_desc = new Uint8Array(cap)
+		for (let i = i2; i >= i1; i--) {
+			let ri = e.tree_ris[i]
+			let p = e.parent_ri[ri]
+			if (p != NONE && (has_modified_desc[ri] || is_row_modified(ri)))
+				has_modified_desc[p] = 1
+		}
+		return has_modified_desc
+	}
+
+	// ri = null: change all roots; recursive: change descendants too.
+	// ancestors of modified rows stay expanded so that edits are not hidden.
 	e.set_collapsed = function(ri, collapsed, recursive) {
 		if (!(e.is_tree || e.is_grouped))
 			return
+		e.exit_edit()
+		// the rows affected, in tree_ris: [i1 .. i2]
+		let i1 = ri == null ? 0 : e.tree_i[ri]
+		let i2 = ri == null ? e.tree_n - 1 : i1 + e.desc_count[ri]
+		let has_modified_desc = collapsed && e.modified_n
+			? modified_desc_rows(i1, i2) : null
+		let last_i = ri != null && !recursive ? i1 : i2 // last row to change
 		let row_flags = e.row_flags
-		if (ri == null) {
-			for (let i = 0; i < e.tree_n; i++) {
-				let ri1 = e.tree_ris[i]
-				if (recursive || e.depth[ri1] == 0)
-					set_bits(row_flags, ri1, ROW_COLLAPSED, collapsed)
-			}
-		} else if (recursive) {
-			let i2 = e.tree_i[ri] + e.desc_count[ri] // last of the subtree
-			for (let i = e.tree_i[ri]; i <= i2; i++)
-				set_bits(row_flags, e.tree_ris[i], ROW_COLLAPSED, collapsed)
-		} else {
-			set_bits(row_flags, ri, ROW_COLLAPSED, collapsed)
+		for (let i = i1; i <= last_i; i++) {
+			let ri1 = e.tree_ris[i]
+			if ((ri != null || recursive || e.depth[ri1] == 0)
+				&& !has_modified_desc?.[ri1])
+				set_bits(row_flags, ri1, ROW_COLLAPSED, collapsed)
 		}
 		update_visible_ris(true)
 	}
 
-	// Show a tree nav's rows as a flat list.
+	// show a tree nav's rows as a flat list.
 	e.set_flat = function(flat) {
 		e.flat = flat // flat view of a tree nav
 		update_is_tree()
@@ -1200,39 +1374,41 @@ ui.nav = function(id, opt) {
 		return sort_fields
 	}
 
-	// move changed rows first, in base_ris order, then keep the remaining rows
-	// in sort order. return a new array, or sorted_ris if no row is changed.
-	function move_changed_rows_first(sorted_ris) {
-		if (!e.changed_n)
+	// move modified rows first, in base_ris order, then keep the remaining rows
+	// in sort order. return a new array, or sorted_ris if no row is modified.
+	function move_modified_rows_first(sorted_ris) {
+		if (!e.modified_n)
 			return sorted_ris
 		let n = e.row_n
 		let ris = new Uint32Array(n) // result
 		let j = 0 // next index into ris
 
-		// copy changed rows in stored order.
+		// copy modified rows in stored order.
 		for (let i = 0; i < n; i++)
-			if (is_row_changed(e.base_ris[i]))
+			if (is_row_modified(e.base_ris[i]))
 				ris[j++] = e.base_ris[i]
 
 		// copy the remaining rows in sort order.
 		for (let i = 0; i < n; i++)
-			if (!is_row_changed(sorted_ris[i]))
+			if (!is_row_modified(sorted_ris[i]))
 				ris[j++] = sorted_ris[i]
 		return ris
 	}
 
 	// Stage 2. order_by = 'col1[:desc] ...' | cmp(ri1, ri2) | null.
-	// put changed rows first, in base_ris order.
-	e.set_order_by = function(order_by) {
+	// put modified rows first, in base_ris order.
+	function sort_ris(order_by) {
 		let sort_fields = isstr(order_by) ? parse_order_by(order_by) : null
 		if (isfunc(order_by)) {
 			e.order_by = order_by
-			e.sorted_ris = move_changed_rows_first(
-				e.base_ris.slice(0, e.row_n).sort(order_by))
+			let sorted_ris = e.base_ris.slice(0, e.row_n)
+			sorted_ris.sort(order_by)
+			e.sorted_ris = move_modified_rows_first(sorted_ris)
 		} else if (sort_fields?.length) {
 			e.order_by = order_by
-			e.sorted_ris = move_changed_rows_first(radix_sort(e.col_vals,
-				e.base_ris.slice(0, e.row_n), e.row_n, sort_fields))
+			let ris = e.base_ris.slice(0, e.row_n)
+			let sorted_ris = radix_sort(e.col_vals, ris, e.row_n, sort_fields)
+			e.sorted_ris = move_modified_rows_first(sorted_ris)
 		} else {
 			e.order_by = null
 			e.sorted_ris = e.base_ris
@@ -1242,17 +1418,17 @@ ui.nav = function(id, opt) {
 
 	/// filtering -------------------------------------------------------------
 
-	// filter by fn(ri) -> is_visible; always include changed rows until saved
+	// filter by fn(ri) -> is_visible; always include modified rows until saved
 	// set_filter(null) clears the filter.
 	e.set_filter = function(fn) {
 		e.filter = fn // filter function, or null
 		let row_flags = e.row_flags
 		let ris = e.base_ris
-		let has_changes = e.changed_n > 0
+		let has_modifications = e.modified_n > 0
 		for (let i = 0; i < e.row_n; i++) {
 			let ri = ris[i]
 			set_bits(row_flags, ri, ROW_PASS,
-				!fn || (has_changes && is_row_changed(ri)) || fn(ri))
+				!fn || (has_modifications && is_row_modified(ri)) || fn(ri))
 		}
 		update_pass_desc()
 		update_visible_ris(true)
@@ -1343,24 +1519,24 @@ ui.nav = function(id, opt) {
 
 		// Collect the sort keys for each level. For ranged columns, write range
 		// starts into a separate column.
-		let key_fields = [] // [{field:, col:, desc:}, ...]: all levels' keys
+		let key_fields = [] // [{field:, vals:, desc:}, ...]: all levels' keys
 		let level_ends = [] // end index into key_fields, by level
 		for (let level of levels) {
 			for (let {field, bucket_func} of level) {
-				// Keep col to read existing data rows, even if alloc_slot()
+				// Keep vals to read existing data rows, even if alloc_slot()
 				// replaces the column arrays. Write new group cells to
 				// e.col_vals.
-				let col = e.col_vals[field.fi]
+				let vals = e.col_vals[field.fi]
 				if (bucket_func) {
-					let bucket_col = new Float64Array(cap) // range start by ri
+					let bucket_vals = new Float64Array(cap) // range start by ri
 					for (let i = 0; i < n; i++) {
 						let ri = base_ris[i]
-						let v = field.col_storage.get(col, ri)
-						bucket_col[ri] = v == null ? NaN : bucket_func(v)
+						let v = field.col_storage.get(vals, ri)
+						bucket_vals[ri] = v == null ? NaN : bucket_func(v)
 					}
-					col = bucket_col
+					vals = bucket_vals
 				}
-				key_fields.push({field: field, col: col, desc: false})
+				key_fields.push({field: field, vals: vals, desc: false})
 			}
 			level_ends.push(key_fields.length)
 		}
@@ -1371,10 +1547,10 @@ ui.nav = function(id, opt) {
 			let k = 0 // index into key_fields
 			for (let level = 0; level < level_n; level++)
 				for (; k < level_ends[level]; k++) {
-					let {field, col} = key_fields[k]
+					let {field, vals} = key_fields[k]
 					let storage = field.col_storage
-					let v2 = storage.get(col, ri2)
-					if (storage.compare_cell(col, ri1, v2))
+					let v2 = storage.get(vals, ri2)
+					if (storage.compare_cell(vals, ri1, v2))
 						return level
 				}
 			return level_n
@@ -1382,7 +1558,8 @@ ui.nav = function(id, opt) {
 
 		// Sort and visit the data rows. Find the first level differing from the
 		// previous row, then create new groups at that level and below it.
-		let ris = radix_sort(e.col_vals, base_ris.slice(0, n), n, key_fields)
+		let ris = base_ris.slice(0, n)
+		ris = radix_sort(e.col_vals, ris, n, key_fields)
 		let group_ris = [] // group slots in key order
 		let open_ris = [] // the open group, by level
 		for (let i = 0; i < n; i++) {
@@ -1398,11 +1575,23 @@ ui.nav = function(id, opt) {
 				for (let field of e.all_fields)
 					field.col_storage.set(e.col_vals[field.fi], group_ri, null)
 				for (let k = 0; k < level_ends[level]; k++) {
-					let {field, col} = key_fields[k]
+					let {field, vals} = key_fields[k]
 					let storage = field.col_storage
 					storage.set(e.col_vals[field.fi], group_ri,
-						storage.get(col, ri))
+						storage.get(vals, ri))
 				}
+
+				// write this level's key values, joined with ' / ', into $group.
+				let label = ''
+				// index in key_fields of this level's first key
+				let k1 = level ? level_ends[level - 1] : 0
+				for (let k = k1; k < level_ends[level]; k++) {
+					let {field, vals} = key_fields[k]
+					let s = val_text(field, field.col_storage.get(vals, ri))
+					label = k > k1 ? label + ' / ' + s : s
+				}
+				group_field.col_storage.set(
+					e.col_vals[group_field.fi], group_ri, label)
 				open_ris[level] = group_ri
 				group_ris.push(group_ri)
 			}
@@ -1446,8 +1635,8 @@ ui.nav = function(id, opt) {
 				child_n[p]++
 			}
 		}
-		e.group_ris = e.group_ris.subarray(0,
-			compact_list(e.group_ris, e.group_ris.length, is_dropped))
+		let n = compact_list(e.group_ris, e.group_ris.length, is_dropped)
+		e.group_ris = e.group_ris.subarray(0, n)
 	}
 
 	// Check for edits in grouping columns. Skip columns without input_vals
@@ -1459,7 +1648,7 @@ ui.nav = function(id, opt) {
 				if (!e.input_vals[fi])
 					continue
 				for (let i = 0; i < e.row_n; i++)
-					if (cell_bit(e.changed_mask, e.base_ris[i], fi))
+					if (cell_bit(e.modified_mask, e.base_ris[i], fi))
 						return true
 			}
 		return false
@@ -1471,7 +1660,7 @@ ui.nav = function(id, opt) {
 	// stored values. Return true if applied.
 	e.set_group_by = function(group_by) {
 		let levels = group_by ? parse_group_by(group_by) : []
-		if (levels.length && (e.is_tree || e.can_be_tree && e.changed_n
+		if (levels.length && (e.is_tree || e.can_be_tree && e.modified_n
 			|| has_edited_keys(levels)))
 			return false
 
@@ -1481,7 +1670,7 @@ ui.nav = function(id, opt) {
 		if (e.is_grouped) {
 			remove_groups()
 			if (levels.length) {
-				e.focus_cell(e.focused_ri, e.focused_fi, 'deselect_hidden')
+				set_focus(e.focused_ri, e.focused_fi, 'deselect_hidden')
 			} else if (e.can_be_tree) {
 				set_tree_parents()
 			} else {
@@ -1494,6 +1683,7 @@ ui.nav = function(id, opt) {
 		e.group_by = levels.length ? group_by : null // group-by spec, or null
 		if (levels.length)
 			add_groups(levels)
+		update_visible_fields()
 		update_is_tree()
 		update_tree_and_visible_ris()
 		return true
@@ -1525,28 +1715,28 @@ ui.nav = function(id, opt) {
 	}
 
 	// check whether the row is new, marked for deletion, or edited.
-	function is_row_changed(ri) {
+	function is_row_modified(ri) {
 		let flags = e.row_flags[ri]
 		if (flags & (ROW_NEW | ROW_REMOVED))
 			return true
 		let word_n = e.mask_word_n
 		for (let w = ri * word_n, w2 = w + word_n; w < w2; w++)
-			if (e.changed_mask[w])
+			if (e.modified_mask[w])
 				return true
 		return false
 	}
 
-	// adjust changed_n if the row became changed or became clean.
-	function update_changed_n(ri, was_changed) {
-		let is_changed = is_row_changed(ri)
-		if (is_changed != was_changed)
-			e.changed_n += is_changed ? 1 : -1
+	// adjust modified_n if the row became modified or became clean.
+	function update_modified_n(ri, was_modified) {
+		let is_modified = is_row_modified(ri)
+		if (is_modified != was_modified)
+			e.modified_n += is_modified ? 1 : -1
 	}
 
 	// return the edited value, or the value last seen on the server when the
 	// cell has no edit, or undefined for a new row's unset cell.
 	e.cell_input_val = function(ri, fi) {
-		return cell_bit(e.changed_mask, ri, fi)
+		return cell_bit(e.modified_mask, ri, fi)
 			? e.input_vals[fi][ri] : unedited_val(ri, fi)
 	}
 
@@ -1596,26 +1786,28 @@ ui.nav = function(id, opt) {
 
 	// set cell's edited value; clear the edit if v equals server value (revert).
 	function set_input_val(ri, fi, v) {
-		let was_changed = is_row_changed(ri)
+		let was_modified = is_row_modified(ri)
 		// for an unset cell, clear the edit only for undefined.
 		// treat null as an input value.
 		if (cell_bit(e.unset_mask, ri, fi) ? v === undefined
 			: v === col_val(ri, fi)
 		) {
-			set_cell_bit(e.changed_mask, ri, fi, false)
+			set_cell_bit(e.modified_mask, ri, fi, false)
 			if (e.input_vals[fi])
 				e.input_vals[fi][ri] = undefined
 		} else {
-			set_cell_bit(e.changed_mask, ri, fi, true)
+			set_cell_bit(e.modified_mask, ri, fi, true)
 			e.input_vals[fi] ??= [] // made on the column's first edit
 			e.input_vals[fi][ri] = v
 		}
-		update_changed_n(ri, was_changed)
+		update_modified_n(ri, was_modified)
 		end_quicksearch_at(ri, fi)
 	}
 
 	function is_cell_editable(ri, fi) {
 		if (e.row_flags[ri] & ROW_GROUP) // group row cell
+			return false
+		if (fi == group_field.fi)
 			return false
 		if (fi == e.pos_field?.fi)
 			return false
@@ -1628,10 +1820,9 @@ ui.nav = function(id, opt) {
 
 	// store the parsed value when parsing succeeds, or keep the typed text
 	// when it fails. Clear the edit if the value equals the server value. With
-	// ev.input, refuse the edit if can_change_val() returns false.
-	e.set_cell_val = function(ri, fi, v, ev) {
+	function set_cell_val_only(ri, fi, v, ev) {
 		if (!(ev?.input ? e.can_change_val(ri, fi) : is_cell_editable(ri, fi)))
-			return
+			return false
 
 		// validate and parse v. Stop if it equals the current value.
 		let field = e.all_fields[fi]
@@ -1639,17 +1830,22 @@ ui.nav = function(id, opt) {
 		if (!field.validator.parse_failed)
 			v = field.validator.value
 		if (v === e.cell_input_val(ri, fi))
-			return
+			return false
 
 		// Store the edit and its cell errors. Clear the row errors because they
 		// were reported for the previous values.
 		set_input_val(ri, fi, v)
 		set_cell_errors(ri, fi, errors)
 		e.row_errors[ri] = undefined
-		update_invalid(ri)
 
 		// Keep the edited row visible until the next filter.
 		set_bits(e.row_flags, ri, ROW_PASS, true)
+		return true
+	}
+
+	e.set_cell_val = function(ri, fi, v, ev) {
+		if (set_cell_val_only(ri, fi, v, ev))
+			e.validate_row(ri)
 	}
 
 	// Return true for a pos or parent_id cell. The caller must then restore
@@ -1665,14 +1861,14 @@ ui.nav = function(id, opt) {
 		e.row_errors[ri] = undefined
 		let is_moved = false
 		for (let fi = 0; fi < e.all_fields.length; fi++)
-			if (cell_bit(e.changed_mask, ri, fi) && revert_cell_val(ri, fi))
+			if (cell_bit(e.modified_mask, ri, fi) && revert_cell_val(ri, fi))
 				is_moved = true
 		update_invalid(ri)
 		return is_moved
 	}
 
 	e.revert_cell = function(ri, fi) {
-		if (!cell_bit(e.changed_mask, ri, fi))
+		if (!cell_bit(e.modified_mask, ri, fi))
 			return
 		let is_moved = revert_cell_val(ri, fi)
 		update_invalid(ri)
@@ -1701,7 +1897,7 @@ ui.nav = function(id, opt) {
 		// Unmark and revert saved rows. Collect new rows to drop afterward.
 		for (let i = 0; i < e.row_n; i++) {
 			let ri = e.base_ris[i]
-			if (!is_row_changed(ri))
+			if (!is_row_modified(ri))
 				continue
 			if (e.row_flags[ri] & ROW_NEW) {
 				new_ris.push(ri)
@@ -1725,31 +1921,31 @@ ui.nav = function(id, opt) {
 		e.cell_errors = [] // cell errors by fi, then ri
 	}
 
-	// Set selected cells to null through set_cell_val(), with the usual edit
-	// restrictions.
+	// Set selected cells to null, with the same edit restrictions as
+	// set_cell_val(). Set only visible fields, even in row-select mode.
+	// Validate each modified row once, after setting its cells.
 	e.set_null_selected_cells = function(ev) {
 		let word_n = e.mask_word_n
 		let sel_mask = e.sel_mask
 		e.each_selected_row(ri => {
+			let is_modified = false
 			for (let w = 0; w < word_n; w++) {
-				let bits = sel_mask[ri * word_n + w] // selected cells of the word
+				// selection bits for visible fields in this word
+				let bits = sel_mask[ri * word_n + w] & visible_fields_mask[w]
 				// Find the column for the lowest set bit, then clear that bit.
 				while (bits) {
 					let fi = w * 32 + 31 - Math.clz32(bits & -bits)
-					e.set_cell_val(ri, fi, null, ev)
+					if (set_cell_val_only(ri, fi, null, ev))
+						is_modified = true
 					bits &= bits - 1
 				}
 			}
+			if (is_modified)
+				e.validate_row(ri)
 		})
 	}
 
 	/// editing policy --------------------------------------------------------
-
-	// Check these permissions only on calls from the user, with ev.input.
-	e.can_add_rows    ??= true // the user may insert rows
-	e.can_remove_rows ??= true // the user may remove rows
-	e.can_change_rows ??= true // the user may edit saved rows
-	e.can_move_rows   ??= true // the user may move rows
 
 	// name: 'no_focus' | 'no_change' | 'no_remove' | 'no_save'
 	e.set_row_flag = function(ri, name, on) {
@@ -1781,31 +1977,31 @@ ui.nav = function(id, opt) {
 
 	/// cell state ------------------------------------------------------------
 
-	e.can_focus_cells ??= true // false: row-select mode
+	/// cell state ------------------------------------------------------------
 
-	e.is_cell_changed = function(ri, fi) {
-		return !!cell_bit(e.changed_mask, ri, fi)
+	e.is_cell_modified = function(ri, fi) {
+		return !!cell_bit(e.modified_mask, ri, fi)
 	}
 
 	e.cell_has_errors = function(ri, fi) {
 		return !!e.cell_errors[fi]?.[ri]
 	}
 
-	// in row-select mode, a focusable row has every field focusable.
 	e.can_focus_cell = function(ri, fi) {
 		return !(e.row_flags[ri] & ROW_NO_FOCUS)
-			&& (!e.can_focus_cells || e.all_fields[fi].focusable != false)
+			&& (!e.cell_select_mode || e.all_fields[fi].focusable != false)
 	}
 
-	// the cell's display text.
-	e.cell_text = function(ri, fi) {
-		let field = e.all_fields[fi]
-		let v = e.cell_input_val(ri, fi)
+	function val_text(field, v) {
 		if (v == null)
 			return field.null_text
 		if (v === '')
 			return field.empty_text
 		return field.to_text(v)
+	}
+
+	e.cell_text = function(ri, fi) {
+		return val_text(e.all_fields[fi], e.cell_input_val(ri, fi))
 	}
 
 	/// focused cell position -------------------------------------------------
@@ -1822,7 +2018,7 @@ ui.nav = function(id, opt) {
 
 	/// row slots and inserting -----------------------------------------------
 
-	// Grow every array indexed by ri to cap slots. Keep the existing values.
+	// grow every array indexed by ri to cap slots, keeping the data.
 	function set_capacity(cap1) {
 		let word_n = e.mask_word_n
 		e.col_vals = e.all_fields.map(field =>
@@ -1839,7 +2035,7 @@ ui.nav = function(id, opt) {
 		e.visible_ris      = grow_typed(e.visible_ris     , cap1)
 		prev_visible_ris   = grow_typed(prev_visible_ris  , cap1)
 		e.sel_mask         = grow_typed(e.sel_mask        , cap1 * word_n)
-		e.changed_mask     = grow_typed(e.changed_mask    , cap1 * word_n)
+		e.modified_mask    = grow_typed(e.modified_mask   , cap1 * word_n)
 		e.unset_mask       = grow_typed(e.unset_mask      , cap1 * word_n)
 		cap = cap1
 	}
@@ -1851,7 +2047,7 @@ ui.nav = function(id, opt) {
 			ri = free_ris.pop()
 		} else {
 			if (slot_n == cap)
-				set_capacity(Math.max(1, cap * 2))
+				set_capacity(max(1, cap * 2))
 			ri = slot_n++
 			e.parent_ri[ri] = NONE
 		}
@@ -1867,15 +2063,15 @@ ui.nav = function(id, opt) {
 			saving_ris.delete(ri)
 		}
 
-		// Subtract the row from changed_n if changed. Clear its state before
+		// Subtract the row from modified_n if modified. Clear its state before
 		// reusing the slot.
-		if (is_row_changed(ri))
-			e.changed_n--
+		if (is_row_modified(ri))
+			e.modified_n--
 		e.row_flags[ri] = 0
 		e.parent_ri[ri] = NONE
 		e.desc_count[ri] = 0
 		e.visible_i[ri] = NONE
-		clear_row_mask(e.changed_mask, ri)
+		clear_row_mask(e.modified_mask, ri)
 		clear_row_mask(e.unset_mask, ri)
 		for (let fi = 0; fi < e.all_fields.length; fi++) {
 			if (e.input_vals[fi])
@@ -1987,7 +2183,7 @@ ui.nav = function(id, opt) {
 
 		// update the counts, the pos values, the indexes and the rows shown.
 		e.row_n += k
-		e.changed_n += k
+		e.modified_n += k
 		if (e.pos_field)
 			place_pos(base_i, k, true)
 		add_to_indexes(ris)
@@ -2005,8 +2201,8 @@ ui.nav = function(id, opt) {
 			let field = e.all_fields[fi]
 			field.col_storage.set(e.col_vals[fi], ri, v)
 			set_cell_bit(e.unset_mask, ri, fi, false)
-			if (cell_bit(e.changed_mask, ri, fi)) {
-				set_cell_bit(e.changed_mask, ri, fi, false)
+			if (cell_bit(e.modified_mask, ri, fi)) {
+				set_cell_bit(e.modified_mask, ri, fi, false)
 				e.input_vals[fi][ri] = undefined
 			}
 			if (is_indexed)
@@ -2038,12 +2234,20 @@ ui.nav = function(id, opt) {
 		let ri = ris[i]
 		let pos1 = null // pos of the previous row of the list
 		let pos2 = null // pos of the next row of the list
-		for (let j = i - 1; j >= 0 && pos1 == null; j--)
-			if (same_pos_list(ris[j], ri))
+		for (let j = i - 1; j >= 0; j--) {
+			if (same_pos_list(ris[j], ri)) {
 				pos1 = e.cell_input_val(ris[j], pos_fi)
-		for (let j = i + k; j < e.row_n && pos2 == null; j++)
-			if (same_pos_list(ris[j], ri))
+				if (pos1 != null)
+					break
+			}
+		}
+		for (let j = i + k; j < e.row_n; j++) {
+			if (same_pos_list(ris[j], ri)) {
 				pos2 = e.cell_input_val(ris[j], pos_fi)
+				if (pos2 != null)
+					break
+			}
+		}
 
 		// Space k values evenly between the neighbors. With one neighbor, count
 		// by 1 before or after it. With neither, use 1..k.
@@ -2096,18 +2300,18 @@ ui.nav = function(id, opt) {
 		if (!e.pos_field)
 			return
 		let field = e.pos_field
-		let col = e.col_vals[field.fi]
+		let vals = e.col_vals[field.fi]
 		if (e.input_vals[field.fi]) {
-			col = col.slice() // pos with the edited values written in
+			vals = vals.slice() // pos with the edited values written in
 			for (let i = 0; i < e.row_n; i++) {
 				let ri = e.base_ris[i]
-				if (cell_bit(e.changed_mask, ri, field.fi))
-					field.col_storage.set(col, ri, e.input_vals[field.fi][ri])
+				if (cell_bit(e.modified_mask, ri, field.fi))
+					field.col_storage.set(vals, ri, e.input_vals[field.fi][ri])
 			}
 		}
 		let was_unsorted = e.sorted_ris == e.base_ris
 		e.base_ris = radix_sort(e.col_vals, e.base_ris, e.row_n,
-			[{field: field, desc: false, col: col}])
+			[{field: field, desc: false, vals: vals}])
 		if (was_unsorted)
 			e.sorted_ris = e.base_ris
 	}
@@ -2205,7 +2409,7 @@ ui.nav = function(id, opt) {
 		// give the rows pos values between their new neighbors.
 		if (e.pos_field)
 			place_pos(i, k)
-		update_tree_and_visible_ris()
+		update_tree_and_visible_ris(false)
 		return true
 	}
 
@@ -2250,17 +2454,17 @@ ui.nav = function(id, opt) {
 		if (flags & ROW_NEW) {
 			new_ris.push(ri)
 		} else {
-			let was_changed = is_row_changed(ri)
+			let was_modified = is_row_modified(ri)
 			set_bits(e.row_flags, ri, ROW_REMOVED, true)
-			update_changed_n(ri, was_changed)
+			update_modified_n(ri, was_modified)
 		}
 		return true
 	}
 
 	function unmark_removed(ri) {
-		let was_changed = is_row_changed(ri)
+		let was_modified = is_row_modified(ri)
 		set_bits(e.row_flags, ri, ROW_REMOVED, false)
-		update_changed_n(ri, was_changed)
+		update_modified_n(ri, was_modified)
 	}
 
 	// Mark ri and its descendants for deletion. For user calls, keep rows with
@@ -2291,9 +2495,9 @@ ui.nav = function(id, opt) {
 		// deleted parent.
 		if (row_flags[ri] & ROW_REMOVED)
 			unmark_removed(ri)
-		for (let p = e.parent_ri[ri];
-			p != NONE && row_flags[p] & ROW_REMOVED; p = e.parent_ri[p]
-		) {
+		for (let p = e.parent_ri[ri]; p != NONE; p = e.parent_ri[p]) {
+			if (!(row_flags[p] & ROW_REMOVED))
+				break
 			unmark_removed(p)
 		}
 
@@ -2345,13 +2549,6 @@ ui.nav = function(id, opt) {
 
 	/// saving ----------------------------------------------------------------
 
-	let save_req = null // pending id or save request, or null
-	let save_batch = null // pending batch: {rows: [...], ris: [...]}
-	let saving_ris = map() // batch row positions: {ri -> index}
-	let want_save = false // save requested during a pending request
-	let want_reload = false // reload requested during a pending request
-	let own_update_ids = new Set() // ids of this nav's saves
-
 	function rowset_url() {
 		return href('/rowset.json/' + e.rowset_name)
 	}
@@ -2362,7 +2559,7 @@ ui.nav = function(id, opt) {
 			values[field.name + ':old'] = col_val(ri, field.fi)
 	}
 
-	// Pack a changed row in rowset.lua's save format. Return null if there is
+	// Pack a modified row in rowset.lua's save format. Return null if there is
 	// nothing to send.
 	function pack_row(ri) {
 		let flags = e.row_flags[ri]
@@ -2385,7 +2582,7 @@ ui.nav = function(id, opt) {
 		// that the server can find it.
 		let has_vals = false
 		for (let field of e.all_fields)
-			if (!field.nosave && cell_bit(e.changed_mask, ri, field.fi)) {
+			if (!field.nosave && cell_bit(e.modified_mask, ri, field.fi)) {
 				values[field.name] = e.input_vals[field.fi][ri]
 				has_vals = true
 			}
@@ -2406,7 +2603,7 @@ ui.nav = function(id, opt) {
 		for (let i = e.tree_n - 1; i >= 0; i--) {
 			let ri = e.tree_ris[i]
 			let flags = e.row_flags[ri]
-			if (flags & (ROW_GROUP | ROW_NO_SAVE) || !is_row_changed(ri))
+			if (flags & (ROW_GROUP | ROW_NO_SAVE) || !is_row_modified(ri))
 				continue
 			// Send rows marked for deletion without validating their cells.
 			if (!(flags & ROW_REMOVED) && !e.validate_row(ri))
@@ -2446,14 +2643,14 @@ ui.nav = function(id, opt) {
 
 	// Write vals[fi] into column storage, leaving cells unchanged for
 	// undefined. Mark the row saved and keep only edits differing from the
-	// server values. Set is_changed_col[fi] for each changed column. Return
+	// server values. Set is_modified_col[fi] for each modified column. Return
 	// true if pos or parent_id changed.
-	function set_server_vals(ri, vals, is_changed_col) {
+	function set_server_vals(ri, vals, is_modified_col) {
 		// Mark the row saved and clear its unset cells.
-		let was_changed = is_row_changed(ri)
+		let was_modified = is_row_modified(ri)
 		set_bits(e.row_flags, ri, ROW_NEW, false)
 		clear_row_mask(e.unset_mask, ri)
-		update_changed_n(ri, was_changed)
+		update_modified_n(ri, was_modified)
 
 		// Write the server values into the columns and clear edits equal to
 		// them.
@@ -2465,7 +2662,7 @@ ui.nav = function(id, opt) {
 			let field = e.all_fields[fi]
 			if (v !== col_val(ri, fi)) {
 				field.col_storage.set(e.col_vals[fi], ri, v)
-				is_changed_col[fi] = 1
+				is_modified_col[fi] = 1
 				update_server_cell(ri, fi)
 				if (fi == e.pos_field?.fi || fi == e.parent_field?.fi)
 					is_moved = true
@@ -2480,13 +2677,13 @@ ui.nav = function(id, opt) {
 
 	// Clear an edit equal to the cell's server value.
 	function clear_edit_if_same(ri, fi) {
-		if (cell_bit(e.changed_mask, ri, fi)
+		if (cell_bit(e.modified_mask, ri, fi)
 			&& e.input_vals[fi][ri] === col_val(ri, fi)
 		) {
-			let was_changed = is_row_changed(ri)
-			set_cell_bit(e.changed_mask, ri, fi, false)
+			let was_modified = is_row_modified(ri)
+			set_cell_bit(e.modified_mask, ri, fi, false)
 			e.input_vals[fi][ri] = undefined
-			update_changed_n(ri, was_changed)
+			update_modified_n(ri, was_modified)
 		}
 	}
 
@@ -2495,14 +2692,14 @@ ui.nav = function(id, opt) {
 	function update_server_cell(ri, fi) {
 		// End quicksearch only for an unedited cell, since the nav displays the
 		// pending value of an edited cell.
-		if (!cell_bit(e.changed_mask, ri, fi))
+		if (!cell_bit(e.modified_mask, ri, fi))
 			end_quicksearch_at(ri, fi)
 		clear_edit_if_same(ri, fi)
 	}
 
-	function invalidate_changed_cols(is_changed_col) {
-		for (let fi = 0; fi < is_changed_col.length; fi++)
-			if (is_changed_col[fi])
+	function invalidate_changed_cols(is_modified_col) {
+		for (let fi = 0; fi < is_modified_col.length; fi++)
+			if (is_modified_col[fi])
 				invalidate_indexes(e.all_fields[fi])
 	}
 
@@ -2529,7 +2726,7 @@ ui.nav = function(id, opt) {
 	e.apply_result = function(batch, result) {
 		let drop_ris = [] // rows the server removed
 		let moved_ris = [] // rows whose pos or parent_id changed
-		let is_changed_col = new Uint8Array(e.all_fields.length) // by fi
+		let is_modified_col = new Uint8Array(e.all_fields.length) // by fi
 
 		// Apply the server's reply to each sent row: remove it, store its
 		// errors, or mark it saved.
@@ -2546,7 +2743,7 @@ ui.nav = function(id, opt) {
 			} else {
 				// Use the sent values if the server did not return row values.
 				let vals = rt.values ?? sent_vals(batch.rows[k])
-				if (set_server_vals(ri, vals, is_changed_col))
+				if (set_server_vals(ri, vals, is_modified_col))
 					moved_ris.push(ri)
 			}
 		}
@@ -2554,7 +2751,7 @@ ui.nav = function(id, opt) {
 		// end the batch, then update the indexes, put moved rows back in
 		// place and drop the removed rows.
 		end_save()
-		invalidate_changed_cols(is_changed_col)
+		invalidate_changed_cols(is_modified_col)
 		if (moved_ris.length)
 			update_row_places(moved_ris)
 		if (drop_ris.length)
@@ -2562,8 +2759,8 @@ ui.nav = function(id, opt) {
 		if (drop_ris.length || moved_ris.length)
 			update_tree_and_visible_ris()
 
-		// Discard the edit and error arrays if no changed rows remain.
-		if (!e.changed_n) {
+		// Discard the edit and error arrays if no modified rows remain.
+		if (!e.modified_n) {
 			e.input_vals = [] // edited values by fi, then ri
 			e.cell_errors = [] // cell errors by fi, then ri
 		}
@@ -2632,7 +2829,7 @@ ui.nav = function(id, opt) {
 		}
 	}
 
-	// Send changed rows to their server rowset, one request at a time. Defer
+	// Send modified rows to their server rowset, one request at a time. Defer
 	// save() if another request is still running.
 	e.save = function() {
 		assert(e.rowset_name, 'save: rowset_name required')
@@ -2672,7 +2869,7 @@ ui.nav = function(id, opt) {
 	function is_same_rowset(rs) {
 		if (!isobj(rs) || !isarray(rs.fields))
 			return false
-		if (rs.fields.length != e.all_fields.length)
+		if (rs.fields.length != rowset_fields.length)
 			return false
 		for (let fi = 0; fi < rs.fields.length; fi++) {
 			let rs_field = rs.fields[fi]
@@ -2680,17 +2877,16 @@ ui.nav = function(id, opt) {
 				return false
 			// Use all_field_types.type when the field has no explicit type.
 			let type = rs_field.type ?? ui.all_field_types.type
-			if (rs_field.name !== e.all_fields[fi].name
-				|| type !== e.all_fields[fi].type
+			if (rs_field.name !== rowset_fields[fi].name
+				|| type !== rowset_fields[fi].type
 			) {
 				return false
 			}
 		}
 		let pk = rs.pk
 		if (isarray(pk)) {
-			for (let col of pk)
-				if (!check_col_name(col))
-					return false
+			if (!check_cols(pk, e.all_fields_map))
+				return false
 			pk = pk.join(' ')
 		} else if (!isstr(pk)) {
 			return false
@@ -2701,7 +2897,7 @@ ui.nav = function(id, opt) {
 			&& (rs.id_col == null || rs.id_col === e.id_field?.name)
 	}
 
-	// Compare ri's primary key with incoming row in_i's primary key. Return
+	// Compare ris primary key with incoming row in_i's primary key. Return
 	// -1, 0 or 1.
 	function compare_pk(ri, in_col_vals, in_i) {
 		for (let field of e.pk_fields) {
@@ -2727,24 +2923,25 @@ ui.nav = function(id, opt) {
 		}
 
 		// load the incoming rows into columns and sort them by pk.
-		let fields = e.all_fields
-		let in_cols = rowset_col_vals(rs, fields.length)
-		if (!in_cols)
+		let fields = rowset_fields
+		let rs_col_vals = rowset_col_vals(rs, fields.length)
+		if (!rs_col_vals)
 			return
-		let m = in_cols[0].length // incoming row count
+		let m = rs_col_vals[0].length // incoming row count
 		let in_col_vals = fields.map(field => // incoming columns, by fi
-			field.col_storage.load_col(in_cols[field.fi], m))
+			field.col_storage.load_col(rs_col_vals[field.fi], m))
 		let in_is = new Uint32Array(m) // incoming row indexes, by pk
 		for (let i = 0; i < m; i++)
 			in_is[i] = i
-		in_is = radix_sort(e.col_vals, in_is, m, e.pk_fields.map(field =>
-			({field: field, desc: false, col: in_col_vals[field.fi]})))
+		let sort_fields = e.pk_fields.map(field =>
+			({field: field, desc: false, vals: in_col_vals[field.fi]}))
+		in_is = radix_sort(e.col_vals, in_is, m, sort_fields)
 
 		// Compare the nav's rows with incoming rows in primary key order. Drop
 		// saved rows found only in the nav, add rows found only on the server,
 		// and collect matching rows.
 		let pk_ris = get_index(e.pk).ris // the rows, by pk
-		let is_changed_col = new Uint8Array(fields.length) // by fi
+		let is_modified_col = new Uint8Array(fields.length) // by fi
 		let match_ris = new Uint32Array(m) // matched saved rows
 		let match_is = new Uint32Array(m) // their incoming row indexes
 		let match_n = 0 // length of match_ris and match_is
@@ -2776,17 +2973,22 @@ ui.nav = function(id, opt) {
 			}
 		}
 
-		// Copy changed cells from matched saved rows, one column at a time.
+		// End the edit before dropping a row deleted on the server.
+		// Keep editing otherwise.
+		if (e.editing && drop_ris.includes(e.focused_ri))
+			e.exit_edit()
+
+		// Copy modified cells from matched saved rows, one column at a time.
 		// Update edits and quicksearch only for the copied cells.
-		let changed_ks = new Uint32Array(match_n) // indexes in match_ris
+		let modified_ks = new Uint32Array(match_n) // indexes in match_ris
 		for (let field of fields) {
 			let fi = field.fi
-			let changed_cell_n = field.col_storage.copy_changed(e.col_vals[fi],
-				match_ris, in_col_vals[fi], match_is, match_n, changed_ks)
-			if (changed_cell_n)
-				is_changed_col[fi] = 1
-			for (let c = 0; c < changed_cell_n; c++)
-				update_server_cell(match_ris[changed_ks[c]], fi)
+			let modified_cell_n = field.col_storage.copy_changed(e.col_vals[fi],
+				match_ris, in_col_vals[fi], match_is, match_n, modified_ks)
+			if (modified_cell_n)
+				is_modified_col[fi] = 1
+			for (let c = 0; c < modified_cell_n; c++)
+				update_server_cell(match_ris[modified_ks[c]], fi)
 		}
 
 		// Remove the current groups and rows no longer on the server. Clear
@@ -2798,7 +3000,7 @@ ui.nav = function(id, opt) {
 		if (drop_ris.length)
 			drop_rows(drop_ris)
 		if (levels || drop_ris.length)
-			e.focus_cell(e.focused_ri, e.focused_fi, 'deselect_hidden')
+			set_focus(e.focused_ri, e.focused_fi, 'deselect_hidden')
 
 		// add the rows that only the server has, at the end of the stored
 		// order.
@@ -2810,6 +3012,7 @@ ui.nav = function(id, opt) {
 			for (let field of fields)
 				field.col_storage.set(e.col_vals[field.fi], ri,
 					field.col_storage.get(in_col_vals[field.fi], add_is[a]))
+			group_field.col_storage.set(e.col_vals[group_field.fi], ri, null)
 			e.row_flags[ri] = ROW_PASS
 		}
 		let was_unsorted = e.sorted_ris == e.base_ris
@@ -2820,14 +3023,15 @@ ui.nav = function(id, opt) {
 
 		// invalidate the indexes of the columns written, and add the new rows
 		// to the other indexes.
-		invalidate_changed_cols(is_changed_col)
+		invalidate_changed_cols(is_modified_col)
 		add_to_indexes(new_ris)
 
-		// Apply the filter again to unchanged rows. Keep changed rows visible.
+		// Apply the filter again to unmodified rows. Keep modified rows and the
+		// edited row visible.
 		if (e.filter)
 			for (let i = 0; i < e.row_n; i++) {
 				let ri = e.base_ris[i]
-				if (!is_row_changed(ri))
+				if (!is_row_modified(ri) && !(e.editing && ri == e.focused_ri))
 					set_bits(e.row_flags, ri, ROW_PASS, e.filter(ri))
 			}
 
@@ -2835,36 +3039,48 @@ ui.nav = function(id, opt) {
 		// values changed.
 		let has_added_or_dropped = k > 0 || drop_ris.length > 0
 		let edited_parent_ris = [] // rows with parent_id edits
+		let is_tree_rebuilt = false // parents rebuilt from parent_id
 		if (levels) {
 			add_groups(levels)
 		} else if (e.can_be_tree && (has_added_or_dropped
-			|| is_changed_col[e.id_field.fi]
-			|| is_changed_col[e.parent_field.fi])
+			|| is_modified_col[e.id_field.fi]
+			|| is_modified_col[e.parent_field.fi])
 		) {
 			set_tree_parents()
+			is_tree_rebuilt = true
 			let parent_fi = e.parent_field.fi
 			if (e.input_vals[parent_fi])
 				for (let i = 0; i < e.row_n; i++)
-					if (cell_bit(e.changed_mask, e.base_ris[i], parent_fi))
+					if (cell_bit(e.modified_mask, e.base_ris[i], parent_fi))
 						edited_parent_ris.push(e.base_ris[i])
 		}
 		let is_pos_changed = !!e.pos_field
-			&& (k > 0 || !!is_changed_col[e.pos_field.fi])
+			&& (k > 0 || !!is_modified_col[e.pos_field.fi])
 		// Restore parents from pending parent_id edits and restore pos order.
 		if (edited_parent_ris.length || is_pos_changed)
 			update_row_places(edited_parent_ris)
+
 		if (e.order_by
-			&& (k > 0 || is_pos_changed || is_changed_col.includes(1))
-		) {
-			e.set_order_by(e.order_by)
-		} else {
-			update_tree_and_visible_ris()
-		}
+			&& (k > 0 || is_pos_changed || is_modified_col.includes(1))
+		)
+			sort_ris(e.order_by)
+
+		// Rebuild the tree before expanding ancestors: update_tree_ris()
+		// clears circular parent links. Keep modified rows and the row being
+		// edited visible if the server moved them under a collapsed parent.
+		update_tree_ris()
+		if (is_tree_rebuilt && e.is_tree)
+			for (let i = 0; i < e.row_n; i++) {
+				let ri = e.base_ris[i]
+				if (is_row_modified(ri) || (e.editing && ri == e.focused_ri))
+					for (let p = e.parent_ri[ri]; p != NONE; p = e.parent_ri[p])
+						e.row_flags[p] &= ~ROW_COLLAPSED
+			}
+		update_pass_desc()
+		update_visible_ris()
 	}
 
 	/// reloading -------------------------------------------------------------
-
-	let load_req = null // pending load request, or null
 
 	// Load the server rowset with load() the first time and with diff_merge()
 	// afterward. Wait for a pending save to finish before reloading, because
@@ -2940,10 +3156,10 @@ ui.nav = function(id, opt) {
 			e.id, 'invalid col_vals'))
 			return null
 		for (let fi = 0; fi < col_n; fi++) {
-			let col_vals = rs.col_vals[fi]
-			if (warn_if(!(isarray(col_vals)
-				|| col_vals instanceof Float64Array
-				|| col_vals instanceof Uint8Array),
+			let vals = rs.col_vals[fi]
+			if (warn_if(!(isarray(vals)
+				|| vals instanceof Float64Array
+				|| vals instanceof Uint8Array),
 				e.id, 'invalid col_vals:', fi))
 				return null
 		}
@@ -2956,6 +3172,19 @@ ui.nav = function(id, opt) {
 		let ok = isstr(col) && col.length > 0 && !invalid_col_name_re.test(col)
 		warn_if(!ok, e.id, 'invalid field name: ', col)
 		return ok
+	}
+
+	function check_cols(cols, all_fields_map) {
+		let fields = []
+		for (let col of cols) {
+			if (!check_col_name(col))
+				return null
+			let field = all_fields_map[col]
+			if (warn_if(!field, e.id, 'unknown column:', col))
+				return null
+			fields.push(field)
+		}
+		return fields
 	}
 
 	function col_field(col, all_fields_map) {
@@ -2971,13 +3200,13 @@ ui.nav = function(id, opt) {
 	// rowset, ignore replies to pending saves because the nav has replaced
 	// their rows.
 	e.load = function(rs) {
+
+		// validation: no state changes so we can early-return on failure.
+
 		if (warn_if(!isarray(rs.fields), e.id, 'fields array required'))
 			return
 		if (warn_if(!rs.fields.length, e.id, 'no fields'))
 			return
-
-		// Create one field per column. Refuse invalid or duplicate names and
-		// fields rejected by ui.create_field().
 		let all_fields = [] // [field1, ...] by fi
 		let all_fields_map = obj() // {col->field}
 		for (let fi = 0; fi < rs.fields.length; fi++) {
@@ -2990,129 +3219,131 @@ ui.nav = function(id, opt) {
 			let field = ui.create_field(field_opt, e.id)
 			if (!field)
 				return
-			field.fi = fi // field index
+			field.fi = fi
 			all_fields.push(field)
 			all_fields_map[name] = field
 		}
 
-		// find the pk columns (required) and the pos, id and parent columns.
-		// stop on an unknown column.
 		let pk = isarray(rs.pk) ? rs.pk.join(' ') : rs.pk
 		let pk_cols = isarray(rs.pk) ? rs.pk : words(rs.pk ?? '')
-		if (warn_if(!(isarray(pk_cols) && pk_cols.length),
-			e.id, 'pk required'))
+		if (warn_if(!(isarray(pk_cols) && pk_cols.length), e.id, 'pk required'))
 			return
-		let pk_fields = []
-		for (let col of pk_cols) {
-			if (!check_col_name(col))
-				return
-			let field = all_fields_map[col]
-			if (warn_if(!field, e.id, 'unknown column:', col))
-				return
-			pk_fields.push(field)
-		}
-		let pos_field = col_field(rs.pos_col, all_fields_map)
-		let id_field = rs.id_col == null
-			? pk_fields.length == 1 ? pk_fields[0] : null
-			: col_field(rs.id_col, all_fields_map)
+		let pk_fields = check_cols(pk_cols, all_fields_map)
+		if (!pk_fields)
+			return
+		let pos_field    = col_field(rs.pos_col, all_fields_map)
+		let id_field     = col_field(rs.id_col, all_fields_map)
 		let parent_field = col_field(rs.parent_col, all_fields_map)
+
 		if (rs.pos_col != null && !pos_field
 			|| rs.id_col != null && !id_field
 			|| rs.parent_col != null && !parent_field)
 			return
 
-		let col_vals = rowset_col_vals(rs, all_fields.length)
-		if (!col_vals)
+		let src_col_vals = rowset_col_vals(rs, all_fields.length)
+		if (!src_col_vals)
 			return
-		let n = col_vals[0].length // row count
-		let cap1 = n + 1
-		let e_col_vals = all_fields.map(field =>
-			field.col_storage.load_col(col_vals[field.fi], cap1))
+
+		// init: from here on, no more returns.
+
+		e.exit_edit()
+
+		e.all_fields = all_fields
+		e.all_fields_map = all_fields_map
+		e.pk = pk
+		e.pk_fields = pk_fields
+		e.pos_field = pos_field
+		e.id_field = id_field
+		e.parent_field = parent_field
+		e.row_n = src_col_vals[0].length
+		cap = e.row_n + 1 // capacity of ri-indexed arrays (+1 for 1 free insert)
+		e.col_vals = e.all_fields.map(field =>
+			field.col_storage.load_col(src_col_vals[field.fi], cap))
+
+		group_field = ui.create_field({
+			name: '$group', label: 'Group', w: 12,
+			is_group_field: true, readonly: true, nosave: true,
+			movable: false, groupable: false, sortable: false,
+		}, e.id)
+		group_field.fi = e.all_fields.length // field index
+		e.col_vals[group_field.fi] = new Array(e.row_n).fill(null)
 
 		// Ignore the pending save's reply and clear any waiting save or reload
 		// before replacing the rows.
+		let cur_save_req = save_req
 		save_req = null
+		cur_save_req?.abort()
 		end_save()
 		want_save = false
 		want_reload = false
-		e.all_fields = all_fields
-		e.all_fields_map = all_fields_map
+		rowset_fields = e.all_fields.slice()
+		rowset_cols = rs.cols
+		rowset_tree_col = rs.tree_col
+		e.all_fields.push(group_field)
+		e.all_fields_map[group_field.name] = group_field
 
-		e.row_n = n // data row count
-		e.col_vals = e_col_vals // column values by fi, then ri
-
-		cap = cap1 // capacity of every ri-indexed array (+1 for 1 free insert)
-		e.row_flags        = new Uint16Array(cap) // ROW_* bits by ri
-		e.parent_ri        = new Uint32Array(cap).fill(NONE) // parent, or NONE
-		first_child_ri     = new Uint32Array(cap) // set by stage 3
-		next_sibling_ri    = new Uint32Array(cap) // set by stage 3
-		e.depth            = new Uint16Array(cap) // indent level by ri
-		e.desc_count       = new Uint32Array(cap) // descendant count by ri
-		e.tree_i           = new Uint32Array(cap) // index in tree_ris by ri
+		e.row_flags        = new Uint16Array(cap)
+		e.parent_ri        = new Uint32Array(cap).fill(NONE)
+		first_child_ri     = new Uint32Array(cap)
+		next_sibling_ri    = new Uint32Array(cap)
+		e.depth            = new Uint16Array(cap)
+		e.desc_count       = new Uint32Array(cap)
+		e.tree_i           = new Uint32Array(cap)
 		tree_ris_buf       = new Uint32Array(cap)
-		e.visible_i        = new Uint32Array(cap) // index in visible_ris by ri
-		e.visible_ris      = new Uint32Array(cap) // ri's shown, in order
-		prev_visible_ris   = new Uint32Array(cap) // visible_ris before stage 5
-		e.visible_n = 0 // length of visible_ris
+		e.visible_i        = new Uint32Array(cap)
+		e.visible_ris      = new Uint32Array(cap)
+		prev_visible_ris   = new Uint32Array(cap)
+		e.visible_n = 0
 
 		// Include every row before applying a filter.
-		e.filter = null // filter function, or null
+		e.filter = null
 		e.row_flags.fill(ROW_PASS)
 
 		// Stage 1: init base_ris and sorted_ris.
-		e.base_ris = new Uint32Array(n) // ri's in stored order
-		for (let ri = 0; ri < n; ri++)
+		e.base_ris = new Uint32Array(e.row_n)
+		for (let ri = 0; ri < e.row_n; ri++)
 			e.base_ris[ri] = ri
-		e.pos_field = pos_field
 		// Use pos order as stored order when pos_col is set.
 		if (e.pos_field)
-			e.base_ris = radix_sort(e.col_vals, e.base_ris, n,
+			e.base_ris = radix_sort(e.col_vals, e.base_ris, e.row_n,
 				[{field: e.pos_field, desc: false}])
 
-		// Use the same array for both orders when unsorted.
-		e.order_by = null // sort columns, sort function, or null
-		e.sorted_ris = e.base_ris // data rows' ri's in sort order
+		e.order_by = null
+		e.sorted_ris = e.base_ris
 
-		indexes = map() // {cols -> {fields:, ris:}}, built on first lookup
-		e.pk = pk // 'col1 ...'
-		e.pk_fields = pk_fields // [field1, ...]
+		indexes = map()
 
-		// Check rowset permissions only for calls from the user, with ev.input.
-		e.rowset_can_add_rows    = rs.can_add_rows    != false // user inserts
-		e.rowset_can_remove_rows = rs.can_remove_rows != false // user removals
-		e.rowset_can_change_rows = rs.can_change_rows != false // user edits
-		e.rowset_can_move_rows   = rs.can_move_rows   != false // user moves
-		e.reserves_ids = !!rs.reserves_ids // reserve ids before saving new rows
+		e.rowset_can_add_rows    = rs.can_add_rows    != false
+		e.rowset_can_remove_rows = rs.can_remove_rows != false
+		e.rowset_can_change_rows = rs.can_change_rows != false
+		e.rowset_can_move_rows   = rs.can_move_rows   != false
+		e.reserves_ids = !!rs.reserves_ids
 
-		e.visible_fields = e.all_fields.slice() // visible columns, in display order
-		for (let i = 0; i < e.visible_fields.length; i++)
-			e.visible_fields[i].vfi = i // index in visible_fields
-		e.mask_word_n = (e.all_fields.length + 31) >>> 5 // W: words per row
-		e.sel_mask = new Uint32Array(cap * e.mask_word_n) // selected cells' bits
-		has_sel_bits = false // false: sel_mask is all zero
-		e.focused_ri = null // focused row, or null
-		e.focused_fi = null // focused column
-		e.quicksearch_text = '' // typed prefix of the focused cell's text
+		e.mask_word_n = (e.all_fields.length + 31) >>> 5
+		all_fields_mask = fields_mask(e.all_fields)
+		e.sel_mask = new Uint32Array(cap * e.mask_word_n)
+		has_sel_bits = false
+		e.move_focus(null, null)
+		e.last_focused_fi = null
+		e.quicksearch_text = ''
 		set_rect(null, null, null, null) // no selection rectangle
 
-		e.changed_mask = new Uint32Array(cap * e.mask_word_n) // edited cells
-		e.unset_mask = new Uint32Array(cap * e.mask_word_n) // server default
-		e.changed_n = 0 // number of changed rows
-		e.input_vals = [] // edited values by fi, then ri
-		e.cell_errors = [] // cell errors by fi, then ri
-		e.row_errors = [] // row errors by ri
+		e.modified_mask = new Uint32Array(cap * e.mask_word_n)
+		e.unset_mask = new Uint32Array(cap * e.mask_word_n)
+		e.modified_n = 0
+		e.input_vals = []
+		e.cell_errors = []
+		e.row_errors = []
 
-		slot_n = n // slots ever used, free ones included
-		free_ris = [] // freed slots, used as a stack
+		slot_n = e.row_n
+		free_ris = []
 
-		e.id_field = id_field
-		e.parent_field = parent_field
 		e.can_be_tree = !!(e.id_field && e.parent_field)
-		e.flat ??= false // flat view of a tree nav
-		e.group_by = null // group-by spec, or null
+		e.group_by = null
 		e.is_grouped = false
-		e.group_ris = new Uint32Array(0) // group row indices in key order
-		group_fis = new Set() // the group-by key columns' fi's
+		e.group_ris = new Uint32Array(0)
+		group_fis = new Set()
+		update_visible_fields()
 		update_is_tree()
 		if (e.can_be_tree)
 			set_tree_parents()

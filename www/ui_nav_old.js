@@ -183,7 +183,7 @@ Tree:
 
 focusing and selection:
 	config:
-		can_focus_cells
+		cell_select_mode
 		auto_advance_row
 		can_select_multiple
 		can_select_non_siblings
@@ -544,7 +544,7 @@ function lookup_nav(rowset_name) {
 	return ui.shared_nav({
 		rowset_name     : rowset_name,
 		is_picker       : true,
-		can_focus_cells : false,
+		cell_select_mode : false,
 		can_add_rows    : false,
 		can_remove_rows : false,
 		can_change_rows : false,
@@ -598,7 +598,7 @@ ui.nav = function(id, opt) {
 	e.can_change_rows            = true
 	e.can_move_rows              = true
 	e.can_sort_rows              = true
-	e.can_focus_cells            = true
+	e.cell_select_mode            = true
 	e.can_select_multiple        = true
 	e.can_select_non_siblings    = true
 
@@ -1366,7 +1366,7 @@ ui.nav = function(id, opt) {
 
 	e.can_focus_cell = function(row, field, for_editing) {
 		return (!row || row.focusable != false)
-			&& (field == null || !e.can_focus_cells || field.focusable != false)
+			&& (field == null || !e.cell_select_mode || field.focusable != false)
 			&& (!for_editing || e.can_change_val(row, field))
 	}
 
@@ -1567,7 +1567,7 @@ ui.nav = function(id, opt) {
 			e.selected_field = e.fields[fi0]
 		} else if (select == 'invert') {
 			if (row) {
-				if (e.can_focus_cells) {
+				if (e.cell_select_mode) {
 					let sel_fields = e.selected_rows.get(row) || set()
 					let field = e.focused_field
 					if (field)
@@ -1589,7 +1589,7 @@ ui.nav = function(id, opt) {
 			e.selected_field = null
 		} else {
 			e.selected_rows.clear()
-			if (row && !e.can_focus_cells)
+			if (row && !e.cell_select_mode)
 				e.selected_rows.set(row, true)
 			else if (row && e.focused_field)
 				e.selected_rows.set(row, set([e.focused_field]))
@@ -1603,7 +1603,7 @@ ui.nav = function(id, opt) {
 				let row = e.rows[ri]
 				if (!e.can_select_cell(row))
 					continue
-				if (!e.can_focus_cells) {
+				if (!e.cell_select_mode) {
 					e.selected_rows.set(row, true)
 					continue
 				}

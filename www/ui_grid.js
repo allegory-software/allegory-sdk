@@ -321,16 +321,93 @@ function init(id, e) {
 	let focused, shift, ctrl
 	let keydown = key => focused && ui.keydown(key)
 
+	// The grid owns the editor widget; the nav decides which cell to edit.
+	let edit_ri = null // edited row, or null when no editor is built
+	let edit_field = null // edited field
+	let editor_id = null // id of the editor widget
+	let want_dropdown_open = false // open the editor's dropdown when built
+
+	// Where to scroll in build().
+	let scroll_to_vri = e.focused_vri()
+	let scroll_to_vfi = e.focused_vfi()
+
+	function focused_field() {
+		return e.focused_fi != null ? e.all_fields[e.focused_fi] : null
+	}
+
+	function quicksearch_fi() {
+		return e.focused_fi
+			?? e.all_fields_map[e.quicksearch_col ?? e.display_col]?.fi
+			?? null
+	}
+
 	function edit_selection() {
-		return e.focused_field.has_editor
-			? e.focused_field.editor_selection(e.editor_id,
-				e.field_align(e.focused_field))
+		let field = focused_field()
+		return field.has_editor
+			? field.editor_selection(editor_id, e.field_align(field))
 			: [e.edit_sel_i, e.edit_sel_len]
 	}
 
 	function caret_at_edge(d) {
-		return e.focused_field.editor_caret_at_edge(e.editor_id, d,
-			e.field_align(e.focused_field))
+		let field = focused_field()
+		return field.editor_caret_at_edge(editor_id, d, e.field_align(field))
+	}
+
+	// focus ------------------------------------------------------------------
+
+	e.scroll_to_cell = function(vri, vfi) {
+		scroll_to_vri = vri
+		scroll_to_vfi = vfi
+	}
+
+	// rows -------------------------------------------------------------------
+
+	function toggle_collapsed(ri, recursive) {
+		e.set_collapsed(ri, !e.is_collapsed(ri), recursive)
+	}
+
+	function selected_ris() {
+		let ris = []
+		e.each_selected_row(ri => ris.push(ri))
+		return ris
+	}
+
+	// editing ----------------------------------------------------------------
+
+	function is_editor_focused() {
+		return editor_id != null
+			&& (ui.focused(editor_id) || ui.focus_inside(editor_id))
+	}
+
+	// Return true if we built an editor for the cell being edited.
+	function is_edit_built() {
+		return edit_ri != null && e.editing
+			&& e.focused_ri == edit_ri && focused_field() == edit_field
+	}
+
+	// Close the previous editor when the nav ends an edit or starts editing
+	// another cell. Focus the new editor only if the grid or the previous
+	// editor had focus.
+	function sync_editor() {
+		let ri = e.editing ? e.focused_ri : null
+		let field = e.editing ? focused_field() : null
+		if (ri == edit_ri && field == edit_field)
+			return
+		let had_focus = is_editor_focused()
+		if (edit_field?.has_editor)
+			edit_field.close_dropdown?.(editor_id)
+		edit_ri = ri
+		edit_field = field
+		editor_id = field
+			? (field.lookup_rowset_name || field.type) + '.editor' : null
+		want_dropdown_open = !!field?.has_editor && e.edit_open_popup
+		if (field?.has_editor && (focused || had_focus)) {
+			// Request focus now; we build the editor's input later in this pass.
+			field.focus_editor(editor_id, e.edit_sel_i, e.edit_sel_len)
+		} else if (had_focus) {
+			// Return focus to the grid only if the old editor still had it.
+			ui.focus(id)
+		}
 	}
 
 	// cross: move along the other axis than the advance_on_enter axis.
@@ -340,7 +417,7 @@ function init(id, e) {
 			must_move: true, enter_edit: true, advance_on_exit: true,
 			open_popup: true}
 		if (by_row)
-			return e.focus_cell(true, true, d, 0, opt)
+			return e.move_focus(true, true, d, 0, opt)
 		else
 			return e.focus_next_cell(d, opt)
 	}
@@ -407,15 +484,16 @@ function init(id, e) {
 		let grid_focused = focused
 		let row_focused = e.focused_ri == ri
 		let field_focused = e.focused_fi == fi
-		let cell_focused = row_focused && (!e.can_focus_cells || field_focused)
+		let cell_focused = row_focused
+			&& (!e.cell_select_mode || field_focused)
 		let disabled = !e.can_focus_cell(ri, fi)
 		let is_new = e.is_new(ri)
 		let cell_invalid = e.cell_has_errors(ri, fi)
-		let modified = e.is_cell_changed(ri, fi)
+		let modified = e.is_cell_modified(ri, fi)
 		let is_null = input_val == null
 		let is_empty = input_val === ''
 		let selected = e.is_cell_selected(ri, fi)
-		let editing = e.editing && cell_focused
+		let editing = edit_ri == ri && edit_field == field
 
 		let bg, bgs
 
@@ -555,15 +633,16 @@ function init(id, e) {
 			// the popup can be moved off the cell to fit on screen.
 			if (!editing || build_stage || field.edits_in_popup || !field.has_editor) {
 				ui.p(pad_l, 0, pad_r, 0)
-				if (row_focused && field_focused && e.quicksearch_text)
+				if (row_focused && e.quicksearch_text
+					&& field.fi == quicksearch_fi())
 					ui.mark_text(0, e.quicksearch_text.length)
 				e.build_val(ri, field, input_val, true, fg, full_width, align)
 				ui.p(0) // build_val() builds nothing for a value with no text!
 			}
 			if (editing && !build_stage && field.has_editor) {
-				ui.focus_group(true, null, e.editor_id)
-				field.build_editor(e.editor_id, input_val, pad_l, pad_r, h, align)
-				e.want_dropdown_open = false
+				ui.focus_group(true, null, editor_id)
+				field.build_editor(editor_id, input_val, pad_l, pad_r, h, align)
+				want_dropdown_open = false
 				ui.end_focus_group()
 			}
 			ui.p(0)
@@ -622,8 +701,8 @@ function init(id, e) {
 			if (foc_cell && hit_cell && hit_vri == foc_vri && hit_vfi == foc_vfi)
 				foc_cell = null
 
-			let edit_row_wide = e.editing && !e.can_focus_cells
-				&& foc_vri >= vri1 && foc_vri < vri2
+			// field index for highlighting the quicksearch text, or null
+			let qs_fi = e.quicksearch_text ? quicksearch_fi() : null
 
 			for (let vfi = vfi1; vfi < vfi2; vfi++) {
 				let field = e.visible_fields[vfi]
@@ -635,7 +714,7 @@ function init(id, e) {
 					&& !field_has_indent(field)
 					&& vfi != hit_vfi
 					&& vfi != foc_vfi
-					&& !edit_row_wide
+					&& field.fi != qs_fi
 			}
 		}
 
@@ -831,9 +910,11 @@ function init(id, e) {
 		if (cell_h == null)
 			return
 
-		let value = ui.input_value(e.editor_id)
-		if (value !== undefined)
-			e.set_cell_val(e.focused_row, e.focused_field, value, {input: e})
+		if (is_edit_built()) {
+			let value = ui.input_value(editor_id)
+			if (value !== undefined)
+				e.set_cell_val(edit_ri, edit_field.fi, value, {input: e})
+		}
 
 		let filter_focused_field = null
 		if (e.filter_bar_visible)
@@ -856,7 +937,7 @@ function init(id, e) {
 
 		if (e.editing
 				&& !ui.focused(id)
-				&& !ui.focused(e.editor_id)
+				&& !ui.focused(editor_id)
 				&& !ui.focus_inside(id+'.cells')
 			)
 			e.exit_edit()
@@ -864,7 +945,7 @@ function init(id, e) {
 		// set keyboard state
 
 		// editing moves the focus to the editor, but these keys are the grid's.
-		focused = ui.focused(id) || ui.focused(e.editor_id)
+		focused = ui.focused(id) || ui.focused(editor_id)
 		shift = ui.keypressed('shift')
 		ctrl  = ui.keypressed('ctrl')
 
@@ -1307,34 +1388,32 @@ function init(id, e) {
 
 		if (hit_zone == 'cell' && ps.drag) {
 
-			let row = e.rows[hit_vri]
+			let ri = e.visible_ris[hit_vri]
 			let field = e.visible_fields[hit_vfi]
 
 			clicked_indent = hit_indent
 			if (hit_indent)
-				e.toggle_collapsed(row, shift)
+				toggle_collapsed(ri, shift)
 
 			let already_on_it =
-				hit_vri == e.focused_row_index &&
-				hit_vfi == e.focused_field_index
+				ri == e.focused_ri &&
+				field.fi == e.focused_fi
 
 			// a clickable cell acts on the click instead of opening an editor.
 			let click = !hit_indent && !ctrl && !shift
-				&& !(e.editing && field.has_editor
-					&& row == e.focused_row && field == e.focused_field)
-				&& e.cell_clickable(row, field)
+				&& !(e.editing && field.has_editor && already_on_it)
+				&& e.cell_clickable(ri, field.fi)
 
 			if (!already_on_it)
 				e.exit_edit()
 
-			if (e.focus_cell(hit_vri, hit_vfi, 0, 0, {
+			if (e.move_focus(ri, field.fi, 0, 0, {
 				must_not_move_col: true,
 				must_not_move_row: true,
 				enter_edit: !hit_indent
 					&& !ctrl && !shift && !click
 					&& (e.enter_edit_on_click
 						|| (e.enter_edit_on_click_focused && already_on_it)),
-				focus_editor: true,
 				focus_non_editable_if_not_found: true,
 				sel_i: 0, sel_len: 1/0,
 				select: shift ? 'expand' : ctrl ? 'invert' : null,
@@ -1344,16 +1423,20 @@ function init(id, e) {
 				if (e.is_picker && !hit_indent)
 					s.picked = true
 				if (click)
-					e.do_cell_click(row, field, {input: e})
+					e.do_cell_click(ri, field.fi, {input: e})
 				// TODO:
 				//drag_op = 'row_move'
 			}
 
 		}
 
+		// On double click, start editing or open the current editor's dropdown.
 		if (ui.dblclicked(id+'.cells') && hit_zone == 'cell'
-			&& !clicked_indent && e.focused_field?.has_editor)
-			e.enter_edit()
+			&& !clicked_indent && focused_field()?.has_editor)
+			if (is_edit_built())
+				edit_field.open_dropdown?.(editor_id)
+			else
+				e.enter_edit()
 
 		// process keyboard input ----------------------------------------------
 
@@ -1365,11 +1448,11 @@ function init(id, e) {
 		let up_arrow    = !horiz ? 'arrowleft'  : 'arrowup'
 		let down_arrow  = !horiz ? 'arrowright' : 'arrowdown'
 
-		let focused_row   = e.focused_row
-		let focused_field = e.focused_field
-		let clickable_cell = focused_row && focused_field
-			&& e.cell_clickable(focused_row, focused_field)
-		let has_editor = e.editing && focused_field?.has_editor
+		let ri = e.focused_ri
+		let field = focused_field()
+		let clickable_cell = ri != null && field
+			&& e.cell_clickable(ri, field.fi)
+		let has_editor = is_edit_built() && edit_field.has_editor
 
 		if (keydown('f1'))
 			return false
@@ -1386,7 +1469,7 @@ function init(id, e) {
 			let all
 			if (!horiz) {
 				all = true
-			} else if (e.editing) {
+			} else if (is_edit_built()) {
 				all = edit_selection()[1] == 1/0
 			} else {
 				all = ctrl
@@ -1399,7 +1482,6 @@ function init(id, e) {
 					sel_len: all ? 1/0 : 0,
 					select: shift ? 'expand' : null,
 					enter_edit: ctrl,
-					focus_editor: ctrl,
 					input: e,
 				}))
 					return false
@@ -1420,26 +1502,18 @@ function init(id, e) {
 
 		// insert with the arrow down key on the last focusable row.
 		if (move_rows && keydown(down_arrow) && !shift) {
-			if (!e.save_on_add_row) { // not really compatible behavior...
-				if (e.is_last_row_focused() && e.can_actually_add_rows()) {
-					if (e.insert_rows(1, {
-						op: 'insert',
-						input: e,
-						focus_it: true,
-					})) {
-						return false
-					}
-				}
-			}
+			if (e.is_last_row_focused()
+				&& e.insert_rows([null], null, {input: e, focus_it: true}).length)
+				return false
 		}
 
 		// remove last row with the arrow up key if not edited.
 		if (move_rows && keydown(up_arrow)) {
-			if (e.is_last_row_focused() && focused_row) {
-				let row = focused_row
-				if (row.is_new && !e.is_row_user_modified(row)) {
+			if (e.is_last_row_focused() && ri != null) {
+				if (e.is_new(ri) && !e.is_row_edited(ri)) {
 					let editing = e.editing
-					if (e.remove_row(row, {input: e, refocus: true})) {
+					e.remove_rows([ri], 'delete', {input: e, refocus: true})
+					if (e.focused_ri != ri) {
 						if (editing)
 							e.enter_edit()
 						return false
@@ -1451,10 +1525,11 @@ function init(id, e) {
 		// row navigation.
 		if (move_rows) {
 
-			let [sel_i, sel_len] = e.editing && horiz ? edit_selection() : [0, 1/0]
+			let [sel_i, sel_len] = is_edit_built() && horiz
+				? edit_selection() : [0, 1/0]
 
 			has_input = true
-			if (e.focus_cell(true, true, rows, 0, {
+			if (e.move_focus(true, true, rows, 0, {
 				sel_i: sel_i,
 				sel_len: sel_len,
 				select: shift ? 'expand' : null,
@@ -1466,8 +1541,8 @@ function init(id, e) {
 
 		// F2: enter edit mode, or toggle the dropdown of the edit in progress
 		if (keydown('f2')) {
-			if (e.editing)
-				focused_field.toggle_dropdown?.(e.editor_id)
+			if (is_edit_built())
+				edit_field.toggle_dropdown?.(editor_id)
 			else
 				e.enter_edit({advance_on_exit: true})
 			return false
@@ -1477,7 +1552,8 @@ function init(id, e) {
 		if (keydown('enter')) {
 			if (e.quicksearch_text) {
 				has_input = true
-				e.quicksearch(e.quicksearch_text, focused_row, shift ? -1 : 1)
+				e.quicksearch(e.quicksearch_text, quicksearch_fi(),
+					shift ? -1 : 1)
 				return false
 			} else if (e.is_picker) {
 				has_input = true
@@ -1503,36 +1579,31 @@ function init(id, e) {
 					e.exit_edit({input: e, cancel: true})
 					return false
 				}
-			} else if (e.remove_selected_rows({input: e, op: 'undelete'})) {
+			} else if (e.undelete_selected_rows({input: e})) {
 				return false
-			} else if (!e.is_picker && focused_row && focused_field) {
-				let row = focused_row
-				if (row.is_new && !e.is_row_user_modified(row, true))
-					e.remove_row(row, {input: e, refocus: true})
+			} else if (!e.is_picker && ri != null && field) {
+				if (e.is_new(ri) && !e.is_row_edited(ri, true))
+					e.remove_rows([ri], 'delete', {input: e, refocus: true})
 				else
-					e.revert_cell(row, focused_field)
+					e.revert_cell(ri, field.fi)
 				return false
 			}
 		}
 
 		// insert key: insert row
 		if (keydown('insert')) {
-			let insert_arg = 1 // add one row
+			let vals = null // add an empty row
 
-			if (ctrl && focused_row) { // add a row filled with focused row's values
-				let row = e.serialize_row_vals(focused_row)
-				e.pk_fields?.map((f) => delete row[f.name])
-				insert_arg = [row]
+			if (ctrl && ri != null) { // copy the row without its primary key
+				let vals = []
+				for (let fi = 0; fi < e.all_fields.length; fi++)
+					vals[fi] = e.cell_input_val(ri, fi)
+				for (let pk_field of e.pk_fields)
+					vals[pk_field.fi] = undefined
 			}
 
-			if (e.insert_rows(insert_arg, {
-				op: 'insert',
-				input: e,
-				at_focused_row: true,
-				focus_it: true,
-			})) {
+			if (e.insert_rows([vals], ri, {input: e, focus_it: true}).length)
 				return false
-			}
 		}
 
 		if (keydown('delete')) {
@@ -1544,23 +1615,24 @@ function init(id, e) {
 
 			// delete on an already-empty cell leaves edit mode. the key is
 			// spent on that, so it must not go on to delete rows as well.
-			if (e.editing && e.cell_input_val(focused_row, focused_field) == null) {
+			if (e.editing && e.cell_input_val(ri, field.fi) == null) {
 				e.exit_edit({cancel: true})
 				return false
 			}
 
 			// delete: delete selected rows, asking first unless the selection
 			// is a single new row.
-			if (!ctrl && !e.editing && e.selected_rows.size) {
-				if (!e.can_actually_remove_rows())
+			let ris = !ctrl && !e.editing ? selected_ris() : empty_array
+			if (ris.length) {
+				if (!(e.can_remove_rows && e.rowset_can_remove_rows))
 					return false
-				let n = e.selected_rows.size
-				let is_one_new_row = n == 1
-					&& e.selected_rows.keys().next().value.is_new
-				if ((is_one_new_row || confirm(S('delete_records_confirmation',
-						'Are you sure you want to delete {0:record:records}?', n)))
-					&& e.remove_selected_rows({input: e, refocus: true}))
+				let n = ris.length
+				let is_one_new_row = n == 1 && e.is_new(ris[0])
+				if (is_one_new_row || confirm(S('delete_records_confirmation',
+						'Are you sure you want to delete {0:record:records}?', n))) {
+					e.remove_rows(ris, 'delete', {input: e, refocus: true})
 					return false
+				}
 			}
 
 			// ctrl_delete: set selected cells to null.
@@ -1572,10 +1644,10 @@ function init(id, e) {
 		}
 
 		if (!has_editor && keydown(' ') && !e.quicksearch_text) {
-			if (focused_row && (!e.can_focus_cells || focused_field == e.tree_field))
-				e.toggle_collapsed(focused_row, shift)
+			if (ri != null && (!e.cell_select_mode || field == e.tree_field))
+				toggle_collapsed(ri, shift)
 			else if (clickable_cell)
-				e.do_cell_click(focused_row, focused_field, {input: e})
+				e.do_cell_click(ri, field.fi, {input: e})
 			return false
 		}
 
@@ -1587,7 +1659,7 @@ function init(id, e) {
 		if (!e.editing && keydown('backspace')) {
 			if (e.quicksearch_text) {
 				has_input = true
-				e.quicksearch(e.quicksearch_text.slice(0, -1), focused_row)
+				e.quicksearch(e.quicksearch_text.slice(0, -1), quicksearch_fi())
 			}
 			return false
 		}
@@ -1599,10 +1671,8 @@ function init(id, e) {
 
 		if (ctrl && !e.editing) {
 			if (keydown('c')) {
-				let row = focused_row
-				let fld = focused_field
-				if (row && fld)
-					copy_to_clipboard(e.cell_text_val(row, fld))
+				if (ri != null && field)
+					copy_to_clipboard(e.cell_text(ri, field.fi))
 				return false
 			} else if (keydown('x')) {
 
@@ -1617,7 +1687,9 @@ function init(id, e) {
 		let typed = focused && !e.editing && ui.key_chars()
 		if (typed) {
 			has_input = true
-			e.quicksearch(e.quicksearch_text + typed, focused_row)
+			let qs_fi = quicksearch_fi()
+			if (qs_fi != null)
+				e.quicksearch(e.quicksearch_text + typed, qs_fi)
 			return false
 		}
 
@@ -1641,16 +1713,15 @@ function init(id, e) {
 		// editor's state is that of the cell that the edit came from: the
 		// grid must not read the editor on the frame that it moves the edit
 		// to another cell.
-		if (e.editing && e.focused_field.has_editor) {
-			let row = e.focused_row
-			let field = e.focused_field
-			let editor_id = e.editor_id
+		if (is_edit_built() && edit_field.has_editor) {
+			let ri = edit_ri
+			let field = edit_field
 			let has_picked_val
 			if (field.editor_value) {
-				let v0 = e.cell_input_val(row, field)
+				let v0 = e.cell_input_val(ri, field.fi)
 				let v1 = field.editor_value(editor_id, v0)
 				if (v1 !== v0) {
-					e.set_cell_val(row, field, v1, {input: e})
+					e.set_cell_val(ri, field.fi, v1, {input: e})
 					has_picked_val = true
 				}
 			}
@@ -1666,6 +1737,8 @@ function init(id, e) {
 			}
 		}
 
+		sync_editor()
+
 	}
 
 	e.build = function(id, opt, fr, align, valign) {
@@ -1679,6 +1752,9 @@ function init(id, e) {
 			if (e.focused_row != e.rows[ri])
 				e.focus_cell(ri, true)
 		}
+
+		// Check again because app code may start or end an edit after update().
+		sync_editor()
 
 		// set layout vars
 
@@ -1720,15 +1796,20 @@ function init(id, e) {
 			cells_w = e.visible_n * row_w
 		}
 
-		if (e.scroll_to_vri != null) {
-			if (e.scroll_to_vri < e.visible_n
-				&& e.visible_fields[e.scroll_to_vfi]
-			) {
-				let [x, y, w, h] = cell_rect(e.scroll_to_vri, e.scroll_to_vfi)
+		if (e.focus_changed) {
+			e.scroll_to_cell(e.focused_vri(), e.focused_vfi())
+			ui.rebuild('focused_cell_changed')
+			e.focus_changed = false
+		}
+		if (scroll_to_vri != null) {
+			let vri = scroll_to_vri
+			let vfi = scroll_to_vfi ?? 0
+			if (vri < e.visible_n && e.visible_fields[vfi]) {
+				let [x, y, w, h] = cell_rect(vri, vfi)
 				ui.scroll_to_view_rect(id+'.cells_scrollbox', x, y, w, h)
 			}
-			e.scroll_to_vri = null
-			e.scroll_to_vfi = null
+			scroll_to_vri = null
+			scroll_to_vfi = null
 		}
 
 		// build ---------------------------------------------------------------

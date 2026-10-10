@@ -1077,7 +1077,9 @@ G.chart = component('chart', 'Input', function(e) {
 							cx.beginPath()
 
 						let x0, x
-						for (let xg of (cg.tied_back ? cg.reverse() : cg)) {
+						if (cg.tied_back)
+							cg.reverse()
+						for (let xg of cg) {
 							x = xg.x
 							if (x0 == null && !cg.tied_back) {
 								x0 = x
