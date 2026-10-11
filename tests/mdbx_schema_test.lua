@@ -1337,6 +1337,72 @@ function test.validate_schema()
 	assert(ok, err)
 end
 
+function test.validate_schema_fks()
+	local function make_schema(case_name)
+		local sc = mdbx_schema()
+		local parent_key = case_name == 'ref_cols' and 'code' or 'id'
+		local parent_table = case_name == 'ref_table' and 'node' or 'parent'
+		local ondelete = case_name == 'ondelete' and 'cascade' or nil
+		sc:import(function()
+			import'schema_mdbx'
+			tables.parent = {
+				id   , id, not_null,
+				code , id, not_null, pk(parent_key),
+			}
+			if case_name == 'cols_desc' then
+				tables.parent.pk.desc[1] = true
+			end
+			tables.node = {
+				id        , idpk,
+				parent_id , id,
+			}
+			if case_name == 'auto_increment_missing' then
+				tables.node.fields.id.auto_increment = nil
+			end
+			if case_name ~= 'missing' and case_name ~= 'refs_missing' then
+				add_fk('node', 'parent_id', parent_table, ondelete)
+			end
+		end)
+		return sc
+	end
+	for _, case_name in ipairs{
+		'matching', 'missing', 'extra', 'ondelete',
+		'ref_table', 'ref_cols', 'cols_desc',
+		'auto_increment_missing', 'auto_increment_extra',
+		'refs_missing',
+	} do
+		with_db_reopen('validate_schema_fks_'..case_name,
+			function(db)
+				local stored_case = 'matching'
+				if case_name == 'extra' then
+					stored_case = 'missing'
+				elseif case_name == 'auto_increment_extra' then
+					stored_case = 'auto_increment_missing'
+				end
+				db.schema = make_schema(stored_case)
+				db:sync_schema()
+			end,
+			function(db)
+				db.schema = make_schema(case_name)
+				local table_name = case_name:find('^refs_')
+					and 'parent' or 'node'
+				db:begin'r'
+				local ok, err = catch('schema', db.dbi_schema, db, table_name)
+				if case_name == 'matching' then
+					assert(ok, tostring(err))
+					db:commit()
+				else
+					assert(not ok and iserror(err, 'schema'), case_name)
+					assert(err.event == 't_open' and err.table == 'node')
+					local attr_name = case_name:find('^auto_increment')
+						and 'auto_increment' or 'fks'
+					assert(err.message:find(attr_name, 1, true), err.message)
+					assert(db.txn == nil)
+				end
+			end)
+	end
+end
+
 -- keyability rules ----------------------------------------------------------
 
 function test.keyability_rules()
@@ -3024,6 +3090,60 @@ function test.fk_delete_cascade()
 		assert(db:exists('a', 2) and db:exists('b', 12) and db:exists('c', 102))
 		db:commit()
 	end)
+end
+
+function test.fk_delete_paper_schema()
+	for _, ondelete in ipairs{false, 'cascade'} do
+		local function make_schema()
+			local sc = mdbx_schema()
+			sc:import(function()
+				import'schema_mdbx'
+				tables.node = {
+					id        , idpk,
+					parent_id , id, fk('node', ondelete or nil),
+				}
+			end)
+			return sc
+		end
+		with_db_reopen('fk_delete_paper_schema_'..(ondelete or 'no_action'),
+			function(db)
+				db.schema = make_schema()
+				db:sync_schema()
+				db:atomic('w', function()
+					db:insert('node', '{}', {id = 1})
+					db:insert('node', '{}', {id = 2, parent_id = 1})
+					db:insert('node', '{}', {id = 3, parent_id = 2})
+					db:insert('node', '{}', {id = 4})
+					db:insert('node', '{}', {id = 5, parent_id = 4})
+				end)
+			end,
+			function(db)
+				db.schema = make_schema()
+				assert(db.schema.tables.node.ref_fks == nil)
+				db:atomic('w', function()
+					if ondelete then
+						db:del('node', 1)
+					else
+						local ok, err = try_mutation(db, db.del, 'node', 1)
+						assert(not ok and is_row_error(err, 'fk'))
+						assert(db:exists('node', 1))
+						assert(db:exists('node', 2))
+						assert(db:exists('node', 3))
+						db:del('node', 3)
+						db:del('node', 2)
+						db:del('node', 1)
+					end
+					assert(not db:exists('node', 1))
+					assert(not db:exists('node', 2))
+					assert(not db:exists('node', 3))
+					assert(db:exists('node', 4))
+					assert(db:exists('node', 5))
+				end)
+				assert(db.live_schema.node == db.schema.tables.node)
+				assert(db.schema.tables.node.ref_fks['node/parent_id']
+					== db.schema.tables.node.fks.parent_id)
+			end)
+	end
 end
 
 --set-null delete: removing a parent nulls referencing children's fk cols; the
