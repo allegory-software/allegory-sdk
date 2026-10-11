@@ -5343,6 +5343,7 @@ const TEXT_FONT           = 2**11
 const TEXT_FONT_SIZE      = 2**12
 const TEXT_FONT_WEIGHT    = 2**13
 const TEXT_LINE_GAP       = 2**14
+const TEXT_CLIPPED        = 2**15
 
 const TEXT_FONT_FLAGS = TEXT_FONT | TEXT_FONT_SIZE | TEXT_FONT_WEIGHT
 
@@ -5751,6 +5752,7 @@ position[CMD_TEXT] = function(a, i, axis, sx, sw) {
 		} else {
 			a[i+2] = a[i+TEXT_W] // we're positioning text_w, not w!
 		}
+		a[i+TEXT_FLAGS] = flags | (a[i+2] > sw ? TEXT_CLIPPED : 0)
 		// store the segment we might have to clip the text to.
 		a[i+TEXT_X] = sx + a[i+MX1] + a[i+PX1]
 		a[i+TEXT_W] = sw - spacings(a, i, 0)
@@ -6202,7 +6204,7 @@ draw[CMD_TEXT] = function(a, i) {
 	if (flags & TEXT_FONT_FLAGS)
 		set_text_font()
 
-	let clip = w > sw
+	let clip = flags & TEXT_CLIPPED
 
 	if (clip) {
 		let h = a[i+3]
