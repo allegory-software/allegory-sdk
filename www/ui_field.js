@@ -665,6 +665,7 @@ let field_config_checks = {
 	nosave: optional_bool,
 	not_null: optional_bool,
 	has_server_default: optional_bool,
+	auto_increment: optional_bool,
 	sortable: optional_bool,
 	min: optional_num,
 	max: optional_num,
