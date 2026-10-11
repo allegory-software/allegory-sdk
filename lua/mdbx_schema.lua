@@ -1751,6 +1751,19 @@ local function cmp_map_str_keys(pt, st, errs, ...)
 		end
 	end
 end
+local function cmp_arrays(pt, st, errs, ...)
+	if #pt ~= #st then
+		add(errs, fmt('%s length mismatch: expected: %d, got: %d',
+			fmt(...), #pt, #st))
+	end
+	for i, pv in ipairs(pt) do
+		local sv = st[i]
+		if pv ~= sv then
+			add(errs, fmt('%s[%d] mismatch: expected: %s, got: %s',
+				fmt(...), i, pv, sv))
+		end
+	end
+end
 local function try_validate_table_schema(stored_schema, paper_schema)
 
 	local errs = {}
@@ -1770,7 +1783,7 @@ local function try_validate_table_schema(stored_schema, paper_schema)
 		local sf = isstr(k) and sfields[k]
 		if sf then
 			cmp_keys(pf, sf, {
-				'key_index', 'val_index',
+				'key_index', 'val_index', 'auto_increment',
 				'col', 'col_pos', 'mdbx_type', 'maxlen', 'fixed', 'nozero', 'not_null',
 				'scale', 'elem_size', 'descending', 'mdbx_collation', 'gen_expr',
 				'gen_fn_version', 'check_expr', 'check_error', 'default_expr',
@@ -1792,6 +1805,26 @@ local function try_validate_table_schema(stored_schema, paper_schema)
 			local six = sixs and sixs[ix_name]
 			if six then
 				cmp_keys(pix, six, {'is_unique'}, errs, '%s', ix_name)
+			end
+		end
+	end
+
+	local pfks = paper_schema.fks
+	local sfks = stored_schema.fks
+	if pfks or sfks then
+		cmp_map_str_keys(pfks or empty, sfks or empty,
+			errs, '%s.%s', table_name, 'fks')
+		for fk_name, pfk in pairs(pfks or empty) do
+			local sfk = sfks and sfks[fk_name]
+			if sfk then
+				cmp_keys(pfk, sfk, {'table', 'ref_table', 'ondelete'},
+					errs, '%s.fks.%s', table_name, fk_name)
+				cmp_arrays(pfk.cols, sfk.cols,
+					errs, '%s.fks.%s.cols', table_name, fk_name)
+				cmp_arrays(pfk.ref_cols, sfk.ref_cols,
+					errs, '%s.fks.%s.ref_cols', table_name, fk_name)
+				cmp_arrays(pfk.cols.desc or empty, sfk.cols.desc or empty,
+					errs, '%s.fks.%s.cols.desc', table_name, fk_name)
 			end
 		end
 	end
@@ -1824,6 +1857,7 @@ local function load_live_schema(self, name)
 	schema = paper_schema
 	if schema then
 		compile_table_schema(schema)
+		schema.ref_fks = stored_schema.ref_fks
 		--setting live_schema now prevents cycles on recursive load_live_schema().
 		self.live_schema[name] = schema
 		for _,ix_schema in ipairs(schema.indexes or empty) do
