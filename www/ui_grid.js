@@ -789,10 +789,6 @@ function init(id, e) {
 				build_cell_at(a, ri, field, vri, vfi, x, y, w, h, build_stage)
 			}
 
-			if (e.is_removed(ri)) {
-				// TODO: build_row_strike_line(ri, vri, rx, ry, rw, rh, build_stage)
-			}
-
 		}
 
 		if (!build_stage) {
@@ -846,6 +842,31 @@ function init(id, e) {
 			build_cell(a, hit_vri, hit_vfi, build_stage)
 		}
 
+		// strike rows marked for deletion after all their cells, so that no
+		// cell background covers the line.
+		for (let vri = vri1; vri < vri2; vri++) {
+			if (!e.is_removed(ris[vri]))
+				continue
+			if (horiz)
+				build_row_strike_line(x0, vri * cell_h, cells_w, cell_h)
+			else
+				build_row_strike_line(vri * row_w, y0, row_w, cells_h)
+		}
+
+	}
+
+	// a 1px line through the middle of a row.
+	function build_row_strike_line(x, y, w, h) {
+		if (horiz) {
+			ui.m(x, y + floor(h / 2), 0, 0)
+			ui.min_wh(w, 1)
+		} else {
+			ui.m(x + floor(w / 2), y, 0, 0)
+			ui.min_wh(1, h)
+		}
+		ui.stack('', 0, 'l', 't')
+			ui.bb('text')
+		ui.end_stack()
 	}
 
 	function on_cellview_frame(a, _i, x, y, w, h, vx, vy, vw, vh) {
