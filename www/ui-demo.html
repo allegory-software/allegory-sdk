@@ -641,14 +641,14 @@ let readonly = ui.value('grid_config_readonly')
 let auto_expand = ui.value('grid_config_auto_expand')
 let filter_bar_visible = ui.value('grid_config_filter_bar')
 
-if (!ui.rowsets.grid_config_rowset || state.recreate) {
+if (!ui.rowsets.grid_config_rowset
+	|| ui.state_of('grid_config_recreate', 'state') == 'click') {
 	ui.rowsets.grid_config_rowset = make_grid_demo_rowset(
 		row_count,
 		tree_depth,
 		first_col,
 		col_count)
 	ui.free_state('grid_config_grid')
-	state.recreate = false
 }
 
 let grid_opt = {
@@ -705,7 +705,7 @@ ui.hvsplit(split_hv, 'grid_config_form_split_'+split_hv, 350, 'px', 2)
 		let master_row_id = grid_nav?.focused_row_cell_val('id')
 		ui.grid('grid_config_detail', {
 			rowset_name: 'grid_config_detail',
-			param_vals: grid_nav?.focused_row
+			param_vals: grid_nav?.focused_ri != null
 				? [{master_id: master_row_id}] : false,
 		})
 	ui.end_hvsplit()
@@ -813,8 +813,7 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 		grid_config_toggle('grid_config_validate_on_load',
 			'Validate on load')
 
-		if (ui.primary_button('grid_config_recreate', 'Recreate grid'))
-			state.recreate = true
+		ui.primary_button('grid_config_recreate', 'Recreate grid')
 	ui.end_v()
 ui.end_scrollbox()
 ui.end_hsplit()

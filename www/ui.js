@@ -7354,7 +7354,8 @@ ui.label = function(for_id, s, fr, align, valign) {
 function input_errors(id) {
 	let s = ui.state_of(id+'.field_input')
 	if (s?.nav)
-		return (s.row && s.nav.cell_errors(s.row, s.field)) ?? empty_array
+		return (s.ri != null && s.nav.cell_errors[s.field.fi]?.[s.ri])
+			|| empty_array
 	let field = s?.field ?? ui.state_of(id, 'field')
 	return field?.validator?.results ?? empty_array
 }
@@ -9571,7 +9572,7 @@ opt:
 
 	field      : field_input: the field to edit.
 	nav, col   : nav_input: the nav and the column to edit.
-	row        : nav_input: the row to edit (nav.focused_row), null for none.
+	ri         : nav_input: the row to edit (nav.focused_ri), null for none.
 	control    : the control to build (field.control, or 'lookup_input' for
 	             a lookup field): 'input', 'password_input', 'checkbox',
 	             'toggle', 'toggle_button', 'date_input', 'color_input',
@@ -9654,21 +9655,21 @@ function build_input_row(id, value, opt, is_bound) {
 
 	let s = ui.state(id+'.field_input')
 	let nav = is_bound ? opt.nav : null
-	let field = is_bound ? nav?.optfld(opt.col) : opt.field
-	let row = is_bound && field
-		? (opt.row === undefined ? nav.focused_row : opt.row) : null
+	let field = is_bound ? nav?.all_fields_map[opt.col] : opt.field
+	let ri = is_bound && field
+		? (opt.ri === undefined ? nav.focused_ri : opt.ri) : null
 	s.nav = nav
-	s.row = row
+	s.ri = ri
 	s.field = field
 
 	let focus_id = id+'.focus_group'
-	if (row) {
+	if (ri != null) {
 		ui.state_of(id)
 		if (ui.focus_inside(focus_id) && ui.keydown('escape')) {
-			nav.revert_cell(row, field, {input: nav})
+			nav.revert_cell(ri, field.fi)
 			ui.capture_keys()
 		}
-		value = nav.cell_input_val(row, field)
+		value = nav.cell_input_val(ri, field.fi)
 	}
 
 	let control = field && (opt.control
@@ -9710,25 +9711,26 @@ function build_input_row(id, value, opt, is_bound) {
 		ui.focus_group(null, null, focus_id)
 		// with no row there's no value to show: an empty text box stands in for
 		// whatever control the field type would build.
-		if (is_bound && !row) {
+		if (is_bound && ri == null) {
 			readonly_text_field ??= ui.create_field({readonly: true})
 			ui.min_w(opt.w)
 			value = ui.input(id, null, readonly_text_field, 1)
 		} else {
-			let readonly = row && !nav.can_change_val(row, field)
+			let readonly = ri != null && !nav.can_change_val(ri, field.fi)
 			value = field.build_input(id, value, opt, control, readonly)
 		}
-		if (row) {
+		if (ri != null) {
 			let input_value = ui.input_value(id)
 			if (input_value !== undefined)
-				nav.set_cell_val(row, field, input_value, {input: nav})
-			value = nav.cell_input_val(row, field)
+				nav.set_cell_val(ri, field.fi, input_value, {input: nav})
+			value = nav.cell_input_val(ri, field.fi)
 		}
 		ui.end_focus_group()
 
 		let has_error = is_bound
-			? row && nav.cell_has_errors(row, field) : field.validator.failed
-		let is_modified = row && nav.cell_modified(row, field)
+			? ri != null && nav.cell_has_errors(ri, field.fi)
+			: field.validator.failed
+		let is_modified = ri != null && nav.is_cell_modified(ri, field.fi)
 		let status_id = id+'.status'
 		if (has_error && (opt.errors ?? 'tooltip') == 'tooltip'
 			&& (ui.focus_inside(focus_id) || hovers(status_id))) {

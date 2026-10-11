@@ -59,6 +59,7 @@ const ui = window.ui
 const {
 	assign, assign_opt, noop, display_name, words, set,
 	num, isnum, isstr, isbool, isarray, isobj, str, dec, repl, utf8_len, floor,
+	isobject, clamp,
 	assert, obj, map, empty_array, empty, return_true,
 	warn, warn_if,
 	format_kbytes, format_kcount, format_date, parse_date,
@@ -1106,17 +1107,136 @@ field_types.secret_key  = {}
 field_types.public_key  = {}
 field_types.private_key = {}
 
+//// CELL BUILDERS ------------------------------------------------------------
+
+// icons drawn by field types, not by any one widget, so they live here
+// rather than in the grid's own icon aliases.
+ui.icon_def('calendar'     , 'tabler', '\uea53')
+ui.icon_def('map_pin'      , 'tabler', '\ueae8')
+ui.icon_def('box_unchecked', 'tabler', '\ueb2c')
+ui.icon_def('box_checked'  , 'tabler_filled', '\uf76d')
+
+// opt: {fg:, align:, full_width:, readonly:}. Without opt, return the text
+// instead of building it.
+
+all_field_types.build_text = function(s, opt) {
+	if (!opt)
+		return s
+	ui.color(opt.fg)
+	ui.text('', s, 0, opt.align, 'c', opt.full_width ? null : 0)
+	return true
+}
+
+all_field_types.build = function(v, opt) {
+	let s = this.to_text(v)
+	return this.build_text(s, opt)
+}
+
+filesize.build = function(x, opt) {
+	let s = this.to_text(x)
+	if (opt) {
+		// TODO: requires a faint color
+		// if (this.is_small(x))
+			//	ui.color('label')
+		return this.build_text(s, opt)
+	}
+	return s
+}
+
+bool.build_null = function(opt) {
+	if (opt) {
+		// let text_font = cx.text_font
+		// cx.text_font = cx.icon_font
+		// all_field_types.build.call(this, '\uf0c8', cx)
+		// cx.text_font = text_font
+		// return true
+	}
+}
+
+// an editable cell shows the box so that it reads as something to click,
+// a readonly one only marks the true ones.
+bool.build = function(v, opt) {
+	if (!isbool(v))
+		return bool.build_null.call(this, opt)
+	if (!opt)
+		return v ? S('true', 'true') : S('false', 'false')
+	let icon =
+		!opt.readonly
+			? (v ? 'box_checked' : 'box_unchecked')
+			: (v ? 'check' : null)
+	if (icon) {
+		ui.color(opt.fg)
+		ui.icon('', icon, 0, opt.align, 'c')
+	}
+}
+
+color.build = function(v, opt) {
+	if (!opt)
+		return v
+	ui.m(ui.sp1(), 0)
+	ui.min_wh(ui.em(1), ui.em(1))
+	ui.stack('', 0, 's', 'c')
+		ui.bb(':' + v)
+	ui.end_stack()
+}
+
+percent.build = function(p, opt) {
+	let s = this.to_text(p)
+	if (!opt)
+		return s
+	let f = clamp(p / this.scale / 100, 0, 1)
+	ui.stack('', 0, 's', 'c')
+		ui.h(0, 0, 's', 's')
+			ui.stack('', f, 's', 's')
+				ui.bb('bg3')
+			ui.end_stack()
+			ui.stack('', 1 - f, 's', 's')
+				ui.bb('bg0')
+			ui.end_stack()
+		ui.end_h()
+		this.build_text(s, opt)
+	ui.end_stack()
+}
+
+icon.build = function(v, opt) {
+	if (!opt)
+		return this.to_text(v)
+	ui.color(opt.fg)
+	ui.icon('', v, 0, opt.align, 'c')
+}
+
+// place vals are {place_id:, description:} or a plain description string.
+place.build = function(v, opt) {
+	let place_id = isobject(v) && v.place_id
+	let descr = isobject(v) ? v.description : v || ''
+	if (!opt)
+		return descr
+	ui.color(place_id ? 'text' : 'label')
+	ui.h(0, ui.sp05())
+		ui.color(opt.fg)
+		ui.icon('', 'map_pin', 0, opt.align, 'c')
+		this.build_text(descr, opt)
+	ui.end_h()
+}
+
+// TODO: btn.build, and btn.click calling field.action(v, row, field).
+btn.build = function(v, opt) {
+	// TODO
+}
+
+btn.click = function() {
+	// TODO
+}
+
 //// create_field() ----------------------------------------------------------
 
 ui.create_field = function(opt, nav_id = '') {
 	let type = opt?.type ?? 'text'
-	if (warn_if(!opt.name, nav_id, 'unnamed field'))
-		return null
-	if (warn_if(!field_types[type], nav_id, 'field:', opt.name, 'unknown type:', type))
+	if (warn_if(!field_types[type], nav_id, 'field:', opt?.name, 'unknown type:', type))
 		return null
 	let field_type = field_types[type]
 	let field = assign_opt({}, all_field_types, field_type, opt)
-	field.label ??= display_name(field.name)
+	field.label ??= display_name(field.name || type)
 	if (!check_field_options(field, field_config_checks, nav_id))
 		return null
 	if (field.enum_values != null) {

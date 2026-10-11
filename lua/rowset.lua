@@ -16,7 +16,6 @@ Rowset attributes (* = server-only):
 	*	hide_cols        : 'col1 ...'    columns hidden by default
 		pos_col          : 'col'         pos column for manual ordering of rows
 		params           : 'par1 ...'    param names for server-side filtering
-		name_col         : 'col'         default display_col in lookup rowsets
 		uks              : ['col1 ...',] unique keys (to validate on the client)
 	TREE
 		id_col           : 'col'         id column for tree-building
@@ -86,7 +85,6 @@ Field attributes:
 		lookup_rowset_name:              lookup rowset name
 		lookup_cols      :               lookup rowset cols
 		display_col      :               lookup display col
-		name_col         :               default display col when used as lookup rowset
 
 Rowset methods:
 
@@ -147,7 +145,7 @@ local client_field_attrs = {
 	scale=1, decimals=1,
 	slider_min = 1, slider_max = 1,
 	slider_markers = 1, slider_scale_base = 1, slider_scales = 1,
-	lookup_rowset_name=1, lookup_cols=1, display_col=1, name_col=1,
+	lookup_rowset_name=1, lookup_cols=1, display_col=1,
 	w=1, min_w=1, max_w=1,
 	hour_step=1, minute_step=1, second_step=1, precision=1,
 	timeago=1, duration_format=1,
@@ -301,7 +299,6 @@ function virtual_rowset(init, ...)
 			params = rs.params,
 			id_col = rs.id_col,
 			parent_col = rs.parent_col,
-			name_col = rs.name_col,
 			tree_col = rs.tree_col,
 		})
 		return res

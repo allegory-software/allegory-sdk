@@ -337,7 +337,8 @@ function init(id, e) {
 
 	function quicksearch_fi() {
 		return e.focused_fi
-			?? e.all_fields_map[e.quicksearch_col ?? e.display_col]?.fi
+			?? (e.quicksearch_col != null
+				? e.all_fields_map[e.quicksearch_col] : e.display_field)?.fi
 			?? null
 	}
 
@@ -560,6 +561,9 @@ function init(id, e) {
 		return CS
 	}
 
+	// field.build() options, rewritten for each cell.
+	let build_opt = {fg: null, align: null, full_width: false, readonly: false}
+
 	function build_cell_at(a, ri, field, vri, vfi, x, y, w, h, build_stage) {
 
 		let cs = cell_state(ri, field, vri, build_stage)
@@ -636,7 +640,31 @@ function init(id, e) {
 				if (row_focused && e.quicksearch_text
 					&& field.fi == quicksearch_fi())
 					ui.mark_text(0, e.quicksearch_text.length)
-				e.build_val(ri, field, input_val, true, fg, full_width, align)
+				build_opt.fg = fg
+				build_opt.align = align
+				build_opt.full_width = full_width
+				build_opt.readonly = !e.can_change_val(ri, field.fi)
+				if (field.is_group_field && e.is_group_row(ri)) {
+					build_opt.readonly = true
+					build_opt.full_width = true
+					ui.h(0, 0, align, 's')
+						let has_key = false
+						for (let group_col of e.group_cols) {
+							if (group_col.group_level != e.depth[ri])
+								continue
+							if (has_key) {
+								ui.color(fg)
+								ui.text('', ' / ', 0, 'l', 'c')
+							}
+							let field = group_col.field
+							let v = e.cell_input_val(ri, field.fi)
+							e.build_val(ri, field, v, build_opt)
+							has_key = true
+						}
+					ui.end_h()
+				} else {
+					e.build_val(ri, field, input_val, build_opt)
+				}
 				ui.p(0) // build_val() builds nothing for a value with no text!
 			}
 			if (editing && !build_stage && field.has_editor) {
@@ -896,7 +924,7 @@ function init(id, e) {
 
 	function group_bar_h() {
 		let sp2 = ui.sp2()
-		let levels = e.groups.col_groups.length-1
+		let levels = e.group_cols.at(-1)?.group_level ?? 0
 		return 2 * sp2 + gcol_h + levels * sp2 + 2
 	}
 
@@ -921,7 +949,7 @@ function init(id, e) {
 			for (let field of e.visible_fields) {
 				let filter_text = ui.input_value(filter_box_id(field))
 				if (filter_text !== undefined)
-					e.set_col_filter(field, filter_text)
+					e.set_col_filter(field.fi, filter_text)
 				if (ui.focused(filter_box_id(field)))
 					filter_focused_field = field
 			}
@@ -965,7 +993,7 @@ function init(id, e) {
 				hit_vfi = field.vfi
 				ui.set_cursor('pointer')
 				if (ps.drag)
-					e.set_order_by_dir(field, 'toggle', shift)
+					e.set_order_by_dir(field, 'toggle', shift, {input: e})
 				break
 			}
 		}
@@ -1067,7 +1095,8 @@ function init(id, e) {
 			if (ps.drop) {
 				// sets x (y in vertical layout) of moved element.
 				let over_fi = mover.move_element_stop()
-				e.move_field(hit_vfi, over_fi)
+				e.move_field(e.visible_fields[hit_vfi], e.visible_fields[over_fi],
+					{input: e})
 
 				// reset drag state but preserve hover state
 				drag_op = null
@@ -1088,7 +1117,8 @@ function init(id, e) {
 
 		// hover or drag group-bar column
 		if (!hit_zone) {
-			for (let col of e.groups.cols || empty_array) {
+			for (let gcol of e.group_cols) {
+				let col = gcol.field.name
 				// hit sort icon
 				let icon_id = id+'.sort_icon.'+col
 				ps = ui.drag_or_hit(icon_id)
@@ -1097,7 +1127,7 @@ function init(id, e) {
 					hit_gcol = col
 					ui.set_cursor('pointer')
 					if (ps.drag)
-						e.set_order_by_dir(col, 'toggle', shift)
+						e.set_order_by_dir(gcol.field, 'toggle', shift, {input: e})
 					break
 				}
 				// hit group column
@@ -1128,32 +1158,33 @@ function init(id, e) {
 				mover = gcol_mover
 				ps.mover = gcol_mover
 
-				mover.cols = [...(e.groups.cols || empty_array)]
-				mover.range_defs = assign({}, e.groups.range_defs)
+				mover.gcols = e.group_cols.slice()
 
 				if (gcol_move_start) {
 
-					mover.col_def = mover.range_defs[hit_gcol]
+					mover.col_def = mover.gcols.find(gcol => gcol.field.name == hit_gcol)
 
-					let x = mover.col_def.index * (gcol_w + 1)
+					let x = mover.col_def.group_i * (gcol_w + 1)
 					let y = mover.col_def.group_level * sp2
 					mover.x0 = x
 					mover.y0 = y
 
 				} else if (col_group_start) {
 
-					mover.cols.push(hit_gcol)
+					let field = e.all_fields_map[hit_gcol]
+					let last_gcol = e.group_cols.at(-1)
 					mover.col_def = {
-						index: mover.cols.length-1,
-						group_level: e.groups.cols.length ? e.groups.col_groups.length : 0,
+						field: field,
+						col_expr: hit_gcol,
+						group_level: last_gcol ? last_gcol.group_level + 1 : 0,
+						group_i: mover.gcols.length,
 					}
-					mover.range_defs[hit_gcol] = mover.col_def
+					mover.gcols.push(mover.col_def)
 
-					let field = e.fld(hit_gcol)
 					let hs = ui.state(id+'.header')
 					let hx = hs.x
 					let hy = hs.y
-					let group_bar_was_visible = !(e.group_bar_visible == 'auto' && !e.groups.cols.length)
+					let group_bar_was_visible = !(e.group_bar_visible == 'auto' && !e.group_cols.length)
 					mover.x0 = field._x - sp2
 					mover.y0 = group_bar_was_visible ? group_bar_h() : 0
 
@@ -1169,7 +1200,8 @@ function init(id, e) {
 					if (vi != null)
 						this.is[i] = vi
 				}
-				mover.move_element_start(mover.col_def.index, 1, 0, mover.cols.length)
+				mover.move_element_start(mover.col_def.group_i, 1, 0,
+					mover.gcols.length)
 
 				// compute the allowed level ranges that the dragged column is
 				// allowed to move vertically in each horizontal position that
@@ -1180,9 +1212,8 @@ function init(id, e) {
 				mover.max_levels = []
 				let last_level = 0
 				let i = 0
-				for (let col of mover.cols) {
-					let def = mover.range_defs[col]
-					let level = def.group_level
+				for (let gcol of mover.gcols) {
+					let level = gcol.group_level
 					mover.levels    [i] = level
 					mover.min_levels[i] = level
 					mover.max_levels[i] = level
@@ -1190,7 +1221,7 @@ function init(id, e) {
 						mover.min_levels[i]--
 						if (i > 0)
 							mover.max_levels[i-1]++
-					} else if (i > 0 && i == mover.cols.length-1) {
+					} else if (i > 0 && i == mover.gcols.length-1) {
 						mover.max_levels[i]++
 					}
 					last_level = level
@@ -1206,7 +1237,7 @@ function init(id, e) {
 
 				// drag column over the group-by header or over the grid's column header.
 				mover.move_element_update(mover.x0 + ps.dx)
-				let vi = mover.is[mover.col_def.index]
+				let vi = mover.is[mover.col_def.group_i]
 				let level = mover.levels[vi]
 				let min_level = mover.min_levels[vi]
 				let max_level = mover.max_levels[vi]
@@ -1255,36 +1286,18 @@ function init(id, e) {
 						// create a temp array with the dragged column moved to its new position.
 						let over_i = mover.move_element_stop()
 						let a = []
-						for (let col of mover.cols) {
-							let def = mover.range_defs[col]
-							let vi = mover.is[def.index]
-							let level = col == hit_gcol ? mover.drop_level : mover.levels[vi]
-							a.push([col, level])
+						for (let gcol of mover.gcols) {
+							let vi = mover.is[gcol.group_i]
+							let level = gcol == mover.col_def ? mover.drop_level : mover.levels[vi]
+							a.push({col_expr: gcol.col_expr, group_level: level})
 						}
-						array_move(a, mover.col_def.index, 1, over_i, true)
-
-						// format group-bar cols and set it.
-						let t = []
-						let last_level = a[0][1] // can be -1..1 from dragging
-						let i = 0
-						for (let [col, level] of a) {
-							if (level != last_level)
-								t.push(' > ')
-							t.push(col)
-							let def = mover.range_defs[col]
-							if (def.offset != null) t.push('/', def.offset)
-							if (def.unit   != null) t.push('/', def.unit)
-							if (def.freq   != null) t.push('/', def.freq)
-							t.push(' ')
-							last_level = level
-							i++
-						}
-						e.group_by = t.join('')
-						e.update_parts({fields: true, rows: true, group_by: true})
+						array_move(a, mover.col_def.group_i, 1, over_i, true)
+						e.set_group_cols(a, {input: e})
 
 					} else if (mover.drop_pos != null) { // put it back in grid
 
-						e.ungroup_col(hit_gcol, mover.drop_pos)
+						e.ungroup_col(mover.col_def.field,
+							e.visible_fields[mover.drop_pos], {input: e})
 
 					}
 
@@ -1699,7 +1712,7 @@ function init(id, e) {
 		}
 
 		if (e.is_picker && has_input)
-			s.input_value = e.focused_row ?? null
+			s.input_value = e.focused_ri
 
 		if (!ui.window_focused() || ui.window_focusing)
 			e.exit_edit()
@@ -1747,10 +1760,9 @@ function init(id, e) {
 
 		let value
 		if (e.is_picker) {
-			value = ui.set_value(id, ui.state(id), opt.value)
-			let ri = value ? e.row_index(value) : false
-			if (e.focused_row != e.rows[ri])
-				e.focus_cell(ri, true)
+			value = ui.set_value(id, ui.state(id), opt.value) // ri or null
+			if (value != e.focused_ri)
+				e.focus_cell(value, e.last_focused_fi)
 		}
 
 		// Check again because app code may start or end an edit after update().
@@ -1821,7 +1833,7 @@ function init(id, e) {
 
 			if (horiz && (
 				e.group_bar_visible == 'always'
-				|| e.group_bar_visible == 'auto' && e.groups.cols.length
+				|| e.group_bar_visible == 'auto' && e.group_cols.length
 				|| drag_op == 'col_group'
 			)) {
 
@@ -1831,18 +1843,18 @@ function init(id, e) {
 
 					let mover = gcol_mover
 
-					for (let col of (mover ?? e.groups).cols ?? empty_array) {
+					for (let gcol of mover?.gcols ?? e.group_cols) {
 
-						let def = (mover ?? e.groups).range_defs[col]
-						let x = def.index * (gcol_w + 1)
-						let y = def.group_level * sp2
+						let col = gcol.field.name
+						let x = gcol.group_i * (gcol_w + 1)
+						let y = gcol.group_level * sp2
 						let w = gcol_w
 						let h = gcol_h
 
 						if (mover) {
-							let vi = mover.is[def.index]
+							let vi = mover.is[gcol.group_i]
 							let level = col == hit_gcol ? mover.drop_level : mover.levels[vi]
-							x = mover.xs[def.index]
+							x = mover.xs[gcol.group_i]
 							y = level * sp2
 							if (col == hit_gcol) {
 								if (mover.drop_level == null) {
@@ -1868,7 +1880,7 @@ function init(id, e) {
 						}
 
 						let col_id = id+'.gcol.'+col
-						let field = e.fld(col)
+						let field = gcol.field
 						ui.m(sp2 + x, sp2 + y, 0, 0)
 						ui.min_wh(w, h)
 						ui.stack(col_id, 1, 'l', 't')
@@ -1885,10 +1897,11 @@ function init(id, e) {
 								// sort icon
 								let icon_id = id+'.sort_icon.'+col
 								if (field.sortable) {
-									let dir = e.sort_dir(field)
+									let dir = field.sort_i == null ? null
+										: field.sort_desc ? 'desc' : 'asc'
 									ui.color(dir ? 'label' : 'faint',
 										(hit_zone == 'sort_icon' && hit_gcol == col) ? 'hover' : null)
-									let pri = e.sort_priority(field)
+									let pri = field.sort_i
 									ui.icon(icon_id,
 										dir == 'asc' && (pri ? 'sort_asc'  : 'sort_asc' ) ||
 										dir          && (pri ? 'sort_desc' : 'sort_desc') ||
@@ -1933,8 +1946,9 @@ function init(id, e) {
 
 					let max_min_w = noclip ? null
 						: max(0, w - 2 * sp2 - sort_icon_w(field))
-					let dir = e.sort_dir(field)
-					let pri = e.sort_priority(field)
+					let dir = field.sort_i == null ? null
+						: field.sort_desc ? 'desc' : 'asc'
+					let pri = field.sort_i
 					let align, is_right_aligned
 					if (horiz) {
 						align = e.field_align(field)
