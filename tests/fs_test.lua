@@ -365,6 +365,78 @@ function test.read_write()
 	rmfile(testfile)
 end
 
+function test.pwrite()
+	local path = 'fs_test_pwrite'
+	with_owner(function()
+		local f = open(path, 'w+')
+		f:write('abcdef')
+		f:seek('set', 4)
+		f:pwrite(1, 'XY')
+		assert(f:seek() == 4)
+		local buffer = new('char[3]', '12')
+		f:pwrite(4, buffer, 2)
+		assert(f:seek() == 4 and f.w == 10)
+		f:pwrite(0, 'ignored', 0)
+		f:pwrite(100, '')
+		assert(f:seek() == 4 and f:size() == 6 and f.w == 10)
+		f:seek('set', 0)
+		local data = new'char[6]'
+		f:readn(data, 6)
+		assert(str(data, 6) == 'aXYd12')
+		f:close()
+		local ok, err = lua_pcall(f.pwrite, f, 0, '')
+		assert(not ok and err == CLOSED)
+	end)
+	rmfile(path)
+end
+
+function test.pwrite_large_offset()
+	local path = 'fs_test_pwrite_large_offset'
+	with_owner(function()
+		local f = open(path, 'w+')
+		local offset = 2^32 + 7
+		f:pwrite(offset, 'x')
+		assert(f:seek() == 0 and f:size() == offset + 1)
+		f:seek('set', offset)
+		local buffer = new'char[1]'
+		f:readn(buffer, 1)
+		assert(str(buffer, 1) == 'x')
+	end)
+	rmfile(path)
+end
+
+function test.pwrite_append()
+	local path = 'fs_test_pwrite_append'
+	with_owner(function()
+		local f = open(path, 'a+')
+		f:write('abc')
+		f:seek('set', 1)
+		f:pwrite(0, 'de')
+		assert(f:seek() == 1 and f:size() == 5 and f.w == 5)
+		f:seek('set', 0)
+		local buffer = new'char[5]'
+		f:readn(buffer, 5)
+		assert(str(buffer, 5) == 'abcde')
+	end)
+	rmfile(path)
+end
+
+function test.pwrite_errors()
+	local path = 'fs_test_pwrite_errors'
+	open(path, 'w'):close()
+	with_owner(function()
+		local f = open(path)
+		local ok, err = pcall(f.pwrite, f, 0, 'x')
+		assert(not ok and err.type == 'fs' and f.w == 0)
+		f:close()
+		local f = open(path, 'r+')
+		local ok, err = pcall(f.pwrite, f, -1, 'x')
+		assert(not ok and err.type == 'fs' and f.w == 0)
+		assert(f:seek() == 0 and f:size() == 0)
+	end)
+	rmfile(path)
+end
+
 function test.open_modes()
 	local testfile = 'fs_test_open_modes'
 

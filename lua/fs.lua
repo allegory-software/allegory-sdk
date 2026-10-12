@@ -35,6 +35,7 @@ FILE I/O
 	f:[try_]read(buf, len) -> readlen|0           read data from file
 	f:readn(buf, n)                               read exactly n bytes
 	f:write(s | buf,len)                          write data to file
+	f:pwrite(offset, s | buf,len)                 write at absolute offset
 	f:sync()                                      sync kernel write buffer to disk
 	f:seek([whence] [, offset]) -> pos            get/set the file pointer
 	f:skip(n) -> actual_n                         skip bytes
@@ -239,6 +240,11 @@ f:readn(buf, len) -> true
 f:write(s | buf,len) -> true
 
 	Write data to file.
+
+f:pwrite(offset, s | buf,len)
+
+	Write all bytes at offset without changing the current file position.
+	On files opened with append access, write at the end regardless of offset.
 
 f:sync()
 
@@ -970,6 +976,8 @@ end
 cdef[[
 ssize_t read(int fd, void *buf, size_t count);
 ssize_t write(int fd, const void *buf, size_t count);
+ssize_t pwrite(int fd, const void *buf, size_t count, off64_t offset)
+	asm("pwrite64");
 int fsync(int fd);
 int64_t lseek(int fd, int64_t offset, int whence) asm("lseek64");
 ]]
@@ -1054,6 +1062,30 @@ function file.write(f, buf, sz)
 	end
 	buf = buf + len
 	sz  = sz  - len
+	goto again
+end
+
+function file.pwrite(f, offset, buf, sz)
+	f:check_closed()
+	sz = sz or #buf
+	if sz == 0 then return end
+	::again::
+	local len = C.pwrite(f.fd, buf, sz, offset)
+	if len == -1 then
+		local _, err = try_errno()
+		if err == 'interrupted' then goto again end
+		f:check_io('pwrite', false, err)
+	end
+	len = tonumber(len)
+	f.w = f.w + len
+	if len == sz then return end
+	assert(len > 0)
+	if isstr(buf) then
+		buf = cast(u8p, buf)
+	end
+	buf = buf + len
+	sz = sz - len
+	offset = offset + len
 	goto again
 end
 
