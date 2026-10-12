@@ -42,6 +42,24 @@ OPEN FILE ATTRIBUTES
 FILE LOCKING
 	f:lock(['r'|'w'], [nonblock])
 	f:unlock([nonblock])
+MEMORY MAPPING
+	[try_]mmap(opt | path,[access]) -> map       map file or anonymous memory
+	f:[try_]mmap([opt]) -> map                   map an open file
+	map.addr                                     void* pointer to mapped memory
+	map.size                                     usable size in bytes
+	map:[try_]close()                            unmap memory
+	map:closed() -> true|false                   check if mapping is closed
+	map:setowner(owner)                          change mapping owner
+	map:onclose(fn)                              exec fn after unmapping
+	map:[try_]sync([offset], [size])             write mapped data to disk
+	map:protect(access, [offset], [size])        change page permissions
+	map:advise(advice, [offset], [size])         advise kernel about access
+	shm_open(opt | name,[mode]) -> f|nil,err     open named shared memory
+	shm_unlink(name) -> true[, 'not_found']      remove shared memory name
+	mirror_buffer([size], [opt]) -> map         create mirrored buffer
+	pagesize() -> bytes                          get system page size
+	aligned_size(size, [dir]) -> size           align size to a page boundary
+	aligned_addr(addr, [dir]) -> addr           align address to page boundary
 DIRECTORY LISTING
 	ls(dir, [opt], ['if_exists']) -> iter() -> name,d  contents iterator
 	try_ls(dir, [opt]) -> iter() -> name,d        ls(..., 'if_exists')
@@ -262,6 +280,86 @@ OPEN FILE ATTRIBUTES ---------------------------------------------------------
 		f:set_attr(attr)
 
 		Set one or more attributes from a table.
+
+MEMORY MAPPING ---------------------------------------------------------------
+
+[try_]mmap(opt | path,[access]) -> map
+f:[try_]mmap([opt]) -> map
+
+	Map a file or allocate zeroed anonymous memory. Options:
+
+	* file   : path or open file; omit for anonymous memory.
+	* access : any combination of 'r', 'w', 'x'; '' for no access.
+	           default: 'r' for files, 'rw' for anonymous memory.
+	* shared : true for shared changes, false for private changes.
+	           default: true for files, false for anonymous memory.
+	* size   : positive byte count, default file size minus offset.
+	           required for anonymous memory.
+	* offset : page-aligned file offset, default zero.
+	           must be zero for anonymous memory.
+	* addr   : address hint; the kernel may choose another address.
+	* owner  : default currentowner().
+
+	Create and resize files with open() and truncate() before mapping.
+	try_mmap() returns 'file_too_short' for empty ranges or ranges past EOF.
+	For shared writable mappings, open the file for reading and writing.
+	For private writable mappings, reading is enough. The kernel does not
+	write private changes to the file; later file changes are not guaranteed
+	to be visible through private mappings.
+
+	Callers can keep using the open file or close it. The mapping's owner
+	and lifetime are independent. mmap(path) closes its file before returning.
+	Callers must synchronize shared access. The kernel can terminate the
+	process on access after file truncation or on an I/O failure.
+
+map:[try_]close()
+
+	Unmap without syncing; addr is nil afterward. Repeated close succeeds.
+
+map:[try_]sync([offset], [size])
+
+	Wait for disk writeback. Private changes are not written back.
+	For sync(), protect(), and advise(), pass byte offsets from map.addr.
+	Offset defaults to zero; size defaults to the remaining bytes.
+	Ranges must be nonempty and within map.size. sync() and advise() align
+	downward and cover the entire requested range.
+
+map:protect(access, [offset], [size])
+
+	Change permissions for whole pages touched by the range. Offset must be
+	page-aligned. For a later upgrade to shared write access, open the file
+	for reading and writing ('r+') before mapping.
+
+map:advise('normal'|'sequential'|'random'|'willneed', [offset], [size])
+
+	Request ordinary, sequential, or random access behavior, or advance
+	loading with 'willneed'. The kernel need not honor hints.
+
+shm_open(opt | name,[mode]) -> f|nil,'not_found'|'already_exists'
+shm_unlink(name) -> true[, 'not_found']
+
+	Open or remove named shared memory. Requires glibc 2.34 or newer.
+	shm_open() accepts open() options with name instead of path; name is
+	'/name' without other slashes. Use read-only or read/write modes.
+	No async or seek. Missing names and exclusive creation conflicts are
+	returned as in open(). New objects have size zero; truncate before mapping.
+	shm_unlink() succeeds if missing. Open files and mappings remain usable.
+	Closing them does not remove the name.
+
+mirror_buffer([size], [opt]) -> map
+
+	Map the same memory twice consecutively. The byte at addr + i is also
+	at addr + size + i for i from zero to size minus one.
+	Size defaults to one page and is rounded up to a page boundary.
+	Options: owner and addr, with the same meanings as mmap options.
+	map.size is one copy's size; close() unmaps both copies.
+	Methods with ranges operate on the first copy, including protect().
+
+aligned_size(size, [dir]) -> size
+aligned_addr(addr, [dir]) -> addr
+
+	Align to a page boundary. dir is 'right' (default) or 'left'.
+	Already aligned values are unchanged. aligned_addr() returns a void*.
 
 DIRECTORY LISTING ------------------------------------------------------------
 
@@ -558,7 +656,7 @@ function _make_file(owner, fd, f)
 	f.fd = fd
 	f.w = 0
 	f.r = 0
-	if not (f.type == 'file' and not f.async) then --not seekable
+	if not (f.type == 'file' and not f.async and not f.shm) then --not seekable
 		f.seek = false
 	end
 	return f
@@ -2089,4 +2187,297 @@ function pidfd_open(pid_or_opt, opt)
 		return check_fs('pid#'..f.pid, 'pidfd_open', false, err)
 	end
 	return _init_file(_make_file(owner, fd, f))
+end
+
+--mmap -----------------------------------------------------------------------
+
+cdef[[
+int getpagesize(void);
+int shm_open(const char *name, int oflag, mode_t mode);
+int shm_unlink(const char *name);
+int memfd_create(const char *name, unsigned int flags);
+void *mmap(void *addr, size_t length, int prot, int flags,
+	int fd, off64_t offset) asm("mmap64");
+int munmap(void *addr, size_t length);
+int msync(void *addr, size_t length, int flags);
+int mprotect(void *addr, size_t length, int prot);
+int madvise(void *addr, size_t length, int advice);
+]]
+
+local page_size = C.getpagesize()
+
+function pagesize()
+	return page_size
+end
+
+function aligned_size(size, dir)
+	local remainder = size % page_size
+	if remainder == 0 then return size end
+	if dir and dir:find'^l' then
+		return size - remainder
+	else
+		return size + (page_size - remainder)
+	end
+end
+
+function aligned_addr(addr, dir)
+	return cast('void *', aligned_size(cast('uintptr_t', addr), dir))
+end
+
+local MAP_SHARED = 1
+local MAP_PRIVATE = 2
+local MAP_FIXED = 0x10
+local MAP_ANONYMOUS = 0x20
+local MS_SYNC = 4
+local MFD_CLOEXEC = 1
+
+local function mmap_protection(access)
+	assert(not access:find'[^rwx]', 'invalid mmap access')
+	return bor(
+		access:find'r' and 1 or 0,
+		access:find'w' and 2 or 0,
+		access:find'x' and 4 or 0
+	)
+end
+
+local function try_map_memory(addr, size, protection, flags, fd, offset)
+	local addr = C.mmap(addr, size, protection, flags, fd, offset)
+	if cast('intptr_t', addr) == -1 then return try_errno() end
+	return addr
+end
+
+local map = {type = 'mmap', error_type = 'fs', debug_prefix = 'm'}
+
+map.setowner = setowner
+map.onclose = file.onclose
+map.checkp = checkp
+
+function map.closed(m)
+	return m.addr == nil
+end
+
+function map.check_closed(m)
+	if not m:closed() then return end
+	error(CLOSED)
+end
+
+function map.try_close(m)
+	if m:closed() then return true end
+	local addr = m.addr
+	m.addr = nil
+	local ok, err = try_errno(C.munmap(addr, m._mapped_size) == 0)
+	_disown(m)
+	live(m, nil)
+	if m._onclose then
+		m:_onclose()
+		m._onclose = nil
+	end
+	return ok, err
+end
+map.close = make_raising('close', map.try_close)
+
+local function make_map(owner, addr, size, mapped_size)
+	local m = _own(owner, object(map, {
+		addr = addr,
+		size = size,
+		_mapped_size = mapped_size or size,
+	}))
+	live(m, 'size=%s', size)
+	return m
+end
+
+local function map_range(m, offset, size, aligned)
+	m:check_closed()
+	local offset = offset or 0
+	local size = size or m.size - offset
+	assert(offset >= 0 and size > 0 and offset + size <= m.size,
+		'invalid mmap range')
+	local aligned_offset = aligned_size(offset, 'left')
+	if aligned then
+		assert(offset == aligned_offset, 'mmap offset not page-aligned')
+	end
+	return cast('uint8_t *', m.addr) + aligned_offset,
+		size + offset - aligned_offset
+end
+
+function map.try_sync(m, offset, size)
+	local addr, size = map_range(m, offset, size)
+	return try_errno(C.msync(addr, size, MS_SYNC) == 0)
+end
+map.sync = make_raising('sync', map.try_sync)
+
+function map.protect(m, access, offset, size)
+	local protection = mmap_protection(access)
+	local addr, size = map_range(m, offset, size, true)
+	return check_fs(m, 'protect',
+		try_errno(C.mprotect(addr, size, protection) == 0))
+end
+
+local mmap_advice = {
+	normal = 0,
+	random = 1,
+	sequential = 2,
+	willneed = 3,
+}
+
+function map.advise(m, advice, offset, size)
+	local advice = assertf(mmap_advice[advice],
+		'invalid mmap advice: %s', advice)
+	local addr, size = map_range(m, offset, size)
+	return check_fs(m, 'advise',
+		try_errno(C.madvise(addr, size, advice) == 0))
+end
+
+local function try_map_file(f, opt, owner, protection, offset)
+	f:check_closed()
+	local file_size, err = fstat(f, 'size')
+	if not file_size then return nil, err end
+	local size = opt.size or file_size - offset
+	if size <= 0 or offset + size > file_size then
+		return nil, 'file_too_short'
+	end
+	local flags = opt.shared == false and MAP_PRIVATE or MAP_SHARED
+	local addr, err = try_map_memory(opt.addr, size, protection,
+		flags, f.fd, offset)
+	if not addr then return nil, err end
+	return make_map(owner, addr, size)
+end
+
+local function close_mapped_file(f, m, err)
+	local ok, close_err = f:try_close()
+	if m and not ok then
+		m:try_close()
+		return nil, close_err
+	end
+	return m, err
+end
+
+local function try_mmap_options(path_or_file, opt)
+	local owner = _check_owner(opt.owner)
+	local access = opt.access or (path_or_file and 'r' or 'rw')
+	local protection = mmap_protection(access)
+	assert(not opt.size or opt.size > 0, 'mmap size must be > 0')
+	if path_or_file then
+		local offset = opt.offset or 0
+		assert(offset >= 0, 'mmap offset must be >= 0')
+		assert(offset == aligned_size(offset), 'mmap offset not page-aligned')
+		if isstr(path_or_file) then
+			local flags = bor(O_CLOEXEC,
+				opt.shared ~= false and access:find'w' and o_bits.rdwr or 0)
+			local fd = C.open(path_or_file, flags, 0)
+			if fd == -1 then return try_errno() end
+			local f = _init_file(_make_file(owner, fd, {path = path_or_file}))
+			return close_mapped_file(f,
+				try_map_file(f, opt, owner, protection, offset))
+		else
+			return try_map_file(path_or_file, opt, owner, protection, offset)
+		end
+	else
+		assert(opt.size, 'anonymous mmap size required')
+		assert(not opt.offset or opt.offset == 0,
+			'anonymous mmap offset must be zero')
+		local flags = bor(MAP_ANONYMOUS,
+			opt.shared and MAP_SHARED or MAP_PRIVATE)
+		local addr, err = try_map_memory(opt.addr, opt.size,
+			protection, flags, -1, 0)
+		if not addr then return nil, err end
+		return make_map(owner, addr, opt.size)
+	end
+end
+
+function try_mmap(path_or_opt, access)
+	if istab(path_or_opt) then
+		return try_mmap_options(path_or_opt.file, path_or_opt)
+	else
+		return try_mmap_options(path_or_opt, {access = access})
+	end
+end
+
+function mmap(path_or_opt, access)
+	local target = istab(path_or_opt) and path_or_opt.file or path_or_opt
+	return check_fs(target, 'mmap', try_mmap(path_or_opt, access))
+end
+
+function file.try_mmap(f, opt)
+	return try_mmap_options(f, opt or empty)
+end
+file.mmap = make_raising('mmap', file.try_mmap)
+
+local function check_shm_name(name)
+	assert(name:match'^/[^/]+$',
+		'shm name must be /name without other slashes')
+	return name
+end
+
+function shm_open(name_or_opt, mode)
+	local f = istab(name_or_opt) and update({}, name_or_opt)
+		or {name = name_or_opt, mode = mode}
+	check_shm_name(f.name)
+	local mode_flags = f.mode and assertf(open_mode_flags[f.mode],
+		'shm_open: invalid mode: %s', f.mode)
+	local flags = bor(bitflags(f.flags, o_bits),
+		bitflags(mode_flags, o_bits))
+	assert(not getbit(flags, o_bits.wronly),
+		'shm_open: use a read/write mode for write access')
+	assert(not f.async, 'shm_open: cannot be opened async')
+	local owner = _check_owner(f.owner)
+	local perms = parse_perms(f.perms) or default_file_perms
+	local fd = C.shm_open(f.name, flags, perms)
+	if fd == -1 then
+		local _, err = try_errno()
+		if err == 'not_found' and not getbit(flags, o_bits.creat) then
+			return nil, err
+		elseif err == 'already_exists' and getbit(flags, o_bits.excl) then
+			return nil, err
+		end
+		return check_fs(f.name, 'shm_open', false, err)
+	end
+	f.shm = true
+	local f = _make_file(owner, fd, f)
+	if f.inheritable then f:set_inheritable(true) end
+	return _init_file(f)
+end
+
+function shm_unlink(name)
+	check_shm_name(name)
+	local ok, err = try_errno(C.shm_unlink(name) == 0)
+	return check_fs(name, 'shm_unlink', ok or err == 'not_found', err)
+end
+
+function mirror_buffer(size, opt)
+	opt = opt or empty
+	local owner = _check_owner(opt.owner)
+	local size = size or page_size
+	assert(size > 0, 'mirror buffer size must be > 0')
+	local size = aligned_size(size)
+	local fd = C.memfd_create('mirror_buffer', MFD_CLOEXEC)
+	if fd == -1 then
+		return check_fs('mirror_buffer', 'memfd_create', try_errno())
+	end
+	local f = _init_file(_make_file(owner, fd, {name = 'mirror_buffer'}))
+	local ok, err = try_errno(C.ftruncate(fd, size) == 0)
+	if not ok then
+		f:try_close()
+		return check_fs(f, 'truncate', false, err)
+	end
+	local addr, err = try_map_memory(opt.addr, size * 2, 0,
+		bor(MAP_PRIVATE, MAP_ANONYMOUS), -1, 0)
+	if not addr then
+		f:try_close()
+		return check_fs(f, 'mmap', false, err)
+	end
+	local m = make_map(owner, addr, size, size * 2)
+	for i = 0, 1 do
+		local addr = cast('uint8_t *', m.addr) + i * size
+		local addr, err = try_map_memory(addr, size, 3,
+			bor(MAP_SHARED, MAP_FIXED), fd, 0)
+		if not addr then
+			m:try_close()
+			f:try_close()
+			return check_fs(m, 'mmap', false, err)
+		end
+	end
+	local m, err = close_mapped_file(f, m)
+	check_fs(f, 'close', m, err)
+	return m
 end

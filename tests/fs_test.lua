@@ -1475,6 +1475,257 @@ function test.scandir_close_after_eof()
 	assert(sc:closed())
 end
 
+function test.mmap_alignment()
+	local page = pagesize()
+	assert(page > 0 and page == pagesize())
+	assert(aligned_size(0) == 0)
+	assert(aligned_size(page) == page)
+	assert(aligned_size(page + 1) == page * 2)
+	assert(aligned_size(page + 1, 'left') == page)
+	assert(aligned_size(2^32 - 1) == 2^32)
+	assert(aligned_size(u64(2^32 - 1)) == u64(2^32))
+	local addr = u64(2^53) + page - 1
+	assert(cast(uintptr, aligned_addr(addr)) == u64(2^53) + page)
+	assert(cast(uintptr, aligned_addr(addr, 'left')) == u64(2^53))
+end
+
+function test.mmap_anonymous_close()
+	with_owner(function()
+		local page = pagesize()
+		local m = mmap{size = page}
+		assert(m.owner == currentowner())
+		assert(not m:closed())
+		local p = cast('uint8_t *', m.addr)
+		assert(p[0] == 0 and p[m.size - 1] == 0)
+		p[0] = 41
+		assert(p[0] == 41)
+		local close_count = 0
+		m:onclose(function(self)
+			assert(self:closed() and self.owner == nil)
+			close_count = close_count + 1
+		end)
+		assert(m:try_close())
+		m:close()
+		assert(m.addr == nil and close_count == 1)
+		local ok, err = pcall(m.sync, m)
+		assert(not ok and err == CLOSED)
+	end)
+end
+
+function test.mmap_address_hint()
+	with_owner(function()
+		local page = pagesize()
+		local m1 = mmap{size = page}
+		cast('uint8_t *', m1.addr)[0] = 47
+		local m2 = mmap{size = page, addr = m1.addr}
+		assert(m2.addr ~= m1.addr)
+		assert(cast('uint8_t *', m1.addr)[0] == 47)
+		assert(cast('uint8_t *', m2.addr)[0] == 0)
+	end)
+end
+
+function test.mmap_file_offset()
+	with_owner(function()
+		local path = 'fs_test_mmap_offset'
+		local page = pagesize()
+		local f = open(path, 'w+')
+		f:truncate(page * 2 + 1)
+		f:seek('set', 17)
+		local m = f:mmap{access = 'rw', offset = page}
+		assert(m.size == page + 1 and f:seek() == 17)
+		local p = cast('uint8_t *', m.addr)
+		p[page] = 53
+		local r = mmap(path)
+		assert(cast('uint8_t *', r.addr)[page * 2] == 53)
+		f:close()
+		rmfile(path)
+		assert(not m:closed() and p[page] == 53)
+	end)
+end
+
+function test.mmap_private_writes()
+	with_owner(function()
+		local path = 'fs_test_mmap_private'
+		local f = open(path, 'w+')
+		f:write('abc')
+		f:close()
+		local f = open(path)
+		local m, err = f:try_mmap{access = 'rw'}
+		assert(not m and err == 'access_denied' and not f:closed())
+		local m = f:mmap{access = 'rw', shared = false}
+		cast('uint8_t *', m.addr)[0] = string.byte('x')
+		assert(str(m.addr, m.size) == 'xbc')
+		m:sync()
+		assert(load(path) == 'abc')
+		local m = mmap{file = path, access = 'rw', shared = false}
+		cast('uint8_t *', m.addr)[1] = string.byte('y')
+		assert(str(m.addr, m.size) == 'ayc')
+		assert(load(path) == 'abc' and not f:closed())
+		rmfile(path)
+	end)
+end
+
+function test.mmap_sync_ranges()
+	with_owner(function()
+		local path = 'fs_test_mmap_sync'
+		local page = pagesize()
+		local f = open(path, 'w+')
+		f:truncate(page * 3)
+		local m = f:mmap{access = 'rw'}
+		local p = cast('uint8_t *', m.addr)
+		p[page] = 61
+		p[page * 2] = 62
+		assert(m:try_sync(1, page * 2))
+		local s = load(path)
+		assert(s:byte(page + 1) == 61 and s:byte(page * 2 + 1) == 62)
+		m:sync(page * 2)
+		m:sync()
+		rmfile(path)
+	end)
+end
+
+function test.mmap_file_errors()
+	with_owner(function()
+		local path = 'fs_test_mmap_errors'
+		local page = pagesize()
+		rmfile(path)
+		local m, err = try_mmap(path)
+		assert(not m and err == 'not_found')
+		local m, err = try_mmap{file = path, access = 'rw', size = 1}
+		assert(not m and err == 'not_found' and not exists(path))
+		local f = open(path, 'w+')
+		local m, err = f:try_mmap()
+		assert(not m and err == 'file_too_short' and not f:closed())
+		f:truncate(page)
+		local m, err = try_mmap{
+			file = path, access = 'rw', size = 2^32,
+		}
+		assert(not m and err == 'file_too_short')
+		assert(f:size() == page)
+		local m, err = f:try_mmap{offset = page}
+		assert(not m and err == 'file_too_short')
+		local ok, err = pcall(mmap, {
+			file = path, size = 2^32,
+		})
+		assert(not ok and err.type == 'fs' and err.event == 'mmap')
+		rmfile(path)
+	end)
+end
+
+function test.mmap_invalid_options()
+	assert(not pcall(try_mmap, {size = 0}))
+	assert(not pcall(try_mmap, {size = -1}))
+	assert(not pcall(try_mmap, {}))
+	assert(not pcall(try_mmap, {size = 1, access = 'c'}))
+	assert(not pcall(try_mmap, {size = 1, offset = 1}))
+	assert(not pcall(try_mmap, {file = fs_test_lua, offset = -1}))
+	assert(not pcall(try_mmap, {file = fs_test_lua, offset = 1}))
+	with_owner(function()
+		local f = open(fs_test_lua)
+		f:close()
+		local ok, err = pcall(f.try_mmap, f)
+		assert(not ok and err == CLOSED)
+	end)
+end
+
+function test.mmap_protect_advise_ranges()
+	with_owner(function()
+		local page = pagesize()
+		local m = mmap{
+			size = page * 2 + 1,
+		}
+		m:protect('')
+		m:protect('r')
+		assert(cast('uint8_t *', m.addr)[0] == 0)
+		m:protect('rw')
+		cast('uint8_t *', m.addr)[0] = 71
+		m:protect('r', page, page)
+		m:protect('rw', page, page)
+		for _, advice in ipairs{'normal', 'random', 'sequential', 'willneed'} do
+			m:advise(advice, 1, page + 1)
+		end
+		assert(not pcall(m.protect, m, 'r', 1, 1))
+		assert(not pcall(m.protect, m, 'c'))
+		assert(not pcall(m.advise, m, 'invalid'))
+		assert(not pcall(m.try_sync, m, -1, 1))
+		assert(not pcall(m.try_sync, m, 0, 0))
+		assert(not pcall(m.try_sync, m, m.size, 1))
+		assert(not pcall(m.advise, m, 'normal', 0, m.size + 1))
+	end)
+end
+
+function test.mmap_owner_cleanup()
+	local page = pagesize()
+	local m
+	local ok, err = pcall_with_owner(function()
+		m = mmap{size = page}
+		error('mmap scope failure')
+	end)
+	assert(not ok and tostring(err):find'mmap scope failure')
+	assert(m:closed() and m.owner == nil)
+end
+
+function test.mmap_setowner()
+	with_owner(function()
+		local page = pagesize()
+		local parent = mmap{size = page}
+		local child
+		with_owner(function()
+			child = mmap{size = page}
+			child:setowner(parent)
+		end)
+		assert(not child:closed() and child.owner == parent)
+		parent:close()
+		assert(child:closed() and child.owner == nil)
+	end)
+end
+
+function test.mmap_shared_memory()
+	with_owner(function()
+		local name = '/fs_test_mmap_'..getpid()
+		local f = shm_open{name = name, flags = 'rdwr creat excl'}
+		f:onclose(function() shm_unlink(name) end)
+		assert(f.shm and not f.seek)
+		assert(band(C.fcntl(f.fd, 1), 1) == 1)
+		local f2, err = shm_open{name = name, flags = 'rdwr creat excl'}
+		assert(not f2 and err == 'already_exists')
+		f:truncate(pagesize())
+		local w = f:mmap{access = 'rw'}
+		local rf = shm_open{name = name, inheritable = true}
+		assert(band(C.fcntl(rf.fd, 1), 1) == 0)
+		local r = rf:mmap()
+		cast('uint8_t *', w.addr)[0] = 81
+		assert(cast('uint8_t *', r.addr)[0] == 81)
+		shm_unlink(name)
+		shm_unlink(name)
+		local f2, err = shm_open(name)
+		assert(not f2 and err == 'not_found')
+		f:close()
+		rf:close()
+		assert(cast('uint8_t *', r.addr)[0] == 81)
+	end)
+end
+
+function test.mmap_mirror_buffer()
+	with_owner(function()
+		local page = pagesize()
+		local m = mirror_buffer(page + 1)
+		assert(m.size == page * 2)
+		local p = cast('uint8_t *', m.addr)
+		p[0] = 91
+		p[m.size - 1] = 92
+		assert(p[m.size] == 91 and p[m.size * 2 - 1] == 92)
+		p[m.size + 1] = 93
+		assert(p[1] == 93)
+		local addr1 = m.addr
+		local addr2 = p + m.size
+		m:close()
+		assert(C.msync(addr1, page, 4) == -1 and errno() == 12)
+		assert(C.msync(addr2, page, 4) == -1 and errno() == 12)
+		assert(select('#', mirror_buffer()) == 1)
+	end)
+end
+
 --test cmdline ---------------------------------------------------------------
 
 chdir(os.getenv'HOME')
