@@ -26,6 +26,11 @@ EVENTFD
 	f:read_value() -> n                           read counter (async)
 	f:write_value([n])                            add n (default 1) to counter (async)
 	EFD_SEMAPHORE                                 flag for semaphore mode
+INOTIFY
+	inotify([opt]) -> f                          open async inotify instance
+	f:add_watch(path, mask) -> wd                add or update a watch
+	f:remove_watch(wd) -> true                   remove a watch
+	f:read_event() -> wd, mask, cookie, name     read one event (async)
 FILE I/O
 	f:[try_]read(buf, len) -> readlen|0           read data from file
 	f:readn(buf, n)                               read exactly n bytes
@@ -863,6 +868,99 @@ function eventfd(initval, flags)
 	f.write_value = function(f, n)
 		wbuf[0] = n or 1
 		f:write(wbuf, 8)
+	end
+	return f
+end
+
+--inotify --------------------------------------------------------------------
+
+cdef[[
+int inotify_init1(int flags);
+int inotify_add_watch(int fd, const char *path, uint32_t mask);
+int inotify_rm_watch(int fd, int wd);
+struct inotify_event {
+	int wd;
+	uint32_t mask;
+	uint32_t cookie;
+	uint32_t len;
+	char name[0];
+};
+]]
+
+--event bits accepted by add_watch() and returned by read_event().
+IN_ACCESS        = 0x00000001 --file accessed
+IN_MODIFY        = 0x00000002 --file contents changed
+IN_ATTRIB        = 0x00000004 --metadata changed
+IN_CLOSE_WRITE   = 0x00000008 --file closed after opening with write access
+IN_CLOSE_NOWRITE = 0x00000010 --file closed after opening without write access
+IN_OPEN          = 0x00000020 --file or directory opened
+IN_MOVED_FROM    = 0x00000040 --old child name after rename
+IN_MOVED_TO      = 0x00000080 --new child name after rename
+IN_CREATE        = 0x00000100 --child created in watched directory
+IN_DELETE        = 0x00000200 --child deleted from watched directory
+IN_DELETE_SELF   = 0x00000400 --watched file or directory deleted
+IN_MOVE_SELF     = 0x00000800 --watched file or directory moved
+
+--combined event masks.
+IN_CLOSE      = bor(IN_CLOSE_WRITE, IN_CLOSE_NOWRITE) --either close event
+IN_MOVE       = bor(IN_MOVED_FROM, IN_MOVED_TO) --either rename event
+IN_ALL_EVENTS = 0x00000fff --all requestable event bits
+
+--additional event bits returned by read_event().
+IN_UNMOUNT    = 0x00002000 --filesystem unmounted
+IN_Q_OVERFLOW = 0x00004000 --events lost; watch descriptor is -1
+IN_IGNORED    = 0x00008000 --watch removed explicitly or automatically
+IN_ISDIR      = 0x40000000 --event for a directory
+
+--watch options accepted by add_watch().
+IN_ONLYDIR     = 0x01000000 --watch only directories
+IN_DONT_FOLLOW = 0x02000000 --do not dereference symlinks
+IN_EXCL_UNLINK = 0x04000000 --exclude events for unlinked children
+IN_MASK_CREATE = 0x10000000 --fail if file or directory is already watched
+IN_MASK_ADD    = 0x20000000 --add event bits to the existing watch mask
+IN_ONESHOT     = 0x80000000 --remove watch after first event
+
+local inotify_event_size = sizeof'struct inotify_event'
+local inotify_event_ptr = ctype'struct inotify_event *'
+
+local function inotify_add_watch(f, path, mask)
+	f:check_closed()
+	local wd = C.inotify_add_watch(f.fd, path, mask)
+	return f:check_io('add_watch', try_errno(wd ~= -1 and wd or nil))
+end
+
+local function inotify_remove_watch(f, wd)
+	f:check_closed()
+	return f:check_io('remove_watch',
+		try_errno(C.inotify_rm_watch(f.fd, wd) == 0))
+end
+
+function inotify(opt)
+	local owner = _check_owner(opt and opt.owner)
+	local fd = C.inotify_init1(bor(O_NONBLOCK, O_CLOEXEC))
+	check_errno(fd ~= -1)
+	local f = _init_file(_make_file(owner, fd, {
+		type = 'inotify', debug_prefix = 'I', async = true, quiet = true,
+		add_watch = inotify_add_watch,
+		remove_watch = inotify_remove_watch,
+	}))
+	local buffer = new'uint32_t[1024]'
+	local bytes = cast(u8p, buffer)
+	local offset, read_size = 0, 0
+	f.read_event = function(f)
+		f:check_closed()
+		if offset == read_size then
+			read_size = f:read(buffer, sizeof(buffer))
+			offset = 0
+		end
+		local event = cast(inotify_event_ptr, bytes + offset)
+		offset = offset + inotify_event_size + event.len
+		local name = event.len > 0 and str(event.name) or nil
+		return
+			tonumber(event.wd),        --watch descriptor
+			tonumber(event.mask),      --IN_* event bits
+			tonumber(event.cookie),    --rename pair number, or 0
+			name                       --child filename, or nil
 	end
 	return f
 end

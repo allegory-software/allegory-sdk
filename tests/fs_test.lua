@@ -104,6 +104,153 @@ function test.eventfd_read_write_value()
 	f:close()
 end
 
+function test.inotify_open_close()
+	with_owner(function()
+		local f = inotify{owner = currentowner()}
+		assert(isfile(f, 'inotify') and f.async and f.epoll_i)
+		assert(f.owner == currentowner())
+		assert(getbit(C.fcntl(f.fd, 3), 0x800))
+		assert(getbit(C.fcntl(f.fd, 1), 1))
+		f:close()
+		assert(f:closed() and not f.epoll_i and not f.owner)
+		f:close()
+		local ok, err = lua_pcall(f.read_event, f)
+		assert(not ok and err == CLOSED)
+	end)
+end
+
+function test.inotify_async_read_event()
+	local path = 'fs_test_inotify_async'
+	mkdir(path)
+	checked_run(function()
+		local f = inotify()
+		local wd = f:add_watch(path, IN_CREATE)
+		local reader = currentthread()
+		f:settimeout(2, 'r')
+		resume(thread(function()
+			wait(.01)
+			assert(f.recv_thread == reader)
+			open(path..'/a', 'w'):close()
+		end, 'inotify producer'))
+		local watch, mask, cookie, name = f:read_event()
+		assert(watch == wd and mask == IN_CREATE)
+		assert(cookie == 0 and name == 'a')
+	end)
+	rm_rf(path)
+end
+
+function test.inotify_batched_events()
+	local path = 'fs_test_inotify_batch'
+	mkdir(path)
+	checked_run(function()
+		local f = inotify()
+		local wd = f:add_watch(path, IN_CREATE)
+		f:settimeout(2, 'r')
+		for i = 1, 180 do
+			open(path..'/'..i, 'w'):close()
+		end
+		mkdir(path..'/dir')
+		for i = 1, 180 do
+			local watch, mask, cookie, name = f:read_event()
+			assert(watch == wd and mask == IN_CREATE)
+			assert(cookie == 0 and name == tostring(i))
+		end
+		local watch, mask, cookie, name = f:read_event()
+		assert(watch == wd and mask == bor(IN_CREATE, IN_ISDIR))
+		assert(cookie == 0 and name == 'dir')
+	end)
+	rm_rf(path)
+end
+
+function test.inotify_rename_and_remove_watch()
+	local path = 'fs_test_inotify_rename'
+	mkdir(path..'/a', true)
+	mkdir(path..'/b')
+	checked_run(function()
+		local f = inotify()
+		local wd1 = f:add_watch(path..'/a', IN_CREATE)
+		local wd2 = f:add_watch(path..'/b', IN_MOVED_TO)
+		assert(wd1 ~= wd2)
+		assert(f:add_watch(path..'/a', bor(IN_MOVED_FROM, IN_MASK_ADD))
+			== wd1)
+		f:settimeout(2, 'r')
+		open(path..'/a/old', 'w'):close()
+		rename(path..'/a/old', path..'/b/new', nil, false)
+		local watch, mask, cookie, name = f:read_event()
+		assert(watch == wd1 and mask == IN_CREATE and name == 'old')
+		watch, mask, cookie, name = f:read_event()
+		assert(watch == wd1 and mask == IN_MOVED_FROM and name == 'old')
+		assert(cookie ~= 0)
+		local move_cookie = cookie
+		watch, mask, cookie, name = f:read_event()
+		assert(watch == wd2 and mask == IN_MOVED_TO and name == 'new')
+		assert(cookie == move_cookie)
+		f:remove_watch(wd1)
+		watch, mask, cookie, name = f:read_event()
+		assert(watch == wd1 and mask == IN_IGNORED)
+		assert(cookie == 0 and name == nil)
+	end)
+	rm_rf(path)
+end
+
+function test.inotify_oneshot()
+	local path = 'fs_test_inotify_oneshot'
+	open(path, 'w'):close()
+	checked_run(function()
+		local f = inotify()
+		local wd = f:add_watch(path, bor(IN_MODIFY, IN_ONESHOT))
+		f:settimeout(2, 'r')
+		local wf = open(path, 'r+')
+		wf:write('a')
+		wf:close()
+		local watch, mask, cookie, name = f:read_event()
+		assert(watch == wd and mask == IN_MODIFY)
+		assert(cookie == 0 and name == nil)
+		watch, mask, cookie, name = f:read_event()
+		assert(watch == wd and mask == IN_IGNORED)
+		assert(cookie == 0 and name == nil)
+	end)
+	rmfile(path)
+end
+
+function test.inotify_close_wakes_waiter()
+	checked_run(function()
+		local f = inotify()
+		local read_ok, read_err
+		local reader = thread(function()
+			read_ok, read_err = lua_pcall(f.read_event, f)
+		end, 'inotify reader')
+		resume(reader)
+		f:close()
+		assert(read_ok == false and read_err == CLOSED)
+		assert(reader:status() == 'dead')
+	end)
+end
+
+function test.inotify_cancel_read_closes_file()
+	checked_run(function()
+		local f = inotify()
+		local read_ok, read_err
+		local reader = thread(function()
+			read_ok, read_err = lua_pcall(f.read_event, f)
+		end, 'inotify reader')
+		resume(reader)
+		assert(reader:try_cancel())
+		assert(read_ok == false and read_err == CANCEL)
+		assert(f:closed() and not f.owner and not f.epoll_i)
+		assert(reader:status() == 'dead')
+	end)
+end
+
+function test.inotify_owner_cleanup()
+	local f
+	with_owner(function()
+		f = inotify()
+		assert(f.owner == currentowner())
+	end)
+	assert(f:closed() and not f.owner and not f.epoll_i)
+end
+
 function test.pidfd_open()
 	local f = pidfd_open(getpid(), {async = false})
 	assert(isfile(f, 'pidfd'))
