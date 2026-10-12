@@ -786,3 +786,132 @@ int schema_find_u32_be(const u32* buf, size_t n, const u32* key) {
 	}
 	return (lo < n && __builtin_bswap32(buf[lo]) == k) ? (int)lo : -1;
 }
+
+// row changes mmaped shared ring buffer -------------------------------------
+
+typedef struct schema_row_changes_header {
+	u64 capacity;
+	u64 retained_start;
+	u64 published_end;
+} schema_row_changes_header;
+
+typedef struct schema_row_changes_writer {
+	schema_row_changes_header* header;
+	u8* data;
+	u64 start;
+	u64 size;
+} schema_row_changes_writer;
+
+INLINE u64 changes_load(const u64* p) {
+	return __atomic_load_n(p, __ATOMIC_SEQ_CST);
+}
+
+INLINE void changes_store(u64* p, u64 value) {
+	__atomic_store_n(p, value, __ATOMIC_SEQ_CST);
+}
+
+INLINE u64 changes_align(u64 size) {
+	return (size + 7) & ~7ULL;
+}
+
+INLINE u64 changes_size(const u8* data) {
+	u64 size;
+	memcpy(&size, data, sizeof(size));
+	return size;
+}
+
+u64 schema_row_changes_end(const schema_row_changes_header* header) {
+	return changes_load(&header->published_end);
+}
+
+void schema_row_changes_begin(schema_row_changes_writer* writer,
+	schema_row_changes_header* header, void* data
+) {
+	writer->header = header;
+	writer->data = data;
+	writer->start = changes_load(&header->published_end);
+	writer->size = 16;
+}
+
+static void changes_reserve(schema_row_changes_writer* writer, u64 size) {
+	schema_row_changes_header* header = writer->header;
+	u64 retained_start = changes_load(&header->retained_start);
+	u64 start = retained_start;
+	u64 end = writer->start + changes_align(size);
+	u64 capacity = header->capacity;
+	while (end - start > capacity) {
+		assert(start < writer->start);
+		u64 batch_size = changes_size(writer->data + start % capacity);
+		assert(batch_size >= 16 && batch_size <= capacity);
+		start += changes_align(batch_size);
+	}
+	if (start != retained_start)
+		changes_store(&header->retained_start, start);
+}
+
+int schema_row_changes_add(schema_row_changes_writer* writer,
+	const void* table, u32 table_size, const void* key, u32 key_size
+) {
+	u64 size = writer->size + 8ULL + table_size + key_size;
+	u64 capacity = writer->header->capacity;
+	int overflow;
+	if (changes_align(size) <= capacity) {
+		changes_reserve(writer, size);
+		u8* data = writer->data + writer->start % capacity + writer->size;
+		memcpy(data, &table_size, 4);
+		memcpy(data + 4, &key_size, 4);
+		memcpy(data + 8, table, table_size);
+		memcpy(data + 8 + table_size, key, key_size);
+		overflow = 0;
+	} else {
+		overflow = changes_align(writer->size) <= capacity;
+	}
+	writer->size = size;
+	return overflow;
+}
+
+void schema_row_changes_publish(schema_row_changes_writer* writer,
+	u64 txn_id
+) {
+	u64 capacity = writer->header->capacity;
+	if (changes_align(writer->size) > capacity)
+		return;
+	changes_reserve(writer, writer->size);
+	u8* data = writer->data + writer->start % capacity;
+	memcpy(data, &writer->size, 8);
+	memcpy(data + 8, &txn_id, 8);
+	changes_store(&writer->header->published_end,
+		writer->start + changes_align(writer->size));
+}
+
+int schema_row_changes_peek(const schema_row_changes_header* header,
+	const void* data, u64* offset, u64* size, u64* txn_id
+) {
+	u64 start = changes_load(&header->retained_start);
+	u64 end = changes_load(&header->published_end);
+	if (*offset < start) {
+		*offset = start;
+		return -1;
+	}
+	if (*offset >= end)
+		return 0;
+	const u8* batch = (const u8*)data + *offset % header->capacity;
+	memcpy(size, batch, 8);
+	memcpy(txn_id, batch + 8, 8);
+	__atomic_thread_fence(__ATOMIC_SEQ_CST);
+	if (*offset < changes_load(&header->retained_start))
+		return -1;
+	assert(*size >= 16 && *size <= header->capacity);
+	assert(*offset + changes_align(*size) <= end);
+	return 1;
+}
+
+int schema_row_changes_read(const schema_row_changes_header* header,
+	const void* data, u64 offset, u64 size, void* out
+) {
+	if (offset < changes_load(&header->retained_start))
+		return 0;
+	memcpy(out, (const u8*)data + offset % header->capacity, size);
+	__atomic_thread_fence(__ATOMIC_SEQ_CST);
+	return offset >= changes_load(&header->retained_start);
+}

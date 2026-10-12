@@ -411,12 +411,20 @@ function Db:begin(mode)
 		assert(not self.txn or self.txn ~= self._ro_txn, 'begin() in r/o transaction')
 		self:checkz('txn_begin', C.mdbx_txn_begin_ex(self.env, self.txn, 0, txnp, nil))
 		self.txn = txnp[0]
+		self:_wtxn_begin()
 	else
 		assert(false)
 	end
 end
 
-Db._wtxn_end = noop --stub
+Db._wtxn_begin = noop
+Db._wtxn_precommit = noop 
+Db._wtxn_end = noop
+
+function Db:txn_id()
+	check_txn(self)
+	return C.mdbx_txn_id(self.txn)
+end
 
 function Db:commit()
 	check_txn(self)
@@ -425,6 +433,7 @@ function Db:commit()
 		self.txn = nil
 	else
 		local parent = ptr(self.txn.parent)
+		if not parent then self:_wtxn_precommit() end
 		local rc = C.mdbx_txn_commit_ex(self.txn, nil)
 		local committed = rc == 0
 		local_dbis_discard(self, committed, parent)
