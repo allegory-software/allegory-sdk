@@ -1550,8 +1550,9 @@ function test.mmap_private_writes()
 		f:write('abc')
 		f:close()
 		local f = open(path)
-		local m, err = f:try_mmap{access = 'rw'}
-		assert(not m and err == 'access_denied' and not f:closed())
+		local ok, err = pcall(f.mmap, f, {access = 'rw'})
+		assert(not ok and err.type == 'fs' and not f:closed())
+		assert(tostring(err):find'access_denied')
 		local m = f:mmap{access = 'rw', shared = false}
 		cast('uint8_t *', m.addr)[0] = string.byte('x')
 		assert(str(m.addr, m.size) == 'xbc')
@@ -1589,41 +1590,54 @@ function test.mmap_file_errors()
 		local path = 'fs_test_mmap_errors'
 		local page = pagesize()
 		rmfile(path)
-		local m, err = try_mmap(path)
+		local m, err = mmap(path)
 		assert(not m and err == 'not_found')
-		local m, err = try_mmap{file = path, access = 'rw', size = 1}
-		assert(not m and err == 'not_found' and not exists(path))
+		local ok, err = pcall(must_mmap, path)
+		assert(not ok and err.type == 'fs' and err.event == 'mmap')
+		assert(tostring(err):find'not_found')
+		local ok, err = pcall(mmap, {file = path, access = 'rw', size = 1})
+		assert(not ok and err.type == 'fs' and err.event == 'open')
+		assert(tostring(err):find'not_found' and not exists(path))
+		local m, err = mmap{
+			file = path, access = 'rw', shared = false, size = 1,
+		}
+		assert(not m and err == 'not_found')
 		local f = open(path, 'w+')
-		local m, err = f:try_mmap()
+		local m, err = f:mmap()
 		assert(not m and err == 'file_too_short' and not f:closed())
+		local ok, err = pcall(f.must_mmap, f)
+		assert(not ok and err.type == 'fs' and err.event == 'mmap')
+		assert(tostring(err):find'file_too_short')
 		f:truncate(page)
-		local m, err = try_mmap{
+		local m, err = mmap{
 			file = path, access = 'rw', size = 2^32,
 		}
 		assert(not m and err == 'file_too_short')
 		assert(f:size() == page)
-		local m, err = f:try_mmap{offset = page}
+		local m, err = f:mmap{offset = page}
 		assert(not m and err == 'file_too_short')
-		local ok, err = pcall(mmap, {
+		local ok, err = pcall(must_mmap, {
 			file = path, size = 2^32,
 		})
 		assert(not ok and err.type == 'fs' and err.event == 'mmap')
+		assert(must_mmap(path).size == page)
+		assert(f:must_mmap().size == page)
 		rmfile(path)
 	end)
 end
 
 function test.mmap_invalid_options()
-	assert(not pcall(try_mmap, {size = 0}))
-	assert(not pcall(try_mmap, {size = -1}))
-	assert(not pcall(try_mmap, {}))
-	assert(not pcall(try_mmap, {size = 1, access = 'c'}))
-	assert(not pcall(try_mmap, {size = 1, offset = 1}))
-	assert(not pcall(try_mmap, {file = fs_test_lua, offset = -1}))
-	assert(not pcall(try_mmap, {file = fs_test_lua, offset = 1}))
+	assert(not pcall(mmap, {size = 0}))
+	assert(not pcall(mmap, {size = -1}))
+	assert(not pcall(mmap, {}))
+	assert(not pcall(mmap, {size = 1, access = 'c'}))
+	assert(not pcall(mmap, {size = 1, offset = 1}))
+	assert(not pcall(mmap, {file = fs_test_lua, offset = -1}))
+	assert(not pcall(mmap, {file = fs_test_lua, offset = 1}))
 	with_owner(function()
 		local f = open(fs_test_lua)
 		f:close()
-		local ok, err = pcall(f.try_mmap, f)
+		local ok, err = pcall(f.mmap, f)
 		assert(not ok and err == CLOSED)
 	end)
 end
@@ -1700,6 +1714,12 @@ function test.mmap_shared_memory()
 		shm_unlink(name)
 		local f2, err = shm_open(name)
 		assert(not f2 and err == 'not_found')
+		local ok, err = pcall(shm_open, name, 'r+')
+		assert(not ok and err.type == 'fs' and err.event == 'shm_open')
+		assert(tostring(err):find'not_found')
+		local ok, err = pcall(shm_open, {name = name, flags = 'rdwr'})
+		assert(not ok and err.type == 'fs' and err.event == 'shm_open')
+		assert(tostring(err):find'not_found')
 		f:close()
 		rf:close()
 		assert(cast('uint8_t *', r.addr)[0] == 81)
@@ -1723,6 +1743,55 @@ function test.mmap_mirror_buffer()
 		assert(C.msync(addr1, page, 4) == -1 and errno() == 12)
 		assert(C.msync(addr2, page, 4) == -1 and errno() == 12)
 		assert(select('#', mirror_buffer()) == 1)
+	end)
+end
+
+function test.mmap_mirror_file()
+	with_owner(function()
+		local path = 'fs_test_mirror_file'
+		local page = pagesize()
+		local f = open(path, 'w+')
+		f:onclose(function() rmfile(path) end)
+		f:write(string.rep('h', page))
+		f:truncate(page * 2)
+		local header = f:mmap{size = page}
+		local m1 = mirror_buffer(page, {file = f, offset = page})
+		local m2 = mirror_buffer(page, {
+			file = path, offset = page, access = 'r',
+		})
+		local data1 = cast('uint8_t*', m1.addr)
+		local data2 = cast('const uint8_t*', m2.addr)
+		data1[0] = 71
+		data1[page - 1] = 72
+		data1[page + 1] = 73
+		assert(data2[0] == 71 and data2[page] == 71)
+		assert(data2[page - 1] == 72 and data2[page * 2 - 1] == 72)
+		assert(data2[1] == 73 and data2[page + 1] == 73)
+		assert(str(header.addr, page) == string.rep('h', page))
+		assert(not f:closed())
+		f:close()
+		assert(data2[0] == 71)
+		m1:close()
+		assert(data2[page - 1] == 72)
+	end)
+end
+
+function test.mmap_mirror_file_ranges()
+	with_owner(function()
+		local path = 'fs_test_mirror_file_ranges'
+		local page = pagesize()
+		local f = open(path, 'w+')
+		f:onclose(function() rmfile(path) end)
+		f:truncate(page * 2)
+		local ok, err = pcall(mirror_buffer, page * 2, {
+			file = f, offset = page,
+		})
+		assert(not ok and err.type == 'fs' and not f:closed())
+		assert(tostring(err):find'file_too_short')
+		local ok = pcall(mirror_buffer, page, {file = f, offset = 1})
+		assert(not ok and not f:closed())
+		local m = mirror_buffer(page - 1, {file = f, offset = page})
+		assert(m.size == page and not f:closed())
 	end)
 end
 
