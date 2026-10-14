@@ -311,19 +311,19 @@ f:[must_]mmap([opt]) -> mmap
 	* addr   : address hint; the kernel may choose another address.
 	* owner  : default currentowner().
 
-	Create and resize files with open() and truncate() before mapping.
-	mmap() returns 'not_found' for missing paths opened read-only, and
-	'file_too_short' for empty ranges or ranges past EOF. Read/write open
-	errors are raised. must_mmap() raises for both returned errors too.
-	For shared writable mappings, open the file for reading and writing.
-	For private writable mappings, reading is enough. The kernel does not
-	write private changes to the file; later file changes are not guaranteed
-	to be visible through private mappings.
+	Create and resize files with open() and truncate() before calling mmap().
+	When opening read/only mmap() returns 'not_found' when file is missing and
+	'file_too_short' for empty ranges or ranges past EOF. must_mmap() raises.
+	Private mode uses copy-on-write, so read-only access is enough, the file
+	doesn't get written anyway. Changes made to the file through another mmap
+	or fd may not become visible through an existing private mapping.
 
-	Callers can keep using the open file or close it. The mapping's owner
-	and lifetime are independent. mmap(path) closes its file before returning.
-	Callers must synchronize shared access. The kernel can terminate the
-	process on access after file truncation or on an I/O failure.
+	mmap(path) opens the file, maps it, then closes the fd before returning.
+	Callers that pass an already-open file can keep that descriptor open or
+	close it; neither choice changes the mapping’s lifetime.
+
+	Callers must synchronize shared access.
+	I/O errors through direct memory access can't be caught in Lua.
 
 mmap:[try_]close()
 
@@ -331,11 +331,10 @@ mmap:[try_]close()
 
 mmap:[try_]sync([offset], [size])
 
-	Wait for disk writeback. Private changes are not written back.
-	For sync(), protect(), and advise(), pass byte offsets from mmap.addr.
-	Offset defaults to zero; size defaults to the remaining bytes.
-	Ranges must be nonempty and within mmap.size. sync() and advise() align
-	downward and cover the entire requested range.
+	fsync (parts of) file. For sync(), protect(), and advise(), offsets are
+	relative to mmap.addr. Offset defaults to 0; size defaults to the remaining
+	bytes. Ranges must be nonempty and within mmap.size. sync() and advise()
+	align the address downward and the size upward to page boundaries.
 
 mmap:protect(access, [offset], [size])
 
@@ -372,7 +371,7 @@ mirror_buffer([size], [opt]) -> mmap
 aligned_size(size, [dir]) -> size
 aligned_addr(addr, [dir]) -> addr
 
-	Align to a page boundary. dir is 'right' (default) or 'left'.
+	Align to a page boundary. dir is 'r'/'right' (default) or 'l'/'left'.
 	Already aligned values are unchanged. aligned_addr() returns a void*.
 
 DIRECTORY LISTING ------------------------------------------------------------
@@ -1138,9 +1137,9 @@ function file.truncate(f, size, opt)
 	f:check_closed()
 	opt = opt or 'fallocate fail' --avoid creating a sparse file
 	if not f.shm then
-		if opt:find'fallocate' then
+		if opt:has'fallocate' then
 			local ok, err = fallocate(f, size)
-			if not ok and opt:find'fail' then
+			if not ok and opt:has'fail' then
 				f:check_io('truncate', false, err)
 			end
 		end
@@ -2367,9 +2366,9 @@ local MFD_CLOEXEC = 1
 local function mmap_protection(access)
 	assert(not access:find'[^rwx]', 'invalid mmap access')
 	return bor(
-		access:find'r' and 1 or 0,
-		access:find'w' and 2 or 0,
-		access:find'x' and 4 or 0
+		access:has'r' and 1 or 0,
+		access:has'w' and 2 or 0,
+		access:has'x' and 4 or 0
 	)
 end
 
@@ -2495,7 +2494,7 @@ local function try_mmap_options(path_or_file, opt)
 		assert(offset >= 0, 'mmap offset must be >= 0')
 		assert(offset == aligned_size(offset), 'mmap offset not page-aligned')
 		if isstr(path_or_file) then
-			local mode = opt.shared ~= false and access:find'w' and 'r+' or 'r'
+			local mode = opt.shared ~= false and access:has'w' and 'r+' or 'r'
 			local f, err = open(path_or_file, mode)
 			if not f then return nil, err end
 			return close_mmap_file(f,

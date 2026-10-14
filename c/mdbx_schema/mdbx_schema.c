@@ -789,18 +789,32 @@ int schema_find_u32_be(const u32* buf, size_t n, const u32* key) {
 
 // row changes mmaped shared ring buffer -------------------------------------
 
+// Offsets are absolute positions in file (writers only increase it).
+// offset % capacity is the position in the ring buffer.
 typedef struct schema_row_changes_header {
-	u64 capacity;
-	u64 retained_start;
-	u64 published_end;
+	u64 capacity;       // ring buffer size in bytes, after the header page
+	u64 retained_start; // offset of the oldest batch still in the buffer
+	u64 published_end;  // offset after the newest published batch
+	u64 wake;           // nothing reads it; writers write it to wake inotify
 } schema_row_changes_header;
 
 typedef struct schema_row_changes_writer {
-	schema_row_changes_header* header;
-	u8* data;
-	u64 start;
-	u64 size;
+	schema_row_changes_header* header; // header page of the changes file
+	u8* data;  // the ring, mapped twice in a row so a batch can cross its end
+	u64 start; // offset of the batch that the current txn is writing
+	u64 size;  // size of that batch so far: header and rows
 } schema_row_changes_writer;
+
+typedef struct schema_row_changes_reader {
+	const schema_row_changes_header* header; // header page of the file
+	const u8* data;  // the ring buffer, mapped twice in a row
+	u64 offset;      // offset of the next batch to read
+	u64 prev_txn_id; // id of the last returned batch, or since_txn_id
+	u64 size;        // buffer size needed when next() returns -1
+	double txn_id;   // id of the batch returned by next()
+} schema_row_changes_reader;
+
+#define CHANGES_BATCH_HEADER_SIZE 16 // size, txn_id
 
 INLINE u64 changes_load(const u64* p) {
 	return __atomic_load_n(p, __ATOMIC_SEQ_CST);
@@ -814,14 +828,16 @@ INLINE u64 changes_align(u64 size) {
 	return (size + 7) & ~7ULL;
 }
 
+// The space for a batch is its size rounded up to 8 bytes, plus 8 bytes at
+// the end that hold the size again, so that a reader can walk the ring backward.
+INLINE u64 changes_slot_size(u64 size) {
+	return changes_align(size) + 8;
+}
+
 INLINE u64 changes_size(const u8* data) {
 	u64 size;
 	memcpy(&size, data, sizeof(size));
 	return size;
-}
-
-u64 schema_row_changes_end(const schema_row_changes_header* header) {
-	return changes_load(&header->published_end);
 }
 
 void schema_row_changes_begin(schema_row_changes_writer* writer,
@@ -830,20 +846,23 @@ void schema_row_changes_begin(schema_row_changes_writer* writer,
 	writer->header = header;
 	writer->data = data;
 	writer->start = changes_load(&header->published_end);
-	writer->size = 16;
+	writer->size = CHANGES_BATCH_HEADER_SIZE;
 }
 
+// Make room for a batch of `size` bytes at writer->start by dropping the
+// oldest batches.
 static void changes_reserve(schema_row_changes_writer* writer, u64 size) {
 	schema_row_changes_header* header = writer->header;
 	u64 retained_start = changes_load(&header->retained_start);
 	u64 start = retained_start;
-	u64 end = writer->start + changes_align(size);
+	u64 end = writer->start + changes_slot_size(size);
 	u64 capacity = header->capacity;
 	while (end - start > capacity) {
 		assert(start < writer->start);
 		u64 batch_size = changes_size(writer->data + start % capacity);
-		assert(batch_size >= 16 && batch_size <= capacity);
-		start += changes_align(batch_size);
+		assert(batch_size >= CHANGES_BATCH_HEADER_SIZE
+			&& batch_size <= capacity);
+		start += changes_slot_size(batch_size);
 	}
 	if (start != retained_start)
 		changes_store(&header->retained_start, start);
@@ -855,7 +874,10 @@ int schema_row_changes_add(schema_row_changes_writer* writer,
 	u64 size = writer->size + 8ULL + table_size + key_size;
 	u64 capacity = writer->header->capacity;
 	int overflow;
-	if (changes_align(size) <= capacity) {
+	// If the row fits in the ring, append it to the batch. Otherwise only add
+	// its size, so that publish() sees that the batch is too large, and
+	// report the overflow for the first row that doesn't fit.
+	if (changes_slot_size(size) <= capacity) {
 		changes_reserve(writer, size);
 		u8* data = writer->data + writer->start % capacity + writer->size;
 		memcpy(data, &table_size, 4);
@@ -864,54 +886,128 @@ int schema_row_changes_add(schema_row_changes_writer* writer,
 		memcpy(data + 8 + table_size, key, key_size);
 		overflow = 0;
 	} else {
-		overflow = changes_align(writer->size) <= capacity;
+		overflow = changes_slot_size(writer->size) <= capacity;
 	}
 	writer->size = size;
 	return overflow;
 }
 
 void schema_row_changes_publish(schema_row_changes_writer* writer,
-	u64 txn_id
+	const MDBX_txn* txn
 ) {
+	u64 txn_id = mdbx_txn_id(txn);
 	u64 capacity = writer->header->capacity;
-	if (changes_align(writer->size) > capacity)
+	// If the batch doesn't fit in the ring, publish nothing. Readers then see
+	// that this txn's id has no batch.
+	u64 slot_size = changes_slot_size(writer->size);
+	if (slot_size > capacity)
 		return;
+	// Write the header and the size at the end, then advance published_end so
+	// that readers see the batch.
 	changes_reserve(writer, writer->size);
 	u8* data = writer->data + writer->start % capacity;
 	memcpy(data, &writer->size, 8);
 	memcpy(data + 8, &txn_id, 8);
+	memcpy(data + slot_size - 8, &writer->size, 8);
 	changes_store(&writer->header->published_end,
-		writer->start + changes_align(writer->size));
+		writer->start + slot_size);
 }
 
-int schema_row_changes_peek(const schema_row_changes_header* header,
-	const void* data, u64* offset, u64* size, u64* txn_id
+void schema_row_changes_reader_init(schema_row_changes_reader* r,
+	const schema_row_changes_header* header, const void* data,
+	u64 since_txn_id
 ) {
-	u64 start = changes_load(&header->retained_start);
-	u64 end = changes_load(&header->published_end);
-	if (*offset < start) {
-		*offset = start;
-		return -1;
+	memset(r, 0, sizeof(*r));
+	r->header = header;
+	r->data = data;
+	r->offset = changes_load(&header->published_end);
+	r->prev_txn_id = since_txn_id;
+	// Walk back from the newest batch to the first batch after since_txn_id.
+	// Stop early if a writer overwrote the batch before r->offset; next()
+	// then sees the missing ids.
+	u64 capacity = header->capacity;
+	while (r->offset > changes_load(&header->retained_start)) {
+		u64 size = changes_size(r->data + (r->offset - 8) % capacity);
+		u64 batch_offset = r->offset - changes_slot_size(size);
+		u64 txn_id;
+		memcpy(&txn_id, r->data + (batch_offset + 8) % capacity, 8);
+		__atomic_thread_fence(__ATOMIC_SEQ_CST);
+		if (r->offset <= changes_load(&header->retained_start))
+			break;
+		assert(size >= CHANGES_BATCH_HEADER_SIZE && size <= capacity);
+		if (txn_id <= since_txn_id)
+			break;
+		r->offset = batch_offset;
 	}
-	if (*offset >= end)
-		return 0;
-	const u8* batch = (const u8*)data + *offset % header->capacity;
-	memcpy(size, batch, 8);
-	memcpy(txn_id, batch + 8, 8);
-	__atomic_thread_fence(__ATOMIC_SEQ_CST);
-	if (*offset < changes_load(&header->retained_start))
-		return -1;
-	assert(*size >= 16 && *size <= header->capacity);
-	assert(*offset + changes_align(*size) <= end);
-	return 1;
 }
 
-int schema_row_changes_read(const schema_row_changes_header* header,
-	const void* data, u64 offset, u64 size, void* out
-) {
-	if (offset < changes_load(&header->retained_start))
+// Called when no more batches are visible to the caller's read snapshot.
+// Every writer publishes its batch before it commits, so if the snapshot's
+// txn id is newer than the last batch, the txns in between published none.
+static int changes_end(schema_row_changes_reader* r, u64 max_txn_id) {
+	if (max_txn_id <= r->prev_txn_id)
 		return 0;
-	memcpy(out, (const u8*)data + offset % header->capacity, size);
-	__atomic_thread_fence(__ATOMIC_SEQ_CST);
-	return offset >= changes_load(&header->retained_start);
+	r->prev_txn_id = max_txn_id;
+	r->txn_id = (double)max_txn_id;
+	return 3;
+}
+
+// Returns 1 when it copied a batch to out, 2 when it copied a batch and the
+// caller missed changes before it, 3 when the caller missed changes up to
+// r->txn_id and there is no batch, 0 when no new batch is visible to txn,
+// and -1 when out is too small; r->size then holds the size needed.
+int schema_row_changes_next(schema_row_changes_reader* r,
+	const MDBX_txn* txn, void* out, u64 out_size
+) {
+	const schema_row_changes_header* header = r->header;
+	u64 capacity = header->capacity;
+	u64 max_txn_id = mdbx_txn_id(txn);
+	for (;;) {
+		// If a writer overwrote batches that this reader had not read yet,
+		// continue from the oldest batch that the ring still holds.
+		u64 start = changes_load(&header->retained_start);
+		u64 end = changes_load(&header->published_end);
+		if (r->offset < start)
+			r->offset = start;
+		if (r->offset >= end)
+			return changes_end(r, max_txn_id);
+
+		// Read the batch header. If a writer overwrote it during the read,
+		// start over.
+		const u8* batch = r->data + r->offset % capacity;
+		u64 size, txn_id;
+		memcpy(&size, batch, 8);
+		memcpy(&txn_id, batch + 8, 8);
+		__atomic_thread_fence(__ATOMIC_SEQ_CST);
+		if (r->offset < changes_load(&header->retained_start))
+			continue;
+		assert(size >= CHANGES_BATCH_HEADER_SIZE && size <= capacity);
+		assert(r->offset + changes_slot_size(size) <= end);
+
+		// Stop at a batch from a txn newer than the caller's read snapshot.
+		if (txn_id > max_txn_id)
+			return changes_end(r, max_txn_id);
+
+		// Copy the batch. If a writer overwrote it during the copy, start
+		// over.
+		if (size > out_size) {
+			r->size = size;
+			return -1;
+		}
+		memcpy(out, batch, size);
+		__atomic_thread_fence(__ATOMIC_SEQ_CST);
+		if (r->offset < changes_load(&header->retained_start))
+			continue;
+		r->offset += changes_slot_size(size);
+
+		// The caller missed changes if ids are missing between the previous
+		// batch and this one. An id has no batch when its writer published
+		// none, or when another writer overwrote the batch before this reader
+		// read it.
+		int has_gap = txn_id > r->prev_txn_id + 1;
+
+		r->prev_txn_id = txn_id;
+		r->txn_id = (double)txn_id;
+		return has_gap ? 2 : 1;
+	}
 }

@@ -89,8 +89,8 @@ ENCODING / DECODING
 ROW CHANGE NOTIFICATIONS
 	db:open_changes_file (size)              open shared row changes file
 	db:track_row_changes (false|true)        disable/enable recording
-	db:changes_reader () -> reader           create buffer reader
-	reader            () -> txn_id,batch,gap | nil,nil,gap
+	db:changes_reader (since_txn_id) -> reader  create buffer reader
+	reader            () -> txn_id,batch,gap | txn_id,nil,true | nil
 	mdbx_each_row_change (batch) -> iter() -> table_name,pk
 LOW-LEVEL / INTEGRATION API
 	MDBX_MAX_KEY_SIZE
@@ -263,21 +263,37 @@ ROW CHANGE NOTIFICATIONS
 	processes and every one reads the same notifications.
 
 	- db:open_changes_file(file_size) opens the changes file. use the the same
-	  file_size when opening the same file.
+	  file_size when opening the same file. Call it before the first write
+	  txn to avoid having a gap in the txn stream that would cause reloads.
 	- db:track_row_changes(false|true) disables/enables recording temporarily.
+	  The code publishes no message for txns committed while it is off, so
+	  readers see a gap.
+	  Turn it off around bulk ops like schema migrations that rewrite rows.
 	- only base-table non-raw row changes are recorded, including from triggers
 	  and fk actions. Indexes, raw writes and schema migrations are not tracked.
-	- to read changes, call changes_reader() -> reader() -> txn_id, batch, gap
-	  then mdbx_each_row_change(batch) -> iter(), table_name, pk.
-	- txn_id is uint64_t. batch is uint8_t[?] containing an encoded message
+	- to start reading changes, call changes_reader(db:txn_id()) on a read txn
+	  to get all changes newer than that txn.
+	- an inotify watcher for IN_MODIFY can be set on the changes file to be
+	  notified when new changes appear.
+	- txn_id is a number. batch is uint8_t[?] containing an encoded message
 	  in a stable shared buffer.
-	- gap is true if the reader detects overwritten messages or a jump
-	  between consecutive transaction IDs. Repeated IDs are allowed.
-	- messages larger than file_size are skipped. gap can be false in that case.
-	- compare consecutive transaction IDs to detect skipped messages and
-	  reload rows if any IDs are missing.
-	- a reader can return repeated IDs and keys, including after a failed
+	- gap is true when the reader detects a jump between consecutive txn_ids,
+	  including when messages get overwritten. Repeated txn_ids are allowed.
+	- when no message is left up to the read txn, but the read txn's id is
+	  newer than the last message, reader() returns txn_id, nil, true: the
+	  txns up to txn_id published no message.
+	- messages larger than file_size are not published.
+	- compare consecutive txn_ids to detect skipped messages and reload rows
+	  if any ids are missing.
+	- a reader can return repeated ids and keys, including after a failed
 	  commit. Fetch current rows with db:find_raw(table_name, pk, #pk).
+
+	TODO: A failed commit publishes its batch with id T, and the next commit
+	reuses T. If that next commit publishes nothing, for example because
+	tracking is off or because the process never opened the changes file,
+	readers take the failed txn’s batch as T and see no gap. The changes of
+	the real txn T are then missed. It needs a failed commit followed
+	immediately by an untracked commit, so it is rare. No clean fix for it yet.
 
 ]]
 
@@ -3203,6 +3219,7 @@ typedef struct schema_row_changes_header {
 	uint64_t capacity;
 	uint64_t retained_start;
 	uint64_t published_end;
+	uint64_t wake;
 } schema_row_changes_header;
 typedef struct schema_row_changes_writer {
 	schema_row_changes_header* header;
@@ -3210,29 +3227,39 @@ typedef struct schema_row_changes_writer {
 	uint64_t start;
 	uint64_t size;
 } schema_row_changes_writer;
-uint64_t schema_row_changes_end(const schema_row_changes_header* header);
+typedef struct schema_row_changes_reader {
+	const schema_row_changes_header* header;
+	const uint8_t* data;
+	uint64_t offset;
+	uint64_t prev_txn_id;
+	uint64_t size;
+	double txn_id;
+} schema_row_changes_reader;
 void schema_row_changes_begin(schema_row_changes_writer* writer,
 	schema_row_changes_header* header, void* data);
 int schema_row_changes_add(schema_row_changes_writer* writer,
 	const void* table, uint32_t table_size,
 	const void* key, uint32_t key_size);
 void schema_row_changes_publish(schema_row_changes_writer* writer,
-	uint64_t txn_id);
-int schema_row_changes_peek(const schema_row_changes_header* header,
-	const void* data, uint64_t* offset, uint64_t* size, uint64_t* txn_id);
-int schema_row_changes_read(const schema_row_changes_header* header,
-	const void* data, uint64_t offset, uint64_t size, void* out);
+	const MDBX_txn* txn);
+void schema_row_changes_reader_init(schema_row_changes_reader* r,
+	const schema_row_changes_header* header, const void* data,
+	uint64_t since_txn_id);
+int schema_row_changes_next(schema_row_changes_reader* r,
+	const MDBX_txn* txn, void* out, uint64_t out_size);
 ]]
+
+local changes_wake_offset = offsetof('schema_row_changes_header', 'wake')
 
 function Db:open_changes_file(size)
 	assert(not self.txn, 'open_changes_file: in transaction')
 	assert(not self._changes, 'changes already open')
 	assert(size > 0, 'changes size must be > 0')
 	local size = aligned_size(size)
-	self:begin('w')
 	local file = must_open{
 		path = self.file..'.changes', mode = 'rw', owner = self,
 	}
+	file:lock()
 	local page_size = pagesize()
 	local file_size = file:attr('size')
 	if file_size == 0 then
@@ -3254,9 +3281,9 @@ function Db:open_changes_file(size)
 		assertf(header.capacity == size,
 			'changes capacity differs: %s', file.path)
 	end
-	file:close()
-	self:commit()
+	file:unlock()
 	self._changes = {
+		file = file,
 		header_map = header_map,
 		data_map = data_map,
 		header = header,
@@ -3283,7 +3310,7 @@ end
 function Db:_wtxn_precommit()
 	local changes = self._changes
 	if changes and self._is_tracking_row_changes ~= false then
-		C.schema_row_changes_publish(changes.writer, self:txn_id())
+		C.schema_row_changes_publish(changes.writer, self.txn)
 	end
 end
 
@@ -3291,7 +3318,14 @@ function Db:_wtxn_end(commit, parent)
 	local changes = self._changes
 	if changes and self._is_tracking_row_changes ~= false then
 		local mark = pop(changes.marks)
-		if not commit then changes.writer.size = mark end
+		if not commit then
+			changes.writer.size = mark
+		elseif not parent then
+			--inotify ignores writes through the mmap, so write one byte through
+			--the fd to wake the processes that watch the file.
+			changes.file:seek('set', changes_wake_offset)
+			changes.file:write('\1', 1)
+		end
 	end
 	invalidate_dirty_schemas(self, commit, parent)
 end
@@ -3309,63 +3343,30 @@ local function add_row_change(db, schema, key, key_size)
 	end
 end
 
-function Db:changes_reader()
+function Db:changes_reader(since_txn_id)
 	assert(self.env, 'closed')
 	local changes = assert(self._changes, 'changes not open')
-	local offset = new('uint64_t[1]', C.schema_row_changes_end(changes.header))
-	local size = new'uint64_t[1]'
-	local txn_id = new'uint64_t[1]'
+	local r = new'schema_row_changes_reader'
+	C.schema_row_changes_reader_init(r, changes.header, changes.data,
+		since_txn_id)
 	local batch_buffer = buffer()
-	local prev_txn_id
-	local has_gap = false
+	local batch, batch_size = nil, 0
 	return function()
 		assert(self.env, 'closed')
 		assert(self.txn and self.txn == self._ro_txn,
 			'changes reader requires a read transaction')
-		while true do
-			local ret = C.schema_row_changes_peek(changes.header, changes.data,
-				offset, size, txn_id)
-			if ret == 0 then
-				return nil, nil, has_gap
-			elseif ret == -1 then
-				if not has_gap then
-					log('ERROR', 'mdbx', 'changes',
-						'Unread row change messages were overwritten: %s',
-						self.file)
-				end
-				has_gap = true
-			else
-				local batch_txn_id = txn_id[0]
-				if batch_txn_id > self:txn_id() then
-					return nil, nil, has_gap
-				end
-				local batch_offset = offset[0]
-				local batch_size = num(size[0])
-				local batch = batch_buffer(batch_size)
-				local ok = C.schema_row_changes_read(changes.header, changes.data,
-					batch_offset, batch_size, batch) == 1
-				if ok then
-					offset[0] = batch_offset + floor((batch_size + 7) / 8) * 8
-					if prev_txn_id and batch_txn_id > prev_txn_id + 1 then
-						if not has_gap then
-							log('ERROR', 'mdbx', 'changes',
-								'Missing row change transaction IDs: %s', self.file)
-						end
-						has_gap = true
-					end
-					prev_txn_id = batch_txn_id
-					local gap = has_gap
-					has_gap = false
-					return batch_txn_id, batch, gap
-				else
-					if not has_gap then
-						log('ERROR', 'mdbx', 'changes',
-							'Unread row change messages were overwritten: %s',
-							self.file)
-					end
-					has_gap = true
-				end
-			end
+		--if the buffer is too small, grow it and read again.
+		local ret = C.schema_row_changes_next(r, self.txn, batch, batch_size)
+		while ret == -1 do
+			batch, batch_size = batch_buffer(num(r.size))
+			ret = C.schema_row_changes_next(r, self.txn, batch, batch_size)
+		end
+		if ret == 0 then
+			return nil
+		elseif ret == 3 then
+			return r.txn_id, nil, true
+		else
+			return r.txn_id, batch, ret == 2
 		end
 	end
 end

@@ -7859,6 +7859,14 @@ local function with_row_changes(name, fn)
 	end)
 end
 
+--reader of the changes committed after this call.
+local function new_changes_reader(db)
+	db:begin'r'
+	local txn_id = db:txn_id()
+	db:commit()
+	return db:changes_reader(txn_id)
+end
+
 local function check_row_changes(batch, ids, names)
 	local count = 0
 	for name, key in mdbx_each_row_change(batch) do
@@ -7872,14 +7880,14 @@ end
 
 function test.row_changes_independent_readers()
 	with_row_changes('row_changes_independent_readers', function(db)
-		local reader1 = db:changes_reader()
-		local reader2 = db:changes_reader()
+		local reader1 = new_changes_reader(db)
+		local reader2 = new_changes_reader(db)
 		db:begin'w'
 		db:insert('t', '{}', {id = 1, v = 10})
 		db:insert('t', '{}', {id = 2, v = 20})
 		local written_id = db:txn_id()
 		db:commit()
-		local reader3 = db:changes_reader()
+		local reader3 = new_changes_reader(db)
 		db:begin'r'
 		for _, reader in ipairs{reader1, reader2} do
 			local txn_id, batch, gap = reader()
@@ -7894,7 +7902,7 @@ end
 
 function test.row_changes_nested_commit_and_abort()
 	with_row_changes('row_changes_nested_commit_and_abort', function(db)
-		local reader = db:changes_reader()
+		local reader = new_changes_reader(db)
 		db:begin'w'
 		db:insert('t', '{}', {id = 1})
 		db:begin'w'
@@ -7925,7 +7933,7 @@ end
 
 function test.row_changes_row_write_paths()
 	with_row_changes('row_changes_row_write_paths', function(db)
-		local reader = db:changes_reader()
+		local reader = new_changes_reader(db)
 		db:begin'w'
 		db:put_records('t', '{}', {{id = 1, v = 10}, {id = 2, v = 20}})
 		db:commit()
@@ -7962,7 +7970,7 @@ function test.row_changes_index_cursor_writes()
 		db:insert('t', '{}', {id = 1, v = 10})
 		db:insert('t', '{}', {id = 2, v = 20})
 		db:commit()
-		local reader = db:changes_reader()
+		local reader = new_changes_reader(db)
 		db:begin'w'
 		local cur = db:cursor(index_name)
 		assert(cur:try_find(nil, 10))
@@ -8002,7 +8010,7 @@ function test.row_changes_trigger_writes()
 		})
 		db:commit()
 		db:open_changes_file(pagesize())
-		local reader = db:changes_reader()
+		local reader = new_changes_reader(db)
 		db:begin'w'
 		db:insert('t', '{}', {id = 1, val = 'one'})
 		db:commit()
@@ -8036,7 +8044,7 @@ function test.row_changes_cascade_delete()
 		db:insert('child', '{}', {id = 10, parent_id = 1})
 		db:insert('child', '{}', {id = 20, parent_id = 2})
 		db:commit()
-		local reader = db:changes_reader()
+		local reader = new_changes_reader(db)
 		db:begin'w'
 		db:del('t', 1)
 		db:commit()
@@ -8053,7 +8061,7 @@ end
 
 function test.row_changes_oversized_nested_abort()
 	with_row_changes('row_changes_oversized_nested_abort', function(db)
-		local reader = db:changes_reader()
+		local reader = new_changes_reader(db)
 		db:begin'w'
 		db:insert('t', '{}', {id = 1, v = 10})
 		db:begin'w'
@@ -8075,7 +8083,7 @@ end
 
 function test.row_changes_oversized_transaction_gap()
 	with_row_changes('row_changes_oversized_transaction_gap', function(db)
-		local reader = db:changes_reader()
+		local reader = new_changes_reader(db)
 		db:begin'w'
 		db:insert('t', '{}', {id = 1, v = 10})
 		db:commit()
@@ -8090,6 +8098,9 @@ function test.row_changes_oversized_transaction_gap()
 		local skipped_id = db:txn_id()
 		db:commit()
 		db:begin'r'
+		local txn_id, batch, gap = reader()
+		assert(txn_id == skipped_id and skipped_id > first_id)
+		assert(batch == nil and gap)
 		assert(not reader())
 		assert(num(db:find('t', 'v', 1)) == pagesize())
 		db:commit()
@@ -8098,19 +8109,44 @@ function test.row_changes_oversized_transaction_gap()
 		local written_id = db:txn_id()
 		db:commit()
 		db:begin'r'
-		local txn_id, batch = reader()
-		assert(txn_id == written_id and txn_id > skipped_id)
-		assert(skipped_id > first_id)
+		local txn_id, batch, gap = reader()
+		assert(txn_id == written_id and not gap)
 		check_row_changes(batch, {2})
 		assert(not reader())
 		db:commit()
 	end)
 end
 
+function test.row_changes_untracked_txn_gap()
+	with_row_changes('row_changes_untracked_txn_gap', function(db)
+		local reader = new_changes_reader(db)
+		db:track_row_changes(false)
+		db:begin'w'
+		db:insert('t', '{}', {id = 1})
+		local untracked_id = db:txn_id()
+		db:commit()
+		db:track_row_changes(true)
+		db:begin'r'
+		local txn_id, batch, gap = reader()
+		assert(txn_id == untracked_id and batch == nil and gap)
+		assert(not reader())
+		db:commit()
+		db:begin'w'
+		db:insert('t', '{}', {id = 2})
+		local tracked_id = db:txn_id()
+		db:commit()
+		db:begin'r'
+		txn_id, batch, gap = reader()
+		assert(txn_id == tracked_id and not gap)
+		check_row_changes(batch, {2})
+		db:commit()
+	end)
+end
+
 function test.row_changes_wraparound_and_reused_batch()
 	with_row_changes('row_changes_wraparound_and_reused_batch', function(db)
-		local fast_reader = db:changes_reader()
-		local slow_reader = db:changes_reader()
+		local fast_reader = new_changes_reader(db)
+		local slow_reader = new_changes_reader(db)
 		db:begin'w'
 		db:insert('t', '{}', {id = 1})
 		db:commit()
@@ -8146,7 +8182,7 @@ end
 
 function test.row_changes_failed_commit_reuses_id()
 	with_row_changes('row_changes_failed_commit_reuses_id', function(db)
-		local reader = db:changes_reader()
+		local reader = new_changes_reader(db)
 		db:begin'w'
 		db:insert('t', '{}', {id = 1})
 		local failed_id = db:txn_id()
@@ -8174,7 +8210,7 @@ end
 
 function test.row_changes_close_and_reopen()
 	with_row_changes('row_changes_close_and_reopen', function(db, file)
-		local reader = db:changes_reader()
+		local reader = new_changes_reader(db)
 		local header_map = db._changes.header_map
 		local data_map = db._changes.data_map
 		db:begin'w'
@@ -8185,7 +8221,7 @@ function test.row_changes_close_and_reopen()
 		assert(not pcall(reader))
 		local db = mdbx_open(file)
 		db:open_changes_file(pagesize())
-		local reader = db:changes_reader()
+		local reader = new_changes_reader(db)
 		db:begin'r'
 		assert(not reader() and db:exists('t', 1))
 		db:commit()
@@ -8201,11 +8237,85 @@ function test.row_changes_close_and_reopen()
 	end)
 end
 
+function test.row_changes_reader_since_txn_id()
+	with_row_changes('row_changes_reader_since_txn_id', function(db)
+		local ids = {}
+		for id = 1, 3 do
+			db:begin'w'
+			db:insert('t', '{}', {id = id})
+			ids[id] = db:txn_id()
+			db:commit()
+		end
+		db:begin'r'
+		local reader = db:changes_reader(ids[1])
+		local txn_id, batch, gap = reader()
+		assert(txn_id == ids[2] and not gap)
+		check_row_changes(batch, {2})
+		txn_id, batch, gap = reader()
+		assert(txn_id == ids[3] and not gap)
+		check_row_changes(batch, {3})
+		assert(not reader())
+		assert(not db:changes_reader(ids[3])())
+		local txn_id, batch, gap = db:changes_reader(ids[1] - 1)()
+		assert(txn_id == ids[1] and not gap)
+		check_row_changes(batch, {1})
+		local txn_id, batch, gap = db:changes_reader(ids[1] - 2)()
+		assert(txn_id == ids[1] and gap)
+		db:commit()
+		local update_ids = {}
+		for count = 1, floor(pagesize() / 32) + 1 do
+			db:begin'w'
+			db:update('t', '{}', {id = 1, v = count})
+			update_ids[count] = db:txn_id()
+			db:commit()
+		end
+		db:begin'r'
+		local txn_id, batch, gap = db:changes_reader(ids[3])()
+		assert(txn_id > ids[3] + 1 and gap)
+		local n = #update_ids
+		local reader = db:changes_reader(update_ids[n - 2])
+		txn_id, batch, gap = reader()
+		assert(txn_id == update_ids[n - 1] and not gap)
+		check_row_changes(batch, {1})
+		txn_id, batch, gap = reader()
+		assert(txn_id == update_ids[n] and not gap)
+		assert(not reader())
+		db:commit()
+	end)
+end
+
+function test.row_changes_commit_wakes_inotify()
+	with_row_changes('row_changes_commit_wakes_inotify', function(db, file)
+		run(function()
+			local f = inotify()
+			local wd = f:add_watch(file..'.changes', IN_MODIFY)
+			f:settimeout(2, 'r')
+			db:begin'w'
+			db:insert('t', '{}', {id = 1})
+			db:commit()
+			local watch, mask = f:read_event()
+			assert(watch == wd and mask == IN_MODIFY)
+			db:begin'w'
+			db:begin'w'
+			db:insert('t', '{}', {id = 2})
+			db:commit()
+			f:settimeout(.01, 'r')
+			local ok, err = pcall(f.read_event, f)
+			assert(not ok and err.message == 'timeout', tostring(err))
+			db:commit()
+			f:settimeout(2, 'r')
+			watch, mask = f:read_event()
+			assert(watch == wd and mask == IN_MODIFY)
+			f:close()
+		end)
+	end)
+end
+
 function test.row_changes_other_process_and_old_snapshot()
 	with_row_changes('row_changes_other_process_and_old_snapshot',
 		function(db, file)
 			require'proc'
-			local reader = db:changes_reader()
+			local reader = new_changes_reader(db)
 			db:begin'r'
 			local snapshot_id = db:txn_id()
 			local code = [[

@@ -423,7 +423,7 @@ Db._wtxn_end = noop
 
 function Db:txn_id()
 	check_txn(self)
-	return C.mdbx_txn_id(self.txn)
+	return tonumber(C.mdbx_txn_id(self.txn))
 end
 
 function Db:commit()
