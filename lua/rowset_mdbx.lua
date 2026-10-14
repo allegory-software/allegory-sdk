@@ -36,8 +36,8 @@ WRITING
 
 	When the write table's pk is its auto-inc col alone, the client reserves
 	ids before saving new rows (reserve_ids() advances the table's sequence),
-	and a new row whose id is already in the table was inserted before: the
-	insert is skipped.
+	and a new row whose pk is already in the table gets an already_exists
+	error.
 
 ]]
 
@@ -119,7 +119,6 @@ function scan_rowset(...)
 		local key_names = {}  --{NAME,...} outputs holding write_table's pk
 		local key_cols  = {}  --{COL,...}  the pk cols themselves
 		local seq_name        --output holding write_table's auto-inc col
-		local seq_col         --write_table's auto-inc col
 		local is_seq_pk       --the auto-inc col is the whole pk: ids reservable
 
 		local insert_row, update_row, delete_row, load_row --fw. decl.
@@ -146,6 +145,7 @@ function scan_rowset(...)
 				f.name = name
 				f.index = i
 				fields[i] = f
+				fields[name] = f
 			end
 			rs.fields = fields
 
@@ -170,7 +170,6 @@ function scan_rowset(...)
 				end
 				local seq_field = schema.autoinc_field
 				seq_name = seq_field and name_of_col[seq_field.col]
-				seq_col = seq_field and seq_field.col
 				is_seq_pk = seq_name ~= nil and #key_names == 1
 					and key_names[1] == seq_name
 				rs.insert_row = insert_row
@@ -262,17 +261,15 @@ function scan_rowset(...)
 
 		--[[local]] function insert_row(self, vals)
 			rowset_db(rs):atomic('w', function()
-				local db = rowset_db(rs)
-				--a supplied id comes from reserve_ids(): a row with it is this
-				--client's earlier insert, whose response was lost.
-				local id = is_seq_pk and vals[seq_name] or nil
-				if id ~= nil and db:exists(write_table, id) then return end
 				local t = written_vals(vals)
 				--written_vals() leaves the pk col out when it's read-only.
-				if id ~= nil then t[seq_col] = id end
-				local seq = db:insert(write_table, '{}', t)
-				--load_row() looks the row up by pk, so put a minted key in vals.
-				if seq and seq_name then vals[seq_name] = seq end
+				for i, name in ipairs(key_names) do
+					local v = vals[name]
+					check_for('row', nil, 'insert', v ~= nil,
+						'pk required: %s', name)
+					t[key_cols[i]] = v
+				end
+				rowset_db(rs):insert(write_table, '{}', t)
 				self:table_changed(write_table)
 			end)
 		end
@@ -290,11 +287,19 @@ function scan_rowset(...)
 
 		--[[local]] function update_row(self, vals)
 			rowset_db(rs):atomic('w', function()
+				local db = rowset_db(rs)
 				local t = written_vals(vals)
+				local keys = {}
 				for i, name in ipairs(key_names) do
-					t[key_cols[i]] = val_or_old(vals, name)
+					keys[i] = val_or_old(vals, name)
+					t[key_cols[i]] = keys[i]
 				end
-				rowset_db(rs):update(write_table, '{}', t)
+				--row deleted by another user: write nothing; reload_row() finds
+				--it gone and answers remove.
+				if not db:exists(write_table, unpack(keys, 1, #key_names)) then
+					return
+				end
+				db:update(write_table, '{}', t)
 				self:table_changed(write_table)
 			end)
 		end

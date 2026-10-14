@@ -49,6 +49,7 @@ Field attributes:
 	EDITING
 		client_default   : val           value that new rows start with
 		has_server_default: t            the server fills this in for new rows
+		auto_increment   : t             id reserved before save
 		readonly         : f             cannot be changed
 		nosave           : f             client-side; should not be saved
 		not_null         : t             can't be null
@@ -94,12 +95,11 @@ Rowset methods:
 		update_row(vals)
 		delete_row(vals)
 		load_row(vals)
-		reserve_ids(n) -> {id1,...}    optional; single auto-inc pk only
+		reserve_ids(n) -> {id1,...}    required for a single auto_increment pk
 
-	A rowset with reserve_ids() gets new rows with the pk already in vals: an
-	id that reserve_ids() returned. insert_row() must treat an existing row
-	with that id as the same insert sent again, whose response was lost: it
-	inserts nothing, and load_row() loads the existing row back.
+	reserve_ids() is for reserving ids from server and assigning them by the
+	client before saving the row in order to prevent double-inserts on network
+	loss. the server will refuse the second insert with the same id.
 
 Methods to call:
 
@@ -140,7 +140,7 @@ end
 local client_field_attrs = {
 	internal=1, hidden=1, readonly=1, null_text=1,
 	name=1, type=1, label=1, info=1, client_default=1, align=1,
-	has_server_default=1,
+	has_server_default=1, auto_increment=1,
 	enum_values=1, enum_labels=1, enum_info=1, not_null=1, min=1, maxlen=1,
 	scale=1, decimals=1,
 	slider_min = 1, slider_max = 1,
@@ -291,7 +291,6 @@ function virtual_rowset(init, ...)
 			can_remove_rows = rs.can_remove_rows,
 			can_change_rows = rs.can_change_rows,
 			can_move_rows = rs.can_move_rows,
-			reserves_ids = rs.reserve_ids and true or nil,
 			fields = rs.client_fields,
 			pk = rs.pk,
 			pos_col = rs.pos_col,
@@ -664,7 +663,7 @@ action['rowset.events'] = function()
 	--when client closes the socket...
 	http_request():onfinish(resume_waiting_thread)
 	--when we close the socket from another thread...
-	http_request().http.f:onclose(resume_waiting_thread)
+	http_request().tcp:onclose(resume_waiting_thread)
 	while true do
 		if isempty(rowsets) then
 			local thread = currentthread()

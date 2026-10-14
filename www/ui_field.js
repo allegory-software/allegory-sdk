@@ -16,7 +16,8 @@ Field attributes (* = client-only):
 		empty_text     : plain text display value for ''
 	*	to_text        : f(v) -> s   plain text display value.
 	EDITING
-		readonly       : prevent editing.
+		readonly       : prevent modifying on new rows or existing rows.
+	*	immutable      : prevent modifying on existing rows.
 		not_null       : don't allow null (false).
 	*	to_input       : f(v) -> s   value as editable text.
 	*	from_input     : f(s) -> v   editable text back to value (or undefined)

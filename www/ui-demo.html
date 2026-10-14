@@ -318,7 +318,8 @@ ui.end_stack()
 
 {
 let fields = [
-	{name: 'id'       , w:   3, type: 'number', align: 'right', editable: false},
+	{name: 'id'       , w:   3, type: 'number', align: 'right', editable: false,
+		auto_increment: true},
 	{name: 'num'      , w:   7, type: 'number', decimals: 2},
 	{name: 'size'     , w:   7, type: 'filesize', magnitude_decimals: 1, gray_min: 1024},
 	{name: 'count'    , w:   5, type: 'count'},
@@ -530,6 +531,46 @@ let grid_config_input_opt = {
 }
 for (let col in grid_config_input_opt)
 	grid_config_input_opt[col].col = col
+let grid_save_input_opt = {
+	id: {},
+	text: {},
+	num: {},
+	test_action: {control: 'enum_input'},
+	test_description: {},
+}
+for (let col in grid_save_input_opt)
+	grid_save_input_opt[col].col = col
+let grid_typed_input_opt = {
+	code: {},
+	text: {},
+	num: {},
+	test_action: {control: 'enum_input'},
+	test_description: {},
+}
+for (let col in grid_typed_input_opt)
+	grid_typed_input_opt[col].col = col
+let grid_config_source_field = ui.create_field({
+	type: 'enum',
+	enum_values: ['client', 'server', 'typed'],
+	enum_labels: {
+		client: 'Client',
+		server: 'Server tree',
+		typed: 'Server typed key',
+	},
+	not_null: true,
+})
+let grid_config_case_field = ui.create_field({
+	type: 'enum',
+	enum_values: [
+		'mixed', 'normal', 'slow save', 'slow response',
+		'disconnect before save', 'disconnect after save',
+		'reject row', 'delete existing row', 'delete missing row',
+		'same typed key',
+	],
+	not_null: true,
+})
+ui.saved_value('grid_config_source', 'client', grid_config_source_field)
+ui.saved_value('grid_config_case', 'mixed', grid_config_case_field)
 let grid_config_label_pos_field = ui.create_field({
 	type: 'enum',
 	enum_values: ['left', 'left-right-align', 'top', 'hide'],
@@ -612,8 +653,154 @@ function set_grid_config_null(nav) {
 	}
 }
 
+// give each new demo nav a few pending changes to test reload() with: two
+// edited rows, a row marked for deletion and a new row.
+let seeded_navs = new WeakSet() // navs that got their demo changes
+function seed_grid_config_changes(nav) {
+	if (seeded_navs.has(nav))
+		return
+	seeded_navs.add(nav)
+	let id_fi   = nav.all_fields_map.id.fi
+	let text_fi = nav.all_fields_map.text.fi
+	let num_fi  = nav.all_fields_map.num.fi
+	let ri2 = nav.lookup('id', [2])
+	let ri3 = nav.lookup('id', [3])
+	let ri4 = nav.lookup('id', [4])
+	if (ri2 != null)
+		nav.set_cell_val(ri2, text_fi, 'edited text')
+	if (ri3 != null)
+		nav.set_cell_val(ri3, num_fi, 12345)
+	if (ri4 != null)
+		nav.remove_rows([ri4])
+	let row = [] // the new row's values, by fi
+	row[id_fi] = nav.row_n + 1000
+	row[text_fi] = 'new row'
+	nav.insert_rows([row])
+	// the grid was built before the changes: build it again with them.
+	ui.rebuild()
+}
+
+let grid_save_tab = Math.random().toString(36).slice(2, 6)
+
+// the server test rowsets: their key column, the keys of the reset test
+// rows, and the test row for each role.
+let grid_test_sets = {
+	server: {
+		rowset_name: 'grid_save', key_col: 'id',
+		keys: [1, 2, 3, 4, 5, 6, 7, 8],
+		other_key: 6, rejected_key: 7, control_key: 8,
+	},
+	typed: {
+		rowset_name: 'grid_typed', key_col: 'code',
+		keys: ['A1', 'A2', 'A3', 'A4', 'A5'],
+		other_key: 'A3', rejected_key: 'A4', control_key: 'A5',
+	},
+}
+
+function is_grid_test_data_reset(nav, test_set) {
+	return nav.ready && !nav.modified_n
+		&& nav.row_n == test_set.keys.length
+		&& test_set.keys.every(
+			key => nav.lookup(test_set.key_col, [key]) != null)
+}
+
+function set_grid_test_val(nav, test_set, key, col, value) {
+	nav.set_cell_val(nav.lookup(test_set.key_col, [key]),
+		nav.all_fields_map[col].fi, value)
+}
+
+function insert_grid_test_row(nav, vals, at_ri) {
+	let row = [] // the new row's values, by fi
+	for (let col in vals)
+		row[nav.all_fields_map[col].fi] = vals[col]
+	nav.insert_rows([row], at_ri)
+}
+
+// edits of the rejected, other and control rows, shared by both rowsets.
+function prepare_grid_test_actions(nav, test_set, test_case) {
+	let set_val = (key, col, value) =>
+		set_grid_test_val(nav, test_set, key, col, value)
+	let other_key = test_set.other_key
+	let control_key = test_set.control_key
+	if (test_case == 'mixed' || test_case == 'reject row')
+		set_val(test_set.rejected_key, 'test_action', 'reject row')
+	if (test_case == 'mixed' || test_case == 'delete existing row') {
+		set_val(other_key, 'num', 606)
+		set_val(control_key, 'test_action', 'delete existing row')
+		set_val(control_key, 'test_description',
+			'Server deletes row '+other_key
+			+' before applying its pending update.')
+	} else if (test_case == 'delete missing row') {
+		nav.remove_rows([nav.lookup(test_set.key_col, [other_key])])
+		set_val(control_key, 'test_action', 'delete existing row')
+		set_val(control_key, 'test_description',
+			'Server deletes row '+other_key
+			+' before applying its pending delete.')
+	} else if (test_case != 'normal' && test_case != 'reject row') {
+		set_val(control_key, 'test_action', test_case)
+		set_val(control_key, 'test_description',
+			'Clear this action before retrying. Delays are 5 seconds.')
+	}
+}
+
+// new rows get no id: the nav reserves ids when saving.
+function prepare_grid_save_changes(nav, test_case) {
+	let test_set = grid_test_sets.server
+	let set_val = (key, col, value) =>
+		set_grid_test_val(nav, test_set, key, col, value)
+	set_val(1, 'text', 'Edited parent')
+	set_val(1, 'num', 101)
+	set_val(2, 'text', 'Edited child')
+	set_val(2, 'num', 202)
+	nav.remove_rows([nav.lookup('id', [3])])
+	insert_grid_test_row(nav, {
+		text: 'New root',
+		test_action: 'normal',
+		test_description: 'New root. Server must supply num = 42.',
+	})
+	insert_grid_test_row(nav, {
+		text: 'New child',
+		test_action: 'normal',
+		test_description:
+			'New child of saved parent 1. Server must supply num = 42.',
+	}, nav.lookup('id', [2]))
+	prepare_grid_test_actions(nav, test_set, test_case)
+}
+
+function prepare_grid_typed_changes(nav, test_case) {
+	let test_set = grid_test_sets.typed
+	if (test_case == 'same typed key') {
+		insert_grid_test_row(nav, {
+			code: 'SAME',
+			text: 'Tab '+grid_save_tab,
+			test_action: 'slow save',
+			test_description:
+				'Save in both tabs within 5 seconds. Second insert must fail.',
+		})
+	} else {
+		set_grid_test_val(nav, test_set, 'A1', 'num', 101)
+		nav.remove_rows([nav.lookup('code', ['A2'])])
+		insert_grid_test_row(nav, {
+			code: 'N1',
+			text: 'New row',
+			test_action: 'normal',
+			test_description: 'New row. Server must supply num = 42.',
+		})
+		prepare_grid_test_actions(nav, test_set, test_case)
+	}
+}
+
 demos.grid = function() {
 let state = ui.state('grid_config_state')
+let source = ui.value('grid_config_source')
+let is_server = source != 'client'
+let test_set = grid_test_sets[source] // server test rowset, or undefined
+let grid_id = source == 'server' ? 'grid_config_server_grid'
+	: source == 'typed' ? 'grid_config_typed_grid'
+	: 'grid_config_grid'
+let input_opt = source == 'server' ? grid_save_input_opt
+	: source == 'typed' ? grid_typed_input_opt
+	: grid_config_input_opt
 
 let row_count = ui.value('grid_config_rows')
 let col_max = max(grid_demo_base_field_count,
@@ -635,23 +822,23 @@ state.tree_depth_slider_field ??= ui.create_field({
 let tree_depth_slider_field = state.tree_depth_slider_field
 let tree_depth = round(ui.value(tree_depth_slider_id))
 
-let first_col = ui.value('grid_config_first_col')
+let first_col = is_server ? 'text' : ui.value('grid_config_first_col')
 let readonly = ui.value('grid_config_readonly')
 let auto_expand = ui.value('grid_config_auto_expand')
 let filter_bar_visible = ui.value('grid_config_filter_bar')
 
-if (!ui.rowsets.grid_config_rowset
-	|| ui.state_of('grid_config_recreate', 'state') == 'click') {
+if (!is_server && (!ui.rowsets.grid_config_rowset
+	|| ui.state_of('grid_config_recreate', 'state') == 'click')) {
 	ui.rowsets.grid_config_rowset = make_grid_demo_rowset(
 		row_count,
 		tree_depth,
 		first_col,
 		col_count)
-	ui.free_state('grid_config_grid')
+	ui.free_state(grid_id)
 }
 
 let grid_opt = {
-	rowset_name: 'grid_config_rowset',
+	rowset_name: is_server ? test_set.rowset_name : 'grid_config_rowset',
 	flat: !ui.value('grid_config_tree'),
 	tree_col: first_col,
 	cell_select_mode: ui.value('grid_config_can_focus_cells'),
@@ -671,10 +858,13 @@ let grid_opt = {
 	vertical_layout: ui.value('grid_config_vertical_layout'),
 	filter_bar_visible: filter_bar_visible,
 }
-let grid_nav = ui.state_of('grid_config_grid', 'e')
+let grid_nav = ui.state_of(grid_id, 'e')
 if (grid_nav) {
 	grid_nav.auto_expand = auto_expand
 	grid_nav.filter_bar_visible = filter_bar_visible
+	// reload before the grid builds, like the recreate button above.
+	if (ui.state_of('grid_config_reload', 'state') == 'click')
+		grid_nav.reload()
 }
 
 ui.hsplit('grid_config_split', 300, 'px', 2)
@@ -695,19 +885,26 @@ if (grid_nav)
 	grid_nav.can_change_rows = !readonly
 
 ui.hvsplit(split_hv, 'grid_config_form_split_'+split_hv, 350, 'px', 2)
-	ui.hvsplit(split_vh, 'grid_config_detail_split_'+split_vh, .25, 'fr', 2)
-		ui.grid('grid_config_grid', grid_opt)
-		grid_nav = ui.state_of('grid_config_grid', 'e')
-		if (grid_nav)
-			grid_nav.auto_expand = auto_expand
-	ui.splitter()
+	if (!is_server)
+		ui.hvsplit(split_vh, 'grid_config_detail_split_'+split_vh,
+			.25, 'fr', 2)
+	ui.grid(grid_id, grid_opt)
+	grid_nav = ui.state_of(grid_id, 'e')
+	if (grid_nav) {
+		grid_nav.auto_expand = auto_expand
+		if (!is_server)
+			seed_grid_config_changes(grid_nav)
+	}
+	if (!is_server) {
+		ui.splitter()
 		let master_row_id = grid_nav?.focused_row_cell_val('id')
 		ui.grid('grid_config_detail', {
 			rowset_name: 'grid_config_detail',
 			param_vals: grid_nav?.focused_ri != null
 				? [{master_id: master_row_id}] : false,
 		})
-	ui.end_hvsplit()
+		ui.end_hvsplit()
+	}
 ui.splitter()
 	ui.v()
 	ui.p(ui.sp())
@@ -720,9 +917,9 @@ ui.splitter()
 		ui.m(ui.sp4())
 		ui.min_w(ui.em(16))
 		ui.v_aligned(1, ui.sp2(), 'l', 't')
-			if (grid_nav)
-				for (let col in grid_config_input_opt) {
-					let opt = grid_config_input_opt[col]
+			if (grid_nav?.ready)
+				for (let col in input_opt) {
+					let opt = input_opt[col]
 					opt.nav = grid_nav
 					opt.label_pos = label_pos
 					ui.box_args(1, 'l', 'c')
@@ -739,31 +936,56 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 	ui.m(ui.sp4())
 	ui.v(0, ui.sp(), 's', 't')
 
-		ui.v_aligned(0)
-		ui.h(1, ui.sp1())
-			ui.text('', 'Rows', 0)
-			ui.enum_toggle('grid_config_rows', null, grid_config_rows_field)
-		ui.end_h()
+		ui.enum_toggle('grid_config_source', null, grid_config_source_field)
+		if (is_server) {
+			ui.list_dropdown('grid_config_case',
+				grid_config_case_field.enum_values, null, grid_config_case_field)
+			let test_case = ui.value('grid_config_case')
+			let can_prepare = grid_nav != null
+				&& is_grid_test_data_reset(grid_nav, test_set)
+				&& (test_case != 'same typed key' || source == 'typed')
+			if (ui.button('grid_config_prepare', 'Prepare edits',
+				null, null, null, null, !can_prepare)) {
+				if (source == 'typed')
+					prepare_grid_typed_changes(grid_nav, test_case)
+				else
+					prepare_grid_save_changes(grid_nav, test_case)
+				ui.rebuild()
+			}
+			if (ui.button('grid_config_server_reset', 'Reset test data'))
+				glue.post('/rowset.json/'+test_set.rowset_name, {exec: 'reset'},
+					function() {
+						ui.free_state(grid_id)
+						ui.animate()
+					})
+			ui.text('', 'Reset test data before preparing a case.', 0, 'l')
+		} else {
+			ui.v_aligned(0)
+			ui.h(1, ui.sp1())
+				ui.text('', 'Rows', 0)
+				ui.enum_toggle('grid_config_rows', null, grid_config_rows_field)
+			ui.end_h()
 
-		ui.h(1, ui.sp1())
-			ui.text('', 'Cols', 0)
-			ui.enum_toggle('grid_config_cols', null, grid_config_cols_field)
-		ui.end_h()
+			ui.h(1, ui.sp1())
+				ui.text('', 'Cols', 0)
+				ui.enum_toggle('grid_config_cols', null, grid_config_cols_field)
+			ui.end_h()
 
-		ui.h(1, ui.sp1())
-			ui.text('', 'Tree depth', 0, 'l')
-			ui.slider(tree_depth_slider_id, null, tree_depth_slider_field)
-			ui.text('', tree_depth, 2, 'r')
-		ui.end_h()
+			ui.h(1, ui.sp1())
+				ui.text('', 'Tree depth', 0, 'l')
+				ui.slider(tree_depth_slider_id, null, tree_depth_slider_field)
+				ui.text('', tree_depth, 2, 'r')
+			ui.end_h()
 
-		ui.end_v_aligned()
-		ui.text('', 'Cells: '+row_count * col_count, 0, 'l')
+			ui.end_v_aligned()
+			ui.text('', 'Cells: '+row_count * col_count, 0, 'l')
 
-		ui.h(1, ui.sp1())
-			ui.text('', 'Col #1', 0, 'l')
-			ui.list_dropdown('grid_config_first_col',
-				grid_demo_first_cols, null, grid_demo_first_col_field)
-		ui.end_h()
+			ui.h(1, ui.sp1())
+				ui.text('', 'Col #1', 0, 'l')
+				ui.list_dropdown('grid_config_first_col',
+					grid_demo_first_cols, null, grid_demo_first_col_field)
+			ui.end_h()
+		}
 
 		function grid_config_toggle(id, label) {
 			ui.h(1, ui.sp(), 's', 'c')
@@ -812,7 +1034,14 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 		grid_config_toggle('grid_config_validate_on_load',
 			'Validate on load')
 
-		ui.primary_button('grid_config_recreate', 'Recreate grid')
+		if (!is_server)
+			ui.primary_button('grid_config_recreate', 'Recreate grid')
+		ui.button('grid_config_reload', 'Reload grid')
+		if (ui.button('grid_config_save', 'Save',
+			null, null, null, null, !is_server || !grid_nav?.modified_n)) {
+			grid_nav.exit_edit()
+			grid_nav.save()
+		}
 	ui.end_v()
 ui.end_scrollbox()
 ui.end_hsplit()

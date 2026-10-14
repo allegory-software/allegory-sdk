@@ -406,8 +406,8 @@ fields readonly; the client does not enforce that. A new row with no key
 yet is a valid row. In ui_nav.js, the nav checks pk uniqueness when it
 validates a row, only for new rows and rows the user edited, and skips the
 check for a row with no key yet. e.lookup() by null returns the rows whose
-value is null. In nav2, the server checks pk uniqueness; the nav does not
-check for duplicate keys.
+value is null. In nav2, the nav does not check pk uniqueness. The server
+refuses an insert with the pk of an existing row.
 
 In nav2, load() requires a PK with at least one column, for both local
 and server rowsets.
@@ -468,12 +468,19 @@ passes 'insert'. remove_rows takes op: 'delete' (the default) or 'undelete'.
 
 Policy. ev.input is not a mode: it marks a call that the user made. Policy
 options (can_add_rows, can_remove_rows, can_change_rows, can_move_rows, a
-row's no_change and no_remove, and the like) stop only those calls. App code
+row's readonly and no_remove, and the like) stop only those calls. App code
 calls without ev.input, and policy options never stop it.
 
 Parameters. A detail nav takes whichever values it needs from the focused
 row of each master nav. When inserting a row, the detail nav fills the
 row's parameter fields with the current parameter values.
+
+The nav filters rows by parameter values like by any other filter, so it
+keeps showing modified rows after the parameter values change. A server
+nav loads only the rows matching the parameter values. reload_rowset() then
+drops a saved row missing from the reply unless the row has edits and its
+server values do not match the parameter values, because the reload did
+not request that row.
 
 Server consistency. The server keeps the tree consistent, with a foreign
 key or without: it rejects removing a row that still has children, or it
@@ -484,9 +491,10 @@ changes them by calling focus_cell() with options that say what it wants,
 never by writing the fields itself. Only visible rows and cols can be
 focused or selected: a hidden focused row or a hidden selected row is a
 bug. On a plain move, focus_cell() selects the focused cell and nothing
-else. After a filter change or a collapse it resets the selection to the
-focused cell; after any other change to the visible rows or cols it drops
-only what is now hidden. The code that changes the visible rows chooses
+else. After a move and after an update from the server it keeps the
+selection and drops only what is now hidden; after any other change to the
+visible rows or cols it resets the selection to the focused cell. The code
+that changes the visible rows chooses
 which, through update_parts(). On Ctrl+A the grid keeps focus unchanged
 and selects all rows.
 
@@ -502,8 +510,7 @@ In nav2, the nav frees each removed row slot once, after compacting stored
 rows and indexes or while removing group rows. The nav clears the row's edits
 and errors when freeing its slot. Before reusing a slot, the nav commits the
 selection rectangle, clears the removed row's visible index, and calls
-focus_cell(ri, fi, 'deselect_hidden'). The nav preserves selection on
-surviving rows.
+focus_cell(ri, fi, 'deselect_hidden').
 
 In nav2, a data row is modified when it is new, marked for deletion, or has
 an edited cell. The nav counts all such rows in modified_n. Only saving is
@@ -517,13 +524,17 @@ data row as passing the filter. The nav includes no_save rows in both
 operations.
 
 revert_changes() drops new rows, unmarks deleted rows, and reverts edited
-cells, including on no_save rows. The nav clears the edits before discarding
-the input_vals and cell_errors arrays.
+cells, including on no_save rows. It marks a new row of the pending or lost
+save batch for deletion instead of dropping it. The nav clears the edits
+before discarding the input_vals and cell_errors arrays, and discards them
+only when no modified row remains.
 
-In nav2, the nav refuses enabling or changing grouping in tree view, or
-with pending changes in a tree-capable nav, including in flat view. For an
-ordinary flat nav, it refuses grouping with edited grouping columns. The
-nav always allows ungrouping.
+In nav2, the nav allows grouping from tree view and restores tree view when
+ungrouping the last column. The nav preserves the flat option while grouped.
+The nav refuses enabling or changing grouping with pending changes in a
+tree-capable nav, including in flat view. For an ordinary flat nav, it
+refuses grouping with edited grouping columns. The nav always allows
+ungrouping.
 
 In nav2, calendar range grouping uses column[/offset]/unit/frequency,
 with month or year as the unit. Frequency and offset are measured in that
@@ -556,7 +567,10 @@ may not remove a record, the nav keeps that record's ancestors too.
 remove_rows with op 'undelete' unmarks only marked records, and their
 marked parents too, so that no kept record is left under a deleted parent.
 The nav drops a deleted new row outright, since the server has nothing to
-delete. The nav sends deletes to the server children first.
+delete. A new row of the pending save batch, or of a failed batch that no
+reload has settled yet, is the exception: the server may have inserted it,
+so the nav marks it for deletion. The nav sends deletes to the server
+children first.
 
 Group rows are not records. Deleting a group row means deleting the rows
 grouped under it: the nav never marks, queues or drops the group row
@@ -597,13 +611,11 @@ after the first edit.
 
 The nav never hides an edited cell. Filters keep modified rows, sorting puts
 them first, and set_collapsed() leaves a row expanded while a modified row is
-in its subtree. Hiding a column with edits is refused. diff_merge() still
+in its subtree. Hiding a column with edits is refused. reload_rowset() still
 drops a saved row that the server no longer has, edits included.
 
-diff_merge() keeps the edit open. It ends the edit only before it drops the
-edited row. When it applies the filter again, it keeps the edited row
-passing. When the server moves a modified row or the edited row under a
-collapsed parent, it expands that row's ancestors.
+reload_rowset() ends the edit. It expands the collapsed ancestors of every
+modified row.
 
 
 WHEN A FIX DOESN'T FIT

@@ -38,7 +38,7 @@ let str2_vals = words.slice(10, 110)
 
 function make_fields() {
 	let fields = [
-		{name: 'id'       , type: 'number'},
+		{name: 'id'       , type: 'number', auto_increment: true},
 		{name: 'parent_id', type: 'number'},
 		{name: 'pos'      , type: 'number'},
 	]

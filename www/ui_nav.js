@@ -17,13 +17,12 @@ NAV CONFIG -------------------------------------------------------------------
 Nav config:
 
 	rowset_name    string       the rowset in ui.rowsets or on the server
-	reserves_ids   boolean      get autoinc ids from server before saving
 
 Access options:
 	per-nav and/or per-rowset:
 		can_{add|remove|change|move}_rows, can_change_parent
 	per-row:
-		no_change, no_remove
+		readonly, no_remove
 
 NOTE: Nav enforces can_* options only on UI calls with ev.input.
 
@@ -107,13 +106,15 @@ ROW DISPLAY STATE
 	is_pass        ROW_PASS        row passes current filters
 	has_pass_desc  ROW_PASS_DESC   some descendant passes current filters
 	is_group       ROW_GROUP       row is a synthetic group row
+	is_unplaced    ROW_UNPLACED    row stays where the user left it, outside
+	                               the sort and the filter
 ROW EDITING STATE
 	is_new         ROW_NEW         inserted, not saved yet
 	is_removed     ROW_REMOVED     marked for deletion
 	is_invalid     ROW_INVALID     row or one of its cells failed validation
 ROW OPTIONS
 	no_focus       ROW_NO_FOCUS    row can't be focused
-	no_change      ROW_NO_CHANGE   row's cells can't be edited
+	readonly       ROW_READONLY    row's cells can't be edited
 	no_remove      ROW_NO_REMOVE   row can't be deleted
 	no_save        ROW_NO_SAVE     row is never saved
 
@@ -156,7 +157,7 @@ The nav also builds these indexes:
 	field(s)           when                     why
 	-----------------  ------------------------ -------------------------------
 	id_field           on load for trees        find parents
-	pk                 on diff_merge            find existing rows
+	pk                 on reload_rowset         find recorded rows
 	any                lookup()                 user asked
 
 An index is a Uint32Array of ris sorted by cols with radix sort. A lookup is
@@ -179,7 +180,7 @@ visible rows in five stages. After writing state, the nav runs the stages
 needed to update the displayed rows.
 
 1: stored order
-	- load, insert, move, drop and merge write base_ris directly. Reverting or
+	- load, insert, move and drop write base_ris directly. Reverting or
 	  accepting server changes to pos_col or parent_id cells also sorts it.
 
 2: e.set_order_by()
@@ -210,7 +211,7 @@ needed to update the displayed rows.
 	  clear hidden focus and selection. O(n) in the worst case.
 
 Outside these stages:
-	- load, group, ungroup, move and merge write parent_ri.
+	- load, group, ungroup and move write parent_ri.
 	- grouping creates group_ris. ungrouping and drop_empty_groups() shifts it.
 
 GRID OPS ---------------------------------------------------------------------
@@ -349,15 +350,19 @@ LOAD
 SAVE
 	- Send requests to rowset_name one at a time; queue another save until the
 	  current request is acknowledged.
-	- With reserves_ids, reserve ids for new rows without ids before saving; a
-	  resent insert then carries the same id and the server skips it.
-	- Scan tree_ris backwards for modified rows; skip group rows, no_save rows,
-	  rows awaiting a save reply and rows failing validation, except rows
-	  marked for deletion.
+	- With an auto_increment pk, reserve ids for new rows without ids before
+	  saving.
+	- Scan tree_ris forward for new and edited rows, then backward for rows
+	  marked for deletion; skip group rows, no_save rows, rows awaiting a save
+	  reply and rows failing validation, except rows marked for deletion.
 	- Send new rows without unset cells, modified rows with pk:old and modified_mask
-	  cells, and removed rows with pk:old. Children go before parents.
+	  cells, and removed rows with pk:old. Parents go before children, except
+	  for deletes, where children go before parents.
 	- Wait for the server's reply before finishing the batch. Keep rows modified
 	  if the request fails.
+	- When the request fails, the server may have saved the batch anyway: reload
+	  before the next save, so that the reload finds the rows that the server
+	  inserted.
 	- O(n); does not run a stage.
 
 SAVE ACK
@@ -365,35 +370,44 @@ SAVE ACK
 	  cell_errors on errors and leave the row modified.
 	- Otherwise write server values, or sent values, into columns; edits equal to
 	  column values stop counting as edits; clear is_new and unset bits.
-	- Skip rows dropped before the server replied; invalidate indexes for written
-	  columns.
+	- Drop a new row marked for deletion while it was in flight if its insert
+	  failed; invalidate indexes for written columns.
 	- when modified_n reaches 0, drop input_vals and cell_errors arrays.
 	- run stages 3-5 when rows are dropped or pos_col or parent_id changes;
 	  otherwise no stage runs.
 
-MERGE ROWSET
-	- Run on reload; load instead when columns or keys differ.
-	- Radix-sort incoming rows by pk and merge them against the pk index.
-	- For matched saved rows, copy modified cells column by column with
-	  col_storage.copy_changed. Update edits and quicksearch only for copied
-	  cells.
-	- Leave a matched new row new when its reserved id matches; the next save
-	  resends it and the server skips the insert.
-	- Append unmatched incoming rows to base_ris as saved rows; drop unmatched
-	  rows that aren't new.
-	- Invalidate indexes for written columns; merge added rows into other indexes.
-	- When filtered, recompute is_pass for rows that aren't modified.
-	- When grouped, rebuild groups.
-	- Rebuild tree parents only when rows are added or dropped, or id or parent_id
-	  changes. Restore pos order when rows are added or pos changes. Run stage 2
-	  when rows are added or any column changes.
-	- Run stages 3-5; O(n).
+MERGE k ROWS (merge_rows)
+	- find the rows by pk, and the removed rows.
+	- write server values into found rows; a new row found becomes the saved
+	  row, with its values that differ as edits. Add the rows not found.
+	- if no row moves, appears or goes away: done, O(k).
+	- a found row moves when pos or parent_id changes, or, without pending
+	  changes, when its sort or group keys or filter result change or it is
+	  unplaced.
+	- otherwise: append added rows, place moved and added rows by pos and
+	  parent; sort the rows that are neither modified nor unplaced into their
+	  positions; filter; rebuild groups; run stages 3-5. O(n).
+
+RELOAD ROWSET
+	- check if row definition differs and load instead if it does.
+	- record the pending changes and collapsed flags by pk.
+	- load the rows, keeping the fields, the filters, order_by, group_by,
+	  cols and the flat mode; reset focus, selection and quicksearch.
+	- find each recorded row by pk and write its edits and deletion mark again.
+	  A new row that the server has becomes that saved row. Add a new row that
+	  the server doesn't have again, unless it is marked for deletion. Drop a
+	  saved row that the server doesn't have, unless it is outside the
+	  requested param_vals.
+	- collapse the recorded rows again, except the ancestors of modified rows.
+	- put rows with pending parent_id or pos edits back in their places
+	- sort, filter, group
+	- run stages 3-5; O(n).
 
 RELOAD
-	- Load rowset from rowset_name the first time; merge it on later reloads.
-	- Wait for the save request to finish before reloading.
-	- Reload on server notifications unless all update_ids are from our saves.
-	- Run the stages needed by load or merge rowset.
+	- load rowset from rowset_name the first time; reload it on later reloads.
+	- wait for the save request to finish before reloading.
+	- reload on server notifications unless all update_ids are from our saves.
+	- run the stages needed by load or reload rowset.
 
 */
 
@@ -422,15 +436,16 @@ const ROW_INVALID   = 2**3  // row or one of its cells failed validation
 const ROW_NEW       = 2**4  // inserted, not saved yet
 const ROW_REMOVED   = 2**5  // marked for deletion
 const ROW_NO_FOCUS  = 2**6  // row can't be focused
-const ROW_NO_CHANGE = 2**7  // row's cells can't be edited
+const ROW_READONLY  = 2**7  // row's cells can't be edited
 const ROW_NO_REMOVE = 2**8  // row can't be deleted
 const ROW_NO_SAVE   = 2**9  // row is never saved
 const ROW_GROUP     = 2**10 // row is a synthetic group row
+const ROW_UNPLACED  = 2**11 // row stays where the user left it
 
 // bit names accepted by set_row_flag()
 let row_config_bits = {
 	no_focus : ROW_NO_FOCUS,
-	no_change: ROW_NO_CHANGE,
+	readonly : ROW_READONLY,
 	no_remove: ROW_NO_REMOVE,
 	no_save  : ROW_NO_SAVE,
 }
@@ -689,6 +704,7 @@ let listen_rowset_events = memoize(function() {
 		let [rowset_name, filter] = update_ids.shift().split(':')
 		for (let fn of rowset_listeners[rowset_name] ?? [])
 			fn(update_ids, filter)
+		ui.animate()
 	}
 })
 
@@ -701,8 +717,10 @@ ui.nav = function(id, opt) {
 	e.id = id
 
 	// get option value from saved state or from opt.
-	let ss = ui.saved_state[e.id] // {cols:, group_by:, order_by:}
-	let saved_opt = k => ss?.[k] !== undefined ? ss[k] : opt?.[k]
+	function saved_opt(k) {
+		let ss = ui.saved_state[e.id] // {cols:, group_by:, order_by:}
+		return ss?.[k] !== undefined ? ss[k] : opt?.[k]
+	}
 
 	// permissions for calls from UI, with ev.input.
 	e.can_add_rows    ??= true
@@ -775,7 +793,7 @@ ui.nav = function(id, opt) {
 
 	// sorting, filtering, tree view and grouping
 	e.order_by = null // sort columns, sort function, or null
-	e.filter = null // filter function, or null
+	e.filter ??= null // filter function, or null
 	e.param_vals ??= null // [{col: val, ...}, ...] | false | null
 	e.is_filtered = false // row_filter is set: the nav filters rows itself
 	let row_filter = null // fn(ri) combining all filters, or null
@@ -787,6 +805,7 @@ ui.nav = function(id, opt) {
 	e.is_grouped = null
 	e.group_ris = null // group ris in key order
 	let group_fis = null // field indices of the grouping columns
+	let collapsed_group_paths = new Set() // group_path() of collapsed groups
 
 	// indexes
 	let indexes = null // {cols -> {fields:, ris:}}, built on first lookup
@@ -823,11 +842,10 @@ ui.nav = function(id, opt) {
 	// saving and loading
 	// the rowset is not in ui.rowsets: load it from the server.
 	let is_server_rowset = !!e.rowset_name && !ui.rowsets[e.rowset_name]
-	e.reserves_ids = null // reserve ids before saving new rows
 	e.ready = false // a rowset from ui.rowsets or the server is loaded
 	let save_req = null // pending id or save request, or null
 	let save_batch = null // pending batch: {rows: [...], ris: [...]}
-	let saving_ris = map() // batch row positions: {ri -> index}
+	let saving_ris = new Set() // rows of the pending or lost batch
 	let want_save = false // save requested during a pending request
 	let want_reload = false // reload requested during a pending request
 	let own_update_ids = new Set() // ids of this nav's saves
@@ -854,6 +872,9 @@ ui.nav = function(id, opt) {
 			rowset_cols: rowset_cols,
 			rowset_tree_col: rowset_tree_col,
 			group_field: group_field,
+			is_saving: save_req != null,
+			is_loading: load_req != null,
+			saving_ris: saving_ris,
 		}
 	}
 
@@ -1623,8 +1644,9 @@ ui.nav = function(id, opt) {
 	}
 
 	// Stage 5. Build the visible row order and keep the previous order in the
-	// other buffer. With reset_sel, select only the focused cell after
-	// filtering or collapsing. Clear focus if the focused row is hidden. To
+	// other buffer. With reset_sel, select only the focused cell; moves and
+	// server updates keep the selection. Clear focus if the focused row is
+	// hidden. To
 	// choose a nearby row, the UI must read visible_i before the operation.
 	function update_visible_ris(reset_sel = true) {
 		// Record or clear the selection rectangle before changing visible
@@ -1702,8 +1724,15 @@ ui.nav = function(id, opt) {
 		for (let i = i1; i <= last_i; i++) {
 			let ri1 = e.tree_ris[i]
 			if ((ri != null || recursive || e.depth[ri1] == 0)
-				&& !has_modified_desc?.[ri1])
+				&& !has_modified_desc?.[ri1]) {
 				set_bits(row_flags, ri1, ROW_COLLAPSED, collapsed)
+				// group rows are rebuilt: keep their state by label path.
+				if (row_flags[ri1] & ROW_GROUP)
+					if (collapsed)
+						collapsed_group_paths.add(group_path(ri1))
+					else
+						collapsed_group_paths.delete(group_path(ri1))
+			}
 		}
 		update_visible_ris(true)
 	}
@@ -1771,20 +1800,36 @@ ui.nav = function(id, opt) {
 				field.sort_desc = desc
 			}
 
-		if (isfunc(order_by)) {
+		if (isfunc(order_by) || sort_fields?.size) {
 			e.order_by = order_by
-			let sorted_ris = e.base_ris.slice(0, e.row_n)
-			sorted_ris.sort(order_by)
-			e.sorted_ris = move_modified_rows_first(sorted_ris)
-		} else if (sort_fields?.size) {
-			e.order_by = order_by
-			let ris = e.base_ris.slice(0, e.row_n)
-			let sorted_ris = radix_sort(e.col_vals, ris, e.row_n,
-				[...sort_fields].map(([field, desc]) => ({field, desc})))
-			e.sorted_ris = move_modified_rows_first(sorted_ris)
+			e.sorted_ris = move_modified_rows_first(
+				sorted_copy(e.base_ris, e.row_n, order_by))
 		} else {
 			e.order_by = null
 			e.sorted_ris = e.base_ris
+		}
+		reset_unplaced()
+	}
+
+	// -> the first n entries of ris sorted by order_by, in a new array.
+	function sorted_copy(ris, n, order_by) {
+		let sorted_ris = ris.slice(0, n)
+		if (isfunc(order_by))
+			return sorted_ris.sort(order_by)
+		let sort_fields = [...parse_order_by(order_by)]
+			.map(([field, desc]) => ({field, desc}))
+		return radix_sort(e.col_vals, sorted_ris, n, sort_fields)
+	}
+
+	// A full sort or filter by the user puts every row in place except the
+	// modified rows.
+	function reset_unplaced() {
+		let row_flags = e.row_flags
+		let has_modifications = e.modified_n > 0
+		for (let i = 0; i < e.row_n; i++) {
+			let ri = e.base_ris[i]
+			set_bits(row_flags, ri, ROW_UNPLACED,
+				has_modifications && is_row_modified(ri))
 		}
 	}
 
@@ -2033,8 +2078,8 @@ ui.nav = function(id, opt) {
 		}
 	}
 
-	// Set is_pass on data rows from row_filter. Keep modified rows and the
-	// edited row passing.
+	// Set is_pass on data rows from row_filter. Keep modified rows, unplaced
+	// rows and the edited row passing.
 	function update_pass() {
 		let row_flags = e.row_flags
 		let ris = e.base_ris
@@ -2043,6 +2088,7 @@ ui.nav = function(id, opt) {
 			let ri = ris[i]
 			set_bits(row_flags, ri, ROW_PASS, !row_filter
 				|| (has_modifications && is_row_modified(ri))
+				|| row_flags[ri] & ROW_UNPLACED
 				|| (e.editing && ri == e.focused_ri)
 				|| row_filter(ri))
 		}
@@ -2050,6 +2096,7 @@ ui.nav = function(id, opt) {
 
 	function refilter() {
 		update_row_filter()
+		reset_unplaced()
 		update_pass()
 		update_pass_desc()
 		update_visible_ris(true)
@@ -2325,6 +2372,18 @@ ui.nav = function(id, opt) {
 		e.group_ris = Uint32Array.from(group_ris)
 		group_fis = new Set(key_fields.map(kf => kf.field.fi))
 		e.is_grouped = true
+		for (let ri of e.group_ris)
+			if (collapsed_group_paths.has(group_path(ri)))
+				e.row_flags[ri] |= ROW_COLLAPSED
+	}
+
+	// -> the labels of a group and of its parent groups, top level first.
+	function group_path(ri) {
+		let label_vals = e.col_vals[group_field.fi]
+		let path = ''
+		for (let p = ri; p != NONE; p = e.parent_ri[p])
+			path = group_field.col_storage.get(label_vals, p) + '\0' + path
+		return path
 	}
 
 	// Free all group row slots for reuse.
@@ -2404,6 +2463,7 @@ ui.nav = function(id, opt) {
 		}
 
 		// add the new groups, if any, and update the rows shown.
+		collapsed_group_paths.clear()
 		e.group_by = levels.length ? group_by : null // group-by spec, or null
 		e.group_cols = levels.flat()
 		if (levels.length)
@@ -2551,6 +2611,7 @@ ui.nav = function(id, opt) {
 			set_cell_bit(e.modified_mask, ri, fi, true)
 			e.input_vals[fi] ??= [] // made on the column's first edit
 			e.input_vals[fi][ri] = v
+			e.row_flags[ri] |= ROW_UNPLACED
 		}
 		update_modified_n(ri, was_modified)
 		end_quicksearch_at(ri, fi)
@@ -2562,6 +2623,8 @@ ui.nav = function(id, opt) {
 		if (fi == group_field.fi)
 			return false
 		if (fi == e.pos_field?.fi)
+			return false
+		if (e.all_fields[fi].immutable && !(e.row_flags[ri] & ROW_NEW))
 			return false
 		if (e.can_be_tree && (fi == e.id_field.fi || fi == e.parent_field.fi))
 			return false
@@ -2631,31 +2694,37 @@ ui.nav = function(id, opt) {
 		}
 	}
 
-	// Drop a new row, or restore the server values of a saved row.
+	// drop a new row, or restore the server values of a saved row.
+	// a new row in the pending or lost batch is marked for deletion, not dropped.
 	e.revert_row = function(ri) {
 		e.exit_edit()
 		if (e.row_flags[ri] & ROW_NEW) {
-			drop_rows([ri])
-			update_tree_and_visible_ris()
+			let new_ris = [] // the row, if it can be dropped
+			mark_removed(ri, new_ris, false)
+			if (new_ris.length) {
+				drop_rows(new_ris)
+				update_tree_and_visible_ris()
+			}
 		} else if (revert_row_vals(ri)) {
 			update_row_places([ri])
 			update_tree_and_visible_ris()
 		}
 	}
 
-	// Drop new rows, unmark rows marked for deletion, and revert edited cells.
+	// drop new rows, unmark rows marked for deletion, and revert edited cells.
+	// new rows in the pending or lost batch are marked for deletion, not dropped.
 	e.revert_changes = function() {
 		e.exit_edit()
 		let new_ris = [] // new rows, dropped in one pass at the end
 		let moved_ris = [] // rows whose pos or parent_id was reverted
 
-		// Unmark and revert saved rows. Collect new rows to drop afterward.
+		// unmark and revert saved rows. collect new rows to drop afterward.
 		for (let i = 0; i < e.row_n; i++) {
 			let ri = e.base_ris[i]
 			if (!is_row_modified(ri))
 				continue
 			if (e.row_flags[ri] & ROW_NEW) {
-				new_ris.push(ri)
+				mark_removed(ri, new_ris, false)
 			} else {
 				e.remove_rows([ri], 'undelete')
 				if (revert_row_vals(ri))
@@ -2663,8 +2732,7 @@ ui.nav = function(id, opt) {
 			}
 		}
 
-		// Restore the positions and parents of reverted rows, then drop new
-		// rows.
+		// restore the positions and parents of reverted rows, then drop new rows.
 		if (moved_ris.length)
 			update_row_places(moved_ris)
 		if (new_ris.length)
@@ -2672,8 +2740,11 @@ ui.nav = function(id, opt) {
 		if (new_ris.length || moved_ris.length)
 			update_tree_and_visible_ris()
 
-		e.input_vals = [] // edited values by fi, then ri
-		e.cell_errors = [] // cell errors by fi, then ri
+		// marked rows of the pending or lost batch keep their edits.
+		if (!e.modified_n) {
+			e.input_vals = [] // edited values by fi, then ri
+			e.cell_errors = [] // cell errors by fi, then ri
+		}
 	}
 
 	// Set selected cells to null, with the same edit restrictions as
@@ -2706,7 +2777,7 @@ ui.nav = function(id, opt) {
 	// the user may edit some cells of the row.
 	function can_change_row(ri) {
 		let flags = e.row_flags[ri]
-		if (flags & (ROW_NO_CHANGE | ROW_REMOVED | ROW_GROUP))
+		if (flags & (ROW_READONLY | ROW_REMOVED | ROW_GROUP))
 			return false
 		// Check can_change_rows only for saved rows.
 		return !!(flags & ROW_NEW)
@@ -2721,7 +2792,7 @@ ui.nav = function(id, opt) {
 
 	/// row state -------------------------------------------------------------
 
-	// name: 'no_focus' | 'no_change' | 'no_remove' | 'no_save'
+	// name: 'no_focus' | 'readonly' | 'no_remove' | 'no_save'
 	e.set_row_flag = function(ri, name, on) {
 		let bit = assert(row_config_bits[name], 'unknown row flag: ', name)
 		set_bits(e.row_flags, ri, bit, on)
@@ -2908,13 +2979,9 @@ ui.nav = function(id, opt) {
 	}
 
 	function free_slot(ri) {
-		// Make apply_result() skip this row if the nav is saving it. The nav
-		// may reuse its slot before the server replies.
-		let batch_i = saving_ris.get(ri) // index in save_batch.ris
-		if (batch_i != null) {
-			save_batch.ris[batch_i] = NONE
-			saving_ris.delete(ri)
-		}
+		// a row of the pending or lost batch is never dropped: the server may
+		// have saved it.
+		assert(!saving_ris.has(ri))
 
 		// Subtract the row from modified_n if modified. Clear its state before
 		// reusing the slot.
@@ -3004,7 +3071,7 @@ ui.nav = function(id, opt) {
 					set_cell_bit(e.unset_mask, ri, field.fi, true)
 				field.col_storage.set(e.col_vals[field.fi], ri, v ?? null)
 			}
-			e.row_flags[ri] = ROW_NEW | ROW_PASS
+			e.row_flags[ri] = ROW_NEW | ROW_PASS | ROW_UNPLACED
 			e.parent_ri[ri] = parent_ri
 
 			// Write parent_id so that the server and set_tree_parents() can read
@@ -3309,15 +3376,16 @@ ui.nav = function(id, opt) {
 	}
 
 	// Mark a saved row for deletion, or collect a new row in new_ris to drop
-	// it. Leave group rows unmarked because they are not records. Return false
-	// if is_input is set and the row has no_remove.
+	// it. Mark a new row of the pending or lost batch too, since the server
+	// may have inserted it. Leave group rows unmarked because they are not
+	// records. Return false if is_input is set and the row has no_remove.
 	function mark_removed(ri, new_ris, is_input) {
 		let flags = e.row_flags[ri]
 		if (is_input && flags & ROW_NO_REMOVE)
 			return false
 		if (flags & ROW_GROUP)
 			return true
-		if (flags & ROW_NEW) {
+		if (flags & ROW_NEW && !saving_ris.has(ri)) {
 			new_ris.push(ri)
 		} else {
 			let was_modified = is_row_modified(ri)
@@ -3383,11 +3451,11 @@ ui.nav = function(id, opt) {
 	}
 
 	// With op 'delete' (the default), mark rows for deletion and drop new
-	// rows. In tree or grouped view, include their descendants. With
-	// 'undelete', clear the marks. With ev.input, refuse deletion if policy
-	// demands it, and keep rows with no_remove. With ev.refocus, if the
-	// focused row was dropped, focus the row now at the first dropped row's
-	// position.
+	// rows, except new rows of the pending or lost batch. In tree or grouped
+	// view, include their descendants. With 'undelete', clear the marks. With
+	// ev.input, refuse deletion if policy demands it, and keep rows with
+	// no_remove. With ev.refocus, if the focused row was dropped, focus the
+	// row now at the first dropped row's position.
 	e.remove_rows = function(ris, op, ev) {
 		let has_parents = e.is_tree || e.is_grouped
 		if (op == 'undelete') {
@@ -3487,29 +3555,37 @@ ui.nav = function(id, opt) {
 		return {type: 'update', values: values}
 	}
 
+	function add_batch_row(batch, ri) {
+		let flags = e.row_flags[ri]
+		if (flags & (ROW_GROUP | ROW_NO_SAVE) || !is_row_modified(ri))
+			return
+		if (!(flags & ROW_REMOVED) && !e.validate_row(ri))
+			return
+		let t = pack_row(ri)
+		if (!t)
+			return
+		saving_ris.add(ri)
+		batch.rows.push(t)
+		batch.ris.push(ri)
+	}
+
 	// Return {rows: [...], ris: [...]} in rowset.lua's save format, or null if
-	// no row is ready. Walk tree_ris backward to send children before parents.
+	// no row is ready. Walk tree_ris forward for new and edited rows, so that
+	// parents go before children, then backward for rows marked for
+	// deletion, so that children go before parents. Send the edits first:
+	// a row moved out of a parent must leave it before the parent's delete.
 	// Skip no_save rows and invalid rows, except rows marked for deletion.
 	// Keep the batch until apply_result() or end_save(), and allow only one
 	// batch at a time.
 	e.pack_changes = function() {
 		assert(!save_batch)
 		let batch = {rows: [], ris: []}
-		for (let i = e.tree_n - 1; i >= 0; i--) {
-			let ri = e.tree_ris[i]
-			let flags = e.row_flags[ri]
-			if (flags & (ROW_GROUP | ROW_NO_SAVE) || !is_row_modified(ri))
-				continue
-			// Send rows marked for deletion without validating their cells.
-			if (!(flags & ROW_REMOVED) && !e.validate_row(ri))
-				continue
-			let t = pack_row(ri)
-			if (!t)
-				continue
-			saving_ris.set(ri, batch.ris.length)
-			batch.rows.push(t)
-			batch.ris.push(ri)
-		}
+		for (let i = 0; i < e.tree_n; i++)
+			if (!(e.row_flags[e.tree_ris[i]] & ROW_REMOVED))
+				add_batch_row(batch, e.tree_ris[i])
+		for (let i = e.tree_n - 1; i >= 0; i--)
+			if (e.row_flags[e.tree_ris[i]] & ROW_REMOVED)
+				add_batch_row(batch, e.tree_ris[i])
 		if (!batch.ris.length)
 			return null
 		save_batch = batch
@@ -3617,48 +3693,65 @@ ui.nav = function(id, opt) {
 		update_invalid(ri)
 	}
 
-	// Apply rowset.lua's reply, with one result per sent row.
-	e.apply_result = function(batch, result) {
-		let drop_ris = [] // rows the server removed
+	// Write server values into rows and drop rows that the server removed.
+	// vals_list[k] holds the values of set_ris[k] by fi, undefined for cells
+	// that the server didn't send.
+	function apply_server_rows(set_ris, vals_list, drop_ris) {
 		let moved_ris = [] // rows whose pos or parent_id changed
 		let is_modified_col = new Uint8Array(e.all_fields.length) // by fi
+		for (let k = 0; k < set_ris.length; k++)
+			if (set_server_vals(set_ris[k], vals_list[k], is_modified_col))
+				moved_ris.push(set_ris[k])
 
-		// Apply the server's reply to each sent row: remove it, store its
-		// errors, or mark it saved.
-		for (let k = 0; k < batch.ris.length; k++) {
-			let ri = batch.ris[k]
-			// Skip rows dropped before the server replied.
-			if (ri == NONE)
-				continue
-			let rt = result.rows[k]
-			if (rt.remove) {
-				drop_ris.push(ri)
-			} else if (rt.error || rt.field_errors) {
-				set_server_errors(ri, rt)
-			} else {
-				// Use the sent values if the server did not return row values.
-				let vals = rt.values ?? sent_vals(batch.rows[k])
-				if (set_server_vals(ri, vals, is_modified_col))
-					moved_ris.push(ri)
-			}
-		}
-
-		// end the batch, then update the indexes, put moved rows back in
-		// place and drop the removed rows.
-		end_save()
+		// update the indexes, put moved rows back in place and drop the
+		// removed rows.
 		invalidate_changed_cols(is_modified_col)
 		if (moved_ris.length)
 			update_row_places(moved_ris)
 		if (drop_ris.length)
 			drop_rows(drop_ris)
 		if (drop_ris.length || moved_ris.length)
-			update_tree_and_visible_ris()
+			update_tree_and_visible_ris(false)
 
 		// Discard the edit and error arrays if no modified rows remain.
 		if (!e.modified_n) {
 			e.input_vals = [] // edited values by fi, then ri
 			e.cell_errors = [] // cell errors by fi, then ri
 		}
+	}
+
+	// Apply rowset.lua's reply, with one result per sent row.
+	e.apply_result = function(batch, result) {
+		let set_ris = [] // rows the server saved
+		let vals_list = [] // their server values, by fi
+		let drop_ris = [] // rows the server removed
+
+		// For each sent row, store its errors, or collect it to remove or to
+		// mark saved.
+		for (let k = 0; k < batch.ris.length; k++) {
+			let ri = batch.ris[k]
+			let rt = result.rows[k]
+			if (rt.remove) {
+				drop_ris.push(ri)
+			} else if (rt.error || rt.field_errors) {
+				// new row marked for deletion while in flight, insert failed:
+				// the server never had it.
+				if ((e.row_flags[ri] & (ROW_NEW | ROW_REMOVED))
+					== (ROW_NEW | ROW_REMOVED))
+					drop_ris.push(ri)
+				else
+					set_server_errors(ri, rt)
+			} else {
+				// Use the sent values if the server did not return row values.
+				set_ris.push(ri)
+				vals_list.push(rt.values ?? sent_vals(batch.rows[k]))
+			}
+		}
+
+		// end the batch before dropping rows: free_slot() refuses a row of
+		// the batch.
+		end_save()
+		apply_server_rows(set_ris, vals_list, drop_ris)
 	}
 
 	// Reserve ids before saving new rows so that the nav can resend an insert
@@ -3686,6 +3779,7 @@ ui.nav = function(id, opt) {
 		// ask the server for that many ids; on success, write them and save
 		// again.
 		save_req = ajax({
+			dont_send: true,
 			url: rowset_url(),
 			upload: {exec: 'reserve_ids', n: new_ris.length},
 			success: function(res) {
@@ -3708,12 +3802,18 @@ ui.nav = function(id, opt) {
 
 	// Finish the request whether it succeeded or failed. Keep unsaved changes
 	// after a failure. Then run any waiting reload or save.
-	function end_request() {
+	function end_request(status) {
 		// Ignore a request canceled by load() or free().
 		if (this != save_req)
 			return
 		save_req = null
-		end_save()
+		// failed save: the server may have saved it anyway. keep its rows in
+		// saving_ris until a reload settles what the server has.
+		if (status == 'fail' && save_batch) {
+			save_batch = null
+		} else {
+			end_save()
+		}
 		if (want_reload) {
 			want_reload = false
 			e.reload()
@@ -3722,6 +3822,7 @@ ui.nav = function(id, opt) {
 			want_save = false
 			e.save()
 		}
+		ui.animate()
 	}
 
 	// Send modified rows to their server rowset, one request at a time. Defer
@@ -3732,7 +3833,16 @@ ui.nav = function(id, opt) {
 			want_save = true
 			return
 		}
-		if (e.reserves_ids && reserve_ids())
+		// rows of a failed save left in saving_ris: reload first, so that the
+		// reload finds the rows that the server inserted and the nav doesn't
+		// send them again.
+		if (saving_ris.size) {
+			want_save = true
+			if (!load_req)
+				e.reload()
+			return
+		}
+		if (e.pk_fields[0].auto_increment && reserve_ids())
 			return
 		let batch = e.pack_changes()
 		if (!batch)
@@ -3743,6 +3853,7 @@ ui.nav = function(id, opt) {
 		let update_id = floor(Math.random() * 2**52).toString(36)
 		own_update_ids.add(update_id)
 		save_req = ajax({
+			dont_send: true,
 			url: rowset_url(),
 			upload: {
 				exec: 'save',
@@ -3792,193 +3903,179 @@ ui.nav = function(id, opt) {
 			&& (rs.id_col == null || rs.id_col === e.id_field?.name)
 	}
 
-	// Compare ris primary key with incoming row in_i's primary key. Return
-	// -1, 0 or 1.
-	function compare_pk(ri, in_col_vals, in_i) {
-		for (let field of e.pk_fields) {
-			let storage = field.col_storage
-			let r = storage.compare_cell(e.col_vals[field.fi], ri,
-				storage.get(in_col_vals[field.fi], in_i))
-			if (r)
-				return r
-		}
-		return 0
+	// Add a row that the server sent and the nav doesn't have, with cells in
+	// rowset field order. Return its slot.
+	function add_server_row(row) {
+		let ri = alloc_slot()
+		for (let field of rowset_fields)
+			field.col_storage.set(e.col_vals[field.fi], ri,
+				row[field.fi] ?? null)
+		group_field.col_storage.set(e.col_vals[group_field.fi], ri, null)
+		e.row_flags[ri] = 0
+		return ri
 	}
 
-	// Merge a reloaded rowset, matching rows by primary key. Use load(rs) if
-	// the columns or keys differ. Copy server values into matched saved rows
-	// and keep edits differing from them. Keep matched new rows new. Add rows
-	// found only on the server and drop saved rows missing from rs, except
-	// edited rows outside the requested param_vals. Sort incoming rows by
-	// primary key and compare them with the nav's primary key index.
-	e.diff_merge = function(rs) {
-		if (!is_same_rowset(rs)) {
-			e.load(rs)
-			return
+	// -> [v, ...] by fi: a new row's values, edited or not, undefined for
+	// unset cells.
+	function new_row_vals(ri) {
+		return rowset_fields.map(field => e.cell_input_val(ri, field.fi))
+	}
+
+	// -> [fi, ...]: the columns besides pos and parent_id whose values give
+	// a row its place: the sort keys, every column for a sort function, and
+	// the group keys.
+	function place_fis() {
+		let fis = isfunc(e.order_by) ? rowset_fields.map(field => field.fi)
+			: e.order_by ? [...parse_order_by(e.order_by).keys()]
+				.map(field => field.fi)
+			: []
+		if (e.is_grouped)
+			fis.push(...group_fis)
+		return fis
+	}
+
+	// Sort the rows of sorted_ris, except the rows with pending changes and
+	// the rows that the user left where they are (R4): those keep their
+	// positions, and the sorted rows fill the other positions.
+	function sort_placed_rows() {
+		let n = e.row_n
+		let sorted_ris = e.sorted_ris
+		let has_modifications = e.modified_n > 0
+		let is_kept = new Uint8Array(n) // 1: row kept, by index in sorted_ris
+		let placed_ris = new Uint32Array(n) // rows to sort, in sorted_ris order
+		let m = 0 // number of rows to sort
+		for (let i = 0; i < n; i++) {
+			let ri = sorted_ris[i]
+			if (e.row_flags[ri] & ROW_UNPLACED
+				|| (has_modifications && is_row_modified(ri)))
+				is_kept[i] = 1
+			else
+				placed_ris[m++] = ri
+		}
+		placed_ris = sorted_copy(placed_ris, m, e.order_by)
+		let j = 0 // next index into placed_ris
+		for (let i = 0; i < n; i++)
+			if (!is_kept[i])
+				sorted_ris[i] = placed_ris[j++]
+	}
+
+	// Rebuild the groups. Focus a focused group again by its label path.
+	function regroup() {
+		let focused_path = e.focused_ri != null
+			&& e.row_flags[e.focused_ri] & ROW_GROUP
+			? group_path(e.focused_ri) : null
+		// clear the selection of the freed group slots before reusing them.
+		remove_groups()
+		deselect_hidden_rows()
+		add_groups(parse_group_by(e.group_by))
+		if (focused_path != null)
+			e.focused_ri = e.group_ris.find(ri =>
+				group_path(ri) == focused_path) ?? null
+	}
+
+	// Apply a change set from the server:
+	//   {rows: [[v1, ...], ...], removed_pks: [[pk1, ...], ...]}
+	// with the cells of each row in rowset field order. Write the values
+	// into the rows found by pk, add the rows not found, and remove the rows
+	// of removed_pks. If no row moves, appears or goes away, stop there.
+	// Otherwise place the rows by pos and parent_id, then sort, filter and
+	// group again, leaving the rows kept in place where they are.
+	e.merge_rows = function(change_set) {
+		assert(!saving_ris.size, 'merge_rows: a save batch is pending or lost')
+		let rows = change_set.rows ?? []
+		let removed_pks = change_set.removed_pks ?? []
+
+		// find every row by pk before changing the pk index.
+		let found_ris = rows.map(row =>
+			e.lookup(e.pk, e.pk_fields.map(field => row[field.fi])))
+		let drop_ris = [] // rows to remove
+		for (let pk of removed_pks) {
+			let ri = e.lookup(e.pk, pk)
+			if (ri != null)
+				drop_ris.push(ri)
 		}
 
-		// load the incoming rows into columns and sort them by pk.
-		let fields = rowset_fields
-		let rs_col_vals = rowset_col_vals(rs, fields.length)
-		if (!rs_col_vals)
-			return
-		let m = rs_col_vals[0].length // incoming row count
-		let in_col_vals = fields.map(field => // incoming columns, by fi
-			field.col_storage.load_col(rs_col_vals[field.fi], m))
-		let in_is = new Uint32Array(m) // incoming row indexes, by pk
-		for (let i = 0; i < m; i++)
-			in_is[i] = i
-		let sort_fields = e.pk_fields.map(field =>
-			({field: field, desc: false, vals: in_col_vals[field.fi]}))
-		in_is = radix_sort(e.col_vals, in_is, m, sort_fields)
-
-		// Compare the nav's rows with incoming rows in primary key order. Drop
-		// saved rows found only in the nav, add rows found only on the server,
-		// and collect matching rows.
-		let pk_ris = get_index(e.pk).ris // the rows, by pk
-		let is_modified_col = new Uint8Array(fields.length) // by fi
-		let match_ris = new Uint32Array(m) // matched saved rows
-		let match_is = new Uint32Array(m) // their incoming row indexes
-		let match_n = 0 // length of match_ris and match_is
-		let drop_ris = [] // saved rows missing from rs
-		let add_is = [] // incoming rows to add
-		let pk_i = 0 // index in pk_ris
-		let j = 0 // index in in_is
-		// When the server returned only the rows matching param_vals, a missing
-		// row outside them was not requested: keep it if it has edits.
-		let is_requested = e.param_vals && is_server_rowset
-			? e.expr_filter(param_vals_expr()) : null
-		while (pk_i < pk_ris.length || j < m) {
-			let ri = pk_i < pk_ris.length ? pk_ris[pk_i] : NONE
-			let r = j == m ? -1 : ri == NONE ? 1
-				: compare_pk(ri, in_col_vals, in_is[j])
-			if (r < 0) {
-				if (!(e.row_flags[ri] & ROW_NEW) && (!is_requested
-					|| !is_row_modified(ri) || is_requested(ri)))
-					drop_ris.push(ri)
-				pk_i++
-			} else if (r > 0) {
-				add_is.push(in_is[j])
-				j++
+		// write the values. A new row with the same pk becomes the saved row,
+		// and its values that differ from the server's become edits. A row
+		// without pending changes must be placed again if its sort or group
+		// keys or its filter result change, or if the user left it unplaced.
+		let key_fis = place_fis()
+		let added_ris = [] // rows not found
+		let placed_ris = [] // found rows to place again
+		let moved_ris = [] // found rows whose pos or parent_id changed
+		let is_modified_col = new Uint8Array(e.all_fields.length) // by fi
+		for (let k = 0; k < rows.length; k++) {
+			let row = rows[k]
+			let ri = found_ris[k]
+			if (ri == null) {
+				added_ris.push(add_server_row(row))
 			} else {
-				// Keep a new row new when its reserved id matches a server row.
-				// If the server inserted it but the reply was lost, resend it on
-				// the next save; the server skips the duplicate insert.
-				if (!(e.row_flags[ri] & ROW_NEW)) {
-					match_ris[match_n] = ri
-					match_is[match_n++] = in_is[j]
+				let was_modified = is_row_modified(ri)
+				let has_new_keys = key_fis.some(fi =>
+					row[fi] !== undefined && row[fi] !== col_val(ri, fi))
+				let new_vals = e.row_flags[ri] & ROW_NEW ? new_row_vals(ri) : null
+				if (set_server_vals(ri, row, is_modified_col))
+					moved_ris.push(ri)
+				if (new_vals)
+					for (let fi = 0; fi < new_vals.length; fi++) {
+						let v = new_vals[fi]
+						if (v === undefined)
+							continue
+						set_input_val(ri, fi, v)
+						if (cell_bit(e.modified_mask, ri, fi))
+							set_cell_errors(ri, fi,
+								validate_cell(e.all_fields[fi], v))
+					}
+				update_invalid(ri)
+				let is_pass = !row_filter || row_filter(ri)
+				if (!was_modified && (has_new_keys
+					|| e.row_flags[ri] & ROW_UNPLACED
+					|| is_pass != !!(e.row_flags[ri] & ROW_PASS))
+				) {
+					e.row_flags[ri] &= ~ROW_UNPLACED
+					placed_ris.push(ri)
 				}
-				pk_i++
-				j++
 			}
 		}
-
-		// End the edit before dropping a row deleted on the server.
-		// Keep editing otherwise.
-		if (e.editing && drop_ris.includes(e.focused_ri))
-			e.exit_edit()
-
-		// Copy modified cells from matched saved rows, one column at a time.
-		// Update edits and quicksearch only for the copied cells.
-		let modified_ks = new Uint32Array(match_n) // indexes in match_ris
-		for (let field of fields) {
-			let fi = field.fi
-			let modified_cell_n = field.col_storage.copy_changed(e.col_vals[fi],
-				match_ris, in_col_vals[fi], match_is, match_n, modified_ks)
-			if (modified_cell_n)
-				is_modified_col[fi] = 1
-			for (let c = 0; c < modified_cell_n; c++)
-				update_server_cell(match_ris[modified_ks[c]], fi)
-		}
-
-		// Remove the current groups and rows no longer on the server. Clear
-		// their focus and selection before alloc_slot() reuses their slots.
-		// Rebuild groups afterward.
-		let levels = e.is_grouped ? parse_group_by(e.group_by) : null
-		if (levels)
-			remove_groups()
-		if (drop_ris.length)
-			drop_rows(drop_ris)
-		if (levels || drop_ris.length)
-			set_focus(e.focused_ri, e.focused_fi, 'deselect_hidden')
-
-		// add the rows that only the server has, at the end of the stored
-		// order.
-		let k = add_is.length
-		let new_ris = new Uint32Array(k) // the added rows' slots
-		for (let a = 0; a < k; a++) {
-			let ri = alloc_slot()
-			new_ris[a] = ri
-			for (let field of fields)
-				field.col_storage.set(e.col_vals[field.fi], ri,
-					field.col_storage.get(in_col_vals[field.fi], add_is[a]))
-			group_field.col_storage.set(e.col_vals[group_field.fi], ri, null)
-			e.row_flags[ri] = ROW_PASS
-		}
-		let was_unsorted = e.sorted_ris == e.base_ris
-		e.base_ris = insert_into_list(e.base_ris, e.row_n, e.row_n, new_ris, k)
-		if (was_unsorted)
-			e.sorted_ris = e.base_ris
-		e.row_n += k
-
-		// invalidate the indexes of the columns written, and add the new rows
-		// to the other indexes.
 		invalidate_changed_cols(is_modified_col)
-		add_to_indexes(new_ris)
 
-		// Apply the filter again to unmodified rows. Keep modified rows and the
-		// edited row visible.
-		update_pass()
-
-		// Rebuild parents, positions and sort order only when the corresponding
-		// values changed.
-		let has_added_or_dropped = k > 0 || drop_ris.length > 0
-		let edited_parent_ris = [] // rows with parent_id edits
-		let is_tree_rebuilt = false // parents rebuilt from parent_id
-		if (levels) {
-			add_groups(levels)
-		} else if (e.can_be_tree && (has_added_or_dropped
-			|| is_modified_col[e.id_field.fi]
-			|| is_modified_col[e.parent_field.fi])
+		// Place rows only when one moves, appears or goes away. Append the
+		// added rows, then put rows in pos order and under their parents.
+		if (drop_ris.length || added_ris.length || moved_ris.length
+			|| placed_ris.length
 		) {
-			set_tree_parents()
-			is_tree_rebuilt = true
-			let parent_fi = e.parent_field.fi
-			if (e.input_vals[parent_fi])
-				for (let i = 0; i < e.row_n; i++)
-					if (cell_bit(e.modified_mask, e.base_ris[i], parent_fi))
-						edited_parent_ris.push(e.base_ris[i])
+			if (drop_ris.length)
+				drop_rows(drop_ris)
+			let n = e.row_n // rows before adding
+			let k = added_ris.length
+			let was_unsorted = e.sorted_ris == e.base_ris
+			let new_ris = Uint32Array.from(added_ris)
+			e.base_ris = insert_into_list(e.base_ris, n, n, new_ris, k)
+			e.sorted_ris = was_unsorted ? e.base_ris
+				: insert_into_list(e.sorted_ris, n, n, new_ris, k)
+			e.row_n += k
+			add_to_indexes(added_ris)
+			if (moved_ris.length || k)
+				update_row_places(moved_ris.concat(added_ris))
+			if (!was_unsorted)
+				sort_placed_rows()
+			update_pass()
+			if (e.is_grouped)
+				regroup()
+			update_tree_and_visible_ris(false)
 		}
-		let is_pos_changed = !!e.pos_field
-			&& (k > 0 || !!is_modified_col[e.pos_field.fi])
-		// Restore parents from pending parent_id edits and restore pos order.
-		if (edited_parent_ris.length || is_pos_changed)
-			update_row_places(edited_parent_ris)
 
-		if (e.order_by
-			&& (k > 0 || is_pos_changed || is_modified_col.includes(1))
-		)
-			sort_ris(e.order_by)
-
-		// Rebuild the tree before expanding ancestors: update_tree_ris()
-		// clears circular parent links. Keep modified rows and the row being
-		// edited visible if the server moved them under a collapsed parent.
-		update_tree_ris()
-		if (is_tree_rebuilt && e.is_tree)
-			for (let i = 0; i < e.row_n; i++) {
-				let ri = e.base_ris[i]
-				if (is_row_modified(ri) || (e.editing && ri == e.focused_ri))
-					for (let p = e.parent_ri[ri]; p != NONE; p = e.parent_ri[p])
-						e.row_flags[p] &= ~ROW_COLLAPSED
-			}
-		update_pass_desc()
-		update_visible_ris()
+		// Discard the edit and error arrays if no modified rows remain.
+		if (!e.modified_n) {
+			e.input_vals = [] // edited values by fi, then ri
+			e.cell_errors = [] // cell errors by fi, then ri
+		}
 	}
 
 	/// reloading -------------------------------------------------------------
 
-	// Merge the rowset with diff_merge(), which uses load() the first time.
-	// Wait for a pending save to finish before reloading, because
+	// Load the rowset again with reload_rowset(), which uses load() the
+	// first time. Wait for a pending save to finish before reloading, because
 	// the server may not have saved those values yet.
 	e.reload = function() {
 		assert(e.rowset_name, 'reload: rowset_name required')
@@ -3987,7 +4084,7 @@ ui.nav = function(id, opt) {
 			return
 		}
 		if (!is_server_rowset) {
-			e.diff_merge(ui.rowsets[e.rowset_name])
+			e.reload_rowset(ui.rowsets[e.rowset_name])
 			e.ready = true
 		} else if (e.param_vals === false) { // no master row: load nothing
 			load_req?.abort()
@@ -4004,16 +4101,24 @@ ui.nav = function(id, opt) {
 			}
 			load_req?.abort()
 			load_req = ajax({
+				dont_send: true,
 				url: url,
 				success: function(rs) {
-					if (this == load_req) {
-						e.diff_merge(rs)
-						e.ready = true
+					if (this != load_req)
+						return
+					e.reload_rowset(rs)
+					e.ready = true
+					// the reload settled the failed save: run the save that waited.
+					if (want_save) {
+						want_save = false
+						e.save()
 					}
 				},
 				done: function() {
-					if (this == load_req)
+					if (this == load_req) {
 						load_req = null
+						ui.animate()
+					}
 				},
 			})
 			load_req.send()
@@ -4151,6 +4256,16 @@ ui.nav = function(id, opt) {
 		let pk_fields = check_cols(pk_cols, all_fields_map)
 		if (!pk_fields)
 			return
+		// a server rowset's pk is one auto_increment number field, whose ids
+		// the nav reserves before saving, or fields that the user fills in.
+		let is_reserved_pk = pk_fields.length == 1
+			&& pk_fields[0].is_number && pk_fields[0].auto_increment
+		let is_typed_pk = pk_fields.every(field =>
+			field.not_null && !field.has_server_default)
+		if (warn_if(is_server_rowset && !is_reserved_pk && !is_typed_pk, e.id,
+			'pk must be one auto_increment number field,'
+			+ ' or not_null fields without a server default'))
+			return
 
 		let pos_field     = col_field(rs.pos_col    , all_fields_map)
 		let id_field      = col_field(rs.id_col     , all_fields_map)
@@ -4168,6 +4283,11 @@ ui.nav = function(id, opt) {
 		// id_col defaults to a one-column pk.
 		if (rs.id_col == null && pk_fields.length == 1)
 			id_field = pk_fields[0]
+
+		if (warn_if(id_field && parent_field
+				&& !(is_reserved_pk && id_field == pk_fields[0]), e.id,
+			'tree id must be the pk, one auto_increment number field'))
+			return
 
 		let src_col_vals = rowset_col_vals(rs, all_fields.length)
 		if (!src_col_vals)
@@ -4187,14 +4307,12 @@ ui.nav = function(id, opt) {
 		e.all_fields_map = all_fields_map
 		e.pk = pk
 		e.pk_fields = pk_fields
+		for (let field of pk_fields)
+			field.immutable = true
 		e.pos_field = pos_field
 		e.id_field = id_field
 		e.parent_field = parent_field
 		e.display_field = display_field
-		e.row_n = src_col_vals[0].length
-		cap = e.row_n + 1 // capacity of ri-indexed arrays (+1 for 1 free insert)
-		e.col_vals = e.all_fields.map(field =>
-			field.col_storage.load_col(src_col_vals[field.fi], cap))
 
 		group_field = ui.create_field({
 			name: '$group', label: 'Group', w: 12,
@@ -4203,16 +4321,7 @@ ui.nav = function(id, opt) {
 		}, e.id)
 		group_field.fi = e.all_fields.length // field index
 		group_field.filter_field = create_filter_field(group_field)
-		e.col_vals[group_field.fi] = new Array(e.row_n).fill(null)
 
-		// Ignore the pending save's reply and clear any waiting save or reload
-		// before replacing the rows.
-		let cur_save_req = save_req
-		save_req = null
-		cur_save_req?.abort()
-		end_save()
-		want_save = false
-		want_reload = false
 		rowset_fields = e.all_fields.slice()
 		rowset_cols = (rs.cols != null ? words(rs.cols)
 			: rowset_fields.filter(field => !field.hidden)
@@ -4220,6 +4329,50 @@ ui.nav = function(id, opt) {
 		rowset_tree_col = rs.tree_col
 		e.all_fields.push(group_field)
 		e.all_fields_map[group_field.name] = group_field
+
+		e.rowset_can_add_rows    = rs.can_add_rows    != false
+		e.rowset_can_remove_rows = rs.can_remove_rows != false
+		e.rowset_can_change_rows = rs.can_change_rows != false
+		e.rowset_can_move_rows   = rs.can_move_rows   != false
+
+		e.mask_word_n = (e.all_fields.length + 31) >>> 5
+		all_fields_mask = fields_mask(e.all_fields)
+		e.last_focused_fi = null
+
+		e.cols = saved_opt('cols')
+		e.order_by = saved_opt('order_by')
+		e.can_be_tree = !!(e.id_field && e.parent_field)
+		e.group_by = null
+		e.group_cols = []
+		collapsed_group_paths.clear()
+
+		// abort/clear any current requests (save or load).
+		let cur_save_req = save_req
+		save_req = null
+		cur_save_req?.abort()
+		end_save()
+		want_save = false
+		want_reload = false
+
+		load_rows(src_col_vals, null, null)
+		let group_by = saved_opt('group_by')
+		if (group_by)
+			e.set_group_by(group_by)
+		e.move_focus(null, null)
+	}
+
+	// load rows from src_col_vals and re-apply filters, order_by, group_by,
+	// cols, flat mode, edit state, collapsed flags.
+	// resets focus, selection, quicksearch.
+	function load_rows(src_col_vals, edit_state, collapsed_pks) {
+		e.exit_edit()
+		e.row_n = src_col_vals[0].length
+		// capacity of ri-indexed arrays: the replay adds at most one row per
+		// recorded row, +1 for 1 free insert.
+		cap = e.row_n + (edit_state ? edit_state.rows.length : 0) + 1
+		e.col_vals = rowset_fields.map(field =>
+			field.col_storage.load_col(src_col_vals[field.fi], cap))
+		e.col_vals[group_field.fi] = new Array(e.row_n).fill(null)
 
 		e.row_flags        = new Uint16Array(cap)
 		e.parent_ri        = new Uint32Array(cap).fill(NONE)
@@ -4234,8 +4387,7 @@ ui.nav = function(id, opt) {
 		prev_visible_ris   = new Uint32Array(cap)
 		e.visible_n = 0
 
-		// Include every row before applying a filter.
-		e.filter = null
+		// include every row before applying a filter.
 		e.row_flags.fill(ROW_PASS)
 
 		// Stage 1: init base_ris and sorted_ris.
@@ -4251,18 +4403,9 @@ ui.nav = function(id, opt) {
 
 		indexes = map()
 
-		e.rowset_can_add_rows    = rs.can_add_rows    != false
-		e.rowset_can_remove_rows = rs.can_remove_rows != false
-		e.rowset_can_change_rows = rs.can_change_rows != false
-		e.rowset_can_move_rows   = rs.can_move_rows   != false
-		e.reserves_ids = !!rs.reserves_ids
-
-		e.mask_word_n = (e.all_fields.length + 31) >>> 5
-		all_fields_mask = fields_mask(e.all_fields)
 		e.sel_mask = new Uint32Array(cap * e.mask_word_n)
 		has_sel_bits = false
 		set_focus(null, null)
-		e.last_focused_fi = null
 		e.quicksearch_text = ''
 		set_rect(null, null, null, null) // no selection rectangle
 
@@ -4275,25 +4418,192 @@ ui.nav = function(id, opt) {
 
 		slot_n = e.row_n
 		free_ris = []
+		// slots of a lost save batch now hold other rows.
+		saving_ris.clear()
 
-		e.cols = saved_opt('cols')
-		e.can_be_tree = !!(e.id_field && e.parent_field)
-		e.group_by = null
-		e.group_cols = []
 		e.is_grouped = false
 		e.group_ris = new Uint32Array(0)
 		group_fis = new Set()
-		update_visible_fields()
-		update_is_tree()
+
+		if (edit_state)
+			replay_edit_state(edit_state)
+		if (collapsed_pks)
+			for (let pk of collapsed_pks) {
+				let ri = e.lookup(e.pk, pk)
+				if (ri != null)
+					set_bits(e.row_flags, ri, ROW_COLLAPSED, true)
+			}
+
 		if (e.can_be_tree)
 			set_tree_parents()
-		sort_ris(saved_opt('order_by'))
+		// put rows moved by pending parent_id or pos edits back in their
+		// places. grouping below sets the parents of grouped rows again.
+		if (edit_state) {
+			let edited_parent_ris = [] // rows with parent_id edits
+			let parent_fi = e.parent_field?.fi
+			if (e.can_be_tree && e.input_vals[parent_fi])
+				for (let i = 0; i < e.row_n; i++)
+					if (cell_bit(e.modified_mask, e.base_ris[i], parent_fi))
+						edited_parent_ris.push(e.base_ris[i])
+			if (edited_parent_ris.length || e.pos_field)
+				update_row_places(edited_parent_ris)
+		}
+		sort_ris(e.order_by)
 		update_row_filter()
 		update_pass()
-		update_tree_and_visible_ris()
-		let group_by = saved_opt('group_by')
-		if (group_by)
-			e.set_group_by(group_by)
+		if (e.group_by)
+			add_groups(parse_group_by(e.group_by))
+		update_visible_fields()
+		update_is_tree()
+
+		// Rebuild the tree before expanding ancestors: update_tree_ris()
+		// clears circular parent links. Expand the collapsed ancestors of
+		// modified rows, because the nav never hides an edited cell.
+		update_tree_ris()
+		if (e.is_tree && collapsed_pks?.length)
+			for (let i = 0; i < e.row_n; i++) {
+				let ri = e.base_ris[i]
+				if (is_row_modified(ri))
+					for (let p = e.parent_ri[ri]; p != NONE; p = e.parent_ri[p])
+						e.row_flags[p] &= ~ROW_COLLAPSED
+			}
+		update_pass_desc()
+		update_visible_ris()
+	}
+
+	// -> [v1, ...]: the row's pk, with a new row's typed pk.
+	function row_pk(ri) {
+		return e.pk_fields.map(field => e.cell_input_val(ri, field.fi))
+	}
+
+	// A server rowset loads only the rows matching param_vals. Return true if
+	// a row with row_vals {col: val} was among the rows requested.
+	function is_requested_vals(row_vals) {
+		if (!(e.param_vals && is_server_rowset))
+			return true
+		return e.param_vals.some(vals =>
+			keys(vals).every(col => row_vals[col] === vals[col]))
+	}
+
+	// Return the pending changes as plain JSON, by pk and column name:
+	//   {rows: [{pk: [v1, ...], is_new, is_removed, vals: {col: v},
+	//     edits: {col: v}}, ...]}
+	// vals holds the set column values: a new row's own values, or the server
+	// values of a saved row.
+	e.get_edit_state = function() {
+		let rows = []
+		for (let i = 0; i < e.row_n; i++) {
+			let ri = e.base_ris[i]
+			if (!is_row_modified(ri))
+				continue
+			let vals = {} // set column values, by col
+			let edits = {} // edited values, by col
+			for (let field of rowset_fields) {
+				let fi = field.fi
+				if (!cell_bit(e.unset_mask, ri, fi))
+					vals[field.name] = col_val(ri, fi)
+				if (cell_bit(e.modified_mask, ri, fi))
+					edits[field.name] = e.input_vals[fi][ri]
+			}
+			let flags = e.row_flags[ri]
+			rows.push({
+				pk: row_pk(ri),
+				is_new: !!(flags & ROW_NEW),
+				is_removed: !!(flags & ROW_REMOVED),
+				vals: vals,
+				edits: edits,
+			})
+		}
+		return {rows: rows}
+	}
+
+	// Add a recorded row that the server didn't return, with its recorded
+	// column values. Return its slot.
+	function add_recorded_row(row) {
+		let ri = alloc_slot()
+		for (let field of rowset_fields) {
+			let v = row.vals[field.name]
+			if (v === undefined)
+				set_cell_bit(e.unset_mask, ri, field.fi, true)
+			field.col_storage.set(e.col_vals[field.fi], ri, v ?? null)
+		}
+		group_field.col_storage.set(e.col_vals[group_field.fi], ri, null)
+		e.row_flags[ri] = row.is_new ? ROW_NEW | ROW_PASS | ROW_UNPLACED
+			: ROW_PASS
+		if (row.is_new)
+			e.modified_n++
+		return ri
+	}
+
+	// Write edit_state from get_edit_state() over the server rows that
+	// load_rows() just loaded, finding each recorded row by pk:
+	//   saved row found: write the edits and the deletion mark again.
+	//   new row found: the server saved it, so it becomes that saved row, and
+	//     its values that differ from the server's become edits (R4).
+	//   saved row not found: drop it, unless the server didn't load it
+	//     because it doesn't match param_vals.
+	//   new row not found: add it again, unless it is marked for deletion,
+	//     because then its insert never committed.
+	function replay_edit_state(edit_state) {
+		let added_ris = [] // recorded rows added again
+		for (let row of edit_state.rows) {
+			let ri = e.lookup(e.pk, row.pk)
+			let edits = row.edits // {col: v}
+			if (ri != null) {
+				if (row.is_new)
+					edits = assign({}, row.vals, row.edits)
+			} else {
+				if (row.is_new ? row.is_removed : is_requested_vals(row.vals))
+					continue
+				ri = add_recorded_row(row)
+				added_ris.push(ri)
+			}
+			for (let col in edits) {
+				let field = e.all_fields_map[col]
+				set_input_val(ri, field.fi, edits[col])
+				// an edit equal to the server value is gone: nothing to check.
+				if (cell_bit(e.modified_mask, ri, field.fi))
+					set_cell_errors(ri, field.fi, validate_cell(field, edits[col]))
+			}
+			if (row.is_removed) {
+				let was_modified = is_row_modified(ri)
+				set_bits(e.row_flags, ri, ROW_REMOVED, true)
+				update_modified_n(ri, was_modified)
+			}
+			update_invalid(ri)
+		}
+
+		// append the added rows to the stored order and the indexes.
+		let k = added_ris.length
+		if (k) {
+			e.base_ris = insert_into_list(e.base_ris, e.row_n, e.row_n,
+				Uint32Array.from(added_ris), k)
+			e.sorted_ris = e.base_ris
+			e.row_n += k
+			add_to_indexes(added_ris)
+		}
+	}
+
+	// reload rs, but keep and re-apply pending changes, collapsed flag and
+	// view view settings. falls back to load(rs) if rowset definition differs.
+	e.reload_rowset = function(rs) {
+		if (!is_same_rowset(rs)) {
+			e.load(rs)
+			return
+		}
+		let src_col_vals = rowset_col_vals(rs, rowset_fields.length)
+		if (!src_col_vals)
+			return
+		let edit_state = e.get_edit_state()
+		// collapse flags on data rows matter only in a nav that can be a tree.
+		let collapsed_pks = [] // pks of the collapsed rows
+		if (e.can_be_tree)
+			for (let i = 0; i < e.row_n; i++) {
+				let ri = e.base_ris[i]
+				if (e.row_flags[ri] & ROW_COLLAPSED)
+					collapsed_pks.push(row_pk(ri))
+			}
+		load_rows(src_col_vals, edit_state, collapsed_pks)
 		e.move_focus(null, null)
 	}
 
@@ -4302,7 +4612,8 @@ ui.nav = function(id, opt) {
 		e.ready = true
 	} else {
 		// Start with no rows until the first load.
-		e.load({fields: [{name: 'id', hidden: true}], pk: 'id', rows: []})
+		e.load({fields: [{name: 'id', hidden: true, not_null: true}], pk: 'id',
+			rows: []})
 		if (is_server_rowset) {
 			listen_rowset_events()
 			rowset_listeners[e.rowset_name] ??= new Set()

@@ -164,7 +164,7 @@ async function bench_flat() {
 
 	await bench('flat: select all',
 		() => nav.focus_cell(first_ri(), first_fi),
-		() => nav.focus_cell(null, null, 'all'),
+		() => nav.select_all_cells(),
 		() => assert(nav.is_cell_selected(last_ri(), last_fi)
 			&& nav.focused_ri == first_ri(), 'select all: not all selected'))
 
@@ -311,7 +311,7 @@ async function bench_flat() {
 		return rows
 	}
 
-	for (let n of [1, 1000])
+	for (let n of [1, 1000, 10000])
 		await bench(`flat: insert ${n} rows at middle`,
 			() => ({rows: make_new_rows(n), row_n: nav.row_n}),
 			ctx => nav.insert_rows(ctx.rows,
@@ -366,17 +366,44 @@ async function bench_flat() {
 		&& nav.lookup('id', [5]) == id5_ri, 'revert: new rows left')
 
 	// a reload where the server changed num3 in 1000 rows.
-	await bench('flat: merge rowset (1000 modified rows)',
+	await bench('flat: reload rowset (1000 modified rows)',
 		() => {
 			let rs = make_flat_rowset()
 			for (let i = 0; i < 1000; i++)
 				rs.col_vals[num3_fi][i * step] = -1
 			return rs
 		},
-		rs => nav.diff_merge(rs),
+		rs => nav.reload_rowset(rs),
 		() => assert(nav.row_n == row_n && nav.modified_n == 0
 			&& nav.cell_input_val(nav.lookup('id', [1]), num3_fi) == -1,
-			'merge: wrong rows'))
+			'reload: wrong rows'))
+
+	// a reload where the server added 10k rows after the loaded ones.
+	await bench('flat: reload rowset adding 10k rows',
+		() => {
+			let rows = make_flat_rows()
+			for (let i = 1; i <= 10000; i++)
+				rows.push(make_row(row_n + i, null, row_n + i))
+			return make_rowset(rows, {pos_col: 'pos'})
+		},
+		rs => nav.reload_rowset(rs),
+		() => assert(nav.row_n == row_n + 10000
+			&& nav.lookup('id', [row_n + 10000]) != null,
+			'reload: rows not added'))
+
+	// a reload where the server dropped every drop_step-th row: 10k rows when
+	// there are at least 10k.
+	let drop_step = Math.max(1, Math.floor(row_n / 10000))
+	let drop_n = Math.ceil(row_n / drop_step) // rows dropped
+	await bench('flat: reload rowset dropping 10k rows',
+		() => make_rowset(make_flat_rows().filter((row, i) => i % drop_step),
+			{pos_col: 'pos'}),
+		rs => nav.reload_rowset(rs),
+		() => assert(nav.row_n == row_n - drop_n
+			&& nav.lookup('id', [1]) == null,
+			'reload: rows not dropped'))
+
+	nav.reload_rowset(make_flat_rowset())
 
 	await bench_group_by(nav)
 	await bench_move(nav)
@@ -451,7 +478,7 @@ function check_slot_retirement() {
 	let nav = ui.nav('slot_retirement')
 	nav.load({
 		fields: [
-			{name: 'id', type: 'number'},
+			{name: 'id', type: 'number', auto_increment: true},
 			{name: 'parent_id', type: 'number'},
 			{name: 'num1', type: 'number'},
 		],
@@ -466,7 +493,7 @@ function check_slot_retirement() {
 	nav.remove_rows([0, new_ri])
 	check_retired_slots(nav, [new_ri])
 	assert(nav.modified_n == 2 && nav.focused_ri == null
-		&& nav.is_cell_selected(0, 2), 'drop: surviving selection changed')
+		&& !nav.is_cell_selected(0, 2), 'drop: selection not reset')
 	let ris = nav.insert_rows([[4], [5]])
 	assert(ris[0] != ris[1] && nav.cell_input_val(ris[0], 0) == 4
 		&& nav.cell_input_val(ris[1], 0) == 5, 'insert: two rows share a slot')
@@ -480,8 +507,8 @@ function check_slot_retirement() {
 	nav.focus_cell(0, 2)
 	nav.focus_cell(nav.group_ris[1], 2, 'invert')
 	nav.set_group_by('b')
-	assert(nav.focused_ri == null && nav.is_cell_selected(0, 2),
-		'regroup: surviving selection changed')
+	assert(nav.focused_ri == null && !nav.is_cell_selected(0, 2),
+		'regroup: selection not reset')
 	for (let ri of nav.group_ris)
 		assert(!nav.is_cell_selected(ri, 2), 'regroup: new group selected')
 
@@ -515,7 +542,7 @@ function check_policy() {
 		pk: 'id',
 	})
 
-	nav.set_row_flag(0, 'no_change', true)
+	nav.set_row_flag(0, 'readonly', true)
 	nav.set_cell_val(0, 1, 'z', user)
 	nav.set_cell_val(1, 2, 'z', user)
 	assert(nav.modified_n == 0, 'policy: user edit not refused')
@@ -571,12 +598,13 @@ function check_saving() {
 	nav.revert_cell(new_ri, 2)
 	assert(nav.cell_input_val(new_ri, 2) === undefined, 'unset: revert kept null')
 
-	// backwards in stored order; unset cells and unedited cells left out.
+	// edits and inserts forward in stored order, then deletes backward;
+	// unset cells and unedited cells left out.
 	nav.set_cell_val(0, 1, 'x2')
 	nav.remove_rows([1])
 	let batch = nav.pack_changes()
-	let [t_new, t_remove, t_update] = batch.rows
-	assert(batch.ris.join() == [new_ri, 1, 0].join()
+	let [t_update, t_new, t_remove] = batch.rows
+	assert(batch.ris.join() == [0, new_ri, 1].join()
 		&& t_new.type == 'new' && t_new.values.a == 'n'
 		&& !('id' in t_new.values) && !('b' in t_new.values)
 		&& t_remove.type == 'remove' && t_remove.values['id:old'] == 2
@@ -587,9 +615,9 @@ function check_saving() {
 	// an edit made in flight stays on top of the server's value.
 	nav.set_cell_val(0, 1, 'x3')
 	nav.apply_result(batch, {rows: [
+		{values: [1, 'x2', 10]},
 		{values: [4, 'n', 7]},
 		{remove: true},
-		{values: [1, 'x2', 10]},
 	]})
 	assert(nav.row_n == 3 && nav.modified_n == 1
 		&& nav.cell_input_val(new_ri, 0) == 4 && nav.cell_input_val(new_ri, 2) == 7
@@ -603,16 +631,27 @@ function check_saving() {
 		&& !nav.validate_row(0), 'ack: error lost')
 	nav.revert_changes()
 
-	// a row dropped in flight: the ack skips its slot.
+	// a new row reverted in flight stays, marked for deletion: the server
+	// inserted it.
 	let [new_ri2] = nav.insert_rows([[undefined, 'm']])
 	batch = nav.pack_changes()
 	nav.revert_row(new_ri2)
 	nav.apply_result(batch, {rows: [{values: [5, 'm', null]}]})
-	assert(nav.row_n == 3 && nav.modified_n == 0,
-		'ack: dropped row not skipped')
+	assert(nav.row_n == 4 && nav.modified_n == 1
+		&& !nav.is_new(new_ri2) && nav.is_removed(new_ri2),
+		'ack: row reverted in flight not kept for deletion')
+	nav.revert_changes()
+
+	// a new row reverted in flight whose insert failed is dropped.
+	let [new_ri3] = nav.insert_rows([[undefined, 'k']])
+	batch = nav.pack_changes()
+	nav.revert_row(new_ri3)
+	nav.apply_result(batch, {rows: [{error: 'no'}]})
+	assert(nav.row_n == 4 && nav.modified_n == 0,
+		'ack: row reverted in flight not dropped after a failed insert')
 }
 
-// diff_merge(): matched rows take the server's values under their edits,
+// reload_rowset(): matched rows take the server's values under their edits,
 // rows new on the server are added, rows gone from it are dropped, and new
 // rows stay.
 function check_merge() {
@@ -625,7 +664,7 @@ function check_merge() {
 	nav.set_cell_val(0, 1, 'x1')
 	nav.set_cell_val(1, 1, 'y1')
 	nav.insert_rows([[undefined, 'n']])
-	nav.diff_merge({
+	nav.reload_rowset({
 		fields: save_fields,
 		rows: [[1, 'x', 11], [2, 'y1', 20], [4, 'w', 40]],
 		pk: 'id',
@@ -639,9 +678,177 @@ function check_merge() {
 		'merge: edits or values wrong')
 
 	// other columns: load.
-	nav.diff_merge({fields: [{name: 'id', type: 'number'}], rows: [[7]],
+	nav.reload_rowset({fields: [{name: 'id', type: 'number'}], rows: [[7]],
 		pk: 'id'})
 	assert(nav.row_n == 1 && nav.modified_n == 0, 'merge: other columns merged')
+}
+
+// -> the values of col in sorted_ris order.
+function sorted_vals(nav, col) {
+	let fi = nav.all_fields_map[col].fi
+	let vals = []
+	for (let i = 0; i < nav.row_n; i++)
+		vals.push(nav.cell_input_val(nav.sorted_ris[i], fi))
+	return vals.join(' ')
+}
+
+// -> k rows of nav with col changed to random values, as merge_rows() takes
+// them, and added_n added rows after them.
+function make_change_set(nav, col, k, added_n) {
+	let rows = []
+	for (let i = 0; i < k; i++) {
+		let ri = nav.base_ris[rand_int(nav.row_n)]
+		let row = nav.all_fields.slice(0, -1).map(field =>
+			nav.cell_input_val(ri, field.fi))
+		row[nav.all_fields_map[col].fi] = rand_int(1000000)
+		rows.push(row)
+	}
+	for (let i = 0; i < added_n; i++)
+		rows.push(make_row(next_merge_id++, null, null))
+	return {rows: rows}
+}
+let next_merge_id = 10 * row_n // id of the next row added by a change set
+
+async function bench_merge_rows() {
+	let nav = ui.nav('bench_merge_rows')
+	nav.load(make_rowset(make_flat_rows()))
+	nav.set_order_by('num1')
+
+	await bench('merge: reference: set_order_by num1 (full sort, stages)',
+		null,
+		() => nav.set_order_by('num1'))
+
+	// a change to a column outside the sort moves no row.
+	for (let k of [1, 1000])
+		await bench(`merge: ${k} rows, num2 changed, sorted by num1`,
+			() => make_change_set(nav, 'num2', k, 0),
+			change_set => nav.merge_rows(change_set))
+
+	for (let k of [1, 1000])
+		await bench(`merge: ${k} rows, num1 changed, sorted by num1`,
+			() => make_change_set(nav, 'num1', k, 0),
+			change_set => nav.merge_rows(change_set),
+			() => check_placed_order(nav, 'num1'))
+
+	await bench('merge: 1000 rows added, sorted by num1',
+		() => make_change_set(nav, 'num1', 0, 1000),
+		change_set => nav.merge_rows(change_set),
+		() => check_placed_order(nav, 'num1'))
+	nav.free()
+}
+
+// the rows of sorted_ris without pending changes are in order by col.
+function check_placed_order(nav, col) {
+	let fi = nav.all_fields_map[col].fi
+	let prev_v // value of the last row without pending changes
+	for (let i = 0; i < nav.row_n; i++) {
+		let ri = nav.sorted_ris[i]
+		if (nav.is_row_edited(ri) || nav.is_new(ri))
+			continue
+		let v = nav.cell_input_val(ri, fi)
+		assert(prev_v == null || v == null || v >= prev_v,
+			'merge: rows out of order at ', i)
+		prev_v = v ?? prev_v
+	}
+}
+
+// merge_rows(): changed rows without pending changes go to their sorted
+// place and through the filter; rows with pending changes stay put.
+function check_merge_rows() {
+	let nav = ui.nav('merge_rows')
+	nav.load({
+		fields: save_fields,
+		col_vals: [[1, 2, 3, 4, 5], ['a', 'b', 'c', 'd', 'e'],
+			[10, 20, 30, 40, 50]],
+		pk: 'id',
+	})
+	nav.set_order_by('b')
+
+	// a changed row moves, an added row goes to its place, a removed row
+	// goes away.
+	nav.merge_rows({rows: [[3, 'c', 60], [6, 'f', 5]], removed_pks: [[2]]})
+	assert(sorted_vals(nav, 'id') == '6 1 4 5 3', 'merge: wrong sort order')
+
+	// an edited row stays where it is when the server changes its sort key,
+	// and the next merge places other rows around it.
+	let ri4 = nav.lookup('id', [4])
+	nav.set_cell_val(ri4, 1, 'd1')
+	nav.merge_rows({rows: [[4, 'd', 1], [1, 'a', 45]]})
+	assert(sorted_vals(nav, 'id') == '6 1 4 5 3'
+		&& nav.cell_input_val(ri4, 1) == 'd1',
+		'merge: edited row moved or lost its edit')
+
+	// a new row with the pk of a server row becomes that saved row, and its
+	// own values stay as edits.
+	let [new_ri] = nav.insert_rows([[7, 'g', 70]])
+	nav.merge_rows({rows: [[7, 'x', 70]]})
+	assert(!nav.is_new(new_ri) && nav.row_n == 6
+		&& nav.cell_input_val(new_ri, 1) == 'g'
+		&& nav.is_row_edited(new_ri),
+		'merge: new row not made the saved row')
+
+	// the filter hides a changed row and keeps a row with pending changes.
+	nav.set_filter(ri => nav.cell_input_val(ri, 2) < 50)
+	nav.merge_rows({rows: [[6, 'f', 55], [4, 'd', 99]]})
+	assert(nav.visible_i[nav.lookup('id', [6])] == 0xFFFFFFFF
+		&& nav.visible_i[ri4] != 0xFFFFFFFF,
+		'merge: filter not applied or edited row hidden')
+	nav.free()
+
+	// a saved row that the user left out of order stays there through a
+	// merge that sorts other rows, until the user sorts.
+	nav = ui.nav('merge_rows_unplaced')
+	nav.load({
+		fields: save_fields,
+		col_vals: [[1, 2, 3], ['a', 'b', 'c'], [10, 20, 30]],
+		pk: 'id',
+	})
+	nav.set_order_by('b')
+	nav.set_cell_val(nav.lookup('id', [1]), 2, 99)
+	nav.apply_result(nav.pack_changes(), {rows: [{}]})
+	nav.merge_rows({rows: [[3, 'c', 5]]})
+	assert(sorted_vals(nav, 'id') == '1 3 2', 'merge: unplaced row moved')
+	nav.set_order_by('b')
+	assert(sorted_vals(nav, 'id') == '3 2 1', 'merge: sort left row unplaced')
+	nav.free()
+
+	// tree: an added child goes under its parent; the rows that the server
+	// removed go away.
+	let tree = ui.nav('merge_rows_tree')
+	tree.load({
+		fields: [
+			{name: 'id', type: 'number', auto_increment: true},
+			{name: 'parent_id', type: 'number'},
+		],
+		col_vals: [[1, 2, 3], [null, 1, 2]],
+		pk: 'id',
+		parent_col: 'parent_id',
+	})
+	tree.merge_rows({rows: [[4, 3]]})
+	let ri_of = id => tree.lookup('id', [id])
+	assert(tree.parent_ri[ri_of(4)] == ri_of(3), 'merge: tree parent not set')
+	tree.merge_rows({removed_pks: [[3], [4]]})
+	assert(tree.row_n == 2 && ri_of(3) == null && ri_of(4) == null,
+		'merge: removed rows kept')
+	tree.free()
+
+	// groups: a collapsed group stays collapsed when rows are added.
+	let grouped = ui.nav('merge_rows_groups')
+	grouped.load({
+		fields: save_fields,
+		col_vals: [[1, 2, 3], ['x', 'x', 'y'], [1, 2, 3]],
+		pk: 'id',
+	})
+	grouped.set_group_by('a')
+	let group_x_ri = grouped.parent_ri[grouped.lookup('id', [1])]
+	grouped.set_collapsed(group_x_ri, true)
+	grouped.merge_rows({rows: [[4, 'x', 4], [5, 'z', 5]]})
+	let group_ri = grouped.parent_ri[grouped.lookup('id', [4])]
+	assert(grouped.is_collapsed(group_ri)
+		&& grouped.parent_ri[grouped.lookup('id', [1])] == group_ri
+		&& grouped.group_ris.length == 3,
+		'merge: groups wrong or collapse lost')
+	grouped.free()
 }
 
 async function bench_move(nav) {
@@ -845,9 +1052,9 @@ async function bench_tree() {
 	nav.set_collapsed(null, false, true)
 
 	// Move modified leaf rows under the first root in the server rowset.
-	// diff_merge() must expand their ancestors to keep the edits visible.
+	// reload_rowset() must expand their ancestors to keep the edits visible.
 	let merge_nav, merge_rs
-	await bench('tree: merge rowset moving 1000 modified rows',
+	await bench('tree: reload rowset moving 1000 modified rows',
 		() => {
 			let moved_rows = tree.rows.map(row => row.slice())
 			let leaf_ri1 = Math.floor(row_n / 4) // first bottom-level row
@@ -869,12 +1076,12 @@ async function bench_tree() {
 				{id_col: 'id', parent_col: 'parent_id'})
 			return moved_ris
 		},
-		() => merge_nav.diff_merge(merge_rs),
+		() => merge_nav.reload_rowset(merge_rs),
 		(_, moved_ris) => {
 			check_tree(merge_nav)
 			for (let i1 of moved_ris)
 				assert(merge_nav.visible_i[merge_nav.lookup('id', [i1 + 1])]
-					!= 0xFFFFFFFF, 'merge: moved modified row hidden')
+					!= 0xFFFFFFFF, 'reload: moved modified row hidden')
 		})
 
 	let root_ri = nav.lookup('id', [tree.largest_root_id])
@@ -1065,7 +1272,7 @@ function check_indexes() {
 	nav = ui.nav('index_tree')
 	nav.load({
 		fields: [
-			{name: 'id', type: 'number'},
+			{name: 'id', type: 'number', auto_increment: true},
 			{name: 'parent_id', type: 'number'},
 			{name: 'pos', type: 'number'},
 		],
@@ -1293,19 +1500,28 @@ async function bench_clear_selection() {
 	}
 }
 
+// ?only=SECTION runs the checks and then only that bench section.
 async function run() {
 	assert(row_n >= 1000, 'rows must be at least 1000')
 	check_validation()
-	await bench_validation()
 	check_indexes()
-	await bench_indexes()
 	check_slot_retirement()
 	check_policy()
 	check_saving()
 	check_merge()
-	await bench_flat()
-	await bench_clear_selection()
-	await bench_tree()
+	check_merge_rows()
+	let only = new URLSearchParams(location.search).get('only')
+	let sections = {
+		validation: bench_validation,
+		indexes: bench_indexes,
+		merge: bench_merge_rows,
+		flat: bench_flat,
+		clear_selection: bench_clear_selection,
+		tree: bench_tree,
+	}
+	for (let name in sections)
+		if (!only || only == name)
+			await sections[name]()
 }
 
 addEventListener('load', () => run().then(

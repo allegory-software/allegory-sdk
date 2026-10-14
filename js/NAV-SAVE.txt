@@ -3,16 +3,16 @@ NAV SAVE AND CHANGE PROPAGATION
 
 This is the plan for saving the records that users edit in the browser,
 and for showing each user the changes that other users make. The code
-today is in www/ui_nav2.js, www/ui_field.js, lua/rowset.lua,
-lua/rowset_mdbx.lua, and the db write path in lua/mdbx_schema.lua (not
-read yet).
+today is in www/ui_nav.js, www/ui_field.js, lua/rowset.lua,
+lua/rowset_mdbx.lua, and the db write path in lua/mdbx_schema.lua.
 
 PROBLEM and REQUIREMENTS say what the system must do, in terms of users
 and their data. IMPLEMENTATION lists ideas for how to do it. None of the
 ideas is decided, and we can replace any of them with a better one.
 
 A label names the same item for good, even when the list changes.
-DECIDE marks a question for Cosmin.
+DECIDE marks a question for Cosmin. LATER marks a question that Cosmin
+put off.
 
 
 PROBLEM
@@ -45,14 +45,18 @@ R1. RECORD KEYS
 	2. A value that the user types: a fact from outside the system, such
 		as a product code, or a fk from inside. The user must fill in every
 		part of it.
-- A new record gets its key before the user saves it.
+- A tree's key is always a number that the system generates.
+- A new record gets a generated key when the user first saves it, before
+	the nav sends the record. Until then the user can't insert or move
+	records under it.
 - A saved record's key never changes. The user can set the key only on a
 	new record.
-- Keys are unique. The user can't save a new record if another record in
-	the user's view has the same key. This includes records marked for
-	deletion.
-- If two users enter the same typed key, they mean the same record. The
-	second save updates it.
+- Keys are unique. The server refuses a new record whose key exists, and
+	the user sees the error on the record.
+- If two users enter the same typed key, the server refuses the second
+	save: the key exists. If the first save reaches the second user's view
+	before the second user saves, the two become one record (R4), and the
+	second user sees that before saving.
 
 
 R2. SAVING
@@ -110,7 +114,9 @@ R4. WHAT THE USER SEES
 	user's view, even while this user is editing it.
 - If the user deletes a new record while its save is underway, the record
 	stays, as a saved record, because the server saved it. The record is
-	instead marked for deletion for the next save. Reverting a new record
+	instead marked for deletion for the next save. If the nav dropped the
+	record, it would never send a delete for it, and the server would keep
+	the record that the user deleted. Reverting a new record
 	removes it, so the same holds for a revert. While the save is underway,
 	the record stays in view, marked for deletion: its fate is uncertain.
 	When the answer arrives:
@@ -126,11 +132,17 @@ R4. WHAT THE USER SEES
 	may need other measures later, such as a diff.
 - If the user changes a record while its save is underway, the new change
 	stays pending on top of the saved values when the answer arrives.
-- A record stays visible and in place, outside the sort and the filter,
-	while it has pending changes or a save underway, whoever changes it.
-	When the save answer arrives, the saved record still stays where it is.
-	Any later change to the record from the server moves it to its place
-	right away: by the filter, the sort, the groups and the tree.
+- When changes from the server arrive, the nav moves each changed record
+	to its place right away: by the filter, the sort, the groups and the
+	tree. It skips the records that have pending changes or a save
+	underway, whoever changes them. Those stay visible and in place,
+	outside the sort and the filter.
+- When the save answer arrives, the saved record still stays where it is,
+	until the next server change to it, the next sort or filter by the
+	user, or the next bulk change from the server.
+- When the server sends a bulk change, such as another user's paste of
+	many records, the nav may put the records with pending changes first
+	instead of in place.
 
 
 R5. PERFORMANCE
@@ -152,18 +164,31 @@ I0. TODAY
 
 - After a save, the server pushes 'NAME update_id...' to every events
 	connection, for every rowset that reads a written table. Every other
-	nav on those rowsets then reloads the whole rowset and merges all of it.
+	nav on those rowsets then reloads the whole rowset (I6).
 - The code that writes a row reports "table T changed", with no key.
 	rowset_mdbx.lua's insert, update and delete call table_changed(). If
 	some code writes and doesn't call table_changed(), nobody hears of the
 	write. App code can call the global rowset_changed() and
 	table_changed(); nothing in lua/ calls them today.
-- If the rowset doesn't set reserves_ids, the nav sends new rows without a
-	pk. If the save's response gets lost, the next save sends the rows
-	again, and the server inserts them a second time.
-- diff_merge() leaves a new row new when it matches a server row by pk.
-	The ack code skips a row that the nav dropped while the row was in
-	flight.
+- Bug: get_index() sorts with radix_sort(), which honors a field's
+	sort_collation ('ai_ci' or a list), but lookup(), upper_bound() and
+	add_to_indexes() compare with compare_cell(), which ignores it. On a
+	column with a sort_collation, a lookup can miss a row. Fix: give
+	compare_cell() the field and make it honor sort_collation.
+- Fixed by I1 and I6:
+	- If the rowset didn't set reserves_ids, the nav sent new rows without
+		a pk. If the save's response got lost, the next save sent the rows
+		again, and the server inserted them a second time.
+	- diff_merge() left a new row new when it matched a server row by pk.
+		The ack code skipped a row that the nav dropped while the row was in
+		flight.
+	- When the insert's answer got lost and the user edited the new row
+		before the next save, the edits were lost: insert_row() skipped the
+		insert because the row existed, and reload_row() loaded the old
+		values back.
+	- An update of a missing row failed: Db:update() raised a not_found row
+		error, apply_changes() returned it as rt.error, and the row stayed
+		in the user's view with that error.
 
 
 I1. KEYS AND SAVE
@@ -174,27 +199,56 @@ I1. KEYS AND SAVE
 	says that a rowset must have reserve_ids() if its pk is one
 	auto_increment field. The nav trusts auto_increment to mean that the
 	server can reserve ids, and doesn't check it.
-- Remove reserves_ids: from the load result, from www/ui_nav2.js's rowset
+- Remove reserves_ids: from the load result, from www/ui_nav.js's rowset
 	options, from the nav, and from the nav's head comment.
 - www/ui_field.js accepts auto_increment as a boolean field option.
 - The nav's load() accepts the pk in two cases:
 	1. one number field with auto_increment. The nav reserves ids before
 		the save.
 	2. every pk field is not_null and has no has_server_default.
-	In any other case, load() warns and stops.
-- Save ops on the server:
-	- insert: if a row with the pk exists, write over it. Today
-		lua/rowset_mdbx.lua skips the insert.
-	- update of a pk: refuse it.
-	- update of a missing row: answer that the row is gone.
-	- delete of a missing row: no error.
+	In any other case, load() warns and stops. A tree's id must be the pk
+	of case 1, in client rowsets too.
+- The nav sets immutable on the pk fields: the user can edit them only on
+	new rows.
+- Save ops on the server, in lua/rowset_mdbx.lua:
+	- insert: insert_row() calls Db:insert(), which refuses an existing
+		pk with a "key exists" row error. The server can't tell a resend
+		after a lost answer from a new record with a key that exists, so
+		the nav tells them apart: after a lost answer, it fetches the
+		changes since its number before it sends the new rows again (I3).
+		If the insert committed, the fetch brings the row, the apply path
+		makes the new row that saved row (I4), and the next save sends only
+		the edits made since. Until I3 exists, the nav reloads in full
+		instead of fetching, and diff_merge() makes a new row that matches
+		a server row by pk that saved row, instead of keeping it new. Gaps
+		in that reload: a detail nav with no master row loads nothing, so
+		its next save waits forever; and a reload filtered by param_vals
+		doesn't return a new row with other param values, so the nav sends
+		it again and gets already_exists, or drops it when it was marked
+		for deletion although the server has it. A new
+		row without a pk value is a client bug: insert_row() answers with a
+		row error. The nav reserves the ids of an auto-inc pk before the
+		save, so insert_row() never assigns an id.
+	- update of a pk: nothing to do. The pk is immutable, so the client
+		never sends it in an update.
+	- update of a missing row: update_row() writes nothing, and
+		reload_row() answers with rt.remove.
+	- delete of a missing row: Db:del() returns false with no error, and
+		reload_row() answers with rt.remove. This works today.
 	reserve_ids() stays tied to the auto-inc pk.
-- Unique pks on save: look up each new row's pk in the pk index. The pk
-	index reads only the columns, and a new row's typed pk is an edit, so
-	the index misses it. So also compare the new rows of the batch with
-	each other.
-- Batch order: today pack_changes() walks tree_ris backwards. That order
-	suits deletes. Inserts need a forward walk.
+
+LATER I1b. Errors on rows that the nav drops. When an update finds no
+row, reload_row() sets rt.remove and the error "Updated record could not
+be loaded back", and the nav drops the row without reading the error. The
+nav can't show a message itself, since it never calls ui functions, so it
+needs a way to report one, such as a list of messages that the grid shows.
+The same error also covers an update that succeeded but moved the row out
+of the rowset's scope, where it is false. To answer the two cases apart,
+update_row() would report a missing row itself.
+- Unique pks on save: the server checks them. Db:insert() refuses an
+	existing pk with a "key exists" row error.
+- Batch order, done: pack_changes() walks tree_ris forward for inserts and
+	edits, then backward for deletes.
 
 I1a. Bench a 10k-row save end to end: write to an actual mdbx table, and
 time everything from the paste to the ack, including the id requests,
@@ -205,29 +259,55 @@ transaction, since mdbx runs one writer at a time.
 I2. CHANGE CAPTURE ON THE SERVER
 ------------------------------------------------------------------------------
 
-- First, read the write and commit path of lua/mdbx_schema.lua.
-- The db write path records every write: the table, the key, and the
-	kind of write (insert, update or delete). It publishes the writes only
-	when the transaction commits. rs:apply_changes() runs each row in a
-	child transaction and rolls a failed row back, and the writes of a
-	rolled-back row must not be published.
-- The db write path gives each commit with writes a change number. The
-	numbers increase in commit order. Two possible sources:
-	- A counter in the server process. It restarts at 0, so the numbers
-		need a restart marker, such as the server's start time.
-	- MDBX's transaction id, if mdbx_schema.lua exposes it. It survives
-		restarts, and it has gaps. The gaps don't matter if the nav asks for
-		the changes since N.
-- The server keeps the recent changes in memory: number, table, key and
-	kind. The db is not for churn. After a restart the list is empty, and
-	every nav needs a full reload.
+- Done in lua/mdbx_schema.lua (ROW CHANGE NOTIFICATIONS): the db records
+	the table name and the raw pk of every row write to a non-raw base
+	table, trigger writes and fk actions included, in a ring buffer in the
+	file db.file..'.changes'. Each top write txn publishes one batch with
+	its txn id, when it commits. The db drops the keys of a rolled-back
+	child txn, so rs:apply_changes() publishes only the rows that it saved.
+	Every process that opens the changes file before its first write txn
+	records its writes, so a write by an app command run from the shell is
+	recorded too.
+- The change number is the mdbx txn id. It grows with each commit and
+	survives restarts. After a failed commit, two batches can have the same
+	id; the repeated keys only cost loading those rows again.
+- The ring is the list of recent changes; the server keeps no list of its
+	own. db:changes_reader(N) reads the batches after txn N, and returns
+	gap = true when it can't: the ring no longer holds them, a process wrote
+	with tracking off or without opening the changes file, or a txn's keys
+	didn't fit in the ring. A gap means that the nav needs a full reload.
+	After a server restart, a nav fetches since its number like before.
+- After a top commit, the writer writes one byte to the changes file, so a
+	process waits for new batches with inotify (IN_MODIFY) on the file,
+	without polling.
+- The server runs one loop: it waits on inotify, opens a read txn, reads
+	the new batches with a reader made by db:changes_reader() at startup,
+	and pushes 'NAME txn_id' for each rowset that reads a changed table. On
+	a gap it doesn't know the tables, so it pushes every rowset.
 - Remove the table_changed() calls from rowset_mdbx.lua. Keep
 	rowset_changed() for rowsets whose rows don't come from a db table,
 	such as rowset.rowsets in lua/rowset.lua. A call to it tells the navs
 	that they need a full reload.
 
-DECIDE I2a. Which rule drops old changes from the list: keep the last X
-changes, or keep the changes of the last T minutes?
+I2a, dropped: the size passed to db:open_changes_file() decides how many
+changes the ring keeps.
+
+I2b, done: mdbx_schema.lua records the writes (above). One finding stays:
+today rowset_mdbx.lua calls table_changed() inside the write txn, before
+the commit, so the push can go out for a row that is then rolled back.
+Removing those calls (above) fixes it.
+
+I2d, decided: no assert that a process opens the changes file before its
+first write txn. A write txn committed before db:open_changes_file()
+makes every reader see a gap. The app turns tracking off around a schema
+migration that rewrites rows (db:track_row_changes(false)); the code then
+publishes nothing for its txns, and every reader sees a gap right away: a
+reader reports a gap when its read txn's id is newer than the last batch.
+
+I2c, decided: the changes file holds 16 MB. A row costs 8 bytes plus the
+table name and the pk, so a 10k-row paste with u32 pks into a table with
+a 10-char name takes about 220 KB. A txn that doesn't fit makes every nav
+on every rowset reload in full.
 
 
 I3. PUSH AND FETCH
@@ -240,31 +320,41 @@ I3. PUSH AND FETCH
 - The nav fetches the changes since its number through rowset.json. That
 	way rowset.lua checks the rowset's allow. One global change number is
 	enough.
+- A load returns db:txn_id() of its read txn: the nav's first number. A
+	fetch reads the batches with db:changes_reader(N) and loads the rows in
+	the same read txn, so the rows match the batches, and returns that
+	txn's id as the nav's new number.
 - The rowset turns the changed table keys into rowset rows:
 	- a key of its write table: load_row() loads the row by pk.
-	- a key that is no longer in the table: a delete.
+	- a key that is no longer in the table: a delete. The rowset decodes
+		the pk values from the raw key with db:decode_kv(table, key, #key,
+		nil, 0, '') (not run yet).
 	In these cases the rowset can't send only the changes, and answers that
 	the nav needs a full reload; the grid then shows the refresh button:
 	- a key of another table that the rowset reads;
 	- a rowset without a write table, or without load_row();
-	- a nav whose number is older than the oldest kept change.
+	- the reader returns gap = true.
+- Cost: a fetch reads only the batches after N, and skips the keys of
+	other tables, once per nav and push.
 - The nav doesn't need to recognize its own save. Remove update_ids and
 	own_update_ids. When the fetch brings back the nav's own save, the save
 	answer has already written those values, so the merge changes nothing
 	and moves nothing (I4). If the save answer got lost, the fetch brings
 	the values like any other change.
-- Deleted parents: the nav removes the children of a deleted parent
-	itself.
+- After a lost save answer, the nav fetches the changes since its number
+	before it sends the new rows again (I1, insert).
+- Deleted parents: the db deletes the children (ondelete 'cascade') or
+	sets their parent_id to null ('set null') itself, and I2 records those
+	writes like any other, so the nav needs nothing more.
 
 
 I4. ONE APPLY PATH IN THE NAV
 ------------------------------------------------------------------------------
 
 - One function applies a change set: rows with values (inserts and
-	updates), and pks to delete. It finds the rows by pk. A push, a save
-	ack and a full reload all use it. The ack code adds its errors on top.
-- For a full reload, today's walk computes the change set. It deletes the
-	rows that are missing from the rowset, except new rows.
+	updates), and pks to delete. It finds the rows by pk. A push and a save
+	ack use it. The ack code adds its errors on top. A full reload doesn't
+	use it: see I6.
 - While a save is in flight, the nav holds the change sets, as it holds
 	reloads today. Otherwise a fetch could bring the nav's own save before
 	the save answer, and move the saved rows.
@@ -273,27 +363,78 @@ I4. ONE APPLY PATH IN THE NAV
 	pending changes before the merge. The check uses the state before the
 	merge: when a save answer got lost, the merge itself clears the edits
 	that match the server's values.
-- Do work only for the rows in the change set:
+- ROW_UNPLACED marks a row that stays where the user left it, outside the
+	sort and the filter. set_input_val() and insert_rows() set it. A full
+	sort or filter by the user (sort_ris(), refilter()) sets it on exactly
+	the modified rows; a merge clears it on the rows of the change set that
+	had no pending changes. The save answer and a revert don't clear it, so
+	a saved row stays where the user left it. update_pass() keeps unplaced
+	rows passing.
+- Most changes move no row, so the merge has two paths:
 
-	step          today                for the change set only
-	------------  -------------------  ------------------------------------
-	filter        every row            the changed rows; the other rows'
-	                                   cells didn't change
-	tree parents  every row            rows with a changed parent_id, added
-	                                   rows, and the children of added rows
-	                                   (needs a lookup of rows by parent_id)
-	groups        removed and rebuilt  needs a lookup of groups by key
-	sort          full radix sort      merge the changed rows in, or a full
-	                                   radix sort (see I5)
-	stages 3-5    full passes          full passes
+	case                                 work
+	-----------------------------------  ---------------------------------
+	every found row keeps pos and        write the values, invalidate the
+	parent_id; rows with no pending      indexes of the changed columns.
+	changes also keep their sort and     O(k)
+	group keys, their filter result
+	and are not unplaced; no row added
+	or removed
+	anything else                        drop removed rows, append added
+	                                     rows, update_row_places() for the
+	                                     moved and added rows, sort the rows
+	                                     that are neither modified nor
+	                                     unplaced into their positions,
+	                                     update_pass(), rebuild the groups,
+	                                     stages 3-5. O(n)
+
+	Bench, 1M rows sorted by num1: 0.1 ms for 1 row with a changed num2,
+	7 ms for 1000; about 100 ms when rows move (set_order_by: about 80 ms).
+- The group collapse state belongs to the nav, as a set of label paths of
+	collapsed groups, so that rebuilding the groups keeps it. A focused
+	group is found again by its label path.
+
+I4a, decided. Findings from reading apply_result(), update_pass() and
+sort_ris():
+- The ack knows its rows by slot (batch.ris) and never adds a row. Only a
+	push needs the pk lookup and adds rows that the nav doesn't have. So
+	the shared part takes slots: write the server values into these rows,
+	drop these rows. The push finds its rows by pk first.
+- apply_result() calls update_row_places() when the server changed pos or
+	parent_id. That keeps the tree right and is not a placement by sort or
+	filter, so "the save answer moves no row" means no sort or filter
+	placement.
+- Placing rows serves only the merge of a push. The ack does none of it.
+Proposal: (1) take the shared part out of apply_result(), with no change in
+behavior; (2) build the merge for a change set by pk, driven first by the
+I5 benches; (3) I2 and I3 then call the merge.
+I4b, decided. Design of the merge, step (2):
+- Change set format: rows as arrays in the rowset's field order, as in a
+	load, plus the pks of removed rows. I3 has no format yet.
+- A merge with a pending or lost batch: the nav holds change sets while a
+	save is in flight (I4), and the fetch after a lost answer settles the
+	lost batch (I3). Until I3, the merge asserts that no batch exists.
+- A new row whose pk the change set brings (R4): write the new row's
+	values as edits first, as replay_edit_state() does, then the server
+	values.
+- pos and parent_id are the stored order and the tree, not the sort: the
+	merge applies them to rows with pending changes too, as the save ack
+	does.
+- The selection of group rows is cleared when the groups are rebuilt, as
+	set_group_by() does.
+Done: (2), as e.merge_rows(change_set), see the table above.
+Done: (1). apply_server_rows(set_ris, vals_list, drop_ris) writes the
+values and drops the rows; apply_result() splits the reply into those lists
+and stores the errors.
 
 
 I5. MERGE COST
 ------------------------------------------------------------------------------
 
-- Write the benches first, in js/tests/nav-bench/nav2_bench.js: a merge
-	that adds 10k rows, a merge that drops 10k rows, and an insert of 10k
-	rows. Add change-set merges once I4 exists.
+- Done: js/tests/nav-bench/nav2_bench.js has a reload that adds 10k rows,
+	a reload that drops 10k rows, and an insert of 10k rows. Done: the
+	merge section (run_nav_bench.mjs nav2 ROWS REPEATS merge) times change
+	sets that move no row and change sets that do.
 - Indexes: today add_to_indexes() sorts the k added rows with a compare
 	function, then does a binary search per row. That is about
 	k log k + k log n compare calls, each through the column storage.
@@ -308,9 +449,95 @@ I5. MERGE COST
 	relies on that.
 
 
+I6. RELOAD BY LOAD AND REPLAY
+------------------------------------------------------------------------------
+
+- A full reload replaces diff_merge(). diff_merge() keeps each row's slot
+	through the reload, so it has to patch in place every structure that
+	stores slots. The server knows rows only by pk, so the nav keeps by pk
+	what must survive the reload, loads the rows again, and replays what it
+	kept.
+- load() does two jobs: it sets up the fields, and it fills the rows.
+	Move the second job into load_rows(). load() sets up the fields, resets
+	the view settings from the saved options, and calls load_rows(), which
+	keeps them. A reload with the same fields calls only load_rows(); a
+	reload with other fields calls load().
+- load_rows() keeps the filter, param_vals, the column filters, order_by,
+	group_by, cols and the flat mode, and resets the quicksearch, the focus
+	and the selection.
+- Before load_rows(), the nav records:
+	- each modified row: its pk (the input pk of a new row), whether it is
+		new or marked for deletion, its edited values by column name, all
+		set values of a new row, and the server values of an edited row.
+		This is the editing state.
+	- the collapsed rows.
+	Row flags such as no_save are not kept: only client rowsets use them,
+	and reload serves server rowsets.
+- After the load, the nav looks up each recorded row by pk in the new pk
+	index:
+
+	recorded row      found on the server       not found
+	----------------  ------------------------  ---------------------------
+	edited saved row  write the edits again     drop it; but put an edited
+	                                            row outside the requested
+	                                            param_vals back, with its
+	                                            recorded server values
+	marked for        mark it again             nothing to do
+	deletion
+	new row           make it that saved row,   insert it again as new;
+	                  with its values that      drop it if it was marked
+	                  differ as edits (R4)      for deletion
+
+	Then it collapses the recorded collapsed rows again, by pk.
+- The editing state is plain JSON, by pk and column name, so the same code
+	can save it in local storage and restore it.
+- The reload ends an open edit. Until I3, a reload follows every
+	notification, so another user's save ends this user's edit.
+- New rows go back at the end of the stored order. After the reload, every
+	row is at its place by the sort and the filter.
+- Server errors on rows are not kept: the next save reports them again.
+- Cost: O(n), with new arrays for every column and row list. The reload
+	runs only when the user asks for it and after a failed save; the I4
+	apply path serves pushes and save acks.
+
 ORDER
 ------------------------------------------------------------------------------
 
-Proposed order: I1; the I5 benches; I4, fed by the full reload and the
-save ack; the rest of I5; I2 and I3. With each step, update the head
-comment of www/ui_nav2.js.
+Proposed order: I1; I6; the I5 benches; I4, fed by the save ack; the rest
+of I5; I2 and I3. With each step, update the head
+comment of www/ui_nav.js.
+
+Done: I1 (except I1a and I1b), I6, the I5 benches, the change capture of
+I2 in lua/mdbx_schema.lua.
+
+Test setup, before I4: tests/canvas_ui_demo_app/cui.lua serves grid_save,
+an auto-inc tree, and grid_typed, a flat table with a typed text pk. The
+grid demo in www/ui-demo.html shows either one ("Server tree", "Server
+typed key"), and prepares a test case on it. Manual checks:
+- grid_save: the first save reserves the ids of the new rows.
+- grid_save: the save sends the parents before the children.
+- a disconnect case: the next save reloads first and doesn't insert the
+	rows twice.
+- slow save: delete a new row while the save waits; it stays, marked for
+	deletion (R4).
+- grid_typed, same typed key: save in two tabs; the second save gets "key
+	exists".
+
+End-to-end save tests, decided: automate the checks above against the
+real server, driven from headless Chrome (jsdom would need jsdom and the
+native canvas package, and saves about 0.5 s of Chrome startup per run).
+- A node runner starts the cui app on its own port and db file, opens a
+	test page from it in headless Chrome, prints the results, and stops
+	both.
+- The test page loads navs without grids from grid_save and grid_typed,
+	resets the data before each test, drives the nav API, and checks the
+	result with a second nav loaded from the server. Two navs on the page
+	stand for two tabs.
+- The test rowsets set no allow, so rowset.json needs no login.
+- Done: tests/canvas_ui_demo_app/run_nav_save_test.mjs runs
+	www/nav_save_test.js. cui.lua reads HTTP_PORT, HTTPS_PORT and VARDIR
+	from the environment; the runner uses 8889, 4444 and a temporary var
+	dir. get_debug_state() reports is_saving, is_loading and saving_ris.
+	The test action 'hold save' makes the save wait for exec 'release'.
+- Not covered yet: I1a (the 10k-row save bench), and the save ack applied
+	through I4.

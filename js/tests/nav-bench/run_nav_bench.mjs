@@ -1,5 +1,5 @@
 // usage: node js/tests/nav-bench/run_nav_bench.mjs nav|nav2 [rows=1000000]
-//   [repeats=3]
+//   [repeats=3] [only=SECTION]
 // times the ops of ui_nav.js (nav) or ui_nav2.js (nav2) in headless Chrome
 // and prints min and median ms per op.
 
@@ -15,12 +15,13 @@ const project_dir = normalize(join(bench_dir, '..', '..', '..'))
 const page = process.argv[2]
 const row_n = +(process.argv[3] || 1000000)
 const rep_n = +(process.argv[4] || 3)
+const only = process.argv[5] // bench section to run, or all
 const timeout_ms = 60 * 60 * 1000
 
 // a wrong page name would 404 and leave the runner waiting for the timeout.
 if (page != 'nav' && page != 'nav2') {
 	process.stderr.write(
-		'usage: run_nav_bench.mjs nav|nav2 [rows] [repeats]\n')
+		'usage: run_nav_bench.mjs nav|nav2 [rows] [repeats] [section]\n')
 	process.exit(1)
 }
 
@@ -82,6 +83,8 @@ const url = new URL(
 	`http://127.0.0.1:${port}/js/tests/nav-bench/${page}_bench.html`)
 url.searchParams.set('rows', row_n)
 url.searchParams.set('repeats', rep_n)
+if (only)
+	url.searchParams.set('only', only)
 
 const chrome = spawn('/usr/bin/google-chrome', [
 	'--headless=new', '--no-sandbox', `--user-data-dir=${profile}`,
