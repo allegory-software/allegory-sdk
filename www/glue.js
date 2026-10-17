@@ -1142,7 +1142,7 @@ class dyn_arr_class {
 			array.nc = this.nc
 			array.len = this.len
 			if (preserve_contents !== false && this.array)
-				array.set(this.array)
+				array.set(this.array.subarray(0, this.len * this.nc))
 			this.array = array
 		}
 		return this

@@ -5,7 +5,7 @@
 
 LOADS
 
-	webb, webb_action, webb_auth, rowset
+	webb, webb_action, webb_auth
 
 USAGE
 
@@ -18,9 +18,6 @@ API
 	app:run() -> exit_code
 	app:run_server()
 	app:run_cmd(cmd_name, cmd_run, cmd_opt, ...) -> exit_code
-	db() -> db                             open the configured db
-	scan(tbl, [path], [alias]) -> scan     db():scan()
-	query('TABLE [ALIAS]'|rel, [alias]) -> rel   db():from()
 
 CONFIG
 
@@ -29,7 +26,6 @@ CONFIG
 	env
 	log_host
 	log_port
-	db_file      var/SCRIPTNAME.mdbx
 
 ]==]
 
@@ -39,7 +35,6 @@ require'cmdline'
 require'webb'
 require'webb_action'
 require'webb_auth'
-require'rowset'
 
 local run_server --fw. decl.
 
@@ -51,18 +46,6 @@ cmddefault'run'
 
 --configure webb_action static file loading.
 wwwdir'www'
-
-local app_db
-function db()
-	if not app_db then
-		require'mdbx_query'
-		app_db = mdbx_open(config('db_file',
-			varpath(scriptname..'.mdbx')), {owner = mainthread()})
-	end
-	return app_db
-end
-function scan(...) return db():scan(...) end
-function query(...) return db():from(...) end
 
 local function webb_app(...)
 
@@ -165,10 +148,6 @@ local function webb_app(...)
 
 	function logging.rpc:close_all_sockets()
 		app.server:close_all_sockets()
-		if app_db then
-			app_db:close()
-			app_db = nil
-		end
 	end
 
 	function app:run_cmd(cmd_name, cmd_run, cmd_opt, ...)

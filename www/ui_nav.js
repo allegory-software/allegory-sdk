@@ -422,6 +422,7 @@ const {
 	memoize, ajax, href,
 	return_true, return_false, captures, json, keys, url_parse, url_format, S,
 	time, copy_to_clipboard,
+	dyn_u32arr,
 } = glue
 
 //// ROW STATE ---------------------------------------------------------------
@@ -901,7 +902,7 @@ ui.nav = function(id, opt) {
 			ris = radix_sort(e.col_vals, ris, e.row_n, sort_fields)
 			index = {
 				fields: fields, // [field1, ...]
-				ris: ris, // ris, sorted by cols
+				ris: dyn_u32arr(ris), // dynamic array of ris, sorted by cols
 			}
 			indexes.set(cols, index)
 		}
@@ -933,9 +934,9 @@ ui.nav = function(id, opt) {
 	}
 
 	// find the insertion index in ris after all rows with keys equal to ris.
-	function upper_bound(ris, ri, fields) {
+	function upper_bound(ris, n, ri, fields) {
 		let i1 = 0 // first index into ris still in the search
-		let i2 = ris.length // end index into ris of the search
+		let i2 = n // end index into ris of the search
 		while (i1 < i2) {
 			let i = (i1 + i2) >>> 1
 			if (compare_rows(ris[i], ri, fields) <= 0)
@@ -958,36 +959,36 @@ ui.nav = function(id, opt) {
 			// one pass.
 			let new_ris = Uint32Array.from(ris)
 			new_ris.sort((ri1, ri2) => compare_rows(ri1, ri2, fields))
-			let old_ris = index.ris
-			let merged = new Uint32Array(old_ris.length + new_ris.length)
-			let m = 0 // next index into merged
-			let i1 = 0 // next index into old_ris to copy
-			for (let ri of new_ris) {
-				let i2 = upper_bound(old_ris, ri, fields)
-				merged.set(old_ris.subarray(i1, i2), m)
-				m += i2 - i1
-				merged[m++] = ri
+			let n = index.ris.len // used index entries
+			let k = new_ris.length // new index entries
+			let index_ris = index.ris.setlen(n + k).array // index storage
+			let i1 = n // end of the old entries still to move
+			for (let i = k - 1; i >= 0; i--) { // new row index
+				let ri = new_ris[i] // new row slot
+				let i2 = upper_bound(index_ris, i1, ri, fields) // insertion index
+				index_ris.copyWithin(i2 + i + 1, i2, i1)
+				index_ris[i2 + i] = ri
 				i1 = i2
 			}
-			merged.set(old_ris.subarray(i1), m)
-			index.ris = merged
 		}
 	}
 
 	// -> ri of the first row whose cols hold vals, or null.
 	e.lookup = function(cols, vals) {
-		let {fields, ris} = get_index(cols)
-		let i1 = 0 // first index into ris still in the search
-		let i2 = ris.length // end index into ris of the search
+		let {fields, ris} = get_index(cols) // fields and dynamic row index
+		let n = ris.len // used index entries
+		let index_ris = ris.array // index storage
+		let i1 = 0 // first index into index_ris still in the search
+		let i2 = n // end index into index_ris of the search
 		while (i1 < i2) {
 			let i = (i1 + i2) >>> 1
-			if (compare_row(ris[i], fields, vals) < 0)
+			if (compare_row(index_ris[i], fields, vals) < 0)
 				i1 = i + 1
 			else
 				i2 = i
 		}
-		return i1 < ris.length && compare_row(ris[i1], fields, vals) == 0
-			? ris[i1] : null
+		return i1 < n && compare_row(index_ris[i1], fields, vals) == 0
+			? index_ris[i1] : null
 	}
 
 	/// focus and selection ---------------------------------------------------
@@ -3361,8 +3362,8 @@ ui.nav = function(id, opt) {
 			compact_list(e.sorted_ris, e.row_n, is_dropped)
 		e.row_n = row_n
 		for (let index of indexes.values())
-			index.ris = index.ris.subarray(0,
-				compact_list(index.ris, index.ris.length, is_dropped))
+			index.ris.len =
+				compact_list(index.ris.array, index.ris.len, is_dropped)
 
 		// free each slot once: remove_rows() passes a new row twice when it
 		// removes overlapping subtrees.
@@ -4070,6 +4071,8 @@ ui.nav = function(id, opt) {
 			e.input_vals = [] // edited values by fi, then ri
 			e.cell_errors = [] // cell errors by fi, then ri
 		}
+		if (change_set.can_load_changed_rows != null)
+			e.can_load_changed_rows = change_set.can_load_changed_rows
 	}
 
 	/// reloading -------------------------------------------------------------
@@ -4334,6 +4337,7 @@ ui.nav = function(id, opt) {
 		e.rowset_can_remove_rows = rs.can_remove_rows != false
 		e.rowset_can_change_rows = rs.can_change_rows != false
 		e.rowset_can_move_rows   = rs.can_move_rows   != false
+		e.can_load_changed_rows  = rs.can_load_changed_rows ?? false
 
 		e.mask_word_n = (e.all_fields.length + 31) >>> 5
 		all_fields_mask = fields_mask(e.all_fields)
@@ -4604,6 +4608,7 @@ ui.nav = function(id, opt) {
 					collapsed_pks.push(row_pk(ri))
 			}
 		load_rows(src_col_vals, edit_state, collapsed_pks)
+		e.can_load_changed_rows = rs.can_load_changed_rows ?? false
 		e.move_focus(null, null)
 	}
 

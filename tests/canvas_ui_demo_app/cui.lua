@@ -73,7 +73,6 @@ do
 					db():atomic('w', function()
 						db():del(tbl, other_key)
 					end)
-					table_changed(tbl)
 				end
 				pr(tbl..' save', row.type,
 					row.values[key_col] or row.values[key_col..':old'], action)
@@ -158,7 +157,9 @@ do
 	end)
 	grid_db.schema = grid_db:atomic('r', grid_db.extract_schema, grid_db)
 	update(grid_db.schema.tables, grid_schema.tables)
+	grid_db:track_row_changes(false)
 	grid_db:sync_schema()
+	grid_db:track_row_changes(true)
 	rowset.grid_save = grid_db:atomic('r', function()
 		return table_rowset('grid_save', {
 			name = 'grid_save',
@@ -198,7 +199,6 @@ do
 				db():insert('grid_save', '[]', row)
 			end
 		end)
-		table_changed('grid_save')
 		return self:exec_load({})
 	end
 
@@ -225,7 +225,6 @@ do
 				db():insert('grid_typed', '[]', row)
 			end
 		end)
-		table_changed('grid_typed')
 		return self:exec_load({})
 	end
 

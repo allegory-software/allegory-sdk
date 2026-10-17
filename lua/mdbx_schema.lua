@@ -87,11 +87,11 @@ ENCODING / DECODING
 	db:col_decoder (schema, col, ix_key, pk, get_base_val) -> get()
 	db:key_encoder (schema, cols, key_schema, ix_key, pk, get_base_val) -> enc()
 ROW CHANGE NOTIFICATIONS
-	db:open_changes_file (size)              open shared row changes file
-	db:track_row_changes (false|true)        disable/enable recording
-	db:changes_reader (since_txn_id) -> reader  create buffer reader
-	reader            () -> txn_id,batch,gap | txn_id,nil,true | nil
-	mdbx_each_row_change (batch) -> iter() -> table_name,pk
+	db:open_changes_file (size)                open shared row changes file
+	db:track_row_changes (false|true)          disable/enable recording
+	db:read_changes (since_txn_id) -> reader   reset shared buffer reader
+	reader() -> txn_id,batch,gap | txn_id,nil,true | nil
+	db:each_row_change (batch, [tables]) -> iter() -> table_name,pk
 LOW-LEVEL / INTEGRATION API
 	MDBX_MAX_KEY_SIZE
 	mdbx_collate_value()
@@ -244,6 +244,17 @@ STATE
 		- live schema cache managed by dbi_schema() and DDL ops (transactional).
 		- dirty_schema is used to invalidate DDL-modified schemas on txn end.
 
+	TODO: nothing invalidates live_schema when another process commits DDL.
+	When another process alters, renames or drops a table without a paper
+	schema, this process keeps the old stored schema and decodes rows with
+	the old layout. Fix: the code increments a counter in $schema in every
+	DDL txn; at txn begin the code compares it with the value cached in the
+	db and clears live_schema when they differ. dbis needs clearing on the
+	same signal: MDBX looks up a cached DBI handle by name on first use in
+	each txn, so after another process renames or drops the table, ops on
+	the handle fail with MDBX_BAD_DBI, and after a drop and a re-create
+	under the same name, the handle opens the new table.
+
 SCHEMA LOADING STEPS
 
 	- load stored schema (already layouted); must be present.
@@ -252,48 +263,6 @@ SCHEMA LOADING STEPS
 	- if paper schema missing, use stored schema as live schema.
 	- compile live schema (which compiles its indexes and fks).
 	- register live schema in live cache along with its indexes.
-
-ROW CHANGE NOTIFICATIONS
-
-	Row changes from all non-raw base tables are tracked in a shared file
-	called db.file..'.changes', mmapped as a ring buffer, containing a stream
-	of records of form: `txn_id, table_name1, raw_pk1, ...` for each write txn,
-	including txns with no writes so that readers can detect discontinuities
-	in the stream and request a full reload. The file can be read from multiple
-	processes and every one reads the same notifications.
-
-	- db:open_changes_file(file_size) opens the changes file. use the the same
-	  file_size when opening the same file. Call it before the first write
-	  txn to avoid having a gap in the txn stream that would cause reloads.
-	- db:track_row_changes(false|true) disables/enables recording temporarily.
-	  The code publishes no message for txns committed while it is off, so
-	  readers see a gap.
-	  Turn it off around bulk ops like schema migrations that rewrite rows.
-	- only base-table non-raw row changes are recorded, including from triggers
-	  and fk actions. Indexes, raw writes and schema migrations are not tracked.
-	- to start reading changes, call changes_reader(db:txn_id()) on a read txn
-	  to get all changes newer than that txn.
-	- an inotify watcher for IN_MODIFY can be set on the changes file to be
-	  notified when new changes appear.
-	- txn_id is a number. batch is uint8_t[?] containing an encoded message
-	  in a stable shared buffer.
-	- gap is true when the reader detects a jump between consecutive txn_ids,
-	  including when messages get overwritten. Repeated txn_ids are allowed.
-	- when no message is left up to the read txn, but the read txn's id is
-	  newer than the last message, reader() returns txn_id, nil, true: the
-	  txns up to txn_id published no message.
-	- messages larger than file_size are not published.
-	- compare consecutive txn_ids to detect skipped messages and reload rows
-	  if any ids are missing.
-	- a reader can return repeated ids and keys, including after a failed
-	  commit. Fetch current rows with db:find_raw(table_name, pk, #pk).
-
-	TODO: A failed commit publishes its batch with id T, and the next commit
-	reuses T. If that next commit publishes nothing, for example because
-	tracking is off or because the process never opened the changes file,
-	readers take the failed txn’s batch as T and see no gap. The changes of
-	the real txn T are then missed. It needs a failed commit followed
-	immediately by an untracked commit, so it is rare. No clean fix for it yet.
 
 ]]
 
@@ -321,6 +290,24 @@ MDBX_MAX_KEY_SIZE = mdbx_max_key_size()
 cdef'int mdbx_cursor_has_txn(const MDBX_cursor *cursor)'
 function Cur:closed()
 	return not (self.c and C.mdbx_cursor_has_txn(self.c) == 1)
+end
+
+--return doubles instead of boxed u64s.
+cdef'double mdbx_txn_id_double(const MDBX_txn *txn)'
+function Db:txn_id()
+	assert(self.txn, 'not in transaction')
+	return C.mdbx_txn_id_double(self.txn)
+end
+
+--return doubles instead of boxed u64s.
+cdef[[
+int mdbx_dbi_sequence_double(MDBX_txn *txn, MDBX_dbi dbi, double *result,
+	uint64_t increment);
+]]
+local seqbuf = f64a(1) -- {seq value before the increment}
+function mdbx_dbi_seq(txn, dbi, increment) -- -> rc, seq
+	local rc = C.mdbx_dbi_sequence_double(txn, dbi, seqbuf, increment)
+	return rc, seqbuf[0]
 end
 
 --ERROR HANDLING -------------------------------------------------------------
@@ -3212,7 +3199,51 @@ function Db:sync_schema(src, opt)
 	end)
 end
 
---DML / ROW CHANGES ----------------------------------------------------------
+--DML / ROW CHANGE NOTIFICATIONS ---------------------------------------------
+
+--[[
+Row changes from all non-raw base tables are tracked in a shared file
+called db.file..'.changes', mmapped as a ring buffer, containing a stream
+of records of form: `txn_id, table_name1, raw_pk1, ...` for each write txn,
+including txns with no writes so that readers can detect discontinuities
+in the stream and request a full reload. The file can be read from multiple
+processes and every one reads the same notifications.
+
+- db:open_changes_file(file_size) opens the changes file. use the the same
+  file_size when opening the same file. Call it before the first write
+  txn to avoid having a gap in the txn stream that would cause reloads.
+- The code publishes no message for txns committed while
+  db:track_row_changes() is off, so readers see a gap.
+  Turn it off around bulk ops like schema migrations that rewrite rows.
+- only base-table non-raw row changes are recorded, including from triggers
+  and fk actions. Indexes, raw writes and schema migrations are not tracked.
+- to read changes, call db:read_changes(since_txn_id) on a read txn to get
+  all changes newer than that txn.
+- an inotify watcher for IN_MODIFY can be set on the changes file to be
+  notified when new changes appear.
+- txn_id is a number. batch is uint8_t[?] containing an encoded message
+  in a stable shared buffer. A record with an empty table name is for
+  the table of the previous record in the batch.
+- db:each_row_change(batch, tables) returns only rows of the tables in
+  `tables` ({table_name -> true}), or rows of all tables if it's nil.
+- gap is true when the reader detects a jump between consecutive txn_ids,
+  including when messages get overwritten. Repeated txn_ids are allowed.
+- when no message is left up to the read txn, but the read txn's id is
+  newer than the last message, reader() returns txn_id, nil, true: the
+  txns up to txn_id published no message.
+- messages larger than file_size are not published.
+- compare consecutive txn_ids to detect skipped messages and reload rows
+  if any ids are missing.
+- a reader can return repeated ids and keys, including after a failed
+  commit. Fetch current rows with db:find_raw(table_name, pk, #pk).
+
+TODO: A failed commit publishes its batch with id T, and the next commit
+reuses T. If that next commit publishes nothing, for example because
+tracking is off or because the process never opened the changes file,
+readers take the failed txn’s batch as T and see no gap. The changes of
+the real txn T are then missed. It needs a failed commit followed
+immediately by an untracked commit, so it is rare. No clean fix for it yet.
+]]
 
 cdef[[
 typedef struct schema_row_changes_header {
@@ -3225,56 +3256,61 @@ typedef struct schema_row_changes_writer {
 	schema_row_changes_header* header;
 	uint8_t* data;
 	uint64_t start;
-	uint64_t size;
+	uint32_t size;
 } schema_row_changes_writer;
 typedef struct schema_row_changes_reader {
 	const schema_row_changes_header* header;
 	const uint8_t* data;
 	uint64_t offset;
 	uint64_t prev_txn_id;
-	uint64_t size;
+	uint32_t size;
 	double txn_id;
 } schema_row_changes_reader;
 void schema_row_changes_begin(schema_row_changes_writer* writer,
 	schema_row_changes_header* header, void* data);
 int schema_row_changes_add(schema_row_changes_writer* writer,
-	const void* table, uint32_t table_size,
-	const void* key, uint32_t key_size);
+	const void* table, uint16_t table_size,
+	const void* key, uint16_t key_size);
 void schema_row_changes_publish(schema_row_changes_writer* writer,
 	const MDBX_txn* txn);
 void schema_row_changes_reader_init(schema_row_changes_reader* r,
 	const schema_row_changes_header* header, const void* data,
 	uint64_t since_txn_id);
 int schema_row_changes_next(schema_row_changes_reader* r,
-	const MDBX_txn* txn, void* out, uint64_t out_size);
+	const MDBX_txn* txn, void* out, uint32_t out_size);
 ]]
 
 local changes_wake_offset = offsetof('schema_row_changes_header', 'wake')
 
+after(Db, '_wtxn_end', invalidate_dirty_schemas)
+Db._row_changed = noop
+
 function Db:open_changes_file(size)
 	assert(not self.txn, 'open_changes_file: in transaction')
-	assert(not self._changes, 'changes already open')
+	assert(not self.read_changes, 'changes already open')
 	assert(size > 0, 'changes size must be > 0')
-	local size = aligned_size(size)
-	local file = must_open{
+	local size = aligned_size(size) -- ring capacity in bytes
+	assert(size < 2^32, 'changes size must be < 4 GB')
+	local file = must_open{ -- shared changes file
 		path = self.file..'.changes', mode = 'rw', owner = self,
 	}
 	file:lock()
-	local page_size = pagesize()
-	local file_size = file:attr('size')
+	local page_size = pagesize() -- header mapping size in bytes
+	local file_size = file:attr('size') -- existing file size in bytes
 	if file_size == 0 then
 		file:truncate(page_size + size)
 	else
 		assertf(file_size == page_size + size,
 			'changes size differs: %s', file.path)
 	end
-	local header_map = file:mmap{
+	local header_map = file:mmap{ -- shared ring header mapping
 		size = page_size, access = 'rw', owner = self,
 	}
-	local data_map = mirror_buffer(size, {
+	local data_map = mirror_buffer(size, { -- shared ring data mapping
 		file = file, offset = page_size, owner = self,
 	})
-	local header = cast('schema_row_changes_header*', header_map.addr)
+	local header = cast( -- shared ring header
+		'schema_row_changes_header*', header_map.addr)
 	if file_size == 0 then
 		header.capacity = size
 	else
@@ -3282,106 +3318,109 @@ function Db:open_changes_file(size)
 			'changes capacity differs: %s', file.path)
 	end
 	file:unlock()
-	self._changes = {
-		file = file,
-		header_map = header_map,
-		data_map = data_map,
-		header = header,
-		data = cast('uint8_t*', data_map.addr),
-		writer = new'schema_row_changes_writer',
-		marks = {},
-	}
-end
+	local data = cast('uint8_t*', data_map.addr) -- shared ring bytes
+	local writer = new'schema_row_changes_writer' -- pending write batch
+	local marks = {} -- {nested_txn_depth -> writer_size_at_begin}
+	local last_table_name -- table of the last record in the batch
 
-function Db:track_row_changes(is_tracking)
-	assert(not self.txn, 'track_row_changes: in transaction')
-	self._is_tracking_row_changes = is_tracking
-end
+	after(self, '_wtxn_begin', function(self)
+		if self._is_tracking_row_changes == false then return end
+		if self.txn.parent == nil then
+			C.schema_row_changes_begin(writer, header, data)
+			last_table_name = nil
+		end
+		add(marks, writer.size)
+	end)
 
-function Db:_wtxn_begin()
-	local changes = self._changes
-	if not changes or self._is_tracking_row_changes == false then return end
-	if self.txn.parent == nil then
-		C.schema_row_changes_begin(changes.writer, changes.header, changes.data)
-	end
-	add(changes.marks, changes.writer.size)
-end
+	before(self, '_wtxn_precommit', function(self)
+		if self._is_tracking_row_changes == false then return end
+		C.schema_row_changes_publish(writer, self.txn)
+	end)
 
-function Db:_wtxn_precommit()
-	local changes = self._changes
-	if changes and self._is_tracking_row_changes ~= false then
-		C.schema_row_changes_publish(changes.writer, self.txn)
-	end
-end
-
-function Db:_wtxn_end(commit, parent)
-	local changes = self._changes
-	if changes and self._is_tracking_row_changes ~= false then
-		local mark = pop(changes.marks)
+	before(self, '_wtxn_end', function(self, commit, parent)
+		if self._is_tracking_row_changes == false then return end
+		local mark = pop(marks) -- writer size before this transaction
 		if not commit then
-			changes.writer.size = mark
+			writer.size = mark
+			--rollback can remove the record that wrote last_table_name.
+			last_table_name = nil
 		elseif not parent then
 			--inotify ignores writes through the mmap, so write one byte through
 			--the fd to wake the processes that watch the file.
-			changes.file:seek('set', changes_wake_offset)
-			changes.file:write('\1', 1)
+			file:pwrite(changes_wake_offset, '\1', 1)
 		end
-	end
-	invalidate_dirty_schemas(self, commit, parent)
-end
+	end)
 
-local function add_row_change(db, schema, key, key_size)
-	local changes = db._changes
-	if changes and db._is_tracking_row_changes ~= false then
-		local overflow = C.schema_row_changes_add(changes.writer,
-			schema.name, #schema.name, key, key_size)
+	after(self, '_row_changed', function(self, schema, key, key_size)
+		if self._is_tracking_row_changes == false then return end
+		local name = schema.name
+		--if table is the same as the last record, write an empty table name.
+		local name_size = name == last_table_name and 0 or #name
+		last_table_name = name
+		local overflow = C.schema_row_changes_add(
+			writer, name, name_size, key, key_size)
 		if overflow ~= 0 then
 			log('ERROR', 'mdbx', 'changes',
-				'Row change message too large: %s (txn %s)',
-				db.file, db:txn_id())
+				'Row changes batch too large: %s (txn %s)',
+				self.file, self:txn_id())
 		end
-	end
-end
+	end)
 
-function Db:changes_reader(since_txn_id)
-	assert(self.env, 'closed')
-	local changes = assert(self._changes, 'changes not open')
-	local r = new'schema_row_changes_reader'
-	C.schema_row_changes_reader_init(r, changes.header, changes.data,
-		since_txn_id)
-	local batch_buffer = buffer()
-	local batch, batch_size = nil, 0
-	return function()
+	local reader = new'schema_row_changes_reader' -- current ring position
+	local batch_buffer = buffer() -- reusable storage for copied batches
+	local batch, batch_size = nil, 0 -- copied batch pointer and capacity
+	local function next_batch()
 		assert(self.env, 'closed')
 		assert(self.txn and self.txn == self._ro_txn,
 			'changes reader requires a read transaction')
 		--if the buffer is too small, grow it and read again.
-		local ret = C.schema_row_changes_next(r, self.txn, batch, batch_size)
+		local ret = C.schema_row_changes_next( -- batch read status
+			reader, self.txn, batch, batch_size)
 		while ret == -1 do
-			batch, batch_size = batch_buffer(num(r.size))
-			ret = C.schema_row_changes_next(r, self.txn, batch, batch_size)
+			batch, batch_size = batch_buffer(num(reader.size))
+			ret = C.schema_row_changes_next(reader, self.txn, batch, batch_size)
 		end
 		if ret == 0 then
 			return nil
 		elseif ret == 3 then
-			return r.txn_id, nil, true
+			return reader.txn_id, nil, true
 		else
-			return r.txn_id, batch, ret == 2
+			return reader.txn_id, batch, ret == 2
 		end
+	end
+
+	function self:read_changes(since_txn_id)
+		assert(self.env, 'closed')
+		C.schema_row_changes_reader_init(reader, header, data, since_txn_id)
+		return next_batch
 	end
 end
 
-function mdbx_each_row_change(batch)
-	local size = num(cast('const uint64_t*', batch)[0])
-	local offset = 16
+function Db:track_row_changes(is_tracking)
+	assert(isbool(is_tracking))
+	assert(not self.txn, 'track_row_changes: in transaction')
+	self._is_tracking_row_changes = is_tracking
+end
+
+function Db:each_row_change(batch, tables)
+	local size = cast(u32p, batch)[0]
+	local offset = 12
+	local name -- table of the last record
+	local is_wanted -- the last record's table is in `tables`
 	return function()
-		if offset == size then return end
-		local sizes = cast('const uint32_t*', batch + offset)
-		local table_size, key_size = num(sizes[0]), num(sizes[1])
-		local name = str(batch + (offset + 8), table_size)
-		local key = str(batch + (offset + 8 + table_size), key_size)
-		offset = offset + 8 + table_size + key_size
-		return name, key
+		while offset ~= size do
+			local sizes = cast(u16p, batch + offset)
+			local table_size, key_size = sizes[0], sizes[1]
+			if table_size > 0 then --0 means use last name
+				name = str(batch + (offset + 4), table_size)
+				is_wanted = not tables or tables[name]
+			end
+			local key_offset = offset + 4 + table_size
+			offset = key_offset + key_size
+			if is_wanted then
+				return name, str(batch + key_offset, key_size)
+			end
+		end
 	end
 end
 
@@ -3667,7 +3706,7 @@ local function cur_update(self, ix_cur, val_cols, ...)
 	local v, v_sz, t, old_t = update_val_rec(db, schema, 'c_update',
 		kk, k_sz, v0, v0_sz, cols, as, ...)
 	assert(self:try_put_raw(kk, k_sz, v, v_sz, C.MDBX_CURRENT))
-	add_row_change(db, schema, kk, k_sz)
+	db:_row_changed(schema, kk, k_sz)
 	if schema.indexes then
 		update_indexes(db, 'c_update', schema, kk, k_sz, v, v_sz, v0c, v0_sz, ix_cur)
 	end
@@ -3743,7 +3782,7 @@ local function put(self, op, tab, cols, ...)
 			self:check_row(op, schema.name, ret, err)
 		end
 		cur:close()
-		add_row_change(self, schema, k, k_sz)
+		self:_row_changed(schema, k, k_sz)
 		if schema.indexes then
 			update_indexes(self, op, schema, k, k_sz, v, v_sz, v0, v0_sz)
 		end
@@ -3759,7 +3798,7 @@ local function put(self, op, tab, cols, ...)
 		local ret, err = self:try_put_raw(dbi, k, k_sz, v, v_sz,
 			C.MDBX_NOOVERWRITE)
 		self:check_row(op, schema.name, ret, err)
-		add_row_change(self, schema, k, k_sz)
+		self:_row_changed(schema, k, k_sz)
 	end
 	log('note', 'db', op, '%s %s', schema.name, cols[S])
 	return autoinc_v
@@ -3803,7 +3842,7 @@ function Cur:del()
 		fire_triggers(schema, 'before_delete', db, old_t)
 	end
 	cur:try_del_raw()
-	add_row_change(db, schema, kk, k_sz)
+	db:_row_changed(schema, kk, k_sz)
 	for _,ix_schema in ipairs(schema.indexes or empty) do
 		ix_schema:del(db, kk, k_sz, v, v_sz)
 	end
@@ -3881,7 +3920,7 @@ function Db:put_records(tab, cols, rows)
 			v, v_buf_sz, cols, as, row)
 		local ok, err = self:try_put_raw(dbi, k, k_sz, v, v_sz)
 		self:check_row('put_rec', schema.name, ok, err)
-		add_row_change(self, schema, k, k_sz)
+		self:_row_changed(schema, k, k_sz)
 	end
 	claim_seq(self, schema, max_seq_val)
 	return true

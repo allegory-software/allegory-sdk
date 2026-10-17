@@ -162,14 +162,10 @@ IMPLEMENTATION (speculative)
 I0. TODAY
 ------------------------------------------------------------------------------
 
-- After a save, the server pushes 'NAME update_id...' to every events
-	connection, for every rowset that reads a written table. Every other
-	nav on those rowsets then reloads the whole rowset (I6).
-- The code that writes a row reports "table T changed", with no key.
-	rowset_mdbx.lua's insert, update and delete call table_changed(). If
-	some code writes and doesn't call table_changed(), nobody hears of the
-	write. App code can call the global rowset_changed() and
-	table_changed(); nothing in lua/ calls them today.
+- After each commit to the db, from any process, the server pushes
+	'NAME txn_id' to every events connection, for every rowset that reads a
+	written table (I2). Every nav on those rowsets then reloads the whole
+	rowset (I6), the nav that saved included.
 - Bug: get_index() sorts with radix_sort(), which honors a field's
 	sort_collation ('ai_ci' or a list), but lookup(), upper_bound() and
 	add_to_indexes() compare with compare_cell(), which ignores it. On a
@@ -272,7 +268,7 @@ I2. CHANGE CAPTURE ON THE SERVER
 	survives restarts. After a failed commit, two batches can have the same
 	id; the repeated keys only cost loading those rows again.
 - The ring is the list of recent changes; the server keeps no list of its
-	own. db:changes_reader(N) reads the batches after txn N, and returns
+	own. db:read_changes(N) reads the records after txn N, and returns
 	gap = true when it can't: the ring no longer holds them, a process wrote
 	with tracking off or without opening the changes file, or a txn's keys
 	didn't fit in the ring. A gap means that the nav needs a full reload.
@@ -281,13 +277,24 @@ I2. CHANGE CAPTURE ON THE SERVER
 	process waits for new batches with inotify (IN_MODIFY) on the file,
 	without polling.
 - The server runs one loop: it waits on inotify, opens a read txn, reads
-	the new batches with a reader made by db:changes_reader() at startup,
+	the new records with db:read_changes(N), using its last read txn id,
 	and pushes 'NAME txn_id' for each rowset that reads a changed table. On
 	a gap it doesn't know the tables, so it pushes every rowset.
-- Remove the table_changed() calls from rowset_mdbx.lua. Keep
-	rowset_changed() for rowsets whose rows don't come from a db table,
-	such as rowset.rowsets in lua/rowset.lua. A call to it tells the navs
-	that they need a full reload.
+- Decided: the loop sends every push. A push from the process that saved
+	reaches only that process's events connections; the navs connected to
+	another server process hear of the save only through the ring. The
+	loop wakes in the writing process too, since the writer writes the wake
+	byte through the fd. So rs:apply_changes() pushes nothing, and these
+	go away: the table_changed() calls in rowset_mdbx.lua, rs:table_changed()
+	and rs:rowset_changed(), self.changed_rowsets and the rowset_changed
+	variable in apply_changes(), the update_id of a save, and the globals
+	rowset_changed() and table_changed(). Today apply_changes() also pushes
+	inside the write txn, before the commit (lua/rowset.lua, the
+	push_rowset_changed_events() call); removing it fixes that too.
+- Decided: data that the navs of other processes should see lives in a db
+	table. A rowset whose rows don't come from a db table gets no push.
+LATER: publish the changes of rowsets that are not mdbx rowsets through the
+ring too.
 
 I2a, dropped: the size passed to db:open_changes_file() decides how many
 changes the ring keeps.
@@ -320,20 +327,41 @@ I3. PUSH AND FETCH
 - The nav fetches the changes since its number through rowset.json. That
 	way rowset.lua checks the rowset's allow. One global change number is
 	enough.
-- A load returns db:txn_id() of its read txn: the nav's first number. A
-	fetch reads the batches with db:changes_reader(N) and loads the rows in
-	the same read txn, so the rows match the batches, and returns that
-	txn's id as the nav's new number.
-- The rowset turns the changed table keys into rowset rows:
-	- a key of its write table: load_row() loads the row by pk.
-	- a key that is no longer in the table: a delete. The rowset decodes
-		the pk values from the raw key with db:decode_kv(table, key, #key,
-		nil, 0, '') (not run yet).
-	In these cases the rowset can't send only the changes, and answers that
-	the nav needs a full reload; the grid then shows the refresh button:
-	- a key of another table that the rowset reads;
-	- a rowset without a write table, or without load_row();
-	- the reader returns gap = true.
+- Done (server side of the fetch): a load returns txn_id, the db:txn_id()
+	of its read txn, which is the nav's first number, and
+	can_load_changed_rows. The fetch is a POST to the rowset URL with
+	{exec = 'load_changed_rows', since_txn_id = N}. rs:load_changed_rows()
+	reads the records with db:read_changes(N) and loads the rows in the same
+	read txn, so the rows match the notifications. It answers {txn_id, rows,
+	removed_pks}, or reload = true on a gap. Both answers also carry
+	can_load_changed_rows.
+- Which rowsets can answer without a full reload, and how the rowset
+	turns table keys into rowset rows: see NAV-CHANGES.txt. Today
+	(its S1): an unfiltered scan or query over one table that outputs that
+	table's whole pk, or a rowset with an rs:on_rows_changed() handler. Any
+	other rowset answers reload = true.
+- Done: the app's db() in lua/webb_app.lua opens the changes file, with
+	the size given by config db_changes_size (16 MB by default).
+- Done: the server loop of I2 and its push, as watch_row_changes(db) in
+	lua/rowset_mdbx.lua, started by app:run_server() for the app's db()
+	(lua/cui_app.lua); and the removals of I2. A rowset whose rs.db is
+	another db needs the app to call watch_row_changes() for that db. The
+	db owns the loop's thread, so db:close() ends it.
+	tests/rowset_mdbx_test.lua checks that a write by another process
+	reaches the push.
+- Open: since I2, two grid_save tests of run_nav_save_test.mjs fail ("first
+	save reserves ids": child not saved under parent 1; "save deletes
+	children before parents": changes left after save). Not traced: they
+	may come from the nav that saved now reloading after its own save, or
+	have failed before.
+- Not done yet: the nav side: the fetch on a push, applying the answer with
+	e.merge_rows(), and holding fetches while a save is in flight. The nav
+	stores can_load_changed_rows today, and nothing else of the fetch. No UI
+	work for now: the refresh button waits.
+- Between the I2 loop and the nav side of I3: the push carries a txn_id,
+	not the nav's update_id, so the nav's rowset_changed() doesn't
+	recognize its own save, and the nav that saved reloads in full after
+	its own save too.
 - Cost: a fetch reads only the batches after N, and skips the keys of
 	other tables, once per nav and push.
 - The nav doesn't need to recognize its own save. Remove update_ids and
@@ -507,8 +535,10 @@ Proposed order: I1; I6; the I5 benches; I4, fed by the save ack; the rest
 of I5; I2 and I3. With each step, update the head
 comment of www/ui_nav.js.
 
-Done: I1 (except I1a and I1b), I6, the I5 benches, the change capture of
-I2 in lua/mdbx_schema.lua.
+Done: I1 (except I1a and I1b), I6, the I5 benches, I2, the server side of
+the I3 fetch.
+
+Next: the nav side of I3 (see I3, "Not done yet").
 
 Test setup, before I4: tests/canvas_ui_demo_app/cui.lua serves grid_save,
 an auto-inc tree, and grid_typed, a flat table with a typed text pk. The

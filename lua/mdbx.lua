@@ -36,7 +36,7 @@ TRANSACTIONS
 	db:commit()                                commit transaction
 	db:abort()                                 abort transaction
 	db.txn                                     current txn (nil if none)
-	db:atomic(['w',], fn, ...) -> ...          run fn in transaction
+	db:atomic('r'|'w'|'any', fn, ...) -> ...   run fn in transaction
 TABLES
 	db:[try_]dbi_raw(name|dbi) -> dbi          open existing table (once)
 	db:create_table_raw(name, [flags]) -> dbi  create table
@@ -418,7 +418,7 @@ function Db:begin(mode)
 end
 
 Db._wtxn_begin = noop
-Db._wtxn_precommit = noop 
+Db._wtxn_precommit = noop
 Db._wtxn_end = noop
 
 function Db:txn_id()
@@ -472,10 +472,13 @@ local function finish(self, parent_txn, ok, ...)
 	end
 end
 function Db:atomic(mode, f, ...)
-	if isfunc(mode) then mode, f = 'r', mode end
-	local parent_txn = self.txn
-	self:begin(mode)
-	return finish(self, parent_txn, pcall(f, ...))
+	if mode == 'any' and self.txn then
+		return f(...)
+	else
+		local parent_txn = self.txn
+		self:begin(mode == 'any' and 'r' or assert(mode))
+		return finish(self, parent_txn, pcall(f, ...))
+	end
 end
 end
 
@@ -651,17 +654,20 @@ function Db:try_del_raw(tab, k, k_sz, v, v_sz)
 	return self:tryz('del', C.mdbx_del(self.txn, dbi, key, vp))
 end
 
-local seqbuf = u64a(1)
+local seqbuf = u64a(1) -- seq value before the increment
+function mdbx_dbi_seq(txn, dbi, increment)
+	local rc = C.mdbx_dbi_sequence(txn, dbi, seqbuf, increment)
+	return rc, num(seqbuf[0])
+end
 function Db:seq(tab, increment)
 	assert(increment, 'seq: increment required')
 	check_wtxn(self)
 	local dbi = isnum(tab) and tab or self:dbi_raw(tab)
-	local rc = C.mdbx_dbi_sequence(self.txn, dbi, seqbuf, increment)
+	local rc, seq = mdbx_dbi_seq(self.txn, dbi, increment)
 	if rc < 0 then
 		self:check_schema('seq', self:table_name(tab), nil, rc ~= -1, 'overflow')
 		self:checkz('seq', rc)
 	end
-	local seq = num(seqbuf[0])
 	log('note', 'db', 'seq', '%s: %d', self:table_name(tab), seq)
 	return seq
 end

@@ -3,7 +3,7 @@
 	Server-side rowsets for nav-based widgets.
 	Written by Cosmin Apreutesei. Public Domain.
 
-Rowset attributes (* = server-only):
+Rowset attributes to set (* = server-only):
 
 	REQUIRED
 		fields           : [field1, ...] fields (required)
@@ -30,7 +30,7 @@ Rowset attributes (* = server-only):
 		can_move_rows    : f             allos changing rows' position in the rowset
 	*	allow            : f|'r1 ...'    allow only if current user has a matching role
 
-Field attributes:
+Field attributes to set:
 
 	REQUIRED
 		name             : 'col'         for identification and referencing
@@ -53,6 +53,8 @@ Field attributes:
 		readonly         : f             cannot be changed
 		nosave           : f             client-side; should not be saved
 		not_null         : t             can't be null
+	COMPUTED
+		compute          : f(rs, vals) -> val   comppute value
 	TEXT
 		maxlen           : n             max length in bytes
 		sort_collation   : signature     'ai_ci' or 'list\0ITEM1\0ITEM2...'
@@ -87,24 +89,20 @@ Field attributes:
 		lookup_cols      :               lookup rowset cols
 		display_col      :               lookup display col
 
-Rowset methods:
+Methods to implement:
 
-		prepare()                      build whatever the other methods need
+		prepare()                        prepare rowset (called on first request)
 		load_rows(result, param_vals)
 		insert_row(vals)
 		update_row(vals)
 		delete_row(vals)
 		load_row(vals)
+		load_changed_rows(result, param_vals, since_txn_id)   optional
 		reserve_ids(n) -> {id1,...}    required for a single auto_increment pk
 
 	reserve_ids() is for reserving ids from server and assigning them by the
 	client before saving the row in order to prevent double-inserts on network
 	loss. the server will refuse the second insert with the same id.
-
-Methods to call:
-
-		rowset_changed(rowset_name)
-		table_changed(table_name)
 
 Sets by default:
 
@@ -113,7 +111,7 @@ Sets by default:
 	- on client-side, `id_col` is set to pk if pk is single-column.
 
 GLOBALS
-	rowset_changed(rowset_name, [update_id])
+	push_rowset_changed_events({rowset_name->true}, txn_id)
 
 ACTIONS
 
@@ -154,10 +152,41 @@ local client_field_attrs = {
 	local_cols = 1, null_lookup_col = 1, nosave = 1,
 }
 
-local rowset_tables = {} --{table -> {rowset->true}}
-local push_rowset_changed_events --fw. decl.
-
 local row_errtypes = 'row field'
+
+--most specific text: in this rowset, in this table, anywhere, then en_text.
+--rowset ids are keyed by name, table ids by col, per xlang.lua.
+local function S_text(attr, en_text, name, col, tbl_name, rowset_name)
+	return rowset_name and S(_('%s:%s.%s.rowset', attr, name, rowset_name))
+		or tbl_name and S(_('%s:%s.%s.table', attr, col, tbl_name))
+		or S(_('%s:%s', attr, name)) or en_text
+end
+
+local function resolve_enum_texts(t, en_attr, attr, text_attr)
+	if not t[en_attr] then return end
+	t[attr] = function(rowset_name)
+		local name, col = t.name or t.col, t.col or t.name
+		local texts = {}
+		for i, v in ipairs(t.enum_values) do
+			texts[v] = S_text(text_attr, t[en_attr][v],
+				name..'.'..v, col..'.'..v, t.table, rowset_name)
+		end
+		return texts
+	end
+end
+
+local function make_translatable_fields_attrs(t)
+	for i,attr in ipairs{'label', 'info'} do
+		local en_attr = 'en_'..attr
+		t[attr] = function(rowset_name)
+			return S_text(attr, call(t[en_attr]), t.name, t.col or t.name,
+				t.table, rowset_name)
+		end
+	end
+	--enum ids carry the value after the col.
+	resolve_enum_texts(t, 'en_enum_labels', 'enum_labels', 'enum_label')
+	resolve_enum_texts(t, 'en_enum_info', 'enum_info', 'enum_info')
+end
 
 function virtual_rowset(init, ...)
 
@@ -170,14 +199,22 @@ function virtual_rowset(init, ...)
 	rs.before = before
 	rs.override = override
 
-	function rs.init_fields(rs, check_duplicates)
+	function rs.init_fields(rs, resolve_types)
 
-		local schema = config'db_schema'
-		if schema then
-			schema:resolve_types(rs.fields, {
-				table_name = rs.name,
-				check_duplicates = check_duplicates,
-			})
+		if resolve_types ~= false then --assume fields are not resolved
+			local schema = config'db_schema'
+			if schema then
+				for i,f in ipairs(rs.fields) do
+					schema:resolve_type(f)
+				end
+			end
+		end
+
+		for i,f in ipairs(rs.fields) do
+			assertf(isstr(f.name), 'field name not a string: %s: %s', rs.name, type(f.name))
+			assertf(not rs.fields[f.name], 'duplicate field name: %s.%s', rs.name, f.name)
+			rs.fields[i] = f
+			rs.fields[f.name] = f
 		end
 
 		local hide_cols = index(collect(words(rs.hide_cols) or empty))
@@ -211,11 +248,9 @@ function virtual_rowset(init, ...)
 			if ro_cols[f.name] then
 				f.readonly = true
 			end
+			make_translatable_fields_attrs(f)
 			update(f, rs.field_attrs and rs.field_attrs[f.name])
 
-			if f.table then
-				attr(rowset_tables, f.table)[rs.name] = true
-			end
 			if f.compute then
 				computed_fields = computed_fields or {}
 				add(computed_fields, f)
@@ -271,7 +306,6 @@ function virtual_rowset(init, ...)
 	end
 
 	rs.compute_row_vals = noop
-	rs.prepare = noop
 
 	local repl = repl
 
@@ -279,7 +313,7 @@ function virtual_rowset(init, ...)
 		local res = {}
 		rs:load_rows(res, param_vals)
 		assert(res.rows[1] == nil or istab(res.rows[1]),
-			'first row not a table')
+			'first row is not a table')
 		if update_computed_fields then
 			for _,row in ipairs(res.rows) do
 				update_computed_fields(row)
@@ -291,6 +325,7 @@ function virtual_rowset(init, ...)
 			can_remove_rows = rs.can_remove_rows,
 			can_change_rows = rs.can_change_rows,
 			can_move_rows = rs.can_move_rows,
+			can_load_changed_rows = rs.load_changed_rows ~= nil,
 			fields = rs.client_fields,
 			pk = rs.pk,
 			pos_col = rs.pos_col,
@@ -345,7 +380,6 @@ function virtual_rowset(init, ...)
 				assert(false)
 			end
 		end
-		return not rt.error
 	end
 
 	function rs:validate_fields(values, only_present_values)
@@ -391,27 +425,11 @@ function virtual_rowset(init, ...)
 		end
 	end
 
-	function rs:rowset_changed(rowset_name, filter)
-		if filter then rowset_name = rowset_name..':'..filter end
-		self.changed_rowsets[rowset_name] = true
-	end
-
-	function rs:table_changed(table_name)
-		local rowsets = rowset_tables[table_name]
-		if rowsets then
-			for rowset_name in pairs(rowsets) do
-				self:rowset_changed(rowset_name)
-			end
-		end
-	end
-
-	function rs:apply_changes(changes, update_id)
+	function rs:apply_changes(changes)
 
 		update_client_fields()
 		local res = {rows = {}, fields = rs.client_fields}
 		local self = object(rs)
-		self.changed_rowsets = {}
-		local rowset_changed = true
 
 		for _,row in ipairs(changes.rows) do
 			local rt = {type = row.type}
@@ -420,9 +438,7 @@ function virtual_rowset(init, ...)
 				if can ~= false then
 					local ok, err = catch(row_errtypes, rs.insert_row, self, row.values)
 					if ok then
-						if reload_row('insert', rt, row.values) then
-							rowset_changed = true
-						end
+						reload_row('insert', rt, row.values)
 					else
 						if err.col then
 							rt.field_errors = {[err.col] = err.message}
@@ -446,9 +462,7 @@ function virtual_rowset(init, ...)
 								row.values[k1] = v
 							end
 						end
-						if reload_row('update', rt, row.values) then
-							rowset_changed = true
-						end
+						reload_row('update', rt, row.values)
 					else
 						if err.col then
 							rt.field_errors = {[err.col] = err.message}
@@ -465,9 +479,7 @@ function virtual_rowset(init, ...)
 				if can ~= false then
 					local ok, err = catch(row_errtypes, rs.delete_row, self, row.values)
 					if ok then
-						if reload_row('delete', rt, row.values) then
-							rowset_changed = true
-						end
+						reload_row('delete', rt, row.values)
 					else
 						rt.error = db_error(err)
 					end
@@ -481,11 +493,6 @@ function virtual_rowset(init, ...)
 			end
 			add(res.rows, rt)
 		end
-
-		if rowset_changed then
-			self:rowset_changed(rs.name, args'filter')
-		end
-		push_rowset_changed_events(self.changed_rowsets, update_id)
 
 		return res
 	end
@@ -559,12 +566,13 @@ function virtual_rowset(init, ...)
 		local post = post()
 		local method = post and post.exec and post.exec or 'load'
 		local method = checkfound(rs['exec_'..method], 'command not found')
-		local rs = method(rs, params, post)
+		if rs.prepare then rs:prepare() end
+		local res = method(rs, params, post)
 
 		if out_format == 'json' then
-			return rs
+			return res
 		elseif out_format == 'xlsx' then
-			download_as_xlsx(rowset_name, rs)
+			download_as_xlsx(rowset_name, res)
 		else
 			assert(false)
 		end
@@ -574,19 +582,34 @@ function virtual_rowset(init, ...)
 		return rs:load(params, post)
 	end
 
+	function rs:exec_load_changed_rows(params, post)
+		local res = {}
+		if rs.load_changed_rows then
+			rs:load_changed_rows(res, params, post.since_txn_id)
+		else
+			res.reload = true
+		end
+		res.can_load_changed_rows = rs.load_changed_rows ~= nil
+		if update_computed_fields and not res.reload then
+			for _, row in ipairs(res.rows) do
+				update_computed_fields(row)
+			end
+		end
+		return res
+	end
+
 	function rs:exec_save(params, post)
 		for _,row_change in ipairs(post.changes.rows) do
 			if row_change.values then
 				update(row_change.values, params)
 			end
 		end
-		return rs:apply_changes(post.changes, post.update_id)
+		return rs:apply_changes(post.changes)
 	end
 
 	--the client asks for ids before its first save of new rows, so that a
 	--resent insert carries the same id and the backend can recognize it.
 	function rs:exec_reserve_ids(params, post)
-		rs:prepare()
 		checkfound(rs.reserve_ids, 'command not found')
 		local n = checkarg(tonumber(post.n))
 		checkarg(n >= 1 and n <= 1000 and n == floor(n))
@@ -595,7 +618,7 @@ function virtual_rowset(init, ...)
 
 	init(rs, ...)
 	if not rs.manual_init_fields then
-		rs:init_fields(true)
+		rs:init_fields()
 	end
 
 	rs.__call = rs.respond
@@ -619,30 +642,16 @@ end)
 --reload push-notifications --------------------------------------------------
 
 local waiting_events_threads = {}
-local changed_rowsets = {} --{req->{rowset->'update_id1 ...'}}
+local changed_rowsets = {} --{req->{rowset->'txn_id1 ...'}}
 
-function rowset_changed(rowset_name, update_id, push_to_clients)
-	local rowsets = istab(rowset_name) and rowset_name or {[rowset_name] = true}
-	push_rowset_changed_events(rowsets, update_id or 'server', push_to_clients)
-end
-
-function table_changed(table_name, update_id, push_to_clients)
-	local rowsets = rowset_tables[table_name]
-	push_rowset_changed_events(rowsets, update_id, push_to_clients)
-end
-
---[[local]] function push_rowset_changed_events(rowsets, update_id, push_to_clients)
-	if rowsets then
-		for rowset_name in pairs(rowsets) do
-			for _, rt in pairs(changed_rowsets) do
-				rt[rowset_name] = catany(' ', rt[rowset_name], update_id)
-			end
+function push_rowset_changed_events(rowsets, txn_id)
+	for rowset_name in pairs(rowsets) do
+		for _, rt in pairs(changed_rowsets) do
+			rt[rowset_name] = catany(' ', rt[rowset_name], txn_id)
 		end
 	end
-	if push_to_clients ~= false then
-		for thread in pairs(waiting_events_threads) do
-			resume(thread)
-		end
+	for thread in pairs(waiting_events_threads) do
+		resume(thread)
 	end
 end
 
@@ -677,8 +686,8 @@ action['rowset.events'] = function()
 			end
 		end
 		local t = {}
-		for rowset_name, update_ids in pairs(rowsets) do
-			t[#t+1] = 'data: '..rowset_name..' '..update_ids..'\n\n'
+		for rowset_name, txn_ids in pairs(rowsets) do
+			t[#t+1] = 'data: '..rowset_name..' '..txn_ids..'\n\n'
 			rowsets[rowset_name] = nil
 		end
 		local events = concat(t)

@@ -47,6 +47,19 @@ int mdbx_cursor_has_txn(const MDBX_cursor *cursor) {
 	return mdbx_cursor_txn(cursor) != 0;
 }
 
+double mdbx_txn_id_double(const MDBX_txn *txn) {
+	return (double)mdbx_txn_id(txn);
+}
+
+int mdbx_dbi_sequence_double(MDBX_txn *txn, MDBX_dbi dbi, double *result,
+	u64 increment
+) {
+	u64 seq;
+	int rc = mdbx_dbi_sequence(txn, dbi, &seq, increment);
+	*result = (double)seq;
+	return rc;
+}
+
 // API -----------------------------------------------------------------------
 
 typedef enum schema_col_type {
@@ -802,7 +815,7 @@ typedef struct schema_row_changes_writer {
 	schema_row_changes_header* header; // header page of the changes file
 	u8* data;  // the ring, mapped twice in a row so a batch can cross its end
 	u64 start; // offset of the batch that the current txn is writing
-	u64 size;  // size of that batch so far: header and rows
+	u32 size;  // size of that batch so far: header and rows
 } schema_row_changes_writer;
 
 typedef struct schema_row_changes_reader {
@@ -810,11 +823,12 @@ typedef struct schema_row_changes_reader {
 	const u8* data;  // the ring buffer, mapped twice in a row
 	u64 offset;      // offset of the next batch to read
 	u64 prev_txn_id; // id of the last returned batch, or since_txn_id
-	u64 size;        // buffer size needed when next() returns -1
+	u32 size;        // buffer size needed when next() returns -1
 	double txn_id;   // id of the batch returned by next()
 } schema_row_changes_reader;
 
-#define CHANGES_BATCH_HEADER_SIZE 16 // size, txn_id
+#define CHANGES_BATCH_HEADER_SIZE 12 // size u32, txn_id u64
+#define CHANGES_ROW_HEADER_SIZE 4 // table_size u16, key_size u16
 
 INLINE u64 changes_load(const u64* p) {
 	return __atomic_load_n(p, __ATOMIC_SEQ_CST);
@@ -828,14 +842,15 @@ INLINE u64 changes_align(u64 size) {
 	return (size + 7) & ~7ULL;
 }
 
-// The space for a batch is its size rounded up to 8 bytes, plus 8 bytes at
-// the end that hold the size again, so that a reader can walk the ring backward.
+// The space for a batch is its size plus 4 bytes at the end that hold the
+// size again, so that a reader can walk the ring backward, rounded up to 8
+// bytes.
 INLINE u64 changes_slot_size(u64 size) {
-	return changes_align(size) + 8;
+	return changes_align(size + 4);
 }
 
-INLINE u64 changes_size(const u8* data) {
-	u64 size;
+INLINE u32 changes_size(const u8* data) {
+	u32 size;
 	memcpy(&size, data, sizeof(size));
 	return size;
 }
@@ -869,9 +884,10 @@ static void changes_reserve(schema_row_changes_writer* writer, u64 size) {
 }
 
 int schema_row_changes_add(schema_row_changes_writer* writer,
-	const void* table, u32 table_size, const void* key, u32 key_size
+	const void* table, u16 table_size, const void* key, u16 key_size
 ) {
-	u64 size = writer->size + 8ULL + table_size + key_size;
+	u64 size = (u64)writer->size + CHANGES_ROW_HEADER_SIZE
+		+ table_size + key_size;
 	u64 capacity = writer->header->capacity;
 	int overflow;
 	// If the row fits in the ring, append it to the batch. Otherwise only add
@@ -880,15 +896,17 @@ int schema_row_changes_add(schema_row_changes_writer* writer,
 	if (changes_slot_size(size) <= capacity) {
 		changes_reserve(writer, size);
 		u8* data = writer->data + writer->start % capacity + writer->size;
-		memcpy(data, &table_size, 4);
-		memcpy(data + 4, &key_size, 4);
-		memcpy(data + 8, table, table_size);
-		memcpy(data + 8 + table_size, key, key_size);
+		memcpy(data, &table_size, 2);
+		memcpy(data + 2, &key_size, 2);
+		memcpy(data + 4, table, table_size);
+		memcpy(data + 4 + table_size, key, key_size);
 		overflow = 0;
 	} else {
 		overflow = changes_slot_size(writer->size) <= capacity;
+		// Stop at capacity + 1 so that the size can't wrap around u32.
+		size = capacity + 1;
 	}
-	writer->size = size;
+	writer->size = (u32)size;
 	return overflow;
 }
 
@@ -906,9 +924,9 @@ void schema_row_changes_publish(schema_row_changes_writer* writer,
 	// that readers see the batch.
 	changes_reserve(writer, writer->size);
 	u8* data = writer->data + writer->start % capacity;
-	memcpy(data, &writer->size, 8);
-	memcpy(data + 8, &txn_id, 8);
-	memcpy(data + slot_size - 8, &writer->size, 8);
+	memcpy(data, &writer->size, 4);
+	memcpy(data + 4, &txn_id, 8);
+	memcpy(data + slot_size - 4, &writer->size, 4);
 	changes_store(&writer->header->published_end,
 		writer->start + slot_size);
 }
@@ -927,10 +945,10 @@ void schema_row_changes_reader_init(schema_row_changes_reader* r,
 	// then sees the missing ids.
 	u64 capacity = header->capacity;
 	while (r->offset > changes_load(&header->retained_start)) {
-		u64 size = changes_size(r->data + (r->offset - 8) % capacity);
+		u32 size = changes_size(r->data + (r->offset - 4) % capacity);
 		u64 batch_offset = r->offset - changes_slot_size(size);
 		u64 txn_id;
-		memcpy(&txn_id, r->data + (batch_offset + 8) % capacity, 8);
+		memcpy(&txn_id, r->data + (batch_offset + 4) % capacity, 8);
 		__atomic_thread_fence(__ATOMIC_SEQ_CST);
 		if (r->offset <= changes_load(&header->retained_start))
 			break;
@@ -957,7 +975,7 @@ static int changes_end(schema_row_changes_reader* r, u64 max_txn_id) {
 // r->txn_id and there is no batch, 0 when no new batch is visible to txn,
 // and -1 when out is too small; r->size then holds the size needed.
 int schema_row_changes_next(schema_row_changes_reader* r,
-	const MDBX_txn* txn, void* out, u64 out_size
+	const MDBX_txn* txn, void* out, u32 out_size
 ) {
 	const schema_row_changes_header* header = r->header;
 	u64 capacity = header->capacity;
@@ -975,9 +993,10 @@ int schema_row_changes_next(schema_row_changes_reader* r,
 		// Read the batch header. If a writer overwrote it during the read,
 		// start over.
 		const u8* batch = r->data + r->offset % capacity;
-		u64 size, txn_id;
-		memcpy(&size, batch, 8);
-		memcpy(&txn_id, batch + 8, 8);
+		u32 size;
+		u64 txn_id;
+		memcpy(&size, batch, 4);
+		memcpy(&txn_id, batch + 4, 8);
 		__atomic_thread_fence(__ATOMIC_SEQ_CST);
 		if (r->offset < changes_load(&header->retained_start))
 			continue;

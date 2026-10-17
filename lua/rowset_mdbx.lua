@@ -8,6 +8,7 @@ API
 	table_rowset  (tbl, [opt]) -> rs  rowset over a whole table
 	lookup_rowset (tbl) -> name, name_col   auto-created lookup rowset
 	prepare_rowsets ()                prepare all of them, to validate at startup
+	watch_row_changes (db)            push changed rowsets to events clients
 
 	rowset.lookup_TABLE               same, created on first access
 
@@ -16,6 +17,7 @@ SCAN ROWSET OPTIONS
 	scan     fn(db) -> scan    required; must end in select()
 	pk       'col1 ...'        required; output names, not table cols
 	db       db                optional; defaults to the app db
+	on_rows_changed            optional; see LOADING CHANGED ROWS
 
 	plus every rowset.lua property (cols, hide_cols, ro_cols, rw_cols,
 	field_attrs, name_col, ...).
@@ -39,15 +41,31 @@ WRITING
 	and a new row whose pk is already in the table gets an already_exists
 	error.
 
+LOADING CHANGED ROWS
+
+	The client asks for the rows changed since its last load. The rowset reads
+	the row change notification records containing the scan's source tables,
+	and rebuilds the affected rowset rows if it can. If it can't, it tells the
+	client to reload everything.
+
+	For simple scans, the scanner can rebuild the rows itself. For complex
+	scans you need to implement rs:on_rows_changed() to avoid full reloads.
+
+	rs:on_rows_changed (changes, param_vals) -> {rows=, removed_pks=} | false
+
+		changes      iter() -> table, pk_val1, ...: the changed source rows,
+		             once per change, so a row can come more than once.
+		rows         changed and added rows, in field order.
+		removed_pks  pks of the rows to remove, in rs.pk order.
+		false        the client reloads everything.
+
 ]]
 
 require'rowset'
 require'mdbx_scan'
 require'glue'
 
-local function rowset_db(rs)
-	return rs.db or db()
-end
+local table_rowset_names = {} -- {db -> {table -> {rowset_name -> true}}}
 
 --a lookup rowset has a one-col key, so fks over several cols have none.
 local function fks_by_col(schema)
@@ -100,239 +118,362 @@ local function find_write_table(db, out_specs, pk)
 	return tbl
 end
 
-function scan_rowset(...)
+local function scan_rowset_init(rs, opt, ...)
 
-	return virtual_rowset(function(rs, opt, ...)
+	update(rs, opt, ...)
 
-		update(rs, opt, ...)
+	assert(rs.scan, 'scan missing')
+	rs.pk = collect(words(assert(rs.pk, 'pk missing')))
+	assert(#rs.pk > 0, 'pk empty')
 
-		assert(rs.scan, 'scan missing')
-		rs.pk = collect(words(assert(rs.pk, 'pk missing')))
-		assert(#rs.pk > 0, 'pk empty')
+	rs.manual_init_fields = true
 
-		rs.manual_init_fields = true
+	local scan     --the prepared scan, built on first use
+	local row_scan --loads one row back by pk; nil when it can't be built
+	local is_prepared     --prepare() ran to the end
+	local write_table
+	local key_names = {}  --{NAME,...} outputs holding write_table's pk
+	local key_cols  = {}  --{COL,...}  the pk cols themselves
+	local seq_name        --output holding write_table's auto-inc col
+	local is_seq_pk       --the auto-inc col is the whole pk: ids reservable
 
-		local scan      --the prepared scan, built on first use
-		local row_scan  --loads one row back by pk; nil when it can't be built
-		local write_table
-		local write_cols = {} --{NAME -> COL} cols we may write
-		local key_names = {}  --{NAME,...} outputs holding write_table's pk
-		local key_cols  = {}  --{COL,...}  the pk cols themselves
-		local seq_name        --output holding write_table's auto-inc col
-		local is_seq_pk       --the auto-inc col is the whole pk: ids reservable
+	local insert_row, update_row, delete_row, load_row --fw. decl.
+	local reserve_ids --fw. decl.
 
-		local insert_row, update_row, delete_row, load_row --fw. decl.
-		local reserve_ids --fw. decl.
+	local function rs_db()
+		return rs.db or db()
+	end
 
-		--building a scan resolves its table schema, which needs a transaction,
-		--so this runs on the first request rather than at load time.
-		function rs:prepare()
-			if scan then return end
-			local db = rowset_db(rs)
-			scan = rs.scan(db)
-			scan:null_value(null)
+	--building a scan resolves its table schema, which needs a transaction,
+	--so this runs on the first request rather than at load time.
+	local function prepare()
+		local db = rs_db()
+		scan = rs.scan(db)
+		scan:null_value(null)
 
-			local fields = {}
-			for i, name in ipairs(scan.out_cols) do
-				local spec = scan.out_specs[name]
-				local f
-				if spec.table then
-					f = update({}, db:table_schema(spec.table).fields[spec.col])
-					f.table = spec.table
-				else
-					f = {readonly = true}
-				end
-				f.name = name
-				f.index = i
-				fields[i] = f
-				fields[name] = f
+		local fields = {}
+		for i, name in ipairs(scan.out_cols) do
+			local spec = scan.out_specs[name]
+			local f
+			if spec.table then
+				f = update({}, db:table_schema(spec.table).fields[spec.col])
+				f.table = spec.table
+			else
+				f = {readonly = true}
 			end
-			rs.fields = fields
+			f.name = name
+			f.index = i
+			fields[i] = f
+		end
+		rs.fields = fields
 
-			write_table = find_write_table(db, scan.out_specs, rs.pk)
+		write_table = find_write_table(db, scan.out_specs, rs.pk)
 
+		for _, f in ipairs(fields) do
+			if f.table ~= write_table then f.readonly = true end
+		end
+
+		if write_table then
+			local schema = db:table_schema(write_table)
+			local name_of_col = {}
 			for _, f in ipairs(fields) do
-				if f.table ~= write_table then f.readonly = true end
-			end
-
-			if write_table then
-				local schema = db:table_schema(write_table)
-				local name_of_col = {}
-				for _, f in ipairs(fields) do
-					if f.table == write_table then
-						name_of_col[f.col] = f.name
-						if not f.readonly then write_cols[f.name] = f.col end
-					end
-				end
-				for i, col in ipairs(schema.pk) do
-					key_names[i] = name_of_col[col]
-					key_cols[i] = col
-				end
-				local seq_field = schema.autoinc_field
-				seq_name = seq_field and name_of_col[seq_field.col]
-				is_seq_pk = seq_name ~= nil and #key_names == 1
-					and key_names[1] == seq_name
-				rs.insert_row = insert_row
-				rs.update_row = update_row
-				rs.delete_row = delete_row
-				if is_seq_pk then rs.reserve_ids = reserve_ids end
-			end
-
-			--so the client shows and picks a name instead of a raw fk value.
-			for _, f in ipairs(fields) do
-				if f.table then
-					local fk = fks_by_col(db:table_schema(f.table))[f.col]
-					if fk then
-						f.lookup_rowset_name, f.display_col =
-							lookup_rowset(fk.ref_table)
-						f.lookup_cols = fk.ref_cols[1]
-					end
+				if f.table == write_table then
+					name_of_col[f.col] = f.name
 				end
 			end
-
-			local params = {}
-			for arg in pairs(scan.arg_fields) do
-				if isstr(arg) then add(params, arg) end
+			for i, col in ipairs(schema.pk) do
+				key_names[i] = name_of_col[col]
+				key_cols[i] = col
 			end
-			rs.params = sort(params)
-
-			--reloading one row repeats the same output over a pk lookup, which
-			--is only possible with one member and every output col coming
-			--from a table col.
-			local member = next(scan.member_scans)
-			local outputs = write_table and not next(scan.member_scans, member)
-				and {}
-			for i, name in ipairs(scan.out_cols) do
-				local spec = scan.out_specs[name]
-				if outputs and spec.col then
-					outputs[i] = {name = name, member = member, col = spec.col}
-				else
-					outputs = nil
-				end
-			end
-			if outputs then
-				local terms = {}
-				for i, col in ipairs(key_cols) do
-					terms[i] = col..' = :'..key_names[i]
-				end
-				row_scan = db:scan(write_table, cat(terms, ', '), member)
-					:select(outputs):null_value(null)
-				--reload_row() reads a missing load_row() as nothing to reload,
-				--but a load_row() returning nothing as the row being gone.
-				rs.load_row = load_row
-			end
-
-			rs:init_fields(true)
+			local seq_field = schema.autoinc_field
+			seq_name = seq_field and name_of_col[seq_field.col]
+			is_seq_pk = seq_name ~= nil and #key_names == 1
+				and key_names[1] == seq_name
+			rs.insert_row = insert_row
+			rs.update_row = update_row
+			rs.delete_row = delete_row
+			if is_seq_pk then rs.reserve_ids = reserve_ids end
 		end
 
-		--load_rows() and load_row() run in the transaction their caller opened.
-		--exec_load() opens one; a reload from apply_changes() is already
-		--inside the save's write transaction.
-		local exec_load = rs.exec_load
-		function rs:exec_load(...)
-			return rowset_db(rs):atomic('r', exec_load, self, ...)
-		end
-
-		--after a run that died mid-iteration the scan still holds a cursor from
-		--a dead transaction; close() drops it before the next seek.
-		function rs:load_rows(res, param_vals)
-			rs:prepare()
-			scan.close()
-			res.rows = scan:rows_array('[]', scan_args(param_vals))
-		end
-
-		--[[local]] function load_row(self, vals)
-			local args = {}
-			for _, name in ipairs(key_names) do
-				args[name] = val_or_old(vals, name)
+		--so the client shows and picks a name instead of a raw fk value.
+		for _, f in ipairs(fields) do
+			if f.table then
+				local fk = fks_by_col(db:table_schema(f.table))[f.col]
+				if fk then
+					f.lookup_rowset_name, f.display_col =
+						lookup_rowset(fk.ref_table)
+					f.lookup_cols = fk.ref_cols[1]
+				end
 			end
-			row_scan.close()
-			return row_scan:first('[]', args)
 		end
 
-		local function written_vals(vals)
-			local t = {}
-			for name, col in pairs(write_cols) do
+		local params = {}
+		for arg in pairs(scan.arg_fields) do
+			if isstr(arg) then add(params, arg) end
+		end
+		rs.params = sort(params)
+
+		--reloading one row repeats the same output over a pk lookup, which
+		--is only possible with one member and every output col coming
+		--from a table col.
+		local member = next(scan.member_scans)
+		local outputs = write_table and not next(scan.member_scans, member)
+			and {}
+		for i, name in ipairs(scan.out_cols) do
+			local spec = scan.out_specs[name]
+			if outputs and spec.col then
+				outputs[i] = {name = name, member = member, col = spec.col}
+			else
+				outputs = nil
+			end
+		end
+		if outputs then
+			local terms = {}
+			for i, col in ipairs(key_cols) do
+				terms[i] = col..' = :'..key_names[i]
+			end
+			row_scan = db:scan(write_table, cat(terms, ', '), member)
+				:select(outputs):null_value(null)
+			--reload_row() reads a missing load_row() as nothing to reload,
+			--but a load_row() returning nothing as the row being gone.
+			rs.load_row = load_row
+		end
+
+		rs:init_load_changed_rows()
+
+		rs:init_fields(false)
+
+		for tbl in pairs(scan.source_tables) do
+			attr(attr(table_rowset_names, db), tbl)[rs.name] = true
+		end
+
+		is_prepared = true
+	end
+	function rs:prepare()
+		if is_prepared then return end
+		rs_db():atomic('r', prepare)
+	end
+
+	--TODO: after a run that died mid-iteration the scan still holds a cursor from
+	--a dead transaction; close() drops it before the next seek but it's a HACK.
+	local function load_rows(res, param_vals)
+		res.rows = scan:rows_array('[]', param_vals)
+		res.txn_id = rs_db():txn_id()
+	end
+	function rs:load_rows(res, param_vals)
+		scan.close()
+		rs_db():atomic('r', load_rows, res, scan_args(param_vals))
+	end
+
+	--[[local]] function load_row(self, vals)
+		local args = {}
+		for _, name in ipairs(key_names) do
+			args[name] = val_or_old(vals, name)
+		end
+		row_scan.close()
+		return row_scan:first('[]', args)
+	end
+
+	local function written_vals(vals)
+		local t = {}
+		for _, f in ipairs(rs.fields) do
+			if f.table == write_table and not f.readonly then
+				local v = vals[f.name]
+				if v ~= nil then t[f.col] = v end
+			end
+		end
+		return t
+	end
+
+	--[[local]] function insert_row(self, vals)
+		rs_db():atomic('w', function()
+			local t = written_vals(vals)
+			--written_vals() leaves the pk col out when it's read-only.
+			for i, name in ipairs(key_names) do
 				local v = vals[name]
-				if v ~= nil then t[col] = v end
+				check_for('row', nil, 'insert', v ~= nil,
+					'pk required: %s', name)
+				t[key_cols[i]] = v
 			end
-			return t
-		end
+			rs_db():insert(write_table, '{}', t)
+		end)
+	end
 
-		--[[local]] function insert_row(self, vals)
-			rowset_db(rs):atomic('w', function()
-				local t = written_vals(vals)
-				--written_vals() leaves the pk col out when it's read-only.
-				for i, name in ipairs(key_names) do
-					local v = vals[name]
-					check_for('row', nil, 'insert', v ~= nil,
-						'pk required: %s', name)
-					t[key_cols[i]] = v
+	--[[local]] function reserve_ids(self, n)
+		return rs_db():atomic('w', function()
+			local first_id = rs_db():seq(write_table, n)
+			local ids = {}
+			for i = 1, n do ids[i] = first_id + i - 1 end
+			return ids
+		end)
+	end
+
+	--[[local]] function update_row(self, vals)
+		rs_db():atomic('w', function()
+			local db = rs_db()
+			local t = written_vals(vals)
+			local keys = {}
+			for i, name in ipairs(key_names) do
+				keys[i] = val_or_old(vals, name)
+				t[key_cols[i]] = keys[i]
+			end
+			--row deleted by another user: write nothing; reload_row() finds
+			--it gone and answers remove.
+			if not db:exists(write_table, unpack(keys, 1, #key_names)) then
+				return
+			end
+			db:update(write_table, '{}', t)
+		end)
+	end
+
+	--[[local]] function delete_row(self, vals)
+		rs_db():atomic('w', function()
+			local keys = {}
+			for i, name in ipairs(key_names) do
+				keys[i] = val_or_old(vals, name)
+			end
+			rs_db():del(write_table, unpack(keys, 1, #key_names))
+		end)
+	end
+
+	local apply_changes = rs.apply_changes
+	function rs:apply_changes(...)
+		return rs_db():atomic('w', apply_changes, self, ...)
+	end
+
+	--row change notifications ---------------------------------------------
+
+	local pk_decoders -- {table -> fn(raw_pk) -> pk_val1, ...}
+	local load_scan_changed_rows -- fn(...) -> {rows, removed_pks}
+
+	local function load_changed_rows(self, res, param_vals, since_txn_id)
+		local db = rs_db()
+		res.txn_id = db:txn_id()
+		--read the batches while the handler iterates the changes; a gap
+		--ends the iteration and the handler's result is discarded.
+		local next_batch = db:read_changes(since_txn_id)
+		local next_row -- iter() -> table, raw_pk over the current batch
+		local has_gap -- a gap was found: the client must reload
+		local function next_change()
+			while true do
+				if next_row then
+					local tbl, raw_pk = next_row()
+					if tbl then
+						if pk_decoders then
+							return tbl, pk_decoders[tbl](raw_pk)
+						else
+							return tbl, raw_pk
+						end
+					end
 				end
-				rowset_db(rs):insert(write_table, '{}', t)
-				self:table_changed(write_table)
-			end)
-		end
-
-		--db:seq() advances the sequence by n, so no auto-inc insert takes the
-		--returned ids.
-		--[[local]] function reserve_ids(self, n)
-			return rowset_db(rs):atomic('w', function()
-				local first_id = rowset_db(rs):seq(write_table, n)
-				local ids = {}
-				for i = 1, n do ids[i] = first_id + i - 1 end
-				return ids
-			end)
-		end
-
-		--[[local]] function update_row(self, vals)
-			rowset_db(rs):atomic('w', function()
-				local db = rowset_db(rs)
-				local t = written_vals(vals)
-				local keys = {}
-				for i, name in ipairs(key_names) do
-					keys[i] = val_or_old(vals, name)
-					t[key_cols[i]] = keys[i]
-				end
-				--row deleted by another user: write nothing; reload_row() finds
-				--it gone and answers remove.
-				if not db:exists(write_table, unpack(keys, 1, #key_names)) then
+				local txn_id, batch, gap = next_batch()
+				if not txn_id then return end
+				if gap then
+					has_gap = true
 					return
 				end
-				db:update(write_table, '{}', t)
-				self:table_changed(write_table)
-			end)
+				next_row = db:each_row_change(batch, scan.source_tables)
+			end
 		end
+		local changes -- {rows, removed_pks} | false
+		if rs.on_rows_changed then
+			changes = rs:on_rows_changed(next_change, param_vals)
+		else
+			changes = load_scan_changed_rows(next_change, scan_args(param_vals))
+		end
+		if has_gap or changes == false then
+			res.reload = true
+			return
+		end
+		res.rows = changes.rows or {}
+		res.removed_pks = changes.removed_pks or {}
+	end
 
-		--[[local]] function delete_row(self, vals)
-			rowset_db(rs):atomic('w', function()
-				local keys = {}
-				for i, name in ipairs(key_names) do
-					keys[i] = val_or_old(vals, name)
+	function rs:init_load_changed_rows()
+		local db = rs_db()
+		if rs.on_rows_changed then
+			pk_decoders = {}
+			for tbl in pairs(scan.source_tables) do
+				local schema = db:table_schema(tbl)
+				local key_rec = MDBX_val() -- {data, size}, encoded source PK
+				local getters = {} -- {key_i -> get()}, source-PK order
+				for key_i, col in ipairs(schema.pk) do
+					getters[key_i] = db:col_decoder(schema, col,
+						nil, key_rec)
 				end
-				rowset_db(rs):del(write_table, unpack(keys, 1, #key_names))
-				self:table_changed(write_table)
+				local n = #getters -- pk col count
+				local pk_vals = {} -- reused for every row: {val1, ...}
+				pk_decoders[tbl] = function(raw_pk)
+					key_rec.data, key_rec.size = raw_pk, #raw_pk
+					for key_i = 1, n do pk_vals[key_i] = getters[key_i]() end
+					return unpack(pk_vals, 1, n)
+				end
+			end
+		else
+			load_scan_changed_rows = scan:make_load_changed_rows(rs.pk)
+		end
+		if rs.on_rows_changed or load_scan_changed_rows then
+			function rs:load_changed_rows(...)
+				return rs_db():atomic('r', load_changed_rows, self, ...)
+			end
+		end
+	end
+
+end
+
+function scan_rowset(...)
+	return virtual_rowset(scan_rowset_init, ...)
+end
+
+--ROW CHANGE PUSH ------------------------------------------------------------
+
+--the db owns the thread, so db:close() cancels the thread's wait.
+function watch_row_changes(db)
+	local tables = attr(table_rowset_names, db) -- {table -> rowset_names}
+	local th = thread(function()
+		local f = inotify() -- woken by each commit, from any process
+		f:add_watch(db.file..'.changes', IN_MODIFY)
+		local since_txn_id = db:atomic('r', db.txn_id, db) -- last read txn
+		while true do
+			f:read_event()
+			local rowset_names = {} -- {rowset_name -> true}
+			db:atomic('r', function()
+				for txn_id, batch, gap in db:read_changes(since_txn_id) do
+					--gap: the changed tables are unknown, push every rowset.
+					if gap then
+						for _, names in pairs(tables) do
+							update(rowset_names, names)
+						end
+						break
+					end
+					for tbl in db:each_row_change(batch, tables) do
+						update(rowset_names, tables[tbl])
+					end
+				end
+				since_txn_id = db:txn_id()
 			end)
+			if next(rowset_names) then
+				push_rowset_changed_events(rowset_names, since_txn_id)
+			end
 		end
-
-		--every row change runs in a child transaction of this one, so a failed
-		--row rolls back on its own and the rest of the batch still applies.
-		local apply_changes = rs.apply_changes
-		function rs:apply_changes(...)
-			rs:prepare()
-			return rowset_db(rs):atomic('w', apply_changes, self, ...)
-		end
-
-	end, ...)
+	end, 'rowset-changes %s', db.file)
+	th:setowner(db)
+	resume(th)
 end
 
 --LOOKUP ROWSETS -------------------------------------------------------------
+
+local function table_schema(tbl)
+	return checkfound(db():atomic('any', function(tbl)
+		return db():table_schema(tbl)
+	end, tbl))
+end
 
 function lookup_rowset(tbl)
 	local rs_name = 'lookup_'..tbl
 	local rs = rawget(rowset, rs_name)
 	if not rs then
-		local schema = checkfound(db():table_schema(tbl))
+		local schema = checkfound(table_schema(tbl))
 		local name_col = guess_name_col(schema)
 		local cols = extend({}, schema.pk)
 		if name_col then add(cols, name_col) end
@@ -362,27 +503,27 @@ end})
 --each scan's table schema. preparing one rowset can register the lookup
 --rowsets for its fk cols, so keep going while new names appear.
 function prepare_rowsets()
-	db():atomic('r', function()
-		local prepared = {}
-		local found_new = true
-		while found_new do
-			found_new = false
-			for name, rs in sortedpairs(rowset) do
-				if not prepared[name] then
-					prepared[name] = true
-					found_new = true
-					rs.name = name
+	local prepared = {}
+	local found_new = true
+	while found_new do
+		found_new = false
+		for name, rs in sortedpairs(rowset) do
+			if not prepared[name] then
+				prepared[name] = true
+				found_new = true
+				rs.name = name
+				if rs.prepare then
 					rs:prepare()
 				end
 			end
 		end
-	end)
+	end
 end
 
 --TABLE ROWSETS --------------------------------------------------------------
 
 function table_rowset(tbl, opt)
-	local schema = checkfound(db():table_schema(tbl))
+	local schema = table_schema(tbl)
 	local sel = cat(schema.cols, ', ')
 	return scan_rowset(update({
 		scan = function(db) return db:scan(tbl, ''):select(sel) end,

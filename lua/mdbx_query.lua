@@ -3307,3 +3307,69 @@ end
 	rel.out_specs = rel._node.out_specs
 	return rel._node
 end
+
+function Rel:make_load_changed_rows(pk)
+	if not self.compiled then compile(self) end
+	local tables = {} -- {table1, ...}, base-table names
+	local found_tables = {} -- {table -> true}
+	local seen_rels = {} -- {rel -> true}, visited relations
+	local add_rel, add_expr -- fn(rel), fn(expr), recursive dependencies
+	local function add_source(source)
+		if source.rel then
+			add_rel(source.rel)
+		else
+			local schema = source.schema
+			local tbl = schema.val_schema and schema.val_schema.name
+				or source.table
+			if not found_tables[tbl] then
+				found_tables[tbl] = true
+				add(tables, tbl)
+			end
+		end
+	end
+	function add_expr(expr)
+		if not istab(expr) then return end
+		if inherits(expr, Rel) then
+			add_rel(expr)
+		elseif expr.table then
+			add_source(expr)
+		else
+			if expr.source then add_source(expr.source) end
+			for operand_i = 2, #expr do add_expr(expr[operand_i]) end
+		end
+	end
+	function add_rel(rel)
+		if seen_rels[rel] then return end
+		seen_rels[rel] = true
+		for _, input in ipairs(rel.set_rels or empty) do add_rel(input) end
+		for _, source in ipairs(rel.sources or empty) do add_source(source) end
+		for _, join in ipairs(rel.joins or empty) do
+			if inherits(join.right, Rel) then
+				add_rel(join.right)
+			else
+				add_source(join.right)
+			end
+			add_expr(join.on_expr)
+		end
+		for _, exprs in ipairs{
+			rel.wheres or empty,
+			rel.havings or empty,
+			rel.select_cols or empty,
+			rel.group_cols or empty,
+			rel.order_cols or empty,
+		} do
+			for _, expr in ipairs(exprs) do add_expr(expr) end
+		end
+	end
+	add_rel(self)
+	if self.set_op or #self.joins ~= 1 or self.joins[1].right.rel
+		or #self.where_conditions > 0 or self.group_cols
+		or self.distinct_cols or self.order_cols or self._limit ~= nil
+		or self._offset ~= nil
+	then
+		return tables
+	end
+	local load_changed_rows = -- fn(...) -> {rows, removed_pks}
+		build_terminal_node(self, 'rows'):make_load_changed_rows(pk)
+	return tables, load_changed_rows
+end

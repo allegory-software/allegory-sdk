@@ -1151,6 +1151,13 @@ function Db:scan(tbl, path, alias)
 			reverse = scan_reverse,
 		}
 	end
+	scan.source_tables = {[base_schema.name] = true} -- {table -> true}
+	scan.can_fetch_by_pk = eq_n == 0 and not range_field
+	for _, param in ipairs(eq_params) do
+		if param.scan then
+			update(scan.source_tables, param.scan.source_tables)
+		end
+	end
 
 	return scan
 end
@@ -1234,6 +1241,7 @@ local function col_specs(scan, spec, what)
 end
 
 function Scan:filter(cols, accept)
+	self.can_fetch_by_pk = false
 	if accept == nil then
 		cols, accept = nil, cols
 	else
@@ -1308,6 +1316,9 @@ end
 function Scan:union(scan2)
 	local scan1 = self
 	local scan = object(Scan)
+	scan.source_tables = -- {table -> true}
+		update({}, scan1.source_tables, scan2.source_tables)
+	scan.can_fetch_by_pk = false
 	scan.db = scan1.db
 	scan.arg_fields = merge_arg_fields(scan1.arg_fields, scan2.arg_fields)
 	local current_scan = scan1
@@ -1426,6 +1437,9 @@ function Scan:merge_union(scan2)
 	assert(scan1.is_index == scan2.is_index)
 	local reverse = scan1.reverse
 	local scan = object(Scan)
+	scan.source_tables = -- {table -> true}
+		update({}, scan1.source_tables, scan2.source_tables)
+	scan.can_fetch_by_pk = false
 	scan.db = scan1.db
 	scan.arg_fields = merge_arg_fields(scan1.arg_fields, scan2.arg_fields)
 	scan.member_scans = scan1.member_scans
@@ -1507,6 +1521,8 @@ local function hash_key(getters, n, scratch, space)
 end
 
 local function set_filter(scan1, scan2, keep_matched, what)
+	update(scan1.source_tables, scan2.source_tables)
+	scan1.can_fetch_by_pk = false
 	local names = scan1.out_cols
 	assertf(names and scan2.out_cols,
 		'%s: select()/aggregate() required first', what)
@@ -1638,6 +1654,9 @@ end
 local function join_scan(outer, inner, left, accept)
 	if isstr(inner) then inner = inner_scan(outer, inner) end
 	local join = object(Scan)
+	join.source_tables = -- {table -> true}
+		update({}, outer.source_tables, inner.source_tables)
+	join.can_fetch_by_pk = false
 	join.db = outer.db
 	join.arg_fields = merge_arg_fields(outer.arg_fields, inner.arg_fields)
 	--col_decoder() resolves a member against outer first, so a duplicate
@@ -1720,6 +1739,7 @@ end
 --answer whether it has a row, and the scan closes it.
 local function has_filter(parent, child, want)
 	child = parent:child_scan(child)
+	update(parent.source_tables, child.source_tables)
 	parent:filter(function()
 		return child:exists(parent.args) == want
 	end)
@@ -1742,6 +1762,8 @@ end
 function Scan:child_scan(child)
 	local parent = self
 	if isstr(child) then child = inner_scan(parent, child) end
+	update(child.source_tables, parent.source_tables)
+	child.can_fetch_by_pk = false
 	local reset, next_row, found = child.reset, child.next, child.found
 	function child.reset(args)
 		if parent.found() then reset(args) end
@@ -1964,6 +1986,7 @@ local row_count_field = {type = 'number', min = 0, decimals = 0,
 --must stop outright once limit rows are yielded -- looking further would run
 --the underlying scan to exhaustion for a match that will never come.
 function Scan:limit(limit, offset)
+	self.can_fetch_by_pk = false
 	local scan = self
 	local next_row, reset = scan.next, scan.reset
 	local limit_arg = type(limit) == 'table' and limit.arg
@@ -2021,6 +2044,7 @@ name in scan.out_cols, including nil.
 NOTE: Sort result is unstable!
 ]]
 function Scan:sort(spec)
+	self.can_fetch_by_pk = false
 	local scan = self
 	local get = scan.get
 	assert(get, 'sort: select()/aggregate() required first')
@@ -2117,6 +2141,7 @@ end
 --requires the scan already be sorted by cols!
 --next() iterates groups; next_in_group() iterates pks in current group.
 function Scan:group_by(cols)
+	self.can_fetch_by_pk = false
 	local next_row = self.next
 	local by_group = self.can_next_group
 	local ncols = #cols
@@ -2268,6 +2293,7 @@ aggregate() emits one record per next(). scan.row contains that record so
 the caller can read every field without copying it through get().
 ]]
 function Scan:aggregate(agg, cols, hash)
+	self.can_fetch_by_pk = false
 	local scan = self
 
 	local function col_reader(c, comparison)
@@ -2440,6 +2466,7 @@ row of every key, and emits those rows in input order. distinct() keeps every
 selected or aggregated field.
 ]]
 function Scan:distinct(cols, hash)
+	self.can_fetch_by_pk = false
 	if not hash then
 		return self:group_by(cols)
 	end
@@ -2545,6 +2572,8 @@ end
 local function member_scan(child, alias, what)
 	assertf(child.get, '%s: select()/aggregate() required first', what)
 	local scan = object(Scan)
+	scan.source_tables = update({}, child.source_tables) -- {table -> true}
+	scan.can_fetch_by_pk = false
 	scan.db = child.db
 	scan.arg_fields = child.arg_fields
 	scan.member_scans = {[alias] = scan}
@@ -2632,6 +2661,8 @@ end
 
 function Db:values_scan(values)
 	local scan = object(Scan)
+	scan.source_tables = {} -- {table -> true}
+	scan.can_fetch_by_pk = false
 	scan.db = self
 	scan.member_scans = {}
 	local arg = values.arg
@@ -2672,4 +2703,66 @@ function Db:values_scan(values)
 	function scan.close() end
 
 	return scan
+end
+
+--LOAD CHANGED ROWS ----------------------------------------------------------
+
+function Scan:make_load_changed_rows(pk)
+	if not self.can_fetch_by_pk or not self.out_cols then
+		return
+	end
+	local db = self.db
+	local tbl = self.base_table
+	local schema = db:table_schema(tbl)
+	local out_cols, out_specs = self.out_cols, self.out_specs
+	if #pk ~= #schema.pk then return end
+	local key_cols = {} -- {source_pk_col -> true}
+	for _, name in ipairs(pk) do
+		local spec = assertf(out_specs[name],
+			'make_load_changed_rows: pk col not in output: %s', name)
+		if spec.table ~= tbl or not schema.fields[spec.col].key_index
+			or key_cols[spec.col]
+		then
+			return
+		end
+		key_cols[spec.col] = true
+	end
+	local key_rec = MDBX_val() -- {data, size}, encoded source PK
+	local value, value_size -- current row data and byte size
+	local function get_value() return value, value_size end
+	local getters = {} -- {output_i -> get()}
+	for output_i, name in ipairs(out_cols) do
+		local spec = out_specs[name]
+		getters[output_i] = db:col_decoder(schema, spec.col, nil,
+			key_rec, get_value)
+	end
+	local function load_changed_rows(changes, param_vals)
+		local rows = {} -- {row1, ...}, rows in output-column order
+		local removed_pks = {} -- {pk1, ...}, keys in result-PK order
+		local seen_keys = {} -- {raw_pk -> true}
+		for table_name, raw_pk in changes do
+			if table_name == tbl and not seen_keys[raw_pk] then
+				seen_keys[raw_pk] = true
+				key_rec.data, key_rec.size = raw_pk, #raw_pk
+				local exists -- source row found by PK
+				exists, value, value_size = db:find_raw(tbl, raw_pk, #raw_pk)
+				if exists then
+					local row = {} -- {val1, ...}, output-column order
+					for output_i, get in ipairs(getters) do
+						local v = get()
+						row[output_i] = v == nil and null or v
+					end
+					add(rows, row)
+				else
+					local result_pk = {} -- {val1, ...}, result-PK order
+					for key_i, name in ipairs(pk) do
+						result_pk[key_i] = getters[out_specs[name].i]()
+					end
+					add(removed_pks, result_pk)
+				end
+			end
+		end
+		return {rows = rows, removed_pks = removed_pks}
+	end
+	return load_changed_rows
 end

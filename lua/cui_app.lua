@@ -5,7 +5,7 @@
 
 LOADS
 
-	webb_app, canvas-ui
+	webb_app, canvas-ui, rowset, rowset_mdbx
 
 USAGE
 
@@ -17,6 +17,9 @@ API
 
 	fontfile(name, path, [desc])  preload a font and load it in the page
 	user_json() -> {signed_in=, anonymous=, email=, phone=}
+	db() -> db                             open the configured db
+	scan(tbl, [path], [alias]) -> scan     db():scan()
+	query('TABLE [ALIAS]'|rel, [alias]) -> rel   db():from()
 
 ACTIONS
 
@@ -35,10 +38,27 @@ USES
 CONFIG
 
 	favicon_href
+	db_file      var/SCRIPTNAME.mdbx
+	db_changes_size 16M
 
 ]==]
 
 local webb_app = require'webb_app'
+require'rowset'
+require'rowset_mdbx'
+
+local app_db
+function db()
+	if not app_db then
+		require'mdbx_query'
+		app_db = mdbx_open(config('db_file',
+			varpath(scriptname..'.mdbx')), {owner = mainthread()})
+		app_db:open_changes_file(config('db_changes_size', 16 * 1024^2))
+	end
+	return app_db
+end
+function scan(...) return db():scan(...) end
+function query(...) return db():from(...) end
 
 local fontfiles = {}
 function fontfile(name, path, desc)
@@ -233,4 +253,18 @@ function cui_module(path)
 	end
 end
 
-return webb_app
+local function cui_app(...)
+	if package.loaded[scriptname] then return end
+	webb_app(...)
+	before(app, 'run_server', function()
+		watch_row_changes(db())
+	end)
+	after(logging.rpc, 'close_all_sockets', function()
+		if app_db then
+			app_db:close()
+			app_db = nil
+		end
+	end)
+end
+
+return cui_app

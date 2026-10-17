@@ -710,7 +710,7 @@ function S_for(ext, id, fmt, ...)
 		S_texts(lang(), ext)[id]
 		or S_texts(default_lang(), ext)[id]
 		or fmt
-	return _(fmt, ...)
+	return fmt and _(fmt, ...)
 end
 
 function S(id, ...)

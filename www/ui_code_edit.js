@@ -1561,13 +1561,6 @@ function code_edit_view(id, opt) {
 
 		ui.focusable(id)
 		ui.v(1, 0, 's', 's')
-			let tabs = [
-				{id: 'tab1', label:'Tab 1'},
-				{id: 'tab2', label:'Tab 2'},
-			]
-			ui.stack('', 0)
-				let sel_tab = ui.tabs(id+'.tabs', tabs, 'tab1')
-			ui.end_stack()
 			ui.min_h(1)
 			ui.stack('', 0)
 				ui.bb('bg2')

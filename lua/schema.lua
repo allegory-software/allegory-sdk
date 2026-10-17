@@ -1055,75 +1055,12 @@ function diff:pp(opt)
 	end
 end
 
---S() can't report a missing id: it takes en_text as its fallback.
-local function S_id(id) --id, if it has a text
-	if S_texts(lang(), 'lua')[id] or S_texts(default_lang(), 'lua')[id] then
-		return id
-	end
-end
+--resolve_type() for virtual rowset fields -----------------------------------
 
---most specific text: in this rowset, in this table, anywhere, then en_text.
---rowset ids are keyed by name, table ids by col, per xlang.lua.
-local function S_text(attr, en_text, name, col, tbl_name, rowset_name)
-	local id =
-		    rowset_name and S_id(_('%s:%s.%s.rowset', attr, name, rowset_name))
-		or tbl_name and S_id(_('%s:%s.%s.table', attr, col, tbl_name))
-		or S_id(_('%s:%s', attr, name))
-	return id and S(id, en_text) or en_text
-end
-
-local function resolve_enum_texts(t, en_attr, attr, text_attr, opt)
-	if not t[en_attr] then return end
-	t[attr] = function(rowset_name)
-		local name, col = t.name or t.col, t.col or t.name
-		local texts = {}
-		for i, v in ipairs(t.enum_values) do
-			texts[v] = S_text(text_attr, t[en_attr][v],
-				name..'.'..v, col..'.'..v, t.table, rowset_name)
-		end
-		return texts
-	end
-	if opt and opt.translate then
-		t[attr] = t[attr]()
-	end
-end
-
-function schema:resolve_type(t, opt) --{attr = val, flag1, ...}
-
+function schema:resolve_type(t) --{attr = val, flag1, ...}
 	resolve_type(self, t, t, 1, #t, empty, true, true)
 	update_type(self, t)
 	for i=#t,1,-1 do t[i] = nil end --remove flags
-
-	--add translatable field attributes.
-	for i,attr in ipairs{'label', 'info'} do
-		local en_attr = 'en_'..attr
-		t[attr] = function(rowset_name)
-			return S_text(attr, call(t[en_attr]), t.name, t.col or t.name,
-				t.table, rowset_name)
-		end
-		if opt and opt.translate then
-			t[attr] = t[attr]()
-		end
-	end
-
-	--enum ids carry the value after the col.
-	resolve_enum_texts(t, 'en_enum_labels', 'enum_labels', 'enum_label', opt)
-	resolve_enum_texts(t, 'en_enum_info', 'enum_info', 'enum_info', opt)
-
-	return t
-end
-
-function schema:resolve_types(fields, opt) --{field1, ...}
-	for i,f in ipairs(fields) do
-		local f = self:resolve_type(f, opt)
-		if opt and opt.check_duplicates then
-			assertf(isstr(f.name), 'field name not a string: %s: %s', opt.table_name, type(f.name))
-			assertf(not fields[f.name], 'duplicate field name: %s.%s', opt.table_name, f.name)
-		end
-		fields[i] = f
-		fields[f.name] = f
-	end
-	return fields
 end
 
 return schema

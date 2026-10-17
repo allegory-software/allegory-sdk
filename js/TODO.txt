@@ -18,12 +18,21 @@ BEHAVIOR:
 - ui_nav create_index and ui_nav2 range_bucket_func: the number bucket
 	(floor((v - offset) / freq) + offset) * freq multiplies offset by freq;
 	freq 10, offset 5, v 17 gives 60 instead of 15.
-- ui_grid build_cells_range calls build_row_strike_line(), which nothing
-	defines, so drawing a row marked for deletion throws.
+- ui-demo set_grid_config_null() calls nav.focused_row and nav.optfld(),
+	which ui_nav.js doesn't have, so the grid demo's "Set null" button
+	throws.
 
 CLEANUP:
 - ui_nav insert_rows: the "insert is aborted" path after
 	focus_cell(false, false) can't happen on a loaded nav.
+- ui_nav: a server nav loads a fake rowset (one hidden not_null 'id' field)
+	so that the grid has a nav to read before the real rowset arrives. Give
+	the nav a real "not loaded" state instead: the grid build still calls
+	set_param_vals() (it starts a detail's load), then exits on !e.ready
+	while still laying out its empty box; set_param_vals() before the first
+	load only stores param_vals and reloads; reload_rowset() calls load()
+	when !e.ready; free() skips the field loop when no fields were loaded.
+	App calls before ready are caller bugs. Then drop the fake rowset.
 
 
 INPUTS
