@@ -29,8 +29,8 @@ CONTAINERS
 	ui.sb_max_wh     (w, h)
 	ui.popup         (id, layer, target_i, side, align, flags, z_index, ox, oy)
 	ui.{h|v}split    (id, size, unit, fixed_side, split_fr, gap, align, valign)
-	ui.hvsplit       (hv, id, size, unit, fixed_side, split_fr, gap, align,
-	                  valign)
+	ui.hvsplit       (hv, id, size, unit, fixed_side, split_fr, gap, align, valign)
+	ui.dock          (id, layout, [opt]) -> iter() -> tab
 	ui.toolbox       (id, title, align, valign, x0, y0, target_i)
 	ui.frame         (id, on_measure, on_build, fr, align, valign, ...args)
 
@@ -39,7 +39,7 @@ INPUT
 	ui.[primary_]button
 	                   (id, s, fr, align, valign, style, readonly)
 	ui.[primary_|bare_]icon_button
-	                   (id, icon, [s], fr, align, valign, style, readonly)
+	                   (id, icon, text, fr, align, valign, style, readonly)
 	ui.label           (for_id, s, fr, align, valign)
 	ui.error_label     (for_id, 'first_error'|'all_errors'|'all_checked', fr, align, valign)
 	ui.input           (id, v, field, fr, text_align, no_box, readonly) -> v
@@ -135,7 +135,7 @@ const {
 	floor, ceil, round, max, min, abs, clamp, snap, logbase, lerp, random,
 	dec, num, str, json, json_arg, words, format_kbytes,
 	set, map, array, array_resize, array_move, empty_array, attr,
-	empty_set, set_equals,
+	empty, empty_set, set_equals,
 	assign, entries, insert, remove_value,
 	noop, return_true, do_after, do_before,
 	runafter, timer,
@@ -910,11 +910,13 @@ out what ops are allowed in the UI while one user is dragging something.
 	ui.nohit           ()                     exclude last command from hit-testing
 
 	ui.drag            (id, ['x'|'y'|'xy']) -> cs|null  drag state if id is captured
-	     cs.drag       first frame of the drag
-	     cs.dragging   every frame from drag to drop
-	     cs.drop       last frame of the drag
-	     cs.dx,dy      how far the mouse moved since the press
-	ui.drag_or_hit     (id) -> cs|hs|null  drag(id), else hit(id)
+	  cs.drag          first frame of the drag
+	  cs.dragging      every frame from drag to drop
+	  cs.drop          last frame of the drag
+	  cs.dx,dy         how far the mouse moved since the press
+	  cs.moved         'l'|'r'|'t'|'b': drag-move direction, if past ui.drag_threshold
+	ui.drag_threshold  logical px threshold for setting cs.moved
+	ui.drag_or_hit     (id) -> cs|hs|null   ui.drag(id) || ui.hit(id)
 
 	ui.set_cursor      (cursor)   set cursor for this frame
 
@@ -1103,6 +1105,8 @@ function release_capture() {
 
 /// drag & drop
 
+ui.drag_threshold = 10
+
 ui.drag = function(id, axis) {
 	let cs = captured(id)
 	if (!cs)
@@ -1111,6 +1115,15 @@ ui.drag = function(id, axis) {
 	let move_y = !axis || axis == 'y' || axis == 'xy'
 	cs.dx = move_x ? ui.mx - ui.mx0 : 0
 	cs.dy = move_y ? ui.my - ui.my0 : 0
+	if (!cs.moved) {
+		let threshold = ui.drag_threshold * dpr // in device px
+		let adx = abs(cs.dx) // distance moved on x
+		let ady = abs(cs.dy) // distance moved on y
+		if (adx > threshold || ady > threshold)
+			cs.moved = adx >= ady
+				? (cs.dx < 0 ? 'l' : 'r')
+				: (cs.dy < 0 ? 't' : 'b')
+	}
 	cs.drag = ui.click // the hit phase captured it this frame
 	cs.dragging = true
 	cs.drop = ui.clickup
@@ -1308,11 +1321,34 @@ when the widget is created in the frame.
 	ui.state_init      (id, k, v)           set widget state var if widget is alive
 	ui.on_free         (id, free_fn)        add a widget gc hook
 
+In IMGUI if you want to hide a widget you simply don't build it, but then its
+state is lost. For a grid in a tab list that means reloading when you switch
+tabs. State scopes solve this by protecting the contents of a tab from being
+gc'ed when that tab was switched from and its contents are no longer built,
+so when the tab is switched to again, the widgets inside will have kept their
+state.
+
+	ui.begin_state_scope (scope_id)         open state scope
+	ui.end_state_scope ()                   end state scope
+	ui.keep_state_scope(scope_id)           keep inside states from prev. frame
+
 */
 
-let state_map      = map() // {id->state}
-let current_id_set = set() // {id}
-let remove_id_set  = set() // {id}
+let state_map = map() // {id->state}
+
+function create_state_scope() {
+	return {
+		current_id_set: set(),
+		remove_id_set: set(),
+		parent: null,
+		used_build_no: null, // build_no of last pass that opened the scope
+		kept_build_no: null, // build_no of last pass the kept the scope
+		focused_id: null, // focused id when the scope was hidden
+	}
+}
+let root_state_scope = create_state_scope() // ids touched outside any scope
+let state_scopes = map() // {scope_id -> scope}
+let open_state_scopes = [] // [scope, ...]
 
 // an update must run once per build pass in order to avoid acting on events
 // like mouse clicks more than once (one-shot state only gets cleared at the
@@ -1329,15 +1365,21 @@ function state_update(id, s) {
 }
 
 ui.state = function(id, update_fn) {
-	assert(!render_state_map, 'state() called while rendering')
+	assert(is_building, 'state() called outside build')
 	assert(id, 'id required')
-	current_id_set.add(id)
-	remove_id_set.delete(id)
 	let s = state_map.get(id)
 	if (!s) {
 		s = obj()
 		state_map.set(id, s)
 	}
+	let scope = open_state_scopes.at(-1) ?? root_state_scope
+	if (s.state_scope != scope) { // id moved to another scope
+		s.state_scope?.current_id_set.delete(id)
+		s.state_scope?.remove_id_set.delete(id)
+		s.state_scope = scope
+	}
+	scope.current_id_set.add(id)
+	scope.remove_id_set.delete(id)
 	if (update_fn)
 		s.update = update_fn
 	state_update(id, s)
@@ -1374,6 +1416,8 @@ function free_state(id, s) {
 	let free = s.free
 	if (free)
 		free(s, id)
+	s.state_scope.current_id_set.delete(id)
+	s.state_scope.remove_id_set.delete(id)
 	state_map.delete(id)
 }
 
@@ -1384,16 +1428,71 @@ ui.free_state = function(id) {
 		free_state(id, s)
 }
 
-function state_gc() {
-	for (let id of remove_id_set) {
-		let s = state_map.get(id)
-		if (s)
-			free_state(id, s)
+ui.begin_state_scope = function(scope_id) {
+	let scope = state_scopes.get(scope_id)
+	if (!scope) {
+		scope = create_state_scope()
+		state_scopes.set(scope_id, scope)
 	}
-	remove_id_set.clear()
-	let empty = remove_id_set
-	remove_id_set = current_id_set
-	current_id_set = empty
+	scope.parent = open_state_scopes.at(-1) ?? null
+	scope.used_build_no = build_no
+	open_state_scopes.push(scope)
+	// shown again: give the focus back to the widget that had it.
+	if (scope.focused_id != null) {
+		ui.focus(scope.focused_id)
+		scope.focused_id = null
+	}
+}
+
+ui.end_state_scope = function() {
+	assert(open_state_scopes.pop(), 'state scope not open')
+}
+
+ui.keep_state_scope = function(scope_id) {
+	let scope = state_scopes.get(scope_id)
+	if (scope)
+		scope.kept_build_no = build_no
+}
+
+function state_scope_stack_check() {
+	assert(!open_state_scopes.length, 'state scope not closed')
+}
+
+// a scope opened inside a kept scope is kept too: the code that would keep
+// it is not built either.
+function is_state_scope_kept(scope) {
+	for ( ; scope; scope = scope.parent)
+		if (scope.kept_build_no == build_no)
+			return true
+	return false
+}
+
+// free_state() removes each id from ids.
+function free_state_ids(ids) {
+	for (let id of ids)
+		free_state(id, state_map.get(id))
+}
+
+function gc_state_scope(scope) {
+	free_state_ids(scope.remove_id_set)
+	let empty = scope.remove_id_set
+	scope.remove_id_set = scope.current_id_set
+	scope.current_id_set = empty
+}
+
+// opened scope: free its untouched ids. kept scope: leave it as it is.
+// any other scope: free all its ids and the scope.
+function state_gc() {
+	gc_state_scope(root_state_scope)
+	for (let [scope_id, scope] of state_scopes) {
+		if (scope.used_build_no == build_no) {
+			gc_state_scope(scope)
+		} else if (!is_state_scope_kept(scope)) {
+			free_state_ids(scope.remove_id_set)
+			free_state_ids(scope.current_id_set)
+			state_scopes.delete(scope_id)
+		}
+	}
 }
 
 ui.on_free = function(id, free1) {
@@ -1442,6 +1541,7 @@ APP API
 	ui.set_saved_value (id, v)           set a saved input's value
 WIDGET API
 	ui.save_state (id, k, v)             save a state var
+	ui.delete_saved_state (id)           delete all saved state vars of id
 	ui.saved_value (id, default, [field]) define a saved input with a default
 
 */
@@ -1491,6 +1591,13 @@ ui.save_state = function(id, k, v) {
 	if (t[k] === v)
 		return
 	t[k] = v
+	saved_state_changed = true
+}
+
+ui.delete_saved_state = function(id) {
+	if (!(id in ui.saved_state))
+		return
+	delete ui.saved_state[id]
 	saved_state_changed = true
 }
 
@@ -1690,7 +1797,7 @@ NOTE: Using relative indexes everywhere allows creating command recordings
 that are relocatable, i.e. can be moved into other recordings without
 having to reoffset the indexes.
 
-NOTE: commands can be vararg (most aren't), and can reuse their arg slots
+NOTE: commands can be vararg (most aren't), and can reuse their args
 throughout the rendering phases for different purposes to keep the rec short.
 Before drawing phase the rec must be cleaned-up so it's serializable, and
 ideally won't contain many sub-objects, long fractional numbers, etc.
@@ -1702,7 +1809,7 @@ let n = 0 // current recording's length
 
 let cmd_names = [] // [[CMD]=NAME]: command's name
 let cmd_name_map = obj()
-let id_slot = [] // [[CMD]=ID]: command's ID arg index, if any
+let id_i = [] // [[CMD]=ID]: command's ID arg index, if any
 
 function C(a, i) { return cmd_names[a[i-1]] } // cmd name for debugging
 
@@ -1725,7 +1832,7 @@ function unsparse_all(i) {
 	unsparse(hittest       , i)
 	unsparse(is_flex_child , i)
 	unsparse(cmd_names     , i)
-	unsparse(id_slot       , i)
+	unsparse(id_i          , i)
 }
 function cmd(name, is_ct) {
 	assert(cmd_name_map[name] == null, 'duplicate command ', name)
@@ -1808,7 +1915,7 @@ ui.layer = function(name, z_index, flags) {
 
 let z_index_band = 0x10000 // 64k popups per layer
 
-let POPUPS_SLOTS   = 4
+let POPUPS_ARGC    = 4
 let POPUPS_Z_INDEX = 0
 let POPUPS_REC_I   = 1
 let POPUPS_CT_I    = 2
@@ -1820,7 +1927,7 @@ let root_popups = []
 let current_popups = root_popups
 
 function free_inner_popups(popups) {
-	for (let k = POPUPS_INNER, n = popups.length; k < n; k += POPUPS_SLOTS) {
+	for (let k = POPUPS_INNER, n = popups.length; k < n; k += POPUPS_ARGC) {
 		let inner_popups = popups[k]
 		if (inner_popups) {
 			free_inner_popups(inner_popups)
@@ -1839,7 +1946,7 @@ function reset_popups() {
 function add_popup(popups, z_index, rec_i, ct_i, inner_popups) {
 	let k = popups.length
 	while (k) {
-		let j = k - POPUPS_SLOTS
+		let j = k - POPUPS_ARGC
 		if (popups[j+POPUPS_Z_INDEX] <= z_index) // <= preserves insert order
 			break
 		k = j
@@ -2036,7 +2143,7 @@ function draw_cmd(a, i, recs) {
 function draw_popups(popups, recs) {
 	let prev_rec  = current_popup_rec
 	let prev_ct_i = current_popup_ct_i
-	for (let k = 0, n = popups.length; k < n; k += POPUPS_SLOTS) {
+	for (let k = 0, n = popups.length; k < n; k += POPUPS_ARGC) {
 		reset_canvas()
 		let rec_i = popups[k+POPUPS_REC_I]
 		let i     = popups[k+POPUPS_CT_I]
@@ -2121,6 +2228,12 @@ function hit_match(prefix) {
 }
 ui.hit_match = hit_match
 
+function capture_match(prefix) {
+	if (ui.captured_id && ui.captured_id.startsWith(prefix))
+		return ui.captured_id.substring(prefix.length)
+}
+ui.capture_match = capture_match
+
 let hit_phase
 
 function set_hit(id) {
@@ -2138,9 +2251,31 @@ function set_hit(id) {
 }
 ui.set_hit = set_hit
 
+// NOTE: doesn't propagate outside ui.frame recs.
+function hit_popup_parents(a, i) {
+	if (a[i-1] == CMD_POPUP && !(a[i+POPUP_FLAGS] & POPUP_HOVER_PARENT))
+		return
+	for (i = cmd_prev_i(a, i); i >= 2; i = cmd_prev_i(a, i)) {
+		let cmd = a[i-1]
+		if (cmd == CMD_END) {
+			i += a[i]
+		} else if (cmd & 1) {
+			if (cmd == CMD_POPUP) {
+				set_hit(a[i+POPUP_ID])
+				if (!(a[i+POPUP_FLAGS] & POPUP_HOVER_PARENT))
+					break
+			} else {
+				let arg_i = id_i[cmd] // ID arg index
+				if (arg_i != null)
+					set_hit(a[i+arg_i])
+			}
+		}
+	}
+}
+
 function hit_popups(popups, recs) {
 	// iterate popups in reverse order.
-	for (let k = popups.length-POPUPS_SLOTS; k >= 0; k -= POPUPS_SLOTS) {
+	for (let k = popups.length-POPUPS_ARGC; k >= 0; k -= POPUPS_ARGC) {
 		let inner_popups = popups[k+POPUPS_INNER]
 		if (inner_popups && hit_popups(inner_popups, recs))
 			return true
@@ -2151,8 +2286,10 @@ function hit_popups(popups, recs) {
 		/*global*/ current_popup_rec  = a
 		/*global*/ current_popup_ct_i = i
 		let hit_f = hittest[a[i-1]]
-		if (hit_f && !a.nohit_set?.has(i) && hit_f(a, i, recs))
+		if (hit_f && !a.nohit_set?.has(i) && hit_f(a, i, recs)) {
+			hit_popup_parents(a, i)
 			return true
+		}
 	}
 }
 
@@ -2232,7 +2369,7 @@ window.addEventListener('focus', function(ev) {
 	animate()
 })
 
-let FOCUSABLE_SLOTS          = 6
+let FOCUSABLE_ARGC           = 6
 let FOCUSABLE_ID             = 0
 let FOCUSABLE_TAB_ORDER      = 1
 let FOCUSABLE_END            = 2 // groups only
@@ -2240,7 +2377,7 @@ let FOCUSABLE_TRAP           = 3 // groups only
 let FOCUSABLE_DEFAULT_BUTTON = 4 // groups only: default button id
 let FOCUSABLE_CANCEL_BUTTON  = 5
 
-let focusables = [] // FOCUSABLE_SLOTS per entry, in tab order
+let focusables = [] // FOCUSABLE_ARGC per entry, in tab order
 ui.focusables = focusables
 
 let open_focus_groups = [] // group_i stack, while registering
@@ -2305,7 +2442,7 @@ register[END_FOCUS_GROUP] = function() {
 let is_focus_group = i => focusables[i+FOCUSABLE_ID] == null
 
 function focus_group_start(group_i) {
-	return group_i == null ? 0 : group_i + FOCUSABLE_SLOTS
+	return group_i == null ? 0 : group_i + FOCUSABLE_ARGC
 }
 
 function focus_group_end(group_i) {
@@ -2314,12 +2451,12 @@ function focus_group_end(group_i) {
 }
 
 function next_focus_sibling_i(i) {
-	return is_focus_group(i) ? focusables[i+FOCUSABLE_END] : i + FOCUSABLE_SLOTS
+	return is_focus_group(i) ? focusables[i+FOCUSABLE_END] : i + FOCUSABLE_ARGC
 }
 
 function focus_group_of(i) {
 	let group_i = null
-	for (let j = 0; j < i; j += FOCUSABLE_SLOTS)
+	for (let j = 0; j < i; j += FOCUSABLE_ARGC)
 		if (is_focus_group(j) && focusables[j+FOCUSABLE_END] > i)
 			group_i = j
 	return group_i
@@ -2328,7 +2465,7 @@ function focus_group_of(i) {
 function focus_find(id) {
 	if (id == null)
 		return null
-	for (let i = 0; i < focusables.length; i += FOCUSABLE_SLOTS)
+	for (let i = 0; i < focusables.length; i += FOCUSABLE_ARGC)
 		if (focusables[i+FOCUSABLE_ID] == id)
 			return i
 	return null
@@ -2498,8 +2635,8 @@ register[GROUP_BUTTON] = function(a, i) {
 	let group_i = open_focus_groups.at(-1)
 	assert(group_i != null,
 		'default_button/cancel_button outside a focus group')
-	let button_slot = a[i+1]
-	focusables[group_i+button_slot] = a[i]
+	let button_i = a[i+1] // button index in the group
+	focusables[group_i+button_i] = a[i]
 }
 
 // focus group's default button or cancel button that was "clicked" by
@@ -2507,20 +2644,28 @@ register[GROUP_BUTTON] = function(a, i) {
 let clicked_button_id
 
 function click_default_button() {
+	let button_i = // button index in the group
+		ui.keydown('enter') ? FOCUSABLE_DEFAULT_BUTTON
+		: ui.keydown('escape') ? FOCUSABLE_CANCEL_BUTTON
+		: null
+	if (button_i == null)
+		return
 	let i = focus_find(ui.focused_id)
 	if (i == null)
 		return
+	// group without the button: try the enclosing group, but not past a trap.
 	let group_i = focus_group_of(i)
-	if (group_i == null)
-		return
-	let id = ui.keydown('enter')
-		? focusables[group_i+FOCUSABLE_DEFAULT_BUTTON] : null
-	if (id == null && ui.keydown('escape'))
-		id = focusables[group_i+FOCUSABLE_CANCEL_BUTTON]
-	if (id == null)
-		return
-	clicked_button_id = id
-	ui.capture_keys()
+	while (group_i != null) {
+		let id = focusables[group_i+button_i] // button to click
+		if (id != null) {
+			clicked_button_id = id
+			ui.capture_keys()
+			return
+		}
+		if (focusables[group_i+FOCUSABLE_TRAP])
+			return
+		group_i = focus_group_of(group_i)
+	}
 }
 
 /// tab capture --------------------------------------------------------------
@@ -2570,6 +2715,7 @@ translate[NOHIT] = function(a, i) {
 // 1) preventing state updates from running twice in the same build pass.
 // 2) expiring text measure cache entries.
 let build_no = 0
+let is_building = false // ui.main() or a frame's on_build() is running
 
 let want_rebuild
 let rebuild_for = [] // [label1,...]
@@ -2610,6 +2756,7 @@ function frame_end_check() {
 	ct_stack_check()
 	rec_stack_check()
 	split_stack_check()
+	state_scope_stack_check()
 	toolbox_stack_check()
 	text_flags_check()
 }
@@ -2674,9 +2821,11 @@ function redraw_all() {
 		let i = ui.stack()
 		assert(rec_i == 0)
 		add_popup(root_popups, layer_base.z_index * z_index_band, rec_i, i, null)
+		is_building = true
 		ui.main()
 		reset_spacings()
 		ui.end()
+		is_building = false
 		frame_end_check()
 
 		t1 = clock_ms()
@@ -2704,8 +2853,14 @@ function redraw_all() {
 		assert(!open_focus_groups.length, 'unbalanced focus_group')
 
 		// clear invalid focus id
-		if (ui.focused_id && focus_find(ui.focused_id) == null)
+		if (ui.focused_id && focus_find(ui.focused_id) == null) {
+			// focused widget in a hidden scope: the scope keeps the focus.
+			let scope = state_map.get(ui.focused_id)?.state_scope
+			if (scope && scope.used_build_no != build_no
+					&& is_state_scope_kept(scope))
+				scope.focused_id = ui.focused_id
 			ui.focus(null)
+		}
 
 		// focus first
 		if (focus_first_id != null) {
@@ -2842,7 +2997,7 @@ ui.widget = function(cmd_name, t, is_ct) {
 	draw_end      [_cmd] = t.draw_end
 	hittest       [_cmd] = t.hit
 	is_flex_child [_cmd] = t.is_flex_child
-	id_slot       [_cmd] = t.ID
+	id_i          [_cmd] = t.ID
 	let create = t.create
 	if (create) {
 		// bind() avoids `...args` which allocates.
@@ -2862,11 +3017,11 @@ A box has min_w, min_h, margin, padding, align, valign, and also fr
 if it's is_flex_child. a box can also be a container.
 it's x,y,w,h are calculated by the layouting system using the above.
 
-The command's first 4 slots hold params at first, then are used as scratch
+The command's first 4 args hold params at first, then are used as scratch
 memory through different phases and end up storing the box's final x,y,w,h.
 
-Flexboxes keep min_w/min_h in slots 0,1, keep measured
-min_w/min_h in slots 2,3 and reuse slots 0,1 for v_aligned min_w/min_h, etc.
+Flexboxes keep min_w/min_h in args 0,1, keep measured
+min_w/min_h in args 2,3 and reuse args 0,1 for v_aligned min_w/min_h, etc.
 
 CREATE
 	ui.box_widget      (cmd_name, t, is_ct)   define a box widget
@@ -3421,6 +3576,7 @@ const CMD_MEASURE = cmd('measure')
 // measure current container after layouting and put the result in
 // ui.state(into_id) keys: x, y, w, h.
 ui.measure = function(into_id) {
+	ui.state(into_id) // id is usually not a widget, so we have to own into_id.
 	let i = ui_cmd_begin(CMD_MEASURE)
 	a[n++] = into_id
 	a[n++] = ui.ct_i() - i // make ct_i relative
@@ -3429,7 +3585,7 @@ ui.measure = function(into_id) {
 
 register[CMD_MEASURE] = function(a, i) {
 	let ct_i = i+a[i+1]
-	let s = ui.state(a[i+0])
+	let s = ui.state_of(a[i+0])
 	s.x = a[ct_i+0]
 	s.y = a[ct_i+1]
 	s.w = a[ct_i+2]
@@ -3720,7 +3876,7 @@ ui.box_widget('box', {
 const STACK_ID = BOX_CT_ARGS+0
 
 const CMD_STACK = cmd_ct('stack')
-id_slot[CMD_STACK] = STACK_ID
+id_i[CMD_STACK] = STACK_ID
 
 ui.stack = function(id, fr, align, valign) {
 	let i = ui_cmd_box_ct_begin(CMD_STACK, fr, align, valign)
@@ -3795,7 +3951,7 @@ function parse_sb_overflow(s) {
 }
 
 const CMD_SCROLLBOX = cmd_ct('scrollbox')
-id_slot[CMD_SCROLLBOX] = SB_ID
+id_i[CMD_SCROLLBOX] = SB_ID
 
 let next_sb_max_w, next_sb_max_h
 
@@ -3815,6 +3971,8 @@ ui.scrollbox = function(
 	let ystate = ui.state(y_id ?? id)
 	if (sx != null) xstate.scroll_x = sx
 	if (sy != null) ystate.scroll_y = sy
+	ui.keep_focus(id+'.scrollbar0')
+	ui.keep_focus(id+'.scrollbar1')
 
 	let i = ui_cmd_box_ct_begin(CMD_SCROLLBOX, fr, align, valign)
 	a[n++] = overflow_x
@@ -3890,8 +4048,8 @@ function settle_scrollbox(a, i) {
 	let id = a[i+SB_ID]
 	let x_id = a[i+SB_SCROLL_ID+0]
 	let y_id = a[i+SB_SCROLL_ID+1]
-	let xstate = ui.state(x_id ?? id)
-	let ystate = ui.state(y_id ?? id)
+	let xstate = ui.state_of(x_id ?? id)
+	let ystate = ui.state_of(y_id ?? id)
 	let sx = xstate.scroll_x ?? 0
 	let sy = ystate.scroll_y ?? 0
 
@@ -3924,7 +4082,7 @@ function settle_scrollbox(a, i) {
 		;[sx, sy] = scroll_offsets_to_view_rect(bx, by, bw, bh, w, h, sx, sy)
 		xstate.scroll_x = sx
 		ystate.scroll_y = sy
-		ui.state(id).scroll_to_view = null
+		ui.state_of(id).scroll_to_view = null
 	}
 
 	// scroll to view the box asked for by ui.scroll_to_view_next_box().
@@ -3961,8 +4119,6 @@ function settle_scrollbox(a, i) {
 			scrollbar_rect(a, i, axis)
 
 		let sbar_id = id+'.scrollbar'+axis
-		ui.state(sbar_id)
-		ui.keep_focus(sbar_id)
 
 		// wheel scrolling
 		if (axis && ui.wheel_dy && hovers(id) && !ui.pressed && (visible || y_id)) {
@@ -4303,13 +4459,15 @@ function popup_parse_align(s) {
 
 const POPUP_FIT_CHANGE_SIDE = 1
 const POPUP_FIT_CONSTRAIN   = 2
-const POPUP_SOLID           = 4
+const POPUP_SOLID           = 4 // hit popup's rect even when no child was hit
+const POPUP_HOVER_PARENT    = 8 // propagate hit to parents
 
 function popup_parse_flags(s) {
 	return (
-		(s.includes('change_side') ? POPUP_FIT_CHANGE_SIDE : 0) |
-		(s.includes('constrain'  ) ? POPUP_FIT_CONSTRAIN   : 0) |
-		(s.includes('solid'      ) ? POPUP_SOLID           : 0)
+		(s.includes('change_side' ) ? POPUP_FIT_CHANGE_SIDE : 0) |
+		(s.includes('constrain'   ) ? POPUP_FIT_CONSTRAIN   : 0) |
+		(s.includes('solid'       ) ? POPUP_SOLID           : 0) |
+		(s.includes('hover_parent') ? POPUP_HOVER_PARENT    : 0)
 	)
 }
 
@@ -4337,6 +4495,9 @@ ui.popup = function(
 	side  = popup_parse_side  (side  ?? 't')
 	align = popup_parse_align (align ?? 'c')
 	flags = popup_parse_flags (flags ?? '')
+
+	if (id)
+		ui.state(id)
 
 	// the hit phase gives a solid popup the clicks that land on its own box,
 	// so a click on its padding must not clear the focus from its contents.
@@ -4523,7 +4684,7 @@ translate[CMD_POPUP] = function(a, i) {
 
 		let id = a[i+POPUP_ID]
 		if (id) {
-			let s = ui.state(id)
+			let s = ui.state_of(id)
 			if (side != (s.side ?? side0))
 				ui.rebuild('popup_side')
 			s.side = side
@@ -4554,8 +4715,8 @@ translate[CMD_POPUP] = function(a, i) {
 		// popup's offset keeps one that it can actually be placed at.
 		let id = a[i+POPUP_ID]
 		if (id) {
-			ui.state(id).ox = a[i+POPUP_OX+0] - cdx
-			ui.state(id).oy = a[i+POPUP_OX+1] - cdy
+			ui.state_of(id).ox = a[i+POPUP_OX+0] - cdx
+			ui.state_of(id).oy = a[i+POPUP_OX+1] - cdy
 		}
 	}
 
@@ -5123,18 +5284,19 @@ DEFINING FONTS
 
 USER API, affects only the next ui.text() call.
 
-	ui.color           (color, [color_state])
-	ui.font            (font|alias)
-	ui.fs | font_size  (size)
-	ui.font_weight     (weight)
-	ui.bold            ()
-	ui.nobold          ()
-	ui.lg | line_gap   (gap)
-	ui.xsmall          ()
-	ui.small           ()
-	ui.smaller         ()
-	ui.large           ()
-	ui.xlarge          ()
+	ui.color       (color, [color_state])
+	ui.font        (font|alias)
+	ui.font_size   (size)
+	ui.default_font_size (size)
+	ui.font_weight (weight)
+	ui.bold        ()
+	ui.nobold      ()
+	ui.line_gap    (gap)
+	ui.xsmall      ()
+	ui.small       ()
+	ui.smaller     ()
+	ui.large       ()
+	ui.xlarge      ()
 
 */
 
@@ -5182,7 +5344,10 @@ ui.font_size = function(x) {
 	if (x != null && x != 1)
 		text_flags |= TEXT_FONT_SIZE
 }
-ui.fs = ui.font_size
+ui.default_font_size = function(x) {
+	if (text_font_size != null) return
+	ui.font_size(x)
+}
 
 ui.xsmall  = function() { ui.font_size(.72   ) }
 ui.small   = function() { ui.font_size(.8125 ) }
@@ -5205,7 +5370,6 @@ ui.line_gap = function(s) {
 	if (s != null && s != 0.5)
 		text_flags |= TEXT_LINE_GAP
 }
-ui.lg = ui.line_gap
 
 let default_font
 let default_font_str
@@ -5348,7 +5512,7 @@ const TEXT_CLIPPED        = 2**15
 const TEXT_FONT_FLAGS = TEXT_FONT | TEXT_FONT_SIZE | TEXT_FONT_WEIGHT
 
 const CMD_TEXT = cmd('text')
-id_slot[CMD_TEXT] = TEXT_ID
+id_i[CMD_TEXT] = TEXT_ID
 
 // draw a background behind [i1, i2) of the next text, to show a match or a
 // selection. bg defaults to the `search` background style.
@@ -5452,6 +5616,7 @@ ui.text = function(
 	}
 	ui_cmd_box_end(i)
 	text_flags = 0
+	text_font_size = null
 
 	return field ? value : text
 }
@@ -5783,11 +5948,14 @@ let drawn_focused_by_key
 // len runs from i to the right: 0 = empty selection; 1/0 = select all.
 
 // request to place the caret. takes effect on the next frame.
-ui.select_text = function(id, i, len) {
-	let s = ui.state(id)
+function set_text_selection(s, i, len) {
 	s.sel_i = i
 	s.sel_len = len
 	s.sel_pending = true
+}
+
+ui.select_text = function(id, i, len) {
+	set_text_selection(ui.state(id), i, len)
 }
 
 ui.text_selection = function(id, from_end, wanted) {
@@ -5864,9 +6032,9 @@ function sync_dom_focus() {
 		if (document.activeElement != input)
 			input.focus({preventScroll: true})
 		if (input != input0 && drawn_focused_by_key) {
-			let id = input._ui_id
-			if (!input._ui_ss_ids && !ui.state_of(id, 'sel_pending'))
-				ui.select_text(id, 0, 1/0)
+			let s = ui.state_of(input._ui_id)
+			if (!input._ui_ss_ids && !s.sel_pending)
+				set_text_selection(s, 0, 1/0)
 		}
 	} else if (input != input0 && document.activeElement == input0) {
 		canvas.focus()
@@ -6397,12 +6565,14 @@ frame.translate = function(a, i, dx, dy) {
 	let on_build = a[i+FRAME_ON_BUILD]
 	let t0 = clock_ms()
 	let a0 = begin_rec()
+	is_building = true
 		a[i+FRAME_REC_I] = rec_i
 		ui.stack()
 			on_build(a, i, x, y, w, h, cx, cy, cw, ch)
 			reset_spacings()
 			ui.end_stack()
 		frame_end_check()
+	is_building = false
 	let a1 = end_rec(a0)
 	frame_make_ms += clock_ms() - t0
 
@@ -6836,9 +7006,9 @@ ui.button_text = function(s, state) {
 ui.button_icon = function(font, icon, state) {
 	state = repl(state, 'click', 'hover')
 	ui.font(font)
-	ui.font_size(1.5)
+	ui.default_font_size(1.5)
 	ui.color('text', state)
-	ui.text('', icon)
+	ui.text('', icon, 0, 'c')
 }
 
 ui.end_button_stack = function(state) {
@@ -6857,7 +7027,7 @@ ui.icon_button = function(
 	let state = readonly ? 'readonly' : s.state
 	ui.button_bb(style, state)
 	let [icon_font, icon_text] = assert(icons[icon], 'unknown icon ', icon)
-	if (text == null) {
+	if (text == null || text === '') {
 		ui.button_icon(icon_font, icon_text, state)
 	} else {
 		ui.p(ui.sp1(), 0)
@@ -6870,8 +7040,8 @@ ui.icon_button = function(
 	return clicked
 }
 
-ui.bare_icon_button = function(id, icon, s, fr, align, valign, readonly) {
-	return ui.icon_button(id, icon, s, fr, align, valign, '', readonly)
+ui.bare_icon_button = function(id, icon, text, fr, align, valign, readonly) {
+	return ui.icon_button(id, icon, text, fr, align, valign, '', readonly)
 }
 
 ui.button = function(id, text, fr, align, valign, style, readonly) {
@@ -6904,7 +7074,7 @@ function hit_v_edge(id, hit_dx) {
 	hit_dx ??= 0
 	hit_dx *= dpr
 	ui.min_w(hit_distance)
-	ui.popup(id, null, null, 'il', 's', 'solid',
+	ui.popup(id, null, null, 'il', 's', 'solid hover_parent',
 		null, -hit_distance / 2 + hit_dx)
 		ui.ml(-hit_dx)
 		ui.stack('', 1, 's', 's')
@@ -6919,7 +7089,7 @@ function hit_h_edge(id, hit_dx) {
 	hit_dx ??= 0
 	hit_dx *= dpr
 	ui.min_h(hit_distance)
-	ui.popup(id, null, null, 'it', 's', 'solid',
+	ui.popup(id, null, null, 'it', 's', 'solid hover_parent',
 		null, null, -hit_distance / 2 + hit_dx)
 		ui.mt(-hit_dx)
 		ui.stack('', 1, 's', 's')
@@ -7053,7 +7223,7 @@ ui.splitter = function() {
 				: (collapsed_side == 1 ? 'it' : 'ib')
 			let thumb_thickness = ui.sp2() + hit_w
 			let thumb_length = 2*ui.sp8()
-			ui.popup('', 'overlay', null, popup_side, 'c', null, null,
+			ui.popup('', 'overlay', null, popup_side, 'c', 'hover_parent', null,
 				horiz ? popup_offset : 0, horiz ? 0 : popup_offset)
 				ui.min_wh(
 					horiz ? thumb_thickness : thumb_length,
@@ -8180,7 +8350,7 @@ function radio_group_update(group_id, s) {
 }
 ui.radio_group = function(group_id, value, field, readonly) {
 	let s = ui.state(group_id)
-	field ??= s.field ?? ui.create_field({type: 'enum'})
+	field ??= s.field ?? ui.create_field({})
 	s.field = field
 	s.readonly = readonly ?? field.readonly
 	s = ui.state(group_id, radio_group_update)
@@ -10324,327 +10494,526 @@ ui.live_move_mixin = function(e) {
 	return e
 }
 
-ui.debug_pane = function(full) {
+//// DOCK --------------------------------------------------------------------
 
-	ui.min_w(200 * dpr)
-	ui.v(0)
-		ui.border('l', 'intense')
-
-		ui.stack('', 0)
-			ui.bb('bg2')
-			ui.p(ui.sp())
-			ui.text('', 'PROFILE', 0, 'l')
-		ui.end_stack()
-		if (full)
-			ui.frame_graph_overlapped(.5)
-		ui.p(ui.sp(), ui.sp05())
-		ui.h(0, ui.sp())
-			ui.color('label')
-			ui.text_w(0)
-			ui.text('', 'recs_length', 1, 'l', 'c', 1/0)
-			ui.color('link')
-			ui.text_w(0)
-			ui.text('', ui.recs_length+'', 1, 'l', 'c', 1/0)
-		ui.end_h()
-		ui.p(ui.sp(), ui.sp05())
-		ui.h(0, ui.sp())
-			ui.color('label')
-			ui.text_w(0)
-			ui.text('', 'bandwidth', 1, 'l', 'c', 1/0)
-			ui.color('link')
-			ui.text_w(0)
-			ui.text('', dec(frame_mbps, 1)+' Mbit/s', 1, 'l', 'c', 1/0)
-		ui.end_h()
-		ui.p(ui.sp(), ui.sp05())
-		ui.h(0, ui.sp())
-			ui.color('label')
-			ui.text_w(0)
-			ui.text('', 'gzip size', 1, 'l', 'c', 1/0)
-			ui.color('link')
-			ui.text_w(0)
-			ui.text('', dec(frame_compression, 0)+'%', 1, 'l', 'c', 1/0)
-		ui.end_h()
-		ui.p(ui.sp(), ui.sp05())
-		ui.h(0, ui.sp())
-			ui.color('label')
-			ui.text_w(0)
-			ui.text('', 'packed size', 1, 'l', 'c', 1/0)
-			ui.color('link')
-			ui.text_w(0)
-			ui.text('', format_kbytes(frame_packed_size, 1), 1, 'l', 'c', 1/0)
-		ui.end_h()
-		ui.p(ui.sp(), ui.sp05())
-		ui.h(0, ui.sp())
-			ui.color('label')
-			ui.text_w(0)
-			ui.text('', 'state ids', 1, 'l', 'c', 1/0)
-			ui.color('link')
-			ui.text_w(0)
-			ui.text('', state_map.size+'', 1, 'l', 'c', 1/0)
-		ui.end_h()
-		let state_key_count = 0
-		for (let s of state_map.values())
-			for (let k in s)
-				state_key_count++
-		ui.p(ui.sp(), ui.sp05())
-		ui.h(0, ui.sp())
-			ui.color('label')
-			ui.text_w(0)
-			ui.text('', 'state keys', 1, 'l', 'c', 1/0)
-			ui.color('link')
-			ui.text_w(0)
-			ui.text('', state_key_count+'', 1, 'l', 'c', 1/0)
-		ui.end_h()
-		ui.box()
-
-		if (full) {
-
-			ui.stack('', 0)
-				ui.bb('bg2')
-				ui.p(ui.sp())
-				ui.text('', 'ID STATES', 0, 'l')
-			ui.end_stack()
-			ui.scrollbox('demo_id_states_sb', 1)
-				ui.v(0, 0, 's', '[')
-					for (let [id, s] of state_map) {
-						ui.p(ui.sp(), ui.sp05())
-						ui.color('link')
-						ui.text('', id, 0, 'l')
-						for (let [k, v] of entries(s)) {
-							if (v === undefined)
-								continue
-							if (k == 'build_no')
-								continue
-							ui.ml(ui.sp2())
-							ui.h(0, ui.sp())
-								let s = isobject(v) || isfunc(v) ? '<'+(typeof v)+'>' : str(v)
-								ui.text_w(0)
-								ui.text('', k, 1, 'l', 'c', 1/0)
-								if (isobject(v) || isfunc(v))
-									ui.color('label')
-								ui.text_w(0)
-								ui.text('', s, 1, 'l', 'c', 1/0)
-							ui.end_h()
-						}
-					}
-				ui.end_v()
-			ui.end_scrollbox()
-
-			ui.border(1, 'light')
-			ui.stack('', 0)
-				ui.bb('bg2')
-				ui.p(ui.sp())
-				ui.text('', 'HIT STATES', 0, 'l')
-			ui.end_stack()
-			ui.scrollbox('demo_hit_states_sb', .5)
-				ui.v(0, 0, 's', '[')
-					for (let [id, s] of hit_state_map) {
-						ui.p(ui.sp(), ui.sp05())
-						ui.color('link')
-						ui.text('', isstr(id) ? id : typeof id, 0, 'l')
-						for (let [k, v] of entries(s)) {
-							ui.ml(ui.sp2())
-							ui.h(0, ui.sp())
-								let s = isobject(v) || isfunc(v) ? '<'+(typeof v)+'>' : str(v)
-								ui.text_w(0)
-								ui.text('', k, 1, 'l', 'c', 1/0)
-								if (isobject(v) || isfunc(v))
-									ui.color('label')
-								ui.text_w(0)
-								ui.text('', s, 1, 'l', 'c', 1/0)
-							ui.end_h()
-						}
-					}
-				ui.end_v()
-			ui.end_scrollbox()
-
-			ui.stack('', 0)
-				ui.bb('bg2')
-				ui.color(ui.captured_id ? 'text' : 'label')
-				ui.p(ui.sp())
-				ui.text_w(0)
-				ui.text('', ui.captured_id ? 'CAP '+ui.captured_id : 'CAPTURED', 0, 'l', 'c', 1/0)
-			ui.end_stack()
-			ui.scrollbox('demo_captured_state_sb', .5)
-				ui.v(0, 0, 's', '[')
-					if (ui.captured_id)
-						for (let [k, v] of entries(captured(ui.captured_id))) {
-							ui.ml(ui.sp2())
-							ui.h(1, ui.sp())
-								let s = isobject(v) || isfunc(v) ? '<'+(typeof v)+'>' : str(v)
-								ui.text_w(0)
-								ui.text('', k, 1, 'l', 'c', 1/0)
-								if (isobject(v) || isfunc(v))
-									ui.color('label')
-								ui.text_w(0)
-								ui.text('', s, 1, 'l', 'c', 1/0)
-							ui.end_h()
-						}
-				ui.end_v()
-			ui.end_scrollbox()
-
-			ui.stack('', 0)
-				ui.bb('bg2')
-				ui.color(ui.captured_id ? 'text' : 'label')
-				ui.p(ui.sp())
-				ui.text_w(0)
-				ui.text('', ui.focused_id ? 'FOCUSED '+ui.focused_id : 'FOCUSED', 0, 'l', 'c', 1/0)
-			ui.end_stack()
-
-		}
-
-	ui.end_v()
-}
-
-//// TABS --------------------------------------------------------------------
-
-// given a list of elements with an ID key, an optional "order list" and an
-// optional "hidden" list, return the list of visible elements in specified
-// order with hidden ones skipped and with new ones that are not in the order
-// list or hidden added at the end.
-function visible_element_list(all, ID, INDEX, order, hidden) {
-	let hidden_ids = words(hidden) ?? empty_array
-	let visible_ids = words(order) ?? all.map(e => e[ID])
-	let id_map = {}
-	for (let e of all) {
-		if (hidden_ids.includes(e[ID])) // hidden
-			continue
-		if (id_map[e[ID]]) // duplicate
-			continue
-		id_map[e[ID]] = e
-	}
-	let visible = []
-	for (let id of visible_ids) {
-		let e = id_map[id]
-		if (!e) // hidden or invalid, skip
-			continue
-		// mark id as processed to skip duplicates and be left with new elements.
-		id_map[id] = null
-		visible.push(e)
-	}
-	// add new elements not present in the order list at the end, in natural order.
-	// TODO: support "before" and "after" hits for more control on placement.
-	for (let e of all)
-		if (id_map[e[ID]])
-			visible.push(e)
-	let by_id = {}
-	let i = 0
-	for (let e of visible) {
-		e[INDEX] = i++
-		by_id[e[ID]] = e
-	}
-	visible['by_'+ID] = by_id
-	return visible
-}
-
-// TODO: tabs_side  auto_focus
+// TODO: auto_focus
 
 ui.icon_def('plus', 'tabler', '\ueb0b')
 
-ui.tabs = function(id, all_tabs, selected_tab, tabs_order, hidden_tabs) {
-
-	let s = ui.state(id)
-	selected_tab = s.value ?? selected_tab
-	tabs_order   = s.tabs_order   ?? tabs_order
-	hidden_tabs  = s.hidden_tabs  ?? hidden_tabs
-
-	let tabs = s.tabs
-	if (!tabs) {
-		tabs = visible_element_list(all_tabs, 'id', 'index', tabs_order, hidden_tabs)
-		s.tabs = tabs
-	}
-
-	selected_tab = tabs.by_id[selected_tab]
-
-	ui.pr(ui.em(2))
-	ui.sb(id, 1, 'auto', 'contain')
-	ui.h(0, 0, 'l', 't')
-
-	let cs = null
-	let drag_tab_id, drag_tab
-	for (drag_tab of tabs) {
-		drag_tab_id = id+'.tab'+drag_tab.index
-		cs = drag_or_hit(drag_tab_id)
-		if (cs) break
-	}
-
-	let mover = cs && cs.mover
-	if (cs) {
-		if (!mover && cs.drag) {
-			selected_tab = drag_tab
-			ui.state(id).value = selected_tab.id
-		} else if (!mover && cs.dragging && !cs.drop && abs(cs.dx) > 10) {
-			mover = ui.live_move_mixin()
-			cs.mover = mover
-			mover.movable_element_size = function(vi) {
-				let tab = tabs[vi]
-				let tab_id = id+'.tab'+tab.index
-				let w = ui.state_of(tab_id, 'w')
-				return w
-			}
-			mover.set_movable_element_pos = function(i, x, moving, vi) {
-				// not using mover's positions, just mover.over_i
-			}
-			mover.move_element_start(drag_tab.index, 1, 0, tabs.length)
-		} else if (mover && cs.dragging && !cs.drop) {
-			mover.move_element_update_dx(cs.dx)
-		} else if (mover && cs.drop) {
-			array_move(tabs, drag_tab.index, 1, mover.over_i, true)
-			tabs_order = tabs.map(tab => tab.id).join(' ')
-			s.tabs_order = tabs_order
-			tabs = visible_element_list(all_tabs, 'id', 'index', tabs_order, hidden_tabs)
-			s.tabs = tabs
-			mover = null
-		}
-	}
-
-	for (let j = 0, n = tabs.length; j < n; j++) {
-		let tab_i = j
-		let tab = tabs[tab_i]
-		let tab_id = id+'.tab'+tab_i
-		let over_gap = mover && tab_i == mover.over_i
-		if (over_gap) {
-			let tab_id = drag_tab_id
-			let w = ui.state_of(tab_id, 'w')
-			ui.min_w(w)
-			ui.stack('', 0)
+function tab_box(
+	id, tab, is_selected, is_hover, has_close_button, is_strip_bottom
+) {
+	let is_close_clicked = false // the user clicked the close button
+	let box_id = id+'.tabbox.'+tab.id
+	ui.focusable(box_id)
+	ui.keep_focus(box_id)
+	ui.stack(box_id)
+	ui.measure(box_id)
+	ui.focus_ring(box_id)
+		ui.bb('bg1', is_hover ? 'hover' : null)
+		ui.p(ui.sp2())
+		ui.text('', tab.label)
+		if (is_selected) {
+			ui.min_h(2)
+			// marker on the tab's edge that faces the pane.
+			ui.stack('', 1, 's', is_strip_bottom ? 't' : 'b')
+				ui.bb('marker')
 			ui.end_stack()
 		}
-		let moving = mover && tab == drag_tab
-		if (moving) {
-			ui.popup('', 'overlay', null, 'it', '[')
-			ui.ml(max(0, mover.x0 + cs.dx))
+		if (has_close_button) {
+			ui.stack('', 0, 'r', 'c')
+				ui.bb('bg1', 'hover')
+				ui.font_size(1)
+				// using id+'.tabclose' instead of uid+'.tabbox.close'
+				// because that prefix is for ui.dock() drag state.
+				is_close_clicked = ui.bare_icon_button(id+'.tabclose.'+tab.id, 'x')
+			ui.end_stack()
 		}
-		ui.stack(tab_id)
-		ui.measure(tab_id)
-			let sel = tab == selected_tab
-			let hover = cs && !cs.dragging && drag_tab == tab || moving
-			ui.bb('bg1', hover ? 'hover' : null)
-			ui.p(ui.sp2())
-			ui.text('', tab.label)
-			if (sel) {
-				ui.min_h(2)
-				ui.stack('', 1, 's', 'b')
-					ui.bb('marker')
-				ui.end_stack()
-			}
-		ui.end_stack()
-		if (moving) {
-			ui.end_popup()
+	ui.end_stack()
+	return is_close_clicked
+}
+
+function tab_gap(w) {
+	ui.min_w(w)
+	// scroll the strip to show where the dragged tab would drop.
+	ui.scroll_to_view_next_box()
+	ui.stack('', 0)
+	ui.bb('bg2')
+	ui.end_stack()
+}
+
+function tab_strip(id, s, tablist, selected_tab, tab_cs) {
+	let tablist_id = id+'.tablist'+tablist.key
+	let tabs = tablist.tabs
+	let is_moving = tab_cs?.moved // the user is dragging a tab of this dock
+	let has_gap = is_moving // insert a gap at the drop position
+		&& tab_cs.drop_tablist == tablist && tab_cs.drop_area == 'strip'
+	ui.stack('', 0)
+	ui.measure(tablist_id+'.strip')
+	if (is_moving && tab_cs.src_tablist == tablist)
+		draw_dock_drag(id, s, tab_cs)
+	ui.bb('bg1')
+	let skip_tab = is_moving && tab_cs.src_tablist == tablist // dragged tab
+		? tabs[tab_cs.tab_i] : null
+	// gap_i counts only the tabs that the strip draws, so not skip_tab.
+	let gap_i = has_gap ? tab_cs.drop_insert_i : null
+	let gap_w = has_gap // gap width
+		? ui.state_of(id+'.tabbox.'
+			+tab_cs.src_tablist.tabs[tab_cs.tab_i].id, 'w') : null
+	let closing_tab // tab whose close button the user clicked
+	// the "+" sits outside the scrollbox, so it stays at the strip's end.
+	ui.h(1, 0, 's', 's')
+	ui.sb(tablist_id, 1, 'auto', 'contain')
+	ui.h(0, 0, 'l', 't')
+	ui.measure(tablist_id+'.tabs')
+	let drawn_n = 0 // number of tabs drawn so far
+	for (let tab_i = 0, n = tabs.length; tab_i < n; tab_i++) {
+		let tab = tabs[tab_i]
+		if (tab == skip_tab)
+			continue
+		if (drawn_n == gap_i)
+			tab_gap(gap_w)
+		let box_id = id+'.tabbox.'+tab.id
+		if (ui.focused(box_id) && ui.keydown('enter')) {
+			ui.select_dock_tab(id, tab.id)
+			ui.capture_keys()
 		}
+		// pointer on the close button: hit() answers for it, not for the tab.
+		let is_hover = hit(id+'.tabclose.'+tab.id)
+			|| (!captured(box_id) && hit(box_id))
+		if (tab_box(id, tab, tab == selected_tab, is_hover,
+				is_hover && s.can_add_remove_tabs, s.is_strip_bottom))
+			closing_tab = tab
+		drawn_n++
 	}
-	if (!mover) {
-		if (ui.bare_icon_button(id+'.plus', 'plus', null, false)) {
-			all_tabs.push({id: 'newtab'+all_tabs.length, label: 'New Tab '+all_tabs.length})
-			tabs = visible_element_list(all_tabs, 'id', 'index', tabs_order, hidden_tabs)
-			s.tabs = tabs
-			ui.rebuild('tabs_changed')
-		}
-	}
+	if (drawn_n == gap_i)
+		tab_gap(gap_w)
+	// stabilize tab strip height for when it has no tabs to set a height.
+	ui.pv(ui.sp2())
+   ui.min_h(ui.line_h())
+ 	ui.box()
 	ui.end_h()
 	ui.end_sb()
+	let add_clicked = false // the user clicked the "+"
+	if (s.can_add_remove_tabs) {
+		ui.font_size(1)
+		ui.ph(ui.sp())
+		add_clicked = ui.bare_icon_button(tablist_id+'.plus', 'plus', null, 0)
+	}
+	ui.end_h()
+	if (closing_tab?.confirm_close) {
+		// select it so that the app builds its content and can ask there.
+		ui.select_dock_tab(id, closing_tab.id)
+		ui.set_dock_tab(id, closing_tab.id, {closing: true})
+	} else if (closing_tab) {
+		ui.remove_dock_tab(id, closing_tab.id)
+	}
+	if (add_clicked) {
+		let tab_ids = set() // {tab_id}
+		add_dock_tab_ids(s.root, tab_ids)
+		let tab_n = 1 // number in the id of the new tab
+		while (tab_ids.has('tab'+tab_n))
+			tab_n++
+		let tab_id = 'tab'+tab_n
+		tabs.push({id: tab_id, label: 'New Tab'})
+		tablist.selected_tab_id = tab_id
+		save_dock_layout(id, s)
+		ui.rebuild('dock_tab_added')
+	}
+	ui.end_stack()
+}
 
-	return selected_tab
+/*
+Copy a layout: assign unique stable keys for ids, remove empty tablists and
+replace single-branch splits, and select the first tab when the selected tab
+from the layout is missing.
+layout: one of:
+	{tabs: [{id, label, ...}, ...], selected_tab_id: tab_id}, or
+	{split: 'h'|'v', size, unit, fixed_side, side1: node, side2: node}
+*/
+function create_dock_layout(s, layout) {
+
+	// empty tablist: remove it.
+	// split with one side missing: replace it with the other side.
+	function add_node(layout_node) {
+		let key = s.next_key++
+		if (layout_node.split) {
+			let side1 = add_node(layout_node.side1)
+			let side2 = add_node(layout_node.side2)
+			if (!side1 || !side2)
+				return side1 ?? side2
+			return {
+				key: key,
+				split: layout_node.split,
+				size: layout_node.size,
+				unit: layout_node.unit,
+				fixed_side: layout_node.fixed_side,
+				side1: side1,
+				side2: side2,
+			}
+		}
+		let tabs = layout_node.tabs.map(tab => assign({}, tab))
+		if (!tabs.length)
+			return null
+		let selected_tab = tabs.find(tab => tab.id == layout_node.selected_tab_id)
+		return {
+			key: key,
+			tabs: tabs,
+			selected_tab_id: (selected_tab ?? tabs[0]).id,
+		}
+	}
+
+	// no tabs at all: an empty root tablist, whose strip shows only the "+".
+	return add_node(layout)
+		?? {key: s.next_key++, tabs: [], selected_tab_id: null}
+}
+
+function find_dock_tablist(node, tab_id) {
+	if (node.split)
+		return find_dock_tablist(node.side1, tab_id)
+			?? find_dock_tablist(node.side2, tab_id)
+	return node.tabs.some(tab => tab.id == tab_id) ? node : null
+}
+
+function add_dock_tab_ids(node, tab_ids) {
+	if (node.split) {
+		add_dock_tab_ids(node.side1, tab_ids)
+		add_dock_tab_ids(node.side2, tab_ids)
+	} else {
+		for (let tab of node.tabs)
+			tab_ids.add(tab.id)
+	}
+}
+
+function save_dock_layout(id, s) {
+	ui.save_state(id, 'root', structuredClone(s.root))
+	ui.save_state(id, 'next_key', s.next_key)
+}
+
+function find_dock_parent(node, child) {
+	if (!node.split)
+		return null
+	if (node.side1 == child || node.side2 == child)
+		return node
+	return find_dock_parent(node.side1, child)
+		?? find_dock_parent(node.side2, child)
+}
+
+// -> root after putting node2 where node1 was
+function replace_dock_node(root, node1, node2) {
+	if (root == node1)
+		return node2
+	let parent = find_dock_parent(root, node1)
+	if (parent.side1 == node1)
+		parent.side1 = node2
+	else
+		parent.side2 = node2
+	return root
+}
+
+/*
+fields that the dock adds to the capture state of a dragged tab:
+	{src_tablist, tab_i, grab_x, grab_y,
+	 drop_tablist, drop_area, drop_insert_i}
+drop_area: 'strip'|'left'|'right'|'top'|'bottom'|'center'|null
+drop_insert_i: position in drop_tablist's tabs without the dragged tab.
+*/
+
+let dock_snap_h = .5 // snapping range above and below a strip, in strip h
+let dock_edge_fr = .25 // tab pane edge zone, as a fraction of its w or h
+
+// the code snaps a dragged tab to a strip when the pointer is near the strip
+// vertically and over its width.
+function hit_tab_strip(id, tab_cs, node) {
+	if (node.split)
+		return hit_tab_strip(id, tab_cs, node.side1)
+			|| hit_tab_strip(id, tab_cs, node.side2)
+	let strip = ui.state_of(id+'.tablist'+node.key+'.strip')
+	if (!(ui.mx >= strip.x && ui.mx < strip.x + strip.w
+			&& ui.my >= strip.y - strip.h * dock_snap_h
+			&& ui.my < strip.y + strip.h * (1 + dock_snap_h)))
+		return false
+	set_strip_drop(id, tab_cs, node)
+	return true
+}
+
+// make the strip of tablist node the drop target, at the dragged tab's x.
+function set_strip_drop(id, tab_cs, node) {
+	let tab_x = ui.mx - tab_cs.grab_x // dragged tab's left edge
+	// insert before the first tab with its middle right of the tab's left x.
+	// the row of tabs is measured after scrolling, unlike the strip.
+	let x = ui.state_of(id+'.tablist'+node.key+'.tabs', 'x') // next tab's left
+	let insert_i = 0 // position among the tabs other than the dragged one
+	for (let tab_i = 0; tab_i < node.tabs.length; tab_i++) {
+		if (node == tab_cs.src_tablist && tab_i == tab_cs.tab_i)
+			continue
+		let w = ui.state_of(id+'.tabbox.'+node.tabs[tab_i].id, 'w')
+		if (tab_x < x + w / 2)
+			break
+		x += w
+		insert_i++
+	}
+	tab_cs.drop_tablist = node
+	tab_cs.drop_area = 'strip'
+	tab_cs.drop_insert_i = insert_i
+}
+
+function hit_tab_pane(id, tab_cs, node) {
+	if (node.split)
+		return hit_tab_pane(id, tab_cs, node.side1)
+			|| hit_tab_pane(id, tab_cs, node.side2)
+	let tab_pane = ui.state_of(id+'.tablist'+node.key+'.pane')
+	let fx = (ui.mx - tab_pane.x) / tab_pane.w // pointer x, as a fraction of w
+	let fy = (ui.my - tab_pane.y) / tab_pane.h // pointer y, as a fraction of h
+	if (!(fx >= 0 && fx < 1 && fy >= 0 && fy < 1))
+		return false
+	let edge_fr = min(fx, 1 - fx, fy, 1 - fy) // distance to the nearest edge
+	let area = edge_fr >= dock_edge_fr ? 'center'
+		: edge_fr == fx ? 'left'
+		: edge_fr == 1 - fx ? 'right'
+		: edge_fr == fy ? 'top'
+		: 'bottom'
+	// splitting a tablist to put its only tab next to itself: no drop.
+	if (area != 'center' && node == tab_cs.src_tablist && node.tabs.length == 1)
+		return true
+	tab_cs.drop_tablist = node
+	tab_cs.drop_area = area
+	return true
+}
+
+function hit_dock(id, s, tab_cs) {
+	tab_cs.drop_tablist = null
+	tab_cs.drop_area = null
+	tab_cs.drop_insert_i = null
+	// fixed layout: the tab can only move along its own strip.
+	if (!s.can_change_layout) {
+		if (s.can_add_remove_tabs)
+			set_strip_drop(id, tab_cs, tab_cs.src_tablist)
+		return
+	}
+	if (!hovers(id)) return // clip to visible dock if dock is in a scrollbox
+	if (hit_tab_strip(id, tab_cs, s.root)) return
+	if (hit_tab_pane(id, tab_cs, s.root)) return
+}
+
+// move the tab to the drop target, or remove it if no area.
+function move_dock_tab(
+	id, s, src_tablist, tab_i, dst_tablist, area, insert_i
+) {
+
+	let tab = src_tablist.tabs.splice(tab_i, 1)[0]
+	if (src_tablist.selected_tab_id == tab.id)
+		src_tablist.selected_tab_id = src_tablist.tabs.length
+			? src_tablist.tabs[min(tab_i, src_tablist.tabs.length - 1)].id
+			: null
+
+	if (area == 'strip') {
+		dst_tablist.tabs.splice(insert_i, 0, tab)
+		dst_tablist.selected_tab_id = tab.id
+	} else if (area == 'center') {
+		dst_tablist.tabs.push(tab)
+		dst_tablist.selected_tab_id = tab.id
+	} else if (area) {
+		let tablist = {
+			key: s.next_key++,
+			tabs: [tab],
+			selected_tab_id: tab.id,
+		}
+		let is_side1 = area == 'left' || area == 'top' // new tablist on side 1
+		let split = {
+			key: s.next_key++,
+			split: area == 'left' || area == 'right' ? 'h' : 'v',
+			size: .5,
+			unit: 'fr',
+			side1: is_side1 ? tablist : dst_tablist,
+			side2: is_side1 ? dst_tablist : tablist,
+		}
+		s.root = replace_dock_node(s.root, dst_tablist, split)
+	}
+
+	// empty tablist: replace its parent split with the split's other side.
+	// empty root: keep it, its strip shows the "+".
+	if (!src_tablist.tabs.length && src_tablist != s.root) {
+		let parent = find_dock_parent(s.root, src_tablist)
+		let sibling_node = parent.side1 == src_tablist
+			? parent.side2 : parent.side1
+		s.root = replace_dock_node(s.root, parent, sibling_node)
+		ui.delete_saved_state(id+'.split'+parent.key)
+	}
+}
+
+/*
+tab record fields that the dock reads and writes:
+	confirm_close: the close button sets closing instead of removing the tab.
+	closing: the user clicked the close button of a confirm_close tab. The app
+		removes the tab with ui.remove_dock_tab() or clears closing with
+		ui.set_dock_tab(), e.g. from a prompt built in the tab's content.
+*/
+
+function* dock_tab_panes(id, s, node, tab_cs) {
+	if (node.split) {
+		ui.hvsplit(node.split, id+'.split'+node.key,
+			node.size, node.unit, node.fixed_side)
+		yield* dock_tab_panes(id, s, node.side1, tab_cs)
+		ui.splitter()
+		yield* dock_tab_panes(id, s, node.side2, tab_cs)
+		end_split()
+	} else {
+		let tablist_id = id+'.tablist'+node.key
+		let tabs = node.tabs
+		let selected_tab = tabs.find(tab => tab.id == node.selected_tab_id)
+
+		// the caller builds only the selected tab's content: keep the others'.
+		for (let tab of tabs)
+			if (tab != selected_tab)
+				ui.keep_state_scope(id+'.tab.'+tab.id)
+
+		ui.v(1, 0, 's', 's')
+			if (!s.is_strip_bottom)
+				tab_strip(id, s, node, selected_tab, tab_cs)
+			ui.stack('', 1, 's', 's')
+			ui.measure(tablist_id+'.pane')
+			// empty root tablist: no tab to build.
+			if (selected_tab) {
+				ui.begin_state_scope(id+'.tab.'+selected_tab.id)
+				yield selected_tab
+				ui.end_state_scope()
+			}
+			ui.end_stack()
+			if (s.is_strip_bottom)
+				tab_strip(id, s, node, selected_tab, tab_cs)
+		ui.end_v()
+	}
+}
+
+// draw the drop marker and the dragged tab over everything.
+function draw_dock_drag(id, s, tab_cs) {
+
+	let tab = tab_cs.src_tablist.tabs[tab_cs.tab_i]
+	let x = ui.mx - tab_cs.grab_x // dragged tab's left edge
+	let y = ui.my - tab_cs.grab_y // dragged tab's top edge
+
+	let area = tab_cs.drop_area
+	if (area == 'strip') {
+		let strip = ui.state_of(id+'.tablist'+tab_cs.drop_tablist.key+'.strip')
+		x = max(strip.x, x)
+		y = strip.y
+	} else if (area) {
+		let tab_pane = ui.state_of(id+'.tablist'+tab_cs.drop_tablist.key
+			+'.pane')
+		let mx = tab_pane.x // marker x
+		let my = tab_pane.y // marker y
+		let mw = area == 'left' || area == 'right'
+			? tab_pane.w / 2 : tab_pane.w
+		let mh = area == 'top' || area == 'bottom'
+			? tab_pane.h / 2 : tab_pane.h
+		if (area == 'right' ) mx += mw
+		if (area == 'bottom') my += mh
+		ui.popup('', 'drag', 'screen', 'it', '[', null, null, mx, my)
+		ui.nohit()
+			ui.min_wh(mw, mh)
+			ui.stack('', 0)
+				ui.bb('bg1', null, 1, 'marker')
+			ui.end_stack()
+		ui.end_popup()
+	}
+
+	ui.popup('', 'drag', 'screen', 'it', '[', null, null, x, y)
+	ui.nohit()
+		tab_box(id, tab, tab.id == tab_cs.src_tablist.selected_tab_id,
+			true, false, s.is_strip_bottom)
+	ui.end_popup()
+}
+
+/*
+options:
+	tabs_side           : 'top'|'t'|'bottom'|'b'  tab strip side (default 'top')
+	can_add_remove_tabs : t|f     allow add/remove/reorder tabs
+	can_change_layout   : t|f     allow docking tabs anywhere
+*/
+ui.dock = function*(id, layout, opt) {
+
+	opt ??= empty
+	let s = ui.state(id)
+	let tabs_side = opt.tabs_side
+	// strip below the pane, for this frame's tabs_side.
+	s.is_strip_bottom = tabs_side == 'bottom' || tabs_side == 'b'
+	assert(s.is_strip_bottom || tabs_side == null
+		|| tabs_side == 'top' || tabs_side == 't',
+		'dock ', id, ': invalid tabs_side ', tabs_side)
+	// "+" and x shown, drops in own tablist.
+	s.can_add_remove_tabs = opt.can_add_remove_tabs ?? true
+	s.can_change_layout = opt.can_change_layout ?? true // drops elsewhere
+
+	if (s.root === undefined) {
+		let saved = ui.saved_state[id]
+		if (saved) {
+			s.root = saved.root
+			s.next_key = saved.next_key // key of the next new node
+		} else {
+			s.next_key = 0 // key of the next new node
+			s.root = create_dock_layout(s, layout)
+		}
+	}
+
+	let drag_tab_id = capture_match(id+'.tabbox.') // id of the dragged tab
+	let tab_cs = drag_tab_id != null // capture state of the dragged tab
+		? ui.drag(id+'.tabbox.'+drag_tab_id, s.can_change_layout ? null : 'x')
+		: null
+	if (tab_cs?.drag) {
+		let tablist = find_dock_tablist(s.root, drag_tab_id)
+		if (tablist.selected_tab_id != drag_tab_id) {
+			tablist.selected_tab_id = drag_tab_id
+			save_dock_layout(id, s)
+		}
+		let box_id = id+'.tabbox.'+drag_tab_id
+		tab_cs.src_tablist = tablist
+		tab_cs.tab_i = tablist.tabs.findIndex(tab => tab.id == drag_tab_id)
+		tab_cs.grab_x = ui.mx0 - ui.state_of(box_id, 'x')
+		tab_cs.grab_y = ui.my0 - ui.state_of(box_id, 'y')
+	}
+	if (tab_cs?.moved)
+		hit_dock(id, s, tab_cs)
+	if (tab_cs?.drop) {
+		if (tab_cs.drop_area) {
+			move_dock_tab(id, s, tab_cs.src_tablist, tab_cs.tab_i,
+				tab_cs.drop_tablist, tab_cs.drop_area, tab_cs.drop_insert_i)
+			save_dock_layout(id, s)
+		}
+		tab_cs = null
+	}
+
+	ui.stack(id)
+		yield* dock_tab_panes(id, s, s.root, tab_cs)
+	ui.end_stack()
+}
+
+ui.set_dock_tab = function(id, tab_id, fields) {
+	let s = ui.state_of(id)
+	let tablist = assert(find_dock_tablist(s.root, tab_id),
+		'dock ', id, ': no tab ', tab_id)
+	assign(tablist.tabs.find(tab => tab.id == tab_id), fields)
+	save_dock_layout(id, s)
+	ui.rebuild('dock_tab_changed')
+}
+
+ui.select_dock_tab = function(id, tab_id) {
+	let s = ui.state_of(id)
+	let tablist = assert(find_dock_tablist(s.root, tab_id),
+		'dock ', id, ': no tab ', tab_id)
+	tablist.selected_tab_id = tab_id
+	save_dock_layout(id, s)
+	ui.rebuild('dock_tab_selected')
+}
+
+ui.remove_dock_tab = function(id, tab_id) {
+	let s = ui.state_of(id)
+	let tablist = assert(find_dock_tablist(s.root, tab_id),
+		'dock ', id, ': no tab ', tab_id)
+	move_dock_tab(id, s, tablist,
+		tablist.tabs.findIndex(tab => tab.id == tab_id))
+	save_dock_layout(id, s)
+	ui.rebuild('dock_tab_removed')
 }
 
 //// TOOLBOX -----------------------------------------------------------------
@@ -11136,6 +11505,180 @@ function template_editor(id, t, ch_t) {
 	ui.end_toolboxes()
 }
 
+//// DEBUG PANE --------------------------------------------------------------
+
+ui.debug_pane = function(full) {
+
+	ui.min_w(200 * dpr)
+	ui.v(0)
+		ui.border('l', 'intense')
+
+		ui.stack('', 0)
+			ui.bb('bg2')
+			ui.p(ui.sp())
+			ui.text('', 'PROFILE', 0, 'l')
+		ui.end_stack()
+		if (full)
+			ui.frame_graph_overlapped(.5)
+		ui.p(ui.sp(), ui.sp05())
+		ui.h(0, ui.sp())
+			ui.color('label')
+			ui.text_w(0)
+			ui.text('', 'recs_length', 1, 'l', 'c', 1/0)
+			ui.color('link')
+			ui.text_w(0)
+			ui.text('', ui.recs_length+'', 1, 'l', 'c', 1/0)
+		ui.end_h()
+		ui.p(ui.sp(), ui.sp05())
+		ui.h(0, ui.sp())
+			ui.color('label')
+			ui.text_w(0)
+			ui.text('', 'bandwidth', 1, 'l', 'c', 1/0)
+			ui.color('link')
+			ui.text_w(0)
+			ui.text('', dec(frame_mbps, 1)+' Mbit/s', 1, 'l', 'c', 1/0)
+		ui.end_h()
+		ui.p(ui.sp(), ui.sp05())
+		ui.h(0, ui.sp())
+			ui.color('label')
+			ui.text_w(0)
+			ui.text('', 'gzip size', 1, 'l', 'c', 1/0)
+			ui.color('link')
+			ui.text_w(0)
+			ui.text('', dec(frame_compression, 0)+'%', 1, 'l', 'c', 1/0)
+		ui.end_h()
+		ui.p(ui.sp(), ui.sp05())
+		ui.h(0, ui.sp())
+			ui.color('label')
+			ui.text_w(0)
+			ui.text('', 'packed size', 1, 'l', 'c', 1/0)
+			ui.color('link')
+			ui.text_w(0)
+			ui.text('', format_kbytes(frame_packed_size, 1), 1, 'l', 'c', 1/0)
+		ui.end_h()
+		ui.p(ui.sp(), ui.sp05())
+		ui.h(0, ui.sp())
+			ui.color('label')
+			ui.text_w(0)
+			ui.text('', 'state ids', 1, 'l', 'c', 1/0)
+			ui.color('link')
+			ui.text_w(0)
+			ui.text('', state_map.size+'', 1, 'l', 'c', 1/0)
+		ui.end_h()
+		let state_key_count = 0
+		for (let s of state_map.values())
+			for (let k in s)
+				state_key_count++
+		ui.p(ui.sp(), ui.sp05())
+		ui.h(0, ui.sp())
+			ui.color('label')
+			ui.text_w(0)
+			ui.text('', 'state keys', 1, 'l', 'c', 1/0)
+			ui.color('link')
+			ui.text_w(0)
+			ui.text('', state_key_count+'', 1, 'l', 'c', 1/0)
+		ui.end_h()
+		ui.box()
+
+		if (full) {
+
+			ui.stack('', 0)
+				ui.bb('bg2')
+				ui.p(ui.sp())
+				ui.text('', 'ID STATES', 0, 'l')
+			ui.end_stack()
+			ui.scrollbox('demo_id_states_sb', 1)
+				ui.v(0, 0, 's', '[')
+					for (let [id, s] of state_map) {
+						ui.p(ui.sp(), ui.sp05())
+						ui.color('link')
+						ui.text('', id, 0, 'l')
+						for (let [k, v] of entries(s)) {
+							if (v === undefined)
+								continue
+							if (k == 'build_no')
+								continue
+							ui.ml(ui.sp2())
+							ui.h(0, ui.sp())
+								let s = isobject(v) || isfunc(v) ? '<'+(typeof v)+'>' : str(v)
+								ui.text_w(0)
+								ui.text('', k, 1, 'l', 'c', 1/0)
+								if (isobject(v) || isfunc(v))
+									ui.color('label')
+								ui.text_w(0)
+								ui.text('', s, 1, 'l', 'c', 1/0)
+							ui.end_h()
+						}
+					}
+				ui.end_v()
+			ui.end_scrollbox()
+
+			ui.border(1, 'light')
+			ui.stack('', 0)
+				ui.bb('bg2')
+				ui.p(ui.sp())
+				ui.text('', 'HIT STATES', 0, 'l')
+			ui.end_stack()
+			ui.scrollbox('demo_hit_states_sb', .5)
+				ui.v(0, 0, 's', '[')
+					for (let [id, s] of hit_state_map) {
+						ui.p(ui.sp(), ui.sp05())
+						ui.color('link')
+						ui.text('', isstr(id) ? id : typeof id, 0, 'l')
+						for (let [k, v] of entries(s)) {
+							ui.ml(ui.sp2())
+							ui.h(0, ui.sp())
+								let s = isobject(v) || isfunc(v) ? '<'+(typeof v)+'>' : str(v)
+								ui.text_w(0)
+								ui.text('', k, 1, 'l', 'c', 1/0)
+								if (isobject(v) || isfunc(v))
+									ui.color('label')
+								ui.text_w(0)
+								ui.text('', s, 1, 'l', 'c', 1/0)
+							ui.end_h()
+						}
+					}
+				ui.end_v()
+			ui.end_scrollbox()
+
+			ui.stack('', 0)
+				ui.bb('bg2')
+				ui.color(ui.captured_id ? 'text' : 'label')
+				ui.p(ui.sp())
+				ui.text_w(0)
+				ui.text('', ui.captured_id ? 'CAP '+ui.captured_id : 'CAPTURED', 0, 'l', 'c', 1/0)
+			ui.end_stack()
+			ui.scrollbox('demo_captured_state_sb', .5)
+				ui.v(0, 0, 's', '[')
+					if (ui.captured_id)
+						for (let [k, v] of entries(captured(ui.captured_id))) {
+							ui.ml(ui.sp2())
+							ui.h(1, ui.sp())
+								let s = isobject(v) || isfunc(v) ? '<'+(typeof v)+'>' : str(v)
+								ui.text_w(0)
+								ui.text('', k, 1, 'l', 'c', 1/0)
+								if (isobject(v) || isfunc(v))
+									ui.color('label')
+								ui.text_w(0)
+								ui.text('', s, 1, 'l', 'c', 1/0)
+							ui.end_h()
+						}
+				ui.end_v()
+			ui.end_scrollbox()
+
+			ui.stack('', 0)
+				ui.bb('bg2')
+				ui.color(ui.captured_id ? 'text' : 'label')
+				ui.p(ui.sp())
+				ui.text_w(0)
+				ui.text('', ui.focused_id ? 'FOCUSED '+ui.focused_id : 'FOCUSED', 0, 'l', 'c', 1/0)
+			ui.end_stack()
+
+		}
+
+	ui.end_v()
+}
+
 //// AUTOMATED TESTING API ---------------------------------------------------
 
 // nothing in here is part of the widget API: it exists so that a test can
@@ -11170,8 +11713,8 @@ ui._point_at = function(id) {
 		let ra = recs[k]
 		let i = 2
 		while (i < ra.length) {
-			let si = id_slot[ra[i-1]]
-			if (si != null && ra[i+si] === id) {
+			let arg_i = id_i[ra[i-1]] // ID arg index
+			if (arg_i != null && ra[i+arg_i] === id) {
 				let p = ui.local_pointer
 				p.mx = ra[i+0] + ra[i+2] / 2
 				p.my = ra[i+1] + ra[i+3] / 2

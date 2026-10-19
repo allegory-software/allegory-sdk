@@ -189,27 +189,48 @@ ui.end_v()
 }
 
 {
-let tabs1 = [
-	{id: 'tab1', label:'Tab 1'},
-	{id: 'tab2', label:'Tab 2 looong'},
-	{id: 'tab3', label:'Tab 3'},
-	{id: 'tab4', label:'Tab 4 even longer'},
-	{id: 'tab5', label:'Tab 5'},
-	{id: 'tab6', label:'Tab 6'},
-]
-demos.tabs = function() {
+let dock1_layout = {
+	split: 'h', size: .4, unit: 'fr',
+	side1: {
+		tabs: [
+			{id: 'tab2', label: 'Tab 2 looong', kind: 'notes'},
+			{id: 'tab3', label: 'Tab 3', kind: 'notes'},
+			{id: 'tab4', label: 'Tab 4 even longer', kind: 'clock'},
+		],
+		selected_tab_id: 'tab2',
+	},
+	side2: {
+		split: 'v', size: .5, unit: 'fr',
+		side1: {tabs: [{id: 'tab1', label: 'Tab 1', kind: 'clock'}]},
+		side2: {tabs: [{id: 'tab5', label: 'Tab 5', kind: 'notes'}]},
+	},
+}
+let dock1_kinds = ['notes', 'clock']
+demos.dock = function() {
 ui.m(ui.em(5))
 ui.stack('', 1, 's', 'c')
 	//ui.p(1)
 	ui.v()
-		ui.stack()
-			ui.bb('bg1')
-			let sel_tab = ui.tabs('tabs1', tabs1, 'tab2', 'tab2 tab3 tab4', 'tab3')
-		ui.end_stack()
-		ui.min_h(200)
-		ui.stack()
+		ui.min_h(400)
+		for (let tab of ui.dock('dock1', dock1_layout)) {
+			let tab_id = 'dock1.tab.'+tab.id // id prefix of the tab's content
 			ui.bb('bg0')
-		ui.end_stack()
+			if (tab.kind) {
+				ui.v(0, ui.sp2(), 's', 't')
+					ui.text('', tab.kind+': '+tab.label)
+					if (tab.kind == 'notes') {
+						ui.saved_value(tab_id+'.text', null)
+						ui.input(tab_id+'.text', null)
+					}
+				ui.end_v()
+			} else {
+				ui.v(0, ui.sp2(), 'c', 'c')
+				for (let kind of dock1_kinds)
+					if (ui.button(tab_id+'.'+kind, kind))
+						ui.set_dock_tab('dock1', tab.id, {kind: kind, label: kind})
+				ui.end_v()
+			}
+		}
 	ui.end_v()
 	//ui.border(1, 'intense')
 ui.end_stack()
@@ -1997,12 +2018,6 @@ ui.main = function() {
 				ui.toggle_button('btn_light', null, 'lights', demo_toggle_field, 0)
 				ui.toggle_button('btn_debug', null, 'DEBUG', demo_toggle_field, 0)
 				ui.toggle_button('btn_tui', null, 'TUI', demo_toggle_field, 0)
-				if (ui.toggle_button('btn_animate', null, 'animate',
-						demo_toggle_field, 0))
-					ui.animate()
-				is_packing = ui.toggle_button('btn_pack', null, 'pack',
-					demo_toggle_field, 0)
-				ui.toggle_button('btn_panes', null, 'panes', demo_toggle_field, 0)
 
 				if (ui.button('btn_reset', 'reset', 0)) {
 					localStorage.clear()
@@ -2046,8 +2061,21 @@ ui.main = function() {
 				ui.end_h()
 			ui.end_hsplit()
 
-			if (ui.DEBUG)
-				ui.debug_pane(ui.value('btn_panes'))
+			if (ui.DEBUG) {
+				ui.v(0)
+					ui.mv(ui.sp05())
+					ui.h(0, ui.sp05())
+						if (ui.toggle_button('btn_animate', null, 'animate',
+								demo_toggle_field, 0))
+							ui.animate()
+						is_packing = ui.toggle_button('btn_pack', null, 'pack',
+							demo_toggle_field, 0)
+						ui.toggle_button('btn_panes', null, 'panes',
+							demo_toggle_field, 0)
+					ui.end_h()
+					ui.debug_pane(ui.value('btn_panes'))
+				ui.end_v()
+			}
 
 		ui.end_h()
 

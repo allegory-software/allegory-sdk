@@ -1071,7 +1071,9 @@ function init(id, e) {
 		// column drag horizontally (vertically in vertical layout)
 		// => start column move
 		if (hit_zone == 'col' && !drag_op && ps.dragging && !ps.drop
-			&& abs(horiz ? ps.dx : ps.dy) > 10
+			&& (horiz
+				? ps.moved == 'l' || ps.moved == 'r'
+				: ps.moved == 't' || ps.moved == 'b')
 			&& e.visible_fields[hit_vfi].movable
 		) {
 
@@ -1128,7 +1130,7 @@ function init(id, e) {
 		// drag column vertically towards group-bar => column move to group
 		let col_group_start
 		if (horiz && hit_zone == 'col' && !drag_op && ps.dragging && !ps.drop
-			&& (ui.hovers(id+'.group_bar') || -ps.dy > 10)
+			&& (ui.hovers(id+'.group_bar') || ps.moved == 't')
 			&& e.visible_fields[hit_vfi].groupable
 		) {
 			col_group_start = true

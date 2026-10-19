@@ -112,13 +112,9 @@ MENU
 - h() with key binding icon or text
 
 
-TABLIST
+DOCK
 ------------------------------------------------------------------------------
-- add/close/move + drag & drop
-
-
-DOCKING
-------------------------------------------------------------------------------
+- auto_focus: focus the first focusable inside the tab when switching tabs.
 
 
 UI API
@@ -126,6 +122,10 @@ UI API
 - text selection: drag-select with mouse
 - drag & drop between windows
 - negative margins?
+- clipping vs overflow: a stack's children overlap each other and stay
+	clipped by the scrollboxes around the stack. A box that must draw over
+	boxes outside its own stack needs a popup, and nothing clips a popup,
+	not even one targeted at a box inside a scrollbox.
 - make ui embeddable:
 	- screen, canvas, cx, screen_w, screen_h, dpr, ui.font_size_normal
 

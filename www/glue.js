@@ -485,7 +485,7 @@ function trace_if(cond, ...args) {
 
 function assert(ret, ...args) {
 	if (!ret)
-		throw (args.length ? args.join('') : 'assertion failed')
+		throw new Error(args.length ? args.join('') : 'assertion failed')
 	return ret
 }
 
