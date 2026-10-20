@@ -2550,6 +2550,7 @@ function resolve_focus_first(group_id) {
 	if (i == null)
 		return false
 	ui.focus(focusables[i+FOCUSABLE_ID])
+	ui.rebuild('focus')
 	return true
 }
 
@@ -2853,6 +2854,10 @@ function redraw_all() {
 
 		assert(!open_focus_groups.length, 'unbalanced focus_group')
 
+		// focus changed in build phase
+		if (ui.focused_id != prev_focused_id)
+			ui.rebuild('focus')
+
 		// clear invalid focus id
 		if (ui.focused_id && focus_find(ui.focused_id) == null) {
 			// focused widget in a hidden scope: the scope keeps the focus.
@@ -2870,9 +2875,6 @@ function redraw_all() {
 			if (!resolve_focus_first(group_id))
 				warn('focus_first: no focusable in ', group_id)
 		}
-
-		if (ui.focused_id != prev_focused_id) // focus changed in build phase
-			ui.rebuild('focus')
 
 		t1 = clock_ms()
 		frame_graph_push('frame_make_time', make_ms + frame_make_ms)

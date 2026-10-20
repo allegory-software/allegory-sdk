@@ -209,6 +209,7 @@ function action.en()
 	out((([[
 <html lang={{lang}} country={{country}} theme="{{theme}}"><head>
 	<meta charset="utf-8">
+	<meta name="darkreader-lock">
 	<title>{{title}}</title>
 	<link rel="icon" href="{{favicon_href}}">
 {{{preloads}}}
