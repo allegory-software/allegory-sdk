@@ -7491,9 +7491,10 @@ function hvlist(hv, id, items, value, field,
 			let item_focused = item === focused_item
 			let item_selected = is_multi
 				? field.has_item(value, item) : item === value
-			let item_color_state =
+			let item_text_color_state =
 				(readonly ? STATE_READONLY : 0)
 				| (!readonly && hit(item_id) ? STATE_HOVER : 0)
+			let item_color_state = item_text_color_state
 				| (list_focused ? STATE_FOCUSED : 0)
 				| (item_focused ? STATE_ITEM_FOCUSED : 0)
 				| (item_selected ? STATE_ITEM_SELECTED : 0)
@@ -7503,7 +7504,7 @@ function hvlist(hv, id, items, value, field,
 			let sides = item_gap ? (!i ? '-r' : i == items.length-1 ? '-l' : null) : null
 			ui.bb(item_bg_color, item_color_state, sides, null, null, ui.sp05())
 			let item_color = custom_item_color ?? 'text'
-			ui.color(item_color, item_color_state)
+			ui.color(item_color, item_text_color_state)
 			ui.text('', field ? field.to_text(item) : item,
 				0,
 				item_align ?? field?.align ?? (hv == 'v' ? 'l' : 'c'),

@@ -22,6 +22,12 @@ BEHAVIOR:
 	which ui_nav.js doesn't have, so the grid demo's "Set null" button
 	throws.
 
+FOCUS BUGS:
+- list_dropdown and color_input register their control outside the dropdown
+	focus group, so Tab inside an open picker cannot return to the control.
+	The caller must register the control inside the group and before its box
+	so that focusing it scrolls the correct box into view.
+
 CLEANUP:
 - ui_nav insert_rows: the "insert is aborted" path after
 	focus_cell(false, false) can't happen on a loaded nav.
