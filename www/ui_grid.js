@@ -1008,7 +1008,7 @@ function init(id, e) {
 		// hover or click on sort icons from colum header
 		for (let field of e.visible_fields) {
 			let icon_id = id+'.sort_icon.'+field.name
-			ps = ui.drag_or_hit(icon_id)
+			ps = ui.captured_or_hit(icon_id)
 			if (ps) {
 				hit_zone = 'sort_icon'
 				hit_vfi = field.vfi
@@ -1021,7 +1021,7 @@ function init(id, e) {
 
 		// hover or drag on on column header
 		if (!hit_zone) {
-			ps = ui.drag_or_hit(id+'.header')
+			ps = ui.captured_or_hit(id+'.header')
 			if (ps && (ps.drag || !ps.dragging)) {
 				if (horiz) {
 					let x0 = ui.state(id+'.header').x
@@ -1144,7 +1144,7 @@ function init(id, e) {
 				let col = gcol.field.name
 				// hit sort icon
 				let icon_id = id+'.sort_icon.'+col
-				ps = ui.drag_or_hit(icon_id)
+				ps = ui.captured_or_hit(icon_id)
 				if (ps) {
 					hit_zone = 'sort_icon'
 					hit_gcol = col
@@ -1156,7 +1156,7 @@ function init(id, e) {
 				// hit group column
 				let col_id = id+'.gcol.'+col
 				ui.state(col_id)
-				ps = ui.drag_or_hit(col_id)
+				ps = ui.captured_or_hit(col_id)
 				if (ps) {
 					hit_zone = 'gcol'
 					hit_gcol = col
@@ -1342,7 +1342,7 @@ function init(id, e) {
 		// check hover/drag on cell view
 
 		if (!hit_zone) {
-			ps = ui.drag_or_hit(id+'.cells')
+			ps = ui.captured_or_hit(id+'.cells')
 			if (ps && (ps.drag || !ps.dragging)) {
 				let s = ui.state(id+'.cells')
 				let x0 = s.x

@@ -916,7 +916,7 @@ out what ops are allowed in the UI while one user is dragging something.
 	  cs.dx,dy         how far the mouse moved since the press
 	  cs.moved         'l'|'r'|'t'|'b': drag-move direction, if past ui.drag_threshold
 	ui.drag_threshold  logical px threshold for setting cs.moved
-	ui.drag_or_hit     (id) -> cs|hs|null   ui.drag(id) || ui.hit(id)
+	ui.captured_or_hit (id) -> cs|hs|null   ui.captured(id) || ui.hit(id)
 
 	ui.set_cursor      (cursor)   set cursor for this frame
 
@@ -1095,6 +1095,7 @@ function capture(id) {
 function captured(id) {
 	return id && ui.captured_id == id && capture_state || null
 }
+ui.captured = captured
 
 function release_capture() {
 	ui.captured_id = null
@@ -1130,10 +1131,10 @@ ui.drag = function(id, axis) {
 	return cs
 }
 
-function drag_or_hit(id) {
-	return ui.drag(id) || hit(id)
+function captured_or_hit(id) {
+	return captured(id) || hit(id)
 }
-ui.drag_or_hit = drag_or_hit
+ui.captured_or_hit = captured_or_hit
 
 /// setting the cursor icon
 
@@ -6754,7 +6755,7 @@ ss.create = function(cmd, id, answer_con, fr, align, valign) {
 		}
 	}
 
-	let hs = captured(id) || hit(id)
+	let hs = captured_or_hit(id)
 	let keys = ui.focused(id) ? ui.pointer.key_state : empty_set
 	if (!s.sent_keys || !set_equals(s.sent_keys, keys)) {
 		s.sent_keys = set(keys)
@@ -7118,7 +7119,7 @@ function split(hv, id, size, unit, fixed_side,
 
 	let horiz = hv == 'h'
 	let W = horiz ? 'w' : 'h' // measured/main-axis size prop
-	let cs = drag_or_hit(id)
+	let cs = captured_or_hit(id)
 	let s = ui.state(id)
 	let measured_wh = (cs?.dragging ? cs[W] : null) ?? s[W]
 	let max_size = (measured_wh ?? 1/0) - splitter_w
@@ -7210,7 +7211,7 @@ ui.splitter = function() {
 	let fr2            = split_stack[n-2]
 	let min2           = split_stack[n-1]
 	let horiz = hv == 'h'
-	let st = drag_or_hit(id) ? 'hover' : null
+	let st = captured_or_hit(id) ? 'hover' : null
 
 	let splitter_w = collapsed_side ? 0 : 1
 	ui.min_wh(horiz ? splitter_w : null, horiz ? null : splitter_w)
@@ -10542,24 +10543,24 @@ function tab_gap(w) {
 	ui.end_stack()
 }
 
-function tab_strip(id, s, tablist, selected_tab, tab_cs) {
+function tab_strip(id, s, tablist, selected_tab, cs) {
 	let tablist_id = id+'.tablist'+tablist.key
 	let tabs = tablist.tabs
-	let is_moving = tab_cs?.moved // the user is dragging a tab of this dock
+	let is_moving = cs?.moved // the user is dragging a tab of this dock
 	let has_gap = is_moving // insert a gap at the drop position
-		&& tab_cs.drop_tablist == tablist && tab_cs.drop_area == 'strip'
+		&& cs.drop_tablist == tablist && cs.drop_area == 'strip'
 	ui.stack('', 0)
 	ui.measure(tablist_id+'.strip')
-	if (is_moving && tab_cs.src_tablist == tablist)
-		draw_dock_drag(id, s, tab_cs)
+	if (is_moving && cs.src_tablist == tablist)
+		draw_dock_drag(id, s, cs)
 	ui.bb('bg1')
-	let skip_tab = is_moving && tab_cs.src_tablist == tablist // dragged tab
-		? tabs[tab_cs.tab_i] : null
+	let skip_tab = is_moving && cs.src_tablist == tablist // dragged tab
+		? tabs[cs.tab_i] : null
 	// gap_i counts only the tabs that the strip draws, so not skip_tab.
-	let gap_i = has_gap ? tab_cs.drop_insert_i : null
+	let gap_i = has_gap ? cs.drop_insert_i : null
 	let gap_w = has_gap // gap width
 		? ui.state_of(id+'.tabbox.'
-			+tab_cs.src_tablist.tabs[tab_cs.tab_i].id, 'w') : null
+			+cs.src_tablist.tabs[cs.tab_i].id, 'w') : null
 	let closing_tab // tab whose close button the user clicked
 	// the "+" sits outside the scrollbox, so it stays at the strip's end.
 	ui.h(1, 0, 's', 's')
@@ -10579,10 +10580,11 @@ function tab_strip(id, s, tablist, selected_tab, tab_cs) {
 			ui.capture_keys()
 		}
 		// pointer on the close button: hit() answers for it, not for the tab.
-		let is_hover = hit(id+'.tabclose.'+tab.id)
-			|| (!captured(box_id) && hit(box_id))
-		if (tab_box(id, tab, tab == selected_tab, is_hover,
-				is_hover && s.can_add_remove_tabs, s.is_strip_bottom))
+		let is_selected = tab == selected_tab
+		let is_dragging = cs?.dragging && cs.src_tablist == tablist && cs.tab_i == tab_i
+		let is_hover = hit(id+'.tabclose.'+tab.id) || captured_or_hit(box_id)
+		let has_close_button = s.can_add_remove_tabs && (is_hover || is_dragging) && !is_moving
+		if (tab_box(id, tab, is_selected, is_hover, has_close_button, s.is_strip_bottom))
 			closing_tab = tab
 		drawn_n++
 	}
@@ -10724,28 +10726,28 @@ let dock_edge_fr = .25 // tab pane edge zone, as a fraction of its w or h
 
 // the code snaps a dragged tab to a strip when the pointer is near the strip
 // vertically and over its width.
-function hit_tab_strip(id, tab_cs, node) {
+function hit_tab_strip(id, cs, node) {
 	if (node.split)
-		return hit_tab_strip(id, tab_cs, node.side1)
-			|| hit_tab_strip(id, tab_cs, node.side2)
+		return hit_tab_strip(id, cs, node.side1)
+			|| hit_tab_strip(id, cs, node.side2)
 	let strip = ui.state_of(id+'.tablist'+node.key+'.strip')
 	if (!(ui.mx >= strip.x && ui.mx < strip.x + strip.w
 			&& ui.my >= strip.y - strip.h * dock_snap_h
 			&& ui.my < strip.y + strip.h * (1 + dock_snap_h)))
 		return false
-	set_strip_drop(id, tab_cs, node)
+	set_strip_drop(id, cs, node)
 	return true
 }
 
 // make the strip of tablist node the drop target, at the dragged tab's x.
-function set_strip_drop(id, tab_cs, node) {
-	let tab_x = ui.mx - tab_cs.grab_x // dragged tab's left edge
+function set_strip_drop(id, cs, node) {
+	let tab_x = ui.mx - cs.grab_x // dragged tab's left edge
 	// insert before the first tab with its middle right of the tab's left x.
 	// the row of tabs is measured after scrolling, unlike the strip.
 	let x = ui.state_of(id+'.tablist'+node.key+'.tabs', 'x') // next tab's left
 	let insert_i = 0 // position among the tabs other than the dragged one
 	for (let tab_i = 0; tab_i < node.tabs.length; tab_i++) {
-		if (node == tab_cs.src_tablist && tab_i == tab_cs.tab_i)
+		if (node == cs.src_tablist && tab_i == cs.tab_i)
 			continue
 		let w = ui.state_of(id+'.tabbox.'+node.tabs[tab_i].id, 'w')
 		if (tab_x < x + w / 2)
@@ -10753,15 +10755,15 @@ function set_strip_drop(id, tab_cs, node) {
 		x += w
 		insert_i++
 	}
-	tab_cs.drop_tablist = node
-	tab_cs.drop_area = 'strip'
-	tab_cs.drop_insert_i = insert_i
+	cs.drop_tablist = node
+	cs.drop_area = 'strip'
+	cs.drop_insert_i = insert_i
 }
 
-function hit_tab_pane(id, tab_cs, node) {
+function hit_tab_pane(id, cs, node) {
 	if (node.split)
-		return hit_tab_pane(id, tab_cs, node.side1)
-			|| hit_tab_pane(id, tab_cs, node.side2)
+		return hit_tab_pane(id, cs, node.side1)
+			|| hit_tab_pane(id, cs, node.side2)
 	let tab_pane = ui.state_of(id+'.tablist'+node.key+'.pane')
 	let fx = (ui.mx - tab_pane.x) / tab_pane.w // pointer x, as a fraction of w
 	let fy = (ui.my - tab_pane.y) / tab_pane.h // pointer y, as a fraction of h
@@ -10774,26 +10776,26 @@ function hit_tab_pane(id, tab_cs, node) {
 		: edge_fr == fy ? 'top'
 		: 'bottom'
 	// splitting a tablist to put its only tab next to itself: no drop.
-	if (area != 'center' && node == tab_cs.src_tablist && node.tabs.length == 1)
+	if (area != 'center' && node == cs.src_tablist && node.tabs.length == 1)
 		return true
-	tab_cs.drop_tablist = node
-	tab_cs.drop_area = area
+	cs.drop_tablist = node
+	cs.drop_area = area
 	return true
 }
 
-function hit_dock(id, s, tab_cs) {
-	tab_cs.drop_tablist = null
-	tab_cs.drop_area = null
-	tab_cs.drop_insert_i = null
+function hit_dock(id, s, cs) {
+	cs.drop_tablist = null
+	cs.drop_area = null
+	cs.drop_insert_i = null
 	// fixed layout: the tab can only move along its own strip.
 	if (!s.can_change_layout) {
 		if (s.can_add_remove_tabs)
-			set_strip_drop(id, tab_cs, tab_cs.src_tablist)
+			set_strip_drop(id, cs, cs.src_tablist)
 		return
 	}
 	if (!hovers(id)) return // clip to visible dock if dock is in a scrollbox
-	if (hit_tab_strip(id, tab_cs, s.root)) return
-	if (hit_tab_pane(id, tab_cs, s.root)) return
+	if (hit_tab_strip(id, cs, s.root)) return
+	if (hit_tab_pane(id, cs, s.root)) return
 }
 
 // move the tab to the drop target, or remove it if no area.
@@ -10850,13 +10852,13 @@ tab record fields that the dock reads and writes:
 		ui.set_dock_tab(), e.g. from a prompt built in the tab's content.
 */
 
-function* dock_tab_panes(id, s, node, tab_cs) {
+function* dock_tab_panes(id, s, node, cs) {
 	if (node.split) {
 		ui.hvsplit(node.split, id+'.split'+node.key,
 			node.size, node.unit, node.fixed_side)
-		yield* dock_tab_panes(id, s, node.side1, tab_cs)
+		yield* dock_tab_panes(id, s, node.side1, cs)
 		ui.splitter()
-		yield* dock_tab_panes(id, s, node.side2, tab_cs)
+		yield* dock_tab_panes(id, s, node.side2, cs)
 		end_split()
 	} else {
 		let tablist_id = id+'.tablist'+node.key
@@ -10870,7 +10872,7 @@ function* dock_tab_panes(id, s, node, tab_cs) {
 
 		ui.v(1, 0, 's', 's')
 			if (!s.is_strip_bottom)
-				tab_strip(id, s, node, selected_tab, tab_cs)
+				tab_strip(id, s, node, selected_tab, cs)
 			ui.stack('', 1, 's', 's')
 			ui.measure(tablist_id+'.pane')
 			// empty root tablist: no tab to build.
@@ -10881,25 +10883,25 @@ function* dock_tab_panes(id, s, node, tab_cs) {
 			}
 			ui.end_stack()
 			if (s.is_strip_bottom)
-				tab_strip(id, s, node, selected_tab, tab_cs)
+				tab_strip(id, s, node, selected_tab, cs)
 		ui.end_v()
 	}
 }
 
 // draw the drop marker and the dragged tab over everything.
-function draw_dock_drag(id, s, tab_cs) {
+function draw_dock_drag(id, s, cs) {
 
-	let tab = tab_cs.src_tablist.tabs[tab_cs.tab_i]
-	let x = ui.mx - tab_cs.grab_x // dragged tab's left edge
-	let y = ui.my - tab_cs.grab_y // dragged tab's top edge
+	let tab = cs.src_tablist.tabs[cs.tab_i]
+	let x = ui.mx - cs.grab_x // dragged tab's left edge
+	let y = ui.my - cs.grab_y // dragged tab's top edge
 
-	let area = tab_cs.drop_area
+	let area = cs.drop_area
 	if (area == 'strip') {
-		let strip = ui.state_of(id+'.tablist'+tab_cs.drop_tablist.key+'.strip')
+		let strip = ui.state_of(id+'.tablist'+cs.drop_tablist.key+'.strip')
 		x = max(strip.x, x)
 		y = strip.y
 	} else if (area) {
-		let tab_pane = ui.state_of(id+'.tablist'+tab_cs.drop_tablist.key
+		let tab_pane = ui.state_of(id+'.tablist'+cs.drop_tablist.key
 			+'.pane')
 		let mx = tab_pane.x // marker x
 		let my = tab_pane.y // marker y
@@ -10920,7 +10922,7 @@ function draw_dock_drag(id, s, tab_cs) {
 
 	ui.popup('', 'drag', 'screen', 'it', '[', null, null, x, y)
 	ui.nohit()
-		tab_box(id, tab, tab.id == tab_cs.src_tablist.selected_tab_id,
+		tab_box(id, tab, tab.id == cs.src_tablist.selected_tab_id,
 			true, false, s.is_strip_bottom)
 	ui.end_popup()
 }
@@ -10957,34 +10959,34 @@ ui.dock = function*(id, layout, opt) {
 	}
 
 	let drag_tab_id = capture_match(id+'.tabbox.') // id of the dragged tab
-	let tab_cs = drag_tab_id != null // capture state of the dragged tab
+	let cs = drag_tab_id != null // capture state of the dragged tab
 		? ui.drag(id+'.tabbox.'+drag_tab_id, s.can_change_layout ? null : 'x')
 		: null
-	if (tab_cs?.drag) {
+	if (cs?.drag) {
 		let tablist = find_dock_tablist(s.root, drag_tab_id)
 		if (tablist.selected_tab_id != drag_tab_id) {
 			tablist.selected_tab_id = drag_tab_id
 			save_dock_layout(id, s)
 		}
 		let box_id = id+'.tabbox.'+drag_tab_id
-		tab_cs.src_tablist = tablist
-		tab_cs.tab_i = tablist.tabs.findIndex(tab => tab.id == drag_tab_id)
-		tab_cs.grab_x = ui.mx0 - ui.state_of(box_id, 'x')
-		tab_cs.grab_y = ui.my0 - ui.state_of(box_id, 'y')
+		cs.src_tablist = tablist
+		cs.tab_i = tablist.tabs.findIndex(tab => tab.id == drag_tab_id)
+		cs.grab_x = ui.mx0 - ui.state_of(box_id, 'x')
+		cs.grab_y = ui.my0 - ui.state_of(box_id, 'y')
 	}
-	if (tab_cs?.moved)
-		hit_dock(id, s, tab_cs)
-	if (tab_cs?.drop) {
-		if (tab_cs.drop_area) {
-			move_dock_tab(id, s, tab_cs.src_tablist, tab_cs.tab_i,
-				tab_cs.drop_tablist, tab_cs.drop_area, tab_cs.drop_insert_i)
+	if (cs?.moved)
+		hit_dock(id, s, cs)
+	if (cs?.drop) {
+		if (cs.drop_area) {
+			move_dock_tab(id, s, cs.src_tablist, cs.tab_i,
+				cs.drop_tablist, cs.drop_area, cs.drop_insert_i)
 			save_dock_layout(id, s)
 		}
-		tab_cs = null
+		cs = null
 	}
 
 	ui.stack(id)
-		yield* dock_tab_panes(id, s, s.root, tab_cs)
+		yield* dock_tab_panes(id, s, s.root, cs)
 	ui.end_stack()
 }
 
@@ -11193,7 +11195,7 @@ function resize_side(side, edges) {
 }
 
 function resizer_update(id, s) {
-	let cs = drag_or_hit(id)
+	let cs = captured_or_hit(id)
 	if (!cs)
 		return
 	if (!cs.dragging)

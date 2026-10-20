@@ -1331,7 +1331,8 @@ function code_edit_view(id, opt) {
 			+ caret_w)
 		let text_h = lines.length * line_h
 
-		let cs = ui.drag_or_hit(id+'.text_contentbox')
+		let cs = ui.drag(id+'.text_contentbox')
+			|| ui.hit(id+'.text_contentbox')
 		if (cs?.drag)
 			ui.focus(id)
 
