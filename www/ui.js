@@ -100,14 +100,12 @@ TODO
 	textarea
 	[v]select-button
 	textarea-input
-	pass-input
 	num-input
 	tags-box
 	tags-input
 	check-dropdown
 	range-calendar
 	ranges-calendar
-	date-input
 	timeofday-input
 	datetime-input
 	date-range-input
@@ -558,19 +556,19 @@ ui.color_def('dark' , 'green-text', 'normal', 120, 0.59, 0.54)
 
 //            theme    name        state       h     s     L     a
 // ---------------------------------------------------------------------------
-ui.color_def('light', 'light'   , 'normal' ,   0,    0,    0, 0.10)
-ui.color_def('light', 'light'   , 'hover'  ,   0,    0,    0, 0.30)
-ui.color_def('light', 'intense' , 'normal' ,   0,    0,    0, 0.10)
-ui.color_def('light', 'intense' , 'focused',   0,    0,    0, 0.30)
-ui.color_def('light', 'intense' , 'hover'  ,   0,    0,    0, 0.40)
-ui.color_def('light', 'max'     , 'normal' ,   0,    0,    0, 1.00)
+ui.color_def('light', 'light'   , 'normal' ,   0,    0, 0.90)
+ui.color_def('light', 'light'   , 'hover'  ,   0,    0, 0.70)
+ui.color_def('light', 'intense' , 'normal' ,   0,    0, 0.90)
+ui.color_def('light', 'intense' , 'focused',   0,    0, 0.70)
+ui.color_def('light', 'intense' , 'hover'  ,   0,    0, 0.60)
+ui.color_def('light', 'max'     , 'normal' ,   0,    0,    0)
 
-ui.color_def('dark' , 'light'   , 'normal' ,   0,    0,    1, 0.06)
-ui.color_def('dark' , 'light'   , 'hover'  ,   0,    0,    1, 0.03)
-ui.color_def('dark' , 'intense' , 'normal' ,   0,    0,    1, 0.08)
-ui.color_def('dark' , 'intense' , 'focused',   0,    0,    1, 0.25)
-ui.color_def('dark' , 'intense' , 'hover'  ,   0,    0,    1, 0.40)
-ui.color_def('dark' , 'max'     , 'normal' ,   0,    0,    1, 1.00)
+ui.color_def('dark' , 'light'   , 'normal' , 216, 0.17, 0.15)
+ui.color_def('dark' , 'light'   , 'hover'  , 216, 0.21, 0.13)
+ui.color_def('dark' , 'intense' , 'normal' , 216, 0.15, 0.19)
+ui.color_def('dark' , 'intense' , 'focused', 216, 0.06, 0.33)
+ui.color_def('dark' , 'intense' , 'hover'  , 216, 0.04, 0.46)
+ui.color_def('dark' , 'max'     , 'normal' ,   0,    0,    1)
 
 /// background colors --------------------------------------------------------
 
@@ -2543,6 +2541,8 @@ ui.focus_first = function(group_id) {
 }
 
 function resolve_focus_first(group_id) {
+	if (ui.focus_inside(group_id))
+		return true
 	let group_i = focus_group_map.get(group_id)
 	if (group_i == null)
 		return false
@@ -3936,18 +3936,20 @@ const SB_STATE     = BOX_CT_ARGS+7
 const SB_SCROLL_ID = BOX_CT_ARGS+8 // x_id,y_id: state ids for sync'ed scrollboxes
 const SB_MAX_W     = BOX_CT_ARGS+10 // max w,h
 
-const SB_OVERFLOW_AUTO     = 0
-const SB_OVERFLOW_HIDE     = 1
-const SB_OVERFLOW_SCROLL   = 2
-const SB_OVERFLOW_CONTAIN  = 3 // expand to fit content, like a stack.
-const SB_OVERFLOW_INFINITE = 4 // special mode for the infinite calendar.
+const SB_OVERFLOW_AUTO       = 0
+const SB_OVERFLOW_AUTO_HOVER = 1 // like auto but only shows on hover
+const SB_OVERFLOW_HIDE       = 2
+const SB_OVERFLOW_SCROLL     = 3
+const SB_OVERFLOW_CONTAIN    = 4 // expand to fit content, like a stack.
+const SB_OVERFLOW_INFINITE   = 5 // special mode for the infinite calendar.
 
 function parse_sb_overflow(s) {
-	if (s == null   || s == 'auto'    ) return SB_OVERFLOW_AUTO
-	if (s === false || s == 'hide'    ) return SB_OVERFLOW_HIDE
-	if (s === true  || s == 'scroll'  ) return SB_OVERFLOW_SCROLL
-	if (               s == 'contain' ) return SB_OVERFLOW_CONTAIN
-	if (               s == 'infinite') return SB_OVERFLOW_INFINITE
+	if (s == null   || s == 'auto'      ) return SB_OVERFLOW_AUTO
+	if (               s == 'auto-hover') return SB_OVERFLOW_AUTO_HOVER
+	if (s === false || s == 'hide'      ) return SB_OVERFLOW_HIDE
+	if (s === true  || s == 'scroll'    ) return SB_OVERFLOW_SCROLL
+	if (               s == 'contain'   ) return SB_OVERFLOW_CONTAIN
+	if (               s == 'infinite'  ) return SB_OVERFLOW_INFINITE
 	assert(false, 'invalid overflow ', s)
 }
 
@@ -4266,11 +4268,13 @@ scrollbar_rect = function(a, i, axis, state) {
 	let h_visible = pw < 1 && (
 			   overflow_x == SB_OVERFLOW_SCROLL
 			|| overflow_x == SB_OVERFLOW_AUTO
+			|| overflow_x == SB_OVERFLOW_AUTO_HOVER
 			|| overflow_x == SB_OVERFLOW_INFINITE
 		)
 	let v_visible = ph < 1 && (
 			   overflow_y == SB_OVERFLOW_SCROLL
 			|| overflow_y == SB_OVERFLOW_AUTO
+			|| overflow_y == SB_OVERFLOW_AUTO_HOVER
 			|| overflow_y == SB_OVERFLOW_INFINITE
 		)
 	let both_visible = h_visible && v_visible && 1 || 0
@@ -4326,6 +4330,9 @@ draw_end[CMD_SCROLLBOX] = function(a, i) {
 			scrollbar_rect(a, i, axis, state)
 
 		if (!visible)
+			continue
+
+		if (!state && a[i+SB_OVERFLOW+axis] == SB_OVERFLOW_AUTO_HOVER)
 			continue
 
 		// draw the track
@@ -7119,7 +7126,7 @@ function split(hv, id, size, unit, fixed_side,
 
 	let horiz = hv == 'h'
 	let W = horiz ? 'w' : 'h' // measured/main-axis size prop
-	let cs = captured_or_hit(id)
+	let cs = ui.drag(id, horiz ? 'x' : 'y') || ui.hit(id)
 	let s = ui.state(id)
 	let measured_wh = (cs?.dragging ? cs[W] : null) ?? s[W]
 	let max_size = (measured_wh ?? 1/0) - splitter_w
@@ -10497,41 +10504,34 @@ ui.live_move_mixin = function(e) {
 
 //// DOCK --------------------------------------------------------------------
 
-// TODO: auto_focus
-
 ui.icon_def('plus', 'tabler', '\ueb0b')
 
-function tab_box(
+function tabbox(
 	id, tab, is_selected, is_hover, has_close_button, is_strip_bottom
 ) {
-	let is_close_clicked = false // the user clicked the close button
 	let box_id = id+'.tabbox.'+tab.id
 	ui.focusable(box_id)
 	ui.keep_focus(box_id)
 	ui.stack(box_id)
 	ui.measure(box_id)
 	ui.focus_ring(box_id)
-		ui.bb('bg1', is_hover ? 'hover' : null)
-		ui.p(ui.sp2())
+	let state = is_hover && !is_selected ? 'hover' : null
+	ui.bb(is_selected ? 'bg' : 'bg1', state, is_selected ? 'r' : 'br', 'intense')
+	ui.ph(ui.em(1.5), ui.em(.25))
+	ui.h(0, ui.sp())
 		ui.text('', tab.label)
-		if (is_selected) {
-			ui.min_h(2)
-			// marker on the tab's edge that faces the pane.
-			ui.stack('', 1, 's', is_strip_bottom ? 't' : 'b')
-				ui.bb('marker')
-			ui.end_stack()
-		}
+		ui.min_w(ui.em(1.25))
+		ui.stack('', 0)
 		if (has_close_button) {
-			ui.stack('', 0, 'r', 'c')
-				ui.bb('bg1', 'hover')
-				ui.font_size(1)
-				// using id+'.tabclose' instead of uid+'.tabbox.close'
-				// because that prefix is for ui.dock() drag state.
-				is_close_clicked = ui.bare_icon_button(id+'.tabclose.'+tab.id, 'x')
-			ui.end_stack()
+			ui.font_size(1)
+			ui.min_w(0)
+			// using id+'.tabclose' instead of uid+'.tabbox.close'
+			// because that prefix is for ui.dock() drag state.
+			ui.bare_icon_button(id+'.tabclose.'+tab.id, 'x')
 		}
+		ui.end_stack()
+	ui.end_h()
 	ui.end_stack()
-	return is_close_clicked
 }
 
 function tab_gap(w) {
@@ -10543,7 +10543,7 @@ function tab_gap(w) {
 	ui.end_stack()
 }
 
-function tab_strip(id, s, tablist, selected_tab, cs) {
+function tab_strip(id, s, tablist, selected_tab, cs, added_tab_id) {
 	let tablist_id = id+'.tablist'+tablist.key
 	let tabs = tablist.tabs
 	let is_moving = cs?.moved // the user is dragging a tab of this dock
@@ -10553,7 +10553,7 @@ function tab_strip(id, s, tablist, selected_tab, cs) {
 	ui.measure(tablist_id+'.strip')
 	if (is_moving && cs.src_tablist == tablist)
 		draw_dock_drag(id, s, cs)
-	ui.bb('bg1')
+	ui.bb('bg1', null, 'b', 'intense')
 	let skip_tab = is_moving && cs.src_tablist == tablist // dragged tab
 		? tabs[cs.tab_i] : null
 	// gap_i counts only the tabs that the strip draws, so not skip_tab.
@@ -10561,10 +10561,8 @@ function tab_strip(id, s, tablist, selected_tab, cs) {
 	let gap_w = has_gap // gap width
 		? ui.state_of(id+'.tabbox.'
 			+cs.src_tablist.tabs[cs.tab_i].id, 'w') : null
-	let closing_tab // tab whose close button the user clicked
-	// the "+" sits outside the scrollbox, so it stays at the strip's end.
 	ui.h(1, 0, 's', 's')
-	ui.sb(tablist_id, 1, 'auto', 'contain')
+	ui.sb(tablist_id, 1, 'auto-hover', 'contain')
 	ui.h(0, 0, 'l', 't')
 	ui.measure(tablist_id+'.tabs')
 	let drawn_n = 0 // number of tabs drawn so far
@@ -10575,53 +10573,30 @@ function tab_strip(id, s, tablist, selected_tab, cs) {
 		if (drawn_n == gap_i)
 			tab_gap(gap_w)
 		let box_id = id+'.tabbox.'+tab.id
-		if (ui.focused(box_id) && ui.keydown('enter')) {
-			ui.select_dock_tab(id, tab.id)
-			ui.capture_keys()
-		}
 		// pointer on the close button: hit() answers for it, not for the tab.
 		let is_selected = tab == selected_tab
 		let is_dragging = cs?.dragging && cs.src_tablist == tablist && cs.tab_i == tab_i
 		let is_hover = hit(id+'.tabclose.'+tab.id) || captured_or_hit(box_id)
 		let has_close_button = s.can_add_remove_tabs && (is_hover || is_dragging) && !is_moving
-		if (tab_box(id, tab, is_selected, is_hover, has_close_button, s.is_strip_bottom))
-			closing_tab = tab
+		if (tab.id == added_tab_id)
+			ui.scroll_to_view_next_box()
+		tabbox(id, tab, is_selected, is_hover, has_close_button, s.is_strip_bottom)
 		drawn_n++
 	}
 	if (drawn_n == gap_i)
 		tab_gap(gap_w)
 	// stabilize tab strip height for when it has no tabs to set a height.
-	ui.pv(ui.sp2())
+	ui.pv(ui.em(0.65))
    ui.min_h(ui.line_h())
  	ui.box()
 	ui.end_h()
 	ui.end_sb()
-	let add_clicked = false // the user clicked the "+"
 	if (s.can_add_remove_tabs) {
 		ui.font_size(1)
 		ui.ph(ui.sp())
-		add_clicked = ui.bare_icon_button(tablist_id+'.plus', 'plus', null, 0)
+		ui.bare_icon_button(tablist_id+'.plus', 'plus', null, 0)
 	}
 	ui.end_h()
-	if (closing_tab?.confirm_close) {
-		// select it so that the app builds its content and can ask there.
-		ui.select_dock_tab(id, closing_tab.id)
-		ui.set_dock_tab(id, closing_tab.id, {closing: true})
-	} else if (closing_tab) {
-		ui.remove_dock_tab(id, closing_tab.id)
-	}
-	if (add_clicked) {
-		let tab_ids = set() // {tab_id}
-		add_dock_tab_ids(s.root, tab_ids)
-		let tab_n = 1 // number in the id of the new tab
-		while (tab_ids.has('tab'+tab_n))
-			tab_n++
-		let tab_id = 'tab'+tab_n
-		tabs.push({id: tab_id, label: 'New Tab'})
-		tablist.selected_tab_id = tab_id
-		save_dock_layout(id, s)
-		ui.rebuild('dock_tab_added')
-	}
 	ui.end_stack()
 }
 
@@ -10670,21 +10645,30 @@ function create_dock_layout(s, layout) {
 		?? {key: s.next_key++, tabs: [], selected_tab_id: null}
 }
 
-function find_dock_tablist(node, tab_id) {
-	if (node.split)
-		return find_dock_tablist(node.side1, tab_id)
-			?? find_dock_tablist(node.side2, tab_id)
+function walk_dock_tablists(node, on_tablist, arg1, arg2) {
+	if (node.split) {
+		return walk_dock_tablists(node.side1, on_tablist, arg1, arg2)
+			|| walk_dock_tablists(node.side2, on_tablist, arg1, arg2)
+	} else {
+		return on_tablist(node, arg1, arg2)
+	}
+}
+
+function find_dock_tablist(root, tab_id) {
+	return walk_dock_tablists(root, find_tablist_with_tab, tab_id)
+}
+
+function find_tablist_with_tab(node, tab_id) {
 	return node.tabs.some(tab => tab.id == tab_id) ? node : null
 }
 
-function add_dock_tab_ids(node, tab_ids) {
-	if (node.split) {
-		add_dock_tab_ids(node.side1, tab_ids)
-		add_dock_tab_ids(node.side2, tab_ids)
-	} else {
-		for (let tab of node.tabs)
-			tab_ids.add(tab.id)
-	}
+function add_dock_tab_ids(root, tab_ids) {
+	return walk_dock_tablists(root, add_tablist_tab_ids, tab_ids)
+}
+
+function add_tablist_tab_ids(node, tab_ids) {
+	for (let tab of node.tabs)
+		tab_ids.add(tab.id)
 }
 
 function save_dock_layout(id, s) {
@@ -10724,12 +10708,13 @@ drop_insert_i: position in drop_tablist's tabs without the dragged tab.
 let dock_snap_h = .5 // snapping range above and below a strip, in strip h
 let dock_edge_fr = .25 // tab pane edge zone, as a fraction of its w or h
 
+function hit_tab_strip(root, id, cs) {
+	return walk_dock_tablists(root, hit_tablist_strip, id, cs)
+}
+
 // the code snaps a dragged tab to a strip when the pointer is near the strip
 // vertically and over its width.
-function hit_tab_strip(id, cs, node) {
-	if (node.split)
-		return hit_tab_strip(id, cs, node.side1)
-			|| hit_tab_strip(id, cs, node.side2)
+function hit_tablist_strip(node, id, cs) {
 	let strip = ui.state_of(id+'.tablist'+node.key+'.strip')
 	if (!(ui.mx >= strip.x && ui.mx < strip.x + strip.w
 			&& ui.my >= strip.y - strip.h * dock_snap_h
@@ -10760,10 +10745,11 @@ function set_strip_drop(id, cs, node) {
 	cs.drop_insert_i = insert_i
 }
 
-function hit_tab_pane(id, cs, node) {
-	if (node.split)
-		return hit_tab_pane(id, cs, node.side1)
-			|| hit_tab_pane(id, cs, node.side2)
+function hit_tab_pane(root, id, cs) {
+	return walk_dock_tablists(root, hit_tablist_pane, id, cs)
+}
+
+function hit_tablist_pane(node, id, cs) {
 	let tab_pane = ui.state_of(id+'.tablist'+node.key+'.pane')
 	let fx = (ui.mx - tab_pane.x) / tab_pane.w // pointer x, as a fraction of w
 	let fy = (ui.my - tab_pane.y) / tab_pane.h // pointer y, as a fraction of h
@@ -10794,8 +10780,8 @@ function hit_dock(id, s, cs) {
 		return
 	}
 	if (!hovers(id)) return // clip to visible dock if dock is in a scrollbox
-	if (hit_tab_strip(id, cs, s.root)) return
-	if (hit_tab_pane(id, cs, s.root)) return
+	if (hit_tab_strip(s.root, id, cs)) return
+	if (hit_tab_pane(s.root, id, cs)) return
 }
 
 // move the tab to the drop target, or remove it if no area.
@@ -10844,6 +10830,50 @@ function move_dock_tab(
 	}
 }
 
+function update_dock_tabs(root, id, s) {
+	return walk_dock_tablists(root, update_tablist_tabs, id, s)
+}
+
+function update_tablist_tabs(node, id, s) {
+	for (let tab_i = 0; tab_i < node.tabs.length; tab_i++) { // tab index
+		let tab = node.tabs[tab_i]
+		if (ui.keydown('enter') && ui.focused(id+'.tabbox.'+tab.id)) {
+			node.selected_tab_id = tab.id
+			save_dock_layout(id, s)
+			ui.rebuild('dock_tab_selected')
+			ui.capture_keys()
+		}
+		if (!s.can_add_remove_tabs
+				|| ui.state_of(id+'.tabclose.'+tab.id, 'state') != 'click')
+			continue
+		if (tab.confirm_close) {
+			// select it so that the app builds its content and can ask there.
+			node.selected_tab_id = tab.id
+			tab.closing = true
+		} else {
+			move_dock_tab(id, s, node, tab_i)
+		}
+		save_dock_layout(id, s)
+		ui.rebuild(tab.confirm_close
+			? 'dock_tab_changed' : 'dock_tab_removed')
+		break
+	}
+	if (s.can_add_remove_tabs
+			&& ui.state_of(id+'.tablist'+node.key+'.plus', 'state') == 'click') {
+		let tab_ids = set() // {tab_id}
+		add_dock_tab_ids(s.root, tab_ids)
+		let tab_n = 1 // number in the id of the new tab
+		while (tab_ids.has('tab'+tab_n))
+			tab_n++
+		let tab_id = 'tab'+tab_n
+		node.tabs.push({id: tab_id, label: 'New Tab'})
+		node.selected_tab_id = tab_id
+		save_dock_layout(id, s)
+		ui.rebuild('dock_tab_added')
+		return tab_id
+	}
+}
+
 /*
 tab record fields that the dock reads and writes:
 	confirm_close: the close button sets closing instead of removing the tab.
@@ -10852,38 +10882,42 @@ tab record fields that the dock reads and writes:
 		ui.set_dock_tab(), e.g. from a prompt built in the tab's content.
 */
 
-function* dock_tab_panes(id, s, node, cs) {
+function dock_tab_panes(id, s, node, cs, on_build_tab, added_tab_id) {
 	if (node.split) {
 		ui.hvsplit(node.split, id+'.split'+node.key,
 			node.size, node.unit, node.fixed_side)
-		yield* dock_tab_panes(id, s, node.side1, cs)
+		dock_tab_panes(id, s, node.side1, cs, on_build_tab, added_tab_id)
 		ui.splitter()
-		yield* dock_tab_panes(id, s, node.side2, cs)
+		dock_tab_panes(id, s, node.side2, cs, on_build_tab, added_tab_id)
 		end_split()
 	} else {
 		let tablist_id = id+'.tablist'+node.key
 		let tabs = node.tabs
-		let selected_tab = tabs.find(tab => tab.id == node.selected_tab_id)
+		let selected_tab // selected tab record
 
 		// the caller builds only the selected tab's content: keep the others'.
 		for (let tab of tabs)
-			if (tab != selected_tab)
+			if (!selected_tab && tab.id == node.selected_tab_id)
+				selected_tab = tab
+			else
 				ui.keep_state_scope(id+'.tab.'+tab.id)
 
 		ui.v(1, 0, 's', 's')
 			if (!s.is_strip_bottom)
-				tab_strip(id, s, node, selected_tab, cs)
+				tab_strip(id, s, node, selected_tab, cs, added_tab_id)
 			ui.stack('', 1, 's', 's')
 			ui.measure(tablist_id+'.pane')
 			// empty root tablist: no tab to build.
 			if (selected_tab) {
 				ui.begin_state_scope(id+'.tab.'+selected_tab.id)
-				yield selected_tab
+				ui.focus_group(false, null, id+'.tab.'+selected_tab.id)
+				on_build_tab(selected_tab)
+				ui.end_focus_group()
 				ui.end_state_scope()
 			}
 			ui.end_stack()
 			if (s.is_strip_bottom)
-				tab_strip(id, s, node, selected_tab, cs)
+				tab_strip(id, s, node, selected_tab, cs, added_tab_id)
 		ui.end_v()
 	}
 }
@@ -10922,7 +10956,7 @@ function draw_dock_drag(id, s, cs) {
 
 	ui.popup('', 'drag', 'screen', 'it', '[', null, null, x, y)
 	ui.nohit()
-		tab_box(id, tab, tab.id == cs.src_tablist.selected_tab_id,
+		tabbox(id, tab, tab.id == cs.src_tablist.selected_tab_id,
 			true, false, s.is_strip_bottom)
 	ui.end_popup()
 }
@@ -10933,7 +10967,7 @@ options:
 	can_add_remove_tabs : t|f     allow add/remove/reorder tabs
 	can_change_layout   : t|f     allow docking tabs anywhere
 */
-ui.dock = function*(id, layout, opt) {
+ui.dock = function(id, layout, on_build_tab, opt) {
 
 	opt ??= empty
 	let s = ui.state(id)
@@ -10968,6 +11002,7 @@ ui.dock = function*(id, layout, opt) {
 			tablist.selected_tab_id = drag_tab_id
 			save_dock_layout(id, s)
 		}
+		ui.focus_first(id+'.tab.'+drag_tab_id)
 		let box_id = id+'.tabbox.'+drag_tab_id
 		cs.src_tablist = tablist
 		cs.tab_i = tablist.tabs.findIndex(tab => tab.id == drag_tab_id)
@@ -10985,8 +11020,12 @@ ui.dock = function*(id, layout, opt) {
 		cs = null
 	}
 
+	let added_tab_id // tab added in this pass
+	if (!cs?.moved && (s.can_add_remove_tabs || ui.keydown('enter')))
+		added_tab_id = update_dock_tabs(s.root, id, s)
+
 	ui.stack(id)
-		yield* dock_tab_panes(id, s, s.root, cs)
+		dock_tab_panes(id, s, s.root, cs, on_build_tab, added_tab_id)
 	ui.end_stack()
 }
 
