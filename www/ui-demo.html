@@ -229,7 +229,11 @@ demos.dock = function() {
 ui.m(ui.em(5))
 ui.stack('', 1, 's', 'c')
 	ui.v()
-		ui.min_h(400)
+		// a dragging tab is shown on top of the border around the dock,
+		// and it doesn't itself have a border, so it cuts the border.
+		// this top marging puts the dock border above the reach of the tab.
+		ui.mt(1)
+		ui.min_h(600)
 		ui.dock('dock1', dock1_layout, build_dock1_tab)
 	ui.end_v()
 	ui.border(1, 'intense')

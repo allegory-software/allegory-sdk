@@ -10507,7 +10507,7 @@ ui.live_move_mixin = function(e) {
 ui.icon_def('plus', 'tabler', '\ueb0b')
 
 function tabbox(
-	id, tab, is_selected, is_hover, has_close_button, is_strip_bottom
+	id, tab, is_selected, is_hover, has_close_button, is_strip_bottom, move_area
 ) {
 	let box_id = id+'.tabbox.'+tab.id
 	ui.focusable(box_id)
@@ -10516,15 +10516,18 @@ function tabbox(
 	ui.measure(box_id)
 	ui.focus_ring(box_id)
 	let state = is_hover && !is_selected ? 'hover' : null
-	ui.bb(is_selected ? 'bg' : 'bg1', state, is_selected ? 'r' : 'br', 'intense')
+	let border_sides = move_area !== undefined && move_area != 'strip' ? 1 : 'r'
+	ui.bb(is_selected ? 'bg' : 'bg1', state, border_sides, 'intense')
 	ui.ph(ui.em(1.5), ui.em(.25))
+	ui.pv(ui.em(0.65))
+   ui.min_h(ui.line_h())
 	ui.h(0, ui.sp())
 		ui.text('', tab.label)
 		ui.min_w(ui.em(1.25))
 		ui.stack('', 0)
 		if (has_close_button) {
 			ui.font_size(1)
-			ui.min_w(0)
+			ui.min_wh(0, 0)
 			// using id+'.tabclose' instead of uid+'.tabbox.close'
 			// because that prefix is for ui.dock() drag state.
 			ui.bare_icon_button(id+'.tabclose.'+tab.id, 'x')
@@ -10647,28 +10650,26 @@ function create_dock_layout(s, layout) {
 
 function walk_dock_tablists(node, on_tablist, arg1, arg2) {
 	if (node.split) {
-		return walk_dock_tablists(node.side1, on_tablist, arg1, arg2)
-			|| walk_dock_tablists(node.side2, on_tablist, arg1, arg2)
+		return (
+			walk_dock_tablists(node.side1, on_tablist, arg1, arg2) ||
+			walk_dock_tablists(node.side2, on_tablist, arg1, arg2)
+		)
 	} else {
 		return on_tablist(node, arg1, arg2)
 	}
 }
-
 function find_dock_tablist(root, tab_id) {
 	return walk_dock_tablists(root, find_tablist_with_tab, tab_id)
 }
-
 function find_tablist_with_tab(node, tab_id) {
 	return node.tabs.some(tab => tab.id == tab_id) ? node : null
 }
-
-function add_dock_tab_ids(root, tab_ids) {
-	return walk_dock_tablists(root, add_tablist_tab_ids, tab_ids)
-}
-
 function add_tablist_tab_ids(node, tab_ids) {
 	for (let tab of node.tabs)
 		tab_ids.add(tab.id)
+}
+function add_dock_tab_ids(root, tab_ids) {
+	return walk_dock_tablists(root, add_tablist_tab_ids, tab_ids)
 }
 
 function save_dock_layout(id, s) {
@@ -10708,10 +10709,6 @@ drop_insert_i: position in drop_tablist's tabs without the dragged tab.
 let dock_snap_h = .5 // snapping range above and below a strip, in strip h
 let dock_edge_fr = .25 // tab pane edge zone, as a fraction of its w or h
 
-function hit_tab_strip(root, id, cs) {
-	return walk_dock_tablists(root, hit_tablist_strip, id, cs)
-}
-
 // the code snaps a dragged tab to a strip when the pointer is near the strip
 // vertically and over its width.
 function hit_tablist_strip(node, id, cs) {
@@ -10722,6 +10719,9 @@ function hit_tablist_strip(node, id, cs) {
 		return false
 	set_strip_drop(id, cs, node)
 	return true
+}
+function hit_tab_strip(root, id, cs) {
+	return walk_dock_tablists(root, hit_tablist_strip, id, cs)
 }
 
 // make the strip of tablist node the drop target, at the dragged tab's x.
@@ -10957,7 +10957,7 @@ function draw_dock_drag(id, s, cs) {
 	ui.popup('', 'drag', 'screen', 'it', '[', null, null, x, y)
 	ui.nohit()
 		tabbox(id, tab, tab.id == cs.src_tablist.selected_tab_id,
-			true, false, s.is_strip_bottom)
+			true, false, s.is_strip_bottom, area)
 	ui.end_popup()
 }
 
