@@ -23,7 +23,6 @@ built-in remote screen sharing.
 * popup positioning.
 * z-layering.
 * styling system for colors and spacing better than CSS.
-* animations better than CSS.
 * IMGUI, so stateless, no DOM updating or diff'ing.
 * no dependencies, no build system, small, hackable code base.
 * possible to add new layouting algorithms.
@@ -46,10 +45,10 @@ row range at an offset.
 
 ## Limitations of canvas-drawn
 
-With canvas, you have to reimplement the web from scratch: layouting, styling,
-animations, box model, etc. Most of these are easy and you can even
-do a better job with not a lot of code. But some are infeasible because
-of missing APIs. Text APIs in particular are very crude
-in the browser, so things like BiDi (UAX#9), Unicode line breaking (UAX#14),
-dictionary-based word wrapping, underlines that break under letter stems,
-all those things are hard, and we'll just have to do without.
+With canvas, you have to reimplement the DOM from scratch: layouting, styling,
+box model, etc. Most of these are easy and you can even do a better job with
+not a lot of code. But some are infeasible because of missing APIs. Text APIs
+in particular are very crude in the browser, so things like BiDi (UAX#9),
+Unicode line breaking (UAX#14), dictionary-based word wrapping, underlines
+that break under letter stems, all those things are hard, and we'll just have
+to do without.

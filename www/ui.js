@@ -1129,6 +1129,10 @@ ui.drag = function(id, axis) {
 	return cs
 }
 
+ui.drag_or_hit = function(id, axis) {
+	return ui.drag(id, axis) || hit(id)
+}
+
 function captured_or_hit(id) {
 	return captured(id) || hit(id)
 }
@@ -7128,7 +7132,7 @@ function split(hv, id, size, unit, fixed_side,
 
 	let horiz = hv == 'h'
 	let W = horiz ? 'w' : 'h' // measured/main-axis size prop
-	let cs = ui.drag(id, horiz ? 'x' : 'y') || ui.hit(id)
+	let cs = ui.drag_or_hit(id, horiz ? 'x' : 'y')
 	let s = ui.state(id)
 	let measured_wh = (cs?.dragging ? cs[W] : null) ?? s[W]
 	let max_size = (measured_wh ?? 1/0) - splitter_w
@@ -10519,7 +10523,9 @@ function tabbox(
 	ui.measure(box_id)
 	ui.focus_ring(box_id)
 	let state = is_hover && !is_selected ? 'hover' : null
-	let border_sides = move_area !== undefined && move_area != 'strip' ? 1 : 'r'
+	let border_sides = move_area !== undefined && move_area != 'strip' ? 1
+		: is_selected ? 'r'
+		: is_strip_bottom ? 'tr' : 'br'
 	ui.bb(is_selected ? 'bg' : 'bg1', state, border_sides, 'intense')
 	ui.ph(ui.em(1.5), ui.em(.25))
 	ui.pv(ui.em(0.65))
@@ -11237,7 +11243,7 @@ function resize_side(side, edges) {
 }
 
 function resizer_update(id, s) {
-	let cs = captured_or_hit(id)
+	let cs = ui.drag_or_hit(id)
 	if (!cs)
 		return
 	if (!cs.dragging)
