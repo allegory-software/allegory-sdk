@@ -129,7 +129,7 @@ ui.login_window = function() {
 ui.logout = function() {
 	let s = ui.state('login')
 	if (s.request) return
-	s.request = glue.post('/logout.json', {}, function(current_user) {
+	s.request = glue.post('/logout.json', null, function(current_user) {
 		s.request = null
 		user = current_user
 		ui.animate()

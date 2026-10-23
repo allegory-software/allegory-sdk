@@ -659,6 +659,7 @@ let optional_obj = allow_null(isobj)
 let field_config_checks = {
 	name: optional_str,
 	label: optional_str,
+	icon: optional_str,
 	info: optional_str,
 	internal: optional_bool,
 	hidden: optional_bool,
@@ -689,7 +690,7 @@ assign(all_field_types, {
 	control: 'input',
 	build_input: ui.build_input,
 	default: null,
-	w: 8,
+	w: 4,
 	min_w: 2,
 	max_w: 154,
 	align: 'left',
@@ -722,11 +723,13 @@ all_field_types.col_storage = array_storage
 //// TEXT --------------------------------------------------------------------
 
 // the default type: all its behavior comes from all_field_types.
-field_types.text = {}
+field_types.text = {w: 8}
 
 //// PASSWORD ----------------------------------------------------------------
 
-field_types.password = {input_type: 'password', control: 'password_input'}
+field_types.password = {
+	input_type: 'password', control: 'password_input', w: 10, icon: 'lock',
+}
 
 //// NUMBER ------------------------------------------------------------------
 
@@ -840,9 +843,10 @@ count.to_input = number.to_text
 
 let date = {
 	control: 'date_input',
+	icon: 'calendar',
 	align: 'right',
 	is_time: true,
-	w: 6,
+	w: 4,
 	precision: 'd',
 	min: parse_date('1000-01-01 00:00:00', 'SQL'),
 	max: parse_date('9999-12-31 23:59:59', 'SQL'),
@@ -872,7 +876,7 @@ date.to_input = function(v) {
 	return format_date(v, null, this.precision)
 }
 
-let dt = assign({}, date, {precision: 'm', w: 11})
+let dt = assign({}, date, {precision: 'm', w: 6})
 field_types.datetime = dt
 
 //// TIME --------------------------------------------------------------------
@@ -882,7 +886,7 @@ field_types.time = ts
 
 ts.has_time = true
 ts.precision = 's'
-ts.w = 12
+ts.w = 8
 
 ui.add_validation_rule({
 	name     : 'time',
@@ -900,6 +904,8 @@ add_scalar_rules('time')
 
 let td = {
 	align: 'center',
+	w: 4,
+	icon: 'clock',
 	is_timeofday: true,
 	from_input: function(s) { return parse_timeofday(s, true, this.precision) },
 	col_storage: f64_storage,
@@ -933,7 +939,10 @@ add_scalar_rules('timeofday')
 
 //// DURATION ----------------------------------------------------------------
 
-let d = {align: 'right', is_duration: true, col_storage: f64_storage}
+let d = {
+	align: 'right', w: 5, icon: 'hourglass',
+	is_duration: true, col_storage: f64_storage,
+}
 field_types.duration = d
 
 let duration_formats = set(words('approx approx+s long'))
@@ -950,7 +959,7 @@ d.to_text = function(v) {
 
 // no editor: the value is toggled by click and space, and the cell keeps
 // building itself while an edit is carried through it.
-let bool = {align: 'center', min_w: 2, w: 2, is_bool: true,
+let bool = {align: 'center', min_w: 2, w: 1, is_bool: true,
 	builds_text: false, has_editor: false, control: 'checkbox',
 	col_storage: bool_storage}
 field_types.bool = bool
@@ -965,7 +974,7 @@ ui.add_validation_rule({
 		'{0} must be a boolean', e.label),
 })
 
-let enm = {control: 'enum_input'}
+let enm = {control: 'enum_input', w: 6}
 field_types.enum = enm
 
 enm.config_checks = {
@@ -1024,7 +1033,7 @@ enum_list.toggle_item = function(v, item) {
 
 //// TAGS --------------------------------------------------------------------
 
-let tags = {}
+let tags = {w: 10, icon: 'tags'}
 field_types.tags = tags
 
 tags.tags_format = 'words' // words | array
@@ -1035,7 +1044,9 @@ tags.to_text = function(v) {
 
 //// COLOR -------------------------------------------------------------------
 
-let color = {is_color: true, control: 'color_input'}
+let color = {
+	is_color: true, control: 'color_input', w: 2, icon: 'color-swatch',
+}
 field_types.color = color
 color.builds_text = false
 
@@ -1057,39 +1068,41 @@ ui.add_validation_rule({
 //// PERCENT -----------------------------------------------------------------
 
 // 50% at the default scale of 100 is stored as 5000.
-let percent = assign({}, number, {scale: 100, decimals: 2})
+let percent = assign({}, number, {
+	scale: 100, decimals: 2, icon: 'percentage',
+})
 field_types.percent = percent
 
 percent.to_text = function(p) {
 	return isnum(p) ? dec(p / this.scale, this.decimals) + '%' : p
 }
 
-let icon = {align: 'center'}
+let icon = {align: 'center', w: 2}
 field_types.icon = icon
 
 //// COL ---------------------------------------------------------------------
 
-let col = {}
+let col = {w: 8}
 field_types.col = col
 
 //// PLACE (GOOGLE MAPS) -----------------------------------------------------
 
-let place = {}
+let place = {w: 10, icon: 'map_pin'}
 field_types.place = place
 
 //// URL ---------------------------------------------------------------------
 
-let url = {}
+let url = {w: 14, icon: 'link'}
 field_types.url = url
 
 //// PHONE -------------------------------------------------------------------
 
-let phone = {}
+let phone = {w: 6, icon: 'phone'}
 field_types.phone = phone
 
 //// EMAIL -------------------------------------------------------------------
 
-let email = {}
+let email = {w: 12, icon: 'mail'}
 field_types.email = email
 
 email.validator_email = {
@@ -1105,18 +1118,32 @@ field_types.button = btn
 
 // TODO: these want a mono-font editor: single-line for secret_key,
 // multi-line for public_key and private_key.
-field_types.secret_key  = {}
-field_types.public_key  = {}
-field_types.private_key = {}
+field_types.secret_key  = {w: 10, icon: 'key'}
+field_types.public_key  = {w: 10, icon: 'key'}
+field_types.private_key = {w: 10, icon: 'key'}
 
 //// CELL BUILDERS ------------------------------------------------------------
 
-// icons drawn by field types, not by any one widget, so they live here
+// icons drawn by field types and field headers, so they live here
 // rather than in the grid's own icon aliases.
 ui.icon_def('calendar'     , 'tabler', '\uea53')
 ui.icon_def('map_pin'      , 'tabler', '\ueae8')
 ui.icon_def('box_unchecked', 'tabler', '\ueb2c')
 ui.icon_def('box_checked'  , 'tabler_filled', '\uf76d')
+ui.icon_def('hash'         , 'tabler', '\ueabc')
+ui.icon_def('key'          , 'tabler', '\ueac7')
+ui.icon_def('clock'        , 'tabler', '\uea70')
+ui.icon_def('hourglass'    , 'tabler', '\uef93')
+ui.icon_def('mail'         , 'tabler', '\ueae5')
+ui.icon_def('phone'        , 'tabler', '\ueb09')
+ui.icon_def('link'         , 'tabler', '\ueade')
+ui.icon_def('lock'         , 'tabler', '\ueae2')
+ui.icon_def('percentage'   , 'tabler', '\uecf4')
+ui.icon_def('binary'       , 'tabler', '\uee08')
+ui.icon_def('tags'         , 'tabler', '\uef86')
+ui.icon_def('language'     , 'tabler', '\uebbe')
+ui.icon_def('flag'         , 'tabler', '\ueaa6')
+ui.icon_def('color-swatch' , 'tabler', '\ueb61')
 
 // opt: {fg:, align:, full_width:, readonly:}. Without opt, return the text
 // instead of building it.

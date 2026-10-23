@@ -442,8 +442,29 @@ function init(id, e) {
 		return field.sortable ? 2 * sp2 : 0
 	}
 
+	function get_header_icon_w(field) {
+		return field.icon ? font_size + sp : 0
+	}
+
 	function col_min_w(field) {
-		return max(field.min_w * font_size, sort_icon_w(field))
+		return max(field.min_w * font_size,
+			sort_icon_w(field) + get_header_icon_w(field))
+	}
+
+	function build_header_label(field, align, max_w, fg) {
+		if (field.icon) {
+			ui.h(1, sp, align, 'c')
+				ui.min_w(font_size)
+				ui.color(fg)
+				ui.icon('', field.icon, 0, 'c', 'c')
+				ui.color(fg)
+				ui.text('', field.label, 1, align, 'c', max_w == null
+					? null : max(0, max_w - get_header_icon_w(field)))
+			ui.end_h()
+		} else {
+			ui.color(fg)
+			ui.text('', field.label, 1, align, 'c', max_w)
+		}
 	}
 
 	function clamp_vertical_w(w) {
@@ -1915,7 +1936,7 @@ function init(id, e) {
 							ui.p(sp2, ui.sp075())
 							ui.h(1, sp)
 
-								ui.text('', field.label, 1, 'l', 'c', 0)
+								build_header_label(field, 'l', 0)
 
 								// sort icon
 								let icon_id = id+'.sort_icon.'+col
@@ -1982,8 +2003,8 @@ function init(id, e) {
 					}
 
 					if (!is_right_aligned) {
-						ui.color(col_group ? 'faint' : null)
-						ui.text('', field.label, 1, align, 'c', max_min_w)
+						build_header_label(field, align, max_min_w,
+							col_group ? 'faint' : null)
 					}
 
 					let icon_id = id+'.sort_icon.'+field.name
@@ -2005,8 +2026,8 @@ function init(id, e) {
 					}
 
 					if (is_right_aligned) {
-						ui.color(col_group ? 'faint' : null)
-						ui.text('', field.label, 1, align, 'c', max_min_w)
+						build_header_label(field, align, max_min_w,
+							col_group ? 'faint' : null)
 					}
 
 				ui.end_h()

@@ -116,7 +116,7 @@ do
 
 	function env.hash(size) --small + fixed size makes it indexable
 		return function()
-			return {type = 'binary', mdbx_type = 'binary',
+			return {type = 'binary', icon = 'binary', mdbx_type = 'binary',
 				fixed = true, maxlen = size}
 		end
 	end
@@ -179,29 +179,44 @@ return function()
 	flags.ai_ci    = {mdbx_collation = 'utf8_ai_ci', sort_collation = 'ai_ci'}
 
 	--non-indexable varsize types
-	types.text   = {type = 'text', mdbx_type = 'utf8', maxlen = 4096}
-	types.binary = {type = 'binary', mdbx_type = 'binary', maxlen = 64*1024^2}
+	types.text   = {type = 'text', w = 12, mdbx_type = 'utf8', maxlen = 4096}
+	types.binary = {
+		type = 'binary', w = 8, icon = 'binary', mdbx_type = 'binary',
+		maxlen = 64*1024^2,
+	}
 	--indexable varsize types (must be nozero or fixed)
-	types.str    = {text, maxlen = 200, nozero}
-	types.name   = {str, ai_ci}
+	types.str    = {text, w = 8, maxlen = 200, nozero}
+	types.name   = {str, w = 10, ai_ci}
 
-	types.bool  = {type = 'bool', w = 2, align = 'center', mdbx_type = 'bool'}
+	types.bool  = {type = 'bool', w = 1, align = 'center', mdbx_type = 'bool'}
 	types.bool0 = {bool , not_null, default(false, 'false')}
 	types.bool1 = {bool , not_null, default(true , 'true' )}
 
-	types.i8  = {type = 'number', align = 'right', decimals = 0, min = -2^ 7, max = 2^ 7-1, mdbx_type = 'i8'}
-	types.i16 = {type = 'number', align = 'right', decimals = 0, min = -2^15, max = 2^15-1, mdbx_type = 'i16'}
-	types.i32 = {type = 'number', align = 'right', decimals = 0, min = -2^31, max = 2^31-1, mdbx_type = 'i32'}
-	types.i52 = {type = 'number', align = 'right', decimals = 0, min = -(2^52-1), max = 2^52-1, mdbx_type = 'f64'}
+	types.i8  = {
+		type = 'number', w = 2, align = 'right', decimals = 0,
+		min = -2^ 7, max = 2^ 7-1, mdbx_type = 'i8',
+	}
+	types.i16 = {
+		type = 'number', w = 4, align = 'right', decimals = 0,
+		min = -2^15, max = 2^15-1, mdbx_type = 'i16',
+	}
+	types.i32 = {
+		type = 'number', w = 4, align = 'right', decimals = 0,
+		min = -2^31, max = 2^31-1, mdbx_type = 'i32',
+	}
+	types.i52 = {
+		type = 'number', w = 6, align = 'right', decimals = 0,
+		min = -(2^52-1), max = 2^52-1, mdbx_type = 'f64',
+	}
 	types.u8  = {i8 , min = 0, max = 2^ 8-1, mdbx_type = 'u8' }
 	types.u16 = {i16, min = 0, max = 2^16-1, mdbx_type = 'u16'}
 	types.u32 = {i32, min = 0, max = 2^32-1, mdbx_type = 'u32'}
 	types.u52 = {i52, min = 0, max = 2^52-1, mdbx_type = 'f64'}
-	types.f32 = {type = 'number' , align = 'right', mdbx_type = 'f32'}
-	types.f64 = {type = 'number' , align = 'right', mdbx_type = 'f64'}
+	types.f32 = {type = 'number' , w = 5, align = 'right', mdbx_type = 'f32'}
+	types.f64 = {type = 'number' , w = 6, align = 'right', mdbx_type = 'f64'}
 
-	types.id   = {u32, w = 3}
-	types.idpk = {id, pk, autoinc}
+	types.id   = {u32, w = 3, icon = 'hash'}
+	types.idpk = {id, pk, autoinc, icon = 'key'}
 	types.pos  = {f64, internal}
 
 	--for money and qty, scale can be dynamic and taken from currency / unit
@@ -209,22 +224,27 @@ return function()
 	--min and max are in scaled units!
 	types.money    = {f64, scale = 10^4, decimals = 2, min = -(10^15-1), max = 10^15-1} --  99 999 999 999 . 9999
 	types.qty      = {f64, scale = 10^6, decimals = 6, min = -(10^15-1), max = 10^15-1} --     999 999 999 . 999999
-	types.percent  = {f64, type = 'percent', scale = 10^2, decimals = 2, min = -(10^8-1), max = 10^8-1} -- 999 999 . 99
-	types.count    = {u52, type = 'count', default(0, '0')}
-	types.filesize = {u52, type = 'filesize', align = 'right'}
+	types.percent  = {
+		f64, type = 'percent', w = 4, scale = 10^2, decimals = 2,
+		min = -(10^8-1), max = 10^8-1,
+	} -- 999 999 . 99
+	types.count    = {
+		u52, type = 'count', w = 4, default(0, '0'),
+	}
+	types.filesize = {u52, type = 'filesize', w = 4, align = 'right'}
 
 	--unix timestamps. max is the last second of year 9999.
-	types.time     = {u52, type = 'datetime', align = 'right', w = 11, precision = 'm',
+	types.time     = {u52, type = 'datetime', align = 'right', w = 6, precision = 'm',
 		min = 0, max = 253402300799}
-	types.time_s   = {time, w = 12, precision = 's'}
-	types.time_ms  = {time, w = 15, precision = 'ms'}
-	types.timeago  = {time_s, timeago = true}
-	types.date     = {time, type = 'date', w = 6, precision = 'd'}
+	types.time_s   = {time, w = 8, precision = 's'}
+	types.time_ms  = {time, w = 8, precision = 'ms'}
+	types.timeago  = {time_s, w = 5, timeago = true, icon = 'clock'}
+	types.date     = {time, type = 'date', w = 4, precision = 'd'}
 	--seconds since midnight.
-	types.timeofday = {u52, type = 'timeofday', align = 'center',
+	types.timeofday = {u52, type = 'timeofday', w = 4, align = 'center',
 		min = 0, max = 24*3600-1}
-	types.timeofday_s = {timeofday, precision = 's'}
-	types.duration  = {u52, type = 'duration', align = 'right'}
+	types.timeofday_s = {timeofday, w = 4, precision = 's'}
+	types.duration  = {u52, type = 'duration', w = 5, align = 'right'}
 
 	types.ctime = {time, not_null, readonly = true, default(nil, 'now()'),
 		en_label = 'Created At'}
@@ -234,22 +254,22 @@ return function()
 	types.atime = {time, not_null, readonly = true, default(nil, 'now()'),
 		en_label = 'Last Accessed At'}
 
-	types.lang      = {str, maxlen = 2, fixed}
-	types.currency  = {str, maxlen = 3, fixed}
-	types.country   = {str, maxlen = 2, fixed}
+	types.lang      = {str, w = 2, icon = 'language', maxlen = 2, fixed}
+	types.currency  = {str, w = 2, maxlen = 3, fixed}
+	types.country   = {str, w = 2, icon = 'flag', maxlen = 2, fixed}
 
-	types.secret_key  = {text, type = 'secret_key' , maxlen = 8192}
-	types.public_key  = {text, type = 'public_key' , maxlen = 8192}
-	types.private_key = {text, type = 'private_key', maxlen = 8192}
-	types.url   = {text, type = 'url', maxlen = 4096}
-	types.email = {str, type = 'email', maxlen = 128, ai_ci}
-	types.phone = {str, type = 'phone', maxlen = 32}
-	types.password = {text, type = 'password', maxlen = 128}
-	types.color = {str, type = 'color', maxlen = 32} --css color
-	types.icon  = {str, type = 'icon' , maxlen = 32} --icon name
-	types.col   = {str, type = 'col'  , maxlen = 64} --col name
-	types.tags  = {text, type = 'tags'} --space-separated words
-	types.place = {str, type = 'place', maxlen = 200} --google maps place id
+	types.secret_key  = {text, type = 'secret_key' , w = 10, maxlen = 8192}
+	types.public_key  = {text, type = 'public_key' , w = 10, maxlen = 8192}
+	types.private_key = {text, type = 'private_key', w = 10, maxlen = 8192}
+	types.url    = {text, type = 'url', w = 14, maxlen = 4096}
+	types.email  = {str, type = 'email', w = 12, maxlen = 128, ai_ci}
+	types.phone  = {str, type = 'phone', w = 6, maxlen = 32}
+	types.password = {text, type = 'password', w = 10, maxlen = 128}
+	types.color  = {str, type = 'color', w = 2, maxlen = 32} --css color
+	types.icon   = {str, type = 'icon' , w = 2, maxlen = 32} --icon name
+	types.col    = {str, type = 'col'  , w = 8, maxlen = 64} --col name
+	types.tags   = {text, type = 'tags', w = 10} --space-separated words
+	types.place  = {str, type = 'place', w = 10, maxlen = 200} --google maps place id
 	types.button = {type = 'button'}
 
 	--field-type-based formatting ---------------------------------------------

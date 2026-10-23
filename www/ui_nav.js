@@ -3514,7 +3514,15 @@ ui.nav = function(id, opt) {
 	/// saving ----------------------------------------------------------------
 
 	function rowset_url() {
-		return href('/rowset.json/' + e.rowset_name)
+		let url = href('/rowset.json/' + e.rowset_name)
+		let filter = param_vals_filter()
+		if (filter) {
+			let u = url_parse(url)
+			u.args = u.args || {}
+			u.args.filter = filter
+			url = url_format(u)
+		}
+		return url
 	}
 
 	// Copy the last saved primary key so that the server can find the row.
@@ -4098,13 +4106,6 @@ ui.nav = function(id, opt) {
 			refilter()
 		} else {
 			let url = rowset_url()
-			let filter = param_vals_filter()
-			if (filter) {
-				let u = url_parse(url)
-				u.args = u.args || {}
-				u.args.filter = filter
-				url = url_format(u)
-			}
 			load_req?.abort()
 			load_req = ajax({
 				dont_send: true,
