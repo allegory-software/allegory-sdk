@@ -3,7 +3,7 @@
 	WebSocket protocol (RFC 6455), client + server.
 	Written by Claude Opus 4.7 XHigh. Public Domain.
 
-	Single-thread model: control frames (ping, pong, close) are handled inline
+	Control frames (ping, pong, close) are handled inline
 	by recv() so the app must call recv() or the peer may drop us as idle.
 
 CLIENT
@@ -44,7 +44,6 @@ CLOSE CODES (RFC 6455 7.4)
 TODO:
 	- permessage-deflate.
 	- auto-ping heartbeat.
-	- concurrent sends.
 	- send 1007/1002 on errors.
 
 ]=]
@@ -162,6 +161,50 @@ local function read_payload(self, plen, mask)
 	return s
 end
 
+local function schedule_write(self)
+	local threads = self.write_threads
+	if self.tcp:closed() then
+		while #threads > 0 do
+			local thread = threads[1]
+			if thread.waiting == true then
+				thread:resume_with(false, CLOSED)
+			else
+				remove(threads, 1)
+			end
+		end
+	elseif #threads > 0 then
+		local thread = threads[1]
+		thread:resume()
+	end
+end
+
+local function begin_write(self)
+	self.tcp:check_closed()
+	local threads = self.write_threads
+	if not threads then
+		threads = {} -- {i -> writer thread; first thread may write}
+		self.write_threads = threads
+		self.tcp:onclose(function()
+			schedule_write(self)
+		end)
+	end
+	local thread = currentthread()
+	assert(threads[1] ~= thread, 'WebSocket frame write already in progress')
+	add(threads, thread)
+	if #threads > 1 then
+		local ok, err = try_suspend()
+		if not ok then
+			remove_value(threads, thread)
+			error(err, 0)
+		end
+	end
+end
+
+local function end_write(self)
+	remove(self.write_threads, 1)
+	schedule_write(self)
+end
+
 local function write_frame(self, fin, opcode, payload, len)
 	len = len or (payload and #payload or 0)
 	local wb = self.wb
@@ -191,6 +234,12 @@ local function write_frame(self, fin, opcode, payload, len)
 		wb:put(payload)
 	end
 	wb:flush()
+end
+
+local function write_pong(self, payload)
+	begin_write(self)
+	write_frame(self, true, OP_PONG, payload, #payload)
+	end_write(self)
 end
 
 local function write_close_frame(self, code, reason)
@@ -235,9 +284,13 @@ local function handle_peer_close(self, payload)
 	self.peer_closed = true
 	self.peer_code, self.peer_reason = code, reason
 	if not self.closed_sent then
-		local echo = (code == 1005) and nil or code
-		write_close_frame(self, echo)
-		self.closed_sent = true
+		begin_write(self)
+		if not self.closed_sent then
+			local echo = (code == 1005) and nil or code
+			self.closed_sent = true
+			write_close_frame(self, echo)
+		end
+		end_write(self)
 	end
 	return code, reason
 end
@@ -253,7 +306,7 @@ function ws:recv()
 		if opcode >= 0x8 then
 			local payload = read_payload(self, plen, mask)
 			if opcode == OP_PING then
-				write_frame(self, true, OP_PONG, payload, #payload)
+				write_pong(self, payload)
 			elseif opcode == OP_PONG then
 				--ignore
 			else --OP_CLOSE
@@ -280,15 +333,25 @@ end
 
 function ws:send(s, kind)
 	assert(type(s) == 'string', 'string expected')
-	assert(not self.closed_sent, 'connection closed')
-	assert(not self.send_in_progress, 'message in progress (use send_chunk)')
+	begin_write(self)
+	if self.closed_sent or self.send_in_progress then
+		local err = self.closed_sent and 'connection closed'
+			or 'message in progress (use send_chunk)'
+		end_write(self)
+		error(err, 2)
+	end
 	local opcode = (kind == 'binary') and OP_BIN or OP_TEXT
 	write_frame(self, true, opcode, s, #s)
+	end_write(self)
 end
 
 function ws:send_chunk(s, kind, fin)
 	assert(type(s) == 'string', 'string expected')
-	assert(not self.closed_sent, 'connection closed')
+	begin_write(self)
+	if self.closed_sent then
+		end_write(self)
+		error('connection closed', 2)
+	end
 	local opcode
 	if self.send_in_progress then
 		opcode = OP_CONT
@@ -300,6 +363,7 @@ function ws:send_chunk(s, kind, fin)
 		self.send_in_progress = false
 	end
 	write_frame(self, fin and true or false, opcode, s, #s)
+	end_write(self)
 end
 
 function ws:recv_chunk()
@@ -311,7 +375,7 @@ function ws:recv_chunk()
 		if opcode >= 0x8 then
 			local payload = read_payload(self, plen, mask)
 			if opcode == OP_PING then
-				write_frame(self, true, OP_PONG, payload, #payload)
+				write_pong(self, payload)
 			elseif opcode == OP_PONG then
 				--ignore
 			else --OP_CLOSE
@@ -344,15 +408,22 @@ end
 function ws:ping(payload)
 	payload = payload or ''
 	assert(#payload <= 125, 'ping payload too big')
+	begin_write(self)
 	write_frame(self, true, OP_PING, payload, #payload)
+	end_write(self)
 end
 
 function ws:close(code, reason)
 	if not self.closed_sent then
-		self.closed_sent = true
-		code = code or 1000
-		write_close_frame(self, code, reason)
-		if not self.peer_closed then
+		begin_write(self)
+		local can_send_close = not self.closed_sent
+		if can_send_close then
+			self.closed_sent = true
+			code = code or 1000
+			write_close_frame(self, code, reason)
+		end
+		end_write(self)
+		if can_send_close and not self.peer_closed then
 			self.tcp:settimeout(self.close_timeout)
 			while not self.peer_closed do
 				local _, opcode, plen, mask = read_frame_header(self)

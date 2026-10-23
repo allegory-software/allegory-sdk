@@ -43,6 +43,11 @@ CONFIG
 
 ]==]
 
+require'mdbx_schema'
+
+db_schema = mdbx_schema() -- application paper schema
+db_schema:import'schema_mdbx'
+
 local webb_app = require'webb_app'
 require'rowset'
 require'rowset_mdbx'
@@ -54,6 +59,7 @@ function db()
 		app_db = mdbx_open(config('db_file',
 			varpath(scriptname..'.mdbx')), {owner = mainthread()})
 		app_db:open_changes_file(config('db_changes_size', 16 * 1024^2))
+		app_db.schema = db_schema
 	end
 	return app_db
 end
@@ -65,92 +71,6 @@ function fontfile(name, path, desc)
 	add(fontfiles, {name, path, desc})
 end
 
---sign-in window -> signed_in. call before opening any container.
---scrim emitted before the window: layers draw forward, hit-test in reverse.
-local login_js = [[
-ui.login_window = function() {
-
-	if (user.signed_in)
-		return true
-
-	let s = ui.state('login')
-
-	ui.popup('login_window', 'window', 'screen', 'ic', '[]')
-		//ui.bg_dots('login_dots', 0.1)
-		ui.bb('bg0', null, 1, 'light')
-		ui.mb(ui.em(6))
-		ui.focus_group(true, null, 'login')
-		ui.v(1, 0, 'c', 'c', 300)
-
-			ui.scope()
-				ui.font_size(4)
-				ui.color('label')
-				ui.icon('user', 0, 'c', 't')
-			ui.end_scope()
-
-			ui.scope()
-				ui.m(ui.sp8())
-				ui.font('heading')
-				ui.font_size(2.5)
-				ui.text('', 'Sign In', 1, 'c', 't')
-			ui.end_scope()
-
-			if (!s.email) {
-
-				ui.pb(ui.sp())
-				ui.text('', 'Email', 0, '[', 't')
-				let email = ui.input('login_email', '', 0)
-				ui.scope()
-					ui.color('label')
-					ui.pt(ui.sp())
-					ui.pb(ui.sp2())
-					ui.text_wrapped('login_hint',
-						"Same for new and returning users: we'll find your "+
-						"account or create one.", 0, '[', 't', 1/0)
-				ui.end_scope()
-				ui.mt(ui.sp2())
-				ui.default_button('login_send_button')
-				if (ui.primary_icon_button('login_send_button', 'mail-fast',
-					'Continue', 1, 's'))
-					post('/gen_auth_code.json', {email: email},
-						function(t) {
-							ui.state('login').email = t.email
-							ui.focus('login_code')
-							ui.animate()
-						},
-						function(e) { alert(e) }
-					)
-
-			} else {
-
-				ui.pb(ui.sp())
-				ui.text('', 'Enter the 6-digit code', 0, '[', 't')
-				let code = ui.input('login_code', '', 0)
-				ui.mt(ui.sp2())
-				ui.default_button('login_signin_button')
-				if (ui.primary_icon_button('login_signin_button', 'key',
-					'Sign in', 1, 's'))
-					post('/login.json', {email: s.email, code: code},
-						function(new_user) {
-							user = new_user
-							ui.state('login').email = null
-							ui.animate()
-						},
-						function(e) { alert(e) }
-					)
-
-			}
-
-		ui.end_v()
-		ui.end_focus_group()
-	ui.end_popup()
-
-	ui.focus_first('login')
-
-	return false
-}
-]]
-
 function user_json()
 	return {
 		--signed_in is always non-nil to avoid an empty table to encode as [].
@@ -160,6 +80,8 @@ function user_json()
 		phone = user'phone',
 	}
 end
+
+action['user.json'] = user_json
 
 action['gen_auth_code.json'] = function()
 	checkarg(method'POST')
@@ -205,7 +127,6 @@ function action.en()
 	vars.preloads = cat(vars.preloads, '\n')
 	vars.fonts = cat(vars.fonts, '\n')
 	vars.user = json(user_json())
-	vars.login_js = login_js
 	out((([[
 <html lang={{lang}} country={{country}} theme="{{theme}}"><head>
 	<meta charset="utf-8">
@@ -215,6 +136,7 @@ function action.en()
 {{{preloads}}}
 	<script src="/glue.js" global></script>
 	<script src="/ui.js" global></script>
+	<script src="/ui_login.js" ></script>
 	<script src="/ui_field.js" ></script>
 	<script src="/ui_nav.js" ></script>
 	<script src="/ui_grid.js" ></script>
@@ -224,7 +146,6 @@ function action.en()
 	<script>
 {{{fonts}}}
 user = {{{user}}}
-{{{login_js}}}
 	</script>
 	<script src="/{{main_file}}"></script>
 </head><style></style>
@@ -250,7 +171,7 @@ function cui_module(path)
 	end
 	local schema = name..'_schema.lua'
 	if exists(indir(path, schema)) then
-		db().schema:import(schema)
+		db_schema:import(schema)
 	end
 end
 

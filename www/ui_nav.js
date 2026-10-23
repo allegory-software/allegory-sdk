@@ -1319,7 +1319,7 @@ ui.nav = function(id, opt) {
 			vfi += vfi_inc
 		}
 
-		let col_moved = last_vfi != start_vfi
+		let col_moved = e.cell_select_mode && last_vfi != start_vfi
 
 		if (opt?.must_move && !(row_moved || col_moved))
 			return [null, null]
@@ -1532,7 +1532,7 @@ ui.nav = function(id, opt) {
 		let tree_col_field = e.all_fields_map[tree_col]
 		// the field that shows the indent and the collapse button
 		e.tree_field = e.is_grouped ? group_field
-			: !e.is_tree ? null
+			: !e.is_tree || tree_col === false ? null
 			: tree_col_field?.vfi != null ? tree_col_field
 			: e.visible_fields[0] ?? null
 	}
@@ -3898,10 +3898,13 @@ ui.nav = function(id, opt) {
 		} else if (!isstr(pk)) {
 			return false
 		}
+		let id_col = rs.id_col === false ? null
+			: rs.id_col ?? (e.pk_fields.length == 1
+				? e.pk_fields[0].name : null)
 		return pk === e.pk
 			&& (rs.pos_col ?? null) === (e.pos_field?.name ?? null)
 			&& (rs.parent_col ?? null) === (e.parent_field?.name ?? null)
-			&& (rs.id_col == null || rs.id_col === e.id_field?.name)
+			&& id_col === (e.id_field?.name ?? null)
 	}
 
 	// Add a row that the server sent and the nav doesn't have, with cells in
@@ -4271,13 +4274,14 @@ ui.nav = function(id, opt) {
 			return
 
 		let pos_field     = col_field(rs.pos_col    , all_fields_map)
-		let id_field      = col_field(rs.id_col     , all_fields_map)
+		let id_field = rs.id_col === false
+			? null : col_field(rs.id_col, all_fields_map)
 		let parent_field  = col_field(rs.parent_col , all_fields_map)
 		let display_field = col_field(rs.display_col, all_fields_map)
 
 		if (
 			   rs.pos_col     != null && !pos_field
-			|| rs.id_col      != null && !id_field
+			|| rs.id_col != null && rs.id_col !== false && !id_field
 			|| rs.parent_col  != null && !parent_field
 			|| rs.display_col != null && !display_field
 		)
@@ -4607,6 +4611,7 @@ ui.nav = function(id, opt) {
 				if (e.row_flags[ri] & ROW_COLLAPSED)
 					collapsed_pks.push(row_pk(ri))
 			}
+		rowset_tree_col = rs.tree_col
 		load_rows(src_col_vals, edit_state, collapsed_pks)
 		e.can_load_changed_rows = rs.can_load_changed_rows ?? false
 		e.move_focus(null, null)

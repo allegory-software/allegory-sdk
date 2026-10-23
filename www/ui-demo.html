@@ -4,11 +4,14 @@
 <meta name="darkreader-lock">
 <script src=glue.js></script>
 <script src=ui.js></script>
+<script src=ui_login.js></script>
 <script src=ui_field.js></script>
 <script src=ui_nav.js></script>
 <script src=ui_grid.js></script>
+<script src=ui_db_explorer.js></script>
 <script src=ui_code_edit.js></script>
 <script src=webrtc.js></script>
+<script src=ui_call.js></script>
 <script src=lezer.js></script>
 <script>
 
@@ -30,6 +33,7 @@ const {
 ui.load_font('tabler'        , 'icons/tabler-icons.woff2')
 ui.load_font('tabler_filled' , 'icons/tabler-icons-filled.woff2')
 ui.load_font('mono'          , 'fonts/jetbrains-mono-nl-regular.woff2')
+ui.font_alias('heading', ui.default_font)
 
 ui.saved_state = json_arg(load('ui_saved_state')) ?? {}
 ui.save_state_delay = 0
@@ -239,6 +243,12 @@ ui.stack('', 1, 's', 'c')
 	ui.end_v()
 	ui.border(1, 'intense')
 ui.end_stack()
+}
+}
+
+{
+demos.db_explorer = function() {
+	ui.db_explorer('db_explorer')
 }
 }
 
@@ -1757,6 +1767,259 @@ ui.h(1, ui.sp2(), 's', 's')
 	ui.end_v()
 
 ui.end_h()
+}
+}
+
+{
+function stop_video_demo(s) {
+	s.capture_request = null
+	if (s.stream) {
+		for (let track of s.stream.getTracks())
+			track.stop()
+		s.stream = null
+	}
+}
+
+demos.video = function() {
+	let s = ui.state('video_demo')
+	if (!s.free) {
+		s.stream = null // captured MediaStream or null
+		s.capture_request = null // pending capture promise or null
+		s.error = null // capture error text or null
+		ui.on_free('video_demo', stop_video_demo)
+	}
+
+	ui.m(ui.sp2())
+	ui.v(1, ui.sp(), 's', 's')
+		ui.h(0, ui.sp())
+			if (!s.stream && !s.capture_request) {
+				if (ui.button('video_demo.start', 'Start', 0)) {
+					s.error = null
+					let capture_request = navigator.mediaDevices.getUserMedia({
+						audio: true,
+						video: true,
+					})
+					s.capture_request = capture_request
+					capture_request.then(function(stream) {
+						if (s.capture_request != capture_request) {
+							for (let track of stream.getTracks())
+								track.stop()
+						} else {
+							s.capture_request = null
+							s.stream = stream
+							ui.animate()
+						}
+					}, function(error) {
+						if (s.capture_request != capture_request) return
+						s.capture_request = null
+						s.error = error.name+': '+error.message
+						ui.animate()
+					})
+				}
+			} else {
+				if (ui.button('video_demo.stop', 'Stop', 0))
+					stop_video_demo(s)
+			}
+		ui.end_h()
+
+		if (s.error) {
+			ui.text('', s.error, 0)
+		} else if (s.capture_request) {
+			ui.text('', 'Requesting camera and microphone...', 0)
+		} else if (s.stream) {
+			let video_track = s.stream.getVideoTracks()[0]
+			let audio_track = s.stream.getAudioTracks()[0]
+			ui.text('', 'Camera: '+video_track.readyState
+				+'; microphone: '+audio_track.readyState, 0)
+			ui.stack('', 1, 's', 's')
+				ui.bb('bg1', null, 1, 'intense')
+				ui.video('video_demo.preview', s.stream)
+			ui.end_stack()
+			let video = ui.state_of('video_demo.preview', 'video')
+			ui.text('', 'Video: '+video.videoWidth+' x '+video.videoHeight, 0)
+			let playback_error = ui.state_of('video_demo.preview',
+				'playback_error')
+			if (playback_error)
+				ui.text('', playback_error, 0)
+		} else {
+			ui.text('', 'Stopped', 0)
+		}
+	ui.end_v()
+}
+}
+
+{
+demos.sign_in = function() {
+	if (ui.login_window()) {
+		ui.m(ui.sp2())
+		ui.v(0, ui.sp(), 'c', 'c')
+			ui.text('', 'Signed in as '+(user.email || user.phone), 0)
+			if (ui.button('sign_in_demo.logout', 'Sign out', 0))
+				ui.logout()
+		ui.end_v()
+	}
+}
+}
+
+{
+demos.call = function() {
+	let s = ui.state('call_demo')
+	if (!s.free) {
+		let params = new URLSearchParams(location.search)
+		s.call_id = params.get('call') // call id text or null
+		s.token = params.get('token') // invite token text or null
+		s.call = null // call session or null
+		s.request = null // demo credentials request or null
+		s.load_error = null // demo credentials error text or null
+		s.name = null // name for the next call or null
+		s.create_request = null // call creation request or null
+		s.create_error = null // call creation error text or null
+		s.copy_result = null // clipboard result text or null
+		s.want_force_turn = false // require TURN for the next call
+		ui.on_free('call_demo', function(s) {
+			if (s.request) s.request.abort()
+			if (s.create_request) s.create_request.abort()
+			if (s.call) s.call.leave()
+		})
+		if (!s.call_id && !s.token)
+			s.request = glue.get('/call_demo.json', function(demo_call) {
+				s.request = null
+				s.call_id = String(demo_call.call)
+				s.token = demo_call.token
+				ui.animate()
+			}, function(error, type) {
+				if (type == 'abort') return
+				s.request = null
+				s.load_error = error
+				ui.animate()
+			}, {silent: true})
+	}
+	let is_active = s.call && s.call.state != 'left'
+		&& s.call.state != 'failed'
+	let is_readonly = is_active || s.request != null
+		|| s.create_request != null
+	ui.m(ui.sp2())
+	ui.v(1, ui.sp(), 's', 's')
+		ui.h(0, ui.sp())
+			ui.label('call_demo.name', 'Call name', 0)
+			s.name = ui.input('call_demo.name', s.name,
+				null, 1, null, false, is_readonly)
+			if (ui.button('call_demo.create', 'Create call', 0,
+				null, null, null, is_readonly || !s.name)) {
+				s.create_error = null
+				s.create_request = glue.post('/call_create.json',
+					{name: s.name}, function(created_call) {
+						s.create_request = null
+						s.call_id = String(created_call.call)
+						s.token = created_call.token
+						s.copy_result = null
+						ui.animate()
+					}, function(error, type) {
+						if (type == 'abort') return
+						s.create_request = null
+						s.create_error = error
+						ui.animate()
+					}, {silent: true})
+			}
+		ui.end_h()
+		ui.h(0, ui.sp())
+			ui.label('call_demo.id', 'Call ID', 0)
+			s.call_id = ui.input('call_demo.id', s.call_id,
+				null, 0, null, false, is_readonly)
+			ui.label('call_demo.token', 'Invite token', 0)
+			s.token = ui.input('call_demo.token', s.token,
+				null, 1, null, false, is_readonly)
+			if (ui.button('call_demo.copy', 'Copy invite link', 0,
+				null, null, null, !s.call_id || !s.token)) {
+				let invite_url = new URL(location.href)
+				invite_url.search = ''
+				invite_url.hash = ''
+				invite_url.searchParams.set('demo', 'call')
+				invite_url.searchParams.set('call', s.call_id)
+				invite_url.searchParams.set('token', s.token)
+				s.copy_result = null
+				glue.copy_to_clipboard(invite_url.href, function() {
+					s.copy_result = 'Invite link copied'
+					ui.animate()
+				}).catch(function(error) {
+					s.copy_result = error.name+': '+error.message
+					ui.animate()
+				})
+			}
+			ui.label('call_demo.force_turn', 'Force TURN', 0)
+			s.want_force_turn = ui.checkbox('call_demo.force_turn',
+				s.want_force_turn, null, 0, null, null, is_active)
+			if (is_active) {
+				if (ui.button('call_demo.leave', 'Leave', 0))
+					s.call.leave()
+			} else {
+				if (ui.button('call_demo.join', 'Join', 0,
+					null, null, null, is_readonly || !s.call_id || !s.token))
+					s.call = join_call({
+						call_id: s.call_id,
+						token: s.token,
+						on_change: ui.animate,
+						ice_transport_policy: s.want_force_turn ? 'relay' : 'all',
+					})
+			}
+		ui.end_h()
+		if (s.request) ui.text('', 'Loading demo call...', 0)
+		if (s.load_error) ui.text('', s.load_error, 0)
+		if (s.create_request) ui.text('', 'Creating call...', 0)
+		if (s.create_error) ui.text('', s.create_error, 0)
+		if (s.copy_result) ui.text('', s.copy_result, 0)
+		let call = s.call
+		ui.text('', 'Status: '+(call ? call.state : 'idle'), 0)
+		if (call?.error) ui.text('', call.error, 0)
+		if (call?.local_stream) {
+			ui.h(0, ui.sp())
+				for (let track of call.local_stream.getTracks()) {
+					let text
+					if (track.kind == 'audio') {
+						text = track.enabled
+							? 'Mute microphone' : 'Unmute microphone'
+					} else {
+						text = track.enabled ? 'Turn camera off' : 'Turn camera on'
+					}
+					if (ui.button('call_demo.track.'+track.kind, text, 0)) {
+						track.enabled = !track.enabled
+						ui.animate()
+					}
+				}
+			ui.end_h()
+		}
+		if (call?.audio_error) {
+			ui.h(0, ui.sp())
+				ui.text('', call.audio_error, 0)
+				if (ui.button('call_demo.audio', 'Play audio', 0))
+					call.play_audio()
+			ui.end_h()
+		}
+		ui.h(1, ui.sp(), 's', 's')
+			ui.v(1, ui.sp(), 's', 's')
+				ui.text('', 'Local', 0)
+				ui.stack('', 1, 's', 's')
+					ui.bb('bg1', null, 1, 'intense')
+					if (call?.local_stream)
+						ui.video('call_demo.local', call.local_stream)
+				ui.end_stack()
+				let local_playback_error =
+					ui.state_of('call_demo.local', 'playback_error')
+				if (local_playback_error) ui.text('', local_playback_error, 0)
+			ui.end_v()
+			ui.v(1, ui.sp(), 's', 's')
+				ui.text('', 'Remote', 0)
+				ui.stack('', 1, 's', 's')
+					ui.bb('bg1', null, 1, 'intense')
+					if (call?.remote_stream)
+						ui.video('call_demo.remote', call.remote_stream)
+				ui.end_stack()
+				let remote_playback_error =
+					ui.state_of('call_demo.remote', 'playback_error')
+				if (remote_playback_error) ui.text('', remote_playback_error, 0)
+			ui.end_v()
+		ui.end_h()
+	ui.end_v()
 }
 }
 

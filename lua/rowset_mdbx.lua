@@ -77,7 +77,7 @@ local function fks_by_col(schema)
 end
 
 local function guess_name_col(schema)
-	if schema.name_col then return schema.name_col end
+	if schema.name_col ~= nil then return schema.name_col or nil end
 	if schema.fields.name then return 'name' end
 end
 
@@ -301,7 +301,7 @@ local function scan_rowset_init(rs, opt, ...)
 
 	--[[local]] function reserve_ids(self, n)
 		return rs_db():atomic('w', function()
-			local first_id = rs_db():seq(write_table, n)
+			local first_id = rs_db():seq(write_table, n) + 1
 			local ids = {}
 			for i = 1, n do ids[i] = first_id + i - 1 end
 			return ids
@@ -511,9 +511,11 @@ function prepare_rowsets()
 			if not prepared[name] then
 				prepared[name] = true
 				found_new = true
-				rs.name = name
-				if rs.prepare then
-					rs:prepare()
+				if istab(rs) then --function rowset: nothing to prepare.
+					rs.name = name
+					if rs.prepare then
+						rs:prepare()
+					end
 				end
 			end
 		end

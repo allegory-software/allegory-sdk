@@ -328,7 +328,7 @@ function virtual_rowset(init, ...)
 			can_load_changed_rows = rs.load_changed_rows ~= nil,
 			fields = rs.client_fields,
 			pk = rs.pk,
-			pos_col = rs.pos_col,
+			pos_col = rs.pos_col or nil,
 			cols = rs.cols,
 			params = rs.params,
 			id_col = rs.id_col,

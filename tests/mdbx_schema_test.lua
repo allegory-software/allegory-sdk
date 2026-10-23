@@ -5276,9 +5276,9 @@ function test.alter_table_rewrites_keys()
 		db:begin'r'
 		local _, schema = db:dbi_schema't'
 		assert(schema.fields.id.mdbx_type == 'u32')
-		assert(num(db:find('t', 'v', 0)) == 10)
-		assert(num(db:find('t', 'v', 1)) == 20)
-		assert(num(db:find('t', 'v', 2)) == 30)
+		assert(num(db:find('t', 'v', 1)) == 10)
+		assert(num(db:find('t', 'v', 2)) == 20)
+		assert(num(db:find('t', 'v', 3)) == 30)
 		db:commit()
 	end)
 end

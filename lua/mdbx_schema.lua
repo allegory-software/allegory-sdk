@@ -594,7 +594,7 @@ local function encode_key(
 			val = nil
 		end
 		if val == nil and f == autoinc_f then
-			val = self:seq(schema.name, 1)
+			val = self:seq(schema.name, 1) + 1
 			autoinc_v = val
 		end
 		if val == nil then
@@ -674,13 +674,13 @@ local function encode_val(self, schema, event, rec, rec_buf_sz, cols, as, ...)
 	return pp[0] - rec
 end
 
---advance the sequence past a key value that a write supplied itself, so that
+--advance the sequence to a key value that a write supplied itself, so that
 --auto-increment never hands out an id that a row already has.
 local function claim_seq(db, schema, val)
 	if val == nil or val == null then return end
 	local seq = db:seq(schema.name, 0)
-	if val + 1 > seq then
-		db:seq(schema.name, val + 1 - seq)
+	if val > seq then
+		db:seq(schema.name, val - seq)
 	end
 end
 

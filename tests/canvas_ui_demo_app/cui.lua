@@ -1,26 +1,17 @@
-require'webb_auth'
+require'webb'
 require'proc'
 
 config{http_host = '*'}
-config{http_port = tonumber(env'HTTP_PORT') or 8888}
-config{https_port = tonumber(env'HTTPS_PORT') or 4443}
+--config{http_port = tonumber(env'HTTP_PORT') or 8888}
+--config{https_port = tonumber(env'HTTPS_PORT') or 4443}
 config{vardir = env'VARDIR'}
 --config{https_addr = false}
 config{project_dir = homedir()}
 config{env = 'dev'} --if no email set, auth code goes to browser console.
 
 config{http_server_debug = 'requests'}
+config{auth_store = 'mdbx'}
 require'cui_app'(...)
-
-auth_init()
-local st = auth_store()
-st.with_lock('w', function()
-	if not st.tenant_exists(1) then
-		assert(st.add_tenant() == 1)
-		st.add_host('localhost:'..config'http_port', 1)
-		st.add_host('localhost:'..config'https_port', 1)
-	end
-end)
 
 logging.debug = true
 logging.verbose = config('verbose', true)
@@ -32,6 +23,8 @@ app.main_file = 'cui_demo.js'
 wwwdir'../../www'
 
 require'rowset_mdbx'
+require'ui_db_explorer'
+require'webb_call'
 
 do
 	local test_actions = {
@@ -128,9 +121,7 @@ do
 		{'A5', 'Response control', 50, 'normal',
 			'Choose a delay or disconnect here; clear it before retrying.'},
 	}
-	local grid_db = db()
-	local grid_schema = mdbx_schema()
-	grid_schema:import(function()
+	db_schema:import(function()
 		import'schema_mdbx'
 		tables.grid_save = {
 			row_check("row.test_action ~= 'reject row'", 'Test row rejected'),
@@ -155,11 +146,39 @@ do
 		}
 		tables.grid_typed.rows = grid_typed_rows
 	end)
-	grid_db.schema = grid_db:atomic('r', grid_db.extract_schema, grid_db)
-	update(grid_db.schema.tables, grid_schema.tables)
+	local grid_db = db()
 	grid_db:track_row_changes(false)
 	grid_db:sync_schema()
 	grid_db:track_row_changes(true)
+	auth_init()
+	local st = auth_store()
+	st.with_lock('w', function()
+		st.repair()
+		if not st.tenant_exists(1) then
+			assert(st.add_tenant() == 1)
+			for _,host in ipairs{
+				'localhost',
+				'catcostaocasa.ro',
+				'capr.go.ro',
+			} do
+				st.add_host(host, 1)
+			end
+		end
+	end)
+	local demo_call = {call = 1} -- demo call id and invite token
+	grid_db:atomic('w', function()
+		demo_call.token = grid_db:find('call', 'token', demo_call.call)
+		if not demo_call.token then
+			grid_db:insert('call', '{}', {
+				call = demo_call.call,
+				name = 'Demo call',
+			})
+			demo_call.token = grid_db:must_find('call', 'token', demo_call.call)
+		end
+	end)
+	action['call_demo.json'] = function()
+		return demo_call
+	end
 	rowset.grid_save = grid_db:atomic('r', function()
 		return table_rowset('grid_save', {
 			name = 'grid_save',

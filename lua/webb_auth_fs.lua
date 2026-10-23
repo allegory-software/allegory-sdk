@@ -194,7 +194,7 @@ local function try_load_user_profile(uid)
 	assert(not u or u.id == uid)
 	return u
 end
-function load_user_profile(uid) --already atomic
+local function load_user_profile(uid) --already atomic
 	return checkfound(try_load_user_profile(uid),
 		S('user_not_found', 'User not found'))
 end
@@ -391,7 +391,7 @@ function fs.repair()
 					fs.del_session(tid, sid)
 				end
 			local u = uid and users[uid]
-			if uid and (not u or not indexof(tid, u.tenants)) then
+			if uid and (not u or not (indexof(tid, u.tenants) or u.roles.dev)) then
 				--^^dangling session from interrupted del_user or user_del_tenant
 				fs.del_session(tid, sid)
 				uid = nil

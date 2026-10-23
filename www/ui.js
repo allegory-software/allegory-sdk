@@ -9363,6 +9363,87 @@ ui.image_data = function(id, key, w, h) {
 	return idata
 }
 
+//// VIDEO -------------------------------------------------------------------
+
+let video_widget = {} // {method -> function}
+
+video_widget.create = function(cmd, id, stream, fr, align, valign) {
+
+	let s = ui.state(id)
+	if (!s.video) {
+		let video = document.createElement('video') // muted decoder
+		video.autoplay = true
+		video.muted = true
+		video.playsInline = true
+		video.onloadeddata = animate
+		video.onresize = animate
+		s.video = video // decoder for the borrowed stream
+		s.playback_error = null // playback error text or null
+		s.video_frame_request = null // pending video frame callback handle
+		s.on_video_frame = function() { // () -> request a UI frame
+			s.video_frame_request = null
+			animate()
+		}
+		ui.on_free(id, function() {
+			if (s.video_frame_rewquest != null)
+				video.cancelVideoFrameCallback(s.video_frame_request)
+			video.onloadeddata = null
+			video.onresize = null
+			video.pause()
+			video.srcObject = null
+		})
+	}
+	if (s.video.srcObject != stream) {
+		s.video.srcObject = stream
+		s.playback_error = null
+		if (stream) {
+			s.video.play().then(function() {
+				animate()
+			}, function(error) {
+				if (s.video.srcObject != stream) return
+				s.playback_error = error.name+': '+error.message
+				animate()
+			})
+		}
+	}
+
+	let i = ui_cmd_box_begin(cmd, fr, align, valign) // command index
+	a[n++] = id
+	ui_cmd_box_end(i)
+	return i
+
+}
+
+video_widget.draw = function(a, i) {
+
+	let id = a[i+BOX_ARGS+0]
+	let s = ui.local_state(id)
+	if (!s) return
+	let video = s.video
+	if (video.readyState < 2) return
+
+	let x = a[i+0]
+	let y = a[i+1]
+	let w = a[i+2]
+	let h = a[i+3]
+	let video_w = video.videoWidth
+	let video_h = video.videoHeight
+	if (!w || !h || !video_w || !video_h) return
+
+	let scale = min(w / video_w, h / video_h)
+	video_w *= scale
+	video_h *= scale
+	x += (w - video_w) / 2
+	y += (h - video_h) / 2
+	cx.drawImage(video, x, y, video_w, video_h)
+
+	if (s.video_frame_request == null)
+		s.video_frame_request = video.requestVideoFrameCallback(s.on_video_frame)
+
+}
+
+ui.box_widget('video', video_widget)
+
 //// COLOR PICKER ------------------------------------------------------------
 
 const GRADIENT_SLIDER_ID      = BOX_ARGS+0

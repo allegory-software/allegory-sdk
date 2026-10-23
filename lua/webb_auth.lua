@@ -81,8 +81,9 @@ end
 
 local _host = host
 
+--tenants are matched by host name alone: strip the port.
 tenant = http_once_per_request(function()
-	return store.tenant_by_host(_host())
+	return store.tenant_by_host((_host():gsub(':%d+$', '')))
 end)
 
 function host() --override to validated version to prevent host injection
@@ -129,7 +130,6 @@ local function create_user(u)
 		lang = multilang() and lang() or nil,
 	}, u)
 	check_fields(u)
-	u.pass = u.pass and bcrypt_hash(u.pass)
 	return store.add_user(tenant(), u)
 end
 
@@ -142,7 +142,6 @@ local function update_user(uid, updates)
 			u[k] = v
 		end
 		check_fields(updates)
-		u.pass = updates.pass and bcrypt_hash(updates.pass)
 	end)
 end
 
@@ -270,12 +269,13 @@ function auth.register_pass(a)
 	check_fields(a)
 	checkarg(a.email or a.phone, 'email or phone')
 	checkarg(a.pass, 'pass')
+	local pass = bcrypt_hash(a.pass) --slow: hash outside the lock.
 	store.with_lock('w', function()
 		local updates = {
 			anonymous = false,
 			email = a.email,
 			phone = a.phone,
-			pass  = a.pass,
+			pass  = pass,
 		}
 		local u = try_load_user(try_load_session())
 		if u and u.anonymous then
@@ -487,10 +487,11 @@ function user(attr) return _user('user', attr) end
 function user_update_profile(a)
 	check_fields(a)
 	local u = login()
-	update_user(u.id, {
+	local pass = a.pass and bcrypt_hash(a.pass) --slow: hash outside the lock.
+	store.with_lock('w', update_user, u.id, {
 		email = a.email,
 		phone = a.phone,
-		pass = a.pass,
+		pass = pass,
 		name = a.name,
 		emailvalid = a.email and a.email ~= u.email and false or nil,
 		phonevalid = a.phone and a.phone ~= u.phone and false or nil,
@@ -501,34 +502,39 @@ end
 
 function user_list()
 	allow(user'roles'.admin, 'only admins can see users')
-	return store.users()
+	return store.with_lock('r', store.users)
 end
 
-local function check_rights(u)
-	local r = user'roles'
+local function check_rights(r, u) --r: current user's roles
 	allow(r.admin, 'only admins can change users')
 	allow(r.dev or not (u and u.roles.dev), 'only devs can change devs')
 end
 
 function user_create(tid, u)
 	check_fields(u)
-	check_rights(u)
+	check_rights(user'roles', u)
 	u.pass = u.pass and bcrypt_hash(u.pass)
-	return store.add_user(tid, u)
+	return store.with_lock('w', store.add_user, tid, u)
 end
 
-function user_update(uid, u)
-	local u = store.load_user(uid)
-	check_rights(u)
-	check_fields(u)
-	u.pass = u.pass and bcrypt_hash(u.pass)
-	return store.update_user(uid, u)
+function user_update(uid, updates)
+	check_fields(updates)
+	local r = user'roles' --login() can take the lock: read before locking.
+	updates = update({}, updates)
+	--slow: hash outside the lock.
+	updates.pass = updates.pass and bcrypt_hash(updates.pass)
+	return store.with_lock('w', function()
+		check_rights(r, store.load_user(uid))
+		return update_user(uid, updates)
+	end)
 end
 
-function usr_delete(uid)
-	local u = store.load_user(uid)
-	check_rights(u)
-	store.try_del_user(u.id)
+function user_delete(uid)
+	local r = user'roles' --login() can take the lock: read before locking.
+	store.with_lock('w', function()
+		check_rights(r, store.load_user(uid))
+		store.try_del_user(uid)
+	end)
 end
 
 --return schema so you can call schema:import'webb_auth'
