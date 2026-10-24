@@ -6487,6 +6487,9 @@ draw[CMD_TEXT] = function(a, i) {
 
 hittest[CMD_TEXT] = function(a, i) {
 	if (hit_box(a, i)) {
+		if ((a[i+TEXT_FLAGS] & TEXT_CLIPPED)
+				&& !hit_rect(a[i+TEXT_X], a[i+1], a[i+TEXT_W], a[i+3]))
+			return
 		if (a[i+TEXT_FLAGS] & TEXT_EDITABLE)
 			ui.set_cursor('text')
 		set_hit(a[i+TEXT_ID])
