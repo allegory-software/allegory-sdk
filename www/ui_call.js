@@ -546,21 +546,25 @@ window.create_call = function(opt) {
 			heartbeat_timer(heartbeat_interval)
 			ice_servers = msg.ice_servers
 			call.name = msg.name
-			if (msg.other_peer_id != call.peer_id) {
-				close_peer()
-				if (msg.other_peer_id)
-					await connect_peer(msg.other_peer_id,
-						msg.other_peer_name, true)
-			} else if (is_repairing && is_offerer) {
-				// this socket was down: the server dropped the restart offer.
-				await send_offer({iceRestart: true})
+			// participants missing from the list left while this socket was
+			// down; listed ones this browser doesn't have yet joined meanwhile.
+			let listed_ids = new Set( // ids of the participants in msg.peers
+				msg.peers.map(listed_peer => listed_peer.id))
+			for (let peer of call.peers.filter(peer => !listed_ids.has(peer.id)))
+				close_peer(peer)
+			for (let listed_peer of msg.peers) {
+				let peer = find_peer(listed_peer.id)
+				if (!peer) {
+					await connect_peer(listed_peer.id, listed_peer.name, true)
+				} else {
+					// this socket was down: the server dropped the restart offer.
+					if (peer.is_repairing && peer.is_offerer)
+						await send_offer(peer, {iceRestart: true})
+					if (peer.is_connected)
+						send_connected(peer)
+				}
 			}
-			if (is_connected)
-				socket.send(JSON.stringify({
-					type: 'connected',
-					peer_id: call.peer_id,
-				}))
-			call.state = connection ? connection_state() : 'waiting'
+			call.state = 'joined'
 			send_media_to_all()
 			on_change()
 		} else if (msg.type == 'heartbeat') {
@@ -568,51 +572,56 @@ window.create_call = function(opt) {
 		} else if (msg.type == 'peer_joined') {
 			await connect_peer(msg.peer_id, msg.name, false)
 		} else if (msg.type == 'peer_disconnected') {
-			if (msg.peer_id == call.peer_id) {
-				call.state = 'reconnecting'
+			let peer = find_peer(msg.peer_id)
+			if (peer) {
+				peer.state = 'reconnecting'
 				on_change()
 			}
 		} else if (msg.type == 'peer_resumed') {
-			if (msg.peer_id == call.peer_id) {
+			let peer = find_peer(msg.peer_id)
+			if (peer) {
 				// partner socket was down: the server dropped the restart offer.
-				if (is_repairing && is_offerer)
-					await send_offer({iceRestart: true})
-				call.state = connection_state()
-				send_media_to_all()
+				if (peer.is_repairing && peer.is_offerer)
+					await send_offer(peer, {iceRestart: true})
+				if (peer.connection)
+					peer.state = connection_state(peer)
+				send_media(peer)
 				on_change()
 			}
 		} else if (msg.type == 'peer_left') {
-			if (msg.peer_id == call.peer_id) {
-				close_peer()
-				call.state = 'waiting'
+			let peer = find_peer(msg.peer_id)
+			if (peer) {
+				close_peer(peer)
 				on_change()
 			}
 		} else if (msg.type == 'signal') {
-			if (msg.peer_id != call.peer_id) return
-			let peer_connection = connection
+			let peer = find_peer(msg.peer_id)
+			if (!peer || !peer.connection) return
+			let peer_connection = peer.connection
 			let data = msg.data
 			if (data.description) {
 				await peer_connection.setRemoteDescription(data.description)
-				if (connection != peer_connection) return
+				if (peer.connection != peer_connection) return
 				if (data.description.type == 'offer') {
 					for (let transceiver of peer_connection.getTransceivers()) {
 						let kind = transceiver.receiver.track.kind
 						let media = kind == 'audio' ? call.microphone : call.camera
 						transceiver.direction = 'sendrecv'
 						transceiver.sender.setStreams(call.local_stream)
-						senders[kind] = transceiver.sender
+						peer.senders[kind] = transceiver.sender
 						await transceiver.sender.replaceTrack(media.track)
-						if (connection != peer_connection) return
+						if (peer.connection != peer_connection) return
 					}
 					await peer_connection.setLocalDescription(
 						await peer_connection.createAnswer())
-					if (connection != peer_connection) return
-					send_signal({description: peer_connection.localDescription})
+					if (peer.connection != peer_connection) return
+					send_signal(peer,
+						{description: peer_connection.localDescription})
 				}
 			} else if (data.candidate) {
 				await peer_connection.addIceCandidate(data.candidate)
 			} else if (data.media) {
-				call.remote_media = data.media
+				peer.media = data.media
 				on_change()
 			}
 		} else {
@@ -624,7 +633,7 @@ window.create_call = function(opt) {
 
 	function drop_socket(error_text) {
 		close_socket()
-		if (!reconnect_token || !is_connected) {
+		if (!reconnect_token || !call.peers.some(peer => peer.is_connected)) {
 			fail(new Error(error_text))
 		} else {
 			if (reconnect_deadline == null) {
@@ -747,6 +756,24 @@ function draw_call_media(id, media, devices, kind, label, set_media,
 	if (media.error) ui.text('', media.error, 0)
 }
 
+// One participant's name, microphone state, video and connection status.
+
+function draw_call_tile(id, name, is_muted, stream, placeholder, status) {
+	ui.v(1, ui.sp(), 's', 's')
+		ui.text('', status ? name+' ('+status+')' : name, 0)
+		if (is_muted) ui.text('', 'Microphone muted', 0)
+		ui.stack('', 1, 's', 's')
+			ui.bb('bg1', null, 1, 'intense')
+			if (stream)
+				ui.video(id, stream)
+			else
+				ui.text('', placeholder, 0, 'c', 'c')
+		ui.end_stack()
+		let playback_error = ui.state_of(id, 'playback_error')
+		if (playback_error) ui.text('', playback_error, 0)
+	ui.end_v()
+}
+
 // Call widget lifetime, join/leave controls and media display.
 
 ui.call = ui.stateful_widget(function(id) {
@@ -835,48 +862,47 @@ ui.call = ui.stateful_widget(function(id) {
 			}
 			draw_call_media(id+'.camera', call.camera, call.devices,
 				'videoinput', 'Camera', call.set_camera, is_closed)
-			if (call.audio_error) {
-				ui.h(0, ui.sp())
-					ui.text('', call.audio_error, 0)
-					if (ui.button(id+'.audio', 'Play audio', 0))
-						call.play_audio()
-				ui.end_h()
-			}
-			ui.h(1, ui.sp(), 's', 's')
-				ui.v(1, ui.sp(), 's', 's')
-					ui.text('', call.name || opt.name || guest_name || 'Local', 0)
-					if (!is_media_enabled(call.microphone))
-						ui.text('', 'Microphone muted', 0)
-					ui.stack('', 1, 's', 's')
-						ui.bb('bg1', null, 1, 'intense')
-						if (is_media_enabled(call.camera))
-							ui.video(id+'.local', call.local_stream)
-						else
-							ui.text('', 'Camera off', 0, 'c', 'c')
-					ui.end_stack()
-					let local_playback_error =
-						ui.state_of(id+'.local', 'playback_error')
-					if (local_playback_error) ui.text('', local_playback_error, 0)
-				ui.end_v()
-				ui.v(1, ui.sp(), 's', 's')
-					ui.text('', call.remote_name || 'Remote', 0)
-					if (call.remote_media && !call.remote_media.microphone)
-						ui.text('', 'Microphone muted', 0)
-					ui.stack('', 1, 's', 's')
-						ui.bb('bg1', null, 1, 'intense')
-						if (call.remote_media?.camera)
-							ui.video(id+'.remote', call.remote_stream)
-						else
-							ui.text('', call.remote_media ? 'Camera off'
-								: call.peer_id ? 'Waiting for media state'
-								: 'Waiting for participant', 0, 'c', 'c')
-					ui.end_stack()
-					let remote_playback_error =
-						ui.state_of(id+'.remote', 'playback_error')
-					if (remote_playback_error)
-						ui.text('', remote_playback_error, 0)
-				ui.end_v()
-			ui.end_h()
+			for (let peer of call.peers)
+				if (peer.audio_error) {
+					ui.h(0, ui.sp())
+						ui.text('', peer.name+': '+peer.audio_error, 0)
+						if (ui.button(id+'.audio.'+peer.id, 'Play audio', 0))
+							call.play_audio(peer)
+					ui.end_h()
+				}
+			if (call.state == 'joined' && !call.peers.length)
+				ui.text('', 'Waiting for participants', 0)
+
+			// Local and participant tiles in a grid.
+
+			let tile_n = 1 + call.peers.length // local and participant tiles
+			let col_n = Math.ceil(Math.sqrt(tile_n)) // tiles per row
+			ui.v(1, ui.sp(), 's', 's')
+				for (let row_i = 0; row_i * col_n < tile_n; row_i++) {
+					ui.h(1, ui.sp(), 's', 's')
+						let tile_i1 = row_i * col_n // first tile index of the row
+						let tile_i2 = Math.min(tile_i1 + col_n, tile_n) // row end
+						for (let tile_i = tile_i1; tile_i < tile_i2; tile_i++) {
+							if (tile_i == 0) {
+								draw_call_tile(id+'.local',
+									call.name || opt.name || guest_name || 'Local',
+									!is_media_enabled(call.microphone),
+									is_media_enabled(call.camera)
+										? call.local_stream : null,
+									'Camera off', null)
+							} else {
+								let peer = call.peers[tile_i - 1]
+								draw_call_tile(id+'.peer.'+peer.id, peer.name,
+									peer.media && !peer.media.microphone,
+									peer.media?.camera ? peer.stream : null,
+									peer.media ? 'Camera off'
+										: 'Waiting for media state',
+									peer.state != 'connected' ? peer.state : null)
+							}
+						}
+					ui.end_h()
+				}
+			ui.end_v()
 		ui.end_v()
 		return call
 	}
