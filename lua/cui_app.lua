@@ -16,7 +16,7 @@ USAGE
 API
 
 	fontfile(name, path, [desc])  preload a font and load it in the page
-	user_json() -> {signed_in=, anonymous=, email=, phone=}
+	user_json() -> {signed_in=, anonymous=, name=, email=, phone=}
 	db() -> db                             open the configured db
 	scan(tbl, [path], [alias]) -> scan     db():scan()
 	query('TABLE [ALIAS]'|rel, [alias]) -> rel   db():from()
@@ -76,6 +76,7 @@ function user_json()
 		--signed_in is always non-nil to avoid an empty table to encode as [].
 		signed_in = user() ~= nil and not user'anonymous',
 		anonymous = user'anonymous',
+		name = user'name',
 		email = user'email',
 		phone = user'phone',
 	}

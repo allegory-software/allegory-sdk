@@ -253,8 +253,14 @@ demos.db_explorer = function() {
 }
 
 {
+// {item id -> checked}
+let menu1_checks = {check_on: true, check_off: false, 'item3.3': true}
 demos.menu = function() {
 ui.m(ui.em(5))
+// act on the pick before ui.menu() builds the menu.
+let picked_id = ui.state_of('menu1', 'picked_id')
+if (menu1_checks[picked_id] != null)
+	menu1_checks[picked_id] = ui.state_of('menu1', 'picked_checked')
 ui.menu('menu1', [
 	{id: 'item1', label: 'Item 1', shortcut: 'Ctrl + F'},
 	{id: 'item2', label: 'Item 2 looong', items: [
@@ -266,9 +272,21 @@ ui.menu('menu1', [
 	]},
 	{id: 'item3', label: 'Item 3', items: [
 		{id: 'item3.1', label: 'Item 3.1 long'},
-		{id: 'item3.2', label: 'Item 3.2'},
+		{id: 'item3.2', label: 'Item 3.2', disabled: true},
+		{id: 'item3.3', label: 'Item 3.3 checked',
+			checked: menu1_checks['item3.3']},
 	]},
-], 'it', '[')
+	{id: 'check_on' , label: 'Checked'  , checked: menu1_checks.check_on },
+	{id: 'check_off', label: 'Unchecked', checked: menu1_checks.check_off},
+	{id: 'disabled', label: 'Disabled', disabled: true},
+	{id: 'disabled_on', label: 'Disabled checked',
+		disabled: true, checked: true},
+	{id: 'disabled_off', label: 'Disabled unchecked',
+		disabled: true, checked: false},
+	{id: 'disabled_sub', label: 'Disabled submenu', disabled: true, items: [
+		{id: 'disabled_sub.1', label: 'Unreachable'},
+	]},
+], true, 'it', '[')
 }
 }
 
@@ -1862,13 +1880,21 @@ demos.sign_in = function() {
 }
 
 {
-demos.call = function() {
+let call_demo_layout = { // dock layout for the call and other tabs
+	tabs: [
+		{id: 'call', label: 'Call'},
+		{id: 'other', label: 'Other'},
+	],
+	selected_tab_id: 'call',
+}
+
+function build_call_demo() {
 	let s = ui.state('call_demo')
 	if (!s.free) {
 		let params = new URLSearchParams(location.search)
 		s.call_id = params.get('call') // call id text or null
 		s.token = params.get('token') // invite token text or null
-		s.call = null // call session or null
+		s.call = null // call session or null before building the widget
 		s.request = null // demo credentials request or null
 		s.load_error = null // demo credentials error text or null
 		s.name = null // name for the next call or null
@@ -1879,7 +1905,6 @@ demos.call = function() {
 		ui.on_free('call_demo', function(s) {
 			if (s.request) s.request.abort()
 			if (s.create_request) s.create_request.abort()
-			if (s.call) s.call.leave()
 		})
 		if (!s.call_id && !s.token)
 			s.request = glue.get('/call_demo.json', function(demo_call) {
@@ -1894,8 +1919,9 @@ demos.call = function() {
 				ui.animate()
 			}, {silent: true})
 	}
-	let is_active = s.call && s.call.state != 'left'
-		&& s.call.state != 'failed'
+	let call = s.call
+	let is_active = call && call.state != 'preview'
+		&& call.state != 'left' && call.state != 'failed'
 	let is_readonly = is_active || s.request != null
 		|| s.create_request != null
 	ui.m(ui.sp2())
@@ -1949,77 +1975,40 @@ demos.call = function() {
 			ui.label('call_demo.force_turn', 'Force TURN', 0)
 			s.want_force_turn = ui.checkbox('call_demo.force_turn',
 				s.want_force_turn, null, 0, null, null, is_active)
-			if (is_active) {
-				if (ui.button('call_demo.leave', 'Leave', 0))
-					s.call.leave()
-			} else {
-				if (ui.button('call_demo.join', 'Join', 0,
-					null, null, null, is_readonly || !s.call_id || !s.token))
-					s.call = join_call({
-						call_id: s.call_id,
-						token: s.token,
-						on_change: ui.animate,
-						ice_transport_policy: s.want_force_turn ? 'relay' : 'all',
-					})
-			}
 		ui.end_h()
 		if (s.request) ui.text('', 'Loading demo call...', 0)
 		if (s.load_error) ui.text('', s.load_error, 0)
 		if (s.create_request) ui.text('', 'Creating call...', 0)
 		if (s.create_error) ui.text('', s.create_error, 0)
 		if (s.copy_result) ui.text('', s.copy_result, 0)
-		let call = s.call
-		ui.text('', 'Status: '+(call ? call.state : 'idle'), 0)
-		if (call?.error) ui.text('', call.error, 0)
-		if (call?.local_stream) {
-			ui.h(0, ui.sp())
-				for (let track of call.local_stream.getTracks()) {
-					let text
-					if (track.kind == 'audio') {
-						text = track.enabled
-							? 'Mute microphone' : 'Unmute microphone'
-					} else {
-						text = track.enabled ? 'Turn camera off' : 'Turn camera on'
-					}
-					if (ui.button('call_demo.track.'+track.kind, text, 0)) {
-						track.enabled = !track.enabled
-						ui.animate()
-					}
-				}
-			ui.end_h()
-		}
-		if (call?.audio_error) {
-			ui.h(0, ui.sp())
-				ui.text('', call.audio_error, 0)
-				if (ui.button('call_demo.audio', 'Play audio', 0))
-					call.play_audio()
-			ui.end_h()
-		}
-		ui.h(1, ui.sp(), 's', 's')
-			ui.v(1, ui.sp(), 's', 's')
-				ui.text('', 'Local', 0)
-				ui.stack('', 1, 's', 's')
-					ui.bb('bg1', null, 1, 'intense')
-					if (call?.local_stream)
-						ui.video('call_demo.local', call.local_stream)
-				ui.end_stack()
-				let local_playback_error =
-					ui.state_of('call_demo.local', 'playback_error')
-				if (local_playback_error) ui.text('', local_playback_error, 0)
-			ui.end_v()
-			ui.v(1, ui.sp(), 's', 's')
-				ui.text('', 'Remote', 0)
-				ui.stack('', 1, 's', 's')
-					ui.bb('bg1', null, 1, 'intense')
-					if (call?.remote_stream)
-						ui.video('call_demo.remote', call.remote_stream)
-				ui.end_stack()
-				let remote_playback_error =
-					ui.state_of('call_demo.remote', 'playback_error')
-				if (remote_playback_error) ui.text('', remote_playback_error, 0)
-			ui.end_v()
-		ui.end_h()
+		s.call = ui.call('call_demo.call', {
+			call_id: s.call_id,
+			token: s.token,
+			name: window.user?.signed_in ? user.name : null,
+			ice_transport_policy: s.want_force_turn ? 'relay' : 'all',
+			can_join: !s.request && !s.create_request,
+		})
 	ui.end_v()
+}
+
+function build_call_demo_tab(tab) {
+	if (tab.id == 'call') {
+		build_call_demo()
+	} else {
+		let call = ui.state_of('call_demo', 'call')
+		ui.m(ui.sp2())
+		ui.v(1, ui.sp(), 's', 's')
+			ui.text('', 'Call status: '+(call ? call.state : 'not started'), 0)
+			ui.text('', 'Switch back to Call to use its controls.', 0)
+		ui.end_v()
+	}
+}
+
+demos.call = function() {
+	ui.dock('call_demo.dock', call_demo_layout, build_call_demo_tab, {
+		can_add_remove_tabs: false,
+		can_change_layout: false,
+	})
 }
 }
 

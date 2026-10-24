@@ -178,18 +178,30 @@ local function schedule_write(self)
 	end
 end
 
-local function begin_write(self)
-	self.tcp:check_closed()
-	local threads = self.write_threads
-	if not threads then
-		threads = {} -- {i -> writer thread; first thread may write}
-		self.write_threads = threads
-		self.tcp:onclose(function()
-			schedule_write(self)
-		end)
+local function schedule_message(self)
+	local threads = self.message_threads
+	if self.tcp:closed() then
+		while #threads > 1 do
+			threads[2]:resume_with(false, CLOSED)
+		end
+	elseif #threads > 0 then
+		threads[1]:resume()
 	end
+end
+
+local function init_write_locks(self)
+	if self.write_threads then return end
+	self.write_threads = {} -- {i -> writer thread; first thread may write}
+	self.message_threads = {} -- {i -> data thread; first thread may send}
+	self.tcp:onclose(function()
+		schedule_message(self)
+		schedule_write(self)
+	end)
+end
+
+local function wait_turn(threads, busy_err)
 	local thread = currentthread()
-	assert(threads[1] ~= thread, 'WebSocket frame write already in progress')
+	assert(threads[1] ~= thread, busy_err)
 	add(threads, thread)
 	if #threads > 1 then
 		local ok, err = try_suspend()
@@ -200,9 +212,26 @@ local function begin_write(self)
 	end
 end
 
+local function begin_write(self)
+	self.tcp:check_closed()
+	init_write_locks(self)
+	wait_turn(self.write_threads, 'WebSocket frame write already in progress')
+end
+
 local function end_write(self)
 	remove(self.write_threads, 1)
 	schedule_write(self)
+end
+
+local function begin_message(self)
+	self.tcp:check_closed()
+	init_write_locks(self)
+	wait_turn(self.message_threads, 'message in progress (use send_chunk)')
+end
+
+local function end_message(self)
+	remove(self.message_threads, 1)
+	schedule_message(self)
 end
 
 local function write_frame(self, fin, opcode, payload, len)
@@ -333,37 +362,43 @@ end
 
 function ws:send(s, kind)
 	assert(type(s) == 'string', 'string expected')
+	begin_message(self)
 	begin_write(self)
-	if self.closed_sent or self.send_in_progress then
-		local err = self.closed_sent and 'connection closed'
-			or 'message in progress (use send_chunk)'
+	if self.closed_sent then
 		end_write(self)
-		error(err, 2)
+		end_message(self)
+		error('connection closed', 2)
 	end
 	local opcode = (kind == 'binary') and OP_BIN or OP_TEXT
 	write_frame(self, true, opcode, s, #s)
 	end_write(self)
+	end_message(self)
 end
 
 function ws:send_chunk(s, kind, fin)
 	assert(type(s) == 'string', 'string expected')
+	local threads = self.message_threads -- data threads or nil
+	local is_first_chunk = not threads or threads[1] ~= currentthread()
+	if is_first_chunk then
+		begin_message(self)
+	end
 	begin_write(self)
 	if self.closed_sent then
 		end_write(self)
+		end_message(self)
 		error('connection closed', 2)
 	end
 	local opcode
-	if self.send_in_progress then
-		opcode = OP_CONT
-	else
+	if is_first_chunk then
 		opcode = (kind == 'binary') and OP_BIN or OP_TEXT
-		self.send_in_progress = true
-	end
-	if fin then
-		self.send_in_progress = false
+	else
+		opcode = OP_CONT
 	end
 	write_frame(self, fin and true or false, opcode, s, #s)
 	end_write(self)
+	if fin then
+		end_message(self)
+	end
 end
 
 function ws:recv_chunk()
@@ -485,7 +520,11 @@ function websocket_upgrade(req, opt)
 	}, ws)
 	--auto-close on handler return if app didn't already close
 	req:onfinish(function()
-		if not self.closed_sent then
+		--frame lock held or socket closed: req:finish() closes the socket.
+		local threads = self.write_threads -- writer threads or nil
+		if not self.closed_sent and not self.tcp:closed()
+			and not (threads and #threads > 0)
+		then
 			self:close(1001, 'going away')
 		end
 	end)

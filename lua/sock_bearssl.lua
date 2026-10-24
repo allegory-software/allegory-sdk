@@ -624,6 +624,19 @@ local function ssl_engine_error(e)
 	return ssl_alert_error(e) or ssl_br_error(e)
 end
 
+local function check_ban(self, e)
+	if not self.on_ban then return end
+	local sc = cast('br_ssl_server_context*', self.eng) -- server context
+	if br_err_name[e] == 'unsupported_version' or (
+		self.listen_socket
+		and sc.client_max_version >= 0x0300
+		and sc.client_max_version < C.BR_TLS12
+		and ssl_alert_error(e) == 'ssl_send_error_protocol_version'
+	) then
+		self.on_ban(self.tcp:remote_addr():ip())
+	end
+end
+
 --PEM parsing ----------------------------------------------------------------
 
 local _pem_acc     -- uint8_t* write head
@@ -1019,7 +1032,8 @@ local function engine_run(self, target)
 		end
 		if band(state, BR_SSL_CLOSED) ~= 0 then
 			local e = tonumber(eng.err)
-			self:check_net('ssl_engine', false, ssl_engine_error(e))
+			check_ban(self, e)
+			self:check_net('ssl_engine', false, ssl_engine_error(e, eng))
 		end
 		if band(state, BR_SSL_SENDREC) ~= 0 then
 			local buf = C.br_ssl_engine_sendrec_buf(eng, _szp)

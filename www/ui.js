@@ -956,6 +956,7 @@ ui.add_pointer = function() {
 		ui.my_notrans = p.my
 		ui.pressed    = p.pressed
 		ui.click      = p.click
+		ui.rightclick = p.rightclick
 		ui.clickup    = p.clickup
 		ui.dblclick   = p.dblclick
 		ui.wheel_dy   = p.wheel_dy
@@ -977,6 +978,7 @@ ui.local_pointer.activate()
 
 function reset_pointer_state(p) {
 	p.click = false
+	p.rightclick = false // right button press for the current frame
 	p.clickup = false
 	p.dblclick = false
 	p.wheel_dy = 0
@@ -997,9 +999,16 @@ screen.addEventListener('pointerdown', function(ev) {
 		ui.local_pointer.pressed = true
 		if (ev.target == canvas)
 			canvas.setPointerCapture(ev.pointerId)
+	} else if (ev.button == 2) {
+		ui.local_pointer.rightclick = true
 	}
 	ui.local_pointer.activate()
 	animate()
+})
+
+screen.addEventListener('contextmenu', function(ev) {
+	if (ev.target == canvas && ui.local_pointer.rightclick)
+		ev.preventDefault()
 })
 
 screen.addEventListener('pointerup', function(ev) {
@@ -2206,6 +2215,11 @@ function clicked(id) {
 }
 ui.clicked = clicked
 
+function rightclicked(id) {
+	return ui.rightclick && hit(id)
+}
+ui.rightclicked = rightclicked
+
 function dblclicked(id) {
 	return ui.dblclick && hit(id)
 }
@@ -2935,7 +2949,7 @@ function redraw_all() {
 		if (!want_rebuild)
 			break
 		rebuild_count++
-		pr('rebuild')
+		//pr('rebuild')
 		if (rebuild_count > 1) {
 			warn('rebuild loop detected')
 			break
@@ -7314,44 +7328,180 @@ ui.end_section = function() {
 
 ui.icon_def('caret_right', 'tabler', '\ueb5f')
 
-ui.menu = function(id, items, side, align) {
+/*
+	let picked_id = ui.menu(id, items, [want_open], [side], [align])
+		items: [{id:, label:, [items:], [checked:], [disabled:]}, ...]
+		-> id of the item picked in this pass, or null
 
-		let open_items = ui.state_of(id, 'open_items')
-		if (!open_items) {
-			open_items = []
-			ui.state(id).open_items = open_items
+	the menu keeps opened state and builds nothing while the menu is closed.
+	pass want_open = true to open it. the menu then opens at the pointer, or
+	next to its container when side is given, and focuses itself. to get the
+	focus back after the menu closes, call ui.focus() when the menu is not open
+	and ui.focus_inside(id) is true.
+
+*/
+
+// -> index of the next enabled item after item i (d = 1) or before it
+// (d = -1), or of the first or last one when i is null. returns i at the
+// ends.
+function next_menu_item_i(items, i, d) {
+	let j = i ?? (d > 0 ? -1 : items.length) // item index
+	for (j += d; j >= 0 && j < items.length; j += d)
+		if (!items[j].disabled)
+			return j
+	return i
+}
+
+// sets ui.state(id).picked_id in the pass in which an item was picked, and
+// ui.state(id).picked_checked to the new checked state of a checked item.
+// escape, click outside the menu and its submenus: close.
+function menu_update(id, s) {
+	s.picked_id = null
+	s.picked_checked = null
+	s.hl_moved_by_key = false
+	if (!s.open)
+		return
+	let focused = ui.focused(id)
+	let escape = focused && ui.keydown('escape')
+	if (escape)
+		ui.capture_keys()
+	// every box of the menu has an id starting with id+'.'.
+	let is_outside = hit_match(id+'.') == null
+	if (escape || (ui.click || ui.rightclick) && is_outside) {
+		s.open = false
+		return
+	}
+	let hl_is = s.hl_is
+	let key_level = max(0, hl_is.length - 1) // level navigated by keys
+	let picked_item
+	let want_close
+
+	// walk the open levels: the menu and the submenus of highlighted items.
+	let level_items = s.items // items of the open menu at level
+	for (let level = 0; level_items; level++) {
+		for (let item of level_items)
+			if (clicked(id+'.item.'+item.id)
+				&& !item.disabled && !item.items?.length
+			) {
+				picked_item = item
+				want_close = item.checked == null
+			}
+		if (focused && level == key_level) {
+			let hl_i = hl_is[level] // highlighted item index
+			let hl_item = level_items[hl_i]
+			let is_hl_enabled = hl_item && !hl_item.disabled
+			let d =
+				ui.keydown('arrowdown') &&  1 ||
+				ui.keydown('arrowup'  ) && -1 || 0
+			if (d) {
+				hl_is[level] = next_menu_item_i(level_items, hl_i, d)
+				s.hl_moved_by_key = true
+			} else if (is_hl_enabled && hl_item.items?.length
+				&& (ui.keydown('arrowright') || ui.keydown('enter'))
+			) {
+				hl_is[level+1] = next_menu_item_i(hl_item.items, null, 1)
+				s.hl_moved_by_key = true
+				ui.capture_keys()
+			} else if (level > 0 && ui.keydown('arrowleft')) {
+				hl_is.length = level
+			} else if (is_hl_enabled && ui.keydown('enter')) {
+				picked_item = hl_item
+				want_close = true
+				ui.capture_keys()
+			} else if (is_hl_enabled && hl_item.checked != null
+				&& ui.keydown(' ')
+			) {
+				picked_item = hl_item
+			}
 		}
+		let open_item = hl_is.length > level + 1
+			? level_items[hl_is[level]] : null
+		level_items = open_item && !open_item.disabled
+			? open_item.items : null
+	}
+	if (picked_item) {
+		s.picked_id = picked_item.id
+		if (picked_item.checked != null)
+			s.picked_checked = !picked_item.checked
+	}
+	if (want_close)
+		s.open = false
+}
+
+ui.menu = function(id, items, want_open, side, align) {
+
+		let s = ui.state(id, menu_update)
+		s.items = items
+		s.hl_is ??= [] // highlighted items indices, per submenu level
+		if (want_open && !s.open) {
+			s.open = true
+			s.hl_is.length = 0
+			s.x = ui.mx // pointer position when opened
+			s.y = ui.my
+			ui.focus(id)
+		}
+		if (!s.open)
+			return s.picked_id
+		let hl_is = s.hl_is
 
 		function menu(level, items, side, align) {
 			let radius = 0 // ui.sp()
-			ui.popup(id, 'open', null, side, align, 'constrain change_side')
+			let flags = 'constrain change_side solid'
+			// one popup id per level: the popup keeps its side on its state.
+			let popup_id = id+'.popup.'+level
+			if (!level && !side)
+				ui.popup(popup_id, 'open', 'screen', 'it', '[', flags, null,
+					s.x, s.y)
+			else
+				ui.popup(popup_id, 'open', null, side, align, flags)
 			ui.shadow('menu')
 			ui.bb('bg1', null, 1, 'light', null, radius)
 			ui.p(1)
+			if (!level) {
+				ui.focus_group(true, null, id)
+				ui.focusable(id)
+			}
+			ui.sb_max_wh(null, screen_h - 2 * screen_margin)
+			ui.sb(id+'.sb.'+level, 0, 'contain')
 			ui.v()
 			let i = 0
 			for (let item of items) {
 				let first = i == 0
 				let last = i == items.length-1
 				let item_id = id+'.item.'+item.id
-				let hover = hit(item_id)
-				if (hover) {
-					array_resize(open_items, level)
-					if (item.items?.length)
-						open_items[level] = item.id
+				// pointer moved onto this item: highlight it, open its submenu.
+				if (ui.hit_enter(item_id)) {
+					hl_is.length = level + 1
+					hl_is[level] = i
+					if (item.items?.length && !item.disabled)
+						hl_is.push(null)
 				}
-				let open = open_items[level] == item.id
+				let is_hl = hl_is[level] == i && !item.disabled
+				let open = is_hl && hl_is.length > level + 1
+				if (is_hl && s.hl_moved_by_key)
+					ui.scroll_to_view_next_box()
 				ui.stack(item_id)
-					ui.pl(ui.em(3))
+					ui.pl(ui.em(1))
 					ui.pr(ui.em(1))
 					ui.pt(ui.sp2())
 					ui.pb(ui.sp2() + (first ? 1 : 0))
 					ui.bb(
-						hover || open ? 'item' : 'bg1',
-						hover || open ? 'focused item-selected item-focused' : null,
+						is_hl ? 'item' : 'bg1',
+						is_hl ? 'focused item-selected item-focused' : null,
 						first ? 'ltr' : last ? 'lbr' : '', null, null, radius)
 					ui.border(last ? '' : 'b', 'light')
 					ui.h(1, ui.sp2())
+						// check mark column, in the space left of the label.
+						ui.min_w(ui.em(2) - ui.sp2())
+						ui.stack('', 0, 'l', 'c')
+							if (item.checked) {
+								if (item.disabled)
+									ui.color('text', 'readonly')
+								ui.icon('', 'check')
+							}
+						ui.end_stack()
+						if (item.disabled)
+							ui.color('text', 'readonly')
 						ui.text('', item.label, 1)
 						if (item.items?.length) {
 							ui.pl(ui.sp2())
@@ -7359,7 +7509,7 @@ ui.menu = function(id, items, side, align) {
 								ui.color('label')
 								ui.icon('', 'caret_right')
 							ui.end_stack()
-							if (hover || open_items[level] == item.id) {
+							if (open) {
 								ui.m(-ui.sp(), -1)
 								menu(level + 1, item.items, 'r', '[')
 							}
@@ -7369,9 +7519,13 @@ ui.menu = function(id, items, side, align) {
 				i++
 			}
 			ui.end_v()
+			ui.end_sb()
+			if (!level)
+				ui.end_focus_group()
 			ui.end_popup()
 		}
 		menu(0, items, side, align)
+		return s.picked_id
 }
 
 //// LIST --------------------------------------------------------------------

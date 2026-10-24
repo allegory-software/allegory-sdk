@@ -416,13 +416,16 @@ RELOAD
 const ui = window.ui
 
 const {
-	assign, assert, isfunc, isstr, isarray, isobj, words, obj, map, empty,
-	warn, warn_if,
-	num, floor, abs, min, max, clamp, strict_sign, month, year, month_of, year_of,
-	memoize, ajax, href,
-	return_true, return_false, captures, json, keys, url_parse, url_format, S,
-	time, copy_to_clipboard,
+	assert, warn, warn_if,
+	isfunc, isstr, isarray, isobj,
+	words, obj, map, empty, keys, insert,
 	dyn_u32arr,
+	num, floor, abs, min, max, clamp, strict_sign,
+	time, month, year, month_of, year_of,
+	memoize, ajax, href,
+	return_true, return_false, captures,
+	json, url_parse, url_format, S,
+	copy_to_clipboard,
 } = glue
 
 //// ROW STATE ---------------------------------------------------------------
@@ -768,6 +771,7 @@ ui.nav = function(id, opt) {
 
 	// fields (dynamic with column hiding and moving)
 	e.visible_fields = null
+	e.cols_menu_items = null // [{id, label, items: [{id, label, checked, disabled}]}]
 
 	// rows (dynamic if grid is editable)
 	e.row_n = null // data row count
@@ -1197,6 +1201,20 @@ ui.nav = function(id, opt) {
 					&& is_rect_field(af[fi]))
 	}
 
+	e.has_extra_selection = function(ri, fi) {
+		for (let vri = 0; vri < e.visible_n; vri++) { // visible row index
+			let ri1 = e.visible_ris[vri]
+			for (let vfi = 0; vfi < e.visible_fields.length; vfi++) {
+				let fi1 = e.visible_fields[vfi].fi
+				if ((ri1 != ri || e.cell_select_mode && fi1 != fi)
+					&& e.is_cell_selected(ri1, fi1)
+				)
+					return true
+			}
+		}
+		return false
+	}
+
 	// call fn(ri) for each row with a selected cell, in display order.
 	// check only visible rows because hidden rows cannot be selected.
 	e.each_selected_row = function(fn) {
@@ -1464,11 +1482,55 @@ ui.nav = function(id, opt) {
 			fields[vfi].vfi = vfi
 		e.visible_fields = fields // visible fields, in display order
 		visible_fields_mask = fields_mask(fields)
+		// the columns menu: one item per column, grouping columns disabled.
+		let items = []
+		for (let field of e.all_fields) {
+			if (field.internal || field == group_field)
+				continue
+			items.push({
+				id: field.name,
+				label: field.label,
+				checked: field.vfi != null,
+				disabled: e.is_grouped && group_fis.has(field.fi),
+			})
+		}
+		e.cols_menu_items = [{
+			id: 'columns',
+			label: 'Show/Hide columns',
+			items,
+		}]
 		set_focus(e.focused_ri, e.focused_fi)
 	}
 
 	e.save_col_w = function(field) {
 		ui.save_state(e.id+'.col_ws', field.name, field.w)
+	}
+
+	function set_cols(col_names, ev) {
+		e.exit_edit()
+		let cols = col_names.join(' ')
+		e.cols = cols == rowset_cols ? null : cols
+		update_visible_fields()
+		if (ev?.input)
+			ui.save_state(e.id, 'cols', e.cols)
+	}
+
+	// add field at vfi or remove it from visible columns.
+	// refuse to hide a field with edits, except the pos and parent fields.
+	e.showhide_field = function(field, show, vfi, ev) {
+		let col_names = words(e.cols ?? rowset_cols)
+		let col_i = col_names.indexOf(field.name) // index in col_names
+		if (show && col_i == -1) {
+			insert(col_names, vfi, field.name)
+		} else if (!show && col_i != -1) {
+			if (field != e.pos_field && field != e.parent_field)
+				for (let row_i = 0; row_i < e.row_n; row_i++)
+					if (e.is_cell_modified(e.base_ris[row_i], field.fi))
+						return false
+			col_names.splice(col_i, 1)
+		}
+		set_cols(col_names, ev)
+		return true
 	}
 
 	// move field before over_field, or to the end if over_field = null.
@@ -1477,18 +1539,13 @@ ui.nav = function(id, opt) {
 	e.move_field = function(field, over_field, ev) {
 		if (field == group_field || field == over_field)
 			return
-		e.exit_edit()
 		let col_names = words(e.cols ?? rowset_cols)
 		col_names.splice(col_names.indexOf(field.name), 1)
 		let over_i = over_field == null ? col_names.length
 			: over_field == group_field ? 0
 			: col_names.indexOf(over_field.name)
 		col_names.splice(over_i, 0, field.name)
-		let cols = col_names.join(' ')
-		e.cols = cols == rowset_cols ? null : cols
-		update_visible_fields()
-		if (ev?.input)
-			ui.save_state(e.id, 'cols', e.cols)
+		set_cols(col_names, ev)
 	}
 
 	/// row orders ------------------------------------------------------------
@@ -4224,7 +4281,7 @@ ui.nav = function(id, opt) {
 	// Accept rs with fields and either col_vals or rows. After accepting the
 	// rowset, ignore replies to pending saves because the nav has replaced
 	// their rows.
-	e.load = function(rs) {
+	e.load = function(rs, apply_view = true) {
 
 		// validation: no state changes so we can early-return on failure.
 
@@ -4245,12 +4302,14 @@ ui.nav = function(id, opt) {
 			if (!field)
 				return
 			field.fi = fi
-			let saved_w = ui.saved_state[e.id+'.col_ws']?.[name]
-			if (saved_w != null)
-				field.w = saved_w
-			let saved_filter = ui.saved_state[e.id+'.col_filters']?.[name]
-			if (saved_filter !== undefined)
-				field.filter = saved_filter
+			if (apply_view) {
+				let saved_w = ui.saved_state[e.id+'.col_ws']?.[name]
+				if (saved_w != null)
+					field.w = saved_w
+				let saved_filter = ui.saved_state[e.id+'.col_filters']?.[name]
+				if (saved_filter !== undefined)
+					field.filter = saved_filter
+			}
 			field.filter_field = create_filter_field(field)
 			all_fields.push(field)
 			all_fields_map[name] = field
@@ -4348,8 +4407,8 @@ ui.nav = function(id, opt) {
 		all_fields_mask = fields_mask(e.all_fields)
 		e.last_focused_fi = null
 
-		e.cols = saved_opt('cols')
-		e.order_by = saved_opt('order_by')
+		e.cols = apply_view ? saved_opt('cols') : null
+		e.order_by = apply_view ? saved_opt('order_by') : null
 		e.can_be_tree = !!(e.id_field && e.parent_field)
 		e.group_by = null
 		e.group_cols = []
@@ -4364,7 +4423,7 @@ ui.nav = function(id, opt) {
 		want_reload = false
 
 		load_rows(src_col_vals, null, null)
-		let group_by = saved_opt('group_by')
+		let group_by = apply_view ? saved_opt('group_by') : null
 		if (group_by)
 			e.set_group_by(group_by)
 		e.move_focus(null, null)
@@ -4624,7 +4683,7 @@ ui.nav = function(id, opt) {
 	} else {
 		// Start with no rows until the first load.
 		e.load({fields: [{name: 'id', hidden: true, not_null: true}], pk: 'id',
-			rows: []})
+			rows: []}, false)
 		if (is_server_rowset) {
 			listen_rowset_events()
 			rowset_listeners[e.rowset_name] ??= new Set()

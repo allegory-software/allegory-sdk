@@ -38,7 +38,7 @@ ui.db_explorer = function(id) {
 		} else {
 			let tables_nav = ui.state_of(id+'.tables', 'e')
 			let table_name = tables_nav?.focused_row_cell_val('name')
-			ui.grid(id+'.'+tab.id+'.'+(table_name ?? ''), {
+			ui.grid(id+'.'+(id == 'rows' ? table_name+'.' : '')+tab.id, {
 				rowset_name: 'db_explorer_'+tab.id,
 				param_vals: table_name ? [{table: table_name}] : false,
 				can_move_rows: false,

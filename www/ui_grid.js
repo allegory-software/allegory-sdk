@@ -304,6 +304,8 @@ function init(id, e) {
 	let help_open
 	let filter_help_field
 	let clicked_indent
+	let columns_menu_id = id+'.columns_menu'
+	let want_columns_menu // right-click on a cell or the header this pass
 
 	function reset_mouse_state() {
 		hit_zone = null
@@ -1005,6 +1007,17 @@ function init(id, e) {
 			ui.capture_keys()
 		}
 
+		// columns menu: act on the pick before e.build() builds the menu.
+		let picked_col = ui.state_of(columns_menu_id, 'picked_id')
+		if (picked_col)
+			e.showhide_field(e.all_fields_map[picked_col],
+				ui.state_of(columns_menu_id, 'picked_checked'),
+				e.focused_vfi(), {input: e})
+		if (!ui.state_of(columns_menu_id, 'open')
+			&& ui.focus_inside(columns_menu_id)
+		)
+			ui.focus(id)
+
 		if (e.editing
 				&& !ui.focused(id)
 				&& !ui.focused(editor_id)
@@ -1414,6 +1427,17 @@ function init(id, e) {
 			}
 		}
 
+		let rightclick_cell = ui.rightclicked(id+'.cells') && hit_zone == 'cell'
+		if (rightclick_cell) {
+			let ri = e.visible_ris[hit_vri]
+			let field = e.visible_fields[hit_vfi]
+			if (!e.has_extra_selection(e.focused_ri, e.focused_fi)
+				&& e.can_focus_cell(ri, field.fi)
+			)
+				e.focus_cell(ri, field.fi)
+		}
+		want_columns_menu = rightclick_cell || ui.rightclicked(id+'.header')
+
 		// column resize
 		if (hit_zone == 'col_divider') {
 			let field = e.visible_fields[hit_vfi]
@@ -1811,6 +1835,7 @@ function init(id, e) {
 
 		// Check again because app code may start or end an edit after update().
 		sync_editor()
+		ui.menu(columns_menu_id, e.cols_menu_items, want_columns_menu)
 
 		// set layout vars
 

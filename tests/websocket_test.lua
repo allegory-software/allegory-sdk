@@ -9,6 +9,8 @@ require'http_server'
 require'websocket'
 
 local PORT = 18890
+local is_stalled_writer_done = false -- /stalled-writer request finished
+local stalled_writer_err -- error raised by the /stalled-writer writer or nil
 
 local n_ok, n_fail = 0, 0
 local function test(name, fn)
@@ -50,6 +52,22 @@ local server = http_server{
 			local m = ws:recv()
 			ws:send(m or '<closed>')
 			ws:close()
+		elseif req.uri == '/stalled-writer' then
+			--the client never reads, so the writer's send times out.
+			local ws = websocket_upgrade(req)
+			req:onfinish(function()
+				is_stalled_writer_done = true
+			end)
+			ws.tcp:settimeout(0.2, 'w')
+			local ts = threadset()
+			resume(ts:thread(function()
+				local s = string.rep('x', 1024 * 1024)
+				while true do
+					ws:send(s)
+				end
+			end, 'stalled writer'))
+			local _, err = ts:wait()
+			stalled_writer_err = err
 		else
 			raise('http_response', {status = 404, content = 'no such ws route\n'})
 		end
@@ -159,6 +177,51 @@ run(function()
 		assert(m == s)
 		assert(k == 'text')
 		ws:close()
+	end)
+
+	test('send waits for another thread\'s chunked message', function()
+		local ws = websocket_connect(url'/echo')
+		with_threads(function(spawn)
+			spawn(function()
+				ws:send_chunk('a')
+				wait(0.05)
+				ws:send_chunk('c', nil, true)
+			end)
+			spawn(function()
+				ws:send('b')
+			end)
+		end)
+		assert(ws:recv() == 'ac')
+		assert(ws:recv() == 'b')
+		ws:close()
+	end)
+
+	test('send_chunk waits for another thread\'s chunked message', function()
+		local ws = websocket_connect(url'/echo')
+		with_threads(function(spawn)
+			spawn(function()
+				ws:send_chunk('a')
+				wait(0.05)
+				ws:send_chunk('b', nil, true)
+			end)
+			spawn(function()
+				ws:send_chunk('x', 'text', true)
+			end)
+		end)
+		assert(ws:recv() == 'ab')
+		assert(ws:recv() == 'x')
+		ws:close()
+	end)
+
+	test('auto-close does not wait for a failed writer', function()
+		local ws = websocket_connect(url'/stalled-writer')
+		local t0 = clock() -- test start time
+		while not is_stalled_writer_done and clock() - t0 < 2 do
+			wait(0.05)
+		end
+		assert(stalled_writer_err ~= nil, 'writer did not fail')
+		assert(is_stalled_writer_done, 'request did not finish')
+		ws:try_close_socket()
 	end)
 
 	server:stop()

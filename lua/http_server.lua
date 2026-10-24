@@ -123,6 +123,7 @@ local req = {
 
 function server:ban_ip(ip)
 	self.ip_blacklist[ip] = clock()
+	log('note', 'htsrv', 'ban-ip', '%s', ip)
 end
 
 function http_server(...)
@@ -574,6 +575,9 @@ function http_server(...)
 				if tcp.istlssocket then
 					ctcp = tcp:tls_accept(ctcp, {
 						tracebacks = self.debug.tracebacks,
+						on_ban = function(ip)
+							self:ban_ip(ip)
+						end,
 					})
 				end
 				if self.debug.stream then

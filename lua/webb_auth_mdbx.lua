@@ -233,7 +233,6 @@ end
 --built on first use because db:scan() needs a transaction.
 local user_tenants_scan -- rows{uid} -> tid,...
 local user_sessions_scan -- rows{uid} -> (sid, tid),...
-local sessions_scan -- rows() -> (sid, atime),...
 
 local function load_tenants(uid) -- -> {tid1,...}
 	local t = {}
@@ -379,15 +378,10 @@ end
 
 --deletes expired sessions. call it after sync_schema().
 function store.repair()
-	local expired_sids = {} -- {sid1,...}
-	sessions_scan = sessions_scan or db():scan('sess', ''):select'sess, atime'
-	for _, sid, atime in sessions_scan:rows() do
+	for cur, _, atime in db():each('sess', 'atime') do
 		if atime + store.session_lifetime < now() then
-			add(expired_sids, sid)
+			cur:del()
 		end
-	end
-	for _, sid in ipairs(expired_sids) do
-		db():del('sess', sid)
 	end
 end
 

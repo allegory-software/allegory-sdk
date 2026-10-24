@@ -154,6 +154,7 @@ do
 	local st = auth_store()
 	st.with_lock('w', function()
 		st.repair()
+		webb_call_repair()
 		if not st.tenant_exists(1) then
 			assert(st.add_tenant() == 1)
 			for _,host in ipairs{
