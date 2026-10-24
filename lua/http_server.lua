@@ -80,6 +80,12 @@ require'http_date'
 local server = {
 	compress = true,
 	max_body_size = 64 * 1024^2,
+	uri_ban_patterns = { -- {pattern_i -> Lua pattern}
+		'/%.git[/?]',
+		'/%.git$',
+		'/%.env[._?]',
+		'/%.env$',
+	},
 }
 http_server_class = server --for overriding defaults
 
@@ -115,11 +121,29 @@ local req = {
 	type = 'http_request', debug_prefix = 'R',
 }
 
+function server:ban_ip(ip)
+	self.ip_blacklist[ip] = clock()
+end
+
 function http_server(...)
 
 	local self = object(server, {
 		compress = config'http_server_compress',
+		uri_ban_patterns = config'http_server_uri_ban_patterns',
+		ip_blacklist = {}, -- {ip -> logged_clock}
 	}, ...)
+
+	local ip_ban_duration = config('http_server_ip_ban_duration', 3600) -- seconds
+	local function is_ip_banned(ip)
+		local logged_clock = self.ip_blacklist[ip] -- time of last ban
+		if not logged_clock then return false end
+		if clock() - logged_clock < ip_ban_duration then
+			return true
+		else
+			self.ip_blacklist[ip] = nil
+			return false
+		end
+	end
 
 	if not self.listen then
 		self.listen = {}
@@ -167,7 +191,11 @@ function http_server(...)
 
 	local next_request_id = 1
 
-	local function handle_request(ctcp)
+	local function handle_request(ctcp, ip)
+		if is_ip_banned(ip) then
+			ctcp:close()
+			return
+		end
 		local rb = ctcp.rb
 		local wb = ctcp.wb
 
@@ -176,6 +204,14 @@ function http_server(...)
 		if not line then ctcp:close(); return end
 		local method, uri, http_version = line:match'^([%u]+)%s+([^%s]+)%s+HTTP/(%d+%.%d+)'
 		ctcp:checkp(http_version == '1.1', 'invalid http version')
+
+		for _, pattern in ipairs(self.uri_ban_patterns) do
+			if uri:find(pattern) then
+				self:ban_ip(ip)
+				ctcp:close()
+				return
+			end
+		end
 
 		local req = object(req, {
 			tcp = ctcp,
@@ -469,9 +505,9 @@ function http_server(...)
 
 	end --handle_request()
 
-	local function handle_connection(ctcp)
+	local function handle_connection(ctcp, ip)
 		repeat
-			handle_request(ctcp)
+			handle_request(ctcp, ip)
 		until ctcp:closed()
 	end
 
@@ -529,6 +565,11 @@ function http_server(...)
 			--here or we kill the thread: move ctcp to accept thread and do it there.
 			resume(thread(function()
 				ctcp:setowner(currentthread())
+				local ip = ctcp:remote_addr():ip() -- peer IP address
+				if is_ip_banned(ip) then
+					ctcp:close()
+					return
+				end
 				ctcp:setopt('tcp_nodelay', true)
 				if tcp.istlssocket then
 					ctcp = tcp:tls_accept(ctcp, {
@@ -548,7 +589,7 @@ function http_server(...)
 				ctcp.wb = pbuffer{
 					f = ctcp,
 				} --write buffer
-				local ok, err = pcall(handle_connection, ctcp)
+				local ok, err = pcall(handle_connection, ctcp, ip)
 				if ctcp.gz then
 					ctcp.gz:free()
 				end
