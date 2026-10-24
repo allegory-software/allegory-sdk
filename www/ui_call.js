@@ -15,6 +15,8 @@ FEATURES
 	- Choose from an updated list of microphones and cameras after plugging
 	  in or unplugging devices.
 	- Check microphone activity with a level meter.
+	- Keep video smooth in larger calls by lowering the camera bitrate sent
+	  to each participant as more participants join.
 
 API
 
@@ -39,6 +41,12 @@ API
 
 let rejected_close_code = 4000 // signaling close code for a refused join
 let repair_timeout = 30 // seconds allowed to repair a failed connection
+
+// Camera bitrate sent to each participant, lowered as the call grows.
+
+function camera_bitrate(participant_n) { // -> bits per second
+	return participant_n <= 2 ? 1500000 : participant_n <= 4 ? 800000 : 400000
+}
 
 function is_media_enabled(media) {
 	return !!(media.track?.enabled && media.track.readyState == 'live'
@@ -336,6 +344,23 @@ window.create_call = function(opt) {
 		for (let track of peer.stream.getTracks())
 			track.stop()
 		call.peers.splice(call.peers.indexOf(peer), 1)
+		set_camera_bitrates()
+	}
+
+	// Camera bitrate for the current number of participants.
+
+	function set_camera_bitrate(peer) {
+		let sender = peer.senders.video
+		let params = sender.getParameters()
+		params.encodings[0].maxBitrate = camera_bitrate(1 + call.peers.length)
+		sender.setParameters(params)
+	}
+
+	// peers not connected yet: set by the 'connected' state change.
+	function set_camera_bitrates() {
+		for (let peer of call.peers)
+			if (peer.is_connected)
+				set_camera_bitrate(peer)
 	}
 
 	function close_socket() {
@@ -474,6 +499,7 @@ window.create_call = function(opt) {
 		})
 		peer.audio.srcObject = peer.stream
 		call.peers.push(peer)
+		set_camera_bitrates()
 		if (peer.is_offerer)
 			for (let kind of ['audio', 'video']) {
 				let track = kind == 'audio'
@@ -519,6 +545,7 @@ window.create_call = function(opt) {
 					peer.is_connected = true
 					peer.is_repairing = false
 					peer.repair_timer()
+					set_camera_bitrate(peer)
 					send_connected(peer)
 				}
 				peer.state = connection_state(peer)
