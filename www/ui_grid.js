@@ -7,8 +7,7 @@
 
 (function () {
 "use strict"
-const _G = window
-const ui = _G.ui
+const ui = window.ui
 
 const {
 	pr,

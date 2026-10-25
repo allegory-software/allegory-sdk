@@ -114,13 +114,12 @@ TODO
 
 (function () {
 "use strict"
-const _G = window
 
 // the <script global> attribute dumps the `ui` namespace into `window`
 // for less typing and more name clashing.
 let script_attr = k => document.currentScript.hasAttribute(k)
 let ui = script_attr('global') || script_attr('ui-global') ? window : {}
-_G.ui = ui
+window.ui = ui
 
 ui.VERSION = 1 // frozen at 1 until this comment is gone!
 

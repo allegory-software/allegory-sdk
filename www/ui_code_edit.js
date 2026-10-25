@@ -40,7 +40,6 @@ IMPL. NOTES
 
 (function () {
 "use strict"
-const _G = window
 
 const {
 	assert,

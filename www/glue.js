@@ -305,9 +305,8 @@ AJAX REQUESTS
 
 (function () {
 "use strict"
-let G = window
 
-G.DEBUG_AJAX = 0
+window.DEBUG_AJAX = 0
 
 // browser detection ---------------------------------------------------------
 
@@ -469,7 +468,7 @@ function warn_once(...args) {
 	warn(...args)
 }
 
-G.DEBUG_SNAP_NUMS = 1
+window.DEBUG_SNAP_NUMS = 1
 function snap_nums(a) {
 	if (!DEBUG_SNAP_NUMS) return a
 	return a.map(v => isnum(v) ? snap(v, 0.01) : v)
@@ -499,7 +498,7 @@ function log_if(cond, ...args) {
 	log(...args)
 }
 
-G.DEBUG_LOG = 1
+window.DEBUG_LOG = 1
 
 let log_level = 0
 let log_off_level
@@ -1060,7 +1059,7 @@ function first_key(t) {
 // autoincrement ids ---------------------------------------------------------
 
 let next_id = {}
-G.DEBUG_GEN_ID = 1
+window.DEBUG_GEN_ID = 1
 function gen_id(k) {
 	if (!DEBUG_GEN_ID)
 		return null
@@ -2581,13 +2580,13 @@ ajax, get, post,
 S, lang, country, href,
 }
 
-G.glue = glue
+window.glue = glue
 
 let script_attr = k => document.currentScript.hasAttribute(k)
 if (script_attr('global') || script_attr('glue-global')) {
 	for (let k in glue) {
-		assert(!(k in G), k, ' global already exists')
-		G[k] = glue[k]
+		assert(!(k in window), k, ' global already exists')
+		window[k] = glue[k]
 	}
 }
 
