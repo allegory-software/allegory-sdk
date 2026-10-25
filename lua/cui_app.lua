@@ -66,6 +66,10 @@ end
 function scan(...) return db():scan(...) end
 function query(...) return db():from(...) end
 
+cmd('install', 'Install application', function()
+	app:install()
+end)
+
 local fontfiles = {}
 function fontfile(name, path, desc)
 	add(fontfiles, {name, path, desc})
@@ -179,7 +183,13 @@ end
 local function cui_app(...)
 	if package.loaded[scriptname] then return end
 	webb_app(...)
-	before(app, 'run_server', function()
+	function app:install()
+		local db = db() -- application database
+		db:track_row_changes(false)
+		db:sync_schema()
+		db:track_row_changes(true)
+	end
+	app:before('run_server', function()
 		watch_row_changes(db())
 	end)
 	after(logging.rpc, 'close_all_sockets', function()

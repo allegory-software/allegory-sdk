@@ -2,6 +2,7 @@ require'webb'
 require'proc'
 
 config{http_host = '*'}
+config{root_action = 'ui-demo.html'}
 --config{http_port = tonumber(env'HTTP_PORT') or 8888}
 --config{https_port = tonumber(env'HTTPS_PORT') or 4443}
 config{vardir = env'VARDIR'}
@@ -146,111 +147,113 @@ do
 		}
 		tables.grid_typed.rows = grid_typed_rows
 	end)
-	local grid_db = db()
-	grid_db:track_row_changes(false)
-	grid_db:sync_schema()
-	grid_db:track_row_changes(true)
-	auth_init()
-	local st = auth_store()
-	st.with_lock('w', function()
-		st.repair()
-		webb_call_repair()
-		if not st.tenant_exists(1) then
-			assert(st.add_tenant() == 1)
-			for _,host in ipairs{
-				'localhost',
-				'catcostaocasa.ro',
-				'capr.go.ro',
-			} do
-				st.add_host(host, 1)
+	app:after('install', function()
+		local domain = assert(config'domain', -- configured host
+			'domain not configured')
+		local st = auth_store() -- authentication store
+		st.with_lock('w', function()
+			if not st.tenant_exists(1) then
+				db():insert('tenant', '{}', {tenant = 1})
 			end
-		end
+			if not st.try_tenant_by_host(domain) then
+				st.add_host(domain, 1)
+			end
+		end)
 	end)
-	local demo_call = {call = 1} -- demo call id and invite token
-	grid_db:atomic('w', function()
-		demo_call.invite_token = grid_db:find('call',
-			'invite_token', demo_call.call)
-		if not demo_call.invite_token then
-			grid_db:insert('call', '{}', {
-				call = demo_call.call,
-				name = 'Demo call',
-			})
-			demo_call.invite_token = grid_db:must_find('call',
+	app:before('run_server', function()
+		local grid_db = db() -- application database
+		auth_init()
+		local st = auth_store() -- authentication store
+		st.with_lock('w', function()
+			st.repair()
+			webb_call_repair()
+		end)
+		local demo_call = {call = 1} -- demo call id and invite token
+		grid_db:atomic('w', function()
+			demo_call.invite_token = grid_db:find('call',
 				'invite_token', demo_call.call)
+			if not demo_call.invite_token then
+				grid_db:insert('call', '{}', {
+					call = demo_call.call,
+					name = 'Demo call',
+				})
+				demo_call.invite_token = grid_db:must_find('call',
+					'invite_token', demo_call.call)
+			end
+		end)
+		action['call_demo.json'] = function()
+			return demo_call
 		end
-	end)
-	action['call_demo.json'] = function()
-		return demo_call
-	end
-	rowset.grid_save = grid_db:atomic('r', function()
-		return table_rowset('grid_save', {
-			name = 'grid_save',
-			parent_col = 'parent_id',
-			pos_col = 'pos',
-			tree_col = 'text',
-			cols = 'id text num test_action test_description',
-			field_attrs = {
-				text = {w = 16},
-				test_action = {w = 18},
-				test_description = {w = 45},
-			},
-		})
-	end)
-	local rs = rowset.grid_save
-	add_test_actions(rs, 'grid_save', 'id', 6)
-	function rs:exec_reset()
-		db():atomic('w', function()
-			local children = {}
-			local roots = {}
-			for _, row in ipairs(db():scan('grid_save', '')
-				:select('id, parent_id'):rows_array('{}')) do
-				if row.parent_id then
-					add(attr(children, row.parent_id), row.id)
-				else
-					add(roots, row.id)
-				end
-			end
-			local function delete_tree(id)
-				for _, child_id in ipairs(children[id] or empty) do
-					delete_tree(child_id)
-				end
-				db():del('grid_save', id)
-			end
-			for _, id in ipairs(roots) do delete_tree(id) end
-			for _, row in ipairs(grid_rows) do
-				db():insert('grid_save', '[]', row)
-			end
+		rowset.grid_save = grid_db:atomic('r', function()
+			return table_rowset('grid_save', {
+				name = 'grid_save',
+				parent_col = 'parent_id',
+				pos_col = 'pos',
+				tree_col = 'text',
+				cols = 'id text num test_action test_description',
+				field_attrs = {
+					text = {w = 16},
+					test_action = {w = 18},
+					test_description = {w = 45},
+				},
+			})
 		end)
-		return self:exec_load({})
-	end
+		local rs = rowset.grid_save
+		add_test_actions(rs, 'grid_save', 'id', 6)
+		function rs:exec_reset()
+			db():atomic('w', function()
+				local children = {}
+				local roots = {}
+				for _, row in ipairs(db():scan('grid_save', '')
+					:select('id, parent_id'):rows_array('{}')) do
+					if row.parent_id then
+						add(attr(children, row.parent_id), row.id)
+					else
+						add(roots, row.id)
+					end
+				end
+				local function delete_tree(id)
+					for _, child_id in ipairs(children[id] or empty) do
+						delete_tree(child_id)
+					end
+					db():del('grid_save', id)
+				end
+				for _, id in ipairs(roots) do delete_tree(id) end
+				for _, row in ipairs(grid_rows) do
+					db():insert('grid_save', '[]', row)
+				end
+			end)
+			return self:exec_load({})
+		end
 
-	rowset.grid_typed = grid_db:atomic('r', function()
-		return table_rowset('grid_typed', {
-			name = 'grid_typed',
-			cols = 'code text num test_action test_description',
-			field_attrs = {
-				text = {w = 16},
-				test_action = {w = 18},
-				test_description = {w = 45},
-			},
-		})
-	end)
-	rs = rowset.grid_typed
-	add_test_actions(rs, 'grid_typed', 'code', 'A3')
-	function rs:exec_reset()
-		db():atomic('w', function()
-			for _, row in ipairs(db():scan('grid_typed', '')
-				:select('code'):rows_array('{}')) do
-				db():del('grid_typed', row.code)
-			end
-			for _, row in ipairs(grid_typed_rows) do
-				db():insert('grid_typed', '[]', row)
-			end
+		rowset.grid_typed = grid_db:atomic('r', function()
+			return table_rowset('grid_typed', {
+				name = 'grid_typed',
+				cols = 'code text num test_action test_description',
+				field_attrs = {
+					text = {w = 16},
+					test_action = {w = 18},
+					test_description = {w = 45},
+				},
+			})
 		end)
-		return self:exec_load({})
-	end
+		rs = rowset.grid_typed
+		add_test_actions(rs, 'grid_typed', 'code', 'A3')
+		function rs:exec_reset()
+			db():atomic('w', function()
+				for _, row in ipairs(db():scan('grid_typed', '')
+					:select('code'):rows_array('{}')) do
+					db():del('grid_typed', row.code)
+				end
+				for _, row in ipairs(grid_typed_rows) do
+					db():insert('grid_typed', '[]', row)
+				end
+			end)
+			return self:exec_load({})
+		end
 
-	prepare_rowsets()
+		prepare_rowsets()
+	end)
 end
 
 fontfile('mono'    , 'fonts/jetbrains-mono-nl-regular.woff2')

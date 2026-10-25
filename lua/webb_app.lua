@@ -51,7 +51,7 @@ local function webb_app(...)
 
 	if package.loaded[scriptname] then return end
 
-	local app = {}
+	local app = {before = before, after = after}
 
 	--process cmdline args.
 	local cmd_action, cmd_opt, cmd_args, cmd_run = cmdaction(...)
