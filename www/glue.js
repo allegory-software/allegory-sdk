@@ -5,10 +5,9 @@
 
 LOADING
 
-	<script src=glue.js [global] [extend]>
+	<script src=glue.js [global]>
 
 	  global flag:   dump the `glue` namespace into `window`.
- 	  extend flag:   extend Object, String, Array, Number, Set, Map prototypes.
 
 BROWSER DETECTION
 
@@ -32,7 +31,6 @@ TYPE CONVERSIONS
 
 	num(s) -> n
 	str(v) -> s
-	bool(s) -> b
 
 MATH
 
@@ -71,27 +69,16 @@ DEBUGGING
 
 	assert(v, err, ...) -> v
 	trace(...)
-	trace_if(cond, ...)
 	pr(...)
 	warn(...)
 	warn_once(...)
 	debug(...)
 	log(...)
 	check(v, ...) -> v
-	log_if(cond, ...)
-	push_log(...)
-	push_log_if(cond, ...)
-	pop_log(...)
 
 	DEBUG_LOG
 	DEBUG_SNAP_NUMS
-	DEBUG_GEN_ID
 	DEBUG_AJAX
-
-CLASSES
-
-	callable_constructor(cons) -> f
-	inherit_properties(subclass, [superclass]) -> subclass
 
 EXTENDING BUILT-IN OBJECTS
 
@@ -99,20 +86,14 @@ EXTENDING BUILT-IN OBJECTS
 	method(class|instance, method, func)
 	override(class|instance, method, func)
 	alias(class|instance, new_name, old_name)
-	override_property_getter(class|instance, prop, getter)
-	override_property_setter(class|instance, prop, setter)
 
 STRINGS
 
 	subst(s, '{0} {1}', a0, a1, ...)
 	display_name(s)
-	lower_ai_ci(s)
-	find_ai_ci(s, s1)
 	escape_regexp(s)
 	words(s) -> a | null
-	wordset(s) -> {word1: true, ...} | null
 	catany(sep, ...)
-	catall(...)
 	captures(s, re) -> [capture1, ...]
 	utf8_len(s) -> n                       byte length of s encoded as UTF-8
 
@@ -120,7 +101,6 @@ ARRAYS
 
 	array([N]) -> a                        new Array(N)
 	empty_array -> []                      global empty array, read-only!
-	range(i, j, step, f) -> a
 	array_resize(a, n, [v]) -> a           resize to n, new slots get v
 	array_set(a, a1) -> s
 	extend(a, a1) -> a
@@ -129,26 +109,17 @@ ARRAYS
 	insert_n(a, i, n)
 	remove_n(a, i, n)
 	remove_value(a, v) -> i
-	replace_value(a, v0, v1) -> i
 	remove_values(a, cond) -> a; cond(v, i, a, j) -> remove_it
 	array_move(a, i1, n, insert_i, [before])
-	array_equals(a1, a2, [i1], [i2]) -> t|f
 	binsearch(a, v, cmp, [i1, i2]); cmp(a, i, v) -> a[i] < v
 	uniq_sorted(a) -> a
-	group_sorted(a, eq_cond, [i1, i2]) -> iter() -> [i1, i2]
-	remove_duplicates(a) -> a
 
 HASH MAPS
 
 	obj() -> o                      create a native map, string keys only
 	set(iter) -> m                  create a set, holds all types
-	set_addset(s, s2) -> s          dump set into set
-	set_set(s, s2) -> s             set elements to s'
-	set_toarray(s) -> [v1,...]      array of elements in insert order
 	set_equals(s, s2[, same_order]) -> t|f    compare sets
 	map(iter) -> m                  create a map, keys and values can be of any type
-	map_first_key(m) -> k           get the first key out of a map
-	map_assign(m, m1) -> m          like assign() but for a map
 	empty -> {}                     global empty object, inherits Object
 	empty_obj -> obj()              global empty object, does not inherit Object
 	empty_set -> set()              global empty set, read-only!
@@ -156,12 +127,9 @@ HASH MAPS
 	assign(dt, t1, ...) -> dt       dump t1, ... into dt
 	entries(t) -> *[k,v]            iterate hash map entries
 	assign_opt(dt, t1, ...) -> dt   dump t1, ... into dt, skips undefined values
-	clone(t) -> t1                  deep clone
 	attr(t, k[, cons])              t[k] = t[k] || cons(); cons defaults to obj
 	memoize(f) -> mf                memoize single-arg function
 	count_keys(t, [max_n]) -> n     count keys in t up-to max_n
-	first_key(t) -> k               get the first key out of an object
-	gen_id(prefix) -> id            generate autoincrement id
 
 TYPED ARRAYS
 
@@ -180,10 +148,6 @@ DATA STRUCTURES
 	fl.alloc() -> e
 	fl.free(e)
 
-HASHING
-
-	hash32(s) -> x
-
 DATE/TIME CALCULATIONS
 
 	time() -> ts
@@ -192,7 +156,6 @@ DATE/TIME CALCULATIONS
 	[day|month|year|week](ts[, offset], [local]) -> ts
 	days(delta_ts) -> ds
 	[year|month|week_day|month_day|hours|minutes|seconds]_of(ts, [local]) -> n
-	set_[year|month|month_day|hours|minutes|seconds](ts, n)
 	week_start_offset([country])
 
 DATE/TIME FORMATTING
@@ -212,9 +175,6 @@ DATE/TIME PARSING
 
 	parse_date(s, [locale], [validate], ['d|s|ms']) -> ts
 	parse_timeofday(s, [validate], ['s|ms']) -> ds
-	parse_duration(s) -> ds
-
-	date_placeholder_text([locale])
 
 FILE SIZE FORMATTING
 
@@ -231,12 +191,8 @@ COLORS
 GEOMETRY
 
 	point_around(cx, cy, r, angle) -> [x, y]
-	clip_rect(x1, y1, w1, h1, x2, y2, w2, h2) -> [x, y, w, h]
-	rect_intersects(x1, y1, w1, h1, x2, y2, w2, h2) -> t|f
 	transform_point_x(m, x, y) => x1
 	transform_point_y(m, x, y) => y1
-	hypot(a, b) -> d
-	distance(x1, y1, x2, y2) -> d
 
 TIMERS
 
@@ -268,7 +224,6 @@ URL DECODING, ENCODING AND UPDATING
 NATIVE CUSTOM EVENTS
 
 	custom_event    (name, ...)
-	custom_event_up (name, ...)
 
 FAST GLOBAL EVENTS
 
@@ -278,9 +233,6 @@ FAST GLOBAL EVENTS
 INTER-WINDOW COMMUNICATION
 
 	broadcast(name, ...)
-	setglobal(name, val)
-	^window.global_changed(name, v, v0)
-	^window.NAME_changed(v, v0)
 
 MULTI-LANGUAGE STUBS
 
@@ -289,11 +241,6 @@ MULTI-LANGUAGE STUBS
 	lang()                                 get current language
 	country()                              get current country
 	href(url, [lang])                      rewrite URL for (current) language
-
-GZIP (DE)COMPRESSION
-
-	await compress(s) -> s
-	await decompress(s) -> s
 
 AJAX REQUESTS
 
@@ -349,8 +296,6 @@ function num(s) {
 	return x != x ? undefined : x
 }
 
-let bool = b => !!b
-
 let str = String
 
 // math ----------------------------------------------------------------------
@@ -401,7 +346,6 @@ let cos = Math.cos
 let tan = Math.tan
 let rad = PI / 180
 let deg = 180 / PI
-
 let asin  = Math.asin
 let acos  = Math.acos
 let atan  = Math.atan
@@ -473,14 +417,6 @@ function snap_nums(a) {
 	if (!DEBUG_SNAP_NUMS) return a
 	return a.map(v => isnum(v) ? snap(v, 0.01) : v)
 }
-function log(...args) {
-	console.log(snap_nums(args))
-}
-
-function trace_if(cond, ...args) {
-	if (!cond) return
-	trace(...args)
-}
 
 function assert(ret, ...args) {
 	if (!ret)
@@ -493,64 +429,11 @@ function check(v, ...args) {
 	return v
 }
 
-function log_if(cond, ...args) {
-	if (!cond) return
-	log(...args)
-}
-
 window.DEBUG_LOG = 1
 
-let log_level = 0
-let log_off_level
 function log(...args) {
 	if (!DEBUG_LOG) return
 	console.log(...snap_nums(args))
-}
-function push_log(...args) {
-	log_level++
-	if (DEBUG_LOG) // Collapsed
-		console.groupCollapsed(...args)
-}
-function pop_log(...args) {
-	if (DEBUG_LOG) {
-		log(...args)
-		console.groupEnd()
-	}
-	log_level--
-	if (log_off_level === log_level) {
-		log_off_level = null
-		DEBUG_LOG = true
-	}
-}
-function push_log_if(cond, ...args) {
-	if (!cond && DEBUG_LOG) {
-		log_off_level = log_level
-		DEBUG_LOG = false
-	}
-	push_log(...args)
-}
-
-// classes -------------------------------------------------------------------
-
-// TODO: is there a way to make a constructable also callable without wrapping it?
-function callable_constructor(cons) {
-	let name = cons.name
-	let f = {[name]: function(...args) { return new cons(...args) }}[name]
-	f.class = cons
-	return f
-}
-
-function inherit_properties(cons, super_cons) {
-	super_cons ??= Object.getPrototypeOf(cons)
-	let child_methods = cons.prototype
-	let super_methods = super_cons.prototype
-	// copy super's methods to child.
-	for (let k of Object.getOwnPropertyNames(super_methods))
-		if (!(k in child_methods)) { // not overridden
-			let desc = Object.getOwnPropertyDescriptor(super_methods, k)
-			Object.defineProperty(child_methods, k, desc)
-		}
-	return cons
 }
 
 /* extending built-in objects ------------------------------------------------
@@ -614,32 +497,6 @@ function alias(cls, new_name, old_name) {
 	Object.defineProperty(proto, new_name, d)
 }
 
-// override a property setter in a prototype *or instance*.
-function override_property_setter(cls, prop, set) {
-	let proto = cls.prototype || cls
-	let d0 = getPropertyDescriptor(proto, prop)
-	assert(d0, cls.type || cls.name, '.', prop, ' does not exist')
-	let inherited = d0.set || noop
-	function wrapper(v) {
-		return set.call(this, inherited, v)
-	}
-	d0.set = wrapper
-	Object.defineProperty(proto, prop, d0)
-}
-
-// override a property getter in a prototype *or instance*.
-function override_property_getter(cls, prop, get) {
-	let proto = cls.prototype || cls
-	let d0 = getPropertyDescriptor(proto, prop)
-	assert(d0, cls.type || cls.name, '.', prop, ' does not exist')
-	let inherited = d0.get || noop
-	function wrapper(v) {
-		return get.call(this, inherited, v)
-	}
-	d0.get = wrapper
-	Object.defineProperty(proto, prop, d0)
-}
-
 // strings -------------------------------------------------------------------
 
 // usage:
@@ -662,21 +519,13 @@ function subst(s, ...args) {
 }
 
 function starts (s, s1) { return s.startsWith(s1) }
-function ends   (s, s1) { return s.endsWith  (s1) }
 
+function ends   (s, s1) { return s.endsWith  (s1) }
 let upper  = s => s.toUpperCase()
 let upper2 = s => ' ' + s.slice(1).toUpperCase()
 let capitalize = s => s.charAt(0).toUpperCase() + s.slice(1)
 function display_name(s) {
 	return s.replace(/[\w]/, upper).replace(/(_[\w])/g, upper2)
-}
-
-function lower_ai_ci(s) {
-	return s.normalize('NFKD').replace(/\p{Diacritic}/gu, '').toLowerCase()
-}
-
-function find_ai_ci(s, s1) {
-	return repl(lower_ai_ci(s).indexOf(lower_ai_ci(s1)), -1, null)
 }
 
 let regexp_special_re = /[.*+?^${}()|[\]\\]/g
@@ -702,31 +551,11 @@ function catany(sep, ...args) {
 	return a.length ? a.join(sep) : null
 }
 
-// concat args. if any arg is null return nothing.
-function catall(...args) {
-	for (let i = 0, n = args.length; i < n; i++)
-		if (args[i] == null)
-			return
-	return catany('', ...args)
-}
-
-function esc(s) {
-	return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // $& means the whole matched string
-}
-
 function words(s) {
 	if (!isstr(s)) return s
 	s = s.trim()
 	if (!s) return []
 	return s.split(/\s+/)
-}
-
-function wordset(s) {
-	if (!isstr(s)) return s
-	let ws = obj()
-	for (let word of words(s))
-		ws[word] = true
-	return ws
 }
 
 function captures(s, re) {
@@ -751,15 +580,6 @@ function utf8_len(s) {
 let array = (N) => new Array(N ?? 0)
 
 let empty_array = []
-
-function range(i1, j, step, f) {
-	step ??= 1
-	f = f || return_arg
-	let a = []
-	for (let i = i1; i < j; i += step)
-		a.push(f(i))
-	return a
-}
 
 function array_resize(a, n, v) {
 	if (n < a.length)
@@ -824,13 +644,6 @@ function remove_value(a, v) {
 	return i
 }
 
-function replace_value(a, v0, v1) {
-	let i = a.indexOf(v0)
-	if (i >= 0)
-		a[i] = v1
-	return i
-}
-
 // NOTE: inside cond(), a[0..j-1] are kept values so far, a[j..i-1] are some
 // but *not all* of the removed values, a[i..a.length-1] are untested values,
 // so be very careful how you read the array inside cond().
@@ -865,17 +678,6 @@ function array_move(a, i1, n, insert_i, before) {
 	return insert_i
 }
 
-function array_equals(a1, a2, i1, i2) {
-	i1 = i1 ?? 0
-	i2 = i2 ?? max(a1.length, a2.length)
-	if (i2 > min(a1.length, a2.length))
-		return false
-	for (let i = i1; i < i2; i++)
-		if (a1[i] !== a2[i])
-			return false
-	return true
-}
-
 // binary search for an insert position that keeps the array sorted.
 // using '<' gives the first insert position, while '<=' gives the last.
 let cmps = {}
@@ -904,71 +706,11 @@ function uniq_sorted(a) {
 	})
 }
 
-function remove_duplicates(a) {
-	if (a.length > 40) { // go heavy after 64k iterations.. too soon?
-		let s = set(a)
-		a.length = 0
-		for (let v of s)
-			a.push(v)
-		return a
-	}
-	return remove_values(a, function(v, i, a) {
-		return a.indexOf(v, i+1) != -1
-	})
-}
-
-// iterate a sorted array (or part of it) in chunks of items that are equal
-// per eq_cond(). use i1, i2 to iterate nested groupings. i2 is exclusive!
-function *group_sorted(a, eq_cond, i1, i2) {
-	i1 ??= 0
-	i2 ??= a.length
-	let i0 = i1
-	let i = i0 + 1
-	if (i1 >= i2)
-		return
-	while (i < i2) {
-		if (!eq_cond(a[i], a[i-1])) {
-			yield [i0, i]
-			i0 = i
-		}
-		i++
-	}
-	yield [i0, i2]
-}
-
 // hash maps -----------------------------------------------------------------
 
 let obj = () => Object.create(null)
 let set = (iter) => new Set(iter)
 let map = (iter) => new Map(iter)
-
-function map_first_key(m) {
-	// let's hope the compiler sees this pattern and doesn't actually allocate
-	// an iterator object for this.
-	for (let k of m.keys())
-		return k
-}
-
-function map_assign(m, m1) {
-	for (let [k,v] of m1)
-		m.set(k, v)
-	return m
-}
-
-function set_addset(s, s1) {
-	for (let k of s1)
-		s.add(k)
-	return s
-}
-
-function set_set(s, s1) {
-	s.clear()
-	return set_addset(s, s1)
-}
-
-function set_toarray(s) {
-	return Array.from(s)
-}
 
 function set_equals(s1, s2, same_order) {
 	if (s1.size != s2.size)
@@ -998,7 +740,6 @@ let keys = Object.keys
 
 let assign = Object.assign
 let entries = Object.entries
-let clone = structuredClone
 
 // like Object.assign() but skips assigning `undefined` values.
 function assign_opt(dt, ...ts) {
@@ -1048,26 +789,6 @@ function count_keys(t, max_n) {
 		n++
 	}
 	return n
-}
-
-function first_key(t) {
-	for (let k in t)
-		if (t.hasOwnProperty(k))
-			return k
-}
-
-// autoincrement ids ---------------------------------------------------------
-
-let next_id = {}
-window.DEBUG_GEN_ID = 1
-function gen_id(k) {
-	if (!DEBUG_GEN_ID)
-		return null
-	if (!next_id[k])
-		next_id[k] = 1
-	else
-		next_id[k]++
-	return next_id[k]
 }
 
 // typed arrays --------------------------------------------------------------
@@ -1283,17 +1004,6 @@ function freelist(create) {
 	return fl
 }
 
-// hashing -------------------------------------------------------------------
-
-function hash32(s) {
-	let hash = 0
-	for (let i = 0, n = s.length; i < n; i++) {
-		hash = ((hash << 5) - hash) + s.charCodeAt(i)
-		hash |= 0 // convert to 32bit integer
-	}
-	return hash
-}
-
 // timestamps ----------------------------------------------------------------
 
 let _d = new Date() // public temporary date object.
@@ -1397,48 +1107,6 @@ function month_day_of (t, local) { if (t == null) return null; _d.setTime(t * 10
 function hours_of     (t, local) { if (t == null) return null; _d.setTime(t * 1000); return local ? _d.getHours   () : _d.getUTCHours   () }
 function minutes_of   (t, local) { if (t == null) return null; _d.setTime(t * 1000); return local ? _d.getMinutes () : _d.getUTCMinutes () }
 function seconds_of   (t, local) { if (t == null) return null; _d.setTime(t * 1000); return local ? _d.getSeconds () : _d.getUTCSeconds () }
-
-function set_year(t, x) {
-	if (t == null) return null
-	_d.setTime(t * 1000)
-	_d.setUTCFullYear(x)
-	return _d.valueOf() / 1000
-}
-
-function set_month(t, x) {
-	if (t == null) return null
-	_d.setTime(t * 1000)
-	_d.setUTCMonth(x - 1)
-	return _d.valueOf() / 1000
-}
-
-function set_month_day(t, x) {
-	if (t == null) return null
-	_d.setTime(t * 1000)
-	_d.setUTCDate(x)
-	return _d.valueOf() / 1000
-}
-
-function set_hours(t, x) {
-	if (t == null) return null
-	_d.setTime(t * 1000)
-	_d.setUTCHours(x)
-	return _d.valueOf() / 1000
-}
-
-function set_minutes(t, x) {
-	if (t == null) return null
-	_d.setTime(t * 1000)
-	_d.setUTCMinutes(x)
-	return _d.valueOf() / 1000
-}
-
-function set_seconds(t, x) {
-	if (t == null) return null
-	_d.setTime(t * 1000)
-	_d.setUTCSeconds(x)
-	return _d.valueOf() / 1000
-}
 
 let weekday_names = memoize(function(locale1) {
 	let wd = {short: obj(), long: obj()}
@@ -1670,50 +1338,7 @@ function format_date(t, locale1, precision) {
 	return date_formatter(locale1 || locale())(t, precision)
 }
 
-let _date_placeholder_text = memoize(function(locale) {
-	let a = []
-	for (let p of date_parts(locale)) {
-		if (p.type == 'day'  ) a.push('d')
-		if (p.type == 'month') a.push('m')
-		if (p.type == 'year' ) a.push('yyyy')
-		if (p.type == 'literal') a.push(p.value)
-	}
-	return a.join('')
-})
-function date_placeholder_text(locale1) {
-	return _date_placeholder_text(locale1 || locale())
-}
-
 // duration parsing & formatting ---------------------------------------------
-
-// parse `N d[ays] N h[ours] N m[in] N s[ec]` in any order, spaces optional.
-// NOTE: returns undefined for failure like num().
-// TODO: years and months!
-// TODO: multi-language.
-let d_re = /(\d+)\s*([^\d\s])[^\d\s]*/g
-function parse_duration(s) {
-	if (!isstr(s))
-		return s
-	s = s.trim()
-	let m
-	let d = 0
-	d_re.lastIndex = 0 // reset regex state.
-	while ((m = d_re.exec(s)) != null) {
-		let x = num(m[1])
-		let t = m[2].toLowerCase()
-		if (t == 'd')
-			d += x * 3600 * 24
-		else if (t == 'h')
-			d += x * 3600
-		else if (t == 'm')
-			d += x * 60
-		else if (t == 's')
-			d += x
-		else
-			return
-	}
-	return d
-}
 
 let format_duration
 {
@@ -1892,56 +1517,8 @@ point_around = function(cx, cy, r, angle) {
 }
 }
 
-let clip_rect
-{
-let out = [0, 0, 0, 0]
-clip_rect = function(x1, y1, w1, h1, x2, y2, w2, h2) {
-	// intersect on one dimension
-	// intersect_segs(ax1, ax2, bx1, bx2) => [max(ax1, bx1), min(ax2, bx2)]
-	// intersect_segs(x1, x1+w1, x2, x2+w2)
-	// intersect_segs(y1, y1+h1, y2, y2+h2)
-	let _x1 = max(x1   , x2)
-	let _x2 = min(x1+w1, x2+w2)
-	let _y1 = max(y1   , y2)
-	let _y2 = min(y1+h1, y2+h2)
-	// clamp size
-	let _w = max(_x2-_x1, 0)
-	let _h = max(_y2-_y1, 0)
-	out[0] = _x1
-	out[1] = _y1
-	out[2] = _w
-	out[3] = _h
-	return out
-}
-}
-
-function segs_overlap(ax1, ax2, bx1, bx2) { // check if two 1D segments overlap
-	return !(ax2 < bx1 || bx2 < ax1)
-}
-function rect_intersects(x1, y1, w1, h1, x2, y2, w2, h2) {
-	return (
-		segs_overlap(x1, x1+w1, x2, x2+w2) &&
-		segs_overlap(y1, y1+h1, y2, y2+h2)
-	)
-}
-
 let transform_point_x = (m, x, y) => x * m.a + y * m.c + m.e
 let transform_point_y = (m, x, y) => x * m.b + y * m.d + m.f
-
-// hypotenuse function: computes sqrt(a^2 + b^2) without underflow / overflow problems.
-function hypot(a, b) {
-	if (a == 0 && b == 0) return 0
-	a = abs(a)
-	b = abs(b)
-	let M = max(a, b)
-	let m = min(a, b)
-	return M * sqrt(1 + (m / M)**2)
-}
-
-// distance between two points. avoids underflow and overflow.
-function distance(x1, y1, x2, y2) {
-	return hypot(x2-x1, y2-y1)
-}
 
 // timers --------------------------------------------------------------------
 
@@ -2128,7 +1705,6 @@ function _event(bubbles, ev, ...args) {
 	return ev
 }
 function custom_event    (...args) { return _event(false, ...args) }
-function custom_event_up (...args) { return _event(true , ...args) }
 
 /* fast global events --------------------------------------------------------
 
@@ -2187,47 +1763,7 @@ function broadcast(topic, ...args) {
 	save('__broadcast', '')
 }
 
-function setglobal(k, v, default_v) {
-	let v0 = window[k] ?? default_v
-	if (v === v0)
-		return
-	window[k] = v
-	broadcast('global_changed', k, v, v0)
-	broadcast(k+'_changed', v, v0)
-}
-
-listen('global_changed', function(k, v) {
-	window[k] = v
-})
-
-// gzip (de)compression with API from Hell -----------------------------------
-
-async function concatUint8Arrays(chunks) {
-	let blob = new Blob(chunks)
-	let buffer = await blob.arrayBuffer()
-	return new Uint8Array(buffer)
-}
-
 let tenc = new TextEncoder()
-let tdec = new TextDecoder()
-function compress(s) {
-	let cs = new CompressionStream('gzip')
-	let writer = cs.writable.getWriter()
-	let b = tenc.encode(s)
-	writer.write(b)
-	writer.close()
-	return new Response(cs.readable).arrayBuffer()
-}
-
-function decompress(byteArray, encoding) {
-	let cs = new DecompressionStream(encoding)
-	let writer = cs.writable.getWriter()
-	writer.write(byteArray)
-	writer.close()
-	return new Response(cs.readable).arrayBuffer().then(function(arrayBuffer) {
-		return tdec.decode(arrayBuffer)
-	})
-}
 
 /* AJAX requests -------------------------------------------------------------
 
@@ -2527,7 +2063,7 @@ let glue = {
 Firefox, Chrome, Safari, Safari_maj, Safari_min,
 isobject, isarray, isobj, isstr, isnum, isbool, isfunc,
 repl,
-num, bool, str,
+num, str,
 inf,
 floor, ceil, round, snap, trunc, mod,
 abs, sign, strict_sign,
@@ -2538,44 +2074,39 @@ random,
 PI, sin, cos, tan, rad, deg, asin, acos, atan, atan2,
 format_base, dec,
 noop, return_true, return_false, return_arg, wrap, do_before, do_after,
-pr, _, warn, warn_if, warn_once, debug, trace, trace_if, assert,
-push_log, push_log_if, pop_log, log, log_if, check,
-callable_constructor, inherit_properties,
-property, method, override, alias, override_property_setter, override_property_getter,
-subst, capitalize, display_name, lower_ai_ci, find_ai_ci,
-escape_regexp, catany, catall, esc, words, wordset, captures, utf8_len,
-array, empty_array, range, array_resize, extend, array_set,
-insert, insert_n, remove, remove_n, remove_value, replace_value, remove_values, array_move, array_equals,
-binsearch, uniq_sorted, group_sorted, remove_duplicates,
-map, map_first_key, gen_id, map_assign,
-set, set_addset, set_set, set_toarray, set_equals, empty_set,
-obj, empty, empty_obj,  keys, assign, entries, assign_opt, clone, count_keys, first_key, attr,
+pr, _, warn, warn_if, warn_once, debug, trace, assert,
+log, check,
+property, method, override, alias,
+subst, capitalize, display_name, ends,
+escape_regexp, catany, words, captures, utf8_len,
+array, empty_array, array_resize, extend, array_set,
+insert, insert_n, remove, remove_n, remove_value, remove_values, array_move,
+binsearch, uniq_sorted,
+map,
+set, set_equals, empty_set,
+obj, empty, empty_obj,  keys, assign, entries, assign_opt, count_keys, attr,
 memoize,
 f32arr, i8arr, u8arr, i16arr, u16arr, i32arr, u32arr,
 max_index_from_array, arr_type_from_max_index, index_arr_type,
-dyn_arr, dyn_f32arr, dyn_i8arr, dyn_u8arr, dyn_i16arr, dyn_u16arr, dyn_i32arr, dyn_u32arr,
+dyn_arr, dyn_f32arr, dyn_i8arr, dyn_u8arr, dyn_i16arr, dyn_u16arr,
+dyn_i32arr, dyn_u32arr,
 freelist,
-hash32,
 _d, time, day, month, year, week, days,
 year_of, month_of, week_day_of, month_day_of, hours_of, minutes_of, seconds_of,
-set_year, set_month, set_month_day, set_hours, set_minutes, set_seconds,
 weekday_name, month_name, month_year, week_start_offset,
-parse_timeofday, parse_date, parse_duration,
-format_timeofday, format_date, date_placeholder_text, format_timeago, format_duration,
+parse_timeofday, parse_date,
+format_timeofday, format_date, format_timeago, format_duration,
 format_kbytes, format_kcount,
 hsl_to_rgb_out, hsl_to_rgb_hex, hsl_to_rgba_int, hsl_to_rgb_int, hex_to_hsl,
 point_around,
-clip_rect, rect_intersects,
-hypot, distance,
 transform_point_x, transform_point_y,
 runafter, runevery, runagainevery, clock, timer,
 json_arg, try_json_arg, json,
 copy_to_clipboard,
 save, load,
 url_parse, url_format,
-custom_event, custom_event_up, listen,
-announce, broadcast, setglobal,
-compress, decompress,
+custom_event, listen,
+announce, broadcast,
 ajax, get, post,
 S, lang, country, href,
 }
@@ -2589,85 +2120,6 @@ if (script_attr('global') || script_attr('glue-global')) {
 		window[k] = glue[k]
 	}
 }
-
-if (script_attr('extend') || script_attr('glue-extend')) {
-
-function m(f) {
-	return function(...args) {
-		return f(this, ...args)
-	}
-}
-
-// String extensions ---------------------------------------------------------
-
-String.prototype.subst            = m(subst           )
-String.prototype.display_name     = m(display_name    )
-String.prototype.lower_ai_ci      = m(lower_ai_ci     )
-String.prototype.find_ai_ci       = m(find_ai_ci      )
-String.prototype.catany           = m(catany          )
-String.prototype.esc              = m(esc             )
-String.prototype.words            = m(words           )
-String.prototype.wordset          = m(wordset         )
-String.prototype.captures         = m(captures        )
-String.prototype.parse_timeofday  = m(parse_timeofday )
-String.prototype.parse_date       = m(parse_date      )
-String.prototype.parse_duration   = m(parse_duration  )
-
-alias(String.prototype, 'starts', 'startsWith' )
-alias(String.prototype, 'ends'  , 'endsWith'   )
-alias(String.prototype, 'upper' , 'toUpperCase')
-alias(String.prototype, 'lower' , 'toLowerCase')
-
-// Number extensions ---------------------------------------------------------
-
-Number.prototype.timeofday  = m(format_timeofday)
-Number.prototype.date       = m(format_date)
-Number.prototype.duration   = m(format_duration)
-Number.prototype.timeago    = m(format_timeago)
-Number.prototype.kbytes     = m(format_kbytes)
-Number.prototype.kcount     = m(format_kcount)
-Number.prototype.base       = m(format_base)
-
-// Array extensions ----------------------------------------------------------
-
-// NOTE: making these non-enumerable methods to avoid affecting Object.keys(array).
-
-property(Array.prototype, 'last', function get_last() { return this[this.length-1] })
-
-method(Array.prototype, 'resize           ', m(array_resize            ))
-method(Array.prototype, 'extend           ', m(extend                  ))
-method(Array.prototype, 'set              ', m(array_set               ))
-method(Array.prototype, 'insert           ', m(insert                  ))
-method(Array.prototype, 'remove           ', m(remove                  ))
-method(Array.prototype, 'insert_n         ', m(insert_n                ))
-method(Array.prototype, 'remove_n         ', m(remove_n                ))
-method(Array.prototype, 'remove_value     ', m(remove_value            ))
-method(Array.prototype, 'remove_values    ', m(remove_values           ))
-method(Array.prototype, 'move             ', m(array_move              ))
-method(Array.prototype, 'equals           ', m(array_equals            ))
-method(Array.prototype, 'binsearch        ', m(binsearch               ))
-method(Array.prototype, 'uniq_sorted      ', m(uniq_sorted             ))
-method(Array.prototype, 'remove_duplicates', m(remove_duplicates       ))
-
-// Map extensions ------------------------------------------------------------
-
-property(Map, 'first_key', m(map_first_key))
-
-Map.prototype.assign = m(map_assign)
-
-// Set extensions ------------------------------------------------------------
-
-Set.prototype.add_set = m(set_addset)
-Set.prototype.set     = m(set_set)
-Set.prototype.toarray = m(set_toarray)
-Set.prototype.equals  = m(set_equals)
-
-// Matrix extennsions --------------------------------------------------------
-
-DOMMatrix.prototype.x = transform_point_x
-DOMMatrix.prototype.y = transform_point_y
-
-} // if (extend)
 
 // wrappers that use overridable glue functions ------------------------------
 
