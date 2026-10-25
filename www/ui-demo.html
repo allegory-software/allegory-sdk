@@ -1893,8 +1893,8 @@ function build_call_demo() {
 	if (!s.free) {
 		let params = new URLSearchParams(location.search)
 		s.call_id = params.get('call') // call id text or null
-		s.token = params.get('token') // invite token text or null
-		s.call = null // call session or null before building the widget
+		s.invite_token = params.get('invite_token') // invite token text or null
+		s.call = null // call or null before building the widget
 		s.request = null // demo credentials request or null
 		s.load_error = null // demo credentials error text or null
 		s.name = null // name for the next call or null
@@ -1906,11 +1906,11 @@ function build_call_demo() {
 			if (s.request) s.request.abort()
 			if (s.create_request) s.create_request.abort()
 		})
-		if (!s.call_id && !s.token)
+		if (!s.call_id && !s.invite_token)
 			s.request = glue.get('/call_demo.json', function(demo_call) {
 				s.request = null
 				s.call_id = String(demo_call.call)
-				s.token = demo_call.token
+				s.invite_token = demo_call.invite_token
 				ui.animate()
 			}, function(error, type) {
 				if (type == 'abort') return
@@ -1937,7 +1937,7 @@ function build_call_demo() {
 					{name: s.name}, function(created_call) {
 						s.create_request = null
 						s.call_id = String(created_call.call)
-						s.token = created_call.token
+						s.invite_token = created_call.invite_token
 						s.copy_result = null
 						ui.animate()
 					}, function(error, type) {
@@ -1952,17 +1952,17 @@ function build_call_demo() {
 			ui.label('call_demo.id', 'Call ID', 0)
 			s.call_id = ui.input('call_demo.id', s.call_id,
 				null, 0, null, false, is_readonly)
-			ui.label('call_demo.token', 'Invite token', 0)
-			s.token = ui.input('call_demo.token', s.token,
+			ui.label('call_demo.invite_token', 'Invite token', 0)
+			s.invite_token = ui.input('call_demo.invite_token', s.invite_token,
 				null, 1, null, false, is_readonly)
 			if (ui.button('call_demo.copy', 'Copy invite link', 0,
-				null, null, null, !s.call_id || !s.token)) {
+				null, null, null, !s.call_id || !s.invite_token)) {
 				let invite_url = new URL(location.href)
 				invite_url.search = ''
 				invite_url.hash = ''
 				invite_url.searchParams.set('demo', 'call')
 				invite_url.searchParams.set('call', s.call_id)
-				invite_url.searchParams.set('token', s.token)
+				invite_url.searchParams.set('invite_token', s.invite_token)
 				s.copy_result = null
 				glue.copy_to_clipboard(invite_url.href, function() {
 					s.copy_result = 'Invite link copied'
@@ -1983,7 +1983,7 @@ function build_call_demo() {
 		if (s.copy_result) ui.text('', s.copy_result, 0)
 		s.call = ui.call('call_demo.call', {
 			call_id: s.call_id,
-			token: s.token,
+			invite_token: s.invite_token,
 			name: window.user?.signed_in ? user.name : null,
 			ice_transport_policy: s.want_force_turn ? 'relay' : 'all',
 			can_join: !s.request && !s.create_request,

@@ -168,13 +168,15 @@ do
 	end)
 	local demo_call = {call = 1} -- demo call id and invite token
 	grid_db:atomic('w', function()
-		demo_call.token = grid_db:find('call', 'token', demo_call.call)
-		if not demo_call.token then
+		demo_call.invite_token = grid_db:find('call',
+			'invite_token', demo_call.call)
+		if not demo_call.invite_token then
 			grid_db:insert('call', '{}', {
 				call = demo_call.call,
 				name = 'Demo call',
 			})
-			demo_call.token = grid_db:must_find('call', 'token', demo_call.call)
+			demo_call.invite_token = grid_db:must_find('call',
+				'invite_token', demo_call.call)
 		end
 	end)
 	action['call_demo.json'] = function()

@@ -1,36 +1,46 @@
 /*
 
-	WebRTC call session and call widget.
+	WebRTC call and call widget.
 	Written by Cosmin Apreutesei. Public Domain.
 
-FEATURES
+FEATURES / NETWORKING
 
-	- Talk to several participants at once.
-	- Switch microphones or cameras during a call without reconnecting.
-	- Rejoin as the same participant after a disconnect or page reload,
-	  within the server's reconnect window.
-	- Automatically detect a lost server connection and try to reconnect.
-	- Automatically try to restore lost audio and video connections.
-	  Stop retrying after the recovery time limit.
-	- Choose from an updated list of microphones and cameras after plugging
-	  in or unplugging devices.
-	- Check microphone activity with a level meter.
-	- Keep video smooth in larger calls by lowering the camera bitrate sent
-	  to each participant as more participants join.
+	- Talk to up to 6 peers in one call with direct connections to each.
+	- Switch microphones or cameras during a call without reconnecting,
+	  by replacing the capture.
+	- Rejoin as the same peer after a disconnect using a reconnect token.
+	- After a page reload or crash, reconnect using the saved reconnect token
+	  as replace token to replace the lost peer slot instead of adding one.
+	- Auto-detect lost server connection via heartbeat messages and reconnect.
+	- Auto-repair lost audio/video connections within a repair timeout.
+	- Auto-lower video bitrate based on number of peers.
+
+FEATURES / DEVICES
+
+	- Preview camera and check microphone before joining.
+	- Mute microphone and turn camera off independently.
+	- Choose microphone, camera and speaker. Remember choices on device.
+	- Auto-update the list of microphones and cameras as devices come and go.
+	- Auto-retry capture after device error.
+	- Auto-retry audio playback when the browser blocks it.
+	- Microphone echo cancellation and noise suppression options.
+	- Microphone level meter.
 
 API
 
 	ui.call(id, opt, [fr], [align], [valign]) -> call
-		call_id, token, name, can_join, ice_transport_policy
+		call_id, invite_token, name, can_join, ice_transport_policy
 		name is optional when the user enters a guest name.
 		can_join defaults to true.
 		ice_transport_policy defaults to 'all'.
 
 	create_call({on_change}) -> call
-	call.join({call_id, token, [name], [ice_transport_policy]})
+	call.join({call_id, invite_token, [name], [ice_transport_policy]})
 	call.leave()
-	call.set_microphone(is_enabled, [device_id]) -> promise
+	call.set_microphone(is_enabled, [device_id],
+		[want_echo_cancellation], [want_noise_suppression]) -> promise
 	call.set_camera(is_enabled, [device_id]) -> promise
+	call.set_speaker([device_id])
 	call.microphone_level() -> number or null
 	call.play_audio(peer)
 
@@ -39,21 +49,25 @@ API
 (function() {
 "use strict"
 
+const {
+	assert, clamp, clock, timer, load, save,
+} = glue
+
 let rejected_close_code = 4000 // signaling close code for a refused join
 let repair_timeout = 30 // seconds allowed to repair a failed connection
 
-// Camera bitrate sent to each participant, lowered as the call grows.
+// Camera bitrate sent to each peer, lowered as the call grows.
 
 function camera_bitrate(participant_n) { // -> bits per second
 	return participant_n <= 2 ? 1500000 : participant_n <= 4 ? 800000 : 400000
 }
 
-function is_media_enabled(media) {
-	return !!(media.track?.enabled && media.track.readyState == 'live'
-		&& !media.track.muted)
+function is_capture_enabled(capture) {
+	return !!(capture.track?.enabled && capture.track.readyState == 'live'
+		&& !capture.track.muted)
 }
 
-// Call session, captured media and remote participants.
+// Call, captured media and remote peers.
 
 window.create_call = function(opt) {
 	let {on_change} = opt
@@ -61,36 +75,44 @@ window.create_call = function(opt) {
 		state: 'preview', // current call phase
 		error: null, // terminal error text or null
 		name: null, // display name accepted by the server or null
-		peers: [], // remote participant objects in join order
+		peers: [], // remote peer objects in join order
 		local_stream: new MediaStream(), // captured MediaStream or null
-		devices: [], // available MediaDeviceInfo objects for audio/video input
+		devices: [], // available MediaDeviceInfo inputs and audio outputs
 		microphone: { // microphone selection and capture state
-			device_id: null, // selected device id or null for the default
+			device_id: load('ui_call.audio'), // or null: default
 			track: null, // captured MediaStreamTrack or null
 			is_enabled: false, // requested microphone transmission
+			want_echo_cancellation: // requested echo cancellation
+				load('ui_call.echo_cancellation') != 'false',
+			want_noise_suppression: // requested noise suppression
+				load('ui_call.noise_suppression') != 'false',
 			pending: null, // pending capture/update promise or null
 			error: null, // microphone error text or null
 		},
 		camera: { // camera selection and capture state
-			device_id: null, // selected device id or null for the default
+			device_id: load('ui_call.video'), // or null: default
 			track: null, // captured MediaStreamTrack or null
 			is_enabled: false, // requested camera capture
 			pending: null, // pending capture/update promise or null
 			error: null, // camera error text or null
 		},
+		speaker: { // audio output selection
+			device_id: load('ui_call.speaker'), // or null: default
+			error: null, // speaker error text or null
+		},
 	}
 	let socket = null // signaling WebSocket or null
 	let signal_url = null // URL used to join or reconnect signaling
-	let reconnect_token = null // credential for this participant or null
+	let reconnect_token = null // credential for this peer or null
 	let token_key = null // sessionStorage key of the stored reconnect token
 	let reconnect_timeout = null // server reconnect window in seconds
 	let reconnect_deadline = null // local retry deadline or null
 	let is_joined = false // current socket has been admitted by the server
-	let retry_timer = glue.timer(retry_signaling) // arm/cancel retry timer
+	let retry_timer = timer(retry_signaling) // arm/cancel retry timer
 	let heartbeat_interval = null // server heartbeat interval in seconds
 	let heartbeat_timeout = null // server silence limit in seconds
-	let last_message_time = null // glue.clock() of the last message or null
-	let heartbeat_timer = glue.timer(send_heartbeat) // arm/cancel heartbeat
+	let last_message_time = null // clock() of the last message or null
+	let heartbeat_timer = timer(send_heartbeat) // arm/cancel heartbeat
 	let ice_servers = null // RTCIceServer array received on admission
 	let ice_transport_policy = 'all' // selected ICE transport policy
 	let messages = Promise.resolve() // serialized signaling operations
@@ -114,18 +136,18 @@ window.create_call = function(opt) {
 		return call.peers.find(peer => peer.id == peer_id)
 	}
 
-	function stop_capture(media) {
-		if (!media.track) return
-		if (media == call.microphone) {
+	function stop_capture(capture) {
+		if (!capture.track) return
+		if (capture == call.microphone) {
 			microphone_source.disconnect()
 			microphone_source = null
 		}
-		media.track.onended = null
-		media.track.onmute = null
-		media.track.onunmute = null
-		media.track.stop()
-		call.local_stream.removeTrack(media.track)
-		media.track = null
+		capture.track.onended = null
+		capture.track.onmute = null
+		capture.track.onunmute = null
+		capture.track.stop()
+		call.local_stream.removeTrack(capture.track)
+		capture.track = null
 	}
 
 	// Available microphones and cameras after capture or hardware changes.
@@ -137,18 +159,19 @@ window.create_call = function(opt) {
 			let devices = await request
 			if (is_closed() || device_request != request) return
 			call.devices = devices.filter(device =>
-				device.kind == 'audioinput' || device.kind == 'videoinput')
+				device.kind == 'audioinput' || device.kind == 'videoinput'
+				|| device.kind == 'audiooutput')
 		} catch (error) {
 			if (is_closed() || device_request != request) return
-			for (let media of [call.microphone, call.camera])
-				media.error = 'Device list: '+error.name+': '+error.message
+			for (let capture of [call.microphone, call.camera])
+				capture.error = 'Device list: '+error.name+': '+error.message
 		}
 		on_change()
 	}
 
-	// Device switching across existing participant connections.
+	// Device switching across existing peer connections.
 
-	async function replace_capture(media, kind, track) {
+	async function replace_capture(capture, kind, track) {
 		// a peer connected during an await got the previous track: repeat
 		// until every sender has this one.
 		let replaced_senders = new Set() // senders given track
@@ -168,10 +191,10 @@ window.create_call = function(opt) {
 			if (track) track.stop()
 			return
 		}
-		stop_capture(media)
+		stop_capture(capture)
 		if (track) {
-			media.track = track
-			track.enabled = media.is_enabled
+			capture.track = track
+			track.enabled = capture.is_enabled
 			call.local_stream.addTrack(track)
 			if (kind == 'audio') {
 				microphone_source = microphone_context
@@ -179,8 +202,8 @@ window.create_call = function(opt) {
 				microphone_source.connect(microphone_analyser)
 			}
 			track.onended = function() {
-				stop_capture(media)
-				media.error = 'Capture ended; select or enable the device again'
+				stop_capture(capture)
+				capture.error = 'Capture ended; select or enable the device again'
 				send_media_to_all()
 				on_change()
 				refresh_devices()
@@ -189,27 +212,38 @@ window.create_call = function(opt) {
 				send_media_to_all()
 				on_change()
 			}
-			if (kind == 'video' && !media.is_enabled)
-				stop_capture(media)
+			if (kind == 'video' && !capture.is_enabled)
+				stop_capture(capture)
 		}
 	}
 
 	// Capture using the latest device and on/off choices.
 
-	async function update_media(media, kind) {
+	async function update_capture(capture, kind) {
 		while (!is_closed()) {
-			let device_id = media.device_id
-			let is_enabled = media.is_enabled
+			let device_id = capture.device_id
+			let is_enabled = capture.is_enabled
+			let {
+				want_echo_cancellation, // requested echo cancellation
+				want_noise_suppression, // requested noise suppression
+			} = capture
 			try {
 				if (!is_enabled) {
 					if (kind == 'video')
-						await replace_capture(media, kind, null)
-					if (!media.is_enabled) return
+						await replace_capture(capture, kind, null)
+					if (!capture.is_enabled) return
 					continue
 				}
-				if (media.track && (media.track.getConstraints()
-					.deviceId?.exact ?? null) == device_id) {
-					media.track.enabled = true
+				let track_constraints = // requested constraints or undefined
+					capture.track?.getConstraints()
+				if (capture.track
+					&& (track_constraints.deviceId?.exact ?? null) == device_id
+					&& (kind != 'audio'
+						|| (track_constraints.echoCancellation
+								== want_echo_cancellation
+							&& track_constraints.noiseSuppression
+								== want_noise_suppression))) {
+					capture.track.enabled = true
 					send_media_to_all()
 					return
 				}
@@ -218,69 +252,85 @@ window.create_call = function(opt) {
 				let constraints = {} // requested capture constraints
 				if (device_id) constraints.deviceId = {exact: device_id}
 				if (kind == 'audio') {
-					constraints.echoCancellation = true
-					constraints.noiseSuppression = true
+					constraints.echoCancellation = want_echo_cancellation
+					constraints.noiseSuppression = want_noise_suppression
 				}
 				let stream = await media_devices.getUserMedia({
 					audio: kind == 'audio' ? constraints : false,
 					video: kind == 'video' ? constraints : false,
 				})
 				let track = stream.getTracks()[0]
-				if (is_closed() || !media.is_enabled
-					|| media.device_id != device_id) {
+				if (is_closed() || !capture.is_enabled
+					|| capture.device_id != device_id
+					|| capture.want_echo_cancellation != want_echo_cancellation
+					|| capture.want_noise_suppression != want_noise_suppression) {
 					track.stop()
 					continue
 				}
 				try {
-					await replace_capture(media, kind, track)
+					await replace_capture(capture, kind, track)
 				} catch (error) {
 					track.stop()
 					throw error
 				}
 				if (is_closed()) return
-				media.error = null
+				capture.error = null
 				send_media_to_all()
 				on_change()
 				refresh_devices()
-				if (media.device_id == device_id && media.is_enabled) return
+				if (capture.device_id == device_id && capture.is_enabled
+					&& capture.want_echo_cancellation == want_echo_cancellation
+					&& capture.want_noise_suppression == want_noise_suppression)
+					return
 			} catch (error) {
 				if (is_closed()) return
-				if (media.device_id != device_id
-					|| media.is_enabled != is_enabled) continue
-				media.error = error.name+': '+error.message
+				if (capture.device_id != device_id
+					|| capture.is_enabled != is_enabled
+					|| capture.want_echo_cancellation != want_echo_cancellation
+					|| capture.want_noise_suppression != want_noise_suppression)
+					continue
+				capture.error = error.name+': '+error.message
 				return
 			}
 		}
 	}
 
-	function set_media(media, kind, is_enabled, device_id) {
-		glue.assert(!is_closed(), 'call is closed')
-		media.device_id = device_id
-		media.is_enabled = is_enabled
-		media.error = null
-		if (media.track && !is_enabled) {
+	function set_capture(capture, kind, is_enabled, device_id) {
+		assert(!is_closed(), 'call is closed')
+		capture.device_id = device_id
+		save('ui_call.'+kind, device_id) // remembered on this device
+		capture.is_enabled = is_enabled
+		capture.error = null
+		if (capture.track && !is_enabled) {
 			if (kind == 'audio') {
-				media.track.enabled = false
+				capture.track.enabled = false
 			} else {
-				stop_capture(media)
+				stop_capture(capture)
 			}
 			send_media_to_all()
 		}
-		if (!media.pending) {
-			media.pending = update_media(media, kind).finally(function() {
-				media.pending = null
+		if (!capture.pending) {
+			capture.pending = update_capture(capture, kind).finally(function() {
+				capture.pending = null
 				on_change()
 			})
 		}
 		on_change()
-		return media.pending
+		return capture.pending
 	}
 
 	// Microphone control and audio analysis for the level meter.
 
 	call.set_microphone = function(is_enabled,
-		device_id = call.microphone.device_id) {
-		let pending = set_media(call.microphone, 'audio', is_enabled, device_id)
+		device_id = call.microphone.device_id,
+		want_echo_cancellation = call.microphone.want_echo_cancellation,
+		want_noise_suppression = call.microphone.want_noise_suppression) {
+		call.microphone.want_echo_cancellation = want_echo_cancellation
+		call.microphone.want_noise_suppression = want_noise_suppression
+		save('ui_call.echo_cancellation', want_echo_cancellation)
+		save('ui_call.noise_suppression', want_noise_suppression)
+		let pending = set_capture(call.microphone, 'audio',
+			is_enabled, device_id)
 		if (is_enabled) {
 			if (!microphone_context) {
 				microphone_context = new AudioContext()
@@ -310,10 +360,31 @@ window.create_call = function(opt) {
 	}
 
 	call.set_camera = function(is_enabled, device_id = call.camera.device_id) {
-		return set_media(call.camera, 'video', is_enabled, device_id)
+		return set_capture(call.camera, 'video', is_enabled, device_id)
 	}
 
-	// Participant removal and call shutdown.
+	// Speaker selection for every peer's audio.
+
+	function set_peer_speaker(peer) {
+		let device_id = call.speaker.device_id ?? '' // '' means the default
+		peer.audio.setSinkId(device_id).catch(function(error) {
+			if (is_closed()) return
+			call.speaker.error = 'Speaker: '+error.name+': '+error.message
+			on_change()
+		})
+	}
+
+	call.set_speaker = function(device_id = null) {
+		assert(!is_closed(), 'call is closed')
+		call.speaker.device_id = device_id
+		save('ui_call.speaker', device_id) // remembered on this device
+		call.speaker.error = null
+		for (let peer of call.peers)
+			set_peer_speaker(peer)
+		on_change()
+	}
+
+	// Peer removal and call shutdown.
 
 	function close_connection(peer) {
 		let peer_connection = peer.connection
@@ -347,7 +418,7 @@ window.create_call = function(opt) {
 		set_camera_bitrates()
 	}
 
-	// Camera bitrate for the current number of participants.
+	// Camera bitrate for the current number of peers.
 
 	function set_camera_bitrate(peer) {
 		let sender = peer.senders.video
@@ -453,8 +524,8 @@ window.create_call = function(opt) {
 
 	function send_media(peer) {
 		send_signal(peer, {media: {
-			microphone: is_media_enabled(call.microphone),
-			camera: is_media_enabled(call.camera),
+			microphone: is_capture_enabled(call.microphone),
+			camera: is_capture_enabled(call.camera),
 		}})
 	}
 
@@ -463,7 +534,7 @@ window.create_call = function(opt) {
 			send_media(peer)
 	}
 
-	// Audio and video connection setup for each participant.
+	// Audio and video connection setup for each peer.
 
 	async function send_offer(peer, offer_opt) {
 		let peer_connection = peer.connection
@@ -474,13 +545,13 @@ window.create_call = function(opt) {
 	}
 
 	async function connect_peer(peer_id, name, want_offer) {
-		glue.assert(!find_peer(peer_id), 'peer already connected')
+		assert(!find_peer(peer_id), 'peer already connected')
 		let peer_connection = new RTCPeerConnection({
 			iceServers: ice_servers,
 			iceTransportPolicy: ice_transport_policy,
 		})
-		let peer = { // remote participant
-			id: peer_id, // participant id
+		let peer = { // remote peer
+			id: peer_id, // peer id
 			name: name, // display name
 			state: 'connecting', // connection status
 			stream: new MediaStream(), // received MediaStream
@@ -494,10 +565,12 @@ window.create_call = function(opt) {
 			is_repairing: false, // ICE restart of a failed connection is running
 			repair_timer: null, // (seconds?) -> arm/cancel repair time limit
 		}
-		peer.repair_timer = glue.timer(function() {
+		peer.repair_timer = timer(function() {
 			fail_connection(peer)
 		})
 		peer.audio.srcObject = peer.stream
+		if (call.speaker.device_id)
+			set_peer_speaker(peer)
 		call.peers.push(peer)
 		set_camera_bitrates()
 		if (peer.is_offerer)
@@ -521,7 +594,7 @@ window.create_call = function(opt) {
 			if (ev.track.kind == 'audio') call.play_audio(peer)
 			on_change()
 		}
-		// Connection recovery with a separate time limit per participant.
+		// Connection repair with a separate time limit per peer.
 
 		peer_connection.onconnectionstatechange = function() {
 			if (peer_connection.connectionState == 'failed' && !peer.is_connected) {
@@ -573,9 +646,9 @@ window.create_call = function(opt) {
 			heartbeat_timer(heartbeat_interval)
 			ice_servers = msg.ice_servers
 			call.name = msg.name
-			// participants missing from the list left while this socket was
+			// peers missing from the list left while this socket was
 			// down; listed ones this browser doesn't have yet joined meanwhile.
-			let listed_ids = new Set( // ids of the participants in msg.peers
+			let listed_ids = new Set( // ids of the peers in msg.peers
 				msg.peers.map(listed_peer => listed_peer.id))
 			for (let peer of call.peers.filter(peer => !listed_ids.has(peer.id)))
 				close_peer(peer)
@@ -632,11 +705,12 @@ window.create_call = function(opt) {
 				if (data.description.type == 'offer') {
 					for (let transceiver of peer_connection.getTransceivers()) {
 						let kind = transceiver.receiver.track.kind
-						let media = kind == 'audio' ? call.microphone : call.camera
+						let capture = kind == 'audio'
+							? call.microphone : call.camera
 						transceiver.direction = 'sendrecv'
 						transceiver.sender.setStreams(call.local_stream)
 						peer.senders[kind] = transceiver.sender
-						await transceiver.sender.replaceTrack(media.track)
+						await transceiver.sender.replaceTrack(capture.track)
 						if (peer.connection != peer_connection) return
 					}
 					await peer_connection.setLocalDescription(
@@ -664,7 +738,7 @@ window.create_call = function(opt) {
 			fail(new Error(error_text))
 		} else {
 			if (reconnect_deadline == null) {
-				reconnect_deadline = glue.clock() + reconnect_timeout
+				reconnect_deadline = clock() + reconnect_timeout
 				retry_timer(1)
 			}
 			call.state = 'reconnecting'
@@ -673,7 +747,7 @@ window.create_call = function(opt) {
 	}
 
 	function send_heartbeat() {
-		if (glue.clock() - last_message_time >= heartbeat_timeout) {
+		if (clock() - last_message_time >= heartbeat_timeout) {
 			drop_socket('Signaling heartbeat timed out')
 		} else {
 			socket.send(JSON.stringify({type: 'heartbeat'}))
@@ -682,15 +756,15 @@ window.create_call = function(opt) {
 	}
 
 	function retry_signaling() {
-		if (glue.clock() >= reconnect_deadline) {
+		if (clock() >= reconnect_deadline) {
 			fail(new Error('Signaling reconnect timed out'))
 		} else {
 			if (!socket) open_socket()
-			retry_timer(Math.min(1, reconnect_deadline - glue.clock()))
+			retry_timer(Math.min(1, reconnect_deadline - clock()))
 		}
 	}
 
-	// Signaling socket setup and stored participant tokens.
+	// Signaling socket setup and stored peer tokens.
 
 	function open_socket() {
 		let url = new URL(signal_url)
@@ -701,7 +775,7 @@ window.create_call = function(opt) {
 			url.searchParams.set('replace_token', replace_token)
 		socket = new WebSocket(url)
 		socket.onmessage = function(ev) {
-			last_message_time = glue.clock()
+			last_message_time = clock()
 			enqueue(function() { return receive(JSON.parse(ev.data)) })
 		}
 		socket.onclose = function(ev) {
@@ -715,14 +789,14 @@ window.create_call = function(opt) {
 	}
 
 	call.join = function(opt) {
-		glue.assert(call.state == 'preview', 'call already joined or closed')
-		let {call_id, token} = opt
+		assert(call.state == 'preview', 'call already joined or closed')
+		let {call_id, invite_token} = opt
 		ice_transport_policy = opt.ice_transport_policy ?? 'all'
 		token_key = 'ui_call.reconnect_token.'+call_id
 		signal_url = new URL('/call_signal/'+encodeURIComponent(call_id),
 			location.href)
 		signal_url.protocol = location.protocol == 'https:' ? 'wss:' : 'ws:'
-		signal_url.searchParams.set('token', token)
+		signal_url.searchParams.set('invite_token', invite_token)
 		if (opt.name) signal_url.searchParams.set('name', opt.name)
 		open_socket()
 		call.state = 'joining'
@@ -740,50 +814,75 @@ window.create_call = function(opt) {
 
 // Device choices, on/off controls and capture retries.
 
-let call_device_defaults = { // {input kind -> system default choice}
+let call_device_defaults = { // {device kind -> system default choice}
 	audioinput: {deviceId: null, label: 'Default microphone'},
 	videoinput: {deviceId: null, label: 'Default camera'},
+	audiooutput: {deviceId: null, label: 'Default speaker'},
 }
 let call_device_field = ui.create_field({ // device choice display
 	to_text: device => device.label || 'Unnamed device',
 })
 
-function draw_call_media(id, media, devices, kind, label, set_media,
-	is_closed) {
-	let input_devices = [call_device_defaults[kind]] // input device choices
+function get_device_choices(devices,
+	device_kind) { // -> [default, device1, ...]
+	let choices = [call_device_defaults[device_kind]]
 	for (let device of devices)
-		if (device.kind == kind && device.deviceId) input_devices.push(device)
-	let selected_device = input_devices.find(device =>
-		device.deviceId == media.device_id)
-	if (!selected_device)
-		selected_device = {
-			deviceId: media.device_id,
-			label: 'Unavailable device',
-		}
+		if (device.kind == device_kind && device.deviceId) choices.push(device)
+	return choices
+}
+
+function get_device_choice(choices, device_id) {
+	return choices.find(device => device.deviceId == device_id) || {
+		deviceId: device_id,
+		label: 'Unavailable device',
+	}
+}
+
+function draw_call_media(id, capture, devices, device_kind, label,
+	set_capture) {
+	let input_devices = get_device_choices(devices,
+		device_kind) // device choices
+	let selected_device = get_device_choice(input_devices, capture.device_id)
 	ui.h(0, ui.sp())
 		ui.label(id, label, 0)
-		let is_enabled = ui.checkbox(id, media.is_enabled,
-			null, 0, null, null, is_closed)
+		let is_enabled = ui.checkbox(id, capture.is_enabled, null, 0)
 		let device = ui.list_dropdown(id+'.device', input_devices,
-			selected_device, call_device_field, 1, null, null, is_closed)
+			selected_device, call_device_field, 1)
 		let device_id = device ? device.deviceId : null
-		if (is_enabled != media.is_enabled || device_id != media.device_id)
-			set_media(is_enabled, device_id)
-		if (media.pending) ui.text('', 'Updating...', 0)
-		if (media.track) {
-			ui.text('', media.track.label, 0)
-			ui.text('', media.track.enabled ? 'On' : 'Muted', 0)
+		if (is_enabled != capture.is_enabled || device_id != capture.device_id)
+			set_capture(is_enabled, device_id)
+		if (capture.pending) ui.text('', 'Updating...', 0)
+		if (capture.track) {
+			ui.text('', capture.track.label, 0)
+			ui.text('', capture.track.enabled ? 'On' : 'Muted', 0)
 		} else {
 			ui.text('', 'Not capturing', 0)
 		}
-		if (media.error && !media.pending && !is_closed)
+		if (capture.error && !capture.pending)
 			if (ui.button(id+'.retry', 'Retry', 0))
-				set_media(true, media.device_id)
+				set_capture(true, capture.device_id)
 	ui.end_h()
-	if (media.error) ui.text('', media.error, 0)
+	if (capture.error) ui.text('', capture.error, 0)
 }
 
-// One participant's name, microphone state, video and connection status.
+// Speaker choice for peers' audio.
+
+function draw_call_speaker(id, call) {
+	let output_devices = get_device_choices(call.devices, 'audiooutput')
+	let selected_device = get_device_choice(output_devices,
+		call.speaker.device_id)
+	ui.h(0, ui.sp())
+		ui.label(id, 'Speaker', 0)
+		let device = ui.list_dropdown(id, output_devices, selected_device,
+			call_device_field, 1)
+		let device_id = device ? device.deviceId : null
+		if (device_id != call.speaker.device_id)
+			call.set_speaker(device_id)
+	ui.end_h()
+	if (call.speaker.error) ui.text('', call.speaker.error, 0)
+}
+
+// One peer's name, microphone state, video and connection status.
 
 function draw_call_tile(id, name, is_muted, stream, placeholder, status) {
 	ui.v(1, ui.sp(), 's', 's')
@@ -804,10 +903,11 @@ function draw_call_tile(id, name, is_muted, stream, placeholder, status) {
 // Call widget lifetime, join/leave controls and media display.
 
 ui.call = ui.stateful_widget(function(id) {
-	let call = window.create_call({on_change: ui.animate}) // call session
+	let call = window.create_call({on_change: ui.animate}) // call
+	let call_error = null // error text of the last ended call or null
 	let guest_name = null // name for this call when no account name is given
 	let microphone_level = null // cached level or null until sampled
-	let meter_timer = glue.timer(function() { // (seconds?) -> arm/cancel
+	let meter_timer = timer(function() { // (seconds?) -> arm/cancel
 		microphone_level = null
 		ui.animate()
 	})
@@ -817,11 +917,24 @@ ui.call = ui.stateful_widget(function(id) {
 		call.leave()
 	})
 
+	// call ended (left or failed): continue in a new call in preview.
+	function replace_ended_call() {
+		let ended_call = call // call being replaced
+		call_error = ended_call.error
+		call = window.create_call({on_change: ui.animate})
+		call.set_microphone(ended_call.microphone.is_enabled,
+			call.microphone.device_id,
+			ended_call.microphone.want_echo_cancellation,
+			ended_call.microphone.want_noise_suppression)
+		if (ended_call.camera.is_enabled) call.set_camera(true)
+	}
+
 	e.build = function(id, opt, fr, align, valign) {
 		ui.state(id)
-		let {call_id, token, can_join = true} = opt
-		let is_closed = call.state == 'left' || call.state == 'failed'
-		let is_active = call.state != 'preview' && !is_closed
+		if (call.state == 'left' || call.state == 'failed')
+			replace_ended_call()
+		let {call_id, invite_token, can_join = true} = opt
+		let is_active = call.state != 'preview' // in a call
 		ui.v(fr ?? 1, ui.sp(), align ?? 's', valign ?? 's')
 			if (call.state == 'preview' && !opt.name) {
 				ui.h(0, ui.sp())
@@ -831,22 +944,39 @@ ui.call = ui.stateful_widget(function(id) {
 			}
 			ui.h(0, ui.sp())
 				if (is_active) {
-					if (ui.button(id+'.leave', 'Leave', 0))
+					if (ui.button(id+'.leave', 'Leave', 0)) {
 						call.leave()
-				} else if (is_closed) {
-					if (ui.button(id+'.preview', 'New preview', 0))
-						call = window.create_call({on_change: ui.animate})
+						replace_ended_call()
+					}
 				} else {
 					if (ui.button(id+'.join', 'Join', 0,
-						null, null, null, !can_join || !call_id || !token
-							|| !(opt.name || guest_name?.trim())))
+						null, null, null, !can_join || !call_id || !invite_token
+							|| !(opt.name || guest_name?.trim()))) {
+						call_error = null
 						call.join({...opt, name: opt.name || guest_name.trim()})
+					}
 				}
 			ui.end_h()
 			ui.text('', 'Status: '+call.state, 0)
-			if (call.error) ui.text('', call.error, 0)
+			if (call_error) ui.text('', call_error, 0)
 			draw_call_media(id+'.microphone', call.microphone, call.devices,
-				'audioinput', 'Microphone', call.set_microphone, is_closed)
+				'audioinput', 'Microphone', call.set_microphone)
+			ui.h(0, ui.sp())
+				ui.label(id+'.echo_cancellation', 'Echo cancellation', 0)
+				let want_echo_cancellation = ui.checkbox( // checkbox value
+					id+'.echo_cancellation', call.microphone.want_echo_cancellation,
+					null, 0)
+				ui.label(id+'.noise_suppression', 'Noise suppression', 0)
+				let want_noise_suppression = ui.checkbox( // checkbox value
+					id+'.noise_suppression', call.microphone.want_noise_suppression,
+					null, 0)
+			ui.end_h()
+			if (want_echo_cancellation != call.microphone.want_echo_cancellation
+				|| want_noise_suppression
+					!= call.microphone.want_noise_suppression)
+				call.set_microphone(call.microphone.is_enabled,
+					call.microphone.device_id,
+					want_echo_cancellation, want_noise_suppression)
 
 			// Microphone level sampling and meter display.
 
@@ -869,7 +999,7 @@ ui.call = ui.stateful_widget(function(id) {
 						if (ui.button(id+'.meter', 'Enable meter', 0))
 							call.set_microphone(true)
 					} else {
-						let fr = glue.clamp( // bar fraction
+						let fr = clamp( // bar fraction
 							1 + Math.log10(level) / 3, 0, 1)
 						ui.min_wh(ui.em(8), ui.em(.5))
 						ui.h(0, 0, 'l', 'c')
@@ -888,7 +1018,10 @@ ui.call = ui.stateful_widget(function(id) {
 				ui.end_h()
 			}
 			draw_call_media(id+'.camera', call.camera, call.devices,
-				'videoinput', 'Camera', call.set_camera, is_closed)
+				'videoinput', 'Camera', call.set_camera)
+			// browsers without audio output routing: no speaker choice.
+			if (HTMLMediaElement.prototype.setSinkId)
+				draw_call_speaker(id+'.speaker', call)
 			for (let peer of call.peers)
 				if (peer.audio_error) {
 					ui.h(0, ui.sp())
@@ -900,9 +1033,9 @@ ui.call = ui.stateful_widget(function(id) {
 			if (call.state == 'joined' && !call.peers.length)
 				ui.text('', 'Waiting for participants', 0)
 
-			// Local and participant tiles in a grid.
+			// Local and peer tiles in a grid.
 
-			let tile_n = 1 + call.peers.length // local and participant tiles
+			let tile_n = 1 + call.peers.length // local and peer tiles
 			let col_n = Math.ceil(Math.sqrt(tile_n)) // tiles per row
 			ui.v(1, ui.sp(), 's', 's')
 				for (let row_i = 0; row_i * col_n < tile_n; row_i++) {
@@ -913,8 +1046,8 @@ ui.call = ui.stateful_widget(function(id) {
 							if (tile_i == 0) {
 								draw_call_tile(id+'.local',
 									call.name || opt.name || guest_name || 'Local',
-									!is_media_enabled(call.microphone),
-									is_media_enabled(call.camera)
+									!is_capture_enabled(call.microphone),
+									is_capture_enabled(call.camera)
 										? call.local_stream : null,
 									'Camera off', null)
 							} else {

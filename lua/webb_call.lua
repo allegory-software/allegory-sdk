@@ -1,30 +1,32 @@
 --[[
 
-	webrtc call creation and signaling.
+	WebRTC call creation and signaling.
 	Written by Cosmin Apreutesei. Public Domain.
 
 FEATURES
 
-	- Create named calls when signed in and invite others with a call token.
-	- Join as a signed-in user or as a guest with a display name.
-	- Talk to up to six participants in one call.
-	- Resume as the same participant for up to 30 seconds after losing the
-	  server connection, after connecting to another participant.
+	- Users can create calls and get an invite token.
+	- Anyone with the token can join, both users and non-users.
+	- Talk to up to six peers in one call.
+	- A reconnect token allows a lost peer to be identified as the same
+	  participant after returning, for up to 30s.
+	- Detect a lost browser connection with heartbeat messages.
 	- Prevent joining another call from the same signed-in browser session
-	  until leaving the current call.
+	  until leaving the current call (one open call per session).
 	- Connect through Cloudflare TURN relays when a direct connection is
 	  unavailable.
+	- Accept signaling only from pages served by this site (origin check).
 
 API
 
 	POST /call_create.json
-		name -> {call = call_id, token = invite_token}
+		name -> {call = call_id, invite_token = invite_token}
 		sign-in required.
 
-	WebSocket /call_signal/<call_id>?token=<invite_token>
+	WebSocket /call_signal/<call_id>?invite_token=<invite_token>
 		name: required for guests; use the account name when signed in.
-		reconnect_token: resume an existing participant.
-		replace_token: remove the earlier participant before joining anew.
+		reconnect_token: resume an existing peer.
+		replace_token: remove the earlier peer before joining anew.
 
 	webb_call_repair()
 		clear stored open-call markers in browser sessions.
@@ -33,6 +35,7 @@ CONFIG
 
 	cloudflare_turn_app_id
 	cloudflare_turn_api_token
+	base_url       allowed signaling origin (default: request scheme and host)
 
 ]]
 
@@ -49,7 +52,7 @@ db_schema:import(function()
 	tables.call = {
 		call        , idpk,
 		name        , name,
-		token       , {str, maxlen = 64, fixed}, not_null, uk,
+		invite_token, {str, maxlen = 64, fixed}, not_null, uk,
 			default(nil, function()
 				return tohex(secure_random_string(32))
 			end),
@@ -66,7 +69,7 @@ db_schema:import(function()
 
 end)
 
--- clear stored session occupancy after losing in-memory participants.
+-- clear stored session occupancy after losing in-memory peers.
 
 function webb_call_repair()
 	for cur, _, open_call in db():each('sess', 'open_call') do
@@ -87,16 +90,16 @@ action['call_create.json'] = function()
 		local call_id = call_db:insert('call', '{}', {name = name})
 		return {
 			call = call_id,
-			token = call_db:must_find('call', 'token', call_id),
+			invite_token = call_db:must_find('call', 'invite_token', call_id),
 		}
 	end)
 end
 
--- active participants and limits for signaling and reconnection.
+-- active peers and limits for signaling and reconnection.
 
 local calls = {} -- {call_id -> {peer_id -> peer}}
-local next_peer_id = 0 -- last assigned participant id
-local max_peers = 6 -- participants allowed in one call
+local next_peer_id = 0 -- last assigned peer id
+local max_peers = 6 -- peers allowed in one call
 local reconnect_timeout = 30 -- seconds allowed to reconnect signaling
 local write_timeout = 10 -- seconds allowed to send one message
 local heartbeat_interval = 5 -- seconds between browser heartbeats
@@ -158,23 +161,30 @@ local function remove_peer(call_db, call_id, call, peer, want_notify)
 end
 
 action.call_signal = function(call_id)
+	-- signaling only from pages served by this site.
+
+	allow(headers'origin' == (config'base_url' or scheme()..'://'..host()),
+		'invalid origin')
+
 	-- invite validation and signed-in or guest identity.
 
 	call_id = checkarg(tonumber(call_id), 'invalid call id')
 	checkarg(call_id >= 1 and call_id <= 0xffffffff
 		and call_id == floor(call_id), 'invalid call id')
 	local call_db = db() -- application database
-	local token = checkfound(call_db:atomic('r',
-		call_db.find, call_db, 'call', 'token', call_id), 'call not found')
-	allow(args'token' == token, 'invalid invite token')
+	local invite_token = checkfound(call_db:atomic('r',
+		call_db.find, call_db, 'call', 'invite_token', call_id),
+		'call not found')
+	allow(args'invite_token' == invite_token, 'invalid invite token')
 	local req = http_request() -- HTTP request
+
 	local current_user = user'*'
 	local session_id = current_user and not current_user.anonymous
 		and req.session_id or nil
 	local reconnect_token = args'reconnect_token'
 	local replace_token = args'replace_token'
-	local name -- display name for a new participant
-	local ice_servers -- TURN credentials for a new participant
+	local name -- display name for a new peer
+	local ice_servers -- TURN credentials for a new peer
 	if not reconnect_token then
 		name = checkarg(session_id and current_user.name
 			or str_arg(args'name'), 'display name required')
@@ -201,12 +211,12 @@ action.call_signal = function(call_id)
 		ice_servers = check500(turn_response.iceServers,
 			'Cloudflare TURN response is missing iceServers')
 	end
-	local peer -- participant retained until leave or reconnect timeout
+	local peer -- peer retained until leave or reconnect timeout
 	local call -- {peer_id -> peer} or nil before upgrade
 	local ws -- signaling WebSocket or nil before upgrade
 	local messages -- wait_queue of encoded messages for ws or nil
 
-	-- retain connected participants during a signaling disconnect.
+	-- retain connected peers during a signaling disconnect.
 
 	req:onfinish(function(_, _, err)
 		if not peer or peer.ws ~= ws then return end
@@ -240,7 +250,7 @@ action.call_signal = function(call_id)
 
 	call = calls[call_id] or {}
 
-	-- resume a participant or admit a new one.
+	-- resume a peer or admit a new one.
 
 	if reconnect_token then
 		peer = find_peer(call, reconnect_token)
@@ -257,7 +267,7 @@ action.call_signal = function(call_id)
 		peer.messages = messages
 		if old_ws then old_ws.tcp:close() end
 	else
-		-- earlier participant of this page (replace_token): remove it.
+		-- earlier peer of this page (replace_token): remove it.
 		local old_peer = replace_token and find_peer(call, replace_token)
 		if old_peer then
 			local old_ws = old_peer.ws
@@ -267,7 +277,7 @@ action.call_signal = function(call_id)
 			if old_ws then old_ws.tcp:close() end
 		end
 
-		-- six participants per call and one call per signed-in session.
+		-- six peers per call and one call per signed-in session.
 
 		if peer_count(call) >= max_peers then
 			ws:close(rejected_close_code, 'call_full')
@@ -305,10 +315,10 @@ action.call_signal = function(call_id)
 		calls[call_id] = call
 	end
 
-	-- participant introductions and reconnection notices.
+	-- peer introductions and reconnection notices.
 
-	-- browser told about a participant by 'joined': offers; by 'peer_joined':
-	-- answers. participant without a socket: list only if this browser
+	-- browser told about a peer by 'joined': offers; by 'peer_joined':
+	-- answers. peer without a socket: list only if this browser
 	-- knows it. listed in join order.
 	local listed_peers = {} -- {i -> peer} listed in this browser's 'joined'
 	for _, other_peer in pairs(call) do
