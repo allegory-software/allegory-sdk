@@ -10,6 +10,8 @@ FEATURES / NETWORKING
 	- Switch between P2P and SFU when peers join or leave.
 	- Force SFU for the whole call, regardless of the number of peers.
 	- Receive SFU media without publishing microphone or camera tracks.
+	- Encrypt SFU audio/video frames with the call's media key, so that
+	  Cloudflare cannot decode them. SFU media uses only Opus and VP8.
 	- Switch microphones or cameras during a call without reconnecting,
 	  by replacing the capture.
 	- Rejoin as the same peer after a disconnect using a reconnect token.
@@ -231,6 +233,7 @@ window.create_call = function(opt) {
 	let socket = null // signaling WebSocket or null
 	let signal_url = null // URL used to join or reconnect signaling
 	let reconnect_token = null // credential for this peer or null
+	let media_key = null // hex AES-128 frame key of the call, or null
 	let token_key = null // sessionStorage key of the stored reconnect token
 	let reconnect_timeout = null // server reconnect window in seconds
 	let reconnect_deadline = null // local retry deadline or null
@@ -277,7 +280,7 @@ window.create_call = function(opt) {
 
 	// Cloudflare SFU state.
 
-	let sfu = null // {id, connection, senders, abort, subscriptions} or null
+	let sfu = null // {id, connection, worker, senders, abort, subscriptions}
 	let sfu_sources = new Map() // {peer_id -> {id, tracks}} publications
 	let sfu_requests = new Map() // {request_id -> {resolve, reject}}
 	let next_sfu_request_id = 0 // last assigned request id
@@ -610,8 +613,11 @@ window.create_call = function(opt) {
 		call.speaker.device_id = device_id
 		save('ui_call.speaker', device_id) // remembered on this device
 		call.speaker.error = null
+		// Chrome rejects setSinkId() while the stream has no audio track:
+		// play_audio() sets the speaker when the audio track arrives.
 		for (let peer of call.peers)
-			set_peer_speaker(peer)
+			if (peer.stream.getAudioTracks().length)
+				set_peer_speaker(peer)
 		on_change()
 	}
 
@@ -801,6 +807,8 @@ window.create_call = function(opt) {
 	// Remote audio playback and browser playback errors.
 
 	call.play_audio = function(peer) {
+		if (peer.audio.sinkId != (call.speaker.device_id ?? ''))
+			set_peer_speaker(peer)
 		peer.audio.play().then(function() {
 			if (peer.audio.srcObject != peer.stream) return
 			peer.audio_error = null
@@ -888,8 +896,6 @@ window.create_call = function(opt) {
 			fail_connection(peer)
 		})
 		peer.audio.srcObject = peer.stream
-		if (call.speaker.device_id)
-			set_peer_speaker(peer)
 		call.peers.push(peer)
 		set_camera_bitrates()
 		return peer
@@ -995,6 +1001,7 @@ window.create_call = function(opt) {
 		sfu.connection.ontrack = null
 		sfu.connection.onconnectionstatechange = null
 		sfu.connection.close()
+		sfu.worker.terminate()
 		sfu = null
 		for (let peer of call.peers) {
 			peer.is_connected = false
@@ -1016,6 +1023,19 @@ window.create_call = function(opt) {
 			connection.addEventListener(event, finish)
 			signal.addEventListener('abort', finish)
 			finish()
+		})
+	}
+
+	// Firefox often never starts a transform created before its worker
+	// script has run, so create transforms only after the worker's message.
+
+	function wait_e2ee_worker(worker) {
+		if (sfu?.worker != worker) return Promise.reject(media_changed)
+		let signal = sfu.abort.signal // lifetime of this worker
+		return new Promise(function(resolve, reject) {
+			worker.onmessage = resolve
+			worker.onerror = event => reject(new Error(event.message))
+			signal.addEventListener('abort', () => reject(media_changed))
 		})
 	}
 
@@ -1084,6 +1104,15 @@ window.create_call = function(opt) {
 			transceivers[kind] = connection.addTransceiver(
 				get_capture_track(capture),
 				{direction: 'sendonly', streams: [call.local_stream]})
+			// browsers read the VP8 header, which stays unencrypted; the
+			// packetizers of other video codecs read encrypted bytes.
+			let mime_types = kind == 'audio' // codecs allowed for this sender
+				? ['audio/opus'] : ['video/vp8', 'video/rtx']
+			transceivers[kind].setCodecPreferences(
+				RTCRtpSender.getCapabilities(kind).codecs.filter(codec =>
+					mime_types.includes(codec.mimeType.toLowerCase())))
+			transceivers[kind].sender.transform = new RTCRtpScriptTransform(
+				sfu.worker, {sending: true, kind, media_key})
 			sfu.senders[kind] = transceivers[kind].sender
 		}
 		if (!Object.keys(transceivers).length) return
@@ -1199,20 +1228,27 @@ window.create_call = function(opt) {
 	async function start_sfu() {
 		if (media_mode != 'sfu' || media_revision != received_media_revision)
 			throw media_changed
+		if (typeof RTCRtpScriptTransform != 'function')
+			throw new Error('This browser cannot encrypt SFU media')
 		stop_sfu()
 		await request_sfu('close')
 		let connection = new RTCPeerConnection({ // shared SFU connection
 			iceServers: ice_servers,
 			iceTransportPolicy: ice_transport_policy,
 		})
+		let worker = new Worker('/ui_call_e2ee_worker.js', {type: 'module'})
 		sfu = {
 			id: null, // Cloudflare session id or null before the first media
 			connection, // RTCPeerConnection for sending and receiving
+			worker, // frame encryption Worker for this connection
 			senders: {}, // {kind -> local RTCRtpSender}
 			abort: new AbortController(), // setup and repair lifetime
 			subscriptions: new Map(), // {mid -> received track source}
 		}
 		connection.ontrack = function(ev) {
+			ev.receiver.transform = new RTCRtpScriptTransform(worker, {
+				sending: false, kind: ev.track.kind, media_key,
+			})
 			let source = sfu.subscriptions.get(ev.transceiver.mid) // publisher
 			let peer = find_peer(source.peer_id) // remote peer or none
 			if (!peer) { ev.track.stop(); return }
@@ -1241,6 +1277,7 @@ window.create_call = function(opt) {
 			}
 			on_change()
 		}
+		await wait_e2ee_worker(worker)
 		await sync_sfu_publications()
 		await sync_sfu_subscriptions()
 	}
@@ -1301,6 +1338,7 @@ window.create_call = function(opt) {
 			heartbeat_timeout = msg.heartbeat_timeout
 			heartbeat_timer(heartbeat_interval)
 			ice_servers = msg.ice_servers
+			media_key = msg.media_key
 			call.name = msg.name
 			// peers missing from the list left while this socket was
 			// down; listed ones this browser doesn't have yet joined meanwhile.
@@ -1580,10 +1618,26 @@ function draw_call_speaker(id, call) {
 
 // One peer's name, microphone state, video and connection status.
 
+function draw_tile_label(text, align, valign, icon) {
+	ui.m(ui.sp05())
+	ui.p(ui.sp05())
+	ui.h(0, ui.sp05(), align, valign)
+		ui.bg(':rgba(0,0,0,0.65)')
+		if (icon) {
+			ui.color(':white')
+			ui.icon('', icon, 0)
+		}
+		ui.color(':white')
+		ui.text('', text, 0)
+		ui.end_h()
+}
+
+// received media is encrypted in every mode: P2P by WebRTC's DTLS-SRTP,
+// SFU by the call's frame encryption.
 function draw_call_tile(id, name, is_muted, stream, placeholder, status,
-	connection_info) {
+	connection_info, is_encrypted) {
 	ui.v(1, ui.sp(), 's', 's')
-		ui.text('', status ? name+' ('+status+')' : name, 0)
+		if (status) ui.text('', status, 0)
 		if (is_muted) ui.text('', 'Microphone muted', 0)
 		ui.stack('', 1, 's', 's')
 			ui.bb('bg1', null, 1, 'intense')
@@ -1591,15 +1645,8 @@ function draw_call_tile(id, name, is_muted, stream, placeholder, status,
 				ui.video(id, stream)
 			else
 				ui.text('', placeholder, 0, 'c', 'c')
-			if (connection_info) {
-				ui.m(ui.sp05())
-				ui.p(ui.sp05())
-				ui.h(0, 0, 'r', 't')
-					ui.bg(':rgba(0,0,0,0.65)')
-					ui.color(':white')
-					ui.text('', connection_info, 0)
-					ui.end_h()
-			}
+			if (connection_info) draw_tile_label(connection_info, 'r', 't')
+			draw_tile_label(name, 'l', 'b', is_encrypted ? 'lock' : null)
 		ui.end_stack()
 		let playback_error = ui.state_of(id, 'playback_error')
 		if (playback_error) ui.text('', playback_error, 0)
@@ -1789,7 +1836,7 @@ ui.call = ui.stateful_widget(function(id) {
 										: 'Waiting for media state',
 									peer.state != 'connected' ? peer.state : null,
 									(peer.connection_type || '--')+' | '
-										+video_bitrate+' Mbps')
+										+video_bitrate+' Mbps', true)
 							}
 						}
 					ui.end_h()

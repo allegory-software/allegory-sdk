@@ -19,6 +19,8 @@ FEATURES
 	- Connect through Cloudflare TURN relays when a direct connection is
 	  unavailable.
 	- Accept signaling only from pages served by this site (origin check).
+	- Create a random media key for each live call and send it to every
+	  admitted peer, for frame encryption that excludes Cloudflare.
 
 API
 
@@ -174,7 +176,7 @@ local function sfu_fetch(sfu_id, path, body, method)
 	}
 	if not response then return nil, tostring(req) end
 	if req.status < 200 or req.status >= 300 then
-		return nil, 'Cloudflare SFU HTTP '..req.status
+		return nil, 'Cloudflare SFU HTTP '..req.status, req.status
 	elseif response.errorCode then
 		return nil, response.errorDescription or response.errorCode
 	end
@@ -195,10 +197,10 @@ local function notify_publication(call, peer)
 end
 
 local function close_sfu_tracks(sfu, tracks)
-	local response, err = sfu_fetch(sfu.id, 'tracks/close', { -- reply or error
+	local response, err, status = sfu_fetch(sfu.id, 'tracks/close', { -- reply
 		tracks = tracks, force = true,
 	}, 'PUT')
-	if not response then return nil, err end
+	if not response then return nil, err, status end
 	for _, track in ipairs(response.tracks) do
 		if not track.errorCode or track.errorCode == 'close_track_error' then
 			sfu.mids[track.mid] = nil
@@ -224,8 +226,11 @@ local function close_sfu(call, peer)
 		add(tracks, {mid = mid})
 	end
 	if #tracks > 0 then
-		local response, err = close_sfu_tracks(sfu, tracks) -- reply or error
-		if not response then return nil, err end
+		local response, err, status = -- reply or error and HTTP status
+			close_sfu_tracks(sfu, tracks)
+		-- HTTP 410: the browser closed its connection first, so Cloudflare
+		-- has already disconnected the session and its tracks.
+		if not response and status ~= 410 then return nil, err end
 	end
 	peer.sfu = nil
 	return {}
@@ -501,6 +506,7 @@ action.call_signal = function(call_id)
 		want_force_sfu = false, -- use SFU regardless of the peer count
 		media_mode = 'p2p', -- 'p2p' or 'sfu'
 		media_revision = 0, -- current media connection setup number
+		media_key = tohex(secure_random_string(16)), -- AES-128 frame key, hex
 	}
 
 	-- resume a peer or admit a new one.
@@ -601,6 +607,7 @@ action.call_signal = function(call_id)
 		name = peer.name,
 		peers = joined_peers,
 		ice_servers = peer.ice_servers,
+		media_key = call.media_key,
 		reconnect_token = peer.reconnect_token,
 		reconnect_timeout = reconnect_timeout,
 		heartbeat_interval = heartbeat_interval,
