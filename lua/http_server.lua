@@ -572,7 +572,9 @@ function http_server(...)
 					ctcp:close()
 					return
 				end
-				ctcp:setopt('tcp_nodelay', true)
+				if ctcp.family ~= 'unix' then
+					ctcp:setopt('tcp_nodelay', true)
+				end
 				if tcp.istlssocket then
 					ctcp = tcp:tls_accept(ctcp, {
 						tracebacks = self.debug.tracebacks,
