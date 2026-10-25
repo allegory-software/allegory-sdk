@@ -5,7 +5,11 @@
 
 FEATURES / NETWORKING
 
-	- Talk to up to 6 peers in one call with direct connections to each.
+	- Use direct connections by default for calls with up to six peers.
+	- Forward media through Cloudflare SFU for larger calls.
+	- Switch between P2P and SFU when peers join or leave.
+	- Force SFU for the whole call, regardless of the number of peers.
+	- Receive SFU media without publishing microphone or camera tracks.
 	- Switch microphones or cameras during a call without reconnecting,
 	  by replacing the capture.
 	- Rejoin as the same peer after a disconnect using a reconnect token.
@@ -38,6 +42,8 @@ API
 	create_call({on_change}) -> call
 	call.join({call_id, invite_token, [name], [ice_transport_policy]})
 	call.leave()
+	call.want_force_sfu: server-confirmed SFU override for the whole call.
+	call.set_force_sfu(want_force_sfu)
 	call.set_microphone(is_enabled, [device_id],
 		[want_echo_cancellation], [want_noise_suppression]) -> promise
 	call.set_camera(is_enabled, [device_id], [want_background_blur]) -> promise
@@ -184,10 +190,12 @@ function create_camera_blur(track, signal, on_error) {
 
 window.create_call = function(opt) {
 	let {on_change} = opt
+
 	let call = {
 		state: 'preview', // current call phase
 		error: null, // terminal error text or null
 		name: null, // display name accepted by the server or null
+		want_force_sfu: false, // server-confirmed call-wide SFU override
 		peers: [], // remote peer objects in join order
 		local_stream: new MediaStream(), // captured MediaStream or null
 		devices: [], // available MediaDeviceInfo inputs and audio outputs
@@ -217,6 +225,9 @@ window.create_call = function(opt) {
 			error: null, // speaker error text or null
 		},
 	}
+
+	// Signaling and reconnection.
+
 	let socket = null // signaling WebSocket or null
 	let signal_url = null // URL used to join or reconnect signaling
 	let reconnect_token = null // credential for this peer or null
@@ -225,22 +236,57 @@ window.create_call = function(opt) {
 	let reconnect_deadline = null // local retry deadline or null
 	let is_joined = false // current socket has been admitted by the server
 	let retry_timer = timer(retry_signaling) // arm/cancel retry timer
+	let messages = Promise.resolve() // serialized signaling operations
+
+	// Heartbeats.
+
 	let heartbeat_interval = null // server heartbeat interval in seconds
 	let heartbeat_timeout = null // server silence limit in seconds
 	let last_message_time = null // clock() of the last message or null
 	let heartbeat_timer = timer(send_heartbeat) // arm/cancel heartbeat
+
+	// ICE settings.
+
 	let ice_servers = null // RTCIceServer array received on admission
 	let ice_transport_policy = 'all' // selected ICE transport policy
-	let messages = Promise.resolve() // serialized signaling operations
+
+	// Capture devices and camera requests.
+
 	let media_devices = navigator.mediaDevices // capture API or undefined
 	let device_request = null // latest device enumeration promise or null
+	let camera_abort = new AbortController() // current camera request lifetime
+
+	// Microphone level meter state.
+
 	let microphone_context = null // meter AudioContext or null
 	let microphone_source = null // captured audio source node or null
 	let microphone_analyser = null // microphone AnalyserNode or null
 	let microphone_samples = null // reusable Float32Array of audio samples
-	let camera_abort = new AbortController() // current camera request lifetime
+
+	// Peer connection statistics state.
+
 	let peer_stats = new Map() // {peer -> previous RTCStatsReport}
 	let stats_timer = timer(update_stats) // arm/cancel statistics sampling
+
+	// Peer identity and media mode state.
+
+	let local_peer_id = null // this browser's peer id
+	let media_mode = null // 'p2p', 'sfu' or null before admission
+	let received_media_revision = null // latest setup number from the server
+	let media_revision = null // server's current media setup number
+
+	// Cloudflare SFU state.
+
+	let sfu = null // {id, connection, senders, abort, subscriptions} or null
+	let sfu_sources = new Map() // {peer_id -> {id, tracks}} publications
+	let sfu_requests = new Map() // {request_id -> {resolve, reject}}
+	let next_sfu_request_id = 0 // last assigned request id
+	let sfu_repair_deadline = null // clock() limit for SFU connection repair
+	let sfu_repair_timer = timer(function() { // arm/cancel SFU repair limit
+		fail(new Error('SFU connection timed out'))
+	})
+
+	const media_changed = Symbol('media changed') // canceled setup operation
 
 	function is_closed() {
 		return call.state == 'left' || call.state == 'failed'
@@ -307,13 +353,15 @@ window.create_call = function(opt) {
 		while (true) {
 			let peer = call.peers.find(call_peer => call_peer.senders[kind]
 				&& !replaced_senders.has(call_peer.senders[kind]))
-			if (!peer) break
-			let sender = peer.senders[kind]
+			let sender = // direct or SFU sender still needing this track
+				peer ? peer.senders[kind] : sfu?.senders[kind]
+			if (!sender || replaced_senders.has(sender)) break
 			replaced_senders.add(sender)
 			try {
 				await sender.replaceTrack(blur ? blur.track : track)
 			} catch (error) {
-				if (peer.senders[kind] == sender) throw error
+				if ((peer ? peer.senders[kind] : sfu?.senders[kind]) == sender)
+					throw error
 			}
 		}
 		if (blur?.error) throw blur.error
@@ -606,8 +654,7 @@ window.create_call = function(opt) {
 
 	// Camera bitrate for the current number of peers.
 
-	function set_camera_bitrate(peer) {
-		let sender = peer.senders.video
+	function set_camera_bitrate(sender) {
 		let params = sender.getParameters()
 		params.encodings[0].maxBitrate = camera_bitrate(1 + call.peers.length)
 		sender.setParameters(params)
@@ -616,13 +663,25 @@ window.create_call = function(opt) {
 	// peers not connected yet: set by the 'connected' state change.
 	function set_camera_bitrates() {
 		for (let peer of call.peers)
-			if (peer.is_connected)
-				set_camera_bitrate(peer)
+			if (peer.connection && peer.is_connected)
+				set_camera_bitrate(peer.senders.video)
 	}
 
+	// Measured video bitrate for direct and SFU connections.
+
 	async function update_stats() {
+		let sfu_connection = sfu?.connection // shared SFU connection or none
+		let sfu_stats = null // one shared RTCStatsReport per sample
+		if (sfu_connection?.connectionState == 'connected') {
+			try {
+				sfu_stats = await sfu_connection.getStats()
+			} catch (error) {
+				if (sfu?.connection == sfu_connection) throw error
+			}
+		}
 		for (let peer of call.peers.slice()) { // remote peer
-			let peer_connection = peer.connection // current RTCPeerConnection
+			let peer_connection = // current RTCPeerConnection
+				peer.connection || sfu?.connection
 			if (!peer_connection) continue
 			if (peer_connection.connectionState != 'connected') {
 				peer.connection_type = null
@@ -632,14 +691,18 @@ window.create_call = function(opt) {
 			}
 			let stats // RTCStatsReport for this sample
 			try {
-				stats = await peer_connection.getStats()
+				stats = peer_connection == sfu_connection
+					? sfu_stats : await peer_connection.getStats()
 			} catch (error) {
-				if (peer.connection != peer_connection) continue
+				if ((peer.connection || sfu?.connection) != peer_connection)
+					continue
 				throw error
 			}
-			if (peer.connection != peer_connection) continue
-			peer.connection_type = null
+			if ((peer.connection || sfu?.connection) != peer_connection)
+				continue
+			peer.connection_type = peer.connection ? null : 'SFU'
 			for (let stat of stats.values()) { // RTCStats object
+				if (!peer.connection) break
 				if (stat.type != 'transport' || !stat.selectedCandidatePairId)
 					continue
 				let candidate_pair = // selected ICE candidate pair
@@ -659,6 +722,9 @@ window.create_call = function(opt) {
 			let video_bitrate = null // sum of incoming video rates in kb/s
 			for (let stat of stats.values()) { // RTCStats object
 				if (stat.type != 'inbound-rtp' || stat.kind != 'video') continue
+				if (!peer.connection
+					&& sfu.subscriptions.get(stat.mid)?.peer_id != peer.id)
+					continue
 				let prev_video_stats = // previous video stats or undefined
 					prev_stats?.get(stat.id)
 				if (!prev_video_stats
@@ -682,6 +748,8 @@ window.create_call = function(opt) {
 
 	function close_socket() {
 		is_joined = false
+		cancel_sfu_requests()
+		if (sfu) sfu.abort.abort()
 		heartbeat_timer()
 		if (socket) {
 			socket.onmessage = null
@@ -695,6 +763,8 @@ window.create_call = function(opt) {
 		camera_abort.abort()
 		retry_timer()
 		stats_timer()
+		sfu_repair_timer()
+		stop_sfu()
 		window.removeEventListener('pagehide', call.leave)
 		if (media_devices)
 			media_devices.removeEventListener('devicechange', refresh_devices)
@@ -749,7 +819,8 @@ window.create_call = function(opt) {
 		messages = messages.then(function() {
 			if (socket && socket == signal_socket) return fn()
 		}).catch(function(error) {
-			if (!is_closed()) fail(error)
+			if (!is_closed() && socket == signal_socket
+				&& error != media_changed) fail(error)
 		})
 	}
 
@@ -757,6 +828,7 @@ window.create_call = function(opt) {
 		if (!is_joined) return
 		socket.send(JSON.stringify({
 			type: 'signal',
+			media_revision: media_revision,
 			peer_id: peer.id,
 			data: data,
 		}))
@@ -780,6 +852,7 @@ window.create_call = function(opt) {
 	function send_media_to_all() {
 		for (let peer of call.peers)
 			send_media(peer)
+		if (sfu && media_mode == 'sfu') enqueue(sync_sfu_publications)
 	}
 
 	// Audio and video connection setup for each peer.
@@ -792,25 +865,21 @@ window.create_call = function(opt) {
 		send_signal(peer, {description: peer_connection.localDescription})
 	}
 
-	async function connect_peer(peer_id, name, want_offer) {
+	function add_peer(peer_id, name) {
 		assert(!find_peer(peer_id), 'peer already connected')
-		let peer_connection = new RTCPeerConnection({
-			iceServers: ice_servers,
-			iceTransportPolicy: ice_transport_policy,
-		})
 		let peer = { // remote peer
 			id: peer_id, // peer id
 			name: name, // display name
 			state: 'connecting', // connection status
-			connection_type: null, // 'P2P', 'Relayed' or null before sampling
+			connection_type: null, // 'P2P', 'Relayed', 'SFU' or null
 			video_bitrate: null, // measured incoming video kb/s or null
 			stream: new MediaStream(), // received MediaStream
 			media: null, // {microphone: boolean, camera: boolean} or null
 			audio_error: null, // remote audio playback error text or null
-			connection: peer_connection, // RTCPeerConnection or null if failed
+			connection: null, // direct RTCPeerConnection or null
 			senders: {audio: null, video: null}, // {kind -> RTCRtpSender or null}
 			audio: new Audio(), // remote audio playback element
-			is_offerer: want_offer, // this browser made the offer
+			is_offerer: local_peer_id > peer_id, // this browser offers for P2P
 			is_connected: false, // connection has connected
 			is_repairing: false, // ICE restart of a failed connection is running
 			repair_timer: null, // (seconds?) -> arm/cancel repair time limit
@@ -823,6 +892,16 @@ window.create_call = function(opt) {
 			set_peer_speaker(peer)
 		call.peers.push(peer)
 		set_camera_bitrates()
+		return peer
+	}
+
+	async function connect_peer(peer) {
+		let peer_connection = new RTCPeerConnection({ // direct connection
+			iceServers: ice_servers,
+			iceTransportPolicy: ice_transport_policy,
+		})
+		peer.connection = peer_connection
+		peer.state = 'connecting'
 		if (peer.is_offerer)
 			for (let kind of ['audio', 'video']) {
 				let track = kind == 'audio'
@@ -868,7 +947,7 @@ window.create_call = function(opt) {
 					peer.is_connected = true
 					peer.is_repairing = false
 					peer.repair_timer()
-					set_camera_bitrate(peer)
+					set_camera_bitrate(peer.senders.video)
 					send_connected(peer)
 				}
 				peer.state = connection_state(peer)
@@ -881,11 +960,338 @@ window.create_call = function(opt) {
 			await send_offer(peer)
 	}
 
+	// Cloudflare SFU requests and the shared media connection.
+
+	function cancel_sfu_requests() {
+		for (let request of sfu_requests.values()) request.reject(media_changed)
+		sfu_requests.clear()
+	}
+
+	function request_sfu(op, args = {}) {
+		if (!is_joined || media_revision != received_media_revision)
+			return Promise.reject(media_changed)
+		let request_id = ++next_sfu_request_id // request awaiting a reply
+		return new Promise(function(resolve, reject) {
+			sfu_requests.set(request_id, {resolve, reject})
+			socket.send(JSON.stringify({
+				type: 'sfu_request', request_id, media_revision, op, ...args,
+			}))
+		})
+	}
+
+	function remove_received_tracks(peer) {
+		for (let track of peer.stream.getTracks()) {
+			peer.stream.removeTrack(track)
+			track.stop()
+		}
+		peer.connection_type = null
+		peer.video_bitrate = null
+		peer_stats.delete(peer)
+	}
+
+	function stop_sfu() {
+		if (!sfu) return
+		sfu.abort.abort()
+		sfu.connection.ontrack = null
+		sfu.connection.onconnectionstatechange = null
+		sfu.connection.close()
+		sfu = null
+		for (let peer of call.peers) {
+			peer.is_connected = false
+			remove_received_tracks(peer)
+		}
+	}
+
+	function wait_sfu(connection, event, is_ready) {
+		if (sfu?.connection != connection) return Promise.reject(media_changed)
+		let signal = sfu.abort.signal // lifetime of this connection
+		return new Promise(function(resolve, reject) {
+			function finish() {
+				if (!signal.aborted && !is_ready()) return
+				connection.removeEventListener(event, finish)
+				signal.removeEventListener('abort', finish)
+				if (signal.aborted) reject(media_changed)
+				else resolve()
+			}
+			connection.addEventListener(event, finish)
+			signal.addEventListener('abort', finish)
+			finish()
+		})
+	}
+
+	// Create the SFU session when media negotiation is needed.
+
+	async function open_sfu(connection) {
+		if (sfu?.connection != connection || sfu.abort.signal.aborted)
+			throw media_changed
+		if (connection.connectionState != 'connected') {
+			if (sfu_repair_deadline == null)
+				sfu_repair_deadline = clock() + repair_timeout
+			sfu_repair_timer(Math.max(0, sfu_repair_deadline - clock()))
+		}
+		if (!sfu.id) {
+			let response = await request_sfu('open') // created SFU session
+			if (sfu?.connection != connection || sfu.abort.signal.aborted)
+				throw media_changed
+			sfu.id = response.sessionId
+		}
+	}
+
+	async function set_sfu_description(connection, response) {
+		if (sfu?.connection != connection || sfu.abort.signal.aborted)
+			throw media_changed
+		if (!response.sessionDescription) return
+		await connection.setRemoteDescription(response.sessionDescription)
+		if (sfu?.connection != connection || sfu.abort.signal.aborted)
+			throw media_changed
+		if (response.sessionDescription.type == 'offer') {
+			await connection.setLocalDescription(await connection.createAnswer())
+			await wait_sfu(connection, 'icegatheringstatechange',
+				() => connection.iceGatheringState == 'complete')
+			await request_sfu('answer', {
+				description: connection.localDescription,
+			})
+		}
+	}
+
+	// Publish enabled captures and close disabled publications.
+
+	async function sync_sfu_publications() {
+		if (!sfu || sfu.abort.signal.aborted || media_mode != 'sfu') return
+		let connection = sfu.connection // current SFU connection
+		let kinds = [] // track kinds disabled since their publication
+		for (let kind of ['audio', 'video']) {
+			let capture = kind == 'audio' // local capture for this sender
+				? call.microphone : call.camera
+			if (sfu.senders[kind] && !is_capture_enabled(capture))
+				kinds.push(kind)
+		}
+		if (kinds.length) {
+			await request_sfu('unpublish', {kinds})
+			if (sfu?.connection != connection || sfu.abort.signal.aborted)
+				throw media_changed
+			for (let kind of kinds) {
+				connection.getTransceivers().find(transceiver =>
+					transceiver.sender == sfu.senders[kind]).stop()
+				sfu.senders[kind] = null
+			}
+		}
+		let transceivers = {} // {kind -> new sending RTCRtpTransceiver}
+		for (let kind of ['audio', 'video']) {
+			let capture = kind == 'audio' // local capture for this sender
+				? call.microphone : call.camera
+			if (sfu.senders[kind] || !is_capture_enabled(capture)) continue
+			transceivers[kind] = connection.addTransceiver(
+				get_capture_track(capture),
+				{direction: 'sendonly', streams: [call.local_stream]})
+			sfu.senders[kind] = transceivers[kind].sender
+		}
+		if (!Object.keys(transceivers).length) return
+		await open_sfu(connection)
+		await connection.setLocalDescription(await connection.createOffer())
+		await wait_sfu(connection, 'icegatheringstatechange',
+			() => connection.iceGatheringState == 'complete')
+		let mids = {} // {kind -> new sending mid}
+		for (let kind in transceivers) mids[kind] = transceivers[kind].mid
+		let response = await request_sfu('publish', { // publication reply
+			description: connection.localDescription, mids,
+		})
+		await set_sfu_description(connection, response)
+		for (let track of response.tracks)
+			if (track.errorCode)
+				throw new Error(track.errorDescription || track.errorCode)
+		await wait_sfu(connection, 'connectionstatechange',
+			() => connection.connectionState == 'connected')
+		if (sfu.senders.video) set_camera_bitrate(sfu.senders.video)
+		await request_sfu('ready')
+	}
+
+	function set_sfu_source(peer_id, msg) {
+		if (msg.sfu_id)
+			sfu_sources.set(peer_id, {id: msg.sfu_id, tracks: msg.sfu_tracks})
+		else
+			sfu_sources.delete(peer_id)
+	}
+
+	async function sync_sfu_subscriptions() {
+		if (!sfu || sfu.abort.signal.aborted || media_mode != 'sfu') return
+		let connection = sfu.connection // current SFU connection
+		let mids = [] // receiving mids whose publisher left or reconnected
+		for (let [mid, source] of sfu.subscriptions) {
+			let publication = // current publisher or none
+				sfu_sources.get(source.peer_id)
+			if (publication?.id != source.sfu_id
+				|| publication.tracks[source.kind]?.trackName != source.track_name
+				|| !find_peer(source.peer_id)) mids.push(mid)
+		}
+		if (mids.length) {
+			let response = // closed receiver tracks
+				await request_sfu('unsubscribe', {mids})
+			if (sfu?.connection != connection || sfu.abort.signal.aborted)
+				throw media_changed
+			for (let mid of mids) {
+				sfu.subscriptions.delete(mid)
+				let transceiver = connection.getTransceivers() // closed receiver
+					.find(transceiver => transceiver.mid == mid)
+				let track = transceiver.receiver.track // closed remote track
+				for (let peer of call.peers) peer.stream.removeTrack(track)
+				transceiver.stop()
+			}
+			await set_sfu_description(connection, response)
+		}
+		let tracks = [] // {peer_id, kind} requested remote tracks
+		for (let peer of call.peers) {
+			let publication = sfu_sources.get(peer.id) // publisher or none
+			peer.is_connected = !!publication
+				&& connection.connectionState == 'connected'
+			if (publication)
+				peer.state = peer.is_connected ? 'connected' : 'connecting'
+			else
+				peer.state = peer.media?.microphone || peer.media?.camera
+					? 'reconnecting' : 'joined'
+			if (!publication) continue
+			for (let kind of ['audio', 'video']) {
+				if (!publication.tracks[kind]) continue
+				let is_enabled = kind == 'audio' // remote capture is transmitting
+					? peer.media?.microphone : peer.media?.camera
+				if (!is_enabled) continue
+				if ([...sfu.subscriptions.values()].some(source =>
+					source.peer_id == peer.id && source.kind == kind)) continue
+				tracks.push({peer_id: peer.id, kind})
+			}
+		}
+		// Add no more than Cloudflare's limit of 64 tracks per request.
+		for (let track_i = 0; track_i < tracks.length; track_i += 64) {
+			await open_sfu(connection)
+			let response = await request_sfu('subscribe', { // track batch reply
+				tracks: tracks.slice(track_i, track_i + 64),
+			})
+			if (sfu?.connection != connection || sfu.abort.signal.aborted)
+				throw media_changed
+			for (let track of response.tracks) {
+				if (track.errorCode) continue
+				sfu.subscriptions.set(track.mid, {
+					peer_id: track.peer_id, kind: track.kind,
+					sfu_id: track.sessionId, track_name: track.trackName,
+				})
+			}
+			await set_sfu_description(connection, response)
+			if (connection.remoteDescription) {
+				await wait_sfu(connection, 'connectionstatechange',
+					() => connection.connectionState == 'connected')
+			} else {
+				await request_sfu('close')
+				if (sfu?.connection != connection || sfu.abort.signal.aborted)
+					throw media_changed
+				sfu.id = null
+				sfu_repair_timer()
+				sfu_repair_deadline = null
+			}
+			for (let track of response.tracks) {
+				if (!track.errorCode) continue
+				let peer = find_peer(track.peer_id) // failed publisher or none
+				if (peer) peer.state = 'failed'
+			}
+		}
+		on_change()
+	}
+
+	async function start_sfu() {
+		if (media_mode != 'sfu' || media_revision != received_media_revision)
+			throw media_changed
+		stop_sfu()
+		await request_sfu('close')
+		let connection = new RTCPeerConnection({ // shared SFU connection
+			iceServers: ice_servers,
+			iceTransportPolicy: ice_transport_policy,
+		})
+		sfu = {
+			id: null, // Cloudflare session id or null before the first media
+			connection, // RTCPeerConnection for sending and receiving
+			senders: {}, // {kind -> local RTCRtpSender}
+			abort: new AbortController(), // setup and repair lifetime
+			subscriptions: new Map(), // {mid -> received track source}
+		}
+		connection.ontrack = function(ev) {
+			let source = sfu.subscriptions.get(ev.transceiver.mid) // publisher
+			let peer = find_peer(source.peer_id) // remote peer or none
+			if (!peer) { ev.track.stop(); return }
+			peer.stream.addTrack(ev.track)
+			peer.is_connected = connection.connectionState == 'connected'
+			peer.state = peer.is_connected ? 'connected' : 'connecting'
+			if (ev.track.kind == 'audio') call.play_audio(peer)
+			on_change()
+		}
+		connection.onconnectionstatechange = function() {
+			if (connection.connectionState == 'connected') {
+				sfu_repair_timer()
+				sfu_repair_deadline = null
+				for (let peer of call.peers) {
+					if (!sfu_sources.has(peer.id)) continue
+					peer.is_connected = true
+					peer.state = 'connected'
+				}
+			} else if (connection.connectionState == 'failed') {
+				cancel_sfu_requests()
+				stop_sfu()
+				for (let peer of call.peers) peer.state = 'reconnecting'
+				enqueue(function() {
+					if (!sfu) return start_sfu()
+				})
+			}
+			on_change()
+		}
+		await sync_sfu_publications()
+		await sync_sfu_subscriptions()
+	}
+
+	// Call-wide Force SFU control and server-controlled media switching.
+
+	call.set_force_sfu = function(want_force_sfu) {
+		assert(is_joined, 'call is not joined')
+		socket.send(JSON.stringify({type: 'force_sfu', want_force_sfu}))
+	}
+
+	async function set_media_mode(msg, is_rejoined = false) {
+		if (msg.media_revision != received_media_revision) return
+		let prev_mode = media_mode // previous connection mode or null
+		let want_rebuild = // the server requested new media connections
+			media_mode != msg.media_mode || media_revision != msg.media_revision
+		media_mode = msg.media_mode
+		media_revision = msg.media_revision
+		if (media_mode == 'sfu') {
+			if (want_rebuild && !is_rejoined) sfu_sources.clear()
+			if (want_rebuild || is_rejoined) {
+				for (let peer of call.peers) {
+					close_connection(peer)
+					remove_received_tracks(peer)
+					peer.state = 'connecting'
+				}
+				await start_sfu()
+			}
+		} else {
+			stop_sfu()
+			sfu_repair_timer()
+			sfu_repair_deadline = null
+			if (prev_mode == 'sfu' || msg.sfu_id) await request_sfu('close')
+			for (let peer of call.peers) {
+				if (!peer.connection) await connect_peer(peer)
+				else if (is_rejoined) {
+					if (peer.is_repairing && peer.is_offerer)
+						await send_offer(peer, {iceRestart: true})
+					if (peer.is_connected) send_connected(peer)
+				}
+			}
+		}
+		on_change()
+	}
+
 	// Server messages and remote connection updates.
 
 	async function receive(msg) {
 		if (msg.type == 'joined') {
 			is_joined = true
+			call.want_force_sfu = msg.want_force_sfu
 			retry_timer()
 			reconnect_deadline = null
 			reconnect_token = msg.reconnect_token
@@ -902,25 +1308,36 @@ window.create_call = function(opt) {
 				msg.peers.map(listed_peer => listed_peer.id))
 			for (let peer of call.peers.filter(peer => !listed_ids.has(peer.id)))
 				close_peer(peer)
+			local_peer_id = msg.peer_id
+			sfu_sources.clear()
 			for (let listed_peer of msg.peers) {
-				let peer = find_peer(listed_peer.id)
-				if (!peer) {
-					await connect_peer(listed_peer.id, listed_peer.name, true)
-				} else {
-					// this socket was down: the server dropped the restart offer.
-					if (peer.is_repairing && peer.is_offerer)
-						await send_offer(peer, {iceRestart: true})
-					if (peer.is_connected)
-						send_connected(peer)
-				}
+				let peer = find_peer(listed_peer.id) // retained peer or none
+				if (!peer) peer = add_peer(listed_peer.id, listed_peer.name)
+				peer.media = listed_peer.media
+				set_sfu_source(peer.id, listed_peer)
 			}
+			await set_media_mode(msg, true)
 			call.state = 'joined'
 			send_media_to_all()
 			on_change()
 		} else if (msg.type == 'heartbeat') {
 			// reply to send_heartbeat(): onmessage already recorded it.
+		} else if (msg.type == 'media_mode') {
+			await set_media_mode(msg)
+		} else if (msg.type == 'force_sfu') {
+			call.want_force_sfu = msg.want_force_sfu
+			on_change()
+		} else if (msg.type == 'sfu_publication') {
+			set_sfu_source(msg.peer_id, msg)
+			await sync_sfu_subscriptions()
 		} else if (msg.type == 'peer_joined') {
-			await connect_peer(msg.peer_id, msg.name, false)
+			let peer = add_peer(msg.peer_id, msg.name) // newly admitted peer
+			peer.media = msg.media
+			set_sfu_source(peer.id, msg)
+			if (media_mode == 'p2p') await connect_peer(peer)
+			else await sync_sfu_subscriptions()
+			send_media(peer)
+			on_change()
 		} else if (msg.type == 'peer_disconnected') {
 			let peer = find_peer(msg.peer_id)
 			if (peer) {
@@ -930,25 +1347,39 @@ window.create_call = function(opt) {
 		} else if (msg.type == 'peer_resumed') {
 			let peer = find_peer(msg.peer_id)
 			if (peer) {
+				peer.media = msg.media
 				// partner socket was down: the server dropped the restart offer.
 				if (peer.is_repairing && peer.is_offerer)
 					await send_offer(peer, {iceRestart: true})
 				if (peer.connection)
 					peer.state = connection_state(peer)
+				else if (peer.is_connected) peer.state = 'connected'
 				send_media(peer)
 				on_change()
 			}
+			set_sfu_source(msg.peer_id, msg)
+			await sync_sfu_subscriptions()
 		} else if (msg.type == 'peer_left') {
 			let peer = find_peer(msg.peer_id)
 			if (peer) {
 				close_peer(peer)
+				sfu_sources.delete(peer.id)
+				await sync_sfu_subscriptions()
 				on_change()
 			}
 		} else if (msg.type == 'signal') {
 			let peer = find_peer(msg.peer_id)
-			if (!peer || !peer.connection) return
+			if (!peer) return
+			let data = msg.data // setup or media state
+			if (data.media) {
+				peer.media = data.media
+				await sync_sfu_subscriptions()
+				on_change()
+				return
+			}
+			if (media_mode != 'p2p' || msg.media_revision != media_revision
+				|| !peer.connection) return
 			let peer_connection = peer.connection
-			let data = msg.data
 			if (data.description) {
 				await peer_connection.setRemoteDescription(data.description)
 				if (peer.connection != peer_connection) return
@@ -972,9 +1403,6 @@ window.create_call = function(opt) {
 				}
 			} else if (data.candidate) {
 				await peer_connection.addIceCandidate(data.candidate)
-			} else if (data.media) {
-				peer.media = data.media
-				on_change()
 			}
 		} else {
 			throw new Error('Unknown signaling message: '+msg.type)
@@ -985,7 +1413,8 @@ window.create_call = function(opt) {
 
 	function drop_socket(error_text) {
 		close_socket()
-		if (!reconnect_token || !call.peers.some(peer => peer.is_connected)) {
+		if (!reconnect_token || (!call.peers.some(peer => peer.is_connected)
+			&& media_mode != 'sfu')) {
 			fail(new Error(error_text))
 		} else {
 			if (reconnect_deadline == null) {
@@ -1027,7 +1456,22 @@ window.create_call = function(opt) {
 		socket = new WebSocket(url)
 		socket.onmessage = function(ev) {
 			last_message_time = clock()
-			enqueue(function() { return receive(JSON.parse(ev.data)) })
+			let msg = JSON.parse(ev.data) // server message
+			if (msg.type == 'sfu_result') {
+				let request = sfu_requests.get(msg.request_id) // pending request
+				if (!request) return
+				sfu_requests.delete(msg.request_id)
+				if (msg.canceled) request.reject(media_changed)
+				else if (msg.error) request.reject(new Error(msg.error))
+				else request.resolve(msg.data)
+			} else {
+				if (msg.type == 'media_mode' || msg.type == 'joined') {
+					received_media_revision = msg.media_revision
+					cancel_sfu_requests()
+					if (sfu) sfu.abort.abort()
+				}
+				enqueue(function() { return receive(msg) })
+			}
 		}
 		socket.onclose = function(ev) {
 			if (ev.code == rejected_close_code) {
@@ -1219,6 +1663,18 @@ ui.call = ui.stateful_widget(function(id) {
 					}
 				}
 			ui.end_h()
+
+			// Force SFU for every peer in the joined call.
+
+			if (call.state == 'joined') {
+				ui.h(0, ui.sp())
+					ui.label(id+'.force_sfu', 'Force SFU (whole call)', 0)
+					let want_force_sfu = ui.checkbox( // requested SFU override
+						id+'.force_sfu', call.want_force_sfu, null, 0)
+					if (want_force_sfu != call.want_force_sfu)
+						call.set_force_sfu(want_force_sfu)
+				ui.end_h()
+			}
 			ui.text('', 'Status: '+call.state, 0)
 			if (call_error) ui.text('', call_error, 0)
 			draw_call_media(id+'.microphone', call.microphone, call.devices,
