@@ -239,6 +239,8 @@ window.create_call = function(opt) {
 	let microphone_analyser = null // microphone AnalyserNode or null
 	let microphone_samples = null // reusable Float32Array of audio samples
 	let camera_abort = new AbortController() // current camera request lifetime
+	let peer_stats = new Map() // {peer -> previous RTCStatsReport}
+	let stats_timer = timer(update_stats) // arm/cancel statistics sampling
 
 	function is_closed() {
 		return call.state == 'left' || call.state == 'failed'
@@ -580,6 +582,9 @@ window.create_call = function(opt) {
 		peer.senders.video = null
 		peer.is_connected = false
 		peer.is_repairing = false
+		peer.connection_type = null
+		peer.video_bitrate = null
+		peer_stats.delete(peer)
 		peer.repair_timer()
 	}
 
@@ -615,6 +620,66 @@ window.create_call = function(opt) {
 				set_camera_bitrate(peer)
 	}
 
+	async function update_stats() {
+		for (let peer of call.peers.slice()) { // remote peer
+			let peer_connection = peer.connection // current RTCPeerConnection
+			if (!peer_connection) continue
+			if (peer_connection.connectionState != 'connected') {
+				peer.connection_type = null
+				peer.video_bitrate = null
+				peer_stats.delete(peer)
+				continue
+			}
+			let stats // RTCStatsReport for this sample
+			try {
+				stats = await peer_connection.getStats()
+			} catch (error) {
+				if (peer.connection != peer_connection) continue
+				throw error
+			}
+			if (peer.connection != peer_connection) continue
+			peer.connection_type = null
+			for (let stat of stats.values()) { // RTCStats object
+				if (stat.type != 'transport' || !stat.selectedCandidatePairId)
+					continue
+				let candidate_pair = // selected ICE candidate pair
+					stats.get(stat.selectedCandidatePairId)
+				let local_candidate = // selected local ICE candidate
+					stats.get(candidate_pair.localCandidateId)
+				let remote_candidate = // selected remote ICE candidate
+					stats.get(candidate_pair.remoteCandidateId)
+				if (local_candidate.candidateType == 'relay'
+					|| remote_candidate.candidateType == 'relay') {
+					peer.connection_type = 'Relayed'
+					break
+				}
+				peer.connection_type = 'P2P'
+			}
+			let prev_stats = peer_stats.get(peer) // previous report or undefined
+			let video_bitrate = null // sum of incoming video rates in kb/s
+			for (let stat of stats.values()) { // RTCStats object
+				if (stat.type != 'inbound-rtp' || stat.kind != 'video') continue
+				let prev_video_stats = // previous video stats or undefined
+					prev_stats?.get(stat.id)
+				if (!prev_video_stats
+					|| stat.timestamp <= prev_video_stats.timestamp
+					|| stat.bytesReceived < prev_video_stats.bytesReceived) {
+					video_bitrate = null
+					break
+				}
+				video_bitrate = (video_bitrate ?? 0)
+					+ 8 * (stat.bytesReceived - prev_video_stats.bytesReceived)
+						/ (stat.timestamp - prev_video_stats.timestamp)
+			}
+			peer.video_bitrate = video_bitrate
+			peer_stats.set(peer, stats)
+		}
+		if (!is_closed()) {
+			stats_timer(1)
+			on_change()
+		}
+	}
+
 	function close_socket() {
 		is_joined = false
 		heartbeat_timer()
@@ -629,6 +694,7 @@ window.create_call = function(opt) {
 	function close() {
 		camera_abort.abort()
 		retry_timer()
+		stats_timer()
 		window.removeEventListener('pagehide', call.leave)
 		if (media_devices)
 			media_devices.removeEventListener('devicechange', refresh_devices)
@@ -736,6 +802,8 @@ window.create_call = function(opt) {
 			id: peer_id, // peer id
 			name: name, // display name
 			state: 'connecting', // connection status
+			connection_type: null, // 'P2P', 'Relayed' or null before sampling
+			video_bitrate: null, // measured incoming video kb/s or null
 			stream: new MediaStream(), // received MediaStream
 			media: null, // {microphone: boolean, camera: boolean} or null
 			audio_error: null, // remote audio playback error text or null
@@ -983,6 +1051,7 @@ window.create_call = function(opt) {
 		if (opt.name) signal_url.searchParams.set('name', opt.name)
 		open_socket()
 		call.state = 'joining'
+		stats_timer(1)
 		on_change()
 	}
 
@@ -1067,7 +1136,8 @@ function draw_call_speaker(id, call) {
 
 // One peer's name, microphone state, video and connection status.
 
-function draw_call_tile(id, name, is_muted, stream, placeholder, status) {
+function draw_call_tile(id, name, is_muted, stream, placeholder, status,
+	connection_info) {
 	ui.v(1, ui.sp(), 's', 's')
 		ui.text('', status ? name+' ('+status+')' : name, 0)
 		if (is_muted) ui.text('', 'Microphone muted', 0)
@@ -1077,6 +1147,15 @@ function draw_call_tile(id, name, is_muted, stream, placeholder, status) {
 				ui.video(id, stream)
 			else
 				ui.text('', placeholder, 0, 'c', 'c')
+			if (connection_info) {
+				ui.m(ui.sp05())
+				ui.p(ui.sp05())
+				ui.h(0, 0, 'r', 't')
+					ui.bg(':rgba(0,0,0,0.65)')
+					ui.color(':white')
+					ui.text('', connection_info, 0)
+					ui.end_h()
+			}
 		ui.end_stack()
 		let playback_error = ui.state_of(id, 'playback_error')
 		if (playback_error) ui.text('', playback_error, 0)
@@ -1244,12 +1323,17 @@ ui.call = ui.stateful_widget(function(id) {
 									'Camera off', null)
 							} else {
 								let peer = call.peers[tile_i - 1]
+								let video_bitrate = // incoming video Mbps or '--'
+									peer.video_bitrate == null
+										? '--' : (peer.video_bitrate / 1000).toFixed(1)
 								draw_call_tile(id+'.peer.'+peer.id, peer.name,
 									peer.media && !peer.media.microphone,
 									peer.media?.camera ? peer.stream : null,
 									peer.media ? 'Camera off'
 										: 'Waiting for media state',
-									peer.state != 'connected' ? peer.state : null)
+									peer.state != 'connected' ? peer.state : null,
+									(peer.connection_type || '--')+' | '
+										+video_bitrate+' Mbps')
 							}
 						}
 					ui.end_h()
