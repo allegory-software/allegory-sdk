@@ -34,10 +34,12 @@ API
 		replace_token: remove the earlier peer before joining anew.
 
 	webb_call_repair()
-		clear stored open-call markers in browser sessions.
+		clear this process's stored open-call markers in browser sessions.
 
 CONFIG
 
+	app_instance   this process's number among the app's processes
+	               (env APP_INSTANCE, default 1)
 	cloudflare_turn_app_id
 	cloudflare_turn_api_token
 	cloudflare_sfu_app_id
@@ -51,6 +53,10 @@ require'webb_auth_mdbx'
 require'websocket'
 require'json'
 require'http_client'
+require'proc'
+
+-- app instance number, for when running multiple app processes.
+config{app_instance = tonumber(env'APP_INSTANCE')}
 
 -- call records and the signed-in session's open call.
 
@@ -72,16 +78,21 @@ db_schema:import(function()
 
 	add_cols('sess after ctime', {
 		open_call   , id, weak_fk'call',
+		open_call_instance, u16, -- app_instance holding open_call in memory
 	})
 
 end)
 
--- clear stored session occupancy after losing in-memory peers.
+-- clear this process's stored session occupancy after losing in-memory
+-- peers.
 
 function webb_call_repair()
-	for cur, _, open_call in db():each('sess', 'open_call') do
-		if open_call then
-			cur:update('open_call', null)
+	local app_instance = config('app_instance', 1) -- this process's number
+	for cur, _, open_call, open_call_instance
+		in db():each('sess', 'open_call open_call_instance')
+	do
+		if open_call and open_call_instance == app_instance then
+			cur:update('open_call open_call_instance', null, null)
 		end
 	end
 end
@@ -389,6 +400,7 @@ local function remove_peer(call_db, call_id, call, peer, want_notify)
 				call_db:update('sess', '{}', {
 					sess = peer.session_id,
 					open_call = null,
+					open_call_instance = null,
 				})
 			end
 		end)
@@ -546,6 +558,7 @@ action.call_signal = function(call_id)
 				call_db:update('sess', '{}', {
 					sess = session_id,
 					open_call = call_id,
+					open_call_instance = config('app_instance', 1),
 				})
 				return true
 			end)
