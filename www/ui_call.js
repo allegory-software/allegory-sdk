@@ -25,6 +25,7 @@ FEATURES / DEVICES
 	- Auto-retry audio playback when the browser blocks it.
 	- Microphone echo cancellation and noise suppression options.
 	- Microphone level meter.
+	- Blur the camera background with MediaPipe.
 
 API
 
@@ -39,7 +40,7 @@ API
 	call.leave()
 	call.set_microphone(is_enabled, [device_id],
 		[want_echo_cancellation], [want_noise_suppression]) -> promise
-	call.set_camera(is_enabled, [device_id]) -> promise
+	call.set_camera(is_enabled, [device_id], [want_background_blur]) -> promise
 	call.set_speaker([device_id])
 	call.microphone_level() -> number or null
 	call.play_audio(peer)
@@ -65,6 +66,118 @@ function camera_bitrate(participant_n) { // -> bits per second
 function is_capture_enabled(capture) {
 	return !!(capture.track?.enabled && capture.track.readyState == 'live'
 		&& !capture.track.muted)
+}
+
+function create_camera_blur(track, signal, on_error) {
+	signal.throwIfAborted()
+	let video = document.createElement('video') // raw camera playback
+	let canvas = document.createElement('canvas') // outgoing blurred video
+	canvas.width = canvas.height = 1
+	let cx = canvas.getContext('2d') // outgoing canvas context
+	let output_track = // outgoing CanvasCaptureMediaStreamTrack
+		canvas.captureStream(0).getVideoTracks()[0]
+	let worker = new Worker('/ui_call_blur_worker.js') // camera processing
+	let frame_request = null // pending video frame callback id or null
+	let is_closed = false // processing resources have been released
+	let is_ready = false // the first processed frame has been returned
+	let resolve_ready, reject_ready // first-frame promise callbacks
+	let ready = new Promise(function(resolve, reject) {
+		resolve_ready = resolve
+		reject_ready = reject
+	}) // -> {track, close, error} after the first processed frame
+	let blur = {track: output_track, close, error: null} // processing result
+
+	function close() {
+		if (is_closed) return
+		is_closed = true
+		signal.removeEventListener('abort', on_abort)
+		if (frame_request != null)
+			video.cancelVideoFrameCallback(frame_request)
+		worker.terminate()
+		video.pause()
+		video.srcObject = null
+		track.stop()
+		output_track.stop()
+	}
+
+	function fail(error) {
+		if (is_closed) return
+		blur.error = error
+		close()
+		if (is_ready)
+			on_error(error)
+		else
+			reject_ready(error)
+	}
+
+	function on_abort() {
+		close()
+		reject_ready(new DOMException(
+			'Camera capture canceled', 'AbortError'))
+	}
+
+	function request_frame() {
+		frame_request = video.requestVideoFrameCallback(
+		async function(_, metadata) {
+			frame_request = null
+			try {
+				let frame = // captured camera frame
+					await createImageBitmap(video)
+				if (is_closed) {
+					frame.close()
+					return
+				}
+				worker.postMessage({
+					type: 'frame',
+					frame,
+					time: metadata.mediaTime * 1000,
+				}, [frame])
+			} catch (error) {
+				fail(error)
+			}
+		})
+	}
+
+	worker.onmessage = function(ev) {
+		if (ev.data.type == 'error') {
+			fail(new Error(ev.data.message))
+		} else if (ev.data.type == 'ready') {
+			request_frame()
+		} else {
+			let frame = ev.data.frame // processed ImageBitmap
+			try {
+				if (canvas.width != frame.width
+					|| canvas.height != frame.height) {
+					canvas.width = frame.width
+					canvas.height = frame.height
+				}
+				cx.drawImage(frame, 0, 0)
+				output_track.requestFrame()
+				if (!is_ready) {
+					is_ready = true
+					signal.removeEventListener('abort', on_abort)
+					resolve_ready(blur)
+				}
+				request_frame()
+			} catch (error) {
+				fail(error)
+			} finally {
+				frame.close()
+			}
+		}
+	}
+	worker.onerror = function(ev) {
+		ev.preventDefault()
+		fail(new Error(ev.message))
+	}
+	signal.addEventListener('abort', on_abort, {once: true})
+	video.muted = true
+	video.playsInline = true
+	video.srcObject = new MediaStream([track])
+	video.play().then(function() {
+		if (!is_closed) worker.postMessage({type: 'init'})
+	}).catch(fail)
+	return ready
 }
 
 // Call, captured media and remote peers.
@@ -93,6 +206,9 @@ window.create_call = function(opt) {
 			device_id: load('ui_call.video'), // or null: default
 			track: null, // captured MediaStreamTrack or null
 			is_enabled: false, // requested camera capture
+			want_background_blur: // requested background blur
+				load('ui_call.background_blur') == 'true',
+			blur: null, // {track, close, error} for processed video or null
 			pending: null, // pending capture/update promise or null
 			error: null, // camera error text or null
 		},
@@ -122,6 +238,7 @@ window.create_call = function(opt) {
 	let microphone_source = null // captured audio source node or null
 	let microphone_analyser = null // microphone AnalyserNode or null
 	let microphone_samples = null // reusable Float32Array of audio samples
+	let camera_abort = new AbortController() // current camera request lifetime
 
 	function is_closed() {
 		return call.state == 'left' || call.state == 'failed'
@@ -136,6 +253,11 @@ window.create_call = function(opt) {
 		return call.peers.find(peer => peer.id == peer_id)
 	}
 
+	function get_capture_track(capture) {
+		return capture == call.camera && capture.blur
+			? capture.blur.track : capture.track
+	}
+
 	function stop_capture(capture) {
 		if (!capture.track) return
 		if (capture == call.microphone) {
@@ -146,7 +268,11 @@ window.create_call = function(opt) {
 		capture.track.onmute = null
 		capture.track.onunmute = null
 		capture.track.stop()
-		call.local_stream.removeTrack(capture.track)
+		call.local_stream.removeTrack(get_capture_track(capture))
+		if (capture == call.camera && capture.blur) {
+			capture.blur.close()
+			capture.blur = null
+		}
 		capture.track = null
 	}
 
@@ -171,9 +297,10 @@ window.create_call = function(opt) {
 
 	// Device switching across existing peer connections.
 
-	async function replace_capture(capture, kind, track) {
+	async function replace_capture(capture, kind, track, blur = null,
+		signal = null) {
 		// a peer connected during an await got the previous track: repeat
-		// until every sender has this one.
+		// until every sender has the output track.
 		let replaced_senders = new Set() // senders given track
 		while (true) {
 			let peer = call.peers.find(call_peer => call_peer.senders[kind]
@@ -182,20 +309,23 @@ window.create_call = function(opt) {
 			let sender = peer.senders[kind]
 			replaced_senders.add(sender)
 			try {
-				await sender.replaceTrack(track)
+				await sender.replaceTrack(blur ? blur.track : track)
 			} catch (error) {
 				if (peer.senders[kind] == sender) throw error
 			}
 		}
-		if (is_closed()) {
+		if (blur?.error) throw blur.error
+		if (is_closed() || signal?.aborted) {
 			if (track) track.stop()
+			if (blur) blur.close()
 			return
 		}
 		stop_capture(capture)
 		if (track) {
 			capture.track = track
+			if (kind == 'video') capture.blur = blur
 			track.enabled = capture.is_enabled
-			call.local_stream.addTrack(track)
+			call.local_stream.addTrack(get_capture_track(capture))
 			if (kind == 'audio') {
 				microphone_source = microphone_context
 					.createMediaStreamSource(call.local_stream)
@@ -223,6 +353,10 @@ window.create_call = function(opt) {
 		while (!is_closed()) {
 			let device_id = capture.device_id
 			let is_enabled = capture.is_enabled
+			let want_background_blur = // requested blur for this capture attempt
+				kind == 'video' && capture.want_background_blur
+			let signal = // camera request signal or null for microphone capture
+				kind == 'video' ? camera_abort.signal : null
 			let {
 				want_echo_cancellation, // requested echo cancellation
 				want_noise_suppression, // requested noise suppression
@@ -238,6 +372,7 @@ window.create_call = function(opt) {
 					capture.track?.getConstraints()
 				if (capture.track
 					&& (track_constraints.deviceId?.exact ?? null) == device_id
+					&& (kind != 'video' || !!capture.blur == want_background_blur)
 					&& (kind != 'audio'
 						|| (track_constraints.echoCancellation
 								== want_echo_cancellation
@@ -260,18 +395,45 @@ window.create_call = function(opt) {
 					video: kind == 'video' ? constraints : false,
 				})
 				let track = stream.getTracks()[0]
-				if (is_closed() || !capture.is_enabled
+				if (is_closed() || signal?.aborted || !capture.is_enabled
 					|| capture.device_id != device_id
 					|| capture.want_echo_cancellation != want_echo_cancellation
-					|| capture.want_noise_suppression != want_noise_suppression) {
+					|| capture.want_noise_suppression != want_noise_suppression
+					|| (kind == 'video'
+						&& capture.want_background_blur != want_background_blur)) {
 					track.stop()
 					continue
 				}
+				let stop_track = signal && (() => track.stop()) // source cleanup
+				if (signal)
+					signal.addEventListener('abort', stop_track, {once: true})
+				let blur = null // {track, close, error} or null
 				try {
-					await replace_capture(capture, kind, track)
+					if (want_background_blur)
+						blur = await create_camera_blur(track, signal,
+							function(error) {
+								if (is_closed() || capture.track != track) return
+								stop_capture(capture)
+								capture.error = error.name+': '+error.message
+								send_media_to_all()
+								on_change()
+							})
+					if (is_closed() || signal?.aborted || !capture.is_enabled
+						|| capture.device_id != device_id
+						|| (kind == 'video'
+							&& capture.want_background_blur
+								!= want_background_blur)) {
+						track.stop()
+						if (blur) blur.close()
+						continue
+					}
+					await replace_capture(capture, kind, track, blur, signal)
 				} catch (error) {
 					track.stop()
+					if (blur) blur.close()
 					throw error
+				} finally {
+					if (signal) signal.removeEventListener('abort', stop_track)
 				}
 				if (is_closed()) return
 				capture.error = null
@@ -280,14 +442,20 @@ window.create_call = function(opt) {
 				refresh_devices()
 				if (capture.device_id == device_id && capture.is_enabled
 					&& capture.want_echo_cancellation == want_echo_cancellation
-					&& capture.want_noise_suppression == want_noise_suppression)
+					&& capture.want_noise_suppression == want_noise_suppression
+					&& (kind != 'video'
+						|| (!signal.aborted
+							&& capture.want_background_blur == want_background_blur)))
 					return
 			} catch (error) {
 				if (is_closed()) return
 				if (capture.device_id != device_id
+					|| signal?.aborted
 					|| capture.is_enabled != is_enabled
 					|| capture.want_echo_cancellation != want_echo_cancellation
-					|| capture.want_noise_suppression != want_noise_suppression)
+					|| capture.want_noise_suppression != want_noise_suppression
+					|| (kind == 'video'
+						&& capture.want_background_blur != want_background_blur))
 					continue
 				capture.error = error.name+': '+error.message
 				return
@@ -359,7 +527,20 @@ window.create_call = function(opt) {
 		return Math.min(1, Math.sqrt(energy / microphone_samples.length))
 	}
 
-	call.set_camera = function(is_enabled, device_id = call.camera.device_id) {
+	call.set_camera = function(is_enabled, device_id = call.camera.device_id,
+		want_background_blur = call.camera.want_background_blur) {
+		if (is_enabled != call.camera.is_enabled
+			|| device_id != call.camera.device_id
+			|| want_background_blur != call.camera.want_background_blur) {
+			camera_abort.abort()
+			camera_abort = new AbortController()
+			if (want_background_blur != call.camera.want_background_blur) {
+				stop_capture(call.camera)
+				send_media_to_all()
+			}
+		}
+		call.camera.want_background_blur = want_background_blur
+		save('ui_call.background_blur', want_background_blur)
 		return set_capture(call.camera, 'video', is_enabled, device_id)
 	}
 
@@ -446,6 +627,7 @@ window.create_call = function(opt) {
 	}
 
 	function close() {
+		camera_abort.abort()
 		retry_timer()
 		window.removeEventListener('pagehide', call.leave)
 		if (media_devices)
@@ -576,7 +758,7 @@ window.create_call = function(opt) {
 		if (peer.is_offerer)
 			for (let kind of ['audio', 'video']) {
 				let track = kind == 'audio'
-					? call.microphone.track : call.camera.track
+					? call.microphone.track : get_capture_track(call.camera)
 				peer.senders[kind] = peer_connection.addTransceiver(track || kind, {
 					direction: 'sendrecv',
 					streams: [call.local_stream],
@@ -710,7 +892,8 @@ window.create_call = function(opt) {
 						transceiver.direction = 'sendrecv'
 						transceiver.sender.setStreams(call.local_stream)
 						peer.senders[kind] = transceiver.sender
-						await transceiver.sender.replaceTrack(capture.track)
+						await transceiver.sender.replaceTrack(
+							get_capture_track(capture))
 						if (peer.connection != peer_connection) return
 					}
 					await peer_connection.setLocalDescription(
@@ -1019,6 +1202,15 @@ ui.call = ui.stateful_widget(function(id) {
 			}
 			draw_call_media(id+'.camera', call.camera, call.devices,
 				'videoinput', 'Camera', call.set_camera)
+			ui.h(0, ui.sp())
+				ui.label(id+'.background_blur', 'Blur background', 0)
+				let want_background_blur = ui.checkbox( // checkbox value
+					id+'.background_blur', call.camera.want_background_blur,
+					null, 0)
+			ui.end_h()
+			if (want_background_blur != call.camera.want_background_blur)
+				call.set_camera(call.camera.is_enabled, call.camera.device_id,
+					want_background_blur)
 			// browsers without audio output routing: no speaker choice.
 			if (HTMLMediaElement.prototype.setSinkId)
 				draw_call_speaker(id+'.speaker', call)
