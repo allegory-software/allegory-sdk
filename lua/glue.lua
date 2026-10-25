@@ -2368,7 +2368,11 @@ do
 
 	function load_config_string(s)
 		local f = assert(loadstring(s))
-		setfenv(f, conf)
+		local fenv = { -- {name -> function or config value}
+			getenv = os.getenv,
+			tonumber = tonumber,
+		}
+		setfenv(f, setmetatable(fenv, {__index = conf, __newindex = conf}))
 		f()
 		return true
 	end
