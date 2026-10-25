@@ -1,2 +1,0 @@
-#!/bin/sh
-exec "${0%cui}/../../bin/luajit" "${0%cui}cui.lua" "$@"

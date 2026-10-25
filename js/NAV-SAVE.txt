@@ -540,7 +540,7 @@ the I3 fetch.
 
 Next: the nav side of I3 (see I3, "Not done yet").
 
-Test setup, before I4: tests/canvas_ui_demo_app/cui.lua serves grid_save,
+Test setup, before I4: demo/demo.lua serves grid_save,
 an auto-inc tree, and grid_typed, a flat table with a typed text pk. The
 grid demo in www/ui-demo.html shows either one ("Server tree", "Server
 typed key"), and prepares a test case on it. Manual checks:
@@ -556,7 +556,7 @@ typed key"), and prepares a test case on it. Manual checks:
 End-to-end save tests, decided: automate the checks above against the
 real server, driven from headless Chrome (jsdom would need jsdom and the
 native canvas package, and saves about 0.5 s of Chrome startup per run).
-- A node runner starts the cui app on its own port and db file, opens a
+- A node runner starts the demo app on its own port and db file, opens a
 	test page from it in headless Chrome, prints the results, and stops
 	both.
 - The test page loads navs without grids from grid_save and grid_typed,
@@ -564,8 +564,8 @@ native canvas package, and saves about 0.5 s of Chrome startup per run).
 	result with a second nav loaded from the server. Two navs on the page
 	stand for two tabs.
 - The test rowsets set no allow, so rowset.json needs no login.
-- Done: tests/canvas_ui_demo_app/run_nav_save_test.mjs runs
-	www/nav_save_test.js. cui.lua reads HTTP_PORT, HTTPS_PORT and VARDIR
+- Done: demo/run_nav_save_test.mjs runs
+	www/nav_save_test.js. demo.lua reads HTTP_PORT, HTTPS_PORT and VARDIR
 	from the environment; the runner uses 8889, 4444 and a temporary var
 	dir. get_debug_state() reports is_saving, is_loading and saving_ris.
 	The test action 'hold save' makes the save wait for exec 'release'.

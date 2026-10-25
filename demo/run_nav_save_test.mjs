@@ -1,5 +1,5 @@
-// usage: node tests/canvas_ui_demo_app/run_nav_save_test.mjs
-// runs www/nav_save_test.js in headless Chrome against a cui server started
+// usage: node demo/run_nav_save_test.mjs
+// runs www/nav_save_test.js in headless Chrome against a demo server started
 // on its own ports and var dir, and prints one line per test.
 
 import {createServer} from 'node:http'
@@ -77,29 +77,29 @@ async function stop_group(child) {
 }
 
 const vardir = await mkdtemp(join(tmpdir(), 'nav-save-var-'))
-const cui = spawn_group(join(app_dir, 'cui'), [], {
+const demo = spawn_group(join(app_dir, 'demo'), [], {
 	...process.env,
 	VARDIR: vardir,
 	HTTP_PORT: String(http_port),
 	HTTPS_PORT: String(https_port),
 })
-let cui_exit_code
-cui.on('exit', code => {
-	cui_exit_code = code
-	finish_run({error: `cui exited with code ${code}`})
+let demo_exit_code
+demo.on('exit', code => {
+	demo_exit_code = code
+	finish_run({error: `demo exited with code ${code}`})
 })
 
-// wait until cui serves the test page.
+// wait until demo serves the test page.
 const page_url = `http://localhost:${http_port}/nav_save_test.html`
 for (let t = 0; ; t += 100) {
-	if (cui_exit_code !== undefined)
+	if (demo_exit_code !== undefined)
 		break
 	try {
 		if ((await fetch(page_url)).ok)
 			break
 	} catch (error) {
 		if (t >= 10000) {
-			finish_run({error: 'cui did not start'})
+			finish_run({error: 'demo did not start'})
 			break
 		}
 	}
@@ -122,20 +122,20 @@ const result = await run_done
 clearTimeout(timeout_id)
 
 await stop_group(chrome)
-cui.removeAllListeners('exit')
-await stop_group(cui)
+demo.removeAllListeners('exit')
+await stop_group(demo)
 report_server.close()
 await rm(profile, {recursive: true, force: true})
 await rm(vardir, {recursive: true, force: true})
 
 if (result.error) {
 	process.stderr.write(`error: ${result.error}\n`)
-	process.stderr.write(cui.stderr_text.slice(-4000))
+	process.stderr.write(demo.stderr_text.slice(-4000))
 	process.exit(1)
 }
 process.stdout.write(`\n${result.test_n - result.failed_n} of `
 	+ `${result.test_n} tests passed\n`)
 if (result.failed_n) {
-	process.stderr.write(cui.stderr_text.slice(-4000))
+	process.stderr.write(demo.stderr_text.slice(-4000))
 	process.exit(1)
 }

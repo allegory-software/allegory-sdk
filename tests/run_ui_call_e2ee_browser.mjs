@@ -17,7 +17,7 @@ let sfu_token = null // provider secret, retained in this Node process
 let sfu_sessions = new Map() // {session_id -> Set of allocated mids}
 if (want_sfu) {
 	let config = await readFile(new URL( // existing demo configuration
-		'./canvas_ui_demo_app/var/cui.conf', import.meta.url), 'utf8')
+		'../demo/var/demo.conf', import.meta.url), 'utf8')
 	let app_id = config.match( // configured provider app id
 		/^cloudflare_sfu_app_id\s*=\s*'([^']+)'/m)[1]
 	sfu_token = config.match(

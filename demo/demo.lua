@@ -19,8 +19,8 @@ logging.filter.log = true
 logging.filter.open = true
 --errortype'http_response'.addtraceback = true
 
-app.main_file = 'cui_demo.js'
-wwwdir'../../www'
+app.main_file = 'demo.js'
+wwwdir'../www'
 
 require'rowset_mdbx'
 require'ui_db_explorer'

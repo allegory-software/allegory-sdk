@@ -1,5 +1,5 @@
 // End-to-end save tests: navs without grids, loaded from the test rowsets
-// grid_save and grid_typed of cui.lua. run_nav_save_test.mjs opens this
+// grid_save and grid_typed of demo.lua. run_nav_save_test.mjs opens this
 // page with ?report=URL and prints the results posted to that URL.
 {
 

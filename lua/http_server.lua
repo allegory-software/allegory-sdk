@@ -46,7 +46,7 @@ CONFIG
 	http_host                      required, set to '*' to match all
 	http_addr                      '0.0.0.0'
 	http_port                      80
-	http_unix_socket               env HTTP_UNIX_SOCKET
+	http_unix_socket
 	http_unix_socket_perms
 	http_unix_socket_user
 	http_unix_socket_group
@@ -75,9 +75,6 @@ require'sock'
 require'sock_bearssl'
 require'http_date'
 require'proc'
-
---a process manager can give each process its own socket.
-config{http_unix_socket = env'HTTP_UNIX_SOCKET'}
 
 --http server ----------------------------------------------------------------
 

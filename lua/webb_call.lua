@@ -39,7 +39,7 @@ API
 CONFIG
 
 	app_instance   this process's number among the app's processes
-	               (env APP_INSTANCE, default 1)
+	               (default 1)
 	cloudflare_turn_app_id
 	cloudflare_turn_api_token
 	cloudflare_sfu_app_id
@@ -54,9 +54,6 @@ require'websocket'
 require'json'
 require'http_client'
 require'proc'
-
--- app instance number, for when running multiple app processes.
-config{app_instance = tonumber(env'APP_INSTANCE')}
 
 -- call records and the signed-in session's open call.
 

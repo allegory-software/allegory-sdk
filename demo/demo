@@ -1,0 +1,2 @@
+#!/bin/sh
+exec "${0%demo}/../bin/luajit" "${0%demo}demo.lua" "$@"
