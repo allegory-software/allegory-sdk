@@ -12,7 +12,6 @@ MULTI-LANGUAGE ACTIONS & LINKS
 ACTIONS
 
 	action(name, args...) -> t|f          execute action as http response
-	execaction(name, args...) -> ret...|true    execute action internally
 
 	function action.NAME(args) end        define a Lua action handler
 
@@ -187,22 +186,13 @@ local mime_type_filters = { -- {mime -> {run = fn, cache_key = fn|nil}}
 	},
 }
 
-local function serve_static_file(path, filter, handler)
-	local filter_key = filter and filter.cache_key and filter.cache_key()
-	local key = filter_key and path..'\0'..filter_key or path -- gzip cache key
-	if not out_buffering() then
-		local source_mtime = mtime(path) -- source modification time
-		check_etag_hash(xxhash128(key..'\0'..source_mtime):hex())
-		if http_request():send_cached(key, source_mtime) then return end
-	end
+local function run_filter(filter, handler, ...)
 	if filter then
-		filter.run(handler)
+		filter.run(handler, ...)
 	else
-		handler()
+		handler(...)
 	end
 end
-
---routing logic --------------------------------------------------------------
 
 local file_ext_max_age_seconds = {
 	js = 60,
@@ -210,15 +200,52 @@ local file_ext_max_age_seconds = {
 	woff2 = 3600,
 }
 
-local file_handlers = {
-	cat = function(file, ...)
-		outcatlist(file, ...)
+local function set_max_age(ext)
+	local max_age = file_ext_max_age_seconds[ext]
+	if max_age and config'env' ~= 'dev' then
+		setheader('cache-control', _('max-age=%d', max_age))
+	end
+end
+
+local function serve_fn(filter, ext, fn, ...)
+	run_filter(filter, fn, ...)
+end
+
+local function serve_string(filter, ext, s)
+	run_filter(filter, outall, s)
+end
+
+local function serve_www_string(filter, ext, s)
+	set_max_age(ext)
+	run_filter(filter, outall, s)
+end
+
+local function serve_static_file(filter, ext, path)
+	if not method'GET' then
+		http_error(405)
+	end
+	set_max_age(ext)
+	local filter_key = filter and filter.cache_key and filter.cache_key()
+	local key = filter_key and path..'\0'..filter_key or path -- gzip cache key
+	if not out_buffering() then
+		local source_mtime = mtime(path) -- source modification time
+		check_etag_hash(xxhash128(key..'\0'..source_mtime):hex())
+		if http_request():send_cached(key, source_mtime) then return end
+	end
+	run_filter(filter, outfile, path)
+end
+
+--routing logic --------------------------------------------------------------
+
+local file_handlers = { -- {ext -> fn(filter, ext, file, ...)}
+	cat = function(filter, ext, file, ...)
+		run_filter(filter, outcatlist, file, ...)
 	end,
-	lua = function(file, ...)
-		return run_lua_file(file, nil, ...)
+	lua = function(filter, ext, file, ...)
+		run_filter(filter, run_lua_file, file, nil, ...)
 	end,
-	lp = function(file, ...)
-		include(file)
+	lp = function(filter, ext, file)
+		run_filter(filter, include, file)
 	end,
 }
 
@@ -228,7 +255,8 @@ local actions = {} --{action -> handler | s}
 
 local function action_handler(action, ...)
 
-	local static_path -- filesystem source file or nil
+	local handler -- fn(filter, ext, arg, ...) | nil
+	local arg -- first arg of handler
 	local action_ext = path_ext(action)
 	local action_no_ext
 	local action_with_ext = action
@@ -241,9 +269,14 @@ local function action_handler(action, ...)
 	end
 	local ext = action_ext
 
-	local handler =
+	local v =
 		(action_no_ext and actions[action_name(action_no_ext)]) --look in the default action table
 		or actions[action_name(action_with_ext)] --look again with .html extension
+	if isfunc(v) then
+		handler, arg = serve_fn, v
+	elseif v then
+		handler, arg = serve_string, v
+	end
 
 	if not handler then --look in the filesystem
 		local file = concat({action, ...}, '/')
@@ -254,25 +287,17 @@ local function action_handler(action, ...)
 		end
 		local plain_file_allowed = not file_handlers[file_ext]
 		if plain_file_allowed then
-			handler = wwwfile[file] and wwwfile(file)
-			if not handler then
+			local s = wwwfile[file] and wwwfile(file) -- virtual file contents
+			if s then
+				handler, arg = serve_www_string, s
+			else
 				local path = wwwpath(file)
 				if path then
-					if not method'GET' then
-						http_error(405)
-					end
-					static_path = path
-					handler = function() outfile(path) end
+					handler, arg = serve_static_file, path
 				end
 			end
 		end
-		if handler then
-			local max_age = file_ext_max_age_seconds[file_ext]
-			if max_age then
-				setheader('cache-control', _('max-age=%d', max_age))
-			end
-		end
-		--`action` is only the first path segment; run_action() needs the
+		--`action` is only the first path segment; action() needs the
 		--mime type of the whole path to pick the 404 action for it.
 		ext = file_ext
 	end
@@ -289,82 +314,53 @@ local function action_handler(action, ...)
 				action_file = action_file1
 			end
 		end
-		handler = action_file and function(...)
-			return file_handler(action_file, ...)
-		end
+		handler, arg = file_handler, action_file
 	end
 
-	if handler and not isfunc(handler) then
-		local s = handler
-		handler = function()
-			outall(s)
-		end
-	end
-
-	return handler, ext, static_path
+	return handler, ext, arg
 end
 
---exec an action without setting content type, looking for a 404 handler
---or filtering the output based on mime type, instead returns whatever
---the action returns (good for exec'ing json actions which return a table).
-local function pass(arg1, ...)
-	if not arg1 then
-		return true, ...
-	else
-		return arg1, ...
-	end
-end
-function execaction(action, ...)
-	local handler = action_handler(action, ...)
-	if not handler then return false end
-	return pass(handler(...))
-end
-
-local function run_action(fallback, action, handler, ext, static_path, ...)
+local function set_action_headers(ext)
 	setmime(ext)
-	--overrides the max-age set for static files above. without no-store the
+	--set_max_age() sets no max-age in dev. without no-store the
 	--browser still caches heuristically when there's no etag and no max-age.
 	if config'env' == 'dev' then
 		setheader('cache-control', 'no-store')
 	end
-	local mime = mime_types[ext]
+end
+
+local function run_action(handler, ext, arg, ...)
+	set_action_headers(ext)
 	if not handler then
-		if not fallback then
-			return false
-		end
-		local not_found_actions = {
-			['text/html' ] = config('404_html_action', '404.html'),
-			['image/png' ] = config('404_png_action' , '404.png'),
-			['image/jpeg'] = config('404_jpeg_action', '404.jpg'),
-		}
-		local nf_action = not_found_actions[mime]
-		if not nf_action then
-			log('note', 'webb', '404', '%s', concat({action, ...}, '/'))
-			return false
-		end
-		local handler, ext, static_path = action_handler(nf_action, ...)
-		return run_action(false, nf_action, handler, ext, static_path,
-			action, ...)
+		return false
 	end
-	local filter = mime_type_filters[mime]
-	if static_path then
-		serve_static_file(static_path, filter, handler)
-	elseif filter then
-		filter.run(handler, ...)
-	else
-		handler(...)
-	end
+	handler(mime_type_filters[mime_types[ext]], ext, arg, ...)
 	http_request():finish()
 	return true
 end
 
 function internal_action(action, ...)
-	local handler, ext, static_path = action_handler(find_action(action, ...))
-	return run_action(false, action, handler, ext, static_path, ...)
+	local handler, ext, arg = action_handler(find_action(action, ...))
+	return run_action(handler, ext, arg, ...)
 end
 
 setmetatable(actions, {__call = function(self, action, ...)
-	local handler, ext, static_path = action_handler(find_action(action, ...))
-	return run_action(true, action, handler, ext, static_path, ...)
+	local handler, ext, arg = action_handler(find_action(action, ...))
+	if not handler then
+		local not_found_actions = {
+			['text/html' ] = config('404_html_action', '404.html'),
+			['image/png' ] = config('404_png_action' , '404.png'),
+			['image/jpeg'] = config('404_jpeg_action', '404.jpg'),
+		}
+		local nf_action = not_found_actions[mime_types[ext]]
+		if not nf_action then
+			set_action_headers(ext)
+			log('note', 'webb', '404', '%s', concat({action, ...}, '/'))
+			return false
+		end
+		local handler, ext, arg = action_handler(nf_action, ...)
+		return run_action(handler, ext, arg, action, ...)
+	end
+	return run_action(handler, ext, arg, ...)
 end})
 action = actions
