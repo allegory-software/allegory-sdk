@@ -282,7 +282,8 @@ assert(ffi.abi'le')
 
 local Db = mdbx_db
 local Cur = mdbx_cursor
-local MS = {}
+local MS = {} --schema class for mdbx_schema()
+local COLS = {} --unique key for keeping concat cols
 
 MDBX_MAX_KEY_SIZE = mdbx_max_key_size()
 
@@ -509,7 +510,7 @@ local m_cols_list = memoize(function(cols)
 	local t = collect(words(cols))
 	assert(#t > 0)
 	for i,col in ipairs(t) do t[col] = i end
-	t[S] = cat(t, ',')
+	t[COLS] = cat(t, ',')
 	return t
 end)
 local function cols_list(cols)
@@ -1383,8 +1384,6 @@ local function layout_table_schema(schema)
 
 end
 
-local S = function() end
-
 local function compile_table_schema(schema)
 
 	assert(schema.layouted)
@@ -1427,9 +1426,9 @@ local function compile_table_schema(schema)
 	for i,col in ipairs(schema.key_cols) do schema.key_cols[col] = i end
 	for i,col in ipairs(schema.val_cols) do schema.val_cols[col] = i end
 
-	schema.    cols[S] = cat(schema.    cols, ',')
-	schema.key_cols[S] = cat(schema.key_cols, ',')
-	schema.val_cols[S] = cat(schema.val_cols, ',')
+	schema.    cols[COLS] = cat(schema.    cols, ',')
+	schema.key_cols[COLS] = cat(schema.key_cols, ',')
+	schema.val_cols[COLS] = cat(schema.val_cols, ',')
 
 	schema.row_check_fn =
 		compile_expr(schema, 'row_check', schema.name) or schema.row_check_fn
@@ -3800,7 +3799,17 @@ local function put(self, op, tab, cols, ...)
 		self:check_row(op, schema.name, ret, err)
 		self:_row_changed(schema, k, k_sz)
 	end
-	log('note', 'db', op, '%s %s', schema.name, cols[S])
+	local logged_cols -- comma-separated column names with a value
+	if op == 'update' and logging.verbose then
+		for i, col in ipairs(cols) do -- selected column index and name
+			if select_col(cols, as, col, ...) == nil then
+				logged_cols = logged_cols or cat(cols, ',', 1, i-1)
+			elseif logged_cols then
+				logged_cols = logged_cols == '' and col or logged_cols..','..col
+			end
+		end
+	end
+	log('note', 'db', op, '%s %s', schema.name, logged_cols or cols[COLS])
 	return autoinc_v
 end
 function Db:insert(tab, ...)
