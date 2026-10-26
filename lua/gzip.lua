@@ -10,14 +10,14 @@ DEFLATE ----------------------------------------------------------------------
 	- gz.write(buf, sz) -> [false,err]
 	- - optional. if not used, data is accumulated in string_buffer gz.b
 	- - allowed to yield.
-	- - called with (nil, 'eof') on finish.
+	- - called with (nil, 0) on finish.
 	- - signals abort by returning `false,err`.
 	- - errors are not caught.
 	- bufsize: output buffer size (64K).
 	- format: 'gzip' (default), 'zlib' or 'raw'.
 	- level: compression level (0-9 from none to best).
 	- windowBits (8..15), memLevel, strategy: see zlib manual.
-	gz:[try_]push(s | buf,len | nil,'eof' [, eof]) -> true[,'eof'] | nil,err
+	gz:[try_]push(s | buf,len | nil,0 [, eof]) -> true[,'eof'] | nil,err
 	gz:[try_]finish() -> true,'eof' | nil,err
 	gz:reset()   reset for reuse with same parameters. gz.write can be replaced.
 	gz:free()
@@ -129,7 +129,7 @@ function gzip_state(gz)
 	strm.next_in, strm.avail_in = nil, 0
 
 	function gz:try_push(data, size, eof)
-		eof = eof or (data == nil and size == 'eof')
+		eof = eof or (data == nil and size == 0)
 		if not strm and eof then return true, 'eof' end --pass-through eof
 		assert(strm, 'closed')
 		local flush = eof and C.Z_FINISH or C.Z_NO_FLUSH
@@ -158,7 +158,7 @@ function gzip_state(gz)
 			if ret == C.Z_STREAM_END then
 				local ok, err
 				if gz.write then
-					ok, err = gz.write(nil, 'eof')
+					ok, err = gz.write(nil, 0)
 				end
 				if ok == false then return nil, err end
 				return true, 'eof'
@@ -176,10 +176,10 @@ function gzip_state(gz)
 		return err or 'more'
 	end
 	function gz:try_finish()
-		return self:try_push(nil, 'eof')
+		return self:try_push(nil, 0)
 	end
 	function gz:finish()
-		return self:push(nil, 'eof')
+		return self:push(nil, 0)
 	end
 
 	local flate_reset = gz.op == 'compress' and C.deflateReset or C.inflateReset

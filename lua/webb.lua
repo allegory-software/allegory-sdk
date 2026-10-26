@@ -75,6 +75,8 @@ RESPONSE
 	check500(ret, err) -> ret               exit with "500 Server error"
 	allow(ret, err) -> ret                  exit with "403 Forbidden"
 	check_etag(s)                           exit with "304 Not modified"
+	check_etag_hash(hash)                   same, with the etag given as a hex hash
+	                                        both do nothing if etag is already set
 	setconnectionclose()                    close the connection after this request.
 FILESYSTEM
 	wwwdir(path)                            register a www search path
@@ -285,9 +287,7 @@ end
 
 function upload(file)
 	save(file, function()
-		local buf, len = req():read_body_chunk()
-		if not buf then return nil, 0 end --eof
-		return buf, len
+		return req():read_body_chunk()
 	end)
 	return file
 end
@@ -348,17 +348,30 @@ checkarg   = checkfunc(400, 'Invalid argument')
 allow      = checkfunc(403, 'Not allowed')
 check500   = checkfunc(500, 'Internal error')
 
-function check_etag(s)
-	if config'env' == 'dev' then return s end
-	if not method'GET' then return s end
-	if out_buffering() then return s end
-	local etag = xxhash128(s):hex()
+local function etag_enabled()
+	return config'env' ~= 'dev' and method'GET' and not out_buffering()
+		and not req().response_headers['etag']
+end
+
+local function apply_etag(etag)
 	local etags = headers'if-none-match'
 	if etags and etags:has(etag) then
 		http_error(304)
 	end
 	--send etag to client as weak etag so that gzip filter still apply.
 	setheader('etag', 'W/'..etag)
+end
+
+function check_etag_hash(etag)
+	if etag_enabled() then
+		apply_etag(etag)
+	end
+end
+
+function check_etag(s)
+	if etag_enabled() then
+		apply_etag(xxhash128(s):hex())
+	end
 	return s
 end
 
@@ -531,7 +544,9 @@ function outfile_function(path, offset, len)
 	end
 
 	return function()
-		setheader('content-length', tostring(len))
+		if not out_buffering() then
+			setheader('content-length', tostring(len))
+		end
 		local pb = pbuffer{f = f}
 		while len > 0 do
 			pb:need(1)

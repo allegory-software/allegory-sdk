@@ -4613,13 +4613,6 @@ Dropdown editors:
 
 */
 
-// icons drawn by field types, not by any one widget, so they live here
-// rather than in the grid's own icon aliases.
-ui.icon_def('calendar'     , 'tabler', '\uea53')
-ui.icon_def('map_pin'      , 'tabler', '\ueae8')
-ui.icon_def('box_unchecked', 'tabler', '\ueb2c')
-ui.icon_def('box_checked'  , 'tabler_filled', '\uf76d')
-
 ui.all_field_types.focus_editor = function(id, sel_i, sel_len) {
 	ui.focus(id, true)
 	ui.select_text(id, sel_i, sel_len)
@@ -4810,7 +4803,7 @@ bool.build = function(v, mode, fg, row, full_width, align) {
 		return v ? S('true', 'true') : S('false', 'false')
 	let icon =
 		row && this.nav.can_change_val(row, this)
-			? (v ? 'box_checked' : 'box_unchecked')
+			? (v ? 'square-check-filled' : 'square-dashed')
 			: (v ? 'check' : null)
 	if (icon) {
 		ui.color(fg)
@@ -5007,8 +5000,8 @@ color.build_editor = function(id, v, pad_l, pad_r, h) {
 				ui.color_picker(picker_id, v, this)
 				ui.h(0, ui.sp05(), 'r')
 					ui.default_button(id+'.pick')
-					ui.primary_button(id+'.pick', S('pick', 'Pick'), 0)
-					ui.button(id+'.cancel', S('cancel', 'Cancel'), 0)
+					ui.primary_button(id+'.pick', '', S('pick', 'Pick'), 0)
+					ui.button(id+'.cancel', '', S('cancel', 'Cancel'), 0)
 				ui.end_h()
 			ui.end_v()
 			ui.resizer(resize_id, 'r')
@@ -5059,7 +5052,7 @@ place.build = function(v, mode, fg, row, full_width, align) {
 	ui.color(place_id ? 'text' : 'label')
 	ui.h(0, ui.sp05())
 		ui.color(fg)
-		ui.icon('', 'map_pin', 0, align, 'c')
+		ui.icon('', 'map-pin', 0, align, 'c')
 		this.build_text(descr, mode, fg, row, full_width, align)
 	ui.end_h()
 }

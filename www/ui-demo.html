@@ -4,6 +4,7 @@
 <meta name="darkreader-lock">
 <script src=glue.js></script>
 <script src=ui.js></script>
+<script src=ui_icon_defs.js></script>
 <script src=ui_login.js></script>
 <script src=ui_field.js></script>
 <script src=ui_nav.js></script>
@@ -225,7 +226,7 @@ function build_dock1_tab(tab) {
 	} else {
 		ui.v(0, ui.sp2(), 'c', 'c')
 			for (let kind of dock1_kinds)
-				if (ui.button(tab_id+'.'+kind, kind))
+				if (ui.button(tab_id+'.'+kind, '', kind))
 					ui.set_dock_tab('dock1', tab.id, {kind: kind, label: capitalize(kind)})
 		ui.end_v()
 	}
@@ -434,8 +435,8 @@ let fields = [
 let rows = [
 	[1, 1234.5  , 800        ,   1234, time(2024,1,15), time(2024,1,15,9,30), time(2031,6,1)     , 8*3600+30*60 , 3725  , true , 'open'   , ['red', 'urgent'], '#e03131'                , 2500, 'plus'        , {place_id: 'p1', description: '1600 Amphitheatre Pkwy'}, 'https://example.com', '+1 555 0100', 'a@example.com', 'hunter2'      , 'sk_live_abc123' , 'ssh-rsa AAAAB3Nz', '-----BEGIN KEY---', 'name'   , null, 1, 'Hello1 Hello1', 'Hello2 Hello2', 'pending', 'one'  , 5, 2, 'Radio 1', 2500, 3000, false, false, true , null],
 	[2, 42      , 5_000_000  ,  98765, time(2024,6,1) , time(2024,6,1,14,0) , time(2032,1,1)     , 13*3600+15*60, 90000 , false, 'pending', ['blue']         , '#2e8b57'                , 6000, 'check'       , 'Just a description, no pin'                             , 'example.org'        , '555-0101'   , 'b@example.org', 'correct-horse', 'sk_live_def456' , 'ssh-ed25519 AAAA', '-----BEGIN KEY---', 'ctime'  , null, 2, 'Lorem ipsum'  , 'Dolor sit'    , 'open'   , 'two'  , 2, 5, 'Radio 2', 5000, 2500, true , true , false, 1],
-	[3, 0       , 3_200_000_000, 2000000, time(2024,12,31), time(2024,12,31,23,59), time(2037,12,31), 0            , 0     , true , 'closed' , ['green', 'a', 'b'], '#1e90ff'                , 10000, 'arrow_up'   , {place_id: 'p3', description: 'No pin greyed out below'}, 'http://sub.example.com/path', '555-0102', 'c@example.com', 's3cr3t'       , 'sk_live_ghi789' , 'ssh-rsa AAAAB3Nz', '-----BEGIN KEY---', 'id'     , null, 3, 'Foo bar'      , 'Baz qux'      , 'closed' , 'three', 7, null, 'Radio 3', 7500, 3500, false, false, true , 1],
-	[4, -12.75  , 60         ,      7, time(2000,1,1) , time(2000,1,1,0,1)  , time(1970,1,2)     , 23*3600+59*60 , 61   , false, 'open'   , []               , '#111111'                , 0   , 'caret_right' , {description: 'Object without a place_id'}               , 'ftp://files.example.com', '555-0103', 'd@example.com', 'pw'           , 'sk_live_jkl012' , 'ssh-dss AAAAB3Nz', '-----BEGIN KEY---', 'status' , null, 1, 'Short'        , 'Right'        , 'open'   , 'one'  , null, 7, 'Radio 1', 1000, 4000, true , true , false, 3],
+	[3, 0       , 3_200_000_000, 2000000, time(2024,12,31), time(2024,12,31,23,59), time(2037,12,31), 0            , 0     , true , 'closed' , ['green', 'a', 'b'], '#1e90ff'                , 10000, 'arrow-up'   , {place_id: 'p3', description: 'No pin greyed out below'}, 'http://sub.example.com/path', '555-0102', 'c@example.com', 's3cr3t'       , 'sk_live_ghi789' , 'ssh-rsa AAAAB3Nz', '-----BEGIN KEY---', 'id'     , null, 3, 'Foo bar'      , 'Baz qux'      , 'closed' , 'three', 7, null, 'Radio 3', 7500, 3500, false, false, true , 1],
+	[4, -12.75  , 60         ,      7, time(2000,1,1) , time(2000,1,1,0,1)  , time(1970,1,2)     , 23*3600+59*60 , 61   , false, 'open'   , []               , '#111111'                , 0   , 'caret-right' , {description: 'Object without a place_id'}               , 'ftp://files.example.com', '555-0103', 'd@example.com', 'pw'           , 'sk_live_jkl012' , 'ssh-dss AAAAB3Nz', '-----BEGIN KEY---', 'status' , null, 1, 'Short'        , 'Right'        , 'open'   , 'one'  , null, 7, 'Radio 1', 1000, 4000, true , true , false, 3],
 	[5, null    , null       ,   null, null           , null                , null               , null          , null , null , null     , null             , null                     , null, null          , null                                                       , null                 , null         , null           , null          , null             , null              , null              , null     , null, null, null           , null           , null     , null   , null, null, null     , null, null, null , null , null , 4],
 ]
 ui.rowsets.grid_types = {
@@ -927,9 +928,9 @@ ui.v()
 ui.p(ui.sp())
 ui.h(0, ui.sp2(), 'l')
 	ui.toggle_button('grid_config_readonly', null, 'Readonly', null, 0)
-	if (ui.button('grid_config_reset', 'Reset') && grid_nav)
+	if (ui.button('grid_config_reset', '', 'Reset') && grid_nav)
 		grid_nav.revert_changes()
-	if (ui.button('grid_config_set_null', 'Set null') && grid_nav)
+	if (ui.button('grid_config_set_null', '', 'Set null') && grid_nav)
 		set_grid_config_null(grid_nav)
 	let split_hv = ui.enum_toggle('grid_config_split_hv',
 		null, grid_config_split_field)
@@ -998,7 +999,7 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 			let can_prepare = grid_nav != null
 				&& is_grid_test_data_reset(grid_nav, test_set)
 				&& (test_case != 'same typed key' || source == 'typed')
-			if (ui.button('grid_config_prepare', 'Prepare edits',
+			if (ui.button('grid_config_prepare', '', 'Prepare edits',
 				null, null, null, null, !can_prepare)) {
 				if (source == 'typed')
 					prepare_grid_typed_changes(grid_nav, test_case)
@@ -1006,7 +1007,7 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 					prepare_grid_save_changes(grid_nav, test_case)
 				ui.rebuild()
 			}
-			if (ui.button('grid_config_server_reset', 'Reset test data'))
+			if (ui.button('grid_config_server_reset', '', 'Reset test data'))
 				glue.post('/rowset.json/'+test_set.rowset_name, {exec: 'reset'},
 					function() {
 						ui.free_state(grid_id)
@@ -1089,9 +1090,9 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 			'Validate on load')
 
 		if (!is_server)
-			ui.primary_button('grid_config_recreate', 'Recreate grid')
-		ui.button('grid_config_reload', 'Reload grid')
-		if (ui.button('grid_config_save', 'Save',
+			ui.primary_button('grid_config_recreate', '', 'Recreate grid')
+		ui.button('grid_config_reload', '', 'Reload grid')
+		if (ui.button('grid_config_save', '', 'Save',
 			null, null, null, null, !is_server || !grid_nav?.modified_n)) {
 			grid_nav.exit_edit()
 			grid_nav.save()
@@ -1282,9 +1283,9 @@ ui.v()
 		ui.h(0, ui.sp(), 'l')
 			input_controls_readonly = ui.checkbox(
 				'input_controls_readonly', input_controls_readonly, null, 0, 'l')
-			if (ui.button('input_controls_reset', 'Reset'))
+			if (ui.button('input_controls_reset', '', 'Reset'))
 				reset_input_controls_values()
-			if (ui.button('input_controls_set_null', 'Set null'))
+			if (ui.button('input_controls_set_null', '', 'Set null'))
 				set_input_controls_values(null)
 		ui.end_h()
 	ui.end_h()
@@ -1356,14 +1357,14 @@ ui.v()
 			ui.box()
 		ui.h()
 			ui.min_wh(0, 0)
-			ui.button('btn1', 'Button',
+			ui.button('btn1', '', 'Button',
 				0, 'l', 'c', null, input_controls_readonly)
 			ui.h(0, ui.sp())
 				ui.min_wh(0, 0)
-				ui.primary_button('btn2', 'Primary',
+				ui.primary_button('btn2', '', 'Primary',
 					0, 'l', 'c', input_controls_readonly)
 				ui.min_wh(0, 0)
-				ui.icon_button('btn_plus', 'plus', 'Icon',
+				ui.button('btn_plus', 'plus', 'Icon',
 					0, 'l', 'c', null, input_controls_readonly)
 			ui.end_h()
 		ui.end_h()
@@ -1506,9 +1507,9 @@ ui.bg_dots('dots1', 0.3)
 demos.button = function() {
 ui.m(ui.sp2())
 ui.h(1, ui.sp2(), 's', 't')
-	if (ui.primary_button('btn1', 'Click me!', 0))
+	if (ui.primary_button('btn1', '', 'Click me!', 0))
 		pr('clicked btn1!')
-	if (ui.button('btn2', 'Click me too!'))
+	if (ui.button('btn2', '', 'Click me too!'))
 		pr('clicked btn2!')
 ui.end_h()
 }
@@ -1811,7 +1812,7 @@ demos.video = function() {
 	ui.v(1, ui.sp(), 's', 's')
 		ui.h(0, ui.sp())
 			if (!s.stream && !s.capture_request) {
-				if (ui.button('video_demo.start', 'Start', 0)) {
+				if (ui.button('video_demo.start', '', 'Start', 0)) {
 					s.error = null
 					let capture_request = navigator.mediaDevices.getUserMedia({
 						audio: true,
@@ -1835,7 +1836,7 @@ demos.video = function() {
 					})
 				}
 			} else {
-				if (ui.button('video_demo.stop', 'Stop', 0))
+				if (ui.button('video_demo.stop', '', 'Stop', 0))
 					stop_video_demo(s)
 			}
 		ui.end_h()
@@ -1872,7 +1873,7 @@ demos.sign_in = function() {
 		ui.m(ui.sp2())
 		ui.v(0, ui.sp(), 'c', 'c')
 			ui.text('', 'Signed in as '+(user.email || user.phone), 0)
-			if (ui.button('sign_in_demo.logout', 'Sign out', 0))
+			if (ui.button('sign_in_demo.logout', '', 'Sign out', 0))
 				ui.logout()
 		ui.end_v()
 	}
@@ -1930,7 +1931,7 @@ function build_call_demo() {
 			ui.label('call_demo.name', 'Call name', 0)
 			s.name = ui.input('call_demo.name', s.name,
 				null, 1, null, false, is_readonly)
-			if (ui.button('call_demo.create', 'Create call', 0,
+			if (ui.button('call_demo.create', '', 'Create call', 0,
 				null, null, null, is_readonly || !s.name)) {
 				s.create_error = null
 				s.create_request = glue.post('/call_create.json',
@@ -1955,7 +1956,7 @@ function build_call_demo() {
 			ui.label('call_demo.invite_token', 'Invite token', 0)
 			s.invite_token = ui.input('call_demo.invite_token', s.invite_token,
 				null, 1, null, false, is_readonly)
-			if (ui.button('call_demo.copy', 'Copy invite link', 0,
+			if (ui.button('call_demo.copy', '', 'Copy invite link', 0,
 				null, null, null, !s.call_id || !s.invite_token)) {
 				let invite_url = new URL(location.href)
 				invite_url.search = ''
@@ -2073,12 +2074,12 @@ ui.v(1, ui.sp())
 		to_sid = ui.input('to_sid', to_sid)
 		if (!offer_con.open && my_sid) {
 			ui.min_w(ui.em(10))
-			if (ui.button('btn_make_offer', 'Share Screen', 0, 'c'))
+			if (ui.button('btn_make_offer', '', 'Share Screen', 0, 'c'))
 				offer_con.connect(to_sid)
 		}
 		if (offer_con.open) {
 			ui.min_w(ui.em(10))
-			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c'))
+			if (ui.button('btn_stop_sharing', '', 'Stop Sharing', 0, 'c'))
 				offer_con.close()
 		}
 	ui.end_h()
@@ -2115,12 +2116,12 @@ ui.v(1, ui.sp())
 		to_sid = ui.input('to_sid', to_sid)
 		if (!answer_con.open && my_sid) {
 			ui.min_w(ui.em(10))
-			if (ui.button('btn_accept_offer', 'See Screen', 0, 'c'))
+			if (ui.button('btn_accept_offer', '', 'See Screen', 0, 'c'))
 				answer_con.connect(to_sid)
 		}
 		if (answer_con.open) {
 			ui.min_w(ui.em(10))
-			if (ui.button('btn_stop_seeing', 'Stop Seeing', 0, 'c'))
+			if (ui.button('btn_stop_seeing', '', 'Stop Seeing', 0, 'c'))
 				answer_con.close()
 		}
 	ui.end_h()
@@ -2152,23 +2153,23 @@ ui.v(1, ui.sp())
 		ui.input('offer_sid', my_sid, offer_sid_field)
 		if (offer_con.open) {
 			ui.min_w(ui.em(10))
-			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c')) {
+			if (ui.button('btn_stop_sharing', '', 'Stop Sharing', 0, 'c')) {
 				offer_con.close()
 			}
 		} else if (answer_con.open) {
 			ui.min_w(ui.em(10))
-			if (ui.button('btn_stop_seeing', 'Stop Seeing', 0, 'c')) {
+			if (ui.button('btn_stop_seeing', '', 'Stop Seeing', 0, 'c')) {
 				answer_con.close()
 			}
 		} else {
 			if (my_sid) {
 				ui.min_w(ui.em(10))
-				if (ui.button('btn_make_offer', 'Share Screen', 0, 'c')) {
+				if (ui.button('btn_make_offer', '', 'Share Screen', 0, 'c')) {
 					offer_con.connect(to_sid)
 				}
 			}
 			ui.min_w(ui.em(10))
-			if (ui.button('btn_accept_offer', 'See Screen', 0, 'c')) {
+			if (ui.button('btn_accept_offer', '', 'See Screen', 0, 'c')) {
 				answer_con.connect(to_sid)
 			}
 		}
@@ -2176,13 +2177,13 @@ ui.v(1, ui.sp())
 		/*
 		ui.state('in_send').value = json(signal_queue.signals)
 		ui.input('in_send')
-		if (ui.button('btn_send')) {
+		if (ui.button('btn_send', '', '')) {
 			signal_queue.signals.length = 0
 		}
 		let answer = ui.input('in_answer')
 
 		let in_recv = ui.input('in_recv')
-		if (ui.button('btn_recv')) {
+		if (ui.button('btn_recv', '', '')) {
 			for (let [id, k, v] of json_arg(in_recv)) {
 				rtc.signal_server.signal(id, k, v)
 			}
@@ -2276,7 +2277,7 @@ ui.main = function() {
 				ui.toggle_button('btn_debug', null, 'DEBUG', demo_toggle_field, 0)
 				ui.toggle_button('btn_tui', null, 'TUI', demo_toggle_field, 0)
 
-				if (ui.button('btn_reset', 'reset', 0)) {
+				if (ui.button('btn_reset', '', 'reset', 0)) {
 					localStorage.clear()
 					location.reload()
 				}

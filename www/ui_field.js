@@ -1087,7 +1087,7 @@ field_types.col = col
 
 //// PLACE (GOOGLE MAPS) -----------------------------------------------------
 
-let place = {w: 10, icon: 'map_pin'}
+let place = {w: 10, icon: 'map-pin'}
 field_types.place = place
 
 //// URL ---------------------------------------------------------------------
@@ -1123,27 +1123,6 @@ field_types.public_key  = {w: 10, icon: 'key'}
 field_types.private_key = {w: 10, icon: 'key'}
 
 //// CELL BUILDERS ------------------------------------------------------------
-
-// icons drawn by field types and field headers, so they live here
-// rather than in the grid's own icon aliases.
-ui.icon_def('calendar'     , 'tabler', '\uea53')
-ui.icon_def('map_pin'      , 'tabler', '\ueae8')
-ui.icon_def('box_unchecked', 'tabler', '\ueb2c')
-ui.icon_def('box_checked'  , 'tabler_filled', '\uf76d')
-ui.icon_def('hash'         , 'tabler', '\ueabc')
-ui.icon_def('key'          , 'tabler', '\ueac7')
-ui.icon_def('clock'        , 'tabler', '\uea70')
-ui.icon_def('hourglass'    , 'tabler', '\uef93')
-ui.icon_def('mail'         , 'tabler', '\ueae5')
-ui.icon_def('phone'        , 'tabler', '\ueb09')
-ui.icon_def('link'         , 'tabler', '\ueade')
-ui.icon_def('lock'         , 'tabler', '\ueae2')
-ui.icon_def('percentage'   , 'tabler', '\uecf4')
-ui.icon_def('binary'       , 'tabler', '\uee08')
-ui.icon_def('tags'         , 'tabler', '\uef86')
-ui.icon_def('language'     , 'tabler', '\uebbe')
-ui.icon_def('flag'         , 'tabler', '\ueaa6')
-ui.icon_def('color-swatch' , 'tabler', '\ueb61')
 
 // opt: {fg:, align:, full_width:, readonly:}. Without opt, return the text
 // instead of building it.
@@ -1191,7 +1170,7 @@ bool.build = function(v, opt) {
 		return v ? S('true', 'true') : S('false', 'false')
 	let icon =
 		!opt.readonly
-			? (v ? 'box_checked' : 'box_unchecked')
+			? (v ? 'square-check-filled' : 'square-dashed')
 			: (v ? 'check' : null)
 	if (icon) {
 		ui.color(opt.fg)
@@ -1243,7 +1222,7 @@ place.build = function(v, opt) {
 	ui.color(place_id ? 'text' : 'label')
 	ui.h(0, ui.sp05())
 		ui.color(opt.fg)
-		ui.icon('', 'map_pin', 0, opt.align, 'c')
+		ui.icon('', 'map-pin', 0, opt.align, 'c')
 		this.build_text(descr, opt)
 	ui.end_h()
 }

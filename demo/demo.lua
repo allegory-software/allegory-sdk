@@ -256,12 +256,10 @@ do
 	end)
 end
 
-fontfile('mono'    , 'fonts/jetbrains-mono-nl-regular.woff2')
-fontfile('inter'   , 'fonts/inter-roman.var.woff2')
-fontfile('opensans', 'fonts/opensans.var.woff2')
-fontfile('ti'      , 'icons/tabler-icons.woff2')
---ui_grid and ui_nav still draw hardcoded font-awesome codepoints.
-fontfile('fas'     , 'icons/fa-solid-900.woff2')
+fontfile('mono'         , 'fonts/jetbrains-mono-nl-regular.woff2')
+fontfile('opensans'     , 'fonts/opensans.var.woff2')
+fontfile('tabler'       , 'icons/tabler-icons.woff2')
+fontfile('tabler_filled', 'icons/tabler-icons.woff2')
 
 action.error = error
 

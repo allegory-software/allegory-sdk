@@ -137,10 +137,14 @@ local function webb_app(...)
 			unpack(cmd_args, 1, cmd_args.n))
 	end
 
+	function app:respond(req)
+		checkfound(action(unpack(args())))
+	end
+
 	function app:run_server()
 		app.server = http_server{
 			respond = function(req)
-				checkfound(action(unpack(args())))
+				app:respond(req)
 			end,
 		}
 		start()

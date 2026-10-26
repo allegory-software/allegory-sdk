@@ -1334,7 +1334,7 @@ function test.save_sync_false_does_not_sync_dir()
 	local testfile = 'fs_test_save_no_sync'
 	rmfile(testfile)
 	local synced = with_sync_dir_spy(function()
-		save(testfile, 'hello', nil, nil, nil, false)
+		save({path = testfile, sync = false}, 'hello')
 	end)
 	local s = load(testfile)
 	rmfile(testfile, false)
@@ -1347,16 +1347,44 @@ function test.save_reader_error_is_not_save_error()
 	rmfile(testfile)
 	local i = 0
 	local ok, err = pcall(function()
-		save(testfile, function()
+		save({path = testfile, sync = false}, function()
 			i = i + 1
 			if i == 1 then return 'hello' end
 			error('reader_error', 0)
-		end, nil, nil, nil, false)
+		end)
 	end)
 	assert(not ok)
 	assert(tostring(err):find'reader_error')
 	assert(not exists(testfile))
 	assert(not exists(testfile..'~'..getpid()))
+end
+
+function test.save_mtime()
+	local testfile = 'fs_test_save_mtime'
+	rmfile(testfile)
+	save({path = testfile, sync = false, mtime = 1000000}, 'hello')
+	assert(load(testfile) == 'hello')
+	assert(mtime(testfile) == 1000000)
+	rmfile(testfile)
+end
+
+function test.file_saver_concurrent_and_abort()
+	local testfile = 'fs_test_saver_concurrent'
+	rmfile(testfile)
+	local write1 = file_saver{path = testfile, sync = false}
+	local write2 = file_saver{path = testfile, sync = false}
+	local write3 = file_saver{path = testfile, sync = false}
+	assert(write1('one'))
+	assert(write2('two'))
+	assert(write3('three'))
+	assert(not exists(testfile))
+	write3(nil, 'abort') --the aborted saver leaves nothing behind
+	assert(write1(nil, 0))
+	assert(load(testfile) == 'one')
+	assert(write2(nil, 0))
+	assert(load(testfile) == 'two')
+	assert(not exists(testfile..'~'..getpid()))
+	rmfile(testfile)
 end
 
 --touch ----------------------------------------------------------------------

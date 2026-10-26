@@ -131,9 +131,10 @@ FILESYSTEM INFO
 HI-LEVEL APIs
 	load(path[, maxlen]) -> s | nil,'not_found'
 	load_tobuffer(path[, maxlen]) -> buf,len | nil,'not_found'
-	save(path, v | buf,len | read, [file_perms], [dir_perms], [sync]) atomic save value/buffer/reader
-	file_saver(path, [file_perms], [dir_perms])
+	save(path | opt, v | buf,len | read) atomic save value/buffer/reader
+	file_saver(path | opt)
 		-> try_write(v | buf,len | nil,0) -> ok, err
+	- opt: {path=, [file_perms=], [dir_perms=], [sync=], [mtime=]}
 	touch(file, [mtime])                          create file or update mtime
 	gen_id(name, [start=1]) -> id                 durable, atomic, concurrent autoincrement
 CONFIG
@@ -1160,6 +1161,7 @@ char *getcwd(char *buf, size_t size);
 int unlink(const char *pathname);
 int rename(const char *oldpath, const char *newpath);
 int link(const char *oldpath, const char *newpath);
+int linkat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, int flags);
 int symlink(const char *oldpath, const char *newpath);
 ssize_t readlink(const char *path, char *buf, size_t bufsize);
 ]]
@@ -1581,6 +1583,7 @@ local function utimes(path, atime, mtime)
 end
 
 local AT_SYMLINK_NOFOLLOW = 0x100
+local AT_SYMLINK_FOLLOW = 0x400
 
 local function lutimes(path, atime, mtime)
 	set_timespec(atime, ts[0])
@@ -2143,14 +2146,20 @@ end
 
 --return a try_write(v | buf,len) -> true | false,err function
 --that doesn't yield, so you can use it in ffi write callbacks.
-function file_saver(file, file_perms, dir_perms, sync)
-	sync = sync ~= false
+function file_saver(path_or_opt)
+	local opt = istab(path_or_opt) and path_or_opt or {path = path_or_opt}
+	local file = opt.path
+	local file_perms = opt.file_perms
+	local dir_perms = opt.dir_perms
+	local mtime = opt.mtime
+	local sync = opt.sync ~= false
 	local tmpfile = file..'~'..getpid()
 	local f, n
 	local function _write(buf, sz)
 		if not f then
-			mkdirs(tmpfile, dir_perms, sync)
-			f = open{path = tmpfile, mode = 'w', perms = file_perms, quiet = true}
+			mkdirs(file, dir_perms, sync)
+			f = open{path = dirname(file), flags = 'tmpfile wronly',
+				perms = file_perms, quiet = true}
 			n = 0
 		end
 		if buf ~= nil and not iscdata(buf) then
@@ -2161,7 +2170,14 @@ function file_saver(file, file_perms, dir_perms, sync)
 			f:write(buf, sz)
 			n = n + sz
 		else --eof
+			if mtime then
+				local ok, err = futimes(f, mtime, mtime)
+				check_fs(file, 'save', ok, err)
+			end
 			if sync then f:sync() end
+			local ok, err = try_errno(C.linkat(AT_FDCWD,
+				'/proc/self/fd/'..f.fd, AT_FDCWD, tmpfile, AT_SYMLINK_FOLLOW) == 0)
+			check_fs(tmpfile, 'link', ok, err)
 			f:close()
 			rename(tmpfile, file, nil, sync)
 			log('note', 'fs', 'save', '%s (%s)', file, format_kbytes(n))
@@ -2190,8 +2206,9 @@ end
 
 --write a Lua value or read()->buf,sz to a file
 --atomically and durably (on drives with PLP).
-function save(file, arg, sz, file_perms, dir_perms, sync)
-	local write = file_saver(file, file_perms, dir_perms, sync)
+function save(path_or_opt, arg, sz)
+	local file = istab(path_or_opt) and path_or_opt.path or path_or_opt
+	local write = file_saver(path_or_opt)
 	if isfunc(arg) then --reader
 		local read = arg
 		while true do

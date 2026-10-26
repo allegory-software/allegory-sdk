@@ -9,7 +9,7 @@ USAGE (see js/demo.html):
 	<script src=ui.js>
 	<script>
 		ui.main = function() {
-			if (ui.button('button1', 'OK'))
+			if (ui.button('button1', '', 'OK'))
 				alert('Hello!')
 		}
 	</script>
@@ -37,8 +37,6 @@ CONTAINERS
 INPUT
 
 	ui.[primary_]button
-	                   (id, s, fr, align, valign, style, readonly)
-	ui.[primary_|bare_]icon_button
 	                   (id, icon, text, fr, align, valign, style, readonly)
 	ui.label           (for_id, s, fr, align, valign)
 	ui.error_label     (for_id, 'first_error'|'all_errors'|'all_checked', fr, align, valign)
@@ -7045,49 +7043,44 @@ ui.end_button_stack = function(state) {
 	return state == 'click'
 }
 
-// s is the label, or null for an icon-only button.
-ui.icon_button = function(
+ui.button = function(
 	id, icon, text, fr, align, valign, style, readonly
 ) {
-	next_min_w ??= ui.em(1.5) // force w
-	next_min_h ??= ui.em(1.5) // force h
-	ui.button_stack(id, fr, align, valign)
-	let s = ui.state(id, button_update)
-	let state = readonly ? 'readonly' : s.state
-	ui.button_bb(style, state)
-	let [icon_font, icon_text] = assert(icons[icon], 'unknown icon ', icon)
-	if (text == null || text === '') {
-		ui.button_icon(icon_font, icon_text, state)
+	if (icon) {
+		next_min_w ??= ui.em(1.5) // force w
+		align ??= 's'
 	} else {
-		ui.p(ui.sp1(), 0)
-		ui.h(0, ui.sp1(), 'c')
-			ui.button_icon(icon_font, icon_text, state)
-			ui.button_text(text, state)
-		ui.end_h()
+		align ??= 'l'
 	}
-	let clicked = ui.end_button_stack(state)
-	return clicked
-}
-
-ui.bare_icon_button = function(id, icon, text, fr, align, valign, readonly) {
-	return ui.icon_button(id, icon, text, fr, align, valign, '', readonly)
-}
-
-ui.button = function(id, text, fr, align, valign, style, readonly) {
-	ui.button_stack(id, fr, align ?? 'l', valign ?? 'c')
-	let s = ui.state(id, button_update)
+	ui.button_stack(id, fr, align, valign)
+	let s = ui.state(id, button_update) // button widget state
 	let state = readonly ? 'readonly' : s.state
 	ui.button_bb(style, state)
-	ui.p(ui.sp2(), 0)
-	ui.button_text(text, state)
+	if (icon) {
+		let [icon_font, icon_text] = assert(icons[icon], 'unknown icon ', icon)
+		if (!text) {
+			ui.button_icon(icon_font, icon_text, state)
+		} else {
+			ui.p(ui.sp1(), 0)
+			ui.h(0, ui.sp1(), 'c')
+				ui.button_icon(icon_font, icon_text, state)
+				ui.button_text(text, state)
+			ui.end_h()
+		}
+	} else {
+		ui.p(ui.sp2(), 0)
+		ui.button_text(text, state)
+	}
 	return ui.end_button_stack(state)
 }
 
-ui.primary_button = function(id, s, fr, align, valign, readonly) {
-	return ui.button(id, s, fr, align, valign, 'button-primary', readonly)
+ui.primary_button = function(id, icon, s, fr, align, valign, readonly) {
+	return ui.button(id, icon, s, fr, align, valign,
+		'button-primary', readonly)
 }
-ui.primary_icon_button = function(id, icon, s, fr, align, valign, readonly) {
-	return ui.icon_button(id, icon, s, fr, align, valign, 'button-primary', readonly)
+
+ui.bare_button = function(id, icon, text, fr, align, valign, readonly) {
+	return ui.button(id, icon, text, fr, align, valign, '', readonly)
 }
 
 ui.btn = ui.button
@@ -7324,8 +7317,6 @@ ui.end_section = function() {
 
 //// MENU --------------------------------------------------------------------
 
-ui.icon_def('caret_right', 'tabler', '\ueb5f')
-
 /*
 	let picked_id = ui.menu(id, items, [want_open], [side], [align])
 		items: [{id:, label:, [items:], [checked:], [disabled:]}, ...]
@@ -7505,7 +7496,7 @@ ui.menu = function(id, items, want_open, side, align) {
 							ui.pl(ui.sp2())
 							ui.stack('', 0)
 								ui.color('label')
-								ui.icon('', 'caret_right')
+								ui.icon('', 'caret-right')
 							ui.end_stack()
 							if (open) {
 								ui.m(-ui.sp(), -1)
@@ -7524,6 +7515,26 @@ ui.menu = function(id, items, want_open, side, align) {
 		}
 		menu(0, items, side, align)
 		return s.picked_id
+}
+
+ui.menu_button = function(
+	id, icon, text, items, fr, align, valign, style, readonly
+) {
+	let menu_id = id+'.menu' // menu widget id
+	ui.stack('', fr, align ?? 'l', valign ?? 'c')
+		let want_open = ui.button(id, icon, text, 1, 's', 's', style, readonly)
+		let picked_id = ui.menu(menu_id, items, want_open, 'b', '[')
+		if (!ui.state_of(menu_id, 'open') && ui.focus_inside(menu_id))
+			ui.focus(id)
+	ui.end_stack()
+	return picked_id
+}
+
+ui.bare_menu_button = function(
+	id, icon, text, items, fr, align, valign, readonly
+) {
+	return ui.menu_button(id, icon, text, items, fr, align, valign,
+		'', readonly)
 }
 
 //// LIST --------------------------------------------------------------------
@@ -7781,9 +7792,6 @@ ui.password_input = function(
 	field ??= ui.state_of(id, 'field') ?? ui.create_field({type: 'password'})
 	return ui.input(id, value, field, fr, text_align, no_box, readonly)
 }
-
-ui.icon_def('check', 'tabler', '\uea5e')
-ui.icon_def('x', 'tabler', '\ueb55')
 
 //// NUM_SLIDER --------------------------------------------------------------
 
@@ -9965,8 +9973,8 @@ ui.color_input = function(id, value, field, fr, readonly) {
 				ui.color_picker(picker_id, value, field)
 				ui.h(0, ui.sp05(), 'r')
 					ui.default_button(id+'.pick')
-					ui.primary_button(id+'.pick', S('pick', 'Pick'), 0)
-					ui.button(id+'.cancel', S('cancel', 'Cancel'), 0)
+					ui.primary_button(id+'.pick', '', S('pick', 'Pick'), 0)
+					ui.button(id+'.cancel', '', S('cancel', 'Cancel'), 0)
 				ui.end_h()
 			ui.end_v()
 			ui.resizer(id+'.resizer', 'r')
@@ -10747,8 +10755,6 @@ ui.live_move_mixin = function(e) {
 
 //// DOCK --------------------------------------------------------------------
 
-ui.icon_def('plus', 'tabler', '\ueb0b')
-
 function tabbox(
 	id, tab, is_selected, is_hover, has_close_button, is_strip_bottom, move_area
 ) {
@@ -10775,7 +10781,7 @@ function tabbox(
 			ui.min_wh(0, 0)
 			// using id+'.tabclose' instead of uid+'.tabbox.close'
 			// because that prefix is for ui.dock() drag state.
-			ui.bare_icon_button(id+'.tabclose.'+tab.id, 'x')
+			ui.bare_button(id+'.tabclose.'+tab.id, 'x', '')
 		}
 		ui.end_stack()
 	ui.end_h()
@@ -10842,7 +10848,7 @@ function tab_strip(id, s, tablist, selected_tab, cs, added_tab_id) {
 	if (s.can_add_remove_tabs) {
 		ui.font_size(1)
 		ui.ph(ui.sp())
-		ui.bare_icon_button(tablist_id+'.plus', 'plus', null, 0)
+		ui.bare_button(tablist_id+'.plus', 'plus', '', 0)
 	}
 	ui.end_h()
 	ui.end_stack()

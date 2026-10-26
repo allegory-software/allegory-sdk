@@ -25,21 +25,6 @@ ui.GRID_FAST_PATH = true
 
 ui.capture_keydown('f1') // browser: help -> grid: key help
 
-/* icon aliases --------------------------------------------------------------
-
-The grid names its icons; the codepoints live here so that loading a
-different icon font only means redefining these.
-
-*/
-
-ui.icon_def('node_collapsed', 'tabler', '\ueb2a')
-ui.icon_def('node_expanded' , 'tabler', '\ueb29')
-ui.icon_def('sort_asc'      , 'tabler', '\ueb26')
-ui.icon_def('sort_desc'     , 'tabler', '\ueb27')
-ui.icon_def('sort_none'     , 'tabler', '\ueb5a')
-ui.icon_def('arrow_up'      , 'tabler', '\uea25')
-ui.icon_def('arrow_down'    , 'tabler', '\uea16')
-
 // draw all the visible cells of one field in a single command.
 // each cell gets (bg, bg_state, fg, text).
 ui.widget('fast_field', {
@@ -653,7 +638,7 @@ function init(id, e) {
 			if (has_children) {
 				ui.p(indent_x - sp2, 0, sp2, 0)
 				ui.color(fg)
-				ui.icon('', collapsed ? 'node_collapsed' : 'node_expanded')
+				ui.icon('', collapsed ? 'square-plus' : 'square-minus-2')
 			}
 			// a popup editor covers the cell instead of replacing it, and
 			// the popup can be moved off the cell to fit on screen.
@@ -1971,9 +1956,9 @@ function init(id, e) {
 										(hit_zone == 'sort_icon' && hit_gcol == col) ? 'hover' : null)
 									let pri = field.sort_i
 									ui.icon(icon_id,
-										dir == 'asc' && (pri ? 'sort_asc'  : 'sort_asc' ) ||
-										dir          && (pri ? 'sort_desc' : 'sort_desc') ||
-										'sort_none'
+										dir == 'asc' && (pri ? 'sort-ascending'  : 'sort-ascending' ) ||
+										dir          && (pri ? 'sort-descending' : 'sort-descending') ||
+										'arrows-sort'
 									, 0)
 								}
 							ui.end_h()
@@ -2039,9 +2024,9 @@ function init(id, e) {
 								!col_group && hit_zone == 'sort_icon'
 									&& hit_vfi == field.vfi ? 'hover' : null)
 							ui.icon(icon_id,
-								dir == 'asc' && (pri ? 'sort_asc'  : 'sort_asc' ) ||
-								dir          && (pri ? 'sort_desc' : 'sort_desc') ||
-								'sort_none'
+								dir == 'asc' && (pri ? 'sort-ascending'  : 'sort-ascending' ) ||
+								dir          && (pri ? 'sort-descending' : 'sort-descending') ||
+								'arrows-sort'
 							, 0)
 						} else {
 							ui.min_w(ui.em(1))
@@ -2092,11 +2077,11 @@ function init(id, e) {
 						ui.stack('', 0, 'l', 't')
 							ui.popup('', 'overlay', null, 't', 'c')
 								ui.color('marker')
-								ui.icon('', 'arrow_down')
+								ui.icon('', 'arrow-down')
 							ui.end_popup()
 							ui.popup('', 'overlay', null, 'b', 'c')
 								ui.color('marker')
-								ui.icon('', 'arrow_up')
+								ui.icon('', 'arrow-up')
 							ui.end_popup()
 						ui.end_stack()
 					}

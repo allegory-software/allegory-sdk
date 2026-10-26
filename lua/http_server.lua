@@ -16,6 +16,7 @@ SERVER
 	- - unix_socket_user           set user  on socket file after bind()
 	- - unix_socket_group          set group on socket file after bind()
 	- compress                     gzip-compress responses (true)
+	- gzip_cache_dir               dir for req:send_cached() files (var/www-cache)
 	- max_body_size                upload size limit (overridable per request)
 	- respond <- fn(req)           request handler
 	- debug <- flags               debug flags: 'protocol tracebacks stream'
@@ -35,9 +36,10 @@ RESPONSE
 		content-length <- n         set body size otherwise it's chunked transfer
 		content-type <- mime        set content-type
 	req.compress <- true|false     gzip-compress response (also see compressed_mime_types)
+	req:send_cached(key, mtime) -> true|false   send the cached gzip response for key
 	req.max_body_size <- n         upload size limit
 	req:send_headers() -> req      send status line and headers
-	req:send_body_chunk(s | buf,len | nil,'eof') -> req    send body chunk
+	req:send_body_chunk(s | buf,len | nil,0) -> req    send body chunk
 	req:finish() -> req            finish response
 	req.headers_sent -> true       true if headers were sent
 	req.finished -> true           true if req:finish() was called
@@ -56,6 +58,7 @@ CONFIG
 	https_crt_file                 var/HOST.crt or ../tests/localhost.crt
 	https_key_file                 var/HOST.key or ../tests/localhost.key
 	http_server_compress           set to false to disable
+	http_gzip_cache_dir            varpath'www-cache'
 	http_server_debug              nil (set to true to enable)
 
 TODO
@@ -72,6 +75,8 @@ if not ... then require'http_server_test'; return end
 require'glue'
 require'pbuffer'
 require'gzip'
+require'fs'
+require'xxhash'
 require'sock'
 require'sock_bearssl'
 require'http_date'
@@ -133,6 +138,7 @@ function http_server(...)
 	local self = object(server, {
 		compress = config'http_server_compress',
 		uri_ban_patterns = config'http_server_uri_ban_patterns',
+		gzip_cache_dir = config('http_gzip_cache_dir', varpath'www-cache'),
 		ip_blacklist = {}, -- {ip -> logged_clock}
 	}, ...)
 
@@ -284,7 +290,7 @@ function http_server(...)
 			rb:skip(rb_skip)
 			rb_skip = 0
 			if body_unread_len == 0 then
-				return nil, 'eof', 0
+				return nil, 0, 0
 			end
 			rb:need(1) --can read into the next request if pipelined
 			local buf, len = rb:ref()
@@ -309,6 +315,19 @@ function http_server(...)
 
 		local allow_send_body
 		local send_body_chunk
+		local send_cached_gzip_file
+		local send_cached_source_mtime
+		local body_is_gzipped -- true: send_cached() sends a gzip file as the body
+
+		local function can_gzip(len)
+			local mime_type = req.response_headers['content-type']
+			local accept_enc = req.headers['accept-encoding']
+			return req.compress
+				and (not len or len > 1000)
+				and accept_enc and accept_enc:has'gzip'
+				and not (mime_type and self.compressed_mime_types[mime_type])
+		end
+
 		function req.send_headers(req)
 			--client might not recv() before all its last send() call return,
 			--so if we don't consume the body first, we might deadlock.
@@ -330,16 +349,13 @@ function http_server(...)
 			elseif allow_send_body then
 				req.response_headers['transfer-encoding'] = 'chunked'
 			end
-			local mime_type = req.response_headers['content-type']
-			local accept_enc = req.headers['accept-encoding']
-			req.compress = allow_send_body and req.compress
-				and (not len or len > 1000)
-				and accept_enc and accept_enc:has'gzip'
-				and not (mime_type and self.compressed_mime_types[mime_type])
-			if req.compress then
-				req.response_headers['transfer-encoding'] = 'chunked'
+			req.compress = allow_send_body and not body_is_gzipped and can_gzip(len)
+			if req.compress or body_is_gzipped then
 				req.response_headers['content-encoding'] = 'gzip'
 				req.response_headers['vary'] = 'accept-encoding'
+			end
+			if req.compress then
+				req.response_headers['transfer-encoding'] = 'chunked'
 				req.response_headers['content-length'] = nil --must be the compressed size
 			end
 
@@ -369,11 +385,24 @@ function http_server(...)
 			wb:flush()
 
 			if req.compress then
+				local write = send_body_chunk -- gzip output sink
+				--only a 200 response is a copy of the source that send_cached()
+				--keyed. an error page must not be cached under that key.
+				if send_cached_gzip_file and req.status == 200 then
+					local save = file_saver{
+						path = send_cached_gzip_file,
+						mtime = send_cached_source_mtime,
+					}
+					function write(buf, len)
+						assert(save(buf, len))
+						send_body_chunk(buf, len)
+					end
+				end
 				if not ctcp.gz then
-					ctcp.gz = gzip_state{op = 'compress', level = 1, write = send_body_chunk}
+					ctcp.gz = gzip_state{op = 'compress', level = 1, write = write}
 				else
 					ctcp.gz:reset()
-					ctcp.gz.write = send_body_chunk
+					ctcp.gz.write = write
 				end
 			end
 
@@ -387,7 +416,7 @@ function http_server(...)
 			assert(allow_send_body, 'not allowed to send body')
 			assert(not body_sent, 'body already sent')
 			local content_length = tonumber(req.response_headers['content-length'])
-			if not (chunk == nil and len == 'eof') then
+			if not (chunk == nil and len == 0) then
 				len = len or #chunk
 				if len == 0 then return end --can't send empty chunks chunked
 				body_sent_len = body_sent_len + len
@@ -422,6 +451,37 @@ function http_server(...)
 			return req
 		end
 
+		--call before sending anything. returns true if cached file was found
+		--and sent, otherwise you need to send normally.
+		function req.send_cached(req, key, source_mtime)
+			assert(isstr(key))
+			assert(isnum(source_mtime))
+			if not can_gzip() then return false end
+			if not self.gzip_cache_dir then return false end
+			local path = indir(self.gzip_cache_dir, xxhash128(key):hex())
+			local f = mtime(path) == source_mtime and open(path)
+			if not f then
+				send_cached_gzip_file = path
+				send_cached_source_mtime = source_mtime
+				return false
+			end
+			local len = f:attr'size'
+			body_is_gzipped = true
+			req.response_headers['content-length'] = tostring(len)
+			req:send_headers()
+			local pb = pbuffer{f = f}
+			while len > 0 do
+				pb:need(1)
+				local buf, n = pb:ref()
+				n = min(n, len)
+				req:send_body_chunk(buf, n)
+				pb:skip(n)
+				len = len - n
+			end
+			f:close()
+			return true
+		end
+
 		function req:flush()
 			wb:flush()
 		end
@@ -437,7 +497,7 @@ function http_server(...)
 				req:send_headers()
 			end
 			if not body_sent and allow_send_body then
-				req:send_body_chunk(nil, 'eof')
+				req:send_body_chunk(nil, 0)
 				assert(body_sent)
 			end
 			if req.close then

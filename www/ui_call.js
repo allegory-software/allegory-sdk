@@ -1593,7 +1593,7 @@ function draw_call_media(id, capture, devices, device_kind, label,
 			ui.text('', 'Not capturing', 0)
 		}
 		if (capture.error && !capture.pending)
-			if (ui.button(id+'.retry', 'Retry', 0))
+			if (ui.button(id+'.retry', '', 'Retry', 0))
 				set_capture(true, capture.device_id)
 	ui.end_h()
 	if (capture.error) ui.text('', capture.error, 0)
@@ -1697,12 +1697,12 @@ ui.call = ui.stateful_widget(function(id) {
 			}
 			ui.h(0, ui.sp())
 				if (is_active) {
-					if (ui.button(id+'.leave', 'Leave', 0)) {
+					if (ui.button(id+'.leave', '', 'Leave', 0)) {
 						call.leave()
 						replace_ended_call()
 					}
 				} else {
-					if (ui.button(id+'.join', 'Join', 0,
+					if (ui.button(id+'.join', '', 'Join', 0,
 						null, null, null, !can_join || !call_id || !invite_token
 							|| !(opt.name || guest_name?.trim()))) {
 						call_error = null
@@ -1761,7 +1761,7 @@ ui.call = ui.stateful_widget(function(id) {
 				ui.h(0, ui.sp())
 					ui.text('', 'Microphone level', 0)
 					if (level == null) {
-						if (ui.button(id+'.meter', 'Enable meter', 0))
+						if (ui.button(id+'.meter', '', 'Enable meter', 0))
 							call.set_microphone(true)
 					} else {
 						let fr = clamp( // bar fraction
@@ -1800,7 +1800,7 @@ ui.call = ui.stateful_widget(function(id) {
 				if (peer.audio_error) {
 					ui.h(0, ui.sp())
 						ui.text('', peer.name+': '+peer.audio_error, 0)
-						if (ui.button(id+'.audio.'+peer.id, 'Play audio', 0))
+						if (ui.button(id+'.audio.'+peer.id, '', 'Play audio', 0))
 							call.play_audio(peer)
 					ui.end_h()
 				}

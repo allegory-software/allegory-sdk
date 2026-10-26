@@ -39,6 +39,23 @@ local function out_req(t)
 	return r
 end
 
+local function sent_req(t)
+	local chunks = {} -- {s,...}: body chunks sent
+	local r = req(t)
+	function r:send_headers()
+		self.headers_sent = true
+		return self
+	end
+	function r:send_body_chunk(s, sz)
+		chunks[#chunks+1] = iscdata(s) and str(s, sz) or tostring(s)
+		return self
+	end
+	function r:body()
+		return concat(chunks)
+	end
+	return r
+end
+
 function test.http_error_is_http_response()
 	local ok, err = pcall(http_error, 304)
 	assert(not ok)
@@ -76,7 +93,7 @@ end
 function test.outfile_offset_len()
 	local file = '/tmp/webb_test_outfile_offset_len'
 	save(file, '0123456789')
-	local r = out_req()
+	local r = sent_req()
 	with_req(r, function()
 		local f = assert(outfile_function(file, 2, 3))
 		f()
@@ -86,10 +103,23 @@ function test.outfile_offset_len()
 	assert(r:body() == '234')
 end
 
+function test.outfile_buffered_sets_no_content_length()
+	local file = '/tmp/webb_test_outfile_buffered'
+	save(file, '0123456789')
+	local r = out_req()
+	with_req(r, function()
+		local f = assert(outfile_function(file, 2, 3))
+		f()
+	end)
+	rmfile(file)
+	assert(r.response_headers['content-length'] == nil)
+	assert(r:body() == '234')
+end
+
 function test.outfile_empty()
 	local file = '/tmp/webb_test_outfile_empty'
 	save(file, '')
-	local r = out_req()
+	local r = sent_req()
 	with_req(r, function()
 		local f = assert(outfile_function(file))
 		f()

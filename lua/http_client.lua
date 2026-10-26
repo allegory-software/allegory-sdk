@@ -42,7 +42,7 @@ CLIENT
 	- eof -> true                     body was read or there is no body
 	req:redirect_request() -> req     create redirect request from redirect_location
 	- body_size -> n | 0              require resending the body or not
-	req:recv_body_chunk() -> chunk,len | nil,'eof'  receive next response body chunk
+	req:recv_body_chunk() -> chunk,len | nil,0  receive next response body chunk
 	req:finish()                      finish request and release connection (required!)
 	- finished -> true                request is finished
 	client:[try_]fetch(opt | url) -> s,req  make request and get response body
@@ -413,7 +413,7 @@ local function decompress(http, req, buf, len, eof)
 	http.tcp:checkp(ok, 'gzip error: %s', err)
 	http.gzb_needs_reset = true
 	local p, len = http.gz.b:ref()
-	if len == 0 and err == 'eof' then return nil, 'eof' end
+	if len == 0 and err == 'eof' then return nil, 0 end
 	if len == 0 then return req:recv_body_chunk() end --gzip buffering, need more input
 	return p, len
 end
@@ -427,7 +427,7 @@ function req:recv_body_chunk()
 	assert(req.response_headers, 'response headers not received')
 
 	if req.eof then
-		return nil, 'eof'
+		return nil, 0
 	end
 	rb:skip(http.rb_skip)
 	http.rb_skip = 0
@@ -454,7 +454,7 @@ function req:recv_body_chunk()
 			rb:need(2):skip(2)
 			http.rb_skip = 0
 			req.eof = true
-			return decompress(http, req, nil, 'eof')
+			return decompress(http, req, nil, 0)
 		end
 	elseif req.response_body_size then
 		local buf, len = rb:need(1):ref()
@@ -475,7 +475,7 @@ function req:recv_body_chunk()
 			req:dp('<<', '%7d bytes (eof)', 0)
 			http.rb_skip = 0
 			req.eof = true
-			return decompress(http, req, nil, 'eof')
+			return decompress(http, req, nil, 0)
 		end
 	end
 end

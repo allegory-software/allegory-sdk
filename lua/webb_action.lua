@@ -167,11 +167,40 @@ local function js_filter(handler, ...)
 	outall(s)
 end
 
-local mime_type_filters = {
-	['text/html']        = html_filter,
-	['application/json'] = json_filter,
-	['application/javascript']  = js_filter,
+--cache_key() -> s | nil: the filter inputs that change the output of a static
+--file. nil: the filter leaves the output of a static file unchanged.
+local mime_type_filters = { -- {mime -> {run = fn, cache_key = fn|nil}}
+	['text/html'] = {
+		run = html_filter,
+		cache_key = function()
+			return concat({lang(), tostring(config'lang_filter')}, '\0')
+		end,
+	},
+	['application/json'] = {
+		run = json_filter,
+	},
+	['application/javascript'] = {
+		run = js_filter,
+		cache_key = function()
+			return config'minify_js' and 'minify' or nil
+		end,
+	},
 }
+
+local function serve_static_file(path, filter, handler)
+	local filter_key = filter and filter.cache_key and filter.cache_key()
+	local key = filter_key and path..'\0'..filter_key or path -- gzip cache key
+	if not out_buffering() then
+		local source_mtime = mtime(path) -- source modification time
+		check_etag_hash(xxhash128(key..'\0'..source_mtime):hex())
+		if http_request():send_cached(key, source_mtime) then return end
+	end
+	if filter then
+		filter.run(handler)
+	else
+		handler()
+	end
+end
 
 --routing logic --------------------------------------------------------------
 
@@ -199,6 +228,7 @@ local actions = {} --{action -> handler | s}
 
 local function action_handler(action, ...)
 
+	local static_path -- filesystem source file or nil
 	local action_ext = path_ext(action)
 	local action_no_ext
 	local action_with_ext = action
@@ -231,7 +261,8 @@ local function action_handler(action, ...)
 					if not method'GET' then
 						http_error(405)
 					end
-					handler = assert(outfile_function(path))
+					static_path = path
+					handler = function() outfile(path) end
 				end
 			end
 		end
@@ -270,7 +301,7 @@ local function action_handler(action, ...)
 		end
 	end
 
-	return handler, ext
+	return handler, ext, static_path
 end
 
 --exec an action without setting content type, looking for a 404 handler
@@ -289,7 +320,7 @@ function execaction(action, ...)
 	return pass(handler(...))
 end
 
-local function run_action(fallback, action, handler, ext, ...)
+local function run_action(fallback, action, handler, ext, static_path, ...)
 	setmime(ext)
 	--overrides the max-age set for static files above. without no-store the
 	--browser still caches heuristically when there's no etag and no max-age.
@@ -311,12 +342,15 @@ local function run_action(fallback, action, handler, ext, ...)
 			log('note', 'webb', '404', '%s', concat({action, ...}, '/'))
 			return false
 		end
-		local handler, ext = action_handler(nf_action, ...)
-		return run_action(false, nf_action, handler, ext, action, ...)
+		local handler, ext, static_path = action_handler(nf_action, ...)
+		return run_action(false, nf_action, handler, ext, static_path,
+			action, ...)
 	end
 	local filter = mime_type_filters[mime]
-	if filter then
-		filter(handler, ...)
+	if static_path then
+		serve_static_file(static_path, filter, handler)
+	elseif filter then
+		filter.run(handler, ...)
 	else
 		handler(...)
 	end
@@ -325,12 +359,12 @@ local function run_action(fallback, action, handler, ext, ...)
 end
 
 function internal_action(action, ...)
-	local handler, ext = action_handler(find_action(action, ...))
-	return run_action(false, action, handler, ext, ...)
+	local handler, ext, static_path = action_handler(find_action(action, ...))
+	return run_action(false, action, handler, ext, static_path, ...)
 end
 
 setmetatable(actions, {__call = function(self, action, ...)
-	local handler, ext = action_handler(find_action(action, ...))
-	return run_action(true, action, handler, ext, ...)
+	local handler, ext, static_path = action_handler(find_action(action, ...))
+	return run_action(true, action, handler, ext, static_path, ...)
 end})
 action = actions

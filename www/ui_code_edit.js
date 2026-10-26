@@ -53,10 +53,6 @@ const {
 	caret_w = 2,
 } = ui
 
-ui.icon_def('arrow_up'      , 'tabler', '\uea25')
-ui.icon_def('arrow_down'    , 'tabler', '\uea16')
-ui.icon_def('close'         , 'tabler', '\ueb55')
-
 //           theme    name        state       h     s     L    a
 // ---------------------------------------------------------------------------
 ui.color_def('light', 'keyword'  , 'normal', 240, 1.00, 0.35)
@@ -1601,13 +1597,13 @@ function code_edit_view(id, opt) {
 										find_scan()
 									}
 									ui.nofocus()
-									if (ui.bare_icon_button(id+'.find_prev', 'arrow_up', null, 0))
+									if (ui.bare_button(id+'.find_prev', 'arrow-up', '', 0))
 										goto_match(-1)
 									ui.nofocus()
-									if (ui.bare_icon_button(id+'.find_next', 'arrow_down', null, 0))
+									if (ui.bare_button(id+'.find_next', 'arrow-down', '', 0))
 										goto_match(1)
 									ui.nofocus()
-									if (ui.bare_icon_button(id+'.find_close', 'close', null, 0)) {
+									if (ui.bare_button(id+'.find_close', 'x', '', 0)) {
 										close_find()
 										ui.focus(id)
 										ui.rebuild('close_find')
@@ -1618,9 +1614,10 @@ function code_edit_view(id, opt) {
 										replace_text = ui.input(
 											rid, replace_text, null, 0) ?? ''
 										ui.nofocus()
-										if (ui.button(id+'.replace', 'Replace', 0))
+										if (ui.button(id+'.replace', '', 'Replace', 0))
 											replace_match()
-										if (ui.button(id+'.replace_all', 'Replace All', 0))
+										if (ui.button(id+'.replace_all', '',
+											'Replace All', 0))
 											replace_all()
 									ui.end_h()
 								}

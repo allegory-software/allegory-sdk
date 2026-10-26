@@ -3,16 +3,6 @@
 
 const ui = window.ui
 
-ui.icon_def('database'    , 'tabler', '\uea88')
-ui.icon_def('table-row'   , 'tabler', '\ufb00')
-ui.icon_def('table-column', 'tabler', '\ufaff')
-ui.icon_def('asterisk'    , 'tabler', '\uefd5')
-ui.icon_def('number'      , 'tabler', '\uf1fe')
-ui.icon_def('ruler'       , 'tabler', '\ueb1a')
-ui.icon_def('decimal'     , 'tabler', '\ufa26')
-ui.icon_def('bolt'        , 'tabler', '\uea38')
-ui.icon_def('shield-check', 'tabler', '\ueb22')
-
 let layout = { // initial dock layout
 	split: 'h', size: .25, unit: 'fr',
 	side1: {tabs: [{id: 'tables', label: 'Tables'}]},

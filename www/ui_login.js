@@ -1,9 +1,5 @@
 //sign-in window -> signed_in. call before opening any container.
 //scrim emitted before the window: layers draw forward, hit-test in reverse.
-ui.load_font('login_icons', '/icons/tabler-icons.woff2')
-ui.icon_def('login_user', 'login_icons', '\ueb4d')
-ui.icon_def('login_mail', 'login_icons', '\uf069')
-ui.icon_def('login_key', 'login_icons', '\ueac7')
 
 ui.login_window = function() {
 
@@ -47,7 +43,7 @@ ui.login_window = function() {
 
 			ui.font_size(4)
 			ui.color('label')
-			ui.icon('', 'login_user', 0, 'c', 't')
+			ui.icon('', 'user', 0, 'c', 't')
 
 			ui.m(ui.sp8())
 			ui.font('heading')
@@ -71,7 +67,7 @@ ui.login_window = function() {
 					"account or create one.", 0, '[', 't', 1/0)
 				ui.mt(ui.sp2())
 				ui.default_button('login_send_button')
-				if (ui.primary_icon_button('login_send_button', 'login_mail',
+				if (ui.primary_button('login_send_button', 'mail-fast',
 					'Continue', 1, 's') && !s.request)
 					s.request = glue.post('/gen_auth_code.json',
 						{email: s.email_text},
@@ -97,7 +93,7 @@ ui.login_window = function() {
 				s.code = ui.input('login_code', s.code, null, 0)
 				ui.mt(ui.sp2())
 				ui.default_button('login_signin_button')
-				if (ui.primary_icon_button('login_signin_button', 'login_key',
+				if (ui.primary_button('login_signin_button', 'key',
 					'Sign in', 1, 's') && !s.request)
 					s.request = glue.post('/login.json',
 						{email: s.email, code: s.code},

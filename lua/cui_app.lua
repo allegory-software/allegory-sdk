@@ -141,6 +141,7 @@ function action.en()
 {{{preloads}}}
 	<script src="/glue.js" global></script>
 	<script src="/ui.js" global></script>
+	<script src="/ui_icon_defs.js"></script>
 	<script src="/ui_login.js" ></script>
 	<script src="/ui_field.js" ></script>
 	<script src="/ui_nav.js" ></script>
@@ -183,6 +184,10 @@ end
 local function cui_app(...)
 	if package.loaded[scriptname] then return end
 	webb_app(...)
+	function app:respond(req)
+		tenant()
+		checkfound(action(unpack(args())))
+	end
 	function app:install()
 		local db = db() -- application database
 		db:track_row_changes(false)
