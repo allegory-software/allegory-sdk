@@ -1,24 +1,24 @@
 require'webb'
 require'proc'
 
-config{http_host = '*'}
-config{root_action = 'ui-demo.html'}
---config{http_port = tonumber(env'HTTP_PORT') or 8888}
---config{https_port = tonumber(env'HTTPS_PORT') or 4443}
-config{vardir = env'VARDIR'}
---config{https_addr = false}
-config{project_dir = homedir()}
-config{env = 'dev'} --if no email set, auth code goes to browser console.
-
-config{http_server_debug = 'requests'}
 config{auth_store = 'mdbx'}
+--config{root_action = 'ui-demo.html'}
+config{http_host = '*'}
+
+--config from env vars for automated tests
+config{http_port  = tonumber(env'HTTP_PORT' ) or 8888}
+config{https_port = tonumber(env'HTTPS_PORT') or 4443}
+config{vardir = env'VARDIR'} --can't put vardir in conf since conf is in vardir.
+--config{https_addr = false}
+
 require'cui_app'(...)
 
-logging.debug = true
-logging.verbose = config('verbose', true)
-logging.filter.log = true
-logging.filter.open = true
+--logging.debug = config('debug', true)
+--logging.verbose = config('verbose', true)
+--logging.filter.log = true
+--logging.filter.open = true
 --errortype'http_response'.addtraceback = true
+--config{http_server_debug = 'requests'}
 
 app.main_file = 'demo.js'
 wwwdir'../www'

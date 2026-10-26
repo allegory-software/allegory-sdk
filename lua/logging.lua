@@ -16,6 +16,7 @@ CONFIG
 	logging.deploy            app deployment name (logged to server)
 	logging.machine           app machine name (logged to server)
 	logging.env               app deployment type: 'dev', 'prod', etc.
+	logging.project_dir       strip this prefix from .lua paths in stack traces
 	logging.quiet             do not log anything to stderr (false)
 	logging.verbose           log `note` messages to stderr (false)
 	logging.debug             log `debug` messages to stderr (false)
@@ -34,7 +35,6 @@ Logging is done to stderr by default. To start logging to a file, call
 logging:tofile(). To start logging to a server, call logging:toserver().
 You can call both.
 
-
 LOGGING API
 
 	log(severity, module, event, fmt, ...)
@@ -43,6 +43,15 @@ LOGGING API
 
 	logarg(v) -> s               format a value for logging
 	logargs(...) -> ...          format multiple values for logging
+
+SEVERITY LEVELS
+
+	level     symbol   logged when
+   --------- -------- --------------------------------
+	''                 logging.debug
+	'note'    !        logging.verbose
+	'warn'    W        always
+	'ERROR'   E        always
 
 ]]
 
@@ -506,6 +515,8 @@ function logging:onvar(client, e) end --stub
 local function log(self, severity, module, event, fmt, ...)
 	if severity == '' and self.filter[module  ] then return end
 	if severity == '' and self.filter[event   ] then return end
+	if severity == '' and not self.debug then return end
+	if severity == 'note' and not self.verbose then return end
 	local env = logging.env and logging.env:sub(1, 1):upper() or 'D'
 	local time = time()
 	local msg = fmt and fmtargs(self, fmt, ...) or ''
@@ -520,36 +531,33 @@ local function log(self, severity, module, event, fmt, ...)
 		if not arg1_multiline then
 			msg = '\n\n'..msg..'\n'
 		end
-		--shorten stacktrace paths to paths relative to project_dir.
-		local project_dir = config'project_dir'
-		if project_dir then
-			msg = msg:gsub('([^%s<]*%.lua):', function(path)
-				path = relpath(path, project_dir) or path
-				path = path_normalize(path, true) --no symlinks in code
-				return path .. ':'
-			end)
-		end
 	end
-	if (severity ~= '' or self.debug) and (severity ~= 'note' or self.verbose) then
-		local entry = (self.logtofile or not self.quiet)
-			and _('%s %s %-1s %-6s %-8s %-4s %s\n',
-				env, date('%Y-%m-%d %H:%M:%S', time),
-				severity_symbol[severity] or severity,
-				module or '', (event or ''):sub(1, 8),
-				logarg((coroutine.running())), msg)
-		if self.logtofile then
-			self:logtofile(entry)
-		end
-		if self.logtoserver then
-			self:logtoserver{
-				deploy = self.deploy, env = logging.env, time = time,
-				severity = severity, module = module, event = event,
-				message = msg:gsub('^\n\n', ''),
-			}
-		end
-		if not self.quiet then
-			self:logtostderr(entry)
-		end
+	--shorten .lua paths to paths relative to project_dir.
+	if self.project_dir and msg:find('.lua:', 1, true) then
+		msg = msg:gsub('([^%s<]*%.lua):', function(path)
+			path = relpath(path, self.project_dir) or path
+			path = path_normalize(path, true) --no symlinks in code
+			return path .. ':'
+		end)
+	end
+	local entry = (self.logtofile or not self.quiet)
+		and _('%s %s %-1s %-6s %-8s %-4s %s\n',
+			env, date('%Y-%m-%d %H:%M:%S', time),
+			severity_symbol[severity] or severity,
+			module or '', (event or ''):sub(1, 8),
+			logarg((coroutine.running())), msg)
+	if self.logtofile then
+		self:logtofile(entry)
+	end
+	if self.logtoserver then
+		self:logtoserver{
+			deploy = self.deploy, env = logging.env, time = time,
+			severity = severity, module = module, event = event,
+			message = msg:gsub('^\n\n', ''),
+		}
+	end
+	if not self.quiet then
+		self:logtostderr(entry)
 	end
 end
 

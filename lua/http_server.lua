@@ -44,6 +44,7 @@ RESPONSE
 	error{type='http_response',status=,headers=,content=}) respond by raising
 CONFIG
 	http_host                      required, set to '*' to match all
+	x_forwarded_headers            match X-Forwarded-Host instead of Host
 	http_addr                      '0.0.0.0'
 	http_port                      80
 	http_unix_socket
@@ -448,7 +449,8 @@ function http_server(...)
 
 		--match Host
 		local host = ctcp.listen_socket.host
-		if host and req.headers['host'] ~= host then
+		if host and req.headers[config'x_forwarded_headers'
+			and 'x-forwarded-host' or 'host'] ~= host then
 			req.status = 400
 			req:finish()
 			return

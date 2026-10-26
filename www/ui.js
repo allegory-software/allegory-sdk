@@ -2889,8 +2889,7 @@ function redraw_all() {
 		if (focus_first_id != null) {
 			let group_id = focus_first_id
 			focus_first_id = null
-			if (!resolve_focus_first(group_id))
-				warn('focus_first: no focusable in ', group_id)
+			resolve_focus_first(group_id)
 		}
 
 		t1 = clock_ms()

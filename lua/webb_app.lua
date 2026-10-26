@@ -92,6 +92,7 @@ local function webb_app(...)
 	logging.deploy  = config'deploy'
 	logging.machine = config'machine'
 	logging.env     = config'env'
+	logging.project_dir = config('project_dir', homedir()) --short stack trace paths
 
 	function run_server() --fw. declared.
 		env('TZ', ':/etc/localtime') --keep os.date() from stat'ing /etc/localtime.

@@ -42,7 +42,7 @@ CONFIG
 	auth_code_lifetime  600       one-time auth code lifetime (seconds)
 	auth_code_maxtry    5         max failed attempts before code is invalidated
 	auth_code_cooldown  30        auth code min resend interval in seconds
-	auth_code_email_from          from address of the auth code email
+	noreply_email                 from address of the auth code email
 	env                           'dev' makes the auth code email optional
 	session_lifetime    2 years   session lifetime in seconds
 	auth_nopass_ip                allow auth without a password from IP (for dev env)
@@ -315,8 +315,7 @@ end
 local function send_auth_code_email(email, code)
 	local minutes = floor(config('auth_code_lifetime', 10 * 60) / 60)
 	sendmail{
-		from = assertf(config'auth_code_email_from',
-			'auth_code_email_from not configured'),
+		from = assertf(config'noreply_email', 'noreply_email not configured'),
 		to = email,
 		subject = S('auth_code_email_subject',
 			'Your authentication code is %s', code),
@@ -366,7 +365,7 @@ function auth_gen_code(a)
 		end
 		return code, u.id
 	end)
-	local skip_mail = config'env' == 'dev' and not config'auth_code_email_from'
+	local skip_mail = config'env' == 'dev' and not config'noreply_email'
 	if a.email and not skip_mail then
 		local ok, err = try(send_auth_code_email, a.email, code)
 		if not ok then
