@@ -9,11 +9,11 @@
 <script src=ui_field.js></script>
 <script src=ui_nav.js></script>
 <script src=ui_grid.js></script>
-<script src=ui_db_explorer.js></script>
 <script src=ui_code_edit.js></script>
 <script src=webrtc.js></script>
 <script src=ui_call.js></script>
 <script src=lezer.js></script>
+<script src=ui_db_explorer.js></script>
 <script>
 
 const {
@@ -288,6 +288,44 @@ ui.menu('menu1', [
 		{id: 'disabled_sub.1', label: 'Unreachable'},
 	]},
 ], true, 'it', '[')
+}
+}
+
+{
+let menu_bar_demo_menus = [ // [{id, icon, label, items}, ...]
+	{id: 'file', icon: 'file', label: 'File', items: [
+		{id: 'new', label: 'New', icon: 'plus'},
+		{id: 'open', label: 'Open', icon: 'folder'},
+		{id: 'recent', label: 'Recent', items: [
+			{id: 'notes', label: 'Notes'},
+			{id: 'report', label: 'Report'},
+		]},
+		{id: 'save', label: 'Save', icon: 'device-floppy', disabled: true},
+	]},
+	{id: 'edit', icon: 'edit', label: 'Edit', items: [
+		{id: 'copy', label: 'Copy', icon: 'copy'},
+		{id: 'paste', label: 'Paste', icon: 'clipboard'},
+	]},
+]
+let menu_bar_demo_text = 'Edit this text' // text input value
+let menu_bar_demo_picked = null // last picked action id or null
+demos.menu_bar = function() {
+ui.m(ui.em(5))
+ui.v(0, ui.sp2(), 's', 't')
+	ui.text('', 'Click a menu, then hover across the bar.', 0)
+	ui.menu_bar('menu_bar_demo', 0, ui.sp(), 's', 'c')
+		for (let menu of menu_bar_demo_menus)
+			menu_bar_demo_picked = ui.bare_menu_button(
+				'menu_bar_demo.'+menu.id, menu.icon, menu.label, menu.items,
+				0) || menu_bar_demo_picked
+		ui.label('menu_bar_demo.text', 'Text', 0)
+		menu_bar_demo_text = ui.input('menu_bar_demo.text',
+			menu_bar_demo_text, null, 1)
+		if (ui.bare_button('menu_bar_demo.help', 'help', 'Help', 0))
+			menu_bar_demo_picked = 'help'
+	ui.end_menu_bar()
+	ui.text('', 'Last action: '+(menu_bar_demo_picked ?? 'none'), 0)
+ui.end_v()
 }
 }
 

@@ -20,6 +20,7 @@ ui.login_window = function() {
 		s.request = glue.get('/user.json', function(current_user) {
 			s.request = null
 			user = current_user
+			ui.saved_state = glue.json_arg(current_user.ui_state)
 			ui.animate()
 		}, function(error, type) {
 			if (type == 'abort') return
@@ -100,6 +101,7 @@ ui.login_window = function() {
 						function(new_user) {
 							s.request = null
 							user = new_user
+							ui.saved_state = glue.json_arg(new_user.ui_state)
 							s.email = null
 							ui.animate()
 						},

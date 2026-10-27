@@ -445,6 +445,9 @@ const ROW_NO_REMOVE = 2**8  // row can't be deleted
 const ROW_NO_SAVE   = 2**9  // row is never saved
 const ROW_GROUP     = 2**10 // row is a synthetic group row
 const ROW_UNPLACED  = 2**11 // row stays where the user left it
+const ROW_CHILDREN_REQUESTED = 2**12 // partial load: row's children requested
+const ROW_CHILDREN_LOADED    = 2**13 // partial load: row's children are loaded
+const ROW_LOAD_RECURSIVE     = 2**14 // partial load: load row's whole subtree
 
 // bit names accepted by set_row_flag()
 let row_config_bits = {
@@ -761,6 +764,7 @@ ui.nav = function(id, opt) {
 	e.pos_field = null
 	e.id_field = null
 	e.parent_field = null
+	e.has_children_field = null
 	e.tree_field = null
 	e.display_field = null
 	e.mask_word_n = null // how many 32-bit words per row for bitmasks
@@ -771,7 +775,8 @@ ui.nav = function(id, opt) {
 
 	// fields (dynamic with column hiding and moving)
 	e.visible_fields = null
-	e.cols_menu_items = null // [{id, label, items: [{id, label, checked, disabled}]}]
+	// [{id, label, icon, items: [{id, label, checked, disabled}]}]
+	e.menu_items = null
 
 	// rows (dynamic if grid is editable)
 	e.row_n = null // data row count
@@ -805,12 +810,16 @@ ui.nav = function(id, opt) {
 	e.can_be_tree = null
 	e.is_tree = null
 	e.flat ??= false // flat view of a tree nav
+	e.start_expanded ??= false // rows and groups start expanded
+	e.partial_load ??= false // load a tree's children on expand
 	e.group_by = null // group-by spec
 	e.group_cols = null // group_by columns from parse_group_by(), in order
 	e.is_grouped = null
 	e.group_ris = null // group ris in key order
 	let group_fis = null // field indices of the grouping columns
-	let collapsed_group_paths = new Set() // group_path() of collapsed groups
+	// group_path() of groups the user expanded or collapsed away from
+	// start_expanded
+	let toggled_group_paths = new Set()
 
 	// indexes
 	let indexes = null // {cols -> {fields:, ris:}}, built on first lookup
@@ -855,6 +864,9 @@ ui.nav = function(id, opt) {
 	let want_reload = false // reload requested during a pending request
 	let own_update_ids = new Set() // ids of this nav's saves
 	let load_req = null // pending load request, or null
+	// partial load: Set of the parent ids requested by the pending load
+	let requested_parent_ids = null
+	let children_reqs = new Set() // pending child load requests
 
 	e.get_debug_state = function() {
 		return {
@@ -996,14 +1008,6 @@ ui.nav = function(id, opt) {
 	}
 
 	/// focus and selection ---------------------------------------------------
-
-	// return a mask with one bit per field (32 fields per mask element).
-	function fields_mask(fields) {
-		let mask = new Uint32Array(e.mask_word_n)
-		for (let field of fields)
-			mask[field.fi >>> 5] |= 1 << (field.fi & 31)
-		return mask
-	}
 
 	function clear_sel() {
 		if (has_sel_bits) {
@@ -1168,6 +1172,7 @@ ui.nav = function(id, opt) {
 			e.quicksearch_text = ''
 		e.focused_ri = ri
 		e.focused_fi = fi
+		update_menu_labels()
 		if (fi != null)
 			e.last_focused_fi = fi
 		if (has_focus_changed)
@@ -1460,6 +1465,14 @@ ui.nav = function(id, opt) {
 
 	/// visible fields --------------------------------------------------------
 
+	// return a mask with one bit per field (32 fields per mask element).
+	function fields_mask(fields) {
+		let mask = new Uint32Array(e.mask_word_n)
+		for (let field of fields)
+			mask[field.fi >>> 5] |= 1 << (field.fi & 31)
+		return mask
+	}
+
 	// Use e.cols, then the rowset's cols, then all non-hidden rowset fields.
 	// Skip internal fields. When grouping, show $group first and hide the
 	// grouping columns: we already show their values in the group label.
@@ -1482,23 +1495,7 @@ ui.nav = function(id, opt) {
 			fields[vfi].vfi = vfi
 		e.visible_fields = fields // visible fields, in display order
 		visible_fields_mask = fields_mask(fields)
-		// the columns menu: one item per column, grouping columns disabled.
-		let items = []
-		for (let field of e.all_fields) {
-			if (field.internal || field == group_field)
-				continue
-			items.push({
-				id: field.name,
-				label: field.label,
-				checked: field.vfi != null,
-				disabled: e.is_grouped && group_fis.has(field.fi),
-			})
-		}
-		e.cols_menu_items = [{
-			id: 'columns',
-			label: 'Show/Hide columns',
-			items,
-		}]
+		update_menu_items()
 		set_focus(e.focused_ri, e.focused_fi)
 	}
 
@@ -1548,6 +1545,43 @@ ui.nav = function(id, opt) {
 		set_cols(col_names, ev)
 	}
 
+	/// context menu ----------------------------------------------------------
+
+	// tree commands in menu_items; update_menu_labels() sets their labels.
+	let expand_item = {id: 'expand_subtree', icon: 'square-plus'}
+	let collapse_item = {id: 'collapse_subtree', icon: 'square-minus-2'}
+
+	function update_menu_items() {
+		// the columns menu: one item per column, grouping columns disabled.
+		let items = []
+		for (let field of e.all_fields) {
+			if (field.internal || field == group_field)
+				continue
+			items.push({
+				id: 'col_' + field.name,
+				field: field,
+				label: field.label,
+				checked: field.vfi != null,
+				disabled: e.is_grouped && group_fis.has(field.fi),
+			})
+		}
+		let columns_item = {
+			id: 'columns',
+			label: 'Show/Hide columns',
+			items,
+		}
+		e.menu_items = e.is_tree || e.is_grouped
+			? [expand_item, collapse_item, columns_item]
+			: [columns_item]
+	}
+
+	// the tree commands act on the focused row's subtree, or on all rows.
+	function update_menu_labels() {
+		let has_focus = e.focused_ri != null // a row is focused
+		expand_item.label = has_focus ? 'Expand subtree' : 'Expand all'
+		collapse_item.label = has_focus ? 'Collapse subtree' : 'Collapse all'
+	}
+
 	/// row orders ------------------------------------------------------------
 
 	// Set parent_ri from the parent_id column. Sort rows by parent_id and
@@ -1556,7 +1590,8 @@ ui.nav = function(id, opt) {
 	function set_tree_parents() {
 		let id_field = e.id_field
 		let parent_field = e.parent_field
-		let id_ris = get_index(id_field.name).ris // rows sorted by id
+		let id_index = get_index(id_field.name).ris // dynamic row index by id
+		let id_ris = id_index.array // rows sorted by id
 		let sort_fields = [{field: parent_field, desc: false}]
 		let pid_ris = e.base_ris.slice(0, e.row_n)
 		pid_ris = radix_sort(e.col_vals, pid_ris, e.row_n, sort_fields)
@@ -1569,7 +1604,7 @@ ui.nav = function(id, opt) {
 			let parent_id = parent_field.col_storage.get(parent_vals, ri)
 			let parent_ri = NONE
 			if (parent_id != null) {
-				while (i < id_ris.length) {
+				while (i < id_index.len) {
 					let cmp = id_cmp(id_vals, id_ris[i], parent_id)
 					if (cmp >= 0) {
 						if (cmp == 0)
@@ -1592,6 +1627,7 @@ ui.nav = function(id, opt) {
 			: !e.is_tree || tree_col === false ? null
 			: tree_col_field?.vfi != null ? tree_col_field
 			: e.visible_fields[0] ?? null
+		update_menu_items()
 	}
 
 	// Stage 3. Build child lists from sorted_ris and group_ris. Visit each
@@ -1786,13 +1822,20 @@ ui.nav = function(id, opt) {
 				set_bits(row_flags, ri1, ROW_COLLAPSED, collapsed)
 				// group rows are rebuilt: keep their state by label path.
 				if (row_flags[ri1] & ROW_GROUP)
-					if (collapsed)
-						collapsed_group_paths.add(group_path(ri1))
+					if (collapsed == e.start_expanded)
+						toggled_group_paths.add(group_path(ri1))
 					else
-						collapsed_group_paths.delete(group_path(ri1))
+						toggled_group_paths.delete(group_path(ri1))
+				if (e.is_tree)
+					set_bits(row_flags, ri1, ROW_LOAD_RECURSIVE,
+						!collapsed && recursive && has_unloaded_children(ri1))
 			}
 		}
 		update_visible_ris(true)
+		// a failed save left rows in saving_ris: reload to settle them.
+		if (!collapsed && load_children(i1, last_i)
+			&& saving_ris.size && !save_req && !load_req)
+			e.reload()
 	}
 
 	// show a tree nav's rows as a flat list.
@@ -1801,6 +1844,7 @@ ui.nav = function(id, opt) {
 		e.flat = flat // flat view of a tree nav
 		update_is_tree()
 		update_tree_and_visible_ris()
+		load_children()
 	}
 
 	/// sorting ---------------------------------------------------------------
@@ -2431,7 +2475,7 @@ ui.nav = function(id, opt) {
 		group_fis = new Set(key_fields.map(kf => kf.field.fi))
 		e.is_grouped = true
 		for (let ri of e.group_ris)
-			if (collapsed_group_paths.has(group_path(ri)))
+			if (toggled_group_paths.has(group_path(ri)) == e.start_expanded)
 				e.row_flags[ri] |= ROW_COLLAPSED
 	}
 
@@ -2521,7 +2565,7 @@ ui.nav = function(id, opt) {
 		}
 
 		// add the new groups, if any, and update the rows shown.
-		collapsed_group_paths.clear()
+		toggled_group_paths.clear()
 		e.group_by = levels.length ? group_by : null // group-by spec, or null
 		e.group_cols = levels.flat()
 		if (levels.length)
@@ -2529,6 +2573,7 @@ ui.nav = function(id, opt) {
 		update_visible_fields()
 		update_is_tree()
 		update_tree_and_visible_ris()
+		load_children()
 		return true
 	}
 
@@ -2721,6 +2766,26 @@ ui.nav = function(id, opt) {
 			e.validate_row(ri)
 	}
 
+	// Write a pos or parent_id cell during a move, without the edit
+	// restrictions or validation in set_cell_val(). Write directly to column
+	// storage for new rows and store an edit for saved rows.
+	function write_cell(ri, fi, v, is_indexed = true) {
+		if (e.row_flags[ri] & ROW_NEW) {
+			let field = e.all_fields[fi]
+			field.col_storage.set(e.col_vals[fi], ri, v)
+			set_cell_bit(e.unset_mask, ri, fi, false)
+			if (cell_bit(e.modified_mask, ri, fi)) {
+				set_cell_bit(e.modified_mask, ri, fi, false)
+				e.input_vals[fi][ri] = undefined
+			}
+			if (is_indexed)
+				invalidate_indexes(field)
+			end_quicksearch_at(ri, fi)
+		} else {
+			set_input_val(ri, fi, v)
+		}
+	}
+
 	// Return true for a pos or parent_id cell. The caller must then restore
 	// the row's position or parent from the reverted value.
 	function revert_cell_val(ri, fi) {
@@ -2860,7 +2925,9 @@ ui.nav = function(id, opt) {
 	e.is_removed   = function(ri) { return !!(e.row_flags[ri] & ROW_REMOVED  ) }
 	e.is_group_row = function(ri) { return !!(e.row_flags[ri] & ROW_GROUP    ) }
 	e.is_collapsed = function(ri) { return !!(e.row_flags[ri] & ROW_COLLAPSED) }
-	e.has_children = function(ri) { return e.desc_count[ri] > 0 }
+	e.has_children = function(ri) {
+		return e.desc_count[ri] > 0 || (e.is_tree && has_unloaded_children(ri))
+	}
 
 	// -> true if the row has an edited cell.
 	// -> true if one of the cells has errors, if with_errors = true.
@@ -3136,8 +3203,7 @@ ui.nav = function(id, opt) {
 			// the row's parent.
 			if (e.can_be_tree) {
 				let parent_field = e.parent_field
-				parent_field.col_storage.set(e.col_vals[parent_field.fi], ri,
-					parent_id)
+				parent_field.col_storage.set(e.col_vals[parent_field.fi], ri, parent_id)
 				set_cell_bit(e.unset_mask, ri, parent_field.fi, false)
 			}
 
@@ -3182,26 +3248,6 @@ ui.nav = function(id, opt) {
 	}
 
 	/// row moving ------------------------------------------------------------
-
-	// Write a pos or parent_id cell during a move, without the edit
-	// restrictions or validation in set_cell_val(). Write directly to column
-	// storage for new rows and store an edit for saved rows.
-	function write_cell(ri, fi, v, is_indexed = true) {
-		if (e.row_flags[ri] & ROW_NEW) {
-			let field = e.all_fields[fi]
-			field.col_storage.set(e.col_vals[fi], ri, v)
-			set_cell_bit(e.unset_mask, ri, fi, false)
-			if (cell_bit(e.modified_mask, ri, fi)) {
-				set_cell_bit(e.modified_mask, ri, fi, false)
-				e.input_vals[fi][ri] = undefined
-			}
-			if (is_indexed)
-				invalidate_indexes(field)
-			end_quicksearch_at(ri, fi)
-		} else {
-			set_input_val(ri, fi, v)
-		}
-	}
 
 	// Compare parent_id values to check whether the rows share a position
 	// list. In a flat nav, use one position list for all rows.
@@ -3404,7 +3450,7 @@ ui.nav = function(id, opt) {
 		return true
 	}
 
-	/// row removing ------------------------------------------------------------
+	/// row removing ----------------------------------------------------------
 
 	// Remove the rows from every list and index. Free their slots for reuse.
 	function drop_rows(ris) {
@@ -3570,13 +3616,22 @@ ui.nav = function(id, opt) {
 
 	/// saving ----------------------------------------------------------------
 
-	function rowset_url() {
+	// recursive = false: load only the roots, or only the direct children
+	// of the parents in the filter.
+	// partial load: parent_ids: [id, ...] ask for the children of those
+	// rows, with null for the roots.
+	function rowset_url(recursive = true, parent_ids) {
 		let url = href('/rowset.json/' + e.rowset_name)
 		let filter = param_vals_filter()
-		if (filter) {
+		if (filter || !recursive || parent_ids) {
 			let u = url_parse(url)
 			u.args = u.args || {}
-			u.args.filter = filter
+			if (filter)
+				u.args.filter = filter
+			if (!recursive)
+				u.args.recursive = 0
+			if (parent_ids)
+				u.args.parent_ids = json(parent_ids)
 			url = url_format(u)
 		}
 		return url
@@ -3762,6 +3817,7 @@ ui.nav = function(id, opt) {
 	// Write server values into rows and drop rows that the server removed.
 	// vals_list[k] holds the values of set_ris[k] by fi, undefined for cells
 	// that the server didn't send.
+	// -> true if rows were placed: the caller must run stages 3-5.
 	function apply_server_rows(set_ris, vals_list, drop_ris) {
 		let moved_ris = [] // rows whose pos or parent_id changed
 		let is_modified_col = new Uint8Array(e.all_fields.length) // by fi
@@ -3776,14 +3832,13 @@ ui.nav = function(id, opt) {
 			update_row_places(moved_ris)
 		if (drop_ris.length)
 			drop_rows(drop_ris)
-		if (drop_ris.length || moved_ris.length)
-			update_tree_and_visible_ris(false)
 
 		// Discard the edit and error arrays if no modified rows remain.
 		if (!e.modified_n) {
 			e.input_vals = [] // edited values by fi, then ri
 			e.cell_errors = [] // cell errors by fi, then ri
 		}
+		return drop_ris.length > 0 || moved_ris.length > 0
 	}
 
 	// Apply rowset.lua's reply, with one result per sent row.
@@ -3817,7 +3872,12 @@ ui.nav = function(id, opt) {
 		// end the batch before dropping rows: free_slot() refuses a row of
 		// the batch.
 		end_save()
-		apply_server_rows(set_ris, vals_list, drop_ris)
+		let is_placed = apply_server_rows(set_ris, vals_list, drop_ris)
+		// rows that the save changed besides the sent rows.
+		if (result.changes && merge_server_rows(result.changes))
+			is_placed = true
+		if (is_placed)
+			update_tree_and_visible_ris(false)
 	}
 
 	// Reserve ids before saving new rows so that the nav can resend an insert
@@ -3888,6 +3948,10 @@ ui.nav = function(id, opt) {
 			want_save = false
 			e.save()
 		}
+		// a failed save left rows in saving_ris: reload to settle them before
+		// loading children.
+		if (load_children() && saving_ris.size && !save_req && !load_req)
+			e.reload()
 		ui.animate()
 	}
 
@@ -3981,6 +4045,8 @@ ui.nav = function(id, opt) {
 				row[field.fi] ?? null)
 		group_field.col_storage.set(e.col_vals[group_field.fi], ri, null)
 		e.row_flags[ri] = 0
+		if (has_unloaded_children(ri))
+			e.row_flags[ri] = ROW_COLLAPSED
 		return ri
 	}
 
@@ -4049,7 +4115,10 @@ ui.nav = function(id, opt) {
 	// of removed_pks. If no row moves, appears or goes away, stop there.
 	// Otherwise place the rows by pos and parent_id, then sort, filter and
 	// group again, leaving the rows kept in place where they are.
-	e.merge_rows = function(change_set) {
+	// row_ris: optional array that gets the slot of each row of the change
+	// set, in order.
+	// -> true if rows were placed: the caller must run stages 3-5.
+	function merge_server_rows(change_set, row_ris) {
 		assert(!saving_ris.size, 'merge_rows: a save batch is pending or lost')
 		let rows = change_set.rows ?? []
 		let removed_pks = change_set.removed_pks ?? []
@@ -4077,7 +4146,8 @@ ui.nav = function(id, opt) {
 			let row = rows[k]
 			let ri = found_ris[k]
 			if (ri == null) {
-				added_ris.push(add_server_row(row))
+				ri = add_server_row(row)
+				added_ris.push(ri)
 			} else {
 				let was_modified = is_row_modified(ri)
 				let has_new_keys = key_fis.some(fi =>
@@ -4105,14 +4175,16 @@ ui.nav = function(id, opt) {
 					placed_ris.push(ri)
 				}
 			}
+			row_ris?.push(ri)
 		}
 		invalidate_changed_cols(is_modified_col)
 
 		// Place rows only when one moves, appears or goes away. Append the
 		// added rows, then put rows in pos order and under their parents.
-		if (drop_ris.length || added_ris.length || moved_ris.length
-			|| placed_ris.length
-		) {
+		let is_placed = drop_ris.length > 0 // rows to place
+			|| added_ris.length > 0 || moved_ris.length > 0
+			|| placed_ris.length > 0
+		if (is_placed) {
 			if (drop_ris.length)
 				drop_rows(drop_ris)
 			let n = e.row_n // rows before adding
@@ -4131,7 +4203,6 @@ ui.nav = function(id, opt) {
 			update_pass()
 			if (e.is_grouped)
 				regroup()
-			update_tree_and_visible_ris(false)
 		}
 
 		// Discard the edit and error arrays if no modified rows remain.
@@ -4141,6 +4212,12 @@ ui.nav = function(id, opt) {
 		}
 		if (change_set.can_load_changed_rows != null)
 			e.can_load_changed_rows = change_set.can_load_changed_rows
+		return is_placed
+	}
+
+	e.merge_rows = function(change_set) {
+		if (merge_server_rows(change_set))
+			update_tree_and_visible_ris(false)
 	}
 
 	/// reloading -------------------------------------------------------------
@@ -4162,7 +4239,19 @@ ui.nav = function(id, opt) {
 			load_req = null
 			refilter()
 		} else {
-			let url = rowset_url()
+			// partial load: load the roots and the children of the rows whose
+			// children are loaded.
+			let parent_ids = e.partial_load ? [null] : null // [id, ...]
+			requested_parent_ids = null
+			if (e.partial_load && e.can_be_tree) {
+				for (let i = 0; i < e.row_n; i++) {
+					let ri = e.base_ris[i]
+					if (e.row_flags[ri] & ROW_CHILDREN_LOADED)
+						parent_ids.push(col_val(ri, e.id_field.fi))
+				}
+				requested_parent_ids = new Set(parent_ids)
+			}
+			let url = rowset_url(!e.partial_load, parent_ids)
 			load_req?.abort()
 			load_req = ajax({
 				dont_send: true,
@@ -4181,6 +4270,7 @@ ui.nav = function(id, opt) {
 				done: function() {
 					if (this == load_req) {
 						load_req = null
+						load_children()
 						ui.animate()
 					}
 				},
@@ -4209,6 +4299,309 @@ ui.nav = function(id, opt) {
 		load_req?.abort()
 		load_req = null
 		save_req = null
+		abort_children_reqs()
+	}
+
+	// -> [v1, ...]: the row's pk, with a new row's typed pk.
+	function row_pk(ri) {
+		return e.pk_fields.map(field => e.cell_input_val(ri, field.fi))
+	}
+
+	// A server rowset loads only the rows matching param_vals. Return true if
+	// a row with row_vals {col: val} was among the rows requested.
+	function is_requested_vals(row_vals) {
+		if (!is_server_rowset)
+			return true
+		if (requested_parent_ids
+			&& !requested_parent_ids.has(row_vals[e.parent_field.name]))
+			return false
+		if (!e.param_vals)
+			return true
+		// a param that is not a column filters rows on the server only.
+		return e.param_vals.some(vals =>
+			keys(vals).every(col => !e.all_fields_map[col]
+				|| row_vals[col] === vals[col]))
+	}
+
+	// Return the pending changes as plain JSON, by pk and column name:
+	//   {rows: [{pk: [v1, ...], is_new, is_removed, vals: {col: v},
+	//     edits: {col: v}}, ...]}
+	// vals holds the set column values: a new row's own values, or the server
+	// values of a saved row.
+	e.get_edit_state = function() {
+		let rows = []
+		for (let i = 0; i < e.row_n; i++) {
+			let ri = e.base_ris[i]
+			if (!is_row_modified(ri))
+				continue
+			let vals = {} // set column values, by col
+			let edits = {} // edited values, by col
+			for (let field of rowset_fields) {
+				let fi = field.fi
+				if (!cell_bit(e.unset_mask, ri, fi))
+					vals[field.name] = col_val(ri, fi)
+				if (cell_bit(e.modified_mask, ri, fi))
+					edits[field.name] = e.input_vals[fi][ri]
+			}
+			let flags = e.row_flags[ri]
+			rows.push({
+				pk: row_pk(ri),
+				is_new: !!(flags & ROW_NEW),
+				is_removed: !!(flags & ROW_REMOVED),
+				vals: vals,
+				edits: edits,
+			})
+		}
+		return {rows: rows}
+	}
+
+	// Add a recorded row that the server didn't return, with its recorded
+	// column values. Return its slot.
+	function add_recorded_row(row) {
+		let ri = alloc_slot()
+		for (let field of rowset_fields) {
+			let v = row.vals[field.name]
+			if (v === undefined)
+				set_cell_bit(e.unset_mask, ri, field.fi, true)
+			field.col_storage.set(e.col_vals[field.fi], ri, v ?? null)
+		}
+		group_field.col_storage.set(e.col_vals[group_field.fi], ri, null)
+		e.row_flags[ri] = row.is_new ? ROW_NEW | ROW_PASS | ROW_UNPLACED
+			: ROW_PASS
+		if (row.is_new)
+			e.modified_n++
+		return ri
+	}
+
+	// Write edit_state from get_edit_state() over the server rows that
+	// load_rows() just loaded, finding each recorded row by pk:
+	//   saved row found: write the edits and the deletion mark again.
+	//   new row found: the server saved it, so it becomes that saved row, and
+	//     its values that differ from the server's become edits (R4).
+	//   saved row not found: drop it, unless the server didn't load it
+	//     because it doesn't match param_vals.
+	//   new row not found: add it again, unless it is marked for deletion,
+	//     because then its insert never committed.
+	function replay_edit_state(edit_state) {
+		let added_ris = [] // recorded rows added again
+		for (let row of edit_state.rows) {
+			let ri = e.lookup(e.pk, row.pk)
+			let edits = row.edits // {col: v}
+			if (ri != null) {
+				if (row.is_new)
+					edits = assign({}, row.vals, row.edits)
+			} else {
+				if (row.is_new ? row.is_removed : is_requested_vals(row.vals))
+					continue
+				ri = add_recorded_row(row)
+				added_ris.push(ri)
+			}
+			for (let col in edits) {
+				let field = e.all_fields_map[col]
+				set_input_val(ri, field.fi, edits[col])
+				// an edit equal to the server value is gone: nothing to check.
+				if (cell_bit(e.modified_mask, ri, field.fi))
+					set_cell_errors(ri, field.fi, validate_cell(field, edits[col]))
+			}
+			if (row.is_removed) {
+				let was_modified = is_row_modified(ri)
+				set_bits(e.row_flags, ri, ROW_REMOVED, true)
+				update_modified_n(ri, was_modified)
+			}
+			update_invalid(ri)
+		}
+
+		// append the added rows to the stored order and the indexes.
+		let k = added_ris.length
+		if (k) {
+			e.base_ris = insert_into_list(e.base_ris, e.row_n, e.row_n,
+				Uint32Array.from(added_ris), k)
+			e.sorted_ris = e.base_ris
+			e.row_n += k
+			add_to_indexes(added_ris)
+		}
+	}
+
+	// Copy the collapsed, children loaded, children requested and load
+	// recursive flags from the rows before the reload to the rows with the
+	// same pk. Both lists are sorted by pk, so walk them together. A tree's
+	// pk is one column. Skip null pks: they don't say which row is which.
+	function restore_tree_flags(old_rows) {
+		let tree_bits = ROW_COLLAPSED | ROW_CHILDREN_LOADED
+			| ROW_CHILDREN_REQUESTED | ROW_LOAD_RECURSIVE
+		let pk_field = e.pk_fields[0]
+		let storage = pk_field.col_storage
+		let pk_vals = e.col_vals[pk_field.fi]
+		let pk_index = get_index(e.pk).ris // dynamic row index by pk
+		let pk_ris = pk_index.array // rows sorted by pk
+		let j = 0 // index into old_rows.pk_ris
+		for (let i = 0; i < pk_index.len; i++) {
+			let ri = pk_ris[i]
+			while (j < old_rows.n) {
+				let old_ri = old_rows.pk_ris[j]
+				let old_pk = storage.get(old_rows.pk_vals, old_ri)
+				let cmp = storage.compare_cell(pk_vals, ri, old_pk)
+				if (cmp < 0)
+					break
+				j++
+				if (cmp == 0) {
+					if (old_pk != null)
+						e.row_flags[ri] = (e.row_flags[ri] & ~tree_bits)
+							| (old_rows.row_flags[old_ri] & tree_bits)
+					break
+				}
+			}
+		}
+	}
+
+	// reload rs, but keep and re-apply pending changes, collapsed flag and
+	// view view settings. falls back to load(rs) if rowset definition differs.
+	e.reload_rowset = function(rs) {
+		if (!is_same_rowset(rs)) {
+			e.load(rs)
+			return
+		}
+		let src_col_vals = rowset_col_vals(rs, rowset_fields.length)
+		if (!src_col_vals)
+			return
+		let edit_state = e.get_edit_state()
+		// collapse flags on data rows matter only in a nav that can be a tree.
+		let old_rows = null // rows before the reload, for restore_tree_flags()
+		if (e.can_be_tree) {
+			let pk_index = get_index(e.pk).ris // dynamic row index by pk
+			old_rows = {
+				pk_ris: pk_index.array, // rows sorted by pk
+				n: pk_index.len,
+				pk_vals: e.col_vals[e.pk_fields[0].fi],
+				row_flags: e.row_flags,
+			}
+		}
+		rowset_tree_col = rs.tree_col
+		load_rows(src_col_vals, edit_state, old_rows)
+		e.can_load_changed_rows = rs.can_load_changed_rows ?? false
+		e.move_focus(null, null)
+	}
+
+	/// partial loading -------------------------------------------------------
+
+	// partial load: the server says that the row has children, and the nav
+	// has not loaded them.
+	function has_unloaded_children(ri) {
+		return e.partial_load && e.can_be_tree
+			&& !(e.row_flags[ri] & ROW_CHILDREN_LOADED)
+			&& !!col_val(ri, e.has_children_field.fi)
+	}
+
+	// Load the children of the expanded rows whose children are not loaded
+	// or requested, or their whole subtrees for rows expanded recursively.
+	// Wait for a pending save or load, because merge_rows() cannot merge
+	// during a save and a load replaces the rows. Wait outside tree view,
+	// where tree_ris has no subtrees to skip. Look only at the rows in
+	// tree_ris[i1 .. i2].
+	// -> true if rows wait for their children.
+	function load_children(i1 = 0, i2 = e.tree_n - 1) {
+		if (!(e.partial_load && e.can_be_tree && e.is_tree))
+			return false
+		let ris = [] // rows to load the children of
+		let recursive_ris = [] // rows to load the subtrees of
+		let row_flags = e.row_flags
+		for (let i = i1; i <= i2; i++) {
+			let ri = e.tree_ris[i]
+			let flags = row_flags[ri]
+			// the subtree comes with a recursive load: a second request for a
+			// row inside it would load that row's subtree twice.
+			if (flags & ROW_CHILDREN_REQUESTED) {
+				if (flags & ROW_LOAD_RECURSIVE)
+					i += e.desc_count[ri]
+			} else if (!(flags & ROW_COLLAPSED) && has_unloaded_children(ri)) {
+				if (flags & ROW_LOAD_RECURSIVE) {
+					recursive_ris.push(ri)
+					i += e.desc_count[ri]
+				} else {
+					ris.push(ri)
+				}
+			}
+		}
+		if (!ris.length && !recursive_ris.length)
+			return false
+		if (save_req || saving_ris.size || load_req)
+			return true
+		if (ris.length)
+			send_children_req(ris, false)
+		if (recursive_ris.length)
+			send_children_req(recursive_ris, true)
+		return true
+	}
+
+	function send_children_req(ris, recursive) {
+		let parent_ids = [] // [id, ...]
+		for (let ri of ris) {
+			e.row_flags[ri] |= ROW_CHILDREN_REQUESTED
+			parent_ids.push(col_val(ri, e.id_field.fi))
+		}
+		let req = ajax({
+			dont_send: true,
+			url: rowset_url(recursive, parent_ids),
+			success: function(rs) {
+				if (!children_reqs.has(this))
+					return
+				// a save or a reload started after the request: load again
+				// after it.
+				if (save_req || saving_ris.size || load_req)
+					clear_children_requested(parent_ids)
+				else
+					merge_children(rs.rows, parent_ids, recursive)
+			},
+			done: function(status) {
+				if (!children_reqs.delete(this))
+					return
+				// failed: load again on the next expand, save or reload.
+				if (status == 'fail')
+					clear_children_requested(parent_ids)
+				ui.animate()
+			},
+		})
+		children_reqs.add(req)
+		req.send()
+	}
+
+	function clear_children_requested(parent_ids) {
+		for (let id of parent_ids) {
+			let ri = e.lookup(e.id_field.name, [id])
+			if (ri != null)
+				e.row_flags[ri] &= ~ROW_CHILDREN_REQUESTED
+		}
+	}
+
+	// done() ignores the aborted requests: load() replaces row_flags, which
+	// drops their requested flags.
+	function abort_children_reqs() {
+		let reqs = children_reqs // requests to abort
+		children_reqs = new Set()
+		for (let req of reqs)
+			req.abort()
+	}
+
+	// Add the loaded rows and mark the parents as loaded. A recursive load
+	// got the whole subtrees, so mark every row as loaded and expand it.
+	function merge_children(rows, parent_ids, recursive) {
+		let row_ris = recursive ? [] : null // slots of the loaded rows
+		let is_placed = merge_server_rows({rows: rows}, row_ris)
+		let row_flags = e.row_flags
+		for (let id of parent_ids) {
+			let ri = e.lookup(e.id_field.name, [id])
+			if (ri != null)
+				row_flags[ri] = (row_flags[ri] | ROW_CHILDREN_LOADED)
+					& ~(ROW_CHILDREN_REQUESTED | ROW_LOAD_RECURSIVE)
+		}
+		if (recursive)
+			for (let ri of row_ris)
+				row_flags[ri] = (row_flags[ri] | ROW_CHILDREN_LOADED)
+					& ~ROW_COLLAPSED
+		if (is_placed)
+			update_tree_and_visible_ris(false)
+		else if (recursive)
+			update_visible_ris(false)
 	}
 
 	/// loading ---------------------------------------------------------------
@@ -4338,12 +4731,14 @@ ui.nav = function(id, opt) {
 			? null : col_field(rs.id_col, all_fields_map)
 		let parent_field  = col_field(rs.parent_col , all_fields_map)
 		let display_field = col_field(rs.display_col, all_fields_map)
+		let has_children_field = col_field(rs.has_children_col, all_fields_map)
 
 		if (
 			   rs.pos_col     != null && !pos_field
 			|| rs.id_col != null && rs.id_col !== false && !id_field
 			|| rs.parent_col  != null && !parent_field
 			|| rs.display_col != null && !display_field
+			|| rs.has_children_col != null && !has_children_field
 		)
 			return
 
@@ -4352,8 +4747,19 @@ ui.nav = function(id, opt) {
 			id_field = pk_fields[0]
 
 		if (warn_if(id_field && parent_field
-				&& !(is_reserved_pk && id_field == pk_fields[0]), e.id,
-			'tree id must be the pk, one auto_increment number field'))
+				&& !(pk_fields.length == 1 && id_field == pk_fields[0]
+					&& (is_reserved_pk || rs.can_add_rows == false
+						&& id_field.readonly)), e.id,
+			'tree id must be a single-column pk; auto_increment required'
+			+ ' unless inserts are disabled and the id is readonly'))
+			return
+
+		// partial load asks the server for the children of given parents and
+		// needs the server to tell which rows have children.
+		let can_be_tree = !!(id_field && parent_field)
+		if (warn_if(e.partial_load && can_be_tree
+				&& !(is_server_rowset && has_children_field), e.id,
+			'partial_load requires a server rowset with has_children_col'))
 			return
 
 		let src_col_vals = rowset_col_vals(rs, all_fields.length)
@@ -4380,6 +4786,7 @@ ui.nav = function(id, opt) {
 		e.id_field = id_field
 		e.parent_field = parent_field
 		e.display_field = display_field
+		e.has_children_field = has_children_field
 
 		group_field = ui.create_field({
 			name: '$group', label: 'Group', w: 12,
@@ -4409,10 +4816,10 @@ ui.nav = function(id, opt) {
 
 		e.cols = apply_view ? saved_opt('cols') : null
 		e.order_by = apply_view ? saved_opt('order_by') : null
-		e.can_be_tree = !!(e.id_field && e.parent_field)
+		e.can_be_tree = can_be_tree
 		e.group_by = null
 		e.group_cols = []
-		collapsed_group_paths.clear()
+		toggled_group_paths.clear()
 
 		// abort/clear any current requests (save or load).
 		let cur_save_req = save_req
@@ -4421,6 +4828,7 @@ ui.nav = function(id, opt) {
 		end_save()
 		want_save = false
 		want_reload = false
+		abort_children_reqs()
 
 		load_rows(src_col_vals, null, null)
 		let group_by = apply_view ? saved_opt('group_by') : null
@@ -4430,9 +4838,9 @@ ui.nav = function(id, opt) {
 	}
 
 	// load rows from src_col_vals and re-apply filters, order_by, group_by,
-	// cols, flat mode, edit state, collapsed flags.
+	// cols, flat mode, edit state, collapsed and children loaded flags.
 	// resets focus, selection, quicksearch.
-	function load_rows(src_col_vals, edit_state, collapsed_pks) {
+	function load_rows(src_col_vals, edit_state, old_rows) {
 		e.exit_edit()
 		e.row_n = src_col_vals[0].length
 		// capacity of ri-indexed arrays: the replay adds at most one row per
@@ -4495,12 +4903,6 @@ ui.nav = function(id, opt) {
 
 		if (edit_state)
 			replay_edit_state(edit_state)
-		if (collapsed_pks)
-			for (let pk of collapsed_pks) {
-				let ri = e.lookup(e.pk, pk)
-				if (ri != null)
-					set_bits(e.row_flags, ri, ROW_COLLAPSED, true)
-			}
 
 		if (e.can_be_tree)
 			set_tree_parents()
@@ -4516,6 +4918,21 @@ ui.nav = function(id, opt) {
 			if (edited_parent_ris.length || e.pos_field)
 				update_row_places(edited_parent_ris)
 		}
+		// rows the nav has not seen before start collapsed, unless
+		// start_expanded, and always when their children are not loaded.
+		// Recorded rows get their recorded flags back.
+		if (e.can_be_tree) {
+			for (let i = 0; i < e.row_n; i++) {
+				let ri = e.base_ris[i]
+				let p = e.parent_ri[ri]
+				if (!e.start_expanded && p != NONE)
+					e.row_flags[p] |= ROW_COLLAPSED
+				if (has_unloaded_children(ri))
+					e.row_flags[ri] |= ROW_COLLAPSED
+			}
+			if (old_rows)
+				restore_tree_flags(old_rows)
+		}
 		sort_ris(e.order_by)
 		update_row_filter()
 		update_pass()
@@ -4528,7 +4945,7 @@ ui.nav = function(id, opt) {
 		// clears circular parent links. Expand the collapsed ancestors of
 		// modified rows, because the nav never hides an edited cell.
 		update_tree_ris()
-		if (e.is_tree && collapsed_pks?.length)
+		if (e.is_tree && e.modified_n)
 			for (let i = 0; i < e.row_n; i++) {
 				let ri = e.base_ris[i]
 				if (is_row_modified(ri))
@@ -4539,157 +4956,22 @@ ui.nav = function(id, opt) {
 		update_visible_ris()
 	}
 
-	// -> [v1, ...]: the row's pk, with a new row's typed pk.
-	function row_pk(ri) {
-		return e.pk_fields.map(field => e.cell_input_val(ri, field.fi))
-	}
-
-	// A server rowset loads only the rows matching param_vals. Return true if
-	// a row with row_vals {col: val} was among the rows requested.
-	function is_requested_vals(row_vals) {
-		if (!(e.param_vals && is_server_rowset))
-			return true
-		return e.param_vals.some(vals =>
-			keys(vals).every(col => row_vals[col] === vals[col]))
-	}
-
-	// Return the pending changes as plain JSON, by pk and column name:
-	//   {rows: [{pk: [v1, ...], is_new, is_removed, vals: {col: v},
-	//     edits: {col: v}}, ...]}
-	// vals holds the set column values: a new row's own values, or the server
-	// values of a saved row.
-	e.get_edit_state = function() {
-		let rows = []
-		for (let i = 0; i < e.row_n; i++) {
-			let ri = e.base_ris[i]
-			if (!is_row_modified(ri))
-				continue
-			let vals = {} // set column values, by col
-			let edits = {} // edited values, by col
-			for (let field of rowset_fields) {
-				let fi = field.fi
-				if (!cell_bit(e.unset_mask, ri, fi))
-					vals[field.name] = col_val(ri, fi)
-				if (cell_bit(e.modified_mask, ri, fi))
-					edits[field.name] = e.input_vals[fi][ri]
-			}
-			let flags = e.row_flags[ri]
-			rows.push({
-				pk: row_pk(ri),
-				is_new: !!(flags & ROW_NEW),
-				is_removed: !!(flags & ROW_REMOVED),
-				vals: vals,
-				edits: edits,
-			})
-		}
-		return {rows: rows}
-	}
-
-	// Add a recorded row that the server didn't return, with its recorded
-	// column values. Return its slot.
-	function add_recorded_row(row) {
-		let ri = alloc_slot()
-		for (let field of rowset_fields) {
-			let v = row.vals[field.name]
-			if (v === undefined)
-				set_cell_bit(e.unset_mask, ri, field.fi, true)
-			field.col_storage.set(e.col_vals[field.fi], ri, v ?? null)
-		}
-		group_field.col_storage.set(e.col_vals[group_field.fi], ri, null)
-		e.row_flags[ri] = row.is_new ? ROW_NEW | ROW_PASS | ROW_UNPLACED
-			: ROW_PASS
-		if (row.is_new)
-			e.modified_n++
-		return ri
-	}
-
-	// Write edit_state from get_edit_state() over the server rows that
-	// load_rows() just loaded, finding each recorded row by pk:
-	//   saved row found: write the edits and the deletion mark again.
-	//   new row found: the server saved it, so it becomes that saved row, and
-	//     its values that differ from the server's become edits (R4).
-	//   saved row not found: drop it, unless the server didn't load it
-	//     because it doesn't match param_vals.
-	//   new row not found: add it again, unless it is marked for deletion,
-	//     because then its insert never committed.
-	function replay_edit_state(edit_state) {
-		let added_ris = [] // recorded rows added again
-		for (let row of edit_state.rows) {
-			let ri = e.lookup(e.pk, row.pk)
-			let edits = row.edits // {col: v}
-			if (ri != null) {
-				if (row.is_new)
-					edits = assign({}, row.vals, row.edits)
-			} else {
-				if (row.is_new ? row.is_removed : is_requested_vals(row.vals))
-					continue
-				ri = add_recorded_row(row)
-				added_ris.push(ri)
-			}
-			for (let col in edits) {
-				let field = e.all_fields_map[col]
-				set_input_val(ri, field.fi, edits[col])
-				// an edit equal to the server value is gone: nothing to check.
-				if (cell_bit(e.modified_mask, ri, field.fi))
-					set_cell_errors(ri, field.fi, validate_cell(field, edits[col]))
-			}
-			if (row.is_removed) {
-				let was_modified = is_row_modified(ri)
-				set_bits(e.row_flags, ri, ROW_REMOVED, true)
-				update_modified_n(ri, was_modified)
-			}
-			update_invalid(ri)
-		}
-
-		// append the added rows to the stored order and the indexes.
-		let k = added_ris.length
-		if (k) {
-			e.base_ris = insert_into_list(e.base_ris, e.row_n, e.row_n,
-				Uint32Array.from(added_ris), k)
-			e.sorted_ris = e.base_ris
-			e.row_n += k
-			add_to_indexes(added_ris)
-		}
-	}
-
-	// reload rs, but keep and re-apply pending changes, collapsed flag and
-	// view view settings. falls back to load(rs) if rowset definition differs.
-	e.reload_rowset = function(rs) {
-		if (!is_same_rowset(rs)) {
-			e.load(rs)
-			return
-		}
-		let src_col_vals = rowset_col_vals(rs, rowset_fields.length)
-		if (!src_col_vals)
-			return
-		let edit_state = e.get_edit_state()
-		// collapse flags on data rows matter only in a nav that can be a tree.
-		let collapsed_pks = [] // pks of the collapsed rows
-		if (e.can_be_tree)
-			for (let i = 0; i < e.row_n; i++) {
-				let ri = e.base_ris[i]
-				if (e.row_flags[ri] & ROW_COLLAPSED)
-					collapsed_pks.push(row_pk(ri))
-			}
-		rowset_tree_col = rs.tree_col
-		load_rows(src_col_vals, edit_state, collapsed_pks)
-		e.can_load_changed_rows = rs.can_load_changed_rows ?? false
-		e.move_focus(null, null)
-	}
-
 	if (e.rowset_name && !is_server_rowset) {
 		e.load(ui.rowsets[e.rowset_name])
 		e.ready = true
-	} else {
+	} else if (is_server_rowset) {
 		// Start with no rows until the first load.
 		e.load({fields: [{name: 'id', hidden: true, not_null: true}], pk: 'id',
-			rows: []}, false)
-		if (is_server_rowset) {
-			listen_rowset_events()
-			rowset_listeners[e.rowset_name] ??= new Set()
-			rowset_listeners[e.rowset_name].add(rowset_changed)
-			e.reload()
-		}
+			rows: [],
+			can_add_rows: false,
+			can_remove_rows: false,
+			can_change_rows: false,
+			can_move_rows: false,
+		}, false)
+		listen_rowset_events()
+		rowset_listeners[e.rowset_name] ??= new Set()
+		rowset_listeners[e.rowset_name].add(rowset_changed)
+		e.reload()
 	}
 
 	return e

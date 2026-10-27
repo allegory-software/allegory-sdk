@@ -83,10 +83,27 @@ function user_json()
 		name = user'name',
 		email = user'email',
 		phone = user'phone',
+		ui_state = user'ui_state' or '{}',
 	}
 end
 
 action['user.json'] = user_json
+
+action['ui_state.json'] = function()
+	local uid = user() -- current user id
+	allow(uid and not user'anonymous', 'sign in required')
+	if method'POST' then
+		local ui_state = checkarg(post'ui_state') -- saved UI state as JSON
+		checkarg(try_json_decode(ui_state, null), 'invalid UI state JSON')
+		db():atomic('w', function()
+			db():update('usr', 'usr ui_state', uid, ui_state)
+		end)
+		return true
+	else
+		checkarg(method'GET')
+		return {ui_state = user'ui_state' or '{}'}
+	end
+end
 
 action['gen_auth_code.json'] = function()
 	checkarg(method'POST')
@@ -132,6 +149,7 @@ function action.en()
 	vars.preloads = cat(vars.preloads, '\n')
 	vars.fonts = cat(vars.fonts, '\n')
 	vars.user = json(user_json())
+	vars.ui_state = (user'ui_state' or '{}'):gsub('<', '\\u003c')
 	out((([[
 <html lang={{lang}} country={{country}} theme="{{theme}}"><head>
 	<meta charset="utf-8">
@@ -149,9 +167,15 @@ function action.en()
 	<script src="/ui_code_edit.js" ></script>
 	<script src="/lezer.js" ></script>
 	<script src="/webrtc.js" ></script>
+	<script src="/ui_db_explorer.js" ></script>
+	<script src="/ui_os_explorer.js" ></script>
 	<script>
 {{{fonts}}}
 user = {{{user}}}
+ui.saved_state = {{{ui_state}}}
+ui.save_unsaved_state = function(saved_state) {
+	post('/ui_state.json', {ui_state: json(saved_state)})
+}
 	</script>
 	<script src="/{{main_file}}"></script>
 </head><style></style>
@@ -184,6 +208,11 @@ end
 local function cui_app(...)
 	if package.loaded[scriptname] then return end
 	webb_app(...)
+	db_schema:import(function()
+		add_cols('usr after theme', {
+			ui_state, text,
+		})
+	end)
 	function app:respond(req)
 		tenant()
 		checkfound(action(unpack(args())))

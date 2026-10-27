@@ -25,6 +25,7 @@ wwwdir'../www'
 
 require'rowset_mdbx'
 require'ui_db_explorer'
+require'ui_os_explorer'
 require'webb_call'
 
 do

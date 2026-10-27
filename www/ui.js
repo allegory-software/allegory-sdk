@@ -7346,6 +7346,7 @@ function next_menu_item_i(items, i, d) {
 // escape, click outside the menu and its submenus: close.
 function menu_update(id, s) {
 	s.picked_id = null
+	s.picked_item = null // the item picked in this pass, or null
 	s.picked_checked = null
 	s.hl_moved_by_key = false
 	if (!s.open)
@@ -7355,13 +7356,14 @@ function menu_update(id, s) {
 	if (escape)
 		ui.capture_keys()
 	// every box of the menu has an id starting with id+'.'.
-	let is_outside = hit_match(id+'.') == null
+	let is_outside = !hovers(id) && hit_match(id+'.') == null
 	if (escape || (ui.click || ui.rightclick) && is_outside) {
 		s.open = false
 		return
 	}
 	let hl_is = s.hl_is
-	let key_level = max(0, hl_is.length - 1) // level navigated by keys
+	let key_level = max(0, // level navigated by keys
+		hl_is.length - (hl_is.at(-1) == null ? 2 : 1))
 	let picked_item
 	let want_close
 
@@ -7383,8 +7385,10 @@ function menu_update(id, s) {
 				ui.keydown('arrowdown') &&  1 ||
 				ui.keydown('arrowup'  ) && -1 || 0
 			if (d) {
+				hl_is.length = level + 1
 				hl_is[level] = next_menu_item_i(level_items, hl_i, d)
 				s.hl_moved_by_key = true
+				ui.capture_keys()
 			} else if (is_hl_enabled && hl_item.items?.length
 				&& (ui.keydown('arrowright') || ui.keydown('enter'))
 			) {
@@ -7393,6 +7397,7 @@ function menu_update(id, s) {
 				ui.capture_keys()
 			} else if (level > 0 && ui.keydown('arrowleft')) {
 				hl_is.length = level
+				ui.capture_keys()
 			} else if (is_hl_enabled && ui.keydown('enter')) {
 				picked_item = hl_item
 				want_close = true
@@ -7410,6 +7415,7 @@ function menu_update(id, s) {
 	}
 	if (picked_item) {
 		s.picked_id = picked_item.id
+		s.picked_item = picked_item
 		if (picked_item.checked != null)
 			s.picked_checked = !picked_item.checked
 	}
@@ -7417,18 +7423,31 @@ function menu_update(id, s) {
 		s.open = false
 }
 
+function set_menu_open(id, s, open) {
+	if (!!s.open == !!open)
+		return
+	s.open = open
+	if (open) {
+		s.hl_is.length = 0
+		s.x = ui.mx // pointer position when opened
+		s.y = ui.my
+		ui.focus(id)
+	}
+}
+
+ui.set_menu_open = function(id, open) {
+	let s = ui.state_of(id)
+	assert(s, 'set_menu_open(): menu not built: ', id)
+	set_menu_open(id, s, open)
+}
+
 ui.menu = function(id, items, want_open, side, align) {
 
 		let s = ui.state(id, menu_update)
 		s.items = items
 		s.hl_is ??= [] // highlighted items indices, per submenu level
-		if (want_open && !s.open) {
-			s.open = true
-			s.hl_is.length = 0
-			s.x = ui.mx // pointer position when opened
-			s.y = ui.my
-			ui.focus(id)
-		}
+		if (want_open)
+			set_menu_open(id, s, true)
 		if (!s.open)
 			return s.picked_id
 		let hl_is = s.hl_is
@@ -7483,10 +7502,10 @@ ui.menu = function(id, items, want_open, side, align) {
 						// check mark column, in the space left of the label.
 						ui.min_w(ui.em(2) - ui.sp2())
 						ui.stack('', 0, 'l', 'c')
-							if (item.checked) {
+							if (item.checked || item.icon) {
 								if (item.disabled)
 									ui.color('text', 'readonly')
-								ui.icon('', 'check')
+								ui.icon('', item.checked ? 'check' : item.icon)
 							}
 						ui.end_stack()
 						if (item.disabled)
@@ -7517,16 +7536,39 @@ ui.menu = function(id, items, want_open, side, align) {
 		return s.picked_id
 }
 
+let open_menu_bars = [] // [menu bar id, ...] while building
+
 ui.menu_button = function(
 	id, icon, text, items, fr, align, valign, style, readonly
 ) {
 	let menu_id = id+'.menu' // menu widget id
-	ui.stack('', fr, align ?? 'l', valign ?? 'c')
-		let want_open = ui.button(id, icon, text, 1, 's', 's', style, readonly)
-		let picked_id = ui.menu(menu_id, items, want_open, 'b', '[')
+	let open = ui.state_of(menu_id, 'open') // whether the menu is open
+	let enter = !readonly && ui.focused(id)
+		&& (ui.keydown('enter') || ui.keydown(' '))
+	let toggle = !readonly && clicked(id) || enter
+	let want_open = !readonly && ui.focused(id) // whether to open this menu
+		&& ui.state_of(open_menu_bars.at(-1), 'want_open_menu')
+	if (!readonly && ui.hit_enter(id)
+		&& ui.focus_inside(open_menu_bars.at(-1))) {
+		let s = ui.state_of(ui.focused_id) // focused widget state
+		want_open = want_open || s?.update == menu_update && s.open
+	}
+	if (enter)
+		ui.capture_keys()
+	if (toggle)
+		ui.set_menu_open(menu_id, !open)
+	else if (open && !ui.focus_inside(id))
+		ui.set_menu_open(menu_id, false)
+	else if (want_open)
+		ui.set_menu_open(menu_id, true)
+	ui.focus_group(false, null, id)
+	ui.stack(menu_id, fr, align ?? 'l', valign ?? 'c')
+		ui.button(id, icon, text, 1, 's', 's', style, readonly)
+		let picked_id = ui.menu(menu_id, items, false, 'b', '[')
 		if (!ui.state_of(menu_id, 'open') && ui.focus_inside(menu_id))
 			ui.focus(id)
 	ui.end_stack()
+	ui.end_focus_group()
 	return picked_id
 }
 
@@ -7535,6 +7577,58 @@ ui.bare_menu_button = function(
 ) {
 	return ui.menu_button(id, icon, text, items, fr, align, valign,
 		'', readonly)
+}
+
+function menu_bar_update(id, s) {
+	s.want_open_menu = false // open the focused menu button after navigation
+	if (ui.click) {
+		let group_i = focus_group_map.get(id) // focus group index
+		if (group_i != null) {
+			let end_i = focus_group_end(group_i) // focus group end index
+			for (let hit_id of hit_state_map.keys()) {
+				if (!clicked(hit_id))
+					continue
+				let i = focus_find(hit_id) // focusable index
+				if (i == null || i <= group_i || i >= end_i)
+					continue
+				if (!ui.focus_inside(hit_id))
+					ui.focus(hit_id)
+				break
+			}
+		}
+	} else if ((ui.keydown('arrowleft') || ui.keydown('arrowright'))
+		&& ui.focus_inside(id)) {
+		ui.state_of(ui.focused_id)
+		let is_back = ui.keydown('arrowleft') // move to the previous item
+		if (is_back || ui.keydown('arrowright')) {
+			let group_i = focus_group_map.get(id) // menu bar group index
+			let i0 = focus_find(ui.focused_id) // current focus record index
+			let parent_i = focus_group_of(i0) // parent focus group index
+			while (parent_i != group_i) {
+				i0 = parent_i
+				parent_i = focus_group_of(i0)
+			}
+			let i = next_focusable_after(group_i, i0, is_back) // focusable index
+			if (i != null) {
+				ui.focus(focusables[i+FOCUSABLE_ID], true)
+				s.want_open_menu = true
+				ui.capture_keys()
+			}
+		}
+	}
+}
+
+ui.menu_bar = function(id, fr, gap, align, valign) {
+	ui.state(id, menu_bar_update)
+	open_menu_bars.push(id)
+	ui.h(fr, gap, align, valign)
+	ui.focus_group(false, null, id)
+}
+
+ui.end_menu_bar = function() {
+	ui.end_focus_group()
+	ui.end_h()
+	open_menu_bars.pop()
 }
 
 //// LIST --------------------------------------------------------------------
@@ -7582,6 +7676,7 @@ function list_update(id, s) {
 			value = focused_item
 			value_changed = 'key'
 		}
+		ui.capture_keys()
 	}
 	if (focused && focused_item != null && ui.keydown(' ')) {
 		value = pick_list_item(field, value, focused_item)
@@ -7848,6 +7943,8 @@ function num_slider_update(id, s) {
 		let d = focused &&
 			(ui.keydown('arrowright') && 1 ||
 				ui.keydown('arrowleft') && -1)
+		if (d)
+			ui.capture_keys()
 		let input_value
 		if (cs) {
 			if (cs.drag) {
@@ -8025,6 +8122,8 @@ function slider_update(id, s) {
 	let focused = ui.focused(id)
 	let d = focused &&
 		(ui.keydown('arrowright') && 1 || ui.keydown('arrowleft') && -1)
+	if (d)
+		ui.capture_keys()
 	let value
 
 	if (cs) {
@@ -9704,6 +9803,7 @@ function gradient_slider(draw_gradient, name, max_value, key_step,
 					? s.value : s.valid_value ?? max_value / 2
 				let d = ui.keypressed('shift') ? shift_key_step : key_step
 				s.input_value = slider_value((value + d * step) / max_value)
+				ui.capture_keys()
 			} else if (ui.keydown('delete')) {
 				s.input_value = null
 			}
@@ -10797,7 +10897,9 @@ function tab_gap(w) {
 	ui.end_stack()
 }
 
-function tab_strip(id, s, tablist, selected_tab, cs, added_tab_id) {
+function tab_strip(
+	id, s, tablist, selected_tab, cs, added_tab_id, opt
+) {
 	let tablist_id = id+'.tablist'+tablist.key
 	let tabs = tablist.tabs
 	let is_moving = cs?.moved // the user is dragging a tab of this dock
@@ -10815,6 +10917,7 @@ function tab_strip(id, s, tablist, selected_tab, cs, added_tab_id) {
 	let gap_w = has_gap // gap width
 		? ui.state_of(id+'.tabbox.'
 			+cs.src_tablist.tabs[cs.tab_i].id, 'w') : null
+	ui.h(1, 0, 's', 's')
 	ui.h(1, 0, 's', 's')
 	ui.sb(tablist_id, 1, 'auto-hover', 'contain')
 	ui.h(0, 0, 'l', 't')
@@ -10850,6 +10953,11 @@ function tab_strip(id, s, tablist, selected_tab, cs, added_tab_id) {
 		ui.ph(ui.sp())
 		ui.bare_button(tablist_id+'.plus', 'plus', '', 0)
 	}
+	ui.end_h()
+	ui.h(0, 0, 'r', 'c')
+	if (opt.on_build_strip)
+		opt.on_build_strip(tablist_id, selected_tab, tablist, s.root)
+	ui.end_h()
 	ui.end_h()
 	ui.end_stack()
 }
@@ -11133,13 +11241,17 @@ tab record fields that the dock reads and writes:
 		ui.set_dock_tab(), e.g. from a prompt built in the tab's content.
 */
 
-function dock_tab_panes(id, s, node, cs, on_build_tab, added_tab_id) {
+function dock_tab_panes(
+	id, s, node, cs, on_build_tab, added_tab_id, opt
+) {
 	if (node.split) {
 		ui.hvsplit(node.split, id+'.split'+node.key,
 			node.size, node.unit, node.fixed_side)
-		dock_tab_panes(id, s, node.side1, cs, on_build_tab, added_tab_id)
+		dock_tab_panes(id, s, node.side1, cs, on_build_tab,
+			added_tab_id, opt)
 		ui.splitter()
-		dock_tab_panes(id, s, node.side2, cs, on_build_tab, added_tab_id)
+		dock_tab_panes(id, s, node.side2, cs, on_build_tab,
+			added_tab_id, opt)
 		end_split()
 	} else {
 		let tablist_id = id+'.tablist'+node.key
@@ -11155,7 +11267,8 @@ function dock_tab_panes(id, s, node, cs, on_build_tab, added_tab_id) {
 
 		ui.v(1, 0, 's', 's')
 			if (!s.is_strip_bottom)
-				tab_strip(id, s, node, selected_tab, cs, added_tab_id)
+				tab_strip(id, s, node, selected_tab, cs,
+					added_tab_id, opt)
 			ui.stack('', 1, 's', 's')
 			ui.measure(tablist_id+'.pane')
 			// empty root tablist: no tab to build.
@@ -11168,7 +11281,8 @@ function dock_tab_panes(id, s, node, cs, on_build_tab, added_tab_id) {
 			}
 			ui.end_stack()
 			if (s.is_strip_bottom)
-				tab_strip(id, s, node, selected_tab, cs, added_tab_id)
+				tab_strip(id, s, node, selected_tab, cs,
+					added_tab_id, opt)
 		ui.end_v()
 	}
 }
@@ -11276,7 +11390,8 @@ ui.dock = function(id, layout, on_build_tab, opt) {
 		added_tab_id = update_dock_tabs(s.root, id, s)
 
 	ui.stack(id)
-		dock_tab_panes(id, s, s.root, cs, on_build_tab, added_tab_id)
+		dock_tab_panes(id, s, s.root, cs, on_build_tab,
+			added_tab_id, opt)
 	ui.end_stack()
 }
 

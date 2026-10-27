@@ -336,6 +336,7 @@ function virtual_rowset(init, ...)
 			id_col = rs.id_col,
 			parent_col = rs.parent_col,
 			tree_col = rs.tree_col,
+			has_children_col = rs.has_children_col,
 		})
 		return res
 	end
@@ -432,6 +433,8 @@ function virtual_rowset(init, ...)
 		update_client_fields()
 		local res = {rows = {}, fields = rs.client_fields}
 		local self = object(rs)
+		--rows that the row ops changed besides the sent rows, in field order.
+		self.changed_rows = {}
 
 		for _,row in ipairs(changes.rows) do
 			local rt = {type = row.type}
@@ -494,6 +497,15 @@ function virtual_rowset(init, ...)
 				assert(false)
 			end
 			add(res.rows, rt)
+		end
+
+		if self.changed_rows[1] then
+			if update_computed_fields then
+				for _, row in ipairs(self.changed_rows) do
+					update_computed_fields(row)
+				end
+			end
+			res.changes = {rows = self.changed_rows}
 		end
 
 		return res
@@ -561,6 +573,8 @@ function virtual_rowset(init, ...)
 			['param:lang'        ] = lang(),
 			['param:default_lang'] = default_lang(),
 			['param:filter'      ] = filter,
+			['param:recursive'   ] = args'recursive' ~= '0',
+			['param:parent_ids'  ] = json_decode(args'parent_ids', null),
 		} do
 			params[k] = v
 			params[k..':old'] = v
