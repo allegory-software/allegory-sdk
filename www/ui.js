@@ -7319,7 +7319,7 @@ ui.end_section = function() {
 
 /*
 	let picked_id = ui.menu(id, items, [want_open], [side], [align])
-		items: [{id:, label:, [items:], [checked:], [disabled:]}, ...]
+		items: [{id:, label:, [items:], [checked:], [disabled:]} | null, ...]
 		-> id of the item picked in this pass, or null
 
 	the menu keeps opened state and builds nothing while the menu is closed.
@@ -7336,7 +7336,7 @@ ui.end_section = function() {
 function next_menu_item_i(items, i, d) {
 	let j = i ?? (d > 0 ? -1 : items.length) // item index
 	for (j += d; j >= 0 && j < items.length; j += d)
-		if (!items[j].disabled)
+		if (items[j] && !items[j].disabled)
 			return j
 	return i
 }
@@ -7371,7 +7371,7 @@ function menu_update(id, s) {
 	let level_items = s.items // items of the open menu at level
 	for (let level = 0; level_items; level++) {
 		for (let item of level_items)
-			if (clicked(id+'.item.'+item.id)
+			if (item && clicked(id+'.item.'+item.id)
 				&& !item.disabled && !item.items?.length
 			) {
 				picked_item = item
@@ -7474,6 +7474,15 @@ ui.menu = function(id, items, want_open, side, align) {
 			ui.v()
 			let i = 0
 			for (let item of items) {
+				if (!item) { // separator
+					ui.pv(ui.sp())
+					ui.stack('', 0)
+						ui.min_h(1)
+						ui.bb('light')
+					ui.end_stack()
+					i++
+					continue
+				}
 				let first = i == 0
 				let last = i == items.length-1
 				let item_id = id+'.item.'+item.id

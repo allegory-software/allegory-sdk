@@ -26,11 +26,11 @@ ui.db_explorer = function(id) {
 				filter_bar_visible: true,
 			})
 		} else {
-			let tables_nav = ui.state_of(id+'.tables', 'e')
+			let tables_nav = ui.state_of(id+'.tables', 'nav')
 			let table_name = tables_nav?.focused_row_cell_val('name')
-			ui.grid(id+'.'+(id == 'rows' ? table_name+'.' : '')+tab.id, {
+			ui.grid(id+'.'+(tab.id == 'rows' ? table_name+'.' : '')+tab.id, {
 				rowset_name: 'db_explorer_'+tab.id,
-				param_vals: table_name ? [{table: table_name}] : false,
+				param_bindings: {[id+'.tables']: 'table'},
 				can_move_rows: false,
 			})
 		}

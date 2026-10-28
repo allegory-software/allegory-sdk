@@ -18,7 +18,7 @@ ui.process_tree = function(id) {
 ui.folder_tree = function(id, folder) {
 	ui.grid(id+'.grid', {
 		rowset_name: 'os_explorer_files',
-		param_vals: [{folder: folder}],
+		param_bar_vals: folder != null ? {folder: folder} : null,
 		partial_load: true,
 	})
 }

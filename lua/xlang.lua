@@ -139,7 +139,7 @@ rowset.S = virtual_rowset(function(self, ...)
 	local function update_key(vals)
 		local ext  = checkarg(json_str_arg(vals['ext:old']))
 		local id   = checkarg(json_str_arg(vals['id:old']))
-		local lang = checkarg(json_str_arg(vals['param:lang']))
+		local lang = lang()
 		return ext, id, lang
 	end
 

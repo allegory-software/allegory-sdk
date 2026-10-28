@@ -397,7 +397,7 @@ RELOAD ROWSET
 	  A new row that the server has becomes that saved row. Add a new row that
 	  the server doesn't have again, unless it is marked for deletion. Drop a
 	  saved row that the server doesn't have, unless it is outside the
-	  requested param_vals.
+	  requested params.
 	- collapse the recorded rows again, except the ancestors of modified rows.
 	- put rows with pending parent_id or pos edits back in their places
 	- sort, filter, group
@@ -717,6 +717,8 @@ let listen_rowset_events = memoize(function() {
 
 //// NAV ---------------------------------------------------------------------
 
+let sel_change_n = 0 // global auto-increment number for sel_change_no
+
 ui.nav = function(id, opt) {
 
 	assert(id, 'nav id required')
@@ -775,8 +777,6 @@ ui.nav = function(id, opt) {
 
 	// fields (dynamic with column hiding and moving)
 	e.visible_fields = null
-	// [{id, label, icon, items: [{id, label, checked, disabled}]}]
-	e.menu_items = null
 
 	// rows (dynamic if grid is editable)
 	e.row_n = null // data row count
@@ -804,7 +804,6 @@ ui.nav = function(id, opt) {
 	// sorting, filtering, tree view and grouping
 	e.order_by = null // sort columns, sort function, or null
 	e.filter ??= null // filter function, or null
-	e.param_vals ??= null // [{col: val, ...}, ...] | false | null
 	e.is_filtered = false // row_filter is set: the nav filters rows itself
 	let row_filter = null // fn(ri) combining all filters, or null
 	e.can_be_tree = null
@@ -817,9 +816,17 @@ ui.nav = function(id, opt) {
 	e.is_grouped = null
 	e.group_ris = null // group ris in key order
 	let group_fis = null // field indices of the grouping columns
-	// group_path() of groups the user expanded or collapsed away from
-	// start_expanded
+	// group_path() of groups expanded or collapsed away from start_expanded
 	let toggled_group_paths = new Set()
+
+	// params
+	e.params = null // {param->def} after rowset is loaded
+	e.param_bar_fields = null // [field, ...]: fields of the param bar's inputs
+	e.param_bar_vals ??= empty // {param->val}; param bar values
+	let param_vals = null // {param->[val, ...]}
+	let param_source_vals = obj() // {input_id->val | nav_id->sel_change_n}
+	let load_param_vals = null // {param->[val, ...]} sent with the last load
+	let parent_param = null // partial load: the param that filters parent_col
 
 	// indexes
 	let indexes = null // {cols -> {fields:, ris:}}, built on first lookup
@@ -828,8 +835,8 @@ ui.nav = function(id, opt) {
 	e.focused_ri = null // focused row, or null
 	e.focused_fi = null // focused column
 	e.focus_changed = false // edge event: set by nav, reset by grid
-	// last focused field, kept when no field is focused
-	e.last_focused_fi = null
+	e.sel_change_no = 0 // increments on focus, selection or server value changes
+	e.last_focused_fi = null // last focused field, kept when no field is focused
 	e.sel_mask = null // selected cells' bits
 	e.quicksearch_text = null // typed prefix of the focused cell's text
 	let has_sel_bits = null // false: sel_mask is all zero
@@ -854,9 +861,8 @@ ui.nav = function(id, opt) {
 	e.row_errors = null // row errors by ri
 
 	// saving and loading
-	// the rowset is not in ui.rowsets: load it from the server.
 	let is_server_rowset = !!e.rowset_name && !ui.rowsets[e.rowset_name]
-	e.ready = false // a rowset from ui.rowsets or the server is loaded
+	e.ready = false // nav loaded (for lookup fields and lookup inputs)
 	let save_req = null // pending id or save request, or null
 	let save_batch = null // pending batch: {rows: [...], ris: [...]}
 	let saving_ris = new Set() // rows of the pending or lost batch
@@ -864,8 +870,6 @@ ui.nav = function(id, opt) {
 	let want_reload = false // reload requested during a pending request
 	let own_update_ids = new Set() // ids of this nav's saves
 	let load_req = null // pending load request, or null
-	// partial load: Set of the parent ids requested by the pending load
-	let requested_parent_ids = null
 	let children_reqs = new Set() // pending child load requests
 
 	e.get_debug_state = function() {
@@ -1172,11 +1176,11 @@ ui.nav = function(id, opt) {
 			e.quicksearch_text = ''
 		e.focused_ri = ri
 		e.focused_fi = fi
-		update_menu_labels()
 		if (fi != null)
 			e.last_focused_fi = fi
 		if (has_focus_changed)
 			e.focus_changed = true
+		e.sel_change_no = ++sel_change_n
 	}
 
 	// Use the selection modes of set_focus(). End the edit before focusing
@@ -1495,7 +1499,6 @@ ui.nav = function(id, opt) {
 			fields[vfi].vfi = vfi
 		e.visible_fields = fields // visible fields, in display order
 		visible_fields_mask = fields_mask(fields)
-		update_menu_items()
 		set_focus(e.focused_ri, e.focused_fi)
 	}
 
@@ -1545,43 +1548,6 @@ ui.nav = function(id, opt) {
 		set_cols(col_names, ev)
 	}
 
-	/// context menu ----------------------------------------------------------
-
-	// tree commands in menu_items; update_menu_labels() sets their labels.
-	let expand_item = {id: 'expand_subtree', icon: 'square-plus'}
-	let collapse_item = {id: 'collapse_subtree', icon: 'square-minus-2'}
-
-	function update_menu_items() {
-		// the columns menu: one item per column, grouping columns disabled.
-		let items = []
-		for (let field of e.all_fields) {
-			if (field.internal || field == group_field)
-				continue
-			items.push({
-				id: 'col_' + field.name,
-				field: field,
-				label: field.label,
-				checked: field.vfi != null,
-				disabled: e.is_grouped && group_fis.has(field.fi),
-			})
-		}
-		let columns_item = {
-			id: 'columns',
-			label: 'Show/Hide columns',
-			items,
-		}
-		e.menu_items = e.is_tree || e.is_grouped
-			? [expand_item, collapse_item, columns_item]
-			: [columns_item]
-	}
-
-	// the tree commands act on the focused row's subtree, or on all rows.
-	function update_menu_labels() {
-		let has_focus = e.focused_ri != null // a row is focused
-		expand_item.label = has_focus ? 'Expand subtree' : 'Expand all'
-		collapse_item.label = has_focus ? 'Collapse subtree' : 'Collapse all'
-	}
-
 	/// row orders ------------------------------------------------------------
 
 	// Set parent_ri from the parent_id column. Sort rows by parent_id and
@@ -1627,7 +1593,6 @@ ui.nav = function(id, opt) {
 			: !e.is_tree || tree_col === false ? null
 			: tree_col_field?.vfi != null ? tree_col_field
 			: e.visible_fields[0] ?? null
-		update_menu_items()
 	}
 
 	// Stage 3. Build child lists from sorted_ris and group_ris. Visit each
@@ -2122,48 +2087,21 @@ ui.nav = function(id, opt) {
 		return filter_field
 	}
 
-	// match rows with any of the param_vals records.
-	function param_vals_expr() {
-		let expr = ['&&']
-		if (e.param_vals.length == 1) {
-			for (let k in e.param_vals[0])
-				expr.push(['===', k, e.param_vals[0][k]])
-		} else {
-			let or_expr = ['||']
-			for (let vals of e.param_vals) {
-				let and_expr = ['&&']
-				for (let k in vals)
-					and_expr.push(['===', k, vals[k]])
-				or_expr.push(and_expr.length > 1 ? and_expr : and_expr[1])
-			}
-			expr.push(or_expr)
-		}
-		return expr
-	}
-
-	// compress param_vals into a value array for single-key pks.
-	function param_vals_filter() {
-		if (!e.param_vals)
-			return
-		let cols = keys(e.param_vals[0])
-		if (cols.length == 1) {
-			let col = cols[0]
-			return json(e.param_vals.map(vals => vals[col]))
-		} else {
-			return json(e.param_vals)
-		}
-	}
-
-	// Combine the app filter, param_vals, column filters and excluded values
-	// into row_filter. A server rowset filters by param_vals on the server.
+	// Combine the app filter, a client rowset's bound cols, column filters
+	// and excluded values into row_filter.
 	function update_row_filter() {
 		let tests = [] // [fn(ri) -> passes, ...]
 		if (e.filter)
 			tests.push(e.filter)
-		if (e.param_vals === false)
-			tests.push(return_false)
-		else if (e.param_vals && !is_server_rowset)
-			tests.push(e.expr_filter(param_vals_expr()))
+		if (!is_server_rowset)
+			for (let name in param_vals) {
+				let vals = param_vals[name] // the tuples, one after another
+				let for_cols = e.params[name].for_cols // 'COL ...'
+				let fis = words(for_cols) // field indices of the cols
+					.map(col => e.all_fields_map[col].fi)
+				tests.push(ri => has_tuple(vals, fis.length,
+					j => col_val(ri, fis[j])))
+			}
 		for (let field of e.all_fields) {
 			if (field.filter)
 				tests.push(val_filter(field, field.filter) ?? return_false)
@@ -2212,8 +2150,15 @@ ui.nav = function(id, opt) {
 		refilter()
 	}
 
+	// partial nav: a column filter would miss the rows not loaded.
+	e.can_filter = function() {
+		return !(e.partial_load && e.can_be_tree)
+	}
+
 	// s: filter text, or null to clear the column filter.
 	e.set_col_filter = function(fi, s) {
+		if (warn_if(!e.can_filter(), e.id, 'no column filters on a partial nav'))
+			return
 		e.exit_edit()
 		let field = e.all_fields[fi]
 		field.filter = s
@@ -2221,43 +2166,183 @@ ui.nav = function(id, opt) {
 		refilter()
 	}
 
-	function same_param_vals(param_vals1, param_vals2) {
-		if (!isarray(param_vals1) || !isarray(param_vals2))
-			return param_vals1 === param_vals2
-		if (param_vals1.length != param_vals2.length)
-			return false
-		for (let i = 0; i < param_vals1.length; i++) {
-			let vals1 = param_vals1[i]
-			let vals2 = param_vals2[i]
-			let n = 0 // keys in vals1
-			for (let k in vals1) {
-				if (vals1[k] !== vals2[k])
-					return false
-				n++
-			}
-			for (let k in vals2)
-				n--
-			if (n)
-				return false
-		}
-		return true
-	}
-
-	// Show the rows matching any of param_vals: [{col: val, ...}, ...]. Pass
-	// false to show no rows and null to show all rows. A server rowset loads
-	// only the matching rows.
-	e.set_param_vals = function(param_vals) {
-		if (same_param_vals(param_vals, e.param_vals))
+	e.clear_col_filters = function() {
+		if (warn_if(!e.can_filter(), e.id,
+			'no column filters on a partial nav'))
 			return
 		e.exit_edit()
-		e.param_vals = param_vals
-		if (param_vals && is_server_rowset) {
-			update_row_filter()
-			e.reload()
-		} else {
-			refilter()
-			e.move_focus(null, null)
+		for (let field of e.all_fields) {
+			if (field.filter == null)
+				continue
+			field.filter = null
+			ui.save_state(e.id+'.col_filters', field.name, null)
 		}
+		refilter()
+	}
+
+	/// params ----------------------------------------------------------------
+
+	// -> the params url arg: param values as {name: [val, ...]}.
+	function params_url_arg() {
+		return json(param_vals)
+	}
+
+	// -> {param name -> [val, ...]} from the bindings: an input's value, or
+	// the pk of a master nav's rows: its focused row for an accept_many =
+	// false param, otherwise its selected rows, the focused row first. Then
+	// the values applied from the param bar, for the params not bound.
+	function read_param_vals() {
+		let lists = obj() // {param name -> [val, ...]}
+		for (let id in e.param_bindings) {
+			let name = e.param_bindings[id] // param name
+			let for_cols = e.params?.[name].for_cols // 'COL ...', or undefined
+			let n = for_cols ? words(for_cols).length : 1 // cols in a tuple
+			let master = ui.state_of(id, 'nav')
+			// master pk and param cols differ: warn and supply no values.
+			if (master && e.params && master.ready
+				&& master.pk_fields.length != n
+			) {
+				warn_once(e.id, 'param', name, 'has', n, 'cols but master', id,
+					'has', master.pk_fields.length, 'pk cols')
+				lists[name] = []
+			} else if (master) {
+				// a new master row has no saved key: it supplies no values.
+				let sel_ris = [] // selected master rows, the focused row first
+				master.each_selected_row(function(ri) {
+					if (master.is_new(ri))
+						return
+					if (ri == master.focused_ri)
+						sel_ris.unshift(ri)
+					else
+						sel_ris.push(ri)
+				})
+				let focused_ri = master.focused_ri // focused master row, or null
+				let focused_ris = focused_ri != null && !master.is_new(focused_ri)
+					? [focused_ri] : []
+				// before the param defs arrive, accept_many is unknown: send the
+				// selected rows; the server uses the first tuple.
+				let ris = !e.params || e.params[name].accept_many != false
+					? sel_ris : focused_ris
+				let vals = [] // the pk tuples, one after another
+				for (let ri of ris)
+					for (let field of master.pk_fields)
+						vals.push(master.cell_val(ri, field.name))
+				lists[name] = vals
+			} else {
+				// an input or a master that isn't built yet supplies no values.
+				let v = ui.value(id)
+				// one value can't fill a tuple of several cols.
+				let is_misbound = v !== undefined && n > 1
+				if (is_misbound)
+					warn_once(e.id, 'input', id, 'is bound to param', name,
+						'which has', n, 'cols')
+				lists[name] = v !== undefined && !is_misbound ? [v] : []
+			}
+		}
+		let saved_vals = ui.saved_state[e.id+'.params'] // {param name -> val}
+		for (let name in saved_vals)
+			lists[name] ??= [saved_vals[name]]
+		for (let name in e.param_bar_vals)
+			lists[name] ??= [e.param_bar_vals[name]]
+		return lists
+	}
+
+	// force: reload even when the lists didn't change.
+	function reload_with_params(force) {
+		let lists = read_param_vals()
+		if (!force && json(lists) == json(param_vals))
+			return
+		param_vals = lists
+		e.exit_edit()
+		if (is_server_rowset)
+			e.reload()
+		else
+			refilter()
+	}
+
+	// -> true if the values val(j) of n cols equal one of the tuples in vals.
+	function has_tuple(vals, n, val) {
+		for (let i = 0; i < vals.length; i += n) { // a tuple's first value
+			let j = 0 // col index
+			while (j < n && val(j) === vals[i + j])
+				j++
+			if (j == n)
+				return true
+		}
+		return false
+	}
+
+	// check if params changed and reload if they did.
+	// called per-frame, hence sel_change_no to make checking cheaper.
+	e.reload_if_params_changed = function() {
+		if (!e.param_bindings)
+			return
+		let has_changed = false
+		for (let id in e.param_bindings) {
+			let master = ui.state_of(id, 'nav')
+			let v = master ? master.sel_change_no : ui.value(id)
+			if (v !== param_source_vals[id]) {
+				param_source_vals[id] = v
+				has_changed = true
+			}
+		}
+		if (has_changed)
+			reload_with_params()
+	}
+
+	// -> the value applied last from the param bar, or the param_bar_vals
+	// option's value.
+	e.param_bar_val = function(name) {
+		let saved_vals = ui.saved_state[e.id+'.params'] // {param name -> val}
+		return saved_vals && name in saved_vals ? saved_vals[name]
+			: e.param_bar_vals[name]
+	}
+
+	// Apply the param bar's values {param name -> val}: save them and
+	// reload, even when the params didn't change.
+	e.set_param_bar_vals = function(vals) {
+		for (let name in vals)
+			ui.save_state(e.id+'.params', name, vals[name])
+		reload_with_params(true)
+	}
+
+	function param_col_vals() { // param vals for insert row: {col->val}
+		let vals = obj() // {col: val}
+		for (let name in e.params) {
+			let for_cols = e.params[name].for_cols // 'COL ...', or undefined
+			let tuple_vals = param_vals[name] // the tuples, or undefined
+			if (for_cols && tuple_vals) {
+				let cols = words(for_cols)
+				for (let j = 0; j < cols.length; j++) // col index
+					vals[cols[j]] = tuple_vals[j]
+			}
+		}
+		return vals
+	}
+
+	// A server rowset loads only the rows matching the params. Return true if
+	// a row with row_vals {col: val} was among the rows requested.
+	function is_requested_vals(row_vals) {
+		if (!is_server_rowset)
+			return true
+		// an empty list loads no rows. No list: a plain param loads no rows
+		// and a col param doesn't filter. A plain param filters rows on the
+		// server only. A col param loads the rows equal to one of its tuples.
+		for (let name in e.params) {
+			let for_cols = e.params[name].for_cols // 'COL ...', or undefined
+			let vals = load_param_vals[name] // the tuples, or undefined
+			if (!vals) {
+				if (!for_cols)
+					return false
+			} else if (!vals.length) {
+				return false
+			} else if (for_cols) {
+				let cols = words(for_cols)
+				if (!has_tuple(vals, cols.length, j => row_vals[cols[j]]))
+					return false
+			}
+		}
+		return true
 	}
 
 	/// quicksearch -----------------------------------------------------------
@@ -2609,6 +2694,11 @@ ui.nav = function(id, opt) {
 	// value last seen on the server.
 	function col_val(ri, fi) {
 		return e.all_fields[fi].col_storage.get(e.col_vals[fi], ri)
+	}
+
+	// -> the server value of the row's col.
+	e.cell_val = function(ri, col) {
+		return col_val(ri, e.all_fields_map[col].fi)
 	}
 
 	// mask bit of cell (ri, fi).
@@ -3129,8 +3219,8 @@ ui.nav = function(id, opt) {
 	}
 
 	// Accept rows as [[v1, ...] | null, ...], with cells in fi order. Use the
-	// first param_vals record, then client_default, for undefined cells or for
-	// a null row. Insert before
+	// first tuple of each col param, then client_default, for undefined cells
+	// or for a null row. Insert before
 	// at_ri, or at the end when at_ri is null. Return the new ris, or
 	// an empty array if refused. When sorted, insert at the chosen position in
 	// sorted_ris and append to base_ris. Otherwise insert at that position in
@@ -3177,13 +3267,13 @@ ui.nav = function(id, opt) {
 			? col_val(tree_parent_ri, e.id_field.fi) : null
 		let k = rows.length
 		let ris = new Uint32Array(k) // the new rows' slots
-		let param_vals = e.param_vals ? e.param_vals[0] : null // {col: val}
+		let param_vals = param_col_vals() // {col: val}
 		for (let i = 0; i < k; i++) {
 			let ri = alloc_slot()
 			ris[i] = ri
 			for (let field of e.all_fields) {
 				let v = rows[i]?.[field.fi]
-				if (v === undefined && param_vals)
+				if (v === undefined)
 					v = param_vals[field.name]
 				if (v === undefined) {
 					v = field.client_default
@@ -3616,25 +3706,8 @@ ui.nav = function(id, opt) {
 
 	/// saving ----------------------------------------------------------------
 
-	// recursive = false: load only the roots, or only the direct children
-	// of the parents in the filter.
-	// partial load: parent_ids: [id, ...] ask for the children of those
-	// rows, with null for the roots.
-	function rowset_url(recursive = true, parent_ids) {
-		let url = href('/rowset.json/' + e.rowset_name)
-		let filter = param_vals_filter()
-		if (filter || !recursive || parent_ids) {
-			let u = url_parse(url)
-			u.args = u.args || {}
-			if (filter)
-				u.args.filter = filter
-			if (!recursive)
-				u.args.recursive = 0
-			if (parent_ids)
-				u.args.parent_ids = json(parent_ids)
-			url = url_format(u)
-		}
-		return url
+	function rowset_url() {
+		return href('/rowset.json/' + e.rowset_name)
 	}
 
 	// Copy the last saved primary key so that the server can find the row.
@@ -3743,6 +3816,7 @@ ui.nav = function(id, opt) {
 		set_bits(e.row_flags, ri, ROW_NEW, false)
 		clear_row_mask(e.unset_mask, ri)
 		update_modified_n(ri, was_modified)
+		e.sel_change_no = ++sel_change_n
 
 		// Write the server values into the columns and clear edits equal to
 		// them.
@@ -3907,7 +3981,9 @@ ui.nav = function(id, opt) {
 		save_req = ajax({
 			dont_send: true,
 			url: rowset_url(),
-			upload: {exec: 'reserve_ids', n: new_ris.length},
+			upload: {
+				exec: 'reserve_ids', n: new_ris.length, params: param_vals,
+			},
 			success: function(res) {
 				if (this != save_req)
 					return
@@ -3987,6 +4063,7 @@ ui.nav = function(id, opt) {
 			url: rowset_url(),
 			upload: {
 				exec: 'save',
+				params: param_vals,
 				changes: {rows: batch.rows},
 				update_id: update_id,
 			},
@@ -4034,6 +4111,7 @@ ui.nav = function(id, opt) {
 			&& (rs.pos_col ?? null) === (e.pos_field?.name ?? null)
 			&& (rs.parent_col ?? null) === (e.parent_field?.name ?? null)
 			&& id_col === (e.id_field?.name ?? null)
+			&& json(rs.params ?? null) == json(e.params)
 	}
 
 	// Add a row that the server sent and the nav doesn't have, with cells in
@@ -4234,31 +4312,33 @@ ui.nav = function(id, opt) {
 		if (!is_server_rowset) {
 			e.reload_rowset(ui.rowsets[e.rowset_name])
 			e.ready = true
-		} else if (e.param_vals === false) { // no master row: load nothing
-			load_req?.abort()
-			load_req = null
-			refilter()
 		} else {
 			// partial load: load the roots and the children of the rows whose
 			// children are loaded.
-			let parent_ids = e.partial_load ? [null] : null // [id, ...]
-			requested_parent_ids = null
+			load_param_vals = param_vals
 			if (e.partial_load && e.can_be_tree) {
+				let parent_ids = [null] // [id, ...]
 				for (let i = 0; i < e.row_n; i++) {
 					let ri = e.base_ris[i]
 					if (e.row_flags[ri] & ROW_CHILDREN_LOADED)
 						parent_ids.push(col_val(ri, e.id_field.fi))
 				}
-				requested_parent_ids = new Set(parent_ids)
+				load_param_vals = assign(obj(), param_vals,
+					{[parent_param]: parent_ids})
 			}
-			let url = rowset_url(!e.partial_load, parent_ids)
 			load_req?.abort()
 			load_req = ajax({
 				dont_send: true,
-				url: url,
+				url: rowset_url(),
+				upload: {
+					exec: 'load',
+					params: load_param_vals,
+					recursive: !e.partial_load,
+				},
 				success: function(rs) {
 					if (this != load_req)
 						return
+					let params0 = e.params // param defs before the reply
 					e.reload_rowset(rs)
 					e.ready = true
 					// the reload settled the failed save: run the save that waited.
@@ -4266,6 +4346,10 @@ ui.nav = function(id, opt) {
 						want_save = false
 						e.save()
 					}
+					// new param defs may change the lists: read them again on the
+					// next frame.
+					if (e.params != params0)
+						param_source_vals = obj()
 				},
 				done: function() {
 					if (this == load_req) {
@@ -4280,13 +4364,13 @@ ui.nav = function(id, opt) {
 	}
 
 	// Reload for server notifications, except those from this nav's own saves
-	// and those for a load filtered by other param_vals.
+	// and those for a load filtered by other params.
 	function rowset_changed(update_ids, filter) {
 		let is_own = true
 		for (let update_id of update_ids)
 			if (!own_update_ids.delete(update_id))
 				is_own = false
-		if (!is_own && (filter == null || filter == param_vals_filter()))
+		if (!is_own && (filter == null || filter == params_url_arg()))
 			e.reload()
 	}
 
@@ -4305,22 +4389,6 @@ ui.nav = function(id, opt) {
 	// -> [v1, ...]: the row's pk, with a new row's typed pk.
 	function row_pk(ri) {
 		return e.pk_fields.map(field => e.cell_input_val(ri, field.fi))
-	}
-
-	// A server rowset loads only the rows matching param_vals. Return true if
-	// a row with row_vals {col: val} was among the rows requested.
-	function is_requested_vals(row_vals) {
-		if (!is_server_rowset)
-			return true
-		if (requested_parent_ids
-			&& !requested_parent_ids.has(row_vals[e.parent_field.name]))
-			return false
-		if (!e.param_vals)
-			return true
-		// a param that is not a column filters rows on the server only.
-		return e.param_vals.some(vals =>
-			keys(vals).every(col => !e.all_fields_map[col]
-				|| row_vals[col] === vals[col]))
 	}
 
 	// Return the pending changes as plain JSON, by pk and column name:
@@ -4379,7 +4447,7 @@ ui.nav = function(id, opt) {
 	//   new row found: the server saved it, so it becomes that saved row, and
 	//     its values that differ from the server's become edits (R4).
 	//   saved row not found: drop it, unless the server didn't load it
-	//     because it doesn't match param_vals.
+	//     because it doesn't match the params.
 	//   new row not found: add it again, unless it is marked for deletion,
 	//     because then its insert never committed.
 	function replay_edit_state(edit_state) {
@@ -4541,7 +4609,12 @@ ui.nav = function(id, opt) {
 		}
 		let req = ajax({
 			dont_send: true,
-			url: rowset_url(recursive, parent_ids),
+			url: rowset_url(),
+			upload: {
+				exec: 'load',
+				params: assign(obj(), param_vals, {[parent_param]: parent_ids}),
+				recursive: recursive,
+			},
 			success: function(rs) {
 				if (!children_reqs.has(this))
 					return
@@ -4549,6 +4622,9 @@ ui.nav = function(id, opt) {
 				// after it.
 				if (save_req || saving_ris.size || load_req)
 					clear_children_requested(parent_ids)
+				// fields or params changed on the server: load everything.
+				else if (!is_same_rowset(rs))
+					e.reload()
 				else
 					merge_children(rs.rows, parent_ids, recursive)
 			},
@@ -4699,9 +4775,6 @@ ui.nav = function(id, opt) {
 				let saved_w = ui.saved_state[e.id+'.col_ws']?.[name]
 				if (saved_w != null)
 					field.w = saved_w
-				let saved_filter = ui.saved_state[e.id+'.col_filters']?.[name]
-				if (saved_filter !== undefined)
-					field.filter = saved_filter
 			}
 			field.filter_field = create_filter_field(field)
 			all_fields.push(field)
@@ -4757,9 +4830,15 @@ ui.nav = function(id, opt) {
 		// partial load asks the server for the children of given parents and
 		// needs the server to tell which rows have children.
 		let can_be_tree = !!(id_field && parent_field)
+		let rs_parent_param = null // the param that filters parent_col
+		if (can_be_tree)
+			for (let name in rs.params)
+				if (rs.params[name].for_cols == parent_field.name)
+					rs_parent_param = name
 		if (warn_if(e.partial_load && can_be_tree
-				&& !(is_server_rowset && has_children_field), e.id,
-			'partial_load requires a server rowset with has_children_col'))
+				&& !(is_server_rowset && has_children_field && rs_parent_param),
+			e.id, 'partial_load requires a server rowset with has_children_col'
+			+ ' and a param with for_cols = parent_col'))
 			return
 
 		let src_col_vals = rowset_col_vals(rs, all_fields.length)
@@ -4769,6 +4848,22 @@ ui.nav = function(id, opt) {
 		// init: from here on, no more returns.
 
 		e.exit_edit()
+
+		e.params = rs.params ?? null
+		// create an input on the param bar for each unbound non-col param.
+		e.param_bar_fields = [] // [field, ...]
+		for (let name in e.params) {
+			let is_bound = keys(e.param_bindings ?? empty).some(id =>
+				e.param_bindings[id] == name)
+			if (!e.params[name].for_cols && !is_bound) {
+				let field_def = assign({name: name}, e.params[name])
+				let field = ui.create_field(field_def, e.id)
+				e.param_bar_fields.push(field)
+			}
+		}
+		// client rowset: filter by the lists for the new defs.
+		if (!is_server_rowset)
+			param_vals = read_param_vals()
 
 		if (e.all_fields)
 			for (let field of e.all_fields)
@@ -4787,6 +4882,7 @@ ui.nav = function(id, opt) {
 		e.parent_field = parent_field
 		e.display_field = display_field
 		e.has_children_field = has_children_field
+		parent_param = rs_parent_param
 
 		group_field = ui.create_field({
 			name: '$group', label: 'Group', w: 12,
@@ -4817,6 +4913,13 @@ ui.nav = function(id, opt) {
 		e.cols = apply_view ? saved_opt('cols') : null
 		e.order_by = apply_view ? saved_opt('order_by') : null
 		e.can_be_tree = can_be_tree
+		if (apply_view && e.can_filter())
+			for (let field of all_fields) {
+			// filter text saved by the user, or undefined
+			let saved_filter = ui.saved_state[e.id+'.col_filters']?.[field.name]
+			if (saved_filter !== undefined)
+					field.filter = saved_filter
+			}
 		e.group_by = null
 		e.group_cols = []
 		toggled_group_paths.clear()
@@ -4971,7 +5074,7 @@ ui.nav = function(id, opt) {
 		listen_rowset_events()
 		rowset_listeners[e.rowset_name] ??= new Set()
 		rowset_listeners[e.rowset_name].add(rowset_changed)
-		e.reload()
+		reload_with_params(true)
 	}
 
 	return e

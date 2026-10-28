@@ -1585,93 +1585,15 @@ function load(key) {
 // URL parsing & formatting --------------------------------------------------
 
 function url_parse(s) {
-
 	if (!isstr(s))
 		return s
-
-	let path, query, fragment
-
-	{
-		let i = s.indexOf('#')
-		if (i > -1) {
-			fragment = path.substring(i + 1)
-			path = s.substring(0, i)
-		} else
-			path = s
-	}
-
-	{
-		let i = path.indexOf('?')
-		if (i > -1) {
-			query = path.substring(i + 1)
-			path = path.substring(0, i)
-		}
-	}
-
-	let a = path.split('/')
-	for (let i = 0; i < a.length; i++)
-		a[i] = decodeURIComponent(a[i])
-
-	let t = obj()
-	if (query !== undefined) {
-		let args = query.split('&')
-		for (let i = 0; i < args.length; i++) {
-			let kv = args[i].split('=')
-			let k = decodeURIComponent(kv[0])
-			let v = kv.length == 1 ? true : decodeURIComponent(kv[1])
-			if (t[k] !== undefined) {
-				if (isarray(t[k]))
-					t[k] = [t[k]]
-				t[k].push(v)
-			} else {
-				t[k] = v
-			}
-		}
-	}
-
-	return {path: path, segments: a, query: query, args: t, fragment: fragment}
+	return new URL(s, document.baseURI)
 }
 
-// TODO: this only works on urls without scheme and host !
 function url_format(t) {
-
 	if (!isobject(t))
 		return t
-
-	let path, args, fragment
-
-	let segments = isarray(t) ? t : t.segments
-	if (segments) {
-		let a = []
-		for (let i = 0; i < segments.length; i++)
-			a[i] = encodeURIComponent(segments[i])
-		path = a.join('/')
-	} else
-		path = t.path
-
-	if (t.args) {
-		let a = []
-		let pkeys = keys(t.args).sort()
-		for (let i = 0; i < pkeys.length; i++) {
-			let pk = pkeys[i]
-			let k = encodeURIComponent(pk)
-			let v = t.args[pk]
-			if (isarray(v)) {
-				for (let j = 0; j < v.length; j++) {
-					let z = v[j]
-					let kv = k + (z !== true ? '=' + encodeURIComponent(z) : '')
-					a.push(kv)
-				}
-			} else if (v != null) {
-				let kv = k + (v !== true ? '=' + encodeURIComponent(v) : '')
-				a.push(kv)
-			}
-		}
-		args = a.join('&')
-	} else
-		args = t.args
-
-	return path + (args ? '?' + args : '') + (fragment ? '#' + fragment : '')
+	return t.href
 }
 
 /* events --------------------------------------------------------------------

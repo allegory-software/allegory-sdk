@@ -1,0 +1,202 @@
+NAV PARAMS
+==============================================================================
+
+What rowset params are, how a nav fills them and how they behave. Covers
+master-detail, the param bar, partial tree loading and the planned grid
+value-list filters.
+
+See NAV-SAVE.txt and NAV-CHANGES.txt for notifications and incremental
+fetching. The incremental fetch sends the same params as the full load.
+
+
+PARAMS
+==============================================================================
+
+A rowset declares its params: rs.params = {name -> def}. A param name is
+any name the rowset declares (an mdbx scan arg, a folder path); it is not a
+column name.
+
+A def is a field definition restricted to the attributes that describe a
+value: type, format, validation, picker, label and alignment. Column
+attributes (visibility, width, sorting, filtering) and row attributes
+(insert default, server default, readonly, saving) don't apply to a param.
+So the client can build an input for a param and compare its values like
+cell values.
+
+Param attributes:
+
+	attr         meaning
+	-----------  --------------------------------------------------------------
+	for_cols     'COL' or 'COL1 COL2 ...': the param filters these columns:
+	             the rowset returns the rows whose col values equal one of
+	             the param's tuples. Several cols make a composite key.
+	accept_many  default true. false: the rowset can't OR a list of values,
+	             so the param takes one tuple.
+
+A param with for_cols is a col param; one without is a plain param. A plain
+param means whatever the rowset does with it. for_cols states a fact about
+the rowset's query, whatever fills the param, and the nav relies on it to:
+
+	- give a new row the param's first tuple in its col cells, so the row
+		that the server saves passes the params on the next load,
+	- decide whether an edited row missing from a reload was requested,
+	- (planned) carry a grid value-list filter on that column.
+
+
+VALUES
+==============================================================================
+
+Every param travels as a list of values: {p: [v1, v2, ...], q: [...]}. A
+composite param's list is flat, its tuples one after another: with
+for_cols = 'k1 k2' and the master rows (1, 'a') and (2, 'b'), the list is
+[1, 'a', 2, 'b']. A row passes a param when its col values equal one of
+the param's tuples. Params combine with AND.
+
+	request has            plain param          col param
+	---------------------  -------------------  ------------------------------
+	an empty list          no rows              no rows
+	no list                no rows              no filter on the columns
+
+The rowset ignores names that it doesn't declare. An accept_many = false
+param gets the first tuple of its list.
+
+null is a value: an empty input supplies [null], not an empty list.
+
+
+BINDINGS
+==============================================================================
+
+opt.param_bindings = {SOURCE_ID: PARAM, ...}
+
+Each source fills one param:
+
+	source      values
+	----------  ---------------------------------------------------------------
+	master nav  the pk of its rows: the focused row for an accept_many =
+	            false param, the selected rows otherwise, the focused row
+	            first when it is selected. The pk cols map in order to the
+	            param's cols, so a composite pk fills a composite param.
+	input       the input's value, as a one-value list.
+
+So in master-detail the selected master rows choose the detail rows that
+hold their key.
+
+Examples:
+
+	{'app.orders': 'order_id'}            order_id has for_cols = 'order_id'
+	{'app.orders': 'key'}                 orders has the pk (id, kind); key
+	                                      has for_cols = 'order_id kind'
+	{'app.m1': 'p1', 'app.m2': 'p2'}      two masters, each filling one col
+	                                      of the detail's composite key
+	{'app.year_input': 'year'}            an input
+
+With two masters, the user picks in each master independently: the detail
+shows the rows whose col1 is one of m1's selected keys and whose col2 is
+one of m2's selected keys. A new detail row gets col1 from m1's focused row
+and col2 from m2's focused row.
+
+A bound source that can't supply values sends an empty list, so the detail
+shows no rows:
+
+	- a master or an input that doesn't exist yet,
+	- a master that isn't loaded yet or has no selected rows,
+	- a master with no focused row, for an accept_many = false param,
+	- a new master row: it has no saved key, so the nav skips it,
+	- a misbinding (the nav warns): a master whose pk has a different
+		number of cols than the param, or an input bound to a param of
+		several cols.
+
+The nav reloads when a source's values change. The detail follows its
+masters within the same frame.
+
+
+UNBOUND PARAMS
+==============================================================================
+
+	param   unbound means                filled by
+	------  ---------------------------  --------------------------------------
+	plain   no rows without a value      the param bar
+	col     no filter on those columns   the grid's value-list filter on that
+	                                     column, run on the server (planned)
+
+The param bar has one input per unbound plain param and a reload button.
+The button applies the typed values and reloads, also when the values
+didn't change. Applied values are saved per user and sent with every load,
+the first one included, so they survive a page load. Until the user
+applies a value, the nav sends the value from the option
+param_bar_vals = {name -> val}, so an app can start a param bar with a
+value. A saved name that the rowset no longer declares is ignored.
+
+
+CLIENT ROWSETS
+==============================================================================
+
+A client rowset (ui.rowsets) declares col params the same way; nothing
+takes a plain param there. The nav filters the rows itself and filters
+again when the lists change. Inserting a row works as for a server rowset.
+
+
+LOADING
+==============================================================================
+
+- The nav learns the param defs from the first reply. The first request
+	sends every bound param with the selected master rows; the rowset uses
+	the first tuple of an accept_many = false param, so that request
+	returns the same rows as the later ones.
+- A reply whose fields or param defs differ from the loaded ones makes the
+	nav load the rowset again from scratch, a reply to a partial load
+	included.
+- Reload with pending edits: the nav keeps a saved row with edits that is
+	missing from the reply when the reload didn't request it, and drops it
+	otherwise. Per param, against the lists sent with that load:
+
+		list sent   plain param            col param
+		----------  ---------------------  ------------------------------------
+		none        not requested          no filter
+		empty       not requested          not requested
+		values      requested: the rowset  requested when the row's col
+		            decides                values equal a tuple
+
+
+PARTIAL LOAD
+==============================================================================
+
+A partial nav (option partial_load, on a tree) loads a row's children when
+the user expands it. It requires a server rowset with has_children_col (a
+bool column telling which rows have children) and a col param on
+parent_col.
+
+- The nav fills the parent param itself; it is not bound. The roots are
+	the value [null]. A full load asks for the roots and the children of
+	the rows whose children are loaded.
+- Request arg recursive=0 loads one level below the requested parents;
+	without it the rowset loads whole subtrees.
+- The first request can't name the parent param, so it sends none. The
+	rowset keeps a rule: recursive=0 with no parent param loads the roots.
+- A partial nav refuses column filters: the client can't see the rows that
+	aren't loaded. Saved column filters are ignored and the grid shows no
+	filter bar. The app's own filter function still applies.
+
+
+WRITING A ROWSET
+==============================================================================
+
+- load_rows(res, param_vals, load_opt): param_vals = {name -> val}, with
+	the first tuple for an accept_many = false param. load_opt = {recursive
+	= true | false}.
+- The row methods read the params from self.param_vals. Row values hold
+	only cell values.
+- rs:load() returns no rows, with full metadata, when a plain param has no
+	value or any param has an empty list, so load_rows() doesn't check that.
+- An mdbx scan rowset declares an accept_many = false param for each scan
+	arg, typed from the arg's schema field.
+- decode_params(defs) decodes the request's params for code that has to
+	pick the rowset first (ui_db_explorer.lua picks a rowset per table).
+
+
+MISSING
+==============================================================================
+
+- Grid value-list filters: they fill unbound col params and run on the server.
+- A list param on an mdbx scan that can't take lists: accept_many = false
+  covers it for now.

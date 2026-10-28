@@ -2,6 +2,9 @@ require'rowset_mdbx'
 
 local ffi = require'ffi' -- foreign function interface
 
+--the param of the rowsets that show one table.
+local table_param = {label = 'Table', accept_many = false}
+
 local function format_key_cols(cols)
 	local t = {} -- {key_i -> 'COL [desc]'}
 	for key_i, col in ipairs(cols) do
@@ -135,8 +138,10 @@ rowset.db_explorer_fields = virtual_rowset(function(rs)
 		},
 	}
 	rs.pk = 'col'
+	rs.params = {table = table_param}
 	function rs:load_rows(res, params)
-		local table_name = checkarg(params['param:filter'][1], 'table required')
+		local table_name = params.table -- the table to describe
+		checkarg(table_name ~= null, 'table required')
 		res.rows = {} -- {row_i -> {value in rs.fields order}}
 		db():atomic('r', function()
 			local schema = db():table_schema(table_name)
@@ -170,8 +175,10 @@ rowset.db_explorer_indexes = virtual_rowset(function(rs)
 		},
 	}
 	rs.pk = 'name'
+	rs.params = {table = table_param}
 	function rs:load_rows(res, params)
-		local table_name = checkarg(params['param:filter'][1], 'table required')
+		local table_name = params.table -- the table to describe
+		checkarg(table_name ~= null, 'table required')
 		res.rows = {} -- {row_i -> {name, cols, is_unique, row_count}}
 		db():atomic('r', function()
 			local schema = db():table_schema(table_name)
@@ -191,6 +198,7 @@ end)
 local function init_raw_rowset(rs, table_name)
 	rs.manual_init_fields = true
 	rs.can_move_rows = false
+	rs.params = {table = table_param}
 	rs.fields = {
 		{name = 'key', label = 'Key (hex)', readonly = true,
 			not_null = true},
@@ -214,11 +222,14 @@ local function init_raw_rowset(rs, table_name)
 	rs:init_fields(false)
 end
 
+--the table param picks the rowset to build, which then declares it too, so
+--that its respond() accepts it.
 rowset.db_explorer_rows = function(name, out_format)
-	local filter = json_decode(args'filter', null)
-	local table_name = checkarg(filter and filter[1], 'table required')
+	--a table name, null, an empty list, or nil.
+	local table_name = decode_params{table = table_param}.table
+	--without a table, the raw rowset loads no rows.
 	local rs = db():atomic('r', function()
-		local schema = db():table_schema(table_name)
+		local schema = isstr(table_name) and db():table_schema(table_name)
 		if schema and not schema.is_index then
 			local field_attrs = {} -- {col -> field attribute overrides}
 			for _, col in ipairs(schema.cols) do
@@ -227,6 +238,7 @@ rowset.db_explorer_rows = function(name, out_format)
 			return table_rowset(table_name, {
 				cols = cat(schema.cols, ' '),
 				field_attrs = field_attrs,
+				params = {table = table_param},
 			})
 		else
 			checkarg(method'GET')

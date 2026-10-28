@@ -88,18 +88,6 @@ local function val_or_old(vals, name)
 	return v
 end
 
---respond() prefixes param values with 'param:' and adds an ':old' copy of
---each, both only for the sql rowsets' col maps and update where clauses.
---TODO: drop this once respond() passes param values through unchanged.
-local function scan_args(param_vals)
-	local args = {}
-	for k, v in pairs(param_vals) do
-		local name = k:match'^param:([^:]+)$'
-		if name then args[name] = v end
-	end
-	return args
-end
-
 --the one table whose rows match the rowset's rows one-to-one: every pk output
 --col comes from it, and together they are exactly its pk.
 local function find_write_table(db, out_specs, pk)
@@ -207,11 +195,12 @@ local function scan_rowset_init(rs, opt, ...)
 			end
 		end
 
-		local params = {}
-		for arg in pairs(scan.arg_fields) do
-			if isstr(arg) then add(params, arg) end
+		rs.params = rs.params or {} -- {param name -> def}
+		for arg, field in pairs(scan.arg_fields) do
+			if isstr(arg) then
+				rs.params[arg] = update({accept_many = false}, field)
+			end
 		end
-		rs.params = sort(params)
 
 		--reloading one row repeats the same output over a pk lookup, which
 		--is only possible with one member and every output col coming
@@ -262,7 +251,7 @@ local function scan_rowset_init(rs, opt, ...)
 	end
 	function rs:load_rows(res, param_vals)
 		scan.close()
-		rs_db():atomic('r', load_rows, res, scan_args(param_vals))
+		rs_db():atomic('r', load_rows, res, param_vals)
 	end
 
 	--[[local]] function load_row(self, vals)
@@ -379,7 +368,7 @@ local function scan_rowset_init(rs, opt, ...)
 		if rs.on_rows_changed then
 			changes = rs:on_rows_changed(next_change, param_vals)
 		else
-			changes = load_scan_changed_rows(next_change, scan_args(param_vals))
+			changes = load_scan_changed_rows(next_change, param_vals)
 		end
 		if has_gap or changes == false then
 			res.reload = true

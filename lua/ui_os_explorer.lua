@@ -142,12 +142,15 @@ rowset.os_explorer_files = virtual_rowset(function(rs)
 	rs.id_col = 'path'
 	rs.parent_col = 'parent_path'
 	rs.has_children_col = 'has_children'
-	rs.params = 'folder'
+	rs.params = {
+		folder = {label = 'Folder', accept_many = false},
+		parent_path = {for_cols = 'parent_path'},
+	}
 	rs.tree_col = 'name'
 	rs.can_move_rows = false
-	function rs:load_rows(res, params)
-		local folder = checkarg( -- requested folder path
-			params['param:filter'][1], 'folder required')
+	function rs:load_rows(res, params, load_opt)
+		local folder = params.folder -- requested folder path
+		checkarg(folder ~= null, 'folder required')
 		if folder:sub(1, 2) == '~/' then
 			folder = indir(homedir(), folder:sub(3))
 		end
@@ -158,10 +161,10 @@ rowset.os_explorer_files = virtual_rowset(function(rs)
 			trees[folder] = tree
 		end
 		local rows = {} -- [row, ...]: see folder_row()
-		local recursive = params['param:recursive'] -- load whole subtrees
+		local recursive = load_opt.recursive -- load whole subtrees
 		--the parents of the rows to load, null for the root; the root alone
 		--when the client sends no parents.
-		for _, parent_path in ipairs(params['param:parent_ids'] or {null}) do
+		for _, parent_path in ipairs(params.parent_path or {null}) do
 			if parent_path == null then
 				add(rows, tree.root_row)
 				if recursive then

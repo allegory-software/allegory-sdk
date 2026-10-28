@@ -1,0 +1,369 @@
+MDBX SCAN AND QUERY CHANGE PROPAGATION
+==============================================================================
+
+Plan for finding which result rows to reload after changes to source tables.
+Support simple scans and queries first, then extend the supported cases.
+This is a performance feature. For unsupported cases, report that the rowset
+needs a full reload. Never miss a changed result row to avoid a reload.
+
+For saving, database change capture, push and fetch, and applying server
+rows in the nav, see NAV-SAVE.txt. Here, extend the server's ability to turn
+source-table keys into result keys. Keep the browser's pending edits and
+reload behavior as specified in NAV-SAVE.txt.
+
+The notify-then-fetch protocol, S1 scope and callback API are agreed.
+Choices marked DECIDE must be settled before the affected stage is
+implemented.
+
+
+GOAL
+==============================================================================
+
+Given changes since the rowset's last database transaction, the server:
+
+1. Finds every table read by the scan or query.
+2. Finds the result keys that might have changed.
+3. Evaluates the current query for those keys, with the rowset's parameters
+	and access checks, and returns current rows or keys to remove.
+4. Reports that a full reload is needed when it cannot do this correctly.
+
+An affected key need not have different values. Reloading an unchanged row
+is acceptable. Omitting an affected key is not.
+
+Include rows newly selected by the query and rows no longer selected.
+Do not restrict the search to rows already loaded in the browser.
+
+Use a result key to identify one result row. After joins or grouping, the
+source table's primary key may be insufficient for that identification.
+
+
+CURRENT BASIS
+==============================================================================
+
+module           information available
+---------------  -------------------------------------------------------------
+mdbx_schema      Transaction batches of base-table names and encoded primary
+                 keys. No old row values or operation kind in the batch.
+mdbx_query       Source schemas, aliases, bound column expressions, joins,
+                 filters, nested relations and output operations.
+mdbx_scan        Read-table set, eligibility for direct PK fetching, member
+                 scans and output-column origins.
+
+Output-column origins alone are insufficient. Include tables read only for
+filters, existence checks and join conditions.
+
+For an index scan, use the base table's identity and primary key when
+processing changes. The database records base-table changes.
+
+
+NETWORK PROTOCOL (agreed)
+==============================================================================
+
+Notify the nav of the rowset name and latest database transaction ID.
+Send no row values in the notification. Compute incremental rows when the
+nav fetches, using its parameters and access checks.
+
+After compilation and callback registration, expose a rowset flag saying
+whether the server supports incremental fetching for that rowset. When
+the server cannot support it, the nav asks for full-reload confirmation
+directly on notification, without first requesting incremental changes.
+
+For an incremental rowset:
+
+step                 action
+-------------------  ---------------------------------------------------------
+Notification         Nav records that newer data is available.
+Fetch                Nav requests changes since its last applied transaction
+                     ID, using the current rowset parameters.
+Incremental reply    Server returns current rows, result keys to remove, and
+                     the read transaction ID.
+Apply                Nav applies the reply and records its transaction ID.
+Runtime fallback     Server reports that a full reload is needed, with no
+                     full-rowset data. Nav asks for confirmation.
+Confirmed reload     Nav requests the full load, applies it, and records the
+                     transaction ID returned with that load.
+
+A notification gap is a runtime reason for a full reload even when the
+compiler supports incremental fetching. Keep that reply in the protocol.
+
+Do not advance the last applied transaction ID on notification or when
+receiving a full-reload requirement. While waiting for confirmation, show
+that the rowset needs refreshing and coalesce further notifications. Do not
+repeat incremental fetches already known to require a full reload.
+
+Full reloads require confirmation. Never push full-rowset values. Use the
+NAV-SAVE.txt rules for preserving pending edits and for holding change sets
+while a save is in flight.
+
+Cost: one fetch request after an incremental notification. Compute current
+rows for requesting navs; retain no per-connection query parameters merely
+to compute and push rows directly.
+
+The full-load reply includes txn_id and can_load_changed_rows. Common rowset
+code sets can_load_changed_rows from the presence of load_changed_rows. MDBX
+preparation determines whether compilation and callbacks cover every
+source table and updates the flag. The load_changed_rows method stays defined.
+POST to the same rowset URL, with the same filter parameter as the full
+load, using {exec = 'load_changed_rows', since_txn_id = N}.
+Both full and incremental replies include can_load_changed_rows. The nav
+updates its flag from either reply, including replies requiring a full
+reload. A client may request changes using the capability reported before
+a server restart. The server prepares the current rowset before deciding
+whether to return incremental rows or require a full reload.
+
+The incremental reply contains txn_id, rows and removed_pks, or reload =
+true. A backend without load_changed_rows returns reload = true without a
+transaction ID. Each row is an array in output-column order.
+Each removal key is an array in result-PK order, even for a one-column PK.
+The server returns at most one final row or removal per result PK.
+
+
+CUSTOM CHANGE CALLBACKS (agreed)
+==============================================================================
+
+App code may know how to find affected result rows when the query compiler
+cannot infer that relationship. A rowset handler covers those cases:
+
+rs:on_rows_changed(changes, param_vals)
+	-> {rows = {...}, removed_pks = {...}} | false
+	changes() -> table_name, pk_val1, ...
+
+Set it as a rowset option, before the rowset is prepared. The handler
+replaces automatic fetching for the whole rowset: it receives the changes
+of every source table of the scan.
+
+Run the handler during the requesting nav's fetch, in the read transaction
+used for reading changes, with the current rowset parameters. The handler
+may reselect affected rows through the original rowset query.
+
+The handler must report current rows, result keys to remove, or that a
+full reload is needed. An empty selection alone does not identify which
+old result rows to remove. When source and result primary keys correspond,
+the server can derive the removal key from the source key.
+
+Source keys come as values in the source table's PK order. The server
+passes each change once, so a source key can come more than once. The
+server calls the handler once per fetch. A handler may return {} when no
+result rows need updating. Returning false requires a full reload and
+discards the partial reply. A handler must account for all affected result
+keys or request a full reload.
+
+Cost: one call per fetch, allowing combined queries and deduplication in
+the handler. No old-value retention is required to use a handler.
+
+
+STAGES
+==============================================================================
+
+S1. ONE TABLE, SAME PRIMARY KEY
+------------------------------------------------------------------------------
+
+Support an unfiltered scan or query over one base table, returning every
+part of that table's primary key, possibly with renamed output columns.
+Include composite keys and full index scans. Exclude joins, grouping,
+distinct, set operations, limits, offsets and arbitrary Lua callbacks at
+this stage.
+
+Infer the result-key columns from the selected columns and table schema.
+For each notified source key, return the current selected row, or return
+the result key to remove when the source row is absent.
+
+Use the existing primary-key notifications. Retain no old row values and
+no source-key to result-key associations.
+
+Integrate the agreed notification protocol, full-reload flag and custom
+callbacks with this stage. Automatic support for more complex queries can
+follow separately.
+
+Cost: metadata per constructed scan or compiled query, and primary-key
+lookups for changed keys. Deduplicate repeated keys during a fetch. Add
+no tracking work per row produced by an ordinary query.
+
+Check: insert, update, delete, composite key, renamed key columns, index
+scan and repeated notifications. Compare fetched changes applied to the
+previous result against a fresh query result.
+
+
+S2. FILTERS AND PARAMETERS ON THAT TABLE
+------------------------------------------------------------------------------
+
+Extend S1 to structured filters reading only the same source row and query
+parameters. Evaluate the original scan bounds and filters when fetching a
+notified key. If the row no longer qualifies, return its key to remove.
+If it now qualifies, return it even if it was absent from the old result.
+
+Include ordering without a limit. The server identifies rows by key; the
+existing nav apply path determines browser placement.
+
+Prefer client-side grouping when sufficient for the rowset. Sending the
+new row under the same result primary key lets the nav replace its old
+row and update client-side groups. Server-side grouped results can remain
+unsupported for incremental fetching.
+
+Do not require old filter values: reevaluate the same possible result key
+before and after the write.
+
+Cost: evaluate the filters for changed keys, in addition to S1's work.
+No larger change records and no retained previous database snapshot.
+
+Check: selecting and excluding a row after an update, changing an index key
+so that a row is selected or excluded by scan bounds, null comparisons,
+fixed parameters and ordering changes. Load the rowset again when changing
+the parameter selection.
+
+
+S3. EQUALITY JOINS, RESULT KEYED BY ONE SOURCE TABLE
+------------------------------------------------------------------------------
+
+Support joins for which the compiler can establish that one source table's
+primary key is unique in the result. Begin with equality joins from that
+table to the complete primary key on another table.
+
+For a change to the table used for the result key, use the notified key
+directly. For a change to a joined table, find rows referencing the changed
+key, then reevaluate those result keys through the original query.
+
+Only support cases for which the notified key and current database suffice
+to find all affected keys. After a source-row update, the query may select
+or exclude a row as well as return different values.
+
+Preserve each source occurrence separately when using aliases or joining
+a table to itself. For one changed table, the code may need several
+affected-key searches.
+
+Cost: reverse lookups and reevaluation of all affected result rows. Without
+a suitable reverse index, finding their keys may require a table scan.
+
+Check: changes from either source, missing inner-join matches, insertion or
+deletion of a matching row, changed references and several source changes
+in one transaction. Add left joins only after tracing transitions between
+no match and a match.
+
+
+S4. OLD RELATIONSHIP VALUES
+------------------------------------------------------------------------------
+
+Before supporting a changed child row mapped to a parent result key, decide
+how to recover the old parent key. Make the same decision before handling
+updates to group columns or deletions for which the source primary key is
+insufficient to determine the affected result key.
+
+approach                      information and cost
+----------------------------  ------------------------------------------------
+Record old and new values     Recover previous and current relationships;
+                              more write work and larger change records.
+Keep previous read snapshot   Query previous and current relationships;
+                              longer transaction lifetime and retained pages.
+Store source/result key maps  Recover previously selected result keys;
+                              memory and upkeep for recorded associations.
+
+DECIDE: choose retention and lifetime before implementing this stage.
+For stored associations, also provide a way to find newly selected rows
+and rows affected by previously absent matches.
+
+Process changes against consistent previous and current database states.
+For several changed source tables, recovering only one row's old values
+may be insufficient to reconstruct its previous join relationships.
+Several changed tables alone do not require old-value retention. Defer
+that work until supporting a case whose affected result keys cannot be
+found from the notified keys and current database.
+
+Check: moving a child between parents, deleting a child, several updates
+to the same row, several commits between fetches, and changing both sides
+of a join before the fetch.
+
+
+S5. EXISTENCE CHECKS AND GROUPED RESULTS
+------------------------------------------------------------------------------
+
+For exists and not_exists, find affected outer keys and reevaluate them,
+including outer rows previously excluded from the result.
+
+For grouped results, find old and new group keys and recompute those groups.
+Include having filters and removal of a group with no remaining rows.
+Incremental aggregate arithmetic is not required for this stage.
+
+Cost: reverse lookups for existence checks; reading every contributing row
+in affected groups for aggregates. Recomputing one large group can still
+be expensive.
+
+Check: first and last matching child, changes passing or failing the inner
+filter, moves between groups, deletion of the last group member, and groups
+selected or excluded by a having filter.
+
+
+S6. LATER CASES
+------------------------------------------------------------------------------
+
+case                          further work before support
+----------------------------  ------------------------------------------------
+Joins with several rows       Establish result identity and find every
+per source key                affected key combination.
+Nested and lateral queries    Analyze dependencies and affected keys through
+                              each inner query's own operations.
+Distinct and set operations   Reevaluate whether other source rows still
+                              produce an affected output key.
+Limit and offset              Find replacement rows and account for changes
+                              outside the previously selected range.
+Arbitrary Lua callbacks       Decide how callers declare all dependencies;
+                              do not attempt to inspect closure behavior.
+
+Retain full-reload fallback until each case has a complete account of
+result identity, old information, membership changes and runtime cost.
+
+
+IMPLEMENTATION BOUNDARIES AND VERIFICATION
+==============================================================================
+
+scan:make_load_changed_rows(pk)
+rel:make_load_changed_rows(pk)
+	Both return source_tables, load_changed_rows, or only source_tables.
+	pk is an array of output-column names.
+	source_tables is an array of base-table names.
+	load_changed_rows(changes, param_vals) -> {rows, removed_pks}
+	changes() -> table_name, raw_pk
+	No load_changed_rows function is returned for unsupported compositions.
+
+rs:load_changed_rows(res, param_vals, since_txn_id)
+	The MDBX backend fills res in the caller's read transaction.
+rs:exec_load_changed_rows(param_vals, post) -> res
+	The MDBX backend opens the read transaction. Common rowset code
+	computes field values before returning the reply.
+
+- Analyze mdbx_query's bound expressions before compiling them into scan
+	callbacks. Keep the analysis on the relation under the existing mutable
+	builder and compilation contract.
+- For direct mdbx_scan composition, store source_tables as a table-name set
+	and can_fetch_by_pk as a boolean. Combine table sets when composing
+	scans. Disable direct PK fetching for unsupported operations.
+- Read notification batches and current result rows in the same read
+	transaction, as proposed in NAV-SAVE.txt I3. On a notification gap,
+	report that a full reload is needed.
+- Use the existing fetch and nav apply work in NAV-SAVE.txt. Its R3 excludes
+	server-filtered views; agree on that extension before integrating S2.
+- For each stage, check affected-key inference and fetch results against
+	a fresh evaluation after applying the changes. Include rollback and
+	trigger/FK writes when verifying database notification integration.
+- Measure query construction, ordinary query execution, change-record
+	size and fetch work. Report regressions in previously supported cases.
+- Each stage needs its own implementation approval, including its public
+	API, retained metadata, verification work and measured costs.
+
+
+CURRENT STATUS
+==============================================================================
+
+Implemented: S1 compilation for scans and queries, dependency registration,
+custom callbacks, full-load capability and transaction ID, and incremental
+fetching through the rowset endpoint. Fetching and computed field values
+run in the same read transaction. History gaps require a full reload.
+
+Checked: scan and query suites; isolated rowset loads and incremental
+fetches; decoded callback keys; duplicate callback rows; false boolean
+values; callback fallback; history gaps; configured-schema field indexing
+and rowset translation setup.
+
+Remaining: application changes-file initialization, committed-change
+notifications through EventSource, nav incremental requests and applying
+replies, and full-reload confirmation in the grid. Browser behavior and
+construction/fetch costs have not been measured.

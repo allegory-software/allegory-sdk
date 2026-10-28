@@ -733,6 +733,7 @@ ui.rowsets.grid_config_detail = {
 		{name: 'qty'      , w:   5, type: 'number'},
 	],
 	rows: grid_config_detail_rows,
+	params: {master_id: {for_cols: 'master_id'}},
 }
 
 function set_grid_config_null(nav) {
@@ -951,7 +952,7 @@ let grid_opt = {
 	vertical_layout: ui.value('grid_config_vertical_layout'),
 	filter_bar_visible: filter_bar_visible,
 }
-let grid_nav = ui.state_of(grid_id, 'e')
+let grid_nav = ui.state_of(grid_id, 'nav')
 if (grid_nav) {
 	grid_nav.auto_expand = auto_expand
 	grid_nav.filter_bar_visible = filter_bar_visible
@@ -982,7 +983,7 @@ ui.hvsplit(split_hv, 'grid_config_form_split_'+split_hv, 350, 'px', 2)
 		ui.hvsplit(split_vh, 'grid_config_detail_split_'+split_vh,
 			.25, 'fr', 2)
 	ui.grid(grid_id, grid_opt)
-	grid_nav = ui.state_of(grid_id, 'e')
+	grid_nav = ui.state_of(grid_id, 'nav')
 	if (grid_nav) {
 		grid_nav.auto_expand = auto_expand
 		if (!is_server)
@@ -990,11 +991,9 @@ ui.hvsplit(split_hv, 'grid_config_form_split_'+split_hv, 350, 'px', 2)
 	}
 	if (!is_server) {
 		ui.splitter()
-		let master_row_id = grid_nav?.focused_row_cell_val('id')
 		ui.grid('grid_config_detail', {
 			rowset_name: 'grid_config_detail',
-			param_vals: grid_nav?.focused_ri != null
-				? [{master_id: master_row_id}] : false,
+			param_bindings: {[grid_id]: 'master_id'},
 		})
 		ui.end_hvsplit()
 	}

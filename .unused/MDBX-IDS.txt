@@ -1,0 +1,137 @@
+MDBX-IDS: table ids in mdbx_schema
+===================================
+
+GOAL
+
+	Tables and indexes with a schema get a permanent id. Storage refers to
+	tables by id; the public API, the paper schema, diffs and messages keep
+	using names. Renaming a table writes one record.
+
+TERMS
+
+	table id     '$N', N from db:seq('$schema', 1). Never reused. Also the
+	             DBI name. Indexes get ids from the same counter.
+	table name   'foo'. What callers pass, what the paper schema uses.
+	index name   'foo/col1,col2:desc'. Same as today; built from the table
+	             name, never stored.
+	cols key     'col1,col2:desc'. An index's columns without the table
+	             name (format_ix_name minus the 'foo/' prefix).
+
+STORAGE ($schema DBI)
+
+	'tables'  -> {['$N'] = 'foo', ...}       base tables only
+	'$N'      -> stored table schema          no name in it
+	'$M'      -> stored index schema          val_table = '$N'
+
+	stored table schema changes:
+		ixs        keyed by cols key instead of index name
+		ix_ids     {[cols key] = '$M'} for every index DBI, user and fk
+		fks        fk.ref_table = '$N'
+		ref_fks    keys '$N/fk_name' (child id)
+
+	row-change stream: records carry the table id bytes instead of the name.
+	mdbx_each_row_change() -> iter() -> table_id, pk
+
+RUNTIME
+
+	Live schema objects keep names, never ids: schema.name = 'foo',
+	ix_schema.name = 'foo/...', val_table, fk.table, fk.ref_table and
+	ref_fks keys hold names. Reason: a paper schema object is shared
+	(header STATE section), and ids differ per db file, so no id can be
+	stored on it. Stored schemas follow the same rule so that code which
+	handles both kinds never reads an id from the object.
+
+	dbis:
+		dbis['$N']        -> dbi
+		dbis['foo']       -> dbi      alias, set when the table is opened
+		dbis['foo/cols']  -> dbi      alias, set when the base is opened
+		dbis[dbi]         -> '$N'
+
+	live_schema, dirty_schema, touch_schema: keyed by id.
+
+	Db:table_id(name|id|dbi) -> '$N'     dbis[dbis[tab]], open on miss
+	Db:table_name(name|id|dbi) -> 'foo'  overrides mdbx.lua's; raw tables
+	                                     return the DBI name
+
+	Hot paths:
+		call by name     dbis[name], dbis[dbi], live_schema[id]
+		                 (one more lookup than today)
+		call by dbi      dbis[dbi], live_schema[id]   (same as today)
+		index ops        dbis['foo/cols']             (same as today)
+		fk enforcement   dbis[ref name], ...          (same as call by name)
+		row change       dbis[schema.name], dbis[dbi] (two lookups per row)
+
+TRANSLATION POINTS
+
+	load_table_schema(id)   ids -> names: schema.name from 'tables',
+	                        fk.ref_table, val_table, ref_fks keys, ixs keys
+	                        (cols key -> index name).
+	save_table_schema(s)    names -> ids, the reverse.
+	everything else         works on names, or on ids from dbis.
+
+PER-FUNCTION CHANGES
+
+	try_dbi / try_open / load_live_schema
+		name miss: read 'tables', find id, open DBI by id, set name alias.
+		open each index by its id from ix_ids, set its index-name alias.
+		index name miss: open base table first (as today).
+	create_table(name)
+		id = '$'..seq; create DBI by id; add to 'tables'.
+	drop_table
+		remove from 'tables'; drop index DBIs by id; parent/child fk
+		untangling as today, with ref_fks keys translated by save.
+	rename_table(name, new_name)
+		write 'tables'. Remove the 'foo' and 'foo/...' aliases from all
+		dbis layers. Invalidate live_schema of the table, its children
+		and its parents (their objects hold the old name). No DBI rename,
+		no $schema row moves, no writes to other tables' records.
+	rename_column
+		rewrite the table's own record and its index records (ixs and
+		ix_ids keys change because the cols key changes). No DBI renames.
+		Children's ref_cols: as today.
+	add_index / drop_index / add_fk / drop_fk / detach_fk
+		allocate or release index ids; keep ix_ids in step.
+	extract_schema
+		iterate 'tables' for schema tables; raw tables are DBI names that
+		do not start with '$'.
+	try_validate_table_schema
+		unchanged: both sides hold names after load.
+	sync_schema
+		unchanged.
+	_row_changed
+		write the id, looked up as above.
+	rename_index
+		gone.
+
+DECISIONS
+
+	- live objects hold names, never ids.
+	- create_table, rename_table and create_table_raw reject names that
+	  start with '$' ('$schema' is created internally).
+	- mdbx_schema overrides table_exists() and each_table() to work on
+	  table names.
+	- row changes: two lookups per row to get the id; consumers receive
+	  ids; table_name(id) returns nil for a dropped table.
+	- mdbx_schema_test.lua is updated after the code change.
+
+OPEN QUESTIONS
+
+	- name resolution in try_dbi_raw. Every raw function in mdbx.lua
+	  (table_stat, find_raw, put_raw, del_raw, seq, each_raw, ...) turns
+	  a name into a dbi through try_dbi_raw. A name alias in dbis is only
+	  present after the table was opened through the schema path; on a
+	  miss try_dbi_raw calls mdbx_dbi_open('foo'), which fails. Callers
+	  that pass names to raw functions: mdbx_scan.lua:1056
+	  (table_entries(schema.name), index names included), and
+	  mdbx_schema.lua itself (each_raw(val_table), find_raw, ...).
+	  Proposal: mdbx_schema overrides try_dbi_raw; for a string that does
+	  not start with '$' it resolves the name ('tables' for a table name,
+	  base table open for an index name) and opens the DBI by id. Names
+	  starting with '$' and raw tables go to mdbx.lua's try_dbi_raw.
+	- rowset_mdbx.lua:326 keys row changes by the value given by
+	  mdbx_each_row_change(), and compares it with table names. It has to
+	  call db:table_name(id) and skip rows of dropped tables (nil).
+	- other consumers checked: mdbx_query.lua:430 and rowset_mdbx.lua:215
+	  compare and pass fk.ref_table, which stays a name; mdbx_scan.lua uses
+	  schema.name and index names from live objects; mdbx_backup.lua uses
+	  none of the changed names. No change needed there.

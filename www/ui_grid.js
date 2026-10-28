@@ -255,6 +255,7 @@ function init(id, e) {
 	e.header_w = ui.saved_state[id]?.header_w ?? 10
 
 	let horiz = !e.vertical_layout
+	let sel_change_no = e.sel_change_no // nav's stamp at the end of update()
 
 	// context-sensitive thus set on each frame
 	let sp
@@ -288,8 +289,6 @@ function init(id, e) {
 	let help_open
 	let filter_help_field
 	let clicked_indent
-	let menu_id = id+'.menu'
-	let want_menu // right-click on a cell or the header this pass
 
 	function reset_mouse_state() {
 		hit_zone = null
@@ -357,6 +356,254 @@ function init(id, e) {
 		let ris = []
 		e.each_selected_row(ri => ris.push(ri))
 		return ris
+	}
+
+	function delete_rows(ris) {
+		if (!ris.length || !(e.can_remove_rows && e.rowset_can_remove_rows))
+			return false
+		let n = ris.length // selected row count
+		let is_one_new_row = n == 1 && e.is_new(ris[0]) // one unsaved row
+		if (is_one_new_row || confirm(S('delete_records_confirmation',
+				'Are you sure you want to delete {0:record:records}?', n))) {
+			e.remove_rows(ris, 'delete', {input: e, refocus: true})
+			return true
+		}
+		return false
+	}
+
+	/// context menu ----------------------------------------------------------
+
+	let menu_id = id+'.menu' // menu widget id
+	let want_menu // right-click on a cell or the header this pass
+	let menu_items = null // menu commands, including null separators
+	let menu_field = null // column of the right-clicked header
+
+	function update_menu_items() {
+		let ri = e.focused_ri // focused row index
+		let field = focused_field() // focused field, or null
+		let has_cell = ri != null && field != null // focused cell exists
+		let has_selection = false // at least one selected row
+		let has_removed = false // a selected row marked for deletion
+		let can_clear = false // a selected cell can be changed
+		e.each_selected_row(ri => {
+			has_selection = true
+			has_removed ||= e.is_removed(ri)
+			if (!can_clear && !e.is_picker)
+				for (let field of e.visible_fields)
+					if (e.is_cell_selected(ri, field.fi)
+						&& e.can_change_val(ri, field.fi))
+						can_clear = true
+		})
+		let items = [] // menu commands, including null separators
+		if (menu_field && !menu_field.internal) {
+			let can_sort = e.can_sort_rows && menu_field.sortable // sort allowed
+			let is_group_col = e.group_cols.some( // column used for grouping
+				gcol => gcol.field == menu_field)
+			items.push(
+				{id: 'sort_asc', label: 'Sort ascending',
+					icon: 'sort-ascending', disabled: !can_sort},
+				{id: 'sort_desc', label: 'Sort descending',
+					icon: 'sort-descending', disabled: !can_sort},
+				{id: 'sort_remove', label: 'Remove from sort',
+					disabled: !can_sort || menu_field.sort_i == null},
+				null,
+				{id: 'group_col', label: 'Group by this column',
+					disabled: is_group_col},
+				{id: 'ungroup_col', label: 'Ungroup this column',
+					disabled: !is_group_col},
+				{id: 'hide_col', label: 'Hide this column', icon: 'eye-off',
+					disabled: menu_field.vfi == null},
+				null)
+		}
+		if (e.is_grouped)
+			items.push({id: 'ungroup_all', label: 'Ungroup all',
+				icon: 'layers-off'}, null)
+		if (has_cell)
+			items.push(
+				{id: 'copy_cell', label: 'Copy cell', icon: 'copy'},
+				{id: 'edit_cell', label: 'Edit cell', icon: 'pencil',
+					disabled: e.is_picker || !e.can_change_val(ri, field.fi)},
+				{id: 'revert_cell', label: 'Revert cell', icon: 'arrow-back-up',
+					disabled: e.is_picker || !e.is_cell_modified(ri, field.fi)},
+				null)
+		items.push(
+			{id: 'select_all', label: 'Select all', icon: 'select-all',
+				disabled: !e.visible_n},
+			{id: 'set_null', label: 'Set selected cells to null', icon: 'eraser',
+				disabled: !can_clear},
+			null)
+		if (!e.is_picker)
+			items.push(
+				{id: 'insert_row', label: 'Insert row', icon: 'row-insert-top',
+					disabled: !(e.can_add_rows && e.rowset_can_add_rows)},
+				{id: 'delete_rows', label: 'Delete selected rows', icon: 'trash',
+					disabled: !has_selection
+						|| !(e.can_remove_rows && e.rowset_can_remove_rows)},
+				{id: 'undelete_rows', label: 'Undelete selected rows',
+					icon: 'trash-off', disabled: !has_removed},
+				null,
+				{id: 'save', label: 'Save changes', icon: 'device-floppy',
+					disabled: !e.rowset_name || !e.modified_n},
+				{id: 'revert_all', label: 'Revert all changes',
+					icon: 'arrow-back-up', disabled: !e.modified_n},
+				null)
+		items.push(
+			{id: 'filter_bar', label: 'Show filter bar', icon: 'filter',
+				checked: e.filter_bar_visible, disabled: !e.can_filter()},
+			{id: 'clear_filters', label: 'Clear column filters',
+				icon: 'filter-off', disabled: !e.can_filter()
+					|| !e.all_fields.some(field => field.filter)})
+		if (e.can_be_tree)
+			items.push({id: 'flat', label: 'Flat view', icon: 'list',
+				checked: !!e.flat, disabled: e.is_grouped})
+		if (e.can_be_tree || e.is_grouped)
+			items.push(null,
+				{id: 'expand_subtree', icon: 'square-plus',
+					label: ri != null ? 'Expand subtree' : 'Expand all',
+					disabled: !e.is_tree && !e.is_grouped},
+				{id: 'collapse_subtree', icon: 'square-minus-2',
+					label: ri != null ? 'Collapse subtree' : 'Collapse all',
+					disabled: !e.is_tree && !e.is_grouped})
+		let column_items = [] // column visibility menu items
+		for (let field of e.all_fields) {
+			if (field.internal || field.is_group_field)
+				continue
+			let is_group_col = false // column used for grouping
+			if (e.is_grouped)
+				for (let gcol of e.group_cols)
+					if (gcol.field == field) {
+						is_group_col = true
+						break
+					}
+			column_items.push({
+				id: 'col_' + field.name,
+				field: field,
+				label: field.label,
+				checked: field.vfi != null,
+				disabled: is_group_col,
+			})
+		}
+		items.push(null,
+			{id: 'columns', label: 'Show/Hide columns', items: column_items},
+			null,
+			{id: 'help', label: 'Keyboard help', icon: 'help'})
+		menu_items = items
+	}
+
+	function update_menu() {
+		if (ui.click)
+			help_open = false
+
+		// menu: act on the pick before e.build() builds the menu.
+		let picked_item = ui.state_of(menu_id, 'picked_item')
+		if (picked_item?.id == 'expand_subtree')
+			e.set_collapsed(e.focused_ri, false, true)
+		else if (picked_item?.id == 'collapse_subtree')
+			e.set_collapsed(e.focused_ri, true, true)
+		else if (picked_item?.field)
+			e.showhide_field(picked_item.field,
+				ui.state_of(menu_id, 'picked_checked'),
+				e.focused_vfi(), {input: e})
+		else if (picked_item) {
+			let ri = e.focused_ri // focused row index
+			let field = focused_field() // focused field, or null
+			switch (picked_item.id) {
+				case 'sort_asc':
+				case 'sort_desc':
+				case 'sort_remove':
+					e.set_order_by_dir(menu_field,
+						picked_item.id == 'sort_asc' ? 'asc'
+						: picked_item.id == 'sort_desc' ? 'desc' : false,
+						true, {input: e})
+					break
+				case 'group_col':
+					e.set_group_cols([...e.group_cols, {
+						field: menu_field,
+						col_expr: menu_field.name,
+						group_level: (e.group_cols.at(-1)?.group_level ?? -1) + 1,
+					}], {input: e})
+					break
+				case 'ungroup_col':
+					e.ungroup_col(menu_field, null, {input: e})
+					break
+				case 'ungroup_all':
+					e.set_group_cols([], {input: e})
+					break
+				case 'hide_col':
+					e.showhide_field(menu_field, false, null, {input: e})
+					break
+				case 'copy_cell':
+					copy_to_clipboard(e.cell_text(ri, field.fi))
+					break
+				case 'edit_cell':
+					e.enter_edit()
+					break
+				case 'revert_cell':
+					e.revert_cell(ri, field.fi)
+					break
+				case 'select_all':
+					e.select_all_cells()
+					break
+				case 'set_null':
+					e.set_null_selected_cells({input: e})
+					break
+				case 'insert_row':
+					e.insert_rows([null], ri, {input: e, focus_it: true})
+					break
+				case 'delete_rows':
+					delete_rows(selected_ris())
+					break
+				case 'undelete_rows':
+					e.undelete_selected_rows({input: e})
+					break
+				case 'save':
+					e.save()
+					break
+				case 'revert_all':
+					if (confirm(S('revert_changes_confirmation',
+							'Are you sure you want to revert all changes?')))
+						e.revert_changes()
+					break
+				case 'filter_bar':
+					e.filter_bar_visible = ui.state_of(menu_id, 'picked_checked')
+					break
+				case 'clear_filters':
+					e.clear_col_filters()
+					break
+				case 'flat':
+					e.set_flat(ui.state_of(menu_id, 'picked_checked'))
+					break
+				case 'help':
+					help_open = true
+					break
+			}
+		}
+		if (picked_item && ui.state_of(menu_id, 'open'))
+			update_menu_items()
+		if (!ui.state_of(menu_id, 'open')
+			&& ui.focus_inside(menu_id)
+		)
+			ui.focus(id)
+	}
+
+	function update_menu_target() {
+		let rightclick_cell = ui.rightclicked(id+'.cells') && hit_zone == 'cell'
+		if (rightclick_cell) {
+			let ri = e.visible_ris[hit_vri]
+			let field = e.visible_fields[hit_vfi]
+			if (!e.has_extra_selection(e.focused_ri, e.focused_fi)
+				&& e.can_focus_cell(ri, field.fi)
+			)
+				e.focus_cell(ri, field.fi)
+		}
+		want_menu = rightclick_cell || ui.rightclicked(id+'.header')
+		if (hit_zone == 'gcol' && ui.rightclicked(id+'.gcol.'+hit_gcol))
+			want_menu = true
+		if (want_menu) {
+			menu_field = rightclick_cell ? null : hit_zone == 'gcol'
+				? e.all_fields_map[hit_gcol] : e.visible_fields[hit_vfi] ?? null
+			update_menu_items()
+		}
 	}
 
 	// editing ----------------------------------------------------------------
@@ -478,6 +725,25 @@ function init(id, e) {
 			ui.field_input(filter_box_id(field), field.filter,
 				{field: field.filter_field, w: 0})
 		ui.end_stack()
+	}
+
+	// param bar: an input for each param that no binding fills, and a reload
+	// button that applies the values typed in the inputs.
+	let param_bar_vals = obj() // {param name -> value typed in the param bar}
+	function build_param_bar() {
+		ui.h(0, sp, 'l', 'c')
+			ui.p(sp, ui.sp05())
+			ui.bb('bg1', null, 'b', 'intense')
+			for (let field of e.param_bar_fields) {
+				let name = field.name
+				if (!(name in param_bar_vals))
+					param_bar_vals[name] = e.param_bar_val(name)
+				param_bar_vals[name] = ui.field_input(id+'.param.'+name,
+					param_bar_vals[name], {field: field, label_pos: 'left'})
+			}
+			if (ui.button(id+'.param_reload', 'reload', null, 0))
+				e.set_param_bar_vals(param_bar_vals)
+		ui.end_h()
 	}
 
 	function indent_offset(indent) {
@@ -959,6 +1225,7 @@ function init(id, e) {
 	e.update = function() {
 
 		let s = ui.state(id)
+		s.nav = e
 		s.picked = false
 		s.input_value = undefined
 		let has_input = false
@@ -973,7 +1240,7 @@ function init(id, e) {
 		}
 
 		let filter_focused_field = null
-		if (e.filter_bar_visible)
+		if (e.filter_bar_visible && e.can_filter())
 			for (let field of e.visible_fields) {
 				let filter_text = ui.input_value(filter_box_id(field))
 				if (filter_text !== undefined)
@@ -991,20 +1258,7 @@ function init(id, e) {
 			ui.capture_keys()
 		}
 
-		// menu: act on the pick before e.build() builds the menu.
-		let picked_item = ui.state_of(menu_id, 'picked_item')
-		if (picked_item?.id == 'expand_subtree')
-			e.set_collapsed(e.focused_ri, false, true)
-		else if (picked_item?.id == 'collapse_subtree')
-			e.set_collapsed(e.focused_ri, true, true)
-		else if (picked_item?.field)
-			e.showhide_field(picked_item.field,
-				ui.state_of(menu_id, 'picked_checked'),
-				e.focused_vfi(), {input: e})
-		if (!ui.state_of(menu_id, 'open')
-			&& ui.focus_inside(menu_id)
-		)
-			ui.focus(id)
+		update_menu()
 
 		if (e.editing
 				&& !ui.focused(id)
@@ -1023,9 +1277,6 @@ function init(id, e) {
 		// check mouse state ---------------------------------------------------
 
 		reset_mouse_state()
-
-		if (ui.click)
-			help_open = false
 
 		// hover or click on sort icons from colum header
 		for (let field of e.visible_fields) {
@@ -1415,16 +1666,7 @@ function init(id, e) {
 			}
 		}
 
-		let rightclick_cell = ui.rightclicked(id+'.cells') && hit_zone == 'cell'
-		if (rightclick_cell) {
-			let ri = e.visible_ris[hit_vri]
-			let field = e.visible_fields[hit_vfi]
-			if (!e.has_extra_selection(e.focused_ri, e.focused_fi)
-				&& e.can_focus_cell(ri, field.fi)
-			)
-				e.focus_cell(ri, field.fi)
-		}
-		want_menu = rightclick_cell || ui.rightclicked(id+'.header')
+		update_menu_target()
 
 		// column resize
 		if (hit_zone == 'col_divider') {
@@ -1695,13 +1937,8 @@ function init(id, e) {
 			if (ris.length) {
 				if (!(e.can_remove_rows && e.rowset_can_remove_rows))
 					return false
-				let n = ris.length
-				let is_one_new_row = n == 1 && e.is_new(ris[0])
-				if (is_one_new_row || confirm(S('delete_records_confirmation',
-						'Are you sure you want to delete {0:record:records}?', n))) {
-					e.remove_rows(ris, 'delete', {input: e, refocus: true})
+				if (delete_rows(ris))
 					return false
-				}
 			}
 
 			// ctrl_delete: set selected cells to null.
@@ -1808,11 +2045,14 @@ function init(id, e) {
 
 		sync_editor()
 
+		// readers see the changes made so far: rebuild only for later ones.
+		sel_change_no = e.sel_change_no
+
 	}
 
 	e.build = function(id, opt, fr, align, valign) {
 
-		e.set_param_vals(opt.param_vals)
+		e.reload_if_params_changed()
 
 		let value
 		if (e.is_picker) {
@@ -1823,7 +2063,7 @@ function init(id, e) {
 
 		// Check again because app code may start or end an edit after update().
 		sync_editor()
-		ui.menu(menu_id, e.menu_items, want_menu)
+		ui.menu(menu_id, menu_items, want_menu)
 
 		// set layout vars
 
@@ -1870,6 +2110,10 @@ function init(id, e) {
 			ui.rebuild('focused_cell_changed')
 			e.focus_changed = false
 		}
+		if (sel_change_no != e.sel_change_no) {
+			sel_change_no = e.sel_change_no
+			ui.rebuild('rows_changed')
+		}
 		if (scroll_to_vri != null) {
 			let vri = scroll_to_vri
 			let vfi = scroll_to_vfi ?? 0
@@ -1884,6 +2128,11 @@ function init(id, e) {
 		// build ---------------------------------------------------------------
 
 		ui.stack(id, fr, align, valign)
+		ui.v(1, 0, 's', 's')
+
+			if (e.param_bar_fields.length)
+				build_param_bar()
+
 		ui.hv(horiz ? 'v' : 'h', 1, 0, 's', 's')
 
 			// group-by bar
@@ -2096,7 +2345,7 @@ function init(id, e) {
 
 			// filter bar
 
-			if (e.filter_bar_visible) {
+			if (e.filter_bar_visible && e.can_filter()) {
 				if (horiz)
 					ui.scrollbox(id+'.filter_bar', 0,
 						header_overflow, 'contain',
@@ -2138,6 +2387,7 @@ function init(id, e) {
 			ui.end_focus_group()
 
 		ui.end_hv()
+		ui.end_v()
 		ui.end_stack()
 
 		return value

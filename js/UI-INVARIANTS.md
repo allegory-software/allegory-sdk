@@ -590,8 +590,8 @@ Editing. The nav owns the edit state: whether the focused cell is being
 edited, the text selection to start with, and whether to open the editor's
 dropdown. The grid owns the editor widget. Each frame the grid compares the
 nav's edit state with the editor it built: it removes the editor of an edit
-that ended and focuses the editor of an edit that started. The nav never
-calls ui functions. In row-select mode the nav keeps no focused field, so
+that ended and focuses the editor of an edit that started. In row-select
+mode the nav keeps no focused field, so
 the user cannot edit.
 
 The nav ends the edit before any operation that changes rows, fields or

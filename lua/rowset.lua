@@ -15,7 +15,9 @@ Rowset attributes to set (* = server-only):
 		cols             : 'col1 ...'    default visible columns list
 	*	hide_cols        : 'col1 ...'    columns hidden by default
 		pos_col          : 'col'         pos column for manual ordering of rows
-		params           : 'par1 ...'    param names for server-side filtering
+		params           : {name->def}   params, each def a field def plus:
+		  .for_cols      : 'col1 ...'    the param filters these cols
+		  .accept_many   : false         the param can only take one value
 		uks              : ['col1 ...',] unique keys (to validate on the client)
 	TREE
 		id_col           : 'col'         id column for tree-building
@@ -92,13 +94,17 @@ Field attributes to set:
 Methods to implement:
 
 		prepare()                        prepare rowset (called on first request)
-		load_rows(result, param_vals)
+		load_rows(result, param_vals, load_opt)
 		insert_row(vals)
 		update_row(vals)
 		delete_row(vals)
 		load_row(vals)
 		load_changed_rows(result, param_vals, since_txn_id)   optional
 		reserve_ids(n) -> {id1,...}    required for a single auto_increment pk
+
+	param_vals is {name -> val}: the request's values for rs.params. The row
+	methods read them from self.param_vals. load_opt is {recursive = true |
+	false}: load whole subtrees, or one level below the requested parents.
 
 	reserve_ids() is for reserving ids from server and assigning them by the
 	client before saving the row in order to prevent double-inserts on network
@@ -112,6 +118,7 @@ Sets by default:
 
 GLOBALS
 	push_rowset_changed_events({rowset_name->true}, txn_id)
+	decode_params({name->def}) -> {name->val}   the request's params
 
 ACTIONS
 
@@ -154,6 +161,23 @@ local client_field_attrs = {
 	local_cols = 1, null_lookup_col = 1, nosave = 1,
 }
 
+--the field attrs that describe a value, without the column and row attrs,
+--plus the param attrs.
+local client_param_attrs = { -- {attr -> 1}
+	for_cols = 1, accept_many = 1,
+	type = 1, label = 1, info = 1, align = 1,
+	not_null = 1, min = 1, max = 1, maxlen = 1,
+	scale = 1, decimals = 1, precision = 1,
+	enum_values = 1, enum_labels = 1, enum_info = 1,
+	slider_min = 1, slider_max = 1,
+	slider_markers = 1, slider_scale_base = 1, slider_scales = 1,
+	hour_step = 1, minute_step = 1, second_step = 1,
+	timeago = 1, duration_format = 1,
+	magnitude = 1, magnitude_decimals = 1, gray_min = 1,
+	lookup_rowset_name = 1, lookup_cols = 1, display_col = 1,
+	control = 1, null_text = 1, empty_text = 1,
+}
+
 local row_errtypes = 'row field'
 
 --most specific text: in this rowset, in this table, anywhere, then en_text.
@@ -188,6 +212,29 @@ local function make_translatable_fields_attrs(t)
 	--enum ids carry the value after the col.
 	resolve_enum_texts(t, 'en_enum_labels', 'enum_labels', 'enum_label')
 	resolve_enum_texts(t, 'en_enum_info', 'enum_info', 'enum_info')
+end
+
+--a param takes a list of values, or its first tuple if accept_many
+--is false: a value, or a list of values for a composite param.
+--names that the rowset doesn't declare are ignored.
+function decode_params(param_defs)
+	local param_vals = {} -- {name -> val}
+	for name, vals in pairs(post'params' or empty) do
+		local def = param_defs[name] -- param def, or nil
+		if def then
+			if def.accept_many == false and #vals > 0 then
+				--tuple size
+				local n = def.for_cols and #collect(words(def.for_cols)) or 1
+				if n == 1 then
+					vals = vals[1]
+				else
+					vals = {unpack(vals, 1, n)}
+				end
+			end
+			param_vals[name] = vals
+		end
+	end
+	return param_vals
 end
 
 function virtual_rowset(init, ...)
@@ -311,9 +358,25 @@ function virtual_rowset(init, ...)
 
 	local repl = repl
 
-	function rs:load(param_vals)
+	local function check_no_rows(param_vals)
+		for name, def in pairs(rs.params or empty) do
+			local v = param_vals[name] -- [val, ...], val, or nil
+			--missing non-col param: no rows
+			if v == nil and not def.for_cols then
+				return true
+			elseif istab(v) and #v == 0 then --empty list: no rows
+				return true
+			end
+		end
+	end
+
+	function rs:load(param_vals, load_opt)
 		local res = {}
-		rs:load_rows(res, param_vals)
+		if check_no_rows(param_vals) then
+			res.rows = {}
+		else
+			rs:load_rows(res, param_vals, load_opt)
+		end
 		assert(res.rows[1] == nil or istab(res.rows[1]),
 			'first row is not a table')
 		if update_computed_fields then
@@ -322,6 +385,19 @@ function virtual_rowset(init, ...)
 			end
 		end
 		update_client_fields()
+		rs.client_params = {} -- {name -> client field def}
+		for name, def in pairs(rs.params or empty) do
+			local client_param = {} -- {client attr -> value}
+			for k, v in pairs(def) do
+				if client_param_attrs[k] then
+					if isfunc(v) then --value getter/generator
+						v = v(rs.name)
+					end
+					client_param[k] = v
+				end
+			end
+			rs.client_params[name] = client_param
+		end
 		merge(res, {
 			can_add_rows = rs.can_add_rows,
 			can_remove_rows = rs.can_remove_rows,
@@ -329,10 +405,10 @@ function virtual_rowset(init, ...)
 			can_move_rows = rs.can_move_rows,
 			can_load_changed_rows = rs.load_changed_rows ~= nil,
 			fields = rs.client_fields,
+			params = rs.client_params,
 			pk = rs.pk,
 			pos_col = rs.pos_col or nil,
 			cols = rs.cols,
-			params = rs.params,
 			id_col = rs.id_col,
 			parent_col = rs.parent_col,
 			tree_col = rs.tree_col,
@@ -428,11 +504,12 @@ function virtual_rowset(init, ...)
 		end
 	end
 
-	function rs:apply_changes(changes)
+	function rs:apply_changes(changes, param_vals)
 
 		update_client_fields()
 		local res = {rows = {}, fields = rs.client_fields}
 		local self = object(rs)
+		self.param_vals = param_vals -- {name -> val}
 		--rows that the row ops changed besides the sent rows, in field order.
 		self.changed_rows = {}
 
@@ -565,25 +642,12 @@ function virtual_rowset(init, ...)
 		elseif isstr(rs.allow) then
 			allow(usr('roles')[rs.allow])
 		end
-		local filter = json_decode(args'filter', null) or {}
-		local params = {}
-		--params are prefixed so that they can be used in col maps.
-		--:old variants are added too for update where sql.
-		for k,v in pairs{
-			['param:lang'        ] = lang(),
-			['param:default_lang'] = default_lang(),
-			['param:filter'      ] = filter,
-			['param:recursive'   ] = args'recursive' ~= '0',
-			['param:parent_ids'  ] = json_decode(args'parent_ids', null),
-		} do
-			params[k] = v
-			params[k..':old'] = v
-		end
-		local post = post()
-		local method = post and post.exec and post.exec or 'load'
+		local post = post() or empty
+		local method = post.exec or 'load'
 		local method = checkfound(rs['exec_'..method], 'command not found')
-		if rs.prepare then rs:prepare() end
-		local res = method(rs, params, post)
+		if rs.prepare then rs:prepare() end --prepare() sets rs.params
+		local param_vals = decode_params(rs.params or empty) -- {name -> val}
+		local res = method(rs, param_vals, post)
 
 		if out_format == 'json' then
 			return res
@@ -595,7 +659,7 @@ function virtual_rowset(init, ...)
 	end
 
 	function rs:exec_load(params, post)
-		return rs:load(params, post)
+		return rs:load(params, {recursive = post.recursive ~= false})
 	end
 
 	function rs:exec_load_changed_rows(params, post)
@@ -615,12 +679,7 @@ function virtual_rowset(init, ...)
 	end
 
 	function rs:exec_save(params, post)
-		for _,row_change in ipairs(post.changes.rows) do
-			if row_change.values then
-				update(row_change.values, params)
-			end
-		end
-		return rs:apply_changes(post.changes)
+		return rs:apply_changes(post.changes, params)
 	end
 
 	--the client asks for ids before its first save of new rows, so that a
