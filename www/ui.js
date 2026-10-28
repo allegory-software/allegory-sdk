@@ -2839,6 +2839,7 @@ function redraw_all() {
 		assert(rec_i == 0)
 		add_popup(root_popups, layer_base.z_index * z_index_band, rec_i, i, null)
 		is_building = true
+		dispatch_actions()
 		ui.main()
 		reset_spacings()
 		ui.end()
@@ -2936,6 +2937,9 @@ function redraw_all() {
 		key_ups.clear()
 		ui.key_events.length = 0
 		clicked_button_id = null
+		requested_action = null
+		requested_target_id = null
+		requested_enabled = null
 
 		ui.window_focusing = false
 
@@ -6961,6 +6965,139 @@ ui.widget('drag_point', {
 })
 }
 
+//// ACTION LIST -------------------------------------------------------------
+
+let action_defs = obj() // {name -> action}
+let shortcut_actions = obj() // {full key -> action}
+let action_bindings = map() // {control id -> action binding}
+let requested_action = null // action requested in this pass
+let requested_target_id = null // target of this pass's action request
+let requested_enabled = null // whether the target accepted the request
+
+ui.action_list = function(defs) {
+	for (let name in defs) {
+		let action = defs[name] // shared command definition
+		assert(!action_defs[name], 'action already defined: ', name)
+		if (action.shortcut) {
+			assert(!shortcut_actions[action.shortcut],
+				'shortcut already assigned: ', action.shortcut)
+			shortcut_actions[action.shortcut] = action
+			ui.capture_keydown(action.shortcut)
+		}
+		action.name = name
+		action_defs[name] = action
+	}
+	return action_defs
+}
+
+ui.actions = ui.action_list({}) // {name -> action}
+
+function get_action(action) {
+	return assert(isstr(action) ? action_defs[action] : action,
+		'unknown action: ', action)
+}
+
+ui.action_enabled = function(action, target_id) {
+	let enabled = get_action(action).enabled // boolean or target query
+	return isfunc(enabled) ? enabled(target_id) : enabled ?? true
+}
+
+ui.action_checked = function(action, target_id) {
+	let checked = get_action(action).checked // boolean or target query
+	return isfunc(checked) ? checked(target_id) : checked ?? null
+}
+
+ui.action_requested = function(target_id, action) {
+	if (requested_target_id != target_id
+		|| requested_action != get_action(action))
+		return false
+	ui.state_of(target_id)
+	if (requested_enabled == null)
+		requested_enabled = !!ui.action_enabled(action, target_id)
+	return requested_enabled
+}
+
+ui.run_actions = function(target_id) {
+	if (!requested_action
+		|| !ui.action_requested(target_id, requested_action))
+		return false
+	assert(requested_action.on_execute,
+		'action has no on_execute: ', requested_action.name)(target_id)
+	return true
+}
+
+function bind_action(id, action, target_id, is_menu) {
+	assert(is_building, 'action binding outside build')
+	assert(target_id, 'action target id required')
+	action = get_action(action)
+	let binding = action_bindings.get(id) // control's retained binding
+	if (!binding) {
+		binding = {id: id} // action control and resolved presentation
+		action_bindings.set(id, binding)
+	}
+	binding.action = action
+	binding.target_id = target_id
+	binding.is_menu = is_menu
+	binding.menu_id = null
+	binding.build_no = build_no
+	binding.disabled = !ui.action_enabled(action, target_id)
+	binding.checked = ui.action_checked(action, target_id)
+	return binding
+}
+
+ui.action_item = function(id, action, target_id) {
+	let binding = bind_action(id, action, target_id, true) // menu item
+	action = binding.action
+	binding.label = action.label
+	binding.icon = action.icon
+	binding.shortcut = action.shortcut
+	return binding
+}
+
+function dispatch_actions() {
+	if (action_bindings.size) {
+		for (let binding of action_bindings.values()) {
+			if (binding.build_no != build_no - 1) {
+				action_bindings.delete(binding.id)
+				continue
+			}
+			if (requested_action)
+				continue
+			let picked // whether this control requested its action
+			if (binding.is_menu) {
+				picked = binding.menu_id
+					&& ui.state_of(binding.menu_id, 'picked_item') == binding
+			} else {
+				picked = ui.state_of(binding.id, 'state') == 'click'
+					&& !binding.disabled
+			}
+			if (picked) {
+				requested_action = binding.action
+				requested_target_id = binding.target_id
+			}
+		}
+	}
+	if (requested_action || !ui.focused_id)
+		return
+	let ev = ui.key_events[0] // key event, if any
+	let action = ev && ev[0] == 'down' && shortcut_actions[ev[1]]
+	if (action) {
+		requested_action = action
+		requested_target_id = ui.focused_id
+		ui.capture_keys()
+	}
+}
+
+function build_action_hint(id, action) {
+	if (!action.hint || !hovers(id))
+		return
+	ui.popup(id+'.hint', 'tooltip', null, 'b', '[',
+		'change_side constrain')
+		ui.bb_tooltip('info', null, 'light', null, ui.sp05())
+		ui.text('', action.hint)
+	ui.end_popup()
+}
+
 //// BUTTON ------------------------------------------------------------------
 
 ui.color_def('*', 'button-text', 'normal'   , 'text', 'active')
@@ -7046,6 +7183,15 @@ ui.end_button_stack = function(state) {
 ui.button = function(
 	id, icon, text, fr, align, valign, style, readonly
 ) {
+	let action = isobject(icon) ? icon : null // optional command definition
+	let binding // retained action binding, when bound
+	if (action) {
+		binding = bind_action(id, action, text, false)
+		icon = binding.checked ? 'check' : action.icon
+		text = action.label
+		binding.disabled = !!readonly || binding.disabled
+		readonly = binding.disabled
+	}
 	if (icon) {
 		next_min_w ??= ui.em(1.5) // force w
 		align ??= 's'
@@ -7071,6 +7217,8 @@ ui.button = function(
 		ui.p(ui.sp2(), 0)
 		ui.button_text(text, state)
 	}
+	if (action)
+		build_action_hint(id, action)
 	return ui.end_button_stack(state)
 }
 
@@ -7486,6 +7634,8 @@ ui.menu = function(id, items, want_open, side, align) {
 				let first = i == 0
 				let last = i == items.length-1
 				let item_id = id+'.item.'+item.id
+				if (item.action)
+					item.menu_id = id
 				// pointer moved onto this item: highlight it, open its submenu.
 				if (ui.hit_enter(item_id)) {
 					hl_is.length = level + 1
@@ -7520,6 +7670,10 @@ ui.menu = function(id, items, want_open, side, align) {
 						if (item.disabled)
 							ui.color('text', 'readonly')
 						ui.text('', item.label, 1)
+						if (item.shortcut) {
+							ui.color('label', item.disabled ? 'readonly' : null)
+							ui.text('', item.shortcut, 0)
+						}
 						if (item.items?.length) {
 							ui.pl(ui.sp2())
 							ui.stack('', 0)
@@ -7532,6 +7686,8 @@ ui.menu = function(id, items, want_open, side, align) {
 							}
 						}
 					ui.end_h()
+					if (item.action)
+						build_action_hint(item_id, item.action)
 				ui.end_stack()
 				i++
 			}
