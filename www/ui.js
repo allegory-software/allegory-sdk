@@ -1768,6 +1768,8 @@ let rec_i
 function begin_rec() {
 	assert(!scroll_to_view_next, 'focusable widget recorded no box')
 	let a0 = a
+	if (a0)
+		a0.n = n
 	a = rec()
 	n = 0
 	rec_i = recs.length
@@ -1777,10 +1779,10 @@ function begin_rec() {
 
 function end_rec(a0) {
 	assert(!scroll_to_view_next, 'focusable widget recorded no box')
-	a.length = n
+	a.n = n
 	let a1 = a
 	a = a0
-	n = a0?.length
+	n = a0?.n
 	return a1
 }
 
@@ -2010,7 +2012,7 @@ let is_flex_child = []
 // measure_end callback to do the work.
 
 function measure_rec(a, axis) {
-	for (let i = 2, n = a.length; i < n; i = cmd_next_i(a, i)) {
+	for (let i = 2, n = a.n; i < n; i = cmd_next_i(a, i)) {
 		let cmd = a[i-1]
 		let measure_f = measure[cmd]
 		if (!measure_f)
@@ -2025,7 +2027,7 @@ function measure_rec(a, axis) {
 // element that has it. recursive, uses call stack to pass ct_i and ct_w.
 
 function position_rec(a, axis, ct_wh) {
-	for (let i = 2, n = a.length; i < n; i = cmd_next_sibling_i(a, i)) {
+	for (let i = 2, n = a.n; i < n; i = cmd_next_sibling_i(a, i)) {
 		let cmd = a[i-1]
 		let position_f = position[cmd]
 		if (!position_f)
@@ -2047,7 +2049,7 @@ function position_rec(a, axis, ct_wh) {
 // translate phase to re-scroll a scrollbox to sync it with a later one.
 
 function translate_rec(a, x, y) {
-	for (let i = 2, n = a.length; i < n; i = cmd_next_sibling_i(a, i)) {
+	for (let i = 2, n = a.n; i < n; i = cmd_next_sibling_i(a, i)) {
 		let cmd = a[i-1]
 		let translate_f = translate[cmd]
 		if (!translate_f)
@@ -2062,7 +2064,7 @@ function translate_rec(a, x, y) {
 // each element that has it (linear scan).
 
 function register_rec(a, rec_i) {
-	for (let i = 2, n = a.length; i < n; i = cmd_next_i(a, i)) {
+	for (let i = 2, n = a.n; i < n; i = cmd_next_i(a, i)) {
 		let cmd = a[i-1]
 		let register_f = register[cmd]
 		if (!register_f)
@@ -2866,7 +2868,7 @@ function redraw_all() {
 		if (ui.DEBUG) {
 			ui.recs_length = 0
 			for (let k = 0; k < recs.length; k++)
-				ui.recs_length += recs[k].length
+				ui.recs_length += recs[k].n
 		}
 
 		// prev frame's focusables have to be available in layout_rec for
@@ -6644,6 +6646,91 @@ frame.hit = function(a, i, recs) {
 
 ui.box_widget('frame', frame)
 
+//// REC BOX -----------------------------------------------------------------
+
+const REC_BOX_REC_I = BOX_ARGS+0
+
+ui.create_rec = function() {
+	let a0 = begin_rec()
+	let created_rec_i = rec_i
+	ui.h()
+	ui.end()
+	end_rec(a0)
+	return created_rec_i
+}
+
+ui.begin_rec_box = function(rec_i) {
+	assert(!scroll_to_view_next, 'focusable widget recorded no box')
+	let a1 = recs[rec_i]
+	let end_i = a1.n - 2
+	assert(a1[end_i-1] == CMD_END && end_i + a1[end_i] == 2,
+		'rec_box ', rec_i, ' is already open')
+	rec_stack.push(a, n, ct_stack.length)
+	a = a1
+	n = end_i - 2
+	ct_stack.push(2)
+}
+
+ui.end_rec_box = function() {
+	ui.end(CMD_H)
+	a.n = n
+	let ct_stack_len = rec_stack.pop()
+	n = rec_stack.pop()
+	a = rec_stack.pop()
+	assert(ct_stack.length == ct_stack_len,
+		'rec_box must open and close its own containers')
+}
+
+let rec_box = {}
+
+rec_box.create = function(cmd, rec_i, fr, align, valign) {
+	let i = ui_cmd_box_begin(cmd, fr, align, valign)
+	a[n++] = null
+	ui_cmd_box_end(i)
+	rec_i ??= ui.create_rec()
+	a[i+REC_BOX_REC_I] = rec_i
+	return rec_i
+}
+
+rec_box.measure = function(a, i, axis) {
+	let a1 = recs[a[i+REC_BOX_REC_I]]
+	ct_stack.push(null)
+	measure_rec(a1, axis)
+	ct_stack.pop()
+	a[i+2+axis] = a1[2+2+axis]
+	box_measure(a, i, axis)
+}
+
+rec_box.position = function(a, i, axis, sx, sw) {
+	box_position(a, i, axis, sx, sw)
+	let sv_i = scroll_to_view_i
+	scroll_to_view_i = null
+	position_rec(recs[a[i+REC_BOX_REC_I]], axis, a[i+2+axis])
+	scroll_to_view_i = scroll_to_view_i ? i : sv_i
+}
+
+rec_box.translate = function(a, i, dx, dy) {
+	box_translate(a, i, dx, dy)
+	translate_rec(recs[a[i+REC_BOX_REC_I]], a[i+0], a[i+1])
+}
+
+rec_box.register = function(a, i) {
+	let rec_i = a[i+REC_BOX_REC_I]
+	register_rec(recs[rec_i], rec_i)
+}
+
+rec_box.draw = function(a, i, recs) {
+	draw_cmd(recs[a[i+REC_BOX_REC_I]], 2, recs)
+}
+
+rec_box.hit = function(a, i, recs) {
+	let a1 = recs[a[i+REC_BOX_REC_I]]
+	let hit_f = hittest[a1[1]]
+	return hit_f && !a.nohit_set?.has(i) && hit_f(a1, 2, recs)
+}
+
+ui.box_widget('rec_box', rec_box)
+
 //// FRAME SERIALIZATION -----------------------------------------------------
 
 /// frame packing
@@ -6660,6 +6747,8 @@ let frame_compression = 0
 let frame_packed_size = 0
 async function pack_frame_json() {
 
+	for (let a1 of recs)
+		a1.length = a1.n
 	let s = json({
 		v: ui.VERSION,
 		id: screen_id,
