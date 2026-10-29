@@ -33,6 +33,10 @@ CONTAINERS
 	ui.dock          (id, layout, [opt]) -> iter() -> tab
 	ui.toolbox       (id, title, align, valign, x0, y0, target_i)
 	ui.frame         (id, on_measure, on_build, fr, align, valign, ...args)
+	ui.rec_box       (rec_i, fr, align, valign)
+	ui.open_rec_box  (rec_i)
+	ui.close_rec_box ()
+	ui.create_rec_box() -> rec_i
 
 INPUT
 
@@ -61,9 +65,9 @@ INPUT
 LIST
 
 	ui.[h|v|hv]list    (id, items, value, field, fr, align, valign,
-	                    item_align, item_valign, item_fr, max_w,
-	                    item_pad_l, item_pad_r, item_pad_y, item_h, item_gap,
-	                    custom_item_bg_color, custom_item_color, readonly) -> value
+	                     item_align, item_valign, item_fr, max_w,
+	                     item_pad_l, item_pad_r, item_pad_y, item_h, item_gap,
+	                     custom_item_bg_color, custom_item_color, readonly) -> value
 	ui.radio_list      (id, items, value, field, hv, fr, align, valign, readonly]) -> value
 
 OTHER
@@ -1686,8 +1690,7 @@ function reset_canvas() {
 
 // used in both build phase and measuring phases.
 
-let ct_stack = [] // [ct_i1,...]
-ui.ct_stack = ct_stack
+let ct_stack // [ct_i1,...]
 
 ui.ct_i = () => assert(ct_stack.at(-1), 'no container')
 ui.rel_ct_i = () => ui.ct_i() - (n+2)
@@ -1715,6 +1718,7 @@ let rec_freelist = array_freelist()
 
 function rec() {
 	let a = rec_freelist.alloc()
+	a.ct_stack ??= []
 	return a
 }
 
@@ -1731,20 +1735,21 @@ let rec_stack = []
 ui.start_recording = function() {
 	assert(!scroll_to_view_next, 'focusable widget recorded no box')
 	let a1 = rec()
-	rec_stack.push(a, n, ct_stack.length)
+	rec_stack.push(a, n, ct_stack)
 	a = a1
 	n = 0
+	ct_stack = a1.ct_stack
 }
 
 ui.end_recording = function() {
 	assert(!scroll_to_view_next, 'focusable widget recorded no box')
-	let ct_stack_len = rec_stack.pop()
+	assert(!ct_stack.length,
+		'recording must open and close its own containers')
 	a.length = n
 	let a1 = a
+	ct_stack = rec_stack.pop()
 	n = rec_stack.pop()
 	a = rec_stack.pop()
-	assert(ct_stack.length == ct_stack_len,
-		'recording must open and close its own containers')
 	return a1
 }
 
@@ -1772,6 +1777,7 @@ function begin_rec() {
 		a0.n = n
 	a = rec()
 	n = 0
+	ct_stack = a.ct_stack
 	rec_i = recs.length
 	recs.push(a)
 	return a0
@@ -1783,6 +1789,7 @@ function end_rec(a0) {
 	let a1 = a
 	a = a0
 	n = a0?.n
+	ct_stack = a0?.ct_stack
 	return a1
 }
 
@@ -2763,6 +2770,7 @@ ui.rebuild = function(label) {
 
 function layout_rec(a, x, y, w, h) {
 	reset_canvas()
+	ct_stack = a.ct_stack
 
 	// x-axis
 	measure_rec(a, 0)
@@ -6650,53 +6658,50 @@ ui.box_widget('frame', frame)
 
 const REC_BOX_REC_I = BOX_ARGS+0
 
-ui.create_rec = function() {
-	let a0 = begin_rec()
-	let created_rec_i = rec_i
-	ui.h()
-	ui.end()
-	end_rec(a0)
-	return created_rec_i
+ui.create_rec_box = function() {
+	let a1 = rec()
+	a1.n = 0
+	recs.push(a1)
+	return recs.length - 1
 }
 
-ui.begin_rec_box = function(rec_i) {
+ui.open_rec_box = function(rec_i) {
 	assert(!scroll_to_view_next, 'focusable widget recorded no box')
 	let a1 = recs[rec_i]
-	let end_i = a1.n - 2
-	assert(a1[end_i-1] == CMD_END && end_i + a1[end_i] == 2,
-		'rec_box ', rec_i, ' is already open')
-	rec_stack.push(a, n, ct_stack.length)
+	assert(a1 != a && !rec_stack.includes(a1),
+		'rec ', rec_i, ' is already open')
+	rec_stack.push(a, n, ct_stack)
 	a = a1
-	n = end_i - 2
-	ct_stack.push(2)
+	n = a1.n
+	ct_stack = a1.ct_stack
 }
 
-ui.end_rec_box = function() {
-	ui.end(CMD_H)
+ui.close_rec_box = function() {
+	assert(!scroll_to_view_next, 'focusable widget recorded no box')
 	a.n = n
-	let ct_stack_len = rec_stack.pop()
+	ct_stack = rec_stack.pop()
 	n = rec_stack.pop()
 	a = rec_stack.pop()
-	assert(ct_stack.length == ct_stack_len,
-		'rec_box must open and close its own containers')
 }
 
 let rec_box = {}
 
 rec_box.create = function(cmd, rec_i, fr, align, valign) {
 	let i = ui_cmd_box_begin(cmd, fr, align, valign)
-	a[n++] = null
+	a[n++] = rec_i
 	ui_cmd_box_end(i)
-	rec_i ??= ui.create_rec()
-	a[i+REC_BOX_REC_I] = rec_i
-	return rec_i
+	return i
 }
 
 rec_box.measure = function(a, i, axis) {
-	let a1 = recs[a[i+REC_BOX_REC_I]]
-	ct_stack.push(null)
+	let rec_i = a[i+REC_BOX_REC_I]
+	let a1 = recs[rec_i]
+	assert(a1.n && cmd_next_sibling_i(a1, 2) == a1.n + 2,
+		'rec ', rec_i, ' must hold one closed top-level box')
+	let ct_stack0 = ct_stack
+	ct_stack = a1.ct_stack
 	measure_rec(a1, axis)
-	ct_stack.pop()
+	ct_stack = ct_stack0
 	a[i+2+axis] = a1[2+2+axis]
 	box_measure(a, i, axis)
 }
@@ -11548,12 +11553,12 @@ tab record fields that the dock reads and writes:
 
 let tab_strip_rec_i
 
-ui.begin_tab_strip = function() {
-	assert(tab_strip_rec_i != null, 'begin_tab_strip() outside a dock tab')
-	ui.begin_rec_box(tab_strip_rec_i)
+ui.open_tab_strip = function() {
+	assert(tab_strip_rec_i != null, 'open_tab_strip() outside a dock tab')
+	ui.open_rec_box(tab_strip_rec_i)
 }
 
-ui.end_tab_strip = ui.end_rec_box
+ui.close_tab_strip = ui.close_rec_box
 
 function dock_tab_panes(
 	id, s, node, cs, on_build_tab, added_tab_id, opt
@@ -11580,7 +11585,10 @@ function dock_tab_panes(
 				ui.keep_state_scope(id+'.tab.'+tab.id)
 
 		let tab_strip_rec_i0 = tab_strip_rec_i
-		tab_strip_rec_i = ui.create_rec()
+		tab_strip_rec_i = ui.create_rec_box()
+		ui.open_rec_box()
+			ui.h()
+		ui.close_rec_box()
 		ui.v(1, 0, 's', 's')
 			if (!s.is_strip_bottom)
 				tab_strip(id, s, node, selected_tab, cs,
@@ -11604,6 +11612,9 @@ function dock_tab_panes(
 				tab_strip(id, s, node, selected_tab, cs,
 					added_tab_id, opt)
 		ui.end_v()
+		ui.open_rec_box(tab_strip_rec_i)
+			ui.end_h()
+		ui.close_rec_box()
 		tab_strip_rec_i = tab_strip_rec_i0
 	}
 }
