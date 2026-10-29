@@ -7173,6 +7173,7 @@ ui.button_text = function(s, state) {
 	next_min_h ??= ui.em(2.2) // force h
 	ui.bold()
 	ui.color('button-text', state)
+	ui.mh(ui.sp2())
 	ui.text('', s, 0, 'c', 'c')
 }
 
