@@ -30,6 +30,9 @@ function profile_button() {
 function app_dock_empty_tab(tab) {
 	let tab_id = 'app_dock.tab.'+tab.id
 	v(0, sp2(), 'c', 'c')
+		if (button(tab_id+'.container', 'layout', 'Container'))
+			set_dock_tab('app_dock', tab.id,
+				{label: 'Container', layout: {tabs: []}})
 		if (button(tab_id+'.db_explorer', 'database-search',
 			'Database explorer'))
 			set_dock_tab('app_dock', tab.id,

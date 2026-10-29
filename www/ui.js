@@ -11156,7 +11156,12 @@ function create_dock_layout(s, layout) {
 				side2: side2,
 			}
 		}
-		let tabs = layout_node.tabs.map(tab => assign({}, tab))
+		let tabs = layout_node.tabs.map(function(tab) {
+			tab = assign({}, tab)
+			if (tab.layout)
+				tab.layout = create_dock_layout(s, tab.layout)
+			return tab
+		})
 		if (!tabs.length)
 			return null
 		let selected_tab = tabs.find(tab => tab.id == layout_node.selected_tab_id)
@@ -11172,13 +11177,26 @@ function create_dock_layout(s, layout) {
 		?? {key: s.next_key++, tabs: [], selected_tab_id: null}
 }
 
-function walk_dock_tablists(node, on_tablist, arg1, arg2) {
+function walk_dock_tablists(
+	node, on_tablist, arg1, arg2, is_visible, skip_tab
+) {
 	if (node.split) {
 		return (
-			walk_dock_tablists(node.side1, on_tablist, arg1, arg2) ||
-			walk_dock_tablists(node.side2, on_tablist, arg1, arg2)
+			walk_dock_tablists(
+				node.side1, on_tablist, arg1, arg2, is_visible, skip_tab) ||
+			walk_dock_tablists(
+				node.side2, on_tablist, arg1, arg2, is_visible, skip_tab)
 		)
 	} else {
+		for (let tab of node.tabs) {
+			if (!tab.layout) continue
+			if (tab == skip_tab) continue
+			if (is_visible && tab.id != node.selected_tab_id) continue
+			let ret = walk_dock_tablists(
+				tab.layout, on_tablist, arg1, arg2, is_visible, skip_tab)
+			if (ret)
+				return ret
+		}
 		return on_tablist(node, arg1, arg2)
 	}
 }
@@ -11202,12 +11220,25 @@ function save_dock_layout(id, s) {
 }
 
 function find_dock_parent(node, child) {
-	if (!node.split)
+	if (node.split) {
+		if (node.side1 == child || node.side2 == child)
+			return node
+		return (
+			find_dock_parent(node.side1, child) ??
+  			find_dock_parent(node.side2, child)
+		)
+	} else {
+		for (let tab of node.tabs) {
+			if (!tab.layout)
+				continue
+			if (tab.layout == child)
+				return tab
+			let parent = find_dock_parent(tab.layout, child)
+			if (parent)
+				return parent
+		}
 		return null
-	if (node.side1 == child || node.side2 == child)
-		return node
-	return find_dock_parent(node.side1, child)
-		?? find_dock_parent(node.side2, child)
+	}
 }
 
 // -> root after putting node2 where node1 was
@@ -11215,7 +11246,9 @@ function replace_dock_node(root, node1, node2) {
 	if (root == node1)
 		return node2
 	let parent = find_dock_parent(root, node1)
-	if (parent.side1 == node1)
+	if (parent.layout == node1)
+		parent.layout = node2
+	else if (parent.side1 == node1)
 		parent.side1 = node2
 	else
 		parent.side2 = node2
@@ -11245,7 +11278,8 @@ function hit_tablist_strip(node, id, cs) {
 	return true
 }
 function hit_tab_strip(root, id, cs) {
-	return walk_dock_tablists(root, hit_tablist_strip, id, cs)
+	return walk_dock_tablists(root, hit_tablist_strip, id, cs,
+		true, cs.src_tablist.tabs[cs.tab_i])
 }
 
 // make the strip of tablist node the drop target, at the dragged tab's x.
@@ -11270,7 +11304,8 @@ function set_strip_drop(id, cs, node) {
 }
 
 function hit_tab_pane(root, id, cs) {
-	return walk_dock_tablists(root, hit_tablist_pane, id, cs)
+	return walk_dock_tablists(root, hit_tablist_pane, id, cs,
+		true, cs.src_tablist.tabs[cs.tab_i])
 }
 
 function hit_tablist_pane(node, id, cs) {
@@ -11343,19 +11378,17 @@ function move_dock_tab(
 		s.root = replace_dock_node(s.root, dst_tablist, split)
 	}
 
-	// empty tablist: replace its parent split with the split's other side.
+	// empty tablist: replace its parent split, if any, with the other side.
 	// empty root: keep it, its strip shows the "+".
 	if (!src_tablist.tabs.length && src_tablist != s.root) {
 		let parent = find_dock_parent(s.root, src_tablist)
-		let sibling_node = parent.side1 == src_tablist
-			? parent.side2 : parent.side1
-		s.root = replace_dock_node(s.root, parent, sibling_node)
-		ui.delete_saved_state(id+'.split'+parent.key)
+		if (parent.split) {
+			let sibling_node = parent.side1 == src_tablist
+				? parent.side2 : parent.side1
+			s.root = replace_dock_node(s.root, parent, sibling_node)
+			ui.delete_saved_state(id+'.split'+parent.key)
+		}
 	}
-}
-
-function update_dock_tabs(root, id, s) {
-	return walk_dock_tablists(root, update_tablist_tabs, id, s)
 }
 
 function update_tablist_tabs(node, id, s) {
@@ -11396,6 +11429,9 @@ function update_tablist_tabs(node, id, s) {
 		ui.rebuild('dock_tab_added')
 		return tab_id
 	}
+}
+function update_dock_tabs(root, id, s) {
+	return walk_dock_tablists(root, update_tablist_tabs, id, s, true)
 }
 
 /*
@@ -11440,7 +11476,11 @@ function dock_tab_panes(
 			if (selected_tab) {
 				ui.begin_state_scope(id+'.tab.'+selected_tab.id)
 				ui.focus_group(false, null, id+'.tab.'+selected_tab.id)
-				on_build_tab(selected_tab)
+				if (selected_tab.layout)
+					dock_tab_panes(id, s, selected_tab.layout, cs, on_build_tab,
+						added_tab_id, opt)
+				else
+					on_build_tab(selected_tab)
 				ui.end_focus_group()
 				ui.end_state_scope()
 			}
@@ -11564,7 +11604,10 @@ ui.set_dock_tab = function(id, tab_id, fields) {
 	let s = ui.state_of(id)
 	let tablist = assert(find_dock_tablist(s.root, tab_id),
 		'dock ', id, ': no tab ', tab_id)
-	assign(tablist.tabs.find(tab => tab.id == tab_id), fields)
+	let tab = tablist.tabs.find(tab => tab.id == tab_id) // tab record
+	assign(tab, fields)
+	if (fields.layout)
+		tab.layout = create_dock_layout(s, fields.layout)
 	save_dock_layout(id, s)
 	ui.rebuild('dock_tab_changed')
 }
