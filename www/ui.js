@@ -11048,6 +11048,8 @@ function tabbox(
 	ui.pv(ui.em(0.65))
    ui.min_h(ui.line_h())
 	ui.h(0, ui.sp())
+		if (tab.icon)
+			ui.icon('', tab.icon)
 		ui.text('', tab.label)
 		ui.min_w(ui.em(1.25))
 		ui.stack('', 0)
