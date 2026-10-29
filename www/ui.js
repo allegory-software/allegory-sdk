@@ -1340,6 +1340,7 @@ state.
 	ui.begin_state_scope (scope_id)         open state scope
 	ui.end_state_scope ()                   end state scope
 	ui.keep_state_scope(scope_id)           keep inside states from prev. frame
+	ui.is_state_hidden(id) -> t|f           id's state is in a kept scope
 
 */
 
@@ -1467,11 +1468,19 @@ function state_scope_stack_check() {
 	assert(!open_state_scopes.length, 'state scope not closed')
 }
 
-// a scope opened inside a kept scope is kept too: the code that would keep
-// it is not built either.
+// a scope opened inside a kept scope is kept too.
 function is_state_scope_kept(scope) {
 	for ( ; scope; scope = scope.parent)
 		if (scope.kept_build_no == build_no)
+			return true
+	return false
+}
+
+// a hidden scope was kept more recently than it was opened.
+ui.is_state_hidden = function(id) {
+	let scope = state_map.get(id)?.state_scope
+	for ( ; scope; scope = scope.parent)
+		if (scope.kept_build_no > scope.used_build_no)
 			return true
 	return false
 }
