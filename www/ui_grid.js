@@ -684,6 +684,13 @@ function init(id, e) {
 			sort_icon_w(field) + get_header_icon_w(field))
 	}
 
+	function get_col_w(field) {
+		let w = ps?.dragging && hit_zone == 'col_divider'
+			&& hit_vfi == field.vfi
+			? ps.w0 + ps.dx : e.get_col_w(field) * font_size
+		return clamp(w, col_min_w(field), field.max_w * font_size)
+	}
+
 	function build_header_label(field, align, max_w, fg) {
 		if (field.icon) {
 			ui.h(1, sp, align, 'c')
@@ -1672,12 +1679,9 @@ function init(id, e) {
 		if (hit_zone == 'col_divider') {
 			let field = e.visible_fields[hit_vfi]
 			if (ps.drag)
-				ps.w0 = field.w * font_size
-			if (ps.dragging)
-				field.w = clamp(ps.w0 + ps.dx,
-					col_min_w(field), field.max_w * font_size) / font_size
-			if (ps.drop)
-				e.save_col_w(field)
+				ps.w0 = e.get_col_w(field) * font_size
+			if (ps.drop && e.save_col_w(field, get_col_w(field) / font_size))
+				ui.rebuild('col_w_changed')
 			ui.set_cursor('col-resize')
 		} else if (hit_zone == 'header_divider') {
 			if (ps.drag)
@@ -2087,8 +2091,7 @@ function init(id, e) {
 		cells_h = 0
 		if (horiz) {
 			for (let field of e.visible_fields) {
-				let w = clamp(field.w * font_size,
-					col_min_w(field), field.max_w * font_size)
+				let w = get_col_w(field)
 				let cw = w + 2 * sp2
 				if (drag_op != 'col_move')
 					field._x = cells_w

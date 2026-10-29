@@ -1504,8 +1504,17 @@ ui.nav = function(id, opt) {
 		set_focus(e.focused_ri, e.focused_fi)
 	}
 
-	e.save_col_w = function(field) {
-		ui.save_state(e.id+'.col_ws', field.name, field.w)
+	let col_ws_id = (e.rowset_name ? 'rowset.'+e.rowset_name : e.id)+'.col_ws'
+
+	e.get_col_w = function(field) {
+		return ui.saved_state[col_ws_id]?.[field.name] ?? field.w
+	}
+
+	e.save_col_w = function(field, w) {
+		if (ui.saved_state[col_ws_id]?.[field.name] == w)
+			return false
+		ui.save_state(col_ws_id, field.name, w)
+		return true
 	}
 
 	function set_cols(col_names, ev) {
