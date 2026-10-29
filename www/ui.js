@@ -11223,6 +11223,7 @@ function tab_strip(
 	}
 	ui.end_h()
 	ui.h(0, 0, 'r', 'c')
+	ui.rec_box(tab_strip_rec_i, 0)
 	if (opt.on_build_strip)
 		opt.on_build_strip(tablist_id, selected_tab, tablist, s.root)
 	ui.end_h()
@@ -11545,6 +11546,15 @@ tab record fields that the dock reads and writes:
 		ui.set_dock_tab(), e.g. from a prompt built in the tab's content.
 */
 
+let tab_strip_rec_i
+
+ui.begin_tab_strip = function() {
+	assert(tab_strip_rec_i != null, 'begin_tab_strip() outside a dock tab')
+	ui.begin_rec_box(tab_strip_rec_i)
+}
+
+ui.end_tab_strip = ui.end_rec_box
+
 function dock_tab_panes(
 	id, s, node, cs, on_build_tab, added_tab_id, opt
 ) {
@@ -11569,6 +11579,8 @@ function dock_tab_panes(
 			else
 				ui.keep_state_scope(id+'.tab.'+tab.id)
 
+		let tab_strip_rec_i0 = tab_strip_rec_i
+		tab_strip_rec_i = ui.create_rec()
 		ui.v(1, 0, 's', 's')
 			if (!s.is_strip_bottom)
 				tab_strip(id, s, node, selected_tab, cs,
@@ -11592,6 +11604,7 @@ function dock_tab_panes(
 				tab_strip(id, s, node, selected_tab, cs,
 					added_tab_id, opt)
 		ui.end_v()
+		tab_strip_rec_i = tab_strip_rec_i0
 	}
 }
 
