@@ -4782,11 +4782,6 @@ ui.nav = function(id, opt) {
 			if (!field)
 				return
 			field.fi = fi
-			if (apply_view) {
-				let saved_w = ui.saved_state[e.id+'.col_ws']?.[name]
-				if (saved_w != null)
-					field.w = saved_w
-			}
 			field.filter_field = create_filter_field(field)
 			all_fields.push(field)
 			all_fields_map[name] = field
