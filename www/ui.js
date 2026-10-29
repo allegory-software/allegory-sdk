@@ -7609,6 +7609,8 @@ function menu_update(id, s) {
 		return
 	}
 	let hl_is = s.hl_is
+	if (is_outside)
+		hl_is.length = 0
 	let key_level = max(0, // level navigated by keys
 		hl_is.length - (hl_is.at(-1) == null ? 2 : 1))
 	let picked_item
@@ -7761,9 +7763,9 @@ ui.menu = function(id, items, want_open, side, align) {
 						ui.min_w(ui.em(2) - ui.sp2())
 						ui.stack('', 0, 'l', 'c')
 							if (item.checked || item.icon) {
-								if (item.disabled)
+								if (item.disabled || (item.checked === false && item.icon))
 									ui.color('text', 'readonly')
-								ui.icon('', item.checked ? 'check' : item.icon)
+								ui.icon('', item.checked && !item.icon ? 'check' : item.icon)
 							}
 						ui.end_stack()
 						if (item.disabled)
