@@ -4,13 +4,12 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 API
-	scan_rowset   (opt) -> rs         rowset over a table scan
-	table_rowset  (tbl, [opt]) -> rs  rowset over a whole table
-	lookup_rowset (tbl) -> name, name_col   auto-created lookup rowset
-	prepare_rowsets ()                prepare all of them, to validate at startup
+	scan_rowset       (opt) -> rs     rowset over a table scan
+	prepare_rowsets   ()              prepare all rowsets (validates schema)
 	watch_row_changes (db)            push changed rowsets to events clients
 
-	rowset.lookup_TABLE               same, created on first access
+	rowset.lookup_TABLE               lookup rowset, created on first access
+	rowset.table_TABLE                full table rowset, created on first access
 
 SCAN ROWSET OPTIONS
 
@@ -19,8 +18,7 @@ SCAN ROWSET OPTIONS
 	db       db                optional; defaults to the app db
 	on_rows_changed            optional; see LOADING CHANGED ROWS
 
-	plus every rowset.lua property (cols, hide_cols, ro_cols, rw_cols,
-	field_attrs, name_col, ...).
+	plus every rowset.lua property (cols, hide_cols, ro_cols, rw_cols, etc.
 
 	Fields come from the scan's output cols. An output col that comes from a
 	table col gets its type, label, enum values, bounds and defaults from the
@@ -65,7 +63,7 @@ require'rowset'
 require'mdbx_scan'
 require'glue'
 
-local table_rowset_names = {} -- {db -> {table -> {rowset_name -> true}}}
+local table_rowset_deps = {} -- {db -> {table -> {rowset_name -> true}}}
 
 --a lookup rowset has a one-col key, so fks over several cols have none.
 local function fks_by_col(schema)
@@ -74,11 +72,6 @@ local function fks_by_col(schema)
 		if #fk.cols == 1 then fks[fk.cols[1]] = fk end
 	end
 	return fks
-end
-
-local function guess_name_col(schema)
-	if schema.name_col ~= nil then return schema.name_col or nil end
-	if schema.fields.name then return 'name' end
 end
 
 --the client sends a row's key under 'COL:old', a changed value under 'COL'.
@@ -188,8 +181,10 @@ local function scan_rowset_init(rs, opt, ...)
 			if f.table then
 				local fk = fks_by_col(db:table_schema(f.table))[f.col]
 				if fk then
-					f.lookup_rowset_name, f.display_col =
-						lookup_rowset(fk.ref_table)
+					local lrs_name = 'lookup_'..fk.ref_table
+					local lrs = rowset[lrs_name]
+					f.lookup_rowset_name = lrs_name
+					f.display_col = lrs.name_col
 					f.lookup_cols = fk.ref_cols[1]
 				end
 			end
@@ -233,7 +228,7 @@ local function scan_rowset_init(rs, opt, ...)
 		rs:init_fields(false)
 
 		for tbl in pairs(scan.source_tables) do
-			attr(attr(table_rowset_names, db), tbl)[rs.name] = true
+			attr(attr(table_rowset_deps, db), tbl)[rs.name] = true
 		end
 
 		is_prepared = true
@@ -418,7 +413,7 @@ end
 
 --the db owns the thread, so db:close() cancels the thread's wait.
 function watch_row_changes(db)
-	local tables = attr(table_rowset_names, db) -- {table -> rowset_names}
+	local tables = attr(table_rowset_deps, db) -- {table -> rowset_names}
 	local th = thread(function()
 		local f = inotify() -- woken by each commit, from any process
 		f:add_watch(db.file..'.changes', IN_MODIFY)
@@ -450,41 +445,6 @@ function watch_row_changes(db)
 	resume(th)
 end
 
---LOOKUP ROWSETS -------------------------------------------------------------
-
-local function table_schema(tbl)
-	return checkfound(db():atomic('any', function(tbl)
-		return db():table_schema(tbl)
-	end, tbl))
-end
-
-function lookup_rowset(tbl)
-	local rs_name = 'lookup_'..tbl
-	local rs = rawget(rowset, rs_name)
-	if not rs then
-		local schema = checkfound(table_schema(tbl))
-		local name_col = guess_name_col(schema)
-		local cols = extend({}, schema.pk)
-		if name_col then add(cols, name_col) end
-		local sel = cat(cols, ', ')
-		rs = scan_rowset{
-			scan = function(db) return db:scan(tbl, ''):select(sel) end,
-			pk = cat(schema.pk, ' '),
-			name_col = name_col,
-		}
-		rawset(rowset, rs_name, rs)
-	end
-	return rs_name, rs.name_col
-end
-
-setmetatable(rowset, {__index = function(self, rs_name)
-	local tbl = rs_name:match'^lookup_(.+)$'
-	if tbl then
-		lookup_rowset(tbl)
-		return rawget(rowset, rs_name)
-	end
-end})
-
 --STARTUP VALIDATION ---------------------------------------------------------
 
 --prepare every registered rowset, to fail at startup instead of on a first
@@ -511,13 +471,29 @@ function prepare_rowsets()
 	end
 end
 
---TABLE ROWSETS --------------------------------------------------------------
+--LOOKUP ROWSETS & TABLE ROWSETS ---------------------------------------------
 
-function table_rowset(tbl, opt)
-	local schema = table_schema(tbl)
-	local sel = cat(schema.cols, ', ')
-	return scan_rowset(update({
+local function table_schema(tbl)
+end
+
+dynamic_rowset('^lookup_(.+)$', function(tbl)
+	local schema = checkfound(db():atomic('any', function(tbl)
+		return db():table_schema(tbl)
+	end, tbl))
+	local name_col = schema.name_col or schema.fields.name and 'name'
+	local cols = extend({}, schema.pk)
+	if name_col then
+		local f = schema.fields[name_col]
+		if not f then
+			name_col = nil --TODO: warn here
+		elseif not f.key_index then
+			add(cols, name_col)
+		end
+	end
+	local sel = cat(cols, ', ')
+	return scan_rowset{
 		scan = function(db) return db:scan(tbl, ''):select(sel) end,
 		pk = cat(schema.pk, ' '),
-	}, opt))
-end
+		name_col = name_col,
+	}
+end)

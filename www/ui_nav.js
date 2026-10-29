@@ -17,6 +17,8 @@ NAV CONFIG -------------------------------------------------------------------
 Nav config:
 
 	rowset_name    string       the rowset in ui.rowsets or on the server
+	label          string       label of the nav as a master in a detail's
+	                            toggle; default: the rowset's label
 
 Access options:
 	per-nav and/or per-rowset:
@@ -418,7 +420,7 @@ const ui = window.ui
 const {
 	assert, warn, warn_if,
 	isfunc, isstr, isarray, isobj,
-	words, obj, map, empty, keys, insert,
+	words, obj, map, empty, empty_array, keys, insert,
 	dyn_u32arr,
 	num, floor, abs, min, max, clamp, strict_sign,
 	time, month, year, month_of, year_of,

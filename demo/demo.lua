@@ -185,20 +185,24 @@ do
 		action['call_demo.json'] = function()
 			return demo_call
 		end
-		rowset.grid_save = grid_db:atomic('r', function()
-			return table_rowset('grid_save', {
-				name = 'grid_save',
-				parent_col = 'parent_id',
-				pos_col = 'pos',
-				tree_col = 'text',
-				cols = 'id text num test_action test_description',
-				field_attrs = {
-					text = {w = 16},
-					test_action = {w = 18},
-					test_description = {w = 45},
-				},
-			})
-		end)
+		rowset.grid_save = scan_rowset{
+			name = 'grid_save',
+			scan = function(db)
+				return db:scan('grid_save', '')
+					:select('id, parent_id, pos, text, num, '
+						..'test_action, test_description')
+			end,
+			pk = 'id',
+			parent_col = 'parent_id',
+			pos_col = 'pos',
+			tree_col = 'text',
+			cols = 'id text num test_action test_description',
+			field_attrs = {
+				text = {w = 16},
+				test_action = {w = 18},
+				test_description = {w = 45},
+			},
+		}
 		local rs = rowset.grid_save
 		add_test_actions(rs, 'grid_save', 'id', 6)
 		function rs:exec_reset()
@@ -227,17 +231,20 @@ do
 			return self:exec_load({})
 		end
 
-		rowset.grid_typed = grid_db:atomic('r', function()
-			return table_rowset('grid_typed', {
-				name = 'grid_typed',
-				cols = 'code text num test_action test_description',
-				field_attrs = {
-					text = {w = 16},
-					test_action = {w = 18},
-					test_description = {w = 45},
-				},
-			})
-		end)
+		rowset.grid_typed = scan_rowset{
+			name = 'grid_typed',
+			scan = function(db)
+				return db:scan('grid_typed', '')
+					:select('code, text, num, test_action, test_description')
+			end,
+			pk = 'code',
+			cols = 'code text num test_action test_description',
+			field_attrs = {
+				text = {w = 16},
+				test_action = {w = 18},
+				test_description = {w = 45},
+			},
+		}
 		rs = rowset.grid_typed
 		add_test_actions(rs, 'grid_typed', 'code', 'A3')
 		function rs:exec_reset()

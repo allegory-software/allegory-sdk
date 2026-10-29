@@ -1,9 +1,10 @@
 require'rowset_mdbx'
 
-local ffi = require'ffi' -- foreign function interface
-
 --the param of the rowsets that show one table.
-local table_param = {label = 'Table', accept_many = false}
+local table_param = {
+	label = 'Table', accept_many = false,
+	lookup_rowset_name = 'db_explorer_tables',
+}
 
 local function format_key_cols(cols)
 	local t = {} -- {key_i -> 'COL [desc]'}
@@ -62,6 +63,7 @@ rowset.db_explorer_tables = virtual_rowset(function(rs)
 		},
 	}
 	rs.pk = 'name'
+	rs.label = 'Tables'
 	function rs:load_rows(res)
 		res.rows = {} -- {row_i -> {value in rs.fields order}}
 		db():atomic('r', function()
@@ -195,7 +197,27 @@ rowset.db_explorer_indexes = virtual_rowset(function(rs)
 	end
 end)
 
-local function init_raw_rowset(rs, table_name)
+dynamic_rowset('^db_explorer_rows_(.+)$', function(tbl)
+	local schema = checkfound(db():atomic('any', function(tbl)
+		return db():table_schema(tbl)
+	end, tbl))
+	checkfound(not schema.is_index)
+	local field_attrs = {}
+	for _, col in ipairs(schema.cols) do
+		field_attrs[col] = {internal = false, hidden = false, cols = null}
+	end
+	local sel = cat(schema.cols, ', ')
+	return scan_rowset{
+		scan = function(db) return db:scan(tbl, ''):select(sel) end,
+		pk = cat(schema.pk, ' '),
+		cols = cat(schema.cols, ' '),
+		field_attrs = field_attrs,
+	}
+end)
+
+--the keys and values of a table as stored, for an index table or a table
+--without a schema. base tables with a schema are rowset.table_NAME.
+rowset.db_explorer_rows_raw = virtual_rowset(function(rs)
 	rs.manual_init_fields = true
 	rs.can_move_rows = false
 	rs.params = {table = table_param}
@@ -206,44 +228,18 @@ local function init_raw_rowset(rs, table_name)
 			not_null = true},
 	}
 	rs.pk = 'key value'
-	function rs:load_rows(res)
+	function rs:load_rows(res, params)
 		res.rows = {} -- {row_i -> {hex_key, hex_value}}
 		db():atomic('r', function()
 			for cursor, key, key_size, value, value_size in
-				db():each_raw(table_name)
+				db():each_raw(params.table)
 			do
 				add(res.rows, {
-					tohex(ffi.string(key, key_size)),
-					tohex(ffi.string(value, value_size)),
+					tohex(str(key, key_size)),
+					tohex(str(value, value_size)),
 				})
 			end
 		end)
 	end
 	rs:init_fields(false)
-end
-
---the table param picks the rowset to build, which then declares it too, so
---that its respond() accepts it.
-rowset.db_explorer_rows = function(name, out_format)
-	--a table name, null, an empty list, or nil.
-	local table_name = decode_params{table = table_param}.table
-	--without a table, the raw rowset loads no rows.
-	local rs = db():atomic('r', function()
-		local schema = isstr(table_name) and db():table_schema(table_name)
-		if schema and not schema.is_index then
-			local field_attrs = {} -- {col -> field attribute overrides}
-			for _, col in ipairs(schema.cols) do
-				field_attrs[col] = {internal = false}
-			end
-			return table_rowset(table_name, {
-				cols = cat(schema.cols, ' '),
-				field_attrs = field_attrs,
-				params = {table = table_param},
-			})
-		else
-			checkarg(method'GET')
-			return virtual_rowset(init_raw_rowset, table_name)
-		end
-	end)
-	return rs(name, out_format)
-end
+end)

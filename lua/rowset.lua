@@ -11,6 +11,7 @@ Rowset attributes to set (* = server-only):
 		col_vals         : [vals1,...]   values: col_vals[fi][ri] = val
 		pk               : 'col1 ...'    primary key (required)
 	OPTIONAL
+		label            : 'Foo Bar'     label of a master in a detail's toggle
 	*	field_attrs      : {col->field}  extra field attributes
 		cols             : 'col1 ...'    default visible columns list
 	*	hide_cols        : 'col1 ...'    columns hidden by default
@@ -116,9 +117,11 @@ Sets by default:
 	- `pos_col` and `parent_col` are set to hidden by default.
 	- on client-side, `id_col` is set to pk if pk is single-column.
 
-GLOBALS
+API
+
 	push_rowset_changed_events({rowset_name->true}, txn_id)
 	decode_params({name->def}) -> {name->val}   the request's params
+	dynamic_rowset(match_name, create_rowset)
 
 ACTIONS
 
@@ -132,7 +135,26 @@ require'webb_action'
 require'glue'
 local xlsx_workbook = require'xlsxwriter.workbook'
 
-rowset = {}
+local rowset_mt = {}
+rowset = setmetatable({}, rowset_mt)
+
+function dynamic_rowset(match_name, create_rowset)
+	if isstr(match_name) then
+		local patt = match_name
+		match_name = function(rs_name)
+			return rs_name:match(patt)
+		end
+	end
+	override(rowset_mt, '__index', function(inherited, self, rs_name)
+		local rs = inherited(self, rs_name)
+		if rs == nil then
+			local name = match_name(rs_name)
+			if name then rs = create_rowset(name) end
+		end
+		rawset(self, rs_name, rs)
+		return rs
+	end)
+end
 
 action['rowset.json'] = function(name)
 	return checkfound(rowset[checkarg(name)])(name, 'json')
@@ -404,6 +426,7 @@ function virtual_rowset(init, ...)
 			can_change_rows = rs.can_change_rows,
 			can_move_rows = rs.can_move_rows,
 			can_load_changed_rows = rs.load_changed_rows ~= nil,
+			label = rs.label,
 			fields = rs.client_fields,
 			params = rs.client_params,
 			pk = rs.pk,
@@ -415,6 +438,10 @@ function virtual_rowset(init, ...)
 			has_children_col = rs.has_children_col,
 		})
 		return res
+	end
+
+	local function db_error(err, s)
+		return catany(':\n', s, err and err.message)
 	end
 
 	local function reload_row(op, rt, row_values)
@@ -466,7 +493,7 @@ function virtual_rowset(init, ...)
 		for i,fld in ipairs(rs.fields) do
 			if fld.validate then
 				local val = values[fld.name]
-				if val ~= nil or only_present_values then
+				if val ~= nil or not only_present_values then
 					local err = fld.validate(val, fld, rs)
 					if isstr(err) then
 						errors = errors or {}
@@ -476,10 +503,6 @@ function virtual_rowset(init, ...)
 			end
 		end
 		return errors
-	end
-
-	local function db_error(err, s)
-		return catany(':\n', s, err and err.message)
 	end
 
 	function rs:can_add_row(values)
