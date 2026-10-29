@@ -717,6 +717,18 @@ let listen_rowset_events = memoize(function() {
 	}
 })
 
+//// MASTER NAVS -------------------------------------------------------------
+
+// navs that can be masters: live non-picker navs, in creation order.
+let rowset_navs = {} // {rowset_name -> [nav, ...]}
+
+// the first not-hidden nav with rowset_name.
+ui.find_master_nav = function(rowset_name) {
+	for (let nav of rowset_navs[rowset_name] ?? empty_array)
+		if (!ui.is_state_hidden(nav.id))
+			return nav
+}
+
 //// NAV ---------------------------------------------------------------------
 
 let sel_change_n = 0 // global auto-increment number for sel_change_no
@@ -829,6 +841,13 @@ ui.nav = function(id, opt) {
 	let param_source_vals = obj() // {input_id->val | nav_id->sel_change_n}
 	let load_param_vals = null // {param->[val, ...]} sent with the last load
 	let parent_param = null // partial load: the param that filters parent_col
+	// {param->input_id | nav_id}: the app's param_bindings, then the masters
+	// that the nav binds itself.
+	e.param_sources = obj()
+	for (let id in e.param_bindings)
+		e.param_sources[e.param_bindings[id]] = id
+	let can_be_master = !!e.rowset_name && !e.is_picker // in rowset_navs
+	e.rowset_label = null // the rowset's label, or null
 
 	// indexes
 	let indexes = null // {cols -> {fields:, ris:}}, built on first lookup
@@ -2199,22 +2218,33 @@ ui.nav = function(id, opt) {
 	}
 
 	// -> {param name -> [val, ...]} from the bindings: an input's value, or
-	// the pk of a master nav's rows: its focused row for an accept_many =
-	// false param, otherwise its selected rows, the focused row first. Then
-	// the values applied from the param bar, for the params not bound.
+	// the param's lookup_cols, else the pk, of a master nav's rows: its
+	// focused row for an accept_many = false param, otherwise its selected
+	// rows, the focused row first. Then the values applied from the param
+	// bar, for the params not bound.
 	function read_param_vals() {
 		let lists = obj() // {param name -> [val, ...]}
-		for (let id in e.param_bindings) {
-			let name = e.param_bindings[id] // param name
+		for (let name in e.param_sources) {
+			let id = e.param_sources[name] // input id or master nav id
 			let for_cols = e.params?.[name].for_cols // 'COL ...', or undefined
 			let n = for_cols ? words(for_cols).length : 1 // cols in a tuple
 			let master = ui.state_of(id, 'nav')
-			// master pk and param cols differ: warn and supply no values.
-			if (master && e.params && master.ready
-				&& master.pk_fields.length != n
+			// before it loads, a master has a placeholder pk and no rows.
+			let lookup_cols = e.params?.[name].lookup_cols // 'COL ...', or pk
+			let key_fields = master?.ready && lookup_cols // master cols supplied
+				? words(lookup_cols).map(col => master.all_fields_map[col])
+				: master?.pk_fields
+			// master lacks a lookup col: warn and supply no values.
+			if (master?.ready && key_fields.includes(undefined)) {
+				warn_once(e.id, 'param', name, 'has lookup_cols', lookup_cols,
+					'missing in master', id)
+				lists[name] = []
+			// master key and param cols differ: warn and supply no values.
+			} else if (master && e.params && master.ready
+				&& key_fields.length != n
 			) {
 				warn_once(e.id, 'param', name, 'has', n, 'cols but master', id,
-					'has', master.pk_fields.length, 'pk cols')
+					'has', key_fields.length, 'key cols')
 				lists[name] = []
 			} else if (master) {
 				// a new master row has no saved key: it supplies no values.
@@ -2234,9 +2264,9 @@ ui.nav = function(id, opt) {
 				// selected rows; the server uses the first tuple.
 				let ris = !e.params || e.params[name].accept_many != false
 					? sel_ris : focused_ris
-				let vals = [] // the pk tuples, one after another
+				let vals = [] // the key tuples, one after another
 				for (let ri of ris)
-					for (let field of master.pk_fields)
+					for (let field of key_fields)
 						vals.push(master.cell_val(ri, field.name))
 				lists[name] = vals
 			} else {
@@ -2283,13 +2313,35 @@ ui.nav = function(id, opt) {
 		return false
 	}
 
+	// Bind each param with lookup_rowset_name and no app binding to a master
+	// found by ui.find_master_nav(). -> true if a binding changed.
+	function bind_master_params() {
+		let has_changed = false
+		for (let name in e.params) {
+			let def = e.params[name]
+			let bound_id = e.param_sources[name] // last binding, or undefined
+			if (!def.lookup_rowset_name || e.param_bindings?.[bound_id] == name)
+				continue
+			// a nav cannot have a master with the same rowset (for now).
+			let master_id = def.lookup_rowset_name != e.rowset_name
+				? ui.find_master_nav(def.lookup_rowset_name)?.id : undefined
+			if (master_id != bound_id) {
+				if (master_id)
+					e.param_sources[name] = master_id
+				else
+					delete e.param_sources[name]
+				has_changed = true
+			}
+		}
+		return has_changed
+	}
+
 	// check if params changed and reload if they did.
 	// called per-frame, hence sel_change_no to make checking cheaper.
 	e.reload_if_params_changed = function() {
-		if (!e.param_bindings)
-			return
-		let has_changed = false
-		for (let id in e.param_bindings) {
+		let has_changed = bind_master_params()
+		for (let name in e.param_sources) {
+			let id = e.param_sources[name] // input id or master nav id
 			let master = ui.state_of(id, 'nav')
 			let v = master ? master.sel_change_no : ui.value(id)
 			if (v !== param_source_vals[id]) {
@@ -4395,6 +4447,10 @@ ui.nav = function(id, opt) {
 		load_req = null
 		save_req = null
 		abort_children_reqs()
+		if (can_be_master) {
+			remove_value(rowset_navs[e.rowset_name], e)
+			ui.rebuild('nav_removed')
+		}
 	}
 
 	// -> [v1, ...]: the row's pk, with a new row's typed pk.
@@ -4856,6 +4912,12 @@ ui.nav = function(id, opt) {
 		e.exit_edit()
 
 		e.params = rs.params ?? null
+		// a param without lookup_rowset_name now: unbind its master.
+		for (let name in e.param_sources)
+			if (e.param_bindings?.[e.param_sources[name]] != name
+					&& !e.params?.[name]?.lookup_rowset_name)
+				delete e.param_sources[name]
+		e.rowset_label = rs.label ?? null
 		// create an input on the param bar for each unbound non-col param.
 		e.param_bar_fields = [] // [field, ...]
 		for (let name in e.params) {
@@ -5081,6 +5143,13 @@ ui.nav = function(id, opt) {
 		rowset_listeners[e.rowset_name] ??= new Set()
 		rowset_listeners[e.rowset_name].add(rowset_changed)
 		reload_with_params(true)
+	}
+
+	if (can_be_master) {
+		rowset_navs[e.rowset_name] ??= []
+		rowset_navs[e.rowset_name].push(e)
+		// details built earlier in the pass: bind them.
+		ui.rebuild('nav_added')
 	}
 
 	return e

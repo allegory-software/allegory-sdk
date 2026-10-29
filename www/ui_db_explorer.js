@@ -44,7 +44,7 @@ ui.db_tables = function(id) {
 }
 
 ui.db_rows = function(id) {
-	build_table_rows(id, ui.bind_master(id, 'table', 'db_explorer_tables'))
+	build_table_rows(id, ui.find_master_nav('db_explorer_tables')?.id)
 }
 
 ui.db_explorer = function(id) {

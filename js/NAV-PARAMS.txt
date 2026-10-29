@@ -72,10 +72,11 @@ Each source fills one param:
 
 	source      values
 	----------  ---------------------------------------------------------------
-	master nav  the pk of its rows: the focused row for an accept_many =
-	            false param, the selected rows otherwise, the focused row
-	            first when it is selected. The pk cols map in order to the
-	            param's cols, so a composite pk fills a composite param.
+	master nav  the param's lookup_cols of its rows, or its pk without
+	            lookup_cols: the focused row for an accept_many = false
+	            param, the selected rows otherwise, the focused row first
+	            when it is selected. The key cols map in order to the
+	            param's cols, so a composite key fills a composite param.
 	input       the input's value, as a one-value list.
 
 So in master-detail the selected master rows choose the detail rows that
@@ -102,12 +103,39 @@ shows no rows:
 	- a master that isn't loaded yet or has no selected rows,
 	- a master with no focused row, for an accept_many = false param,
 	- a new master row: it has no saved key, so the nav skips it,
-	- a misbinding (the nav warns): a master whose pk has a different
-		number of cols than the param, or an input bound to a param of
-		several cols.
+	- a misbinding (the nav warns): a master whose key has a different
+		number of cols than the param, a master missing one of the param's
+		lookup_cols, or an input bound to a param of several cols.
 
 The nav reloads when a source's values change. The detail follows its
 masters within the same frame.
+
+
+AUTOMATIC BINDINGS
+==============================================================================
+
+A param with lookup_rowset_name holds keys of that rowset. When the app's
+param_bindings doesn't bind it, the nav binds it to a master by itself, so
+master-detail chains form as the user opens grids anywhere in the app. The
+master supplies values the same way as in BINDINGS.
+
+The nav picks the master with ui.find_master_nav(), which any widget can
+call for a value that it needs from a master on a given rowset:
+
+	ui.find_master_nav(rowset_name) -> nav | undefined
+
+ui.db_rows() calls it to learn which table to show: each table has its own
+rowset, so the table can't be a param of the rows nav.
+
+The master is the first live non-picker nav created on rowset_name that is
+not in a hidden dock tab. A nav never binds to a nav on its own rowset.
+Without a master, a nav's param is unbound (see UNBOUND PARAMS). The nav
+looks for the master on every frame.
+
+A plain param bound to a master gets no input on the param bar.
+
+The nav learns lookup_rowset_name from the first reply, so the first
+request of a detail goes without the automatic params.
 
 
 UNBOUND PARAMS

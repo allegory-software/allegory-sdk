@@ -743,6 +743,8 @@ function init(id, e) {
 			ui.bb('bg1', null, 'b', 'intense')
 			for (let field of e.param_bar_fields) {
 				let name = field.name
+				if (e.param_sources[name])
+					continue
 				if (!(name in param_bar_vals))
 					param_bar_vals[name] = e.param_bar_val(name)
 				param_bar_vals[name] = ui.field_input(id+'.param.'+name,
@@ -751,6 +753,13 @@ function init(id, e) {
 			if (ui.button(id+'.param_reload', 'reload', null, 0))
 				e.set_param_bar_vals(param_bar_vals)
 		ui.end_h()
+	}
+
+	function is_param_bar_not_empty() {
+		for (let field of e.param_bar_fields)
+			if (!e.param_sources[field.name])
+				return true
+		return false
 	}
 
 	function indent_offset(indent) {
@@ -2133,7 +2142,7 @@ function init(id, e) {
 		ui.stack(id, fr, align, valign)
 		ui.v(1, 0, 's', 's')
 
-			if (e.param_bar_fields.length)
+			if (is_param_bar_not_empty())
 				build_param_bar()
 
 		ui.hv(horiz ? 'v' : 'h', 1, 0, 's', 's')
