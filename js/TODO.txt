@@ -134,6 +134,11 @@ UI API
 	not even one targeted at a box inside a scrollbox.
 - make ui embeddable:
 	- screen, canvas, cx, screen_w, screen_h, dpr, ui.font_size_normal
+- go back to one rebuild per frame (ui.js redraw_all). The second rebuild
+	exists for one case: a new dock tab's content is first built in the
+	rebuild that set_dock_tab() asks for, and the nav or master binding that
+	it creates asks for another, so that the tab strip and the detail navs
+	built earlier in the pass see it.
 
 
 SCREEN SHARING

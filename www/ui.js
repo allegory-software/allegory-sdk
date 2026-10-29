@@ -1558,7 +1558,7 @@ ui.stateful_widget = function(create) {
 
 APP API
 	ui.saved_state <-> {id->{k->v}}      per-id saved widget state
-	ui.save_unsaved_state (saved_state) app hook to persist saved state
+	ui.save_unsaved_state (saved_state)  app hook to persist saved state
 	ui.save_state_delay <- n             seconds to wait before saving
 	ui.set_saved_value (id, v)           set a saved input's value
 WIDGET API
@@ -2969,7 +2969,14 @@ function redraw_all() {
 			break
 		rebuild_count++
 		//pr('rebuild')
-		if (rebuild_count > 1) {
+		/*
+		TODO: allow one rebuild again. The second one exists for a single
+		case: a new dock tab's content is first built in the rebuild that
+		set_dock_tab() asks for, and the nav or master binding that it creates
+		then asks for another rebuild, so that the dock's tab strip and the
+		detail navs built earlier in the pass see it.
+		*/
+		if (rebuild_count > 2) {
 			warn('rebuild loop detected')
 			break
 		}
