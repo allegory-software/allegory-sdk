@@ -14,80 +14,169 @@ USAGE (see js/demo.html):
 		}
 	</script>
 
-	Documentation is inline, search for "////" to navigate major topics and
-	"///" for sections within a topic. All APIs are in the `ui` namespace, but
-	not all APIs can be used in app code (i.e. in the build phase). Some APIs
-	are only useful for creating widgets and some only work in certain
-	rendering phases. The docs should be clear about that. Below is only the
-	hi-level app code API using built-in widgets.
+Documentation is inline, search for "////" to navigate major topics and
+"///" for sections within a topic. All APIs are in the `ui` namespace, but
+not all APIs can be used in app code (i.e. in the build phase). Some APIs
+are only useful for creating widgets and some only work in certain rendering
+phases. The docs should be clear about that. API index below for quick jump.
 
 CONTAINERS
+  STACK         ui.stack  ui.aspect_box
+  FLEX          ui.h  ui.v  ui.hv  ui.v_aligned  ui.box
+  SCROLLBOX     ui.scrollbox  ui.sb  ui.sb_max_wh
+    SCROLL TO   ui.scroll_to_view_next_box  ui.scroll_to_view_rect
+  POPUP         ui.popup
+    POPUP POS   ui.set_z_index  ui.popup_max_w
+  SPLIT         ui.hsplit  ui.vsplit  ui.hvsplit  ui.splitter
+  DOCK          ui.dock
+  DOCK TABS     ui.set_dock_tab  ui.select_dock_tab  ui.remove_dock_tab
+  TAB STRIP     ui.open_tab_strip  ui.close_tab_strip
+  TOOLBOX       ui.toolbox  ui.begin_toolboxes
+  SECTION       ui.begin_section
+  FRAME         ui.frame
+  REC BOX       ui.create_rec_box  ui.rec_box  ui.open_rec_box  ui.close_rec_box
+  RECORDING     ui.start_recording  ui.end_recording  ui.play_recording
 
-	ui.h|v[_aligned] (fr, gap, align, valign)
-	ui.stack         (id, fr, align, valign)
-	ui.sb|scrollbox  (id, fr, overflow_x, overflow_y, align, valign, sx, sy, x_id, y_id)
-	ui.sb_max_wh     (w, h)
-	ui.popup         (id, layer, target_i, side, align, flags, z_index, ox, oy)
-	ui.{h|v}split    (id, size, unit, fixed_side, split_fr, gap, align, valign)
-	ui.hvsplit       (hv, id, size, unit, fixed_side, split_fr, gap, align, valign)
-	ui.dock          (id, layout, [opt]) -> iter() -> tab
-	ui.toolbox       (id, title, align, valign, x0, y0, target_i)
-	ui.frame         (id, on_measure, on_build, fr, align, valign, ...args)
-	ui.rec_box       (rec_i, fr, align, valign)
-	ui.open_rec_box  (rec_i)
-	ui.close_rec_box ()
-	ui.create_rec_box() -> rec_i
+CONTENT
+  TEXT          ui.text  ui.text_editable  ui.text_lines  ui.text_wrapped
+  HEADINGS      ui.heading  ui.h1  ui.h2
+  TEXT COLOR    ui.color
+  FONT          ui.font  ui.font_alias  ui.load_font
+  FONT SIZE     ui.font_size  ui.default_font_size
+  FONT SIZES    ui.xsmall  ui.small  ui.smaller  ui.large  ui.xlarge
+  FONT WEIGHT   ui.font_weight  ui.bold  ui.nobold
+  LINE GAP      ui.line_gap
+  TEXT MARKS    ui.mark_text
+  TEXT SIZE     ui.measure_text  ui.line_h  ui.text_w  ui.text_h  ui.text_wh
+  SELECTION     ui.select_text  ui.text_selection
+  ICONS         ui.icon  ui.icon_def
+  IMAGE         ui.img  ui.image_data
+  VIDEO         ui.video
+  BACKGROUND    ui.bb  ui.bg  ui.border
+  SHADOW        ui.shadow  ui.shadow_def  ui.set_shadow  ui.reset_shadow
+  TOOLTIP BB    ui.bb_tooltip
+  POLYLINE      ui.polyline
+  DOTS          ui.bg_dots
 
-INPUT
+ACTIONS
+  BUTTON        ui.button  ui.primary_button  ui.bare_button  ui.btn  ui.pri_btn
+  MENU          ui.menu  ui.set_menu_open
+  MENU BUTTON   ui.menu_button  ui.bare_menu_button
+  MENU BAR      ui.menu_bar
+  ACTION LIST   ui.action_list  ui.actions
+    QUERY       ui.action_enabled  ui.action_checked
+    DISPATCH    ui.action_requested  ui.run_actions
+    ITEM        ui.action_item
 
-	ui.[primary_]button
-	                   (id, icon, text, fr, align, valign, style, readonly)
-	ui.label           (for_id, s, fr, align, valign)
-	ui.error_label     (for_id, 'first_error'|'all_errors'|'all_checked', fr, align, valign)
-	ui.input           (id, v, field, fr, text_align, no_box, readonly) -> v
-	ui.password_input  (id, v, field, fr, text_align, no_box, readonly) -> v
-	ui.list_dropdown   (id, items, value, field, fr, align, max_w, readonly) -> value
-	ui.enum_input      (id, value, field, fr, align, max_w, readonly) -> value
-	ui.enum_toggle     (id, value, field, fr, align, valign, readonly) -> value
-	ui.toggle          (id, on, field, fr, align, valign, readonly) -> on
-	ui.checkbox        (id, on, field, fr, align, valign, readonly) -> on
-	ui.toggle_button   (id, on, text, field, fr, align, valign, readonly) -> on
-	ui.radio_group     (id, value, field, readonly) -> value
-	ui.radio           (id, own_val, fr, align, valign)
-	ui.end_radio_group ()
-	ui.date_input      (id, v, field, fr, align, valign, readonly) -> v
-	ui.color_input     (id, v, field, fr, readonly) -> v
-	ui.num_slider      (id, v, field, readonly) -> v
-	ui.slider          (id, v, field, readonly) -> v
-	ui.field_input     (id, v, opt) -> v
-	ui.nav_input       (id, opt) -> v
+INPUTS
+  LABELS        ui.label  ui.error_label
+  TEXT          ui.input  ui.password_input
+  INPUT SIZE    ui.em_input  ui.em_input_max  ui.em_input_max_popup
+  NUMBER        ui.num_slider  ui.slider
+  BOOL          ui.checkbox  ui.toggle  ui.toggle_button
+  ENUM          ui.enum_input  ui.enum_toggle
+  LIST          ui.list  ui.vlist  ui.hlist  ui.hvlist
+  LIST DROP     ui.list_dropdown  ui.list_dropdown_inline
+  RADIO         ui.radio_group  ui.radio  ui.radio_list
+  DATE          ui.date_input  ui.calendar
+  COLOR         ui.color_input  ui.color_picker
+  COLOR SLIDER  ui.hue_slider  ui.sat_slider  ui.lum_slider
+  FIELD         ui.field_input  ui.nav_input  ui.build_input
+  VALUE         ui.value  ui.input_value  ui.set_value
+  DROPDOWN      ui.dropdown  ui.dropdown_picker
+  OPEN          ui.set_dropdown_open  ui.dropdown_open
+  EDGES         ui.dropdown_opened  ui.dropdown_closed  ui.dropdown_picked
+  UPDATE        ui.dropdown_update
 
-LIST
+LAYOUT
+  UNITS         ui.em  ui.sp  ui.sp025  ui.sp05  ui.sp075  ui.sp1  ui.sp2
+                ui.sp4  ui.sp8
+  PADDING       ui.p  ui.padding
+  PAD SIDES     ui.pl  ui.pr  ui.pt  ui.pb
+  PAD SIDES     ui.padding_left  ui.padding_right  ui.padding_top
+                ui.padding_bottom
+  PAD AXES      ui.ph  ui.pv  ui.padding_horiz  ui.padding_vert
+  MARGIN        ui.m  ui.margin
+  MARGIN SIDES  ui.ml  ui.mr  ui.mt  ui.mb  ui.mh  ui.mv
+  MIN SIZE      ui.min_w  ui.min_h  ui.min_wh
+  DEFAULT SIZE  ui.default_min_w  ui.default_min_h  ui.default_min_wh
+  BOX ARGS      ui.box_args  ui.clear_box_args
+  MEASURE       ui.measure
 
-	ui.[h|v|hv]list    (id, items, value, field, fr, align, valign,
-	                     item_align, item_valign, item_fr, max_w,
-	                     item_pad_l, item_pad_r, item_pad_y, item_h, item_gap,
-	                     custom_item_bg_color, custom_item_color, readonly) -> value
-	ui.radio_list      (id, items, value, field, hv, fr, align, valign, readonly]) -> value
+WIDGET STATE
+  ACCESS        ui.state  ui.state_of  ui.set_state_of  ui.state_init
+  LIFETIME      ui.free_state  ui.on_free
+  STATE SCOPES  ui.begin_state_scope  ui.keep_state_scope  ui.is_state_hidden
+  SAVED STATE   ui.saved_state  ui.save_state  ui.delete_saved_state
+  SAVED INPUT   ui.saved_value  ui.set_saved_value
 
-OTHER
+POINTER INPUT
+  POSITION      ui.mx  ui.my  ui.mx_notrans  ui.my_notrans  ui.update_mouse
+  BUTTONS       ui.pressed  ui.click  ui.rightclick  ui.clickup  ui.dblclick
+                ui.clicked  ui.rightclicked  ui.dblclicked
+  WHEEL         ui.wheel_dy  ui.trackpad
+  ENTER/LEAVE   ui.mouseenter  ui.mouseleave
+  HIT CONTROL   ui.nohit
+  HIT TESTING   ui.hit  ui.hovers  ui.set_hit  ui.hit_match
+  HIT HELPERS   ui.hit_rect  ui.hit_bbox  ui.hit_box
+  HOVER EDGES   ui.hit_enter  ui.hit_leave
+  CAPTURE       ui.captured_id  ui.captured  ui.capture_match ui.captured_or_hit
+  DRAG          ui.drag  ui.drag_or_hit  ui.mx0  ui.my0
+  CURSOR        ui.set_cursor
 
-	ui.drag_point      (id, x, y, color)
-	ui.polyline        (id, points, closed, fill_color, fill_color_state, stroke_color, stroke_color_state)
-	ui.resizer         (id, edges, max_w, max_h)
+KEYBOARD INPUT
+  KEYS          ui.keydown  ui.keyup  ui.keypressed  ui.key_chars
+  EVENTS        ui.key_events  ui.keys_down  ui.keys_up
+  CAPTURE       ui.capture_keys  ui.capture_keydown  ui.capture_keyup
+  CLIPBOARD     ui.clipboard_text
 
-RENDERING CONTROL
+FOCUS
+  ACCESS        ui.focused_id  ui.focused_by_key  ui.focus  ui.focused
+                ui.focusing
+  WINDOW        ui.window_focused  ui.window_focusing
+  TAB ORDER     ui.focusables  ui.focusable  ui.nofocus  ui.keep_focus
+  GROUP         ui.focus_group  ui.focus_inside  ui.focus_first
+  TAB           ui.capture_tab  ui.tab_into
+  BUTTONS       ui.default_button  ui.cancel_button
 
-	ui.animate ()         request another animation frame
-	ui.rebuild ([label])  request another build/layout pass in this frame
+THEMES
+  THEME         ui.themes  ui.theme  ui.theme_is_dark
+  SCREEN THEME  ui.screen_theme  ui.set_screen_theme
+  DEFINE COLOR  ui.color_def
+  READ COLOR    ui.color_obj  ui.color_css  ui.color_rgb  ui.color_rgba
+  DARK BG       ui.set_bg_color  ui.bg_is_dark
+  COLOR UTILS   ui.hsl  ui.hsl_adjust  ui.alpha_adjust
+  TUI STYLE     ui.set_tui
 
-SCROLLING INTO VIEW
+RENDER CONTROL
+  FRAME LOOP    ui.animate  ui.rebuild
+  CANVAS        ui.screen  ui.cx  ui.resize  ui.main
+  LAYERS        ui.layer
 
-	ui.scroll_to_view_next_box  ()
-	ui.scroll_to_view_rect      (scrollbox_id, x, y, w, h)
+SHARED SCREEN   ui.shared_screen
 
-TODO
+WIDGET API
+  REGISTER      ui.widget  ui.stateful_widget  ui.box_widget  ui.box_ct_widget
+  BOX SLOTS     ui.PX1  ui.PX2  ui.MX1  ui.MX2  ui.FR  ui.ALIGN
+  ARG SLOTS     ui.BOX_ARGS  ui.BOX_CT_ARGS
+  COMMANDS      ui.cmd_begin  ui.cmd_add_arg  ui.cmd_end  ui.cmd
+  BOX COMMANDS  ui.cmd_box  ui.cmd_box_ct
+  CMD INDICES   ui.ct_i  ui.rel_ct_i  ui.last_i
+  MEASURE       ui.add_ct_min_wh
+  POSITION      ui.align_x  ui.align_w  ui.inner_x  ui.inner_w
+  BOX POSITION  ui.box_position  ui.box_translate
+  DRAW STATE    ui.render_state  ui.local_state
+  FOCUS RING    ui.focus_ring
+  BUTTON PARTS  ui.button_stack  ui.button_bb  ui.button_text  ui.button_icon
+  LIST VALUE    ui.draw_value_row
+  DRAG POINT    ui.drag_point
+  RESIZER       ui.resizer
 
+INTEGRATION
+  POINTERS      ui.pointers  ui.pointer  ui.local_pointer  ui.add_pointer
+
+
+NYI
 	toaster         side  align  timeout  spacing
 	checklist
 	action-band
@@ -170,29 +259,31 @@ identical geometry to both users otherwise you won't know what you click on!
 
 SCREEN THEME
 
-	ui.screen_theme() -> 'dark'
-	ui.set_screen_theme(theme)
+	ui.screen_theme     () -> 'dark'  get the screen theme
+	ui.set_screen_theme (theme=)      set the screen theme
 
-DEFINING COLORS
+COLORS DEFINITIONS
 
-	ui.color_def  (theme, name, state, h, s, L, a, is_dark)          define color
-	ui.color_def  (theme, name, state, name, state, theme, is_dark)  copy color
-	ui.shadow_def (theme, name, x, y, blur, h, s, L, a, [inset])     define shadow
+	ui.color_def  (theme, name, state=, h, s, L, a=1, is_dark=) define color
+	ui.color_def  (theme, name, state=, src_name, src_state=, src_theme=, is_dark=)
 
 THEME API, to be used exclusively in the drawing phase!
 
-	ui.color_obj  (name, [state], [theme]) -> [css_color, h, s, L, a]
-	ui.color_css  (name, [state], [theme]) -> css_color   for fillStyle/strokeStyle
-	ui.color_rgb  (name, [state], [theme]) -> 0xRRGGBB    for WebGL, ignoring alpha
-	ui.color_rgba (name, [state], [theme]) -> 0xRRGGBBAA  for WebGL, with alpha
-	ui.bg_is_dark   (bg_color) -> t|f     should text be white on this bg?
-	ui.theme_is_dark([theme]) -> t|f      is (current) theme dark?
-	ui.theme        () -> theme
-	ui.hsl          (h, s, L, a) -> css_color     from HSL
-	ui.hsl_adjust   (c, h, s, L, a) -> css_color  from color c with adjusted h, s, L
-	ui.alpha_adjust (c, a) -> css_color           from color c with adjusted alpha
+	ui.color_obj  (name, state=, theme=) -> [css_color, h, s, L, a]
+	ui.color_css  (name, state=, theme=) -> css_color   for fillStyle/strokeStyle
+	ui.color_rgb  (name, state=, theme=) -> 0xRRGGBB  for WebGL, ignoring alpha
+	ui.color_rgba (name, state=, theme=) -> 0xRRGGBBAA  for WebGL, with alpha
 
-	ui.set_shadow (name)   set cx.shadowColor etc. for painting a shadow
+	ui.hsl          (h, s, L, a=1) -> css_color     from HSL
+	ui.hsl_adjust   (c, h, s, L, a=1) -> css_color  from color c with adjusted h, s, L
+	ui.alpha_adjust (c, a) -> css_color        from color c with adjusted alpha
+
+	ui.set_bg_color (color, state=)    set fill color and drawing theme
+	ui.bg_is_dark   (bg_color) -> ?    should text be white on this bg?
+	ui.theme_is_dark(theme=) -> ?      is (current) theme dark?
+	ui.theme        () -> theme
+
+	ui.set_shadow   (name)   set cx.shadowColor etc. for painting a shadow
 
 */
 
@@ -718,7 +809,7 @@ since we're not planning to have our canvas-based UI embedded in a normal
 HTML page any time soon.
 
 	ui.screen          access to canvas container div
-	ui.resize()        resize canvas and request another animation frame
+	ui.resize ()       resize canvas and request another animation frame
 
 */
 
@@ -874,50 +965,69 @@ and other users can't use the mouse while one user is dragging something.
 mouse handling *for every widget*, and it would be a nightmare to figure
 out what ops are allowed in the UI while one user is dragging something.
 
+MULTIPLE POINTERS
+
 	ui.pointers        [p1, ...]
-	ui.add_pointer     () -> pointer
-	ui.pointer         -> p    active pointer
+	ui.add_pointer     () -> pointer     create a pointer
+	ui.pointer         -> p              active pointer
+
+MOUSE POSITION
 
 	ui.mx              active pointer x-coord, transformed
 	ui.my              active pointer y-coord, transformed
 	ui.mx_notrans      active pointer x-coord
 	ui.my_notrans      active pointer y-coord
+	ui.update_mouse    ()   update ui.mx, ui.my to current transform
+
+MOUSE BUTTONS STATE
+
 	ui.pressed         active pointer pressed
 	ui.click           active pointer clicked
-	ui.clickup         active pointer de-clicked
+	ui.clickup         left button released this frame
 	ui.dblclick        active pointer double-clicked
+	ui.local_pointer   default pointer that tracks the local mouse and keyboard
+	ui.mx0, ui.my0     mouse position at the start of the drag
+
+MOUSE WHEEL STATE
+
 	ui.wheel_dy        active pointer wheel delta
-	ui.trackpad        active pointer wheel delta is from is a trackpad
+	ui.trackpad        wheel input is from a trackpad
 
-	ui.local_pointer   = default pointer that tracks the local mouse and keyboard
-	ui.mx0 my0         = mouse position when started dragging
-	ui.update_mouse    ()   update mouse coords to current transform
-	ui.hit_rect        (x, y, w, h) -> t|f
-	ui.hit_bb          (x1, y1, x2, y2) -> t|f  ; bb means bounding box
-	ui.hit_box         (a, i) -> t|f
+HIT HELPERS
 
-	ui.captured_id     = id of the widget that mouse is down on
+	ui.hit_rect        (x, y, w, h) -> ?
+	ui.hit_bbox        (x1, y1, x2, y2) -> ?     bb means bounding box
+	ui.hit_box         (a, i) -> ?   test the pointer against a box
+
+MOUSE HIT STATE
+
+	ui.captured_id     id of the widget that mouse is down on
 	ui.captured        (id) -> cs | null  get captured state if mouse is captured
-
-	ui.hit             (id[, k]) -> hs|v|null hit state if id is directly hit or dragging
-	ui.clicked         (id) -> hs|v|null  hit state if id was clicked this frame
-	ui.dblclicked      (id) -> hs|v|null  hit state if id was double-clicked
-	ui.hit_enter       (id) -> t|f            mouse started hovering widget
-	ui.hit_leave       (id) -> t|f            mouse stopped hovering widget
-	ui.hovers          (id) -> hs|null        hit state if mouse hovers or dragging over id
-	ui.set_hit         (id) -> hs             declare that mouse hovers widget
-	ui.nohit           ()                     exclude last command from hit-testing
-
-	ui.drag            (id, ['x'|'y'|'xy']) -> cs|null  drag state if id is captured
+	ui.hit             (id, k=) -> hs|v|null  hit state if id is directly hit or dragging
+	ui.clicked         (id) -> hs|null    hit state if id was clicked this frame
+	ui.dblclicked      (id) -> hs|null    hit state if id was double-clicked
+	ui.rightclicked    (id) -> hs|false|undefined
+	ui.hit_match       (id_prefix) -> suffix|undefined    read the hit id suffix
+	ui.capture_match   (id_prefix) -> suffix|undefined
+	ui.hit_enter       (id) -> ?          pointer entered the widget
+	ui.hit_leave       (id) -> ?          pointer left the widget
+	ui.hovers          (id) -> hs|null    hit state if mouse hovers or dragging over id
+	ui.set_hit         (id) -> hs         mark id as hovered (in hit phase only)
+	ui.drag            (id, axis=) -> cs|null  drag state if id is captured
 	  cs.drag          first frame of the drag
 	  cs.dragging      every frame from drag to drop
 	  cs.drop          last frame of the drag
 	  cs.dx,dy         how far the mouse moved since the press
 	  cs.moved         'l'|'r'|'t'|'b': drag-move direction, if past ui.drag_threshold
-	ui.drag_threshold  logical px threshold for setting cs.moved
 	ui.captured_or_hit (id) -> cs|hs|null   ui.captured(id) || ui.hit(id)
 
-	ui.set_cursor      (cursor)   set cursor for this frame
+HIT CONTROL
+
+	ui.nohit           ()    exclude last command from hit-testing
+
+CURSOR
+
+	ui.set_cursor  (cursor='initial')   set cursor for this frame
 
 */
 
@@ -1067,15 +1177,15 @@ screen.addEventListener('wheel', function(ev) {
 	animate()
 })
 
-function hit_bb(x1, y1, x2, y2) {
+function hit_bbox(x1, y1, x2, y2) {
 	return (
 		(ui.mx >= x1 && ui.mx < x2) &&
 		(ui.my >= y1 && ui.my < y2)
 	)
 }
-ui.hit_bb = hit_bb
+ui.hit_bbox = hit_bbox
 function hit_rect(x, y, w, h) {
-	return hit_bb(x, y, x+w, y+h)
+	return hit_bbox(x, y, x+w, y+h)
 }
 ui.hit_rect = hit_rect
 
@@ -1174,18 +1284,20 @@ function apply_cursor() {
 
 /*
 
-	ui.keydown         (key) -> t|f     check if a key was just pressed
-	ui.keyup           (key) -> t|f     check if a key was just depressed
-	ui.keypressed      (key) -> t|f     check if the active pointer's user holds a key
+	ui.keydown         (key) -> ?    check whether the key was pressed
+	ui.keyup           (key) -> ?    check whether the key was released
+	ui.keypressed      (key) -> ?    check if the active pointer's user holds a key
 
-	ui.key_chars () -> s          printable characters typed this frame
+	ui.key_chars       () -> s  printable characters typed this frame
 	ui.key_events -> [['down'|'up', full_key, key, char, ctrl, alt, shift], ...]
-	ui.keys_down () -> n
-	ui.keys_up   () -> n
+	ui.keys_down       () -> n  count keydown events
+	ui.keys_up         () -> n  count keyup events
 
-	ui.capture_keys    ()    remove current keydown() and keyup() events
-	ui.capture_keydown (key)   stop the browser from acting on a keydown
-	ui.capture_keyup   (key)   stop the browser from acting on a keyup
+	ui.clipboard_text -> text read from the clipboard
+
+	ui.capture_keys    ()     remove current keydown() and keyup() events
+	ui.capture_keydown (key)  stop the browser from acting on a keydown
+	ui.capture_keyup   (key)  stop the browser from acting on a keyup
 
 */
 
@@ -1328,11 +1440,13 @@ state is needed before the widget appears in the frame. The update callback
 is called once per build pass, either due to a state access from outside or
 when the widget is created in the frame.
 
-	ui.state           (id, [update_fn]) -> state     get own state and keep it alive
-	ui.state_of        (id[, k]) -> state | v | nil   get another widget's state
-	ui.set_state_of    (id, k, v)           set another widget's state var, if alive
-	ui.state_init      (id, k, v)           set widget state var if widget is alive
-	ui.on_free         (id, free_fn)        add a widget gc hook
+	ui.state           (id, update_fn=) -> state      get own state and keep it alive
+	ui.state_of        (id, k=) -> state | v | nil    get another widget's state
+	ui.set_state_of    (id, k, v)      set another widget's state var, if alive
+	ui.state_init      (id, k, v)      set widget state var if widget is alive
+	ui.on_free         (id, free_fn)   add a widget gc hook
+	ui.free_state      (id)            free widget state
+	ui.stateful_widget (create) -> build  create a widget builder
 
 In IMGUI if you want to hide a widget you simply don't build it, but then its
 state is lost. For a grid in a tab list that means reloading when you switch
@@ -1341,10 +1455,9 @@ gc'ed when that tab was switched from and its contents are no longer built,
 so when the tab is switched to again, the widgets inside will have kept their
 state.
 
-	ui.begin_state_scope (scope_id)         open state scope
-	ui.end_state_scope ()                   end state scope
-	ui.keep_state_scope(scope_id)           keep inside states from prev. frame
-	ui.is_state_hidden(id) -> t|f           id's state is in a kept scope
+	ui.begin_state_scope (scope_id)   open state scope
+	ui.keep_state_scope  (scope_id)   keep widgets in the scope alive
+	ui.is_state_hidden   (id) -> ?    id's state is in a kept scope
 
 */
 
@@ -1536,19 +1649,18 @@ ui.on_free = function(id, free1) {
 // small widgets but for big widgets like the grid it's much nicer to keep the
 // state internal with faster access and declared and initialized in one place.
 ui.stateful_widget = function(create) {
-	return function() { // id, ...build_args
-		let id = arguments[0]
+	return function(id, ...args) {
 		assert(isstr(id), 'id required')
 		let e
 		let s = ui.state_of(id)
 		if (!s) {
-			e = create.apply(null, arguments)
+			e = create.apply(null, id, ...args)
 			s = ui.state(id, e.update)
 			s.e = e
 		} else {
 			e = s.e
 		}
-		return e.build.apply(e, arguments)
+		return e.build.apply(e, id, ...args)
 	}
 }
 
@@ -1676,6 +1788,16 @@ function reset_tui() {
 
 //// FRAME BUILDING ----------------------------------------------------------
 
+/*
+
+	ui.rel_ct_i    () -> relative container index
+	ui.cmd_begin   (cmd) -> i           begin a command
+	ui.cmd_end     (i)                  finish a command
+	ui.cmd_add_arg (v)                  append a command argument
+	ui.cmd         (cmd, ...args) -> i  record a command
+
+*/
+
 function reset_canvas() {
 	assert(dpr)
 	default_font = ui.TUI ? 'monospace' : ui.default_font
@@ -1708,9 +1830,9 @@ function ct_stack_check() {
 
 /*
 
-	ui.start_recording ()
-	ui.end_recording   () -> a1
-	ui.play_recording  (a1)
+	ui.start_recording ()       begin a command recording
+	ui.end_recording   () -> a  end command recording
+	ui.play_recording  (a1)     append recorded commands
 
 */
 
@@ -1923,7 +2045,7 @@ ui.cmd = ui_cmd
 
 let layer_map = {} // {name->layer}
 
-//	ui.layer(name, [z_index], ['root modal'])
+//	ui.layer (name, z_index=, ['root modal'])       define a popup layer
 //
 //   root flag  : popups on this layer are in the root stacking context.
 //   modal flag : popups on this layer create their own stacking context.
@@ -2089,8 +2211,8 @@ and deserialized frame object, so ui.state(), ui.hit() state, ui.captured_id,
 etc. don't work here. Drawing can keep local inter-frame state with
 ui.render_state().
 
-	ui.render_state    (id) -> state      get render-local widget state
-	ui.local_state     (id[, k]) -> state | v | nil
+	ui.render_state (id) -> state      get render-local widget state
+	ui.local_state  (id, k=) -> state | v | nil
 
 	ui.cx       the canvas 2D context to draw with
 
@@ -2327,8 +2449,6 @@ function hit_popups(popups, recs) {
 
 function hit_frame(recs, popups) {
 
-	hit_frame_template_reset()
-
 	// reset hit state. set by set_hit() calls from hit callbacks.
 	hit_state_map.clear()
 	hit_id = null
@@ -2346,21 +2466,38 @@ function hit_frame(recs, popups) {
 
 /*
 
+CURRENT WIDGET FOCUS
+
 	ui.focused_id      = id                    id of focused widget
-	ui.focus           (id)                    focus widget
-	ui.focused         (id) -> t|f             check if widget is currently focused
-	ui.focusing        (id) -> t|f             widget is focusing this frame
-	ui.focusable       (id, [tab_order])       add widget to the tab order
-	ui.nofocus         ()                      declare the next widget not tab-focusable
-	ui.keep_focus      (id)                    declare widget not click-focusable
-	ui.capture_tab     (id)                    widget gets tab and shift-tab
-	ui.focus_group     ([trap], [tab_order], [id]) begin a tab order group
-	ui.end_focus_group ()                      end a tab order group
-	ui.default_button  (id)                    enter in the group's inputs hits it
-	ui.focus_inside    (group_id) -> t|f       focus is inside this focus group
-	ui.focus_first     (group_id)              focus first widget unless focus is inside
-	ui.tab_into        (id)                    next tab enters this focus group
-	ui.window_focused -> t|f                   browser window has focus
+	ui.focused_by_key -> ?
+	ui.focus           (id, by_key=)  focus widget
+	ui.focused         (id) -> ?      check whether the widget has focus
+	ui.focusing        (id) -> ?      widget gained focus this frame
+
+WIDGET FOCUS BEHAVIOR
+
+	ui.focusable       (id, tab_order=)        add widget to the tab order
+	ui.nofocus         ()             skip the next widget in Tab navigation
+	ui.keep_focus      (id)           preserve focus when the widget is clicked
+	ui.capture_tab     (id)           let the widget process Tab and Shift+Tab
+	ui.focusables -> flat focus records
+
+FOCUS GROUPS
+
+	ui.focus_group     (trap=, tab_order=, id=)    begin a tab order group
+	ui.focus_inside    (group_id) -> ?         focus is inside the group
+	ui.focus_first     (group_id)     focus the first widget if focus is outside
+	ui.tab_into        (id)           direct the next Tab into this group
+
+GROUP BUTTONS
+
+	ui.default_button  (id)  activate this button on Enter inside the group
+	ui.cancel_button   (id)  activate this button on Escape inside the group
+
+BROWSER FOCUS
+
+	ui.window_focused -> ?            browser window has focus
+	ui.window_focusing -> ?
 
 */
 
@@ -2741,8 +2878,8 @@ translate[NOHIT] = function(a, i) {
 
 /*
 
-	ui.animate ()         request another animation frame
-	ui.rebuild ([label])  request another build/layout pass in this frame
+	ui.animate ()        request another animation frame
+	ui.rebuild (label=)  request another build/layout pass in this frame
 
 */
 
@@ -3027,9 +3164,9 @@ ui.animate = animate
 		hit           : f(a, i, recs)     hit-test widget
 		is_flex_child : t|f               has fr at a[i+FR] and min_w/h at a[i+2+axis]
 										          so it can be a child of a flex container.
-	}, is_ct) -> create
+	}, is_ct=) -> create
 
-	ui.measure(into_id)   measure container and put x,y,w,h in state of into_id.
+	ui.measure (into_id) measure container and put x,y,w,h in state of into_id.
 
 */
 
@@ -3071,64 +3208,56 @@ Flexboxes keep min_w/min_h in args 0,1, keep measured
 min_w/min_h in args 2,3 and reuse args 0,1 for v_aligned min_w/min_h, etc.
 
 CREATE
-	ui.box_widget      (cmd_name, t, is_ct)   define a box widget
-	ui.box_ct_widget   (cmd_name, t)          define a container box widget
+	ui.box_widget        (cmd_name, t, is_ct=)  define a box widget
+	ui.box_ct_widget     (cmd_name, t)          define a container box widget
+	ui.cmd_box           (cmd, fr=1, align='s', valign='s', ...args) -> i
 
-	ui.PX1    = index offset in a for x1 padding; y1 padding at PX1+1
-	ui.PX2    = index offset in a for x2 padding; y1 padding at PX2+1
-	ui.MX1    = index offset in a for x1 margin; y1 margin at MX1+1
-	ui.MX2    = index offset in a for x2 margin; y2 margin at MX2+1
-	ui.FR     = index offset in a for fr
-	ui.ALIGN  = index offset in a for align
+ARGS
+	ui.PX1  ui.PX2  ui.MX1  ui.MX2  ui.FR  ui.ALIGN    box arg offsets
+	ui.BOX_CT_ARGS -> ct_box arg#1 offset
+	ui.BOX_ARGS    -> box arg#1 offset
 
+NEARBY COMMANDS
 	ui.ct_i   () -> ct_i    get container index in a
 	ui.last_i () -> last_i  get the index of the last cmd in a
 
-MEASURE
-	ui.add_ct_min_wh (a, axis, w)    declare min width/height
+MEASURE PHASE
+	ui.add_ct_min_wh  (a, axis, w)    declare min width/height
 
-POSITION
-	ui.align_x (a, i, axis, sx, sw)
-	ui.align_w (a, i, axis, sx, sw)
-	ui.inner_x (a, i, axis, ct_x)
-	ui.inner_w (a, i, axis, ct_x)
+POSITION PHASE
+	ui.align_x       (a, i, axis, sx, sw)  calculate the aligned position
+	ui.align_w       (a, i, axis, sx, sw)  calculate the aligned size
+	ui.inner_x       (a, i, axis, ct_x)    calculate the inner position
+	ui.inner_w       (a, i, axis, ct_x)    calculate the inner size
+	ui.box_position  (a, i, axis, sx, sw)  position a box on one axis
 
-DRAW
-	ui.popup_target_rect (a, i)  find a popup's target rect
+TRANSLATE PHASE
+	ui.box_translate  (a, i, dx, dy)             move a box
 
 USER API: MARGINS & PADDINGS
 
-	ui.em (em) -> x    em units to pixels
+	ui.em  (em=1) -> x    em units to pixels
 
-	ui.sp025 () -> em( .125)
-	ui.sp05  () -> em( .25)
-	ui.sp075 () -> em( .375)
-	ui.sp    () -> em( .5)
-	ui.sp1   () -> em( .5)
-	ui.sp2   () -> em( .75)
-	ui.sp4   () -> em(1)
-	ui.sp8   () -> em(2)
+	ui.p          (px1[, py1, [px2, py2]])    set paddings
+	ui.ph  ui.pv  (p1[, p2])                  set horizontal / vertical padding
+	ui.pl  ui.pr  ui.pt  ui.pb  (p)           set left / right / top / bottom padding
 
-	ui.p[adding]           ([px1], [py1], [px2], [py2])
-	ui.p[adding_]l[eft]    (p)
-	ui.p[adding_]r[ight]   (p)
-	ui.p[adding_]t[op]     (p)
-	ui.p[adding_]b[ottom]  (p)
-	ui.p[adding_]h[oriz]   (p1, [p2])
-	ui.p[adding_]v[ert]    (p1, [p2])
+	ui.m          (mx1[, my1, [mx2, my2]])    set margins
+	ui.mh  ui.mv  (m1[, m2])                  set horizontal / vertical margin
+	ui.ml  ui.mr  ui.mt  ui.mb  (m)           set left / right / top / bottom margin
 
-	ui.m[argin]            ([mx1], [my1], [mx2], [my2])
-	ui.m[argin_]l[eft]     (m)
-	ui.m[argin_]r[ight]    (m)
-	ui.m[argin_]t[op]      (m)
-	ui.m[argin_]b[ottom]   (m)
-	ui.m[argin_]h[oriz]    (m1, [m2])
-	ui.m[argin_]v[ert]     (m1, [m2])
+	ui.min_w   ui.min_h   ui.min_wh   (w|h|w,h)   set minimum width/ height
+	ui.text_w  ui.text_h  ui.text_wh  (w|h|w,h)   set text width / height
 
-	ui.[default_]min_w(w)       set (default) min_w
-	ui.[default_]min_h(h)       set (default) min_h
-	ui.[default_]min_wh(w, h)   set (default) min_w and min_h
-	ui.text_w|h|wh()            aliases to min_w|h|wh to use with ui.text()
+	ui.default_min_w   (w)      set minimum width if unset
+	ui.default_min_h   (h)      set minimum height if unset
+	ui.default_min_wh  (w, h)   set minimum size if unset
+
+USER API: BOX ARGS
+
+	ui.box_args       (fr=, align=, valign=)  set args for the next input
+	ui.box_args       ({fr: undefined, align: undefined, valign: undefined})
+	ui.clear_box_args ()                      clear the next input args
 
 */
 
@@ -3458,6 +3587,13 @@ ui.box_widget = function(cmd_name, t, is_ct) {
 
 //// BOX CONTAINER WIDGETS ---------------------------------------------------
 
+/*
+
+	ui.cmd_box_ct (cmd, fr=1, align='s', valign='s', ...args) -> i
+	ui.end        (cmd=)   close a container
+
+*/
+
 function cmd_next_sibling_i(a, i) {
 	let cmd = a[i-1]
 	if (cmd & 1) // container
@@ -3609,7 +3745,6 @@ function hit_ct(a, i, recs, id) {
 	}
 	if (hit_box(a, i)) {
 		set_hit(id)
-		hit_template(a, i)
 		// an id means that the app hit-tests this box, so it takes the hit.
 		// nohit() opts out.
 		return !!id
@@ -3640,6 +3775,15 @@ register[CMD_MEASURE] = function(a, i) {
 }
 
 //// FLEX --------------------------------------------------------------------
+
+/*
+
+	ui.h         (fr=1, gap=0, align='s', valign='s')  begin horizontal flex box
+	ui.v         (fr=1, gap=0, align='s', valign='s')  begin vertical flex box
+	ui.v_aligned (fr=1, gap=0, align='s', valign='s')  begin vertical flex, aligned
+	ui.hv        ('h|v', fr=1, gap=0, align='s', valign='s')
+
+*/
 
 const FLEX_GAP = BOX_CT_ARGS+0
 
@@ -3909,7 +4053,9 @@ is_flex_child[CMD_V_ALIGNED] = true
 
 //// BOX ---------------------------------------------------------------------
 
-// just an empty box used as an empty place in v_aligned or to reserve space.
+
+//	ui.box (fr=0) -> i
+// empty box used as an empty place in v_aligned or to reserve space.
 ui.box_widget('box', {
 	create: function(cmd, fr) {
 		let i = ui_cmd_box_begin(cmd, fr ?? 0, 's', 's')
@@ -3919,6 +4065,10 @@ ui.box_widget('box', {
 })
 
 //// STACK -------------------------------------------------------------------
+
+// a box container that paints its children one on top of the other.
+//
+// ui.stack (id=, fr=1, align='s', valign='s')
 
 const STACK_ID = BOX_CT_ARGS+0
 
@@ -3954,6 +4104,10 @@ hittest[CMD_STACK] = function(a, i, recs) {
 
 //// ASPECT BOX --------------------------------------------------------------
 
+//	a box container than keeps a fixed aspect ratio while stretching.
+//
+// ui.aspect_box  (aspect=1, fr=1, align='s', valign='s')
+
 ui.box_ct_widget('aspect_box', {
 	create: function(cmd, aspect, fr, align, valign) {
 		let i = ui_cmd_box_ct_begin(cmd, fr, align, valign)
@@ -3973,6 +4127,19 @@ ui.box_ct_widget('aspect_box', {
 })
 
 //// SCROLLBOX ---------------------------------------------------------------
+
+/*
+
+	ui.scrollbox | ui.sb (id, fr=1,
+		overflow_x='auto', overflow_y='auto', align='s', valign='s',
+		sx=, sy=, x_id=, y_id=)
+
+	ui.sb_max_wh               (w=0, h=0)  set max w and h (for popups)
+
+	ui.scroll_to_view_next_box ()          scroll to reveal following box
+	ui.scroll_to_view_rect     (sb_id, x, y, w, h) scroll to reveal a content area
+
+*/
 
 const SB_OVERFLOW  = BOX_CT_ARGS+0 // overflow x,y
 const SB_CW        = BOX_CT_ARGS+2 // content w,h
@@ -4004,7 +4171,10 @@ id_i[CMD_SCROLLBOX] = SB_ID
 
 let next_sb_max_w, next_sb_max_h
 
-ui.sb_max_wh = function(w, h) { next_sb_max_w = w; next_sb_max_h = h }
+ui.sb_max_wh = function(w, h) {
+	next_sb_max_w = w
+	next_sb_max_h = h
+}
 
 ui.scrollbox = function(
 	id, fr, overflow_x, overflow_y, align, valign, sx, sy, x_id, y_id
@@ -4404,8 +4574,6 @@ hittest[CMD_SCROLLBOX] = function(a, i, recs) {
 	if (!hit_box(a, i))
 		return
 
-	hit_template(a, i)
-
 	// test the scrollbars
 	for (let axis = 0; axis < 2; axis++) {
 		let [visible, tx, ty, tw, th, bx, by, bw, bh] =
@@ -4432,6 +4600,18 @@ hittest[CMD_SCROLLBOX] = function(a, i, recs) {
 }
 
 //// POPUP -------------------------------------------------------------------
+
+/*
+
+	Popups enable layering and anchoring of overlapped content.
+
+	ui.popup     (id=, layer=, target='container', side='t', align='c', flags=,
+	              z_index=0, ox=, oy=)
+
+	ui.set_z_index (a, i, z_index)  set popup order within its layer
+	ui.popup_max_w () -> w          read the maximum popup width
+
+*/
 
 const POPUP_START             = 0
 const POPUP_END               = 1
@@ -5044,6 +5224,19 @@ draw[CMD_BB_TOOLTIP] = function(a, i) {
 
 //// BOX SHADOW --------------------------------------------------------------
 
+/*
+
+SHADOW DEFINITIONS
+
+	ui.shadow_def   (theme, name, x, y, blur, h, s, L, a=1, inset=)
+
+DRAWING PHASE
+
+	ui.shadow       (name)   set the box shadow
+	ui.reset_shadow ()       clear the drawing shadow
+
+*/
+
 ui.shadow_def = function(theme_name, name, x, y, blur, h, s, L, a, inset) {
 	themes[theme_name].shadow[name] = [
 		x, y, blur,
@@ -5133,6 +5326,17 @@ function draw_inset_shadow(st, x, y, w, h, sides, r) {
 }
 
 //// BACKGROUND & BORDER -----------------------------------------------------
+
+/*
+
+	ui.bb     (bg_color=, bg_color_state=,
+	           border_sides=, border_color=, border_color_state=,
+	           border_radius=, border_dash=)
+	ui.bg     (bg_color=, bg_color_state=)
+	ui.border (border_sides=true, border_color=, border_color_state=,
+	           border_radius=, border_dash=)
+
+*/
 
 const BORDER_SIDE_T = 1
 const BORDER_SIDE_R = 2
@@ -5309,13 +5513,13 @@ hittest[CMD_BB] = function(a, i) {
 		return
 	let ct_i = i+a[i+BB_CT_I]
 	if (hit_box(a, ct_i)) {
-		hit_template(a, ct_i)
 		return true
 	}
 }
 
 //// FOCUS RING --------------------------------------------------------------
 
+//	draw focus ring as an overlay popup if id is keyboard-focused.
 ui.focus_ring = function(id) {
 	if (!ui.focused_by_key)
 		return
@@ -5331,26 +5535,30 @@ ui.focus_ring = function(id) {
 
 /*
 
-DEFINING FONTS
+FONT DEFINITIONS
 
-	ui.load_font   (name, url, desc)      load a font
-	ui.font_alias  (alias, name)          alias a loaded font
+	ui.load_font         (name, url, desc=)  load a font
+	ui.font_alias        (alias, name)       alias a loaded font
 
 USER API, affects only the next ui.text() call.
 
-	ui.color       (color, [color_state])
-	ui.font        (font|alias)
-	ui.font_size   (size)
-	ui.default_font_size (size)
-	ui.font_weight (weight)
-	ui.bold        ()
-	ui.nobold      ()
-	ui.line_gap    (gap)
-	ui.xsmall      ()
-	ui.small       ()
-	ui.smaller     ()
-	ui.large       ()
-	ui.xlarge      ()
+	ui.color             (color=, color_state=)
+
+	ui.font              (font=)    set the next text font
+
+	ui.font_weight       (weight=)  set the next text font weight
+	ui.bold              ()         use bold text
+	ui.nobold            ()         use normal text weight
+
+	ui.font_size         (size=1)   set the next text font size
+	ui.default_font_size (size=1)   set font size if unset
+	ui.xsmall            ()         use extra small text
+	ui.small             ()         use small text
+	ui.smaller           ()         use smaller text
+	ui.large             ()         use large text
+	ui.xlarge            ()         use extra large text
+
+	ui.line_gap          (gap=0.5)  set spacing between text lines
 
 */
 
@@ -5512,26 +5720,28 @@ function copy_input_value(field, v) {
 //// TEXT BOX ----------------------------------------------------------------
 
 /*
+
 TEXT BOXES
 
-	ui.text            (id, v, fr, align, valign, max_w, wrap, field, readonly)
-	ui.text_editable   (id, v, fr, align, valign, max_w, field, readonly)
-	ui.text_lines      (id, v, fr, align, valign, max_w)
-	ui.text_wrapped    (id, v, fr, align, valign, max_w)
-	ui.heading (size, s, align)
-	hi.h1      (s, align)
-	ui.h2      (s, align)
+	ui.text          (id, v=, fr=1, align='l', valign='c', max_w=-1, wrap=, field=, readonly=)
+	ui.text_editable (id, v=, fr=1, align='l', valign='c', max_w=-1, field=, readonly=)
+	ui.text_lines    (id, v=, fr=1, align='l', valign='c', max_w=-1)
+	ui.text_wrapped  (id, v=, fr=1, align='l', valign='c', max_w=-1)
 
-TEXT STATE API
+	ui.heading (size, s=, align='l')  draw a heading
+	ui.h1      (s=, align='l')        draw a level 1 heading
+	ui.h2      (s=, align='l')        draw a level 2 heading
 
-	ui.mark_text       (i1, i2, [bg])   put a bg behind [i1,i2) of the next text
-	ui.select_text     (id, i, len)     place the caret in an editable text
-	ui.text_selection  (id, [from_end], [wanted]) -> [i, len]
+TEXT STATE
+
+	ui.mark_text      (i1, i2, bg=)  put a bg behind [i1,i2) of the next text
+	ui.select_text    (id, i, len)   place the caret in an editable text
+	ui.text_selection (id, from_end=, wanted=) -> [i, len]
 
 TEXT HELPERS
 
-	ui.measure_text (cx, s) -> {w:, asc:, dsc:, {actual|font}BoundingBox{Ascent|Descent|Left|Right}:, }
-	ui.line_h       () -> h    height of a line of text in the normal font
+	ui.measure_text   (cx, s) -> {w:, asc:, dsc:, {actual|font}BoundingBox{Ascent|Descent|Left|Right}:, }
+	ui.line_h         () -> h    height of a line of text in the normal font
 
 */
 
@@ -6533,12 +6743,19 @@ hittest[CMD_TEXT] = function(a, i) {
 		if (a[i+TEXT_FLAGS] & TEXT_EDITABLE)
 			ui.set_cursor('text')
 		set_hit(a[i+TEXT_ID])
-		hit_template(a, i)
 		return true
 	}
 }
 
 //// ICONS -------------------------------------------------------------------
+
+/*
+
+	ui.icon_def (name, font, text)  define an icon
+
+	ui.icon     (id, name, fr=1, align='l', valign='c', max_w=-1)
+
+*/
 
 // text is a codepoint, or the icon's name for a font that ligates names:
 // material icons ligates, tabler and font awesome don't.
@@ -6556,13 +6773,21 @@ ui.icon = function(id, name, fr, align, valign, max_w) {
 
 //// FRAME -------------------------------------------------------------------
 
-// A frame sits inside a scrollbox. You give it its dimensions so that the
-// scrollbox knows how to scroll it, but you don't build its content there.
-// Instead, you pass it a callback and you build the content in the callback.
-// The engine calls your callback when it can tell you the frame viewport so
-// that you can build only the content that is visible and skip building the
-// content that is not in the frame. The grid and the code edit widgets use
-// frames to scroll long content at constant speed.
+/*
+
+A frame sits inside a scrollbox. You give it its dimensions so that the
+scrollbox knows how to scroll it, but you don't build its content there.
+Instead, you pass it a callback and you build the content in the callback.
+The engine calls your callback when it can tell you the frame viewport so
+that you can build only the content that is visible and skip building the
+content that is not in the frame. The grid and the code edit widgets use
+frames to scroll long content at constant speed.
+
+	ui.frame (on_measure, on_build, fr=1, align='s', valign='s', ...args)
+
+	ui.FRAME_ARGS_I -> first frame callback argument offset
+
+*/
 
 const FRAME_ON_MEASURE = BOX_ARGS+0
 const FRAME_ON_BUILD   = BOX_ARGS+1
@@ -6662,6 +6887,23 @@ frame.hit = function(a, i, recs) {
 ui.box_widget('frame', frame)
 
 //// REC BOX -----------------------------------------------------------------
+
+/*
+
+A box that you can add content to before placing it in the layout, or you
+can place it and add content later, decoupling build order from layout order.
+
+	ui.create_rec_box () -> rec_i    create a rec box
+
+	ui.rec_box  (rec_i, fr=1, align='s', valign='s')    place a rec box
+
+	ui.open_rec_box   (rec_i)    begin writing to a rec box
+	ui.close_rec_box  ()         stop writing to the rec box
+
+You can call open_rec_box / close_rec_box multiple times to add more content
+and you can open a container in an open/close session and close it in another.
+
+*/
 
 const REC_BOX_REC_I = BOX_ARGS+0
 
@@ -6820,12 +7062,7 @@ ui.unpack_frame = unpack_frame
 
 //// SHARED SCREEN -----------------------------------------------------------
 
-/*
-	ui.shared_screen   (id, answer_con, fr, align, valign)
-	ui.process_shared_screen_input (p, t)
-	ui.pack_frame      () -> s     pack current frame for sending over the network
-	ui.frame_changed   = noop      hook this for sending frames out
-*/
+//	ui.shared_screen  (id, answer_con, fr=1, align='s', valign='s')
 
 let SS_ID    = BOX_ARGS+0
 let SS_FRAME = BOX_ARGS+1
@@ -7003,6 +7240,8 @@ ui.box_widget('shared_screen', ss)
 
 //// DRAG_POINT --------------------------------------------------------------
 
+//	ui.drag_point (id, x, y, color='red')
+
 {
 let ARGS  = 2+2+8+1
 let COLOR = ARGS+0
@@ -7076,6 +7315,18 @@ ui.widget('drag_point', {
 }
 
 //// ACTION LIST -------------------------------------------------------------
+
+/*
+
+	ui.action_list      (defs) -> {name -> action}  register action definitions
+	ui.actions -> {name -> action}
+	ui.action_enabled   (action, target_id) -> ?
+	ui.action_checked   (action, target_id) -> ?
+	ui.action_requested (target_id, action) -> ?
+	ui.run_actions      (target_id) -> ?
+	ui.action_item      (id, action, target_id) -> menu_item
+
+*/
 
 let action_defs = obj() // {name -> action}
 let shortcut_actions = obj() // {full key -> action}
@@ -7209,6 +7460,21 @@ function build_action_hint(id, action) {
 }
 
 //// BUTTON ------------------------------------------------------------------
+
+/*
+
+	ui.button  ui.btn (id, icon=, text=, fr=1, align=, valign='c', style='button', readonly=) -> ?
+	ui.primary_button (id, icon=, text=, fr=1, align=, valign='c', readonly=) -> ?
+	ui.bare_button    (id, icon=, text=, fr=1, align=, valign='c', readonly=) -> ?
+
+BUTTON PARTS
+
+	ui.button_stack     (id, fr=1, align='s', valign='c')
+	ui.button_bb        (style='button', state)  draw the button background
+	ui.button_text      (s, state)               draw button text
+	ui.button_icon      (font, icon, state)      draw a button icon
+
+*/
 
 ui.color_def('*', 'button-text', 'normal'   , 'text', 'active')
 ui.color_def('*', 'button-text', 'readonly' , 'text', 'readonly')
@@ -7381,6 +7647,15 @@ function end_hit_h_edge() {
 }
 
 //// SPLIT -------------------------------------------------------------------
+
+/*
+
+	ui.hsplit  (id, size=, unit='fr', fixed_side=1, split_fr=1, gap=0, align='s', valign='s')
+	ui.vsplit  (id, size=, unit='fr', fixed_side=1, split_fr=1, gap=0, align='s', valign='s')
+	ui.hvsplit (hv, id, size=, unit='fr', fixed_side=1, split_fr=1, gap=0, align='s', valign='s')
+	ui.splitter ()  begin the second split pane
+
+*/
 
 let split_stack = []
 
@@ -7556,6 +7831,8 @@ ui.end_hvsplit = end_split
 
 //// SECTION -----------------------------------------------------------------
 
+// collapsible section:
+//	ui.begin_section (id, title=) -> ?
 ui.begin_section = function(id, title) {
 	let s = ui.state(id)
 	if (ui.clicked(id))
@@ -7577,15 +7854,22 @@ ui.end_section = function() {
 //// MENU --------------------------------------------------------------------
 
 /*
-	let picked_id = ui.menu(id, items, [want_open], [side], [align])
+
+Menu keeps opened state and builds nothing while the menu is closed.
+pass want_open = true to open it. the menu then opens at the pointer, or
+next to its container when side is given, and focuses itself. to get the
+focus back after the menu closes, call ui.focus() when the menu is not open
+and ui.focus_inside(id) is true.
+
+	ui.set_menu_open    (id, open)  open or close a menu
+	ui.menu             (id, items, want_open=, side=, align=) -> picked_id
+	ui.menu_button      (id, icon=, text=, items, fr=1, align='l', valign='c', style='button', readonly=) -> picked_id
+	ui.bare_menu_button (id, icon=, text=, items, fr=1, align='l', valign='c', readonly=) -> picked_id
+	ui.menu_bar         (id, fr=1, gap=0, align='s', valign='s')
+
+	let picked_id = ui.menu(id, items, want_open=, side=, align=)
 		items: [{id:, label:, [items:], [checked:], [disabled:]} | null, ...]
 		-> id of the item picked in this pass, or null
-
-	the menu keeps opened state and builds nothing while the menu is closed.
-	pass want_open = true to open it. the menu then opens at the pointer, or
-	next to its container when side is given, and focuses itself. to get the
-	focus back after the menu closes, call ui.focus() when the menu is not open
-	and ui.focus_inside(id) is true.
 
 */
 
@@ -7911,6 +8195,17 @@ ui.end_menu_bar = function() {
 
 //// LIST --------------------------------------------------------------------
 
+/*
+
+	ui.list  ui.vlist  ui.hlist  ui.hvlist  (
+		id, items, value=, field=, fr=1, align='s', valign='t',
+	   item_align=, item_valign='c', item_fr=1, max_w=-1,
+	   item_pad_l=, item_pad_r=, item_pad_y=, item_h=, item_gap=0,
+	   custom_item_bg_color=, custom_item_color='text', readonly=
+	) -> value
+
+*/
+
 function valid_list_index(i, items) {
 	return items.length ? clamp(i, 0, items.length-1) : null
 }
@@ -8068,7 +8363,10 @@ ui.list = ui.vlist
 
 //// LABEL -------------------------------------------------------------------
 
-// a label is a clickable text that focuses an input.
+// A clickable text that focuses an input.
+//
+//	ui.label (for_id, s=, fr=1, align='l', valign='c')
+//
 ui.label = function(for_id, s, fr, align, valign) {
 	let id = for_id+'.label'
 	ui.color('text', hit(id) ? 'hover' : null)
@@ -8076,6 +8374,10 @@ ui.label = function(for_id, s, fr, align, valign) {
 }
 
 //// ERROR_LABEL -------------------------------------------------------------
+
+// Show input validation results / errors.
+//
+//	ui.error_label (for_id, mode='first_error', fr=1, align='l', valign='c')
 
 function input_errors(id) {
 	let s = ui.state_of(id+'.field_input')
@@ -8126,6 +8428,21 @@ ui.error_label = function(for_id, mode, fr, align, valign) {
 
 //// INPUT -------------------------------------------------------------------
 
+/*
+
+TEXT INPUTS
+
+	ui.input          (id, v=, field=, fr=1, text_align='s', no_box=, readonly=) -> v
+	ui.password_input (id, v=, field=, fr=1, text_align='s', no_box=, readonly=) -> v
+
+DEFAULT WIDTHS
+
+	ui.em_input           () -> ui.em(ui.input_min_w_em)
+	ui.em_input_max       () -> ui.em(ui.input_max_w_em)
+	ui.em_input_max_popup () -> ui.em(ui.input_max_popup_w_em)
+
+*/
+
 ui.input_min_w_em = 10
 ui.input_max_w_em = 12
 ui.input_max_popup_w_em = 24
@@ -8167,6 +8484,8 @@ ui.password_input = function(
 }
 
 //// NUM_SLIDER --------------------------------------------------------------
+
+// ui.num_slider (id, v=, field=, readonly=) -> v
 
 function num_slider_update(id, s) {
 
@@ -8313,6 +8632,8 @@ ui.num_slider = function(id, value, field, readonly) {
 }
 
 //// SLIDER ------------------------------------------------------------------
+
+// ui.slider (id, v=, field=, readonly=) -> v
 
 function compute_step_and_range(
 	wanted_n, min, max, scale_base, scales, min_step
@@ -8656,6 +8977,8 @@ ui.box_widget('slider', slider)
 
 //// TOGGLE ------------------------------------------------------------------
 
+// ui.toggle (id, on=, field=, fr=0, align='c', valign='c', readonly=) -> on
+
 let TOGGLE_ID    = BOX_ARGS+0
 let TOGGLE_STATE = BOX_ARGS+1
 
@@ -8776,6 +9099,13 @@ ui.box_widget('toggle', toggle)
 
 //// CHECKBOX ----------------------------------------------------------------
 
+/*
+
+	ui.checkbox      (id, on=, field=, fr=0, align='l', valign='c', readonly=) -> on
+	ui.toggle_button (id, on=, text=, field=, fr=1, align='l', valign='c', readonly=) -> on
+
+*/
+
 let checkbox = {...toggle}
 
 checkbox.create = function(
@@ -8880,6 +9210,15 @@ ui.toggle_button = function(
 }
 
 //// RADIO -------------------------------------------------------------------
+
+/*
+
+	ui.radio_group     (id, value=, field=, readonly=) -> value
+	ui.radio           (id, own_val, fr=0, align='c', valign='c')
+
+	ui.radio_list      (id, items, value=, field=, hv='v', fr=1, align='s', valign='s', readonly=) -> value
+
+*/
 
 let radio = {...checkbox}
 
@@ -9010,19 +9349,28 @@ ui.radio_list = function(
 //// DROPDOWN ----------------------------------------------------------------
 
 /*
-	let open = ui.dropdown(id, [update], [want_open])
-		... the value ...
-	ui.dropdown_picker(id, [side], [align])
-		if (open)
-			... the picker, under id+'.picker' ...
-	ui.end_dropdown(id)
 
-	while the picker is up, tab cycles inside the dropdown: its box and its
+	While the picker is up, tab cycles inside the dropdown: its box and its
 	picker, so put whatever the control is made of inside the box.
 
-	opening focuses the picker. closing focuses nothing: the caller that
+	Opening focuses the picker. Closing focuses nothing: the caller that
 	wants the focus back calls ui.focus() when the picker is closed and
-	ui.focus_inside(id+'.picker') still says the focus is in it.
+
+	ui.focus_inside    (id+'.picker')
+
+	ui.set_dropdown_open (id, open)       open or close a dropdown
+	ui.dropdown_open     (id) -> ?        check whether the picker is open
+	ui.dropdown_opened   (id) -> ?        check whether the picker just opened
+	ui.dropdown_closed   (id) -> ?        check whether the picker just closed
+	ui.dropdown_picked   (id) -> ?        check whether the user picked a value
+	ui.dropdown_update   (id, s, disabled=)   update dropdown state
+	ui.dropdown          (id, update=, want_open=) -> ?
+
+	let open = ui.dropdown (id, update=, want_open=)
+		... the value ...
+	ui.dropdown_picker (id, side=, align=, yoffset=, min_w=, min_h=)
+		if (open)
+			... the picker, under id+'.picker' ...
 
 */
 
@@ -9158,6 +9506,15 @@ ui.end_dropdown = function(id) {
 }
 
 //// LIST_DROPDOWN -----------------------------------------------------------
+
+/*
+
+	ui.list_dropdown        (id, items, value=, field=, fr=1, align='l', max_w=, readonly=) -> value
+	ui.list_dropdown_inline (id, items, value=, field=, fr=1, align='l', max_w=) -> value
+
+	ui.draw_value_row       (value, field=, row_id=, pad, chevron_w, max_w=, w=, align='l')
+
+*/
 
 const chevron_points = [0.5,0.5, 5.5,5.5,  10.5,0.5]
 function draw_chevron(chevron_w) {
@@ -9320,6 +9677,13 @@ ui.list_dropdown_inline = function(id, items, value, field,
 	return ui.list_dropdown(id, items, value, field, fr, align, max_w)
 }
 
+/*
+
+	ui.enum_input  (id, value=, field, fr=1, align='l', max_w=, readonly=) -> value
+	ui.enum_toggle (id, value=, field, fr=0, align='l', valign='c', readonly=) -> value
+
+*/
+
 ui.enum_input = function(id, value, field, fr, align, max_w, readonly) {
 	return ui.list_dropdown(id, field.enum_items(), value, field,
 		fr, align, max_w, readonly)
@@ -9341,6 +9705,8 @@ ui.enum_toggle = function(
 }
 
 //// CALENDAR ----------------------------------------------------------------
+
+// ui.calendar (id, sel_day=, ranges=, fr=1, align='s', valign='s') -> sel_day
 
 function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 
@@ -9639,6 +10005,8 @@ ui.calendar = function(id, sel_day, ranges, fr, align, valign) {
 
 //// DATE INPUT --------------------------------------------------------------
 
+// ui.date_input (id, v=, field=, fr=1, align='r', valign='c', readonly=) -> v
+
 function date_input_update(id, s) {
 
 	s.input_value = undefined
@@ -9751,6 +10119,8 @@ ui.date_input = function(id, v, field, fr, align, valign, readonly) {
 }
 
 //// IMAGE -------------------------------------------------------------------
+
+// ui.img (src, fr=1, align='s', valign='s', max_min_h=0)
 
 function create_image(src, data) { // called from async callback!
 	let image = new Image()
@@ -9888,6 +10258,8 @@ ui.box_widget('img', img)
 
 //// IMAGE_DATA --------------------------------------------------------------
 
+// ui.image_data (id, key, w, h) -> image_data
+
 ui.image_data = function(id, key, w, h) {
 	let s = ui.render_state(id)
 	let idata = s[key]
@@ -9904,6 +10276,8 @@ ui.image_data = function(id, key, w, h) {
 }
 
 //// VIDEO -------------------------------------------------------------------
+
+// ui.video (id, stream=, fr=1, align='s', valign='s') -> i
 
 let video_widget = {} // {method -> function}
 
@@ -9985,6 +10359,15 @@ video_widget.draw = function(a, i) {
 ui.box_widget('video', video_widget)
 
 //// COLOR PICKER ------------------------------------------------------------
+
+/*
+
+	ui.color_picker (id, hex=, field=) -> hex    edit a color
+	ui.hue_slider (id, value=, hue=, sat=, fr=0, align='s', valign='s') -> value
+	ui.sat_slider (id, value=, hue=, sat=, fr=0, align='s', valign='s') -> value
+	ui.lum_slider (id, value=, hue=, sat=, fr=0, align='s', valign='s') -> value
+
+*/
 
 const GRADIENT_SLIDER_ID      = BOX_ARGS+0
 const GRADIENT_SLIDER_HUE     = BOX_ARGS+1
@@ -10310,6 +10693,9 @@ function color_input_update(id, s) {
 	if (!readonly && ui.focused(id) && ui.keydown('delete'))
 		s.input_value = null
 }
+
+// ui.color_input (id, v=, field=, fr=1, readonly=) -> v
+//
 ui.color_input = function(id, value, field, fr, readonly) {
 	let min_w = next_min_w ?? ui.em_input()
 	next_min_w = null
@@ -10369,13 +10755,14 @@ ui.color_input = function(id, value, field, fr, readonly) {
 
 /*
 
-	ui.field_input (id, v, opt) -> v
-	ui.nav_input   (id, opt) -> v
-
 field_input builds a field's control with its label and a status icon: an x
 for a validation error, a check mark for a modified cell. nav_input builds
 the control for a cell of a nav, and an empty readonly text box when there
 is no row. Both read fr, align and valign from ui.box_args().
+
+	ui.field_input (id, v=, opt) -> v  edit a field with label and status
+	ui.nav_input   (id, opt) -> v      edit a nav cell with label and status
+	ui.build_input (id, value=, opt, control, readonly=) -> value
 
 opt:
 
@@ -10593,6 +10980,14 @@ ui.nav_input = function(id, opt) {
 
 //// POLYLINE ----------------------------------------------------------------
 
+/*
+
+	ui.polyline (id, points, closed=,
+	             fill_color=, fill_color_state=,
+	             stroke_color=, stroke_color_state=, line_width=1)
+
+*/
+
 function set_points(cx, x0, y0, a, pi1, pi2, closed, offset) {
 	cx.beginPath()
 	let x = a[pi1+0] + offset
@@ -10717,6 +11112,7 @@ ui.widget('polyline', {
 //// BG_DOTS -----------------------------------------------------------------
 
 // background animation with randomly connected dots.
+// ui.bg_dots (id, speed=1) -> i
 
 {
 let dot_density = 1 // per 100px^2 surface
@@ -10988,6 +11384,8 @@ ui.box_widget('frame_graph', {
 
 // live-move list element pattern.
 
+// usage:
+//	  ui.live_move_mixin (e=) -> e   add list movement methods
 // implements:
 //   move_element_start(move_i, move_n, i1, i2[, x1, x2])
 //   move_element_update(elem_x)
@@ -11132,6 +11530,21 @@ ui.live_move_mixin = function(e) {
 }
 
 //// DOCK --------------------------------------------------------------------
+
+/*
+
+	ui.dock  (id, layout, on_build_tab, opt=)   build a dock layout
+	  opt.tabs_side           : 't'|'b'  tab strip side (default 't')
+	  opt.can_add_remove_tabs : t|f      allow add/remove/reorder tabs
+	  opt.can_change_layout   : t|f      allow docking tabs anywhere
+
+	ui.open_tab_strip  ()                    begin recording tab strip content
+	ui.close_tab_strip ()                    stop recording tab strip content
+	ui.set_dock_tab    (id, tab_id, fields)  update tab fields
+	ui.select_dock_tab (id, tab_id)          select a dock tab
+	ui.remove_dock_tab (id, tab_id)          remove a dock tab
+
+*/
 
 function tabbox(
 	id, tab, is_selected, is_hover, has_close_button, is_strip_bottom, move_area
@@ -11593,7 +12006,7 @@ function dock_tab_panes(
 
 		let tab_strip_rec_i0 = tab_strip_rec_i
 		tab_strip_rec_i = ui.create_rec_box()
-		ui.open_rec_box()
+		ui.open_rec_box(tab_strip_rec_i)
 			ui.h()
 		ui.close_rec_box()
 		ui.v(1, 0, 's', 's')
@@ -11665,12 +12078,6 @@ function draw_dock_drag(id, s, cs) {
 	ui.end_popup()
 }
 
-/*
-options:
-	tabs_side           : 'top'|'t'|'bottom'|'b'  tab strip side (default 'top')
-	can_add_remove_tabs : t|f     allow add/remove/reorder tabs
-	can_change_layout   : t|f     allow docking tabs anywhere
-*/
 ui.dock = function(id, layout, on_build_tab, opt) {
 
 	opt ??= empty
@@ -11766,6 +12173,15 @@ ui.remove_dock_tab = function(id, tab_id) {
 }
 
 //// TOOLBOX -----------------------------------------------------------------
+
+/*
+
+	ui.begin_toolboxes (tid)  begin toolbox group
+	ui.end_toolboxes   ()     end toolbox group
+
+	ui.toolbox (id, title, align='[', valign='t', x0, y0, target_i='screen')
+
+*/
 
 let toolbox_stack = []
 
@@ -11965,6 +12381,10 @@ function resizer_update(id, s) {
 	}
 }
 
+// resize current container by dragging from the requested edges.
+//
+// ui.resizer (id, edges='rb', max_w=, max_h=)
+//
 ui.widget('resizer', {
 	create: function(cmd, id, edges, max_w, max_h) {
 		let s = ui.state(id, resizer_update)
@@ -12002,256 +12422,6 @@ ui.widget('resizer', {
 	},
 })
 
-}
-
-//// TEMPLATE ----------------------------------------------------------------
-
-let targs  = {}
-let tprops = {}
-
-targs.text  = function(t) { return [t.id, t.s, t.align, t.valign, t.fr] }
-targs.h     = function(t) { return [t.fr, t.gap, t.align, t.valign] }
-targs.v     = targs.h
-targs.stack = function(t) { return [t.id, t.fr, t.align, t.valign] }
-targs.bb    = function(t) { return [t.bg_color, t.sides, t.border_color, t.border_radius] }
-
-tprops.text = {
-	id     : {type: 'id'  , },
-	s      : {type: 'text', },
-	align  : {type: 'enum', enum_values: 's c l r', default: 'l'},
-	valign : {type: 'enum', enum_values: 's c t b', default: 'c'},
-	fr     : {type: 'fr'  , },
-}
-
-tprops.h = {
-	fr     : {type: 'fr'  , },
-	gap    : {type: 'size', },
-	align  : {type: 'enum', enum_values: 's c l r', default: 's'},
-	valign : {type: 'enum', enum_values: 's c t b', default: 's'},
-	min_w  : {type: 'size', default: 0},
-	min_h  : {type: 'size', default: 0},
-}
-tprops.v = tprops.h
-
-tprops.stack = {
-	id     : {type: 'id'  , },
-	fr     : {type: 'fr'  , },
-	align  : {type: 'enum', enum_values: 's c l r', default: 's'},
-	valign : {type: 'enum', enum_values: 's c t b', default: 's'},
-	min_w  : {type: 'size', default: 0},
-	min_h  : {type: 'size', default: 0},
-}
-
-tprops.bb = {
-	bg_color      : {type: 'color', },
-	sides         : {type: 'enum' , enum_values: 't r b l tb rl tr rb lt bl -l -b -r -t all', default: 'all'},
-	border_color  : {type: 'color', },
-	border_radius : {type: 'size' , default: 0},
-}
-
-let hit_template_id
-let hit_template_i0
-let hit_template_i1
-let selected_template_id
-let selected_template_root_t
-let selected_template_node_t
-
-function hit_frame_template_reset() {
-	hit_template_id = null
-	hit_template_i0 = null
-	hit_template_i1 = null
-}
-
-function template_select_node(id, root_t, node_t, node_i) {
-	selected_template_id = id
-	selected_template_root_t = root_t
-	selected_template_node_t = node_t
-	ui.rebuild('select_node')
-}
-
-function template_find_node(a, i, t, t_i) {
-	if (i == t_i)
-		return t
-	if (t.e) {
-		let ch_t_i = cmd_next_i(a, t_i)
-		for (let ch_t of t.e) {
-			let found_t = template_find_node(a, i, ch_t, ch_t_i)
-			if (found_t)
-				return found_t
-			ch_t_i = cmd_next_sibling_i(a, ch_t_i)
-		}
-	}
-}
-function hit_template(a, i) {
-	let id = hit_template_id
-	if (id && i >= hit_template_i0 && i < hit_template_i1) {
-		let hs = hovers(id)
-		if (!hs)
-			return
-		let root_t = hs.root
-		let node_t = template_find_node(a, i, root_t, hit_template_i0)
-		hs.node = node_t
-		if (ui.click)
-			template_select_node(id, root_t, node_t)
-		return true
-	}
-}
-
-function template_add(t) {
-	let cmd = cmd_name_map[t.t]
-	let targs_f = assert(targs[t.t], 'unknown type ', t.t)
-	let args = targs_f(t)
-	t.i = n + 2
-	ui.min_wh(t.min_w, t.min_h)
-	ui[t.t](...args)
-	if (t.e)
-		for (let ch_t of t.e)
-			template_add(ch_t, 0)
-	if (cmd & 1) // container
-		ui.end()
-}
-
-function template_drag_point(id, ch_t, ct_i, ha, va) {
-	ui.popup('', 'overlay', ct_i, ha, va)
-		ui.drag_point(id+'.'+ha+va, 0, 0, 'red')
-	ui.end_popup()
-}
-
-ui.template = function(id, t, ...stack_args) {
-	ui.stack('', ...stack_args)
-	let i0 = n+2 // index of first cmd's arg#1
-	template_add(t)
-	let i1 = n+2 // index of next cmd's arg#1
-	ui.template_overlay(id, t, i0, i1)
-	let ch_t = selected_template_node_t
-	let ch_i = ch_t && ch_t.i
-	let ct_i = ch_i
-	if (t == selected_template_root_t) {
-		template_drag_point(id, ch_t, ct_i, 'l', '[')
-		template_drag_point(id, ch_t, ct_i, 'l', 'c')
-		template_drag_point(id, ch_t, ct_i, 'l', ']')
-		template_drag_point(id, ch_t, ct_i, 'r', '[')
-		template_drag_point(id, ch_t, ct_i, 'r', 'c')
-		template_drag_point(id, ch_t, ct_i, 'r', ']')
-		template_editor(id, t, ch_t)
-	}
-	ui.end_stack()
-}
-
-ui.box_widget('template_overlay', {
-	create: function(cmd, id, t, i0, i1) {
-		let i = ui_cmd_box_begin(cmd, 1, 's', 's')
-		a[n++] = id
-		a[n++] = t
-		a[n++] = i0
-		a[n++] = i1
-		ui_cmd_box_end(i)
-		return i
-	},
-	hit: function(a, i) {
-		let id = a[i+BOX_ARGS+0]
-		let t  = a[i+BOX_ARGS+1]
-		let i0 = a[i+BOX_ARGS+2]
-		let i1 = a[i+BOX_ARGS+3]
-		if (hit_box(a, i)) {
-			hit_template_id = id
-			hit_template_i0 = i0
-			hit_template_i1 = i1
-			set_hit(id).root = t
-		}
-	},
-	draw: function(a, i) {
-		let id = a[i+BOX_ARGS+0]
-		let sel_id = selected_template_id
-		if (sel_id && sel_id == id) {
-			let t = selected_template_node_t
-			let i = t.i
-			if (a[i-1] == CMD_BB)
-				i = i+a[i+BB_CT_I]
-			let x = a[i+0]
-			let y = a[i+1]
-			let w = a[i+2]
-			let h = a[i+3]
-			cx.strokeStyle = 'magenta'
-			cx.beginPath()
-			cx.rect(
-				x + .5,
-				y + .5,
-				w - .5,
-				h - .5,
-			)
-			cx.stroke()
-		}
-	},
-})
-
-function draw_node(id, t_t, t, depth) {
-	ui.p(depth * 20, ui.sp05(), 0)
-	ui.stack(t)
-		let hs = hit(t)
-		if (hs && ui.click)
-			template_select_node(id, t_t, t)
-		let sel = t == selected_template_node_t
-		if (sel) {
-			ui.bb('item',
-				ui.focused(id)
-					? 'item-focused item-selected focused'
-					: 'item-focused item-selected'
-			)
-		}
-		ui.color('text', hs ? 'hover' : null)
-		ui.text('', t.t, 1, 'l')
-	ui.end_stack()
-	if (t.e)
-		for (let ct of t.e)
-			draw_node(id, t_t, ct, depth+1)
-}
-function template_editor(id, t, ch_t) {
-
-	ui.begin_toolboxes('template_editor_toolboxes')
-
-	ui.toolbox(id+'.tree_toolbox', 'Tree', ']', 't', 100, 100)
-		ui.min_wh(150, 200)
-		ui.scrollbox(id+'.tree_toolbox_sb')
-			ui.p(10)
-			ui.v(1, 0, 's', 't')
-				draw_node(id, t, t, 0)
-			ui.end_v()
-		ui.end_scrollbox()
-	ui.end_toolbox()
-
-	ui.toolbox(id+'.prop_toolbox', 'Props', ']', 't', 100, 400)
-		ui.min_wh(150, 200)
-		ui.scrollbox(id+'.prop_toolbox_sb')
-			ui.v(1, 0, 's', 't')
-			let defs = tprops[ch_t.t]
-			for (let k in defs) {
-				let def = defs[k]
-				let v = ch_t[k]
-				ui.h()
-					ui.border('b', 'light')
-					let vs = str((v != null ? v : def.default) ?? '')
-					ui.mb(1)
-					ui.p(8, 5)
-					ui.text('', k , 1, 'l', 'c', 20)
-					ui.mb(1)
-					ui.p(8, 5)
-					ui.stack()
-						if (def.type == 'color') {
-							ui.bb(v, null, 'l', 'light')
-						} else {
-							ui.border('l', 'light')
-							ui.color(v != null ? 'text' : 'label')
-							ui.text('', vs, 1, 'l', 'c', 20)
-						}
-					ui.end_stack()
-				ui.end_h()
-			}
-			ui.end_v()
-		ui.end_scrollbox()
-	ui.end_toolbox()
-
-	ui.end_toolboxes()
 }
 
 //// DEBUG PANE --------------------------------------------------------------

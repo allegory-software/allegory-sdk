@@ -1,5 +1,6 @@
-//sign-in window -> signed_in. call before opening any container.
-//scrim emitted before the window: layers draw forward, hit-test in reverse.
+const {
+	get, post, json_arg,
+} = glue
 
 ui.login_window = function() {
 
@@ -15,12 +16,12 @@ ui.login_window = function() {
 	s.email_text ??= null // typed email text or null
 	s.code ??= null // typed sign-in code or null
 
-	//page rendered without a user: ask the server for the session.
+	// page rendered without a user: ask the server for the session.
 	if (!window.user && !s.request && !s.load_error)
-		s.request = glue.get('/user.json', function(current_user) {
+		s.request = get('/user.json', function(current_user) {
 			s.request = null
 			user = current_user
-			ui.saved_state = glue.json_arg(current_user.ui_state)
+			ui.saved_state = json_arg(current_user.ui_state)
 			ui.animate()
 		}, function(error, type) {
 			if (type == 'abort') return
@@ -70,7 +71,7 @@ ui.login_window = function() {
 				ui.default_button('login_send_button')
 				if (ui.primary_button('login_send_button', 'mail-fast',
 					'Continue', 1, 's') && !s.request)
-					s.request = glue.post('/gen_auth_code.json',
+					s.request = post('/gen_auth_code.json',
 						{email: s.email_text},
 						function(t) {
 							s.request = null
@@ -96,12 +97,12 @@ ui.login_window = function() {
 				ui.default_button('login_signin_button')
 				if (ui.primary_button('login_signin_button', 'key',
 					'Sign in', 1, 's') && !s.request)
-					s.request = glue.post('/login.json',
+					s.request = post('/login.json',
 						{email: s.email, code: s.code},
 						function(new_user) {
 							s.request = null
 							user = new_user
-							ui.saved_state = glue.json_arg(new_user.ui_state)
+							ui.saved_state = json_arg(new_user.ui_state)
 							s.email = null
 							ui.animate()
 						},
@@ -123,11 +124,10 @@ ui.login_window = function() {
 	return false
 }
 
-//sign out. login_window() shows the window again after the reply.
 ui.logout = function() {
 	let s = ui.state('login')
 	if (s.request) return
-	s.request = glue.post('/logout.json', null, function(current_user) {
+	s.request = post('/logout.json', null, function(current_user) {
 		s.request = null
 		user = current_user
 		ui.animate()

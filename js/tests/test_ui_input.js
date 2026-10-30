@@ -58,7 +58,7 @@ Object.assign(ctx.ui, {
 	sp: () => 1,
 	em_input: () => 100,
 })
-load_section('let state_map      =', 'ui.set_state_of =')
+load_section('let state_map =', 'ui.set_state_of =')
 load_section('ui.value = function', '//// TEXT BOX')
 load_section('ui.focused_id = null', 'ui.focusing =')
 load_section('const ALIGN_STRETCH', 'function parse_valign')

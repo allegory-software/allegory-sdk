@@ -21,6 +21,7 @@ let ctx = {
 		isarray: Array.isArray,
 		str: String,
 		dec: String,
+		utf8_len: s => new TextEncoder().encode(s).length,
 		repl: (v, v0, v1) => v === v0 ? v1 : v,
 		assert: v => { if (!v) throw new Error('assertion failed'); return v },
 		obj: () => Object.create(null),
