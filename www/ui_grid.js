@@ -1241,13 +1241,9 @@ function init(id, e) {
 	e.update = function() {
 
 		let s = ui.state(id)
-		s.nav = e
 		s.picked = false
 		s.input_value = undefined
 		let has_input = false
-
-		if (cell_h == null)
-			return
 
 		if (is_edit_built()) {
 			let value = ui.input_value(editor_id)
@@ -2420,3 +2416,4 @@ function create_grid(id, opt) {
 ui.grid = ui.stateful_widget(create_grid)
 
 }()) // module function
+	ui.state(id).nav = nav // the grid's nav

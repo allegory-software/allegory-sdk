@@ -41,8 +41,11 @@ WIDGET STATE AND UPDATES
 ui.state(id) returns the state object for that id, creating it if needed, and
 keeps it alive for this frame. ui.state(id, fn) also registers an update.
 
-An update runs once per build pass: whoever touches that id's state first
-runs it, whether that is the widget itself or some other code.
+An update runs once per build pass, except in the pass that creates the
+state, because nothing can have happened to the widget yet. In every other
+pass, whoever touches that id's state first runs it, whether that is the
+widget itself or some other code. So the update always reads what the
+widget's last build stored.
 
 That is the mechanism for reading a widget before it builds itself. A widget
 that appears later in the frame is readable earlier through its update.

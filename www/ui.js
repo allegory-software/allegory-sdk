@@ -1499,6 +1499,7 @@ ui.state = function(id, update_fn) {
 		s = obj()
 		state_map.set(id, s)
 	}
+		s.build_no = build_no // build_no of the last update run, or of creation
 	let scope = open_state_scopes.at(-1) ?? root_state_scope
 	if (s.state_scope != scope) { // id moved to another scope
 		s.state_scope?.current_id_set.delete(id)
@@ -9807,18 +9808,16 @@ function calendar_update(id, s) {
 
 	let sel_day = s.value
 
-	if (s.year0 != null) { // the lists have drawn
-		let year_value = ui.input_value(id+'.year' )
-		let month_value = ui.input_value(id+'.month')
-		if (year_value !== undefined || month_value !== undefined) {
-			let d = sel_day ?? day(time())
-			let y = year_value ?? year_of(d)
-			let m = month_value != null
-				? months.indexOf(month_value) + 1 : month_of(d)
-			let last_month_day = month_day_of(month(time(y, m, 1), 1) - 1)
-			sel_day = time(y, m, min(month_day_of(d), last_month_day))
-			s.input_value = sel_day
-		}
+	let year_value = ui.input_value(id+'.year' )
+	let month_value = ui.input_value(id+'.month')
+	if (year_value !== undefined || month_value !== undefined) {
+		let d = sel_day ?? day(time())
+		let y = year_value ?? year_of(d)
+		let m = month_value != null
+			? months.indexOf(month_value) + 1 : month_of(d)
+		let last_month_day = month_day_of(month(time(y, m, 1), 1) - 1)
+		sel_day = time(y, m, min(month_day_of(d), last_month_day))
+		s.input_value = sel_day
 	}
 
 	let hit_day = num(ui.hit_match(id+'.day.'))
