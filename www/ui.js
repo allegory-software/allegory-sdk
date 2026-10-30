@@ -8199,11 +8199,12 @@ ui.end_menu_bar = function() {
 /*
 
 	ui.list  ui.vlist  ui.hlist  ui.hvlist  (
-		id, items, value=, field=, fr=1, align='s', valign='t',
-	   item_align=, item_valign='c', item_fr=1, max_w=-1,
-	   item_pad_l=, item_pad_r=, item_pad_y=, item_h=, item_gap=0,
-	   custom_item_bg_color=, custom_item_color='text', readonly=
+		id, items, value=, field=, fr=1, align='s', valign='t', readonly=, opt=
 	) -> value
+
+		opt: {item_align, item_valign, item_fr, max_w,
+	      item_pad_l, item_pad_r, item_pad_y, item_h, item_gap,
+	      item_bg_color, item_color}
 
 */
 
@@ -8283,11 +8284,7 @@ function list_update(id, s) {
 		ui.capture_keys()
 }
 function hvlist(hv, id, items, value, field,
-	fr, align, valign,
-	item_align, item_valign, item_fr,
-	max_w,
-	item_pad_l, item_pad_r, item_pad_y, item_h, item_gap,
-	custom_item_bg_color, custom_item_color, readonly
+	fr, align, valign, readonly, opt
 ) {
 	hv = hv || 'v'
 	assert(hv == 'v' || hv == 'h')
@@ -8313,20 +8310,20 @@ function hvlist(hv, id, items, value, field,
 	// reveal the focused item on tab-focusing the list and on arrow keys.
 	// a clicked item is excepted to avoid shifting it under the mouse pointer.
 	let reveal_fi = ui.focusing(id) || s.focused_item_changed == 'key'
-	ui.hv(hv, fr, item_gap,
+	ui.hv(hv, fr, opt?.item_gap,
 		align  ?? (hv == 'v' ? 's' : 'l'),
 		valign ?? (hv == 'v' ? 't' : 'c'))
 	let i = 0
 	for (let item of items) {
 		let item_id = id+'.'+i
 		ui.p(
-			item_pad_l ?? ui.sp(),
-			item_pad_y ?? ui.sp05(),
-			item_pad_r ?? item_pad_l ?? ui.sp())
+			opt?.item_pad_l ?? ui.sp(),
+			opt?.item_pad_y ?? ui.sp05(),
+			opt?.item_pad_r ?? opt?.item_pad_l ?? ui.sp())
 		if (item === focused_item && reveal_fi)
 			ui.scroll_to_view_next_box()
-		ui.min_h(item_h)
-		ui.stack(item_id, item_fr, 's', hv == 'v' ? 't' : 's')
+		ui.min_h(opt?.item_h)
+		ui.stack(item_id, opt?.item_fr, 's', hv == 'v' ? 't' : 's')
 			let item_focused = item === focused_item
 			let item_selected = is_multi
 				? field.has_item(value, item) : item === value
@@ -8337,18 +8334,18 @@ function hvlist(hv, id, items, value, field,
 				| (list_focused ? STATE_FOCUSED : 0)
 				| (item_focused ? STATE_ITEM_FOCUSED : 0)
 				| (item_selected ? STATE_ITEM_SELECTED : 0)
-			let item_bg_color = custom_item_bg_color
+			let item_bg_color = opt?.item_bg_color
 				?? (item_focused || item_selected ? 'item' : 'bg')
 			// TODO: remove this rounded corners hack
-			let sides = item_gap ? (!i ? '-r' : i == items.length-1 ? '-l' : null) : null
+			let sides = opt?.item_gap ? (!i ? '-r' : i == items.length-1 ? '-l' : null) : null
 			ui.bb(item_bg_color, item_color_state, sides, null, null, ui.sp05())
-			let item_color = custom_item_color ?? 'text'
+			let item_color = opt?.item_color ?? 'text'
 			ui.color(item_color, item_text_color_state)
 			ui.text('', field ? field.to_text(item) : item,
 				0,
-				item_align ?? field?.align ?? (hv == 'v' ? 'l' : 'c'),
-				item_valign ?? 'c',
-				max_w)
+				opt?.item_align ?? field?.align ?? (hv == 'v' ? 'l' : 'c'),
+				opt?.item_valign ?? 'c',
+				opt?.max_w)
 			if (item_focused)
 				ui.focus_ring(id)
 		ui.end_stack()
@@ -9694,15 +9691,14 @@ ui.enum_toggle = function(
 	id, value, field, fr, align, valign, readonly
 ) {
 	ui.mv(ui.sp025()) // make it match other inputs
+	let s = ui.state(id)
+	s.enum_toggle_opt ??= { // options for the enum toggle list
+		item_align: 'c', item_valign: 'c', item_fr: 1,
+		item_gap: 2,
+		custom_item_bg_color: 'toggle', custom_item_color: 'toggle-text',
+	}
 	return ui.hlist(id, field.enum_items(), value, field,
-		fr ?? 0, align ?? 'l', valign ?? 'c',
-		'c', 'c', 1, // item_align, item_valign, item_fr
-		null,
-		// item_pad_l, item_pad_r, item_pad_y, item_h, item_gap
-		null, null, null, null, 2,
-		'toggle', 'toggle-text', // item_bg_color, item_bg_state
-		readonly
-	)
+		fr ?? 0, align ?? 'l', valign ?? 'c', readonly, s.enum_toggle_opt)
 }
 
 //// CALENDAR ----------------------------------------------------------------
