@@ -71,7 +71,7 @@ ACTIONS
 
 INPUTS
   LABELS        ui.label  ui.error_label
-  TEXT          ui.input  ui.password_input
+  TEXT          ui.input  ui.password_input  ui.apply_input
   INPUT SIZE    ui.em_input  ui.em_input_max  ui.em_input_max_popup
   NUMBER        ui.num_slider  ui.slider
   BOOL          ui.checkbox  ui.toggle  ui.toggle_button
@@ -8571,6 +8571,49 @@ ui.password_input = function(
 ) {
 	field ??= input_field(id) ?? ui.create_field({type: 'password'})
 	return ui.input(id, value, field, fr, text_align, no_box, readonly)
+}
+
+//// APPLY INPUT -------------------------------------------------------------
+
+/*
+
+Apply button for any input. Publishes the input's value under its own id but
+only when pressing the Apply button. Good for slow ops that can't run on each
+keystroke or slider move but are wired to react to input changes like nav
+param inputs that would refresh a grid on every keystroke.
+
+	ui.apply_input (id, input_id, v=, field=, fr=1, readonly=) -> v
+
+Make a focus group around the input and the apply button and inside it call:
+
+	ui.default_button(id+'.apply')
+
+*/
+
+function apply_input_update(id, s) {
+	s.interaction_value = undefined
+	if (s.readonly)
+		return
+	if (ui.state_of(id+'.apply', 'state') != 'click')
+		return
+	let value = ui.value(s.input_id)
+	if (value === undefined)
+		return
+	set_interaction_value(id, s, value)
+}
+
+ui.apply_input = function(id, input_id, value, field, fr, readonly) {
+	let s = ui.state(id, apply_input_update) // applied value and validation
+	field ??= input_field(id) ?? input_field(input_id)
+	readonly ??= field?.readonly
+	s.input_id = input_id // target input id
+	s.readonly = readonly
+	set_value(id, s, value, field)
+	let no_value = ui.value(input_id) === undefined
+	let no_apply = readonly || no_value
+	ui.button(id+'.apply', 'check', S('apply', 'Apply'),
+		fr, null, null, null, no_apply)
+	return ui.value(id)
 }
 
 //// NUM_SLIDER --------------------------------------------------------------

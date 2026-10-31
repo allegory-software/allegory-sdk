@@ -1535,6 +1535,42 @@ ui.end_v()
 }
 
 {
+let number_field = ui.create_field({
+	type: 'number',
+	min: 0,
+	max: 10,
+}) // number field for the pending edit
+let date_field = ui.create_field({type: 'date'}) // date field for the edit
+demos.apply_input = function() {
+ui.v(0, ui.sp2(), 'c', 'c')
+	ui.text('', 'Edit a value, then click Apply or press Enter.', 0)
+	ui.focus_group(false, null, 'apply_number_group')
+	ui.default_button('apply_number.apply')
+	ui.h(0, ui.sp(), 'l', 'c')
+		ui.label('apply_number_edit', 'Number (0-10)', 0)
+		ui.input('apply_number_edit', undefined, number_field)
+		let number_value = ui.apply_input('apply_number',
+			'apply_number_edit', undefined, undefined, 0)
+		ui.text('', 'Applied: '+(number_value ?? '(none)'), 0)
+	ui.end_h()
+	ui.end_focus_group()
+	ui.focus_group(false, null, 'apply_date_group')
+	ui.default_button('apply_date.apply')
+	ui.h(0, ui.sp(), 'l', 'c')
+		ui.label('apply_date_edit', 'Date', 0)
+		ui.date_input('apply_date_edit', undefined, date_field)
+		let date_value = ui.apply_input('apply_date',
+			'apply_date_edit', undefined, undefined, 0)
+		let date_text = date_value == null
+			? '(none)' : date_field.to_text(date_value)
+		ui.text('', 'Applied: '+date_text, 0)
+	ui.end_h()
+	ui.end_focus_group()
+ui.end_v()
+}
+}
+
+{
 let num_slider1_value = 25
 let num_slider1_field = ui.create_field({
 	type: 'number',

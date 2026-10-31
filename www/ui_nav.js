@@ -2293,78 +2293,108 @@ ui.nav = function(id, opt) {
 		return json(param_vals)
 	}
 
-	// -> {PARAM -> [val, ...]} from the bindings: an input's value, or
-	// the param's lookup_cols, else the pk, of a master nav's rows: its
-	// focused row for an accept_many = false param, otherwise its selected
-	// rows, the focused row first. Then the values applied from the param
-	// bar, for the params not bound.
+	// gathers param vals from bound param sources (master navs and param inputs)
+	// into {PARAM -> [val, ...]}
 	function read_param_vals() {
-		let param_vals = obj() // {param name -> [val, ...]}
-		for (let name in e.param_sources) {
-			let id = e.param_sources[name] // input id or master nav id
-			let for_cols = e.params?.[name].for_cols // 'COL ...', or undefined
-			let n = for_cols ? words(for_cols).length : 1 // cols in a tuple
-			let master = ui.state_of(id, 'nav')
-			// before it loads, a master has a placeholder pk and no rows.
-			let lookup_cols = e.params?.[name].lookup_cols // 'COL ...', or pk
-			let key_fields = master?.ready && lookup_cols // master cols supplied
-				? words(lookup_cols).map(col => master.all_fields_map[col])
-				: master?.pk_fields
-			// master lacks a lookup col: warn and supply no values.
-			if (master?.ready && key_fields.includes(undefined)) {
-				warn_once(e.id, 'param', name, 'has lookup_cols', lookup_cols,
-					'missing in master', id)
-				param_vals[name] = []
-			// master key and param cols differ: warn and supply no values.
-			} else if (master && e.params && master.ready && key_fields.length != n) {
-				warn_once(e.id, 'param', name, 'has', n, 'cols but master', id,
-					'has', key_fields.length, 'key cols')
-				param_vals[name] = []
-			} else if (master) {
-				// a new master row has no saved key: it supplies no values.
+		let pv = obj() // {param name -> [val, ...]}
+		for (let param in e.param_sources) {
+
+			let source_id = e.param_sources[param] // input id or master nav id
+			let s = ui.state_of(source_id)
+			if (!s) {
+				pv[param] = []
+				continue
+			}
+
+			let for_cols = e.params?.[param].for_cols // 'COL ...'
+			let col_n = for_cols ? words(for_cols).length : 1
+			let master_nav = s.nav
+			let lookup_cols = e.params?.[param].lookup_cols // 'COL ...', or pk
+			let is_ready = master_nav?.ready
+			let key_fields = is_ready && lookup_cols
+				? words(lookup_cols).map(col => master_nav.all_fields_map[col])
+				: master_nav?.pk_fields
+			let key_n = key_fields?.length
+
+			if (is_ready && key_fields.includes(undefined)) { // missing cols
+
+				warn_once(e.id, 'param', param, 'lookup_cols', lookup_cols,
+					'missing in master', source_id)
+				pv[param] = []
+
+			} else if (e.params && is_ready && key_n != col_n) { // diff. cols
+
+				warn_once(e.id, 'param', param, 'has', col_n, 'cols but master',
+					source_id, 'has', key_n, 'key cols')
+				pv[param] = []
+
+			} else if (master_nav) { // param taken from a master nav
+
 				let sel_ris = [] // selected master rows, the focused row first
-				master.each_selected_row(function(ri) {
-					if (master.is_new(ri))
+				master_nav.each_selected_row(function(ri) {
+					if (master_nav.is_new(ri)) // row is not on the server yet
 						return
-					if (ri == master.focused_ri)
+					if (ri == master_nav.focused_ri) // this comes first
 						sel_ris.unshift(ri)
 					else
 						sel_ris.push(ri)
 				})
-				let focused_ri = master.focused_ri // focused master row, or null
-				let focused_ris = focused_ri != null && !master.is_new(focused_ri)
-					? [focused_ri] : []
-				// before the param defs arrive, accept_many is unknown: send the
-				// selected rows; the server uses the first tuple.
-				let ris = !e.params || e.params[name].accept_many != false
+
+				let focused_ri = master_nav.focused_ri // focused master row, or null
+				let has_focused_row = focused_ri != null
+				let has_saved_focus = has_focused_row
+					&& !master_nav.is_new(focused_ri)
+				let focused_ris = has_saved_focus ? [focused_ri] : []
+
+				// before e.params is known, accept_many is unknown: send all the
+				// selected rows; if server can't do accept_many, it will use the first.
+				let ris = !e.params || e.params[param].accept_many != false
 					? sel_ris : focused_ris
+
 				let vals = [] // the key tuples, one after another
 				for (let ri of ris)
 					for (let field of key_fields)
-						vals.push(master.cell_val(ri, field.name))
-				param_vals[name] = vals
-			} else {
-				// an input or a master that isn't built yet supplies no values.
-				let v = ui.value(id)
-				// one value can't fill a tuple of several cols.
-				let is_misbound = v !== undefined && n > 1
-				if (is_misbound)
-					warn_once(e.id, 'input', id, 'is bound to param', name,
-						'which has', n, 'cols')
-				param_vals[name] = v !== undefined && !is_misbound ? [v] : []
+						vals.push(master_nav.cell_val(ri, field.name))
+				pv[param] = vals
+
+			} else { // param taken from an input
+
+				if (col_n > 1) { // bound wrongly (inputs are single-col)
+
+					warn_once(e.id, 'input', source_id, 'is bound to param',
+						param, 'which has', col_n, 'cols')
+					pv[param] = []
+
+				} else {
+
+					let v = ui.value(source_id)
+					pv[param] = v !== undefined ? [v] : []
+
+				}
+
 			}
 		}
+
+		// read stored params, unvalidated if e.params are not loaded yet!
 		let saved_vals = ui.saved_state[e.id+'.params'] // {param name -> val}
-		for (let name in saved_vals)
-			param_vals[name] ??= param_bar_list(name, saved_vals[name])
-		for (let name in e.param_bar_vals)
-			param_vals[name] ??= param_bar_list(name, e.param_bar_vals[name])
-		return param_vals
+		for (let param in saved_vals)
+			pv[param] ??= read_param_bar_vals(param, saved_vals[param])
+
+		// read caller param vals, unvalidated if e.params are not loaded yet!
+		for (let param in e.param_bar_vals)
+			pv[param] ??= read_param_bar_vals(param, e.param_bar_vals[param])
+
+		return pv
 	}
 
-	function param_bar_list(param_name, v) {
-		let field = e.param_bar_fields?.find(field => field.name == param_name)
-		if (!field)
+	function read_param_bar_vals(param_name, v) {
+		let field
+		for (let field1 of e.param_bar_fields ?? empty_array)
+			if (field1.name == param_name) {
+				field = field1
+				break
+			}
+		if (!field) // e.params not loaded yet, return unvalidated
 			return [v]
 		field.validation ??= field.validator.create_output() // validator out
 		return field.validator.validate(v, field.validation) ? [v] : []
@@ -2395,35 +2425,29 @@ ui.nav = function(id, opt) {
 		return false
 	}
 
-	// Bind each param with lookup_rowset_name and no app binding to a master
-	// selected from the available masters. -> true if a binding changed.
-	function bind_master_params() {
+	// check if params changed and reload if they did.
+	// called per-frame, hence sel_change_no to make checking cheaper.
+	e.reload_if_params_changed = function() {
 		let has_changed = false
 		for (let param in e.master_rowset_names) {
-			let bound_id = e.param_sources[param] // last binding, or undefined
-			let master_id = ui.master_id(e.id, param,
-				e.master_rowset_names[param])
-			if (master_id != bound_id) {
-				if (master_id)
-					e.param_sources[param] = master_id
+			let master_id0 = e.param_sources[param] // last binding, or undefined
+			let rowset_name = e.master_rowset_names[param]
+			let master_id1 = ui.master_id(e.id, param, rowset_name)
+			if (master_id1 != master_id0) {
+				if (master_id1)
+					e.param_sources[param] = master_id1
 				else
 					delete e.param_sources[param]
 				has_changed = true
 			}
 		}
-		return has_changed
-	}
-
-	// check if params changed and reload if they did.
-	// called per-frame, hence sel_change_no to make checking cheaper.
-	e.reload_if_params_changed = function() {
-		let has_changed = bind_master_params()
-		for (let name in e.param_sources) {
-			let id = e.param_sources[name] // input id or master nav id
-			let master = ui.state_of(id, 'nav')
-			let v = master ? master.sel_change_no : ui.value(id)
-			if (v !== param_source_vals[id]) {
-				param_source_vals[id] = v
+		for (let param in e.param_sources) {
+			let source_id = e.param_sources[param] // input id or master nav id
+			let master_nav = ui.state_of(source_id, 'nav')
+			let v0 = param_source_vals[source_id] // previous value or selection no.
+			let v1 = master_nav ? master_nav.sel_change_no : ui.value(source_id)
+			if (v1 !== v0) {
+				param_source_vals[source_id] = v1
 				has_changed = true
 			}
 		}
