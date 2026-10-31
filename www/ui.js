@@ -20,6 +20,8 @@ not all APIs can be used in app code (i.e. in the build phase). Some APIs
 are only useful for creating widgets and some only work in certain rendering
 phases. The docs should be clear about that. API index below for quick jump.
 
+IMGUI FRAME     ui.main  ui.animate  ui.rebuild
+
 CONTAINERS
   STACK         ui.stack  ui.aspect_box
   FLEX          ui.h  ui.v  ui.hv  ui.v_aligned  ui.box
@@ -39,18 +41,17 @@ CONTAINERS
 
 CONTENT
   TEXT          ui.text  ui.text_editable  ui.text_lines  ui.text_wrapped
-  HEADINGS      ui.heading  ui.h1  ui.h2
-  TEXT COLOR    ui.color
-  FONT          ui.font  ui.font_alias  ui.load_font
-  FONT SIZE     ui.font_size  ui.default_font_size
-  FONT SIZES    ui.xsmall  ui.small  ui.smaller  ui.large  ui.xlarge
-  FONT WEIGHT   ui.font_weight  ui.bold  ui.nobold
-  LINE GAP      ui.line_gap
+    LAYOUT      ui.line_gap  ui.text_w  ui.text_h  ui.text_wh
+    HEADINGS    ui.heading  ui.h1  ui.h2
+    TEXT COLOR  ui.color
+    FONT        ui.font  ui.font_alias  ui.load_font
+    FONT SIZE   ui.font_size  ui.default_font_size
+    FONT SIZES  ui.xsmall  ui.small  ui.smaller  ui.large  ui.xlarge
+    FONT WEIGHT ui.font_weight  ui.bold  ui.nobold
   TEXT MARKS    ui.mark_text
-  TEXT SIZE     ui.measure_text  ui.line_h  ui.text_w  ui.text_h  ui.text_wh
   SELECTION     ui.select_text  ui.text_selection
   ICONS         ui.icon  ui.icon_def
-  IMAGE         ui.img  ui.image_data
+  IMAGE         ui.img
   VIDEO         ui.video
   BACKGROUND    ui.bb  ui.bg  ui.border
   SHADOW        ui.shadow  ui.shadow_def  ui.set_shadow  ui.reset_shadow
@@ -74,41 +75,33 @@ INPUTS
   INPUT SIZE    ui.em_input  ui.em_input_max  ui.em_input_max_popup
   NUMBER        ui.num_slider  ui.slider
   BOOL          ui.checkbox  ui.toggle  ui.toggle_button
-  ENUM          ui.enum_input  ui.enum_toggle
-  LIST          ui.list  ui.vlist  ui.hlist  ui.hvlist
-  LIST DROP     ui.list_dropdown  ui.list_dropdown_inline
-  RADIO         ui.radio_group  ui.radio  ui.radio_list
+  SELECT        ui.enum_input  ui.enum_toggle
+                ui.list_dropdown  ui.list_dropdown_inline
+                ui.radio_group  ui.radio  ui.radio_list
+                ui.list  ui.hlist  ui.hvlist
   DATE          ui.date_input  ui.calendar
   COLOR         ui.color_input  ui.color_picker
-  COLOR SLIDER  ui.hue_slider  ui.sat_slider  ui.lum_slider
+    H,S,L       ui.hue_slider  ui.sat_slider  ui.lum_slider
   FIELD         ui.field_input  ui.nav_input  ui.build_input
   VALUE         ui.value  ui.input_value  ui.set_value
-  DROPDOWN      ui.dropdown  ui.dropdown_picker
-  OPEN          ui.set_dropdown_open  ui.dropdown_open
-  EDGES         ui.dropdown_opened  ui.dropdown_closed  ui.dropdown_picked
-  UPDATE        ui.dropdown_update
 
 LAYOUT
-  UNITS         ui.em  ui.sp  ui.sp025  ui.sp05  ui.sp075  ui.sp1  ui.sp2
-                ui.sp4  ui.sp8
-  PADDING       ui.p  ui.padding
-  PAD SIDES     ui.pl  ui.pr  ui.pt  ui.pb
-  PAD SIDES     ui.padding_left  ui.padding_right  ui.padding_top
-                ui.padding_bottom
-  PAD AXES      ui.ph  ui.pv  ui.padding_horiz  ui.padding_vert
-  MARGIN        ui.m  ui.margin
-  MARGIN SIDES  ui.ml  ui.mr  ui.mt  ui.mb  ui.mh  ui.mv
+  UNITS         ui.em  ui.sp ui.sp025 05 075 1 2 4 8
+  PADDINGS      ui.p  ui.pl  ui.pr  ui.pt  ui.pb  ui.ph  ui.pv
+  MARGINS       ui.m  ui.ml  ui.mr  ui.mt  ui.mb  ui.mh  ui.mv
   MIN SIZE      ui.min_w  ui.min_h  ui.min_wh
-  DEFAULT SIZE  ui.default_min_w  ui.default_min_h  ui.default_min_wh
-  BOX ARGS      ui.box_args  ui.clear_box_args
-  MEASURE       ui.measure
+                ui.default_min_w  ui.default_min_h  ui.default_min_wh
+  BOX ARGS      ui.box_args
 
 WIDGET STATE
   ACCESS        ui.state  ui.state_of  ui.set_state_of  ui.state_init
   LIFETIME      ui.free_state  ui.on_free
   STATE SCOPES  ui.begin_state_scope  ui.keep_state_scope  ui.is_state_hidden
+
+PERSISTENCE
   SAVED STATE   ui.saved_state  ui.save_state  ui.delete_saved_state
-  SAVED INPUT   ui.saved_value  ui.set_saved_value
+  SAVED INPUT   ui.saved_value_def  ui.saved_value  ui.set_saved_value
+                ui.saved_value_validation
 
 POINTER INPUT
   POSITION      ui.mx  ui.my  ui.mx_notrans  ui.my_notrans  ui.update_mouse
@@ -117,8 +110,7 @@ POINTER INPUT
   WHEEL         ui.wheel_dy  ui.trackpad
   ENTER/LEAVE   ui.mouseenter  ui.mouseleave
   HIT CONTROL   ui.nohit
-  HIT TESTING   ui.hit  ui.hovers  ui.set_hit  ui.hit_match
-  HIT HELPERS   ui.hit_rect  ui.hit_bbox  ui.hit_box
+  HIT TESTING   ui.hit  ui.hovers  ui.hit_match
   HOVER EDGES   ui.hit_enter  ui.hit_leave
   CAPTURE       ui.captured_id  ui.captured  ui.capture_match ui.captured_or_hit
   DRAG          ui.drag  ui.drag_or_hit  ui.mx0  ui.my0
@@ -126,7 +118,7 @@ POINTER INPUT
 
 KEYBOARD INPUT
   KEYS          ui.keydown  ui.keyup  ui.keypressed  ui.key_chars
-  EVENTS        ui.key_events  ui.keys_down  ui.keys_up
+  EVENT STREAM  ui.key_events  ui.keys_down  ui.keys_up
   CAPTURE       ui.capture_keys  ui.capture_keydown  ui.capture_keyup
   CLIPBOARD     ui.clipboard_text
 
@@ -143,34 +135,38 @@ THEMES
   THEME         ui.themes  ui.theme  ui.theme_is_dark
   SCREEN THEME  ui.screen_theme  ui.set_screen_theme
   DEFINE COLOR  ui.color_def
-  READ COLOR    ui.color_obj  ui.color_css  ui.color_rgb  ui.color_rgba
-  DARK BG       ui.set_bg_color  ui.bg_is_dark
-  COLOR UTILS   ui.hsl  ui.hsl_adjust  ui.alpha_adjust
   TUI STYLE     ui.set_tui
-
-RENDER CONTROL
-  FRAME LOOP    ui.animate  ui.rebuild
-  CANVAS        ui.screen  ui.cx  ui.resize  ui.main
-  LAYERS        ui.layer
 
 SHARED SCREEN   ui.shared_screen
 
 WIDGET API
   REGISTER      ui.widget  ui.stateful_widget  ui.box_widget  ui.box_ct_widget
-  BOX SLOTS     ui.PX1  ui.PX2  ui.MX1  ui.MX2  ui.FR  ui.ALIGN
-  ARG SLOTS     ui.BOX_ARGS  ui.BOX_CT_ARGS
-  COMMANDS      ui.cmd_begin  ui.cmd_add_arg  ui.cmd_end  ui.cmd
-  BOX COMMANDS  ui.cmd_box  ui.cmd_box_ct
-  CMD INDICES   ui.ct_i  ui.rel_ct_i  ui.last_i
-  MEASURE       ui.add_ct_min_wh
-  POSITION      ui.align_x  ui.align_w  ui.inner_x  ui.inner_w
-  BOX POSITION  ui.box_position  ui.box_translate
-  DRAW STATE    ui.render_state  ui.local_state
+  BUILD PHASE   ui.cmd_begin  ui.cmd_add_arg  ui.cmd_end  ui.cmd
+    BOX CMD     ui.cmd_box  ui.cmd_box_ct
+    BOX ARGS    ui.PX1  ui.PX2  ui.MX1  ui.MX2  ui.FR  ui.ALIGN  ui.clear_box_args
+    VAR ARGS    ui.BOX_ARGS  ui.BOX_CT_ARGS
+    CT ARGS     ui.ct_i  ui.rel_ct_i  ui.last_i
+    MEASURE     ui.measure
+  MEASURE PHASE ui.add_ct_min_wh
+  POS PHASE     ui.align_x  ui.align_w  ui.inner_x  ui.inner_w
+    BOX POS     ui.box_position  ui.box_translate
+  DRAW PHASE    ui.cx
+    DRAW STATE  ui.render_state  ui.local_state  ui.image_data
+    THEME COLOR ui.color_obj  ui.color_css  ui.color_rgb  ui.color_rgba
+    SET BG      ui.set_bg_color  ui.bg_is_dark
+    COLOR MATH  ui.hsl  ui.hsl_adjust  ui.alpha_adjust
+    TEXT SIZE   ui.measure_text  ui.line_h
+  HIT PHASE     ui.set_hit  ui.hit_rect  ui.hit_bbox  ui.hit_box
+  LAYERS        ui.layer_def
   FOCUS RING    ui.focus_ring
   BUTTON PARTS  ui.button_stack  ui.button_bb  ui.button_text  ui.button_icon
-  LIST VALUE    ui.draw_value_row
+  LIST PARTS    ui.draw_value_row
   DRAG POINT    ui.drag_point
   RESIZER       ui.resizer
+  DROPDOWN      ui.dropdown  ui.dropdown_picker
+    OPEN        ui.set_dropdown_open  ui.dropdown_open
+    EDGES       ui.dropdown_opened  ui.dropdown_closed  ui.dropdown_picked
+    UPDATE      ui.dropdown_update
 
 INTEGRATION
   POINTERS      ui.pointers  ui.pointer  ui.local_pointer  ui.add_pointer
@@ -808,9 +804,6 @@ There's only one global canvas stretched to the entire viewport for now
 since we're not planning to have our canvas-based UI embedded in a normal
 HTML page any time soon.
 
-	ui.screen          access to canvas container div
-	ui.resize ()       resize canvas and request another animation frame
-
 */
 
 function css(s) {
@@ -865,7 +858,6 @@ body {
 
 let screen = document.createElement('div')
 screen.classList.add('ui-screen')
-ui.screen = screen
 
 let canvas = document.createElement('canvas')
 canvas.classList.add('ui-canvas')
@@ -873,7 +865,7 @@ canvas.setAttribute('tabindex', 0)
 screen.appendChild(canvas)
 
 let cx = canvas.getContext('2d')
-ui.cx = cx
+ui.cx = cx // drawing phase
 
 let screen_w, screen_h, screen_dpr
 let dpr // frame's dpr (comes with the frame in remote views)
@@ -896,7 +888,6 @@ function resize_canvas() {
 	font_size_normal = ui.font_size_normal * dpr
 	animate()
 }
-ui.resize = resize_canvas
 window.addEventListener('resize', resize_canvas)
 
 let screen_theme_name = document.documentElement.getAttribute('theme') ?? 'light'
@@ -947,7 +938,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 	await document.fonts.ready
 	ready = true
 	assert(ui.main, 'ui.main not set')
-	document.body.appendChild(ui.screen)
+	document.body.appendChild(screen)
 	resize_canvas()
 	canvas.focus()
 })
@@ -1497,9 +1488,9 @@ ui.state = function(id, update_fn) {
 	let s = state_map.get(id)
 	if (!s) {
 		s = obj()
+		s.build_no = build_no // build_no of the last update run, or of creation
 		state_map.set(id, s)
 	}
-		s.build_no = build_no // build_no of the last update run, or of creation
 	let scope = open_state_scopes.at(-1) ?? root_state_scope
 	if (s.state_scope != scope) { // id moved to another scope
 		s.state_scope?.current_id_set.delete(id)
@@ -1655,13 +1646,13 @@ ui.stateful_widget = function(create) {
 		let e
 		let s = ui.state_of(id)
 		if (!s) {
-			e = create.apply(null, id, ...args)
+			e = create.call(null, id, ...args)
 			s = ui.state(id, e.update)
 			s.e = e
 		} else {
 			e = s.e
 		}
-		return e.build.apply(e, id, ...args)
+		return e.build.call(e, id, ...args)
 	}
 }
 
@@ -1670,39 +1661,29 @@ ui.stateful_widget = function(create) {
 /*
 
 APP API
-	ui.saved_state <-> {id->{k->v}}      per-id saved widget state
-	ui.save_unsaved_state (saved_state)  app hook to persist saved state
-	ui.save_state_delay <- n             seconds to wait before saving
-	ui.set_saved_value (id, v)           set a saved input's value
+
+	ui.saved_state -> {id->{k->v}}    per-id saved widget state
+
 WIDGET API
-	ui.save_state (id, k, v)             save a state var
-	ui.delete_saved_state (id)           delete all saved state vars of id
-	ui.saved_value (id, default, [field]) define a saved input with a default
+
+	ui.save_state         (id, k, v)  save a state var
+	ui.delete_saved_state (id)        delete all saved state vars of id
+
+INTEGRATION API
+
+	ui.save_unsaved_state (saved_state)  app hook to persist saved state
+	ui.load_saved_state   (saved_state)  replace the saved state
 
 */
 
-ui.saved_state = obj()
+ui.saved_state = obj() // {id->{k->v}}   per-id saved widget state
 ui.save_state_delay = 1
 ui.save_unsaved_state = noop
 
-let value_defaults = map()
-
-ui.saved_value = function(id, default_value, field) {
-	value_defaults.set(id, default_value)
-	let t = ui.saved_state[id]
-	if (field && t?.value !== undefined
-			&& !field.validator.validate(t.value, false))
-		delete t.value
-}
-
-function read_saved_value(id) {
-	let v = ui.saved_state[id]?.value
-	return v !== undefined ? v : value_defaults.get(id)
-}
-
-ui.set_saved_value = function(id, v) {
-	assert(value_defaults.has(id), 'not a saved value: ', id)
-	ui.save_state(id, 'value', v)
+ui.load_saved_state = function(saved_state) {
+	ui.saved_state = saved_state
+	for (let [id, saved_value] of saved_values)
+		load_saved_value(id, saved_value)
 }
 
 let saved_state_changed
@@ -2046,13 +2027,13 @@ ui.cmd = ui_cmd
 
 let layer_map = {} // {name->layer}
 
-//	ui.layer (name, z_index=, ['root modal'])       define a popup layer
+//	ui.layer_def (name, z_index=, ['root modal'])       define a popup layer
 //
 //   root flag  : popups on this layer are in the root stacking context.
 //   modal flag : popups on this layer create their own stacking context.
 //   no flags   : popups on this layer don't create a stacking context.
 //
-ui.layer = function(name, z_index, flags) {
+ui.layer_def = function(name, z_index, flags) {
 	assert(!layer_map[name])
 	let layer = obj()
 	layer.name = assert(name)
@@ -2114,14 +2095,14 @@ let current_popup_ct_i
 /// built-in layers ----------------------------------------------------------
 
 const layer_base =
-ui.layer('base'    , 0)
-ui.layer('overlay' , 1) // focus rings, drag points: must cover siblings.
-ui.layer('error'   , 2) // persistent tooltips: not hover (tooltips are hover).
-ui.layer('toolbox' , 3, 'modal') // toolboxes
-ui.layer('open'    , 4, 'modal') // dropdowns, menus: must cover all non-modals.
-ui.layer('modal'   , 5, 'modal') // modals: must cover all other modals.
-ui.layer('tooltip' , 6, 'root') // tooltips: must cover all static.
-ui.layer('drag'    , 7, 'root') // dragged object: must cover everything.
+ui.layer_def('base'    , 0)
+ui.layer_def('overlay' , 1) // focus rings, drag points: must cover siblings.
+ui.layer_def('error'   , 2) // persistent tooltips: not hover (tooltips are hover).
+ui.layer_def('toolbox' , 3, 'modal') // toolboxes
+ui.layer_def('open'    , 4, 'modal') // dropdowns, menus: must cover all non-modals.
+ui.layer_def('modal'   , 5, 'modal') // modals: must cover all other modals.
+ui.layer_def('tooltip' , 6, 'root') // tooltips: must cover all static.
+ui.layer_def('drag'    , 7, 'root') // dragged object: must cover everything.
 
 //// RENDERING PHASES --------------------------------------------------------
 
@@ -3258,7 +3239,6 @@ USER API: BOX ARGS
 
 	ui.box_args       (fr=, align=, valign=)  set args for the next input
 	ui.box_args       ({fr: undefined, align: undefined, valign: undefined})
-	ui.clear_box_args ()                      clear the next input args
 
 */
 
@@ -5741,7 +5721,7 @@ TEXT STATE
 
 TEXT HELPERS
 
-	ui.measure_text   (cx, s) -> {w:, asc:, dsc:, {actual|font}BoundingBox{Ascent|Descent|Left|Right}:, }
+	ui.measure_text   (s) -> {w:, asc:, dsc:, {actual|font}BoundingBox{Ascent|Descent|Left|Right}:, }
 	ui.line_h         () -> h    height of a line of text in the normal font
 
 */
@@ -6032,7 +6012,7 @@ function create_word_wrapper() {
 		}
 		ww.min_w = 0
 		for (let s of words) {
-			let m = measure_text(cx, s)
+			let m = measure_text(s)
 			widths.push(m.width)
 			ww.min_w = max(ww.min_w, m.width)
 		}
@@ -6125,7 +6105,7 @@ measure[CMD_TEXT] = function(a, i, axis) {
 			let text_h
 			if (isstr(s)) { // single-line
 				let is_password = input_type == 'password'
-				let m = measure_text(cx, is_password ? '\u{2022}' : s)
+				let m = measure_text(is_password ? '\u{2022}' : s)
 				asc = m.fontBoundingBoxAscent
 				dsc = m.fontBoundingBoxDescent
 				text_w = ceil(is_password ? m.width * s.length : m.width)
@@ -6134,7 +6114,7 @@ measure[CMD_TEXT] = function(a, i, axis) {
 				text_w = 0
 				text_h = 0
 				for (let ss of s) {
-					let m = measure_text(cx, ss)
+					let m = measure_text(ss)
 					asc = m.fontBoundingBoxAscent
 					dsc = m.fontBoundingBoxDescent
 					text_w = max(text_w, ceil(m.width))
@@ -6338,7 +6318,7 @@ function input_blur(ev) {
 	// deactivating the window blurs the input, but focus didn't move.
 	if (!document.hasFocus())
 		return
-	if (ui.focused_id == this._ui_id && !ui.screen.contains(ev.relatedTarget))
+	if (ui.focused_id == this._ui_id && !screen.contains(ev.relatedTarget))
 		ui.focus(null)
 	animate()
 }
@@ -8198,7 +8178,7 @@ ui.end_menu_bar = function() {
 
 /*
 
-	ui.list  ui.vlist  ui.hlist  ui.hvlist  (
+	ui.list  ui.hlist  ui.hvlist  (
 		id, items, value=, field=, fr=1, align='s', valign='t', readonly=, opt=
 	) -> value
 
@@ -8355,9 +8335,8 @@ function hvlist(hv, id, items, value, field,
 	return value
 }
 ui.hvlist = hvlist
-ui.vlist = hvlist.bind(null, 'v')
+ui.list  = hvlist.bind(null, 'v')
 ui.hlist = hvlist.bind(null, 'h')
-ui.list = ui.vlist
 
 //// LABEL -------------------------------------------------------------------
 
@@ -8925,7 +8904,7 @@ slider.draw = function(a, i) {
 
 		let color = color_obj('label')
 		cx.textAlign = 'center'
-		let m = measure_text(cx, ' ')
+		let m = measure_text(' ')
 		let asc = m.fontBoundingBoxAscent
 		let dsc = m.fontBoundingBoxDescent
 		let x0 = x
@@ -10253,6 +10232,8 @@ ui.box_widget('img', img)
 
 //// IMAGE_DATA --------------------------------------------------------------
 
+// get multiple stable raster surfaces for a widget to draw on and blit
+//
 // ui.image_data (id, key, w, h) -> image_data
 
 ui.image_data = function(id, key, w, h) {
