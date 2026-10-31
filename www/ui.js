@@ -83,7 +83,7 @@ INPUTS
   COLOR         ui.color_input  ui.color_picker
     H,S,L       ui.hue_slider  ui.sat_slider  ui.lum_slider
   FIELD         ui.field_input  ui.nav_input  ui.build_input
-  VALUE         ui.value  ui.input_value  ui.set_value
+  VALUE         ui.value  ui.input_value  ui.interaction_value
 
 LAYOUT
   UNITS         ui.em  ui.sp ui.sp025 05 075 1 2 4 8
@@ -140,6 +140,7 @@ THEMES
 SHARED SCREEN   ui.shared_screen
 
 WIDGET API
+  DOCK CONTEXT  ui.in_dock_tab
   REGISTER      ui.widget  ui.stateful_widget  ui.box_widget  ui.box_ct_widget
   BUILD PHASE   ui.cmd_begin  ui.cmd_add_arg  ui.cmd_end  ui.cmd
     BOX CMD     ui.cmd_box  ui.cmd_box_ct
@@ -158,6 +159,7 @@ WIDGET API
     TEXT SIZE   ui.measure_text  ui.line_h
   HIT PHASE     ui.set_hit  ui.hit_rect  ui.hit_bbox  ui.hit_box
   LAYERS        ui.layer_def
+  INPUT VALUE   ui.input_field  ui.set_interaction_value  ui.set_value
   FOCUS RING    ui.focus_ring
   BUTTON PARTS  ui.button_stack  ui.button_bb  ui.button_text  ui.button_icon
   LIST PARTS    ui.draw_value_row
@@ -5649,46 +5651,107 @@ function reset_text_font() {
 
 /*
 
-	ui.value       (id) -> v               what the input holds right now
-	ui.input_value (id) -> v | undefined   interaction value, if interacted thi frame
-	ui.set_value   (id, state, v, [field])
+USER API
+
+	ui.value             (id) -> v | undefined  what the input holds, if valid
+	ui.input_value       (id) -> v | undefined   current value, valid or not
+	ui.interaction_value (id) -> v | undefined   user input this pass
+
+SAVED INPUTS DEFINITIONS
+
+	ui.saved_value_def        (id, default, field)  define a saved value
+	ui.saved_value            (id) -> v | undefined  read the accepted value
+	ui.set_saved_value        (id, v) -> valid?     attempt to save a value
+	ui.saved_value_validation (id) -> out          latest validation results
+
+WIDGET API
+
+	ui.input_field           (id) -> field | undefined
+	ui.set_interaction_value (id, state, v)
+	ui.set_value             (id, state, v=, field=)
+
+INVARIANTS
+
+- there are 5 sources of values for an input:
+	- caller: value arg to input widget, validated when it or the field changes.
+	- saved: value from saved_state (saved inputs only), validated on load.
+	- current interaction: returned over the caller value, validated on change.
+	- past interaction: kept in input, returned when caller value is undefined.
+	- default: from saved_value_def, or null.
+- ui.value() returns only valid values (undefined when invalid).
+- ui.interaction_value() gives the value from current interaction, valid or not,
+  or undefined when not interacted in this build pass, so it's an edge event.
+- reading the value runs the input's update callback. this gives updated
+  interaction value but can't give a caller's value supplied later. so when
+  the caller owns the value, readers must get it from the owner too!
+- DOM text handlers validate browser edits between frames.
+- saved values have their own validator and result independent of the input.
+- the code saves only valid values to saved state.
+- inputs keep invalid edits even when app code updates the saved value.
+- input keeps s.revert_value to revert on Escape. dropdown inputs set it when
+  the picker opens.
 
 */
 
-// what the input holds right now, current in any order inside a pass for
-// what the user did to it, but not for a value the caller supplies later in
-// the pass.
+// returns what the input holds, including invalid edits.
+ui.input_value = function(id, s = ui.state_of(id)) {
+	if (s?.interaction_value !== undefined)
+		return s.interaction_value
+	else
+		return s?.input_value
+}
+
 ui.value = function(id) {
 	let s = ui.state_of(id)
-	if (s?.input_value !== undefined)
-		return s.input_value
-	else if (value_defaults.has(id))
-		return read_saved_value(id)
-	else
-		return s?.value
+	return s?.validation?.failed ? undefined : ui.input_value(id, s)
 }
 
-ui.input_value = function(id) {
-	return ui.state_of(id, 'input_value')
+ui.interaction_value = function(id) {
+	return ui.state_of(id, 'interaction_value')
 }
+
+// validate input value if changed and and save it if valid.
+function set_interaction_value(id, s, value) {
+	s.interaction_value = value
+	if (value !== undefined && s.field) {
+		if (value !== s.input_value)
+			s.field.validator.validate(value, s.validation)
+		if (saved_values.has(id))
+			ui.set_saved_value(id, value)
+	}
+}
+ui.set_interaction_value = set_interaction_value
 
 function set_value(id, s, value, field) {
-	let value0 = s.value
-	let is_saved = value_defaults.has(id)
-	assert(!is_saved || value == null, 'saved input takes no value: ', id)
-	if (s.input_value !== undefined) {
-		value = s.input_value
-		if (is_saved)
-			ui.save_state(id, 'value', value)
+	let value0 = s.input_value
+	let saved_value = saved_values.get(id)
+	if (saved_value) {
+		assert(!field || field == saved_value.field,
+			'saved value has a different field: ', id)
+		field = saved_value.field
+	}
+	let is_input = s.interaction_value !== undefined
+	if (is_input) {
+		value = s.interaction_value
 	} else {
-		if (is_saved)
-			value = read_saved_value(id)
+		if (saved_value) {
+			value = s.validation?.failed && value0 !== undefined
+				? value0 : saved_value.value
+		} else if (value === undefined) {
+			value = value0 ?? null
+		}
 		if (value !== value0)
 			s.revert_value = value
 	}
-	s.value = value
-	if (field && (s.input_value !== undefined || value !== value0))
-		field.validator.validate(value)
+	s.input_value = value
+	let field0 = s.field
+	s.field = field // input's field, or nothing
+	if (field) {
+		if (field != field0) // field changed: remake validator's output object.
+			s.validation = field.validator.create_output()
+		if (field != field0 || !is_input && value !== value0)
+			field.validator.validate(value, s.validation)
+	}
 	return value
 }
 ui.set_value = set_value
@@ -5697,6 +5760,63 @@ function copy_input_value(field, v) {
 	if (v != null)
 		copy_to_clipboard(field ? field.to_input(v) : String(v))
 }
+
+/// saved values
+
+let saved_values = map() // {id -> {default_value, field, validation, value}}
+
+ui.saved_value_def = function(id, default_value, field) {
+	assert(!saved_values.has(id), 'saved value already defined: ', id)
+	assert(field, 'saved value field required: ', id)
+	let saved_value = {
+		default_value: default_value,
+		field: field,
+		validation: field.validator.create_output(),
+		value: undefined,
+	}
+	saved_values.set(id, saved_value)
+	load_saved_value(id, saved_value)
+}
+
+function load_saved_value(id, saved_value) {
+	let value = ui.saved_state[id]?.value
+	if (value === undefined)
+		value = saved_value.default_value
+	let out = saved_value.validation // output for the loaded value
+	let is_valid = saved_value.field.validator.validate(value, out)
+	saved_value.value = is_valid ? out.value : undefined
+}
+
+ui.saved_value = function(id) {
+	ui.state_of(id)
+	let saved_value = saved_values.get(id)
+	assert(saved_value, 'saved value not defined: ', id)
+	return saved_value.value
+}
+
+ui.saved_value_validation = function(id) {
+	ui.state_of(id)
+	let saved_value = saved_values.get(id)
+	assert(saved_value, 'saved value not defined: ', id)
+	return saved_value.validation
+}
+
+ui.set_saved_value = function(id, value) {
+	let saved_value = saved_values.get(id)
+	assert(saved_value, 'saved value not defined: ', id)
+	let out = saved_value.validation // output for the attempted value
+	let is_valid = saved_value.field.validator.validate(value, out)
+	if (is_valid) {
+		saved_value.value = out.value
+		ui.save_state(id, 'value', out.value)
+	}
+	return is_valid
+}
+
+function input_field(id) {
+	return saved_values.get(id)?.field ?? ui.state_of(id, 'field')
+}
+ui.input_field = input_field
 
 //// TEXT BOX ----------------------------------------------------------------
 
@@ -5771,9 +5891,8 @@ ui.mark_text = function(i1, i2, bg) {
 		text_flags |= TEXT_MARKED
 }
 
-// NOTE: called between frames so hit testing is not availble here!
 function editable_text_update(id, s) {
-	s.input_value = undefined
+	s.interaction_value = undefined
 }
 
 // max_w : clip text beyond max_w. makes sense when w is not given.
@@ -5787,15 +5906,12 @@ ui.text = function(
 	if (field) { // editable
 		let s = ui.state(id, editable_text_update)
 		ui.focusable(id)
-		let value0 = s.value
+		let value0 = s.input_value
 		let field0 = s.field
-		s.field = field
-		value = set_value(id, s, repl(value ?? null, '', null))
-		if (s.text === undefined || s.input_value === undefined
-				&& (value !== value0 || field != field0)) {
+		value = set_value(id, s, repl(value, '', null), field)
+		if (s.text === undefined || s.interaction_value === undefined
+				&& (value !== value0 || field != field0))
 			s.text = value == null ? '' : field.to_input(value)
-			field.validator?.validate(value)
-		}
 		text = s.text
 	} else {
 		text = String(value ?? '')
@@ -5863,16 +5979,12 @@ ui.text = function(
 	text_flags = 0
 	text_font_size = null
 
-	return field ? value : text
+	return field ? ui.value(id) : text
 }
 ui.text_editable = function(
 	id, value, fr, align, valign, max_w, field, readonly
 ) {
-	if (!field) {
-		let s = ui.state(id)
-		s.field ??= ui.create_field()
-		field = s.field
-	}
+	field ??= input_field(id) ?? ui.create_field()
 	return ui.text(id, value, fr, align, valign, max_w, null, field, readonly)
 }
 ui.text_lines = function(id, s, fr, align, valign, max_w) {
@@ -5900,7 +6012,7 @@ function see(m) {
 
 let measure_text; {
 let tm = map()
-measure_text = function(cx, s) {
+measure_text = function(s) {
 	let fm = tm.get(cx.font)
 	if (!fm) { fm = map(); tm.set(cx.font, fm) }
 	let m = fm.get(s)
@@ -5918,7 +6030,7 @@ measure_text = function(cx, s) {
 ui.measure_text = measure_text
 
 ui.line_h = function() {
-	let m = measure_text(cx, '')
+	let m = measure_text('')
 	return ceil(m.fontBoundingBoxAscent + m.fontBoundingBoxDescent)
 }
 
@@ -5993,7 +6105,7 @@ function create_word_wrapper() {
 		if (cx.font == last_font)
 			return
 		last_font = cx.font
-		let m = measure_text(cx, ' ')
+		let m = measure_text(' ')
 		sp_w = m.width
 		ww.sp_w = sp_w
 		ww.asc = m.fontBoundingBoxAscent
@@ -6330,18 +6442,20 @@ function read_input_sel(t, input) {
 	t.caret  = backward ? input.selectionStart : input.selectionEnd
 }
 
-function set_text_input_value(s, text) {
+function set_text_input_value(id, s, text) {
 	s.text = text
 	let input_value = repl(text, '', null)
-	let validator = s.field.validator
-	validator.validate(input_value)
-	s.input_value = validator.parse_failed ? input_value : validator.value
+	let out = s.validation
+	s.field.validator.validate(input_value, out)
+	s.interaction_value = out.parse_failed ? input_value : out.value
+	if (saved_values.has(id))
+		ui.set_saved_value(id, input_value)
 }
 
 function input_text_changed() {
 	let s = ui.state_of(this._ui_id)
 	if (!s) return
-	set_text_input_value(s, this.value)
+	set_text_input_value(this._ui_id, s, this.value)
 	read_input_sel(s, this)
 	forget_selection(s)
 	animate()
@@ -6372,7 +6486,7 @@ function remote_input_blur(ev) {
 	if (!document.hasFocus())
 		return
 	if (ui.focused_id == this._ui_ss_ids[0]
-			&& !ui.screen.contains(ev.relatedTarget))
+			&& !screen.contains(ev.relatedTarget))
 		ui.focus(null)
 	animate()
 }
@@ -6451,7 +6565,7 @@ ui.process_shared_screen_input = function(p, t) {
 	} else if (t.event == 'input') {
 		let s = ui.state_of(t.input)
 		if (!s) return
-		set_text_input_value(s, t.value)
+		set_text_input_value(t.input, s, t.value)
 		s.anchor = t.anchor
 		s.caret = t.caret
 		applied_edit_n = t.n
@@ -6652,15 +6766,15 @@ draw[CMD_TEXT] = function(a, i) {
 			let mark_s = s.slice(i1, i2)
 			let text_x
 			if (flags & TEXT_ALIGN_RIGHT)
-				text_x = anchor_x - measure_text(cx, s).width
+				text_x = anchor_x - measure_text(s).width
 			else if (flags & TEXT_ALIGN_CENTER)
-				text_x = anchor_x - measure_text(cx, s).width / 2
+				text_x = anchor_x - measure_text(s).width / 2
 			else
 				text_x = anchor_x
-			let mark_x = text_x + measure_text(cx, s.slice(0, i1)).width
+			let mark_x = text_x + measure_text(s.slice(0, i1)).width
 			let bg = color_obj(a[arg_i+2])
 			cx.fillStyle = bg[0]
-			cx.fillRect(mark_x, y, measure_text(cx, mark_s).width, asc + dsc)
+			cx.fillRect(mark_x, y, measure_text(mark_s).width, asc + dsc)
 			cx.fillStyle = color_css('text')
 			cx.textAlign = 'left'
 			cx.fillText(mark_s, mark_x, y + asc)
@@ -7167,7 +7281,7 @@ ss.draw = function(a, i) {
 	let id = a[i+SS_ID]
 	if (ss_screen_ids.includes(t.id)) {
 		let err = 'shared screen cycle'
-		let m = measure_text(cx, err)
+		let m = measure_text(err)
 		let asc = m.actualBoundingBoxAscent
 		let dsc = m.actualBoundingBoxDescent
 		cx.fillStyle = color_css('button-danger')
@@ -8204,7 +8318,7 @@ function pick_list_item(field, value, item) {
 }
 
 function list_update(id, s) {
-	s.input_value = undefined
+	s.interaction_value = undefined
 	if (s.readonly) {
 		s.focused_item_changed = false
 		s.picked = false
@@ -8213,7 +8327,7 @@ function list_update(id, s) {
 	let items = s.items
 	let field = s.field
 	let is_multi = field?.is_values
-	let value = s.value
+	let value = s.input_value
 	let focused = ui.focused(id)
 	let focused_item0 = s.focused_item
 	let focused_item = focused_item0
@@ -8253,8 +8367,6 @@ function list_update(id, s) {
 		}
 		i++
 	}
-	if (value_changed)
-		s.input_value = value
 	s.focused_item_changed = focused_item0 !== focused_item
 		? focused_item_changed : false
 	s.focused_item = focused_item
@@ -8262,16 +8374,17 @@ function list_update(id, s) {
 	s.picked = !is_multi && value_changed == 'click' || !!has_enter
 	if (has_enter)
 		ui.capture_keys()
+	set_interaction_value(id, s, value_changed ? value : undefined)
 }
 function hvlist(hv, id, items, value, field,
 	fr, align, valign, readonly, opt
 ) {
+	field ??= input_field(id)
 	hv = hv || 'v'
 	assert(hv == 'v' || hv == 'h')
 	readonly ??= field?.readonly
 	let s = ui.state(id)
 	s.items = items
-	s.field = field
 	s.readonly = readonly
 	s.hv = hv
 	ui.state(id, list_update)
@@ -8332,7 +8445,7 @@ function hvlist(hv, id, items, value, field,
 		i++
 	}
 	ui.end()
-	return value
+	return ui.value(id)
 }
 ui.hvlist = hvlist
 ui.list  = hvlist.bind(null, 'v')
@@ -8361,8 +8474,7 @@ function input_errors(id) {
 	if (s?.nav)
 		return (s.ri != null && s.nav.cell_errors[s.field.fi]?.[s.ri])
 			|| empty_array
-	let field = s?.field ?? ui.state_of(id, 'field')
-	return field?.validator?.results ?? empty_array
+	return ui.state_of(id, 'validation')?.results ?? empty_array
 }
 
 ui.error_label = function(for_id, mode, fr, align, valign) {
@@ -8428,6 +8540,7 @@ ui.em_input_max       = () => ui.em(ui.input_max_w_em)
 ui.em_input_max_popup = () => ui.em(ui.input_max_popup_w_em)
 
 ui.input = function(id, value, field, fr, text_align, no_box, readonly) {
+	field ??= input_field(id)
 	if (clicked(id+'.label')) {
 		ui.focus(id)
 		ui.select_text(id, 0, 1/0)
@@ -8456,7 +8569,7 @@ ui.input = function(id, value, field, fr, text_align, no_box, readonly) {
 ui.password_input = function(
 	id, value, field, fr, text_align, no_box, readonly
 ) {
-	field ??= ui.state_of(id, 'field') ?? ui.create_field({type: 'password'})
+	field ??= input_field(id) ?? ui.create_field({type: 'password'})
 	return ui.input(id, value, field, fr, text_align, no_box, readonly)
 }
 
@@ -8466,7 +8579,7 @@ ui.password_input = function(
 
 function num_slider_update(id, s) {
 
-	s.input_value = undefined
+	s.interaction_value = undefined
 
 	let input_id = id+'.input'
 	let field = s.field
@@ -8480,7 +8593,7 @@ function num_slider_update(id, s) {
 		}
 	}
 	if (ui.focused(id) && ui.keydown('ctrl c'))
-		copy_input_value(field, s.value)
+		copy_input_value(field, s.input_value)
 	if (s.readonly)
 		return
 
@@ -8508,9 +8621,7 @@ function num_slider_update(id, s) {
 		s.editing = false
 	}
 
-	let value = ui.input_value(input_id)
-	if (value !== undefined)
-		s.input_value = value
+	let interaction_value = ui.interaction_value(input_id)
 
 	if (!s.editing) {
 		let cs = ui.drag(id+'.handle')
@@ -8522,40 +8633,40 @@ function num_slider_update(id, s) {
 		let input_value
 		if (cs) {
 			if (cs.drag) {
-				let p = clamp(slider_p(s.value, from, to), p_min, p_max)
+				let p = clamp(slider_p(s.input_value, from, to), p_min, p_max)
 				cs.x0 = lerp(p, 0, 1, 0, s.w)
 				ui.focus(id)
 			}
 			let p = clamp((cs.x0 + cs.dx) / s.w, p_min, p_max)
 			input_value = lerp(p, 0, 1, from, to)
 		} else if (d) {
-			let p = clamp(slider_p(s.value, from, to)
+			let p = clamp(slider_p(s.input_value, from, to)
 				+ d * (ui.keypressed('shift') ? .01 : .1), p_min, p_max)
 			input_value = lerp(p, 0, 1, from, to)
 		} else if (focused && ui.keydown('delete')) {
 			input_value = null
 		}
 		if (input_value !== undefined)
-			s.input_value = snap_slider_value(input_value, field, from, to)
+			interaction_value = snap_slider_value(input_value, field, from, to)
 		if (hit(id+'.handle') || cs)
 			ui.set_cursor('ew-resize')
 	}
+	set_interaction_value(id, s, interaction_value)
 }
 ui.num_slider = function(id, value, field, readonly) {
 	let s = ui.state(id)
-	field ??= s.field ?? ui.create_field({
+	field ??= input_field(id) ?? ui.create_field({
 		type: 'number',
 		min: 0,
 		max: 1,
 		decimals: 2,
 	})
 	readonly ??= field.readonly
-	s.field = field
 	s.readonly = readonly
 	let from = field.slider_min ?? field.min ?? 0
 	let to = field.slider_max ?? field.max ?? 1
 	s = ui.state(id, num_slider_update)
-	value = set_value(id, s, value, s.editing ? null : field)
+	value = set_value(id, s, value, field)
 
 	let p_min = slider_p(field.min ?? from, from, to)
 	let p_max = slider_p(field.max ?? to, from, to)
@@ -8605,7 +8716,7 @@ ui.num_slider = function(id, value, field, readonly) {
 		ui.measure(id)
 	ui.end_stack()
 
-	return value
+	return ui.value(id)
 }
 
 //// SLIDER ------------------------------------------------------------------
@@ -8677,14 +8788,14 @@ function snap_slider_value(value, field, from, to) {
 
 function slider_update(id, s) {
 
-	s.input_value = undefined
+	s.interaction_value = undefined
 
 	if (clicked(id+'.label'))
 		ui.focus(id)
 
 	let field = s.field
 	if (ui.focused(id) && ui.keydown('ctrl c'))
-		copy_input_value(field, s.value)
+		copy_input_value(field, s.input_value)
 	if (s.readonly)
 		return
 	let slider_min = field.slider_min ?? field.min ?? 0
@@ -8706,7 +8817,7 @@ function slider_update(id, s) {
 		let p = clamp((ui.mx - track_x) / track_w, p_min, p_max)
 		value = lerp(p, 0, 1, slider_min, slider_max)
 	} else if (d) {
-		let p = slider_p(s.value, slider_min, slider_max)
+		let p = slider_p(s.input_value, slider_min, slider_max)
 			+ d * (ui.keypressed('shift') ? .01 : .1)
 		value = lerp(clamp(p, p_min, p_max), 0, 1,
 			slider_min, slider_max)
@@ -8714,19 +8825,19 @@ function slider_update(id, s) {
 		value = null
 	}
 	if (value !== undefined)
-		s.input_value = snap_slider_value(value, field, slider_min, slider_max)
+		set_interaction_value(id, s,
+			snap_slider_value(value, field, slider_min, slider_max))
 }
 slider.create = function(cmd, id, value, field, readonly) {
 
 	let s = ui.state(id)
-	field ??= s.field ?? ui.create_field({
+	field ??= input_field(id) ?? ui.create_field({
 		type: 'number',
 		min: 0,
 		max: 1,
 		decimals: 2,
 	})
 	readonly ??= field.readonly
-	s.field = field
 	s.readonly = readonly
 	ui.focusable(id)
 
@@ -8797,7 +8908,7 @@ slider.create = function(cmd, id, value, field, readonly) {
 		ui.end_popup()
 	}
 
-	return value
+	return ui.value(id)
 }
 
 slider.draw = function(a, i) {
@@ -8976,7 +9087,8 @@ function toggle_path(cx, x, y, w, h) {
 let toggle = {}
 
 function toggle_update(id, s) {
-	s.input_value = undefined
+	s.interaction_value = undefined
+	let interaction_value
 	if (clicked(id+'.label'))
 		ui.focus(id)
 	if (s.readonly)
@@ -8984,16 +9096,16 @@ function toggle_update(id, s) {
 	let hs = hit(id) || hit(id+'.label')
 	let focused = ui.focused(id)
 	if ((hs && ui.click) || (focused && ui.keydown(' ')))
-		s.input_value = !s.value
+		interaction_value = !s.input_value
 	else if (!s.field.not_null && focused && ui.keydown('delete'))
-		s.input_value = null
+		interaction_value = null
+	set_interaction_value(id, s, interaction_value)
 }
 
 function set_toggle_state(id, on, field, readonly) {
 	let s = ui.state(id)
-	field ??= s.field ?? ui.create_field({type: 'bool'})
+	field ??= input_field(id) ?? ui.create_field({type: 'bool'})
 	readonly ??= field.readonly
-	s.field = field
 	s.readonly = readonly
 	s = ui.state(id, toggle_update)
 	set_value(id, s, on, field)
@@ -9005,7 +9117,7 @@ function toggle_create(
 ) {
 	let s = set_toggle_state(id, on, field, readonly)
 	ui.focusable(id)
-	on = s.value
+	on = s.input_value
 	readonly = s.readonly
 	let hs = hit(id) || hit(id+'.label')
 	let focused = ui.focused(id)
@@ -9016,7 +9128,7 @@ function toggle_create(
 		(focused && ui.focused_by_key ? TOGGLE_FOCUSED : 0) |
 		(readonly ? TOGGLE_READONLY : 0)
 	ui_cmd_box_end(i)
-	return on
+	return ui.value(id)
 }
 
 toggle.create = function(
@@ -9178,12 +9290,12 @@ ui.toggle_button = function(
 		(s.readonly ? STATE_READONLY : 0)
 		| (!s.readonly && hit(id) ? STATE_HOVER : 0)
 		| (ui.focused(id) ? STATE_FOCUSED : 0)
-		| (s.value ? STATE_ITEM_SELECTED : 0)
+		| (s.input_value ? STATE_ITEM_SELECTED : 0)
 	ui.bb('toggle', state, 'all', null, null, ui.sp05())
 	ui.color('toggle-text', state)
 	ui.text('', text, 0, 'c', 'c')
 	ui.end_stack()
-	return s.value
+	return ui.value(id)
 }
 
 //// RADIO -------------------------------------------------------------------
@@ -9202,7 +9314,7 @@ let radio = {...checkbox}
 let radio_group_stack = []
 
 function radio_group_update(group_id, s) {
-	s.input_value = undefined
+	s.interaction_value = undefined
 	let del = !s.field.not_null && ui.keydown('delete')
 	if (!ui.click && !ui.keydown(' ') && !del)
 		return
@@ -9217,17 +9329,16 @@ function radio_group_update(group_id, s) {
 		ui.focus(id)
 	if (s.readonly)
 		return
-	s.input_value = del ? null : radio_s.own_val
+	set_interaction_value(group_id, s, del ? null : radio_s.own_val)
 }
 ui.radio_group = function(group_id, value, field, readonly) {
 	let s = ui.state(group_id)
-	field ??= s.field ?? ui.create_field({})
-	s.field = field
+	field ??= input_field(group_id) ?? ui.create_field({})
 	s.readonly = readonly ?? field.readonly
 	s = ui.state(group_id, radio_group_update)
-	value = set_value(group_id, s, value, field)
+	set_value(group_id, s, value, field)
 	radio_group_stack.push(group_id)
-	return value
+	return ui.value(group_id)
 }
 ui.end_radio_group = function() {
 	radio_group_stack.pop()
@@ -9243,7 +9354,7 @@ radio.create = function(cmd,
 	s.own_val = own_val
 	ui.focusable(id)
 	let readonly = ui.state_of(group_id, 'readonly')
-	let selected = own_val === ui.value(group_id)
+	let selected = own_val === ui.input_value(group_id)
 	let hs = hit(id) || hit(id+'.label')
 	let focused = ui.focused(id)
 	next_min_w ??= ui.em(1.5)
@@ -9307,6 +9418,7 @@ ui.box_widget('radio', radio)
 ui.radio_list = function(
 	id, items, value, field, hv, fr, align, valign, readonly
 ) {
+	field ??= input_field(id)
 	value = ui.radio_group(id, value, field, readonly)
 	ui.hv(hv ?? 'v', fr, ui.sp2(), align, valign)
 	let i = 0
@@ -9523,9 +9635,10 @@ ui.draw_value_row = draw_value_row
 
 function list_dropdown_update(id, s) {
 
-	s.input_value = undefined
+	s.interaction_value = undefined
+	let interaction_value
 	if (ui.focused(id) && ui.keydown('ctrl c'))
-		copy_input_value(s.field, s.value)
+		copy_input_value(s.field, s.input_value)
 	let readonly = s.readonly
 
 	let picker_id = id+'.picker'
@@ -9538,37 +9651,42 @@ function list_dropdown_update(id, s) {
 		set_dropdown_open(id, s, !s.open, true)
 
 	if (s.opened) {
-		s.revert_value = s.value
+		s.revert_value = s.input_value
 	} else if (s.closed) {
 		if (!is_multi)
-			s.input_value = s.picked ? ui.value(picker_id) : s.revert_value
+			interaction_value = s.picked
+				? ui.input_value(picker_id) : s.revert_value
 		else if (s.canceled)
-			s.input_value = s.revert_value
+			interaction_value = s.revert_value
 	}
 
-	if (readonly)
+	if (readonly) {
+		set_interaction_value(id, s, interaction_value)
 		return
+	}
 
-	let picker_value = ui.input_value(picker_id)
+	let picker_value = ui.interaction_value(picker_id)
 	if (picker_value !== undefined)
-		s.input_value = picker_value
+		interaction_value = picker_value
 
 	if (!s.field?.not_null && ui.keydown('delete')
 		&& (ui.focused(id) || ui.focus_inside(id)))
-		s.input_value = null
+		interaction_value = null
 
 	// arrow keys move the selection with the list closed.
 	if (!is_multi && !s.open && ui.focused(id)) {
 		let d = ui.keydown('arrowup') && -1 || ui.keydown('arrowdown') && 1 || 0
 		if (d)
-			s.input_value = next_list_item(items, s.value, d)
+			interaction_value = next_list_item(items, s.input_value, d)
 	}
+	set_interaction_value(id, s, interaction_value)
 }
 
 ui.list_dropdown = function(
 	id, items, value, field, fr, align, max_w, readonly
 ) {
 
+	field ??= input_field(id)
 	let text_w = next_min_w
 	next_min_w = null
 
@@ -9586,10 +9704,9 @@ ui.list_dropdown = function(
 	readonly ??= field?.readonly
 	let s = ui.state(id)
 	s.items = items
-	s.field = field
 	s.readonly = readonly
 	let open = ui.dropdown(id, list_dropdown_update)
-	value = set_value(id, s, value, open ? null : field)
+	value = set_value(id, s, value, field)
 
 	if (!open && ui.focus_inside(picker_id))
 		ui.focus(id)
@@ -9643,7 +9760,7 @@ ui.list_dropdown = function(
 
 	ui.end_stack()
 
-	return value
+	return ui.value(id)
 }
 
 // dropdowns have fixed w by default that aligns with inputs.
@@ -9662,6 +9779,7 @@ ui.list_dropdown_inline = function(id, items, value, field,
 */
 
 ui.enum_input = function(id, value, field, fr, align, max_w, readonly) {
+	field ??= input_field(id)
 	return ui.list_dropdown(id, field.enum_items(), value, field,
 		fr, align, max_w, readonly)
 }
@@ -9669,12 +9787,13 @@ ui.enum_input = function(id, value, field, fr, align, max_w, readonly) {
 ui.enum_toggle = function(
 	id, value, field, fr, align, valign, readonly
 ) {
+	field ??= input_field(id)
 	ui.mv(ui.sp025()) // make it match other inputs
 	let s = ui.state(id)
 	s.enum_toggle_opt ??= { // options for the enum toggle list
 		item_align: 'c', item_valign: 'c', item_fr: 1,
 		item_gap: 2,
-		custom_item_bg_color: 'toggle', custom_item_color: 'toggle-text',
+		item_bg_color: 'toggle', item_color: 'toggle-text',
 	}
 	return ui.hlist(id, field.enum_items(), value, field,
 		fr ?? 0, align ?? 'l', valign ?? 'c', readonly, s.enum_toggle_opt)
@@ -9776,15 +9895,15 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 
 function calendar_update(id, s) {
 
-	s.input_value = undefined
+	s.interaction_value = undefined
 
 	let ranges = s.ranges
 	let h = s.h ?? 0
 
-	let sel_day = s.value
+	let sel_day = s.input_value
 
-	let year_value = ui.input_value(id+'.year' )
-	let month_value = ui.input_value(id+'.month')
+	let year_value = ui.interaction_value(id+'.year' )
+	let month_value = ui.interaction_value(id+'.month')
 	if (year_value !== undefined || month_value !== undefined) {
 		let d = sel_day ?? day(time())
 		let y = year_value ?? year_of(d)
@@ -9792,7 +9911,7 @@ function calendar_update(id, s) {
 			? months.indexOf(month_value) + 1 : month_of(d)
 		let last_month_day = month_day_of(month(time(y, m, 1), 1) - 1)
 		sel_day = time(y, m, min(month_day_of(d), last_month_day))
-		s.input_value = sel_day
+		s.interaction_value = sel_day
 	}
 
 	let hit_day = num(ui.hit_match(id+'.day.'))
@@ -9806,7 +9925,7 @@ function calendar_update(id, s) {
 			if (cs.drag) {
 				ui.focus(id)
 				sel_day = hit_day
-				s.input_value = sel_day
+				s.interaction_value = sel_day
 			}
 			if (cs.drop)
 				clicked_day = true
@@ -9832,7 +9951,7 @@ function calendar_update(id, s) {
 
 		if (ui.keydown('delete')) {
 			sel_day = null
-			s.input_value = null
+			s.interaction_value = null
 			ui.capture_keys()
 		} else if (ctrl && (ui.keydown('arrowup') || ui.keydown('arrowdown'))) {
 			let sy = s.scroll_y ?? 0
@@ -9852,7 +9971,7 @@ function calendar_update(id, s) {
 
 			if (mode == 'day') {
 				sel_day = day(sel_day ?? time(), ddays)
-				s.input_value = sel_day
+				s.interaction_value = sel_day
 				ui.capture_keys()
 			} else if (focused_range && e.can_change_range(focused_range)) {
 				let r = focused_range
@@ -9907,7 +10026,7 @@ ui.calendar = function(id, sel_day, ranges, fr, align, valign) {
 	ui.focusable(id)
 	let s = ui.state(id)
 	s.ranges = ranges
-	let day0 = s.value
+	let day0 = s.input_value
 	ui.state(id, calendar_update)
 	sel_day = set_value(id, s, sel_day)
 
@@ -9974,7 +10093,7 @@ ui.calendar = function(id, sel_day, ranges, fr, align, valign) {
 
 	ui.end_h()
 
-	return sel_day
+	return ui.value(id)
 }
 
 //// DATE INPUT --------------------------------------------------------------
@@ -9983,7 +10102,8 @@ ui.calendar = function(id, sel_day, ranges, fr, align, valign) {
 
 function date_input_update(id, s) {
 
-	s.input_value = undefined
+	s.interaction_value = undefined
+	let interaction_value
 	let readonly = s.readonly
 
 	let picker_id = id+'.picker'
@@ -10002,21 +10122,25 @@ function date_input_update(id, s) {
 	}
 
 	if (ui.dropdown_opened(id))
-		s.revert_value = s.value
+		s.revert_value = s.input_value
 	else if (ui.dropdown_closed(id))
-		s.input_value = ui.dropdown_picked(id)
-			? ui.value(picker_id) : s.revert_value
+		interaction_value = ui.dropdown_picked(id)
+			? ui.input_value(picker_id) : s.revert_value
 
-	if (readonly)
+	if (readonly) {
+		set_interaction_value(id, s, interaction_value)
 		return
+	}
 
-	let value = ui.input_value(input_id)
+	let value = ui.interaction_value(input_id)
 	if (value !== undefined)
-		s.input_value = value
+		interaction_value = value
 
-	let d = ui.input_value(picker_id)
-	if (d !== undefined)
-		s.input_value = d
+	value = ui.interaction_value(picker_id)
+	if (value !== undefined)
+		interaction_value = value
+
+	set_interaction_value(id, s, interaction_value)
 }
 
 ui.date_input = function(id, v, field, fr, align, valign, readonly) {
@@ -10028,9 +10152,8 @@ ui.date_input = function(id, v, field, fr, align, valign, readonly) {
 	let input_id = id+'.input'
 
 	let s = ui.state(id)
-	field ??= s.field ?? ui.create_field({type: 'date'})
+	field ??= input_field(id) ?? ui.create_field({type: 'date'})
 	readonly ??= field.readonly
-	s.field = field
 	s.readonly = readonly
 	ui.state(id, date_input_update)
 
@@ -10050,7 +10173,7 @@ ui.date_input = function(id, v, field, fr, align, valign, readonly) {
 		ui.select_text(input_id, 0, 1/0)
 	}
 
-	let value = set_value(id, s, v)
+	let value = set_value(id, s, v, field)
 
 	let input_align = parse_align(align ?? 'r')
 	input_align = input_align == ALIGN_END ? 'sr'
@@ -10089,7 +10212,7 @@ ui.date_input = function(id, v, field, fr, align, valign, readonly) {
 
 	ui.end_dropdown(id)
 
-	return value
+	return ui.value(id)
 }
 
 //// IMAGE -------------------------------------------------------------------
@@ -10419,7 +10542,8 @@ function gradient_slider(draw_gradient, name, max_value, key_step,
 
 	function update(id, s) {
 
-		s.input_value = undefined
+		s.interaction_value = undefined
+		let interaction_value
 		if (ui.clicked(id+'.label'))
 			ui.focus(id)
 
@@ -10428,7 +10552,7 @@ function gradient_slider(draw_gradient, name, max_value, key_step,
 			if (cs.drag)
 				ui.focus(id)
 			if (cs.dragging)
-				s.input_value = slider_value(
+				interaction_value = slider_value(
 					cs.p + cs.dx / (cs.w-1))
 		}
 
@@ -10436,19 +10560,20 @@ function gradient_slider(draw_gradient, name, max_value, key_step,
 			let step = ui.keydown('arrowright') && 1
 				|| ui.keydown('arrowleft') && -1
 			if (step) {
-				let value = is_slider_value(s.value)
-					? s.value : s.valid_value ?? max_value / 2
+				let value = is_slider_value(s.input_value)
+					? s.input_value : s.valid_value ?? max_value / 2
 				let d = ui.keypressed('shift') ? shift_key_step : key_step
-				s.input_value = slider_value((value + d * step) / max_value)
+				interaction_value = slider_value((value + d * step) / max_value)
 				ui.capture_keys()
 			} else if (ui.keydown('delete')) {
-				s.input_value = null
+				interaction_value = null
 			}
 		}
 
-		let text = ui.input_value(id+'.input')
+		let text = ui.interaction_value(id+'.input')
 		if (text !== undefined)
-			s.input_value = text
+			interaction_value = text
+		set_interaction_value(id, s, interaction_value)
 	}
 
 	ui.box_widget(name, {
@@ -10458,24 +10583,23 @@ function gradient_slider(draw_gradient, name, max_value, key_step,
 		create: function(cmd, id, value, hue, sat, fr, align, valign) {
 			let min_h = next_min_h
 			let s = ui.state(id)
-			s.field ??= ui.create_field({
+			let field = input_field(id) ?? ui.create_field({
 				type: 'number',
 				min: 0,
 				max: max_value,
 				decimals: display_decimals,
 			})
-			let field = s.field
 			s = ui.state(id, update)
-			let prev_value = s.value
-			value = set_value(id, s, value)
+			let prev_value = s.input_value
+			value = set_value(id, s, value, field)
 			if (is_slider_value(value))
 				s.valid_value = value
 
 			let input_id = id+'.input'
-			let box_text = ui.value(input_id)
-			let has_box_input = ui.input_value(input_id) !== undefined
-			let text = box_text
-			if ((!has_box_input && value !== prev_value) || text === undefined)
+			let has_box_input = ui.interaction_value(input_id) !== undefined
+			let text // value for the box, or nothing: the box keeps its own
+			if ((!has_box_input && value !== prev_value)
+					|| !ui.state_of(input_id))
 				text = value == null || !isnum(value)
 					? value : dec(value, display_decimals)
 
@@ -10502,7 +10626,7 @@ function gradient_slider(draw_gradient, name, max_value, key_step,
 					ui.input(input_id, text, field, 0, 'sr')
 				ui.end_focus_group()
 			ui.end_h()
-			return value
+			return ui.value(id)
 		},
 
 		draw: function(a, i) {
@@ -10551,19 +10675,20 @@ function is_color_component(value, max_value) {
 function get_color_component_value(id, value, want_reset) {
 	if (want_reset)
 		return value
-	let v = ui.value(id)
+	let v = ui.input_value(id)
 	return v !== undefined ? v : value
 }
 
 function color_picker_update(id, s) {
-	s.input_value = undefined
+	s.interaction_value = undefined
+	let interaction_value
 
 	let hue_s = ui.state_of(id+'.hue')
 	let sat_s = ui.state_of(id+'.sat')
 	let lum_s = ui.state_of(id+'.lum')
-	let hue = hue_s?.input_value
-	let sat = sat_s?.input_value
-	let lum = lum_s?.input_value
+	let hue = hue_s?.interaction_value
+	let sat = sat_s?.interaction_value
+	let lum = lum_s?.interaction_value
 	if (hue !== undefined || sat !== undefined || lum !== undefined) {
 		let input_hue = hue !== undefined ? hue : hue_s?.valid_value
 		let input_sat = sat !== undefined ? sat : sat_s?.valid_value
@@ -10572,15 +10697,16 @@ function color_picker_update(id, s) {
 			&& is_color_component(input_sat, 1)
 			&& is_color_component(input_lum, 1)
 		) {
-			s.input_value = hsl_to_rgb_hex(input_hue, input_sat, input_lum)
+			interaction_value = hsl_to_rgb_hex(input_hue, input_sat, input_lum)
 		} else {
-			s.input_value = s.value
+			interaction_value = s.input_value
 		}
 	}
 
-	let text = ui.input_value(id+'.hex')
+	let text = ui.interaction_value(id+'.hex')
 	if (text !== undefined)
-		s.input_value = text
+		interaction_value = text
+	set_interaction_value(id, s, interaction_value)
 }
 
 ui.color_picker = function(id, hex, field) {
@@ -10589,18 +10715,17 @@ ui.color_picker = function(id, hex, field) {
 	let lum_id = id+'.lum'
 	let hex_id = id+'.hex'
 	let s = ui.state(id)
-	field ??= s.field ?? ui.create_field({type: 'color'})
-	s.field = field
+	field ??= input_field(id) ?? ui.create_field({type: 'color'})
 	s = ui.state(id, color_picker_update)
-	let prev_hex = s.value
-	let has_input_value = s.input_value !== undefined
-	let value = set_value(id, s, hex)
+	let prev_hex = s.input_value
+	let has_input_value = s.interaction_value !== undefined
+	let value = set_value(id, s, hex, field)
 	let has_caller_value_change = !has_input_value && value !== prev_hex
 
 	let hue_s = ui.state_of(hue_id)
 	let sat_s = ui.state_of(sat_id)
 	let lum_s = ui.state_of(lum_id)
-	let hex_input_value = ui.input_value(hex_id)
+	let hex_input_value = ui.interaction_value(hex_id)
 	let want_reset = !hue_s || has_caller_value_change
 		|| hex_input_value !== undefined
 			&& field.from_input(hex_input_value) !== undefined
@@ -10618,10 +10743,9 @@ ui.color_picker = function(id, hex, field) {
 	let gradient_sat = is_color_component(sat_value, 1)
 		? sat_value : sat
 
-	let box_text = ui.value(hex_id)
 	let has_box_input = hex_input_value !== undefined
-	let text = box_text
-	if ((!has_box_input && value !== prev_hex) || text === undefined)
+	let text // value for the box, or nothing: the box keeps its own
+	if ((!has_box_input && value !== prev_hex) || !ui.state_of(hex_id))
 		text = value
 
 	ui.v_aligned(1, ui.sp2())
@@ -10643,31 +10767,33 @@ ui.color_picker = function(id, hex, field) {
 		ui.end_h()
 	ui.end_v_aligned()
 
-	return value
+	return ui.value(id)
 }
 
 function color_input_update(id, s) {
-	s.input_value = undefined
+	s.interaction_value = undefined
+	let interaction_value
 	if (ui.focused(id) && ui.keydown('ctrl c'))
-		copy_input_value(s.field, s.value)
+		copy_input_value(s.field, s.input_value)
 	let readonly = s.readonly
 
 	ui.dropdown_update(id, s, readonly)
 
 	let picker_id = id+'.picker'
 	if (ui.dropdown_opened(id)) {
-		s.revert_value = s.value
+		s.revert_value = s.input_value
 	} else if (ui.dropdown_closed(id)) {
-		s.input_value = ui.dropdown_picked(id)
-			? ui.value(picker_id) : s.revert_value
+		interaction_value = ui.dropdown_picked(id)
+			? ui.input_value(picker_id) : s.revert_value
 	} else if (!readonly) {
-		let picker_value = ui.input_value(picker_id)
+		let picker_value = ui.interaction_value(picker_id)
 		if (picker_value !== undefined)
-			s.input_value = picker_value
+			interaction_value = picker_value
 	}
 
 	if (!readonly && ui.focused(id) && ui.keydown('delete'))
-		s.input_value = null
+		interaction_value = null
+	set_interaction_value(id, s, interaction_value)
 }
 
 // ui.color_input (id, v=, field=, fr=1, readonly=) -> v
@@ -10677,9 +10803,8 @@ ui.color_input = function(id, value, field, fr, readonly) {
 	next_min_w = null
 	let picker_id = id+'.picker'
 	let s = ui.state(id)
-	field ??= s.field ?? ui.create_field({type: 'color'})
+	field ??= input_field(id) ?? ui.create_field({type: 'color'})
 	readonly ??= field.readonly
-	s.field = field
 	s.readonly = readonly
 	s = ui.state(id, color_input_update)
 
@@ -10690,7 +10815,7 @@ ui.color_input = function(id, value, field, fr, readonly) {
 	if (!open && ui.focus_inside(picker_id))
 		ui.focus(id)
 
-	value = set_value(id, s, value, open ? null : field)
+	value = set_value(id, s, value, field)
 
 		let state =
 			(readonly ? STATE_READONLY : 0)
@@ -10724,7 +10849,7 @@ ui.color_input = function(id, value, field, fr, readonly) {
 
 	ui.end_stack()
 
-	return value
+	return ui.value(id)
 }
 
 //// FIELD_INPUT & NAV_INPUT -------------------------------------------------
@@ -10770,7 +10895,7 @@ opt:
 */
 
 // builds the control under `id`; nav_input reads what the user made of it
-// with ui.input_value(id).
+// with ui.interaction_value(id).
 ui.build_input = function(id, value, opt, control, readonly) {
 	ui.min_w(opt.w)
 	if (control == 'input') {
@@ -10827,7 +10952,8 @@ function build_input_row(id, value, opt, is_bound) {
 
 	let s = ui.state(id+'.field_input')
 	let nav = is_bound ? opt.nav : null
-	let field = is_bound ? nav?.all_fields_map[opt.col] : opt.field
+	let field = is_bound ? nav?.all_fields_map[opt.col]
+		: opt.field ?? input_field(id)
 	let ri = is_bound && field
 		? (opt.ri === undefined ? nav.focused_ri : opt.ri) : null
 	s.nav = nav
@@ -10892,7 +11018,7 @@ function build_input_row(id, value, opt, is_bound) {
 			value = field.build_input(id, value, opt, control, readonly)
 		}
 		if (ri != null) {
-			let input_value = ui.input_value(id)
+			let input_value = ui.interaction_value(id)
 			if (input_value !== undefined)
 				nav.set_cell_val(ri, field.fi, input_value, {input: nav})
 			value = nav.cell_input_val(ri, field.fi)
@@ -10901,7 +11027,7 @@ function build_input_row(id, value, opt, is_bound) {
 
 		let has_error = is_bound
 			? ri != null && nav.cell_has_errors(ri, field.fi)
-			: field.validator.failed
+			: ui.state_of(id, 'validation').failed
 		let is_modified = ri != null && nav.is_cell_modified(ri, field.fi)
 		let status_id = id+'.status'
 		if (has_error && (opt.errors ?? 'tooltip') == 'tooltip'
@@ -10943,7 +11069,7 @@ function build_input_row(id, value, opt, is_bound) {
 		ui.end_h()
 	}
 
-	return value
+	return has_error ? undefined : value
 }
 
 ui.field_input = function(id, value, opt) {
@@ -11516,6 +11642,7 @@ ui.live_move_mixin = function(e) {
 
 	ui.open_tab_strip  ()                    begin recording tab strip content
 	ui.close_tab_strip ()                    stop recording tab strip content
+	ui.in_dock_tab     () -> t|f             inside a dock tab's build
 	ui.set_dock_tab    (id, tab_id, fields)  update tab fields
 	ui.select_dock_tab (id, tab_id)          select a dock tab
 	ui.remove_dock_tab (id, tab_id)          remove a dock tab
@@ -11948,6 +12075,10 @@ tab record fields that the dock reads and writes:
 */
 
 let tab_strip_rec_i
+
+ui.in_dock_tab = function() {
+	return tab_strip_rec_i != null
+}
 
 ui.open_tab_strip = function() {
 	assert(tab_strip_rec_i != null, 'open_tab_strip() outside a dock tab')

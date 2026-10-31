@@ -57,14 +57,21 @@ frame's records, which do not include the widget, and the browser has no
 element of it to write into, so nothing can have happened to it yet: it has
 no edge and no input value to report.
 
-A stored input is the exception. When the app calls ui.saved_value(id,
-default) before any code reads id, the input keeps its value in
-ui.saved_state under its id, and ui.value(id) answers from there, or with the
-default while the store has none, whether or not state exists for that id.
-The input takes that value in place of the caller's on every frame, and the
-caller gets it back as the return value; the input ignores the caller's
-value. The input writes ui.saved_state only on a frame in which the user
-interacted with it.
+A saved-value model exists independently of its input. The app declares it
+once with ui.saved_value_def(id, default, field), for a static id. The model
+owns the field, validator, validation output and accepted value. On loading,
+the model validates the stored value, or the default when nothing is stored.
+It returns undefined for an invalid loaded value and leaves storage untouched.
+ui.saved_value(id) reads the accepted value even when no input exists.
+
+An input binds automatically to the model declared under its id. It uses the
+model's field and keeps its own value and validation output. On each user
+edit, the model validates the attempted value. It accepts and saves only valid
+values. ui.set_saved_value(id, value) uses the same validation and saving
+operation. ui.saved_value_validation(id) returns the model's validation
+output for the latest attempted write or load. After a rejected write, the
+model preserves its accepted value. The input preserves an invalid edit even
+when app code changes the model's accepted value.
 
 State survives between frames only while some code touches its id every
 frame.
@@ -171,19 +178,19 @@ text, input, toggle, checkbox, slider, num_slider, radio_group, radio_list,
 date_input, color_input.
 
 tabs is not an input: its selected tab is view state, not a value the caller
-publishes through ui.value(id) or ui.input_value(id).
+publishes through ui.value(id) or ui.interaction_value(id).
 
-sat_lum_square, hue_bar, list, list_dropdown, calendar and
-color_picker behave the same way and publish the same way, so ui.value(id)
-and ui.input_value(id) answer for them too. They are not inputs only in the
+sat_lum_square, hue_bar, list, list_dropdown, calendar and color_picker behave
+the same way and publish the same way, so ui.value(id) and
+ui.interaction_value(id) answer for them too. They are not inputs only in the
 sense that a caller is not expected to reach for them by id: the widget that
 builds one takes its return value. calendar is date_input's own picker the
 same way color_picker is color_input's: date_input normalizes the value to a
 day number or null before it ever reaches calendar, so calendar itself never
 has to accept or preserve a value it cannot interpret.
 
-There is no uncontrolled shape, except a stored input (see WIDGET STATE).
-The caller passes a value on every frame.
+A caller that passes undefined gets the input's own value back: the input
+keeps what it holds, which starts as null.
 
 null is a value -- database null, no value at all. Every input accepts null
 and returns it, and the user clears an input to null with the Delete key
@@ -193,9 +200,11 @@ box that was given nothing. Drawing null differently is not done yet,
 except in a slider: with no value it draws its thumb in the middle.
 
 An input ignores the caller's value on any frame in which the user
-interacted with it, and takes the caller's value on every other frame; a
-stored input takes the stored value instead, or its default while the store
-has none. It returns what it holds, on every call.
+interacted with it, and takes the caller's value on every other frame; an
+input bound to a saved-value model takes its accepted value, except while
+preserving an invalid edit (see WIDGET STATE).
+It returns what it holds while that is valid and undefined while it is not,
+on every call, and ui.value(id) answers the same.
 
 The user interacted when the widget itself read an input event addressed to
 it -- a click, a drag, a key -- or when the browser wrote into it between
@@ -203,12 +212,12 @@ frames. A gesture that leaves the value where it was still counts: dragging
 a slider already at its maximum keeps the caller out for that frame, so the
 pointer does not lose the thumb.
 
-A widget decides that for itself. A widget built out of others asks each
-child instead of deciding on the child's behalf: ui.input_value(id) gives
-what the user made of that widget this pass, or nothing when the user did
-nothing to it. The widget takes the value from whichever child reports one,
-and then reports an interaction of its own, so the answer cascades outward
-to its own caller.
+A widget decides that for itself. A widget built out of others asks each child
+instead of deciding on the child's behalf: ui.interaction_value(id) gives what
+the user made of that widget this pass, or nothing when the user did nothing
+to it. The widget takes the value from whichever child reports one, and then
+reports an interaction of its own, so the answer cascades outward to its own
+caller.
 
 The cascade runs the other way too. A widget built out of others passes each
 child the child's own value back, unchanged, unless the widget's value
@@ -223,11 +232,12 @@ So a caller cannot correct a value while the user is acting on it. A
 validation, a clamp, or a value arriving from elsewhere takes effect on the
 first frame after the user stops.
 
-A value the caller passes comes back unchanged. An input does not clamp,
-round or otherwise normalize it: a slider value outside its range draws the
-thumb pinned at one end and returns the value it was given. An input
-normalizes only where showing the value as given would leave it unusable --
-a list index with no row to point at is one of those.
+A valid value the caller passes comes back unchanged; an invalid one comes
+back as undefined. An input does not clamp, round or otherwise normalize it:
+a slider value outside its range draws the thumb pinned at one end and
+returns the value it was given. An input normalizes only where showing the
+value as given would leave it unusable -- a list index with no row to point
+at is one of those.
 
 Where an input normalizes, it changes only what it draws and what it uses to
 start the next interaction -- never what it stores as the value or returns
@@ -235,11 +245,12 @@ from ui.value(id). A list with an out-of-range index highlights no row and
 clamps arrow-key movement from that index, but keeps returning the caller's
 index unchanged until the user picks a row.
 
-An input accepts, displays and returns a value it cannot interpret. Text
-that does not parse comes back as the text the user typed, not as a number
-or as a substitute for one. Nothing discards what the user is in the middle
-of writing and nothing corrects it. Validation marks a value invalid
-somewhere else, and the model stores it as it is.
+An input accepts and displays a value it cannot interpret, and keeps it: text
+that does not parse stays in the box as the user typed it, and
+ui.interaction_value(id) gives it on the frame the user typed it. The input
+returns undefined for it, and so does ui.value(id). Nothing discards what the
+user is in the middle of writing and nothing corrects it. A nav stores invalid
+cell edits. A saved-value model accepts only valid writes.
 
 Reading an input before it builds gives what the user has done to it so far.
 That is the answer a reader wants, and the only one that does not change

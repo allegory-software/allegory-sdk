@@ -70,8 +70,7 @@ function app_dock_app_tab(tab) {
 	v(0, sp2(), 's', 't')
 		text('', tab.kind+': '+tab.label)
 		if (tab.kind == 'notes') {
-			saved_value(tab_id+'.text', null)
-			input(tab_id+'.text', null)
+			input('app_dock.tab.'+tab.id+'.text')
 		}
 	end_v()
 }

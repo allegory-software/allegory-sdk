@@ -44,7 +44,29 @@ ui.db_tables = function(id) {
 }
 
 ui.db_rows = function(id) {
-	build_table_rows(id, ui.find_master_nav('db_explorer_tables')?.id)
+	let toggle_id = id+'.master.table'
+	let rowset_name = tables_opt.rowset_name
+	let picked_id = ui.interaction_value(toggle_id) // nav id
+	if (picked_id !== undefined)
+		ui.set_master_id(id, 'table', picked_id)
+	let master_id = ui.master_id(id, 'table', rowset_name)
+	let has_master_toggle = ui.has_master_toggle(rowset_name)
+	if (ui.in_dock_tab() && has_master_toggle) {
+		ui.open_tab_strip()
+		ui.pr(ui.sp())
+		ui.h(0, ui.sp(), 'r', 'c')
+			ui.master_toggle(toggle_id, rowset_name, master_id, 'Table')
+		ui.end_h()
+		ui.close_tab_strip()
+	}
+	ui.v()
+		if (!ui.in_dock_tab() && has_master_toggle) {
+			ui.h(0, ui.sp(), 'l', 'c')
+				ui.master_toggle(toggle_id, rowset_name, master_id, 'Table')
+			ui.end_h()
+		}
+		build_table_rows(id, master_id)
+	ui.end_v()
 }
 
 ui.db_explorer = function(id) {

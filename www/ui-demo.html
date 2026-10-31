@@ -2,6 +2,7 @@
 <html>
 <head>
 <meta name="darkreader-lock">
+<link rel="icon" href="data:,">
 <script src=glue.js></script>
 <script src=ui.js></script>
 <script src=ui_icon_defs.js></script>
@@ -42,20 +43,21 @@ ui.save_unsaved_state = function(saved_state) {
 	save('ui_saved_state', json(saved_state))
 }
 let demo_toggle_field = ui.create_field({type: 'bool', not_null: true})
-ui.saved_value('btn_light'  , ui.screen_theme() == 'light', demo_toggle_field)
-ui.saved_value('btn_debug'  , false, demo_toggle_field)
-ui.saved_value('btn_tui'    , false, demo_toggle_field)
-ui.saved_value('btn_animate', false, demo_toggle_field)
-ui.saved_value('btn_pack'   , false, demo_toggle_field)
-ui.saved_value('btn_panes'  , true , demo_toggle_field)
-ui.set_screen_theme(ui.value('btn_light') ? 'light' : 'dark')
+ui.saved_value_def('btn_light'  , ui.screen_theme() == 'light',
+	demo_toggle_field)
+ui.saved_value_def('btn_debug'  , false, demo_toggle_field)
+ui.saved_value_def('btn_tui'    , false, demo_toggle_field)
+ui.saved_value_def('btn_animate', false, demo_toggle_field)
+ui.saved_value_def('btn_pack'   , false, demo_toggle_field)
+ui.saved_value_def('btn_panes'  , true , demo_toggle_field)
+ui.set_screen_theme(ui.saved_value('btn_light') ? 'light' : 'dark')
 
-ui.DEBUG      = ui.value('btn_debug')
-ui.TUI        = ui.value('btn_tui')
-ui.saved_value('demos_list', 'grid')
+ui.DEBUG      = ui.saved_value('btn_debug')
+ui.TUI        = ui.saved_value('btn_tui')
+ui.saved_value_def('demos_list', 'grid', ui.create_field())
 let url_demo = location.search.match('demo=([^&]+)')?.[1]
 if (url_demo)
-	attr(ui.saved_state, 'demos_list').value = url_demo
+	ui.set_saved_value('demos_list', url_demo)
 let remote_demo = location.search.match('remote=([^&]+)')?.[1]
 
 ui.focus('demos_list')
@@ -219,8 +221,7 @@ function build_dock1_tab(tab) {
 		ui.v(0, ui.sp2(), 's', 't')
 			ui.text('', tab.kind+': '+tab.label)
 			if (tab.kind == 'notes') {
-				ui.saved_value(tab_id+'.text', null)
-				ui.input(tab_id+'.text', null)
+				ui.input(tab_id+'.text')
 			}
 		ui.end_v()
 	} else {
@@ -662,8 +663,8 @@ let grid_config_case_field = ui.create_field({
 	],
 	not_null: true,
 })
-ui.saved_value('grid_config_source', 'client', grid_config_source_field)
-ui.saved_value('grid_config_case', 'mixed', grid_config_case_field)
+ui.saved_value_def('grid_config_source', 'client', grid_config_source_field)
+ui.saved_value_def('grid_config_case', 'mixed', grid_config_case_field)
 let grid_config_label_pos_field = ui.create_field({
 	type: 'enum',
 	enum_values: ['left', 'left-right-align', 'top', 'hide'],
@@ -688,32 +689,57 @@ let grid_config_cols_field = ui.create_field({
 	not_null: true,
 })
 
-ui.saved_value('grid_config_tree', true)
-ui.saved_value('grid_config_auto_expand', false)
-ui.saved_value('grid_config_vertical_layout', false)
-ui.saved_value('grid_config_filter_bar', false)
-ui.saved_value('grid_config_can_focus_cells', true)
-ui.saved_value('grid_config_can_select_multiple', true)
-ui.saved_value('grid_config_can_select_non_siblings', true)
-ui.saved_value('grid_config_can_change_parent', true)
-ui.saved_value('grid_config_auto_focus_first_cell', true)
-ui.saved_value('grid_config_enter_edit_on_click', false)
-ui.saved_value('grid_config_enter_edit_on_click_focused', false)
-ui.saved_value('grid_config_auto_jump_cells', true)
-ui.saved_value('grid_config_stay_in_edit_mode', true)
-ui.saved_value('grid_config_auto_advance_row', false)
-ui.saved_value('grid_config_exit_edit_on_escape', true)
-ui.saved_value('grid_config_validate_on_load', true)
-ui.saved_value('grid_config_readonly', false)
-ui.saved_value('grid_config_label_pos', 'left', grid_config_label_pos_field)
-ui.saved_value('grid_config_split_hv', 'h', grid_config_split_field)
-ui.saved_value('grid_config_rows', 1000, grid_config_rows_field)
-ui.saved_value('grid_config_cols', grid_demo_base_field_count,
+let grid_config_toggle_field = ui.create_field({type: 'bool'}) // shared field
+let grid_config_tree_depth_field = ui.create_field({ // slider field
+	type: 'number',
+	min: 0,
+	max: 8,
+	decimals: 0,
+	slider_markers: false,
+})
+
+ui.saved_value_def('grid_config_tree', true, grid_config_toggle_field)
+ui.saved_value_def('grid_config_auto_expand', false, grid_config_toggle_field)
+ui.saved_value_def('grid_config_vertical_layout', false,
+	grid_config_toggle_field)
+ui.saved_value_def('grid_config_filter_bar', false, grid_config_toggle_field)
+ui.saved_value_def('grid_config_can_focus_cells', true,
+	grid_config_toggle_field)
+ui.saved_value_def('grid_config_can_select_multiple', true,
+	grid_config_toggle_field)
+ui.saved_value_def('grid_config_can_select_non_siblings', true,
+	grid_config_toggle_field)
+ui.saved_value_def('grid_config_can_change_parent', true,
+	grid_config_toggle_field)
+ui.saved_value_def('grid_config_auto_focus_first_cell', true,
+	grid_config_toggle_field)
+ui.saved_value_def('grid_config_enter_edit_on_click', false,
+	grid_config_toggle_field)
+ui.saved_value_def('grid_config_enter_edit_on_click_focused', false,
+	grid_config_toggle_field)
+ui.saved_value_def('grid_config_auto_jump_cells', true,
+	grid_config_toggle_field)
+ui.saved_value_def('grid_config_stay_in_edit_mode', true,
+	grid_config_toggle_field)
+ui.saved_value_def('grid_config_auto_advance_row', false,
+	grid_config_toggle_field)
+ui.saved_value_def('grid_config_exit_edit_on_escape', true,
+	grid_config_toggle_field)
+ui.saved_value_def('grid_config_validate_on_load', true,
+	grid_config_toggle_field)
+ui.saved_value_def('grid_config_readonly', false, grid_config_toggle_field)
+ui.saved_value_def('grid_config_label_pos', 'left',
+	grid_config_label_pos_field)
+ui.saved_value_def('grid_config_split_hv', 'h', grid_config_split_field)
+ui.saved_value_def('grid_config_rows', 1000, grid_config_rows_field)
+ui.saved_value_def('grid_config_cols', grid_demo_base_field_count,
 	grid_config_cols_field)
-ui.saved_value('grid_config_tree_depth_slider', 4)
-ui.saved_value('grid_config_first_col', grid_demo_first_cols[0],
+ui.saved_value_def('grid_config_tree_depth_slider', 4,
+	grid_config_tree_depth_field)
+ui.saved_value_def('grid_config_first_col', grid_demo_first_cols[0],
 	grid_demo_first_col_field)
-ui.saved_value('grid_config_fast_path', ui.GRID_FAST_PATH)
+ui.saved_value_def('grid_config_fast_path', ui.GRID_FAST_PATH,
+	grid_config_toggle_field)
 
 let grid_config_detail_rows = []
 for (let master_id = 1; master_id <= 20; master_id++)
@@ -885,8 +911,7 @@ function prepare_grid_typed_changes(nav, test_case) {
 }
 
 demos.grid = function() {
-let state = ui.state('grid_config_state')
-let source = ui.value('grid_config_source')
+let source = ui.saved_value('grid_config_source')
 let is_server = source != 'client'
 let test_set = grid_test_sets[source] // server test rowset, or undefined
 let grid_id = source == 'server' ? 'grid_config_server_grid'
@@ -896,30 +921,22 @@ let input_opt = source == 'server' ? grid_save_input_opt
 	: source == 'typed' ? grid_typed_input_opt
 	: grid_config_input_opt
 
-let row_count = ui.value('grid_config_rows')
+let row_count = ui.saved_value('grid_config_rows')
 let col_max = max(grid_demo_base_field_count,
 	floor(1000000 / row_count))
-let col_count = ui.value('grid_config_cols')
+let col_count = ui.saved_value('grid_config_cols')
 if (col_count > col_max) {
 	col_count = col_max
 	ui.set_saved_value('grid_config_cols', col_count)
 }
 
 let tree_depth_slider_id = 'grid_config_tree_depth_slider'
-state.tree_depth_slider_field ??= ui.create_field({
-	type: 'number',
-	min: 0,
-	max: 8,
-	decimals: 0,
-	slider_markers: false,
-})
-let tree_depth_slider_field = state.tree_depth_slider_field
-let tree_depth = round(ui.value(tree_depth_slider_id))
+let tree_depth = round(ui.saved_value(tree_depth_slider_id))
 
-let first_col = is_server ? 'text' : ui.value('grid_config_first_col')
-let readonly = ui.value('grid_config_readonly')
-let auto_expand = ui.value('grid_config_auto_expand')
-let filter_bar_visible = ui.value('grid_config_filter_bar')
+let first_col = is_server ? 'text' : ui.saved_value('grid_config_first_col')
+let readonly = ui.saved_value('grid_config_readonly')
+let auto_expand = ui.saved_value('grid_config_auto_expand')
+let filter_bar_visible = ui.saved_value('grid_config_filter_bar')
 
 if (!is_server && (!ui.rowsets.grid_config_rowset
 	|| ui.state_of('grid_config_recreate', 'state') == 'click')) {
@@ -933,23 +950,25 @@ if (!is_server && (!ui.rowsets.grid_config_rowset
 
 let grid_opt = {
 	rowset_name: is_server ? test_set.rowset_name : 'grid_config_rowset',
-	flat: !ui.value('grid_config_tree'),
+	flat: !ui.saved_value('grid_config_tree'),
 	tree_col: first_col,
-	cell_select_mode: ui.value('grid_config_can_focus_cells'),
-	can_select_multiple: ui.value('grid_config_can_select_multiple'),
-	can_select_non_siblings: ui.value('grid_config_can_select_non_siblings'),
-	can_change_parent: ui.value('grid_config_can_change_parent'),
-	auto_focus_first_cell: ui.value('grid_config_auto_focus_first_cell'),
-	enter_edit_on_click: ui.value('grid_config_enter_edit_on_click'),
+	cell_select_mode: ui.saved_value('grid_config_can_focus_cells'),
+	can_select_multiple: ui.saved_value('grid_config_can_select_multiple'),
+	can_select_non_siblings:
+		ui.saved_value('grid_config_can_select_non_siblings'),
+	can_change_parent: ui.saved_value('grid_config_can_change_parent'),
+	auto_focus_first_cell:
+		ui.saved_value('grid_config_auto_focus_first_cell'),
+	enter_edit_on_click: ui.saved_value('grid_config_enter_edit_on_click'),
 	enter_edit_on_click_focused:
-		ui.value('grid_config_enter_edit_on_click_focused'),
-	auto_jump_cells: ui.value('grid_config_auto_jump_cells'),
-	stay_in_edit_mode: ui.value('grid_config_stay_in_edit_mode'),
-	auto_advance_row: ui.value('grid_config_auto_advance_row'),
-	exit_edit_on_escape: ui.value('grid_config_exit_edit_on_escape'),
-	validate_on_load: ui.value('grid_config_validate_on_load'),
+		ui.saved_value('grid_config_enter_edit_on_click_focused'),
+	auto_jump_cells: ui.saved_value('grid_config_auto_jump_cells'),
+	stay_in_edit_mode: ui.saved_value('grid_config_stay_in_edit_mode'),
+	auto_advance_row: ui.saved_value('grid_config_auto_advance_row'),
+	exit_edit_on_escape: ui.saved_value('grid_config_exit_edit_on_escape'),
+	validate_on_load: ui.saved_value('grid_config_validate_on_load'),
 	can_change_rows: !readonly,
-	vertical_layout: ui.value('grid_config_vertical_layout'),
+	vertical_layout: ui.saved_value('grid_config_vertical_layout'),
 	filter_bar_visible: filter_bar_visible,
 }
 let grid_nav = ui.state_of(grid_id, 'nav')
@@ -1032,7 +1051,7 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 		if (is_server) {
 			ui.list_dropdown('grid_config_case',
 				grid_config_case_field.enum_values, null, grid_config_case_field)
-			let test_case = ui.value('grid_config_case')
+			let test_case = ui.saved_value('grid_config_case')
 			let can_prepare = grid_nav != null
 				&& is_grid_test_data_reset(grid_nav, test_set)
 				&& (test_case != 'same typed key' || source == 'typed')
@@ -1065,7 +1084,8 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 
 			ui.h(1, ui.sp1())
 				ui.text('', 'Tree depth', 0, 'l')
-				ui.slider(tree_depth_slider_id, null, tree_depth_slider_field)
+				ui.slider(tree_depth_slider_id, null,
+					grid_config_tree_depth_field)
 				ui.text('', tree_depth, 2, 'r')
 			ui.end_h()
 
@@ -2283,10 +2303,10 @@ demos_array = keys(demos)
 let is_packing = false
 ui.main = function() {
 
-	ui.GRID_FAST_PATH = ui.value('grid_config_fast_path')
-	ui.DEBUG = ui.value('btn_debug')
-	ui.set_tui(ui.value('btn_tui'))
-	let lights = ui.value('btn_light')
+	ui.GRID_FAST_PATH = ui.saved_value('grid_config_fast_path')
+	ui.DEBUG = ui.saved_value('btn_debug')
+	ui.set_tui(ui.saved_value('btn_tui'))
+	let lights = ui.saved_value('btn_light')
 	if (lights != (ui.screen_theme() == 'light'))
 		ui.set_screen_theme(lights ? 'light' : 'dark')
 
@@ -2355,7 +2375,7 @@ ui.main = function() {
 						ui.toggle_button('btn_panes', null, 'panes',
 							demo_toggle_field, 0)
 					ui.end_h()
-					ui.debug_pane(ui.value('btn_panes'))
+					ui.debug_pane(ui.saved_value('btn_panes'))
 				ui.end_v()
 			}
 

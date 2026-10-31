@@ -734,32 +734,50 @@ function init(id, e) {
 		ui.end_stack()
 	}
 
-	// param bar: an input for each param that no binding fills, and a reload
-	// button that applies the values typed in the inputs.
+	// param bar: the master toggles outside a dock tab, an input for each
+	// param that no binding fills, and a reload button that applies the
+	// values typed in the inputs.
 	let param_bar_vals = obj() // {param name -> value typed in the param bar}
-	function build_param_bar() {
+	function build_param_bar(has_inputs, has_master_toggles) {
 		ui.h(0, sp, 'l', 'c')
 			ui.p(sp, ui.sp05())
 			ui.bb('bg1', null, 'b', 'intense')
+			if (has_master_toggles)
+				build_master_toggles()
+			let has_invalid = false // a param input holds an invalid value
 			for (let field of e.param_bar_fields) {
 				let name = field.name
 				if (e.param_sources[name])
 					continue
+				let param_id = id+'.param.'+name
 				if (!(name in param_bar_vals))
 					param_bar_vals[name] = e.param_bar_val(name)
-				param_bar_vals[name] = ui.field_input(id+'.param.'+name,
-					param_bar_vals[name], {field: field, label_pos: 'left'})
+				if (ui.field_input(param_id, param_bar_vals[name],
+						{field: field, label_pos: 'left'}) === undefined)
+					has_invalid = true
+				// user's value this pass, or nothing
+				let v = ui.interaction_value(param_id)
+				if (v !== undefined)
+					param_bar_vals[name] = v
 			}
-			if (ui.button(id+'.param_reload', 'reload', null, 0))
-				e.set_param_bar_vals(param_bar_vals)
+			if (has_inputs)
+				if (ui.button(id+'.param_reload', 'reload', null, 0,
+						null, null, null, has_invalid))
+					e.set_param_bar_vals(param_bar_vals)
 		ui.end_h()
 	}
 
-	function is_param_bar_not_empty() {
+	function has_param_inputs() {
 		for (let field of e.param_bar_fields)
 			if (!e.param_sources[field.name])
 				return true
 		return false
+	}
+
+	function build_master_toggles() {
+		for (let param in e.master_rowset_names)
+			ui.master_toggle(id+'.master.'+param, e.master_rowset_names[param],
+				e.param_sources[param], e.params[param].label ?? param)
 	}
 
 	function indent_offset(indent) {
@@ -899,7 +917,7 @@ function init(id, e) {
 		if (full_width && field.builds_text) {
 			let s = e.cell_text(ri, field.fi)
 			if (s) {
-				cell_w = max(w, ceil(ui.measure_text(cx, s).width) + pad_l + pad_r)
+				cell_w = max(w, ceil(ui.measure_text(s).width) + pad_l + pad_r)
 				let overflow = cell_w - w
 				cell_x = x - (
 					align == 'center' ? round(overflow / 2) :
@@ -1242,19 +1260,25 @@ function init(id, e) {
 
 		let s = ui.state(id)
 		s.picked = false
-		s.input_value = undefined
+		s.interaction_value = undefined
 		let has_input = false
 
 		if (is_edit_built()) {
-			let value = ui.input_value(editor_id)
+			let value = ui.interaction_value(editor_id)
 			if (value !== undefined)
 				e.set_cell_val(edit_ri, edit_field.fi, value, {input: e})
+		}
+
+		for (let param in e.master_rowset_names) {
+			let master_id = ui.interaction_value(id+'.master.'+param)
+			if (master_id !== undefined)
+				ui.set_master_id(e.id, param, master_id)
 		}
 
 		let filter_focused_field = null
 		if (e.filter_bar_visible && e.can_filter())
 			for (let field of e.visible_fields) {
-				let filter_text = ui.input_value(filter_box_id(field))
+				let filter_text = ui.interaction_value(filter_box_id(field))
 				if (filter_text !== undefined)
 					e.set_col_filter(field.fi, filter_text)
 				if (ui.focused(filter_box_id(field)))
@@ -1929,7 +1953,7 @@ function init(id, e) {
 		if (keydown('delete')) {
 
 			if (e.is_picker) {
-				s.input_value = null
+				s.interaction_value = null
 				return false
 			}
 
@@ -2014,7 +2038,7 @@ function init(id, e) {
 		}
 
 		if (e.is_picker && has_input)
-			s.input_value = e.focused_ri
+			s.interaction_value = e.focused_ri
 
 		if (!ui.window_focused() || ui.window_focusing)
 			e.exit_edit()
@@ -2136,10 +2160,22 @@ function init(id, e) {
 		// build ---------------------------------------------------------------
 
 		ui.stack(id, fr, align, valign)
+		let has_master_toggles = ui.has_master_toggles(e)
+		if (ui.in_dock_tab() && has_master_toggles) {
+			ui.open_tab_strip()
+			ui.pr(sp)
+			ui.h(0, sp, 'r', 'c')
+				build_master_toggles()
+			ui.end_h()
+			ui.close_tab_strip()
+		}
 		ui.v(1, 0, 's', 's')
 
-			if (is_param_bar_not_empty())
-				build_param_bar()
+			let has_inputs = has_param_inputs() // the param bar shows inputs
+			// the param bar shows the master toggles
+			let has_bar_toggles = !ui.in_dock_tab() && has_master_toggles
+			if (has_inputs || has_bar_toggles)
+				build_param_bar(has_inputs, has_bar_toggles)
 
 		ui.hv(horiz ? 'v' : 'h', 1, 0, 's', 's')
 
@@ -2411,9 +2447,9 @@ function create_grid(id, opt) {
 		ui.on_free(id, nav.free)
 	}
 	init(id, nav)
+	ui.state(id).nav = nav // the grid's nav
 	return nav
 }
 ui.grid = ui.stateful_widget(create_grid)
 
 }()) // module function
-	ui.state(id).nav = nav // the grid's nav

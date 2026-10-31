@@ -1,3 +1,5 @@
+(function() {
+
 const {
 	get, post, json_arg,
 } = glue
@@ -21,7 +23,7 @@ ui.login_window = function() {
 		s.request = get('/user.json', function(current_user) {
 			s.request = null
 			user = current_user
-			ui.saved_state = json_arg(current_user.ui_state)
+			ui.load_saved_state(json_arg(current_user.ui_state))
 			ui.animate()
 		}, function(error, type) {
 			if (type == 'abort') return
@@ -102,7 +104,7 @@ ui.login_window = function() {
 						function(new_user) {
 							s.request = null
 							user = new_user
-							ui.saved_state = json_arg(new_user.ui_state)
+							ui.load_saved_state(json_arg(new_user.ui_state))
 							s.email = null
 							ui.animate()
 						},
@@ -137,3 +139,5 @@ ui.logout = function() {
 		alert(e)
 	})
 }
+
+}())

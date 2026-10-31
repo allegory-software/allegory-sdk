@@ -21,6 +21,9 @@ BEHAVIOR:
 - ui-demo set_grid_config_null() calls nav.focused_row and nav.optfld(),
 	which ui_nav.js doesn't have, so the grid demo's "Set null" button
 	throws.
+- enum_list cells store a bitmask where bit i means enum_values[i], so rows
+	saved before enum_values change order or lose an item name other items.
+	Stored inputs save item values instead (ui.js save_input_value).
 
 FOCUS BUGS:
 - list_dropdown and color_input register their control outside the dropdown
@@ -65,7 +68,6 @@ INPUTS
 
 - compact vs normal form
 - smart round corners
-- review/refactor: validation state kept in field.validator
 
 - LATER: label inside box / no_box arg for composed boxes
 	- problem: for dropdown picker to be anchored such that value row
@@ -125,6 +127,15 @@ DOCK
 
 UI API
 ------------------------------------------------------------------------------
+- use undefined for "nothing found" in API returns; use true/false for
+	yes/no queries. Preserve null input values and stored null values.
+	- captured, drag: return undefined when there is no capture.
+	- clicked, rightclicked, dblclicked: return undefined when not clicked.
+	- menu, menu_button, bare_menu_button: return undefined when not picked.
+	- action_checked: return undefined for no checked state, false for unchecked.
+	- hsplit, vsplit, hvsplit: return undefined for an absent size.
+	- focused, focusing, focus_inside, begin_section: always return booleans.
+	- update the API return documentation to match.
 - text selection: drag-select with mouse
 - drag & drop between windows
 - negative margins?

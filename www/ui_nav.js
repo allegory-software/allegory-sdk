@@ -20,6 +20,15 @@ Nav config:
 	label          string       label of the nav as a master in a detail's
 	                            toggle; default: the rowset's label
 
+Master binding:
+
+	nav.master_rowset_names -> {param name -> rowset name} | null
+	ui.master_id(id, param, rowset_name) -> master_id | undefined
+	ui.set_master_id(id, param, master_id)
+	ui.has_master_toggle(rowset_name) -> t|f
+	ui.has_master_toggles(nav) -> t|f
+	ui.master_toggle(id, rowset_name, master_id, label)
+
 Access options:
 	per-nav and/or per-rowset:
 		can_{add|remove|change|move}_rows, can_change_parent
@@ -420,7 +429,7 @@ const ui = window.ui
 const {
 	assert, warn, warn_if,
 	isfunc, isstr, isarray, isobj,
-	words, obj, map, empty, empty_array, keys, insert,
+	words, obj, map, empty, empty_array, keys, insert, remove_value,
 	dyn_u32arr,
 	num, floor, abs, min, max, clamp, strict_sign,
 	time, month, year, month_of, year_of,
@@ -722,11 +731,77 @@ let listen_rowset_events = memoize(function() {
 // navs that can be masters: live non-picker navs, in creation order.
 let rowset_navs = {} // {rowset_name -> [nav, ...]}
 
-// the first not-hidden nav with rowset_name.
-ui.find_master_nav = function(rowset_name) {
+// the preferred not-hidden nav with rowset_name, else the last one.
+function find_master_nav(rowset_name, preferred_id) {
+	let navs = rowset_navs[rowset_name] ?? empty_array
+	let last_nav
+	for (let i = navs.length-1; i >= 0; i--) { // nav index
+		let nav = navs[i]
+		if (ui.is_state_hidden(nav.id))
+			continue
+		last_nav ??= nav
+		if (!preferred_id || nav.id == preferred_id)
+			return nav
+	}
+	return last_nav
+}
+
+ui.master_id = function(id, param, rowset_name) {
+	let picked_id = ui.saved_state[id+'.masters']?.[param] // nav id
+	return find_master_nav(rowset_name, picked_id)?.id
+}
+
+ui.set_master_id = function(id, param, master_id) {
+	ui.save_state(id+'.masters', param, master_id)
+}
+
+ui.has_master_toggle = function(rowset_name) {
+	let n = 0 // visible master count
 	for (let nav of rowset_navs[rowset_name] ?? empty_array)
 		if (!ui.is_state_hidden(nav.id))
-			return nav
+			n++
+	return n >= 2
+}
+
+ui.has_master_toggles = function(nav) {
+	for (let param in nav.master_rowset_names)
+		if (ui.has_master_toggle(nav.master_rowset_names[param]))
+			return true
+	return false
+}
+
+ui.master_toggle = function(id, rowset_name, master_id, label) {
+	if (!ui.has_master_toggle(rowset_name))
+		return
+	let navs = rowset_navs[rowset_name] ?? empty_array
+	let field = ui.input_field(id) // enum field of the last build, or nothing
+	let has_changed = !field || field.label != label
+	let n = 0 // visible master count
+	for (let nav of navs) {
+		if (ui.is_state_hidden(nav.id))
+			continue
+		if (field?.enum_values[n] != nav.id
+			|| field.enum_labels[nav.id]
+				!= (nav.label ?? nav.rowset_label ?? nav.id))
+			has_changed = true
+		n++
+	}
+	if (has_changed || field.enum_values.length != n) {
+		let values = [] // [master nav id, ...]
+		let labels = obj() // {master nav id -> label}
+		for (let nav of navs) {
+			if (ui.is_state_hidden(nav.id))
+				continue
+			values.push(nav.id)
+			labels[nav.id] = nav.label ?? nav.rowset_label ?? nav.id
+		}
+		field = ui.create_field({
+			type: 'enum', label: label,
+			enum_values: values, enum_labels: labels, not_null: true,
+		}, id)
+	}
+	ui.label(id, label, 0)
+	ui.enum_toggle(id, master_id, field)
 }
 
 //// NAV ---------------------------------------------------------------------
@@ -836,6 +911,7 @@ ui.nav = function(id, opt) {
 	// params
 	e.params = null // {param->def} after rowset is loaded
 	e.param_bar_fields = null // [field, ...]: fields of the param bar's inputs
+	e.master_rowset_names = null // {param name -> rowset name}
 	e.param_bar_vals ??= empty // {param->val}; param bar values
 	let param_vals = null // {param->[val, ...]}
 	let param_source_vals = obj() // {input_id->val | nav_id->sel_change_n}
@@ -2217,13 +2293,13 @@ ui.nav = function(id, opt) {
 		return json(param_vals)
 	}
 
-	// -> {param name -> [val, ...]} from the bindings: an input's value, or
+	// -> {PARAM -> [val, ...]} from the bindings: an input's value, or
 	// the param's lookup_cols, else the pk, of a master nav's rows: its
 	// focused row for an accept_many = false param, otherwise its selected
 	// rows, the focused row first. Then the values applied from the param
 	// bar, for the params not bound.
 	function read_param_vals() {
-		let lists = obj() // {param name -> [val, ...]}
+		let param_vals = obj() // {param name -> [val, ...]}
 		for (let name in e.param_sources) {
 			let id = e.param_sources[name] // input id or master nav id
 			let for_cols = e.params?.[name].for_cols // 'COL ...', or undefined
@@ -2238,14 +2314,12 @@ ui.nav = function(id, opt) {
 			if (master?.ready && key_fields.includes(undefined)) {
 				warn_once(e.id, 'param', name, 'has lookup_cols', lookup_cols,
 					'missing in master', id)
-				lists[name] = []
+				param_vals[name] = []
 			// master key and param cols differ: warn and supply no values.
-			} else if (master && e.params && master.ready
-				&& key_fields.length != n
-			) {
+			} else if (master && e.params && master.ready && key_fields.length != n) {
 				warn_once(e.id, 'param', name, 'has', n, 'cols but master', id,
 					'has', key_fields.length, 'key cols')
-				lists[name] = []
+				param_vals[name] = []
 			} else if (master) {
 				// a new master row has no saved key: it supplies no values.
 				let sel_ris = [] // selected master rows, the focused row first
@@ -2268,7 +2342,7 @@ ui.nav = function(id, opt) {
 				for (let ri of ris)
 					for (let field of key_fields)
 						vals.push(master.cell_val(ri, field.name))
-				lists[name] = vals
+				param_vals[name] = vals
 			} else {
 				// an input or a master that isn't built yet supplies no values.
 				let v = ui.value(id)
@@ -2277,23 +2351,31 @@ ui.nav = function(id, opt) {
 				if (is_misbound)
 					warn_once(e.id, 'input', id, 'is bound to param', name,
 						'which has', n, 'cols')
-				lists[name] = v !== undefined && !is_misbound ? [v] : []
+				param_vals[name] = v !== undefined && !is_misbound ? [v] : []
 			}
 		}
 		let saved_vals = ui.saved_state[e.id+'.params'] // {param name -> val}
 		for (let name in saved_vals)
-			lists[name] ??= [saved_vals[name]]
+			param_vals[name] ??= param_bar_list(name, saved_vals[name])
 		for (let name in e.param_bar_vals)
-			lists[name] ??= [e.param_bar_vals[name]]
-		return lists
+			param_vals[name] ??= param_bar_list(name, e.param_bar_vals[name])
+		return param_vals
+	}
+
+	function param_bar_list(param_name, v) {
+		let field = e.param_bar_fields?.find(field => field.name == param_name)
+		if (!field)
+			return [v]
+		field.validation ??= field.validator.create_output() // validator out
+		return field.validator.validate(v, field.validation) ? [v] : []
 	}
 
 	// force: reload even when the lists didn't change.
 	function reload_with_params(force) {
-		let lists = read_param_vals()
-		if (!force && json(lists) == json(param_vals))
+		let param_vals1 = read_param_vals()
+		if (!force && json(param_vals1) == json(param_vals))
 			return
-		param_vals = lists
+		param_vals = param_vals1
 		e.exit_edit()
 		if (is_server_rowset)
 			e.reload()
@@ -2314,22 +2396,18 @@ ui.nav = function(id, opt) {
 	}
 
 	// Bind each param with lookup_rowset_name and no app binding to a master
-	// found by ui.find_master_nav(). -> true if a binding changed.
+	// selected from the available masters. -> true if a binding changed.
 	function bind_master_params() {
 		let has_changed = false
-		for (let name in e.params) {
-			let def = e.params[name]
-			let bound_id = e.param_sources[name] // last binding, or undefined
-			if (!def.lookup_rowset_name || e.param_bindings?.[bound_id] == name)
-				continue
-			// a nav cannot have a master with the same rowset (for now).
-			let master_id = def.lookup_rowset_name != e.rowset_name
-				? ui.find_master_nav(def.lookup_rowset_name)?.id : undefined
+		for (let param in e.master_rowset_names) {
+			let bound_id = e.param_sources[param] // last binding, or undefined
+			let master_id = ui.master_id(e.id, param,
+				e.master_rowset_names[param])
 			if (master_id != bound_id) {
 				if (master_id)
-					e.param_sources[name] = master_id
+					e.param_sources[param] = master_id
 				else
-					delete e.param_sources[name]
+					delete e.param_sources[param]
 				has_changed = true
 			}
 		}
@@ -2811,13 +2889,12 @@ ui.nav = function(id, opt) {
 	// return null if valid, otherwise copy the validator's results into
 	// [result1, ...] with .failed set to true.
 	function validate_cell(field, v) {
-		if (v === undefined && field.has_server_default)
-			return null
-		if (field.validator.validate(v, 'failed'))
+		field.validation ??= field.validator.create_output() // validator out
+		if (field.validator.validate(v, field.validation, 'failed'))
 			return null
 		let errors = []
 		errors.failed = true
-		for (let result of field.validator.results)
+		for (let result of field.validation.results)
 			errors.push(assign({}, result))
 		return errors
 	}
@@ -2845,7 +2922,8 @@ ui.nav = function(id, opt) {
 			for (let field of e.all_fields) {
 				let fi = field.fi
 				let v = e.cell_input_val(ri, fi)
-				let errors = validate_cell(field, v)
+				let errors = v === undefined && field.has_server_default
+					? null : validate_cell(field, v)
 				set_cell_errors(ri, fi, errors)
 			}
 		update_invalid(ri)
@@ -2898,8 +2976,8 @@ ui.nav = function(id, opt) {
 		// validate and parse v. Stop if it equals the current value.
 		let field = e.all_fields[fi]
 		let errors = validate_cell(field, v)
-		if (!field.validator.parse_failed)
-			v = field.validator.value
+		if (!field.validation.parse_failed)
+			v = field.validation.value
 		if (v === e.cell_input_val(ri, fi))
 			return false
 
@@ -3330,14 +3408,14 @@ ui.nav = function(id, opt) {
 			? col_val(tree_parent_ri, e.id_field.fi) : null
 		let k = rows.length
 		let ris = new Uint32Array(k) // the new rows' slots
-		let param_vals = param_col_vals() // {col: val}
+		let col_vals = param_col_vals() // {col: val}
 		for (let i = 0; i < k; i++) {
 			let ri = alloc_slot()
 			ris[i] = ri
 			for (let field of e.all_fields) {
 				let v = rows[i]?.[field.fi]
 				if (v === undefined)
-					v = param_vals[field.name]
+					v = col_vals[field.name]
 				if (v === undefined) {
 					v = field.client_default
 					if (isfunc(v))
@@ -4222,8 +4300,7 @@ ui.nav = function(id, opt) {
 		let m = 0 // number of rows to sort
 		for (let i = 0; i < n; i++) {
 			let ri = sorted_ris[i]
-			if (e.row_flags[ri] & ROW_UNPLACED
-				|| (has_modifications && is_row_modified(ri)))
+			if (e.row_flags[ri] & ROW_UNPLACED || (has_modifications && is_row_modified(ri)))
 				is_kept[i] = 1
 			else
 				placed_ris[m++] = ri
@@ -4237,8 +4314,8 @@ ui.nav = function(id, opt) {
 
 	// Rebuild the groups. Focus a focused group again by its label path.
 	function regroup() {
-		let focused_path = e.focused_ri != null
-			&& e.row_flags[e.focused_ri] & ROW_GROUP
+		let focused_path =
+			e.focused_ri != null && e.row_flags[e.focused_ri] & ROW_GROUP
 			? group_path(e.focused_ri) : null
 		// clear the selection of the freed group slots before reusing them.
 		remove_groups()
@@ -4291,8 +4368,8 @@ ui.nav = function(id, opt) {
 				added_ris.push(ri)
 			} else {
 				let was_modified = is_row_modified(ri)
-				let has_new_keys = key_fis.some(fi =>
-					row[fi] !== undefined && row[fi] !== col_val(ri, fi))
+				let has_new_keys = key_fis
+					.some(fi => row[fi] !== undefined && row[fi] !== col_val(ri, fi))
 				let new_vals = e.row_flags[ri] & ROW_NEW ? new_row_vals(ri) : null
 				if (set_server_vals(ri, row, is_modified_col))
 					moved_ris.push(ri)
@@ -4302,18 +4379,20 @@ ui.nav = function(id, opt) {
 						if (v === undefined)
 							continue
 						set_input_val(ri, fi, v)
-						if (cell_bit(e.modified_mask, ri, fi))
-							set_cell_errors(ri, fi,
-								validate_cell(e.all_fields[fi], v))
+						if (cell_bit(e.modified_mask, ri, fi)) {
+							let errors = validate_cell(e.all_fields[fi], v)
+							set_cell_errors(ri, fi, errors)
+						}
 					}
 				update_invalid(ri)
 				let is_pass = !row_filter || row_filter(ri)
-				if (!was_modified && (has_new_keys
-					|| e.row_flags[ri] & ROW_UNPLACED
-					|| is_pass != !!(e.row_flags[ri] & ROW_PASS))
-				) {
-					e.row_flags[ri] &= ~ROW_UNPLACED
-					placed_ris.push(ri)
+				if (!was_modified) {
+					if (has_new_keys || e.row_flags[ri] & ROW_UNPLACED
+						|| is_pass != !!(e.row_flags[ri] & ROW_PASS)
+					) {
+						e.row_flags[ri] &= ~ROW_UNPLACED
+						placed_ris.push(ri)
+					}
 				}
 			}
 			row_ris?.push(ri)
@@ -4912,23 +4991,28 @@ ui.nav = function(id, opt) {
 		e.exit_edit()
 
 		e.params = rs.params ?? null
-		// a param without lookup_rowset_name now: unbind its master.
-		for (let name in e.param_sources)
-			if (e.param_bindings?.[e.param_sources[name]] != name
-					&& !e.params?.[name]?.lookup_rowset_name)
-				delete e.param_sources[name]
 		e.rowset_label = rs.label ?? null
 		// create an input on the param bar for each unbound non-col param.
 		e.param_bar_fields = [] // [field, ...]
+		e.master_rowset_names = obj() // {param name -> rowset name}
 		for (let name in e.params) {
-			let is_bound = keys(e.param_bindings ?? empty).some(id =>
-				e.param_bindings[id] == name)
+			let is_bound = keys(e.param_bindings ?? empty)
+				.some(id => e.param_bindings[id] == name)
 			if (!e.params[name].for_cols && !is_bound) {
 				let field_def = assign({name: name}, e.params[name])
 				let field = ui.create_field(field_def, e.id)
 				e.param_bar_fields.push(field)
 			}
+			let lookup_rowset_name = e.params[name].lookup_rowset_name
+			// a nav cannot have a master with the same rowset (for now).
+			if (!is_bound && lookup_rowset_name && lookup_rowset_name != e.rowset_name)
+				e.master_rowset_names[name] = lookup_rowset_name
 		}
+		// a param that is not auto-bound now: unbind its master.
+		for (let name in e.param_sources)
+			if (e.param_bindings?.[e.param_sources[name]] != name
+				&& !e.master_rowset_names[name])
+				delete e.param_sources[name]
 		// client rowset: filter by the lists for the new defs.
 		if (!is_server_rowset)
 			param_vals = read_param_vals()
@@ -5158,7 +5242,8 @@ ui.nav = function(id, opt) {
 //// LOOKUP_INPUT ------------------------------------------------------------
 
 function lookup_input_update(id, s) {
-	s.input_value = undefined
+	s.interaction_value = undefined
+	let interaction_value
 	let field = s.field
 	let ln = s.lookup_nav
 	let disabled = s.readonly || !can_pick_lookup_val(field, ln)
@@ -5166,19 +5251,20 @@ function lookup_input_update(id, s) {
 	ui.dropdown_update(id, s, disabled)
 
 	if (s.opened)
-		s.revert_value = s.value
+		s.revert_value = s.input_value
 	if (s.closed && !s.picked) {
-		s.input_value = s.revert_value
+		interaction_value = s.revert_value
 	} else if (!disabled) {
-		let ln_ri = ui.input_value(id+'.picker')
+		let ln_ri = ui.interaction_value(id+'.picker')
 		if (ln_ri !== undefined)
-			s.input_value = ln_ri != null
+			interaction_value = ln_ri != null
 				? ln.cell_input_val(ln_ri, lookup_val_field(field, ln).fi) : null
 	}
 
 	if (!disabled && !field.not_null && ui.focused(id)
 		&& ui.keydown('delete'))
-		s.input_value = null
+		interaction_value = null
+	ui.set_interaction_value(id, s, interaction_value)
 }
 
 function free_lookup_input(s) {
@@ -5188,13 +5274,13 @@ function free_lookup_input(s) {
 ui.lookup_input = function(id, value, field, fr, readonly) {
 	let picker_id = id+'.picker'
 	let s = ui.state(id)
+	field ??= ui.input_field(id)
 	if (!s.lookup_nav) {
 		s.lookup_nav = lookup_nav(field.lookup_rowset_name)
 		s.lookup_nav.ref()
 		ui.on_free(id, free_lookup_input)
 	}
 	readonly ??= field.readonly
-	s.field = field
 	s.readonly = readonly
 	s = ui.state(id, lookup_input_update)
 	let ln = s.lookup_nav
@@ -5207,7 +5293,7 @@ ui.lookup_input = function(id, value, field, fr, readonly) {
 	if (!open && ui.focus_inside(picker_id))
 		ui.focus(id)
 
-	value = ui.set_value(id, s, value, open ? null : field)
+	value = ui.set_value(id, s, value, field)
 
 	let val_field = lookup_val_field(field, ln)
 	let display_field = lookup_display_field(field, ln)
@@ -5250,7 +5336,7 @@ ui.lookup_input = function(id, value, field, fr, readonly) {
 
 	ui.end_stack()
 
-	return value
+	return ui.value(id)
 }
 
 }())

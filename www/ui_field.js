@@ -87,15 +87,17 @@ We don't like abstractions around here but this one buys us many things:
   works for validating ranges, db records, etc. as a unit.
 - it's not that much code for all of that.
 
-output:
+fields:
 	rules
+methods:
+	create_output() -> out
+	validate(v, out, [with_messages]) -> valid?
+output (out):
 	results
 	value
 	failed
 	parse_failed
 	first_failed_result
-methods:
-	validate(v, [with_messages]) -> valid?
 
 */
 
@@ -109,11 +111,9 @@ ui.create_validator = function(e, own_rules = empty_array, no_global_rules) {
 
 	let rules = []
 	let parse_rule
-	let results = []
 	let checked = map()
 
 	let validator = {
-		results: results,
 		rules: rules,
 		triggered: false,
 	}
@@ -156,19 +156,30 @@ ui.create_validator = function(e, own_rules = empty_array, no_global_rules) {
 			add_global_rule(rule_name)
 	for (let rule of own_rules)
 		add_rule(rule)
-	for (let rule of rules) {
-		let result = obj()
-		result.checked = false
-		result.failed = false
-		result.rule = rule
-		result.error = null
-		result.rule_text = null
-		results.push(result)
+	let required_rule_is = rules.map(rule => // [rule_i -> [rule_i, ...]]
+		rule.requires.length
+			? rule.requires.map(name => rules.indexOf(ui.validation_rules[name]))
+			: empty_array)
+
+	validator.create_output = function() {
+		let results = []
+		for (let rule of rules) {
+			let result = obj()
+			result.checked = false
+			result.failed = false
+			result.rule = rule
+			result.error = null
+			result.rule_text = null
+			results.push(result)
+		}
+		return {
+			results: results,
+			value: null,
+			failed: false,
+			parse_failed: false,
+			first_failed_result: null,
+		}
 	}
-	let required_results = rules.map(rule => rule.requires.length
-		? rule.requires.map(name =>
-			results[rules.indexOf(ui.validation_rules[name])])
-		: empty_array)
 
 	validator.parse = function(v) {
 		if (v == null) return null
@@ -176,7 +187,8 @@ ui.create_validator = function(e, own_rules = empty_array, no_global_rules) {
 		return v
 	}
 
-	validator.validate = function(v, with_messages) {
+	validator.validate = function(v, out, with_messages) {
+		let results = out.results
 		let first_failed_result = null
 		let parse_failed = false
 		next_rule: for (let i = 0, n = results.length; i < n; i++) {
@@ -188,7 +200,8 @@ ui.create_validator = function(e, own_rules = empty_array, no_global_rules) {
 			result.rule_text = null
 			if (v == null && !rule.check_null)
 				continue
-			for (let req_result of required_results[i]) {
+			for (let req_rule_i of required_rule_is[i]) {
+				let req_result = results[req_rule_i]
 				if (!req_result?.checked || req_result.failed)
 					continue next_rule
 			}
@@ -205,19 +218,19 @@ ui.create_validator = function(e, own_rules = empty_array, no_global_rules) {
 			if (failed && !first_failed_result)
 				first_failed_result = result
 		}
-		this.failed = !!first_failed_result
-		this.first_failed_result = first_failed_result
+		out.failed = !!first_failed_result
+		out.first_failed_result = first_failed_result
 		let has_messages = with_messages != false
-			&& (with_messages != 'failed' || this.failed)
+			&& (with_messages != 'failed' || out.failed)
 		if (has_messages)
 			for (let result of results) {
 				let rule = result.rule
 				result.error = rule.error(e, v)
 				result.rule_text = rule.rule(e)
 			}
-		this.parse_failed = parse_failed
-		this.value = repl(v, undefined, null)
-		return !this.failed
+		out.parse_failed = parse_failed
+		out.value = repl(v, undefined, null)
+		return !out.failed
 	}
 
 	return validator

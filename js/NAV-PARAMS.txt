@@ -119,16 +119,18 @@ param_bindings doesn't bind it, the nav binds it to a master by itself, so
 master-detail chains form as the user opens grids anywhere in the app. The
 master supplies values the same way as in BINDINGS.
 
-The nav picks the master with ui.find_master_nav(), which any widget can
-call for a value that it needs from a master on a given rowset:
+The nav and ui.db_rows() pick the master with ui.master_id(), which any
+widget can call:
 
-	ui.find_master_nav(rowset_name) -> nav | undefined
+	ui.master_id(id, param, rowset_name) -> master_id | undefined
 
-ui.db_rows() calls it to learn which table to show: each table has its own
-rowset, so the table can't be a param of the rows nav.
+ui.db_rows() resolves its master before choosing which table to show: each
+table has its own rowset, so the table can't be a param of the rows nav.
 
-The master is the first live non-picker nav created on rowset_name that is
-not in a hidden dock tab. A nav never binds to a nav on its own rowset.
+The nav uses the saved master choice when available, otherwise the last live
+non-picker nav created on rowset_name that is not in a hidden dock tab. The
+nav preserves the saved choice when using a temporary fallback. A nav never
+binds to a nav on its own rowset.
 Without a master, a nav's param is unbound (see UNBOUND PARAMS). The nav
 looks for the master on every frame.
 
