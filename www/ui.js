@@ -8061,7 +8061,7 @@ function menu_update(id, s) {
 		return
 	}
 	let hl_is = s.hl_is
-	if (is_outside)
+	if (ui.hit_leave(id+'.popup.0'))
 		hl_is.length = 0
 	let key_level = max(0, // level navigated by keys
 		hl_is.length - (hl_is.at(-1) == null ? 2 : 1))
@@ -8156,6 +8156,8 @@ ui.menu = function(id, items, want_open, side, align) {
 		function menu(level, items, side, align) {
 			let radius = 0 // ui.sp()
 			let flags = 'constrain change_side solid'
+			if (level)
+				flags += ' hover_parent'
 			// one popup id per level: the popup keeps its side on its state.
 			let popup_id = id+'.popup.'+level
 			if (!level && !side)
