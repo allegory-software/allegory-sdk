@@ -1568,6 +1568,7 @@ ui.begin_state_scope = function(scope_id) {
 		ui.focus(scope.focused_id)
 		scope.focused_id = null
 	}
+	return scope
 }
 
 ui.end_state_scope = function() {
@@ -12056,6 +12057,65 @@ function find_dock_parent(node, child) {
 	}
 }
 
+function get_dock_state_scope(scope, prev_dock) {
+	for (; scope; scope = scope.parent) {
+		if (!scope.dock) continue
+		if (scope.dock == prev_dock) continue
+		return scope
+	}
+}
+
+function get_dock_node_depth(root, node) {
+	let depth = 0
+	for (; node != root; depth++) {
+		node = find_dock_parent(root, node)
+		if (!node)
+			return -1
+	}
+	return depth
+}
+
+ui.get_dock_shared_parent_depth = function(id) {
+	let scope0 = get_dock_state_scope(cur_state_scope)
+	let scope1 = get_dock_state_scope(state_map.get(id)?.state_scope)
+	for (; scope0; scope0 = get_dock_state_scope(scope0.parent, scope0.dock)) {
+		for (let scope = scope1; scope;
+				scope = get_dock_state_scope(scope.parent, scope.dock)) {
+			if (scope.dock != scope0.dock)
+				continue
+			let root = scope.dock.root
+			let node0 = scope0.dock_tab
+			let node1 = scope.dock_tab
+			let depth0 = get_dock_node_depth(root, node0)
+			let depth1 = get_dock_node_depth(root, node1)
+			if (depth0 < 0) return 0
+			if (depth1 < 0) return 0
+			while (depth0 > depth1) {
+				node0 = find_dock_parent(root, node0)
+				depth0--
+			}
+			while (depth1 > depth0) {
+				node1 = find_dock_parent(root, node1)
+				depth1--
+			}
+			while (node0 != node1) {
+				node0 = find_dock_parent(root, node0)
+				node1 = find_dock_parent(root, node1)
+				depth0--
+			}
+			let depth = depth0 + 1
+			for (let scope = get_dock_state_scope(scope0.parent, scope0.dock);
+					scope; scope = get_dock_state_scope(scope.parent, scope.dock)) {
+				let tab_depth = get_dock_node_depth(scope.dock.root, scope.dock_tab)
+				if (tab_depth < 0) return 0
+				depth += tab_depth + 1
+			}
+			return depth
+		}
+	}
+	return 0
+}
+
 // -> root after putting node2 where node1 was
 function replace_dock_node(root, node1, node2) {
 	if (root == node1)
@@ -12316,7 +12376,9 @@ function dock_tab_panes(
 			ui.measure(tablist_id+'.pane')
 			// empty root tablist: no tab to build.
 			if (selected_tab) {
-				ui.begin_state_scope(id+'.tab.'+selected_tab.id)
+				let scope = ui.begin_state_scope(id+'.tab.'+selected_tab.id)
+				scope.dock = s
+				scope.dock_tab = selected_tab
 				ui.focus_group(false, null, id+'.tab.'+selected_tab.id)
 				if (selected_tab.layout)
 					dock_tab_panes(id, s, selected_tab.layout, cs, on_build_tab,
