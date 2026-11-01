@@ -26,7 +26,6 @@ WEBB
 
 MDBX
 ------------------------------------------------------------------------------
-* schema.lua - fix some ambiguities for multi-engine paper schema support
 
 
 MISSING MODULES
@@ -45,6 +44,7 @@ LEVERAGE AI
 	* check where args are mutated on public APIs
 	* check where raising errors after acquiring resources can leak them
 	* check where invariants are violated
+	* check raw buffer access with no bounds checks
 * refactoring
 	* find footguns and surprising behavior
 	* find over-abstraction that could be simplified
@@ -65,15 +65,9 @@ LEFTOVERS
 * xml.lua uses io.open
 
 
-BUGS
-------------------------------------------------------------------------------
-* ROWSET filter push notifications on session
-
-
 FEATURES
 ------------------------------------------------------------------------------
 - SCHEMA SYNC insert-or-update rows over existing table
-- ROWSET map error messages to fields on check constraint violations.
 - glue.lua subst() with varargs like js version
 - HTTP ranges on file serving
 - XLS(X) parsing

@@ -14,7 +14,6 @@
 <script src=webrtc.js></script>
 <script src=ui_call.js></script>
 <script src=lezer.js></script>
-<script src=ui_db_explorer.js></script>
 <script>
 
 const {
@@ -245,23 +244,6 @@ ui.stack('', 1, 's', 'c')
 	ui.end_v()
 	ui.border(1, 'intense')
 ui.end_stack()
-}
-}
-
-{
-let layout = { // initial dock layout
-	split: 'h', size: .25, unit: 'fr',
-	side1: {tabs: [{id: 'tables', label: 'Tables'}]},
-	side2: {tabs: [
-		{id: 'rows', label: 'Content'},
-		{id: 'fields', label: 'Fields'},
-		{id: 'indexes', label: 'Indexes'},
-	]},
-}
-demos.db_explorer = function() {
-	ui.dock('db_explorer.dock', layout, function(tab) {
-		ui['db_'+tab.id]('db_explorer.'+tab.id)
-	}, {can_add_remove_tabs: false})
 }
 }
 

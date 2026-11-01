@@ -1673,9 +1673,7 @@ APP API
 
 WIDGET API
 
-	ui.save_state (id, k, v)          save a state var
-	ui.save_state (id, k, undefined)  delete a state var
-	ui.save_state (id)                delete all saved state vars of id
+	ui.save_state (id, [k, [v]])      save/delete a state var
 
 INTEGRATION API
 
@@ -1712,20 +1710,15 @@ window.addEventListener('pagehide', function() {
 
 ui.save_state = function(id, k, v) {
 	if (k === undefined) {
-		if (!(id in ui.saved_state))
-			return
+		if (!(id in ui.saved_state)) return
 		delete ui.saved_state[id]
 	} else if (v === undefined) {
 		let t = ui.saved_state[id] // {state key -> saved value}
-		if (!t)
-			return
-		if (!(k in t))
-			return
+		if (!t || !(k in t)) return
 		delete t[k]
 	} else {
 		let t = attr(ui.saved_state, id) // {state key -> saved value}
-		if (t[k] === v)
-			return
+		if (t[k] === v) return
 		t[k] = v
 	}
 	saved_state_changed = true
