@@ -8398,9 +8398,23 @@ function list_update(id, s) {
 	let next_key = s.hv == 'h' ? 'arrowright' : 'arrowdown'
 	let prev_key = s.hv == 'h' ? 'arrowleft' : 'arrowup'
 	let d = focused && (
-			ui.keydown(next_key) &&  1 ||
-			ui.keydown(prev_key) && -1
+			ui.keydown('home'  ) && -1/0 ||
+			ui.keydown('end'   ) &&  1/0 ||
+			ui.keydown(prev_key) &&   -1 ||
+			ui.keydown(next_key) &&    1
 		) || 0
+	let page_direction = focused && s.hv == 'v' && (
+			ui.keydown('pageup'  ) && -1 ||
+			ui.keydown('pagedown') &&  1
+		) || 0
+	if (page_direction) {
+		d = page_direction
+		if (items.length) {
+			let viewport_h = ui.state_of(id+'.viewport', 'h')
+			let row_h = (s.h + s.item_gap) / items.length
+			d *= max(1, floor(viewport_h / row_h))
+		}
+	}
 	let focused_item_changed = d && 'key'
 	let value_changed
 	if (d) {
@@ -8470,6 +8484,11 @@ function hvlist(hv, id, items, value, field,
 	ui.hv(hv, fr, opt?.item_gap,
 		align  ?? (hv == 'v' ? 's' : 'l'),
 		valign ?? (hv == 'v' ? 't' : 'c'))
+	if (!readonly && hv == 'v') {
+		s.item_gap = opt?.item_gap ?? 0 // for page navigation
+		ui.measure(id)
+		ui.measure_viewport(id+'.viewport')
+	}
 	let i = 0
 	for (let item of items) {
 		let item_id = id+'.'+i
