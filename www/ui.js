@@ -12045,6 +12045,8 @@ function find_dock_parent(node, child) {
 		)
 	} else {
 		for (let tab of node.tabs) {
+			if (tab == child)
+				return node
 			if (!tab.layout)
 				continue
 			if (tab.layout == child)
