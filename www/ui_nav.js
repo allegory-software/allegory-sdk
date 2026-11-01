@@ -731,19 +731,34 @@ let listen_rowset_events = memoize(function() {
 // navs that can be masters: live non-picker navs, in creation order.
 let rowset_navs = {} // {rowset_name -> [nav, ...]}
 
-// the preferred not-hidden nav with rowset_name, else the last one.
+// the preferred not-hidden nav with rowset_name, else the nearest one.
 function find_master_nav(rowset_name, preferred_id) {
 	let navs = rowset_navs[rowset_name] ?? empty_array
-	let last_nav
+	if (preferred_id)
+		for (let i = navs.length-1; i >= 0; i--) { // nav index
+			let nav = navs[i]
+			if (nav.id != preferred_id) continue
+			if (!ui.is_state_hidden(nav.id))
+				return nav
+		}
+	let nearest_nav // nearest visible master, the last one on a tie
+	let nearest_depth // shared parent depth of nearest_nav
 	for (let i = navs.length-1; i >= 0; i--) { // nav index
 		let nav = navs[i]
 		if (ui.is_state_hidden(nav.id))
 			continue
-		last_nav ??= nav
-		if (!preferred_id || nav.id == preferred_id)
-			return nav
+		if (!nearest_nav) {
+			nearest_nav = nav
+		} else {
+			nearest_depth ??= ui.get_dock_shared_parent_depth(nearest_nav.id)
+			let depth = ui.get_dock_shared_parent_depth(nav.id)
+			if (depth > nearest_depth) {
+				nearest_nav = nav
+				nearest_depth = depth
+			}
+		}
 	}
-	return last_nav
+	return nearest_nav
 }
 
 ui.master_id = function(id, param, rowset_name) {
