@@ -151,7 +151,9 @@ rowset.os_explorer_files = virtual_rowset(function(rs)
 	function rs:load_rows(res, params, load_opt)
 		local folder = params.folder -- requested folder path
 		checkarg(folder ~= null, 'folder required')
-		if folder:sub(1, 2) == '~/' then
+		if folder == '~' then
+			folder = homedir()
+		elseif folder:sub(1, 2) == '~/' then
 			folder = indir(homedir(), folder:sub(3))
 		end
 		folder = path_normalize(abspath(folder), false, false)

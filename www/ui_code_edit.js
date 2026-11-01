@@ -1313,7 +1313,7 @@ function code_edit_view(id, opt) {
 		{
 			let font0 = cx.font
 			cx.font = font_size+'px mono'
-			let m = ui.measure_text(cx, 'm')
+			let m = ui.measure_text('m')
 			cx.font = font0
 			char_w = m.width
 			font_descent = m.fontBoundingBoxDescent

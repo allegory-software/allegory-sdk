@@ -164,7 +164,7 @@ function app_dock_tab(tab) {
 	} else if (tab.kind == 'process_tree') {
 		ui.process_tree('app_dock.tab.'+tab.id+'.process_tree')
 	} else if (tab.kind == 'folder_tree') {
-		ui.folder_tree('app_dock.tab.'+tab.id+'.folder_tree', '~/sdk')
+		ui.folder_tree('app_dock.tab.'+tab.id+'.folder_tree', '~')
 	} else if (tab.kind == 'open_ports') {
 		ui.open_ports('app_dock.tab.'+tab.id+'.open_ports')
 	} else if (tab.kind == 'saved_state') {

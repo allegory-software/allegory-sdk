@@ -1690,7 +1690,7 @@ function init(id, e) {
 							if (field_has_indent(field)) {
 								if (e.has_children(ri)) {
 									let indent_x = indent_offset(e.depth[ri])
-									hit_indent = hit_dx <= indent_x
+									hit_indent = hit_dx <= indent_x + ui.sp2()
 								}
 							}
 							break

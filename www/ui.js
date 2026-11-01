@@ -2997,6 +2997,10 @@ function redraw_all() {
 		t0 = t1
 
 		let a = end_rec()
+		viewport_x1 = 0
+		viewport_y1 = 0
+		viewport_x2 = screen_w
+		viewport_y2 = screen_h
 		layout_rec(a, 0, 0, screen_w, screen_h)
 
 		if (ui.DEBUG) {
@@ -3762,6 +3766,30 @@ register[CMD_MEASURE] = function(a, i) {
 	s.h = a[ct_i+3]
 }
 
+//// VIEWPORT MEASURE REQUESTS -----------------------------------------------
+
+let viewport_x1
+let viewport_y1
+let viewport_x2
+let viewport_y2
+
+const CMD_MEASURE_VIEWPORT = cmd('measure_viewport')
+
+ui.measure_viewport = function(into_id) {
+	ui.state(into_id) // id is usually not a widget, so we have to own into_id.
+	let i = ui_cmd_begin(CMD_MEASURE_VIEWPORT) // command index
+	a[n++] = into_id
+	ui_cmd_end(i)
+}
+
+translate[CMD_MEASURE_VIEWPORT] = function(a, i) {
+	let s = ui.state_of(a[i])
+	s.x = viewport_x1
+	s.y = viewport_y1
+	s.w = max(0, viewport_x2 - viewport_x1)
+	s.h = max(0, viewport_y2 - viewport_y1)
+}
+
 //// FLEX --------------------------------------------------------------------
 
 /*
@@ -4398,7 +4426,21 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 	a[i+SB_SX+0] = sx
 	a[i+SB_SX+1] = sy
 
+	let viewport_x10 = viewport_x1
+	let viewport_y10 = viewport_y1
+	let viewport_x20 = viewport_x2
+	let viewport_y20 = viewport_y2
+	viewport_x1 = max(viewport_x1, x)
+	viewport_y1 = max(viewport_y1, y)
+	viewport_x2 = min(viewport_x2, x + w)
+	viewport_y2 = min(viewport_y2, y + h)
+
 	translate_children(a, i, dx - sx, dy - sy)
+
+	viewport_x1 = viewport_x10
+	viewport_y1 = viewport_y10
+	viewport_x2 = viewport_x20
+	viewport_y2 = viewport_y20
 
 }
 
@@ -4948,7 +4990,21 @@ translate[CMD_POPUP] = function(a, i) {
 	a[i+0] = x
 	a[i+1] = y
 
+	let viewport_x10 = viewport_x1
+	let viewport_y10 = viewport_y1
+	let viewport_x20 = viewport_x2
+	let viewport_y20 = viewport_y2
+	viewport_x1 = 0
+	viewport_y1 = 0
+	viewport_x2 = screen_w
+	viewport_y2 = screen_h
+
 	translate_children(a, i, x, y)
+
+	viewport_x1 = viewport_x10
+	viewport_y1 = viewport_y10
+	viewport_x2 = viewport_x20
+	viewport_y2 = viewport_y20
 
 }
 
@@ -9786,12 +9842,13 @@ ui.list_dropdown = function(
 					ui.sb_max_wh(null,
 						ui.state_of(resizer_id, 'h') ?? picker_max_h)
 					ui.scrollbox(picker_id+'.sb', 1, 'contain', 'auto', 's', 's')
-						ui.list(picker_id, items, value, field, 0,
-							's', 's', align, 'c', 0,
-							max_w ?? ui.em_input_max_popup(),
-							align == 'r' ? pad * 2 + chevron_w : pad,
-							align == 'l' ? pad * 2 + chevron_w : pad,
-							pad)
+						let opt = s.picker_opt ??= {} // picker list options
+						opt.item_align = align
+						opt.max_w = max_w ?? ui.em_input_max_popup()
+						opt.item_pad_l = align == 'r' ? pad * 2 + chevron_w : pad
+						opt.item_pad_r = align == 'l' ? pad * 2 + chevron_w : pad
+						opt.item_pad_y = pad
+						ui.list(picker_id, items, value, field, 0, 's', 's', readonly, opt)
 					ui.end_scrollbox()
 					ui.resizer(resizer_id, is_popup_above ? 't' : 'b',
 						null, picker_max_h)
@@ -9816,7 +9873,7 @@ ui.list_dropdown = function(
 ui.list_dropdown_inline = function(id, items, value, field,
 	fr, align, max_w) {
 	ui.min_w(-1)
-	return ui.list_dropdown(id, items, value, field, fr, align, max_w)
+	return ui.list_dropdown(id, items, value, field, fr ?? 0, align, max_w)
 }
 
 /*
