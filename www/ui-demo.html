@@ -249,8 +249,19 @@ ui.end_stack()
 }
 
 {
+let layout = { // initial dock layout
+	split: 'h', size: .25, unit: 'fr',
+	side1: {tabs: [{id: 'tables', label: 'Tables'}]},
+	side2: {tabs: [
+		{id: 'rows', label: 'Content'},
+		{id: 'fields', label: 'Fields'},
+		{id: 'indexes', label: 'Indexes'},
+	]},
+}
 demos.db_explorer = function() {
-	ui.db_explorer('db_explorer')
+	ui.dock('db_explorer.dock', layout, function(tab) {
+		ui['db_'+tab.id]('db_explorer.'+tab.id)
+	}, {can_add_remove_tabs: false})
 }
 }
 

@@ -959,6 +959,7 @@ ui.nav = function(id, opt) {
 
 	// saving and loading
 	let is_server_rowset = !!e.rowset_name && !ui.rowsets[e.rowset_name]
+	let client_rowset = null // last accepted client rowset
 	e.ready = false // nav loaded (for lookup fields and lookup inputs)
 	let save_req = null // pending id or save request, or null
 	let save_batch = null // pending batch: {rows: [...], ris: [...]}
@@ -4199,11 +4200,27 @@ ui.nav = function(id, opt) {
 	// Send modified rows to their server rowset, one request at a time. Defer
 	// save() if another request is still running.
 	e.save = function() {
+
+		if (!is_server_rowset) {
+			assert(client_rowset.save, 'save: client rowset.save required')
+			let batch = e.pack_changes()
+			if (!batch)
+				return
+			try {
+				let result = client_rowset.save({rows: batch.rows})
+				e.apply_result(batch, result)
+			} finally {
+				end_save()
+			}
+			return
+		}
+
 		assert(e.rowset_name, 'save: rowset_name required')
 		if (save_req) {
 			want_save = true
 			return
 		}
+
 		// rows of a failed save left in saving_ris: reload first, so that the
 		// reload finds the rows that the server inserted and the nav doesn't
 		// send them again.
@@ -4702,6 +4719,7 @@ ui.nav = function(id, opt) {
 		let src_col_vals = rowset_col_vals(rs, rowset_fields.length)
 		if (!src_col_vals)
 			return
+		client_rowset = is_server_rowset ? null : rs
 		let edit_state = e.get_edit_state()
 		// collapse flags on data rows matter only in a nav that can be a tree.
 		let old_rows = null // rows before the reload, for restore_tree_flags()
@@ -5013,6 +5031,7 @@ ui.nav = function(id, opt) {
 		// init: from here on, no more returns.
 
 		e.exit_edit()
+		client_rowset = is_server_rowset ? null : rs
 
 		e.params = rs.params ?? null
 		e.rowset_label = rs.label ?? null

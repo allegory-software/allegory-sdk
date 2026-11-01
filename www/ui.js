@@ -99,7 +99,7 @@ WIDGET STATE
   STATE SCOPES  ui.begin_state_scope  ui.keep_state_scope  ui.is_state_hidden
 
 PERSISTENCE
-  SAVED STATE   ui.saved_state  ui.save_state  ui.delete_saved_state
+  SAVED STATE   ui.saved_state  ui.save_state
   SAVED INPUT   ui.saved_value_def  ui.saved_value  ui.set_saved_value
                 ui.saved_value_validation
 
@@ -1458,7 +1458,7 @@ let state_map = map() // {id->state}
 
 function create_state_scope() {
 	return {
-		current_id_set: set(),
+		cur_id_set: set(),
 		remove_id_set: set(),
 		parent: null,
 		used_build_no: null, // build_no of last pass that opened the scope
@@ -1467,6 +1467,7 @@ function create_state_scope() {
 	}
 }
 let root_state_scope = create_state_scope() // ids touched outside any scope
+let cur_state_scope = root_state_scope // scope for state() calls
 let state_scopes = map() // {scope_id -> scope}
 let open_state_scopes = [] // [scope, ...]
 
@@ -1481,7 +1482,10 @@ function state_update(id, s) {
 	if (s.build_no == build_no)
 		return
 	s.build_no = build_no
+	let scope0 = cur_state_scope // scope before the update
+	cur_state_scope = s.state_scope
 	update_fn(id, s)
+	cur_state_scope = scope0
 }
 
 ui.state = function(id, update_fn) {
@@ -1493,13 +1497,13 @@ ui.state = function(id, update_fn) {
 		s.build_no = build_no // build_no of the last update run, or of creation
 		state_map.set(id, s)
 	}
-	let scope = open_state_scopes.at(-1) ?? root_state_scope
+	let scope = cur_state_scope
 	if (s.state_scope != scope) { // id moved to another scope
-		s.state_scope?.current_id_set.delete(id)
+		s.state_scope?.cur_id_set.delete(id)
 		s.state_scope?.remove_id_set.delete(id)
 		s.state_scope = scope
 	}
-	scope.current_id_set.add(id)
+	scope.cur_id_set.add(id)
 	scope.remove_id_set.delete(id)
 	if (update_fn)
 		s.update = update_fn
@@ -1537,7 +1541,7 @@ function free_state(id, s) {
 	let free = s.free
 	if (free)
 		free(s, id)
-	s.state_scope.current_id_set.delete(id)
+	s.state_scope.cur_id_set.delete(id)
 	s.state_scope.remove_id_set.delete(id)
 	state_map.delete(id)
 }
@@ -1555,9 +1559,10 @@ ui.begin_state_scope = function(scope_id) {
 		scope = create_state_scope()
 		state_scopes.set(scope_id, scope)
 	}
-	scope.parent = open_state_scopes.at(-1) ?? null
+	scope.parent = cur_state_scope == root_state_scope ? null : cur_state_scope
 	scope.used_build_no = build_no
-	open_state_scopes.push(scope)
+	open_state_scopes.push(cur_state_scope)
+	cur_state_scope = scope
 	// shown again: give the focus back to the widget that had it.
 	if (scope.focused_id != null) {
 		ui.focus(scope.focused_id)
@@ -1566,7 +1571,7 @@ ui.begin_state_scope = function(scope_id) {
 }
 
 ui.end_state_scope = function() {
-	assert(open_state_scopes.pop(), 'state scope not open')
+	cur_state_scope = assert(open_state_scopes.pop(), 'state scope not open')
 }
 
 ui.keep_state_scope = function(scope_id) {
@@ -1605,8 +1610,8 @@ function free_state_ids(ids) {
 function gc_state_scope(scope) {
 	free_state_ids(scope.remove_id_set)
 	let empty = scope.remove_id_set
-	scope.remove_id_set = scope.current_id_set
-	scope.current_id_set = empty
+	scope.remove_id_set = scope.cur_id_set
+	scope.cur_id_set = empty
 }
 
 // opened scope: free its untouched ids. kept scope: leave it as it is.
@@ -1618,7 +1623,7 @@ function state_gc() {
 			gc_state_scope(scope)
 		} else if (!is_state_scope_kept(scope)) {
 			free_state_ids(scope.remove_id_set)
-			free_state_ids(scope.current_id_set)
+			free_state_ids(scope.cur_id_set)
 			state_scopes.delete(scope_id)
 		}
 	}
@@ -1668,8 +1673,9 @@ APP API
 
 WIDGET API
 
-	ui.save_state         (id, k, v)  save a state var
-	ui.delete_saved_state (id)        delete all saved state vars of id
+	ui.save_state (id, k, v)          save a state var
+	ui.save_state (id, k, undefined)  delete a state var
+	ui.save_state (id)                delete all saved state vars of id
 
 INTEGRATION API
 
@@ -1705,17 +1711,23 @@ window.addEventListener('pagehide', function() {
 })
 
 ui.save_state = function(id, k, v) {
-	let t = attr(ui.saved_state, id)
-	if (t[k] === v)
-		return
-	t[k] = v
-	saved_state_changed = true
-}
-
-ui.delete_saved_state = function(id) {
-	if (!(id in ui.saved_state))
-		return
-	delete ui.saved_state[id]
+	if (k === undefined) {
+		if (!(id in ui.saved_state))
+			return
+		delete ui.saved_state[id]
+	} else if (v === undefined) {
+		let t = ui.saved_state[id] // {state key -> saved value}
+		if (!t)
+			return
+		if (!(k in t))
+			return
+		delete t[k]
+	} else {
+		let t = attr(ui.saved_state, id) // {state key -> saved value}
+		if (t[k] === v)
+			return
+		t[k] = v
+	}
 	saved_state_changed = true
 }
 
@@ -2057,7 +2069,7 @@ let POPUPS_INNER   = 3
 let popups_freelist = array_freelist()
 
 let root_popups = []
-let current_popups = root_popups
+let cur_popups = root_popups
 
 function free_inner_popups(popups) {
 	for (let k = POPUPS_INNER, n = popups.length; k < n; k += POPUPS_ARGC) {
@@ -2073,7 +2085,7 @@ function free_inner_popups(popups) {
 function reset_popups() {
 	free_inner_popups(root_popups)
 	root_popups.length = 0
-	current_popups = root_popups
+	cur_popups = root_popups
 }
 
 function add_popup(popups, z_index, rec_i, ct_i, inner_popups) {
@@ -2091,8 +2103,8 @@ function add_popup(popups, z_index, rec_i, ct_i, inner_popups) {
 }
 
 // current draw/hit popup, so we can skip draw/hit of nested popups.
-let current_popup_rec
-let current_popup_ct_i
+let cur_popup_rec
+let cur_popup_ct_i
 
 /// built-in layers ----------------------------------------------------------
 
@@ -2204,7 +2216,7 @@ ui.render_state().
 
 function create_render_state_map() {
 	let sm = map()
-	sm.current_id_set = set()
+	sm.cur_id_set = set()
 	sm.remove_id_set = set()
 	return sm
 }
@@ -2218,8 +2230,8 @@ function render_state_gc(sm) {
 	}
 	sm.remove_id_set.clear()
 	let empty = sm.remove_id_set
-	sm.remove_id_set = sm.current_id_set
-	sm.current_id_set = empty
+	sm.remove_id_set = sm.cur_id_set
+	sm.cur_id_set = empty
 }
 
 let root_render_state_map = create_render_state_map()
@@ -2227,7 +2239,7 @@ let render_state_map
 
 ui.render_state = function(id, k) {
 	assert(render_state_map, 'render_state() called outside rendering')
-	render_state_map.current_id_set.add(id)
+	render_state_map.cur_id_set.add(id)
 	render_state_map.remove_id_set.delete(id)
 	let s = render_state_map.get(id)
 	if (!s) {
@@ -2274,33 +2286,33 @@ function draw_cmd(a, i, recs) {
 }
 
 function draw_popups(popups, recs) {
-	let prev_rec  = current_popup_rec
-	let prev_ct_i = current_popup_ct_i
+	let prev_rec  = cur_popup_rec
+	let prev_ct_i = cur_popup_ct_i
 	for (let k = 0, n = popups.length; k < n; k += POPUPS_ARGC) {
 		reset_canvas()
 		let rec_i = popups[k+POPUPS_REC_I]
 		let i     = popups[k+POPUPS_CT_I]
 		let a = recs[rec_i]
-		/*global*/ current_popup_rec  = a
-		/*global*/ current_popup_ct_i = i
+		/*global*/ cur_popup_rec  = a
+		/*global*/ cur_popup_ct_i = i
 		draw_cmd(a, i, recs)
 		let inner_popups = popups[k+POPUPS_INNER]
 		if (inner_popups)
 			draw_popups(inner_popups, recs)
 	}
-	current_popup_rec  = prev_rec
-	current_popup_ct_i = prev_ct_i
+	cur_popup_rec  = prev_rec
+	cur_popup_ct_i = prev_ct_i
 }
 
 function draw_frame(recs, popups, sm1) {
 	let sm0 = render_state_map
 	render_state_map = assert(sm1)
-	let current_popup_rec0  = current_popup_rec
-	let current_popup_ct_i0 = current_popup_ct_i
+	let cur_popup_rec0  = cur_popup_rec
+	let cur_popup_ct_i0 = cur_popup_ct_i
 
 	draw_popups(popups, recs)
-	assert(current_popup_rec  == current_popup_rec0)
-	assert(current_popup_ct_i == current_popup_ct_i0)
+	assert(cur_popup_rec  == cur_popup_rec0)
+	assert(cur_popup_ct_i == cur_popup_ct_i0)
 
 	render_state_gc(render_state_map)
 	render_state_map = sm0
@@ -2421,8 +2433,8 @@ function hit_popups(popups, recs) {
 		let rec_i = popups[k+POPUPS_REC_I]
 		let i     = popups[k+POPUPS_CT_I]
 		let a = recs[rec_i]
-		/*global*/ current_popup_rec  = a
-		/*global*/ current_popup_ct_i = i
+		/*global*/ cur_popup_rec  = a
+		/*global*/ cur_popup_ct_i = i
 		let hit_f = hittest[a[i-1]]
 		if (hit_f && !a.nohit_set?.has(i) && hit_f(a, i, recs)) {
 			hit_popup_parents(a, i)
@@ -4962,10 +4974,10 @@ ui.popup_target_rect = function(a, i) {
 register[CMD_END] = function(a, end_i) {
 	let ct_i = end_i+a[end_i]
 	if (
-		current_popups.popup_rec == a &&
-		current_popups.popup_i == ct_i
+		cur_popups.popup_rec == a &&
+		cur_popups.popup_i == ct_i
 	)
-		current_popups = current_popups.parent_popups
+		cur_popups = cur_popups.parent_popups
 }
 
 register[CMD_POPUP] = function(a, i, rec_i) {
@@ -4976,26 +4988,26 @@ register[CMD_POPUP] = function(a, i, rec_i) {
 	assert(z_index >= 0 && z_index < z_index_band,
 		'z_index out of range: ', z_index)
 	let inner_popups = layer.modal ? popups_freelist.alloc() : null
-	add_popup(layer.root ? root_popups : current_popups,
+	add_popup(layer.root ? root_popups : cur_popups,
 		layer.z_index * z_index_band + z_index,
 		rec_i, i, inner_popups)
 	if (inner_popups) {
 		// hack: although inner_popus is serialized, its properties are not
 		// because it's an array.
-		inner_popups.parent_popups = current_popups
+		inner_popups.parent_popups = cur_popups
 		inner_popups.popup_i = i
 		inner_popups.popup_rec = a
-		current_popups = inner_popups
+		cur_popups = inner_popups
 	}
 }
 
 draw[CMD_POPUP] = function(a, i) {
-	if (a != current_popup_rec || i != current_popup_ct_i)
+	if (a != cur_popup_rec || i != cur_popup_ct_i)
 		return true
 }
 
 hittest[CMD_POPUP] = function(a, i, recs) {
-	if (a != current_popup_rec || i != current_popup_ct_i)
+	if (a != cur_popup_rec || i != cur_popup_ct_i)
 		return
 	let solid = a[i+POPUP_FLAGS] & POPUP_SOLID
 	if (hit_children(a, i, recs)) {
@@ -8115,10 +8127,10 @@ ui.menu = function(id, items, want_open, side, align) {
 			let i = 0
 			for (let item of items) {
 				if (!item) { // separator
-					ui.pv(ui.sp())
+					ui.mv(ui.sp())
+					ui.min_h(1)
 					ui.stack('', 0)
-						ui.min_h(1)
-						ui.bb('light')
+						ui.border('t', 'intense')
 					ui.end_stack()
 					i++
 					continue
@@ -11692,8 +11704,52 @@ ui.live_move_mixin = function(e) {
 
 */
 
+function collect_dock_tab_titles(tablist, titles, groups) {
+	for (let tab of tablist.tabs) {
+		let label = tab.label ?? 'New Tab'
+		let t = titles.get(tab) // runtime title record
+		if (!t) {
+			t = {label: label, no: null, text: null}
+			titles.set(tab, t)
+		}
+		if (t.label != label) {
+			t.label = label
+			t.no = null
+		}
+		let group_titles = groups.get(label)
+		if (!group_titles) {
+			group_titles = [] // [runtime title record, ...]
+			groups.set(label, group_titles)
+		}
+		group_titles.push(t)
+	}
+}
+
+function update_dock_tab_titles(s) {
+	s.tab_titles ??= new WeakMap() // {tab -> runtime title record}
+	let groups = map() // {base title -> [runtime title record, ...]}
+	walk_dock_tablists(s.root, collect_dock_tab_titles, s.tab_titles, groups)
+	for (let titles of groups.values()) {
+		let nos = set() // assigned title numbers
+		for (let title of titles)
+			if (title.no != null)
+				nos.add(title.no)
+		let no = 1 // next unused title number
+		for (let title of titles) {
+			if (title.no == null) {
+				while (nos.has(no)) no++
+				title.no = no++
+			}
+			title.text = titles.length > 1
+				? title.label+' '+title.no : title.label
+		}
+	}
+	s.tab_titles_dirty = false // recompute titles when true
+}
+
 function tabbox(
-	id, tab, is_selected, is_hover, has_close_button, is_strip_bottom, move_area
+	id, s, tab, is_selected, is_hover, has_close_button, is_strip_bottom, title,
+	move_area
 ) {
 	let box_id = id+'.tabbox.'+tab.id
 	ui.focusable(box_id)
@@ -11712,7 +11768,35 @@ function tabbox(
 	ui.h(0, ui.sp())
 		if (tab.icon)
 			ui.icon('', tab.icon)
-		ui.text('', tab.label)
+		let is_starting_edit = !!ui.dblclicked(box_id)
+		if (is_starting_edit || s.edit_tab_id == tab.id) {
+			let text_id = id+'.tabtitle.'+tab.id
+			if (is_starting_edit) {
+				s.edit_tab_id = tab.id // tab whose title is being edited
+				ui.select_text(text_id, 0, 1/0)
+				ui.focus(text_id)
+			}
+			let is_focused = ui.focused(text_id)
+			let has_enter = is_focused && ui.keydown('enter')
+			let is_outside = ui.click && !ui.hovers(text_id)
+			let want_save = has_enter || is_outside
+			let want_cancel = is_focused && ui.keydown('escape')
+			if (want_save || want_cancel) {
+				if (want_save)
+					ui.set_tab_title(id, tab.id, ui.value(text_id))
+				s.edit_tab_id = null
+				if (!is_outside) {
+					ui.focus(box_id)
+					ui.capture_keys()
+				}
+				ui.text('', title.text)
+			} else {
+				let value = is_starting_edit ? title.text : undefined
+				ui.text_editable(text_id, value, 0)
+			}
+		} else {
+			ui.text('', title.text)
+		}
 		ui.min_w(ui.em(1.25))
 		ui.stack('', 0)
 		if (has_close_button) {
@@ -11776,7 +11860,8 @@ function tab_strip(
 		let has_close_button = s.can_add_remove_tabs && (is_hover || is_dragging) && !is_moving
 		if (tab.id == added_tab_id)
 			ui.scroll_to_view_next_box()
-		tabbox(id, tab, is_selected, is_hover, has_close_button, s.is_strip_bottom)
+		tabbox(id, s, tab, is_selected, is_hover, has_close_button,
+			s.is_strip_bottom, s.tab_titles.get(tab))
 		drawn_n++
 	}
 	if (drawn_n == gap_i)
@@ -11879,7 +11964,10 @@ function find_dock_tablist(root, tab_id) {
 	return walk_dock_tablists(root, find_tablist_with_tab, tab_id)
 }
 function find_tablist_with_tab(node, tab_id) {
-	return node.tabs.some(tab => tab.id == tab_id) ? node : null
+	for (let tab of node.tabs)
+		if (tab.id == tab_id)
+			return node
+	return null
 }
 function add_tablist_tab_ids(node, tab_ids) {
 	for (let tab of node.tabs)
@@ -12024,6 +12112,14 @@ function move_dock_tab(
 ) {
 
 	let tab = src_tablist.tabs.splice(tab_i, 1)[0]
+	if (!area) {
+		s.tab_titles_dirty = true
+		let closes_edit_tab = s.edit_tab_id == tab.id
+		if (!closes_edit_tab && s.edit_tab_id && tab.layout)
+			closes_edit_tab = !!find_dock_tablist(tab.layout, s.edit_tab_id)
+		if (closes_edit_tab)
+			s.edit_tab_id = null
+	}
 	if (src_tablist.selected_tab_id == tab.id)
 		src_tablist.selected_tab_id = src_tablist.tabs.length
 			? src_tablist.tabs[min(tab_i, src_tablist.tabs.length - 1)].id
@@ -12061,7 +12157,7 @@ function move_dock_tab(
 			let sibling_node = parent.side1 == src_tablist
 				? parent.side2 : parent.side1
 			s.root = replace_dock_node(s.root, parent, sibling_node)
-			ui.delete_saved_state(id+'.split'+parent.key)
+			ui.save_state(id+'.split'+parent.key)
 		}
 	}
 }
@@ -12098,7 +12194,8 @@ function update_tablist_tabs(node, id, s) {
 		while (tab_ids.has('tab'+tab_n))
 			tab_n++
 		let tab_id = 'tab'+tab_n
-		node.tabs.push({id: tab_id, label: 'New Tab'})
+		node.tabs.push({id: tab_id})
+		s.tab_titles_dirty = true
 		node.selected_tab_id = tab_id
 		save_dock_layout(id, s)
 		ui.rebuild('dock_tab_added')
@@ -12223,8 +12320,8 @@ function draw_dock_drag(id, s, cs) {
 
 	ui.popup('', 'drag', 'screen', 'it', '[', null, null, x, y)
 	ui.nohit()
-		tabbox(id, tab, tab.id == cs.src_tablist.selected_tab_id,
-			true, false, s.is_strip_bottom, area)
+		tabbox(id, s, tab, tab.id == cs.src_tablist.selected_tab_id,
+			true, false, s.is_strip_bottom, s.tab_titles.get(tab), area)
 	ui.end_popup()
 }
 
@@ -12285,6 +12382,9 @@ ui.dock = function(id, layout, on_build_tab, opt) {
 	if (!cs?.moved && (s.can_add_remove_tabs || ui.keydown('enter')))
 		added_tab_id = update_dock_tabs(s.root, id, s)
 
+	if (!s.tab_titles || s.tab_titles_dirty)
+		update_dock_tab_titles(s)
+
 	ui.stack(id)
 		dock_tab_panes(id, s, s.root, cs, on_build_tab,
 			added_tab_id, opt)
@@ -12296,11 +12396,37 @@ ui.set_dock_tab = function(id, tab_id, fields) {
 	let tablist = assert(find_dock_tablist(s.root, tab_id),
 		'dock ', id, ': no tab ', tab_id)
 	let tab = tablist.tabs.find(tab => tab.id == tab_id) // tab record
+	let label0 = tab.label
+	let layout0 = tab.layout
 	assign(tab, fields)
+	if (tab.label != label0)
+		s.tab_titles_dirty = true
 	if (fields.layout)
 		tab.layout = create_dock_layout(s, fields.layout)
+	if (tab.layout != layout0)
+		s.tab_titles_dirty = true
 	save_dock_layout(id, s)
 	ui.rebuild('dock_tab_changed')
+}
+
+ui.set_tab_title = function(id, tab_id, title, icon) {
+	let s = ui.state_of(id) // dock state
+	let tablist = assert(find_dock_tablist(s.root, tab_id),
+		'dock ', id, ': no tab ', tab_id)
+	for (let tab of tablist.tabs) {
+		if (tab.id != tab_id) continue
+		if (icon === undefined)
+			icon = tab.icon
+		if (tab.label == title && tab.icon == icon)
+			return
+		if (tab.label != title)
+			s.tab_titles_dirty = true
+		tab.label = title
+		tab.icon = icon
+		save_dock_layout(id, s)
+		ui.rebuild('dock_tab_title')
+		return
+	}
 }
 
 ui.select_dock_tab = function(id, tab_id) {

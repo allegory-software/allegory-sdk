@@ -3,16 +3,6 @@
 
 const ui = window.ui
 
-let layout = { // initial dock layout
-	split: 'h', size: .25, unit: 'fr',
-	side1: {tabs: [{id: 'tables', label: 'Tables'}]},
-	side2: {tabs: [
-		{id: 'rows', label: 'Content'},
-		{id: 'fields', label: 'Fields'},
-		{id: 'indexes', label: 'Indexes'},
-	]},
-}
-
 const tables_opt = { // table grid options
 	rowset_name: 'db_explorer_tables',
 	cell_select_mode: true,
@@ -69,20 +59,18 @@ ui.db_rows = function(id) {
 	ui.end_v()
 }
 
-ui.db_explorer = function(id) {
-	ui.dock(id+'.dock', layout, function(tab) {
-		if (tab.id == 'tables') {
-			ui.grid(id+'.tables', tables_opt)
-		} else if (tab.id == 'rows') {
-			build_table_rows(id, id+'.tables')
-		} else {
-			ui.grid(id+'.'+tab.id, {
-				rowset_name: 'db_explorer_'+tab.id,
-				param_bindings: {[id+'.tables']: 'table'},
-				can_move_rows: false,
-			})
-		}
-	}, {can_add_remove_tabs: false})
+ui.db_fields = function(id) {
+	ui.grid(id+'.grid', {
+		rowset_name: 'db_explorer_fields',
+		can_move_rows: false,
+	})
+}
+
+ui.db_indexes = function(id) {
+	ui.grid(id+'.grid', {
+		rowset_name: 'db_explorer_indexes',
+		can_move_rows: false,
+	})
 }
 
 }())
