@@ -5344,7 +5344,7 @@ function free_lookup_input(s) {
 	s.lookup_nav.unref()
 }
 
-ui.lookup_input = function(id, value, field, fr, readonly) {
+ui.lookup_input = function(id, value, field, fr, no_box, readonly) {
 	let picker_id = id+'.picker'
 	let s = ui.state(id)
 	field ??= ui.input_field(id)
@@ -5392,10 +5392,11 @@ ui.lookup_input = function(id, value, field, fr, readonly) {
 		let state = disabled
 			? (focused ? 'readonly focused' : 'readonly')
 			: (focused ? 'focused' : null)
-		ui.bb('input', state, 1, 'intense', state)
+		if (!no_box)
+			ui.bb('input', state, 1, 'intense', state)
 		ui.color('text', state)
 		ui.draw_value_row(text, null, null,
-			ui.sp(), ui.em(1), null, null, 'l')
+			no_box ? 0 : ui.sp(), ui.em(1), null, null, 'l')
 
 	ui.dropdown_picker(id, 'b')
 

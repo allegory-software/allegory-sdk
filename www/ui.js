@@ -9724,7 +9724,7 @@ ui.end_dropdown = function(id) {
 
 /*
 
-	ui.list_dropdown        (id, items, value=, field=, fr=1, align='l', max_w=, readonly=) -> value
+	ui.list_dropdown        (id, items, value=, field=, fr=1, align='l', max_w=, no_box=, readonly=) -> value
 	ui.list_dropdown_inline (id, items, value=, field=, fr=1, align='l', max_w=) -> value
 
 	ui.draw_value_row       (value, field=, row_id=, pad, chevron_w, max_w=, w=, align='l')
@@ -9809,7 +9809,7 @@ function list_dropdown_update(id, s) {
 }
 
 ui.list_dropdown = function(
-	id, items, value, field, fr, align, max_w, readonly
+	id, items, value, field, fr, align, max_w, no_box, readonly
 ) {
 
 	field ??= input_field(id)
@@ -9820,6 +9820,7 @@ ui.list_dropdown = function(
 	let value_id = id+'.value'
 
 	let pad = ui.sp()
+	let box_pad = no_box ? 0 : pad // padding of the closed value row
 	let chevron_w = ui.em(1)
 	align = align ?? 'l'
 	assert(align == 'l' || align == 'r', 'invalid list dropdown align')
@@ -9840,10 +9841,10 @@ ui.list_dropdown = function(
 		let state =
 			(readonly ? STATE_READONLY : 0)
 			| (ui.focused(id) ? STATE_FOCUSED : 0)
-		if (!open)
+		if (!open && !no_box)
 			ui.bb('input', state, 1, 'intense', state)
 		ui.color('text', state)
-		draw_value_row(value, field, null, pad, chevron_w,
+		draw_value_row(value, field, null, box_pad, chevron_w,
 			max_w ?? ui.em_input_max(),
 			text_w, align)
 
@@ -9900,15 +9901,17 @@ ui.list_dropdown_inline = function(id, items, value, field,
 
 /*
 
-	ui.enum_input  (id, value=, field, fr=1, align='l', max_w=, readonly=) -> value
+	ui.enum_input  (id, value=, field, fr=1, align='l', max_w=, no_box=, readonly=) -> value
 	ui.enum_toggle (id, value=, field, fr=0, align='l', valign='c', readonly=) -> value
 
 */
 
-ui.enum_input = function(id, value, field, fr, align, max_w, readonly) {
+ui.enum_input = function(id, value, field, fr, align, max_w, no_box,
+	readonly
+) {
 	field ??= input_field(id)
 	return ui.list_dropdown(id, field.enum_items(), value, field,
-		fr, align, max_w, readonly)
+		fr, align, max_w, no_box, readonly)
 }
 
 ui.enum_toggle = function(
@@ -10225,7 +10228,8 @@ ui.calendar = function(id, sel_day, ranges, fr, align, valign) {
 
 //// DATE INPUT --------------------------------------------------------------
 
-// ui.date_input (id, v=, field=, fr=1, align='r', valign='c', readonly=) -> v
+// ui.date_input (id, v=, field=, fr=1, align='r', valign='c', no_box=,
+//    readonly=) -> v
 
 function date_input_update(id, s) {
 
@@ -10270,7 +10274,7 @@ function date_input_update(id, s) {
 	set_interaction_value(id, s, interaction_value)
 }
 
-ui.date_input = function(id, v, field, fr, align, valign, readonly) {
+ui.date_input = function(id, v, field, fr, align, valign, no_box, readonly) {
 
 	let min_w = next_min_w ?? ui.em_input()
 	next_min_w = null
@@ -10310,8 +10314,10 @@ ui.date_input = function(id, v, field, fr, align, valign, readonly) {
 			let state =
 				(readonly ? STATE_READONLY : 0)
 				| (focused ? STATE_FOCUSED : 0)
-			ui.bb('input', state, 1, 'intense', state)
-			ui.p(ui.sp())
+			if (!no_box) {
+				ui.bb('input', state, 1, 'intense', state)
+				ui.p(ui.sp())
+			}
 			ui.min_w(min_w)
 			ui.h(0, ui.sp05())
 				ui.color('text', state)
@@ -10923,9 +10929,9 @@ function color_input_update(id, s) {
 	set_interaction_value(id, s, interaction_value)
 }
 
-// ui.color_input (id, v=, field=, fr=1, readonly=) -> v
+// ui.color_input (id, v=, field=, fr=1, no_box=, readonly=) -> v
 //
-ui.color_input = function(id, value, field, fr, readonly) {
+ui.color_input = function(id, value, field, fr, no_box, readonly) {
 	let min_w = next_min_w ?? ui.em_input()
 	next_min_w = null
 	let picker_id = id+'.picker'
@@ -10948,7 +10954,8 @@ ui.color_input = function(id, value, field, fr, readonly) {
 			(readonly ? STATE_READONLY : 0)
 			| (ui.focused(id) ? STATE_FOCUSED : 0)
 
-		ui.bb('input', state, 1, 'intense', state)
+		if (!no_box)
+			ui.bb('input', state, 1, 'intense', state)
 		ui.m(ui.sp())
 		ui.min_wh(min_w, ui.line_h())
 		ui.stack('', 1, 's', 'c')
@@ -11018,6 +11025,9 @@ opt:
 	hv         : radio_list: 'h'|'v'.
 	pad_l      : left padding of the control.
 	pad_r      : right padding of the control.
+	no_box     : input, password_input, date_input, color_input,
+	             lookup_input, enum_input, list_dropdown: no background,
+	             border or padding around the control.
 
 */
 
@@ -11027,10 +11037,10 @@ ui.build_input = function(id, value, opt, control, readonly) {
 	ui.min_w(opt.w)
 	if (control == 'input') {
 		value = ui.input(id, value, this,
-			1, opt.text_align, null, readonly)
+			1, opt.text_align, opt.no_box, readonly)
 	} else if (control == 'password_input') {
 		value = ui.password_input(id, value, this,
-			1, opt.text_align, null, readonly)
+			1, opt.text_align, opt.no_box, readonly)
 	} else if (control == 'checkbox') {
 		value = ui.checkbox(id, value, this, 0, 'l', 'c', readonly)
 	} else if (control == 'toggle') {
@@ -11040,20 +11050,20 @@ ui.build_input = function(id, value, opt, control, readonly) {
 			0, 'l', 'c', readonly)
 	} else if (control == 'date_input') {
 		value = ui.date_input(id, value, this,
-			1, opt.text_align ?? this.align, 'c', readonly)
+			1, opt.text_align ?? this.align, 'c', opt.no_box, readonly)
 	} else if (control == 'color_input') {
-		value = ui.color_input(id, value, this, 1, readonly)
+		value = ui.color_input(id, value, this, 1, opt.no_box, readonly)
 	} else if (control == 'lookup_input') {
-		value = ui.lookup_input(id, value, this, 1, readonly)
+		value = ui.lookup_input(id, value, this, 1, opt.no_box, readonly)
 	} else if (control == 'enum_input') {
 		value = ui.enum_input(id, value, this,
-			1, opt.text_align, opt.max_w, readonly)
+			1, opt.text_align, opt.max_w, opt.no_box, readonly)
 	} else if (control == 'enum_toggle') {
 		value = ui.enum_toggle(id, value, this,
 			1, 's', 'c', readonly)
 	} else if (control == 'list_dropdown') {
 		value = ui.list_dropdown(id, opt.items ?? this.enum_items(),
-			value, this, 1, opt.text_align, opt.max_w, readonly)
+			value, this, 1, opt.text_align, opt.max_w, opt.no_box, readonly)
 	} else if (control == 'radio_list') {
 		value = ui.radio_list(id, opt.items ?? this.enum_items(),
 			value, this, opt.hv, 1, 'l', 'c', readonly)
