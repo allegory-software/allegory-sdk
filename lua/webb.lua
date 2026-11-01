@@ -255,7 +255,7 @@ function args(v)
 	end
 end
 
-function post(v)
+function post(v, null_val)
 	if not method'POST' then
 		return
 	end
@@ -272,7 +272,7 @@ function post(v)
 				if ct:has'application/x-www-form-urlencoded' then
 					s = url_parse_args(s)
 				elseif ct:has'application/json' then --prevent ENCTYPE CORS
-					s = json_decode(s, null)
+					s = json_decode(s, null_val)
 				end
 			end
 		end

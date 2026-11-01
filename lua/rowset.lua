@@ -665,7 +665,12 @@ function virtual_rowset(init, ...)
 		elseif isstr(rs.allow) then
 			allow(usr('roles')[rs.allow])
 		end
-		local post = post() or empty
+		local post = post(nil, null) or empty
+		for k, v in pairs(post) do
+			if k ~= 'changes' then
+				post[k] = repl_nulls(v)
+			end
+		end
 		local method = post.exec or 'load'
 		local method = checkfound(rs['exec_'..method], 'command not found')
 		if rs.prepare then rs:prepare() end --prepare() sets rs.params
