@@ -1889,6 +1889,27 @@ ui.nav = function(id, opt) {
 		return has_modified_desc
 	}
 
+	function set_row_collapsed(ri, collapsed) {
+		set_bits(e.row_flags, ri, ROW_COLLAPSED, collapsed)
+		// group rows are rebuilt: keep their state by label path.
+		if (e.row_flags[ri] & ROW_GROUP)
+			if (collapsed == e.start_expanded)
+				toggled_group_paths.add(group_path(ri))
+			else
+				toggled_group_paths.delete(group_path(ri))
+	}
+
+	e.expand_to_view_row = function(ri) {
+		set_bits(e.row_flags, ri, ROW_PASS, true)
+		if (e.visible_i[ri] == NONE) {
+			for (let p = e.parent_ri[ri]; p != NONE; p = e.parent_ri[p]) {
+				set_row_collapsed(p, false)
+				e.row_flags[p] |= ROW_PASS_DESC
+			}
+			update_visible_ris()
+		}
+	}
+
 	// ri = null: change all roots; recursive: change descendants too.
 	// ancestors of modified rows stay expanded so that edits are not hidden.
 	e.set_collapsed = function(ri, collapsed, recursive) {
@@ -1906,13 +1927,7 @@ ui.nav = function(id, opt) {
 			let ri1 = e.tree_ris[i]
 			if ((ri != null || recursive || e.depth[ri1] == 0)
 				&& !has_modified_desc?.[ri1]) {
-				set_bits(row_flags, ri1, ROW_COLLAPSED, collapsed)
-				// group rows are rebuilt: keep their state by label path.
-				if (row_flags[ri1] & ROW_GROUP)
-					if (collapsed == e.start_expanded)
-						toggled_group_paths.add(group_path(ri1))
-					else
-						toggled_group_paths.delete(group_path(ri1))
+				set_row_collapsed(ri1, collapsed)
 				if (e.is_tree)
 					set_bits(row_flags, ri1, ROW_LOAD_RECURSIVE,
 						!collapsed && recursive && has_unloaded_children(ri1))
@@ -3028,7 +3043,7 @@ ui.nav = function(id, opt) {
 		e.row_errors[ri] = undefined
 
 		// Keep the edited row visible until the next filter.
-		set_bits(e.row_flags, ri, ROW_PASS, true)
+		e.expand_to_view_row(ri)
 		return true
 	}
 
