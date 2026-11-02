@@ -72,7 +72,7 @@ ACTIONS
 INPUTS
   LABELS        ui.label  ui.error_label
   TEXT          ui.input  ui.password_input  ui.apply_input
-  INPUT SIZE    ui.em_input  ui.em_input_max  ui.em_input_max_popup
+  INPUT SIZE    ui.input_min_w_em  ui.input_max_w_em  ui.input_max_popup_w_em
   NUMBER        ui.num_slider  ui.slider
   BOOL          ui.checkbox  ui.toggle  ui.toggle_button
   SELECT        ui.enum_input  ui.enum_toggle
@@ -7610,7 +7610,7 @@ BUTTON PARTS
 	ui.button_stack     (id, fr=0, align='l', valign='c')
 	ui.button_bb        (style='button', state)  draw the button background
 	ui.button_text      (s, state)               draw button text
-	ui.button_icon      (font, icon, state)      draw a button icon
+	ui.button_icon      (icon, state)            draw a button icon
 
 */
 
@@ -7634,7 +7634,7 @@ ui.color_def('dark' , 'button-primary', 'readonly' , 0, 0, 0.18)
 ui.button_stack = function(id, fr, align, valign) {
 	ui.focusable(id)
 	ui.keep_focus(id)
-	next_min_h ??= ui.em(1.5)
+	next_min_h ??= ui.em(ui.input_h_em)
 	ui.stack(id, fr ?? 0, align ?? 'l', valign ?? 'c')
 	ui.focus_ring(id)
 }
@@ -7675,19 +7675,21 @@ ui.button_bb = function(style, state) {
 
 ui.button_text = function(s, state) {
 	state = repl(state, 'click', 'hover')
-	next_min_h ??= ui.em(2.2) // force h
 	ui.bold()
 	ui.color('button-text', state)
-	ui.mh(ui.sp2())
 	ui.text('', s, 0, 'c', 'c')
 }
 
-ui.button_icon = function(font, icon, state) {
+ui.button_icon = function(icon, state) {
+	let [icon_font, icon_text] = icons[icon]
+	if (!icon_text)
+		warn_once('unknown icon ', icon)
 	state = repl(state, 'click', 'hover')
-	ui.font(font)
+	ui.font(icon_font)
 	ui.default_font_size(1.5)
 	ui.color('text', state)
-	ui.text('', icon, 0, 'c')
+	next_min_w ??= ui.em(1.5) // force w
+	ui.text('', icon_text, 0, 'c')
 }
 
 ui.end_button_stack = function(state) {
@@ -7707,25 +7709,23 @@ ui.button = function(
 		binding.disabled = !!readonly || binding.disabled
 		readonly = binding.disabled
 	}
-	if (icon)
-		next_min_w ??= ui.em(1.5) // force w
+	next_min_w ??= ui.em(2)
 	ui.button_stack(id, fr, align, valign)
 	let s = ui.state(id, button_update) // button widget state
 	let state = readonly ? 'readonly' : s.state
 	ui.button_bb(style, state)
 	if (icon) {
-		let [icon_font, icon_text] = assert(icons[icon], 'unknown icon ', icon)
 		if (!text) {
-			ui.button_icon(icon_font, icon_text, state)
+			ui.button_icon(icon, state)
 		} else {
-			ui.p(ui.sp1(), 0)
+			ui.ph(ui.sp2())
 			ui.h(0, ui.sp1(), 'c')
-				ui.button_icon(icon_font, icon_text, state)
+				ui.button_icon(icon, state)
 				ui.button_text(text, state)
 			ui.end_h()
 		}
 	} else {
-		ui.p(ui.sp2(), 0)
+		ui.ph(ui.sp2())
 		ui.button_text(text, state)
 	}
 	if (action)
@@ -8497,7 +8497,7 @@ function hvlist(hv, id, items, value, field,
 			let sides = opt?.item_gap ? (!i ? '-r' : i == items.length-1 ? '-l' : null) : null
 			ui.bb(item_bg_color, item_color_state, sides, null, null, ui.sp05())
 			let item_color = opt?.item_color ?? 'text'
-			ui.color(item_color, item_text_color_state)
+			ui.color(item_color, item_color_state)
 			ui.text('', field ? field.to_text(item) : item,
 				0,
 				opt?.item_align ?? field?.align ?? (hv == 'v' ? 'l' : 'c'),
@@ -8588,20 +8588,12 @@ TEXT INPUTS
 	ui.input          (id, v=, field=, fr=1, align='s', valign='c', text_align='s', no_box=, readonly=) -> v
 	ui.password_input (id, v=, field=, fr=1, align='s', valign='c', text_align='s', no_box=, readonly=) -> v
 
-DEFAULT WIDTHS
-
-	ui.em_input           () -> ui.em(ui.input_min_w_em)
-	ui.em_input_max       () -> ui.em(ui.input_max_w_em)
-	ui.em_input_max_popup () -> ui.em(ui.input_max_popup_w_em)
-
 */
 
+ui.input_h_em = 2
 ui.input_min_w_em = 10
 ui.input_max_w_em = 12
 ui.input_max_popup_w_em = 24
-ui.em_input           = () => ui.em(ui.input_min_w_em)
-ui.em_input_max       = () => ui.em(ui.input_max_w_em)
-ui.em_input_max_popup = () => ui.em(ui.input_max_popup_w_em)
 
 let input_pad_x_em = 0.5
 let input_pad_y_em = 0.5
@@ -8615,15 +8607,16 @@ ui.input = function(id, value, field, fr, align, valign, text_align, no_box,
 	}
 	readonly ??= field?.readonly
 	let focused = ui.focused(id)
-	let text_w = next_min_w ?? ui.em_input()
+	let text_w = next_min_w ?? ui.em(ui.input_min_w_em)
 	next_min_w = null
 	if (!no_box) {
+		ui.default_min_h(ui.em(ui.input_h_em))
 		ui.stack('', fr ?? 1, align ?? 's', valign ?? 'c')
 		let state =
 			(readonly ? STATE_READONLY : 0)
 			| (focused ? STATE_FOCUSED : 0)
 		ui.bb('input', state, 1, 'intense', state)
-		ui.p(ui.em(input_pad_x_em), ui.em(input_pad_y_em))
+		ui.ph(ui.em(input_pad_x_em))
 		ui.color('text', state)
 	}
 	ui.text_w(text_w)
@@ -8793,11 +8786,12 @@ ui.num_slider = function(id, value, field, fr, align, valign, readonly) {
 	fr ??= 1
 	align ??= 's'
 	valign ??= 'c'
-	let min_w = next_min_w ?? ui.em_input()
+	let min_w = next_min_w ?? ui.em(ui.input_min_w_em)
 	next_min_w = null
 
 	let text = field.to_text(value)
 
+	ui.default_min_h(ui.em(ui.input_h_em))
 	ui.stack(id, fr, align, valign)
 		let state =
 			(readonly ? STATE_READONLY : 0)
@@ -8817,7 +8811,7 @@ ui.num_slider = function(id, value, field, fr, align, valign, readonly) {
 				}
 			ui.end_stack()
 		ui.end_h()
-		ui.p(ui.em(input_pad_x_em), ui.em(input_pad_y_em))
+		ui.ph(ui.em(input_pad_x_em))
 		ui.color('text', state)
 		ui.text_w(min_w)
 		if (show_input)
@@ -8963,7 +8957,7 @@ slider.create = function(cmd, id, value, field, fr, align, valign, readonly) {
 	fr ??= 1
 	align ??= 's'
 	valign ??= 'c'
-	let min_w = next_min_w ?? ui.em_input()
+	let min_w = next_min_w ?? ui.em(ui.input_min_w_em)
 	let min_h = next_min_h ?? ui.em((markers ? 2.8 : 1.2))
 	next_min_w = null
 	next_min_h = null
@@ -9679,13 +9673,14 @@ ui.dropdown = function(id, update, want_open, fr, align, valign, no_box,
 	let open = s.open
 
 	let box_pad_x = no_box ? 0 : ui.em(input_pad_x_em)
-	let box_pad_y = no_box ? 0 : ui.em(input_pad_y_em)
 	s.pad_l = px1 + box_pad_x
 	s.pad_r = px2 + box_pad_x
-	let pad_t = py1 + box_pad_y
-	let pad_b = py2 + box_pad_y
+	let pad_t = py1
+	let pad_b = py2
 	ui.p(0)
 
+	if (!no_box)
+		ui.default_min_h(ui.em(ui.input_h_em))
 	ui.v(fr ?? 1, 0, align ?? 's', valign ?? 'c')
 
 		ui.focus_group(open, null, id)
@@ -9758,7 +9753,7 @@ function draw_value_row(value, field, edge_inset, chevron_w, max_w, align) {
 		ui.text('', value == null ? ''
 			: field ? field.to_text(value) : value,
 			1, align, 'c',
-			max_w ?? ui.em_input_max(),
+			max_w ?? ui.em(ui.input_max_w_em),
 		)
 		if (align == 'l')
 			draw_chevron(chevron_w, 'r', chevron_mx)
@@ -9830,7 +9825,7 @@ ui.list_dropdown = function(
 	let state =
 		(readonly ? STATE_READONLY : 0)
 		| (ui.focused(id) ? STATE_FOCUSED : 0)
-	ui.default_min_w(ui.em_input())
+	ui.default_min_w(ui.em(ui.input_min_w_em))
 	let open = ui.dropdown(id, list_dropdown_update, want_open && !readonly,
 		fr, align, valign, no_box, state)
 	value = set_value(id, s, value, field)
@@ -9842,7 +9837,7 @@ ui.list_dropdown = function(
 
 		ui.color('text', state)
 		draw_value_row(value, field, text_align == 'l' ? s.pad_r : s.pad_l,
-			chevron_w, max_w ?? ui.em_input_max(), text_align)
+			chevron_w, max_w ?? ui.em(ui.input_max_w_em), text_align)
 
 	ui.dropdown_picker(id, 'b', text_align == 'r' ? ']s' : 's')
 
@@ -9857,7 +9852,7 @@ ui.list_dropdown = function(
 				ui.scrollbox(picker_id+'.sb', 1, 'contain', 'auto', 's', 's')
 					let opt = s.picker_opt ??= {} // picker list options
 					opt.item_align = text_align
-					opt.max_w = max_w ?? ui.em_input_max_popup()
+					opt.max_w = max_w ?? ui.em(ui.input_max_popup_w_em)
 					opt.item_pad_l = s.pad_l
 					opt.item_pad_r = s.pad_r
 					opt.item_pad_y = ui.em(input_pad_y_em)
@@ -10279,7 +10274,7 @@ ui.date_input = function(
 	let state =
 		(readonly ? STATE_READONLY : 0)
 		| (focused ? STATE_FOCUSED : 0)
-	ui.default_min_w(ui.em_input())
+	ui.default_min_w(ui.em(ui.input_min_w_em))
 	let open = ui.dropdown(id, null, want_open && !readonly, fr, align, valign,
 		no_box, state)
 	if (!open && ui.focus_inside(picker_id))
@@ -10925,7 +10920,7 @@ ui.color_input = function(id, value, field, fr, align, valign, no_box,
 	let state =
 		(readonly ? STATE_READONLY : 0)
 		| (ui.focused(id) ? STATE_FOCUSED : 0)
-	ui.default_min_w(ui.em_input())
+	ui.default_min_w(ui.em(ui.input_min_w_em))
 	let open = ui.dropdown(id, null, want_open && !readonly, fr, align, valign,
 		no_box, state)
 	if (!open && ui.focus_inside(picker_id))
@@ -10940,7 +10935,7 @@ ui.color_input = function(id, value, field, fr, align, valign, no_box,
 				ui.m(ui.em(ui.color_swatch_margin_em))
 			else
 				ui.min_h(ui.line_h())
-			ui.stack('', 1, 's', 's')
+			ui.stack('', 1, 's', no_box ? 's' : 'c')
 				if (field.from_input(value) !== undefined)
 					ui.bb(':'+value)
 			ui.end_stack()
@@ -11860,10 +11855,10 @@ function tabbox(
 		} else {
 			ui.text('', title.text)
 		}
-		ui.min_w(ui.em(1.25))
+		ui.min_w(ui.em(1.55))
 		ui.stack('', 0)
 		if (has_close_button) {
-			ui.font_size(1)
+			ui.font_size(0.85)
 			ui.min_wh(0, 0)
 			// using id+'.tabclose' instead of uid+'.tabbox.close'
 			// because that prefix is for ui.dock() drag state.

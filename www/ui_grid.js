@@ -746,8 +746,8 @@ function init(id, e) {
 	// values typed in the inputs.
 	let param_bar_vals = obj() // {param name -> value typed in the param bar}
 	function build_param_bar(has_inputs, has_master_toggles) {
+		ui.p(ui.sp2(), ui.sp05())
 		ui.h(0, sp, 's', 'c')
-			ui.p(sp, ui.sp05())
 			ui.bb('bg0', null, 'b', 'intense')
 			if (has_master_toggles)
 				build_master_toggles()
@@ -760,7 +760,7 @@ function init(id, e) {
 				if (!(name in param_bar_vals))
 					param_bar_vals[name] = e.param_bar_val(name)
 				if (ui.field_input(param_id, param_bar_vals[name],
-						{field: field, label_pos: 'left'}) === undefined)
+						{field: field, label_pos: 'left'}, 0, 'l') === undefined)
 					has_invalid = true
 				// user's value this pass, or nothing
 				let v = ui.interaction_value(param_id)
@@ -2116,7 +2116,7 @@ function init(id, e) {
 		sp2 = ui.sp2()
 		font_size = ui.em(1)
 		line_height = font_size * 1
-		cell_h = round(line_height + 2 * sp + e.cell_border_h_width)
+		cell_h = ui.em(ui.input_h_em)
 		row_w    = clamp_vertical_w(e.row_w    * font_size) + 2 * sp2
 		header_w = clamp_vertical_w(e.header_w * font_size) + 2 * sp2
 		header_h = cell_h

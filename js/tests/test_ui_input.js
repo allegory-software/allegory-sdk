@@ -60,9 +60,10 @@ function build(fn) {
 }
 `, ctx)
 Object.assign(ctx.ui, {
-	focusable() {}, stack() {}, end_stack() {}, bb() {}, p() {}, color() {},
+	focusable() {}, stack() {}, end_stack() {}, bb() {}, p() {}, ph() {},
+	color() {},
 	sp: () => 1,
-	em_input: () => 100,
+	em: em => Math.round((em ?? 1) * 10),
 })
 load_section('let state_map =', 'ui.set_state_of =')
 load_section('ui.input_value = function(', '//// TEXT BOX')
@@ -75,7 +76,7 @@ load_section('const TEXT_ASC', 'ui.heading =')
 load_section('ui.select_text =', 'function remember_select_all')
 load_section('function read_input_sel', 'function input_selection_changed')
 load_section('ui.process_shared_screen_input =', '// a remote input is wired')
-load_section('ui.input = function', '//// NUM_SLIDER')
+load_section('ui.input_h_em =', '//// NUM_SLIDER')
 
 const ui = ctx.ui
 const number_field = ui.create_field({

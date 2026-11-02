@@ -5379,7 +5379,7 @@ ui.lookup_input = function(id, value, field, fr, align, valign, no_box,
 	let state = disabled
 		? (focused ? 'readonly focused' : 'readonly')
 		: (focused ? 'focused' : null)
-	ui.default_min_w(ui.em_input())
+	ui.default_min_w(ui.em(ui.input_min_w_em))
 	let open = ui.dropdown(id, null, want_open && !disabled, fr, align, valign,
 		no_box, state)
 	if (!open && ui.focus_inside(picker_id))

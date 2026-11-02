@@ -667,7 +667,7 @@ function virtual_rowset(init, ...)
 		end
 		local post = post(nil, null) or empty
 		for k, v in pairs(post) do
-			if k ~= 'changes' then
+			if k ~= 'changes' and k ~= 'params' then
 				post[k] = repl_nulls(v)
 			end
 		end
