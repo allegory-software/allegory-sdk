@@ -5333,6 +5333,23 @@ function lookup_input_update(id, s) {
 	if (!disabled && !field.not_null && ui.focused(id)
 		&& ui.keydown('delete'))
 		interaction_value = null
+
+	// select with the arrow keys when dropdown is closed.
+	if (!disabled && !s.open && ui.focused(id)) {
+		let d =
+			ui.keydown('arrowup'  ) && -1 ||
+			ui.keydown('arrowdown') &&  1
+			|| 0
+		if (d) {
+			let val_field = lookup_val_field(field, ln)
+			let value = s.input_value
+			let ln_ri0 = value != null ? ln.lookup(val_field.name, [value]) : null
+			let [ln_ri1] = ln.first_focusable_cell(ln_ri0, null, d, 0)
+			interaction_value = ln_ri1 != null
+				? ln.cell_input_val(ln_ri1, val_field.fi) : null
+		}
+	}
+	
 	ui.set_interaction_value(id, s, interaction_value)
 }
 

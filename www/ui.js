@@ -8405,24 +8405,27 @@ function list_update(id, s) {
 	let focused = ui.focused(id)
 	let focused_item0 = s.focused_item
 	let focused_item = focused_item0
-	let next_key = s.hv == 'h' ? 'arrowright' : 'arrowdown'
-	let prev_key = s.hv == 'h' ? 'arrowleft' : 'arrowup'
-	let d = focused && (
-			ui.keydown('home'  ) && -1/0 ||
-			ui.keydown('end'   ) &&  1/0 ||
-			ui.keydown(prev_key) &&   -1 ||
-			ui.keydown(next_key) &&    1
-		) || 0
-	let page_direction = focused && s.hv == 'v' && (
-			ui.keydown('pageup'  ) && -1 ||
-			ui.keydown('pagedown') &&  1
-		) || 0
-	if (page_direction) {
-		d = page_direction
-		if (items.length) {
-			let viewport_h = ui.state_of(id+'.viewport', 'h')
-			let row_h = (s.h + s.item_gap) / items.length
-			d *= max(1, floor(viewport_h / row_h))
+	let d = 0
+	if (focused) {
+		let next_key = s.hv == 'h' ? 'arrowright' : 'arrowdown'
+		let prev_key = s.hv == 'h' ? 'arrowleft'  : 'arrowup'
+	 	d = (
+				ui.keydown('home'  ) && -1/0 ||
+				ui.keydown('end'   ) &&  1/0 ||
+				ui.keydown(prev_key) &&   -1 ||
+				ui.keydown(next_key) &&    1
+			) || 0
+		let page_direction = s.hv == 'v' && (
+				ui.keydown('pageup'  ) && -1 ||
+				ui.keydown('pagedown') &&  1
+			) || 0
+		if (page_direction) {
+			d = page_direction
+			if (items.length) {
+				let viewport_h = ui.state_of(id+'.viewport', 'h')
+				let row_h = (s.h + s.item_gap) / items.length
+				d *= max(1, floor(viewport_h / row_h))
+			}
 		}
 	}
 	let focused_item_changed = d && 'key'
@@ -8458,7 +8461,8 @@ function list_update(id, s) {
 	s.focused_item_changed = focused_item0 !== focused_item
 		? focused_item_changed : false
 	s.focused_item = focused_item
-	let has_enter = value != null && ui.focused(id) && ui.keydown('enter')
+	let has_enter = value != null && ui.focused(id)
+		&& ui.keydown('enter')
 	s.picked = !is_multi && value_changed == 'click' || !!has_enter
 	if (has_enter)
 		ui.capture_keys()
@@ -12228,7 +12232,7 @@ function hit_tablist_pane(node, id, cs) {
 	if (!(fx >= 0 && fx < 1 && fy >= 0 && fy < 1))
 		return false
 	let edge_fr = min(fx, 1 - fx, fy, 1 - fy) // distance to the nearest edge
-	let area = edge_fr >= dock_edge_fr ? 'center'
+	let area = !node.tabs.length || edge_fr >= dock_edge_fr ? 'center'
 		: edge_fr == fx ? 'left'
 		: edge_fr == 1 - fx ? 'right'
 		: edge_fr == fy ? 'top'

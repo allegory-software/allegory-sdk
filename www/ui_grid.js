@@ -148,12 +148,10 @@ function make_help_lines(horiz) {
 		'',
 		'Edit',
 		'',
-		'Enter: Enter / exit cell edit mode',
-		'F2: Enter / exit vertical edit mode',
-		'Ctrl+Enter: Enter / exit quick-edit mode',
-		horiz
-			? 'Ctrl+\u2190\u2192: Move & quick-edit cells'
-			: 'Ctrl+\u2191\u2193: Move & quick-edit cells',
+		'Enter: Edit mode on/off',
+		'F2: Vertical edit mode on/off',
+		'Ctrl+Enter: Quick-edit mode on/off',
+		'Ctrl+\u2190\u2191\u2192\u2193: Quick-edit mode move',
 		'Esc: Cancel the edit',
 		'Ctrl+Delete: Empty the cells',
 		horiz
@@ -310,6 +308,7 @@ function init(id, e) {
 	let edit_ri = null // edited row, or null when no editor is built
 	let edit_field = null // edited field
 	let editor_id = null // id of the editor widget
+	let editor_text_id = null // id of the built editor's text box, or null
 	let want_dropdown_open = false // open the editor's dropdown when built
 	let want_editor_focus = false // focus the editor when built
 
@@ -332,19 +331,18 @@ function init(id, e) {
 		let field = focused_field()
 		if (!field.has_editor)
 			return [e.edit_sel_i, e.edit_sel_len]
-		let text_id = ui.state_of(editor_id, 'text_id')
-		if (!text_id)
+		if (!editor_text_id)
 			return [0, 1/0]
-		return ui.text_selection(text_id, e.field_align(field) == 'right', true)
+		return ui.text_selection(editor_text_id,
+			e.field_align(field) == 'right', true)
 	}
 
 	function caret_at_edge(d) {
-		let text_id = ui.state_of(editor_id, 'text_id')
-		if (!text_id)
+		if (!editor_text_id)
 			return true
 		if (edit_text_selection()[1] == 1/0) // select-all
 			return true
-		let [i, len] = ui.text_selection(text_id, d > 0)
+		let [i, len] = ui.text_selection(editor_text_id, d > 0)
 		return !len && i == (d < 0 ? 0 : -1)
 	}
 
@@ -643,6 +641,7 @@ function init(id, e) {
 		edit_field = field
 		editor_id = field
 			? (field.lookup_rowset_name || field.type) + '.editor' : null
+		editor_text_id = null
 		want_dropdown_open = !!field?.has_editor && e.edit_open_popup
 		if (field?.has_editor && (focused || had_focus)) {
 			// Request focus when we build the editor later in this pass.
@@ -982,13 +981,13 @@ function init(id, e) {
 				editor_opt.text_align = align
 				editor_opt.open = want_dropdown_open
 				field.build_input(editor_id, input_val, editor_opt, field.control)
+				editor_text_id = ui.state_of(editor_id, 'text_id') ?? null
 				want_dropdown_open = false
 				if (want_editor_focus) {
-					let text_id = ui.state_of(editor_id, 'text_id')
-					if (text_id)
-						ui.select_text(text_id, e.edit_sel_i, e.edit_sel_len)
+					if (editor_text_id)
+						ui.select_text(editor_text_id, e.edit_sel_i, e.edit_sel_len)
 					if (!ui.dropdown_opened(editor_id))
-						ui.focus(text_id ?? editor_id, true)
+						ui.focus(editor_text_id ?? editor_id, true)
 					want_editor_focus = false
 				}
 				ui.end_focus_group()
@@ -1278,6 +1277,37 @@ function init(id, e) {
 		s.interaction_value = undefined
 		let has_input = false
 
+		// set keyboard state
+		focused = ui.focused(id) || ui.focused(editor_text_id || editor_id)
+		shift = ui.keypressed('shift')
+		ctrl  = ui.keypressed('ctrl')
+
+		let grid_cols =
+			keydown(horiz ? 'arrowleft'  : 'arrowup'  ) && -1 ||
+			keydown(horiz ? 'arrowright' : 'arrowdown') &&  1
+
+		let grid_rows =
+			keydown(horiz ? 'arrowup'   : 'arrowleft' ) && -1 ||
+			keydown(horiz ? 'arrowdown' : 'arrowright') &&  1 ||
+			(ctrl && (keydown('home') || keydown('pageup'  ))) && -1/0 ||
+			(ctrl && (keydown('end' ) || keydown('pagedown'))) &&  1/0
+
+		if ((grid_cols || grid_rows) && is_edit_built() && edit_field.has_editor) {
+			let can_move = e.auto_jump_cells && !shift
+			let caret_dir = horiz ? grid_cols : grid_rows
+			if (can_move && caret_dir)
+				can_move = ctrl && caret_at_edge(caret_dir)
+			if (!can_move) {
+				grid_cols = null
+				grid_rows = null
+			}
+		}
+		let grid_enter = ctrl && keydown('enter')
+
+		// capture arrows before a drodpown editor takes them to change cell value.
+		if (grid_cols || grid_rows || grid_enter)
+			ui.capture_keys()
+
 		if (is_edit_built()) {
 			let value = ui.interaction_value(editor_id)
 			if (value !== undefined)
@@ -1317,14 +1347,6 @@ function init(id, e) {
 				&& !ui.focus_inside(id+'.cells')
 			)
 			e.exit_edit()
-
-		// set keyboard state
-
-		// editing moves the focus to the editor, but these keys are the grid's.
-		let editor_text_id = editor_id && ui.state_of(editor_id, 'text_id')
-		focused = ui.focused(id) || ui.focused(editor_text_id || editor_id)
-		shift = ui.keypressed('shift')
-		ctrl  = ui.keypressed('ctrl')
 
 		// check mouse state ---------------------------------------------------
 
@@ -1797,31 +1819,19 @@ function init(id, e) {
 
 		// process keyboard input ----------------------------------------------
 
-		if (ui.key_events.length)
+		if (ui.key_events.length || grid_cols || grid_rows || grid_enter)
 			if ((function() {
-
-		let left_arrow  =  horiz ? 'arrowleft'  : 'arrowup'
-		let right_arrow =  horiz ? 'arrowright' : 'arrowdown'
-		let up_arrow    = !horiz ? 'arrowleft'  : 'arrowup'
-		let down_arrow  = !horiz ? 'arrowright' : 'arrowdown'
 
 		let ri = e.focused_ri
 		let field = focused_field()
-		let clickable_cell = ri != null && field
-			&& e.cell_clickable(ri, field.fi)
+		let clickable_cell = ri != null && field && e.cell_clickable(ri, field.fi)
 		let has_editor = is_edit_built() && edit_field.has_editor
 
 		if (keydown('f1'))
 			return false
 
 		// same-row field navigation.
-		if (keydown(left_arrow) || keydown(right_arrow)) {
-
-			let cols = keydown(left_arrow) ? -1 : 1
-
-			let move = !has_editor
-				|| (e.auto_jump_cells && !shift && (!horiz || ctrl)
-					&& (!horiz || ctrl && caret_at_edge(cols)))
+		if (grid_cols) {
 
 			let all
 			if (!horiz) {
@@ -1832,40 +1842,43 @@ function init(id, e) {
 				all = ctrl
 			}
 
-			if (move) {
-				has_input = true
-				if (e.focus_next_cell(cols, {
-					sel_i: all ? 0 : cols > 0 ? 0 : -1,
-					sel_len: all ? 1/0 : 0,
-					select: shift ? 'expand' : null,
-					enter_edit: ctrl,
-					input: e,
-				}))
-					return false
-			}
+			has_input = true
+			if (e.focus_next_cell(grid_cols, {
+				sel_i: all ? 0 : grid_cols > 0 ? 0 : -1,
+				sel_len: all ? 1/0 : 0,
+				select: shift ? 'expand' : null,
+				enter_edit: ctrl,
+				input: e,
+			}))
+				return false
 
 		}
 
-		let rows
-		if      (keydown(up_arrow  )) rows = -1
-		else if (keydown(down_arrow)) rows =  1
-		else if (keydown('pageup'  )) rows = -(ctrl ? 1/0 : page_row_count)
+		let rows = grid_rows
+		if      (keydown('pageup'  )) rows = -(ctrl ? 1/0 : page_row_count)
 		else if (keydown('pagedown')) rows =  (ctrl ? 1/0 : page_row_count)
 		else if (keydown('home'    )) rows = -1/0
 		else if (keydown('end'     )) rows =  1/0
-		let move_rows = rows && (!has_editor
-			|| (e.auto_jump_cells && !shift
-				&& (horiz || ctrl && caret_at_edge(rows))))
+		let move_rows = rows
+		if (rows) {
+			if (grid_cols || grid_rows || !has_editor) {
+				move_rows = true
+			} else {
+				move_rows = e.auto_jump_cells && !shift
+				if (move_rows && !horiz)
+					move_rows = ctrl && caret_at_edge(rows)
+			}
+		}
 
 		// insert with the arrow down key on the last focusable row.
-		if (move_rows && keydown(down_arrow) && !shift) {
+		if (move_rows && grid_rows == 1 && !shift) {
 			if (e.is_last_row_focused()
 				&& e.insert_rows([null], null, {input: e, focus_it: true}).length)
 				return false
 		}
 
 		// remove last row with the arrow up key if not edited.
-		if (move_rows && keydown(up_arrow)) {
+		if (move_rows && grid_rows == -1) {
 			if (e.is_last_row_focused() && ri != null) {
 				if (e.is_new(ri) && !e.is_row_edited(ri)) {
 					let editing = e.editing
@@ -1890,6 +1903,7 @@ function init(id, e) {
 				sel_i: sel_i,
 				sel_len: sel_len,
 				select: shift ? 'expand' : null,
+				enter_edit: ctrl,
 				input: e,
 			}))
 				return false
@@ -1906,7 +1920,7 @@ function init(id, e) {
 		}
 
 		// Enter: toggle edit mode, and navigate on exit
-		if (keydown('enter')) {
+		if (grid_enter || keydown('enter')) {
 			if (e.quicksearch_text) {
 				has_input = true
 				e.quicksearch(e.quicksearch_text, quicksearch_fi(),
@@ -2065,13 +2079,12 @@ function init(id, e) {
 		// grid must not read the editor on the frame that it moves the edit
 		// to another cell.
 		if (is_edit_built() && edit_field.has_editor) {
-			let has_text_box = !!ui.state_of(editor_id, 'text_id')
 			if (ui.dropdown_picked(editor_id)) {
 				let advance = e.advance_on_exit && e.advance_on_enter
 				e.exit_edit()
 				if (advance)
 					advance_edit(false, 1)
-			} else if (ui.dropdown_closed(editor_id) && !has_text_box) {
+			} else if (ui.dropdown_closed(editor_id) && !editor_text_id) {
 				e.exit_edit()
 			}
 		}
