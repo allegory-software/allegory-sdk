@@ -2,6 +2,8 @@ require'rowset'
 require'proc'
 require'ipv6'
 
+--process tree ---------------------------------------------------------------
+
 rowset.os_explorer_processes = virtual_rowset(function(rs)
 	rs.fields = {
 		{name = 'name', label = 'Process'},
@@ -35,6 +37,8 @@ rowset.os_explorer_processes = virtual_rowset(function(rs)
 		end
 	end
 end)
+
+--file tree ------------------------------------------------------------------
 
 --scanned trees, kept until the process exits and never updated.
 local trees = {} -- {root folder path -> {root_row =, child_rows =}}
@@ -179,6 +183,61 @@ rowset.os_explorer_files = virtual_rowset(function(rs)
 		res.rows = rows
 	end
 end)
+
+--editable text files --------------------------------------------------------
+
+local max_file_size = 16 * 1024^2
+
+local function check_file_contents(contents)
+	checkarg(#contents <= max_file_size, 'file exceeds 16 MiB')
+	checkarg(not contents:sub(1, 8000):find('\0', 1, true), 'binary file')
+	return contents
+end
+
+local function file_contents_row(path)
+	local attrs = file_attr(path, nil, false) -- attributes without dereferencing
+	if not attrs or attrs.type ~= 'file' then return end
+	checkarg(attrs.size <= max_file_size, 'file exceeds 16 MiB')
+	local contents = check_file_contents(checkfound(load(path, max_file_size)))
+	return {path, contents ~= '' and contents or null}
+end
+
+rowset.os_explorer_file = virtual_rowset(function(rs)
+	rs.fields = {
+		{name = 'path', not_null = true, readonly = true},
+		{name = 'contents', label = 'Contents', maxlen = max_file_size},
+	}
+	rs.pk = 'path'
+	rs.params = {
+		path = {
+			for_cols = 'path',
+			lookup_rowset_name = 'os_explorer_files', lookup_cols = 'path',
+			accept_many = false,
+		},
+	}
+	function rs:load_rows(res, params)
+		res.rows = {}
+		if params.path and params.path ~= null then
+			local row = file_contents_row(params.path)
+			if row then res.rows[1] = row end
+		end
+	end
+	function rs:load_row(values)
+		return file_contents_row(values.path)
+	end
+	function rs:update_row(values)
+		local path = values['path:old'] -- loaded identity, independent of params
+		local attrs = checkfound(file_attr(path, nil, false))
+		checkarg(attrs.type == 'file', 'not a regular file')
+		checkarg(attrs.size <= max_file_size, 'file exceeds 16 MiB')
+		local contents = values.contents -- null represents an empty file
+		if contents == null then contents = '' end
+		check_file_contents(contents)
+		save({path = path, file_perms = attrs.perms}, contents)
+	end
+end)
+
+--open ports -----------------------------------------------------------------
 
 local address_words = ctype'uint32_t[4]'() -- native-endian address words
 

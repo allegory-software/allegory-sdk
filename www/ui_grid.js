@@ -859,6 +859,8 @@ function init(id, e) {
 			fg = 'faint'
 		else if (is_null || is_empty || disabled)
 			fg = 'label'
+		else if (field.text_color)
+			fg = field.text_color(e, ri, input_val)
 		else
 			fg = 'text'
 

@@ -31,7 +31,8 @@ let cmps_src = glue_src.slice(
 	glue_src.indexOf('function binsearch'))
 
 let glue = cmps_src +
-	['array_resize', 'insert', 'remove', 'insert_n', 'binsearch']
+	['array_resize', 'insert', 'remove', 'insert_n', 'binsearch',
+		'escape_regexp']
 		.map(glue_fn).join('\n')
 
 let Lezer = {
@@ -51,9 +52,14 @@ let states = new Map()
 
 function state(id, k) {
 	let s = states.get(id)
+	let is_new = !s
 	if (!s) {
 		s = Object.create(null)
 		states.set(id, s)
+	}
+	if (typeof k == 'function') {
+		if (!is_new) k(id, s)
+		return s
 	}
 	return k ? s[k] : s
 }
@@ -66,6 +72,7 @@ let ui = {
 	widget(){}, cmd(){}, keepalive(){}, on_free(){}, focus(){}, focusable(){},
 	capture_keydown(){}, capture_keyup(){}, capture_tab(){},
 	scroll_to_view_rect(){}, measure(){},
+	min_w(){}, min_h(){}, min_wh(){},
 	v(){}, end_v(){}, h(){}, end_h(){}, stack(){}, end_stack(){},
 	scrollbox(){}, end_scrollbox(){}, bb(){}, tabs(){},
 	code_edit_sidebar(){},
@@ -78,6 +85,20 @@ let ui = {
 	em: n => Math.round((n ?? 1) * FONT_SIZE),
 	focused: () => true,
 	state,
+	state_of: (id, key) => key ? states.get(id)?.[key] : states.get(id),
+	input_field: id => states.get(id)?.field,
+	create_field: opt => ({to_input: String, ...opt}),
+	set_value(id, s, value, field) {
+		value = s.interaction_value !== undefined ? s.interaction_value
+			: value === undefined ? s.input_value ?? null : value
+		s.input_value = value
+		s.field = field
+		return value
+	},
+	set_interaction_value(id, s, value) { s.interaction_value = value },
+	value: id => states.get(id)?.interaction_value
+		?? states.get(id)?.input_value,
+	hit: () => null,
 	drag: () => !drag_state ? empty_cs : Object.assign(state('drag'), {
 		hover    : drag_state == 'hover',
 		drag     : drag_state == 'drag',
@@ -105,16 +126,15 @@ let ctx = {
 	isarray: Array.isArray,
 	noop: () => {},
 	pr: (...a) => console.log(...a),
-	empty_array: [],
+	empty_array: [], empty: {},
 	navigator: {clipboard: {writeText: s => copies.push(s)}},
 	ui, Lezer,
 }
 ctx.window = ctx
 vm.createContext(ctx)
 vm.runInContext(glue, ctx, {filename: 'glue-subset.js'})
+ctx.glue = ctx
 vm.runInContext(fs.readFileSync(SRC, 'utf8'), ctx, {filename: SRC})
-
-let ed
 
 function open_text(s) {
 	states = new Map()
@@ -123,15 +143,14 @@ function open_text(s) {
 	drag_state = null
 	ui.mx = 0
 	ui.my = 0
-	ui.code_edit('ed', {code: s, lang: 'html'}, 100, 100)
-	ed = states.get('ed').view
+	ui.code_edit('ed', s, null, {lang: 'html'})
 	state('ed.text_contentbox').x = 0
 	state('ed.text_contentbox').y = 0
 }
 
 function press(full_key, key, key_char, ctrl, alt, shift) {
 	key_events = [['down', full_key, key, key_char, !!ctrl, !!alt, !!shift]]
-	ed.render(100, 100)
+	ui.code_edit('ed')
 	key_events = []
 }
 
@@ -139,13 +158,13 @@ function click_at(line, col, state_name) {
 	ui.mx = col * CHAR_W
 	ui.my = line * LINE_H + 1
 	drag_state = state_name
-	ed.render(100, 100)
+	ui.code_edit('ed')
 	drag_state = null
 }
 
 function dump() {
 	captured = null
-	ed.render(100, 100)
+	ui.code_edit('ed')
 	return {lines: captured[12].slice(), cursor: captured[16]}
 }
 

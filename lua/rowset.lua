@@ -47,7 +47,7 @@ Field attributes to set:
 		max_w            : px            max grid column width
 		null_text        : ''            text for null
 		empty_text       : ''            text for ''
-		text_color       : JS expression using row.COL, returning a color name
+		text_color       : JS expression using row.COL and value -> color name
 		internal         : t             cannot be made visible
 		hidden           : t             not visible by default
 	EDITING

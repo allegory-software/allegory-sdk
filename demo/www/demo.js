@@ -110,6 +110,9 @@ function saved_state_grid(id) {
 	ui.grid(id, {rowset_name: 'saved_state'})
 }
 
+// Use distinct state IDs for chooser buttons and replacement widgets.
+// ui.state(id, update) can otherwise run the widget's update on the
+// previous button state, before the widget initializes its fields.
 function app_dock_empty_tab(tab) {
 	let tab_id = 'app_dock.tab.'+tab.id
 	v(0, sp2(), 'c', 'c')
@@ -134,6 +137,9 @@ function app_dock_empty_tab(tab) {
 		if (button(tab_id+'.folder_tree', 'folder', 'Folder tree'))
 			set_dock_tab('app_dock', tab.id,
 				{kind: 'folder_tree', label: 'Folder tree', icon: 'folder'})
+		if (button(tab_id+'.file_editor_button', 'file-code', 'File editor'))
+			set_dock_tab('app_dock', tab.id,
+				{kind: 'file_editor', label: 'File editor', icon: 'file-code'})
 		if (button(tab_id+'.open_ports', 'network', 'Open ports'))
 			set_dock_tab('app_dock', tab.id,
 				{kind: 'open_ports', label: 'Open ports', icon: 'network'})
@@ -165,6 +171,8 @@ function app_dock_tab(tab) {
 		ui.process_tree('app_dock.tab.'+tab.id+'.process_tree')
 	} else if (tab.kind == 'folder_tree') {
 		ui.folder_tree('app_dock.tab.'+tab.id+'.folder_tree', '~')
+	} else if (tab.kind == 'file_editor') {
+		ui.file_editor('app_dock.tab.'+tab.id+'.file_editor')
 	} else if (tab.kind == 'open_ports') {
 		ui.open_ports('app_dock.tab.'+tab.id+'.open_ports')
 	} else if (tab.kind == 'saved_state') {

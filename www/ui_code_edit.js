@@ -44,7 +44,7 @@ IMPL. NOTES
 const {
 	assert,
 	binsearch, insert_n,
-	noop, assign, ceil, clamp, escape_regexp, floor, isarray,
+	noop, assign, ceil, clamp, empty, escape_regexp, floor, isarray,
 	max, min, remove_value, round,
 } = glue
 
@@ -420,7 +420,7 @@ ui.widget('code_edit_text', {
 	}
 })
 
-function code_edit_view(id, opt) {
+function code_edit_view(id, opt, s) {
 
 	let e = {}
 
@@ -433,10 +433,11 @@ function code_edit_view(id, opt) {
 
 	// text changes from edits, flushed at the end of the frame.
 	let changes = [] // [line1, char1, removed_n1, inserted_n1, ...]
+	let value_changed = false
 
 	// parsing/highlighting state.
-	let lang = opt.lang ?? 'html'
-	let parser = assert(Lezer.parsers[lang], 'invalid language ', lang)
+	let parser = Object.hasOwn(Lezer.parsers, opt.lang)
+		? Lezer.parsers[opt.lang] : null
 	let syntax_tree // per Lezer parsing
 	let line_colors = [] // token colors: [[char, width, color], ...], ...]  1:1 with lines
 
@@ -870,6 +871,7 @@ function code_edit_view(id, opt) {
 		undo_group = null
 		cursor = {line: 0, char: 0, sel_line: 0, sel_char: 0, want_col: 0}
 		update_text_state(true)
+		value_changed = false
 	}
 
 	// undo-able ops ----------------------------------------------------------
@@ -1162,7 +1164,11 @@ function code_edit_view(id, opt) {
 
 		compute_line_offsets()
 
-		if (reparse_all) {
+		if (!parser) {
+			syntax_tree = null
+			for (let colors of line_colors)
+				colors.length = 0
+		} else if (reparse_all) {
 			syntax_tree = parser.parse(lines_input)
 			build_colors(0)
 		} else {
@@ -1192,6 +1198,8 @@ function code_edit_view(id, opt) {
 		if (find_text)
 			find_scan()
 
+		if (!reparse_all)
+			value_changed = true
 		changes.length = 0
 	}
 
@@ -1304,27 +1312,7 @@ function code_edit_view(id, opt) {
 		ui.end_stack()
 	}
 
-	e.render = function() {
-
-		// set layout vars
-
-		font_size = ui.em(1)
-		line_h = round(font_size * 1.5)
-		{
-			let font0 = cx.font
-			cx.font = font_size+'px mono'
-			let m = ui.measure_text('m')
-			cx.font = font0
-			char_w = m.width
-			font_descent = m.fontBoundingBoxDescent
-		}
-		sidebar_digits_w = (lines.length+'').length * char_w
-		sidebar_margin_l = ui.em(1.25)
-		let sidebar_margin_r = ui.sp1()
-		let sidebar_w = sidebar_margin_l + sidebar_digits_w + sidebar_margin_r
-		let text_w = ceil(max(max_line_col, cursor_col(cursor)) * char_w
-			+ caret_w)
-		let text_h = lines.length * line_h
+	e.update = function() {
 
 		let cs = ui.drag(id+'.text_contentbox')
 			|| ui.hit(id+'.text_contentbox')
@@ -1370,6 +1358,12 @@ function code_edit_view(id, opt) {
 
 			for (let [event, full_key, key, key_char, ctrl, alt, shift] of ui.key_events) {
 				if (event != 'down')
+					continue
+				if (s.field.readonly && (key_char || key == 'enter'
+						|| key == 'backspace' || key == 'delete' || key == 'tab'
+						|| key == 'paste' || full_key == 'ctrl x'
+						|| full_key == 'ctrl z' || full_key == 'ctrl shift z'
+						|| full_key == 'ctrl y'))
 					continue
 				let lines_n = 0
 				let chars_n = 0
@@ -1553,6 +1547,85 @@ function code_edit_view(id, opt) {
 
 		update_text_state()
 
+		if (find_open) {
+			let fid = id+'.find_input'
+			let rid = id+'.replace_input'
+			let find_value = ui.input_value(fid)
+			let replace_value = ui.input_value(rid)
+			if (find_value !== undefined)
+				find_text = find_value ?? ''
+			if (replace_value !== undefined)
+				replace_text = replace_value ?? ''
+			if (find_text != last_find_text) {
+				last_find_text = find_text
+				find_scan()
+			}
+			if (ui.state_of(id+'.find_prev', 'state') == 'click')
+				goto_match(-1)
+			if (ui.state_of(id+'.find_next', 'state') == 'click')
+				goto_match(1)
+			if (!s.field.readonly
+					&& ui.state_of(id+'.replace', 'state') == 'click')
+				replace_match()
+			if (!s.field.readonly
+					&& ui.state_of(id+'.replace_all', 'state') == 'click')
+				replace_all()
+			if (ui.state_of(id+'.find_close', 'state') == 'click') {
+				close_find()
+				ui.focus(id)
+				ui.rebuild('close_find')
+			}
+			if (ui.focused(fid) || ui.focused(rid)) {
+				if (ui.keydown('escape')) {
+					close_find()
+					ui.focus(id)
+					ui.rebuild('close_find')
+				}
+				if (ui.keydown('ctrl f') || ui.keydown('ctrl h')) {
+					find_replace = ui.keydown('ctrl h')
+					ui.rebuild('find_replace')
+				}
+				if (ui.keydown('enter')) {
+					if (ui.focused(rid)) {
+						if (!s.field.readonly)
+							replace_match()
+					} else {
+						goto_match(ui.keypressed('shift') ? -1 : 1)
+					}
+				}
+			}
+		}
+
+	}
+
+	e.render = function(lang) {
+		let parser1 = Object.hasOwn(Lezer.parsers, lang)
+			? Lezer.parsers[lang] : null
+		if (parser1 != parser) {
+			parser = parser1
+			update_text_state(true)
+		}
+
+		// set layout vars
+
+		font_size = ui.em(1)
+		line_h = round(font_size * 1.5)
+		{
+			let font0 = cx.font
+			cx.font = font_size+'px mono'
+			let m = ui.measure_text('m')
+			cx.font = font0
+			char_w = m.width
+			font_descent = m.fontBoundingBoxDescent
+		}
+		sidebar_digits_w = (lines.length+'').length * char_w
+		sidebar_margin_l = ui.em(1.25)
+		let sidebar_margin_r = ui.sp1()
+		let sidebar_w = sidebar_margin_l + sidebar_digits_w + sidebar_margin_r
+		let text_w = ceil(max(max_line_col, cursor_col(cursor)) * char_w
+			+ caret_w)
+		let text_h = lines.length * line_h
+
 		// build editor
 
 		ui.focusable(id)
@@ -1591,55 +1664,27 @@ function code_edit_view(id, opt) {
 							ui.focus_group(true)
 							ui.v(0, ui.sp05())
 								ui.h(0, ui.sp05())
-									find_text = ui.input(fid, find_text, null, 0) ?? ''
-									if (find_text != last_find_text) {
-										last_find_text = find_text
-										find_scan()
-									}
+									ui.input(fid, find_text, null, 0)
 									ui.nofocus()
-									if (ui.bare_button(id+'.find_prev', 'arrow-up', ''))
-										goto_match(-1)
+									ui.bare_button(id+'.find_prev', 'arrow-up', '')
 									ui.nofocus()
-									if (ui.bare_button(id+'.find_next', 'arrow-down', ''))
-										goto_match(1)
+									ui.bare_button(id+'.find_next', 'arrow-down', '')
 									ui.nofocus()
-									if (ui.bare_button(id+'.find_close', 'x', '')) {
-										close_find()
-										ui.focus(id)
-										ui.rebuild('close_find')
-									}
+									ui.bare_button(id+'.find_close', 'x', '')
 								ui.end_h()
 								if (find_replace) {
 									ui.h(0, ui.sp05())
-										replace_text = ui.input(
-											rid, replace_text, null, 0) ?? ''
+										ui.input(
+											rid, replace_text, null, 0)
 										ui.nofocus()
-										if (ui.button(id+'.replace', '', 'Replace'))
-											replace_match()
-										if (ui.button(id+'.replace_all', '',
-											'Replace All'))
-											replace_all()
+										ui.button(id+'.replace', '', 'Replace',
+											null, null, null, null, s.field.readonly)
+										ui.button(id+'.replace_all', '', 'Replace All',
+											null, null, null, null, s.field.readonly)
 									ui.end_h()
 								}
 							ui.end_v()
 							ui.end_focus_group()
-							if (ui.focused(fid) || ui.focused(rid)) {
-								if (ui.keydown('escape')) {
-									close_find()
-									ui.focus(id)
-									ui.rebuild('close_find')
-								}
-								if (ui.keydown('ctrl f') || ui.keydown('ctrl h')) {
-									find_replace = ui.keydown('ctrl h')
-									ui.rebuild('find_replace')
-								}
-								if (ui.keydown('enter')) {
-									if (ui.focused(rid))
-										replace_match()
-									else
-										goto_match(ui.keypressed('shift') ? -1 : 1)
-								}
-							}
 						ui.end_popup()
 					}
 
@@ -1649,15 +1694,39 @@ function code_edit_view(id, opt) {
 
 	}
 
-	reset_editor(opt.code)
+	e.reset = reset_editor
+	e.update_value = function() {
+		if (!value_changed)
+			return
+		ui.set_interaction_value(id, s, lines.join(newline) || null)
+		value_changed = false
+	}
 
 	return e
 }
 
-ui.code_edit = function(id, opt) {
-	let s = ui.state(id)
-	s.view ??= code_edit_view(id, opt)
-	s.view.render()
+function code_edit_update(id, s) {
+	s.interaction_value = undefined
+	s.view.update()
+}
+
+ui.code_edit_update_value = function(id) {
+	ui.state_of(id, 'view')?.update_value()
+}
+
+ui.code_edit = function(id, value, field, opt) {
+	let s = ui.state(id, code_edit_update)
+	let is_new = !s.view
+	s.view ??= code_edit_view(id, opt ?? empty, s)
+	field ??= ui.input_field(id) ?? ui.create_field({maxlen: null})
+	let value0 = s.input_value
+	let field0 = s.field
+	value = ui.set_value(id, s, value, field)
+	if (is_new || s.interaction_value === undefined
+			&& (value !== value0 || field != field0))
+		s.view.reset(value == null ? '' : field.to_input(value))
+	s.view.render(opt?.lang)
+	return ui.value(id)
 }
 
 }()) // module function

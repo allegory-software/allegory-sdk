@@ -14,7 +14,8 @@ Field attributes (* = client-only):
 		align          : 'left'|'right'|'center'
 		null_text      : plain text display value for null
 		empty_text     : plain text display value for ''
-		text_color     : JS expression using row.COL, or f(nav, ri) -> color name
+		text_color     : JS expression using row.COL and value, or
+		                 f(nav, ri, value) -> color name
 	*	to_text        : f(v) -> s   plain text display value.
 	EDITING
 		readonly       : prevent modifying on new rows or existing rows.
@@ -1263,14 +1264,14 @@ function compile_row_expr(expr) {
 			return nav.cell_input_val(ri, nav.all_fields_map[col].fi)
 		},
 	})
-	let eval_expr = new Function('row',
+	let eval_expr = new Function('row', 'value',
 		'"use strict"; return (\n'+expr+'\n)')
-	return function(nav1, ri1) {
+	return function(nav1, ri1, value) {
 		let nav0 = nav, ri0 = ri
 		nav = nav1
 		ri = ri1
 		try {
-			return eval_expr(row)
+			return eval_expr(row, value)
 		} catch (err) {
 			warn_once('row expression:', expr, err)
 			return 'error'
