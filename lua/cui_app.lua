@@ -107,7 +107,7 @@ end
 
 action['gen_auth_code.json'] = function()
 	checkarg(method'POST')
-	local email = checkarg(str_arg(post'email'))
+	local email = checkarg(str_arg(post'email'), 'Email required')
 	local code = auth_gen_code{email = email}
 	return {email = email, code = config'env' == 'dev' and code or nil}
 end

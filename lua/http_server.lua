@@ -201,10 +201,6 @@ function http_server(...)
 	local next_request_id = 1
 
 	local function handle_request(ctcp, ip)
-		if is_ip_banned(ip) then
-			ctcp:close()
-			return
-		end
 		local rb = ctcp.rb
 		local wb = ctcp.wb
 
@@ -213,14 +209,6 @@ function http_server(...)
 		if not line then ctcp:close(); return end
 		local method, uri, http_version = line:match'^([%u]+)%s+([^%s]+)%s+HTTP/(%d+%.%d+)'
 		ctcp:checkp(http_version == '1.1', 'invalid http version')
-
-		for _, pattern in ipairs(self.uri_ban_patterns) do
-			if uri:find(pattern) then
-				self:ban_ip(ip)
-				ctcp:close()
-				return
-			end
-		end
 
 		local req = object(req, {
 			tcp = ctcp,
@@ -259,6 +247,20 @@ function http_server(...)
 				req.headers[name] = prev_value .. ',' .. value
 			else
 				req.headers[name] = value
+			end
+		end
+		if config'x_forwarded_headers' then
+			ip = assert(req.headers['x-forwarded-for'])
+		end
+		if is_ip_banned(ip) then
+			ctcp:close()
+			return
+		end
+		for _, pattern in ipairs(self.uri_ban_patterns) do
+			if uri:find(pattern) then
+				self:ban_ip(ip)
+				ctcp:close()
+				return
 			end
 		end
 		--remove the 5s timeout from accept (crude measure against slowloris)
@@ -630,10 +632,6 @@ function http_server(...)
 			resume(thread(function()
 				ctcp:setowner(currentthread())
 				local ip = ctcp:remote_addr():ip() -- peer IP address
-				if is_ip_banned(ip) then
-					ctcp:close()
-					return
-				end
 				if ctcp.family ~= 'unix' then
 					ctcp:setopt('tcp_nodelay', true)
 				end

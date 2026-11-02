@@ -311,6 +311,7 @@ function init(id, e) {
 	let edit_field = null // edited field
 	let editor_id = null // id of the editor widget
 	let want_dropdown_open = false // open the editor's dropdown when built
+	let want_editor_focus = false // focus the editor when built
 
 	// Where to scroll in build().
 	let scroll_to_vri = e.focused_vri()
@@ -327,16 +328,24 @@ function init(id, e) {
 			?? null
 	}
 
-	function edit_selection() {
+	function edit_text_selection() {
 		let field = focused_field()
-		return field.has_editor
-			? field.editor_selection(editor_id, e.field_align(field))
-			: [e.edit_sel_i, e.edit_sel_len]
+		if (!field.has_editor)
+			return [e.edit_sel_i, e.edit_sel_len]
+		let text_id = ui.state_of(editor_id, 'text_id')
+		if (!text_id)
+			return [0, 1/0]
+		return ui.text_selection(text_id, e.field_align(field) == 'right', true)
 	}
 
 	function caret_at_edge(d) {
-		let field = focused_field()
-		return field.editor_caret_at_edge(editor_id, d, e.field_align(field))
+		let text_id = ui.state_of(editor_id, 'text_id')
+		if (!text_id)
+			return true
+		if (edit_text_selection()[1] == 1/0) // select-all
+			return true
+		let [i, len] = ui.text_selection(text_id, d > 0)
+		return !len && i == (d < 0 ? 0 : -1)
 	}
 
 	// focus ------------------------------------------------------------------
@@ -628,16 +637,16 @@ function init(id, e) {
 		if (ri == edit_ri && field == edit_field)
 			return
 		let had_focus = is_editor_focused()
-		if (edit_field?.has_editor)
-			edit_field.close_dropdown?.(editor_id)
+		if (edit_field?.has_editor && ui.dropdown_open(editor_id))
+			ui.set_dropdown_open(editor_id, false)
 		edit_ri = ri
 		edit_field = field
 		editor_id = field
 			? (field.lookup_rowset_name || field.type) + '.editor' : null
 		want_dropdown_open = !!field?.has_editor && e.edit_open_popup
 		if (field?.has_editor && (focused || had_focus)) {
-			// Request focus now; we build the editor's input later in this pass.
-			field.focus_editor(editor_id, e.edit_sel_i, e.edit_sel_len)
+			// Request focus when we build the editor later in this pass.
+			want_editor_focus = true
 		} else if (had_focus) {
 			// Return focus to the grid only if the old editor still had it.
 			ui.focus(id)
@@ -870,6 +879,9 @@ function init(id, e) {
 
 	// field.build() options, rewritten for each cell.
 	let build_opt = {fg: null, align: null, full_width: false, readonly: false}
+	let editor_opt = {
+		no_box: true, w: null, text_align: null, open: false,
+	} // build_input() opt for the cell editor
 
 	function build_cell_at(a, ri, field, vri, vfi, x, y, w, h, build_stage) {
 
@@ -907,28 +919,19 @@ function init(id, e) {
 
 		// frame building
 		let sp2 = ui.sp2()
-		let pad_l = sp2 + indent_x
-		let pad_r = sp2
-		let cell_x = x
-		let cell_w = w
-		// because ui.text doesn't support overflow direction (ui.text overflows
-		// always to the right), we need to expand the overflown cell and shift
-		// it left for right and center align.
-		if (full_width && field.builds_text) {
-			let s = e.cell_text(ri, field.fi)
-			if (s) {
-				cell_w = max(w, ceil(ui.measure_text(s).width) + pad_l + pad_r)
-				let overflow = cell_w - w
-				cell_x = x - (
-					align == 'center' ? round(overflow / 2) :
-					align == 'right' ? overflow : 0)
-			}
-		}
+		let cell_pad = field.no_cell_pad ? 0 : sp2 // left and right padding
+		let pad_l = cell_pad + indent_x
+		let pad_r = cell_pad
 
 		// render help
-		ui.m(cell_x, y, 0, 0)
-		ui.min_wh(cell_w, h)
+		ui.m(x, y, 0, 0)
+		ui.min_wh(w, h)
 		let cell_i = ui.stack('', 0, 'l', 't')
+			if (full_width) {
+				let popup_align = align == 'right' ? ']s'
+					: align == 'center' ? 'cs' : '[s'
+				ui.popup('', null, cell_i, 'its', popup_align, 'hover_parent')
+			}
 			ui.bb(bg, bgs,
 				build_stage == 'col_move' ? (horiz ? 'lrb' : 'tb') : 'b', 'light')
 			if (help_open && !build_stage && row_focused && field_focused)
@@ -940,9 +943,7 @@ function init(id, e) {
 				ui.color(fg)
 				ui.icon('', collapsed ? 'square-plus' : 'square-minus-2')
 			}
-			// a popup editor covers the cell instead of replacing it, and
-			// the popup can be moved off the cell to fit on screen.
-			if (!editing || build_stage || field.edits_in_popup || !field.has_editor) {
+			if (!editing || build_stage || !field.has_editor) {
 				ui.p(pad_l, 0, pad_r, 0)
 				if (row_focused && e.quicksearch_text
 					&& field.fi == quicksearch_fi())
@@ -976,11 +977,25 @@ function init(id, e) {
 			}
 			if (editing && !build_stage && field.has_editor) {
 				ui.focus_group(true, null, editor_id)
-				field.build_editor(editor_id, input_val, pad_l, pad_r, h, align)
+				ui.p(pad_l, 0, pad_r, 0)
+				editor_opt.w = w - pad_l - pad_r
+				editor_opt.text_align = align
+				editor_opt.open = want_dropdown_open
+				field.build_input(editor_id, input_val, editor_opt, field.control)
 				want_dropdown_open = false
+				if (want_editor_focus) {
+					let text_id = ui.state_of(editor_id, 'text_id')
+					if (text_id)
+						ui.select_text(text_id, e.edit_sel_i, e.edit_sel_len)
+					if (!ui.dropdown_opened(editor_id))
+						ui.focus(text_id ?? editor_id, true)
+					want_editor_focus = false
+				}
 				ui.end_focus_group()
 			}
 			ui.p(0)
+			if (full_width)
+				ui.end_popup()
 		ui.end_stack()
 
 	}
@@ -1306,7 +1321,8 @@ function init(id, e) {
 		// set keyboard state
 
 		// editing moves the focus to the editor, but these keys are the grid's.
-		focused = ui.focused(id) || ui.focused(editor_id)
+		let editor_text_id = editor_id && ui.state_of(editor_id, 'text_id')
+		focused = ui.focused(id) || ui.focused(editor_text_id || editor_id)
 		shift = ui.keypressed('shift')
 		ctrl  = ui.keypressed('ctrl')
 
@@ -1652,7 +1668,8 @@ function init(id, e) {
 
 		if (!hit_zone) {
 			ps = ui.drag_or_hit(id+'.cells')
-			if (ps && (ps.drag || !ps.dragging)) {
+			let is_cell_release = ps?.drop && !ps.zone // released, not a divider
+			if (ps && (ps.drag || !ps.dragging || is_cell_release)) {
 				let s = ui.state(id+'.cells')
 				let x0 = s.x
 				let y0 = s.y
@@ -1774,13 +1791,9 @@ function init(id, e) {
 
 		}
 
-		// On double click, start editing or open the current editor's dropdown.
 		if (ui.dblclicked(id+'.cells') && hit_zone == 'cell'
 			&& !clicked_indent && focused_field()?.has_editor)
-			if (is_edit_built())
-				edit_field.open_dropdown?.(editor_id)
-			else
-				e.enter_edit()
+			e.enter_edit()
 
 		// process keyboard input ----------------------------------------------
 
@@ -1814,7 +1827,7 @@ function init(id, e) {
 			if (!horiz) {
 				all = true
 			} else if (is_edit_built()) {
-				all = edit_selection()[1] == 1/0
+				all = edit_text_selection()[1] == 1/0
 			} else {
 				all = ctrl
 			}
@@ -1870,7 +1883,7 @@ function init(id, e) {
 		if (move_rows) {
 
 			let [sel_i, sel_len] = is_edit_built() && horiz
-				? edit_selection() : [0, 1/0]
+				? edit_text_selection() : [0, 1/0]
 
 			has_input = true
 			if (e.move_focus(true, true, rows, 0, {
@@ -1886,7 +1899,7 @@ function init(id, e) {
 		// F2: enter edit mode, or toggle the dropdown of the edit in progress
 		if (keydown('f2')) {
 			if (is_edit_built())
-				edit_field.toggle_dropdown?.(editor_id)
+				ui.set_dropdown_open(editor_id, !ui.dropdown_open(editor_id))
 			else
 				e.enter_edit({advance_on_exit: true})
 			return false
@@ -2044,35 +2057,22 @@ function init(id, e) {
 			e.exit_edit()
 
 		// if editing with an editor:
-		// - write editor's value to the cell.
-		// - exit edit when the editor's dropdown is closed, reverting unless
-		// value picked.
+		// - exit edit when a value is picked from the editor's dropdown, or
+		// when the dropdown of an editor with no text box is closed.
 		// - on advance_on_exit + advance_on_enter + pick, move to next cell.
 		// the grid builds the editor later in this frame, so until then the
 		// editor's state is that of the cell that the edit came from: the
 		// grid must not read the editor on the frame that it moves the edit
 		// to another cell.
 		if (is_edit_built() && edit_field.has_editor) {
-			let ri = edit_ri
-			let field = edit_field
-			let has_picked_val
-			if (field.editor_value) {
-				let v0 = e.cell_input_val(ri, field.fi)
-				let v1 = field.editor_value(editor_id, v0)
-				if (v1 !== v0) {
-					e.set_cell_val(ri, field.fi, v1, {input: e})
-					has_picked_val = true
-				}
-			}
-			let closed = field.dropdown_closed?.(editor_id)
-				&& (field.edits_in_popup || has_picked_val)
-			if (closed) {
-				let picked = field.dropdown_picked(editor_id)
-				let advance = picked
-					&& e.advance_on_exit && e.advance_on_enter
-				e.exit_edit({input: e, cancel: !picked})
+			let has_text_box = !!ui.state_of(editor_id, 'text_id')
+			if (ui.dropdown_picked(editor_id)) {
+				let advance = e.advance_on_exit && e.advance_on_enter
+				e.exit_edit()
 				if (advance)
 					advance_edit(false, 1)
+			} else if (ui.dropdown_closed(editor_id) && !has_text_box) {
+				e.exit_edit()
 			}
 		}
 

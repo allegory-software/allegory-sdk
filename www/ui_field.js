@@ -1062,6 +1062,7 @@ let color = {
 }
 field_types.color = color
 color.builds_text = false
+color.no_cell_pad = true
 
 color.from_input = function(s) {
 	return /^#[0-9a-f]{6}$/i.test(s) ? s : undefined
@@ -1194,10 +1195,12 @@ bool.build = function(v, opt) {
 color.build = function(v, opt) {
 	if (!opt)
 		return v
-	ui.m(ui.sp1(), 0)
-	ui.min_wh(ui.em(1), ui.em(1))
-	ui.stack('', 0, 's', 'c')
-		ui.bb(':' + v)
+	ui.stack('', 0, 's', 's')
+		ui.m(ui.em(ui.color_swatch_margin_em))
+		ui.min_w(ui.em(1))
+		ui.stack('', 1, 's', 's')
+			ui.bb(':' + v)
+		ui.end_stack()
 	ui.end_stack()
 }
 
@@ -1258,6 +1261,8 @@ ui.create_field = function(opt, nav_id = '') {
 	let field_type = field_types[type]
 	let field = assign_opt({}, all_field_types, field_type, opt)
 	field.label ??= display_name(field.name || type)
+	if (field.lookup_rowset_name)
+		field.control = 'lookup_input'
 	if (!check_field_options(field, field_config_checks, nav_id))
 		return null
 	if (field.enum_values != null) {

@@ -5967,6 +5967,7 @@ ui.text = function(
 	let text
 	if (field) { // editable
 		let s = ui.state(id, editable_text_update)
+		s.text_id = id // id of the text box
 		ui.focusable(id)
 		let value0 = s.input_value
 		let field0 = s.field
@@ -8622,6 +8623,9 @@ ui.em_input           = () => ui.em(ui.input_min_w_em)
 ui.em_input_max       = () => ui.em(ui.input_max_w_em)
 ui.em_input_max_popup = () => ui.em(ui.input_max_popup_w_em)
 
+let input_pad_x_em = 0.5
+let input_pad_y_em = 0.5
+
 ui.input = function(id, value, field, fr, text_align, no_box, readonly) {
 	field ??= input_field(id)
 	if (clicked(id+'.label')) {
@@ -8638,7 +8642,7 @@ ui.input = function(id, value, field, fr, text_align, no_box, readonly) {
 			(readonly ? STATE_READONLY : 0)
 			| (focused ? STATE_FOCUSED : 0)
 		ui.bb('input', state, 1, 'intense', state)
-		ui.p(ui.sp())
+		ui.p(ui.em(input_pad_x_em), ui.em(input_pad_y_em))
 		ui.color('text', state)
 	}
 	ui.text_w(text_w)
@@ -8831,7 +8835,7 @@ ui.num_slider = function(id, value, field, readonly) {
 				}
 			ui.end_stack()
 		ui.end_h()
-		ui.p(ui.sp())
+		ui.p(ui.em(input_pad_x_em), ui.em(input_pad_y_em))
 		ui.color('text', state)
 		ui.text_w(min_w)
 		if (show_input)
@@ -9579,9 +9583,9 @@ ui.radio_list = function(
 	ui.dropdown_closed   (id) -> ?        check whether the picker just closed
 	ui.dropdown_picked   (id) -> ?        check whether the user picked a value
 	ui.dropdown_update   (id, s, disabled=)   update dropdown state
-	ui.dropdown          (id, update=, want_open=) -> ?
+	ui.dropdown          (id, update=, want_open=, fr=1, no_box=, state=) -> ?
 
-	let open = ui.dropdown (id, update=, want_open=)
+	let open = ui.dropdown (id, update=, want_open=, fr=1, no_box=, state=)
 		... the value ...
 	ui.dropdown_picker (id, side=, align=, yoffset=, min_w=, min_h=)
 		if (open)
@@ -9606,11 +9610,13 @@ function set_dropdown_open(id, s, open, picked, canceled) {
 ui.set_dropdown_open = function(id, open) {
 	let s = ui.state_of(id)
 	assert(s, 'set_dropdown_open(): dropdown not built: ', id)
+	if (s.open == null) // not a dropdown
+		return
 	set_dropdown_open(id, s, open)
 }
 
 ui.dropdown_open = function(id) {
-	return !!ui.state_of(id, 'open')
+	return ui.state_of(id, 'open') // undefined if not a dropdown
 }
 
 ui.dropdown_opened = function(id) {
@@ -9677,7 +9683,10 @@ ui.dropdown_update = function(id, s, disabled) {
 }
 
 // opened by ui.set_dropdown_open().
-ui.dropdown = function(id, update, want_open) {
+ui.dropdown = function(id, update, want_open, fr, no_box, state) {
+
+	let min_w = next_min_w
+	next_min_w = null
 
 	let s = ui.state(id, update)
 	if (!s.update)
@@ -9687,10 +9696,22 @@ ui.dropdown = function(id, update, want_open) {
 		set_dropdown_open(id, s, true)
 	let open = s.open
 
-	ui.v()
+	let box_pad_x = no_box ? 0 : ui.em(input_pad_x_em)
+	let box_pad_y = no_box ? 0 : ui.em(input_pad_y_em)
+	s.pad_l = px1 + box_pad_x
+	s.pad_r = px2 + box_pad_x
+	let pad_t = py1 + box_pad_y
+	let pad_b = py2 + box_pad_y
+	ui.p(0)
+
+	ui.v(fr)
 
 		ui.focus_group(open, null, id)
 		ui.stack(id)
+		if (!no_box)
+			ui.bb('input', state, 1, 'intense', state)
+		ui.p(s.pad_l, pad_t, s.pad_r, pad_b)
+		ui.min_w(min_w)
 
 	return open
 }
@@ -9724,38 +9745,42 @@ ui.end_dropdown = function(id) {
 
 /*
 
-	ui.list_dropdown        (id, items, value=, field=, fr=1, align='l', max_w=, no_box=, readonly=) -> value
+	ui.list_dropdown        (id, items, value=, field=, fr=1, align='l', max_w=, no_box=, readonly=, want_open=) -> value
 	ui.list_dropdown_inline (id, items, value=, field=, fr=1, align='l', max_w=) -> value
 
-	ui.draw_value_row       (value, field=, row_id=, pad, chevron_w, max_w=, w=, align='l')
+	ui.draw_value_row       (value, field=, edge_inset, chevron_w, max_w=, align='l')
 
 */
 
 const chevron_points = [0.5,0.5, 5.5,5.5,  10.5,0.5]
-function draw_chevron(chevron_w) {
+let chevron_margin_em = 0.55 // chevron <-> box edge distance
+let chevron_gap_em = 0.5 // value text <-> chevron distance
+
+function draw_chevron(chevron_w, side, chevron_mx) {
+	if (side == 'r')
+		ui.mr(chevron_mx)
+	else
+		ui.ml(chevron_mx)
 	ui.min_w(chevron_w)
-	ui.stack('', 0, 'c', 'c')
-		ui.polyline('', chevron_points, false, null, null, 'label')
+	ui.stack('', 0)
+		ui.stack('', 0, side, 'c')
+			ui.polyline('', chevron_points, false, null, null, 'label')
+		ui.end_stack()
 	ui.end_stack()
 }
-function draw_value_row(value, field, row_id,
-	pad, chevron_w, max_w, w, align
-) {
-	ui.stack(row_id ?? '', 0)
-		ui.p(pad)
-		ui.h(0, pad)
-			if (align == 'r')
-				draw_chevron(chevron_w)
-			ui.text_w(w == -1 ? w : (w ?? ui.em_input()) - chevron_w)
-			ui.text('', value == null ? ''
-				: field ? field.to_text(value) : value,
-				1, align, 'c',
-				max_w ?? ui.em_input_max(),
-			)
-			if (align == 'l')
-				draw_chevron(chevron_w)
-		ui.end_h()
-	ui.end_stack()
+function draw_value_row(value, field, edge_inset, chevron_w, max_w, align) {
+	let chevron_mx = ui.em(chevron_margin_em) - edge_inset
+	ui.h(0, ui.em(chevron_gap_em))
+		if (align == 'r')
+			draw_chevron(chevron_w, 'l', chevron_mx)
+		ui.text('', value == null ? ''
+			: field ? field.to_text(value) : value,
+			1, align, 'c',
+			max_w ?? ui.em_input_max(),
+		)
+		if (align == 'l')
+			draw_chevron(chevron_w, 'r', chevron_mx)
+	ui.end_h()
 }
 ui.draw_value_row = draw_value_row
 
@@ -9773,12 +9798,7 @@ function list_dropdown_update(id, s) {
 
 	ui.dropdown_update(id, s, readonly)
 
-	if (!readonly && clicked(id+'.value'))
-		set_dropdown_open(id, s, !s.open, true)
-
-	if (s.opened) {
-		s.revert_value = s.input_value
-	} else if (s.closed) {
+	if (s.closed) {
 		if (!is_multi)
 			interaction_value = s.picked
 				? ui.input_value(picker_id) : s.revert_value
@@ -9809,84 +9829,63 @@ function list_dropdown_update(id, s) {
 }
 
 ui.list_dropdown = function(
-	id, items, value, field, fr, align, max_w, no_box, readonly
+	id, items, value, field, fr, align, max_w, no_box, readonly, want_open
 ) {
 
 	field ??= input_field(id)
-	let text_w = next_min_w
-	next_min_w = null
 
 	let picker_id = id+'.picker'
-	let value_id = id+'.value'
 
-	let pad = ui.sp()
-	let box_pad = no_box ? 0 : pad // padding of the closed value row
 	let chevron_w = ui.em(1)
-	align = align ?? 'l'
-	assert(align == 'l' || align == 'r', 'invalid list dropdown align')
-
-	ui.stack('', fr, 's', 's')
+	align = parse_align(align ?? 'l') == ALIGN_END ? 'r' : 'l'
 
 	ui.focusable(id)
 	readonly ??= field?.readonly
 	let s = ui.state(id)
 	s.items = items
 	s.readonly = readonly
-	let open = ui.dropdown(id, list_dropdown_update)
+	let state =
+		(readonly ? STATE_READONLY : 0)
+		| (ui.focused(id) ? STATE_FOCUSED : 0)
+	ui.default_min_w(ui.em_input())
+	let open = ui.dropdown(id, list_dropdown_update, want_open && !readonly,
+		fr, no_box, state)
 	value = set_value(id, s, value, field)
+	if (ui.dropdown_opened(id))
+		s.revert_value = s.input_value
 
 	if (!open && ui.focus_inside(picker_id))
 		ui.focus(id)
 
-		let state =
-			(readonly ? STATE_READONLY : 0)
-			| (ui.focused(id) ? STATE_FOCUSED : 0)
-		if (!open && !no_box)
-			ui.bb('input', state, 1, 'intense', state)
 		ui.color('text', state)
-		draw_value_row(value, field, null, box_pad, chevron_w,
-			max_w ?? ui.em_input_max(),
-			text_w, align)
+		draw_value_row(value, field, align == 'l' ? s.pad_r : s.pad_l,
+			chevron_w, max_w ?? ui.em_input_max(), align)
 
-	ui.dropdown_picker(id, null, align == 'r' ? ']s' : 's')
+	ui.dropdown_picker(id, 'b', align == 'r' ? ']s' : 's')
 
 		if (open) {
 			let is_popup_above = ui.state_of(id+'.popup', 'side')
-				== POPUP_SIDE_INNER_BOTTOM
-			ui.v()
-				if (!is_popup_above) {
-					ui.color('text', state)
-					draw_value_row(value, field, value_id,
-						pad, chevron_w, max_w, null, align)
-				}
-				let resizer_id = id+'.resizer'
-				let picker_max_h = ui.em(16)
-				ui.stack('', 1, 's', 's')
-					ui.sb_max_wh(null,
-						ui.state_of(resizer_id, 'h') ?? picker_max_h)
-					ui.scrollbox(picker_id+'.sb', 1, 'contain', 'auto', 's', 's')
-						let opt = s.picker_opt ??= {} // picker list options
-						opt.item_align = align
-						opt.max_w = max_w ?? ui.em_input_max_popup()
-						opt.item_pad_l = align == 'r' ? pad * 2 + chevron_w : pad
-						opt.item_pad_r = align == 'l' ? pad * 2 + chevron_w : pad
-						opt.item_pad_y = pad
-						ui.list(picker_id, items, value, field, 0, 's', 's', readonly, opt)
-					ui.end_scrollbox()
-					ui.resizer(resizer_id, is_popup_above ? 't' : 'b',
-						null, picker_max_h)
-				ui.end_stack()
-				if (is_popup_above) {
-					ui.color('text', state)
-					draw_value_row(value, field, value_id,
-						pad, chevron_w, max_w, null, align)
-				}
-			ui.end_v()
+				== POPUP_SIDE_TOP
+			let resizer_id = id+'.resizer'
+			let picker_max_h = ui.em(16)
+			ui.stack('', 1, 's', 's')
+				ui.sb_max_wh(null,
+					ui.state_of(resizer_id, 'h') ?? picker_max_h)
+				ui.scrollbox(picker_id+'.sb', 1, 'contain', 'auto', 's', 's')
+					let opt = s.picker_opt ??= {} // picker list options
+					opt.item_align = align
+					opt.max_w = max_w ?? ui.em_input_max_popup()
+					opt.item_pad_l = s.pad_l
+					opt.item_pad_r = s.pad_r
+					opt.item_pad_y = ui.em(input_pad_y_em)
+					ui.list(picker_id, items, value, field, 0, 's', 's', readonly, opt)
+				ui.end_scrollbox()
+				ui.resizer(resizer_id, is_popup_above ? 't' : 'b',
+					null, picker_max_h)
+			ui.end_stack()
 		}
 
 	ui.end_dropdown(id)
-
-	ui.end_stack()
 
 	return ui.value(id)
 }
@@ -9901,17 +9900,17 @@ ui.list_dropdown_inline = function(id, items, value, field,
 
 /*
 
-	ui.enum_input  (id, value=, field, fr=1, align='l', max_w=, no_box=, readonly=) -> value
+	ui.enum_input  (id, value=, field, fr=1, align='l', max_w=, no_box=, readonly=, want_open=) -> value
 	ui.enum_toggle (id, value=, field, fr=0, align='l', valign='c', readonly=) -> value
 
 */
 
 ui.enum_input = function(id, value, field, fr, align, max_w, no_box,
-	readonly
+	readonly, want_open
 ) {
 	field ??= input_field(id)
 	return ui.list_dropdown(id, field.enum_items(), value, field,
-		fr, align, max_w, no_box, readonly)
+		fr, align, max_w, no_box, readonly, want_open)
 }
 
 ui.enum_toggle = function(
@@ -10229,7 +10228,7 @@ ui.calendar = function(id, sel_day, ranges, fr, align, valign) {
 //// DATE INPUT --------------------------------------------------------------
 
 // ui.date_input (id, v=, field=, fr=1, align='r', valign='c', no_box=,
-//    readonly=) -> v
+//    readonly=, want_open=) -> v
 
 function date_input_update(id, s) {
 
@@ -10252,9 +10251,7 @@ function date_input_update(id, s) {
 		}
 	}
 
-	if (ui.dropdown_opened(id))
-		s.revert_value = s.input_value
-	else if (ui.dropdown_closed(id))
+	if (ui.dropdown_closed(id))
 		interaction_value = ui.dropdown_picked(id)
 			? ui.input_value(picker_id) : s.revert_value
 
@@ -10274,10 +10271,9 @@ function date_input_update(id, s) {
 	set_interaction_value(id, s, interaction_value)
 }
 
-ui.date_input = function(id, v, field, fr, align, valign, no_box, readonly) {
-
-	let min_w = next_min_w ?? ui.em_input()
-	next_min_w = null
+ui.date_input = function(id, v, field, fr, align, valign, no_box, readonly,
+	want_open
+) {
 
 	let picker_id = id+'.picker'
 	let input_id = id+'.input'
@@ -10286,6 +10282,7 @@ ui.date_input = function(id, v, field, fr, align, valign, no_box, readonly) {
 	field ??= input_field(id) ?? ui.create_field({type: 'date'})
 	readonly ??= field.readonly
 	s.readonly = readonly
+	s.text_id = input_id // id of the text box
 	ui.state(id, date_input_update)
 
 	if (clicked(id+'.label')) {
@@ -10294,7 +10291,11 @@ ui.date_input = function(id, v, field, fr, align, valign, no_box, readonly) {
 	}
 
 	let focused = ui.focused(input_id)
-	let open = ui.dropdown(id)
+	let state =
+		(readonly ? STATE_READONLY : 0)
+		| (focused ? STATE_FOCUSED : 0)
+	ui.default_min_w(ui.em_input())
+	let open = ui.dropdown(id, null, want_open && !readonly, fr, no_box, state)
 	if (!open && ui.focus_inside(picker_id))
 		ui.focus(input_id)
 
@@ -10305,20 +10306,14 @@ ui.date_input = function(id, v, field, fr, align, valign, no_box, readonly) {
 	}
 
 	let value = set_value(id, s, v, field)
+	if (opened)
+		s.revert_value = s.input_value
 
 	let input_align = parse_align(align ?? 'r')
 	input_align = input_align == ALIGN_END ? 'sr'
 		: input_align == ALIGN_CENTER ? 'sc' : 's'
 
-		ui.stack(input_id, fr, 's', 's')
-			let state =
-				(readonly ? STATE_READONLY : 0)
-				| (focused ? STATE_FOCUSED : 0)
-			if (!no_box) {
-				ui.bb('input', state, 1, 'intense', state)
-				ui.p(ui.sp())
-			}
-			ui.min_w(min_w)
+		ui.stack(input_id)
 			ui.h(0, ui.sp05())
 				ui.color('text', state)
 				ui.icon(id, 'calendar', 0, 'l', 'c')
@@ -10913,9 +10908,7 @@ function color_input_update(id, s) {
 	ui.dropdown_update(id, s, readonly)
 
 	let picker_id = id+'.picker'
-	if (ui.dropdown_opened(id)) {
-		s.revert_value = s.input_value
-	} else if (ui.dropdown_closed(id)) {
+	if (ui.dropdown_closed(id)) {
 		interaction_value = ui.dropdown_picked(id)
 			? ui.input_value(picker_id) : s.revert_value
 	} else if (!readonly) {
@@ -10929,11 +10922,11 @@ function color_input_update(id, s) {
 	set_interaction_value(id, s, interaction_value)
 }
 
-// ui.color_input (id, v=, field=, fr=1, no_box=, readonly=) -> v
+ui.color_swatch_margin_em = 0.5 // swatch <-> cell edge distance
+
+// ui.color_input (id, v=, field=, fr=1, no_box=, readonly=, want_open=) -> v
 //
-ui.color_input = function(id, value, field, fr, no_box, readonly) {
-	let min_w = next_min_w ?? ui.em_input()
-	next_min_w = null
+ui.color_input = function(id, value, field, fr, no_box, readonly, want_open) {
 	let picker_id = id+'.picker'
 	let s = ui.state(id)
 	field ??= input_field(id) ?? ui.create_field({type: 'color'})
@@ -10941,26 +10934,28 @@ ui.color_input = function(id, value, field, fr, no_box, readonly) {
 	s.readonly = readonly
 	s = ui.state(id, color_input_update)
 
-	ui.stack('', fr, 's', 's')
-
 	ui.focusable(id)
-	let open = ui.dropdown(id)
+	let state =
+		(readonly ? STATE_READONLY : 0)
+		| (ui.focused(id) ? STATE_FOCUSED : 0)
+	ui.default_min_w(ui.em_input())
+	let open = ui.dropdown(id, null, want_open && !readonly, fr, no_box, state)
 	if (!open && ui.focus_inside(picker_id))
 		ui.focus(id)
 
 	value = set_value(id, s, value, field)
+	if (ui.dropdown_opened(id))
+		s.revert_value = s.input_value
 
-		let state =
-			(readonly ? STATE_READONLY : 0)
-			| (ui.focused(id) ? STATE_FOCUSED : 0)
-
-		if (!no_box)
-			ui.bb('input', state, 1, 'intense', state)
-		ui.m(ui.sp())
-		ui.min_wh(min_w, ui.line_h())
-		ui.stack('', 1, 's', 'c')
-			if (field.from_input(value) !== undefined)
-				ui.bb(':'+value)
+		ui.stack('', 1, 's', 's')
+			if (no_box)
+				ui.m(ui.em(ui.color_swatch_margin_em))
+			else
+				ui.min_h(ui.line_h())
+			ui.stack('', 1, 's', 's')
+				if (field.from_input(value) !== undefined)
+					ui.bb(':'+value)
+			ui.end_stack()
 		ui.end_stack()
 
 	ui.dropdown_picker(id, 'b', '[', ui.sp05(),
@@ -10980,8 +10975,6 @@ ui.color_input = function(id, value, field, fr, no_box, readonly) {
 		}
 
 	ui.end_dropdown(id)
-
-	ui.end_stack()
 
 	return ui.value(id)
 }
@@ -11028,6 +11021,8 @@ opt:
 	no_box     : input, password_input, date_input, color_input,
 	             lookup_input, enum_input, list_dropdown: no background,
 	             border or padding around the control.
+	open       : date_input, color_input, lookup_input, enum_input,
+	             list_dropdown: open the dropdown.
 
 */
 
@@ -11050,20 +11045,24 @@ ui.build_input = function(id, value, opt, control, readonly) {
 			0, 'l', 'c', readonly)
 	} else if (control == 'date_input') {
 		value = ui.date_input(id, value, this,
-			1, opt.text_align ?? this.align, 'c', opt.no_box, readonly)
+			1, opt.text_align ?? this.align, 'c', opt.no_box, readonly,
+			opt.open)
 	} else if (control == 'color_input') {
-		value = ui.color_input(id, value, this, 1, opt.no_box, readonly)
+		value = ui.color_input(id, value, this, 1, opt.no_box, readonly,
+			opt.open)
 	} else if (control == 'lookup_input') {
-		value = ui.lookup_input(id, value, this, 1, opt.no_box, readonly)
+		value = ui.lookup_input(id, value, this, 1, opt.no_box, readonly,
+			opt.open)
 	} else if (control == 'enum_input') {
 		value = ui.enum_input(id, value, this,
-			1, opt.text_align, opt.max_w, opt.no_box, readonly)
+			1, opt.text_align, opt.max_w, opt.no_box, readonly, opt.open)
 	} else if (control == 'enum_toggle') {
 		value = ui.enum_toggle(id, value, this,
 			1, 's', 'c', readonly)
 	} else if (control == 'list_dropdown') {
 		value = ui.list_dropdown(id, opt.items ?? this.enum_items(),
-			value, this, 1, opt.text_align, opt.max_w, opt.no_box, readonly)
+			value, this, 1, opt.text_align, opt.max_w, opt.no_box, readonly,
+			opt.open)
 	} else if (control == 'radio_list') {
 		value = ui.radio_list(id, opt.items ?? this.enum_items(),
 			value, this, opt.hv, 1, 'l', 'c', readonly)
@@ -11107,8 +11106,7 @@ function build_input_row(id, value, opt, is_bound) {
 		value = nav.cell_input_val(ri, field.fi)
 	}
 
-	let control = field && (opt.control
-		?? (field.lookup_rowset_name ? 'lookup_input' : field.control))
+	let control = field && (opt.control ?? field.control)
 	let is_bool_control = control == 'checkbox' || control == 'toggle'
 		|| control == 'toggle_button'
 

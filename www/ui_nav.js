@@ -1532,8 +1532,7 @@ ui.nav = function(id, opt) {
 	// Start editing the focused cell. Return false if the user can't edit it.
 	// sel_i, sel_len: initial text selection, as in ui.select_text().
 	// Select all text by default.
-	// open_popup: false to leave the editor's dropdown closed, except for
-	// fields with edits_in_popup.
+	// open_popup: false to leave the editor's dropdown closed.
 	e.enter_edit = function(opt) {
 		if (e.editing)
 			return true
@@ -1554,7 +1553,6 @@ ui.nav = function(id, opt) {
 		e.edit_sel_i   = sel_i
 		e.edit_sel_len = sel_len
 		e.edit_open_popup = opt?.open_popup != false
-			|| !!e.all_fields[fi].edits_in_popup
 		return true
 	}
 
@@ -5323,8 +5321,6 @@ function lookup_input_update(id, s) {
 
 	ui.dropdown_update(id, s, disabled)
 
-	if (s.opened)
-		s.revert_value = s.input_value
 	if (s.closed && !s.picked) {
 		interaction_value = s.revert_value
 	} else if (!disabled) {
@@ -5344,7 +5340,7 @@ function free_lookup_input(s) {
 	s.lookup_nav.unref()
 }
 
-ui.lookup_input = function(id, value, field, fr, no_box, readonly) {
+ui.lookup_input = function(id, value, field, fr, no_box, readonly, want_open) {
 	let picker_id = id+'.picker'
 	let s = ui.state(id)
 	field ??= ui.input_field(id)
@@ -5358,15 +5354,21 @@ ui.lookup_input = function(id, value, field, fr, no_box, readonly) {
 	s = ui.state(id, lookup_input_update)
 	let ln = s.lookup_nav
 
-	ui.default_min_w(ui.em_input())
-	ui.stack('', fr, 's', 's')
+	let disabled = readonly || !can_pick_lookup_val(field, ln)
 
 	ui.focusable(id)
-	let open = ui.dropdown(id)
+	let focused = ui.focused(id)
+	let state = disabled
+		? (focused ? 'readonly focused' : 'readonly')
+		: (focused ? 'focused' : null)
+	ui.default_min_w(ui.em_input())
+	let open = ui.dropdown(id, null, want_open && !disabled, fr, no_box, state)
 	if (!open && ui.focus_inside(picker_id))
 		ui.focus(id)
 
 	value = ui.set_value(id, s, value, field)
+	if (ui.dropdown_opened(id))
+		s.revert_value = s.input_value
 
 	let val_field = lookup_val_field(field, ln)
 	let display_field = lookup_display_field(field, ln)
@@ -5387,16 +5389,8 @@ ui.lookup_input = function(id, value, field, fr, no_box, readonly) {
 	if (text != null && ui.focused(id) && ui.keydown('ctrl c'))
 		copy_to_clipboard(text)
 
-		let disabled = readonly || !can_pick_lookup_val(field, ln)
-		let focused = ui.focused(id)
-		let state = disabled
-			? (focused ? 'readonly focused' : 'readonly')
-			: (focused ? 'focused' : null)
-		if (!no_box)
-			ui.bb('input', state, 1, 'intense', state)
 		ui.color('text', state)
-		ui.draw_value_row(text, null, null,
-			no_box ? 0 : ui.sp(), ui.em(1), null, null, 'l')
+		ui.draw_value_row(text, null, s.pad_r, ui.em(1), null, 'l')
 
 	ui.dropdown_picker(id, 'b')
 
@@ -5407,8 +5401,6 @@ ui.lookup_input = function(id, value, field, fr, no_box, readonly) {
 		}
 
 	ui.end_dropdown(id)
-
-	ui.end_stack()
 
 	return ui.value(id)
 }
