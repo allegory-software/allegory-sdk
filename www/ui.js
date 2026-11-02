@@ -1837,6 +1837,8 @@ function rec() {
 function free_rec(a) {
 	if (a.nohit_set)
 		a.nohit_set.clear()
+	a.parent_rec_i = null
+	a.parent_cmd_i = null
 	rec_freelist.free(a)
 }
 
@@ -2395,8 +2397,7 @@ function set_hit(id) {
 }
 ui.set_hit = set_hit
 
-// NOTE: doesn't propagate outside ui.frame recs.
-function hit_popup_parents(a, i) {
+function hit_popup_parents(a, i, recs) {
 	if (a[i-1] == CMD_POPUP && !(a[i+POPUP_FLAGS] & POPUP_HOVER_PARENT))
 		return
 	for (i = cmd_prev_i(a, i); i >= 2; i = cmd_prev_i(a, i)) {
@@ -2407,7 +2408,7 @@ function hit_popup_parents(a, i) {
 			if (cmd == CMD_POPUP) {
 				set_hit(a[i+POPUP_ID])
 				if (!(a[i+POPUP_FLAGS] & POPUP_HOVER_PARENT))
-					break
+					return
 			} else {
 				let arg_i = id_i[cmd] // ID arg index
 				if (arg_i != null)
@@ -2415,6 +2416,8 @@ function hit_popup_parents(a, i) {
 			}
 		}
 	}
+	if (a.parent_rec_i != null)
+		hit_popup_parents(recs[a.parent_rec_i], a.parent_cmd_i, recs)
 }
 
 function hit_popups(popups, recs) {
@@ -2431,7 +2434,7 @@ function hit_popups(popups, recs) {
 		/*global*/ cur_popup_ct_i = i
 		let hit_f = hittest[a[i-1]]
 		if (hit_f && !a.nohit_set?.has(i) && hit_f(a, i, recs)) {
-			hit_popup_parents(a, i)
+			hit_popup_parents(a, i, recs)
 			return true
 		}
 	}
@@ -7024,9 +7027,12 @@ frame.translate = function(a, i, dx, dy) {
 
 }
 
-frame.register = function(a, i) {
+frame.register = function(a, i, parent_rec_i) {
 	let rec_i = a[i+FRAME_REC_I]
-	register_rec(recs[rec_i], rec_i)
+	let a1 = recs[rec_i] // child recording
+	a1.parent_rec_i = parent_rec_i // parent recording index
+	a1.parent_cmd_i = i // owning command index
+	register_rec(a1, rec_i)
 }
 
 frame.draw = function(a, i, recs) {
@@ -7126,9 +7132,12 @@ rec_box.translate = function(a, i, dx, dy) {
 	translate_rec(recs[a[i+REC_BOX_REC_I]], a[i+0], a[i+1])
 }
 
-rec_box.register = function(a, i) {
+rec_box.register = function(a, i, parent_rec_i) {
 	let rec_i = a[i+REC_BOX_REC_I]
-	register_rec(recs[rec_i], rec_i)
+	let a1 = recs[rec_i] // child recording
+	a1.parent_rec_i = parent_rec_i // parent recording index
+	a1.parent_cmd_i = i // owning command index
+	register_rec(a1, rec_i)
 }
 
 rec_box.draw = function(a, i, recs) {
