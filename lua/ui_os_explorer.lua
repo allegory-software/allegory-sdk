@@ -126,7 +126,7 @@ end
 
 rowset.os_explorer_files = virtual_rowset(function(rs)
 	rs.fields = {
-		{name = 'name', label = 'Name'},
+		{name = 'name', label = 'Name', type = 'os_file_name'},
 		{
 			name = 'path', label = 'Path', not_null = true,
 			readonly = true, hidden = true,

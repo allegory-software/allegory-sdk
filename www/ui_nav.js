@@ -17,6 +17,7 @@ NAV CONFIG -------------------------------------------------------------------
 Nav config:
 
 	rowset_name    string       the rowset in ui.rowsets or on the server
+	field_attrs   {col->attrs}  per-column overrides of rowset field attributes
 	label          string       label of the nav as a master in a detail's
 	                            toggle; default: the rowset's label
 
@@ -3346,7 +3347,7 @@ ui.nav = function(id, opt) {
 			}
 		}
 
-		return field.build(v, opt)
+		return field.build(v, opt, e, ri)
 	}
 
 	/// row slots and inserting -----------------------------------------------
@@ -4298,8 +4299,9 @@ ui.nav = function(id, opt) {
 			let rs_field = rs.fields[fi]
 			if (!isobj(rs_field))
 				return false
-			// Use all_field_types.type when the field has no explicit type.
-			let type = rs_field.type ?? ui.all_field_types.type
+			let attrs = e.field_attrs?.[rs_field.name]
+			let type = attrs?.type !== undefined ? attrs.type : rs_field.type
+			type ??= ui.all_field_types.type
 			if (rs_field.name !== rowset_fields[fi].name
 				|| type !== rowset_fields[fi].type
 			) {
@@ -4983,6 +4985,9 @@ ui.nav = function(id, opt) {
 				return
 			if (warn_if(all_fields_map[name], e.id, 'duplicate field name:', name))
 				return
+			let attrs = e.field_attrs?.[name]
+			if (attrs)
+				field_opt = assign_opt({}, field_opt, attrs)
 			let field = ui.create_field(field_opt, e.id)
 			if (!field)
 				return

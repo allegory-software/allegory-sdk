@@ -75,6 +75,11 @@ function fontfile(name, path, desc)
 	add(fontfiles, {name, path, desc})
 end
 
+fontfile('mono'         , 'fonts/jetbrains-mono-nl-regular.woff2')
+fontfile('opensans'     , 'fonts/opensans.var.woff2')
+fontfile('tabler'       , 'icons/tabler-icons.woff2')
+fontfile('tabler_filled', 'icons/tabler-icons-filled.woff2')
+
 function user_json()
 	return {
 		--signed_in is always non-nil to avoid an empty table to encode as [].

@@ -14,6 +14,7 @@ Field attributes (* = client-only):
 		align          : 'left'|'right'|'center'
 		null_text      : plain text display value for null
 		empty_text     : plain text display value for ''
+		text_color     : JS expression using row.COL, or f(nav, ri) -> color name
 	*	to_text        : f(v) -> s   plain text display value.
 	EDITING
 		readonly       : prevent modifying on new rows or existing rows.
@@ -60,9 +61,9 @@ const ui = window.ui
 const {
 	assign, assign_opt, noop, display_name, words, set,
 	num, isnum, isstr, isbool, isarray, isobj, str, dec, repl, utf8_len, floor,
-	isobject, clamp,
+	isobject, isfunc, clamp,
 	assert, obj, map, empty_array, empty, return_true,
-	warn, warn_if,
+	warn, warn_if, warn_once,
 	format_kbytes, format_kcount, format_date, parse_date,
 	parse_timeofday, format_timeofday, format_duration, format_timeago, S,
 } = glue
@@ -674,6 +675,7 @@ let field_config_checks = {
 	label: optional_str,
 	icon: optional_str,
 	info: optional_str,
+	text_color: v => v == null || isstr(v) || isfunc(v),
 	internal: optional_bool,
 	hidden: optional_bool,
 	readonly: optional_bool,
@@ -1252,6 +1254,33 @@ btn.click = function() {
 	// TODO
 }
 
+//// ROW EXPRESSIONS ---------------------------------------------------------
+
+function compile_row_expr(expr) {
+	let nav, ri // current nav and row slot during expression evaluation
+	let row = new Proxy(obj(), {
+		get: function(t, col) {
+			return nav.cell_input_val(ri, nav.all_fields_map[col].fi)
+		},
+	})
+	let eval_expr = new Function('row',
+		'"use strict"; return (\n'+expr+'\n)')
+	return function(nav1, ri1) {
+		let nav0 = nav, ri0 = ri
+		nav = nav1
+		ri = ri1
+		try {
+			return eval_expr(row)
+		} catch (err) {
+			warn_once('row expression:', expr, err)
+			return 'error'
+		} finally {
+			nav = nav0
+			ri = ri0
+		}
+	}
+}
+
 //// create_field() ----------------------------------------------------------
 
 ui.create_field = function(opt, nav_id = '') {
@@ -1271,6 +1300,8 @@ ui.create_field = function(opt, nav_id = '') {
 	}
 	if (!field.check_config(nav_id))
 		return null
+	if (isstr(field.text_color))
+		field.text_color = compile_row_expr(field.text_color)
 	let own_rules = []
 	for (let k in field) {
 		if (k.startsWith('validator_')) {

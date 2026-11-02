@@ -264,11 +264,6 @@ do
 	end)
 end
 
-fontfile('mono'         , 'fonts/jetbrains-mono-nl-regular.woff2')
-fontfile('opensans'     , 'fonts/opensans.var.woff2')
-fontfile('tabler'       , 'icons/tabler-icons.woff2')
-fontfile('tabler_filled', 'icons/tabler-icons.woff2')
-
 action.error = error
 
 --NOTE: a session is a browser tab.

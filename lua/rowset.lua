@@ -47,6 +47,7 @@ Field attributes to set:
 		max_w            : px            max grid column width
 		null_text        : ''            text for null
 		empty_text       : ''            text for ''
+		text_color       : JS expression using row.COL, returning a color name
 		internal         : t             cannot be made visible
 		hidden           : t             not visible by default
 	EDITING
@@ -168,6 +169,7 @@ local client_field_attrs = {
 	internal=1, hidden=1, readonly=1, null_text=1,
 	filter = 1,
 	icon = 1,
+	text_color = 1,
 	name=1, type=1, label=1, info=1, client_default=1, align=1,
 	has_server_default=1, auto_increment=1,
 	enum_values=1, enum_labels=1, enum_info=1, not_null=1, min=1, maxlen=1,

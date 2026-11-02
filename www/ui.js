@@ -455,7 +455,7 @@ function resolve_color(color_rules, state_bits) {
 		if (!color && state_bits) {
 			for (let i = 1, n = color_rules.length; i < n; i += 3) {
 				let required_bits = color_rules[i+0]
-				let rule_color     = color_rules[i+2]
+				let rule_color    = color_rules[i+2]
 				if (!required_bits)
 					color = rule_color
 			}
