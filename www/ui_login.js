@@ -62,7 +62,7 @@ ui.login_window = function() {
 
 				ui.pb(ui.sp())
 				ui.text('', 'Email', 0, '[', 't')
-				s.email_text = ui.input('login_email', s.email_text, null, 1)
+				s.email_text = ui.input('login_email', s.email_text)
 				ui.color('label')
 				ui.pt(ui.sp())
 				ui.pb(ui.sp2())

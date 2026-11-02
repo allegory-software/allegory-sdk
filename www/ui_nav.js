@@ -5357,7 +5357,8 @@ function free_lookup_input(s) {
 	s.lookup_nav.unref()
 }
 
-ui.lookup_input = function(id, value, field, fr, no_box, readonly, want_open) {
+ui.lookup_input = function(id, value, field, fr, align, valign, no_box,
+	readonly, want_open) {
 	let picker_id = id+'.picker'
 	let s = ui.state(id)
 	field ??= ui.input_field(id)
@@ -5379,7 +5380,8 @@ ui.lookup_input = function(id, value, field, fr, no_box, readonly, want_open) {
 		? (focused ? 'readonly focused' : 'readonly')
 		: (focused ? 'focused' : null)
 	ui.default_min_w(ui.em_input())
-	let open = ui.dropdown(id, null, want_open && !disabled, fr, no_box, state)
+	let open = ui.dropdown(id, null, want_open && !disabled, fr, align, valign,
+		no_box, state)
 	if (!open && ui.focus_inside(picker_id))
 		ui.focus(id)
 

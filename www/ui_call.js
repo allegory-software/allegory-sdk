@@ -1579,9 +1579,9 @@ function draw_call_media(id, capture, devices, device_kind, label,
 	let selected_device = get_device_choice(input_devices, capture.device_id)
 	ui.h(0, ui.sp())
 		ui.label(id, label, 0)
-		let is_enabled = ui.checkbox(id, capture.is_enabled, null, 0)
+		let is_enabled = ui.checkbox(id, capture.is_enabled)
 		let device = ui.list_dropdown(id+'.device', input_devices,
-			selected_device, call_device_field, 1)
+			selected_device, call_device_field)
 		let device_id = device ? device.deviceId : null
 		if (is_enabled != capture.is_enabled || device_id != capture.device_id)
 			set_capture(is_enabled, device_id)
@@ -1593,7 +1593,7 @@ function draw_call_media(id, capture, devices, device_kind, label,
 			ui.text('', 'Not capturing', 0)
 		}
 		if (capture.error && !capture.pending)
-			if (ui.button(id+'.retry', '', 'Retry', 0))
+			if (ui.button(id+'.retry', '', 'Retry'))
 				set_capture(true, capture.device_id)
 	ui.end_h()
 	if (capture.error) ui.text('', capture.error, 0)
@@ -1608,7 +1608,7 @@ function draw_call_speaker(id, call) {
 	ui.h(0, ui.sp())
 		ui.label(id, 'Speaker', 0)
 		let device = ui.list_dropdown(id, output_devices, selected_device,
-			call_device_field, 1)
+			call_device_field)
 		let device_id = device ? device.deviceId : null
 		if (device_id != call.speaker.device_id)
 			call.set_speaker(device_id)
@@ -1692,17 +1692,17 @@ ui.call = ui.stateful_widget(function(id) {
 			if (call.state == 'preview' && !opt.name) {
 				ui.h(0, ui.sp())
 					ui.label(id+'.name', 'Your name', 0)
-					guest_name = ui.input(id+'.name', guest_name, null, 1)
+					guest_name = ui.input(id+'.name', guest_name)
 				ui.end_h()
 			}
 			ui.h(0, ui.sp())
 				if (is_active) {
-					if (ui.button(id+'.leave', '', 'Leave', 0)) {
+					if (ui.button(id+'.leave', '', 'Leave')) {
 						call.leave()
 						replace_ended_call()
 					}
 				} else {
-					if (ui.button(id+'.join', '', 'Join', 0,
+					if (ui.button(id+'.join', '', 'Join', null,
 						null, null, null, !can_join || !call_id || !invite_token
 							|| !(opt.name || guest_name?.trim()))) {
 						call_error = null
@@ -1717,7 +1717,7 @@ ui.call = ui.stateful_widget(function(id) {
 				ui.h(0, ui.sp())
 					ui.label(id+'.force_sfu', 'Force SFU (whole call)', 0)
 					let want_force_sfu = ui.checkbox( // requested SFU override
-						id+'.force_sfu', call.want_force_sfu, null, 0)
+						id+'.force_sfu', call.want_force_sfu)
 					if (want_force_sfu != call.want_force_sfu)
 						call.set_force_sfu(want_force_sfu)
 				ui.end_h()
@@ -1729,12 +1729,12 @@ ui.call = ui.stateful_widget(function(id) {
 			ui.h(0, ui.sp())
 				ui.label(id+'.echo_cancellation', 'Echo cancellation', 0)
 				let want_echo_cancellation = ui.checkbox( // checkbox value
-					id+'.echo_cancellation', call.microphone.want_echo_cancellation,
-					null, 0)
+					id+'.echo_cancellation',
+						call.microphone.want_echo_cancellation)
 				ui.label(id+'.noise_suppression', 'Noise suppression', 0)
 				let want_noise_suppression = ui.checkbox( // checkbox value
-					id+'.noise_suppression', call.microphone.want_noise_suppression,
-					null, 0)
+					id+'.noise_suppression',
+						call.microphone.want_noise_suppression)
 			ui.end_h()
 			if (want_echo_cancellation != call.microphone.want_echo_cancellation
 				|| want_noise_suppression
@@ -1761,7 +1761,7 @@ ui.call = ui.stateful_widget(function(id) {
 				ui.h(0, ui.sp())
 					ui.text('', 'Microphone level', 0)
 					if (level == null) {
-						if (ui.button(id+'.meter', '', 'Enable meter', 0))
+						if (ui.button(id+'.meter', '', 'Enable meter'))
 							call.set_microphone(true)
 					} else {
 						let fr = clamp( // bar fraction
@@ -1787,8 +1787,7 @@ ui.call = ui.stateful_widget(function(id) {
 			ui.h(0, ui.sp())
 				ui.label(id+'.background_blur', 'Blur background', 0)
 				let want_background_blur = ui.checkbox( // checkbox value
-					id+'.background_blur', call.camera.want_background_blur,
-					null, 0)
+					id+'.background_blur', call.camera.want_background_blur)
 			ui.end_h()
 			if (want_background_blur != call.camera.want_background_blur)
 				call.set_camera(call.camera.is_enabled, call.camera.device_id,
@@ -1800,7 +1799,7 @@ ui.call = ui.stateful_widget(function(id) {
 				if (peer.audio_error) {
 					ui.h(0, ui.sp())
 						ui.text('', peer.name+': '+peer.audio_error, 0)
-						if (ui.button(id+'.audio.'+peer.id, '', 'Play audio', 0))
+						if (ui.button(id+'.audio.'+peer.id, '', 'Play audio'))
 							call.play_audio(peer)
 					ui.end_h()
 				}

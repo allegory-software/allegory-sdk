@@ -1597,13 +1597,13 @@ function code_edit_view(id, opt) {
 										find_scan()
 									}
 									ui.nofocus()
-									if (ui.bare_button(id+'.find_prev', 'arrow-up', '', 0))
+									if (ui.bare_button(id+'.find_prev', 'arrow-up', ''))
 										goto_match(-1)
 									ui.nofocus()
-									if (ui.bare_button(id+'.find_next', 'arrow-down', '', 0))
+									if (ui.bare_button(id+'.find_next', 'arrow-down', ''))
 										goto_match(1)
 									ui.nofocus()
-									if (ui.bare_button(id+'.find_close', 'x', '', 0)) {
+									if (ui.bare_button(id+'.find_close', 'x', '')) {
 										close_find()
 										ui.focus(id)
 										ui.rebuild('close_find')
@@ -1614,10 +1614,10 @@ function code_edit_view(id, opt) {
 										replace_text = ui.input(
 											rid, replace_text, null, 0) ?? ''
 										ui.nofocus()
-										if (ui.button(id+'.replace', '', 'Replace', 0))
+										if (ui.button(id+'.replace', '', 'Replace'))
 											replace_match()
 										if (ui.button(id+'.replace_all', '',
-											'Replace All', 0))
+											'Replace All'))
 											replace_all()
 									ui.end_h()
 								}

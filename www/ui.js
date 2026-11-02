@@ -91,7 +91,6 @@ LAYOUT
   MARGINS       ui.m  ui.ml  ui.mr  ui.mt  ui.mb  ui.mh  ui.mv
   MIN SIZE      ui.min_w  ui.min_h  ui.min_wh
                 ui.default_min_w  ui.default_min_h  ui.default_min_wh
-  BOX ARGS      ui.box_args
 
 WIDGET STATE
   ACCESS        ui.state  ui.state_of  ui.set_state_of  ui.state_init
@@ -144,7 +143,7 @@ WIDGET API
   REGISTER      ui.widget  ui.stateful_widget  ui.box_widget  ui.box_ct_widget
   BUILD PHASE   ui.cmd_begin  ui.cmd_add_arg  ui.cmd_end  ui.cmd
     BOX CMD     ui.cmd_box  ui.cmd_box_ct
-    BOX ARGS    ui.PX1  ui.PX2  ui.MX1  ui.MX2  ui.FR  ui.ALIGN  ui.clear_box_args
+    BOX ARGS    ui.PX1  ui.PX2  ui.MX1  ui.MX2  ui.FR  ui.ALIGN
     VAR ARGS    ui.BOX_ARGS  ui.BOX_CT_ARGS
     CT ARGS     ui.ct_i  ui.rel_ct_i  ui.last_i
     MEASURE     ui.measure
@@ -3250,11 +3249,6 @@ USER API: MARGINS & PADDINGS
 	ui.default_min_h   (h)      set minimum height if unset
 	ui.default_min_wh  (w, h)   set minimum size if unset
 
-USER API: BOX ARGS
-
-	ui.box_args       (fr=, align=, valign=)  set args for the next input
-	ui.box_args       ({fr: undefined, align: undefined, valign: undefined})
-
 */
 
 const PX1        =  4
@@ -3395,29 +3389,6 @@ function reset_spacings() {
 	next_min_h = null
 }
 reset_spacings()
-
-/// box args
-
-let fr0, align0, valign0
-
-ui.box_args = function(fr, align, valign) {
-	if (isobj(fr)) {
-		let t = fr
-		fr0     = t.fr
-		align0  = t.align
-		valign0 = t.valign
-	} else {
-		fr0     = fr
-		align0  = align
-		valign0 = valign
-	}
-}
-
-ui.clear_box_args = function() {
-	fr0     = null
-	align0  = null
-	valign0 = null
-}
 
 /// box command
 
@@ -7630,13 +7601,13 @@ function build_action_hint(id, action) {
 
 /*
 
-	ui.button  ui.btn (id, icon=, text=, fr=1, align=, valign='c', style='button', readonly=) -> ?
-	ui.primary_button (id, icon=, text=, fr=1, align=, valign='c', readonly=) -> ?
-	ui.bare_button    (id, icon=, text=, fr=1, align=, valign='c', readonly=) -> ?
+	ui.button  ui.btn (id, icon=, text=, fr=0, align='l', valign='c', style='button', readonly=) -> ?
+	ui.primary_button (id, icon=, text=, fr=0, align='l', valign='c', readonly=) -> ?
+	ui.bare_button    (id, icon=, text=, fr=0, align='l', valign='c', readonly=) -> ?
 
 BUTTON PARTS
 
-	ui.button_stack     (id, fr=1, align='s', valign='c')
+	ui.button_stack     (id, fr=0, align='l', valign='c')
 	ui.button_bb        (style='button', state)  draw the button background
 	ui.button_text      (s, state)               draw button text
 	ui.button_icon      (font, icon, state)      draw a button icon
@@ -7664,7 +7635,7 @@ ui.button_stack = function(id, fr, align, valign) {
 	ui.focusable(id)
 	ui.keep_focus(id)
 	next_min_h ??= ui.em(1.5)
-	ui.stack(id, fr, align ?? 's', valign ?? 'c')
+	ui.stack(id, fr ?? 0, align ?? 'l', valign ?? 'c')
 	ui.focus_ring(id)
 }
 
@@ -7736,12 +7707,8 @@ ui.button = function(
 		binding.disabled = !!readonly || binding.disabled
 		readonly = binding.disabled
 	}
-	if (icon) {
+	if (icon)
 		next_min_w ??= ui.em(1.5) // force w
-		align ??= 's'
-	} else {
-		align ??= 'l'
-	}
 	ui.button_stack(id, fr, align, valign)
 	let s = ui.state(id, button_update) // button widget state
 	let state = readonly ? 'readonly' : s.state
@@ -8030,8 +7997,8 @@ and ui.focus_inside(id) is true.
 
 	ui.set_menu_open    (id, open)  open or close a menu
 	ui.menu             (id, items, want_open=, side=, align=) -> picked_id
-	ui.menu_button      (id, icon=, text=, items, fr=1, align='l', valign='c', style='button', readonly=) -> picked_id
-	ui.bare_menu_button (id, icon=, text=, items, fr=1, align='l', valign='c', readonly=) -> picked_id
+	ui.menu_button      (id, icon=, text=, items, fr=0, align='l', valign='c', style='button', readonly=) -> picked_id
+	ui.bare_menu_button (id, icon=, text=, items, fr=0, align='l', valign='c', readonly=) -> picked_id
 	ui.menu_bar         (id, fr=1, gap=0, align='s', valign='s')
 
 	let picked_id = ui.menu(id, items, want_open=, side=, align=)
@@ -8293,8 +8260,8 @@ ui.menu_button = function(
 	else if (want_open)
 		ui.set_menu_open(menu_id, true)
 	ui.focus_group(false, null, id)
-	ui.stack(menu_id, fr, align ?? 'l', valign ?? 'c')
-		ui.button(id, icon, text, 1, 's', 's', style, readonly)
+	ui.stack(menu_id, fr ?? 0, align ?? 'l', valign ?? 'c')
+		ui.button(id, icon, text, 1, 's', null, style, readonly)
 		let picked_id = ui.menu(menu_id, items, false, 'b', '[')
 		if (!ui.state_of(menu_id, 'open') && ui.focus_inside(menu_id))
 			ui.focus(id)
@@ -8618,8 +8585,8 @@ ui.error_label = function(for_id, mode, fr, align, valign) {
 
 TEXT INPUTS
 
-	ui.input          (id, v=, field=, fr=1, text_align='s', no_box=, readonly=) -> v
-	ui.password_input (id, v=, field=, fr=1, text_align='s', no_box=, readonly=) -> v
+	ui.input          (id, v=, field=, fr=1, align='s', valign='c', text_align='s', no_box=, readonly=) -> v
+	ui.password_input (id, v=, field=, fr=1, align='s', valign='c', text_align='s', no_box=, readonly=) -> v
 
 DEFAULT WIDTHS
 
@@ -8639,7 +8606,8 @@ ui.em_input_max_popup = () => ui.em(ui.input_max_popup_w_em)
 let input_pad_x_em = 0.5
 let input_pad_y_em = 0.5
 
-ui.input = function(id, value, field, fr, text_align, no_box, readonly) {
+ui.input = function(id, value, field, fr, align, valign, text_align, no_box,
+	readonly) {
 	field ??= input_field(id)
 	if (clicked(id+'.label')) {
 		ui.focus(id)
@@ -8650,7 +8618,7 @@ ui.input = function(id, value, field, fr, text_align, no_box, readonly) {
 	let text_w = next_min_w ?? ui.em_input()
 	next_min_w = null
 	if (!no_box) {
-		ui.stack('', fr, 's', 's')
+		ui.stack('', fr ?? 1, align ?? 's', valign ?? 'c')
 		let state =
 			(readonly ? STATE_READONLY : 0)
 			| (focused ? STATE_FOCUSED : 0)
@@ -8667,10 +8635,11 @@ ui.input = function(id, value, field, fr, text_align, no_box, readonly) {
 }
 
 ui.password_input = function(
-	id, value, field, fr, text_align, no_box, readonly
+	id, value, field, fr, align, valign, text_align, no_box, readonly
 ) {
 	field ??= input_field(id) ?? ui.create_field({type: 'password'})
-	return ui.input(id, value, field, fr, text_align, no_box, readonly)
+	return ui.input(id, value, field, fr, align, valign, text_align, no_box,
+		readonly)
 }
 
 //// APPLY INPUT -------------------------------------------------------------
@@ -8682,7 +8651,7 @@ only when pressing the Apply button. Good for slow ops that can't run on each
 keystroke or slider move but are wired to react to input changes like nav
 param inputs that would refresh a grid on every keystroke.
 
-	ui.apply_input (id, input_id, v=, field=, fr=1, readonly=) -> v
+	ui.apply_input (id, input_id, v=, field=, fr=0, align='l', valign='c', readonly=) -> v
 
 Make a focus group around the input and the apply button and inside it call:
 
@@ -8702,7 +8671,8 @@ function apply_input_update(id, s) {
 	set_interaction_value(id, s, value)
 }
 
-ui.apply_input = function(id, input_id, value, field, fr, readonly) {
+ui.apply_input = function(id, input_id, value, field, fr, align, valign,
+	readonly) {
 	let s = ui.state(id, apply_input_update) // applied value and validation
 	field ??= input_field(id) ?? input_field(input_id)
 	readonly ??= field?.readonly
@@ -8712,13 +8682,13 @@ ui.apply_input = function(id, input_id, value, field, fr, readonly) {
 	let no_value = ui.value(input_id) === undefined
 	let no_apply = readonly || no_value
 	ui.button(id+'.apply', 'check', S('apply', 'Apply'),
-		fr, null, null, null, no_apply)
+		fr, align, valign, null, no_apply)
 	return ui.value(id)
 }
 
 //// NUM_SLIDER --------------------------------------------------------------
 
-// ui.num_slider (id, v=, field=, readonly=) -> v
+// ui.num_slider (id, v=, field=, fr=1, align='s', valign='c', readonly=) -> v
 
 function num_slider_update(id, s) {
 
@@ -8796,7 +8766,7 @@ function num_slider_update(id, s) {
 	}
 	set_interaction_value(id, s, interaction_value)
 }
-ui.num_slider = function(id, value, field, readonly) {
+ui.num_slider = function(id, value, field, fr, align, valign, readonly) {
 	let s = ui.state(id)
 	field ??= input_field(id) ?? ui.create_field({
 		type: 'number',
@@ -8820,12 +8790,11 @@ ui.num_slider = function(id, value, field, readonly) {
 	if (!show_input)
 		ui.focusable(id)
 
-	let fr = fr0 ?? 1
-	let align = align0 ?? 's'
-	let valign = valign0 ?? 'c'
+	fr ??= 1
+	align ??= 's'
+	valign ??= 'c'
 	let min_w = next_min_w ?? ui.em_input()
 	next_min_w = null
-	ui.clear_box_args()
 
 	let text = field.to_text(value)
 
@@ -8864,7 +8833,7 @@ ui.num_slider = function(id, value, field, readonly) {
 
 //// SLIDER ------------------------------------------------------------------
 
-// ui.slider (id, v=, field=, readonly=) -> v
+// ui.slider (id, v=, field=, fr=1, align='s', valign='c', readonly=) -> v
 
 function compute_step_and_range(
 	wanted_n, min, max, scale_base, scales, min_step
@@ -8971,7 +8940,7 @@ function slider_update(id, s) {
 		set_interaction_value(id, s,
 			snap_slider_value(value, field, slider_min, slider_max))
 }
-slider.create = function(cmd, id, value, field, readonly) {
+slider.create = function(cmd, id, value, field, fr, align, valign, readonly) {
 
 	let s = ui.state(id)
 	field ??= input_field(id) ?? ui.create_field({
@@ -8991,14 +8960,13 @@ slider.create = function(cmd, id, value, field, readonly) {
 	let scale_base = field.slider_scale_base ?? 10
 	let scales = field.slider_scales ?? 0
 
-	let fr = fr0 ?? 1
-	let align = align0 ?? 's'
-	let valign = valign0 ?? 'c'
+	fr ??= 1
+	align ??= 's'
+	valign ??= 'c'
 	let min_w = next_min_w ?? ui.em_input()
 	let min_h = next_min_h ?? ui.em((markers ? 2.8 : 1.2))
 	next_min_w = null
 	next_min_h = null
-	ui.clear_box_args()
 
 	let pad_x = markers ? ui.sp8() : ui.sp2()
 
@@ -9208,7 +9176,7 @@ ui.box_widget('slider', slider)
 
 //// TOGGLE ------------------------------------------------------------------
 
-// ui.toggle (id, on=, field=, fr=0, align='c', valign='c', readonly=) -> on
+// ui.toggle (id, on=, field=, fr=0, align='l', valign='c', readonly=) -> on
 
 let TOGGLE_ID    = BOX_ARGS+0
 let TOGGLE_STATE = BOX_ARGS+1
@@ -9264,7 +9232,7 @@ function toggle_create(
 	readonly = s.readonly
 	let hs = hit(id) || hit(id+'.label')
 	let focused = ui.focused(id)
-	let i = ui_cmd_box_begin(cmd, fr ?? 0, align ?? 'c', valign ?? 'c')
+	let i = ui_cmd_box_begin(cmd, fr ?? 0, align ?? 'l', valign ?? 'c')
 	a[n++] = id
 	a[n++] = (on ? TOGGLE_ON : 0) | (on == null ? TOGGLE_NULL : 0) |
 		(hs ? TOGGLE_HOVER : 0) |
@@ -9334,7 +9302,7 @@ ui.box_widget('toggle', toggle)
 /*
 
 	ui.checkbox      (id, on=, field=, fr=0, align='l', valign='c', readonly=) -> on
-	ui.toggle_button (id, on=, text=, field=, fr=1, align='l', valign='c', readonly=) -> on
+	ui.toggle_button (id, on=, text=, field=, fr=0, align='l', valign='c', readonly=) -> on
 
 */
 
@@ -9345,7 +9313,7 @@ checkbox.create = function(
 ) {
 	next_min_w ??= ui.em(1.2)
 	next_min_h ??= ui.em(1.2)
-	return toggle_create(cmd, id, on, field, fr ?? 0, align ?? 'l', valign,
+	return toggle_create(cmd, id, on, field, fr, align, valign,
 		readonly)
 }
 
@@ -9427,7 +9395,7 @@ ui.toggle_button = function(
 	ui.mv(ui.sp025()) // make it match other inputs
 	ui.p(ui.sp(), ui.sp05())
 	next_min_h ??= 0
-	ui.button_stack(id, fr, align ?? 'l', valign ?? 'c')
+	ui.button_stack(id, fr, align, valign)
 	let s = set_toggle_state(id, on, field, readonly)
 	let state =
 		(s.readonly ? STATE_READONLY : 0)
@@ -9448,7 +9416,7 @@ ui.toggle_button = function(
 	ui.radio_group     (id, value=, field=, readonly=) -> value
 	ui.radio           (id, own_val, fr=0, align='c', valign='c')
 
-	ui.radio_list      (id, items, value=, field=, hv='v', fr=1, align='s', valign='s', readonly=) -> value
+	ui.radio_list      (id, items, value=, field=, fr=1, align='s', valign='c', hv='v', readonly=) -> value
 
 */
 
@@ -9559,11 +9527,11 @@ radio.draw = function(a, i) {
 ui.box_widget('radio', radio)
 
 ui.radio_list = function(
-	id, items, value, field, hv, fr, align, valign, readonly
+	id, items, value, field, fr, align, valign, hv, readonly
 ) {
 	field ??= input_field(id)
 	value = ui.radio_group(id, value, field, readonly)
-	ui.hv(hv ?? 'v', fr, ui.sp2(), align, valign)
+	ui.hv(hv ?? 'v', fr ?? 1, ui.sp2(), align ?? 's', valign ?? 'c')
 	let i = 0
 	for (let item of items) {
 		let radio_id = id+'.'+i
@@ -9596,9 +9564,9 @@ ui.radio_list = function(
 	ui.dropdown_closed   (id) -> ?        check whether the picker just closed
 	ui.dropdown_picked   (id) -> ?        check whether the user picked a value
 	ui.dropdown_update   (id, s, disabled=)   update dropdown state
-	ui.dropdown          (id, update=, want_open=, fr=1, no_box=, state=) -> ?
+	ui.dropdown          (id, update=, want_open=, fr=1, align='s', valign='c', no_box=, state=) -> ?
 
-	let open = ui.dropdown (id, update=, want_open=, fr=1, no_box=, state=)
+	let open = ui.dropdown (id, update=, want_open=, fr=1, align='s', valign='c', no_box=, state=)
 		... the value ...
 	ui.dropdown_picker (id, side=, align=, yoffset=, min_w=, min_h=)
 		if (open)
@@ -9696,7 +9664,8 @@ ui.dropdown_update = function(id, s, disabled) {
 }
 
 // opened by ui.set_dropdown_open().
-ui.dropdown = function(id, update, want_open, fr, no_box, state) {
+ui.dropdown = function(id, update, want_open, fr, align, valign, no_box,
+	state) {
 
 	let min_w = next_min_w
 	next_min_w = null
@@ -9717,7 +9686,7 @@ ui.dropdown = function(id, update, want_open, fr, no_box, state) {
 	let pad_b = py2 + box_pad_y
 	ui.p(0)
 
-	ui.v(fr)
+	ui.v(fr ?? 1, 0, align ?? 's', valign ?? 'c')
 
 		ui.focus_group(open, null, id)
 		ui.stack(id)
@@ -9758,8 +9727,8 @@ ui.end_dropdown = function(id) {
 
 /*
 
-	ui.list_dropdown        (id, items, value=, field=, fr=1, align='l', max_w=, no_box=, readonly=, want_open=) -> value
-	ui.list_dropdown_inline (id, items, value=, field=, fr=1, align='l', max_w=) -> value
+	ui.list_dropdown        (id, items, value=, field=, fr=1, align='s', valign='c', text_align='l', max_w=, no_box=, readonly=, want_open=) -> value
+	ui.list_dropdown_inline (id, items, value=, field=, fr=0, align='l', valign='c', text_align='l', max_w=) -> value
 
 	ui.draw_value_row       (value, field=, edge_inset, chevron_w, max_w=, align='l')
 
@@ -9842,7 +9811,8 @@ function list_dropdown_update(id, s) {
 }
 
 ui.list_dropdown = function(
-	id, items, value, field, fr, align, max_w, no_box, readonly, want_open
+	id, items, value, field, fr, align, valign, text_align, max_w, no_box,
+		readonly, want_open
 ) {
 
 	field ??= input_field(id)
@@ -9850,7 +9820,7 @@ ui.list_dropdown = function(
 	let picker_id = id+'.picker'
 
 	let chevron_w = ui.em(1)
-	align = parse_align(align ?? 'l') == ALIGN_END ? 'r' : 'l'
+	text_align = parse_align(text_align ?? 'l') == ALIGN_END ? 'r' : 'l'
 
 	ui.focusable(id)
 	readonly ??= field?.readonly
@@ -9862,7 +9832,7 @@ ui.list_dropdown = function(
 		| (ui.focused(id) ? STATE_FOCUSED : 0)
 	ui.default_min_w(ui.em_input())
 	let open = ui.dropdown(id, list_dropdown_update, want_open && !readonly,
-		fr, no_box, state)
+		fr, align, valign, no_box, state)
 	value = set_value(id, s, value, field)
 	if (ui.dropdown_opened(id))
 		s.revert_value = s.input_value
@@ -9871,10 +9841,10 @@ ui.list_dropdown = function(
 		ui.focus(id)
 
 		ui.color('text', state)
-		draw_value_row(value, field, align == 'l' ? s.pad_r : s.pad_l,
-			chevron_w, max_w ?? ui.em_input_max(), align)
+		draw_value_row(value, field, text_align == 'l' ? s.pad_r : s.pad_l,
+			chevron_w, max_w ?? ui.em_input_max(), text_align)
 
-	ui.dropdown_picker(id, 'b', align == 'r' ? ']s' : 's')
+	ui.dropdown_picker(id, 'b', text_align == 'r' ? ']s' : 's')
 
 		if (open) {
 			let is_popup_above = ui.state_of(id+'.popup', 'side')
@@ -9886,7 +9856,7 @@ ui.list_dropdown = function(
 					ui.state_of(resizer_id, 'h') ?? picker_max_h)
 				ui.scrollbox(picker_id+'.sb', 1, 'contain', 'auto', 's', 's')
 					let opt = s.picker_opt ??= {} // picker list options
-					opt.item_align = align
+					opt.item_align = text_align
 					opt.max_w = max_w ?? ui.em_input_max_popup()
 					opt.item_pad_l = s.pad_l
 					opt.item_pad_r = s.pad_r
@@ -9906,24 +9876,26 @@ ui.list_dropdown = function(
 // dropdowns have fixed w by default that aligns with inputs.
 // these inline dropdowns have dynamic width for use inline inside text.
 ui.list_dropdown_inline = function(id, items, value, field,
-	fr, align, max_w) {
+	fr, align, valign, text_align, max_w) {
 	ui.min_w(-1)
-	return ui.list_dropdown(id, items, value, field, fr ?? 0, align, max_w)
+	return ui.list_dropdown(id, items, value, field, fr ?? 0, align ?? 'l', valign,
+		text_align, max_w)
 }
 
 /*
 
-	ui.enum_input  (id, value=, field, fr=1, align='l', max_w=, no_box=, readonly=, want_open=) -> value
+	ui.enum_input  (id, value=, field, fr=1, align='s', valign='c', text_align='l', max_w=, no_box=, readonly=, want_open=) -> value
 	ui.enum_toggle (id, value=, field, fr=0, align='l', valign='c', readonly=) -> value
 
 */
 
-ui.enum_input = function(id, value, field, fr, align, max_w, no_box,
+ui.enum_input = function(
+	id, value, field, fr, align, valign, text_align, max_w, no_box,
 	readonly, want_open
 ) {
 	field ??= input_field(id)
-	return ui.list_dropdown(id, field.enum_items(), value, field,
-		fr, align, max_w, no_box, readonly, want_open)
+	return ui.list_dropdown(id, field.enum_items(), value, field, fr, align,
+		valign, text_align, max_w, no_box, readonly, want_open)
 }
 
 ui.enum_toggle = function(
@@ -10240,7 +10212,7 @@ ui.calendar = function(id, sel_day, ranges, fr, align, valign) {
 
 //// DATE INPUT --------------------------------------------------------------
 
-// ui.date_input (id, v=, field=, fr=1, align='r', valign='c', no_box=,
+// ui.date_input (id, v=, field=, fr=1, align='s', valign='c', text_align='r', no_box=,
 //    readonly=, want_open=) -> v
 
 function date_input_update(id, s) {
@@ -10284,8 +10256,8 @@ function date_input_update(id, s) {
 	set_interaction_value(id, s, interaction_value)
 }
 
-ui.date_input = function(id, v, field, fr, align, valign, no_box, readonly,
-	want_open
+ui.date_input = function(
+	id, v, field, fr, align, valign, text_align, no_box, readonly, want_open
 ) {
 
 	let picker_id = id+'.picker'
@@ -10308,7 +10280,8 @@ ui.date_input = function(id, v, field, fr, align, valign, no_box, readonly,
 		(readonly ? STATE_READONLY : 0)
 		| (focused ? STATE_FOCUSED : 0)
 	ui.default_min_w(ui.em_input())
-	let open = ui.dropdown(id, null, want_open && !readonly, fr, no_box, state)
+	let open = ui.dropdown(id, null, want_open && !readonly, fr, align, valign,
+		no_box, state)
 	if (!open && ui.focus_inside(picker_id))
 		ui.focus(input_id)
 
@@ -10322,7 +10295,7 @@ ui.date_input = function(id, v, field, fr, align, valign, no_box, readonly,
 	if (opened)
 		s.revert_value = s.input_value
 
-	let input_align = parse_align(align ?? 'r')
+	let input_align = parse_align(text_align ?? 'r')
 	input_align = input_align == ALIGN_END ? 'sr'
 		: input_align == ALIGN_CENTER ? 'sc' : 's'
 
@@ -10332,7 +10305,7 @@ ui.date_input = function(id, v, field, fr, align, valign, no_box, readonly,
 				ui.icon(id, 'calendar', 0, 'l', 'c')
 				ui.color('text', state)
 				ui.text_editable(input_id, value, 1,
-					input_align, valign ?? 'c', null, field, readonly)
+					input_align, 'c', null, field, readonly)
 			ui.end_h()
 		ui.end_stack()
 
@@ -10764,7 +10737,7 @@ function gradient_slider(draw_gradient, name, max_value, key_step,
 							ui.focus_ring()
 					ui.end_stack()
 					ui.min_w(ui.em(3))
-					ui.input(input_id, text, field, 0, 'sr')
+					ui.input(input_id, text, field, 0, null, null, 'sr')
 				ui.end_focus_group()
 			ui.end_h()
 			return ui.value(id)
@@ -10904,7 +10877,7 @@ ui.color_picker = function(id, hex, field) {
 		ui.end_h()
 		ui.h(0, ui.sp1(), 's', 'c')
 			ui.label(hex_id, 'HEX', 0)
-			ui.input(hex_id, text, field, 1)
+			ui.input(hex_id, text, field)
 		ui.end_h()
 	ui.end_v_aligned()
 
@@ -10937,9 +10910,10 @@ function color_input_update(id, s) {
 
 ui.color_swatch_margin_em = 0.5 // swatch <-> cell edge distance
 
-// ui.color_input (id, v=, field=, fr=1, no_box=, readonly=, want_open=) -> v
+// ui.color_input (id, v=, field=, fr=1, align='s', valign='c', no_box=, readonly=, want_open=) -> v
 //
-ui.color_input = function(id, value, field, fr, no_box, readonly, want_open) {
+ui.color_input = function(id, value, field, fr, align, valign, no_box,
+	readonly, want_open) {
 	let picker_id = id+'.picker'
 	let s = ui.state(id)
 	field ??= input_field(id) ?? ui.create_field({type: 'color'})
@@ -10952,7 +10926,8 @@ ui.color_input = function(id, value, field, fr, no_box, readonly, want_open) {
 		(readonly ? STATE_READONLY : 0)
 		| (ui.focused(id) ? STATE_FOCUSED : 0)
 	ui.default_min_w(ui.em_input())
-	let open = ui.dropdown(id, null, want_open && !readonly, fr, no_box, state)
+	let open = ui.dropdown(id, null, want_open && !readonly, fr, align, valign,
+		no_box, state)
 	if (!open && ui.focus_inside(picker_id))
 		ui.focus(id)
 
@@ -10980,8 +10955,8 @@ ui.color_input = function(id, value, field, fr, no_box, readonly, want_open) {
 				ui.color_picker(picker_id, value, field)
 				ui.h(0, ui.sp05(), 'r')
 					ui.default_button(id+'.pick')
-					ui.primary_button(id+'.pick', '', S('pick', 'Pick'), 0)
-					ui.button(id+'.cancel', '', S('cancel', 'Cancel'), 0)
+					ui.primary_button(id+'.pick', '', S('pick', 'Pick'))
+					ui.button(id+'.cancel', '', S('cancel', 'Cancel'))
 				ui.end_h()
 			ui.end_v()
 			ui.resizer(id+'.resizer', 'r')
@@ -10999,10 +10974,10 @@ ui.color_input = function(id, value, field, fr, no_box, readonly, want_open) {
 field_input builds a field's control with its label and a status icon: an x
 for a validation error, a check mark for a modified cell. nav_input builds
 the control for a cell of a nav, and an empty readonly text box when there
-is no row. Both read fr, align and valign from ui.box_args().
+is no row.
 
-	ui.field_input (id, v=, opt) -> v  edit a field with label and status
-	ui.nav_input   (id, opt) -> v      edit a nav cell with label and status
+	ui.field_input (id, v=, opt, fr=1, align='s', valign='c') -> v  edit a field with label and status
+	ui.nav_input   (id, opt, fr=1, align='s', valign='c') -> v      edit a nav cell with label and status
 	ui.build_input (id, value=, opt, control, readonly=) -> value
 
 opt:
@@ -11024,7 +10999,7 @@ opt:
 	error_mode : which results the error tooltip or label shows, as in
 	             ui.error_label(): 'first_error', 'all_errors' (default),
 	             'all_checked', 'all'.
-	text_align :input, password_input, date_input, enum_input, list_dropdown.
+	text_align : input, password_input, date_input, enum_input, list_dropdown.
 	w          : min width of the control.
 	max_w      : enum_input, list_dropdown: max width.
 	items      : list_dropdown, radio_list: the items (field.enum_items()).
@@ -11044,47 +11019,43 @@ opt:
 ui.build_input = function(id, value, opt, control, readonly) {
 	ui.min_w(opt.w)
 	if (control == 'input') {
-		value = ui.input(id, value, this,
-			1, opt.text_align, opt.no_box, readonly)
+		value = ui.input(id, value, this, null, null, null, opt.text_align,
+			opt.no_box, readonly)
 	} else if (control == 'password_input') {
-		value = ui.password_input(id, value, this,
-			1, opt.text_align, opt.no_box, readonly)
+		value = ui.password_input(id, value, this, null, null, null, opt.text_align,
+			opt.no_box, readonly)
 	} else if (control == 'checkbox') {
-		value = ui.checkbox(id, value, this, 0, 'l', 'c', readonly)
+		value = ui.checkbox(id, value, this, null, null, null, readonly)
 	} else if (control == 'toggle') {
-		value = ui.toggle(id, value, this, 0, 'l', 'c', readonly)
+		value = ui.toggle(id, value, this, null, null, null, readonly)
 	} else if (control == 'toggle_button') {
-		value = ui.toggle_button(id, value, this.label, this,
-			0, 'l', 'c', readonly)
+		value = ui.toggle_button(id, value, this.label, this, null, null, null,
+			readonly)
 	} else if (control == 'date_input') {
-		value = ui.date_input(id, value, this,
-			1, opt.text_align ?? this.align, 'c', opt.no_box, readonly,
-			opt.open)
+		value = ui.date_input(id, value, this, null, null, null,
+			opt.text_align ?? this.align, opt.no_box, readonly, opt.open)
 	} else if (control == 'color_input') {
-		value = ui.color_input(id, value, this, 1, opt.no_box, readonly,
-			opt.open)
+		value = ui.color_input(id, value, this, null, null, null, opt.no_box,
+			readonly, opt.open)
 	} else if (control == 'lookup_input') {
-		value = ui.lookup_input(id, value, this, 1, opt.no_box, readonly,
-			opt.open)
+		value = ui.lookup_input(id, value, this, null, null, null, opt.no_box,
+			readonly, opt.open)
 	} else if (control == 'enum_input') {
-		value = ui.enum_input(id, value, this,
-			1, opt.text_align, opt.max_w, opt.no_box, readonly, opt.open)
+		value = ui.enum_input(id, value, this, null, null, null, opt.text_align,
+			opt.max_w, opt.no_box, readonly, opt.open)
 	} else if (control == 'enum_toggle') {
-		value = ui.enum_toggle(id, value, this,
-			1, 's', 'c', readonly)
+		value = ui.enum_toggle(id, value, this, null, null, null, readonly)
 	} else if (control == 'list_dropdown') {
-		value = ui.list_dropdown(id, opt.items ?? this.enum_items(),
-			value, this, 1, opt.text_align, opt.max_w, opt.no_box, readonly,
+		value = ui.list_dropdown(id, opt.items ?? this.enum_items(), value,
+			this, null, null, null, opt.text_align, opt.max_w, opt.no_box, readonly,
 			opt.open)
 	} else if (control == 'radio_list') {
-		value = ui.radio_list(id, opt.items ?? this.enum_items(),
-			value, this, opt.hv, 1, 'l', 'c', readonly)
+		value = ui.radio_list(id, opt.items ?? this.enum_items(), value, this,
+			null, 'l', null, opt.hv, readonly)
 	} else if (control == 'num_slider') {
-		ui.box_args(1, 's', 'c')
-		value = ui.num_slider(id, value, this, readonly)
+		value = ui.num_slider(id, value, this, null, null, null, readonly)
 	} else if (control == 'slider') {
-		ui.box_args(1, 's', 'c')
-		value = ui.slider(id, value, this, readonly)
+		value = ui.slider(id, value, this, null, null, null, readonly)
 	} else {
 		assert(false, 'unknown input control: ', control)
 	}
@@ -11093,11 +11064,10 @@ ui.build_input = function(id, value, opt, control, readonly) {
 
 let readonly_text_field
 
-function build_input_row(id, value, opt, is_bound) {
-	let fr = fr0 ?? 1
-	let align = align0 ?? 's'
-	let valign = valign0 ?? 's'
-	ui.clear_box_args()
+function build_input_row(id, value, opt, is_bound, fr, align, valign) {
+	fr ??= 1
+	align ??= 's'
+	valign ??= 'c'
 
 	let s = ui.state(id+'.field_input')
 	let nav = is_bound ? opt.nav : null
@@ -11160,7 +11130,7 @@ function build_input_row(id, value, opt, is_bound) {
 		if (is_bound && ri == null) {
 			readonly_text_field ??= ui.create_field({readonly: true})
 			ui.min_w(opt.w)
-			value = ui.input(id, null, readonly_text_field, 1)
+			value = ui.input(id, null, readonly_text_field)
 		} else {
 			let readonly = ri != null && !nav.can_change_val(ri, field.fi)
 			value = field.build_input(id, value, opt, control, readonly)
@@ -11220,12 +11190,12 @@ function build_input_row(id, value, opt, is_bound) {
 	return has_error ? undefined : value
 }
 
-ui.field_input = function(id, value, opt) {
-	return build_input_row(id, value, opt, false)
+ui.field_input = function(id, value, opt, fr, align, valign) {
+	return build_input_row(id, value, opt, false, fr, align, valign)
 }
 
-ui.nav_input = function(id, opt) {
-	return build_input_row(id, null, opt, true)
+ui.nav_input = function(id, opt, fr, align, valign) {
+	return build_input_row(id, null, opt, true, fr, align, valign)
 }
 
 //// POLYLINE ----------------------------------------------------------------
@@ -11968,7 +11938,7 @@ function tab_strip(
 	if (s.can_add_remove_tabs) {
 		ui.font_size(1)
 		ui.ph(ui.sp())
-		ui.bare_button(tablist_id+'.plus', 'plus', '', 0)
+		ui.bare_button(tablist_id+'.plus', 'plus', '')
 	}
 	ui.end_h()
 	ui.h(0, 0, 'r', 'c')

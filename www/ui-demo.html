@@ -172,7 +172,7 @@ ui.end_v()
 let toggle1_on = false
 demos.toggle = function() {
 ui.h(0, ui.sp(), 'c', 'c')
-	toggle1_on = ui.toggle('toggle1', toggle1_on)
+	toggle1_on = ui.toggle('toggle1', toggle1_on, null, null, 'c')
 	ui.label('toggle1', 'Toggle me!')
 ui.end_h()
 }
@@ -220,7 +220,7 @@ function build_dock1_tab(tab) {
 		ui.v(0, ui.sp2(), 's', 't')
 			ui.text('', tab.kind+': '+tab.label)
 			if (tab.kind == 'notes') {
-				ui.input(tab_id+'.text')
+				ui.input(tab_id+'.text', undefined)
 			}
 		ui.end_v()
 	} else {
@@ -310,12 +310,10 @@ ui.v(0, ui.sp2(), 's', 't')
 	ui.menu_bar('menu_bar_demo', 0, ui.sp(), 's', 'c')
 		for (let menu of menu_bar_demo_menus)
 			menu_bar_demo_picked = ui.bare_menu_button(
-				'menu_bar_demo.'+menu.id, menu.icon, menu.label, menu.items,
-				0) || menu_bar_demo_picked
+				'menu_bar_demo.'+menu.id, menu.icon, menu.label, menu.items) || menu_bar_demo_picked
 		ui.label('menu_bar_demo.text', 'Text', 0)
-		menu_bar_demo_text = ui.input('menu_bar_demo.text',
-			menu_bar_demo_text, null, 1)
-		if (ui.bare_button('menu_bar_demo.help', 'help', 'Help', 0))
+		menu_bar_demo_text = ui.input('menu_bar_demo.text', menu_bar_demo_text)
+		if (ui.bare_button('menu_bar_demo.help', 'help', 'Help'))
 			menu_bar_demo_picked = 'help'
 	ui.end_menu_bar()
 	ui.text('', 'Last action: '+(menu_bar_demo_picked ?? 'none'), 0)
@@ -978,13 +976,13 @@ ui.hsplit('grid_config_split', 300, 'px', 2)
 ui.v()
 ui.p(ui.sp())
 ui.h(0, ui.sp2(), 'l')
-	ui.toggle_button('grid_config_readonly', null, 'Readonly', null, 0)
+	ui.toggle_button('grid_config_readonly', null, 'Readonly')
 	if (ui.button('grid_config_reset', '', 'Reset') && grid_nav)
 		grid_nav.revert_changes()
 	if (ui.button('grid_config_set_null', '', 'Set null') && grid_nav)
 		set_grid_config_null(grid_nav)
-	let split_hv = ui.enum_toggle('grid_config_split_hv',
-		null, grid_config_split_field)
+	let split_hv = ui.enum_toggle('grid_config_split_hv', null,
+		grid_config_split_field)
 	let split_vh = split_hv == 'h' ? 'v' : 'h'
 ui.end_h()
 if (grid_nav)
@@ -1014,8 +1012,8 @@ ui.splitter()
 	ui.p(ui.sp())
 	ui.h(0, ui.sp2(), 'l')
 		ui.label('grid_config_label_pos', 'Labels', 0)
-		let label_pos = ui.enum_toggle('grid_config_label_pos',
-			null, grid_config_label_pos_field)
+		let label_pos = ui.enum_toggle('grid_config_label_pos', null,
+			grid_config_label_pos_field)
 	ui.end_h()
 	ui.scrollbox('grid_config_form_sb', 1, 'auto', 'auto', 's', 's')
 		ui.m(ui.sp4())
@@ -1026,8 +1024,7 @@ ui.splitter()
 					let opt = input_opt[col]
 					opt.nav = grid_nav
 					opt.label_pos = label_pos
-					ui.box_args(1, 'l', 'c')
-					ui.nav_input('grid_config_'+col, opt)
+					ui.nav_input('grid_config_'+col, opt, null, 'l')
 				}
 		ui.end_v_aligned()
 	ui.end_scrollbox()
@@ -1087,15 +1084,15 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 
 			ui.h(1, ui.sp1())
 				ui.text('', 'Col #1', 0, 'l')
-				ui.list_dropdown('grid_config_first_col',
-					grid_demo_first_cols, null, grid_demo_first_col_field)
+				ui.list_dropdown('grid_config_first_col', grid_demo_first_cols,
+					null, grid_demo_first_col_field)
 			ui.end_h()
 		}
 
 		function grid_config_toggle(id, label) {
 			ui.h(1, ui.sp(), 's', 'c')
 				ui.label(id, label, 1, 'l', 'c')
-				ui.toggle(id, null, null, 0)
+				ui.toggle(id, null, null, null, 'c')
 			ui.end_h()
 		}
 
@@ -1332,7 +1329,7 @@ ui.v()
 		ui.label('input_controls_readonly', 'Readonly', 0)
 		ui.h(0, ui.sp(), 'l')
 			input_controls_readonly = ui.checkbox(
-				'input_controls_readonly', input_controls_readonly, null, 0, 'l')
+				'input_controls_readonly', input_controls_readonly)
 			if (ui.button('input_controls_reset', '', 'Reset'))
 				reset_input_controls_values()
 			if (ui.button('input_controls_set_null', '', 'Set null'))
@@ -1355,67 +1352,54 @@ ui.v()
 	ui.end_v_aligned()
 	ui.v_aligned(0, ui.sp2(), 'c', 'c')
 
-	ui.box_args(0, 'l')
 	input1_text = ui.field_input('input1', input1_text,
-		input_controls_opt.input1)
-	ui.box_args(0, 'l')
+		input_controls_opt.input1, 0, 'l')
 	input2_text = ui.field_input('input2', input2_text,
-		input_controls_opt.input2)
-	ui.box_args(0, 'l')
+		input_controls_opt.input2, 0, 'l')
 	password1_text = ui.field_input('password1', password1_text,
-		input_controls_opt.password1)
-	ui.box_args(0, 'l')
+		input_controls_opt.password1, 0, 'l')
 	lookup1_value = ui.field_input('lookup1', lookup1_value,
-		input_controls_opt.lookup1)
-	ui.box_args(0, 'l')
-	dd1_value = ui.field_input('dd1', dd1_value, input_controls_opt.dd1)
-	ui.box_args(0, 'l')
-	dd2_value = ui.field_input('dd2', dd2_value, input_controls_opt.dd2)
-	ui.box_args(0, 'l')
+		input_controls_opt.lookup1, 0, 'l')
+	dd1_value = ui.field_input('dd1', dd1_value, input_controls_opt.dd1, 0,
+		'l')
+	dd2_value = ui.field_input('dd2', dd2_value, input_controls_opt.dd2, 0,
+		'l')
 	enum_toggle_value = ui.field_input('enum_toggle1', enum_toggle_value,
-		input_controls_opt.enum_toggle1)
-	ui.box_args(0, 'l')
+		input_controls_opt.enum_toggle1, 0, 'l')
 	date_input1_v = ui.field_input('date_input1', date_input1_v,
-		input_controls_opt.date_input1)
-	ui.box_args(0, 'l')
+		input_controls_opt.date_input1, 0, 'l')
 	date_input3_v = ui.field_input('date_input3', date_input3_v,
-		input_controls_opt.date_input3)
-	ui.box_args(0, 'l')
+		input_controls_opt.date_input3, 0, 'l')
 	color_input1_v = ui.field_input('color_input1', color_input1_v,
-		input_controls_opt.color_input1)
-	ui.box_args(0, 'l')
+		input_controls_opt.color_input1, 0, 'l')
 	num_slider1_value = ui.field_input('num_slider1', num_slider1_value,
-		input_controls_opt.num_slider1)
-	ui.box_args(0, 'l')
+		input_controls_opt.num_slider1, 0, 'l')
 	slider1_v = ui.field_input('slider1', slider1_v,
-		input_controls_opt.slider1)
-	ui.box_args(0, 'l')
-	cb1_checked = ui.field_input('cb1', cb1_checked, input_controls_opt.cb1)
-	ui.box_args(0, 'l')
-	cb2_checked = ui.field_input('cb2', cb2_checked, input_controls_opt.cb2)
-	ui.box_args(0, 'l')
+		input_controls_opt.slider1, 0, 'l')
+	cb1_checked = ui.field_input('cb1', cb1_checked, input_controls_opt.cb1, 0,
+		'l')
+	cb2_checked = ui.field_input('cb2', cb2_checked, input_controls_opt.cb2, 0,
+		'l')
 	toggle1_on = ui.field_input('toggle1', toggle1_on,
-		input_controls_opt.toggle1)
-	ui.box_args(0, 'l')
+		input_controls_opt.toggle1, 0, 'l')
 	toggle2_on = ui.field_input('toggle2', toggle2_on,
-		input_controls_opt.toggle2)
-	ui.box_args(0, 'l')
+		input_controls_opt.toggle2, 0, 'l')
 	radio_value = ui.field_input('radio_list1', radio_value,
-		input_controls_opt.radio_list1)
+		input_controls_opt.radio_list1, 0, 'l')
 	ui.h(0, ui.sp2())
 		if (is_label_left)
 			ui.box()
 		ui.h()
 			ui.min_wh(0, 0)
 			ui.button('btn1', '', 'Button',
-				0, 'l', 'c', null, input_controls_readonly)
+				null, null, null, null, input_controls_readonly)
 			ui.h(0, ui.sp())
 				ui.min_wh(0, 0)
 				ui.primary_button('btn2', '', 'Primary',
-					0, 'l', 'c', input_controls_readonly)
+					null, null, null, input_controls_readonly)
 				ui.min_wh(0, 0)
 				ui.button('btn_plus', 'plus', 'Icon',
-					0, 'l', 'c', null, input_controls_readonly)
+					null, null, null, null, input_controls_readonly)
 			ui.end_h()
 		ui.end_h()
 	ui.end_h()
@@ -1542,8 +1526,7 @@ ui.v(0, ui.sp2(), 'c', 'c')
 	ui.h(0, ui.sp(), 'l', 'c')
 		ui.label('apply_number_edit', 'Number (0-10)', 0)
 		ui.input('apply_number_edit', undefined, number_field)
-		let number_value = ui.apply_input('apply_number',
-			'apply_number_edit', undefined, undefined, 0)
+		let number_value = ui.apply_input('apply_number', 'apply_number_edit')
 		ui.text('', 'Applied: '+(number_value ?? '(none)'), 0)
 	ui.end_h()
 	ui.end_focus_group()
@@ -1552,8 +1535,7 @@ ui.v(0, ui.sp2(), 'c', 'c')
 	ui.h(0, ui.sp(), 'l', 'c')
 		ui.label('apply_date_edit', 'Date', 0)
 		ui.date_input('apply_date_edit', undefined, date_field)
-		let date_value = ui.apply_input('apply_date',
-			'apply_date_edit', undefined, undefined, 0)
+		let date_value = ui.apply_input('apply_date', 'apply_date_edit')
 		let date_text = date_value == null
 			? '(none)' : date_field.to_text(date_value)
 		ui.text('', 'Applied: '+date_text, 0)
@@ -1576,9 +1558,8 @@ let num_slider1_field = ui.create_field({
 demos.num_slider = function() {
 ui.min_w(300)
 ui.v(0, ui.sp(), 'c', 'c')
-	ui.box_args(0)
 	num_slider1_value = ui.num_slider(
-		'num_slider1', num_slider1_value, num_slider1_field)
+		'num_slider1', num_slider1_value, num_slider1_field, 0)
 ui.end_v()
 }
 }
@@ -1593,7 +1574,7 @@ ui.bg_dots('dots1', 0.3)
 demos.button = function() {
 ui.m(ui.sp2())
 ui.h(1, ui.sp2(), 's', 't')
-	if (ui.primary_button('btn1', '', 'Click me!', 0))
+	if (ui.primary_button('btn1', '', 'Click me!'))
 		pr('clicked btn1!')
 	if (ui.button('btn2', '', 'Click me too!'))
 		pr('clicked btn2!')
@@ -1773,7 +1754,8 @@ function tb_contents(tb) { // tb: toolbox id, prefixes the ids in here
 	ui.stack()
 		ui.m(ui.sp2())
 		ui.v(1, ui.sp(), 'c', 't')
-			tb_input_text[tb] = ui.input(tb+'_input', tb_input_text[tb] ?? 'type here')
+			tb_input_text[tb] = ui.input(tb+'_input',
+				tb_input_text[tb] ?? 'type here')
 			tb_dd_values[tb+'1'] = ui.list_dropdown(
 				tb+'_dd1', dd_items, tb_dd_values[tb+'1'], dropdown_field)
 			tb_dd_values[tb+'2'] = ui.list_dropdown(
@@ -1885,7 +1867,7 @@ demos.video = function() {
 	ui.v(1, ui.sp(), 's', 's')
 		ui.h(0, ui.sp())
 			if (!s.stream && !s.capture_request) {
-				if (ui.button('video_demo.start', '', 'Start', 0)) {
+				if (ui.button('video_demo.start', '', 'Start')) {
 					s.error = null
 					let capture_request = navigator.mediaDevices.getUserMedia({
 						audio: true,
@@ -1909,7 +1891,7 @@ demos.video = function() {
 					})
 				}
 			} else {
-				if (ui.button('video_demo.stop', '', 'Stop', 0))
+				if (ui.button('video_demo.stop', '', 'Stop'))
 					stop_video_demo(s)
 			}
 		ui.end_h()
@@ -1946,7 +1928,7 @@ demos.sign_in = function() {
 		ui.m(ui.sp2())
 		ui.v(0, ui.sp(), 'c', 'c')
 			ui.text('', 'Signed in as '+(user.email || user.phone), 0)
-			if (ui.button('sign_in_demo.logout', '', 'Sign out', 0))
+			if (ui.button('sign_in_demo.logout', '', 'Sign out'))
 				ui.logout()
 		ui.end_v()
 	}
@@ -2002,9 +1984,9 @@ function build_call_demo() {
 	ui.v(1, ui.sp(), 's', 's')
 		ui.h(0, ui.sp())
 			ui.label('call_demo.name', 'Call name', 0)
-			s.name = ui.input('call_demo.name', s.name,
-				null, 1, null, false, is_readonly)
-			if (ui.button('call_demo.create', '', 'Create call', 0,
+			s.name = ui.input('call_demo.name', s.name, null, null, null, null, null,
+				false, is_readonly)
+			if (ui.button('call_demo.create', '', 'Create call', null,
 				null, null, null, is_readonly || !s.name)) {
 				s.create_error = null
 				s.create_request = glue.post('/call_create.json',
@@ -2024,12 +2006,12 @@ function build_call_demo() {
 		ui.end_h()
 		ui.h(0, ui.sp())
 			ui.label('call_demo.id', 'Call ID', 0)
-			s.call_id = ui.input('call_demo.id', s.call_id,
-				null, 0, null, false, is_readonly)
+			s.call_id = ui.input('call_demo.id', s.call_id, null, 0, null, null,
+				null, false, is_readonly)
 			ui.label('call_demo.invite_token', 'Invite token', 0)
 			s.invite_token = ui.input('call_demo.invite_token', s.invite_token,
-				null, 1, null, false, is_readonly)
-			if (ui.button('call_demo.copy', '', 'Copy invite link', 0,
+				null, null, null, null, null, false, is_readonly)
+			if (ui.button('call_demo.copy', '', 'Copy invite link', null,
 				null, null, null, !s.call_id || !s.invite_token)) {
 				let invite_url = new URL(location.href)
 				invite_url.search = ''
@@ -2048,7 +2030,7 @@ function build_call_demo() {
 			}
 			ui.label('call_demo.force_turn', 'Force TURN', 0)
 			s.want_force_turn = ui.checkbox('call_demo.force_turn',
-				s.want_force_turn, null, 0, null, null, is_active)
+				s.want_force_turn, null, null, null, null, is_active)
 		ui.end_h()
 		if (s.request) ui.text('', 'Loading demo call...', 0)
 		if (s.load_error) ui.text('', s.load_error, 0)
@@ -2147,12 +2129,12 @@ ui.v(1, ui.sp())
 		to_sid = ui.input('to_sid', to_sid)
 		if (!offer_con.open && my_sid) {
 			ui.min_w(ui.em(10))
-			if (ui.button('btn_make_offer', '', 'Share Screen', 0, 'c'))
+			if (ui.button('btn_make_offer', '', 'Share Screen', null, 'c'))
 				offer_con.connect(to_sid)
 		}
 		if (offer_con.open) {
 			ui.min_w(ui.em(10))
-			if (ui.button('btn_stop_sharing', '', 'Stop Sharing', 0, 'c'))
+			if (ui.button('btn_stop_sharing', '', 'Stop Sharing', null, 'c'))
 				offer_con.close()
 		}
 	ui.end_h()
@@ -2189,12 +2171,12 @@ ui.v(1, ui.sp())
 		to_sid = ui.input('to_sid', to_sid)
 		if (!answer_con.open && my_sid) {
 			ui.min_w(ui.em(10))
-			if (ui.button('btn_accept_offer', '', 'See Screen', 0, 'c'))
+			if (ui.button('btn_accept_offer', '', 'See Screen', null, 'c'))
 				answer_con.connect(to_sid)
 		}
 		if (answer_con.open) {
 			ui.min_w(ui.em(10))
-			if (ui.button('btn_stop_seeing', '', 'Stop Seeing', 0, 'c'))
+			if (ui.button('btn_stop_seeing', '', 'Stop Seeing', null, 'c'))
 				answer_con.close()
 		}
 	ui.end_h()
@@ -2226,23 +2208,23 @@ ui.v(1, ui.sp())
 		ui.input('offer_sid', my_sid, offer_sid_field)
 		if (offer_con.open) {
 			ui.min_w(ui.em(10))
-			if (ui.button('btn_stop_sharing', '', 'Stop Sharing', 0, 'c')) {
+			if (ui.button('btn_stop_sharing', '', 'Stop Sharing', null, 'c')) {
 				offer_con.close()
 			}
 		} else if (answer_con.open) {
 			ui.min_w(ui.em(10))
-			if (ui.button('btn_stop_seeing', '', 'Stop Seeing', 0, 'c')) {
+			if (ui.button('btn_stop_seeing', '', 'Stop Seeing', null, 'c')) {
 				answer_con.close()
 			}
 		} else {
 			if (my_sid) {
 				ui.min_w(ui.em(10))
-				if (ui.button('btn_make_offer', '', 'Share Screen', 0, 'c')) {
+				if (ui.button('btn_make_offer', '', 'Share Screen', null, 'c')) {
 					offer_con.connect(to_sid)
 				}
 			}
 			ui.min_w(ui.em(10))
-			if (ui.button('btn_accept_offer', '', 'See Screen', 0, 'c')) {
+			if (ui.button('btn_accept_offer', '', 'See Screen', null, 'c')) {
 				answer_con.connect(to_sid)
 			}
 		}
@@ -2346,11 +2328,11 @@ ui.main = function() {
 			ui.h(1, ui.sp2(), 's')
 				ui.border('b', 'light')
 
-				ui.toggle_button('btn_light', null, 'lights', demo_toggle_field, 0)
-				ui.toggle_button('btn_debug', null, 'DEBUG', demo_toggle_field, 0)
-				ui.toggle_button('btn_tui', null, 'TUI', demo_toggle_field, 0)
+				ui.toggle_button('btn_light', null, 'lights', demo_toggle_field)
+				ui.toggle_button('btn_debug', null, 'DEBUG', demo_toggle_field)
+				ui.toggle_button('btn_tui', null, 'TUI', demo_toggle_field)
 
-				if (ui.button('btn_reset', '', 'reset', 0)) {
+				if (ui.button('btn_reset', '', 'reset')) {
 					localStorage.clear()
 					location.reload()
 				}
@@ -2397,12 +2379,12 @@ ui.main = function() {
 					ui.mv(ui.sp05())
 					ui.h(0, ui.sp05())
 						if (ui.toggle_button('btn_animate', null, 'animate',
-								demo_toggle_field, 0))
+							demo_toggle_field))
 							ui.animate()
 						is_packing = ui.toggle_button('btn_pack', null, 'pack',
-							demo_toggle_field, 0)
+							demo_toggle_field)
 						ui.toggle_button('btn_panes', null, 'panes',
-							demo_toggle_field, 0)
+							demo_toggle_field)
 					ui.end_h()
 					ui.debug_pane(ui.saved_value('btn_panes'))
 				ui.end_v()

@@ -736,7 +736,6 @@ function init(id, e) {
 				build_help(id+'.filter', cell_i,
 					field.filter_field.is_number_filter
 						? number_filter_help_lines : text_filter_help_lines)
-			ui.box_args(1, 's', 's')
 			ui.field_input(filter_box_id(field), field.filter,
 				{field: field.filter_field, w: 0})
 		ui.end_stack()
@@ -747,9 +746,9 @@ function init(id, e) {
 	// values typed in the inputs.
 	let param_bar_vals = obj() // {param name -> value typed in the param bar}
 	function build_param_bar(has_inputs, has_master_toggles) {
-		ui.h(0, sp, 'l', 'c')
+		ui.h(0, sp, 's', 'c')
 			ui.p(sp, ui.sp05())
-			ui.bb('bg1', null, 'b', 'intense')
+			ui.bb('bg0', null, 'b', 'intense')
 			if (has_master_toggles)
 				build_master_toggles()
 			let has_invalid = false // a param input holds an invalid value
@@ -769,7 +768,7 @@ function init(id, e) {
 					param_bar_vals[name] = v
 			}
 			if (has_inputs)
-				if (ui.button(id+'.param_reload', 'reload', null, 0,
+				if (ui.button(id+'.param_reload', 'reload', null, null,
 						null, null, null, has_invalid))
 					e.set_param_bar_vals(param_bar_vals)
 		ui.end_h()
