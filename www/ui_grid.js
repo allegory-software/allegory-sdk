@@ -12,7 +12,7 @@ const ui = window.ui
 const {
 	pr,
 	round, min, max, floor, ceil, abs, clamp,
-	array_move, assign, copy_to_clipboard, empty_array,
+	array_move, assign, copy_to_clipboard, empty_obj, empty_array,
 	noop,
 	S,
 } = glue
@@ -782,9 +782,13 @@ function init(id, e) {
 	}
 
 	function build_master_toggles() {
-		for (let param in e.master_rowset_names)
+		let frozen_vals = ui.saved_state[e.id+'.frozen_params'] ?? empty_obj
+		for (let param in e.master_rowset_names) {
+			if (param in frozen_vals)
+				continue
 			ui.master_toggle(id+'.master.'+param, e.master_rowset_names[param],
 				e.param_sources[param], e.params[param].label ?? param)
+		}
 	}
 
 	function indent_offset(indent) {
@@ -2185,8 +2189,7 @@ function init(id, e) {
 		}
 		ui.v(1, 0, 's', 's')
 
-			let has_inputs = has_param_inputs() // the param bar shows inputs
-			// the param bar shows the master toggles
+			let has_inputs = has_param_inputs()
 			let has_bar_toggles = !ui.in_dock_tab() && has_master_toggles
 			if (has_inputs || has_bar_toggles)
 				build_param_bar(has_inputs, has_bar_toggles)

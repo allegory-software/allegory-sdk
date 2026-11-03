@@ -1003,7 +1003,7 @@ ui.hvsplit(split_hv, 'grid_config_form_split_'+split_hv, 350, 'px', 2)
 		ui.splitter()
 		ui.grid('grid_config_detail', {
 			rowset_name: 'grid_config_detail',
-			param_bindings: {[grid_id]: 'master_id'},
+			param_bindings: {master_id: grid_id},
 		})
 		ui.end_hvsplit()
 	}

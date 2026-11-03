@@ -20,7 +20,7 @@ function build_table_rows(id, tables_id) {
 	if (tables_nav.focused_row_cell_val('raw')) {
 		ui.grid(id+'.raw_rows', {
 			rowset_name: 'db_explorer_rows_raw',
-			param_bindings: {[tables_id]: 'table'},
+			param_bindings: {table: tables_id},
 		})
 	} else {
 		ui.grid(id+'.'+table_name+'.rows', {

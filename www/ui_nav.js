@@ -16,9 +16,9 @@ NAV CONFIG -------------------------------------------------------------------
 
 Nav config:
 
-	rowset_name    string       the rowset in ui.rowsets or on the server
+	rowset_name   string        the rowset in ui.rowsets or on the server
 	field_attrs   {col->attrs}  per-column overrides of rowset field attributes
-	label          string       label of the nav as a master in a detail's
+	label         string        label of the nav as a master in a detail's
 	                            toggle; default: the rowset's label
 
 Master binding:
@@ -29,6 +29,7 @@ Master binding:
 	ui.has_master_toggle(rowset_name) -> t|f
 	ui.has_master_toggles(nav) -> t|f
 	ui.master_toggle(id, rowset_name, master_id, label)
+	nav.set_param_frozen(param, frozen)  keep param val incl. on page reloads
 
 Access options:
 	per-nav and/or per-rowset:
@@ -430,7 +431,7 @@ const ui = window.ui
 const {
 	assert, warn, warn_if,
 	isfunc, isstr, isarray, isobj,
-	words, obj, map, empty, empty_array, keys, insert, remove_value,
+	words, obj, map, assign, empty, empty_obj, empty_array, keys, insert, remove_value,
 	dyn_u32arr,
 	num, floor, abs, min, max, clamp, strict_sign,
 	time, month, year, month_of, year_of,
@@ -780,9 +781,12 @@ ui.has_master_toggle = function(rowset_name) {
 }
 
 ui.has_master_toggles = function(nav) {
-	for (let param in nav.master_rowset_names)
+	let frozen_vals = ui.saved_state[nav.id+'.frozen_params'] ?? empty_obj
+	for (let param in nav.master_rowset_names) {
+		if (param in frozen_vals) continue
 		if (ui.has_master_toggle(nav.master_rowset_names[param]))
 			return true
+	}
 	return false
 }
 
@@ -928,7 +932,7 @@ ui.nav = function(id, opt) {
 	e.params = null // {param->def} after rowset is loaded
 	e.param_bar_fields = null // [field, ...]: fields of the param bar's inputs
 	e.master_rowset_names = null // {param name -> rowset name}
-	e.param_bar_vals ??= empty // {param->val}; param bar values
+	e.param_bar_vals ??= empty_obj // {param->val}; param bar values
 	let param_vals = null // {param->[val, ...]}
 	let param_source_vals = obj() // {input_id->val | nav_id->sel_change_n}
 	let load_param_vals = null // {param->[val, ...]} sent with the last load
@@ -936,8 +940,8 @@ ui.nav = function(id, opt) {
 	// {param->input_id | nav_id}: the app's param_bindings, then the masters
 	// that the nav binds itself.
 	e.param_sources = obj()
-	for (let id in e.param_bindings)
-		e.param_sources[e.param_bindings[id]] = id
+	for (let param in e.param_bindings)
+		e.param_sources[param] = e.param_bindings[param]
 	let can_be_master = !!e.rowset_name && !e.is_picker // in rowset_navs
 	e.rowset_label = null // the rowset's label, or null
 
@@ -2327,7 +2331,15 @@ ui.nav = function(id, opt) {
 	// into {PARAM -> [val, ...]}
 	function read_param_vals() {
 		let pv = obj() // {param name -> [val, ...]}
+
+		let frozen_vals = ui.saved_state[e.id+'.frozen_params'] ?? empty_obj
+		for (let param in frozen_vals)
+			pv[param] = frozen_vals[param]
+
 		for (let param in e.param_sources) {
+
+			if (param in frozen_vals)
+				continue
 
 			let source_id = e.param_sources[param] // input id or master nav id
 			let s = ui.state_of(source_id)
@@ -2441,6 +2453,13 @@ ui.nav = function(id, opt) {
 			e.reload()
 		else
 			refilter()
+	}
+
+	e.set_param_frozen = function(param, frozen) {
+		let val = frozen ? param_vals[param] : undefined
+		ui.save_state(e.id+'.frozen_params', param, val)
+		if (!frozen)
+			reload_with_params()
 	}
 
 	// -> true if the values val(j) of n cols equal one of the tuples in vals.
@@ -5066,14 +5085,14 @@ ui.nav = function(id, opt) {
 		e.exit_edit()
 		client_rowset = is_server_rowset ? null : rs
 
-		e.params = rs.params ?? null
 		e.rowset_label = rs.label ?? null
+
+		e.params = rs.params ?? null
 		// create an input on the param bar for each unbound non-col param.
 		e.param_bar_fields = [] // [field, ...]
 		e.master_rowset_names = obj() // {param name -> rowset name}
 		for (let name in e.params) {
-			let is_bound = keys(e.param_bindings ?? empty)
-				.some(id => e.param_bindings[id] == name)
+			let is_bound = e.param_bindings?.[name] != null
 			if (!e.params[name].for_cols && !is_bound) {
 				let field_def = assign({name: name}, e.params[name])
 				let field = ui.create_field(field_def, e.id)
@@ -5086,8 +5105,7 @@ ui.nav = function(id, opt) {
 		}
 		// a param that is not auto-bound now: unbind its master.
 		for (let name in e.param_sources)
-			if (e.param_bindings?.[e.param_sources[name]] != name
-				&& !e.master_rowset_names[name])
+			if (e.param_bindings?.[name] == null && !e.master_rowset_names[name])
 				delete e.param_sources[name]
 		// client rowset: filter by the lists for the new defs.
 		if (!is_server_rowset)
@@ -5354,7 +5372,7 @@ function lookup_input_update(id, s) {
 				? ln.cell_input_val(ln_ri1, val_field.fi) : null
 		}
 	}
-	
+
 	ui.set_interaction_value(id, s, interaction_value)
 }
 

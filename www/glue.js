@@ -732,9 +732,9 @@ function set_equals(s1, s2, same_order) {
 	return true
 }
 
-let empty = {}
-let empty_obj = obj()
+let empty_obj = obj() // use for maps where keys can be anything
 let empty_set = set()
+let empty = {} // use for objects where you need object semantics (__proto__, etc.)
 
 let keys = Object.keys
 

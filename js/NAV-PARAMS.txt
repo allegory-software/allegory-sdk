@@ -66,9 +66,9 @@ null is a value: an empty input supplies [null], not an empty list.
 BINDINGS
 ==============================================================================
 
-opt.param_bindings = {SOURCE_ID: PARAM, ...}
+opt.param_bindings = {PARAM: SOURCE_ID, ...}
 
-Each source fills one param:
+Each param takes its values from one source:
 
 	source      values
 	----------  ---------------------------------------------------------------
@@ -84,12 +84,12 @@ hold their key.
 
 Examples:
 
-	{'app.orders': 'order_id'}            order_id has for_cols = 'order_id'
-	{'app.orders': 'key'}                 orders has the pk (id, kind); key
+	{order_id: 'app.orders'}              order_id has for_cols = 'order_id'
+	{key: 'app.orders'}                   orders has the pk (id, kind); key
 	                                      has for_cols = 'order_id kind'
-	{'app.m1': 'p1', 'app.m2': 'p2'}      two masters, each filling one col
+	{p1: 'app.m1', p2: 'app.m2'}          two masters, each filling one col
 	                                      of the detail's composite key
-	{'app.year_input': 'year'}            an input
+	{year: 'app.year_input'}              an input
 
 With two masters, the user picks in each master independently: the detail
 shows the rows whose col1 is one of m1's selected keys and whose col2 is
