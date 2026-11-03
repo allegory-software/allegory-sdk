@@ -11843,8 +11843,8 @@ function tabbox(
 	ui.h(0, ui.sp())
 		if (tab.icon)
 			ui.icon('', tab.icon)
-		let is_starting_edit = !!ui.dblclicked(box_id)
-		if (is_starting_edit || s.edit_tab_id == tab.id) {
+		let is_starting_edit = tab.can_edit_title && !!ui.dblclicked(box_id)
+		if (tab.can_edit_title && (is_starting_edit || s.edit_tab_id == tab.id)) {
 			let text_id = id+'.tabtitle.'+tab.id
 			if (is_starting_edit) {
 				s.edit_tab_id = tab.id // tab whose title is being edited
@@ -12344,6 +12344,7 @@ function update_dock_tabs(root, id, s) {
 
 /*
 tab record fields that the dock reads and writes:
+	can_edit_title: allow renaming the title on double-click; default false.
 	confirm_close: the close button sets closing instead of removing the tab.
 	closing: the user clicked the close button of a confirm_close tab. The app
 		removes the tab with ui.remove_dock_tab() or clears closing with
