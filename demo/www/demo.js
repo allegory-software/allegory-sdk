@@ -118,7 +118,8 @@ function app_dock_empty_tab(tab) {
 	v(0, sp2(), 'c', 'c')
 		if (button(tab_id+'.container', 'layout', 'Container'))
 			set_dock_tab('app_dock', tab.id,
-				{label: 'Container', icon: 'layout', layout: {tabs: []}})
+				{label: 'Container', icon: 'layout', can_edit_title: true,
+					layout: {tabs: []}})
 		if (button(tab_id+'.db_tables', 'list-details', 'Tables'))
 			set_dock_tab('app_dock', tab.id,
 				{kind: 'db_tables', label: 'Tables', icon: 'list-details'})
