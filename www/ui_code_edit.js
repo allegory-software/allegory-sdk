@@ -756,7 +756,7 @@ function code_edit_view(id, opt, s) {
 	}
 
 	function replace_match() {
-		if (!find_lines.length)
+		if (s.field.readonly || !find_lines.length)
 			return
 		let [line1, char1, line2, char2] = sel_range(cursor)
 		if (!cursor.block
@@ -774,7 +774,7 @@ function code_edit_view(id, opt, s) {
 	}
 
 	function replace_all() {
-		if (!find_lines.length)
+		if (s.field.readonly || !find_lines.length)
 			return
 		let line1, char1, line2, char2
 		if (cursor_has_selection(cursor)) {
@@ -1001,23 +1001,26 @@ function code_edit_view(id, opt, s) {
 
 	// replaces the selection with s, or with s[i] per line when the cursor
 	// is a block and s is an array of one string per line.
-	function replace_selection(s, normalize_tabs) {
+	function replace_selection(text, normalize_tabs) {
+		if (s.field.readonly)
+			return false
 		if (cursor.block) {
 			let [line1, col1, line2, col2] = block_sel_range(cursor)
 			for (let line = line1; line <= line2; line++) {
 				remove_text(line, block_char(line, col1),
 					line, block_char(line, col2))
 				insert_text(line, col_to_char(col1, lines[line], tab_width),
-					isarray(s) ? s[line - line1] : s)
+					isarray(text) ? text[line - line1] : text)
 			}
 			set_block_cursor(cursor.line, col1, cursor.sel_line, col1)
 		} else {
 			let [line1, char1, line2, char2] = sel_range(cursor)
 			remove_text(line1, char1, line2, char2)
 			let [end_line, end_char] =
-				insert_text(line1, char1, s, normalize_tabs)
+				insert_text(line1, char1, text, normalize_tabs)
 			set_cursor(end_line, end_char, false)
 		}
+		return true
 	}
 
 	function remove_selection() {
@@ -1025,7 +1028,56 @@ function code_edit_view(id, opt, s) {
 			replace_selection('')
 	}
 
+	function cut_selection() {
+		if (s.field.readonly)
+			return
+		undo_group = 'cut'
+		copy_selection()
+		remove_selection()
+		undo_group = null
+	}
+
+	function delete_text(dir) {
+		if (s.field.readonly)
+			return
+		undo_group = 'delete'
+		if (cursor_has_selection(cursor)) {
+			remove_selection()
+		} else if (cursor.block) {
+			let [line1, col1, line2, col2] = block_sel_range(cursor)
+			if (dir > 0)
+				col2 = next_block_col(col2, line1, line2, 1)
+			else
+				col1 = next_block_col(col1, line1, line2, -1)
+			if (col1 < col2) {
+				for (let line = line1; line <= line2; line++)
+					remove_text(line, block_char(line, col1),
+						line, block_char(line, col2))
+				set_block_cursor(cursor.line, col1, cursor.sel_line, col1)
+			}
+		} else {
+			let line = cursor.line
+			let char = cursor.char
+			if (dir > 0) {
+				if (char < lines[line].length)
+					remove_text(line, char, line, char+1)
+				else if (line < lines.length-1)
+					remove_text(line, char, line+1, 0)
+			} else if (char) {
+				remove_text(line, char-1, line, char)
+				set_cursor(line, char-1, false)
+			} else if (line) {
+				let prev_char = lines[line-1].length
+				remove_text(line-1, prev_char, line, 0)
+				set_cursor(line-1, prev_char, false)
+			}
+		}
+		undo_group = null
+	}
+
 	function indent_selection() {
+		if (s.field.readonly)
+			return
 		let line1 = min(cursor.line, cursor.sel_line)
 		let line2 = max(cursor.line, cursor.sel_line)
 		for (let i = line1; i <= line2; i++)
@@ -1039,6 +1091,8 @@ function code_edit_view(id, opt, s) {
 	}
 
 	function outdent_selection() {
+		if (s.field.readonly)
+			return
 		let line1 = min(cursor.line, cursor.sel_line)
 		let line2 = max(cursor.line, cursor.sel_line)
 		if (cursor.block) {
@@ -1075,6 +1129,8 @@ function code_edit_view(id, opt, s) {
 	}
 
 	function undo() {
+		if (s.field.readonly)
+			return
 		undoing = true
 		let stack = undo_stack
 		undo_stack = redo_stack
@@ -1100,6 +1156,8 @@ function code_edit_view(id, opt, s) {
 	}
 
 	function redo() {
+		if (s.field.readonly)
+			return
 		;[redo_stack, undo_stack] = [undo_stack, redo_stack]
 		undo()
 		;[redo_stack, undo_stack] = [undo_stack, redo_stack]
@@ -1354,16 +1412,11 @@ function code_edit_view(id, opt, s) {
 
 		if (ui.focused(id)) {
 
-			ui.capture_tab(id)
+			if (!s.field.readonly)
+				ui.capture_tab(id)
 
 			for (let [event, full_key, key, key_char, ctrl, alt, shift] of ui.key_events) {
 				if (event != 'down')
-					continue
-				if (s.field.readonly && (key_char || key == 'enter'
-						|| key == 'backspace' || key == 'delete' || key == 'tab'
-						|| key == 'paste' || full_key == 'ctrl x'
-						|| full_key == 'ctrl z' || full_key == 'ctrl shift z'
-						|| full_key == 'ctrl y'))
 					continue
 				let lines_n = 0
 				let chars_n = 0
@@ -1412,26 +1465,6 @@ function code_edit_view(id, opt, s) {
 							set_block_cursor(line, cursor.col,
 								cursor.sel_line, cursor.sel_col)
 					}
-				} else if (cursor.block
-						&& (key == 'backspace' || key == 'delete')) {
-					undo_group = 'delete'
-					if (cursor_has_selection(cursor)) {
-						remove_selection()
-					} else {
-						let [bline1, col1, bline2, col2] =
-							block_sel_range(cursor)
-						if (key == 'delete')
-							col2 = next_block_col(col2, bline1, bline2, 1)
-						else
-							col1 = next_block_col(col1, bline1, bline2, -1)
-						if (col1 < col2) {
-							for (let line = bline1; line <= bline2; line++)
-								remove_text(line, block_char(line, col1),
-									line, block_char(line, col2))
-							set_block_cursor(cursor.line, col1,
-								cursor.sel_line, col1)
-						}
-					}
 				} else if (chars_n < 0) { // navigation & selection
 					if (cursor.char > 0) {
 						let new_char = ctrl ? prev_token(cursor) : cursor.char-1
@@ -1465,32 +1498,14 @@ function code_edit_view(id, opt, s) {
 					}
 				} else if (key_char) { // typing
 					undo_group = 'insert'
-					replace_selection(key_char)
-					if (cursor.block)
+					if (replace_selection(key_char) && cursor.block)
 						set_block_cursor(cursor.line, cursor.col+1,
 							cursor.sel_line, cursor.col+1)
 				} else if (key == 'enter' && !cursor.block) {
 					undo_group = 'insert'
 					replace_selection(newline)
 				} else if (key == 'backspace' || key == 'delete') {
-					undo_group = 'delete'
-					let line = cursor.line
-					let char = cursor.char
-					if (cursor_has_selection(cursor)) {
-						remove_selection()
-					} else if (key == 'delete') {
-						if (char < lines[line].length)
-							remove_text(line, char, line, char+1)
-						else if (line < lines.length-1)
-							remove_text(line, char, line+1, 0)
-					} else if (char) {
-						remove_text(line, char-1, line, char)
-						set_cursor(line, char-1, false)
-					} else if (line) {
-						let prev_char = lines[line-1].length
-						remove_text(line-1, prev_char, line, 0)
-						set_cursor(line-1, prev_char, false)
-					}
+					delete_text(key == 'backspace' ? -1 : 1)
 				} else if (full_key == 'tab') {
 					undo_group = 'indent'
 					indent_selection()
@@ -1500,9 +1515,7 @@ function code_edit_view(id, opt, s) {
 				} else if (full_key == 'ctrl c') { // cut, copy, paste
 					copy_selection()
 				} else if (full_key == 'ctrl x') {
-					undo_group = 'cut'
-					copy_selection()
-					remove_selection()
+					cut_selection()
 				} else if (key == 'paste') {
 					undo_group = 'paste'
 					if (cursor.block) {
@@ -1564,11 +1577,9 @@ function code_edit_view(id, opt, s) {
 				goto_match(-1)
 			if (ui.state_of(id+'.find_next', 'state') == 'click')
 				goto_match(1)
-			if (!s.field.readonly
-					&& ui.state_of(id+'.replace', 'state') == 'click')
+			if (ui.state_of(id+'.replace', 'state') == 'click')
 				replace_match()
-			if (!s.field.readonly
-					&& ui.state_of(id+'.replace_all', 'state') == 'click')
+			if (ui.state_of(id+'.replace_all', 'state') == 'click')
 				replace_all()
 			if (ui.state_of(id+'.find_close', 'state') == 'click') {
 				close_find()
@@ -1587,8 +1598,7 @@ function code_edit_view(id, opt, s) {
 				}
 				if (ui.keydown('enter')) {
 					if (ui.focused(rid)) {
-						if (!s.field.readonly)
-							replace_match()
+						replace_match()
 					} else {
 						goto_match(ui.keypressed('shift') ? -1 : 1)
 					}
