@@ -2835,11 +2835,11 @@ function click_default_button() {
 /// tab capture --------------------------------------------------------------
 
 ui.capture_tab = function(id) {
-	ui.state(id).capture_tab = true
+	ui.state(id).capture_tab_build_no = build_no
 }
 
 function tab_captured(id) {
-	return !!state_map.get(id)?.capture_tab
+	return state_map.get(id)?.capture_tab_build_no == build_no - 1
 }
 
 let tab_into_id // focus group that the next tab must move into
