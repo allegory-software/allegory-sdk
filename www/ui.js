@@ -5568,6 +5568,7 @@ USER API, affects only the next ui.text() call.
 	ui.font_weight       (weight=)  set the next text font weight
 	ui.bold              ()         use bold text
 	ui.nobold            ()         use normal text weight
+	ui.font_style        (style=)   'normal' or 'italic' for the next text
 
 	ui.font_size         (size=1)   set the next text font size
 	ui.default_font_size (size=1)   set font size if unset
@@ -5586,7 +5587,7 @@ ui.default_font  = 'Arial'
 
 let text_flags = 0
 let text_color, text_color_state
-let text_font, text_font_size, text_font_weight, text_line_gap
+let text_font, text_font_size, text_font_weight, text_font_style, text_line_gap
 
 function text_flags_check() {
 	assert(!text_flags, 'text property set with no ui.text() after it')
@@ -5645,6 +5646,13 @@ ui.font_weight = function(s) {
 ui.bold   = function() { ui.font_weight('bold') }
 ui.nobold = function() { ui.font_weight('normal') }
 
+ui.font_style = function(s) {
+	text_font_style = s
+	text_flags &= ~TEXT_FONT_STYLE
+	if (s && s != 'normal')
+		text_flags |= TEXT_FONT_STYLE
+}
+
 ui.line_gap = function(s) {
 	text_line_gap = s
 	text_flags &= ~TEXT_LINE_GAP
@@ -5657,7 +5665,7 @@ let default_font_str
 let last_font_str
 
 let cur_color, cur_color_state, cur_font, cur_font_size, cur_font_weight
-let cur_line_gap
+let cur_font_style, cur_line_gap
 
 function read_text_args(a, i, flags) {
 	let arg_i = i+TEXT_ARGS_I
@@ -5666,12 +5674,14 @@ function read_text_args(a, i, flags) {
 	cur_font        = flags & TEXT_FONT        ? a[arg_i++] : default_font
 	cur_font_size   = flags & TEXT_FONT_SIZE   ? a[arg_i++] : font_size_normal
 	cur_font_weight = flags & TEXT_FONT_WEIGHT ? a[arg_i++] : 'normal'
+	cur_font_style  = flags & TEXT_FONT_STYLE  ? a[arg_i++] : 'normal'
 	cur_line_gap    = flags & TEXT_LINE_GAP    ? a[arg_i++] : 0.5
 	return arg_i
 }
 
 function set_text_font() {
-	let s = cur_font_weight + ' ' + cur_font_size + 'px ' + cur_font
+	let s = cur_font_style + ' ' + cur_font_weight
+		+ ' ' + cur_font_size + 'px ' + cur_font
 	if (s == last_font_str) return
 	last_font_str = s
 	cx.font = s
@@ -5909,8 +5919,10 @@ const TEXT_FONT_SIZE      = 2**12
 const TEXT_FONT_WEIGHT    = 2**13
 const TEXT_LINE_GAP       = 2**14
 const TEXT_CLIPPED        = 2**15
+const TEXT_FONT_STYLE     = 2**16
 
 const TEXT_FONT_FLAGS = TEXT_FONT | TEXT_FONT_SIZE | TEXT_FONT_WEIGHT
+	| TEXT_FONT_STYLE
 
 const CMD_TEXT = cmd('text')
 id_i[CMD_TEXT] = TEXT_ID
@@ -6003,6 +6015,8 @@ ui.text = function(
 		a[n++] = text_font_size
 	if (text_flags & TEXT_FONT_WEIGHT)
 		a[n++] = text_font_weight
+	if (text_flags & TEXT_FONT_STYLE)
+		a[n++] = text_font_style
 	if (text_flags & TEXT_LINE_GAP)
 		a[n++] = text_line_gap
 	if (field)
@@ -6710,13 +6724,16 @@ draw[CMD_TEXT] = function(a, i) {
 		}
 		if (  input._ui_font        != cur_font
 			|| input._ui_font_weight != cur_font_weight
+			|| input._ui_font_style  != cur_font_style
 			|| input._ui_font_size   != css_font_size
 		) {
 			input.style.fontFamily = cur_font
 			input.style.fontWeight = cur_font_weight
+			input.style.fontStyle  = cur_font_style
 			input.style.fontSize   = css_font_size+'px'
 			input._ui_font        = cur_font
 			input._ui_font_weight = cur_font_weight
+			input._ui_font_style  = cur_font_style
 			input._ui_font_size   = css_font_size
 		}
 		if (  input._ui_x != css_x
