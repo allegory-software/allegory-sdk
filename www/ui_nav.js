@@ -520,7 +520,7 @@ function between(x, a, b) {
 
 /*
 Sort the first n entries of ris by sort_fields.
-- sort_fields = [{field:, desc:, [vals:]}, ...].
+- sort_fields = [{field:, desc:, [vals:]} | {rank: f(ri)}, ...].
 - sort by the last field first so that earlier fields take priority.
 - for each field, sort by successive groups of 16 bits, lowest first.
 - in each pass, keep rows with equal keys in their previous order.
@@ -540,10 +540,17 @@ function radix_sort(col_vals, ris, n, sort_fields) {
 
 		// build this field's sort keys. Use vals when supplied: for ranged
 		// grouping, the nav passes each range's starting value in vals.
-		let {field, desc, vals} = sort_fields[sfi]
-		vals ??= col_vals[field.fi]
-		let word_n = field.col_storage.write_sort_keys(
-			vals, ris, n, field, keys[0], keys[1])
+		let {field, desc, vals, rank} = sort_fields[sfi]
+		let word_n
+		if (rank) {
+			word_n = 1
+			for (let i = 0; i < n; i++)
+				keys[0][i] = rank(ris[i])
+		} else {
+			vals ??= col_vals[field.fi]
+			word_n = field.col_storage.write_sort_keys(
+				vals, ris, n, field, keys[0], keys[1])
+		}
 
 		// invert the keys for descending order, with null last.
 		if (desc)
@@ -2028,8 +2035,12 @@ ui.nav = function(id, opt) {
 		let sorted_ris = ris.slice(0, n)
 		if (isfunc(order_by))
 			return sorted_ris.sort(order_by)
-		let sort_fields = [...parse_order_by(order_by)]
-			.map(([field, desc]) => ({field, desc}))
+		let sort_fields = []
+		for (let [field, desc] of parse_order_by(order_by)) {
+			if (field.rank)
+				sort_fields.push({rank: ri => field.rank(e, ri)})
+			sort_fields.push({field, desc})
+		}
 		return radix_sort(e.col_vals, sorted_ris, n, sort_fields)
 	}
 
@@ -4382,13 +4393,14 @@ ui.nav = function(id, opt) {
 	}
 
 	// -> [fi, ...]: the columns besides pos and parent_id whose values give
-	// a row its place: the sort keys, every column for a sort function, and
-	// the group keys.
+	// a row its place: the sort keys, every column for a sort or rank function,
+	// and the group keys.
 	function place_fis() {
-		let fis = isfunc(e.order_by) ? rowset_fields.map(field => field.fi)
-			: e.order_by ? [...parse_order_by(e.order_by).keys()]
-				.map(field => field.fi)
-			: []
+		let fields = isstr(e.order_by)
+			? [...parse_order_by(e.order_by).keys()] : []
+		let fis = isfunc(e.order_by) || fields.some(field => field.rank)
+			? rowset_fields.map(field => field.fi)
+			: fields.map(field => field.fi)
 		if (e.is_grouped)
 			fis.push(...group_fis)
 		return fis

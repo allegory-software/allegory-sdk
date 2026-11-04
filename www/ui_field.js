@@ -10,6 +10,7 @@ Field attributes (* = client-only):
 		type           : for choosing a field definition: number, bool, etc.
 	STORAGE
 	*	col_storage    : see "column storage" below.
+	*	rank           : f(nav, ri) -> u32   custom sort rank fn
 	DISPLAY
 		align          : 'left'|'right'|'center'
 		null_text      : plain text display value for null
@@ -679,6 +680,7 @@ let field_config_checks = {
 	section: optional_str,
 	tab: optional_str,
 	text_color: v => v == null || isstr(v) || isfunc(v),
+	rank: v => v == null || isfunc(v),
 	internal: optional_bool,
 	hidden: optional_bool,
 	readonly: optional_bool,

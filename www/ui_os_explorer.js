@@ -31,6 +31,7 @@ const file_type_icons = { // {filesystem type -> icon name}
 
 ui.field_types.os_file_name = {
 	w: 8,
+	rank: (nav, ri) => nav.cell_val(ri, 'type') == 'dir' ? 0 : 1,
 	text_color: "'file-' + (row.type || 'unknown')",
 	build: function(v, opt, nav, ri) {
 		let s = this.to_text(v)

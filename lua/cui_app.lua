@@ -165,15 +165,16 @@ function action.en()
 	<script src="/glue.js" global></script>
 	<script src="/ui.js" global></script>
 	<script src="/ui_icon_defs.js"></script>
-	<script src="/ui_login.js" ></script>
-	<script src="/ui_field.js" ></script>
-	<script src="/ui_nav.js" ></script>
-	<script src="/ui_grid.js" ></script>
+	<script src="/ui_login.js"></script>
+	<script src="/ui_field.js"></script>
+	<script src="/ui_nav.js"></script>
+	<script src="/ui_grid.js"></script>
 	<script src="/ui_code_edit.js" ></script>
-	<script src="/lezer.js" ></script>
-	<script src="/webrtc.js" ></script>
-	<script src="/ui_db_explorer.js" ></script>
-	<script src="/ui_os_explorer.js" ></script>
+	<script src="/lezer.js"></script>
+	<script src="/webrtc.js"></script>
+	<script src="/ui_call.js"></script>
+	<script src="/ui_db_explorer.js"></script>
+	<script src="/ui_os_explorer.js"></script>
 	<script>
 {{{fonts}}}
 user = {{{user}}}
