@@ -11877,26 +11877,10 @@ function tabbox(
 				ui.select_text(text_id, 0, 1/0)
 				ui.focus(text_id)
 			}
-			let is_focused = ui.focused(text_id)
-			let has_enter = is_focused && ui.keydown('enter')
-			let is_outside = ui.click && !ui.hovers(text_id)
-			let want_save = has_enter || is_outside
-			let want_cancel = is_focused && ui.keydown('escape')
-			if (want_save || want_cancel) {
-				if (want_save)
-					ui.set_tab_title(id, tab.id, ui.value(text_id))
-				s.edit_tab_id = null
-				if (!is_outside) {
-					ui.focus(box_id)
-					ui.capture_keys()
-				}
-				ui.text('', title)
-			} else {
-				let value = is_starting_edit ? title : undefined
-				ui.text_editable(text_id, value, 0)
-				ui.capture_enter(text_id)
-				ui.capture_escape(text_id)
-			}
+			let value = is_starting_edit ? title : undefined
+			ui.text_editable(text_id, value, 0)
+			ui.capture_enter(text_id)
+			ui.capture_escape(text_id)
 		} else {
 			if (tab.hot)
 				ui.font_style('italic')
@@ -12377,15 +12361,21 @@ function move_dock_tab(
 	}
 }
 
-function update_tablist_tabs(node, id, s) {
-	for (let tab_i = 0; tab_i < node.tabs.length; tab_i++) { // tab index
-		let tab = node.tabs[tab_i]
-		if (ui.keydown('enter') && ui.focused(id+'.tabbox.'+tab.id)) {
+function select_focused_dock_tab(node, id, s) {
+	for (let tab of node.tabs) {
+		if (ui.focused(id+'.tabbox.'+tab.id)) {
 			node.selected_tab_id = tab.id
 			save_dock_layout(id, s)
 			ui.rebuild('dock_tab_selected')
 			ui.capture_keys()
+			return true
 		}
+	}
+}
+
+function update_tablist_tabs(node, id, s) {
+	for (let tab_i = 0; tab_i < node.tabs.length; tab_i++) { // tab index
+		let tab = node.tabs[tab_i]
 		if (!s.can_add_remove_tabs
 				|| ui.state_of(id+'.tabclose.'+tab.id, 'state') != 'click')
 			continue
@@ -12406,6 +12396,31 @@ function update_tablist_tabs(node, id, s) {
 }
 function update_dock_tabs(root, id, s) {
 	return walk_dock_tablists(root, update_tablist_tabs, id, s, true)
+}
+
+function dock_update(id, s) {
+	let drag_tab_id = capture_match(id+'.tabbox.') // id of the dragged tab
+	let cs = drag_tab_id != null // capture state of the dragged tab
+		? captured(id+'.tabbox.'+drag_tab_id) : null
+	if (!cs?.moved && ui.keydown('enter'))
+		walk_dock_tablists(s.root, select_focused_dock_tab, id, s, true)
+	if (s.edit_tab_id != null) {
+		let text_id = id+'.tabtitle.'+s.edit_tab_id
+		let is_focused = ui.focused(text_id)
+		let has_enter = is_focused && ui.keydown('enter')
+		let is_outside = ui.click && !ui.hovers(text_id)
+		let want_save = has_enter || is_outside
+		let want_cancel = is_focused && ui.keydown('escape')
+		if (want_save || want_cancel) {
+			if (want_save)
+				ui.set_tab_title(id, s.edit_tab_id, ui.value(text_id))
+			if (!is_outside) {
+				ui.focus(id+'.tabbox.'+s.edit_tab_id)
+				ui.capture_keys()
+			}
+			s.edit_tab_id = null
+		}
+	}
 }
 
 /*
@@ -12545,7 +12560,7 @@ function draw_dock_drag(id, s, cs) {
 ui.dock = function(id, layout, on_build_tab, opt) {
 
 	opt ??= empty
-	let s = ui.state(id)
+	let s = ui.state(id, dock_update)
 	s.id = id
 	let tabs_side = opt.tabs_side
 	// strip below the pane, for this frame's tabs_side.
@@ -12621,13 +12636,15 @@ ui.dock = function(id, layout, on_build_tab, opt) {
 	}
 
 	let added_tab_id // tab added in this pass
-	if (!cs?.moved && (s.can_add_remove_tabs || ui.keydown('enter')))
+	if (!cs?.moved && s.can_add_remove_tabs)
 		added_tab_id = update_dock_tabs(s.root, id, s)
 
+	ui.focus_group(false, null, id)
 	ui.stack(id)
 		dock_tab_panes(id, s, s.root, cs, on_build_tab,
 			added_tab_id, opt)
 	ui.end_stack()
+	ui.end_focus_group()
 }
 
 ui.set_dock_tab = function(id, tab_id, props) {

@@ -236,6 +236,8 @@ vm.runInContext([
 		'function new_dock_tab_id('),
 	section(ui_source, 'function serialize_dock_layout(',
 		'function find_dock_parent('),
+	section(ui_source, 'function dock_update(',
+		'/*\nTab properties that the dock reads and writes'),
 	section(ui_source, 'ui.dock =', 'ui.set_dock_tab ='),
 	section(ui_source, 'ui.select_dock_tab =', 'ui.remove_dock_tab ='),
 ].join('\n'), context)
