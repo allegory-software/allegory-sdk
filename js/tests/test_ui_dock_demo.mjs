@@ -141,7 +141,7 @@ assert.deepEqual((await read_tree()).side1, {
 
 // pick a kind for the new tab.
 await pg.evaluate(function() {
-	ui.set_dock_tab('dock1', 'tab6', {kind: 'clock', label: 'clock'})
+	ui.set_dock_tab('dock1', 'tab6', {kind: 'clock', title: 'clock'})
 	ui.animate()
 })
 await pg.waitForTimeout(100)

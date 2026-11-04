@@ -215,7 +215,7 @@ local function cui_app(...)
 	webb_app(...)
 	db_schema:import(function()
 		add_cols('usr after theme', {
-			ui_state, text,
+			ui_state, text, {maxlen = 1024 * 64},
 		})
 	end)
 	function app:respond(req)

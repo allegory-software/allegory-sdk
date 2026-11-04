@@ -118,35 +118,35 @@ function app_dock_empty_tab(tab) {
 	v(0, sp2(), 'c', 'c')
 		if (button(tab_id+'.container', 'layout', 'Container'))
 			set_dock_tab('app_dock', tab.id,
-				{label: 'Container', icon: 'layout', can_edit_title: true,
+				{title: 'Container', icon: 'layout',
 					layout: {tabs: []}})
 		if (button(tab_id+'.db_tables', 'list-details', 'Tables'))
 			set_dock_tab('app_dock', tab.id,
-				{kind: 'db_tables', label: 'Tables', icon: 'list-details'})
+				{kind: 'db_tables', title: 'Tables', icon: 'list-details'})
 		if (button(tab_id+'.db_rows', 'table-row', 'Rows'))
 			set_dock_tab('app_dock', tab.id,
-				{kind: 'db_rows', label: 'Rows', icon: 'table-row'})
+				{kind: 'db_rows', title: 'Rows', icon: 'table-row'})
 		if (button(tab_id+'.db_fields', 'table-column', 'Fields'))
 			set_dock_tab('app_dock', tab.id,
-				{kind: 'db_fields', label: 'Fields', icon: 'table-column'})
+				{kind: 'db_fields', title: 'Fields', icon: 'table-column'})
 		if (button(tab_id+'.db_indexes', 'list-search', 'Indexes'))
 			set_dock_tab('app_dock', tab.id,
-				{kind: 'db_indexes', label: 'Indexes', icon: 'list-search'})
+				{kind: 'db_indexes', title: 'Indexes', icon: 'list-search'})
 		if (button(tab_id+'.process_tree', 'hierarchy', 'Process tree'))
 			set_dock_tab('app_dock', tab.id,
-				{kind: 'process_tree', label: 'Process tree', icon: 'hierarchy'})
+				{kind: 'process_tree', title: 'Process tree', icon: 'hierarchy'})
 		if (button(tab_id+'.folder_tree', 'folder', 'Folder tree'))
 			set_dock_tab('app_dock', tab.id,
-				{kind: 'folder_tree', label: 'Folder tree', icon: 'folder'})
+				{kind: 'folder_tree', title: 'Folder tree', icon: 'folder'})
 		if (button(tab_id+'.file_editor_button', 'file-code', 'File editor'))
 			set_dock_tab('app_dock', tab.id,
-				{kind: 'file_editor', label: 'File editor', icon: 'file-code'})
+				{kind: 'file_editor', title: 'File editor', icon: 'file-code'})
 		if (button(tab_id+'.open_ports', 'network', 'Open ports'))
 			set_dock_tab('app_dock', tab.id,
-				{kind: 'open_ports', label: 'Open ports', icon: 'network'})
+				{kind: 'open_ports', title: 'Open ports', icon: 'network'})
 		if (button(tab_id+'.saved_state', 'database', 'Saved state'))
 			set_dock_tab('app_dock', tab.id,
-				{kind: 'saved_state', label: 'Saved state', icon: 'database'})
+				{kind: 'saved_state', title: 'Saved state', icon: 'database'})
 	end_v()
 }
 

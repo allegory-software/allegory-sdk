@@ -200,16 +200,16 @@ let dock1_layout = {
 	split: 'h', size: .4, unit: 'fr',
 	side1: {
 		tabs: [
-			{id: 'tab2', label: 'Tab 2 looong', kind: 'notes'},
-			{id: 'tab3', label: 'Tab 3', kind: 'notes'},
-			{id: 'tab4', label: 'Tab 4 even longer', kind: 'clock'},
+			{id: 'tab2', title: 'Tab 2 looong', kind: 'notes'},
+			{id: 'tab3', title: 'Tab 3', kind: 'notes'},
+			{id: 'tab4', title: 'Tab 4 even longer', kind: 'clock'},
 		],
 		selected_tab_id: 'tab2',
 	},
 	side2: {
 		split: 'v', size: .5, unit: 'fr',
-		side1: {tabs: [{id: 'tab1', label: 'Tab 1', kind: 'clock'}]},
-		side2: {tabs: [{id: 'tab5', label: 'Tab 5', kind: 'notes'}]},
+		side1: {tabs: [{id: 'tab1', title: 'Tab 1', kind: 'clock'}]},
+		side2: {tabs: [{id: 'tab5', title: 'Tab 5', kind: 'notes'}]},
 	},
 }
 let dock1_kinds = ['notes', 'clock']
@@ -218,7 +218,7 @@ function build_dock1_tab(tab) {
 	let tab_id = 'dock1.tab.'+tab.id // id prefix of the tab's content
 	if (tab.kind) {
 		ui.v(0, ui.sp2(), 's', 't')
-			ui.text('', tab.kind+': '+tab.label)
+			ui.text('', tab.kind+': '+tab.title)
 			if (tab.kind == 'notes') {
 				ui.input(tab_id+'.text', undefined)
 			}
@@ -227,7 +227,7 @@ function build_dock1_tab(tab) {
 		ui.v(0, ui.sp2(), 'c', 'c')
 			for (let kind of dock1_kinds)
 				if (ui.button(tab_id+'.'+kind, '', kind))
-					ui.set_dock_tab('dock1', tab.id, {kind: kind, label: capitalize(kind)})
+					ui.set_dock_tab('dock1', tab.id, {kind: kind, title: capitalize(kind)})
 		ui.end_v()
 	}
 }
@@ -1938,8 +1938,8 @@ demos.sign_in = function() {
 {
 let call_demo_layout = { // dock layout for the call and other tabs
 	tabs: [
-		{id: 'call', label: 'Call'},
-		{id: 'other', label: 'Other'},
+		{id: 'call', title: 'Call'},
+		{id: 'other', title: 'Other'},
 	],
 	selected_tab_id: 'call',
 }

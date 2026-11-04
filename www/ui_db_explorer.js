@@ -31,6 +31,7 @@ function build_table_rows(id, tables_id) {
 
 ui.db_tables = function(id) {
 	ui.grid(id+'.grid', tables_opt)
+	ui.set_current_tab_title('Tables')
 }
 
 ui.db_rows = function(id) {
@@ -40,6 +41,8 @@ ui.db_rows = function(id) {
 	if (picked_id !== undefined)
 		ui.set_master_id(id, 'table', picked_id)
 	let master_id = ui.master_id(id, 'table', rowset_name)
+	if (master_id)
+		ui.mark_follows_source(master_id)
 	let has_master_toggle = ui.has_master_toggle(rowset_name)
 	if (ui.in_dock_tab() && has_master_toggle) {
 		ui.open_tab_strip()
@@ -60,6 +63,7 @@ ui.db_rows = function(id) {
 }
 
 ui.db_fields = function(id) {
+	ui.set_current_tab_title('Fields')
 	ui.grid(id+'.grid', {
 		rowset_name: 'db_explorer_fields',
 		can_move_rows: false,
@@ -67,6 +71,7 @@ ui.db_fields = function(id) {
 }
 
 ui.db_indexes = function(id) {
+	ui.set_current_tab_title('Indexes')
 	ui.grid(id+'.grid', {
 		rowset_name: 'db_explorer_indexes',
 		can_move_rows: false,

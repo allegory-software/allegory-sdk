@@ -58,6 +58,7 @@ const open_ports_opt = { // socket grid options
 
 ui.process_tree = function(id) {
 	ui.grid(id+'.grid', process_tree_opt)
+	ui.set_current_tab_title('Process tree')
 }
 
 ui.folder_tree = function(id, folder) {
@@ -70,10 +71,15 @@ ui.folder_tree = function(id, folder) {
 			type: {text_color: "'file-' + (value || 'unknown')"},
 		},
 	})
+	let nav = ui.state_of(id+'.grid', 'nav')
+	let title = nav.param_vals('folder')?.[0]
+	if (title != null)
+		ui.set_current_tab_title(title)
 }
 
 ui.open_ports = function(id) {
 	ui.grid(id+'.grid', open_ports_opt)
+	ui.set_current_tab_title('Open ports')
 }
 
 // file contents editor
@@ -102,6 +108,9 @@ ui.file_editor = function(id) {
 	}
 	let nav = s.nav
 	nav.reload_if_params_changed()
+	let title = nav.param_vals('path')?.[0]
+	if (title != null)
+		ui.set_current_tab_title(title)
 	let ri = nav.focused_ri
 	if (ri == null)
 		return

@@ -1601,6 +1601,13 @@ ui.is_state_hidden = function(id) {
 	return false
 }
 
+function scope_contains_scope(scope, inner_scope) {
+	for ( ; inner_scope; inner_scope = inner_scope.parent)
+		if (inner_scope == scope)
+			return true
+	return false
+}
+
 // free_state() removes each id from ids.
 function free_state_ids(ids) {
 	for (let id of ids)
@@ -1673,7 +1680,7 @@ APP API
 
 WIDGET API
 
-	ui.save_state (id, [k, [v]])      save/delete a state var
+	ui.save_state (id, [k, [v, force]])  save/delete a state var
 
 INTEGRATION API
 
@@ -1708,7 +1715,7 @@ window.addEventListener('pagehide', function() {
 	save_unsaved_state()
 })
 
-ui.save_state = function(id, k, v) {
+ui.save_state = function(id, k, v, force) {
 	if (k === undefined) {
 		if (!(id in ui.saved_state)) return
 		delete ui.saved_state[id]
@@ -1718,7 +1725,7 @@ ui.save_state = function(id, k, v) {
 		delete t[k]
 	} else {
 		let t = attr(ui.saved_state, id) // {state key -> saved value}
-		if (t[k] === v) return
+		if (!force && t[k] === v) return
 		t[k] = v
 	}
 	saved_state_changed = true
@@ -5017,7 +5024,7 @@ register[CMD_POPUP] = function(a, i, rec_i) {
 		rec_i, i, inner_popups)
 	if (inner_popups) {
 		// hack: although inner_popus is serialized, its properties are not
-		// because it's an array.
+		// because it's an array, so we can use it to hold state that stays local.
 		inner_popups.parent_popups = cur_popups
 		inner_popups.popup_i = i
 		inner_popups.popup_rec = a
@@ -11769,63 +11776,27 @@ ui.live_move_mixin = function(e) {
 	  opt.tabs_side           : 't'|'b'  tab strip side (default 't')
 	  opt.can_add_remove_tabs : t|f      allow add/remove/reorder tabs
 	  opt.can_change_layout   : t|f      allow docking tabs anywhere
-
+	ui.set_dock_tab    (id, tab_id, props)   update tab properties
+	ui.remove_dock_tab (id, tab_id)          remove a dock tab
+	ui.select_dock_tab (id, tab_id)          select a dock tab
+TAB STRIP REC BOX
 	ui.open_tab_strip  ()                    begin recording tab strip content
 	ui.close_tab_strip ()                    stop recording tab strip content
 	ui.in_dock_tab     () -> t|f             inside a dock tab's build
-	ui.set_dock_tab    (id, tab_id, fields)  update tab fields
-	ui.select_dock_tab (id, tab_id)          select a dock tab
-	ui.remove_dock_tab (id, tab_id)          remove a dock tab
+	ui.set_current_tab_title (title, icon=)  set enclosing dock tab's title
+FROZEN & HOT STATE
+	ui.can_follow_source (source_id) -> t|f  false when an enclosing dock tab
+	  that doesn't enclose source_id is frozen
+	ui.mark_follows_source (source_id)       mark hot the enclosing dock tabs
+	  that don't enclose source_id
 
 */
 
-function collect_dock_tab_titles(tablist, titles, groups) {
-	for (let tab of tablist.tabs) {
-		let label = tab.label ?? 'New Tab'
-		let t = titles.get(tab) // runtime title record
-		if (!t) {
-			t = {label: label, no: null, text: null}
-			titles.set(tab, t)
-		}
-		if (t.label != label) {
-			t.label = label
-			t.no = null
-		}
-		let group_titles = groups.get(label)
-		if (!group_titles) {
-			group_titles = [] // [runtime title record, ...]
-			groups.set(label, group_titles)
-		}
-		group_titles.push(t)
-	}
-}
-
-function update_dock_tab_titles(s) {
-	s.tab_titles ??= new WeakMap() // {tab -> runtime title record}
-	let groups = map() // {base title -> [runtime title record, ...]}
-	walk_dock_tablists(s.root, collect_dock_tab_titles, s.tab_titles, groups)
-	for (let titles of groups.values()) {
-		let nos = set() // assigned title numbers
-		for (let title of titles)
-			if (title.no != null)
-				nos.add(title.no)
-		let no = 1 // next unused title number
-		for (let title of titles) {
-			if (title.no == null) {
-				while (nos.has(no)) no++
-				title.no = no++
-			}
-			title.text = titles.length > 1
-				? title.label+' '+title.no : title.label
-		}
-	}
-	s.tab_titles_dirty = false // recompute titles when true
-}
-
 function tabbox(
-	id, s, tab, is_selected, is_hover, has_close_button, is_strip_bottom, title,
+	id, s, tab, is_selected, is_hover, has_close_button, is_strip_bottom,
 	move_area
 ) {
+	let title = tab.title ?? 'New Tab'
 	let box_id = id+'.tabbox.'+tab.id
 	ui.focusable(box_id)
 	ui.keep_focus(box_id)
@@ -11843,8 +11814,9 @@ function tabbox(
 	ui.h(0, ui.sp())
 		if (tab.icon)
 			ui.icon('', tab.icon)
-		let is_starting_edit = tab.can_edit_title && !!ui.dblclicked(box_id)
-		if (tab.can_edit_title && (is_starting_edit || s.edit_tab_id == tab.id)) {
+		let can_edit_title = !!tab.layout || tab.can_edit_title
+		let is_starting_edit = can_edit_title && ui.dblclicked(box_id)
+		if (can_edit_title && (is_starting_edit || s.edit_tab_id == tab.id)) {
 			let text_id = id+'.tabtitle.'+tab.id
 			if (is_starting_edit) {
 				s.edit_tab_id = tab.id // tab whose title is being edited
@@ -11864,13 +11836,15 @@ function tabbox(
 					ui.focus(box_id)
 					ui.capture_keys()
 				}
-				ui.text('', title.text)
+				ui.text('', title)
 			} else {
-				let value = is_starting_edit ? title.text : undefined
+				let value = is_starting_edit ? title : undefined
 				ui.text_editable(text_id, value, 0)
 			}
 		} else {
-			ui.text('', title.text)
+			if (tab.hot)
+				ui.font_style('italic')
+			ui.text('', title)
 		}
 		ui.min_w(ui.em(1.55))
 		ui.stack('', 0)
@@ -11935,8 +11909,7 @@ function tab_strip(
 		let has_close_button = s.can_add_remove_tabs && (is_hover || is_dragging) && !is_moving
 		if (tab.id == added_tab_id)
 			ui.scroll_to_view_next_box()
-		tabbox(id, s, tab, is_selected, is_hover, has_close_button,
-			s.is_strip_bottom, s.tab_titles.get(tab))
+		tabbox(id, s, tab, is_selected, is_hover, has_close_button, s.is_strip_bottom)
 		drawn_n++
 	}
 	if (drawn_n == gap_i)
@@ -11967,7 +11940,7 @@ Copy a layout: assign unique stable keys for ids, remove empty tablists and
 replace single-branch splits, and select the first tab when the selected tab
 from the layout is missing.
 layout: one of:
-	{tabs: [{id, label, ...}, ...], selected_tab_id: tab_id}, or
+	{tabs: [{id, title, ...}, ...], selected_tab_id: tab_id}, or
 	{split: 'h'|'v', size, unit, fixed_side, side1: node, side2: node}
 */
 function create_dock_layout(s, layout) {
@@ -12044,6 +12017,7 @@ function find_tablist_with_tab(node, tab_id) {
 			return node
 	return null
 }
+
 function add_tablist_tab_ids(node, tab_ids) {
 	for (let tab of node.tabs)
 		tab_ids.add(tab.id)
@@ -12051,9 +12025,54 @@ function add_tablist_tab_ids(node, tab_ids) {
 function add_dock_tab_ids(root, tab_ids) {
 	return walk_dock_tablists(root, add_tablist_tab_ids, tab_ids)
 }
+function new_dock_tab_id(s) {
+	let tab_ids = set() // {tab_id}
+	add_dock_tab_ids(s.root, tab_ids)
+	let tab_n = 1 // number in the id of the new tab
+	while (tab_ids.has('tab'+tab_n))
+		tab_n++
+	return 'tab'+tab_n
+}
+
+function serialize_dock_layout(node) {
+	if (node.split) {
+		return {
+			key: node.key,
+			split: node.split,
+			size: node.size,
+			unit: node.unit,
+			fixed_side: node.fixed_side,
+			side1: serialize_dock_layout(node.side1),
+			side2: serialize_dock_layout(node.side2),
+		}
+	}
+	let tabs = []
+	for (let tab of node.tabs) {
+		let saved_tab = {
+			id: tab.id,
+			kind: tab.kind,
+			title: tab.title,
+			icon: tab.icon,
+			layout: tab.layout
+				? serialize_dock_layout(tab.layout) : undefined,
+			frozen: tab.frozen,
+			hot: tab.hot,
+		}
+		tabs.push(saved_tab)
+	}
+	return {
+		key: node.key,
+		tabs: tabs,
+		selected_tab_id: node.selected_tab_id,
+	}
+}
+function serialize_dock_root() {
+	return serialize_dock_layout(this)
+}
 
 function save_dock_layout(id, s) {
-	ui.save_state(id, 'root', structuredClone(s.root))
+	s.root.toJSON = serialize_dock_root
+	ui.save_state(id, 'root', s.root, true)
 	ui.save_state(id, 'next_key', s.next_key)
 }
 
@@ -12089,53 +12108,53 @@ function get_dock_state_scope(scope, prev_dock) {
 	}
 }
 
-function get_dock_node_depth(root, node) {
-	let depth = 0
-	for (; node != root; depth++) {
-		node = find_dock_parent(root, node)
-		if (!node)
-			return -1
+function find_dock_shared_depth(node, tab0, tab1, depth) {
+	if (node.split) {
+		let found1 = find_dock_shared_depth(node.side1, tab0, tab1, depth + 1)
+		if (found1 >= 2) return found1
+		let found2 = find_dock_shared_depth(node.side2, tab0, tab1, depth + 1)
+		if (found2 >= 2) return found2
+		return found1 + found2 == 2 ? 2 + depth : found1 + found2
 	}
-	return depth
+	let found_n = 0
+	for (let tab of node.tabs) {
+		let tab_found_n = (tab == tab0 ? 1 : 0) + (tab == tab1 ? 1 : 0)
+		if (tab.layout) {
+			let found = find_dock_shared_depth(tab.layout, tab0, tab1, depth + 2)
+			if (found >= 2) return found
+			tab_found_n += found
+		}
+		if (tab_found_n == 2) return 2 + depth + 1
+		found_n += tab_found_n
+	}
+	return found_n == 2 ? 2 + depth : found_n
 }
 
 ui.get_dock_shared_parent_depth = function(id) {
 	let scope0 = get_dock_state_scope(cur_state_scope)
 	let scope1 = get_dock_state_scope(state_map.get(id)?.state_scope)
-	for (; scope0; scope0 = get_dock_state_scope(scope0.parent, scope0.dock)) {
-		for (let scope = scope1; scope;
-				scope = get_dock_state_scope(scope.parent, scope.dock)) {
-			if (scope.dock != scope0.dock)
-				continue
-			let root = scope.dock.root
-			let node0 = scope0.dock_tab
-			let node1 = scope.dock_tab
-			let depth0 = get_dock_node_depth(root, node0)
-			let depth1 = get_dock_node_depth(root, node1)
-			if (depth0 < 0) return 0
-			if (depth1 < 0) return 0
-			while (depth0 > depth1) {
-				node0 = find_dock_parent(root, node0)
-				depth0--
-			}
-			while (depth1 > depth0) {
-				node1 = find_dock_parent(root, node1)
-				depth1--
-			}
-			while (node0 != node1) {
-				node0 = find_dock_parent(root, node0)
-				node1 = find_dock_parent(root, node1)
-				depth0--
-			}
-			let depth = depth0 + 1
-			for (let scope = get_dock_state_scope(scope0.parent, scope0.dock);
-					scope; scope = get_dock_state_scope(scope.parent, scope.dock)) {
-				let tab_depth = get_dock_node_depth(scope.dock.root, scope.dock_tab)
-				if (tab_depth < 0) return 0
-				depth += tab_depth + 1
+	while (scope0) {
+		let scope = scope1
+		while (scope && scope.dock != scope0.dock)
+			scope = get_dock_state_scope(scope.parent, scope.dock)
+		if (scope) {
+			let found = find_dock_shared_depth(scope.dock.root,
+				scope0.dock_tab, scope.dock_tab, 0)
+			if (found < 2) return 0
+			let depth = found - 2 + 1
+			let enclosing_scope = get_dock_state_scope(scope0.parent, scope0.dock)
+			while (enclosing_scope) {
+				let tab = enclosing_scope.dock_tab
+				let tab_found = find_dock_shared_depth(enclosing_scope.dock.root,
+					tab, tab, 0)
+				if (tab_found < 2) return 0
+				depth += tab_found - 2 + 1
+				enclosing_scope = get_dock_state_scope(enclosing_scope.parent,
+					enclosing_scope.dock)
 			}
 			return depth
 		}
+		scope0 = get_dock_state_scope(scope0.parent, scope0.dock)
 	}
 	return 0
 }
@@ -12155,11 +12174,11 @@ function replace_dock_node(root, node1, node2) {
 }
 
 /*
-fields that the dock adds to the capture state of a dragged tab:
-	{src_tablist, tab_i, grab_x, grab_y,
-	 drop_tablist, drop_area, drop_insert_i}
-drop_area: 'strip'|'left'|'right'|'top'|'bottom'|'center'|null
-drop_insert_i: position in drop_tablist's tabs without the dragged tab.
+capture state fields for a dragged tab:
+	src_tablist, tab_i, grab_x, grab_y,
+	drop_tablist, drop_area, drop_insert_i
+	drop_area     : 'strip'|'left'|'right'|'top'|'bottom'|'center'|null
+	drop_insert_i : position in drop_tablist's tabs without the dragged tab.
 */
 
 let dock_snap_h = .5 // snapping range above and below a strip, in strip h
@@ -12249,7 +12268,6 @@ function move_dock_tab(
 
 	let tab = src_tablist.tabs.splice(tab_i, 1)[0]
 	if (!area) {
-		s.tab_titles_dirty = true
 		let closes_edit_tab = s.edit_tab_id == tab.id
 		if (!closes_edit_tab && s.edit_tab_id && tab.layout)
 			closes_edit_tab = !!find_dock_tablist(tab.layout, s.edit_tab_id)
@@ -12310,28 +12328,15 @@ function update_tablist_tabs(node, id, s) {
 		if (!s.can_add_remove_tabs
 				|| ui.state_of(id+'.tabclose.'+tab.id, 'state') != 'click')
 			continue
-		if (tab.confirm_close) {
-			// select it so that the app builds its content and can ask there.
-			node.selected_tab_id = tab.id
-			tab.closing = true
-		} else {
-			move_dock_tab(id, s, node, tab_i)
-		}
+		move_dock_tab(id, s, node, tab_i)
 		save_dock_layout(id, s)
-		ui.rebuild(tab.confirm_close
-			? 'dock_tab_changed' : 'dock_tab_removed')
+		ui.rebuild('dock_tab_removed')
 		break
 	}
 	if (s.can_add_remove_tabs
 			&& ui.state_of(id+'.tablist'+node.key+'.plus', 'state') == 'click') {
-		let tab_ids = set() // {tab_id}
-		add_dock_tab_ids(s.root, tab_ids)
-		let tab_n = 1 // number in the id of the new tab
-		while (tab_ids.has('tab'+tab_n))
-			tab_n++
-		let tab_id = 'tab'+tab_n
+		let tab_id = new_dock_tab_id(s)
 		node.tabs.push({id: tab_id})
-		s.tab_titles_dirty = true
 		node.selected_tab_id = tab_id
 		save_dock_layout(id, s)
 		ui.rebuild('dock_tab_added')
@@ -12343,12 +12348,14 @@ function update_dock_tabs(root, id, s) {
 }
 
 /*
-tab record fields that the dock reads and writes:
-	can_edit_title: allow renaming the title on double-click; default false.
-	confirm_close: the close button sets closing instead of removing the tab.
-	closing: the user clicked the close button of a confirm_close tab. The app
-		removes the tab with ui.remove_dock_tab() or clears closing with
-		ui.set_dock_tab(), e.g. from a prompt built in the tab's content.
+Tab properties that the dock reads and writes:
+	id     : tab id, unique within the dock, including nested layouts.
+	title  : tab title; default 'New Tab'.
+	icon   : optional icon shown before the title.
+	layout : tab is a container of a nested layout, not an application tab.
+	can_edit_title : allow renaming a tab title; default false.
+	frozen : all inside navs freeze param vals bound to sources outside the tab.
+	hot    : at least one inside nav param is bound to a source outside the tab.
 */
 
 let tab_strip_rec_i
@@ -12412,6 +12419,12 @@ function dock_tab_panes(
 					on_build_tab(selected_tab)
 				ui.end_focus_group()
 				ui.end_state_scope()
+				let is_hot = scope.hot_build_no == build_no
+				if (is_hot != !!selected_tab.hot) {
+					selected_tab.hot = is_hot
+					save_dock_layout(id, s)
+					ui.rebuild('dock_tab_hot')
+				}
 			}
 			ui.end_stack()
 			if (s.is_strip_bottom)
@@ -12460,7 +12473,7 @@ function draw_dock_drag(id, s, cs) {
 	ui.popup('', 'drag', 'screen', 'it', '[', null, null, x, y)
 	ui.nohit()
 		tabbox(id, s, tab, tab.id == cs.src_tablist.selected_tab_id,
-			true, false, s.is_strip_bottom, s.tab_titles.get(tab), area)
+			true, false, s.is_strip_bottom, area)
 	ui.end_popup()
 }
 
@@ -12468,6 +12481,7 @@ ui.dock = function(id, layout, on_build_tab, opt) {
 
 	opt ??= empty
 	let s = ui.state(id)
+	s.id = id
 	let tabs_side = opt.tabs_side
 	// strip below the pane, for this frame's tabs_side.
 	s.is_strip_bottom = tabs_side == 'bottom' || tabs_side == 'b'
@@ -12487,6 +12501,7 @@ ui.dock = function(id, layout, on_build_tab, opt) {
 			s.next_key = 0 // key of the next new node
 			s.root = create_dock_layout(s, layout)
 		}
+		s.root.toJSON = serialize_dock_root
 	}
 
 	let drag_tab_id = capture_match(id+'.tabbox.') // id of the dragged tab
@@ -12509,11 +12524,29 @@ ui.dock = function(id, layout, on_build_tab, opt) {
 	if (cs?.moved)
 		hit_dock(id, s, cs)
 	if (cs?.drop) {
+
+		// drop: move tab in layout
 		if (cs.drop_area) {
 			move_dock_tab(id, s, cs.src_tablist, cs.tab_i,
 				cs.drop_tablist, cs.drop_area, cs.drop_insert_i)
 			save_dock_layout(id, s)
 		}
+
+		// ctrl+click: freeze/unfreeze tab
+		if (!cs.moved && s.can_add_remove_tabs && ui.keypressed('ctrl')) {
+			let tablist = cs.src_tablist
+			let tab = tablist.tabs[cs.tab_i] // the ctrl-clicked tab
+			tab.frozen = !tab.frozen
+			if (tab.frozen && !tab.layout) {
+				let copy = assign({}, tab) // unfrozen copy that follows the sources
+				copy.id = new_dock_tab_id(s)
+				delete copy.frozen
+				tablist.tabs.splice(cs.tab_i, 0, copy)
+			}
+			save_dock_layout(id, s)
+			ui.rebuild('dock_tab_frozen')
+		}
+
 		cs = null
 	}
 
@@ -12521,31 +12554,33 @@ ui.dock = function(id, layout, on_build_tab, opt) {
 	if (!cs?.moved && (s.can_add_remove_tabs || ui.keydown('enter')))
 		added_tab_id = update_dock_tabs(s.root, id, s)
 
-	if (!s.tab_titles || s.tab_titles_dirty)
-		update_dock_tab_titles(s)
-
 	ui.stack(id)
 		dock_tab_panes(id, s, s.root, cs, on_build_tab,
 			added_tab_id, opt)
 	ui.end_stack()
 }
 
-ui.set_dock_tab = function(id, tab_id, fields) {
+ui.set_dock_tab = function(id, tab_id, props) {
 	let s = ui.state_of(id)
 	let tablist = assert(find_dock_tablist(s.root, tab_id),
 		'dock ', id, ': no tab ', tab_id)
 	let tab = tablist.tabs.find(tab => tab.id == tab_id) // tab record
-	let label0 = tab.label
-	let layout0 = tab.layout
-	assign(tab, fields)
-	if (tab.label != label0)
-		s.tab_titles_dirty = true
-	if (fields.layout)
-		tab.layout = create_dock_layout(s, fields.layout)
-	if (tab.layout != layout0)
-		s.tab_titles_dirty = true
+	assign(tab, props)
+	if (props.layout)
+		tab.layout = create_dock_layout(s, props.layout)
 	save_dock_layout(id, s)
 	ui.rebuild('dock_tab_changed')
+}
+
+function set_dock_tab_title(s, tab, title, icon) {
+	if (icon === undefined)
+		icon = tab.icon
+	if (tab.title == title && tab.icon == icon)
+		return
+	tab.title = title
+	tab.icon = icon
+	save_dock_layout(s.id, s)
+	ui.rebuild('dock_tab_title')
 }
 
 ui.set_tab_title = function(id, tab_id, title, icon) {
@@ -12553,18 +12588,37 @@ ui.set_tab_title = function(id, tab_id, title, icon) {
 	let tablist = assert(find_dock_tablist(s.root, tab_id),
 		'dock ', id, ': no tab ', tab_id)
 	for (let tab of tablist.tabs) {
-		if (tab.id != tab_id) continue
-		if (icon === undefined)
-			icon = tab.icon
-		if (tab.label == title && tab.icon == icon)
+		if (tab.id == tab_id) {
+			set_dock_tab_title(s, tab, title, icon)
 			return
-		if (tab.label != title)
-			s.tab_titles_dirty = true
-		tab.label = title
-		tab.icon = icon
-		save_dock_layout(id, s)
-		ui.rebuild('dock_tab_title')
-		return
+		}
+	}
+}
+
+ui.set_current_tab_title = function(title, icon) {
+	let dock_scope = get_dock_state_scope(cur_state_scope)
+	if (!dock_scope) return
+	set_dock_tab_title(dock_scope.dock, dock_scope.dock_tab, title, icon)
+}
+
+ui.can_follow_source = function(source_id) {
+	let source_scope = state_map.get(source_id)?.state_scope
+	let scope = get_dock_state_scope(cur_state_scope)
+	while (scope) {
+		if (scope_contains_scope(scope, source_scope)) return true
+		if (scope.dock_tab.frozen) return false
+		scope = get_dock_state_scope(scope.parent)
+	}
+	return true
+}
+
+ui.mark_follows_source = function(source_id) {
+	let source_scope = state_map.get(source_id)?.state_scope
+	let scope = get_dock_state_scope(cur_state_scope)
+	while (scope) {
+		if (scope_contains_scope(scope, source_scope)) return
+		scope.hot_build_no = build_no
+		scope = get_dock_state_scope(scope.parent)
 	}
 }
 

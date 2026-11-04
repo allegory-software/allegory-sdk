@@ -1,3 +1,15 @@
+REFACTOR
+------------------------------------------------------------------------------
+- remove long forms of align, valign, etc.
+
+
+REVIEW / TOO MUCH CODE
+------------------------------------------------------------------------------
+- dock title editing
+- dock set_tab_title
+- client nav save - notify errors
+
+
 BUGS
 ------------------------------------------------------------------------------
 GLITCHES:
@@ -8,6 +20,8 @@ invisible max_w from the first drag.
 
 BEHAVIOR:
 - ui.date_input: enter to close while focused on input cancels instead of pick.
+- dock: serialize_dock_layout saves only known tab props, so can_edit_title
+	and other props set by the app are lost after a page reload.
 - ui.create_validator skips own rules that have no applies(), so
 	email.validator_email is never checked.
 - grid Escape on a cell: replace `!e.is_picker` with: drop an unchanged new

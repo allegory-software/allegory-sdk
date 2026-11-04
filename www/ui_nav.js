@@ -30,6 +30,7 @@ Master binding:
 	ui.has_master_toggles(nav) -> t|f
 	ui.master_toggle(id, rowset_name, master_id, label)
 	nav.set_param_frozen(param, frozen)  keep param val incl. on page reloads
+	nav.param_vals(name) -> [val, ...] | undefined    current param values
 
 Access options:
 	per-nav and/or per-rowset:
@@ -679,10 +680,14 @@ ui.shared_navs = shared_navs // for debugging
 
 } // end shared nav scope
 
-function lookup_display_field(field, ln = field.lookup_nav) {
+function lookup_display_field(field, ln) {
 	if (!ln) return
-	return (field.display_col != null && ln.all_fields_map[field.display_col])
-		|| ln.display_field
+	let display_field = (field.display_col != null
+		&& ln.all_fields_map[field.display_col]) || ln.display_field
+	if (!display_field && ln.ready)
+		warn_once(ln.id, 'lookup field', field.name,
+			'has no display_col and the lookup rowset has no name col')
+	return display_field
 }
 
 function lookup_nav(rowset_name) {
@@ -699,13 +704,13 @@ function lookup_nav(rowset_name) {
 
 // the lookup nav's field whose value this field stores. multi-col lookups
 // have no single value to pick, so they have none.
-function lookup_val_field(field, ln = field.lookup_nav) {
+function lookup_val_field(field, ln) {
 	let col = field.lookup_cols || ln.pk
 	if (col == null || col.includes(' ')) return
 	return ln.all_fields_map[col]
 }
 
-function can_pick_lookup_val(field, ln = field.lookup_nav) {
+function can_pick_lookup_val(field, ln) {
 	return ln.ready
 		&& lookup_val_field(field, ln)
 		&& lookup_display_field(field, ln)
@@ -2456,7 +2461,7 @@ ui.nav = function(id, opt) {
 	}
 
 	e.set_param_frozen = function(param, frozen) {
-		let val = frozen ? param_vals[param] : undefined
+		let val = frozen ? param_vals?.[param] : undefined
 		ui.save_state(e.id+'.frozen_params', param, val)
 		if (!frozen)
 			reload_with_params()
@@ -2490,8 +2495,14 @@ ui.nav = function(id, opt) {
 				has_changed = true
 			}
 		}
+		let frozen_vals = ui.saved_state[e.id+'.frozen_params'] ?? empty_obj
 		for (let param in e.param_sources) {
 			let source_id = e.param_sources[param] // input id or master nav id
+			let is_frozen = !ui.can_follow_source(source_id)
+			if (is_frozen != (param in frozen_vals))
+				e.set_param_frozen(param, is_frozen)
+			if (is_frozen) continue
+			ui.mark_follows_source(source_id)
 			let master_nav = ui.state_of(source_id, 'nav')
 			let v0 = param_source_vals[source_id] // previous value or selection no.
 			let v1 = master_nav ? master_nav.sel_change_no : ui.value(source_id)
@@ -2502,6 +2513,10 @@ ui.nav = function(id, opt) {
 		}
 		if (has_changed)
 			reload_with_params()
+	}
+
+	e.param_vals = function(name) {
+		return param_vals?.[name]
 	}
 
 	// -> the value applied last from the param bar, or the param_bar_vals
@@ -3301,7 +3316,7 @@ ui.nav = function(id, opt) {
 	e.field_align = function(field) {
 		if (field == e.tree_field)
 			return 'left'
-		return lookup_display_field(field)?.align ?? field.align
+		return lookup_display_field(field, field.lookup_nav)?.align ?? field.align
 	}
 
 	{
@@ -3358,7 +3373,7 @@ ui.nav = function(id, opt) {
 
 		let ln_ri = e.lookup_val(ri, field, v)
 		if (ln_ri != null) {
-			let df = lookup_display_field(field)
+			let df = lookup_display_field(field, field.lookup_nav)
 			if (df) {
 				let ln = field.lookup_nav
 				return ln.build_val(ln_ri, df,
@@ -5038,7 +5053,8 @@ ui.nav = function(id, opt) {
 		let id_field = rs.id_col === false
 			? null : col_field(rs.id_col, all_fields_map)
 		let parent_field  = col_field(rs.parent_col , all_fields_map)
-		let display_field = col_field(rs.display_col, all_fields_map)
+		let display_field = rs.display_col != null
+			? col_field(rs.display_col, all_fields_map) : all_fields_map.name
 		let has_children_field = col_field(rs.has_children_col, all_fields_map)
 
 		if (
