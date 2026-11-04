@@ -2221,7 +2221,9 @@ function init(id, e) {
 		} else if (hit_zone == 'header_divider') {
 			if (ps.drag)
 				ps.w0 = e.header_w * font_size
-			if (ps.dragging)
+			if (ps.cancel)
+				e.header_w = ps.w0 / font_size
+			else if (ps.dragging)
 				e.header_w = clamp_vertical_w(ps.w0 + ps.dx) / font_size
 			if (ps.drop)
 				ui.save_state(id, 'header_w', e.header_w)
@@ -2229,7 +2231,9 @@ function init(id, e) {
 		} else if (hit_zone == 'row_divider') {
 			if (ps.drag)
 				ps.w0 = e.row_w * font_size
-			if (ps.dragging)
+			if (ps.cancel)
+				e.row_w = ps.w0 / font_size
+			else if (ps.dragging)
 				e.row_w = clamp_vertical_w(ps.w0 + ps.dx) / font_size
 			if (ps.drop)
 				ui.save_state(id, 'row_w', e.row_w)

@@ -1011,6 +1011,7 @@ MOUSE HIT STATE
 	  cs.drag          first frame of the drag
 	  cs.dragging      every frame from drag to drop
 	  cs.drop          last frame of the drag
+	  cs.cancel        Escape canceled the drag; last frame of the drag
 	  cs.dx,dy         how far the mouse moved since the press
 	  cs.moved         'l'|'r'|'t'|'b': drag-move direction, if past ui.drag_threshold
 	ui.captured_or_hit (id) -> cs|hs|null   ui.captured(id) || ui.hit(id)
@@ -1214,6 +1215,13 @@ function release_capture() {
 	capture_state = null
 	ui.click = false
 	ui.pointer.click = false
+}
+
+function cancel_capture() {
+	if (ui.captured_id == null || !ui.keydown('escape'))
+		return
+	capture_state.cancel = true
+	consume_key_down('escape')
 }
 
 /// drag & drop
@@ -3002,6 +3010,7 @@ function redraw_all() {
 
 		focus_on_click()
 		focus_on_tab()
+		cancel_capture()
 		click_default_button()
 
 		let prev_focused_id = ui.focused_id
@@ -3112,7 +3121,7 @@ function redraw_all() {
 		reset_canvas()
 
 		// auto release pointer capture on clickup
-		if (ui.clickup && ui.captured_id != null)
+		if ((ui.clickup || capture_state?.cancel) && ui.captured_id != null)
 			release_capture()
 
 		for (let p of ui.pointers)
@@ -8805,10 +8814,13 @@ function num_slider_update(id, s) {
 		if (d)
 			ui.capture_keys()
 		let input_value
-		if (cs) {
+		if (cs?.cancel) {
+			interaction_value = cs.value0
+		} else if (cs) {
 			if (cs.drag) {
 				let p = clamp(slider_p(s.input_value, from, to), p_min, p_max)
 				cs.x0 = lerp(p, 0, 1, 0, s.w)
+				cs.value0 = s.input_value
 				ui.focus(id)
 			}
 			let p = clamp((cs.x0 + cs.dx) / s.w, p_min, p_max)
@@ -8995,6 +9007,8 @@ function slider_update(id, s) {
 	let value
 
 	if (cs) {
+		if (ui.click) // the hit phase captured it this frame
+			cs.value0 = s.input_value
 		let p = clamp((ui.mx - track_x) / track_w, p_min, p_max)
 		value = lerp(p, 0, 1, slider_min, slider_max)
 	} else if (d) {
@@ -9005,7 +9019,9 @@ function slider_update(id, s) {
 	} else if (!field.not_null && focused && ui.keydown('delete')) {
 		value = null
 	}
-	if (value !== undefined)
+	if (cs?.cancel)
+		set_interaction_value(id, s, cs.value0)
+	else if (value !== undefined)
 		set_interaction_value(id, s,
 			snap_slider_value(value, field, slider_min, slider_max))
 }
@@ -10737,9 +10753,13 @@ function gradient_slider(draw_gradient, name, max_value, key_step,
 
 		let cs = ui.drag(id, 'x')
 		if (cs) {
-			if (cs.drag)
+			if (cs.drag) {
+				cs.value0 = s.input_value
 				ui.focus(id)
-			if (cs.dragging)
+			}
+			if (cs.cancel)
+				interaction_value = cs.value0
+			else if (cs.dragging)
 				interaction_value = slider_value(
 					cs.p + cs.dx / (cs.w-1))
 		}
