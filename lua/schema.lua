@@ -502,6 +502,14 @@ function schema.env.aka(old_names)
 	end
 end
 
+function schema.env.section(name)
+	return {section = name}
+end
+
+function schema.env.tab(name)
+	return {tab = name}
+end
+
 local function trigger_pos(tgs, when, op)
 	local i = 1
 	for _,tg in pairs(tgs) do

@@ -3225,6 +3225,7 @@ ui.nav = function(id, opt) {
 		return !!(flags & ROW_NEW)
 			|| e.can_change_rows && e.rowset_can_change_rows
 	}
+	e.can_change_row = can_change_row
 
 	// the user may edit the cell.
 	e.can_change_val = function(ri, fi) {
@@ -5102,6 +5103,8 @@ ui.nav = function(id, opt) {
 		client_rowset = is_server_rowset ? null : rs
 
 		e.rowset_label = rs.label ?? null
+		e.sections = rs.sections ?? null
+		e.tabs = rs.tabs ?? null
 
 		e.params = rs.params ?? null
 		// create an input on the param bar for each unbound non-col param.

@@ -129,6 +129,7 @@ FOCUS
   GROUP         ui.focus_group  ui.focus_inside  ui.focus_first
   TAB           ui.capture_tab  ui.tab_into
   BUTTONS       ui.default_button  ui.cancel_button
+                ui.capture_enter  ui.capture_escape
 
 THEMES
   THEME         ui.themes  ui.theme  ui.theme_is_dark
@@ -1006,6 +1007,7 @@ MOUSE HIT STATE
 	ui.hovers          (id) -> hs|null    hit state if mouse hovers or dragging over id
 	ui.set_hit         (id) -> hs         mark id as hovered (in hit phase only)
 	ui.drag            (id, axis=) -> cs|null  drag state if id is captured
+	  axis             'x'|'y'|'xy' (default)|'none'
 	  cs.drag          first frame of the drag
 	  cs.dragging      every frame from drag to drop
 	  cs.drop          last frame of the drag
@@ -1447,9 +1449,9 @@ gc'ed when that tab was switched from and its contents are no longer built,
 so when the tab is switched to again, the widgets inside will have kept their
 state.
 
-	ui.begin_state_scope (scope_id)   open state scope
+	ui.begin_state_scope (scope_id, hidden=false)   open state scope
 	ui.keep_state_scope  (scope_id)   keep widgets in the scope alive
-	ui.is_state_hidden   (id) -> ?    id's state is in a kept scope
+	ui.is_state_hidden   (id) -> ?    id's state is in a hidden scope
 
 */
 
@@ -1463,6 +1465,7 @@ function create_state_scope() {
 		used_build_no: null, // build_no of last pass that opened the scope
 		kept_build_no: null, // build_no of last pass the kept the scope
 		focused_id: null, // focused id when the scope was hidden
+		hidden: false,
 	}
 }
 let root_state_scope = create_state_scope() // ids touched outside any scope
@@ -1552,7 +1555,9 @@ ui.free_state = function(id) {
 		free_state(id, s)
 }
 
-ui.begin_state_scope = function(scope_id) {
+// hidden means: content is built but it's hidden, so don't restore focus in it.
+// nav also reads the hidden flag to exclude itself from master nav selection.
+ui.begin_state_scope = function(scope_id, hidden) {
 	let scope = state_scopes.get(scope_id)
 	if (!scope) {
 		scope = create_state_scope()
@@ -1560,10 +1565,11 @@ ui.begin_state_scope = function(scope_id) {
 	}
 	scope.parent = cur_state_scope == root_state_scope ? null : cur_state_scope
 	scope.used_build_no = build_no
+	scope.hidden = !!hidden
 	open_state_scopes.push(cur_state_scope)
 	cur_state_scope = scope
 	// shown again: give the focus back to the widget that had it.
-	if (scope.focused_id != null) {
+	if (scope.focused_id != null && !is_state_scope_hidden(scope)) {
 		ui.focus(scope.focused_id)
 		scope.focused_id = null
 	}
@@ -1592,13 +1598,15 @@ function is_state_scope_kept(scope) {
 	return false
 }
 
-// a hidden scope was kept more recently than it was opened.
-ui.is_state_hidden = function(id) {
-	let scope = state_map.get(id)?.state_scope
+function is_state_scope_hidden(scope) {
 	for ( ; scope; scope = scope.parent)
-		if (scope.kept_build_no > scope.used_build_no)
+		if (scope.hidden || scope.kept_build_no > scope.used_build_no)
 			return true
 	return false
+}
+
+ui.is_state_hidden = function(id) {
+	return is_state_scope_hidden(state_map.get(id)?.state_scope)
 }
 
 function scope_contains_scope(scope, inner_scope) {
@@ -2191,12 +2199,16 @@ function translate_rec(a, x, y) {
 // each element that has it (linear scan).
 
 function register_rec(a, rec_i) {
-	for (let i = 2, n = a.n; i < n; i = cmd_next_i(a, i)) {
+	let i = 2
+	let n = a.n
+	while (i < n) {
 		let cmd = a[i-1]
 		let register_f = register[cmd]
-		if (!register_f)
-			continue
-		register_f(a, i, rec_i)
+		if (register_f && register_f(a, i, rec_i) === true) {
+			i = cmd_next_sibling_i(a, i)
+		} else {
+			i = cmd_next_i(a, i)
+		}
 	}
 }
 
@@ -2492,6 +2504,8 @@ GROUP BUTTONS
 
 	ui.default_button  (id)  activate this button on Enter inside the group
 	ui.cancel_button   (id)  activate this button on Escape inside the group
+	ui.capture_enter   (id)  let the widget process Enter instead
+	ui.capture_escape  (id)  let the widget process Escape instead
 
 BROWSER FOCUS
 
@@ -2810,6 +2824,14 @@ register[GROUP_BUTTON] = function(a, i) {
 	focusables[group_i+button_i] = a[i]
 }
 
+ui.capture_enter = function(id) {
+	ui.state(id).capture_enter_build_no = build_no
+}
+
+ui.capture_escape = function(id) {
+	ui.state(id).capture_escape_build_no = build_no
+}
+
 // focus group's default button or cancel button that was "clicked" by
 // pressing Enter or Escape key inside an input in the group.
 let clicked_button_id
@@ -2820,6 +2842,12 @@ function click_default_button() {
 		: ui.keydown('escape') ? FOCUSABLE_CANCEL_BUTTON
 		: null
 	if (button_i == null)
+		return
+	let s = state_map.get(ui.focused_id)
+	let capture_build_no = button_i == FOCUSABLE_DEFAULT_BUTTON
+		? s?.capture_enter_build_no
+		: s?.capture_escape_build_no
+	if (capture_build_no == build_no - 1)
 		return
 	let i = focus_find(ui.focused_id)
 	if (i == null)
@@ -3037,8 +3065,7 @@ function redraw_all() {
 		if (ui.focused_id && focus_find(ui.focused_id) == null) {
 			// focused widget in a hidden scope: the scope keeps the focus.
 			let scope = state_map.get(ui.focused_id)?.state_scope
-			if (scope && scope.used_build_no != build_no
-					&& is_state_scope_kept(scope))
+			if (scope && is_state_scope_hidden(scope))
 				scope.focused_id = ui.focused_id
 			ui.focus(null)
 		}
@@ -4066,16 +4093,20 @@ ui.box_widget('box', {
 
 // a box container that paints its children one on top of the other.
 //
-// ui.stack (id=, fr=1, align='s', valign='s')
+// ui.stack (id=, fr=1, align='s', valign='s', hidden=false)
 
-const STACK_ID = BOX_CT_ARGS+0
+const STACK_ID    = BOX_CT_ARGS+0
+const STACK_FLAGS = BOX_CT_ARGS+1
+
+const STACK_HIDDEN = 1
 
 const CMD_STACK = cmd_ct('stack')
 id_i[CMD_STACK] = STACK_ID
 
-ui.stack = function(id, fr, align, valign) {
+ui.stack = function(id, fr, align, valign, hidden) {
 	let i = ui_cmd_box_ct_begin(CMD_STACK, fr, align, valign)
 	a[n++] = id || ''
+	a[n++] = hidden ? STACK_HIDDEN : 0
 	ui_cmd_box_ct_end(i)
 	return i
 }
@@ -4096,7 +4127,13 @@ ui.end_stack = function() { ui.end(CMD_STACK) }
 
 translate[CMD_STACK] = translate_ct
 
+register[CMD_STACK] = draw[CMD_STACK] = function(a, i) {
+	return !!(a[i+STACK_FLAGS] & STACK_HIDDEN)
+}
+
 hittest[CMD_STACK] = function(a, i, recs) {
+	if (a[i+STACK_FLAGS] & STACK_HIDDEN)
+		return false
 	return hit_ct(a, i, recs, a[i+STACK_ID])
 }
 
@@ -7273,13 +7310,28 @@ function ss_free(s) {
 		s.con.send(json({event: 'key_state', keys: []}))
 }
 
+function ss_update(id, s) {
+	let keys = ui.focused(id) ? ui.pointer.key_state : empty_set
+	if (!s.sent_keys || !set_equals(s.sent_keys, keys)) {
+		s.sent_keys = set(keys)
+		s.con.send(json({event: 'key_state', keys: [...keys]}))
+	}
+	if (ui.focused(id)) {
+		for (let ev of ui.key_events)
+			s.con.send(json({event: 'key', key_event: ev}))
+		ui.capture_keys()
+	}
+}
+
 ss.create = function(cmd, id, answer_con, fr, align, valign) {
 
 	ui.state(id)
 	ui.focusable(id)
 	ui.capture_tab(id)
+	ui.capture_enter(id)
+	ui.capture_escape(id)
 	ui.measure(id)
-	let s = ui.state(id)
+	let s = ui.state(id, ss_update)
 	if (s.con != answer_con) {
 		if (s.con)
 			ss_free(s)
@@ -7295,16 +7347,6 @@ ss.create = function(cmd, id, answer_con, fr, align, valign) {
 	}
 
 	let hs = captured_or_hit(id)
-	let keys = ui.focused(id) ? ui.pointer.key_state : empty_set
-	if (!s.sent_keys || !set_equals(s.sent_keys, keys)) {
-		s.sent_keys = set(keys)
-		answer_con.send(json({event: 'key_state', keys: [...keys]}))
-	}
-	if (ui.focused(id)) {
-		for (let ev of ui.key_events)
-			answer_con.send(json({event: 'key', key_event: ev}))
-		ui.capture_keys()
-	}
 	let mx = answer_con.frame && hs && ui.mx != null ? ui.mx - s.x : null
 	let my = answer_con.frame && hs && ui.my != null ? ui.my - s.y : null
 	ss_send_pointer(s, mx, my)
@@ -7736,6 +7778,8 @@ ui.button = function(
 	next_min_w ??= ui.em(2)
 	ui.button_stack(id, fr, align, valign)
 	let s = ui.state(id, button_update) // button widget state
+	if (!readonly)
+		ui.capture_enter(id)
 	let state = readonly ? 'readonly' : s.state
 	ui.button_bb(style, state)
 	if (icon) {
@@ -8804,8 +8848,14 @@ ui.num_slider = function(id, value, field, fr, align, valign, readonly) {
 	let input_id = id+'.input'
 	let show_input = s.editing || readonly
 	let focused = ui.focused(show_input ? input_id : id)
+	ui.focus_group(false, null, id) // make default_button work!
 	if (!show_input)
 		ui.focusable(id)
+	if (!readonly) {
+		ui.capture_enter(s.editing ? input_id : id)
+		if (s.editing)
+			ui.capture_escape(input_id)
+	}
 
 	fr ??= 1
 	align ??= 's'
@@ -8845,6 +8895,7 @@ ui.num_slider = function(id, value, field, fr, align, valign, readonly) {
 			ui.text('', text, 1, 'sr', 'c')
 		ui.measure(id)
 	ui.end_stack()
+	ui.end_focus_group()
 
 	return ui.value(id)
 }
@@ -9695,6 +9746,8 @@ ui.dropdown = function(id, update, want_open, fr, align, valign, no_box,
 	if (want_open)
 		set_dropdown_open(id, s, true)
 	let open = s.open
+	if (!s.readonly)
+		ui.capture_enter(id)
 
 	let box_pad_x = no_box ? 0 : ui.em(input_pad_x_em)
 	s.pad_l = px1 + box_pad_x
@@ -10293,6 +10346,8 @@ ui.date_input = function(
 		ui.focus(input_id)
 		ui.select_text(input_id, 0, 1/0)
 	}
+	if (!readonly)
+		ui.capture_enter(input_id)
 
 	let focused = ui.focused(input_id)
 	let state =
@@ -11004,45 +11059,37 @@ opt:
 	field      : field_input: the field to edit.
 	nav, col   : nav_input: the nav and the column to edit.
 	ri         : nav_input: the row to edit (nav.focused_ri), null for none.
-	control    : the control to build (field.control, or 'lookup_input' for
-	             a lookup field): 'input', 'password_input', 'checkbox',
-	             'toggle', 'toggle_button', 'date_input', 'color_input',
-	             'lookup_input', 'enum_input', 'enum_toggle', 'list_dropdown',
-	             'radio_list', 'num_slider', 'slider'.
-	label_pos  : 't'|'top', 'l'|'left', 'lr'|'left-right-align' (on the
-	             left, right-aligned), 'hide' or null (no label). A checkbox
-	             or toggle always shows its label next to it.
-	errors     : 'tooltip' (default): show the errors in a tooltip while the
-	             focus is inside the control or the pointer is over the status
-	             icon. Any other value: no tooltip.
-	error_mode : which results the error tooltip or label shows, as in
-	             ui.error_label(): 'first_error', 'all_errors' (default),
-	             'all_checked', 'all'.
+	control    : the control to build: field.control, or 'lookup_input'.
+	label_pos  : 't|top | l|left | lr|left-right-align | hide', null.
+	errors     : 'tooltip' (default): show errors in a tooltip while focused.
+	error_mode : 'first_error', 'all_errors' (default), 'all_checked', 'all'.
 	text_align : input, password_input, date_input, enum_input, list_dropdown.
-	w          : min width of the control.
-	max_w      : enum_input, list_dropdown: max width.
+	min_w      : min width.
+	min_h      : min height.
+	max_w      : max width: enum_input, list_dropdown.
 	items      : list_dropdown, radio_list: the items (field.enum_items()).
 	hv         : radio_list: 'h'|'v'.
-	pad_l      : left padding of the control.
-	pad_r      : right padding of the control.
-	no_box     : input, password_input, date_input, color_input,
-	             lookup_input, enum_input, list_dropdown: no background,
-	             border or padding around the control.
-	open       : date_input, color_input, lookup_input, enum_input,
-	             list_dropdown: open the dropdown.
+	pad_l      : left padding.
+	pad_r      : right padding.
+	no_box     : no box, for inline grid editing.
+	open       : open the dropdown (for dropdowns obviously).
 
 */
 
 // builds the control under `id`; nav_input reads what the user made of it
 // with ui.interaction_value(id).
 ui.build_input = function(id, value, opt, control, readonly) {
-	ui.min_w(opt.w)
+	ui.min_w(opt.min_w)
+	if (opt.min_h != null)
+		ui.min_h(opt.min_h)
 	if (control == 'input') {
 		value = ui.input(id, value, this, null, null, null, opt.text_align,
 			opt.no_box, readonly)
 	} else if (control == 'password_input') {
 		value = ui.password_input(id, value, this, null, null, null, opt.text_align,
 			opt.no_box, readonly)
+	} else if (control == 'code_edit') {
+		value = ui.code_edit(id, value, this, opt, readonly)
 	} else if (control == 'checkbox') {
 		value = ui.checkbox(id, value, this, null, null, null, readonly)
 	} else if (control == 'toggle') {
@@ -11148,7 +11195,9 @@ function build_input_row(id, value, opt, is_bound, fr, align, valign) {
 		// whatever control the field type would build.
 		if (is_bound && ri == null) {
 			readonly_text_field ??= ui.create_field({readonly: true})
-			ui.min_w(opt.w)
+			ui.min_w(opt.min_w)
+			if (opt.min_h != null)
+				ui.min_h(opt.min_h)
 			value = ui.input(id, null, readonly_text_field)
 		} else {
 			let readonly = ri != null && !nav.can_change_val(ri, field.fi)
@@ -11773,10 +11822,14 @@ ui.live_move_mixin = function(e) {
 /*
 
 	ui.dock  (id, layout, on_build_tab, opt=)   build a dock layout
+	  tab.live               : t|f      build unselected tab hidden for layout
 	  opt.tabs_side           : 't'|'b'  tab strip side (default 't')
-	  opt.can_add_remove_tabs : t|f      allow add/remove/reorder tabs
+	  opt.can_add_remove_tabs : t|f      allow add/remove tabs
+	  opt.can_move_tabs       : t|f      reorder (default can_add_remove_tabs)
 	  opt.can_change_layout   : t|f      allow docking tabs anywhere
-	ui.set_dock_tab    (id, tab_id, props)   update tab properties
+	  opt.save_layout         : t|f      restore/save layout (default true)
+	  opt.strip_max_w         : w        grow tab strip to fit tabs up to w
+	ui.set_dock_tab   (id, tab_id, props)   update tab properties
 	ui.remove_dock_tab (id, tab_id)          remove a dock tab
 	ui.select_dock_tab (id, tab_id)          select a dock tab
 TAB STRIP REC BOX
@@ -11800,6 +11853,7 @@ function tabbox(
 	let box_id = id+'.tabbox.'+tab.id
 	ui.focusable(box_id)
 	ui.keep_focus(box_id)
+	ui.capture_enter(box_id)
 	ui.stack(box_id)
 	ui.measure(box_id)
 	ui.focus_ring(box_id)
@@ -11840,6 +11894,8 @@ function tabbox(
 			} else {
 				let value = is_starting_edit ? title : undefined
 				ui.text_editable(text_id, value, 0)
+				ui.capture_enter(text_id)
+				ui.capture_escape(text_id)
 			}
 		} else {
 			if (tab.hot)
@@ -11891,6 +11947,7 @@ function tab_strip(
 			+cs.src_tablist.tabs[cs.tab_i].id, 'w') : null
 	ui.h(1, 0, 's', 's')
 	ui.h(1, 0, 's', 's')
+	ui.sb_max_wh(opt.strip_max_w)
 	ui.sb(tablist_id, 1, 'auto-hover', 'contain')
 	ui.h(0, 0, 'l', 't')
 	ui.measure(tablist_id+'.tabs')
@@ -12057,6 +12114,7 @@ function serialize_dock_layout(node) {
 				? serialize_dock_layout(tab.layout) : undefined,
 			frozen: tab.frozen,
 			hot: tab.hot,
+			live: tab.live,
 		}
 		tabs.push(saved_tab)
 	}
@@ -12071,6 +12129,8 @@ function serialize_dock_root() {
 }
 
 function save_dock_layout(id, s) {
+	if (!s.save_layout)
+		return
 	s.root.toJSON = serialize_dock_root
 	ui.save_state(id, 'root', s.root, true)
 	ui.save_state(id, 'next_key', s.next_key)
@@ -12252,7 +12312,7 @@ function hit_dock(id, s, cs) {
 	cs.drop_insert_i = null
 	// fixed layout: the tab can only move along its own strip.
 	if (!s.can_change_layout) {
-		if (s.can_add_remove_tabs)
+		if (s.can_move_tabs)
 			set_strip_drop(id, cs, cs.src_tablist)
 		return
 	}
@@ -12311,7 +12371,8 @@ function move_dock_tab(
 			let sibling_node = parent.side1 == src_tablist
 				? parent.side2 : parent.side1
 			s.root = replace_dock_node(s.root, parent, sibling_node)
-			ui.save_state(id+'.split'+parent.key)
+			if (s.save_layout)
+				ui.save_state(id+'.split'+parent.key)
 		}
 	}
 }
@@ -12388,11 +12449,11 @@ function dock_tab_panes(
 		let tabs = node.tabs
 		let selected_tab // selected tab record
 
-		// the caller builds only the selected tab's content: keep the others'.
+		// build selected and live tabs; keep the other scopes.
 		for (let tab of tabs)
 			if (!selected_tab && tab.id == node.selected_tab_id)
 				selected_tab = tab
-			else
+			else if (!tab.live)
 				ui.keep_state_scope(id+'.tab.'+tab.id)
 
 		let tab_strip_rec_i0 = tab_strip_rec_i
@@ -12406,22 +12467,26 @@ function dock_tab_panes(
 					added_tab_id, opt)
 			ui.stack('', 1, 's', 's')
 			ui.measure(tablist_id+'.pane')
-			// empty root tablist: no tab to build.
-			if (selected_tab) {
-				let scope = ui.begin_state_scope(id+'.tab.'+selected_tab.id)
+			for (let tab of tabs) {
+				let hidden = tab != selected_tab
+				if (hidden && !tab.live)
+					continue
+				let scope = ui.begin_state_scope(id+'.tab.'+tab.id, hidden)
 				scope.dock = s
-				scope.dock_tab = selected_tab
-				ui.focus_group(false, null, id+'.tab.'+selected_tab.id)
-				if (selected_tab.layout)
-					dock_tab_panes(id, s, selected_tab.layout, cs, on_build_tab,
+				scope.dock_tab = tab
+				ui.stack('', 1, 's', 's', hidden)
+				ui.focus_group(false, null, id+'.tab.'+tab.id)
+				if (tab.layout)
+					dock_tab_panes(id, s, tab.layout, cs, on_build_tab,
 						added_tab_id, opt)
 				else
-					on_build_tab(selected_tab)
+					on_build_tab(tab)
 				ui.end_focus_group()
+				ui.end_stack()
 				ui.end_state_scope()
 				let is_hot = scope.hot_build_no == build_no
-				if (is_hot != !!selected_tab.hot) {
-					selected_tab.hot = is_hot
+				if (is_hot != !!tab.hot) {
+					tab.hot = is_hot
 					save_dock_layout(id, s)
 					ui.rebuild('dock_tab_hot')
 				}
@@ -12488,12 +12553,15 @@ ui.dock = function(id, layout, on_build_tab, opt) {
 	assert(s.is_strip_bottom || tabs_side == null
 		|| tabs_side == 'top' || tabs_side == 't',
 		'dock ', id, ': invalid tabs_side ', tabs_side)
-	// "+" and x shown, drops in own tablist.
+	// "+" and x shown.
 	s.can_add_remove_tabs = opt.can_add_remove_tabs ?? true
+	// drops in own tablist.
+	s.can_move_tabs = opt.can_move_tabs ?? s.can_add_remove_tabs
 	s.can_change_layout = opt.can_change_layout ?? true // drops elsewhere
+	s.save_layout = opt.save_layout ?? true
 
 	if (s.root === undefined) {
-		let saved = ui.saved_state[id]
+		let saved = s.save_layout && ui.saved_state[id]
 		if (saved) {
 			s.root = saved.root
 			s.next_key = saved.next_key // key of the next new node
@@ -12505,8 +12573,10 @@ ui.dock = function(id, layout, on_build_tab, opt) {
 	}
 
 	let drag_tab_id = capture_match(id+'.tabbox.') // id of the dragged tab
+	let drag_axis = s.can_change_layout ? null
+		: s.can_move_tabs ? 'x' : 'none'
 	let cs = drag_tab_id != null // capture state of the dragged tab
-		? ui.drag(id+'.tabbox.'+drag_tab_id, s.can_change_layout ? null : 'x')
+		? ui.drag(id+'.tabbox.'+drag_tab_id, drag_axis)
 		: null
 	if (cs?.drag) {
 		let tablist = find_dock_tablist(s.root, drag_tab_id)
@@ -12839,26 +12909,30 @@ function resizer_update(id, s) {
 	if (cs.dragging) {
 		let side = cs.side
 		ui.set_cursor(cursors[side])
+		let dx = s.is_centered ? 2 * cs.dx : cs.dx
+		let dy = s.is_centered ? 2 * cs.dy : cs.dy
 		if (side.includes('r'))
-			s.w = min(cs.w0 + cs.dx, s.max_w ?? 1/0)
+			s.w = min(cs.w0 + dx, s.max_w ?? 1/0)
 		if (side.includes('l'))
-			s.w = min(cs.w0 - cs.dx, s.max_w ?? 1/0)
+			s.w = min(cs.w0 - dx, s.max_w ?? 1/0)
 		if (side.includes('b'))
-			s.h = min(cs.h0 + cs.dy, s.max_h ?? 1/0)
+			s.h = min(cs.h0 + dy, s.max_h ?? 1/0)
 		if (side.includes('t'))
-			s.h = min(cs.h0 - cs.dy, s.max_h ?? 1/0)
+			s.h = min(cs.h0 - dy, s.max_h ?? 1/0)
 	}
 }
 
 // resize current container by dragging from the requested edges.
+// is_centered: size changes by twice the pointer move.
 //
-// ui.resizer (id, edges='rb', max_w=, max_h=)
+// ui.resizer (id, edges='rb', max_w=, max_h=, is_centered=)
 //
 ui.widget('resizer', {
-	create: function(cmd, id, edges, max_w, max_h) {
+	create: function(cmd, id, edges, max_w, max_h, is_centered) {
 		let s = ui.state(id, resizer_update)
 		s.max_w = max_w
 		s.max_h = max_h
+		s.is_centered = is_centered
 		let i = ui_cmd_begin(cmd)
 		a[n++] = ui.ct_i() - i
 		a[n++] = id

@@ -33,7 +33,7 @@ vm.runInContext([
 	section(ui_source, 'function state_update(', 'ui.set_state_of ='),
 	section(ui_source, 'ui.begin_state_scope =',
 		'function state_scope_stack_check'),
-	section(ui_source, 'ui.is_state_hidden =', '// free_state()'),
+	section(ui_source, 'function is_state_scope_hidden(', '// free_state()'),
 	section(ui_source, 'function find_dock_parent(', '// -> root after'),
 	section(ui_source, 'function dock_tab_panes(', '// draw the drop marker'),
 	section(nav_source, 'function find_master_nav(', 'ui.master_id ='),
@@ -145,3 +145,214 @@ assert.equal(ui.get_dock_shared_parent_depth('dock.near_tab'),
 	ui.get_dock_shared_parent_depth('dock.far_tab'))
 assert.equal(context.find_master_nav('tables').id, 'dock.near_tab.2')
 console.log('Dock ancestry and master selection checks passed.')
+
+// live tabs and focus restoration
+
+const selected_tab = tab('selected')
+const live_tab = tab('live')
+live_tab.live = true
+const kept_tab = tab('kept')
+const live_dock = {root: tablist(selected_tab, live_tab, kept_tab)}
+const built_tabs = []
+const hidden_stacks = []
+const focus_calls = []
+const stack0 = ui.stack
+const focus0 = ui.focus
+ui.stack = function(id, fr, align, valign, hidden) {
+	if (hidden !== undefined)
+		hidden_stacks.push(hidden)
+}
+ui.focus = id => focus_calls.push(id)
+function build_live_tab(dock_tab) {
+	built_tabs.push(dock_tab.id)
+	register_tab('live', dock_tab)
+}
+live_dock.root.selected_tab_id = 'kept'
+context.build_no++
+build('live', live_dock, build_live_tab)
+live_dock.root.selected_tab_id = 'selected'
+context.build_no++
+built_tabs.length = 0
+hidden_stacks.length = 0
+build('live', live_dock, build_live_tab)
+assert.deepEqual(built_tabs, ['selected', 'live'])
+assert.deepEqual(hidden_stacks, [false, true])
+assert.equal(ui.is_state_hidden('live.selected'), false)
+assert.equal(ui.is_state_hidden('live.live'), true)
+assert.equal(ui.is_state_hidden('live.kept'), true)
+context.rowset_navs.live_masters = [
+	{id: 'live.selected'}, {id: 'live.live'},
+]
+assert.equal(context.find_master_nav('live_masters', 'live.live').id,
+	'live.selected')
+const live_scope = state_map.get('live.live').state_scope
+live_scope.focused_id = 'live.live'
+context.build_no++
+build('live', live_dock, build_live_tab)
+assert.deepEqual(focus_calls, [])
+assert.equal(live_scope.focused_id, 'live.live')
+live_dock.root.selected_tab_id = 'live'
+context.build_no++
+build('live', live_dock, build_live_tab)
+assert.deepEqual(focus_calls, ['live.live'])
+assert.equal(live_scope.focused_id, null)
+assert.equal(ui.is_state_hidden('live.live'), false)
+assert.equal(context.find_master_nav('live_masters', 'live.selected').id,
+	'live.live')
+
+const nested_live_tab = tab('parent', tablist(tab('child')))
+nested_live_tab.live = true
+const nested_live_dock = {root: tablist(tab('visible'), nested_live_tab)}
+context.build_no++
+build('nested_live', nested_live_dock, dock_tab =>
+	register_tab('nested_live', dock_tab))
+assert.equal(ui.is_state_hidden('nested_live.child'), true)
+const child_scope = state_map.get('nested_live.child').state_scope
+child_scope.focused_id = 'nested_live.child'
+focus_calls.length = 0
+context.build_no++
+build('nested_live', nested_live_dock, dock_tab =>
+	register_tab('nested_live', dock_tab))
+assert.deepEqual(focus_calls, [])
+nested_live_dock.root.selected_tab_id = 'parent'
+context.build_no++
+build('nested_live', nested_live_dock, dock_tab =>
+	register_tab('nested_live', dock_tab))
+assert.deepEqual(focus_calls, ['nested_live.child'])
+assert.equal(ui.is_state_hidden('nested_live.child'), false)
+ui.stack = stack0
+ui.focus = focus0
+console.log('Live tab builds, hidden scopes and focus checks passed.')
+
+// dock layout persistence
+
+Object.assign(context, {
+	assign: Object.assign, empty: {}, capture_match: () => null,
+	update_dock_tabs: noop,
+})
+vm.runInContext([
+	section(ui_source, 'function free_state(', 'ui.begin_state_scope ='),
+	section(ui_source, 'function create_dock_layout(',
+		'function new_dock_tab_id('),
+	section(ui_source, 'function serialize_dock_layout(',
+		'function find_dock_parent('),
+	section(ui_source, 'ui.dock =', 'ui.set_dock_tab ='),
+	section(ui_source, 'ui.select_dock_tab =', 'ui.remove_dock_tab ='),
+].join('\n'), context)
+const saves = []
+ui.saved_state = {}
+ui.save_state = function(id, key, value) {
+	saves.push([id, key])
+	ui.saved_state[id] ??= {}
+	ui.saved_state[id][key] = JSON.parse(JSON.stringify(value))
+}
+const form_layout = {tabs: [
+	{id: 'first', live: true}, {id: 'second', live: true},
+]}
+const old_form_layout = {key: 7, tabs: [{id: 'old'}], selected_tab_id: 'old'}
+ui.saved_state.form = {root: old_form_layout, next_key: 8}
+context.set_current_scope(null)
+ui.dock('form', form_layout, noop, {save_layout: false})
+assert.equal(ui.state_of('form').save_layout, false)
+assert.equal(ui.state_of('form').root.selected_tab_id, 'first')
+assert.equal(ui.state_of('form').root.tabs[0].live, true)
+ui.select_dock_tab('form', 'second')
+assert.equal(ui.state_of('form').root.selected_tab_id, 'second')
+assert.deepEqual(saves, [])
+assert.equal(ui.saved_state.form.root, old_form_layout)
+ui.free_state('form')
+ui.dock('form', form_layout, noop, {save_layout: false})
+assert.equal(ui.state_of('form').root.selected_tab_id, 'first')
+assert.deepEqual(saves, [])
+
+const saved_layout = {
+	key: 3, tabs: [{id: 'saved', live: true}, {id: 'other', live: false}],
+	selected_tab_id: 'saved',
+}
+ui.saved_state.persistent = {root: saved_layout, next_key: 4}
+ui.dock('persistent', form_layout, noop)
+assert.equal(ui.state_of('persistent').save_layout, true)
+assert.equal(ui.state_of('persistent').root, saved_layout)
+ui.select_dock_tab('persistent', 'other')
+assert.deepEqual(saves, [['persistent', 'root'], ['persistent', 'next_key']])
+assert.equal(ui.saved_state.persistent.root.tabs[0].live, true)
+assert.equal(ui.saved_state.persistent.root.tabs[1].live, false)
+ui.free_state('persistent')
+ui.dock('persistent', form_layout, noop)
+assert.equal(ui.state_of('persistent').root.selected_tab_id, 'other')
+assert.equal(ui.state_of('persistent').root.tabs[0].live, true)
+console.log('Transient layouts and saved live flags checks passed.')
+
+// hidden stack layout and registration
+
+const layout_context = vm.createContext({
+	ui: {}, max: Math.max, min: Math.min, round: Math.round,
+	obj: () => Object.create(null),
+	isnum: value => typeof value == 'number',
+	assert(value, ...message) {
+		assert(value, message.join(' '))
+		return value
+	},
+	tui_snap_paddings: noop, font_size_normal: 16,
+})
+vm.runInContext([
+	'let ct_stack = []; let cur_theme = "light"; let theme_stack = [];',
+	'let registered = []; let painted = []; let hit_n = 0;',
+	'function is_main_axis() { return false }',
+	'function hit_rect() { return true }',
+	'function hit_ct() { hit_n++; return true }',
+	section(ui_source, 'let measure       =', '/// measuring phase'),
+	section(ui_source, 'let a // current recording', '//// LAYERS'),
+	section(ui_source, 'const PX1 ', 'ui.box_widget ='),
+	section(ui_source, 'function cmd_next_sibling_i(', 'ui.box_ct_widget ='),
+	section(ui_source, 'const CMD_END =', '// position phase utils'),
+	section(ui_source, 'function position_children_stacked(',
+		'// hit phase utils'),
+	section(ui_source, 'const STACK_ID ', '//// ASPECT BOX'),
+	section(ui_source, 'function measure_rec(', '/// drawing phase'),
+	section(ui_source, 'function draw_cmd(', 'function draw_popups('),
+	`const MARK = cmd('marker')
+	register[MARK] = (a, i) => { registered.push(a[i]) }
+	draw[MARK] = (a, i) => { painted.push(a[i]) }
+	globalThis.build_layout = function(hidden) {
+		a = []; n = 0; ct_stack = []; a.ct_stack = ct_stack
+		let root_i = ui.stack('root')
+		ui.min_wh(30, 200)
+		ui.stack('selected')
+		ui.cmd(MARK, 'selected')
+		ui.end_stack()
+		ui.min_wh(200, 30)
+		let hidden_i = ui.stack('live', 1, 's', 's', hidden)
+		ui.cmd(MARK, 'live')
+		ui.stack('nested')
+		ui.cmd(MARK, 'nested')
+		ui.end_stack()
+		ui.end_stack()
+		ui.end_stack()
+		a.n = n
+		measure_rec(a, 0)
+		position_rec(a, 0, 200)
+		measure_rec(a, 1)
+		position_rec(a, 1, 200)
+		registered = []; painted = []; hit_n = 0
+		register_rec(a, 0)
+		draw_cmd(a, root_i, [a])
+		hittest[CMD_STACK](a, hidden_i, [a])
+		return {
+			w: a[root_i+2], h: a[root_i+3], registered, painted, hit_n,
+		}
+	}`,
+].join('\n'), layout_context)
+const hidden_layout = layout_context.build_layout(true)
+assert.equal(hidden_layout.w, 200)
+assert.equal(hidden_layout.h, 200)
+assert.deepEqual(Array.from(hidden_layout.registered), ['selected'])
+assert.deepEqual(Array.from(hidden_layout.painted), ['selected'])
+assert.equal(hidden_layout.hit_n, 0)
+const visible_layout = layout_context.build_layout(false)
+assert.deepEqual(Array.from(visible_layout.registered),
+	['selected', 'live', 'nested'])
+assert.deepEqual(Array.from(visible_layout.painted),
+	['selected', 'live', 'nested'])
+assert.equal(visible_layout.hit_n, 1)
+console.log('Hidden stack sizing, registration, drawing and hit checks passed.')

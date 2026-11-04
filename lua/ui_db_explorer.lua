@@ -89,54 +89,67 @@ rowset.db_explorer_tables = virtual_rowset(function(rs)
 end)
 
 rowset.db_explorer_fields = virtual_rowset(function(rs)
+	rs.tabs = 'Column Storage Values Validation'
 	rs.fields = {
 		{
 			name = 'col', label = 'Column', icon = 'table-column',
-			readonly = true, not_null = true,
+			readonly = true, not_null = true, tab = 'Column',
 		},
-		{name = 'mdbx_type', label = 'MDBX type', readonly = true},
+		{
+			name = 'mdbx_type', label = 'MDBX type', readonly = true,
+			tab = 'Column',
+		},
 		{
 			name = 'key_index', label = 'Key position', type = 'number',
-			readonly = true, icon = 'key',
+			readonly = true, icon = 'key', tab = 'Column',
 		},
 		{
 			name = 'not_null', label = 'Not null', type = 'bool',
-			readonly = true, icon = 'asterisk',
+			readonly = true, icon = 'asterisk', tab = 'Validation',
 		},
 		{
 			name = 'auto_increment', label = 'Auto increment', type = 'bool',
-			readonly = true, icon = 'number',
+			readonly = true, icon = 'number', tab = 'Values',
 		},
 		{
 			name = 'maxlen', label = 'Max length', type = 'number',
-			readonly = true, icon = 'ruler',
+			readonly = true, icon = 'ruler', tab = 'Storage',
 		},
 		{
 			name = 'fixed', label = 'Fixed', type = 'bool',
-			readonly = true, hidden = true,
+			readonly = true, hidden = true, tab = 'Storage',
 		},
 		{
 			name = 'nozero', label = 'No zero', type = 'bool',
-			readonly = true, hidden = true,
+			readonly = true, hidden = true, tab = 'Storage',
 		},
 		{
 			name = 'scale', label = 'Scale', type = 'number',
-			readonly = true, icon = 'decimal',
+			readonly = true, icon = 'decimal', tab = 'Storage',
 		},
-		{name = 'mdbx_collation', label = 'Collation', readonly = true},
-		{name = 'default_expr', label = 'Default', readonly = true},
+		{
+			name = 'mdbx_collation', label = 'Collation', readonly = true,
+			tab = 'Storage',
+		},
+		{
+			name = 'default_expr', label = 'Default', readonly = true,
+			tab = 'Values',
+		},
 		{
 			name = 'gen_expr', label = 'Generated', icon = 'bolt',
-			readonly = true,
+			readonly = true, tab = 'Values',
 		},
-		{name = 'on_update_expr', label = 'On update', readonly = true},
+		{
+			name = 'on_update_expr', label = 'On update', readonly = true,
+			tab = 'Values',
+		},
 		{
 			name = 'check_expr', label = 'Check', icon = 'shield-check',
-			readonly = true,
+			readonly = true, tab = 'Validation',
 		},
 		{
 			name = 'check_error', label = 'Check error', readonly = true,
-			hidden = true,
+			hidden = true, tab = 'Validation',
 		},
 	}
 	rs.pk = 'col'

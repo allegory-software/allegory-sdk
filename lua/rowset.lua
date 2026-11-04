@@ -14,6 +14,8 @@ Rowset attributes to set (* = server-only):
 		label            : 'Foo Bar'     label of a master in a detail's toggle
 	*	field_attrs      : {col->field}  extra field attributes
 		cols             : 'col1 ...'    default visible columns list
+		sections         : 's1 ...'      form section order
+		tabs             : 't1 ...'      form tab order
 	*	hide_cols        : 'col1 ...'    columns hidden by default
 		pos_col          : 'col'         pos column for manual ordering of rows
 		params           : {name->def}   params, each def a field def plus:
@@ -41,6 +43,8 @@ Field attributes to set:
 	DISPLAY
 		label            : 'Foo Bar'     input-box label / grid column label
 		info             : '...'         input-box info / grid column info
+		section          : 'Section'     form input section
+		tab              : 'Tab'         form input tab
 		align            : 'left'|'right'|'center'   cell alignment
 		w                : px            default grid column width
 		min_w            : px            min grid column width
@@ -166,6 +170,7 @@ action['rowset.xlsx'] = function(name)
 end
 
 local client_field_attrs = {
+	section = 1, tab = 1,
 	internal=1, hidden=1, readonly=1, null_text=1,
 	filter = 1,
 	icon = 1,
@@ -434,6 +439,8 @@ function virtual_rowset(init, ...)
 			pk = rs.pk,
 			pos_col = rs.pos_col or nil,
 			cols = rs.cols,
+			sections = rs.sections,
+			tabs = rs.tabs,
 			id_col = rs.id_col,
 			parent_col = rs.parent_col,
 			tree_col = rs.tree_col,

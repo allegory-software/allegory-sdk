@@ -22,29 +22,31 @@ function auth_schema()
 
 	tables.usr = {
 		usr         , idpk    ,
-		anonymous   , bool1   ,
-		email       , email   ,
-		emailvalid  , bool0   ,
-		pass        , str     , --bcrypt_hash() is ascii nozero 60 chars
-		active      , bool1   ,
-		title       , name    ,
-		name        , name    ,
-		phone       , str     ,
-		phonevalid  , bool0   ,
-		sex         , enum'M F O',
-		birthday    , date    ,
-		newsletter  , bool0   ,
-		roles       , tags    ,
-		note        , text    ,
-		theme       , str     ,
-		auth_code   , str     , --six_digit_code()
-		auth_code_created  , time ,
-		auth_code_trycount , count, --capped by the auth_code_maxtry config
-		auth_code_validates, enum'email phone',
-		clientip    , str     , --when it was created
-		atime       , atime   , --last access time
-		ctime       , ctime   , --creation time
-		mtime       , mtime   , --last modification time
+		anonymous   , bool1   , tab'Account',
+		email       , email   , tab'Profile', section'Contact',
+		emailvalid  , bool0   , tab'Profile', section'Contact',
+		--bcrypt_hash() is ascii nozero 60 chars
+		pass        , str     , tab'Security',
+		active      , bool1   , tab'Account',
+		title       , name    , tab'Profile', section'Name',
+		name        , name    , tab'Profile', section'Name',
+		phone       , str     , tab'Profile', section'Contact',
+		phonevalid  , bool0   , tab'Profile', section'Contact',
+		sex         , enum'M F O', tab'Profile', section'Name',
+		birthday    , date    , tab'Profile', section'Name',
+		newsletter  , bool0   , tab'Profile', section'Contact',
+		roles       , tags    , tab'Account',
+		note        , text    , tab'Account',
+		theme       , str     , tab'Account',
+		auth_code   , str     , tab'Security', --six_digit_code()
+		auth_code_created  , time , tab'Security',
+		--capped by the auth_code_maxtry config
+		auth_code_trycount , count, tab'Security',
+		auth_code_validates, enum'email phone', tab'Security',
+		clientip    , str     , tab'Activity', --when it was created
+		atime       , atime   , tab'Activity', --last access time
+		ctime       , ctime   , tab'Activity', --creation time
+		mtime       , mtime   , tab'Activity', --last modification time
 	}
 
 	tables.usr_tenant = {
@@ -70,8 +72,8 @@ function auth_schema()
 		import'lang'
 
 		add_cols('usr after note', {
-			lang        , lang    , weak_fk,
-			country     , country , weak_fk,
+			lang        , lang    , weak_fk, tab'Profile',
+			country     , country , weak_fk, tab'Profile',
 		})
 
 	end

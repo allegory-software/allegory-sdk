@@ -13,7 +13,7 @@ const {
 	pr,
 	round, min, max, floor, ceil, abs, clamp,
 	array_move, assign, copy_to_clipboard, empty_obj, empty_array,
-	noop,
+	noop, words,
 	S,
 } = glue
 
@@ -25,9 +25,11 @@ ui.GRID_FAST_PATH = true
 
 ui.capture_keydown('f1') // browser: help -> grid: key help
 
+//// FAST GRID CELLS ---------------------------------------------------------
+
 // draw all the visible cells of one field in a single command.
 // each cell gets (bg, bg_state, fg, text).
-ui.widget('fast_field', {
+ui.widget('fast_grid_cells', {
 	create: function(cmd, x0, y0, w, cell_h, cell_dx, cell_dy,
 		pad, align, baseline, n
 	) {
@@ -131,6 +133,8 @@ ui.widget('fast_field', {
 	},
 })
 
+//// HELP --------------------------------------------------------------------
+
 function make_help_lines(horiz) {
 	return [
 		'Move',
@@ -150,6 +154,7 @@ function make_help_lines(horiz) {
 		'',
 		'Enter: Edit mode on/off',
 		'F2: Vertical edit mode on/off',
+		'Shift+F2: Edit row in a form',
 		'Ctrl+Enter: Quick-edit mode on/off',
 		'Ctrl+\u2190\u2191\u2192\u2193: Quick-edit mode move',
 		'Esc: Cancel the edit',
@@ -238,7 +243,11 @@ function build_help(id, target_i, help_lines) {
 	ui.end_popup()
 }
 
+//// GRID --------------------------------------------------------------------
+
 function init(id, e) {
+
+	/// config ----------------------------------------------------------------
 
 	e.cell_border_v_width = 0
 	e.cell_border_h_width = 1
@@ -249,11 +258,13 @@ function init(id, e) {
 	e.group_bar_visible ??= 'auto' // auto | always | no
 	e.filter_bar_visible ??= false
 
-	e.row_w    = ui.saved_state[id]?.row_w    ?? 12
-	e.header_w = ui.saved_state[id]?.header_w ?? 10
+	e.row_w    = ui.saved_state[id]?.row_w    ?? 12 // in em units
+	e.header_w = ui.saved_state[id]?.header_w ?? 10 // in em units
 
+	/// state -----------------------------------------------------------------
+
+	// layout
 	let horiz = !e.vertical_layout
-	let sel_change_no = e.sel_change_no // nav's stamp at the end of update()
 
 	// context-sensitive thus set on each frame
 	let sp
@@ -275,18 +286,14 @@ function init(id, e) {
 	// mouse state
 	let ps
 	let gcol_mover
-	let hit_zone // sort_icon, col_divider, header_divider, row_divider,
-	             // col, gcol, cell
+	let hit_zone // sort_icon, col_divider, header_divider, row_divider, col, gcol, cell
 	let drag_op  // col_move, col_group, row_move
 	let hit_vri // index in visible_ris
 	let hit_vfi // index in visible_fields
-	let hit_gcol // group-bar column name
+	let hit_gcol // hit column in group bar
 	let hit_indent
-	let row_move_state
-
-	let help_open
-	let filter_help_field
 	let clicked_indent
+	let row_move_state
 
 	function reset_mouse_state() {
 		hit_zone = null
@@ -304,56 +311,54 @@ function init(id, e) {
 	let focused, shift, ctrl
 	let keydown = key => focused && ui.keydown(key)
 
-	// The grid owns the editor widget; the nav decides which cell to edit.
+	// inline editing state
 	let edit_ri = null // edited row, or null when no editor is built
 	let edit_field = null // edited field
 	let editor_id = null // id of the editor widget
 	let editor_text_id = null // id of the built editor's text box, or null
 	let want_dropdown_open = false // open the editor's dropdown when built
 	let want_editor_focus = false // focus the editor when built
+	let editor_opt = {
+		no_box: true, min_w: null, text_align: null, open: false,
+	} // build_input() opt for the cell editor
 
-	// Where to scroll in build().
+	// scroll state
+	let sel_change_no = e.sel_change_no // nav's stamp at the end of update()
 	let scroll_to_vri = e.focused_vri()
 	let scroll_to_vfi = e.focused_vfi()
+
+	// help state
+	let help_open
+	let filter_help_field
+
+	// context menu state
+	let menu_id = id+'.menu' // menu widget id
+	let want_menu // right-click on a cell or the header this pass
+	let menu_items = null // menu commands, including null separators
+	let menu_field = null // column of the right-clicked header
+
+	// row form state
+	let row_form = null
+	let row_form_id = id+'.row_form'
+
+	// param state
+	let param_bar_vals = obj() // {param name -> value typed in the param bar}
+
+	// cells state
+	let CS = {}
+	// field.build() options, rewritten for each cell.
+	let build_opt = {fg: null, align: null, full_width: false, readonly: false}
+
+	/// helpers ---------------------------------------------------------------
 
 	function focused_field() {
 		return e.focused_fi != null ? e.all_fields[e.focused_fi] : null
 	}
 
-	function quicksearch_fi() {
-		return e.focused_fi
-			?? (e.quicksearch_col != null
-				? e.all_fields_map[e.quicksearch_col] : e.display_field)?.fi
-			?? null
-	}
-
-	function edit_text_selection() {
-		let field = focused_field()
-		if (!field.has_editor)
-			return [e.edit_sel_i, e.edit_sel_len]
-		if (!editor_text_id)
-			return [0, 1/0]
-		return ui.text_selection(editor_text_id,
-			e.field_align(field) == 'right', true)
-	}
-
-	function caret_at_edge(d) {
-		if (!editor_text_id)
-			return true
-		if (edit_text_selection()[1] == 1/0) // select-all
-			return true
-		let [i, len] = ui.text_selection(editor_text_id, d > 0)
-		return !len && i == (d < 0 ? 0 : -1)
-	}
-
-	// focus ------------------------------------------------------------------
-
 	e.scroll_to_cell = function(vri, vfi) {
 		scroll_to_vri = vri
 		scroll_to_vfi = vfi
 	}
-
-	// rows -------------------------------------------------------------------
 
 	function toggle_collapsed(ri, recursive) {
 		e.set_collapsed(ri, !e.is_collapsed(ri), recursive)
@@ -379,11 +384,6 @@ function init(id, e) {
 	}
 
 	/// context menu ----------------------------------------------------------
-
-	let menu_id = id+'.menu' // menu widget id
-	let want_menu // right-click on a cell or the header this pass
-	let menu_items = null // menu commands, including null separators
-	let menu_field = null // column of the right-clicked header
 
 	function update_menu_items() {
 		let ri = e.focused_ri // focused row index
@@ -497,96 +497,100 @@ function init(id, e) {
 		menu_items = items
 	}
 
-	function update_menu() {
-		if (ui.click)
-			help_open = false
-
-		// menu: act on the pick before e.build() builds the menu.
+	function update_menu_pick() {
 		let picked_item = ui.state_of(menu_id, 'picked_item')
-		if (picked_item?.id == 'expand_subtree')
-			e.set_collapsed(e.focused_ri, false, true)
-		else if (picked_item?.id == 'collapse_subtree')
-			e.set_collapsed(e.focused_ri, true, true)
-		else if (picked_item?.field)
-			e.showhide_field(picked_item.field,
-				ui.state_of(menu_id, 'picked_checked'),
-				e.focused_vfi(), {input: e})
-		else if (picked_item) {
-			let ri = e.focused_ri // focused row index
-			let field = focused_field() // focused field, or null
-			switch (picked_item.id) {
-				case 'sort_asc':
-				case 'sort_desc':
-				case 'sort_remove':
-					e.set_order_by_dir(menu_field,
-						picked_item.id == 'sort_asc' ? 'asc'
-						: picked_item.id == 'sort_desc' ? 'desc' : false,
-						true, {input: e})
-					break
-				case 'group_col':
-					e.set_group_cols([...e.group_cols, {
-						field: menu_field,
-						col_expr: menu_field.name,
-						group_level: (e.group_cols.at(-1)?.group_level ?? -1) + 1,
-					}], {input: e})
-					break
-				case 'ungroup_col':
-					e.ungroup_col(menu_field, null, {input: e})
-					break
-				case 'ungroup_all':
-					e.set_group_cols([], {input: e})
-					break
-				case 'hide_col':
-					e.showhide_field(menu_field, false, null, {input: e})
-					break
-				case 'copy_cell':
-					copy_to_clipboard(e.cell_text(ri, field.fi))
-					break
-				case 'edit_cell':
-					e.enter_edit()
-					break
-				case 'revert_cell':
-					e.revert_cell(ri, field.fi)
-					break
-				case 'select_all':
-					e.select_all_cells()
-					break
-				case 'set_null':
-					e.set_null_selected_cells({input: e})
-					break
-				case 'insert_row':
-					e.insert_rows([null], ri, {input: e, focus_it: true})
-					break
-				case 'delete_rows':
-					delete_rows(selected_ris())
-					break
-				case 'undelete_rows':
-					e.undelete_selected_rows({input: e})
-					break
-				case 'save':
-					e.save()
-					break
-				case 'revert_all':
-					if (confirm(S('revert_changes_confirmation',
-							'Are you sure you want to revert all changes?')))
-						e.revert_changes()
-					break
-				case 'filter_bar':
-					e.filter_bar_visible = ui.state_of(menu_id, 'picked_checked')
-					break
-				case 'clear_filters':
-					e.clear_col_filters()
-					break
-				case 'flat':
-					e.set_flat(ui.state_of(menu_id, 'picked_checked'))
-					break
-				case 'help':
-					help_open = true
-					break
-			}
+		if (!picked_item)
+			return
+
+		let ri = e.focused_ri
+		let field = focused_field()
+		switch (picked_item.id) {
+			case 'expand_subtree':
+				e.set_collapsed(ri, false, true)
+				break
+			case 'collapse_subtree':
+				e.set_collapsed(ri, true, true)
+				break
+			case 'sort_asc':
+			case 'sort_desc':
+			case 'sort_remove':
+				e.set_order_by_dir(menu_field,
+					picked_item.id == 'sort_asc' ? 'asc'
+					: picked_item.id == 'sort_desc' ? 'desc' : false,
+					true, {input: e})
+				break
+			case 'group_col':
+				e.set_group_cols([...e.group_cols, {
+					field: menu_field,
+					col_expr: menu_field.name,
+					group_level: (e.group_cols.at(-1)?.group_level ?? -1) + 1,
+				}], {input: e})
+				break
+			case 'ungroup_col':
+				e.ungroup_col(menu_field, null, {input: e})
+				break
+			case 'ungroup_all':
+				e.set_group_cols([], {input: e})
+				break
+			case 'hide_col':
+				e.showhide_field(menu_field, false, null, {input: e})
+				break
+			case 'copy_cell':
+				copy_to_clipboard(e.cell_text(ri, field.fi))
+				break
+			case 'edit_cell':
+				e.enter_edit()
+				break
+			case 'revert_cell':
+				e.revert_cell(ri, field.fi)
+				break
+			case 'select_all':
+				e.select_all_cells()
+				break
+			case 'set_null':
+				e.set_null_selected_cells({input: e})
+				break
+			case 'insert_row':
+				e.insert_rows([null], ri, {input: e, focus_it: true})
+				break
+			case 'delete_rows':
+				delete_rows(selected_ris())
+				break
+			case 'undelete_rows':
+				e.undelete_selected_rows({input: e})
+				break
+			case 'save':
+				e.save()
+				break
+			case 'revert_all':
+				if (confirm(S('revert_changes_confirmation',
+						'Are you sure you want to revert all changes?')))
+					e.revert_changes()
+				break
+			case 'filter_bar':
+				e.filter_bar_visible = ui.state_of(menu_id, 'picked_checked')
+				break
+			case 'clear_filters':
+				e.clear_col_filters()
+				break
+			case 'flat':
+				e.set_flat(ui.state_of(menu_id, 'picked_checked'))
+				break
+			case 'help':
+				help_open = true
+				break
+			default:
+				if (picked_item.field)
+					e.showhide_field(picked_item.field,
+						ui.state_of(menu_id, 'picked_checked'),
+						e.focused_vfi(), {input: e})
 		}
-		if (picked_item && ui.state_of(menu_id, 'open'))
+		if (ui.state_of(menu_id, 'open'))
 			update_menu_items()
+	}
+
+	function update_menu() {
+		update_menu_pick()
 		if (!ui.state_of(menu_id, 'open')
 			&& ui.focus_inside(menu_id)
 		)
@@ -613,7 +617,26 @@ function init(id, e) {
 		}
 	}
 
-	// editing ----------------------------------------------------------------
+	/// editing ---------------------------------------------------------------
+
+	function edit_text_selection() {
+		let field = focused_field()
+		if (!field.has_editor)
+			return [e.edit_sel_i, e.edit_sel_len]
+		if (!editor_text_id)
+			return [0, 1/0]
+		return ui.text_selection(editor_text_id,
+			e.field_align(field) == 'right', true)
+	}
+
+	function caret_at_edge(d) {
+		if (!editor_text_id)
+			return true
+		if (edit_text_selection()[1] == 1/0) // select-all
+			return true
+		let [i, len] = ui.text_selection(editor_text_id, d > 0)
+		return !len && i == (d < 0 ? 0 : -1)
+	}
 
 	function is_editor_focused() {
 		return editor_id != null
@@ -675,9 +698,184 @@ function init(id, e) {
 		}
 	}
 
-	function field_has_indent(field) {
-		return field == e.tree_field
+	/// row form --------------------------------------------------------------
+
+	function group_form_fields(fields, attr, order) {
+		let groups = new Map()
+		for (let field of fields) {
+			let name = field[attr] ?? ''
+			let group = groups.get(name)
+			if (!group) {
+				group = {name: name, fields: []}
+				groups.set(name, group)
+			}
+			group.fields.push(field)
+		}
+		let ordered_groups = []
+		for (let name of words(order ?? '')) {
+			let group = groups.get(name)
+			if (group) {
+				ordered_groups.push(group)
+				groups.delete(name)
+			}
+		}
+		let unnamed_group = groups.get('')
+		groups.delete('')
+		for (let group of groups.values())
+			ordered_groups.push(group)
+		if (unnamed_group)
+			ordered_groups.push(unnamed_group)
+		return ordered_groups
 	}
+
+	function open_row_form() {
+		let fields = e.all_fields.filter(field =>
+			!field.internal && !field.is_group_field
+			&& (!field.readonly || field.section || field.tab))
+		if (!fields.some(field => e.can_change_val(e.focused_ri, field.fi)))
+			return
+		e.exit_edit()
+		let tabs = group_form_fields(fields, 'tab', e.tabs)
+		for (let tab of tabs) {
+			tab.id = row_form_id+'.tab.'+tab.name
+			tab.sections = group_form_fields(tab.fields, 'section', e.sections)
+			for (let section of tab.sections)
+				section.inputs = section.fields.map(field => {
+					let input = {
+						id: row_form_id+'.input.'+field.name,
+						nav: e, col: field.name, label_pos: 'left',
+					}
+					if (field.control == 'code_edit') {
+						input.min_w = ui.em(ui.input_min_w_em)
+						input.min_h = 5 * round(ui.em(1) * 1.5) + 1
+					}
+					return input
+				})
+		}
+		let layout = {
+			tabs: tabs.map(tab => ({
+				id: tab.id, title: tab.name || S('other', 'Other'), live: true,
+			})),
+		}
+		row_form = {fields: e.all_fields, tabs: tabs, layout: layout}
+	}
+
+	function build_row_form_tab(dock_tab) {
+		let tab = row_form.tabs.find(tab => tab.id == dock_tab.id)
+		if (tab.fields.length == 1 && tab.fields[0].control == 'code_edit') {
+			let input = tab.sections[0].inputs[0]
+			let field = tab.fields[0]
+			let ri = e.focused_ri
+			let focus_id = input.id+'.focus_group'
+			ui.code_edit_update_value(input.id)
+			if (ui.focus_inside(focus_id) && ui.keydown('escape')) {
+				e.revert_cell(ri, field.fi)
+				ui.capture_keys()
+			}
+			let value = ui.interaction_value(input.id)
+			if (value !== undefined)
+				e.set_cell_val(ri, field.fi, value, {input: e})
+			ui.p(ui.sp4())
+			ui.v(1, ui.sp05(), 's', 's')
+				ui.h(0, ui.sp2(), 's', 'c')
+					ui.label(input.id, field.label, 1, 's', 'c')
+					ui.v(0, ui.sp05(), 'r', 'c')
+						let errors = e.cell_errors[field.fi]?.[ri] ?? empty_array
+						for (let result of errors) {
+							if (!result.failed)
+								continue
+							ui.small()
+							ui.color('error-text')
+							ui.text('', result.error, 0, 'r', 'c')
+						}
+					ui.end_v()
+				ui.end_h()
+				ui.focus_group(null, null, focus_id)
+					field.build_input(input.id, e.cell_input_val(ri, field.fi),
+						input, field.control, !e.can_change_val(ri, field.fi))
+				ui.end_focus_group()
+			ui.end_v()
+			return
+		}
+		ui.sb_max_wh(ui.em(36), ui.em(30))
+		ui.p(ui.sp4())
+		ui.sb(tab.id+'.inputs', 1, 'auto', 'auto')
+			ui.min_w(ui.em(20))
+			ui.v_aligned(0, ui.sp2(), 'l', 't')
+				ui.h(0)
+					ui.min_w(ui.em(10))
+					ui.box()
+				ui.end_h()
+				for (let section of tab.sections) {
+					if (section.name || tab.sections.length > 1) {
+						ui.color('faint')
+						ui.xlarge()
+						ui.text('', section.name || S('other', 'Other'))
+					}
+					for (let input of section.inputs)
+						ui.nav_input(input.id, input, 1, 'l')
+				}
+			ui.end_v_aligned()
+		ui.end_sb()
+	}
+
+	function build_row_form(target_i) {
+		if (!row_form)
+			return
+		if (e.focused_ri == null || row_form.fields != e.all_fields) {
+			row_form = null
+			return
+		}
+
+		let tabs = row_form.tabs
+		let save, cancel
+		let resizer_id = row_form_id+'.resizer'
+		ui.popup(row_form_id, 'modal', target_i, 'ic', 'c', 'constrain')
+			ui.shadow('modal')
+			ui.bb('bg', null, 1, 'light')
+			ui.focus_group(true, null, row_form_id)
+			ui.min_wh(
+				ui.state_of(resizer_id, 'w'),
+				ui.state_of(resizer_id, 'h'))
+			ui.stack()
+				ui.v(1, ui.sp2(), 's', 's')
+					if (tabs.length > 1)
+						ui.dock(row_form_id+'.dock', row_form.layout,
+							build_row_form_tab, {
+								can_add_remove_tabs: false,
+								can_change_layout: false,
+								save_layout: false,
+								strip_max_w: ui.em(60),
+							})
+					else if (tabs.length)
+						build_row_form_tab(tabs[0])
+					ui.p(0, 0, ui.sp2(), ui.sp2())
+					ui.h(0, ui.sp(), 'r')
+						ui.default_button(row_form_id+'.save')
+						ui.cancel_button(row_form_id+'.cancel')
+						save = ui.primary_button(row_form_id+'.save',
+							'device-floppy', S('save', 'Save'))
+						cancel = ui.button(row_form_id+'.cancel',
+							'x', S('cancel', 'Cancel'))
+					ui.end_h()
+				ui.end_v()
+				ui.resizer(resizer_id, 'lrtb', null, null, true)
+			ui.end_stack()
+			ui.end_focus_group()
+		ui.end_popup()
+		ui.focus_first(row_form_id)
+
+		if (save || cancel) {
+			if (save)
+				e.save()
+			else
+				e.revert_row(e.focused_ri)
+			row_form = null
+			ui.focus(id)
+		}
+	}
+
+	/// column header ---------------------------------------------------------
 
 	function sort_icon_w(field) {
 		return field.sortable ? 2 * sp2 : 0
@@ -699,664 +897,11 @@ function init(id, e) {
 		return clamp(w, col_min_w(field), field.max_w * font_size)
 	}
 
-	function build_header_label(field, align, max_w, fg) {
-		if (field.icon) {
-			ui.h(1, sp, align, 'c')
-				ui.min_w(font_size)
-				ui.color(fg)
-				ui.icon('', field.icon, 0, 'c', 'c')
-				ui.color(fg)
-				ui.text('', field.label, 1, align, 'c', max_w == null
-					? null : max(0, max_w - get_header_icon_w(field)))
-			ui.end_h()
-		} else {
-			ui.color(fg)
-			ui.text('', field.label, 1, align, 'c', max_w)
-		}
-	}
-
 	function clamp_vertical_w(w) {
 		return clamp(w, 2 * font_size, 50 * font_size)
 	}
 
-	function filter_box_id(field) {
-		return id+'.filter.'+field.name
-	}
-
-	function build_filter_cell(field) {
-		if (horiz) {
-			ui.m(field._x, 0, 0, 0)
-			ui.min_w(field._w)
-		} else {
-			ui.m(0, field._y, 0, 0)
-			ui.min_wh(header_w, cell_h)
-		}
-		let cell_i = ui.stack('', 0, 'l', 't')
-			if (field == filter_help_field)
-				build_help(id+'.filter', cell_i,
-					field.filter_field.is_number_filter
-						? number_filter_help_lines : text_filter_help_lines)
-			ui.field_input(filter_box_id(field), field.filter,
-				{field: field.filter_field, w: 0})
-		ui.end_stack()
-	}
-
-	// param bar: the master toggles outside a dock tab, an input for each
-	// param that no binding fills, and a reload button that applies the
-	// values typed in the inputs.
-	let param_bar_vals = obj() // {param name -> value typed in the param bar}
-	function build_param_bar(has_inputs, has_master_toggles) {
-		ui.p(ui.sp2(), ui.sp05())
-		ui.h(0, sp, 's', 'c')
-			ui.bb('bg0', null, 'b', 'intense')
-			if (has_master_toggles)
-				build_master_toggles()
-			let has_invalid = false // a param input holds an invalid value
-			for (let field of e.param_bar_fields) {
-				let name = field.name
-				if (e.param_sources[name])
-					continue
-				let param_id = id+'.param.'+name
-				if (!(name in param_bar_vals))
-					param_bar_vals[name] = e.param_bar_val(name)
-				if (ui.field_input(param_id, param_bar_vals[name],
-						{field: field, label_pos: 'left'}, 0, 'l') === undefined)
-					has_invalid = true
-				// user's value this pass, or nothing
-				let v = ui.interaction_value(param_id)
-				if (v !== undefined)
-					param_bar_vals[name] = v
-			}
-			if (has_inputs)
-				if (ui.button(id+'.param_reload', 'reload', null, null,
-						null, null, null, has_invalid))
-					e.set_param_bar_vals(param_bar_vals)
-		ui.end_h()
-	}
-
-	function has_param_inputs() {
-		for (let field of e.param_bar_fields)
-			if (!e.param_sources[field.name])
-				return true
-		return false
-	}
-
-	function build_master_toggles() {
-		let frozen_vals = ui.saved_state[e.id+'.frozen_params'] ?? empty_obj
-		for (let param in e.master_rowset_names) {
-			if (param in frozen_vals)
-				continue
-			ui.master_toggle(id+'.master.'+param, e.master_rowset_names[param],
-				e.param_sources[param], e.params[param].label ?? param)
-		}
-	}
-
-	function indent_offset(indent) {
-		return floor(font_size * 1.5 + (font_size * 1.2) * indent)
-	}
-
-	let CS = {}
-	function cell_state(ri, field, vri, build_stage) {
-		let fi = field.fi
-		let input_val = e.cell_input_val(ri, fi)
-
-		let grid_focused = focused
-		let row_focused = e.focused_ri == ri
-		let field_focused = e.focused_fi == fi
-		let cell_focused = row_focused
-			&& (!e.cell_select_mode || field_focused)
-		let disabled = !e.can_focus_cell(ri, fi)
-		let is_new = e.is_new(ri)
-		let cell_invalid = e.cell_has_errors(ri, fi)
-		let modified = e.is_cell_modified(ri, fi)
-		let is_null = input_val == null
-		let is_empty = input_val === ''
-		let selected = e.is_cell_selected(ri, fi)
-		let editing = edit_ri == ri && edit_field == field
-
-		let bg, bgs
-
-		if (build_stage == 'col_move' || build_stage == 'row_move')
-			bg = 'bg2'
-		else if (build_stage == 'col_group')
-			bg = 'bg0'
-		if (editing) {
-			bg = 'input'
-			bgs = 'focused'
-		} else if (cell_invalid) {
-			bg = 'item'
-			bgs = grid_focused && cell_focused ? 'item-error item-focused' : 'item-error'
-		} else if (cell_focused) {
-			bg = 'item'
-			if (selected)
-				bgs = grid_focused
-					? 'item-focused item-selected focused'
-					: 'item-focused item-selected'
-			else
-				bgs = grid_focused
-					? 'item-focused focused'
-					: 'item-selected'
-		} else if (selected) {
-			bg = 'item'
-			bgs = grid_focused ? 'item-selected focused' : 'item-selected'
-		} else if (is_new) {
-			bg = 'item'
-			bgs = modified ? 'new modified' : 'new'
-		} else if (modified) {
-			bg = 'item'
-			bgs = 'modified'
-		} else if (row_focused) {
-			bg = 'row'
-			bgs = grid_focused ? 'item-focused focused' : 'item-focused'
-		}
-		if (!bg) {
-			if (e.is_group_row(ri))
-				bg = null
-			else if ((vri & 1) == 0)
-				bg = 'alt'
-			else
-				bg = 'bg'
-		}
-
-		let fg
-		if (build_stage == 'col_group')
-			fg = 'faint'
-		else if (is_null || is_empty || disabled)
-			fg = 'label'
-		else if (field.text_color)
-			fg = field.text_color(e, ri, input_val)
-		else
-			fg = 'text'
-
-		CS.input_val = input_val
-		CS.bg = bg
-		CS.bgs = bgs
-		CS.fg = fg
-		CS.editing = editing
-		CS.is_null = is_null
-		CS.is_empty = is_empty
-		CS.row_focused = row_focused
-		CS.field_focused = field_focused
-		CS.cell_focused = cell_focused
-		return CS
-	}
-
-	// field.build() options, rewritten for each cell.
-	let build_opt = {fg: null, align: null, full_width: false, readonly: false}
-	let editor_opt = {
-		no_box: true, w: null, text_align: null, open: false,
-	} // build_input() opt for the cell editor
-
-	function build_cell_at(a, ri, field, vri, vfi, x, y, w, h, build_stage) {
-
-		let cs = cell_state(ri, field, vri, build_stage)
-		let input_val = cs.input_val
-		let bg = cs.bg, bgs = cs.bgs, fg = cs.fg, editing = cs.editing
-		let row_focused = cs.row_focused
-		let field_focused = cs.field_focused
-
-		let hovering = hit_zone == 'cell' && hit_vri == vri && hit_vfi == vfi
-		let align = e.field_align(field)
-		let full_width = !build_stage
-			&& ((row_focused && field_focused) || hovering)
-			&& (align == 'left' || !field_has_indent(field))
-
-		let indent_x = 0
-		let collapsed
-		let has_children
-		if (field_has_indent(field)) {
-			indent_x = indent_offset(e.depth[ri])
-			has_children = e.has_children(ri)
-			if (has_children)
-				collapsed = e.is_collapsed(ri)
-			let s = row_move_state
-			if (s) {
-				// show minus sign on adopting parent.
-				if (ri == s.hit_parent_ri && collapsed == null)
-					collapsed = false
-
-				// shift indent on moving rows so it gets under the adopting parent.
-				if (build_stage == 'row_move')
-					indent_x += s.hit_indent_x - s.indent_x
-			}
-		}
-
-		// frame building
-		let sp2 = ui.sp2()
-		let cell_pad = field.no_cell_pad ? 0 : sp2 // left and right padding
-		let pad_l = cell_pad + indent_x
-		let pad_r = cell_pad
-
-		// render help
-		ui.m(x, y, 0, 0)
-		ui.min_wh(w, h)
-		let cell_i = ui.stack('', 0, 'l', 't')
-			if (full_width) {
-				let popup_align = align == 'right' ? ']s'
-					: align == 'center' ? 'cs' : '[s'
-				ui.popup('', null, cell_i, 'its', popup_align, 'hover_parent')
-			}
-			ui.bb(bg, bgs,
-				build_stage == 'col_move' ? (horiz ? 'lrb' : 'tb') : 'b', 'light')
-			if (help_open && !build_stage && row_focused && field_focused)
-				build_help(id, cell_i,
-					horiz ? horiz_help_lines : vertical_help_lines)
-
-			if (has_children) {
-				ui.p(indent_x - sp2, 0, sp2, 0)
-				ui.color(fg)
-				ui.icon('', collapsed ? 'square-plus' : 'square-minus-2')
-			}
-			if (!editing || build_stage || !field.has_editor) {
-				ui.p(pad_l, 0, pad_r, 0)
-				if (row_focused && e.quicksearch_text
-					&& field.fi == quicksearch_fi())
-					ui.mark_text(0, e.quicksearch_text.length)
-				build_opt.fg = fg
-				build_opt.align = align
-				build_opt.full_width = full_width
-				build_opt.readonly = !e.can_change_val(ri, field.fi)
-				if (field.is_group_field && e.is_group_row(ri)) {
-					build_opt.readonly = true
-					build_opt.full_width = true
-					ui.h(0, 0, align, 's')
-						let has_key = false
-						for (let group_col of e.group_cols) {
-							if (group_col.group_level != e.depth[ri])
-								continue
-							if (has_key) {
-								ui.color(fg)
-								ui.text('', ' / ', 0, 'l', 'c')
-							}
-							let field = group_col.field
-							let v = e.cell_input_val(ri, field.fi)
-							e.build_val(ri, field, v, build_opt)
-							has_key = true
-						}
-					ui.end_h()
-				} else {
-					e.build_val(ri, field, input_val, build_opt)
-				}
-				ui.p(0) // build_val() builds nothing for a value with no text!
-			}
-			if (editing && !build_stage && field.has_editor) {
-				ui.focus_group(true, null, editor_id)
-				ui.p(pad_l, 0, pad_r, 0)
-				editor_opt.w = w - pad_l - pad_r
-				editor_opt.text_align = align
-				editor_opt.open = want_dropdown_open
-				field.build_input(editor_id, input_val, editor_opt, field.control)
-				editor_text_id = ui.state_of(editor_id, 'text_id') ?? null
-				want_dropdown_open = false
-				if (want_editor_focus) {
-					if (editor_text_id)
-						ui.select_text(editor_text_id, e.edit_sel_i, e.edit_sel_len)
-					if (!ui.dropdown_opened(editor_id))
-						ui.focus(editor_text_id ?? editor_id, true)
-					want_editor_focus = false
-				}
-				ui.end_focus_group()
-			}
-			ui.p(0)
-			if (full_width)
-				ui.end_popup()
-		ui.end_stack()
-
-	}
-
-	let cell_rect
-	{
-	let r = [0, 0, 0, 0]
-	cell_rect = function(vri, vfi) {
-		let field = e.visible_fields[vfi]
-		let x, y, w
-		if (horiz) {
-			x = field._x
-			y = vri * cell_h
-			w = field._w
-		} else {
-			x = vri * row_w
-			y = field._y
-			w = row_w
-		}
-		r[0] = x
-		r[1] = y
-		r[2] = w
-		r[3] = cell_h
-		return r
-	}
-	}
-
-	function build_cell(a, vri, vfi, build_stage) {
-		let [x, y, w, h] = cell_rect(vri, vfi)
-		let ri    = e.visible_ris[vri]
-		let field = e.visible_fields[vfi]
-		build_cell_at(a, ri, field, vri, vfi, x, y, w, h, build_stage)
-	}
-
-	function build_cells_range(a, x0, y0, ris, vri1, vri2, vfi1, vfi2,
-		build_stage
-	) {
-
-		let hit_cell, foc_cell, foc_vri, foc_vfi
-
-		if (!build_stage) {
-
-			foc_vri = e.focused_vri()
-			foc_vfi = e.focused_vfi()
-
-			hit_cell = hit_zone == 'cell'
-				&& hit_vri >= vri1 && hit_vri <= vri2
-				&& hit_vfi >= vfi1 && hit_vfi <= vfi2
-
-			foc_cell = foc_vri != null && foc_vfi != null
-
-			// when foc_cell and hit_cell are the same, don't build them twice.
-			if (foc_cell && hit_cell && hit_vri == foc_vri && hit_vfi == foc_vfi)
-				foc_cell = null
-
-			// field index for highlighting the quicksearch text, or null
-			let qs_fi = e.quicksearch_text ? quicksearch_fi() : null
-
-			for (let vfi = vfi1; vfi < vfi2; vfi++) {
-				let field = e.visible_fields[vfi]
-				if (field._fast_build == null)
-					field._fast_build = field.build == ui.all_field_types.build
-						&& !field.lookup_nav && !field.null_lookup_col
-				field._fast_now = ui.GRID_FAST_PATH
-					&& field._fast_build
-					&& !field_has_indent(field)
-					&& vfi != hit_vfi
-					&& vfi != foc_vfi
-					&& field.fi != qs_fi
-			}
-		}
-
-		let skip_moving_col = drag_op == 'col_move' && build_stage == 'col'
-
-		for (let vri = vri1; vri < vri2; vri++) {
-
-			let ri = ris[vri]
-
-			let rx, ry, rw, rh
-			if (horiz) {
-				rx = x0
-				ry = vri * cell_h
-				rw = cells_w
-				rh = cell_h
-			} else {
-				rx = vri * row_w
-				ry = y0
-				rw = row_w
-				rh = cells_h
-			}
-
-			let row_is_foc = foc_cell && foc_vri == vri
-			let row_is_hit = hit_cell && hit_vri == vri
-
-			for (let vfi = vfi1; vfi < vfi2; vfi++) {
-				if (skip_moving_col && hit_vfi == vfi)
-					continue
-				if (row_is_hit && hit_vfi == vfi)
-					continue
-				if (row_is_foc && foc_vfi == vfi)
-					continue
-
-				let field = e.visible_fields[vfi]
-
-				if (!build_stage && field._fast_now)
-					continue
-
-				let x = horiz ? field._x : rx
-				let y = horiz ? ry : field._y
-				let w = horiz ? field._w : rw
-				let h = cell_h
-
-				build_cell_at(a, ri, field, vri, vfi, x, y, w, h, build_stage)
-			}
-
-		}
-
-		if (!build_stage) {
-			let sp2 = ui.sp2()
-			let m = ui.measure_text(cx, 'M')
-			let text_h = ceil(m.fontBoundingBoxAscent + m.fontBoundingBoxDescent)
-			let baseline = max(0, round((cell_h - text_h) / 2)) + round(m.fontBoundingBoxAscent)
-			for (let vfi = vfi1; vfi < vfi2; vfi++) {
-				let field = e.visible_fields[vfi]
-				if (!field._fast_now)
-					continue
-				let align = field.align || 'left'
-				let cmd_i = horiz
-					? ui.fast_field(field._x, vri1 * cell_h, field._w, cell_h,
-						0, cell_h, sp2, align, baseline, vri2 - vri1)
-					: ui.fast_field(vri1 * row_w, field._y, row_w, cell_h,
-						row_w, 0, sp2, align, baseline, vri2 - vri1)
-				for (let vri = vri1; vri < vri2; vri++) {
-					let ri = ris[vri]
-					let cs = cell_state(ri, field, vri, build_stage)
-					let fg = cs.fg
-					let text
-					if (cs.is_null) {
-						text = field.null_text ?? ''
-					} else if (cs.is_empty) {
-						text = field.empty_text ?? ''
-					} else {
-						text = field.to_text(cs.input_val)
-					}
-					ui.cmd_add_arg(cs.bg)
-					ui.cmd_add_arg(cs.bgs)
-					ui.cmd_add_arg(fg)
-					ui.cmd_add_arg(text)
-				}
-				ui.cmd_end(cmd_i)
-			}
-		}
-
-		if (foc_cell
-			&& foc_vri >= vri1 && foc_vri < vri2
-			&& foc_vfi >= vfi1 && foc_vfi <= vfi2
-		) {
-			build_cell(a, foc_vri, foc_vfi, build_stage)
-		}
-
-		// hit_cell can overlap foc_cell, so we build it after it.
-		if (hit_cell
-			&& hit_vri >= vri1 && hit_vri < vri2
-			&& hit_vfi >= vfi1 && hit_vfi <= vfi2
-		) {
-			build_cell(a, hit_vri, hit_vfi, build_stage)
-		}
-
-		// strike rows marked for deletion after all their cells, so that no
-		// cell background covers the line.
-		for (let vri = vri1; vri < vri2; vri++) {
-			if (!e.is_removed(ris[vri]))
-				continue
-			if (horiz)
-				build_row_strike_line(x0, vri * cell_h, cells_w, cell_h)
-			else
-				build_row_strike_line(vri * row_w, y0, row_w, cells_h)
-		}
-
-	}
-
-	// a 1px line through the middle of a row.
-	function build_row_strike_line(x, y, w, h) {
-		if (horiz) {
-			ui.m(x, y + floor(h / 2), 0, 0)
-			ui.min_wh(w, 1)
-		} else {
-			ui.m(x + floor(w / 2), y, 0, 0)
-			ui.min_wh(1, h)
-		}
-		ui.stack('', 0, 'l', 't')
-			ui.bb('text')
-		ui.end_stack()
-	}
-
-	function on_cellview_frame(a, _i, x, y, w, h, vx, vy, vw, vh) {
-
-		let sx = vx - x
-		let sy = vy - y
-
-		// find the visible row range
-
-		let rn // number of rows fully or partially in the viewport.
-		let vri1, vri2 // visible row range.
-		if (horiz) {
-			page_row_count = floor(vh / cell_h)
-			vri1 = floor(sy / cell_h)
-		} else {
-			page_row_count = floor(vw / row_w)
-			vri1 = floor(sx / row_w)
-		}
-		rn = page_row_count + 2 // 2 is right, think it!
-		vri2 = vri1 + rn
-		vri1 = max(0, min(vri1, e.visible_n - 1))
-		vri2 = max(0, min(vri2, e.visible_n))
-
-		// find the visible field range
-
-		let vfi1, vfi2 // visible field range.
-		if (horiz) {
-			for (let field of e.visible_fields) {
-				let fx = field._x + x
-				let fw = field._w
-				if (vfi1 == null && fx + fw >= vx)
-					vfi1 = field.vfi
-				if (vfi2 == null && fx > vx + vw)
-					vfi2 = field.vfi
-			}
-		} else {
-			for (let field of e.visible_fields) {
-				let fy = field._y + y
-				if (vfi1 == null && fy + cell_h >= vy)
-					vfi1 = field.vfi
-				if (vfi2 == null && fy > vy + vh)
-					vfi2 = field.vfi
-			}
-		}
-		vfi2 = vfi2 ?? e.visible_fields.length
-
-		let bx = e.cell_border_v_width
-		let by = e.cell_border_h_width
-
-		// build cells
-
-		ui.stack(id+'.cells')
-		ui.measure(id+'.cells')
-
-		x = bx + sx
-		y = by + sy
-
-		if (drag_op == 'row_move') {
-			// build fixed rows first and moving rows above them.
-			let s = row_move_state
-			build_cells_range(a, x, y, e.visible_ris, s.vri1, s.vri2, vfi1, vfi2, 'row')
-			// TODO: build_cells_range(s.rows, s.move_vri1, s.move_vri2, vfi1, vfi2, 'row_move')
-		} else if (drag_op == 'col_move' || drag_op == 'col_group') {
-			// build fixed cols first and moving cols above them.
-			build_cells_range(a, x, y, e.visible_ris, vri1, vri2, vfi1, vfi2, 'col')
-			build_cells_range(a, x, y, e.visible_ris, vri1, vri2,	hit_vfi, hit_vfi + 1, drag_op)
-		} else {
-			build_cells_range(a, x, y, e.visible_ris, vri1, vri2, vfi1, vfi2)
-		}
-
-		ui.end_stack()
-
-	}
-
-	// render grid ------------------------------------------------------------
-
-	function group_bar_h() {
-		let sp2 = ui.sp2()
-		let levels = e.group_cols.at(-1)?.group_level ?? 0
-		return 2 * sp2 + gcol_h + levels * sp2 + 2
-	}
-
-	e.update = function() {
-
-		let s = ui.state(id)
-		s.picked = false
-		s.interaction_value = undefined
-		let has_input = false
-
-		// set keyboard state
-		focused = ui.focused(id) || ui.focused(editor_text_id || editor_id)
-		shift = ui.keypressed('shift')
-		ctrl  = ui.keypressed('ctrl')
-
-		let grid_cols =
-			keydown(horiz ? 'arrowleft'  : 'arrowup'  ) && -1 ||
-			keydown(horiz ? 'arrowright' : 'arrowdown') &&  1
-
-		let grid_rows =
-			keydown(horiz ? 'arrowup'   : 'arrowleft' ) && -1 ||
-			keydown(horiz ? 'arrowdown' : 'arrowright') &&  1 ||
-			(ctrl && (keydown('home') || keydown('pageup'  ))) && -1/0 ||
-			(ctrl && (keydown('end' ) || keydown('pagedown'))) &&  1/0
-
-		if ((grid_cols || grid_rows) && is_edit_built() && edit_field.has_editor) {
-			let can_move = e.auto_jump_cells && !shift
-			let caret_dir = horiz ? grid_cols : grid_rows
-			if (can_move && caret_dir)
-				can_move = ctrl && caret_at_edge(caret_dir)
-			if (!can_move) {
-				grid_cols = null
-				grid_rows = null
-			}
-		}
-		let grid_enter = ctrl && keydown('enter')
-
-		// capture arrows before a drodpown editor takes them to change cell value.
-		if (grid_cols || grid_rows || grid_enter)
-			ui.capture_keys()
-
-		if (is_edit_built()) {
-			let value = ui.interaction_value(editor_id)
-			if (value !== undefined)
-				e.set_cell_val(edit_ri, edit_field.fi, value, {input: e})
-		}
-
-		for (let param in e.master_rowset_names) {
-			let master_id = ui.interaction_value(id+'.master.'+param)
-			if (master_id !== undefined)
-				ui.set_master_id(e.id, param, master_id)
-		}
-
-		let filter_focused_field = null
-		if (e.filter_bar_visible && e.can_filter())
-			for (let field of e.visible_fields) {
-				let filter_text = ui.interaction_value(filter_box_id(field))
-				if (filter_text !== undefined)
-					e.set_col_filter(field.fi, filter_text)
-				if (ui.focused(filter_box_id(field)))
-					filter_focused_field = field
-			}
-		if (filter_focused_field != filter_help_field || ui.click)
-			filter_help_field = null
-		if (filter_focused_field && ui.keydown('f1')) {
-			filter_help_field = filter_help_field ? null : filter_focused_field
-			ui.capture_keys()
-		} else if (filter_help_field && ui.keydown('escape')) {
-			filter_help_field = null
-			ui.capture_keys()
-		}
-
-		update_menu()
-
-		if (e.editing
-				&& !ui.focused(id)
-				&& !ui.focused(editor_id)
-				&& !ui.focus_inside(id+'.cells')
-			)
-			e.exit_edit()
-
-		// check mouse state ---------------------------------------------------
-
-		reset_mouse_state()
-
+	function update_header() {
 		// hover or click on sort icons from colum header
 		for (let field of e.visible_fields) {
 			let icon_id = id+'.sort_icon.'+field.name
@@ -1478,7 +1023,149 @@ function init(id, e) {
 			}
 
 		}
+	}
 
+	function build_header_label(field, align, max_w, fg) {
+		if (field.icon) {
+			ui.h(1, sp, align, 'c')
+				ui.min_w(font_size)
+				ui.color(fg)
+				ui.icon('', field.icon, 0, 'c', 'c')
+				ui.color(fg)
+				ui.text('', field.label, 1, align, 'c', max_w == null
+					? null : max(0, max_w - get_header_icon_w(field)))
+			ui.end_h()
+		} else {
+			ui.color(fg)
+			ui.text('', field.label, 1, align, 'c', max_w)
+		}
+	}
+
+	function build_header_cell(field, noclip) {
+		let w, h
+		if (horiz) {
+			ui.m(field._x, 0, 0, 0)
+			w = field._w
+			h = header_h
+		} else {
+			ui.m(0, field._y, 0, 0)
+			w = header_w
+			h = cell_h
+		}
+		ui.p(sp2, 0)
+		ui.min_wh(w - 2 * sp2, h)
+		ui.h(0, sp, 'l', 't')
+
+			let col_move  = drag_op == 'col_move'  && hit_vfi == field.vfi
+			let col_group = drag_op == 'col_group' && hit_gcol == field.name
+
+			ui.bb(
+				col_move ? 'bg2' : col_group ? 'bg0' : 'bg1', null,
+				col_move ? (horiz ? 'blr' : 'tbr') : 'br', 'intense')
+
+			let max_min_w = noclip ? null
+				: max(0, w - 2 * sp2 - sort_icon_w(field))
+			let dir = field.sort_i == null ? null
+				: field.sort_desc ? 'desc' : 'asc'
+			let pri = field.sort_i
+			let align, is_right_aligned
+			if (horiz) {
+				align = e.field_align(field)
+				is_right_aligned = align == 'right'
+			} else {
+				align = e.header_align
+				is_right_aligned = align == 'r'
+			}
+
+			if (!is_right_aligned) {
+				build_header_label(field, align, max_min_w,
+					col_group ? 'faint' : null)
+			}
+
+			let icon_id = id+'.sort_icon.'+field.name
+
+			if (field.sortable) {
+				if (e.visible_n > 1 || dir) {
+					ui.color(dir && !col_group ? 'label' : 'faint',
+						!col_group && hit_zone == 'sort_icon'
+							&& hit_vfi == field.vfi ? 'hover' : null)
+					ui.icon(icon_id,
+						dir == 'asc' && (pri ? 'sort-ascending'  : 'sort-ascending' ) ||
+						dir          && (pri ? 'sort-descending' : 'sort-descending') ||
+						'arrows-sort'
+					, 0)
+				} else {
+					ui.min_w(ui.em(1))
+					ui.box()
+				}
+			}
+
+			if (is_right_aligned) {
+				build_header_label(field, align, max_min_w,
+					col_group ? 'faint' : null)
+			}
+
+		ui.end_h()
+	}
+
+	function build_header(header_overflow) {
+		if (horiz)
+			ui.scrollbox(id+'.header', 0,
+				header_overflow, 'contain',
+				null, null, null, null, id+'.cells_scrollbox')
+		else
+			ui.scrollbox(id+'.header', 0,
+				'contain', header_overflow,
+				null, null, null, null, null, id+'.cells_scrollbox')
+
+			ui.stack(id+'.header')
+			ui.measure(id+'.header')
+
+				let col_move = drag_op == 'col_move'
+
+				ui.bb('bg1', null, horiz ? 'b' : 'r', 'intense')
+				for (let field of e.visible_fields) {
+					if (col_move && hit_vfi === field.vfi)
+						continue
+					build_header_cell(field)
+				}
+				if (col_move) {
+					let field = e.visible_fields[hit_vfi]
+					build_header_cell(field)
+				}
+
+				// group column drop arrows
+
+				if (gcol_mover?.drop_pos != null) {
+					let x = e.visible_fields[gcol_mover.drop_pos]?._x ?? cells_w
+					ui.ml(x)
+					ui.min_h(header_h)
+					ui.stack('', 0, 'l', 't')
+						ui.popup('', 'overlay', null, 't', 'c')
+							ui.color('marker')
+							ui.icon('', 'arrow-down')
+						ui.end_popup()
+						ui.popup('', 'overlay', null, 'b', 'c')
+							ui.color('marker')
+							ui.icon('', 'arrow-up')
+						ui.end_popup()
+					ui.end_stack()
+				}
+
+			ui.end_stack()
+
+		ui.end_scrollbox()
+	}
+
+	/// group bar -------------------------------------------------------------
+
+	function group_bar_h() {
+		let sp2 = ui.sp2()
+		let levels = e.group_cols.at(-1)?.group_level ?? 0
+		return 2 * sp2 + gcol_h + levels * sp2 + 2
+	}
+
+	function update_group_bar() {
 		// drag column vertically towards group-bar => column move to group
 		let col_group_start
 		if (horiz && hit_zone == 'col' && !drag_op && ps.dragging && !ps.drop
@@ -1685,6 +1372,781 @@ function init(id, e) {
 			}
 
 		}
+	}
+
+	function build_group_bar() {
+		if (horiz && (
+			e.group_bar_visible == 'always'
+			|| e.group_bar_visible == 'auto' && e.group_cols.length
+			|| drag_op == 'col_group'
+		)) {
+
+			ui.min_h(group_bar_h())
+			let group_bar_i = ui.sb(id+'.group_bar', 0, 'hide', 'hide', 's', 't')
+				ui.bb('bg2', null, 'b', 'light')
+
+				let mover = gcol_mover
+
+				for (let gcol of mover?.gcols ?? e.group_cols) {
+
+					let col = gcol.field.name
+					let x = gcol.group_i * (gcol_w + 1)
+					let y = gcol.group_level * sp2
+					let w = gcol_w
+					let h = gcol_h
+
+					if (mover) {
+						let vi = mover.is[gcol.group_i]
+						let level = col == hit_gcol ? mover.drop_level : mover.levels[vi]
+						x = mover.xs[gcol.group_i]
+						y = level * sp2
+						if (col == hit_gcol) {
+							if (mover.drop_level == null) {
+								// dragging outside the columns area
+								x = mover.x0 + ps.dx
+								y = mover.y0 + ps.dy
+							} else {
+								let place_x = vi * (w + 1)
+								ui.m(sp2 + place_x - 1, sp2 + y - 1, 0, 0)
+								ui.min_wh(w + 2, h + 2)
+								ui.stack('', 0, 'l', 't')
+									ui.border(1, 'marker', null, 0, 'dashes')
+								ui.end_stack()
+								x = mover.x0 + ps.dx
+								y = mover.y0 + ps.dy
+							}
+						}
+					}
+
+					if (mover && col == hit_gcol) {
+						ui.popup(id+'.moving_gcol_popup', 'drag', group_bar_i, 'il', '[')
+						ui.nohit()
+					}
+
+					let col_id = id+'.gcol.'+col
+					let field = gcol.field
+					ui.m(sp2 + x, sp2 + y, 0, 0)
+					ui.min_wh(w, h)
+					ui.stack(col_id, 1, 'l', 't')
+						let bgs = hit_gcol == col && (
+							!ps.dragging || ps.drop ? 'hover'
+								: hit_zone != 'sort_icon' ? 'active' : 'hover'
+							) || null
+						ui.bb('bg1', bgs, 1, 'intense')
+						ui.p(sp2, ui.sp075())
+						ui.h(1, sp)
+
+							build_header_label(field, 'l', 0)
+
+							// sort icon
+							let icon_id = id+'.sort_icon.'+col
+							if (field.sortable) {
+								let dir = field.sort_i == null ? null
+									: field.sort_desc ? 'desc' : 'asc'
+								ui.color(dir ? 'label' : 'faint',
+									(hit_zone == 'sort_icon' && hit_gcol == col) ? 'hover' : null)
+								let pri = field.sort_i
+								ui.icon(icon_id,
+									dir == 'asc' && (pri ? 'sort-ascending'  : 'sort-ascending' ) ||
+									dir          && (pri ? 'sort-descending' : 'sort-descending') ||
+									'arrows-sort'
+								, 0)
+							}
+						ui.end_h()
+					ui.end_stack()
+
+					if (mover && col == hit_gcol)
+						ui.end_popup()
+
+				}
+
+			ui.end_sb()
+
+		}
+	}
+
+	/// filter bar ------------------------------------------------------------
+
+	function filter_box_id(field) {
+		return id+'.filter.'+field.name
+	}
+
+	function update_filter_bar() {
+		let filter_focused_field = null
+		if (e.filter_bar_visible && e.can_filter())
+			for (let field of e.visible_fields) {
+				let filter_text = ui.interaction_value(filter_box_id(field))
+				if (filter_text !== undefined)
+					e.set_col_filter(field.fi, filter_text)
+				if (ui.focused(filter_box_id(field)))
+					filter_focused_field = field
+			}
+		if (filter_focused_field != filter_help_field || ui.click)
+			filter_help_field = null
+		if (filter_focused_field && ui.keydown('f1')) {
+			filter_help_field = filter_help_field ? null : filter_focused_field
+			ui.capture_keys()
+		} else if (filter_help_field && ui.keydown('escape')) {
+			filter_help_field = null
+			ui.capture_keys()
+		}
+	}
+
+	function build_filter_cell(field) {
+		if (horiz) {
+			ui.m(field._x, 0, 0, 0)
+			ui.min_w(field._w)
+		} else {
+			ui.m(0, field._y, 0, 0)
+			ui.min_wh(header_w, cell_h)
+		}
+		let cell_i = ui.stack('', 0, 'l', 't')
+			if (field == filter_help_field)
+				build_help(id+'.filter', cell_i,
+					field.filter_field.is_number_filter
+						? number_filter_help_lines : text_filter_help_lines)
+			ui.field_input(filter_box_id(field), field.filter,
+				{field: field.filter_field, min_w: 0})
+		ui.end_stack()
+	}
+
+	function build_filter_bar(header_overflow) {
+		if (e.filter_bar_visible && e.can_filter()) {
+			if (horiz)
+				ui.scrollbox(id+'.filter_bar', 0,
+					header_overflow, 'contain',
+					null, null, null, null, id+'.cells_scrollbox')
+			else
+				ui.scrollbox(id+'.filter_bar', 0,
+					'contain', header_overflow,
+					null, null, null, null, null, id+'.cells_scrollbox')
+
+				ui.stack('')
+					ui.bb('bg1', null, horiz ? 'b' : 'r', 'intense')
+					for (let field of e.visible_fields)
+						build_filter_cell(field)
+				ui.end_stack()
+
+			ui.end_scrollbox()
+		}
+	}
+
+	/// parameter bar ---------------------------------------------------------
+
+	function has_param_inputs() {
+		for (let field of e.param_bar_fields)
+			if (!e.param_sources[field.name])
+				return true
+		return false
+	}
+
+	function build_master_toggles() {
+		let frozen_vals = ui.saved_state[e.id+'.frozen_params'] ?? empty_obj
+		for (let param in e.master_rowset_names) {
+			if (param in frozen_vals)
+				continue
+			ui.master_toggle(id+'.master.'+param, e.master_rowset_names[param],
+				e.param_sources[param], e.params[param].label ?? param)
+		}
+	}
+
+	// param bar: the master toggles outside a dock tab, an input for each
+	// param that no binding fills, and a reload button that applies the
+	// values typed in the inputs.
+	function build_param_bar(has_inputs, has_master_toggles) {
+		ui.p(ui.sp2(), ui.sp05())
+		ui.h(0, sp, 's', 'c')
+			ui.bb('bg0', null, 'b', 'intense')
+			if (has_master_toggles)
+				build_master_toggles()
+			let has_invalid = false // a param input holds an invalid value
+			for (let field of e.param_bar_fields) {
+				let name = field.name
+				if (e.param_sources[name])
+					continue
+				let param_id = id+'.param.'+name
+				if (!(name in param_bar_vals))
+					param_bar_vals[name] = e.param_bar_val(name)
+				if (ui.field_input(param_id, param_bar_vals[name],
+						{field: field, label_pos: 'left'}, 0, 'l') === undefined)
+					has_invalid = true
+				// user's value this pass, or nothing
+				let v = ui.interaction_value(param_id)
+				if (v !== undefined)
+					param_bar_vals[name] = v
+			}
+			if (has_inputs)
+				if (ui.button(id+'.param_reload', 'reload', null, null,
+						null, null, null, has_invalid))
+					e.set_param_bar_vals(param_bar_vals)
+		ui.end_h()
+	}
+
+	/// cells -----------------------------------------------------------------
+
+	function quicksearch_fi() {
+		return e.focused_fi
+			?? (e.quicksearch_col != null
+				? e.all_fields_map[e.quicksearch_col] : e.display_field)?.fi
+			?? null
+	}
+
+	function field_has_indent(field) {
+		return field == e.tree_field
+	}
+
+	function indent_offset(indent) {
+		return floor(font_size * 1.5 + (font_size * 1.2) * indent)
+	}
+
+	let cell_rect
+	{
+	let r = [0, 0, 0, 0]
+	cell_rect = function(vri, vfi) {
+		let field = e.visible_fields[vfi]
+		let x, y, w
+		if (horiz) {
+			x = field._x
+			y = vri * cell_h
+			w = field._w
+		} else {
+			x = vri * row_w
+			y = field._y
+			w = row_w
+		}
+		r[0] = x
+		r[1] = y
+		r[2] = w
+		r[3] = cell_h
+		return r
+	}
+	}
+
+	function cell_state(ri, field, vri, build_stage) {
+		let fi = field.fi
+		let input_val = e.cell_input_val(ri, fi)
+
+		let grid_focused = focused
+		let row_focused = e.focused_ri == ri
+		let field_focused = e.focused_fi == fi
+		let cell_focused = row_focused
+			&& (!e.cell_select_mode || field_focused)
+		let disabled = !e.can_focus_cell(ri, fi)
+		let is_new = e.is_new(ri)
+		let cell_invalid = e.cell_has_errors(ri, fi)
+		let modified = e.is_cell_modified(ri, fi)
+		let is_null = input_val == null
+		let is_empty = input_val === ''
+		let selected = e.is_cell_selected(ri, fi)
+		let editing = edit_ri == ri && edit_field == field
+
+		let bg, bgs
+
+		if (build_stage == 'col_move' || build_stage == 'row_move')
+			bg = 'bg2'
+		else if (build_stage == 'col_group')
+			bg = 'bg0'
+		if (editing) {
+			bg = 'input'
+			bgs = 'focused'
+		} else if (cell_invalid) {
+			bg = 'item'
+			bgs = grid_focused && cell_focused ? 'item-error item-focused' : 'item-error'
+		} else if (cell_focused) {
+			bg = 'item'
+			if (selected)
+				bgs = grid_focused
+					? 'item-focused item-selected focused'
+					: 'item-focused item-selected'
+			else
+				bgs = grid_focused
+					? 'item-focused focused'
+					: 'item-selected'
+		} else if (selected) {
+			bg = 'item'
+			bgs = grid_focused ? 'item-selected focused' : 'item-selected'
+		} else if (is_new) {
+			bg = 'item'
+			bgs = modified ? 'new modified' : 'new'
+		} else if (modified) {
+			bg = 'item'
+			bgs = 'modified'
+		} else if (row_focused) {
+			bg = 'row'
+			bgs = grid_focused ? 'item-focused focused' : 'item-focused'
+		}
+		if (!bg) {
+			if (e.is_group_row(ri))
+				bg = null
+			else if ((vri & 1) == 0)
+				bg = 'alt'
+			else
+				bg = 'bg'
+		}
+
+		let fg
+		if (build_stage == 'col_group')
+			fg = 'faint'
+		else if (is_null || is_empty || disabled)
+			fg = 'label'
+		else if (field.text_color)
+			fg = field.text_color(e, ri, input_val)
+		else
+			fg = 'text'
+
+		CS.input_val = input_val
+		CS.bg = bg
+		CS.bgs = bgs
+		CS.fg = fg
+		CS.editing = editing
+		CS.is_null = is_null
+		CS.is_empty = is_empty
+		CS.row_focused = row_focused
+		CS.field_focused = field_focused
+		CS.cell_focused = cell_focused
+		return CS
+	}
+
+	function build_cell_at(a, ri, field, vri, vfi, x, y, w, h, build_stage) {
+
+		let cs = cell_state(ri, field, vri, build_stage)
+		let input_val = cs.input_val
+		let bg = cs.bg, bgs = cs.bgs, fg = cs.fg, editing = cs.editing
+		let row_focused = cs.row_focused
+		let field_focused = cs.field_focused
+
+		let hovering = hit_zone == 'cell' && hit_vri == vri && hit_vfi == vfi
+		let align = e.field_align(field)
+		let full_width = !build_stage
+			&& ((row_focused && field_focused) || hovering)
+			&& (align == 'left' || !field_has_indent(field))
+
+		let indent_x = 0
+		let collapsed
+		let has_children
+		if (field_has_indent(field)) {
+			indent_x = indent_offset(e.depth[ri])
+			has_children = e.has_children(ri)
+			if (has_children)
+				collapsed = e.is_collapsed(ri)
+			let s = row_move_state
+			if (s) {
+				// show minus sign on adopting parent.
+				if (ri == s.hit_parent_ri && collapsed == null)
+					collapsed = false
+
+				// shift indent on moving rows so it gets under the adopting parent.
+				if (build_stage == 'row_move')
+					indent_x += s.hit_indent_x - s.indent_x
+			}
+		}
+
+		let sp2 = ui.sp2()
+		let cell_pad = field.no_cell_pad ? 0 : sp2 // left and right padding
+		let pad_l = cell_pad + indent_x
+		let pad_r = cell_pad
+
+		ui.m(x, y, 0, 0)
+		ui.min_wh(w, h)
+		let cell_i = ui.stack('', 0, 'l', 't')
+			if (full_width) {
+				let popup_align = align == 'right' ? ']s'
+					: align == 'center' ? 'cs' : '[s'
+				ui.popup('', null, cell_i, 'its', popup_align, 'hover_parent')
+			}
+			ui.bb(bg, bgs,
+				build_stage == 'col_move' ? (horiz ? 'lrb' : 'tb') : 'b', 'light')
+			if (help_open && !build_stage && row_focused && field_focused)
+				build_help(id, cell_i,
+					horiz ? horiz_help_lines : vertical_help_lines)
+
+			if (has_children) {
+				ui.p(indent_x - sp2, 0, sp2, 0)
+				ui.color(fg)
+				ui.icon('', collapsed ? 'square-plus' : 'square-minus-2')
+			}
+
+			if (!editing || build_stage || !field.has_editor) {
+				ui.p(pad_l, 0, pad_r, 0)
+				if (row_focused && e.quicksearch_text
+					&& field.fi == quicksearch_fi())
+					ui.mark_text(0, e.quicksearch_text.length)
+				build_opt.fg = fg
+				build_opt.align = align
+				build_opt.full_width = full_width
+				build_opt.readonly = !e.can_change_val(ri, field.fi)
+				if (field.is_group_field && e.is_group_row(ri)) {
+					build_opt.readonly = true
+					build_opt.full_width = true
+					ui.h(0, 0, align, 's')
+						let has_key = false
+						for (let group_col of e.group_cols) {
+							if (group_col.group_level != e.depth[ri])
+								continue
+							if (has_key) {
+								ui.color(fg)
+								ui.text('', ' / ', 0, 'l', 'c')
+							}
+							let field = group_col.field
+							let v = e.cell_input_val(ri, field.fi)
+							e.build_val(ri, field, v, build_opt)
+							has_key = true
+						}
+					ui.end_h()
+				} else {
+					e.build_val(ri, field, input_val, build_opt)
+				}
+				ui.p(0) // build_val() builds nothing for a value with no text!
+			}
+
+			if (editing && !build_stage && field.has_editor) {
+				ui.focus_group(true, null, editor_id)
+				ui.p(pad_l, 0, pad_r, 0)
+				editor_opt.min_w = w - pad_l - pad_r
+				editor_opt.text_align = align
+				editor_opt.open = want_dropdown_open
+				field.build_input(editor_id, input_val, editor_opt, field.control)
+				editor_text_id = ui.state_of(editor_id, 'text_id') ?? null
+				want_dropdown_open = false
+				if (want_editor_focus) {
+					if (editor_text_id)
+						ui.select_text(editor_text_id, e.edit_sel_i, e.edit_sel_len)
+					if (!ui.dropdown_opened(editor_id))
+						ui.focus(editor_text_id ?? editor_id, true)
+					want_editor_focus = false
+				}
+				ui.end_focus_group()
+			}
+
+			ui.p(0)
+			if (full_width)
+				ui.end_popup()
+		ui.end_stack()
+
+	}
+
+	function build_cell(a, vri, vfi, build_stage) {
+		let [x, y, w, h] = cell_rect(vri, vfi)
+		let ri    = e.visible_ris[vri]
+		let field = e.visible_fields[vfi]
+		build_cell_at(a, ri, field, vri, vfi, x, y, w, h, build_stage)
+	}
+
+	// a 1px line through the middle of a row.
+	function build_row_strike_line(x, y, w, h) {
+		if (horiz) {
+			ui.m(x, y + floor(h / 2), 0, 0)
+			ui.min_wh(w, 1)
+		} else {
+			ui.m(x + floor(w / 2), y, 0, 0)
+			ui.min_wh(1, h)
+		}
+		ui.stack('', 0, 'l', 't')
+			ui.bb('text')
+		ui.end_stack()
+	}
+
+	function build_cells_range(a, x0, y0, ris, vri1, vri2, vfi1, vfi2,
+		build_stage
+	) {
+
+		let hit_cell, foc_cell, foc_vri, foc_vfi
+
+		if (!build_stage) {
+
+			foc_vri = e.focused_vri()
+			foc_vfi = e.focused_vfi()
+
+			hit_cell = hit_zone == 'cell'
+				&& hit_vri >= vri1 && hit_vri <= vri2
+				&& hit_vfi >= vfi1 && hit_vfi <= vfi2
+
+			foc_cell = foc_vri != null && foc_vfi != null
+
+			// when foc_cell and hit_cell are the same, don't build them twice.
+			if (foc_cell && hit_cell && hit_vri == foc_vri && hit_vfi == foc_vfi)
+				foc_cell = null
+
+			// field index for highlighting the quicksearch text, or null
+			let qs_fi = e.quicksearch_text ? quicksearch_fi() : null
+
+			for (let vfi = vfi1; vfi < vfi2; vfi++) {
+				let field = e.visible_fields[vfi]
+				if (field._fast_build == null)
+					field._fast_build = field.build == ui.all_field_types.build
+						&& !field.lookup_nav && !field.null_lookup_col
+				field._fast_now = ui.GRID_FAST_PATH
+					&& field._fast_build
+					&& !field_has_indent(field)
+					&& vfi != hit_vfi
+					&& vfi != foc_vfi
+					&& field.fi != qs_fi
+			}
+		}
+
+		let skip_moving_col = drag_op == 'col_move' && build_stage == 'col'
+
+		for (let vri = vri1; vri < vri2; vri++) {
+
+			let ri = ris[vri]
+
+			let rx, ry, rw, rh
+			if (horiz) {
+				rx = x0
+				ry = vri * cell_h
+				rw = cells_w
+				rh = cell_h
+			} else {
+				rx = vri * row_w
+				ry = y0
+				rw = row_w
+				rh = cells_h
+			}
+
+			let row_is_foc = foc_cell && foc_vri == vri
+			let row_is_hit = hit_cell && hit_vri == vri
+
+			for (let vfi = vfi1; vfi < vfi2; vfi++) {
+				if (skip_moving_col && hit_vfi == vfi)
+					continue
+				if (row_is_hit && hit_vfi == vfi)
+					continue
+				if (row_is_foc && foc_vfi == vfi)
+					continue
+
+				let field = e.visible_fields[vfi]
+
+				if (!build_stage && field._fast_now)
+					continue
+
+				let x = horiz ? field._x : rx
+				let y = horiz ? ry : field._y
+				let w = horiz ? field._w : rw
+				let h = cell_h
+
+				build_cell_at(a, ri, field, vri, vfi, x, y, w, h, build_stage)
+			}
+
+		}
+
+		if (!build_stage) {
+			let sp2 = ui.sp2()
+			let m = ui.measure_text(cx, 'M')
+			let text_h = ceil(m.fontBoundingBoxAscent + m.fontBoundingBoxDescent)
+			let baseline = max(0, round((cell_h - text_h) / 2)) + round(m.fontBoundingBoxAscent)
+			for (let vfi = vfi1; vfi < vfi2; vfi++) {
+				let field = e.visible_fields[vfi]
+				if (!field._fast_now)
+					continue
+				let align = field.align || 'left'
+				let cmd_i = horiz
+					? ui.fast_grid_cells(field._x, vri1 * cell_h, field._w, cell_h,
+						0, cell_h, sp2, align, baseline, vri2 - vri1)
+					: ui.fast_grid_cells(vri1 * row_w, field._y, row_w, cell_h,
+						row_w, 0, sp2, align, baseline, vri2 - vri1)
+				for (let vri = vri1; vri < vri2; vri++) {
+					let ri = ris[vri]
+					let cs = cell_state(ri, field, vri, build_stage)
+					let fg = cs.fg
+					let text
+					if (cs.is_null) {
+						text = field.null_text ?? ''
+					} else if (cs.is_empty) {
+						text = field.empty_text ?? ''
+					} else {
+						text = field.to_text(cs.input_val)
+					}
+					ui.cmd_add_arg(cs.bg)
+					ui.cmd_add_arg(cs.bgs)
+					ui.cmd_add_arg(fg)
+					ui.cmd_add_arg(text)
+				}
+				ui.cmd_end(cmd_i)
+			}
+		}
+
+		if (foc_cell
+			&& foc_vri >= vri1 && foc_vri < vri2
+			&& foc_vfi >= vfi1 && foc_vfi <= vfi2
+		) {
+			build_cell(a, foc_vri, foc_vfi, build_stage)
+		}
+
+		// hit_cell can overlap foc_cell, so we build it after it.
+		if (hit_cell
+			&& hit_vri >= vri1 && hit_vri < vri2
+			&& hit_vfi >= vfi1 && hit_vfi <= vfi2
+		) {
+			build_cell(a, hit_vri, hit_vfi, build_stage)
+		}
+
+		// strike rows marked for deletion after all their cells, so that no
+		// cell background covers the line.
+		for (let vri = vri1; vri < vri2; vri++) {
+			if (!e.is_removed(ris[vri]))
+				continue
+			if (horiz)
+				build_row_strike_line(x0, vri * cell_h, cells_w, cell_h)
+			else
+				build_row_strike_line(vri * row_w, y0, row_w, cells_h)
+		}
+
+	}
+
+	function on_cellview_frame(a, _i, x, y, w, h, vx, vy, vw, vh) {
+
+		let sx = vx - x
+		let sy = vy - y
+
+		// find the visible row range
+
+		let rn // number of rows fully or partially in the viewport.
+		let vri1, vri2 // visible row range.
+		if (horiz) {
+			page_row_count = floor(vh / cell_h)
+			vri1 = floor(sy / cell_h)
+		} else {
+			page_row_count = floor(vw / row_w)
+			vri1 = floor(sx / row_w)
+		}
+		rn = page_row_count + 2 // 2 is right, think it!
+		vri2 = vri1 + rn
+		vri1 = max(0, min(vri1, e.visible_n - 1))
+		vri2 = max(0, min(vri2, e.visible_n))
+
+		// find the visible field range
+
+		let vfi1, vfi2 // visible field range.
+		if (horiz) {
+			for (let field of e.visible_fields) {
+				let fx = field._x + x
+				let fw = field._w
+				if (vfi1 == null && fx + fw >= vx)
+					vfi1 = field.vfi
+				if (vfi2 == null && fx > vx + vw)
+					vfi2 = field.vfi
+			}
+		} else {
+			for (let field of e.visible_fields) {
+				let fy = field._y + y
+				if (vfi1 == null && fy + cell_h >= vy)
+					vfi1 = field.vfi
+				if (vfi2 == null && fy > vy + vh)
+					vfi2 = field.vfi
+			}
+		}
+		vfi2 = vfi2 ?? e.visible_fields.length
+
+		let bx = e.cell_border_v_width
+		let by = e.cell_border_h_width
+
+		// build cells
+
+		ui.stack(id+'.cells')
+		ui.measure(id+'.cells')
+
+		x = bx + sx
+		y = by + sy
+
+		if (drag_op == 'row_move') {
+			// build fixed rows first and moving rows above them.
+			let s = row_move_state
+			build_cells_range(a, x, y, e.visible_ris, s.vri1, s.vri2, vfi1, vfi2, 'row')
+			// TODO: build_cells_range(s.rows, s.move_vri1, s.move_vri2, vfi1, vfi2, 'row_move')
+		} else if (drag_op == 'col_move' || drag_op == 'col_group') {
+			// build fixed cols first and moving cols above them.
+			build_cells_range(a, x, y, e.visible_ris, vri1, vri2, vfi1, vfi2, 'col')
+			build_cells_range(a, x, y, e.visible_ris, vri1, vri2,	hit_vfi, hit_vfi + 1, drag_op)
+		} else {
+			build_cells_range(a, x, y, e.visible_ris, vri1, vri2, vfi1, vfi2)
+		}
+
+		ui.end_stack()
+
+	}
+
+	/// update ----------------------------------------------------------------
+
+	e.update = function() {
+
+		let s = ui.state(id)
+		s.picked = false
+		s.interaction_value = undefined
+		let has_input = false
+
+		/// keyboard state
+		focused = ui.focused(id) || ui.focused(editor_text_id || editor_id)
+		ui.capture_enter(id)
+		ui.capture_escape(id)
+		shift = ui.keypressed('shift')
+		ctrl  = ui.keypressed('ctrl')
+
+		let grid_cols =
+			keydown(horiz ? 'arrowleft'  : 'arrowup'  ) && -1 ||
+			keydown(horiz ? 'arrowright' : 'arrowdown') &&  1
+
+		let grid_rows =
+			keydown(horiz ? 'arrowup'   : 'arrowleft' ) && -1 ||
+			keydown(horiz ? 'arrowdown' : 'arrowright') &&  1 ||
+			(ctrl && (keydown('home') || keydown('pageup'  ))) && -1/0 ||
+			(ctrl && (keydown('end' ) || keydown('pagedown'))) &&  1/0
+
+		if ((grid_cols || grid_rows) && is_edit_built() && edit_field.has_editor) {
+			let can_move = e.auto_jump_cells && !shift
+			let caret_dir = horiz ? grid_cols : grid_rows
+			if (can_move && caret_dir)
+				can_move = ctrl && caret_at_edge(caret_dir)
+			if (!can_move) {
+				grid_cols = null
+				grid_rows = null
+			}
+		}
+		let grid_enter = ctrl && keydown('enter')
+
+		// capture arrows before a drodpown editor takes them to change cell value.
+		if (grid_cols || grid_rows || grid_enter)
+			ui.capture_keys()
+
+		/// editor value
+
+		if (is_edit_built()) {
+			let value = ui.interaction_value(editor_id)
+			if (value !== undefined)
+				e.set_cell_val(edit_ri, edit_field.fi, value, {input: e})
+		}
+
+		/// master toggles
+
+		for (let param in e.master_rowset_names) {
+			let master_id = ui.interaction_value(id+'.master.'+param)
+			if (master_id !== undefined)
+				ui.set_master_id(e.id, param, master_id)
+		}
+
+		/// filter bar
+
+		update_filter_bar()
+
+		/// help and context menu
+
+		if (ui.click)
+			help_open = false
+		update_menu()
+
+		if (e.editing
+				&& !ui.focused(id)
+				&& !ui.focused(editor_id)
+				&& !ui.focus_inside(id+'.cells')
+			)
+			e.exit_edit()
+
+		/// mouse input --------------------------------------------------------
+
+		reset_mouse_state()
+
+		update_header()
+
+		update_group_bar()
 
 		if (drag_op == 'col_group')
 			ui.set_cursor('grabbing')
@@ -1822,7 +2284,7 @@ function init(id, e) {
 			&& !clicked_indent && focused_field()?.has_editor)
 			e.enter_edit()
 
-		// process keyboard input ----------------------------------------------
+		/// keyboard input -----------------------------------------------------
 
 		if (ui.key_events.length || grid_cols || grid_rows || grid_enter)
 			if ((function() {
@@ -1917,7 +2379,10 @@ function init(id, e) {
 
 		// F2: enter edit mode, or toggle the dropdown of the edit in progress
 		if (keydown('f2')) {
-			if (is_edit_built())
+			if (shift && !ctrl) {
+				if (!e.is_picker && ri != null && e.can_change_row(ri))
+					open_row_form()
+			} else if (is_edit_built())
 				ui.set_dropdown_open(editor_id, !ui.dropdown_open(editor_id))
 			else
 				e.enter_edit({advance_on_exit: true})
@@ -2101,6 +2566,8 @@ function init(id, e) {
 
 	}
 
+	/// build -----------------------------------------------------------------
+
 	e.build = function(id, opt, fr, align, valign) {
 
 		e.reload_if_params_changed()
@@ -2116,7 +2583,7 @@ function init(id, e) {
 		sync_editor()
 		ui.menu(menu_id, menu_items, want_menu)
 
-		// set layout vars
+		/// layout
 
 		sp  = ui.sp1()
 		sp2 = ui.sp2()
@@ -2132,7 +2599,7 @@ function init(id, e) {
 
 		ui.focusable(id)
 
-		// layout fields and compute cell grid size
+		/// field layout
 
 		cells_w = 0
 		cells_h = 0
@@ -2155,6 +2622,8 @@ function init(id, e) {
 			cells_w = e.visible_n * row_w
 		}
 
+		/// scrolling
+
 		if (e.focus_changed) {
 			e.scroll_to_cell(e.focused_vri(), e.focused_vfi())
 			ui.rebuild('focused_cell_changed')
@@ -2175,9 +2644,9 @@ function init(id, e) {
 			scroll_to_vfi = null
 		}
 
-		// build ---------------------------------------------------------------
+		/// grid ---------------------------------------------------------------
 
-		ui.stack(id, fr, align, valign)
+		let grid_i = ui.stack(id, fr, align, valign)
 		let has_master_toggles = ui.has_master_toggles(e)
 		if (ui.in_dock_tab() && has_master_toggles) {
 			ui.open_tab_strip()
@@ -2196,239 +2665,23 @@ function init(id, e) {
 
 		ui.hv(horiz ? 'v' : 'h', 1, 0, 's', 's')
 
-			// group-by bar
+			/// group bar
 
-			if (horiz && (
-				e.group_bar_visible == 'always'
-				|| e.group_bar_visible == 'auto' && e.group_cols.length
-				|| drag_op == 'col_group'
-			)) {
+			build_group_bar()
 
-				ui.min_h(group_bar_h())
-				let group_bar_i = ui.sb(id+'.group_bar', 0, 'hide', 'hide', 's', 't')
-					ui.bb('bg2', null, 'b', 'light')
-
-					let mover = gcol_mover
-
-					for (let gcol of mover?.gcols ?? e.group_cols) {
-
-						let col = gcol.field.name
-						let x = gcol.group_i * (gcol_w + 1)
-						let y = gcol.group_level * sp2
-						let w = gcol_w
-						let h = gcol_h
-
-						if (mover) {
-							let vi = mover.is[gcol.group_i]
-							let level = col == hit_gcol ? mover.drop_level : mover.levels[vi]
-							x = mover.xs[gcol.group_i]
-							y = level * sp2
-							if (col == hit_gcol) {
-								if (mover.drop_level == null) {
-									// dragging outside the columns area
-									x = mover.x0 + ps.dx
-									y = mover.y0 + ps.dy
-								} else {
-									let place_x = vi * (w + 1)
-									ui.m(sp2 + place_x - 1, sp2 + y - 1, 0, 0)
-									ui.min_wh(w + 2, h + 2)
-									ui.stack('', 0, 'l', 't')
-										ui.border(1, 'marker', null, 0, 'dashes')
-									ui.end_stack()
-									x = mover.x0 + ps.dx
-									y = mover.y0 + ps.dy
-								}
-							}
-						}
-
-						if (mover && col == hit_gcol) {
-							ui.popup(id+'.moving_gcol_popup', 'drag', group_bar_i, 'il', '[')
-							ui.nohit()
-						}
-
-						let col_id = id+'.gcol.'+col
-						let field = gcol.field
-						ui.m(sp2 + x, sp2 + y, 0, 0)
-						ui.min_wh(w, h)
-						ui.stack(col_id, 1, 'l', 't')
-							let bgs = hit_gcol == col && (
-								!ps.dragging || ps.drop ? 'hover'
-									: hit_zone != 'sort_icon' ? 'active' : 'hover'
-								) || null
-							ui.bb('bg1', bgs, 1, 'intense')
-							ui.p(sp2, ui.sp075())
-							ui.h(1, sp)
-
-								build_header_label(field, 'l', 0)
-
-								// sort icon
-								let icon_id = id+'.sort_icon.'+col
-								if (field.sortable) {
-									let dir = field.sort_i == null ? null
-										: field.sort_desc ? 'desc' : 'asc'
-									ui.color(dir ? 'label' : 'faint',
-										(hit_zone == 'sort_icon' && hit_gcol == col) ? 'hover' : null)
-									let pri = field.sort_i
-									ui.icon(icon_id,
-										dir == 'asc' && (pri ? 'sort-ascending'  : 'sort-ascending' ) ||
-										dir          && (pri ? 'sort-descending' : 'sort-descending') ||
-										'arrows-sort'
-									, 0)
-								}
-							ui.end_h()
-						ui.end_stack()
-
-						if (mover && col == hit_gcol)
-							ui.end_popup()
-
-					}
-
-				ui.end_sb()
-
-			}
-
-			// column header
-
-			function build_header_cell(field, noclip) {
-				let w, h
-				if (horiz) {
-					ui.m(field._x, 0, 0, 0)
-					w = field._w
-					h = header_h
-				} else {
-					ui.m(0, field._y, 0, 0)
-					w = header_w
-					h = cell_h
-				}
-				ui.p(sp2, 0)
-				ui.min_wh(w - 2 * sp2, h)
-				ui.h(0, sp, 'l', 't')
-
-					let col_move  = drag_op == 'col_move'  && hit_vfi == field.vfi
-					let col_group = drag_op == 'col_group' && hit_gcol == field.name
-
-					ui.bb(
-						col_move ? 'bg2' : col_group ? 'bg0' : 'bg1', null,
-						col_move ? (horiz ? 'blr' : 'tbr') : 'br', 'intense')
-
-					let max_min_w = noclip ? null
-						: max(0, w - 2 * sp2 - sort_icon_w(field))
-					let dir = field.sort_i == null ? null
-						: field.sort_desc ? 'desc' : 'asc'
-					let pri = field.sort_i
-					let align, is_right_aligned
-					if (horiz) {
-						align = e.field_align(field)
-						is_right_aligned = align == 'right'
-					} else {
-						align = e.header_align
-						is_right_aligned = align == 'r'
-					}
-
-					if (!is_right_aligned) {
-						build_header_label(field, align, max_min_w,
-							col_group ? 'faint' : null)
-					}
-
-					let icon_id = id+'.sort_icon.'+field.name
-
-					if (field.sortable) {
-						if (e.visible_n > 1 || dir) {
-							ui.color(dir && !col_group ? 'label' : 'faint',
-								!col_group && hit_zone == 'sort_icon'
-									&& hit_vfi == field.vfi ? 'hover' : null)
-							ui.icon(icon_id,
-								dir == 'asc' && (pri ? 'sort-ascending'  : 'sort-ascending' ) ||
-								dir          && (pri ? 'sort-descending' : 'sort-descending') ||
-								'arrows-sort'
-							, 0)
-						} else {
-							ui.min_w(ui.em(1))
-							ui.box()
-						}
-					}
-
-					if (is_right_aligned) {
-						build_header_label(field, align, max_min_w,
-							col_group ? 'faint' : null)
-					}
-
-				ui.end_h()
-			}
+			/// column header
 
 			let header_overflow = e.auto_expand ? 'contain' : 'hide'
-			if (horiz)
-				ui.scrollbox(id+'.header', 0,
-					header_overflow, 'contain',
-					null, null, null, null, id+'.cells_scrollbox')
-			else
-				ui.scrollbox(id+'.header', 0,
-					'contain', header_overflow,
-					null, null, null, null, null, id+'.cells_scrollbox')
+			build_header(header_overflow)
 
-				ui.stack(id+'.header')
-				ui.measure(id+'.header')
+			/// filter bar
 
-					let col_move = drag_op == 'col_move'
-
-					ui.bb('bg1', null, horiz ? 'b' : 'r', 'intense')
-					for (let field of e.visible_fields) {
-						if (col_move && hit_vfi === field.vfi)
-							continue
-						build_header_cell(field)
-					}
-					if (col_move) {
-						let field = e.visible_fields[hit_vfi]
-						build_header_cell(field)
-					}
-
-					// group column drop arrows
-
-					if (gcol_mover?.drop_pos != null) {
-						let x = e.visible_fields[gcol_mover.drop_pos]?._x ?? cells_w
-						ui.ml(x)
-						ui.min_h(header_h)
-						ui.stack('', 0, 'l', 't')
-							ui.popup('', 'overlay', null, 't', 'c')
-								ui.color('marker')
-								ui.icon('', 'arrow-down')
-							ui.end_popup()
-							ui.popup('', 'overlay', null, 'b', 'c')
-								ui.color('marker')
-								ui.icon('', 'arrow-up')
-							ui.end_popup()
-						ui.end_stack()
-					}
-
-				ui.end_stack()
-
-			ui.end_scrollbox()
-
-			// filter bar
-
-			if (e.filter_bar_visible && e.can_filter()) {
-				if (horiz)
-					ui.scrollbox(id+'.filter_bar', 0,
-						header_overflow, 'contain',
-						null, null, null, null, id+'.cells_scrollbox')
-				else
-					ui.scrollbox(id+'.filter_bar', 0,
-						'contain', header_overflow,
-						null, null, null, null, null, id+'.cells_scrollbox')
-
-					ui.stack('')
-						ui.bb('bg1', null, horiz ? 'b' : 'r', 'intense')
-						for (let field of e.visible_fields)
-							build_filter_cell(field)
-					ui.end_stack()
-
-				ui.end_scrollbox()
-			}
+			build_filter_bar(header_overflow)
 
 			// so that focus_inside() answers for a picker's own widgets.
 			ui.focus_group(null, null, id+'.cells')
 
-			// cells frame
+			/// cells frame
 
 			let overflow = e.auto_expand ? 'contain' : 'auto'
 			let resizer_id = id+'.resizer'
@@ -2450,6 +2703,8 @@ function init(id, e) {
 		ui.end_hv()
 		ui.end_v()
 		ui.end_stack()
+
+		build_row_form(grid_i)
 
 		return value
 

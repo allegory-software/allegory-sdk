@@ -676,6 +676,8 @@ let field_config_checks = {
 	label: optional_str,
 	icon: optional_str,
 	info: optional_str,
+	section: optional_str,
+	tab: optional_str,
 	text_color: v => v == null || isstr(v) || isfunc(v),
 	internal: optional_bool,
 	hidden: optional_bool,
@@ -1257,7 +1259,7 @@ btn.click = function() {
 
 //// ROW EXPRESSIONS ---------------------------------------------------------
 
-function compile_row_expr(expr) {
+function compile_row_expr(expr, error_value) {
 	let nav, ri // current nav and row slot during expression evaluation
 	let row = new Proxy(obj(), {
 		get: function(t, col) {
@@ -1274,7 +1276,7 @@ function compile_row_expr(expr) {
 			return eval_expr(row, value)
 		} catch (err) {
 			warn_once('row expression:', expr, err)
-			return 'error'
+			return error_value
 		} finally {
 			nav = nav0
 			ri = ri0
@@ -1302,7 +1304,7 @@ ui.create_field = function(opt, nav_id = '') {
 	if (!field.check_config(nav_id))
 		return null
 	if (isstr(field.text_color))
-		field.text_color = compile_row_expr(field.text_color)
+		field.text_color = compile_row_expr(field.text_color, 'error')
 	let own_rules = []
 	for (let k in field) {
 		if (k.startsWith('validator_')) {

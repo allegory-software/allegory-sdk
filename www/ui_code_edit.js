@@ -756,7 +756,7 @@ function code_edit_view(id, opt, s) {
 	}
 
 	function replace_match() {
-		if (s.field.readonly || !find_lines.length)
+		if (s.readonly || !find_lines.length)
 			return
 		let [line1, char1, line2, char2] = sel_range(cursor)
 		if (!cursor.block
@@ -774,7 +774,7 @@ function code_edit_view(id, opt, s) {
 	}
 
 	function replace_all() {
-		if (s.field.readonly || !find_lines.length)
+		if (s.readonly || !find_lines.length)
 			return
 		let line1, char1, line2, char2
 		if (cursor_has_selection(cursor)) {
@@ -1002,7 +1002,7 @@ function code_edit_view(id, opt, s) {
 	// replaces the selection with s, or with s[i] per line when the cursor
 	// is a block and s is an array of one string per line.
 	function replace_selection(text, normalize_tabs) {
-		if (s.field.readonly)
+		if (s.readonly)
 			return false
 		if (cursor.block) {
 			let [line1, col1, line2, col2] = block_sel_range(cursor)
@@ -1029,7 +1029,7 @@ function code_edit_view(id, opt, s) {
 	}
 
 	function cut_selection() {
-		if (s.field.readonly)
+		if (s.readonly)
 			return
 		undo_group = 'cut'
 		copy_selection()
@@ -1038,7 +1038,7 @@ function code_edit_view(id, opt, s) {
 	}
 
 	function delete_text(dir) {
-		if (s.field.readonly)
+		if (s.readonly)
 			return
 		undo_group = 'delete'
 		if (cursor_has_selection(cursor)) {
@@ -1076,7 +1076,7 @@ function code_edit_view(id, opt, s) {
 	}
 
 	function indent_selection() {
-		if (s.field.readonly)
+		if (s.readonly)
 			return
 		let line1 = min(cursor.line, cursor.sel_line)
 		let line2 = max(cursor.line, cursor.sel_line)
@@ -1091,7 +1091,7 @@ function code_edit_view(id, opt, s) {
 	}
 
 	function outdent_selection() {
-		if (s.field.readonly)
+		if (s.readonly)
 			return
 		let line1 = min(cursor.line, cursor.sel_line)
 		let line2 = max(cursor.line, cursor.sel_line)
@@ -1129,7 +1129,7 @@ function code_edit_view(id, opt, s) {
 	}
 
 	function undo() {
-		if (s.field.readonly)
+		if (s.readonly)
 			return
 		undoing = true
 		let stack = undo_stack
@@ -1156,7 +1156,7 @@ function code_edit_view(id, opt, s) {
 	}
 
 	function redo() {
-		if (s.field.readonly)
+		if (s.readonly)
 			return
 		;[redo_stack, undo_stack] = [undo_stack, redo_stack]
 		undo()
@@ -1412,8 +1412,10 @@ function code_edit_view(id, opt, s) {
 
 		if (ui.focused(id)) {
 
-			if (!s.field.readonly)
+			if (!s.readonly)
 				ui.capture_tab(id)
+			ui.capture_enter(id)
+			ui.capture_escape(id)
 
 			for (let [event, full_key, key, key_char, ctrl, alt, shift] of ui.key_events) {
 				if (event != 'down')
@@ -1688,9 +1690,9 @@ function code_edit_view(id, opt, s) {
 											rid, replace_text, null, 0)
 										ui.nofocus()
 										ui.button(id+'.replace', '', 'Replace',
-											null, null, null, null, s.field.readonly)
+											null, null, null, null, s.readonly)
 										ui.button(id+'.replace_all', '', 'Replace All',
-											null, null, null, null, s.field.readonly)
+											null, null, null, null, s.readonly)
 									ui.end_h()
 								}
 							ui.end_v()
@@ -1724,7 +1726,7 @@ ui.code_edit_update_value = function(id) {
 	ui.state_of(id, 'view')?.update_value()
 }
 
-ui.code_edit = function(id, value, field, opt) {
+ui.code_edit = function(id, value, field, opt, readonly) {
 	let s = ui.state(id, code_edit_update)
 	let is_new = !s.view
 	s.view ??= code_edit_view(id, opt ?? empty, s)
@@ -1732,6 +1734,7 @@ ui.code_edit = function(id, value, field, opt) {
 	let value0 = s.input_value
 	let field0 = s.field
 	value = ui.set_value(id, s, value, field)
+	s.readonly = readonly ?? field.readonly
 	if (is_new || s.interaction_value === undefined
 			&& (value !== value0 || field != field0))
 		s.view.reset(value == null ? '' : field.to_input(value))

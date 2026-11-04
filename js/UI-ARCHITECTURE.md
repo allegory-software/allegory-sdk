@@ -22,7 +22,7 @@ frame. IMGUI makes it worse, but the problem itself is not IMGUI-specific.
 	* CON: the later widget must have already been there the last frame or
 	  state_of() returns nothing, so you need to use state_of(id) ?? model.
 	* CON: must use widget state to pass information between the two stages
-	  instead of local variables (FIX to get that back: stateful_widget).
+	  instead of local variables. FIX to get that back: stateful_widget.
 
 * solution #3: cmd record buffers (currently avoided):
 	* decouples build/state-update order from document order, so that widgets
@@ -30,13 +30,33 @@ frame. IMGUI makes it worse, but the problem itself is not IMGUI-specific.
 	* CON: inter-record index references are not supported.
 		* FIX: use ct stack instead of storing ct_i.
 	* CON: you can't reference a widget that you don't own.
+	* CON: recording large parts of UI incurs proportional array copy cost.
+
+* solution #4: rec_box widget:
+	* like record buffers but better:
+		* uses secondary arrays so no array copy.
+		* can add content to it in multiple sessions.
+		* can be placed before or after you add content.
 
 * other cases and alternatives:
 	* dynamic child order in flexbox:
 		* ALT: TODO: `order` attribute for flex children.
 
+
 NOTE: layers only work with popups because you want layers when things overlap
 and only popups do that (other boxes don't overflow).
+
+
+THE TAB/ENTER/ESCAPE CAPTURING PROBLEM
+------------------------------------------------------------------------------
+Another build-order problem. A default button can be activated by pressing
+Enter on a focusable in its group. That makes it depend on the state of the
+focused widget in its group. So we should just call state_of() which calls
+capture_keys() on Enter and we know not to activate the button then. That
+works only if every widget that acts on Enter or Escape does so in its own
+update callback and calls capture_keys() there, or, if it acts while focus is
+on a child it builds, it must put a focus group under its own id around that
+child.
 
 
 THE "I CHANGED A WIDGET ALREADY BUILT" PROBLEM
@@ -52,7 +72,8 @@ THE "I CHANGED A WIDGET ALREADY BUILT" PROBLEM
 THE WIDGET STORED STATE PROBLEM
 ------------------------------------------------------------------------------
 A widget needs a setting before the widget that is editing that setting has run.
-It needs the default on first use, the stored value afterward, and the user’s latest edit during interaction.
+It needs the default on first use, the stored value afterward, and the user’s
+latest edit during interaction.
 
 
 THE MEASURE-WHILE-BUILDING PROBLEM
