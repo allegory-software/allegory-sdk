@@ -447,6 +447,15 @@ end
 
 --STARTUP VALIDATION ---------------------------------------------------------
 
+function prepare_table_rowsets()
+	for tbl in sortedpairs(db().schema.tables) do
+		local name = 'table_'..tbl
+		local rs = rowset[name]
+		rs.name = name
+		rs:prepare()
+	end
+end
+
 --prepare every registered rowset, to fail at startup instead of on a first
 --request. run it after sync_schema(): the checking happens while resolving
 --each scan's table schema. preparing one rowset can register the lookup
@@ -473,9 +482,6 @@ end
 
 --LOOKUP ROWSETS & TABLE ROWSETS ---------------------------------------------
 
-local function table_schema(tbl)
-end
-
 dynamic_rowset('^lookup_(.+)$', function(tbl)
 	local schema = checkfound(db():atomic('any', function(tbl)
 		return db():table_schema(tbl)
@@ -495,5 +501,22 @@ dynamic_rowset('^lookup_(.+)$', function(tbl)
 		scan = function(db) return db:scan(tbl, ''):select(sel) end,
 		pk = cat(schema.pk, ' '),
 		name_col = name_col,
+		internal = true,
+		can_add_rows = false,
+		can_change_rows = false,
+		can_remove_rows = false,
+	}
+end)
+
+dynamic_rowset('^table_(.+)$', function(tbl)
+	local schema = checkfound(db():atomic('any', function(tbl)
+		return db():table_schema(tbl)
+	end, tbl))
+	checkfound(not schema.is_index)
+	local sel = cat(schema.cols, ', ')
+	return scan_rowset{
+		scan = function(db) return db:scan(tbl, ''):select(sel) end,
+		pk = cat(schema.pk, ' '),
+		cols = cat(schema.cols, ' '),
 	}
 end)

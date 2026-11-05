@@ -259,8 +259,6 @@ do
 			end)
 			return self:exec_load({})
 		end
-
-		prepare_rowsets()
 	end)
 end
 

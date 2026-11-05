@@ -746,7 +746,9 @@ rowset.rowsets = virtual_rowset(function(rs) --rowset reflection
 	function rs:load_rows(res, params)
 		res.rows = {}
 		for name, rs in sortedpairs(rowset) do
-			add(res.rows, {name})
+			if not istab(rs) or not rs.internal then
+				add(res.rows, {name})
+			end
 		end
 	end
 end)

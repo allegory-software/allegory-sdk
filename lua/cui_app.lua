@@ -231,6 +231,8 @@ local function cui_app(...)
 		db:track_row_changes(true)
 	end
 	app:before('run_server', function()
+		prepare_table_rowsets()
+		prepare_rowsets()
 		watch_row_changes(db())
 	end)
 	after(logging.rpc, 'close_all_sockets', function()

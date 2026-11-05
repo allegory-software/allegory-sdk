@@ -21,17 +21,22 @@ function db() return current_db end
 
 --run f(db, file) against a fresh isolated db with table t and its changes
 --file open. db() returns that db while f runs.
-local function with_db(name, f)
+local function with_db(name, f, schema)
 	local file = test_file(name)
 	cleanup(file)
 	local tdb = mdbx_open(file)
-	tdb:begin'w'
-	tdb:create_table('t', {
-		name = 't',
-		fields = {{col = 'id', mdbx_type = 'u32', not_null = true}},
-		pk = {'id'},
-	})
-	tdb:commit()
+	if schema then
+		tdb.schema = schema
+		tdb:sync_schema()
+	else
+		tdb:begin'w'
+		tdb:create_table('t', {
+			name = 't',
+			fields = {{col = 'id', mdbx_type = 'u32', not_null = true}},
+			pk = {'id'},
+		})
+		tdb:commit()
+	end
 	tdb:open_changes_file(pagesize())
 	current_db = tdb
 	local ok, err = xpcall(f, debug.traceback, tdb, file)
@@ -43,8 +48,9 @@ end
 
 function test.push_from_other_process()
 	with_db('push_from_other_process', function(tdb, file)
-		rowset.t_rs = table_rowset('t', {db = tdb})
+		local rs = rowset.table_t
 		prepare_rowsets()
+		assert(rs.name == 'table_t')
 		local pushes = {} -- {{names = {rowset_name -> true}, txn_id = n}, ...}
 		local waiter -- wait_job resumed by the first push
 		local push0 = push_rowset_changed_events
@@ -79,13 +85,55 @@ db:close()
 				waiter:wait(5)
 			end
 			assert(#pushes == 1, 'no push from the other process')
-			assert(pushes[1].names.t_rs and pushes[1].txn_id > txn_id0)
+			assert(pushes[1].names.table_t and pushes[1].txn_id > txn_id0)
 			--closing the db ends the watcher thread.
 			tdb:close()
 		end)
 		push_rowset_changed_events = push0
-		rowset.t_rs = nil
+		rowset.table_t = nil
 	end)
+end
+
+function test.prepare_table_rowsets()
+	local schema = mdbx_schema()
+	schema:import(function()
+		import'schema_mdbx'
+		tables.t = {
+			id, idpk,
+			name, text,
+			secret, text, {internal = true},
+		}
+		tables.child = {
+			id, idpk,
+			t_id, id, fk't',
+		}
+	end)
+	with_db('prepare_table_rowsets', function(tdb)
+		assert(rawget(rowset, 'table_t') == nil)
+		assert(rawget(rowset, 'table_child') == nil)
+		prepare_table_rowsets()
+		local rs = assert(rawget(rowset, 'table_t'))
+		local child_rs = assert(rawget(rowset, 'table_child'))
+		assert(rs.name == 'table_t' and rs.fields.secret.internal)
+		assert(child_rs.name == 'table_child' and child_rs.fields.t_id)
+		assert(child_rs.fields.t_id.lookup_rowset_name == 'lookup_t')
+		local lookup = assert(rawget(rowset, 'lookup_t'))
+		assert(lookup.internal)
+		assert(lookup:can_add_row{} == false)
+		assert(lookup:can_change_row{} == false)
+		assert(lookup:can_remove_row{} == false)
+		prepare_table_rowsets()
+		assert(rowset.table_t == rs and rowset.table_child == child_rs)
+		local listed = {}
+		for _, row in ipairs(rowset.rowsets:load{}.rows) do
+			listed[row[1]] = true
+		end
+		assert(listed.table_t and listed.table_child)
+		assert(not listed.lookup_t)
+		rowset.table_t = nil
+		rowset.table_child = nil
+		rowset.lookup_t = nil
+	end, schema)
 end
 
 local name = ...
