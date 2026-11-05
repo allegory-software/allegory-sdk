@@ -2146,6 +2146,11 @@ function init(id, e) {
 
 		update_header()
 
+		if ((hit_zone == 'col' || hit_zone == 'sort_icon') && !ps.dragging) {
+			let field = e.visible_fields[hit_vfi]
+			ui.set_tooltip(field.info ?? field.label)
+		}
+
 		update_group_bar()
 
 		if (drag_op == 'col_group')
