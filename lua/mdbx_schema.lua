@@ -333,6 +333,20 @@ function Db:check_col(event, tab, col, ret, ...)
 	error(e)
 end
 
+local function check_key(self, event, schema, key_schema, ret, err)
+	if ret or err ~= 'already_exists' then
+		return self:check_row(event, schema.name, ret, err)
+	end
+	local e = error_for('row', self, event, err)
+	e.table = schema.name
+	e.field_errors = {}
+	for _, col in ipairs(key_schema.key_cols) do
+		e.field_errors[col] = err
+	end
+	self:abort()
+	error(e)
+end
+
 --DML GLOBAL SHARED BUFFERS --------------------------------------------------
 
 local key_rec_buffer = u8a(MDBX_MAX_KEY_SIZE)
@@ -3574,7 +3588,7 @@ local function update_indexes(
 	for _, ix_schema in ipairs(schema.indexes) do
 		local cur = ix_cur and ix_cur.schema == ix_schema and ix_cur or nil
 		local ok, err = ix_schema:update(self, k, k_sz, v, v_sz, v0, v0_sz, cur)
-		self:check_row(event, schema.name, ok, err)
+		check_key(self, event, schema, ix_schema, ok, err)
 	end
 end
 
@@ -3778,7 +3792,7 @@ local function put(self, op, tab, cols, ...)
 			--trigger or a gen_fn and its index entries would be left behind.
 			local ret, err = cur:try_put_raw(k, k_sz, v, v_sz,
 				C.MDBX_NOOVERWRITE)
-			self:check_row(op, schema.name, ret, err)
+			check_key(self, op, schema, schema, ret, err)
 		end
 		cur:close()
 		self:_row_changed(schema, k, k_sz)
@@ -3796,7 +3810,7 @@ local function put(self, op, tab, cols, ...)
 		local v, v_sz = insert_val_rec(self, schema, op, k, k_sz, cols, as, ...)
 		local ret, err = self:try_put_raw(dbi, k, k_sz, v, v_sz,
 			C.MDBX_NOOVERWRITE)
-		self:check_row(op, schema.name, ret, err)
+		check_key(self, op, schema, schema, ret, err)
 		self:_row_changed(schema, k, k_sz)
 	end
 	local logged_cols -- comma-separated column names with a value
