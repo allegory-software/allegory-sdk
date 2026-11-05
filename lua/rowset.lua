@@ -141,6 +141,10 @@ require'glue'
 local xlsx_workbook = require'xlsxwriter.workbook'
 
 local rowset_mt = {}
+function rowset_mt:__newindex(name, rs)
+	if istab(rs) then rs.name = name end
+	rawset(self, name, rs)
+end
 rowset = setmetatable({}, rowset_mt)
 
 function dynamic_rowset(match_name, create_rowset)
@@ -156,17 +160,17 @@ function dynamic_rowset(match_name, create_rowset)
 			local name = match_name(rs_name)
 			if name then rs = create_rowset(name) end
 		end
-		rawset(self, rs_name, rs)
+		self[rs_name] = rs
 		return rs
 	end)
 end
 
 action['rowset.json'] = function(name)
-	return checkfound(rowset[checkarg(name)])(name, 'json')
+	return checkfound(rowset[checkarg(name)])('json')
 end
 
 action['rowset.xlsx'] = function(name)
-	return checkfound(rowset[checkarg(name)])(name, 'xlsx')
+	return checkfound(rowset[checkarg(name)])('xlsx')
 end
 
 local client_field_attrs = {
@@ -667,8 +671,7 @@ function virtual_rowset(init, ...)
 		end)
 	end
 
-	function rs:respond(rowset_name, out_format)
-		rs.name = rowset_name
+	function rs:respond(out_format)
 		if isfunc(rs.allow) then
 			allow(rs:allow())
 		elseif isstr(rs.allow) then
@@ -689,7 +692,7 @@ function virtual_rowset(init, ...)
 		if out_format == 'json' then
 			return res
 		elseif out_format == 'xlsx' then
-			download_as_xlsx(rowset_name, res)
+			download_as_xlsx(rs.name, res)
 		else
 			assert(false)
 		end

@@ -451,7 +451,6 @@ function prepare_table_rowsets()
 	for tbl in sortedpairs(db().schema.tables) do
 		local name = 'table_'..tbl
 		local rs = rowset[name]
-		rs.name = name
 		rs:prepare()
 	end
 end
@@ -470,7 +469,6 @@ function prepare_rowsets()
 				prepared[name] = true
 				found_new = true
 				if istab(rs) then --function rowset: nothing to prepare.
-					rs.name = name
 					if rs.prepare then
 						rs:prepare()
 					end
