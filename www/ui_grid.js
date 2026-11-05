@@ -1633,7 +1633,7 @@ function init(id, e) {
 			&& (!e.cell_select_mode || field_focused)
 		let disabled = !e.can_focus_cell(ri, fi)
 		let is_new = e.is_new(ri)
-		let cell_invalid = e.cell_has_errors(ri, fi)
+		let cell_invalid = e.cell_has_errors(ri, fi) || !!e.row_errors[ri]
 		let modified = e.is_cell_modified(ri, fi)
 		let is_null = input_val == null
 		let is_empty = input_val === ''
@@ -1821,6 +1821,22 @@ function init(id, e) {
 			ui.p(0)
 			if (full_width)
 				ui.end_popup()
+			if (!build_stage && focused && row_focused && field_focused) {
+				let cell_errors = e.cell_errors[field.fi]?.[ri]
+				let row_errors = e.row_errors[ri]
+				if (cell_errors || row_errors) {
+					ui.mv(ui.sp())
+					ui.p(ui.sp2(), ui.sp())
+					ui.popup(id+'.error', 'tooltip', cell_i, 'b', '[',
+						'change_side constrain')
+						ui.bb_tooltip('bg1', null, 'intense', 'focused', ui.sp05())
+						if (cell_errors)
+							ui.error_label(null, 'all_errors', 0, null, null, cell_errors)
+						if (row_errors)
+							ui.error_label(null, 'all_errors', 0, null, null, row_errors)
+					ui.end_popup()
+				}
+			}
 		ui.end_stack()
 
 	}

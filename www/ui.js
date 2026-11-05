@@ -8772,11 +8772,11 @@ function input_errors(id) {
 	return ui.state_of(id, 'validation')?.results ?? empty_array
 }
 
-ui.error_label = function(for_id, mode, fr, align, valign) {
+ui.error_label = function(for_id, mode, fr, align, valign, results) {
 	mode ??= 'first_error'
 	ui.v(fr, ui.sp05(), align ?? 'l', valign ?? 'c')
 	let text_n = 0
-	for (let result of input_errors(for_id)) {
+	for (let result of results ?? input_errors(for_id)) {
 		let is_shown = mode == 'all' ? true
 			: mode == 'all_checked' ? result.checked
 			: result.failed && (mode == 'all_errors' || !text_n)
