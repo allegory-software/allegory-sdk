@@ -103,10 +103,17 @@ function test.prepare_table_rowsets()
 			name, text,
 			secret, text, {internal = true},
 		}
+		tables.pair = {
+			a, id,
+			b, id, pk('a', 'b'),
+		}
 		tables.child = {
 			id, idpk,
 			t_id, id, fk't',
+			c1, id,
+			c2, id,
 		}
+		add_fk('child', 'c1 c2', 'pair')
 	end)
 	with_db('prepare_table_rowsets', function(tdb)
 		assert(rawget(rowset, 'table_t') == nil)
@@ -117,6 +124,15 @@ function test.prepare_table_rowsets()
 		assert(rs.name == 'table_t' and rs.fields.secret.internal)
 		assert(child_rs.name == 'table_child' and child_rs.fields.t_id)
 		assert(child_rs.fields.t_id.lookup_rowset_name == 'lookup_t')
+		local param = child_rs:load{}.params.t_id
+		assert(param.for_cols == 't_id' and param.lookup_cols == 'id')
+		assert(param.lookup_rowset_name == 'table_t')
+		assert(param.client_filter == true)
+		local pair_param = child_rs:load{}.params['c1,c2']
+		assert(pair_param.for_cols == 'c1 c2')
+		assert(pair_param.lookup_cols == 'a b')
+		assert(pair_param.lookup_rowset_name == 'table_pair')
+		assert(pair_param.client_filter == true)
 		local lookup = assert(rawget(rowset, 'lookup_t'))
 		assert(lookup.internal)
 		assert(lookup:can_add_row{} == false)
@@ -132,6 +148,7 @@ function test.prepare_table_rowsets()
 		assert(not listed.lookup_t)
 		rowset.table_t = nil
 		rowset.table_child = nil
+		rowset.table_pair = nil
 		rowset.lookup_t = nil
 	end, schema)
 end

@@ -45,6 +45,29 @@ function test.load_with_empty_list_has_no_rows()
 	assert(load_n() == 0)
 end
 
+function test.client_filter_does_not_restrict_server_load()
+	local rs, load_n = params_rowset()
+	rs.params.c.client_filter = true
+	local res = rs:load{p = 'v', c = {}}
+	assert(#res.rows == 1 and load_n() == 1)
+	assert(res.params.c.client_filter == true)
+	assert(#rs:load{c = {1}}.rows == 0)
+end
+
+function test.decode_ignores_client_filter()
+	local post0 = post
+	function post(name)
+		assert(name == 'params')
+		return {p = {'v'}, c = {}, unknown = {1}}
+	end
+	local vals = decode_params{
+		p = {accept_many = false},
+		c = {for_cols = 'id', client_filter = true},
+	}
+	post = post0
+	assert(vals.p == 'v' and vals.c == nil and vals.unknown == nil)
+end
+
 local ok_n, failed_n = 0, 0
 for _, name in ipairs(test) do
 	local ok, err = xpcall(test[name], debug.traceback)

@@ -511,10 +511,20 @@ dynamic_rowset('^table_(.+)$', function(tbl)
 		return db():table_schema(tbl)
 	end, tbl))
 	checkfound(not schema.is_index)
+	local params = {}
+	for name, fk in pairs(schema.fks or empty) do
+		params[name] = {
+			for_cols = cat(fk.cols, ' '),
+			lookup_cols = cat(fk.ref_cols, ' '),
+			lookup_rowset_name = 'table_'..fk.ref_table,
+			client_filter = true,
+		}
+	end
 	local sel = cat(schema.cols, ', ')
 	return scan_rowset{
 		scan = function(db) return db:scan(tbl, ''):select(sel) end,
 		pk = cat(schema.pk, ' '),
 		cols = cat(schema.cols, ' '),
+		params = params,
 	}
 end)

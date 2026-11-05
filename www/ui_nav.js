@@ -2243,21 +2243,22 @@ ui.nav = function(id, opt) {
 		return filter_field
 	}
 
-	// Combine the app filter, a client rowset's bound cols, column filters
+	// Combine the app filter, locally filtered bound cols, column filters
 	// and excluded values into row_filter.
 	function update_row_filter() {
 		let tests = [] // [fn(ri) -> passes, ...]
 		if (e.filter)
 			tests.push(e.filter)
-		if (!is_server_rowset)
-			for (let name in param_vals) {
-				let vals = param_vals[name] // the tuples, one after another
-				let for_cols = e.params[name].for_cols // 'COL ...'
-				let fis = words(for_cols) // field indices of the cols
-					.map(col => e.all_fields_map[col].fi)
-				tests.push(ri => has_tuple(vals, fis.length,
-					j => col_val(ri, fis[j])))
-			}
+		for (let name in param_vals) {
+			if (is_server_rowset && !e.params[name]?.client_filter)
+				continue
+			let vals = param_vals[name] // the tuples, one after another
+			let for_cols = e.params[name].for_cols // 'COL ...'
+			let fis = words(for_cols) // field indices of the cols
+				.map(col => e.all_fields_map[col].fi)
+			tests.push(ri => has_tuple(vals, fis.length,
+				j => col_val(ri, fis[j])))
+		}
 		for (let field of e.all_fields) {
 			if (field.filter)
 				tests.push(val_filter(field, field.filter) ?? return_false)
@@ -2338,9 +2339,21 @@ ui.nav = function(id, opt) {
 
 	/// params ----------------------------------------------------------------
 
-	// -> the params url arg: param values as {name: [val, ...]}.
+	function server_param_vals(vals) {
+		let params = vals
+		for (let name in vals) {
+			if (!e.params?.[name]?.client_filter)
+				continue
+			if (params == vals)
+				params = assign(obj(), vals)
+			delete params[name]
+		}
+		return params
+	}
+
+	// -> the params url arg: server param values as {name: [val, ...]}.
 	function params_url_arg() {
-		return json(param_vals)
+		return json(server_param_vals(param_vals))
 	}
 
 	// gathers param vals from bound param sources (master navs and param inputs)
@@ -2463,9 +2476,12 @@ ui.nav = function(id, opt) {
 		let param_vals1 = read_param_vals()
 		if (!force && json(param_vals1) == json(param_vals))
 			return
+		let server_params_changed = is_server_rowset
+			&& json(server_param_vals(param_vals1))
+				!= json(server_param_vals(param_vals))
 		param_vals = param_vals1
 		e.exit_edit()
-		if (is_server_rowset)
+		if (is_server_rowset && (force || server_params_changed))
 			e.reload()
 		else
 			refilter()
@@ -2569,6 +2585,8 @@ ui.nav = function(id, opt) {
 		// and a col param doesn't filter. A plain param filters rows on the
 		// server only. A col param loads the rows equal to one of its tuples.
 		for (let name in e.params) {
+			if (e.params[name].client_filter)
+				continue
 			let for_cols = e.params[name].for_cols // 'COL ...', or undefined
 			let vals = load_param_vals[name] // the tuples, or undefined
 			if (!vals) {
@@ -4223,7 +4241,8 @@ ui.nav = function(id, opt) {
 			dont_send: true,
 			url: rowset_url(),
 			upload: {
-				exec: 'reserve_ids', n: new_ris.length, params: param_vals,
+				exec: 'reserve_ids', n: new_ris.length,
+				params: server_param_vals(param_vals),
 			},
 			success: function(res) {
 				if (this != save_req)
@@ -4320,7 +4339,7 @@ ui.nav = function(id, opt) {
 			url: rowset_url(),
 			upload: {
 				exec: 'save',
-				params: param_vals,
+				params: server_param_vals(param_vals),
 				changes: {rows: batch.rows},
 				update_id: update_id,
 			},
@@ -4575,7 +4594,7 @@ ui.nav = function(id, opt) {
 		} else {
 			// partial load: load the roots and the children of the rows whose
 			// children are loaded.
-			load_param_vals = param_vals
+			load_param_vals = server_param_vals(param_vals)
 			if (e.partial_load && e.can_be_tree) {
 				let parent_ids = [null] // [id, ...]
 				for (let i = 0; i < e.row_n; i++) {
@@ -4583,7 +4602,7 @@ ui.nav = function(id, opt) {
 					if (e.row_flags[ri] & ROW_CHILDREN_LOADED)
 						parent_ids.push(col_val(ri, e.id_field.fi))
 				}
-				load_param_vals = assign(obj(), param_vals,
+				load_param_vals = assign(obj(), load_param_vals,
 					{[parent_param]: parent_ids})
 			}
 			load_req?.abort()
@@ -5103,6 +5122,23 @@ ui.nav = function(id, opt) {
 				&& !(is_server_rowset && has_children_field && rs_parent_param),
 			e.id, 'partial_load requires a server rowset with has_children_col'
 			+ ' and a param with for_cols = parent_col'))
+			return
+
+		let has_client_filter = false
+		for (let name in rs.params) {
+			let def = rs.params[name]
+			if (!def.client_filter)
+				continue
+			let cols = words(def.for_cols ?? '')
+			if (warn_if(!cols.length, e.id, 'param', name,
+				'client_filter requires for_cols'))
+				return
+			if (!check_cols(cols, all_fields_map))
+				return
+			has_client_filter = true
+		}
+		if (warn_if(has_client_filter && e.partial_load, e.id,
+			'client_filter requires a fully loaded rowset'))
 			return
 
 		let src_col_vals = rowset_col_vals(rs, all_fields.length)

@@ -21,6 +21,7 @@ Rowset attributes to set (* = server-only):
 		params           : {name->def}   params, each def a field def plus:
 		  .for_cols      : 'col1 ...'    the param filters these cols
 		  .accept_many   : false         the param can only take one value
+		  .client_filter : false         filter on the client on this param
 		uks              : ['col1 ...',] unique keys (to validate on the client)
 	TREE
 		id_col           : 'col'         id column for tree-building
@@ -197,7 +198,7 @@ local client_field_attrs = {
 --the field attrs that describe a value, without the column and row attrs,
 --plus the param attrs.
 local client_param_attrs = { -- {attr -> 1}
-	for_cols = 1, accept_many = 1,
+	for_cols = 1, accept_many = 1, client_filter = 1,
 	type = 1, label = 1, info = 1, align = 1,
 	not_null = 1, min = 1, max = 1, maxlen = 1,
 	scale = 1, decimals = 1, precision = 1,
@@ -254,7 +255,7 @@ function decode_params(param_defs)
 	local param_vals = {} -- {name -> val}
 	for name, vals in pairs(post'params' or empty) do
 		local def = param_defs[name] -- param def, or nil
-		if def then
+		if def and not def.client_filter then
 			if def.accept_many == false and #vals > 0 then
 				--tuple size
 				local n = def.for_cols and #collect(words(def.for_cols)) or 1
@@ -393,12 +394,14 @@ function virtual_rowset(init, ...)
 
 	local function check_no_rows(param_vals)
 		for name, def in pairs(rs.params or empty) do
-			local v = param_vals[name] -- [val, ...], val, or nil
-			--missing non-col param: no rows
-			if v == nil and not def.for_cols then
-				return true
-			elseif istab(v) and #v == 0 then --empty list: no rows
-				return true
+			if not def.client_filter then
+				local v = param_vals[name] -- [val, ...], val, or nil
+				--missing non-col param: no rows
+				if v == nil and not def.for_cols then
+					return true
+				elseif istab(v) and #v == 0 then --empty list: no rows
+					return true
+				end
 			end
 		end
 	end
