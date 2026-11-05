@@ -61,6 +61,7 @@ CONTENT
 
 ACTIONS
   BUTTON        ui.button  ui.primary_button  ui.bare_button  ui.btn  ui.pri_btn
+  POPUP BUTTON  ui.popup_button
   MENU          ui.menu  ui.set_menu_open
   MENU BUTTON   ui.menu_button  ui.bare_menu_button
   MENU BAR      ui.menu_bar
@@ -102,7 +103,7 @@ PERSISTENCE
   SAVED INPUT   ui.saved_value_def  ui.saved_value  ui.set_saved_value
                 ui.saved_value_validation
 
-POINTER INPUT
+MOUSE INPUT
   POSITION      ui.mx  ui.my  ui.mx_notrans  ui.my_notrans  ui.update_mouse
   BUTTONS       ui.pressed  ui.click  ui.rightclick  ui.clickup  ui.dblclick
                 ui.clicked  ui.rightclicked  ui.dblclicked
@@ -165,6 +166,7 @@ WIDGET API
   LIST PARTS    ui.draw_value_row
   DRAG POINT    ui.drag_point
   RESIZER       ui.resizer
+  POPUP STATE   ui.set_popup_open  ui.popup_update
   DROPDOWN      ui.dropdown  ui.dropdown_picker
     OPEN        ui.set_dropdown_open  ui.dropdown_open
     EDGES       ui.dropdown_opened  ui.dropdown_closed  ui.dropdown_picked
@@ -998,6 +1000,7 @@ MOUSE HIT STATE
 	ui.captured        (id) -> cs | null  get captured state if mouse is captured
 	ui.hit             (id, k=) -> hs|v|null  hit state if id is directly hit or dragging
 	ui.clicked         (id) -> hs|null    hit state if id was clicked this frame
+	ui.clicked_outside (id) -> ?          left click outside the container and its popups
 	ui.dblclicked      (id) -> hs|null    hit state if id was double-clicked
 	ui.rightclicked    (id) -> hs|false|undefined
 	ui.hit_match       (id_prefix) -> suffix|undefined    read the hit id suffix
@@ -1280,6 +1283,19 @@ function apply_cursor() {
 		screen.style.cursor = screen_cursor
 	if (canvas.style.cursor != cursor)
 		canvas.style.cursor = cursor
+}
+
+/// setting the browser tooltip
+
+let cur_tooltip
+ui.set_tooltip = function(tooltip) {
+	cur_tooltip = tooltip
+}
+
+function apply_tooltip() {
+	let tooltip = cur_tooltip ?? ''
+	if (canvas.title != tooltip)
+		canvas.title = tooltip
 }
 
 //// KEYBOARD HANDLING -------------------------------------------------------
@@ -2344,8 +2360,8 @@ function draw_frame(recs, popups, sm1) {
 
 let hit_id // innermost hit widget
 
-let hit_state_map      = map() // {id->state}
-let prev_hit_state_map = map() // {id->state}
+let hit_state_map      = map() // {id->state|null}; null: contained, not hovered
+let prev_hit_state_map = map() // {id->state|null}
 
 function hovers(id, k) {
 	if (!id) return
@@ -2370,6 +2386,10 @@ function clicked(id) {
 }
 ui.clicked = clicked
 
+ui.clicked_outside = function(id) {
+	return !!(ui.click && !hit_state_map.has(id))
+}
+
 function rightclicked(id) {
 	return ui.rightclick && hit(id)
 }
@@ -2384,14 +2404,14 @@ ui.hit_enter = function(id) {
 	assert(!render_state_map, 'hit_enter() called while rendering')
 	if (ui.captured_id != null)
 		return false
-	return hit_state_map.has(id) && !prev_hit_state_map.has(id)
+	return !!hit_state_map.get(id) && !prev_hit_state_map.get(id)
 }
 
 ui.hit_leave = function(id) {
 	assert(!render_state_map, 'hit_leave() called while rendering')
 	if (ui.captured_id != null)
 		return false
-	return !hit_state_map.has(id) && prev_hit_state_map.has(id)
+	return !hit_state_map.get(id) && !!prev_hit_state_map.get(id)
 }
 
 function hit_match(prefix) {
@@ -2423,27 +2443,35 @@ function set_hit(id) {
 }
 ui.set_hit = set_hit
 
-function hit_popup_parents(a, i, recs) {
+function hit_popup_parents(a, i, recs, hover_parent = true) {
 	if (a[i-1] == CMD_POPUP && !(a[i+POPUP_FLAGS] & POPUP_HOVER_PARENT))
-		return
+		hover_parent = false
 	for (i = cmd_prev_i(a, i); i >= 2; i = cmd_prev_i(a, i)) {
 		let cmd = a[i-1]
 		if (cmd == CMD_END) {
 			i += a[i]
 		} else if (cmd & 1) {
+			let id
 			if (cmd == CMD_POPUP) {
-				set_hit(a[i+POPUP_ID])
+				id = a[i+POPUP_ID]
+				if (hover_parent)
+					set_hit(id)
 				if (!(a[i+POPUP_FLAGS] & POPUP_HOVER_PARENT))
-					return
+					hover_parent = false
 			} else {
 				let arg_i = id_i[cmd] // ID arg index
-				if (arg_i != null)
-					set_hit(a[i+arg_i])
+				if (arg_i != null) {
+					id = a[i+arg_i]
+					if (hover_parent)
+						set_hit(id)
+				}
 			}
+			if (id && !hit_state_map.has(id))
+				hit_state_map.set(id, null)
 		}
 	}
 	if (a.parent_rec_i != null)
-		hit_popup_parents(recs[a.parent_rec_i], a.parent_cmd_i, recs)
+		hit_popup_parents(recs[a.parent_rec_i], a.parent_cmd_i, recs, hover_parent)
 }
 
 function hit_popups(popups, recs) {
@@ -2794,6 +2822,8 @@ ui.keep_focus = function(id) {
 function focus_on_click() {
 	if (!ui.click) return
 	for (let id of hit_state_map.keys()) { // reverse paint order
+		if (!hit_state_map.get(id))
+			continue
 		// prevent focus stealing or clearing (scrollbar, etc.)
 		if (state_map.get(id)?.keep_focus)
 			return
@@ -3001,6 +3031,7 @@ function redraw_all() {
 		// can be changed in hit phase or in build phase.
 		// applied once at the end of the frame.
 		ui.set_cursor()
+		ui.set_tooltip()
 
 		hit_frame(recs, root_popups)
 
@@ -3159,6 +3190,7 @@ function redraw_all() {
 	}
 
 	apply_cursor()
+	apply_tooltip()
 	schedule_save_unsaved_state()
 
 	// focusing_id resets once per frame, after the rebuild loop, not once per
@@ -7773,7 +7805,7 @@ ui.end_button_stack = function(state) {
 }
 
 ui.button = function(
-	id, icon, text, fr, align, valign, style, readonly
+	id, icon, text, fr, align, valign, style, readonly, tooltip
 ) {
 	let action = isobject(icon) ? icon : null // optional command definition
 	let binding // retained action binding, when bound
@@ -7787,6 +7819,8 @@ ui.button = function(
 	next_min_w ??= ui.em(2)
 	ui.button_stack(id, fr, align, valign)
 	let s = ui.state(id, button_update) // button widget state
+	if (hit(id))
+		ui.set_tooltip(tooltip)
 	if (!readonly)
 		ui.capture_enter(id)
 	let state = readonly ? 'readonly' : s.state
@@ -7810,17 +7844,137 @@ ui.button = function(
 	return ui.end_button_stack(state)
 }
 
-ui.primary_button = function(id, icon, s, fr, align, valign, readonly) {
+ui.primary_button = function(id, icon, s, fr, align, valign, readonly, tooltip) {
 	return ui.button(id, icon, s, fr, align, valign,
-		'button-primary', readonly)
+		'button-primary', readonly, tooltip)
 }
 
-ui.bare_button = function(id, icon, text, fr, align, valign, readonly) {
-	return ui.button(id, icon, text, fr, align, valign, '', readonly)
+ui.bare_button = function(id, icon, text, fr, align, valign, readonly, tooltip) {
+	return ui.button(id, icon, text, fr, align, valign, '', readonly, tooltip)
 }
 
 ui.btn = ui.button
 ui.pri_btn = ui.primary_button
+
+//// POPUP STATE -------------------------------------------------------------
+
+/*
+
+	ui.set_popup_open (s, open, canceled=) -> changed
+	ui.popup_update (s, toggle=, close=, canceled=, focus_id=, outside_id=) -> toggled
+
+USGE
+	- init s.open to false when building the widget.
+	- call ui.popup_update() once from the update callback.
+	- omit focus_id or outside_id to skip the corresponding dismissal check.
+	- ui.popup_update() returns true when it applies the toggle request.
+
+BEAHVIOR
+	- publishes  s.open, s.opened, s.closed, s.canceled edge state.
+	- closes on Escape within the supplied focus scope (and sets s.canceled).
+	- closes when clicking outside the container and its nested popups.
+	- callers manage focus and dropdown selection separately.
+
+*/
+
+function set_popup_open(s, open, canceled) {
+	if (!!s.open == !!open)
+		return false
+	s.open = open
+	if (open) {
+		s.opened = true
+	} else {
+		s.closed = true
+		s.canceled = !!canceled
+	}
+	return true
+}
+ui.set_popup_open = set_popup_open
+
+function popup_update(s, toggle, close, canceled, focus_id, outside_id) {
+	s.opened = false
+	s.closed = false
+	s.canceled = false
+	let escape = s.open && focus_id && ui.keydown('escape')
+		&& ui.focus_inside(focus_id)
+	let click_outside = s.open && outside_id && ui.clicked_outside(outside_id)
+	if (escape)
+		ui.capture_keys()
+	if (close || escape || click_outside) {
+		set_popup_open(s, false, canceled || escape)
+	} else if (toggle) {
+		set_popup_open(s, !s.open, canceled)
+		return true
+	}
+	return false
+}
+ui.popup_update = popup_update
+
+//// POPUP BUTTON ------------------------------------------------------------
+
+/*
+
+	if (ui.popup_button(id, icon, text, side='b', align='[')) {
+		... popup contents ...
+		ui.end_popup_button(id)
+	}
+
+	- closing with Escape or the close button restores focus to id+'.button'.
+
+*/
+
+function popup_button_update(id, s) {
+	let button_id = id+'.button'
+	let enter = ui.focused(button_id)
+		&& (ui.keydown('enter') || ui.keydown(' '))
+	let toggle = clicked(button_id) || enter
+	let cancel = ui.state_of(id+'.cancel', 'state') == 'click'
+	if (enter)
+		ui.capture_keys()
+	if (popup_update(s, toggle, cancel, cancel, id, id)) {
+		if (s.closed)
+			ui.focus(button_id)
+	}
+	if (s.opened)
+		ui.focus_first(id+'.picker')
+}
+
+ui.popup_button = function(id, icon, text, side, align) {
+	let s = ui.state(id, popup_button_update)
+	s.open ??= false
+	if (s.closed && s.canceled)
+		ui.focus(id+'.button')
+	ui.focus_group(s.open, null, id)
+	ui.stack(id, 0, 'l', 'c')
+		ui.button(id+'.button', icon, text)
+		if (!s.open) {
+			ui.end_stack()
+			ui.end_focus_group()
+			return false
+		}
+		ui.m(ui.sp1())
+		ui.p(ui.sp1())
+		ui.popup(id+'.popup', 'open', null, side ?? 'b', align ?? '[',
+			'constrain change_side solid')
+			ui.bb_tooltip('bg2', null, 'light', null, ui.sp05())
+			ui.focus_group(false, null, id+'.picker')
+			ui.stack()
+				ui.large()
+				ui.bare_button(id+'.cancel', 'x', null, 0, 'r', 't')
+				ui.p(ui.sp4())
+				ui.v(0, ui.sp4())
+				ui.h2('Settings')
+	return true
+}
+
+ui.end_popup_button = function(id) {
+				ui.end_v()
+			ui.end_stack()
+			ui.end_focus_group()
+		ui.end_popup()
+	ui.end_stack()
+	ui.end_focus_group()
+}
 
 //// HIT EDGE ----------------------------------------------------------------
 
@@ -9660,16 +9814,12 @@ ui.radio_list = function(
 */
 
 function set_dropdown_open(id, s, open, picked, canceled) {
-	if (!!s.open == !!open)
+	if (!set_popup_open(s, open, canceled))
 		return
-	s.open = open
 	if (open) {
-		s.opened = true
 		ui.focus_first(id+'.picker')
 	} else {
-		s.closed = true
 		s.picked = !!picked
-		s.canceled = !!canceled
 	}
 }
 
@@ -9703,13 +9853,10 @@ ui.dropdown_picked = function(id) {
 // ui.state(id).open.
 ui.dropdown_update = function(id, s, disabled) {
 
-	s.opened = false
-	s.closed = false
 	s.picked = false
-	s.canceled = false
 
 	if (disabled) {
-		set_dropdown_open(id, s, false)
+		popup_update(s, false, true)
 		return
 	}
 
@@ -9732,20 +9879,14 @@ ui.dropdown_update = function(id, s, disabled) {
 	let f2 = open && ui.keydown('f2') && ui.focus_inside(picker_id)
 
 	let toggle = click || enter || cancel || f2
-	let escape = open && ui.keydown('escape') && ui.focus_inside(picker_id)
-	let click_outside = open && ui.click && !hovers(popup_id)
-
-	if (picked || escape || click_outside) {
-		open = false
-		if (escape)
-			ui.capture_keys()
-	} else if (toggle) {
-		open = !open
+	if (popup_update(s, toggle, picked, cancel, picker_id, popup_id)) {
 		if (enter || f2)
 			ui.capture_keys()
 	}
-
-	set_dropdown_open(id, s, open, picked, escape || cancel)
+	if (s.opened)
+		ui.focus_first(picker_id)
+	if (s.closed)
+		s.picked = !!picked
 }
 
 // opened by ui.set_dropdown_open().
@@ -13121,6 +13262,8 @@ ui.debug_pane = function(full) {
 			ui.scrollbox('demo_hit_states_sb', .5)
 				ui.v(0, 0, 's', '[')
 					for (let [id, s] of hit_state_map) {
+						if (!s)
+							continue
 						ui.p(ui.sp(), ui.sp05())
 						ui.color('link')
 						ui.text('', isstr(id) ? id : typeof id, 0, 'l')
