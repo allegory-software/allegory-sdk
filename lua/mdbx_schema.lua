@@ -3864,6 +3864,7 @@ function Cur:del()
 	if schema.triggers then
 		fire_triggers(schema, 'after_delete', db, old_t)
 	end
+	log('note', 'db', 'del', '%s', schema.name)
 	return true
 end
 function Db:del(tab, ...)
