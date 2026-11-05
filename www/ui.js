@@ -12224,6 +12224,10 @@ function add_tablist_tab_ids(node, tab_ids) {
 	for (let tab of node.tabs)
 		tab_ids.add(tab.id)
 }
+function restore_dock_tabs(node, restore_tab) {
+	for (let i = 0; i < node.tabs.length; i++)
+		node.tabs[i] = restore_tab(node.tabs[i])
+}
 function add_dock_tab_ids(root, tab_ids) {
 	return walk_dock_tablists(root, add_tablist_tab_ids, tab_ids)
 }
@@ -12253,6 +12257,7 @@ function serialize_dock_layout(node) {
 		let saved_tab = {
 			id: tab.id,
 			kind: tab.kind,
+			args: tab.args,
 			title: tab.title,
 			icon: tab.icon,
 			layout: tab.layout
@@ -12746,6 +12751,10 @@ ui.dock = function(id, layout, on_build_tab, opt) {
 			s.root = create_dock_layout(s, layout)
 		}
 		s.root.toJSON = serialize_dock_root
+		if (saved && opt.restore_tab) {
+			walk_dock_tablists(s.root, restore_dock_tabs, opt.restore_tab)
+			save_dock_layout(id, s)
+		}
 	}
 
 	let drag_tab_id = capture_match(id+'.tabbox.') // id of the dragged tab
