@@ -3063,7 +3063,9 @@ function redraw_all() {
 		add_popup(root_popups, layer_base.z_index * z_index_band, rec_i, i, null)
 		is_building = true
 		dispatch_actions()
+		ui.begin_toolboxes('toolboxes')
 		ui.main()
+		ui.end_toolboxes()
 		reset_spacings()
 		ui.end()
 		is_building = false
@@ -12912,7 +12914,7 @@ ui.remove_dock_tab = function(id, tab_id) {
 
 /*
 
-	ui.begin_toolboxes (tid)  begin toolbox group
+	ui.begin_toolboxes (tid)  begin toolbox group (the frame has one around ui.main)
 	ui.end_toolboxes   ()     end toolbox group
 
 	ui.toolbox (id, title, align='[', valign='t', x0, y0,
