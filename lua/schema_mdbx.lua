@@ -48,7 +48,7 @@ local function install_trigger_helpers(self)
 		'before_delete', 'after_delete',
 	} do
 		self.env[event] = function(arg1, arg2)
-			if isstr(arg1) then --standalone: before_insert('usr', fn)
+			if isstr(arg1) then --standalone: before_insert('user', fn)
 				local tbl = assertf(self.tables[arg1],
 					'unknown table for trigger: %s', arg1)
 				local fn = assertf(isfunc(arg2) and arg2,

@@ -70,10 +70,10 @@ db_schema:import(function()
 
 	tables.call_users = {
 		call        , id, not_null, child_fk,
-		usr         , id, not_null, child_fk, pk(call, usr),
+		user        , id, not_null, child_fk, pk(call, user),
 	}
 
-	add_cols('sess after ctime', {
+	add_cols('session after ctime', {
 		open_call   , id, weak_fk'call',
 		open_call_instance, u16, -- app_instance holding open_call in memory
 	})
@@ -86,7 +86,7 @@ end)
 function webb_call_repair()
 	local app_instance = config('app_instance', 1) -- this process's number
 	for cur, _, open_call, open_call_instance
-		in db():each('sess', 'open_call open_call_instance')
+		in db():each('session', 'open_call open_call_instance')
 	do
 		if open_call and open_call_instance == app_instance then
 			cur:update('open_call open_call_instance', null, null)
@@ -393,9 +393,10 @@ local function remove_peer(call_db, call_id, call, peer, want_notify)
 	call.peers[peer.id] = nil
 	if peer.session_id then
 		call_db:atomic('w', function()
-			if call_db:find('sess', 'open_call', peer.session_id) == call_id then
-				call_db:update('sess', '{}', {
-					sess = peer.session_id,
+			if call_db:find('session', 'open_call', peer.session_id) == call_id
+			then
+				call_db:update('session', '{}', {
+					session = peer.session_id,
 					open_call = null,
 					open_call_instance = null,
 				})
@@ -549,11 +550,11 @@ action.call_signal = function(call_id)
 
 		if session_id then
 			local can_join = call_db:atomic('w', function()
-				if call_db:find('sess', 'open_call', session_id) then
+				if call_db:find('session', 'open_call', session_id) then
 					return false
 				end
-				call_db:update('sess', '{}', {
-					sess = session_id,
+				call_db:update('session', '{}', {
+					session = session_id,
 					open_call = call_id,
 					open_call_instance = config('app_instance', 1),
 				})

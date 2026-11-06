@@ -20,8 +20,8 @@ function auth_schema()
 		tenant      , id, not_null, child_fk,
 	}
 
-	tables.usr = {
-		usr         , idpk    ,
+	tables.user = {
+		user        , idpk    ,
 		anonymous   , bool1   , tab'Account',
 		email       , email   , tab'Profile', section'Contact',
 		emailvalid  , bool0   , tab'Profile', section'Contact',
@@ -49,19 +49,19 @@ function auth_schema()
 		mtime       , mtime   , tab'Activity', --last modification time
 	}
 
-	tables.usr_tenant = {
-		usr         , id, not_null, child_fk,
-		tenant      , id, not_null, child_fk, pk(usr, tenant),
-		--copies of usr.email and usr.phone, unique per tenant.
+	tables.user_tenant = {
+		user        , id, not_null, child_fk,
+		tenant      , id, not_null, child_fk, pk(user, tenant),
+		--copies of user.email and user.phone, unique per tenant.
 		email       , email, uk(tenant, email),
 		phone       , str  , uk(tenant, phone),
 	}
 
-	tables.sess = {
+	tables.session = {
 		--the session id is tohex() of 16 random bytes, so always 32 chars.
-		sess        , {str, maxlen = 32, fixed}, not_null, pk,
+		session     , {str, maxlen = 32, fixed}, not_null, pk,
 		tenant      , id     , not_null, child_fk,
-		usr         , id     , not_null, child_fk,
+		user        , id     , not_null, child_fk,
 		clientip    , str    , --when it was created
 		atime       , atime  , --last use, for expiry
 		ctime       , ctime  ,
@@ -71,7 +71,7 @@ function auth_schema()
 
 		import'lang'
 
-		add_cols('usr after note', {
+		add_cols('user after note', {
 			lang        , lang    , weak_fk, tab'Profile',
 			country     , country , weak_fk, tab'Profile',
 		})
@@ -103,7 +103,7 @@ local function check_tenant(tid)
 end
 
 local function check_user(uid)
-	return checkfound(db():exists('usr', uid) and uid,
+	return checkfound(db():exists('user', uid) and uid,
 		S('invalid_user', 'Invalid user'))
 end
 
@@ -179,24 +179,24 @@ end
 function store.add_session(tid, sid, uid)
 	check_tenant(tid)
 	check_user(uid)
-	db():insert('sess', '{}', {sess = sid, tenant = tid, usr = uid})
+	db():insert('session', '{}', {session = sid, tenant = tid, user = uid})
 end
 
 function store.load_session(tid, sid)
-	local sess_tid, uid, atime = db():find('sess', 'tenant usr atime', sid)
+	local sess_tid, uid, atime = db():find('session', 'tenant user atime', sid)
 	if sess_tid ~= tid then return nil end --not found or other tenant's
 	if atime + store.session_lifetime < now() then return nil, 'expired' end
 	return uid
 end
 
 function store.del_session(tid, sid)
-	if db():find('sess', 'tenant', sid) ~= tid then return end
-	db():del('sess', sid)
+	if db():find('session', 'tenant', sid) ~= tid then return end
+	db():del('session', sid)
 end
 
 local function touch_session(tid, sid)
-	if db():find('sess', 'tenant', sid) ~= tid then return end
-	db():update('sess', '{}', {sess = sid, atime = now()})
+	if db():find('session', 'tenant', sid) ~= tid then return end
+	db():update('session', '{}', {session = sid, atime = now()})
 end
 --callable without the lock.
 function store.touch_session(tid, sid)
@@ -223,8 +223,8 @@ local function encode_roles(roles) -- {role -> true} -> 'role1 ...' | null
 	return #t > 0 and cat(t, ' ') or null
 end
 
---user table: usr row fields + id, tenants, decoded roles.
-local function user_row(u) -- user table -> usr row without the pk
+--user table: user row fields + id, tenants, decoded roles.
+local function user_row(u) -- user table -> user row without the pk
 	local row = update({}, u)
 	row.id = nil
 	row.tenants = nil
@@ -239,7 +239,7 @@ local user_sessions_scan -- rows{uid} -> (sid, tid),...
 local function load_tenants(uid) -- -> {tid1,...}
 	local t = {}
 	user_tenants_scan = user_tenants_scan
-		or db():scan('usr_tenant', 'usr = ?'):select'tenant'
+		or db():scan('user_tenant', 'user = ?'):select'tenant'
 	for _, tid in user_tenants_scan:rows{uid} do
 		t[#t+1] = tid
 	end
@@ -247,7 +247,7 @@ local function load_tenants(uid) -- -> {tid1,...}
 end
 
 local function try_load_user(uid)
-	local u = db():find('usr', '{}', uid)
+	local u = db():find('user', '{}', uid)
 	if not u then return end
 	u.id = uid
 	u.roles = decode_roles(u.roles)
@@ -263,13 +263,13 @@ store.load_user = load_user
 
 function store.users() --return {u1,...}
 	local tenants = {} -- {uid -> {tid1,...}}
-	for _, uid, tid in db():each'usr_tenant' do
+	for _, uid, tid in db():each'user_tenant' do
 		add(attr(tenants, uid), tid)
 	end
 	local t = {}
-	for _, u in db():each('usr', '{}') do
-		local uid = u.usr
-		u.usr = nil
+	for _, u in db():each('user', '{}') do
+		local uid = u.user
+		u.user = nil
 		u.id = uid
 		u.roles = decode_roles(u.roles)
 		u.tenants = tenants[uid] or {}
@@ -279,8 +279,8 @@ function store.users() --return {u1,...}
 end
 
 function store.uid_by(KEY, tid, key)
-	local row = db():find('usr_tenant/tenant,'..KEY, '{}', tid, key)
-	return row and row.usr
+	local row = db():find('user_tenant/tenant,'..KEY, '{}', tid, key)
+	return row and row.user
 end
 
 local function check_uid_by(KEY, tid, key)
@@ -288,9 +288,9 @@ local function check_uid_by(KEY, tid, key)
 		S(KEY..'_taken', KEY..' already registered'))
 end
 
-local function add_usr_tenant(uid, tid, u)
-	db():insert('usr_tenant', '{}', {
-		usr = uid,
+local function add_user_tenant(uid, tid, u)
+	db():insert('user_tenant', '{}', {
+		user = uid,
 		tenant = tid,
 		email = u.email,
 		phone = u.phone,
@@ -304,16 +304,16 @@ function store.add_user(tid, u)
 	if u.email then check_uid_by('email', tid, u.email) end
 	if u.phone then check_uid_by('phone', tid, u.phone) end
 	u.roles = {}
-	local uid = db():insert('usr', '{}', user_row(u))
+	local uid = db():insert('user', '{}', user_row(u))
 	u.id = uid
 	u.tenants = {tid}
-	add_usr_tenant(uid, tid, u)
+	add_user_tenant(uid, tid, u)
 	return u
 end
 
 --memberships and sessions are deleted by fk cascade.
 function store.try_del_user(uid)
-	return db():del('usr', uid)
+	return db():del('user', uid)
 end
 
 function store.update_user(uid, update_fields)
@@ -337,12 +337,12 @@ function store.update_user(uid, update_fields)
 	for k in pairs(old_row) do
 		if row[k] == nil then row[k] = null end
 	end
-	row.usr = uid
-	db():update('usr', '{}', row)
+	row.user = uid
+	db():update('user', '{}', row)
 	if u.email ~= old_row.email or u.phone ~= old_row.phone then
 		for _,tid in ipairs(u.tenants) do
-			db():update('usr_tenant', '{}', {
-				usr = uid,
+			db():update('user_tenant', '{}', {
+				user = uid,
 				tenant = tid,
 				email = u.email or null,
 				phone = u.phone or null,
@@ -354,22 +354,23 @@ end
 
 function store.user_add_tenant(uid, tid)
 	check_tenant(tid)
-	add_usr_tenant(uid, tid, load_user(uid))
+	add_user_tenant(uid, tid, load_user(uid))
 end
 
 function store.user_del_tenant(uid, tid)
-	assert(db():del('usr_tenant', uid, tid))
+	assert(db():del('user_tenant', uid, tid))
 	user_sessions_scan = user_sessions_scan
-		or db():scan('sess/usr', 'usr = ?'):select'sess, tenant':for_update()
+		or db():scan('session/user', 'user = ?')
+			:select'session, tenant':for_update()
 	for _, sid, sess_tid in user_sessions_scan:rows{uid} do
 		if sess_tid == tid then
-			db():del('sess', sid)
+			db():del('session', sid)
 		end
 	end
 end
 
 local function touch_user(uid)
-	db():update('usr', '{}', {usr = uid, atime = now()})
+	db():update('user', '{}', {user = uid, atime = now()})
 end
 --callable without the lock.
 function store.touch_user(uid)
@@ -380,7 +381,7 @@ end
 
 --deletes expired sessions. call it after sync_schema().
 function store.repair()
-	for cur, _, atime in db():each('sess', 'atime') do
+	for cur, _, atime in db():each('session', 'atime') do
 		if atime + store.session_lifetime < now() then
 			cur:del()
 		end

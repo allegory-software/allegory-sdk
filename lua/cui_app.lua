@@ -101,7 +101,7 @@ action['ui_state.json'] = function()
 		local ui_state = checkarg(post'ui_state') -- saved UI state as JSON
 		checkarg(try_json_decode(ui_state, null), 'invalid UI state JSON')
 		db():atomic('w', function()
-			db():update('usr', 'usr ui_state', uid, ui_state)
+			db():update('user', 'user ui_state', uid, ui_state)
 		end)
 		return true
 	else
@@ -215,7 +215,7 @@ local function cui_app(...)
 	if package.loaded[scriptname] then return end
 	webb_app(...)
 	db_schema:import(function()
-		add_cols('usr after theme', {
+		add_cols('user after theme', {
 			ui_state, text, {maxlen = 1024 * 64, control = 'code_edit',
 				lang = 'js'}, internal,
 		})

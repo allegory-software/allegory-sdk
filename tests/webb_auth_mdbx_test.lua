@@ -155,7 +155,7 @@ t0 = 1e11 --atime defaults to the real clock
 local ret, err = store.load_session(tid1, sid1)
 assert(ret == nil and err == 'expired')
 store.repair()
-assert(not db():exists('sess', sid1))
+assert(not db():exists('session', sid1))
 t0 = 0
 print'ok repair'
 
