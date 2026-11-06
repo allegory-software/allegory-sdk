@@ -2591,6 +2591,110 @@ function test.member_scan_unknown_member()
 	end)
 end
 
+function test.scan_txn_cleanup()
+	with_db('scan_txn_cleanup', function(db)
+		add_scan_data(db)
+		local scan
+		db:atomic('r', function()
+			scan = db:scan('scan_rows/status', 'status = :status')
+				:select'tenant_id, id, active, score'
+		end)
+		local args = {status = 'ready'}
+		for _, mode in ipairs{'r', 'w'} do
+			for _, finish in ipairs{'commit', 'abort', 'error'} do
+				local function start()
+					scan.reset(args)
+					assert(scan.next())
+					scan.get{}
+				end
+				if finish == 'error' then
+					local ok, err = pcall(function()
+						db:atomic(mode, function()
+							start()
+							error('interrupted scan')
+						end)
+					end)
+					assert(not ok and tostring(err):find('interrupted scan'))
+				else
+					db:begin(mode)
+					start()
+					db[finish](db)
+				end
+				db:atomic(mode, function()
+					local cur = db:cursor'scan_files'
+					assert(cur:first_raw())
+					scan.close()
+					assert(not cur:closed())
+					assert(#scan:rows_array('[]', args) == 4)
+					assert(not cur:closed())
+					start()
+					scan.close()
+					assert(#scan:rows_array('[]', args) == 4)
+					cur:close()
+				end)
+			end
+		end
+	end)
+end
+
+function test.scan_fatal_txn_cleanup()
+	with_db('scan_fatal_txn_cleanup', function(db)
+		add_scan_data(db)
+		for _, mode in ipairs{'r', 'w'} do
+			db:begin(mode)
+			local scan = db:scan('scan_rows', ''):select'id'
+			scan.reset()
+			assert(scan.next())
+			local child
+			if mode == 'w' then
+				db:begin'w'
+				child = db:scan('scan_files', ''):select'path'
+				child.reset()
+				assert(child.next())
+			end
+			local ok, err = pcall(function()
+				db:checkz('test', ffi.C.MDBX_BAD_TXN)
+			end)
+			assert(not ok and iserror(err, 'db'))
+			assert(not db.txn)
+			db:atomic('r', function()
+				local cur = db:cursor'scan_files'
+				assert(cur:first_raw())
+				scan.close()
+				if child then child.close() end
+				assert(not cur:closed())
+				assert(#scan:rows_array'[]' == 5)
+				if child then assert(#child:rows_array'[]' == 5) end
+				cur:close()
+			end)
+		end
+	end)
+end
+
+function test.scan_nested_txn_cleanup()
+	with_db('scan_nested_txn_cleanup', function(db)
+		add_scan_data(db)
+		for _, finish in ipairs{'commit', 'abort'} do
+			db:begin'w'
+			local parent = db:scan('scan_rows', ''):select'tenant_id, id'
+			parent.reset()
+			assert(parent.next())
+			local _, row = parent.get{}
+			assert(row.tenant_id == 1 and row.id == 1)
+			db:begin'w'
+			local child = db:scan('scan_files', ''):select'tenant_id, path'
+			child.reset()
+			assert(child.next())
+			db[finish](db)
+			assert(parent.next())
+			local _, row = parent.get{}
+			assert(row.tenant_id == 1 and row.id == 2)
+			assert(#child:rows_array'[]' == 5)
+			db:commit()
+		end
+	end)
+end
+
 local name = ...
 if name == 'mdbx_scan_test' then name = nil end
 local tests = name and {name} or test

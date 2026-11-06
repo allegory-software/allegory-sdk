@@ -23,6 +23,7 @@ Rowset attributes to set (* = server-only):
 		  .accept_many   : false         the param can only take one value
 		  .client_filter : false         filter on the client on this param
 		uks              : ['col1 ...',] unique keys (to validate on the client)
+	*  allow_unfiltered : false         don't load rowset totally unfiltered
 	TREE
 		id_col           : 'col'         id column for tree-building
 		parent_col       : 'col'         parent column for tree-building
@@ -30,10 +31,10 @@ Rowset attributes to set (* = server-only):
 	ACCESS
 	*	ro_cols          : 'col1 ...'    read-only columns
 	*	rw_cols          : 'col1 ...'    read-write columns
-		can_add_rows     : f             allow adding new rows
-		can_remove_rows  : f             allow removing rows
-		can_change_rows  : f             allow editing existing rows
-		can_move_rows    : f             allos changing rows' position in the rowset
+		can_add_rows     : false         allow adding new rows
+		can_remove_rows  : false         allow removing rows
+		can_change_rows  : false         allow editing existing rows
+		can_move_rows    : false         allos changing rows' position in the rowset
 	*	allow            : f|'r1 ...'    allow only if current user has a matching role
 
 Field attributes to set:
@@ -393,9 +394,11 @@ function virtual_rowset(init, ...)
 	local repl = repl
 
 	local function check_no_rows(param_vals)
+		local has_params = false
 		for name, def in pairs(rs.params or empty) do
 			if not def.client_filter then
 				local v = param_vals[name] -- [val, ...], val, or nil
+				if v ~= nil then has_params = true end
 				--missing non-col param: no rows
 				if v == nil and not def.for_cols then
 					return true
@@ -404,6 +407,7 @@ function virtual_rowset(init, ...)
 				end
 			end
 		end
+		return rs.allow_unfiltered == false and not has_params
 	end
 
 	function rs:load(param_vals, load_opt)

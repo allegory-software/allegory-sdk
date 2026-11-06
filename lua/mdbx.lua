@@ -37,6 +37,7 @@ TRANSACTIONS
 	db:abort()                                 abort transaction
 	db.txn                                     current txn (nil if none)
 	db:atomic('r'|'w'|'any', fn, ...) -> ...   run fn in transaction
+	db:on_txn_end(fn)                          register transaction-end cleanup
 TABLES
 	db:[try_]dbi_raw(name|dbi) -> dbi          open existing table (once)
 	db:create_table_raw(name, [flags]) -> dbi  create table
@@ -89,10 +90,12 @@ DEBUG
 
 CURSOR LIFETIME
 
-Cursors are txn-owned and automatically closed on txn end and later reused,
-so never use a cursor beyond txn boundaries or you might end up using an
-unrelated cursor! The good news is that you can abandon cursors (and the Lua
-objects that own cursors) and commit/abort will close the leaks.
+Cursors are borrowed, not owned: the txn closes them on txn end, and the db
+reuses them, so if you hold a cursor beyond the txn in which you got it,
+you'll be holding somebody else's cursor! The good news is that you can
+abandon cursors (and the Lua objects that own cursors) and commit/abort will
+close the leaks. If you really need to hold a cursor reference, clean it up
+in a db:on_txn_end(fn) callback, that's what it's for.
 
 ]]
 
@@ -206,6 +209,8 @@ function mdbx_open(file, opt)
 		env_dbis = setmetatable({}, {}), --{dbi->name, name->dbi}
 		readonly = opt.readonly,
 		_ro_txn = nil,
+		_txn_depth = 0,
+		_txn_end_callbacks = {}, --{depth -> {fn -> true}}
 		_cursors = {},
 		type = 'DB',
 		live_schema = {}, --{table_name->table_schema}
@@ -352,14 +357,28 @@ local function invalidate_dbi(self, dbi, name)
 	end
 end
 
+local function end_txn(self)
+	local depth = self._txn_depth
+	local callbacks = self._txn_end_callbacks[depth]
+	if callbacks then
+		for fn in pairs(callbacks) do
+			callbacks[fn] = nil
+			fn()
+		end
+	end
+	self._txn_depth = depth - 1
+end
+
 local function abort_all_txns(self)
 	while self.txn do
 		if self.txn == self._ro_txn then
 			C.mdbx_txn_reset(self.txn)
+			end_txn(self)
 			self.txn = nil
 		else
 			local parent = ptr(self.txn.parent)
 			C.mdbx_txn_abort(self.txn)
+			end_txn(self)
 			local_dbis_discard(self)
 			self:_wtxn_end(false, parent)
 			self.txn = parent
@@ -406,11 +425,13 @@ function Db:begin(mode)
 			self._ro_txn = ro_txn
 		end
 		self.txn = ro_txn
+		self._txn_depth = self._txn_depth + 1
 	elseif mode == 'w' then
 		assert(not self.readonly, 'read-only database')
 		assert(not self.txn or self.txn ~= self._ro_txn, 'begin() in r/o transaction')
 		self:checkz('txn_begin', C.mdbx_txn_begin_ex(self.env, self.txn, 0, txnp, nil))
 		self.txn = txnp[0]
+		self._txn_depth = self._txn_depth + 1
 		self:_wtxn_begin()
 	else
 		assert(false)
@@ -421,6 +442,17 @@ Db._wtxn_begin = noop
 Db._wtxn_precommit = noop
 Db._wtxn_end = noop
 
+function Db:on_txn_end(fn)
+	check_txn(self)
+	local depth = self._txn_depth
+	local callbacks = self._txn_end_callbacks[depth]
+	if not callbacks then
+		callbacks = {}
+		self._txn_end_callbacks[depth] = callbacks
+	end
+	callbacks[fn] = true
+end
+
 function Db:txn_id()
 	check_txn(self)
 	return tonumber(C.mdbx_txn_id(self.txn))
@@ -430,11 +462,13 @@ function Db:commit()
 	check_txn(self)
 	if self.txn == self._ro_txn then
 		self:checkz('txn_commit', C.mdbx_txn_reset(self.txn))
+		end_txn(self)
 		self.txn = nil
 	else
 		local parent = ptr(self.txn.parent)
 		if not parent then self:_wtxn_precommit() end
 		local rc = C.mdbx_txn_commit_ex(self.txn, nil)
+		end_txn(self)
 		local committed = rc == 0
 		local_dbis_discard(self, committed, parent)
 		self:_wtxn_end(committed, parent)
@@ -447,10 +481,12 @@ function Db:abort()
 	check_txn(self)
 	if self.txn == self._ro_txn then
 		self:checkz('txn_abort', C.mdbx_txn_reset(self.txn))
+		end_txn(self)
 		self.txn = nil
 	else
 		local parent = ptr(self.txn.parent)
 		self:checkz('txn_abort', C.mdbx_txn_abort(self.txn))
+		end_txn(self)
 		local_dbis_discard(self)
 		self:_wtxn_end(false, parent)
 		self.txn = parent

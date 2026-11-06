@@ -901,6 +901,38 @@ function test.table_count()
 	end)
 end
 
+function test.txn_end_callbacks()
+	with_db('txn_end_callbacks', function(db)
+		local n = 0
+		local function done() n = n + 1 end
+		for _, mode in ipairs{'r', 'w'} do
+			for _, finish in ipairs{'commit', 'abort'} do
+				db:begin(mode)
+				db:on_txn_end(done)
+				db:on_txn_end(done)
+				local n0 = n
+				db[finish](db)
+				assert(n == n0 + 1)
+				db:begin(mode)
+				db[finish](db)
+				assert(n == n0 + 1)
+			end
+		end
+		local parent_done, child_done
+		db:begin'w'
+		db:on_txn_end(function() parent_done = true end)
+		db:begin'w'
+		db:begin'w'
+		db:on_txn_end(function() child_done = true end)
+		db:abort()
+		assert(child_done and not parent_done)
+		db:commit()
+		assert(not parent_done)
+		db:commit()
+		assert(parent_done)
+	end)
+end
+
 local name = ...
 if name == 'mdbx_test' then name = nil end
 local tests = name and {name} or test

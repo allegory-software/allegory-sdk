@@ -333,14 +333,11 @@ local function scan_rowset_init(rs, opt, ...)
 		rs_db():atomic('r', prepare)
 	end
 
-	--TODO: after a run that died mid-iteration the scan still holds a cursor from
-	--a dead transaction; close() drops it before the next seek but it's a HACK.
 	local function load_rows(res, param_vals)
 		res.rows = scan:rows_array('[]', param_vals)
 		res.txn_id = rs_db():txn_id()
 	end
 	function rs:load_rows(res, param_vals)
-		scan.close()
 		rs_db():atomic('r', load_rows, res, param_vals)
 	end
 
@@ -349,7 +346,6 @@ local function scan_rowset_init(rs, opt, ...)
 		for _, name in ipairs(key_names) do
 			args[name] = val_or_old(vals, name)
 		end
-		row_scan.close()
 		return row_scan:first('[]', args)
 	end
 
@@ -557,6 +553,7 @@ end)
 local function members_rowset_init(rs, link_table)
 
 	rs.manual_init_fields = true
+	rs.allow_unfiltered = false
 
 	local is_prepared
 	local lookups    -- {{key_col=, table=, col=, param=},...} in pk order

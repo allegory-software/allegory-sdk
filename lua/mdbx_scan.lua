@@ -976,6 +976,12 @@ function Db:scan(tbl, path, alias)
 
 	local cur
 	local base_cur --base-table lookup state
+	local function close()
+		started = nil
+		if cur then cur:close(); cur = nil end
+		if base_cur then base_cur:close(); base_cur = nil end
+	end
+	scan.close = close
 
 	--move on the first row between the seek key and the limit key given by
 	--next_bounds(); when move finds no row there, or lands past the limit key,
@@ -992,7 +998,10 @@ function Db:scan(tbl, path, alias)
 			if has_limit then
 				limit_rec.data, limit_rec.size = limit_data, limit_sz
 			end
-			if not cur then cur = db:cursor(schema.name) end
+			if not cur then
+				db:on_txn_end(close)
+				cur = db:cursor(schema.name)
+			end
 			local start_op = must_seek and seek_op or first_op
 			local landed = cur:move_raw_into(start_op, key_rec, val_rec)
 			if landed and last_dup_op and not must_seek then
@@ -1072,12 +1081,6 @@ function Db:scan(tbl, path, alias)
 		base_key_rec = MDBX_val()
 		base_val_rec = MDBX_val()
 		scan.base_val_rec = base_val_rec
-	end
-
-	function scan.close()
-		started = nil
-		if cur then cur:close(); cur = nil end
-		if base_cur then base_cur:close(); base_cur = nil end
 	end
 
 	--col decoder -------------------------------------------------------------
