@@ -5352,6 +5352,7 @@ ui.shadow_def = function(theme_name, name, x, y, blur, h, s, L, a, inset) {
 // ---------------------------------------------------------------------------
 ui.shadow_def('light', 'tooltip' ,  2,  2,  9, 0, 0, 0, 0.26)
 ui.shadow_def('light', 'toolbox' ,  1,  1,  4, 0, 0, 0, 0.66)
+ui.shadow_def('light', 'input'   ,  1,  1,  2, 0, 0, 0, 0.66)
 ui.shadow_def('light', 'menu'    ,  0,  5, 16, 0, 0, 0, 0.20)
 ui.shadow_def('light', 'button'  ,  0,  0,  2, 0, 0, 0, 0.06)
 ui.shadow_def('light', 'thumb'   ,  0,  0,  2, 0, 0, 0, 0.66)
@@ -5360,6 +5361,7 @@ ui.shadow_def('light', 'picker'  ,  0,  5, 10, 0, 0, 0, 0.13) // large fuzzy sha
 
 ui.shadow_def('dark' , 'tooltip' ,  2,  2,  9, 0, 0, 0, 0.26)
 ui.shadow_def('dark' , 'toolbox' ,  1,  1,  4, 0, 0, 0, 0.66)
+ui.shadow_def('dark' , 'input'   ,  1,  1,  4, 0, 0, 0, 0.66)
 ui.shadow_def('dark' , 'menu'    ,  1,  1,  9, 0, 0, 0, 1.00)
 ui.shadow_def('dark' , 'button'  ,  0,  0,  2, 0, 0, 0, 1.00)
 ui.shadow_def('dark' , 'thumb'   ,  1,  1,  3, 0, 0, 0, 0.66)
@@ -5392,7 +5394,9 @@ function set_drop_shadow(st) {
 }
 
 function set_shadow(s) {
-	let st = assert(cur_theme.shadow[s], 'unknown shadow ', s)
+	let st = cur_theme.shadow[s]
+	if (!st)
+		return reset_shadow()
 	assert(!st[SHADOW_INSET], 'inset shadow outside bb: ', s)
 	set_drop_shadow(st)
 	cur_shadow = st
@@ -5410,7 +5414,9 @@ ui.reset_shadow = reset_shadow
 
 draw[CMD_SHADOW] = function(a, i) {
 	let s = a[i+0]
-	let st = assert(cur_theme.shadow[s], 'unknown shadow ', s)
+	let st = cur_theme.shadow[s]
+	if (!st)
+		return reset_shadow()
 	if (!st[SHADOW_INSET])
 		set_drop_shadow(st)
 	cur_shadow = st
@@ -8846,6 +8852,7 @@ ui.input = function(id, value, field, fr, align, valign, text_align, no_box,
 		let state =
 			(readonly ? STATE_READONLY : 0)
 			| (focused ? STATE_FOCUSED : 0)
+		ui.shadow('input')
 		ui.bb('input', state, 1, 'intense', state)
 		ui.ph(ui.em(input_pad_x_em))
 		ui.color('text', state)
@@ -9036,6 +9043,7 @@ ui.num_slider = function(id, value, field, fr, align, valign, readonly) {
 		let state =
 			(readonly ? STATE_READONLY : 0)
 			| (focused ? STATE_FOCUSED : 0)
+		ui.shadow('input')
 		ui.bb('input', state, 1, 'intense', state)
 		ui.p(1)
 		ui.h(0, 0, 's', 's')
@@ -9919,8 +9927,10 @@ ui.dropdown = function(id, update, want_open, fr, align, valign, no_box,
 
 		ui.focus_group(open, null, id)
 		ui.stack(id)
-		if (!no_box)
+		if (!no_box) {
+			ui.shadow('input')
 			ui.bb('input', state, 1, 'intense', state)
+		}
 		ui.p(s.pad_l, pad_t, s.pad_r, pad_b)
 		ui.min_w(min_w)
 
@@ -12082,6 +12092,7 @@ function tab_strip(
 	ui.measure(tablist_id+'.strip')
 	if (is_moving && cs.src_tablist == tablist)
 		draw_dock_drag(id, s, cs)
+	ui.shadow('input')
 	ui.bb('bg1', null, 'b', 'intense')
 	let skip_tab = is_moving && cs.src_tablist == tablist // dragged tab
 		? tabs[cs.tab_i] : null
