@@ -70,7 +70,7 @@ db_schema:import(function()
 
 	tables.call_users = {
 		call        , id, not_null, child_fk,
-		user        , id, not_null, child_fk, pk(call, user),
+		user        , id, not_null, child_fk, pk(call, user), aka'usr',
 	}
 
 	add_cols('session after ctime', {

@@ -20,8 +20,8 @@ function auth_schema()
 		tenant      , id, not_null, child_fk,
 	}
 
-	tables.user = {
-		user        , idpk    ,
+	tables.user = { aka'usr',
+		user        , idpk    , aka'usr',
 		anonymous   , bool1   , tab'Account',
 		email       , email   , tab'Profile', section'Contact',
 		emailvalid  , bool0   , tab'Profile', section'Contact',
@@ -49,19 +49,19 @@ function auth_schema()
 		mtime       , mtime   , tab'Activity', --last modification time
 	}
 
-	tables.user_tenant = {
-		user        , id, not_null, child_fk,
+	tables.user_tenant = { aka'usr_tenant',
+		user        , id, not_null, child_fk, aka'usr',
 		tenant      , id, not_null, child_fk, pk(user, tenant),
 		--copies of user.email and user.phone, unique per tenant.
 		email       , email, uk(tenant, email),
 		phone       , str  , uk(tenant, phone),
 	}
 
-	tables.session = {
+	tables.session = { aka'sess',
 		--the session id is tohex() of 16 random bytes, so always 32 chars.
-		session     , {str, maxlen = 32, fixed}, not_null, pk,
+		session     , {str, maxlen = 32, fixed}, not_null, pk, aka'sess',
 		tenant      , id     , not_null, child_fk,
-		user        , id     , not_null, child_fk,
+		user        , id     , not_null, child_fk, aka'usr',
 		clientip    , str    , --when it was created
 		atime       , atime  , --last use, for expiry
 		ctime       , ctime  ,
