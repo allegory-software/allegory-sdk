@@ -220,7 +220,8 @@ function app_dock_tab(tab) {
 			rowset_name: tab.args.rowset_name,
 		})
 		let nav = ui.state_of(id, 'nav')
-		ui.set_current_tab_title(nav.rowset_label ?? nav.rowset_name)
+		if (nav.ready)
+			ui.set_current_tab_title(nav.rowset_label ?? nav.rowset_name)
 	} else if (tab.kind == 'call') {
 		let id = 'app_dock.tab.'+tab.id+'.call'
 		let s = ui.state(id)

@@ -5224,6 +5224,12 @@ ui.nav = function(id, opt) {
 		e.last_focused_fi = null
 
 		e.cols = apply_view ? saved_opt('cols') : null
+		if (e.cols != null) {
+			e.cols = words(e.cols).filter(col => {
+				let field = all_fields_map[col]
+				return field && !field.internal && field != group_field
+			}).join(' ') || null
+		}
 		e.order_by = apply_view ? saved_opt('order_by') : null
 		e.can_be_tree = can_be_tree
 		if (apply_view && e.can_filter())
