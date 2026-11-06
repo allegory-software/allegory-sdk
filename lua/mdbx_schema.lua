@@ -3125,13 +3125,21 @@ function Db:sync_schema(src, opt)
 			P('drop table: %s', tbl_name)
 			assert(self:drop_table(tbl_name))
 		end
+		for old_name, d in sortedpairs(tables.update or empty) do
+			local new_name = d.new.name
+			if new_name ~= old_name then
+				P('rename table: %s -> %s', old_name, new_name)
+				self:rename_table(old_name, new_name)
+			end
+		end
 		for tbl_name, tbl in sortedpairs(tables.add or empty) do
 			P('create table: %s', tbl_name)
 			self:create_table(tbl_name, copy_base_schema(tbl))
 		end
 
 		--rename columns, then apply the complete new table definition.
-		for tbl_name, d in sortedpairs(tables.update or empty) do
+		for _, d in sortedpairs(tables.update or empty) do
+			local tbl_name = d.new.name
 			for old_col, fd in sortedpairs(
 				d.fields and d.fields.update or empty)
 			do
@@ -3153,7 +3161,8 @@ function Db:sync_schema(src, opt)
 				self:add_index(tbl_name, ix)
 			end
 		end
-		for tbl_name, d in sortedpairs(tables.update or empty) do
+		for _, d in sortedpairs(tables.update or empty) do
+			local tbl_name = d.new.name
 			for ix_name, ix in sortedpairs(d.ixs and d.ixs.add or empty) do
 				P('add index: %s', ix_name)
 				self:add_index(tbl_name, ix)
@@ -3167,7 +3176,8 @@ function Db:sync_schema(src, opt)
 				self:add_fk(copy_fk(fk))
 			end
 		end
-		for tbl_name, d in sortedpairs(tables.update or empty) do
+		for _, d in sortedpairs(tables.update or empty) do
+			local tbl_name = d.new.name
 			for fk_name, fk in sortedpairs(d.fks and d.fks.add or empty) do
 				P('add fk: %s.%s', tbl_name, fk_name)
 				self:add_fk(copy_fk(fk))
