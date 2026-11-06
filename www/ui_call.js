@@ -1579,24 +1579,34 @@ function draw_call_media(id, capture, devices, device_kind, label,
 	let selected_device = get_device_choice(input_devices, capture.device_id)
 	ui.h(0, ui.sp())
 		ui.label(id, label, 0)
-		let is_enabled = ui.checkbox(id, capture.is_enabled)
 		let device = ui.list_dropdown(id+'.device', input_devices,
 			selected_device, call_device_field)
 		let device_id = device ? device.deviceId : null
-		if (is_enabled != capture.is_enabled || device_id != capture.device_id)
-			set_capture(is_enabled, device_id)
-		if (capture.pending) ui.text('', 'Updating...', 0)
-		if (capture.track) {
-			ui.text('', capture.track.label, 0)
-			ui.text('', capture.track.enabled ? 'On' : 'Muted', 0)
-		} else {
-			ui.text('', 'Not capturing', 0)
-		}
-		if (capture.error && !capture.pending)
-			if (ui.button(id+'.retry', '', 'Retry'))
-				set_capture(true, capture.device_id)
+		if (device_id != capture.device_id)
+			set_capture(capture.is_enabled, device_id)
 	ui.end_h()
-	if (capture.error) ui.text('', capture.error, 0)
+	ui.h(0, ui.sp())
+		ui.box()
+		ui.h(0, ui.sp())
+			if (capture.pending)
+				ui.text('', 'Updating...', 0)
+			if (capture.track) {
+				ui.text('', capture.track.label, 1, 'l', 'c', 0)
+				ui.text('', capture.track.enabled ? 'On' : 'Muted', 0)
+			} else {
+				ui.text('', 'Not capturing', 0)
+			}
+			if (capture.error && !capture.pending)
+				if (ui.button(id+'.retry', '', 'Retry'))
+					set_capture(true, capture.device_id)
+		ui.end_h()
+	ui.end_h()
+	if (capture.error) {
+		ui.h(0, ui.sp())
+			ui.box()
+			ui.text('', capture.error, 0)
+		ui.end_h()
+	}
 }
 
 // Speaker choice for peers' audio.
@@ -1616,7 +1626,7 @@ function draw_call_speaker(id, call) {
 	if (call.speaker.error) ui.text('', call.speaker.error, 0)
 }
 
-// One peer's name, microphone state, video and connection status.
+// One peer's name, video and connection status.
 
 function draw_tile_label(text, align, valign, icon) {
 	ui.m(ui.sp05())
@@ -1634,11 +1644,10 @@ function draw_tile_label(text, align, valign, icon) {
 
 // received media is encrypted in every mode: P2P by WebRTC's DTLS-SRTP,
 // SFU by the call's frame encryption.
-function draw_call_tile(id, name, is_muted, stream, placeholder, status,
+function draw_call_tile(id, name, stream, placeholder, status,
 	connection_info, is_encrypted) {
 	ui.v(1, ui.sp(), 's', 's')
 		if (status) ui.text('', status, 0)
-		if (is_muted) ui.text('', 'Microphone muted', 0)
 		ui.stack('', 1, 's', 's')
 			ui.bb('bg1', null, 1, 'intense')
 			if (stream)
@@ -1695,106 +1704,8 @@ ui.call = ui.stateful_widget(function(id) {
 					guest_name = ui.input(id+'.name', guest_name)
 				ui.end_h()
 			}
-			ui.h(0, ui.sp())
-				if (is_active) {
-					if (ui.button(id+'.leave', '', 'Leave')) {
-						call.leave()
-						replace_ended_call()
-					}
-				} else {
-					if (ui.button(id+'.join', '', 'Join', null,
-						null, null, null, !can_join || !call_id || !invite_token
-							|| !(opt.name || guest_name?.trim()))) {
-						call_error = null
-						call.join({...opt, name: opt.name || guest_name.trim()})
-					}
-				}
-			ui.end_h()
-
-			// Force SFU for every peer in the joined call.
-
-			if (call.state == 'joined') {
-				ui.h(0, ui.sp())
-					ui.label(id+'.force_sfu', 'Force SFU (whole call)', 0)
-					let want_force_sfu = ui.checkbox( // requested SFU override
-						id+'.force_sfu', call.want_force_sfu)
-					if (want_force_sfu != call.want_force_sfu)
-						call.set_force_sfu(want_force_sfu)
-				ui.end_h()
-			}
 			ui.text('', 'Status: '+call.state, 0)
 			if (call_error) ui.text('', call_error, 0)
-			draw_call_media(id+'.microphone', call.microphone, call.devices,
-				'audioinput', 'Microphone', call.set_microphone)
-			ui.h(0, ui.sp())
-				ui.label(id+'.echo_cancellation', 'Echo cancellation', 0)
-				let want_echo_cancellation = ui.checkbox( // checkbox value
-					id+'.echo_cancellation',
-						call.microphone.want_echo_cancellation)
-				ui.label(id+'.noise_suppression', 'Noise suppression', 0)
-				let want_noise_suppression = ui.checkbox( // checkbox value
-					id+'.noise_suppression',
-						call.microphone.want_noise_suppression)
-			ui.end_h()
-			if (want_echo_cancellation != call.microphone.want_echo_cancellation
-				|| want_noise_suppression
-					!= call.microphone.want_noise_suppression)
-				call.set_microphone(call.microphone.is_enabled,
-					call.microphone.device_id,
-					want_echo_cancellation, want_noise_suppression)
-
-			// Microphone level sampling and meter display.
-
-			let level
-			if (!call.microphone.track?.enabled) {
-				meter_timer()
-				microphone_level = null
-				level = call.microphone_level()
-			} else {
-				if (microphone_level == null) {
-					microphone_level = call.microphone_level()
-					if (microphone_level != null) meter_timer(.1)
-				}
-				level = microphone_level
-			}
-			if (call.microphone.track) {
-				ui.h(0, ui.sp())
-					ui.text('', 'Microphone level', 0)
-					if (level == null) {
-						if (ui.button(id+'.meter', '', 'Enable meter'))
-							call.set_microphone(true)
-					} else {
-						let fr = clamp( // bar fraction
-							1 + Math.log10(level) / 3, 0, 1)
-						ui.min_wh(ui.em(8), ui.em(.5))
-						ui.h(0, 0, 'l', 'c')
-							ui.bb('bg1', null, 1, 'intense')
-							if (fr > 0) {
-								ui.stack('', fr, 's', 's')
-									ui.bb('link')
-								ui.end_stack()
-							}
-							if (fr < 1) {
-								ui.stack('', 1 - fr, 's', 's')
-								ui.end_stack()
-							}
-						ui.end_h()
-					}
-				ui.end_h()
-			}
-			draw_call_media(id+'.camera', call.camera, call.devices,
-				'videoinput', 'Camera', call.set_camera)
-			ui.h(0, ui.sp())
-				ui.label(id+'.background_blur', 'Blur background', 0)
-				let want_background_blur = ui.checkbox( // checkbox value
-					id+'.background_blur', call.camera.want_background_blur)
-			ui.end_h()
-			if (want_background_blur != call.camera.want_background_blur)
-				call.set_camera(call.camera.is_enabled, call.camera.device_id,
-					want_background_blur)
-			// browsers without audio output routing: no speaker choice.
-			if (HTMLMediaElement.prototype.setSinkId)
-				draw_call_speaker(id+'.speaker', call)
 			for (let peer of call.peers)
 				if (peer.audio_error) {
 					ui.h(0, ui.sp())
@@ -1819,7 +1730,6 @@ ui.call = ui.stateful_widget(function(id) {
 							if (tile_i == 0) {
 								draw_call_tile(id+'.local',
 									call.name || opt.name || guest_name || 'Local',
-									!is_capture_enabled(call.microphone),
 									is_capture_enabled(call.camera)
 										? call.local_stream : null,
 									'Camera off', null)
@@ -1829,7 +1739,6 @@ ui.call = ui.stateful_widget(function(id) {
 									peer.video_bitrate == null
 										? '--' : (peer.video_bitrate / 1000).toFixed(1)
 								draw_call_tile(id+'.peer.'+peer.id, peer.name,
-									peer.media && !peer.media.microphone,
 									peer.media?.camera ? peer.stream : null,
 									peer.media ? 'Camera off'
 										: 'Waiting for media state',
@@ -1841,6 +1750,155 @@ ui.call = ui.stateful_widget(function(id) {
 					ui.end_h()
 				}
 			ui.end_v()
+
+			// Microphone, camera and join/leave controls.
+
+			ui.p(ui.sp1())
+			ui.stack('', 0)
+				ui.h(0, ui.sp(), 'c', 'c')
+					if (ui.button(id+'.microphone',
+						call.microphone.is_enabled ? 'microphone' : 'microphone-off',
+						null, null, null, null,
+						call.microphone.is_enabled ? 'button' : 'button-danger', null,
+						call.microphone.is_enabled ? 'Unmuted: mute' : 'Muted: unmute'))
+						call.set_microphone(!call.microphone.is_enabled)
+					if (ui.button(id+'.camera',
+						call.camera.is_enabled ? 'video' : 'video-off',
+						null, null, null, null,
+						call.camera.is_enabled ? 'button' : 'button-danger', null,
+						call.camera.is_enabled
+							? 'Camera on: turn off' : 'Camera off: turn on'))
+						call.set_camera(!call.camera.is_enabled)
+					if (is_active) {
+						if (ui.button(id+'.leave', 'phone-end', null,
+							null, null, null, 'button-danger', null, 'In call: leave')) {
+							call.leave()
+							replace_ended_call()
+						}
+					} else {
+						if (ui.primary_button(id+'.join', 'phone', null, null,
+							null, null, !can_join || !call_id || !invite_token
+								|| !(opt.name || guest_name?.trim()), 'Join call')) {
+							call_error = null
+							call.join({...opt, name: opt.name || guest_name.trim()})
+						}
+					}
+				ui.end_h()
+				ui.h(0, ui.sp(), 'r', 'c')
+					if (ui.button(id+'.background_blur',
+						call.camera.want_background_blur ? 'blur' : 'blur-off',
+						null, null, null, null,
+						call.camera.want_background_blur ? 'button-primary' : 'button',
+						null, call.camera.want_background_blur
+							? 'Background blur on: turn off' : 'Background blur off: turn on'))
+						call.set_camera(call.camera.is_enabled, call.camera.device_id,
+							!call.camera.want_background_blur)
+					if (ui.popup_button(id+'.settings', 'settings', null, 't', ']')) {
+						ui.pb(ui.sp8())
+						ui.min_w(ui.em(24))
+						ui.v_aligned(0, ui.sp(), 's', 't')
+
+							// Force SFU for every peer in the joined call.
+
+							if (call.state == 'joined') {
+								ui.h(0, ui.sp())
+									ui.box()
+									ui.h(0, ui.sp())
+										let want_force_sfu = ui.checkbox( // requested SFU override
+											id+'.force_sfu', call.want_force_sfu)
+										ui.label(id+'.force_sfu', 'Force SFU (whole call)', 0)
+									ui.end_h()
+									if (want_force_sfu != call.want_force_sfu)
+										call.set_force_sfu(want_force_sfu)
+								ui.end_h()
+							}
+
+							// Microphone device.
+
+							ui.mt(ui.sp4())
+							draw_call_media(id+'.microphone', call.microphone, call.devices,
+								'audioinput', 'Microphone', call.set_microphone)
+
+							// Microphone level meter.
+
+							let level
+							if (!call.microphone.track?.enabled) {
+								meter_timer()
+								microphone_level = null
+								level = call.microphone_level()
+							} else {
+								if (microphone_level == null) {
+									microphone_level = call.microphone_level()
+									if (microphone_level != null) meter_timer(.1)
+								}
+								level = microphone_level
+							}
+							ui.h(1, ui.sp())
+								ui.box()
+								let fr = clamp(1 + Math.log10(level ?? 0) / 3, 0, 1)
+								ui.min_h(ui.em(.5))
+								ui.h(0, 0, 's', 'c')
+									ui.bb('bg1', null, 1, 'intense')
+									if (fr > 0) {
+										ui.stack('', fr, 's', 's')
+											ui.bg('marker')
+										ui.end_stack()
+									}
+									if (fr < 1) {
+										ui.stack('', 1 - fr, 's', 's')
+										ui.end_stack()
+									}
+								ui.end_h()
+							ui.end_h()
+
+							// Microphone echo canceling and noise suppression.
+
+							ui.h(0, ui.sp())
+								ui.box()
+								ui.h(0, ui.sp())
+									let want_echo_cancellation = ui.checkbox( // checkbox value
+										id+'.echo_cancellation',
+											call.microphone.want_echo_cancellation)
+									ui.label(id+'.echo_cancellation', 'Echo cancellation', 0)
+								ui.end_h()
+							ui.end_h()
+							ui.h(0, ui.sp())
+								ui.box()
+								ui.h(0, ui.sp())
+									let want_noise_suppression = ui.checkbox( // checkbox value
+										id+'.noise_suppression',
+											call.microphone.want_noise_suppression)
+									ui.label(id+'.noise_suppression', 'Noise suppression', 0)
+								ui.end_h()
+							ui.end_h()
+							if (want_echo_cancellation != call.microphone.want_echo_cancellation
+								|| want_noise_suppression
+									!= call.microphone.want_noise_suppression)
+								call.set_microphone(call.microphone.is_enabled,
+									call.microphone.device_id,
+									want_echo_cancellation, want_noise_suppression)
+
+							// Camera settings
+
+							ui.mt(ui.sp4())
+							draw_call_media(id+'.camera', call.camera, call.devices,
+								'videoinput', 'Camera', call.set_camera)
+
+							// Speaker Settings
+
+							ui.mt(ui.sp4())
+							if (HTMLMediaElement.prototype.setSinkId)
+								draw_call_speaker(id+'.speaker', call)
+
+						ui.end_v_aligned()
+						ui.end_popup_button(id+'.settings')
+					}
+				ui.end_h()
+			ui.end_stack()
+			if (!ui.dropdown_open(id+'.settings')) {
+				meter_timer()
+				microphone_level = null
+			}
 		ui.end_v()
 		return call
 	}
