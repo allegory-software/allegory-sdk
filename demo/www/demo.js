@@ -115,6 +115,30 @@ function saved_state_grid(id) {
 // previous button state, before the widget initializes its fields.
 function app_dock_empty_tab(tab) {
 	let tab_id = 'app_dock.tab.'+tab.id
+	let s = ui.state(tab_id+'.rowsets')
+	if (!s.free) {
+		s.items = [] // [{id, label}]
+		s.load_error = null // rowset listing error text or null
+		s.request = null // rowset listing request or null
+		ui.on_free(tab_id+'.rowsets', function(s) {
+			if (s.request) s.request.abort()
+		})
+		s.request = glue.get('/rowset.json/rowsets', function(rowsets) {
+			s.request = null
+			let names = new Set(rowsets.rows.map(row => row[0]))
+			// add client rowsets to the set
+			for (let name in ui.rowsets)
+				if (!ui.rowsets[name].internal)
+					names.add(name)
+			s.items = [...names].sort().map(name => ({id: name, label: name}))
+			ui.animate()
+		}, function(error, type) {
+			if (type == 'abort') return
+			s.request = null
+			s.load_error = error
+			ui.animate()
+		}, {silent: true})
+	}
 	v(0, sp2(), 'c', 'c')
 		if (button(tab_id+'.container', 'layout', 'Container'))
 			set_dock_tab('app_dock', tab.id,
@@ -147,6 +171,18 @@ function app_dock_empty_tab(tab) {
 		if (button(tab_id+'.saved_state', 'database', 'Saved state'))
 			set_dock_tab('app_dock', tab.id,
 				{kind: 'saved_state', title: 'Saved state', icon: 'database'})
+		let rowset_name = menu_button(tab_id+'.rowsets_button',
+			'database', 'Rowsets', s.items, null, null, null, null,
+			!!s.request || !!s.load_error)
+		if (rowset_name)
+			set_dock_tab('app_dock', tab.id, {
+				kind: 'rowset', title: rowset_name, icon: 'database',
+				args: {rowset_name: rowset_name},
+			})
+		if (s.load_error) text('', s.load_error, 0)
+		if (button(tab_id+'.call', 'phone', 'Call'))
+			set_dock_tab('app_dock', tab.id,
+				{kind: 'call', title: 'Call', icon: 'phone'})
 	end_v()
 }
 
@@ -178,6 +214,41 @@ function app_dock_tab(tab) {
 		ui.open_ports('app_dock.tab.'+tab.id+'.open_ports')
 	} else if (tab.kind == 'saved_state') {
 		saved_state_grid('app_dock.tab.'+tab.id+'.saved_state.grid')
+	} else if (tab.kind == 'rowset') {
+		ui.grid('app_dock.tab.'+tab.id+'.rowset', {
+			rowset_name: tab.args.rowset_name,
+		})
+	} else if (tab.kind == 'call') {
+		let id = 'app_dock.tab.'+tab.id+'.call'
+		let s = ui.state(id)
+		if (!s.free) {
+			s.demo_call = null // {call, invite_token} or null before loading
+			s.load_error = null // credentials error text or null
+			s.request = null // credentials request or null
+			ui.on_free(id, function(s) {
+				if (s.request) s.request.abort()
+			})
+			s.request = glue.get('/call_demo.json', function(demo_call) {
+				s.request = null
+				s.demo_call = demo_call
+				ui.animate()
+			}, function(error, type) {
+				if (type == 'abort') return
+				s.request = null
+				s.load_error = error
+				ui.animate()
+			}, {silent: true})
+		}
+		v(1, sp(), 's', 's')
+			if (s.request) text('', 'Loading demo call...', 0)
+			if (s.load_error) text('', s.load_error, 0)
+			ui.call(id+'.widget', {
+				call_id: s.demo_call ? String(s.demo_call.call) : null,
+				invite_token: s.demo_call?.invite_token,
+				name: user.name,
+				can_join: s.demo_call != null,
+			})
+		end_v()
 	} else if (tab.kind) {
 		app_dock_app_tab(tab)
 	} else {
@@ -197,6 +268,12 @@ function app_dock_tab_strip(tablist_id, selected_tab, tablist, layout) {
 
 let app_dock_tab_opt = { // dock options
 	on_build_strip: app_dock_tab_strip,
+	restore_tab(tab) {
+		if (tab.kind == 'rowset'
+				&& !(isstr(tab.args?.rowset_name) && tab.args.rowset_name))
+			return {id: tab.id}
+		return tab
+	},
 }
 
 main = function() {
