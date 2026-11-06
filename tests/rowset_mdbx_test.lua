@@ -113,6 +113,10 @@ function test.prepare_table_rowsets()
 			c1, id,
 			c2, id,
 		}
+		tables.terminal = {
+			t_id, id, pk't_id', fk't',
+			name, id, fk't',
+		}
 		add_fk('child', 'c1 c2', 'pair')
 	end)
 	with_db('prepare_table_rowsets', function(tdb)
@@ -138,6 +142,14 @@ function test.prepare_table_rowsets()
 		assert(lookup:can_add_row{} == false)
 		assert(lookup:can_change_row{} == false)
 		assert(lookup:can_remove_row{} == false)
+		local terminal = rowset.lookup_terminal
+		terminal:prepare()
+		for _, f in ipairs(terminal.fields) do
+			assert(not f.lookup_rowset_name)
+			assert(not f.lookup_cols and not f.display_col)
+		end
+		assert(rowset.table_terminal.fields.t_id.lookup_rowset_name == 'lookup_t')
+		assert(rowset.table_terminal.fields.name.lookup_rowset_name == 'lookup_t')
 		prepare_table_rowsets()
 		assert(rowset.table_t == rs and rowset.table_child == child_rs)
 		local listed = {}
@@ -150,6 +162,8 @@ function test.prepare_table_rowsets()
 		rowset.table_child = nil
 		rowset.table_pair = nil
 		rowset.lookup_t = nil
+		rowset.table_terminal = nil
+		rowset.lookup_terminal = nil
 	end, schema)
 end
 

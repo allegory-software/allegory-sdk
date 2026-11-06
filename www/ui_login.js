@@ -32,6 +32,11 @@ ui.login_window = function() {
 			ui.animate()
 		}, {silent: true})
 
+	let has_inputs = !!window.user && !user.signed_in
+	if (has_inputs && !s.has_inputs)
+		ui.focus_first('login')
+	s.has_inputs = has_inputs
+
 	if (window.user && user.signed_in)
 		return true
 
@@ -120,8 +125,6 @@ ui.login_window = function() {
 		ui.end_v()
 		ui.end_focus_group()
 	ui.end_popup()
-
-	ui.focus_first('login')
 
 	return false
 }

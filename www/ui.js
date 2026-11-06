@@ -5354,16 +5354,16 @@ ui.shadow_def('light', 'tooltip' ,  2,  2,  9, 0, 0, 0, 0.26)
 ui.shadow_def('light', 'toolbox' ,  1,  1,  4, 0, 0, 0, 0.66)
 ui.shadow_def('light', 'input'   ,  1,  1,  2, 0, 0, 0, 0.66)
 ui.shadow_def('light', 'menu'    ,  0,  5, 16, 0, 0, 0, 0.20)
-ui.shadow_def('light', 'button'  ,  0,  0,  2, 0, 0, 0, 0.06)
+ui.shadow_def('light', 'button'  ,  1,  1,  2, 0, 0, 0, 0.66)
 ui.shadow_def('light', 'thumb'   ,  0,  0,  2, 0, 0, 0, 0.66)
 ui.shadow_def('light', 'modal'   ,  2,  5, 10, 0, 0, 0, 0.53)
 ui.shadow_def('light', 'picker'  ,  0,  5, 10, 0, 0, 0, 0.13) // large fuzzy shadow
 
 ui.shadow_def('dark' , 'tooltip' ,  2,  2,  9, 0, 0, 0, 0.26)
-ui.shadow_def('dark' , 'toolbox' ,  1,  1,  4, 0, 0, 0, 0.66)
+ui.shadow_def('dark' , 'toolbox' ,  1,  1,  9, 0, 0, 0, 1.00)
 ui.shadow_def('dark' , 'input'   ,  1,  1,  4, 0, 0, 0, 0.66)
 ui.shadow_def('dark' , 'menu'    ,  1,  1,  9, 0, 0, 0, 1.00)
-ui.shadow_def('dark' , 'button'  ,  0,  0,  2, 0, 0, 0, 1.00)
+ui.shadow_def('dark' , 'button'  ,  1,  1,  4, 0, 0, 0, 0.66)
 ui.shadow_def('dark' , 'thumb'   ,  1,  1,  3, 0, 0, 0, 0.66)
 ui.shadow_def('dark' , 'modal'   ,  2,  5, 10, 0, 0, 0, 0.53)
 ui.shadow_def('dark' , 'picker'  ,  0,  2, 15, 0, 0, 0, 0.80)
@@ -8426,7 +8426,6 @@ ui.menu = function(id, items, want_open, side, align) {
 						is_hl ? 'item' : 'bg1',
 						is_hl ? 'focused item-selected item-focused' : null,
 						first ? 'ltr' : last ? 'lbr' : '', null, null, radius)
-					ui.border(last ? '' : 'b', 'light')
 					ui.h(1, ui.sp2())
 						// check mark column, in the space left of the label.
 						ui.min_w(ui.em(2) - ui.sp2())

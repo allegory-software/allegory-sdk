@@ -16,6 +16,7 @@ SCAN ROWSET OPTIONS
 	scan     fn(db) -> scan    required; must end in select()
 	pk       'col1 ...'        required; output names, not table cols
 	db       db                optional; defaults to the app db
+	is_lookup bool             optional; omit FK lookup attributes
 	on_rows_changed            optional; see LOADING CHANGED ROWS
 
 	plus every rowset.lua property (cols, hide_cols, ro_cols, rw_cols, etc.
@@ -282,7 +283,9 @@ local function scan_rowset_init(rs, opt, ...)
 			if is_seq_pk then rs.reserve_ids = reserve_ids end
 		end
 
-		set_lookup_attrs(db, fields)
+		if not rs.is_lookup then
+			set_lookup_attrs(db, fields)
+		end
 
 		rs.params = rs.params or {} -- {param name -> def}
 		for arg, field in pairs(scan.arg_fields) do
@@ -512,6 +515,7 @@ dynamic_rowset('^lookup_(.+)$', function(tbl)
 	end
 	local sel = cat(cols, ', ')
 	return scan_rowset{
+		is_lookup = true,
 		scan = function(db) return db:scan(tbl, ''):select(sel) end,
 		pk = cat(schema.pk, ' '),
 		name_col = name_col,
