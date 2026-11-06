@@ -1810,8 +1810,8 @@ function test.scan_count()
 	end)
 end
 
-function test.scan_order_repeats_and_cutoff()
-	with_db('scan_order_repeats_and_cutoff', function(db)
+function test.scan_order_repeats()
+	with_db('scan_order_repeats', function(db)
 		db:begin'w'
 		db:create_table('ord_rows', {fields = {
 			{col = 'tenant_id', mdbx_type = 'u32', not_null = true},
@@ -1820,12 +1820,6 @@ function test.scan_order_repeats_and_cutoff()
 				nozero = true, not_null = true},
 		}, pk = {'tenant_id', 'id'}})
 		local _, _, ix = db:add_index('ord_rows', {'tenant_id', 'status'})
-		db:create_table('ord_names', {fields = {
-			{col = 'name', mdbx_type = 'utf8', maxlen = 16, nozero = true,
-				not_null = true, mdbx_collation = 'utf8_ai_ci'},
-			{col = 'n'   , mdbx_type = 'u32', not_null = true},
-		}, pk = {'name'}})
-		local _, _, name_ix = db:add_index('ord_names', {'n'})
 		db:commit()
 		db:begin'r'
 
@@ -1840,10 +1834,6 @@ function test.scan_order_repeats_and_cutoff()
 		assert(order(ix, 1, true) == 'status desc, id desc', order(ix, 1, true))
 		assert(order(ix, 0, false) == 'tenant_id asc, status asc, id asc',
 			order(ix, 0, false))
-
-		--the index key holds n, then the pk holds the ai_ci name as the
-		--base table stores it, which a bound cannot be encoded against.
-		assert(order(name_ix, 0, false) == 'n asc', order(name_ix, 0, false))
 
 		db:commit()
 	end)

@@ -5001,10 +5001,10 @@ ui.nav = function(id, opt) {
 		return rs.col_vals
 	}
 
-	let invalid_col_name_re = /^[0-9]|[^a-z0-9_]/
+	let valid_col_name_re = /^\$?[a-z_][a-z0-9_]*(?![\s\S])/
 
 	function check_col_name(col) {
-		let ok = isstr(col) && col.length > 0 && !invalid_col_name_re.test(col)
+		let ok = isstr(col) && valid_col_name_re.test(col)
 		warn_if(!ok, e.id, 'invalid field name: ', col)
 		return ok
 	}

@@ -4606,18 +4606,16 @@ function test.ai_ci_encoding_edges()
 		assert(not ok and iserror(err, 'field'),
 			'maxlen was checked after folding instead of on input')
 
-		db:create_table('key', {name = 'key', fields = {
-			{col = 's' , mdbx_type = 'utf8', maxlen = 16,
-				nozero = true, not_null = true, mdbx_collation = 'utf8_ai_ci'},
-			{col = 'id', mdbx_type = 'u32', not_null = true},
-		}, pk = {'s'}})
-		db:insert('key', '{}', {s = 'É', id = 1})
-		assert(db:find('key', 'id', 'E') == nil)
-		db:add_index('key', {'s'})
-		assert(num((db:must_find('key/s', '{}', 'E')).id) == 1)
-		db:insert('key', '{}', {s = 'E', id = 2})
-		assert(num(db:find('key', 'id', 'É')) == 1)
-		assert(num(db:find('key', 'id', 'E')) == 2)
+		ok, err = pcall(function()
+			db:create_table('key', {name = 'key', fields = {
+				{col = 's' , mdbx_type = 'utf8', maxlen = 16,
+					nozero = true, not_null = true, mdbx_collation = 'utf8_ai_ci'},
+				{col = 'id', mdbx_type = 'u32', not_null = true},
+			}, pk = {'s'}})
+		end)
+		assert(not ok)
+		assert(tostring(err):find('key col cannot have mdbx_collation', 1, true),
+			tostring(err))
 		db:commit()
 	end)
 end

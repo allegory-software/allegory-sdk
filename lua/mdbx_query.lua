@@ -1364,19 +1364,11 @@ local function bucket_facts(source, conditions)
 	return eq, lo, hi, prefix, not_null, not_equal, in_
 end
 
---path_seekable() rejects collated fields stored as original base-key text.
---a bound is encoded against the stored key bytes, so a collated col is only
---seekable where those bytes are its collation key.
-local function path_seekable(schema, i)
-	local field = schema.path_fields[i]
-	return not field.collator or field.key_collator ~= nil
-end
-
 --eq_depth() counts leading path fields that '=' or 'is' can constrain.
 local function eq_depth(schema, eq)
 	local depth = 0
 	for i, field in ipairs(schema.path_fields) do
-		if eq[field.col] and path_seekable(schema, i) then
+		if eq[field.col] then
 			depth = i
 		else
 			break
@@ -1425,19 +1417,15 @@ local function try_key(schema, eq, lo, hi, prefix, not_null, not_equal, in_)
 		local next_field = fields[depth + 1]
 		local col = next_field.col
 		local next_coll = next_field.key_collator
-		if prefix[col] and path_seekable(schema, depth + 1)
-			and (not next_coll or next_coll.prefix)
-		then
+		if prefix[col] and (not next_coll or next_coll.prefix) then
 			plan = {kind = 'prefix', depth = depth, bound_col = col}
-		elseif path_seekable(schema, depth + 1) and in_[col] then
+		elseif in_[col] then
 			plan = {kind = 'in', depth = depth, bound_col = col}
-		elseif path_seekable(schema, depth + 1)
-			and (lo[col] or hi[col])
-		then
+		elseif lo[col] or hi[col] then
 			plan = {kind = 'range', depth = depth, bound_col = col}
-		elseif path_seekable(schema, depth + 1) and not_equal[col] then
+		elseif not_equal[col] then
 			plan = {kind = 'not_equal', depth = depth, bound_col = col}
-		elseif path_seekable(schema, depth + 1) and not_null[col] then
+		elseif not_null[col] then
 			plan = {kind = 'range', depth = depth, bound_col = col}
 		elseif depth > 0 then
 			plan = {kind = equality_kind(schema, depth), depth = depth}
@@ -1470,7 +1458,6 @@ local kind_rank = {
 --[[
 - key_order() marks equality fields as fixed and returns the remaining
   path_fields in cursor order.
-- key_order() stops before a collated duplicate-PK field.
 - key_order() removes repeated ordinary cols from the duplicate PK suffix.
 - key_order() applies each field's stored direction and reverses every
   varying field when reverse is true.
@@ -1487,7 +1474,6 @@ local function key_order(source, schema, depth, reverse)
 		end
 	end
 	for i = depth + 1, #fields do
-		if not path_seekable(schema, i) then break end
 		local field = fields[i]
 		local col = field.col
 		if not cols[col] then

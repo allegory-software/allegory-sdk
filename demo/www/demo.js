@@ -215,9 +215,12 @@ function app_dock_tab(tab) {
 	} else if (tab.kind == 'saved_state') {
 		saved_state_grid('app_dock.tab.'+tab.id+'.saved_state.grid')
 	} else if (tab.kind == 'rowset') {
-		ui.grid('app_dock.tab.'+tab.id+'.rowset', {
+		let id = 'app_dock.tab.'+tab.id+'.rowset'
+		ui.grid(id, {
 			rowset_name: tab.args.rowset_name,
 		})
+		let nav = ui.state_of(id, 'nav')
+		ui.set_current_tab_title(nav.rowset_label ?? nav.rowset_name)
 	} else if (tab.kind == 'call') {
 		let id = 'app_dock.tab.'+tab.id+'.call'
 		let s = ui.state(id)

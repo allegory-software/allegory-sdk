@@ -1629,8 +1629,7 @@ function init(id, e) {
 		let grid_focused = focused
 		let row_focused = e.focused_ri == ri
 		let field_focused = e.focused_fi == fi
-		let cell_focused = row_focused
-			&& (!e.cell_select_mode || field_focused)
+		let cell_focused = row_focused && (!e.cell_select_mode || field_focused)
 		let disabled = !e.can_focus_cell(ri, fi)
 		let is_new = e.is_new(ri)
 		let cell_invalid = e.cell_has_errors(ri, fi) || !!e.row_errors[ri]

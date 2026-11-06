@@ -74,11 +74,36 @@ local function fks_by_col(schema)
 	return fks
 end
 
+--a link table's pk cols are each a single-col fk.
+local function is_link_table(schema)
+	local fks = fks_by_col(schema)
+	for _, col in ipairs(schema.pk) do
+		if not fks[col] then return false end
+	end
+	return true
+end
+
 --the client sends a row's key under 'COL:old', a changed value under 'COL'.
 local function val_or_old(vals, name)
 	local v = vals[name]
 	if v == nil then v = vals[name..':old'] end
 	return v
+end
+
+--so the client shows and picks a name instead of a raw fk value.
+local function set_lookup_attrs(db, fields)
+	for _, f in ipairs(fields) do
+		if f.table then
+			local fk = fks_by_col(db:table_schema(f.table))[f.col]
+			if fk then
+				local lrs_name = 'lookup_'..fk.ref_table
+				local lrs = rowset[lrs_name]
+				f.lookup_rowset_name = lrs_name
+				f.display_col = lrs.name_col
+				f.lookup_cols = fk.ref_cols[1]
+			end
+		end
+	end
 end
 
 --the one table whose rows match the rowset's rows one-to-one: every pk output
@@ -97,6 +122,87 @@ local function find_write_table(db, out_specs, pk)
 		if not cols[col] then return end
 	end
 	return tbl
+end
+
+--row change notifications ---------------------------------------------------
+
+local function init_load_changed_rows(rs, source_tables, load_scan_changed_rows)
+
+	local function rs_db()
+		return rs.db or db()
+	end
+
+	local pk_decoders -- {table -> fn(raw_pk) -> pk_val1, ...}
+
+	local function load_changed_rows(self, res, param_vals, since_txn_id)
+		local db = rs_db()
+		res.txn_id = db:txn_id()
+		--read the batches while the handler iterates the changes; a gap
+		--ends the iteration and the handler's result is discarded.
+		local next_batch = db:read_changes(since_txn_id)
+		local next_row -- iter() -> table, raw_pk over the current batch
+		local has_gap -- a gap was found: the client must reload
+		local function next_change()
+			while true do
+				if next_row then
+					local tbl, raw_pk = next_row()
+					if tbl then
+						if pk_decoders then
+							return tbl, pk_decoders[tbl](raw_pk)
+						else
+							return tbl, raw_pk
+						end
+					end
+				end
+				local txn_id, batch, gap = next_batch()
+				if not txn_id then return end
+				if gap then
+					has_gap = true
+					return
+				end
+				next_row = db:each_row_change(batch, source_tables)
+			end
+		end
+		local changes -- {rows, removed_pks} | false
+		if rs.on_rows_changed then
+			changes = rs:on_rows_changed(next_change, param_vals)
+		else
+			changes = load_scan_changed_rows(next_change, param_vals)
+		end
+		if has_gap or changes == false then
+			res.reload = true
+			return
+		end
+		res.rows = changes.rows or {}
+		res.removed_pks = changes.removed_pks or {}
+	end
+
+	local db = rs_db()
+	if rs.on_rows_changed then
+		pk_decoders = {}
+		for tbl in pairs(source_tables) do
+			local schema = db:table_schema(tbl)
+			local key_rec = MDBX_val() -- {data, size}, encoded source PK
+			local getters = {} -- {key_i -> get()}, source-PK order
+			for key_i, col in ipairs(schema.pk) do
+				getters[key_i] = db:col_decoder(schema, col,
+					nil, key_rec)
+			end
+			local n = #getters -- pk col count
+			local pk_vals = {} -- reused for every row: {val1, ...}
+			pk_decoders[tbl] = function(raw_pk)
+				key_rec.data, key_rec.size = raw_pk, #raw_pk
+				for key_i = 1, n do pk_vals[key_i] = getters[key_i]() end
+				return unpack(pk_vals, 1, n)
+			end
+		end
+	end
+	if rs.on_rows_changed or load_scan_changed_rows then
+		function rs:load_changed_rows(...)
+			return rs_db():atomic('r', load_changed_rows, self, ...)
+		end
+	end
+
 end
 
 local function scan_rowset_init(rs, opt, ...)
@@ -176,19 +282,7 @@ local function scan_rowset_init(rs, opt, ...)
 			if is_seq_pk then rs.reserve_ids = reserve_ids end
 		end
 
-		--so the client shows and picks a name instead of a raw fk value.
-		for _, f in ipairs(fields) do
-			if f.table then
-				local fk = fks_by_col(db:table_schema(f.table))[f.col]
-				if fk then
-					local lrs_name = 'lookup_'..fk.ref_table
-					local lrs = rowset[lrs_name]
-					f.lookup_rowset_name = lrs_name
-					f.display_col = lrs.name_col
-					f.lookup_cols = fk.ref_cols[1]
-				end
-			end
-		end
+		set_lookup_attrs(db, fields)
 
 		rs.params = rs.params or {} -- {param name -> def}
 		for arg, field in pairs(scan.arg_fields) do
@@ -223,7 +317,8 @@ local function scan_rowset_init(rs, opt, ...)
 			rs.load_row = load_row
 		end
 
-		rs:init_load_changed_rows()
+		init_load_changed_rows(rs, scan.source_tables,
+			not rs.on_rows_changed and scan:make_load_changed_rows(rs.pk))
 
 		rs:init_fields(false)
 
@@ -325,84 +420,6 @@ local function scan_rowset_init(rs, opt, ...)
 		return rs_db():atomic('w', apply_changes, self, ...)
 	end
 
-	--row change notifications ---------------------------------------------
-
-	local pk_decoders -- {table -> fn(raw_pk) -> pk_val1, ...}
-	local load_scan_changed_rows -- fn(...) -> {rows, removed_pks}
-
-	local function load_changed_rows(self, res, param_vals, since_txn_id)
-		local db = rs_db()
-		res.txn_id = db:txn_id()
-		--read the batches while the handler iterates the changes; a gap
-		--ends the iteration and the handler's result is discarded.
-		local next_batch = db:read_changes(since_txn_id)
-		local next_row -- iter() -> table, raw_pk over the current batch
-		local has_gap -- a gap was found: the client must reload
-		local function next_change()
-			while true do
-				if next_row then
-					local tbl, raw_pk = next_row()
-					if tbl then
-						if pk_decoders then
-							return tbl, pk_decoders[tbl](raw_pk)
-						else
-							return tbl, raw_pk
-						end
-					end
-				end
-				local txn_id, batch, gap = next_batch()
-				if not txn_id then return end
-				if gap then
-					has_gap = true
-					return
-				end
-				next_row = db:each_row_change(batch, scan.source_tables)
-			end
-		end
-		local changes -- {rows, removed_pks} | false
-		if rs.on_rows_changed then
-			changes = rs:on_rows_changed(next_change, param_vals)
-		else
-			changes = load_scan_changed_rows(next_change, param_vals)
-		end
-		if has_gap or changes == false then
-			res.reload = true
-			return
-		end
-		res.rows = changes.rows or {}
-		res.removed_pks = changes.removed_pks or {}
-	end
-
-	function rs:init_load_changed_rows()
-		local db = rs_db()
-		if rs.on_rows_changed then
-			pk_decoders = {}
-			for tbl in pairs(scan.source_tables) do
-				local schema = db:table_schema(tbl)
-				local key_rec = MDBX_val() -- {data, size}, encoded source PK
-				local getters = {} -- {key_i -> get()}, source-PK order
-				for key_i, col in ipairs(schema.pk) do
-					getters[key_i] = db:col_decoder(schema, col,
-						nil, key_rec)
-				end
-				local n = #getters -- pk col count
-				local pk_vals = {} -- reused for every row: {val1, ...}
-				pk_decoders[tbl] = function(raw_pk)
-					key_rec.data, key_rec.size = raw_pk, #raw_pk
-					for key_i = 1, n do pk_vals[key_i] = getters[key_i]() end
-					return unpack(pk_vals, 1, n)
-				end
-			end
-		else
-			load_scan_changed_rows = scan:make_load_changed_rows(rs.pk)
-		end
-		if rs.on_rows_changed or load_scan_changed_rows then
-			function rs:load_changed_rows(...)
-				return rs_db():atomic('r', load_changed_rows, self, ...)
-			end
-		end
-	end
-
 end
 
 function scan_rowset(...)
@@ -448,10 +465,13 @@ end
 --STARTUP VALIDATION ---------------------------------------------------------
 
 function prepare_table_rowsets()
-	for tbl in sortedpairs(db().schema.tables) do
+	for tbl, schema in sortedpairs(db().schema.tables) do
 		local name = 'table_'..tbl
 		local rs = rowset[name]
 		rs:prepare()
+		if is_link_table(schema) then
+			rowset['members_'..tbl]:prepare()
+		end
 	end
 end
 
@@ -478,7 +498,7 @@ function prepare_rowsets()
 	end
 end
 
---LOOKUP ROWSETS & TABLE ROWSETS ---------------------------------------------
+--LOOKUP ROWSETS -------------------------------------------------------------
 
 dynamic_rowset('^lookup_(.+)$', function(tbl)
 	local schema = checkfound(db():atomic('any', function(tbl)
@@ -506,6 +526,8 @@ dynamic_rowset('^lookup_(.+)$', function(tbl)
 	}
 end)
 
+--TABLE ROWSETS --------------------------------------------------------------
+
 dynamic_rowset('^table_(.+)$', function(tbl)
 	local schema = checkfound(db():atomic('any', function(tbl)
 		return db():table_schema(tbl)
@@ -522,9 +544,267 @@ dynamic_rowset('^table_(.+)$', function(tbl)
 	end
 	local sel = cat(schema.cols, ', ')
 	return scan_rowset{
+		label = tbl:gsub('_', ' '):gsub('^.', string.upper),
 		scan = function(db) return db:scan(tbl, ''):select(sel) end,
 		pk = cat(schema.pk, ' '),
 		cols = cat(schema.cols, ' '),
 		params = params,
 	}
+end)
+
+--MEMBERS ROWSETS ------------------------------------------------------------
+
+local function members_rowset_init(rs, link_table)
+
+	rs.manual_init_fields = true
+
+	local is_prepared
+	local lookups    -- {{key_col=, table=, col=, param=},...} in pk order
+	local outputs    -- {{name=, member=, col=},...} in field order
+	local scans = {} -- {'1'|'0' per key col's param presence -> scan}
+
+	local function rs_db()
+		return rs.db or db()
+	end
+
+	local function prepare()
+		local db = rs_db()
+		local schema = db:table_schema(link_table)
+
+		local fk_names = {} -- {col -> fk name}
+		for name, fk in pairs(schema.fks or empty) do
+			if #fk.cols == 1 then
+				fk_names[fk.cols[1]] = name
+			end
+		end
+
+		local fields = {}
+		outputs = {}
+		local function add_field(f, member, col)
+			add(fields, f)
+			f.index = #fields
+			outputs[f.index] = {name = f.name, member = member, col = col}
+		end
+
+		add_field({name = '$member', type = 'bool', not_null = true,
+			en_label = 'Member'}, link_table, schema.pk[1])
+
+		lookups = {}
+		rs.params = {}
+		for i, col in ipairs(schema.pk) do
+			local fk_name = assertf(fk_names[col], 'members: no fk: %s.%s',
+				link_table, col)
+			local fk = schema.fks[fk_name]
+			local lrs = rowset['lookup_'..fk.ref_table]
+			local lookup = {
+				key_col = col,
+				table = fk.ref_table,
+				col = fk.ref_cols[1],
+				param = fk_name,
+			}
+			lookups[i] = lookup
+			rs.params[lookup.param] = {
+				for_cols = col,
+				lookup_cols = lookup.col,
+				lookup_rowset_name = 'table_'..lookup.table,
+			}
+			local f = update({}, schema.fields[col])
+			f.name = col
+			f.table = link_table
+			f.readonly = true
+			f.hidden = lrs.name_col ~= nil
+			add_field(f, col, lookup.col)
+		end
+
+		for _, col in ipairs(schema.cols) do
+			if not schema.fields[col].key_index then
+				local f = update({}, schema.fields[col])
+				f.name = col
+				f.table = link_table
+				add_field(f, link_table, col)
+			end
+		end
+
+		for _, lookup in ipairs(lookups) do
+			local lschema = db:table_schema(lookup.table)
+			local name_col = rowset['lookup_'..lookup.table].name_col
+			for _, col in ipairs(lschema.cols) do
+				if col ~= lookup.col then
+					local f = update({}, lschema.fields[col])
+					f.name = lookup.key_col..'_'..col
+					f.table = lookup.table
+					f.readonly = true
+					if col ~= name_col then f.hidden = true end
+					add_field(f, lookup.key_col, col)
+				end
+			end
+		end
+
+		set_lookup_attrs(db, fields)
+
+		rs.fields = fields
+		rs.pk = cat(schema.pk, ' ')
+
+		local source_tables = {[link_table] = true} -- {table -> true}
+		for _, lookup in ipairs(lookups) do
+			source_tables[lookup.table] = true
+		end
+		init_load_changed_rows(rs, source_tables)
+
+		rs:init_fields(false)
+
+		for tbl in pairs(source_tables) do
+			attr(attr(table_rowset_deps, db), tbl)[rs.name] = true
+		end
+
+		is_prepared = true
+	end
+	function rs:prepare()
+		if is_prepared then return end
+		rs_db():atomic('r', prepare)
+	end
+
+	local function create_scan(param_vals)
+		local db = rs_db()
+		local scan
+		local link_path = {}
+		for i, lookup in ipairs(lookups) do
+			local path = param_vals[lookup.param]
+				and {{lookup.col, 'in_list', {arg = lookup.param}}} or ''
+			local lookup_scan = db:scan(lookup.table, path, lookup.key_col)
+			if scan then
+				scan = scan:join(lookup_scan)
+			else
+				scan = lookup_scan
+			end
+			link_path[i] = {lookup.key_col, '=',
+				{scan = lookup_scan, col = lookup.col}}
+		end
+		return scan:left_join(db:scan(link_table, link_path, link_table))
+			:select(outputs):null_value(null)
+	end
+
+	local function read_rows(param_vals)
+		local key = ''
+		for _, lookup in ipairs(lookups) do
+			key = key..(param_vals[lookup.param] and '1' or '0')
+		end
+		local scan = scans[key]
+		if not scan then
+			scan = create_scan(param_vals)
+			scans[key] = scan
+		end
+		scan.close()
+		local rows = scan:rows_array('[]', param_vals)
+		for _, row in ipairs(rows) do
+			row[1] = row[1] ~= null
+		end
+		return rows
+	end
+
+	local function load_rows(res, param_vals)
+		res.rows = read_rows(param_vals)
+		res.txn_id = rs_db():txn_id()
+	end
+	function rs:load_rows(res, param_vals)
+		rs_db():atomic('r', load_rows, res, param_vals)
+	end
+
+	function rs:load_row(vals)
+		local param_vals = {}
+		for _, lookup in ipairs(lookups) do
+			param_vals[lookup.param] = {val_or_old(vals, lookup.key_col)}
+		end
+		return read_rows(param_vals)[1]
+	end
+
+	function rs:update_row(vals)
+		rs_db():atomic('w', function()
+			local db = rs_db()
+			local keys = {}
+			for i, lookup in ipairs(lookups) do
+				keys[i] = val_or_old(vals, lookup.key_col)
+			end
+			if vals['$member'] == false then
+				db:del(link_table, unpack(keys, 1, #lookups))
+			else
+				local t = {}
+				for i, lookup in ipairs(lookups) do
+					t[lookup.key_col] = keys[i]
+				end
+				for _, f in ipairs(rs.fields) do
+					if f.table == link_table and not f.readonly then
+						local v = vals[f.name]
+						if v ~= nil then t[f.col] = v end
+					end
+				end
+				db:upsert(link_table, '{}', t)
+			end
+		end)
+	end
+
+	local apply_changes = rs.apply_changes
+	function rs:apply_changes(...)
+		return rs_db():atomic('w', apply_changes, self, ...)
+	end
+
+	function rs:on_rows_changed(changes, param_vals)
+		local db = rs_db()
+		local rows = {}
+		local seen = {} -- {'KEY1\0KEY2...' -> true}
+		local n = #lookups
+		local function add_rows(param_vals)
+			for _, row in ipairs(read_rows(param_vals)) do
+				local k = concat(row, '\0', 2, n + 1)
+				if not seen[k] then
+					seen[k] = true
+					add(rows, row)
+				end
+			end
+		end
+		local function is_requested(param, v)
+			local vals = param_vals[param]
+			return vals == nil or indexof(v, vals) ~= nil
+		end
+		while true do
+			local change = {changes()} -- {table, pk_val1, ...}
+			local tbl = change[1]
+			if tbl == nil then break end
+			if tbl == link_table then
+				local key_vals = {} -- {param -> {val}}
+				local is_in_params = true
+				for i, lookup in ipairs(lookups) do
+					local v = change[i + 1]
+					is_in_params = is_in_params and is_requested(lookup.param, v)
+					key_vals[lookup.param] = {v}
+				end
+				if is_in_params then add_rows(key_vals) end
+			end
+			for _, lookup in ipairs(lookups) do
+				local id = change[2]
+				if tbl == lookup.table and is_requested(lookup.param, id) then
+					if not db:exists(lookup.table, id) then return false end
+					local narrowed_vals = update({}, param_vals)
+					narrowed_vals[lookup.param] = {id}
+					add_rows(narrowed_vals)
+				end
+			end
+		end
+		return {rows = rows}
+	end
+
+end
+
+function members_rowset(...)
+	return virtual_rowset(members_rowset_init, ...)
+end
+
+dynamic_rowset('^members_(.+)$', function(tbl)
+	local schema = checkfound(db():atomic('any', function(tbl)
+		return db():table_schema(tbl)
+	end, tbl))
+	checkfound(is_link_table(schema))
+	local rs = members_rowset(tbl)
+	rs.label = tbl:gsub('_', ' '):gsub('^.', string.upper)
+	return rs
 end)

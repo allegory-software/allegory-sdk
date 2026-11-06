@@ -375,9 +375,7 @@ local MDBX_val_size = sizeof'MDBX_val'
 
 --a col the leading depth fields fix holds one value for the whole scan,
 --so a path that names it again (an index key col that is also a pk col)
---orders nothing the second time. a collated col keeps its key form in
---an index key and its original text in the base key, so a bound cannot be
---encoded against one past the index key: the order stops there.
+--orders nothing the second time.
 local function scan_order(schema, depth, reverse)
 	local order = {}
 	local fields = schema.path_fields
@@ -386,9 +384,6 @@ local function scan_order(schema, depth, reverse)
 	for i = 1, depth do seen[fields[i].col] = true end
 	for i = depth + 1, #fields do
 		local field = fields[i]
-		if field.collator
-			and not (schema.is_index and i <= #schema.key_fields)
-		then break end
 		if not seen[field.col] then
 			seen[field.col] = true
 			local descending = not not field.descending

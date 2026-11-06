@@ -22,7 +22,7 @@ LIMITATIONS
 	- unique indexes don't check rows with a null in an indexed column.
 	- primary key columns must be `not_null`.
 	- primary keys are immutable!
-	- utf8_ai_ci can only be used for index keys.
+	- pk columns cannot have a collation.
 	- fks: only to pk columns, no "restrict", no "onupdate" (pk is immutable).
 	- schema layouting errors are non-recoverable.
 TABLES
@@ -1228,6 +1228,8 @@ local function layout_table_schema(schema)
 			'pk col unknown: `%s` for table: %s', col, table_name)
 		if not schema.is_index then
 			assertf(f.not_null, 'key col must be not_null: %s.%s', table_name, col)
+			assertf(not f.mdbx_collation,
+				'key col cannot have mdbx_collation: %s.%s', table_name, col)
 		end
 		if f.maxlen and not f.fixed then
 			assertf(f.nozero, 'varsize key col must be nozero: %s.%s', table_name, col)
@@ -2245,10 +2247,7 @@ local function alter_values_in_place(self, dbi, old_schema, new_schema, event)
 	cur:close()
 end
 
---a base key stores the original value, so a col's collation is not part of
---its key encoding and changing one rewrites no keys.
 local key_rewrite_attrs = update({not_null=1}, field_type_attrs)
-key_rewrite_attrs.mdbx_collation = nil
 
 local function alter_via_temp_table(self, dbi, old_schema, new_schema, event)
 
