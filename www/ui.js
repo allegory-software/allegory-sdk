@@ -12916,7 +12916,8 @@ ui.remove_dock_tab = function(id, tab_id) {
 	ui.begin_toolboxes (tid)  begin toolbox group
 	ui.end_toolboxes   ()     end toolbox group
 
-	ui.toolbox (id, title, align='[', valign='t', x0, y0, target_i='screen')
+	ui.toolbox (id, title, align='[', valign='t', x0, y0,
+		target_i='screen', drag_ids=id+'.title')
 
 */
 
@@ -12926,7 +12927,9 @@ function toolbox_stack_check() {
 	assert(!toolbox_stack.length, 'toolbox not closed')
 }
 
-ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
+ui.toolbox = function(
+	id, title, align, valign, x0, y0, target_i, drag_ids
+) {
 
 	ui.state(id)
 	let  align_start =  parse_align( align || '[') == ALIGN_START
@@ -12937,8 +12940,12 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 		ts.to_top = id
 		ui.tab_into(id)
 	}
-	ui.state(id+'.title')
-	let cs = ui.drag(id+'.title')
+	let drag_id = drag_ids ?? id+'.title'
+	if (isarray(drag_id))
+		drag_id = drag_id.includes(ui.captured_id) ? ui.captured_id : null
+	let cs = ui.drag(drag_id)
+	if (cs?.drag)
+		ui.focus_first(id)
 	let s = ui.state(id)
 	// ox, oy: offset from the target edges that align and valign anchor the
 	// toolbox to, so that it keeps its distance from them when they move.
@@ -12961,6 +12968,7 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 		ts.popups.set(id, i)
 		ui.focus_group(null, null, id)
 		//ui.p(1)
+		ui.shadow('toolbox')
 		ui.bb('bg1', null, 1, 'intense')//, null, ui.sp075())
 		let w = ui.state_of(id+'.resizer', 'w')
 		let h = ui.state_of(id+'.resizer', 'h')
@@ -12972,13 +12980,16 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 		ui.stack()
 			toolbox_stack.push(id, tid)
 			ui.v() // title / body split
-				ui.h(0) // title bar
-					ui.stack(id+'.title')
-						ui.bb('bg3')// , null, 1, null, null, ui.sp075())
-						ui.p(ui.sp2(), ui.sp())
-						ui.text('', title, 0, 'l')
-					ui.end_stack()
-				ui.end_h()
+				if (title != null) {
+					ui.state(id+'.title')
+					ui.h(0) // title bar
+						ui.stack(id+'.title')
+							ui.bb('bg3')// , null, 1, null, null, ui.sp075())
+							ui.p(ui.sp2(), ui.sp())
+							ui.text('', title, 0, 'l')
+						ui.end_stack()
+					ui.end_h()
+				}
 }
 
 ui.end_toolbox = function() {
