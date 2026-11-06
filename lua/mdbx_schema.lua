@@ -334,16 +334,14 @@ function Db:check_col(event, tab, col, ret, ...)
 	error(e)
 end
 
+--uk/pk failures add e.cols to the error to know which fields are duplicated.
 local function check_key(self, event, schema, key_schema, ret, err)
 	if ret or err ~= 'already_exists' then
 		return self:check_row(event, schema.name, ret, err)
 	end
 	local e = error_for('row', self, event, err)
 	e.table = schema.name
-	e.field_errors = {}
-	for _, col in ipairs(key_schema.key_cols) do
-		e.field_errors[col] = err
-	end
+	e.cols = key_schema.key_cols
 	self:abort()
 	error(e)
 end

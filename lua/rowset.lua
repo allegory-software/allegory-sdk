@@ -460,6 +460,34 @@ function virtual_rowset(init, ...)
 		return catany(':\n', s, err and err.message)
 	end
 
+	local function set_write_error(rt, err)
+		if err.cols or err.col then
+			--uk/pk error has err.cols, null errors etc. have err.col.
+			--map table/col errors back to rowset cols where possible.
+			local cols = err.cols or {err.col}
+			local field_errors = {}
+			local message = err.message
+			for _, col in ipairs(cols) do
+				local mapped = false
+				for _, field in ipairs(rs.fields) do
+					if field.table == err.table and field.col == col then
+						field_errors[field.name] = message
+						mapped = true
+					end
+				end
+				if not mapped then
+					local s = format('%s.%s: %s', err.table, col, message)
+					rt.error = catany('\n', rt.error or db_error(err), s)
+				end
+			end
+			if next(field_errors) then
+				rt.field_errors = field_errors
+			end
+		else
+			rt.error = db_error(err)
+		end
+	end
+
 	local function reload_row(op, rt, row_values)
 		if not rs.load_row then return end
 		local ok, row = catch(row_errtypes, rs.load_row, rs, row_values)
@@ -561,11 +589,7 @@ function virtual_rowset(init, ...)
 					if ok then
 						reload_row('insert', rt, row.values)
 					else
-						if err.col then
-							rt.field_errors = {[err.col] = err.message}
-						else
-							rt.error = db_error(err)
-						end
+						set_write_error(rt, err)
 					end
 				else
 					rt.error = err or true
@@ -585,11 +609,7 @@ function virtual_rowset(init, ...)
 						end
 						reload_row('update', rt, row.values)
 					else
-						if err.col then
-							rt.field_errors = {[err.col] = err.message}
-						else
-							rt.error = db_error(err)
-						end
+						set_write_error(rt, err)
 					end
 				else
 					rt.error = err or true
