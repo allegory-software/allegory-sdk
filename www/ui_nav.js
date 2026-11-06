@@ -2039,7 +2039,24 @@ ui.nav = function(id, opt) {
 		for (let [field, desc] of parse_order_by(order_by)) {
 			if (field.rank)
 				sort_fields.push({rank: ri => field.rank(e, ri)})
-			sort_fields.push({field, desc})
+
+			// lookup col: sort by lookup col display values.
+			let ln = field.lookup_nav
+			let df = lookup_display_field(field, ln)
+			if (df) {
+				let vals = new Array(slot_n)
+				for (let i = 0; i < n; i++) {
+					let ri = ris[i]
+					let v = col_val(ri, field.fi)
+					let ln_ri = v != null ? e.lookup_val(ri, field, v) : null
+					vals[ri] = ln_ri != null ? ln.cell_val(ln_ri, df.name) : v
+				}
+				vals = df.col_storage.load_col(vals, slot_n)
+				sort_fields.push({field: df, desc, vals})
+
+			} else {
+				sort_fields.push({field, desc})
+			}
 		}
 		return radix_sort(e.col_vals, sorted_ris, n, sort_fields)
 	}
