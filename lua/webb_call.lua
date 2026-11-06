@@ -63,7 +63,7 @@ db_schema:import(function()
 		call        , idpk,
 		name        , name,
 		invite_token, {str, maxlen = 64, fixed}, not_null, uk,
-			default(nil, function()
+			server_default(function()
 				return tohex(secure_random_string(32))
 			end),
 	}

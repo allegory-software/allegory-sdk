@@ -615,8 +615,8 @@ function lang_schema()
 		rtl                 , bool0,
 		en_name             , name, not_null, uk(en_name),
 		name                , name, not_null, uk(name),
-		decimal_separator   , str, maxlen(8), not_null, default',',
-		thousands_separator , str, maxlen(8), not_null, default'.',
+		decimal_separator   , str, maxlen(8), not_null, client_default',',
+		thousands_separator , str, maxlen(8), not_null, client_default'.',
 		supported           , bool0,
 	}
 

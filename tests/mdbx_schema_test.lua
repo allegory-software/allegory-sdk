@@ -7235,10 +7235,11 @@ function test.expr_fn_helpers()
 			import'schema_mdbx'
 			tables.t = {
 				id , idpk,
-				d  , u32, default(0, function() return math.floor(7.9) end),
-				e  , u32, default(0, '8'),
+				d  , u32, client_default(0),
+					server_default(function() return math.floor(7.9) end),
+				e  , u32, client_default(0), server_default'8',
 				g  , u32, as'row.d + row.e',
-				client, bool, default(false),
+				client, bool, client_default(false),
 				n  , i32, check(function(v) return math.abs(v) < 10 end,
 					'bad n'),
 				ver, u32, on_update(function() return math.floor(42.9) end),

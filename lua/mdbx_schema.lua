@@ -160,7 +160,8 @@ IX & FK SPEC
 
 PAPER-SCHEMA HELPERS (schema_mdbx.lua)
 
-	default         (value [, expr|fn])            client and optional server default
+	client_default  (value)                        typed client-side default
+	server_default  (expr|fn)                      server-side default
 	check           (expr|fn, [error_message])     column constraint
 	row_check       (expr|fn, [error_message])     table constraint
 	on_update       (expr|fn)                      server-side update value
@@ -200,9 +201,9 @@ CHECK CONSTRAINTS
 
 DEFAULTS
 
-	- `default(value [, expr|fn])` sets the typed client-side default and,
-	  optionally, the server default. expr can use `f` to get field attributes
-	  and may call `now()`; `fn(f) -> val|nil`.
+	- `client_default(value)` sets the typed client-side default.
+	- `server_default(expr|fn)` sets the server default. expr can use `f`
+	  to get field attributes and may call `now()`; `fn(f) -> val|nil`.
 	- expr is stored in DB; fn is paper-schema only. you can't have both.
 
 GENERATED COLUMNS

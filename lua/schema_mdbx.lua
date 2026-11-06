@@ -127,12 +127,12 @@ do
 		end
 	end
 
-	--Typed client-side value with an optional server-side expression or fn.
-	function env.default(v, server_default)
-		if server_default ~= nil then
-			return expr_fn_flag('default', server_default, {client_default = v})
-		end
+	function env.client_default(v)
 		return function() return {client_default = v} end
+	end
+
+	function env.server_default(expr)
+		return expr_fn_flag('default', expr)
 	end
 
 	function env.check(expr, error_message)
@@ -189,8 +189,8 @@ return function()
 	types.name   = {str, w = 10, ai_ci}
 
 	types.bool  = {type = 'bool', w = 1, align = 'center', mdbx_type = 'bool'}
-	types.bool0 = {bool , not_null, default(false, 'false')}
-	types.bool1 = {bool , not_null, default(true , 'true' )}
+	types.bool0 = {bool , not_null, client_default(false), server_default'false'}
+	types.bool1 = {bool , not_null, client_default(true), server_default'true'}
 
 	types.i8  = {
 		type = 'number', w = 2, align = 'right', decimals = 0,
@@ -229,7 +229,7 @@ return function()
 		min = -(10^8-1), max = 10^8-1,
 	} -- 999 999 . 99
 	types.count    = {
-		u52, type = 'count', w = 4, default(0, '0'),
+		u52, type = 'count', w = 4, client_default(0), server_default'0',
 	}
 	types.filesize = {u52, type = 'filesize', w = 4, align = 'right'}
 
@@ -246,12 +246,12 @@ return function()
 	types.timeofday_s = {timeofday, w = 4, precision = 's'}
 	types.duration  = {u52, type = 'duration', w = 5, align = 'right'}
 
-	types.ctime = {time, not_null, readonly = true, default(nil, 'now()'),
+	types.ctime = {time, not_null, readonly = true, server_default'now()',
 		en_label = 'Created At'}
 	types.mtime = {time, not_null, readonly = true,
-		default(nil, 'now()'), on_update'now()',
+		server_default'now()', on_update'now()',
 		en_label = 'Last Modified At'}
-	types.atime = {time, not_null, readonly = true, default(nil, 'now()'),
+	types.atime = {time, not_null, readonly = true, server_default'now()',
 		en_label = 'Last Accessed At'}
 
 	types.lang      = {str, w = 2, icon = 'language', maxlen = 2, fixed}

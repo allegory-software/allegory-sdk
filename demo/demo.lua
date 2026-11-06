@@ -131,9 +131,9 @@ do
 			parent_id        , id, fk'grid_save',
 			pos              , pos,
 			text             , str,
-			num              , f64, default(nil, '42'),
+			num              , f64, server_default'42',
 			test_action      , enum(test_actions), not_null,
-				default('normal', "'normal'"),
+				client_default'normal', server_default"'normal'",
 			test_description , text,
 		}
 		tables.grid_save.rows = grid_rows
@@ -141,9 +141,9 @@ do
 			row_check("row.test_action ~= 'reject row'", 'Test row rejected'),
 			code             , str, pk,
 			text             , str,
-			num              , f64, default(nil, '42'),
+			num              , f64, server_default'42',
 			test_action      , enum(test_actions), not_null,
-				default('normal', "'normal'"),
+				client_default'normal', server_default"'normal'",
 			test_description , text,
 		}
 		tables.grid_typed.rows = grid_typed_rows
