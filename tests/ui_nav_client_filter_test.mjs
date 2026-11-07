@@ -115,7 +115,7 @@ try {
 				rowset_name: 'detail', param_bindings: {scope: 'scope'},
 			})
 			ui.state('detail').nav = probe.detail
-			probe.detail.reload_if_params_changed()
+			probe.detail.check_dependencies()
 		}
 		ui.animate()
 	})

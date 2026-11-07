@@ -108,7 +108,7 @@ ui.file_editor = function(id) {
 		ui.on_free(id, s.nav.free)
 	}
 	let nav = s.nav
-	nav.reload_if_params_changed()
+	nav.check_dependencies()
 	let title = nav.param_vals('path')?.[0]
 	if (title != null)
 		ui.set_current_tab_title(title)

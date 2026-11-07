@@ -838,7 +838,8 @@ ui.master_toggle = function(id, rowset_name, master_id, label) {
 
 //// NAV ---------------------------------------------------------------------
 
-let sel_change_n = 0 // global auto-increment number for sel_change_no
+let sel_change_counter = 0 // global auto-increment number for sel_change_no
+let rows_change_counter = 0 // global auto-increment number for rows_change_no
 
 ui.nav = function(id, opt) {
 
@@ -946,7 +947,7 @@ ui.nav = function(id, opt) {
 	e.master_rowset_names = null // {param name -> rowset name}
 	e.param_bar_vals ??= empty_obj // {param->val}; param bar values
 	let param_vals = null // {param->[val, ...]}
-	let param_source_vals = obj() // {input_id->val | nav_id->sel_change_n}
+	let param_source_vals = obj() // {input_id->val | nav_id->sel_change_no}
 	let load_param_vals = null // {param->[val, ...]} sent with the last load
 	let parent_param = null // partial load: the param that filters parent_col
 	// {param->input_id | nav_id}: the app's param_bindings, then the masters
@@ -992,7 +993,10 @@ ui.nav = function(id, opt) {
 	// saving and loading
 	let is_server_rowset = !!e.rowset_name && !ui.rowsets[e.rowset_name]
 	let client_rowset = null // last accepted client rowset
-	e.ready = false // nav loaded (for lookup fields and lookup inputs)
+	e.ready = false // view built with all lookup data
+	e.loaded = false // rows loaded
+	e.rows_change_no = 0 // increments on loads and merges
+	e.load_error = null // error of the last load, or null
 	let save_req = null // pending id or save request, or null
 	let save_batch = null // pending batch: {rows: [...], ris: [...]}
 	let saving_ris = new Set() // rows of the pending or lost batch
@@ -1304,13 +1308,27 @@ ui.nav = function(id, opt) {
 		let has_focus_changed = ri != e.focused_ri || fi != e.focused_fi
 		if (has_focus_changed)
 			e.quicksearch_text = ''
+
+		// save focused pk.
+		if (ri != null && !e.is_picker && !e.is_group_row(ri)) {
+			let saved_pk = ui.saved_state[e.id]?.focused_pk
+			if (!saved_pk || compare_row(ri, e.pk_fields, saved_pk) != 0) {
+				let pk = []
+				for (let field of e.pk_fields)
+					pk.push(col_val(ri, field.fi))
+				ui.save_state(e.id, 'focused_pk', pk)
+			}
+			let col = fi != null ? e.all_fields[fi].name : null
+			ui.save_state(e.id, 'focused_col', col)
+		}
+
 		e.focused_ri = ri
 		e.focused_fi = fi
 		if (fi != null)
 			e.last_focused_fi = fi
 		if (has_focus_changed)
 			e.focus_changed = true
-		e.sel_change_no = ++sel_change_n
+		e.sel_change_no = ++sel_change_counter
 	}
 
 	// Use the selection modes of set_focus(). End the edit before focusing
@@ -2030,6 +2048,8 @@ ui.nav = function(id, opt) {
 		reset_unplaced()
 	}
 
+	let sorted_lookups_change_no = 0 // max rows_change_no of sorted lookup navs
+
 	// -> the first n entries of ris sorted by order_by, in a new array.
 	function sorted_copy(ris, n, order_by) {
 		let sorted_ris = ris.slice(0, n)
@@ -2042,6 +2062,12 @@ ui.nav = function(id, opt) {
 
 			// lookup col: sort by lookup col display values.
 			let ln = field.lookup_nav
+			if (ln) {
+				if (!ln.ready)
+					return sorted_ris
+				sorted_lookups_change_no =
+					max(sorted_lookups_change_no, ln.rows_change_no)
+			}
 			let df = lookup_display_field(field, ln)
 			if (df) {
 				let vals = new Array(slot_n)
@@ -2077,6 +2103,52 @@ ui.nav = function(id, opt) {
 		e.exit_edit()
 		sort_ris(order_by)
 		update_tree_and_visible_ris()
+	}
+
+	function has_loading_lookups() {
+		for (let field of e.all_fields)
+			if (field.lookup_nav && !field.lookup_nav.ready)
+				return true
+		return false
+	}
+
+	function resort_if_lookups_changed() {
+		if (!e.loaded || has_loading_lookups())
+			return
+		for (let field of e.all_fields) {
+			if (field.sort_i == null || !field.lookup_nav)
+				continue
+			if (field.lookup_nav.rows_change_no > sorted_lookups_change_no) {
+				sort_placed_rows()
+				if (e.is_grouped)
+					regroup()
+				update_tree_and_visible_ris(false)
+				break
+			}
+		}
+	}
+
+	function focus_saved_cell() {
+		// restore focused row from saved focused_pk.
+		let focused_pk = ui.saved_state[e.id]?.focused_pk
+		let focused_ri = null
+		if (focused_pk)
+			for (let i = 0; i < e.row_n; i++) {
+				let ri = e.base_ris[i]
+				if (compare_row(ri, e.pk_fields, focused_pk) == 0) {
+					focused_ri = ri
+					break
+				}
+			}
+		let focused_col = ui.saved_state[e.id]?.focused_col
+		e.move_focus(focused_ri, e.all_fields_map[focused_col]?.fi ?? null)
+	}
+
+	function finish_load() {
+		if (e.ready || !e.loaded || has_loading_lookups())
+			return
+		focus_saved_cell()
+		e.ready = true
 	}
 
 	// dir: 'asc' | 'desc' | 'toggle' | false. A field already in order_by
@@ -2525,7 +2597,7 @@ ui.nav = function(id, opt) {
 
 	// check if params changed and reload if they did.
 	// called per-frame, hence sel_change_no to make checking cheaper.
-	e.reload_if_params_changed = function() {
+	function reload_if_params_changed() {
 		let has_changed = false
 		for (let param in e.master_rowset_names) {
 			let master_id0 = e.param_sources[param] // last binding, or undefined
@@ -2557,6 +2629,12 @@ ui.nav = function(id, opt) {
 		}
 		if (has_changed)
 			reload_with_params()
+	}
+
+	e.check_dependencies = function() {
+		reload_if_params_changed()
+		resort_if_lookups_changed()
+		finish_load()
 	}
 
 	e.param_vals = function(name) {
@@ -3347,6 +3425,22 @@ ui.nav = function(id, opt) {
 		field.lookup_nav = null
 	}
 
+	e.load_errors = function() {
+		let errors = []
+		if (e.load_error)
+			errors.push(e.load_error)
+		let lookup_navs = new Set()
+		for (let field of e.all_fields) {
+			let ln = field.lookup_nav
+			if (!ln || lookup_navs.has(ln))
+				continue
+			lookup_navs.add(ln)
+			if (ln.load_error)
+				errors.push(ln.load_error)
+		}
+		return errors
+	}
+
 	function build_null_lookup_val(ri, field, opt) {
 		if (ri == null || !field.null_lookup_col) return
 		let nf = e.all_fields_map[field.null_lookup_col]  ; if (!nf || !nf.lookup_cols) return
@@ -4092,7 +4186,7 @@ ui.nav = function(id, opt) {
 		set_bits(e.row_flags, ri, ROW_NEW, false)
 		clear_row_mask(e.unset_mask, ri)
 		update_modified_n(ri, was_modified)
-		e.sel_change_no = ++sel_change_n
+		e.sel_change_no = ++sel_change_counter
 
 		// Write the server values into the columns and clear edits equal to
 		// them.
@@ -4492,6 +4586,7 @@ ui.nav = function(id, opt) {
 	// -> true if rows were placed: the caller must run stages 3-5.
 	function merge_server_rows(change_set, row_ris) {
 		assert(!saving_ris.size, 'merge_rows: a save batch is pending or lost')
+		e.rows_change_no = ++rows_change_counter
 		let rows = change_set.rows ?? []
 		let removed_pks = change_set.removed_pks ?? []
 
@@ -4607,7 +4702,6 @@ ui.nav = function(id, opt) {
 		}
 		if (!is_server_rowset) {
 			e.reload_rowset(ui.rowsets[e.rowset_name])
-			e.ready = true
 		} else {
 			// partial load: load the roots and the children of the rows whose
 			// children are loaded.
@@ -4635,8 +4729,9 @@ ui.nav = function(id, opt) {
 					if (this != load_req)
 						return
 					let params0 = e.params // param defs before the reply
+					e.load_error = null
+					e.loaded = true
 					e.reload_rowset(rs)
-					e.ready = true
 					// the reload settled the failed save: run the save that waited.
 					if (want_save) {
 						want_save = false
@@ -4646,6 +4741,9 @@ ui.nav = function(id, opt) {
 					// next frame.
 					if (e.params != params0)
 						param_source_vals = obj()
+				},
+				fail: function(err) {
+					e.load_error = err
 				},
 				done: function() {
 					if (this == load_req) {
@@ -4734,8 +4832,7 @@ ui.nav = function(id, opt) {
 			field.col_storage.set(e.col_vals[field.fi], ri, v ?? null)
 		}
 		group_field.col_storage.set(e.col_vals[group_field.fi], ri, null)
-		e.row_flags[ri] = row.is_new ? ROW_NEW | ROW_PASS | ROW_UNPLACED
-			: ROW_PASS
+		e.row_flags[ri] = row.is_new ? ROW_NEW | ROW_PASS | ROW_UNPLACED : ROW_PASS
 		if (row.is_new)
 			e.modified_n++
 		return ri
@@ -4846,9 +4943,8 @@ ui.nav = function(id, opt) {
 			}
 		}
 		rowset_tree_col = rs.tree_col
-		load_rows(src_col_vals, edit_state, old_rows)
 		e.can_load_changed_rows = rs.can_load_changed_rows ?? false
-		e.move_focus(null, null)
+		load_rows(src_col_vals, edit_state, old_rows)
 	}
 
 	/// partial loading -------------------------------------------------------
@@ -5048,10 +5144,7 @@ ui.nav = function(id, opt) {
 		return field
 	}
 
-	// Accept rs with fields and either col_vals or rows. After accepting the
-	// rowset, ignore replies to pending saves because the nav has replaced
-	// their rows.
-	e.load = function(rs, apply_view = true) {
+	e.load = function(rs) {
 
 		// validation: no state changes so we can early-return on failure.
 
@@ -5166,6 +5259,8 @@ ui.nav = function(id, opt) {
 
 		e.exit_edit()
 		client_rowset = is_server_rowset ? null : rs
+		if (!is_server_rowset)
+			e.loaded = true
 
 		e.rowset_label = rs.label ?? null
 		e.sections = rs.sections ?? null
@@ -5240,24 +5335,26 @@ ui.nav = function(id, opt) {
 		all_fields_mask = fields_mask(e.all_fields)
 		e.last_focused_fi = null
 
-		e.cols = apply_view ? saved_opt('cols') : null
+		e.cols = e.loaded ? saved_opt('cols') : null
 		if (e.cols != null) {
 			e.cols = words(e.cols).filter(col => {
 				let field = all_fields_map[col]
 				return field && !field.internal && field != group_field
 			}).join(' ') || null
 		}
-		e.order_by = apply_view ? saved_opt('order_by') : null
+		e.order_by = e.loaded ? saved_opt('order_by') : null
 		e.can_be_tree = can_be_tree
-		if (apply_view && e.can_filter())
+		if (e.loaded && e.can_filter())
 			for (let field of all_fields) {
 			// filter text saved by the user, or undefined
 			let saved_filter = ui.saved_state[e.id+'.col_filters']?.[field.name]
 			if (saved_filter !== undefined)
 					field.filter = saved_filter
 			}
-		e.group_by = null
-		e.group_cols = []
+		let group_by = e.loaded ? saved_opt('group_by') : null
+		let group_levels = group_by ? parse_group_by(group_by) : []
+		e.group_by = group_levels.length ? group_by : null
+		e.group_cols = group_levels.flat()
 		toggled_group_paths.clear()
 
 		// abort/clear any current requests (save or load).
@@ -5270,10 +5367,7 @@ ui.nav = function(id, opt) {
 		abort_children_reqs()
 
 		load_rows(src_col_vals, null, null)
-		let group_by = apply_view ? saved_opt('group_by') : null
-		if (group_by)
-			e.set_group_by(group_by)
-		e.move_focus(null, null)
+		return true
 	}
 
 	// load rows from src_col_vals and re-apply filters, order_by, group_by,
@@ -5281,6 +5375,7 @@ ui.nav = function(id, opt) {
 	// resets focus, selection, quicksearch.
 	function load_rows(src_col_vals, edit_state, old_rows) {
 		e.exit_edit()
+		e.ready = false
 		e.row_n = src_col_vals[0].length
 		// capacity of ri-indexed arrays: the replay adds at most one row per
 		// recorded row, +1 for 1 free insert.
@@ -5393,11 +5488,13 @@ ui.nav = function(id, opt) {
 			}
 		update_pass_desc()
 		update_visible_ris()
+		e.rows_change_no = ++rows_change_counter
+		finish_load()
 	}
 
 	if (e.rowset_name && !is_server_rowset) {
-		e.load(ui.rowsets[e.rowset_name])
-		e.ready = true
+		let is_accepted = e.load(ui.rowsets[e.rowset_name])
+		assert(is_accepted, e.id, ': invalid rowset')
 	} else if (is_server_rowset) {
 		// Start with no rows until the first load.
 		e.load({fields: [{name: 'id', hidden: true, not_null: true}], pk: 'id',
@@ -5406,7 +5503,7 @@ ui.nav = function(id, opt) {
 			can_remove_rows: false,
 			can_change_rows: false,
 			can_move_rows: false,
-		}, false)
+		})
 		listen_rowset_events()
 		rowset_listeners[e.rowset_name] ??= new Set()
 		rowset_listeners[e.rowset_name].add(rowset_changed)

@@ -141,7 +141,7 @@ try {
 		visible: probe.first.visible_n, second: probe.second.ready,
 		loading: probe.texts.includes('loading...'),
 		focusable: ui.focusables.includes('grid'),
-	})), {ready: false, visible: 0, second: false,
+	})), {ready: false, visible: 2, second: false,
 		loading: true, focusable: false})
 	assert.equal(requests.get('slow'), 1)
 	pending.get('slow').end(JSON.stringify({
@@ -150,14 +150,17 @@ try {
 	}))
 	await page.waitForFunction(() => ui.shared_navs.slow.ready)
 	assert.deepEqual(await page.evaluate(() => [probe.first.ready,
-		probe.first.visible_n, probe.second.ready]), [false, 0, false])
+		probe.first.visible_n, probe.second.ready]), [false, 2, false])
 	assert.equal(requests.get('other'), 1)
 	pending.get('other').end(JSON.stringify({
 		fields: [{name: 'id', type: 'number', not_null: true}, {name: 'name'}],
 		pk: 'id', rows: [[1, 'Other']],
 	}))
-	await page.waitForFunction(() => probe.first.ready && probe.second.ready
-		&& ui.focusables.includes('grid'))
+	await page.waitForFunction(() => {
+		probe.second.check_dependencies()
+		return probe.first.ready && probe.second.ready
+			&& ui.focusables.includes('grid')
+	})
 	assert.deepEqual(await page.evaluate(() => ({
 		first: probe.ids(probe.first), second: probe.ids(probe.second),
 		freed: probe.freed.ready, loading: probe.texts.includes('loading...'),
