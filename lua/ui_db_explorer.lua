@@ -221,6 +221,7 @@ dynamic_rowset('^db_explorer_rows_(.+)$', function(tbl)
 	end
 	local sel = cat(schema.cols, ', ')
 	return scan_rowset{
+		label = 'Rows',
 		scan = function(db) return db:scan(tbl, ''):select(sel) end,
 		pk = cat(schema.pk, ' '),
 		cols = cat(schema.cols, ' '),
@@ -231,6 +232,7 @@ end)
 --the keys and values of a table as stored, for an index table or a table
 --without a schema. base tables with a schema are rowset.table_NAME.
 rowset.db_explorer_rows_raw = virtual_rowset(function(rs)
+	rs.label = 'Rows'
 	rs.manual_init_fields = true
 	rs.can_move_rows = false
 	rs.params = {table = table_param}

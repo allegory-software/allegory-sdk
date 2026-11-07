@@ -13023,26 +13023,24 @@ ui.end_toolboxes = function() {
 			if (ui.focus_inside(id))
 				s.to_top = id
 	let to_top_id = s.to_top
-	if (to_top_id || !order.length) {
-		let prev_top_id = order.at(-1)
-		for (let id of order) // remove toolboxes that have been removed
-			if (!popups.has(id))
-				remove_value(order, id)
-		for (let id of popups.keys()) // add toolboxes added this frame
-			if (!order.includes(id))
-				order.push(id)
-		if (to_top_id) {
-			let src_i = order.indexOf(to_top_id)
-			let dst_i = order.length-1
-			if (src_i != dst_i) {
-				let o1 = order.join(' ')
-				array_move(order, src_i, 1, dst_i)
-			}
+	let prev_top_id = order.at(-1)
+	for (let id of order) // remove toolboxes that have been removed
+		if (!popups.has(id))
+			remove_value(order, id)
+	for (let id of popups.keys()) // add toolboxes added this frame
+		if (!order.includes(id))
+			order.push(id)
+	if (to_top_id) {
+		let src_i = order.indexOf(to_top_id)
+		let dst_i = order.length-1
+		if (src_i != dst_i) {
+			let o1 = order.join(' ')
+			array_move(order, src_i, 1, dst_i)
 		}
-		if (prev_top_id != order.at(-1) && ui.focus_inside(prev_top_id))
-			ui.focus(null)
-		s.to_top = null
 	}
+	if (prev_top_id != order.at(-1) && ui.focus_inside(prev_top_id))
+		ui.focus(null)
+	s.to_top = null
 	let z = 1
 	for (let id of order) {
 		let popup_i = popups.get(id)

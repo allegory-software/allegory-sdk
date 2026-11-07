@@ -18,8 +18,7 @@ Nav config:
 
 	rowset_name   string        the rowset in ui.rowsets or on the server
 	field_attrs   {col->attrs}  per-column overrides of rowset field attributes
-	label         string        label of the nav as a master in a detail's
-	                            toggle; default: the rowset's label
+	label         string        label of the nav; default: the rowset's label
 
 Master binding:
 
@@ -812,9 +811,7 @@ ui.master_toggle = function(id, rowset_name, master_id, label) {
 	for (let nav of navs) {
 		if (ui.is_state_hidden(nav.id))
 			continue
-		if (field?.enum_values[n] != nav.id
-			|| field.enum_labels[nav.id]
-				!= (nav.label ?? nav.rowset_label ?? nav.id))
+		if (field?.enum_values[n] != nav.id || field.enum_labels[nav.id] != nav.label)
 			has_changed = true
 		n++
 	}
@@ -825,7 +822,7 @@ ui.master_toggle = function(id, rowset_name, master_id, label) {
 			if (ui.is_state_hidden(nav.id))
 				continue
 			values.push(nav.id)
-			labels[nav.id] = nav.label ?? nav.rowset_label ?? nav.id
+			labels[nav.id] = nav.label
 		}
 		field = ui.create_field({
 			type: 'enum', label: label,
@@ -956,7 +953,7 @@ ui.nav = function(id, opt) {
 	for (let param in e.param_bindings)
 		e.param_sources[param] = e.param_bindings[param]
 	let can_be_master = !!e.rowset_name && !e.is_picker // in rowset_navs
-	e.rowset_label = null // the rowset's label, or null
+	e.label ??= e.rowset_name
 
 	// indexes
 	let indexes = null // {cols -> {fields:, ris:}}, built on first lookup
@@ -5262,7 +5259,7 @@ ui.nav = function(id, opt) {
 		if (!is_server_rowset)
 			e.loaded = true
 
-		e.rowset_label = rs.label ?? null
+		e.label = opt?.label ?? rs.label ?? e.rowset_name
 		e.sections = rs.sections ?? null
 		e.tabs = rs.tabs ?? null
 
