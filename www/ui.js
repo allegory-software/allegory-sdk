@@ -8298,13 +8298,25 @@ function menu_update(id, s) {
 	// walk the open levels: the menu and the submenus of highlighted items.
 	let level_items = s.items // items of the open menu at level
 	for (let level = 0; level_items; level++) {
-		for (let item of level_items)
-			if (item && clicked(id+'.item.'+item.id)
+		for (let i = 0; i < level_items.length; i++) {
+			let item = level_items[i]
+			if (!item)
+				continue
+			let item_id = id+'.item.'+item.id
+			// pointer moved onto this item: highlight it, open its submenu.
+			if (ui.hit_enter(item_id)) {
+				hl_is.length = level + 1
+				hl_is[level] = i
+				if (item.items?.length && !item.disabled)
+					hl_is.push(null)
+			}
+			if (clicked(item_id)
 				&& !item.disabled && !item.items?.length
 			) {
 				picked_item = item
 				want_close = item.checked == null
 			}
+		}
 		if (focused && level == key_level) {
 			let hl_i = hl_is[level] // highlighted item index
 			let hl_item = level_items[hl_i]
@@ -8418,13 +8430,6 @@ ui.menu = function(id, items, want_open, side, align) {
 				let item_id = id+'.item.'+item.id
 				if (item.action)
 					item.menu_id = id
-				// pointer moved onto this item: highlight it, open its submenu.
-				if (ui.hit_enter(item_id)) {
-					hl_is.length = level + 1
-					hl_is[level] = i
-					if (item.items?.length && !item.disabled)
-						hl_is.push(null)
-				}
 				let is_hl = hl_is[level] == i && !item.disabled
 				let open = is_hl && hl_is.length > level + 1
 				if (is_hl && s.hl_moved_by_key)
