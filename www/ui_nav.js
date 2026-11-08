@@ -861,6 +861,7 @@ ui.nav = function(id, opt) {
 	e.rowset_can_remove_rows = null
 	e.rowset_can_change_rows = null
 	e.rowset_can_move_rows   = null
+	e.actions = null // [{name, label, reload}, ...]: the rowset's actions
 
 	// focus and selection modes
 	e.cell_select_mode     ??= true // cell-select vs row-select mode
@@ -1002,6 +1003,7 @@ ui.nav = function(id, opt) {
 	let own_update_ids = new Set() // ids of this nav's saves
 	let load_req = null // pending load request, or null
 	let children_reqs = new Set() // pending child load requests
+	let action_req = null // pending action request, or null
 
 	e.get_debug_state = function() {
 		return {
@@ -1386,6 +1388,23 @@ ui.nav = function(id, opt) {
 				}
 			}
 		}
+	}
+
+	// -> [ri, ...]: the selected rows that have a pk on the server, the
+	// focused row first.
+	e.selected_server_ris = function() {
+		let sel_ris = []
+		e.each_selected_row(function(ri) {
+			if (e.is_new(ri)) // row is not on the server yet
+				return
+			if (e.is_group_row(ri)) // group rows have no pk
+				return
+			if (ri == e.focused_ri) // this comes first
+				sel_ris.unshift(ri)
+			else
+				sel_ris.push(ri)
+		})
+		return sel_ris
 	}
 
 	// -> index of the focused row in visible_ris, or null.
@@ -2487,15 +2506,7 @@ ui.nav = function(id, opt) {
 
 			} else if (master_nav) { // param taken from a master nav
 
-				let sel_ris = [] // selected master rows, the focused row first
-				master_nav.each_selected_row(function(ri) {
-					if (master_nav.is_new(ri)) // row is not on the server yet
-						return
-					if (ri == master_nav.focused_ri) // this comes first
-						sel_ris.unshift(ri)
-					else
-						sel_ris.push(ri)
-				})
+				let sel_ris = master_nav.selected_server_ris()
 
 				let focused_ri = master_nav.focused_ri // focused master row, or null
 				let has_focused_row = focused_ri != null
@@ -4346,7 +4357,6 @@ ui.nav = function(id, opt) {
 		// ask the server for that many ids; on success, write them and save
 		// again.
 		save_req = ajax({
-			dont_send: true,
 			url: rowset_url(),
 			upload: {
 				exec: 'reserve_ids', n: new_ris.length,
@@ -4366,7 +4376,6 @@ ui.nav = function(id, opt) {
 			},
 			done: end_request,
 		})
-		save_req.send()
 		return true
 	}
 
@@ -4443,7 +4452,6 @@ ui.nav = function(id, opt) {
 		let update_id = floor(Math.random() * 2**52).toString(36)
 		own_update_ids.add(update_id)
 		save_req = ajax({
-			dont_send: true,
 			url: rowset_url(),
 			upload: {
 				exec: 'save',
@@ -4457,7 +4465,34 @@ ui.nav = function(id, opt) {
 			},
 			done: end_request,
 		})
-		save_req.send()
+	}
+
+	/// actions ---------------------------------------------------------------
+
+	e.exec_action = function(action) {
+		let pks = [] // [[v1, ...], ...]: focused row first, then the others
+		for (let ri of e.selected_server_ris())
+			pks.push(row_pk(ri))
+		action_req = ajax({
+			url: rowset_url(),
+			upload: {
+				exec: action.name,
+				params: server_param_vals(param_vals),
+				pks: pks,
+			},
+			success: function() {
+				if (action.reload && this == action_req)
+					e.reload()
+			},
+			done: function() {
+				if (this == action_req)
+					action_req = null
+			},
+		})
+	}
+
+	e.has_pending_request = function() {
+		return save_req != null || load_req != null || action_req != null
 	}
 
 	/// merging ---------------------------------------------------------------
@@ -4715,7 +4750,6 @@ ui.nav = function(id, opt) {
 			}
 			load_req?.abort()
 			load_req = ajax({
-				dont_send: true,
 				url: rowset_url(),
 				upload: {
 					exec: 'load',
@@ -4750,7 +4784,6 @@ ui.nav = function(id, opt) {
 					}
 				},
 			})
-			load_req.send()
 		}
 	}
 
@@ -4775,6 +4808,8 @@ ui.nav = function(id, opt) {
 		load_req = null
 		save_req = null
 		abort_children_reqs()
+		action_req?.abort()
+		action_req = null
 		if (can_be_master) {
 			remove_value(rowset_navs[e.rowset_name], e)
 			ui.rebuild('nav_removed')
@@ -5002,7 +5037,6 @@ ui.nav = function(id, opt) {
 			parent_ids.push(col_val(ri, e.id_field.fi))
 		}
 		let req = ajax({
-			dont_send: true,
 			url: rowset_url(),
 			upload: {
 				exec: 'load',
@@ -5032,7 +5066,6 @@ ui.nav = function(id, opt) {
 			},
 		})
 		children_reqs.add(req)
-		req.send()
 	}
 
 	function clear_children_requested(parent_ids) {
@@ -5327,6 +5360,7 @@ ui.nav = function(id, opt) {
 		e.rowset_can_change_rows = rs.can_change_rows != false
 		e.rowset_can_move_rows   = rs.can_move_rows   != false
 		e.can_load_changed_rows  = rs.can_load_changed_rows ?? false
+		e.actions = rs.actions ?? []
 
 		e.mask_word_n = (e.all_fields.length + 31) >>> 5
 		all_fields_mask = fields_mask(e.all_fields)

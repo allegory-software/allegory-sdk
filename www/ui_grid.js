@@ -490,8 +490,16 @@ function init(id, e) {
 				disabled: is_group_col,
 			})
 		}
+		let action_items = [] // the rowset's custom action menu items
+		for (let action of e.actions)
+			action_items.push({id: 'action_' + action.name,
+				action: action, label: action.label})
 		items.push(null,
-			{id: 'columns', label: 'Show/Hide columns', items: column_items},
+			{id: 'columns', label: 'Show/Hide columns', items: column_items})
+		if (action_items.length)
+			items.push({id: 'actions', label: 'Actions', items: action_items,
+				disabled: e.has_pending_request()})
+		items.push(
 			null,
 			{id: 'help', label: 'Keyboard help', icon: 'help'})
 		menu_items = items
@@ -580,7 +588,9 @@ function init(id, e) {
 				help_open = true
 				break
 			default:
-				if (picked_item.field)
+				if (picked_item.action)
+					e.exec_action(picked_item.action)
+				else if (picked_item.field)
 					e.showhide_field(picked_item.field,
 						ui.state_of(menu_id, 'picked_checked'),
 						e.focused_vfi(), {input: e})

@@ -35,7 +35,10 @@ Rowset attributes to set (* = server-only):
 		can_remove_rows  : false         allow removing rows
 		can_change_rows  : false         allow editing existing rows
 		can_move_rows    : false         allos changing rows' position in the rowset
-	*	allow            : f|'r1 ...'    allow only if current user has a matching role
+	ACTIONS
+		actions          : [{name = 'foo', label = 'Foo', reload = false},...]
+		                                 custom actions, in the grid's Actions menu
+	*	allow           : f|'r1 ...'    allow only if current user has a matching role
 
 Field attributes to set:
 
@@ -444,6 +447,7 @@ function virtual_rowset(init, ...)
 			can_change_rows = rs.can_change_rows,
 			can_move_rows = rs.can_move_rows,
 			can_load_changed_rows = rs.load_changed_rows ~= nil,
+			actions = rs.actions,
 			label = rs.label,
 			fields = rs.client_fields,
 			params = rs.client_params,
