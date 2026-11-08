@@ -16,16 +16,18 @@ local function nextport() PORT = PORT + 1; return PORT end
 local CERT = assert(load'localhost.crt')
 local KEY  = assert(load'localhost.key')
 
-local function mkserver(port)
+local function mkserver(port, owner)
 	return server_stcp(listen('127.0.0.1', port), {
 		cert = CERT,
 		key = KEY,
+		owner = owner,
 	})
 end
 
-local function mkclient(port)
+local function mkclient(port, owner)
 	return client_stcp(connect('127.0.0.1', port), 'localhost', {
 		insecure_noverifycert = true,
+		owner = owner,
 	})
 end
 
@@ -220,6 +222,270 @@ function test.tls_debug_stream()
 		local n = s:recv(BUF, 64)
 		assert(str(BUF, n) == 'hello')
 		s:close()
+		server:close()
+	end)
+end
+
+function test.tls_listener_owner()
+	checked_run(function()
+		local owner0 = _own(currentthread(), {})
+		local owner1 = _own(currentthread(), {})
+		local server = mkserver(nextport(), owner0)
+		local closed_n = 0
+		server:onclose(function(s)
+			assert(s == server)
+			assert(s:closed())
+			assert(s.tcp.owner == nil)
+			assert(s._keepalive == nil)
+			closed_n = closed_n + 1
+		end)
+		assert(server.owner == nil)
+		assert(server.tcp.owner == owner0)
+		assert(server:setowner(owner1) == server)
+		owner0:try_close()
+		assert(not server:closed())
+		owner1:try_close()
+		assert(server:closed())
+		assert(closed_n == 1)
+		assert(server:try_close())
+		assert(closed_n == 1)
+		local ok, err = pcall(server.check_closed, server)
+		assert(not ok and err == CLOSED)
+	end)
+end
+
+local function tls_receiver_close(cancel, raw_close)
+	checked_run(function()
+		local port = nextport()
+		local server = mkserver(port)
+		local s
+		local closed_n = 0
+		local worker = sthread(function()
+			local raw = assert(server:try_accept())
+			raw:setowner(currentthread())
+			s = server:tls_accept(raw)
+			assert(s.owner == nil)
+			assert(raw.owner == currentthread())
+			s:onclose(function(self)
+				assert(self == s)
+				assert(self:closed())
+				assert(self.tcp.owner == nil)
+				assert(self._keepalive == nil)
+				closed_n = closed_n + 1
+			end)
+			s:send'r'
+			local ok, err = pcall(s.recv, s, BUF, 1)
+			assert(not ok)
+			assert(err == (cancel and CANCEL or CLOSED))
+			assert(s:closed())
+			assert(s:try_close())
+		end, 'tls recv owner')
+		resume(worker)
+		local owner0 = _own(currentthread(), {})
+		local owner1 = _own(currentthread(), {})
+		local c = mkclient(port, owner0)
+		assert(c.owner == nil)
+		assert(c.tcp.owner == owner0)
+		assert(c:setowner(owner1) == c)
+		owner0:try_close()
+		assert(not c:closed())
+		assert(c:recv(BUF, 1) == 1)
+		assert(worker.waiting == s.tcp)
+		if cancel then
+			assert(worker:try_cancel())
+		elseif raw_close then
+			assert(s.tcp:try_close())
+		else
+			assert(s:try_close())
+		end
+		assert(worker:status() == 'dead')
+		assert(worker.owner == nil)
+		assert(s.tcp.owner == nil)
+		assert(closed_n == 1)
+		local ok, err = pcall(s.recv, s, BUF, 1)
+		assert(not ok and err == CLOSED)
+		ok, err = pcall(s.send, s, 'x')
+		assert(not ok and err == CLOSED)
+		assert(not next(server.sockets))
+		owner1:try_close()
+		assert(c:closed())
+		assert(c._keepalive == nil)
+		server:close()
+	end)
+end
+
+function test.tls_close_receiver_owner()
+	tls_receiver_close(false, false)
+end
+
+function test.tls_raw_close_receiver_owner()
+	tls_receiver_close(false, true)
+end
+
+function test.tls_cancel_receiver_owner()
+	tls_receiver_close(true, false)
+end
+
+function test.tls_thread_finish_closes_socket()
+	checked_run(function()
+		local port = nextport()
+		local server = mkserver(port)
+		local s
+		local worker = sthread(function()
+			local raw = assert(server:try_accept())
+			raw:setowner(currentthread())
+			s = server:tls_accept(raw)
+			s:send'r'
+		end, 'tls socket owner')
+		resume(worker)
+		local c = mkclient(port)
+		assert(c:recv(BUF, 1) == 1)
+		assert(worker:status() == 'dead')
+		assert(worker.owner == nil)
+		assert(s:closed())
+		assert(s.tcp.owner == nil)
+		assert(s._keepalive == nil)
+		assert(not next(server.sockets))
+		c:close()
+		server:close()
+	end)
+end
+
+function test.tls_listener_cancel_suspended_clients()
+	checked_run(function()
+		local port = nextport()
+		local server = mkserver(port)
+		local workers = {}
+		local closed_n = 0
+		local listener = sthread(function()
+			while true do
+				local ok, raw = pcall(server.try_accept, server)
+				if not ok then
+					assert(raw == CANCEL)
+					break
+				end
+				local suspended = #workers < 2
+				local worker = sthread(function()
+					raw:setowner(currentthread())
+					local s = server:tls_accept(raw)
+					local waiting_thread
+					s:onclose(function()
+						closed_n = closed_n + 1
+						if waiting_thread then
+							resume(waiting_thread, 'closed')
+						end
+					end)
+					s:send'r'
+					if suspended then
+						waiting_thread = currentthread()
+						assert(suspend() == 'closed')
+						waiting_thread = nil
+					else
+						local ok, err = pcall(s.recv, s, BUF, 1)
+						assert(not ok and err == CLOSED)
+					end
+					assert(s:closed())
+					s:close()
+				end, 'tls client handler')
+				add(workers, worker)
+				resume(worker)
+			end
+		end, 'tls accept waiter')
+		resume(listener)
+		local clients = {}
+		for i = 1, 3 do
+			local c = mkclient(port)
+			assert(c:recv(BUF, 1) == 1)
+			add(clients, c)
+		end
+		assert(workers[1].waiting == true)
+		assert(workers[2].waiting == true)
+		assert(listener:try_cancel())
+		assert(listener:status() == 'dead')
+		assert(server:closed())
+		assert(server._keepalive == nil)
+		assert(not next(server.sockets))
+		assert(server.tcp._sockets_n == 0)
+		assert(closed_n == 3)
+		for _, worker in ipairs(workers) do
+			assert(worker:status() == 'dead')
+			assert(worker.owner == nil)
+		end
+		server:close()
+		assert(closed_n == 3)
+		for _, c in ipairs(clients) do c:close() end
+	end)
+end
+
+local function tls_server_handshake_close(cancel)
+	checked_run(function()
+		local port = nextport()
+		local server = mkserver(port)
+		local c = connect('127.0.0.1', port)
+		local raw = assert(server:try_accept())
+		local worker = sthread(function()
+			raw:setowner(currentthread())
+			local ok, err = pcall(server.tls_accept, server, raw)
+			assert(not ok)
+			assert(err == (cancel and CANCEL or CLOSED))
+		end, 'tls server handshake')
+		resume(worker)
+		assert(worker.waiting == raw)
+		local s = assert(raw.stcp)
+		assert(not server.sockets[s])
+		local closed_n = 0
+		s:onclose(function() closed_n = closed_n + 1 end)
+		if cancel then
+			assert(worker:try_cancel())
+		else
+			server:close()
+		end
+		assert(worker:status() == 'dead')
+		assert(worker.owner == nil)
+		assert(raw.owner == nil)
+		assert(s:closed())
+		assert(s._keepalive == nil)
+		assert(closed_n == 1)
+		assert(server.tcp._sockets_n == 0)
+		c:close()
+		server:close()
+	end)
+end
+
+function test.tls_cancel_server_handshake()
+	tls_server_handshake_close(true)
+end
+
+function test.tls_listener_close_during_handshake()
+	tls_server_handshake_close(false)
+end
+
+function test.tls_cancel_client_handshake()
+	checked_run(function()
+		local port = nextport()
+		local server = listen('127.0.0.1', port)
+		local raw = connect('127.0.0.1', port)
+		local peer = server:accept()
+		local worker = sthread(function()
+			local ok, err = pcall(client_stcp, raw, 'localhost', {
+				insecure_noverifycert = true,
+			})
+			assert(not ok and err == CANCEL)
+		end, 'tls client handshake')
+		resume(worker)
+		assert(worker.waiting == raw)
+		local s = assert(raw.stcp)
+		assert(raw.owner == worker)
+		local closed_n = 0
+		s:onclose(function() closed_n = closed_n + 1 end)
+		assert(worker:try_cancel())
+		assert(worker:status() == 'dead')
+		assert(worker.owner == nil)
+		assert(raw.owner == nil)
+		assert(s:closed())
+		assert(s._keepalive == nil)
+		assert(closed_n == 1)
+		peer:close()
 		server:close()
 	end)
 end

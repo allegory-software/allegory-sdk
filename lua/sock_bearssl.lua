@@ -1065,16 +1065,19 @@ local stcp = {
 	checkp       = checkp,
 	checknp      = checknp,
 	protect      = protect,
-	setowner     = setowner,
 }
+
+function stcp:setowner(owner)
+	self.tcp:setowner(owner)
+	return self
+end
 
 function stcp:onclose(fn)
 	after(self, '_onclose', fn)
 end
 
 function stcp:check_closed()
-	if not self._closed then return end
-	error(CLOSED)
+	return self.tcp:check_closed()
 end
 
 function stcp:shutdown(mode)
@@ -1094,31 +1097,26 @@ function stcp:debug_stream(protocol_name)
 end
 
 function stcp:try_close()
-	if self._closed then return true end
-	self._closed = true --close barrier
-	if self.sockets then --server TLS socket: close all accepted TLS sockets.
-		for s in pairs(self.sockets) do
-			s:try_close()
-		end
-	end
-	local ok, err = self.tcp:try_close()
+	return self.tcp:try_close()
+end
+stcp.close = make_raising('close', stcp.try_close)
+
+local function stcp_onclose(tcp)
+	local self = tcp.stcp
 	local ps = self.listen_socket
 	if ps then
 		ps.sockets[self] = nil
 	end
-	_disown(self)
 	self._keepalive = nil
 	live(self, nil)
 	if self._onclose then
 		self:_onclose()
 		self._onclose = nil
 	end
-	return ok, err
 end
-stcp.close = make_raising('close', stcp.try_close)
 
 function stcp:closed()
-	return self._closed
+	return self.tcp:closed()
 end
 
 function stcp:_try_cancel_io(cancel_thread)
@@ -1134,13 +1132,14 @@ function _G.client_stcp(tcp, host, opt)
 	local owner = _check_owner(opt.owner)
 	local sc, eng, keepalive = make_client_ctx(opt)
 	assert(C.br_ssl_client_reset(sc, host, 0) ~= 0, 'ssl_client_reset_failed')
-	local s = _own(owner, object(client_stcp, {
+	local s = object(client_stcp, {
 		tcp = tcp,
 		eng = eng,
 		_keepalive = keepalive,
-	}))
+	})
 	tcp.stcp = s --cross-ref
-	tcp:setowner(s)
+	tcp:setowner(owner)
+	tcp:onclose(stcp_onclose)
 	engine_run(s, bor(BR_SSL_SENDAPP, BR_SSL_RECVAPP))
 	live(s, 'tcp=%s', tcp)
 	return s
@@ -1248,16 +1247,17 @@ function _G.try_server_stcp(tcp, opt)
 		add(keepalive, cache_buf)
 	end
 	local issuer_kt = opt.cert_issuer_rsa and BR_KEYTYPE_RSA or BR_KEYTYPE_EC
-	local s = _own(owner, object(server_stcp, {
+	local s = object(server_stcp, {
 		tcp = tcp,
 		sockets = {},
 		_chain = chain, _chain_n = chain_n,
 		_sk = sk, _kt = kt, _issuer_kt = issuer_kt,
 		_cache = cache,
 		_keepalive = keepalive,
-	}))
+	})
 	tcp.stcp = s --cross-ref for client socket tracking
-	tcp:setowner(s) --stcp owns it now
+	tcp:setowner(owner)
+	tcp:onclose(stcp_onclose)
 	live(s, 'tcp=%s', tcp)
 	return s
 end
@@ -1274,14 +1274,14 @@ function server_stcp:tls_accept(ctcp, opt)
 
 	assert(C.br_ssl_server_reset(sc) ~= 0, 'ssl_server_reset_failed')
 
-	local s = _own(ctcp.owner, object(client_stcp, {
+	local s = object(client_stcp, {
 		tcp = ctcp,
 		eng = eng,
 		_keepalive = keepalive,
 		listen_socket = self,
-	}, opt))
+	}, opt)
 	ctcp.stcp = s --cross-ref
-	ctcp:setowner(s)
+	ctcp:onclose(stcp_onclose)
 
 	engine_run(s, bor(BR_SSL_SENDAPP, BR_SSL_RECVAPP))
 
