@@ -11,6 +11,8 @@ AUTH API
 	- {type='pass',email=,phone=,pass=}       login with email/phone and password
 	- {type='code',email=|phone=,code=}       login with code from gen_auth_code()
 	- {type='register_pass',email=,phone=,pass=} create a user with a password
+	- {type='impersonate',uid=}               act as another user (admins only)
+	- {type='unimpersonate'}                  stop acting as another user
 	host() -> host                            get host, raises if no matching tenant
 	tenant() -> tid                           get tenant id for host()
 	user([field]|'*') -> val|u                login with session cookie and get user
@@ -28,9 +30,6 @@ AUTH STORE API
 TO OVERRIDE
 	{email|phone|name|pass}_is_valid(s)       field validators
 	auth_switch_user(new_u, old_u)            callback when login from anonymous login
-
-REQUEST ARGS
-	uid        user id, for impersonation
 
 SCHEMA
 	auth_schema                              auth schema
@@ -166,16 +165,21 @@ local function parse_session_cookie()
 	return sid
 end
 
-local function set_session_cookie(sid)
+local function set_cookie(name, val)
 	local secure_flag = scheme'https'
 	setheader('set-cookie',
-		'session='..(sid or 0)
+		name..'='..(val or 0)
 		..'; Path=/'
-		..'; Max-Age='..(sid and 9999999999 or 0)
+		..'; Max-Age='..(val and 9999999999 or 0)
 		..(secure_flag and '; Secure' or '') --prevent MITM
 		..'; HttpOnly' --prevent JS access
 		..'; SameSite='..(secure_flag and 'strict' or 'lax') --prevent BREACH (but also img tracking)
 	)
+end
+
+local function set_session_cookie(sid)
+	set_cookie('session', sid)
+	set_cookie('impersonate', nil)
 	http_request().session_id = sid
 end
 
@@ -191,20 +195,24 @@ local function try_load_session()
 	return store.load_session(tenant(), sid)
 end
 
-local function set_req_user(ru)
+local function can_impersonate(ru, iu) --only devs can impersonate devs.
+	return ru.roles.admin and (ru.roles.dev or not iu.roles.dev)
+end
+
+local function set_req_user(ru, iuid)
 	local u = ru
 	local req = http_request()
 	req.real_user = ru
 	req.user = u
 	if not u then return end
 	--impersonate other user if asked
-	local iuid = args'uid'
-	if ru and iuid then
-		iuid = checkarg(id_arg(iuid), 'uid')
-		if iuid ~= ru.id then
-			allow(ru.roles.admin, 'user impersonation denied')
-			u = allow(try_load_user(iuid))
+	if iuid and iuid ~= ru.id then
+		local iu = try_load_user(iuid)
+		if iu and can_impersonate(ru, iu) then
+			u = iu
 			req.user = u
+		else
+			set_cookie('impersonate', nil)
 		end
 	end
 	if multilang() then
@@ -429,8 +437,26 @@ function auth.session()
 	req.session_loaded = true
 	store.with_lock('r', function()
 		local u = try_load_user(try_load_session())
-		set_req_user(u)
+		set_req_user(u, id_arg(cookie'impersonate'))
 	end)
+end
+
+--impersonate another user (admins only) until unimpersonate or new login.
+function auth.impersonate(a)
+	local iuid = checkarg(id_arg(a.uid), 'uid')
+	local ru = http_request().real_user
+	store.with_lock('r', function()
+		local iu = try_load_user(iuid)
+		allow(ru and iu and can_impersonate(ru, iu),
+			'user impersonation denied')
+		set_cookie('impersonate', iuid)
+		set_req_user(ru, iuid)
+	end)
+end
+
+function auth.unimpersonate()
+	set_cookie('impersonate', nil)
+	set_req_user(http_request().real_user)
 end
 
 function login(a)
@@ -499,8 +525,12 @@ end
 
 --user admin web API -------------------------------------------------------------
 
+local function user_roles() --current user's roles, none when signed out
+	return user'roles' or empty
+end
+
 function user_list()
-	allow(user'roles'.admin, 'only admins can see users')
+	allow(user_roles().admin, 'only admins can see users')
 	return store.with_lock('r', store.users)
 end
 
@@ -511,14 +541,14 @@ end
 
 function user_create(tid, u)
 	check_fields(u)
-	check_rights(user'roles', u)
+	check_rights(user_roles(), u)
 	u.pass = u.pass and bcrypt_hash(u.pass)
 	return store.with_lock('w', store.add_user, tid, u)
 end
 
 function user_update(uid, updates)
 	check_fields(updates)
-	local r = user'roles' --login() can take the lock: read before locking.
+	local r = user_roles() --login() can take the lock: read before locking.
 	updates = update({}, updates)
 	--slow: hash outside the lock.
 	updates.pass = updates.pass and bcrypt_hash(updates.pass)
@@ -529,7 +559,7 @@ function user_update(uid, updates)
 end
 
 function user_delete(uid)
-	local r = user'roles' --login() can take the lock: read before locking.
+	local r = user_roles() --login() can take the lock: read before locking.
 	store.with_lock('w', function()
 		check_rights(r, store.load_user(uid))
 		store.try_del_user(uid)

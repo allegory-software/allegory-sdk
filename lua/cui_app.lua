@@ -16,7 +16,8 @@ USAGE
 API
 
 	fontfile(name, path, [desc])  preload a font and load it in the page
-	user_json() -> {signed_in=, anonymous=, name=, email=, phone=}
+	user_json() -> {signed_in=, is_admin=, impersonating=, anonymous=,
+		name=, email=, phone=}
 	db() -> db                             open the configured db
 	scan(tbl, [path], [alias]) -> scan     db():scan()
 	query('TABLE [ALIAS]'|rel, [alias]) -> rel   db():from()
@@ -26,6 +27,9 @@ ACTIONS
 	gen_auth_code.json
 	login.json
 	logout.json
+	impersonate.json
+	unimpersonate.json
+	users.json
 
 UI API
 
@@ -81,9 +85,12 @@ fontfile('tabler'       , 'icons/tabler-icons.woff2')
 fontfile('tabler_filled', 'icons/tabler-icons-filled.woff2')
 
 function user_json()
+	local real_u = real_user'*' -- real user or nil
 	return {
 		--signed_in is always non-nil to avoid an empty table to encode as [].
 		signed_in = user() ~= nil and not user'anonymous',
+		is_admin = real_u ~= nil and real_u.roles.admin == true,
+		impersonating = real_user() ~= user(),
 		anonymous = user'anonymous',
 		name = user'name',
 		email = user'email',
@@ -129,6 +136,26 @@ action['logout.json'] = function()
 	checkarg(method'POST')
 	login{type = 'logout'}
 	return user_json()
+end
+
+action['impersonate.json'] = function()
+	checkarg(method'POST')
+	login{type = 'impersonate', uid = post'uid'}
+	return user_json()
+end
+
+action['unimpersonate.json'] = function()
+	checkarg(method'POST')
+	login{type = 'unimpersonate'}
+	return user_json()
+end
+
+action['users.json'] = function()
+	local users = {} -- {{id=, name=, email=}, ...}
+	for _, u in ipairs(user_list()) do
+		add(users, {id = u.id, name = u.name, email = u.email})
+	end
+	return users
 end
 
 --tie webb to cui

@@ -19,10 +19,10 @@ local function newreq()
 	local sid = sc and sc[1]:match'session=(.-);'
 	currentthread():ownenv().http_request = {
 		uri = '/',
-		headers = {host = 'test'},
+		headers = {host = 'test',
+			cookie = sid and 'session='..sid},
 		response_headers = {},
 		log = noop,
-		cookie = sid and 'session='..sid,
 	}
 end
 local _time = 0
@@ -61,7 +61,7 @@ local function login(a)
 end
 local function try_login(a)
 	local ok, ret = pcall(login, a)
-	if ok then return ret and ret.id end
+	if ok then return ret end
 	return nil, ret --ret is the error message
 end
 local function assert_err(err, substring)
@@ -171,6 +171,134 @@ local real_uid = login{type = 'register_pass', email = 'bar@test.com', pass = 's
 assert(real_uid == anon_uid) --same uid, upgraded in place
 assert(not user'anonymous') --no longer anonymous
 print'ok anon / upgrade'
+
+--impersonation: each request carries the cookies set by the previous one.
+local jar --{cookie name -> value}
+local function newreq_jar()
+	local req = currentthread().env.http_request
+	for _, sc in ipairs(req.response_headers['set-cookie'] or {}) do
+		local name, val = sc:match'^(%w+)=(.-);'
+		jar[name] = val ~= '0' and val or nil
+	end
+	currentthread():ownenv().http_request = {
+		uri = '/',
+		headers = {host = 'test',
+			cookie = jar.session and 'session='..jar.session},
+		cookies = {impersonate = jar.impersonate},
+		response_headers = {},
+		log = noop,
+	}
+end
+local function sets_cookie(prefix)
+	for _, sc in ipairs(http_request().response_headers['set-cookie'] or {}) do
+		if sc:find(prefix, 1, true) == 1 then return true end
+	end
+	return false
+end
+local function register(email, roles)
+	newreq()
+	local uid = login{type = 'register_pass', email = email, pass = 'secret'}
+	auth_store().with_lock('w', auth_store().update_user, uid, function(u)
+		u.roles = roles
+	end)
+	return uid
+end
+local function new_browser() --first request of a browser with no cookies
+	newreq()
+	jar = {}
+	newreq_jar()
+end
+local function sign_in(email)
+	new_browser()
+	login{type = 'pass', email = email, pass = 'secret'}
+end
+
+local admin_uid  = register('admin@test.com', {admin = true})
+local plain_uid  = register('plain@test.com', {})
+local dev_uid    = register('dev@test.com', {admin = true, dev = true})
+local dev2_uid   = register('dev2@test.com', {dev = true})
+local victim_uid = register('victim@test.com', {})
+
+--test impersonate / unimpersonate
+sign_in('admin@test.com')
+newreq_jar()
+assert(login{type = 'impersonate', uid = plain_uid} == plain_uid)
+assert(real_user() == admin_uid)
+newreq_jar()
+assert(login{type = 'session'} == plain_uid) --the cookie keeps impersonating
+assert(real_user() == admin_uid)
+newreq_jar()
+assert(login{type = 'unimpersonate'} == admin_uid)
+newreq_jar()
+assert(login{type = 'session'} == admin_uid)
+print'ok impersonate'
+
+--test impersonation denied
+sign_in('plain@test.com')
+newreq_jar()
+local uid, err = try_login{type = 'impersonate', uid = admin_uid}
+assert(not uid); assert_err(err, 'impersonation denied')
+sign_in('admin@test.com')
+newreq_jar()
+local uid, err = try_login{type = 'impersonate', uid = dev2_uid}
+assert(not uid); assert_err(err, 'impersonation denied')
+newreq_jar()
+local uid, err = try_login{type = 'impersonate', uid = 99999}
+assert(not uid); assert_err(err, 'impersonation denied')
+sign_in('dev@test.com')
+newreq_jar()
+assert(login{type = 'impersonate', uid = dev2_uid} == dev2_uid)
+print'ok impersonate / denied'
+
+--test a non-admin's impersonation cookie is ignored and cleared
+sign_in('plain@test.com')
+newreq_jar()
+http_request().cookies = {impersonate = tostring(admin_uid)}
+assert(login{type = 'session'} == plain_uid)
+assert(real_user() == plain_uid)
+assert(sets_cookie'impersonate=0;')
+print'ok impersonate / forged cookie'
+
+--test impersonating a deleted user ends the impersonation
+sign_in('admin@test.com')
+newreq_jar()
+login{type = 'impersonate', uid = victim_uid}
+auth_store().with_lock('w', auth_store().try_del_user, victim_uid)
+newreq_jar()
+assert(login{type = 'session'} == admin_uid)
+assert(sets_cookie'impersonate=0;')
+newreq_jar()
+assert(login{type = 'session'} == admin_uid)
+print'ok impersonate / deleted user'
+
+--test logout and login end the impersonation
+sign_in('admin@test.com')
+newreq_jar()
+login{type = 'impersonate', uid = plain_uid}
+newreq_jar()
+login{type = 'logout'}
+assert(sets_cookie'impersonate=0;')
+sign_in('admin@test.com')
+newreq_jar()
+login{type = 'impersonate', uid = plain_uid}
+newreq_jar()
+login{type = 'pass', email = 'admin@test.com', pass = 'secret'}
+assert(sets_cookie'impersonate=0;')
+print'ok impersonate / new login'
+
+--test user admin API when signed out
+config{auto_create_user = false}
+new_browser()
+local ok, err = pcall(user_list)
+assert(not ok); assert_err(err, 'only admins')
+local ok, err = pcall(user_create, 1, {})
+assert(not ok); assert_err(err, 'only admins')
+local ok, err = pcall(user_update, admin_uid, {})
+assert(not ok); assert_err(err, 'only admins')
+local ok, err = pcall(user_delete, admin_uid)
+assert(not ok); assert_err(err, 'only admins')
+config{auto_create_user = true}
+print'ok user admin / signed out'
 
 --clean-up
 rm_rf'/tmp/webb_auth_test'

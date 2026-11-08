@@ -8090,7 +8090,7 @@ function split(hv, id, size, unit, fixed_side,
 		}
 	}
 
-	ui[hv](split_fr, gap, align, valign)
+	ui.hv(hv, split_fr, gap, align, valign)
 
 	if (cs)
 		ui.set_cursor(horiz ? 'col-resize' : 'row-resize')
