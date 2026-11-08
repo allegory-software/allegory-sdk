@@ -27,6 +27,7 @@ require'rowset_mdbx'
 require'ui_db_explorer'
 require'ui_os_explorer'
 require'webb_call'
+require'app_pm'
 
 do
 	local test_actions = {
