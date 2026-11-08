@@ -828,16 +828,20 @@ function init(id, e) {
 		}
 
 		let tabs = row_form.tabs
-		let save, cancel
-		let resizer_id = row_form_id+'.resizer'
-		ui.popup(row_form_id, 'modal', target_i, 'ic', 'c', 'constrain')
-			ui.shadow('modal')
-			ui.bb('bg', null, 1, 'light')
-			ui.focus_group(true, null, row_form_id)
-			ui.min_wh(
-				ui.state_of(resizer_id, 'w'),
-				ui.state_of(resizer_id, 'h'))
-			ui.stack()
+		let prev, next, save, cancel
+		let title = e.label
+		if (e.display_field)
+			title += ' '+e.cell_text(e.focused_ri, e.display_field.fi)
+		else
+			for (let field of e.pk_fields)
+				title += ' '+e.cell_text(e.focused_ri, field.fi)
+		ui.toolbox(row_form_id, title, '[', 't', 0, 0, target_i, row_form.drag_ids)
+			if (ui.focus_inside(row_form_id))
+				row_form.focused_id = ui.focused_id
+			else if (row_form.focused_id && ui.click
+				&& row_form.drag_ids.includes(ui.captured_id))
+				ui.focus(row_form.focused_id)
+			ui.focus_group(false)
 				ui.v(1, ui.sp2(), 's', 's')
 					if (tabs.length > 1)
 						ui.dock(row_form_id+'.dock', row_form.layout,
@@ -849,8 +853,14 @@ function init(id, e) {
 							})
 					else if (tabs.length)
 						build_row_form_tab(tabs[0])
-					ui.p(0, 0, ui.sp2(), ui.sp2())
-					ui.h(0, ui.sp(), 'r')
+					ui.ph(ui.sp2())
+					ui.pb(ui.sp2())
+					ui.h(0, ui.sp(), 's')
+						prev = ui.button(row_form_id+'.prev',
+							'chevron-left', S('prev', 'Prev'))
+						next = ui.button(row_form_id+'.next',
+							'chevron-right', S('next', 'Next'))
+						ui.box(1)
 						ui.default_button(row_form_id+'.save')
 						ui.cancel_button(row_form_id+'.cancel')
 						save = ui.primary_button(row_form_id+'.save',
@@ -859,11 +869,12 @@ function init(id, e) {
 							'x', S('cancel', 'Cancel'))
 					ui.end_h()
 				ui.end_v()
-				ui.resizer(resizer_id, 'lrtb', null, null, true)
-			ui.end_stack()
 			ui.end_focus_group()
-		ui.end_popup()
-		ui.focus_first(row_form_id)
+		ui.end_toolbox()
+
+		if (prev || next)
+			e.move_focus(true, true, prev ? -1 : 1, 0,
+				{input: e, must_move: true})
 
 		if (save || cancel) {
 			if (save)
