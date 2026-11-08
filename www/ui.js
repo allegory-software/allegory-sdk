@@ -33,7 +33,7 @@ CONTAINERS
   DOCK          ui.dock
   DOCK TABS     ui.set_dock_tab  ui.select_dock_tab  ui.remove_dock_tab
   TAB STRIP     ui.open_tab_strip  ui.close_tab_strip
-  TOOLBOX       ui.toolbox  ui.begin_toolboxes  ui.modal
+  TOOLBOX       ui.toolbox  ui.begin_toolboxes  ui.modal  ui.set_modal_open
   SECTION       ui.begin_section
   FRAME         ui.frame
   REC BOX       ui.create_rec_box  ui.rec_box  ui.open_rec_box  ui.close_rec_box
@@ -7494,7 +7494,7 @@ ss.draw = function(a, i) {
 
 ui.box_widget('shared_screen', ss)
 
-//// DRAG_POINT --------------------------------------------------------------
+//// DRAG POINT --------------------------------------------------------------
 
 //	ui.drag_point (id, x, y, color='red')
 
@@ -12922,8 +12922,6 @@ ui.remove_dock_tab = function(id, tab_id) {
 	ui.toolbox (id, title, align='[', valign='t', x0, y0,
 		target_i='screen', drag_ids=id+'.title')
 
-	ui.modal  (id, title)  centered toolbox over a blocking semi-opaque screen
-
 */
 
 let toolbox_stack = []
@@ -13057,17 +13055,53 @@ ui.end_toolboxes = function() {
 
 //// MODAL -------------------------------------------------------------------
 
+/*
+
+	if (ui.modal (id, title)) {
+		... contents ...
+		ui.end_modal()
+	}
+	ui.set_modal_open (id, open, canceled=)  open or close a modal
+
+	- the close button in the title bar and Escape close the modal (canceled).
+	- publishes s.open, s.opened, s.closed, s.canceled (see POPUP STATE).
+
+*/
+
+function modal_update(id, s) {
+	let cancel = ui.state_of(id+'.cancel', 'state') == 'click'
+	popup_update(s, false, cancel, cancel)
+}
+
+ui.set_modal_open = function(id, open, canceled) {
+	let s = ui.state_of(id)
+	assert(s, 'set_modal_open(): modal not built: ', id)
+	if (set_popup_open(s, open, canceled) && open)
+		ui.focus_first(id)
+}
+
 ui.modal = function(id, title) {
-	let overlay_id = id+'.overlay'
-	let s = ui.state(overlay_id)
-	ui.popup(overlay_id, 'modal', 'screen', 'ics', 's', 'solid')
+	let s = ui.state(id, modal_update)
+	s.open ??= false
+	if (!s.open)
+		return false
+	ui.popup(id+'.overlay', 'modal', 'screen', 'ics', 's', 'solid')
 		ui.bb('smoke')
-		ui.toolbox(id, title, 'c', 'c', 0, 0, null, [])
+		ui.toolbox(id, null, 'c', 'c', 0, 0, null, [])
 			ui.focus_group(true)
-			if (!s.focus_moved) {
-				s.focus_moved = true // focus moved into the modal on first build
-				ui.focus_first(id)
-			}
+			ui.cancel_button(id+'.cancel')
+			ui.h(0)
+				ui.stack(id+'.title')
+					ui.bb('bg3')
+					ui.p(ui.sp2(), ui.sp())
+					ui.h(1, ui.sp2(), 's', 'c')
+						ui.text('', title, 1, 'l')
+						ui.nofocus()
+						ui.bare_button(id+'.cancel', 'x', '')
+					ui.end_h()
+				ui.end_stack()
+			ui.end_h()
+	return true
 }
 
 ui.end_modal = function() {
