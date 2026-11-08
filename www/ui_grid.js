@@ -1717,7 +1717,7 @@ function init(id, e) {
 		let hovering = hit_zone == 'cell' && hit_vri == vri && hit_vfi == vfi
 		let align = e.field_align(field)
 		let full_width = !build_stage
-			&& ((row_focused && field_focused) || hovering)
+			&& ((focused && row_focused && field_focused) || hovering)
 			&& (align == 'left' || !field_has_indent(field))
 
 		let indent_x = 0
