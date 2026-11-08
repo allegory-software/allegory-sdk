@@ -95,7 +95,7 @@ LAYOUT
 
 WIDGET STATE
   ACCESS        ui.state  ui.state_of  ui.set_state_of  ui.state_init
-  LIFETIME      ui.free_state  ui.on_free
+  LIFETIME      ui.free_state  ui.free_all_state  ui.on_free
   STATE SCOPES  ui.begin_state_scope  ui.keep_state_scope  ui.is_state_hidden
 
 PERSISTENCE
@@ -1464,6 +1464,7 @@ when the widget is created in the frame.
 	ui.state_init      (id, k, v)      set widget state var if widget is alive
 	ui.on_free         (id, free_fn)   add a widget gc hook
 	ui.free_state      (id)            free widget state
+	ui.free_all_state  ()              free all widget state
 	ui.stateful_widget (create) -> build  create a widget builder
 
 In IMGUI if you want to hide a widget you simply don't build it, but then its
@@ -1576,6 +1577,12 @@ ui.free_state = function(id) {
 	assert(!render_state_map, 'free_state() called while rendering')
 	let s = state_map.get(id)
 	if (s)
+		free_state(id, s)
+}
+
+ui.free_all_state = function() {
+	assert(!render_state_map, 'free_all_state() called while rendering')
+	for (let [id, s] of state_map)
 		free_state(id, s)
 }
 
