@@ -17,37 +17,110 @@ application anyway, and not in SQL files containing DDL statements?
 Here's some reasons:
 
 * you want to generate SQL DDL scripts for different SQL dialects
-from a common structured format.
+  from a common structured format.
 * you want to diff between a live database and your "on paper" schema
-to make sure that the database was migrated properly.
+  to make sure that the database was migrated properly.
 * you want to generate schema migrations (semi-)automatically without having
-to create and maintain schema versions and migration scripts.
+  to create and maintain schema versions and migration scripts.
 * you don't want to care about declaration order for foreign key constraints.
 * you want to annotate table fields with extra information for use in
-data-bound widget toolkits, and you don't want to do that off-band
-in a separate file.
+  data-bound widget toolkits, and you don't want to do that off-band
+  in a separate file.
 * your app has modules or extensions and you want each module to define its
-own part of the app schema, including adding columns to common tables
-or even adding foreign keys that reference tables from other modules.
+  own part of the app schema, including adding columns to common tables
+  or even adding foreign keys that reference tables from other modules.
 * you want to use a boolean type in MySQL.
 * you want a "shell" API for bulk DML ops like copying tables between
-databases with different engines.
+  databases with different engines.
 * use it as a base for a scriptable ETL tool.
 
-## Usage
+API --------------------------------------------------------------------------
 
-See `schema_mdbx.lua` for type definitions and `lang_schema()` in lang.lua
-and `auth_schema()` in `webb_auth_mdbx.lua` for examples of table definitions.
+	schema.new(opt) -> sc`          create a new schema object
+	schema.diff(sc1, sc2) -> diff`  find out what changed between `sc1` and `sc2`
+	diff:pp()`                      pretty print a schema diff
+	sc:import(fn | module)          add more schema definitions to sc
 
-### How this works / caveats
+SCHEMA DEFINITIONS -----------------------------------------------------------
 
-#### TL;DR
+	Definitions are created inside fn of import(fn), which runs in a special
+	function environment that enables the schema SDL.
+
+	See `schema_mdbx.lua` for type definitions and search for db_schema:import
+	calls in the code base for examples of table definitions. It will make the
+	terse reference here make a lot more sense.
+
+TABLES, TYPES, FLAGS
+
+	tables.NAME = {[tbl_flag, ...] col, type, flag, ... col, ...}  define a table
+	types.NAME = {...}              define a type
+	flags.NAME = {...}              define a flag
+	type_attrs.TYPE = {attr = val}  attrs added to every field of TYPE
+
+	- a type or flag is a name, a table {name, ..., attr = val}, or a
+	  function fn(sc, tbl, fld) -> {name, ..., attr = val} | nil.
+	- functions at the start of a table are table flags: fn(sc, tbl).
+
+FIELD FLAGS
+
+	pk                              pk of all the fields so far
+	pk(col, ...)                    pk of the given cols ('col [desc]')
+	uk, ix                          unique index / index on this field
+	uk(col, ...), ix(col, ...)      same on the given cols ('col [desc]')
+	fk                              fk to the table named like the col
+	fk(tbl, [ondelete], [onupdate]) fk to tbl; onupdate defaults 'cascade'
+	child_fk, child_fk(tbl)         fk with ondelete = 'cascade'
+	weak_fk, weak_fk(tbl)           fk with ondelete = 'set null'
+	check(body)                     check on this field; body is a string
+	                                or a table of engine attributes
+	aka'old1 old2'                  former names (also a table flag)
+	section'Name', tab'Name'        set field.section / field.tab
+
+SCHEMA WORDS AND METHODS
+
+	import(src)                     sc:import(src)
+	add_fk(tbl, 'col1 ...', ref_tbl, [ondelete], [onupdate])
+	add_child_fk(tbl, 'cols', ref_tbl)   ondelete = 'cascade'
+	add_weak_fk(tbl, 'cols', ref_tbl)    ondelete = 'set null'
+	trigger(name, when, op, tbl, ...)    sc:add_trigger(...)
+	action(def), action(tbl, def)   sc:add_action(...)
+	proc(name, args, ...)           sc:add_proc(...)
+	add_cols('tbl [after col]', t)  sc:add_cols(...)
+	- the same words exist as methods on sc, in the sc:add_X(...) form.
+	- sc:import(src) -> sc runs src once: a function (in sc.env), a schema
+	  (merges its types, tables, procs and type_attrs), a module name
+	  (looked up in schema.package, then require) or a plain table
+	  (merged into sc.env).
+	- sc:add_table(name, t) -> tbl defines a table; error if it exists.
+	- sc:add_cols adds fields to a defined table, after `col` if given.
+	- add_trigger and add_proc merge the extra `...` tables into the
+	  trigger or proc.
+	- sc:check_refs() errors if an fk references a table never defined.
+	- sc:resolve_type(t) resolves {flag, ..., attr = val} into attrs in
+	  place and drops the flags (used for virtual rowset fields).
+	- sc:format_ix_name(tbl, cols, unique) and sc:format_fk_name(tbl, cols)
+	  build the index and fk names from the formats below.
+	- schema.package: {module name -> src}, used by sc:import().
+	- schema.isschema(t): true if t is a schema.
+
+TABLE ACTIONS
+
+	table_schema.actions = {def1,...}
+		def: {name = 'foo', label = 'Foo', reload = false, fn = fn(db, pks)}
+
+	- declared in paper schema with `action(def)` as a table-level flag, or
+	  with `action(table_name, def)` after the table.
+	- paper-only: not stored.
+
+HOW THIS WORKS / CAVEATS -----------------------------------------------------
+
+TL;DR
 
 Field names in `my_schema` that clash with flag names need to be quoted.
 Field names, type names and flag names that clash with globals from `sc.env`
 or locals from the outer scope also need to be quoted.
 
-#### Long version
+LONG VERSION
 
 Using Lua for syntax instead of our own means that Lua's lexical rules apply,
 including lexical scoping which cannot be turned off, so there are some
@@ -82,16 +155,8 @@ inherit from multiple types but would've also made type names clash with
 field names. With the first variant only flag names clash with field names
 which is more acceptable.
 
-API
-	schema.new(opt) -> sc`          create a new schema object
-	schema.diff(sc1, sc2) -> diff`  find out what changed between `sc1` and `sc2`
-	diff:pp()`                      pretty print a schema diff
-
 INTEGRATION WITH DB ENGINES
 
-API
-	schema.cols_change_affects(old_tbl, new_tbl, cols, attrs) -> changed, col
-	schema.pk_change_affects(old_tbl, new_tbl, attrs) -> changed, col
 schema.new() options:
 	engine                     engine name used for engine-specific attributes.
 	diff_table_attrs           {attr->true}: attributes included in table diffs.
@@ -110,6 +175,11 @@ schema.new() options:
 	fk_indexes_store_pk        FK enforcement indexes store or otherwise depend
 	                           on the encoded child-table PK, so child PK changes
 	                           rebuild all foreign keys on the table.
+	cols_change_affects (old_tbl, new_tbl, cols, attrs) -> changed, col
+	pk_change_affects   (old_tbl, new_tbl, attrs) -> changed, col
+	ix_name_format  '%s_%s__%s'   (uk|ix, tbl, cols joined by `_`)
+	fk_name_format  'fk_%s__%s'   (tbl, cols joined by `_`)
+	ck_name_format  'ck_%s__%s'   (tbl, col)
 
 ]=]
 
@@ -366,6 +436,7 @@ do
 		function env.add_child_fk (...) self:add_child_fk (...) end
 		function env.add_weak_fk  (...) self:add_weak_fk  (...) end
 		function env.trigger      (...) self:add_trigger  (...) end
+		function env.action       (...) return self:add_action(...) end
 		function env.proc         (...) self:add_proc     (...) end
 		function env.add_cols     (...) self:add_cols     (...) end
 
@@ -526,6 +597,20 @@ function schema:add_trigger(name, when, op, tbl_name, ...)
 	assertf(not sql_triggers[name], 'duplicate trigger `%s`', name)
 	sql_triggers[name] = update({name = name, when = when, op = op,
 		table = tbl_name, pos = trigger_pos(sql_triggers, when, op)}, ...)
+end
+
+function schema:add_action(arg1, arg2)
+	local function add_action(tbl, def)
+		if getfenv(def.fn) == self.env then setfenv(def.fn, _G) end
+		add(attr(tbl, 'actions'), def)
+	end
+	if isstr(arg1) then --standalone: action('user', def)
+		local tbl = assertf(self.tables[arg1],
+			'unknown table for action: %s', arg1)
+		add_action(tbl, arg2)
+	else --inline: action(def) -- returns a table-level flag
+		return function(_, tbl) add_action(tbl, arg1) end
+	end
 end
 
 function schema:add_proc(name, args, ...)

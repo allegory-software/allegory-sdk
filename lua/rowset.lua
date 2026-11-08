@@ -36,7 +36,8 @@ Rowset attributes to set (* = server-only):
 		can_change_rows  : false         allow editing existing rows
 		can_move_rows    : false         allos changing rows' position in the rowset
 	ACTIONS
-		actions          : [{name = 'foo', label = 'Foo', reload = false},...]
+		actions          : [{name = 'foo', label = 'Foo', reload = false,
+		                     fn = fn(rs, pks, params)},...]
 		                                 custom actions, in the grid's Actions menu
 	*	allow           : f|'r1 ...'    allow only if current user has a matching role
 
@@ -441,13 +442,21 @@ function virtual_rowset(init, ...)
 			end
 			rs.client_params[name] = client_param
 		end
+		local client_actions = rs.actions and {}
+		for i, action in ipairs(rs.actions or empty) do
+			client_actions[i] = {
+				name   = action.name,
+				label  = action.label,
+				reload = action.reload,
+			}
+		end
 		merge(res, {
 			can_add_rows = rs.can_add_rows,
 			can_remove_rows = rs.can_remove_rows,
 			can_change_rows = rs.can_change_rows,
 			can_move_rows = rs.can_move_rows,
 			can_load_changed_rows = rs.load_changed_rows ~= nil,
-			actions = rs.actions,
+			actions = client_actions,
 			label = rs.label,
 			fields = rs.client_fields,
 			params = rs.client_params,
@@ -760,6 +769,16 @@ function virtual_rowset(init, ...)
 		local n = checkarg(tonumber(post.n))
 		checkarg(n >= 1 and n <= 1000 and n == floor(n))
 		return {ids = rs:reserve_ids(n)}
+	end
+
+	function rs:exec_action(params, post)
+		local action
+		for _, a in ipairs(rs.actions or empty) do
+			if a.name == post.action then action = a end
+		end
+		checkfound(action, 'action not found')
+		action.fn(rs, checkarg(post.pks), params)
+		return {}
 	end
 
 	init(rs, ...)

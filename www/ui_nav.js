@@ -4476,7 +4476,7 @@ ui.nav = function(id, opt) {
 		action_req = ajax({
 			url: rowset_url(),
 			upload: {
-				exec: action.name,
+				exec: 'action', action: action.name,
 				params: server_param_vals(param_vals),
 				pks: pks,
 			},

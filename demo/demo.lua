@@ -137,6 +137,33 @@ do
 			test_description , text,
 		}
 		tables.grid_save.rows = grid_rows
+		action('grid_save', {
+			name = 'reset', label = 'Reset test data', reload = true,
+			fn = function(db)
+				db:atomic('w', function()
+					local children = {}
+					local roots = {}
+					for _, row in ipairs(db:scan('grid_save', '')
+						:select('id, parent_id'):rows_array('{}')) do
+						if row.parent_id then
+							add(attr(children, row.parent_id), row.id)
+						else
+							add(roots, row.id)
+						end
+					end
+					local function delete_tree(id)
+						for _, child_id in ipairs(children[id] or empty) do
+							delete_tree(child_id)
+						end
+						db:del('grid_save', id)
+					end
+					for _, id in ipairs(roots) do delete_tree(id) end
+					for _, row in ipairs(grid_rows) do
+						db:insert('grid_save', '[]', row)
+					end
+				end)
+			end,
+		})
 		tables.grid_typed = {
 			row_check("row.test_action ~= 'reject row'", 'Test row rejected'),
 			code             , str, pk,
@@ -147,6 +174,20 @@ do
 			test_description , text,
 		}
 		tables.grid_typed.rows = grid_typed_rows
+		action('grid_typed', {
+			name = 'reset', label = 'Reset test data', reload = true,
+			fn = function(db)
+				db:atomic('w', function()
+					for _, row in ipairs(db:scan('grid_typed', '')
+						:select('code'):rows_array('{}')) do
+						db:del('grid_typed', row.code)
+					end
+					for _, row in ipairs(grid_typed_rows) do
+						db:insert('grid_typed', '[]', row)
+					end
+				end)
+			end,
+		})
 	end)
 	app:after('install', function()
 		local domain = assert(config'domain', -- configured host
@@ -205,31 +246,6 @@ do
 		}
 		local rs = rowset.grid_save
 		add_test_actions(rs, 'grid_save', 'id', 6)
-		function rs:exec_reset()
-			db():atomic('w', function()
-				local children = {}
-				local roots = {}
-				for _, row in ipairs(db():scan('grid_save', '')
-					:select('id, parent_id'):rows_array('{}')) do
-					if row.parent_id then
-						add(attr(children, row.parent_id), row.id)
-					else
-						add(roots, row.id)
-					end
-				end
-				local function delete_tree(id)
-					for _, child_id in ipairs(children[id] or empty) do
-						delete_tree(child_id)
-					end
-					db():del('grid_save', id)
-				end
-				for _, id in ipairs(roots) do delete_tree(id) end
-				for _, row in ipairs(grid_rows) do
-					db():insert('grid_save', '[]', row)
-				end
-			end)
-			return self:exec_load({})
-		end
 
 		rowset.grid_typed = scan_rowset{
 			name = 'grid_typed',
@@ -247,18 +263,6 @@ do
 		}
 		rs = rowset.grid_typed
 		add_test_actions(rs, 'grid_typed', 'code', 'A3')
-		function rs:exec_reset()
-			db():atomic('w', function()
-				for _, row in ipairs(db():scan('grid_typed', '')
-					:select('code'):rows_array('{}')) do
-					db():del('grid_typed', row.code)
-				end
-				for _, row in ipairs(grid_typed_rows) do
-					db():insert('grid_typed', '[]', row)
-				end
-			end)
-			return self:exec_load({})
-		end
 	end)
 end
 

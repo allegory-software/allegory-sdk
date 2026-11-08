@@ -26,6 +26,8 @@ SCAN ROWSET OPTIONS
 	paper schema. One that doesn't -- an expression, an aggregate -- is
 	read-only and untyped.
 
+	Table actions are published as rowset actions if the rowset has table's pk.
+
 WRITING
 
 	One table is written: the one whose rows match the rowset's rows
@@ -281,6 +283,40 @@ local function scan_rowset_init(rs, opt, ...)
 			rs.update_row = update_row
 			rs.delete_row = delete_row
 			if is_seq_pk then rs.reserve_ids = reserve_ids end
+
+			--add table actions to rowset actions.
+			if schema.actions then
+				--rowset can have its pk declared in a different order than
+				--the table. key_pos maps rowset pk col i -> write_table pk col i.
+				local key_pos = {} -- {write_table pk col i -> i in rs.pk[i]}
+				for i, name in ipairs(key_names) do
+					key_pos[i] = indexof(name, rs.pk)
+				end
+				rs.actions = extend({}, rs.actions)
+				local names = {} -- {action name -> true}
+				for _, action in ipairs(rs.actions) do
+					names[action.name] = true
+				end
+				for _, action in ipairs(schema.actions) do
+					assertf(not names[action.name],
+						'rowset %s: action name taken: %s', rs.name, action.name)
+					names[action.name] = true
+					add(rs.actions, {
+						name = action.name, label = action.label,
+						reload = action.reload,
+						fn = function(self, pks, params)
+							local table_pks = {} -- {{pk col1 val,...},...}
+							for i, pk in ipairs(pks) do
+								table_pks[i] = {}
+								for j, pos in ipairs(key_pos) do
+									table_pks[i][j] = pk[pos]
+								end
+							end
+							action.fn(rs_db(), table_pks)
+						end,
+					})
+				end
+			end
 		end
 
 		if not rs.is_lookup then

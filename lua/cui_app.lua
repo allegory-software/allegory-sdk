@@ -21,6 +21,8 @@ API
 	db() -> db                             open the configured db
 	scan(tbl, [path], [alias]) -> scan     db():scan()
 	query('TABLE [ALIAS]'|rel, [alias]) -> rel   db():from()
+	table_action(tbl_name, def)            add a table action to db_schema
+	rowset_action(rowset_name, def)        add an action to a rowset
 
 ACTIONS
 
@@ -51,6 +53,15 @@ require'mdbx_schema'
 db_schema = mdbx_schema() -- application paper schema
 db_schema:import'schema_mdbx'
 
+require'webb_auth_mdbx'
+
+db_schema:import(function()
+	add_cols('user after theme', {
+		ui_state, text, {maxlen = 1024 * 64, control = 'code_edit',
+			lang = 'js'}, internal,
+	})
+end)
+
 local webb_app = require'webb_app'
 require'rowset'
 require'rowset_mdbx'
@@ -68,6 +79,14 @@ function db()
 end
 function scan(...) return db():scan(...) end
 function query(...) return db():from(...) end
+
+function table_action(tbl_name, def)
+	db_schema:add_action(tbl_name, def)
+end
+
+function rowset_action(rowset_name, def)
+	add(attr(rowset[rowset_name], 'actions'), def)
+end
 
 cmd('install', 'Install application', function()
 	app:install()
@@ -245,12 +264,6 @@ end
 local function cui_app(...)
 	if package.loaded[scriptname] then return end
 	webb_app(...)
-	db_schema:import(function()
-		add_cols('user after theme', {
-			ui_state, text, {maxlen = 1024 * 64, control = 'code_edit',
-				lang = 'js'}, internal,
-		})
-	end)
 	function app:respond(req)
 		tenant()
 		checkfound(action(unpack(args())))

@@ -1054,7 +1054,8 @@ ui.scrollbox('grid_config_controls_sb', 1, 'auto', 'auto', 's', 's')
 				ui.rebuild()
 			}
 			if (ui.button('grid_config_server_reset', '', 'Reset test data'))
-				glue.post('/rowset.json/'+test_set.rowset_name, {exec: 'reset'},
+				glue.post('/rowset.json/'+test_set.rowset_name,
+					{exec: 'action', action: 'reset', pks: []},
 					function() {
 						ui.free_state(grid_id)
 						ui.animate()

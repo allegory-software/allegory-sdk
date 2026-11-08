@@ -287,7 +287,7 @@ async function run() {
 	for (let [name, rowset_name, fn] of tests) {
 		let error
 		try {
-			await post_rowset(rowset_name, {exec: 'reset'})
+			await post_rowset(rowset_name, {exec: 'action', action: 'reset', pks: []})
 			await fn(await open_nav(rowset_name))
 		} catch (e) {
 			error = String(e.stack ?? e)
