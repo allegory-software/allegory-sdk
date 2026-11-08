@@ -118,7 +118,7 @@ end
 
 function test.load_cartesian()
 	with_db('load_cartesian', function(tdb, rs)
-		local rows = rows_by_key(rs, rs:load{}.rows)
+		local rows = rows_by_key(rs, rs:load{grp = {1, 2}}.rows)
 		assert(count(rows) == 6)
 		assert(col(rs, rows['1 1'], '$member') == true)
 		assert(col(rs, rows['1 1'], 'role') == 'admin')

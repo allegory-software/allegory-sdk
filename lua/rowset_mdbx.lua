@@ -363,12 +363,16 @@ local function scan_rowset_init(rs, opt, ...)
 		rs_db():atomic('r', prepare)
 	end
 
-	local function load_rows(res, param_vals)
-		res.rows = scan:rows_array('[]', param_vals)
+	local function load_rows(res, param_vals, load_opt)
+		if load_opt.rows then
+			res.rows = scan:rows_array('[]', param_vals)
+		else
+			res.col_vals = scan:cols_array(param_vals)
+		end
 		res.txn_id = rs_db():txn_id()
 	end
-	function rs:load_rows(res, param_vals)
-		rs_db():atomic('r', load_rows, res, param_vals)
+	function rs:load_rows(res, param_vals, load_opt)
+		rs_db():atomic('r', load_rows, res, param_vals, load_opt)
 	end
 
 	--[[local]] function load_row(self, vals)

@@ -27,6 +27,7 @@ TERMINALS
 	scan:rows         ([shape], [args]) -> iter() -> scan, vals...|row
 	scan:left_rows    ([shape], [args]) -> iter() -> scan [, vals...|row]
 	scan:rows_array   ([shape], [args]) -> {row1,...}
+	scan:cols_array   ([args]) -> {col1_vals,...}
 	scan:first        ([shape], [args]) -> vals... | row | nil
 	scan:one          ([shape], [args]) -> vals... | row | nil
 	scan:must_one     ([shape], [args]) -> vals... | row
@@ -1358,6 +1359,7 @@ function Scan:union(scan2)
 		scan.out_specs = same_out_specs(scan1, scan2)
 		scan.rows = scan1.rows
 		scan.rows_array = scan1.rows_array
+		scan.cols_array = scan1.cols_array
 		scan.first = scan1.first
 		scan.one = scan1.one
 		scan.must_one = scan1.must_one
@@ -1878,6 +1880,25 @@ local function output_rows_array(scan, shape, args)
 	return collect_output_rows(scan, shape, args)
 end
 
+--one array per output col, indexed by row. a nil col value leaves a hole,
+--so set null_value() first.
+local function output_cols_array(scan, args)
+	local out_cols = scan.out_cols
+	local n = #out_cols
+	local cols = {}
+	for i = 1, n do cols[i] = {} end
+	local scratch = {}
+	local ri = 0
+	scan.reset(args)
+	while scan.next() do
+		scan.get(scratch)
+		ri = ri + 1
+		for i = 1, n do cols[i][ri] = scratch[out_cols[i]] end
+	end
+	scan.close()
+	return cols
+end
+
 local function output_first(scan, shape, args)
 	shape, args = parse_row_args(shape, args)
 	local rows = collect_output_rows(scan, shape, args, 1)
@@ -1941,6 +1962,7 @@ local function install_get(scan, names, read_value, out_specs)
 	scan.get = get
 	scan.rows = output_rows
 	scan.rows_array = output_rows_array
+	scan.cols_array = output_cols_array
 	scan.first = output_first
 	scan.one = output_one
 	scan.must_one = output_must_one

@@ -116,7 +116,9 @@ Methods to implement:
 
 	param_vals is {name -> val}: the request's values for rs.params. The row
 	methods read them from self.param_vals. load_opt is {recursive = true |
-	false}: load whole subtrees, or one level below the requested parents.
+	false, rows = true | false}: load whole subtrees, or one level below the
+	requested parents; and result.rows is required, or result.col_vals is
+	accepted instead.
 
 	reserve_ids() is for reserving ids from server and assigning them by the
 	client before saving the row in order to prevent double-inserts on network
@@ -415,17 +417,27 @@ function virtual_rowset(init, ...)
 	end
 
 	function rs:load(param_vals, load_opt)
+		load_opt = load_opt or empty
 		local res = {}
 		if check_no_rows(param_vals) then
 			res.rows = {}
 		else
 			rs:load_rows(res, param_vals, load_opt)
 		end
-		assert(res.rows[1] == nil or istab(res.rows[1]),
+		assert(not res.rows or res.rows[1] == nil or istab(res.rows[1]),
 			'first row is not a table')
 		if update_computed_fields then
-			for _,row in ipairs(res.rows) do
+			for _,row in ipairs(res.rows or empty) do
 				update_computed_fields(row)
+			end
+			if res.col_vals then
+				local col_vals = res.col_vals
+				local row = {} -- the one row that all the rows go through
+				for ri = 1, #col_vals[1] do
+					for fi = 1, #col_vals do row[fi] = col_vals[fi][ri] end
+					update_computed_fields(row)
+					for fi = 1, #col_vals do col_vals[fi][ri] = row[fi] end
+				end
 			end
 		end
 		update_client_fields()
@@ -727,7 +739,7 @@ function virtual_rowset(init, ...)
 		local method = checkfound(rs['exec_'..method], 'command not found')
 		if rs.prepare then rs:prepare() end --prepare() sets rs.params
 		local param_vals = decode_params(rs.params or empty) -- {name -> val}
-		local res = method(rs, param_vals, post)
+		local res = method(rs, param_vals, post, out_format)
 
 		if out_format == 'json' then
 			return res
@@ -738,8 +750,9 @@ function virtual_rowset(init, ...)
 		end
 	end
 
-	function rs:exec_load(params, post)
-		return rs:load(params, {recursive = post.recursive ~= false})
+	function rs:exec_load(params, post, out_format)
+		return rs:load(params, {recursive = post.recursive ~= false,
+			rows = out_format == 'xlsx'})
 	end
 
 	function rs:exec_load_changed_rows(params, post)
