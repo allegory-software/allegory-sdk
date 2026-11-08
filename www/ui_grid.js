@@ -2087,6 +2087,8 @@ function init(id, e) {
 		let s = ui.state(id)
 		s.picked = false
 		s.interaction_value = undefined
+		if (!e.ready)
+			return
 		let has_input = false
 
 		/// keyboard state
@@ -2594,7 +2596,17 @@ function init(id, e) {
 
 	e.build = function(id, opt, fr, align, valign) {
 
-		e.reload_if_params_changed()
+		e.check_dependencies()
+
+		if (!e.ready) {
+			let errors = e.load_errors()
+			let text = errors.length ? errors.join('\n')
+				: S('loading', 'loading...')
+			ui.stack(id, fr, align, valign)
+				ui.text('', text, 0, 'c', 'c', null, 'line')
+			ui.end_stack()
+			return
+		}
 
 		let value
 		if (e.is_picker) {
