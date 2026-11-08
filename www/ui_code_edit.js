@@ -1642,10 +1642,6 @@ function code_edit_view(id, opt, s) {
 
 		ui.focusable(id)
 		ui.v(1, 0, 's', 's')
-			ui.min_h(1)
-			ui.stack('', 0)
-				ui.bb('bg2')
-			ui.end_stack()
 			ui.h(1, ui.sp025())
 
 				ui.stack('', 0)
