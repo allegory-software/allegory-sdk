@@ -12093,7 +12093,6 @@ function tab_strip(
 	ui.measure(tablist_id+'.strip')
 	if (is_moving && cs.src_tablist == tablist)
 		draw_dock_drag(id, s, cs)
-	ui.shadow('input')
 	ui.bb('bg1', null, 'b', 'intense')
 	let skip_tab = is_moving && cs.src_tablist == tablist // dragged tab
 		? tabs[cs.tab_i] : null
@@ -12968,9 +12967,8 @@ ui.toolbox = function(
 	)
 		ts.popups.set(id, i)
 		ui.focus_group(null, null, id)
-		//ui.p(1)
 		ui.shadow('toolbox')
-		ui.bb('bg1', null, 1, 'intense')//, null, ui.sp075())
+		ui.bb('bg1', null, 1, 'intense')
 		let w = ui.state_of(id+'.resizer', 'w')
 		let h = ui.state_of(id+'.resizer', 'h')
 		if (w != null) ui.save_state(id, 'w', w / dpr)
