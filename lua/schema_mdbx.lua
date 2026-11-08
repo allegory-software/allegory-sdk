@@ -265,6 +265,7 @@ return function()
 	types.email  = {str, type = 'email', w = 12, maxlen = 128, ai_ci}
 	types.phone  = {str, type = 'phone', w = 6, maxlen = 32}
 	types.password = {text, type = 'password', w = 10, maxlen = 128}
+	types.address= {text, w = 14, maxlen = 1024}
 	types.color  = {str, type = 'color', w = 2, maxlen = 32} --css color
 	types.icon   = {str, type = 'icon' , w = 2, maxlen = 32} --icon name
 	types.col    = {str, type = 'col'  , w = 8, maxlen = 64} --col name
