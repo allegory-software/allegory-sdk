@@ -757,66 +757,77 @@ function init(id, e) {
 				id: tab.id, title: tab.name || S('other', 'Other'), live: true,
 			})),
 		}
-		row_form = {fields: e.all_fields, tabs: tabs, layout: layout}
+		let drag_ids = []
+		for (let tab of tabs)
+			drag_ids.push(tab.id+'.surface', tab.id+'.inputs')
+		row_form = {
+			fields: e.all_fields, tabs: tabs, layout: layout, drag_ids: drag_ids,
+			focused_id: null,
+		}
+		ui.focus_first(row_form_id)
 	}
 
 	function build_row_form_tab(dock_tab) {
 		let tab = row_form.tabs.find(tab => tab.id == dock_tab.id)
-		if (tab.fields.length == 1 && tab.fields[0].control == 'code_edit') {
-			let input = tab.sections[0].inputs[0]
-			let field = tab.fields[0]
-			let ri = e.focused_ri
-			let focus_id = input.id+'.focus_group'
-			ui.code_edit_update_value(input.id)
-			if (ui.focus_inside(focus_id) && ui.keydown('escape')) {
-				e.revert_cell(ri, field.fi)
-				ui.capture_keys()
-			}
-			let value = ui.interaction_value(input.id)
-			if (value !== undefined)
-				e.set_cell_val(ri, field.fi, value, {input: e})
-			ui.p(ui.sp4())
-			ui.v(1, ui.sp05(), 's', 's')
-				ui.h(0, ui.sp2(), 's', 'c')
-					ui.label(input.id, field.label, 1, 's', 'c')
-					ui.v(0, ui.sp05(), 'r', 'c')
-						let errors = e.cell_errors[field.fi]?.[ri] ?? empty_array
-						for (let result of errors) {
-							if (!result.failed)
-								continue
-							ui.small()
-							ui.color('error-text')
-							ui.text('', result.error, 0, 'r', 'c')
-						}
-					ui.end_v()
-				ui.end_h()
-				ui.focus_group(null, null, focus_id)
-					field.build_input(input.id, e.cell_input_val(ri, field.fi),
-						input, field.control, !e.can_change_val(ri, field.fi))
-				ui.end_focus_group()
-			ui.end_v()
-			return
-		}
-		ui.sb_max_wh(ui.em(36), ui.em(30))
-		ui.p(ui.sp4())
-		ui.sb(tab.id+'.inputs', 1, 'auto', 'auto')
-			ui.min_w(ui.em(20))
-			ui.v_aligned(0, ui.sp2(), 'l', 't')
-				ui.h(0)
-					ui.min_w(ui.em(10))
-					ui.box()
-				ui.end_h()
-				for (let section of tab.sections) {
-					if (section.name || tab.sections.length > 1) {
-						ui.color('faint')
-						ui.xlarge()
-						ui.text('', section.name || S('other', 'Other'))
-					}
-					for (let input of section.inputs)
-						ui.nav_input(input.id, input, 1, 'l')
+		ui.stack(tab.id+'.surface', 1, 's', 's')
+			if (tab.fields.length == 1 && tab.fields[0].control == 'code_edit') {
+				let input = tab.sections[0].inputs[0]
+				let field = tab.fields[0]
+				let ri = e.focused_ri
+				let focus_id = input.id+'.focus_group'
+				ui.code_edit_update_value(input.id)
+				if (ui.focus_inside(focus_id) && ui.keydown('escape')) {
+					e.revert_cell(ri, field.fi)
+					ui.capture_keys()
 				}
-			ui.end_v_aligned()
-		ui.end_sb()
+				let value = ui.interaction_value(input.id)
+				if (value !== undefined)
+					e.set_cell_val(ri, field.fi, value, {input: e})
+				ui.p(ui.sp4())
+				ui.v(1, ui.sp05(), 's', 's')
+					ui.h(0, ui.sp2(), 's', 'c')
+						ui.label(input.id, field.label, 1, 's', 'c')
+						ui.v(0, ui.sp05(), 'r', 'c')
+							let errors = e.cell_errors[field.fi]?.[ri] ?? empty_array
+							for (let result of errors) {
+								if (!result.failed)
+									continue
+								ui.small()
+								ui.color('error-text')
+								ui.text('', result.error, 0, 'r', 'c')
+							}
+						ui.end_v()
+					ui.end_h()
+					ui.focus_group(null, null, focus_id)
+						field.build_input(input.id, e.cell_input_val(ri, field.fi),
+							input, field.control, !e.can_change_val(ri, field.fi))
+					ui.end_focus_group()
+				ui.end_v()
+				ui.end_stack()
+				return
+			}
+			ui.sb_max_wh(ui.em(36), ui.em(30))
+			ui.p(ui.sp4())
+			ui.sb(tab.id+'.inputs', 1, 'auto', 'auto')
+				ui.min_w(ui.em(20))
+				ui.pv(ui.sp1()) // make room for input shadow
+				ui.v_aligned(0, ui.sp2(), 'l', 't')
+					ui.h(0)
+						ui.min_w(ui.em(10))
+						ui.box()
+					ui.end_h()
+					for (let section of tab.sections) {
+						if (section.name || tab.sections.length > 1) {
+							ui.color('faint')
+							ui.xlarge()
+							ui.text('', section.name || S('other', 'Other'))
+						}
+						for (let input of section.inputs)
+							ui.nav_input(input.id, input, 1, 'l')
+					}
+				ui.end_v_aligned()
+			ui.end_sb()
+		ui.end_stack()
 	}
 
 	function build_row_form(target_i) {
