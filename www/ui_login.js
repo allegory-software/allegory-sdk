@@ -22,9 +22,7 @@ ui.login_window = function() {
 	if (!window.user && !s.request && !s.load_error)
 		s.request = get('/user.json', function(current_user) {
 			s.request = null
-			user = current_user
-			ui.load_saved_state(json_arg(current_user.ui_state))
-			ui.animate()
+			ui.switch_user(current_user)
 		}, function(error, type) {
 			if (type == 'abort') return
 			s.request = null
@@ -45,7 +43,9 @@ ui.login_window = function() {
 		ui.shadow('modal')
 		ui.bb('bg0', null, 1, 'light')
 		ui.mb(ui.em(2))
-		ui.p(ui.em(2))
+		ui.pv(ui.em(3))
+		ui.pt(ui.em(3.5))
+		ui.ph(ui.em(2.5))
 		ui.focus_group(true, null, 'login')
 		ui.min_w(300)
 		ui.v(1, 0, 'c', 'c')
@@ -108,10 +108,8 @@ ui.login_window = function() {
 						{email: s.email, code: s.code},
 						function(new_user) {
 							s.request = null
-							user = new_user
-							ui.load_saved_state(json_arg(new_user.ui_state))
 							s.email = null
-							ui.animate()
+							ui.switch_user(new_user)
 						},
 						function(e, type) {
 							if (type == 'abort') return
@@ -122,6 +120,13 @@ ui.login_window = function() {
 
 			}
 
+			if (window.user?.impersonating) {
+				ui.mt(ui.sp2())
+				if (ui.button('login_unimpersonate_button', 'user-x',
+					'Stop impersonating', 1, 's'))
+					ui.unimpersonate()
+			}
+
 		ui.end_v()
 		ui.end_focus_group()
 	ui.end_popup()
@@ -129,18 +134,54 @@ ui.login_window = function() {
 	return false
 }
 
-ui.logout = function() {
+ui.switch_user = function(new_user) {
+	user = new_user
+	ui.load_saved_state(json_arg(new_user.ui_state))
+	ui.free_all_state()
+	ui.animate()
+}
+
+function post_user(url, data) {
 	let s = ui.state('login')
 	if (s.request) return
-	s.request = post('/logout.json', null, function(current_user) {
+	s.request = post(url, data, function(new_user) {
 		s.request = null
-		user = current_user
-		ui.animate()
+		ui.switch_user(new_user)
 	}, function(e, type) {
 		if (type == 'abort') return
 		s.request = null
 		alert(e)
 	})
+}
+
+ui.unimpersonate = function() { post_user('/unimpersonate.json') }
+
+ui.logout = function() { post_user('/logout.json') }
+
+ui.impersonate_modal = function(rowset_name) {
+	let grid_id = 'impersonate_grid'
+	let uid, ok, cancel
+	if (ui.modal('impersonate_modal', 'Impersonate')) {
+		ui.m(ui.sp2())
+		ui.min_wh(ui.em(32), ui.em(20))
+		ui.v(1, ui.sp2(), 's', 's')
+			ui.grid(grid_id, {rowset_name: rowset_name, cols: 'name email'})
+			uid = ui.state_of(grid_id, 'nav')?.focused_row_cell_val('user')
+			ui.h(0, ui.sp(), 's')
+				ui.box(1)
+				ui.default_button('impersonate_ok')
+				ok = ui.primary_button('impersonate_ok', 'user-share',
+					'Impersonate', 0, 'l', 'c', uid == null)
+				cancel = ui.button('impersonate_cancel', 'x', 'Cancel')
+			ui.end_h()
+		ui.end_v()
+		ui.end_modal()
+	}
+	if (ok) {
+		post_user('/impersonate.json', {uid: uid})
+	} else if (cancel) {
+		ui.set_modal_open('impersonate_modal', false, true)
+	}
 }
 
 }())

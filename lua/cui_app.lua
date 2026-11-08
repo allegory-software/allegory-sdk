@@ -16,7 +16,7 @@ USAGE
 API
 
 	fontfile(name, path, [desc])  preload a font and load it in the page
-	user_json() -> {signed_in=, is_admin=, impersonating=, anonymous=,
+	user_json() -> {id=, signed_in=, is_admin=, impersonating=, anonymous=,
 		name=, email=, phone=}
 	db() -> db                             open the configured db
 	scan(tbl, [path], [alias]) -> scan     db():scan()
@@ -29,7 +29,6 @@ ACTIONS
 	logout.json
 	impersonate.json
 	unimpersonate.json
-	users.json
 
 UI API
 
@@ -84,9 +83,19 @@ fontfile('opensans'     , 'fonts/opensans.var.woff2')
 fontfile('tabler'       , 'icons/tabler-icons.woff2')
 fontfile('tabler_filled', 'icons/tabler-icons-filled.woff2')
 
+local function is_ui_state(s) -- s: JSON text
+	return istab(try_json_decode(s)) and s:find'^%s*{' ~= nil
+end
+
+local function user_ui_state()
+	local s = user'ui_state'
+	return s and is_ui_state(s) and s or '{}'
+end
+
 function user_json()
 	local real_u = real_user'*' -- real user or nil
 	return {
+		id = user(),
 		--signed_in is always non-nil to avoid an empty table to encode as [].
 		signed_in = user() ~= nil and not user'anonymous',
 		is_admin = real_u ~= nil and real_u.roles.admin == true,
@@ -95,7 +104,7 @@ function user_json()
 		name = user'name',
 		email = user'email',
 		phone = user'phone',
-		ui_state = user'ui_state' or '{}',
+		ui_state = user_ui_state(),
 	}
 end
 
@@ -105,15 +114,16 @@ action['ui_state.json'] = function()
 	local uid = user() -- current user id
 	allow(uid and not user'anonymous', 'sign in required')
 	if method'POST' then
+		if id_arg(post'uid') ~= uid then return false end
 		local ui_state = checkarg(post'ui_state') -- saved UI state as JSON
-		checkarg(try_json_decode(ui_state, null), 'invalid UI state JSON')
+		checkarg(is_ui_state(ui_state), 'invalid UI state JSON')
 		db():atomic('w', function()
 			db():update('user', 'user ui_state', uid, ui_state)
 		end)
 		return true
 	else
 		checkarg(method'GET')
-		return {ui_state = user'ui_state' or '{}'}
+		return {ui_state = user_ui_state()}
 	end
 end
 
@@ -150,14 +160,6 @@ action['unimpersonate.json'] = function()
 	return user_json()
 end
 
-action['users.json'] = function()
-	local users = {} -- {{id=, name=, email=}, ...}
-	for _, u in ipairs(user_list()) do
-		add(users, {id = u.id, name = u.name, email = u.email})
-	end
-	return users
-end
-
 --tie webb to cui
 function action.en()
 	local vars = {}
@@ -180,8 +182,10 @@ function action.en()
 	vars.main_file = app.main_file
 	vars.preloads = cat(vars.preloads, '\n')
 	vars.fonts = cat(vars.fonts, '\n')
-	vars.user = json(user_json())
-	vars.ui_state = (user'ui_state' or '{}'):gsub('<', '\\u003c')
+	local page_user = user_json()
+	page_user.ui_state = nil -- the page has it in ui.saved_state
+	vars.user = json(page_user)
+	vars.ui_state = user_ui_state():gsub('<', '\\u003c')
 	out((([[
 <html lang={{lang}} country={{country}} theme="{{theme}}"><head>
 	<meta charset="utf-8">
@@ -207,7 +211,7 @@ function action.en()
 user = {{{user}}}
 ui.saved_state = {{{ui_state}}}
 ui.save_unsaved_state = function(saved_state) {
-	post('/ui_state.json', {ui_state: json(saved_state)})
+	post('/ui_state.json', {uid: user.id, ui_state: json(saved_state)})
 }
 	</script>
 	<script src="/{{main_file}}"></script>

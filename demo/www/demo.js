@@ -14,23 +14,34 @@ let profile_menu_items = [ // [{id, label}]
 	{id: 'sign_out_button', label: 'Sign out', icon: 'logout'},
 ]
 
+let admin_profile_menu_items = [ // profile menu of admins
+	profile_menu_items[0],
+	null,
+	{id: 'impersonate_button', label: 'Impersonate', icon: 'user-share'},
+	profile_menu_items[2],
+]
+
 function profile_button() {
+	if (user.impersonating) {
+		mr(sp1())
+		let unimpersonate = bare_button('unimpersonate_button', 'user-x',
+			user.name || user.email, 0, null, null, false,
+			'Stop impersonating')
+		if (unimpersonate)
+			ui.unimpersonate()
+	}
 	mr(sp1())
 	profile_menu_items[0].checked = ui.saved_state.globals?.theme == 'light'
-	let profile_action = bare_menu_button(
-		'profile_button', 'user-circle', '', profile_menu_items)
+	let profile_action = bare_menu_button('profile_button', 'user-circle', '',
+		user.is_admin ? admin_profile_menu_items : profile_menu_items)
 	if (profile_action == 'lights_button') {
 		let theme = ui.screen_theme() == 'dark' ? 'light' : 'dark'
 		ui.save_state('globals', 'theme', theme)
 		ui.set_screen_theme(theme)
+	} else if (profile_action == 'impersonate_button') {
+		ui.set_modal_open('impersonate_modal', true)
 	} else if (profile_action == 'sign_out_button') {
-		post('/logout.json', null,
-			function(new_user) {
-				user = new_user
-				animate()
-			},
-			function(e) { alert(e) }
-		)
+		ui.logout()
 	}
 }
 
@@ -285,4 +296,5 @@ main = function() {
 		return
 	ui.set_screen_theme(ui.saved_state.globals?.theme)
 	dock('app_dock', {tabs: []}, app_dock_tab, app_dock_tab_opt)
+	ui.impersonate_modal('table_user')
 }
