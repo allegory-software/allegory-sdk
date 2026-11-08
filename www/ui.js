@@ -33,7 +33,7 @@ CONTAINERS
   DOCK          ui.dock
   DOCK TABS     ui.set_dock_tab  ui.select_dock_tab  ui.remove_dock_tab
   TAB STRIP     ui.open_tab_strip  ui.close_tab_strip
-  TOOLBOX       ui.toolbox  ui.begin_toolboxes
+  TOOLBOX       ui.toolbox  ui.begin_toolboxes  ui.modal
   SECTION       ui.begin_section
   FRAME         ui.frame
   REC BOX       ui.create_rec_box  ui.rec_box  ui.open_rec_box  ui.close_rec_box
@@ -4235,6 +4235,7 @@ const SB_OVERFLOW_CONTAIN    = 4 // expand to fit content, like a stack.
 const SB_OVERFLOW_INFINITE   = 5 // special mode for the infinite calendar.
 
 function parse_sb_overflow(s) {
+	if (isnum(s)) return s
 	if (s == null   || s == 'auto'      ) return SB_OVERFLOW_AUTO
 	if (               s == 'auto-hover') return SB_OVERFLOW_AUTO_HOVER
 	if (s === false || s == 'hide'      ) return SB_OVERFLOW_HIDE
@@ -4760,7 +4761,7 @@ function popup_parse_side_name(s) {
 }
 
 function popup_parse_side(s) {
-	let side = popup_parse_side_name(popup_parse_stretch(s))
+	let side = isnum(s) ? s : popup_parse_side_name(popup_parse_stretch(s))
 	assert(!parsed_stretch || (side & POPUP_SIDE_INNER),
 		'stretch on an outer side ', s)
 	return side + parsed_stretch
@@ -4777,6 +4778,7 @@ function popup_parse_align_name(s) {
 }
 
 function popup_parse_align(s) {
+	if (isnum(s)) return s
 	if (s == '[]'     ) s = '[s'
 	if (s == 's'      ) s = '[s'
 	if (s == 'stretch') s = 'start-stretch'
@@ -4789,6 +4791,7 @@ const POPUP_SOLID           = 4 // hit popup's rect even when no child was hit
 const POPUP_HOVER_PARENT    = 8 // propagate hit to parents
 
 function popup_parse_flags(s) {
+	if (isnum(s)) return s
 	return (
 		(s.includes('change_side' ) ? POPUP_FIT_CHANGE_SIDE : 0) |
 		(s.includes('constrain'   ) ? POPUP_FIT_CONSTRAIN   : 0) |
@@ -12919,6 +12922,8 @@ ui.remove_dock_tab = function(id, tab_id) {
 	ui.toolbox (id, title, align='[', valign='t', x0, y0,
 		target_i='screen', drag_ids=id+'.title')
 
+	ui.modal  (id, title)  centered toolbox over a blocking semi-opaque screen
+
 */
 
 let toolbox_stack = []
@@ -12932,8 +12937,11 @@ ui.toolbox = function(
 ) {
 
 	ui.state(id)
-	let  align_start =  parse_align( align || '[') == ALIGN_START
-	let valign_start = parse_valign(valign || 't') == ALIGN_START
+	 align =  parse_align( align || '[')
+	valign = parse_valign(valign || 't')
+	let  align_start  =  align == ALIGN_START
+	let valign_start  = valign == ALIGN_START
+	let valign_center = valign == ALIGN_CENTER
 	let tid = assert(toolbox_stack.at(-1), 'begin_toolboxes missing')
 	let ts = ui.state(tid)
 	if (hovers(id) && ui.click) {
@@ -12961,8 +12969,9 @@ ui.toolbox = function(
 		ui.save_state(id, 'ox', ox / dpr)
 		ui.save_state(id, 'oy', oy / dpr)
 	}
+	let side = valign_center ? 'ic' : valign_start ? 'it' : 'ib'
 	let i = ui.popup(id, 'toolbox', target_i ?? 'screen',
-		valign_start ? 'it' : 'ib', align, 'constrain solid', null,
+		side, align, 'constrain solid', null,
 		ox, oy
 	)
 		ts.popups.set(id, i)
@@ -13044,6 +13053,27 @@ ui.end_toolboxes = function() {
 		let popup_i = popups.get(id)
 		set_z_index(a, popup_i, z++)
 	}
+}
+
+//// MODAL -------------------------------------------------------------------
+
+ui.modal = function(id, title) {
+	let overlay_id = id+'.overlay'
+	let s = ui.state(overlay_id)
+	ui.popup(overlay_id, 'modal', 'screen', 'ics', 's', 'solid')
+		ui.bb('smoke')
+		ui.toolbox(id, title, 'c', 'c', 0, 0, null, [])
+			ui.focus_group(true)
+			if (!s.focus_moved) {
+				s.focus_moved = true // focus moved into the modal on first build
+				ui.focus_first(id)
+			}
+}
+
+ui.end_modal = function() {
+			ui.end_focus_group()
+		ui.end_toolbox()
+	ui.end_popup()
 }
 
 //// RESIZER -----------------------------------------------------------------

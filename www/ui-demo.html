@@ -1807,6 +1807,48 @@ ui.end_toolboxes()
 }
 }
 
+{
+let modal_is_open = false
+let modal_text = 'type here'
+let modal_dd_value = null
+let modal_result = 'none yet'
+let modal_dd_items = ['item 1', 'item 2', 'item 3']
+let modal_dd_field = ui.create_field({type: 'enum', enum_values: modal_dd_items})
+demos.modal = function() {
+ui.v(1, ui.sp2(), 'c', 'c')
+	if (ui.button('modal_open', 'app-window', 'Open modal'))
+		modal_is_open = true
+	ui.text('', 'last result: '+modal_result)
+ui.end_v()
+if (modal_is_open) {
+	let ok, cancel
+	ui.modal('modal_demo', 'I am a modal')
+		ui.m(ui.sp2())
+		ui.min_w(300)
+		ui.v(1, ui.sp2(), 's', 't')
+			modal_text = ui.input('modal_input', modal_text)
+			modal_dd_value = ui.list_dropdown('modal_dd', modal_dd_items,
+				modal_dd_value, modal_dd_field)
+			ui.h(0, ui.sp(), 's')
+				ui.box(1)
+				ui.default_button('modal_ok')
+				ui.cancel_button('modal_cancel')
+				ok = ui.primary_button('modal_ok', 'check', 'OK')
+				cancel = ui.button('modal_cancel', 'x', 'Cancel')
+			ui.end_h()
+		ui.end_v()
+	ui.end_modal()
+	if (ok) {
+		modal_result = 'OK: '+modal_text+', '+modal_dd_value
+		modal_is_open = false
+	} else if (cancel) {
+		modal_result = 'Cancel'
+		modal_is_open = false
+	}
+}
+}
+}
+
 // 240x160 so the fitted box is visibly wider than tall.
 {
 let img_data_src = 'data:image/svg+xml,'+encodeURIComponent(
