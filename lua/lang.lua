@@ -610,6 +610,8 @@ function multilang() return config('multilang', true) end
 
 function lang_schema()
 
+	category'Languages'
+
 	tables.lang = {
 		lang                , lang, pk,
 		rtl                 , bool0,

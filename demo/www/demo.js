@@ -46,6 +46,7 @@ function profile_button() {
 }
 
 ui.rowsets.saved_state = { // saved widget state rowset
+	category: 'Demo',
 	fields: [
 		{name: 'id', not_null: true},
 		{name: 'sub_id'},
@@ -128,7 +129,7 @@ function app_dock_empty_tab(tab) {
 	let tab_id = 'app_dock.tab.'+tab.id
 	let s = ui.state(tab_id+'.rowsets')
 	if (!s.free) {
-		s.items = [] // [{id, label}]
+		s.items = [] // [{id, label, items: [{id, label}]}]
 		s.load_error = null // rowset listing error text or null
 		s.request = null // rowset listing request or null
 		ui.on_free(tab_id+'.rowsets', function(s) {
@@ -136,12 +137,18 @@ function app_dock_empty_tab(tab) {
 		})
 		s.request = glue.get('/rowset.json/rowsets', function(rowsets) {
 			s.request = null
-			let names = new Set(rowsets.rows.map(row => row[0]))
-			// add client rowsets to the set
-			for (let name in ui.rowsets)
-				if (!ui.rowsets[name].internal)
-					names.add(name)
-			s.items = [...names].sort().map(name => ({id: name, label: name}))
+			let category_items = new Map()
+			for (let [name, label, category] of rowsets.rows)
+				attr(category_items, category, array).push({id: name, label})
+			for (let name in ui.rowsets) {
+				let rowset = ui.rowsets[name]
+				if (!rowset.internal)
+					attr(category_items, rowset.category ?? 'Other', array)
+						.push({id: name, label: rowset.label ?? name})
+			}
+			s.items = []
+			for (let [category, items] of category_items)
+				s.items.push({id: 'category.'+category, label: category, items})
 			ui.animate()
 		}, function(error, type) {
 			if (type == 'abort') return

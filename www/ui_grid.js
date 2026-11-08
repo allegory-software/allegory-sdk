@@ -1577,8 +1577,9 @@ function init(id, e) {
 		for (let param in e.master_rowset_names) {
 			if (param in frozen_vals)
 				continue
-			ui.master_toggle(id+'.master.'+param, e.master_rowset_names[param],
-				e.param_sources[param], e.params[param].label ?? param)
+			let def = e.params[param]
+			ui.master_toggle(id, param, e.master_rowset_names[param],
+				def.auto_bind, def.label ?? param)
 		}
 	}
 
@@ -2162,14 +2163,6 @@ function init(id, e) {
 			let value = ui.interaction_value(editor_id)
 			if (value !== undefined)
 				e.set_cell_val(edit_ri, edit_field.fi, value, {input: e})
-		}
-
-		/// master toggles
-
-		for (let param in e.master_rowset_names) {
-			let master_id = ui.interaction_value(id+'.master.'+param)
-			if (master_id !== undefined)
-				ui.set_master_id(e.id, param, master_id)
 		}
 
 		/// filter bar

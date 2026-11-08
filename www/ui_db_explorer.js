@@ -35,11 +35,7 @@ ui.db_tables = function(id) {
 }
 
 ui.db_rows = function(id) {
-	let toggle_id = id+'.master.table'
 	let rowset_name = tables_opt.rowset_name
-	let picked_id = ui.interaction_value(toggle_id) // nav id
-	if (picked_id !== undefined)
-		ui.set_master_id(id, 'table', picked_id)
 	let master_id = ui.master_id(id, 'table', rowset_name)
 	if (master_id)
 		ui.mark_follows_source(master_id)
@@ -48,14 +44,14 @@ ui.db_rows = function(id) {
 		ui.open_tab_strip()
 		ui.pr(ui.sp())
 		ui.h(0, ui.sp(), 'r', 'c')
-			ui.master_toggle(toggle_id, rowset_name, master_id, 'Table')
+			ui.master_toggle(id, 'table', rowset_name, true, 'Table')
 		ui.end_h()
 		ui.close_tab_strip()
 	}
 	ui.v()
 		if (!ui.in_dock_tab() && has_master_toggle) {
 			ui.h(0, ui.sp(), 'l', 'c')
-				ui.master_toggle(toggle_id, rowset_name, master_id, 'Table')
+				ui.master_toggle(id, 'table', rowset_name, true, 'Table')
 			ui.end_h()
 		}
 		build_table_rows(id, master_id)

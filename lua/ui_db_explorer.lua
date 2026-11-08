@@ -15,6 +15,7 @@ local function format_key_cols(cols)
 end
 
 rowset.db_explorer_tables = virtual_rowset(function(rs)
+	rs.category = 'Database explorer'
 	rs.fields = {
 		{
 			name = 'name', label = 'Table', icon = 'database',
@@ -89,6 +90,8 @@ rowset.db_explorer_tables = virtual_rowset(function(rs)
 end)
 
 rowset.db_explorer_fields = virtual_rowset(function(rs)
+	rs.label = 'Fields'
+	rs.category = 'Database explorer'
 	rs.tabs = 'Column Storage Values Validation'
 	rs.fields = {
 		{
@@ -173,6 +176,8 @@ rowset.db_explorer_fields = virtual_rowset(function(rs)
 end)
 
 rowset.db_explorer_indexes = virtual_rowset(function(rs)
+	rs.label = 'Indexes'
+	rs.category = 'Database explorer'
 	rs.fields = {
 		{name = 'name', label = 'Index', readonly = true, not_null = true},
 		{
@@ -222,7 +227,8 @@ dynamic_rowset('^db_explorer_rows_(.+)$', function(tbl)
 	local sel = cat(schema.cols, ', ')
 	return scan_rowset{
 		label = 'Rows',
-		scan = function(db) return db:scan(tbl, ''):select(sel) end,
+		category = 'Database explorer',
+		scan =function(db) return db:scan(tbl, ''):select(sel) end,
 		pk = cat(schema.pk, ' '),
 		cols = cat(schema.cols, ' '),
 		field_attrs = field_attrs,
@@ -233,6 +239,7 @@ end)
 --without a schema. base tables with a schema are rowset.table_NAME.
 rowset.db_explorer_rows_raw = virtual_rowset(function(rs)
 	rs.label = 'Rows'
+	rs.category = 'Database explorer'
 	rs.manual_init_fields = true
 	rs.can_move_rows = false
 	rs.params = {table = table_param}

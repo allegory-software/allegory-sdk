@@ -23,11 +23,10 @@ Nav config:
 Master binding:
 
 	nav.master_rowset_names -> {param name -> rowset name} | null
-	ui.master_id(id, param, rowset_name) -> master_id | undefined
-	ui.set_master_id(id, param, master_id)
+	ui.master_id(id, param, rowset_name, auto_bind) -> master_id | undefined
 	ui.has_master_toggle(rowset_name) -> t|f
 	ui.has_master_toggles(nav) -> t|f
-	ui.master_toggle(id, rowset_name, master_id, label)
+	ui.master_toggle(id, param, rowset_name, auto_bind, label)
 	nav.set_param_frozen(param, frozen)  keep param val incl. on page reloads
 	nav.param_vals(name) -> [val, ...] | undefined    current param values
 
@@ -774,13 +773,23 @@ function find_master_nav(rowset_name, preferred_id) {
 	return nearest_nav
 }
 
-ui.master_id = function(id, param, rowset_name) {
-	let picked_id = ui.saved_state[id+'.masters']?.[param] // nav id
-	return find_master_nav(rowset_name, picked_id)?.id
+function master_toggle_pick(toggle_id) {
+	let v = ui.interaction_value(toggle_id)
+	if (v === undefined)
+		return
+	let field = ui.input_field(toggle_id)
+	return field.is_values ? (v ? field.enum_values[0] : null) : v
 }
 
-ui.set_master_id = function(id, param, master_id) {
-	ui.save_state(id+'.masters', param, master_id)
+ui.master_id = function(id, param, rowset_name, auto_bind) {
+	let picked_id = master_toggle_pick(id+'.master.'+param) // nav id | null
+	if (picked_id === undefined)
+		picked_id = ui.saved_state[id+'.masters']?.[param]
+	else
+		ui.save_state(id+'.masters', param, picked_id)
+	if (picked_id === null || (picked_id === undefined && auto_bind === false))
+		return
+	return find_master_nav(rowset_name, picked_id)?.id
 }
 
 ui.has_master_toggle = function(rowset_name) {
@@ -788,7 +797,7 @@ ui.has_master_toggle = function(rowset_name) {
 	for (let nav of rowset_navs[rowset_name] ?? empty_array)
 		if (!ui.is_state_hidden(nav.id))
 			n++
-	return n >= 2
+	return n >= 1
 }
 
 ui.has_master_toggles = function(nav) {
@@ -801,9 +810,11 @@ ui.has_master_toggles = function(nav) {
 	return false
 }
 
-ui.master_toggle = function(id, rowset_name, master_id, label) {
+ui.master_toggle = function(nav_id, param, rowset_name, auto_bind, label) {
 	if (!ui.has_master_toggle(rowset_name))
 		return
+	let id = nav_id+'.master.'+param
+	let master_id = ui.master_id(nav_id, param, rowset_name, auto_bind)
 	let navs = rowset_navs[rowset_name] ?? empty_array
 	let field = ui.input_field(id) // enum field of the last build, or nothing
 	let has_changed = !field || field.label != label
@@ -815,7 +826,10 @@ ui.master_toggle = function(id, rowset_name, master_id, label) {
 			has_changed = true
 		n++
 	}
-	if (has_changed || field.enum_values.length != n) {
+	let is_single = n == 1
+	if (has_changed || field.enum_values.length != n
+		|| !!field.is_values != is_single
+	) {
 		let values = [] // [master nav id, ...]
 		let labels = obj() // {master nav id -> label}
 		for (let nav of navs) {
@@ -825,12 +839,13 @@ ui.master_toggle = function(id, rowset_name, master_id, label) {
 			labels[nav.id] = nav.label
 		}
 		field = ui.create_field({
-			type: 'enum', label: label,
-			enum_values: values, enum_labels: labels, not_null: true,
+			type: is_single ? 'enum_list' : 'enum', label: label,
+			enum_values: values, enum_labels: labels,
 		}, id)
 	}
 	ui.label(id, label, 0)
-	ui.enum_toggle(id, master_id, field)
+	let value = is_single ? (master_id ? 1 : null) : (master_id ?? null)
+	ui.enum_toggle(id, value, field)
 }
 
 //// NAV ---------------------------------------------------------------------
@@ -2610,7 +2625,8 @@ ui.nav = function(id, opt) {
 		for (let param in e.master_rowset_names) {
 			let master_id0 = e.param_sources[param] // last binding, or undefined
 			let rowset_name = e.master_rowset_names[param]
-			let master_id1 = ui.master_id(e.id, param, rowset_name)
+			let master_id1 = ui.master_id(e.id, param, rowset_name,
+				e.params[param].auto_bind)
 			if (master_id1 != master_id0) {
 				if (master_id1)
 					e.param_sources[param] = master_id1

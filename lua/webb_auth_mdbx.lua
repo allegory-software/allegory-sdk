@@ -8,6 +8,8 @@ function auth_schema()
 
 	import'schema_mdbx'
 
+	category'Authentication'
+
 	tables.tenant = {
 		tenant      , idpk,
 		name        , name,

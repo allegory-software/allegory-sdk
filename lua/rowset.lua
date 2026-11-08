@@ -12,6 +12,7 @@ Rowset attributes to set (* = server-only):
 		pk               : 'col1 ...'    primary key (required)
 	OPTIONAL
 		label            : 'Foo Bar'     label of a master in a detail's toggle
+		category         : 'Foo'         display group of the rowset in menus
 	*	field_attrs      : {col->field}  extra field attributes
 		cols             : 'col1 ...'    default visible columns list
 		sections         : 's1 ...'      form section order
@@ -22,8 +23,9 @@ Rowset attributes to set (* = server-only):
 		  .for_cols      : 'col1 ...'    the param filters these cols
 		  .accept_many   : false         the param can only take one value
 		  .client_filter : false         filter on the client on this param
+		  .auto_bind     : true          bind to an open master nav automatically
 		uks              : ['col1 ...',] unique keys (to validate on the client)
-	*  allow_unfiltered : false         don't load rowset totally unfiltered
+	*	allow_unfiltered : false         don't load rowset totally unfiltered
 	TREE
 		id_col           : 'col'         id column for tree-building
 		parent_col       : 'col'         parent column for tree-building
@@ -128,7 +130,8 @@ Sets by default:
 
 	- `can_[add|change|remove]_rows` are set to false on missing row update methods.
 	- `pos_col` and `parent_col` are set to hidden by default.
-	- on client-side, `id_col` is set to pk if pk is single-column.
+	- `id_col` is set to pk if the rowset is a tree (has `parent_col`) and pk
+	  is single-column (client-side rowsets get the same default on the client).
 
 API
 
@@ -205,7 +208,7 @@ local client_field_attrs = {
 --the field attrs that describe a value, without the column and row attrs,
 --plus the param attrs.
 local client_param_attrs = { -- {attr -> 1}
-	for_cols = 1, accept_many = 1, client_filter = 1,
+	for_cols = 1, accept_many = 1, client_filter = 1, auto_bind = 1,
 	type = 1, label = 1, info = 1, align = 1,
 	not_null = 1, min = 1, max = 1, maxlen = 1,
 	scale = 1, decimals = 1, precision = 1,
@@ -255,6 +258,13 @@ local function make_translatable_fields_attrs(t)
 	resolve_enum_texts(t, 'en_enum_info', 'enum_info', 'enum_info')
 end
 
+local col_attrs = {'id_col', 'parent_col', 'tree_col', 'has_children_col'}
+
+local function assert_field(rs, attr, col)
+	assertf(rs.fields[col], 'rowset %s: %s: no field named %s',
+		rs.name, attr, col)
+end
+
 --a param takes a list of values, or its first tuple if accept_many
 --is false: a value, or a list of values for a composite param.
 --names that the rowset doesn't declare are ignored.
@@ -291,6 +301,8 @@ function virtual_rowset(init, ...)
 
 	function rs.init_fields(rs, resolve_types)
 
+		assertf(rs.fields[1], 'rowset %s: no fields', rs.name)
+
 		if resolve_types ~= false then --assume fields are not resolved
 			local schema = config'db_schema'
 			if schema then
@@ -310,6 +322,31 @@ function virtual_rowset(init, ...)
 		local hide_cols = index(collect(words(rs.hide_cols) or empty))
 		local ro_cols = index(collect(words(rs.ro_cols) or empty))
 		local rw_cols = rs.rw_cols and index(collect(words(rs.rw_cols)))
+		local pk_names = collect(words(rs.pk))
+		local pk_cols = index(pk_names)
+
+		for col in pairs(pk_cols) do assert_field(rs, 'pk', col) end
+		for col in pairs(hide_cols) do assert_field(rs, 'hide_cols', col) end
+		for col in pairs(ro_cols) do assert_field(rs, 'ro_cols', col) end
+		for col in pairs(rw_cols or empty) do assert_field(rs, 'rw_cols', col) end
+		for col in pairs(rs.field_attrs or empty) do
+			assert_field(rs, 'field_attrs', col)
+		end
+		for _, attr in ipairs(col_attrs) do
+			if rs[attr] then assert_field(rs, attr, rs[attr]) end
+		end
+		for name, def in pairs(rs.params or empty) do
+			if def.client_filter then
+				assertf(def.for_cols,
+					'rowset %s: param %s: client_filter needs for_cols',
+					rs.name, name)
+				for col in words(def.for_cols) do
+					assertf(rs.fields[col],
+						'rowset %s: param %s: for_cols: no field named %s',
+						rs.name, name, col)
+				end
+			end
+		end
 
 		if rs.pos_col == nil and rs.fields.pos then
 			rs.pos_col = 'pos'
@@ -340,6 +377,9 @@ function virtual_rowset(init, ...)
 			end
 			make_translatable_fields_attrs(f)
 			update(f, rs.field_attrs and rs.field_attrs[f.name])
+			if pk_cols[f.name] then
+				f.not_null = true
+			end
 
 			if f.compute then
 				computed_fields = computed_fields or {}
@@ -362,6 +402,29 @@ function virtual_rowset(init, ...)
 		if not rs.insert_row then rs.can_add_rows    = false end
 		if not rs.update_row then rs.can_change_rows = false end
 		if not rs.delete_row then rs.can_remove_rows = false end
+
+		local has_server_default_pk = false
+		for _, col in ipairs(pk_names) do
+			has_server_default_pk = has_server_default_pk
+				or rs.fields[col].has_server_default
+		end
+		local is_reserved_pk = #pk_names == 1
+			and rs.fields[pk_names[1]].auto_increment
+		assertf(is_reserved_pk or not has_server_default_pk,
+			'rowset %s: pk with has_server_default must be auto_increment',
+			rs.name)
+
+		if rs.id_col == nil and rs.parent_col and #pk_names == 1 then
+			rs.id_col = pk_names[1]
+		end
+		if rs.id_col and rs.parent_col then
+			local id_field = rs.fields[rs.id_col]
+			assertf(#pk_names == 1 and rs.id_col == pk_names[1]
+				and (id_field.auto_increment
+					or rs.can_add_rows == false and id_field.readonly),
+				'rowset %s: id_col requires auto_increment pk or readonly',
+				rs.name)
+		end
 
 		if computed_fields then
 			local current_row
@@ -804,18 +867,104 @@ function virtual_rowset(init, ...)
 	return rs
 end
 
+--reflection -----------------------------------------------------------------
+
+local function list_rowsets()
+	local list = {}
+	for name, rs in pairs(rowset) do
+		if not istab(rs) or not rs.internal then
+			local t = istab(rs) and rs or empty
+			local masters = {}
+			for _, def in pairs(t.params or empty) do
+				local master = def.lookup_rowset_name
+				if master and master ~= name and def.auto_bind ~= false then
+					masters[master] = true
+				end
+			end
+			add(list, {
+				name = name,
+				label = t.label or name,
+				category = t.category or 'Other',
+				masters = masters,
+			})
+		end
+	end
+	return sort(list, cmp'category label name')
+end
+
+--used to populate the rowsets menu.
 rowset.rowsets = virtual_rowset(function(rs) --rowset reflection
 	rs.fields = {
-		{name = 'name'}
+		{name = 'name'},
+		{name = 'label'},
+		{name = 'category'},
 	}
 	rs.pk = 'name'
 	function rs:load_rows(res, params)
 		res.rows = {}
-		for name, rs in sortedpairs(rowset) do
-			if not istab(rs) or not rs.internal then
-				add(res.rows, {name})
+		for _, e in ipairs(list_rowsets()) do
+			add(res.rows, {e.name, e.label, e.category})
+		end
+	end
+end)
+
+--not functional: used for inspection only.
+rowset.rowsets_tree = virtual_rowset(function(rs)
+	rs.fields = {
+		{name = 'id', readonly = true},
+		{name = 'parent_id'},
+		{name = 'name'},
+		{name = 'label'},
+		{name = 'category'},
+	}
+	rs.pk = 'id'
+	rs.parent_col = 'parent_id'
+	rs.tree_col = 'label'
+	rs.hide_cols = 'id name'
+	function rs:load_rows(res, params)
+		local list = list_rowsets()
+		local listed = {}
+		for _, e in ipairs(list) do
+			listed[e.name] = e
+		end
+		local details = {}
+		local roots = {}
+		for _, e in ipairs(list) do
+			local has_master = false
+			for master in pairs(e.masters) do
+				if listed[master] then
+					add(attr(details, master), e)
+					has_master = true
+				end
+			end
+			if not has_master then
+				add(roots, e)
 			end
 		end
+		local rows = {}
+		local visited = {}
+		local on_path = {}
+		local function add_rows(e, parent_id)
+			local id = parent_id and parent_id..'/'..e.name or e.name
+			add(rows, {id, parent_id or null, e.name, e.label, e.category})
+			visited[e.name] = true
+			on_path[e.name] = true
+			for _, detail in ipairs(details[e.name] or empty) do
+				if not on_path[detail.name] then
+					add_rows(detail, id)
+				end
+			end
+			on_path[e.name] = nil
+		end
+		for _, e in ipairs(roots) do
+			add_rows(e)
+		end
+		for _, e in ipairs(list) do
+			if not visited[e.name] then
+				add_rows(e)
+			end
+		end
+		res.rows = rows
 	end
 end)
 

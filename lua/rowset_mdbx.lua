@@ -565,20 +565,26 @@ dynamic_rowset('^table_(.+)$', function(tbl)
 	end, tbl))
 	checkfound(not schema.is_index)
 	local params = {}
+	local pk_cols = index(schema.pk)
 	for name, fk in pairs(schema.fks or empty) do
+		local is_fk_on_pk = true
+		for _, col in ipairs(fk.cols) do
+			is_fk_on_pk = is_fk_on_pk and pk_cols[col] ~= nil
+		end
 		params[name] = {
 			for_cols = cat(fk.cols, ' '),
 			lookup_cols = cat(fk.ref_cols, ' '),
 			lookup_rowset_name = 'table_'..fk.ref_table,
 			client_filter = true,
+			auto_bind = is_fk_on_pk or fk.ondelete == 'cascade',
 		}
 	end
 	local sel = cat(schema.cols, ', ')
 	return scan_rowset{
 		label = tbl:gsub('_', ' '):gsub('^.', string.upper),
+		category = schema.category,
 		scan = function(db) return db:scan(tbl, ''):select(sel) end,
 		pk = cat(schema.pk, ' '),
-		cols = cat(schema.cols, ' '),
 		params = params,
 	}
 end)
@@ -837,6 +843,7 @@ dynamic_rowset('^members_(.+)$', function(tbl)
 	end, tbl))
 	checkfound(is_link_table(schema))
 	local rs = members_rowset(tbl)
-	rs.label = tbl:gsub('_', ' '):gsub('^.', string.upper)
+	rs.label = tbl:gsub('_', ' '):gsub('^.', string.upper) .. ' (members)'
+	rs.category = schema.category
 	return rs
 end)

@@ -59,6 +59,8 @@ require'proc'
 
 db_schema:import(function()
 
+	category'Calls'
+
 	tables.call = {
 		call        , idpk,
 		name        , name,

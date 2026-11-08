@@ -126,6 +126,7 @@ do
 	}
 	db_schema:import(function()
 		import'schema_mdbx'
+		category'Demo'
 		tables.grid_save = {
 			row_check("row.test_action ~= 'reject row'", 'Test row rejected'),
 			id               , idpk,
@@ -229,6 +230,7 @@ do
 		end
 		rowset.grid_save = scan_rowset{
 			name = 'grid_save',
+			category = 'Demo',
 			scan = function(db)
 				return db:scan('grid_save', '')
 					:select('id, parent_id, pos, text, num, '
@@ -250,6 +252,7 @@ do
 
 		rowset.grid_typed = scan_rowset{
 			name = 'grid_typed',
+			category = 'Demo',
 			scan = function(db)
 				return db:scan('grid_typed', '')
 					:select('code, text, num, test_action, test_description')

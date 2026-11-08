@@ -1,6 +1,8 @@
 
 db_schema:import(function()
 
+	category'Project Management'
+
 	tables.company = {
 		company      , idpk,
 		name         , name, not_null, uk,

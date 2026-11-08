@@ -5,6 +5,8 @@ require'ipv6'
 --process tree ---------------------------------------------------------------
 
 rowset.os_explorer_processes = virtual_rowset(function(rs)
+	rs.label = 'Processes'
+	rs.category = 'OS explorer'
 	rs.fields = {
 		{name = 'name', label = 'Process'},
 		{
@@ -129,6 +131,8 @@ local function add_child_rows(rows, child_rows, dir, recursive)
 end
 
 rowset.os_explorer_files = virtual_rowset(function(rs)
+	rs.label = 'Files'
+	rs.category = 'OS explorer'
 	rs.fields = {
 		{name = 'name', label = 'Name', type = 'os_file_name'},
 		{
@@ -203,6 +207,8 @@ local function file_contents_row(path)
 end
 
 rowset.os_explorer_file = virtual_rowset(function(rs)
+	rs.label = 'File'
+	rs.category = 'OS explorer'
 	rs.fields = {
 		{name = 'path', not_null = true, readonly = true},
 		{name = 'contents', label = 'Contents', maxlen = max_file_size},
@@ -255,6 +261,8 @@ end
 local protocols = {'tcp', 'tcp6', 'udp', 'udp6'} -- /proc/net file names
 
 rowset.os_explorer_ports = virtual_rowset(function(rs)
+	rs.label = 'Ports'
+	rs.category = 'OS explorer'
 	rs.fields = {
 		{name = 'protocol', label = 'Protocol', not_null = true},
 		{name = 'address', label = 'Address'},

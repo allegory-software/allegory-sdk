@@ -79,6 +79,8 @@ FIELD FLAGS
 SCHEMA WORDS AND METHODS
 
 	import(src)                     sc:import(src)
+	category'Name'                  tbl.category = 'Name' for the tables defined
+	                                after it in the same import fn
 	add_fk(tbl, 'col1 ...', ref_tbl, [ondelete], [onupdate])
 	add_child_fk(tbl, 'cols', ref_tbl)   ondelete = 'cascade'
 	add_weak_fk(tbl, 'cols', ref_tbl)    ondelete = 'set null'
@@ -91,6 +93,8 @@ SCHEMA WORDS AND METHODS
 	  (merges its types, tables, procs and type_attrs), a module name
 	  (looked up in schema.package, then require) or a plain table
 	  (merged into sc.env).
+	- tbl.category is display text only, for grouping tables in menus. A nested
+	  import starts with no category and the outer one resumes after it.
 	- sc:add_table(name, t) -> tbl defines a table; error if it exists.
 	- sc:add_cols adds fields to a defined table, after `col` if given.
 	- add_trigger and add_proc merge the extra `...` tables into the
@@ -283,7 +287,8 @@ local function resolve_fk(fk, tbl, ref_tbl)
 end
 
 local function parse_table(self, name, t)
-	local tbl = {is_table = true, name = name, fields = {}}
+	local tbl = {is_table = true, name = name, fields = {},
+		category = self.current_category}
 	parse_cols(self, t, tbl.fields, name, tbl)
 	--resolve fks that ref this table.
 	local fks = self.table_refs and self.table_refs[name]
@@ -439,6 +444,7 @@ do
 		function env.action       (...) return self:add_action(...) end
 		function env.proc         (...) self:add_proc     (...) end
 		function env.add_cols     (...) self:add_cols     (...) end
+		function env.category     (name) self.current_category = name end
 
 		return self
 	end
@@ -459,7 +465,10 @@ function schema:import(src)
 	if isfunc(src) then --def
 		if not self.loaded[src] then
 			setfenv(src, self.env)
+			local category0 = self.current_category
+			self.current_category = nil
 			src()
+			self.current_category = category0
 			self.loaded[src] = true
 		end
 	elseif isschema(src) then --schema
