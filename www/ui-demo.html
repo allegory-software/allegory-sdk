@@ -1808,7 +1808,6 @@ ui.end_toolboxes()
 }
 
 {
-let modal_is_open = false
 let modal_text = 'type here'
 let modal_dd_value = null
 let modal_result = 'none yet'
@@ -1817,12 +1816,12 @@ let modal_dd_field = ui.create_field({type: 'enum', enum_values: modal_dd_items}
 demos.modal = function() {
 ui.v(1, ui.sp2(), 'c', 'c')
 	if (ui.button('modal_open', 'app-window', 'Open modal'))
-		modal_is_open = true
+		ui.set_modal_open('modal_demo', true)
 	ui.text('', 'last result: '+modal_result)
 ui.end_v()
-if (modal_is_open) {
+{
 	let ok, cancel
-	ui.modal('modal_demo', 'I am a modal')
+	if (ui.modal('modal_demo', 'I am a modal')) {
 		ui.m(ui.sp2())
 		ui.min_w(300)
 		ui.v(1, ui.sp2(), 's', 't')
@@ -1832,19 +1831,20 @@ if (modal_is_open) {
 			ui.h(0, ui.sp(), 's')
 				ui.box(1)
 				ui.default_button('modal_ok')
-				ui.cancel_button('modal_cancel')
 				ok = ui.primary_button('modal_ok', 'check', 'OK')
 				cancel = ui.button('modal_cancel', 'x', 'Cancel')
 			ui.end_h()
 		ui.end_v()
-	ui.end_modal()
+		ui.end_modal()
+	}
 	if (ok) {
 		modal_result = 'OK: '+modal_text+', '+modal_dd_value
-		modal_is_open = false
+		ui.set_modal_open('modal_demo', false)
 	} else if (cancel) {
-		modal_result = 'Cancel'
-		modal_is_open = false
+		ui.set_modal_open('modal_demo', false, true)
 	}
+	if (ui.state_of('modal_demo', 'canceled'))
+		modal_result = 'Cancel'
 }
 }
 }
