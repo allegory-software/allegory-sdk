@@ -155,6 +155,12 @@ function app_dock_empty_tab(tab) {
 			set_dock_tab('app_dock', tab.id,
 				{title: 'Container', icon: 'layout',
 					layout: {tabs: []}})
+		let closed_containers = ui.dock_closed_containers('app_dock')
+		let closed_container_id = menu_button(tab_id+'.containers_button',
+			'archive', 'Containers', closed_containers, null, null, null, null,
+			!closed_containers.length)
+		if (closed_container_id)
+			ui.restore_dock_container('app_dock', tab.id, closed_container_id)
 		if (button(tab_id+'.db_tables', 'list-details', 'Tables'))
 			set_dock_tab('app_dock', tab.id,
 				{kind: 'db_tables', title: 'Tables', icon: 'list-details'})

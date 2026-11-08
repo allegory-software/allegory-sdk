@@ -12014,6 +12014,9 @@ ui.live_move_mixin = function(e) {
 	ui.set_dock_tab   (id, tab_id, props)   update tab properties
 	ui.remove_dock_tab (id, tab_id)          remove a dock tab
 	ui.select_dock_tab (id, tab_id)          select a dock tab
+	ui.dock_closed_containers (id) -> items  closed containers, as menu items
+	ui.restore_dock_container (id, tab_id, closed_tab_id)
+	  show a closed container in tab tab_id and forget it as closed
 TAB STRIP REC BOX
 	ui.open_tab_strip  ()                    begin recording tab strip content
 	ui.close_tab_strip ()                    stop recording tab strip content
@@ -12255,6 +12258,10 @@ function add_dock_tab_ids(root, tab_ids) {
 function new_dock_tab_id(s) {
 	let tab_ids = set() // {tab_id}
 	add_dock_tab_ids(s.root, tab_ids)
+	for (let closed_tab of s.closed_containers) {
+		tab_ids.add(closed_tab.id)
+		add_dock_tab_ids(closed_tab.layout, tab_ids)
+	}
 	let tab_n = 1 // number in the id of the new tab
 	while (tab_ids.has('tab'+tab_n))
 		tab_n++
@@ -12274,25 +12281,26 @@ function serialize_dock_layout(node) {
 		}
 	}
 	let tabs = []
-	for (let tab of node.tabs) {
-		let saved_tab = {
-			id: tab.id,
-			kind: tab.kind,
-			args: tab.args,
-			title: tab.title,
-			icon: tab.icon,
-			layout: tab.layout
-				? serialize_dock_layout(tab.layout) : undefined,
-			frozen: tab.frozen,
-			hot: tab.hot,
-			live: tab.live,
-		}
-		tabs.push(saved_tab)
-	}
+	for (let tab of node.tabs)
+		tabs.push(serialize_dock_tab(tab))
 	return {
 		key: node.key,
 		tabs: tabs,
 		selected_tab_id: node.selected_tab_id,
+	}
+}
+function serialize_dock_tab(tab) {
+	return {
+		id: tab.id,
+		kind: tab.kind,
+		args: tab.args,
+		title: tab.title,
+		icon: tab.icon,
+		layout: tab.layout
+			? serialize_dock_layout(tab.layout) : undefined,
+		frozen: tab.frozen,
+		hot: tab.hot,
+		live: tab.live,
 	}
 }
 function serialize_dock_root() {
@@ -12305,6 +12313,7 @@ function save_dock_layout(id, s) {
 	s.root.toJSON = serialize_dock_root
 	ui.save_state(id, 'root', s.root, true)
 	ui.save_state(id, 'next_key', s.next_key)
+	ui.save_state(id, 'closed_containers', s.closed_containers, true)
 }
 
 function find_dock_parent(node, child) {
@@ -12499,6 +12508,8 @@ function move_dock_tab(
 
 	let tab = src_tablist.tabs.splice(tab_i, 1)[0]
 	if (!area) {
+		if (tab.layout)
+			s.closed_containers.push(serialize_dock_tab(tab))
 		let closes_edit_tab = s.edit_tab_id == tab.id
 		if (!closes_edit_tab && s.edit_tab_id && tab.layout)
 			closes_edit_tab = !!find_dock_tablist(tab.layout, s.edit_tab_id)
@@ -12771,6 +12782,7 @@ ui.dock = function(id, layout, on_build_tab, opt) {
 			s.next_key = 0 // key of the next new node
 			s.root = create_dock_layout(s, layout)
 		}
+		s.closed_containers = saved?.closed_containers ?? [] // [saved tab, ...]
 		s.root.toJSON = serialize_dock_root
 		if (saved && opt.restore_tab) {
 			walk_dock_tablists(s.root, restore_dock_tabs, opt.restore_tab)
@@ -12846,6 +12858,30 @@ ui.set_dock_tab = function(id, tab_id, props) {
 	assign(tab, props)
 	if (props.layout)
 		tab.layout = create_dock_layout(s, props.layout)
+	save_dock_layout(id, s)
+	ui.rebuild('dock_tab_changed')
+}
+
+ui.dock_closed_containers = function(id) {
+	let s = ui.state_of(id)
+	let items = [] // [{id, label}]
+	for (let closed_tab of s.closed_containers)
+		items.push({id: closed_tab.id, label: closed_tab.title ?? 'New Tab'})
+	return items
+}
+
+ui.restore_dock_container = function(id, tab_id, closed_tab_id) {
+	let s = ui.state_of(id)
+	let tablist = assert(find_dock_tablist(s.root, tab_id),
+		'dock ', id, ': no tab ', tab_id)
+	let tab = tablist.tabs.find(tab => tab.id == tab_id) // tab record
+	let closed_i = s.closed_containers.findIndex(
+		closed_tab => closed_tab.id == closed_tab_id)
+	assert(closed_i >= 0, 'dock ', id, ': no closed container ', closed_tab_id)
+	let closed_tab = s.closed_containers.splice(closed_i, 1)[0]
+	tab.title = closed_tab.title
+	tab.icon = closed_tab.icon
+	tab.layout = closed_tab.layout
 	save_dock_layout(id, s)
 	ui.rebuild('dock_tab_changed')
 }
