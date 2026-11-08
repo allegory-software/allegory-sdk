@@ -14,7 +14,8 @@ API
 SCAN ROWSET OPTIONS
 
 	scan     fn(db) -> scan    required; must end in select()
-	pk       'col1 ...'        required; output names, not table cols
+	pk       'col1 ...'        required; output names, not table cols; when
+	                           they are a table's pk, in that table's pk order
 	db       db                optional; defaults to the app db
 	is_lookup bool             optional; omit FK lookup attributes
 	on_rows_changed            optional; see LOADING CHANGED ROWS
@@ -112,17 +113,20 @@ end
 --the one table whose rows match the rowset's rows one-to-one: every pk output
 --col comes from it, and together they are exactly its pk.
 local function find_write_table(db, out_specs, pk)
-	local tbl, cols = nil, {}
-	for _, name in ipairs(pk) do
+	local tbl, cols = nil, {} -- cols: {col -> position in pk}
+	for i, name in ipairs(pk) do
 		local spec = assertf(out_specs[name], 'pk col not in output: %s', name)
 		if not spec.table or (tbl and spec.table ~= tbl) then return end
 		tbl = spec.table
-		cols[spec.col] = true
+		cols[spec.col] = i
 	end
 	local table_pk = db:table_schema(tbl).pk
 	if #table_pk ~= #pk then return end
 	for _, col in ipairs(table_pk) do
 		if not cols[col] then return end
+	end
+	for i, col in ipairs(table_pk) do
+		assertf(cols[col] == i, 'pk cols not in the pk order of table %s', tbl)
 	end
 	return tbl
 end
@@ -286,12 +290,6 @@ local function scan_rowset_init(rs, opt, ...)
 
 			--add table actions to rowset actions.
 			if schema.actions then
-				--rowset can have its pk declared in a different order than
-				--the table. key_pos maps rowset pk col i -> write_table pk col i.
-				local key_pos = {} -- {write_table pk col i -> i in rs.pk[i]}
-				for i, name in ipairs(key_names) do
-					key_pos[i] = indexof(name, rs.pk)
-				end
 				rs.actions = extend({}, rs.actions)
 				local names = {} -- {action name -> true}
 				for _, action in ipairs(rs.actions) do
@@ -304,15 +302,8 @@ local function scan_rowset_init(rs, opt, ...)
 					add(rs.actions, {
 						name = action.name, label = action.label,
 						reload = action.reload,
-						fn = function(self, pks, params)
-							local table_pks = {} -- {{pk col1 val,...},...}
-							for i, pk in ipairs(pks) do
-								table_pks[i] = {}
-								for j, pos in ipairs(key_pos) do
-									table_pks[i][j] = pk[pos]
-								end
-							end
-							action.fn(rs_db(), table_pks)
+						fn = function(self, pks)
+							action.fn(rs_db(), pks)
 						end,
 					})
 				end
