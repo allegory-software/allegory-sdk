@@ -204,9 +204,8 @@ local function set_req_user(ru, iuid)
 	local req = http_request()
 	req.real_user = ru
 	req.user = u
-	if not u then return end
 	--impersonate other user if asked
-	if iuid and iuid ~= ru.id then
+	if u and iuid and iuid ~= ru.id then
 		local iu = try_load_user(iuid)
 		if iu and can_impersonate(ru, iu) then
 			u = iu
@@ -216,9 +215,14 @@ local function set_req_user(ru, iuid)
 		end
 	end
 	if multilang() then
-		setlang(u.lang) --user lang has priority over action lang.
-		setcountry(u.country)
+		--user lang has priority over action lang. the request can switch
+		--users: fall back to the action's lang, not to the previous user's.
+		req.lang0 = req.lang0 or lang()
+		req.country0 = req.country0 or country()
+		setlang(u and u.lang or req.lang0)
+		setcountry(u and u.country or req.country0)
 	end
+	if not u then return end
 	wlog('', 'auth', 'auth-ok', 'uid=%d%s%s', u.id,
 		ru and ru ~= u and ' ruid=' or '',
 		ru and ru ~= u and ru.id or '')

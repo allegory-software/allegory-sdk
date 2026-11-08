@@ -2049,7 +2049,8 @@ glue.Sf = function(...args) {
 	return () => glue.S(...args)
 }
 
-glue.locale = memoize(function() { return glue.lang() + '-' + country() })
+let locale_of = memoize(lang1 => memoize(country1 => lang1 + '-' + country1))
+glue.locale = function() { return locale_of(glue.lang())(country()) }
 let locale = glue.locale
 
 }()) // module function

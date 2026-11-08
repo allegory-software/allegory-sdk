@@ -136,6 +136,8 @@ ui.login_window = function() {
 
 ui.switch_user = function(new_user) {
 	user = new_user
+	document.documentElement.lang = new_user.lang
+	document.documentElement.setAttribute('country', new_user.country)
 	ui.load_saved_state(json_arg(new_user.ui_state))
 	ui.free_all_state()
 	ui.animate()

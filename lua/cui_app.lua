@@ -17,7 +17,7 @@ API
 
 	fontfile(name, path, [desc])  preload a font and load it in the page
 	user_json() -> {id=, signed_in=, is_admin=, impersonating=, anonymous=,
-		name=, email=, phone=}
+		name=, email=, phone=, lang=, country=}
 	db() -> db                             open the configured db
 	scan(tbl, [path], [alias]) -> scan     db():scan()
 	query('TABLE [ALIAS]'|rel, [alias]) -> rel   db():from()
@@ -123,6 +123,8 @@ function user_json()
 		name = user'name',
 		email = user'email',
 		phone = user'phone',
+		lang = lang(),
+		country = country(),
 		ui_state = user_ui_state(),
 	}
 end

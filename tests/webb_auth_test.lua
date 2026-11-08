@@ -300,6 +300,32 @@ assert(not ok); assert_err(err, 'only admins')
 config{auto_create_user = true}
 print'ok user admin / signed out'
 
+--test impersonation applies the user's lang and country, and ends with them
+local multilang0 = multilang
+function multilang() return true end
+local fr_uid = register('fr@test.com', {})
+auth_store().with_lock('w', auth_store().update_user, fr_uid, function(u)
+	u.lang = 'fr'
+	u.country = 'FR'
+end)
+local function new_lang_req() --a request starts with the action's lang.
+	newreq_jar()
+	currentthread():ownenv()._lang = nil
+	currentthread():ownenv()._country = nil
+end
+sign_in('admin@test.com')
+new_lang_req()
+login{type = 'impersonate', uid = fr_uid}
+assert(lang() == 'fr' and country() == 'FR')
+new_lang_req()
+login{type = 'session'}
+assert(lang() == 'fr' and country() == 'FR')
+new_lang_req()
+login{type = 'unimpersonate'}
+assert(lang() == 'en' and country() == 'US')
+multilang = multilang0
+print'ok impersonate / lang and country'
+
 --clean-up
 rm_rf'/tmp/webb_auth_test'
 
