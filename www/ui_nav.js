@@ -1082,7 +1082,7 @@ ui.nav = function(id, opt) {
 		for (let i = 0; i < fields.length; i++) {
 			let field = fields[i]
 			let vals = e.col_vals[field.fi]
-			let r = field.col_storage.compare_cell(vals, ri, key_vals[i])
+			let r = field.col_storage.compare_cell(vals, ri, key_vals[i], field)
 			if (r)
 				return r
 		}
@@ -1094,7 +1094,7 @@ ui.nav = function(id, opt) {
 		for (let field of fields) {
 			let vals = e.col_vals[field.fi]
 			let r = field.col_storage.compare_cell(vals, ri1,
-				field.col_storage.get(vals, ri2))
+				field.col_storage.get(vals, ri2), field)
 			if (r)
 				return r
 		}
@@ -2884,7 +2884,7 @@ ui.nav = function(id, opt) {
 					let {field, vals} = key_fields[k]
 					let storage = field.col_storage
 					let v2 = storage.get(vals, ri2)
-					if (storage.compare_cell(vals, ri1, v2))
+					if (storage.compare_cell(vals, ri1, v2, field))
 						return level
 				}
 			return level_n
@@ -4963,7 +4963,7 @@ ui.nav = function(id, opt) {
 			while (j < old_rows.n) {
 				let old_ri = old_rows.pk_ris[j]
 				let old_pk = storage.get(old_rows.pk_vals, old_ri)
-				let cmp = storage.compare_cell(pk_vals, ri, old_pk)
+				let cmp = storage.compare_cell(pk_vals, ri, old_pk, pk_field)
 				if (cmp < 0)
 					break
 				j++

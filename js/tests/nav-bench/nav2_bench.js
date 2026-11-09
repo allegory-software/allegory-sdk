@@ -1308,6 +1308,23 @@ function check_indexes() {
 		&& nav.lookup('pos', [1]) == 0,
 		'move saved row: loaded-value index changed')
 
+	// lookups compare in the index's sort order, collation included.
+	for (let [sort_collation, vals, v] of [
+		['ai_ci', ['b', 'A', 'C'], 'C'],
+		['list\0z\0x', ['x', 'y', 'z'], 'z'],
+	]) {
+		nav = ui.nav('index_collation')
+		nav.load({
+			fields: [{name: 'id', type: 'number'},
+				{name: 's', sort_collation: sort_collation}],
+			col_vals: [[1, 2, 3], vals],
+			pk: 'id',
+		})
+		assert(nav.lookup('s', [v]) == vals.indexOf(v),
+			'lookup missed a value in a collated column: ', sort_collation)
+		nav.free()
+	}
+
 	nav = ui.nav('index_tree')
 	nav.load({
 		fields: [

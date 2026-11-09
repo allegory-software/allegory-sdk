@@ -64,7 +64,7 @@ const {
 	assign, assign_opt, noop, display_name, words, set,
 	num, isnum, isstr, isbool, isarray, isobj, str, dec, repl, utf8_len, floor,
 	isobject, isfunc, clamp,
-	assert, obj, map, empty_array, empty, return_true,
+	assert, obj, map, empty_array, empty, return_true, memoize,
 	warn, warn_if, warn_once,
 	format_kbytes, format_kcount, format_date, parse_date,
 	parse_timeofday, format_timeofday, format_duration, format_timeago, S,
@@ -468,7 +468,8 @@ and JS arrays for strings.
 	write_sort_keys(vals, ris, n, field, keys0, keys1) -> word_n
 		radix sort keys of the rows ris[0..n), as 1 or 2 Uint32 words per row:
 		the least significant word in keys0, the other one in keys1.
-	compare_cell(vals, ri, v) -> -1|0|1            sort comparator
+	compare_cell(vals, ri, v, field) -> -1|0|1     sort comparator, in the
+		order of write_sort_keys(), field.sort_collation included
 	copy_changed(vals, ris, src_vals, src_is, n, changed_ks) -> count
 		for k in [0..n): where src_vals[src_is[k]] differs from vals[ris[k]],
 		copy it there and put k in changed_ks. src_vals is made by load_col().
@@ -480,7 +481,17 @@ function compare_vals(v1, v2) {
 	return v1 !== v2 ? (v1 < v2 ? -1 : 1) : 0
 }
 
-let base_collator_compare
+const base_collator_compare = new Intl.Collator(undefined,
+	{sensitivity: 'base'}).compare
+
+// 'list\0ITEM1\0ITEM2...' -> {item -> rank}, ranks from 1.
+let list_ranks = memoize(function(sort_collation) {
+	let items = sort_collation.slice(5).split('\0')
+	let item_ranks = map() // {listed value -> rank}
+	for (let i = 0; i < items.length; i++)
+		item_ranks.set(items[i], i + 1)
+	return item_ranks
+})
 
 function grow_typed_col(vals, cap) {
 	let vals1 = new vals.constructor(cap)
@@ -521,8 +532,6 @@ let array_storage = {
 			}
 		}
 		if (field.sort_collation == 'ai_ci') {
-			base_collator_compare ??= new Intl.Collator(undefined,
-				{sensitivity: 'base'}).compare
 			distinct_vals.sort(base_collator_compare)
 			let rank = 0
 			for (let i = 0; i < distinct_vals.length; i++) {
@@ -532,10 +541,7 @@ let array_storage = {
 				ranks.set(distinct_vals[i], rank)
 			}
 		} else if (field.sort_collation?.startsWith('list\0')) {
-			let items = field.sort_collation.slice(5).split('\0')
-			let item_ranks = map() // {listed value -> rank}
-			for (let i = 0; i < items.length; i++)
-				item_ranks.set(items[i], i + 1)
+			let item_ranks = list_ranks(field.sort_collation)
 			let unlisted_vals = []
 			for (let v of distinct_vals) {
 				if (item_ranks.has(v))
@@ -545,7 +551,7 @@ let array_storage = {
 			}
 			unlisted_vals.sort(compare_vals)
 			for (let i = 0; i < unlisted_vals.length; i++)
-				ranks.set(unlisted_vals[i], items.length + i + 1)
+				ranks.set(unlisted_vals[i], item_ranks.size + i + 1)
 		} else {
 			distinct_vals.sort(compare_vals)
 			for (let rank = 0; rank < distinct_vals.length; rank++)
@@ -557,12 +563,22 @@ let array_storage = {
 		}
 		return 1
 	},
-	compare_cell: function(vals, ri, v) {
+	compare_cell: function(vals, ri, v, field) {
 		let v1 = vals[ri]
 		if (v1 == null)
 			return v == null ? 0 : -1
 		if (v == null)
 			return 1
+		if (field.sort_collation == 'ai_ci') {
+			return base_collator_compare(v1, v)
+		}
+		if (field.sort_collation?.startsWith('list\0')) {
+			let item_ranks = list_ranks(field.sort_collation)
+			let rank1 = item_ranks.get(v1) // undefined: unlisted
+			let rank2 = item_ranks.get(v)
+			if (rank1 !== undefined || rank2 !== undefined)
+				return compare_vals(rank1 ?? 1/0, rank2 ?? 1/0)
+		}
 		return compare_vals(v1, v)
 	},
 	copy_changed: copy_changed,
