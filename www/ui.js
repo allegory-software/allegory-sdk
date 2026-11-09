@@ -6130,6 +6130,8 @@ ui.text = function(
 		a[n++] = mark_bg ?? 'search'
 	}
 	ui_cmd_box_end(i)
+	if (field && ui.focused(id))
+		ui.measure_viewport(id+'.viewport')
 	text_flags = 0
 	text_font_size = null
 
@@ -6530,6 +6532,31 @@ function apply_select_text(input) {
 
 /// input DOM elements -------------------------------------------------------
 
+function clip_dom_element(el, x, y, w, h, viewport) {
+	let clip_l = viewport ? max(0, viewport.x - x) / screen_dpr : 0
+	let clip_t = viewport ? max(0, viewport.y - y) / screen_dpr : 0
+	let clip_r = viewport ? max(0, x + w - viewport.x - viewport.w) / screen_dpr : 0
+	let clip_b = viewport ? max(0, y + h - viewport.y - viewport.h) / screen_dpr : 0
+	if (
+		el._ui_clip_l != clip_l ||
+		el._ui_clip_t != clip_t ||
+		el._ui_clip_r != clip_r ||
+		el._ui_clip_b != clip_b
+	) {
+		el.style.clipPath = clip_l || clip_t || clip_r || clip_b
+			? 'inset('
+				+clip_t+'px '
+				+clip_r+'px '
+				+clip_b+'px '
+				+clip_l+'px)'
+			: 'none'
+		el._ui_clip_l = clip_l
+		el._ui_clip_t = clip_t
+		el._ui_clip_r = clip_r
+		el._ui_clip_b = clip_b
+	}
+}
+
 // move the DOM focus to where the frame put it:
 // 1) same input focused (do nothing)
 // 2) diff input focused by key (focus it, and select all of it by default)
@@ -6762,6 +6789,7 @@ draw[CMD_TEXT] = function(a, i) {
 	let x          = a[i+0]
 	let y          = a[i+1]
 	let w          = a[i+2]
+	let h          = a[i+3]
 	let s          = a[i+TEXT_S]
 	let asc        = a[i+TEXT_ASC]
 	let dsc        = a[i+TEXT_DSC]
@@ -6803,6 +6831,13 @@ draw[CMD_TEXT] = function(a, i) {
 		let css_py2 = py2 / screen_dpr
 		let css_font_size = cur_font_size / screen_dpr
 		let css_opacity = focused ? '1' : '0'
+		let viewport = focused ? state_map.get(id+'.viewport') : null
+		clip_dom_element(input,
+			sx - px1,
+			y - py1,
+			sw + px1 + px2,
+			h  + py1 + py2,
+			viewport)
 		if (
 			document.activeElement != input ||
 			(ss_frame?.n ?? 0) >= input._ui_n
