@@ -7767,20 +7767,26 @@ ui.button_stack = function(id, fr, align, valign) {
 function button_update(id, s) {
 	let cs = captured(id)
 	let hs = hit(id)
+	let focused = ui.focused(id)
+	if (s.pressed_key && (!focused
+		|| !ui.keypressed(s.pressed_key) && !ui.keyup(s.pressed_key)))
+		s.pressed_key = null
 	let state
 	if (clicked_button_id == id) {
 		state = 'click'
-	} else if (ui.focused(id) && (ui.keydown('enter') || ui.keydown(' '))) {
-		if (ui.keydown('enter'))
+	} else if (focused && (ui.keydown('enter') || ui.keydown(' '))) {
+		s.pressed_key = ui.keydown('enter') ? 'enter' : ' '
+		if (s.pressed_key == 'enter')
 			ui.capture_keys()
 		state = 'active'
-	} else if (ui.focused(id) && (ui.keyup('enter') || ui.keyup(' '))) {
-		if (ui.keyup('enter'))
+	} else if (focused && s.pressed_key && ui.keyup(s.pressed_key)) {
+		if (s.pressed_key == 'enter')
 			ui.capture_keys()
+		s.pressed_key = null
 		state = 'click'
 	} else {
 		state = cs && hs ? ui.clickup ? 'click' : 'active'
-			: hs ? 'hover' : ui.focused(id) ? 'focused' : null
+			: hs ? 'hover' : focused ? 'focused' : null
 	}
 	s.state = state
 	if (state == 'click')
@@ -7978,7 +7984,9 @@ ui.popup_button = function(id, icon, text, side, align) {
 			ui.focus_group(false, null, id+'.picker')
 			ui.stack()
 				ui.large()
-				ui.bare_button(id+'.cancel', 'x', null, 0, 'r', 't')
+				ui.focus_group(false, 1)
+					ui.bare_button(id+'.cancel', 'x', null, 0, 'r', 't')
+				ui.end_focus_group()
 				ui.p(ui.sp4())
 				ui.v(0, ui.sp4())
 				ui.h2('Settings')
@@ -8601,6 +8609,8 @@ function valid_list_index(i, items) {
 }
 
 function next_list_item(items, item, d) {
+	if (d == 1/0)
+		return items.length ? items[items.length-1] : null
 	let i = items.indexOf(item)
 	i = i >= 0 ? i + d : d >= 0 ? 0 : items.length-1
 	i = valid_list_index(i, items)
@@ -12997,7 +13007,7 @@ ui.toolbox = function(
 	let drag_id = drag_ids ?? id+'.title'
 	if (isarray(drag_id))
 		drag_id = drag_id.includes(ui.captured_id) ? ui.captured_id : null
-	let cs = ui.drag(drag_id)
+	let cs = ui.drag(id+'.title') || ui.drag(drag_id)
 	if (cs?.drag)
 		ui.focus_first(id)
 	let s = ui.state(id)
