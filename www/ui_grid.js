@@ -2189,7 +2189,6 @@ function init(id, e) {
 		update_menu()
 
 		if (e.editing
-				&& !ui.focused(id)
 				&& !ui.focused(editor_id)
 				&& !ui.focus_inside(id+'.cells')
 			)
