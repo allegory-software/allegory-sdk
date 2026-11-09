@@ -2564,6 +2564,7 @@ function init(id, e) {
 		}
 
 		if (ctrl && keydown('s')) {
+			e.exit_edit()
 			e.save()
 			return false
 		}
