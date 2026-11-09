@@ -1757,7 +1757,7 @@ ui.nav = function(id, opt) {
 			let parent_ri = NONE
 			if (parent_id != null) {
 				while (i < id_index.len) {
-					let cmp = id_cmp(id_vals, id_ris[i], parent_id)
+					let cmp = id_cmp(id_vals, id_ris[i], parent_id, id_field)
 					if (cmp >= 0) {
 						if (cmp == 0)
 							parent_ri = id_ris[i]
