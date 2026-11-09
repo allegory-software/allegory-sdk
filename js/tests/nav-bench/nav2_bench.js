@@ -604,7 +604,7 @@ function check_saving() {
 	nav.remove_rows([1])
 	let batch = nav.pack_changes()
 	let [t_update, t_new, t_remove] = batch.rows
-	assert(batch.ris.join() == [0, new_ri, 1].join()
+	assert([...batch.ris].join() == [0, new_ri, 1].join()
 		&& t_new.type == 'new' && t_new.values.a == 'n'
 		&& !('id' in t_new.values) && !('b' in t_new.values)
 		&& t_remove.type == 'remove' && t_remove.values['id:old'] == 2

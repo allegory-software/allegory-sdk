@@ -211,6 +211,35 @@ try {
 	await click('call.settings.cancel')
 	await open('call.settings', false)
 	console.log('Call settings: microphone and camera dropdowns passed')
+	await page.evaluate(() => {
+		probe.pressed_a = 0
+		probe.pressed_b = 0
+		ui.main = function() {
+			if (ui.button('press.a', '', 'A')) probe.pressed_a++
+			if (ui.button('press.b', '', 'B')) probe.pressed_b++
+		}
+		ui.animate()
+	})
+	await page.waitForTimeout(60)
+	for (const name of ['Enter', ' ']) {
+		await page.evaluate(() => { ui.focus('press.a'); ui.animate() })
+		await page.waitForTimeout(60)
+		await page.keyboard.down(name)
+		await page.waitForTimeout(40)
+		await page.evaluate(() => { ui.focus('press.b'); ui.animate() })
+		await page.waitForTimeout(60)
+		await page.keyboard.up(name)
+		await page.waitForTimeout(60)
+		assert.deepEqual(await page.evaluate(() =>
+			[probe.pressed_a, probe.pressed_b]), [0, 0])
+	}
+	await key('Enter')
+	assert.deepEqual(await page.evaluate(() =>
+		[probe.pressed_a, probe.pressed_b]), [0, 1])
+	await key(' ')
+	assert.deepEqual(await page.evaluate(() =>
+		[probe.pressed_a, probe.pressed_b]), [0, 2])
+	console.log('Buttons: a key release activates only its own press, once')
 	assert.deepEqual(errors, [])
 } finally {
 	await browser.close()

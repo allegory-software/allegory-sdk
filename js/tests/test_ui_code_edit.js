@@ -71,6 +71,7 @@ let ui = {
 	color_def(){}, icon_def(){},
 	widget(){}, cmd(){}, keepalive(){}, on_free(){}, focus(){}, focusable(){},
 	capture_keydown(){}, capture_keyup(){}, capture_tab(){},
+	capture_enter(){}, capture_escape(){},
 	scroll_to_view_rect(){}, measure(){},
 	min_w(){}, min_h(){}, min_wh(){},
 	v(){}, end_v(){}, h(){}, end_h(){}, stack(){}, end_stack(){},

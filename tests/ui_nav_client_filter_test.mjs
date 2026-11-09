@@ -196,8 +196,16 @@ try {
 	}), [1, 20])
 	await page.evaluate(() => probe.detail.revert_changes())
 	rows.push([5, 1, 20, 'notified'])
-	for (const res of notifications) res.write('data: detail external\n\n')
+	const request_n = requests.length
+	for (const res of notifications)
+		res.write('id: 42\ndata: detail\n\n')
+	await page.waitForFunction(() => probe.detail.needs_reload)
+	assert.equal(requests.length, request_n)
+	assert.equal(await page.evaluate(() => probe.detail.lookup('id', [5])), null)
+	await page.evaluate(() => probe.detail.reload())
 	await page.waitForFunction(() => probe.detail.lookup('id', [5]) != null)
+	assert.equal(await page.evaluate(() => probe.detail.needs_reload), false)
+	assert.deepEqual(await page.evaluate(() => probe.ids()), [2, 5])
 	assert.deepEqual(requests.at(-1).params, {scope: ['x']})
 	await page.evaluate(rs => {
 		rs.params.parent.lookup_rowset_name = 'absent'

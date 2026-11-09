@@ -61,7 +61,7 @@ function build(fn) {
 `, ctx)
 Object.assign(ctx.ui, {
 	focusable() {}, stack() {}, end_stack() {}, bb() {}, p() {}, ph() {},
-	color() {},
+	color() {}, shadow() {},
 	sp: () => 1,
 	em: em => Math.round((em ?? 1) * 10),
 })

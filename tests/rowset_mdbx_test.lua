@@ -86,6 +86,10 @@ db:close()
 			end
 			assert(#pushes == 1, 'no push from the other process')
 			assert(pushes[1].names.table_t and pushes[1].txn_id > txn_id0)
+			local names, txn_id = changed_rowsets_since(tdb, txn_id0)
+			assert(names.table_t and txn_id == pushes[1].txn_id)
+			local names1, txn_id1 = changed_rowsets_since(tdb, txn_id)
+			assert(next(names1) == nil and txn_id1 == txn_id)
 			--closing the db ends the watcher thread.
 			tdb:close()
 		end)

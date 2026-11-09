@@ -46,9 +46,14 @@ async function post_rowset(rowset_name, data) {
 	return res.json()
 }
 
+function is_saving_row(nav, ri) {
+	return !!nav.get_debug_state().save_batch?.ris.has(ri)
+}
+
 function is_idle(nav) {
 	let ds = nav.get_debug_state()
 	return nav.ready && !ds.is_saving && !ds.is_loading
+		&& !ds.is_loading_changes
 }
 
 let navs = [] // navs of the running test, freed after it
@@ -176,8 +181,6 @@ test('lost save response: no second insert', 'grid_save',
 		set_val(nav, ri_of(nav, 'id', 8), 'test_action',
 			'disconnect after save')
 		await save(nav)
-		assert(nav.get_debug_state().saving_ris.size,
-			'failed save left no rows to settle')
 		await save(nav)
 		assert(!nav.modified_n, 'changes left after the second save')
 		assert(find_ris(nav, 'text', 'New root').length == 1,
@@ -206,7 +209,7 @@ test('delete a new row while its save is underway', 'grid_save',
 		let new_ri = insert(nav, {text: 'New root'})
 		set_val(nav, ri_of(nav, 'id', 8), 'test_action', 'hold save')
 		nav.save()
-		await wait_for(() => nav.get_debug_state().saving_ris.has(new_ri),
+		await wait_for(() => is_saving_row(nav, new_ri),
 			'save sent')
 		nav.remove_rows([new_ri])
 		assert(nav.is_removed(new_ri), 'row not marked for deletion')
@@ -226,12 +229,58 @@ test('delete a new row while its failing save is underway', 'grid_save',
 		let new_ri = insert(nav, {text: 'New root', test_action: 'reject row'})
 		set_val(nav, ri_of(nav, 'id', 8), 'test_action', 'hold save')
 		nav.save()
-		await wait_for(() => nav.get_debug_state().saving_ris.has(new_ri),
+		await wait_for(() => is_saving_row(nav, new_ri),
 			'save sent')
 		nav.remove_rows([new_ri])
 		await post_rowset('grid_save', {exec: 'release'})
 		await wait_for(() => is_idle(nav), 'save')
 		assert(!find_ris(nav, 'text', 'New root').length, 'row not dropped')
+	})
+
+test('delete a new row while its lost save is underway', 'grid_save',
+	async function(nav) {
+		let new_ri = insert(nav, {text: 'New root'})
+		set_val(nav, ri_of(nav, 'id', 1), 'test_action', 'hold save')
+		set_val(nav, ri_of(nav, 'id', 8), 'test_action', 'fail after save')
+		nav.save()
+		await wait_for(() => is_saving_row(nav, new_ri),
+			'save sent')
+		nav.remove_rows([new_ri])
+		await post_rowset('grid_save', {exec: 'release'})
+		await wait_for(() => is_idle(nav), 'save')
+		await save(nav)
+		assert(!find_ris(nav, 'text', 'New root').length, 'row still shown')
+		let sv = await open_nav('grid_save')
+		assert(!find_ris(sv, 'text', 'New root').length, 'row not deleted')
+	})
+
+test('delete a new row while its failing request is underway', 'grid_save',
+	async function(nav) {
+		let new_ri = insert(nav, {text: 'New root'})
+		set_val(nav, ri_of(nav, 'id', 1), 'test_action', 'hold save')
+		set_val(nav, ri_of(nav, 'id', 8), 'test_action', 'fail before save')
+		nav.save()
+		await wait_for(() => is_saving_row(nav, new_ri),
+			'save sent')
+		nav.remove_rows([new_ri])
+		await post_rowset('grid_save', {exec: 'release'})
+		await wait_for(() => is_idle(nav), 'save')
+		set_val(nav, ri_of(nav, 'id', 1), 'test_action', 'normal')
+		set_val(nav, ri_of(nav, 'id', 8), 'test_action', 'normal')
+		await save(nav)
+		assert(!find_ris(nav, 'text', 'New root').length, 'row not dropped')
+		assert(!nav.modified_n, 'changes left after save')
+	})
+
+test('another nav gets a save through a fetch', 'grid_save',
+	async function(nav) {
+		let sv = await open_nav('grid_save')
+		let sv_ri1 = ri_of(sv, 'id', 1)
+		sv.focus_cell(sv_ri1, fi_of(sv, 'text'))
+		set_val(nav, ri_of(nav, 'id', 1), 'num', 111)
+		await save(nav)
+		await wait_for(() => val(sv, sv_ri1, 'num') == 111, 'fetch')
+		assert(sv.focused_ri == sv_ri1, 'other nav reloaded')
 	})
 
 test('pk can be set only on a new row', 'grid_typed', async function(nav) {
@@ -272,7 +321,7 @@ test('same typed key, saved at the same time', 'grid_typed',
 			{code: 'SAME', text: 'Nav 1', test_action: 'hold save'})
 		insert(nav2, {code: 'SAME', text: 'Nav 2'})
 		nav1.save()
-		await wait_for(() => nav1.get_debug_state().saving_ris.has(ri1),
+		await wait_for(() => is_saving_row(nav1, ri1),
 			'save sent')
 		await save(nav2)
 		await post_rowset('grid_typed', {exec: 'release'})

@@ -104,6 +104,25 @@ try {
 	assert.deepEqual(local, {asc: [3, 2, 4, 1], desc: [1, 2, 4, 3],
 		numbers: [2, 1], composite: [2, 1], named: [2, 1],
 		ready: true})
+	assert.deepEqual(await page.evaluate(() => {
+		const parents = []
+		for (const [collation, rows] of [
+			['ai_ci', [['b', 'A'], ['a', null]]],
+			['list\0z\0a', [['a', 'z'], ['z', null]]],
+		]) {
+			const nav = ui.nav('collated_tree', {start_expanded: true})
+			nav.load({
+				fields: [{name: 'id', not_null: true, readonly: true,
+					sort_collation: collation},
+					{name: 'parent_id', sort_collation: collation}],
+				pk: 'id', id_col: 'id', parent_col: 'parent_id',
+				can_add_rows: false, rows: rows,
+			})
+			parents.push(nav.parent_ri[0])
+			nav.free()
+		}
+		return parents
+	}), [1, 1])
 
 	await page.evaluate(() => {
 		probe.waiting_rs = {
