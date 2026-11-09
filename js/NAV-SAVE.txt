@@ -15,6 +15,55 @@ DECIDE marks a question for Cosmin. LATER marks a question that Cosmin
 put off.
 
 
+STATUS (2026-11-09)
+==============================================================================
+
+Where things are:
+- The nav: www/ui_nav.js. Saving (pack_changes, apply_result, save,
+	end_request), fetching (load_changed_rows), merging (merge_server_rows),
+	reloading (reload, reload_rowset, load_rows), the request queue
+	(run_waiting_requests), pinning (ROW_PINNED).
+- The grid's smoke screen and Reload button: www/ui_grid.js, e.build().
+- Collation in lookups: compare_cell() in www/ui_field.js.
+- Server: lua/rowset.lua (apply_changes, the rowset.events action and its
+	Last-Event-ID replay), lua/rowset_mdbx.lua (changed_rowsets_since,
+	watch_row_changes, load_changed_rows), lua/mdbx_schema.lua (the ring).
+
+Tests:
+- node demo/run_nav_save_test.mjs: end-to-end save tests in headless
+	Chrome against the demo server (demo/www/nav_save_test.js). 15 pass.
+- node js/tests/nav-bench/run_nav_bench.mjs nav2 1000 1 merge: the nav2
+	checks (merge, pinning, saving, indexes, collation), then the merge bench.
+- bin/luajit -joff -lscite tests/rowset_mdbx_test.lua: the watcher's push.
+
+Done: I1 (except I1a), I1b, I1c, I2, I3, I4 with the pinning fixes, the I5
+benches, I6, the I0 collation bug, the grid's smoke screen.
+
+Open problems:
+1. Smoke screen after the user's own save, on a rowset that can't fetch
+	(I3). No solution yet: the nav can't tell what its own commit changed
+	in such a rowset. The way out is the NAV-CHANGES.txt stages (S2:
+	filters and params, S3: joins), which make more rowsets fetchable.
+2. The browser resends a POST by itself when the server closes a reused
+	connection without an answer (I3, "Found"). If the first attempt
+	committed and the resend succeeds, the resent inserts get "key exists"
+	on the user's own rows until the push's fetch makes them saved rows. A
+	save in between sends the inserts again. Not covered by a test.
+3. The smoke screen and the Reload button are not tried in the browser.
+4. Accepted gaps (I3): a nav whose first load finished before the events
+	connection reached the server can miss a commit made in between; the
+	reconnect replay reads db() only.
+5. A failed load or fetch drops the save that waited for it; the user saves
+	again (run_waiting_requests).
+6. Lines 25-28 of PROBLEM repeat the end of the paragraph above them.
+
+Next: the bulk change threshold (R4: more than 100 rows; pinned rows
+first, first among siblings in tree view; saved rows unpinned), the rest
+of I5, I1a, then NAV-CHANGES.txt S2.
+
+The work since commit 3d2f1cc2 is not committed.
+
+
 PROBLEM
 ==============================================================================
 
@@ -175,15 +224,21 @@ IMPLEMENTATION (speculative)
 I0. TODAY
 ------------------------------------------------------------------------------
 
-- After each commit to the db, from any process, the server pushes
-	'NAME txn_id' to every events connection, for every rowset that reads a
-	written table (I2). Every nav on those rowsets then reloads the whole
-	rowset (I6), the nav that saved included.
-- Bug: get_index() sorts with radix_sort(), which honors a field's
+- After each commit to the db, from any process, the server pushes the
+	name of every rowset that reads a written table to every events
+	connection (I2). Every nav on those rowsets then fetches the changed
+	rows and merges them (I3, I4); a rowset that can't fetch gets the smoke
+	screen.
+- Fixed: get_index() sorts with radix_sort(), which honors a field's
 	sort_collation ('ai_ci' or a list), but lookup(), upper_bound() and
-	add_to_indexes() compare with compare_cell(), which ignores it. On a
-	column with a sort_collation, a lookup can miss a row. Fix: give
-	compare_cell() the field and make it honor sort_collation.
+	add_to_indexes() compared with compare_cell(), which ignored it, so a
+	lookup on such a column could miss a row. compare_cell() now takes the
+	field and honors sort_collation; nav2_bench checks a lookup on both
+	kinds.
+- Fixed: validate_row() kept the server's errors on a saved row, so the
+	nav never sent a rejected saved row again, and a unique key error on a
+	column the user didn't edit kept the row from saving for good. It now
+	drops them, as the old nav did.
 - Fixed by I1 and I6:
 	- If the rowset didn't set reserves_ids, the nav sent new rows without
 		a pk. If the save's response got lost, the next save sent the rows
@@ -227,14 +282,12 @@ I1. KEYS AND SAVE
 		changes since its number before it sends the new rows again (I3).
 		If the insert committed, the fetch brings the row, the apply path
 		makes the new row that saved row (I4), and the next save sends only
-		the edits made since. Until I3 exists, the nav reloads in full
-		instead of fetching, and diff_merge() makes a new row that matches
-		a server row by pk that saved row, instead of keeping it new. Gaps
-		in that reload: a detail nav with no master row loads nothing, so
-		its next save waits forever; and a reload filtered by param_vals
-		doesn't return a new row with other param values, so the nav sends
-		it again and gets already_exists, or drops it when it was marked
-		for deletion although the server has it. A new
+		the edits made since. A rowset that can't fetch reloads in full
+		instead (I1c). Gaps in that reload: a detail nav with no master row
+		loads nothing; and a reload filtered by param_vals doesn't return a
+		new row with other param values, so the nav sends it again and gets
+		already_exists, or drops it when it was marked for deletion although
+		the server has it. A new
 		row without a pk value is a client bug: insert_row() answers with a
 		row error. The nav reserves the ids of an auto-inc pk before the
 		save, so insert_row() never assigns an id.
@@ -248,8 +301,9 @@ I1. KEYS AND SAVE
 
 I1c, decided: a failed save request ends like any failed save: the nav
 forgets the batch, and its rows keep their pending changes. The nav keeps
-no lost batch: rows leave saving_ris when the request ends, whatever the
-outcome. The failure sets a flag, and the next save first fetches the
+no lost batch: save_batch ends when the request ends, whatever the
+outcome, and its ris Set is the only record of the rows in flight. The
+failure sets a flag, and the next save first fetches the
 changes since the nav's number (I3), or reloads in full when the rowset
 can't fetch. The merge makes a committed new row that saved row, so the
 save sends only the edits made since, and an insert that didn't commit is
@@ -311,7 +365,8 @@ I2. CHANGE CAPTURE ON THE SERVER
 	without polling.
 - The server runs one loop: it waits on inotify, opens a read txn, reads
 	the new records with db:read_changes(N), using its last read txn id,
-	and pushes 'NAME txn_id' for each rowset that reads a changed table. On
+	and pushes 'NAME', with txn_id as the SSE event id, for each rowset
+	that reads a changed table. On
 	a gap it doesn't know the tables, so it pushes every rowset.
 - Decided: the loop sends every push. A push from the process that saved
 	reaches only that process's events connections; the navs connected to
@@ -354,7 +409,8 @@ I3. PUSH AND FETCH
 ------------------------------------------------------------------------------
 
 - When a table changes, the server pushes the name of each rowset that
-	reads the table, with the new change number. The push carries no row
+	reads the table, with the new change number as the SSE event id, used
+	only for the replay on reconnect. The push carries no row
 	values, because the server sends every rowset's notifications to every
 	events connection.
 - The nav fetches the changes since its number through rowset.json. That
@@ -389,25 +445,45 @@ I3. PUSH AND FETCH
 - Done: the event streams (rowset.events, webb_push, the demo's call
 	events) call out_flush() after each event; before, http_server kept
 	the events in its write buffer and sent none.
-- Open: with pushes arriving, three tests of run_nav_save_test.mjs fail:
-	"first save reserves ids", "rejected row keeps its changes" and "lost
-	save response: no second insert". Each nav reloads in full on every
-	push, its own saves and the test's resets included; a reload drops the
-	server errors and settles a lost batch before the test checks it. The
-	nav side of I3 replaces those reloads. Not traced one by one.
-- Not done yet: the nav side: the fetch on a push, applying the answer with
-	e.merge_rows(), and holding fetches while a save is in flight. The nav
-	stores can_load_changed_rows today, and nothing else of the fetch. No UI
-	work for now: the refresh button waits.
+- Done: the nav side, in www/ui_nav.js: load_changed_rows() fetches on a
+	push, merges the answer, and stores its txn_id. One request at a time: the fetch waits for a pending
+	save or load, and the save and the reload wait for the fetch. A failed
+	save request sets has_failed_save, and the next save fetches first
+	(I1c). A rowset that can't fetch, or a fetch answered reload = true,
+	sets e.needs_reload, or reloads when settling a failed save. The save
+	sends no update_id. run_nav_save_test.mjs passes all tests.
+- Done, not tried in the browser yet: in www/ui_grid.js, a loaded grid
+	with e.needs_reload or e.load_error covers itself with a smoke screen
+	that shows the reason, and a click on it reloads. A grid whose first
+	load failed shows the errors and a Reload button.
+- Open, no solution yet: on a rowset that can't fetch, the push for the
+	nav's own save sets needs_reload, so the grid would show the smoke
+	screen after each save. Rejected: skipping the push of the nav's own
+	commit. The save answer would have to report its commit's txn_id and
+	whether the commit wrote other keys of the rowset's tables, and the nav
+	would need a set of its own commit ids for saves that follow each other
+	faster than their pushes. It would also help only rowsets with
+	load_row: a rowset with a join has none, so after a save the nav shows
+	the sent values and stale joined columns. Loading rows by key through
+	the rowset's query fixes both the save answer and the fetch, which is
+	the NAV-CHANGES.txt stages (S2 for filters and params, S3 for joins).
+- Found: Chrome sends a POST again by itself when the server closes a
+	reused connection without an answer, so a "disconnect" test action
+	reaches the server several times. The fail before/after save test
+	actions answer 503 instead, which the browser doesn't retry. Reserved
+	ids keep such repeats from inserting a row twice.
+- Open: when the first attempt committed and the browser's own resend
+	succeeds, the nav never sees a failure, so it doesn't fetch first: the
+	resent inserts get "key exists", and the nav shows that error on its
+	own rows. The push's fetch then makes them saved rows. Fixed: the merge
+	cleared the errors only on the cells that still differ from the
+	server, so "key exists" stayed on the pk cells; it now clears the
+	errors on the cells that match.
 - Decided: a failed fetch shows its error like a failed load does today.
 	The grid needs a reload button on any error.
 - Decided: when a fetch answers reload = true, or the rowset can't answer
 	a fetch, the grid covers itself with a smoke screen, and a click
 	anywhere on it reloads.
-- Between the I2 loop and the nav side of I3: the push carries a txn_id,
-	not the nav's update_id, so the nav's rowset_changed() doesn't
-	recognize its own save, and the nav that saved reloads in full after
-	its own save too.
 - Cost: a fetch reads only the batches after N, and skips the keys of
 	other tables, once per nav and push.
 - The nav doesn't need to recognize its own save. Remove update_ids and
@@ -417,12 +493,15 @@ I3. PUSH AND FETCH
 	the values like any other change.
 - After a lost save answer, the nav fetches the changes since its number
 	before it sends the new rows again (I1, insert, and I1c).
-- Decided: the server keeps no queue of pushes for a dropped events
-	connection, so each nav fetches the changes since its number every time
-	the shared EventSource connects (its open event), whether or not
-	anything changed. The first open counts too: a nav that loaded before
-	the connection opened may have missed pushes. A nav that hasn't loaded
-	yet skips it. Cost: one fetch per nav per connect.
+- Done: pushes missed while the events connection was down. Each event
+	carries its txn_id as the SSE event id, and the browser sends the last
+	one back in the Last-Event-ID header when the EventSource reconnects.
+	The events action then calls changed_rowsets_since(db(), txn_id), which
+	the watcher also calls on each wake, and pushes the rowsets that
+	changed, or every rowset on a gap. The nav does nothing on reconnect.
+	The replay reads db() only, so it misses the pushes of another watched
+	db. Accepted: a nav whose first load finished before the events
+	connection reached the server can miss a commit made in between.
 - Deleted parents: the db deletes the children (ondelete 'cascade') or
 	sets their parent_id to null ('set null') itself, and I2 records those
 	writes like any other, so the nav needs nothing more.
@@ -499,9 +578,9 @@ I5 benches; (3) I2 and I3 then call the merge.
 I4b, decided. Design of the merge, step (2):
 - Change set format: rows as arrays in the rowset's field order, as in a
 	load, plus the pks of removed rows. I3 has no format yet.
-- A merge with a pending or lost batch: the nav holds change sets while a
-	save is in flight (I4), and the fetch after a lost answer settles the
-	lost batch (I3). Until I3, the merge asserts that no batch exists.
+- A merge with a pending batch: the nav holds change sets while a save is
+	in flight (I4), and the merge asserts that no batch is pending. There
+	is no lost batch since I1c.
 - A new row whose pk the change set brings (R4): write the new row's
 	values as edits first, as replay_edit_state() does, then the server
 	values.
@@ -579,8 +658,7 @@ I6. RELOAD BY LOAD AND REPLAY
 	Then it collapses the recorded collapsed rows again, by pk.
 - The editing state is plain JSON, by pk and column name, so the same code
 	can save it in local storage and restore it.
-- The reload ends an open edit. Until I3, a reload follows every
-	notification, so another user's save ends this user's edit.
+- The reload ends an open edit.
 - New rows go back at the end of the stored order. After the reload, every
 	row is at its place by the sort and the filter.
 - Server errors on rows are not kept: the next save reports them again.
@@ -595,10 +673,7 @@ Proposed order: I1; I6; the I5 benches; I4, fed by the save ack; the rest
 of I5; I2 and I3. With each step, update the head
 comment of www/ui_nav.js.
 
-Done: I1 (except I1a and I1b), I6, the I5 benches, I2, the server side of
-the I3 fetch.
-
-Next: the nav side of I3 (see I3, "Not done yet").
+Done and Next: see STATUS at the top.
 
 Test setup, before I4: demo/demo.lua serves grid_save,
 an auto-inc tree, and grid_typed, a flat table with a typed text pk. The
@@ -606,7 +681,7 @@ grid demo in www/ui-demo.html shows either one ("Server tree", "Server
 typed key"), and prepares a test case on it. Manual checks:
 - grid_save: the first save reserves the ids of the new rows.
 - grid_save: the save sends the parents before the children.
-- a disconnect case: the next save reloads first and doesn't insert the
+- a disconnect case: the next save fetches first and doesn't insert the
 	rows twice.
 - slow save: delete a new row while the save waits; it stays, marked for
 	deletion (R4).
@@ -627,7 +702,8 @@ native canvas package, and saves about 0.5 s of Chrome startup per run).
 - Done: demo/run_nav_save_test.mjs runs
 	www/nav_save_test.js. demo.lua reads HTTP_PORT, HTTPS_PORT and VARDIR
 	from the environment; the runner uses 8889, 4444 and a temporary var
-	dir. get_debug_state() reports is_saving, is_loading and saving_ris.
+	dir. get_debug_state() reports is_saving, is_loading,
+	is_loading_changes and save_batch.
 	The test action 'hold save' makes the save wait for exec 'release'.
 - Not covered yet: I1a (the 10k-row save bench), and the save ack applied
 	through I4.

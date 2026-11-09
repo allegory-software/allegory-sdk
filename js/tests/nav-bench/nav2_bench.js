@@ -624,12 +624,28 @@ function check_saving() {
 		&& nav.lookup('id', [4]) == new_ri && nav.lookup('id', [2]) == null
 		&& nav.cell_input_val(0, 1) == 'x3', 'ack: wrong rows')
 
-	// an error leaves the row modified and invalid.
+	// an error leaves the row modified and invalid; the next save drops it
+	// and sends the row again.
 	batch = nav.pack_changes()
 	nav.apply_result(batch, {rows: [{error: 'no', field_errors: {a: 'bad'}}]})
-	assert(nav.modified_n == 1 && nav.row_errors[0] && nav.cell_errors[1][0]
-		&& !nav.validate_row(0), 'ack: error lost')
-	nav.revert_changes()
+	assert(nav.modified_n == 1 && nav.row_errors[0] && nav.cell_errors[1][0],
+		'ack: error lost')
+	batch = nav.pack_changes()
+	assert(batch && batch.ris.has(0) && !nav.row_errors[0]
+		&& !nav.cell_errors[1][0], 'ack: rejected row not sent again')
+	nav.apply_result(batch, {rows: [{values: [1, 'x3', 10]}]})
+
+	// a unique key error on a column the user didn't edit: fixing the
+	// edited column clears it.
+	nav.set_cell_val(0, 1, 'x4')
+	batch = nav.pack_changes()
+	nav.apply_result(batch,
+		{rows: [{error: true, field_errors: {a: 'key exists', b: 'key exists'}}]})
+	nav.set_cell_val(0, 1, 'x5')
+	batch = nav.pack_changes()
+	assert(!nav.cell_errors[2][0] && batch?.ris.has(0),
+		'ack: unique key error on an unedited column kept')
+	nav.apply_result(batch, {rows: [{values: [1, 'x5', 10]}]})
 
 	// a new row reverted in flight stays, marked for deletion: the server
 	// inserted it.
@@ -832,6 +848,25 @@ function check_merge_rows() {
 	nav.merge_rows({rows: [[1, 'x', 99]]})
 	assert(nav.visible_i[ri1] == 0xFFFFFFFF,
 		'merge: changed pinned row not placed')
+	nav.free()
+
+	// "key exists" on a new row: the merge that brings the saved row with
+	// that pk clears the error on the cells that match the server.
+	nav = ui.nav('merge_rows_key_exists')
+	nav.load({
+		fields: save_fields,
+		col_vals: [[1, 2, 3], ['a', 'b', 'c'], [10, 20, 30]],
+		pk: 'id',
+	})
+	let [key_ri] = nav.insert_rows([[4, 'n', 7]])
+	nav.apply_result(nav.pack_changes(),
+		{rows: [{error: true, field_errors: {id: 'key exists'}}]})
+	assert(nav.cell_errors[0][key_ri] && nav.is_new(key_ri),
+		'merge: key exists not stored')
+	nav.merge_rows({rows: [[4, 'n', 7]]})
+	assert(!nav.cell_errors[0]?.[key_ri] && !nav.is_new(key_ri)
+		&& nav.modified_n == 0 && nav.validate_row(key_ri),
+		'merge: key exists kept on the saved row')
 	nav.free()
 
 	// the row with the open editor stays in place before the user types.

@@ -669,8 +669,6 @@ function virtual_rowset(init, ...)
 		local res = {rows = {}, fields = rs.client_fields}
 		local self = object(rs)
 		self.param_vals = param_vals -- {name -> val}
-		--rows that the row ops changed besides the sent rows, in field order.
-		self.changed_rows = {}
 
 		for _,row in ipairs(changes.rows) do
 			local rt = {type = row.type}
@@ -725,15 +723,6 @@ function virtual_rowset(init, ...)
 				assert(false)
 			end
 			add(res.rows, rt)
-		end
-
-		if self.changed_rows[1] then
-			if update_computed_fields then
-				for _, row in ipairs(self.changed_rows) do
-					update_computed_fields(row)
-				end
-			end
-			res.changes = {rows = self.changed_rows}
 		end
 
 		return res
@@ -970,14 +959,21 @@ end)
 
 --reload push-notifications --------------------------------------------------
 
-local waiting_events_threads = {}
-local changed_rowsets = {} --{req->{rowset->'txn_id1 ...'}}
+local waiting_events_threads = {} --{thread -> true}
+local changed_rowsets = {} --{events_req->{rowset->true}}
+local last_txn_id = {} --{events_req->txn_id}; last txn_id pushed to events_req
+
+local function add_changed_rowsets(req, rowsets, txn_id)
+	local rt = changed_rowsets[req]
+	for rowset_name in pairs(rowsets) do
+		rt[rowset_name] = true
+	end
+	last_txn_id[req] = txn_id
+end
 
 function push_rowset_changed_events(rowsets, txn_id)
-	for rowset_name in pairs(rowsets) do
-		for _, rt in pairs(changed_rowsets) do
-			rt[rowset_name] = catany(' ', rt[rowset_name], txn_id)
-		end
+	for req in pairs(changed_rowsets) do
+		add_changed_rowsets(req, rowsets, txn_id)
 	end
 	for thread in pairs(waiting_events_threads) do
 		resume(thread)
@@ -994,6 +990,7 @@ action['rowset.events'] = function()
 	changed_rowsets[req] = rowsets
 	local function resume_waiting_thread()
 		changed_rowsets[req] = nil
+		last_txn_id[req] = nil
 		if waiting_thread then
 			return resume(waiting_thread, 'closed')
 		end
@@ -1002,6 +999,13 @@ action['rowset.events'] = function()
 	http_request():onfinish(resume_waiting_thread)
 	--when we close the socket from another thread...
 	http_request().tcp:onclose(resume_waiting_thread)
+	--browser sends last-event-id header when it reconnects an EventSource,
+	--which is the last txn_id received because we send txn_id as event-id.
+	--push the rowsets that changed since.
+	local last_event_id = tonumber(headers'last-event-id')
+	if last_event_id then
+		add_changed_rowsets(req, changed_rowsets_since(db(), last_event_id))
+	end
 	while true do
 		if isempty(rowsets) then
 			local thread = currentthread()
@@ -1015,10 +1019,13 @@ action['rowset.events'] = function()
 			end
 		end
 		local t = {}
-		for rowset_name, txn_ids in pairs(rowsets) do
-			t[#t+1] = 'data: '..rowset_name..' '..txn_ids..'\n\n'
+		local id = last_txn_id[req]
+		t[#t+1] = 'id: '..id..'\n'
+		for rowset_name in pairs(rowsets) do
+			t[#t+1] = 'data: '..rowset_name..'\n'
 			rowsets[rowset_name] = nil
 		end
+		t[#t+1] = '\n'
 		local events = concat(t)
 		assert(not out_buffering())
 		out(events)

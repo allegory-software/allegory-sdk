@@ -2165,6 +2165,15 @@ function init(id, e) {
 				e.set_cell_val(edit_ri, edit_field.fi, value, {input: e})
 		}
 
+		if (e.load_error || e.needs_reload) {
+			e.exit_edit()
+			row_form = null
+			want_menu = false
+			if (ui.state_of(menu_id, 'open'))
+				ui.set_menu_open(menu_id, false)
+			return
+		}
+
 		/// filter bar
 
 		update_filter_bar()
@@ -2628,7 +2637,14 @@ function init(id, e) {
 			let text = errors.length ? errors.join('\n')
 				: S('loading', 'loading...')
 			ui.stack(id, fr, align, valign)
-				ui.text('', text, 0, 'c', 'c', null, 'line')
+				ui.v(0, ui.sp2(), 'c', 'c')
+					ui.text('', text, 0, 'c', 'c', null, 'line')
+					if (errors.length) {
+						let reload_text = S('reload', 'Reload')
+						if (ui.button(id+'.reload', 'reload', reload_text, 0, 'c'))
+							e.reload()
+					}
+				ui.end_v()
 			ui.end_stack()
 			return
 		}
@@ -2763,6 +2779,23 @@ function init(id, e) {
 
 		ui.end_hv()
 		ui.end_v()
+
+		/// smoke screen: a failed request or rows that need a reload
+
+		if (e.load_error || e.needs_reload) {
+			let smoke_id = id+'.smoke'
+			if (ui.clicked(smoke_id))
+				e.reload()
+			let text = e.load_error
+				? e.load_error+'\n'+S('click_to_reload', 'Click to reload.')
+				: S('rows_changed_reload',
+					'The rows changed on the server. Click to reload.')
+			ui.stack(smoke_id, 1, 's', 's')
+				ui.bb('smoke')
+				ui.text('', text, 0, 'c', 'c', null, 'line')
+			ui.end_stack()
+		}
+
 		ui.end_stack()
 
 		build_row_form(grid_i)

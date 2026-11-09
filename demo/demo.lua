@@ -34,6 +34,7 @@ do
 		'normal', 'slow save', 'slow response',
 		'disconnect before save', 'disconnect after save',
 		'reject row', 'delete existing row', 'hold save',
+		'fail before save', 'fail after save',
 	}
 	--slow or drop a save as asked by the test_action of a saved row. 'delete
 	--existing row' deletes the row other_key in another transaction first.
@@ -55,6 +56,7 @@ do
 		function rs:exec_save(params, post)
 			local has_slow_save, has_slow_response, has_hold_save
 			local has_disconnect_before, has_disconnect_after
+			local has_fail_before, has_fail_after
 			for _, row in ipairs(post.changes.rows) do
 				local action = row.values.test_action
 				has_hold_save = has_hold_save or action == 'hold save'
@@ -65,6 +67,10 @@ do
 					or action == 'disconnect before save'
 				has_disconnect_after = has_disconnect_after
 					or action == 'disconnect after save'
+				has_fail_before = has_fail_before
+					or action == 'fail before save'
+				has_fail_after = has_fail_after
+					or action == 'fail after save'
 				if action == 'delete existing row' then
 					db():atomic('w', function()
 						db():del(tbl, other_key)
@@ -86,12 +92,14 @@ do
 				http_request().tcp:close()
 				http_error(503)
 			end
+			if has_fail_before then http_error(503) end
 			local res = exec_save(self, params, post)
 			if has_slow_response then wait(5) end
 			if has_disconnect_after then
 				http_request().tcp:close()
 				http_error(503)
 			end
+			if has_fail_after then http_error(503) end
 			return res
 		end
 	end

@@ -7,6 +7,7 @@ API
 	scan_rowset       (opt) -> rs     rowset over a table scan
 	prepare_rowsets   ()              prepare all rowsets (validates schema)
 	watch_row_changes (db)            push changed rowsets to events clients
+	changed_rowsets_since(db, txn_id) -> {rowset_name->true}, txn_id
 
 	rowset.lookup_TABLE               lookup rowset, created on first access
 	rowset.table_TABLE                full table rowset, created on first access
@@ -458,31 +459,39 @@ end
 
 --ROW CHANGE PUSH ------------------------------------------------------------
 
+-- -> {rowset_name -> true}, txn_id of the read txn
+function changed_rowsets_since(db, since_txn_id)
+	local tables = attr(table_rowset_deps, db) -- {table -> rowset_names}
+	local rowset_names = {} -- {rowset_name -> true}
+	local read_txn_id -- txn_id of the read txn
+	db:atomic('r', function()
+		for txn_id, batch, gap in db:read_changes(since_txn_id) do
+			--gap: the changed tables are unknown, push every rowset.
+			if gap then
+				for _, names in pairs(tables) do
+					update(rowset_names, names)
+				end
+				break
+			end
+			for tbl in db:each_row_change(batch, tables) do
+				update(rowset_names, tables[tbl])
+			end
+		end
+		read_txn_id = db:txn_id()
+	end)
+	return rowset_names, read_txn_id
+end
+
 --the db owns the thread, so db:close() cancels the thread's wait.
 function watch_row_changes(db)
-	local tables = attr(table_rowset_deps, db) -- {table -> rowset_names}
 	local th = thread(function()
 		local f = inotify() -- woken by each commit, from any process
 		f:add_watch(db.file..'.changes', IN_MODIFY)
 		local since_txn_id = db:atomic('r', db.txn_id, db) -- last read txn
 		while true do
 			f:read_event()
-			local rowset_names = {} -- {rowset_name -> true}
-			db:atomic('r', function()
-				for txn_id, batch, gap in db:read_changes(since_txn_id) do
-					--gap: the changed tables are unknown, push every rowset.
-					if gap then
-						for _, names in pairs(tables) do
-							update(rowset_names, names)
-						end
-						break
-					end
-					for tbl in db:each_row_change(batch, tables) do
-						update(rowset_names, tables[tbl])
-					end
-				end
-				since_txn_id = db:txn_id()
-			end)
+			local rowset_names -- {rowset_name -> true}
+			rowset_names, since_txn_id = changed_rowsets_since(db, since_txn_id)
 			if next(rowset_names) then
 				push_rowset_changed_events(rowset_names, since_txn_id)
 			end

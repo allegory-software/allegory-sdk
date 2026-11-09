@@ -353,6 +353,9 @@ MOVE k ROWS TO i
 
 SERVER OPS -------------------------------------------------------------------
 
+Type of requests: load, load_changed_rows, reserve_ids, save, action. Only one
+live request at a time. No queue, just a pending latch per request type.
+
 LOAD
 	- copy cell values from rowset into storage via field.col_storage.load_col().
 	- set base_ris to 0..n-1 and sort it by pos_col if any.
@@ -360,21 +363,18 @@ LOAD
 	- run stages 3-5.
 
 SAVE
-	- Send requests to rowset_name one at a time; queue another save until the
-	  current request is acknowledged.
-	- With an auto_increment pk, reserve ids for new rows without ids before
-	  saving.
-	- Scan tree_ris forward for new and edited rows, then backward for rows
+	- reserve ids for autoinc pks before saving new rows to avoid duplicate
+	  inserts on retries after network failures.
+	- scan tree_ris forward for new and edited rows, then backward for rows
 	  marked for deletion; skip group rows, no_save rows, rows awaiting a save
 	  reply and rows failing validation, except rows marked for deletion.
-	- Send new rows without unset cells, modified rows with pk:old and modified_mask
-	  cells, and removed rows with pk:old. Parents go before children, except
-	  for deletes, where children go before parents.
-	- Wait for the server's reply before finishing the batch. Keep rows modified
-	  if the request fails.
-	- When the request fails, the server may have saved the batch anyway: reload
-	  before the next save, so that the reload finds the rows that the server
-	  inserted.
+	- sends new rows without unset cells, modified rows with pk:old and
+	  modified_mask cells, and removed rows with pk:old.
+	- parents go before children for inserts and updates; children go before
+	  parents for deletes.
+	- keeps edits for retry if the request fails.
+	- re-fetch before saving again after save failure, so that the merge finds
+	  the rows that the server inserted.
 	- O(n); does not run a stage.
 
 SAVE ACK
@@ -384,6 +384,7 @@ SAVE ACK
 	  column values stop counting as edits; clear is_new and unset bits.
 	- Drop a new row marked for deletion while it was in flight if its insert
 	  failed; invalidate indexes for written columns.
+	- drop the new rows marked for deletion that the server doesn't have.
 	- when modified_n reaches 0, drop input_vals and cell_errors arrays.
 	- run stages 3-5 when rows are dropped or pos_col or parent_id changes;
 	  otherwise no stage runs.
@@ -417,9 +418,16 @@ RELOAD ROWSET
 
 RELOAD
 	- load rowset from rowset_name the first time; reload it on later reloads.
-	- wait for the save request to finish before reloading.
-	- reload on server notifications unless all update_ids are from our saves.
+	- wait for the save request and the fetch to finish before reloading.
 	- run the stages needed by load or reload rowset.
+
+LOAD CHANGED ROWS
+	- on a server notification, fetch the rows changed since txn_id and merge
+	  them.
+	- one request at a time: wait for a pending save, load or fetch, and make
+	  the save and the reload wait for the fetch.
+	- if the rowset can't fetch or the server asks for a full reload, set
+	  needs_reload, or reload when settling a failed save.
 
 */
 
@@ -457,9 +465,7 @@ const ROW_NO_REMOVE = 2**8  // row can't be deleted
 const ROW_NO_SAVE   = 2**9  // row is never saved
 const ROW_GROUP     = 2**10 // row is a synthetic group row
 const ROW_PINNED    = 2**11 // row stays where the user left it
-const ROW_CHILDREN_REQUESTED = 2**12 // partial load: row's children requested
 const ROW_CHILDREN_LOADED    = 2**13 // partial load: row's children are loaded
-const ROW_LOAD_RECURSIVE     = 2**14 // partial load: load row's whole subtree
 
 // bit names accepted by set_row_flag()
 let row_config_bits = {
@@ -723,17 +729,17 @@ function can_pick_lookup_val(field, ln) {
 
 //// ROWSET NOTIFICATIONS ----------------------------------------------------
 
-let rowset_listeners = {} // {rowset_name -> Set(fn(update_ids, filter))}
+let rowset_listeners = {} // {rowset_name -> Set(fn())}
 
 // share one connection among all navs. When the server changes a rowset's
-// rows, it sends 'NAME[:FILTER] UPDATE_ID...'.
+// rows, it sends the pending rowset names in one event. On reconnect, it pushes
+// rowsets that changed since the last event that the browser received.
 let listen_rowset_events = memoize(function() {
 	let es = new EventSource('/rowset.events')
 	es.onmessage = function(ev) {
-		let update_ids = words(ev.data)
-		let [rowset_name, filter] = update_ids.shift().split(':')
-		for (let fn of rowset_listeners[rowset_name] ?? [])
-			fn(update_ids, filter)
+		for (let rowset_name of words(ev.data))
+			for (let fn of rowset_listeners[rowset_name] ?? [])
+				fn()
 		ui.animate()
 	}
 })
@@ -1010,17 +1016,17 @@ ui.nav = function(id, opt) {
 	e.loaded = false // rows loaded
 	e.rows_change_no = 0 // increments on loads and merges
 	e.load_error = null // error of the last load, or null
-	let save_req = null // pending id or save request, or null
-	let save_batch = null // pending batch: {rows: [...], ris: [...]}
-	let saving_ris = new Set() // rows of the pending or lost batch
+	let active_req = null // pending id, save, load, fetch or action request
+	let save_batch = null // pending batch: {rows: [...], ris: Set(ri)}
 	let want_save = false // save requested during a pending request
 	let want_reload = false // reload requested during a pending request
-	let own_update_ids = new Set() // ids of this nav's saves
-	let load_req = null // pending load request, or null
-	let children_reqs = new Set() // pending child load requests
-	let action_req = null // pending action request, or null
+	let has_failed_save = false // a save request failed: fetch before saving
+	let txn_id = null // the server's change number of the loaded rows
+	let want_changes = false // fetch requested during a pending request
+	e.needs_reload = false // the changed rows can't be fetched: reload
 
 	e.get_debug_state = function() {
+		let exec = active_req?.upload.exec
 		return {
 			cap: cap,
 			slot_n: slot_n,
@@ -1041,9 +1047,10 @@ ui.nav = function(id, opt) {
 			rowset_cols: rowset_cols,
 			rowset_tree_col: rowset_tree_col,
 			group_field: group_field,
-			is_saving: save_req != null,
-			is_loading: load_req != null,
-			saving_ris: saving_ris,
+			is_saving: exec == 'save' || exec == 'reserve_ids',
+			is_loading: exec == 'load' && !active_req.is_children,
+			is_loading_changes: exec == 'load_changed_rows',
+			save_batch: save_batch,
 		}
 	}
 
@@ -1979,29 +1986,38 @@ ui.nav = function(id, opt) {
 	e.set_collapsed = function(ri, collapsed, recursive) {
 		if (!(e.is_tree || e.is_grouped))
 			return
-		e.exit_edit()
 		// the rows affected, in tree_ris: [i1 .. i2]
 		let i1 = ri == null ? 0 : e.tree_i[ri]
 		let i2 = ri == null ? e.tree_n - 1 : i1 + e.desc_count[ri]
+		let last_i = ri != null && !recursive ? i1 : i2 // last row to change
+		let parent_ids
+		if (!collapsed && e.partial_load && e.is_tree) {
+			for (let i = i1; i <= last_i; i++) {
+				let ri1 = e.tree_ris[i]
+				if (!(ri != null || recursive || e.depth[ri1] == 0))
+					continue
+				if (!has_unloaded_children(ri1))
+					continue
+				if (active_req)
+					return
+				parent_ids ??= []
+				parent_ids.push(col_val(ri1, e.id_field.fi))
+				if (recursive)
+					i += e.desc_count[ri1]
+			}
+		}
+		e.exit_edit()
 		let has_modified_desc = collapsed && e.modified_n
 			? modified_desc_rows(i1, i2) : null
-		let last_i = ri != null && !recursive ? i1 : i2 // last row to change
-		let row_flags = e.row_flags
 		for (let i = i1; i <= last_i; i++) {
 			let ri1 = e.tree_ris[i]
 			if ((ri != null || recursive || e.depth[ri1] == 0)
-				&& !has_modified_desc?.[ri1]) {
+				&& !has_modified_desc?.[ri1])
 				set_row_collapsed(ri1, collapsed)
-				if (e.is_tree)
-					set_bits(row_flags, ri1, ROW_LOAD_RECURSIVE,
-						!collapsed && recursive && has_unloaded_children(ri1))
-			}
 		}
 		update_visible_ris(true)
-		// a failed save left rows in saving_ris: reload to settle them.
-		if (!collapsed && load_children(i1, last_i)
-			&& saving_ris.size && !save_req && !load_req)
-			e.reload()
+		if (parent_ids)
+			send_children_req(parent_ids, !!recursive)
 	}
 
 	// show a tree nav's rows as a flat list.
@@ -2010,7 +2026,6 @@ ui.nav = function(id, opt) {
 		e.flat = flat // flat view of a tree nav
 		update_is_tree()
 		update_tree_and_visible_ris()
-		load_children()
 	}
 
 	/// sorting ---------------------------------------------------------------
@@ -2469,11 +2484,6 @@ ui.nav = function(id, opt) {
 			delete params[name]
 		}
 		return params
-	}
-
-	// -> the params url arg: server param values as {name: [val, ...]}.
-	function params_url_arg() {
-		return json(server_param_vals(param_vals))
 	}
 
 	// gathers param vals from bound param sources (master navs and param inputs)
@@ -3035,7 +3045,6 @@ ui.nav = function(id, opt) {
 		update_visible_fields()
 		update_is_tree()
 		update_tree_and_visible_ris()
-		load_children()
 		return true
 	}
 
@@ -3154,12 +3163,25 @@ ui.nav = function(id, opt) {
 
 	// return true if the row and its cells are valid.
 	e.validate_row = function(ri) {
+		// remove server errors so that the next save can send the row again
+		// since it won't send it if it has errors.
+		// one case this covers: the server puts uk errors on every col of the
+		// uk: if we would let errors in, user would have to change all columns
+		// before being able to save again.
+		e.row_errors[ri] = undefined
 		if (e.row_flags[ri] & ROW_NEW)
 			for (let field of e.all_fields) {
 				let fi = field.fi
 				let v = e.cell_input_val(ri, fi)
 				let errors = v === undefined && field.has_server_default
 					? null : validate_cell(field, v)
+				set_cell_errors(ri, fi, errors)
+			}
+		else
+			for (let field of e.all_fields) {
+				let fi = field.fi
+				let errors = cell_bit(e.modified_mask, ri, fi)
+					? validate_cell(field, e.input_vals[fi][ri]) : null
 				set_cell_errors(ri, fi, errors)
 			}
 		update_invalid(ri)
@@ -3285,7 +3307,7 @@ ui.nav = function(id, opt) {
 	}
 
 	// drop a new row, or restore the server values of a saved row.
-	// a new row in the pending or lost batch is marked for deletion, not dropped.
+	// mark a new row while its save is pending or a failed save is unresolved.
 	e.revert_row = function(ri) {
 		e.exit_edit()
 		if (e.row_flags[ri] & ROW_NEW) {
@@ -3302,7 +3324,7 @@ ui.nav = function(id, opt) {
 	}
 
 	// drop new rows, unmark rows marked for deletion, and revert edited cells.
-	// new rows in the pending or lost batch are marked for deletion, not dropped.
+	// mark new rows while their save is pending or a failed save is unresolved.
 	e.revert_changes = function() {
 		e.exit_edit()
 		let new_ris = [] // new rows, dropped in one pass at the end
@@ -3330,7 +3352,7 @@ ui.nav = function(id, opt) {
 		if (new_ris.length || moved_ris.length)
 			update_tree_and_visible_ris()
 
-		// marked rows of the pending or lost batch keep their edits.
+		// marked new rows keep their edits.
 		if (!e.modified_n) {
 			e.input_vals = [] // edited values by fi, then ri
 			e.cell_errors = [] // cell errors by fi, then ri
@@ -3588,9 +3610,9 @@ ui.nav = function(id, opt) {
 	}
 
 	function free_slot(ri) {
-		// a row of the pending or lost batch is never dropped: the server may
+		// a row of the pending batch is never dropped: the server may
 		// have saved it.
-		assert(!saving_ris.has(ri))
+		assert(!save_batch?.ris.has(ri))
 
 		// Subtract the row from modified_n if modified. Clear its state before
 		// reusing the slot.
@@ -3964,8 +3986,8 @@ ui.nav = function(id, opt) {
 	}
 
 	// Mark a saved row for deletion, or collect a new row in new_ris to drop
-	// it. Mark a new row of the pending or lost batch too, since the server
-	// may have inserted it. Leave group rows unmarked because they are not
+	// it. Mark new rows while their save is pending or a failed save is
+	// unresolved. Leave group rows unmarked because they are not
 	// records. Return false if is_input is set and the row has no_remove.
 	function mark_removed(ri, new_ris, is_input) {
 		let flags = e.row_flags[ri]
@@ -3973,7 +3995,7 @@ ui.nav = function(id, opt) {
 			return false
 		if (flags & ROW_GROUP)
 			return true
-		if (flags & ROW_NEW && !saving_ris.has(ri)) {
+		if (flags & ROW_NEW && !save_batch?.ris.has(ri) && !has_failed_save) {
 			new_ris.push(ri)
 		} else {
 			let was_modified = is_row_modified(ri)
@@ -4039,11 +4061,11 @@ ui.nav = function(id, opt) {
 	}
 
 	// With op 'delete' (the default), mark rows for deletion and drop new
-	// rows, except new rows of the pending or lost batch. In tree or grouped
-	// view, include their descendants. With 'undelete', clear the marks. With
-	// ev.input, refuse deletion if policy demands it, and keep rows with
-	// no_remove. With ev.refocus, if the focused row was dropped, focus the
-	// row now at the first dropped row's position.
+	// rows, except while their save is pending or a failed save is unresolved.
+	// In tree or grouped view, include their descendants. With 'undelete',
+	// clear the marks. With ev.input, refuse deletion if policy demands it,
+	// and keep rows with no_remove. With ev.refocus, if the focused row was
+	// dropped, focus the row now at the first dropped row's position.
 	e.remove_rows = function(ris, op, ev) {
 		let has_parents = e.is_tree || e.is_grouped
 		if (op == 'undelete') {
@@ -4152,12 +4174,11 @@ ui.nav = function(id, opt) {
 		let t = pack_row(ri)
 		if (!t)
 			return
-		saving_ris.add(ri)
 		batch.rows.push(t)
-		batch.ris.push(ri)
+		batch.ris.add(ri)
 	}
 
-	// Return {rows: [...], ris: [...]} in rowset.lua's save format, or null if
+	// Return {rows: [...], ris: Set(ri)} in rowset.lua's save format, or null if
 	// no row is ready. Walk tree_ris forward for new and edited rows, so that
 	// parents go before children, then backward for rows marked for
 	// deletion, so that children go before parents. Send the edits first:
@@ -4167,14 +4188,14 @@ ui.nav = function(id, opt) {
 	// batch at a time.
 	e.pack_changes = function() {
 		assert(!save_batch)
-		let batch = {rows: [], ris: []}
+		let batch = {rows: [], ris: new Set()}
 		for (let i = 0; i < e.tree_n; i++)
 			if (!(e.row_flags[e.tree_ris[i]] & ROW_REMOVED))
 				add_batch_row(batch, e.tree_ris[i])
 		for (let i = e.tree_n - 1; i >= 0; i--)
 			if (e.row_flags[e.tree_ris[i]] & ROW_REMOVED)
 				add_batch_row(batch, e.tree_ris[i])
-		if (!batch.ris.length)
+		if (!batch.ris.size)
 			return null
 		save_batch = batch
 		return batch
@@ -4184,7 +4205,6 @@ ui.nav = function(id, opt) {
 	// the next save.
 	function end_save() {
 		save_batch = null
-		saving_ris.clear()
 	}
 
 	// Return the values sent in t, indexed by fi. Leave unsent cells
@@ -4309,7 +4329,7 @@ ui.nav = function(id, opt) {
 		return drop_ris.length > 0 || moved_ris.length > 0
 	}
 
-	// Apply rowset.lua's reply, with one result per sent row.
+	// Apply rowset update result, with one result per sent row.
 	e.apply_result = function(batch, result) {
 		let set_ris = [] // rows the server saved
 		let vals_list = [] // their server values, by fi
@@ -4317,16 +4337,15 @@ ui.nav = function(id, opt) {
 
 		// For each sent row, store its errors, or collect it to remove or to
 		// mark saved.
-		for (let k = 0; k < batch.ris.length; k++) {
-			let ri = batch.ris[k]
+		let k = 0 // index of the sent row and its result
+		for (let ri of batch.ris) {
 			let rt = result.rows[k]
 			if (rt.remove) {
 				drop_ris.push(ri)
 			} else if (rt.error || rt.field_errors) {
 				// new row marked for deletion while in flight, insert failed:
 				// the server never had it.
-				if ((e.row_flags[ri] & (ROW_NEW | ROW_REMOVED))
-					== (ROW_NEW | ROW_REMOVED))
+				if ((e.row_flags[ri] & (ROW_NEW | ROW_REMOVED)) == (ROW_NEW | ROW_REMOVED))
 					drop_ris.push(ri)
 				else
 					set_server_errors(ri, rt)
@@ -4335,16 +4354,13 @@ ui.nav = function(id, opt) {
 				set_ris.push(ri)
 				vals_list.push(rt.values ?? sent_vals(batch.rows[k]))
 			}
+			k++
 		}
 
 		// end the batch before dropping rows: free_slot() refuses a row of
 		// the batch.
 		end_save()
-		let is_placed = apply_server_rows(set_ris, vals_list, drop_ris)
-		// rows that the save changed besides the sent rows.
-		if (result.changes && merge_server_rows(result.changes))
-			is_placed = true
-		if (is_placed)
+		if (apply_server_rows(set_ris, vals_list, drop_ris))
 			update_tree_and_visible_ris(false)
 	}
 
@@ -4372,56 +4388,80 @@ ui.nav = function(id, opt) {
 
 		// ask the server for that many ids; on success, write them and save
 		// again.
-		save_req = ajax({
-			url: rowset_url(),
-			upload: {
-				exec: 'reserve_ids', n: new_ris.length,
-				params: server_param_vals(param_vals),
-			},
-			success: function(res) {
-				if (this != save_req)
-					return
-				for (let i = 0; i < new_ris.length; i++) {
-					let ri = new_ris[i]
-					// The nav may have dropped this row and reused its slot since
-					// requesting ids.
-					if (e.row_flags[ri] & ROW_NEW && e.cell_input_val(ri, pk_fi) == null)
-						write_cell(ri, pk_fi, res.ids[i])
-				}
-				want_save = true
-			},
-			done: end_request,
+		send_request({
+			exec: 'reserve_ids', n: new_ris.length,
+			params: server_param_vals(param_vals),
+		}, function(res) {
+			for (let i = 0; i < new_ris.length; i++) {
+				let ri = new_ris[i]
+				// The nav may have dropped this row and reused its slot since
+				// requesting ids.
+				if (e.row_flags[ri] & ROW_NEW && e.cell_input_val(ri, pk_fi) == null)
+					write_cell(ri, pk_fi, res.ids[i])
+			}
+			want_save = true
 		})
 		return true
 	}
 
-	// Finish the request whether it succeeded or failed. Keep unsaved changes
-	// after a failure. Then run any waiting reload or save.
-	function end_request(status) {
-		// Ignore a request canceled by load() or free().
-		if (this != save_req)
-			return
-		save_req = null
-		// failed save: the server may have saved it anyway. keep its rows in
-		// saving_ris until a reload settles what the server has.
-		if (status == 'fail' && save_batch) {
-			save_batch = null
-		} else {
-			end_save()
-		}
+	// Run the reload, fetch and save that waited for a request to end. A
+	// failed load or fetch drops the save that waited for it: the user saves
+	// again.
+	function run_waiting_requests(status) {
+		if (status == 'fail')
+			want_save = false
 		if (want_reload) {
 			want_reload = false
 			e.reload()
+		}
+		if (want_changes) {
+			want_changes = false
+			load_changed_rows()
 		}
 		if (want_save) {
 			want_save = false
 			e.save()
 		}
-		// a failed save left rows in saving_ris: reload to settle them before
-		// loading children.
-		if (load_children() && saving_ris.size && !save_req && !load_req)
-			e.reload()
-		ui.animate()
+	}
+
+	// Finish the request whether it succeeded or failed. Keep unsaved changes
+	// after a failure. Then run any waiting reload, fetch or save.
+	function send_request(upload, on_success, is_children) {
+		assert(!active_req)
+		active_req = ajax({
+			url: rowset_url(),
+			upload: upload,
+			is_children: !!is_children,
+			done: function(status, res) {
+				// Ignore a request canceled by load() or free().
+				if (this != active_req)
+					return
+				active_req = null
+				let exec = this.upload.exec
+				let is_read = exec == 'load' || exec == 'load_changed_rows'
+				let is_rowset_read = is_read && !this.is_children
+				if (status == 'success')
+					on_success(res)
+				else if (is_rowset_read)
+					e.load_error = res
+				if (!is_read) {
+					// failed save: the server may have saved it anyway. fetch the
+					// changes before the next save.
+					if (status == 'fail' && save_batch)
+						has_failed_save = true
+					end_save()
+				}
+				run_waiting_requests(is_rowset_read ? status : undefined)
+				ui.animate()
+			},
+		})
+	}
+
+	function cancel_request(abort) {
+		let req = active_req
+		active_req = null
+		if (abort)
+			req?.abort()
 	}
 
 	// Send modified rows to their server rowset, one request at a time. Defer
@@ -4443,18 +4483,17 @@ ui.nav = function(id, opt) {
 		}
 
 		assert(e.rowset_name, 'save: rowset_name required')
-		if (save_req) {
+		if (active_req) {
 			want_save = true
 			return
 		}
 
-		// rows of a failed save left in saving_ris: reload first, so that the
-		// reload finds the rows that the server inserted and the nav doesn't
-		// send them again.
-		if (saving_ris.size) {
+		// a save request failed: fetch the changes first, so that the merge
+		// finds the rows that the server inserted and the nav doesn't send
+		// them again.
+		if (has_failed_save) {
 			want_save = true
-			if (!load_req)
-				e.reload()
+			load_changed_rows()
 			return
 		}
 		if (e.pk_fields[0].auto_increment && reserve_ids())
@@ -4463,52 +4502,35 @@ ui.nav = function(id, opt) {
 		if (!batch)
 			return
 
-		// Assign a save id so that rowset_changed() can ignore the server
-		// notification for this save.
-		let update_id = floor(Math.random() * 2**52).toString(36)
-		own_update_ids.add(update_id)
-		save_req = ajax({
-			url: rowset_url(),
-			upload: {
-				exec: 'save',
-				params: server_param_vals(param_vals),
-				changes: {rows: batch.rows},
-				update_id: update_id,
-			},
-			success: function(result) {
-				if (this == save_req)
-					e.apply_result(batch, result)
-			},
-			done: end_request,
+		send_request({
+			exec: 'save',
+			params: server_param_vals(param_vals),
+			changes: {rows: batch.rows},
+		}, function(result) {
+			e.apply_result(batch, result)
 		})
 	}
 
 	/// actions ---------------------------------------------------------------
 
 	e.exec_action = function(action) {
+		if (active_req)
+			return
 		let pks = [] // [[v1, ...], ...]: focused row first, then the others
 		for (let ri of e.selected_server_ris())
 			pks.push(row_pk(ri))
-		action_req = ajax({
-			url: rowset_url(),
-			upload: {
-				exec: 'action', action: action.name,
-				params: server_param_vals(param_vals),
-				pks: pks,
-			},
-			success: function() {
-				if (action.reload && this == action_req)
-					e.reload()
-			},
-			done: function() {
-				if (this == action_req)
-					action_req = null
-			},
+		send_request({
+			exec: 'action', action: action.name,
+			params: server_param_vals(param_vals),
+			pks: pks,
+		}, function() {
+			if (action.reload)
+				want_reload = true
 		})
 	}
 
 	e.has_pending_request = function() {
-		return save_req != null || load_req != null || action_req != null
+		return active_req != null
 	}
 
 	/// merging ---------------------------------------------------------------
@@ -4638,7 +4660,7 @@ ui.nav = function(id, opt) {
 	// set, in order.
 	// -> true if rows were placed: the caller must run stages 3-5.
 	function merge_server_rows(change_set, row_ris) {
-		assert(!saving_ris.size, 'merge_rows: a save batch is pending or lost')
+		assert(!save_batch, 'merge_rows: a save batch is pending')
 		e.rows_change_no = ++rows_change_counter
 		let rows = change_set.rows ?? []
 		let removed_pks = change_set.removed_pks ?? []
@@ -4687,10 +4709,13 @@ ui.nav = function(id, opt) {
 						if (v === undefined)
 							continue
 						set_input_val(ri, fi, v)
-						if (cell_bit(e.modified_mask, ri, fi)) {
-							let errors = validate_cell(e.all_fields[fi], v)
-							set_cell_errors(ri, fi, errors)
-						}
+						// Chrome can send a save POST twice without telling us: the
+						// server inserts the row on the first and answers the second
+						// with "key exists" on the pk. Clear it here, where the row
+						// becomes the saved row.
+						let errors = cell_bit(e.modified_mask, ri, fi)
+							? validate_cell(e.all_fields[fi], v) : null
+						set_cell_errors(ri, fi, errors)
 					}
 				update_invalid(ri)
 				let is_pass = !row_filter || row_filter(ri)
@@ -4737,8 +4762,6 @@ ui.nav = function(id, opt) {
 			e.input_vals = [] // edited values by fi, then ri
 			e.cell_errors = [] // cell errors by fi, then ri
 		}
-		if (change_set.can_load_changed_rows != null)
-			e.can_load_changed_rows = change_set.can_load_changed_rows
 		return is_placed
 	}
 
@@ -4751,10 +4774,12 @@ ui.nav = function(id, opt) {
 
 	// Load the rowset again with reload_rowset(), which uses load() the
 	// first time. Wait for a pending save to finish before reloading, because
-	// the server may not have saved those values yet.
+	// the server may not have saved those values yet, and for a pending
+	// fetch, so that its rows don't arrive after the reload.
 	e.reload = function() {
 		assert(e.rowset_name, 'reload: rowset_name required')
-		if (save_req) {
+		if (active_req && (active_req.upload.exec != 'load'
+			|| active_req.is_children)) {
 			want_reload = true
 			return
 		}
@@ -4774,68 +4799,79 @@ ui.nav = function(id, opt) {
 				load_param_vals = assign(obj(), load_param_vals,
 					{[parent_param]: parent_ids})
 			}
-			load_req?.abort()
-			load_req = ajax({
-				url: rowset_url(),
-				upload: {
-					exec: 'load',
-					params: load_param_vals,
-					recursive: !e.partial_load,
-				},
-				success: function(rs) {
-					if (this != load_req)
-						return
-					let params0 = e.params // param defs before the reply
-					e.load_error = null
-					e.loaded = true
-					e.reload_rowset(rs)
-					// the reload settled the failed save: run the save that waited.
-					if (want_save) {
-						want_save = false
-						e.save()
-					}
-					// new param defs may change the lists: read them again on the
-					// next frame.
-					if (e.params != params0)
-						param_source_vals = obj()
-				},
-				fail: function(err) {
-					e.load_error = err
-				},
-				done: function() {
-					if (this == load_req) {
-						load_req = null
-						load_children()
-						ui.animate()
-					}
-				},
+			cancel_request(true)
+			send_request({
+				exec: 'load',
+				params: load_param_vals,
+				recursive: !e.partial_load,
+			}, function(rs) {
+				let params0 = e.params // param defs before the reply
+				e.load_error = null
+				e.loaded = true
+				e.reload_rowset(rs)
+				// new param defs may change the lists: read them again on the
+				// next frame.
+				if (e.params != params0)
+					param_source_vals = obj()
 			})
 		}
 	}
 
-	// Reload for server notifications, except those from this nav's own saves
-	// and those for a load filtered by other params.
-	function rowset_changed(update_ids, filter) {
-		let is_own = true
-		for (let update_id of update_ids)
-			if (!own_update_ids.delete(update_id))
-				is_own = false
-		if (!is_own && (filter == null || filter == params_url_arg()))
-			e.reload()
+	function load_changed_rows() {
+		if (active_req) {
+			want_changes = true
+			return
+		}
+		if (!e.can_load_changed_rows) {
+			if (has_failed_save)
+				e.reload()
+			else
+				e.needs_reload = true
+			return
+		}
+		send_request({
+			exec: 'load_changed_rows',
+			params: server_param_vals(param_vals),
+			since_txn_id: txn_id,
+		}, function(res) {
+			e.load_error = null
+			e.can_load_changed_rows = res.can_load_changed_rows ?? false
+			if (res.reload) {
+				if (has_failed_save)
+					want_reload = true
+				else
+					e.needs_reload = true
+				return
+			}
+			let is_placed = merge_server_rows(res)
+			if (has_failed_save) {
+				has_failed_save = false
+				// drop new rows marked for deletion.
+				let drop_ris = []
+				for (let i = 0; i < e.row_n; i++) {
+					let ri = e.base_ris[i]
+					if ((e.row_flags[ri] & (ROW_NEW | ROW_REMOVED)) == (ROW_NEW | ROW_REMOVED))
+						drop_ris.push(ri)
+				}
+				if (drop_ris.length) {
+					drop_rows(drop_ris)
+					is_placed = true
+				}
+			}
+			txn_id = res.txn_id
+			if (is_placed)
+				update_tree_and_visible_ris(false)
+		})
 	}
 
 	// Stop listening for server notifications, abort loading, and ignore
-	// replies to pending saves.
+	// replies to pending writes.
 	e.free = function() {
 		for (let field of e.all_fields)
 			free_field_lookup_nav(field)
-		rowset_listeners[e.rowset_name]?.delete(rowset_changed)
-		load_req?.abort()
-		load_req = null
-		save_req = null
-		abort_children_reqs()
-		action_req?.abort()
-		action_req = null
+		rowset_listeners[e.rowset_name]?.delete(load_changed_rows)
+		let exec = active_req?.upload.exec
+		cancel_request(exec == 'load' || exec == 'load_changed_rows')
 		if (can_be_master) {
 			remove_value(rowset_navs[e.rowset_name], e)
 			ui.rebuild('nav_removed')
@@ -4945,13 +4981,11 @@ ui.nav = function(id, opt) {
 		}
 	}
 
-	// Copy the collapsed, children loaded, children requested and load
-	// recursive flags from the rows before the reload to the rows with the
+	// Copy the collapsed and children loaded flags to the rows with the
 	// same pk. Both lists are sorted by pk, so walk them together. A tree's
 	// pk is one column. Skip null pks: they don't say which row is which.
 	function restore_tree_flags(old_rows) {
 		let tree_bits = ROW_COLLAPSED | ROW_CHILDREN_LOADED
-			| ROW_CHILDREN_REQUESTED | ROW_LOAD_RECURSIVE
 		let pk_field = e.pk_fields[0]
 		let storage = pk_field.col_storage
 		let pk_vals = e.col_vals[pk_field.fi]
@@ -5002,6 +5036,7 @@ ui.nav = function(id, opt) {
 		}
 		rowset_tree_col = rs.tree_col
 		e.can_load_changed_rows = rs.can_load_changed_rows ?? false
+		txn_id = rs.txn_id ?? null
 		load_rows(src_col_vals, edit_state, old_rows)
 	}
 
@@ -5015,100 +5050,17 @@ ui.nav = function(id, opt) {
 			&& !!col_val(ri, e.has_children_field.fi)
 	}
 
-	// Load the children of the expanded rows whose children are not loaded
-	// or requested, or their whole subtrees for rows expanded recursively.
-	// Wait for a pending save or load, because merge_rows() cannot merge
-	// during a save and a load replaces the rows. Wait outside tree view,
-	// where tree_ris has no subtrees to skip. Look only at the rows in
-	// tree_ris[i1 .. i2].
-	// -> true if rows wait for their children.
-	function load_children(i1 = 0, i2 = e.tree_n - 1) {
-		if (!(e.partial_load && e.can_be_tree && e.is_tree))
-			return false
-		let ris = [] // rows to load the children of
-		let recursive_ris = [] // rows to load the subtrees of
-		let row_flags = e.row_flags
-		for (let i = i1; i <= i2; i++) {
-			let ri = e.tree_ris[i]
-			let flags = row_flags[ri]
-			// the subtree comes with a recursive load: a second request for a
-			// row inside it would load that row's subtree twice.
-			if (flags & ROW_CHILDREN_REQUESTED) {
-				if (flags & ROW_LOAD_RECURSIVE)
-					i += e.desc_count[ri]
-			} else if (!(flags & ROW_COLLAPSED) && has_unloaded_children(ri)) {
-				if (flags & ROW_LOAD_RECURSIVE) {
-					recursive_ris.push(ri)
-					i += e.desc_count[ri]
-				} else {
-					ris.push(ri)
-				}
-			}
-		}
-		if (!ris.length && !recursive_ris.length)
-			return false
-		if (save_req || saving_ris.size || load_req)
-			return true
-		if (ris.length)
-			send_children_req(ris, false)
-		if (recursive_ris.length)
-			send_children_req(recursive_ris, true)
-		return true
-	}
-
-	function send_children_req(ris, recursive) {
-		let parent_ids = [] // [id, ...]
-		for (let ri of ris) {
-			e.row_flags[ri] |= ROW_CHILDREN_REQUESTED
-			parent_ids.push(col_val(ri, e.id_field.fi))
-		}
-		let req = ajax({
-			url: rowset_url(),
-			upload: {
-				exec: 'load',
-				params: assign(obj(), param_vals, {[parent_param]: parent_ids}),
-				recursive: recursive,
-			},
-			success: function(rs) {
-				if (!children_reqs.has(this))
-					return
-				// a save or a reload started after the request: load again
-				// after it.
-				if (save_req || saving_ris.size || load_req)
-					clear_children_requested(parent_ids)
-				// fields or params changed on the server: load everything.
-				else if (!is_same_rowset(rs))
-					e.reload()
-				else
-					merge_children(rs.rows, parent_ids, recursive)
-			},
-			done: function(status) {
-				if (!children_reqs.delete(this))
-					return
-				// failed: load again on the next expand, save or reload.
-				if (status == 'fail')
-					clear_children_requested(parent_ids)
-				ui.animate()
-			},
-		})
-		children_reqs.add(req)
-	}
-
-	function clear_children_requested(parent_ids) {
-		for (let id of parent_ids) {
-			let ri = e.lookup(e.id_field.name, [id])
-			if (ri != null)
-				e.row_flags[ri] &= ~ROW_CHILDREN_REQUESTED
-		}
-	}
-
-	// done() ignores the aborted requests: load() replaces row_flags, which
-	// drops their requested flags.
-	function abort_children_reqs() {
-		let reqs = children_reqs // requests to abort
-		children_reqs = new Set()
-		for (let req of reqs)
-			req.abort()
+	function send_children_req(parent_ids, recursive) {
+		send_request({
+			exec: 'load',
+			params: assign(obj(), param_vals, {[parent_param]: parent_ids}),
+			recursive: recursive,
+		}, function(rs) {
+			if (!is_same_rowset(rs))
+				e.reload()
+			else
+				merge_children(rs.rows, parent_ids, recursive)
+		}, true)
 	}
 
 	// Add the loaded rows and mark the parents as loaded. A recursive load
@@ -5120,8 +5072,7 @@ ui.nav = function(id, opt) {
 		for (let id of parent_ids) {
 			let ri = e.lookup(e.id_field.name, [id])
 			if (ri != null)
-				row_flags[ri] = (row_flags[ri] | ROW_CHILDREN_LOADED)
-					& ~(ROW_CHILDREN_REQUESTED | ROW_LOAD_RECURSIVE)
+				row_flags[ri] |= ROW_CHILDREN_LOADED
 		}
 		if (recursive)
 			for (let ri of row_ris)
@@ -5386,6 +5337,7 @@ ui.nav = function(id, opt) {
 		e.rowset_can_change_rows = rs.can_change_rows != false
 		e.rowset_can_move_rows   = rs.can_move_rows   != false
 		e.can_load_changed_rows  = rs.can_load_changed_rows ?? false
+		txn_id = rs.txn_id ?? null
 		e.actions = rs.actions ?? []
 
 		e.mask_word_n = (e.all_fields.length + 31) >>> 5
@@ -5414,14 +5366,14 @@ ui.nav = function(id, opt) {
 		e.group_cols = group_levels.flat()
 		toggled_group_paths.clear()
 
-		// abort/clear any current requests (save or load).
-		let cur_save_req = save_req
-		save_req = null
-		cur_save_req?.abort()
+		// abort/clear any current request.
+		if (active_req) {
+			cancel_request(true)
+			want_save = false
+			want_reload = false
+			want_changes = false
+		}
 		end_save()
-		want_save = false
-		want_reload = false
-		abort_children_reqs()
 
 		load_rows(src_col_vals, null, null)
 		return true
@@ -5485,8 +5437,8 @@ ui.nav = function(id, opt) {
 
 		slot_n = e.row_n
 		free_ris = []
-		// slots of a lost save batch now hold other rows.
-		saving_ris.clear()
+		has_failed_save = false // the replay settled a failed save
+		e.needs_reload = false
 
 		e.is_grouped = false
 		e.group_ris = new Uint32Array(0)
@@ -5563,7 +5515,7 @@ ui.nav = function(id, opt) {
 		})
 		listen_rowset_events()
 		rowset_listeners[e.rowset_name] ??= new Set()
-		rowset_listeners[e.rowset_name].add(rowset_changed)
+		rowset_listeners[e.rowset_name].add(load_changed_rows)
 		reload_with_params(true)
 	}
 

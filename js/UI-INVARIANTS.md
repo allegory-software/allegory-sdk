@@ -459,7 +459,9 @@ has_server_default. The nav skips all field validators for those cells,
 including rules with check_null. The nav stores cell errors and preserves
 the cell values and edit state during validation. The required validator
 accepts null when has_server_default is true and rejects null and undefined
-otherwise. For saved rows, validate_row() uses the stored cell and row errors.
+otherwise. For saved rows, validate_row() validates the edited cells and
+clears the errors of the other cells. For every row, it clears the row
+errors, so the next save sends a row that the server rejected again.
 
 validator.validate(v, 'failed') formats result messages only when at least
 one rule fails. It still parses and validates once and preserves result
@@ -538,8 +540,8 @@ data row as passing the filter. The nav includes no_save rows in both
 operations.
 
 revert_changes() drops new rows, unmarks deleted rows, and reverts edited
-cells, including on no_save rows. It marks a new row of the pending or lost
-save batch for deletion instead of dropping it. The nav clears the edits
+cells, including on no_save rows. It marks a new row of the pending save
+batch for deletion instead of dropping it. The nav clears the edits
 before discarding the input_vals and cell_errors arrays, and discards them
 only when no modified row remains.
 
@@ -581,9 +583,10 @@ may not remove a record, the nav keeps that record's ancestors too.
 remove_rows with op 'undelete' unmarks only marked records, and their
 marked parents too, so that no kept record is left under a deleted parent.
 The nav drops a deleted new row outright, since the server has nothing to
-delete. A new row of the pending save batch, or of a failed batch that no
-reload has settled yet, is the exception: the server may have inserted it,
-so the nav marks it for deletion. The nav sends deletes to the server
+delete. A new row of the pending save batch is the exception: the server
+may be inserting it, so the nav marks it for deletion. After a failed save,
+the next save fetches first and drops the marked new rows that the server
+doesn't have. The nav sends deletes to the server
 children first.
 
 Group rows are not records. Deleting a group row means deleting the rows
