@@ -57,7 +57,10 @@ let nav_n = 0 // navs created, for unique ids
 async function open_nav(rowset_name) {
 	let nav = ui.nav('nav_save_test_'+(++nav_n), {rowset_name: rowset_name})
 	navs.push(nav)
-	await wait_for(() => is_idle(nav), rowset_name+' load')
+	await wait_for(() => {
+		nav.check_dependencies()
+		return is_idle(nav)
+	}, rowset_name+' load')
 	return nav
 }
 

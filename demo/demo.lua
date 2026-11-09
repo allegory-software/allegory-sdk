@@ -309,11 +309,13 @@ action['rtc_signal.events'] = function()
 	http_request().tcp:onclose(close)
 	assert(not out_buffering())
 	out('data: '..json_encode{sid = sid}..'\n\n')
+	out_flush()
 	while true do
 		local signal = remove(signals, 1)
 		if signal then
 			pr('->> signal', signal)
 			out('data: '..json_encode(signal)..'\n\n')
+			out_flush()
 		else
 			state.waiting_thread = currentthread()
 			local action = suspend()

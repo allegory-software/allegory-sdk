@@ -22,6 +22,10 @@ Several users edit the same tables in the browser at the same time. Server
 code changes the data too. Requests and responses get lost on the network.
 Users paste thousands of rows from a spreadsheet, as new records or as
 changes to existing records.
+browser at the same time. Server
+code changes the data too. Requests and responses get lost on the network.
+Users paste thousands of rows from a spreadsheet, as new records or as
+changes to existing records.
 
 P1. Speed. The user edits and saves big tables and huge pastes without
 	waiting. When another user changes one record, the user's browser does
@@ -124,8 +128,12 @@ R4. WHAT THE USER SEES
 	- the insert failed: the record was never saved, so the record goes
 		away.
 	- the answer is lost: the record stays marked for deletion. The next
-		save sends the delete, and a delete of a missing record is not an
-		error (R2).
+		save first fetches the changes: if the insert committed, the record
+		is a saved record marked for deletion, and the save deletes it;
+		otherwise the record was never saved, so the record goes away.
+- If the user deletes a new record after its save failed, the nav drops
+	it, like any new record. If the insert had committed, the fetch before
+	the next save brings the record back as a saved record.
 - If another user changes a field after this user changed it, the field
 	takes the new saved value, and this user's change stays on top of it,
 	pending. The field gets no mark: long edits, such as a multi-line text,
@@ -143,6 +151,11 @@ R4. WHAT THE USER SEES
 - When the server sends a bulk change, such as another user's paste of
 	many records, the nav may put the records with pending changes first
 	instead of in place.
+- Decided, not done: a bulk change is a change set of more than 100 rows.
+	On a bulk change, the nav puts the records with pending changes first,
+	first among their siblings in tree view, since the nav never breaks
+	the tree in tree view. The same threshold unpins the saved records
+	(above).
 
 
 R5. PERFORMANCE
@@ -233,7 +246,27 @@ I1. KEYS AND SAVE
 		reload_row() answers with rt.remove. This works today.
 	reserve_ids() stays tied to the auto-inc pk.
 
-LATER I1b. Errors on rows that the nav drops. When an update finds no
+I1c, decided: a failed save request ends like any failed save: the nav
+forgets the batch, and its rows keep their pending changes. The nav keeps
+no lost batch: rows leave saving_ris when the request ends, whatever the
+outcome. The failure sets a flag, and the next save first fetches the
+changes since the nav's number (I3), or reloads in full when the rowset
+can't fetch. The merge makes a committed new row that saved row, so the
+save sends only the edits made since, and an insert that didn't commit is
+sent again. After that fetch the nav drops the rows that are still new
+and marked for deletion: the user deleted them while their insert was in
+flight, and the insert didn't commit.
+Withdrawn: resending a lost batch as it is, with "key exists" on a resent
+row taken as success. It needed the server to report pk collisions apart
+from unique-key ones, the nav to remember which rows it resends, a delete
+by typed pk for a new row, and lost rows that outlive merges.
+Why not rely on the push alone: a network loss usually drops the events
+connection too, and the user can save before the nav reconnects and
+fetches.
+
+I1b, decided: when an update finds no row, the nav drops the row without
+showing the error, as it does today. The notes below stay for reference.
+Errors on rows that the nav drops. When an update finds no
 row, reload_row() sets rt.remove and the error "Updated record could not
 be loaded back", and the nav drops the row without reading the error. The
 nav can't show a message itself, since it never calls ui functions, so it
@@ -349,15 +382,28 @@ I3. PUSH AND FETCH
 	db owns the loop's thread, so db:close() ends it.
 	tests/rowset_mdbx_test.lua checks that a write by another process
 	reaches the push.
-- Open: since I2, two grid_save tests of run_nav_save_test.mjs fail ("first
-	save reserves ids": child not saved under parent 1; "save deletes
-	children before parents": changes left after save). Not traced: they
-	may come from the nav that saved now reloading after its own save, or
-	have failed before.
+- Done: run_nav_save_test.mjs passes all tests. The runner runs `demo
+	install` on its fresh var dir, with domain = 'localhost' in demo.conf,
+	and the test page calls nav.check_dependencies() while it waits for a
+	load, since only a grid calls it.
+- Done: the event streams (rowset.events, webb_push, the demo's call
+	events) call out_flush() after each event; before, http_server kept
+	the events in its write buffer and sent none.
+- Open: with pushes arriving, three tests of run_nav_save_test.mjs fail:
+	"first save reserves ids", "rejected row keeps its changes" and "lost
+	save response: no second insert". Each nav reloads in full on every
+	push, its own saves and the test's resets included; a reload drops the
+	server errors and settles a lost batch before the test checks it. The
+	nav side of I3 replaces those reloads. Not traced one by one.
 - Not done yet: the nav side: the fetch on a push, applying the answer with
 	e.merge_rows(), and holding fetches while a save is in flight. The nav
 	stores can_load_changed_rows today, and nothing else of the fetch. No UI
 	work for now: the refresh button waits.
+- Decided: a failed fetch shows its error like a failed load does today.
+	The grid needs a reload button on any error.
+- Decided: when a fetch answers reload = true, or the rowset can't answer
+	a fetch, the grid covers itself with a smoke screen, and a click
+	anywhere on it reloads.
 - Between the I2 loop and the nav side of I3: the push carries a txn_id,
 	not the nav's update_id, so the nav's rowset_changed() doesn't
 	recognize its own save, and the nav that saved reloads in full after
@@ -370,7 +416,13 @@ I3. PUSH AND FETCH
 	and moves nothing (I4). If the save answer got lost, the fetch brings
 	the values like any other change.
 - After a lost save answer, the nav fetches the changes since its number
-	before it sends the new rows again (I1, insert).
+	before it sends the new rows again (I1, insert, and I1c).
+- Decided: the server keeps no queue of pushes for a dropped events
+	connection, so each nav fetches the changes since its number every time
+	the shared EventSource connects (its open event), whether or not
+	anything changed. The first open counts too: a nav that loaded before
+	the connection opened may have missed pushes. A nav that hasn't loaded
+	yet skips it. Cost: one fetch per nav per connect.
 - Deleted parents: the db deletes the children (ondelete 'cascade') or
 	sets their parent_id to null ('set null') itself, and I2 records those
 	writes like any other, so the nav needs nothing more.
@@ -391,13 +443,21 @@ I4. ONE APPLY PATH IN THE NAV
 	pending changes before the merge. The check uses the state before the
 	merge: when a save answer got lost, the merge itself clears the edits
 	that match the server's values.
-- ROW_UNPLACED marks a row that stays where the user left it, outside the
+- ROW_PINNED marks a row that stays where the user left it, outside the
 	sort and the filter. set_input_val() and insert_rows() set it. A full
 	sort or filter by the user (sort_ris(), refilter()) sets it on exactly
 	the modified rows; a merge clears it on the rows of the change set that
 	had no pending changes. The save answer and a revert don't clear it, so
-	a saved row stays where the user left it. update_pass() keeps unplaced
+	a saved row stays where the user left it. update_pass() keeps pinned
 	rows passing.
+- Done: the merge and its re-sort keep the row with the open editor in
+	place, read from the nav's editing state and focused row, with no flag.
+	Before, a merge could move it between entering the edit and the first
+	keystroke, and after the user typed back the original value.
+- Done: a merge moves a pinned row without pending changes only when the
+	change set changes one of its values, so the fetch that brings back the
+	nav's own save leaves the saved row where it is (R4). Its filter result
+	doesn't count: update_pass() keeps a pinned row passing anyway.
 - Most changes move no row, so the merge has two paths:
 
 	case                                 work
@@ -406,13 +466,13 @@ I4. ONE APPLY PATH IN THE NAV
 	parent_id; rows with no pending      indexes of the changed columns.
 	changes also keep their sort and     O(k)
 	group keys, their filter result
-	and are not unplaced; no row added
+	and are not pinned; no row added
 	or removed
 	anything else                        drop removed rows, append added
 	                                     rows, update_row_places() for the
 	                                     moved and added rows, sort the rows
 	                                     that are neither modified nor
-	                                     unplaced into their positions,
+	                                     pinned into their positions,
 	                                     update_pass(), rebuild the groups,
 	                                     stages 3-5. O(n)
 

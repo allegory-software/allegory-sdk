@@ -4,7 +4,7 @@
 
 import {createServer} from 'node:http'
 import {spawn} from 'node:child_process'
-import {mkdtemp, rm} from 'node:fs/promises'
+import {mkdtemp, rm, writeFile} from 'node:fs/promises'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {fileURLToPath} from 'node:url'
@@ -77,12 +77,25 @@ async function stop_group(child) {
 }
 
 const vardir = await mkdtemp(join(tmpdir(), 'nav-save-var-'))
-const demo = spawn_group(join(app_dir, 'demo'), [], {
+const demo_env = {
 	...process.env,
 	VARDIR: vardir,
 	HTTP_PORT: String(http_port),
 	HTTPS_PORT: String(https_port),
-})
+}
+
+await writeFile(join(vardir, 'demo.conf'), "domain = 'localhost'\n")
+const install = spawn_group(join(app_dir, 'demo'), ['install'], demo_env)
+const install_exit_code = await new Promise(resolve =>
+	install.on('exit', resolve))
+if (install_exit_code) {
+	process.stderr.write(`error: demo install exited with code `
+		+ `${install_exit_code}\n${install.stderr_text.slice(-4000)}`)
+	await rm(vardir, {recursive: true, force: true})
+	process.exit(1)
+}
+
+const demo = spawn_group(join(app_dir, 'demo'), [], demo_env)
 let demo_exit_code
 demo.on('exit', code => {
 	demo_exit_code = code

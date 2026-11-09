@@ -797,7 +797,7 @@ function check_merge_rows() {
 
 	// a saved row that the user left out of order stays there through a
 	// merge that sorts other rows, until the user sorts.
-	nav = ui.nav('merge_rows_unplaced')
+	nav = ui.nav('merge_rows_pinned')
 	nav.load({
 		fields: save_fields,
 		col_vals: [[1, 2, 3], ['a', 'b', 'c'], [10, 20, 30]],
@@ -807,9 +807,48 @@ function check_merge_rows() {
 	nav.set_cell_val(nav.lookup('id', [1]), 2, 99)
 	nav.apply_result(nav.pack_changes(), {rows: [{}]})
 	nav.merge_rows({rows: [[3, 'c', 5]]})
-	assert(sorted_vals(nav, 'id') == '1 3 2', 'merge: unplaced row moved')
+	assert(sorted_vals(nav, 'id') == '1 3 2', 'merge: pinned row moved')
 	nav.set_order_by('b')
-	assert(sorted_vals(nav, 'id') == '3 2 1', 'merge: sort left row unplaced')
+	assert(sorted_vals(nav, 'id') == '3 2 1', 'merge: sort left row pinned')
+	nav.free()
+
+	// the merge that brings back the nav's own save keeps a pinned row in
+	// place and visible; a merge that changes one of its values places it.
+	nav = ui.nav('merge_rows_echo')
+	nav.load({
+		fields: save_fields,
+		col_vals: [[1, 2, 3], ['a', 'b', 'c'], [10, 20, 30]],
+		pk: 'id',
+	})
+	nav.set_order_by('b')
+	nav.set_filter(ri => nav.cell_input_val(ri, 2) < 50)
+	let ri1 = nav.lookup('id', [1])
+	nav.set_cell_val(ri1, 2, 99)
+	nav.apply_result(nav.pack_changes(), {rows: [{}]})
+	nav.merge_rows({rows: [[1, 'a', 99]]})
+	assert(sorted_vals(nav, 'id') == '1 2 3'
+		&& nav.visible_i[ri1] != 0xFFFFFFFF,
+		'merge: own save moved or hid a pinned row')
+	nav.merge_rows({rows: [[1, 'x', 99]]})
+	assert(nav.visible_i[ri1] == 0xFFFFFFFF,
+		'merge: changed pinned row not placed')
+	nav.free()
+
+	// the row with the open editor stays in place before the user types.
+	nav = ui.nav('merge_rows_editing')
+	nav.load({
+		fields: save_fields,
+		col_vals: [[1, 2, 3], ['a', 'b', 'c'], [10, 20, 30]],
+		pk: 'id',
+	})
+	nav.set_order_by('b')
+	nav.focus_cell(nav.lookup('id', [1]), 2)
+	assert(nav.enter_edit(), 'merge: edit not entered')
+	nav.merge_rows({rows: [[1, 'a', 25]]})
+	assert(sorted_vals(nav, 'id') == '1 2 3', 'merge: edited row moved')
+	nav.merge_rows({rows: [[3, 'c', 5]]})
+	assert(sorted_vals(nav, 'id') == '1 3 2', 'merge: edited row re-sorted')
+	nav.exit_edit()
 	nav.free()
 
 	// tree: an added child goes under its parent; the rows that the server

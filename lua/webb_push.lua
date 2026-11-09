@@ -67,6 +67,7 @@ function push_notifications_action(action_name, serialize_event, event_belongs_t
 			local events = concat(t)
 			assert(not out_buffering())
 			out(events)
+			out_flush()
 		end
 	end
 end

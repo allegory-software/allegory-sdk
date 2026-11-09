@@ -118,7 +118,7 @@ ROW DISPLAY STATE
 	is_pass        ROW_PASS        row passes current filters
 	has_pass_desc  ROW_PASS_DESC   some descendant passes current filters
 	is_group       ROW_GROUP       row is a synthetic group row
-	is_unplaced    ROW_UNPLACED    row stays where the user left it, outside
+	is_pinned      ROW_PINNED      row stays where the user left it, outside
 	                               the sort and the filter
 ROW EDITING STATE
 	is_new         ROW_NEW         inserted, not saved yet
@@ -394,11 +394,11 @@ MERGE k ROWS (merge_rows)
 	  row, with its values that differ as edits. Add the rows not found.
 	- if no row moves, appears or goes away: done, O(k).
 	- a found row moves when pos or parent_id changes, or, without pending
-	  changes, when its sort or group keys or filter result change or it is
-	  unplaced.
+	  changes and outside the edit, when its sort or group keys or filter
+	  result change; a pinned row, only when one of its values changes.
 	- otherwise: append added rows, place moved and added rows by pos and
-	  parent; sort the rows that are neither modified nor unplaced into their
-	  positions; filter; rebuild groups; run stages 3-5. O(n).
+	  parent; sort the rows that are neither modified, edited nor pinned into
+	  their positions; filter; rebuild groups; run stages 3-5. O(n).
 
 RELOAD ROWSET
 	- check if row definition differs and load instead if it does.
@@ -456,7 +456,7 @@ const ROW_READONLY  = 2**7  // row's cells can't be edited
 const ROW_NO_REMOVE = 2**8  // row can't be deleted
 const ROW_NO_SAVE   = 2**9  // row is never saved
 const ROW_GROUP     = 2**10 // row is a synthetic group row
-const ROW_UNPLACED  = 2**11 // row stays where the user left it
+const ROW_PINNED    = 2**11 // row stays where the user left it
 const ROW_CHILDREN_REQUESTED = 2**12 // partial load: row's children requested
 const ROW_CHILDREN_LOADED    = 2**13 // partial load: row's children are loaded
 const ROW_LOAD_RECURSIVE     = 2**14 // partial load: load row's whole subtree
@@ -2076,7 +2076,7 @@ ui.nav = function(id, opt) {
 			e.order_by = null
 			e.sorted_ris = e.base_ris
 		}
-		reset_unplaced()
+		reset_pinned()
 	}
 
 	let sorted_lookups_change_no = 0 // max rows_change_no of sorted lookup navs
@@ -2120,12 +2120,12 @@ ui.nav = function(id, opt) {
 
 	// A full sort or filter by the user puts every row in place except the
 	// modified rows.
-	function reset_unplaced() {
+	function reset_pinned() {
 		let row_flags = e.row_flags
 		let has_modifications = e.modified_n > 0
 		for (let i = 0; i < e.row_n; i++) {
 			let ri = e.base_ris[i]
-			set_bits(row_flags, ri, ROW_UNPLACED,
+			set_bits(row_flags, ri, ROW_PINNED,
 				has_modifications && is_row_modified(ri))
 		}
 	}
@@ -2395,7 +2395,7 @@ ui.nav = function(id, opt) {
 		}
 	}
 
-	// Set is_pass on data rows from row_filter. Keep modified rows, unplaced
+	// Set is_pass on data rows from row_filter. Keep modified rows, pinned
 	// rows and the edited row passing.
 	function update_pass() {
 		let row_flags = e.row_flags
@@ -2405,7 +2405,7 @@ ui.nav = function(id, opt) {
 			let ri = ris[i]
 			set_bits(row_flags, ri, ROW_PASS, !row_filter
 				|| (has_modifications && is_row_modified(ri))
-				|| row_flags[ri] & ROW_UNPLACED
+				|| row_flags[ri] & ROW_PINNED
 				|| (e.editing && ri == e.focused_ri)
 				|| row_filter(ri))
 		}
@@ -2413,7 +2413,7 @@ ui.nav = function(id, opt) {
 
 	function refilter() {
 		update_row_filter()
-		reset_unplaced()
+		reset_pinned()
 		update_pass()
 		update_pass_desc()
 		update_visible_ris(true)
@@ -3181,7 +3181,7 @@ ui.nav = function(id, opt) {
 			set_cell_bit(e.modified_mask, ri, fi, true)
 			e.input_vals[fi] ??= [] // made on the column's first edit
 			e.input_vals[fi][ri] = v
-			e.row_flags[ri] |= ROW_UNPLACED
+			e.row_flags[ri] |= ROW_PINNED
 		}
 		update_modified_n(ri, was_modified)
 		end_quicksearch_at(ri, fi)
@@ -3680,7 +3680,7 @@ ui.nav = function(id, opt) {
 					set_cell_bit(e.unset_mask, ri, field.fi, true)
 				field.col_storage.set(e.col_vals[field.fi], ri, v ?? null)
 			}
-			e.row_flags[ri] = ROW_NEW | ROW_PASS | ROW_UNPLACED
+			e.row_flags[ri] = ROW_NEW | ROW_PASS | ROW_PINNED
 			e.parent_ri[ri] = parent_ri
 
 			// Write parent_id so that the server and set_tree_parents() can read
@@ -4584,22 +4584,27 @@ ui.nav = function(id, opt) {
 		return fis
 	}
 
-	// Sort the rows of sorted_ris, except the rows with pending changes and
-	// the rows that the user left where they are (R4): those keep their
-	// positions, and the sorted rows fill the other positions.
+	// Sort the rows of sorted_ris, except the rows with pending changes, the
+	// row being edited and the rows that the user left where they are (R4):
+	// those keep their positions, and the sorted rows fill the other
+	// positions.
 	function sort_placed_rows() {
 		let n = e.row_n
 		let sorted_ris = e.sorted_ris
 		let has_modifications = e.modified_n > 0
+		let edited_ri = e.editing ? e.focused_ri : null
 		let is_kept = new Uint8Array(n) // 1: row kept, by index in sorted_ris
 		let placed_ris = new Uint32Array(n) // rows to sort, in sorted_ris order
 		let m = 0 // number of rows to sort
 		for (let i = 0; i < n; i++) {
 			let ri = sorted_ris[i]
-			if (e.row_flags[ri] & ROW_UNPLACED || (has_modifications && is_row_modified(ri)))
+			if (e.row_flags[ri] & ROW_PINNED || ri == edited_ri
+				|| (has_modifications && is_row_modified(ri))
+			) {
 				is_kept[i] = 1
-			else
+			} else {
 				placed_ris[m++] = ri
+			}
 		}
 		placed_ris = sorted_copy(placed_ris, m, e.order_by)
 		let j = 0 // next index into placed_ris
@@ -4650,9 +4655,11 @@ ui.nav = function(id, opt) {
 
 		// write the values. A new row with the same pk becomes the saved row,
 		// and its values that differ from the server's become edits. A row
-		// without pending changes must be placed again if its sort or group
-		// keys or its filter result change, or if the user left it unplaced.
+		// without pending changes and outside the edit must be placed again
+		// if its sort or group keys or its filter result change; a pinned
+		// row, only if one of its values changes.
 		let key_fis = place_fis()
+		let edited_ri = e.editing ? e.focused_ri : null
 		let added_ris = [] // rows not found
 		let placed_ris = [] // found rows to place again
 		let moved_ris = [] // found rows whose pos or parent_id changed
@@ -4665,8 +4672,12 @@ ui.nav = function(id, opt) {
 				added_ris.push(ri)
 			} else {
 				let was_modified = is_row_modified(ri)
+				let is_pinned = !!(e.row_flags[ri] & ROW_PINNED)
 				let has_new_keys = key_fis
 					.some(fi => row[fi] !== undefined && row[fi] !== col_val(ri, fi))
+				let has_new_vals = is_pinned && rowset_fields.some(field =>
+					row[field.fi] !== undefined
+					&& row[field.fi] !== col_val(ri, field.fi))
 				let new_vals = e.row_flags[ri] & ROW_NEW ? new_row_vals(ri) : null
 				if (set_server_vals(ri, row, is_modified_col))
 					moved_ris.push(ri)
@@ -4683,11 +4694,10 @@ ui.nav = function(id, opt) {
 					}
 				update_invalid(ri)
 				let is_pass = !row_filter || row_filter(ri)
-				if (!was_modified) {
-					if (has_new_keys || e.row_flags[ri] & ROW_UNPLACED
-						|| is_pass != !!(e.row_flags[ri] & ROW_PASS)
-					) {
-						e.row_flags[ri] &= ~ROW_UNPLACED
+				if (!was_modified && ri != edited_ri) {
+					let has_new_pass = is_pass != !!(e.row_flags[ri] & ROW_PASS)
+					if (is_pinned ? has_new_vals : has_new_keys || has_new_pass) {
+						e.row_flags[ri] &= ~ROW_PINNED
 						placed_ris.push(ri)
 					}
 				}
@@ -4880,7 +4890,7 @@ ui.nav = function(id, opt) {
 			field.col_storage.set(e.col_vals[field.fi], ri, v ?? null)
 		}
 		group_field.col_storage.set(e.col_vals[group_field.fi], ri, null)
-		e.row_flags[ri] = row.is_new ? ROW_NEW | ROW_PASS | ROW_UNPLACED : ROW_PASS
+		e.row_flags[ri] = row.is_new ? ROW_NEW | ROW_PASS | ROW_PINNED : ROW_PASS
 		if (row.is_new)
 			e.modified_n++
 		return ri

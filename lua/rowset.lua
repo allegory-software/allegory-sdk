@@ -1022,5 +1022,6 @@ action['rowset.events'] = function()
 		local events = concat(t)
 		assert(not out_buffering())
 		out(events)
+		out_flush()
 	end
 end
