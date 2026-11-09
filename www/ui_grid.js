@@ -1835,7 +1835,11 @@ function init(id, e) {
 				ui.focus_group(true, null, editor_id)
 				ui.p(pad_l, 0, pad_r, 0)
 				editor_opt.min_w = w - pad_l - pad_r
-				editor_opt.text_align = align
+				editor_opt.text_align = 's'
+				if (align == 'right')
+					editor_opt.text_align = 'sr'
+				else if (align == 'center')
+					editor_opt.text_align = 'sc'
 				editor_opt.open = want_dropdown_open
 				field.build_input(editor_id, input_val, editor_opt, field.control)
 				editor_text_id = ui.state_of(editor_id, 'text_id') ?? null
