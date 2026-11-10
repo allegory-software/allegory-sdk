@@ -644,8 +644,8 @@ function house_plan(t) {
 					seg = seg_around_point(p, sdx, sdy)
 					if (seg) {
 						// detach seg at branch point p so we can then resize it by its free end-point.
-						let x = p[0] + dx * abs(sdx)
-						let y = p[1] + dy * abs(sdy)
+						let x = p[0]
+						let y = p[1]
 						let new_p = floor.add_point(x, y)
 						floor.set_seg_point(seg, seg.pi(p), new_p)
 						p = new_p
@@ -671,7 +671,8 @@ function house_plan(t) {
 
 			log('resizing seg:', seg.id)
 
-			floor.fix()
+			floor.rebuild()
+			create_edges()
 
 			pop_log()
 

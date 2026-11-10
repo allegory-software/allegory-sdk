@@ -53,6 +53,7 @@
 				['connect', p1, p2, ...]
 				[seg_id, p1, p2, ...] // use null for an automatic ID
 
+		rebuild()
 		fix()
 
 		hit_cycle(x, y, cycle) -> t|f
@@ -1043,6 +1044,13 @@ let plane_graph_class = class plane_graph extends Array {
 
 	_after_fix() {} // stub
 
+	rebuild() {
+		this._find_comps()
+		this._extract_cycles()
+		this._find_inside_comps()
+		return this
+	}
+
 	fix() {
 		push_log('fixing plane_graph', this.id)
 		this._split_intersecting_segs()
@@ -1052,9 +1060,7 @@ let plane_graph_class = class plane_graph extends Array {
 		this._rebuild_adj_refs()
 		this._merge_colinear_segs()
 		this._remove_isolated_points()
-		this._find_comps()
-		this._extract_cycles()
-		this._find_inside_comps()
+		this.rebuild()
 		this._after_fix()
 		pop_log()
 		return this
