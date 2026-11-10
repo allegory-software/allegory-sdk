@@ -227,6 +227,18 @@ function action.en()
 	<script src="/ui_call.js"></script>
 	<script src="/ui_db_explorer.js"></script>
 	<script src="/ui_os_explorer.js"></script>
+	<script src="/earcut.js"></script>
+	<script src="/3d.js"></script>
+	<script src="/suncalc.js"></script>
+	<script src="/gl.js"></script>
+	<script src="/gl-renderer.js"></script>
+	<script src="/model3.js"></script>
+	<script src="/plane-graph.js"></script>
+	<script src="/house-plan.js"></script>
+	<script src="/house-test-plans.js"></script>
+	<script src="/model3-editor.js"></script>
+	<script src="/house-model-editor.js"></script>
+	<script src="/house-plan-editor.js"></script>
 	<script>
 {{{fonts}}}
 user = {{{user}}}

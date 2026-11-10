@@ -3,7 +3,16 @@
 <head>
 <meta name="darkreader-lock">
 <link rel="icon" href="data:,">
-<script src=glue.js></script>
+<script src=glue.js global></script>
+<script src=earcut.js></script>
+<script src=3d.js></script>
+<script src=suncalc.js></script>
+<script src=gl.js></script>
+<script src=gl-renderer.js></script>
+<script src=model3.js></script>
+<script src=plane-graph.js></script>
+<script src=house-plan.js></script>
+<script src=house-test-plans.js></script>
 <script src=ui.js></script>
 <script src=ui_icon_defs.js></script>
 <script src=ui_login.js></script>
@@ -14,6 +23,9 @@
 <script src=webrtc.js></script>
 <script src=ui_call.js></script>
 <script src=lezer.js></script>
+<script src=model3-editor.js></script>
+<script src=house-model-editor.js></script>
+<script src=house-plan-editor.js></script>
 <script>
 
 const {
@@ -2343,6 +2355,30 @@ demos.code_edit = function() {
 
 code = ui.code_edit('code_edit1', code)
 
+}
+}
+
+demos.model3_editor = function() {
+ui.model3_editor('model3_editor_demo', {}, ui.model3_editor_test_objects)
+}
+
+{
+let house
+demos.house_model_editor = function() {
+house ??= house_plan(house_test_plans.gable1)
+ui.house_model_editor('house_model_editor_demo', house)
+}
+}
+
+{
+let house
+demos.floor_editor = function() {
+house ??= house_plan(house_test_plans.gable1)
+ui.m(ui.sp2())
+ui.h(1, ui.sp2())
+	for (let floor of house.floors)
+		ui.floor_editor('floor_editor_demo'+floor.i, floor)
+ui.end_h()
 }
 }
 

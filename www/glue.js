@@ -75,8 +75,16 @@ DEBUGGING
 	debug(...)
 	log(...)
 	check(v, ...) -> v
+	push_log(...)                          start a collapsed console group
+	pop_log(...)                           log and end the group
+	push_log_if(cond, ...)                 push_log, but if cond is false,
+	                                       silence all logging until the
+	                                       matching pop_log
+	gen_id(prefix) -> n | null             next id for prefix, null when
+	                                       DEBUG_GEN_ID is off
 
 	DEBUG_LOG
+	DEBUG_GEN_ID
 	DEBUG_SNAP_NUMS
 	DEBUG_AJAX
 
@@ -86,6 +94,14 @@ EXTENDING BUILT-IN OBJECTS
 	method(class|instance, method, func)
 	override(class|instance, method, func)
 	alias(class|instance, new_name, old_name)
+
+CLASSES
+
+	callable_constructor(cls) -> f         f(...args) calls `new cls(...args)`
+	inherit_properties(cls, [super_cls]) -> cls   copy the properties of
+	                                       super_cls.prototype that cls.prototype
+	                                       doesn't have; super_cls defaults to
+	                                       cls's parent
 
 STRINGS
 
@@ -103,22 +119,29 @@ ARRAYS
 	empty_array -> []                      global empty array, read-only!
 	array_resize(a, n, [v]) -> a           resize to n, new slots get v
 	array_set(a, a1) -> s
+	array_equals(a1, a2, [i1], [i2]) -> t|f    compare a1[i1..i2-1] with a2
 	extend(a, a1) -> a
 	insert(a, i, v) -> a
 	remove(a, i) -> v
 	insert_n(a, i, n)
 	remove_n(a, i, n)
 	remove_value(a, v) -> i
+	replace_value(a, v0, v1) -> i          replace the first v0 with v1
 	remove_values(a, cond) -> a; cond(v, i, a, j) -> remove_it
 	array_move(a, i1, n, insert_i, [before])
 	binsearch(a, v, cmp, [i1, i2]); cmp(a, i, v) -> a[i] < v
 	uniq_sorted(a) -> a
+	group_sorted(a, eq_cond, [i1], [i2]) -> *[i1, i2]
+	                                       iterate the index ranges of runs of
+	                                       consecutive elements for which
+	                                       eq_cond(a[i], a[i-1]) is true
 
 HASH MAPS
 
 	obj() -> o                      create a native map, string keys only
 	set(iter) -> m                  create a set, holds all types
 	set_equals(s, s2[, same_order]) -> t|f    compare sets
+	set_toarray(s) -> a                       the values of s as an array
 	map(iter) -> m                  create a map, keys and values can be of any type
 	empty -> {}                     global empty object, inherits Object
 	empty_obj -> obj()              global empty object, does not inherit Object
@@ -193,6 +216,8 @@ GEOMETRY
 	point_around(cx, cy, r, angle) -> [x, y]
 	transform_point_x(m, x, y) => x1
 	transform_point_y(m, x, y) => y1
+	hypot(a, b) -> n                       sqrt(a^2 + b^2) without overflow
+	distance(x1, y1, x2, y2) -> n
 
 TIMERS
 
@@ -436,6 +461,49 @@ function log(...args) {
 	console.log(...snap_nums(args))
 }
 
+let log_level = 0 // current console group depth
+let log_off_level // console group depth at which to enable logging
+
+function push_log(...args) {
+	log_level++
+	if (DEBUG_LOG) // Collapsed
+		console.groupCollapsed(...args)
+}
+
+function pop_log(...args) {
+	if (DEBUG_LOG) {
+		log(...args)
+		console.groupEnd()
+	}
+	log_level--
+	if (log_off_level === log_level) {
+		log_off_level = null
+		DEBUG_LOG = true
+	}
+}
+
+function push_log_if(cond, ...args) {
+	if (!cond && DEBUG_LOG) {
+		log_off_level = log_level
+		DEBUG_LOG = false
+	}
+	push_log(...args)
+}
+
+let next_id = {} // {prefix -> last generated id}
+
+window.DEBUG_GEN_ID = 1
+
+function gen_id(k) {
+	if (!DEBUG_GEN_ID)
+		return null
+	if (!next_id[k])
+		next_id[k] = 1
+	else
+		next_id[k]++
+	return next_id[k]
+}
+
 /* extending built-in objects ------------------------------------------------
 
 NOTE: built-in methods are actually "data properties" that shadow normal
@@ -495,6 +563,26 @@ function alias(cls, new_name, old_name) {
 	let d = getPropertyDescriptor(proto, old_name)
 	assert(d, cls.type || cls.name, '.', old_name, ' does not exist')
 	Object.defineProperty(proto, new_name, d)
+}
+
+function callable_constructor(cons) {
+	let name = cons.name
+	let f = {[name]: function(...args) { return new cons(...args) }}[name]
+	f.class = cons
+	return f
+}
+
+function inherit_properties(cons, super_cons) {
+	super_cons ??= Object.getPrototypeOf(cons)
+	let child_methods = cons.prototype
+	let super_methods = super_cons.prototype
+	// copy super's methods to child.
+	for (let k of Object.getOwnPropertyNames(super_methods))
+		if (!(k in child_methods)) { // not overridden
+			let desc = Object.getOwnPropertyDescriptor(super_methods, k)
+			Object.defineProperty(child_methods, k, desc)
+		}
+	return cons
 }
 
 // strings -------------------------------------------------------------------
@@ -606,6 +694,17 @@ function array_set(a, a1) {
 	return a
 }
 
+function array_equals(a1, a2, i1, i2) {
+	i1 = i1 ?? 0
+	i2 = i2 ?? max(a1.length, a2.length)
+	if (i2 > min(a1.length, a2.length))
+		return false
+	for (let i = i1; i < i2; i++)
+		if (a1[i] !== a2[i])
+			return false
+	return true
+}
+
 function insert(a, i, v) {
 	if (i == null)
 		a.push(v)
@@ -641,6 +740,13 @@ function remove_value(a, v) {
 	let i = a.indexOf(v)
 	if (i != -1)
 		a.splice(i, 1)
+	return i
+}
+
+function replace_value(a, v0, v1) {
+	let i = a.indexOf(v0)
+	if (i >= 0)
+		a[i] = v1
 	return i
 }
 
@@ -706,6 +812,23 @@ function uniq_sorted(a) {
 	})
 }
 
+function *group_sorted(a, eq_cond, i1, i2) {
+	i1 ??= 0
+	i2 ??= a.length
+	let i0 = i1
+	let i = i0 + 1
+	if (i1 >= i2)
+		return
+	while (i < i2) {
+		if (!eq_cond(a[i], a[i-1])) {
+			yield [i0, i]
+			i0 = i
+		}
+		i++
+	}
+	yield [i0, i2]
+}
+
 // hash maps -----------------------------------------------------------------
 
 let obj = () => Object.create(null)
@@ -730,6 +853,10 @@ function set_equals(s1, s2, same_order) {
 				return false
 	}
 	return true
+}
+
+function set_toarray(s) {
+	return Array.from(s)
 }
 
 let empty_obj = obj() // use for maps where keys can be anything
@@ -1520,6 +1647,19 @@ point_around = function(cx, cy, r, angle) {
 let transform_point_x = (m, x, y) => x * m.a + y * m.c + m.e
 let transform_point_y = (m, x, y) => x * m.b + y * m.d + m.f
 
+function hypot(a, b) {
+	if (a == 0 && b == 0) return 0
+	a = abs(a)
+	b = abs(b)
+	let M = max(a, b)
+	let m = min(a, b)
+	return M * sqrt(1 + (m / M)**2)
+}
+
+function distance(x1, y1, x2, y2) {
+	return hypot(x2-x1, y2-y1)
+}
+
 // timers --------------------------------------------------------------------
 
 function runafter(t, f) { return setTimeout(f, t * 1000) }
@@ -1997,15 +2137,17 @@ PI, sin, cos, tan, rad, deg, asin, acos, atan, atan2,
 format_base, dec,
 noop, return_true, return_false, return_arg, wrap, do_before, do_after,
 pr, _, warn, warn_if, warn_once, debug, trace, assert,
-log, check,
+log, check, push_log, pop_log, push_log_if, gen_id,
 property, method, override, alias,
+callable_constructor, inherit_properties,
 subst, capitalize, display_name, ends,
 escape_regexp, catany, words, captures, utf8_len,
-array, empty_array, array_resize, extend, array_set,
-insert, insert_n, remove, remove_n, remove_value, remove_values, array_move,
-binsearch, uniq_sorted,
+array, empty_array, array_resize, extend, array_set, array_equals,
+insert, insert_n, remove, remove_n, remove_value, replace_value, remove_values,
+array_move,
+binsearch, uniq_sorted, group_sorted,
 map,
-set, set_equals, empty_set,
+set, set_equals, set_toarray, empty_set,
 obj, empty, empty_obj,  keys, assign, entries, assign_opt, count_keys, attr,
 memoize,
 f32arr, i8arr, u8arr, i16arr, u16arr, i32arr, u32arr,
@@ -2022,6 +2164,7 @@ format_kbytes, format_kcount,
 hsl_to_rgb_out, hsl_to_rgb_hex, hsl_to_rgba_int, hsl_to_rgb_int, hex_to_hsl,
 point_around,
 transform_point_x, transform_point_y,
+hypot, distance,
 runafter, runevery, runagainevery, clock, timer,
 json_arg, try_json_arg, json,
 copy_to_clipboard,

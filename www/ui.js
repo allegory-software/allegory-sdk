@@ -106,6 +106,7 @@ PERSISTENCE
 MOUSE INPUT
   POSITION      ui.mx  ui.my  ui.mx_notrans  ui.my_notrans  ui.update_mouse
   BUTTONS       ui.pressed  ui.click  ui.rightclick  ui.clickup  ui.dblclick
+                ui.tripleclick
                 ui.clicked  ui.rightclicked  ui.dblclicked
   WHEEL         ui.wheel_dy  ui.trackpad
   ENTER/LEAVE   ui.mouseenter  ui.mouseleave
@@ -862,6 +863,7 @@ body {
 
 let screen = document.createElement('div')
 screen.classList.add('ui-screen')
+ui.screen = screen
 
 let canvas = document.createElement('canvas')
 canvas.classList.add('ui-canvas')
@@ -980,6 +982,7 @@ MOUSE BUTTONS STATE
 	ui.click           active pointer clicked
 	ui.clickup         left button released this frame
 	ui.dblclick        active pointer double-clicked
+	ui.tripleclick     active pointer triple-clicked (never set yet)
 	ui.local_pointer   default pointer that tracks the local mouse and keyboard
 	ui.mx0, ui.my0     mouse position at the start of the drag
 
@@ -1068,6 +1071,7 @@ ui.add_pointer = function() {
 		ui.rightclick = p.rightclick
 		ui.clickup    = p.clickup
 		ui.dblclick   = p.dblclick
+		ui.tripleclick = p.tripleclick
 		ui.wheel_dy   = p.wheel_dy
 		ui.trackpad   = p.trackpad
 
@@ -1090,6 +1094,7 @@ function reset_pointer_state(p) {
 	p.rightclick = false // right button press for the current frame
 	p.clickup = false
 	p.dblclick = false
+	p.tripleclick = false // not set by any event yet
 	p.wheel_dy = 0
 	p.trackpad = false
 	p.mouseenter = false
@@ -1880,6 +1885,7 @@ function rec() {
 }
 
 function free_rec(a) {
+	a.ct_stack.length = 0 // a frame that threw leaves its containers open.
 	if (a.nohit_set)
 		a.nohit_set.clear()
 	a.parent_rec_i = null
@@ -3016,6 +3022,61 @@ function draw_pointer(p, x0, y0) {
 	cx.fillRect(x0 + p.mx, y0 + p.my, 5, 5)
 }
 
+function clear_frame_input() {
+
+	// auto release pointer capture on clickup
+	if ((ui.clickup || capture_state?.cancel) && ui.captured_id != null)
+		release_capture()
+
+	for (let p of ui.pointers)
+		reset_pointer_state(p)
+	reset_pointer_state(ui)
+
+	key_downs.clear()
+	key_ups.clear()
+	ui.key_events.length = 0
+	clicked_button_id = null
+	requested_action = null
+	requested_target_id = null
+	requested_enabled = null
+
+	ui.window_focusing = false
+
+	// updates can run again now that they can't see the same edge state.
+	build_no++
+}
+
+// a frame threw: put what a frame leaves open back to its idle value.
+// the container stacks and the state scope chain stay unbalanced otherwise,
+// and the next frame loops forever in is_state_scope_hidden().
+function reset_frame_state() {
+	is_building = false
+	hit_phase = false
+	render_state_map = undefined
+	cur_popup_rec = undefined
+	cur_popup_ct_i = undefined
+	a = undefined
+	n = undefined
+	ct_stack = undefined
+	rec_stack.length = 0
+	split_stack.length = 0
+	toolbox_stack.length = 0
+	radio_group_stack.length = 0
+	open_menu_bars.length = 0
+	open_focus_groups.length = 0
+	theme_stack.length = 0
+	open_state_scopes.length = 0
+	cur_state_scope = root_state_scope
+	text_flags = 0
+	scroll_to_view_next = false
+	reset_spacings()
+	focusing_id = null
+	cur_theme = null
+	// a draw that threw can leave unbalanced save() calls and a clip behind.
+	cx.reset()
+	clear_frame_input()
+}
+
 function redraw_all() {
 
 	// hit_enter() and hit_leave() compare against the last frame that was drawn,
@@ -3160,26 +3221,7 @@ function redraw_all() {
 
 		reset_canvas()
 
-		// auto release pointer capture on clickup
-		if ((ui.clickup || capture_state?.cancel) && ui.captured_id != null)
-			release_capture()
-
-		for (let p of ui.pointers)
-			reset_pointer_state(p)
-		reset_pointer_state(ui)
-
-		key_downs.clear()
-		key_ups.clear()
-		ui.key_events.length = 0
-		clicked_button_id = null
-		requested_action = null
-		requested_target_id = null
-		requested_enabled = null
-
-		ui.window_focusing = false
-
-		// updates can run again now that they can't see the same edge state.
-		build_no++
+		clear_frame_input()
 
 		if (!want_rebuild)
 			break
@@ -3218,7 +3260,12 @@ function raf_animate(raf_t) {
 	frame_graph_push('frame_delta_time', raf_dt)
 	raf_t0 = raf_t
 	let t0 = clock_ms()
-	redraw_all()
+	try {
+		redraw_all()
+	} catch (err) {
+		reset_frame_state()
+		console.error(err)
+	}
 	let t1 = clock_ms()
 	frame_graph_push('frame_time', t1 - t0)
 }

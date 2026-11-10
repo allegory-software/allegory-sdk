@@ -207,6 +207,18 @@ function app_dock_empty_tab(tab) {
 		if (button(tab_id+'.call', 'phone', 'Call'))
 			set_dock_tab('app_dock', tab.id,
 				{kind: 'call', title: 'Call', icon: 'phone'})
+		if (button(tab_id+'.model3_editor', 'cube', 'Model editor'))
+			set_dock_tab('app_dock', tab.id,
+				{kind: 'model3_editor', title: 'Model editor', icon: 'cube'})
+		if (button(tab_id+'.house_model_editor', 'building-cottage',
+				'House model editor'))
+			set_dock_tab('app_dock', tab.id,
+				{kind: 'house_model_editor', title: 'House model editor',
+					icon: 'building-cottage'})
+		if (button(tab_id+'.floor_editor', 'layout-board', 'Floor editor'))
+			set_dock_tab('app_dock', tab.id,
+				{kind: 'floor_editor', title: 'Floor editor',
+					icon: 'layout-board'})
 	end_v()
 }
 
@@ -277,6 +289,22 @@ function app_dock_tab(tab) {
 				can_join: s.demo_call != null,
 			})
 		end_v()
+	} else if (tab.kind == 'model3_editor') {
+		ui.model3_editor('app_dock.tab.'+tab.id+'.model3_editor.widget', {},
+			ui.model3_editor_test_objects)
+	} else if (tab.kind == 'house_model_editor') {
+		let id = 'app_dock.tab.'+tab.id+'.house_model_editor'
+		let s = ui.state(id+'.house')
+		s.house ??= house_plan(house_test_plans.gable1) // house_plan() model
+		ui.house_model_editor(id+'.widget', s.house)
+	} else if (tab.kind == 'floor_editor') {
+		let id = 'app_dock.tab.'+tab.id+'.floor_editor'
+		let s = ui.state(id+'.house')
+		s.house ??= house_plan(house_test_plans.gable1) // house_plan() model
+		h(1, sp2())
+			for (let floor of s.house.floors)
+				ui.floor_editor(id+'.widget'+floor.i, floor)
+		end_h()
 	} else if (tab.kind) {
 		app_dock_app_tab(tab)
 	} else {
