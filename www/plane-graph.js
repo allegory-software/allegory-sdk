@@ -51,7 +51,7 @@
 
 				['draw', [id, ]x0, y0, [id, ]d-to-right, [id, ]d-to-down, [id, ]d-to-right, ...]
 				['connect', p1, p2, ...]
-				[[seg_id, ]p1, p2, ...]
+				[seg_id, p1, p2, ...] // use null for an automatic ID
 
 		fix()
 
@@ -575,24 +575,12 @@ let plane_graph_class = class plane_graph extends Array {
 					this.add_seg(p0, p1)
 				p0 = p1
 			}
-		} else { // [[seg_id, ]p1, p2, ...]
-			let i = 0
-			let n = a.length
-			let id, p1
-			while (i < n) {
-				let p = a[i]
-				if (isstr(p)) {
-					id = p
-				} else if (!p1) {
-					p1 = this._point_ref(p)
-				} else {
-					let p2 = this._point_ref(p)
-					this.add_seg(p1, p2, id)
-					p1 = null
-					p2 = null
-					id = null
-				}
-				i++
+		} else { // [seg_id, p1, p2, ...]
+			for (let i = 0, n = a.length; i < n; i += 3) {
+				let id = a[i]
+				let p1 = this._point_ref(a[i+1])
+				let p2 = this._point_ref(a[i+2])
+				this.add_seg(p1, p2, id)
 			}
 		}
 	}

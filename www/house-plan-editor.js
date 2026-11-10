@@ -308,6 +308,9 @@ ui.box_widget('floor_editor', {
 
 	create: function(cmd, id, plan, fr, align, valign) {
 
+		ui.focus_group(false, 0, id)
+		ui.focusable(id)
+
 		let s = ui.state(id)
 		s.draw_state ??= {snap_lines: [], measure_edges: [], above_floors: [], below_floors: []} // plan drawing data
 		let draw_state = s.draw_state
@@ -319,6 +322,13 @@ ui.box_widget('floor_editor', {
 			sg.zoom(ui.wheel_dy / ui.em(7), hs.mx, hs.my)
 
 		let cs = ui.drag(id)
+		let is_restored = false
+		if (!cs && ui.focus_inside(id)) {
+			if (ui.keydown('ctrl shift z') || ui.keydown('ctrl y'))
+				is_restored = plan.redo()
+			else if (ui.keydown('ctrl z'))
+				is_restored = plan.undo()
+		}
 
 		if (cs) {
 
@@ -347,7 +357,7 @@ ui.box_widget('floor_editor', {
 
 			let action = cs.action
 
-			if (!action && (abs(dx) >= 10 || abs(dy) >= 10)) { // dragged far enough to assume intent to drag.
+			if (!cs.cancel && !action && (abs(dx) >= 10 || abs(dy) >= 10)) { // dragged far enough to assume intent to drag.
 
 				// establish direction of drag on x and y axis.
 				let sdx = abs(dx) > 1.5 * abs(dy) ? sign(dx) : 0 // straight enough
@@ -363,19 +373,27 @@ ui.box_widget('floor_editor', {
 
 			}
 
-			if (action == 'move_seg')
-				cs.move_seg.move(dx, dy, draw_state)
+			if (action == 'move_seg') {
+				if (cs.cancel)
+					cs.move_seg.cancel(draw_state)
+				else
+					cs.move_seg.move(dx, dy, draw_state)
+			}
 
-			if (action == 'resize_seg')
-				cs.resize_seg.resize(dx, dy, draw_state, cs)
+			if (action == 'resize_seg') {
+				if (cs.cancel)
+					cs.resize_seg.cancel(draw_state)
+				else
+					cs.resize_seg.resize(dx, dy, draw_state, cs)
+			}
 
-			if (action == 'pan') {
+			if (action == 'pan' && !cs.cancel) {
 				sg.x0 = sg.pan_x0 + cs.dx
 				sg.y0 = sg.pan_y0 + cs.dy
 				sg.panned = true
 			}
 
-			if (cs.drop) {
+			if (cs.drop && !cs.cancel) {
 				if (action == 'move_seg') {
 					cs.move_seg.stop(draw_state)
 				} else if (action == 'resize_seg') {
@@ -387,11 +405,12 @@ ui.box_widget('floor_editor', {
 
 		let is_deleting_seg = hs?.action == 'move_seg' && ui.dblclick
 		if (is_deleting_seg) {
-			plan.rem_seg(hs.seg)
-			plan.fix()
+			plan.delete_seg(hs.seg)
 		}
 
-		if (cs?.drop || is_deleting_seg) {
+		if (cs?.drop || cs?.cancel || is_deleting_seg || is_restored) {
+			draw_state.snap_lines.length = 0
+			draw_state.measure_edges.length = 0
 			if (hs) {
 				hs.seg = null
 				hs.p = null
@@ -459,6 +478,7 @@ ui.box_widget('floor_editor', {
 			ui.end_v()
 
 		ui.end_stack()
+		ui.end_focus_group()
 
 	},
 
@@ -519,8 +539,6 @@ ui.box_widget('floor_editor', {
 		let draw_state = a[i+FLOOR_EDITOR_DRAW_STATE]
 		let x0 = draw_state.x0
 		let y0 = draw_state.y0
-
-		x00 += ui.focused(id) ? 100 : 0
 
 		let cs = ui.captured(id)
 		let hs = cs ?? ui.hovers(id) // while dragging, the state at drag start.

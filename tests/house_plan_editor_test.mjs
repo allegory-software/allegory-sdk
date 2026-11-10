@@ -121,6 +121,18 @@ function hit_state() {
 	})
 }
 
+async function history_key(key, shift = false) {
+	await pg.keyboard.down('Control')
+	if (shift) await pg.keyboard.down('Shift')
+	await pg.waitForTimeout(50)
+	await pg.keyboard.down(key)
+	await pg.waitForTimeout(50)
+	await pg.keyboard.up(key)
+	if (shift) await pg.keyboard.up('Shift')
+	await pg.keyboard.up('Control')
+	await pg.waitForTimeout(100)
+}
+
 let view = await read_view()
 check('plan placed', view.scale > 0 && view.x0 != null, JSON.stringify(view))
 
@@ -240,6 +252,14 @@ let deleted = await pg.evaluate(function() {
 check('double-click deletes the wall and joins the rooms',
 	!deleted.has_divider && deleted.segs == 4 && deleted.cycles == 2,
 	JSON.stringify(deleted))
+await history_key('z')
+check('keyboard undo restores the deleted wall', await pg.evaluate(() =>
+	house.floors[0].segs.length == 7
+		&& house.floors[0].comps[0].cycles.length == 3))
+await history_key('y')
+check('keyboard redo deletes the wall again', await pg.evaluate(() =>
+	house.floors[0].segs.length == 4
+		&& house.floors[0].comps[0].cycles.length == 2))
 check('no page errors after resizing and deletion', errors.length == 0,
 	errors.join('\n'))
 
@@ -271,6 +291,80 @@ for (let target_x of [0, 600]) {
 		errors.length == n_errors && merged.drawn && merged.captured == null,
 		errors.slice(n_errors).join('\n'))
 }
+
+// keyboard history and cancellation.
+await pg.reload()
+await pg.waitForTimeout(200)
+segs0 = await read_segs()
+view = await read_view()
+sx = view.x0 + Math.round(200 * view.scale)
+sy = view.y0 + Math.round(200 * view.scale)
+await pg.mouse.move(sx, sy)
+await pg.waitForTimeout(50)
+await pg.mouse.down()
+await pg.waitForTimeout(50)
+await pg.mouse.move(sx + 100, sy)
+await pg.waitForTimeout(100)
+await pg.mouse.up()
+await pg.waitForTimeout(100)
+segs1 = await read_segs()
+check('wall click focuses the floor',
+	await pg.evaluate(() => ui.focused_id == 'fe'))
+await history_key('z')
+check('Ctrl+Z undoes the complete wall drag', await read_segs() == segs0)
+await history_key('z', true)
+check('Ctrl+Shift+Z redoes the wall drag', await read_segs() == segs1)
+await pg.evaluate(function() {
+	ui.focus('fe.grid_button')
+	ui.animate()
+})
+await pg.waitForTimeout(100)
+await history_key('z')
+check('history shortcuts work from the floor toolbar',
+	await read_segs() == segs0)
+await history_key('y')
+check('Ctrl+Y redoes the wall drag', await read_segs() == segs1)
+await pg.evaluate(function() {
+	ui.focus(null)
+	ui.animate()
+})
+await pg.waitForTimeout(100)
+await history_key('z')
+check('history shortcuts require floor focus', await read_segs() == segs1)
+
+for (let action of ['move', 'create']) {
+	await pg.reload()
+	await pg.waitForTimeout(200)
+	segs0 = await read_segs()
+	view = await read_view()
+	sx = view.x0 + Math.round(400 * view.scale)
+	sy = view.y0 + Math.round((action == 'move' ? 0 : 200) * view.scale)
+	await pg.mouse.move(sx, sy)
+	await pg.waitForTimeout(50)
+	await pg.mouse.down()
+	await pg.waitForTimeout(50)
+	await pg.mouse.move(sx + (action == 'create' ? 40 : 0),
+		sy + (action == 'move' ? 80 : 0))
+	await pg.waitForTimeout(100)
+	await pg.keyboard.down('Escape')
+	await pg.waitForTimeout(100)
+	await pg.keyboard.up('Escape')
+	await pg.waitForTimeout(50)
+	check('Escape restores the wall ' + action, await read_segs() == segs0)
+	check('Escape finalizes capture and topology for ' + action,
+		await pg.evaluate(function() {
+			let f = house.floors[0]
+			return ui.captured_id == null && f.comps[0].ps.length == f.ps.length
+				&& f.comps[0].segs.length == f.segs.length
+		}))
+	await pg.mouse.up()
+	await pg.waitForTimeout(50)
+	await history_key('z')
+	check('cancelled ' + action + ' adds no undo step',
+		await read_segs() == segs0)
+}
+check('no page errors after history and cancellation',
+	errors.length == 0, errors.join('\n'))
 
 // empty-floor drawing and view state.
 await pg.reload()

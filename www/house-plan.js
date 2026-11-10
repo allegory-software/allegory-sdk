@@ -167,6 +167,103 @@ function house_plan(t) {
 				fix_roof(roof)
 		}
 
+		// model state ---------------------------------------------------------
+
+		floor.save_state = function() {
+			let points = []
+			let lines = []
+			let point_indices = map()
+			for (let p of floor.ps) {
+				point_indices.set(p, points.length)
+				points.push([p[0], p[1], p.id])
+			}
+			for (let seg of floor.segs)
+				lines.push(seg.id, point_indices.get(seg[0]),
+					point_indices.get(seg[1]))
+			return {points: points, lines: [lines]}
+		}
+
+		function same_state(state) {
+			let lines = state.lines[0]
+			if (floor.ps.length != state.points.length
+				|| floor.segs.length * 3 != lines.length)
+				return false
+			for (let i = 0; i < floor.ps.length; i++) {
+				let p = floor.ps[i]
+				let p0 = state.points[i]
+				if (p[0] != p0[0] || p[1] != p0[1] || p.id != p0[2])
+					return false
+			}
+			for (let i = 0; i < floor.segs.length; i++) {
+				let seg = floor.segs[i]
+				let j = i * 3
+				if (seg.id != lines[j]
+					|| seg[0] != floor.ps[lines[j+1]]
+					|| seg[1] != floor.ps[lines[j+2]])
+					return false
+			}
+			return true
+		}
+
+		floor.load_state = function(state) {
+			floor.load(state.points, state.lines)
+			floor.fix()
+		}
+
+		// edit history --------------------------------------------------------
+
+		let undo_stack = []
+		let redo_stack = []
+		let edit0
+
+		function begin_edit() {
+			assert(!edit0)
+			edit0 = floor.save_state()
+		}
+
+		function commit_edit() {
+			assert(edit0)
+			if (!same_state(edit0)) {
+				undo_stack.push(edit0)
+				redo_stack.length = 0
+			}
+			edit0 = null
+		}
+
+		function cancel_edit(draw_state) {
+			assert(edit0)
+			let state = edit0
+			edit0 = null
+			floor.load_state(state)
+			draw_state.snap_lines.length = 0
+			draw_state.measure_edges.length = 0
+		}
+
+		floor.undo = function() {
+			assert(!edit0)
+			if (!undo_stack.length)
+				return false
+			redo_stack.push(floor.save_state())
+			floor.load_state(undo_stack.pop())
+			return true
+		}
+
+		floor.redo = function() {
+			assert(!edit0)
+			if (!redo_stack.length)
+				return false
+			undo_stack.push(floor.save_state())
+			floor.load_state(redo_stack.pop())
+			return true
+		}
+
+		floor.delete_seg = function(seg) {
+			begin_edit()
+			floor.rem_seg(seg)
+			floor.fix()
+			commit_edit()
+		}
+
 		// plan view UI ops ----------------------------------------------------
 
 		// Find and fix the the cycles that contain the sequence (p0,p1,p2) or (p2,p1,p0).
@@ -405,6 +502,7 @@ function house_plan(t) {
 
 			push_log('START MOVE SEG:', seg.id)
 
+			begin_edit()
 			detach_colinear_segs(seg)
 
 			pop_log()
@@ -517,10 +615,12 @@ function house_plan(t) {
 				if (remove_seg)
 					floor.rem_seg(seg)
 				floor.fix()
+				commit_edit()
 				pop_log()
 				draw_state.snap_lines.length = 0
 				draw_state.measure_edges.length = 0
 			}
+			s.cancel = cancel_edit
 
 			return s
 		}
@@ -531,6 +631,7 @@ function house_plan(t) {
 			// based on direction of drag, either detach a seg or add a seg, and start resizing it.
 			push_log('START RESIZE SEG')
 
+			begin_edit()
 			let p0 = p ? [...p] : [mx0, my0]
 			let seg
 			if (p) {
@@ -601,10 +702,12 @@ function house_plan(t) {
 			s.stop = function(draw_state) {
 				push_log('STOP RESIZE SEG:', seg.id)
 				floor.fix()
+				commit_edit()
 				pop_log()
 				draw_state.snap_lines.length = 0
 				draw_state.measure_edges.length = 0
 			}
+			s.cancel = cancel_edit
 
 			return s
 		}
