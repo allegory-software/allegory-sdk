@@ -339,8 +339,9 @@ rs:exec_load_changed_rows(param_vals, post) -> res
 - Read notification batches and current result rows in the same read
 	transaction, as proposed in NAV-SAVE.txt I3. On a notification gap,
 	report that a full reload is needed.
-- Use the existing fetch and nav apply work in NAV-SAVE.txt. Its R3 excludes
-	server-filtered views; agree on that extension before integrating S2.
+- Use the existing fetch and nav apply work in NAV-SAVE.txt. Its R3 now
+	includes server-filtered views (decided 2026-11-09): every detail nav
+	with a master is one, so S2 is needed for detail navs to fetch.
 - For each stage, check affected-key inference and fetch results against
 	a fresh evaluation after applying the changes. Include rollback and
 	trigger/FK writes when verifying database notification integration.
@@ -362,6 +363,17 @@ Checked: scan and query suites; isolated rowset loads and incremental
 fetches; decoded callback keys; duplicate callback rows; false boolean
 values; callback fallback; history gaps; configured-schema field indexing
 and rowset translation setup.
+
+Implemented (2026-11-09), S2 for scan paths: a scan with param bounds
+(=, range, starts, in, ~=, is_not_null, on a table or an index) can fetch.
+For each changed key, scan.has_rec() checks the row's scanned record
+against the bounds that reset(args) builds, the same bounds next() walks;
+an index scan first builds the row's index key with ix_schema:row_key(). A
+row outside the bounds is sent as removed. Filters, sort, joins, limits and
+params read from another scan's row still need a full reload. Checked:
+has_rec() against next() for every path kind and direction
+(mdbx_scan_test scan_has_rec); a detail rowset's fetch through an fk index
+(rowset_mdbx_test changed_rows_with_params). Demo: grid_save_children.
 
 Remaining: application changes-file initialization, committed-change
 notifications through EventSource, nav incremental requests and applying

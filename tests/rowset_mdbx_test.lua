@@ -184,6 +184,156 @@ function test.prepare_table_rowsets()
 	end, schema)
 end
 
+--a fetch on a scan with a param returns the changed rows inside the scan
+--for the request's param values, and the others as removed.
+function test.changed_rows_with_params()
+	local schema = mdbx_schema()
+	schema:import(function()
+		import'schema_mdbx'
+		tables.t = {
+			id, idpk,
+		}
+		tables.child = {
+			id, idpk,
+			t_id, id, fk't',
+			name, text,
+		}
+	end)
+	with_db('changed_rows_with_params', function(tdb)
+		tdb:atomic('w', function()
+			tdb:insert('t', '{}', {id = 1})
+			tdb:insert('t', '{}', {id = 2})
+			tdb:insert('child', '{}', {id = 1, t_id = 1, name = 'a'})
+			tdb:insert('child', '{}', {id = 2, t_id = 2, name = 'b'})
+		end)
+		rowset.children = scan_rowset{
+			scan = function(db)
+				return db:scan('child/t_id', 't_id = :t_id')
+					:select('id, t_id, name')
+			end,
+			pk = 'id',
+		}
+		local rs = rowset.children
+		rs:prepare()
+		local params = {t_id = 1}
+		local res = rs:load(params)
+		assert(res.can_load_changed_rows)
+		local txn_id = res.txn_id
+
+		local function fetch()
+			res = {}
+			rs:load_changed_rows(res, params, txn_id)
+			assert(not res.reload)
+			txn_id = res.txn_id
+			local ids = {} -- {id -> true}
+			for _, row in ipairs(res.rows) do ids[row[1]] = true end
+			local removed_ids = {} -- {id -> true}
+			for _, pk in ipairs(res.removed_pks) do removed_ids[pk[1]] = true end
+			return ids, removed_ids
+		end
+
+		--insert under another master: removed (the nav doesn't have it).
+		tdb:atomic('w', tdb.insert, tdb, 'child', '{}',
+			{id = 3, t_id = 2, name = 'c'})
+		local ids, removed_ids = fetch()
+		assert(not next(ids) and removed_ids[3])
+
+		--insert and update under the requested master: rows.
+		tdb:atomic('w', function()
+			tdb:insert('child', '{}', {id = 4, t_id = 1, name = 'd'})
+			tdb:update('child', '{}', {id = 1, name = 'a2'})
+		end)
+		ids, removed_ids = fetch()
+		assert(ids[4] and ids[1] and not next(removed_ids))
+		assert(res.rows[1][3] == 'a2' or res.rows[2][3] == 'a2')
+
+		--moved to another master: removed; moved in: row.
+		tdb:atomic('w', function()
+			tdb:update('child', '{}', {id = 1, t_id = 2})
+			tdb:update('child', '{}', {id = 2, t_id = 1})
+		end)
+		ids, removed_ids = fetch()
+		assert(ids[2] and removed_ids[1] and not ids[1])
+
+		--deleted: removed.
+		tdb:atomic('w', tdb.del, tdb, 'child', 4)
+		ids, removed_ids = fetch()
+		assert(removed_ids[4] and not next(ids))
+
+		--without the param the load loads no rows and returns no txn_id;
+		--the fetch that follows a push answers no changes and keeps it.
+		local res0 = rs:load({})
+		assert(#res0.rows == 0 and res0.txn_id == nil)
+		tdb:atomic('w', tdb.insert, tdb, 'child', '{}',
+			{id = 5, t_id = 1, name = 'e'})
+		res = rs:exec_load_changed_rows({}, {since_txn_id = null})
+		assert(not res.reload and #res.rows == 0 and #res.removed_pks == 0)
+		assert(res.txn_id == null)
+
+		rowset.children = nil
+		rowset.lookup_t = nil
+	end, schema)
+end
+
+--a table rowset filters by its one auto_bind fk param on the server, through
+--the fk's index, and fetches by it; without the param it loads every row.
+function test.table_rowset_server_param()
+	local schema = mdbx_schema()
+	schema:import(function()
+		import'schema_mdbx'
+		tables.t = {
+			id, idpk,
+		}
+		tables.part = {
+			id, idpk,
+			t_id, id, not_null, child_fk't',
+			other_t_id, id, fk't',
+			name, text,
+		}
+	end)
+	with_db('table_rowset_server_param', function(tdb)
+		tdb:atomic('w', function()
+			tdb:insert('t', '{}', {id = 1})
+			tdb:insert('t', '{}', {id = 2})
+			tdb:insert('part', '{}', {id = 1, t_id = 1, name = 'a'})
+			tdb:insert('part', '{}', {id = 2, t_id = 2, name = 'b'})
+		end)
+		local rs = rowset.table_part
+		rs:prepare()
+		local params = rs:load{}.params
+		assert(params.t_id.client_filter == false)
+		assert(params.other_t_id.client_filter == true)
+
+		local function ids(rows)
+			local t = {}
+			for _, row in ipairs(rows) do add(t, row[1]) end
+			sort(t)
+			return cat(t, ',')
+		end
+		local res = rs:load({t_id = {1}}, {rows = true})
+		assert(ids(res.rows) == '1')
+		assert(res.can_load_changed_rows)
+		local txn_id = res.txn_id
+		assert(ids(rs:load({}, {rows = true}).rows) == '1,2')
+		assert(ids(rs:load({t_id = {1, 2}}, {rows = true}).rows) == '1,2')
+
+		--insert under the other master: removed; moved in: row.
+		tdb:atomic('w', function()
+			tdb:insert('part', '{}', {id = 3, t_id = 2, name = 'c'})
+			tdb:update('part', '{}', {id = 2, t_id = 1})
+		end)
+		res = {}
+		rs:load_changed_rows(res, {t_id = {1}}, txn_id)
+		assert(not res.reload)
+		assert(ids(res.rows) == '2')
+		assert(#res.removed_pks == 1 and res.removed_pks[1][1] == 3)
+
+		rowset.table_part = nil
+		rowset.lookup_t = nil
+		rowset.table_t = nil
+	end, schema)
+end
+
 local name = ...
 if name == 'rowset_mdbx_test' then name = nil end
 local tests = name and {name} or test

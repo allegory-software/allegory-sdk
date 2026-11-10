@@ -2695,6 +2695,95 @@ function test.scan_nested_txn_cleanup()
 	end)
 end
 
+--has_rec() takes a base row's scanned record and agrees with the rows that
+--next() walks, for every kind of path and both directions.
+function test.scan_has_rec()
+	with_db('scan_has_rec', function(db)
+		add_scan_data(db)
+		db:begin'w'
+		db:create_table('hr_rows', {fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'g', mdbx_type = 'u32', not_null = true},
+			{col = 'score', mdbx_type = 'i32'},
+		}, pk = {'id'}})
+		local _, _, score_asc  = db:add_index('hr_rows', {'score'})
+		local _, _, score_desc = db:add_index('hr_rows', {'score',
+			desc = {true}})
+		local _, _, g_score    = db:add_index('hr_rows', {'g', 'score'})
+		for _, row in ipairs{
+			{id = 1, g = 1},
+			{id = 2, g = 1, score = -1},
+			{id = 3, g = 1, score = 10},
+			{id = 4, g = 1, score = 20},
+			{id = 5, g = 2},
+			{id = 6, g = 2, score = 10},
+		} do
+			db:insert('hr_rows', '{}', row)
+		end
+		db:commit()
+		db:begin'r'
+
+		local function check(tbl, path, args)
+			local scan = db:scan(tbl, path)
+			local pk_rec = scan.is_index and scan.val_rec or scan.key_rec
+			local walked = {} -- {raw pk -> true}
+			scan.reset(args)
+			while scan.next() do
+				walked[str(pk_rec.data, pk_rec.size)] = true
+			end
+			scan.close()
+			local ix_schema = scan.is_index and db:table_schema(scan.table)
+			local base_pk_rec = MDBX_val() -- the base row's pk
+			local ix_key_rec = MDBX_val() -- the base row's index key
+			scan.reset(args)
+			for _, k, k_sz, v, v_sz in db:each_raw(scan.base_table) do
+				base_pk_rec.data, base_pk_rec.size = k, k_sz
+				local is_in_scan
+				if ix_schema then
+					ix_key_rec.data, ix_key_rec.size =
+						ix_schema:row_key(db, k, k_sz, v, v_sz)
+					is_in_scan = scan.has_rec(ix_key_rec, base_pk_rec)
+				else
+					is_in_scan = scan.has_rec(base_pk_rec)
+				end
+				assertf(not is_in_scan == not walked[str(k, k_sz)],
+					'%s %s: has_rec() disagrees with next()', tbl, path)
+			end
+		end
+
+		check('scan_rows', '')
+		check('scan_rows', 'tenant_id = ?, id = ?', {1, 2})
+		check('scan_rows', 'tenant_id = ?, id = ?', {9, 9})
+		check('scan_rows', 'tenant_id = ?', {1})
+		check('scan_rows', 'tenant_id = ?, id >= ? <= ?', {1, 2, 3})
+		check('scan_rows', 'tenant_id = ?, id >= ? <= ? desc', {1, 2, 3})
+		check('scan_rows', 'tenant_id = ?, id > ?', {1, 1})
+		check('scan_rows', 'tenant_id = ?, id < ? desc', {1, 3})
+		check('scan_rows/status', 'status = ?', {'ready'})
+		check('scan_rows/status', 'status starts ?', {'rea'})
+		check('scan_rows/status', 'status starts ? desc', {'d'})
+		check('scan_rows/status', 'status = ?, tenant_id = ?, id >= ? <= ?',
+			{'ready', 1, 2, 3})
+		check('scan_rows/status',
+			'status = ?, tenant_id = ?, id >= ? <= ? desc', {'ready', 1, 2, 3})
+		check('scan_files/status', 'status = ?, tenant_id = ?, path starts ?',
+			{'ready', 1, 'a/'})
+		check('scan_files/status',
+			'status = ?, tenant_id = ?, path starts ? desc', {'ready', 1, 'a/'})
+		check('scan_rows/score', 'score < ?', {25})
+		check('scan_rows/score', 'score is_not_null')
+		check(score_asc, 'score ~= ?', {10})
+		check(score_desc, 'score ~= ? asc', {10})
+		check(score_asc, 'score in ?', {{20, -1, 20}})
+		check(score_desc, 'score in ?', {{10, -1}})
+		check(g_score, 'g = ?, score ~= ?', {1, 10})
+		check(g_score, 'g = ?, score <= ? desc', {1, 10})
+		check(g_score, 'g = ?', {2})
+
+		db:commit()
+	end)
+end
+
 local name = ...
 if name == 'mdbx_scan_test' then name = nil end
 local tests = name and {name} or test

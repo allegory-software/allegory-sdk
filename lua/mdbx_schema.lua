@@ -2760,6 +2760,16 @@ end
 		assert(self:try_del_raw(ix_dbi, xk0, xk0_sz, k, k_sz))
 	end
 
+	--the index key of base row (k, v), in a reusable buffer.
+	function ix_schema.row_key(ix_schema, self, k, k_sz, v, v_sz) -- -> xk, xk_sz
+		local xk, xk_buf_sz = ix1_key_rec_buffer, MDBX_MAX_KEY_SIZE
+		decode_ix_into(k, k_sz, v, v_sz, dt)
+		local xk_sz = encode_key(self, ix_schema, 'i_key', nil,
+			false, xk, xk_buf_sz, cols, '[]', dt)
+		clear(dt)
+		return xk, xk_sz
+	end
+
 end
 
 --create the index table, populate it from existing rows, and register it.

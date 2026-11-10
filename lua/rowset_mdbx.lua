@@ -14,7 +14,8 @@ API
 
 SCAN ROWSET OPTIONS
 
-	scan     fn(db) -> scan    required; must end in select()
+	scan     fn(db, param_names) -> scan
+	                           required; must end in select(); see COL PARAMS
 	pk       'col1 ...'        required; output names, not table cols; when
 	                           they are a table's pk, in that table's pk order
 	db       db                optional; defaults to the app db
@@ -29,6 +30,19 @@ SCAN ROWSET OPTIONS
 	read-only and untyped.
 
 	Table actions are published as rowset actions if the rowset has table's pk.
+
+COL PARAMS
+
+	A col param is a param with for_cols and without client_filter. A request
+	can omit it, and then it doesn't filter. So the scan can take a different
+	access path for each set of col params present: the rowset calls
+	rs.scan(db, param_names) once per set, with param_names {name -> true},
+	keeps that scan, and loads and fetches with it. Every scan must output the
+	same cols and read the same tables as the scan for no params, which the
+	rowset takes its fields and table deps from.
+
+	Example: table_* rowsets scan the fk's index when the request has the fk
+	param, and the whole table when it doesn't.
 
 WRITING
 
@@ -224,7 +238,8 @@ local function scan_rowset_init(rs, opt, ...)
 	rs.manual_init_fields = true
 
 	local scan     --the prepared scan, built on first use
-	local row_scan --loads one row back by pk; nil when it can't be built
+	local scans_by_params = {} --{'NAME1 NAME2' -> scan}; params sorted; '' for none.
+	local row_scan        --loads one row by params + pk; nil if it can't be built
 	local is_prepared     --prepare() ran to the end
 	local write_table
 	local key_names = {}  --{NAME,...} outputs holding write_table's pk
@@ -234,17 +249,43 @@ local function scan_rowset_init(rs, opt, ...)
 
 	local insert_row, update_row, delete_row, load_row --fw. decl.
 	local reserve_ids --fw. decl.
+	local changed_rows_loader, load_scan_changed_rows --fw. decl.
 
 	local function rs_db()
 		return rs.db or db()
+	end
+
+	--the scan for the col params present in a request (see COL PARAMS),
+	--built on first use. needs a transaction: building a scan resolves its
+	--table schema.
+	local function scan_for_params(param_vals)
+		local names = {} -- {name1, ...}
+		local param_names = {} -- {name -> true}
+		for name, def in pairs(rs.params) do
+			if def.for_cols and not def.client_filter
+				and param_vals[name] ~= nil
+			then
+				add(names, name)
+				param_names[name] = true
+			end
+		end
+		sort(names)
+		local key = cat(names, ' ')
+		local scan = scans_by_params[key]
+		if not scan then
+			scan = rs.scan(rs_db(), param_names):null_value(null)
+			scans_by_params[key] = scan
+		end
+		return scan
 	end
 
 	--building a scan resolves its table schema, which needs a transaction,
 	--so this runs on the first request rather than at load time.
 	local function prepare()
 		local db = rs_db()
-		scan = rs.scan(db)
-		scan:null_value(null)
+		--rs.params is not complete yet: the scan for no params adds its args.
+		scan = rs.scan(db, empty):null_value(null)
+		scans_by_params[''] = scan
 
 		local fields = {}
 		for i, name in ipairs(scan.out_cols) do
@@ -349,7 +390,8 @@ local function scan_rowset_init(rs, opt, ...)
 		end
 
 		init_load_changed_rows(rs, scan.source_tables,
-			not rs.on_rows_changed and scan:make_load_changed_rows(rs.pk))
+			not rs.on_rows_changed and changed_rows_loader(scan)
+				and load_scan_changed_rows)
 
 		rs:init_fields(false)
 
@@ -365,6 +407,7 @@ local function scan_rowset_init(rs, opt, ...)
 	end
 
 	local function load_rows(res, param_vals, load_opt)
+		local scan = scan_for_params(param_vals)
 		if load_opt.rows then
 			res.rows = scan:rows_array('[]', param_vals)
 		else
@@ -374,6 +417,28 @@ local function scan_rowset_init(rs, opt, ...)
 	end
 	function rs:load_rows(res, param_vals, load_opt)
 		rs_db():atomic('r', load_rows, res, param_vals, load_opt)
+	end
+
+	--loading changed rows
+
+	local changed_rows_loaders = {} --{scan -> load_changed_rows() | false}
+
+	--the scan's load_changed_rows(), or false if the scan can't fetch.
+	--[[local]] function changed_rows_loader(scan)
+		local load = changed_rows_loaders[scan]
+		if load == nil then
+			load = scan:make_load_changed_rows(rs.pk) or false
+			changed_rows_loaders[scan] = load
+		end
+		return load
+	end
+
+	--fetch with the scan for the request's col params; for a scan that
+	--can't fetch, answer reload.
+	--[[local]] function load_scan_changed_rows(changes, param_vals)
+		local load = changed_rows_loader(scan_for_params(param_vals))
+		if not load then return false end
+		return load(changes, param_vals)
 	end
 
 	--[[local]] function load_row(self, vals)
@@ -588,11 +653,35 @@ dynamic_rowset('^table_(.+)$', function(tbl)
 			auto_bind = is_fk_on_pk or fk.ondelete == 'cascade',
 		}
 	end
+
+	--the server filters by the one single-col auto_bind fk, if the table has
+	--only one, through that fk's index. the nav filters by the others.
+	local server_param -- fk name; false when the table has several
+	for name, def in pairs(params) do
+		if def.auto_bind and #schema.fks[name].cols == 1 then
+			if server_param then
+				server_param = false
+				break
+			end
+			server_param = name
+		end
+	end
+	if server_param then
+		params[server_param].client_filter = false
+	end
+
 	local sel = cat(schema.cols, ', ')
 	return scan_rowset{
 		label = tbl:gsub('_', ' '):gsub('^.', string.upper),
 		category = schema.category,
-		scan = function(db) return db:scan(tbl, ''):select(sel) end,
+		scan = function(db, param_names)
+			if server_param and param_names[server_param] then
+				local fk = db:table_schema(tbl).fks[server_param]
+				return db:scan(fk.index.name, fk.cols[1]..' in :'..server_param)
+					:select(sel)
+			end
+			return db:scan(tbl, ''):select(sel)
+		end,
 		pk = cat(schema.pk, ' '),
 		params = params,
 	}

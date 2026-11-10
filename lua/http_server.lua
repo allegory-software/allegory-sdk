@@ -553,7 +553,7 @@ function http_server(...)
 						req:log('ERROR', 'htsrv', 'req', '%s', err)
 					end
 				else
-					logerror(ctcp, 'respond', '%s', err)
+					logerror(ctcp, 'respond', '%s %s: %s', method, uri, err)
 					req.status = 500
 				end
 			else --status line already sent, too late to send HTTP 500.

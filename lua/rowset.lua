@@ -809,10 +809,16 @@ function virtual_rowset(init, ...)
 
 	function rs:exec_load_changed_rows(params, post)
 		local res = {}
-		if rs.load_changed_rows then
-			rs:load_changed_rows(res, params, post.since_txn_id)
-		else
+		if not rs.load_changed_rows then
 			res.reload = true
+		elseif check_no_rows(params) then
+			--with these params, load() returns no rows without a scan and
+			--without a txn_id, so no changed row is requested: keep the
+			--client's txn_id.
+			res.rows, res.removed_pks = {}, {}
+			res.txn_id = post.since_txn_id
+		else
+			rs:load_changed_rows(res, params, post.since_txn_id)
 		end
 		res.can_load_changed_rows = rs.load_changed_rows ~= nil
 		if update_computed_fields and not res.reload then

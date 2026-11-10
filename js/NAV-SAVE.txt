@@ -57,6 +57,12 @@ Open problems:
 	again (run_waiting_requests).
 6. Lines 25-28 of PROBLEM repeat the end of the paragraph above them.
 
+Done since: fetch for scans with param bounds (NAV-CHANGES.txt S2, scan
+paths only), so detail rowsets filtered by the server fetch. Not tried in
+the browser: the demo's grid_save_children detail under "Server tree".
+Proposed, not approved: server filtering for table_* fk params, with
+fetch, in NAV-FETCH-BY-PK.txt.
+
 Next: the bulk change threshold (R4: more than 100 rows; pinned rows
 first, first among siblings in tree view; saved rows unpinned), the rest
 of I5, I1a, then NAV-CHANGES.txt S2.
@@ -153,7 +159,9 @@ R3. SEEING OTHERS' CHANGES
 	in the grid; the nav doesn't do it on its own. The user's pending
 	changes and new records survive a full reload.
 - A user receives only the records that the user is allowed to see.
-- Views that the server filters are out of scope.
+- Views that the server filters are in scope (decided 2026-11-09): every
+	detail nav with a master is one, and those need fetching
+	(NAV-CHANGES.txt S2).
 
 
 R4. WHAT THE USER SEES

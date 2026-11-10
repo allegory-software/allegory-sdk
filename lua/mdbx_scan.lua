@@ -52,6 +52,7 @@ TABLE SCAN
 	scan.next_group    () -> true | nil
 	scan.next_in_group () -> true | nil
 	scan.found         () -> true | nil
+	scan.has_rec       (key_rec, val_rec) -> true | nil   after reset()
 	scan.close         ()
 	scan:col_decoder   (member, col, [comparison]) -> getter, collator
 	scan.key_rec, scan.val_rec, scan.is_index, scan.can_next_group
@@ -917,6 +918,45 @@ function Db:scan(tbl, path, alias)
 			found = nil
 		end
 
+		--a record is in the scan when it has the exact key, if any, and its
+		--range_rec part falls in one sub-range: [lo, hi), as seek_next() walks.
+		local lo_rec, hi_rec -- MDBX_val: one sub-range's bounds
+		function scan.has_rec(rec_key, rec_val) -- -> true | nil
+			if empty_scan then return end
+			if not lo_rec then
+				lo_rec, hi_rec = MDBX_val(), MDBX_val()
+			end
+			if exact_write
+				and C.schema_key_cmp_rec(rec_key, key_rec) ~= 0
+			then
+				return
+			end
+			local test_rec = range_in_val and rec_val or rec_key
+			for i = 1, range_n do
+				local ok, seek_data, seek_sz, limit_data, limit_sz =
+					compute_bounds(range_at(i))
+				if ok then
+					local lo_data, lo_sz, hi_data, hi_sz =
+						seek_data, seek_sz, limit_data, limit_sz
+					if reverse then
+						lo_data, lo_sz, hi_data, hi_sz =
+							limit_data, limit_sz, seek_data, seek_sz
+					end
+					local is_above_lo = true
+					if lo_sz then
+						lo_rec.data, lo_rec.size = lo_data, lo_sz
+						is_above_lo = C.schema_key_cmp_rec(test_rec, lo_rec) >= 0
+					end
+					local is_below_hi = true
+					if hi_sz then
+						hi_rec.data, hi_rec.size = hi_data, hi_sz
+						is_below_hi = C.schema_key_cmp_rec(test_rec, hi_rec) < 0
+					end
+					if is_above_lo and is_below_hi then return true end
+				end
+			end
+		end
+
 	else
 		--no range_eq/lo/hi/prefix past the exact key (or no key at all):
 		--the whole key, with no key to seek to and no limit to stop
@@ -938,6 +978,13 @@ function Db:scan(tbl, path, alias)
 			yielded = false
 			started = false
 			found = nil
+		end
+
+		--a record is in the scan when it has the exact key, if any.
+		function scan.has_rec(rec_key) -- -> true | nil
+			if empty_scan then return end
+			if not exact_write then return true end
+			return C.schema_key_cmp_rec(rec_key, key_rec) == 0 or nil
 		end
 	end
 
@@ -1151,10 +1198,13 @@ function Db:scan(tbl, path, alias)
 		}
 	end
 	scan.source_tables = {[base_schema.name] = true} -- {table -> true}
-	scan.can_fetch_by_pk = eq_n == 0 and not range_field
+	--has_rec() checks a fetched row against the args, but not against another
+	--scan's current row.
+	scan.can_fetch_by_pk = true
 	for _, param in ipairs(eq_params) do
 		if param.scan then
 			update(scan.source_tables, param.scan.source_tables)
+			scan.can_fetch_by_pk = false
 		end
 	end
 
@@ -2756,17 +2806,32 @@ function Scan:make_load_changed_rows(pk)
 		getters[output_i] = db:col_decoder(schema, spec.col, nil,
 			key_rec, get_value)
 	end
+	local ix_schema = self.is_index and db:table_schema(self.table)
+	local ix_key_rec = ix_schema and MDBX_val() -- {data, size}, row's index key
 	local function load_changed_rows(changes, param_vals)
 		local rows = {} -- {row1, ...}, rows in output-column order
 		local removed_pks = {} -- {pk1, ...}, keys in result-PK order
 		local seen_keys = {} -- {raw_pk -> true}
+		self.reset(param_vals)
 		for table_name, raw_pk in changes do
 			if table_name == tbl and not seen_keys[raw_pk] then
 				seen_keys[raw_pk] = true
 				key_rec.data, key_rec.size = raw_pk, #raw_pk
 				local exists -- source row found by PK
 				exists, value, value_size = db:find_raw(tbl, raw_pk, #raw_pk)
+				--a row outside the scan's bounds for these args is sent as
+				--removed, like a deleted row.
+				local is_in_scan -- source row found and inside the scan
 				if exists then
+					if ix_schema then
+						ix_key_rec.data, ix_key_rec.size = ix_schema:row_key(db,
+							raw_pk, #raw_pk, value, value_size)
+						is_in_scan = self.has_rec(ix_key_rec, key_rec)
+					else
+						is_in_scan = self.has_rec(key_rec)
+					end
+				end
+				if is_in_scan then
 					local row = {} -- {val1, ...}, output-column order
 					for output_i, get in ipairs(getters) do
 						local v = get()

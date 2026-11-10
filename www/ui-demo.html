@@ -1001,7 +1001,17 @@ if (grid_nav)
 	grid_nav.can_change_rows = !readonly
 
 ui.hvsplit(split_hv, 'grid_config_form_split_'+split_hv, 350, 'px', 2)
-	if (!is_server)
+	// the detail grid: client-filtered for the client rowset, server-filtered
+	// for grid_save.
+	let detail_rowset_name, detail_param
+	if (source == 'client') {
+		detail_rowset_name = 'grid_config_detail'
+		detail_param = 'master_id'
+	} else if (source == 'server') {
+		detail_rowset_name = 'grid_save_children'
+		detail_param = 'parent_id'
+	}
+	if (detail_rowset_name)
 		ui.hvsplit(split_vh, 'grid_config_detail_split_'+split_vh,
 			.25, 'fr', 2)
 	ui.grid(grid_id, grid_opt)
@@ -1011,11 +1021,11 @@ ui.hvsplit(split_hv, 'grid_config_form_split_'+split_hv, 350, 'px', 2)
 		if (!is_server)
 			seed_grid_config_changes(grid_nav)
 	}
-	if (!is_server) {
+	if (detail_rowset_name) {
 		ui.splitter()
-		ui.grid('grid_config_detail', {
-			rowset_name: 'grid_config_detail',
-			param_bindings: {master_id: grid_id},
+		ui.grid(detail_rowset_name, {
+			rowset_name: detail_rowset_name,
+			param_bindings: {[detail_param]: grid_id},
 		})
 		ui.end_hvsplit()
 	}
@@ -2353,7 +2363,7 @@ if ((x > y && y < z) || !false ?? true) {
 
 demos.code_edit = function() {
 
-code = ui.code_edit('code_edit1', code)
+code = ui.code_edit('code_edit1', code, null, {lang: 'html'})
 
 }
 }

@@ -258,6 +258,18 @@ do
 		local rs = rowset.grid_save
 		add_test_actions(rs, 'grid_save', 'id', 6)
 
+		--a detail of grid_save that the server filters by parent_id.
+		rowset.grid_save_children = scan_rowset{
+			name = 'grid_save_children',
+			category = 'Demo',
+			scan = function(db)
+				return db:scan('grid_save/parent_id', 'parent_id = :parent_id')
+					:select('id, parent_id, pos, text, num')
+			end,
+			pk = 'id',
+			cols = 'id text num',
+		}
+
 		rowset.grid_typed = scan_rowset{
 			name = 'grid_typed',
 			category = 'Demo',
