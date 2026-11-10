@@ -2933,6 +2933,8 @@ function poly_offset(ps, d, ops) {
 		p0 = p1
 	}
 
+	if (!ps.length)
+		ps.push(ps1[0])
 	n = ps.length
 	if (n == 1) { // single null seg: make a square
 		let ci = 0
@@ -3746,13 +3748,21 @@ line2.offset = function line2_offset(d, x1, y1, x2, y2) {
 	// normal vector of the same length as original segment.
 	let dx = -(y2-y1)
 	let dy =   x2-x1
-	let k = d / distance(x1, y1, x2, y2) // normal vector scale factor
+	if (dx == 0 && dy != 0) {
+		dy = d * sign(dy)
+	} else if (dy == 0 && dx != 0) {
+		dx = d * sign(dx)
+	} else {
+		let k = d / distance(x1, y1, x2, y2) // normal vector scale factor
+		dx *= k
+		dy *= k
+	}
 	// normal vector scaled and translated to (x1,y1) and (x2,y2)
 	out.length = 4
-	out[0] = x1 + dx * k
-	out[1] = y1 + dy * k
-	out[2] = x2 + dx * k
-	out[3] = y2 + dy * k
+	out[0] = x1 + dx
+	out[1] = y1 + dy
+	out[2] = x2 + dx
+	out[3] = y2 + dy
 	return out
 }
 

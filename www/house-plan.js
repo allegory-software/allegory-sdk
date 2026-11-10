@@ -37,7 +37,8 @@ function house_plan(t) {
 	function house_bb() {
 		let bb = bbox2()
 		for (let floor of house.floors)
-			bb.add_bbox2(...floor.bb)
+			if (floor.bb[0] <= floor.bb[2])
+				bb.add_bbox2(...floor.bb)
 		return bb
 	}
 
@@ -383,11 +384,11 @@ function house_plan(t) {
 			let snap_range = closest_range(a, ranges)
 			let [min_a, max_a] = snap_range
 			a = clamp(a, min_a, max_a)
-			let sa = snap_lines.snap(a, ui.keypressed('shift') ? 2 : snap_d)
+			let sa = snap_lines.snap(a, ui.keypressed('ctrl') ? 2 : snap_d)
 			draw_state.snap_lines.length = 0
 			if (sa != null)
 				draw_state.snap_lines.push(sa, snap_lines.v)
-			return sa
+			return sa ?? a
 		}
 
 		// find the seg in the left, right, top, bottom side around p.
@@ -472,15 +473,16 @@ function house_plan(t) {
 
 				if (move_freely) {
 
+					let snap_d = ui.keypressed('ctrl') ? 2 : 20
 					let a = seg0.axis + da
-					let sa = snap_lines.snap(a) ?? a
+					let sa = snap_lines.snap(a, snap_d) ?? a
 					a = sa ?? a
 
 					// snap both end-points on main-axis.
 					let m1 = seg0.m1 + dm
 					let m2 = seg0.m2 + dm
-					let m1s = m_snap_lines.snap(m1)
-					let m2s = m_snap_lines.snap(m2)
+					let m1s = m_snap_lines.snap(m1, snap_d)
+					let m2s = m_snap_lines.snap(m2, snap_d)
 					if (m1s != null && m2s != null) // both ends snapped
 						if (abs(m1s - m1) <= abs(m2s - m2)) // pick the one closer to snap line
 							m2s = null
@@ -495,6 +497,7 @@ function house_plan(t) {
 					seg[1][0] =  v ? a : m2s ?? m2
 					seg[0][1] = !v ? a : m1s ?? m1
 					seg[1][1] = !v ? a : m2s ?? m2
+					create_edges()
 
 				} else { // move on cross axis
 
@@ -512,7 +515,7 @@ function house_plan(t) {
 			s.stop = function(draw_state, remove_seg) {
 				push_log('STOP MOVE SEG:', seg.id)
 				if (remove_seg)
-					rem_seg(seg)
+					floor.rem_seg(seg)
 				floor.fix()
 				pop_log()
 				draw_state.snap_lines.length = 0
@@ -528,6 +531,7 @@ function house_plan(t) {
 			// based on direction of drag, either detach a seg or add a seg, and start resizing it.
 			push_log('START RESIZE SEG')
 
+			let p0 = p ? [...p] : [mx0, my0]
 			let seg
 			if (p) {
 				// find seg in the drag direction around p.
@@ -566,14 +570,12 @@ function house_plan(t) {
 
 			log('resizing seg:', seg.id)
 
-			let p0 = [...p]
-
 			floor.fix()
 
 			pop_log()
 
 			let ranges = seg_resize_ranges(seg, p)
-			let snap_lines = snap_lines_for(!seg[0].is_v, seg)
+			let snap_lines = snap_lines_for(!seg.is_v, seg)
 
 			let s = {seg: seg}
 

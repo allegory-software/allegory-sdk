@@ -281,6 +281,20 @@ function cycle2() {
 }
 
 check('poly2.bbox of a cycle', () => veq(cycle2().bbox(), [0, 0, 4, 4]))
+
+for (let n of [1, 2, 3])
+	for (let d of [-2, 2])
+		check('poly2.offset collapsed cycle n=' + n + ', d=' + d, () => {
+			let p = poly2()
+			for (let i = 0; i < n; i++)
+				p.push([10, 20])
+			let edges = p.offset(d, poly2())
+			return p.length == n && edges.length == 4
+				&& edges[0].p == p[0] && veq(edges.bbox(), [8, 18, 12, 22])
+		})
+check('poly2.offset empty cycle stays empty', () =>
+	poly2().offset(2, poly2()).length == 0)
+
 check('poly2.hit', () => square2().hit(1, 1) && !square2().hit(5, 1))
 check('poly2.contains_point', () => square2().contains_point(v2(1, 1)))
 check('poly2.area', () => close(Math.abs(square2().area()), 16))
@@ -357,6 +371,24 @@ check('poly3.compute_smooth_normals', () => {
 check('poly3.triangles', () => square3().triangles().length == 6)
 
 // line2 / line3 -------------------------------------------------------------
+
+for (let n of [100, 200, 400, 500, 600])
+	for (let d of [-14, 14])
+		for (let v of [false, true])
+			for (let dir of [-1, 1])
+				check('line2.offset exact axis ' + [n, d, v, dir], () => {
+					let x2 = v ? 0 : dir * n
+					let y2 = v ? dir * n : 0
+					let r = line2.offset(d, 0, 0, x2, y2)
+					let dx = v ? -dir * d : 0
+					let dy = v ? 0 : dir * d
+					return r[0] == dx && r[1] == dy
+						&& r[2] == x2 + dx && r[3] == y2 + dy
+				})
+check('line2.offset angled segment', () =>
+	veq(line2.offset(5, 0, 0, 3, 4), [-4, 3, -1, 7]))
+check('line2.offset angled segment with negative distance', () =>
+	veq(line2.offset(-5, 0, 0, 3, 4), [4, -3, 7, 1]))
 
 check('line2.distance', () => close(line2(v2(0, 0), v2(3, 4)).distance(), 5))
 check('line3.distance', () => close(line3(v3(0, 0, 0), v3(3, 4, 0)).distance(), 5))

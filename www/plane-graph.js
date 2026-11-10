@@ -69,6 +69,12 @@ const G = window
 const {
 	inf,
 	mod,
+	abs, min, max,
+	isarray, isobj, isnum, isstr,
+	assert, check,
+	log, push_log, pop_log, gen_id,
+	remove_value, replace_value, remove_values,
+	words, map, set, set_toarray,
 	freelist,
 } = glue
 
@@ -173,8 +179,8 @@ seg2.class = seg2_class
 function rem_edge(p1, p2, ps) {
 	remove_value(p1.adj, p2)
 	remove_value(p2.adj, p1)
-	if (p1.adj == 0) remove_value(ps, p1)
-	if (p2.adj == 0) remove_value(ps, p2)
+	if (p1.adj.length == 0) remove_value(ps, p1)
+	if (p2.adj.length == 0) remove_value(ps, p2)
 }
 
 function rem_filament(p, ps) {
@@ -369,11 +375,12 @@ let plane_graph_class = class plane_graph extends Array {
 	}
 
 	add(pg, opt) {
-		asset(pg.is_plane_graph)
+		assert(pg.is_plane_graph)
+		let point_copies = map()
 		for (let p of pg.ps)
-			add_point(p[0], p[1])
+			point_copies.set(p, this.add_point(p[0], p[1]))
 		for (let seg of pg.segs)
-			add_seg(seg[0], seg[1])
+			this.add_seg(point_copies.get(seg[0]), point_copies.get(seg[1]))
 		return this
 	}
 
@@ -568,7 +575,7 @@ let plane_graph_class = class plane_graph extends Array {
 					this.add_seg(p0, p1)
 				p0 = p1
 			}
-		} else if (isarray(a[0])) { // [[seg_id, ]p1, p2, ...]
+		} else { // [[seg_id, ]p1, p2, ...]
 			let i = 0
 			let n = a.length
 			let id, p1
@@ -623,7 +630,9 @@ let plane_graph_class = class plane_graph extends Array {
 	}
 
 	_remove_null_segs() {
-		this.rem_segs(seg => v2_near(seg[0], seg[1]), 'null segs')
+		this.rem_segs(seg => this.orthogonal
+			? seg[0][0] == seg[1][0] && seg[0][1] == seg[1][1]
+			: v2_near(seg[0], seg[1]), 'null segs')
 	}
 
 	_remove_angled_segs() {
@@ -713,7 +722,9 @@ let plane_graph_class = class plane_graph extends Array {
 		let p0
 		for (let i = 0; i < this.ps.length; i++) {
 			let p = this.ps[i]
-			if (p0 && v2_near(p, p0)) {
+			if (p0 && (this.orthogonal
+				? p[0] == p0[0] && p[1] == p0[1]
+				: v2_near(p, p0))) {
 				for (let j = 0; j < p.segs.length; j++) { // each connected seg
 					let seg = p.segs[j]
 					for (let i = 0; i < 2; i++) // each seg end
@@ -788,9 +799,9 @@ let plane_graph_class = class plane_graph extends Array {
 				m0 = m
 			} else if (v != v0 || m != m0) {
 				if (i >= i0 + 2) { // there's at least 2 segments on this axis
+					let seg0 = this.segs[i0]
 					for (let j = i0+1; j < i; j++) {
 						let seg1 = this.segs[j]
-						let seg0 = this.segs[j-1]
 						let m1_1 = seg1.m1
 						let m2_0 = seg0.m2
 						if (m1_1 < m2_0) {
@@ -802,6 +813,8 @@ let plane_graph_class = class plane_graph extends Array {
 								'; seg removed:', seg1.id, '; seg', seg0.id, '.m2 set to:', seg1.m2)
 							seg1.removed = true
 							seg0.m2 = max(seg1.m2, seg0.m2)
+						} else {
+							seg0 = seg1
 						}
 					}
 				}
@@ -834,7 +847,7 @@ let plane_graph_class = class plane_graph extends Array {
 		comp.outer_cycle = null
 		comp.segs.length = 0
 		comp.islands.length = 0
-		comp_freelist.free()
+		comp_freelist.free(comp)
 	}
 
 	_free_comps() {

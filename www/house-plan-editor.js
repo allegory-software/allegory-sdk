@@ -53,6 +53,14 @@ function scaler(name) {
 	let bb = bbox2()
 	s.scale_to_fit = function(bb1, w, h) {
 		if (s.zoomed) return
+		if (bb1[0] > bb1[2]) {
+			set_scale(1)
+			if (!s.panned) {
+				s.x0 = round(w / 2)
+				s.y0 = round(h / 2)
+			}
+			return
+		}
 		let margin = ceil(ui.em(2) + line_width)
 		w -= 2 * margin
 		h -= 2 * margin
@@ -83,8 +91,6 @@ function scaler(name) {
 		let plan_yt = s.plan_y(-s.y0 + yc)
 
 		set_scale(clamp(scale * 1.2 ** -d, 0.1, 10))
-
-		// TODO: rotate
 
 		let xt = s.x(plan_xt)
 		let yt = s.y(plan_yt)
@@ -318,6 +324,13 @@ ui.box_widget('floor_editor', {
 
 			let dx = cs.dx / sg.scale
 			let dy = cs.dy / sg.scale
+			if (sg.rotation) {
+				let c = cos(sg.rotation)
+				let s = sin(sg.rotation)
+				let dx0 = dx
+				dx = dx0 * c + dy * s
+				dy = -dx0 * s + dy * c
+			}
 
 			if (cs.drag) {
 
@@ -357,19 +370,40 @@ ui.box_widget('floor_editor', {
 				cs.resize_seg.resize(dx, dy, draw_state, cs)
 
 			if (action == 'pan') {
-				sg.x0 = sg.pan_x0 + sg.d(dx)
-				sg.y0 = sg.pan_y0 + sg.d(dy)
+				sg.x0 = sg.pan_x0 + cs.dx
+				sg.y0 = sg.pan_y0 + cs.dy
 				sg.panned = true
 			}
 
 			if (cs.drop) {
 				if (action == 'move_seg') {
-					cs.move_seg.stop(draw_state, ui.dblclick)
+					cs.move_seg.stop(draw_state)
 				} else if (action == 'resize_seg') {
 					cs.resize_seg.stop(draw_state)
 				}
 			}
 
+		}
+
+		let is_deleting_seg = hs?.action == 'move_seg' && ui.dblclick
+		if (is_deleting_seg) {
+			plan.rem_seg(hs.seg)
+			plan.fix()
+		}
+
+		if (cs?.drop || is_deleting_seg) {
+			if (hs) {
+				hs.seg = null
+				hs.p = null
+				hs.cycle = null
+				hs.action = null
+			}
+			if (cs) {
+				cs.seg = null
+				cs.p = null
+				cs.cycle = null
+				cs.action = null
+			}
 		}
 
 		ui.stack()
@@ -776,8 +810,16 @@ ui.box_widget('floor_editor', {
 		let pan    = ui.keypressed('shift')
 		let nosnap = ui.keypressed('ctrl')
 
-		hs.mx = ui.mx - x00 // pointer position in the box, for zooming.
+		hs.mx = ui.mx - x00 // pointer position before view rotation, for zooming.
 		hs.my = ui.my - y00
+		if (sg.rotation) {
+			let c = cos(sg.rotation)
+			let s = sin(sg.rotation)
+			let dx = hs.mx - w / 2
+			let dy = hs.my - h / 2
+			hs.mx = w / 2 + dx * c + dy * s
+			hs.my = h / 2 - dx * s + dy * c
+		}
 
 		if (pan) {
 			hs.action = 'pan'

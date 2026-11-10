@@ -167,6 +167,237 @@ check('shift+drag pans', view2.x0 != view1.x0 || view2.y0 != view1.y0,
 
 check('no page errors after input', errors.length == 0, errors.join('\n'))
 
+// a new wall follows the pointer from its initial position.
+await pg.reload()
+await pg.waitForTimeout(300)
+view = await read_view()
+sx = view.x0 + Math.round(400 * view.scale)
+sy = view.y0 + Math.round(200 * view.scale)
+await pg.mouse.move(sx, sy)
+await pg.waitForTimeout(100)
+await pg.mouse.down()
+await pg.waitForTimeout(100)
+await pg.mouse.move(sx + 40, sy)
+await pg.waitForTimeout(100)
+let resize = await pg.evaluate(function() {
+	let cs = ui.captured('fe')
+	let seg = cs.resize_seg?.seg
+	return seg && {length: seg.m2 - seg.m1, dx: cs.dx}
+})
+check('new wall follows the pointer without an initial jump',
+	resize && Math.abs(resize.length - resize.dx / view.scale) < 1e-6,
+	JSON.stringify(resize))
+await pg.mouse.up()
+await pg.waitForTimeout(100)
+
+// collapse the new wall, then extend it again during the same drag.
+view = await read_view()
+await pg.mouse.move(sx, sy)
+await pg.waitForTimeout(100)
+await pg.mouse.down()
+await pg.waitForTimeout(100)
+await pg.mouse.move(sx + 40, sy)
+await pg.waitForTimeout(100)
+let collapsed = await pg.evaluate(function() {
+	let ds = ui._state_map.get('fe').draw_state
+	let seg = ui.captured('fe').resize_seg?.seg
+	return {scale: ds.scale, length: seg && seg.m2 - seg.m1}
+})
+check('collapsed wall keeps a finite positive view scale',
+	collapsed.length == 0 && Number.isFinite(collapsed.scale)
+		&& collapsed.scale > 0,
+	JSON.stringify(collapsed))
+await pg.mouse.move(sx + 60, sy)
+await pg.waitForTimeout(100)
+let extended = await pg.evaluate(function() {
+	let seg = ui.captured('fe').resize_seg?.seg
+	return seg && seg.m2 - seg.m1
+})
+check('collapsed wall can be extended again',
+	Math.abs(extended - 20 / view.scale) < 1e-6, extended)
+await pg.mouse.up()
+await pg.waitForTimeout(100)
+
+// double-click deletion runs after the pointer has been released.
+await pg.reload()
+await pg.waitForTimeout(300)
+view = await read_view()
+sx = view.x0 + Math.round(200 * view.scale)
+sy = view.y0 + Math.round(200 * view.scale)
+await pg.mouse.move(sx, sy)
+await pg.waitForTimeout(100)
+await pg.mouse.dblclick(sx, sy, {delay: 80})
+await pg.waitForTimeout(200)
+let deleted = await pg.evaluate(function() {
+	let floor = house.floors[0]
+	let has_divider = false
+	for (let seg of floor.segs)
+		if (seg.is_v && seg.axis == 200)
+			has_divider = true
+	return {has_divider, segs: floor.segs.length,
+		cycles: floor.comps[0].cycles.length}
+})
+check('double-click deletes the wall and joins the rooms',
+	!deleted.has_divider && deleted.segs == 4 && deleted.cycles == 2,
+	JSON.stringify(deleted))
+check('no page errors after resizing and deletion', errors.length == 0,
+	errors.join('\n'))
+
+// merging the divider into either outside wall.
+for (let target_x of [0, 600]) {
+	await pg.reload()
+	await pg.waitForTimeout(300)
+	view = await read_view()
+	sx = view.x0 + Math.round(200 * view.scale)
+	sy = view.y0 + Math.round(200 * view.scale)
+	await pg.mouse.move(sx, sy)
+	await pg.waitForTimeout(100)
+	await pg.mouse.down()
+	await pg.waitForTimeout(100)
+	await pg.mouse.move(view.x0 + Math.round(target_x * view.scale), sy,
+		{steps: 10})
+	await pg.waitForTimeout(100)
+	let n_errors = errors.length
+	await pg.mouse.up()
+	await pg.waitForTimeout(200)
+	let merged = await pg.evaluate(function() {
+		let floor = house.floors[0]
+		return {segs: floor.segs.length, cycles: floor.comps[0].cycles.length,
+			drawn: ui._frame_drawn, captured: ui.captured_id}
+	})
+	check('merging at x=' + target_x + ' joins the rooms',
+		merged.segs == 4 && merged.cycles == 2, JSON.stringify(merged))
+	check('merging at x=' + target_x + ' draws without stale references',
+		errors.length == n_errors && merged.drawn && merged.captured == null,
+		errors.slice(n_errors).join('\n'))
+}
+
+// empty-floor drawing and view state.
+await pg.reload()
+await pg.waitForTimeout(200)
+await pg.evaluate(function() {
+	window.house = house_plan({floors: [{lines: []}]})
+	ui.animate()
+})
+await pg.waitForTimeout(100)
+view = await read_view()
+check('empty floor has a centered view at scale 1',
+	view.scale == 1 && view.x0 == 400 && view.y0 == 300,
+	JSON.stringify(view))
+await pg.mouse.move(400, 300)
+await pg.waitForTimeout(50)
+await pg.mouse.down()
+await pg.waitForTimeout(50)
+await pg.mouse.move(440, 300)
+await pg.waitForTimeout(100)
+await pg.mouse.up()
+await pg.waitForTimeout(100)
+check('a wall can be drawn on an empty floor', await pg.evaluate(function() {
+	let f = house.floors[0]
+	return f.segs.length == 1 && f.segs[0].m2 > f.segs[0].m1
+}))
+await pg.keyboard.down('Shift')
+await pg.mouse.move(400, 300)
+await pg.waitForTimeout(50)
+await pg.mouse.down()
+await pg.waitForTimeout(50)
+await pg.mouse.move(440, 320)
+await pg.mouse.up()
+await pg.keyboard.up('Shift')
+await pg.waitForTimeout(100)
+view = await read_view()
+await pg.evaluate(function() {
+	window.house = house_plan({floors: [{lines: []}]})
+	ui.animate()
+})
+await pg.waitForTimeout(100)
+view1 = await read_view()
+check('empty floor preserves panning',
+	view1.x0 == view.x0 && view1.y0 == view.y0, JSON.stringify(view1))
+await pg.mouse.move(400, 300)
+await pg.waitForTimeout(50)
+await pg.mouse.wheel(0, -100)
+await pg.waitForTimeout(100)
+view = await read_view()
+await pg.evaluate(function() {
+	window.house = house_plan({floors: [{lines: []}]})
+	ui.animate()
+})
+await pg.waitForTimeout(100)
+view1 = await read_view()
+check('empty floor preserves zoom', view1.scale == view.scale
+	&& view1.x0 == view.x0 && view1.y0 == view.y0, JSON.stringify(view1))
+
+// rotated wall movement, panning and zooming.
+for (let turns of [1, 2, 3]) {
+	await pg.reload()
+	await pg.waitForTimeout(200)
+	await pg.evaluate(function() {
+		ui.focus('fe.rotate_button')
+		ui.animate()
+	})
+	await pg.waitForTimeout(50)
+	for (let i = 0; i < turns; i++) {
+		await pg.keyboard.down('Enter')
+		await pg.waitForTimeout(50)
+		await pg.keyboard.up('Enter')
+		await pg.waitForTimeout(50)
+	}
+	view = await read_view()
+	let angle = turns * Math.PI / 2
+	let c = Math.cos(angle), s = Math.sin(angle)
+	let px = view.x0 - 400
+	let py = view.y0 + Math.round(200 * view.scale) - 300
+	sx = 400 + px * c - py * s
+	sy = 300 + px * s + py * c
+	await pg.mouse.move(sx, sy)
+	await pg.waitForTimeout(50)
+	await pg.mouse.down()
+	await pg.waitForTimeout(50)
+	await pg.mouse.move(sx + 40 * c, sy + 40 * s)
+	await pg.waitForTimeout(100)
+	let moved_axis = await pg.evaluate(() => ui.captured('fe')?.seg?.axis)
+	check('wall follows the pointer at rotation ' + turns * 90,
+		Math.abs(moved_axis - 40 / view.scale) < 1e-6, moved_axis)
+	await pg.mouse.up()
+	await pg.waitForTimeout(100)
+}
+view = await read_view()
+await pg.keyboard.down('Shift')
+await pg.mouse.move(400, 300)
+await pg.waitForTimeout(50)
+await pg.mouse.down()
+await pg.waitForTimeout(50)
+await pg.mouse.move(440, 320)
+await pg.mouse.up()
+await pg.keyboard.up('Shift')
+await pg.waitForTimeout(100)
+view1 = await read_view()
+check('rotated panning follows screen pixels',
+	view1.x0 - view.x0 == 40 && view1.y0 - view.y0 == 20,
+	JSON.stringify([view, view1]))
+view = view1
+let angle = 3 * Math.PI / 2
+let c = Math.cos(angle), s = Math.sin(angle)
+let ux = 400 + 100 * c + 50 * s
+let uy = 300 - 100 * s + 50 * c
+let plan_x = (ux - view.x0) / view.scale
+let plan_y = (uy - view.y0) / view.scale
+await pg.mouse.move(500, 350)
+await pg.waitForTimeout(50)
+await pg.mouse.wheel(0, -100)
+await pg.waitForTimeout(100)
+view1 = await read_view()
+let px = view1.x0 + Math.round(plan_x * view1.scale) - 400
+let py = view1.y0 + Math.round(plan_y * view1.scale) - 300
+let zoom_x = 400 + px * c - py * s
+let zoom_y = 300 + px * s + py * c
+check('rotated zoom keeps the point under the pointer',
+	Math.abs(zoom_x - 500) <= 1 && Math.abs(zoom_y - 350) <= 1,
+	JSON.stringify([zoom_x, zoom_y]))
+check('no page errors after empty-floor and rotated editing',
+	errors.length == 0, errors.join('\n'))
+
 // the pages that host the demos load without errors and build the widget.
 let base_url = `http://127.0.0.1:${server.address().port}`
 for (let url of ['/cui_app', '/ui-demo.html?demo=floor_editor']) {
