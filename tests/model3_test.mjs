@@ -12,7 +12,7 @@ const files = {
 	'/earcut.js': www('earcut.js'),
 	'/3d.js': www('3d.js'),
 	'/gl.js': www('gl.js'),
-	'/gl-renderer.js': www('gl-renderer.js'),
+	'/gl_renderer.js': www('gl_renderer.js'),
 	'/model3.js': process.argv[2] ?? www('model3.js'),
 }
 const page_html = `<!DOCTYPE html><canvas id=c width=16 height=16></canvas>
@@ -20,7 +20,7 @@ const page_html = `<!DOCTYPE html><canvas id=c width=16 height=16></canvas>
 <script src=earcut.js></script>
 <script src=3d.js global></script>
 <script src=gl.js></script>
-<script src=gl-renderer.js></script>
+<script src=gl_renderer.js></script>
 <script src=model3.js></script>`
 
 const server = http.createServer(async (req, res) => {
@@ -82,7 +82,7 @@ const results = await page.evaluate(() => {
 	const veq = (a, b) => Array.from(a).length == b.length &&
 		Array.from(a).every((x, i) => near(x, b[i]))
 
-	// a mock of the editor's undo stack, same shape as model3-editor.js.
+	// a mock of the editor's undo stack, same shape as model3_editor.js.
 	function make_editor() {
 		let undo_stack = [], undo_groups = [], redo_stack = [], redo_groups = []
 		let ed = {gl}

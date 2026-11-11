@@ -7,6 +7,8 @@ import {fileURLToPath} from 'node:url'
 
 const www = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 	'..', 'www')
+const test_plans = (await fs.readFile(path.join(www, 'ui-demo.html'), 'utf8'))
+	.match(/<script id=house_test_plans>[\s\S]*?<\/script>/)[0]
 const page_html = `<!DOCTYPE html>
 <html>
 <head>
@@ -14,16 +16,25 @@ const page_html = `<!DOCTYPE html>
 <script src=glue.js global></script>
 <script src=earcut.js></script>
 <script src=3d.js></script>
-<script src=plane-graph.js></script>
-<script src=house-plan.js></script>
-<script src=house-test-plans.js></script>
+<script src=plane_graph.js></script>
+<script src=house_plan.js></script>
+${test_plans}
 <script src=ui.js></script>
 <script src=ui_icon_defs.js></script>
-<script src=house-plan-editor.js></script>
+<script src=ui_field.js></script>
+<script src=house_plan_editor.js></script>
 <script>
-window.house = house_plan(house_test_plans.simple)
+window.plan_json = json(house_test_plans.simple)
 ui.main = function() {
-	ui.floor_editor('fe', window.house.floors[0])
+	if (window.publish_plan) {
+		ui.floor_editor_update_value('fe')
+		window.publish_plan = false
+	}
+	window.plan_json = ui.floor_editor('fe', window.plan_json,
+		null, null, window.editor_readonly)
+	window.input_value = ui.value('fe')
+	window.raw_input_value = ui.input_value('fe')
+	window.house = ui.state_of('fe', 'house')
 }
 </script>
 <body></body>
@@ -44,19 +55,19 @@ const server = http.createServer(async function(req, res) {
 <script src=glue.js global></script>
 <script src=ui.js global></script>
 <script src=ui_icon_defs.js></script>
+<script src=ui_field.js></script>
 <script src=earcut.js></script>
 <script src=3d.js></script>
-<script src=plane-graph.js></script>
-<script src=house-plan.js></script>
-<script src=house-test-plans.js></script>
-<script src=house-plan-editor.js></script>
+<script src=plane_graph.js></script>
+<script src=house_plan.js></script>
+${test_plans}
+<script src=house_plan_editor.js></script>
 <script>
-let house
+let plan_json = json(house_test_plans.gable1)
 ui.main = function() {
-	house ??= house_plan(house_test_plans.gable1)
 	h(1, sp2())
-		for (let floor of house.floors)
-			ui.floor_editor('fe'+floor.i, floor)
+		for (let i = 0; i < house_test_plans.gable1.floors.length; i++)
+			ui.floor_editor('fe'+i, plan_json)
 	end_h()
 }
 </script>
@@ -146,6 +157,15 @@ check('hovering a wall hits it', hs?.action == 'move_seg' && hs.has_seg,
 	JSON.stringify(hs))
 
 // dragging the wall moves it.
+let input_json = await pg.evaluate(function() {
+	let save_state = house.save_state
+	window.snapshot_n = 0
+	house.save_state = function() {
+		window.snapshot_n++
+		return save_state()
+	}
+	return window.input_value
+})
 let segs0 = await read_segs()
 await pg.mouse.down()
 await pg.mouse.move(sx + 100, sy, {steps: 10}) // past the 20-unit snap.
@@ -153,6 +173,17 @@ await pg.mouse.up()
 await pg.waitForTimeout(300)
 let segs1 = await read_segs()
 check('dragging a wall moves it', segs0 != segs1, segs0 + ' ' + segs1)
+check('editing keeps JSON serialization deferred', await pg.evaluate(value =>
+	window.input_value == value && window.snapshot_n == 0, input_json))
+await pg.evaluate(function() {
+	window.house0 = house
+	window.publish_plan = true
+	ui.animate()
+})
+await pg.waitForTimeout(100)
+check('publishing builds JSON once and preserves the live house',
+	await pg.evaluate(value => window.input_value != value
+		&& window.snapshot_n == 1 && house == window.house0, input_json))
 
 // the wheel zooms.
 view = await read_view()
@@ -367,13 +398,22 @@ check('no page errors after history and cancellation',
 	errors.length == 0, errors.join('\n'))
 
 // empty-floor drawing and view state.
+async function reset_empty_floor() {
+	await pg.evaluate(function() {
+		window.publish_plan = true
+		ui.animate()
+	})
+	await pg.waitForTimeout(100)
+	await pg.evaluate(function() {
+		window.plan_json = json({floors: [{lines: []}]})
+		ui.animate()
+	})
+	await pg.waitForTimeout(100)
+}
+
 await pg.reload()
 await pg.waitForTimeout(200)
-await pg.evaluate(function() {
-	window.house = house_plan({floors: [{lines: []}]})
-	ui.animate()
-})
-await pg.waitForTimeout(100)
+await reset_empty_floor()
 view = await read_view()
 check('empty floor has a centered view at scale 1',
 	view.scale == 1 && view.x0 == 400 && view.y0 == 300,
@@ -400,11 +440,7 @@ await pg.mouse.up()
 await pg.keyboard.up('Shift')
 await pg.waitForTimeout(100)
 view = await read_view()
-await pg.evaluate(function() {
-	window.house = house_plan({floors: [{lines: []}]})
-	ui.animate()
-})
-await pg.waitForTimeout(100)
+await reset_empty_floor()
 view1 = await read_view()
 check('empty floor preserves panning',
 	view1.x0 == view.x0 && view1.y0 == view.y0, JSON.stringify(view1))
@@ -413,11 +449,7 @@ await pg.waitForTimeout(50)
 await pg.mouse.wheel(0, -100)
 await pg.waitForTimeout(100)
 view = await read_view()
-await pg.evaluate(function() {
-	window.house = house_plan({floors: [{lines: []}]})
-	ui.animate()
-})
-await pg.waitForTimeout(100)
+await reset_empty_floor()
 view1 = await read_view()
 check('empty floor preserves zoom', view1.scale == view.scale
 	&& view1.x0 == view.x0 && view1.y0 == view.y0, JSON.stringify(view1))
@@ -467,9 +499,14 @@ await pg.mouse.up()
 await pg.keyboard.up('Shift')
 await pg.waitForTimeout(100)
 view1 = await read_view()
+let pan_dx = view1.x0 - view.x0
+let pan_dy = view1.y0 - view.y0
+let pan_angle = 3 * Math.PI / 2
+let pan_x = pan_dx * Math.cos(pan_angle) - pan_dy * Math.sin(pan_angle)
+let pan_y = pan_dx * Math.sin(pan_angle) + pan_dy * Math.cos(pan_angle)
 check('rotated panning follows screen pixels',
-	view1.x0 - view.x0 == 40 && view1.y0 - view.y0 == 20,
-	JSON.stringify([view, view1]))
+	Math.abs(pan_x - 40) < 1e-6 && Math.abs(pan_y - 20) < 1e-6,
+	JSON.stringify([pan_x, pan_y]))
 view = view1
 let angle = 3 * Math.PI / 2
 let c = Math.cos(angle), s = Math.sin(angle)
@@ -491,6 +528,37 @@ check('rotated zoom keeps the point under the pointer',
 	JSON.stringify([zoom_x, zoom_y]))
 check('no page errors after empty-floor and rotated editing',
 	errors.length == 0, errors.join('\n'))
+
+// input values and readonly publication.
+await pg.evaluate(function() {
+	window.plan_json = null
+	ui.animate()
+})
+await pg.waitForTimeout(100)
+check('the input accepts null', await pg.evaluate(() =>
+	window.input_value === null && house == null))
+await pg.evaluate(function() {
+	window.plan_json = '{'
+	ui.animate()
+})
+await pg.waitForTimeout(100)
+check('the input preserves invalid JSON', await pg.evaluate(() =>
+	window.input_value === undefined && window.raw_input_value == '{'
+		&& house == null))
+await pg.evaluate(function() {
+	window.plan_json = json(house_test_plans.simple)
+	window.editor_readonly = true
+	ui.animate()
+})
+await pg.waitForTimeout(100)
+let readonly_json = await pg.evaluate(() => window.input_value)
+await pg.evaluate(function() {
+	window.publish_plan = true
+	ui.animate()
+})
+await pg.waitForTimeout(100)
+check('readonly input does not publish edits', await pg.evaluate(value =>
+	window.input_value == value, readonly_json))
 
 // the pages that host the demos load without errors and build the widget.
 let base_url = `http://127.0.0.1:${server.address().port}`

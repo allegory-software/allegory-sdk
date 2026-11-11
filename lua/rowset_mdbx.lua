@@ -359,7 +359,7 @@ local function scan_rowset_init(rs, opt, ...)
 		rs.params = rs.params or {} -- {param name -> def}
 		for arg, field in pairs(scan.arg_fields) do
 			if isstr(arg) then
-				rs.params[arg] = update({accept_many = false}, field)
+				rs.params[arg] = update({accept_many = false}, field, rs.params[arg])
 			end
 		end
 

@@ -268,7 +268,7 @@ function square2() {
 	return p
 }
 
-// a cycle as plane-graph builds it: the elements are the points themselves.
+// a cycle as plane_graph builds it: the elements are the points themselves.
 function cycle2() {
 	let p = poly2()
 	p.push([0, 0], [4, 0], [4, 4], [0, 4])

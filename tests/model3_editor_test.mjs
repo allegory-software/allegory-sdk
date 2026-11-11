@@ -17,10 +17,10 @@ const page_html = `<!DOCTYPE html>
 <script src=3d.js></script>
 <script src=suncalc.js></script>
 <script src=gl.js></script>
-<script src=gl-renderer.js></script>
+<script src=gl_renderer.js></script>
 <script src=model3.js></script>
 <script src=ui.js></script>
-<script src=model3-editor.js></script>
+<script src=model3_editor.js></script>
 <script>
 const {v3, line3} = Math3D
 ui.main = function() {
@@ -61,9 +61,9 @@ const server = http.createServer(async function(req, res) {
 <script src=3d.js></script>
 <script src=suncalc.js></script>
 <script src=gl.js></script>
-<script src=gl-renderer.js></script>
+<script src=gl_renderer.js></script>
 <script src=model3.js></script>
-<script src=model3-editor.js></script>
+<script src=model3_editor.js></script>
 <script>
 ui.main = function() {
 	ui.model3_editor('m', {}, ui.model3_editor_test_objects)

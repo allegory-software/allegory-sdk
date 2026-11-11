@@ -371,7 +371,13 @@ function init(id, e) {
 	}
 
 	function delete_rows(ris) {
-		if (!ris.length || !(e.can_remove_rows && e.rowset_can_remove_rows))
+		let can_remove = false
+		for (let ri of ris)
+			if (e.can_remove_row(ri)) {
+				can_remove = true
+				break
+			}
+		if (!can_remove)
 			return false
 		let n = ris.length // selected row count
 		let is_one_new_row = n == 1 && e.is_new(ris[0]) // one unsaved row
@@ -389,11 +395,11 @@ function init(id, e) {
 		let ri = e.focused_ri // focused row index
 		let field = focused_field() // focused field, or null
 		let has_cell = ri != null && field != null // focused cell exists
-		let has_selection = false // at least one selected row
+		let can_remove = false // a selected row may be removed
 		let has_removed = false // a selected row marked for deletion
 		let can_clear = false // a selected cell can be changed
 		e.each_selected_row(ri => {
-			has_selection = true
+			can_remove ||= e.can_remove_row(ri)
 			has_removed ||= e.is_removed(ri)
 			if (!can_clear && !e.is_picker)
 				for (let field of e.visible_fields)
@@ -444,8 +450,7 @@ function init(id, e) {
 				{id: 'insert_row', label: 'Insert row', icon: 'row-insert-top',
 					disabled: !(e.can_add_rows && e.rowset_can_add_rows)},
 				{id: 'delete_rows', label: 'Delete selected rows', icon: 'trash',
-					disabled: !has_selection
-						|| !(e.can_remove_rows && e.rowset_can_remove_rows)},
+					disabled: !can_remove},
 				{id: 'undelete_rows', label: 'Undelete selected rows',
 					icon: 'trash-off', disabled: !has_removed},
 				null,
@@ -2528,8 +2533,6 @@ function init(id, e) {
 			// is a single new row.
 			let ris = !ctrl && !e.editing ? selected_ris() : empty_array
 			if (ris.length) {
-				if (!(e.can_remove_rows && e.rowset_can_remove_rows))
-					return false
 				if (delete_rows(ris))
 					return false
 			}
@@ -2793,7 +2796,7 @@ function init(id, e) {
 			let text = e.load_error
 				? e.load_error+'\n'+S('click_to_reload', 'Click to reload.')
 				: S('rows_changed_reload',
-					'The rows changed on the server. Click to reload.')
+					'The rows changed on the server.\nClick to reload.')
 			ui.stack(smoke_id, 1, 's', 's')
 				ui.bb('smoke')
 				ui.text('', text, 0, 'c', 'c', null, 'line')

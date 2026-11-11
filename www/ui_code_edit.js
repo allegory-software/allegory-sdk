@@ -1706,7 +1706,13 @@ function code_edit_view(id, opt, s) {
 	e.update_value = function() {
 		if (!value_changed)
 			return
-		ui.set_interaction_value(id, s, lines.join(newline) || null)
+		let value = lines.join(newline) || null
+		if (value != null && s.field.from_input) {
+			let v = s.field.from_input(value)
+			if (v !== undefined)
+				value = v
+		}
+		ui.set_interaction_value(id, s, value)
 		value_changed = false
 	}
 

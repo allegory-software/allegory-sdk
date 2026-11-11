@@ -2605,8 +2605,11 @@ ui.nav = function(id, opt) {
 		e.exit_edit()
 		if (is_server_rowset && (force || server_params_changed))
 			e.reload()
-		else
+		else {
 			refilter()
+			if (e.focused_ri == null)
+				focus_saved_cell()
+		}
 	}
 
 	e.set_param_frozen = function(param, frozen) {
@@ -3397,6 +3400,14 @@ ui.nav = function(id, opt) {
 	}
 	e.can_change_row = can_change_row
 
+	e.can_remove_row = function(ri) {
+		let flags = e.row_flags[ri]
+		if (flags & ROW_NO_REMOVE)
+			return false
+		return !!(flags & (ROW_NEW | ROW_GROUP))
+			|| e.can_remove_rows && e.rowset_can_remove_rows
+	}
+
 	// the user may edit the cell.
 	e.can_change_val = function(ri, fi) {
 		return !e.all_fields[fi].readonly && can_change_row(ri)
@@ -3988,10 +3999,10 @@ ui.nav = function(id, opt) {
 	// Mark a saved row for deletion, or collect a new row in new_ris to drop
 	// it. Mark new rows while their save is pending or a failed save is
 	// unresolved. Leave group rows unmarked because they are not
-	// records. Return false if is_input is set and the row has no_remove.
+	// records. Return false if is_input is set and deletion is not allowed.
 	function mark_removed(ri, new_ris, is_input) {
 		let flags = e.row_flags[ri]
-		if (is_input && flags & ROW_NO_REMOVE)
+		if (is_input && !e.can_remove_row(ri))
 			return false
 		if (flags & ROW_GROUP)
 			return true
@@ -4075,7 +4086,7 @@ ui.nav = function(id, opt) {
 					unmark_subtree_removed(ri)
 				else
 					unmark_removed(ri)
-		} else if (!ev?.input || (e.can_remove_rows && e.rowset_can_remove_rows)) {
+		} else {
 			e.exit_edit()
 			let had_focus = e.focused_ri != null
 			let top_vri = 1/0 // first removed row's position in visible_ris

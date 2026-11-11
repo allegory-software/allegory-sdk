@@ -61,7 +61,7 @@ NOTE: use obj() instead of {} for maps to prevent map['constructor'].
 const ui = window.ui
 
 const {
-	assign, assign_opt, noop, display_name, words, set,
+	assign, assign_opt, noop, display_name, words, set, json, try_json_arg,
 	num, isnum, isstr, isbool, isarray, isobj, str, dec, repl, utf8_len, floor,
 	isobject, isfunc, clamp,
 	assert, obj, map, empty_array, empty, return_true, memoize,
@@ -760,6 +760,31 @@ all_field_types.col_storage = array_storage
 
 // the default type: all its behavior comes from all_field_types.
 field_types.text = {w: 8}
+
+//// JSON --------------------------------------------------------------------
+
+let json_field = field_types.json = {
+	control: 'code_edit', w: 12, maxlen: 1024 ** 2,
+}
+
+json_field.to_input = function(s) {
+	let v = try_json_arg(s)
+	return v === undefined ? s : json(v, null, '\t')
+}
+
+json_field.from_input = function(s) {
+	let v = try_json_arg(s)
+	return v === undefined ? undefined : json(v)
+}
+
+json_field.validator_json = {
+	parse    : (e, v) => e.from_input(v),
+	validate : return_true,
+	error    : (e) => S('validation_json_error',
+		'{0} is not valid JSON', e.label),
+	rule     : (e) => S('validation_json_rule',
+		'{0} must be valid JSON', e.label),
+}
 
 //// PASSWORD ----------------------------------------------------------------
 

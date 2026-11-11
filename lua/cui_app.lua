@@ -231,14 +231,14 @@ function action.en()
 	<script src="/3d.js"></script>
 	<script src="/suncalc.js"></script>
 	<script src="/gl.js"></script>
-	<script src="/gl-renderer.js"></script>
+	<script src="/gl_renderer.js"></script>
 	<script src="/model3.js"></script>
-	<script src="/plane-graph.js"></script>
-	<script src="/house-plan.js"></script>
-	<script src="/house-test-plans.js"></script>
-	<script src="/model3-editor.js"></script>
-	<script src="/house-model-editor.js"></script>
-	<script src="/house-plan-editor.js"></script>
+	<script src="/plane_graph.js"></script>
+	<script src="/house_plan.js"></script>
+	<script src="/model3_editor.js"></script>
+	<script src="/house_model_editor.js"></script>
+	<script src="/house_plan_editor.js"></script>
+	<script src="/ui_unit_plan.js"></script>
 	<script>
 {{{fonts}}}
 user = {{{user}}}

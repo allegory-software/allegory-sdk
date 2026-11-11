@@ -7,6 +7,8 @@ import {fileURLToPath} from 'node:url'
 
 const www = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 	'..', 'www')
+const test_plans = (await fs.readFile(path.join(www, 'ui-demo.html'), 'utf8'))
+	.match(/<script id=house_test_plans>[\s\S]*?<\/script>/)[0]
 const page_html = `<!DOCTYPE html>
 <html>
 <head>
@@ -16,13 +18,13 @@ const page_html = `<!DOCTYPE html>
 <script src=3d.js></script>
 <script src=suncalc.js></script>
 <script src=gl.js></script>
-<script src=gl-renderer.js></script>
-<script src=plane-graph.js></script>
-<script src=house-plan.js></script>
+<script src=gl_renderer.js></script>
+<script src=plane_graph.js></script>
+<script src=house_plan.js></script>
 <script src=model3.js></script>
 <script src=ui.js></script>
-<script src=model3-editor.js></script>
-<script src=house-model-editor.js></script>
+<script src=model3_editor.js></script>
+<script src=house_model_editor.js></script>
 <script>
 let plans = { // the first two of hd's test plans.
 	simple: {
@@ -78,13 +80,13 @@ const server = http.createServer(async function(req, res) {
 <script src=3d.js></script>
 <script src=suncalc.js></script>
 <script src=gl.js></script>
-<script src=gl-renderer.js></script>
+<script src=gl_renderer.js></script>
 <script src=model3.js></script>
-<script src=plane-graph.js></script>
-<script src=house-plan.js></script>
-<script src=house-test-plans.js></script>
-<script src=model3-editor.js></script>
-<script src=house-model-editor.js></script>
+<script src=plane_graph.js></script>
+<script src=house_plan.js></script>
+${test_plans}
+<script src=model3_editor.js></script>
+<script src=house_model_editor.js></script>
 <script>
 let house
 ui.main = function() {

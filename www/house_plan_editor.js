@@ -10,9 +10,9 @@ let out = []
 
 let floor_names = [
 	'GROUND FLOOR',
-	'1ˢᵗ FLOOR',
-	'2ⁿᵈ FLOOR',
-	'3ʳᵈ FLOOR',
+	'1st FLOOR',
+	'2nd FLOOR',
+	'3rd FLOOR',
 ]
 
 let format_length = d => format_kcount(d / 1e2, 2)+'m'
@@ -288,7 +288,9 @@ function draw_length(cx, sg, x1, y1, x2, y2) {
 
 	let [xc, yc] = line2.at(.5, x1, y1, x2, y2, out)
 	cx.translate(xc, yc)
-	cx.rotate(a)
+	let rotation = sg.rotation ?? 0
+	let text_angle = mod(rotation - a + PI/2, PI) - PI/2
+	cx.rotate(text_angle - rotation)
 	let tx = round(-w / 2)
 	let ty = round((m.fontBoundingBoxAscent - m.fontBoundingBoxDescent) / 2)
 	cx.translate(tx, ty)
@@ -296,6 +298,142 @@ function draw_length(cx, sg, x1, y1, x2, y2) {
 	cx.fillText(s, 0, 0)
 
 	cx.restore()
+}
+
+function floor_editor_update(id, s) {
+	s.interaction_value = undefined
+	if (!s.house)
+		return
+	let plan = s.floor
+	let readonly = s.readonly
+	let draw_state = s.draw_state
+	let floor0 = s.floor
+	for (let floor of plan.house.floors)
+		if (ui.clicked(id+'.floor'+floor.i))
+			s.floor = floor
+	plan = s.floor
+	if (plan != floor0) {
+		draw_state.snap_lines.length = 0
+		draw_state.measure_edges.length = 0
+	}
+
+	let sg = scale_group('editor')
+
+	let hs = ui.hit(id)
+	if (hs && ui.wheel_dy)
+		sg.zoom(ui.wheel_dy / ui.em(7), hs.mx, hs.my)
+
+	let cs = ui.drag(id)
+	let is_restored = false
+	if (!readonly && !cs && ui.focus_inside(id)) {
+		if (ui.keydown('ctrl shift z') || ui.keydown('ctrl y'))
+			is_restored = plan.house.redo()
+		else if (ui.keydown('ctrl z'))
+			is_restored = plan.house.undo()
+	}
+
+	if (cs) {
+
+		let dx = cs.dx / sg.scale
+		let dy = cs.dy / sg.scale
+		if (sg.rotation) {
+			let c = cos(sg.rotation)
+			let s = sin(sg.rotation)
+			let dx0 = dx
+			dx = dx0 * c + dy * s
+			dy = -dx0 * s + dy * c
+		}
+
+		if (cs.drag) {
+
+			let action = cs.action
+			let seg    = cs.seg
+
+			if (action == 'move_seg') { // move seg
+				cs.move_seg = plan.start_move_seg(seg, draw_state)
+			} else if (action == 'pan') {
+				sg.pan_x0 = sg.x0
+				sg.pan_y0 = sg.y0
+			}
+		}
+
+		let action = cs.action
+
+		if (!readonly && !cs.cancel && !action && (abs(dx) >= 10 || abs(dy) >= 10)) { // dragged far enough to assume intent to drag.
+
+			// establish direction of drag on x and y axis.
+			let sdx = abs(dx) > 1.5 * abs(dy) ? sign(dx) : 0 // straight enough
+			let sdy = abs(dy) > 1.5 * abs(dx) ? sign(dy) : 0 // straight enough
+			if (sdx || sdy) {
+				action = 'resize_seg'
+				cs.action = action
+				let p   = cs.p
+				let mx0 = cs.x
+				let my0 = cs.y
+				cs.resize_seg = plan.start_resize_seg(p, mx0, my0, dx, dy, sdx, sdy, draw_state)
+			}
+
+		}
+
+		if (action == 'move_seg') {
+			if (cs.cancel)
+				cs.move_seg.cancel(draw_state)
+			else
+				cs.move_seg.move(dx, dy, draw_state)
+		}
+
+		if (action == 'resize_seg') {
+			if (cs.cancel)
+				cs.resize_seg.cancel(draw_state)
+			else
+				cs.resize_seg.resize(dx, dy, draw_state, cs)
+		}
+
+		if (action == 'pan' && !cs.cancel) {
+			sg.x0 = sg.pan_x0 + dx * sg.scale
+			sg.y0 = sg.pan_y0 + dy * sg.scale
+			sg.panned = true
+		}
+
+		if (cs.drop && !cs.cancel) {
+			if (action == 'move_seg') {
+				cs.move_seg.stop(draw_state)
+			} else if (action == 'resize_seg') {
+				cs.resize_seg.stop(draw_state)
+			}
+		}
+
+	}
+
+	let is_deleting_seg = !readonly
+		&& hs?.action == 'move_seg' && ui.dblclick
+	if (is_deleting_seg) {
+		plan.delete_seg(hs.seg)
+	}
+
+	if (cs?.drop || cs?.cancel || is_deleting_seg || is_restored) {
+		draw_state.snap_lines.length = 0
+		draw_state.measure_edges.length = 0
+		if (hs) {
+			hs.seg = null
+			hs.p = null
+			hs.cycle = null
+			hs.action = null
+		}
+		if (cs) {
+			cs.seg = null
+			cs.p = null
+			cs.cycle = null
+			cs.action = null
+		}
+	}
+
+}
+
+ui.floor_editor_update_value = function(id) {
+	let s = ui.state_of(id)
+	if (s?.house && !s.readonly)
+		ui.set_interaction_value(id, s, json(s.house.save_state()))
 }
 
 let FLOOR_EDITOR_ID         = ui.BOX_ARGS+0
@@ -306,136 +444,59 @@ ui.box_widget('floor_editor', {
 
 	ID: FLOOR_EDITOR_ID,
 
-	create: function(cmd, id, plan, fr, align, valign) {
+	create: function(cmd, id, value, field, opt, readonly) {
+
+		let s = ui.state(id, floor_editor_update)
+		field ??= ui.input_field(id) ?? s.field
+			?? ui.create_field({type: 'json'})
+		let value0 = s.input_value
+		let field0 = s.field
+		value = ui.set_value(id, s, value, field)
+		if (!s.draw_state || s.interaction_value === undefined
+				&& (value !== value0 || field != field0)) {
+			s.house = value != null && !s.validation.failed
+				? house_plan(json_arg(value)) : null
+			s.floor = s.house?.floors[0]
+		}
+		s.readonly = readonly ?? field.readonly
+		if (!s.house) {
+			ui.text('', value, 1, 's', 's', null, 'line')
+			return ui.value(id)
+		}
 
 		ui.focus_group(false, 0, id)
 		ui.focusable(id)
 
-		let s = ui.state(id)
-		s.draw_state ??= {snap_lines: [], measure_edges: [], above_floors: [], below_floors: []} // plan drawing data
+		s.draw_state ??= {
+			snap_lines: [],
+			measure_edges: [],
+			above_floors: [],
+			below_floors: [],
+		}
 		let draw_state = s.draw_state
-
+		let plan = s.floor
+		draw_state.readonly = s.readonly
 		let sg = scale_group('editor')
-
-		let hs = ui.hit(id)
-		if (hs && ui.wheel_dy)
-			sg.zoom(ui.wheel_dy / ui.em(7), hs.mx, hs.my)
-
-		let cs = ui.drag(id)
-		let is_restored = false
-		if (!cs && ui.focus_inside(id)) {
-			if (ui.keydown('ctrl shift z') || ui.keydown('ctrl y'))
-				is_restored = plan.redo()
-			else if (ui.keydown('ctrl z'))
-				is_restored = plan.undo()
-		}
-
-		if (cs) {
-
-			let dx = cs.dx / sg.scale
-			let dy = cs.dy / sg.scale
-			if (sg.rotation) {
-				let c = cos(sg.rotation)
-				let s = sin(sg.rotation)
-				let dx0 = dx
-				dx = dx0 * c + dy * s
-				dy = -dx0 * s + dy * c
-			}
-
-			if (cs.drag) {
-
-				let action = cs.action
-				let seg    = cs.seg
-
-				if (action == 'move_seg') { // move seg
-					cs.move_seg = plan.start_move_seg(seg, draw_state)
-				} else if (action == 'pan') {
-					sg.pan_x0 = sg.x0
-					sg.pan_y0 = sg.y0
-				}
-			}
-
-			let action = cs.action
-
-			if (!cs.cancel && !action && (abs(dx) >= 10 || abs(dy) >= 10)) { // dragged far enough to assume intent to drag.
-
-				// establish direction of drag on x and y axis.
-				let sdx = abs(dx) > 1.5 * abs(dy) ? sign(dx) : 0 // straight enough
-				let sdy = abs(dy) > 1.5 * abs(dx) ? sign(dy) : 0 // straight enough
-				if (sdx || sdy) {
-					action = 'resize_seg'
-					cs.action = action
-					let p   = cs.p
-					let mx0 = cs.x
-					let my0 = cs.y
-					cs.resize_seg = plan.start_resize_seg(p, mx0, my0, dx, dy, sdx, sdy, draw_state)
-				}
-
-			}
-
-			if (action == 'move_seg') {
-				if (cs.cancel)
-					cs.move_seg.cancel(draw_state)
-				else
-					cs.move_seg.move(dx, dy, draw_state)
-			}
-
-			if (action == 'resize_seg') {
-				if (cs.cancel)
-					cs.resize_seg.cancel(draw_state)
-				else
-					cs.resize_seg.resize(dx, dy, draw_state, cs)
-			}
-
-			if (action == 'pan' && !cs.cancel) {
-				sg.x0 = sg.pan_x0 + cs.dx
-				sg.y0 = sg.pan_y0 + cs.dy
-				sg.panned = true
-			}
-
-			if (cs.drop && !cs.cancel) {
-				if (action == 'move_seg') {
-					cs.move_seg.stop(draw_state)
-				} else if (action == 'resize_seg') {
-					cs.resize_seg.stop(draw_state)
-				}
-			}
-
-		}
-
-		let is_deleting_seg = hs?.action == 'move_seg' && ui.dblclick
-		if (is_deleting_seg) {
-			plan.delete_seg(hs.seg)
-		}
-
-		if (cs?.drop || cs?.cancel || is_deleting_seg || is_restored) {
-			draw_state.snap_lines.length = 0
-			draw_state.measure_edges.length = 0
-			if (hs) {
-				hs.seg = null
-				hs.p = null
-				hs.cycle = null
-				hs.action = null
-			}
-			if (cs) {
-				cs.seg = null
-				cs.p = null
-				cs.cycle = null
-				cs.action = null
-			}
-		}
 
 		ui.stack()
 
-			ui.cmd_box(cmd, fr, align, valign, id, plan, draw_state)
+			ui.cmd_box(cmd, 1, 's', 's', id, plan, draw_state)
 
 			ui.m(ui.sp())
 			ui.v(1, ui.sp())
 
 				ui.h(0, ui.sp05(), 's', 't')
 
-					ui.bold()
-					ui.text('', floor_names[plan.i] ?? S(plan.i+'_floor', '{0}ᵗʰ FLOOR', plan.i))
+					ui.v(0, ui.sp05(), '[')
+						let floors = plan.house.floors
+						for (let i = floors.length-1; i >= 0; i--) {
+							let floor = floors[i]
+							ui.color('text', floor == plan ? 'active' : null)
+							ui.bold()
+							ui.text(id+'.floor'+floor.i, floor_names[floor.i]
+								?? S(floor.i+'_floor', '{0}ᵗʰ FLOOR', floor.i))
+						}
+					ui.end_v()
 
 					if (!ui.window_focused()) {
 						ui.p(ui.sp05(), 0)
@@ -479,6 +540,7 @@ ui.box_widget('floor_editor', {
 
 		ui.end_stack()
 		ui.end_focus_group()
+		return ui.value(id)
 
 	},
 
@@ -672,7 +734,12 @@ ui.box_widget('floor_editor', {
 					cx.fillStyle = ui.color_css('label')
 					let s = format_area(c.edges.area())
 					if (DEBUG_PLAN) s = co.id + '/' + c.id + ' ' + s
-					cx.fillText(s, x, y+5)
+					cx.save()
+					cx.translate(x, y)
+					if (sg.rotation)
+						cx.rotate(-sg.rotation)
+					cx.fillText(s, 0, 5)
+					cx.restore()
 				}
 			}
 
@@ -728,8 +795,10 @@ ui.box_widget('floor_editor', {
 		if (seg) {
 			if (seg[0].segs.length == 1 && seg[1].segs.length == 1)
 				ui.set_cursor('move')
-			else
-				ui.set_cursor(seg.is_v ? 'ew-resize' : 'ns-resize')
+			else {
+				let axes_swapped = round((sg.rotation ?? 0) / (90*rad)) % 2 != 0
+				ui.set_cursor(seg.is_v != axes_swapped ? 'ew-resize' : 'ns-resize')
+			}
 		} else if (hit_p)
 			ui.set_cursor('copy')
 		else if (drag_action == 'pan')
@@ -843,6 +912,9 @@ ui.box_widget('floor_editor', {
 			hs.action = 'pan'
 			return true
 		}
+
+		if (draw_state.readonly)
+			return true
 
 		cx.save()
 		cx.translate(x00, y00)

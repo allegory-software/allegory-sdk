@@ -1,4 +1,4 @@
-// run: node tests/gl_renderer_test.mjs [path/to/gl-renderer.js]
+// run: node tests/gl_renderer_test.mjs [path/to/gl_renderer.js]
 import {chromium} from '/usr/local/lib/node_modules/playwright/index.mjs'
 import http from 'node:http'
 import fs from 'node:fs/promises'
@@ -11,14 +11,14 @@ const files = {
 	'/3d.js': path.join(sdk, 'www/3d.js'),
 	'/gl.js': path.join(sdk, 'www/gl.js'),
 	'/earcut.js': path.join(sdk, 'www/earcut.js'),
-	'/gl-renderer.js': process.argv[2] ?? path.join(sdk, 'www/gl-renderer.js'),
+	'/gl_renderer.js': process.argv[2] ?? path.join(sdk, 'www/gl_renderer.js'),
 }
 const page_html = `<!DOCTYPE html><canvas id=c width=64 height=64></canvas>
 <script src=glue.js global></script>
 <script src=earcut.js></script>
 <script src=3d.js global></script>
 <script src=gl.js></script>
-<script src=gl-renderer.js></script>`
+<script src=gl_renderer.js></script>`
 
 const server = http.createServer(async (req, res) => {
 	if (req.url == '/') {

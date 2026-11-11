@@ -184,6 +184,56 @@ function test.prepare_table_rowsets()
 	end, schema)
 end
 
+function test.scan_param_settings()
+	local schema = mdbx_schema()
+	schema:import(function()
+		import'schema_mdbx'
+		tables.unit = {unit, idpk}
+		tables.detail = {
+			id, idpk,
+			unit, id, not_null, child_fk'unit',
+		}
+	end)
+	with_db('scan_param_settings', function(tdb)
+		tdb:atomic('w', function()
+			tdb:insert('unit', '{}', {unit = 1})
+			tdb:insert('unit', '{}', {unit = 2})
+			tdb:insert('detail', '{}', {id = 1, unit = 1})
+			tdb:insert('detail', '{}', {id = 2, unit = 2})
+		end)
+		rowset.unit_details = scan_rowset{
+			pk = 'id',
+			params = {
+				unit = {
+					for_cols = 'unit',
+					lookup_rowset_name = 'table_unit',
+					lookup_cols = 'unit',
+					auto_bind = true,
+					accept_many = false,
+					min = 1,
+				},
+			},
+			scan = function(db)
+				return db:scan('detail/unit', 'unit = :unit')
+					:select('id, unit')
+			end,
+		}
+		local rs = rowset.unit_details
+		rs:prepare()
+		local res = rs:load({unit = 1}, {rows = true})
+		local param = res.params.unit
+		assert(param.for_cols == 'unit')
+		assert(param.lookup_rowset_name == 'table_unit')
+		assert(param.lookup_cols == 'unit')
+		assert(param.auto_bind == true and param.accept_many == false)
+		assert(param.type == 'number' and param.min == 1)
+		assert(param.max == 2^32-1)
+		assert(#res.rows == 1 and res.rows[1][1] == 1)
+		rowset.unit_details = nil
+		rowset.lookup_unit = nil
+	end, schema)
+end
+
 --a fetch on a scan with a param returns the changed rows inside the scan
 --for the request's param values, and the others as removed.
 function test.changed_rows_with_params()

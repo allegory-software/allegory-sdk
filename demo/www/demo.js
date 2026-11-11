@@ -157,69 +157,71 @@ function app_dock_empty_tab(tab) {
 			ui.animate()
 		}, {silent: true})
 	}
-	v(0, sp2(), 'c', 'c')
-		if (button(tab_id+'.container', 'layout', 'Container'))
-			set_dock_tab('app_dock', tab.id,
-				{title: 'Container', icon: 'layout',
-					layout: {tabs: []}})
-		let closed_containers = ui.dock_closed_containers('app_dock')
-		let closed_container_id = menu_button(tab_id+'.containers_button',
-			'archive', 'Containers', closed_containers, null, null, null, null,
-			!closed_containers.length)
-		if (closed_container_id)
-			ui.restore_dock_container('app_dock', tab.id, closed_container_id)
-		if (button(tab_id+'.db_tables', 'list-details', 'Tables'))
-			set_dock_tab('app_dock', tab.id,
-				{kind: 'db_tables', title: 'Tables', icon: 'list-details'})
-		if (button(tab_id+'.db_rows', 'table-row', 'Rows'))
-			set_dock_tab('app_dock', tab.id,
-				{kind: 'db_rows', title: 'Rows', icon: 'table-row'})
-		if (button(tab_id+'.db_fields', 'table-column', 'Fields'))
-			set_dock_tab('app_dock', tab.id,
-				{kind: 'db_fields', title: 'Fields', icon: 'table-column'})
-		if (button(tab_id+'.db_indexes', 'list-search', 'Indexes'))
-			set_dock_tab('app_dock', tab.id,
-				{kind: 'db_indexes', title: 'Indexes', icon: 'list-search'})
-		if (button(tab_id+'.process_tree', 'hierarchy', 'Process tree'))
-			set_dock_tab('app_dock', tab.id,
-				{kind: 'process_tree', title: 'Process tree', icon: 'hierarchy'})
-		if (button(tab_id+'.folder_tree', 'folder', 'Folder tree'))
-			set_dock_tab('app_dock', tab.id,
-				{kind: 'folder_tree', title: 'Folder tree', icon: 'folder'})
-		if (button(tab_id+'.file_editor_button', 'file-code', 'File editor'))
-			set_dock_tab('app_dock', tab.id,
-				{kind: 'file_editor', title: 'File editor', icon: 'file-code'})
-		if (button(tab_id+'.open_ports', 'network', 'Open ports'))
-			set_dock_tab('app_dock', tab.id,
-				{kind: 'open_ports', title: 'Open ports', icon: 'network'})
-		if (button(tab_id+'.saved_state', 'database', 'Saved state'))
-			set_dock_tab('app_dock', tab.id,
-				{kind: 'saved_state', title: 'Saved state', icon: 'database'})
-		let rowset_name = menu_button(tab_id+'.rowsets_button',
-			'database', 'Rowsets', s.items, null, null, null, null,
-			!!s.request || !!s.load_error)
-		if (rowset_name)
-			set_dock_tab('app_dock', tab.id, {
-				kind: 'rowset', title: rowset_name, icon: 'database',
-				args: {rowset_name: rowset_name},
-			})
-		if (s.load_error) text('', s.load_error, 0)
-		if (button(tab_id+'.call', 'phone', 'Call'))
-			set_dock_tab('app_dock', tab.id,
-				{kind: 'call', title: 'Call', icon: 'phone'})
-		if (button(tab_id+'.model3_editor', 'cube', 'Model editor'))
-			set_dock_tab('app_dock', tab.id,
-				{kind: 'model3_editor', title: 'Model editor', icon: 'cube'})
-		if (button(tab_id+'.house_model_editor', 'building-cottage',
-				'House model editor'))
-			set_dock_tab('app_dock', tab.id,
-				{kind: 'house_model_editor', title: 'House model editor',
-					icon: 'building-cottage'})
-		if (button(tab_id+'.floor_editor', 'layout-board', 'Floor editor'))
-			set_dock_tab('app_dock', tab.id,
-				{kind: 'floor_editor', title: 'Floor editor',
-					icon: 'layout-board'})
-	end_v()
+	ui.scrollbox(tab_id+'.scrollbox', 1, 'auto', 'auto', 's', 's')
+		v(0, sp2(), 'c', 'c')
+			if (button(tab_id+'.container', 'layout', 'Container'))
+				set_dock_tab('app_dock', tab.id,
+					{title: 'Container', icon: 'layout',
+						layout: {tabs: []}})
+			let closed_containers = ui.dock_closed_containers('app_dock')
+			let closed_container_id = menu_button(tab_id+'.containers_button',
+				'archive', 'Containers', closed_containers, null, null, null, null,
+				!closed_containers.length)
+			if (closed_container_id)
+				ui.restore_dock_container('app_dock', tab.id, closed_container_id)
+			if (button(tab_id+'.db_tables', 'list-details', 'Tables'))
+				set_dock_tab('app_dock', tab.id,
+					{kind: 'db_tables', title: 'Tables', icon: 'list-details'})
+			if (button(tab_id+'.db_rows', 'table-row', 'Rows'))
+				set_dock_tab('app_dock', tab.id,
+					{kind: 'db_rows', title: 'Rows', icon: 'table-row'})
+			if (button(tab_id+'.db_fields', 'table-column', 'Fields'))
+				set_dock_tab('app_dock', tab.id,
+					{kind: 'db_fields', title: 'Fields', icon: 'table-column'})
+			if (button(tab_id+'.db_indexes', 'list-search', 'Indexes'))
+				set_dock_tab('app_dock', tab.id,
+					{kind: 'db_indexes', title: 'Indexes', icon: 'list-search'})
+			if (button(tab_id+'.process_tree', 'hierarchy', 'Process tree'))
+				set_dock_tab('app_dock', tab.id,
+					{kind: 'process_tree', title: 'Process tree', icon: 'hierarchy'})
+			if (button(tab_id+'.folder_tree', 'folder', 'Folder tree'))
+				set_dock_tab('app_dock', tab.id,
+					{kind: 'folder_tree', title: 'Folder tree', icon: 'folder'})
+			if (button(tab_id+'.file_editor_button', 'file-code', 'File editor'))
+				set_dock_tab('app_dock', tab.id,
+					{kind: 'file_editor', title: 'File editor', icon: 'file-code'})
+			if (button(tab_id+'.open_ports', 'network', 'Open ports'))
+				set_dock_tab('app_dock', tab.id,
+					{kind: 'open_ports', title: 'Open ports', icon: 'network'})
+			if (button(tab_id+'.saved_state', 'database', 'Saved state'))
+				set_dock_tab('app_dock', tab.id,
+					{kind: 'saved_state', title: 'Saved state', icon: 'database'})
+			let rowset_name = menu_button(tab_id+'.rowsets_button',
+				'database', 'Rowsets', s.items, null, null, null, null,
+				!!s.request || !!s.load_error)
+			if (rowset_name)
+				set_dock_tab('app_dock', tab.id, {
+					kind: 'rowset', title: rowset_name, icon: 'database',
+					args: {rowset_name: rowset_name},
+				})
+			if (s.load_error) text('', s.load_error, 0)
+			if (button(tab_id+'.call', 'phone', 'Call'))
+				set_dock_tab('app_dock', tab.id,
+					{kind: 'call', title: 'Call', icon: 'phone'})
+			if (button(tab_id+'.model3_editor', 'cube', 'Model editor'))
+				set_dock_tab('app_dock', tab.id,
+					{kind: 'model3_editor', title: 'Model editor', icon: 'cube'})
+			if (button(tab_id+'.house_model_editor', 'building-cottage',
+					'House model editor'))
+				set_dock_tab('app_dock', tab.id,
+					{kind: 'house_model_editor', title: 'House model editor',
+						icon: 'building-cottage'})
+			if (button(tab_id+'.floor_editor', 'layout-board', 'Floor editor'))
+				set_dock_tab('app_dock', tab.id,
+					{kind: 'floor_editor', title: 'Floor editor',
+						icon: 'layout-board'})
+		end_v()
+	ui.end_scrollbox()
 }
 
 function app_dock_app_tab(tab) {
@@ -229,6 +231,46 @@ function app_dock_app_tab(tab) {
 			input('app_dock.tab.'+tab.id+'.text')
 		}
 	end_v()
+}
+
+let house_model_editor_plan = {
+	floor_h: 250,
+	floors: [
+		{
+			points: [
+				[200,  0, 'cl'],
+				[200,400, 'cr'],
+			],
+			lines: [
+				['draw','tl',0,0, 'tr',600, 'br',400, 'bl',-600, 'tl',-400],
+				['connect','cl','cr'],
+			],
+		},
+		{
+			points: [
+				[300,  0, 'cl'],
+				[300,400, 'cr'],
+			],
+			lines: [
+				['draw','tl',0,0, 'tr',600, 'br',400, 'bl',-600, 'tl',-400],
+				['connect','cl','cr'],
+			],
+		},
+		{
+			points: [
+				[  0,240, 'cl'],
+				[600,240, 'cr'],
+			],
+			lines: [
+				['draw','tl',0,0, 'tr',600, 'br',400, 'bl',-600, 'tl',-400],
+				['connect','cl','cr'],
+			],
+			roofs: [
+				{type: 'gable', pitch: 45, eaves: 50, axis: 'h', h: 300,
+					box: [-50,-50,650,450]},
+			],
+		},
+	],
 }
 
 function app_dock_tab(tab) {
@@ -295,16 +337,11 @@ function app_dock_tab(tab) {
 	} else if (tab.kind == 'house_model_editor') {
 		let id = 'app_dock.tab.'+tab.id+'.house_model_editor'
 		let s = ui.state(id+'.house')
-		s.house ??= house_plan(house_test_plans.gable1) // house_plan() model
+		s.house ??= house_plan(house_model_editor_plan)
 		ui.house_model_editor(id+'.widget', s.house)
 	} else if (tab.kind == 'floor_editor') {
 		let id = 'app_dock.tab.'+tab.id+'.floor_editor'
-		let s = ui.state(id+'.house')
-		s.house ??= house_plan(house_test_plans.gable1) // house_plan() model
-		h(1, sp2())
-			for (let floor of s.house.floors)
-				ui.floor_editor(id+'.widget'+floor.i, floor)
-		end_h()
+		ui.unit_plan_editor(id+'.widget')
 	} else if (tab.kind) {
 		app_dock_app_tab(tab)
 	} else {

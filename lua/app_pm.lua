@@ -1,4 +1,7 @@
 
+-- Construction Project Management Application Module.
+--	Written by Cosmin Apreutesei. Public Domain.
+
 db_schema:import(function()
 
 	category'Project Management'
@@ -36,6 +39,21 @@ db_schema:import(function()
 		project , id, not_null, child_fk,
 		name    , name, not_null,
 		note    , text,
+		plan    , id, weak_fk, --agreed plan
+	}
+
+	tables.plan = {
+		plan    , idpk,
+		unit    , id, not_null, fk,
+		user    , id, not_null, fk, server_default(function()
+			return user()
+		end), --owner
+		name    , name,
+		public  , bool0,
+		locked  , bool0,
+		data    , json, not_null, internal,
+			server_default'\'{"floors":[{"points":[],"lines":[]}]}\'',
+		mtime   , mtime,
 	}
 
 	tables.folder = {
@@ -142,3 +160,83 @@ Very rare. Example: shift handoffs.
 	}
 
 end)
+
+--plans ---------------------------------------------------------------------
+
+require'rowset_mdbx'
+
+local function can_see_plan(plan)
+	return plan.public or plan.user == user()
+end
+
+local function plan_rowset(detail)
+	local cols = 'plan, unit, user, name, public, locked, mtime'
+	if detail then cols = cols..', data' end
+	local changed_scan
+	return scan_rowset{
+		label = detail and 'Plan' or 'Plans',
+		category = 'Project Management',
+		internal = detail,
+		pk = 'plan',
+		ro_cols = 'user',
+		allow_unfiltered = not detail,
+		params = detail and {
+			plan = {
+				for_cols = 'plan', accept_many = false, auto_bind = true,
+				lookup_rowset_name = 'plans', lookup_cols = 'plan',
+			},
+		} or {
+			unit = {
+				for_cols = 'unit', accept_many = true, auto_bind = true,
+				lookup_rowset_name = 'table_unit', lookup_cols = 'unit',
+				client_filter = true,
+			},
+		},
+		allow = function()
+			return user() ~= nil and not user'anonymous'
+		end,
+		scan = function(db, param_names)
+			local scan = db:scan('plan',
+				detail and param_names.plan and 'plan = :plan' or '')
+			return scan:filter('public, user', can_see_plan):select(cols)
+		end,
+		on_rows_changed = function(self, changes, param_vals)
+			if not changed_scan then
+				changed_scan = (self.db or db()):scan('plan', 'plan = :plan')
+					:filter('public, user', can_see_plan):select(cols)
+					:null_value(null)
+			end
+			local rows, removed_pks, seen = {}, {}, {}
+			for tbl, plan in changes do
+				if tbl == 'plan' and not seen[plan] then
+					seen[plan] = true
+					local row
+					if not detail or param_vals.plan == plan then
+						row = changed_scan:first('[]', {plan = plan})
+					end
+					if row then
+						add(rows, row)
+					else
+						add(removed_pks, {plan})
+					end
+				end
+			end
+			return {rows = rows, removed_pks = removed_pks}
+		end,
+		can_change_row = function(self, vals)
+			local public, owner, locked = db():find('plan',
+				'public user locked', vals['plan:old'])
+			if not (public or owner == user()) then
+				return false, 'Plan not found'
+			end
+			if detail and locked then
+				return false, 'Plan is locked; save a copy'
+			end
+			local errors = self:validate_fields(vals, true)
+			if errors then return false, nil, errors end
+		end,
+	}
+end
+
+rowset.plans = plan_rowset(false)
+rowset.plan_data = plan_rowset(true)

@@ -79,7 +79,7 @@ INPUTS
   SELECT        ui.enum_input  ui.enum_toggle
                 ui.list_dropdown  ui.list_dropdown_inline
                 ui.radio_group  ui.radio  ui.radio_list
-                ui.list  ui.hlist  ui.hvlist
+                ui.list  ui.hlist  ui.hvlist  ui.bare_list
   DATE          ui.date_input  ui.calendar
   COLOR         ui.color_input  ui.color_picker
     H,S,L       ui.hue_slider  ui.sat_slider  ui.lum_slider
@@ -8684,6 +8684,12 @@ ui.end_menu_bar = function() {
 	      item_pad_l, item_pad_r, item_pad_y, item_h, item_gap,
 	      item_bg_color, item_color}
 
+	ui.bare_list (id, items, value=, field=, fr=1, align='s', valign='t',
+		readonly=, opt=) -> value
+
+		a ui.list with no item backgrounds and a check mark before each
+		selected item.
+
 */
 
 function valid_list_index(i, items) {
@@ -8781,7 +8787,7 @@ function list_update(id, s) {
 	set_interaction_value(id, s, value_changed ? value : undefined)
 }
 function hvlist(hv, id, items, value, field,
-	fr, align, valign, readonly, opt
+	fr, align, valign, readonly, opt, is_bare
 ) {
 	field ??= input_field(id)
 	hv = hv || 'v'
@@ -8833,21 +8839,36 @@ function hvlist(hv, id, items, value, field,
 				(readonly ? STATE_READONLY : 0)
 				| (!readonly && hit(item_id) ? STATE_HOVER : 0)
 			let item_color_state = item_text_color_state
-				| (list_focused ? STATE_FOCUSED : 0)
+				| (list_focused && (item_focused || item_selected)
+					? STATE_FOCUSED : 0)
 				| (item_focused ? STATE_ITEM_FOCUSED : 0)
 				| (item_selected ? STATE_ITEM_SELECTED : 0)
 			let item_bg_color = opt?.item_bg_color
 				?? (item_focused || item_selected ? 'item' : 'bg')
 			// TODO: remove this rounded corners hack
 			let sides = opt?.item_gap ? (!i ? '-r' : i == items.length-1 ? '-l' : null) : null
-			ui.bb(item_bg_color, item_color_state, sides, null, null, ui.sp05())
+			if (!is_bare)
+				ui.bb(item_bg_color, item_color_state, sides, null, null, ui.sp05())
 			let item_color = opt?.item_color ?? 'text'
+			if (is_bare) {
+				// check mark column: blank for unselected items.
+				ui.h(1, ui.sp2())
+				ui.min_w(ui.em(2) - ui.sp2())
+				ui.stack('', 0, 'l', 'c')
+					if (item_selected) {
+						ui.color(item_color, item_color_state)
+						ui.icon('', 'check')
+					}
+				ui.end_stack()
+			}
 			ui.color(item_color, item_color_state)
 			ui.text('', field ? field.to_text(item) : item,
-				0,
+				is_bare ? 1 : 0,
 				opt?.item_align ?? field?.align ?? (hv == 'v' ? 'l' : 'c'),
 				opt?.item_valign ?? 'c',
 				opt?.max_w)
+			if (is_bare)
+				ui.end_h()
 			if (item_focused)
 				ui.focus_ring(id)
 		ui.end_stack()
@@ -8859,6 +8880,13 @@ function hvlist(hv, id, items, value, field,
 ui.hvlist = hvlist
 ui.list  = hvlist.bind(null, 'v')
 ui.hlist = hvlist.bind(null, 'h')
+
+ui.bare_list = function(
+	id, items, value, field, fr, align, valign, readonly, opt
+) {
+	return hvlist('v', id, items, value, field,
+		fr, align, valign, readonly, opt, true)
+}
 
 //// LABEL -------------------------------------------------------------------
 
@@ -11369,6 +11397,8 @@ ui.build_input = function(id, value, opt, control, readonly) {
 			opt.no_box, readonly)
 	} else if (control == 'code_edit') {
 		value = ui.code_edit(id, value, this, opt, readonly)
+	} else if (control == 'floor_editor') {
+		value = ui.floor_editor(id, value, this, opt, readonly)
 	} else if (control == 'checkbox') {
 		value = ui.checkbox(id, value, this, null, null, null, readonly)
 	} else if (control == 'toggle') {

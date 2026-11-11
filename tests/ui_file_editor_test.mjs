@@ -10,6 +10,7 @@ const fields = [
 const paths = ['/first.txt', '/second.txt']
 const contents = new Map([[paths[0], 'hello\n'], [paths[1], 'second\n']])
 const loads = [], saves = []
+let load_error, save_error, save_field_error
 const server = http.createServer(async (req, res) => {
 	try {
 		if (req.url == '/') {
@@ -34,12 +35,22 @@ const server = http.createServer(async (req, res) => {
 			if (request.exec == 'save') {
 				saves.push(request)
 				result = {fields, rows: request.changes.rows.map(row => {
+					if (save_error)
+						return {type: 'update', error: save_error}
+					if (save_field_error)
+						return {type: 'update',
+							field_errors: {contents: save_field_error}}
 					const path = row.values['path:old']
 					contents.set(path, row.values.contents)
 					return {type: 'update', values: [path, row.values.contents]}
 				})}
 			} else {
 				loads.push(request)
+				if (load_error) {
+					res.writeHead(500, {'Content-Type': 'text/plain'})
+					res.end(load_error)
+					return
+				}
 				const path = request.params.path?.[0]
 				result = {fields, pk: 'path',
 					params: {path: {for_cols: 'path', accept_many: false,
@@ -87,6 +98,17 @@ try {
 			await frame()
 		}
 	}
+	async function click(id) {
+		const point = await page.evaluate(id => {
+			ui._point_at(id)
+			return {x: ui.local_pointer.mx, y: ui.local_pointer.my}
+		}, id)
+		await page.mouse.move(point.x, point.y)
+		await page.mouse.down()
+		await frame()
+		await page.mouse.up()
+		await frame()
+	}
 	await page.goto(`http://127.0.0.1:${server.address().port}/`)
 	await page.waitForFunction(() => ui._frame_drawn)
 	const demo = await fs.readFile(
@@ -119,34 +141,58 @@ try {
 	assert.equal(await page.evaluate(() =>
 		ui._state_map.get('app_dock.tab.probe.file_editor').nav.row_n), 0)
 	assert.equal(await page.evaluate(() =>
-		ui._state_map.has('app_dock.tab.probe.file_editor.editor')), false)
+		[...ui._state_map].some(([id, s]) => s.view
+			&& id.startsWith('app_dock.tab.probe.file_editor.editor.'))), false)
 	assert.deepEqual(errors, [])
 	await page.evaluate(() => {
+		window.shown_errors = new Set()
+		const text = ui.text
+		ui.text = function(...args) {
+			const value = args[1]
+			if (value != null && (value == window.file_nav?.load_error
+				|| value == 'Test row error' || value == 'Test field error'))
+				window.shown_errors.add(value)
+			return text(...args)
+		}
 		ui.rowsets.os_explorer_files = {
 			fields: [{name: 'path', not_null: true, readonly: true}],
 			pk: 'path', rows: [['/first.txt'], ['/second.txt']],
 			can_add_rows: false, can_remove_rows: false, can_change_rows: false,
 		}
+		window.build_file = function(tab) {
+			window.file_tab = tab
+			window.file_was_in_dock = ui.in_dock_tab()
+			ui.file_editor(window.file_id ?? 'file', window.file_opt)
+		}
 		ui.main = function() {
-			window.early_value = ui.value('file.editor')
+			window.early_value = ui.value(window.file_input_id)
 			let s = ui.state('files')
 			s.nav ??= ui.nav('files', {rowset_name: 'os_explorer_files'})
 			if (window.want_second) {
 				window.want_second = false
 				s.nav.focus_cell(1, 0)
 			}
-			ui.file_editor('file')
+			if (window.file_in_dock)
+				ui.dock('file_dock', {tabs: [{id: 'file'}]}, window.build_file)
+			else
+				window.build_file()
+			let file_id = window.file_id ?? 'file'
+			let nav = ui.state_of(file_id, 'nav')
+			window.file_nav = nav
+			window.file_input_id = file_id+'.editor.'
+				+ nav.focused_row_cell_val('path')
 		}
 		ui.animate()
 	})
 	await page.waitForFunction(() =>
-		ui._state_map.get('file.editor')?.input_value == 'hello\n')
+		ui._state_map.get(window.file_input_id)?.input_value == 'hello\n')
 	assert(loads.some(req => req.params.path?.[0] == paths[0]))
-	await page.evaluate(() => ui.focus('file.editor'))
+	assert(await page.evaluate(() => ui._state_map.has('file.master.path')))
+	await page.evaluate(() => ui.focus(window.file_input_id))
 	await frame()
 	await key('x')
 	assert.equal(await page.evaluate(() =>
-		ui._state_map.get('file.editor').input_value), 'hello\n')
+		ui._state_map.get(window.file_input_id).input_value), 'hello\n')
 	assert.equal(await page.evaluate(() => window.early_value), 'hello\n')
 	assert.equal(await page.evaluate(() =>
 		ui._state_map.get('file').nav.modified_n), 0)
@@ -160,23 +206,27 @@ try {
 	await page.evaluate(() => { window.want_second = true })
 	await page.evaluate(() => ui.animate())
 	await page.waitForFunction(() =>
-		ui._state_map.get('file.editor')?.input_value == 'second\n')
+		ui._state_map.get(window.file_input_id)?.input_value == 'second\n')
 	assert(loads.some(req => req.params.path?.[0] == paths[1]))
+	assert.equal(await page.evaluate(() => ui.focused_id),
+		'file.editor.'+paths[1])
+	assert.equal(await page.evaluate(() =>
+		ui._state_map.has('file.editor./first.txt')), false)
 	await key('Control+h')
 	await page.evaluate(() => ui._redraw())
 	await page.waitForFunction(() =>
 		[...document.querySelectorAll('input')].some(input =>
-			input._ui_id == 'file.editor.find_input'))
+			input._ui_id == window.file_input_id+'.find_input'))
 	await page.evaluate(() =>
 		[...document.querySelectorAll('input')].find(input =>
-		input._ui_id == 'file.editor.find_input').focus())
+		input._ui_id == window.file_input_id+'.find_input').focus())
 	for (const char of 'second') await key(char)
 	await page.evaluate(() =>
 		[...document.querySelectorAll('input')].find(input =>
-		input._ui_id == 'file.editor.replace_input').focus())
+		input._ui_id == window.file_input_id+'.replace_input').focus())
 	for (const char of 'third') await key(char)
 	const replace = await page.evaluate(() => {
-		ui._point_at('file.editor.replace_all')
+		ui._point_at(window.file_input_id+'.replace_all')
 		return {x: ui.local_pointer.mx, y: ui.local_pointer.my}
 	})
 	await page.mouse.move(replace.x, replace.y)
@@ -185,24 +235,133 @@ try {
 	await page.mouse.up()
 	await frame()
 	assert.equal(await page.evaluate(() =>
-		ui._state_map.get('file.editor').input_value), 'second\n')
+		ui._state_map.get(window.file_input_id).input_value), 'second\n')
 	await page.evaluate(() =>
 		[...document.querySelectorAll('input')].find(input =>
-		input._ui_id == 'file.editor.find_input').focus())
+		input._ui_id == window.file_input_id+'.find_input').focus())
 	await key('Control+s')
 	await page.waitForFunction(() =>
 		ui._state_map.get('file')?.nav.modified_n == 0)
 	assert.equal(contents.get(paths[1]), 'third\n')
-	await page.evaluate(() => ui.focus('file.editor'))
+	await page.evaluate(() => ui.focus(window.file_input_id))
 	await frame()
 	await key('Control+a')
 	await key('Backspace')
 	assert.equal(await page.evaluate(() =>
-		ui._state_map.get('file.editor').input_value), 'third\n')
+		ui._state_map.get(window.file_input_id).input_value), 'third\n')
 	await key('Control+s')
 	await page.waitForFunction(() =>
 		ui._state_map.get('file')?.nav.modified_n == 0)
 	assert.equal(contents.get(paths[1]), null)
+
+	// master selection and readonly options.
+	await click('file.master.path')
+	await page.waitForFunction(() => window.file_nav.focused_ri == null)
+	assert.equal(await page.evaluate(() =>
+		ui.saved_state['file.masters'].path), null)
+	await click('file.master.path')
+	await page.waitForFunction(() => window.file_nav.focused_ri != null)
+	const save_n = saves.length
+	await page.evaluate(() => {
+		window.file_opt = {readonly: true}
+		ui.focus(window.file_input_id)
+		ui.animate()
+	})
+	await page.waitForFunction(() =>
+		ui._state_map.get(window.file_input_id)?.readonly)
+	await key('x')
+	await key('Control+s')
+	assert.equal(saves.length, save_n)
+	await page.evaluate(() => {
+		window.file_opt = {readonly: false}
+		ui.animate()
+	})
+	await page.waitForFunction(() =>
+		ui._state_map.get(window.file_input_id)?.readonly === false)
+	await key('Control+s')
+	assert.equal(saves.length, save_n)
+
+	// row and field save errors preserve pending edits for retry.
+	save_error = 'Test row error'
+	await key('x')
+	await key('Control+s')
+	await page.waitForFunction(() => window.file_nav.row_errors[
+		window.file_nav.focused_ri]?.[0]?.error == 'Test row error'
+		&& window.shown_errors.has('Test row error'))
+	assert.equal(contents.get(paths[1]), null)
+	save_error = null
+	await key('Control+s')
+	await page.waitForFunction(() => window.file_nav.modified_n == 0)
+	assert.equal(contents.get(paths[1]), 'x')
+	save_field_error = 'Test field error'
+	await key('y')
+	await key('Control+s')
+	await page.waitForFunction(() => {
+		let nav = window.file_nav
+		return nav.cell_errors[nav.all_fields_map.contents.fi]?.[
+			nav.focused_ri]?.[0]?.error == 'Test field error'
+			&& window.shown_errors.has('Test field error')
+	})
+	assert.equal(contents.get(paths[1]), 'x')
+	save_field_error = null
+	await key('Control+s')
+	await page.waitForFunction(() => window.file_nav.modified_n == 0)
+	assert.equal(contents.get(paths[1]), 'xy')
+
+	// explicit binding and client validation.
+	await page.evaluate(() => {
+		ui._state_map.get('files').nav.focus_cell(0, 0)
+		window.file_id = 'file_validated'
+		window.file_opt = {param_bindings: {path: 'files'},
+			field_attrs: {contents: {maxlen: 7}}}
+		ui.animate()
+	})
+	await page.waitForFunction(() => window.file_nav.ready
+		&& window.file_nav.id == 'file_validated'
+		&& window.file_nav.focused_ri != null)
+	assert.equal(await page.evaluate(() => window.file_nav.param_sources.path),
+		'files')
+	assert.equal(await page.evaluate(() =>
+		ui._state_map.has('file_validated.master.path')), false)
+	await page.evaluate(() => ui.focus(window.file_input_id))
+	await frame()
+	const validated_save_n = saves.length
+	await key('z')
+	await key('Control+s')
+	await page.waitForFunction(() => {
+		let nav = window.file_nav
+		return nav.cell_has_errors(nav.focused_ri,
+			nav.all_fields_map.contents.fi)
+	})
+	assert.equal(saves.length, validated_save_n)
+	assert.equal(contents.get(paths[0]), 'xhello\n')
+	await key('Backspace')
+	await key('Control+s')
+	await page.waitForFunction(() => window.file_nav.modified_n == 0)
+	assert.equal(saves.length, validated_save_n)
+
+	// load errors and a master toggle in the dock tab strip.
+	load_error = 'Test load error'
+	await page.evaluate(() => window.file_nav.reload())
+	await page.waitForFunction(() => window.file_nav.load_error
+		&& window.shown_errors.has(window.file_nav.load_error))
+	load_error = null
+	await page.evaluate(() => window.file_nav.reload())
+	await page.waitForFunction(() => !window.file_nav.load_error
+		&& !window.file_nav.has_pending_request())
+	await page.evaluate(() => {
+		window.file_id = 'file_docked'
+		window.file_opt = undefined
+		window.file_in_dock = true
+		ui.animate()
+	})
+	await page.waitForFunction(() => window.file_was_in_dock
+		&& ui._state_map.has('file_docked.master.path')
+		&& window.file_nav.ready && window.file_nav.focused_ri != null)
+	assert.equal(await page.evaluate(() => window.file_tab.title), paths[0])
+	assert.equal(await page.evaluate(() =>
+		ui._state_map.get('file_docked').input_opt.lang), 'txt')
+
 	await page.evaluate(() => {
 		window.caller_value = 'abc'
 		window.probe_field = ui.create_field({maxlen: 3})
@@ -239,7 +398,7 @@ try {
 	assert.equal(await page.evaluate(() => window.caller_value), 'abc')
 	assert.deepEqual(errors, [])
 	console.log('file editor: binding, Ctrl+S, switching, find/replace,'
-		+ ' input contract')
+		+ ' masters, readonly, validation, errors, dock strip, input contract')
 } finally {
 	await browser?.close()
 	server.closeAllConnections()

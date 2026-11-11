@@ -33,6 +33,68 @@ function poly_get_point(i, out) {
 function house_plan(t) {
 
 	let house = {}
+	let edit0
+	let edit_floor
+
+	function copy_roofs(roofs) {
+		if (!roofs) return
+		let a = []
+		for (let roof of roofs)
+			a.push({type: roof.type, pitch: roof.pitch, eaves: roof.eaves,
+				axis: roof.axis, h: roof.h, box: bbox2(...roof.box)})
+		return a
+	}
+
+	house.save_state = function() {
+		let floors = []
+		for (let floor of house.floors) {
+			let state = floor.save_state()
+			state.h = floor.fixed_h
+			state.roofs = copy_roofs(floor.roofs)
+			floors.push(state)
+		}
+		return {floor_h: house.floor_h,
+			int_wall_thickness: house.int_wall_thickness,
+			ext_wall_thickness: house.ext_wall_thickness, floors: floors}
+	}
+
+	function begin_edit(floor) {
+		assert(!edit0)
+		edit_floor = floor
+		edit0 = floor.save_state()
+	}
+
+	function same_state(floor, state) {
+		let lines = state.lines[0]
+		if (floor.ps.length != state.points.length
+			|| floor.segs.length * 3 != lines.length)
+			return false
+		for (let i = 0; i < floor.ps.length; i++) {
+			let p = floor.ps[i]
+			let p0 = state.points[i]
+			if (p[0] != p0[0] || p[1] != p0[1] || p.id != p0[2])
+				return false
+		}
+		for (let i = 0; i < floor.segs.length; i++) {
+			let seg = floor.segs[i]
+			let j = i * 3
+			if (seg.id != lines[j]
+				|| seg[0] != floor.ps[lines[j+1]]
+				|| seg[1] != floor.ps[lines[j+2]])
+				return false
+		}
+		return true
+	}
+
+	function commit_edit(floor) {
+		assert(edit0 && edit_floor == floor)
+		if (!same_state(floor, edit0)) {
+			undo_stack.push({floor: floor, state: edit0})
+			redo_stack.length = 0
+		}
+		edit0 = null
+		edit_floor = null
+	}
 
 	function house_bb() {
 		let bb = bbox2()
@@ -49,7 +111,7 @@ function house_plan(t) {
 		floor.orthogonal = true
 
 		floor.house = house
-		floor.roofs = t.roofs
+		floor.roofs = copy_roofs(t.roofs)
 		floor.i = floor_i
 		floor.id = 'floor'+floor_i
 		floor.h ??= house.floor_h
@@ -149,7 +211,6 @@ function house_plan(t) {
 			push_log('init roofs')
 
 			for (let roof of floor.roofs) {
-				roof.box = bbox2(...roof.box)
 				fix_roof(roof)
 			}
 
@@ -183,28 +244,6 @@ function house_plan(t) {
 			return {points: points, lines: [lines]}
 		}
 
-		function same_state(state) {
-			let lines = state.lines[0]
-			if (floor.ps.length != state.points.length
-				|| floor.segs.length * 3 != lines.length)
-				return false
-			for (let i = 0; i < floor.ps.length; i++) {
-				let p = floor.ps[i]
-				let p0 = state.points[i]
-				if (p[0] != p0[0] || p[1] != p0[1] || p.id != p0[2])
-					return false
-			}
-			for (let i = 0; i < floor.segs.length; i++) {
-				let seg = floor.segs[i]
-				let j = i * 3
-				if (seg.id != lines[j]
-					|| seg[0] != floor.ps[lines[j+1]]
-					|| seg[1] != floor.ps[lines[j+2]])
-					return false
-			}
-			return true
-		}
-
 		floor.load_state = function(state) {
 			floor.load(state.points, state.lines)
 			floor.fix()
@@ -212,56 +251,21 @@ function house_plan(t) {
 
 		// edit history --------------------------------------------------------
 
-		let undo_stack = []
-		let redo_stack = []
-		let edit0
-
-		function begin_edit() {
-			assert(!edit0)
-			edit0 = floor.save_state()
-		}
-
-		function commit_edit() {
-			assert(edit0)
-			if (!same_state(edit0)) {
-				undo_stack.push(edit0)
-				redo_stack.length = 0
-			}
-			edit0 = null
-		}
-
 		function cancel_edit(draw_state) {
-			assert(edit0)
+			assert(edit0 && edit_floor == floor)
 			let state = edit0
 			edit0 = null
+			edit_floor = null
 			floor.load_state(state)
 			draw_state.snap_lines.length = 0
 			draw_state.measure_edges.length = 0
 		}
 
-		floor.undo = function() {
-			assert(!edit0)
-			if (!undo_stack.length)
-				return false
-			redo_stack.push(floor.save_state())
-			floor.load_state(undo_stack.pop())
-			return true
-		}
-
-		floor.redo = function() {
-			assert(!edit0)
-			if (!redo_stack.length)
-				return false
-			undo_stack.push(floor.save_state())
-			floor.load_state(redo_stack.pop())
-			return true
-		}
-
 		floor.delete_seg = function(seg) {
-			begin_edit()
+			begin_edit(floor)
 			floor.rem_seg(seg)
 			floor.fix()
-			commit_edit()
+			commit_edit(floor)
 		}
 
 		// plan view UI ops ----------------------------------------------------
@@ -502,7 +506,7 @@ function house_plan(t) {
 
 			push_log('START MOVE SEG:', seg.id)
 
-			begin_edit()
+			begin_edit(floor)
 			detach_colinear_segs(seg)
 
 			pop_log()
@@ -591,10 +595,12 @@ function house_plan(t) {
 					else if (m2s != null)
 						m1s = m2s - (seg0.m2 - seg0.m1)
 
-					seg[0][0] =  v ? a : m1s ?? m1
-					seg[1][0] =  v ? a : m2s ?? m2
-					seg[0][1] = !v ? a : m1s ?? m1
-					seg[1][1] = !v ? a : m2s ?? m2
+					let p1 = seg[seg0.i1]
+					let p2 = seg[seg0.i2]
+					p1[0] =  v ? a : m1s ?? m1
+					p2[0] =  v ? a : m2s ?? m2
+					p1[1] = !v ? a : m1s ?? m1
+					p2[1] = !v ? a : m2s ?? m2
 					create_edges()
 
 				} else { // move on cross axis
@@ -615,7 +621,7 @@ function house_plan(t) {
 				if (remove_seg)
 					floor.rem_seg(seg)
 				floor.fix()
-				commit_edit()
+				commit_edit(floor)
 				pop_log()
 				draw_state.snap_lines.length = 0
 				draw_state.measure_edges.length = 0
@@ -631,7 +637,7 @@ function house_plan(t) {
 			// based on direction of drag, either detach a seg or add a seg, and start resizing it.
 			push_log('START RESIZE SEG')
 
-			begin_edit()
+			begin_edit(floor)
 			let p0 = p ? [...p] : [mx0, my0]
 			let seg
 			if (p) {
@@ -676,7 +682,7 @@ function house_plan(t) {
 
 			pop_log()
 
-			let ranges = seg_resize_ranges(seg, p)
+			let ranges = seg_resize_ranges(seg, p0)
 			let snap_lines = snap_lines_for(!seg.is_v, seg)
 
 			let s = {seg: seg}
@@ -703,7 +709,7 @@ function house_plan(t) {
 			s.stop = function(draw_state) {
 				push_log('STOP RESIZE SEG:', seg.id)
 				floor.fix()
-				commit_edit()
+				commit_edit(floor)
 				pop_log()
 				draw_state.snap_lines.length = 0
 				draw_state.measure_edges.length = 0
@@ -978,8 +984,32 @@ function house_plan(t) {
 	}
 	init()
 
-	return house
+	// history ---------------------------------------------------------------
 
+	let undo_stack = []
+	let redo_stack = []
+
+	house.undo = function() {
+		assert(!edit0)
+		if (!undo_stack.length)
+			return false
+		let {floor, state} = undo_stack.pop()
+		redo_stack.push({floor: floor, state: floor.save_state()})
+		floor.load_state(state)
+		return true
+	}
+
+	house.redo = function() {
+		assert(!edit0)
+		if (!redo_stack.length)
+			return false
+		let {floor, state} = redo_stack.pop()
+		undo_stack.push({floor: floor, state: floor.save_state()})
+		floor.load_state(state)
+		return true
+	}
+
+	return house
 }
 
 G.house_plan = house_plan

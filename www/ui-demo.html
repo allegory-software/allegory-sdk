@@ -8,11 +8,74 @@
 <script src=3d.js></script>
 <script src=suncalc.js></script>
 <script src=gl.js></script>
-<script src=gl-renderer.js></script>
+<script src=gl_renderer.js></script>
 <script src=model3.js></script>
-<script src=plane-graph.js></script>
-<script src=house-plan.js></script>
-<script src=house-test-plans.js></script>
+<script src=plane_graph.js></script>
+<script src=house_plan.js></script>
+<script id=house_test_plans>
+// sample plans for house_plan(), used by the demos.
+window.house_test_plans = {
+
+	simple: {
+
+		floor_h: 250,
+		floors: [
+			{
+				points: [
+					[200,  0, 'cl'],
+					[200,400, 'cr'],
+				],
+				lines: [
+					['draw','tl',0,0, 'tr',600, 'br',400, 'bl',-600, 'tl',-400],
+					['connect','cl','cr'],
+				],
+			},
+		],
+	},
+
+	gable1 : {
+
+		floor_h: 250,
+		floors: [
+			{
+				points: [
+					[200,  0, 'cl'],
+					[200,400, 'cr'],
+				],
+				lines: [
+					['draw','tl',0,0, 'tr',600, 'br',400, 'bl',-600, 'tl',-400],
+					['connect','cl','cr'],
+				],
+			},
+			{
+				points: [
+					[300,  0, 'cl'],
+					[300,400, 'cr'],
+				],
+				lines: [
+					['draw','tl',0,0, 'tr',600, 'br',400, 'bl',-600, 'tl',-400],
+					['connect','cl','cr'],
+				],
+			},
+			{
+				points: [
+					[  0,240, 'cl'],
+					[600,240, 'cr'],
+				],
+				lines: [
+					['draw','tl',0,0, 'tr',600, 'br',400, 'bl',-600, 'tl',-400],
+					['connect','cl','cr'],
+				],
+				roofs: [
+					{type: 'gable', pitch: 45, eaves: 50, axis: 'h', h: 300, box: [-50,-50,650,450]},
+				],
+			},
+		],
+
+	},
+
+}
+</script>
 <script src=ui.js></script>
 <script src=ui_icon_defs.js></script>
 <script src=ui_login.js></script>
@@ -23,9 +86,9 @@
 <script src=webrtc.js></script>
 <script src=ui_call.js></script>
 <script src=lezer.js></script>
-<script src=model3-editor.js></script>
-<script src=house-model-editor.js></script>
-<script src=house-plan-editor.js></script>
+<script src=model3_editor.js></script>
+<script src=house_model_editor.js></script>
+<script src=house_plan_editor.js></script>
 <script>
 
 const {
@@ -338,11 +401,30 @@ let list1_items = []
 for (let i = 1; i <= 1000; i++)
 	list1_items.push('Item '+i)
 let list1_value = list1_items[0]
+let bare_list_items = list1_items.slice(0, 20)
+let bare_list1_value = bare_list_items[0]
+let bare_list2_field = ui.create_field({
+	type: 'enum_list', enum_values: bare_list_items,
+})
+let bare_list2_items = bare_list2_field.enum_items()
+let bare_list2_value = 0b101
 demos.list = function() {
-ui.min_wh(100, 300)
-ui.sb('list1_sb', 1, null, null, 'c', 'c')
-	list1_value = ui.list('list1', list1_items, list1_value)
-ui.end_sb()
+ui.h(1, ui.sp2(), 'c', 'c')
+	ui.min_wh(100, 300)
+	ui.sb('list1_sb', 1, null, null, 'c', 'c')
+		list1_value = ui.list('list1', list1_items, list1_value)
+	ui.end_sb()
+	ui.min_wh(100, 300)
+	ui.sb('bare_list1_sb', 1, null, null, 'c', 'c')
+		bare_list1_value = ui.bare_list(
+			'bare_list1', bare_list_items, bare_list1_value)
+	ui.end_sb()
+	ui.min_wh(100, 300)
+	ui.sb('bare_list2_sb', 1, null, null, 'c', 'c')
+		bare_list2_value = ui.bare_list(
+			'bare_list2', bare_list2_items, bare_list2_value, bare_list2_field)
+	ui.end_sb()
+ui.end_h()
 }
 }
 
@@ -2381,14 +2463,10 @@ ui.house_model_editor('house_model_editor_demo', house)
 }
 
 {
-let house
+let plan_json = json(house_test_plans.gable1)
 demos.floor_editor = function() {
-house ??= house_plan(house_test_plans.gable1)
 ui.m(ui.sp2())
-ui.h(1, ui.sp2())
-	for (let floor of house.floors)
-		ui.floor_editor('floor_editor_demo'+floor.i, floor)
-ui.end_h()
+plan_json = ui.floor_editor('floor_editor_demo', plan_json)
 }
 }
 
