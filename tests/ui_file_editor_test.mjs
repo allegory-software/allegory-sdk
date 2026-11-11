@@ -17,7 +17,7 @@ const server = http.createServer(async (req, res) => {
 			res.setHeader('Content-Type', 'text/html')
 			res.end('<!doctype html>' + ['glue.js', 'ui.js', 'ui_icon_defs.js',
 				'ui_field.js', 'ui_nav.js', 'ui_code_edit.js', 'lezer.js',
-				'ui_os_explorer.js'].map(name =>
+				'app_os.js'].map(name =>
 				`<script src="${name}" `
 				+ `${name == 'glue.js' ? 'global' : ''}></script>`
 				).join('') + '<script>ui.main = function() {}</script>')

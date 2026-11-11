@@ -225,8 +225,8 @@ function action.en()
 	<script src="/lezer.js"></script>
 	<script src="/webrtc.js"></script>
 	<script src="/ui_call.js"></script>
-	<script src="/ui_db_explorer.js"></script>
-	<script src="/ui_os_explorer.js"></script>
+	<script src="/app_db.js"></script>
+	<script src="/app_os.js"></script>
 	<script src="/earcut.js"></script>
 	<script src="/3d.js"></script>
 	<script src="/suncalc.js"></script>
@@ -238,7 +238,7 @@ function action.en()
 	<script src="/model3_editor.js"></script>
 	<script src="/house_model_editor.js"></script>
 	<script src="/house_plan_editor.js"></script>
-	<script src="/ui_unit_plan.js"></script>
+	<script src="/app_pm.js"></script>
 	<script>
 {{{fonts}}}
 user = {{{user}}}
