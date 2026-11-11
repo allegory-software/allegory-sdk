@@ -61,7 +61,7 @@ db_schema:import(function()
 
 	category'Calls'
 
-	tables.call = {
+	tables.call = { icon'video',
 		call        , idpk,
 		name        , name,
 		invite_token, {str, maxlen = 64, fixed}, not_null, uk,
@@ -70,7 +70,7 @@ db_schema:import(function()
 			end),
 	}
 
-	tables.call_users = {
+	tables.call_users = { icon'users',
 		call        , id, not_null, child_fk,
 		user        , id, not_null, child_fk, pk(call, user), aka'usr',
 	}

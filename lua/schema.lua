@@ -75,6 +75,7 @@ FIELD FLAGS
 	                                or a table of engine attributes
 	aka'old1 old2'                  former names (also a table flag)
 	section'Name', tab'Name'        set field.section / field.tab
+	icon'name'                     set field.icon (also a table flag)
 
 SCHEMA WORDS AND METHODS
 
@@ -588,6 +589,13 @@ end
 
 function schema.env.tab(name)
 	return {tab = name}
+end
+
+function schema.env.icon(name)
+	return function(self, tbl, fld)
+		local entity = fld or tbl
+		entity.icon = name
+	end
 end
 
 local function trigger_pos(tgs, when, op)

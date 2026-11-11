@@ -1223,19 +1223,19 @@ bool.build_null = function(opt) {
 	}
 }
 
-// an editable cell shows the box so that it reads as something to click,
-// a readonly one only marks the true ones.
+// without a field icon, an editable cell shows the box so that it reads as
+// something to click, and a readonly one only marks the true ones.
 bool.build = function(v, opt) {
 	if (!isbool(v))
 		return bool.build_null.call(this, opt)
 	if (!opt)
 		return v ? S('true', 'true') : S('false', 'false')
-	let icon =
+	let icon = this.icon || (
 		!opt.readonly
 			? (v ? 'square-check-filled' : 'square-dashed')
-			: (v ? 'check' : null)
+			: (v ? 'check' : null))
 	if (icon) {
-		ui.color(opt.fg)
+		ui.color(this.icon && !v ? 'faint' : opt.fg)
 		ui.icon('', icon, 0, opt.align, 'c')
 	}
 }

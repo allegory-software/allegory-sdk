@@ -612,7 +612,7 @@ function lang_schema()
 
 	category'Languages'
 
-	tables.lang = {
+	tables.lang = { icon'language',
 		lang                , lang, pk,
 		rtl                 , bool0,
 		en_name             , name, not_null, uk(en_name),
@@ -624,7 +624,7 @@ function lang_schema()
 
 	tables.lang.rows = lang_rows
 
-	tables.currency = {
+	tables.currency = { icon'currency-dollar',
 		currency    , currency, not_null, pk,
 		decimals    , u8, not_null,
 		en_name     , name, not_null, uk(en_name),
@@ -633,7 +633,7 @@ function lang_schema()
 
 	tables.currency.rows = currency_rows
 
-	tables.country = {
+	tables.country = { icon'flag',
 		country     , country, not_null, pk,
 		lang        , lang, not_null, fk,
 		currency    , currency, fk,

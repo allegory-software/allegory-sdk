@@ -120,6 +120,10 @@ local function set_lookup_attrs(db, fields)
 				f.lookup_rowset_name = lrs_name
 				f.display_col = lrs.name_col
 				f.lookup_cols = fk.ref_cols[1]
+				local ref_schema = db:table_schema(fk.ref_table)
+				local display_field = ref_schema.fields[lrs.name_col]
+				f.icon = ref_schema.icon or display_field and display_field.icon
+					or f.icon
 			end
 		end
 	end

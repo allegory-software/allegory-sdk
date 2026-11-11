@@ -181,18 +181,19 @@ return function()
 	--non-indexable varsize types
 	types.text   = {type = 'text', w = 12, mdbx_type = 'utf8', maxlen = 4096}
 	types.binary = {
-		type = 'binary', w = 8, icon = 'binary', mdbx_type = 'binary',
+		type = 'binary', w = 8, mdbx_type = 'binary', icon'binary',
 		maxlen = 64*1024^2,
 	}
+
 	--indexable varsize types (must be nozero or fixed)
-	types.str    = {text, w = 8, maxlen = 200, nozero}
-	types.name   = {str, w = 10, ai_ci}
+	types.str  = {text, w = 8, maxlen = 200, nozero}
+	types.name = {str, w = 10, ai_ci, icon'tag'}
 
 	types.bool  = {type = 'bool', w = 1, align = 'center', mdbx_type = 'bool'}
 	types.bool0 = {bool , not_null, client_default(false), server_default'false'}
 	types.bool1 = {bool , not_null, client_default(true), server_default'true'}
 
-	types.i8  = {
+	types.i8 = {
 		type = 'number', w = 2, align = 'right', decimals = 0,
 		min = -2^ 7, max = 2^ 7-1, mdbx_type = 'i8',
 	}
@@ -222,57 +223,64 @@ return function()
 	--for money and qty, scale can be dynamic and taken from currency / unit
 	--of measure, though some apps can normalize on a single scale.
 	--min and max are in scaled units!
-	types.money    = {f64, scale = 10^4, decimals = 2, min = -(10^15-1), max = 10^15-1} --  99 999 999 999 . 9999
-	types.qty      = {f64, scale = 10^6, decimals = 6, min = -(10^15-1), max = 10^15-1} --     999 999 999 . 999999
-	types.percent  = {
-		f64, type = 'percent', w = 4, scale = 10^2, decimals = 2,
-		min = -(10^8-1), max = 10^8-1,
-	} -- 999 999 . 99
-	types.count    = {
-		u52, type = 'count', w = 4, client_default(0), server_default'0',
-	}
-	types.filesize = {u52, type = 'filesize', w = 4, align = 'right'}
+	types.money    = {f64, scale = 10^4, decimals = 2, min = -(10^15-1), max = 10^15-1, icon'currency-dollar'} --  99 999 999 999 . 9999
+	types.qty      = {f64, scale = 10^6, decimals = 6, min = -(10^15-1), max = 10^15-1, icon'chart-bar'      } --     999 999 999 . 999999
+	types.percent  = {f64, scale = 10^2, decimals = 2, min = -(10^ 8-1), max = 10^ 8-1, type = 'percent', w = 4, icon'percentage'} -- 999 999 . 99
+	types.count    = {u52, type = 'count', w = 4, client_default(0), server_default'0', icon'hash'}
+	types.filesize = {u52, type = 'filesize', w = 4, align = 'right', icon'file-delta'}
 
 	--unix timestamps. max is the last second of year 9999.
-	types.time     = {u52, type = 'datetime', align = 'right', w = 6, precision = 'm',
-		min = 0, max = 253402300799}
-	types.time_s   = {time, w = 8, precision = 's'}
-	types.time_ms  = {time, w = 8, precision = 'ms'}
-	types.timeago  = {time_s, w = 5, timeago = true, icon = 'clock'}
-	types.date     = {time, type = 'date', w = 4, precision = 'd'}
+	types.time    = {
+		u52, type = 'datetime', align = 'right', w = 6,
+		precision = 'm', min = 0, max = 253402300799, icon'calendar',
+	}
+	types.time_s  = {time, w = 8, precision = 's'}
+	types.time_ms = {time, w = 8, precision = 'ms'}
+	types.timeago = {time_s, w = 5, timeago = true, icon = 'clock'}
+	types.date    = {time, type = 'date', w = 4, precision = 'd'}
 	--seconds since midnight.
-	types.timeofday = {u52, type = 'timeofday', w = 4, align = 'center',
-		min = 0, max = 24*3600-1}
+	types.timeofday   = {
+		u52, icon'clock', type = 'timeofday', w = 4,
+		align = 'center', min = 0, max = 24*3600-1,
+	}
 	types.timeofday_s = {timeofday, w = 4, precision = 's'}
-	types.duration  = {u52, type = 'duration', w = 5, align = 'right'}
+	types.duration    = {u52, type = 'duration', w = 5, align = 'right', icon'hourglass'}
 
-	types.ctime = {time, not_null, readonly = true, server_default'now()',
-		en_label = 'Created At'}
-	types.mtime = {time, not_null, readonly = true,
+	types.ctime = {
+		time, not_null, readonly = true,
+		server_default'now()',
+		en_label = 'Created At',
+	}
+	types.mtime = {
+		time, not_null, icon'clock', readonly = true,
 		server_default'now()', on_update'now()',
-		en_label = 'Last Modified At'}
-	types.atime = {time, not_null, readonly = true, server_default'now()',
-		en_label = 'Last Accessed At'}
+		en_label = 'Last Modified At',
+	}
+	types.atime = {
+		time, not_null, icon'history', readonly = true,
+		server_default'now()',
+		en_label = 'Last Accessed At',
+	}
 
-	types.lang      = {str, w = 2, icon = 'language', maxlen = 2, fixed}
-	types.currency  = {str, w = 2, maxlen = 3, fixed}
-	types.country   = {str, w = 2, icon = 'flag', maxlen = 2, fixed}
+	types.lang     = {str, w = 2, icon = 'language', maxlen = 2, fixed}
+	types.currency = {str, icon'currency-dollar', w = 2, maxlen = 3, fixed}
+	types.country  = {str, w = 2, icon = 'flag', maxlen = 2, fixed}
 
-	types.secret_key  = {text, type = 'secret_key' , w = 10, maxlen = 8192}
-	types.public_key  = {text, type = 'public_key' , w = 10, maxlen = 8192}
-	types.private_key = {text, type = 'private_key', w = 10, maxlen = 8192}
-	types.url    = {text, type = 'url', w = 14, maxlen = 4096}
-	types.email  = {str, type = 'email', w = 12, maxlen = 128, ai_ci}
-	types.phone  = {str, type = 'phone', w = 6, maxlen = 32}
-	types.password = {text, type = 'password', w = 10, maxlen = 128}
-	types.address= {text, w = 14, maxlen = 1024}
-	types.json   = {text, type = 'json', maxlen = 1024^2}
-	types.color  = {str, type = 'color', w = 2, maxlen = 32} --css color
-	types.icon   = {str, type = 'icon' , w = 2, maxlen = 32} --icon name
-	types.col    = {str, type = 'col'  , w = 8, maxlen = 64} --col name
-	types.tags   = {text, type = 'tags', w = 10} --space-separated words
-	types.place  = {str, type = 'place', w = 10, maxlen = 200} --google maps place id
-	types.button = {type = 'button'}
+	types.secret_key  = {text, icon'key'    , type = 'secret_key' , w = 10, maxlen = 8192}
+	types.public_key  = {text, icon'key'    , type = 'public_key' , w = 10, maxlen = 8192}
+	types.private_key = {text, icon'key'    , type = 'private_key', w = 10, maxlen = 8192}
+	types.url         = {text, icon'world'  , type = 'url'        , w = 14, maxlen = 4096}
+	types.email       = {str , icon'mail'   , type = 'email'      , w = 12, maxlen = 128, ai_ci}
+	types.phone       = {str , icon'phone'  , type = 'phone'      , w =  6, maxlen = 32}
+	types.password    = {text, icon'lock'   , type = 'password'   , w = 10, maxlen = 128}
+	types.address     = {text, icon'map-pin', type = 'text'       , w = 14, maxlen = 1024}
+	types.json        = {text, icon'braces' , type = 'json'               , maxlen = 1024^2}
+	types.color       = {str , icon'palette', type = 'color'      , w =  2, maxlen = 32} --css color
+	types.icon        = {str , icon'icons'  , type = 'icon'       , w =  2, maxlen = 32} --icon name
+	types.col         = {str , icon'columns', type = 'col'        , w =  8, maxlen = 64} --col name
+	types.tags        = {text, icon'tags'   , type = 'tags'       , w = 10} --space-separated words
+	types.place       = {str , icon'map-pin', type = 'place'      , w = 10, maxlen = 200} --google maps place id
+	types.button      = {type = 'button'}
 
 	--field-type-based formatting ---------------------------------------------
 

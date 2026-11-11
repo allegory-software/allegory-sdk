@@ -6,99 +6,99 @@ db_schema:import(function()
 
 	category'Project Management'
 
-	tables.company = {
+	tables.company = { icon'building',
 		company      , idpk,
 		name         , name, not_null, uk,
-		address      , name,
-		registration , name,
+		address      , name, icon'map-pin',
+		registration , name, icon'id',
 		phone        , phone,
 		email        , email,
 		website      , url,
-		note         , text,
+		note         , text, icon'notes',
 	}
 
-	tables.contact = {
+	tables.contact = { icon'user',
 		contact   , idpk,
 		name      , name, not_null, uk,
 		phone     , phone,
 		email     , email,
-		position  , name,
+		position  , name, icon'briefcase',
 		company   , id, fk,
-		note      , text,
+		note      , text, icon'notes',
 	}
 
-	tables.project = {
+	tables.project = { icon'briefcase',
 		project    , idpk,
 		name       , name, not_null, uk,
 		client     , id, child_fk(company),
-		note       , text,
+		note       , text, icon'notes',
 	}
 
-	tables.unit = {
+	tables.unit = { icon'home',
 		unit    , idpk,
 		project , id, not_null, child_fk,
 		name    , name, not_null,
-		note    , text,
+		note    , text, icon'notes',
 		plan    , id, weak_fk, --agreed plan
 	}
 
-	tables.plan = {
+	tables.plan = { icon'map',
 		plan    , idpk,
 		unit    , id, not_null, fk,
 		user    , id, not_null, fk, server_default(function()
 			return user()
 		end), --owner
 		name    , name,
-		public  , bool0,
-		locked  , bool0,
+		public  , bool0, icon'world',
+		locked  , bool0, icon'lock',
 		data    , json, not_null, internal,
 			server_default'\'{"floors":[{"points":[],"lines":[]}]}\'',
 		mtime   , mtime,
 	}
 
-	tables.folder = {
+	tables.folder = { icon'folder',
 		folder , idpk,
 		name   , name, not_null,
 		parent , id, fk(folder),
 	}
 
-	tables.measure = {
+	tables.measure = { icon'ruler',
 		measure , idpk,
 		name    , name, not_null, uk,
-		unit    , name, not_null,
-		note    , text,
+		unit    , name, not_null, icon'ruler',
+		note    , text, icon'notes',
 	}
 
 	for i=1,3 do
-		tables['dim'..i..'_wbs'] = {
+		tables['dim'..i..'_wbs'] = { icon'tags',
 			id   , idpk,
 			name , name, not_null,
-			note , text,
+			note , text, icon'notes',
 		}
 	end
 
-	tables.wbs = { --work breakdown structure
+	tables.wbs = { icon'list-tree', --work breakdown structure
 		wbs    , idpk,
 		name   , name, not_null,
-		code   , name,
-		type   , enum'work product service',
+		code   , name, icon'code',
+		type   , enum'work product service', icon'category',
 		project, id,
 		--estimated current cost
 		unit_cost , money,
-		unit      , name,
+		unit      , name, icon'ruler',
 		measure   , id, fk,
 		--estimated productivity
-		output_per_day , qty,
-		output_unit    , name,
+		output_per_day , qty, icon'gauge',
+		output_unit    , name, icon'ruler',
 		--org
 		folder , id, fk,
 		dim1   , id, fk(dim1_wbs),
 		dim2   , id, fk(dim2_wbs),
 		dim3   , id, fk(dim3_wbs),
-		note   , text,
+		note   , text, icon'notes',
 	}
 
-	tables.wbs_dependency = {
+	tables.wbs_dependency = { icon'arrows-shuffle',
 		wbs          , id, child_fk,
 		needs_wbs    , id, fk(wbs),
 		type         , enum('FS SS FF SF', {
@@ -121,42 +121,42 @@ Example: cannot finish electrical inspection until wiring is finished.
 			SF = [[
 Very rare. Example: shift handoffs.
 ]],
-		}), not_null, client_default'"FS"',
+		}), not_null, client_default'"FS"', icon'category',
 		delay        , duration,
-		note         , text,
+		note         , text, icon'notes',
 		pk(wbs, needs_wbs),
 	}
 
 	--cost estimates and cost tracking
 
-	tables.unit_measure = {
+	tables.unit_measure = { icon'ruler',
 		unit    , id, not_null, child_fk,
 		measure , id, not_null, fk,
 		qty     , qty, not_null,
 		pk(unit, measure),
 	}
 
-	tables.cost = {
+	tables.cost = { icon'currency-dollar',
 		unit      , id, not_null, child_fk,
 		wbs       , id, not_null, fk,
 		qty       , qty, not_null,
 		estimated_unit_cost  , money,
 		contracted_unit_cost , money,
-		status    , enum'started finished',
-		note      , text,
+		status    , enum'started finished', icon'progress-check',
+		note      , text, icon'notes',
 		pk(unit, wbs),
 	}
 
-	tables.punch = {
+	tables.punch = { icon'clock',
 		punch    , idpk,
 		unit     , id, not_null, child_fk,
 		wbs      , id, not_null, fk,
-		start_at , time,
-		end_at   , time,
+		start_at , time, icon'player-play',
+		end_at   , time, icon'player-stop',
 		hours    , duration,
 		output   , qty,
 		worker   , id, not_null, fk(contact),
-		note     , text,
+		note     , text, icon'notes',
 	}
 
 end)

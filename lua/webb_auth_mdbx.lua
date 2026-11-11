@@ -10,61 +10,63 @@ function auth_schema()
 
 	category'Authentication'
 
-	tables.tenant = {
+	tables.tenant = { icon'building-community',
 		tenant      , idpk,
 		name        , name,
-		active      , bool1,
+		active      , bool1, icon'power',
 		ctime       , ctime,
 	}
 
-	tables.host = {
-		host        , str, pk, --lowercase
+	tables.host = { icon'world',
+		host        , str, pk, icon'world', --lowercase
 		tenant      , id, not_null, child_fk,
 	}
 
-	tables.user = { aka'usr',
+	tables.user = { icon'user', aka'usr',
 		user        , idpk    , aka'usr',
-		anonymous   , bool1   , tab'Account',
+		anonymous   , bool1   , tab'Account', icon'user-question',
 		email       , email   , tab'Profile', section'Contact',
-		emailvalid  , bool0   , tab'Profile', section'Contact',
+		emailvalid  , bool0   , tab'Profile', section'Contact', icon'mail-check',
 		--bcrypt_hash() is ascii nozero 60 chars
-		pass        , str     , tab'Security',
-		active      , bool1   , tab'Account',
+		pass        , str     , tab'Security', icon'lock',
+		active      , bool1   , tab'Account', icon'power',
 		title       , name    , tab'Profile', section'Name',
-		name        , name    , tab'Profile', section'Name',
-		phone       , str     , tab'Profile', section'Contact',
-		phonevalid  , bool0   , tab'Profile', section'Contact',
+		name        , name    , tab'Profile', section'Name', icon'user',
+		phone       , str     , tab'Profile', section'Contact', icon'phone',
+		phonevalid  , bool0   , tab'Profile', section'Contact', icon'phone-check',
 		sex         , enum'M F O', tab'Profile', section'Name',
-		birthday    , date    , tab'Profile', section'Name',
-		newsletter  , bool0   , tab'Profile', section'Contact',
-		roles       , tags    , tab'Account',
-		note        , text    , tab'Account',
-		theme       , str     , tab'Account',
-		auth_code   , str     , tab'Security', --six_digit_code()
-		auth_code_created  , time , tab'Security',
+			icon'gender-bigender',
+		birthday    , date    , tab'Profile', section'Name', icon'cake',
+		newsletter  , bool0   , tab'Profile', section'Contact', icon'news',
+		roles       , tags    , tab'Account', icon'shield',
+		note        , text    , tab'Account', icon'notes',
+		theme       , str     , tab'Account', icon'palette',
+		auth_code   , str     , tab'Security', icon'key', --six_digit_code()
+		auth_code_created  , time , tab'Security', icon'clock',
 		--capped by the auth_code_maxtry config
 		auth_code_trycount , count, tab'Security',
-		auth_code_validates, enum'email phone', tab'Security',
-		clientip    , str     , tab'Activity', --when it was created
+		auth_code_validates, enum'email phone', tab'Security', icon'shield-check',
+		clientip    , str     , tab'Activity', icon'world', --when it was created
 		atime       , atime   , tab'Activity', --last access time
 		ctime       , ctime   , tab'Activity', --creation time
 		mtime       , mtime   , tab'Activity', --last modification time
 	}
 
-	tables.user_tenant = { aka'usr_tenant',
+	tables.user_tenant = { icon'users', aka'usr_tenant',
 		user        , id, not_null, child_fk, aka'usr',
 		tenant      , id, not_null, child_fk, pk(user, tenant),
 		--copies of user.email and user.phone, unique per tenant.
 		email       , email, uk(tenant, email),
-		phone       , str  , uk(tenant, phone),
+		phone       , str  , uk(tenant, phone), icon'phone',
 	}
 
-	tables.session = { aka'sess',
+	tables.session = { icon'fingerprint', aka'sess',
 		--the session id is tohex() of 16 random bytes, so always 32 chars.
 		session     , {str, maxlen = 32, fixed}, not_null, pk, aka'sess',
+			icon'fingerprint',
 		tenant      , id     , not_null, child_fk,
 		user        , id     , not_null, child_fk, aka'usr',
-		clientip    , str    , --when it was created
+		clientip    , str    , icon'world', --when it was created
 		atime       , atime  , --last use, for expiry
 		ctime       , ctime  ,
 	}
