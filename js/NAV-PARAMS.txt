@@ -221,7 +221,7 @@ WRITING A ROWSET
 - An mdbx scan rowset declares an accept_many = false param for each scan
 	arg, typed from the arg's schema field.
 - decode_params(defs) decodes the request's params for code that has to
-	pick the rowset first (ui_db_explorer.lua picks a rowset per table).
+	pick the rowset first (app_db.lua picks a rowset per table).
 
 
 MISSING

@@ -24,8 +24,8 @@ app.main_file = 'demo.js'
 wwwdir'../www'
 
 require'rowset_mdbx'
-require'ui_db_explorer'
-require'ui_os_explorer'
+require'app_db'
+require'app_os'
 require'webb_call'
 require'app_pm'
 
