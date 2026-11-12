@@ -4200,21 +4200,25 @@ ui.box_widget('box', {
 
 // a box container that paints its children one on top of the other.
 //
-// ui.stack (id=, fr=1, align='s', valign='s', hidden=false, fixed=false)
+// ui.stack (id=, fr=1, align='s', valign='s', hidden=false, fixed=false, clip=false)
 
 const STACK_ID    = BOX_CT_ARGS+0
 const STACK_FLAGS = BOX_CT_ARGS+1
 
 const STACK_HIDDEN = 1 // children take up space but they're not drawn.
 const STACK_FIXED  = 2 // children don't take up space, they overflow.
+const STACK_CLIP   = 4 // clip drawing and hit testing to the content box.
 
 const CMD_STACK = cmd_ct('stack')
 id_i[CMD_STACK] = STACK_ID
 
-ui.stack = function(id, fr, align, valign, hidden, fixed) {
+ui.stack = function(id, fr, align, valign, hidden, fixed, clip) {
 	let i = ui_cmd_box_ct_begin(CMD_STACK, fr, align, valign)
 	a[n++] = id || ''
-	a[n++] = (hidden ? STACK_HIDDEN : 0) | (fixed ? STACK_FIXED : 0)
+	a[n++] =
+		(hidden ? STACK_HIDDEN : 0) |
+		(fixed  ? STACK_FIXED  : 0) |
+		(clip   ? STACK_CLIP   : 0)
 	ui_cmd_box_ct_end(i)
 	return i
 }
@@ -4239,15 +4243,54 @@ is_flex_child[CMD_STACK] = true
 
 ui.end_stack = function() { ui.end(CMD_STACK) }
 
-translate[CMD_STACK] = translate_ct
+translate[CMD_STACK] = function(a, i, dx, dy) {
+	if (!(a[i+STACK_FLAGS] & STACK_CLIP))
+		return translate_ct(a, i, dx, dy)
+	let x = a[i+0] + dx
+	let y = a[i+1] + dy
+	a[i+0] = x
+	a[i+1] = y
+	let viewport_x10 = viewport_x1
+	let viewport_y10 = viewport_y1
+	let viewport_x20 = viewport_x2
+	let viewport_y20 = viewport_y2
+	viewport_x1 = max(viewport_x1, x)
+	viewport_y1 = max(viewport_y1, y)
+	viewport_x2 = min(viewport_x2, x + a[i+2])
+	viewport_y2 = min(viewport_y2, y + a[i+3])
+	translate_children(a, i, dx, dy)
+	viewport_x1 = viewport_x10
+	viewport_y1 = viewport_y10
+	viewport_x2 = viewport_x20
+	viewport_y2 = viewport_y20
+}
 
-register[CMD_STACK] = draw[CMD_STACK] = function(a, i) {
+register[CMD_STACK] = function(a, i) {
 	return !!(a[i+STACK_FLAGS] & STACK_HIDDEN)
+}
+
+draw[CMD_STACK] = function(a, i) {
+	if (a[i+STACK_FLAGS] & STACK_HIDDEN)
+		return true
+	if (a[i+STACK_FLAGS] & STACK_CLIP) {
+		cx.save()
+		cx.beginPath()
+		cx.rect(a[i+0], a[i+1], a[i+2], a[i+3])
+		cx.clip()
+	}
+}
+
+draw_end[CMD_STACK] = function(a, i) {
+	if (a[i+STACK_FLAGS] & STACK_CLIP)
+		cx.restore()
 }
 
 hittest[CMD_STACK] = function(a, i, recs) {
 	if (a[i+STACK_FLAGS] & STACK_HIDDEN)
 		return false
+	if (a[i+STACK_FLAGS] & STACK_CLIP)
+		if (!hit_rect(a[i+0], a[i+1], a[i+2], a[i+3]))
+			return false
 	return hit_ct(a, i, recs, a[i+STACK_ID])
 }
 
