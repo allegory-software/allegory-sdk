@@ -129,7 +129,8 @@ function app_dock_empty_tab(tab) {
 	let tab_id = 'app_dock.tab.'+tab.id
 	let s = ui.state(tab_id+'.rowsets')
 	if (!s.free) {
-		s.items = [] // [{id, label, items: [{id, label}]}]
+		s.items = [] // [{id, label, items: [{id, label, icon}]}]
+		s.menu_items = {} // {rowset_name -> {id, label, icon}}
 		s.load_error = null // rowset listing error text or null
 		s.request = null // rowset listing request or null
 		ui.on_free(tab_id+'.rowsets', function(s) {
@@ -138,13 +139,19 @@ function app_dock_empty_tab(tab) {
 		s.request = glue.get('/rowset.json/rowsets', function(rowsets) {
 			s.request = null
 			let category_items = new Map()
-			for (let [name, label, category] of rowsets.rows)
-				attr(category_items, category, array).push({id: name, label})
+			for (let [name, label, category, icon] of rowsets.rows) {
+				let item = {id: name, label, icon}
+				attr(category_items, category, array).push(item)
+				s.menu_items[name] = item
+			}
 			for (let name in ui.rowsets) {
 				let rowset = ui.rowsets[name]
-				if (!rowset.internal)
-					attr(category_items, rowset.category ?? 'Other', array)
-						.push({id: name, label: rowset.label ?? name})
+				if (!rowset.internal) {
+					let item = {id: name, label: rowset.label ?? name,
+						icon: rowset.icon}
+					attr(category_items, rowset.category ?? 'Other', array).push(item)
+					s.menu_items[name] = item
+				}
 			}
 			s.items = []
 			for (let [category, items] of category_items)
@@ -201,7 +208,8 @@ function app_dock_empty_tab(tab) {
 				!!s.request || !!s.load_error)
 			if (rowset_name)
 				set_dock_tab('app_dock', tab.id, {
-					kind: 'rowset', title: rowset_name, icon: 'database',
+					kind: 'rowset', title: s.menu_items[rowset_name].label,
+					icon: s.menu_items[rowset_name].icon ?? 'database',
 					args: {rowset_name: rowset_name},
 				})
 			if (s.load_error) text('', s.load_error, 0)

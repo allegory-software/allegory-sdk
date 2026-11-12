@@ -186,8 +186,9 @@ return function()
 	}
 
 	--indexable varsize types (must be nozero or fixed)
-	types.str  = {text, w = 8, maxlen = 200, nozero}
+	types.str  = {text, maxlen = 200, w = 8, nozero}
 	types.name = {str, w = 10, ai_ci, icon'tag'}
+	types.long_name = {text, maxlen = 1200, w = 20, ai_ci, icon'tag'}
 
 	types.bool  = {type = 'bool', w = 1, align = 'center', mdbx_type = 'bool'}
 	types.bool0 = {bool , not_null, client_default(false), server_default'false'}
@@ -280,6 +281,7 @@ return function()
 	types.col         = {str , icon'columns', type = 'col'        , w =  8, maxlen = 64} --col name
 	types.tags        = {text, icon'tags'   , type = 'tags'       , w = 10} --space-separated words
 	types.place       = {str , icon'map-pin', type = 'place'      , w = 10, maxlen = 200} --google maps place id
+	types.note        = {text, icon'notes'}
 	types.button      = {type = 'button'}
 
 	--field-type-based formatting ---------------------------------------------

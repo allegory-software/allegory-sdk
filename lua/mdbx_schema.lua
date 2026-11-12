@@ -1516,7 +1516,7 @@ local function compile_table_schema(schema)
 					local physical_maxlen = encoded_maxlen(schema, f)
 					local write = f.key_collator.write
 					function f.encode(db, event, buf, val)
-						assertf(typeof(val) == 'string')
+						assert(typeof(val) == 'string')
 						local len = #val
 						if len > maxlen then
 							db:check_col(event, schema.name, f.col, false, 'too_long')
@@ -1540,7 +1540,7 @@ local function compile_table_schema(schema)
 				elseif f.mdbx_type == 'utf8' or f.mdbx_type == 'binary' then
 					--raw text/binary strings
 					function f.encode(db, event, buf, val)
-						assertf(typeof(val) == 'string')
+						assert(typeof(val) == 'string')
 						local len = #val
 						if len > maxlen then
 							db:check_col(event, schema.name, f.col, false, 'too_long')
@@ -1559,7 +1559,7 @@ local function compile_table_schema(schema)
 					end
 				else --array
 					function f.encode(db, event, buf, val)
-						assertf(typeof(val) == 'table')
+						assert(typeof(val) == 'table')
 						local len = #val
 						if len > maxlen then
 							db:check_col(event, schema.name, f.col, false, 'too_long')

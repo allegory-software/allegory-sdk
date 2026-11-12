@@ -76,6 +76,7 @@ FIELD FLAGS
 	aka'old1 old2'                  former names (also a table flag)
 	section'Name', tab'Name'        set field.section / field.tab
 	icon'name'                     set field.icon (also a table flag)
+	label'Name'                    table flag: set tbl.label (display text)
 
 SCHEMA WORDS AND METHODS
 
@@ -595,6 +596,13 @@ function schema.env.icon(name)
 	return function(self, tbl, fld)
 		local entity = fld or tbl
 		entity.icon = name
+	end
+end
+
+function schema.env.label(name)
+	return function(self, tbl, fld)
+		assert(not fld, 'label is a table flag: a field takes en_label')
+		tbl.label = name
 	end
 end
 

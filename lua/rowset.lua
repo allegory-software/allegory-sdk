@@ -13,6 +13,7 @@ Rowset attributes to set (* = server-only):
 	OPTIONAL
 		label            : 'Foo Bar'     label of a master in a detail's toggle
 		category         : 'Foo'         display group of the rowset in menus
+		icon             : 'foo'         icon of the rowset in menus
 	*	field_attrs      : {col->field}  extra field attributes
 		cols             : 'col1 ...'    default visible columns list
 		sections         : 's1 ...'      form section order
@@ -880,6 +881,7 @@ local function list_rowsets()
 				name = name,
 				label = t.label or name,
 				category = t.category or 'Other',
+				icon = t.icon,
 				masters = masters,
 			})
 		end
@@ -893,12 +895,13 @@ rowset.rowsets = virtual_rowset(function(rs) --rowset reflection
 		{name = 'name'},
 		{name = 'label'},
 		{name = 'category'},
+		{name = 'icon'},
 	}
 	rs.pk = 'name'
 	function rs:load_rows(res, params)
 		res.rows = {}
 		for _, e in ipairs(list_rowsets()) do
-			add(res.rows, {e.name, e.label, e.category})
+			add(res.rows, {e.name, e.label, e.category, e.icon or null})
 		end
 	end
 end)

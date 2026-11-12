@@ -637,6 +637,10 @@ end)
 
 --TABLE ROWSETS --------------------------------------------------------------
 
+local function table_label(tbl, schema)
+	return schema.label or tbl:gsub('_', ' '):gsub('^.', string.upper)
+end
+
 dynamic_rowset('^table_(.+)$', function(tbl)
 	local schema = checkfound(db():atomic('any', function(tbl)
 		return db():table_schema(tbl)
@@ -675,9 +679,11 @@ dynamic_rowset('^table_(.+)$', function(tbl)
 	end
 
 	local sel = cat(schema.cols, ', ')
+	local name_col = schema.name_col or schema.fields.name and 'name'
 	return scan_rowset{
-		label = tbl:gsub('_', ' '):gsub('^.', string.upper),
+		label = table_label(tbl, schema),
 		category = schema.category,
+		icon = schema.icon,
 		scan = function(db, param_names)
 			if server_param and param_names[server_param] then
 				local fk = db:table_schema(tbl).fks[server_param]
@@ -688,6 +694,8 @@ dynamic_rowset('^table_(.+)$', function(tbl)
 		end,
 		pk = cat(schema.pk, ' '),
 		params = params,
+		parent_col = schema.parent_col,
+		tree_col = schema.parent_col and name_col,
 	}
 end)
 
@@ -945,7 +953,7 @@ dynamic_rowset('^members_(.+)$', function(tbl)
 	end, tbl))
 	checkfound(is_link_table(schema))
 	local rs = members_rowset(tbl)
-	rs.label = tbl:gsub('_', ' '):gsub('^.', string.upper) .. ' (members)'
+	rs.label = table_label(tbl, schema)..' (members)'
 	rs.category = schema.category
 	return rs
 end)

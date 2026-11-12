@@ -6,45 +6,45 @@ db_schema:import(function()
 
 	category'Project Management'
 
-	tables.company = { icon'building',
+	tables.company = { icon'building', label'Companies',
 		company      , idpk,
 		name         , name, not_null, uk,
-		address      , name, icon'map-pin',
-		registration , name, icon'id',
+		address      , address,
+		registration , name,
 		phone        , phone,
 		email        , email,
 		website      , url,
-		note         , text, icon'notes',
+		note         , note,
 	}
 
-	tables.contact = { icon'user',
+	tables.contact = { icon'user', label'Contacts',
 		contact   , idpk,
 		name      , name, not_null, uk,
 		phone     , phone,
 		email     , email,
 		position  , name, icon'briefcase',
 		company   , id, fk,
-		note      , text, icon'notes',
+		note      , note,
 	}
 
-	tables.project = { icon'briefcase',
+	tables.project = { icon'briefcase', label'Projects',
 		project    , idpk,
 		name       , name, not_null, uk,
 		client     , id, child_fk(company),
-		note       , text, icon'notes',
+		note       , note,
 	}
 
-	tables.unit = { icon'home',
-		unit    , idpk,
+	tables.lot = { icon'home', label'Lots',
+		lot     , idpk,
 		project , id, not_null, child_fk,
 		name    , name, not_null,
-		note    , text, icon'notes',
+		note    , note,
 		plan    , id, weak_fk, --agreed plan
 	}
 
-	tables.plan = { icon'map',
+	tables.plan = { icon'map', label'Plans',
 		plan    , idpk,
-		unit    , id, not_null, fk,
+		lot     , id, not_null, fk,
 		user    , id, not_null, fk, server_default(function()
 			return user()
 		end), --owner
@@ -56,51 +56,73 @@ db_schema:import(function()
 		mtime   , mtime,
 	}
 
-	tables.folder = { icon'folder',
+	types.unit = {str, w = 2, icon = 'ruler', maxlen = 16}
+
+	tables.unit = { icon'ruler', label'Units',
+		unit, unit, pk,
+		note, note,
+	}
+
+	tables.folder = { icon'folder', label'Folders',
 		folder , idpk,
-		name   , name, not_null,
+		name   , long_name, not_null,
 		parent , id, fk(folder),
 	}
 
-	tables.measure = { icon'ruler',
+	tables.folder.parent_col = 'parent'
+
+	tables.measure = { icon'ruler', label'Measures',
 		measure , idpk,
 		name    , name, not_null, uk,
-		unit    , name, not_null, icon'ruler',
-		note    , text, icon'notes',
+		unit    , unit, not_null, fk,
+		note    , note,
 	}
 
 	for i=1,3 do
-		tables['dim'..i..'_wbs'] = { icon'tags',
+		tables['dim'..i..'_wi'] = { icon'tags', label('Dimension '..i..' Tags'),
 			id   , idpk,
 			name , name, not_null,
-			note , text, icon'notes',
+			note , note,
 		}
 	end
 
-	tables.wbs = { icon'list-tree', --work breakdown structure
-		wbs    , idpk,
-		name   , name, not_null,
+	tables.wi = { icon'list-tree', label'Work Items',
+		wi     , idpk,
+		name   , long_name, not_null,
 		code   , name, icon'code',
-		type   , enum'work product service', icon'category',
-		project, id,
-		--estimated current cost
-		unit_cost , money,
-		unit      , name, icon'ruler',
-		measure   , id, fk,
-		--estimated productivity
-		output_per_day , qty, icon'gauge',
-		output_unit    , name, icon'ruler',
+		project, id, fk, --custom wi per project
+		unit   , unit, fk,
+		measure, id, fk,
 		--org
 		folder , id, fk,
-		dim1   , id, fk(dim1_wbs),
-		dim2   , id, fk(dim2_wbs),
-		dim3   , id, fk(dim3_wbs),
-		note   , text, icon'notes',
+		dim1   , id, fk(dim1_wi),
+		dim2   , id, fk(dim2_wi),
+		dim3   , id, fk(dim3_wi),
+		note   , note,
 	}
 
-	tables.wbs_dependency = { icon'arrows-shuffle',
-		wbs          , id, child_fk,
-		needs_wbs    , id, fk(wbs),
+	tables.resource = { icon'package', label'Resources',
+		resource  , idpk,
+		name      , long_name, not_null,
+		code      , name, icon'code',
+		type      , enum'labor material service equipment other', icon'category',
+		unit      , unit, fk,
+		unit_cost , money,
+		currency  , currency, fk,
+		note      , note,
+	}
+
+	tables.wi_comp = { icon'components', label'Work Item Components',
+		wi       , id, not_null, child_fk,
+		resource , id, not_null, fk,
+		qty      , qty, not_null, --per unit of wi, in resource.unit
+		pk(wi, resource),
+	}
+
+	tables.wi_dependency = { icon'arrows-shuffle',
+		label'Work Item Dependencies',
+		wi           , id, child_fk,
+		needs_wi     , id, fk(wi),
 		type         , enum('FS SS FF SF', {
 			FS = 'Finish-to-Start',
 			SS = 'Start-to-Start',
@@ -123,40 +145,40 @@ Very rare. Example: shift handoffs.
 ]],
 		}), not_null, client_default'"FS"', icon'category',
 		delay        , duration,
-		note         , text, icon'notes',
-		pk(wbs, needs_wbs),
+		note         , note,
+		pk(wi, needs_wi),
 	}
 
 	--cost estimates and cost tracking
 
-	tables.unit_measure = { icon'ruler',
-		unit    , id, not_null, child_fk,
+	tables.lot_measure = { icon'ruler', label'Lot Measures',
+		lot     , id, not_null, child_fk,
 		measure , id, not_null, fk,
 		qty     , qty, not_null,
-		pk(unit, measure),
+		pk(lot, measure),
 	}
 
-	tables.cost = { icon'currency-dollar',
-		unit      , id, not_null, child_fk,
-		wbs       , id, not_null, fk,
+	tables.cost = { icon'currency-dollar', label'Costs',
+		lot       , id, not_null, child_fk,
+		wi        , id, not_null, fk,
 		qty       , qty, not_null,
 		estimated_unit_cost  , money,
 		contracted_unit_cost , money,
 		status    , enum'started finished', icon'progress-check',
-		note      , text, icon'notes',
-		pk(unit, wbs),
+		note      , note,
+		pk(lot, wi),
 	}
 
-	tables.punch = { icon'clock',
+	tables.punch = { icon'clock', label'Punches',
 		punch    , idpk,
-		unit     , id, not_null, child_fk,
-		wbs      , id, not_null, fk,
+		lot      , id, not_null, child_fk,
+		wi       , id, not_null, fk,
 		start_at , time, icon'player-play',
 		end_at   , time, icon'player-stop',
 		hours    , duration,
 		output   , qty,
 		worker   , id, not_null, fk(contact),
-		note     , text, icon'notes',
+		note     , note,
 	}
 
 end)
@@ -170,7 +192,7 @@ local function can_see_plan(plan)
 end
 
 local function plan_rowset(detail)
-	local cols = 'plan, unit, user, name, public, locked, mtime'
+	local cols = 'plan, lot, user, name, public, locked, mtime'
 	if detail then cols = cols..', data' end
 	local changed_scan
 	return scan_rowset{
@@ -186,9 +208,9 @@ local function plan_rowset(detail)
 				lookup_rowset_name = 'plans', lookup_cols = 'plan',
 			},
 		} or {
-			unit = {
-				for_cols = 'unit', accept_many = true, auto_bind = true,
-				lookup_rowset_name = 'table_unit', lookup_cols = 'unit',
+			lot = {
+				for_cols = 'lot', accept_many = true, auto_bind = true,
+				lookup_rowset_name = 'table_lot', lookup_cols = 'lot',
 				client_filter = true,
 			},
 		},
