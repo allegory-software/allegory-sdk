@@ -1769,11 +1769,10 @@ function init(id, e) {
 
 		ui.m(x, y, 0, 0)
 		ui.min_wh(w, h)
-		let cell_i = ui.stack('', 0, 'l', 't')
+		let cell_i = ui.stack('', 0, 'l', 't', false, full_width)
 			if (full_width) {
-				let popup_align = align == 'right' ? ']s'
-					: align == 'center' ? 'cs' : '[s'
-				ui.popup('', null, cell_i, 'its', popup_align, 'hover_parent')
+				ui.min_wh(w, h)
+				ui.stack('', 0, align, 't')
 			}
 			ui.bb(bg, bgs,
 				build_stage == 'col_move' ? (horiz ? 'lrb' : 'tb') : 'b', 'light')
@@ -1845,7 +1844,7 @@ function init(id, e) {
 
 			ui.p(0)
 			if (full_width)
-				ui.end_popup()
+				ui.end_stack()
 			if (!build_stage && focused && row_focused && field_focused) {
 				let cell_errors = e.cell_errors[field.fi]?.[ri]
 				let row_errors = e.row_errors[ri]
