@@ -11587,7 +11587,7 @@ ui.nav_input = function(id, opt, fr, align, valign) {
 	return build_input_row(id, null, opt, true, fr, align, valign)
 }
 
-//// NAV_EDITOR: a widget editing one cell of the focused row ---------------
+//// NAV_EDITOR: a widget that owns and edits a one-row detail nav -----------
 
 function is_nav_editor_changed(s) {
 	return s.nav.modified_n > 0 || s.def.is_value_changed(s.input_id)
@@ -11640,8 +11640,7 @@ ui.nav_editor = function(id, opt, def) {
 	let in_dock = ui.in_dock_tab()
 	if (in_dock && has_master_toggle) {
 		ui.open_tab_strip()
-		ui.master_toggle(id, def.key_col, def.master_rowset_name, true,
-			def.label)
+		ui.master_toggle(id, def.key_col, def.master_rowset_name, true, def.label)
 		ui.close_tab_strip()
 	}
 
@@ -11654,8 +11653,7 @@ ui.nav_editor = function(id, opt, def) {
 	ui.v(1, ui.sp())
 		if (!in_dock && has_master_toggle) {
 			ui.h(0, ui.sp())
-				ui.master_toggle(id, def.key_col, def.master_rowset_name, true,
-					def.label)
+				ui.master_toggle(id, def.key_col, def.master_rowset_name, true, def.label)
 			ui.end_h()
 		}
 		if (nav.load_error)

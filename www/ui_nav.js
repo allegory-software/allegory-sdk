@@ -2098,6 +2098,7 @@ ui.nav = function(id, opt) {
 	}
 
 	let sorted_lookups_change_no = 0 // max rows_change_no of sorted lookup navs
+	let filtered_lookups_change_no = 0
 
 	// -> the first n entries of ris sorted by order_by, in a new array.
 	function sorted_copy(ris, n, order_by) {
@@ -2161,19 +2162,35 @@ ui.nav = function(id, opt) {
 		return false
 	}
 
-	function resort_if_lookups_changed() {
+	function update_if_lookups_changed() {
 		if (!e.loaded || has_loading_lookups())
 			return
+		let want_sort = false
+		let want_filter = false
 		for (let field of e.all_fields) {
-			if (field.sort_i == null || !field.lookup_nav)
+			if (!field.lookup_nav)
 				continue
-			if (field.lookup_nav.rows_change_no > sorted_lookups_change_no) {
-				sort_placed_rows()
-				if (e.is_grouped)
-					regroup()
-				update_tree_and_visible_ris(false)
-				break
-			}
+			if (field.sort_i != null
+				&& field.lookup_nav.rows_change_no > sorted_lookups_change_no)
+				want_sort = true
+			if (field.filter && !field.filter_field.filter_expr
+				&& field.lookup_nav.rows_change_no > filtered_lookups_change_no)
+				want_filter = true
+		}
+		if (want_sort) {
+			sort_placed_rows()
+			if (e.is_grouped)
+				regroup()
+		}
+		if (want_filter) {
+			update_row_filter()
+			update_pass()
+		}
+		if (want_sort) {
+			update_tree_and_visible_ris(false)
+		} else if (want_filter) {
+			update_pass_desc()
+			update_visible_ris(false)
 		}
 	}
 
@@ -2395,6 +2412,7 @@ ui.nav = function(id, opt) {
 	// Combine the app filter, locally filtered bound cols, column filters
 	// and excluded values into row_filter.
 	function update_row_filter() {
+		filtered_lookups_change_no = 0
 		let tests = [] // [fn(ri) -> passes, ...]
 		if (e.filter)
 			tests.push(e.filter)
@@ -2416,6 +2434,10 @@ ui.nav = function(id, opt) {
 					if (expr != null)
 						tests.push(e.expr_filter(expr))
 				} else {
+					if (field.lookup_nav)
+						filtered_lookups_change_no =
+							max(filtered_lookups_change_no,
+								field.lookup_nav.rows_change_no)
 					tests.push(val_filter(field, field.filter) ?? return_false)
 				}
 			}
@@ -2698,7 +2720,7 @@ ui.nav = function(id, opt) {
 
 	e.check_dependencies = function() {
 		reload_if_params_changed()
-		resort_if_lookups_changed()
+		update_if_lookups_changed()
 		finish_load()
 	}
 
@@ -3606,6 +3628,7 @@ ui.nav = function(id, opt) {
 			let df = lookup_display_field(field, field.lookup_nav)
 			if (df) {
 				let ln = field.lookup_nav
+				// we don't have recursive lookups, but reusing build_val is simpler.
 				return ln.build_val(ln_ri, df,
 					ln.cell_input_val(ln_ri, df.fi), opt)
 			}
