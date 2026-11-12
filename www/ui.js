@@ -8690,7 +8690,7 @@ ui.end_menu_bar = function() {
 
 		opt: {item_align, item_valign, item_fr, max_w,
 	      item_pad_l, item_pad_r, item_pad_y, item_h, item_gap,
-	      item_bg_color, item_color}
+	      item_bg_color, item_color, build_item, build_value}
 
 	ui.bare_list (id, items, value=, field=, fr=1, align='s', valign='t',
 		readonly=, opt=) -> value
@@ -8794,10 +8794,42 @@ function list_update(id, s) {
 		ui.capture_keys()
 	set_interaction_value(id, s, value_changed ? value : undefined)
 }
+function build_list_value(value, field, fr, align, valign, max_w) {
+	ui.text('', field ? field.to_text(value) : value,
+		fr, align, valign, max_w)
+}
+
+ui.list_item = function(item, field, opt, state, align, sides) {
+	let has_bg = state & (STATE_ITEM_FOCUSED | STATE_ITEM_SELECTED)
+	let bg = opt?.item_bg_color ?? (has_bg ? 'item' : 'bg')
+	ui.bb(bg, state, sides, null, null, ui.sp05())
+	ui.color(opt?.item_color ?? 'text', state)
+	let build_value = opt?.build_value ?? field?.build_value ?? build_list_value
+	build_value(item, field, 0, align, opt?.item_valign ?? 'c', opt?.max_w)
+}
+
+ui.bare_list_item = function(item, field, opt, state, align) {
+	let color = opt?.item_color ?? 'text'
+	// check mark column: blank for unselected items.
+	ui.h(1, ui.sp2())
+		ui.min_w(ui.em(2) - ui.sp2())
+		ui.stack('', 0, 'l', 'c')
+			if (state & STATE_ITEM_SELECTED) {
+				ui.color(color, state)
+				ui.icon('', 'check')
+			}
+		ui.end_stack()
+		ui.color(color, state)
+		let build_value = opt?.build_value ?? field?.build_value ?? build_list_value
+		build_value(item, field, 1, align, opt?.item_valign ?? 'c', opt?.max_w)
+	ui.end_h()
+}
+
 function hvlist(hv, id, items, value, field,
-	fr, align, valign, readonly, opt, is_bare
+	fr, align, valign, readonly, opt, build_item
 ) {
 	field ??= input_field(id)
+	build_item = opt?.build_item ?? build_item ?? ui.list_item
 	hv = hv || 'v'
 	assert(hv == 'v' || hv == 'h')
 	readonly ??= field?.readonly
@@ -8851,32 +8883,10 @@ function hvlist(hv, id, items, value, field,
 					? STATE_FOCUSED : 0)
 				| (item_focused ? STATE_ITEM_FOCUSED : 0)
 				| (item_selected ? STATE_ITEM_SELECTED : 0)
-			let item_bg_color = opt?.item_bg_color
-				?? (item_focused || item_selected ? 'item' : 'bg')
 			// TODO: remove this rounded corners hack
 			let sides = opt?.item_gap ? (!i ? '-r' : i == items.length-1 ? '-l' : null) : null
-			if (!is_bare)
-				ui.bb(item_bg_color, item_color_state, sides, null, null, ui.sp05())
-			let item_color = opt?.item_color ?? 'text'
-			if (is_bare) {
-				// check mark column: blank for unselected items.
-				ui.h(1, ui.sp2())
-				ui.min_w(ui.em(2) - ui.sp2())
-				ui.stack('', 0, 'l', 'c')
-					if (item_selected) {
-						ui.color(item_color, item_color_state)
-						ui.icon('', 'check')
-					}
-				ui.end_stack()
-			}
-			ui.color(item_color, item_color_state)
-			ui.text('', field ? field.to_text(item) : item,
-				is_bare ? 1 : 0,
-				opt?.item_align ?? field?.align ?? (hv == 'v' ? 'l' : 'c'),
-				opt?.item_valign ?? 'c',
-				opt?.max_w)
-			if (is_bare)
-				ui.end_h()
+			let align = opt?.item_align ?? field?.align ?? (hv == 'v' ? 'l' : 'c')
+			build_item(item, field, opt, item_color_state, align, sides)
 			if (item_focused)
 				ui.focus_ring(id)
 		ui.end_stack()
@@ -8893,7 +8903,7 @@ ui.bare_list = function(
 	id, items, value, field, fr, align, valign, readonly, opt
 ) {
 	return hvlist('v', id, items, value, field,
-		fr, align, valign, readonly, opt, true)
+		fr, align, valign, readonly, opt, ui.bare_list_item)
 }
 
 //// LABEL -------------------------------------------------------------------
@@ -10117,10 +10127,10 @@ ui.end_dropdown = function(id) {
 
 /*
 
-	ui.list_dropdown        (id, items, value=, field=, fr=1, align='s', valign='c', text_align='l', max_w=, no_box=, readonly=, want_open=) -> value
+	ui.list_dropdown        (id, items, value=, field=, fr=1, align='s', valign='c', text_align='l', max_w=, no_box=, readonly=, want_open=, opt=) -> value
 	ui.list_dropdown_inline (id, items, value=, field=, fr=0, align='l', valign='c', text_align='l', max_w=) -> value
 
-	ui.draw_value_row       (value, field=, edge_inset, chevron_w, max_w=, align='l')
+	ui.draw_value_row       (value, field=, edge_inset, chevron_w, max_w=, align='l', build_value=)
 
 */
 
@@ -10140,16 +10150,16 @@ function draw_chevron(chevron_w, side, chevron_mx) {
 		ui.end_stack()
 	ui.end_stack()
 }
-function draw_value_row(value, field, edge_inset, chevron_w, max_w, align) {
+function draw_value_row(
+	value, field, edge_inset, chevron_w, max_w, align, build_value
+) {
 	let chevron_mx = ui.em(chevron_margin_em) - edge_inset
 	ui.h(0, ui.em(chevron_gap_em))
 		if (align == 'r')
 			draw_chevron(chevron_w, 'l', chevron_mx)
-		ui.text('', value == null ? ''
-			: field ? field.to_text(value) : value,
-			1, align, 'c',
-			max_w ?? ui.em(ui.input_max_w_em),
-		)
+		let build = value == null ? build_list_value : build_value ?? build_list_value
+		build(value, value == null ? null : field, 1, align, 'c',
+			max_w ?? ui.em(ui.input_max_w_em))
 		if (align == 'l')
 			draw_chevron(chevron_w, 'r', chevron_mx)
 	ui.end_h()
@@ -10202,7 +10212,7 @@ function list_dropdown_update(id, s) {
 
 ui.list_dropdown = function(
 	id, items, value, field, fr, align, valign, text_align, max_w, no_box,
-		readonly, want_open
+		readonly, want_open, opt
 ) {
 
 	field ??= input_field(id)
@@ -10232,7 +10242,8 @@ ui.list_dropdown = function(
 
 		ui.color('text', state)
 		draw_value_row(value, field, text_align == 'l' ? s.pad_r : s.pad_l,
-			chevron_w, max_w ?? ui.em(ui.input_max_w_em), text_align)
+			chevron_w, max_w ?? ui.em(ui.input_max_w_em), text_align,
+			opt?.build_value ?? field?.build_value)
 
 	ui.dropdown_picker(id, 'b', text_align == 'r' ? ']s' : 's')
 
@@ -10245,14 +10256,17 @@ ui.list_dropdown = function(
 				ui.sb_max_wh(null,
 					ui.state_of(resizer_id, 'h') ?? picker_max_h)
 				ui.scrollbox(picker_id+'.sb', 1, 'contain', 'auto', 's', 's')
-					let opt = s.picker_opt ??= {} // picker list options
-					opt.item_align = text_align
-					opt.max_w = max_w ?? ui.em(ui.input_max_popup_w_em)
-					opt.item_pad_l = s.pad_l
-					opt.item_pad_r = s.pad_r
-					opt.item_pad_y = ui.em(input_pad_y_em)
+					let picker_opt = s.picker_opt ??= {} // picker list options
+					picker_opt.item_align = text_align
+					picker_opt.max_w = max_w ?? ui.em(ui.input_max_popup_w_em)
+					picker_opt.item_pad_l = s.pad_l
+					picker_opt.item_pad_r = s.pad_r
+					picker_opt.item_pad_y = ui.em(input_pad_y_em)
+					picker_opt.build_item = opt?.build_item
+					picker_opt.build_value = opt?.build_value ?? field?.build_value
 					let build_list = field?.is_values ? ui.bare_list : ui.list
-					build_list(picker_id, items, value, field, 0, 's', 's', readonly, opt)
+					build_list(picker_id, items, value, field, 0, 's', 's', 
+						readonly, picker_opt)
 				ui.end_scrollbox()
 				ui.resizer(resizer_id, is_popup_above ? 't' : 'b',
 					null, picker_max_h)
@@ -10275,18 +10289,18 @@ ui.list_dropdown_inline = function(id, items, value, field,
 
 /*
 
-	ui.enum_input  (id, value=, field, fr=1, align='s', valign='c', text_align='l', max_w=, no_box=, readonly=, want_open=) -> value
+	ui.enum_input  (id, value=, field, fr=1, align='s', valign='c', text_align='l', max_w=, no_box=, readonly=, want_open=, opt=) -> value
 	ui.enum_toggle (id, value=, field, fr=0, align='l', valign='c', readonly=) -> value
 
 */
 
 ui.enum_input = function(
 	id, value, field, fr, align, valign, text_align, max_w, no_box,
-	readonly, want_open
+	readonly, want_open, opt
 ) {
 	field ??= input_field(id)
 	return ui.list_dropdown(id, field.enum_items(), value, field, fr, align,
-		valign, text_align, max_w, no_box, readonly, want_open)
+		valign, text_align, max_w, no_box, readonly, want_open, opt)
 }
 
 ui.enum_toggle = function(
@@ -11433,13 +11447,13 @@ ui.build_input = function(id, value, opt, control, readonly) {
 			readonly, opt.open)
 	} else if (control == 'enum_input') {
 		value = ui.enum_input(id, value, this, null, null, null, opt.text_align,
-			opt.max_w, opt.no_box, readonly, opt.open)
+			opt.max_w, opt.no_box, readonly, opt.open, opt)
 	} else if (control == 'enum_toggle') {
 		value = ui.enum_toggle(id, value, this, null, null, null, readonly)
 	} else if (control == 'list_dropdown') {
 		value = ui.list_dropdown(id, opt.items ?? this.enum_items(), value,
 			this, null, null, null, opt.text_align, opt.max_w, opt.no_box, readonly,
-			opt.open)
+			opt.open, opt)
 	} else if (control == 'radio_list') {
 		value = ui.radio_list(id, opt.items ?? this.enum_items(), value, this,
 			null, 'l', null, opt.hv, readonly)

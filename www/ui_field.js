@@ -722,6 +722,7 @@ let field_config_checks = {
 	align: v => v == null || v == 'left' || v == 'right' || v == 'center',
 	enum_values: allow_null(v => isarray(v) || isstr(v)),
 	filter_input: optional_obj,
+	build_value: allow_null(isfunc),
 	maxlen: allow_null(v => isnum(v) && v >= 0 && v == floor(v)),
 	w: optional_num,
 	min_w: optional_num,
@@ -1085,6 +1086,19 @@ field_types.bool = bool
 
 bool.filter_input = assign({}, checklist_filter_input, {
 	enum_values: [false, true],
+	build_value: function(v, field, fr, align, valign, max_w) {
+		if (field.icon && isarray(v)) {
+			ui.h(fr, ui.sp05(), align, valign)
+				for (let item of v)
+					field.build_value(item, field, 0, align, valign, max_w)
+			ui.end_h()
+		} else if (field.icon && isbool(v)) {
+			ui.color(v ? 'text' : 'faint')
+			ui.icon('', field.icon, fr, align, valign, max_w)
+		} else {
+			ui.text('', field.to_text(v), fr, align, valign, max_w)
+		}
+	},
 })
 
 ui.add_validation_rule({

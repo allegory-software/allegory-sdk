@@ -2389,6 +2389,7 @@ ui.nav = function(id, opt) {
 			align: field.align,
 			label: field.label,
 			is_number_filter: has_number_filter(field),
+			icon: field.icon,
 			enum_values: field.enum_values,
 			enum_labels: field.enum_labels,
 			null_text: field.null_text || S('null', 'null'),
