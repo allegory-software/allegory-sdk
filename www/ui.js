@@ -108,7 +108,7 @@ MOUSE INPUT
   POSITION      ui.mx  ui.my  ui.mx_notrans  ui.my_notrans  ui.update_mouse
   BUTTONS       ui.pressed  ui.click  ui.rightclick  ui.clickup  ui.dblclick
                 ui.tripleclick
-                ui.clicked  ui.rightclicked  ui.dblclicked
+                ui.clicked  ui.rightclicked  ui.dblclicked  ui.tripleclicked
   WHEEL         ui.wheel_dy  ui.trackpad
   ENTER/LEAVE   ui.mouseenter  ui.mouseleave
   HIT CONTROL   ui.nohit
@@ -983,7 +983,7 @@ MOUSE BUTTONS STATE
 	ui.click           active pointer clicked
 	ui.clickup         left button released this frame
 	ui.dblclick        active pointer double-clicked
-	ui.tripleclick     active pointer triple-clicked (never set yet)
+	ui.tripleclick     active pointer triple-clicked
 	ui.local_pointer   default pointer that tracks the local mouse and keyboard
 	ui.mx0, ui.my0     mouse position at the start of the drag
 
@@ -1006,6 +1006,7 @@ MOUSE HIT STATE
 	ui.clicked         (id) -> hs|null    hit state if id was clicked this frame
 	ui.clicked_outside (id) -> ?          left click outside the container and its popups
 	ui.dblclicked      (id) -> hs|null    hit state if id was double-clicked
+	ui.tripleclicked   (id) -> hs|null    hit state if id was triple-clicked
 	ui.rightclicked    (id) -> hs|false|undefined
 	ui.hit_match       (id_prefix) -> suffix|undefined    read the hit id suffix
 	ui.capture_match   (id_prefix) -> suffix|undefined
@@ -1095,7 +1096,7 @@ function reset_pointer_state(p) {
 	p.rightclick = false // right button press for the current frame
 	p.clickup = false
 	p.dblclick = false
-	p.tripleclick = false // not set by any event yet
+	p.tripleclick = false
 	p.wheel_dy = 0
 	p.trackpad = false
 	p.mouseenter = false
@@ -1138,11 +1139,14 @@ screen.addEventListener('pointerup', function(ev) {
 	animate()
 })
 
-screen.addEventListener('dblclick', function(ev) {
+screen.addEventListener('click', function(ev) {
+	if (ev.button != 0 || (ev.detail != 2 && ev.detail != 3))
+		return
 	update_mouse(ev)
-	if (ev.button == 0) {
+	if (ev.detail == 2)
 		ui.local_pointer.dblclick = true
-	}
+	else
+		ui.local_pointer.tripleclick = true
 	ui.local_pointer.activate()
 	animate()
 })
@@ -2413,6 +2417,11 @@ function dblclicked(id) {
 	return ui.dblclick && hit(id)
 }
 ui.dblclicked = dblclicked
+
+function tripleclicked(id) {
+	return ui.tripleclick && hit(id)
+}
+ui.tripleclicked = tripleclicked
 
 ui.hit_enter = function(id) {
 	assert(!render_state_map, 'hit_enter() called while rendering')
@@ -7429,6 +7438,7 @@ function ss_send_pointer(s, mx, my) {
 	let click    = inside && ui.click
 	let clickup  = inside && ui.clickup
 	let dblclick = inside && ui.dblclick
+	let tripleclick = inside && ui.tripleclick
 	let wheel_dy = inside ? ui.wheel_dy : 0
 	let trackpad = inside && ui.trackpad
 	if (
@@ -7438,6 +7448,7 @@ function ss_send_pointer(s, mx, my) {
 		click    == p.click    &&
 		clickup  == p.clickup  &&
 		dblclick == p.dblclick &&
+		tripleclick == p.tripleclick &&
 		wheel_dy == p.wheel_dy &&
 		trackpad == p.trackpad
 	)
@@ -7448,6 +7459,7 @@ function ss_send_pointer(s, mx, my) {
 	p.click    = click
 	p.clickup  = clickup
 	p.dblclick = dblclick
+	p.tripleclick = tripleclick
 	p.wheel_dy = wheel_dy
 	p.trackpad = trackpad
 	s.con.send(json(p))
