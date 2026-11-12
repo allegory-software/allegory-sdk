@@ -8764,7 +8764,7 @@ function list_update(id, s) {
 		}
 		ui.capture_keys()
 	}
-	if (focused && focused_item != null && ui.keydown(' ')) {
+	if (focused && items.includes(focused_item) && ui.keydown(' ')) {
 		value = pick_list_item(field, value, focused_item)
 		value_changed = 'key'
 	}
@@ -8958,6 +8958,13 @@ ui.error_label = function(for_id, mode, fr, align, valign, results) {
 		ui.box()
 	}
 	ui.end_v()
+}
+
+ui.error_popup = function(id, anchor_i) {
+	ui.mv(ui.sp())
+	ui.p(ui.sp2(), ui.sp())
+	ui.popup(id, 'tooltip', anchor_i, 'b', '[', 'change_side constrain')
+	ui.bb_tooltip('bg1', null, 'intense', 'focused', ui.sp05())
 }
 
 //// INPUT -------------------------------------------------------------------
@@ -11536,11 +11543,7 @@ function build_input_row(id, value, opt, is_bound, fr, align, valign) {
 		let status_id = id+'.status'
 		if (has_error && (opt.errors ?? 'tooltip') == 'tooltip'
 			&& (ui.focus_inside(focus_id) || hovers(status_id))) {
-			ui.mv(ui.sp())
-			ui.p(ui.sp2(), ui.sp())
-			ui.popup(id+'.error', 'tooltip', box_i, 'b', '[',
-				'change_side constrain')
-				ui.bb_tooltip('bg1', null, 'intense', 'focused', ui.sp05())
+			ui.error_popup(id+'.error', box_i)
 				ui.error_label(id, opt.error_mode ?? 'all_errors')
 			ui.end_popup()
 		}

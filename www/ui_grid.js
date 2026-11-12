@@ -466,12 +466,6 @@ function init(id, e) {
 				{id: 'revert_all', label: 'Revert all changes',
 					icon: 'arrow-back-up', disabled: !e.modified_n},
 				null)
-		items.push(
-			{id: 'filter_bar', label: 'Show filter bar', icon: 'filter',
-				checked: e.filter_bar_visible, disabled: !e.can_filter()},
-			{id: 'clear_filters', label: 'Clear column filters',
-				icon: 'filter-off', disabled: !e.can_filter()
-					|| !e.all_fields.some(field => field.filter)})
 		if (e.can_be_tree)
 			items.push({id: 'flat', label: 'Flat view', icon: 'list',
 				checked: !!e.flat, disabled: e.is_grouped})
@@ -1533,8 +1527,15 @@ function init(id, e) {
 				build_help(id+'.filter', cell_i,
 					field.filter_field.is_number_filter
 						? number_filter_help_lines : text_filter_help_lines)
-			ui.field_input(filter_box_id(field), field.filter,
-				{field: field.filter_field, min_w: 0})
+			let input_id = filter_box_id(field)
+			let filter_field = field.filter_field
+			filter_field.build_input(input_id, field.filter,
+				{min_w: 0}, filter_field.control)
+			if (ui.state_of(input_id, 'validation').failed && ui.focused(input_id)) {
+				ui.error_popup(input_id+'.error', cell_i)
+					ui.error_label(input_id, 'all_errors')
+				ui.end_popup()
+			}
 		ui.end_stack()
 	}
 
@@ -1856,11 +1857,7 @@ function init(id, e) {
 				let cell_errors = e.cell_errors[field.fi]?.[ri]
 				let row_errors = e.row_errors[ri]
 				if (cell_errors || row_errors) {
-					ui.mv(ui.sp())
-					ui.p(ui.sp2(), ui.sp())
-					ui.popup(id+'.error', 'tooltip', cell_i, 'b', '[',
-						'change_side constrain')
-						ui.bb_tooltip('bg1', null, 'intense', 'focused', ui.sp05())
+					ui.error_popup(id+'.error', cell_i)
 						if (cell_errors)
 							ui.error_label(null, 'all_errors', 0, null, null, cell_errors)
 						if (row_errors)

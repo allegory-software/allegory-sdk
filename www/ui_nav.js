@@ -2321,8 +2321,12 @@ ui.nav = function(id, opt) {
 
 		}
 
-		let shown_text = ri =>
-			(val_text(field, col_val(ri, fi)) ?? '').toLowerCase()
+		let shown_text = ri => {
+			let v = col_val(ri, fi)
+			let text = field.lookup_nav
+				? e.build_val(ri, field, v) : val_text(field, v)
+			return (text ?? '').toLowerCase()
+		}
 		expr = expr.toLowerCase()
 
 		// exact match: =s
@@ -2364,20 +2368,27 @@ ui.nav = function(id, opt) {
 	}
 
 	function create_filter_field(field) {
-		let filter_field = ui.create_field({
+		let opt = assign({
 			align: field.align,
 			label: field.label,
 			is_number_filter: has_number_filter(field),
-		})
-		filter_field.validator = ui.create_validator(filter_field, [{
-			name     : 'filter',
-			applies  : return_true,
-			validate : (filter_field, s) => !!val_filter(field, s),
-			error    : (filter_field, s) => S('validation_filter_error',
-				'{0}: invalid filter', filter_field.label),
-			rule     : (filter_field) => S('validation_filter_rule',
-				'{0} must be a valid filter', filter_field.label),
-		}], true)
+			enum_values: field.enum_values,
+			enum_labels: field.enum_labels,
+			null_text: field.null_text || S('null', 'null'),
+		}, field.filter_input)
+		if (opt.is_values && !field.not_null)
+			opt.enum_values = [...words(opt.enum_values), null]
+		let filter_field = ui.create_field(opt)
+		if (!filter_field.is_values)
+			filter_field.validator = ui.create_validator(filter_field, [{
+				name     : 'filter',
+				applies  : return_true,
+				validate : (filter_field, v) => !!val_filter(field, v),
+				error    : (filter_field, s) => S('validation_filter_error',
+					'{0}: invalid filter', filter_field.label),
+				rule     : (filter_field) => S('validation_filter_rule',
+					'{0} must be a valid filter', filter_field.label),
+			}], true)
 		return filter_field
 	}
 
@@ -2398,8 +2409,16 @@ ui.nav = function(id, opt) {
 				j => col_val(ri, fis[j])))
 		}
 		for (let field of e.all_fields) {
-			if (field.filter)
-				tests.push(val_filter(field, field.filter) ?? return_false)
+			if (field.filter) {
+				let filter_field = field.filter_field
+				if (filter_field.filter_expr) {
+					let expr = filter_field.filter_expr(field.filter, field.name)
+					if (expr != null)
+						tests.push(e.expr_filter(expr))
+				} else {
+					tests.push(val_filter(field, field.filter) ?? return_false)
+				}
+			}
 			if (field.exclude_vals)
 				tests.push(ri => !field.exclude_vals.has(col_val(ri, field.fi)))
 		}
@@ -2450,7 +2469,7 @@ ui.nav = function(id, opt) {
 		return !(e.partial_load && e.can_be_tree)
 	}
 
-	// s: filter text, or null to clear the column filter.
+	// s: filter text or selected values, or null to clear the column filter.
 	e.set_col_filter = function(fi, s) {
 		if (warn_if(!e.can_filter(), e.id, 'no column filters on a partial nav'))
 			return

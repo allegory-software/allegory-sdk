@@ -447,7 +447,15 @@ ui.add_validation_rule({
 ui.add_validation_rule({
 	name     : 'values_known',
 	applies  : (e) => e.is_values,
-	validate : (e, v) => v === (v & ((1 << e.enum_values.length) - 1)),
+	validate : (e, v) => {
+		if (isarray(v)) {
+			for (let item of v)
+				if (!e.known_values.has(item))
+					return false
+			return true
+		}
+		return v === (v & ((1 << e.enum_values.length) - 1))
+	},
 	error    : (e, v) => S('validation_values_known_error',
 		'{0}: unknown values: {1}', e.label, field_value(e, v)),
 	rule     : (e) => S('validation_values_known_rule',
@@ -713,6 +721,7 @@ let field_config_checks = {
 	empty_text: optional_str,
 	align: v => v == null || v == 'left' || v == 'right' || v == 'center',
 	enum_values: allow_null(v => isarray(v) || isstr(v)),
+	filter_input: optional_obj,
 	maxlen: allow_null(v => isnum(v) && v >= 0 && v == floor(v)),
 	w: optional_num,
 	min_w: optional_num,
@@ -724,6 +733,7 @@ let all_field_types  = ui.all_field_types  = obj() // {K: V}
 assign(all_field_types, {
 	type: 'text',
 	control: 'input',
+	filter_input: {control: 'input'},
 	build_input: ui.build_input,
 	default: null,
 	w: 4,
@@ -1016,6 +1026,54 @@ d.to_text = function(v) {
 	return format_duration(v, this.duration_format)
 }
 
+//// CHECKLIST FILTERS -------------------------------------------------------
+
+let checklist_filter_input = {
+	control: 'enum_input',
+	is_values: true,
+	filter_expr: function(v, col) {
+		if (v == null || !v.length)
+			return null
+		let expr = ['||']
+		for (let item of v)
+			expr.push(['===', col, item])
+		return expr
+	},
+	enum_items: function() {
+		return this.enum_values
+	},
+	has_item: function(v, item) {
+		return v != null && v.includes(item)
+	},
+	toggle_item: function(v, item) {
+		let values = v == null ? [] : v.slice()
+		let i = values.indexOf(item)
+		if (i == -1)
+			values.push(item)
+		else
+			values.splice(i, 1)
+		return values.length ? values : null
+	},
+	to_text: function(v) {
+		if (isarray(v)) {
+			let s = ''
+			for (let item of v) {
+				if (s)
+					s += ', '
+				s += this.to_text(item)
+			}
+			return s
+		}
+		if (v == null)
+			return this.null_text
+		if (this.enum_labels && this.enum_labels[v] !== undefined)
+			return this.enum_labels[v]
+		if (isbool(v))
+			return v ? S('true', 'true') : S('false', 'false')
+		return String(v)
+	},
+}
+
 //// BOOL --------------------------------------------------------------------
 
 // no editor: the value is toggled by click and space, and the cell keeps
@@ -1024,6 +1082,10 @@ let bool = {align: 'center', w: 1, is_bool: true,
 	builds_text: false, has_editor: false, control: 'checkbox',
 	col_storage: bool_storage}
 field_types.bool = bool
+
+bool.filter_input = assign({}, checklist_filter_input, {
+	enum_values: [false, true],
+})
 
 ui.add_validation_rule({
 	name     : 'bool',
@@ -1037,6 +1099,8 @@ ui.add_validation_rule({
 
 let enm = {control: 'enum_input', w: 6}
 field_types.enum = enm
+
+enm.filter_input = checklist_filter_input
 
 enm.config_checks = {
 	enum_values: v => v != null,
