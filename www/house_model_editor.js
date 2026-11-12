@@ -84,22 +84,43 @@ function init_house_model_editor(e, house) {
 			push_log('creating floor plan')
 
 			let c = e.create_component({name: 'floor_'+floor.i})
-			e.root.comp.add_child(c, mat4())
+			let floor_y = house.h - floor.y - floor.h
+			e.root.comp.add_child(c, mat4().translate(0, floor_y, 0))
+			let has_roofs = !!floor.roofs?.length
 
 			for (let fcomp of floor.comps) {
 				let face_pis = []
 				let face_holes = []
+				let top_pis = []
 				for (let cycle of fcomp.cycles) {
-					let pi0
+					let i1 = face_pis.length
+					if (!cycle.outer)
+						face_holes.push(i1)
 					for (let ep of cycle.edges) {
 						let pi = c.add_point_xyz(ep[0], 0, ep[1])
 						face_pis.push(pi)
-						pi0 = pi0 ?? pi
+						if (!has_roofs)
+							top_pis.push(c.add_point_xyz(ep[0], floor.h, ep[1]))
 					}
-					if (!cycle.outer)
-						face_holes.push(pi0)
+					if (!has_roofs) {
+						let i2 = face_pis.length
+						let j = i2-1
+						for (let i = i1; i < i2; i++) {
+							c.add_face([face_pis[i], face_pis[j],
+								top_pis[j], top_pis[i]])
+							j = i
+						}
+						j = i2-1
+						for (let i = i1; i < j; i++, j--) {
+							let pi = top_pis[i]
+							top_pis[i] = top_pis[j]
+							top_pis[j] = pi
+						}
+					}
 				}
 				c.add_face(face_pis, null, null, face_holes)
+				if (!has_roofs)
+					c.add_face(top_pis, null, null, face_holes)
 			}
 
 			pop_log()
@@ -111,7 +132,7 @@ function init_house_model_editor(e, house) {
 				push_log('creating roof', roof_name)
 
 				let c = e.create_component({name: roof_name})
-				e.root.comp.add_child(c, mat4())
+				e.root.comp.add_child(c, mat4().translate(0, floor_y, 0))
 
 				roof.comp = c
 
@@ -193,7 +214,7 @@ function init_house_model_editor(e, house) {
 
 			} // for roof
 
-			if (floor.roofs) {
+			if (has_roofs) {
 
 				push_log('raising walls')
 				let A = v3()
