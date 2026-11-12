@@ -10320,7 +10320,7 @@ ui.list_dropdown = function(
 					picker_opt.build_item = opt?.build_item
 					picker_opt.build_value = opt?.build_value ?? field?.build_value
 					let build_list = field?.is_values ? ui.bare_list : ui.list
-					build_list(picker_id, items, value, field, 0, 's', 's', 
+					build_list(picker_id, items, value, field, 0, 's', 's',
 						readonly, picker_opt)
 				ui.end_scrollbox()
 				ui.resizer(resizer_id, is_popup_above ? 't' : 'b',

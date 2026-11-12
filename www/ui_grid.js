@@ -268,7 +268,7 @@ function init(id, e) {
 	let horiz = !e.vertical_layout
 
 	// context-sensitive thus set on each frame
-	let sp
+	let sp1
 	let sp2
 	let font_size
 	let line_height
@@ -884,7 +884,7 @@ function init(id, e) {
 						build_row_form_tab(tabs[0])
 					ui.ph(ui.sp2())
 					ui.pb(ui.sp2())
-					ui.h(0, ui.sp(), 's')
+					ui.h(0, ui.sp1(), 's')
 						prev = ui.button(row_form_id+'.prev',
 							'chevron-left', S('prev', 'Prev'))
 						next = ui.button(row_form_id+'.next',
@@ -1066,7 +1066,7 @@ function init(id, e) {
 
 	function build_header_label(field, align, max_w, fg) {
 		if (field.icon) {
-			ui.h(1, sp, align, 'c')
+			ui.h(1, sp1, align, 'c')
 				ui.min_w(font_size)
 				ui.color(fg)
 				ui.icon('', field.icon, 0, 'c', 'c')
@@ -1091,45 +1091,40 @@ function init(id, e) {
 			w = header_w
 			h = cell_h
 		}
-		ui.p(sp2, 0)
-		ui.min_wh(w - 2 * sp2, h)
-		ui.h(0, sp, 'l', 't')
+		ui.min_wh(w, h)
+		ui.stack('', 0, 'l', 't', false, true, true)
 
 			let col_move  = drag_op == 'col_move'  && hit_vfi == field.vfi
 			let col_group = drag_op == 'col_group' && hit_gcol == field.name
 
-			ui.bb(
-				col_move ? 'bg2' : col_group ? 'bg0' : 'bg1', null,
-				col_move ? (horiz ? 'blr' : 'tbr') : 'br', 'intense')
+			ui.bg(col_move ? 'bg2' : col_group ? 'bg0' : 'bg1')
 
-			let max_min_w = noclip ? null : max(0, w - 2 * sp2)
-			let dir = sort_icon(field)
-			let align, is_right_aligned
-			if (horiz) {
-				align = e.field_align(field)
-				is_right_aligned = align == 'right'
-			} else {
-				align = e.header_align
-				is_right_aligned = align == 'r'
-			}
+			ui.p(sp2, 0)
+			ui.h(1, sp1)
 
-			if (!is_right_aligned) {
-				build_header_label(field, align, max_min_w,
-					col_group ? 'faint' : null)
-			}
+				let max_min_w = noclip ? null : max(0, w - 2 * sp2)
+				let dir = sort_icon(field)
+				let align, is_right_aligned
+				if (horiz) {
+					align = e.field_align(field)
+					is_right_aligned = align == 'right'
+				} else {
+					align = e.header_align
+					is_right_aligned = align == 'r'
+				}
 
-			if (is_right_aligned) {
-				build_header_label(field, align, max_min_w,
-					col_group ? 'faint' : null)
-			}
+				build_header_label(field, align, max_min_w, col_group ? 'faint' : null)
 
-			if (dir) {
-				ui.m(-sp2, 0, 0, 0)
-				ui.color(col_group ? 'faint' : 'label')
-				ui.icon(id+'.sort_icon.'+field.name, dir, 0)
-			}
+				if (dir) {
+					ui.color(col_group ? 'faint' : 'label')
+					ui.icon(id+'.sort_icon.'+field.name, dir, 0)
+				}
 
-		ui.end_h()
+			ui.end_h()
+
+			ui.border(col_move ? (horiz ? 'blr' : 'tbr') : 'br', 'intense')
+
+		ui.end_stack()
 	}
 
 	function build_header(header_overflow) {
@@ -1147,7 +1142,6 @@ function init(id, e) {
 
 				let col_move = drag_op == 'col_move'
 
-				ui.bb('bg1', null, horiz ? 'b' : 'r', 'intense')
 				for (let field of e.visible_fields) {
 					if (col_move && hit_vfi === field.vfi)
 						continue
@@ -1460,7 +1454,7 @@ function init(id, e) {
 							) || null
 						ui.bb('bg1', bgs, 1, 'intense')
 						ui.p(sp2, ui.sp075())
-						ui.h(1, sp)
+						ui.h(1, sp1)
 
 							build_header_label(field, 'l', 0)
 							let dir = sort_icon(field)
@@ -1531,8 +1525,13 @@ function init(id, e) {
 						? number_filter_help_lines : text_filter_help_lines)
 			let input_id = filter_box_id(field)
 			let filter_field = field.filter_field
+			let focused = ui.focused(input_id)
+			let state = focused ? 'focused' : null
+			ui.bb(focused ? 'input' : 'bg0', state, 0, 'faint')
+			ui.ph(ui.em(0.5))
 			filter_field.build_input(input_id, field.filter,
-				{min_w: 0}, filter_field.control)
+				{min_w: 0, min_h: cell_h, no_box: true},
+				filter_field.control)
 			if (ui.state_of(input_id, 'validation').failed && ui.focused(input_id)) {
 				ui.error_popup(input_id+'.error', cell_i)
 					ui.error_label(input_id, 'all_errors')
@@ -1553,7 +1552,6 @@ function init(id, e) {
 					null, null, null, null, null, id+'.cells_scrollbox')
 
 				ui.stack('')
-					ui.bb('bg1', null, horiz ? 'b' : 'r', 'intense')
 					for (let field of e.visible_fields)
 						build_filter_cell(field)
 				ui.end_stack()
@@ -1587,7 +1585,7 @@ function init(id, e) {
 	// values typed in the inputs.
 	function build_param_bar(has_inputs, has_master_toggles) {
 		ui.p(ui.sp2(), ui.sp05())
-		ui.h(0, sp, 's', 'c')
+		ui.h(0, sp1, 's', 'c')
 			ui.bb('bg0', null, 'b', 'intense')
 			if (has_master_toggles)
 				build_master_toggles()
@@ -1976,7 +1974,6 @@ function init(id, e) {
 		}
 
 		if (!build_stage) {
-			let sp2 = ui.sp2()
 			let m = ui.measure_text(cx, 'M')
 			let text_h = ceil(m.fontBoundingBoxAscent + m.fontBoundingBoxDescent)
 			let baseline = max(0, round((cell_h - text_h) / 2)) + round(m.fontBoundingBoxAscent)
@@ -2660,7 +2657,7 @@ function init(id, e) {
 
 		/// layout
 
-		sp  = ui.sp1()
+		sp1 = ui.sp1()
 		sp2 = ui.sp2()
 		font_size = ui.em(1)
 		line_height = font_size * 1
@@ -2669,7 +2666,7 @@ function init(id, e) {
 		header_w = clamp_vertical_w(e.header_w * font_size) + 2 * sp2
 		header_h = cell_h
 		gcol_w = ui.em(6) // group-bar column width
-		gcol_h = round(line_height + sp)
+		gcol_h = round(line_height + sp1)
 		gcol_gap = 1
 
 		ui.focusable(id)
@@ -2725,8 +2722,8 @@ function init(id, e) {
 		let has_master_toggles = ui.has_master_toggles(e)
 		if (ui.in_dock_tab() && has_master_toggles) {
 			ui.open_tab_strip()
-			ui.pr(sp)
-			ui.h(0, sp, 'r', 'c')
+			ui.pr(sp1)
+			ui.h(0, sp1, 'r', 'c')
 				build_master_toggles()
 			ui.end_h()
 			ui.close_tab_strip()
