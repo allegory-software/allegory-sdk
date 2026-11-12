@@ -1984,39 +1984,59 @@ ui.nav = function(id, opt) {
 		}
 	}
 
-	// ri = null: change all roots; recursive: change descendants too.
+	// ri = row index or array in tree order; null: all roots.
+	// recursive: change descendants too.
 	// ancestors of modified rows stay expanded so that edits are not hidden.
 	e.set_collapsed = function(ri, collapsed, recursive) {
 		if (!(e.is_tree || e.is_grouped))
 			return
-		// the rows affected, in tree_ris: [i1 .. i2]
-		let i1 = ri == null ? 0 : e.tree_i[ri]
-		let i2 = ri == null ? e.tree_n - 1 : i1 + e.desc_count[ri]
-		let last_i = ri != null && !recursive ? i1 : i2 // last row to change
+		let ris = isarray(ri) ? ri : [ri]
+		if (!ris.length)
+			return
+		let i1 = ris[0] == null ? 0 : e.tree_i[ris[0]]
+		let i2 = -1
+		let last_i = -1
 		let parent_ids
-		if (!collapsed && e.partial_load && e.is_tree) {
-			for (let i = i1; i <= last_i; i++) {
-				let ri1 = e.tree_ris[i]
-				if (!(ri != null || recursive || e.depth[ri1] == 0))
-					continue
-				if (!has_unloaded_children(ri1))
-					continue
-				if (active_req)
-					return
-				parent_ids ??= []
-				parent_ids.push(col_val(ri1, e.id_field.fi))
-				if (recursive)
-					i += e.desc_count[ri1]
+		for (let ri1 of ris) {
+			let first_i = ri1 == null ? 0 : e.tree_i[ri1]
+			if (first_i <= last_i)
+				continue
+			let end_i = ri1 == null ? e.tree_n - 1
+				: first_i + e.desc_count[ri1]
+			i2 = max(i2, end_i)
+			last_i = ri1 == null || recursive ? end_i : first_i
+			if (!collapsed && e.partial_load && e.is_tree) {
+				for (let i = first_i; i <= last_i; i++) {
+					let ri2 = e.tree_ris[i]
+					if (!(ri1 != null || recursive || e.depth[ri2] == 0))
+						continue
+					if (!has_unloaded_children(ri2))
+						continue
+					if (active_req)
+						return
+					parent_ids ??= []
+					parent_ids.push(col_val(ri2, e.id_field.fi))
+					if (recursive)
+						i += e.desc_count[ri2]
+				}
 			}
 		}
 		e.exit_edit()
 		let has_modified_desc = collapsed && e.modified_n
 			? modified_desc_rows(i1, i2) : null
-		for (let i = i1; i <= last_i; i++) {
-			let ri1 = e.tree_ris[i]
-			if ((ri != null || recursive || e.depth[ri1] == 0)
-				&& !has_modified_desc?.[ri1])
-				set_row_collapsed(ri1, collapsed)
+		last_i = -1
+		for (let ri1 of ris) {
+			let first_i = ri1 == null ? 0 : e.tree_i[ri1]
+			if (first_i <= last_i)
+				continue
+			last_i = ri1 == null ? e.tree_n - 1
+				: recursive ? first_i + e.desc_count[ri1] : first_i
+			for (let i = first_i; i <= last_i; i++) {
+				let ri2 = e.tree_ris[i]
+				if ((ri1 != null || recursive || e.depth[ri2] == 0)
+					&& !has_modified_desc?.[ri2])
+					set_row_collapsed(ri2, collapsed)
+			}
 		}
 		update_visible_ris(true)
 		if (parent_ids)

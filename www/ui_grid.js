@@ -362,7 +362,7 @@ function init(id, e) {
 	}
 
 	function toggle_collapsed(ri, recursive) {
-		e.set_collapsed(ri, !e.is_collapsed(ri), recursive)
+		e.set_collapsed(selected_ris(), !e.is_collapsed(ri), recursive)
 	}
 
 	function selected_ris() {
@@ -521,10 +521,10 @@ function init(id, e) {
 		let field = focused_field()
 		switch (picked_item.id) {
 			case 'expand_subtree':
-				e.set_collapsed(ri, false, true)
+				e.set_collapsed(ri == null ? null : selected_ris(), false, true)
 				break
 			case 'collapse_subtree':
-				e.set_collapsed(ri, true, true)
+				e.set_collapsed(ri == null ? null : selected_ris(), true, true)
 				break
 			case 'sort_asc':
 			case 'sort_desc':
