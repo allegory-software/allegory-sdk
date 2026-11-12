@@ -24,6 +24,7 @@ const {
 ui.GRID_FAST_PATH = true
 
 ui.capture_keydown('f1') // browser: help -> grid: key help
+ui.capture_keydown('ctrl r') // browser: reload page -> grid: reload rowset
 
 //// FAST GRID CELLS ---------------------------------------------------------
 
@@ -2296,8 +2297,6 @@ function init(id, e) {
 			let field = e.visible_fields[hit_vfi]
 
 			clicked_indent = hit_indent
-			if (hit_indent)
-				toggle_collapsed(ri, shift)
 
 			let already_on_it =
 				ri == e.focused_ri &&
@@ -2320,10 +2319,13 @@ function init(id, e) {
 						|| (e.enter_edit_on_click_focused && already_on_it)),
 				focus_non_editable_if_not_found: true,
 				sel_i: 0, sel_len: 1/0,
-				select: shift ? 'expand' : ctrl ? 'invert' : null,
+				select: hit_indent ? null
+					: shift ? 'expand' : ctrl ? 'invert' : null,
 				input: e,
 			})) {
 				has_input = true
+				if (hit_indent)
+					toggle_collapsed(ri)
 				if (e.is_picker && !hit_indent)
 					s.picked = true
 				if (click)
@@ -2555,6 +2557,11 @@ function init(id, e) {
 		if (ctrl && keydown('s')) {
 			e.exit_edit()
 			e.save()
+			return false
+		}
+
+		if (ctrl && keydown('r')) {
+			e.reload()
 			return false
 		}
 

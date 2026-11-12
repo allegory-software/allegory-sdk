@@ -1738,6 +1738,8 @@ INTEGRATION API
 
 */
 
+ui.views = obj()
+
 ui.saved_state = obj() // {id->{k->v}}   per-id saved widget state
 ui.save_state_delay = 1
 ui.save_unsaved_state = noop
@@ -6408,7 +6410,7 @@ function create_word_wrapper() {
 		let sep_w = 0
 		for (let i = 0, n = widths.length; i <= n; i++) {
 			let w = i < n ? widths[i] : 0
-			if (i == n || ceil(line_w + sep_w + w) > ct_w) {
+			if (i == n || (i > line_i && ceil(line_w + sep_w + w) > ct_w)) {
 				line_w = ceil(line_w)
 				max_line_w = max(max_line_w, line_w)
 				lines.push(line_i)
@@ -12404,6 +12406,7 @@ function tab_strip(
 	id, s, tablist, selected_tab, cs, added_tab_id, opt
 ) {
 	let tablist_id = id+'.tablist'+tablist.key
+	let is_new_strip = !ui.state_of(tablist_id) // strip appears: show selected
 	let tabs = tablist.tabs
 	let is_moving = cs?.moved // the user is dragging a tab of this dock
 	let has_gap = is_moving // insert a gap at the drop position
@@ -12439,7 +12442,7 @@ function tab_strip(
 		let is_dragging = cs?.dragging && cs.src_tablist == tablist && cs.tab_i == tab_i
 		let is_hover = hit(id+'.tabclose.'+tab.id) || captured_or_hit(box_id)
 		let has_close_button = s.can_add_remove_tabs && (is_hover || is_dragging) && !is_moving
-		if (tab.id == added_tab_id)
+		if (tab.id == added_tab_id || is_new_strip && is_selected)
 			ui.scroll_to_view_next_box()
 		tabbox(id, s, tab, is_selected, is_hover, has_close_button, s.is_strip_bottom)
 		drawn_n++
@@ -13841,7 +13844,7 @@ ui._point_at = function(id) {
 	for (let k = 0; k < recs.length; k++) {
 		let ra = recs[k]
 		let i = 2
-		while (i < ra.length) {
+		while (i < ra.n) {
 			let arg_i = id_i[ra[i-1]] // ID arg index
 			if (arg_i != null && ra[i+arg_i] === id) {
 				let p = ui.local_pointer

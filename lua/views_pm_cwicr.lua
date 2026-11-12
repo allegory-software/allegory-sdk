@@ -1,8 +1,8 @@
 
--- Import the CWICR cost database into the app_pm work item tables.
+-- Import the CWICR cost database into the views_pm work item tables.
 --	Written by Cosmin Apreutesei. Public Domain.
 
-require'app_pm'
+require'views_pm'
 require'json'
 
 local levels = {'category', 'collection', 'department', 'section',

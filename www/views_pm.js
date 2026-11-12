@@ -49,4 +49,14 @@ ui.unit_model_editor = function(id) {
 	ui.end_v()
 }
 
+ui.views.house_model_editor = {
+	label: 'House model editor', icon: 'building-cottage', category: 'Editors',
+	build: function(id) { ui.unit_model_editor(id+'.widget') },
+}
+
+ui.views.floor_editor = {
+	label: 'Floor editor', icon: 'layout-board', category: 'Editors',
+	build: function(id) { ui.unit_plan_editor(id+'.widget') },
+}
+
 }())

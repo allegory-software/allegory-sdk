@@ -122,11 +122,59 @@ function saved_state_grid(id) {
 	ui.grid(id, {rowset_name: 'saved_state'})
 }
 
+ui.views.saved_state = {
+	label: 'Saved state', icon: 'database', category: 'Tools',
+	build: function(id) { saved_state_grid(id+'.grid') },
+}
+
+ui.views.call = {
+	label: 'Call', icon: 'phone', category: 'Tools',
+	build: function(id) {
+		let s = ui.state(id)
+		if (!s.free) {
+			s.demo_call = null // {call, invite_token} or null before loading
+			s.load_error = null // credentials error text or null
+			s.request = null // credentials request or null
+			ui.on_free(id, function(s) {
+				if (s.request) s.request.abort()
+			})
+			s.request = glue.get('/call_demo.json', function(demo_call) {
+				s.request = null
+				s.demo_call = demo_call
+				ui.animate()
+			}, function(error, type) {
+				if (type == 'abort') return
+				s.request = null
+				s.load_error = error
+				ui.animate()
+			}, {silent: true})
+		}
+		v(1, sp(), 's', 's')
+			if (s.request) text('', 'Loading demo call...', 0)
+			if (s.load_error) text('', s.load_error, 0)
+			ui.call(id+'.widget', {
+				call_id: s.demo_call ? String(s.demo_call.call) : null,
+				invite_token: s.demo_call?.invite_token,
+				name: user.name,
+				can_join: s.demo_call != null,
+			})
+		end_v()
+	},
+}
+
+ui.views.model3_editor = {
+	label: 'Model editor', icon: 'cube', category: 'Editors',
+	build: function(id) {
+		ui.model3_editor(id+'.widget', {}, ui.model3_editor_test_objects)
+	},
+}
+
 // Use distinct state IDs for chooser buttons and replacement widgets.
 // ui.state(id, update) can otherwise run the widget's update on the
 // previous button state, before the widget initializes its fields.
 function app_dock_empty_tab(tab) {
 	let tab_id = 'app_dock.tab.'+tab.id
+
 	let s = ui.state(tab_id+'.rowsets')
 	if (!s.free) {
 		s.items = [] // [{id, label, items: [{id, label, icon}]}]
@@ -164,70 +212,72 @@ function app_dock_empty_tab(tab) {
 			ui.animate()
 		}, {silent: true})
 	}
+
 	ui.scrollbox(tab_id+'.scrollbox', 1, 'auto', 'auto', 's', 's')
+		ui.p(ui.sp4(), ui.sp8())
 		v(0, sp2(), 'c', 'c')
-			if (button(tab_id+'.container', 'layout', 'Container'))
-				set_dock_tab('app_dock', tab.id,
-					{title: 'Container', icon: 'layout',
-						layout: {tabs: []}})
-			let closed_containers = ui.dock_closed_containers('app_dock')
-			let closed_container_id = menu_button(tab_id+'.containers_button',
-				'archive', 'Containers', closed_containers, null, null, null, null,
-				!closed_containers.length)
-			if (closed_container_id)
-				ui.restore_dock_container('app_dock', tab.id, closed_container_id)
-			if (button(tab_id+'.db_tables', 'list-details', 'Tables'))
-				set_dock_tab('app_dock', tab.id,
-					{kind: 'db_tables', title: 'Tables', icon: 'list-details'})
-			if (button(tab_id+'.db_rows', 'table-row', 'Rows'))
-				set_dock_tab('app_dock', tab.id,
-					{kind: 'db_rows', title: 'Rows', icon: 'table-row'})
-			if (button(tab_id+'.db_fields', 'table-column', 'Fields'))
-				set_dock_tab('app_dock', tab.id,
-					{kind: 'db_fields', title: 'Fields', icon: 'table-column'})
-			if (button(tab_id+'.db_indexes', 'list-search', 'Indexes'))
-				set_dock_tab('app_dock', tab.id,
-					{kind: 'db_indexes', title: 'Indexes', icon: 'list-search'})
-			if (button(tab_id+'.process_tree', 'hierarchy', 'Process tree'))
-				set_dock_tab('app_dock', tab.id,
-					{kind: 'process_tree', title: 'Process tree', icon: 'hierarchy'})
-			if (button(tab_id+'.folder_tree', 'folder', 'Folder tree'))
-				set_dock_tab('app_dock', tab.id,
-					{kind: 'folder_tree', title: 'Folder tree', icon: 'folder'})
-			if (button(tab_id+'.file_editor_button', 'file-code', 'File editor'))
-				set_dock_tab('app_dock', tab.id,
-					{kind: 'file_editor', title: 'File editor', icon: 'file-code'})
-			if (button(tab_id+'.open_ports', 'network', 'Open ports'))
-				set_dock_tab('app_dock', tab.id,
-					{kind: 'open_ports', title: 'Open ports', icon: 'network'})
-			if (button(tab_id+'.saved_state', 'database', 'Saved state'))
-				set_dock_tab('app_dock', tab.id,
-					{kind: 'saved_state', title: 'Saved state', icon: 'database'})
-			let rowset_name = menu_button(tab_id+'.rowsets_button',
-				'database', 'Rowsets', s.items, null, null, null, null,
-				!!s.request || !!s.load_error)
-			if (rowset_name)
-				set_dock_tab('app_dock', tab.id, {
-					kind: 'rowset', title: s.menu_items[rowset_name].label,
-					icon: s.menu_items[rowset_name].icon ?? 'database',
-					args: {rowset_name: rowset_name},
-				})
-			if (s.load_error) text('', s.load_error, 0)
-			if (button(tab_id+'.call', 'phone', 'Call'))
-				set_dock_tab('app_dock', tab.id,
-					{kind: 'call', title: 'Call', icon: 'phone'})
-			if (button(tab_id+'.model3_editor', 'cube', 'Model editor'))
-				set_dock_tab('app_dock', tab.id,
-					{kind: 'model3_editor', title: 'Model editor', icon: 'cube'})
-			if (button(tab_id+'.house_model_editor', 'building-cottage',
-					'House model editor'))
-				set_dock_tab('app_dock', tab.id,
-					{kind: 'house_model_editor', title: 'House model editor',
-						icon: 'building-cottage'})
-			if (button(tab_id+'.floor_editor', 'layout-board', 'Floor editor'))
-				set_dock_tab('app_dock', tab.id,
-					{kind: 'floor_editor', title: 'Floor editor',
-						icon: 'layout-board'})
+
+			ui.h(0, ui.sp2())
+
+				if (button(tab_id+'.container', 'layout', 'Container'))
+					set_dock_tab('app_dock', tab.id,
+						{title: 'Container', icon: 'layout',
+							layout: {tabs: []}})
+
+				let closed_containers = ui.dock_closed_containers('app_dock')
+				let closed_container_id = menu_button(tab_id+'.containers_button',
+					'archive', 'Containers', closed_containers, null, null, null, null,
+					!closed_containers.length)
+				if (closed_container_id)
+					ui.restore_dock_container('app_dock', tab.id, closed_container_id)
+
+				let rowset_name = menu_button(tab_id+'.rowsets_button',
+					'database', 'Rowsets', s.items, null, null, null, null,
+					!!s.request || !!s.load_error)
+				if (rowset_name)
+					set_dock_tab('app_dock', tab.id, {
+						kind: 'rowset', title: s.menu_items[rowset_name].label,
+						icon: s.menu_items[rowset_name].icon ?? 'database',
+						args: {rowset_name: rowset_name},
+					})
+				if (s.load_error) text('', s.load_error, 0)
+
+			ui.end_h()
+
+			let categories = new Map()
+			for (let name in ui.views) {
+				let view = ui.views[name]
+				attr(categories, view.category, array).push(name)
+			}
+
+			let k = 1
+			for (let [category, names] of categories) {
+				ui.bold()
+				ui.mt(ui.sp2())
+				ui.large()
+				ui.color('link')
+				ui.text('', category, 0)
+				v(0, sp2())
+					for (let i = 0; i < names.length; i++) {
+						if (i % 6 == 0)
+							ui.h(0, ui.sp1(), 'l', 't')
+						let name = names[i]
+						let view = ui.views[name]
+						ui.min_w(ui.em(3))
+						v(0, ui.sp(), 'c', 't')
+							if (button(tab_id+'.'+name+'_button',
+									view.icon, null, 0, 'c'))
+								set_dock_tab('app_dock', tab.id, {
+									kind: name, title: view.label, icon: view.icon,
+								})
+							ui.text_wrapped('view.'+k++, view.label.trim(), 0, 'c', 't')//, ui.em(3))
+						end_v()
+						if (i % 6 == 5 || i == names.length - 1)
+							ui.end_h()
+					}
+				end_v()
+			}
+
 		end_v()
 	ui.end_scrollbox()
 }
@@ -242,24 +292,9 @@ function app_dock_app_tab(tab) {
 }
 
 function app_dock_tab(tab) {
-	if (tab.kind == 'db_tables') {
-		ui.db_tables('app_dock.tab.'+tab.id+'.db_tables')
-	} else if (tab.kind == 'db_rows') {
-		ui.db_rows('app_dock.tab.'+tab.id+'.db_rows')
-	} else if (tab.kind == 'db_fields') {
-		ui.db_fields('app_dock.tab.'+tab.id+'.db_fields')
-	} else if (tab.kind == 'db_indexes') {
-		ui.db_indexes('app_dock.tab.'+tab.id+'.db_indexes')
-	} else if (tab.kind == 'process_tree') {
-		ui.process_tree('app_dock.tab.'+tab.id+'.process_tree')
-	} else if (tab.kind == 'folder_tree') {
-		ui.folder_tree('app_dock.tab.'+tab.id+'.folder_tree', '~')
-	} else if (tab.kind == 'file_editor') {
-		ui.file_editor('app_dock.tab.'+tab.id+'.file_editor')
-	} else if (tab.kind == 'open_ports') {
-		ui.open_ports('app_dock.tab.'+tab.id+'.open_ports')
-	} else if (tab.kind == 'saved_state') {
-		saved_state_grid('app_dock.tab.'+tab.id+'.saved_state.grid')
+	let view = ui.views[tab.kind]
+	if (view) {
+		view.build('app_dock.tab.'+tab.id+'.'+tab.kind, tab.args)
 	} else if (tab.kind == 'rowset') {
 		let id = 'app_dock.tab.'+tab.id+'.rowset'
 		ui.grid(id, {
@@ -268,46 +303,6 @@ function app_dock_tab(tab) {
 		let nav = ui.state_of(id, 'nav')
 		if (nav.ready)
 			ui.set_current_tab_title(nav.label)
-	} else if (tab.kind == 'call') {
-		let id = 'app_dock.tab.'+tab.id+'.call'
-		let s = ui.state(id)
-		if (!s.free) {
-			s.demo_call = null // {call, invite_token} or null before loading
-			s.load_error = null // credentials error text or null
-			s.request = null // credentials request or null
-			ui.on_free(id, function(s) {
-				if (s.request) s.request.abort()
-			})
-			s.request = glue.get('/call_demo.json', function(demo_call) {
-				s.request = null
-				s.demo_call = demo_call
-				ui.animate()
-			}, function(error, type) {
-				if (type == 'abort') return
-				s.request = null
-				s.load_error = error
-				ui.animate()
-			}, {silent: true})
-		}
-		v(1, sp(), 's', 's')
-			if (s.request) text('', 'Loading demo call...', 0)
-			if (s.load_error) text('', s.load_error, 0)
-			ui.call(id+'.widget', {
-				call_id: s.demo_call ? String(s.demo_call.call) : null,
-				invite_token: s.demo_call?.invite_token,
-				name: user.name,
-				can_join: s.demo_call != null,
-			})
-		end_v()
-	} else if (tab.kind == 'model3_editor') {
-		ui.model3_editor('app_dock.tab.'+tab.id+'.model3_editor.widget', {},
-			ui.model3_editor_test_objects)
-	} else if (tab.kind == 'house_model_editor') {
-		let id = 'app_dock.tab.'+tab.id+'.house_model_editor'
-		ui.unit_model_editor(id+'.widget')
-	} else if (tab.kind == 'floor_editor') {
-		let id = 'app_dock.tab.'+tab.id+'.floor_editor'
-		ui.unit_plan_editor(id+'.widget')
 	} else if (tab.kind) {
 		app_dock_app_tab(tab)
 	} else {

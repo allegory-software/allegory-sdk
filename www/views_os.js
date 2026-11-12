@@ -109,4 +109,24 @@ ui.file_editor = function(id, opt) {
 		ui.set_current_tab_title(title)
 }
 
+ui.views.process_tree = {
+	label: 'Process tree', icon: 'hierarchy', category: 'Files & Processes',
+	build: ui.process_tree,
+}
+
+ui.views.folder_tree = {
+	label: 'Folder tree', icon: 'folder', category: 'Files & Processes',
+	build: function(id) { ui.folder_tree(id, '~') },
+}
+
+ui.views.file_editor = {
+	label: 'File editor', icon: 'file-code', category: 'Files & Processes',
+	build: ui.file_editor,
+}
+
+ui.views.open_ports = {
+	label: 'Open ports', icon: 'network', category: 'Files & Processes',
+	build: ui.open_ports,
+}
+
 }())

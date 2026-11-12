@@ -1333,14 +1333,23 @@ ui.nav = function(id, opt) {
 		if (has_focus_changed)
 			e.quicksearch_text = ''
 
-		// save focused pk.
-		if (ri != null && !e.is_picker && !e.is_group_row(ri)) {
-			let saved_pk = ui.saved_state[e.id]?.focused_pk
-			if (!saved_pk || compare_row(ri, e.pk_fields, saved_pk) != 0) {
-				let pk = []
-				for (let field of e.pk_fields)
-					pk.push(col_val(ri, field.fi))
-				ui.save_state(e.id, 'focused_pk', pk)
+		// save focused pk, or the label path of the focused group.
+		if (ri != null && !e.is_picker) {
+			if (e.is_group_row(ri)) {
+				let path = group_path(ri)
+				if (ui.saved_state[e.id]?.focused_group_path != path) {
+					ui.save_state(e.id, 'focused_group_path', path)
+					ui.save_state(e.id, 'focused_pk', null)
+				}
+			} else {
+				let saved_pk = ui.saved_state[e.id]?.focused_pk
+				if (!saved_pk || compare_row(ri, e.pk_fields, saved_pk) != 0) {
+					let pk = []
+					for (let field of e.pk_fields)
+						pk.push(col_val(ri, field.fi))
+					ui.save_state(e.id, 'focused_pk', pk)
+					ui.save_state(e.id, 'focused_group_path', null)
+				}
 			}
 			let col = fi != null ? e.all_fields[fi].name : null
 			ui.save_state(e.id, 'focused_col', col)
@@ -2215,10 +2224,13 @@ ui.nav = function(id, opt) {
 	}
 
 	function focus_saved_cell() {
-		// restore focused row from saved focused_pk.
+		// restore focused row from saved focused_group_path or focused_pk.
+		let focused_group_path = ui.saved_state[e.id]?.focused_group_path
 		let focused_pk = ui.saved_state[e.id]?.focused_pk
 		let focused_ri = null
-		if (focused_pk)
+		if (focused_group_path != null)
+			focused_ri = find_group_ri(focused_group_path)
+		else if (focused_pk)
 			for (let i = 0; i < e.row_n; i++) {
 				let ri = e.base_ris[i]
 				if (compare_row(ri, e.pk_fields, focused_pk) == 0) {
@@ -3032,6 +3044,11 @@ ui.nav = function(id, opt) {
 		for (let p = ri; p != NONE; p = e.parent_ri[p])
 			path = group_field.col_storage.get(label_vals, p) + '\0' + path
 		return path
+	}
+
+	// -> the group row with the given group_path(), or null.
+	function find_group_ri(path) {
+		return e.group_ris.find(ri => group_path(ri) == path) ?? null
 	}
 
 	// Free all group row slots for reuse.
@@ -4732,8 +4749,7 @@ ui.nav = function(id, opt) {
 		deselect_hidden_rows()
 		add_groups(parse_group_by(e.group_by))
 		if (focused_path != null)
-			e.focused_ri = e.group_ris.find(ri =>
-				group_path(ri) == focused_path) ?? null
+			e.focused_ri = find_group_ri(focused_path)
 	}
 
 	// Apply a change set from the server:

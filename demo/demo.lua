@@ -24,11 +24,11 @@ app.main_file = 'demo.js'
 wwwdir'../www'
 
 require'rowset_mdbx'
-require'app_db'
-require'app_os'
+require'views_db'
+require'views_os'
 require'webb_call'
-require'app_pm'
-require'app_pm_cwicr'
+require'views_pm'
+require'views_pm_cwicr'
 
 do
 	local test_actions = {

@@ -74,4 +74,24 @@ ui.db_indexes = function(id) {
 	})
 }
 
+ui.views.db_tables = {
+	label: 'Tables', icon: 'list-details', category: 'Database',
+	build: ui.db_tables,
+}
+
+ui.views.db_rows = {
+	label: 'Rows', icon: 'table-row', category: 'Database',
+	build: ui.db_rows,
+}
+
+ui.views.db_fields = {
+	label: 'Fields', icon: 'table-column', category: 'Database',
+	build: ui.db_fields,
+}
+
+ui.views.db_indexes = {
+	label: 'Indexes', icon: 'list-search', category: 'Database',
+	build: ui.db_indexes,
+}
+
 }())

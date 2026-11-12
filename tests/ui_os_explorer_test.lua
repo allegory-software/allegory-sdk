@@ -1,4 +1,4 @@
-require'app_os'
+require'views_os'
 
 local rs = rowset.os_explorer_file
 local dir = '/tmp/sdk_file_editor_'..uuid()
