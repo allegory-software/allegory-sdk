@@ -3,7 +3,7 @@
 const G = window
 
 const {
-	do_after, assert, push_log, pop_log, push_log_if, gen_id,
+	assert, push_log, pop_log, push_log_if, gen_id,
 	empty_array, empty_obj,
 } = glue
 
@@ -13,6 +13,7 @@ const {v3, mat4, plane, line2, line3} = Math3D
 function init_house_model_editor(e, house) {
 
 	e.house = assert(house)
+	e.house_edit_no = house.edit_no
 
 	let project_wall_to_roof_face
 	{
@@ -269,26 +270,22 @@ function init_house_model_editor(e, house) {
 
 	create_plan()
 	e.update_all()
-
-	// the house is in cm, the editor's default camera is for 1-unit models.
-	e.set_camera_pos(v3(-300, 600, 900))
-	e.set_camera_dir(v3(-6, 4.4, 7))
-
-	e.free = do_after(e.free, function() {
-		e.house.free()
-	})
 }
 
 // ui.house_model_editor (id, house, fr=1, align='s', valign='s')
 ui.house_model_editor = function(id, house, fr, align, valign) {
 	let e = ui.state_of(id, 'e')
 	let init = null
-	if (!e || e.house != house) { // a different house gets a new editor.
-		if (e)
-			ui.free_state(id)
+	if (!e) {
 		init = function(e1) {
 			init_house_model_editor(e1, house)
+			// the house is in cm, the editor's default camera is for 1-unit models.
+			e1.set_camera_pos(v3(-300, 600, 900))
+			e1.set_camera_dir(v3(-6, 4.4, 7))
 		}
+	} else if (e.house != house || e.house_edit_no != house.edit_no) {
+		e.clear_model()
+		init_house_model_editor(e, house)
 	}
 	ui.model3_editor(id, empty_obj, init, fr, align, valign)
 }
