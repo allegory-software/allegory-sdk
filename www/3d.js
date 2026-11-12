@@ -152,8 +152,11 @@ API
 const G = window
 
 const {
-	inf, sin, cos,
-	callable_constructor, inherit_properties, distance,
+	isarray, isstr, isnum,
+	round, abs, sign, min, max, clamp, sqrt, PI, inf, sin, cos, tan, rad,
+	acos, atan2,
+	assert, callable_constructor, inherit_properties,
+	array_set, remove_values, assign, f32arr, u8arr, distance,
 } = glue
 
 let NEAR = 1e-5 // distance epsilon (tolerance)

@@ -2,6 +2,12 @@
 "use strict"
 const G = window
 
+const {
+	ceil, round, snap, mod, abs, sign, min, clamp, PI, sin, cos, rad, atan2,
+	array_set, memoize, format_kcount, point_around, distance,
+	json_arg, json, S,
+} = glue
+
 const {bbox2, line2} = Math3D
 
 // view utils ----------------------------------------------------------------
@@ -432,8 +438,15 @@ function floor_editor_update(id, s) {
 
 ui.floor_editor_update_value = function(id) {
 	let s = ui.state_of(id)
-	if (s?.house && !s.readonly)
+	if (s?.house && !s.readonly) {
 		ui.set_interaction_value(id, s, json(s.house.save_state()))
+		s.value_edit_no = s.house.edit_no
+	}
+}
+
+ui.floor_editor_is_value_changed = function(id) {
+	let s = ui.state_of(id)
+	return !!s?.house && s.house.edit_no != s.value_edit_no
 }
 
 let FLOOR_EDITOR_ID         = ui.BOX_ARGS+0
@@ -457,6 +470,7 @@ ui.box_widget('floor_editor', {
 			s.house = value != null && !s.validation.failed
 				? house_plan(json_arg(value)) : null
 			s.floor = s.house?.floors[0]
+			s.value_edit_no = 0 // house.edit_no of the value loaded or published
 		}
 		s.readonly = readonly ?? field.readonly
 		if (!s.house) {

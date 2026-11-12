@@ -1,3 +1,5 @@
+const {abs, sign, PI, rad, S} = glue
+
 // roof plan view ------------------------------------------------------------
 
 let ROOF_PLAN_VIEW_ID         = ui.S-1

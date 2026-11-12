@@ -20,6 +20,12 @@
 (function() {
 "use strict"
 
+const {
+	mod, abs, clamp, return_true, assert, log, push_log, pop_log,
+	callable_constructor, inherit_properties,
+	extend, insert, remove_value, map, set, assign, attr, json,
+} = glue
+
 const {NEAR, v3, mat4, line3, box3, poly3} = Math3D
 
 window.DEBUG_MODEL3 ??= 0

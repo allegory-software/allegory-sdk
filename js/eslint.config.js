@@ -17,6 +17,14 @@ for (const k of page_globals)
 	if (!glue_exports.has(k))
 		globals[k] = 'readonly'
 
+// globals that our scripts and the page define.
+for (const k of [
+	'Math3D', 'plane_graph', 'house_plan', 'earcut', 'suncalc',
+	'DEBUG_PLAN', 'DEBUG_PLAN_LOAD', 'DEBUG_MODEL3',
+	'user',
+])
+	globals[k] = 'readonly'
+
 module.exports = [
 	{
 		ignores: [
@@ -41,6 +49,21 @@ module.exports = [
 			'no-unsafe-negation': 'error',
 			'no-cond-assign'    : 'error',
 			'use-isnan'         : 'error',
+		},
+	},
+	{
+		files: ['www/ui_call_blur_worker.js'],
+		languageOptions: {
+			globals: {
+				importScripts: 'readonly',
+				Vision: 'readonly', // from mediapipe/vision_bundle.js
+			},
+		},
+	},
+	{
+		files: ['www/ui_call_e2ee.js', 'www/ui_call_e2ee_worker.js'],
+		languageOptions: {
+			sourceType: 'module',
 		},
 	},
 ]

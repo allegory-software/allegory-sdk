@@ -84,6 +84,7 @@ INPUTS
   COLOR         ui.color_input  ui.color_picker
     H,S,L       ui.hue_slider  ui.sat_slider  ui.lum_slider
   FIELD         ui.field_input  ui.nav_input  ui.build_input
+  NAV_EDITOR    ui.nav_editor
   VALUE         ui.value  ui.input_value  ui.interaction_value
 
 LAYOUT
@@ -11575,6 +11576,97 @@ ui.nav_input = function(id, opt, fr, align, valign) {
 	return build_input_row(id, null, opt, true, fr, align, valign)
 }
 
+//// NAV_EDITOR: a widget editing one cell of the focused row ---------------
+
+function is_nav_editor_changed(s) {
+	return s.nav.modified_n > 0 || s.def.is_value_changed(s.input_id)
+}
+
+function nav_editor_update(id, s) {
+	let nav = s.nav
+	let ri = nav.focused_ri
+	if (ri == null)
+		return
+	let def = s.def
+	let key = nav.cell_input_val(ri, nav.all_fields_map[def.key_col].fi)
+	let input_id = id+'.editor.'+key
+	let save = nav.ready && !s.readonly
+		&& ui.focus_inside(id) && ui.keydown('ctrl s')
+	if (save)
+		def.update_value(input_id)
+	let value = ui.interaction_value(input_id)
+	if (value !== undefined)
+		nav.set_cell_val(ri, nav.all_fields_map[def.value_col].fi, value,
+			{input: nav})
+	if (save)
+		nav.save()
+}
+
+ui.nav_editor = function(id, opt, def) {
+	let s = ui.state(id, nav_editor_update)
+	if (!s.nav) {
+		s.def = def // {rowset_name, key_col, value_col, ...}
+		s.input_id = null // id of the last built widget
+		s.nav = ui.nav(id, {
+			rowset_name: def.rowset_name,
+			...opt,
+			can_lose_edits: () => is_nav_editor_changed(s),
+		})
+		ui.on_free(id, s.nav.free)
+	}
+	let readonly = opt?.readonly
+	s.readonly = readonly
+	let nav = s.nav
+	nav.can_change_rows = !readonly && (opt?.can_change_rows ?? true)
+	nav.check_dependencies()
+	if (is_nav_editor_changed(s))
+		ui.mark_tab_modified()
+	let ri = nav.focused_ri
+	let key = ri != null ? nav.cell_input_val(ri,
+		nav.all_fields_map[def.key_col].fi) : null
+
+	let has_master_toggle = ui.has_master_toggles(nav)
+	let in_dock = ui.in_dock_tab()
+	if (in_dock && has_master_toggle) {
+		ui.open_tab_strip()
+		ui.master_toggle(id, def.key_col, def.master_rowset_name, true,
+			def.label)
+		ui.close_tab_strip()
+	}
+
+	let input_id = id+'.editor.'+key
+	if (ri != null && input_id != s.input_id
+		&& ui.focus_inside(s.input_id+'.focus_group'))
+		ui.focus(input_id)
+
+	ui.focus_group(false, null, id)
+	ui.v(1, ui.sp())
+		if (!in_dock && has_master_toggle) {
+			ui.h(0, ui.sp())
+				ui.master_toggle(id, def.key_col, def.master_rowset_name, true,
+					def.label)
+			ui.end_h()
+		}
+		if (nav.load_error)
+			ui.text('', nav.load_error, 0)
+		let row_error = ri != null && nav.row_errors[ri]?.[0]?.error
+		if (row_error)
+			ui.text('', row_error, 0)
+		if (ri != null) {
+			let field = nav.all_fields_map[def.value_col]
+			ui.focus_group(null, null, input_id+'.focus_group')
+				def.build(input_id, nav.cell_input_val(ri, field.fi), field,
+					!nav.can_change_val(ri, field.fi), key)
+			ui.end_focus_group()
+			s.input_id = input_id
+		} else {
+			ui.text('', def.empty_text, 1, 'c', 'c')
+		}
+	ui.end_v()
+	ui.end_focus_group()
+	return nav
+}
+
 //// POLYLINE ----------------------------------------------------------------
 
 /*
@@ -12154,6 +12246,11 @@ FROZEN & HOT STATE
 	  that doesn't enclose source_id is frozen
 	ui.mark_follows_source (source_id)       mark hot the enclosing dock tabs
 	  that don't enclose source_id
+	ui.freeze_current_tab (source_id) -> t|f freeze the enclosing dock tab
+	  if it doesn't enclose source_id and its dock can add tabs, and add an
+	  unfrozen copy after it
+MODIFIED STATE
+	ui.mark_tab_modified ()                  mark modified the enclosing dock tabs
 
 */
 
@@ -12206,6 +12303,10 @@ function tabbox(
 			// using id+'.tabclose' instead of uid+'.tabbox.close'
 			// because that prefix is for ui.dock() drag state.
 			ui.bare_button(id+'.tabclose.'+tab.id, 'x', '')
+		} else if (tab.modified) {
+			ui.font_size(0.6)
+			ui.color('green-text')
+			ui.icon('', 'circle-filled', 1, 'c', 'c')
 		}
 		ui.end_stack()
 	ui.end_h()
@@ -12757,6 +12858,7 @@ Tab properties that the dock reads and writes:
 	can_edit_title : allow renaming a tab title; default false.
 	frozen : all inside navs freeze param vals bound to sources outside the tab.
 	hot    : at least one inside nav param is bound to a source outside the tab.
+	modified : at least one inside widget holds unsaved edits; not saved.
 */
 
 let tab_strip_rec_i
@@ -12809,8 +12911,12 @@ function dock_tab_panes(
 			ui.measure(tablist_id+'.pane')
 			for (let tab of tabs) {
 				let hidden = tab != selected_tab
-				if (hidden && !tab.live)
+				if (hidden && !tab.live) {
+					// unbuilt tab: keep the enclosing tabs modified.
+					if (tab.modified)
+						ui.mark_tab_modified()
 					continue
+				}
 				let scope = ui.begin_state_scope(id+'.tab.'+tab.id, hidden)
 				scope.dock = s
 				scope.dock_tab = tab
@@ -12829,6 +12935,11 @@ function dock_tab_panes(
 					tab.hot = is_hot
 					save_dock_layout(id, s)
 					ui.rebuild('dock_tab_hot')
+				}
+				let is_modified = scope.modified_build_no == build_no
+				if (is_modified != !!tab.modified) {
+					tab.modified = is_modified
+					ui.rebuild('dock_tab_modified')
 				}
 			}
 			ui.end_stack()
@@ -12951,15 +13062,13 @@ ui.dock = function(id, layout, on_build_tab, opt) {
 		if (!cs.moved && s.can_add_remove_tabs && ui.keypressed('ctrl')) {
 			let tablist = cs.src_tablist
 			let tab = tablist.tabs[cs.tab_i] // the ctrl-clicked tab
-			tab.frozen = !tab.frozen
-			if (tab.frozen && !tab.layout) {
-				let copy = assign({}, tab) // unfrozen copy that follows the sources
-				copy.id = new_dock_tab_id(s)
-				delete copy.frozen
-				tablist.tabs.splice(cs.tab_i, 0, copy)
+			if (tab.frozen) {
+				tab.frozen = false
+				save_dock_layout(id, s)
+				ui.rebuild('dock_tab_frozen')
+			} else {
+				freeze_dock_tab(s, tablist, tab, cs.tab_i)
 			}
-			save_dock_layout(id, s)
-			ui.rebuild('dock_tab_frozen')
 		}
 
 		cs = null
@@ -13059,6 +13168,44 @@ ui.mark_follows_source = function(source_id) {
 	while (scope) {
 		if (scope_contains_scope(scope, source_scope)) return
 		scope.hot_build_no = build_no
+		scope = get_dock_state_scope(scope.parent)
+	}
+}
+
+// freeze tab and insert at copy_i a copy of it that follows the sources.
+function freeze_dock_tab(s, tablist, tab, copy_i) {
+	tab.frozen = true
+	if (!tab.layout) {
+		let copy = assign({}, tab) // unfrozen copy that follows the sources
+		copy.id = new_dock_tab_id(s)
+		delete copy.frozen
+		delete copy.modified
+		tablist.tabs.splice(copy_i, 0, copy)
+	}
+	save_dock_layout(s.id, s)
+	ui.rebuild('dock_tab_frozen')
+}
+
+// the copy goes after the tab: dock_tab_panes() is iterating the tablist.
+ui.freeze_current_tab = function(source_id) {
+	let scope = get_dock_state_scope(cur_state_scope)
+	if (!scope) return false
+	let source_scope = state_map.get(source_id)?.state_scope
+	if (scope_contains_scope(scope, source_scope)) return false
+	let s = scope.dock
+	if (!s.can_add_remove_tabs) return false
+	let tab = scope.dock_tab
+	let tablist = find_dock_tablist(s.root, tab.id)
+	freeze_dock_tab(s, tablist, tab, tablist.tabs.indexOf(tab) + 1)
+	// the caller marked the tab hot earlier in this build: unmark it.
+	scope.hot_build_no = null
+	return true
+}
+
+ui.mark_tab_modified = function() {
+	let scope = get_dock_state_scope(cur_state_scope)
+	while (scope) {
+		scope.modified_build_no = build_no
 		scope = get_dock_state_scope(scope.parent)
 	}
 }

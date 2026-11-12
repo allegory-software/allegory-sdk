@@ -19,6 +19,8 @@ Nav config:
 	rowset_name   string        the rowset in ui.rowsets or on the server
 	field_attrs   {col->attrs}  per-column overrides of rowset field attributes
 	label         string        label of the nav; default: the rowset's label
+	can_lose_edits fn() -> t|f  true: freeze the dock tab instead of loading
+	                            changed params
 
 Master binding:
 
@@ -436,9 +438,10 @@ LOAD CHANGED ROWS
 const ui = window.ui
 
 const {
-	assert, warn, warn_if,
+	assert, warn, warn_if, warn_once,
 	isfunc, isstr, isarray, isobj,
-	words, obj, map, assign, empty, empty_obj, empty_array, keys, insert, remove_value,
+	words, obj, map, assign, assign_opt, empty, empty_obj, empty_array, keys,
+	insert, remove_value,
 	dyn_u32arr,
 	num, floor, abs, min, max, clamp, strict_sign,
 	time, month, year, month_of, year_of,
@@ -2594,10 +2597,16 @@ ui.nav = function(id, opt) {
 	}
 
 	// force: reload even when the lists didn't change.
-	function reload_with_params(force) {
+	// can_freeze_tab: keep unsaved edits by freezing the dock tab instead.
+	function reload_with_params(force, can_freeze_tab) {
 		let param_vals1 = read_param_vals()
 		if (!force && json(param_vals1) == json(param_vals))
 			return
+		if (can_freeze_tab && e.can_lose_edits?.())
+			for (let param in e.param_sources)
+				if (json(param_vals1[param]) != json(param_vals[param])
+					&& ui.freeze_current_tab(e.param_sources[param]))
+					return
 		let server_params_changed = is_server_rowset
 			&& json(server_param_vals(param_vals1))
 				!= json(server_param_vals(param_vals))
@@ -2665,7 +2674,7 @@ ui.nav = function(id, opt) {
 			}
 		}
 		if (has_changed)
-			reload_with_params()
+			reload_with_params(false, true)
 	}
 
 	e.check_dependencies = function() {

@@ -147,6 +147,14 @@
 
 (function() {
 
+const {
+	isobject, isarray, isstr, isnum, isfunc,
+	repl, num, floor, min, max, nextpow2, noop, pr, assert, property,
+	remove_value, map, assign, attr,
+	f32arr, i8arr, u8arr, i16arr, u16arr, i32arr, u32arr, dyn_arr,
+	time,
+} = glue
+
 const {v2, v3, v4, mat3f32, mat4f32} = Math3D
 
 let gl = WebGL2RenderingContext.prototype

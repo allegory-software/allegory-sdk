@@ -2,6 +2,11 @@
 "use strict"
 const G = window
 
+const {
+	do_after, assert, push_log, pop_log, push_log_if, gen_id,
+	empty_array, empty_obj,
+} = glue
+
 const {v3, mat4, plane, line2, line3} = Math3D
 
 // init(e) for ui.model3_editor(): fill the editor with the house model.

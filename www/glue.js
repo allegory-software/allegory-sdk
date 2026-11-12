@@ -1950,7 +1950,7 @@ function ajax(req) {
 
 	req.send_async = function() {
 		return new Promise(function(resolve, reject) {
-			on('done', function(...args) {
+			req.on('done', function(...args) {
 				resolve(args)
 			})
 			req.send()

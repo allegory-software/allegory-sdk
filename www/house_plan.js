@@ -2,6 +2,12 @@
 "use strict"
 const G = window
 
+const {
+	round, mod, abs, min, max, clamp, tan, rad,
+	assert, log, push_log, pop_log, push_log_if,
+	insert, uniq_sorted, group_sorted, map, assign, clock,
+} = glue
+
 const {bbox2, poly2} = Math3D
 
 let out = []
@@ -35,6 +41,7 @@ function house_plan(t) {
 	let house = {}
 	let edit0
 	let edit_floor
+	house.edit_no = 0 // increments on each committed edit, undo and redo
 
 	function copy_roofs(roofs) {
 		if (!roofs) return
@@ -91,6 +98,7 @@ function house_plan(t) {
 		if (!same_state(floor, edit0)) {
 			undo_stack.push({floor: floor, state: edit0})
 			redo_stack.length = 0
+			house.edit_no++
 		}
 		edit0 = null
 		edit_floor = null
@@ -996,6 +1004,7 @@ function house_plan(t) {
 		let {floor, state} = undo_stack.pop()
 		redo_stack.push({floor: floor, state: floor.save_state()})
 		floor.load_state(state)
+		house.edit_no++
 		return true
 	}
 
@@ -1006,6 +1015,7 @@ function house_plan(t) {
 		let {floor, state} = redo_stack.pop()
 		undo_stack.push({floor: floor, state: floor.save_state()})
 		floor.load_state(state)
+		house.edit_no++
 		return true
 	}
 

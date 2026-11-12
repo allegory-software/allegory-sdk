@@ -8,6 +8,10 @@ let suncalc = {};
 
 (function () {
 
+const {
+	round, abs, sqrt, PI, sin, cos, tan, rad, asin, acos, atan2,
+} = glue
+
 // sun calculations are based on http://aa.quae.nl/en/reken/zonpositie.html formulas
 
 
@@ -232,6 +236,7 @@ suncalc.moon_times = function (t, lat, lng) {
 
 	// go in 2-hour chunks, each time seeing if a 3-point quadratic curve crosses zero (which means rise or set)
 	let rise, set
+	let ye // the last chunk's extremum altitude
 	for (let i = 1; i <= 24; i += 2) {
 
 		let h1 = suncalc.moon_position(hours_later(t, i), lat, lng).altitude - hc
@@ -240,14 +245,15 @@ suncalc.moon_times = function (t, lat, lng) {
 		let a = (h0 + h2) / 2 - h1
 		let b = (h2 - h0) / 2
 		let xe = -b / (2 * a)
-		let ye = (a * xe + b) * xe + h1
+		ye = (a * xe + b) * xe + h1
 		let d = b * b - 4 * a * h1
 		let roots = 0
+		let x1, x2 // the roots
 
 		if (d >= 0) {
 			let dx = sqrt(d) / (abs(a) * 2)
-			let x1 = xe - dx
-			let x2 = xe + dx
+			x1 = xe - dx
+			x2 = xe + dx
 			if (abs(x1) <= 1) roots++
 			if (abs(x2) <= 1) roots++
 			if (x1 < -1) x1 = x2

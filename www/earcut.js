@@ -2,6 +2,8 @@
 (function() {
 'use strict';
 
+const {freelist} = glue
+
 function earcut(data, holeIndices, dim, triangles) {
 
     dim = dim || 2;

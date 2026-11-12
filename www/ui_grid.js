@@ -12,7 +12,7 @@ const ui = window.ui
 const {
 	pr,
 	round, min, max, floor, ceil, abs, clamp,
-	array_move, assign, copy_to_clipboard, empty_obj, empty_array,
+	array_move, assign, copy_to_clipboard, obj, empty_obj, empty_array,
 	noop, words,
 	S,
 } = glue
@@ -2638,6 +2638,8 @@ function init(id, e) {
 	e.build = function(id, opt, fr, align, valign) {
 
 		e.check_dependencies()
+		if (e.modified_n > 0)
+			ui.mark_tab_modified()
 
 		if (!e.ready) {
 			let errors = e.load_errors()

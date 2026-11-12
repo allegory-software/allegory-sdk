@@ -1715,6 +1715,9 @@ function code_edit_view(id, opt, s) {
 		ui.set_interaction_value(id, s, value)
 		value_changed = false
 	}
+	e.is_value_changed = function() {
+		return value_changed
+	}
 
 	return e
 }
@@ -1726,6 +1729,10 @@ function code_edit_update(id, s) {
 
 ui.code_edit_update_value = function(id) {
 	ui.state_of(id, 'view')?.update_value()
+}
+
+ui.code_edit_is_value_changed = function(id) {
+	return !!ui.state_of(id, 'view')?.is_value_changed()
 }
 
 ui.code_edit = function(id, value, field, opt, readonly) {

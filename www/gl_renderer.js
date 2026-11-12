@@ -13,6 +13,10 @@
 (function() {
 "use strict"
 
+const {
+	isstr, floor, round, assert, remove_value, assign, f32arr, u16arr,
+} = glue
+
 const {v2, v3, v4, mat4, mat4f32, box3, poly3, FAR} = Math3D
 
 let gl = WebGL2RenderingContext.prototype

@@ -2,6 +2,8 @@
 "use strict"
 const G = window
 
+const {lerp} = glue
+
 // face view -----------------------------------------------------------------
 
 let FACE_VIEW_ID         = ui.S-1

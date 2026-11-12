@@ -17,6 +17,13 @@
 "use strict"
 const G = window
 
+const {
+	floor, abs, sign, min, clamp, sqrt, PI, rad, format_base,
+	noop, pr, assert, log, property,
+	extend, array_set, array_equals, insert, remove_value, array_move,
+	assign, freelist, time, timer,
+} = glue
+
 const {NEAR, FAR, v2, v3, v4, mat4, plane, plane3, line3, camera3} = Math3D
 
 G.DEBUG_PLAN ??= 0
