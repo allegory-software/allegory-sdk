@@ -727,7 +727,7 @@ assign(all_field_types, {
 	build_input: ui.build_input,
 	default: null,
 	w: 4,
-	min_w: 2,
+	min_w: 0,
 	max_w: 154,
 	align: 'left',
 	not_null: false,
@@ -1020,7 +1020,7 @@ d.to_text = function(v) {
 
 // no editor: the value is toggled by click and space, and the cell keeps
 // building itself while an edit is carried through it.
-let bool = {align: 'center', min_w: 2, w: 1, is_bool: true,
+let bool = {align: 'center', w: 1, is_bool: true,
 	builds_text: false, has_editor: false, control: 'checkbox',
 	col_storage: bool_storage}
 field_types.bool = bool
