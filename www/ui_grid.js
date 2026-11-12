@@ -428,6 +428,13 @@ function init(id, e) {
 					disabled: menu_field.vfi == null},
 				null)
 		}
+		items.push(
+			{id: 'filter_bar', label: 'Show filter bar', icon: 'filter',
+				checked: e.filter_bar_visible, disabled: !e.can_filter()},
+			{id: 'clear_filters', label: 'Clear column filters',
+				icon: 'filter-off', disabled: !e.can_filter()
+					|| !e.all_fields.some(field => field.filter)},
+			null)
 		if (e.is_grouped)
 			items.push({id: 'ungroup_all', label: 'Ungroup all',
 				icon: 'layers-off'}, null)
