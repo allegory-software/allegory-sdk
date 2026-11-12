@@ -256,7 +256,8 @@ function init(id, e) {
 	e.vertical_layout   ??= false
 	e.header_align      ??= 'l'
 	e.group_bar_visible ??= 'auto' // auto | always | no
-	e.filter_bar_visible ??= false
+	e.filter_bar_visible = ui.saved_state[id]?.filter_bar_visible
+		?? e.filter_bar_visible ?? false
 
 	e.row_w    = ui.saved_state[id]?.row_w    ?? 12 // in em units
 	e.header_w = ui.saved_state[id]?.header_w ?? 10 // in em units
@@ -583,6 +584,7 @@ function init(id, e) {
 				break
 			case 'filter_bar':
 				e.filter_bar_visible = ui.state_of(menu_id, 'picked_checked')
+				ui.save_state(id, 'filter_bar_visible', e.filter_bar_visible)
 				break
 			case 'clear_filters':
 				e.clear_col_filters()

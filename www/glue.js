@@ -1007,7 +1007,7 @@ class dyn_arr_class {
 				for (let i = 0, n = this_len * this.nc; i < n; i++)
 					array1[i] = this.array[i]
 			array1.nc = this.nc
-			array1.length = this_len
+			array1.len = this_len
 			this.array = array1
 		}
 		this.arr_type = arr_type1
