@@ -286,7 +286,7 @@ function init(id, e) {
 	// mouse state
 	let ps
 	let gcol_mover
-	let hit_zone // sort_icon, col_divider, header_divider, row_divider, col, gcol, cell
+	let hit_zone // col_divider, header_divider, row_divider, col, gcol, cell
 	let drag_op  // col_move, col_group, row_move
 	let hit_vri // index in visible_ris
 	let hit_vfi // index in visible_fields
@@ -914,17 +914,17 @@ function init(id, e) {
 
 	/// column header ---------------------------------------------------------
 
-	function sort_icon_w(field) {
-		return field.sortable ? 2 * sp2 : 0
-	}
-
 	function get_header_icon_w(field) {
-		return field.icon ? font_size + sp : 0
+		return field.icon ? font_size : 0
 	}
 
 	function col_min_w(field) {
-		return max(field.min_w * font_size,
-			sort_icon_w(field) + get_header_icon_w(field))
+		return max(field.min_w * font_size, get_header_icon_w(field))
+	}
+
+	function sort_icon(field) {
+		return field.sort_i == null ? null
+			: field.sort_desc ? 'sort-descending' : 'sort-ascending'
 	}
 
 	function get_col_w(field) {
@@ -939,7 +939,6 @@ function init(id, e) {
 	}
 
 	function update_header() {
-		// hover or click on sort icons from colum header
 		for (let field of e.visible_fields) {
 			let icon_id = id+'.sort_icon.'+field.name
 			ps = ui.drag_or_hit(icon_id)
@@ -1100,11 +1099,8 @@ function init(id, e) {
 				col_move ? 'bg2' : col_group ? 'bg0' : 'bg1', null,
 				col_move ? (horiz ? 'blr' : 'tbr') : 'br', 'intense')
 
-			let max_min_w = noclip ? null
-				: max(0, w - 2 * sp2 - sort_icon_w(field))
-			let dir = field.sort_i == null ? null
-				: field.sort_desc ? 'desc' : 'asc'
-			let pri = field.sort_i
+			let max_min_w = noclip ? null : max(0, w - 2 * sp2)
+			let dir = sort_icon(field)
 			let align, is_right_aligned
 			if (horiz) {
 				align = e.field_align(field)
@@ -1119,27 +1115,15 @@ function init(id, e) {
 					col_group ? 'faint' : null)
 			}
 
-			let icon_id = id+'.sort_icon.'+field.name
-
-			if (field.sortable) {
-				if (e.visible_n > 1 || dir) {
-					ui.color(dir && !col_group ? 'label' : 'faint',
-						!col_group && hit_zone == 'sort_icon'
-							&& hit_vfi == field.vfi ? 'hover' : null)
-					ui.icon(icon_id,
-						dir == 'asc' && (pri ? 'sort-ascending'  : 'sort-ascending' ) ||
-						dir          && (pri ? 'sort-descending' : 'sort-descending') ||
-						'arrows-sort'
-					, 0)
-				} else {
-					ui.min_w(ui.em(1))
-					ui.box()
-				}
-			}
-
 			if (is_right_aligned) {
 				build_header_label(field, align, max_min_w,
 					col_group ? 'faint' : null)
+			}
+
+			if (dir) {
+				ui.m(-sp2, 0, 0, 0)
+				ui.color(col_group ? 'faint' : 'label')
+				ui.icon(id+'.sort_icon.'+field.name, dir, 0)
 			}
 
 		ui.end_h()
@@ -1218,7 +1202,6 @@ function init(id, e) {
 		if (!hit_zone) {
 			for (let gcol of e.group_cols) {
 				let col = gcol.field.name
-				// hit sort icon
 				let icon_id = id+'.sort_icon.'+col
 				ps = ui.drag_or_hit(icon_id)
 				if (ps) {
@@ -1470,27 +1453,17 @@ function init(id, e) {
 					ui.stack(col_id, 1, 'l', 't')
 						let bgs = hit_gcol == col && (
 							!ps.dragging || ps.drop ? 'hover'
-								: hit_zone != 'sort_icon' ? 'active' : 'hover'
+							: hit_zone != 'sort_icon' ? 'active' : 'hover'
 							) || null
 						ui.bb('bg1', bgs, 1, 'intense')
 						ui.p(sp2, ui.sp075())
 						ui.h(1, sp)
 
 							build_header_label(field, 'l', 0)
-
-							// sort icon
-							let icon_id = id+'.sort_icon.'+col
-							if (field.sortable) {
-								let dir = field.sort_i == null ? null
-									: field.sort_desc ? 'desc' : 'asc'
-								ui.color(dir ? 'label' : 'faint',
-									(hit_zone == 'sort_icon' && hit_gcol == col) ? 'hover' : null)
-								let pri = field.sort_i
-								ui.icon(icon_id,
-									dir == 'asc' && (pri ? 'sort-ascending'  : 'sort-ascending' ) ||
-									dir          && (pri ? 'sort-descending' : 'sort-descending') ||
-									'arrows-sort'
-								, 0)
+							let dir = sort_icon(field)
+							if (dir) {
+								ui.color('label')
+								ui.icon(id+'.sort_icon.'+col, dir, 0)
 							}
 						ui.end_h()
 					ui.end_stack()
@@ -2216,7 +2189,7 @@ function init(id, e) {
 
 		update_header()
 
-		if ((hit_zone == 'col' || hit_zone == 'sort_icon') && !ps.dragging) {
+		if (hit_zone == 'col' && !ps.dragging) {
 			let field = e.visible_fields[hit_vfi]
 			ui.set_tooltip(field.info ?? field.label)
 		}
