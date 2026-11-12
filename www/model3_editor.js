@@ -547,7 +547,7 @@ function model3_editor(e) {
 		e.root.comp = create_component({name: '<root>'})
 	}
 
-	e.free = function() {
+	function free_model() {
 		for (let comp of comps) {
 			if (comp.davib) {
 				comp.davib.free()
@@ -557,7 +557,31 @@ function model3_editor(e) {
 		}
 		comps.length = 0
 		e.root = null
+	}
 
+	e.clear_model = function() {
+		if (tool.bind)
+			tool.bind(false)
+		captured_move = null
+		captured_up = null
+		mouse.dragging = false
+		mouse.prevent_validate = false
+		free_model()
+		cur_path.length = 0
+		cur_comp = null
+		undo_groups.length = 0
+		undo_stack.length = 0
+		redo_groups.length = 0
+		redo_stack.length = 0
+		init_root()
+		enter_edit([e.root])
+		update_all()
+		if (tool.bind)
+			tool.bind(true)
+	}
+
+	e.free = function() {
+		free_model()
 		canvas.remove()
 		canvas = null
 		gl = null
