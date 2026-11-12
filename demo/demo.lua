@@ -28,6 +28,7 @@ require'app_db'
 require'app_os'
 require'webb_call'
 require'app_pm'
+require'app_pm_cwicr'
 
 do
 	local test_actions = {
