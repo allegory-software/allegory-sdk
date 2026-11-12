@@ -31,7 +31,7 @@ rowset.db_explorer_tables = virtual_rowset(function(rs)
 		},
 		{
 			name = 'raw', label = 'Raw', type = 'bool', readonly = true,
-			not_null = true, filter = '=false', icon = 'binary',
+			not_null = true, filter = {false}, icon = 'binary',
 		},
 		{
 			name = 'is_index', label = 'Index', type = 'bool',
@@ -226,6 +226,7 @@ dynamic_rowset('^db_explorer_rows_(.+)$', function(tbl)
 	end
 	local sel = cat(schema.cols, ', ')
 	return scan_rowset{
+		internal = true,
 		label = 'Rows',
 		category = 'Database explorer',
 		scan =function(db) return db:scan(tbl, ''):select(sel) end,
@@ -238,7 +239,8 @@ end)
 --the keys and values of a table as stored, for an index table or a table
 --without a schema. base tables with a schema are rowset.table_NAME.
 rowset.db_explorer_rows_raw = virtual_rowset(function(rs)
-	rs.label = 'Rows'
+	rs.internal = true
+	rs.label = 'Raw rows'
 	rs.category = 'Database explorer'
 	rs.manual_init_fields = true
 	rs.can_move_rows = false

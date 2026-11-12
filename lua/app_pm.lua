@@ -143,7 +143,7 @@ Example: cannot finish electrical inspection until wiring is finished.
 			SF = [[
 Very rare. Example: shift handoffs.
 ]],
-		}), not_null, client_default'"FS"', icon'category',
+		}), not_null, client_default'FS', icon'category',
 		delay        , duration,
 		note         , note,
 		pk(wi, needs_wi),
