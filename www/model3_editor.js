@@ -1257,11 +1257,25 @@ function model3_editor(e) {
 		e.cursor = shift ? 'grab' : 'orbit'
 	}
 
+	function center_orbit_point(p, out) {
+		let bb = e.root.comp.bbox()
+		if (!bb.is_empty())
+			return bb.center(out)
+		let dir = camera.dir
+		let depth = (
+			(p[0] - camera.pos[0]) * dir[0] +
+			(p[1] - camera.pos[1]) * dir[1] +
+			(p[2] - camera.pos[2]) * dir[2]
+		) / dir.len2()
+		return out.set(dir).muls(depth).add(camera.pos)
+	}
+
 	tools.orbit.pointerdown = function(capture) {
 		let cam0 = camera.clone()
 		let mx0 = mouse.x
 		let my0 = mouse.y
 		let hit_point = mouse_hit_model({mode: 'camera'})
+		let orbit_point = v3()
 		let panning = shift
 		mouse.prevent_validate = true
 		return capture(function() {
@@ -1281,7 +1295,8 @@ function model3_editor(e) {
 			} else {
 				let dx = (mx - mx0) / 400
 				let dy = (my - my0) / 400
-				camera.orbit(hit_point, dy, dx, 0)
+				center_orbit_point(hit_point, orbit_point)
+				camera.orbit(orbit_point, dy, dx, 0)
 			}
 			update_camera()
 		})
@@ -1310,6 +1325,7 @@ function model3_editor(e) {
 		if (shift && !ctrl && (x || y)) {
 			let dx = x / -10
 			let dy = y / -10
+			center_orbit_point(hit_point, hit_point)
 			camera.orbit(hit_point, dy, dx, 0)
 			update_camera()
 			return false

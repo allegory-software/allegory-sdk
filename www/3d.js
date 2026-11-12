@@ -4354,16 +4354,17 @@ camera = function(e) {
 	}
 
 	e.orbit = function(target, ax, ay, az) {
+		let up = _v1.set(_v4_0.set(e.up, 0).transform(e.view)).normalize()
 		let vdir = _v0.set(e.world_to_view(e.pos.clone().add(e.dir), _v4_0))
 		vdir.rotate(v3.x_axis, -ax)
-		vdir.rotate(v3.y_axis, -ay)
+		vdir.rotate(up, -ay)
 		vdir.rotate(v3.z_axis, -az)
 		let dir = e.view_to_world(vdir, _v2).sub(e.pos)
 		e.dir.set(dir)
 		let vtarget = e.world_to_view(target, _v4_0)
 		let vpos = _v3.set(vtarget).negate()
 		vpos.rotate(v3.x_axis, -ax)
-		vpos.rotate(v3.y_axis, -ay)
+		vpos.rotate(up, -ay)
 		vpos.rotate(v3.z_axis, -az)
 		vpos.add(vtarget)
 		let pos = e.view_to_world(vpos, _v4)
