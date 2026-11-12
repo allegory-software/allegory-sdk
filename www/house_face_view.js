@@ -145,7 +145,6 @@ ui.box_widget('face_view', {
 		cx.save()
 
 		// fixed grid
-		sg.show_grid = true
 		draw_grids(cx, sg, x0, y0, w, h)
 
 		sg.transform(cx, w, h)

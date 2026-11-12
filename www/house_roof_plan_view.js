@@ -127,6 +127,7 @@ ui.box_widget('roof_plan_view', {
 
 					if (ui.icon_button(id+'.grid_button', 'fas', '\uf00a', 0)) {
 						sg.show_grid = !sg.show_grid
+						ui.save_state('floor_editor', 'show_grid', sg.show_grid)
 						ui.animate()
 					}
 

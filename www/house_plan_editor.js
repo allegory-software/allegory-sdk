@@ -32,6 +32,7 @@ function seg_center(seg) {
 
 function scaler(name) {
 	let s = {}
+	s.show_grid = ui.saved_state.floor_editor?.show_grid
 	let line_width = 2 // thickness of wall line stroke in pixels at 1:1 scale
 	let scale, margin
 	s.d = d => round(d * scale)
@@ -538,6 +539,7 @@ ui.box_widget('floor_editor', {
 
 					if (ui.button(id+'.grid_button', 'grid-dots', '', 0)) {
 						sg.show_grid = !sg.show_grid
+						ui.save_state('floor_editor', 'show_grid', sg.show_grid)
 						ui.animate()
 					}
 
