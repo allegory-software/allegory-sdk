@@ -233,46 +233,6 @@ function app_dock_app_tab(tab) {
 	end_v()
 }
 
-let house_model_editor_plan = {
-	floor_h: 250,
-	floors: [
-		{
-			points: [
-				[200,  0, 'cl'],
-				[200,400, 'cr'],
-			],
-			lines: [
-				['draw','tl',0,0, 'tr',600, 'br',400, 'bl',-600, 'tl',-400],
-				['connect','cl','cr'],
-			],
-		},
-		{
-			points: [
-				[300,  0, 'cl'],
-				[300,400, 'cr'],
-			],
-			lines: [
-				['draw','tl',0,0, 'tr',600, 'br',400, 'bl',-600, 'tl',-400],
-				['connect','cl','cr'],
-			],
-		},
-		{
-			points: [
-				[  0,240, 'cl'],
-				[600,240, 'cr'],
-			],
-			lines: [
-				['draw','tl',0,0, 'tr',600, 'br',400, 'bl',-600, 'tl',-400],
-				['connect','cl','cr'],
-			],
-			roofs: [
-				{type: 'gable', pitch: 45, eaves: 50, axis: 'h', h: 300,
-					box: [-50,-50,650,450]},
-			],
-		},
-	],
-}
-
 function app_dock_tab(tab) {
 	if (tab.kind == 'db_tables') {
 		ui.db_tables('app_dock.tab.'+tab.id+'.db_tables')
@@ -336,9 +296,7 @@ function app_dock_tab(tab) {
 			ui.model3_editor_test_objects)
 	} else if (tab.kind == 'house_model_editor') {
 		let id = 'app_dock.tab.'+tab.id+'.house_model_editor'
-		let s = ui.state(id+'.house')
-		s.house ??= house_plan(house_model_editor_plan)
-		ui.house_model_editor(id+'.widget', s.house)
+		ui.unit_model_editor(id+'.widget')
 	} else if (tab.kind == 'floor_editor') {
 		let id = 'app_dock.tab.'+tab.id+'.floor_editor'
 		ui.unit_plan_editor(id+'.widget')
