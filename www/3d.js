@@ -2352,7 +2352,7 @@ let plane_class = class plane {
 
 	// Newell's method.
 	set_from_poly3(poly) {
-		let n = poly.point_count()
+		let n = poly.point_count_without_holes()
 		assert(n >= 3)
 		let pn = _v1.set(0, 0, 0)
 		let p1 = poly.get_point3(n-1, _v2)
