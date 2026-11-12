@@ -446,7 +446,7 @@ const {
 	num, floor, abs, min, max, clamp, strict_sign,
 	time, month, year, month_of, year_of,
 	memoize, ajax, href,
-	return_true, return_false, captures,
+	return_true, return_false, captures, fold_text,
 	json, url_parse, url_format, S,
 	copy_to_clipboard,
 } = glue
@@ -2362,9 +2362,9 @@ ui.nav = function(id, opt) {
 			let v = col_val(ri, fi)
 			let text = field.lookup_nav
 				? e.build_val(ri, field, v) : val_text(field, v)
-			return (text ?? '').toLowerCase()
+			return fold_text(text ?? '')
 		}
-		expr = expr.toLowerCase()
+		expr = fold_text(expr)
 
 		// exact match: =s
 		if (expr.startsWith('=')) {
@@ -2815,10 +2815,10 @@ ui.nav = function(id, opt) {
 			e.quicksearch_text = ''
 	}
 
-	// Search column fi for text starting with s, ignoring case. Pass '' to end
-	// quicksearch. With offset 0 (the default), search forward from the
-	// focused row; with 1, start at the next row; with -1, search backward
-	// from the previous row. If no row is focused, start as if the first row
+	// Search column fi for text starting with s, ignoring case and accents.
+	// Pass '' to end quicksearch. With offset 0 (the default), search forward
+	// from the focused row; with 1, start at the next row; with -1, search
+	// backward from the previous row. If no row is focused, start as if the first row
 	// were focused. Continue from the other end after reaching either end.
 	// Skip no_focus rows. Focus the first matching row and return its ri, or
 	// return null if none matched.
@@ -2827,7 +2827,7 @@ ui.nav = function(id, opt) {
 			e.quicksearch_text = ''
 			return null
 		}
-		let s_lower = s.toLowerCase()
+		let s_folded = fold_text(s)
 		let n = e.visible_n
 		let dir = offset < 0 ? -1 : 1 // walk direction
 		// Add n to keep i nonnegative when searching backward. Use i % n to
@@ -2837,7 +2837,7 @@ ui.nav = function(id, opt) {
 		for (let k = 0; k < n; k++, i += dir) {
 			let ri = e.visible_ris[i % n]
 			if (!(e.row_flags[ri] & ROW_NO_FOCUS)
-				&& e.cell_text(ri, fi).toLowerCase().startsWith(s_lower)
+				&& fold_text(e.cell_text(ri, fi)).startsWith(s_folded)
 			) {
 				e.focus_cell(ri, fi)
 				e.quicksearch_text = s

@@ -108,6 +108,7 @@ STRINGS
 	subst(s, '{0} {1}', a0, a1, ...)
 	display_name(s)
 	escape_regexp(s)
+	fold_text(s) -> s                      lowercase without accents
 	words(s) -> a | null
 	catany(sep, ...)
 	captures(s, re) -> [capture1, ...]
@@ -615,6 +616,9 @@ let capitalize = s => s.charAt(0).toUpperCase() + s.slice(1)
 function display_name(s) {
 	return s.replace(/[\w]/, upper).replace(/(_[\w])/g, upper2)
 }
+
+let accents_re = /\p{M}/gu
+let fold_text = s => s.normalize('NFD').replace(accents_re, '').toLowerCase()
 
 let regexp_special_re = /[.*+?^${}()|[\]\\]/g
 function escape_regexp(s) {
@@ -2141,7 +2145,7 @@ log, check, push_log, pop_log, push_log_if, gen_id,
 property, method, override, alias,
 callable_constructor, inherit_properties,
 subst, capitalize, display_name, ends,
-escape_regexp, catany, words, captures, utf8_len,
+escape_regexp, fold_text, catany, words, captures, utf8_len,
 array, empty_array, array_resize, extend, array_set, array_equals,
 insert, insert_n, remove, remove_n, remove_value, replace_value, remove_values,
 array_move,
