@@ -3614,7 +3614,7 @@ function align_x(a, i, axis, sx, sw) {
 		return sx + sw - min_w
 	} else if (align == ALIGN_CENTER) {
 		let min_w = a[i+2+axis]
-		return sx + max(0, round((sw - min_w) / 2))
+		return sx + round((sw - min_w) / 2)
 	} else {
 		return sx
 	}
@@ -4191,25 +4191,32 @@ ui.box_widget('box', {
 
 // a box container that paints its children one on top of the other.
 //
-// ui.stack (id=, fr=1, align='s', valign='s', hidden=false)
+// ui.stack (id=, fr=1, align='s', valign='s', hidden=false, fixed=false)
 
 const STACK_ID    = BOX_CT_ARGS+0
 const STACK_FLAGS = BOX_CT_ARGS+1
 
-const STACK_HIDDEN = 1
+const STACK_HIDDEN = 1 // children take up space but they're not drawn.
+const STACK_FIXED  = 2 // children don't take up space, they overflow.
 
 const CMD_STACK = cmd_ct('stack')
 id_i[CMD_STACK] = STACK_ID
 
-ui.stack = function(id, fr, align, valign, hidden) {
+ui.stack = function(id, fr, align, valign, hidden, fixed) {
 	let i = ui_cmd_box_ct_begin(CMD_STACK, fr, align, valign)
 	a[n++] = id || ''
-	a[n++] = hidden ? STACK_HIDDEN : 0
+	a[n++] = (hidden ? STACK_HIDDEN : 0) | (fixed ? STACK_FIXED : 0)
 	ui_cmd_box_ct_end(i)
 	return i
 }
 
 measure[CMD_STACK] = ct_stack_push
+
+measure_end[CMD_STACK] = function(a, i, axis) {
+	if (a[i+STACK_FLAGS] & STACK_FIXED)
+		a[i+2+axis] = 0
+	ct_measure_end(a, i, axis)
+}
 
 function position_stacked(a, i, axis, sx, sw) {
 	let x = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
