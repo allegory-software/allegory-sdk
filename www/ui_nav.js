@@ -3009,17 +3009,21 @@ ui.nav = function(id, opt) {
 
 	// Check for edits in grouping columns. Skip columns without input_vals
 	// because no cells in those columns have pending edits.
-	function has_edited_keys(levels) {
-		for (let level of levels)
-			for (let {field} of level) {
-				let fi = field.fi
-				if (!e.input_vals[fi])
-					continue
-				for (let i = 0; i < e.row_n; i++)
-					if (cell_bit(e.modified_mask, e.base_ris[i], fi))
-						return true
-			}
+	function has_edited_keys(group_cols) {
+		for (let {field} of group_cols) {
+			let fi = field.fi
+			if (!e.input_vals[fi])
+				continue
+			for (let i = 0; i < e.row_n; i++)
+				if (cell_bit(e.modified_mask, e.base_ris[i], fi))
+					return true
+		}
 		return false
+	}
+
+	e.can_set_group_cols = function(group_cols) {
+		return !group_cols.length || !(e.can_be_tree && e.modified_n
+			|| has_edited_keys(group_cols))
 	}
 
 	// Use the syntax accepted by parse_group_by(), or pass null to ungroup.
@@ -3028,8 +3032,8 @@ ui.nav = function(id, opt) {
 	// stored values. Return true if applied.
 	e.set_group_by = function(group_by) {
 		let levels = group_by ? parse_group_by(group_by) : []
-		if (levels.length && (e.can_be_tree && e.modified_n
-			|| has_edited_keys(levels)))
+		let group_cols = levels.flat()
+		if (!e.can_set_group_cols(group_cols))
 			return false
 		e.exit_edit()
 
@@ -3051,7 +3055,7 @@ ui.nav = function(id, opt) {
 		// add the new groups, if any, and update the rows shown.
 		toggled_group_paths.clear()
 		e.group_by = levels.length ? group_by : null // group-by spec, or null
-		e.group_cols = levels.flat()
+		e.group_cols = group_cols
 		if (levels.length)
 			add_groups(levels)
 		update_visible_fields()

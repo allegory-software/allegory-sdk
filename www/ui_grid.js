@@ -1423,6 +1423,7 @@ function init(id, e) {
 				ui.bb('bg2', null, 'b', 'light')
 
 				let mover = gcol_mover
+				let can_group = !mover || e.can_set_group_cols(mover.gcols)
 
 				for (let gcol of mover?.gcols ?? e.group_cols) {
 
@@ -1443,12 +1444,14 @@ function init(id, e) {
 								x = mover.x0 + ps.dx
 								y = mover.y0 + ps.dy
 							} else {
-								let place_x = vi * (w + 1)
-								ui.m(sp2 + place_x - 1, sp2 + y - 1, 0, 0)
-								ui.min_wh(w + 2, h + 2)
-								ui.stack('', 0, 'l', 't')
-									ui.border(1, 'marker', null, 0, 'dashes')
-								ui.end_stack()
+								if (can_group) {
+									let place_x = vi * (w + 1)
+									ui.m(sp2 + place_x - 1, sp2 + y - 1, 0, 0)
+									ui.min_wh(w + 2, h + 2)
+									ui.stack('', 0, 'l', 't')
+										ui.border(1, 'marker', null, 0, 'dashes')
+									ui.end_stack()
+								}
 								x = mover.x0 + ps.dx
 								y = mover.y0 + ps.dy
 							}
@@ -1495,6 +1498,14 @@ function init(id, e) {
 					if (mover && col == hit_gcol)
 						ui.end_popup()
 
+				}
+
+				if (!can_group) {
+					ui.m(sp2)
+					ui.color('error-text')
+					ui.text('', S('group_pending_changes',
+						'Save or discard pending changes before grouping'),
+						0, 'l', 'c')
 				}
 
 			ui.end_sb()
