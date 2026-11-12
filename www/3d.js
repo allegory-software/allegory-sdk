@@ -4354,6 +4354,9 @@ camera = function(e) {
 	}
 
 	e.orbit = function(target, ax, ay, az) {
+		let pitch = PI / 2 - e.dir.angle_to(e.up)
+		let max_pitch = 89.9 * rad
+		ax = clamp(ax, -max_pitch - pitch, max_pitch - pitch)
 		let up = _v1.set(_v4_0.set(e.up, 0).transform(e.view)).normalize()
 		let vdir = _v0.set(e.world_to_view(e.pos.clone().add(e.dir), _v4_0))
 		vdir.rotate(v3.x_axis, -ax)
