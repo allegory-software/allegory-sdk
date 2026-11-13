@@ -29,15 +29,15 @@ ui.unit_model_editor = function(id) {
 	let has_master_toggle = ui.has_master_toggle(rowset_name)
 	let in_dock = ui.in_dock_tab()
 	if (in_dock && has_master_toggle) {
-		ui.open_tab_strip()
-		ui.master_toggle(id, 'plan', rowset_name, true, 'Plan')
-		ui.close_tab_strip()
+		ui.begin_master_toggle_bar(true)
+			ui.master_toggle(id, 'plan', rowset_name, true, 'Plan')
+		ui.end_master_toggle_bar(true)
 	}
 	ui.v(1, ui.sp())
 		if (!in_dock && has_master_toggle) {
-			ui.h(0, ui.sp())
+			ui.begin_master_toggle_bar(false)
 				ui.master_toggle(id, 'plan', rowset_name, true, 'Plan')
-			ui.end_h()
+			ui.end_master_toggle_bar(false)
 		}
 		let master = ui.state_of(master_id)
 		let house = master?.nav.focused_ri != null

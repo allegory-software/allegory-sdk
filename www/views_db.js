@@ -41,18 +41,15 @@ ui.db_rows = function(id) {
 		ui.mark_follows_source(master_id)
 	let has_master_toggle = ui.has_master_toggle(rowset_name)
 	if (ui.in_dock_tab() && has_master_toggle) {
-		ui.open_tab_strip()
-		ui.pr(ui.sp())
-		ui.h(0, ui.sp(), 'r', 'c')
+		ui.begin_master_toggle_bar(true)
 			ui.master_toggle(id, 'table', rowset_name, true, 'Table')
-		ui.end_h()
-		ui.close_tab_strip()
+		ui.end_master_toggle_bar(true)
 	}
 	ui.v()
 		if (!ui.in_dock_tab() && has_master_toggle) {
-			ui.h(0, ui.sp(), 'l', 'c')
+			ui.begin_master_toggle_bar(false)
 				ui.master_toggle(id, 'table', rowset_name, true, 'Table')
-			ui.end_h()
+			ui.end_master_toggle_bar(false)
 		}
 		build_table_rows(id, master_id)
 	ui.end_v()

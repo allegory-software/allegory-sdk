@@ -8941,7 +8941,9 @@ function hvlist(hv, id, items, value, field,
 				| (item_focused ? STATE_ITEM_FOCUSED : 0)
 				| (item_selected ? STATE_ITEM_SELECTED : 0)
 			// TODO: remove this rounded corners hack
-			let sides = opt?.item_gap ? (!i ? '-r' : i == items.length-1 ? '-l' : null) : null
+			let sides = !opt?.item_gap ? null
+				: items.length == 1 ? true
+				: !i ? '-r' : i == items.length-1 ? '-l' : null
 			let align = opt?.item_align ?? field?.align ?? (hv == 'v' ? 'l' : 'c')
 			build_item(item, field, opt, item_color_state, align, sides)
 			if (item_focused)
@@ -11658,6 +11660,26 @@ ui.nav_input = function(id, opt, fr, align, valign) {
 	return build_input_row(id, null, opt, true, fr, align, valign)
 }
 
+//// MASTER TOGGLE BAR -----------------------------------------------------
+
+ui.begin_master_toggle_bar = function(in_dock) {
+	if (in_dock) {
+		ui.open_tab_strip()
+		ui.pr(ui.sp1())
+		ui.h(0, ui.sp1(), 'r', 'c')
+	} else {
+		ui.p(ui.sp2(), ui.sp05())
+		ui.h(0, ui.sp1(), 's', 'c')
+		ui.bb('bg0', null, 'b', 'intense')
+	}
+}
+
+ui.end_master_toggle_bar = function(in_dock) {
+	ui.end_h()
+	if (in_dock)
+		ui.close_tab_strip()
+}
+
 //// NAV_EDITOR: a widget that owns and edits a one-row detail nav -----------
 
 function is_nav_editor_changed(s) {
@@ -11710,9 +11732,9 @@ ui.nav_editor = function(id, opt, def) {
 	let has_master_toggle = ui.has_master_toggles(nav)
 	let in_dock = ui.in_dock_tab()
 	if (in_dock && has_master_toggle) {
-		ui.open_tab_strip()
-		ui.master_toggle(id, def.key_col, def.master_rowset_name, true, def.label)
-		ui.close_tab_strip()
+		ui.begin_master_toggle_bar(true)
+			ui.master_toggle(id, def.key_col, def.master_rowset_name, true, def.label)
+		ui.end_master_toggle_bar(true)
 	}
 
 	let input_id = id+'.editor.'+key
@@ -11723,9 +11745,9 @@ ui.nav_editor = function(id, opt, def) {
 	ui.focus_group(false, null, id)
 	ui.v(1, ui.sp())
 		if (!in_dock && has_master_toggle) {
-			ui.h(0, ui.sp())
+			ui.begin_master_toggle_bar(false)
 				ui.master_toggle(id, def.key_col, def.master_rowset_name, true, def.label)
-			ui.end_h()
+			ui.end_master_toggle_bar(false)
 		}
 		if (nav.load_error)
 			ui.text('', nav.load_error, 0)
