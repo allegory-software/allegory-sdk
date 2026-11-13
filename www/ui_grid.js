@@ -338,6 +338,7 @@ function init(id, e) {
 	let want_menu // right-click on a cell or the header this pass
 	let menu_items = null // menu commands, including null separators
 	let menu_field = null // column of the right-clicked header
+	let is_menu_gcol = false // the menu is for a group bar column
 
 	// row form state
 	let row_form = null
@@ -394,6 +395,7 @@ function init(id, e) {
 	/// context menu ----------------------------------------------------------
 
 	function update_menu_items() {
+
 		let ri = e.focused_ri // focused row index
 		let field = focused_field() // focused field, or null
 		let has_cell = ri != null && field != null // focused cell exists
@@ -409,11 +411,12 @@ function init(id, e) {
 						&& e.can_change_val(ri, field.fi))
 						can_clear = true
 		})
+
 		let items = [] // menu commands, including null separators
-		if (menu_field && !menu_field.internal) {
+
+		if (menu_field) {
 			let can_sort = e.can_sort_rows && menu_field.sortable // sort allowed
-			let is_group_col = e.group_cols.some( // column used for grouping
-				gcol => gcol.field == menu_field)
+
 			items.push(
 				{id: 'sort_asc', label: 'Sort ascending',
 					icon: 'sort-ascending', disabled: !can_sort},
@@ -421,95 +424,115 @@ function init(id, e) {
 					icon: 'sort-descending', disabled: !can_sort},
 				{id: 'sort_remove', label: 'Remove from sort',
 					disabled: !can_sort || menu_field.sort_i == null},
-				null,
-				{id: 'group_col', label: 'Group by this column',
-					disabled: is_group_col},
-				{id: 'ungroup_col', label: 'Ungroup this column',
-					disabled: !is_group_col},
-				{id: 'hide_col', label: 'Hide this column', icon: 'eye-off',
-					disabled: menu_field.vfi == null},
 				null)
-		}
-		items.push(
-			{id: 'filter_bar', label: 'Show filter bar', icon: 'filter',
-				checked: e.filter_bar_visible, disabled: !e.can_filter()},
-			{id: 'clear_filters', label: 'Clear column filters',
-				icon: 'filter-off', disabled: !e.can_filter()
-					|| !e.all_fields.some(field => field.filter)},
-			null)
-		if (e.is_grouped)
-			items.push({id: 'ungroup_all', label: 'Ungroup all',
-				icon: 'layers-off'}, null)
-		if (has_cell)
+
+			if (is_menu_gcol) {
+				// group bar column: grouping items only.
+				items.push(
+					{id: 'ungroup_col', label: 'Ungroup this column'},
+					{id: 'ungroup_all', label: 'Ungroup all',
+						icon: 'layers-off'},
+					null)
+			} else {
+				// header column.
+				items.push({id: 'group_col', label: 'Group by this column',
+					disabled: !menu_field.groupable})
+				if (e.is_grouped)
+					items.push({id: 'ungroup_all', label: 'Ungroup all',
+						icon: 'layers-off'})
+				items.push(null)
+
+				let column_items = [] // column visibility menu items
+				for (let field of e.all_fields) {
+					if (field.internal || field.is_group_field)
+						continue
+					let is_group_col = false // column used for grouping
+					if (e.is_grouped)
+						for (let gcol of e.group_cols)
+							if (gcol.field == field) {
+								is_group_col = true
+								break
+							}
+					column_items.push({
+						id: 'col_' + field.name,
+						field: field,
+						label: field.label,
+						checked: field.vfi != null,
+						disabled: is_group_col,
+					})
+				}
+				items.push(
+					{id: 'columns', label: 'Show/Hide columns',
+						items: column_items},
+					{id: 'hide_col', label: 'Hide this column', icon: 'eye-off'},
+					null,
+					{id: 'filter_bar', label: 'Show filter bar', icon: 'filter',
+						checked: e.filter_bar_visible, disabled: !e.can_filter()},
+					{id: 'clear_filters', label: 'Clear column filters',
+						icon: 'filter-off', disabled: !e.can_filter()
+							|| !e.all_fields.some(field => field.filter)},
+					null)
+			}
+
+		} else {
+			// data cell.
+			if (has_cell)
+				items.push(
+					{id: 'copy_cell', label: 'Copy cell', icon: 'copy'},
+					{id: 'edit_cell', label: 'Edit cell', icon: 'pencil',
+						disabled: e.is_picker || !e.can_change_val(ri, field.fi)},
+					{id: 'revert_cell', label: 'Revert cell',
+						icon: 'arrow-back-up',
+						disabled: e.is_picker || !e.is_cell_modified(ri, field.fi)},
+					null)
+
 			items.push(
-				{id: 'copy_cell', label: 'Copy cell', icon: 'copy'},
-				{id: 'edit_cell', label: 'Edit cell', icon: 'pencil',
-					disabled: e.is_picker || !e.can_change_val(ri, field.fi)},
-				{id: 'revert_cell', label: 'Revert cell', icon: 'arrow-back-up',
-					disabled: e.is_picker || !e.is_cell_modified(ri, field.fi)},
+				{id: 'select_all', label: 'Select all', icon: 'select-all',
+					disabled: !e.visible_n},
+				{id: 'set_null', label: 'Set selected cells to null',
+					icon: 'eraser', disabled: !can_clear},
 				null)
-		items.push(
-			{id: 'select_all', label: 'Select all', icon: 'select-all',
-				disabled: !e.visible_n},
-			{id: 'set_null', label: 'Set selected cells to null', icon: 'eraser',
-				disabled: !can_clear},
-			null)
-		if (!e.is_picker)
-			items.push(
-				{id: 'insert_row', label: 'Insert row', icon: 'row-insert-top',
-					disabled: !(e.can_add_rows && e.rowset_can_add_rows)},
-				{id: 'delete_rows', label: 'Delete selected rows', icon: 'trash',
-					disabled: !can_remove},
-				{id: 'undelete_rows', label: 'Undelete selected rows',
-					icon: 'trash-off', disabled: !has_removed},
-				null,
-				{id: 'save', label: 'Save changes', icon: 'device-floppy',
-					disabled: !e.rowset_name || !e.modified_n},
-				{id: 'revert_all', label: 'Revert all changes',
-					icon: 'arrow-back-up', disabled: !e.modified_n},
-				null)
-		if (e.can_be_tree)
-			items.push({id: 'flat', label: 'Flat view', icon: 'list',
-				checked: !!e.flat, disabled: e.is_grouped})
-		if (e.can_be_tree || e.is_grouped)
-			items.push(null,
-				{id: 'expand_subtree', icon: 'square-plus',
-					label: ri != null ? 'Expand subtree' : 'Expand all',
-					disabled: !e.is_tree && !e.is_grouped},
-				{id: 'collapse_subtree', icon: 'square-minus-2',
-					label: ri != null ? 'Collapse subtree' : 'Collapse all',
-					disabled: !e.is_tree && !e.is_grouped})
-		let column_items = [] // column visibility menu items
-		for (let field of e.all_fields) {
-			if (field.internal || field.is_group_field)
-				continue
-			let is_group_col = false // column used for grouping
-			if (e.is_grouped)
-				for (let gcol of e.group_cols)
-					if (gcol.field == field) {
-						is_group_col = true
-						break
-					}
-			column_items.push({
-				id: 'col_' + field.name,
-				field: field,
-				label: field.label,
-				checked: field.vfi != null,
-				disabled: is_group_col,
-			})
+
+			if (e.can_be_tree)
+				items.push({id: 'flat', label: 'Flat view', icon: 'list',
+					checked: !!e.flat, disabled: e.is_grouped})
+			if (e.can_be_tree || e.is_grouped)
+				items.push(
+					{id: 'expand_subtree', icon: 'square-plus',
+						label: ri != null ? 'Expand subtree' : 'Expand all',
+						disabled: !e.is_tree && !e.is_grouped},
+					{id: 'collapse_subtree', icon: 'square-minus-2',
+						label: ri != null ? 'Collapse subtree' : 'Collapse all',
+						disabled: !e.is_tree && !e.is_grouped},
+					null)
+
+			if (!e.is_picker)
+				items.push(
+					{id: 'insert_row', label: 'Insert row', icon: 'row-insert-top',
+						disabled: !(e.can_add_rows && e.rowset_can_add_rows)},
+					{id: 'delete_rows', label: 'Delete selected rows',
+						icon: 'trash', disabled: !can_remove},
+					{id: 'undelete_rows', label: 'Undelete selected rows',
+						icon: 'trash-off', disabled: !has_removed},
+					null,
+					{id: 'save', label: 'Save changes', icon: 'device-floppy',
+						disabled: !e.rowset_name || !e.modified_n},
+					{id: 'revert_all', label: 'Revert all changes',
+						icon: 'arrow-back-up', disabled: !e.modified_n},
+					null)
+
+			let action_items = [] // the rowset's custom action menu items
+			for (let action of e.actions)
+				action_items.push({id: 'action_' + action.name,
+					action: action, label: action.label})
+			if (action_items.length)
+				items.push({id: 'actions', label: 'Actions', items: action_items,
+					disabled: e.has_pending_request()}, null)
 		}
-		let action_items = [] // the rowset's custom action menu items
-		for (let action of e.actions)
-			action_items.push({id: 'action_' + action.name,
-				action: action, label: action.label})
-		items.push(null,
-			{id: 'columns', label: 'Show/Hide columns', items: column_items})
-		if (action_items.length)
-			items.push({id: 'actions', label: 'Actions', items: action_items,
-				disabled: e.has_pending_request()})
+
 		items.push(
-			null,
 			{id: 'help', label: 'Keyboard help', icon: 'help'})
+
 		menu_items = items
 	}
 
@@ -627,11 +650,13 @@ function init(id, e) {
 				e.focus_cell(ri, field.fi)
 		}
 		want_menu = rightclick_cell || ui.rightclicked(id+'.header')
+			&& e.visible_fields[hit_vfi] != null
 		if (hit_zone == 'gcol' && ui.rightclicked(id+'.gcol.'+hit_gcol))
 			want_menu = true
 		if (want_menu) {
 			menu_field = rightclick_cell ? null : hit_zone == 'gcol'
-				? e.all_fields_map[hit_gcol] : e.visible_fields[hit_vfi] ?? null
+				? e.all_fields_map[hit_gcol] : e.visible_fields[hit_vfi]
+			is_menu_gcol = hit_zone == 'gcol'
 			update_menu_items()
 		}
 	}
@@ -1585,9 +1610,7 @@ function init(id, e) {
 	// param that no binding fills, and a reload button that applies the
 	// values typed in the inputs.
 	function build_param_bar(has_inputs, has_master_toggles) {
-		ui.p(ui.sp2(), ui.sp05())
-		ui.h(0, sp1, 's', 'c')
-			ui.bb('bg0', null, 'b', 'intense')
+		ui.begin_master_toggle_bar(false)
 			if (has_master_toggles)
 				build_master_toggles()
 			let has_invalid = false // a param input holds an invalid value
@@ -1610,7 +1633,7 @@ function init(id, e) {
 				if (ui.button(id+'.param_reload', 'reload', null, null,
 						null, null, null, has_invalid))
 					e.set_param_bar_vals(param_bar_vals)
-		ui.end_h()
+		ui.end_master_toggle_bar(false)
 	}
 
 	/// cells -----------------------------------------------------------------
@@ -2199,6 +2222,11 @@ function init(id, e) {
 
 		update_group_bar()
 
+		if (hit_zone == 'gcol' && !ps.dragging) {
+			let field = e.all_fields_map[hit_gcol]
+			ui.set_tooltip(field.info ?? field.label)
+		}
+
 		if (drag_op == 'col_group')
 			ui.set_cursor('grabbing')
 		else if (drag_op == 'col_move')
@@ -2728,12 +2756,9 @@ function init(id, e) {
 		let grid_i = ui.stack(id, fr, align, valign)
 		let has_master_toggles = ui.has_master_toggles(e)
 		if (ui.in_dock_tab() && has_master_toggles) {
-			ui.open_tab_strip()
-			ui.pr(sp1)
-			ui.h(0, sp1, 'r', 'c')
+			ui.begin_master_toggle_bar(true)
 				build_master_toggles()
-			ui.end_h()
-			ui.close_tab_strip()
+			ui.end_master_toggle_bar(true)
 		}
 		ui.v(1, 0, 's', 's')
 

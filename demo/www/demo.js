@@ -178,7 +178,6 @@ function app_dock_empty_tab(tab) {
 	let s = ui.state(tab_id+'.rowsets')
 	if (!s.free) {
 		s.items = [] // [{id, label, items: [{id, label, icon}]}]
-		s.menu_items = {} // {rowset_name -> {id, label, icon}}
 		s.load_error = null // rowset listing error text or null
 		s.request = null // rowset listing request or null
 		ui.on_free(tab_id+'.rowsets', function(s) {
@@ -190,7 +189,6 @@ function app_dock_empty_tab(tab) {
 			for (let [name, label, category, icon] of rowsets.rows) {
 				let item = {id: name, label, icon}
 				attr(category_items, category, array).push(item)
-				s.menu_items[name] = item
 			}
 			for (let name in ui.rowsets) {
 				let rowset = ui.rowsets[name]
@@ -198,7 +196,6 @@ function app_dock_empty_tab(tab) {
 					let item = {id: name, label: rowset.label ?? name,
 						icon: rowset.icon}
 					attr(category_items, rowset.category ?? 'Other', array).push(item)
-					s.menu_items[name] = item
 				}
 			}
 			s.items = []
@@ -231,15 +228,6 @@ function app_dock_empty_tab(tab) {
 				if (closed_container_id)
 					ui.restore_dock_container('app_dock', tab.id, closed_container_id)
 
-				let rowset_name = menu_button(tab_id+'.rowsets_button',
-					'database', 'Rowsets', s.items, null, null, null, null,
-					!!s.request || !!s.load_error)
-				if (rowset_name)
-					set_dock_tab('app_dock', tab.id, {
-						kind: 'rowset', title: s.menu_items[rowset_name].label,
-						icon: s.menu_items[rowset_name].icon ?? 'database',
-						args: {rowset_name: rowset_name},
-					})
 				if (s.load_error) text('', s.load_error, 0)
 
 			ui.end_h()
@@ -249,30 +237,45 @@ function app_dock_empty_tab(tab) {
 				let view = ui.views[name]
 				attr(categories, view.category, array).push(name)
 			}
+			for (let category of s.items)
+				for (let item of category.items)
+					attr(categories, category.label, array).push(item)
 
 			let k = 1
-			for (let [category, names] of categories) {
+			for (let [category, choices] of categories) {
 				ui.bold()
 				ui.mt(ui.sp2())
 				ui.large()
 				ui.color('link')
 				ui.text('', category, 0)
 				v(0, sp2())
-					for (let i = 0; i < names.length; i++) {
+					for (let i = 0; i < choices.length; i++) {
 						if (i % 6 == 0)
 							ui.h(0, ui.sp1(), 'l', 't')
-						let name = names[i]
-						let view = ui.views[name]
+						let choice = choices[i]
+						let is_rowset = !isstr(choice)
+						let name = is_rowset ? choice.id : choice
+						let view = is_rowset ? choice : ui.views[name]
+						let icon = is_rowset ? view.icon ?? 'database' : view.icon
+						let button_id = tab_id+'.'
+							+ (is_rowset ? 'rowset.' : '')+name+'_button'
 						ui.min_w(ui.em(3))
 						v(0, ui.sp(), 'c', 't')
-							if (button(tab_id+'.'+name+'_button',
-									view.icon, null, 0, 'c'))
-								set_dock_tab('app_dock', tab.id, {
-									kind: name, title: view.label, icon: view.icon,
-								})
+							if (button(button_id, icon, null, 0, 'c')) {
+								if (is_rowset) {
+									set_dock_tab('app_dock', tab.id, {
+										kind: 'rowset', title: view.label, icon: icon,
+										args: {rowset_name: name},
+									})
+								} else {
+									set_dock_tab('app_dock', tab.id, {
+										kind: name, title: view.label, icon: icon,
+									})
+								}
+							}
 							ui.text_wrapped('view.'+k++, view.label.trim(), 0, 'c', 't')//, ui.em(3))
 						end_v()
-						if (i % 6 == 5 || i == names.length - 1)
+						if (i % 6 == 5 || i == choices.length - 1)
 							ui.end_h()
 					}
 				end_v()
