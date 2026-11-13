@@ -1,3 +1,12 @@
+
+// TODO: draw() is not streamable. it reads state that is not on remote:
+// - sg.x0, sg.y0 (transform, draw_grids): send in draw_state.
+// - sg.show_grid, sg.show_dims: send in draw_state.
+// - cycle c.edges, c.outer, c.islands, c.center(), c.edges.area(): props and
+//   methods are lost in json. send plain geometry.
+// - ui.captured(), ui.hovers() (hit_* values): send plain fields.
+// - ui.set_cursor(): derive on the sharing machine.
+
 (function () {
 "use strict"
 const G = window
@@ -33,6 +42,7 @@ function seg_center(seg) {
 function scaler(name) {
 	let s = {}
 	s.show_grid = ui.saved_state.floor_editor?.show_grid
+	s.show_dims = ui.saved_state.floor_editor?.show_dims
 	let line_width = 2 // thickness of wall line stroke in pixels at 1:1 scale
 	let scale, margin
 	s.d = d => round(d * scale)
@@ -86,6 +96,7 @@ function scaler(name) {
 			s.x0 = -s.x(x1) + margin + round((w - s.d(x2 - x1)) / 2)
 			s.y0 = -s.y(y1) + margin + round((h - s.d(y2 - y1)) / 2)
 		}
+		return true
 	}
 	s.set_scale = function(sc) {
 		if (s.zoomed) return
@@ -140,8 +151,20 @@ function draw_grid(cx, sg, x0, y0, w, h, step, dark_color, light_color) {
 	return true
 }
 
-function draw_grids(cx, sg, x0, y0, w, h) {
-	// fixed grid
+function draw_grids(cx, sg, w, h) {
+	let x0 = sg.x0
+	let y0 = sg.y0
+	if (sg.rotation) {
+		let xc = round(w / 2)
+		let yc = round(h / 2)
+		let c = cos(sg.rotation)
+		let s = sin(sg.rotation)
+		let dx = x0 - xc
+		let dy = y0 - yc
+		x0 = xc + dx * c - dy * s
+		y0 = yc + dx * s + dy * c
+	}
+	// grid
 	cx.save()
 	cx.translate(.5, .5)
 	// TODO: make this dynamic; show at most 3-levels based on zoom level
@@ -252,7 +275,7 @@ function draw_length(cx, sg, x1, y1, x2, y2) {
 	cx.save()
 
 	cx.font = 'bold 14px sans-serif'
-	let m = ui.measure_text('0.00m')
+	let m = ui.measure_text(s)
 	let w = m.width
 
 	let t1 = clamp((sg.d(d) - (w + 10)) / 2 / sg.d(d), 0, 1)
@@ -302,6 +325,7 @@ function draw_length(cx, sg, x1, y1, x2, y2) {
 	let ty = round((m.fontBoundingBoxAscent - m.fontBoundingBoxDescent) / 2)
 	cx.translate(tx, ty)
 	cx.fillStyle = ui.color_css('text')
+	cx.textAlign = 'left'
 	cx.fillText(s, 0, 0)
 
 	cx.restore()
@@ -472,6 +496,7 @@ ui.box_widget('floor_editor', {
 				? house_plan(json_arg(value)) : null
 			s.floor = s.house?.floors[0]
 			s.value_edit_no = 0 // house.edit_no of the value loaded or published
+			scale_group('editor').rotation = s.house?.rotation ?? 0
 		}
 		s.readonly = readonly ?? field.readonly
 		if (!s.house) {
@@ -513,42 +538,54 @@ ui.box_widget('floor_editor', {
 						}
 					ui.end_v()
 
-					if (!ui.window_focused()) {
-						ui.p(ui.sp05(), 0)
-						ui.stack('', 0, '[')
-							ui.nobold()
-							ui.xlarge()
-							ui.color('text')
-							ui.icon('', 'keyboard-off', 0, 'c', 'c')
-						ui.end_stack()
-					}
-
-					ui.v(1); ui.end()
+					ui.v(1)
+						if (!ui.window_focused() || !ui.focus_inside(id)) {
+							ui.p(ui.sp05(), 0)
+							ui.stack('', 0, 'c')
+								ui.nobold()
+								ui.xlarge()
+								ui.color('text')
+								ui.icon('', 'keyboard-off', 0, 'c', 'c')
+							ui.end_stack()
+						}
+					ui.end_v()
 
 					if (sg.zoomed) {
-						if (ui.button(id+'.zoom_button', sg.scale > 1 ? 'zoom-in' : 'zoom-out', '', 0, ']')) {
+						if (ui.button(id+'.zoom_button',
+								sg.scale > 1 ? 'zoom-in' : 'zoom-out', '', 0, ']',
+								null, null, null, S('fit_to_view', 'Fit to view'))) {
 							sg.reset_zoom()
-							ui.animate()
 						}
 					}
 
-					if (ui.button(id+'.rotate_button', 'rotate-clockwise', '', 0)) {
-						sg.rotation = ((sg.rotation ?? 0) + 90*rad) % (360*rad)
-						ui.animate()
+					if (ui.button(id+'.rotate_button', 'rotate-rectangle', '', 0,
+							null, null, null, null,
+							S('rotate_90_degrees', 'Rotate 90 degrees'))) {
+						sg.rotate_requested = true
 					}
 
-					if (ui.button(id+'.grid_button', 'grid-dots', '', 0)) {
+					if (ui.button(id+'.grid_button', 'grid-4x4', '', 0,
+							null, null, null, null,
+							S('show_grid', 'Show grid'))) {
 						sg.show_grid = !sg.show_grid
 						ui.save_state('floor_editor', 'show_grid', sg.show_grid)
-						ui.animate()
+					}
+
+					if (ui.button(id+'.dims_button', 'ruler-measure', '', 0,
+							null, null, null, null,
+							S('show_all_dimensions', 'Show all dimensions'))) {
+						sg.show_dims = !sg.show_dims
+						ui.save_state('floor_editor', 'show_dims', sg.show_dims)
 					}
 
 				ui.end_h()
 
-				ui.v(0, ui.sp(), ']')
+				ui.v(1, ui.sp(), ']')
 
-					ui.button(id+'.c1', 'pointer', '', 0)
-					ui.button(id+'.c2', 'arrows-move', '', 0)
+					ui.v(0, ui.sp(), 'c', 'c')
+						ui.button(id+'.c1', 'pointer', '', 0)
+						ui.button(id+'.c2', 'arrows-move', '', 0)
+					ui.end_v()
 
 				ui.end_v()
 
@@ -570,7 +607,29 @@ ui.box_widget('floor_editor', {
 		let w  = a[i+2]
 		let h  = a[i+3]
 		let plan = a[i+FLOOR_EDITOR_PLAN]
-		sg.scale_to_fit(plan.house.bb, w, h)
+		let is_fitted = sg.scale_to_fit(plan.house.bb, w, h)
+		// first fit: lock the view, like a manual zoom.
+		if (is_fitted && !sg.has_fitted) {
+			sg.has_fitted = true
+			sg.zoomed = true
+		}
+		if (sg.rotate_requested) {
+			sg.rotate_requested = false
+			let bb = plan.house.bb
+			let xc = sg.x((bb[0] + bb[2]) / 2)
+			let yc = sg.y((bb[1] + bb[3]) / 2)
+			let vx = round(w / 2)
+			let vy = round(h / 2)
+			let dx = xc + sg.x0 - vx
+			let dy = yc + sg.y0 - vy
+			sg.x0 = vx + dy - xc
+			sg.y0 = vy - dx - yc
+			sg.rotation = ((sg.rotation ?? 0) + 90*rad) % (360*rad)
+			if (!a[i+FLOOR_EDITOR_DRAW_STATE].readonly) {
+				plan.house.rotation = sg.rotation
+				plan.house.edit_no++
+			}
+		}
 	},
 
 	translate: function(a, i, dx, dy) {
@@ -615,8 +674,6 @@ ui.box_widget('floor_editor', {
 		let id    = a[i+FLOOR_EDITOR_ID]
 
 		let draw_state = a[i+FLOOR_EDITOR_DRAW_STATE]
-		let x0 = draw_state.x0
-		let y0 = draw_state.y0
 
 		let cs = ui.captured(id)
 		let hs = cs ?? ui.hovers(id) // while dragging, the state at drag start.
@@ -643,8 +700,10 @@ ui.box_widget('floor_editor', {
 		cx.translate(x00, y00)
 		cx.font = 'bold 14px sans-serif'
 
-		// fixed grid
-		draw_grids(cx, sg, x0, y0, w, h)
+		// grid
+		draw_grids(cx, sg, w, h)
+
+		cx.textAlign = 'left'
 
 		// legend
 		{
@@ -754,6 +813,7 @@ ui.box_widget('floor_editor', {
 					cx.translate(x, y)
 					if (sg.rotation)
 						cx.rotate(-sg.rotation)
+					cx.textAlign = 'center'
 					cx.fillText(s, 0, 5)
 					cx.restore()
 				}
@@ -761,7 +821,7 @@ ui.box_widget('floor_editor', {
 
 		// edge measurements
 		let me = draw_state.measure_edges
-		if (me) {
+		if (me && !sg.show_dims) {
 			for (let [ep1, ep2] of me) {
 				let x1 = ep1[0]
 				let y1 = ep1[1]
@@ -769,6 +829,24 @@ ui.box_widget('floor_editor', {
 				let y2 = ep2[1]
 				;[x1, y1, x2, y2] = line2.offset(-10, x1, y1, x2, y2, [])
 				draw_length(cx, sg, x1, y1, x2, y2)
+			}
+		}
+
+		// show all dimensions: interior (room cycles) and exterior (outer cycles),
+		// shown always while the mode is on, drags included.
+		if (sg.show_dims) {
+			for (let co of draw_state.comps) {
+				for (let c of co.cycles) {
+					if (!c.edges)
+						continue
+					for (let ei = 0, n = c.edges.length; ei < n; ei++) {
+						let ep1 = c.edges[ei]
+						let ep2 = c.edges[(ei + 1) % n]
+						let [x1, y1, x2, y2] = line2.offset(-10,
+							ep1[0], ep1[1], ep2[0], ep2[1])
+						draw_length(cx, sg, x1, y1, x2, y2)
+					}
+				}
 			}
 		}
 
@@ -847,6 +925,7 @@ ui.box_widget('floor_editor', {
 			let x = sg.x(x0) - 5
 			let y = sg.y(y0) + 5
 			cx.fillStyle = '#f66'
+			cx.textAlign = 'left'
 			cx.fillText(seg.id, x, y)
 		}
 
@@ -857,6 +936,7 @@ ui.box_widget('floor_editor', {
 			let x = sg.x(x0) - 5
 			let y = sg.y(y0) + 5
 			cx.fillStyle = 'white'
+			cx.textAlign = 'left'
 			cx.fillText(p.id, x, y)
 		}
 
@@ -869,6 +949,7 @@ ui.box_widget('floor_editor', {
 					let x = sg.x(ep[0]) - 5
 					let y = sg.y(ep[1]) + 15
 					cx.fillStyle = '#0f0'
+					cx.textAlign = 'left'
 					cx.fillText(c.i+'/'+ep.ci, x, y)
 				}
 			}

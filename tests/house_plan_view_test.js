@@ -43,6 +43,7 @@ cx.fillText = function(text, x, y) {
 
 let ui = {
 	BOX_ARGS, cx,
+	saved_state: {},
 	box_widget(name, def) { widget = def },
 	state(id, update) {
 		if (state.draw_state && update) update(id, state)
@@ -234,6 +235,36 @@ for (let [w, h] of [[400, 300], [800, 600], [1600, 1200]]) {
 			close(after[0] - before[0], 40)
 			close(after[1] - before[1], 20)
 			capture = null
+		})
+	}
+}
+
+// rotation after panning --------------------------------------------------
+
+for (let [w, h] of [[800, 600], [801, 601]]) {
+	record[2] = w
+	record[3] = h
+	frame()
+	capture = {action: 'pan', drag: true, dx: 0, dy: 0}
+	frame()
+	capture.drag = false
+	capture.dx = 73
+	capture.dy = -41
+	frame()
+	capture = null
+	let bb = plan.house.bb
+	let x = (bb[0] + bb[2]) / 2
+	let y = (bb[1] + bb[3]) / 2
+	let before = screen_point(x, y)
+	let scale = state.draw_state.scale
+	for (let turns = 1; turns <= 4; turns++) {
+		check('rotation center after panning in ' + w + 'x' + h
+				+ ', turn ' + turns, () => {
+			frame(true)
+			let after = screen_point(x, y)
+			close(after[0], before[0])
+			close(after[1], before[1])
+			close(state.draw_state.scale, scale)
 		})
 	}
 }

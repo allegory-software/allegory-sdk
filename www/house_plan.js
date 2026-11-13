@@ -25,6 +25,7 @@ let face_axis_sign = i => ((i + 3) & 2) - 1  // 0,1,2,3 -> 1,-1,-1,1
 // house model ---------------------------------------------------------------
 
 let defaults = {
+	rotation: 0,
 	floor_h: 250,
 	int_wall_thickness: 8,
 	ext_wall_thickness: 18,
@@ -60,7 +61,7 @@ function house_plan(t) {
 			state.roofs = copy_roofs(floor.roofs)
 			floors.push(state)
 		}
-		return {floor_h: house.floor_h,
+		return {rotation: house.rotation, floor_h: house.floor_h,
 			int_wall_thickness: house.int_wall_thickness,
 			ext_wall_thickness: house.ext_wall_thickness, floors: floors}
 	}
