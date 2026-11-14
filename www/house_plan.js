@@ -3,7 +3,7 @@
 const G = window
 
 const {
-	round, mod, abs, min, max, clamp, sqrt,
+	round, mod, abs, sign, min, max, clamp, sqrt, tan, rad,
 	assert, log, push_log, pop_log, push_log_if,
 	insert, remove_value, uniq_sorted, map, assign, clock, json,
 } = glue
@@ -43,7 +43,8 @@ function house_plan(t) {
 		for (let edge_point of roof.edge_points ?? [])
 			edge_points.push({x: edge_point.x, y: edge_point.y,
 				pitch: edge_point.pitch})
-		return {pitch: roof.pitch, edge_points: edge_points}
+		return {pitch: roof.pitch, overhang: roof.overhang ?? 60,
+			edge_points: edge_points}
 	}
 
 	function copy_room_points(room_points) {
@@ -240,13 +241,16 @@ function house_plan(t) {
 		// roofs ---------------------------------------------------------------
 
 		// the faces of the roof over the floor's outlines, as returned by
-		// roof_skeleton(). the roof's edges are the outer skin's sides. an
-		// edge point sets the pitch of the nearest side. two or more points
+		// roof_skeleton(). the roof's edges are the sides of its perimeter:
+		// the outer skin's sides moved outward by the overhang. an edge point
+		// sets the pitch of the nearest outer skin side. two or more points
 		// on one side: the roof's pitch, like room points. the faces are the
-		// roof's top, which starts at the floor's top on the outer skin.
+		// roof's top. each sloped side's plane passes through the floor's top
+		// on the outer skin, so its eave is lower by the overhang times the
+		// slope.
 		floor.make_roof_faces = function() {
 			let roof = floor.roof
-			let eave_z = floor.z + floor.h
+			let wall_z = floor.z + floor.h
 
 			// one ring per outline: the outer skin's corners, without the
 			// collinear points of the walls joining it.
@@ -288,15 +292,130 @@ function house_plan(t) {
 					edge_point_by_side.has(min_key) ? null : edge_point)
 			}
 
-			let faces = []
+			// the perimeter, on prism_union()'s grid: the outlines, a strip
+			// `overhang` deep outside each side that moves, and a square at
+			// each outside corner between two sides that move. a sloped side
+			// moves. a gable side moves only with outside corners at both
+			// ends: at an inside corner, its line bounds the faces inside the
+			// house. outlines closer than twice the overhang merge.
+			let scale = prism_union.grid_scale
+			let paths = []
+			let sides = [] // [{nx, ny, c, m1, m2, d, pitch}, ...]
+				// n: outward normal, c: moved line, m1..m2: extent, d: move.
+			// the corner at path[i] of a ccw path is an outside corner.
+			function is_convex(path, i) {
+				let n = path.length
+				let p0 = path[(i+n-1) % n]
+				let p1 = path[i]
+				let p2 = path[(i+1) % n]
+				return (p1.x - p0.x) * (p2.y - p1.y)
+					- (p1.y - p0.y) * (p2.x - p1.x) > 0
+			}
 			for (let ring_i = 0; ring_i < rings.length; ring_i++) {
-				let ring = rings[ring_i]
-				let pitches = []
-				for (let i = 0; i < ring.length; i++) {
-					let edge_point = edge_point_by_side.get(ring_i+' '+i)
-					pitches.push(edge_point?.pitch ?? roof.pitch)
+				let [path] = add_ring_path([], rings[ring_i])
+				paths.push(path)
+				let n = path.length
+				let ring_sides = []
+				for (let i = 0; i < n; i++) {
+					let p = path[i]
+					let q = path[(i+1) % n]
+					let pitch = edge_point_by_side.get(ring_i+' '+i)?.pitch
+						?? roof.pitch
+					let is_moving = pitch != 90
+						|| is_convex(path, i) && is_convex(path, (i+1) % n)
+					let d = is_moving ? round(roof.overhang * scale) : 0
+					let nx = sign(q.y - p.y)
+					let ny = -sign(q.x - p.x)
+					let is_v = p.x == q.x
+					ring_sides.push({
+						nx: nx,
+						ny: ny,
+						c: is_v ? p.x + nx * d : p.y + ny * d,
+						m1: is_v ? min(p.y, q.y) : min(p.x, q.x),
+						m2: is_v ? max(p.y, q.y) : max(p.x, q.x),
+						d: d,
+						pitch: pitch,
+					})
 				}
-				for (let face of roof_skeleton([ring], pitches, eave_z))
+				for (let i = 0; i < n; i++) {
+					let p = path[i]
+					let q = path[(i+1) % n]
+					let {nx, ny, d} = ring_sides[i]
+					if (d) // ccw strip.
+						paths.push([p, {x: p.x + nx * d, y: p.y + ny * d},
+							{x: q.x + nx * d, y: q.y + ny * d}, q])
+					let side0 = ring_sides[(i+n-1) % n]
+					if (d && side0.d && is_convex(path, i)) { // ccw square.
+						let dx0 = side0.nx * side0.d
+						let dy0 = side0.ny * side0.d
+						paths.push([p, {x: p.x + dx0, y: p.y + dy0},
+							{x: p.x + dx0 + nx * d, y: p.y + dy0 + ny * d},
+							{x: p.x + nx * d, y: p.y + ny * d}])
+					}
+				}
+				for (let side of ring_sides)
+					sides.push(side)
+			}
+			let {Clipper64, PolyTree64, ClipType, FillRule} = clipper2
+			let clipper = new Clipper64()
+			clipper.addSubject(paths) // keeps the points where strips end.
+			let tree = new PolyTree64()
+			clipper.execute(ClipType.Union, FillRule.NonZero, tree)
+
+			// the outer skin side that a perimeter side came from: on its moved
+			// line, facing the same way, nearest along the line.
+			function find_side(a, b) {
+				let is_v = a.x == b.x
+				let nx = sign(b.y - a.y)
+				let ny = -sign(b.x - a.x)
+				let c = is_v ? a.x : a.y
+				let m = is_v ? (a.y + b.y) / 2 : (a.x + b.x) / 2
+				let min_d = 1/0
+				let found_side
+				for (let side of sides) {
+					if (side.nx != nx || side.ny != ny || side.c != c)
+						continue
+					let d = max(side.m1 - m, 0, m - side.m2)
+					if (d >= min_d)
+						continue
+					min_d = d
+					found_side = side
+				}
+				return assert(found_side)
+			}
+
+			let faces = []
+			let ring_groups = [] // [[outline, hole, ...], ...] grid paths
+			function add_ring_groups(node) {
+				for (let i = 0; i < node.count; i++) {
+					let outline = node.child(i)
+					let group = [outline.polygon]
+					for (let j = 0; j < outline.count; j++) {
+						let hole = outline.child(j)
+						group.push(hole.polygon)
+						add_ring_groups(hole) // islands
+					}
+					ring_groups.push(group)
+				}
+			}
+			add_ring_groups(tree)
+			for (let group of ring_groups) {
+				let group_rings = []
+				let pitches = []
+				let eave_zs = []
+				for (let path of group) {
+					let ring = []
+					for (let i = 0, n = path.length; i < n; i++) {
+						let p = path[i]
+						let {pitch, d} = find_side(p, path[(i+1) % n])
+						ring.push([p.x / scale, p.y / scale])
+						pitches.push(pitch)
+						eave_zs.push(pitch == 90 ? wall_z
+							: wall_z - d / scale * tan(pitch * rad))
+					}
+					group_rings.push(ring)
+				}
+				for (let face of roof_skeleton(group_rings, pitches, eave_zs))
 					faces.push(face)
 			}
 			return faces

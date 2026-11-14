@@ -1370,14 +1370,23 @@ function roof_z_range(faces) {
 	return [z1, z2]
 }
 
-check('gable roof on the top floor: two faces from the wall top up', () => {
+check('gable roof on the top floor: two faces over the overhang', () => {
 	let h = house(ctx.house_test_plans.gable1)
 	let f = h.floors[2]
 	let faces = f.make_roof_faces()
 	assert.equal(faces.length, 2)
-	// outer skin: y -14..414, 45 deg: the ridge is half the width above.
-	let eave_z = f.z + f.h
-	assert.deepEqual(roof_z_range(faces), [eave_z, eave_z + 214])
+	// outer skin: x -14..614, y -14..414, 45 deg: the ridge is half the
+	// width above the wall top; the eaves are 60 out and 60 lower; the
+	// gables are 60 out too.
+	let wall_z = f.z + f.h
+	assert.deepEqual(roof_z_range(faces), [wall_z - 60, wall_z + 214])
+	let x1 = 1/0, y1 = 1/0, x2 = -1/0, y2 = -1/0
+	for (let face of faces)
+		for (let [x, y] of face.rings[0]) {
+			x1 = Math.min(x1, x); y1 = Math.min(y1, y)
+			x2 = Math.max(x2, x); y2 = Math.max(y2, y)
+		}
+	assert.deepEqual([x1, y1, x2, y2], [-74, -74, 674, 474])
 })
 
 check('two edge points on one side: the roof pitch', () => {

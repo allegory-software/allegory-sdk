@@ -390,7 +390,7 @@ function check_solid(r) {
 }
 
 function set_roof(h, pitch, edge_points) {
-	h.floors[h.floors.length-1].roof = {pitch,
+	h.floors[h.floors.length-1].roof = {pitch, overhang: 60,
 		edge_points: edge_points ?? []}
 }
 
@@ -461,6 +461,20 @@ check('steep 75: the underside cuts below the wall tops', () => {
 	let h = ctx.house_plan(ctx.house_test_plans.gable1)
 	set_roof(h, 75)
 	check_solid(house_report(h))
+})
+
+// a slot cut into the house, its sides gables, its end sloped: the
+// overhang moves the gables into the slot, and with them the sides of the
+// slot end's face inside the house. PRINT=1 prints the house state to paste
+// into the house plan editor.
+check('gables along a slot', () => {
+	let h = ctx.house_plan({floors: [{lines: [
+		['draw', 0, 0, 400, 300, 150, -300, 400, 700, -950, -700],
+	]}]})
+	set_roof(h, 45, [{x: 400, y: 150, pitch: 90}, {x: 550, y: 150, pitch: 90}])
+	check_solid(house_report(h))
+	if (process.env.PRINT)
+		console.log(JSON.stringify(h.save_state()))
 })
 
 check('hip roof over a 6x4 grid of rooms', () => {

@@ -116,7 +116,8 @@ function chessboard_dist(rings, x, y) {
 // sample points may lie in no face and face areas may add up to less than
 // the footprint area. returns sample points + heights.
 function check_roof(rings, pitches, eave_z, is_covered = true) {
-	let faces = roof_skeleton(rings, pitches, eave_z)
+	let faces = roof_skeleton(rings, pitches,
+		Array(pitches.length).fill(eave_z))
 	let edges = input_edges(rings)
 
 	for (let face of faces)
@@ -229,7 +230,8 @@ check('shed rectangle', () => {
 })
 
 check('all vertical: no faces', () => {
-	let faces = roof_skeleton([rect(0, 0, 10, 4)], [90, 90, 90, 90], 0)
+	let faces = roof_skeleton([rect(0, 0, 10, 4)], [90, 90, 90, 90],
+		[0, 0, 0, 0])
 	assert.equal(faces.length, 0)
 })
 
@@ -309,6 +311,96 @@ check('step, tie rule: the faster edge continues', () => {
 	assert.ok(abs_near(face_area(faces, 2), 5))
 	assert.ok(abs_near(face_area(faces, 0), 90))
 	assert.ok(abs_near(max_z(faces), 5))
+})
+
+// eaves at different heights ------------------------------------------------
+
+// the corner at ring[i] of a ccw ring is an outside corner.
+function is_convex(ring, i) {
+	let n = ring.length
+	let [x0, y0] = ring[(i + n - 1) % n]
+	let [x1, y1] = ring[i]
+	let [x2, y2] = ring[(i + 1) % n]
+	return (x1 - x0) * (y2 - y1) - (y1 - y0) * (x2 - x1) > 0
+}
+
+// ring moved outward edge for edge, edge i by ds[i]: every corner moves
+// along both edges' outward normals. the ring is ccw (area > 0).
+function offset_ring(ring, ds) {
+	let ring1 = []
+	for (let i = 0, n = ring.length; i < n; i++) {
+		let [x0, y0] = ring[(i + n - 1) % n]
+		let [x1, y1] = ring[i]
+		let [x2, y2] = ring[(i + 1) % n]
+		let d0 = ds[(i + n - 1) % n]
+		let d1 = ds[i]
+		// outward normal of a ccw edge (dx, dy): (dy, -dx).
+		let nx = d0 * Math.sign(y1 - y0) + d1 * Math.sign(y2 - y1)
+		let ny = -d0 * Math.sign(x1 - x0) - d1 * Math.sign(x2 - x1)
+		ring1.push([x1 + nx, y1 + ny])
+	}
+	return ring1
+}
+
+// wall_ring moved outward by d as in house_plan's make_roof_faces(): sloped
+// edges move, vertical edges move only with outside corners at both ends.
+// each sloped edge's eave is lowered by d*tan(pitch), so its plane passes
+// through z = 0 at the wall line: inside the wall ring, the roof must be the
+// wall ring's roof.
+function check_overhang(wall_ring, pitches, d, is_covered = true) {
+	let n = wall_ring.length
+	let ds = []
+	let eave_zs = []
+	for (let i = 0; i < n; i++) {
+		let pitch = pitches[i]
+		let is_moving = pitch != 90
+			|| is_convex(wall_ring, i) && is_convex(wall_ring, (i + 1) % n)
+		ds.push(is_moving ? d : 0)
+		eave_zs.push(pitch == 90 ? 0 : -d * Math.tan(pitch * rad))
+	}
+	let ring = offset_ring(wall_ring, ds)
+	let faces = roof_skeleton([ring], pitches, eave_zs)
+	let wall_edges = input_edges([wall_ring])
+
+	for (let face of faces)
+		for (let face_ring of face.rings)
+			for (let [x, y, z] of face_ring)
+				for (let ei of face.edge_is)
+					assert.ok(abs_near(z, plane_z(wall_edges[ei], pitches[ei], 0,
+						x, y)), 'face point '+x+','+y+','+z+' off its plane')
+
+	let faces_area = 0
+	for (let face of faces)
+		for (let face_ring of face.rings)
+			faces_area += ring_area(face_ring)
+	assert.ok(is_covered ? abs_near(faces_area, ring_area(ring))
+		: faces_area <= ring_area(ring) + 1e-6,
+		'faces area '+faces_area+' != footprint area '+ring_area(ring))
+
+	// roof_z() finds each point's face, then its plane from the wall edge.
+	let {samples} = check_roof([wall_ring], pitches, 0, is_covered)
+	for (let [x, y, z] of samples) {
+		let z1 = roof_z([wall_ring], pitches, 0, faces, x, y, is_covered)
+		assert.ok(z == null ? z1 == null : z1 != null && abs_near(z, z1),
+			'z '+z1+' != '+z+' at '+x+','+y)
+	}
+	return faces
+}
+
+check('overhang: hip rectangle, 45 long sides, 30 short sides', () => {
+	check_overhang(rect(0, 0, 10, 4), [45, 30, 45, 30], 1)
+})
+
+check('overhang: L with a gable end and mixed pitches', () => {
+	let wall_ring = [[0, 0], [6, 0], [6, 4], [3, 4], [3, 7], [0, 7]]
+	check_overhang(wall_ring, [90, 45, 30, 45, 45, 45], .5)
+})
+
+check('overhang: a gable at an inside corner stays on the wall line', () => {
+	// a slot 1 wide, 3 deep, gables on its sides, its end sloped.
+	let wall_ring = [[0, 0], [4, 0], [4, 3], [5, 3], [5, 0], [9, 0], [9, 7],
+		[0, 7]]
+	check_overhang(wall_ring, [45, 90, 45, 90, 45, 45, 45, 45], .3)
 })
 
 // random shapes -------------------------------------------------------------
@@ -428,6 +520,25 @@ check('random column shapes, random pitches with vertical edges', () => {
 	}
 })
 
+check('random column shapes, overhang with random pitches', () => {
+	let pitch_choices = [30, 45, 60, 90, Math.atan(0.5) / rad]
+	for (let i = 0; i < 1000; i++) {
+		let wall_ring = random_columns_ring()
+		if (i & 1)
+			wall_ring = swap_xy(wall_ring)
+		let pitches = wall_ring.map(() => pitch_choices[random_int(0, 4)])
+		if (!pitches.some(p => p != 90))
+			pitches[0] = 45
+		try {
+			check_overhang(wall_ring, pitches, .2, false)
+		} catch (e) {
+			console.error('ring', JSON.stringify(wall_ring),
+				'pitches', JSON.stringify(pitches))
+			throw e
+		}
+	}
+})
+
 check('random holes, equal pitch vs chessboard distance', () => {
 	for (let i = 0; i < 200; i++) {
 		let w = random_int(8, 20)
@@ -456,7 +567,8 @@ check('random column shapes, no holes: no face has a hole', () => {
 		let pitches = ring.map(() => pitch_choices[random_int(0, 4)])
 		if (!pitches.some(p => p != 90))
 			pitches[0] = 45
-		for (let face of roof_skeleton([ring], pitches, 0))
+		let eave_zs = Array(pitches.length).fill(0)
+		for (let face of roof_skeleton([ring], pitches, eave_zs))
 			for (let face_ring of face.rings)
 				if (ring_area(face_ring) <= 0) {
 					console.error('ring', JSON.stringify(ring),

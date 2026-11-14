@@ -3,17 +3,20 @@
 	Weighted straight skeleton of axis-aligned polygons, for roofs.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	roof_skeleton(rings, pitches, eave_z) -> faces
+	roof_skeleton(rings, pitches, eave_zs) -> faces
 		rings    [[[x, y], ...], ...]  outer ring (area > 0), holes (area < 0)
 		pitches  [deg, ...]            per edge, edges of all rings in order
+		eave_zs  [z, ...]              per edge: the height of its eave
 		faces    [{edge_is: [i, ...], rings: [[[x, y, z], ...], ...],
 		           plane: [a, b, c]}, ...]
 
 	Edges with pitch 90 are vertical (gable ends, edges against a wall) and
-	get no face. Edges in the same plane share one face. Of collinear
-	neighbor edges, only the shallowest gets a face. Regions closed in by
-	vertical edges get no face. Face rings are ccw outlines (area > 0) and
-	cw holes (area < 0). A face's plane is z = a*x + b*y + c.
+	get no face. A sloped edge with its eave above the lowest eave stays
+	vertical up to its eave, then slopes. Edges in the same plane share one
+	face. Of collinear neighbor edges, only the shallowest gets a face.
+	Regions closed in by vertical edges get no face. Face rings are ccw
+	outlines (area > 0) and cw holes (area < 0). A face's plane is
+	z = a*x + b*y + c.
 
 */
 
@@ -26,13 +29,14 @@ const {inf, abs, min, max, tan, rad, atan2, assert} = glue
 let NEAR = 1e-5 // distance and time tolerance
 
 // The code moves every edge inward at its own speed, time being the height
-// above the eaves. All moving edges stay axis-aligned and every corner joins
-// two perpendicular edges, so there are only two events:
+// above the lowest eave. All moving edges stay axis-aligned and every corner
+// joins two perpendicular edges, so there are only three events:
 //  - two parallel edges facing each other meet: the overlap becomes a ridge
 //    and the rest of the edges reconnect.
 //  - the edge between two parallel edges facing the same way shrinks to
 //    zero: the edges become collinear and the faster one (lower roof)
 //    continues over both.
+//  - an edge with a higher eave reaches its eave and starts moving.
 // Each moving edge is a piece of a plane. Each corner traces an arc between
 // the faces of its two pieces; the code adds the arcs and ridges to the faces
 // as half-edges with the face on their left, and walks them into rings.
@@ -40,7 +44,7 @@ let NEAR = 1e-5 // distance and time tolerance
 // planes and pieces ---------------------------------------------------------
 
 function line_at(plane, t) {
-	return plane.c + plane.n * plane.s * t
+	return plane.c + plane.n * plane.s * (t - plane.t0)
 }
 
 // direction of the piece's edge along its axis: +1 or -1.
@@ -62,10 +66,13 @@ function tail_is_reflex(piece) {
 	return piece.prev.plane.n == -piece_dir(piece)
 }
 
-function roof_skeleton(rings, pitches, eave_z) {
+function roof_skeleton(rings, pitches, eave_zs) {
 
-	let planes = [] // [{is_v, c, n, s, edge_is, half_edges}, ...]
-	let pieces = [] // [{plane, prev, next, n1, is_dead}, ...]
+	let planes = [] // [{is_v, c, n, s, t0, edge_is, half_edges}, ...]
+		// t0: the time the plane starts moving.
+	let pieces = [] // [{plane, start_plane, prev, next, n1, is_dead}, ...]
+		// start_plane: the sloped plane that replaces the vertical one at
+		// its t0.
 	let nodes_now = [] // [{x, y, t}, ...] created at the current time
 
 	// nodes ---------------------------------------------------------------
@@ -126,9 +133,10 @@ function roof_skeleton(rings, pitches, eave_z) {
 			joins.push(p, q, node)
 	}
 
-	function add_piece(plane, prev, next, n1, next_n1) {
-		let piece = {plane: plane, prev: null, next: null, n1: null,
-			is_dead: false}
+	// add a part of piece0.
+	function add_piece(piece0, prev, next, n1, next_n1) {
+		let piece = {plane: piece0.plane, start_plane: piece0.start_plane,
+			prev: null, next: null, n1: null, is_dead: false}
 		link(prev, piece, n1)
 		link(piece, next, next_n1)
 		pieces.push(piece)
@@ -238,10 +246,10 @@ function roof_skeleton(rings, pitches, eave_z) {
 		// low end
 		if (a1 < c1 - NEAR) { // a keeps its tail part.
 			end_arc(c, nc, n1)
-			add_piece(a.plane, pa, nc, a.n1, n1)
+			add_piece(a, pa, nc, a.n1, n1)
 		} else if (c1 < a1 - NEAR) { // c keeps its head part.
 			end_arc(pa, a, n1)
-			add_piece(c.plane, pa, nc, n1, nc.n1)
+			add_piece(c, pa, nc, n1, nc.n1)
 		} else {
 			end_arc(pa, a, n1)
 			end_arc(c, nc, n1)
@@ -251,10 +259,10 @@ function roof_skeleton(rings, pitches, eave_z) {
 		// high end
 		if (a2 > c2 + NEAR) { // a keeps its head part.
 			end_arc(pc, c, n2)
-			add_piece(a.plane, pc, na, n2, na.n1)
+			add_piece(a, pc, na, n2, na.n1)
 		} else if (c2 > a2 + NEAR) { // c keeps its tail part.
 			end_arc(a, na, n2)
-			add_piece(c.plane, pc, na, c.n1, n2)
+			add_piece(c, pc, na, c.n1, n2)
 		} else {
 			end_arc(pc, c, n2)
 			end_arc(a, na, n2)
@@ -277,9 +285,34 @@ function roof_skeleton(rings, pitches, eave_z) {
 		run_joins(t)
 	}
 
+	// the vertical piece e reaches its eave at time t and starts sloping.
+	function start(e, t) {
+		let tail = tail_node(e, t)
+		let head = head_node(e, t)
+		end_arc(e.prev, e, tail)
+		end_arc(e, e.next, head)
+		e.plane = e.start_plane
+		e.start_plane = null
+		e.n1 = tail
+		e.next.n1 = head
+		if (tail != head) // the eave line.
+			e.plane.half_edges.push(tail, head)
+	}
+
 	// events --------------------------------------------------------------
 
 	let ev_t, ev_a, ev_c // next event: collide(ev_a, ev_c) or collapse(ev_a)
+	let ev_is_start // or start(ev_a)
+
+	function find_start(e) {
+		let plane = e.start_plane
+		if (!plane || plane.t0 >= ev_t)
+			return
+		ev_t = plane.t0
+		ev_a = e
+		ev_c = null
+		ev_is_start = true
+	}
 
 	function find_collapse(e, t0) {
 		let p = e.prev.plane
@@ -297,6 +330,7 @@ function roof_skeleton(rings, pitches, eave_z) {
 		ev_t = t
 		ev_a = e
 		ev_c = null
+		ev_is_start = false
 	}
 
 	function find_collision(a, c, t0) {
@@ -336,15 +370,36 @@ function roof_skeleton(rings, pitches, eave_z) {
 		ev_t = t
 		ev_a = a
 		ev_c = c
+		ev_is_start = false
 	}
 
 	// input ---------------------------------------------------------------
 
-	let plane_by_key = new Map() // {'is_v c n pitch' -> plane}
+	// time 0 is the lowest eave of the sloped edges.
+	let eave_z = inf
+	for (let i = 0; i < pitches.length; i++)
+		if (pitches[i] != 90)
+			eave_z = min(eave_z, eave_zs[i])
+
+	let plane_by_key = new Map() // {'is_v c n pitch t0' -> plane}
+	function get_plane(is_v, c, nrm, pitch, t0) {
+		let key = is_v + ' ' + c + ' ' + nrm + ' ' + pitch + ' ' + t0
+		let plane = plane_by_key.get(key)
+		if (!plane) {
+			let s = pitch == 90 ? 0 : 1 / tan(pitch * rad)
+			plane = {is_v: is_v, c: c, n: nrm, s: s, t0: t0, edge_is: [],
+				half_edges: []}
+			plane_by_key.set(key, plane)
+			planes.push(plane)
+		}
+		return plane
+	}
+
 	let edge_i = 0 // index in pitches
 	for (let ring of rings) {
 		let n = ring.length
 		let ring_planes = [] // [plane, ...] per edge
+		let start_planes = [] // [plane|null, ...] per edge
 		for (let i = 0; i < n; i++) {
 			let [x1, y1] = ring[i]
 			let [x2, y2] = ring[(i + 1) % n]
@@ -352,17 +407,17 @@ function roof_skeleton(rings, pitches, eave_z) {
 			let c = is_v ? x1 : y1
 			let nrm = is_v ? (y2 > y1 ? -1 : 1) : (x2 > x1 ? 1 : -1)
 			let pitch = pitches[edge_i]
-			let key = is_v + ' ' + c + ' ' + nrm + ' ' + pitch
-			let plane = plane_by_key.get(key)
-			if (!plane) {
-				let s = pitch == 90 ? 0 : 1 / tan(pitch * rad)
-				plane = {is_v: is_v, c: c, n: nrm, s: s, edge_is: [],
-					half_edges: []}
-				plane_by_key.set(key, plane)
-				planes.push(plane)
-			}
+			let t0 = pitch == 90 ? 0 : eave_zs[edge_i] - eave_z
+			let plane = get_plane(is_v, c, nrm, pitch, t0)
 			plane.edge_is.push(edge_i)
-			ring_planes.push(plane)
+			// eave above time 0: vertical up to it.
+			if (t0 > 0) {
+				ring_planes.push(get_plane(is_v, c, nrm, 90, 0))
+				start_planes.push(plane)
+			} else {
+				ring_planes.push(plane)
+				start_planes.push(null)
+			}
 			edge_i++
 		}
 
@@ -376,11 +431,14 @@ function roof_skeleton(rings, pitches, eave_z) {
 		let i = 0
 		while (i < n) {
 			let plane = ring_planes[(i0 + i) % n]
+			let start_plane = start_planes[(i0 + i) % n]
 			let j = i + 1
 			while (j < n && ring_planes[(i0 + j) % n].is_v == plane.is_v) {
 				let plane1 = ring_planes[(i0 + j) % n]
-				if (plane1.s > plane.s)
+				if (plane1.s > plane.s) {
 					plane = plane1
+					start_plane = start_planes[(i0 + j) % n]
+				}
 				j++
 			}
 			for (let k = i; k < j; k++) {
@@ -389,8 +447,9 @@ function roof_skeleton(rings, pitches, eave_z) {
 				plane.half_edges.push(node_at(x1, y1, 0), node_at(x2, y2, 0))
 			}
 			let [x, y] = ring[(i0 + i) % n]
-			let piece = {plane: plane, prev: prev_piece, next: null,
-				n1: node_at(x, y, 0), is_dead: false}
+			let piece = {plane: plane, start_plane: start_plane,
+				prev: prev_piece, next: null, n1: node_at(x, y, 0),
+				is_dead: false}
 			pieces.push(piece)
 			if (prev_piece)
 				prev_piece.next = piece
@@ -405,7 +464,7 @@ function roof_skeleton(rings, pitches, eave_z) {
 
 	// moving edges --------------------------------------------------------
 
-	let t = 0 // current time: height above the eaves
+	let t = 0 // current time: height above the lowest eave
 	while (1) {
 		let live_pieces = []
 		for (let piece of pieces)
@@ -416,6 +475,7 @@ function roof_skeleton(rings, pitches, eave_z) {
 		ev_t = inf
 		for (let i = 0; i < pieces.length; i++) {
 			let a = pieces[i]
+			find_start(a)
 			find_collapse(a, t)
 			for (let j = i + 1; j < pieces.length; j++)
 				find_collision(a, pieces[j], t)
@@ -426,7 +486,9 @@ function roof_skeleton(rings, pitches, eave_z) {
 		if (ev_t > t + NEAR)
 			nodes_now.length = 0
 		t = max(t, ev_t)
-		if (ev_c)
+		if (ev_is_start)
+			start(ev_a, ev_t)
+		else if (ev_c)
 			collide(ev_a, ev_c, ev_t)
 		else
 			collapse(ev_a, ev_t)
@@ -488,13 +550,13 @@ function roof_skeleton(rings, pitches, eave_z) {
 				face_rings.push(ring)
 		}
 		if (face_rings.length) {
-			// the edge is at m = c + n*s*t at height t above the eaves,
-			// m = x or y.
+			// the edge is at m = c + n*s*(t - t0) at height t above the
+			// lowest eave, m = x or y.
 			let dz = plane.n / plane.s // dz per unit of m
 			let a = plane.is_v ? dz : 0
 			let b = plane.is_v ? 0 : dz
 			faces.push({edge_is: plane.edge_is, rings: face_rings,
-				plane: [a, b, eave_z - dz * plane.c]})
+				plane: [a, b, eave_z + plane.t0 - dz * plane.c]})
 		}
 	}
 	return faces
