@@ -4,7 +4,7 @@ const G = window
 
 const {
 	assert, push_log, pop_log,
-	empty_obj,
+	empty_obj, map,
 } = glue
 
 const {v3, mat4, line2, line3} = Math3D
@@ -56,87 +56,41 @@ function init_house_model_editor(e, house, cut_floor) {
 	}
 	}
 
-	function create_plan(wall_polys, horizontal_polys) {
+	function create_plan(faces) {
 
-		// walls: one face per merged wall polygon of the house.
-		push_log('creating walls')
-		let c = e.create_component({name: 'walls'})
-		e.root.comp.add_child(c, mat4())
-
-		// add a face from the outline and holes of poly, each loop reversed
-		// if is_reversed. add_poly_point(poly, p) adds 2D point p in 3D.
-		function add_poly_face(poly, is_reversed, add_poly_point) {
-			let pis = []
-			for (let hi = -1, hn = poly.hole_count(); hi < hn; hi++) {
-				let i1 = hi < 0 ? 0 : poly.hole_i1(hi)
-				let i2 = hi < 0 ? poly.point_count_without_holes()
-					: poly.hole_i2(hi)
-				for (let j = 0; j < i2 - i1; j++)
-					pis.push(add_poly_point(poly, poly[is_reversed ? i2-1-j : i1+j]))
+		// one component per face tag ('walls', 'roof'), named after it.
+		push_log('creating faces')
+		let comp_by_tag = map() // {tag -> component}
+		for (let face of faces) {
+			let c = comp_by_tag.get(face.tag)
+			if (!c) {
+				c = e.create_component({name: face.tag})
+				e.root.comp.add_child(c, mat4())
+				comp_by_tag.set(face.tag, c)
 			}
-			c.add_face(pis, null, null, poly.holes)
-		}
-
-		function add_wall_point(poly, [m, z]) {
-			let x = poly.is_v ? poly.axis : m
-			let y = poly.is_v ? m : poly.axis
-			return c.add_point_xyz(x, z, y)
-		}
-
-		function add_horizontal_point(poly, [x, y]) {
-			return c.add_point_xyz(x, poly.z, y)
-		}
-
-		for (let poly of wall_polys) {
-			// model3 faces are ccw seen from outside. the poly is ccw in
-			// (m, z), so it is cw seen from outside when the plan's m axis
-			// is toward the viewer's left: on an x plane facing +x, or on a
-			// y plane facing -y. reverse each loop there.
-			let is_reversed = poly.is_v == (poly.normal > 0)
-			add_poly_face(poly, is_reversed, add_wall_point)
-		}
-
-		// slab tops and undersides, wall caps. a poly that is ccw in plan
-		// (x, y) is cw seen from above, so reverse each loop of up faces.
-		for (let poly of horizontal_polys) {
-			let is_reversed = poly.normal > 0
-			add_poly_face(poly, is_reversed, add_horizontal_point)
-		}
-		pop_log()
-
-		// roof: on the top floor, when the model is not cut.
-		let top_floor = floors[floors.length-1]
-		if (!cut_floor && top_floor.roof) {
-			push_log('creating roof')
-			let c = e.create_component({name: 'roof'})
-			e.root.comp.add_child(c, mat4())
-			for (let face of top_floor.make_roof_faces()) {
-				// the footprint has no holes, so neither have its faces: each
-				// ring is an outline, ccw in plan (x, y), so cw seen from
-				// above: reverse it.
-				for (let ring of face.rings) {
-					let pis = []
-					let area = 0
-					for (let i = ring.length-1; i >= 0; i--) {
-						let [x1, y1, z] = ring[i]
-						let [x2, y2] = ring[(i+1) % ring.length]
-						area += x1 * y2 - x2 * y1
-						pis.push(c.add_point_xyz(x1, z, y1))
-					}
-					assert(area > 0)
-					c.add_face(pis)
+			// face rings are ccw seen from outside in (x, y, z). the model's
+			// (x, y, z) is the plan's (x, z, y), a mirror, so reverse each ring.
+			let pis = []
+			let holes = []
+			for (let ring of face.rings) {
+				if (pis.length)
+					holes.push(pis.length)
+				for (let i = ring.length-1; i >= 0; i--) {
+					let [x, y, z] = ring[i]
+					pis.push(c.add_point_xyz(x, z, y))
 				}
 			}
-			pop_log()
+			c.add_face(pis, null, null, holes)
 		}
+		pop_log()
 
 	}
 
 	let floors = house.floors
-	let [wall_polys, horizontal_polys] = cut_floor
-		? house.make_polys(cut_floor, true)
-		: house.make_polys(floors[floors.length-1], false)
-	create_plan(wall_polys, horizontal_polys)
+	let faces = cut_floor
+		? house.make_faces(cut_floor, true)
+		: house.make_faces(floors[floors.length-1], false)
+	create_plan(faces)
 	e.update_all()
 }
 

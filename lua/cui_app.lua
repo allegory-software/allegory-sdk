@@ -235,6 +235,8 @@ function action.en()
 	<script src="/model3.js"></script>
 	<script src="/plane_graph.js"></script>
 	<script src="/roof_skeleton.js"></script>
+	<script src="/clipper2.js"></script>
+	<script src="/prism_union.js"></script>
 	<script src="/house_plan.js"></script>
 	<script src="/model3_editor.js"></script>
 	<script src="/house_model_editor.js"></script>

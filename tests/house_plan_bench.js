@@ -21,7 +21,7 @@ ctx.localStorage = {}
 ctx.addEventListener = () => {}
 vm.createContext(ctx)
 for (let name of ['glue.js', 'earcut.js', '3d.js', 'plane_graph.js',
-	'house_plan.js']) {
+	'clipper2.js', 'prism_union.js', 'house_plan.js']) {
 	let file = path.join(sdk, 'www', name)
 	vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, {filename: file})
 }
@@ -46,14 +46,14 @@ for (let [cols, rows, floor_n] of [[3, 2, 2], [6, 4, 3], [10, 6, 3]]) {
 	let floor = house.floors[0]
 	let top_floor = house.floors[floor_n-1]
 	let n = 20
-	let polys
+	let faces
 	let t0 = performance.now()
 	for (let i = 0; i < n; i++) {
 		floor.fix()
-		polys = house.make_polys(top_floor, false)
+		faces = house.make_faces(top_floor, false)
 	}
 	let dt = (performance.now() - t0) / n
 	console.info(cols+'x'+rows+' rooms, '+floor_n+' floors: '
-		+dt.toFixed(2)+' ms per fix and make_polys, '
-		+polys[1].length+' horizontal polys')
+		+dt.toFixed(2)+' ms per fix and make_faces, '
+		+faces.length+' faces')
 }

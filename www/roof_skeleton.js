@@ -6,13 +6,14 @@
 	roof_skeleton(rings, pitches, eave_z) -> faces
 		rings    [[[x, y], ...], ...]  outer ring (area > 0), holes (area < 0)
 		pitches  [deg, ...]            per edge, edges of all rings in order
-		faces    [{edge_is: [i, ...], rings: [[[x, y, z], ...], ...]}, ...]
+		faces    [{edge_is: [i, ...], rings: [[[x, y, z], ...], ...],
+		           plane: [a, b, c]}, ...]
 
 	Edges with pitch 90 are vertical (gable ends, edges against a wall) and
 	get no face. Edges in the same plane share one face. Of collinear
 	neighbor edges, only the shallowest gets a face. Regions closed in by
 	vertical edges get no face. Face rings are ccw outlines (area > 0) and
-	cw holes (area < 0).
+	cw holes (area < 0). A face's plane is z = a*x + b*y + c.
 
 */
 
@@ -486,8 +487,15 @@ function roof_skeleton(rings, pitches, eave_z) {
 			if (abs(area) > NEAR)
 				face_rings.push(ring)
 		}
-		if (face_rings.length)
-			faces.push({edge_is: plane.edge_is, rings: face_rings})
+		if (face_rings.length) {
+			// the edge is at m = c + n*s*t at height t above the eaves,
+			// m = x or y.
+			let dz = plane.n / plane.s // dz per unit of m
+			let a = plane.is_v ? dz : 0
+			let b = plane.is_v ? 0 : dz
+			faces.push({edge_is: plane.edge_is, rings: face_rings,
+				plane: [a, b, eave_z - dz * plane.c]})
+		}
 	}
 	return faces
 }

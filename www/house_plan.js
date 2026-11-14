@@ -3,7 +3,7 @@
 const G = window
 
 const {
-	round, mod, abs, min, max, clamp,
+	round, mod, abs, min, max, clamp, sqrt,
 	assert, log, push_log, pop_log, push_log_if,
 	insert, remove_value, uniq_sorted, map, assign, clock, json,
 } = glue
@@ -21,6 +21,7 @@ let defaults = {
 	int_wall_thickness: 8,
 	ext_wall_thickness: 18,
 	slab_thickness: 20,
+	roof_thickness: 20, // at right angles to the roof
 }
 
 function poly_get_point(i, out) {
@@ -42,8 +43,7 @@ function house_plan(t) {
 		for (let edge_point of roof.edge_points ?? [])
 			edge_points.push({x: edge_point.x, y: edge_point.y,
 				pitch: edge_point.pitch})
-		return {pitch: roof.pitch, eave_h: roof.eave_h,
-			edge_points: edge_points}
+		return {pitch: roof.pitch, edge_points: edge_points}
 	}
 
 	function copy_room_points(room_points) {
@@ -64,7 +64,8 @@ function house_plan(t) {
 		return {rotation: house.rotation, floor_h: house.floor_h,
 			int_wall_thickness: house.int_wall_thickness,
 			ext_wall_thickness: house.ext_wall_thickness,
-			slab_thickness: house.slab_thickness, floors: floors}
+			slab_thickness: house.slab_thickness,
+			roof_thickness: house.roof_thickness, floors: floors}
 	}
 
 	function begin_edit(floor) {
@@ -136,7 +137,7 @@ function house_plan(t) {
 		floor.orthogonal = true
 
 		floor.house = house
-		// {pitch:, eave_h:, edge_points: [{x:, y:, pitch:}, ...]} or null
+		// {pitch:, edge_points: [{x:, y:, pitch:}, ...]} or null
 		floor.roof = copy_roof(t.roof)
 		floor.i = floor_i
 		floor.id = 'floor'+floor_i
@@ -241,11 +242,11 @@ function house_plan(t) {
 		// the faces of the roof over the floor's outlines, as returned by
 		// roof_skeleton(). the roof's edges are the outer skin's sides. an
 		// edge point sets the pitch of the nearest side. two or more points
-		// on one side: the roof's pitch, like room points.
+		// on one side: the roof's pitch, like room points. the faces are the
+		// roof's top, which starts at the floor's top on the outer skin.
 		floor.make_roof_faces = function() {
 			let roof = floor.roof
-			let eave_h = roof.eave_h ?? house.slab_thickness // on the top slab
-			let eave_z = floor.z + floor.h + eave_h
+			let eave_z = floor.z + floor.h
 
 			// one ring per outline: the outer skin's corners, without the
 			// collinear points of the walls joining it.
@@ -773,427 +774,141 @@ function house_plan(t) {
 		return floor
 	}
 
-	// walls ------------------------------------------------------------------
+	// walls and slabs --------------------------------------------------------
 
-	// The code builds the walls of the whole house as polygons, one per flat
-	// connected surface. Each polygon lies on a vertical plane at plan
-	// x = axis (is_v) or plan y = axis, and its outside is toward the sign of
-	// `normal` on that axis. Points are in plane coords (m, z): m is the plan
-	// coord along the plane (y if is_v, else x), z is the height from ground.
-	//
-	// For every skin edge of every floor, the code adds a rectangle from the
-	// top of the floor's slab to the top of the floor. For every outer edge
-	// of every slab, it adds a rectangle as tall as the slab is thick. All
-	// rectangles are ccw in (m, z), and rectangles on the same plane only
-	// touch, never overlap. Where two rectangles touch, their edges are on
-	// the shared part in opposite directions. So the code sums the directions
-	// of all edges on each line and keeps only the parts where the sum is not
-	// zero: those parts are the outlines of the merged polygons.
+	// The code builds the walls and slabs of the house as prisms and fuses
+	// them into faces with prism_union(). A floor's walls stand on its slab;
+	// their plan region is the even-odd fill of all the floor's skins: the
+	// outlines minus the rooms plus the islands minus their rooms. Slab i is
+	// at the bottom of floor i, under the outlines of floors i-1 and i,
+	// except under the open rooms of floor i over the rooms of floor i-1.
+	// The islands of an open room are not in the room. The top floor's roof
+	// bodies cut the walls and slabs under them. The top floor's walls rise
+	// to the roof underside.
 
-	// planes ------------------------------------------------------------------
-
-	// find or create the plane of the skins at `axis` with outside `normal`.
-	function wall_plane(planes, is_v, axis, normal) {
-		let key = (is_v ? 'v' : 'h') + (normal > 0 ? '+' : '-') + axis
-		let plane = planes.get(key)
-		if (!plane) {
-			plane = {
-				is_v: is_v,
-				axis: axis,
-				normal: normal,
-				hlines: map(), // {z -> [m1, m2, dir, ...]}
-				vlines: map(), // {m -> [z1, z2, dir, ...]}
-			}
-			planes.set(key, plane)
-		}
-		return plane
+	// add a plan ring of [x, y] points to clipper paths on prism_union()'s
+	// grid.
+	function add_ring_path(paths, ring) {
+		let scale = prism_union.grid_scale
+		let path = []
+		for (let [x, y] of ring)
+			path.push({x: round(x * scale), y: round(y * scale)})
+		paths.push(path)
+		return paths
 	}
 
-	// add a directed edge from m1 to m2 (dir = 1) or back (dir = -1) to the
-	// horizontal or vertical line at `line_at`.
-	function add_line_edge(lines, line_at, m1, m2, dir) {
-		let a = lines.get(line_at)
-		if (!a) {
-			a = []
-			lines.set(line_at, a)
-		}
-		a.push(m1, m2, dir)
-	}
-
-	// add the ccw rectangle from (m1, z1) to (m2, z2), with m1 < m2, z1 < z2.
-	function add_rect(plane, m1, z1, m2, z2) {
-		// ccw in (m, z): bottom goes +m, right goes +z, top goes -m, left -z.
-		add_line_edge(plane.hlines, z1, m1, m2,  1)
-		add_line_edge(plane.vlines, m2, z1, z2,  1)
-		add_line_edge(plane.hlines, z2, m1, m2, -1)
-		add_line_edge(plane.vlines, m1, z1, z2, -1)
-	}
-
-	// add the rectangle of skin edge (p1, p2) between heights z1 and z2.
-	// the wall body is on the same side of every skin cycle, so the outside
-	// of an edge (p1, p2) taken in cycle order is toward (dy, -dx).
-	function add_skin_rect(planes, p1, p2, z1, z2) {
-		let [x1, y1] = p1
-		let [x2, y2] = p2
-		let is_v = x1 == x2
-		let axis = is_v ? x1 : y1
-		let normal = is_v ? (y2 > y1 ? 1 : -1) : (x2 > x1 ? -1 : 1)
-		let pm1 = is_v ? y1 : x1
-		let pm2 = is_v ? y2 : x2
-		let m1 = min(pm1, pm2)
-		let m2 = max(pm1, pm2)
-		let plane = wall_plane(planes, is_v, axis, normal)
-		add_rect(plane, m1, z1, m2, z2)
-	}
-
-	// cancelling shared edges -------------------------------------------------
-
-	// sum the edge directions along one line and add each maximal run of
-	// non-zero sum to `runs` as m1, m2, dir. a zero sum means a shared part.
-	function sum_line_runs(a, runs) {
-		let events = [] // [[m, dir_change], ...]
-		for (let i = 0; i < a.length; i += 3) {
-			let m1  = a[i+0]
-			let m2  = a[i+1]
-			let dir = a[i+2]
-			events.push([m1, dir], [m2, -dir])
-		}
-		events.sort((e1, e2) => e1[0] - e2[0])
-		let sum = 0
-		let run_m1, run_dir
-		let i = 0
-		let n = events.length
-		while (i < n) {
-			// apply all the events at m, then look at the sum right after m.
-			let m = events[i][0]
-			while (i < n) {
-				let [event_m, dir_change] = events[i]
-				if (event_m != m)
-					break
-				sum += dir_change
-				i++
-			}
-			if (run_m1 != null && sum != run_dir) { // sum changed: end the run.
-				runs.push(run_m1, m, run_dir)
-				run_m1 = null
-			}
-			if (run_m1 == null && sum != 0) { // start a run.
-				run_m1 = m
-				run_dir = sum
-			}
-		}
-	}
-
-	// make the directed edges [m1, z1, m2, z2] left after cancelling.
-	function plane_edges(plane) {
-		let edges = []
-		let runs = []
-		for (let [z, a] of plane.hlines) {
-			runs.length = 0
-			sum_line_runs(a, runs)
-			for (let i = 0; i < runs.length; i += 3) {
-				let m1  = runs[i+0]
-				let m2  = runs[i+1]
-				let dir = runs[i+2]
-				if (dir > 0)
-					edges.push([m1, z, m2, z])
-				else
-					edges.push([m2, z, m1, z])
-			}
-		}
-		for (let [m, a] of plane.vlines) {
-			runs.length = 0
-			sum_line_runs(a, runs)
-			for (let i = 0; i < runs.length; i += 3) {
-				let z1  = runs[i+0]
-				let z2  = runs[i+1]
-				let dir = runs[i+2]
-				if (dir > 0)
-					edges.push([m, z1, m, z2])
-				else
-					edges.push([m, z2, m, z1])
-			}
-		}
-		return edges
-	}
-
-	// tracing loops -----------------------------------------------------------
-
-	// find the edge that continues edge `e` at its end point. where two
-	// polygons touch at a corner, that point has two outgoing edges. the
-	// filled side of every edge is on its left, so the code takes the
-	// leftmost turn to keep each polygon's outline a separate loop.
-	function next_edge(edges_by_start, e) {
-		let [m1, z1, m2, z2] = e
-		let dm = m2 - m1
-		let dz = z2 - z1
-		let next_e, next_turn
-		for (let e1 of edges_by_start.get(m2+' '+z2)) {
-			let [e1_m1, e1_z1, e1_m2, e1_z2] = e1
-			let cross = dm * (e1_z2 - e1_z1) - dz * (e1_m2 - e1_m1)
-			let turn = cross > 0 ? 1 : cross < 0 ? -1 : 0 // left, right, straight
-			if (next_e && turn <= next_turn)
-				continue
-			next_e = e1
-			next_turn = turn
-		}
-		return next_e
-	}
-
-	// walk the edges into closed loops.
-	function trace_loops(edges) {
-		let edges_by_start = map() // {'m z' -> [edge, ...]}
-		for (let e of edges) {
-			let [m1, z1] = e
-			let key = m1+' '+z1
-			let a = edges_by_start.get(key)
-			if (!a) {
-				a = []
-				edges_by_start.set(key, a)
-			}
-			a.push(e)
-		}
-		let loops = []
-		for (let e0 of edges) {
-			if (e0.is_traced)
-				continue
-			let loop = poly2()
-			loop.get_point = poly_get_point
-			let e = e0
-			do {
-				e.is_traced = true
-				loop.push([e[0], e[1]])
-				e = next_edge(edges_by_start, e)
-			} while (e != e0)
-			loops.push(loop)
-		}
-		return loops
-	}
-
-	// polygons ----------------------------------------------------------------
-
-	// make the polygons of one plane. ccw loops are outlines, cw loops are
-	// holes. the code adds each hole to the smallest outline that contains
-	// it, storing hole points after outline points, like model3 faces.
-	function add_plane_polys(plane, polys) {
-		let outlines = []
-		let holes = []
-		for (let loop of trace_loops(plane_edges(plane))) {
-			if (loop.area() > 0)
-				outlines.push(loop)
-			else
-				holes.push(loop)
-		}
-
-		let outline_holes = [] // [[hole, ...], ...] per outline
-		for (let i = 0; i < outlines.length; i++)
-			outline_holes.push([])
-		for (let hole of holes) {
-			// test the middle of the hole's first edge.
-			let [m1, z1] = hole[0]
-			let [m2, z2] = hole[1]
-			let m = (m1 + m2) / 2
-			let z = (z1 + z2) / 2
-			let min_i
-			for (let i = 0; i < outlines.length; i++) {
-				let outline = outlines[i]
-				if (!outline.hit(m, z))
-					continue
-				if (min_i != null && outline.area() >= outlines[min_i].area())
-					continue
-				min_i = i
-			}
-			outline_holes[min_i].push(hole)
-		}
-
-		for (let i = 0; i < outlines.length; i++) {
-			let poly = outlines[i]
-			poly.holes = []
-			for (let hole of outline_holes[i]) {
-				poly.holes.push(poly.length)
-				for (let p of hole)
-					poly.push(p)
-			}
-			poly.invalidate()
-			polys.push(poly)
-		}
-	}
-
-	// horizontal faces --------------------------------------------------------
-
-	// The code builds the horizontal faces of the whole house as polygons in
-	// plan coords (x, y) at height z, facing up (normal = 1) or down
-	// (normal = -1). At every height where a slab or a wall starts or ends,
-	// the code adds an up face where there is solid just below and air just
-	// above, and a down face where it is the other way round. The solid
-	// regions below and above overlap only partly and slabs have holes, so
-	// summing their edges would mix up faces and holes. Instead the code cuts
-	// the plan into cells at the x and y of every skin corner involved, tests
-	// the center of each cell, adds the cells that need a face as rectangles,
-	// and merges them like the wall rectangles. Where a slab cell borders a
-	// cell with no slab, the code adds a side rectangle of the slab to the
-	// wall planes.
-
-	function hit_outline(floor, x, y) {
+	function add_outline_paths(floor, paths) {
 		for (let comp of floor) // root comps: islands are inside them.
-			if (comp.outer_cycle.edges.hit(x, y))
-				return true
-		return false
+			add_ring_path(paths, comp.outer_cycle.edges)
+		return paths
 	}
 
-	// add the faces at the bottom (z) and at the top of the slab between
-	// floor0 below and floor1 above to `polys`, and the slab's sides to
-	// `planes`. under the slab: the wall bodies of floor0. over the slab: the
-	// wall bodies of floor1. no_slab: no slab between them, so the faces at
-	// z are the caps of floor0's walls.
-	function add_slab_faces(planes, polys, z, floor0, floor1, no_slab) {
-		let xs = []
-		let ys = []
-		for (let floor of [floor0, floor1]) {
-			if (!floor)
+	function add_skin_paths(floor, paths) {
+		for (let comp of floor.comps)
+			for (let c of comp.cycles)
+				add_ring_path(paths, c.edges)
+		return paths
+	}
+
+	function add_open_room_paths(floor, paths) {
+		for (let [c, room_point] of floor.room_point_by_cycle) {
+			if (!room_point?.is_open)
 				continue
-			for (let comp of floor.comps)
-				for (let c of comp.cycles)
-					for (let ep of c.edges) {
-						xs.push(ep[0])
-						ys.push(ep[1])
-					}
+			add_ring_path(paths, c.edges)
+			for (let comp of c.islands)
+				add_ring_path(paths, comp.outer_cycle.edges)
 		}
-		xs.sort((x1, x2) => x1 - x2)
-		ys.sort((y1, y2) => y1 - y2)
-		uniq_sorted(xs)
-		uniq_sorted(ys)
-
-		let nx = xs.length-1
-		let ny = ys.length-1
-		let slab_cells = [] // [in_slab, ...] at i*ny+j
-		let bottom_up   = {hlines: map(), vlines: map()}
-		let bottom_down = {hlines: map(), vlines: map()}
-		let top_up      = {hlines: map(), vlines: map()}
-		let top_down    = {hlines: map(), vlines: map()}
-		for (let i = 0; i < nx; i++) {
-			let x1 = xs[i]
-			let x2 = xs[i+1]
-			let x = (x1 + x2) / 2
-			for (let j = 0; j < ny; j++) {
-				let y1 = ys[j]
-				let y2 = ys[j+1]
-				let y = (y1 + y2) / 2
-
-				// rooms are inside the outlines: look for them only there.
-				let in_outline0 = !!floor0 && hit_outline(floor0, x, y)
-				let in_outline1 = !!floor1 && hit_outline(floor1, x, y)
-				let room0 = in_outline0 && floor0.hit_cycle_edges(x, y)
-				let room1 = in_outline1 && floor1.hit_cycle_edges(x, y)
-				let in_walls0 = in_outline0 && !room0
-				let in_walls1 = in_outline1 && !room1
-				// the slab is under both floors, except under the open rooms
-				// of floor1 over the rooms of floor0. the islands of an open
-				// room are not in the room.
-				let is_open1 = room1
-					&& floor1.room_point_by_cycle.get(room1)?.is_open
-				let in_slab = !no_slab && (in_outline0 || in_outline1)
-					&& !(is_open1 && room0)
-				slab_cells[i*ny+j] = in_slab
-
-				if (in_walls0 != in_slab)
-					add_rect(in_walls0 ? bottom_up : bottom_down, x1, y1, x2, y2)
-				if (in_slab != in_walls1)
-					add_rect(in_slab ? top_up : top_down, x1, y1, x2, y2)
-			}
-		}
-
-		// slab sides: on the cell sides between slab and no slab, facing
-		// away from the slab.
-		let slab_t = house.slab_thickness
-		let z2 = z + slab_t
-		for (let i = 0; i < nx; i++) {
-			let x1 = xs[i]
-			let x2 = xs[i+1]
-			for (let j = 0; j < ny; j++) {
-				if (!slab_cells[i*ny+j])
-					continue
-				let y1 = ys[j]
-				let y2 = ys[j+1]
-				let is_slab_left  = i > 0    && slab_cells[(i-1)*ny+j]
-				let is_slab_right = i < nx-1 && slab_cells[(i+1)*ny+j]
-				let is_slab_below = j > 0    && slab_cells[i*ny+j-1]
-				let is_slab_above = j < ny-1 && slab_cells[i*ny+j+1]
-				if (!is_slab_left)
-					add_rect(wall_plane(planes, true , x1, -1), y1, z, y2, z2)
-				if (!is_slab_right)
-					add_rect(wall_plane(planes, true , x2,  1), y1, z, y2, z2)
-				if (!is_slab_below)
-					add_rect(wall_plane(planes, false, y1, -1), x1, z, x2, z2)
-				if (!is_slab_above)
-					add_rect(wall_plane(planes, false, y2,  1), x1, z, x2, z2)
-			}
-		}
-
-		for (let [plane, plane_z, normal] of [
-			[bottom_up  , z         ,  1],
-			[bottom_down, z         , -1],
-			[top_up     , z + slab_t,  1],
-			[top_down   , z + slab_t, -1],
-		]) {
-			let i0 = polys.length
-			add_plane_polys(plane, polys)
-			for (let i = i0; i < polys.length; i++) {
-				polys[i].z = plane_z
-				polys[i].normal = normal
-			}
-		}
+		return paths
 	}
 
-	// building ----------------------------------------------------------------
+	// grid paths of the slab between floor0 below, which can be null, and
+	// floor1 above.
+	function slab_paths(floor0, floor1) {
+		let {union, intersect, difference, FillRule} = clipper2
+		let EO = FillRule.EvenOdd
+		let paths
+		if (!floor0) {
+			paths = add_outline_paths(floor1, [])
+		} else {
+			let outline0 = add_outline_paths(floor0, [])
+			let outline1 = add_outline_paths(floor1, [])
+			let rooms0 = difference(outline0, add_skin_paths(floor0, []), EO)
+			let open_rooms = intersect(add_open_room_paths(floor1, []), rooms0,
+				EO)
+			paths = difference(union(outline0, outline1, EO), open_rooms, EO)
+		}
+		return paths
+	}
 
-	// make the wall polys and the horizontal polys of floors 0..top_floor.
-	// no_top_slab: no slab on top of top_floor, cap its walls instead.
-	house.make_polys = function(top_floor, no_top_slab) {
-		let planes = map() // {key -> plane}
-		let horizontal_polys = []
+	// make the faces of the walls, slabs and roof of floors 0..top_floor,
+	// tagged 'walls' (walls and slabs) and 'roof'.
+	// no_roof: leave out top_floor's roof.
+	house.make_faces = function(top_floor, no_roof) {
+		let prisms = []
 		let slab_t = house.slab_thickness
 		let floors = house.floors
 		let floor_n = top_floor.i + 1
+		let roof_faces = !no_roof && top_floor.roof
+			? top_floor.make_roof_faces() : null
 
-		// floor skins: from the top of the floor's slab to the top of the floor.
+		// the roof's highest point.
+		let roof_z = -1/0
+		if (roof_faces) {
+			for (let face of roof_faces) {
+				let [a, b, c] = face.plane
+				for (let ring of face.rings)
+					for (let [x, y] of ring)
+						roof_z = max(roof_z, a * x + b * y + c)
+			}
+		}
+
+		// walls: from the top of the floor's slab to the top of the floor.
+		// under a roof: up to the roof's highest point, so the roof bodies
+		// cut them to the roof underside.
 		for (let floor_i = 0; floor_i < floor_n; floor_i++) {
 			let floor = floors[floor_i]
-			let z1 = floor.z + slab_t
-			let z2 = floor.z + floor.h
-			for (let comp of floor.comps) {
-				for (let c of comp.cycles) {
-					let eps = c.edges
-					for (let i = 0, n = eps.length; i < n; i++)
-						add_skin_rect(planes, eps[i], eps[(i+1) % n], z1, z2)
-				}
+			let top_z = floor == top_floor && roof_faces
+				? roof_z : floor.z + floor.h
+			prisms.push({
+				paths: add_skin_paths(floor, []),
+				bottom: [0, 0, floor.z + slab_t],
+				top: [0, 0, top_z],
+				tag: 'walls',
+			})
+		}
+
+		// slabs: slab i is at the bottom of floor i.
+		for (let i = 0; i < floor_n; i++) {
+			let floor = floors[i]
+			prisms.push({
+				paths: slab_paths(floors[i-1], floor),
+				bottom: [0, 0, floor.z],
+				top: [0, 0, floor.z + slab_t],
+				tag: 'walls',
+			})
+		}
+
+		// roof: one body per roof face, with the face on top, roof_thickness
+		// thick at right angles to it. the roof cuts the walls and slabs under
+		// it. where faces of different pitches meet, the underside has a step.
+		if (roof_faces) {
+			let roof_t = house.roof_thickness
+			for (let face of roof_faces) {
+				let [a, b, c] = face.plane
+				let paths = []
+				for (let ring of face.rings)
+					add_ring_path(paths, ring)
+				prisms.push({
+					paths: paths,
+					bottom: [a, b, c - roof_t * sqrt(1 + a * a + b * b)],
+					top: face.plane,
+					tag: 'roof',
+					is_cutter: true,
+				})
 			}
 		}
 
-		// slabs: slab i is at the bottom of floor i, and one more slab is on
-		// top of top_floor, unless no_top_slab.
-		for (let i = 0; i <= floor_n; i++) {
-			let floor0 = floors[i-1]
-			let floor1 = i < floor_n ? floors[i] : null
-			let z = floor1 ? floor1.z : floor0.z + floor0.h
-			let no_slab = i == floor_n && no_top_slab
-			add_slab_faces(planes, horizontal_polys, z, floor0, floor1, no_slab)
-		}
-
-		// merge the rectangles of each plane into polygons.
-		let wall_polys = []
-		for (let plane of planes.values()) {
-			let i0 = wall_polys.length
-			add_plane_polys(plane, wall_polys)
-			for (let i = i0; i < wall_polys.length; i++) {
-				let poly = wall_polys[i]
-				poly.is_v   = plane.is_v
-				poly.axis   = plane.axis
-				poly.normal = plane.normal
-			}
-		}
-
-		return [wall_polys, horizontal_polys]
+		return prism_union(prisms)
 	}
 
 	house.free = function() {

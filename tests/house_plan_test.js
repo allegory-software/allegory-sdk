@@ -21,7 +21,7 @@ ctx.localStorage = {}
 ctx.addEventListener = () => {}
 vm.createContext(ctx)
 let files = ['glue.js', 'earcut.js', '3d.js', 'plane_graph.js',
-	'roof_skeleton.js', 'house_plan.js']
+	'roof_skeleton.js', 'clipper2.js', 'prism_union.js', 'house_plan.js']
 for (let name of files) {
 	let file = path.join(sdk, 'www', name)
 	vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, {filename: file})
@@ -742,11 +742,70 @@ function rect_lines(x, y, w, h) {
 	return ['draw', x, y, w, h, -w, -h]
 }
 
+// convert a face of make_faces() to a poly2 of 2D points with holes, ccw
+// outline: wall polys in (m, z) with is_v, axis, normal; horizontal polys in
+// plan (x, y) with z, normal.
+function face_poly(face) {
+	let [x0, y0, z0] = face.rings[0][0]
+	let is_flat = true
+	let is_x = true
+	for (let [x, y, z] of face.rings[0]) {
+		is_flat = is_flat && z == z0
+		is_x = is_x && x == x0
+	}
+	let rings2 = []
+	for (let ring of face.rings) {
+		let ring2 = []
+		for (let [x, y, z] of ring)
+			ring2.push(is_flat ? [x, y] : is_x ? [y, z] : [x, z])
+		rings2.push(ring2)
+	}
+	let area = 0
+	let outline = rings2[0]
+	for (let i = 0; i < outline.length; i++) {
+		let [m1, z1] = outline[i]
+		let [m2, z2] = outline[(i+1) % outline.length]
+		area += m1 * z2 - m2 * z1
+	}
+	// faces are ccw seen from outside in (x, y, z): ccw in (x, y) facing up,
+	// in (y, z) facing +x, in (x, z) facing -y.
+	let is_ccw = area > 0
+	let poly = ctx.Math3D.poly2()
+	poly.holes = []
+	for (let ring2 of rings2) {
+		if (poly.length)
+			poly.holes.push(poly.length)
+		if (!is_ccw)
+			ring2.reverse()
+		for (let p of ring2)
+			poly.push(p)
+	}
+	if (is_flat) {
+		poly.z = z0
+		poly.normal = is_ccw ? 1 : -1
+	} else {
+		poly.is_v = is_x
+		poly.axis = is_x ? x0 : y0
+		poly.normal = (is_ccw == is_x) ? 1 : -1
+	}
+	return poly
+}
+
 // polys of the whole house, or of floors 0..floor cut at floor.
 function house_polys(h, floor) {
-	if (floor)
-		return h.make_polys(floor, true)
-	return h.make_polys(h.floors[h.floors.length-1], false)
+	let faces = floor
+		? h.make_faces(floor, true)
+		: h.make_faces(h.floors[h.floors.length-1], false)
+	let wall_polys = []
+	let horizontal_polys = []
+	for (let face of faces) {
+		let poly = face_poly(face)
+		if (poly.z != null)
+			horizontal_polys.push(poly)
+		else
+			wall_polys.push(poly)
+	}
+	return [wall_polys, horizontal_polys]
 }
 
 function wall_polys_at(h, is_v, axis, normal, floor) {
@@ -782,21 +841,43 @@ check('exterior skin merges across T-junctions and slabs', () => {
 	let [poly, ...rest] = wall_polys_at(h, false, -14, -1)
 	assert.equal(rest.length, 0)
 	assert.deepEqual(outline_points(poly),
-		[[-14, 0], [614, 0], [614, 270], [-14, 270]])
+		[[-14, 0], [614, 0], [614, 250], [-14, 250]])
 	assert.deepEqual([...poly.holes], [])
 })
 
+// gable1 cut at its top floor: without the roof.
 check('exterior skins of stacked floors merge into one polygon', () => {
 	let h = house(ctx.house_test_plans.gable1)
-	let [poly, ...rest] = wall_polys_at(h, true, -14, -1)
+	let [poly, ...rest] = wall_polys_at(h, true, -14, -1, h.floors[2])
 	assert.equal(rest.length, 0)
 	assert.deepEqual(outline_points(poly),
-		[[-14, 0], [414, 0], [414, 770], [-14, 770]])
+		[[-14, 0], [414, 0], [414, 750], [-14, 750]])
+})
+
+check('the gable wall rises to the roof underside', () => {
+	let h = house(ctx.house_test_plans.gable1)
+	let faces = h.make_faces(h.floors[2], false)
+	let walls = faces.filter(face => face.tag == 'walls')
+	let roofs = faces.filter(face => face.tag == 'roof')
+	assert(roofs.length > 0)
+	let [poly, ...rest] = walls.map(face_poly).filter(poly =>
+		poly.is_v && poly.axis == -14 && poly.normal == -1)
+	assert.equal(rest.length, 0)
+	// 45 deg, 20 thick: the underside is 20*sqrt(2) below the top, which
+	// starts at 750 on the outer skin and peaks at the ridge, y = 200.
+	let d = 20 * Math.SQRT2
+	let ps = outline_points(poly)
+	let ps1 = [[-14, 0], [414, 0], [414, 750 - d], [200, 964 - d],
+		[-14, 750 - d]]
+	assert.equal(ps.length, ps1.length)
+	for (let i = 0; i < ps.length; i++)
+		for (let k = 0; k < 2; k++)
+			assert(Math.abs(ps[i][k] - ps1[i][k]) <= .002, JSON.stringify(ps))
 })
 
 check('room skins of floors with a slab between them stay separate', () => {
 	let h = house(ctx.house_test_plans.gable1)
-	let polys = wall_polys_at(h, true, 4, 1)
+	let polys = wall_polys_at(h, true, 4, 1, h.floors[2])
 	assert.equal(polys.length, 4)
 	for (let poly of polys)
 		assert.equal(poly.point_count(), 4)
@@ -810,10 +891,10 @@ check('a smaller upper floor makes a stepped polygon', () => {
 	let [poly, ...rest] = wall_polys_at(h, false, -14, -1)
 	assert.equal(rest.length, 0)
 	assert.deepEqual(outline_points(poly), [
-		[-14, 0], [614, 0], [614, 270], [314, 270], [314, 520], [-14, 520]])
+		[-14, 0], [614, 0], [614, 270], [314, 270], [314, 500], [-14, 500]])
 	let [side] = wall_polys_at(h, true, 314, 1)
 	assert.deepEqual(outline_points(side),
-		[[-14, 270], [414, 270], [414, 520], [-14, 520]])
+		[[-14, 270], [414, 270], [414, 500], [-14, 500]])
 })
 
 check('a gap between two floors makes a hole', () => {
@@ -825,7 +906,7 @@ check('a gap between two floors makes a hole', () => {
 	let [poly, ...rest] = wall_polys_at(h, false, -14, -1)
 	assert.equal(rest.length, 0)
 	assert.deepEqual(outline_points(poly),
-		[[-14, 0], [614, 0], [614, 770], [-14, 770]])
+		[[-14, 0], [614, 0], [614, 750], [-14, 750]])
 	assert.equal(poly.hole_count(), 1)
 	assert.deepEqual(loop_points(poly, poly.hole_i1(0), poly.hole_i2(0)),
 		[[214, 270], [214, 500], [386, 500], [386, 270]])
@@ -836,7 +917,7 @@ check('floor height comes from the plan', () => {
 	assert.equal(h.floors[0].h, 300)
 	let [poly] = wall_polys_at(h, false, -14, -1)
 	assert.deepEqual(outline_points(poly),
-		[[-14, 0], [614, 0], [614, 320], [-14, 320]])
+		[[-14, 0], [614, 0], [614, 300], [-14, 300]])
 })
 
 // open rooms ----------------------------------------------------------------
@@ -1043,21 +1124,20 @@ function horizontal_polys_at(h, z, normal, floor) {
 	return polys
 }
 
-check('one floor has slab bottom, floor, ceiling and slab top', () => {
+check('one floor has slab bottom, floor and wall tops', () => {
 	let h = house({floors: [{lines: [rect_lines(0, 0, 600, 400)]}]})
-	assert.equal(house_polys(h)[1].length, 4)
+	assert.equal(house_polys(h)[1].length, 3)
 	let outline = [[-14, -14], [614, -14], [614, 414], [-14, 414]]
 	let room = [[4, 4], [596, 4], [596, 396], [4, 396]]
-	for (let [z, normal, ps] of [
-		[  0, -1, outline],
-		[ 20,  1, room],
-		[250, -1, room],
-		[270,  1, outline],
+	for (let [z, normal, ps, hole_n] of [
+		[  0, -1, outline, 0],
+		[ 20,  1, room, 0],
+		[250,  1, outline, 1],
 	]) {
 		let [poly, ...rest] = horizontal_polys_at(h, z, normal)
 		assert.equal(rest.length, 0)
 		assert.deepEqual(outline_points(poly), ps)
-		assert.deepEqual([...poly.holes], [])
+		assert.equal(poly.hole_count(), hole_n)
 	}
 })
 
@@ -1066,7 +1146,7 @@ check('an open room has no floor and no ceiling below it', () => {
 	assert.equal(horizontal_polys_at(h, 250, -1).length, 0)
 	assert.equal(horizontal_polys_at(h, 250,  1).length, 0)
 	assert.equal(horizontal_polys_at(h, 270,  1).length, 0)
-	assert.equal(house_polys(h)[1].length, 4)
+	assert.equal(house_polys(h)[1].length, 3)
 })
 
 check('a wall under an open room gets a slab', () => {
@@ -1199,7 +1279,7 @@ check('adding a floor copies the top floor and raises the walls', () => {
 	assert.equal(h.h, 500)
 	let [poly] = wall_polys_at(h, false, -14, -1)
 	assert.deepEqual(outline_points(poly),
-		[[-14, 0], [614, 0], [614, 520], [-14, 520]])
+		[[-14, 0], [614, 0], [614, 500], [-14, 500]])
 })
 
 check('removing the top floor lowers the walls', () => {
@@ -1209,7 +1289,7 @@ check('removing the top floor lowers the walls', () => {
 	assert.equal(h.floors.length, 1)
 	assert.equal(h.h, 250)
 	let [poly] = wall_polys_at(h, true, -14, -1)
-	assert.equal(outline_points(poly)[2][1], 270)
+	assert.equal(outline_points(poly)[2][1], 250)
 })
 
 check('adding and removing floors is undoable', () => {
@@ -1290,13 +1370,13 @@ function roof_z_range(faces) {
 	return [z1, z2]
 }
 
-check('gable roof on the top floor: two faces from the top slab up', () => {
+check('gable roof on the top floor: two faces from the wall top up', () => {
 	let h = house(ctx.house_test_plans.gable1)
 	let f = h.floors[2]
 	let faces = f.make_roof_faces()
 	assert.equal(faces.length, 2)
 	// outer skin: y -14..414, 45 deg: the ridge is half the width above.
-	let eave_z = f.z + f.h + h.slab_thickness
+	let eave_z = f.z + f.h
 	assert.deepEqual(roof_z_range(faces), [eave_z, eave_z + 214])
 })
 

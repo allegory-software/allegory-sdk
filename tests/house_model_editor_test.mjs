@@ -20,6 +20,9 @@ const page_html = `<!DOCTYPE html>
 <script src=gl.js></script>
 <script src=gl_renderer.js></script>
 <script src=plane_graph.js></script>
+<script src=roof_skeleton.js></script>
+<script src=clipper2.js></script>
+<script src=prism_union.js></script>
 <script src=house_plan.js></script>
 <script src=model3.js></script>
 <script src=ui.js></script>
@@ -45,10 +48,13 @@ let plans = { // the first two of hd's test plans.
 				['draw', 'tl', 0, 0, 'tr', 600, 'br', 400, 'bl', -600, 'tl', -400],
 				['connect', 'cl', 'cr'],
 			],
-			roofs: [
-				{type: 'gable', pitch: 45, eaves: 50, axis: 'h', h: 300,
-					box: [-50, -50, 650, 450]},
-			],
+			roof: {
+				pitch: 45,
+				edge_points: [
+					{x:   0, y: 200, pitch: 90},
+					{x: 600, y: 200, pitch: 90},
+				],
+			},
 		}],
 	},
 }
@@ -83,6 +89,9 @@ const server = http.createServer(async function(req, res) {
 <script src=gl_renderer.js></script>
 <script src=model3.js></script>
 <script src=plane_graph.js></script>
+<script src=roof_skeleton.js></script>
+<script src=clipper2.js></script>
+<script src=prism_union.js></script>
 <script src=house_plan.js></script>
 ${test_plans}
 <script src=model3_editor.js></script>
