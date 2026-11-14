@@ -1079,7 +1079,7 @@ let checklist_filter_input = {
 
 // no editor: the value is toggled by click and space, and the cell keeps
 // building itself while an edit is carried through it.
-let bool = {align: 'center', w: 1, is_bool: true,
+let bool = {align: 'left', w: 1, is_bool: true,
 	builds_text: false, has_editor: false, control: 'checkbox',
 	col_storage: bool_storage}
 field_types.bool = bool

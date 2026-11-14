@@ -1,6 +1,6 @@
 require'views_os'
 
-local rs = rowset.os_explorer_file
+local rs = rowset.os_file
 local dir = '/tmp/sdk_file_editor_'..uuid()
 mkdir(dir)
 currentthread():ownenv().http_request = {response_headers = {}}
@@ -24,7 +24,7 @@ local ok, err = xpcall(function()
 	assert(#result.rows == 1)
 	assert(result.rows[1][1] == path)
 	assert(result.rows[1][2] == text)
-	assert(result.params.path.lookup_rowset_name == 'os_explorer_files')
+	assert(result.params.path.lookup_rowset_name == 'os_files')
 	assert(result.params.path.lookup_cols == 'path')
 	assert(result.params.path.accept_many == false)
 	assert(result.fields[2].maxlen == 16 * 1024^2)

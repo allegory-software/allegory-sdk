@@ -4,13 +4,13 @@
 const ui = window.ui
 
 const tables_opt = { // table grid options
-	rowset_name: 'db_explorer_tables',
+	rowset_name: 'db_tables',
 	cell_select_mode: true,
 	filter_bar_visible: true,
 }
 
 // the rows of the table focused in the table grid tables_id: a table_NAME
-// grid for a base table, a db_explorer_raw grid for an index table or a
+// grid for a base table, a db_rows_raw grid for an index table or a
 // table without a schema, and nothing without a focused table.
 function build_table_rows(id, tables_id) {
 	let tables_nav = ui.state_of(tables_id, 'nav')
@@ -19,12 +19,12 @@ function build_table_rows(id, tables_id) {
 		return
 	if (tables_nav.focused_row_cell_val('raw')) {
 		ui.grid(id+'.raw_rows', {
-			rowset_name: 'db_explorer_rows_raw',
+			rowset_name: 'db_rows_raw',
 			param_bindings: {table: tables_id},
 		})
 	} else {
 		ui.grid(id+'.'+table_name+'.rows', {
-			rowset_name: 'db_explorer_rows_'+table_name,
+			rowset_name: 'db_rows_'+table_name,
 		})
 	}
 }
@@ -58,7 +58,7 @@ ui.db_rows = function(id) {
 ui.db_fields = function(id) {
 	ui.set_current_tab_title('Fields')
 	ui.grid(id+'.grid', {
-		rowset_name: 'db_explorer_fields',
+		rowset_name: 'db_fields',
 		can_move_rows: false,
 	})
 }
@@ -66,7 +66,7 @@ ui.db_fields = function(id) {
 ui.db_indexes = function(id) {
 	ui.set_current_tab_title('Indexes')
 	ui.grid(id+'.grid', {
-		rowset_name: 'db_explorer_indexes',
+		rowset_name: 'db_indexes',
 		can_move_rows: false,
 	})
 }

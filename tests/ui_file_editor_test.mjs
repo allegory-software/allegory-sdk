@@ -27,7 +27,7 @@ const server = http.createServer(async (req, res) => {
 		} else if (req.url == '/rowset.json/rowsets') {
 			res.setHeader('Content-Type', 'application/json')
 			res.end(JSON.stringify({rows: []}))
-		} else if (req.url == '/rowset.json/os_explorer_file') {
+		} else if (req.url == '/rowset.json/os_file') {
 			let body = ''
 			for await (const chunk of req) body += chunk
 			const request = JSON.parse(body)
@@ -54,7 +54,7 @@ const server = http.createServer(async (req, res) => {
 				const path = request.params.path?.[0]
 				result = {fields, pk: 'path',
 					params: {path: {for_cols: 'path', accept_many: false,
-						lookup_rowset_name: 'os_explorer_files',
+						lookup_rowset_name: 'os_files',
 						lookup_cols: 'path'}},
 					can_add_rows: false, can_remove_rows: false,
 					can_change_rows: true, can_move_rows: false,
@@ -154,7 +154,7 @@ try {
 				window.shown_errors.add(value)
 			return text(...args)
 		}
-		ui.rowsets.os_explorer_files = {
+		ui.rowsets.os_files = {
 			fields: [{name: 'path', not_null: true, readonly: true}],
 			pk: 'path', rows: [['/first.txt'], ['/second.txt']],
 			can_add_rows: false, can_remove_rows: false, can_change_rows: false,
@@ -167,7 +167,7 @@ try {
 		ui.main = function() {
 			window.early_value = ui.value(window.file_input_id)
 			let s = ui.state('files')
-			s.nav ??= ui.nav('files', {rowset_name: 'os_explorer_files'})
+			s.nav ??= ui.nav('files', {rowset_name: 'os_files'})
 			if (window.want_second) {
 				window.want_second = false
 				s.nav.focus_cell(1, 0)

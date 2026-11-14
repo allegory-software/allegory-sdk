@@ -446,7 +446,7 @@ const {
 	num, floor, abs, min, max, clamp, strict_sign,
 	time, month, year, month_of, year_of,
 	memoize, ajax, href,
-	return_true, return_false, captures, fold_text,
+	return_true, return_false, captures, fold_text, display_name,
 	json, url_parse, url_format, S,
 	copy_to_clipboard,
 } = glue
@@ -978,7 +978,7 @@ ui.nav = function(id, opt) {
 	for (let param in e.param_bindings)
 		e.param_sources[param] = e.param_bindings[param]
 	let can_be_master = !!e.rowset_name && !e.is_picker // in rowset_navs
-	e.label ??= e.rowset_name
+	e.label ??= e.rowset_name && display_name(e.rowset_name)
 
 	// indexes
 	let indexes = null // {cols -> {fields:, ris:}}, built on first lookup
@@ -5372,7 +5372,9 @@ ui.nav = function(id, opt) {
 		if (!is_server_rowset)
 			e.loaded = true
 
-		e.label = opt?.label ?? rs.label ?? e.rowset_name
+		e.label = opt?.label ?? rs.label
+			?? (e.rowset_name && display_name(e.rowset_name))
+		e.info = rs.info ?? null
 		e.sections = rs.sections ?? null
 		e.tabs = rs.tabs ?? null
 

@@ -577,9 +577,6 @@ function prepare_table_rowsets()
 		local name = 'table_'..tbl
 		local rs = rowset[name]
 		rs:prepare()
-		if is_link_table(schema) then
-			rowset['members_'..tbl]:prepare()
-		end
 	end
 end
 
@@ -637,8 +634,11 @@ end)
 
 --TABLE ROWSETS --------------------------------------------------------------
 
+local function upper_word(c) return ' '..c:upper() end
+
 local function table_label(tbl, schema)
-	return schema.label or tbl:gsub('_', ' '):gsub('^.', string.upper)
+	return schema.label
+		or tbl:gsub('^%w', string.upper):gsub('_(%w)', upper_word)
 end
 
 dynamic_rowset('^table_(.+)$', function(tbl)
@@ -646,6 +646,15 @@ dynamic_rowset('^table_(.+)$', function(tbl)
 		return db():table_schema(tbl)
 	end, tbl))
 	checkfound(not schema.is_index)
+	if schema.members then
+		assertf(is_link_table(schema), 'members: `%s` is not a link table', tbl)
+		local rs = members_rowset(tbl)
+		rs.label = table_label(tbl, schema)
+		rs.category = schema.category
+		rs.icon = schema.icon
+		rs.internal = schema.internal
+		return rs
+	end
 	local params = {}
 	local pk_cols = index(schema.pk)
 	for name, fk in pairs(schema.fks or empty) do
@@ -682,8 +691,10 @@ dynamic_rowset('^table_(.+)$', function(tbl)
 	local name_col = schema.name_col or schema.fields.name and 'name'
 	return scan_rowset{
 		label = table_label(tbl, schema),
+		info = schema.info,
 		category = schema.category,
 		icon = schema.icon,
+		internal = schema.internal,
 		scan = function(db, param_names)
 			if server_param and param_names[server_param] then
 				local fk = db:table_schema(tbl).fks[server_param]
@@ -735,7 +746,7 @@ local function members_rowset_init(rs, link_table)
 		end
 
 		add_field({name = '$member', type = 'bool', not_null = true,
-			en_label = 'Member'}, link_table, schema.pk[1])
+			en_label = 'Member', icon = 'check'}, link_table, schema.pk[1])
 
 		lookups = {}
 		rs.params = {}
@@ -946,14 +957,3 @@ end
 function members_rowset(...)
 	return virtual_rowset(members_rowset_init, ...)
 end
-
-dynamic_rowset('^members_(.+)$', function(tbl)
-	local schema = checkfound(db():atomic('any', function(tbl)
-		return db():table_schema(tbl)
-	end, tbl))
-	checkfound(is_link_table(schema))
-	local rs = members_rowset(tbl)
-	rs.label = table_label(tbl, schema)..' (members)'
-	rs.category = schema.category
-	return rs
-end)

@@ -70,7 +70,7 @@ db_schema:import(function()
 			end),
 	}
 
-	tables.call_users = { icon'users',
+	tables.call_users = { icon'users', members,
 		call        , id, not_null, child_fk,
 		user        , id, not_null, child_fk, pk(call, user), aka'usr',
 	}

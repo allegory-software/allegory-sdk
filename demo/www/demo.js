@@ -24,28 +24,28 @@ let admin_profile_menu_items = [ // profile menu of admins
 function profile_button() {
 	if (user.impersonating) {
 		mr(sp1())
-		let unimpersonate = bare_button('unimpersonate_button', 'user-x',
-			user.name || user.email, 0, null, null, false,
+		let is_unimpersonate_clicked = bare_button('unimpersonate_button',
+			'user-x', user.name || user.email, 0, null, null, false,
 			'Stop impersonating')
-		if (unimpersonate)
-			ui.unimpersonate()
+		if (is_unimpersonate_clicked)
+			unimpersonate()
 	}
 	mr(sp1())
-	profile_menu_items[0].checked = ui.saved_state.globals?.theme == 'light'
+	profile_menu_items[0].checked = saved_state.globals?.theme == 'light'
 	let profile_action = bare_menu_button('profile_button', 'user-circle', '',
 		user.is_admin ? admin_profile_menu_items : profile_menu_items)
 	if (profile_action == 'lights_button') {
-		let theme = ui.screen_theme() == 'dark' ? 'light' : 'dark'
-		ui.save_state('globals', 'theme', theme)
-		ui.set_screen_theme(theme)
+		let theme = screen_theme() == 'dark' ? 'light' : 'dark'
+		save_state('globals', 'theme', theme)
+		set_screen_theme(theme)
 	} else if (profile_action == 'impersonate_button') {
-		ui.set_modal_open('impersonate_modal', true)
+		set_modal_open('impersonate_modal', true)
 	} else if (profile_action == 'sign_out_button') {
-		ui.logout()
+		logout()
 	}
 }
 
-ui.rowsets.saved_state = { // saved widget state rowset
+rowsets.saved_state = { // saved widget state rowset
 	category: 'Demo',
 	fields: [
 		{name: 'id', not_null: true},
@@ -57,11 +57,11 @@ ui.rowsets.saved_state = { // saved widget state rowset
 	can_move_rows: false,
 	get rows() {
 		let rows = [] // [[id, sub-id, state key, JSON value], ...]
-		for (let widget_id in ui.saved_state) {
+		for (let widget_id in saved_state) {
 			let dot_i = widget_id.indexOf('.') // first dot index
 			let state_id = dot_i < 0 ? widget_id : widget_id.slice(0, dot_i)
 			let sub_id = dot_i < 0 ? null : widget_id.slice(dot_i + 1)
-			let saved_vars = ui.saved_state[widget_id] // map or malformed value
+			let saved_vars = saved_state[widget_id] // map or malformed value
 			if (isobj(saved_vars)) {
 				for (let state_key in saved_vars)
 					rows.push([state_id, sub_id, state_key,
@@ -82,9 +82,9 @@ ui.rowsets.saved_state = { // saved widget state rowset
 				? old_id : old_id+'.'+old_sub_id
 			if (row.type == 'remove') {
 				if (old_key == null)
-					ui.save_state(old_widget_id)
+					save_state(old_widget_id)
 				else
-					ui.save_state(old_widget_id, old_key, undefined)
+					save_state(old_widget_id, old_key, undefined)
 				return {remove: true}
 			}
 			let state_id = values.id ?? old_id
@@ -96,7 +96,7 @@ ui.rowsets.saved_state = { // saved widget state rowset
 			let is_renamed = !is_new
 				&& (widget_id != old_widget_id || state_key != old_key)
 			if (is_new || is_renamed) {
-				let saved_vars = ui.saved_state[widget_id] // {state key -> value}
+				let saved_vars = saved_state[widget_id] // {state key -> value}
 				if (saved_vars && state_key in saved_vars)
 					return {error: 'Saved setting already exists'}
 			}
@@ -108,51 +108,51 @@ ui.rowsets.saved_state = { // saved widget state rowset
 					return {field_errors: {value: err.message}}
 				}
 			} else {
-				value = ui.saved_state[old_widget_id][old_key]
+				value = saved_state[old_widget_id][old_key]
 			}
 			if (is_renamed)
-				ui.save_state(old_widget_id, old_key, undefined)
-			ui.save_state(widget_id, state_key, value)
+				save_state(old_widget_id, old_key, undefined)
+			save_state(widget_id, state_key, value)
 			return {}
 		})}
 	},
 }
 
 function saved_state_grid(id) {
-	ui.grid(id, {rowset_name: 'saved_state'})
+	grid(id, {rowset_name: 'saved_state'})
 }
 
-ui.views.saved_state = {
+views.saved_state = {
 	label: 'Saved state', icon: 'database', category: 'Tools',
 	build: function(id) { saved_state_grid(id+'.grid') },
 }
 
-ui.views.call = {
+views.call = {
 	label: 'Call', icon: 'phone', category: 'Tools',
 	build: function(id) {
-		let s = ui.state(id)
+		let s = state(id)
 		if (!s.free) {
 			s.demo_call = null // {call, invite_token} or null before loading
 			s.load_error = null // credentials error text or null
 			s.request = null // credentials request or null
-			ui.on_free(id, function(s) {
+			on_free(id, function(s) {
 				if (s.request) s.request.abort()
 			})
 			s.request = glue.get('/call_demo.json', function(demo_call) {
 				s.request = null
 				s.demo_call = demo_call
-				ui.animate()
+				animate()
 			}, function(error, type) {
 				if (type == 'abort') return
 				s.request = null
 				s.load_error = error
-				ui.animate()
+				animate()
 			}, {silent: true})
 		}
 		v(1, sp(), 's', 's')
 			if (s.request) text('', 'Loading demo call...', 0)
 			if (s.load_error) text('', s.load_error, 0)
-			ui.call(id+'.widget', {
+			call(id+'.widget', {
 				call_id: s.demo_call ? String(s.demo_call.call) : null,
 				invite_token: s.demo_call?.invite_token,
 				name: user.name,
@@ -162,107 +162,183 @@ ui.views.call = {
 	},
 }
 
-ui.views.model3_editor = {
+views.model3_editor = {
 	label: 'Model editor', icon: 'cube', category: 'Editors',
 	build: function(id) {
-		ui.model3_editor(id+'.widget', {}, ui.model3_editor_test_objects)
+		model3_editor(id+'.widget', {}, model3_editor_test_objects)
 	},
 }
 
+function cmp_label(a, b) {
+	return a.label < b.label ? -1 : a.label > b.label ? 1 : 0
+}
+
+// query: folded search text or null for no search.
+function label_matches(label, query) {
+	return !query || fold_text(label).includes(query)
+}
+
+// first leaf tab in layout order that has a category -> {category, icon}
+function find_container_category(node, rowset_info) {
+	if (node.split)
+		return find_container_category(node.side1, rowset_info)
+			?? find_container_category(node.side2, rowset_info)
+	for (let tab of node.tabs) {
+		if (tab.layout) {
+			let found = find_container_category(tab.layout, rowset_info)
+			if (found)
+				return found
+		} else if (tab.kind == 'rowset') {
+			let info = rowset_info.get(tab.args.rowset_name)
+			if (info)
+				return info
+		} else {
+			let view = views[tab.kind]
+			if (view?.category)
+				return {category: view.category, icon: view.icon}
+		}
+	}
+}
+
 // Use distinct state IDs for chooser buttons and replacement widgets.
-// ui.state(id, update) can otherwise run the widget's update on the
+// state(id, update) can otherwise run the widget's update on the
 // previous button state, before the widget initializes its fields.
 function app_dock_empty_tab(tab) {
 	let tab_id = 'app_dock.tab.'+tab.id
 
-	let s = ui.state(tab_id+'.rowsets')
+	let s = state(tab_id+'.rowsets')
 	if (!s.free) {
 		s.items = [] // [{id, label, items: [{id, label, icon}]}]
+		s.rowset_info = new Map() // {rowset name -> {category, icon}}
 		s.load_error = null // rowset listing error text or null
 		s.request = null // rowset listing request or null
-		ui.on_free(tab_id+'.rowsets', function(s) {
+		focus(tab_id+'.search')
+		on_free(tab_id+'.rowsets', function(s) {
 			if (s.request) s.request.abort()
 		})
-		s.request = glue.get('/rowset.json/rowsets', function(rowsets) {
+		s.request = glue.get('/rowset.json/rowsets', function(response_rowsets) {
 			s.request = null
 			let category_items = new Map()
-			for (let [name, label, category, icon] of rowsets.rows) {
-				let item = {id: name, label, icon}
+			for (let [name, label, category, icon] of response_rowsets.rows) {
+				icon = icon ?? 'database'
+				let item = {id: name, label: label ?? display_name(name), icon}
 				attr(category_items, category, array).push(item)
+				s.rowset_info.set(name, {category, icon})
 			}
-			for (let name in ui.rowsets) {
-				let rowset = ui.rowsets[name]
+			for (let name in rowsets) {
+				let rowset = rowsets[name]
 				if (!rowset.internal) {
-					let item = {id: name, label: rowset.label ?? name,
-						icon: rowset.icon}
-					attr(category_items, rowset.category ?? 'Other', array).push(item)
+					let icon = rowset.icon ?? 'database'
+					let item = {id: name,
+						label: rowset.label ?? display_name(name), icon}
+					let category = rowset.category ?? 'Other'
+					attr(category_items, category, array).push(item)
+					s.rowset_info.set(name, {category, icon})
 				}
 			}
 			s.items = []
-			for (let [category, items] of category_items)
+			for (let [category, items] of category_items) {
+				items.sort(cmp_label)
 				s.items.push({id: 'category.'+category, label: category, items})
-			ui.animate()
+			}
+			animate()
 		}, function(error, type) {
 			if (type == 'abort') return
 			s.request = null
 			s.load_error = error
-			ui.animate()
+			animate()
 		}, {silent: true})
 	}
 
-	ui.scrollbox(tab_id+'.scrollbox', 1, 'auto', 'auto', 's', 's')
-		ui.p(ui.sp4(), ui.sp8())
-		v(0, sp2(), 'c', 'c')
+	scrollbox(tab_id+'.scrollbox', 1, 'auto', 'auto', 's', 's')
+		p(sp4(), sp8())
 
-			ui.h(0, ui.sp2())
+		v(0, sp2(), 'c', 't')
 
-				if (button(tab_id+'.container', 'layout', 'Container'))
-					set_dock_tab('app_dock', tab.id,
-						{title: 'Container', icon: 'layout',
-							layout: {tabs: []}})
+			ui.min_w(ui.em(36))
+			h(0, sp2(), 'c')
 
-				let closed_containers = ui.dock_closed_containers('app_dock')
-				let closed_container_id = menu_button(tab_id+'.containers_button',
-					'archive', 'Containers', closed_containers, null, null, null, null,
-					!closed_containers.length)
-				if (closed_container_id)
-					ui.restore_dock_container('app_dock', tab.id, closed_container_id)
+				icon('', 'search', 0, 'c', 'c')
+				let search = input(tab_id+'.search')
 
 				if (s.load_error) text('', s.load_error, 0)
 
-			ui.end_h()
+			end_h()
 
+			let query = search ? fold_text(search) : null
+
+			// containers: "New Container" first, then closed containers,
+			// each in its first child's category.
 			let categories = new Map()
-			for (let name in ui.views) {
-				let view = ui.views[name]
+			if (label_matches('New Container', query)) {
+				let item = {container: true, id: null, label: 'New Container',
+					icon: 'layout'}
+				attr(categories, 'Containers', array).push(item)
+			}
+			for (let closed of dock_closed_containers('app_dock')) {
+				if (!label_matches(closed.label, query))
+					continue
+				let found = find_container_category(closed.layout, s.rowset_info)
+				let item = {container: true, id: closed.id, label: closed.label,
+					icon: found?.icon ?? 'layout'}
+				attr(categories, found?.category ?? 'Containers', array).push(item)
+			}
+
+			for (let name in views) {
+				let view = views[name]
+				if (!label_matches(view.label, query))
+					continue
 				attr(categories, view.category, array).push(name)
 			}
 			for (let category of s.items)
 				for (let item of category.items)
-					attr(categories, category.label, array).push(item)
+					if (label_matches(item.label, query))
+						attr(categories, category.label, array).push(item)
+
+			// "Containers" first, then the other categories alphabetically.
+			let category_names = [] // [category, ...]
+			for (let category of categories.keys())
+				if (category != 'Containers')
+					category_names.push(category)
+			category_names.sort()
+			if (categories.has('Containers'))
+				category_names.unshift('Containers')
 
 			let k = 1
-			for (let [category, choices] of categories) {
-				ui.bold()
-				ui.mt(ui.sp2())
-				ui.large()
-				ui.color('link')
-				ui.text('', category, 0)
+			for (let category of category_names) {
+				let choices = categories.get(category)
+				bold()
+				mt(sp2())
+				large()
+				color('link')
+				text('', category, 0)
 				v(0, sp2())
+					let cols = 5
 					for (let i = 0; i < choices.length; i++) {
-						if (i % 6 == 0)
-							ui.h(0, ui.sp1(), 'l', 't')
+						if (i % 5 == 0)
+							h(0, sp1(), 'l', 't')
 						let choice = choices[i]
-						let is_rowset = !isstr(choice)
-						let name = is_rowset ? choice.id : choice
-						let view = is_rowset ? choice : ui.views[name]
-						let icon = is_rowset ? view.icon ?? 'database' : view.icon
+						let is_container = !isstr(choice) && choice.container
+						let is_rowset = !isstr(choice) && !is_container
+						let name = is_container ? choice.id ?? 'new'
+							: is_rowset ? choice.id : choice
+						let view = is_container || is_rowset ? choice : views[name]
+						let icon = view.icon
 						let button_id = tab_id+'.'
-							+ (is_rowset ? 'rowset.' : '')+name+'_button'
-						ui.min_w(ui.em(3))
-						v(0, ui.sp(), 'c', 't')
+							+ (is_container ? 'container.' : is_rowset ? 'rowset.' : '')
+							+ name+'_button'
+						min_w(em(3))
+						v(0, sp(), 'c', 't')
 							if (button(button_id, icon, null, 0, 'c')) {
-								if (is_rowset) {
+								if (is_container) {
+									if (choice.id == null)
+										set_dock_tab('app_dock', tab.id,
+											{title: 'Container', icon: 'layout',
+												layout: {tabs: []}})
+									else
+										restore_dock_container('app_dock', tab.id,
+											choice.id)
+								} else if (is_rowset) {
 									set_dock_tab('app_dock', tab.id, {
 										kind: 'rowset', title: view.label, icon: icon,
 										args: {rowset_name: name},
@@ -273,16 +349,17 @@ function app_dock_empty_tab(tab) {
 									})
 								}
 							}
-							ui.text_wrapped('view.'+k++, view.label.trim(), 0, 'c', 't')//, ui.em(3))
+							//small()
+							text_wrapped('view.'+k++, view.label.trim(), 0, 'c', 't')//, em(3))
 						end_v()
-						if (i % 6 == 5 || i == choices.length - 1)
-							ui.end_h()
+						if (i % cols == cols-1 || i == choices.length - 1)
+							end_h()
 					}
 				end_v()
 			}
 
 		end_v()
-	ui.end_scrollbox()
+	end_scrollbox()
 }
 
 function app_dock_app_tab(tab) {
@@ -295,17 +372,17 @@ function app_dock_app_tab(tab) {
 }
 
 function app_dock_tab(tab) {
-	let view = ui.views[tab.kind]
+	let view = views[tab.kind]
 	if (view) {
 		view.build('app_dock.tab.'+tab.id+'.'+tab.kind, tab.args)
 	} else if (tab.kind == 'rowset') {
 		let id = 'app_dock.tab.'+tab.id+'.rowset'
-		ui.grid(id, {
+		grid(id, {
 			rowset_name: tab.args.rowset_name,
 		})
-		let nav = ui.state_of(id, 'nav')
+		let nav = state_of(id, 'nav')
 		if (nav.ready)
-			ui.set_current_tab_title(nav.label)
+			set_current_tab_title(nav.label)
 	} else if (tab.kind) {
 		app_dock_app_tab(tab)
 	} else {
@@ -336,7 +413,7 @@ let app_dock_tab_opt = { // dock options
 main = function() {
 	if (!login_window())
 		return
-	ui.set_screen_theme(ui.saved_state.globals?.theme)
+	set_screen_theme(saved_state.globals?.theme)
 	dock('app_dock', {tabs: []}, app_dock_tab, app_dock_tab_opt)
-	ui.impersonate_modal('table_user')
+	impersonate_modal('table_user')
 }

@@ -171,6 +171,8 @@ PAPER-SCHEMA HELPERS (schema_mdbx.lua)
 	hash            (size)                         fixed-size binary type
 	maxlen          (n)                            set maximum field length
 	virtual                                        leading table marker
+	members                                        leading table marker: link
+	                                               table rowset is members_rowset
 
 TRIGGERS
 

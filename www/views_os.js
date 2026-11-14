@@ -50,11 +50,11 @@ ui.field_types.os_file_name = {
 }
 
 const process_tree_opt = { // process grid options
-	rowset_name: 'os_explorer_processes',
+	rowset_name: 'os_processes',
 }
 
 const open_ports_opt = { // socket grid options
-	rowset_name: 'os_explorer_ports',
+	rowset_name: 'os_ports',
 }
 
 ui.process_tree = function(id) {
@@ -64,7 +64,7 @@ ui.process_tree = function(id) {
 
 ui.folder_tree = function(id, folder) {
 	ui.grid(id+'.grid', {
-		rowset_name: 'os_explorer_files',
+		rowset_name: 'os_files',
 		param_bar_vals: folder != null ? {folder: folder} : null,
 		partial_load: true,
 		field_attrs: {
@@ -88,10 +88,10 @@ ui.open_ports = function(id) {
 const code_edit_opt = {lang: null} // ui.code_edit() reads it during the call
 
 const file_editor_def = {
-	rowset_name: 'os_explorer_file',
+	rowset_name: 'os_file',
 	key_col: 'path',
 	value_col: 'contents',
-	master_rowset_name: 'os_explorer_files',
+	master_rowset_name: 'os_files',
 	label: 'File',
 	empty_text: 'Select a file',
 	build: function(input_id, value, field, readonly, path) {

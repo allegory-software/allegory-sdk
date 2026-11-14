@@ -4,7 +4,8 @@ require'ipv6'
 
 --process tree ---------------------------------------------------------------
 
-rowset.os_explorer_processes = virtual_rowset(function(rs)
+rowset.os_processes = virtual_rowset(function(rs)
+	rs.internal = true
 	rs.label = 'Processes'
 	rs.category = 'OS explorer'
 	rs.fields = {
@@ -130,7 +131,8 @@ local function add_child_rows(rows, child_rows, dir, recursive)
 	end
 end
 
-rowset.os_explorer_files = virtual_rowset(function(rs)
+rowset.os_files = virtual_rowset(function(rs)
+	rs.internal = true
 	rs.label = 'Files'
 	rs.category = 'OS explorer'
 	rs.fields = {
@@ -206,7 +208,8 @@ local function file_contents_row(path)
 	return {path, contents ~= '' and contents or null}
 end
 
-rowset.os_explorer_file = virtual_rowset(function(rs)
+rowset.os_file = virtual_rowset(function(rs)
+	rs.internal = true
 	rs.label = 'File'
 	rs.category = 'OS explorer'
 	rs.fields = {
@@ -217,7 +220,7 @@ rowset.os_explorer_file = virtual_rowset(function(rs)
 	rs.params = {
 		path = {
 			for_cols = 'path',
-			lookup_rowset_name = 'os_explorer_files', lookup_cols = 'path',
+			lookup_rowset_name = 'os_files', lookup_cols = 'path',
 			accept_many = false,
 		},
 	}
@@ -260,7 +263,8 @@ end
 
 local protocols = {'tcp', 'tcp6', 'udp', 'udp6'} -- /proc/net file names
 
-rowset.os_explorer_ports = virtual_rowset(function(rs)
+rowset.os_ports = virtual_rowset(function(rs)
+	rs.internal = true
 	rs.label = 'Ports'
 	rs.category = 'OS explorer'
 	rs.fields = {

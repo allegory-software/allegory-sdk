@@ -3,7 +3,7 @@ require'rowset_mdbx'
 --the param of the rowsets that show one table.
 local table_param = {
 	label = 'Table', accept_many = false,
-	lookup_rowset_name = 'db_explorer_tables',
+	lookup_rowset_name = 'db_tables',
 }
 
 local function format_key_cols(cols)
@@ -14,7 +14,8 @@ local function format_key_cols(cols)
 	return cat(t, ', ')
 end
 
-rowset.db_explorer_tables = virtual_rowset(function(rs)
+rowset.db_tables = virtual_rowset(function(rs)
+	rs.internal = true
 	rs.category = 'Database explorer'
 	rs.fields = {
 		{
@@ -89,7 +90,8 @@ rowset.db_explorer_tables = virtual_rowset(function(rs)
 	end
 end)
 
-rowset.db_explorer_fields = virtual_rowset(function(rs)
+rowset.db_fields = virtual_rowset(function(rs)
+	rs.internal = true
 	rs.label = 'Fields'
 	rs.category = 'Database explorer'
 	rs.tabs = 'Column Storage Values Validation'
@@ -175,7 +177,8 @@ rowset.db_explorer_fields = virtual_rowset(function(rs)
 	end
 end)
 
-rowset.db_explorer_indexes = virtual_rowset(function(rs)
+rowset.db_indexes = virtual_rowset(function(rs)
+	rs.internal = true
 	rs.label = 'Indexes'
 	rs.category = 'Database explorer'
 	rs.fields = {
@@ -215,7 +218,7 @@ rowset.db_explorer_indexes = virtual_rowset(function(rs)
 	end
 end)
 
-dynamic_rowset('^db_explorer_rows_(.+)$', function(tbl)
+dynamic_rowset('^db_rows_(.+)$', function(tbl)
 	local schema = checkfound(db():atomic('any', function(tbl)
 		return db():table_schema(tbl)
 	end, tbl))
@@ -238,7 +241,7 @@ end)
 
 --the keys and values of a table as stored, for an index table or a table
 --without a schema. base tables with a schema are rowset.table_NAME.
-rowset.db_explorer_rows_raw = virtual_rowset(function(rs)
+rowset.db_rows_raw = virtual_rowset(function(rs)
 	rs.internal = true
 	rs.label = 'Raw rows'
 	rs.category = 'Database explorer'

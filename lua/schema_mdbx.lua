@@ -170,8 +170,15 @@ return function()
 	--directly and never opens it as a physical table.
 	function virtual(self, tbl) tbl.virtual = true end
 
+	--table-level marker: build a membership rowset out of this table for easy
+	--membership association via a checkbox column instead of a dropdown.
+	function members(self, tbl) tbl.members = true end
+
+	--table-level and field-level marker: table/field is client-accessible but
+	--not published for direct access (it is used internally by some feature).
+	function internal(self, tbl, fld) (fld or tbl).internal = true end
+
 	flags.hidden   = {hidden = true}
-	flags.internal = {internal = true}
 	flags.not_null = {not_null = true}
 	flags.autoinc  = {auto_increment = true, readonly = true}
 	flags.nozero   = {nozero = true} --no embedded zeroes allowed
@@ -190,7 +197,7 @@ return function()
 	types.name = {str, w = 10, ai_ci, icon'tag'}
 	types.long_name = {text, maxlen = 1200, w = 20, ai_ci, icon'tag'}
 
-	types.bool  = {type = 'bool', w = 1, align = 'center', mdbx_type = 'bool'}
+	types.bool  = {type = 'bool', w = 1, mdbx_type = 'bool'}
 	types.bool0 = {bool , not_null, client_default(false), server_default'false'}
 	types.bool1 = {bool , not_null, client_default(true), server_default'true'}
 

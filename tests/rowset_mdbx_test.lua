@@ -384,6 +384,49 @@ function test.table_rowset_server_param()
 	end, schema)
 end
 
+--table flags `internal` and info'...' reach the table and members rowsets;
+--`internal` stays a field flag too.
+function test.table_flags_internal_info()
+	local schema = mdbx_schema()
+	schema:import(function()
+		import'schema_mdbx'
+		tables.grp = {
+			internal, info'Groups text',
+			grp, idpk,
+			secret, text, internal,
+		}
+		tables.person = {person, idpk}
+		tables.grp_person = {
+			internal, icon'users', members,
+			grp   , id, not_null, child_fk,
+			person, id, not_null, child_fk, pk(grp, person),
+		}
+	end)
+	with_db('table_flags_internal_info', function(tdb)
+		prepare_table_rowsets()
+		local rs = rowset.table_grp
+		assert(rs.internal and rs.info == 'Groups text')
+		assert(rs.fields.secret.internal and not rs.fields.grp.internal)
+		assert(rs:load{}.info == 'Groups text')
+		assert(not rowset.table_person.internal)
+		assert(rowset.table_grp_person.internal)
+		assert(rowset.table_grp_person.label == 'Grp Person')
+		assert(rowset.table_grp_person.icon == 'users')
+		local listed = {} -- {rowset_name -> label}
+		for _, row in ipairs(rowset.rowsets:load{}.rows) do
+			listed[row[1]] = row[2]
+		end
+		assert(listed.table_person == 'Person')
+		assert(listed.rowsets == null) --no label: the client derives it.
+		assert(not listed.table_grp and not listed.table_grp_person)
+		local names = {'table_grp', 'table_person', 'table_grp_person',
+			'lookup_grp', 'lookup_person'}
+		for _, name in ipairs(names) do
+			rowset[name] = nil
+		end
+	end, schema)
+end
+
 local name = ...
 if name == 'rowset_mdbx_test' then name = nil end
 local tests = name and {name} or test

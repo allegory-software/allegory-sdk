@@ -12,6 +12,7 @@ Rowset attributes to set (* = server-only):
 		pk               : 'col1 ...'    primary key (required)
 	OPTIONAL
 		label            : 'Foo Bar'     label of a master in a detail's toggle
+		info             : '...'         description of the rowset
 		category         : 'Foo'         display group of the rowset in menus
 		icon             : 'foo'         icon of the rowset in menus
 	*	field_attrs      : {col->field}  extra field attributes
@@ -534,6 +535,7 @@ function virtual_rowset(init, ...)
 			can_load_changed_rows = rs.load_changed_rows ~= nil,
 			actions = client_actions,
 			label = rs.label,
+			info = rs.info,
 			fields = rs.client_fields,
 			params = rs.client_params,
 			pk = rs.pk,
@@ -879,14 +881,14 @@ local function list_rowsets()
 			end
 			add(list, {
 				name = name,
-				label = t.label or name,
+				label = t.label,
 				category = t.category or 'Other',
 				icon = t.icon,
 				masters = masters,
 			})
 		end
 	end
-	return sort(list, cmp'category label name')
+	return list
 end
 
 --used to populate the rowsets menu.
@@ -901,7 +903,7 @@ rowset.rowsets = virtual_rowset(function(rs) --rowset reflection
 	function rs:load_rows(res, params)
 		res.rows = {}
 		for _, e in ipairs(list_rowsets()) do
-			add(res.rows, {e.name, e.label, e.category, e.icon or null})
+			add(res.rows, {e.name, e.label or null, e.category, e.icon or null})
 		end
 	end
 end)
@@ -944,7 +946,7 @@ rowset.rowsets_tree = virtual_rowset(function(rs)
 		local on_path = {}
 		local function add_rows(e, parent_id)
 			local id = parent_id and parent_id..'/'..e.name or e.name
-			add(rows, {id, parent_id or null, e.name, e.label, e.category})
+			add(rows, {id, parent_id or null, e.name, e.label or e.name, e.category})
 			visited[e.name] = true
 			on_path[e.name] = true
 			for _, detail in ipairs(details[e.name] or empty) do

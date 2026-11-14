@@ -32,6 +32,7 @@ local function members_schema()
 			email , text,
 		}
 		tables.grp_person = {
+			members,
 			grp   , id, not_null, child_fk,
 			person, id, not_null, child_fk, pk(grp, person),
 			role  , text,
@@ -60,12 +61,12 @@ local function with_db(name, f)
 			tdb:insert('grp_person', '{}', {grp = 1, person = 1, role = 'admin'})
 			tdb:insert('grp_person', '{}', {grp = 2, person = 3})
 		end)
-		local rs = rowset.members_grp_person
+		local rs = rowset.table_grp_person
 		rs:prepare()
 		f(tdb, rs)
 	end, debug.traceback)
 	current_db = nil
-	rowset.members_grp_person = nil
+	rowset.table_grp_person = nil
 	rowset.lookup_grp = nil
 	rowset.lookup_person = nil
 	if tdb.env then tdb:close() end

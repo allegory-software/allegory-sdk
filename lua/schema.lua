@@ -77,6 +77,7 @@ FIELD FLAGS
 	section'Name', tab'Name'        set field.section / field.tab
 	icon'name'                     set field.icon (also a table flag)
 	label'Name'                    table flag: set tbl.label (display text)
+	info'Text'                     table flag: set tbl.info (display text)
 
 SCHEMA WORDS AND METHODS
 
@@ -603,6 +604,13 @@ function schema.env.label(name)
 	return function(self, tbl, fld)
 		assert(not fld, 'label is a table flag: a field takes en_label')
 		tbl.label = name
+	end
+end
+
+function schema.env.info(text)
+	return function(self, tbl, fld)
+		assert(not fld, 'info is a table flag: a field takes en_info')
+		tbl.info = text
 	end
 end
 

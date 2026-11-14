@@ -12335,7 +12335,7 @@ ui.live_move_mixin = function(e) {
 	ui.set_dock_tab   (id, tab_id, props)   update tab properties
 	ui.remove_dock_tab (id, tab_id)          remove a dock tab
 	ui.select_dock_tab (id, tab_id)          select a dock tab
-	ui.dock_closed_containers (id) -> items  closed containers, as menu items
+	ui.dock_closed_containers (id) -> items  closed containers, as menu items with layout
 	ui.restore_dock_container (id, tab_id, closed_tab_id)
 	  show a closed container in tab tab_id and forget it as closed
 TAB STRIP REC BOX
@@ -13203,9 +13203,11 @@ ui.set_dock_tab = function(id, tab_id, props) {
 
 ui.dock_closed_containers = function(id) {
 	let s = ui.state_of(id)
-	let items = [] // [{id, label}]
-	for (let closed_tab of s.closed_containers)
-		items.push({id: closed_tab.id, label: closed_tab.title ?? 'New Tab'})
+	let items = [] // [{id, label, layout}]
+	for (let closed_tab of s.closed_containers) {
+		items.push({id: closed_tab.id, label: closed_tab.title ?? 'New Tab',
+			layout: closed_tab.layout})
+	}
 	return items
 }
 
