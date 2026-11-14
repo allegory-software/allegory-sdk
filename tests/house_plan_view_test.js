@@ -88,8 +88,9 @@ let ui = {
 		fontBoundingBoxDescent: 2}),
 }
 for (let name of ['animate', 'box_position', 'box_translate', 'focus_group',
-	'focusable', 'end_focus_group', 'stack', 'end_stack', 'm', 'v', 'h',
-	'end', 'end_v', 'end_h', 'bold', 'text', 'color'])
+	'focusable', 'end_focus_group', 'stack', 'end_stack', 'm', 'mt', 'v', 'h',
+	'end', 'end_v', 'end_h', 'bold', 'text', 'color', 'p', 'nobold',
+	'xlarge', 'icon', 'state_of'])
 	ui[name] = () => {}
 
 const ctx = {

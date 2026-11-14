@@ -3,7 +3,7 @@
 const G = window
 
 const {
-	round, mod, abs, min, max, clamp, tan, rad,
+	round, mod, abs, min, max, clamp,
 	assert, log, push_log, pop_log, push_log_if,
 	insert, remove_value, uniq_sorted, map, assign, clock, json,
 } = glue
@@ -35,13 +35,15 @@ function house_plan(t) {
 	let edit0
 	house.edit_no = 0 // increments on each committed edit, undo and redo
 
-	function copy_roofs(roofs) {
-		if (!roofs) return
-		let a = []
-		for (let roof of roofs)
-			a.push({type: roof.type, pitch: roof.pitch, eaves: roof.eaves,
-				axis: roof.axis, h: roof.h, box: bbox2(...roof.box)})
-		return a
+	function copy_roof(roof) {
+		if (!roof)
+			return null
+		let edge_points = []
+		for (let edge_point of roof.edge_points ?? [])
+			edge_points.push({x: edge_point.x, y: edge_point.y,
+				pitch: edge_point.pitch})
+		return {pitch: roof.pitch, eave_h: roof.eave_h,
+			edge_points: edge_points}
 	}
 
 	function copy_room_points(room_points) {
@@ -57,7 +59,6 @@ function house_plan(t) {
 		for (let floor of house.floors) {
 			let state = floor.save_state()
 			state.h = floor.fixed_h
-			state.roofs = copy_roofs(floor.roofs)
 			floors.push(state)
 		}
 		return {rotation: house.rotation, floor_h: house.floor_h,
@@ -135,7 +136,8 @@ function house_plan(t) {
 		floor.orthogonal = true
 
 		floor.house = house
-		floor.roofs = copy_roofs(t.roofs)
+		// {pitch:, eave_h:, edge_points: [{x:, y:, pitch:}, ...]} or null
+		floor.roof = copy_roof(t.roof)
 		floor.i = floor_i
 		floor.id = 'floor'+floor_i
 		floor.h = t.h ?? house.floor_h
@@ -148,7 +150,6 @@ function house_plan(t) {
 		floor._after_fix = function() {
 			create_edges()
 			fix_open_rooms()
-			fix_roofs()
 			fix_snap_lines()
 		}
 
@@ -237,54 +238,67 @@ function house_plan(t) {
 
 		// roofs ---------------------------------------------------------------
 
-		function roof_ridge_is_v(roof) { return roof.axis == 'v' }
+		// the faces of the roof over the floor's outlines, as returned by
+		// roof_skeleton(). the roof's edges are the outer skin's sides. an
+		// edge point sets the pitch of the nearest side. two or more points
+		// on one side: the roof's pitch, like room points.
+		floor.make_roof_faces = function() {
+			let roof = floor.roof
+			let eave_h = roof.eave_h ?? house.slab_thickness // on the top slab
+			let eave_z = floor.z + floor.h + eave_h
 
-		function gable_roof_ridge_axis(roof) {
-			let M1 = roof_ridge_is_v(roof) ? 0 : 1
-			let m1 = roof.bb[M1]
-			let m2 = roof.bb[M1+2]
-			return (m1 + m2) / 2
-		}
-
-		function gable_roof_height_at(m, roof) {
-			let a = roof.pitch * rad
-			let M1 = roof_ridge_is_v(roof) ? 0 : 1
-			let m1 = roof.bb[M1]
-			let m2 = roof.bb[M1+2]
-			let mc = (m2 + m1) / 2
-			return round(tan(a) * ((m2 - mc) - abs(m - mc)))
-		}
-
-		function gable_roof_height_at_point(px, py, roof) {
-			let m = roof_ridge_is_v(roof) ? px : py
-			return gable_roof_height_at(m, roof)
-		}
-
-		function roof_section() {
-
-		}
-
-		function init_roofs() {
-			if (!floor.roofs)
-				return
-			push_log('init roofs')
-
-			for (let roof of floor.roofs) {
-				fix_roof(roof)
+			// one ring per outline: the outer skin's corners, without the
+			// collinear points of the walls joining it.
+			let rings = []
+			for (let comp of floor) { // root comps: islands are inside them.
+				let eps = comp.outer_cycle.edges
+				let ring = []
+				for (let i = 0, n = eps.length; i < n; i++) {
+					let [x0, y0] = eps[(i+n-1) % n]
+					let [x1, y1] = eps[i]
+					let [x2, y2] = eps[(i+1) % n]
+					if (x0 == x1 && x1 == x2 || y0 == y1 && y1 == y2)
+						continue
+					ring.push([x1, y1])
+				}
+				rings.push(ring)
 			}
 
-			pop_log()
-		}
+			let edge_point_by_side = map() // {'ring_i i' -> edge_point|null if 2+}
+			for (let edge_point of roof.edge_points) {
+				let {x, y} = edge_point
+				let min_d = 1/0
+				let min_key
+				for (let ring_i = 0; ring_i < rings.length; ring_i++) {
+					let ring = rings[ring_i]
+					for (let i = 0, n = ring.length; i < n; i++) {
+						let [x1, y1] = ring[i]
+						let [x2, y2] = ring[(i+1) % n]
+						let dx = max(min(x1, x2) - x, 0, x - max(x1, x2))
+						let dy = max(min(y1, y2) - y, 0, y - max(y1, y2))
+						let d = dx * dx + dy * dy
+						if (d >= min_d)
+							continue
+						min_d = d
+						min_key = ring_i+' '+i
+					}
+				}
+				edge_point_by_side.set(min_key,
+					edge_point_by_side.has(min_key) ? null : edge_point)
+			}
 
-		function fix_roof(roof) {
-			//
-		}
-
-		function fix_roofs() {
-			if (!floor.roofs)
-				return
-			for (let roof of floor.roofs)
-				fix_roof(roof)
+			let faces = []
+			for (let ring_i = 0; ring_i < rings.length; ring_i++) {
+				let ring = rings[ring_i]
+				let pitches = []
+				for (let i = 0; i < ring.length; i++) {
+					let edge_point = edge_point_by_side.get(ring_i+' '+i)
+					pitches.push(edge_point?.pitch ?? roof.pitch)
+				}
+				for (let face of roof_skeleton([ring], pitches, eave_z))
+					faces.push(face)
+			}
+			return faces
 		}
 
 		// model state ---------------------------------------------------------
@@ -301,12 +315,14 @@ function house_plan(t) {
 				lines.push(seg.id, point_indices.get(seg[0]),
 					point_indices.get(seg[1]))
 			return {points: points, lines: [lines],
-				room_points: copy_room_points(floor.room_points)}
+				room_points: copy_room_points(floor.room_points),
+				roof: copy_roof(floor.roof)}
 		}
 
 		floor.load_state = function(state) {
 			floor.load(state.points, state.lines)
 			floor.room_points = copy_room_points(state.room_points)
+			floor.roof = copy_roof(state.roof)
 			floor.fix()
 		}
 
@@ -752,7 +768,6 @@ function house_plan(t) {
 
 		push_log('LOADING LEVEL', floor.i)
 		floor.load(t.points, t.lines)
-		init_roofs()
 		pop_log()
 
 		return floor

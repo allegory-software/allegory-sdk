@@ -598,6 +598,7 @@ ui.box_widget('floor_editor', {
 								?? S(floor.i+'_floor', '{0}ᵗʰ FLOOR', floor.i))
 						}
 						if (!s.readonly) {
+							ui.mt(ui.em(1))
 							ui.h(0, ui.sp05())
 								ui.button(id+'.add_floor_button', 'building-plus', '',
 									0, null, null, null, null,

@@ -21,7 +21,7 @@ ctx.localStorage = {}
 ctx.addEventListener = () => {}
 vm.createContext(ctx)
 let files = ['glue.js', 'earcut.js', '3d.js', 'plane_graph.js',
-	'house_plan.js']
+	'roof_skeleton.js', 'house_plan.js']
 for (let name of files) {
 	let file = path.join(sdk, 'www', name)
 	vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, {filename: file})
@@ -501,14 +501,8 @@ check('saved geometry remains independent and can be loaded repeatedly', () => {
 	}
 })
 
-check('wall history leaves roof objects and direct editor links attached', () => {
-	let state = JSON.parse(JSON.stringify(ctx.house_test_plans.gable1))
-	state.floors[0].roofs = state.floors[2].roofs
-	let f = house(state).floors[0]
-	let roofs = f.roofs
-	let roof = roofs[0]
-	let comp = {roof: roof}
-	roof.comp = comp
+check('wall history leaves direct editor links attached', () => {
+	let f = house(ctx.house_test_plans.gable1).floors[0]
 	let editor = {floor: f}
 	f.editor = editor
 	f.ps[0].editor = editor
@@ -523,10 +517,6 @@ check('wall history leaves roof objects and direct editor links attached', () =>
 	r = f.start_move_seg(f.segs[0], ds)
 	r.move(0, 50, ds)
 	r.cancel(ds)
-	assert.equal(f.roofs, roofs)
-	assert.equal(f.roofs[0], roof)
-	assert.equal(roof.comp, comp)
-	assert.equal(comp.roof, roof)
 	assert.equal(f.editor, editor)
 	assert.equal(editor.floor, f)
 })
@@ -695,7 +685,7 @@ check('house snapshots round-trip every floor and roof', () => {
 	assert.equal(JSON.stringify(h1.save_state()), saved)
 	let state = h.save_state()
 	state.floors[0].points[0][0] += 100
-	state.floors[2].roofs[0].box[0] += 100
+	state.floors[2].roof.edge_points[0].x += 100
 	assert.equal(JSON.stringify(h.save_state()), saved)
 })
 
@@ -1284,6 +1274,50 @@ check('load_state with a bad state restores the house and adds no edit', () => {
 	assert.equal(h.floors, floors)
 	assert.equal(h.edit_no, edit_no)
 	assert.equal(h.undo(), false)
+})
+
+// roofs --------------------------------------------------------------------
+
+function roof_z_range(faces) {
+	let z1 = 1/0
+	let z2 = -1/0
+	for (let face of faces)
+		for (let ring of face.rings)
+			for (let [x, y, z] of ring) {
+				z1 = Math.min(z1, z)
+				z2 = Math.max(z2, z)
+			}
+	return [z1, z2]
+}
+
+check('gable roof on the top floor: two faces from the top slab up', () => {
+	let h = house(ctx.house_test_plans.gable1)
+	let f = h.floors[2]
+	let faces = f.make_roof_faces()
+	assert.equal(faces.length, 2)
+	// outer skin: y -14..414, 45 deg: the ridge is half the width above.
+	let eave_z = f.z + f.h + h.slab_thickness
+	assert.deepEqual(roof_z_range(faces), [eave_z, eave_z + 214])
+})
+
+check('two edge points on one side: the roof pitch', () => {
+	let state = JSON.parse(JSON.stringify(ctx.house_test_plans.gable1))
+	state.floors[2].roof.edge_points.push({x: 0, y: 100, pitch: 90})
+	let faces = house(state).floors[2].make_roof_faces()
+	assert.equal(faces.length, 3) // left side sloped, right side vertical
+})
+
+check('the roof is in the floor state: add_floor and undo keep it', () => {
+	let h = house(ctx.house_test_plans.gable1)
+	let roof = JSON.stringify(h.floors[2].roof)
+	let f = h.add_floor()
+	assert.equal(JSON.stringify(f.roof), roof)
+	let ds = draw_state()
+	let r = f.start_move_seg(f.segs.find(s => !s.is_v && s.axis == 240), ds)
+	r.move(0, 50, ds)
+	r.stop(ds)
+	assert(h.undo())
+	assert.equal(JSON.stringify(f.roof), roof)
 })
 
 console.log(n_checks + ' house plan checks passed')

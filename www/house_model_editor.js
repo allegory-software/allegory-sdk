@@ -4,7 +4,7 @@ const G = window
 
 const {
 	assert, push_log, pop_log,
-	empty_array, empty_obj,
+	empty_obj,
 } = glue
 
 const {v3, mat4, line2, line3} = Math3D
@@ -104,108 +104,31 @@ function init_house_model_editor(e, house, cut_floor) {
 		}
 		pop_log()
 
-		for (let floor of house.floors) {
-
-			// cut: skip the roofs of the cut floor and above.
-			if (cut_floor && floor.i >= cut_floor.i)
-				break
-
-			push_log('creating floor', floor.id)
-
-			let floor_y = floor.z
-
-			for (let roof of floor.roofs ?? empty_array) {
-
-				let roof_name = 'roof_'+floor.i
-
-				push_log('creating roof', roof_name)
-
-				let c = e.create_component({name: roof_name})
-				e.root.comp.add_child(c, mat4().translate(0, floor_y, 0))
-
-				roof.comp = c
-
-				if (roof.type == 'gable') {
-
-					// calculate the ridge end-point coords om the xz-plane
-					let pitch = roof.pitch
-					let h = assert(roof.h)
-					let eaves = roof.eaves ?? 0
-					let axis = roof.axis ?? 'v'
-					let [bx1, bz1, bx2, bz2] = roof.box
-					let rx1, rz1, rx2, rz2, y1, y2
-					if (axis == 'v') {
-						rz1 = bz1
-						rz2 = bz2
-						rx1 = (bx2 + bx1) / 2
-						rx2 = rx1
-					} else {
-						rx1 = bx1
-						rx2 = bx2
-						rz1 = (bz2 + bz1) / 2
-						rz2 = rz1
+		// roof: on the top floor, when the model is not cut.
+		let top_floor = floors[floors.length-1]
+		if (!cut_floor && top_floor.roof) {
+			push_log('creating roof')
+			let c = e.create_component({name: 'roof'})
+			e.root.comp.add_child(c, mat4())
+			for (let face of top_floor.make_roof_faces()) {
+				// the footprint has no holes, so neither have its faces: each
+				// ring is an outline, ccw in plan (x, y), so cw seen from
+				// above: reverse it.
+				for (let ring of face.rings) {
+					let pis = []
+					let area = 0
+					for (let i = ring.length-1; i >= 0; i--) {
+						let [x1, y1, z] = ring[i]
+						let [x2, y2] = ring[(i+1) % ring.length]
+						area += x1 * y2 - x2 * y1
+						pis.push(c.add_point_xyz(x1, z, y1))
 					}
-
-					// generate the 2 sides, 2 faces each, of the gable roof
-					for (let j = 0; j <= 1; j++) { // bottom then top face
-
-						let ry = h + j * 20
-
-						// generate the ridge end-points for this face
-						c.add_point_xyz(rx1, ry, rz1)
-						c.add_point_xyz(rx2, ry, rz2)
-
-						for (let i = 0; i <= 1; i++) { // left then right side
-							let pis = []
-							let x1, z1, x2, z2
-							if (axis == 'v') {
-								z1 = rz1
-								z2 = rz2
-								x1 = i ? bx2 : bx1
-								x2 = x1
-							} else {
-								x1 = rx1
-								x2 = rx2
-								z1 = i ? bz2 : bz1
-								z2 = z1
-							}
-							let y = ry - 100
-							if (!i) {
-								c.add_point_xyz(x2, y, z2)
-								c.add_point_xyz(x1, y, z1)
-								if (!j)
-									pis.push(3, 2, 1, 0)
-								else
-									pis.push(6, 7, 8, 9)
-							} else {
-								c.add_point_xyz(x1, y, z1)
-								c.add_point_xyz(x2, y, z2)
-								if (!j)
-									pis.push(5, 4, 0, 1)
-								else
-									pis.push(7, 6, 10, 11)
-							}
-							let face = c.add_face(pis)
-							face.bottom = !j
-						}
-
-					}
-
-					// create fascias
-					c.add_face([1, 2, 8, 7, 11, 5])
-					c.add_face([0, 4, 10, 6, 9, 3])
-					c.add_face([3, 9, 8, 2])
-					c.add_face([4, 5, 11, 10])
-
+					assert(area > 0)
+					c.add_face(pis)
 				}
-
-				pop_log()
-
-			} // for roof
-
+			}
 			pop_log()
-
-		} // for floor
+		}
 
 	}
 
