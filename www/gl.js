@@ -758,6 +758,9 @@ gl.draw = function(gl_mode, offset, count) {
 	if (ib) {
 		if (count == null)
 			count = ib.len
+		// nothing to draw: skip the call; GL validates attrs even then.
+		if (!count || n_inst == 0)
+			return this
 		let byte_offset = offset * ib.arr_type.BYTES_PER_ELEMENT
 		if (n_inst != null) {
 			// NOTE: don't look for an offset-in-the-instance-buffers arg,
@@ -770,6 +773,9 @@ gl.draw = function(gl_mode, offset, count) {
 	} else {
 		if (count == null)
 			count = vao.vertex_count
+		// nothing to draw: skip the call; GL validates attrs even then.
+		if (!count || n_inst == 0)
+			return this
 		if (n_inst != null) {
 			gl.drawArraysInstanced(gl_mode, offset, count, n_inst)
 		} else {

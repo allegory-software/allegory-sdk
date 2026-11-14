@@ -3,17 +3,18 @@
 const G = window
 
 const {
-	assert, push_log, pop_log, push_log_if, gen_id,
+	assert, push_log, pop_log,
 	empty_array, empty_obj,
 } = glue
 
-const {v3, mat4, plane, line2, line3} = Math3D
+const {v3, mat4, line2, line3} = Math3D
 
-// init(e) for ui.model3_editor(): fill the editor with the house model.
-function init_house_model_editor(e, house) {
+// fill the editor with the house model up to cut_floor, or with all of it.
+function init_house_model_editor(e, house, cut_floor) {
 
 	e.house = assert(house)
 	e.house_edit_no = house.edit_no
+	e.cut_floor = cut_floor // floor the model is cut at, or null
 
 	let project_wall_to_roof_face
 	{
@@ -55,75 +56,63 @@ function init_house_model_editor(e, house) {
 	}
 	}
 
-	function create_plan() {
+	function create_plan(wall_polys, horizontal_polys) {
 
-		// TODO:
-		// let c = e.create_component({name: 'test'})
-		// e.root.comp.add_child(c, mat4())
-		// let p = plane().set_from_coplanar_points(v3(0, 0, 0), v3(1, 1, 0), v3(1, 1, 1))
-		// let [x, y] = p.transform_xyz_xy(0, 1, 1)
+		// walls: one face per merged wall polygon of the house.
+		push_log('creating walls')
+		let c = e.create_component({name: 'walls'})
+		e.root.comp.add_child(c, mat4())
 
-		/*
-		let p = plane_graph()
-		let p1 = p.add_point(-14, 0)
-		let p2 = p.add_point(200, 0)
-		p.add_seg(p1, p2)
-		let p3 = p.add_point(-14, 214)
-		let p4 = p.add_point(200, 214)
-		p.add_seg(p3, p4)
-		p.add_seg(p1, p3)
-		p.add_seg(p2, p4)
-		p.fix()
-		pr(p)
-		*/
+		// add a face from the outline and holes of poly, each loop reversed
+		// if is_reversed. add_poly_point(poly, p) adds 2D point p in 3D.
+		function add_poly_face(poly, is_reversed, add_poly_point) {
+			let pis = []
+			for (let hi = -1, hn = poly.hole_count(); hi < hn; hi++) {
+				let i1 = hi < 0 ? 0 : poly.hole_i1(hi)
+				let i2 = hi < 0 ? poly.point_count_without_holes()
+					: poly.hole_i2(hi)
+				for (let j = 0; j < i2 - i1; j++)
+					pis.push(add_poly_point(poly, poly[is_reversed ? i2-1-j : i1+j]))
+			}
+			c.add_face(pis, null, null, poly.holes)
+		}
+
+		function add_wall_point(poly, [m, z]) {
+			let x = poly.is_v ? poly.axis : m
+			let y = poly.is_v ? m : poly.axis
+			return c.add_point_xyz(x, z, y)
+		}
+
+		function add_horizontal_point(poly, [x, y]) {
+			return c.add_point_xyz(x, poly.z, y)
+		}
+
+		for (let poly of wall_polys) {
+			// model3 faces are ccw seen from outside. the poly is ccw in
+			// (m, z), so it is cw seen from outside when the plan's m axis
+			// is toward the viewer's left: on an x plane facing +x, or on a
+			// y plane facing -y. reverse each loop there.
+			let is_reversed = poly.is_v == (poly.normal > 0)
+			add_poly_face(poly, is_reversed, add_wall_point)
+		}
+
+		// slab tops and undersides, wall caps. a poly that is ccw in plan
+		// (x, y) is cw seen from above, so reverse each loop of up faces.
+		for (let poly of horizontal_polys) {
+			let is_reversed = poly.normal > 0
+			add_poly_face(poly, is_reversed, add_horizontal_point)
+		}
+		pop_log()
 
 		for (let floor of house.floors) {
 
+			// cut: skip the roofs of the cut floor and above.
+			if (cut_floor && floor.i >= cut_floor.i)
+				break
+
 			push_log('creating floor', floor.id)
 
-			push_log('creating floor plan')
-
-			let c = e.create_component({name: 'floor_'+floor.i})
-			let floor_y = house.h - floor.y - floor.h
-			e.root.comp.add_child(c, mat4().translate(0, floor_y, 0))
-			let has_roofs = !!floor.roofs?.length
-
-			for (let fcomp of floor.comps) {
-				let face_pis = []
-				let face_holes = []
-				let top_pis = []
-				for (let cycle of fcomp.cycles) {
-					let i1 = face_pis.length
-					if (!cycle.outer)
-						face_holes.push(i1)
-					for (let ep of cycle.edges) {
-						let pi = c.add_point_xyz(ep[0], 0, ep[1])
-						face_pis.push(pi)
-						if (!has_roofs)
-							top_pis.push(c.add_point_xyz(ep[0], floor.h, ep[1]))
-					}
-					if (!has_roofs) {
-						let i2 = face_pis.length
-						let j = i2-1
-						for (let i = i1; i < i2; i++) {
-							c.add_face([face_pis[i], face_pis[j],
-								top_pis[j], top_pis[i]])
-							j = i
-						}
-						j = i2-1
-						for (let i = i1; i < j; i++, j--) {
-							let pi = top_pis[i]
-							top_pis[i] = top_pis[j]
-							top_pis[j] = pi
-						}
-					}
-				}
-				c.add_face(face_pis, null, null, face_holes)
-				if (!has_roofs)
-					c.add_face(top_pis, null, null, face_holes)
-			}
-
-			pop_log()
+			let floor_y = floor.z
 
 			for (let roof of floor.roofs ?? empty_array) {
 
@@ -214,101 +203,51 @@ function init_house_model_editor(e, house) {
 
 			} // for roof
 
-			if (has_roofs) {
-
-				push_log('raising walls')
-				let A = v3()
-				let B = v3()
-				let C = v3()
-				for (let fcomp of floor.comps) {
-					for (let cycle of fcomp.cycles) {
-						let a = cycle.edges
-						let n = a.length
-						let p2 = a[n-1]
-						for (let i = 0; i < n; i++) {
-							let p1 = a[i]
-
-							// raise a wall from this edge up to the roofs.
-							let wall_id = gen_id('wall')
-							// let c = e.create_component({name: wall_id})
-							// e.root.comp.add_child(c, mat4())
-
-							let wall = plane_graph()
-							wall.id = wall_id
-							push_log_if(true, 'raising wall', wall.id, 'between', p1.p.id, p2.p.id)
-
-							// create wall's vertical plane.
-							// The order of p1,p2 is important in order to orient the
-							// faces of the edges of the outer cycle outwards,
-							// and the faces of the edges of the inner cycles inwards.
-							let [x1, y1] = p1
-							let [x2, y2] = p2
-							A.set(x1, 0, y1)
-							B.set(x2, 0, y2)
-							C.set(x1, 1, y1)
-							wall.plane = plane().set_from_coplanar_points(A, B, C)
-
-							// add wall base line
-							let [ax, ay] = wall.plane.transform_xyz_xy(A[0], A[1], A[2])
-							let [bx, by] = wall.plane.transform_xyz_xy(B[0], B[1], B[2])
-							// A.transform(wall.plane)
-							// B.transform(wall.plane)
-							let wall_p1 = wall.add_point(ax, ay)
-							let wall_p2 = wall.add_point(bx, by)
-							wall.add_seg(wall_p1, wall_p2)
-
-							// project wall base line on each roof face plane
-							// and intersect it with the roof face poly, keeping
-							// only the parts that are inside the poly.
-							for (let roof of floor.roofs)
-								for (let face of roof.comp.faces)
-									if (face.bottom)
-										project_wall_to_roof_face(wall, p1, p2, face)
-
-							// add wall's vertical edges
-							if (wall.sp1) wall.add_seg(wall_p1, wall.sp1)
-							if (wall.sp2) wall.add_seg(wall_p2, wall.sp2)
-
-							wall.fix()
-							pop_log()
-
-							c.add(wall)
-
-							p2 = p1
-						}
-					}
-				}
-
-				pop_log()
-
-			} // if roofs: raise walls
-
 			pop_log()
 
 		} // for floor
 
 	}
 
-	create_plan()
+	let floors = house.floors
+	let [wall_polys, horizontal_polys] = cut_floor
+		? house.make_polys(cut_floor, true)
+		: house.make_polys(floors[floors.length-1], false)
+	create_plan(wall_polys, horizontal_polys)
 	e.update_all()
 }
 
-// ui.house_model_editor (id, house, fr=1, align='s', valign='s')
-ui.house_model_editor = function(id, house, fr, align, valign) {
+// ui.house_model_editor (id, house, floor=, fr=1, align='s', valign='s')
+// floor: the current floor, which the user can choose to cut the model at.
+ui.house_model_editor = function(id, house, floor, fr, align, valign) {
+	let cut_id = id+'.cut_button'
+	// read before the toggle builds: its update gives this frame's click.
+	let is_cut = ui.value(cut_id) ?? true // option: cut the model at floor
+	let cut_floor = floor && is_cut ? floor : null
 	let e = ui.state_of(id, 'e')
 	let init = null
 	if (!e) {
 		init = function(e1) {
-			init_house_model_editor(e1, house)
+			init_house_model_editor(e1, house, cut_floor)
 			// the house is in cm, the editor's default camera is for 1-unit models.
 			e1.set_camera_pos(v3(-300, 600, 900))
 			e1.set_camera_dir(v3(-6, 4.4, 7))
 		}
-	} else if (e.house != house || e.house_edit_no != house.edit_no) {
+	} else if (e.house != house || e.house_edit_no != house.edit_no
+		|| e.cut_floor != cut_floor
+	) {
 		e.clear_model()
-		init_house_model_editor(e, house)
+		init_house_model_editor(e, house, cut_floor)
 	}
-	ui.model3_editor(id, empty_obj, init, fr, align, valign)
+	ui.stack('', fr, align, valign)
+		ui.model3_editor(id, empty_obj, init)
+		ui.p(ui.sp())
+		ui.stack()
+			if (floor)
+				ui.toggle_button(cut_id, is_cut,
+					S('house_model_cut', 'Up to current floor'), null, 0, 'l', 't')
+		ui.end_stack()
+	ui.end_stack()
 }
 
 }()) // module function

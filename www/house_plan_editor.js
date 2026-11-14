@@ -342,6 +342,28 @@ function floor_editor_update(id, s) {
 	for (let floor of plan.house.floors)
 		if (ui.clicked(id+'.floor'+floor.i))
 			s.floor = floor
+	let floors = s.house.floors
+	if (ui.state_of(id+'.add_floor_button', 'state') == 'click') {
+		s.floor = s.house.add_floor()
+	} else if (floors.length > 1
+		&& ui.state_of(id+'.remove_floor_button', 'state') == 'click'
+	) {
+		s.house.remove_top_floor()
+	}
+
+	let cs = ui.drag(id)
+	let is_restored = false
+	if (!readonly && !cs && ui.focus_inside(id)) {
+		if (ui.keydown('ctrl shift z') || ui.keydown('ctrl y'))
+			is_restored = plan.house.redo()
+		else if (ui.keydown('ctrl z'))
+			is_restored = plan.house.undo()
+	}
+
+	// removed the selected floor, or undid an added floor or redid a removed
+	// one: select the top floor.
+	if (!floors.includes(s.floor))
+		s.floor = floors[floors.length-1]
 	plan = s.floor
 	if (plan != floor0) {
 		draw_state.snap_lines.length = 0
@@ -353,15 +375,6 @@ function floor_editor_update(id, s) {
 	let hs = ui.hit(id)
 	if (hs && ui.wheel_dy)
 		sg.zoom(ui.wheel_dy / ui.em(7), hs.mx, hs.my)
-
-	let cs = ui.drag(id)
-	let is_restored = false
-	if (!readonly && !cs && ui.focus_inside(id)) {
-		if (ui.keydown('ctrl shift z') || ui.keydown('ctrl y'))
-			is_restored = plan.house.redo()
-		else if (ui.keydown('ctrl z'))
-			is_restored = plan.house.undo()
-	}
 
 	if (cs) {
 
@@ -420,6 +433,20 @@ function floor_editor_update(id, s) {
 				cs.resize_seg.resize(dx, dy, draw_state, cs)
 		}
 
+		// a room point moves only past the drag threshold: a click toggles
+		// its room instead.
+		if (action == 'move_room_point') {
+			if (cs.moved && !cs.cancel)
+				cs.move_room_point ??= plan.start_move_room_point(cs.room_point)
+			let move_room_point = cs.move_room_point
+			if (move_room_point) {
+				if (cs.cancel)
+					move_room_point.cancel(draw_state)
+				else
+					move_room_point.move(dx, dy)
+			}
+		}
+
 		if (action == 'pan' && !cs.cancel) {
 			sg.x0 = sg.pan_x0 + dx * sg.scale
 			sg.y0 = sg.pan_y0 + dy * sg.scale
@@ -431,6 +458,8 @@ function floor_editor_update(id, s) {
 				cs.move_seg.stop(draw_state)
 			} else if (action == 'resize_seg') {
 				cs.resize_seg.stop(draw_state)
+			} else if (action == 'move_room_point') {
+				cs.move_room_point?.stop() // not moved: no edit started.
 			}
 		}
 
@@ -442,19 +471,34 @@ function floor_editor_update(id, s) {
 		plan.delete_seg(hs.seg)
 	}
 
-	if (cs?.drop || cs?.cancel || is_deleting_seg || is_restored) {
+	// clicked inside a room without dragging: open or close the room.
+	let is_toggling_room = !readonly && cs?.drop && !cs.cancel && !cs.moved
+		&& (!cs.action || cs.action == 'move_room_point') && cs.cycle
+	if (is_toggling_room)
+		plan.toggle_room(cs.cycle, cs.room_x, cs.room_y)
+
+	let is_removing_room_point = !readonly && !cs && hs?.room_point
+		&& ui.focus_inside(id) && ui.keydown('delete')
+	if (is_removing_room_point)
+		plan.remove_room_point(hs.room_point)
+
+	if (cs?.drop || cs?.cancel || is_deleting_seg || is_removing_room_point
+		|| is_restored
+	) {
 		draw_state.snap_lines.length = 0
 		draw_state.measure_edges.length = 0
 		if (hs) {
 			hs.seg = null
 			hs.p = null
 			hs.cycle = null
+			hs.room_point = null
 			hs.action = null
 		}
 		if (cs) {
 			cs.seg = null
 			cs.p = null
 			cs.cycle = null
+			cs.room_point = null
 			cs.action = null
 		}
 	}
@@ -512,6 +556,7 @@ ui.box_widget('floor_editor', {
 			measure_edges: [],
 			above_floors: [],
 			below_floors: [],
+			below_cycles: [], // [edges, ...] of the floor below, except outlines
 		}
 		let draw_state = s.draw_state
 		let plan = s.floor
@@ -536,9 +581,19 @@ ui.box_widget('floor_editor', {
 							ui.text(id+'.floor'+floor.i, floor_names[floor.i]
 								?? S(floor.i+'_floor', '{0}ᵗʰ FLOOR', floor.i))
 						}
+						if (!s.readonly) {
+							ui.h(0, ui.sp05())
+								ui.button(id+'.add_floor_button', 'building-plus', '',
+									0, null, null, null, null,
+									S('add_floor', 'Add floor'))
+								ui.button(id+'.remove_floor_button', 'building-minus',
+									'', 0, null, null, null, floors.length < 2,
+									S('remove_top_floor', 'Remove top floor'))
+							ui.end_h()
+						}
 					ui.end_v()
 
-					ui.v(1)
+					ui.v(1, 0, 's', 't')
 						if (!ui.window_focused() || !ui.focus_inside(id)) {
 							ui.p(ui.sp05(), 0)
 							ui.stack('', 0, 'c')
@@ -550,30 +605,33 @@ ui.box_widget('floor_editor', {
 						}
 					ui.end_v()
 
-					if (sg.zoomed) {
-						if (ui.button(id+'.zoom_button',
-								sg.scale > 1 ? 'zoom-in' : 'zoom-out', '', 0, ']',
-								null, null, null, S('fit_to_view', 'Fit to view'))) {
-							sg.reset_zoom()
-						}
+					if (sg.zoomed && ui.button(id+'.zoom_button',
+							sg.scale > 1 ? 'zoom-in' : 'zoom-out', '',
+							0, 'c', 't', null, null,
+							S('fit_to_view', 'Fit to view'))
+					) {
+						sg.reset_zoom()
 					}
 
-					if (ui.button(id+'.rotate_button', 'rotate-rectangle', '', 0,
-							null, null, null, null,
-							S('rotate_90_degrees', 'Rotate 90 degrees'))) {
+					if (ui.button(id+'.rotate_button', 'rotate-rectangle', '',
+							0, 'c', 't', null, null,
+							S('rotate_90_degrees', 'Rotate 90 degrees'))
+					) {
 						sg.rotate_requested = true
 					}
 
-					if (ui.button(id+'.grid_button', 'grid-4x4', '', 0,
-							null, null, null, null,
-							S('show_grid', 'Show grid'))) {
+					if (ui.button(id+'.grid_button', 'grid-4x4', '',
+							0, 'c', 't', null, null,
+							S('show_grid', 'Show grid'))
+					) {
 						sg.show_grid = !sg.show_grid
 						ui.save_state('floor_editor', 'show_grid', sg.show_grid)
 					}
 
-					if (ui.button(id+'.dims_button', 'ruler-measure', '', 0,
-							null, null, null, null,
-							S('show_all_dimensions', 'Show all dimensions'))) {
+					if (ui.button(id+'.dims_button', 'ruler-measure', '',
+							0, 'c', 't', null, null,
+							S('show_all_dimensions', 'Show all dimensions'))
+					) {
 						sg.show_dims = !sg.show_dims
 						ui.save_state('floor_editor', 'show_dims', sg.show_dims)
 					}
@@ -652,7 +710,9 @@ ui.box_widget('floor_editor', {
 		draw_state.comps = plan.comps
 		draw_state.segs = plan.segs // TODO: remove this from draw stream
 		draw_state.ps = plan.ps // TODO: remove this from draw stream
-		draw_state.plan_snap_lines = plan.snap_lines
+		draw_state.plan_snap_lines = plan.house.snap_lines
+		draw_state.room_points = plan.room_points
+		draw_state.room_point_by_cycle = plan.room_point_by_cycle
 
 		draw_state.above_floors.length = 0
 		draw_state.below_floors.length = 0
@@ -663,6 +723,18 @@ ui.box_widget('floor_editor', {
 			let a = plan1.i > plan.i ? draw_state.above_floors : draw_state.below_floors
 			a.push(t)
 		}
+
+		// the cycles of the floor below for clipping the open rooms to the
+		// slab: rooms, islands and island rooms, but not the root outlines.
+		draw_state.below_cycles.length = 0
+		let below_plan = plan.house.floors[plan.i-1]
+		if (below_plan)
+			for (let co of below_plan.comps)
+				for (let c of co.cycles) {
+					if (c.outer && !co.inside)
+						continue
+					draw_state.below_cycles.push(c.edges)
+				}
 	},
 
 	draw: function(a, i) {
@@ -681,6 +753,7 @@ ui.box_widget('floor_editor', {
 		let hit_seg     = hs?.seg
 		let hit_p       = hs?.p
 		let hit_cycle   = hs?.cycle
+		let hit_room_point = hs?.room_point
 		let hit_x       = hs?.x
 		let hit_y       = hs?.y
 		let drag_action = cs?.action
@@ -774,6 +847,20 @@ ui.box_widget('floor_editor', {
 					continue
 				if (!c.edges)
 					continue
+				let room_point = draw_state.room_point_by_cycle.get(c)
+
+				// open room: background only on the slab, outside the rooms below.
+				let is_open = room_point?.is_open
+				if (is_open) {
+					cx.save()
+					cx.beginPath()
+					let [x1, y1, x2, y2] = c.edges.bbox()
+					cx.rect(sg.x(x1), sg.y(y1),
+						sg.x(x2) - sg.x(x1), sg.y(y2) - sg.y(y1))
+					for (let edges of draw_state.below_cycles)
+						draw_edges(cx, sg, edges)
+					cx.clip('evenodd')
+				}
 
 				cx.beginPath()
 
@@ -783,8 +870,15 @@ ui.box_widget('floor_editor', {
 				for (let icomp of c.islands)
 					draw_edges(cx, sg, icomp.outer_cycle.edges)
 
-				cx.fillStyle = ui.alpha_adjust(ui.color_obj('bg1', hit_cycle == c ? 'hover' : null), .5)
+				if (room_point === null) // two or more room points.
+					cx.fillStyle = ui.alpha_adjust(ui.color_obj('error'), .5)
+				else
+					cx.fillStyle = ui.alpha_adjust(ui.color_obj('bg1',
+						hit_cycle == c ? 'hover' : null), .5)
 				cx.fill()
+
+				if (is_open)
+					cx.restore()
 			}
 		}
 
@@ -807,7 +901,10 @@ ui.box_widget('floor_editor', {
 					x = sg.x(x)
 					y = sg.y(y)
 					cx.fillStyle = ui.color_css('label')
-					let s = format_area(c.edges.area())
+					let area = c.edges.area()
+					for (let icomp of c.islands)
+						area -= icomp.outer_cycle.edges.area()
+					let s = format_area(area)
 					if (DEBUG_PLAN) s = co.id + '/' + c.id + ' ' + s
 					cx.save()
 					cx.translate(x, y)
@@ -818,6 +915,21 @@ ui.box_widget('floor_editor', {
 					cx.restore()
 				}
 			}
+
+		// room points: filled if open.
+		for (let room_point of draw_state.room_points) {
+			let r = room_point == hit_room_point ? 8 : 6
+			cx.beginPath()
+			cx.arc(sg.x(room_point.x), sg.y(room_point.y), r, 0, 2*PI)
+			if (room_point.is_open) {
+				cx.fillStyle = ui.color_css('text')
+				cx.fill()
+			}
+			cx.strokeStyle = ui.color_css('text')
+			cx.lineWidth = 2
+			cx.stroke()
+			cx.lineWidth = 1
+		}
 
 		// edge measurements
 		let me = draw_state.measure_edges
@@ -964,7 +1076,9 @@ ui.box_widget('floor_editor', {
 		seg, action=move_seg       hit segment
 		seg, x or y                hit around segment along its length
 		x and/or y                 hit vert and/or horiz snap line
-		cycle                      inside inner cycle
+		cycle, room_x, room_y      inside inner cycle
+		room_point,
+		action=move_room_point     hit room point
 	*/
 	hit: function(a, i) {
 
@@ -1023,7 +1137,7 @@ ui.box_widget('floor_editor', {
 
 		let snap_margin = 15
 
-		let hit_p, hit_seg, hit_action, hit_cycle
+		let hit_p, hit_seg, hit_action, hit_cycle, hit_room_point
 
 		for (let p of draw_state.ps) {
 			let dx = ui.mx - sg.x(p[0])
@@ -1039,7 +1153,18 @@ ui.box_widget('floor_editor', {
 			}
 		}
 
-		if (!hit_p)
+		for (let room_point of draw_state.room_points) {
+			let dx = ui.mx - sg.x(room_point.x)
+			let dy = ui.my - sg.y(room_point.y)
+			if (abs(dx) <= 8 && abs(dy) <= 8) {
+				hit_room_point = room_point
+				hs.room_point = room_point
+				hs.action = 'move_room_point'
+				break
+			}
+		}
+
+		if (!hit_p && !hit_room_point)
 			for (let seg of draw_state.segs) {
 
 				let x1 = seg[0][0]
@@ -1098,7 +1223,7 @@ ui.box_widget('floor_editor', {
 			}
 
 		// hit snapping point
-		if (!hit_p && !hit_seg) {
+		if (!hit_p && !hit_seg && !hit_room_point) {
 			let sx = plan.snap_x(mx, nosnap)
 			let sy = plan.snap_y(my, nosnap)
 			hs.x = sx ?? mx
@@ -1110,8 +1235,11 @@ ui.box_widget('floor_editor', {
 		// hit inner cycle
 		if (!hit_p && !hit_seg) {
 			hit_cycle = plan.hit_cycle_edges(mx, my)
-			if (hit_cycle)
+			if (hit_cycle) {
 				hs.cycle = hit_cycle
+				hs.room_x = mx // unsnapped, for placing a room point.
+				hs.room_y = my
+			}
 		}
 
 		cx.restore()

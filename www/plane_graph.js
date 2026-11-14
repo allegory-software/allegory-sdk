@@ -1018,6 +1018,8 @@ let plane_graph_class = class plane_graph extends Array {
 			let cy = this.hit_cycle_edges_of_island(x, y, comp)
 			if (cy)
 				return cy
+			if (comp.outer_cycle.edges.hit(x, y)) // in the island's wall body.
+				return
 		}
 		if (!cy.edges.hit(x, y))
 			return

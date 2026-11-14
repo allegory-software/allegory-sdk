@@ -5,22 +5,13 @@ const G = window
 const {
 	round, mod, abs, min, max, clamp, tan, rad,
 	assert, log, push_log, pop_log, push_log_if,
-	insert, uniq_sorted, group_sorted, map, assign, clock,
+	insert, remove_value, uniq_sorted, map, assign, clock, json,
 } = glue
 
 const {bbox2, poly2} = Math3D
 
-let out = []
-
 G.DEBUG_PLAN = 0
 G.DEBUG_PLAN_LOAD = 1
-
-// face plan model utils -----------------------------------------------------
-
-// NOTE: face is 0,1,2,3 going clockwise from the bottom-side face.
-let face_is_v = i => i & 1                   // 0,1,2,3 ->  0,1,0,1
-let face_sign = i => (i & 2) - 1             // 0,1,2,3 -> -1,-1,1,1
-let face_axis_sign = i => ((i + 3) & 2) - 1  // 0,1,2,3 -> 1,-1,-1,1
 
 // house model ---------------------------------------------------------------
 
@@ -29,6 +20,7 @@ let defaults = {
 	floor_h: 250,
 	int_wall_thickness: 8,
 	ext_wall_thickness: 18,
+	slab_thickness: 20,
 }
 
 function poly_get_point(i, out) {
@@ -41,7 +33,6 @@ function house_plan(t) {
 
 	let house = {}
 	let edit0
-	let edit_floor
 	house.edit_no = 0 // increments on each committed edit, undo and redo
 
 	function copy_roofs(roofs) {
@@ -50,6 +41,14 @@ function house_plan(t) {
 		for (let roof of roofs)
 			a.push({type: roof.type, pitch: roof.pitch, eaves: roof.eaves,
 				axis: roof.axis, h: roof.h, box: bbox2(...roof.box)})
+		return a
+	}
+
+	function copy_room_points(room_points) {
+		let a = []
+		for (let room_point of room_points)
+			a.push({x: room_point.x, y: room_point.y,
+				is_open: room_point.is_open})
 		return a
 	}
 
@@ -63,46 +62,23 @@ function house_plan(t) {
 		}
 		return {rotation: house.rotation, floor_h: house.floor_h,
 			int_wall_thickness: house.int_wall_thickness,
-			ext_wall_thickness: house.ext_wall_thickness, floors: floors}
+			ext_wall_thickness: house.ext_wall_thickness,
+			slab_thickness: house.slab_thickness, floors: floors}
 	}
 
 	function begin_edit(floor) {
 		assert(!edit0)
-		edit_floor = floor
 		edit0 = floor.save_state()
 	}
 
-	function same_state(floor, state) {
-		let lines = state.lines[0]
-		if (floor.ps.length != state.points.length
-			|| floor.segs.length * 3 != lines.length)
-			return false
-		for (let i = 0; i < floor.ps.length; i++) {
-			let p = floor.ps[i]
-			let p0 = state.points[i]
-			if (p[0] != p0[0] || p[1] != p0[1] || p.id != p0[2])
-				return false
-		}
-		for (let i = 0; i < floor.segs.length; i++) {
-			let seg = floor.segs[i]
-			let j = i * 3
-			if (seg.id != lines[j]
-				|| seg[0] != floor.ps[lines[j+1]]
-				|| seg[1] != floor.ps[lines[j+2]])
-				return false
-		}
-		return true
-	}
-
 	function commit_edit(floor) {
-		assert(edit0 && edit_floor == floor)
-		if (!same_state(floor, edit0)) {
-			undo_stack.push({floor: floor, state: edit0})
+		assert(edit0)
+		if (json(floor.save_state()) != json(edit0)) {
+			undo_stack.push({op: 'edit', floor: floor, state: edit0})
 			redo_stack.length = 0
 			house.edit_no++
 		}
 		edit0 = null
-		edit_floor = null
 	}
 
 	function house_bb() {
@@ -111,6 +87,45 @@ function house_plan(t) {
 			if (floor.bb[0] <= floor.bb[2])
 				bb.add_bbox2(...floor.bb)
 		return bb
+	}
+
+	function snap_lines_for(v, exclude_seg) {
+		let mi = v ? 0 : 1
+		let ms = []
+		for (let floor of house.floors) {
+			for (let p of floor.ps) {
+				if (exclude_seg && (exclude_seg[0] == p || exclude_seg[1] == p))
+					continue
+				let m = p[mi]
+				ms.push(m)
+			}
+		}
+		ms.sort((m1, m2) => m1 - m2)
+		uniq_sorted(ms)
+
+		ms.snap = function(m, snap_d) {
+			let min_d = 1/0
+			let min_m
+			for (let m1 of ms) {
+				let d = abs(m - m1)
+				if (d <= snap_d && d < min_d) {
+					min_d = d
+					min_m = m1
+				}
+			}
+			return min_m // ?? snap(m, 10)
+		}
+
+		ms.v = v
+
+		return ms
+	}
+
+	house.snap_lines = [] // [x lines, y lines] of all the floors
+
+	function fix_snap_lines() {
+		house.snap_lines[0] = snap_lines_for(1)
+		house.snap_lines[1] = snap_lines_for(0)
 	}
 
 	function create_floor(t, floor_i) {
@@ -123,34 +138,18 @@ function house_plan(t) {
 		floor.roofs = copy_roofs(t.roofs)
 		floor.i = floor_i
 		floor.id = 'floor'+floor_i
-		floor.h ??= house.floor_h
+		floor.h = t.h ?? house.floor_h
 		floor.fixed_h = t.h
 		floor.bb = bbox2()
-
-		floor.snap_lines = []
+		// [{x:, y:, is_open:}, ...]
+		floor.room_points = copy_room_points(t.room_points ?? [])
+		floor.room_point_by_cycle = map() // {cycle -> room_point|null if 2+}
 
 		floor._after_fix = function() {
 			create_edges()
+			fix_open_rooms()
 			fix_roofs()
-			floor.snap_lines[0] = snap_lines_for(1)
-			floor.snap_lines[1] = snap_lines_for(0)
-			for (let face of house.faces)
-				face.fix()
-		}
-
-		function fix_areas_for(comp) {
-			for (let c of comp.cycles) {
-				if (c.outer)
-					continue
-				let a0 = c.edges.area()
-				for (let icomp of c.islands) {
-					fix_areas_for(icomp)
-					c.edges._area -= icomp.outer_cycle.edges.area()
-				}
-				let a1 = c.edges.area()
-				if (0 && a1 != a0)
-					log('cycle', c.id, 'area fixed:', a1, '+', a0-a1, '=', a0)
-			}
+			fix_snap_lines()
 		}
 
 		function create_edges() {
@@ -171,18 +170,69 @@ function house_plan(t) {
 				}
 			}
 
-			for (let c of floor)
-				fix_areas_for(c)
-
 			// compute the level plan bbox now that we have outer skins.
 			floor.bb.reset()
 			for (let co of floor.comps)
 				floor.bb.add_bbox2(...co.outer_cycle.edges.bbox())
 
 			// recompute house plan bbox.
-			if (house.bb) // not in init
-				house.bb = house_bb()
+			house.bb = house_bb()
 
+		}
+
+		// rooms ---------------------------------------------------------------
+
+		// a room is open if it holds exactly one room point and that point
+		// is open. two points in one room: closed.
+		function fix_open_rooms() {
+			let room_point_by_cycle = floor.room_point_by_cycle
+			room_point_by_cycle.clear()
+			for (let room_point of floor.room_points) {
+				let c = floor.hit_cycle_edges(room_point.x, room_point.y)
+				if (!c) // in a wall body or outside: no room.
+					continue
+				room_point_by_cycle.set(c,
+					room_point_by_cycle.has(c) ? null : room_point)
+			}
+		}
+
+		// no point in room c: add an open one at (x, y). one point: flip it.
+		// two or more points: nothing.
+		floor.toggle_room = function(c, x, y) {
+			let room_point = floor.room_point_by_cycle.get(c)
+			if (room_point === null)
+				return
+			begin_edit(floor)
+			if (room_point)
+				room_point.is_open = !room_point.is_open
+			else
+				floor.room_points.push({x: x, y: y, is_open: true})
+			floor.fix()
+			commit_edit(floor)
+		}
+
+		floor.start_move_room_point = function(room_point) {
+			begin_edit(floor)
+			let x0 = room_point.x
+			let y0 = room_point.y
+			let s = {}
+			s.move = function(dx, dy) {
+				room_point.x = x0 + dx
+				room_point.y = y0 + dy
+			}
+			s.stop = function() {
+				floor.fix()
+				commit_edit(floor)
+			}
+			s.cancel = cancel_edit
+			return s
+		}
+
+		floor.remove_room_point = function(room_point) {
+			begin_edit(floor)
+			remove_value(floor.room_points, room_point)
+			floor.fix()
+			commit_edit(floor)
 		}
 
 		// roofs ---------------------------------------------------------------
@@ -250,21 +300,22 @@ function house_plan(t) {
 			for (let seg of floor.segs)
 				lines.push(seg.id, point_indices.get(seg[0]),
 					point_indices.get(seg[1]))
-			return {points: points, lines: [lines]}
+			return {points: points, lines: [lines],
+				room_points: copy_room_points(floor.room_points)}
 		}
 
 		floor.load_state = function(state) {
 			floor.load(state.points, state.lines)
+			floor.room_points = copy_room_points(state.room_points)
 			floor.fix()
 		}
 
 		// edit history --------------------------------------------------------
 
 		function cancel_edit(draw_state) {
-			assert(edit0 && edit_floor == floor)
+			assert(edit0)
 			let state = edit0
 			edit0 = null
-			edit_floor = null
 			floor.load_state(state)
 			draw_state.snap_lines.length = 0
 			draw_state.measure_edges.length = 0
@@ -372,45 +423,13 @@ function house_plan(t) {
 			return !(am2 <= bm1 || bm2 <= am1)
 		}
 
-		function snap_lines_for(v, exclude_seg) {
-			let mi = v ? 0 : 1
-			let ms = []
-			for (let floor of house.floors) {
-				for (let p of floor.ps) {
-					if (exclude_seg && (exclude_seg[0] == p || exclude_seg[1] == p))
-						continue
-					let m = p[mi]
-					ms.push(m)
-				}
-			}
-			ms.sort()
-			uniq_sorted(ms)
-
-			ms.snap = function(m, snap_d) {
-				let min_d = 1/0
-				let min_m
-				for (let m1 of ms) {
-					let d = abs(m - m1)
-					if (d <= snap_d && d < min_d) {
-						min_d = d
-						min_m = m1
-					}
-				}
-				return min_m // ?? snap(m, 10)
-			}
-
-			ms.v = v
-
-			return ms
-		}
-
 		function snap_x(x, nosnap) {
 			let snap_d = nosnap ? 2 : 20
-			return floor.snap_lines[0].snap(x, snap_d)
+			return house.snap_lines[0].snap(x, snap_d)
 		}
 		function snap_y(y, nosnap) {
 			let snap_d = nosnap ? 2 : 20
-			return floor.snap_lines[1].snap(y, snap_d)
+			return house.snap_lines[1].snap(y, snap_d)
 		}
 		floor.snap_x = snap_x
 		floor.snap_y = snap_y
@@ -739,215 +758,486 @@ function house_plan(t) {
 		return floor
 	}
 
-	// face -------------------------------------------------------------------
+	// walls ------------------------------------------------------------------
 
-	// returns x1, y1, x2, y2, min_depth, max_depth
-	function face_bb(vert) {
-		let [x1, y1, x2, y2] = house.bb
-		let h = house.h
-		if (vert)
-			return [y1, 0, y2, h, x1, x2]
-		else
-			return [x1, 0, x2, h, y1, y2]
+	// The code builds the walls of the whole house as polygons, one per flat
+	// connected surface. Each polygon lies on a vertical plane at plan
+	// x = axis (is_v) or plan y = axis, and its outside is toward the sign of
+	// `normal` on that axis. Points are in plane coords (m, z): m is the plan
+	// coord along the plane (y if is_v, else x), z is the height from ground.
+	//
+	// For every skin edge of every floor, the code adds a rectangle from the
+	// top of the floor's slab to the top of the floor. For every outer edge
+	// of every slab, it adds a rectangle as tall as the slab is thick. All
+	// rectangles are ccw in (m, z), and rectangles on the same plane only
+	// touch, never overlap. Where two rectangles touch, their edges are on
+	// the shared part in opposite directions. So the code sums the directions
+	// of all edges on each line and keeps only the parts where the sum is not
+	// zero: those parts are the outlines of the merged polygons.
+
+	// planes ------------------------------------------------------------------
+
+	// find or create the plane of the skins at `axis` with outside `normal`.
+	function wall_plane(planes, is_v, axis, normal) {
+		let key = (is_v ? 'v' : 'h') + (normal > 0 ? '+' : '-') + axis
+		let plane = planes.get(key)
+		if (!plane) {
+			plane = {
+				is_v: is_v,
+				axis: axis,
+				normal: normal,
+				hlines: map(), // {z -> [m1, m2, dir, ...]}
+				vlines: map(), // {m -> [z1, z2, dir, ...]}
+			}
+			planes.set(key, plane)
+		}
+		return plane
 	}
 
-	function p_x(p) { return p[0] }
-	function p_y(p) { return p[1] }
+	// add a directed edge from m1 to m2 (dir = 1) or back (dir = -1) to the
+	// horizontal or vertical line at `line_at`.
+	function add_line_edge(lines, line_at, m1, m2, dir) {
+		let a = lines.get(line_at)
+		if (!a) {
+			a = []
+			lines.set(line_at, a)
+		}
+		a.push(m1, m2, dir)
+	}
 
-	function create_face(face_i) {
+	// add the ccw rectangle from (m1, z1) to (m2, z2), with m1 < m2, z1 < z2.
+	function add_rect(plane, m1, z1, m2, z2) {
+		// ccw in (m, z): bottom goes +m, right goes +z, top goes -m, left -z.
+		add_line_edge(plane.hlines, z1, m1, m2,  1)
+		add_line_edge(plane.vlines, m2, z1, z2,  1)
+		add_line_edge(plane.hlines, z2, m1, m2, -1)
+		add_line_edge(plane.vlines, m1, z1, z2, -1)
+	}
 
-		let fv = face_is_v(face_i)
-		let fs = face_sign(face_i)
-		let fas = face_axis_sign(face_i)
+	// add the rectangle of skin edge (p1, p2) between heights z1 and z2.
+	// the wall body is on the same side of every skin cycle, so the outside
+	// of an edge (p1, p2) taken in cycle order is toward (dy, -dx).
+	function add_skin_rect(planes, p1, p2, z1, z2) {
+		let [x1, y1] = p1
+		let [x2, y2] = p2
+		let is_v = x1 == x2
+		let axis = is_v ? x1 : y1
+		let normal = is_v ? (y2 > y1 ? 1 : -1) : (x2 > x1 ? -1 : 1)
+		let pm1 = is_v ? y1 : x1
+		let pm2 = is_v ? y2 : x2
+		let m1 = min(pm1, pm2)
+		let m2 = max(pm1, pm2)
+		let plane = wall_plane(planes, is_v, axis, normal)
+		add_rect(plane, m1, z1, m2, z2)
+	}
 
-		let bb = bbox2()
+	// cancelling shared edges -------------------------------------------------
 
-		let ep_m    = fv ? p_y : p_x
-		let ep_axis = fv ? p_x : p_y
+	// sum the edge directions along one line and add each maximal run of
+	// non-zero sum to `runs` as m1, m2, dir. a zero sum means a shared part.
+	function sum_line_runs(a, runs) {
+		let events = [] // [[m, dir_change], ...]
+		for (let i = 0; i < a.length; i += 3) {
+			let m1  = a[i+0]
+			let m2  = a[i+1]
+			let dir = a[i+2]
+			events.push([m1, dir], [m2, -dir])
+		}
+		events.sort((e1, e2) => e1[0] - e2[0])
+		let sum = 0
+		let run_m1, run_dir
+		let i = 0
+		let n = events.length
+		while (i < n) {
+			// apply all the events at m, then look at the sum right after m.
+			let m = events[i][0]
+			while (i < n) {
+				let [event_m, dir_change] = events[i]
+				if (event_m != m)
+					break
+				sum += dir_change
+				i++
+			}
+			if (run_m1 != null && sum != run_dir) { // sum changed: end the run.
+				runs.push(run_m1, m, run_dir)
+				run_m1 = null
+			}
+			if (run_m1 == null && sum != 0) { // start a run.
+				run_m1 = m
+				run_dir = sum
+			}
+		}
+	}
 
-		function ep_h(ep) {
-			return ep.p.h ?? 0
+	// make the directed edges [m1, z1, m2, z2] left after cancelling.
+	function plane_edges(plane) {
+		let edges = []
+		let runs = []
+		for (let [z, a] of plane.hlines) {
+			runs.length = 0
+			sum_line_runs(a, runs)
+			for (let i = 0; i < runs.length; i += 3) {
+				let m1  = runs[i+0]
+				let m2  = runs[i+1]
+				let dir = runs[i+2]
+				if (dir > 0)
+					edges.push([m1, z, m2, z])
+				else
+					edges.push([m2, z, m1, z])
+			}
+		}
+		for (let [m, a] of plane.vlines) {
+			runs.length = 0
+			sum_line_runs(a, runs)
+			for (let i = 0; i < runs.length; i += 3) {
+				let z1  = runs[i+0]
+				let z2  = runs[i+1]
+				let dir = runs[i+2]
+				if (dir > 0)
+					edges.push([m, z1, m, z2])
+				else
+					edges.push([m, z2, m, z1])
+			}
+		}
+		return edges
+	}
+
+	// tracing loops -----------------------------------------------------------
+
+	// find the edge that continues edge `e` at its end point. where two
+	// polygons touch at a corner, that point has two outgoing edges. the
+	// filled side of every edge is on its left, so the code takes the
+	// leftmost turn to keep each polygon's outline a separate loop.
+	function next_edge(edges_by_start, e) {
+		let [m1, z1, m2, z2] = e
+		let dm = m2 - m1
+		let dz = z2 - z1
+		let next_e, next_turn
+		for (let e1 of edges_by_start.get(m2+' '+z2)) {
+			let [e1_m1, e1_z1, e1_m2, e1_z2] = e1
+			let cross = dm * (e1_z2 - e1_z1) - dz * (e1_m2 - e1_m1)
+			let turn = cross > 0 ? 1 : cross < 0 ? -1 : 0 // left, right, straight
+			if (next_e && turn <= next_turn)
+				continue
+			next_e = e1
+			next_turn = turn
+		}
+		return next_e
+	}
+
+	// walk the edges into closed loops.
+	function trace_loops(edges) {
+		let edges_by_start = map() // {'m z' -> [edge, ...]}
+		for (let e of edges) {
+			let [m1, z1] = e
+			let key = m1+' '+z1
+			let a = edges_by_start.get(key)
+			if (!a) {
+				a = []
+				edges_by_start.set(key, a)
+			}
+			a.push(e)
+		}
+		let loops = []
+		for (let e0 of edges) {
+			if (e0.is_traced)
+				continue
+			let loop = poly2()
+			loop.get_point = poly_get_point
+			let e = e0
+			do {
+				e.is_traced = true
+				loop.push([e[0], e[1]])
+				e = next_edge(edges_by_start, e)
+			} while (e != e0)
+			loops.push(loop)
+		}
+		return loops
+	}
+
+	// polygons ----------------------------------------------------------------
+
+	// make the polygons of one plane. ccw loops are outlines, cw loops are
+	// holes. the code adds each hole to the smallest outline that contains
+	// it, storing hole points after outline points, like model3 faces.
+	function add_plane_polys(plane, polys) {
+		let outlines = []
+		let holes = []
+		for (let loop of trace_loops(plane_edges(plane))) {
+			if (loop.area() > 0)
+				outlines.push(loop)
+			else
+				holes.push(loop)
 		}
 
-		function edge_sign(ep1, ep2) {
-			return ep_m(ep1) < ep_m(ep2) ? 1 : -1
+		let outline_holes = [] // [[hole, ...], ...] per outline
+		for (let i = 0; i < outlines.length; i++)
+			outline_holes.push([])
+		for (let hole of holes) {
+			// test the middle of the hole's first edge.
+			let [m1, z1] = hole[0]
+			let [m2, z2] = hole[1]
+			let m = (m1 + m2) / 2
+			let z = (z1 + z2) / 2
+			let min_i
+			for (let i = 0; i < outlines.length; i++) {
+				let outline = outlines[i]
+				if (!outline.hit(m, z))
+					continue
+				if (min_i != null && outline.area() >= outlines[min_i].area())
+					continue
+				min_i = i
+			}
+			outline_holes[min_i].push(hole)
 		}
 
-		let walls = [] // exterior wall horizontal measurements
-		let planes = []
+		for (let i = 0; i < outlines.length; i++) {
+			let poly = outlines[i]
+			poly.holes = []
+			for (let hole of outline_holes[i]) {
+				poly.holes.push(poly.length)
+				for (let p of hole)
+					poly.push(p)
+			}
+			poly.invalidate()
+			polys.push(poly)
+		}
+	}
 
-		let face = {house: house, i: face_i, bb: bb, planes: planes}
+	// horizontal faces --------------------------------------------------------
 
-		function create_face_planes() {
+	// The code builds the horizontal faces of the whole house as polygons in
+	// plan coords (x, y) at height z, facing up (normal = 1) or down
+	// (normal = -1). At every height where a slab or a wall starts or ends,
+	// the code adds an up face where there is solid just below and air just
+	// above, and a down face where it is the other way round. The solid
+	// regions below and above overlap only partly and slabs have holes, so
+	// summing their edges would mix up faces and holes. Instead the code cuts
+	// the plan into cells at the x and y of every skin corner involved, tests
+	// the center of each cell, adds the cells that need a face as rectangles,
+	// and merges them like the wall rectangles. Where a slab cell borders a
+	// cell with no slab, the code adds a side rectangle of the slab to the
+	// wall planes.
 
-			return // TODO
+	function hit_outline(floor, x, y) {
+		for (let comp of floor) // root comps: islands are inside them.
+			if (comp.outer_cycle.edges.hit(x, y))
+				return true
+		return false
+	}
 
-			face.bb = face_bb(fv) // TODO: reuse bb
-
-			walls.length = 0
-			planes.length = 0
-
-			// find outer edges that are projecting in the face's direction.
-			for (let floor of house.floors) {
-				for (let comp of floor.comps) {
-					if (comp.inside)
-						continue
-					let eps = comp.outer_cycle.edges
-					for (let i = 0, n = eps.length; i < n; i++) {
-						let ep1 = eps[(i+0) % n]
-						let ep2 = eps[(i+1) % n]
-						if ((ep1[0] == ep2[0]) != fv) // _|_ edge: invisible
-							continue
-						if (edge_sign(ep1, ep2) != fs) // back-face edge: obscured: cull it
-							continue
-						let last_wall = walls[walls.length-1]
-						let last_ep2 = last_wall && last_wall[1]
-						if (last_ep2 == ep1) // in-wall point: skip (i.e. merge segs)
-							last_wall[1] = ep2
-						else
-							walls.push([ep1, ep2, floor, comp])
+	// add the faces at the bottom (z) and at the top of the slab between
+	// floor0 below and floor1 above to `polys`, and the slab's sides to
+	// `planes`. under the slab: the wall bodies of floor0. over the slab: the
+	// wall bodies of floor1. no_slab: no slab between them, so the faces at
+	// z are the caps of floor0's walls.
+	function add_slab_faces(planes, polys, z, floor0, floor1, no_slab) {
+		let xs = []
+		let ys = []
+		for (let floor of [floor0, floor1]) {
+			if (!floor)
+				continue
+			for (let comp of floor.comps)
+				for (let c of comp.cycles)
+					for (let ep of c.edges) {
+						xs.push(ep[0])
+						ys.push(ep[1])
 					}
-					// merge first and last segs if necessary.
-					let first_wall = walls[0]
-					let last_wall  = walls[walls.length-1]
-					if (last_wall[1] == first_wall[0]) {
-						first_wall[0] = last_wall[0]
-						walls.pop()
-					}
+		}
+		xs.sort((x1, x2) => x1 - x2)
+		ys.sort((y1, y2) => y1 - y2)
+		uniq_sorted(xs)
+		uniq_sorted(ys)
+
+		let nx = xs.length-1
+		let ny = ys.length-1
+		let slab_cells = [] // [in_slab, ...] at i*ny+j
+		let bottom_up   = {hlines: map(), vlines: map()}
+		let bottom_down = {hlines: map(), vlines: map()}
+		let top_up      = {hlines: map(), vlines: map()}
+		let top_down    = {hlines: map(), vlines: map()}
+		for (let i = 0; i < nx; i++) {
+			let x1 = xs[i]
+			let x2 = xs[i+1]
+			let x = (x1 + x2) / 2
+			for (let j = 0; j < ny; j++) {
+				let y1 = ys[j]
+				let y2 = ys[j+1]
+				let y = (y1 + y2) / 2
+
+				// rooms are inside the outlines: look for them only there.
+				let in_outline0 = !!floor0 && hit_outline(floor0, x, y)
+				let in_outline1 = !!floor1 && hit_outline(floor1, x, y)
+				let room0 = in_outline0 && floor0.hit_cycle_edges(x, y)
+				let room1 = in_outline1 && floor1.hit_cycle_edges(x, y)
+				let in_walls0 = in_outline0 && !room0
+				let in_walls1 = in_outline1 && !room1
+				// the slab is under both floors, except under the open rooms
+				// of floor1 over the rooms of floor0. the islands of an open
+				// room are not in the room.
+				let is_open1 = room1
+					&& floor1.room_point_by_cycle.get(room1)?.is_open
+				let in_slab = !no_slab && (in_outline0 || in_outline1)
+					&& !(is_open1 && room0)
+				slab_cells[i*ny+j] = in_slab
+
+				if (in_walls0 != in_slab)
+					add_rect(in_walls0 ? bottom_up : bottom_down, x1, y1, x2, y2)
+				if (in_slab != in_walls1)
+					add_rect(in_slab ? top_up : top_down, x1, y1, x2, y2)
+			}
+		}
+
+		// slab sides: on the cell sides between slab and no slab, facing
+		// away from the slab.
+		let slab_t = house.slab_thickness
+		let z2 = z + slab_t
+		for (let i = 0; i < nx; i++) {
+			let x1 = xs[i]
+			let x2 = xs[i+1]
+			for (let j = 0; j < ny; j++) {
+				if (!slab_cells[i*ny+j])
+					continue
+				let y1 = ys[j]
+				let y2 = ys[j+1]
+				let is_slab_left  = i > 0    && slab_cells[(i-1)*ny+j]
+				let is_slab_right = i < nx-1 && slab_cells[(i+1)*ny+j]
+				let is_slab_below = j > 0    && slab_cells[i*ny+j-1]
+				let is_slab_above = j < ny-1 && slab_cells[i*ny+j+1]
+				if (!is_slab_left)
+					add_rect(wall_plane(planes, true , x1, -1), y1, z, y2, z2)
+				if (!is_slab_right)
+					add_rect(wall_plane(planes, true , x2,  1), y1, z, y2, z2)
+				if (!is_slab_below)
+					add_rect(wall_plane(planes, false, y1, -1), x1, z, x2, z2)
+				if (!is_slab_above)
+					add_rect(wall_plane(planes, false, y2,  1), x1, z, x2, z2)
+			}
+		}
+
+		for (let [plane, plane_z, normal] of [
+			[bottom_up  , z         ,  1],
+			[bottom_down, z         , -1],
+			[top_up     , z + slab_t,  1],
+			[top_down   , z + slab_t, -1],
+		]) {
+			let i0 = polys.length
+			add_plane_polys(plane, polys)
+			for (let i = i0; i < polys.length; i++) {
+				polys[i].z = plane_z
+				polys[i].normal = normal
+			}
+		}
+	}
+
+	// building ----------------------------------------------------------------
+
+	// make the wall polys and the horizontal polys of floors 0..top_floor.
+	// no_top_slab: no slab on top of top_floor, cap its walls instead.
+	house.make_polys = function(top_floor, no_top_slab) {
+		let planes = map() // {key -> plane}
+		let horizontal_polys = []
+		let slab_t = house.slab_thickness
+		let floors = house.floors
+		let floor_n = top_floor.i + 1
+
+		// floor skins: from the top of the floor's slab to the top of the floor.
+		for (let floor_i = 0; floor_i < floor_n; floor_i++) {
+			let floor = floors[floor_i]
+			let z1 = floor.z + slab_t
+			let z2 = floor.z + floor.h
+			for (let comp of floor.comps) {
+				for (let c of comp.cycles) {
+					let eps = c.edges
+					for (let i = 0, n = eps.length; i < n; i++)
+						add_skin_rect(planes, eps[i], eps[(i+1) % n], z1, z2)
 				}
 			}
+		}
 
-			// pr(face, walls.map(w => w[2].i+':'+w[0].p.i+'-'+w[1].p.id).join(' '))
+		// slabs: slab i is at the bottom of floor i, and one more slab is on
+		// top of top_floor, unless no_top_slab.
+		for (let i = 0; i <= floor_n; i++) {
+			let floor0 = floors[i-1]
+			let floor1 = i < floor_n ? floors[i] : null
+			let z = floor1 ? floor1.z : floor0.z + floor0.h
+			let no_slab = i == floor_n && no_top_slab
+			add_slab_faces(planes, horizontal_polys, z, floor0, floor1, no_slab)
+		}
 
-			// sort walls by depth.
-			walls.sort(function(w1, w2) {
-				// 1st level grouping: by depth (asc order).
-				let y1 = ep_axis(w1[0])
-				let y2 = ep_axis(w2[0])
-				let dy = fas * (y1 - y2)
-				if (dy) return dy
-				// 2nd level grouping: by floor (desc order).
-				let l1 = w1[2].i
-				let l2 = w2[2].i
-				return l2 - l1
-			})
-
-			let eq_depth = (w1, w2) => ep_axis(w1[0]) == ep_axis(w2[0])
-			let eq_floor = (w1, w2) => w1[2] == w2[2]
-
-			// create face polygons by merging the faces that are on the same vertical plane.
-			for (let [j1, j2] of group_sorted(walls, eq_depth)) {
-
-				// 1st level grouping: j1,j2 is all walls of a single depth plane.
-				push_log('FACE PLANE', 'face=', face_i, 'plane=', planes.length, 'depth=', ep_axis(walls[j1][0]), 'i=', j1, '..', j2)
-
-				let plan = plane_graph()
-				plan.depth = ep_axis(walls[j1][0])
-
-				function add_seg(x1, y1, x2, y2, ep1, ep2, ...log_args) {
-					push_log(...log_args, ':', x1, y1, '-', x2, y2)
-					let p1 = plan.add_point(x1, y1)
-					let p2 = plan.add_point(x2, y2)
-					// set back refs to origin eps for quick updating
-					p1.ep1 = ep1
-					p2.ep2 = ep2
-					plan.add_seg(p1, p2)
-					pop_log()
-				}
-
-				let last_i1, last_i2, last_floor_i
-				for (let [i1, i2] of group_sorted(walls, eq_floor, j1, j2)) {
-
-					// 2nd level grouping: i1,i2 is all walls of a single floor of this depth plane.
-
-					let floor = walls[i1][2]
-					let h = floor.h
-					let y = floor.y
-					let y1 = y
-					let y2 = y + h
-
-					for (let i = i1; i < i2; i++) {
-
-						// make vertical segments (these are just constructed, no merging).
-						let [ep1, ep2] = walls[i]
-						let x1 = ep_m(ep1)
-						let x2 = ep_m(ep2)
-						let y11 = y1 - ep_h(ep1)
-						let y12 = y1 - ep_h(ep2)
-						// pr(face_i, floor.i, x1, x2, ep_h(ep1), ep_h(ep2))
-						add_seg(x1, y11, x1, y2, ep1, ep2, 'vertical of floor', floor.i)
-						add_seg(x2, y12, x2, y2, ep1, ep2, 'vertical of floor', floor.i)
-
-						// for top and bottom floors whichever they are in this particular
-						// depth plane (might not be all floors), make top and bottom segments.
-						if (last_floor_i != floor.i+1) // top line
-							add_seg(x1, y11, x2, y12, ep1, ep2, 'top of floor', floor.i)
-						if (i2 == j2 || last_floor_i != null && last_floor_i != floor.i+1) // bottom line
-							add_seg(x1, y2, x2, y2, ep1, ep2, 'bottom of floor', floor.i)
-					}
-
-					// merge segments between this floor and the last floor.
-					// adding all end-points from the segments of both floors
-					// and sorting them gives us exactly the segments we want,
-					// no analyzing intersections necessary.
-					if (last_floor_i == floor.i+1) {
-
-						let a = []
-
-						for (let i = i1; i < i2; i++)
-							a.push(walls[i][0], walls[i][1])
-						for (let i = last_i1; i < last_i2; i++)
-							a.push(walls[i][0], walls[i][1])
-
-						a.sort((ep1, ep2) => ep_m(ep1) - ep_m(ep2))
-
-						for (let i = 0, n = a.length; i < n; i += 2) {
-							let ep1 = a[i]
-							let ep2 = a[i+1]
-							let x1 = ep_m(ep1)
-							let x2 = ep_m(ep2)
-							if (x1 != x2)
-								add_seg(x1, y1, x2, y1, ep1, ep2, 'between floors', last_floor_i, 'and', floor.i)
-						}
-
-					}
-
-					last_i1 = i1
-					last_i2 = i2
-					last_floor_i = floor.i
-				}
-
-				plan.fix()
-				planes.push(plan)
-
-				pop_log()
-
+		// merge the rectangles of each plane into polygons.
+		let wall_polys = []
+		for (let plane of planes.values()) {
+			let i0 = wall_polys.length
+			add_plane_polys(plane, wall_polys)
+			for (let i = i0; i < wall_polys.length; i++) {
+				let poly = wall_polys[i]
+				poly.is_v   = plane.is_v
+				poly.axis   = plane.axis
+				poly.normal = plane.normal
 			}
-
 		}
 
-		function wall_face_rect(plan, lv, wr, i, scale) {
-			let h = pix(lv.h, scale)
-			let v  = wall_vert(wr, i)
-			let p1 = wall_p1(wr, i+0, true, null, scale)
-			let p2 = wall_p1(wr, i+1, true, null, scale)
-			let X = v ? 1 : 0
-			let Y = v ? 0 : 1
-			let x1 = p1[X]
-			let x2 = p2[X]
-			let x = min(x1, x2)
-			let w = max(x1, x2) - x
-			let y = 0
-			return [x, y, w, h, p1[Y]] // (x, y, w, h, z)
-		}
-
-		face.fix = create_face_planes
-
-		return face
+		return [wall_polys, horizontal_polys]
 	}
 
 	house.free = function() {
 		// TODO
+	}
+
+	// adding and removing floors ----------------------------------------------
+
+	function fix_floor_heights() {
+		let z = 0
+		for (let floor of house.floors) {
+			floor.z = z // height of the floor's bottom from the ground
+			z += floor.h
+		}
+		house.h = z
+	}
+
+	// add a copy of the top floor's walls and height on top of it.
+	house.add_floor = function() {
+		assert(!edit0)
+		let floors = house.floors
+		let top_floor = floors[floors.length-1]
+		let state = top_floor.save_state()
+		state.h = top_floor.fixed_h
+		let floor = create_floor(state, floors.length)
+		floors.push(floor)
+		fix_floor_heights()
+		floor.fix()
+		undo_stack.push({op: 'add_floor', floor: floor})
+		redo_stack.length = 0
+		house.edit_no++
+		return floor
+	}
+
+	// remove the top floor. the undo entry keeps the floor so that undo can
+	// put it back, and the older entries that load into it stay valid.
+	house.remove_top_floor = function() {
+		assert(!edit0)
+		assert(house.floors.length > 1)
+		let floor = pop_floor()
+		undo_stack.push({op: 'remove_floor', floor: floor})
+		redo_stack.length = 0
+		house.edit_no++
+	}
+
+	// put a fixed floor back on top: its own state is unchanged.
+	function push_floor(floor) {
+		house.floors.push(floor)
+		fix_floor_heights()
+		house.bb = house_bb()
+		fix_snap_lines()
+	}
+
+	function pop_floor() {
+		let floor = house.floors.pop()
+		fix_floor_heights()
+		house.bb = house_bb()
+		fix_snap_lines()
+		return floor
 	}
 
 	// init -------------------------------------------------------------------
@@ -960,31 +1250,18 @@ function house_plan(t) {
 		push_log_if(DEBUG_PLAN_LOAD, 'LOADING PLAN')
 
 		house.floors = []
-		house.faces = []
 
 		for (let n = t.floors?.length ?? 0, i = n-1; i >= 0; i--) {
 			let floor = create_floor(t.floors[i], i)
 			house.floors[i] = floor
 		}
 
+		fix_floor_heights()
+
 		for (let floor of house.floors)
 			floor.fix()
 
-		let y = 0
-		for (let n = house.floors.length, i = n-1; i >= 0; i--) {
-			let floor = house.floors[i]
-			floor.y = y
-			y += floor.h
-		}
-		house.h = y
-
-		for (let i = 0; i <= 3; i++)
-			house.faces.push(create_face(i))
-
 		house.bb = house_bb()
-
-		for (let face of house.faces)
-			face.fix()
 
 		let dt = round((clock() - t0) * 1000)
 		log('TIME', ('*').repeat(dt), dt, 'ms')
@@ -998,13 +1275,28 @@ function house_plan(t) {
 	let undo_stack = []
 	let redo_stack = []
 
+	// apply the opposite of an entry and return the entry that reverts that,
+	// for the other stack: undo and redo are the same operation.
+	function revert_entry(entry) {
+		let {op, floor} = entry
+		if (op == 'edit') {
+			let state = floor.save_state()
+			floor.load_state(entry.state)
+			return {op: 'edit', floor: floor, state: state}
+		} else if (op == 'add_floor') {
+			pop_floor()
+			return {op: 'remove_floor', floor: floor}
+		} else if (op == 'remove_floor') {
+			push_floor(floor)
+			return {op: 'add_floor', floor: floor}
+		}
+	}
+
 	house.undo = function() {
 		assert(!edit0)
 		if (!undo_stack.length)
 			return false
-		let {floor, state} = undo_stack.pop()
-		redo_stack.push({floor: floor, state: floor.save_state()})
-		floor.load_state(state)
+		redo_stack.push(revert_entry(undo_stack.pop()))
 		house.edit_no++
 		return true
 	}
@@ -1013,9 +1305,7 @@ function house_plan(t) {
 		assert(!edit0)
 		if (!redo_stack.length)
 			return false
-		let {floor, state} = redo_stack.pop()
-		undo_stack.push({floor: floor, state: floor.save_state()})
-		floor.load_state(state)
+		undo_stack.push(revert_entry(redo_stack.pop()))
 		house.edit_no++
 		return true
 	}
