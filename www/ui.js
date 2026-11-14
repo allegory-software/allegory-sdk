@@ -1404,9 +1404,9 @@ document.addEventListener('keyup', function(ev) {
 	process_key(ev, 'up', ev.key)
 })
 
-document.addEventListener('paste', async function(ev) {
+document.addEventListener('paste', function(ev) {
 	// getting the clipboard contents and setting keydown of pseudo-key 'paste'.
-	ui.clipboard_text = await navigator.clipboard.readText()
+	ui.clipboard_text = ev.clipboardData.getData('text/plain')
 	process_key(null, 'down', 'paste')
 	// because nobody is there to depress this key.
 	ui.local_pointer.key_state.delete('paste')

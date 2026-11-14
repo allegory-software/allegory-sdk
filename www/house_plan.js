@@ -1242,7 +1242,7 @@ function house_plan(t) {
 
 	// init -------------------------------------------------------------------
 
-	function init() {
+	function init(t) {
 
 		assign(house, defaults, t)
 
@@ -1268,12 +1268,44 @@ function house_plan(t) {
 
 		pop_log()
 	}
-	init()
+	init(t)
 
 	// history ---------------------------------------------------------------
 
 	let undo_stack = []
 	let redo_stack = []
+
+	// the live settings and floors of the house, for the load undo entry.
+	// the entry keeps the floor objects so that older entries stay valid.
+	function take_state() {
+		let state = {floors: house.floors}
+		for (let k in defaults)
+			state[k] = house[k]
+		return state
+	}
+
+	function put_state(state) {
+		assign(house, state)
+		fix_floor_heights()
+		house.bb = house_bb()
+		fix_snap_lines()
+	}
+
+	// replace the settings and floors with a save_state() result, as one edit.
+	// on a bad state: restore the old state, rethrow.
+	house.load_state = function(state) {
+		assert(!edit0)
+		let state0 = take_state()
+		try {
+			init(state)
+		} catch (e) {
+			put_state(state0)
+			throw e
+		}
+		undo_stack.push({op: 'load', state: state0})
+		redo_stack.length = 0
+		house.edit_no++
+	}
 
 	// apply the opposite of an entry and return the entry that reverts that,
 	// for the other stack: undo and redo are the same operation.
@@ -1289,6 +1321,10 @@ function house_plan(t) {
 		} else if (op == 'remove_floor') {
 			push_floor(floor)
 			return {op: 'add_floor', floor: floor}
+		} else if (op == 'load') {
+			let state = take_state()
+			put_state(entry.state)
+			return {op: 'load', state: state}
 		}
 	}
 

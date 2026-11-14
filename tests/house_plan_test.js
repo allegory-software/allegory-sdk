@@ -1253,4 +1253,37 @@ check('a new action clears redo', () => {
 	assert.equal(h.redo(), false)
 })
 
+check('load_state is one undoable edit that keeps older history valid', () => {
+	let h = house(ctx.house_test_plans.gable1)
+	let before = JSON.stringify(h.save_state())
+	h.floors[0].delete_seg(h.floors[0].segs[0])
+	let edited = JSON.stringify(h.save_state())
+	let state = house(ctx.house_test_plans.simple).save_state()
+	let loaded = JSON.stringify(state)
+	let edit_no = h.edit_no
+	h.load_state(JSON.parse(loaded))
+	assert.equal(h.edit_no, edit_no + 1)
+	assert.equal(JSON.stringify(h.save_state()), loaded)
+	assert(h.undo())
+	assert.equal(JSON.stringify(h.save_state()), edited)
+	assert(h.undo()) // the edit made before the load
+	assert.equal(JSON.stringify(h.save_state()), before)
+	assert(h.redo())
+	assert(h.redo())
+	assert.equal(JSON.stringify(h.save_state()), loaded)
+	assert.equal(h.redo(), false)
+})
+
+check('load_state with a bad state restores the house and adds no edit', () => {
+	let h = house(ctx.house_test_plans.gable1)
+	let before = JSON.stringify(h.save_state())
+	let floors = h.floors
+	let edit_no = h.edit_no
+	assert.throws(() => h.load_state({floors: [null]}))
+	assert.equal(JSON.stringify(h.save_state()), before)
+	assert.equal(h.floors, floors)
+	assert.equal(h.edit_no, edit_no)
+	assert.equal(h.undo(), false)
+})
+
 console.log(n_checks + ' house plan checks passed')

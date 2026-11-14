@@ -14,7 +14,7 @@ const G = window
 const {
 	ceil, round, snap, mod, abs, sign, min, clamp, PI, sin, cos, rad, atan2,
 	array_set, memoize, format_kcount, point_around, distance,
-	json_arg, json, S,
+	json_arg, try_json_arg, json, copy_to_clipboard, S,
 } = glue
 
 const {bbox2, line2} = Math3D
@@ -360,8 +360,24 @@ function floor_editor_update(id, s) {
 			is_restored = plan.house.undo()
 	}
 
+	// copy and paste the whole house as json text.
+	if (!cs && ui.focus_inside(id) && ui.keydown('ctrl c'))
+		copy_to_clipboard(json(s.house.save_state()))
+	if (!readonly && !cs && ui.focus_inside(id) && ui.keydown('paste')) {
+		let state = try_json_arg(ui.clipboard_text)
+		if (state?.floors?.length) {
+			try {
+				plan.house.load_state(state)
+				is_restored = true
+			} catch {
+				// bad state: load_state restored the house, ignore the paste.
+			}
+		}
+	}
+
 	// removed the selected floor, or undid an added floor or redid a removed
-	// one: select the top floor.
+	// one, or pasted or undid a paste: select the top floor.
+	floors = s.house.floors // paste and its undo replace the array.
 	if (!floors.includes(s.floor))
 		s.floor = floors[floors.length-1]
 	plan = s.floor
