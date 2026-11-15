@@ -30,7 +30,8 @@ let NEAR = 1e-5 // distance and time tolerance
 
 // The code moves every edge inward at its own speed, time being the height
 // above the lowest eave. All moving edges stay axis-aligned and every corner
-// joins two perpendicular edges, so there are only three events:
+// joins two perpendicular edges. The outline changes at three kinds of
+// events:
 //  - two parallel edges facing each other meet: the overlap becomes a ridge
 //    and the rest of the edges reconnect.
 //  - the edge between two parallel edges facing the same way shrinks to
@@ -40,6 +41,9 @@ let NEAR = 1e-5 // distance and time tolerance
 // Each moving edge is a piece of a plane. Each corner traces an arc between
 // the faces of its two pieces; the code adds the arcs and ridges to the faces
 // as half-edges with the face on their left, and walks them into rings.
+// The code handles all events at one height together: it rebuilds the
+// outline from the positions of the pieces at that height, so the order of
+// the events does not change the result.
 
 // planes and pieces ---------------------------------------------------------
 
@@ -70,7 +74,7 @@ function roof_skeleton(rings, pitches, eave_zs) {
 
 	let planes = [] // [{is_v, c, n, s, t0, edge_is, half_edges}, ...]
 		// t0: the time the plane starts moving.
-	let pieces = [] // [{plane, start_plane, prev, next, n1, is_dead}, ...]
+	let pieces = [] // [{plane, start_plane, prev, next, n1}, ...]
 		// start_plane: the sloped plane that replaces the vertical one at
 		// its t0.
 	let nodes_now = [] // [{x, y, t}, ...] created at the current time
@@ -111,207 +115,15 @@ function roof_skeleton(rings, pitches, eave_zs) {
 		q.plane.half_edges.push(node, node0)
 	}
 
-	// segment n1 -> n2 along `above`'s moving direction: `below` is behind it.
-	function add_ridge(above, below, n1, n2) {
-		if (n1 == n2)
-			return
-		above.half_edges.push(n1, n2)
-		below.half_edges.push(n2, n1)
-	}
-
-	// pieces --------------------------------------------------------------
-
-	let joins = [] // [p, q, node, ...] collinear pieces linked at node
-
-	// make q follow p, their corner starting at `node`. collinear pieces are
-	// joined later by run_joins(), after every link of the event is made.
-	function link(p, q, node) {
-		p.next = q
-		q.prev = p
-		q.n1 = node
-		if (p.plane.is_v == q.plane.is_v)
-			joins.push(p, q, node)
-	}
-
-	// add a part of piece0.
-	function add_piece(piece0, prev, next, n1, next_n1) {
-		let piece = {plane: piece0.plane, start_plane: piece0.start_plane,
-			prev: null, next: null, n1: null, is_dead: false}
-		link(prev, piece, n1)
-		link(piece, next, next_n1)
-		pieces.push(piece)
-	}
-
-	// p and q are collinear and meet at `node` where both their arcs ended.
-	// p comes before q.
-	function join(p, q, node, t) {
-		if (p == q) { // zero-length piece between two collinear pieces: drop.
-			p.is_dead = true
-			return
-		}
-		if (q.next == p) { // only p and q are left: they end at both nodes.
-			add_ridge(p.plane, q.plane, node, p.n1)
-			p.is_dead = true
-			q.is_dead = true
-			return
-		}
-		assert(p.prev.plane.is_v != p.plane.is_v)
-		assert(q.next.plane.is_v != q.plane.is_v)
-		if (p.plane.n != q.plane.n) {
-			// facing each other: q turns back over p and they collide from
-			// `node` up to the end of the shorter one.
-			let node_m = p.plane.is_v ? node.y : node.x
-			let p_len = abs(node_m - piece_tail_m(p, t))
-			let q_len = abs(piece_head_m(q, t) - node_m)
-			if (p_len > q_len + NEAR) { // p keeps its tail part.
-				let head = head_node(q, t)
-				add_ridge(p.plane, q.plane, node, head)
-				end_arc(q, q.next, head)
-				q.is_dead = true
-				link(p, q.next, head)
-			} else if (q_len > p_len + NEAR) { // q keeps its head part.
-				let tail = tail_node(p, t)
-				add_ridge(p.plane, q.plane, node, tail)
-				end_arc(p.prev, p, tail)
-				p.is_dead = true
-				link(p.prev, q, tail)
-			} else {
-				let tail = tail_node(p, t)
-				add_ridge(p.plane, q.plane, node, tail)
-				end_arc(p.prev, p, tail)
-				end_arc(q, q.next, tail)
-				p.is_dead = true
-				q.is_dead = true
-				link(p.prev, q.next, tail)
-			}
-		} else if (p.plane == q.plane) { // same plane: merge.
-			q.is_dead = true
-			link(p, q.next, q.next.n1)
-		} else if (p.plane.s >= q.plane.s) { // p is faster: p continues over q.
-			let head = head_node(q, t)
-			add_ridge(p.plane, q.plane, node, head)
-			end_arc(q, q.next, head)
-			q.is_dead = true
-			link(p, q.next, head)
-		} else { // q is faster: q continues over p.
-			let tail = tail_node(p, t)
-			add_ridge(q.plane, p.plane, tail, node)
-			end_arc(p.prev, p, tail)
-			p.is_dead = true
-			link(p.prev, q, tail)
-		}
-	}
-
-	// a join that kills a piece links its neighbors, so a pending join
-	// with a dead piece was already resolved.
-	function run_joins(t) {
-		for (let i = 0; i < joins.length; i += 3) {
-			let p    = joins[i+0]
-			let q    = joins[i+1]
-			let node = joins[i+2]
-			if (p.is_dead || q.is_dead)
-				continue
-			join(p, q, node, t)
-		}
-		joins.length = 0
-	}
-
-	// two parallel pieces facing each other meet at time t.
-	function collide(a, c, t) {
-		if (piece_dir(a) < 0) {
-			let a0 = a
-			a = c
-			c = a0
-		}
-		// a runs from a1 to a2, c runs from c2 to c1, both along +m.
-		let a1 = piece_tail_m(a, t)
-		let a2 = piece_head_m(a, t)
-		let c1 = piece_head_m(c, t)
-		let c2 = piece_tail_m(c, t)
-		let o1 = max(a1, c1)
-		let o2 = max(o1, min(a2, c2))
-		let L = line_at(a.plane, t)
-		let is_v = a.plane.is_v
-		let n1 = is_v ? node_at(L, o1, t) : node_at(o1, L, t)
-		let n2 = is_v ? node_at(L, o2, t) : node_at(o2, L, t)
-		add_ridge(c.plane, a.plane, n1, n2)
-
-		let pa = a.prev
-		let na = a.next
-		let pc = c.prev
-		let nc = c.next
-		a.is_dead = true
-		c.is_dead = true
-
-		// low end
-		if (a1 < c1 - NEAR) { // a keeps its tail part.
-			end_arc(c, nc, n1)
-			add_piece(a, pa, nc, a.n1, n1)
-		} else if (c1 < a1 - NEAR) { // c keeps its head part.
-			end_arc(pa, a, n1)
-			add_piece(c, pa, nc, n1, nc.n1)
-		} else {
-			end_arc(pa, a, n1)
-			end_arc(c, nc, n1)
-			link(pa, nc, n1)
-		}
-
-		// high end
-		if (a2 > c2 + NEAR) { // a keeps its head part.
-			end_arc(pc, c, n2)
-			add_piece(a, pc, na, n2, na.n1)
-		} else if (c2 > a2 + NEAR) { // c keeps its tail part.
-			end_arc(a, na, n2)
-			add_piece(c, pc, na, c.n1, n2)
-		} else {
-			end_arc(pc, c, n2)
-			end_arc(a, na, n2)
-			link(pc, na, n2)
-		}
-
-		run_joins(t)
-	}
-
-	// the piece between two parallel pieces facing the same way shrinks to
-	// zero at time t.
-	function collapse(e, t) {
-		let p = e.prev
-		let q = e.next
-		let node = tail_node(e, t)
-		end_arc(p, e, node)
-		end_arc(e, q, node)
-		e.is_dead = true
-		link(p, q, node)
-		run_joins(t)
-	}
-
-	// the vertical piece e reaches its eave at time t and starts sloping.
-	function start(e, t) {
-		let tail = tail_node(e, t)
-		let head = head_node(e, t)
-		end_arc(e.prev, e, tail)
-		end_arc(e, e.next, head)
-		e.plane = e.start_plane
-		e.start_plane = null
-		e.n1 = tail
-		e.next.n1 = head
-		if (tail != head) // the eave line.
-			e.plane.half_edges.push(tail, head)
-	}
-
 	// events --------------------------------------------------------------
 
-	let ev_t, ev_a, ev_c // next event: collide(ev_a, ev_c) or collapse(ev_a)
-	let ev_is_start // or start(ev_a)
+	let ev_t // time of the next event
 
 	function find_start(e) {
 		let plane = e.start_plane
 		if (!plane || plane.t0 >= ev_t)
 			return
 		ev_t = plane.t0
-		ev_a = e
-		ev_c = null
-		ev_is_start = true
 	}
 
 	function find_collapse(e, t0) {
@@ -328,9 +140,6 @@ function roof_skeleton(rings, pitches, eave_zs) {
 		if (t >= ev_t)
 			return
 		ev_t = t
-		ev_a = e
-		ev_c = null
-		ev_is_start = false
 	}
 
 	function find_collision(a, c, t0) {
@@ -368,9 +177,238 @@ function roof_skeleton(rings, pitches, eave_zs) {
 				return
 		}
 		ev_t = t
-		ev_a = a
-		ev_c = c
-		ev_is_start = false
+	}
+
+	// rebuild -------------------------------------------------------------
+
+	// all events at time t. the code cuts the pieces at their corners on each
+	// line into spans, removes the spans where pieces facing each other
+	// overlap, links the spans left into rings, and makes one piece per run
+	// of collinear spans: the fastest plane of the run gets the run. a plane
+	// gets a half-edge where it stops or starts owning a span, and corners
+	// that are gone end their arcs.
+	function rebuild(t) {
+
+		// pieces at time t, grouped by line.
+		let segs = [] // [{piece, is_v, c, d, n1, n2}, ...]
+		let corners = [] // [{p, q, node, is_kept}, ...]
+		for (let piece of pieces) {
+			let n1 = tail_node(piece, t)
+			let n2 = head_node(piece, t)
+			corners.push({p: piece, q: piece.next, node: n2, is_kept: false})
+			if (n1 == n2) // zero length.
+				continue
+			let is_v = piece.plane.is_v
+			segs.push({piece: piece, is_v: is_v, c: is_v ? n1.x : n1.y,
+				d: piece_dir(piece), n1: n1, n2: n2})
+		}
+		segs.sort((a, b) => a.is_v - b.is_v || a.c - b.c)
+		let lines = [] // [{is_v, segs, nodes, olds, spans}, ...]
+		let line
+		for (let i = 0; i < segs.length; i++) {
+			let seg = segs[i]
+			let seg0 = segs[i-1]
+			if (!seg0 || seg0.is_v != seg.is_v || seg.c - seg0.c > NEAR) {
+				line = {is_v: seg.is_v, segs: []}
+				lines.push(line)
+			}
+			line.segs.push(seg)
+		}
+
+		// spans between consecutive corners on each line; pieces facing each
+		// other cancel where they overlap.
+		let spans = [] // [{is_v, d, n1, n2, plane, start_plane, prev, next,
+			// owner}, ...]
+		for (let line of lines) {
+			let is_v = line.is_v
+			let node_set = new Set()
+			for (let seg of line.segs) {
+				node_set.add(seg.n1)
+				node_set.add(seg.n2)
+			}
+			let nodes = [...node_set]
+			nodes.sort(is_v ? (a, b) => a.y - b.y : (a, b) => a.x - b.x)
+			let node_i = new Map()
+			for (let i = 0; i < nodes.length; i++)
+				node_i.set(nodes[i], i)
+			let span_n = nodes.length - 1
+			// olds[d][k]: the piece facing d along the line over span k.
+			let olds = {'1': [], '-1': []}
+			for (let seg of line.segs) {
+				let i1 = node_i.get(seg.n1)
+				let i2 = node_i.get(seg.n2)
+				let a = olds[seg.d]
+				for (let k = min(i1, i2); k < max(i1, i2); k++) {
+					assert(!a[k], 'pieces overlap')
+					a[k] = seg.piece
+				}
+			}
+			let news = {'1': [], '-1': []}
+			for (let k = 0; k < span_n; k++) {
+				let p1 = olds[1][k]
+				let p2 = olds[-1][k]
+				if (p1 && p2 || !p1 && !p2)
+					continue
+				let piece = p1 ?? p2
+				let d = p1 ? 1 : -1
+				let is_start = piece.start_plane
+					&& piece.start_plane.t0 <= t + NEAR
+				let span = {
+					is_v: is_v, d: d,
+					n1: d > 0 ? nodes[k] : nodes[k+1],
+					n2: d > 0 ? nodes[k+1] : nodes[k],
+					plane: is_start ? piece.start_plane : piece.plane,
+					start_plane: is_start ? null : piece.start_plane,
+					prev: null, next: null, owner: null,
+				}
+				spans.push(span)
+				news[d][k] = span
+			}
+			line.nodes = nodes
+			line.olds = olds
+			line.news = news
+		}
+
+		// link the spans: where rings touch at a node, take the leftmost turn
+		// to keep them separate.
+		let outs_by_node = new Map() // {node -> [span, ...]}
+		for (let span of spans) {
+			let a = outs_by_node.get(span.n1)
+			if (!a) {
+				a = []
+				outs_by_node.set(span.n1, a)
+			}
+			a.push(span)
+		}
+		for (let span of spans) {
+			let dx = span.is_v ? 0 : span.d
+			let dy = span.is_v ? span.d : 0
+			let next_span
+			let max_turn = -inf
+			for (let span1 of outs_by_node.get(span.n2)) {
+				let dx1 = span1.is_v ? 0 : span1.d
+				let dy1 = span1.is_v ? span1.d : 0
+				let turn = atan2(dx * dy1 - dy * dx1, dx * dx1 + dy * dy1)
+				if (turn <= max_turn)
+					continue
+				max_turn = turn
+				next_span = span1
+			}
+			assert(next_span && !next_span.prev, 'spans do not link')
+			span.next = next_span
+			next_span.prev = span
+		}
+
+		// one piece per run of collinear spans.
+		let new_pieces = []
+		for (let span0 of spans) {
+			if (span0.owner)
+				continue
+			// start the ring at a corner.
+			let first_span = span0
+			while (first_span.prev.is_v == first_span.is_v)
+				first_span = first_span.prev
+			let first_piece, prev_piece
+			let span = first_span
+			do {
+				let run_span = span
+				let last_span = span
+				while (last_span.next.is_v == span.is_v) {
+					last_span = last_span.next
+					if (last_span.plane.s > run_span.plane.s)
+						run_span = last_span
+				}
+				let span1 = span
+				while (1) {
+					span1.owner = run_span.plane
+					if (span1 == last_span)
+						break
+					span1 = span1.next
+				}
+				let piece = {plane: run_span.plane,
+					start_plane: run_span.start_plane,
+					prev: prev_piece, next: null, n1: span.n1}
+				new_pieces.push(piece)
+				if (prev_piece)
+					prev_piece.next = piece
+				else
+					first_piece = piece
+				prev_piece = piece
+				span = last_span.next
+			} while (span != first_span)
+			prev_piece.next = first_piece
+			first_piece.prev = prev_piece
+		}
+
+		// corners: a corner between the same planes at the same node keeps
+		// its arc; the other corners end their arcs here.
+		let corners_by_node = new Map() // {node -> [corner, ...]}
+		for (let corner of corners) {
+			let a = corners_by_node.get(corner.node)
+			if (!a) {
+				a = []
+				corners_by_node.set(corner.node, a)
+			}
+			a.push(corner)
+		}
+		for (let q of new_pieces) {
+			let node = q.n1
+			let p = q.prev
+			for (let corner of corners_by_node.get(node) ?? []) {
+				if (corner.is_kept || corner.p.plane != p.plane
+						|| corner.q.plane != q.plane)
+					continue
+				corner.is_kept = true
+				q.n1 = corner.q.n1
+				break
+			}
+		}
+		for (let corner of corners)
+			if (!corner.is_kept)
+				end_arc(corner.p, corner.q, corner.node)
+
+		// half-edges where a plane stops or starts owning spans: a plane that
+		// stops gets one against its direction, a plane that starts gets one
+		// along it.
+		function add_half_edge(plane, nodes, k1, k2, d) {
+			if (!plane || !plane.s)
+				return
+			if (d > 0)
+				plane.half_edges.push(nodes[k1], nodes[k2])
+			else
+				plane.half_edges.push(nodes[k2], nodes[k1])
+		}
+		for (let line of lines) {
+			let nodes = line.nodes
+			let span_n = nodes.length - 1
+			for (let d of [1, -1]) {
+				let olds = line.olds[d]
+				let news = line.news[d]
+				let stop_plane = null
+				let stop_k = 0
+				let start_plane = null
+				let start_k = 0
+				for (let k = 0; k <= span_n; k++) {
+					let old_plane = k < span_n ? olds[k]?.plane ?? null : null
+					let new_plane = k < span_n ? news[k]?.owner ?? null : null
+					let is_same = old_plane == new_plane
+					let plane1 = is_same ? null : old_plane
+					let plane2 = is_same ? null : new_plane
+					if (plane1 != stop_plane) {
+						add_half_edge(stop_plane, nodes, stop_k, k, -d)
+						stop_plane = plane1
+						stop_k = k
+					}
+					if (plane2 != start_plane) {
+						add_half_edge(start_plane, nodes, start_k, k, d)
+						start_plane = plane2
+						start_k = k
+					}
+				}
+			}
+		}
+
+		return new_pieces
 	}
 
 	// input ---------------------------------------------------------------
@@ -448,8 +486,7 @@ function roof_skeleton(rings, pitches, eave_zs) {
 			}
 			let [x, y] = ring[(i0 + i) % n]
 			let piece = {plane: plane, start_plane: start_plane,
-				prev: prev_piece, next: null, n1: node_at(x, y, 0),
-				is_dead: false}
+				prev: prev_piece, next: null, n1: node_at(x, y, 0)}
 			pieces.push(piece)
 			if (prev_piece)
 				prev_piece.next = piece
@@ -466,12 +503,6 @@ function roof_skeleton(rings, pitches, eave_zs) {
 
 	let t = 0 // current time: height above the lowest eave
 	while (1) {
-		let live_pieces = []
-		for (let piece of pieces)
-			if (!piece.is_dead)
-				live_pieces.push(piece)
-		pieces = live_pieces
-
 		ev_t = inf
 		for (let i = 0; i < pieces.length; i++) {
 			let a = pieces[i]
@@ -486,12 +517,7 @@ function roof_skeleton(rings, pitches, eave_zs) {
 		if (ev_t > t + NEAR)
 			nodes_now.length = 0
 		t = max(t, ev_t)
-		if (ev_is_start)
-			start(ev_a, ev_t)
-		else if (ev_c)
-			collide(ev_a, ev_c, ev_t)
-		else
-			collapse(ev_a, ev_t)
+		pieces = rebuild(t)
 	}
 	for (let piece of pieces)
 		assert(!piece.plane.s, 'sloped edge left after the last event')

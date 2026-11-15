@@ -4,26 +4,38 @@
 // unshuffled run: events at the same height must give one roof whatever
 // order the code finds them in (investigation).
 // env SDK=dir loads dir/www/roof_skeleton.js instead (a changed copy),
-// N=shapes (default 1000), SHUFFLES=runs per shape (default 5).
+// N=shapes (default 1000), SHUFFLES=runs per shape (default 5),
+// BASE=dir also compares the unshuffled roof with dir/www/roof_skeleton.js
+// (e.g. BASE=. for the production code) and prints DIFF lines.
 const fs = require('node:fs')
 const path = require('node:path')
 const vm = require('node:vm')
 const sdk = path.resolve(__dirname, '..')
-const ctx = {console, setTimeout, clearTimeout, TextEncoder, TextDecoder,
-	URL, URLSearchParams, performance, Intl, atob, btoa, queueMicrotask}
-ctx.window = ctx
-ctx.document = {currentScript: {hasAttribute: k => k == 'global'}}
-ctx.navigator = {language: 'en', userAgent: ''}
-ctx.location = {href: 'http://x/'}
-ctx.localStorage = {}
-ctx.addEventListener = () => {}
-vm.createContext(ctx)
-vm.runInContext(fs.readFileSync(path.join(sdk, 'www', 'glue.js'), 'utf8'),
-	ctx, {filename: 'glue.js'})
-// shuffle hook added after the dead pieces are removed.
+function new_context() {
+	const ctx = {console, setTimeout, clearTimeout, TextEncoder, TextDecoder,
+		URL, URLSearchParams, performance, Intl, atob, btoa, queueMicrotask}
+	ctx.window = ctx
+	ctx.document = {currentScript: {hasAttribute: k => k == 'global'}}
+	ctx.navigator = {language: 'en', userAgent: ''}
+	ctx.location = {href: 'http://x/'}
+	ctx.localStorage = {}
+	ctx.addEventListener = () => {}
+	vm.createContext(ctx)
+	vm.runInContext(fs.readFileSync(path.join(sdk, 'www', 'glue.js'), 'utf8'),
+		ctx, {filename: 'glue.js'})
+	return ctx
+}
+const ctx = new_context()
+let base_ctx
+if (process.env.BASE) {
+	base_ctx = new_context()
+	let file = path.join(process.env.BASE, 'www', 'roof_skeleton.js')
+	vm.runInContext(fs.readFileSync(file, 'utf8'), base_ctx, {filename: file})
+}
+// shuffle hook added after each rebuild of the pieces.
 let src = fs.readFileSync(path.join(process.env.SDK || sdk, 'www',
 	'roof_skeleton.js'), 'utf8')
-let hook_line = '\t\tpieces = live_pieces\n'
+let hook_line = '\t\tpieces = rebuild(t)\n'
 if (!src.includes(hook_line))
 	throw new Error('hook line not found')
 src = src.replace(hook_line, hook_line
@@ -175,6 +187,18 @@ let SHUFFLES = +(process.env.SHUFFLES || 5)
 let pitch_choices = [30, 45, 60, 90, Math.atan(0.5) / rad]
 let fails = 0
 let crashes = 0 // unshuffled runs that failed an assert
+let diffs = 0 // unshuffled runs that differ from BASE
+
+// zs1 against zs0: the first point with a different height, or undefined.
+function zs_diff(zs0, zs1) {
+	for (let k = 0; k < zs0.length; k++) {
+		let z0 = zs0[k][2]
+		let z1 = zs1[k][2]
+		if (z0 == null ? z1 != null : z1 == null || Math.abs(z0 - z1) > 1e-6)
+			return 'z ' + z1 + ' != ' + z0 + ' at ' + zs0[k][0] + ','
+				+ zs0[k][1]
+	}
+}
 for (let i = 0; i < N; i++) {
 	let wall_ring = random_columns_ring()
 	if (i & 1)
@@ -204,26 +228,29 @@ for (let i = 0; i < N; i++) {
 				JSON.stringify(pitches), e.message)
 			continue
 		}
+		if (base_ctx) {
+			let err
+			try {
+				err = zs_diff(zs0, roof_zs(base_ctx.roof_skeleton([ring], pitches,
+					eave_zs), ring))
+			} catch (e) {
+				err = 'base: ' + e.message
+			}
+			if (err) {
+				diffs++
+				console.log('DIFF', i, 'overhang', d, JSON.stringify(wall_ring),
+					JSON.stringify(pitches), err)
+			}
+		}
 		ctx.shuffle_pieces = shuffle
 		for (let s = 0; s < SHUFFLES; s++) {
 			let err
-			let zs1
 			try {
-				zs1 = roof_zs(ctx.roof_skeleton([ring], pitches, eave_zs), ring)
+				err = zs_diff(zs0, roof_zs(ctx.roof_skeleton([ring], pitches,
+					eave_zs), ring))
 			} catch (e) {
 				err = e.message
 			}
-			if (!err)
-				for (let k = 0; k < zs0.length; k++) {
-					let z0 = zs0[k][2]
-					let z1 = zs1[k][2]
-					if (z0 == null ? z1 != null
-							: z1 == null || Math.abs(z0 - z1) > 1e-6) {
-						err = 'z ' + z1 + ' != ' + z0 + ' at ' + zs0[k][0]
-							+ ',' + zs0[k][1]
-						break
-					}
-				}
 			if (err) {
 				fails++
 				console.log('FAIL', i, 'overhang', d, JSON.stringify(wall_ring),
@@ -234,4 +261,4 @@ for (let i = 0; i < N; i++) {
 	}
 }
 console.log(N + ' shapes, ' + fails + ' order-dependent runs, '
-	+ crashes + ' crashes')
+	+ crashes + ' crashes' + (base_ctx ? ', ' + diffs + ' differ from BASE' : ''))

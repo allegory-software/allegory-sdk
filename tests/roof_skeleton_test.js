@@ -1,4 +1,5 @@
 // run: node tests/roof_skeleton_test.js
+// env SDK=dir loads dir/www/roof_skeleton.js instead (a changed copy).
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -19,7 +20,8 @@ ctx.localStorage = {}
 ctx.addEventListener = () => {}
 vm.createContext(ctx)
 for (let name of ['glue.js', 'roof_skeleton.js']) {
-	let file = path.join(sdk, 'www', name)
+	let file = path.join(name == 'roof_skeleton.js' && process.env.SDK || sdk,
+		'www', name)
 	vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, {filename: file})
 }
 const roof_skeleton = ctx.roof_skeleton
@@ -346,15 +348,19 @@ function offset_ring(ring, ds) {
 // edges move, vertical edges move only with outside corners at both ends.
 // each sloped edge's eave is lowered by d*tan(pitch), so its plane passes
 // through z = 0 at the wall line: inside the wall ring, the roof must be the
-// wall ring's roof.
-function check_overhang(wall_ring, pitches, d, is_covered = true) {
+// wall ring's roof. a moving gable can change the order of the events inside
+// the wall ring, and with it the roof there: random shapes keep the gables
+// on the wall line (gables_move false).
+function check_overhang(wall_ring, pitches, d, is_covered = true,
+	gables_move = true
+) {
 	let n = wall_ring.length
 	let ds = []
 	let eave_zs = []
 	for (let i = 0; i < n; i++) {
 		let pitch = pitches[i]
-		let is_moving = pitch != 90
-			|| is_convex(wall_ring, i) && is_convex(wall_ring, (i + 1) % n)
+		let is_moving = pitch != 90 || gables_move
+			&& is_convex(wall_ring, i) && is_convex(wall_ring, (i + 1) % n)
 		ds.push(is_moving ? d : 0)
 		eave_zs.push(pitch == 90 ? 0 : -d * Math.tan(pitch * rad))
 	}
@@ -405,10 +411,11 @@ check('overhang: a gable at an inside corner stays on the wall line', () => {
 
 // random shapes -------------------------------------------------------------
 
+// 32-bit integer LCG: exact in doubles.
 let seed = 1
 function random() {
-	seed = (seed * 1103515245 + 12345) % 2147483648
-	return seed / 2147483648
+	seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
+	return seed / 4294967296
 }
 function random_int(a, b) { return a + Math.floor(random() * (b - a + 1)) }
 
@@ -530,7 +537,7 @@ check('random column shapes, overhang with random pitches', () => {
 		if (!pitches.some(p => p != 90))
 			pitches[0] = 45
 		try {
-			check_overhang(wall_ring, pitches, .2, false)
+			check_overhang(wall_ring, pitches, .2, false, false)
 		} catch (e) {
 			console.error('ring', JSON.stringify(wall_ring),
 				'pitches', JSON.stringify(pitches))

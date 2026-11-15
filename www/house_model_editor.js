@@ -4,7 +4,7 @@ const G = window
 
 const {
 	assert, push_log, pop_log,
-	empty_obj, map,
+	map,
 } = glue
 
 const {v3, mat4, line2, line3} = Math3D

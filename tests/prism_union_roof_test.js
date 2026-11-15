@@ -28,7 +28,9 @@ vm.createContext(ctx)
 let files = ['glue.js', 'earcut.js', '3d.js', 'plane_graph.js',
 	'roof_skeleton.js', 'clipper2.js', 'prism_union.js', 'house_plan.js']
 for (let name of files) {
-	let file = path.join(sdk, 'www', name)
+	// env SDK=dir loads dir/www/roof_skeleton.js instead (a changed copy).
+	let file = path.join(name == 'roof_skeleton.js' && process.env.SDK || sdk,
+		'www', name)
 	vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, {filename: file})
 }
 vm.runInContext(fs.readFileSync(path.join(sdk, 'www/ui-demo.html'), 'utf8')

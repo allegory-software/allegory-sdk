@@ -29,7 +29,9 @@ let files = ['www/glue.js', 'www/earcut.js', 'www/3d.js', 'www/plane_graph.js',
 	'www/roof_skeleton.js', 'www/clipper2.js', 'www/prism_union.js',
 	'www/house_plan.js']
 for (let name of files) {
-	let file = path.join(sdk, name)
+	// env SDK=dir loads dir/www/roof_skeleton.js instead (a changed copy).
+	let file = path.join(name == 'www/roof_skeleton.js' && process.env.SDK
+		|| sdk, name)
 	vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, {filename: file})
 }
 vm.runInContext(fs.readFileSync(path.join(sdk, 'www/ui-demo.html'), 'utf8')
@@ -497,6 +499,20 @@ check('gables along a slot', () => {
 		['draw', 0, 0, 400, 300, 150, -300, 400, 700, -950, -700],
 	]}]})
 	set_roof(h, 45, [{x: 400, y: 150, pitch: 90}, {x: 550, y: 150, pitch: 90}])
+	check_solid(house_report(h))
+	if (process.env.PRINT)
+		console.log(JSON.stringify(h.save_state()))
+})
+
+// a gable set back 200 from the front eave next to it: the front eave
+// reaches the gable's line at 200 above the wall top and continues over the
+// gable's run. PRINT=1 prints the house state to paste into the house plan
+// editor.
+check('sloped eave lines up with a gable', () => {
+	let h = ctx.house_plan({floors: [{lines: [
+		['draw', 0, 0, 500, 200, 500, 600, -1000, -800],
+	]}]})
+	set_roof(h, 45, [{x: 750, y: 200, pitch: 90}])
 	check_solid(house_report(h))
 	if (process.env.PRINT)
 		console.log(JSON.stringify(h.save_state()))
