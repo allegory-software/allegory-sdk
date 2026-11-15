@@ -118,7 +118,7 @@ ui.load_font('tabler_filled' , 'icons/tabler-icons-filled.woff2')
 ui.load_font('mono'          , 'fonts/jetbrains-mono-nl-regular.woff2')
 ui.font_alias('heading', ui.default_font)
 
-ui.saved_state = json_arg(load('ui_saved_state')) ?? {}
+ui.load_saved_state(json_arg(load('ui_saved_state')) ?? {})
 ui.save_state_delay = 0
 ui.save_unsaved_state = function(saved_state) {
 	save('ui_saved_state', json(saved_state))

@@ -94,6 +94,15 @@ function init_house_model_editor(e, house, cut_floor) {
 	e.update_all()
 }
 
+ui.saved_value_def('house_model_fov', 60, ui.create_field({
+	type: 'number',
+	min: 20,
+	max: 120,
+	decimals: 0,
+}))
+
+let model_editor_opt = {}
+
 // ui.house_model_editor (id, house, floor=, fr=1, align='s', valign='s')
 // floor: the current floor, which the user can choose to cut the model at.
 ui.house_model_editor = function(id, house, floor, fr, align, valign) {
@@ -116,13 +125,20 @@ ui.house_model_editor = function(id, house, floor, fr, align, valign) {
 		e.clear_model()
 		init_house_model_editor(e, house, cut_floor)
 	}
+	model_editor_opt.fov = ui.saved_value('house_model_fov') ?? undefined
 	ui.stack('', fr, align, valign)
-		ui.model3_editor(id, empty_obj, init)
+		ui.model3_editor(id, model_editor_opt, init)
 		ui.p(ui.sp())
 		ui.stack()
 			if (floor)
 				ui.toggle_button(cut_id, is_cut,
 					S('house_model_cut', 'Up to current floor'), null, 0, 'l', 't')
+			ui.h(0, ui.sp(), 'r', 't')
+				ui.text('', S('house_model_fov', 'FOV'))
+				let fov_i = ui.stack('', 0)
+					ui.num_slider('house_model_fov')
+				ui.end_stack()
+			ui.end_h()
 		ui.end_stack()
 	ui.end_stack()
 }
