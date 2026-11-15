@@ -38,7 +38,7 @@ function house_plan(t) {
 
 	function copy_roof(roof) {
 		if (!roof)
-			return null
+			return {pitch: 20, overhang: 60, edge_points: []}
 		let edge_points = []
 		for (let edge_point of roof.edge_points ?? [])
 			edge_points.push({x: edge_point.x, y: edge_point.y,
@@ -52,6 +52,13 @@ function house_plan(t) {
 		for (let room_point of room_points)
 			a.push({x: room_point.x, y: room_point.y,
 				is_open: room_point.is_open})
+		return a
+	}
+
+	function copy_area_points(area_points) {
+		let a = []
+		for (let area_point of area_points)
+			a.push({x: area_point.x, y: area_point.y, kind: area_point.kind})
 		return a
 	}
 
@@ -138,7 +145,7 @@ function house_plan(t) {
 		floor.orthogonal = true
 
 		floor.house = house
-		// {pitch:, edge_points: [{x:, y:, pitch:}, ...]} or null
+		// {pitch:, overhang:, edge_points: [{x:, y:, pitch:}, ...]}
 		floor.roof = copy_roof(t.roof)
 		floor.i = floor_i
 		floor.id = 'floor'+floor_i
@@ -148,6 +155,8 @@ function house_plan(t) {
 		// [{x:, y:, is_open:}, ...]
 		floor.room_points = copy_room_points(t.room_points ?? [])
 		floor.room_point_by_cycle = map() // {cycle -> room_point|null if 2+}
+		// [{x:, y:, kind: 'roof'|'terrace'}, ...]
+		floor.area_points = copy_area_points(t.area_points ?? [])
 
 		floor._after_fix = function() {
 			create_edges()
@@ -240,17 +249,15 @@ function house_plan(t) {
 
 		// roofs ---------------------------------------------------------------
 
-		// the faces of the roof over the floor's outlines, as returned by
-		// roof_skeleton(). the roof's edges are the sides of its perimeter:
-		// the outer skin's sides moved outward by the overhang. an edge point
-		// sets the pitch of the nearest outer skin side. two or more points
-		// on one side: the roof's pitch, like room points. the faces are the
-		// roof's top. each sloped side's plane passes through the floor's top
-		// on the outer skin, so its eave is lower by the overhang times the
-		// slope.
-		floor.make_roof_faces = function() {
-			let roof = floor.roof
-			let wall_z = floor.z + floor.h
+		// the parts of the floor's outlines that the floor above leaves
+		// uncovered, one per connected part: [{paths, kind}, ...]. paths: on
+		// prism_union()'s grid, the outline first, then its holes. kind: the
+		// kind of the one area point inside the area, else 'roof'.
+		floor.make_areas = function() {
+			let {Clipper64, PolyTree64, ClipType, FillRule, pointInPolygon,
+				PointInPolygonResult} = clipper2
+			let scale = prism_union.grid_scale
+			let floor1 = house.floors[floor.i+1]
 
 			// one ring per outline: the outer skin's corners, without the
 			// collinear points of the walls joining it.
@@ -269,23 +276,102 @@ function house_plan(t) {
 				rings.push(ring)
 			}
 
-			let edge_point_by_side = map() // {'ring_i i' -> edge_point|null if 2+}
+			let paths = []
+			for (let ring of rings)
+				add_ring_path(paths, ring)
+			let clipper = new Clipper64()
+			// keeps the corner where an area's side passes from an outline
+			// to a wall of the floor above.
+			clipper.addSubject(paths)
+			if (floor1)
+				clipper.addClip(add_outline_paths(floor1, []))
+			let tree = new PolyTree64()
+			clipper.execute(ClipType.Difference, FillRule.NonZero, tree)
+
+			let areas = []
+			let {IsInside, IsOutside} = PointInPolygonResult
+			for (let group of add_path_groups(tree, [])) {
+				let area_point_n = 0
+				let found_area_point
+				for (let area_point of floor.area_points) {
+					let p = {
+						x: round(area_point.x * scale),
+						y: round(area_point.y * scale),
+					}
+					if (pointInPolygon(p, group[0]) != IsInside)
+						continue
+					let in_hole = false
+					for (let i = 1; i < group.length; i++)
+						if (pointInPolygon(p, group[i]) != IsOutside)
+							in_hole = true
+					if (in_hole)
+						continue
+					area_point_n++
+					found_area_point = area_point
+				}
+				areas.push({
+					paths: group,
+					kind: area_point_n == 1 ? found_area_point.kind : 'roof',
+				})
+			}
+			return areas
+		}
+
+		// the faces of the roof over the floor's roof areas, as returned by
+		// roof_skeleton(). roof_areas: areas from make_areas(). an area's
+		// side next to the outside of the floor's outlines is an eave side;
+		// its other sides run along the walls of the floor above: vertical,
+		// they don't move. the roof's edges are the sides of its perimeter:
+		// the eave sides moved outward by the overhang. an edge point sets
+		// the pitch of the nearest eave side. two or more points on one side:
+		// the roof's pitch, like room points. the faces are the roof's top.
+		// each sloped side's plane passes through the floor's top on the
+		// outer skin, so its eave is lower by the overhang times the slope.
+		floor.make_roof_faces = function(roof_areas) {
+			let roof = floor.roof
+			let wall_z = floor.z + floor.h
+			let scale = prism_union.grid_scale
+			let floor1 = house.floors[floor.i+1]
+			let {pointInPolygon, PointInPolygonResult} = clipper2
+
+			let area_paths = [] // ccw outlines and cw holes of all the areas
+			for (let area of roof_areas)
+				for (let path of area.paths)
+					area_paths.push(path)
+
+			// the side p-q of an area path has the outside of the floor's
+			// outlines next to its middle.
+			let outline_paths = add_outline_paths(floor, [])
+			function is_eave_side(p, q) {
+				let x = round((p.x + q.x) / 2) + sign(q.y - p.y)
+				let y = round((p.y + q.y) / 2) - sign(q.x - p.x)
+				for (let path of outline_paths)
+					if (pointInPolygon({x: x, y: y}, path)
+						!= PointInPolygonResult.IsOutside)
+						return false
+				return true
+			}
+
+			let edge_point_by_side = map() // {'path_i i' -> edge_point|null if 2+}
 			for (let edge_point of roof.edge_points) {
-				let {x, y} = edge_point
+				let x = edge_point.x * scale
+				let y = edge_point.y * scale
 				let min_d = 1/0
 				let min_key
-				for (let ring_i = 0; ring_i < rings.length; ring_i++) {
-					let ring = rings[ring_i]
-					for (let i = 0, n = ring.length; i < n; i++) {
-						let [x1, y1] = ring[i]
-						let [x2, y2] = ring[(i+1) % n]
-						let dx = max(min(x1, x2) - x, 0, x - max(x1, x2))
-						let dy = max(min(y1, y2) - y, 0, y - max(y1, y2))
+				for (let path_i = 0; path_i < area_paths.length; path_i++) {
+					let path = area_paths[path_i]
+					for (let i = 0, n = path.length; i < n; i++) {
+						let p = path[i]
+						let q = path[(i+1) % n]
+						if (!is_eave_side(p, q))
+							continue
+						let dx = max(min(p.x, q.x) - x, 0, x - max(p.x, q.x))
+						let dy = max(min(p.y, q.y) - y, 0, y - max(p.y, q.y))
 						let d = dx * dx + dy * dy
 						if (d >= min_d)
 							continue
 						min_d = d
-						min_key = ring_i+' '+i
+						min_key = path_i+' '+i
 					}
 				}
 				edge_point_by_side.set(min_key,
@@ -298,7 +384,6 @@ function house_plan(t) {
 			// moves. a gable side moves only with outside corners at both
 			// ends: at an inside corner, its line bounds the faces inside the
 			// house. outlines closer than twice the overhang merge.
-			let scale = prism_union.grid_scale
 			let paths = []
 			let sides = [] // [{nx, ny, c, m1, m2, d, pitch}, ...]
 				// n: outward normal, c: moved line, m1..m2: extent, d: move.
@@ -311,18 +396,20 @@ function house_plan(t) {
 				return (p1.x - p0.x) * (p2.y - p1.y)
 					- (p1.y - p0.y) * (p2.x - p1.x) > 0
 			}
-			for (let ring_i = 0; ring_i < rings.length; ring_i++) {
-				let [path] = add_ring_path([], rings[ring_i])
+			for (let path_i = 0; path_i < area_paths.length; path_i++) {
+				let path = area_paths[path_i]
 				paths.push(path)
 				let n = path.length
 				let ring_sides = []
 				for (let i = 0; i < n; i++) {
 					let p = path[i]
 					let q = path[(i+1) % n]
-					let pitch = edge_point_by_side.get(ring_i+' '+i)?.pitch
-						?? roof.pitch
-					let is_moving = pitch != 90
-						|| is_convex(path, i) && is_convex(path, (i+1) % n)
+					let is_eave = is_eave_side(p, q)
+					let pitch = is_eave
+						? edge_point_by_side.get(path_i+' '+i)?.pitch ?? roof.pitch
+						: 90
+					let is_moving = is_eave && (pitch != 90
+						|| is_convex(path, i) && is_convex(path, (i+1) % n))
 					let d = is_moving ? round(roof.overhang * scale) : 0
 					let nx = sign(q.y - p.y)
 					let ny = -sign(q.x - p.x)
@@ -356,14 +443,35 @@ function house_plan(t) {
 				for (let side of ring_sides)
 					sides.push(side)
 			}
+			// the sides of the floor above, facing into it: where a strip ends
+			// at its wall, the perimeter side there is on its outline.
+			if (floor1) {
+				for (let path of add_outline_paths(floor1, [])) {
+					for (let i = 0, n = path.length; i < n; i++) {
+						let p = path[i]
+						let q = path[(i+1) % n]
+						let is_v = p.x == q.x
+						sides.push({
+							nx: -sign(q.y - p.y),
+							ny: sign(q.x - p.x),
+							c: is_v ? p.x : p.y,
+							m1: is_v ? min(p.y, q.y) : min(p.x, q.x),
+							m2: is_v ? max(p.y, q.y) : max(p.x, q.x),
+							d: 0,
+							pitch: 90,
+						})
+					}
+				}
+			}
 			let {Clipper64, PolyTree64, ClipType, FillRule} = clipper2
 			let clipper = new Clipper64()
 			clipper.addSubject(paths) // keeps the points where strips end.
 			let tree = new PolyTree64()
 			clipper.execute(ClipType.Union, FillRule.NonZero, tree)
 
-			// the outer skin side that a perimeter side came from: on its moved
-			// line, facing the same way, nearest along the line.
+			// the area side or the side of the floor above that a perimeter
+			// side came from: on its moved line, facing the same way, nearest
+			// along the line.
 			function find_side(a, b) {
 				let is_v = a.x == b.x
 				let nx = sign(b.y - a.y)
@@ -385,21 +493,7 @@ function house_plan(t) {
 			}
 
 			let faces = []
-			let ring_groups = [] // [[outline, hole, ...], ...] grid paths
-			function add_ring_groups(node) {
-				for (let i = 0; i < node.count; i++) {
-					let outline = node.child(i)
-					let group = [outline.polygon]
-					for (let j = 0; j < outline.count; j++) {
-						let hole = outline.child(j)
-						group.push(hole.polygon)
-						add_ring_groups(hole) // islands
-					}
-					ring_groups.push(group)
-				}
-			}
-			add_ring_groups(tree)
-			for (let group of ring_groups) {
+			for (let group of add_path_groups(tree, [])) {
 				let group_rings = []
 				let pitches = []
 				let eave_zs = []
@@ -436,12 +530,14 @@ function house_plan(t) {
 					point_indices.get(seg[1]))
 			return {points: points, lines: [lines],
 				room_points: copy_room_points(floor.room_points),
+				area_points: copy_area_points(floor.area_points),
 				roof: copy_roof(floor.roof)}
 		}
 
 		floor.load_state = function(state) {
 			floor.load(state.points, state.lines)
 			floor.room_points = copy_room_points(state.room_points)
+			floor.area_points = copy_area_points(state.area_points)
 			floor.roof = copy_roof(state.roof)
 			floor.fix()
 		}
@@ -900,10 +996,12 @@ function house_plan(t) {
 	// their plan region is the even-odd fill of all the floor's skins: the
 	// outlines minus the rooms plus the islands minus their rooms. Slab i is
 	// at the bottom of floor i, under the outlines of floors i-1 and i,
-	// except under the open rooms of floor i over the rooms of floor i-1.
-	// The islands of an open room are not in the room. The top floor's roof
-	// bodies cut the walls and slabs under them. The top floor's walls rise
-	// to the roof underside.
+	// except under the open rooms of floor i over the rooms of floor i-1
+	// and under the roofs of floor i-1. The islands of an open room are not
+	// in the room. Each floor has a roof over the parts of its outlines that
+	// the floor above leaves uncovered, except over terraces. The roof bodies
+	// cut the walls and slabs under them. A floor's walls under its roof
+	// rise to the roof underside. The top floor's terraces get a slab on top.
 
 	// add a plan ring of [x, y] points to clipper paths on prism_union()'s
 	// grid.
@@ -914,6 +1012,22 @@ function house_plan(t) {
 			path.push({x: round(x * scale), y: round(y * scale)})
 		paths.push(path)
 		return paths
+	}
+
+	// add the polygons of a clipper PolyTree64 to `groups` as
+	// [outline, hole, ...], islands as groups of their own.
+	function add_path_groups(node, groups) {
+		for (let i = 0; i < node.count; i++) {
+			let outline = node.child(i)
+			let group = [outline.polygon]
+			for (let j = 0; j < outline.count; j++) {
+				let hole = outline.child(j)
+				group.push(hole.polygon)
+				add_path_groups(hole, groups) // islands
+			}
+			groups.push(group)
+		}
+		return groups
 	}
 
 	function add_outline_paths(floor, paths) {
@@ -941,8 +1055,8 @@ function house_plan(t) {
 	}
 
 	// grid paths of the slab between floor0 below, which can be null, and
-	// floor1 above.
-	function slab_paths(floor0, floor1) {
+	// floor1 above. roof_paths0: the grid paths of floor0's roof areas.
+	function slab_paths(floor0, floor1, roof_paths0) {
 		let {union, intersect, difference, FillRule} = clipper2
 		let EO = FillRule.EvenOdd
 		let paths
@@ -954,64 +1068,114 @@ function house_plan(t) {
 			let rooms0 = difference(outline0, add_skin_paths(floor0, []), EO)
 			let open_rooms = intersect(add_open_room_paths(floor1, []), rooms0,
 				EO)
-			paths = difference(union(outline0, outline1, EO), open_rooms, EO)
+			paths = difference(union(outline0, outline1, EO),
+				[...open_rooms, ...roof_paths0], EO)
 		}
 		return paths
 	}
 
-	// make the faces of the walls, slabs and roof of floors 0..top_floor,
+	// make the faces of the walls, slabs and roofs of floors 0..top_floor,
 	// tagged 'walls' (walls and slabs) and 'roof'.
-	// no_roof: leave out top_floor's roof.
+	// no_roof: leave out top_floor's roofs and terraces.
 	house.make_faces = function(top_floor, no_roof) {
 		let prisms = []
 		let slab_t = house.slab_thickness
 		let floors = house.floors
 		let floor_n = top_floor.i + 1
-		let roof_faces = !no_roof && top_floor.roof
-			? top_floor.make_roof_faces() : null
+		let {intersect, difference, FillRule} = clipper2
+		let EO = FillRule.EvenOdd
 
-		// the roof's highest point.
-		let roof_z = -1/0
-		if (roof_faces) {
-			for (let face of roof_faces) {
-				let [a, b, c] = face.plane
-				for (let ring of face.rings)
-					for (let [x, y] of ring)
-						roof_z = max(roof_z, a * x + b * y + c)
+		// areas: the roof areas of each floor; the terraces of top_floor.
+		let roof_paths_by_floor = [] // [[path, ...], ...] grid paths
+		let roof_faces_by_floor = [] // [faces, ...]
+		let terrace_paths = [] // grid paths of top_floor's terraces
+		for (let floor_i = 0; floor_i < floor_n; floor_i++) {
+			let floor = floors[floor_i]
+			let roof_areas = []
+			let roof_paths = []
+			if (!(floor == top_floor && no_roof)) {
+				for (let area of floor.make_areas()) {
+					if (area.kind == 'roof') {
+						roof_areas.push(area)
+						for (let path of area.paths)
+							roof_paths.push(path)
+					} else if (floor == top_floor) {
+						for (let path of area.paths)
+							terrace_paths.push(path)
+					}
+				}
 			}
+			roof_paths_by_floor.push(roof_paths)
+			roof_faces_by_floor.push(roof_areas.length
+				? floor.make_roof_faces(roof_areas) : [])
 		}
 
 		// walls: from the top of the floor's slab to the top of the floor.
-		// under a roof: up to the roof's highest point, so the roof bodies
-		// cut them to the roof underside.
+		// under the floor's roofs: up to their highest point, so the roof
+		// bodies cut them to the roof underside.
 		for (let floor_i = 0; floor_i < floor_n; floor_i++) {
 			let floor = floors[floor_i]
-			let top_z = floor == top_floor && roof_faces
-				? roof_z : floor.z + floor.h
-			prisms.push({
-				paths: add_skin_paths(floor, []),
-				bottom: [0, 0, floor.z + slab_t],
-				top: [0, 0, top_z],
-				tag: 'walls',
-			})
+			let skin_paths = add_skin_paths(floor, [])
+			let roof_paths = roof_paths_by_floor[floor_i]
+			let bottom = [0, 0, floor.z + slab_t]
+			let top = [0, 0, floor.z + floor.h]
+			if (roof_paths.length) {
+				let roof_z = -1/0
+				for (let face of roof_faces_by_floor[floor_i]) {
+					let [a, b, c] = face.plane
+					for (let ring of face.rings)
+						for (let [x, y] of ring)
+							roof_z = max(roof_z, a * x + b * y + c)
+				}
+				prisms.push({
+					paths: intersect(skin_paths, roof_paths, EO),
+					bottom: bottom,
+					top: [0, 0, roof_z],
+					tag: 'walls',
+				})
+				prisms.push({
+					paths: difference(skin_paths, roof_paths, EO),
+					bottom: bottom,
+					top: top,
+					tag: 'walls',
+				})
+			} else {
+				prisms.push({
+					paths: skin_paths,
+					bottom: bottom,
+					top: top,
+					tag: 'walls',
+				})
+			}
 		}
 
 		// slabs: slab i is at the bottom of floor i.
 		for (let i = 0; i < floor_n; i++) {
 			let floor = floors[i]
 			prisms.push({
-				paths: slab_paths(floors[i-1], floor),
+				paths: slab_paths(floors[i-1], floor, roof_paths_by_floor[i-1]),
 				bottom: [0, 0, floor.z],
 				top: [0, 0, floor.z + slab_t],
 				tag: 'walls',
 			})
 		}
 
-		// roof: one body per roof face, with the face on top, roof_thickness
+		// terraces of top_floor: a slab on top of it.
+		if (terrace_paths.length) {
+			let z = top_floor.z + top_floor.h
+			prisms.push({
+				paths: terrace_paths,
+				bottom: [0, 0, z],
+				top: [0, 0, z + slab_t],
+				tag: 'walls',
+			})
+		}
+
+		// roofs: one body per roof face, with the face on top, roof_thickness
 		// thick at right angles to it. the roof cuts the walls and slabs under
 		// it. where faces of different pitches meet, the underside has a step.
-		if (roof_faces) {
-			let roof_t = house.roof_thickness
+		let roof_t = house.roof_thickness
+		for (let roof_faces of roof_faces_by_floor) {
 			for (let face of roof_faces) {
 				let [a, b, c] = face.plane
 				let paths = []

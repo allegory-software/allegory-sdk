@@ -97,8 +97,12 @@ function house_prisms(h, roof_t) {
 	let slab_t = h.slab_thickness
 	let floors = h.floors
 	let top_floor = floors[floors.length-1]
-	let roof_faces = top_floor.make_roof_faces()
-	// the top floor's walls go up to the roof's highest point.
+	let roof_areas = top_floor.make_areas()
+	let roof_paths = []
+	for (let area of roof_areas)
+		roof_paths.push(...area.paths)
+	let roof_faces = top_floor.make_roof_faces(roof_areas)
+	// the top floor's walls under the roof go up to the roof's highest point.
 	let roof_z = -1/0
 	for (let face of roof_faces) {
 		let [a, b, c] = face.plane
@@ -107,9 +111,17 @@ function house_prisms(h, roof_t) {
 				roof_z = Math.max(roof_z, a * x + b * y + c)
 	}
 	for (let floor of floors) {
-		let top_z = floor == top_floor ? roof_z : floor.z + floor.h
-		prisms.push({paths: skin_paths(floor), tag: 'walls',
-			bottom: [0, 0, floor.z + slab_t], top: [0, 0, top_z]})
+		let bottom = [0, 0, floor.z + slab_t]
+		let top = [0, 0, floor.z + floor.h]
+		if (floor == top_floor) {
+			let paths = skin_paths(floor)
+			prisms.push({paths: clipper2.intersect(paths, roof_paths, EO),
+				tag: 'walls', bottom, top: [0, 0, roof_z]})
+			prisms.push({paths: clipper2.difference(paths, roof_paths, EO),
+				tag: 'walls', bottom, top})
+		} else {
+			prisms.push({paths: skin_paths(floor), tag: 'walls', bottom, top})
+		}
 	}
 	for (let i = 0; i < floors.length; i++) {
 		let floor0 = floors[i-1]
@@ -367,8 +379,21 @@ function house_report(h) {
 	// the union rounds z and the cut lines to the grid: up to half a grid
 	// unit over the faces on planes.
 	r.volume_error = Math.abs(r.volume - v) / (r.plan_area * .5 / S)
-	// make_faces() builds the same prisms.
+	// make_faces() builds the same prisms, with the parts of the lower floors
+	// that stick out as terraces: house_prisms() has the top floor's roof
+	// only, and reference_volume() takes cutters that don't overlap.
 	let top_floor = h.floors[h.floors.length-1]
+	for (let floor of h.floors) {
+		if (floor == top_floor)
+			continue
+		let make_areas = floor.make_areas
+		floor.make_areas = function() {
+			let areas = make_areas()
+			for (let area of areas)
+				area.kind = 'terrace'
+			return areas
+		}
+	}
 	let r1 = union_report_of_faces(h.make_faces(top_floor, false))
 	r.make_faces_error = Math.abs(r1.volume - r.volume) / r.volume
 	// where the code splits a side face where two bounds cross, it rounds the
@@ -511,6 +536,42 @@ check('random pitches', () => {
 	}
 	if (process.env.SWEEP)
 		console.log('sweep', n * 3, 'houses,', tiny_n, 'tiny faces')
+})
+
+// roofs on the parts of lower floors that stick out: make_faces() is
+// closed. no reference volume: the upper roof's overhang is over the lower
+// roof, and reference_volume() takes cutters that don't overlap.
+check('roofs on lower floors', () => {
+	let rect = (x, y, w, h) => ['draw', x, y, w, h, -w, -h]
+	for (let floors of [
+		// lean-to against the upper wall.
+		[{lines: [rect(0, 0, 600, 400)]}, {lines: [rect(0, 0, 300, 400)]}],
+		// lean-to as a terrace.
+		[{lines: [rect(0, 0, 600, 400)],
+			area_points: [{x: 450, y: 200, kind: 'terrace'}]},
+			{lines: [rect(0, 0, 300, 400)]}],
+		// an eave side runs on into the upper floor's wall.
+		[{lines: [rect(0, 0, 600, 400)]}, {lines: [rect(300, 200, 300, 400)]}],
+		// upper floor inside: a roof all around it.
+		[{lines: [rect(0, 0, 900, 700)]}, {lines: [rect(300, 200, 300, 300)]}],
+		// a wide second building: its hip roof is the floor's highest point,
+		// so the lean-to's walls rise above the upper roof's overhang, and
+		// both roofs cut them: the lower one wins.
+		[{lines: [rect(0, 0, 600, 400), rect(900, 0, 1200, 1200)]},
+			{lines: [rect(0, 0, 300, 400)]}],
+		// a gap between two upper parts, covered by the floor above.
+		[{lines: [rect(0, 0, 600, 400)]},
+			{lines: [rect(0, 0, 200, 400), rect(400, 0, 200, 400)]},
+			{lines: [rect(0, 0, 600, 400)]}],
+	]) {
+		let h = ctx.house_plan({floors})
+		let faces = h.make_faces(h.floors[h.floors.length-1], false)
+		let r = union_report_of_faces(faces)
+		assert(r.face_n_by_tag.roof > 0)
+		let uncovered = uncovered_length(r.faces, (process.env.TOL ?? 2) / S
+			+ 1e-9)
+		assert(uncovered < 1e-6, 'not closed: '+uncovered+' uncovered')
+	}
 })
 
 console.log(checks+' checks')

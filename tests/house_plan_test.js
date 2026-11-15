@@ -792,10 +792,9 @@ function face_poly(face) {
 }
 
 // polys of the whole house, or of floors 0..floor cut at floor.
+// cut at floor, default: the top floor. without floor's roof.
 function house_polys(h, floor) {
-	let faces = floor
-		? h.make_faces(floor, true)
-		: h.make_faces(h.floors[h.floors.length-1], false)
+	let faces = h.make_faces(floor ?? h.floors[h.floors.length-1], true)
 	let wall_polys = []
 	let horizontal_polys = []
 	for (let face of faces) {
@@ -836,9 +835,10 @@ function outline_points(poly) {
 	return loop_points(poly, 0, poly.point_count_without_holes())
 }
 
+// cut at the top floor: without the roof.
 check('exterior skin merges across T-junctions and slabs', () => {
 	let h = house(ctx.house_test_plans.simple)
-	let [poly, ...rest] = wall_polys_at(h, false, -14, -1)
+	let [poly, ...rest] = wall_polys_at(h, false, -14, -1, h.floors[0])
 	assert.equal(rest.length, 0)
 	assert.deepEqual(outline_points(poly),
 		[[-14, 0], [614, 0], [614, 250], [-14, 250]])
@@ -883,23 +883,26 @@ check('room skins of floors with a slab between them stay separate', () => {
 		assert.equal(poly.point_count(), 4)
 })
 
+// a terrace on the lower floor, cut at the top floor: without roofs.
 check('a smaller upper floor makes a stepped polygon', () => {
 	let h = house({floors: [
-		{lines: [rect_lines(0, 0, 600, 400)]},
+		{lines: [rect_lines(0, 0, 600, 400)],
+			area_points: [{x: 450, y: 200, kind: 'terrace'}]},
 		{lines: [rect_lines(0, 0, 300, 400)]},
 	]})
-	let [poly, ...rest] = wall_polys_at(h, false, -14, -1)
+	let [poly, ...rest] = wall_polys_at(h, false, -14, -1, h.floors[1])
 	assert.equal(rest.length, 0)
 	assert.deepEqual(outline_points(poly), [
 		[-14, 0], [614, 0], [614, 270], [314, 270], [314, 500], [-14, 500]])
-	let [side] = wall_polys_at(h, true, 314, 1)
+	let [side] = wall_polys_at(h, true, 314, 1, h.floors[1])
 	assert.deepEqual(outline_points(side),
 		[[-14, 270], [414, 270], [414, 500], [-14, 500]])
 })
 
 check('a gap between two floors makes a hole', () => {
 	let h = house({floors: [
-		{lines: [rect_lines(0, 0, 600, 400)]},
+		{lines: [rect_lines(0, 0, 600, 400)],
+			area_points: [{x: 300, y: 200, kind: 'terrace'}]},
 		{lines: [rect_lines(0, 0, 200, 400), rect_lines(400, 0, 200, 400)]},
 		{lines: [rect_lines(0, 0, 600, 400)]},
 	]})
@@ -1191,7 +1194,8 @@ check('an open room on the ground floor keeps its slab', () => {
 
 check('a smaller upper floor leaves a terrace and a ceiling', () => {
 	let h = house({floors: [
-		{lines: [rect_lines(0, 0, 600, 400)]},
+		{lines: [rect_lines(0, 0, 600, 400)],
+			area_points: [{x: 450, y: 200, kind: 'terrace'}]},
 		{lines: [rect_lines(0, 0, 300, 400)]},
 	]})
 	// slab 1 top: the upper room floor and the terrace.
@@ -1211,7 +1215,8 @@ check('a smaller upper floor leaves a terrace and a ceiling', () => {
 
 check('a terrace slab side merges with the walls below it', () => {
 	let h = house({floors: [
-		{lines: [rect_lines(0, 0, 600, 400)]},
+		{lines: [rect_lines(0, 0, 600, 400)],
+			area_points: [{x: 450, y: 200, kind: 'terrace'}]},
 		{lines: [rect_lines(0, 0, 300, 400)]},
 	]})
 	let [poly, ...rest] = wall_polys_at(h, true, 614, 1)
@@ -1373,7 +1378,7 @@ function roof_z_range(faces) {
 check('gable roof on the top floor: two faces over the overhang', () => {
 	let h = house(ctx.house_test_plans.gable1)
 	let f = h.floors[2]
-	let faces = f.make_roof_faces()
+	let faces = f.make_roof_faces(f.make_areas())
 	assert.equal(faces.length, 2)
 	// outer skin: x -14..614, y -14..414, 45 deg: the ridge is half the
 	// width above the wall top; the eaves are 60 out and 60 lower; the
@@ -1392,8 +1397,102 @@ check('gable roof on the top floor: two faces over the overhang', () => {
 check('two edge points on one side: the roof pitch', () => {
 	let state = JSON.parse(JSON.stringify(ctx.house_test_plans.gable1))
 	state.floors[2].roof.edge_points.push({x: 0, y: 100, pitch: 90})
-	let faces = house(state).floors[2].make_roof_faces()
+	let f = house(state).floors[2]
+	let faces = f.make_roof_faces(f.make_areas())
 	assert.equal(faces.length, 3) // left side sloped, right side vertical
+})
+
+function faces_bbox(faces) {
+	let x1 = 1/0, y1 = 1/0, x2 = -1/0, y2 = -1/0
+	for (let face of faces)
+		for (let [x, y] of face.rings[0]) {
+			x1 = Math.min(x1, x); y1 = Math.min(y1, y)
+			x2 = Math.max(x2, x); y2 = Math.max(y2, y)
+		}
+	return [x1, y1, x2, y2]
+}
+
+// up faces of make_faces() at height z.
+function up_faces_at(faces, z) {
+	return faces.filter(face => face.rings[0].every(p => p[2] == z)
+		&& face_poly(face).normal == 1)
+}
+
+// floor 0: x 0..600; floor 1: x 0..300 on top of it.
+function lean_to_house(area_points) {
+	return house({floors: [
+		{lines: [rect_lines(0, 0, 600, 400)], area_points: area_points},
+		{lines: [rect_lines(0, 0, 300, 400)]},
+	]})
+}
+
+check('a lower floor sticking out: a roof against the upper wall', () => {
+	let h = lean_to_house()
+	let [f0, f1] = h.floors
+	let areas = f0.make_areas()
+	assert.equal(areas.length, 1)
+	assert.equal(areas[0].kind, 'roof')
+	let faces = f0.make_roof_faces(areas)
+	// eaves north, east and south move out by 60; the side on the upper
+	// floor's outer skin, x = 314, stays: no face rises from it.
+	assert.equal(faces.length, 3)
+	assert.deepEqual(faces_bbox(faces), [314, -74, 674, 474])
+	let wall_z = f0.z + f0.h
+	let [z1, z2] = roof_z_range(faces)
+	assert(Math.abs(z1 - (wall_z - 60 * Math.tan(20 * Math.PI / 180))) < 1e-9)
+	assert(Math.abs(z2 - (wall_z + 214 * Math.tan(20 * Math.PI / 180))) < 1e-9)
+	// slab 1 leaves out the roof: its top shows in the upper room only.
+	let all_faces = h.make_faces(f1, false)
+	let [slab_top, ...rest] = up_faces_at(all_faces, f1.z + h.slab_thickness)
+	assert.equal(rest.length, 0)
+	assert.deepEqual(faces_bbox([slab_top]), [4, 4, 296, 396])
+	// floor 0's outer wall under the roof rises to the roof underside.
+	let [poly] = all_faces.map(face_poly).filter(poly =>
+		poly.is_v && poly.axis == 614 && poly.normal == 1)
+	let d = h.roof_thickness / Math.cos(20 * Math.PI / 180)
+	assert(Math.abs(Math.max(...outline_points(poly).map(p => p[1]))
+		- (wall_z - d)) < .002)
+})
+
+check('a lower floor sticking out: a terrace', () => {
+	let h = lean_to_house([{x: 450, y: 200, kind: 'terrace'}])
+	let [f0, f1] = h.floors
+	let areas = f0.make_areas()
+	assert.equal(areas.length, 1)
+	assert.equal(areas[0].kind, 'terrace')
+	let faces = h.make_faces(f1, false)
+	// the roof is the upper floor's only: x -74..374.
+	assert.deepEqual(faces_bbox(faces.filter(face => face.tag == 'roof')),
+		[-74, -74, 374, 474])
+	// slab 1 top: the upper room floor and the terrace.
+	let slab_tops = up_faces_at(faces, f1.z + h.slab_thickness)
+	assert.deepEqual([...slab_tops].map(face => [...faces_bbox([face])]).sort(),
+		[[314, -14, 614, 414], [4, 4, 296, 396]])
+})
+
+check('the upper roof overhangs the lower roof', () => {
+	let h = lean_to_house()
+	let [f0, f1] = h.floors
+	let upper_faces = f1.make_roof_faces(f1.make_areas())
+	assert.deepEqual(faces_bbox(upper_faces), [-74, -74, 374, 474])
+	let faces = h.make_faces(f1, false)
+	assert.deepEqual(faces_bbox(faces.filter(face => face.tag == 'roof')),
+		[-74, -74, 674, 474])
+})
+
+// floor 1 covers the north-east corner of floor 0 and sticks out north:
+// floor 0's north side runs on from its outline to floor 1's wall.
+check('an eave side runs on into a wall side', () => {
+	let h = house({floors: [
+		{lines: [rect_lines(0, 0, 600, 400)]},
+		{lines: [rect_lines(300, 200, 300, 400)]},
+	]})
+	let [f0, f1] = h.floors
+	let areas = f0.make_areas()
+	assert.equal(areas.length, 1)
+	let faces = f0.make_roof_faces(areas)
+	assert(faces.length > 0)
+	h.make_faces(f1, false)
 })
 
 check('the roof is in the floor state: add_floor and undo keep it', () => {

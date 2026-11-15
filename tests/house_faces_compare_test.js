@@ -83,8 +83,18 @@ function old_keys(h, top_floor) {
 }
 
 // faces to 2D polys: same conversion as house_plan_test.js face_poly().
-// cut at top_floor: no roof.
+// cut at top_floor: no roof. the old code had no roofs on the lower floors:
+// their parts that stick out are terraces here.
 function new_keys(h, top_floor) {
+	for (let floor of h.floors) {
+		let make_areas = floor.make_areas
+		floor.make_areas = function() {
+			let areas = make_areas()
+			for (let area of areas)
+				area.kind = 'terrace'
+			return areas
+		}
+	}
 	let keys = []
 	for (let face of h.make_faces(top_floor, true)) {
 		let [x0, y0, z0] = face.rings[0][0]

@@ -124,7 +124,7 @@ function house_prisms(h, roof_t) {
 		volume += paths_area(paths) * slab_t
 	}
 	let top_floor = floors[floors.length-1]
-	for (let face of top_floor.make_roof_faces()) {
+	for (let face of top_floor.make_roof_faces(top_floor.make_areas())) {
 		let ring = face.rings[0]
 		let [a, b, c] = face.plane
 		let paths = [ring_path(ring)]

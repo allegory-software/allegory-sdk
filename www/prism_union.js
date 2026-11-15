@@ -21,7 +21,8 @@
 	edges.
 
 	A cutter prism removes the parts of the other prisms above its bottom
-	plane, inside its plan region. Cutters must not overlap.
+	plane, inside its plan region. Cutters don't cut cutters. Where several
+	cutters cut the top of a prism, the lowest cutter bottom is its top.
 
 	A face gets the tag of the prism whose surface it is. Prisms of different
 	tags can touch but must not overlap: the code adds no faces between them.
@@ -434,7 +435,7 @@ function prism_union(prisms) {
 	}
 
 	// faces on planes: the code merges the z ranges of each cell's prisms,
-	// cut by the cell's cutter, into solid ranges per tag and adds an up face
+	// cut by the cell's cutters, into solid ranges per tag and adds an up face
 	// at the top of each range and a down face at its bottom. no two planes
 	// cross in the cell, so their order at the average of the cell's points
 	// is their order everywhere in the cell.
@@ -464,23 +465,35 @@ function prism_union(prisms) {
 		let cx = sx / n
 		let cy = sy / n
 
-		let cutter = null
-		for (let prism of cell.prisms) {
-			if (!prism.is_cutter)
-				continue
-			assert(!cutter, 'cutters overlap')
-			cutter = prism
-		}
+		let cutters = []
+		for (let prism of cell.prisms)
+			if (prism.is_cutter)
+				cutters.push(prism)
 		let ranges = [] // [{bottom, top, tag, z1, z2}, ...] by z1
 		for (let prism of cell.prisms) {
 			let top = prism.top
-			if (cutter && !prism.is_cutter) {
-				let [bottom_cut, top_cut] = cuts.get(cutter).get(prism)
-				if (is_cut(cell, bottom_cut))
-					continue
-				if (is_cut(cell, top_cut))
+			let is_removed = false
+			let is_top_cut = false
+			if (!prism.is_cutter) {
+				for (let cutter of cutters) {
+					let [bottom_cut, top_cut] = cuts.get(cutter).get(prism)
+					if (is_cut(cell, bottom_cut)) {
+						is_removed = true
+						break
+					}
+					if (!is_cut(cell, top_cut))
+						continue
+					// cut by several cutters: the lowest bottom. bottoms that
+					// cross in the cell fail the 'prism planes cross' check.
+					if (is_top_cut
+						&& grid_z(cutter.bottom, cx, cy) >= grid_z(top, cx, cy))
+						continue
+					is_top_cut = true
 					top = cutter.bottom
+				}
 			}
+			if (is_removed)
+				continue
 			ranges.push({
 				bottom: prism.bottom,
 				top: top,
