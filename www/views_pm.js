@@ -44,7 +44,8 @@ ui.unit_model_editor = function(id) {
 			? ui.state_of(master.input_id, 'house') : null
 		if (house)
 			ui.house_model_editor(id+'.editor', house,
-				ui.state_of(master.input_id, 'floor'))
+				ui.state_of(master.input_id, 'floor'), null, null, null,
+				ui.state_of(master.input_id, 'readonly'))
 		else
 			ui.text('', unit_plan_editor_def.empty_text, 1, 'c', 'c')
 	ui.end_v()

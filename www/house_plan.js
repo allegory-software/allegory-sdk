@@ -897,7 +897,7 @@ function house_plan(t) {
 			for (let seg of floor.segs)
 				lines.push(seg.id, point_indices.get(seg[0]),
 					point_indices.get(seg[1]))
-			return {points: points, lines: [lines],
+			return {h: floor.fixed_h, points: points, lines: [lines],
 				room_points: copy_room_points(floor.room_points),
 				area_points: copy_area_points(floor.area_points),
 				roof: copy_roof(floor.roof)}
@@ -911,12 +911,90 @@ function house_plan(t) {
 		}
 
 		floor.load_state = function(state) {
+			floor.fixed_h = state.h
+			floor.h = state.h ?? house.floor_h
+			fix_floor_heights()
 			floor.load(state.points, state.lines)
 			snap_points()
 			floor.room_points = copy_room_points(state.room_points)
 			floor.area_points = copy_area_points(state.area_points)
 			floor.roof = copy_roof(state.roof)
 			floor.fix()
+		}
+
+		// heights -------------------------------------------------------------
+
+		floor.roof_height = function() {
+			let areas = []
+			for (let area of floor.make_areas())
+				if (area.kind == 'roof')
+					areas.push(area)
+			let wall_z = floor.z + floor.h
+			let z = wall_z
+			if (areas.length)
+				for (let face of floor.make_roof_faces(areas)) {
+					let [a, b, c] = face.plane
+					for (let ring of face.rings)
+						for (let [x, y] of ring)
+							z = max(z, a*x + b*y + c)
+				}
+			return z - wall_z
+		}
+
+		floor.start_move_height = function(is_roof) {
+			let h0 = is_roof ? floor.roof_height() : floor.h
+			if (is_roof && !h0)
+				return
+			begin_edit(floor)
+			let s = {}
+			if (is_roof) {
+				let roof0 = edit0.roof
+				let min_scale = 0
+				let max_scale = 1/0
+				function pitch_limits(pitch) {
+					if (pitch == null || pitch == 90)
+						return
+					let slope = tan(pitch * rad)
+					min_scale = max(min_scale, tan(rad) / slope)
+					max_scale = min(max_scale, tan(89*rad) / slope)
+				}
+				pitch_limits(roof0.pitch)
+				for (let p of roof0.edge_points)
+					pitch_limits(p.pitch)
+				let scale0 = 1
+				s.move = function(dh) {
+					let scale = clamp((h0 + snap_length(dh)) / h0,
+						min_scale, max_scale)
+					if (scale == scale0)
+						return false
+					scale0 = scale
+					let roof = floor.roof
+					function scale_pitch(pitch) {
+						return pitch == null || pitch == 90 || scale == 1
+							? pitch : atan(tan(pitch * rad) * scale) / rad
+					}
+					roof.pitch = scale_pitch(roof0.pitch)
+					for (let i = 0; i < roof.edge_points.length; i++) {
+						let p0 = roof0.edge_points[i]
+						roof.edge_points[i].pitch = scale_pitch(p0.pitch)
+					}
+					return true
+				}
+			} else {
+				s.move = function(dh) {
+					let h = max(house.slab_thickness + house.precision,
+						snap_length(h0 + dh))
+					if (floor.h == h)
+						return false
+					floor.fixed_h = h == h0 ? edit0.h : h
+					floor.h = h
+					fix_floor_heights()
+					return true
+				}
+			}
+			s.stop = function() { commit_edit(floor) }
+			s.cancel = cancel_edit
+			return s
 		}
 
 		// edit history --------------------------------------------------------

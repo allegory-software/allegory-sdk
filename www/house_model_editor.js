@@ -4,7 +4,7 @@ const G = window
 
 const {
 	assert, push_log, pop_log,
-	map,
+	map, max, PI, format_kcount,
 } = glue
 
 const {v3, mat4, line2, line3} = Math3D
@@ -103,13 +103,219 @@ ui.saved_value_def('house_model_fov', 60, ui.create_field({
 
 let model_editor_opt = {}
 
-// ui.house_model_editor (id, house, floor=, fr=1, align='s', valign='s')
+// height controls ----------------------------------------------------------
+
+const HEIGHT_CONTROLS_ID = ui.BOX_ARGS
+const CMD_HEIGHT_CONTROLS = ui.box_widget('house_height_controls', {
+	ID: HEIGHT_CONTROLS_ID,
+	draw: function(a, i) {
+		ui.local_state(a[i+HEIGHT_CONTROLS_ID], 'e')?.draw(a, i)
+	},
+	hit: function(a, i) {
+		if (!ui.hit_box(a, i))
+			return
+		let controls = a[i+HEIGHT_CONTROLS_ID+1]
+		let mx = ui.mx - a[i+0]
+		let my = ui.my - a[i+1]
+		let hit_i
+		let distance = 10 ** 2
+		for (let i = 1; i < controls.length; i++) {
+			let p = controls[i]
+			if (!p.visible)
+				continue
+			let dx = mx - p[0]
+			let dy = my - p[1]
+			let d = dx*dx + dy*dy
+			if (d < distance) {
+				distance = d
+				hit_i = i
+			}
+		}
+		if (hit_i) {
+			let hs = ui.set_hit(a[i+HEIGHT_CONTROLS_ID])
+			hs.control_i = hit_i
+			return true
+		}
+	},
+})
+
+function create_height_controls(id) {
+	let e = {}
+	let changed = false
+	let house, editor_id, cut_floor, readonly
+	let controls = []
+	let axis = line3()
+	let point = v3()
+	let edit, drag_z0
+	let roof_h = 0
+	let roof_edit_no
+	let x, y
+
+	function cancel_edit() {
+		if (edit) {
+			edit.cancel()
+			edit = null
+			changed = true
+		}
+	}
+	ui.on_free(id, cancel_edit)
+
+	e.update = function() {
+		ui.state(id)
+		changed = false
+		if (readonly) {
+			cancel_edit()
+			return
+		}
+		let cs = ui.drag(id)
+		if (!cs && (ui.focused(id) || ui.focused(editor_id))) {
+			let redo = ui.keydown('ctrl shift z') || ui.keydown('ctrl y')
+			let undo = ui.keydown('ctrl z')
+			if (redo || undo) {
+				changed = redo ? house.redo() : house.undo()
+				ui.capture_keys()
+			}
+		}
+		if (cs) {
+			if (cs.cancel) {
+				cancel_edit()
+			} else {
+				let editor = ui.state_of(editor_id, 'e')
+				if (cs.drag) {
+					ui.focus(id)
+					let p = editor.screen_to_axis(ui.mx0-x, ui.my0-y,
+						axis, point)
+					drag_z0 = p?.[1]
+				}
+				if (cs.moved && drag_z0 != null) {
+					let p = editor.screen_to_axis(ui.mx-x, ui.my-y,
+						axis, point)
+					if (p) {
+						let floors = house.floors
+						let is_roof = cs.control_i > floors.length
+						let floor = floors[is_roof ? floors.length-1
+							: cs.control_i-1]
+						edit ??= floor.start_move_height(is_roof)
+						if (edit) {
+							changed = edit.move(p[1] - drag_z0)
+						}
+					}
+				}
+				if (cs.drop && edit) {
+					edit.stop()
+					edit = null
+				}
+			}
+		}
+		if (ui.captured_or_hit(id))
+			ui.set_cursor('ns-resize')
+	}
+
+	e.build = function(id, house1, editor_id1, cut_floor1, readonly1) {
+		if (house != house1 || cut_floor != cut_floor1) {
+			cancel_edit()
+			roof_edit_no = null
+		}
+		if (readonly1)
+			cancel_edit()
+		house = house1
+		editor_id = editor_id1
+		cut_floor = cut_floor1
+		readonly = readonly1
+		let floors = house.floors
+		let top_floor = floors[floors.length-1]
+		if (roof_edit_no != house.edit_no
+			|| changed && ui.captured(id)?.control_i > floors.length
+		) {
+			roof_h = cut_floor ? 0 : top_floor.roof_height()
+			roof_edit_no = house.edit_no
+		}
+		let ax = house.bb[0] - 100
+		let az = house.bb[3] + 100
+		if (!ui.captured(id)) {
+			axis[0].set(ax, 0, az)
+			axis[1].set(ax, max(house.h + roof_h, 1), az)
+		}
+
+		if (!readonly)
+			ui.focusable(id)
+		let box_i = ui.cmd_box(CMD_HEIGHT_CONTROLS, 1, 's', 's', id, controls)
+		if (readonly)
+			ui.nohit(box_i)
+		return changed
+	}
+
+	e.draw = function(a, i) {
+		let editor = ui.local_state(editor_id, 'e')
+		if (!editor)
+			return
+		x = a[i+0]
+		y = a[i+1]
+		let cx = ui.cx
+		cx.save()
+		cx.beginPath()
+		cx.rect(x, y, a[i+2], a[i+3])
+		cx.clip()
+		cx.translate(x, y)
+		cx.font = 'bold 14px sans-serif'
+		cx.textAlign = 'left'
+		cx.textBaseline = 'middle'
+		cx.strokeStyle = ui.color_css('text')
+		cx.fillStyle = ui.color_css('text')
+		cx.lineWidth = 2
+		let prev
+		let hs = ui.captured(id) || ui.hovers(id)
+		let floors = house.floors
+		let floor_n = cut_floor ? cut_floor.i+1 : floors.length
+		controls.length = floor_n + 1 + (roof_h > 0 ? 1 : 0)
+		for (let i = 0; i < controls.length; i++) {
+			let is_roof = i > floor_n
+			let floor = floors[is_roof ? floor_n-1 : max(0, i-1)]
+			let z = is_roof ? house.h + roof_h : i ? floor.z + floor.h : 0
+			let p = controls[i] ??= v3()
+			point.set(axis[0][0], z, axis[0][2])
+			p.visible = !!editor.world_to_screen(point, p)
+			if (!p.visible) {
+				prev = null
+				continue
+			}
+			let [px, py] = p
+			if (prev) {
+				cx.beginPath()
+				cx.moveTo(prev[0], prev[1])
+				cx.lineTo(px, py)
+				cx.stroke()
+				let text = (is_roof ? 'Roof ' : '')
+					+ format_kcount((is_roof ? roof_h : floor.h) / 100, 2)+'m'
+				cx.fillText(text, (px + prev[0])/2 + 12,
+					(py + prev[1])/2)
+			}
+			cx.beginPath()
+			cx.arc(px, py, z > 0 && hs?.control_i == i
+				? 6 : 4, 0, 2*PI)
+			cx.fill()
+			prev = p
+		}
+		cx.restore()
+	}
+
+	return e
+}
+
+let height_controls = ui.stateful_widget(create_height_controls)
+
+// ui.house_model_editor (id, house, floor=, fr=1, align='s', valign='s',
+//                       readonly=)
 // floor: the current floor, which the user can choose to cut the model at.
-ui.house_model_editor = function(id, house, floor, fr, align, valign) {
+ui.house_model_editor = function(id, house, floor, fr, align, valign,
+	readonly
+) {
 	let cut_id = id+'.cut_button'
 	// read before the toggle builds: its update gives this frame's click.
 	let is_cut = ui.value(cut_id) ?? true // option: cut the model at floor
 	let cut_floor = floor && is_cut ? floor : null
+	let controls_id = id+'.heights'
+	ui.state_of(controls_id)
 	let e = ui.state_of(id, 'e')
 	let init = null
 	if (!e) {
@@ -119,15 +325,17 @@ ui.house_model_editor = function(id, house, floor, fr, align, valign) {
 			e1.set_camera_pos(v3(-300, 600, 900))
 			e1.set_camera_dir(v3(-6, 4.4, 7))
 		}
-	} else if (e.house != house || e.house_edit_no != house.edit_no
-		|| e.cut_floor != cut_floor
-	) {
-		e.clear_model()
-		init_house_model_editor(e, house, cut_floor)
 	}
 	model_editor_opt.fov = ui.saved_value('house_model_fov') ?? undefined
 	ui.stack('', fr, align, valign)
 		ui.model3_editor(id, model_editor_opt, init)
+		let is_changed = height_controls(controls_id, house, id, cut_floor,
+			readonly)
+		if (e && (e.house != house || e.house_edit_no != house.edit_no
+			|| is_changed || e.cut_floor != cut_floor)) {
+			e.clear_model()
+			init_house_model_editor(e, house, cut_floor)
+		}
 		ui.p(ui.sp())
 		ui.stack()
 			if (floor)

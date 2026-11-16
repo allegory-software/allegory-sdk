@@ -152,6 +152,31 @@ function model3_editor(e) {
 		fire_pointermove()
 	}
 
+	e.world_to_screen = function(p, out) {
+		let cp = camera.world_to_clip(p, axis_clip)
+		if (cp[3] <= 0)
+			return
+		return camera.clip_to_screen(cp, out)
+	}
+
+	let axis_screen = line3()
+	let axis_ray = line3()
+	let axis_intersection = line3()
+	let axis_pointer = v3()
+	let axis_clip = v4()
+	e.screen_to_axis = function(x, y, axis, out) {
+		camera.world_to_screen(axis[0], axis_screen[0])
+		camera.world_to_screen(axis[1], axis_screen[1])
+		if (!axis_screen.distance2())
+			return
+		axis_pointer.set(x, y, 0)
+		axis_screen.project_point(axis_pointer, false, out)
+		camera.raycast(out[0], out[1], axis_ray)
+		if (!axis_ray.intersect_line(axis, axis_intersection))
+			return
+		return out.set(axis_intersection[1])
+	}
+
 	// shadows ----------------------------------------------------------------
 
 	e.set_shadows = function(v) { renderer.enable_shadows = v; update_renderer() }
