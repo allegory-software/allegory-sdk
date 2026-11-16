@@ -1469,14 +1469,14 @@ check('a lower floor sticking out: a roof against the upper wall', () => {
 	assert.equal(areas.length, 1)
 	assert.equal(areas[0].kind, 'roof')
 	let faces = f0.make_roof_faces(areas)
-	// eaves north, east and south move out by 60; the side on the upper
+	// eaves north, east and south follow the rounded eave height; the upper
 	// floor's outer skin, x = 314, stays: no face rises from it.
 	assert.equal(faces.length, 3)
-	assert.deepEqual(faces_bbox(faces), [314, -74, 674, 474])
+	assert.deepEqual(faces_bbox(faces), [314, -74.445, 674.445, 474.445])
 	let wall_z = f0.z + f0.h
 	let [z1, z2] = roof_z_range(faces)
-	assert(Math.abs(z1 - (wall_z - 60 * Math.tan(20 * Math.PI / 180))) < 1e-9)
-	assert(Math.abs(z2 - (wall_z + 214 * Math.tan(20 * Math.PI / 180))) < 1e-9)
+	assert(Math.abs(z1 - (wall_z - 22)) < 1e-9)
+	assert_near(z2, wall_z - 22 + 274.445 * Math.tan(20 * Math.PI / 180))
 	// slab 1 leaves out the roof: its top shows in the upper room only.
 	let all_faces = h.make_faces(f1, false)
 	let [slab_top, ...rest] = up_faces_at(all_faces, f1.z + h.slab_thickness)
@@ -1497,9 +1497,9 @@ check('a lower floor sticking out: a terrace', () => {
 	assert.equal(areas.length, 1)
 	assert.equal(areas[0].kind, 'terrace')
 	let faces = h.make_faces(f1, false)
-	// the roof is the upper floor's only: x -74..374.
+	// the roof is the upper floor's only: x -74.445..374.445.
 	assert.deepEqual(faces_bbox(faces.filter(face => face.tag == 'roof')),
-		[-74, -74, 374, 474])
+		[-74.445, -74.445, 374.445, 474.445])
 	// slab 1 top: the upper room floor and the terrace.
 	let slab_tops = up_faces_at(faces, f1.z + h.slab_thickness)
 	assert.deepEqual([...slab_tops].map(face => [...faces_bbox([face])]).sort(),
@@ -1510,10 +1510,11 @@ check('the upper roof overhangs the lower roof', () => {
 	let h = lean_to_house()
 	let [f0, f1] = h.floors
 	let upper_faces = f1.make_roof_faces(f1.make_areas())
-	assert.deepEqual(faces_bbox(upper_faces), [-74, -74, 374, 474])
+	assert.deepEqual(faces_bbox(upper_faces),
+		[-74.445, -74.445, 374.445, 474.445])
 	let faces = h.make_faces(f1, false)
 	assert.deepEqual(faces_bbox(faces.filter(face => face.tag == 'roof')),
-		[-74, -74, 674, 474])
+		[-74.445, -74.445, 674.445, 474.445])
 })
 
 // floor 1 covers the north-east corner of floor 0 and sticks out north:
@@ -1573,15 +1574,15 @@ check('make_roof_faces lists the eave sides', () => {
 	let scale = ctx.prism_union.grid_scale
 	for (let side of sides) {
 		assert.equal(side.edge_point, undefined)
-		assert.equal(side.d, 60 * scale)
+		assert.equal(side.d, 60.445 * scale)
 		assert.equal(side.pitch, 20)
 	}
 	let {w} = eave_sides(f)
-	assert.equal(w.c, -74 * scale)
+	assert.equal(w.c, -74.445 * scale)
 	assert.equal(w.wall_c, -14 * scale)
 	assert.deepEqual([w.m1, w.m2], [-14 * scale, 414 * scale])
 	// the eave line runs to the neighbors' eave lines.
-	assert.deepEqual([w.e1, w.e2], [-74 * scale, 474 * scale])
+	assert.deepEqual([w.e1, w.e2], [-74.445 * scale, 474.445 * scale])
 	assert.equal(w.is_only_slope, undefined)
 })
 
@@ -1651,8 +1652,8 @@ check('the eave line of a side at an inside corner stops at the neighbor', () =>
 	f.make_roof_faces(f.make_areas(), sides)
 	let scale = ctx.prism_union.grid_scale
 	let side = sides.find(side => side.ny > 0 && side.wall_c == 314 * scale)
-	// from the east eave line (x = 674) to the inner eave line (x = 374).
-	assert.deepEqual([side.e1, side.e2], [374 * scale, 674 * scale])
+	// from the east eave line to the inner eave line.
+	assert.deepEqual([side.e1, side.e2], [374.445 * scale, 674.445 * scale])
 })
 
 check('toggle_gable: add a gable point, flip it, or nothing if 2+', () => {
@@ -1703,7 +1704,7 @@ check('three edge points on an eave keep its defaults and conflict', () => {
 	let {w, e} = eave_sides(f)
 	assert.equal(w.edge_point, null)
 	assert.equal(w.pitch, 20)
-	assert.equal(w.d, 60 * ctx.prism_union.grid_scale)
+	assert.equal(w.d, 60.445 * ctx.prism_union.grid_scale)
 	assert.equal(f.can_toggle_gable(w), false)
 	assert.equal(e.edge_point, point)
 	assert.equal(e.pitch, 30)
@@ -1727,10 +1728,11 @@ check('moving a sloped eave sets the roof eave height', () => {
 	let m = f.start_move_eave(eave_sides(f).e, 650, 200)
 	assert.equal(m.move(20, 5, false), true)
 	m.stop()
-	assert_near(f.roof.eave_h, -80 * tan20)
+	assert_near(f.roof.eave_h, -29)
 	assert.equal(f.roof.overhang, 60)
 	assert.equal(f.roof.edge_points.length, 0)
-	assert.deepEqual(faces_bbox(eave_sides(f).faces), [-94, -94, 694, 494])
+	assert.deepEqual(faces_bbox(eave_sides(f).faces),
+		[-93.677, -93.677, 693.677, 493.677])
 	// inward to the wall line: the eaves are at the wall top.
 	m = f.start_move_eave(eave_sides(f).n, 300, -50)
 	assert.equal(m.move(0, 80, false), true)
@@ -1742,7 +1744,7 @@ check('moving a sloped eave sets the roof eave height', () => {
 	assert.equal(m.move(0, 10, false), true)
 	assert_near(f.roof.eave_h, 0)
 	assert.equal(m.move(0, -151, false), true)
-	assert_near(f.roof.eave_h, -150 * tan20)
+	assert_near(f.roof.eave_h, -55)
 	m.cancel()
 })
 
@@ -1753,14 +1755,14 @@ check('moving the eaves inward stops when the highest eave is at the wall top',
 	let m = f.start_move_eave(eave_sides(f).n, 300, -50)
 	assert.equal(m.move(0, 100, false), true)
 	m.stop()
-	assert_near(f.roof.eave_h, -60 * tan20 + 10)
+	assert_near(f.roof.eave_h, -22 + 10)
 	assert_near(f.roof.edge_points[0].eave_h, 0)
 	// one eave: its overhang stops at 0 and at max_overhang.
 	m = f.start_move_eave(eave_sides(f).w, -50, 200)
 	m.move(100, 0, true)
 	assert_near(f.roof.edge_points[1].eave_h, 0)
 	m.move(-200, 0, true)
-	assert_near(f.roof.edge_points[1].eave_h, -150 * tan20)
+	assert_near(f.roof.edge_points[1].eave_h, -55)
 	m.cancel()
 })
 
@@ -1772,11 +1774,11 @@ check('moving a gable sets the roof overhang', () => {
 	assert.equal(m.move(20, 0, false), true)
 	m.stop()
 	assert.equal(f.roof.overhang, 80)
-	assert_near(f.roof.eave_h, -60 * tan20)
+	assert_near(f.roof.eave_h, -22)
 	let {e, w} = eave_sides(f)
 	let scale = ctx.prism_union.grid_scale
 	assert.equal(e.d, 80 * scale)
-	assert.equal(w.d, 60 * scale)
+	assert.equal(w.d, 60.445 * scale)
 })
 
 check('one eave snaps to the roof value and to eave corners', () => {
@@ -1791,17 +1793,17 @@ check('one eave snaps to the roof value and to eave corners', () => {
 	assert.equal(m.move(25, 0, true, 20), true)
 	m.stop()
 	assert.equal(f.roof.edge_points[0].eave_h, null)
-	assert.equal(eave_sides(f).e.d, 60 * scale)
+	assert.equal(eave_sides(f).e.d, 60.445 * scale)
 	// near the corner position x = 700: the eave line goes there; snap_d 0
 	// (ctrl): no snap.
 	m = f.start_move_eave(eave_sides(f).e, 650, 200, [700])
 	m.move(30, 0, true, 20)
-	assert_near(f.roof.edge_points[0].eave_h, -86 * tan20)
+	assert_near(f.roof.edge_points[0].eave_h, -31)
 	m.move(30, 0, true, 0)
-	assert_near(f.roof.edge_points[0].eave_h, -90 * tan20)
+	assert_near(f.roof.edge_points[0].eave_h, -33)
 	// all eaves: no snap.
 	m.move(30, 0, false, 20)
-	assert_near(f.roof.eave_h, -90 * tan20)
+	assert_near(f.roof.eave_h, -33)
 	m.cancel()
 	// a gable near the roof's overhang: its own overhang is removed.
 	f.toggle_gable(eave_sides(f).w, -50, 200)
@@ -1821,11 +1823,11 @@ check('eaves are level: the overhang follows the pitch', () => {
 	let {e, w, faces} = eave_sides(f)
 	let wall_z = f.z + f.h
 	let scale = ctx.prism_union.grid_scale
-	assert_near(e.eave_z, wall_z - 60 * tan20)
-	assert_near(w.eave_z, wall_z - 60 * tan20)
-	assert.equal(e.d, Math.round(60 * tan20 * scale)) // tan 45 = 1
-	assert.equal(w.d, 60 * scale)
-	assert_near(roof_z_range(faces)[0], wall_z - 60 * tan20)
+	assert_near(e.eave_z, wall_z - 22)
+	assert_near(w.eave_z, wall_z - 22)
+	assert.equal(e.d, 22 * scale) // tan 45 = 1
+	assert.equal(w.d, 60.445 * scale)
+	assert_near(roof_z_range(faces)[0], wall_z - 22)
 })
 
 check('a shallow side stops at max_overhang: its eave is higher', () => {
@@ -1844,35 +1846,35 @@ check('moving one eave sets its edge point eave height', () => {
 	let m = f.start_move_eave(eave_sides(f).e, 650, 200)
 	m.move(-30, 0, true)
 	m.stop()
-	assert_near(f.roof.eave_h, -60 * tan20)
+	assert_near(f.roof.eave_h, -22)
 	let point = f.roof.edge_points[0]
 	assert.deepEqual([point.x, point.y], [614, 200])
-	assert_near(point.eave_h, -30 * tan20)
+	assert_near(point.eave_h, -11)
 	let {e, w, faces} = eave_sides(f)
 	assert.equal(e.edge_point, f.roof.edge_points[0])
 	assert.equal(e.pitch, 20)
-	assert.deepEqual(faces_bbox(faces), [-74, -74, 644, 474])
+	assert.deepEqual(faces_bbox(faces), [-74.445, -74.445, 644.222, 474.445])
 	let scale = ctx.prism_union.grid_scale
-	assert.equal(e.d, 30 * scale)
-	assert.equal(w.d, 60 * scale)
+	assert.equal(e.d, 30.222 * scale)
+	assert.equal(w.d, 60.445 * scale)
 	// again: the same edge point.
 	m = f.start_move_eave(e, 650, 300)
 	m.move(10, 0, true)
 	m.stop()
 	assert.equal(f.roof.edge_points.length, 1)
-	assert_near(f.roof.edge_points[0].eave_h, -40 * tan20)
+	assert_near(f.roof.edge_points[0].eave_h, -15)
 	// the eave height is saved.
 	let state = h.save_state()
-	assert_near(state.floors[0].roof.edge_points[0].eave_h, -40 * tan20)
+	assert_near(state.floors[0].roof.edge_points[0].eave_h, -15)
 	// 2+ points: no own eave height; all eaves still move.
 	f.roof.edge_points.push({x: 614, y: 100})
 	m = f.start_move_eave(eave_sides(f).e, 650, 200)
 	assert.equal(m.move(10, 0, true), false)
-	assert_near(f.roof.eave_h, -60 * tan20)
-	assert_near(f.roof.edge_points[0].eave_h, -40 * tan20)
+	assert_near(f.roof.eave_h, -22)
+	assert_near(f.roof.edge_points[0].eave_h, -15)
 	assert.equal(m.move(10, 0, false), true)
-	assert_near(f.roof.eave_h, -70 * tan20)
-	assert_near(f.roof.edge_points[0].eave_h, -50 * tan20)
+	assert_near(f.roof.eave_h, -26)
+	assert_near(f.roof.edge_points[0].eave_h, -19)
 	m.stop()
 })
 
@@ -1886,9 +1888,9 @@ check('cancelling or undoing an eave move restores the eave height', () => {
 	m = f.start_move_eave(eave_sides(f).e, 650, 200)
 	m.move(30, 0, false)
 	m.stop()
-	assert_near(f.roof.eave_h, -90 * tan20)
+	assert_near(f.roof.eave_h, -33)
 	assert(h.undo())
-	assert_near(h.floors[0].roof.eave_h, -60 * tan20)
+	assert_near(h.floors[0].roof.eave_h, -22)
 })
 
 check('shift toggled during an eave drag: the last mode counts', () => {
@@ -1896,27 +1898,27 @@ check('shift toggled during an eave drag: the last mode counts', () => {
 	let f = h.floors[0]
 	let m = f.start_move_eave(eave_sides(f).e, 650, 200)
 	m.move(20, 0, false)
-	assert_near(f.roof.eave_h, -80 * tan20)
+	assert_near(f.roof.eave_h, -29)
 	m.move(30, 0, true)
-	assert_near(f.roof.eave_h, -60 * tan20)
+	assert_near(f.roof.eave_h, -22)
 	assert.deepEqual([f.roof.edge_points[0].x, f.roof.edge_points[0].y],
 		[614, 200])
-	assert_near(f.roof.edge_points[0].eave_h, -90 * tan20)
+	assert_near(f.roof.edge_points[0].eave_h, -33)
 	m.move(40, 0, false)
-	assert_near(f.roof.eave_h, -100 * tan20)
+	assert_near(f.roof.eave_h, -37)
 	assert.equal(f.roof.edge_points.length, 0)
 	m.move(50, 0, true)
 	m.stop()
-	assert_near(f.roof.eave_h, -60 * tan20)
+	assert_near(f.roof.eave_h, -22)
 	assert.equal(f.roof.edge_points.length, 1)
-	assert_near(f.roof.edge_points[0].eave_h, -110 * tan20)
+	assert_near(f.roof.edge_points[0].eave_h, -40)
 	// a side with its own eave height, without shift: all eaves by the same
 	// height, its own too.
 	m = f.start_move_eave(eave_sides(f).e, 650, 200)
 	m.move(10, 0, false)
 	m.stop()
-	assert_near(f.roof.eave_h, -70 * tan20)
-	assert_near(f.roof.edge_points[0].eave_h, -120 * tan20)
+	assert_near(f.roof.eave_h, -26)
+	assert_near(f.roof.edge_points[0].eave_h, -44)
 	assert(h.undo())
 	assert(h.undo())
 	assert.equal(h.floors[0].roof.edge_points.length, 0)
@@ -2151,6 +2153,165 @@ check('roof cut by the upper wall has no rounding points on the rakes', () => {
 	assert.equal(wall.length, 5)
 	for (let p of wall)
 		assert(p[1] == -14 || p[1] == 200 || p[1] == 414)
+})
+
+// stored geometry precision ------------------------------------------------
+
+check('load snaps stored geometry without changing the input plan', () => {
+	let plan = {floor_h: 250.6, int_wall_thickness: 8.6,
+		ext_wall_thickness: 18.6, slab_thickness: 20.6,
+		roof_thickness: 20.6, floors: [{h: 260.6,
+			lines: [['connect', [-100.6, 0.4], [100.6, 0.4],
+				[100.6, 200.6], [-100.6, 200.6], [-100.6, 0.4]],
+				['connect', [0.4, -100.6], [0.4, 300.6]]],
+			room_points: [{x: 30.6, y: 40.4, is_open: true}],
+			area_points: [{x: 50.6, y: 60.4, kind: 'terrace'}],
+			roof: {pitch: 23.456789, overhang: 60.6, eave_h: -22.6,
+				max_overhang: 150.6, edge_points: [{x: 100.6,
+					y: 30.4, pitch: null, overhang: null, eave_h: -12.6}]},
+		}]}
+	let before = JSON.stringify(plan)
+	let h = house(plan)
+	assert.equal(JSON.stringify(plan), before)
+	assert.equal(h.precision, 1)
+	assert_near(h.floor_h, 251)
+	assert_near(h.int_wall_thickness, 9)
+	assert_near(h.ext_wall_thickness, 19)
+	assert_near(h.slab_thickness, 21)
+	assert_near(h.roof_thickness, 21)
+	let f = h.floors[0]
+	assert_near(f.fixed_h, 261)
+	assert.equal(f.h, f.fixed_h)
+	for (let p of f.ps) {
+		assert.equal(p[0], Math.round(p[0]))
+		assert.equal(p[1], Math.round(p[1]))
+	}
+	assert(f.ps.find(p => p[0] == 0 && p[1] == 0 && p.segs.length == 4))
+	assert_near(f.room_points[0].x, 31)
+	assert_near(f.room_points[0].y, 40)
+	assert_near(f.area_points[0].x, 51)
+	assert_near(f.area_points[0].y, 60)
+	assert.equal(f.roof.pitch, plan.floors[0].roof.pitch)
+	assert_near(f.roof.overhang, 61)
+	assert_near(f.roof.eave_h, -23)
+	assert_near(f.roof.max_overhang, 151)
+	assert_near(f.roof.edge_points[0].x, 101)
+	assert_near(f.roof.edge_points[0].y, 30)
+	assert_near(f.roof.edge_points[0].eave_h, -13)
+	assert.equal(f.roof.edge_points[0].overhang, null)
+	let saved = JSON.stringify(h.save_state())
+	assert.equal(JSON.stringify(house(JSON.parse(saved)).save_state()), saved)
+})
+
+check('new walls and resize previews use the plan precision', () => {
+	let h = house({floors: [{}]})
+	let f = h.floors[0]
+	let m = f.start_resize_seg(null, -100.6, 200.6, 60.6, 0, 1, 0)
+	assert_near(m.seg[0][0], -101)
+	assert_near(m.seg[0][1], 201)
+	assert_near(m.seg[1][0], -40)
+	let p = m.resize(80.6, 0, 0)
+	assert_near(p[0], -20)
+	assert_near(p[1], 201)
+	m.stop()
+	let saved = JSON.stringify(h.save_state())
+	assert(h.undo())
+	assert.equal(f.ps.length, 0)
+	assert(h.redo())
+	assert.equal(JSON.stringify(h.save_state()), saved)
+	m = f.start_resize_seg(f.ps.find(p => p[0] == -20), -20, 201,
+		10.6, 0, 1, 0)
+	assert_near(m.resize(10.6, 0, 0)[0], -9)
+	m.cancel()
+	assert.equal(JSON.stringify(h.save_state()), saved)
+})
+
+check('free and connected wall move previews snap coordinates', () => {
+	let f = floor([['connect', [0, 0], [100, 0]]])
+	let m = f.start_move_seg(f.segs[0])
+	m.move(10.6, -20.6, 0)
+	assert_near(f.segs[0][0][0], 11)
+	assert_near(f.segs[0][1][0], 111)
+	assert_near(f.segs[0].axis, -21)
+	m.stop()
+	f = floor([rect_lines(0, 0, 600, 400)])
+	let seg = f.segs.find(s => s.is_v && s.axis == 600)
+	m = f.start_move_seg(seg)
+	m.move(20.6, 0, 0)
+	assert_near(seg.axis, 621)
+	m.stop()
+})
+
+check('room creation and room move previews snap their coordinates', () => {
+	let h = house({floors: [{lines: [rect_lines(0, 0, 600, 400)]}]})
+	let f = h.floors[0]
+	f.toggle_room(f.comps[0].cycles[0], 100.6, 200.6)
+	let p = f.room_points[0]
+	assert_near(p.x, 101)
+	assert_near(p.y, 201)
+	let m = f.start_move_room_point(p)
+	m.move(10.6, -20.6)
+	assert_near(p.x, 112)
+	assert_near(p.y, 180)
+	m.stop()
+	assert(h.undo())
+	assert_near(f.room_points[0].x, 101)
+	assert(h.redo())
+	assert_near(f.room_points[0].x, 112)
+})
+
+check('roof points and eave previews snap lengths and keep pitches', () => {
+	let h = eave_house()
+	let f = h.floors[0]
+	f.toggle_gable(eave_sides(f).e, 650, 200.6)
+	assert_near(f.roof.edge_points[0].y, 201)
+	let m = f.start_move_eave(eave_sides(f).e, 650, 200.6)
+	m.move(20.6, 0, true)
+	assert_near(f.roof.edge_points[0].overhang, 81)
+	m.stop()
+	let saved = JSON.stringify(h.save_state())
+	m = f.start_move_eave(eave_sides(f).w, -50, 300.6)
+	m.move(-10.6, 0, true)
+	assert_near(f.roof.edge_points[1].y, 301)
+	assert_near(f.roof.edge_points[1].eave_h, -26)
+	assert.equal(f.roof.pitch, 20)
+	m.stop()
+	assert(h.undo())
+	assert.equal(JSON.stringify(h.save_state()), saved)
+	assert(h.redo())
+	assert_near(f.roof.edge_points[1].eave_h, -26)
+})
+
+check('automatically created roof midpoints use plan precision', () => {
+	let f = house({floors: [{lines: [rect_lines(0, 0, 600, 401)],
+		roof: roof60()}]}).floors[0]
+	let sides = eave_sides(f)
+	let m = f.start_move_pitch(eave_face(sides, 'e'))
+	m.move(3.123456, true)
+	assert_near(f.roof.edge_points[0].y, 201)
+	assert.equal(f.roof.edge_points[0].pitch, 23.123456)
+	m.stop()
+})
+
+check('saved precision survives loading, floor copies and undo', () => {
+	let h = house({precision: .1, floors: [{
+		lines: [['connect', [0.04, 0.06], [100.06, 0.06]]],
+	}]})
+	let state0 = JSON.stringify(h.save_state())
+	assert.equal(h.precision, .1)
+	assert_near(h.floors[0].ps[0][1], .1)
+	assert_near(h.add_floor().ps[1][0], 100.1)
+	assert(h.undo())
+	h.load_state({precision: .01, floors: [{
+		lines: [['connect', [0.004, 0.006], [100.006, 0.006]]],
+	}]})
+	let state1 = JSON.stringify(h.save_state())
+	assert.equal(h.precision, .01)
+	assert_near(h.floors[0].ps[0][1], .01)
+	assert(h.undo())
+	assert.equal(JSON.stringify(h.save_state()), state0)
+	assert(h.redo())
+	assert.equal(JSON.stringify(h.save_state()), state1)
 })
 
 console.log(n_checks + ' house plan checks passed')

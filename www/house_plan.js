@@ -3,7 +3,7 @@
 const G = window
 
 const {
-	round, mod, abs, sign, min, max, clamp, sqrt, tan, atan, rad,
+	round, snap, mod, abs, sign, min, max, clamp, sqrt, tan, atan, rad,
 	assert, log, push_log, pop_log, push_log_if,
 	insert, remove_value, uniq_sorted, map, assign, clock, json,
 } = glue
@@ -15,7 +15,9 @@ G.DEBUG_PLAN_LOAD = 1
 
 // house model ---------------------------------------------------------------
 
+// everything is in cm!
 let defaults = {
+	precision: 1,
 	rotation: 0,
 	floor_h: 250,
 	int_wall_thickness: 8,
@@ -36,24 +38,28 @@ function house_plan(t) {
 	let edit0
 	house.edit_no = 0 // increments on each committed edit, undo and redo
 
+	function snap_length(x) {
+		return x == null ? x : snap(x, house.precision)
+	}
+
 	function copy_roof(roof) {
-		if (!roof)
-			return {pitch: 20, overhang: 60, eave_h: -22, max_overhang: 150,
-				edge_points: []}
+		roof ??= {pitch: 20}
 		let edge_points = []
 		for (let edge_point of roof.edge_points ?? [])
-			edge_points.push({x: edge_point.x, y: edge_point.y,
-				pitch: edge_point.pitch, overhang: edge_point.overhang,
-				eave_h: edge_point.eave_h})
-		return {pitch: roof.pitch, overhang: roof.overhang ?? 60,
-			eave_h: roof.eave_h ?? -22, max_overhang: roof.max_overhang ?? 150,
+			edge_points.push({x: snap_length(edge_point.x),
+				y: snap_length(edge_point.y), pitch: edge_point.pitch,
+				overhang: snap_length(edge_point.overhang),
+				eave_h: snap_length(edge_point.eave_h)})
+		return {pitch: roof.pitch, overhang: snap_length(roof.overhang ?? 60),
+			eave_h: snap_length(roof.eave_h ?? -22),
+			max_overhang: snap_length(roof.max_overhang ?? 150),
 			edge_points: edge_points}
 	}
 
 	function copy_room_points(room_points) {
 		let a = []
 		for (let room_point of room_points)
-			a.push({x: room_point.x, y: room_point.y,
+			a.push({x: snap_length(room_point.x), y: snap_length(room_point.y),
 				is_open: room_point.is_open})
 		return a
 	}
@@ -61,7 +67,8 @@ function house_plan(t) {
 	function copy_area_points(area_points) {
 		let a = []
 		for (let area_point of area_points)
-			a.push({x: area_point.x, y: area_point.y, kind: area_point.kind})
+			a.push({x: snap_length(area_point.x), y: snap_length(area_point.y),
+				kind: area_point.kind})
 		return a
 	}
 
@@ -72,7 +79,8 @@ function house_plan(t) {
 			state.h = floor.fixed_h
 			floors.push(state)
 		}
-		return {rotation: house.rotation, floor_h: house.floor_h,
+		return {precision: house.precision,
+			rotation: house.rotation, floor_h: house.floor_h,
 			int_wall_thickness: house.int_wall_thickness,
 			ext_wall_thickness: house.ext_wall_thickness,
 			slab_thickness: house.slab_thickness,
@@ -156,8 +164,8 @@ function house_plan(t) {
 		floor.roof = copy_roof(t.roof)
 		floor.i = floor_i
 		floor.id = 'floor'+floor_i
-		floor.h = t.h ?? house.floor_h
-		floor.fixed_h = t.h
+		floor.h = snap_length(t.h ?? house.floor_h)
+		floor.fixed_h = snap_length(t.h)
 		floor.bb = bbox2()
 		// [{x:, y:, is_open:}, ...]
 		floor.room_points = copy_room_points(t.room_points ?? [])
@@ -227,7 +235,8 @@ function house_plan(t) {
 			if (room_point)
 				room_point.is_open = !room_point.is_open
 			else
-				floor.room_points.push({x: x, y: y, is_open: true})
+				floor.room_points.push({x: snap_length(x), y: snap_length(y),
+					is_open: true})
 			floor.fix()
 			commit_edit(floor)
 		}
@@ -238,8 +247,8 @@ function house_plan(t) {
 			let y0 = room_point.y
 			let s = {}
 			s.move = function(dx, dy) {
-				room_point.x = x0 + dx
-				room_point.y = y0 + dy
+				room_point.x = snap_length(x0 + dx)
+				room_point.y = snap_length(y0 + dy)
 				fix_open_rooms()
 			}
 			s.stop = function() {
@@ -579,7 +588,8 @@ function house_plan(t) {
 		// that side.
 		function wall_point(side, x, y) {
 			let c = side.wall_c / prism_union.grid_scale
-			return side.nx ? {x: c, y: y} : {x: x, y: c}
+			return {x: snap_length(side.nx ? c : x),
+				y: snap_length(side.nx ? y : c)}
 		}
 
 		// two or more points on the eave side, or the area's only sloped
@@ -681,7 +691,7 @@ function house_plan(t) {
 					let slope = tan(side.pitch * rad)
 					let d = clamp(side.d / scale + dd, 0,
 						roof.max_overhang) // new overhang
-					let eave_h = -d * slope
+					let eave_h = snap_length(-d * slope)
 					if (is_one) {
 						let edge_point = roof.edge_points[edge_point_i]
 						if (is_roof_value) {
@@ -703,10 +713,10 @@ function house_plan(t) {
 						if (edge_point.eave_h != null)
 							max_eave_h = max(max_eave_h, edge_point.eave_h)
 					dz = min(dz, -max_eave_h)
-					roof.eave_h += dz
+					roof.eave_h = snap_length(roof.eave_h + dz)
 					for (let edge_point of roof.edge_points)
 						if (edge_point.eave_h != null)
-							edge_point.eave_h += dz
+							edge_point.eave_h = snap_length(edge_point.eave_h + dz)
 					return true
 				}
 
@@ -722,12 +732,14 @@ function house_plan(t) {
 						roof.edge_points.push(edge_point)
 					}
 					edge_point.overhang =
-						max(0, (edge_point.overhang ?? roof.overhang) + dd)
+						snap_length(max(0,
+							(edge_point.overhang ?? roof.overhang) + dd))
 				} else {
-					roof.overhang = max(0, roof.overhang + dd)
+					roof.overhang = snap_length(max(0, roof.overhang + dd))
 					for (let edge_point of roof.edge_points)
 						if (edge_point.overhang != null)
-							edge_point.overhang = max(0, edge_point.overhang + dd)
+							edge_point.overhang =
+							snap_length(max(0, edge_point.overhang + dd))
 				}
 				return true
 			}
@@ -891,8 +903,16 @@ function house_plan(t) {
 				roof: copy_roof(floor.roof)}
 		}
 
+		function snap_points() {
+			for (let p of floor.ps) {
+				p[0] = snap_length(p[0])
+				p[1] = snap_length(p[1])
+			}
+		}
+
 		floor.load_state = function(state) {
 			floor.load(state.points, state.lines)
+			snap_points()
 			floor.room_points = copy_room_points(state.room_points)
 			floor.area_points = copy_area_points(state.area_points)
 			floor.roof = copy_roof(state.roof)
@@ -1058,7 +1078,7 @@ function house_plan(t) {
 			a = clamp(a, min_a, max_a)
 			let sa = snap_lines.snap(a, snap_d)
 			s.snap_a = sa ?? null
-			return sa ?? a
+			return snap_length(sa ?? a)
 		}
 
 		// find the seg in the left, right, top, bottom side around p.
@@ -1121,10 +1141,10 @@ function house_plan(t) {
 
 					let p1 = seg[seg0.i1]
 					let p2 = seg[seg0.i2]
-					p1[0] =  v ? a : m1s ?? m1
-					p2[0] =  v ? a : m2s ?? m2
-					p1[1] = !v ? a : m1s ?? m1
-					p2[1] = !v ? a : m2s ?? m2
+					p1[0] = snap_length(v ? a : m1s ?? m1)
+					p2[0] = snap_length(v ? a : m2s ?? m2)
+					p1[1] = snap_length(!v ? a : m1s ?? m1)
+					p2[1] = snap_length(!v ? a : m2s ?? m2)
 					create_edges()
 
 				} else { // move on cross axis
@@ -1160,6 +1180,8 @@ function house_plan(t) {
 			push_log('START RESIZE SEG')
 
 			begin_edit(floor)
+			mx0 = snap_length(mx0)
+			my0 = snap_length(my0)
 			let p0 = p ? [...p] : [mx0, my0]
 			let seg
 			if (p) {
@@ -1189,8 +1211,8 @@ function house_plan(t) {
 					x1 = mx0
 					y1 = my0
 				}
-				let x2 = x1 + dx * abs(sdx)
-				let y2 = y1 + dy * abs(sdy)
+				let x2 = snap_length(x1 + dx * abs(sdx))
+				let y2 = snap_length(y1 + dy * abs(sdy))
 				let p1 = floor.add_point(x1, y1)
 				let p2 = floor.add_point(x2, y2)
 				seg = floor.add_seg(p1, p2)
@@ -1215,8 +1237,8 @@ function house_plan(t) {
 			}
 
 			s.resize = function(dx, dy, snap_d = 30) {
-				let x1 = p0[0] + dx * abs(sdx)
-				let y1 = p0[1] + dy * abs(sdy)
+				let x1 = snap_length(p0[0] + dx * abs(sdx))
+				let y1 = snap_length(p0[1] + dy * abs(sdy))
 
 				let a = sdx ? x1 : y1
 				let sa = snap_seg(a, min_a, max_a, snap_lines, s, snap_d)
@@ -1248,6 +1270,7 @@ function house_plan(t) {
 
 		push_log('LOADING LEVEL', floor.i)
 		floor.load(t.points, t.lines)
+		snap_points()
 		pop_log()
 
 		return floor
@@ -1522,6 +1545,11 @@ function house_plan(t) {
 	function init(t) {
 
 		assign(house, defaults, t)
+		house.floor_h = snap_length(house.floor_h)
+		house.int_wall_thickness = snap_length(house.int_wall_thickness)
+		house.ext_wall_thickness = snap_length(house.ext_wall_thickness)
+		house.slab_thickness = snap_length(house.slab_thickness)
+		house.roof_thickness = snap_length(house.roof_thickness)
 
 		let t0 = clock()
 		push_log_if(DEBUG_PLAN_LOAD, 'LOADING PLAN')
