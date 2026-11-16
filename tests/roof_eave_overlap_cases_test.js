@@ -128,14 +128,17 @@ function overlaps(faces, sides) {
 // edge points: [x, y, pitch, eave_h] near a wall's middle. quiet: no log.
 // returns {third, bad}: the most samples of an overlap on a third face; the
 // samples with the top off.
-function run_case(name, points, roof, edge_points, quiet) {
+// the case data is in cm; the plan is in mm.
+function run_case(name, points_cm, roof_cm, edge_points_cm, quiet) {
 	let log1 = quiet ? () => {} : log
 	let result = {third: 0, bad: 0}
-	let h = ctx.house_plan({floors: [{lines: [draw(points)]}]})
+	let points = points_cm.map(([x, y]) => [x * 10, y * 10])
+	let roof = {...roof_cm, eave_h: roof_cm.eave_h * 10}
+	let h = ctx.house_plan({version: 1, floors: [{lines: [draw(points)]}]})
 	let floor = h.floors[0]
 	floor.roof = Object.assign(floor.roof, roof)
-	floor.roof.edge_points = edge_points.map(([x, y, pitch, eave_h]) =>
-		({x, y, pitch, eave_h}))
+	floor.roof.edge_points = edge_points_cm.map(([x, y, pitch, eave_h]) =>
+		({x: x * 10, y: y * 10, pitch, eave_h: eave_h * 10}))
 	let areas = floor.make_areas().filter(a => a.kind == 'roof')
 	let sides = []
 	let faces = floor.make_roof_faces(areas, sides)
@@ -172,7 +175,7 @@ function run_case(name, points, roof, edge_points, quiet) {
 				let z = union_top(union_faces, x, y)
 				let dz = z == null ? 1/0 : Math.abs(z - want)
 				max_dz = Math.max(max_dz, dz)
-				if (dz > 0.5)
+				if (dz > 5)
 					n_bad++
 			}
 		log1('  x', f(r.x1), f(r.x2), 'y', f(r.y1), f(r.y2),
@@ -187,7 +190,7 @@ function run_case(name, points, roof, edge_points, quiet) {
 		return result
 	// the JSON loads back into the same model.
 	let json = JSON.stringify(h.save_state())
-	let h2 = ctx.house_plan({})
+	let h2 = ctx.house_plan({version: 1})
 	h2.load_state(JSON.parse(json))
 	let n2 = h2.make_faces(h2.floors[0], false).length
 	log('  faces', union_faces.length, 'after load', n2)

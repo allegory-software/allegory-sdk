@@ -102,10 +102,11 @@ function on_edges(edges, x, y) {
 	return false
 }
 
-let dz = Number(process.env.Z ?? 50)
-let step = Number(process.env.STEP ?? 25)
+let dz = Number(process.env.Z ?? 500)
+let step = Number(process.env.STEP ?? 250)
 let [dir1, dir2] = (process.env.SIDES ?? 'n,e').split(',')
-let f = ctx.house_plan({floors: [{lines: [rect_lines(0, 0, 600, 400)]}]})
+let f = ctx.house_plan({version: 1,
+	floors: [{lines: [rect_lines(0, 0, 6000, 4000)]}]})
 	.floors[0]
 let wall_z = f.z + f.h
 let z = wall_z + dz
@@ -125,9 +126,9 @@ for (let [p, q] of shared_edges(face1, face2)) {
 }
 console.log('grab', grab_x?.toFixed(1), grab_y?.toFixed(1), 'z +' + dz)
 let counts = {}
-for (let y = -50; y <= 450; y += step) {
+for (let y = -500; y <= 4500; y += step) {
 	let row = ''
-	for (let x = -50; x <= 650; x += step) {
+	for (let x = -500; x <= 6500; x += step) {
 		if (grab_x != null && Math.abs(x - grab_x) < step / 2
 			&& Math.abs(y - grab_y) < step / 2
 		) {

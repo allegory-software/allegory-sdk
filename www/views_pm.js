@@ -42,11 +42,14 @@ ui.unit_model_editor = function(id) {
 		let master = ui.state_of(master_id)
 		let house = master?.nav.focused_ri != null
 			? ui.state_of(master.input_id, 'house') : null
-		if (house)
-			ui.house_model_editor(id+'.editor', house,
+		if (house) {
+			let nav = master.nav
+			let plan = nav.cell_input_val(nav.focused_ri,
+				nav.all_fields_map.plan.fi)
+			ui.house_model_editor(id+'.editor.'+plan, house,
 				ui.state_of(master.input_id, 'floor'), null, null, null,
 				ui.state_of(master.input_id, 'readonly'))
-		else
+		} else
 			ui.text('', unit_plan_editor_def.empty_text, 1, 'c', 'c')
 	ui.end_v()
 }

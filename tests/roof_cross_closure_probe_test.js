@@ -122,16 +122,17 @@ function uncovered_length(faces, d) {
 
 
 let rect = (x, y, w, h) => ['draw', x, y, w, 0, 0, h, -w, 0, 0, -h]
-let L = ['draw', 0, 0, 800, 0, 0, 300, -400, 0, 0, 400, -400, 0, 0, -700]
+let L = ['draw', 0, 0, 8000, 0, 0, 3000, -4000, 0, 0, 4000, -4000, 0, 0, -7000]
 let shapes = {
-	two: [[rect(0, 0, 800, 600)], [rect(0, 0, 400, 600)]],
-	twoL: [[L], [rect(0, 0, 400, 300)]],
+	two: [[rect(0, 0, 8000, 6000)], [rect(0, 0, 4000, 6000)]],
+	twoL: [[L], [rect(0, 0, 4000, 3000)]],
 }
-let step = Number(process.env.STEP ?? 100)
+let step = Number(process.env.STEP ?? 3000)
 let tol = (process.env.TOL ?? 25) / S + 1e-9
 let counts = {built: 0, open: 0, failed: 0}
 for (let name in shapes) {
-	let house = ctx.house_plan({floors: shapes[name].map(lines => ({lines}))})
+	let house = ctx.house_plan({version: 1,
+		floors: shapes[name].map(lines => ({lines}))})
 	let top = house.floors[house.floors.length-1]
 	for (let f of house.floors) {
 		let lines = []
@@ -150,8 +151,8 @@ for (let name in shapes) {
 				let z = a * x0 + b * y0 + c
 				if (!f.can_move_faces([line.face1, line.face2], z))
 					continue
-				for (let dy = -300; dy <= 300; dy += step) {
-					for (let dx = -300; dx <= 300; dx += step) {
+				for (let dy = -3000; dy <= 3000; dy += step) {
+					for (let dx = -3000; dx <= 3000; dx += step) {
 						let m = f.start_move_faces([line.face1, line.face2], z)
 						if (!m.move(x0 + dx, y0 + dy)) {
 							m.cancel()

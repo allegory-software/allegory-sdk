@@ -100,6 +100,10 @@ await new Promise(r => server.listen(0, '127.0.0.1', r))
 const browser = await chromium.launch({channel: 'chrome', headless: true})
 const pg = await browser.newPage({deviceScaleFactor: 1,
 	viewport: {width: 800, height: 600}})
+// half of the sleeps keeps the run short; a quarter makes timing-dependent
+// checks fail.
+const wait_ms = pg.waitForTimeout.bind(pg)
+pg.waitForTimeout = ms => wait_ms(ms / 2)
 let errors = [] // [message, ...]
 pg.on('pageerror', e => errors.push(e.stack ?? e.message))
 pg.on('console', function(m) {
@@ -153,9 +157,9 @@ async function history_key(key, shift = false) {
 let view = await read_view()
 check('plan placed', view.scale > 0 && view.x0 != null, JSON.stringify(view))
 
-// the connecting wall is at x=200 on the plan.
-let sx = Math.round(view.x0 + Math.round(200 * view.scale))
-let sy = Math.round(view.y0 + Math.round(200 * view.scale))
+// the connecting wall is at x=2000 on the plan (mm).
+let sx = Math.round(view.x0 + Math.round(2000 * view.scale))
+let sy = Math.round(view.y0 + Math.round(2000 * view.scale))
 await pg.mouse.move(sx, sy)
 await pg.waitForTimeout(200)
 let hs = await hit_state()
@@ -174,7 +178,7 @@ let input_json = await pg.evaluate(function() {
 })
 let segs0 = await read_segs()
 await pg.mouse.down()
-await pg.mouse.move(sx + 100, sy, {steps: 10}) // past the 20-unit snap.
+await pg.mouse.move(sx + 100, sy, {steps: 10}) // past the 200 mm snap.
 await pg.mouse.up()
 await pg.waitForTimeout(300)
 let segs1 = await read_segs()
@@ -220,8 +224,8 @@ check('no page errors after input', errors.length == 0, errors.join('\n'))
 await pg.reload()
 await pg.waitForTimeout(300)
 view = await read_view()
-sx = view.x0 + Math.round(400 * view.scale)
-sy = view.y0 + Math.round(200 * view.scale)
+sx = view.x0 + Math.round(4000 * view.scale)
+sy = view.y0 + Math.round(2000 * view.scale)
 await pg.mouse.move(sx, sy)
 await pg.waitForTimeout(100)
 await pg.mouse.down()
@@ -233,7 +237,7 @@ let resize = await pg.evaluate(function() {
 	let seg = cs.edit?.seg
 	return seg && {length: seg.m2 - seg.m1, dx: cs.dx}
 })
-// lengths snap to the house's precision: 1 cm.
+// lengths snap to whole mm.
 check('new wall follows the pointer without an initial jump',
 	resize && resize.length == Math.round(resize.dx / view.scale),
 	JSON.stringify(resize))
@@ -271,14 +275,15 @@ check('collapsed wall keeps a finite positive view scale',
 	collapsed.length == 0 && Number.isFinite(collapsed.scale)
 		&& collapsed.scale > 0,
 	JSON.stringify(collapsed))
-await pg.mouse.move(sx + 60, sy)
+// past the 300 mm snap to the wall's other end.
+await pg.mouse.move(sx + 100, sy)
 await pg.waitForTimeout(100)
 let extended = await pg.evaluate(function() {
 	let seg = ui.captured('fe').edit?.seg
 	return seg && seg.m2 - seg.m1
 })
 check('collapsed wall can be extended again',
-	extended == Math.round(20 / view.scale), extended)
+	extended == Math.round(60 / view.scale), extended)
 await pg.mouse.up()
 await pg.waitForTimeout(100)
 
@@ -286,8 +291,8 @@ await pg.waitForTimeout(100)
 await pg.reload()
 await pg.waitForTimeout(300)
 view = await read_view()
-sx = view.x0 + Math.round(200 * view.scale)
-sy = view.y0 + Math.round(200 * view.scale)
+sx = view.x0 + Math.round(2000 * view.scale)
+sy = view.y0 + Math.round(2000 * view.scale)
 await pg.mouse.move(sx, sy)
 await pg.waitForTimeout(100)
 await pg.mouse.dblclick(sx, sy, {delay: 80})
@@ -296,7 +301,7 @@ let deleted = await pg.evaluate(function() {
 	let floor = house.floors[0]
 	let has_divider = false
 	for (let seg of floor.segs)
-		if (seg.is_v && seg.axis == 200)
+		if (seg.is_v && seg.axis == 2000)
 			has_divider = true
 	return {has_divider, segs: floor.segs.length,
 		cycles: floor.comps[0].cycles.length}
@@ -316,12 +321,12 @@ check('no page errors after resizing and deletion', errors.length == 0,
 	errors.join('\n'))
 
 // merging the divider into either outside wall.
-for (let target_x of [0, 600]) {
+for (let target_x of [0, 6000]) {
 	await pg.reload()
 	await pg.waitForTimeout(300)
 	view = await read_view()
-	sx = view.x0 + Math.round(200 * view.scale)
-	sy = view.y0 + Math.round(200 * view.scale)
+	sx = view.x0 + Math.round(2000 * view.scale)
+	sy = view.y0 + Math.round(2000 * view.scale)
 	await pg.mouse.move(sx, sy)
 	await pg.waitForTimeout(100)
 	await pg.mouse.down()
@@ -349,8 +354,8 @@ await pg.reload()
 await pg.waitForTimeout(200)
 segs0 = await read_segs()
 view = await read_view()
-sx = view.x0 + Math.round(200 * view.scale)
-sy = view.y0 + Math.round(200 * view.scale)
+sx = view.x0 + Math.round(2000 * view.scale)
+sy = view.y0 + Math.round(2000 * view.scale)
 await pg.mouse.move(sx, sy)
 await pg.waitForTimeout(50)
 await pg.mouse.down()
@@ -389,8 +394,8 @@ for (let action of ['move', 'create']) {
 	await pg.waitForTimeout(200)
 	segs0 = await read_segs()
 	view = await read_view()
-	sx = view.x0 + Math.round(400 * view.scale)
-	sy = view.y0 + Math.round((action == 'move' ? 0 : 200) * view.scale)
+	sx = view.x0 + Math.round(4000 * view.scale)
+	sy = view.y0 + Math.round((action == 'move' ? 0 : 2000) * view.scale)
 	await pg.mouse.move(sx, sy)
 	await pg.waitForTimeout(50)
 	await pg.mouse.down()
@@ -428,7 +433,7 @@ async function reset_empty_floor() {
 	})
 	await pg.waitForTimeout(100)
 	await pg.evaluate(function() {
-		window.plan_json = json({floors: [{lines: []}]})
+		window.plan_json = json({version: 1, floors: [{lines: []}]})
 		ui.animate()
 	})
 	await pg.waitForTimeout(100)
@@ -493,12 +498,12 @@ for (let turns of [1, 2, 3]) {
 		await pg.waitForTimeout(50)
 	}
 	view = await read_view()
-	// the connecting wall at x=200: the wall at x=0 leaves the view at
+	// the connecting wall at x=2000: the wall at x=0 leaves the view at
 	// 90 and 270 degrees.
 	let angle = turns * Math.PI / 2
 	let c = Math.cos(angle), s = Math.sin(angle)
-	let px = view.x0 + Math.round(200 * view.scale) - 400
-	let py = view.y0 + Math.round(200 * view.scale) - 300
+	let px = view.x0 + Math.round(2000 * view.scale) - 400
+	let py = view.y0 + Math.round(2000 * view.scale) - 300
 	sx = 400 + px * c - py * s
 	sy = 300 + px * s + py * c
 	await pg.mouse.move(sx, sy)
@@ -509,7 +514,7 @@ for (let turns of [1, 2, 3]) {
 	await pg.waitForTimeout(100)
 	let moved_axis = await pg.evaluate(() => ui.captured('fe')?.seg?.axis)
 	check('wall follows the pointer at rotation ' + turns * 90,
-		moved_axis == 200 + Math.round(40 / view.scale), moved_axis)
+		moved_axis == 2000 + Math.round(40 / view.scale), moved_axis)
 	await pg.mouse.up()
 	await pg.waitForTimeout(100)
 }
@@ -601,14 +606,14 @@ for (let action of ['room_point', 'eave', 'line', 'blocked_line']) {
 				return fill_text.call(this, text, x, y, ...args)
 			}
 			try {
-				window.plan_json = json({floors: [{
-					lines: [['draw', 0, 0, 600, 400, -600, -400]],
-					room_points: [{x: 100, y: 200, is_open: true}],
-					roof: {pitch: 20, overhang: 20,
-						eave_h: -20 * Math.tan(20 * Math.PI / 180),
+				window.plan_json = json({version: 1, floors: [{
+					lines: [['draw', 0, 0, 6000, 4000, -6000, -4000]],
+					room_points: [{x: 1000, y: 2000, is_open: true}],
+					roof: {pitch: 20, overhang: 200,
+						eave_h: -200 * Math.tan(20 * Math.PI / 180),
 						edge_points: blocked ? [
-						{x: 100, y: -14, pitch: 20},
-						{x: 500, y: -14, pitch: 20},
+						{x: 1000, y: -140, pitch: 20},
+						{x: 5000, y: -140, pitch: 20},
 					] : []},
 				}]})
 				ui.animate()
@@ -624,9 +629,9 @@ for (let action of ['room_point', 'eave', 'line', 'blocked_line']) {
 			await pg.waitForTimeout(100)
 		}
 		view = await read_view()
-		sx = view.x0 + Math.round((action == 'room_point' ? 100
-			: action == 'eave' ? 634 : 300) * view.scale)
-		sy = view.y0 + Math.round(200 * view.scale)
+		sx = view.x0 + Math.round((action == 'room_point' ? 1000
+			: action == 'eave' ? 6340 : 3000) * view.scale)
+		sy = view.y0 + Math.round(2000 * view.scale)
 		let before = await pg.evaluate(() => JSON.stringify(house.save_state()))
 		await pg.mouse.move(sx, sy)
 		await pg.waitForTimeout(50)
@@ -699,16 +704,16 @@ function read_texts() {
 	})
 }
 
-// a 600 x 400 house with a hip roof of 20 degrees and an overhang of 20,
+// a 6000 x 4000 house with a hip roof of 20 degrees and an overhang of 200,
 // shown at the roof level.
 async function load_roof_plan(edge_points) {
 	await pg.reload()
 	await pg.waitForTimeout(200)
 	await pg.evaluate(function(edge_points) {
-		window.plan_json = json({floors: [{
-			lines: [['draw', 0, 0, 600, 400, -600, -400]],
-			roof: {pitch: 20, overhang: 20,
-				eave_h: -20 * Math.tan(20 * Math.PI / 180),
+		window.plan_json = json({version: 1, floors: [{
+			lines: [['draw', 0, 0, 6000, 4000, -6000, -4000]],
+			roof: {pitch: 20, overhang: 200,
+				eave_h: -200 * Math.tan(20 * Math.PI / 180),
 				edge_points: edge_points},
 		}]})
 	}, edge_points)
@@ -721,8 +726,8 @@ async function load_roof_plan(edge_points) {
 // shift over an eave pans; a double-click on a dragged ridge resets it.
 await load_roof_plan([])
 view = await read_view()
-sx = view.x0 + Math.round(634 * view.scale) // east eave
-sy = view.y0 + Math.round(200 * view.scale)
+sx = view.x0 + Math.round(6340 * view.scale) // east eave
+sy = view.y0 + Math.round(2000 * view.scale)
 await pg.mouse.move(sx, sy)
 await pg.waitForTimeout(50)
 check('eave hit without shift', (await hit_state())?.action == 'move_eave')
@@ -734,7 +739,7 @@ check('shift over an eave hits only pan', await pg.evaluate(function() {
 	return hs?.action == 'pan' && !hs.roof_side
 }))
 await pg.keyboard.up('Shift')
-sx = view.x0 + Math.round(300 * view.scale) // ridge
+sx = view.x0 + Math.round(3000 * view.scale) // ridge
 await pg.mouse.move(sx, sy)
 await pg.waitForTimeout(50)
 check('ridge is hit', await pg.evaluate(function() {
@@ -766,14 +771,14 @@ check('double-click resets the ridge', await pg.evaluate(function() {
 	for (let ep of eps)
 		if (ep.pitch != null)
 			return false
-	// ridge at y = 200; hips at 45 degrees.
+	// ridge at y = 2000; hips at 45 degrees.
 	let ds = ui.state_of('fe', 'draw_state')
 	let has_ridge = false
 	for (let {p, q} of ds.roof_lines) {
 		let dx = Math.abs(q[0] - p[0])
 		let dy = Math.abs(q[1] - p[1])
 		if (dy < 1e-6)
-			has_ridge = Math.abs(p[1] - 200) < 1e-6
+			has_ridge = Math.abs(p[1] - 2000) < 1e-6
 		else if (Math.abs(dx - dy) > 1e-6)
 			return false
 	}
@@ -781,7 +786,7 @@ check('double-click resets the ridge', await pg.evaluate(function() {
 }))
 
 // ctrl: an eave moves below the drag threshold; a click does not toggle.
-sx = view.x0 + Math.round(634 * view.scale) // east eave
+sx = view.x0 + Math.round(6340 * view.scale) // east eave
 await pg.mouse.move(sx, sy)
 await pg.waitForTimeout(50)
 await pg.keyboard.down('Control')
@@ -807,9 +812,9 @@ await pg.waitForTimeout(100)
 check('ctrl+drag below the threshold moves only the eave',
 	await pg.evaluate(function() {
 		let roof = house.floors[0].roof
-		let eave_h = Math.round(-20 * Math.tan(20 * Math.PI / 180)) // 1 cm
+		let eave_h = Math.round(-200 * Math.tan(20 * Math.PI / 180)) // 1 mm
 		return house.edit_no == 3 && roof.eave_h == eave_h
-			&& roof.edge_points.some(p => p.x == 614 && p.eave_h < eave_h)
+			&& roof.edge_points.some(p => p.x == 6140 && p.eave_h < eave_h)
 	}), await pg.evaluate(() =>
 		json({edit_no: house.edit_no, roof: house.floors[0].roof})))
 
@@ -877,20 +882,20 @@ check('shift+label drag keeps the steepest pitch at 89',
 		&& await pg.evaluate(() => house.edit_no == 3), JSON.stringify(roof))
 
 await load_roof_plan([
-	{x: 100, y: -14, pitch: 30},
-	{x: 500, y: -14, pitch: 30},
+	{x: 1000, y: -140, pitch: 30},
+	{x: 5000, y: -140, pitch: 30},
 ])
 labels = await read_labels()
 let can_move = await drag_label(north_label(labels), -20)
 check('label drag on a side with two edge points does nothing',
 	can_move === false && await pg.evaluate(() => house.edit_no == 0))
 
-// the east ridge end (400, 200), where the north, south and east faces
+// the east ridge end (4000, 2000), where the north, south and east faces
 // meet: a drag along the ridge outward makes only the east face steeper.
 await load_roof_plan([])
 view = await read_view()
-sx = view.x0 + Math.round(400 * view.scale)
-sy = view.y0 + Math.round(200 * view.scale)
+sx = view.x0 + Math.round(4000 * view.scale)
+sy = view.y0 + Math.round(2000 * view.scale)
 await pg.mouse.move(sx, sy)
 await pg.waitForTimeout(100)
 check('ridge end is hit with its three faces', await pg.evaluate(function() {
@@ -904,16 +909,16 @@ await pg.waitForTimeout(50)
 await pg.mouse.up()
 await pg.waitForTimeout(100)
 roof = await read_roof()
-// eave_h snapped to 1 cm: the overhang (19.23) is off the grid, so the side
+// eave_h snapped to 1 mm: the overhang is off the grid, so the side
 // faces' planes meet the wall top on the wall line only within the grid
-// rounding of their eave lines: their pitch is off by ~3e-5 deg.
+// rounding of their eave lines: their pitch is off by a tiny angle.
 check('ridge end drag along the ridge changes only the end face',
 	roof.edge_points.length == 3 && roof.edge_points.every(ep =>
-		ep.x == 614 ? ep.pitch > 21 : Math.abs(ep.pitch - 20) < 1e-3),
+		ep.x == 6140 ? ep.pitch > 21 : Math.abs(ep.pitch - 20) < 1e-3),
 	JSON.stringify(roof))
 
 // double-click on a pitch label: the face back to the roof's pitch.
-await load_roof_plan([{x: 300, y: -14, pitch: 30}])
+await load_roof_plan([{x: 3000, y: -140, pitch: 30}])
 labels = await read_labels()
 check('the north face has its own pitch',
 	north_label(labels).text == '30°', JSON.stringify(labels))
@@ -927,7 +932,7 @@ check('double-click on a pitch label resets the face', await pg.evaluate(() =>
 
 // ctrl+double-click on an eave with an edge point: no move, the point is
 // removed.
-await load_roof_plan([{x: 300, y: 414, eave_h: -10}])
+await load_roof_plan([{x: 3000, y: 4140, eave_h: -100}])
 view = await read_view()
 let south_c = await pg.evaluate(function() { // the south eave line
 	let ds = ui.state_of('fe', 'draw_state')
@@ -935,7 +940,7 @@ let south_c = await pg.evaluate(function() { // the south eave line
 		if (side.ny == 1)
 			return side.c / prism_union.grid_scale
 })
-sx = view.x0 + Math.round(300 * view.scale)
+sx = view.x0 + Math.round(3000 * view.scale)
 sy = view.y0 + Math.round(south_c * view.scale)
 await pg.mouse.move(sx, sy)
 await pg.waitForTimeout(50)
@@ -956,8 +961,8 @@ check('ctrl+double-click on an eave removes its edge point',
 // dimensions mode, of all eaves and lines.
 await load_roof_plan([])
 view = await read_view()
-sx = view.x0 + Math.round(634 * view.scale) // east eave
-sy = view.y0 + Math.round(200 * view.scale)
+sx = view.x0 + Math.round(6340 * view.scale) // east eave
+sy = view.y0 + Math.round(2000 * view.scale)
 await pg.mouse.move(sx, sy)
 await pg.waitForTimeout(50)
 let texts0 = await read_texts()
@@ -980,19 +985,19 @@ check('no page errors after pan and line reset',
 
 // stepped roof: projected edges at different heights are not shared.
 await pg.evaluate(function() {
-	house.load_state({floors: [{
-		lines: [['draw', 0, 0, 500, 100, 500, 900, -1000, -1000]],
+	house.load_state({version: 1, floors: [{
+		lines: [['draw', 0, 0, 5000, 1000, 5000, 9000, -10000, -10000]],
 		roof: {pitch: 90, overhang: 0, edge_points: [
-			{x: 250, y: -14, pitch: Math.atan(.5) * 180 / Math.PI},
-			{x: 750, y: 86, pitch: 45},
+			{x: 2500, y: -140, pitch: Math.atan(.5) * 180 / Math.PI},
+			{x: 7500, y: 860, pitch: 45},
 		]},
 	}]})
 	ui.animate()
 })
 await pg.waitForTimeout(100)
 view = await read_view()
-await pg.mouse.move(view.x0 + Math.round(514 * view.scale),
-	view.y0 + Math.round(136 * view.scale))
+await pg.mouse.move(view.x0 + Math.round(5140 * view.scale),
+	view.y0 + Math.round(1360 * view.scale))
 await pg.waitForTimeout(50)
 check('different roof heights produce no draggable shared line',
 	await pg.evaluate(() => ui.hovers('fe')?.action != 'move_faces'))
@@ -1006,8 +1011,8 @@ check('roof shared endpoints reuse face points', await pg.evaluate(function() {
 	return ds.roof_lines.length == 1 && points.has(ds.roof_lines[0].p)
 		&& points.has(ds.roof_lines[0].q)
 }))
-await pg.mouse.move(view.x0 + Math.round(600 * view.scale),
-	view.y0 + Math.round(186 * view.scale))
+await pg.mouse.move(view.x0 + Math.round(6000 * view.scale),
+	view.y0 + Math.round(1860 * view.scale))
 await pg.waitForTimeout(50)
 check('the actual join between roof faces remains draggable',
 	await pg.evaluate(function() {
@@ -1033,9 +1038,9 @@ let area_labels = await pg.evaluate(async function() {
 		return fill_text.call(this, text, ...args)
 	}
 	try {
-		window.plan_json = json({floors: [{lines: [
-			['draw', 0, 0, 600, 400, -600, -400],
-			['draw', 200, 100, 100, 100, -100, -100],
+		window.plan_json = json({version: 1, floors: [{lines: [
+			['draw', 0, 0, 6000, 4000, -6000, -4000],
+			['draw', 2000, 1000, 1000, 1000, -1000, -1000],
 		]}]})
 		ui.animate()
 		await new Promise(resolve => requestAnimationFrame(() =>

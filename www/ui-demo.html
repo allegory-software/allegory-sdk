@@ -16,20 +16,21 @@
 <script src=prism_union.js></script>
 <script src=house_plan.js></script>
 <script id=house_test_plans>
-// sample plans for house_plan(), used by the demos.
+// sample plans for house_plan(), used by the demos. lengths are in mm.
 window.house_test_plans = {
 
 	simple: {
 
-		floor_h: 250,
+		version: 1,
+		floor_h: 2500,
 		floors: [
 			{
 				points: [
-					[200,  0, 'cl'],
-					[200,400, 'cr'],
+					[2000,   0, 'cl'],
+					[2000,4000, 'cr'],
 				],
 				lines: [
-					['draw','tl',0,0, 'tr',600, 'br',400, 'bl',-600, 'tl',-400],
+					['draw','tl',0,0, 'tr',6000, 'br',4000, 'bl',-6000, 'tl',-4000],
 					['connect','cl','cr'],
 				],
 			},
@@ -38,42 +39,43 @@ window.house_test_plans = {
 
 	gable1 : {
 
-		floor_h: 250,
+		version: 1,
+		floor_h: 2500,
 		floors: [
 			{
 				points: [
-					[200,  0, 'cl'],
-					[200,400, 'cr'],
+					[2000,   0, 'cl'],
+					[2000,4000, 'cr'],
 				],
 				lines: [
-					['draw','tl',0,0, 'tr',600, 'br',400, 'bl',-600, 'tl',-400],
+					['draw','tl',0,0, 'tr',6000, 'br',4000, 'bl',-6000, 'tl',-4000],
 					['connect','cl','cr'],
 				],
 			},
 			{
 				points: [
-					[300,  0, 'cl'],
-					[300,400, 'cr'],
+					[3000,   0, 'cl'],
+					[3000,4000, 'cr'],
 				],
 				lines: [
-					['draw','tl',0,0, 'tr',600, 'br',400, 'bl',-600, 'tl',-400],
+					['draw','tl',0,0, 'tr',6000, 'br',4000, 'bl',-6000, 'tl',-4000],
 					['connect','cl','cr'],
 				],
 			},
 			{
 				points: [
-					[  0,240, 'cl'],
-					[600,240, 'cr'],
+					[   0,2400, 'cl'],
+					[6000,2400, 'cr'],
 				],
 				lines: [
-					['draw','tl',0,0, 'tr',600, 'br',400, 'bl',-600, 'tl',-400],
+					['draw','tl',0,0, 'tr',6000, 'br',4000, 'bl',-6000, 'tl',-4000],
 					['connect','cl','cr'],
 				],
 				roof: {
 					pitch: 45,
 					edge_points: [
-						{x:   0, y: 200, pitch: 90},
-						{x: 600, y: 200, pitch: 90},
+						{x:    0, y: 2000, pitch: 90},
+						{x: 6000, y: 2000, pitch: 90},
 					],
 				},
 			},

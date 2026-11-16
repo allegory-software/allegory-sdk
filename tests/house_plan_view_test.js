@@ -7,7 +7,8 @@ const vm = require('node:vm')
 const sdk = path.resolve(__dirname, '..')
 const BOX_ARGS = 8
 let widget, hover, capture, cursor, rotate_click, dims_click
-let want_rebuild
+let want_rebuild, clicked_id
+let save_n = 0
 let state = {}
 let record = [0, 0, 800, 600]
 let matrix = [1, 0, 0, 1, 0, 0]
@@ -57,7 +58,7 @@ let ui = {
 		return value
 	},
 	value: () => state.input_value,
-	clicked: () => false,
+	clicked: id => id == clicked_id,
 	hit: () => hover,
 	drag: () => capture,
 	captured: () => capture,
@@ -67,21 +68,32 @@ let ui = {
 	window_focused: () => true,
 	keypressed: () => false,
 	set_cursor(s) { cursor = s },
-	button(id) {
-		if (id == 'fe.rotate_button' && rotate_click) {
+	create_field: () => ({}),
+	save_state(id, k, v) {
+		save_n++
+		if (v === undefined)
+			delete ui.saved_state[id]?.[k]
+		else
+			(ui.saved_state[id] ??= {})[k] = v
+	},
+	state_of(id, key) {
+		if (id == 'fe.rotate_button' && key == 'state' && rotate_click) {
 			rotate_click = false
-			return true
+			return 'click'
 		}
+	},
+	button(id) {
 		if (id == 'fe.dims_button' && dims_click) {
 			dims_click = false
 			return true
 		}
 		return false
 	},
-	cmd_box(cmd, fr, align, valign, id, plan, ds) {
+	cmd_box(cmd, fr, align, valign, id, plan, ds, sg) {
 		record[BOX_ARGS] = id
 		record[BOX_ARGS+1] = plan
 		record[BOX_ARGS+2] = ds
+		record[BOX_ARGS+3] = sg
 	},
 	em: (n = 1) => 16*n,
 	sp: () => 0,
@@ -97,7 +109,7 @@ let ui = {
 for (let name of ['animate', 'box_position', 'box_translate', 'focus_group',
 	'focusable', 'end_focus_group', 'stack', 'end_stack', 'm', 'mt', 'v', 'h',
 	'end', 'end_v', 'end_h', 'bold', 'text', 'color', 'p', 'nobold',
-	'xlarge', 'icon', 'state_of', 'save_state'])
+	'xlarge', 'icon', 'popup_button', 'interaction_value'])
 	ui[name] = () => {}
 
 const ctx = {
@@ -105,6 +117,7 @@ const ctx = {
 		groupEnd() {}},
 	setTimeout, clearTimeout, TextEncoder, TextDecoder, URL,
 	URLSearchParams, performance, Intl, atob, btoa, queueMicrotask, ui,
+	devicePixelRatio: 1,
 }
 ctx.window = ctx
 ctx.document = {currentScript: {hasAttribute: k => k == 'global'}}
@@ -114,6 +127,7 @@ ctx.localStorage = {}
 ctx.addEventListener = () => {}
 vm.createContext(ctx)
 for (let name of ['glue.js', 'earcut.js', '3d.js', 'plane_graph.js',
+	'roof_skeleton.js', 'clipper2.js', 'prism_union.js',
 	'house_plan.js', 'house_plan_editor.js']) {
 	let file = path.join(sdk, 'www', name)
 	vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, {filename: file})
@@ -123,7 +137,7 @@ vm.runInContext(fs.readFileSync(path.join(sdk, 'www/ui-demo.html'), 'utf8')
 
 let offset = ctx.Math3D.line2.offset
 function record_offset(d, x1, y1, x2, y2) {
-	assert.equal(d, -10)
+	assert.equal(d, -100)
 	assert(x1 != x2 || y1 != y2)
 	dimensions.push([x1, y1, x2, y2])
 	return offset(d, x1, y1, x2, y2)
@@ -148,6 +162,7 @@ function frame(rotate = false) {
 				capture.drag = false
 			hover = null
 		}
+		clicked_id = null
 	} while (want_rebuild)
 	matrix = [1, 0, 0, 1, 0, 0]
 	texts.length = 0
@@ -171,12 +186,12 @@ function equal_axes(actual, expected) {
 		close(actual[i], expected[i])
 }
 function screen_point(x, y) {
-	let ds = state.draw_state
-	let angle = ds.rotation ?? 0
+	let sg = state
+	let angle = sg.rotation ?? 0
 	let c = Math.cos(angle), s = Math.sin(angle)
 	let cx = Math.round(record[2] / 2), cy = Math.round(record[3] / 2)
-	x = Math.round(x * ds.scale) + ds.x0 - cx
-	y = Math.round(y * ds.scale) + ds.y0 - cy
+	x = Math.round(x * sg.scale) + sg.x0 - cx
+	y = Math.round(y * sg.scale) + sg.y0 - cy
 	return [cx + x*c - y*s, cy + x*s + y*c]
 }
 
@@ -208,7 +223,7 @@ for (let turns of [0, 1, 2, 3]) {
 				assert(seg)
 				capture = {action: 'move_seg', seg, drag: true, dx: 0, dy: 0}
 				frame()
-				close(state.draw_state.rotation ?? 0, turns * Math.PI / 2)
+				close(state.rotation, turns * Math.PI / 2)
 				let screen_v = v != (turns % 2 != 0)
 				assert.equal(cursor, screen_v ? 'ew-resize' : 'ns-resize')
 				let rooms = []
@@ -250,31 +265,31 @@ for (let turns of [0, 1, 2, 3]) {
 // measurements after moving an exterior wall -------------------------------
 
 for (let [y, dy, expected] of [
-	[0, -100, [[-14, -14, 226, -14], [226, -114, 614, -114],
-		[596, -96, 244, -96], [244, 4, 204, 4]]],
-	[0, 100, [[-14, -14, 254, -14], [254, 86, 614, 86],
-		[196, 96, 236, 96], [236, 4, 4, 4]]],
-	[400, -100, [[614, 314, 254, 314], [254, 414, -14, 414],
-		[4, 396, 236, 396], [236, 304, 196, 304]]],
-	[400, 100, [[614, 514, 226, 514], [226, 414, -14, 414],
-		[204, 396, 244, 396], [244, 496, 596, 496],
-		[204, 396, 244, 396], [244, 496, 596, 496]]],
+	[0, -1000, [[-140, -140, 2260, -140], [2260, -1140, 6140, -1140],
+		[5960, -960, 2440, -960], [2440, 40, 2040, 40]]],
+	[0, 1000, [[-140, -140, 2540, -140], [2540, 860, 6140, 860],
+		[1960, 960, 2360, 960], [2360, 40, 40, 40]]],
+	[4000, -1000, [[6140, 3140, 2540, 3140], [2540, 4140, -140, 4140],
+		[40, 3960, 2360, 3960], [2360, 3040, 1960, 3040]]],
+	[4000, 1000, [[6140, 5140, 2260, 5140], [2260, 4140, -140, 4140],
+		[2040, 3960, 2440, 3960], [2440, 4960, 5960, 4960],
+		[2040, 3960, 2440, 3960], [2440, 4960, 5960, 4960]]],
 ]) {
 	check('exterior wall measurements y=' + y + ', dy=' + dy, () => {
-		let ds = state.draw_state
-		let seg = plan.segs.find(s => !s.is_v && s.axis == y && s.m1 == 200)
+		let sg = state
+		let seg = plan.segs.find(s => !s.is_v && s.axis == y && s.m1 == 2000)
 		let edit = plan.start_move_seg(seg)
 		edit.move(0, dy)
 		edit.stop()
-		let connector = plan.segs.find(s => s.is_v && s.axis == 200
+		let connector = plan.segs.find(s => s.is_v && s.axis == 2000
 			&& s.m1 == Math.min(y, y+dy) && s.m2 == Math.max(y, y+dy))
 		assert(connector)
 		capture = {action: 'move_seg', seg: connector, drag: true, dx: 0, dy: 0}
 		frame()
 		capture.drag = false
-		let angle = ds.rotation ?? 0
-		capture.dx = 40 * ds.scale * Math.cos(angle)
-		capture.dy = 40 * ds.scale * Math.sin(angle)
+		let angle = sg.rotation
+		capture.dx = 400 * sg.scale * Math.cos(angle)
+		capture.dy = 400 * sg.scale * Math.sin(angle)
 		frame()
 		assert.deepEqual(dimensions, expected)
 		assert(strokes.filter(s => s.length == 12).length >= expected.length)
@@ -291,15 +306,15 @@ check('all dimensions replace drag measurements', () => {
 	dims_click = true
 	frame()
 	assert.equal(dimensions.length, 14)
-	let seg = plan.segs.find(s => s.is_v && s.axis == 200)
+	let seg = plan.segs.find(s => s.is_v && s.axis == 2000)
 	capture = {action: 'move_seg', seg, drag: true, dx: 0, dy: 0}
 	frame()
 	assert.equal(dimensions.length, 14)
 	capture.drag = false
-	let ds = state.draw_state
-	let angle = ds.rotation ?? 0
-	capture.dx = 40 * ds.scale * Math.cos(angle)
-	capture.dy = 40 * ds.scale * Math.sin(angle)
+	let sg = state
+	let angle = sg.rotation
+	capture.dx = 400 * sg.scale * Math.cos(angle)
+	capture.dy = 400 * sg.scale * Math.sin(angle)
 	frame()
 	assert.equal(dimensions.length, 14)
 	capture.cancel = true
@@ -353,17 +368,179 @@ for (let [w, h] of [[800, 600], [801, 601]]) {
 	let x = (bb[0] + bb[2]) / 2
 	let y = (bb[1] + bb[3]) / 2
 	let before = screen_point(x, y)
-	let scale = state.draw_state.scale
+	let scale = state.scale
 	for (let turns = 1; turns <= 4; turns++) {
 		check('rotation center after panning in ' + w + 'x' + h
 				+ ', turn ' + turns, () => {
 			frame(true)
 			let after = screen_point(x, y)
-			close(after[0], before[0])
-			close(after[1], before[1])
-			close(state.draw_state.scale, scale)
+			// the view center is a plan point: its pixel position is rounded.
+			assert(Math.abs(after[0] - before[0]) <= 1, after[0] + ' != ' + before[0])
+			assert(Math.abs(after[1] - before[1]) <= 1, after[1] + ' != ' + before[1])
+			close(state.scale, scale)
 		})
 	}
 }
+
+// drawing a wall -----------------------------------------------------------
+
+check('drawing a wall shows its length on both sides', () => {
+	record[2] = 800
+	record[3] = 600
+	frame()
+	let edit = plan.start_resize_seg(null, 4000, 1000, 800, 0, 1, 0)
+	edit.resize(1500, 0)
+	let {scale, rotation} = state
+	capture = {action: 'resize_seg', edit, drag: false,
+		dx: 1500 * scale * Math.cos(rotation),
+		dy: 1500 * scale * Math.sin(rotation)}
+	frame()
+	assert.equal(dimensions.length, 2)
+	for (let [x1, y1, x2, y2] of dimensions)
+		assert(Math.hypot(x2 - x1, y2 - y1) >= 1500)
+	capture.cancel = true
+	frame()
+	capture = null
+	assert.equal(dimensions.length, 0)
+})
+
+// view in the saved state --------------------------------------------------
+
+check('the view keeps its center and logical scale when the viewport resizes',
+	() => {
+	record[2] = 800
+	record[3] = 600
+	frame()
+	let sg = state
+	assert.equal(sg.zoomed, true)
+	let {scale, cx, cy} = sg
+	record[2] = 1600
+	record[3] = 1200
+	frame()
+	close(sg.scale, scale)
+	close(sg.cx, cx)
+	close(sg.cy, cy)
+	// the plan point at the center of the viewport.
+	assert(Math.abs((800 - sg.x0) / sg.scale - cx) <= 1 / sg.scale)
+	assert(Math.abs((600 - sg.y0) / sg.scale - cy) <= 1 / sg.scale)
+})
+
+check('rotation, pan and zoom are saved by the editor id and restored', () => {
+	record[2] = 800
+	record[3] = 600
+	frame()
+	capture = {action: 'pan', drag: true, dx: 0, dy: 0}
+	frame()
+	capture.drag = false
+	capture.dx = 30
+	capture.dy = 20
+	frame()
+	capture.drop = true
+	frame()
+	capture = null
+	frame(true)
+	let {rotation, scale, cx, cy} = state
+	assert.deepEqual(ui.saved_state.fe,
+		{rotation, scale, cx, cy})
+	assert.equal(rotation % (Math.PI / 2), 0)
+	state = {}
+	frame()
+	close(state.rotation, rotation)
+	close(state.scale, scale)
+	close(state.cx, cx)
+	close(state.cy, cy)
+	assert.equal(state.zoomed, true)
+	// fit once, then keep the fitted scale.
+	state.reset_zoom()
+	frame()
+	assert.equal(ui.saved_state.fe.scale, state.scale)
+	assert.equal(ui.saved_state.fe.rotation, rotation)
+})
+
+check('pixel density changes preserve logical scale and center', () => {
+	let {scale, cx, cy} = state
+	let d = state.d(1000)
+	ctx.devicePixelRatio = 2
+	frame()
+	close(state.scale, scale)
+	close(state.cx, cx)
+	close(state.cy, cy)
+	assert(Math.abs(state.d(1000) - 2*d) <= 1)
+	state = {}
+	frame()
+	close(state.scale, scale)
+	ctx.devicePixelRatio = 1
+	frame()
+})
+
+check('idle layouts and pan movements do not save; release saves once', () => {
+	let n = save_n
+	frame()
+	frame()
+	assert.equal(save_n, n)
+	ctx.devicePixelRatio = 2
+	let {cx, cy, scale} = state
+	capture = {action: 'pan', drag: true, dx: 0, dy: 0}
+	frame()
+	capture.drag = false
+	capture.dx = 40
+	capture.dy = 20
+	frame()
+	assert.equal(save_n, n)
+	let angle = state.rotation
+	let dx = 40 / (scale * 2), dy = 20 / (scale * 2)
+	close(state.cx, cx - dx*Math.cos(angle) - dy*Math.sin(angle))
+	close(state.cy, cy + dx*Math.sin(angle) - dy*Math.cos(angle))
+	capture.drop = true
+	frame()
+	assert.equal(save_n, n + 4)
+	close(ui.saved_state.fe.cx, state.cx)
+	close(ui.saved_state.fe.cy, state.cy)
+	capture = null
+	ctx.devicePixelRatio = 1
+	frame()
+	assert.equal(save_n, n + 4)
+})
+
+check('wheel and rotation clicks save without saving on later layouts', () => {
+	let n = save_n
+	hover = {mx: 0, my: 0}
+	ui.wheel_dy = -16
+	frame()
+	ui.wheel_dy = 0
+	hover = null
+	assert.equal(save_n, n + 4)
+	frame()
+	assert.equal(save_n, n + 4)
+	frame(true)
+	assert.equal(save_n, n + 8)
+	frame()
+	assert.equal(save_n, n + 8)
+})
+
+check('floor and roof selection survive editor recreation', () => {
+	let t = ctx.house_test_plans.simple
+	plan_json = ctx.json({...t, floors: [t.floors[0], t.floors[0]]})
+	frame()
+	let n = save_n
+	clicked_id = 'fe.floor1'
+	frame()
+	assert.equal(save_n, n + 2)
+	assert.equal(ui.saved_state.fe.floor, 1)
+	state = {}
+	frame()
+	assert.equal(state.floor.i, 1)
+	n = save_n
+	clicked_id = 'fe.roof'
+	frame()
+	assert.equal(save_n, n + 2)
+	state = {}
+	frame()
+	assert.equal(state.is_roof_level, true)
+	assert.equal(state.floor.i, 1)
+	n = save_n
+	frame()
+	assert.equal(save_n, n)
+})
 
 console.log(n_checks + ' house plan view checks passed')

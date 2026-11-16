@@ -39,14 +39,15 @@ function roof_sides(floor) {
 	return sides
 }
 
-// a 20 cm step in one wall: a short side between an inside and an outside
+// a 200 mm step in one wall: a short side between an inside and an outside
 // corner.
-ctx.house_test_plans.step20 = {floors: [{lines: [['draw', 0, 0,
-	600, 400, -300, -20, -300, -380]]}]}
+ctx.house_test_plans.step20 = {version: 1, floors: [{lines: [['draw', 0, 0,
+	6000, 4000, -3000, -200, -3000, -3800]]}]}
 
-let overhangs = [0, 1, 5, 10, 20, 40, 59, 61, 80, 100, 150, 200, 300, 500]
+let overhangs = [0, 10, 50, 100, 200, 400, 590, 610, 800, 1000, 1500, 2000,
+	3000, 5000]
 // fractional overhangs, as the editor makes from pointer moves / view scale.
-for (let i = 1; i < 400; i += 7)
+for (let i = 10; i < 4000; i += 70)
 	overhangs.push(i / 1.4475235901201562)
 let n_fails = 0
 for (let name in ctx.house_test_plans) {

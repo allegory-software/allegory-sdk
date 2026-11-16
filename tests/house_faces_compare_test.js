@@ -54,15 +54,31 @@ function loop_key(ps) {
 	return JSON.stringify([...ps.slice(min_i), ...ps.slice(0, min_i)])
 }
 
-// canonical text of a poly2 with holes, ccw outline in 2D.
-function poly_key(plane_key, poly) {
+// the old code is in cm, the new code in mm: the state for the old code has
+// its lengths divided by 10, and its polys are scaled back by k = 10.
+function mm_to_cm(v, key) {
+	if (typeof v == 'number')
+		return key == 'pitch' || key == 'version' ? v : v / 10
+	if (Array.isArray(v))
+		return v.map(v1 => mm_to_cm(v1, key))
+	if (v && typeof v == 'object') {
+		let v1 = {}
+		for (let k in v)
+			v1[k] = mm_to_cm(v[k], k)
+		return v1
+	}
+	return v
+}
+
+// canonical text of a poly2 with holes, ccw outline in 2D, scaled by k.
+function poly_key(plane_key, poly, k) {
 	let loops = []
 	let ends = [...(poly.holes ?? []), poly.length]
 	let i1 = 0
 	for (let i2 of ends) {
 		let ps = []
 		for (let i = i1; i < i2; i++)
-			ps.push([poly[i][0], poly[i][1]])
+			ps.push([poly[i][0] * k, poly[i][1] * k])
 		loops.push(loop_key(ps))
 		i1 = i2
 	}
@@ -76,9 +92,10 @@ function old_keys(h, top_floor) {
 	let [wall_polys, horizontal_polys] = h.make_polys(top_floor, true)
 	let keys = []
 	for (let poly of wall_polys)
-		keys.push(poly_key('w '+poly.is_v+' '+poly.axis+' '+poly.normal, poly))
+		keys.push(poly_key('w '+poly.is_v+' '+poly.axis * 10+' '+poly.normal,
+			poly, 10))
 	for (let poly of horizontal_polys)
-		keys.push(poly_key('h '+poly.z+' '+poly.normal, poly))
+		keys.push(poly_key('h '+poly.z * 10+' '+poly.normal, poly, 10))
 	return keys.sort()
 }
 
@@ -132,7 +149,7 @@ function new_keys(h, top_floor) {
 		let plane_key = is_flat
 			? 'h '+z0+' '+(is_ccw ? 1 : -1)
 			: 'w '+is_x+' '+(is_x ? x0 : y0)+' '+((is_ccw == is_x) ? 1 : -1)
-		keys.push(poly_key(plane_key, poly))
+		keys.push(poly_key(plane_key, poly, 1))
 	}
 	return keys.sort()
 }
@@ -142,45 +159,45 @@ function rect_lines(x, y, w, h) {
 }
 
 function grid_lines(cols, rows) {
-	let w = cols * 300
-	let h = rows * 300
+	let w = cols * 3000
+	let h = rows * 3000
 	let lines = [rect_lines(0, 0, w, h)]
 	for (let i = 1; i < cols; i++)
-		lines.push(['draw', i * 300, 0, 0, h])
+		lines.push(['draw', i * 3000, 0, 0, h])
 	for (let j = 1; j < rows; j++)
-		lines.push(['draw', 0, j * 300, w])
+		lines.push(['draw', 0, j * 3000, w])
 	return lines
 }
 
-let houses = [] // [[name, state], ...]
+let houses = [] // [[name, state], ...] in mm
 for (let name in new_ctx.house_test_plans)
 	houses.push([name, new_ctx.house_test_plans[name]])
-houses.push(['grid 3x2x2', {floors: [
+houses.push(['grid 3x2x2', {version: 1, floors: [
 	{lines: grid_lines(3, 2)},
 	{lines: grid_lines(3, 2)},
 ]}])
-houses.push(['open rooms over a grid', {floors: [
+houses.push(['open rooms over a grid', {version: 1, floors: [
 	{lines: grid_lines(3, 2)},
 	{lines: grid_lines(3, 2), room_points: [
-		{x: 100, y: 100, is_open: true},
-		{x: 400, y: 400, is_open: true},
+		{x: 1000, y: 1000, is_open: true},
+		{x: 4000, y: 4000, is_open: true},
 	]},
-	{lines: [rect_lines(0, 0, 600, 600)]},
+	{lines: [rect_lines(0, 0, 6000, 6000)]},
 ]}])
-houses.push(['island in an open room', {floors: [
-	{lines: [rect_lines(0, 0, 600, 400)]},
-	{lines: [rect_lines(0, 0, 600, 400), rect_lines(200, 100, 100, 100)],
-		room_points: [{x: 100, y: 200, is_open: true}]},
+houses.push(['island in an open room', {version: 1, floors: [
+	{lines: [rect_lines(0, 0, 6000, 4000)]},
+	{lines: [rect_lines(0, 0, 6000, 4000), rect_lines(2000, 1000, 1000, 1000)],
+		room_points: [{x: 1000, y: 2000, is_open: true}]},
 ]}])
-houses.push(['overflow and underflow', {floors: [
-	{lines: [rect_lines(0, 0, 600, 400)]},
-	{lines: [rect_lines(300, 200, 600, 400)]},
-	{lines: [rect_lines(0, 0, 200, 400), rect_lines(400, 0, 200, 400)]},
+houses.push(['overflow and underflow', {version: 1, floors: [
+	{lines: [rect_lines(0, 0, 6000, 4000)]},
+	{lines: [rect_lines(3000, 2000, 6000, 4000)]},
+	{lines: [rect_lines(0, 0, 2000, 4000), rect_lines(4000, 0, 2000, 4000)]},
 ]}])
 
 let n = 0
 for (let [name, state] of houses) {
-	let old_h = old_ctx.house_plan(JSON.parse(JSON.stringify(state)))
+	let old_h = old_ctx.house_plan(mm_to_cm(JSON.parse(JSON.stringify(state))))
 	let new_h = new_ctx.house_plan(JSON.parse(JSON.stringify(state)))
 	let floor_n = new_h.floors.length
 	for (let i = 0; i < floor_n; i++) {

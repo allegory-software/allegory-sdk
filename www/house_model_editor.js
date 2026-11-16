@@ -230,8 +230,8 @@ function create_height_controls(id) {
 			roof_h = cut_floor ? 0 : top_floor.roof_height()
 			roof_edit_no = house.edit_no
 		}
-		let ax = house.bb[0] - 100
-		let az = house.bb[3] + 100
+		let ax = house.bb[0] - 1000
+		let az = house.bb[3] + 1000
 		if (!ui.captured(id)) {
 			axis[0].set(ax, 0, az)
 			axis[1].set(ax, max(house.h + roof_h, 1), az)
@@ -286,7 +286,7 @@ function create_height_controls(id) {
 				cx.lineTo(px, py)
 				cx.stroke()
 				let text = (is_roof ? 'Roof ' : '')
-					+ format_kcount((is_roof ? roof_h : floor.h) / 100, 2)+'m'
+					+ format_kcount((is_roof ? roof_h : floor.h) / 1000, 2)+'m'
 				cx.fillText(text, (px + prev[0])/2 + 12,
 					(py + prev[1])/2)
 			}
@@ -312,7 +312,10 @@ ui.house_model_editor = function(id, house, floor, fr, align, valign,
 ) {
 	let cut_id = id+'.cut_button'
 	// read before the toggle builds: its update gives this frame's click.
-	let is_cut = ui.value(cut_id) ?? true // option: cut the model at floor
+	let is_cut = ui.value(cut_id)
+		?? ui.saved_state[id]?.is_cut ?? true // option: cut the model at floor
+	if (ui.interaction_value(cut_id) !== undefined)
+		ui.save_state(id, 'is_cut', is_cut)
 	let cut_floor = floor && is_cut ? floor : null
 	let controls_id = id+'.heights'
 	ui.state_of(controls_id)
@@ -321,8 +324,8 @@ ui.house_model_editor = function(id, house, floor, fr, align, valign,
 	if (!e) {
 		init = function(e1) {
 			init_house_model_editor(e1, house, cut_floor)
-			// the house is in cm, the editor's default camera is for 1-unit models.
-			e1.set_camera_pos(v3(-300, 600, 900))
+			// the house is in mm, the editor's default camera is for 1-unit models.
+			e1.set_camera_pos(v3(-3000, 6000, 9000))
 			e1.set_camera_dir(v3(-6, 4.4, 7))
 		}
 	}

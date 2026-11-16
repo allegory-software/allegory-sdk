@@ -23,17 +23,18 @@ for (let name of ['glue.js', 'earcut.js', '3d.js', 'plane_graph.js', 'roof_skele
 }
 let log = console.log.bind(console)
 let rect = (x, y, w, h) => ['draw', x, y, w, 0, 0, h, -w, 0, 0, -h]
-let L = ['draw', 0, 0, 800, 0, 0, 300, -400, 0, 0, 400, -400, 0, 0, -700]
+let L = ['draw', 0, 0, 8000, 0, 0, 3000, -4000, 0, 0, 4000, -4000, 0, 0, -7000]
 let shapes = {
-	rect: [[rect(0, 0, 600, 400)]],
+	rect: [[rect(0, 0, 6000, 4000)]],
 	L: [[L]],
-	two: [[rect(0, 0, 800, 600)], [rect(0, 0, 400, 600)]],
-	twoL: [[L], [rect(0, 0, 400, 300)]],
+	two: [[rect(0, 0, 8000, 6000)], [rect(0, 0, 4000, 6000)]],
+	twoL: [[L], [rect(0, 0, 4000, 3000)]],
 }
 let errs = {}
 let n_moves = 0
 for (let name in shapes) {
-	let house = ctx.house_plan({floors: shapes[name].map(lines => ({lines}))})
+	let house = ctx.house_plan({version: 1,
+		floors: shapes[name].map(lines => ({lines}))})
 	let top = house.floors[house.floors.length-1]
 	for (let f of house.floors) {
 		let wall_z = f.z + f.h
@@ -71,8 +72,8 @@ for (let name in shapes) {
 			}
 		for (let {k, faces, x0, y0, z} of grabs) {
 			if (!f.can_move_faces(faces, z)) continue
-			for (let dy = -300; dy <= 300; dy += 50)
-				for (let dx = -300; dx <= 300; dx += 50) {
+			for (let dy = -3000; dy <= 3000; dy += 3000)
+				for (let dx = -3000; dx <= 3000; dx += 3000) {
 					let m = f.start_move_faces(faces, z)
 					n_moves++
 					if (!m.move(x0 + dx, y0 + dy)) { m.cancel(); continue }

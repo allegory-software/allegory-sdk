@@ -375,7 +375,7 @@ function uncovered_length(faces, d) {
 }
 
 function house_report(h) {
-	let prisms = house_prisms(h, 20)
+	let prisms = house_prisms(h, 200)
 	let r = union_report(prisms)
 	let v = reference_volume(prisms)
 	// the union rounds z and the cut lines to the grid: up to half a grid
@@ -417,8 +417,8 @@ function check_solid(r) {
 }
 
 function set_roof(h, pitch, edge_points) {
-	h.floors[h.floors.length-1].roof = {pitch, overhang: 60, eave_h: -22,
-		max_overhang: 150, edge_points: edge_points ?? []}
+	h.floors[h.floors.length-1].roof = {pitch, overhang: 600, eave_h: -220,
+		max_overhang: 1500, edge_points: edge_points ?? []}
 }
 
 // plans ---------------------------------------------------------------------
@@ -434,19 +434,20 @@ function house_with_top(lines, points) {
 }
 
 const L_lines = [
-	['draw','a',0,0, 'b',600, 'c',200, 'd',-300, 'e',200, 'f',-300, 'a',-400],
+	['draw','a',0,0, 'b',6000, 'c',2000, 'd',-3000, 'e',2000, 'f',-3000,
+		'a',-4000],
 	['connect','p1','p2'],
 ]
-const L_points = [[150, 0, 'p1'], [150, 400, 'p2']]
+const L_points = [[1500, 0, 'p1'], [1500, 4000, 'p2']]
 
 function grid_lines(cols, rows) {
-	let w = cols * 300
-	let h = rows * 300
+	let w = cols * 3000
+	let h = rows * 3000
 	let lines = [['draw', 0, 0, w, h, -w, -h]]
 	for (let i = 1; i < cols; i++)
-		lines.push(['draw', i * 300, 0, 0, h])
+		lines.push(['draw', i * 3000, 0, 0, h])
 	for (let j = 1; j < rows; j++)
-		lines.push(['draw', 0, j * 300, w])
+		lines.push(['draw', 0, j * 3000, w])
 	return lines
 }
 
@@ -454,7 +455,7 @@ function grid_house(cols, rows, floor_n) {
 	let floors = []
 	for (let i = 0; i < floor_n; i++)
 		floors.push({lines: grid_lines(cols, rows)})
-	return ctx.house_plan({floors})
+	return ctx.house_plan({version: 1, floors})
 }
 
 // checks --------------------------------------------------------------------
@@ -474,13 +475,13 @@ check('hip 45 over gable1', () => {
 
 check('hip 30 short / 45 long', () => {
 	let h = ctx.house_plan(ctx.house_test_plans.gable1)
-	set_roof(h, 45, [{x: 0, y: 200, pitch: 30}, {x: 600, y: 200, pitch: 30}])
+	set_roof(h, 45, [{x: 0, y: 2000, pitch: 30}, {x: 6000, y: 2000, pitch: 30}])
 	check_solid(house_report(h))
 })
 
 check('L roof 37 / 52', () => {
 	let h = house_with_top(L_lines, L_points)
-	set_roof(h, 37, [{x: 450, y: 200, pitch: 52}, {x: 0, y: 200, pitch: 52}])
+	set_roof(h, 37, [{x: 4500, y: 2000, pitch: 52}, {x: 0, y: 2000, pitch: 52}])
 	check_solid(house_report(h))
 })
 
@@ -495,24 +496,25 @@ check('steep 75: the underside cuts below the wall tops', () => {
 // slot end's face inside the house. PRINT=1 prints the house state to paste
 // into the house plan editor.
 check('gables along a slot', () => {
-	let h = ctx.house_plan({floors: [{lines: [
-		['draw', 0, 0, 400, 300, 150, -300, 400, 700, -950, -700],
+	let h = ctx.house_plan({version: 1, floors: [{lines: [
+		['draw', 0, 0, 4000, 3000, 1500, -3000, 4000, 7000, -9500, -7000],
 	]}]})
-	set_roof(h, 45, [{x: 400, y: 150, pitch: 90}, {x: 550, y: 150, pitch: 90}])
+	set_roof(h, 45, [{x: 4000, y: 1500, pitch: 90},
+		{x: 5500, y: 1500, pitch: 90}])
 	check_solid(house_report(h))
 	if (process.env.PRINT)
 		console.log(JSON.stringify(h.save_state()))
 })
 
-// a gable set back 200 from the front eave next to it: the front eave
-// reaches the gable's line at 200 above the wall top and continues over the
+// a gable set back 2000 from the front eave next to it: the front eave
+// reaches the gable's line at 2000 above the wall top and continues over the
 // gable's run. PRINT=1 prints the house state to paste into the house plan
 // editor.
 check('sloped eave lines up with a gable', () => {
-	let h = ctx.house_plan({floors: [{lines: [
-		['draw', 0, 0, 500, 200, 500, 600, -1000, -800],
+	let h = ctx.house_plan({version: 1, floors: [{lines: [
+		['draw', 0, 0, 5000, 2000, 5000, 6000, -10000, -8000],
 	]}]})
-	set_roof(h, 45, [{x: 750, y: 200, pitch: 90}])
+	set_roof(h, 45, [{x: 7500, y: 2000, pitch: 90}])
 	check_solid(house_report(h))
 	if (process.env.PRINT)
 		console.log(JSON.stringify(h.save_state()))
@@ -520,7 +522,7 @@ check('sloped eave lines up with a gable', () => {
 
 check('hip roof over a 6x4 grid of rooms', () => {
 	let h = grid_house(6, 4, 3)
-	set_roof(h, 37, [{x: 0, y: 600, pitch: 52}])
+	set_roof(h, 37, [{x: 0, y: 6000, pitch: 52}])
 	check_solid(house_report(h))
 })
 
@@ -535,8 +537,8 @@ check('random pitches', () => {
 	for (let k = 0; k < n; k++) {
 		let pitch = () => Math.round(20 + random() * 55)
 		let edge_points = [
-			{x: 0, y: 100, pitch: pitch()}, {x: 600, y: 100, pitch: pitch()},
-			{x: 100, y: 0, pitch: pitch()}, {x: 100, y: 400, pitch: pitch()},
+			{x: 0, y: 1000, pitch: pitch()}, {x: 6000, y: 1000, pitch: pitch()},
+			{x: 1000, y: 0, pitch: pitch()}, {x: 1000, y: 4000, pitch: pitch()},
 		]
 		for (let make_house of [
 			() => ctx.house_plan(ctx.house_test_plans.gable1),
@@ -561,26 +563,28 @@ check('roofs on lower floors', () => {
 	let rect = (x, y, w, h) => ['draw', x, y, w, h, -w, -h]
 	for (let floors of [
 		// lean-to against the upper wall.
-		[{lines: [rect(0, 0, 600, 400)]}, {lines: [rect(0, 0, 300, 400)]}],
+		[{lines: [rect(0, 0, 6000, 4000)]}, {lines: [rect(0, 0, 3000, 4000)]}],
 		// lean-to as a terrace.
-		[{lines: [rect(0, 0, 600, 400)],
-			area_points: [{x: 450, y: 200, kind: 'terrace'}]},
-			{lines: [rect(0, 0, 300, 400)]}],
+		[{lines: [rect(0, 0, 6000, 4000)],
+			area_points: [{x: 4500, y: 2000, kind: 'terrace'}]},
+			{lines: [rect(0, 0, 3000, 4000)]}],
 		// an eave side runs on into the upper floor's wall.
-		[{lines: [rect(0, 0, 600, 400)]}, {lines: [rect(300, 200, 300, 400)]}],
+		[{lines: [rect(0, 0, 6000, 4000)]},
+			{lines: [rect(3000, 2000, 3000, 4000)]}],
 		// upper floor inside: a roof all around it.
-		[{lines: [rect(0, 0, 900, 700)]}, {lines: [rect(300, 200, 300, 300)]}],
+		[{lines: [rect(0, 0, 9000, 7000)]},
+			{lines: [rect(3000, 2000, 3000, 3000)]}],
 		// a wide second building: its hip roof is the floor's highest point,
 		// so the lean-to's walls rise above the upper roof's overhang, and
 		// both roofs cut them: the lower one wins.
-		[{lines: [rect(0, 0, 600, 400), rect(900, 0, 1200, 1200)]},
-			{lines: [rect(0, 0, 300, 400)]}],
+		[{lines: [rect(0, 0, 6000, 4000), rect(9000, 0, 12000, 12000)]},
+			{lines: [rect(0, 0, 3000, 4000)]}],
 		// a gap between two upper parts, covered by the floor above.
-		[{lines: [rect(0, 0, 600, 400)]},
-			{lines: [rect(0, 0, 200, 400), rect(400, 0, 200, 400)]},
-			{lines: [rect(0, 0, 600, 400)]}],
+		[{lines: [rect(0, 0, 6000, 4000)]},
+			{lines: [rect(0, 0, 2000, 4000), rect(4000, 0, 2000, 4000)]},
+			{lines: [rect(0, 0, 6000, 4000)]}],
 	]) {
-		let h = ctx.house_plan({floors})
+		let h = ctx.house_plan({version: 1, floors})
 		let faces = h.make_faces(h.floors[h.floors.length-1], false)
 		let r = union_report_of_faces(faces)
 		assert(r.face_n_by_tag.roof > 0)
@@ -597,8 +601,8 @@ console.log(checks+' checks')
 if (process.env.BENCH) {
 	for (let [cols, rows, floor_n] of [[3, 2, 2], [6, 4, 3], [10, 6, 3]]) {
 		let h = grid_house(cols, rows, floor_n)
-		set_roof(h, 37, [{x: 0, y: rows * 150, pitch: 52}])
-		let prisms = house_prisms(h, 20)
+		set_roof(h, 37, [{x: 0, y: rows * 1500, pitch: 52}])
+		let prisms = house_prisms(h, 200)
 		let n = 5
 		let t0 = performance.now()
 		for (let i = 0; i < n; i++)

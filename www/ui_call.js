@@ -1793,7 +1793,7 @@ ui.call = ui.stateful_widget(function(id) {
 							? 'Background blur on: turn off' : 'Background blur off: turn on'))
 						call.set_camera(call.camera.is_enabled, call.camera.device_id,
 							!call.camera.want_background_blur)
-					if (ui.popup_button(id+'.settings', 'settings', null, 't', ']')) {
+					if (ui.popup_button(id+'.settings', 'settings', null, null, null, 't', ']')) {
 						ui.pb(ui.sp8())
 						ui.min_w(ui.em(24))
 						ui.v_aligned(0, ui.sp(), 's', 't')

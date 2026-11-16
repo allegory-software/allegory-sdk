@@ -56,6 +56,8 @@ let glue_log = log
 
 // the widget's box command ---------------------------------------------------
 
+const camera_props = ['camera_pos', 'camera_dir', 'camera_up']
+
 const MODEL3_EDITOR_ID = ui.BOX_ARGS+0 // widget id
 
 const CMD_MODEL3_EDITOR = ui.box_widget('model3_editor', {
@@ -111,8 +113,9 @@ function model3_editor(e) {
 	// camera -----------------------------------------------------------------
 
 	let camera = camera3({pos: v3(-1, 5, 10), dir: v3(-.5, .5, 1)})
-	let min_distance = 0.001  // min line distance
-	let max_distance = 1e4    // max model total distance
+	let camera_dirty = false
+	let min_distance = 0.01   // min line distance
+	let max_distance = 1e5    // max model total distance
 
 	function update_camera_proj() {
 		camera.view_size.set(floor(cw), floor(ch))
@@ -138,6 +141,14 @@ function model3_editor(e) {
 	e.prop('camera_pos' , {store: 'var', type: 'v3', default: camera.pos})
 	e.prop('camera_dir' , {store: 'var', type: 'v3', default: camera.dir})
 	e.prop('camera_up'  , {store: 'var', type: 'v3', default: camera.up })
+
+	function save_camera() {
+		if (!camera_dirty)
+			return
+		for (let k of camera_props)
+			ui.save_state(e.id, k, Array.from(e[k]))
+		camera_dirty = false
+	}
 
 	function update_camera() {
 		camera.update()
@@ -1347,8 +1358,9 @@ function model3_editor(e) {
 				center_orbit_point(hit_point, orbit_point)
 				camera.orbit(orbit_point, dy, dx, 0)
 			}
+			camera_dirty = true
 			update_camera()
-		})
+		}, save_camera)
 	}
 
 	{
@@ -1361,6 +1373,7 @@ function model3_editor(e) {
 		let y = key == 'arrowup'   && -1 || key == 'arrowdown'  && 1 || 0
 		if (!shift && ctrl && y) {
 			camera.dolly(hit_point, 1 + 0.4 * (key == 'arrowdown' ? 1 : -1))
+			camera_dirty = true
 			update_camera()
 			return false
 		}
@@ -1368,6 +1381,7 @@ function model3_editor(e) {
 			let dx = -50 * x
 			let dy = -50 * y
 			camera.pan(hit_point, mouse.x, mouse.y, mouse.x + dx, mouse.y + dy)
+			camera_dirty = true
 			update_camera()
 			return false
 		}
@@ -1376,6 +1390,7 @@ function model3_editor(e) {
 			let dy = y / -10
 			center_orbit_point(hit_point, hit_point)
 			camera.orbit(hit_point, dy, dx, 0)
+			camera_dirty = true
 			update_camera()
 			return false
 		}
@@ -1385,6 +1400,8 @@ function model3_editor(e) {
 		orbit_update_cursor()
 		if (key != 'shift' && key != 'ctrl' && key != 'alt')
 			hit_point = null
+		if (!captured_up)
+			save_camera()
 	}
 
 	}
@@ -2015,7 +2032,9 @@ function model3_editor(e) {
 		mouse.prevent_validate = false
 		let hit_point = mouse_hit_model({mode: 'camera'})
 		camera.dolly(hit_point, 1 + 0.4 * dy)
+		camera_dirty = true
 		update_camera()
+		save_camera()
 	}
 
 	let tool_keys = {
@@ -2459,6 +2478,7 @@ function model3_editor(e) {
 			captured_move = null
 			captured_up = null
 			e.keydown('escape')
+			save_camera()
 		}
 
 		if (ui.mx != null && (cs || hs)) {
@@ -2594,6 +2614,10 @@ function create_model3_editor(id, opt, init) {
 	ui.on_free(id, function() { e.free() }) // init() can wrap e.free.
 	if (init)
 		init(e)
+	let saved = ui.saved_state[id]
+	for (let k of camera_props)
+		if (saved?.[k])
+			e['set_'+k](v3(...saved[k]))
 	return e
 }
 

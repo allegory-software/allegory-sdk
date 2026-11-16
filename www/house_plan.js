@@ -3,7 +3,7 @@
 const G = window
 
 const {
-	round, snap, mod, abs, sign, min, max, clamp, sqrt, tan, atan, rad,
+	round, mod, abs, sign, min, max, clamp, sqrt, tan, atan, rad,
 	assert, log, push_log, pop_log, push_log_if,
 	insert, remove_value, uniq_sorted, map, assign, clock, json,
 } = glue
@@ -15,15 +15,69 @@ G.DEBUG_PLAN_LOAD = 1
 
 // house model ---------------------------------------------------------------
 
-// everything is in cm!
+// everything is in mm!
 let defaults = {
-	precision: 1,
-	rotation: 0,
-	floor_h: 250,
-	int_wall_thickness: 8,
-	ext_wall_thickness: 18,
-	slab_thickness: 20,
-	roof_thickness: 20, // at right angles to the roof
+	floor_h: 2500,
+	int_wall_thickness: 80,
+	ext_wall_thickness: 180,
+	slab_thickness: 200,
+	roof_thickness: 200, // at right angles to the roof
+}
+
+// the state version: states without a version are in cm.
+const STATE_VERSION = 1
+
+function cm_to_mm(x) {
+	return x == null ? x : x * 10
+}
+
+// the state of an older house, in cm, as a state in mm.
+function scale_cm_state(t) {
+	let t1 = {...t, version: STATE_VERSION}
+	delete t1.precision
+	delete t1.rotation
+	for (let k in defaults)
+		if (t[k] != null)
+			t1[k] = cm_to_mm(t[k])
+	if (!t.floors)
+		return t1
+	t1.floors = []
+	for (let floor of t.floors) {
+		let floor1 = {...floor, h: cm_to_mm(floor.h)}
+		if (floor.points) {
+			floor1.points = []
+			for (let [x, y, id] of floor.points)
+				floor1.points.push([cm_to_mm(x), cm_to_mm(y), id])
+		}
+		if (floor.room_points) {
+			floor1.room_points = []
+			for (let room_point of floor.room_points)
+				floor1.room_points.push({...room_point,
+					x: cm_to_mm(room_point.x), y: cm_to_mm(room_point.y)})
+		}
+		if (floor.area_points) {
+			floor1.area_points = []
+			for (let area_point of floor.area_points)
+				floor1.area_points.push({...area_point,
+					x: cm_to_mm(area_point.x), y: cm_to_mm(area_point.y)})
+		}
+		if (floor.roof) {
+			let roof = floor.roof
+			floor1.roof = {...roof, overhang: cm_to_mm(roof.overhang),
+				eave_h: cm_to_mm(roof.eave_h),
+				max_overhang: cm_to_mm(roof.max_overhang)}
+			if (roof.edge_points) {
+				floor1.roof.edge_points = []
+				for (let edge_point of roof.edge_points)
+					floor1.roof.edge_points.push({...edge_point,
+						x: cm_to_mm(edge_point.x), y: cm_to_mm(edge_point.y),
+						overhang: cm_to_mm(edge_point.overhang),
+						eave_h: cm_to_mm(edge_point.eave_h)})
+			}
+		}
+		t1.floors.push(floor1)
+	}
+	return t1
 }
 
 function poly_get_point(i, out) {
@@ -39,7 +93,7 @@ function house_plan(t) {
 	house.edit_no = 0 // increments on each committed edit, undo and redo
 
 	function snap_length(x) {
-		return x == null ? x : snap(x, house.precision)
+		return x == null ? x : round(x)
 	}
 
 	function copy_roof(roof) {
@@ -50,9 +104,9 @@ function house_plan(t) {
 				y: snap_length(edge_point.y), pitch: edge_point.pitch,
 				overhang: snap_length(edge_point.overhang),
 				eave_h: snap_length(edge_point.eave_h)})
-		return {pitch: roof.pitch, overhang: snap_length(roof.overhang ?? 60),
-			eave_h: snap_length(roof.eave_h ?? -22),
-			max_overhang: snap_length(roof.max_overhang ?? 150),
+		return {pitch: roof.pitch, overhang: snap_length(roof.overhang ?? 600),
+			eave_h: snap_length(roof.eave_h ?? -220),
+			max_overhang: snap_length(roof.max_overhang ?? 1500),
 			edge_points: edge_points}
 	}
 
@@ -79,8 +133,7 @@ function house_plan(t) {
 			state.h = floor.fixed_h
 			floors.push(state)
 		}
-		return {precision: house.precision,
-			rotation: house.rotation, floor_h: house.floor_h,
+		return {version: STATE_VERSION, floor_h: house.floor_h,
 			int_wall_thickness: house.int_wall_thickness,
 			ext_wall_thickness: house.ext_wall_thickness,
 			slab_thickness: house.slab_thickness,
@@ -669,7 +722,7 @@ function house_plan(t) {
 					let snapped_dd = dd
 					for (let c of snap_cs) {
 						let d1 = (c - wall_c) * (side.nx + side.ny) // on c
-						if (abs(d1 - d0) < 1e-3) // the side's own line
+						if (abs(d1 - d0) < 1e-2) // the side's own line
 							continue
 						let snap_dd = abs(d1 - (d0 + dd))
 						if (snap_dd >= min_d)
@@ -982,8 +1035,7 @@ function house_plan(t) {
 				}
 			} else {
 				s.move = function(dh) {
-					let h = max(house.slab_thickness + house.precision,
-						snap_length(h0 + dh))
+					let h = max(house.slab_thickness + 1, snap_length(h0 + dh))
 					if (floor.h == h)
 						return false
 					floor.fixed_h = h == h0 ? edit0.h : h
@@ -1191,7 +1243,7 @@ function house_plan(t) {
 				snap_v: snap_lines.v,
 			}
 
-			s.move = function(dx, dy, snap_d = 20) {
+			s.move = function(dx, dy, snap_d = 200) {
 
 				let dm = v ? dy : dx
 				let da = v ? dx : dy
@@ -1291,7 +1343,7 @@ function house_plan(t) {
 				}
 				let x2 = snap_length(x1 + dx * abs(sdx))
 				let y2 = snap_length(y1 + dy * abs(sdy))
-				let p1 = floor.add_point(x1, y1)
+				let p1 = p ?? floor.add_point(x1, y1)
 				let p2 = floor.add_point(x2, y2)
 				seg = floor.add_seg(p1, p2)
 				p = p2
@@ -1307,6 +1359,9 @@ function house_plan(t) {
 			let min_a = seg_resize_bump_limit(seg, p0, -1)
 			let max_a = seg_resize_bump_limit(seg, p0,  1)
 			let snap_lines = snap_lines_for(!seg.is_v, seg)
+			// the seg's other end: a zero-length seg gets removed by fix().
+			let other_p = seg[1 - seg.pi(p)]
+			snap_lines.push(other_p[snap_lines.v ? 0 : 1])
 
 			let s = {
 				seg: seg,
@@ -1314,7 +1369,7 @@ function house_plan(t) {
 				snap_v: snap_lines.v,
 			}
 
-			s.resize = function(dx, dy, snap_d = 30) {
+			s.resize = function(dx, dy, snap_d = 300) {
 				let x1 = snap_length(p0[0] + dx * abs(sdx))
 				let y1 = snap_length(p0[1] + dy * abs(sdy))
 
@@ -1667,10 +1722,46 @@ function house_plan(t) {
 		return floor
 	}
 
+	// settings ---------------------------------------------------------------
+
+	// set the house setting `name` (a key of defaults) and rebuild what it
+	// changes: the floors' heights and wall edges.
+	function apply_setting(name, value) {
+		house[name] = value
+		for (let floor of house.floors)
+			floor.h = floor.fixed_h ?? house.floor_h
+		fix_floor_heights()
+		for (let floor of house.floors)
+			floor.fix()
+	}
+
+	// start changing the setting `name`: s.move(value) sets it, s.stop()
+	// commits the changes as one edit.
+	house.start_edit_setting = function(name) {
+		assert(!edit0)
+		let value0 = house[name]
+		let s = {}
+		s.move = function(value) {
+			value = snap_length(value)
+			if (house[name] != value)
+				apply_setting(name, value)
+		}
+		s.stop = function() {
+			if (house[name] == value0)
+				return
+			undo_stack.push({op: 'setting', name: name, value: value0})
+			redo_stack.length = 0
+			house.edit_no++
+		}
+		return s
+	}
+
 	// init -------------------------------------------------------------------
 
 	function init(t) {
 
+		if (t.version == null)
+			t = scale_cm_state(t)
 		assign(house, defaults, t)
 		house.floor_h = snap_length(house.floor_h)
 		house.int_wall_thickness = snap_length(house.int_wall_thickness)
@@ -1757,6 +1848,10 @@ function house_plan(t) {
 			let state = take_state()
 			put_state(entry.state)
 			return {op: 'load', state: state}
+		} else if (op == 'setting') {
+			let value = house[entry.name]
+			apply_setting(entry.name, entry.value)
+			return {op: 'setting', name: entry.name, value: value}
 		}
 	}
 

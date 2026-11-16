@@ -26,20 +26,20 @@ for (let name of ['glue.js', 'earcut.js', '3d.js', 'plane_graph.js',
 	vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, {filename: file})
 }
 
-// a cols x rows grid of 300 x 300 rooms.
+// a cols x rows grid of 3000 x 3000 rooms.
 function grid_lines(cols, rows) {
-	let w = cols * 300
-	let h = rows * 300
+	let w = cols * 3000
+	let h = rows * 3000
 	let lines = [['draw', 0, 0, w, h, -w, -h]]
 	for (let i = 1; i < cols; i++)
-		lines.push(['draw', i * 300, 0, 0, h])
+		lines.push(['draw', i * 3000, 0, 0, h])
 	for (let j = 1; j < rows; j++)
-		lines.push(['draw', 0, j * 300, w])
+		lines.push(['draw', 0, j * 3000, w])
 	return lines
 }
 
 for (let [cols, rows] of [[3, 2], [6, 4], [10, 6]]) {
-	let house = ctx.house_plan({floors: [
+	let house = ctx.house_plan({version: 1, floors: [
 		{lines: grid_lines(cols, rows)},
 		{lines: grid_lines(cols - 1, rows - 1)},
 	]})

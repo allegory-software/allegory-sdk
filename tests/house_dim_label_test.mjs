@@ -111,7 +111,7 @@ try {
 			max_perp = Math.max(max_perp, Math.abs(perp - 5))
 		}
 		if (dsf == 1 && !rotations) {
-			// line2.offset(-10) puts a dimension line inside a room cycle and
+			// line2.offset(-100) puts a dimension line inside a room cycle and
 			// outside an outer cycle: the same sign serves both.
 			const sides = await page.evaluate(() => {
 				let plan = ui._state_map.get('floor_editor_demo').floor
@@ -136,7 +136,7 @@ try {
 							let [x1, y1] = pts[i]
 							let [x2, y2] = pts[(i+1) % n]
 							let [a, b, c2, e] = Math3D.line2.offset(
-								-10, x1, y1, x2, y2)
+								-100, x1, y1, x2, y2)
 							if (inside(pts, (a + c2) / 2, (b + e) / 2))
 								inside_n++
 						}
@@ -146,7 +146,7 @@ try {
 			})
 			for (let c of sides)
 				if (c.inside_n != (c.outer ? 0 : c.n)) {
-					console.log('offset(-10) side is wrong for', c)
+					console.log('offset(-100) side is wrong for', c)
 					failed = true
 				}
 		}

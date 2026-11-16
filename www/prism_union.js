@@ -7,7 +7,7 @@
 		prisms  [{paths: [[{x, y}, ...], ...], bottom: [a, b, c],
 		          top: [a, b, c], tag:, is_cutter:}, ...]
 		faces   [{rings: [[[x, y, z], ...], ...], tag:}, ...]
-	prism_union.grid_scale -> 1000
+	prism_union.grid_scale -> 100
 
 	A prism is the plan region of its paths, filled even-odd, between its
 	bottom and top planes z = a*x + b*y + c. The code fuses all the prisms
@@ -48,7 +48,7 @@ const G = window
 const {round, abs, min, max, hypot, inf, assert, map, uniq_sorted} = glue
 const {Clipper64, PolyTree64, ClipType, FillRule} = clipper2
 
-let SCALE = 1000 // grid units per plan unit
+let SCALE = 100 // grid units per plan unit (mm): a grid unit is 10 um
 
 // clipper -------------------------------------------------------------------
 

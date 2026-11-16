@@ -31,15 +31,15 @@ for (let name of ['glue.js', 'earcut.js', '3d.js', 'plane_graph.js',
 	vm.runInContext(src, ctx, {filename: file})
 }
 
-// a cols x rows grid of 300 x 300 rooms.
+// a cols x rows grid of 3000 x 3000 rooms.
 function grid_lines(cols, rows) {
-	let w = cols * 300
-	let h = rows * 300
+	let w = cols * 3000
+	let h = rows * 3000
 	let lines = [['draw', 0, 0, w, h, -w, -h]]
 	for (let i = 1; i < cols; i++)
-		lines.push(['draw', i * 300, 0, 0, h])
+		lines.push(['draw', i * 3000, 0, 0, h])
 	for (let j = 1; j < rows; j++)
-		lines.push(['draw', 0, j * 300, w])
+		lines.push(['draw', 0, j * 3000, w])
 	return lines
 }
 
@@ -54,8 +54,8 @@ for (let [cols, rows, floor_n] of [[3, 2, 2], [6, 4, 3], [10, 6, 3]]) {
 	let floors = []
 	for (let i = 0; i < floor_n; i++)
 		floors.push({lines: grid_lines(cols - i, rows),
-			room_points: [{x: 150, y: 150, is_open: true}]})
-	let house = ctx.house_plan({floors: floors})
+			room_points: [{x: 1500, y: 1500, is_open: true}]})
+	let house = ctx.house_plan({version: 1, floors: floors})
 	let floor = house.floors[0]
 	let n = 50
 	let fix_dt = time(n, () => floor.fix())

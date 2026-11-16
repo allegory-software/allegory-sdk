@@ -8085,7 +8085,8 @@ ui.popup_update = popup_update
 
 /*
 
-	if (ui.popup_button(id, icon, text, side='b', align='[')) {
+	if (ui.popup_button(id, icon, text, align='l', valign='c', side='b',
+			popup_align='[')) {
 		... popup contents ...
 		ui.end_popup_button(id)
 	}
@@ -8110,13 +8111,13 @@ function popup_button_update(id, s) {
 		ui.focus_first(id+'.picker')
 }
 
-ui.popup_button = function(id, icon, text, side, align) {
+ui.popup_button = function(id, icon, text, align, valign, side, popup_align) {
 	let s = ui.state(id, popup_button_update)
 	s.open ??= false
 	if (s.closed && s.canceled)
 		ui.focus(id+'.button')
 	ui.focus_group(s.open, null, id)
-	ui.stack(id, 0, 'l', 'c')
+	ui.stack(id, 0, align ?? 'l', valign ?? 'c')
 		ui.button(id+'.button', icon, text)
 		if (!s.open) {
 			ui.end_stack()
@@ -8125,8 +8126,8 @@ ui.popup_button = function(id, icon, text, side, align) {
 		}
 		ui.m(ui.sp1())
 		ui.p(ui.sp1())
-		ui.popup(id+'.popup', 'open', null, side ?? 'b', align ?? '[',
-			'constrain change_side solid')
+		ui.popup(id+'.popup', 'open', null, side ?? 'b',
+			popup_align ?? '[', 'constrain change_side solid')
 			ui.bb_tooltip('bg2', null, 'light', null, ui.sp05())
 			ui.focus_group(false, null, id+'.picker')
 			ui.stack()

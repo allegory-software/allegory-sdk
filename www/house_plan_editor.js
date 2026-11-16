@@ -14,7 +14,7 @@ const G = window
 const {
 	ceil, round, snap, mod, abs, sign, min, max, clamp, PI, sin, cos, rad,
 	atan2, hypot,
-	array_set, empty_array, memoize, format_kcount, point_around, distance,
+	array_set, empty_array, format_kcount, point_around, distance,
 	json_arg, try_json_arg, json, copy_to_clipboard, S,
 } = glue
 
@@ -31,102 +31,13 @@ let floor_names = [
 	'3\u02b3\u1d48 FLOOR',
 ]
 
-let format_length = d => format_kcount(d / 1e2, 2)+'m'
-let format_area = a => format_kcount(abs(a) / 1e4, 2)+' m\u00b2'
+// plan units are mm.
+let format_length = d => format_kcount(d / 1e3, 2)+'m'
+let format_area = a => format_kcount(abs(a) / 1e6, 2)+' m\u00b2'
 
 function seg_center(seg) {
 	return line2.at(.5, seg[0][0], seg[0][1], seg[1][0], seg[1][1], out)
 }
-
-// shared scale --------------------------------------------------------------
-
-function scaler(name) {
-	let s = {}
-	s.show_grid = ui.saved_state.floor_editor?.show_grid
-	s.show_dims = ui.saved_state.floor_editor?.show_dims
-	let line_width = 2 // thickness of wall line stroke in pixels at 1:1 scale
-	let scale, margin
-	s.d = d => round(d * scale)
-	s.x = x => round(x * scale)
-	s.y = y => round(y * scale)
-	s.plan_x = x => x / scale
-	s.plan_y = y => y / scale
-	s.plan_d = d => d / scale
-	s.transform = function(cx, w, h) {
-		if (s.rotation) {
-			let xc = round(w / 2)
-			let yc = round(h / 2)
-			cx.translate(xc, yc)
-			cx.rotate(s.rotation)
-			cx.translate(-xc, -yc)
-		}
-		cx.translate(s.x0, s.y0)
-	}
-	function set_scale(sc) {
-		scale = sc
-		s.scale = sc
-		// snap line width to an even number for sharpness
-		s.line_width = snap(line_width * sc, 2)
-	}
-	let bb = bbox2()
-	s.scale_to_fit = function(bb1, w, h) {
-		if (s.zoomed) return
-		if (bb1[0] > bb1[2]) {
-			set_scale(1)
-			if (!s.panned) {
-				s.x0 = round(w / 2)
-				s.y0 = round(h / 2)
-			}
-			return
-		}
-		let margin = ceil(ui.em(2) + line_width)
-		w -= 2 * margin
-		h -= 2 * margin
-		array_set(bb, bb1)
-		bb.rotate(s.rotation)
-		let [x1, y1, x2, y2] = bb
-		let bw = x2 - x1
-		let bh = y2 - y1
-		set_scale(min(
-			scale,
-			w / bw,
-			h / bh
-		))
-		if (!s.panned) {
-			// in pixels from widget's origin
-			s.x0 = -s.x(x1) + margin + round((w - s.d(x2 - x1)) / 2)
-			s.y0 = -s.y(y1) + margin + round((h - s.d(y2 - y1)) / 2)
-		}
-		return true
-	}
-	s.set_scale = function(sc) {
-		if (s.zoomed) return
-		set_scale(sc)
-	}
-	s.zoom = function(d, xc, yc) { // zoom around (xc,yc) pixels from widget's origin
-		if (!d) return
-
-		let plan_xt = s.plan_x(-s.x0 + xc)
-		let plan_yt = s.plan_y(-s.y0 + yc)
-
-		set_scale(clamp(scale * 1.2 ** -d, 0.1, 10))
-
-		let xt = s.x(plan_xt)
-		let yt = s.y(plan_yt)
-
-		s.x0 = -(xt - xc)
-		s.y0 = -(yt - yc)
-
-		s.zoomed = true
-	}
-	s.reset_zoom = function() {
-		s.zoomed = false
-		s.panned = false
-	}
-	return s
-}
-
-let scale_group = memoize(scaler)
 
 // floor view ----------------------------------------------------------------
 
@@ -167,7 +78,7 @@ function draw_grids(cx, sg, w, h) {
 	// grid
 	cx.save()
 	cx.translate(.5, .5)
-	let step = 1
+	let step = 10
 	let factor = 5
 	while (sg.d(step) < 7) {
 		step *= factor
@@ -196,7 +107,7 @@ function draw_edges(cx, sg, eps) {
 }
 
 function draw_walls(cx, sg, comps, segs) {
-	if (sg.scale <= 0.2) { // to small to even show edges
+	if (sg.scale <= 0.02) { // to small to even show edges
 		for (let seg of segs) {
 			let x1 = sg.x(seg[0][0]) + .5
 			let y1 = sg.y(seg[0][1]) + .5
@@ -236,7 +147,7 @@ function draw_walls(cx, sg, comps, segs) {
 			x.fill()
 			cx.wall_pattern = cx.createPattern(c, 'repeat')
 		}
-		if (sg.scale > 0.4) {
+		if (sg.scale > 0.04) {
 			cx.fillStyle = DEBUG_PLAN ? '#333' : cx.wall_pattern
 			cx.fill('nonzero')
 			cx.lineWidth = DEBUG_PLAN ? 2 : sg.line_width
@@ -275,7 +186,7 @@ function draw_length(cx, sg, x1, y1, x2, y2, s) {
 	if (sg.d(d) < 20)
 		return
 
-	;[x1, y1, x2, y2] = line2.offset(-10, x1, y1, x2, y2)
+	;[x1, y1, x2, y2] = line2.offset(-100, x1, y1, x2, y2)
 
 	s ??= format_length(d)
 
@@ -407,7 +318,7 @@ function draw_roof_line_dims(cx, sg, line, wall_z) {
 	let [x1, y1, z1] = line.p
 	let [x2, y2, z2] = line.q
 	let d = distance(x1, y1, x2, y2)
-	if (abs(z2 - z1) > 1e-6) {
+	if (abs(z2 - z1) > 1e-5) {
 		draw_length(cx, sg, x1, y1, x2, y2, format_length(hypot(d, z2 - z1)))
 		return
 	}
@@ -524,8 +435,8 @@ function hit_roof_point(hs, draw_state, sg, mx, my) {
 	let faces = [] // faces of the segments that end at found_p
 	for (let line of draw_state.roof_lines) {
 		let {p, q, face1, face2} = line
-		let is_end = distance(x, y, p[0], p[1]) < 1e-3
-			|| distance(x, y, q[0], q[1]) < 1e-3
+		let is_end = distance(x, y, p[0], p[1]) < 1e-2
+			|| distance(x, y, q[0], q[1]) < 1e-2
 		if (!is_end)
 			continue
 		if (!faces.includes(face1)) faces.push(face1)
@@ -572,7 +483,34 @@ function find_roof_face(faces, side0) {
 				return face
 }
 
+// settings ------------------------------------------------------------------
+
+function setting_field(min, max) {
+	return ui.create_field({type: 'number', min: min, max: max, decimals: 1})
+}
+
+// the house settings that the editor changes. their sliders are in cm.
+let settings = [
+	{name: 'int_wall_thickness', field: setting_field(2, 50),
+		label: () => S('int_wall_thickness', 'Interior wall thickness (cm)')},
+	{name: 'ext_wall_thickness', field: setting_field(2, 80),
+		label: () => S('ext_wall_thickness', 'Exterior wall thickness (cm)')},
+	{name: 'slab_thickness', field: setting_field(5, 100),
+		label: () => S('slab_thickness', 'Slab thickness (cm)')},
+	{name: 'roof_thickness', field: setting_field(5, 100),
+		label: () => S('roof_thickness', 'Roof thickness (cm)')},
+	{name: 'floor_h', field: setting_field(150, 600),
+		label: () => S('floor_height', 'Floor height (cm)')},
+]
+
 // floor editor updates ------------------------------------------------------
+
+function select_floor(id, s, floor, is_roof_level) {
+	s.floor = floor
+	s.is_roof_level = is_roof_level
+	ui.save_state(id, 'floor', floor.i)
+	ui.save_state(id, 'is_roof_level', is_roof_level)
+}
 
 function floor_editor_update(id, s) {
 	s.interaction_value = undefined
@@ -584,18 +522,14 @@ function floor_editor_update(id, s) {
 	let floor0 = s.floor
 	let is_roof_level0 = s.is_roof_level
 	let edit_no0 = s.house.edit_no
-	for (let floor of plan.house.floors) {
-		if (ui.clicked(id+'.floor'+floor.i)) {
-			s.floor = floor
-			s.is_roof_level = false
-		}
-	}
-	if (ui.clicked(id+'.roof'))
-		s.is_roof_level = true
 	let floors = s.house.floors
+	for (let floor of floors)
+		if (ui.clicked(id+'.floor'+floor.i))
+			select_floor(id, s, floor, false)
+	if (ui.clicked(id+'.roof'))
+		select_floor(id, s, floors[floors.length-1], true)
 	if (ui.state_of(id+'.add_floor_button', 'state') == 'click') {
-		s.floor = s.house.add_floor()
-		s.is_roof_level = false
+		select_floor(id, s, s.house.add_floor(), false)
 	} else if (floors.length > 1
 		&& ui.state_of(id+'.remove_floor_button', 'state') == 'click'
 	) {
@@ -629,8 +563,8 @@ function floor_editor_update(id, s) {
 	// removed the selected floor, or undid an added floor or redid a removed
 	// one, or pasted or undid a paste: select the top floor.
 	floors = s.house.floors // paste and its undo replace the array.
-	if (!floors.includes(s.floor))
-		s.floor = floors[floors.length-1]
+	if (!floors.includes(s.floor) || is_restored && s.is_roof_level)
+		select_floor(id, s, floors[floors.length-1], s.is_roof_level)
 	// the roof level: the top floor's roof.
 	if (s.is_roof_level)
 		s.floor = floors[floors.length-1]
@@ -639,16 +573,48 @@ function floor_editor_update(id, s) {
 		draw_state.snap_lines.length = 0
 	}
 
-	let sg = scale_group('editor')
+	let sg = s
+
+	let is_rotated = ui.state_of(id+'.rotate_button', 'state') == 'click'
+	if (is_rotated) {
+		let bb = s.house.bb
+		let is_empty = bb[0] > bb[2]
+		sg.rotate_90(is_empty ? sg.cx : (bb[0] + bb[2]) / 2,
+			is_empty ? sg.cy : (bb[1] + bb[3]) / 2)
+		save_floor_view(id, s)
+	}
+	if (ui.state_of(id+'.zoom_button', 'state') == 'click')
+		sg.reset_zoom()
+
+	// the settings: one house edit per run of frames with user input.
+	let edited_name, edited_value // the setting the user is changing, in cm
+	for (let setting of settings) {
+		let value = ui.interaction_value(id+'.setting.'+setting.name)
+		if (value != null) { // a cleared input has no value to set.
+			edited_name = setting.name
+			edited_value = value
+		}
+	}
+	if (s.setting_edit && s.setting_name != edited_name) {
+		s.setting_edit.stop()
+		s.setting_edit = null
+	}
+	if (edited_name) {
+		s.setting_name = edited_name
+		s.setting_edit ??= s.house.start_edit_setting(edited_name)
+		s.setting_edit.move(edited_value * 10)
+	}
 
 	let hs = ui.hit(id)
-	if (hs && ui.wheel_dy)
-		sg.zoom(ui.wheel_dy / ui.em(7), hs.mx, hs.my)
+	if (hs && ui.wheel_dy) {
+		sg.zoom_at(ui.wheel_dy / ui.em(7), hs.mx, hs.my)
+		save_floor_view(id, s)
+	}
 
 	if (cs) {
 
-		let dx = cs.dx / sg.scale
-		let dy = cs.dy / sg.scale
+		let dx = sg.plan_d(cs.dx)
+		let dy = sg.plan_d(cs.dy)
 		if (sg.rotation) {
 			let c = cos(sg.rotation)
 			let s = sin(sg.rotation)
@@ -665,8 +631,8 @@ function floor_editor_update(id, s) {
 			if (action == 'move_seg') { // move seg
 				cs.edit = plan.start_move_seg(seg)
 			} else if (action == 'pan') {
-				sg.pan_x0 = sg.x0
-				sg.pan_y0 = sg.y0
+				sg.pan_cx0 = sg.cx
+				sg.pan_cy0 = sg.cy
 			}
 		}
 
@@ -679,7 +645,7 @@ function floor_editor_update(id, s) {
 			// past the drag threshold, or with ctrl at the first movement: a
 			// press without movement starts no edit, so a double-click can.
 			let is_moved = cs.moved || nosnap && !!(cs.dx || cs.dy)
-			let is_resize_drag = abs(dx) >= 10 || abs(dy) >= 10
+			let is_resize_drag = abs(dx) >= 100 || abs(dy) >= 100
 
 			if (!readonly && !s.is_roof_level && !action && is_resize_drag) { // dragged far enough to assume intent to drag.
 
@@ -698,10 +664,10 @@ function floor_editor_update(id, s) {
 			}
 
 			if (action == 'move_seg')
-				cs.edit.move(dx, dy, nosnap ? 2 : 20)
+				cs.edit.move(dx, dy, nosnap ? 20 : 200)
 
 			if (action == 'resize_seg')
-				[cs.x, cs.y] = cs.edit.resize(dx, dy, nosnap ? 2 : 30)
+				[cs.x, cs.y] = cs.edit.resize(dx, dy, nosnap ? 20 : 300)
 
 			if (action == 'move_seg' || action == 'resize_seg') {
 				let {snap_a, snap_v} = cs.edit
@@ -741,7 +707,7 @@ function floor_editor_update(id, s) {
 				}
 				if (cs.edit)
 					cs.can_move_eave = cs.edit.move(dx, dy,
-						!ui.keypressed('shift'), nosnap ? 0 : 20)
+						!ui.keypressed('shift'), nosnap ? 0 : 200)
 			}
 
 			// the line or point where roof faces meet follows the pointer at
@@ -769,17 +735,17 @@ function floor_editor_update(id, s) {
 						!ui.keypressed('shift'))
 			}
 
-			if (action == 'pan') {
-				sg.x0 = sg.pan_x0 + dx * sg.scale
-				sg.y0 = sg.pan_y0 + dy * sg.scale
-				sg.panned = true
-			}
+			if (action == 'pan')
+				sg.pan_to(sg.pan_cx0 - dx, sg.pan_cy0 - dy)
 
 			if (cs.drop)
 				cs.edit?.stop()
 		}
 
 	}
+
+	if (cs?.drop || cs?.cancel)
+		save_floor_view(id, s)
 
 	let is_deleting_seg = !readonly
 		&& hs?.action == 'move_seg' && ui.dblclick
@@ -836,7 +802,7 @@ function floor_editor_update(id, s) {
 	// again in a second pass of this frame.
 	let is_changed = s.house.edit_no != edit_no0 || cs?.drop || cs?.cancel
 		|| plan != floor0 || s.is_roof_level != is_roof_level0
-		|| hs && ui.wheel_dy
+		|| hs && ui.wheel_dy || is_rotated
 	if (is_changed)
 		ui.rebuild('floor_editor_changed')
 
@@ -857,9 +823,20 @@ ui.floor_editor_is_value_changed = function(id) {
 
 // floor editor widget -------------------------------------------------------
 
+const saved_view_fields = ['rotation', 'scale', 'cx', 'cy']
+
+function save_floor_view(id, s) {
+	if (!s.view_dirty)
+		return
+	for (let k of saved_view_fields)
+		ui.save_state(id, k, s[k])
+	s.view_dirty = false
+}
+
 let FLOOR_EDITOR_ID         = ui.BOX_ARGS+0
 let FLOOR_EDITOR_PLAN       = ui.BOX_ARGS+1
 let FLOOR_EDITOR_DRAW_STATE = ui.BOX_ARGS+2
+let FLOOR_EDITOR_VIEW       = ui.BOX_ARGS+3
 
 ui.box_widget('floor_editor', {
 
@@ -877,10 +854,106 @@ ui.box_widget('floor_editor', {
 				&& (value !== value0 || field != field0)) {
 			s.house = value != null && !s.validation.failed
 				? house_plan(json_arg(value)) : null
-			s.floor = s.house?.floors[0]
-			s.is_roof_level = false
+			let ss = ui.saved_state[id]
+			s.is_roof_level = ss?.is_roof_level ?? false
+			let floors = s.house?.floors
+			s.floor = floors?.[s.is_roof_level ? floors.length-1
+				: min(ss?.floor ?? 0, floors.length-1)]
 			s.value_edit_no = 0 // house.edit_no of the value loaded or published
-			scale_group('editor').rotation = s.house?.rotation ?? 0
+			s.setting_edit = null // the edit of the replaced house
+		}
+		if (!s.d) {
+			s.show_grid = ui.saved_state.floor_editor?.show_grid
+			s.show_dims = ui.saved_state.floor_editor?.show_dims
+			let ss = ui.saved_state[id]
+			s.rotation = ss?.rotation ?? 0
+			s.scale = ss?.scale
+			s.cx = ss?.cx // plan point at the center of the viewport
+			s.cy = ss?.cy
+			s.zoomed = s.scale != null // fixed view or fit to the plan
+			s.view_dirty = false
+			let line_width = 2 // thickness of wall line stroke in pixels at 1:1 scale
+			s.d = d => round(d * s.scale * devicePixelRatio)
+			s.x = x => round(x * s.scale * devicePixelRatio)
+			s.y = y => round(y * s.scale * devicePixelRatio)
+			s.plan_x = x => x / (s.scale * devicePixelRatio)
+			s.plan_y = y => y / (s.scale * devicePixelRatio)
+			s.plan_d = d => d / (s.scale * devicePixelRatio)
+			s.transform = function(cx, w, h) {
+				if (s.rotation) {
+					let xc = round(w / 2)
+					let yc = round(h / 2)
+					cx.translate(xc, yc)
+					cx.rotate(s.rotation)
+					cx.translate(-xc, -yc)
+				}
+				cx.translate(s.x0, s.y0)
+			}
+			function set_scale(sc) {
+				s.scale = sc
+				// snap line width to an even number for sharpness
+				s.line_width = snap(line_width * sc * devicePixelRatio, 2)
+			}
+			let bb = bbox2()
+			// set the scale and the origin (x0, y0, in pixels from widget's origin)
+			// of a viewport of w x h pixels: fitted to the plan bounding box bb1, or
+			// from the saved view. returns true if fitted to a non-empty plan.
+			s.layout = function(bb1, w, h) {
+				let is_fitted = !s.zoomed && bb1[0] <= bb1[2]
+				if (is_fitted) {
+					s.view_dirty = true
+					let margin = ceil(ui.em(2) + line_width)
+					array_set(bb, bb1)
+					bb.rotate(s.rotation)
+					let [x1, y1, x2, y2] = bb
+					s.scale = min(
+						(w - 2 * margin) / (x2 - x1),
+						(h - 2 * margin) / (y2 - y1)
+					) / devicePixelRatio
+					s.cx = (bb1[0] + bb1[2]) / 2
+					s.cy = (bb1[1] + bb1[3]) / 2
+				} else if (!s.zoomed) { // empty plan.
+					s.scale = .1
+					s.cx = 0
+					s.cy = 0
+				}
+				set_scale(s.scale)
+				s.x0 = round(w / 2) - s.x(s.cx)
+				s.y0 = round(h / 2) - s.y(s.cy)
+				return is_fitted
+			}
+			// zoom around the point (mx, my) in pixels from the center of the
+			// viewport, along the plan's axes.
+			s.zoom_at = function(d, mx, my) {
+				if (!d) return
+				let plan_x = s.cx + s.plan_x(mx)
+				let plan_y = s.cy + s.plan_y(my)
+				let scale1 = clamp(s.scale * 1.2 ** -d, 0.01, 1)
+				s.cx = plan_x - mx / (scale1 * devicePixelRatio)
+				s.cy = plan_y - my / (scale1 * devicePixelRatio)
+				set_scale(scale1)
+				s.zoomed = true
+				s.view_dirty = true
+			}
+			s.pan_to = function(cx, cy) {
+				s.cx = cx
+				s.cy = cy
+				s.zoomed = true
+				s.view_dirty = true
+			}
+			// rotate the view by 90 degrees around the plan point (bx, by): it stays
+			// where it is on screen.
+			s.rotate_90 = function(bx, by) {
+				let dx = bx - s.cx
+				let dy = by - s.cy
+				s.cx = bx - dy
+				s.cy = by + dx
+				s.rotation = (s.rotation + 90*rad) % (360*rad)
+				s.view_dirty = true
+			}
+			s.reset_zoom = function() {
+				s.zoomed = false
+			}
 		}
 		s.readonly = readonly ?? field.readonly
 		if (!s.house) {
@@ -908,11 +981,11 @@ ui.box_widget('floor_editor', {
 		// the top floor.
 		draw_state.roof_floor = s.is_roof_level
 			? plan : plan.house.floors[plan.i-1]
-		let sg = scale_group('editor')
+		let sg = s
 
 		ui.stack()
 
-			ui.cmd_box(cmd, 1, 's', 's', id, plan, draw_state)
+			ui.cmd_box(cmd, 1, 's', 's', id, plan, draw_state, sg)
 
 			ui.m(ui.sp())
 			ui.v(1, ui.sp())
@@ -957,20 +1030,15 @@ ui.box_widget('floor_editor', {
 						}
 					ui.end_v()
 
-					if (sg.zoomed && ui.button(id+'.zoom_button',
-							sg.scale > 1 ? 'zoom-in' : 'zoom-out', '',
+					if (sg.zoomed)
+						ui.button(id+'.zoom_button',
+							sg.scale > .1 ? 'zoom-in' : 'zoom-out', '',
 							0, 'c', 't', null, null,
 							S('fit_to_view', 'Fit to view'))
-					) {
-						sg.reset_zoom()
-					}
 
-					if (ui.button(id+'.rotate_button', 'rotate-rectangle', '',
-							0, 'c', 't', null, null,
-							S('rotate_90_degrees', 'Rotate 90 degrees'))
-					) {
-						sg.rotate_requested = true
-					}
+					ui.button(id+'.rotate_button', 'rotate-rectangle', '',
+						0, 'c', 't', null, null,
+						S('rotate_90_degrees', 'Rotate 90 degrees'))
 
 					if (ui.button(id+'.grid_button', 'grid-4x4', '',
 							0, 'c', 't', null, null,
@@ -986,6 +1054,24 @@ ui.box_widget('floor_editor', {
 					) {
 						sg.show_dims = !sg.show_dims
 						ui.save_state('floor_editor', 'show_dims', sg.show_dims)
+					}
+
+					if (ui.popup_button(id+'.settings', 'settings', null,
+						'c', 't', 'b', ']')
+					) {
+						ui.min_w(ui.em(24))
+						ui.v_aligned(0, ui.sp(), 's', 't')
+							for (let setting of settings) {
+								let setting_id = id+'.setting.'+setting.name
+								ui.h(0, ui.sp1(), 's', 'c')
+									ui.label(setting_id, setting.label(), 0)
+									ui.num_slider(setting_id,
+										plan.house[setting.name] / 10, setting.field,
+										1, null, null, s.readonly)
+								ui.end_h()
+							}
+						ui.end_v_aligned()
+						ui.end_popup_button(id+'.settings')
 					}
 
 				ui.end_h()
@@ -1009,38 +1095,17 @@ ui.box_widget('floor_editor', {
 
 	position: function(a, i, axis, sx, sw)	{
 		ui.box_position(a, i, axis, sx, sw)
-		let sg = scale_group('editor')
-		if (!axis) {
-			sg.set_scale(1/0)
+		if (!axis)
 			return
-		}
+		let sg = a[i+FLOOR_EDITOR_VIEW]
 		let w  = a[i+2]
 		let h  = a[i+3]
 		let plan = a[i+FLOOR_EDITOR_PLAN]
-		let is_fitted = sg.scale_to_fit(plan.house.bb, w, h)
-		// first fit: lock the view, like a manual zoom.
-		if (is_fitted && !sg.has_fitted) {
-			sg.has_fitted = true
+		let is_fitted = sg.layout(plan.house.bb, w, h)
+		// lock the fitted view, like a manual zoom.
+		if (is_fitted) {
 			sg.zoomed = true
-		}
-		if (sg.rotate_requested) {
-			sg.rotate_requested = false
-			let bb = plan.house.bb
-			let xc = sg.x((bb[0] + bb[2]) / 2)
-			let yc = sg.y((bb[1] + bb[3]) / 2)
-			let vx = round(w / 2)
-			let vy = round(h / 2)
-			let dx = xc + sg.x0 - vx
-			let dy = yc + sg.y0 - vy
-			sg.x0 = vx + dy - xc
-			sg.y0 = vy - dx - yc
-			sg.rotation = ((sg.rotation ?? 0) + 90*rad) % (360*rad)
-			if (!a[i+FLOOR_EDITOR_DRAW_STATE].readonly) {
-				plan.house.rotation = sg.rotation
-				plan.house.edit_no++
-			}
-			// the hit phase ran on the view before the rotation.
-			ui.rebuild('floor_editor_changed')
+			save_floor_view(a[i+FLOOR_EDITOR_ID], sg)
 		}
 	},
 
@@ -1051,7 +1116,7 @@ ui.box_widget('floor_editor', {
 		let plan = a[i+FLOOR_EDITOR_PLAN]
 		let draw_state = a[i+FLOOR_EDITOR_DRAW_STATE]
 
-		let sg = scale_group('editor')
+		let sg = a[i+FLOOR_EDITOR_VIEW]
 
 		draw_state.x0 = sg.x0
 		draw_state.y0 = sg.y0
@@ -1134,9 +1199,7 @@ ui.box_widget('floor_editor', {
 		let drag_action = cs?.action
 		let drag_seg    = cs?.seg
 
-		let sg = scale_group('editor')
-		sg.set_scale(draw_state.scale)
-		sg.rotation = draw_state.rotation
+		let sg = a[i+FLOOR_EDITOR_VIEW]
 
 		let cx = ui.cx
 		cx.save()
@@ -1156,11 +1219,11 @@ ui.box_widget('floor_editor', {
 		// legend
 		{
 		let m = ui.em()
-		let cm = 100
-		let d = sg.d(cm)
+		let mm = 1000
+		let d = sg.d(mm)
 		while (d > w - 2*m) {
-			cm /= 5
-			d = sg.d(cm)
+			mm /= 5
+			d = sg.d(mm)
 		}
 		cx.beginPath()
 		let t = 4
@@ -1169,7 +1232,7 @@ ui.box_widget('floor_editor', {
 		cx.rect(x, y, d, t)
 		cx.fillStyle = ui.color_css('label')
 		cx.fill()
-		let s = format_length(cm)
+		let s = format_length(mm)
 		let tw = ui.measure_text(s).width
 		cx.fillText(s, x + d - tw, y - 2)
 		}
@@ -1387,7 +1450,7 @@ ui.box_widget('floor_editor', {
 		}
 
 		// cycles area
-		if (sg.scale > 0.4)
+		if (sg.scale > 0.04)
 			for (let co of draw_state.comps) {
 				for (let c of co.cycles) {
 					if (c.outer)
@@ -1448,6 +1511,25 @@ ui.box_widget('floor_editor', {
 							draw_length(cx, sg, ep0[0], ep0[1], ep1[0], ep1[1])
 						if (ep3)
 							draw_length(cx, sg, ep2[0], ep2[1], ep3[0], ep3[1])
+					}
+				}
+			}
+		}
+
+		// drawing a wall: its length on each side.
+		if (drag_action == 'resize_seg' && !sg.show_dims) {
+			let sp1 = cs.edit.seg[0]
+			let sp2 = cs.edit.seg[1]
+			for (let co of draw_state.comps) {
+				for (let c of co.cycles) {
+					if (!c.edges)
+						continue
+					for (let i = 0, n = c.edges.length; i < n; i++) {
+						let ep1 = c.edges[i]
+						let ep2 = c.edges[(i+1) % n]
+						if (ep1.p == sp1 && ep2.p == sp2
+							|| ep1.p == sp2 && ep2.p == sp1)
+							draw_length(cx, sg, ep1[0], ep1[1], ep2[0], ep2[1])
 					}
 				}
 			}
@@ -1616,24 +1698,26 @@ ui.box_widget('floor_editor', {
 		let sl = draw_state.snap_lines
 		sl.length = 0
 
-		let sg = scale_group('editor')
+		let sg = a[i+FLOOR_EDITOR_VIEW]
 
 		let cx = ui.cx
 
 		let pan    = ui.keypressed('shift')
 		let nosnap = ui.keypressed('ctrl')
-		let snap_d = nosnap ? 2 : 20
+		let snap_d = nosnap ? 20 : 200
 		let snap_lines = draw_state.plan_snap_lines
 
-		hs.mx = ui.mx - x00 // pointer position before view rotation, for zooming.
-		hs.my = ui.my - y00
+		// pointer position from the viewport center, along the plan's axes,
+		// for zooming.
+		hs.mx = ui.mx - x00 - w / 2
+		hs.my = ui.my - y00 - h / 2
 		if (sg.rotation) {
 			let c = cos(sg.rotation)
 			let s = sin(sg.rotation)
-			let dx = hs.mx - w / 2
-			let dy = hs.my - h / 2
-			hs.mx = w / 2 + dx * c + dy * s
-			hs.my = h / 2 - dx * s + dy * c
+			let dx = hs.mx
+			let dy = hs.my
+			hs.mx = dx * c + dy * s
+			hs.my = -dx * s + dy * c
 		}
 
 		if (draw_state.readonly) {

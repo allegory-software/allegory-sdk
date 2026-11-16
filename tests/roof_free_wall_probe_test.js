@@ -39,8 +39,8 @@ function roof_faces(floor) {
 	return areas.length ? floor.make_roof_faces(areas) : []
 }
 let from = Number(process.env.FROM ?? 0)
-let to = Number(process.env.TO ?? 400)
-let step = Number(process.env.STEP ?? 1)
+let to = Number(process.env.TO ?? 4000)
+let step = Number(process.env.STEP ?? 10)
 for (let floor of h.floors) {
 	let first_fail
 	let n_fails = 0
@@ -53,7 +53,7 @@ for (let floor of h.floors) {
 			n_fails++
 		}
 	}
-	floor.roof.overhang = 60
+	floor.roof.overhang = 600
 	console.info('floor', floor.i, n_fails+' fails', 'first at', first_fail)
 	if (n_fails)
 		process.exitCode = 1

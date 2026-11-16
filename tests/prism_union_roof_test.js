@@ -1,7 +1,7 @@
 // run: node tests/prism_union_roof_test.js
 // env: SWEEP=n (n random pitch sets per plan), BENCH=1, VERBOSE=1.
 // roof bodies as prisms in prism_union(), over the walls and slabs of the
-// house: one prism per roof face, 20 cm thick. hip and valley lines are
+// house: one prism per roof face, 200 mm thick. hip and valley lines are
 // diagonal, so the union has to round their crossings with wall edges the
 // same way on both sides. checks that the union is a closed solid of the
 // right volume, with no side faces along diagonals.
@@ -186,12 +186,12 @@ function check_solid(r) {
 }
 
 function set_roof(h, pitch, edge_points) {
-	h.floors[h.floors.length-1].roof = {pitch, overhang: 60,
+	h.floors[h.floors.length-1].roof = {pitch, overhang: 600,
 		edge_points: edge_points ?? []}
 }
 
 function house_report(h) {
-	let {prisms, volume} = house_prisms(h, 20)
+	let {prisms, volume} = house_prisms(h, 200)
 	let r = union_report(prisms, volume)
 	if (process.env.VERBOSE)
 		console.log(JSON.stringify(r))
@@ -212,20 +212,21 @@ function house_with_top(lines, points) {
 }
 
 const L_lines = [
-	['draw','a',0,0, 'b',600, 'c',200, 'd',-300, 'e',200, 'f',-300, 'a',-400],
+	['draw','a',0,0, 'b',6000, 'c',2000, 'd',-3000, 'e',2000, 'f',-3000,
+		'a',-4000],
 	['connect','p1','p2'],
 ]
-const L_points = [[150, 0, 'p1'], [150, 400, 'p2']]
+const L_points = [[1500, 0, 'p1'], [1500, 4000, 'p2']]
 
-// a cols x rows grid of 300 x 300 rooms.
+// a cols x rows grid of 3000 x 3000 rooms.
 function grid_lines(cols, rows) {
-	let w = cols * 300
-	let h = rows * 300
+	let w = cols * 3000
+	let h = rows * 3000
 	let lines = [['draw', 0, 0, w, h, -w, -h]]
 	for (let i = 1; i < cols; i++)
-		lines.push(['draw', i * 300, 0, 0, h])
+		lines.push(['draw', i * 3000, 0, 0, h])
 	for (let j = 1; j < rows; j++)
-		lines.push(['draw', 0, j * 300, w])
+		lines.push(['draw', 0, j * 3000, w])
 	return lines
 }
 
@@ -233,7 +234,7 @@ function grid_house(cols, rows, floor_n) {
 	let floors = []
 	for (let i = 0; i < floor_n; i++)
 		floors.push({lines: grid_lines(cols, rows)})
-	return ctx.house_plan({floors})
+	return ctx.house_plan({version: 1, floors})
 }
 
 // checks --------------------------------------------------------------------
@@ -246,25 +247,25 @@ check('hip 45 over gable1', () => {
 
 check('hip 30 short / 45 long: a snapped point on a wall edge is kept', () => {
 	let h = ctx.house_plan(ctx.house_test_plans.gable1)
-	set_roof(h, 45, [{x: 0, y: 200, pitch: 30}, {x: 600, y: 200, pitch: 30}])
+	set_roof(h, 45, [{x: 0, y: 2000, pitch: 30}, {x: 6000, y: 2000, pitch: 30}])
 	check_solid(house_report(h))
 })
 
 check('L roof 37 / 52: planes of the two sides cross along a hip', () => {
 	let h = house_with_top(L_lines, L_points)
-	set_roof(h, 37, [{x: 450, y: 200, pitch: 52}, {x: 0, y: 200, pitch: 52}])
+	set_roof(h, 37, [{x: 4500, y: 2000, pitch: 52}, {x: 0, y: 2000, pitch: 52}])
 	check_solid(house_report(h))
 })
 
 check('walls below cross the hips away from grid points', () => {
 	let h = house_with_floor(1, L_lines, L_points)
-	set_roof(h, 37, [{x: 0, y: 200, pitch: 52}, {x: 600, y: 200, pitch: 52}])
+	set_roof(h, 37, [{x: 0, y: 2000, pitch: 52}, {x: 6000, y: 2000, pitch: 52}])
 	check_solid(house_report(h))
 })
 
 check('hip roof over a 6x4 grid of rooms', () => {
 	let h = grid_house(6, 4, 3)
-	set_roof(h, 37, [{x: 0, y: 600, pitch: 52}])
+	set_roof(h, 37, [{x: 0, y: 6000, pitch: 52}])
 	check_solid(house_report(h))
 })
 
@@ -279,8 +280,8 @@ check('random pitches', () => {
 	for (let k = 0; k < n; k++) {
 		let pitch = () => Math.round(20 + random() * 45)
 		let edge_points = [
-			{x: 0, y: 100, pitch: pitch()}, {x: 600, y: 100, pitch: pitch()},
-			{x: 100, y: 0, pitch: pitch()}, {x: 100, y: 400, pitch: pitch()},
+			{x: 0, y: 1000, pitch: pitch()}, {x: 6000, y: 1000, pitch: pitch()},
+			{x: 1000, y: 0, pitch: pitch()}, {x: 1000, y: 4000, pitch: pitch()},
 		]
 		for (let make_house of [
 			() => ctx.house_plan(ctx.house_test_plans.gable1),
@@ -305,8 +306,8 @@ console.log(checks+' checks')
 if (process.env.BENCH) {
 	for (let [cols, rows, floor_n] of [[3, 2, 2], [6, 4, 3], [10, 6, 3]]) {
 		let h = grid_house(cols, rows, floor_n)
-		set_roof(h, 37, [{x: 0, y: rows * 150, pitch: 52}])
-		let {prisms, volume} = house_prisms(h, 20)
+		set_roof(h, 37, [{x: 0, y: rows * 1500, pitch: 52}])
+		let {prisms, volume} = house_prisms(h, 200)
 		let n = 5
 		let t0 = performance.now()
 		for (let i = 0; i < n; i++)
