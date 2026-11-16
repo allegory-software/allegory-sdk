@@ -233,8 +233,9 @@ let resize = await pg.evaluate(function() {
 	let seg = cs.edit?.seg
 	return seg && {length: seg.m2 - seg.m1, dx: cs.dx}
 })
+// lengths snap to the house's precision: 1 cm.
 check('new wall follows the pointer without an initial jump',
-	resize && Math.abs(resize.length - resize.dx / view.scale) < 1e-6,
+	resize && resize.length == Math.round(resize.dx / view.scale),
 	JSON.stringify(resize))
 await pg.evaluate(function() {
 	let rebuild = ui.rebuild
@@ -277,7 +278,7 @@ let extended = await pg.evaluate(function() {
 	return seg && seg.m2 - seg.m1
 })
 check('collapsed wall can be extended again',
-	Math.abs(extended - 20 / view.scale) < 1e-6, extended)
+	extended == Math.round(20 / view.scale), extended)
 await pg.mouse.up()
 await pg.waitForTimeout(100)
 
@@ -508,7 +509,7 @@ for (let turns of [1, 2, 3]) {
 	await pg.waitForTimeout(100)
 	let moved_axis = await pg.evaluate(() => ui.captured('fe')?.seg?.axis)
 	check('wall follows the pointer at rotation ' + turns * 90,
-		Math.abs(moved_axis - 200 - 40 / view.scale) < 1e-6, moved_axis)
+		moved_axis == 200 + Math.round(40 / view.scale), moved_axis)
 	await pg.mouse.up()
 	await pg.waitForTimeout(100)
 }
@@ -806,11 +807,11 @@ await pg.waitForTimeout(100)
 check('ctrl+drag below the threshold moves only the eave',
 	await pg.evaluate(function() {
 		let roof = house.floors[0].roof
-		let eave_h = -20 * Math.tan(20 * Math.PI / 180)
+		let eave_h = Math.round(-20 * Math.tan(20 * Math.PI / 180)) // 1 cm
 		return house.edit_no == 3 && roof.eave_h == eave_h
-			&& roof.edge_points.some(p => p.x == 614
-				&& p.eave_h < eave_h - 1)
-	}))
+			&& roof.edge_points.some(p => p.x == 614 && p.eave_h < eave_h)
+	}), await pg.evaluate(() =>
+		json({edit_no: house.edit_no, roof: house.floors[0].roof})))
 
 // pitch labels: one per face; a drag changes the face's pitch, shift all
 // pitches, within 1..89; without shift, two edge points block the drag.
@@ -903,9 +904,12 @@ await pg.waitForTimeout(50)
 await pg.mouse.up()
 await pg.waitForTimeout(100)
 roof = await read_roof()
+// eave_h snapped to 1 cm: the overhang (19.23) is off the grid, so the side
+// faces' planes meet the wall top on the wall line only within the grid
+// rounding of their eave lines: their pitch is off by ~3e-5 deg.
 check('ridge end drag along the ridge changes only the end face',
 	roof.edge_points.length == 3 && roof.edge_points.every(ep =>
-		ep.x == 614 ? ep.pitch > 21 : Math.abs(ep.pitch - 20) < 1e-6),
+		ep.x == 614 ? ep.pitch > 21 : Math.abs(ep.pitch - 20) < 1e-3),
 	JSON.stringify(roof))
 
 // double-click on a pitch label: the face back to the roof's pitch.

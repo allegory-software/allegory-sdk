@@ -1,0 +1,251 @@
+HOUSE PLAN EDITOR: ROOFS
+
+Roofs for the house plan editor (www/house_plan.js, house_model_editor.js, house_roof_plan_view.js). Follows js/HOUSE-WALLS.txt. Planned 2026-11-14.
+
+## Decisions 2026-11-14 (session 2), Cosmin: "ok go" = prototype the cut, then one proposal
+
+- Roof thickness: perpendicular to the roof (20 cm); step on the UNDERSIDE where pitches differ: skeleton = top surface, body bottom = top lowered by t/cos(pitch).
+- Tags in prism_union: approved (component split, textures, other things).
+- Remove the top slab (Cosmin never wanted it; it was only easier).
+- Drop `roof.eave_h`: redundant with the top floor's height; roof top surface starts at the top-floor wall top on the outer wall line. Consequence: R2 raise must raise ALL walls of the roof's floor (interior too). Per-edge/per-roof offsets: decide in P3/P4.
+- The cut (R2: walls/slabs top = min(top, roof underside)) goes INSIDE prism_union (it owns grid + snapping); house_plan clipping would re-round hip crossings. Cosmin: the cut was the sell of the prism model; don't present it as an obstacle.
+- Workflow: prototype in tests (production untouched), then ONE proposal: cut + top slab removal + roof bodies + tags + eave_h drop.
+
+## P2 step 2 DONE (2026-11-14, uncommitted, approved "go"): cut + tags + roof bodies in production
+
+- www/prism_union.js: prism tag/is_cutter, face tag, cut regions (see below), per-tag ranges. roof_skeleton faces: plane [a, b, c] (top). house_plan.js: roof_thickness 20 (perpendicular, saved), no top slab, roof.eave_h removed (eave_z = floor top), make_faces(top_floor, no_roof) with tags 'walls'/'roof', roof bodies is_cutter. house_model_editor.js: one component per tag. Prototype files deleted; test = tests/prism_union_cut_test.js (7 checks, SWEEP, BENCH, TOL default 2). house_plan_test 97, faces_compare 14 (cut views only), prism_union_roof_test 6 (no top slab, face.plane).
+- Bench roof union jitless 38/128/250 ms, JIT 10/32/54.
+- Cosmin checked step 2 in 3D (2026-11-14): cut correct, gaps at gable ends as expected.
+
+## R2 raise DONE (2026-11-14, committed 073f0bc1 with P1/P2, checked by Cosmin in 3D)
+
+- make_faces: roof faces computed first; top floor walls top = flat plane at the roof's highest top point (roof_z); the existing cut (f_max < 0: cut everywhere) sets them to the underside per cell. Gable triangles closed, interior walls reach the underside. No new state.
+- Tests: house_plan_test gable check now expects the pentagon (eave 750-20v2, apex 964-20v2); prism_union_cut_test house_prisms raises the top walls too. SWEEP=300 (900 houses) passes.
+- Bench jitless 26/94/199 ms, JIT 7/17/35 (faster than step 2: no cut regions for the top-floor wall top).
+
+## R3 overhang DONE (2026-11-15, uncommitted, approved "yes")
+
+- Cosmin chose: skeleton runs ON the perimeter (not wedges from the wall line); uniform horizontal overhang (not level eaves); overhang one value per roof, default 60 (`roof.overhang` in copy_roof); gables move outward too (Cosmin: "trust you", wants to SEE the slot case). Cosmin WANTS custom drawn ortho perimeters later: drawn ring replaces the offset ring; sides parallel to a wall side take that wall's plane, sides with no wall need stored eave heights (P4).
+- roof_skeleton(rings, pitches, eave_zs): per-edge eave heights. Time 0 = lowest sloped eave; plane.t0; an edge with a higher eave starts on a vertical plane (pitch 90 plane on its line) and a `start` event swaps in its sloped plane (piece.start_plane), ending arcs at the corners and adding its eave segment. add_piece(piece0, ...) copies start_plane.
+- make_roof_faces: outer skin rings -> grid -> clipper inflatePaths (Miter) by overhang -> Union to PolyTree64 (merges close outlines, groups holes) -> per group roof_skeleton with eave_z = wall top - overhang*tan(pitch) (90: wall top). Edge points: nearest perimeter side, key 'group_i ring_i i'.
+- Finding: a vertical edge's line continues inside the house as a face side at an inside corner (gable meeting a sloped edge at a reflex corner); moving gables outward shifts that side. Equivalence sweep (roof inside wall line unchanged) therefore uses sloped edges only.
+- Tests: roof_skeleton_test 25 (overhang rect, L with gable, 300 random sloped sweep), house_plan_test 97 (gable roof check: eave 690, bbox -74..674), prism_union_cut_test 8 (new 'gables along a slot', PRINT=1 prints state JSON to paste), set_roof in cut/roof tests sets overhang 60. SWEEP=300 passes (tiny faces 2573 -> 3550). Bench jitless 29/95/198, JIT 7/22/37.
+- tests/roof_overhang_probe_test.js: probe printing skeleton faces of an L (investigation).
+- Fix after Cosmin saw the slot bug ("go" 2026-11-15): gable sides move only with outside corners at both ends; perimeter = clipper union of outer skin + ccw strip per moving side + ccw square at outside corners between two moving sides (preserveCollinear kept); perimeter side -> outer skin side by moved line + normal + nearest extent (find_side); edge points map to outer skin sides again. 1000-shape test: 700 fails -> 0.
+- Cosmin checked the fixed slot case in 3D (2026-11-15): confirmed. His note: gables at an inside corner leave a vertical step in the roof over the house with no wall under it; closing it would need a suspended wall (like dormers). Not addressed; belongs with dormers / R1.
+- R3 + slot fix committed 2026-11-15 (Cosmin "ok go") as a6167f23.
+
+## P3 (Cosmin chose P3 2026-11-15; proposal sent, waiting for answers)
+
+- Proposed: floor.area_points [{x, y, kind: 'roof'|'terrace'}] (like room points); uncovered region of floor k = outline k minus outline k+1 (top: whole outline), per connected group the kind of its one area point, else roof; floor.roof stays one record per floor for all its roof groups; region sides on floor k+1's outer skin = wall sides: pitch 90, never move, edge points skip them; walls of floor k inside roof groups rise to that roof (R2), rest stop at floor top; slab k+1 leaves out floor k's roof groups; top-floor terrace groups get a top slab.
+- Constraint found: prism_union asserts 'cutters overlap' (prism_union.js:471, one cutter per cell); an upper roof's overhang lies over a lower roof in plan, so P3 needs several cutters per cell (cutters still don't cut each other; two cutters cutting one prism in a cell = crossing roofs = R1, stays an assert).
+- Answers (Cosmin 2026-11-15): 'covered by the upper roof' kind LATER; every floor gets a roof record, default pitch 20 deg (overhang 60); area point UI is a separate later step, Cosmin checks a state JSON I give him.
+- Settled: compute the uncovered area once (one clipper difference per floor) and use it for roofs and for slab k+1 (union of outlines minus roof areas). Rejected my own 3-part split (covered/uncovered/overhang): no user for the parts, more clipper ops. Cosmin approved judging that tradeoff instead of agreeing.
+- Not handled: a lower roof's overhang strip under an upper floor's balcony overflow.
+- FINAL PROPOSAL (sent 2026-11-15, waiting for "go"; Cosmin may start a new session for it): state: floor.area_points new (save/copy/undo like room_points); copy_roof(null) -> {pitch: 20, overhang: 60, edge_points: []}. Changes: (1) make_faces: per floor uncovered area (diff), split into groups (PolyTree), kind from the one area point inside, else roof. (2) make_roof_faces(areas): skeleton on roof areas; a side on floor k's outer skin = eave side (edge points, overhang, gable rule as now); other sides = along floor k+1's wall: pitch 90, never move, no edge points. (3) floor k's walls split by roof areas: inside rise to the floor's highest roof point and get cut (R2), outside stop at floor top. (4) slab k+1 = today's region minus floor k's roof areas; top-floor terrace areas get a top slab. (5) prism_union: per cell apply every cutter's cut to non-cutters instead of assert 'cutters overlap' (prism_union.js:471); cutters still don't cut cutters; two cutters top-cutting one prism in a cell = assert (R1); update header comment "Cutters must not overlap". Tests in house_plan_test: lower floor sticking out -> lean-to against the upper wall; same area as terrace; upper overhang over lower roof; fix checks expecting a null roof. Then give Cosmin a state JSON to check in 3D. Cost: per floor per model rebuild 1 diff + 2 ops wall split + 1 slab op + 1 skeleton per roof area; nothing per frame.
+
+## P3 IMPLEMENTED (2026-11-15, committed 7cdec431)
+
+- house_plan.js: copy_roof(null) -> default roof; floor.area_points; floor.make_areas() (NEW public method; ring code moved from make_roof_faces; Clipper64 difference keeps collinear corners) -> [{paths, kind}]; make_roof_faces(roof_areas): eave side = outside of floor's outlines next to side middle (pointInPolygon), else wall side (90, d 0); floor above's outline sides added reversed to `sides` so find_side maps strip ends at its wall; add_path_groups lifted to house level; make_faces per floor areas, walls split intersect/difference by roof paths, slab_paths(…, roof_paths0), terrace top slab, roof bodies of all floors. prism_union: several cutters per cell, assert 'two cutters cut one top'.
+- Tests: house_plan_test 101 (house_polys default = top floor without roof; terrace area points in 4 old checks; 4 new P3 checks), cut test 9 (reference mirrors wall split; lower floors stubbed terrace; new closure check 'roofs on lower floors'), compare test stubs all areas terrace (14 pass), bench loads roof_skeleton.js. Bench jitless roofed 40/122/262, no roof = HEAD 12/56/138.
+- DONE ("ok lowest cutter cuts"): prism_union takes the lowest cutter bottom at the cell center among top cuts (first cut applied as before); cut test closure list includes the wide-second-building house. Was: 'two cutters cut one top' reachable without crossing roofs (/tmp/p3probe/probe.js: floor0 = rect 600x400 + separate wide rect >= 1200, floor1 = rect 300x400): walls rise to the floor's highest roof point, so the upper overhang cuts them too. Recommended: prism_union takes the cutter with the lowest bottom at the cell (crossing bottoms already hit 'prism planes cross').
+
+## RESOLVED by the event fix below (was LATER): roof_skeleton simultaneous events
+
+Pre-existing in roof_skeleton.js (also at 073f0bc1), not caused by R3. Production untouched; the failing sweep 'random column shapes, overhang with random pitches' stays in tests/roof_skeleton_test.js (commit 2026-11-15 includes it failing).
+
+Problem: the event loop takes the first event found with t < ev_t, so events at the same height run in float-rounding / piece-array order. Each event relinks pieces, and with zero-length pieces around, the next event at that height sees different neighbors. Results: (a) different roofs for different orders (base vs overhang runs disagree), (b) crashes 'sloped edge left after the last event' for some orders, including the code's own order.
+
+Size (tests/roof_skeleton_shuffle_probe_test.js, N=5000, 5 shuffles, base + overhang .2): current code 106 order-dependent runs, 15 crashes; 9 shapes crash in the unshuffled order (shape numbers of that probe's RNG: 45 1993 2387 2507 2859 2959 3274 4282 4653). ~0.2% of random shapes crash in production order.
+
+Cases analysed (edge numbers = wall ring edge index; 26.565 = atan(.5)):
+- Shape '111' (test sweep repro): wall_ring [[8,0],[8,5],[4,5],[4,8],[7,8],[7,13],[9,13],[9,18],[10,18],[10,23],[6,23],[6,21],[3,21],[3,18],[5,18],[5,13],[0,13],[0,8],[2,8],[2,5],[0,5],[0,0]], pitches [45,30,26.565,60,90,26.565,26.565,90,45,45,90,45,26.565,60,26.565,60,26.565,45,60,30,45,30], overhang .2. At z=1: collide(gable 4, edge 14), collide(edge 6, edge 14), collapse(edge 5 between gable 4 and edge 6), all at node area x=7. Collisions first: gable 4 stays, edge 6's face stops at x=7. Collapse first: tie rule -> edge 6 continues over the gable run, its lower part sweeps over the gable wing to a ridge at x=4.5. Argument for collisions first: the collapse node (7,15) lies inside the collision's ridge (y 12.42..17.4), so after the collision gable 4 and edge 6 are no longer neighbors.
+- Shape 692 (probe RNG): [[0,1],[2,1],[2,4],[6,4],[6,2],[15,2],[15,4],[18,4],[18,8],[15,8],[15,10],[6,10],[6,12],[3,12],[3,10],[2,10],[2,8],[0,8]], pitches [45,45,90,45,30,60,30,90,45,45,30,90,30,90,26.565,45,90,90], overhang .2. Edges 14 and 15 (neighbors) shrink to zero at the same node (3,8). Collapse 14 first: edge 15 takes over gable 13's run; collapse 15 first: edge 14 takes over gable 16's run. Removing both together: gables 13 and 16 meet at a reflex corner, no takeover (the symmetric result).
+- Shape 45 (probe RNG, crash): [[9,0],[9,7],[12,7],[12,11],[7,11],[7,15],[8,15],[8,18],[3,18],[3,15],[5,15],[5,13],[1,13],[1,11],[5,11],[5,3],[6,3],[6,0]], pitches [30,26.565,60,60,30,26.565,26.565,45,60,45,45,26.565,26.565,90,60,90,90,30]. At t=1.732 the bottom column shrinks to the point (6,3): collapse 15, collide 0/14, collide 0/16. Collide first leaves a 2-piece loop (edge 17, gable 16) of zero size; join() handles 1-piece and collinear 2-piece loops only, so no event kills it -> assert.
+- Shape 149 (test sweep): NOT an order bug. Gable 5 moves outward (outside corners at both ends), which changes which event comes first (collision 3/5 vs collapse 3). The sweep's premise (roof inside the wall line unchanged) is false when gables move. Same as the R3 finding above. Decide: drop moving gables from that equivalence check, or accept.
+
+Tried (in /tmp copies, gone after reboot):
+- Variant C = three rules: (1) collisions and starts before collapses within NEAR (collapse min time kept apart: cl_t/cl_e; collapse only if cl_t < ev_t - NEAR); (2) in join(), same-direction branch: a piece with zero length at the node does not continue over its collinear neighbor (the other one continues); (3) link(): if p, q perpendicular and q.next == p, the loop is a point: end both arcs, kill both. Result N=1000: 0 order-dependent, 0 crashes, all suites + sweeps pass; N=5000: 14 order-dependent, 8 crashes (1993 3274 4282 4653 crash unshuffled). Patches instances; NOT proposed.
+- Batch of all collapses at one height, joins after the batch: breaks join() asserts (p.prev / q.next perpendicular) when two non-adjacent collapses leave three collinear pieces in a row.
+
+Structural fix to design later: process all events at one height as one batch (collisions, then all collapses, then joins), with join()/collide() able to handle runs of collinear and zero-length pieces. Also decide the semantics: does the tie rule let a sloped edge take over a gable's run (current code: yes, gable s=0 always loses)?
+
+Test bugs found: roof_skeleton_test random(): seed * 1103515245 exceeds 2^53, the sequence cycles after 10466 values (~334 shapes), so the 1000-shape sweeps test 334 distinct shapes. Fix: Math.imul 32-bit LCG (as in the shuffle probe). FIXED 2026-11-15 ("ok fix random"): all 26 checks pass on distinct shapes.
+
+Probes (committed): tests/roof_skeleton_order_probe_test.js [RING PITCHES [EDGE_I...]] prints events + faces, base and overhang .2; env SDK=dir loads a changed copy, SHUFFLE=seed. tests/roof_skeleton_shuffle_probe_test.js: env N, SHUFFLES, SDK; prints FAIL (order-dependent) and CRASH (unshuffled assert) lines.
+
+## Cut prototype notes
+
+- tests/prism_union_cut_proto.js = copy of www/prism_union.js + cut + tags (+ debug hooks G.debug_piece/G.debug_line_group, G.GRID_LIFT, G.NO_SIDE_MERGE: remove when porting). tests/prism_cut_proto_test.js (7 checks; exact reference volume via clipper areas + plane integrals; edge coverage check within TOL grid units, default 2; FIXES=1 simulates the precision fixes; SWEEP, BENCH). Sweep 300 houses: closed within 2 units without fixes, 1 unit with.
+- Cut mechanism: prism.is_cutter; per (cutter, other prism, bottom/top plane): f = cutter.bottom - plane over cutter path points: all < 0 -> cut everywhere, all >= |grad| -> nowhere, else splitter = cutter bbox half-plane f < |grad| (line moved 1 unit away from cut side), snapped with prism paths, overlaid only on cells containing the cutter. Per cell: bottom cut -> drop prism, top cut -> top = cutter.bottom. Assert one cutter per cell.
+- Tags: ranges merge per tag; touching different tags -> no faces between; overlap -> assert; groups keyed by tag; side walk tracks the tag of the last +1 bound per side.
+- Precision findings (pre-existing in step-1 code): side faces z on grid vs plane faces exact z (<= .5 unit); clipper drops output triangles with 2 points < 2 units apart (buildPath isVerySmallTriangle) AND sub-unit-wide slivers in its scanline; hairline cracks <= ~2 units (20 um). Grid lift + keep-tiny-triangles patch reduce to <= 1 unit; NOT proposed (no visible effect).
+- Bench jitless 38/126/252 ms vs step-1 roof union 29/107/228.
+
+## NEXT SESSION (older notes)
+
+1. Cosmin has not yet looked at the prism faces or the roof in 3D. Offer that first (ui-demo.html, house model editor demo).
+2. P1 and P2 step 1 are uncommitted (see "Uncommitted" below). Ask before committing. Index state: Cosmin staged www/prism_union.js (P1 version), tests/prism_union_test.js, tests/house_faces_compare_test.js and the deleted tests/prism_roof_proto_test.js (shows `AD`); the working prism_union.js has step 1 (`AM`). Never touch the index (no git stash) without asking.
+3. Write the proposal for P2 step 2 (roof bodies), present it, wait for "go". Do not implement before approval.
+
+## P2 step 2 decisions and findings (2026-11-14)
+
+- Roof thickness: Cosmin: a constant like slab thickness, 20 cm. Proposal: `house.roof_thickness: 20` next to `slab_thickness` in house_plan.js defaults (vertical or perpendicular thickness: decide and state in the proposal).
+- Roof as a separate model component: Cosmin wants it "if it doesn't complicate things too much". Present the cost honestly before proposing:
+  - Two separate prism_union calls (walls, roof) leave coincident faces where the roof sits on the top slab and later where R2 raises walls to the roof underside (z-fighting, faces inside the solid). So separate unions are wrong for touching parts.
+  - One union with a tag per prism (component; later material, which the plan already needs) and the tag in the face group key: up/down faces take the tag of the prism whose plane is range.top / range.bottom (known per solid range). Side faces: a solid range merges touching prisms (slab + wall + roof body), so side faces must be split at the z where the owning prism changes; needs per-prism sub-ranges in each solid range. Overlapping prisms of different tags (R2 raised walls inside roof bodies?) need an owner rule: ask Cosmin.
+  - Output: faces get `tag` (or the union returns faces per tag); house_model_editor create_plan makes one component per tag.
+- The roof skeleton faces have no holes; roof body prism per skeleton face: paths = face ring on grid, bottom = face plane, top = bottom + thickness (as in tests/prism_union_roof_test.js house_prisms + ring_plane). Today the eave sits on the top slab (eave_h default = slab_thickness), so roof bottoms touch the slab top along the eave.
+
+## Uncommitted work (branch dev, as of 2026-11-14)
+
+New: www/prism_union.js, tests/prism_union_test.js, tests/house_faces_compare_test.js, tests/prism_union_roof_test.js. Modified: www/house_plan.js, www/house_model_editor.js, www/clipper2.js (patch), www/ui-demo.html + lua/cui_app.lua (load clipper2.js, prism_union.js), tests/house_plan_test.js (face helpers), tests/house_plan_bench.js, tests/house_model_editor_test.mjs. Roof stages A-B and the clipper2 vendoring are already committed (ae94aeea).
+
+Tests (all pass): `node tests/prism_union_test.js` 12, `node tests/house_plan_test.js` 96, `node tests/house_faces_compare_test.js` 28 (old make_polys loaded via `git show ae94aeea:www/house_plan.js` vs make_faces, all identical), roof_skeleton_test 22, house_plan_view_test 36, `node tests/house_model_editor_test.mjs` 11 (playwright). `tests/house_plan_editor_test.mjs`: 3 failures that also happen at HEAD (empty floor centered view, wall follows pointer at rotation 90/270), unrelated, not fixed.
+
+## Approved by Cosmin
+
+1. Model: a roof = footprint polygon + a record per footprint edge {pitch (90 = vertical: gable end or edge against a wall), eave height, later profile = list of (height, pitch) breaks}. The roof record stores defaults; edges store overrides only. Geometry from a weighted straight skeleton.
+2. Per-edge overrides are anchored by a stored point near the edge, like room points (reuse room point storage/undo/per-fix map/editor move+remove; own hit test: nearest footprint edge).
+3. Eave height is relative (to the wall top of the floor below) and can be negative.
+4. Own skeleton implementation for axis-aligned plans (floors are `orthogonal`), not CGAL.
+5. Tie rule: where two parallel edges facing the same way line up, the shallower (faster) edge continues over both (lower roof).
+6. Regions closed in by vertical edges get no roof face; the editor flags them later.
+7. Top-floor ceiling: keep the flat top slab; default eave height = `house.slab_thickness`; `roof.eave_h` null = that default, resolved at use.
+8. Default area kind with no area point: ROOF. Different-pitch join: step on the underside.
+
+## Combination rules (Cosmin: "got it")
+
+- R1: overlapping roofs: take the highest surface (dormers, low roof against a higher roof, valleys). Outward-bent breaks (gambrel) come from a profile break on one roof.
+- R2: the code cuts walls and slabs of all floors below by the roof underside, and raises or lowers exterior walls on a footprint edge to the roof underside (gable triangles, knee walls, A-frame, ridge lowered into the floor below).
+- R3: planes are defined at the wall line; the overhang contour only clips the extended planes. Default contour = wall line offset by overhang; custom = drawn polygon.
+- Default footprint = a floor's underflow region; per region the user picks own roof / terrace / covered by the upper roof's extended footprint (ties into the deferred slab-ownership design in js/HOUSE-WALLS.txt). Dormers = attic-floor walls + a second roof with a drawn footprint.
+- Editor handles map to stored values by direct formulas (<= 2 unknowns); equal ridge heights etc. are drag snaps, not stored constraints.
+
+## Geometry design: union of prisms (settled, Cosmin: "got it, ok")
+
+Cosmin rejected roof-owned gable faces (the wall must own the gable) and wanted a design that later stages don't rewrite.
+
+- Prism = plan region between a bottom plane and a top plane (z = a*x + b*y + c). Every house part is prisms: walls, slabs, roof bodies (per roof face: face polygon extended to the overhang contour, underside -> underside + t/cos(pitch)).
+- R2 as prisms: cut (top = min(top, underside), split on the crossing line) and raise (exterior wall bodies of the roof's floor, floor top -> underside): gable, knee wall, lowered eave are one operation. R3: eave faces extended outward, bounded by extended hip lines at outside corners; at inside corners overlap + union gives the valley.
+- No 3D subtraction: holes are built in 2D (stairwell = slab minus opening; window = wall split into below-sill and above-head prisms). Sides always vertical. Later per-material faces need the merge keyed by material.
+- Dormers: walls up to the dormer roof underside; inside needs an opening in the main roof over the dormer interior and trimming the dormer roof where its underside drops below the main underside. Unverified sliver between the two lines; check on a prototype.
+- Different pitches meeting: step on the underside (each face body = prism over its own top-face polygon). Off-plumb join later = underside from a second skeleton run with lowered eaves.
+- Data (proposed, part of the design, not built): floor `roofs: [{footprint (null = overflow areas tagged roof; drawn = dormer/extra), pitch, eave_h, overhang, edge_points}]` (replaces `floor.roof`); floor `area_points: [{x, y, kind}]` per overflow area, kind = own roof / terrace / covered by upper roof.
+
+## Stages
+
+Roof A DONE (committed): www/roof_skeleton.js `roof_skeleton(rings, pitches, eave_z) -> faces`, rings [[[x, y], ...]] outer area > 0 then holes; pitches per edge in degrees, 90 = vertical; faces [{edge_is, rings: [[[x, y, z]]]}] one per plane, ccw outline / cw holes. Vertical edges no face; of collinear neighbors only the shallowest gets a face. Events `collide` and `collapse`, `joins` queue, nodes merged within NEAR 1e-5, faces traced leftmost turn. Cost ~ cube of edge count (67 edges 1 ms JIT). Reference check: equal pitch height = chessboard distance to the boundary.
+
+Roof B DONE (committed): `floor.roof` = `{pitch, eave_h, edge_points: [{x, y, pitch}]}` or null in floor state (`copy_roof`); `floor.make_roof_faces()` one ring per root comp from `outer_cycle.edges`, edge point -> nearest ring side, 2+ points on a side -> roof.pitch; eave_z = floor.z + floor.h + eave_h. Model editor adds a separate `roof` component on the top floor when not cut (zero thickness faces). Gable triangles still open (P2).
+
+Prism P1 DONE (uncommitted, 2026-11-14):
+- www/prism_union.js: `prism_union(prisms) -> faces`, `prism_union.grid_scale` = 1000 (grid units per cm). prisms = [{paths: Paths64 on the grid (plan * grid_scale, rounded), filled even-odd, any direction; bottom: [a, b, c]; top: [a, b, c]}], planes in plan units. faces = [{rings: [[[x, y, z], ...], ...]}] in plan units, outline first, ccw seen from outside (right-handed x, y, z with z up), holes cw.
+- Builder: (1) cells by incremental overlay (per prism per cell: intersect + difference; rest = prism minus cells; input paths cleaned with a union only for the first prism); (2) per cell: plane order at the average of the cell's points, assert order holds at every cell point ('prism planes cross'), merge z ranges (touching merges) -> up face at each solid range top, down face at its bottom, grouped by facing + plane; (3) side faces: cell edges grouped by line key 'dx dy offset' (gcd-reduced direction, larger component positive, position t = x or y), pieces between consecutive edge ends, left/right cell ranges evaluated at both ends as grid z, sorted by za+zb, assert order holds at both ends, trapezoid where exactly one side is solid, facing the empty side; (4) clipper union with PolyTree per group, lift to 3D (down / left-facing reversed).
+- house_plan.js: `house.make_faces(top_floor, no_top_slab)` replaces make_polys. Walls of floor i: one prism, skin rings of all cycles (even-odd), z floor.z + slab_t .. floor.z + floor.h. Slab i: `slab_paths(floor0, floor1)` = union(outline0, outline1) minus (open rooms of floor1 without their islands) & (outline0 minus skins0), using clipper2 integer ops; one slab: just that floor's outlines. `add_ring_path` snaps [x, y] rings to the grid. Removed: wall_plane, add_line_edge, add_rect, add_skin_rect, sum_line_runs, plane_edges, next_edge, trace_loops, add_plane_polys, hit_outline, add_slab_faces.
+- house_model_editor.js `create_plan(faces)`: one loop, every ring reversed (model space (x, z, y) mirrors), holes = ring start indices. Roof component unchanged.
+- www/clipper2.js PATCHED (noted in its header): perpendicDistFromLineSqrdGreaterThanQuarter has no BigInt branch (clipper ran it for deltas > 6888 grid units = 6.9 cm; 30% of the time). Redo on any clipper2 update.
+- Cost (fix + make_faces, tests/house_plan_bench.js, 3x2x2 / 6x4x3 / 10x6x3): JIT 7 / 14 / 25 ms (old code 7 / 14 / 33), jitless 13 / 59 / 147 (old 6 / 40 / 157). 85% of the time is inside clipper (collinear cleanup per output path); own code ~1 ms, so typed arrays/structs in own code gain nothing. Further speedup needs fewer clipper calls = own plan arrangement instead of the overlay (large; not planned unless cost matters).
+
+Diagonal-edge prototype (2026-11-14, tests/prism_roof_proto_test.js; env SNAP=diagonal, SWEEP=n, BENCH=1, VERBOSE=1; production untouched). Roof bodies = per skeleton face, bottom = face plane, top = +20 cm, over walls+slabs (slabs without open rooms):
+- Raw input fails: separate clipper calls round the same hip/wall crossing differently, so the two sides of a hip get different line keys -> coincident opposite side faces (15 in one case) and 'prism planes cross' on the bench houses 6x4x3 and 10x6x3.
+- Snap rounding (Hobby) of all input paths alone is not enough: clipper's collinear cleanup drops a snapped point from a straight wall edge, a later call rounds the crossing 1 unit off. Snap + preserveCollinear in the overlay (final PolyTree merge still cleans): every case closed, exact volume, no diagonal side faces.
+- Diagonal-only snap (hot pixels = diagonal ends + crossings with a diagonal; axis edges routed only through those) gives identical results; cost jitless 1.3 / 4.9 / 9.2 ms, JIT ~1 ms. Collinear overlay ~+5%.
+- Remaining: 57 of 300 random-pitch houses assert at prism_union.js:313 (side piece bounds cross along a rounded hip) -> the planned split of side pieces (not prototyped). Plus ~3.6 tiny faces per house: 1-micron steps where two roof planes meet on a rounded line (part of the rounded solid).
+
+Prism P2 step 1 DONE (2026-11-14, uncommitted, approved incl. thin step faces): prism_union.js `snap_paths(prisms)` (diagonal-only Hobby snap; diagonals routed from the lower-x end through every path point / crossing whose closed unit square they pass, sorted by enter t then leave t; straight edges get the diagonal points on them via ys_by_x / xs_by_y), overlay keeps collinear points (`clip(..., no_collinear)` true only for the final merges), side pieces split where bounds cross (z by interpolation, sort by middle z, running max at ends) instead of asserting. Test: tests/prism_union_roof_test.js (6 checks; SWEEP=1000 -> 3000 houses all closed; BENCH=1). Prototype test deleted. Walls-only bench unchanged (JIT 7/14/26, jitless 13/62/153); roof bench union JIT 6/20/45, jitless 28/106/225 ms. Cosmin had staged prism_union.js + tests mid-session; staged prism_union.js is still the P1 version.
+
+Prism P2 NEXT (outline only, to be proposed in detail and approved; step 1 above done):
+- Roof bodies as prisms for the top floor roof: per skeleton face, paths = face ring on the grid, top = face plane, bottom = top lowered by thickness / cos(pitch). Replaces the separate zero-thickness roof component (ask: keep a separate model component for the roof, e.g. for its material later?). Open: roof thickness value (new house setting? ask).
+- R2 for the top floor roof: cut walls/slabs below by the roof underside; raise the exterior wall bodies of the roof's floor from floor top to the underside (gable triangles, knee walls).
+- Builder: split cells where two of their planes cross (instead of asserting); split side pieces where bound lines cross (instead of asserting).
+- Plane fit from skeleton face rings (3 non-collinear points -> [a, b, c]).
+- Risk to check first: hip/valley edges are diagonal; clipper rounds intersection points on diagonal edges, so cell edges on one geometric line may get different integer line keys and side faces may not pair. Verify on a prototype before proposing the mechanism.
+- Bench before/after; stop and report if clearly slower.
+
+Later stages: P3) overflow areas, area points, several roofs per floor; P4) overhang contour, per-edge eave heights, profile breaks; roof plan view editing (click edge sloped/vertical, slope arrows, ridge drags, flag regions without roof); dormers, catslide; custom overhang contour.
+
+## Working notes
+
+- Cosmin: playwright only for visual/DOM tests; node stubs otherwise.
+- Test files load www scripts into a vm context: arrays created inside it fail `assert.deepEqual` against test-realm arrays; spread them first.
+
+## Event fix (chosen 2026-11-15, "go" = design in test copies, then one proposal)
+
+- Tie rule settled (Cosmin "sounds good"): keep "sloped edge continues over a gable's run" (gable s=0 always loses); no user choice. Full gable + lower roof = two floors (P3) or R1. Example check: prism_union_cut_test 'sloped eave lines up with a gable' (PRINT=1).
+- Prototype (2026-11-15): tests/roof_skeleton_batch_proto/www/roof_skeleton.js. rebuild(t) replaces collide/collapse/start/join/run_joins/link/add_piece/add_ridge: pieces at t -> per line (is_v, c within NEAR) spans between corner nodes; opposite pieces over one span cancel; spans linked by leftmost turn at nodes; one piece per run of collinear spans, fastest plane owns the run (ties: first); half-edges per line where a plane stops (against its direction) or starts (along) owning spans; old corners with the same plane pair at the same node keep their arc start, others end_arc. Finders only set ev_t.
+- Semantics change: a piece with zero length at the event height takes over nothing (production lets it; all 6 deterministic diffs of 300 shapes are this; e.g. [[0,5],[5,5],[5,2],[6,2],[6,10],[0,10]] pitches [90,90,90,90,sh,sh]).
+- Results: roof_skeleton_test all 26 pass with FIXED_GABLES=1 (env added; moving gables break the overhang sweep premise: proto fails one moving-gable shape without it); N=300: 0 order-dependent, 0 crashes; house tests pass with SDK=proto (101/10/6/14, SWEEP 300). Tests got SDK env: roof_skeleton_test, house_plan_test, prism_union_cut_test, prism_union_roof_test; shuffle probe BASE=dir prints DIFF lines. Bench tests/roof_skeleton_bench.js: proto 2-3x slower (JIT .13->.29 ms small, 4->8 ms 117 edges; jitless .36->1.04, 37->56): node_at linear scan over all corners each rebuild.
+- IMPLEMENTED 2026-11-15 ("ok go"), uncommitted: proto moved into www/roof_skeleton.js (rebuild(t)); proto folder and roof_skeleton_order_probe_test.js deleted; random overhang sweep passes gables_move false (check_overhang param, FIXED_GABLES env removed); shuffle probe hooks `pieces = rebuild(t)`. All tests pass; tiny faces in cut SWEEP=300 5383 = same as HEAD. Bench JIT .25/7.1 ms. random() LCG fixed too (Math.imul).
+- Not done (only if cost matters): node_at() scans every corner of the current height on each rebuild; main cause of the 2-3x slowdown.
+- Committed 061a047d. NEXT: Cosmin chooses the next stage: area point UI, roof plan view editing, P4 (stored per-edge eave heights, drawn overhang outline, profile breaks), dormers/R1.
+
+## Area point UI: DROPPED (2026-11-15)
+- Built, then reverted at Cosmin's request ("remove"; he has another idea for area points; terraces deferred). house_roof_plan_view.js stays deleted (staged).
+
+## Roof parametrization UI -- START HERE NEXT SESSION (updated 2026-11-16 end of session 2)
+
+ALL UNCOMMITTED on branch dev. Ask before committing. Staged deletion of www/house_roof_plan_view.js is Cosmin's. Someone else (Cosmin) also edited www/house_plan_editor.js concurrently this session (e.g. ui.hsl in draw_grids) -- leave his changes alone.
+
+Goal (Cosmin): modeless direct manipulation in the plan: act on things directly, no tool change or selection; use Shift/Ctrl/Alt to stretch modelessness. Rule: when an action does nothing, the pointer shows it (not-allowed).
+
+Where roofs are edited (Cosmin: "perfect"): floor k's roof in floor k+1's view (the roof area is empty space there); the top floor's roof in a ROOF entry above the floor list (s.is_roof_level: top floor's walls drawn faded, not editable; drag in empty space does nothing, not-allowed).
+
+### Roof data model now (level eaves, replaced R3's uniform horizontal overhang)
+- floor.roof = {pitch, overhang, eave_h, max_overhang, edge_points: [{x, y, pitch, overhang, eave_h}]}; copy_roof defaults pitch 20, overhang 60, eave_h -22, max_overhang 150; edge point fields null = the roof's.
+- overhang: gables (rake) only. eave_h: eave height of sloped sides relative to the wall top (<= 0). max_overhang: cap for sloped sides.
+- make_roof_faces: sloped side d = min(-eave_h / tan(pitch), max_overhang). Uncapped: eave_z = wall_z + eave_h EXACTLY (level eaves; plane meets wall top only within eave-line grid rounding ~0.001 cm; tests use 1e-2 tolerance there). Capped: eave_z = wall_z - max_overhang * tan(pitch) (higher eave). Gables: d = overhang (moves only with outside corners at both ends, as before). Eave side records also carry eave_z.
+- Eave side records: {nx, ny, c (moved line), wall_c, m1, m2, e1, e2, d, pitch, eave_z, is_eave, edge_point (none / obj / null if 2+), is_only_slope}; faces get .sides.
+
+### Editor gestures now
+- click eave = gable <-> hip; dblclick = remove its edge point.
+- drag eave: sloped side -> all eave heights by the same dz (roof + own eave_h's); gable -> roof overhang + own overhangs. Shift = only that side's own value (edge point added on the wall line). CLAMPED (Cosmin: clamp, never reset): overhang within 0..max_overhang, highest eave stops at the wall top. move() returns false only for Shift on a side with 2+ edge points.
+- eave hit test: only within 8 px of the eave line (hit_roof_side).
+- line drag (ridge/hip/valley): start_move_line(face1, face2, z) -> move(x, y): tan(pitch) = (z - wall top)/inward distance per face, edge points at side middles. Cosmin finds hip/valley drag poor (roof rises sliding along hips; degenerate shapes). NOT changed; he wants a ridge-END drag in any direction instead (along = end pitch, across = move ridge). Earlier rejected: blocking unless faces still meet at pointer.
+- 2026-11-16 session 3 (approved "yes", uncommitted): Shift = pan only, no eave hit (Shift for "this eave only" now pressed during the eave drag); dblclick a line = floor.reset_line(face1, face2): pitch = null on both faces' own edge points (hip 45 deg, ridge centered). Ctrl: room point / eave / line move starts at once (no drag threshold); Ctrl+click toggles nothing. Test in house_plan_editor_test.mjs (123 checks).
+- Committed c7b65366 (all roof UI so far). Then item 3 DONE uncommitted ("do yours. go"): pitch label per face (roof_label_point: longest eave side middle, half the face depth inward); vertical drag 4 px/deg, delta snapped to 1 deg (ctrl .1); plain = roof.pitch + all own sloped pitches by same delta, clamped so all stay 1..89 (pitch 90 = gable skipped); Shift (pressed AFTER the press; before = pan) = this face's edge points (floor.start_move_pitch). Label hit before eave/line. Next: propose removing hip/valley drag after Cosmin tries labels.
+- Ridge-end drag DONE uncommitted ("go"): line drag generalized to face lists: floor.can_move_faces/start_move_faces/reset_faces(faces[, z]); hs.roof_faces, action 'move_faces'; hit_roof_point (line endpoint where 3+ faces meet, before lines). Rejected alt (Cosmin asked): drag whole ridge in all directions -- same code, ends not independent. Limitation: end dragged to gable has no face -> point becomes 2-face line end; back to hip via eave click. Crash probe covers points: 0 failures.
+- 2026-11-16 batch (uncommitted, "go"): all moved eaves highlighted (same kind; shift drag: one); dblclick pitch label = reset_faces([face]); start_move_eave(side, x, y, snap_cs) move(dx, dy, is_one, snap_d): is_one only: snap to eave corners (sides' c / e1,e2) and to roof value (removes own); measurements draw_eave_dims / draw_roof_line_dims (draw_length got optional text) while dragging, all in show_dims. Moves (ctrl, labels) now start at first movement, NOT press: done for a "dblclick crash" I claimed, then disproved (ui.dblclick is set by the DOM click event on the release frame, after cs.edit.stop()) -- asked Cosmin whether to revert.
+- Editor test geometry: 800x600 viewport; the top toolbar takes hits near y<40; east eave of the 600x400 test house is off-screen at x=805.
+- Editor tests: Playwright events faster than frames can share one frame -> add waits between down/move/up/key-up.
+- Hip/valley drag removal: answered NO for now -- it is the only way to change ridge height / one face's pitch alone (ridge & ridge-end drags keep grab height; valleys and pyramids have no ridge end). Remove it once per-face pitch scrub exists.
+- hover highlight of lines: draw looks up hit faces via find_roof_face (translate rebuilds faces each frame; lookup needed for drags anyway; caching the roof not wanted: ~1 ms/frame).
+
+### prism_union: crossing roofs (done this session)
+- Split regions where planes of two OVERLAPPING cutters cross (bbox overlap + one clipper intersection per pair, so faces of one roof that only touch get none); cells carry split_regions; order check allows reversal up to dz = hypot(a, b) + 1 only for the split pair. Fixes 'prism planes cross' (roof bodies of different floors crossing; reachable by many edits). Hard requirement from Cosmin: never crash.
+- Hairline cracks along creases where clipper drops tiny step faces: up to 21 grid units (0.21 mm) at 88.7 deg. Accepted (like diagonal-edge steps).
+- Bench jitless 43/122/264 ms (unchanged).
+
+### Tests (all pass) and probes
+- house_plan_test 128 (roof60() helper = explicit 60 overhang at 20 deg; assert_near; tan20), house_plan_editor_test.mjs 113 (eave case: roof overhang 20 + eave_h -20*tan20, press east eave x=634, drag +40), house_plan_view_test 41 (ui.hsl stub added), prism_union 12, cut 10 (set_roof has eave_h/max_overhang; SWEEP=300 ok), roof 6, skeleton 28, faces compare 14, eave drag probe 0 fails.
+- tests/roof_line_drag_crash_probe_test.js (drags every roof line of lean-to/L houses; 0 failures), tests/roof_cross_closure_probe_test.js (closure, TOL default 25, SDK=dir), tests/house_plan_bench.js (SDK=dir loads changed prism_union.js), tests/roof_line_drag_probe_test.js (hip drag map), tests/roof_overhang_probe_test.js (fixed: eave_zs array).
+
+### Known, not fixed (production; needs proposal)
+- pitch exactly 0 crashes roof_skeleton (outs_by_node.get) -- also at HEAD; editor cannot produce it (line drag gives pitch > 0), only pasted/loaded state.
+
+### 2026-11-16 session 4 (committed): shift convention reversed
+- Eave drag and pitch-label drag: default = one eave / one face; Shift (pressed after the press) = all eaves of its kind / all sloped faces. Hints SHIFT=All Eaves / SHIFT=All Faces. Hover shows the default mode (hover with shift = pan, no hit); eave highlight remaps hit_roof_side to this frame's side also on hover. Pitch drag with shift lights all sloped labels. Tests were stale; Cosmin fixed them ("always update tests to match behavior changes").
+- Items 2 (ridge-end drag) and 3 (pitch labels; no Alt = roof default) of NEXT below are DONE and committed; eave/line drag, level eaves, crossing-roof split too.
+
+### NEXT (each needs a proposal and "go")
+1. Two-plane gable over an L (eaves follow the contour, roof stays 2 planes). Cosmin chose SNAP (no stored link; link needs UI he'll do later). Finding: a sloped side's plane always passes through the wall top at its OWN wall line; eave_h only sets the overhang, so dragging an eave just extends the plane. The notch side needs (a) own eave_h AND own overhang in its edge point (plane meets wall line at eave_h + overhang*slope), (b) eave above the wall top allowed for it (R2 raises walls under it), (c) a gesture. My suggestion, sent, awaiting answer: Alt+click eave = set this side's eave_h + overhang so its plane equals the nearest sloped side facing the same way with the same pitch; values only; a later eave drag keeps the plane and changes the overhang.
+2. DONE (ridge-end drag).
+3. DONE (pitch labels).
+4. Later: profile breaks (Dutch gable, gambrel, mansard), drawn overhang outline, dormers / R1, area/terrace UI (Cosmin has another idea).
+
+### Decisions kept
+- No clipping of overhangs at the floor above (bad input is shown; but never crash).
+- Roof level = top floor + is_roof_level checks; kind == 'roof' filter in editor translate() and make_faces; dblclick = 2 undo steps.
+- Equal pitches give the same plan; heights need number labels or 3D.
+- Snaps, not stored constraints, until Cosmin designs link UI.
+
+## Cross gable eave overlap DONE uncommitted (2026-11-16, "go")
+
+- Problem (Cosmin's JSON in tests/roof_steps_probe_test.js): at an inside corner of two sloped sides with different eave heights, the skeleton keeps the higher side vertical up to its eave, so the lower eave stops on the higher side's moved line (open vertical triangle).
+- Fix: make_faces adds, per pair of perpendicular sloped eave sides with different eave_z whose overhang strips overlap, a roof body with the lower side's face plane (from face.sides) over the overlap rectangle; prism_union keeps the higher top (valley = max of the planes). No prism_union change; the high roof is NOT cut (5 cm underside step = the accepted different-pitch underside step).
+- Dormers discussed: front line + front wall height + pitch + per-side gable/sloped; needs R1 + suspended walls (bottom cut by a lower roof's top). Not started.
+
+## Open bug: flaky ctrl+drag eave check (found 2026-11-16, not investigated further per Cosmin)
+
+- tests/house_plan_editor_test.mjs 'ctrl+drag below the threshold moves only the eave' fails about 1 run in 3: after a ctrl+press and a 4 px move (2 steps) on the east eave, the edit exists ('starts its move at the first movement' passes), yet after the release edit_no is still 2 and the roof has no edge point. From start_move_eave (is_one, snap_d 0), any 2-4 px move should add an edge point with eave_h -8. Cause unproven; maybe the 50 ms waits between pointer events.
+- Same session: fixed the other stale editor test checks (ui_field.js missing from the model editor test pages; default roof; 1 cm snapping from bbde91db in wall lengths, eave_h, ridge-end pitch tolerance).

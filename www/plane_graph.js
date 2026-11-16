@@ -541,7 +541,7 @@ let plane_graph_class = class plane_graph extends Array {
 			a = words(a)
 		if (a[0] == 'draw') { // ['draw', [id, ]x0, y0, [id, ]d-to-right, [id, ]d-to-down, [id, ]d-to-right, ...]
 			let x0, p0, id
-			let i = 0
+			let i = 1 // after 'draw'
 			let n = a.length
 			let sx = 1 // horizontal first
 			let sy = 0

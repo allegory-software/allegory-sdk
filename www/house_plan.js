@@ -1375,6 +1375,7 @@ function house_plan(t) {
 		// areas: the roof areas of each floor; the terraces of top_floor.
 		let roof_paths_by_floor = [] // [[path, ...], ...] grid paths
 		let roof_faces_by_floor = [] // [faces, ...]
+		let eave_sides_by_floor = [] // [[side, ...], ...] from make_roof_faces()
 		let terrace_paths = [] // grid paths of top_floor's terraces
 		for (let floor_i = 0; floor_i < floor_n; floor_i++) {
 			let floor = floors[floor_i]
@@ -1393,8 +1394,10 @@ function house_plan(t) {
 				}
 			}
 			roof_paths_by_floor.push(roof_paths)
+			let eave_sides = []
+			eave_sides_by_floor.push(eave_sides)
 			roof_faces_by_floor.push(roof_areas.length
-				? floor.make_roof_faces(roof_areas) : [])
+				? floor.make_roof_faces(roof_areas, eave_sides) : [])
 		}
 
 		// walls: from the top of the floor's slab to the top of the floor.
@@ -1475,6 +1478,52 @@ function house_plan(t) {
 					tag: 'roof',
 					is_cutter: true,
 				})
+			}
+		}
+
+		// overhang strips of two perpendicular sloped sides with different
+		// eave heights overlap: a body with the lower side's plane over the
+		// overlap, under the higher eave up to the wall. prism_union() keeps
+		// the higher top.
+		for (let floor_i = 0; floor_i < floor_n; floor_i++) {
+			let sides = eave_sides_by_floor[floor_i]
+			let side_planes = map() // {side -> plane} of the side's face
+			for (let face of roof_faces_by_floor[floor_i])
+				for (let side of face.sides)
+					side_planes.set(side, face.plane)
+			for (let i = 0; i < sides.length; i++) {
+				for (let j = i+1; j < sides.length; j++) {
+					let side1 = sides[i]
+					let side2 = sides[j]
+					if (side1.pitch == 90 || side2.pitch == 90
+						|| !side1.nx == !side2.nx || side1.eave_z == side2.eave_z)
+						continue
+					// strips on the grid: across from wall_c to c, along m1..m2.
+					let x1 = -1/0, y1 = -1/0, x2 = 1/0, y2 = 1/0
+					for (let side of [side1, side2]) {
+						let c1 = min(side.wall_c, side.c)
+						let c2 = max(side.wall_c, side.c)
+						x1 = max(x1, side.nx ? c1 : side.m1)
+						x2 = min(x2, side.nx ? c2 : side.m2)
+						y1 = max(y1, side.nx ? side.m1 : c1)
+						y2 = min(y2, side.nx ? side.m2 : c2)
+					}
+					if (x2 <= x1 || y2 <= y1)
+						continue
+					let plane = side_planes.get(
+						side1.eave_z < side2.eave_z ? side1 : side2)
+					if (!plane) // lower side has no face: no roof to continue.
+						continue
+					let [a, b, c] = plane
+					prisms.push({
+						paths: [[{x: x1, y: y1}, {x: x2, y: y1},
+							{x: x2, y: y2}, {x: x1, y: y2}]],
+						bottom: [a, b, c - roof_t * sqrt(1 + a * a + b * b)],
+						top: plane,
+						tag: 'roof',
+						is_cutter: true,
+					})
+				}
 			}
 		}
 

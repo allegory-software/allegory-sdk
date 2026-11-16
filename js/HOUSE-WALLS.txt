@@ -1,0 +1,32 @@
+HOUSE PLAN EDITOR: 3D WALLS
+
+SUPERSEDED face code (2026-11-14): `make_polys`, the edge-cancel merge, `add_rect`, `add_slab_rects` and the slab cell grid described below no longer exist; `house.make_faces` builds walls and slabs as prisms with `prism_union` (see js/HOUSE-ROOFS.txt, stage P1). The slab rules below still hold. The "slab region encoded twice" compensation inside house_plan.js is gone (`slab_paths` computes it once); the plan editor's `draw_state.below_cycles` clip is still a second copy of the slab rule.
+
+House plan editor (www/house_plan.js, house_model_editor.js, house_plan_editor.js, plane_graph.js), as of 2026-11-14. All stage work is uncommitted on branch `dev`. Tests: `node tests/house_plan_test.js` (86 checks); cost bench: `node tests/house_plan_bench.js`.
+
+Settled decisions (Cosmin approved):
+- A slab lies at the bottom of each floor and covers the union of the outer skins of the floor below and the floor above (this gives terraces and undersides). One more slab sits on top of the top floor. Walls stand on slabs (they don't pass through).
+- Rooms are inner cycles, rebuilt on every fix, so room flags go on room points: a stored position per floor with an `is_open` flag. A room is the cycle containing its point (`hit_cycle_edges`). Revit places rooms the same way. Cosmin chose the position anchor over a wall-id + side anchor (a wall-id anchor would depend on which wall the code picked, invisible to the user).
+- No room point: closed. Two or more points in one room: the editor highlights the room and the code treats it as closed.
+- An open room has no slab under it only over the rooms of the floor below (islands in it keep a slab piece), so its skins merge with the skins of the room below. Where it overflows the floor below, and over the walls below (interior walls too), it keeps the slab. Open rooms on the ground floor keep a full slab. The plan editor clips open-room backgrounds to the same region (`draw_state.below_cycles`, evenodd clip) -- a second copy of the slab rule, to be replaced by drawing a stored per-floor slab.
+- Deferred design (2026-11-14, Cosmin agreed it's coherent, do later): slab i belongs to floor i (balcony overflow included). Underflow (floor below's outline outside floor i) is ambiguous: roof owned by floor i-1 or terrace owned by floor i, by a user choice. The top of the house becomes a floor with zero walls whose whole underflow is roof or terrace, replacing `no_top_slab` and the extra top slab. Open questions: where the roof/terrace tag is stored (tag point per connected underflow region?), how to split a region, the default. Area labels should then be per slab `top_up` poly (slab minus walls) instead of per room. Drawing stored slab faces in the editor needs: a per-floor cache, recompute when floor i-1 changes, a pass after all floors are fixed at load, and live updates during drags (fix runs only on drop).
+- Horizontal faces rule: at every height where a slab or wall starts or ends, an up face where solid is below and air above, a down face the reverse. Ground slab underside included; horizontal faces go in the same "walls" model3 component.
+- Walls on floors with roofs are full height until the roof stage. The roof stage will intersect roof bottom planes with wall planes; `project_wall_to_roof_face` in house_model_editor.js is kept for it.
+
+Done:
+- Stage 1: slabs with constant `house.slab_thickness`; `fix_walls()` merges coplanar skins into `house.wall_polys` by cancelling shared edges; add/remove top floor; undo entries carry `op` ('edit', 'add_floor', 'remove_floor').
+- Stage 2: `floor.room_points` `[{x, y, is_open}]` in floor state; `fix_open_rooms()` in `_after_fix` builds `floor.open_rooms` and `floor.room_point_by_cycle` ({cycle -> room_point|null if 2+}); `add_slab_rects` cuts open rooms out of the slab; `add_floor` copies room points.
+- Stage 3 (editor UI): `floor.toggle_room(c, x, y)` (no point: add open at the unsnapped click, never the centroid since it can fall outside U/L rooms or in an island; one point: flip; 2+: nothing), `floor.remove_room_point`, `floor.start_move_room_point`; `same_state` compares room points. Editor: click in a room toggles; Delete on a hovered marker removes; dragging a marker moves it (starts past the drag threshold so a click still toggles); open rooms unfilled, conflict rooms in `error` color, markers filled = open.
+- Stage 4 (horizontal faces): `house.horizontal_polys` (plan x,y + `z`, `normal` +-1), built in `add_slab_horizontal_polys` per slab with a cell grid (coordinate compression) over the skin corner coords of the two floors: per cell 4 tests (outline/room of floor0 and floor1), derive walls-below / slab / walls-above, add rects, merge with the wall edge-cancel code. `add_rect` shared with `add_skin_rect`; `add_plane_polys` no longer tags polys, callers do. Model editor reverses up faces. Fixed `hit_cycle_edges_of_cycle` (plane_graph.js) returning the surrounding room for points in an island's wall body.
+
+Not yet checked interactively by Cosmin: stage 3 UI and stage 4 in 3D. Do that first in the next session.
+
+Known behavior / leftovers:
+- Cost: fix of a 10x6-room 3-floor house 18 -> 40 ms (JIT), 46 -> 170 ms jitless; runs on drop/undo/toggle/load, not during drags.
+- Compensation: the slab region is encoded twice (`add_slab_rects` edges and the cell test in `add_slab_horizontal_polys`); one slab-outline owner would remove it.
+- Double-click in a room toggles twice (two undo entries). Click within a wall's snap margin, or on a marker inside a wall corner's snap area, doesn't toggle.
+- Deferred small UI: help line text for click/Delete, a move cursor over markers (it shows 'copy' now).
+
+Next: stage 5, roofs, planned in js/HOUSE-ROOFS.txt. Top-floor ceiling decided: keep the flat top slab under the roof. The old gable code is gone (roofs stage 2).
+
+Known open issues: `plane_graph.free()` keeps caller-set own fields on pooled objects (`_after_fix`, `orthogonal`); other floors' snap lines go stale after add/remove floor; a disabled `ui.button` still reports 'click' in its state.

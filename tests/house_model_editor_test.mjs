@@ -26,6 +26,7 @@ const page_html = `<!DOCTYPE html>
 <script src=house_plan.js></script>
 <script src=model3.js></script>
 <script src=ui.js></script>
+<script src=ui_field.js></script>
 <script src=model3_editor.js></script>
 <script src=house_model_editor.js></script>
 <script>
@@ -82,6 +83,7 @@ const server = http.createServer(async function(req, res) {
 <link rel="icon" href="data:,">
 <script src=glue.js global></script>
 <script src=ui.js global></script>
+<script src=ui_field.js></script>
 <script src=earcut.js></script>
 <script src=3d.js></script>
 <script src=suncalc.js></script>
@@ -185,7 +187,8 @@ await pg.waitForTimeout(500)
 let r2 = await read_editor()
 check('a new editor for the second house', r2?.is_gable1, JSON.stringify(r2))
 check('the roof and the walls were added',
-	r2?.children > (r1?.children ?? 0), JSON.stringify([r1, r2]))
+	r2?.comps.includes('walls') && r2?.comps.includes('roof'),
+	JSON.stringify([r1, r2]))
 
 check('no page errors after the switch', errors.length == 0,
 	errors.join('\n'))
