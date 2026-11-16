@@ -13,7 +13,7 @@ const G = window
 
 const {
 	ceil, round, snap, mod, abs, sign, min, clamp, PI, sin, cos, rad, atan2,
-	array_set, memoize, format_kcount, point_around, distance,
+	array_set, empty_array, memoize, format_kcount, point_around, distance,
 	json_arg, try_json_arg, json, copy_to_clipboard, S,
 } = glue
 
@@ -25,9 +25,9 @@ let out = []
 
 let floor_names = [
 	'GROUND FLOOR',
-	'1st FLOOR',
-	'2nd FLOOR',
-	'3rd FLOOR',
+	'1ˢᵗ FLOOR',
+	'2ⁿᵈ FLOOR',
+	'3ʳᵈ FLOOR',
 ]
 
 let format_length = d => format_kcount(d / 1e2, 2)+'m'
@@ -129,12 +129,11 @@ let scale_group = memoize(scaler)
 
 // floor view ----------------------------------------------------------------
 
-function draw_grid(cx, sg, x0, y0, w, h, step, dark_color, light_color) {
+function draw_grid(cx, sg, x0, y0, w, h, step, color) {
 	if (!sg.show_grid)
 		return
 	if (sg.d(step) < 7)
 		return
-	let color = ui.theme().is_dark ? dark_color : light_color
 	cx.strokeStyle = color
 	for (let i = mod(sg.plan_x(x0), step), n = sg.plan_d(w); i < n; i += step) {
 		cx.beginPath()
@@ -167,19 +166,19 @@ function draw_grids(cx, sg, w, h) {
 	// grid
 	cx.save()
 	cx.translate(.5, .5)
-	// TODO: make this dynamic; show at most 3-levels based on zoom level
-	// with dynamic lightness based on level.
-	if (0) {
+	let step = 1
+	let factor = 5
+	while (sg.d(step) < 7) {
+		step *= factor
+		factor = 10 / factor
+	}
 	for (let i = 0; i < 3; i++) {
-		let step = (i == 0 ? 1 : i == 1 ? 5 : 10)
-		let L = ui.theme().is_dark ? 1 : 0
-		draw_grid(cx, sg, x0, y0, w, h,  10, hsl(0, 0, L))
+		let intensity = clamp((step * sg.scale - 7) / 28, 0, 1)
+		let L = ui.theme().is_dark ? 0.2 : 0.8
+		draw_grid(cx, sg, x0, y0, w, h, step, ui.hsl(0, 0, L, intensity))
+		step *= factor
+		factor = 10 / factor
 	}
-	}
-	let g1 =
-	draw_grid(cx, sg, x0, y0, w, h,  10, '#222'   , '#eee')
-	draw_grid(cx, sg, x0, y0, w, h,  50, g1 ? '#2a2a2a' : '#222', '#ddd')
-	draw_grid(cx, sg, x0, y0, w, h, 100, '#333'   , '#ccc')
 	cx.restore()
 }
 
@@ -196,6 +195,21 @@ function draw_edges(cx, sg, eps) {
 }
 
 function draw_walls(cx, sg, comps, segs) {
+	if (sg.scale <= 0.2) { // to small to even show edges
+		for (let seg of segs) {
+			let x1 = sg.x(seg[0][0]) + .5
+			let y1 = sg.y(seg[0][1]) + .5
+			let x2 = sg.x(seg[1][0]) + .5
+			let y2 = sg.y(seg[1][1]) + .5
+			cx.beginPath()
+			cx.moveTo(x1, y1)
+			cx.lineTo(x2, y2)
+			cx.strokeStyle = ui.color_css('text')
+			cx.stroke()
+		}
+		return
+	}
+
 	for (let comp of comps) {
 
 		cx.beginPath()
@@ -230,22 +244,26 @@ function draw_walls(cx, sg, comps, segs) {
 			cx.stroke()
 			cx.lineJoin = 'miter'
 			cx.lineWidth = 1
-		} else if (sg.scale > 0.2) { // too small to stroke
+		} else { // too small to stroke
 			cx.fillStyle = ui.color_css('text')
 			cx.fill()
-		} else { // to small to even show edges
-			for (let seg of segs) {
-				let x1 = sg.x(seg[0][0]) + .5
-				let y1 = sg.y(seg[0][1]) + .5
-				let x2 = sg.x(seg[1][0]) + .5
-				let y2 = sg.y(seg[1][1]) + .5
-				cx.beginPath()
-				cx.moveTo(x1, y1)
-				cx.lineTo(x2, y2)
-				cx.strokeStyle = ui.color_css('text')
-				cx.stroke()
-			}
 		}
+	}
+}
+
+// find the farthest edge point from `c.edges[i0]` going in `dir` direction
+// in the array, which has the same spatial direction `v` with the previous
+// point.
+function last_perp_edge_point(c, i, n, dir, v) {
+	let ep0 = c.edges[mod(i, n)]
+	while (1) {
+		let ep1 = c.edges[mod(i, n)]
+		let ep2 = c.edges[mod(i+dir, n)]
+		if (ep2.p == ep0.p) // end-cap, don't measure
+			return
+		if ((ep1[0] == ep2[0]) != v) // changed direction, return last edge point
+			return ep1
+		i += dir
 	}
 }
 
@@ -254,6 +272,8 @@ function draw_length(cx, sg, x1, y1, x2, y2) {
 	let d = distance(x1, y1, x2, y2)
 	if (sg.d(d) < 20)
 		return
+
+	;[x1, y1, x2, y2] = line2.offset(-10, x1, y1, x2, y2)
 
 	let s = format_length(d)
 
@@ -331,6 +351,77 @@ function draw_length(cx, sg, x1, y1, x2, y2) {
 	cx.restore()
 }
 
+// the eave side of the edited roof at the plan point (mx, my): on its eave
+// line, 8 pixels around.
+function hit_roof_side(hs, draw_state, sg, mx, my) {
+	let scale = prism_union.grid_scale
+	let x = mx * scale
+	let y = my * scale
+	let m = sg.plan_d(8) * scale
+	for (let side of draw_state.roof_sides) {
+		let {nx, c, e1, e2} = side
+		let a = nx ? x : y // across the side
+		let b = nx ? y : x // along the side
+		if (b < e1 || b > e2)
+			continue
+		if (abs(a - c) > m)
+			continue
+		hs.roof_side = side
+		hs.roof_x = mx // unsnapped, for placing an edge point.
+		hs.roof_y = my
+		hs.action = 'move_eave'
+		return true
+	}
+	return false
+}
+
+// the line between two faces of the edited roof at the plan point (mx, my),
+// 8 pixels around: the nearest shared segment.
+function hit_roof_line(hs, draw_state, sg, mx, my) {
+	let min_d = sg.plan_d(8)
+	let found_line, found_x, found_y
+	for (let line of draw_state.roof_lines) {
+		let {p, q} = line
+		let [px, py] = p
+		let dx = q[0] - px
+		let dy = q[1] - py
+		let t = clamp(((mx - px) * dx + (my - py) * dy)
+			/ (dx * dx + dy * dy), 0, 1)
+		let x = px + t * dx // the point of p-q nearest to (mx, my)
+		let y = py + t * dy
+		let d = distance(mx, my, x, y)
+		if (d >= min_d)
+			continue
+		min_d = d
+		found_line = line
+		found_x = x
+		found_y = y
+	}
+	if (!found_line)
+		return false
+	let {face1, face2} = found_line
+	let [a, b, c] = face1.plane
+	hs.roof_face1 = face1
+	hs.roof_face2 = face2
+	hs.roof_x = found_x // grabbed point, on the line.
+	hs.roof_y = found_y
+	hs.roof_z = a * found_x + b * found_y + c
+	hs.action = 'move_line'
+	return true
+}
+
+// the face of this frame's roof in the plane of the side from an earlier
+// frame's roof: the same side has the same wall line and extent.
+function find_roof_face(faces, side0) {
+	let {nx, ny, wall_c, m1, m2} = side0
+	for (let face of faces)
+		for (let side of face.sides)
+			if (side.nx == nx && side.ny == ny && side.wall_c == wall_c
+				&& side.m1 == m1 && side.m2 == m2
+			)
+				return face
+}
+
 function floor_editor_update(id, s) {
 	s.interaction_value = undefined
 	if (!s.house)
@@ -339,12 +430,20 @@ function floor_editor_update(id, s) {
 	let readonly = s.readonly
 	let draw_state = s.draw_state
 	let floor0 = s.floor
-	for (let floor of plan.house.floors)
-		if (ui.clicked(id+'.floor'+floor.i))
+	let is_roof_level0 = s.is_roof_level
+	let edit_no0 = s.house.edit_no
+	for (let floor of plan.house.floors) {
+		if (ui.clicked(id+'.floor'+floor.i)) {
 			s.floor = floor
+			s.is_roof_level = false
+		}
+	}
+	if (ui.clicked(id+'.roof'))
+		s.is_roof_level = true
 	let floors = s.house.floors
 	if (ui.state_of(id+'.add_floor_button', 'state') == 'click') {
 		s.floor = s.house.add_floor()
+		s.is_roof_level = false
 	} else if (floors.length > 1
 		&& ui.state_of(id+'.remove_floor_button', 'state') == 'click'
 	) {
@@ -380,10 +479,12 @@ function floor_editor_update(id, s) {
 	floors = s.house.floors // paste and its undo replace the array.
 	if (!floors.includes(s.floor))
 		s.floor = floors[floors.length-1]
+	// the roof level: the top floor's roof.
+	if (s.is_roof_level)
+		s.floor = floors[floors.length-1]
 	plan = s.floor
 	if (plan != floor0) {
 		draw_state.snap_lines.length = 0
-		draw_state.measure_edges.length = 0
 	}
 
 	let sg = scale_group('editor')
@@ -410,7 +511,7 @@ function floor_editor_update(id, s) {
 			let seg    = cs.seg
 
 			if (action == 'move_seg') { // move seg
-				cs.move_seg = plan.start_move_seg(seg, draw_state)
+				cs.edit = plan.start_move_seg(seg, draw_state)
 			} else if (action == 'pan') {
 				sg.pan_x0 = sg.x0
 				sg.pan_y0 = sg.y0
@@ -419,64 +520,73 @@ function floor_editor_update(id, s) {
 
 		let action = cs.action
 
-		if (!readonly && !cs.cancel && !action && (abs(dx) >= 10 || abs(dy) >= 10)) { // dragged far enough to assume intent to drag.
+		if (cs.cancel) {
+			cs.edit?.cancel()
+		} else {
+			let nosnap = ui.keypressed('ctrl')
 
-			// establish direction of drag on x and y axis.
-			let sdx = abs(dx) > 1.5 * abs(dy) ? sign(dx) : 0 // straight enough
-			let sdy = abs(dy) > 1.5 * abs(dx) ? sign(dy) : 0 // straight enough
-			if (sdx || sdy) {
-				action = 'resize_seg'
-				cs.action = action
-				let p   = cs.p
-				let mx0 = cs.x
-				let my0 = cs.y
-				cs.resize_seg = plan.start_resize_seg(p, mx0, my0, dx, dy, sdx, sdy, draw_state)
+			if (!readonly && !s.is_roof_level && !action && (abs(dx) >= 10 || abs(dy) >= 10)) { // dragged far enough to assume intent to drag.
+
+				// establish direction of drag on x and y axis.
+				let sdx = abs(dx) > 1.5 * abs(dy) ? sign(dx) : 0 // straight enough
+				let sdy = abs(dy) > 1.5 * abs(dx) ? sign(dy) : 0 // straight enough
+				if (sdx || sdy) {
+					action = 'resize_seg'
+					cs.action = action
+					let p   = cs.p
+					let mx0 = cs.x
+					let my0 = cs.y
+					cs.edit = plan.start_resize_seg(p, mx0, my0, dx, dy, sdx, sdy, draw_state)
+				}
+
 			}
 
-		}
+			if (action == 'move_seg')
+				cs.edit.move(dx, dy, draw_state, nosnap ? 2 : 20)
 
-		if (action == 'move_seg') {
-			if (cs.cancel)
-				cs.move_seg.cancel(draw_state)
-			else
-				cs.move_seg.move(dx, dy, draw_state)
-		}
+			if (action == 'resize_seg')
+				[cs.x, cs.y] = cs.edit.resize(dx, dy, draw_state,
+					nosnap ? 2 : 30)
 
-		if (action == 'resize_seg') {
-			if (cs.cancel)
-				cs.resize_seg.cancel(draw_state)
-			else
-				cs.resize_seg.resize(dx, dy, draw_state, cs)
-		}
-
-		// a room point moves only past the drag threshold: a click toggles
-		// its room instead.
-		if (action == 'move_room_point') {
-			if (cs.moved && !cs.cancel)
-				cs.move_room_point ??= plan.start_move_room_point(cs.room_point)
-			let move_room_point = cs.move_room_point
-			if (move_room_point) {
-				if (cs.cancel)
-					move_room_point.cancel(draw_state)
-				else
-					move_room_point.move(dx, dy)
+			// a room point moves only past the drag threshold or with ctrl: a
+			// click toggles its room instead.
+			if (action == 'move_room_point') {
+				if (cs.moved || ui.keypressed('ctrl'))
+					cs.edit ??= plan.start_move_room_point(cs.room_point)
+				cs.edit?.move(dx, dy)
 			}
-		}
 
-		if (action == 'pan' && !cs.cancel) {
-			sg.x0 = sg.pan_x0 + dx * sg.scale
-			sg.y0 = sg.pan_y0 + dy * sg.scale
-			sg.panned = true
-		}
-
-		if (cs.drop && !cs.cancel) {
-			if (action == 'move_seg') {
-				cs.move_seg.stop(draw_state)
-			} else if (action == 'resize_seg') {
-				cs.resize_seg.stop(draw_state)
-			} else if (action == 'move_room_point') {
-				cs.move_room_point?.stop() // not moved: no edit started.
+			// an eave moves only past the drag threshold or with ctrl: a click
+			// toggles its gable instead. shift: only that eave.
+			if (action == 'move_eave') {
+				if (cs.moved || ui.keypressed('ctrl'))
+					cs.edit ??= draw_state.roof_floor.start_move_eave(
+						cs.roof_side, cs.roof_x, cs.roof_y)
+				if (cs.edit)
+					cs.can_move_eave = cs.edit.move(dx, dy,
+						ui.keypressed('shift'))
 			}
+
+			// the line between two roof faces follows the pointer at the
+			// grabbed height, past the drag threshold or with ctrl.
+			if (action == 'move_line') {
+				let roof_floor = draw_state.roof_floor
+				if (cs.moved || ui.keypressed('ctrl'))
+					cs.edit ??= roof_floor.start_move_line(
+						cs.roof_face1, cs.roof_face2, cs.roof_z)
+				if (cs.edit)
+					cs.can_move_line = cs.edit.move(
+						cs.roof_x + dx, cs.roof_y + dy)
+			}
+
+			if (action == 'pan') {
+				sg.x0 = sg.pan_x0 + dx * sg.scale
+				sg.y0 = sg.pan_y0 + dy * sg.scale
+				sg.panned = true
+			}
+
+			if (cs.drop)
+				cs.edit?.stop()
 		}
 
 	}
@@ -487,11 +597,31 @@ function floor_editor_update(id, s) {
 		plan.delete_seg(hs.seg)
 	}
 
+	// double-clicked an eave side: remove its edge point.
+	let is_resetting_eave = !readonly
+		&& hs?.action == 'move_eave' && ui.dblclick && hs.roof_side.edge_point
+	if (is_resetting_eave)
+		draw_state.roof_floor.remove_edge_point(hs.roof_side.edge_point)
+
+	// double-clicked a line between two roof faces: both faces back to the
+	// roof's pitch.
+	let is_resetting_line = !readonly
+		&& hs?.action == 'move_line' && ui.dblclick
+	if (is_resetting_line)
+		draw_state.roof_floor.reset_line(hs.roof_face1, hs.roof_face2)
+
 	// clicked inside a room without dragging: open or close the room.
 	let is_toggling_room = !readonly && cs?.drop && !cs.cancel && !cs.moved
-		&& (!cs.action || cs.action == 'move_room_point') && cs.cycle
+		&& !cs.edit && (!cs.action || cs.action == 'move_room_point') && cs.cycle
 	if (is_toggling_room)
 		plan.toggle_room(cs.cycle, cs.room_x, cs.room_y)
+
+	// clicked an eave side without dragging: switch it between gable and
+	// the roof's pitch.
+	let is_toggling_gable = !readonly && cs?.drop && !cs.cancel && !cs.moved
+		&& !cs.edit && cs.action == 'move_eave'
+	if (is_toggling_gable)
+		draw_state.roof_floor.toggle_gable(cs.roof_side, cs.roof_x, cs.roof_y)
 
 	let is_removing_room_point = !readonly && !cs && hs?.room_point
 		&& ui.focus_inside(id) && ui.keydown('delete')
@@ -499,25 +629,18 @@ function floor_editor_update(id, s) {
 		plan.remove_room_point(hs.room_point)
 
 	if (cs?.drop || cs?.cancel || is_deleting_seg || is_removing_room_point
-		|| is_restored
+		|| is_resetting_eave || is_resetting_line || is_restored
 	) {
 		draw_state.snap_lines.length = 0
-		draw_state.measure_edges.length = 0
-		if (hs) {
-			hs.seg = null
-			hs.p = null
-			hs.cycle = null
-			hs.room_point = null
-			hs.action = null
-		}
-		if (cs) {
-			cs.seg = null
-			cs.p = null
-			cs.cycle = null
-			cs.room_point = null
-			cs.action = null
-		}
 	}
+
+	// the hit phase ran before this update: changed house or view: hit
+	// again in a second pass of this frame.
+	let is_changed = s.house.edit_no != edit_no0 || cs?.drop || cs?.cancel
+		|| plan != floor0 || s.is_roof_level != is_roof_level0
+		|| hs && ui.wheel_dy
+	if (is_changed)
+		ui.rebuild('floor_editor_changed')
 
 }
 
@@ -555,6 +678,7 @@ ui.box_widget('floor_editor', {
 			s.house = value != null && !s.validation.failed
 				? house_plan(json_arg(value)) : null
 			s.floor = s.house?.floors[0]
+			s.is_roof_level = false
 			s.value_edit_no = 0 // house.edit_no of the value loaded or published
 			scale_group('editor').rotation = s.house?.rotation ?? 0
 		}
@@ -569,14 +693,21 @@ ui.box_widget('floor_editor', {
 
 		s.draw_state ??= {
 			snap_lines: [],
-			measure_edges: [],
 			above_floors: [],
 			below_floors: [],
 			below_cycles: [], // [edges, ...] of the floor below, except outlines
+			roof_faces: [], // roof_floor's make_roof_faces()
+			roof_sides: [], // roof_floor's eave sides from make_roof_faces()
+			roof_lines: [], // [{p, q, face1, face2}, ...] shared roof segments
 		}
 		let draw_state = s.draw_state
 		let plan = s.floor
 		draw_state.readonly = s.readonly
+		draw_state.is_roof_level = s.is_roof_level
+		// the floor whose roof is edited: the floor below; the roof level:
+		// the top floor.
+		draw_state.roof_floor = s.is_roof_level
+			? plan : plan.house.floors[plan.i-1]
 		let sg = scale_group('editor')
 
 		ui.stack()
@@ -590,9 +721,13 @@ ui.box_widget('floor_editor', {
 
 					ui.v(0, ui.sp05(), '[')
 						let floors = plan.house.floors
+						ui.color('text', s.is_roof_level ? 'active' : null)
+						ui.bold()
+						ui.text(id+'.roof', S('roof', 'ROOF'))
 						for (let i = floors.length-1; i >= 0; i--) {
 							let floor = floors[i]
-							ui.color('text', floor == plan ? 'active' : null)
+							ui.color('text', floor == plan && !s.is_roof_level
+								? 'active' : null)
 							ui.bold()
 							ui.text(id+'.floor'+floor.i, floor_names[floor.i]
 								?? S(floor.i+'_floor', '{0}ᵗʰ FLOOR', floor.i))
@@ -704,6 +839,8 @@ ui.box_widget('floor_editor', {
 				plan.house.rotation = sg.rotation
 				plan.house.edit_no++
 			}
+			// the hit phase ran on the view before the rotation.
+			ui.rebuild('floor_editor_changed')
 		}
 	},
 
@@ -724,17 +861,35 @@ ui.box_widget('floor_editor', {
 		// pick what parts of the plan to send over the network for drawing
 		// and in which format. note that the plan has arrays with props but
 		// the props will not be sent over because of how json works.
-		draw_state.comps = plan.comps
-		draw_state.segs = plan.segs // TODO: remove this from draw stream
-		draw_state.ps = plan.ps // TODO: remove this from draw stream
+		// the roof level: the top floor's walls are drawn like a floor below
+		// and not edited.
+		let is_roof_level = draw_state.is_roof_level
+		draw_state.comps = is_roof_level ? empty_array : plan.comps
+		draw_state.segs = is_roof_level ? empty_array : plan.segs // TODO: remove this from draw stream
+		draw_state.ps = is_roof_level ? empty_array : plan.ps // TODO: remove this from draw stream
 		draw_state.plan_snap_lines = plan.house.snap_lines
-		draw_state.room_points = plan.room_points
+		draw_state.room_points = is_roof_level ? empty_array : plan.room_points
 		draw_state.room_point_by_cycle = plan.room_point_by_cycle
+
+		// the roof of roof_floor: its faces and its eave sides.
+		let roof_floor = draw_state.roof_floor
+		draw_state.roof_sides.length = 0
+		draw_state.roof_lines.length = 0
+		draw_state.roof_faces = []
+		if (roof_floor) {
+			let roof_areas = []
+			for (let area of roof_floor.make_areas())
+				if (area.kind == 'roof')
+					roof_areas.push(area)
+			if (roof_areas.length)
+				draw_state.roof_faces = roof_floor.make_roof_faces(roof_areas,
+					draw_state.roof_sides, draw_state.roof_lines)
+		}
 
 		draw_state.above_floors.length = 0
 		draw_state.below_floors.length = 0
 		for (let plan1 of plan.house.floors) {
-			if (plan1 == plan)
+			if (plan1 == plan && !is_roof_level)
 				continue
 			let t = {comps: plan1.comps, segs: plan1.segs}
 			let a = plan1.i > plan.i ? draw_state.above_floors : draw_state.below_floors
@@ -771,7 +926,10 @@ ui.box_widget('floor_editor', {
 		let hit_p       = hs?.p
 		let hit_cycle   = hs?.cycle
 		let hit_room_point = hs?.room_point
-		let hit_x       = hs?.x
+		let hit_roof_side = hs?.roof_side
+		let hit_roof_face1 = hs?.roof_face1
+		let hit_roof_face2 = hs?.roof_face2
+		let hit_x      = hs?.x
 		let hit_y       = hs?.y
 		let drag_action = cs?.action
 		let drag_seg    = cs?.seg
@@ -820,7 +978,9 @@ ui.box_widget('floor_editor', {
 		{
 		let m = ui.em()
 		cx.fillStyle = ui.color_css('label')
-		let s = 'CTRL=No Snap  SHIFT=Pan'
+		// the keys that apply to what is under the pointer.
+		let s = hit_roof_side ? 'CTRL=No Snap  SHIFT=This Eave Only'
+			: 'CTRL=No Snap  SHIFT=Pan'
 		cx.fillText(s, m, h - m)
 		}
 
@@ -908,6 +1068,76 @@ ui.box_widget('floor_editor', {
 			draw_walls(cx, sg, plan1.comps, plan1.segs)
 		cx.globalAlpha = 1
 
+		// roof of roof_floor: the outlines of its faces. hovered or dragged
+		// eave side: its eave line.
+		cx.strokeStyle = ui.color_css('label')
+		for (let face of draw_state.roof_faces) {
+			cx.beginPath()
+			for (let ring of face.rings)
+				draw_edges(cx, sg, ring)
+			cx.stroke()
+		}
+		// dragged: hit_roof_side is from the drag start; the same side of
+		// this frame's roof has the moved eave line.
+		let roof_side = hit_roof_side
+		if (roof_side && drag_action == 'move_eave') {
+			let {nx, ny, wall_c, m1, m2} = roof_side
+			roof_side = null
+			for (let side of draw_state.roof_sides)
+				if (side.nx == nx && side.ny == ny && side.wall_c == wall_c
+					&& side.m1 == m1 && side.m2 == m2
+				) {
+					roof_side = side
+					break
+				}
+		}
+		if (roof_side) {
+			let scale = prism_union.grid_scale
+			let c  = roof_side.c  / scale
+			let e1 = roof_side.e1 / scale
+			let e2 = roof_side.e2 / scale
+			cx.beginPath()
+			if (roof_side.nx) {
+				cx.moveTo(sg.x(c), sg.y(e1))
+				cx.lineTo(sg.x(c), sg.y(e2))
+			} else {
+				cx.moveTo(sg.x(e1), sg.y(c))
+				cx.lineTo(sg.x(e2), sg.y(c))
+			}
+			cx.strokeStyle = ui.color_css('link')
+			cx.lineWidth = 3
+			cx.stroke()
+			cx.lineWidth = 1
+		}
+		// hovered or dragged line between two faces: their shared segments.
+		// hit_roof_face1 and hit_roof_face2 are from an earlier frame's roof
+		// (hovered: the hit phase; dragged: the drag start); the faces of
+		// this frame's roof in the same planes have the line.
+		let roof_face1 = hit_roof_face1
+		let roof_face2 = hit_roof_face2
+		if (roof_face1) {
+			roof_face1 = find_roof_face(draw_state.roof_faces,
+				roof_face1.sides[0])
+			roof_face2 = find_roof_face(draw_state.roof_faces,
+				roof_face2.sides[0])
+		}
+		if (roof_face1 && roof_face2) {
+			cx.beginPath()
+			for (let line of draw_state.roof_lines) {
+				let {p, q, face1, face2} = line
+				let is_same = face1 == roof_face1 && face2 == roof_face2
+					|| face1 == roof_face2 && face2 == roof_face1
+				if (!is_same)
+					continue
+				cx.moveTo(sg.x(p[0]), sg.y(p[1]))
+				cx.lineTo(sg.x(q[0]), sg.y(q[1]))
+			}
+			cx.strokeStyle = ui.color_css('link')
+			cx.lineWidth = 3
+			cx.stroke()
+			cx.lineWidth = 1
+		}
+
 		// cycles area
 		if (sg.scale > 0.4)
 			for (let co of draw_state.comps) {
@@ -920,7 +1150,7 @@ ui.box_widget('floor_editor', {
 					cx.fillStyle = ui.color_css('label')
 					let area = c.edges.area()
 					for (let icomp of c.islands)
-						area -= icomp.outer_cycle.edges.area()
+						area += icomp.outer_cycle.edges.area()
 					let s = format_area(area)
 					if (DEBUG_PLAN) s = co.id + '/' + c.id + ' ' + s
 					cx.save()
@@ -948,16 +1178,30 @@ ui.box_widget('floor_editor', {
 			cx.lineWidth = 1
 		}
 
-		// edge measurements
-		let me = draw_state.measure_edges
-		if (me && !sg.show_dims) {
-			for (let [ep1, ep2] of me) {
-				let x1 = ep1[0]
-				let y1 = ep1[1]
-				let x2 = ep2[0]
-				let y2 = ep2[1]
-				;[x1, y1, x2, y2] = line2.offset(-10, x1, y1, x2, y2, [])
-				draw_length(cx, sg, x1, y1, x2, y2)
+		// find all affected _|_ edges so we can show their lengths as we move
+		// the seg
+		if (drag_action == 'move_seg' && !sg.show_dims) {
+			let sp1 = drag_seg[0]
+			let sp2 = drag_seg[1]
+			let v = drag_seg.is_v
+			for (let co of draw_state.comps) {
+				for (let c of co.cycles) {
+					for (let i = 0, n = c.edges.length; i <= n; i++) {
+						let ep1 = c.edges[(i+0) % n]
+						let ep2 = c.edges[(i+1) % n]
+						if (!(ep1.p == sp1 && ep2.p == sp2
+							|| ep1.p == sp2 && ep2.p == sp1)) // not seg's edge
+							continue
+						let ep0 = last_perp_edge_point(c, i+0, n, -1, !v)
+						let ep3 = last_perp_edge_point(c, i+1, n,  1, !v)
+						if (!(ep0 || ep3))
+							continue
+						if (ep0)
+							draw_length(cx, sg, ep0[0], ep0[1], ep1[0], ep1[1])
+						if (ep3)
+							draw_length(cx, sg, ep2[0], ep2[1], ep3[0], ep3[1])
+					}
+				}
 			}
 		}
 
@@ -971,9 +1215,7 @@ ui.box_widget('floor_editor', {
 					for (let ei = 0, n = c.edges.length; ei < n; ei++) {
 						let ep1 = c.edges[ei]
 						let ep2 = c.edges[(ei + 1) % n]
-						let [x1, y1, x2, y2] = line2.offset(-10,
-							ep1[0], ep1[1], ep2[0], ep2[1])
-						draw_length(cx, sg, x1, y1, x2, y2)
+						draw_length(cx, sg, ep1[0], ep1[1], ep2[0], ep2[1])
 					}
 				}
 			}
@@ -993,35 +1235,30 @@ ui.box_widget('floor_editor', {
 			cx.fill()
 		}
 
-		// orthogonal measurements
-		if (0)
-		for (let i = 0; i < 2; i++) {
-			for (let m of draw_state.plan_snap_lines[i]) {
-				let x = sg.x(i == 0 ? m : -50)
-				let y = sg.y(i == 1 ? m : -20)
-				cx.save()
-				cx.translate(x, y)
-				//if (i == 0)
-					cx.rotate(-PI/4)
-				cx.fillStyle = 'white' //ui.color_css('label')
-				cx.strokeStyle = 'black'
-				cx.shadowBlur = 4
-				cx.shadowColor = 'black'
-				let s = format_length(m)
-				cx.fillText(s, 0, 0)
-				cx.restore()
-			}
-		}
-
 		// cursor
 		let seg = drag_action == 'move_seg' && drag_seg || (hit_action == 'move_seg' && hit_seg)
+		let axes_swapped = round((sg.rotation ?? 0) / (90*rad)) % 2 != 0
 		if (seg) {
 			if (seg[0].segs.length == 1 && seg[1].segs.length == 1)
 				ui.set_cursor('move')
 			else {
-				let axes_swapped = round((sg.rotation ?? 0) / (90*rad)) % 2 != 0
 				ui.set_cursor(seg.is_v != axes_swapped ? 'ew-resize' : 'ns-resize')
 			}
+		} else if (hit_roof_side) {
+			// shift on an eave side with 2+ edge points: no own overhang.
+			// pressed without a move started: a click that cannot toggle the
+			// gable.
+			let is_blocked = cs?.can_move_eave === false || cs && !cs.edit
+				&& !draw_state.roof_floor.can_toggle_gable(hit_roof_side)
+			ui.set_cursor(is_blocked ? 'not-allowed'
+				: !!hit_roof_side.nx != axes_swapped ? 'ew-resize' : 'ns-resize')
+		} else if (hit_roof_face1) {
+			// grabbed at or below the wall top, a side with 2+ edge points,
+			// or moved onto or past both faces' wall lines: blocked.
+			let is_blocked = cs?.edit ? cs.can_move_line === false
+				: !draw_state.roof_floor.can_move_line(
+					hit_roof_face1, hit_roof_face2, hs.roof_z)
+			ui.set_cursor(is_blocked ? 'not-allowed' : 'move')
 		} else if (hit_p)
 			ui.set_cursor('copy')
 		else if (drag_action == 'pan')
@@ -1029,6 +1266,8 @@ ui.box_widget('floor_editor', {
 		else if (hs) {
 			if (hit_action == 'pan')
 				ui.set_cursor('grab')
+			else if (draw_state.is_roof_level) // no walls to draw.
+				ui.set_cursor(cs?.moved ? 'not-allowed' : 'default')
 			else
 				ui.set_cursor('copy')
 		}
@@ -1096,6 +1335,11 @@ ui.box_widget('floor_editor', {
 		cycle, room_x, room_y      inside inner cycle
 		room_point,
 		action=move_room_point     hit room point
+		roof_side, roof_x, roof_y,
+		action=move_eave           hit eave side
+		roof_face1, roof_face2,
+		roof_x, roof_y, roof_z,
+		action=move_line           hit line between two roof faces
 	*/
 	hit: function(a, i) {
 
@@ -1124,6 +1368,8 @@ ui.box_widget('floor_editor', {
 
 		let pan    = ui.keypressed('shift')
 		let nosnap = ui.keypressed('ctrl')
+		let snap_d = nosnap ? 2 : 20
+		let snap_lines = draw_state.plan_snap_lines
 
 		hs.mx = ui.mx - x00 // pointer position before view rotation, for zooming.
 		hs.my = ui.my - y00
@@ -1136,13 +1382,11 @@ ui.box_widget('floor_editor', {
 			hs.my = h / 2 - dx * s + dy * c
 		}
 
-		if (pan) {
-			hs.action = 'pan'
+		if (draw_state.readonly) {
+			if (pan)
+				hs.action = 'pan'
 			return true
 		}
-
-		if (draw_state.readonly)
-			return true
 
 		cx.save()
 		cx.translate(x00, y00)
@@ -1151,6 +1395,13 @@ ui.box_widget('floor_editor', {
 
 		let mx = sg.plan_x(ui.mx)
 		let my = sg.plan_y(ui.my)
+
+		if (pan) {
+			hs.action = 'pan'
+			cx.restore()
+			ui.update_mouse()
+			return true
+		}
 
 		let snap_margin = 15
 
@@ -1228,8 +1479,8 @@ ui.box_widget('floor_editor', {
 				if (ui.hit_bbox(sx1, sy1, sx2, sy2)) {
 					hit_seg = seg
 					hs.seg = seg
-					let sx = !v ? plan.snap_x(mx, nosnap) ?? mx : null
-					let sy = v  ? plan.snap_y(my, nosnap) ?? my : null
+					let sx = !v ? snap_lines[0].snap(mx, snap_d) ?? mx : null
+					let sy = v  ? snap_lines[1].snap(my, snap_d) ?? my : null
 					hs.x = sx ?? x1
 					hs.y = sy ?? y1
 					if (sx != null) sl.push(sx, 1)
@@ -1239,10 +1490,18 @@ ui.box_widget('floor_editor', {
 
 			}
 
+		// hit eave side, else line between two roof faces
+		let hit_roof = !hit_p && !hit_seg && !hit_room_point
+			&& (hit_roof_side(hs, draw_state, sg, mx, my)
+				|| hit_roof_line(hs, draw_state, sg, mx, my))
+
+		// the roof level has no walls to draw or rooms to open.
+		let is_roof_level = draw_state.is_roof_level
+
 		// hit snapping point
-		if (!hit_p && !hit_seg && !hit_room_point) {
-			let sx = plan.snap_x(mx, nosnap)
-			let sy = plan.snap_y(my, nosnap)
+		if (!hit_p && !hit_seg && !hit_room_point && !hit_roof && !is_roof_level) {
+			let sx = snap_lines[0].snap(mx, snap_d)
+			let sy = snap_lines[1].snap(my, snap_d)
 			hs.x = sx ?? mx
 			hs.y = sy ?? my
 			if (sx != null) sl.push(sx, 1)
@@ -1250,7 +1509,7 @@ ui.box_widget('floor_editor', {
 		}
 
 		// hit inner cycle
-		if (!hit_p && !hit_seg) {
+		if (!hit_p && !hit_seg && !hit_roof && !is_roof_level) {
 			hit_cycle = plan.hit_cycle_edges(mx, my)
 			if (hit_cycle) {
 				hs.cycle = hit_cycle

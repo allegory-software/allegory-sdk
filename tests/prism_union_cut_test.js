@@ -417,8 +417,8 @@ function check_solid(r) {
 }
 
 function set_roof(h, pitch, edge_points) {
-	h.floors[h.floors.length-1].roof = {pitch, overhang: 60,
-		edge_points: edge_points ?? []}
+	h.floors[h.floors.length-1].roof = {pitch, overhang: 60, eave_h: -22,
+		max_overhang: 150, edge_points: edge_points ?? []}
 }
 
 // plans ---------------------------------------------------------------------

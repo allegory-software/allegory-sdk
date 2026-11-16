@@ -74,6 +74,46 @@ function input_edges(rings) {
 	return edges
 }
 
+function check_shared_edges(faces, shared_edges) {
+	let points = new Set()
+	for (let face of faces)
+		for (let ring of face.rings)
+			for (let point of ring)
+				points.add(point)
+	for (let {p, q, face1, face2} of shared_edges) {
+		assert(points.has(p) && points.has(q), 'endpoints reuse face points')
+		assert(faces.includes(face1) && faces.includes(face2))
+		assert.notEqual(face1, face2)
+		assert(Math.hypot(q[0] - p[0], q[1] - p[1]) > 0)
+		for (let face of [face1, face2]) {
+			let [a, b, c] = face.plane
+			assert(abs_near(p[2], a * p[0] + b * p[1] + c))
+			assert(abs_near(q[2], a * q[0] + b * q[1] + c))
+			let on_boundary = false
+			for (let ring of face.rings) {
+				for (let i = 0, n = ring.length; i < n; i++) {
+					let u = ring[i], v = ring[(i+1) % n]
+					let dx = v[0] - u[0], dy = v[1] - u[1]
+					let len = Math.hypot(dx, dy)
+					if (!len)
+						continue
+					let cross_p = (p[0] - u[0]) * dy - (p[1] - u[1]) * dx
+					let cross_q = (q[0] - u[0]) * dy - (q[1] - u[1]) * dx
+					if (Math.abs(cross_p) > NEAR * len)
+						continue
+					if (Math.abs(cross_q) > NEAR * len)
+						continue
+					let tp = ((p[0] - u[0]) * dx + (p[1] - u[1]) * dy) / len**2
+					let tq = ((q[0] - u[0]) * dx + (q[1] - u[1]) * dy) / len**2
+					if (Math.min(tp, tq) >= -NEAR && Math.max(tp, tq) <= 1+NEAR)
+						on_boundary = true
+				}
+			}
+			assert(on_boundary, 'shared segment is on both face boundaries')
+		}
+	}
+}
+
 // height of the plane of input edge `edge` at (x, y).
 function plane_z(edge, pitch, eave_z, x, y) {
 	let [[x1, y1], [x2, y2]] = edge
@@ -118,8 +158,10 @@ function chessboard_dist(rings, x, y) {
 // sample points may lie in no face and face areas may add up to less than
 // the footprint area. returns sample points + heights.
 function check_roof(rings, pitches, eave_z, is_covered = true) {
+	let shared_edges = []
 	let faces = roof_skeleton(rings, pitches,
-		Array(pitches.length).fill(eave_z))
+		Array(pitches.length).fill(eave_z), shared_edges)
+	check_shared_edges(faces, shared_edges)
 	let edges = input_edges(rings)
 
 	for (let face of faces)
@@ -214,6 +256,29 @@ check('hip square', () => {
 	let {faces} = check_roof(rings, [45, 45, 45, 45], 0)
 	assert.equal(faces.length, 4)
 	assert.ok(abs_near(max_z(faces), 3))
+})
+
+check('shared edges leave faces unchanged and append to the output', () => {
+	let rings = [rect(0, 0, 10, 4)]
+	let pitches = [45, 45, 45, 45]
+	let zs = [100, 100, 100, 100]
+	let sentinel = {}
+	let edges = [sentinel]
+	let faces = roof_skeleton(rings, pitches, zs, edges)
+	assert.deepEqual(faces, roof_skeleton(rings, pitches, zs))
+	assert.equal(edges[0], sentinel)
+	assert.equal(edges.length, 6) // four hips and one ridge.
+	check_shared_edges(faces, edges.slice(1))
+})
+
+check('collinear eaves in one plane create no extra shared edges', () => {
+	let rings = [[[0, 0], [5, 0], [10, 0], [10, 4], [0, 4]]]
+	let edges = []
+	let faces = roof_skeleton(rings, [45, 45, 45, 45, 45],
+		[0, 0, 0, 0, 0], edges)
+	assert.equal(faces.length, 4)
+	assert.equal(edges.length, 5)
+	check_shared_edges(faces, edges)
 })
 
 check('gable rectangle', () => {
@@ -313,6 +378,15 @@ check('step, tie rule: the faster edge continues', () => {
 	assert.ok(abs_near(face_area(faces, 2), 5))
 	assert.ok(abs_near(face_area(faces, 0), 90))
 	assert.ok(abs_near(max_z(faces), 5))
+	let shared_edges = []
+	roof_skeleton(rings, [shallow, 90, 45, 90, 90, 90],
+		[0, 0, 0, 0, 0, 0], shared_edges)
+	assert.equal(shared_edges.length, 1)
+	let {p, q} = shared_edges[0]
+	assert(abs_near(p[1], 2) && abs_near(q[1], 2))
+	assert(abs_near(p[2], 1) && abs_near(q[2], 1))
+	assert(abs_near(Math.min(p[0], q[0]), 5))
+	assert(abs_near(Math.max(p[0], q[0]), 10))
 })
 
 // eaves at different heights ------------------------------------------------
@@ -365,7 +439,9 @@ function check_overhang(wall_ring, pitches, d, is_covered = true,
 		eave_zs.push(pitch == 90 ? 0 : -d * Math.tan(pitch * rad))
 	}
 	let ring = offset_ring(wall_ring, ds)
-	let faces = roof_skeleton([ring], pitches, eave_zs)
+	let shared_edges = []
+	let faces = roof_skeleton([ring], pitches, eave_zs, shared_edges)
+	check_shared_edges(faces, shared_edges)
 	let wall_edges = input_edges([wall_ring])
 
 	for (let face of faces)
@@ -575,7 +651,10 @@ check('random column shapes, no holes: no face has a hole', () => {
 		if (!pitches.some(p => p != 90))
 			pitches[0] = 45
 		let eave_zs = Array(pitches.length).fill(0)
-		for (let face of roof_skeleton([ring], pitches, eave_zs))
+		let shared_edges = []
+		let faces = roof_skeleton([ring], pitches, eave_zs, shared_edges)
+		check_shared_edges(faces, shared_edges)
+		for (let face of faces)
 			for (let face_ring of face.rings)
 				if (ring_area(face_ring) <= 0) {
 					console.error('ring', JSON.stringify(ring),

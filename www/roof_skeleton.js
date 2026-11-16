@@ -3,12 +3,15 @@
 	Weighted straight skeleton of axis-aligned polygons, for roofs.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	roof_skeleton(rings, pitches, eave_zs) -> faces
+	roof_skeleton(rings, pitches, eave_zs, shared_edges) -> faces
 		rings    [[[x, y], ...], ...]  outer ring (area > 0), holes (area < 0)
 		pitches  [deg, ...]            per edge, edges of all rings in order
 		eave_zs  [z, ...]              per edge: the height of its eave
 		faces    [{edge_is: [i, ...], rings: [[[x, y, z], ...], ...],
 		           plane: [a, b, c]}, ...]
+		shared_edges  optional array: append {p, q, face1, face2} for each
+		              shared segment, in event order. p, q reference points
+		              in the returned face rings.
 
 	Edges with pitch 90 are vertical (gable ends, edges against a wall) and
 	get no face. A sloped edge with its eave above the lowest eave stays
@@ -70,14 +73,15 @@ function tail_is_reflex(piece) {
 	return piece.prev.plane.n == -piece_dir(piece)
 }
 
-function roof_skeleton(rings, pitches, eave_zs) {
+function roof_skeleton(rings, pitches, eave_zs, shared_edges) {
 
-	let planes = [] // [{is_v, c, n, s, t0, edge_is, half_edges}, ...]
+	let planes = [] // [{is_v, c, n, s, t0, edge_is, half_edges, face}, ...]
 		// t0: the time the plane starts moving.
 	let pieces = [] // [{plane, start_plane, prev, next, n1}, ...]
 		// start_plane: the sloped plane that replaces the vertical one at
 		// its t0.
-	let nodes_now = [] // [{x, y, t}, ...] created at the current time
+	let nodes_now = [] // [{x, y, t, point}, ...] created at the current time
+	let shared = shared_edges && [] // [node1, node2, plane1, plane2, ...]
 
 	// nodes ---------------------------------------------------------------
 
@@ -113,6 +117,9 @@ function roof_skeleton(rings, pitches, eave_zs) {
 			return
 		p.plane.half_edges.push(node0, node)
 		q.plane.half_edges.push(node, node0)
+		if (shared && p.plane.s && q.plane.s
+			&& p.plane != q.plane)
+			shared.push(node0, node, p.plane, q.plane)
 	}
 
 	// events --------------------------------------------------------------
@@ -381,6 +388,17 @@ function roof_skeleton(rings, pitches, eave_zs) {
 		for (let line of lines) {
 			let nodes = line.nodes
 			let span_n = nodes.length - 1
+			if (shared) {
+				for (let k = 0; k < span_n; k++) {
+					let plane1 = line.olds[1][k]?.plane
+					let plane2 = line.olds[-1][k]?.plane
+					let plane3 = line.news[1][k]?.owner ?? line.news[-1][k]?.owner
+					plane1 ??= plane2
+					plane2 = plane3 ?? plane2
+					if (plane1?.s && plane2?.s && plane1 != plane2)
+						shared.push(nodes[k], nodes[k+1], plane1, plane2)
+				}
+			}
 			for (let d of [1, -1]) {
 				let olds = line.olds[d]
 				let news = line.news[d]
@@ -550,7 +568,10 @@ function roof_skeleton(rings, pitches, eave_zs) {
 				is_traced[i] = true
 				let n1 = he[i+0]
 				let n2 = he[i+1]
-				ring.push([n1.x, n1.y, eave_z + n1.t])
+				let point = [n1.x, n1.y, eave_z + n1.t]
+				ring.push(point)
+				if (shared)
+					n1.point ??= point
 				area += n1.x * n2.y - n2.x * n1.y
 				// where the face touches itself at a node, take the
 				// leftmost turn to keep its rings separate.
@@ -581,8 +602,20 @@ function roof_skeleton(rings, pitches, eave_zs) {
 			let dz = plane.n / plane.s // dz per unit of m
 			let a = plane.is_v ? dz : 0
 			let b = plane.is_v ? 0 : dz
-			faces.push({edge_is: plane.edge_is, rings: face_rings,
-				plane: [a, b, eave_z + plane.t0 - dz * plane.c]})
+			let face = {edge_is: plane.edge_is, rings: face_rings,
+				plane: [a, b, eave_z + plane.t0 - dz * plane.c]}
+			faces.push(face)
+			if (shared)
+				plane.face = face
+		}
+	}
+	if (shared) {
+		for (let i = 0; i < shared.length; i += 4) {
+			let face1 = shared[i+2].face
+			let face2 = shared[i+3].face
+			if (face1 && face2)
+				shared_edges.push({p: shared[i].point, q: shared[i+1].point,
+					face1: face1, face2: face2})
 		}
 	}
 	return faces

@@ -28,7 +28,10 @@
 	tags can touch but must not overlap: the code adds no faces between them.
 
 	The planes of the prisms over one plan region must not cross in it,
-	except where a cutter's bottom crosses the planes of the prisms it cuts.
+	except where a cutter's bottom crosses the planes of the prisms it cuts,
+	and where the planes of two cutters cross. There, the code splits the
+	plan on the crossing line rounded to the grid, so the solid gets thin
+	step faces along it.
 
 	Before the overlay, the code rounds each crossing of a diagonal edge with
 	another edge to the grid once, and puts that point in both edges, so
@@ -318,6 +321,7 @@ function prism_union(prisms) {
 	let cut_regions = [] // [{cutter, paths}, ...]
 	let cuts = map() // {cutter -> {prism -> [bottom_cut, top_cut]}}
 		// cut: true: everywhere, false: nowhere, cut region: inside it.
+	let cutter_bboxes = [] // [{cutter, x1, y1, x2, y2}, ...] with the margin
 	for (let cutter of prisms) {
 		if (!cutter.is_cutter)
 			continue
@@ -338,6 +342,7 @@ function prism_union(prisms) {
 		y1 -= 2
 		x2 += 2
 		y2 += 2
+		cutter_bboxes.push({cutter: cutter, x1: x1, y1: y1, x2: x2, y2: y2})
 		let prism_cuts = map()
 		cuts.set(cutter, prism_cuts)
 		for (let prism of prisms) {
@@ -379,17 +384,85 @@ function prism_union(prisms) {
 		return cut === true || cut !== false && cell.cut_regions.includes(cut)
 	}
 
+	// splits: where a plane of a cutter crosses a plane of another cutter
+	// inside both bboxes and the two cutters overlap, the code adds a split
+	// region: one side of the crossing line, inside both bboxes. on the
+	// rounded line, the two planes can be out of order by the plane z of
+	// one grid unit across the line.
+	let split_regions = [] // [{cutter1, cutter2, plane1, plane2, dz, paths},
+		// ...] dz: the most z by which the planes can be out of order.
+	for (let i = 0; i < cutter_bboxes.length; i++) {
+		let bbox1 = cutter_bboxes[i]
+		let cutter1 = bbox1.cutter
+		for (let j = i+1; j < cutter_bboxes.length; j++) {
+			let bbox2 = cutter_bboxes[j]
+			let cutter2 = bbox2.cutter
+			let x1 = max(bbox1.x1, bbox2.x1)
+			let y1 = max(bbox1.y1, bbox2.y1)
+			let x2 = min(bbox1.x2, bbox2.x2)
+			let y2 = min(bbox1.y2, bbox2.y2)
+			if (x1 >= x2 || y1 >= y2)
+				continue
+			// cutters that only touch: no splits.
+			if (!clip(ClipType.Intersection, cutter1.paths, cutter2.paths, [])
+				.length)
+				continue
+			for (let plane1 of [cutter1.bottom, cutter1.top]) {
+				for (let plane2 of [cutter2.bottom, cutter2.top]) {
+					// f: plane1 minus plane2, in grid units: linear, so its
+					// extremes in the box are at the corners.
+					let a = plane1[0] - plane2[0]
+					let b = plane1[1] - plane2[1]
+					let c = (plane1[2] - plane2[2]) * SCALE
+					let f_min =  inf
+					let f_max = -inf
+					for (let [x, y] of [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]) {
+						let f = a * x + b * y + c
+						f_min = min(f_min, f)
+						f_max = max(f_max, f)
+					}
+					if (f_min >= 0 || f_max <= 0)
+						continue
+					split_regions.push({
+						cutter1: cutter1,
+						cutter2: cutter2,
+						plane1: plane1,
+						plane2: plane2,
+						dz: hypot(a, b) + 1, // +1: grid_z() rounding.
+						paths: half_plane_paths(a, b, c, x1, y1, x2, y2),
+					})
+				}
+			}
+		}
+	}
+	// the most z by which plane1 can be above plane2 in the cell.
+	function out_of_order_dz(cell, plane1, plane2) {
+		for (let split_region of cell.split_regions) {
+			let p1 = split_region.plane1
+			let p2 = split_region.plane2
+			if (p1 == plane1 && p2 == plane2 || p1 == plane2 && p2 == plane1)
+				return split_region.dz
+		}
+		return 0
+	}
+
 	// cells: the code cuts the plan into cells, each covered by the same
 	// prisms everywhere, by overlaying the prisms one by one. the overlay
 	// keeps collinear points: the snapped points on straight edges. without
 	// them, a later op would round the crossing again, maybe elsewhere.
 	// the code snaps the cut regions with the prisms and overlays each one
-	// only on the cells of its cutter.
-	let snapped_paths = snap_paths([...prisms, ...cut_regions])
+	// only on the cells of its cutter. same for the split regions, on the
+	// cells of both their cutters.
+	let snapped_paths = snap_paths([...prisms, ...cut_regions,
+		...split_regions])
 	let prism_paths = snapped_paths.slice(0, prisms.length)
 	for (let i = 0; i < cut_regions.length; i++)
 		cut_regions[i].paths = snapped_paths[prisms.length + i]
-	let cells = [] // [{paths, prisms, cut_regions, ranges}, ...]
+	for (let i = 0; i < split_regions.length; i++)
+		split_regions[i].paths =
+			snapped_paths[prisms.length + cut_regions.length + i]
+	let cells = [] // [{paths, prisms, cut_regions, split_regions, ranges},
+		// ...]
 	for (let prism_i = 0; prism_i < prisms.length; prism_i++) {
 		let prism = prisms[prism_i]
 		let paths = prism_paths[prism_i]
@@ -403,15 +476,16 @@ function prism_union(prisms) {
 			let out_paths = clip(ClipType.Difference  , cell.paths, paths, [])
 			if (in_paths.length)
 				cells1.push({paths: in_paths, prisms: [...cell.prisms, prism],
-					cut_regions: []})
+					cut_regions: [], split_regions: []})
 			if (out_paths.length)
 				cells1.push({paths: out_paths, prisms: cell.prisms,
-					cut_regions: []})
+					cut_regions: [], split_regions: []})
 			if (rest.length)
 				rest = clip(ClipType.Difference, rest, cell.paths, [])
 		}
 		if (rest.length)
-			cells1.push({paths: rest, prisms: [prism], cut_regions: []})
+			cells1.push({paths: rest, prisms: [prism], cut_regions: [],
+				split_regions: []})
 		cells = cells1
 	}
 	for (let cut_region of cut_regions) {
@@ -426,10 +500,33 @@ function prism_union(prisms) {
 			let out_paths = clip(ClipType.Difference  , cell.paths, paths, [])
 			if (in_paths.length)
 				cells1.push({paths: in_paths, prisms: cell.prisms,
-					cut_regions: [...cell.cut_regions, cut_region]})
+					cut_regions: [...cell.cut_regions, cut_region],
+					split_regions: []})
 			if (out_paths.length)
 				cells1.push({paths: out_paths, prisms: cell.prisms,
-					cut_regions: cell.cut_regions})
+					cut_regions: cell.cut_regions, split_regions: []})
+		}
+		cells = cells1
+	}
+	for (let split_region of split_regions) {
+		let cells1 = []
+		for (let cell of cells) {
+			if (!cell.prisms.includes(split_region.cutter1)
+				|| !cell.prisms.includes(split_region.cutter2)
+			) {
+				cells1.push(cell)
+				continue
+			}
+			let paths = split_region.paths
+			let in_paths  = clip(ClipType.Intersection, cell.paths, paths, [])
+			let out_paths = clip(ClipType.Difference  , cell.paths, paths, [])
+			let split_regions1 = [...cell.split_regions, split_region]
+			if (in_paths.length)
+				cells1.push({paths: in_paths, prisms: cell.prisms,
+					cut_regions: cell.cut_regions, split_regions: split_regions1})
+			if (out_paths.length)
+				cells1.push({paths: out_paths, prisms: cell.prisms,
+					cut_regions: cell.cut_regions, split_regions: split_regions1})
 		}
 		cells = cells1
 	}
@@ -438,7 +535,8 @@ function prism_union(prisms) {
 	// cut by the cell's cutters, into solid ranges per tag and adds an up face
 	// at the top of each range and a down face at its bottom. no two planes
 	// cross in the cell, so their order at the average of the cell's points
-	// is their order everywhere in the cell.
+	// is their order everywhere in the cell, up to the rounding of the
+	// cell's split lines.
 	let plane_groups = map() // {'normal tag a b c' ->
 		// {plane, normal, tag, paths}}
 	function add_plane_paths(plane, normal, tag, paths) {
@@ -484,7 +582,7 @@ function prism_union(prisms) {
 					if (!is_cut(cell, top_cut))
 						continue
 					// cut by several cutters: the lowest bottom. bottoms that
-					// cross in the cell fail the 'prism planes cross' check.
+					// cross split the cell.
 					if (is_top_cut
 						&& grid_z(cutter.bottom, cx, cy) >= grid_z(top, cx, cy))
 						continue
@@ -503,17 +601,26 @@ function prism_union(prisms) {
 			})
 		}
 
-		// planes cross in the cell: they are out of order at some point.
+		// planes cross in the cell: they are out of order at some point, by
+		// more than the rounding of the cell's split lines.
 		let planes = []
 		for (let range of ranges)
 			planes.push(range.bottom, range.top)
 		planes.sort((plane1, plane2) =>
 			grid_z(plane1, cx, cy) - grid_z(plane2, cx, cy))
-		for (let path of cell.paths)
-			for (let p of path)
-				for (let i = 1; i < planes.length; i++)
-					assert(grid_z(planes[i-1], p.x, p.y)
-						<= grid_z(planes[i], p.x, p.y), 'prism planes cross')
+		for (let path of cell.paths) {
+			for (let p of path) {
+				for (let i = 1; i < planes.length; i++) {
+					let plane1 = planes[i-1]
+					let plane2 = planes[i]
+					let dz = grid_z(plane1, p.x, p.y) - grid_z(plane2, p.x, p.y)
+					if (dz <= 0)
+						continue
+					assert(dz <= out_of_order_dz(cell, plane1, plane2),
+						'prism planes cross')
+				}
+			}
+		}
 
 		ranges.sort((range1, range2) => range1.z1 - range2.z1)
 		cell.ranges = [] // solid ranges: [{bottom, top, tag, z1, z2,

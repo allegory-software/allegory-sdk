@@ -3,7 +3,7 @@
 const G = window
 
 const {
-	round, mod, abs, sign, min, max, clamp, sqrt, tan, rad,
+	round, mod, abs, sign, min, max, clamp, sqrt, tan, atan, rad,
 	assert, log, push_log, pop_log, push_log_if,
 	insert, remove_value, uniq_sorted, map, assign, clock, json,
 } = glue
@@ -38,12 +38,15 @@ function house_plan(t) {
 
 	function copy_roof(roof) {
 		if (!roof)
-			return {pitch: 20, overhang: 60, edge_points: []}
+			return {pitch: 20, overhang: 60, eave_h: -22, max_overhang: 150,
+				edge_points: []}
 		let edge_points = []
 		for (let edge_point of roof.edge_points ?? [])
 			edge_points.push({x: edge_point.x, y: edge_point.y,
-				pitch: edge_point.pitch})
+				pitch: edge_point.pitch, overhang: edge_point.overhang,
+				eave_h: edge_point.eave_h})
 		return {pitch: roof.pitch, overhang: roof.overhang ?? 60,
+			eave_h: roof.eave_h ?? -22, max_overhang: roof.max_overhang ?? 150,
 			edge_points: edge_points}
 	}
 
@@ -145,7 +148,11 @@ function house_plan(t) {
 		floor.orthogonal = true
 
 		floor.house = house
-		// {pitch:, overhang:, edge_points: [{x:, y:, pitch:}, ...]}
+		// {pitch:, overhang:, eave_h:, max_overhang:,
+		// edge_points: [{x:, y:, pitch:, overhang:, eave_h:}, ...]}
+		// overhang: of gables. eave_h: eave height of sloped sides above the
+		// wall top (<= 0). max_overhang: of sloped sides: past it, the eave is
+		// higher. edge point pitch, overhang, eave_h: null = the roof's.
 		floor.roof = copy_roof(t.roof)
 		floor.i = floor_i
 		floor.id = 'floor'+floor_i
@@ -160,7 +167,6 @@ function house_plan(t) {
 
 		floor._after_fix = function() {
 			create_edges()
-			fix_open_rooms()
 			fix_snap_lines()
 		}
 
@@ -176,6 +182,7 @@ function house_plan(t) {
 
 			for (let comp of floor.comps) {
 				for (let c of comp.cycles) {
+					c.invalidate()
 					let edges = poly2()
 					edges.get_point = poly_get_point
 					c.edges = c.offset(c.outer ? (c.comp.inside ? -o_int : -o_ext) : -o_int, edges)
@@ -189,6 +196,8 @@ function house_plan(t) {
 
 			// recompute house plan bbox.
 			house.bb = house_bb()
+
+			fix_open_rooms()
 
 		}
 
@@ -231,6 +240,7 @@ function house_plan(t) {
 			s.move = function(dx, dy) {
 				room_point.x = x0 + dx
 				room_point.y = y0 + dy
+				fix_open_rooms()
 			}
 			s.stop = function() {
 				floor.fix()
@@ -322,22 +332,24 @@ function house_plan(t) {
 		// side next to the outside of the floor's outlines is an eave side;
 		// its other sides run along the walls of the floor above: vertical,
 		// they don't move. the roof's edges are the sides of its perimeter:
-		// the eave sides moved outward by the overhang. an edge point sets
-		// the pitch of the nearest eave side. two or more points on one side:
-		// the roof's pitch, like room points. the faces are the roof's top.
-		// each sloped side's plane passes through the floor's top on the
-		// outer skin, so its eave is lower by the overhang times the slope.
-		floor.make_roof_faces = function(roof_areas) {
+		// the eave sides moved outward by their overhang. an edge point sets
+		// the pitch, overhang and eave height of the nearest eave side. two or
+		// more points on one side: the roof's, like room points. the faces are
+		// the roof's top. each sloped side's plane passes through the floor's
+		// top on the outer skin, so its overhang is the eave height over the
+		// slope, up to max_overhang; past it, the eave is higher.
+		// eave_sides: optional array that receives the eave sides:
+		// [{nx, ny, c, wall_c, m1, m2, e1, e2, d, pitch, eave_z, is_eave,
+		// edge_point, is_only_slope}, ...] on the grid, see `sides`;
+		// edge_point: none, or null if 2+; is_only_slope: the only sloped eave
+		// side of its area.
+		// each face also gets `sides`: the eave sides in its plane.
+		// shared_edges: optional array, as in roof_skeleton().
+		floor.make_roof_faces = function(roof_areas, eave_sides, shared_edges) {
 			let roof = floor.roof
 			let wall_z = floor.z + floor.h
 			let scale = prism_union.grid_scale
-			let floor1 = house.floors[floor.i+1]
 			let {pointInPolygon, PointInPolygonResult} = clipper2
-
-			let area_paths = [] // ccw outlines and cw holes of all the areas
-			for (let area of roof_areas)
-				for (let path of area.paths)
-					area_paths.push(path)
 
 			// the side p-q of an area path has the outside of the floor's
 			// outlines next to its middle.
@@ -352,30 +364,54 @@ function house_plan(t) {
 				return true
 			}
 
-			let edge_point_by_side = map() // {'path_i i' -> edge_point|null if 2+}
+			let sides = [] // [{nx, ny, c, wall_c, m1, m2, e1, e2, d, pitch,
+				// is_eave, edge_point}, ...] n: outward normal, c: moved line,
+				// wall_c: wall line, m1..m2: extent, e1..e2: extent of the moved
+				// line, d: move.
+			let sides_by_path = [] // [[side, ...], ...] per area path
+			for (let area of roof_areas)
+				for (let path of area.paths) {
+					let ring_sides = []
+					for (let i = 0, n = path.length; i < n; i++) {
+						let p = path[i]
+						let q = path[(i+1) % n]
+						let is_v = p.x == q.x
+						let side = {
+							nx: sign(q.y - p.y),
+							ny: -sign(q.x - p.x),
+							wall_c: is_v ? p.x : p.y,
+							m1: is_v ? min(p.y, q.y) : min(p.x, q.x),
+							m2: is_v ? max(p.y, q.y) : max(p.x, q.x),
+							is_eave: is_eave_side(p, q),
+							edge_point: undefined,
+						}
+						ring_sides.push(side)
+						sides.push(side)
+					}
+					sides_by_path.push(ring_sides)
+				}
+
 			for (let edge_point of roof.edge_points) {
 				let x = edge_point.x * scale
 				let y = edge_point.y * scale
 				let min_d = 1/0
-				let min_key
-				for (let path_i = 0; path_i < area_paths.length; path_i++) {
-					let path = area_paths[path_i]
-					for (let i = 0, n = path.length; i < n; i++) {
-						let p = path[i]
-						let q = path[(i+1) % n]
-						if (!is_eave_side(p, q))
-							continue
-						let dx = max(min(p.x, q.x) - x, 0, x - max(p.x, q.x))
-						let dy = max(min(p.y, q.y) - y, 0, y - max(p.y, q.y))
-						let d = dx * dx + dy * dy
-						if (d >= min_d)
-							continue
-						min_d = d
-						min_key = path_i+' '+i
-					}
+				let found_side
+				for (let side of sides) {
+					if (!side.is_eave)
+						continue
+					let dx = side.nx ? abs(side.wall_c - x)
+						: max(side.m1 - x, 0, x - side.m2)
+					let dy = side.nx ? max(side.m1 - y, 0, y - side.m2)
+						: abs(side.wall_c - y)
+					let d = dx * dx + dy * dy
+					if (d >= min_d)
+						continue
+					min_d = d
+					found_side = side
 				}
-				edge_point_by_side.set(min_key,
-					edge_point_by_side.has(min_key) ? null : edge_point)
+				if (found_side)
+					found_side.edge_point = found_side.edge_point !== undefined
+						? null : edge_point
 			}
 
 			// the perimeter, on prism_union()'s grid: the outlines, a strip
@@ -385,8 +421,6 @@ function house_plan(t) {
 			// ends: at an inside corner, its line bounds the faces inside the
 			// house. outlines closer than twice the overhang merge.
 			let paths = []
-			let sides = [] // [{nx, ny, c, m1, m2, d, pitch}, ...]
-				// n: outward normal, c: moved line, m1..m2: extent, d: move.
 			// the corner at path[i] of a ccw path is an outside corner.
 			function is_convex(path, i) {
 				let n = path.length
@@ -396,72 +430,82 @@ function house_plan(t) {
 				return (p1.x - p0.x) * (p2.y - p1.y)
 					- (p1.y - p0.y) * (p2.x - p1.x) > 0
 			}
-			for (let path_i = 0; path_i < area_paths.length; path_i++) {
-				let path = area_paths[path_i]
-				paths.push(path)
-				let n = path.length
-				let ring_sides = []
-				for (let i = 0; i < n; i++) {
-					let p = path[i]
-					let q = path[(i+1) % n]
-					let is_eave = is_eave_side(p, q)
-					let pitch = is_eave
-						? edge_point_by_side.get(path_i+' '+i)?.pitch ?? roof.pitch
-						: 90
-					let is_moving = is_eave && (pitch != 90
-						|| is_convex(path, i) && is_convex(path, (i+1) % n))
-					let d = is_moving ? round(roof.overhang * scale) : 0
-					let nx = sign(q.y - p.y)
-					let ny = -sign(q.x - p.x)
-					let is_v = p.x == q.x
-					ring_sides.push({
-						nx: nx,
-						ny: ny,
-						c: is_v ? p.x + nx * d : p.y + ny * d,
-						m1: is_v ? min(p.y, q.y) : min(p.x, q.x),
-						m2: is_v ? max(p.y, q.y) : max(p.x, q.x),
-						d: d,
-						pitch: pitch,
-					})
-				}
-				for (let i = 0; i < n; i++) {
-					let p = path[i]
-					let q = path[(i+1) % n]
-					let {nx, ny, d} = ring_sides[i]
-					if (d) // ccw strip.
-						paths.push([p, {x: p.x + nx * d, y: p.y + ny * d},
-							{x: q.x + nx * d, y: q.y + ny * d}, q])
-					let side0 = ring_sides[(i+n-1) % n]
-					if (d && side0.d && is_convex(path, i)) { // ccw square.
-						let dx0 = side0.nx * side0.d
-						let dy0 = side0.ny * side0.d
-						paths.push([p, {x: p.x + dx0, y: p.y + dy0},
-							{x: p.x + dx0 + nx * d, y: p.y + dy0 + ny * d},
-							{x: p.x + nx * d, y: p.y + ny * d}])
+			let path_i = 0
+			for (let area of roof_areas) {
+				let only_sloped_side
+				for (let path of area.paths) {
+					paths.push(path)
+					let n = path.length
+					let ring_sides = sides_by_path[path_i++]
+					for (let i = 0; i < n; i++) {
+						let side = ring_sides[i]
+						let {nx, ny, wall_c, is_eave, edge_point} = side
+						let pitch = is_eave ? edge_point?.pitch ?? roof.pitch : 90
+						let is_moving = is_eave && (pitch != 90
+							|| is_convex(path, i) && is_convex(path, (i+1) % n))
+						let d
+						let eave_z
+						if (pitch == 90) {
+							let overhang = edge_point?.overhang ?? roof.overhang
+							d = is_moving ? round(overhang * scale) : 0
+							eave_z = wall_z
+						} else {
+							// level eaves: the overhang follows the pitch.
+							let slope = tan(pitch * rad)
+							let eave_h = edge_point?.eave_h ?? roof.eave_h
+							let overhang = -eave_h / slope // pitch 0: inf.
+							if (overhang < roof.max_overhang) {
+								d = round(overhang * scale)
+								eave_z = wall_z + eave_h
+							} else {
+								d = round(roof.max_overhang * scale)
+								eave_z = wall_z - roof.max_overhang * slope
+							}
+						}
+						side.c = wall_c + (nx + ny) * d
+						side.d = d
+						side.pitch = pitch
+						side.eave_z = eave_z
+						if (is_eave)
+							eave_sides?.push(side)
+						if (is_eave && pitch != 90)
+							only_sloped_side = only_sloped_side === undefined
+								? side : null
 					}
-				}
-				for (let side of ring_sides)
-					sides.push(side)
-			}
-			// the sides of the floor above, facing into it: where a strip ends
-			// at its wall, the perimeter side there is on its outline.
-			if (floor1) {
-				for (let path of add_outline_paths(floor1, [])) {
-					for (let i = 0, n = path.length; i < n; i++) {
+					// the ends of each side's moved line: where its neighbor's
+					// moved line crosses it; a collinear neighbor: the side's
+					// corner.
+					for (let i = 0; i < n; i++) {
+						let side = ring_sides[i]
+						let side0 = ring_sides[(i+n-1) % n]
+						let side1 = ring_sides[(i+1) % n]
+						let is_v = !!side.nx
 						let p = path[i]
 						let q = path[(i+1) % n]
-						let is_v = p.x == q.x
-						sides.push({
-							nx: -sign(q.y - p.y),
-							ny: sign(q.x - p.x),
-							c: is_v ? p.x : p.y,
-							m1: is_v ? min(p.y, q.y) : min(p.x, q.x),
-							m2: is_v ? max(p.y, q.y) : max(p.x, q.x),
-							d: 0,
-							pitch: 90,
-						})
+						let e0 = !!side0.nx != is_v ? side0.c : is_v ? p.y : p.x
+						let e1 = !!side1.nx != is_v ? side1.c : is_v ? q.y : q.x
+						side.e1 = min(e0, e1)
+						side.e2 = max(e0, e1)
+					}
+					for (let i = 0; i < n; i++) {
+						let p = path[i]
+						let q = path[(i+1) % n]
+						let {nx, ny, d} = ring_sides[i]
+						if (d) // ccw strip.
+							paths.push([p, {x: p.x + nx * d, y: p.y + ny * d},
+								{x: q.x + nx * d, y: q.y + ny * d}, q])
+						let side0 = ring_sides[(i+n-1) % n]
+						if (d && side0.d && is_convex(path, i)) { // ccw square.
+							let dx0 = side0.nx * side0.d
+							let dy0 = side0.ny * side0.d
+							paths.push([p, {x: p.x + dx0, y: p.y + dy0},
+								{x: p.x + dx0 + nx * d, y: p.y + dy0 + ny * d},
+								{x: p.x + nx * d, y: p.y + ny * d}])
+						}
 					}
 				}
+				if (only_sloped_side)
+					only_sloped_side.is_only_slope = true
 			}
 			let {Clipper64, PolyTree64, ClipType, FillRule} = clipper2
 			let clipper = new Clipper64()
@@ -469,9 +513,11 @@ function house_plan(t) {
 			let tree = new PolyTree64()
 			clipper.execute(ClipType.Union, FillRule.NonZero, tree)
 
-			// the area side or the side of the floor above that a perimeter
-			// side came from: on its moved line, facing the same way, nearest
-			// along the line.
+			// the area side that a perimeter side came from: on its moved line,
+			// facing the same way, nearest along the line. none: a vertical
+			// side, like the end of a strip on the perimeter or a side along
+			// the floor above's wall.
+			let vertical_side = {pitch: 90, d: 0}
 			function find_side(a, b) {
 				let is_v = a.x == b.x
 				let nx = sign(b.y - a.y)
@@ -489,7 +535,7 @@ function house_plan(t) {
 					min_d = d
 					found_side = side
 				}
-				return assert(found_side)
+				return found_side ?? vertical_side
 			}
 
 			let faces = []
@@ -497,22 +543,220 @@ function house_plan(t) {
 				let group_rings = []
 				let pitches = []
 				let eave_zs = []
+				let edge_sides = [] // [side, ...] per edge, like pitches
 				for (let path of group) {
 					let ring = []
 					for (let i = 0, n = path.length; i < n; i++) {
 						let p = path[i]
-						let {pitch, d} = find_side(p, path[(i+1) % n])
+						let side = find_side(p, path[(i+1) % n])
+						let {pitch, eave_z} = side
 						ring.push([p.x / scale, p.y / scale])
 						pitches.push(pitch)
-						eave_zs.push(pitch == 90 ? wall_z
-							: wall_z - d / scale * tan(pitch * rad))
+						eave_zs.push(pitch == 90 ? wall_z : eave_z)
+						edge_sides.push(side)
 					}
 					group_rings.push(ring)
 				}
-				for (let face of roof_skeleton(group_rings, pitches, eave_zs))
+				let roof_faces = roof_skeleton(group_rings, pitches, eave_zs,
+					shared_edges)
+				for (let face of roof_faces) {
+					face.sides = [] // [side, ...] eave sides in the face's plane
+					for (let edge_i of face.edge_is)
+						if (!face.sides.includes(edge_sides[edge_i]))
+							face.sides.push(edge_sides[edge_i])
 					faces.push(face)
+				}
 			}
 			return faces
+		}
+
+		// the point on the wall line of an eave side from make_roof_faces()
+		// across from the plan point (x, y): an edge point there maps back to
+		// that side.
+		function wall_point(side, x, y) {
+			let c = side.wall_c / prism_union.grid_scale
+			return side.nx ? {x: c, y: y} : {x: x, y: c}
+		}
+
+		// two or more points on the eave side, or the area's only sloped
+		// side: no toggle, so the area keeps a roof.
+		floor.can_toggle_gable = function(side) {
+			return side.edge_point !== null && !side.is_only_slope
+		}
+
+		// no edge point on the eave side: add a gable point across from
+		// (x, y). one point: switch it between gable and the roof's pitch.
+		floor.toggle_gable = function(side, x, y) {
+			if (!floor.can_toggle_gable(side))
+				return
+			let edge_point = side.edge_point
+			begin_edit(floor)
+			if (edge_point) {
+				edge_point.pitch = edge_point.pitch == 90 ? null : 90
+			} else {
+				edge_point = wall_point(side, x, y)
+				edge_point.pitch = 90
+				floor.roof.edge_points.push(edge_point)
+			}
+			commit_edit(floor)
+		}
+
+		floor.remove_edge_point = function(edge_point) {
+			begin_edit(floor)
+			remove_value(floor.roof.edge_points, edge_point)
+			commit_edit(floor)
+		}
+
+		// the line between the faces face1 and face2 from make_roof_faces():
+		// clear the own pitch of each of their sides, so both faces take the
+		// roof's pitch. a side with two or more edge points has the roof's.
+		floor.reset_line = function(face1, face2) {
+			begin_edit(floor)
+			for (let face of [face1, face2])
+				for (let side of face.sides)
+					if (side.edge_point)
+						side.edge_point.pitch = null
+			commit_edit(floor)
+		}
+
+		// move the eave side outward or inward. a gable: all gables by the
+		// same distance (the roof's overhang and every edge point's own). a
+		// sloped side: all eave heights by the same height (the roof's and
+		// every edge point's own), the side's change. with is_one, only the
+		// side's own, in its edge point (added across from (x, y) if none).
+		// is_one can change from one move to the next. a sloped side's
+		// overhang stays within 0..max_overhang and no eave rises above the
+		// wall top. a move with is_one on a side with two or more points (no
+		// own values) leaves the start values and returns false.
+		floor.start_move_eave = function(side, x, y) {
+			begin_edit(floor)
+			let roof0 = edit0.roof
+			let edge_point_i = floor.roof.edge_points.indexOf(side.edge_point)
+			let s = {}
+			s.move = function(dx, dy, is_one) {
+				// each move starts from the roof as it was at the start.
+				let roof = copy_roof(roof0)
+				floor.roof = roof
+				if (is_one && side.edge_point === null)
+					return false
+				let dd = dx * side.nx + dy * side.ny
+
+				if (side.pitch != 90) {
+					let slope = tan(side.pitch * rad)
+					let d = clamp(side.d / prism_union.grid_scale + dd, 0,
+						roof.max_overhang) // new overhang
+					let eave_h = -d * slope
+					if (is_one) {
+						let edge_point = roof.edge_points[edge_point_i]
+						if (!edge_point) {
+							edge_point = wall_point(side, x, y)
+							roof.edge_points.push(edge_point)
+						}
+						edge_point.eave_h = eave_h
+						return true
+					}
+					let dz = eave_h - (side.edge_point?.eave_h ?? roof.eave_h)
+					// the highest eave stops at the wall top.
+					let max_eave_h = roof.eave_h
+					for (let edge_point of roof.edge_points)
+						if (edge_point.eave_h != null)
+							max_eave_h = max(max_eave_h, edge_point.eave_h)
+					dz = min(dz, -max_eave_h)
+					roof.eave_h += dz
+					for (let edge_point of roof.edge_points)
+						if (edge_point.eave_h != null)
+							edge_point.eave_h += dz
+					return true
+				}
+
+				if (is_one) {
+					let edge_point = roof.edge_points[edge_point_i]
+					if (!edge_point) {
+						edge_point = wall_point(side, x, y)
+						roof.edge_points.push(edge_point)
+					}
+					edge_point.overhang =
+						max(0, (edge_point.overhang ?? roof.overhang) + dd)
+				} else {
+					roof.overhang = max(0, roof.overhang + dd)
+					for (let edge_point of roof.edge_points)
+						if (edge_point.overhang != null)
+							edge_point.overhang = max(0, edge_point.overhang + dd)
+				}
+				return true
+			}
+			s.stop = function() {
+				commit_edit(floor)
+			}
+			s.cancel = cancel_edit
+			return s
+		}
+
+		// the line between the faces face1 and face2 from make_roof_faces(),
+		// grabbed at height z, can move: a point at or below the wall top
+		// cannot move inward; a side with two or more edge points has no
+		// own pitch.
+		floor.can_move_line = function(face1, face2, z) {
+			if (z <= floor.z + floor.h)
+				return false
+			for (let face of [face1, face2])
+				for (let side of face.sides)
+					if (side.edge_point === null)
+						return false
+			return true
+		}
+
+		// move the line between face1 and face2 grabbed at height z: each
+		// face's plane passes through (x, y) at z, by the pitch in the edge
+		// point of each of its sides (added on the wall line if none). (x, y)
+		// on or past a face's wall line: its sides go vertical. both faces:
+		// move() leaves the start values and returns false.
+		floor.start_move_line = function(face1, face2, z) {
+			if (!floor.can_move_line(face1, face2, z))
+				return
+			begin_edit(floor)
+			let roof0 = edit0.roof
+			let wall_z = floor.z + floor.h
+			let scale = prism_union.grid_scale
+			let faces = [face1, face2]
+			let edge_point_is = [] // [edge_point_i|-1, ...] per side, in roof0
+			for (let face of faces)
+				for (let side of face.sides)
+					edge_point_is.push(
+						floor.roof.edge_points.indexOf(side.edge_point))
+			let s = {}
+			s.move = function(x, y) {
+				// each move starts from the roof as it was at the start.
+				let roof = copy_roof(roof0)
+				floor.roof = roof
+				let pitches = [] // [pitch, ...] per face
+				for (let face of faces) {
+					let {nx, ny, wall_c} = face.sides[0]
+					let a = nx ? x : y // across the side
+					let d = (wall_c / scale - a) * (nx + ny) // inward
+					pitches.push(d > 0 ? atan((z - wall_z) / d) / rad : 90)
+				}
+				if (pitches[0] == 90 && pitches[1] == 90)
+					return false
+				let i = 0
+				for (let face_i = 0; face_i < 2; face_i++) {
+					for (let side of faces[face_i].sides) {
+						let edge_point = roof.edge_points[edge_point_is[i++]]
+						if (!edge_point) {
+							let m = (side.m1 + side.m2) / 2 / scale
+							edge_point = wall_point(side, m, m)
+							roof.edge_points.push(edge_point)
+						}
+						edge_point.pitch = pitches[face_i]
+					}
+				}
+				return true
+			}
+			s.stop = function() {
+				commit_edit(floor)
+			}
+			s.cancel = cancel_edit
+			return s
 		}
 
 		// model state ---------------------------------------------------------
@@ -544,13 +788,11 @@ function house_plan(t) {
 
 		// edit history --------------------------------------------------------
 
-		function cancel_edit(draw_state) {
+		function cancel_edit() {
 			assert(edit0)
 			let state = edit0
 			edit0 = null
 			floor.load_state(state)
-			draw_state.snap_lines.length = 0
-			draw_state.measure_edges.length = 0
 		}
 
 		floor.delete_seg = function(seg) {
@@ -655,17 +897,6 @@ function house_plan(t) {
 			return !(am2 <= bm1 || bm2 <= am1)
 		}
 
-		function snap_x(x, nosnap) {
-			let snap_d = nosnap ? 2 : 20
-			return house.snap_lines[0].snap(x, snap_d)
-		}
-		function snap_y(y, nosnap) {
-			let snap_d = nosnap ? 2 : 20
-			return house.snap_lines[1].snap(y, snap_d)
-		}
-		floor.snap_x = snap_x
-		floor.snap_y = snap_y
-
 		function seg_move_bump_limit(seg, sign) {
 			let v = seg.is_v
 			let a = seg.axis
@@ -690,14 +921,6 @@ function house_plan(t) {
 			}
 			return min_a1
 		}
-		function seg_move_ranges(seg) {
-			let min_a = seg_move_bump_limit(seg, -1)
-			let max_a = seg_move_bump_limit(seg,  1)
-			let ranges = [
-				[min_a, max_a],
-			]
-			return ranges
-		}
 		function seg_resize_bump_limit(seg, p, sign) {
 			let v = seg.is_v
 			let a = p[v ? 1 : 0]
@@ -716,36 +939,9 @@ function house_plan(t) {
 			}
 			return min_a1
 		}
-		function seg_resize_ranges(seg, p) {
-			let min_a = seg_resize_bump_limit(seg, p, -1)
-			let max_a = seg_resize_bump_limit(seg, p,  1)
-			let ranges = [
-				[min_a, max_a],
-			]
-			return ranges
-		}
-		function closest_range(a, ranges) {
-			let min_range
-			let min_d = 1/0
-			for (let range of ranges) {
-				let [a1, a2] = range
-				if (a >= a1 && a <= a2) { // in range
-					min_range = range
-					break
-				}
-				let d = max(0, min(abs(a1 - a), abs(a2 - a))) // distance to range's closest end-point
-				if (d < min_d) {
-					min_range = range
-					min_d = d
-				}
-			}
-			return min_range
-		}
-		function snap_seg(a, ranges, snap_lines, draw_state, snap_d) {
-			let snap_range = closest_range(a, ranges)
-			let [min_a, max_a] = snap_range
+		function snap_seg(a, min_a, max_a, snap_lines, draw_state, snap_d) {
 			a = clamp(a, min_a, max_a)
-			let sa = snap_lines.snap(a, ui.keypressed('ctrl') ? 2 : snap_d)
+			let sa = snap_lines.snap(a, snap_d)
 			draw_state.snap_lines.length = 0
 			if (sa != null)
 				draw_state.snap_lines.push(sa, snap_lines.v)
@@ -773,69 +969,21 @@ function house_plan(t) {
 
 			let move_freely = seg[0].segs.length == 1 && seg[1].segs.length == 1
 			let seg0 = seg.clone()
-			let ranges = seg_move_ranges(seg)
+			let min_a = seg_move_bump_limit(seg, -1)
+			let max_a = seg_move_bump_limit(seg,  1)
 			let snap_lines = snap_lines_for(seg.is_v, move_freely && seg)
 			let v = seg0.is_v
 			let m_snap_lines = move_freely && snap_lines_for(!seg.is_v, seg)
 
-			// find all affected _|_ edges so we can show their lengths as we move the seg
-			function update_measure_edges() {
-				let perp_edges = []
-				// find the farthest edge point from `c.edges[i0]` going in `dir` direction
-				// in the array, which has the same spatial direction `v` with the previous point.
-				function last_perp_edge_point(c, i, n, dir, v) {
-					let ep0 = c.edges[mod(i, n)]
-					while (1) {
-						let ep1 = c.edges[mod(i, n)]
-						let ep2 = c.edges[mod(i+dir, n)]
-						if (ep2.p == ep0.p) // end-cap, don't measure
-							return
-						if ((ep1[0] == ep2[0]) != v) // changed direction, return last edge point
-							return ep1
-						i += dir
-					}
-				}
-				let sp1 = seg[0]
-				let sp2 = seg[1]
-				let v = seg.is_v
-				for (let co of floor.comps) {
-					for (let c of co.cycles) {
-						for (let i = 0, n = c.edges.length; i <= n; i++) {
-							let ep1 = c.edges[(i+0) % n]
-							let ep2 = c.edges[(i+1) % n]
-							if (!(ep1.p == sp1 && ep2.p == sp2 || ep1.p == sp2 && ep2.p == sp1)) // not seg's edge
-								continue
-							let ep0 = last_perp_edge_point(c, i+0, n, -1, !v)
-							let ep3 = last_perp_edge_point(c, i+1, n,  1, !v)
-							if (!(ep0 || ep3))
-								continue
-							if (0) {
-								// remove measurement of parallel wall of the same length
-								let A = v ? 0 : 1 // index of cross axis of perp segs
-								let dupe = ep0 && ep3 && ep0.p[A] == ep3.p[A]
-								if (dupe)
-									ep3 = null
-							}
-							if (ep0) perp_edges.push([ep0, ep1])
-							if (ep3) perp_edges.push([ep2, ep3])
-						}
-					}
-				}
-				draw_state.measure_edges = perp_edges
-			}
-
-			update_measure_edges()
-
 			let s = {}
 
-			s.move = function(dx, dy, draw_state) {
+			s.move = function(dx, dy, draw_state, snap_d = 20) {
 
 				let dm = v ? dy : dx
 				let da = v ? dx : dy
 
 				if (move_freely) {
 
-					let snap_d = ui.keypressed('ctrl') ? 2 : 20
 					let a = seg0.axis + da
 					let sa = snap_lines.snap(a, snap_d) ?? a
 					a = sa ?? a
@@ -866,25 +1014,23 @@ function house_plan(t) {
 				} else { // move on cross axis
 
 					let a = seg0.axis + (v ? dx : dy)
-					let sa = snap_seg(a, ranges, snap_lines, draw_state, 20)
+					let sa = snap_seg(a, min_a, max_a, snap_lines,
+						draw_state, snap_d)
 					a = sa ?? a
 					seg.axis = a
 					create_edges()
-					update_measure_edges()
 
 				}
 
 			}
 
-			s.stop = function(draw_state, remove_seg) {
+			s.stop = function(remove_seg) {
 				push_log('STOP MOVE SEG:', seg.id)
 				if (remove_seg)
 					floor.rem_seg(seg)
 				floor.fix()
 				commit_edit(floor)
 				pop_log()
-				draw_state.snap_lines.length = 0
-				draw_state.measure_edges.length = 0
 			}
 			s.cancel = cancel_edit
 
@@ -942,17 +1088,18 @@ function house_plan(t) {
 
 			pop_log()
 
-			let ranges = seg_resize_ranges(seg, p0)
+			let min_a = seg_resize_bump_limit(seg, p0, -1)
+			let max_a = seg_resize_bump_limit(seg, p0,  1)
 			let snap_lines = snap_lines_for(!seg.is_v, seg)
 
 			let s = {seg: seg}
 
-			s.resize = function(dx, dy, draw_state, hs) {
+			s.resize = function(dx, dy, draw_state, snap_d = 30) {
 				let x1 = p0[0] + dx * abs(sdx)
 				let y1 = p0[1] + dy * abs(sdy)
 
 				let a = sdx ? x1 : y1
-				let sa = snap_seg(a, ranges, snap_lines, draw_state, 30)
+				let sa = snap_seg(a, min_a, max_a, snap_lines, draw_state, snap_d)
 				if (sa != null)
 					a = sa
 				if (sdx)
@@ -961,18 +1108,15 @@ function house_plan(t) {
 					y1 = a
 				p[0] = x1
 				p[1] = y1
-				hs.x = x1
-				hs.y = y1
 				create_edges()
+				return p
 			}
 
-			s.stop = function(draw_state) {
+			s.stop = function() {
 				push_log('STOP RESIZE SEG:', seg.id)
 				floor.fix()
 				commit_edit(floor)
 				pop_log()
-				draw_state.snap_lines.length = 0
-				draw_state.measure_edges.length = 0
 			}
 			s.cancel = cancel_edit
 

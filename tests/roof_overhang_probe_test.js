@@ -20,6 +20,7 @@ for (let f of ['glue.js', 'roof_skeleton.js'])
 // L: 600 x 400 with a 300 x 300 wing; edge 0 is a gable end.
 let ring = [[0, 0], [600, 0], [600, 400], [300, 400], [300, 700], [0, 700]]
 let pitches = [90, 45, 30, 45, 45, 45]
-for (let face of ctx.roof_skeleton([ring], pitches, 0))
+let eave_zs = pitches.map(() => 0)
+for (let face of ctx.roof_skeleton([ring], pitches, eave_zs))
 	console.log(JSON.stringify(face.edge_is), JSON.stringify(face.rings[0]
 		.map(([x, y, z]) => [+x.toFixed(1), +y.toFixed(1), +z.toFixed(1)])))

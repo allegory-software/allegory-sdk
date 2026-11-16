@@ -6,11 +6,12 @@ const vm = require('node:vm')
 
 const sdk = path.resolve(__dirname, '..')
 const BOX_ARGS = 8
-let widget, hover, capture, cursor, rotate_click
+let widget, hover, capture, cursor, rotate_click, dims_click
+let want_rebuild
 let state = {}
 let record = [0, 0, 800, 600]
 let matrix = [1, 0, 0, 1, 0, 0]
-let stack = [], texts = [], strokes = [], points = []
+let stack = [], texts = [], strokes = [], points = [], dimensions = []
 
 function transform_point(x, y) {
 	return [matrix[0]*x + matrix[2]*y + matrix[4],
@@ -61,6 +62,7 @@ let ui = {
 	drag: () => capture,
 	captured: () => capture,
 	hovers: () => hover,
+	rebuild() { want_rebuild = true },
 	focus_inside: () => false,
 	window_focused: () => true,
 	keypressed: () => false,
@@ -68,6 +70,10 @@ let ui = {
 	button(id) {
 		if (id == 'fe.rotate_button' && rotate_click) {
 			rotate_click = false
+			return true
+		}
+		if (id == 'fe.dims_button' && dims_click) {
+			dims_click = false
 			return true
 		}
 		return false
@@ -84,13 +90,14 @@ let ui = {
 	color_css: () => '#000',
 	color_obj: () => '#000',
 	alpha_adjust: c => c,
+	hsl: () => '#000',
 	measure_text: () => ({width: 40, fontBoundingBoxAscent: 10,
 		fontBoundingBoxDescent: 2}),
 }
 for (let name of ['animate', 'box_position', 'box_translate', 'focus_group',
 	'focusable', 'end_focus_group', 'stack', 'end_stack', 'm', 'mt', 'v', 'h',
 	'end', 'end_v', 'end_h', 'bold', 'text', 'color', 'p', 'nobold',
-	'xlarge', 'icon', 'state_of'])
+	'xlarge', 'icon', 'state_of', 'save_state'])
 	ui[name] = () => {}
 
 const ctx = {
@@ -114,22 +121,44 @@ for (let name of ['glue.js', 'earcut.js', '3d.js', 'plane_graph.js',
 vm.runInContext(fs.readFileSync(path.join(sdk, 'www/ui-demo.html'), 'utf8')
 	.match(/<script id=house_test_plans>([\s\S]*?)<\/script>/)[1], ctx)
 
+let offset = ctx.Math3D.line2.offset
+function record_offset(d, x1, y1, x2, y2) {
+	assert.equal(d, -10)
+	assert(x1 != x2 || y1 != y2)
+	dimensions.push([x1, y1, x2, y2])
+	return offset(d, x1, y1, x2, y2)
+}
+
 let plan_json = ctx.json(ctx.house_test_plans.simple)
 let field = {readonly: false}
 let plan
-let measure_edges = []
 function frame(rotate = false) {
 	rotate_click = rotate
-	widget.create(null, 'fe', plan_json, field)
-	plan = state.house.floors[0]
-	state.draw_state.measure_edges = measure_edges
-	widget.position(record, 0, 0)
-	widget.position(record, 0, 1)
-	widget.translate(record, 0, 0, 0)
+	do {
+		want_rebuild = false
+		widget.create(null, 'fe', plan_json, field)
+		plan = state.house.floors[0]
+		widget.position(record, 0, 0)
+		widget.position(record, 0, 1)
+		widget.translate(record, 0, 0, 0)
+		if (want_rebuild) {
+			if (capture?.drop || capture?.cancel)
+				capture = null
+			if (capture)
+				capture.drag = false
+			hover = null
+		}
+	} while (want_rebuild)
 	matrix = [1, 0, 0, 1, 0, 0]
 	texts.length = 0
 	strokes.length = 0
+	dimensions.length = 0
+	ctx.Math3D.line2.offset = record_offset
 	widget.draw(record, 0)
+	ctx.Math3D.line2.offset = offset
+	for (let stroke of strokes)
+		for (let [x, y] of stroke)
+			assert(Number.isFinite(x) && Number.isFinite(y))
 	assert.equal(stack.length, 0)
 	assert.equal(rotate_click, false)
 }
@@ -165,11 +194,6 @@ function check(name, f) {
 // labels, arrows, and resize cursors ---------------------------------------
 
 frame()
-let rooms = []
-for (let co of plan.comps)
-	for (let c of co.cycles)
-		if (!c.outer)
-			rooms.push(c)
 
 for (let turns of [0, 1, 2, 3]) {
 	if (turns)
@@ -179,14 +203,19 @@ for (let turns of [0, 1, 2, 3]) {
 			let name = 'drawing at ' + turns*90 + ' degrees, vertical=' + v
 				+ ', reversed=' + reverse
 			check(name, () => {
-				hover = {action: 'move_seg', seg: plan.segs.find(s => s.is_v == v)}
-				let a = [0, 0]
-				let b = v ? [0, 200] : [200, 0]
-				measure_edges = [[reverse ? b : a, reverse ? a : b]]
+				let seg = plan.segs.find(s => s.is_v == v
+					&& (s[0][v ? 1 : 0] > s[1][v ? 1 : 0]) == reverse)
+				assert(seg)
+				capture = {action: 'move_seg', seg, drag: true, dx: 0, dy: 0}
 				frame()
 				close(state.draw_state.rotation ?? 0, turns * Math.PI / 2)
 				let screen_v = v != (turns % 2 != 0)
 				assert.equal(cursor, screen_v ? 'ew-resize' : 'ns-resize')
+				let rooms = []
+				for (let co of plan.comps)
+					for (let c of co.cycles)
+						if (!c.outer)
+							rooms.push(c)
 				let areas = texts.filter(t => t.text.includes('\u00b2'))
 				assert.equal(areas.length, rooms.length)
 				for (let i = 0; i < areas.length; i++) {
@@ -198,7 +227,7 @@ for (let turns of [0, 1, 2, 3]) {
 				}
 				let label = texts[texts.length-1]
 				assert(label.text.endsWith('m'))
-				equal_axes(label.axes, screen_v ? [0, -1, 1, 0] : [1, 0, 0, 1])
+				equal_axes(label.axes, screen_v ? [1, 0, 0, 1] : [0, -1, 1, 0])
 				let arrows = strokes[strokes.length-1]
 				assert.equal(arrows.length, 12)
 				let dx = arrows[6][0] - arrows[0][0]
@@ -209,10 +238,77 @@ for (let turns of [0, 1, 2, 3]) {
 				for (let i of [7, 9])
 					assert((arrows[6][0] - arrows[i][0])*dx
 						+ (arrows[6][1] - arrows[i][1])*dy > 0)
+				capture.cancel = true
+				capture.drag = false
+				frame()
+				capture = null
 			})
 		}
 	}
 }
+
+// measurements after moving an exterior wall -------------------------------
+
+for (let [y, dy, expected] of [
+	[0, -100, [[-14, -14, 226, -14], [226, -114, 614, -114],
+		[596, -96, 244, -96], [244, 4, 204, 4]]],
+	[0, 100, [[-14, -14, 254, -14], [254, 86, 614, 86],
+		[196, 96, 236, 96], [236, 4, 4, 4]]],
+	[400, -100, [[614, 314, 254, 314], [254, 414, -14, 414],
+		[4, 396, 236, 396], [236, 304, 196, 304]]],
+	[400, 100, [[614, 514, 226, 514], [226, 414, -14, 414],
+		[204, 396, 244, 396], [244, 496, 596, 496],
+		[204, 396, 244, 396], [244, 496, 596, 496]]],
+]) {
+	check('exterior wall measurements y=' + y + ', dy=' + dy, () => {
+		let ds = state.draw_state
+		let seg = plan.segs.find(s => !s.is_v && s.axis == y && s.m1 == 200)
+		let edit = plan.start_move_seg(seg, ds)
+		edit.move(0, dy, ds)
+		edit.stop()
+		let connector = plan.segs.find(s => s.is_v && s.axis == 200
+			&& s.m1 == Math.min(y, y+dy) && s.m2 == Math.max(y, y+dy))
+		assert(connector)
+		capture = {action: 'move_seg', seg: connector, drag: true, dx: 0, dy: 0}
+		frame()
+		capture.drag = false
+		let angle = ds.rotation ?? 0
+		capture.dx = 40 * ds.scale * Math.cos(angle)
+		capture.dy = 40 * ds.scale * Math.sin(angle)
+		frame()
+		assert.deepEqual(dimensions, expected)
+		assert(strokes.filter(s => s.length == 12).length >= expected.length)
+		capture.cancel = true
+		frame()
+		capture = null
+		assert(state.house.undo())
+		frame()
+		assert.equal(dimensions.length, 0)
+	})
+}
+
+check('all dimensions replace drag measurements', () => {
+	dims_click = true
+	frame()
+	assert.equal(dimensions.length, 14)
+	let seg = plan.segs.find(s => s.is_v && s.axis == 200)
+	capture = {action: 'move_seg', seg, drag: true, dx: 0, dy: 0}
+	frame()
+	assert.equal(dimensions.length, 14)
+	capture.drag = false
+	let ds = state.draw_state
+	let angle = ds.rotation ?? 0
+	capture.dx = 40 * ds.scale * Math.cos(angle)
+	capture.dy = 40 * ds.scale * Math.sin(angle)
+	frame()
+	assert.equal(dimensions.length, 14)
+	capture.cancel = true
+	frame()
+	capture = null
+	dims_click = true
+	frame()
+	assert.equal(dimensions.length, 0)
+})
 
 // panning at different scales ---------------------------------------------
 
