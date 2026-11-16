@@ -1,0 +1,446 @@
+FORM TEMPLATES AND THE FORM DESIGNER
+==============================================================================
+
+Plan for ui.form() and its designer. Implementation goes in www/ui_form.js.
+
+Parts marked PROPOSAL are not decided yet. FINDINGS lists what the current
+code does that gets in the way, with the decision taken for each. OPEN
+QUESTIONS lists what Cosmin still decides.
+
+
+CONCEPTS
+------------------------------------------------------------------------------
+
+Form: a named template. The app builds an instance of it with
+
+	ui.form(id, NAME, context_vars)
+
+as many times as it wants. id is the instance id. Whether several instances
+of one form can be on screen at the same time is not decided. That section,
+SINGLE OR MULTIPLE INSTANCES, also has the shape of context_vars.
+
+Form definition: the widget tree of a form, in a serializable data structure
+that is easy to read and edit by hand. Forms are stored in
+ui.saved_state._forms[NAME] until storage is decided. ui.form() takes no seed
+definition.
+
+Widget type: the description of one kind of widget that can go on a form:
+	- an icon name
+	- a name
+	- the props shown in the object inspector: a {prop_name -> field} map
+		used to create the inspector's nav
+	- a builder function that takes the prop values and builds the widget
+
+Widget ids: each widget on a form has an id suffix prop. Its id is the
+instance id, a dot, and the suffix. The designer generates a unique suffix
+when the user adds a widget. An inner form's instance id is built the same
+way, so ids stay unique at any depth of nesting.
+
+
+WHAT GOES ON A FORM
+------------------------------------------------------------------------------
+
+Input widgets, buttons, grids, docks, and other forms.
+
+
+LAYOUT
+------------------------------------------------------------------------------
+
+Widgets on a form are free floating, with anchors on the left, top, right
+and bottom sides, as in Delphi. All positions and sizes are stored in
+logical pixels.
+
+A widget stores its distance to each side that it is anchored to: left or
+right or both, top or bottom or both. It stores w only when it is not
+anchored to both sides on the x axis, and h the same way on the y axis. The
+keys present in the definition are the anchors: there are no separate anchor
+booleans. A widget anchored to neither side of an axis is centered on it,
+with no offset.
+
+ui.stack supports this without new layout code (see align_x and align_w in
+www/ui.js). The form builds each widget inside its own wrapper stack, with
+the widget stretched in it, and sets the wrapper's align, margins and min
+width from the stored keys. For the x axis:
+
+	keys          align   left margin   right margin   wrapper min width
+	left, w       'l'     left          0              left + w
+	right, w      'r'     0             right          right + w
+	left, right   's'     left          right          left + right
+	                                                    + widget's min width
+	w             'c'     0             0              w
+
+The y axis works the same way with top, bottom, h and valign.
+
+No margin depends on the form's size, so the form's min size is the size
+that its content pushes out to, and the form has no min_w or min_h. The
+form's w, h, max_w and max_h apply only to a future ui.modal. In the IDE,
+the IDE code calls ui.min_wh(w, h) on the form's box, so the form shows at
+w, h there.
+
+After a move or a resize, the designer converts the widget's measured rect
+into distances to the sides that the widget is anchored to. When the user
+toggles an anchor in the object inspector, the designer converts the same
+way from the widget's current rect.
+
+The wrapper also gives the designer each widget's command index (for popups
+targeted at the widget) and, through ui.measure(), its rect.
+
+
+DATA AND ACTIONS
+------------------------------------------------------------------------------
+
+The problem, in Cosmin's words: if forms are conceptually like widgets
+(templates) that you can instantiate multiple times, then we open up a whole
+can of worms, because a template is trivial to express in code in IMGUI,
+where we're leveraging an entire programming language:
+
+	- the widget constructor is just a plain function.
+	- it can be parametrized with args, and the args can be bound to any
+		sub-widget by passing them down to their build functions.
+	- conditionals are just ifs.
+	- repeats are just for loops.
+	- sub-ids are just id+'.foo'.
+
+Translating all this into UI concepts -- declaring variables or slots,
+binding them to widget props, conditional expressions, repeat widgets -- is
+complex. The goal is the primitives that make forms dynamic enough for
+business apps, which are the focus of the UI, without going full-blown web
+templating or Figma-style abstractions.
+
+Decided: no conditionals for now.
+
+Precedent: a Delphi form has no variables, conditionals or loops. It has
+placement, prop values, and two kinds of binding to things that code owns:
+data controls bind to a dataset field, buttons bind to actions. Grids do the
+repeats. The action decides enabled and visible for a button, the field's
+readonly flag does it for an input. Anything else is a custom component.
+
+	Delphi                        here
+	dataset                       nav (exists)
+	data control bound to field   ui.nav_input with nav and col (exists)
+	DBGrid                        ui.grid with opt.nav (exists)
+	master-detail                 detail nav params from master (exists)
+	TActionList                   named actions (new)
+	custom component              widget type registered in code (planned)
+
+PROPOSAL:
+	- A bound widget's props name the widget that owns the nav (a grid) and
+		a column (see F9). With one instance per form the props store that
+		widget's id. With multiple instances see SINGLE OR MULTIPLE
+		INSTANCES.
+	- Values that are not in a database (a search box, a date range) go in a
+		one-row client nav. Its fields give type, validation and null
+		handling, and a detail nav can take params from it like from any
+		master nav. Which widget owns that nav is open (Q4).
+	- A nested form widget has a prop that maps the inner form's slots to
+		the outer form's slots.
+	- Buttons bind to an action by name. Code defines each action: handler,
+		enabled, visible, shortcut. Something like Delphi's TActionList.
+	- Anything more dynamic: the app registers a widget type in code, and
+		the toolbar shows it like a built-in type.
+
+
+SINGLE OR MULTIPLE INSTANCES
+------------------------------------------------------------------------------
+
+Not decided. Multiple instances on screen at the same time are what require
+instance ids, per-instance data, and per-instance action context. A form
+with one instance needs none of the three. The business case is the user
+opening two invoices in two dock tabs at the same time.
+
+Two instances driven by two different rows: if both instances bind to the
+same master nav, both show the master's focused row, because a nav has one
+focused row. PROPOSAL: each instance has its own grid, which owns its own
+nav, and the instance passes that grid the key of the row that the instance
+shows as param_vals (e.param_vals and e.set_param_vals() exist in
+ui_nav.js). The instance's detail navs take their params from that nav as
+usual. Cost: one nav per instance, and an edit made in the form reaches the
+master grid's nav only after a save and a reload.
+
+Problems with one instance per form (ui.form(id), stored in _forms[id]):
+	- The user cannot open two records in the same form at the same time,
+		such as two invoices in two dock tabs.
+	- A sub-form cannot appear twice on one screen, such as a billing and a
+		shipping address. The only way is a copy of its definition under a
+		second id.
+
+Problems with multiple instances (ui.form(id, NAME, context_vars)):
+	- The caller passes an instance id, and every widget id is built from
+		it.
+	- A binding to a grid on the same form stores the grid's suffix, and the
+		form builds the grid's id from its instance id. A binding to a grid
+		outside the form cannot be stored in the definition: it needs slots,
+		and the caller passes a {slot -> widget id} map.
+	- Action handlers need the instance (Q1).
+	- The same record opened twice: two per-instance navs hold separate
+		edits of one row, and both can save.
+	- An edit made in an instance reaches the master grid's nav only after a
+		save and a reload.
+	- Nav user state (cols, sort, grouping): a per-instance nav needs a
+		per-instance id, so the code saves that state once per instance.
+	- Widget user state (col widths, split fr, dock layout, stored inputs):
+		two instances cannot share an id, because they would share one state
+		object (scroll, focus, the grid's nav). So either the user configures
+		each instance again, or the widgets save their prefs under a second
+		key, NAME + suffix, instead of under the widget id. Every widget that
+		calls ui.save_state() would change. Then what the user sees depends
+		on when the widgets read their saved prefs:
+		- only on creation: each open instance keeps its own live layout,
+			and the instance that the user changed last decides the layout of
+			the next one opened. The dock reads ui.saved_state[id] only when
+			it has no layout yet.
+		- on every frame: moving a split in one instance moves it in the
+			other.
+		When splits and grids read their saved state is not checked yet.
+	- With instance ids taken from row keys, the code adds saved_state
+		entries for every record ever opened, and nothing removes them.
+	- Two instances of one NAME in tweak mode means two selections editing
+		one definition. This needs a rule, such as one design-mode instance
+		per NAME.
+
+
+NESTED FORMS
+------------------------------------------------------------------------------
+
+A form is a widget type, so a form can contain other forms.
+
+In design mode the designer does not edit an inner form in place.
+Double-clicking the inner form opens it in design mode in the IDE.
+
+
+DOCKS ON A FORM
+------------------------------------------------------------------------------
+
+ui.dock is a layout widget. In design mode the user needs to select one of
+its panes, to drop or paste widgets into it.
+
+Widgets in a dock pane are selectable like the widgets outside it. A
+selection rectangle selects only widgets of the form on which the user
+started it.
+
+The form definition owns the dock layout. The dock takes the layout from the
+caller. Relayouting in design mode saves into the form definition.
+Relayouting in app mode, when the dock allows it, saves into
+ui.saved_state[dock_id] as it does now.
+
+Not decided: putting a widget in a dock pane would create an owned,
+anonymous, stretched form in the pane. What an anonymous form is, how it
+works, and whether to support it or do something else is open.
+
+
+THE FORM IN DESIGN MODE
+------------------------------------------------------------------------------
+
+Selecting:
+	- click a widget to select it. The designer draws 8 handles on its sides
+		and corners with ui.drag_point.
+	- ctrl+click adds the widget to the selection or removes it.
+	- dragging on empty space selects the widgets touching the selection
+		rectangle.
+
+Moving: dragging anywhere inside a selected widget moves all selected
+widgets.
+
+Resizing: dragging a handle resizes all selected widgets.
+
+Snapping: to an invisible 4x4 px grid, and to the same side of other widgets.
+
+Form size: in IDE mode, dragging the form's bottom-right corner sets the
+form's w and h. Tweak mode has no form resizing, because there the form sits
+in an app layout, where only its min size applies.
+
+Clipboard: cut, copy and paste the selected widgets.
+
+Order: ctrl+up and ctrl+down move the selected widgets in the form's list of
+widgets, which is also their z-order.
+
+PROPOSAL: in design mode the form adds one box widget, defined in
+ui_form.js, as the last child of its stack, stretched over the whole form.
+That box is the topmost child, so the hit phase gives it every click inside
+the form and the widgets under it get none. On a click or a drag start the
+designer compares the pointer position with the widget rects given by
+ui.measure() to decide between a widget, a dock pane, and empty space. The
+box is focusable, so it receives the designer's keys (clipboard, ctrl+arrows,
+delete).
+
+
+DESIGNER TOOLS
+------------------------------------------------------------------------------
+
+Widget toolbar: one icon button for each widget type. Pressing a button puts
+a new widget of that type in the center of the form. The toolbar is a
+floating popup above the form, left-aligned, with an sp2 bottom margin.
+
+Widget tree: a grid in tree mode listing the widgets on the form. Selecting
+rows selects the corresponding widgets on the form.
+
+Object inspector: a grid in vertical mode with one row, showing the props of
+the selected widgets. With one widget selected it shows that widget's props.
+With several selected it shows their common props, with null where their
+values differ, and an edit writes the new value to all of them.
+
+The widget tree and the object inspector are in a vsplit, in a floating popup
+on the right of the form, top-aligned, with an sp2 left margin.
+
+
+DESIGNER MODES
+------------------------------------------------------------------------------
+
+Tweak mode puts a form in design mode in place, in the running app.
+ctrl+f2 toggles tweak mode of the innermost form that contains the focused
+widget.
+
+IDE mode is a full designer and coding environment. ctrl+f1 toggles it. It is
+a full-screen modal popup holding an hsplit:
+	- left pane, the fixed side: a grid listing all forms.
+	- right pane: the current form, centered, in tweak mode.
+
+The designer takes ctrl+f2 and ctrl+f1 and calls ui.capture_keys(), so that
+no widget reads them as f2 or f1 (see F6).
+
+
+IMPLEMENTATION RULES
+------------------------------------------------------------------------------
+
+- KISS and YAGNI.
+- Every piece of new state carries a big cost and needs a reason.
+- Keep responsibilities separate. Code does not reach into state it does not
+	own. Every hack or compensation gets reported, so that the architecture
+	changes and the API gap gets filled instead.
+- Widgets such as the dock may change to support design mode. All code is
+	WIP.
+- Small stages, the most basic testable functionality first.
+
+
+FINDINGS
+------------------------------------------------------------------------------
+
+F1. ui.template already exists in www/ui.js (the TEMPLATE section, from line
+	11304), and ui-demo.html uses it. It is a prototype of the same idea: a
+	tree of typed nodes, per-type props (tprops), selection with drag points,
+	and tree and props toolboxes. It keeps the selection in module-level
+	variables, and template_add() writes the node's command index into the
+	tree node (t.i, line 11401), so the serializable tree carries frame data.
+	Decided: move it to .unused/js/ui_template.js. It was a prototype and is
+	probably not salvageable.
+
+F2. Widget ids are global. A state scope groups ids for freeing but does not
+	prefix them (ui.state, line 1366). Two instances of one form built at the
+	same time would build the same widget ids.
+	Decided: ui.form() takes an instance id (see Widget ids in CONCEPTS).
+
+F3. ui.drag_point keeps its own position: create() calls ui.state_init() and
+	then draws at the stored x, y, so after the first frame it ignores the
+	x, y passed by the caller (line 6885). Selection handles must follow the
+	selected widget's box on every frame.
+	Decided: change ui.drag_point as needed, probably to take x, y from the
+	caller on every frame and report the drag.
+
+F4. ui.dock keeps its layout in ui.saved_state[dock_id] and the user can
+	change the layout at runtime (ui.dock, save_dock_layout).
+	Decided: see DOCKS ON A FORM.
+
+F5. dpr is private to ui.js, so ui_form.js cannot convert the stored logical
+	px into the device px of the command array. ui.toolbox does the same
+	conversion internally (line 11098).
+	Decided: expose dpr, a logical-px conversion, or both.
+
+F6. ui.keydown('f2') also returns true for ctrl+f2: apply_key_event() adds
+	both the full key and the bare key to key_downs (line 1220). The grid
+	starts an edit on keydown('f2') (ui_grid.js line 1579) and so does
+	ui.input (ui.js line 7657). The grid also opens its key help on
+	keydown('f1'), so ctrl+f1 clashes the same way.
+	Decided: see DESIGNER MODES.
+
+F7. Boxes have no max size: ui.js has min_w and min_h for boxes and
+	ui.sb_max_wh() for scrollboxes only. The form's max_w and max_h need a
+	place to go.
+	Decided: the form's w, h, max_w and max_h apply only to a future
+	ui.modal.
+
+F8. A box that is not stretched gets its min size: align_w() returns min_w
+	for every align except 's'. Nothing in the layout uses a preferred size.
+	So a form placed with align 'c' (as in the IDE) shows at its min size,
+	not at w, h, and a form stretched by its parent shows at the parent's
+	size whatever w, h are.
+	Decided: in the app and in tweak mode the parent layout decides the
+	form's size, and tweak mode has no form resizing. In the IDE the IDE
+	code calls ui.min_wh(w, h) on the form's box.
+
+F9. ui.nav() is a widget API, not an app API: a nav belongs to the widget
+	that creates it, today ui.grid. A binding stores the id of that widget,
+	and the form reads the nav from the widget's state. ui.grid does not
+	declare its nav in its state: s.e holds the grid's stateful widget
+	object (ui.stateful_widget(), ui.js line 1515), which is the nav only
+	because create_grid() returns the nav (ui_grid.js line 2116).
+	Decided: every widget that owns a nav stores it in s.nav, and the form
+	reads it with ui.state_of(id, 'nav').
+	The nav exists only after the grid's first build, so an input placed
+	before its grid in the form's widget list finds no nav on the frame on
+	which both first appear.
+	Decided: the form calls ui.rebuild() then.
+	A grid that has never been built (in a dock tab the user has not
+	opened) has no nav.
+	Decided: inputs bound to it show disabled.
+
+
+OPEN QUESTIONS
+------------------------------------------------------------------------------
+
+Q1. Actions and multiple instances: two instances of one form each have a
+	Save button bound to "save". Does the code pass the form instance (its
+	id and its context_vars) to a global action's handler, or does the code
+	register actions per instance?
+
+Q2. Single or multiple instances (see SINGLE OR MULTIPLE INSTANCES).
+
+Q3. Deferred. Dock layout: the user's saved layout in
+	ui.saved_state[dock_id] takes precedence over the layout from the form
+	definition (ui.dock reads the saved layout first). After a designer
+	changes the definition, a user with a saved layout keeps seeing the old
+	one. What resets it?
+
+Q4. Values that are not in a database go in a one-row client nav (DATA AND
+	ACTIONS). A nav belongs to a widget (F9). Which widget owns that nav?
+
+
+STAGES
+------------------------------------------------------------------------------
+
+Each stage is testable on its own in the demo.
+
+0. Move ui.template and its demo call to .unused/js/ui_template.js.
+1. Widget type registry with two types that need no data: label and button.
+	ui.form(id, NAME) builds a hand-written definition from _forms[NAME] on a
+	stack, positioned by left, top, w, h. Widget ids from the instance id
+	and the suffix props.
+2. All anchor combinations (LAYOUT table). Test by resizing the form's
+	container.
+3. Tweak mode for one form: ctrl+f2 toggles it. The design box covers the
+	form. Click selects one widget and the designer draws its 8 handles.
+4. Move the selected widget by dragging, snapped to the 4 px grid. The
+	designer writes the new position into _forms[NAME].
+5. Resize by the handles, snapped to the grid.
+6. Multi-select: ctrl+click and the selection rectangle. Move and resize
+	apply to all selected widgets.
+7. Widget toolbar popup: add a widget of a type in the center of the form.
+8. Widget tree and object inspector popup, one widget selected: edit props,
+	including the anchors.
+9. Inspector with several widgets selected: common props, null where they
+	differ, bulk edit.
+10. Cut, copy, paste, delete.
+11. ctrl+up / ctrl+down to change the order of the selected widgets.
+12. Snap to the sides of other widgets.
+13. IDE mode: ctrl+f1, modal popup, hsplit with the forms grid, the form
+	shown at its w, h.
+14. Form resize by its bottom-right corner in IDE mode (ui.resizer may fit).
+15. Data binding: input widgets and grids as widget types, inputs bound to
+	a grid and a column (F9; slots need Q2).
+16. Actions: buttons bound to actions by name (needs Q1).
+17. Nested forms: form as a widget type with a slot map, double-click to
+	open in the IDE.
+18. Docks on a form: layout from the definition, select a pane, drop and
+	paste into it, widgets in panes selectable, selection rectangle limited
+	to its form.
+19. Widgets in dock panes without a form around them: anonymous forms or
+	something else, once decided.

@@ -1,0 +1,366 @@
+UI-CALL: AUDIO AND VIDEO MEETINGS -- TODO
+==============================================================================
+
+Remaining work for www/ui_call.js and lua/webb_call.lua. Implemented items
+were removed; the FEATURES sections of those files list what works.
+
+K means proposed essential; O means optional.
+
+
+1. FUNCTIONALITY
+------------------------------------------------------------------------------
+
+Meeting entry and lifetime
+
+Sel | ID  | Functionality
+----|-----|-------------------------------------------------------------------
+ O  | A09 | Schedule meetings; specify title, time and duration.
+ O  | A10 | List upcoming and past meetings.
+ O  | A11 | Invite specific signed-in users.
+ O  | A12 | Invite external guests by individual e-mail links.
+ O  | A13 | Verify a guest's e-mail with a one-time code.
+ O  | A14 | Revoke invitations and the associated guest sessions.
+ O  | A15 | Ask to join without an invitation; host invites or dismisses.
+
+Audio, video and devices
+
+Sel | ID  | Functionality
+----|-----|-------------------------------------------------------------------
+ O  | B14 | Replace background with bundled or user-supplied pictures.
+ O  | B15 | Share a screen/window/tab alongside camera video.
+ O  | B16 | Stop screen sharing from the app or browser controls.
+
+Meeting display and moderation
+
+Sel | ID  | Functionality
+----|-----|-------------------------------------------------------------------
+ O  | C05 | Outline the active speaker.
+ O  | C06 | Switch between grid and screen presentation layouts.
+ O  | C07 | Fullscreen an individual tile.
+ O  | C08 | Show participant list, host/co-host and guest labels.
+ O  | C09 | Lobby: host admits or rejects waiting participants.
+ O  | C10 | Host removes a participant.
+ O  | C11 | Host assigns or removes co-host privileges.
+ O  | C12 | Show meeting elapsed/remaining time.
+ O  | C13 | Display connection path, bitrate and latency per tile.
+
+Network, recovery and encryption
+
+Sel | ID  | Functionality
+----|-----|-------------------------------------------------------------------
+ O  | D11 | Recover the same meeting after a server restart.
+ O  | D12 | Forward media through an SFU for larger meetings.
+ O  | D13 | Move between peer-to-peer and SFU during a meeting.
+ K  | D14 | Encrypt audio/video frames between browsers, including via SFU.
+
+Calling people and the rest of Biptrix
+
+Sel | ID  | Functionality
+----|-----|-------------------------------------------------------------------
+ O  | E01 | Start an audio/video call from a conversation.
+ O  | E02 | Ring other participants; incoming-call answer/decline screen.
+ O  | E03 | Ring all tabs/devices; stop ringing after an answer or timeout.
+ O  | E04 | Ring additional colleagues into an ongoing meeting.
+ O  | E05 | Missed-call messages and e-mails.
+ O  | E06 | Push incoming calls to closed apps, with repeated ringing.
+ O  | E07 | In-call chat, history and unread indication.
+ O  | E18 | Installable web app and push service worker.
+ O  | E19 | English, Romanian and Spanish interface translations.
+
+
+2. OPEN DECISIONS
+------------------------------------------------------------------------------
+
+Decision             | Question for Cosmin
+---------------------|--------------------------------------------------------
+ Host authority      | Identify the creator on the server. Decide whether to
+                     | retain end-for-all, lobby and removal controls.
+ Meeting lifetime    | Define expiry and when an empty meeting is deleted.
+ Server restart      | Live rooms are in memory. Restart recovery (D11)
+                     | requires persistent meeting access and expiry
+                     | information, not saved WebRTC objects.
+ Browser targets     | Agree desktop/mobile browsers and minimum versions;
+                     | check capture, playback and canvas video on them.
+
+
+3. REMAINING IMPLEMENTATION ITEMS
+------------------------------------------------------------------------------
+
+	mm runs APP_PROCESSES app processes from the $DEPLOY@.service template,
+	each on its own unix socket. nginx sends other routes round robin and
+	each /call_signal/<call_id> to the process given by a hash of the call
+	id, with no retry on another process. Each process records its
+	APP_INSTANCE in the sessions whose open call it holds, and
+	webb_call_repair() clears only those. Known issue:
+	push_rowset_changed_events() wakes only the /rowset.events listeners of
+	its own process. Untested on a real deploy.
+
+	Manual acceptance. Cosmin verifies visual and interaction behavior
+	interactively. No screenshots for canvas-ui verification. Any requested
+	browser automation reads state and media statistics instead.
+
+	Case                    | Acceptance to check
+	------------------------|-------------------------------------------------
+	 Two-person call        | Both participants hear and see each other.
+	 Audio-only entry       | Audio works with camera absent, denied or off.
+	 Group call             | Join/leave and media work through the SFU.
+	 P2P/SFU threshold      | Switch at six -> seven -> six peers.
+	 Mute/camera controls   | Correct transmission and actual state indication.
+	 Device replacement     | Selected device works; loss/failure is visible.
+	 TURN-only connection   | Audio/video work with relay candidates forced.
+	 Blocked audio playback | User can enable sound explicitly, without echo.
+	 Resize/hidden tiles    | Correct layout/audio per chosen policy.
+	 Socket interruption    | Bounded recovery; preserve still-working media.
+	 Reload/duplicate tab   | Follow the selected identity/replacement policy.
+	 Leave during capture   | Stop late capture results; no camera/mic leak.
+	 Expiry/access denial   | Refuse entry/resume; terminate local resources.
+	 Server restart         | Check the recovery contract selected for D11.
+
+
+4. TEST PLAN
+------------------------------------------------------------------------------
+
+Test the browser/provider integration first. Then put most coverage into
+controlled transitions. Use real Web Crypto for cryptographic checks.
+Cosmin verifies canvas-ui appearance and interaction; browser automation
+reads state, decoded video counters and received audio samples.
+
+Order | Coverage                     | Method
+------|------------------------------|----------------------------------------
+ 1    | Actual media paths           | Two real browsers and real Cloudflare.
+ 2    | Pending operations           | Control time and network completion.
+ 3    | Encryption and key lifetime  | Known vectors and invalid-frame cases.
+ 4    | Repeated transitions         | Seeded sequences and real media soak.
+
+Real browser/provider checks
+
+	- Use Chrome and Firefox. Start with two peers; Force SFU avoids the
+	  need to run seven browsers for every media integration check.
+	- Verify P2P, forced TURN, SFU, and SFU through forced TURN.
+	- Verify bidirectional media, audio only, video only, receive only,
+	  and both peers idle before either enables capture.
+	- Switch P2P -> SFU -> P2P while transmitting and while receiving.
+	- Disable capture for more than 30 seconds, then enable it again.
+	- Verify received decoded video frames and received audio samples.
+	  Check connection state and measured bitrate as additional evidence.
+	- In Chrome, read received audio samples through
+	  createMediaStreamSource() on the received track while an audio
+	  element plays that track. Chrome decodes remote audio only while an
+	  element plays it. The node created by createMediaElementSource() for
+	  an element playing a MediaStream outputs only zeros.
+	- Check permission denial, device removal, device replacement, camera
+	  blur and blocked audio playback interactively.
+
+Controlled transition checks
+
+	Control the clock, signaling delivery and Cloudflare response delivery.
+	Exercise the actual call code at those boundaries. Keep the real browser
+	checks above to verify WebRTC behavior and the provider API contract.
+
+	Operation pending       | Events before completion
+	------------------------|-------------------------------------------------
+	 Capture or blur setup  | Disable, change device, change blur, leave.
+	 SFU session creation  | Leave, change mode, lose signaling, reconnect.
+	 Publish or subscribe  | Source leaves, source restarts, change mode.
+	 Offer/answer exchange | Lose signaling, peer replacement, ICE failure.
+	 Track closure         | Source replacement, partial error, leave.
+	 Media key delivery    | Join, leave, reconnect, delayed/duplicate reply.
+
+	For each operation, complete it successfully, fail it, and complete it
+	after its owner has left or has been replaced. Include partial track
+	allocation and partial closure. Advance time across heartbeat, repair
+	and reconnect deadlines without fixed sleeps.
+
+	Check these invariants:
+	- Old operations never modify the current connection or peer.
+	- The server selects P2P through six peers and SFU above six peers,
+	  unless the call-wide Force SFU override is enabled.
+	- Changing that override above six updates everyone without rebuilding
+	  an unchanged media connection.
+	- Every allocated track remains owned until closure is confirmed.
+	- Leave releases captures, workers, connections and pending requests.
+	- An idle SFU peer owns no Cloudflare session until media is needed.
+	- Reconnect preserves identity within the reconnect window.
+	- Encryption never falls back to plaintext when keys are unavailable.
+
+Cryptographic checks
+
+	- Check round trips for Opus frames and for VP8 keyframes and delta
+	  frames, including frames shorter than the VP8 header.
+	- Reject truncated frames, a wrong key, modified ciphertext, modified
+	  unencrypted header bytes, a modified nonce and invalid tags.
+	- Install transforms before the first frame on every sender/receiver,
+	  including those created during mode changes and capture replacement.
+
+Repeated transitions
+
+	Run reproducible sequences of joins, departures, capture toggles,
+	signaling loss and mode changes. Record the seed and operation order.
+	Also run a longer real-browser call and check that resources are
+	released after each departure and after the final leave.
+
+
+5. ENCRYPTION IMPLEMENTATION PLAN
+------------------------------------------------------------------------------
+
+Goal: Cloudflare cannot decrypt audio/video. The Lua server creates and
+distributes the media keys. Cloudflare can still observe routing
+metadata. The Lua server continues to exchange signaling and Cloudflare
+control requests, with no media-frame forwarding.
+Browsers must load trusted application code.
+
+Stage | Work                                             | Status
+------|--------------------------------------------------|--------------------
+ 1    | AES-GCM frames with unencrypted VP8 header       | Done
+ 2    | Chrome/Firefox/Cloudflare packetization check     | Done
+ 3    | Server-created meeting key                       | Done
+ 4    | Encoded-transform worker and call integration    | Done
+ 5    | Readiness display and transition coverage        | Planned
+
+Stage 1: frame format and cryptographic operations
+
+	Frame on the wire: [unencrypted VP8 header][AES-GCM ciphertext and
+	16-byte tag][12-byte random nonce]. The VP8 header is 3 bytes, or 10
+	bytes on a keyframe, and the code authenticates it as additional data.
+	Opus frames have no unencrypted bytes. Every frame uses the meeting's
+	media key and a fresh random nonce. With random 96-bit nonces, one key
+	is safe for about 2^32 frames.
+
+	Implementation: www/ui_call_e2ee.js, tested by
+	tests/ui_call_e2ee_test.mjs. This module does not change live calls.
+	The call module must not advertise E2EE before integration.
+
+Stage 2: packetization and browser compatibility
+
+	Encrypted calls use only Opus and VP8. The H.264 and AV1 packetizers
+	split frames at markers inside the frame bytes, and encrypted frames
+	contain no such markers. H.264 for phones needs encryption that keeps
+	the H.264 headers in the frame unencrypted; that depends on the
+	browser-targets decision.
+
+	Chrome's receiver takes the VP8 keyframe flag from the dependency
+	descriptor RTP header extension when that extension is negotiated, and
+	otherwise from the first frame byte. Keep the VP8 header unencrypted
+	so that Chrome reads the real flag on every path.
+
+	Full-frame SFrame result in Chrome 148 P2P: neither connection
+	negotiated the dependency descriptor. Chrome decoded 252 of the first
+	299 frames as keyframes. After 5 dropped frames, Chrome sent 3 PLIs
+	and decoded no frame in 10 seconds. The plaintext control recovered
+	after 1 PLI.
+
+	Result with the unencrypted VP8 header: Chrome 148 and Firefox 140
+	recovered after 5 dropped frames in every completed scenario, P2P and
+	through Cloudflare, plaintext and encrypted. No connection negotiated
+	the dependency descriptor.
+
+	Firefox 140: in 2 of 4 runs the page never reported, and the runner
+	stopped Firefox after 240 seconds. A standalone probe showed the
+	cause: when the page creates an RTCRtpScriptTransform before its
+	worker script has run, Firefox often never starts the transform. No
+	frame then passes through any transform, the video element paints
+	nothing, and getStats() on both connections never resolves. This
+	happened in 15 of 19 runs. In 6 of 6 runs where the page waited for a
+	message posted by the worker script before creating the transforms,
+	media flowed. The test page now starts one worker per scenario and
+	waits for its ready message; Firefox then did not stall in 7 runs. The
+	production worker needs the same wait.
+
+	One of 3 Cloudflare runs failed in both browsers with "SFU publisher
+	connection timed out", with no ICE candidate errors. Cause unknown.
+
+Stage 3: key distribution
+
+	Only Cloudflare is excluded from the media. The site is not served
+	through Cloudflare's proxy, so Cloudflare cannot read signaling.
+
+	The Lua server creates a random 16-byte media key when a meeting
+	starts and keeps it in memory with the room. The server sends the key
+	over signaling to each admitted member. Never reuse the invite_token
+	query parameter as the media key. Never send the key to Cloudflare.
+	Browsers keep the key in memory, never in browser storage.
+
+	Every sender encrypts with the media key and a random nonce per frame,
+	so senders need no key ids or counters.
+
+	The server controls admission and Cloudflare track subscriptions, so
+	the media key stays the same when members join or leave.
+
+	Implementation: lua/webb_call.lua creates the key with the in-memory
+	call and sends it in every 'joined' message, including after a
+	reconnect. When the last peer leaves, the server removes the call and
+	its key; the next join creates a new key. www/ui_call.js stores the key
+	from 'joined' in memory. Nothing reads it until stage 4.
+
+Stage 4: worker and media integration
+
+	Encrypt only SFU media. WebRTC encrypts P2P media between the two
+	browsers with DTLS-SRTP, and Cloudflare TURN relays only forward those
+	encrypted packets.
+
+	Use RTCRtpScriptTransform and Web Crypto in a dedicated worker. Attach
+	encryption immediately when creating a sender, and attach decryption
+	before processing the receiver's first frame. Cover SFU publishers and
+	SFU subscribers. replaceTrack() keeps a sender's transform.
+
+	Drop unauthenticated frames.
+	Unsupported browsers cannot enter an encrypted call. Close the worker
+	and discard keys on leave. Check asynchronous completions against the
+	current call before accepting them.
+
+	Implementation in www/ui_call.js: start_sfu() creates one
+	www/ui_call_e2ee_worker.js per SFU connection and waits for its ready
+	message before publishing or subscribing. sync_sfu_publications()
+	limits each sender to Opus, or to VP8 with RTX, and attaches the
+	encrypting transform. The SFU connection's ontrack attaches the
+	decrypting transform. stop_sfu() terminates the worker. The worker
+	drops frames that fail authentication. 'joined' delivers the media
+	key before any SFU connection starts, so no sender waits for a key.
+	A browser without RTCRtpScriptTransform fails the call when the call
+	switches to SFU. Cosmin verified SFU audio/video in a real call.
+
+	Chrome passes padding-only audio RTP packets to the receive transform
+	as empty frames. The receive worker passes an empty frame through
+	unchanged, and Chrome then discards it as it does without a transform.
+
+	Account for encryption/decryption work per encoded frame and for the
+	12-byte nonce plus the 16-byte authentication tag. Keep encryption in
+	the worker; do not add per-frame work to the canvas-ui build pass.
+
+Stage 5: verification and acceptance
+
+	Show encryption readiness.
+	Apply the cryptographic and transition checks in section 4, then verify
+	actual decoded audio/video through Cloudflare in Chrome and Firefox.
+	Do not equate successful connection setup with successful decryption.
+
+References
+
+	Browser API:
+	https://developer.mozilla.org/en-US/docs/Web/API/RTCRtpScriptTransform
+	Packetization:
+	https://www.w3.org/TR/webrtc-encoded-transform/
+
+
+6. BIPTRIX SOURCE MAP
+------------------------------------------------------------------------------
+
+References for the remaining items, with line numbers from the revision
+inspected on 2026-10-23.
+
+Area                    | Source
+------------------------|-----------------------------------------------------
+ App feature inventory  | /home/cosmin/biptrix/README.md:38
+ Meeting HTTP routes    | /home/cosmin/biptrix/routes/meetings.js:14
+ Meeting creation       | /home/cosmin/biptrix/core/meetings.js:31
+ Access and host rights | /home/cosmin/biptrix/core/meetings.js:137
+ Guest entry            | /home/cosmin/biptrix/core/meetings.js:181
+ Room admission/resume  | /home/cosmin/biptrix/core/meeting-rooms.js:167
+ Signaling and commands | /home/cosmin/biptrix/core/meeting-rooms.js:355
+ Room departure         | /home/cosmin/biptrix/core/meeting-rooms.js:543
+ SFU provider           | /home/cosmin/biptrix/core/sfu.js:1
+ Ringing                | /home/cosmin/biptrix/core/calls.js:28
+ Tiles and layout       | /home/cosmin/biptrix/public/js/meeting.js:1297
+ Active speaker         | /home/cosmin/biptrix/public/js/meeting.js:1476
+ Mic/camera/share       | /home/cosmin/biptrix/public/js/meeting.js:1614
+ Frame encryption       | /home/cosmin/biptrix/public/js/e2ee.js:41

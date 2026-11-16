@@ -1,0 +1,200 @@
+FETCH BY PK FOR SERVER-FILTERED DETAIL ROWSETS
+==============================================================================
+
+Plan for letting table_* rowsets filter by their fk params on the server
+and still fetch changed rows instead of reloading. Part of NAV-CHANGES.txt
+S2. NAV-SAVE.txt R3 puts server-filtered views in scope (decided
+2026-11-09): every detail nav with a master is one.
+
+Status (2026-11-09): the restricted form below is implemented (not
+committed). The full PLAN further down is proposed, not approved; it
+should be redone on mdbx_query (see OPEN). DECIDE marks a question for
+Cosmin.
+
+
+RESTRICTED FORM - IMPLEMENTED
+==============================================================================
+
+Only one fk param per table_* rowset filters on the server: the
+single-col fk with auto_bind (the fk on the pk, or a cascading fk), when
+the table has exactly one such fk. Every other param stays
+client_filter = true. A request has that param or not, so a rowset needs
+at most two scans, nothing is checked per row on the server, and the fetch
+works through has_rec() on the 'in_list' path.
+
+- scan_rowset (lua/rowset_mdbx.lua): the scan option is
+	fn(db, param_names); param_names is {name -> true} of the col params
+	(with for_cols, without client_filter) present in the request.
+	The header's COL PARAMS section documents it. scan_for_params() returns
+	the scan for a request, kept in scans_by_params under the sorted names
+	of the col params present ('' for none), built on first use. prepare()
+	builds the scan for no params and takes the fields, write table,
+	row_scan, params and table deps from it, as before. load_rows() uses
+	scan_for_params(). The fetch code is in its own section ("loading
+	changed rows"): changed_rows_loader() keeps each scan's
+	load_changed_rows() closure, or false if the scan can't fetch, and
+	load_scan_changed_rows() fetches with the request's scan, answering
+	reload = true for a scan that can't fetch. Rowsets without col params
+	keep one scan; their scan fn ignores param_names.
+- table_*: the one single-col auto_bind fk param gets
+	client_filter = false. Its scan fn returns
+	db:scan(fk.index.name, 'COL in :PARAM') when the param is present, and
+	the whole table scan otherwise.
+- Cost: at most two scans per rowset. A master change reloads only that
+	master's rows from the server.
+- Not covered: a detail bound to two masters at once (ui.master_toggle()
+	per param) loads every row of the server-filtered master and filters
+	by the other one in the browser. A table with two single-col auto_bind
+	fks (a link table whose pk is two fks) keeps every param
+	client-filtered; members rowsets serve those for editing.
+- Test: rowset_mdbx_test table_rowset_server_param (which param is
+	server-filtered, loads with and without it, a fetch with a row moving
+	in and a row of another master).
+- Not tried in the browser.
+
+
+DONE BEFORE THIS PLAN
+==============================================================================
+
+Fetch for scans with param bounds in the path (not committed yet):
+
+- scan.has_rec(key_rec, val_rec) in lua/mdbx_scan.lua: after reset(args),
+	whether a record of the scanned table lies inside the scan's bounds. It
+	compares the record with the exact key and with each sub-range from
+	compute_bounds(), the same bounds that seek_next() and next() use.
+- ix_schema.row_key(db, k, k_sz, v, v_sz) in lua/mdbx_schema.lua: the index
+	key of a base row, built with the same calls as ix_schema.update().
+- scan.can_fetch_by_pk is true unless an eq param reads another scan's
+	current row ({scan=...}). Filters, sort, joins and limits still set it
+	to false.
+- Scan:make_load_changed_rows() resets the scan with the request's
+	param_vals; a changed row outside the bounds goes out as removed.
+- Tests: mdbx_scan_test scan_has_rec (has_rec() against next() for every
+	path kind and direction), rowset_mdbx_test changed_rows_with_params.
+- Fixed: a load that check_no_rows() answers with no rows (a plain param
+	missing, an empty list, allow_unfiltered = false without params) runs
+	no scan and returns no txn_id, but the fetch after the next push ran
+	the scan anyway, with since_txn_id = null and the param missing, and
+	failed. rs:exec_load_changed_rows() in lua/rowset.lua now applies the
+	same check and answers no changes, keeping the client's txn_id.
+	Checked in rowset_mdbx_test changed_rows_with_params.
+- Demo: rowset grid_save_children (grid_save/parent_id with
+	'parent_id = :parent_id'), shown as the detail grid of "Server tree" in
+	www/ui-demo.html. Not tried in the browser yet.
+
+
+PROBLEM
+==============================================================================
+
+table_* rowsets (lua/rowset_mdbx.lua, dynamic_rowset '^table_(.+)$') scan
+the whole table, db:scan(tbl, ''), and declare one param per fk with
+client_filter = true: the server loads every row and the nav filters by
+master in the browser. Setting client_filter = false alone makes the
+server ignore the param, since the scan has no args, and the nav stops
+filtering: every detail would show the whole table.
+
+Two gaps:
+
+1. scan_rowset builds one scan, with one access path, for every request.
+	A table_* rowset needs a different path for each set of fk params
+	present: the table when none is present, the param's fk index with
+	'col in :P' when one is. Members rowsets solve this inside their own
+	init, with one scan per set of params present (rowset_mdbx.lua,
+	read_rows()). scan_rowset has no way to express it.
+2. A scan seeks through one index. With two fk params present, it can seek
+	by one and has to check the other on each row it walks. Scan:in_()
+	takes its list when the scan is built, and Scan:filter() takes no
+	args, so nothing can check a row against an arg list. A check of "col
+	in the list from arg P" reads only the row's own columns and the args,
+	so the fetch can evaluate it on a fetched row too (NAV-CHANGES.txt S2:
+	"structured filters reading only the same source row and query
+	parameters").
+
+
+PLAN
+==============================================================================
+
+State and costs:
+- Per rowset: one scan per set of fk params present, built on first use.
+	Rowsets without col params keep one scan.
+- Per scan: one test per in_ filter on the base table, for the fetch.
+- Load, one param present: a seek on that fk index, no per-row work.
+- Load, two or more present: one decode and one set lookup per walked row
+	for each extra param; in_ costs the same today.
+- Per reset() with an arg list: the filter rebuilds its value set,
+	O(values).
+- Per fetch: for each changed row in the scan, one decode and one lookup
+	per test.
+- Each master change reloads the detail from the server, instead of the
+	nav filtering a table that it loaded whole.
+
+1. Scan:in_() and Scan:not_in() take {arg = 'KEY'} for the values, as
+	Scan:limit() does. membership_filter wraps reset() to rebuild the set
+	from args[KEY], and asserts when the arg is missing, as limit() does.
+
+2. Filtering without disabling the fetch. Scan:filter() wraps next() and
+	sets can_fetch_by_pk = false. Move its next() wrapping, including the
+	can_next_group reset, into a local add_row_test(scan, accept).
+	Scan:filter() keeps setting the flag to false; membership_filter calls
+	add_row_test() directly. This moves about 8 lines of Scan:filter().
+
+3. New scan field: scan.in_tests = {{col = COL, test = fn(v) -> t|f},...}.
+	membership_filter adds an entry when the col belongs to the base
+	table's member, and sets can_fetch_by_pk = false for a col of another
+	member. test applies the collation key and reads the current set. This
+	also makes constant-value in_() and not_in() fetchable.
+
+4. Scan:make_load_changed_rows() builds one decoder per in_tests col when
+	it builds its closure. A changed row passes only if has_rec() and every
+	test return true; a row that fails goes out as removed.
+
+5. scan_rowset (API change): the scan option becomes
+	fn(db, param_names), with param_names = {name -> true} of the col
+	params present in the request: params with for_cols and without
+	client_filter. A plain param, one without for_cols, is required anyway
+	and doesn't enter the key. prepare() builds the scan for the empty set
+	and takes the fields, write table, row_scan, params and table deps
+	from it, as now. load_rows() and load_changed_rows() use the scan for
+	the request's key. init_load_changed_rows() takes a function that
+	returns the fetch closure for a request's param_vals.
+
+6. table_* (contract change): single-col fk params get
+	client_filter = false. No param present: db:scan(tbl, ''). One or more
+	present: a path 'col in :P' on the fk index (fk.index.name) of the first
+	present param by sorted name, plus in_(col, {arg = P}) for each other
+	present param.
+
+7. Tests: mdbx_scan: in_ with an arg, including a second reset() with
+	other values, and in_tests in a fetch. rowset_mdbx: table_* with one fk
+	param and with two, checked through load and fetch: rows moving in and
+	out, deletes.
+
+DECIDE: composite fk params (for example c1,c2 -> pair) stay
+client_filter = true. The 'in' path term and in_() both take one col.
+
+
+OPEN
+==============================================================================
+
+- The full PLAN duplicates mdbx_query: with wheres such as
+	{'in', c'COL', p'P'}, its planner already picks which condition drives
+	the index seek (an 'in' on a param list becomes an in_list path term)
+	and checks the rest per row in eval_expr(). Steps 1-3 and 6 redo that
+	by hand. On mdbx_query, the missing pieces are: fetch for queries with
+	wheres (Rel:make_load_changed_rows() gives up on any where, and the
+	residual conditions run through Scan:filter(), which disables the
+	fetch), a rowset over a Rel, and one Rel per set of params present.
+	Unchecked: whether eval_expr() can run on a fetched row, which is not
+	the scan's current row.
+- A path param {get = fn} keeps the scan fetchable. Spec strings and
+	rowsets don't make one, but a hand-built path whose get() reads another
+	scan's row would fetch wrong rows, like the {scan=...} case that
+	disables fetching.
+- No test runs has_rec() on a collated index col. row_key() and the
+	bounds use the same encoders as index writes and seeks.
+- The nav side needs no change: server_param_vals() already sends the
+	params that are not client_filter, and is_requested_vals() already
+	handles server-filtered col params in the reload replay.
+- Rel:make_load_changed_rows() in lua/mdbx_query.lua now also resets its
+	terminal scan with the param values. No caller and no test cover it.
+- Not tried in the browser: the grid_save_children demo detail.
