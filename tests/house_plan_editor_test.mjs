@@ -631,7 +631,8 @@ for (let action of ['room_point', 'eave', 'line', 'blocked_line']) {
 		await pg.waitForTimeout(50)
 		await pg.mouse.down()
 		await pg.waitForTimeout(50)
-		let expected_action = 'move_' + (action == 'blocked_line' ? 'line' : action)
+		let expected_action = action == 'line' || action == 'blocked_line'
+			? 'move_faces' : 'move_' + action
 		check(action+' '+finish+': capture starts without a model edit',
 			await pg.evaluate(action => {
 				let cs = ui.captured('fe')
@@ -676,35 +677,48 @@ for (let action of ['room_point', 'eave', 'line', 'blocked_line']) {
 check('no page errors after room and roof edits',
 	errors.length == 0, errors.join('\n'))
 
-// shift over an eave pans; a double-click on a dragged ridge resets it.
-await pg.reload()
-await pg.waitForTimeout(200)
-let roof_click = await pg.evaluate(async function() {
-	let point
-	let fill_text = ui.cx.fillText
-	ui.cx.fillText = function(text, x, y, ...args) {
-		if (text == 'ROOF') {
-			let p = this.getTransform().transformPoint({x: x+3, y: y-3})
-			point = {x: p.x, y: p.y}
+// the screen points of the texts drawn in one frame: [{text, x, y}, ...].
+function read_texts() {
+	return pg.evaluate(async function() {
+		let texts = []
+		let fill_text = ui.cx.fillText
+		ui.cx.fillText = function(text, x, y, ...args) {
+			let p = this.getTransform().transformPoint({x: x, y: y})
+			texts.push({text: text, x: p.x, y: p.y})
+			return fill_text.call(this, text, x, y, ...args)
 		}
-		return fill_text.call(this, text, x, y, ...args)
-	}
-	try {
+		try {
+			ui.animate()
+			await new Promise(resolve => requestAnimationFrame(() =>
+				requestAnimationFrame(resolve)))
+			return texts
+		} finally {
+			ui.cx.fillText = fill_text
+		}
+	})
+}
+
+// a 600 x 400 house with a hip roof of 20 degrees and an overhang of 20,
+// shown at the roof level.
+async function load_roof_plan(edge_points) {
+	await pg.reload()
+	await pg.waitForTimeout(200)
+	await pg.evaluate(function(edge_points) {
 		window.plan_json = json({floors: [{
 			lines: [['draw', 0, 0, 600, 400, -600, -400]],
 			roof: {pitch: 20, overhang: 20,
-				eave_h: -20 * Math.tan(20 * Math.PI / 180), edge_points: []},
+				eave_h: -20 * Math.tan(20 * Math.PI / 180),
+				edge_points: edge_points},
 		}]})
-		ui.animate()
-		await new Promise(resolve => requestAnimationFrame(() =>
-			requestAnimationFrame(resolve)))
-		return point
-	} finally {
-		ui.cx.fillText = fill_text
-	}
-})
-await pg.mouse.click(roof_click.x, roof_click.y)
-await pg.waitForTimeout(100)
+	}, edge_points)
+	for (let t of await read_texts())
+		if (t.text == 'ROOF')
+			await pg.mouse.click(t.x + 3, t.y - 3)
+	await pg.waitForTimeout(100)
+}
+
+// shift over an eave pans; a double-click on a dragged ridge resets it.
+await load_roof_plan([])
 view = await read_view()
 sx = view.x0 + Math.round(634 * view.scale) // east eave
 sy = view.y0 + Math.round(200 * view.scale)
@@ -722,10 +736,14 @@ await pg.keyboard.up('Shift')
 sx = view.x0 + Math.round(300 * view.scale) // ridge
 await pg.mouse.move(sx, sy)
 await pg.waitForTimeout(50)
-check('ridge is hit', (await hit_state())?.action == 'move_line',
-	JSON.stringify(await hit_state()))
+check('ridge is hit', await pg.evaluate(function() {
+	let hs = ui.hovers('fe')
+	return hs?.action == 'move_faces' && hs.roof_faces.length == 2
+}), JSON.stringify(await hit_state()))
 await pg.mouse.down()
+await pg.waitForTimeout(50)
 await pg.mouse.move(sx, sy + 40, {steps: 4})
+await pg.waitForTimeout(50)
 await pg.mouse.up()
 await pg.waitForTimeout(100)
 check('ridge drag sets own pitches', await pg.evaluate(function() {
@@ -737,7 +755,7 @@ await pg.mouse.move(sx + 20, sy + 40)
 await pg.waitForTimeout(50)
 await pg.mouse.move(sx, sy + 40)
 await pg.waitForTimeout(100)
-check('dragged ridge is hit', (await hit_state())?.action == 'move_line')
+check('dragged ridge is hit', (await hit_state())?.action == 'move_faces')
 await pg.mouse.dblclick(sx, sy + 40, {delay: 80})
 await pg.waitForTimeout(100)
 check('double-click resets the ridge', await pg.evaluate(function() {
@@ -769,20 +787,190 @@ await pg.keyboard.down('Control')
 await pg.waitForTimeout(50)
 await pg.mouse.down()
 await pg.waitForTimeout(50)
-check('ctrl+press on an eave starts its move', await pg.evaluate(() =>
-	ui.captured('fe')?.action == 'move_eave' && !!ui.captured('fe').edit))
+check('ctrl+press on an eave starts no edit before a movement',
+	await pg.evaluate(() =>
+		ui.captured('fe')?.action == 'move_eave' && !ui.captured('fe').edit))
 await pg.mouse.up()
 await pg.waitForTimeout(100)
 check('ctrl+click on an eave does not toggle its gable',
 	await pg.evaluate(() => house.edit_no == 2))
 await pg.mouse.down()
+await pg.waitForTimeout(50)
 await pg.mouse.move(sx + 4, sy, {steps: 2})
+await pg.waitForTimeout(50)
+check('ctrl+press on an eave starts its move at the first movement',
+	await pg.evaluate(() => !!ui.captured('fe')?.edit))
 await pg.mouse.up()
 await pg.keyboard.up('Control')
 await pg.waitForTimeout(100)
-check('ctrl+drag below the threshold moves the eave', await pg.evaluate(() =>
-	house.edit_no == 3 && house.floors[0].roof.eave_h
-		< -20 * Math.tan(20 * Math.PI / 180) - 1))
+check('ctrl+drag below the threshold moves only the eave',
+	await pg.evaluate(function() {
+		let roof = house.floors[0].roof
+		let eave_h = -20 * Math.tan(20 * Math.PI / 180)
+		return house.edit_no == 3 && roof.eave_h == eave_h
+			&& roof.edge_points.some(p => p.x == 614
+				&& p.eave_h < eave_h - 1)
+	}))
+
+// pitch labels: one per face; a drag changes the face's pitch, shift all
+// pitches, within 1..89; without shift, two edge points block the drag.
+async function read_labels() {
+	let labels = []
+	for (let t of await read_texts())
+		if (t.text.endsWith('\u00b0'))
+			labels.push(t)
+	return labels
+}
+// the label nearest to the north eave.
+function north_label(labels) {
+	let found
+	for (let t of labels)
+		if (!found || t.y < found.y)
+			found = t
+	return found
+}
+async function drag_label(label, dy, shift) {
+	await pg.mouse.move(label.x, label.y - 5)
+	await pg.waitForTimeout(50)
+	await pg.mouse.down()
+	await pg.waitForTimeout(50)
+	if (shift) // shift before the press pans.
+		await pg.keyboard.down('Shift')
+	await pg.waitForTimeout(50)
+	await pg.mouse.move(label.x, label.y - 5 + dy, {steps: 4})
+	await pg.waitForTimeout(50)
+	let can_move = await pg.evaluate(() => ui.captured('fe')?.can_move_pitch)
+	await pg.mouse.up()
+	await pg.waitForTimeout(50)
+	if (shift)
+		await pg.keyboard.up('Shift')
+	await pg.waitForTimeout(100)
+	return can_move
+}
+function read_roof() {
+	return pg.evaluate(() => house.floors[0].roof)
+}
+
+await load_roof_plan([])
+let labels = await read_labels()
+check('one pitch label per face', labels.length == 4
+	&& labels.every(t => t.text == '20\u00b0'), JSON.stringify(labels))
+await drag_label(north_label(labels), -20, true)
+let roof = await read_roof()
+check('shift+label drag changes the roof pitch',
+	roof.pitch == 25 && !roof.edge_points.length, JSON.stringify(roof))
+labels = await read_labels()
+await drag_label(north_label(labels), 20)
+roof = await read_roof()
+check('label drag changes only the face',
+	roof.pitch == 25 && roof.edge_points.length == 1
+		&& roof.edge_points[0].pitch == 20, JSON.stringify(roof))
+labels = await read_labels()
+check('labels show the new pitches',
+	labels.filter(t => t.text == '25\u00b0').length == 3
+		&& north_label(labels).text == '20\u00b0', JSON.stringify(labels))
+await drag_label(north_label(labels), -400, true)
+roof = await read_roof()
+check('shift+label drag keeps the steepest pitch at 89',
+	roof.pitch == 89 && roof.edge_points[0].pitch == 84
+		&& await pg.evaluate(() => house.edit_no == 3), JSON.stringify(roof))
+
+await load_roof_plan([
+	{x: 100, y: -14, pitch: 30},
+	{x: 500, y: -14, pitch: 30},
+])
+labels = await read_labels()
+let can_move = await drag_label(north_label(labels), -20)
+check('label drag on a side with two edge points does nothing',
+	can_move === false && await pg.evaluate(() => house.edit_no == 0))
+
+// the east ridge end (400, 200), where the north, south and east faces
+// meet: a drag along the ridge outward makes only the east face steeper.
+await load_roof_plan([])
+view = await read_view()
+sx = view.x0 + Math.round(400 * view.scale)
+sy = view.y0 + Math.round(200 * view.scale)
+await pg.mouse.move(sx, sy)
+await pg.waitForTimeout(100)
+check('ridge end is hit with its three faces', await pg.evaluate(function() {
+	let hs = ui.hovers('fe')
+	return hs?.action == 'move_faces' && hs.roof_faces.length == 3
+}))
+await pg.mouse.down()
+await pg.waitForTimeout(50)
+await pg.mouse.move(sx + 40, sy, {steps: 4})
+await pg.waitForTimeout(50)
+await pg.mouse.up()
+await pg.waitForTimeout(100)
+roof = await read_roof()
+check('ridge end drag along the ridge changes only the end face',
+	roof.edge_points.length == 3 && roof.edge_points.every(ep =>
+		ep.x == 614 ? ep.pitch > 21 : Math.abs(ep.pitch - 20) < 1e-6),
+	JSON.stringify(roof))
+
+// double-click on a pitch label: the face back to the roof's pitch.
+await load_roof_plan([{x: 300, y: -14, pitch: 30}])
+labels = await read_labels()
+check('the north face has its own pitch',
+	north_label(labels).text == '30°', JSON.stringify(labels))
+let label = north_label(labels)
+await pg.mouse.move(label.x, label.y - 5)
+await pg.waitForTimeout(50)
+await pg.mouse.dblclick(label.x, label.y - 5, {delay: 80})
+await pg.waitForTimeout(100)
+check('double-click on a pitch label resets the face', await pg.evaluate(() =>
+	house.floors[0].roof.edge_points[0].pitch == null && house.edit_no == 1))
+
+// ctrl+double-click on an eave with an edge point: no move, the point is
+// removed.
+await load_roof_plan([{x: 300, y: 414, eave_h: -10}])
+view = await read_view()
+let south_c = await pg.evaluate(function() { // the south eave line
+	let ds = ui.state_of('fe', 'draw_state')
+	for (let side of ds.roof_sides)
+		if (side.ny == 1)
+			return side.c / prism_union.grid_scale
+})
+sx = view.x0 + Math.round(300 * view.scale)
+sy = view.y0 + Math.round(south_c * view.scale)
+await pg.mouse.move(sx, sy)
+await pg.waitForTimeout(50)
+await pg.keyboard.down('Control')
+await pg.waitForTimeout(50)
+await pg.mouse.dblclick(sx, sy, {delay: 80})
+await pg.waitForTimeout(100)
+await pg.keyboard.up('Control')
+await pg.waitForTimeout(50)
+check('ctrl+double-click on an eave removes its edge point',
+	await pg.evaluate(() =>
+		house.floors[0].roof.edge_points.length == 0 && house.edit_no == 1),
+	await pg.evaluate(() => house.edit_no + ' '
+		+ JSON.stringify(house.floors[0].roof)) + ' ' + south_c
+		+ errors.join('\n'))
+
+// measurements: while dragging an eave, of the moved eaves; in the
+// dimensions mode, of all eaves and lines.
+await load_roof_plan([])
+view = await read_view()
+sx = view.x0 + Math.round(634 * view.scale) // east eave
+sy = view.y0 + Math.round(200 * view.scale)
+await pg.mouse.move(sx, sy)
+await pg.waitForTimeout(50)
+let texts0 = await read_texts()
+await pg.mouse.down()
+await pg.waitForTimeout(50)
+await pg.keyboard.down('Shift')
+await pg.mouse.move(sx + 30, sy, {steps: 4})
+await pg.waitForTimeout(50)
+let texts1 = await read_texts()
+await pg.mouse.up()
+await pg.keyboard.up('Shift')
+await pg.waitForTimeout(100)
+let heights = t => t.filter(t => t.text.startsWith('h ')).length
+check('no eave heights shown while hovering', heights(texts0) == 0,
+	JSON.stringify(texts0.map(t => t.text)))
+check('shift+eave drag shows the heights of all sloped eaves',
+	heights(texts1) == 4, JSON.stringify(texts1.map(t => t.text)))
 check('no page errors after pan and line reset',
 	errors.length == 0, errors.join('\n'))
 
@@ -803,7 +991,7 @@ await pg.mouse.move(view.x0 + Math.round(514 * view.scale),
 	view.y0 + Math.round(136 * view.scale))
 await pg.waitForTimeout(50)
 check('different roof heights produce no draggable shared line',
-	await pg.evaluate(() => ui.hovers('fe')?.action != 'move_line'))
+	await pg.evaluate(() => ui.hovers('fe')?.action != 'move_faces'))
 check('roof shared endpoints reuse face points', await pg.evaluate(function() {
 	let ds = ui.state_of('fe', 'draw_state')
 	let points = new Set()
@@ -820,9 +1008,9 @@ await pg.waitForTimeout(50)
 check('the actual join between roof faces remains draggable',
 	await pg.evaluate(function() {
 		let hs = ui.hovers('fe')
-		if (hs?.action != 'move_line')
+		if (hs?.action != 'move_faces')
 			return false
-		for (let face of [hs.roof_face1, hs.roof_face2]) {
+		for (let face of hs.roof_faces) {
 			let [a, b, c] = face.plane
 			if (Math.abs(a * hs.roof_x + b * hs.roof_y + c - hs.roof_z) > 1e-6)
 				return false

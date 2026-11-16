@@ -37,10 +37,6 @@ function floor(lines) {
 	return house({floors: [{lines}]}).floors[0]
 }
 
-function draw_state() {
-	return {snap_lines: []}
-}
-
 let n_checks = 0
 function check(name, f) {
 	try {
@@ -56,34 +52,31 @@ function check(name, f) {
 
 check('new wall uses the initial pointer position', () => {
 	let f = floor([[null, [0, 0], [100, 0]]])
-	let ds = draw_state()
-	let r = f.start_resize_seg(null, 300, 300, 20, 0, 1, 0, ds)
-	assert.equal(r.resize(20, 0, ds), r.seg[1])
+	let r = f.start_resize_seg(null, 300, 300, 20, 0, 1, 0)
+	assert.equal(r.resize(20, 0), r.seg[1])
 	assert.equal(r.seg.m1, 300)
 	assert.equal(r.seg.m2, 320)
-	r.resize(40, 0, ds)
+	r.resize(40, 0)
 	assert.equal(r.seg.m2, 340)
 	r.stop()
 })
 
 check('detached endpoint uses its original position', () => {
 	let f = floor([['connect', [0, 0], [100, 0], [100, 100]]])
-	let ds = draw_state()
 	let p = f.ps.find(p => p[0] == 100 && p[1] == 0)
-	let r = f.start_resize_seg(p, 100, 0, -20, 0, -1, 0, ds)
-	r.resize(-20, 0, ds, 2)
+	let r = f.start_resize_seg(p, 100, 0, -20, 0, -1, 0)
+	r.resize(-20, 0, 2)
 	assert.equal(r.seg.m2, 80)
-	r.resize(-40, 0, ds, 2)
+	r.resize(-40, 0, 2)
 	assert.equal(r.seg.m2, 60)
 	r.stop()
 })
 
 check('existing free endpoint uses its original position', () => {
 	let f = floor([[null, [0, 0], [100, 0]]])
-	let ds = draw_state()
 	let p = f.ps.find(p => p[0] == 100)
-	let r = f.start_resize_seg(p, 100, 0, 20, 0, 1, 0, ds)
-	assert.equal(r.resize(20, 0, ds), p)
+	let r = f.start_resize_seg(p, 100, 0, 20, 0, 1, 0)
+	assert.equal(r.resize(20, 0), p)
 	assert.equal(p[0], 120)
 	r.stop()
 })
@@ -92,19 +85,18 @@ check('existing free endpoint uses its original position', () => {
 
 check('collapsing a free wall keeps finite bounds and allows extending', () => {
 	let f = house(ctx.house_test_plans.simple).floors[0]
-	let ds = draw_state()
-	let created = f.start_resize_seg(null, 400, 200, 60, 0, 1, 0, ds)
-	created.resize(60, 0, ds)
+	let created = f.start_resize_seg(null, 400, 200, 60, 0, 1, 0)
+	created.resize(60, 0)
 	created.stop()
 	let p = f.ps.find(p => p[0] == 400 && p[1] == 200)
-	let r = f.start_resize_seg(p, 400, 200, 60, 0, 1, 0, ds)
-	r.resize(60, 0, ds)
+	let r = f.start_resize_seg(p, 400, 200, 60, 0, 1, 0)
+	r.resize(60, 0)
 	assert.equal(r.seg.m1, r.seg.m2)
 	for (let m of f.house.bb)
 		assert(Number.isFinite(m), 'infinite house bounds')
 	for (let c of f.comps)
 		assert(c.outer_cycle.edges.length > 0, 'empty wall outline')
-	r.resize(80, 0, ds)
+	r.resize(80, 0)
 	assert.equal(p[0], 480)
 	assert.equal(r.seg.m2 - r.seg.m1, 20)
 	for (let m of f.house.bb)
@@ -118,16 +110,15 @@ check('overlapping walls stay separate until release', () => {
 	let f = floor([[null, [0, 0], [1000, 0]]])
 	let before = geometry(f)
 	let seg = f.segs[0]
-	let ds = draw_state()
 	let fix = f.fix
 	let n_fix = 0
 	f.fix = function() {
 		n_fix++
 		return fix.call(this)
 	}
-	let r = f.start_resize_seg(null, 500, 0, 40, 0, 1, 0, ds)
+	let r = f.start_resize_seg(null, 500, 0, 40, 0, 1, 0)
 	for (let dx of [40, 100, 200]) {
-		r.resize(dx, 0, ds)
+		r.resize(dx, 0)
 		assert.equal(n_fix, 0)
 		assert.equal(f.segs.length, 2)
 		assert.equal(f.ps.length, 4)
@@ -149,9 +140,8 @@ check('overlapping walls stay separate until release', () => {
 check('overlapping extension commits once and supports undo and redo', () => {
 	let f = floor([[null, [0, 0], [1000, 0]]])
 	let before = geometry(f)
-	let ds = draw_state()
-	let r = f.start_resize_seg(null, 500, 0, 40, 0, 1, 0, ds)
-	r.resize(600, 0, ds)
+	let r = f.start_resize_seg(null, 500, 0, 40, 0, 1, 0)
+	r.resize(600, 0)
 	assert.equal(f.segs.length, 2)
 	assert(f.segs.includes(r.seg))
 	r.stop()
@@ -169,9 +159,8 @@ check('cancelling an overlapping extension restores its starting geometry',
 	() => {
 	let f = floor([[null, [0, 0], [1000, 0]]])
 	let before = geometry(f)
-	let ds = draw_state()
-	let r = f.start_resize_seg(null, 500, 0, 40, 0, 1, 0, ds)
-	r.resize(600, 0, ds)
+	let r = f.start_resize_seg(null, 500, 0, 40, 0, 1, 0)
+	r.resize(600, 0)
 	assert(f.segs.includes(r.seg))
 	r.cancel()
 	assert.equal(geometry(f), before)
@@ -183,15 +172,14 @@ check('a detached junction endpoint can collapse on the first resize step',
 	let f = house(ctx.house_test_plans.simple).floors[0]
 	let before = geometry(f)
 	let p = f.ps_ids.get('cl')
-	let ds = draw_state()
-	let r = f.start_resize_seg(p, 200, 0, -200, 0, -1, 0, ds)
+	let r = f.start_resize_seg(p, 200, 0, -200, 0, -1, 0)
 	assert.equal(r.seg.m2, 200)
-	r.resize(-200, 0, ds)
+	r.resize(-200, 0)
 	assert(f.segs.includes(r.seg))
 	assert.equal(r.seg.m1, r.seg.m2)
 	for (let m of f.house.bb)
 		assert(Number.isFinite(m))
-	r.resize(-80, 0, ds)
+	r.resize(-80, 0)
 	assert.equal(r.seg.m2, 120)
 	r.stop()
 	let after = geometry(f)
@@ -208,12 +196,12 @@ check('vertical endpoint does not snap to x coordinates', () => {
 		[null, [100, 0], [100, 100]],
 		[null, [180, 500], [180, 600]],
 	])
-	let ds = draw_state()
 	let p = f.ps.find(p => p[0] == 100 && p[1] == 100)
-	let r = f.start_resize_seg(p, 100, 100, 0, 0, 0, 1, ds)
-	r.resize(0, 90, ds)
+	let r = f.start_resize_seg(p, 100, 100, 0, 0, 0, 1)
+	r.resize(0, 90)
 	assert.equal(p[1], 190)
-	assert.equal(ds.snap_lines.length, 0)
+	assert.equal(r.snap_a, null)
+	assert.equal(r.snap_v, false)
 	r.stop()
 })
 
@@ -223,11 +211,12 @@ for (let ctrl of [false, true]) {
 			[null, [100, 0], [100, 100]],
 			[null, [180, 200], [180, 600]],
 		])
-		let ds = draw_state()
 		let p = f.ps.find(p => p[0] == 100 && p[1] == 100)
-		let r = f.start_resize_seg(p, 100, 100, 0, 0, 0, 1, ds)
-		r.resize(0, 90, ds, ctrl ? 2 : 30)
+		let r = f.start_resize_seg(p, 100, 100, 0, 0, 0, 1)
+		r.resize(0, 90, ctrl ? 2 : 30)
 		assert.equal(p[1], ctrl ? 190 : 200)
+		assert.equal(r.snap_a, ctrl ? null : 200)
+		assert.equal(r.snap_v, false)
 		r.stop()
 	})
 }
@@ -237,10 +226,9 @@ check('vertical endpoint stops at a blocking wall', () => {
 		[null, [100, 0], [100, 100]],
 		[null, [0, 250], [300, 250]],
 	])
-	let ds = draw_state()
 	let p = f.ps.find(p => p[0] == 100 && p[1] == 100)
-	let r = f.start_resize_seg(p, 100, 100, 0, 0, 0, 1, ds)
-	r.resize(0, 400, ds)
+	let r = f.start_resize_seg(p, 100, 100, 0, 0, 0, 1)
+	r.resize(0, 400)
 	assert.equal(p[1], 250)
 	r.stop()
 })
@@ -263,13 +251,12 @@ for (let v of [false, true])
 				let d0 = direction * first_delta
 				let dx0 = v ? 0 : d0
 				let dy0 = v ? d0 : 0
-				let ds = draw_state()
 				let r = f.start_resize_seg(null, x0, y0, dx0, dy0,
-					v ? 0 : direction, v ? direction : 0, ds)
+					v ? 0 : direction, v ? direction : 0)
 				let d = direction * 200
-				r.resize(v ? 0 : d, v ? d : 0, ds)
+				r.resize(v ? 0 : d, v ? d : 0)
 				assert.equal(r.seg[1][v ? 1 : 0], 250)
-				r.resize(0, 0, ds)
+				r.resize(0, 0)
 				assert.equal(r.seg[1][v ? 1 : 0], m0)
 				r.cancel()
 			})
@@ -283,13 +270,14 @@ for (let ctrl of [false, true]) {
 			[null, [0, 0], [100, 0]],
 			[null, [0, 200], [100, 200]],
 		])
-		let ds = draw_state()
 		let s = f.segs.find(s => s.axis == 0)
 		let c = f.comps.find(c => c.segs.includes(s)).outer_cycle
 		let y1 = c.edges.bbox()[1]
-		let r = f.start_move_seg(s, ds)
-		r.move(0, 190, ds, ctrl ? 2 : 20)
+		let r = f.start_move_seg(s)
+		r.move(0, 190, ctrl ? 2 : 20)
 		let dy = ctrl ? 190 : 200
+		assert.equal(r.snap_a, undefined)
+		assert.equal(r.snap_v, false)
 		assert.equal(s.axis, dy)
 		assert.equal(c.edges.bbox()[1], y1 + dy)
 		r.stop()
@@ -300,10 +288,9 @@ for (let ctrl of [false, true]) {
 			[null, [0, 0], [100, 0]],
 			[null, [200, 200], [350, 200]],
 		])
-		let ds = draw_state()
 		let s = f.segs.find(s => s.axis == 0)
-		let r = f.start_move_seg(s, ds)
-		r.move(190, 0, ds, ctrl ? 2 : 20)
+		let r = f.start_move_seg(s)
+		r.move(190, 0, ctrl ? 2 : 20)
 		assert.equal(s.m1, ctrl ? 190 : 200)
 		assert.equal(s.m2 - s.m1, 100)
 		r.stop()
@@ -324,14 +311,13 @@ for (let v of [false, true])
 			let p2 = seg[1]
 			let a0 = [...p1]
 			let b0 = [...p2]
-			let ds = draw_state()
-			let r = f.start_move_seg(seg, ds)
-			r.move(0, 0, ds)
+			let r = f.start_move_seg(seg)
+			r.move(0, 0)
 			r.stop()
 			assert.equal(geometry(f), before)
 			assert.equal(f.house.undo(), false)
-			r = f.start_move_seg(seg, ds)
-			r.move(30, 40, ds)
+			r = f.start_move_seg(seg)
+			r.move(30, 40)
 			assert.equal(seg[0], p1)
 			assert.equal(seg[1], p2)
 			assert.deepEqual([...p1], [a0[0] + 30, a0[1] + 40])
@@ -360,9 +346,8 @@ for (let v of [false, true]) {
 				[null, [200, 200], [350, 200]],
 			])
 		let seg = f.segs.find(seg => seg.axis == 0)
-		let ds = draw_state()
-		let r = f.start_move_seg(seg, ds)
-		r.move(v ? 0 : 190, v ? 190 : 0, ds)
+		let r = f.start_move_seg(seg)
+		r.move(v ? 0 : 190, v ? 190 : 0)
 		assert.equal(seg[0][v ? 1 : 0], 300)
 		assert.equal(seg[1][v ? 1 : 0], 200)
 		assert.equal(seg.m2 - seg.m1, 100)
@@ -376,17 +361,16 @@ for (let y of [0, 400])
 	for (let dy of [-100, 100]) {
 		check('exterior wall outlines y=' + y + ', dy=' + dy, () => {
 			let f = house(ctx.house_test_plans.simple).floors[0]
-			let ds = draw_state()
 			let s = f.segs.find(s => !s.is_v && s.axis == y && s.m1 == 200)
-			let r = f.start_move_seg(s, ds)
-			r.move(0, dy, ds)
+			let r = f.start_move_seg(s)
+			r.move(0, dy)
 			r.stop()
 			let connector = f.segs.find(s => s.is_v && s.axis == 200
 				&& s.m1 == Math.min(y, y+dy) && s.m2 == Math.max(y, y+dy))
 			assert(connector)
-			let r1 = f.start_move_seg(connector, ds)
+			let r1 = f.start_move_seg(connector)
 			for (let dx of [0, 40]) {
-				r1.move(dx, 0, ds)
+				r1.move(dx, 0)
 				for (let c of f.comps)
 					for (let cy of c.cycles)
 						for (let i = 0; i < cy.edges.length; i++) {
@@ -405,20 +389,20 @@ for (let y of [0, 400])
 for (let ctrl of [false, true]) {
 	check('connected-wall movement, ctrl=' + ctrl, () => {
 		let f = house(ctx.house_test_plans.simple).floors[0]
-		let ds = draw_state()
 		let s = f.segs.find(s => s.is_v && s.axis == 200)
-		let r = f.start_move_seg(s, ds)
-		r.move(15, 0, ds, ctrl ? 2 : 20)
+		let r = f.start_move_seg(s)
+		r.move(15, 0, ctrl ? 2 : 20)
 		assert.equal(s.axis, ctrl ? 215 : 200)
+		assert.equal(r.snap_a, ctrl ? null : 200)
+		assert.equal(r.snap_v, true)
 		r.stop()
 	})
 }
 
 check('deleting a wall through the move callback', () => {
 	let f = house(ctx.house_test_plans.simple).floors[0]
-	let ds = draw_state()
 	let s = f.segs.find(s => s.is_v && s.axis == 200)
-	f.start_move_seg(s, ds).stop(true)
+	f.start_move_seg(s).stop(true)
 	assert.equal(f.segs.length, 4)
 	assert.equal(f.comps[0].cycles.length, 2)
 })
@@ -496,14 +480,13 @@ check('wall history leaves direct editor links attached', () => {
 	f.ps[0].editor = editor
 	f.segs[0].editor = editor
 	JSON.stringify(f.save_state())
-	let ds = draw_state()
-	let r = f.start_move_seg(f.segs.find(s => s.is_v && s.axis == 200), ds)
-	r.move(50, 0, ds)
+	let r = f.start_move_seg(f.segs.find(s => s.is_v && s.axis == 200))
+	r.move(50, 0)
 	r.stop()
 	assert(f.house.undo())
 	assert(f.house.redo())
-	r = f.start_move_seg(f.segs[0], ds)
-	r.move(0, 50, ds)
+	r = f.start_move_seg(f.segs[0])
+	r.move(0, 50)
 	r.cancel()
 	assert.equal(f.editor, editor)
 	assert.equal(editor.floor, f)
@@ -511,12 +494,11 @@ check('wall history leaves direct editor links attached', () => {
 
 check('a whole drag is one undo step with stable IDs', () => {
 	let f = house(ctx.house_test_plans.simple).floors[0]
-	let ds = draw_state()
 	let before = geometry(f)
 	let s = f.segs.find(s => s.is_v && s.axis == 200)
-	let r = f.start_move_seg(s, ds)
+	let r = f.start_move_seg(s)
 	for (let dx of [30, 40, 50])
-		r.move(dx, 0, ds)
+		r.move(dx, 0)
 	r.stop()
 	let after = geometry(f)
 	assert.notEqual(after, before)
@@ -531,11 +513,10 @@ check('a whole drag is one undo step with stable IDs', () => {
 
 check('resizing can be undone and redone', () => {
 	let f = floor([[null, [0, 0], [100, 0]]])
-	let ds = draw_state()
 	let before = geometry(f)
 	let p = f.ps.find(p => p[0] == 100)
-	let r = f.start_resize_seg(p, 100, 0, 20, 0, 1, 0, ds)
-	r.resize(40, 0, ds)
+	let r = f.start_resize_seg(p, 100, 0, 20, 0, 1, 0)
+	r.resize(40, 0)
 	r.stop()
 	let after = geometry(f)
 	assert(f.house.undo())
@@ -546,10 +527,9 @@ check('resizing can be undone and redone', () => {
 
 check('new walls can be undone and redone', () => {
 	let f = floor([[null, [0, 0], [100, 0]]])
-	let ds = draw_state()
 	let before = geometry(f)
-	let r = f.start_resize_seg(null, 300, 300, 20, 0, 1, 0, ds)
-	r.resize(40, 0, ds)
+	let r = f.start_resize_seg(null, 300, 300, 20, 0, 1, 0)
+	r.resize(40, 0)
 	r.stop()
 	let after = geometry(f)
 	assert(f.house.undo())
@@ -573,11 +553,10 @@ check('deletion undo restores rooms and connections', () => {
 
 check('cancelled wall movement restores temporary topology', () => {
 	let f = house(ctx.house_test_plans.simple).floors[0]
-	let ds = draw_state()
 	let before = geometry(f)
 	let s = f.segs.find(s => !s.is_v && s.axis == 0 && s.m1 == 200)
-	let r = f.start_move_seg(s, ds)
-	r.move(0, 100, ds)
+	let r = f.start_move_seg(s)
+	r.move(0, 100)
 	r.cancel()
 	assert.equal(geometry(f), before)
 	assert.equal(f.comps[0].ps.length, f.ps.length)
@@ -587,10 +566,9 @@ check('cancelled wall movement restores temporary topology', () => {
 
 check('cancelled wall creation restores the starting geometry', () => {
 	let f = floor([[null, [0, 0], [100, 0]]])
-	let ds = draw_state()
 	let before = geometry(f)
-	let r = f.start_resize_seg(null, 300, 300, 20, 0, 1, 0, ds)
-	r.resize(40, 0, ds)
+	let r = f.start_resize_seg(null, 300, 300, 20, 0, 1, 0)
+	r.resize(40, 0)
 	r.cancel()
 	assert.equal(geometry(f), before)
 	assert.equal(f.house.undo(), false)
@@ -598,14 +576,13 @@ check('cancelled wall creation restores the starting geometry', () => {
 
 check('new edits discard redo history', () => {
 	let f = floor([[null, [0, 0], [100, 0]]])
-	let ds = draw_state()
 	let before = geometry(f)
-	let r = f.start_move_seg(f.segs[0], ds)
-	r.move(0, 50, ds)
+	let r = f.start_move_seg(f.segs[0])
+	r.move(0, 50)
 	r.stop()
 	assert(f.house.undo())
-	r = f.start_move_seg(f.segs[0], ds)
-	r.move(0, 80, ds)
+	r = f.start_move_seg(f.segs[0])
+	r.move(0, 80)
 	r.stop()
 	assert.equal(f.house.redo(), false)
 	assert(f.house.undo())
@@ -614,19 +591,18 @@ check('new edits discard redo history', () => {
 
 check('unchanged and cancelled edits preserve redo', () => {
 	let f = house(ctx.house_test_plans.simple).floors[0]
-	let ds = draw_state()
 	let s = f.segs.find(s => s.is_v && s.axis == 200)
-	let r = f.start_move_seg(s, ds)
-	r.move(50, 0, ds)
+	let r = f.start_move_seg(s)
+	r.move(50, 0)
 	r.stop()
 	let after = geometry(f)
 	assert(f.house.undo())
 	s = f.segs.find(s => !s.is_v && s.axis == 0 && s.m1 == 200)
-	r = f.start_move_seg(s, ds)
-	r.move(0, 0, ds)
+	r = f.start_move_seg(s)
+	r.move(0, 0)
 	r.stop()
-	r = f.start_move_seg(f.segs[0], ds)
-	r.move(0, 50, ds)
+	r = f.start_move_seg(f.segs[0])
+	r.move(0, 50)
 	r.cancel()
 	assert(f.house.redo())
 	assert.equal(geometry(f), after)
@@ -640,9 +616,8 @@ check('house undo preserves the other floors', () => {
 	let f = h.floors[0]
 	let before = geometry(f)
 	let other = geometry(h.floors[1])
-	let ds = draw_state()
-	let r = f.start_move_seg(f.segs[0], ds)
-	r.move(0, 50, ds)
+	let r = f.start_move_seg(f.segs[0])
+	r.move(0, 50)
 	r.stop()
 	assert(f.house.undo())
 	assert.equal(geometry(f), before)
@@ -700,9 +675,8 @@ check('house undo follows edits across floors and discards redo', () => {
 check('cancelled changes add no undo step', () => {
 	let h = ctx.house_plan(ctx.house_test_plans.simple)
 	let f = h.floors[0]
-	let ds = draw_state()
-	let drag = f.start_move_seg(f.segs[0], ds)
-	drag.move(0, 50, ds)
+	let drag = f.start_move_seg(f.segs[0])
+	drag.move(0, 50)
 	drag.cancel()
 	assert.equal(h.undo(), false)
 	f.delete_seg(f.segs[0])
@@ -988,8 +962,8 @@ check('an edit undo restores the open rooms', () => {
 	let h = open_room_house([{x: 100, y: 200, is_open: true}])
 	let floor = h.floors[1]
 	let seg = floor.segs.find(seg => seg.is_v && seg.axis == 0)
-	let mover = floor.start_move_seg(seg, draw_state())
-	mover.move(150, 0, draw_state())
+	let mover = floor.start_move_seg(seg)
+	mover.move(150, 0)
 	mover.stop()
 	assert.equal(open_room_count(floor), 0) // the point is outside now.
 	assert(h.undo())
@@ -1098,10 +1072,9 @@ check('wall movement updates room centers and open rooms during preview',
 	let right = floor.hit_cycle_edges(400, 200)
 	assert.deepEqual(Array.from(left.center()), [100, 200])
 	assert.deepEqual(Array.from(right.center()), [400, 200])
-	let ds = draw_state()
 	let seg = floor.segs.find(seg => seg.is_v && seg.axis == 200)
-	let mover = floor.start_move_seg(seg, ds)
-	mover.move(100, 0, ds)
+	let mover = floor.start_move_seg(seg)
+	mover.move(100, 0)
 	assert.deepEqual(Array.from(left.center()), [150, 200])
 	assert.deepEqual(Array.from(right.center()), [450, 200])
 	assert.equal(floor.room_point_by_cycle.get(left), floor.room_points[0])
@@ -1119,12 +1092,11 @@ check('wall resize keeps open rooms assigned to the preview cycles', () => {
 	}]})
 	let floor = h.floors[0]
 	let p = floor.ps.find(p => p[0] == 600 && p[1] == 400)
-	let ds = draw_state()
-	let resize = floor.start_resize_seg(p, 600, 400, 0, 50, 0, 1, ds)
+	let resize = floor.start_resize_seg(p, 600, 400, 0, 50, 0, 1)
 	let room = floor.hit_cycle_edges(250, 200)
 	assert(room)
 	assert.equal(floor.room_point_by_cycle.get(room), floor.room_points[0])
-	resize.resize(0, 50, ds)
+	resize.resize(0, 50)
 	room = floor.hit_cycle_edges(250, 200)
 	assert(room)
 	assert.equal(floor.room_point_by_cycle.get(room), floor.room_points[0])
@@ -1564,9 +1536,8 @@ check('the roof is in the floor state: add_floor and undo keep it', () => {
 	let roof = JSON.stringify(h.floors[2].roof)
 	let f = h.add_floor()
 	assert.equal(JSON.stringify(f.roof), roof)
-	let ds = draw_state()
-	let r = f.start_move_seg(f.segs.find(s => !s.is_v && s.axis == 240), ds)
-	r.move(0, 50, ds)
+	let r = f.start_move_seg(f.segs.find(s => !s.is_v && s.axis == 240))
+	r.move(0, 50)
 	r.stop()
 	assert(h.undo())
 	assert.equal(JSON.stringify(f.roof), roof)
@@ -1808,6 +1779,42 @@ check('moving a gable sets the roof overhang', () => {
 	assert.equal(w.d, 60 * scale)
 })
 
+check('one eave snaps to the roof value and to eave corners', () => {
+	let h = eave_house()
+	let f = h.floors[0]
+	let scale = ctx.prism_union.grid_scale
+	f.roof.edge_points.push({x: 614, y: 200, eave_h: -30 * tan20})
+	let {e} = eave_sides(f)
+	assert_near(e.d / scale, 30)
+	// near the roof's overhang (60): the own eave height is removed.
+	let m = f.start_move_eave(e, 650, 200, [])
+	assert.equal(m.move(25, 0, true, 20), true)
+	m.stop()
+	assert.equal(f.roof.edge_points[0].eave_h, null)
+	assert.equal(eave_sides(f).e.d, 60 * scale)
+	// near the corner position x = 700: the eave line goes there; snap_d 0
+	// (ctrl): no snap.
+	m = f.start_move_eave(eave_sides(f).e, 650, 200, [700])
+	m.move(30, 0, true, 20)
+	assert_near(f.roof.edge_points[0].eave_h, -86 * tan20)
+	m.move(30, 0, true, 0)
+	assert_near(f.roof.edge_points[0].eave_h, -90 * tan20)
+	// all eaves: no snap.
+	m.move(30, 0, false, 20)
+	assert_near(f.roof.eave_h, -90 * tan20)
+	m.cancel()
+	// a gable near the roof's overhang: its own overhang is removed.
+	f.toggle_gable(eave_sides(f).w, -50, 200)
+	m = f.start_move_eave(eave_sides(f).w, -50, 200, [])
+	m.move(-30, 0, true, 0)
+	m.stop()
+	assert.equal(f.roof.edge_points[1].overhang, 90)
+	m = f.start_move_eave(eave_sides(f).w, -50, 200, [])
+	m.move(25, 0, true, 20)
+	m.stop()
+	assert.equal(f.roof.edge_points[1].overhang, null)
+})
+
 check('eaves are level: the overhang follows the pitch', () => {
 	let f = eave_house().floors[0]
 	f.roof.edge_points.push({x: 614, y: 200, pitch: 45})
@@ -1948,8 +1955,8 @@ check('moving the ridge sets the pitches of the faces on both sides', () => {
 	let z = eave_ridge_z(f)
 	let n = eave_face(by_dir, 'n')
 	let s = eave_face(by_dir, 's')
-	assert.equal(f.can_move_line(n, s, z), true)
-	let m = f.start_move_line(n, s, z)
+	assert.equal(f.can_move_faces([n, s], z), true)
+	let m = f.start_move_faces([n, s], z)
 	// along the ridge: no difference.
 	assert.equal(m.move(320, 250), true)
 	m.stop()
@@ -1978,7 +1985,8 @@ check('moving a hip sets the pitches of its two faces', () => {
 	let f = eave_house().floors[0]
 	let by_dir = eave_sides(f)
 	let z = f.z + f.h + 50
-	let m = f.start_move_line(eave_face(by_dir, 'n'), eave_face(by_dir, 'e'), z)
+	let m = f.start_move_faces(
+		[eave_face(by_dir, 'n'), eave_face(by_dir, 'e')], z)
 	m.move(500, 100)
 	m.stop()
 	by_dir = eave_sides(f)
@@ -1993,7 +2001,8 @@ check('a line moved onto a wall line: that side goes vertical', () => {
 	let f = eave_house().floors[0]
 	let by_dir = eave_sides(f)
 	let z = eave_ridge_z(f)
-	let m = f.start_move_line(eave_face(by_dir, 'n'), eave_face(by_dir, 's'), z)
+	let m = f.start_move_faces(
+		[eave_face(by_dir, 'n'), eave_face(by_dir, 's')], z)
 	assert.equal(m.move(300, 414), true)
 	m.stop()
 	by_dir = eave_sides(f)
@@ -2016,8 +2025,8 @@ for (let blocked_by of ['height', 'edge_points']) {
 		let edit_no = h.edit_no
 		let by_dir = eave_sides(f)
 		let z = blocked_by == 'height' ? f.z + f.h : eave_ridge_z(f)
-		assert.equal(f.start_move_line(eave_face(by_dir, 'n'),
-			eave_face(by_dir, 'e'), z), undefined)
+		assert.equal(f.start_move_faces([eave_face(by_dir, 'n'),
+			eave_face(by_dir, 'e')], z), undefined)
 		assert.equal(JSON.stringify(h.save_state()), state1)
 		assert.equal(h.edit_no, edit_no)
 		assert(h.redo())
@@ -2035,17 +2044,113 @@ check('a line cannot move: low, past both walls, or 2+ points', () => {
 	let by_dir = eave_sides(f)
 	let n = eave_face(by_dir, 'n')
 	let e = eave_face(by_dir, 'e')
-	assert.equal(f.can_move_line(n, e, f.z + f.h), false)
+	assert.equal(f.can_move_faces([n, e], f.z + f.h), false)
 	// past both walls of the hip's corner: start values.
-	let m = f.start_move_line(n, e, f.z + f.h + 50)
+	let m = f.start_move_faces([n, e], f.z + f.h + 50)
 	assert.equal(m.move(650, -50), false)
 	assert.equal(f.roof.edge_points.length, 0)
 	m.cancel()
 	assert.equal(f.roof.edge_points.length, 0)
 	f.roof.edge_points.push({x: 614, y: 100}, {x: 614, y: 300})
 	by_dir = eave_sides(f)
-	assert.equal(f.can_move_line(eave_face(by_dir, 'n'),
-		eave_face(by_dir, 'e'), eave_ridge_z(f)), false)
+	assert.equal(f.can_move_faces([eave_face(by_dir, 'n'),
+		eave_face(by_dir, 'e')], eave_ridge_z(f)), false)
+})
+
+// eave_house's hip roof: the east end of the ridge, where the north, south
+// and east faces meet, at x = 614 - 214.
+check('moving a ridge end sets the pitches of the faces that meet there', () => {
+	let h = eave_house()
+	let f = h.floors[0]
+	let by_dir = eave_sides(f)
+	let z = eave_ridge_z(f)
+	let faces = [eave_face(by_dir, 'n'), eave_face(by_dir, 's'),
+		eave_face(by_dir, 'e')]
+	// along the ridge, outward: only the end face changes, steeper.
+	let m = f.start_move_faces(faces, z)
+	assert.equal(m.move(500, 200), true)
+	m.stop()
+	by_dir = eave_sides(f)
+	assert(Math.abs(by_dir.n.pitch - 20) < 1e-9)
+	assert(Math.abs(by_dir.s.pitch - 20) < 1e-9)
+	assert(by_dir.e.pitch > 20)
+	assert.equal(by_dir.w.pitch, 20)
+	assert(Math.abs(face_z(eave_face(by_dir, 'e'), 500, 200) - z) < 1e-2)
+	// past the end wall: a gable.
+	assert(h.undo())
+	by_dir = eave_sides(f)
+	faces = [eave_face(by_dir, 'n'), eave_face(by_dir, 's'),
+		eave_face(by_dir, 'e')]
+	m = f.start_move_faces(faces, z)
+	assert.equal(m.move(650, 200), true)
+	m.stop()
+	by_dir = eave_sides(f)
+	assert.equal(by_dir.e.pitch, 90)
+	assert.equal(eave_face(by_dir, 'e'), undefined)
+	// across the ridge: the side faces change, the end face does not.
+	assert(h.undo())
+	by_dir = eave_sides(f)
+	faces = [eave_face(by_dir, 'n'), eave_face(by_dir, 's'),
+		eave_face(by_dir, 'e')]
+	m = f.start_move_faces(faces, z)
+	assert.equal(m.move(400, 250), true)
+	m.stop()
+	by_dir = eave_sides(f)
+	assert(by_dir.n.pitch < 20 && by_dir.s.pitch > 20)
+	assert(Math.abs(by_dir.e.pitch - 20) < 1e-9)
+	// double-click: back to the roof's pitch.
+	by_dir = eave_sides(f)
+	f.reset_faces([eave_face(by_dir, 'n'), eave_face(by_dir, 's'),
+		eave_face(by_dir, 'e')])
+	by_dir = eave_sides(f)
+	for (let dir of ['w', 'e', 'n', 's'])
+		assert.equal(by_dir[dir].pitch, 20)
+})
+
+check('roof cut by the upper wall has no rounding points on the rakes', () => {
+	let roof = {pitch: 20, overhang: 60, eave_h: -22,
+		max_overhang: 150, edge_points: []}
+	let h = house({
+		floor_h: 250,
+		int_wall_thickness: 8,
+		ext_wall_thickness: 18,
+		slab_thickness: 20,
+		roof_thickness: 20,
+		floors: [
+			{
+				points: [[0, 0, 'draw'], [0, 400, 7],
+					[600, 0, 5], [600, 400, 6]],
+				lines: [[5, 0, 2, 7, 3, 1, 8, 1, 0, 6, 2, 3]],
+				roof: roof,
+			},
+			{
+				points: [[0, 0, 'draw'], [0, 400, 3],
+					[300, 0, 1], [300, 400, 2]],
+				lines: [[1, 0, 2, 3, 3, 1, 4, 1, 0, 2, 2, 3]],
+				roof: roof,
+			},
+		],
+	})
+	let wall
+	for (let face of h.make_faces(h.floors[1])) {
+		for (let ring of face.rings) {
+			assert(ring.length >= 3)
+			if (face.tag != 'walls')
+				continue
+			let on_cut = true
+			let max_z = -Infinity
+			for (let p of ring) {
+				on_cut &&= p[0] == 314
+				max_z = Math.max(max_z, p[2])
+			}
+			if (on_cut && max_z > 400)
+				wall = ring
+		}
+	}
+	assert(wall)
+	assert.equal(wall.length, 5)
+	for (let p of wall)
+		assert(p[1] == -14 || p[1] == 200 || p[1] == 414)
 })
 
 console.log(n_checks + ' house plan checks passed')

@@ -697,13 +697,30 @@ function prism_union(prisms) {
 
 	let line_groups = map() // {'line_key normal tag' ->
 		// {line, normal, tag, paths}}
-	function add_line_path(line_key, line, normal, tag, path) {
+	function add_line_path(line_key, line, normal, tag, path, bottom, top) {
 		let key = line_key+' '+normal+' '+tag
 		let group = line_groups.get(key)
 		if (!group) {
 			group = {line: line, normal: normal, tag: tag, paths: []}
 			line_groups.set(key, group)
 		}
+		for (let path0 of group.paths) {
+			if (path0[1].x != path[0].x || path0[1].y != path[0].y
+				|| path0[2].y != path[3].y)
+				continue
+			let bottom0 = path0.bottom
+			let top0 = path0.top
+			if (bottom0[0] != bottom[0] || bottom0[1] != bottom[1]
+				|| bottom0[2] != bottom[2])
+				continue
+			if (top0[0] != top[0] || top0[1] != top[1] || top0[2] != top[2])
+				continue
+			path0[1] = path[1]
+			path0[2] = path[2]
+			return
+		}
+		path.bottom = bottom
+		path.top = top
 		group.paths.push(path)
 	}
 
@@ -715,12 +732,13 @@ function prism_union(prisms) {
 		return line.is_x_major ? (line.offset + line.dy * t) / line.dx : t
 	}
 
-	let bounds = [] // [{za, zb, left_change, right_change, tag}, ...]
+	let bounds = [] // [{plane, za, zb, left_change, right_change, tag}, ...]
 	let split_ts = [] // piece ends and the points between where bounds cross
 	function add_range_bounds(ranges, xa, ya, xb, yb, is_left) {
 		for (let range of ranges) {
 			for (let [plane, change] of [[range.bottom, 1], [range.top, -1]]) {
 				bounds.push({
+					plane: plane,
 					za: grid_z(plane, xa, ya),
 					zb: grid_z(plane, xb, yb),
 					left_change : is_left ? change : 0,
@@ -843,9 +861,11 @@ function prism_union(prisms) {
 						{x: t0, y: b2.z0},
 					]
 					if (left_n > 0)
-						add_line_path(line_key, line, 1, left_tag, path)
+						add_line_path(line_key, line, 1, left_tag, path,
+							b1.plane, b2.plane)
 					else
-						add_line_path(line_key, line, -1, right_tag, path)
+						add_line_path(line_key, line, -1, right_tag, path,
+							b1.plane, b2.plane)
 				}
 			}
 		}

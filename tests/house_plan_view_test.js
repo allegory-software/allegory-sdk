@@ -263,8 +263,8 @@ for (let [y, dy, expected] of [
 	check('exterior wall measurements y=' + y + ', dy=' + dy, () => {
 		let ds = state.draw_state
 		let seg = plan.segs.find(s => !s.is_v && s.axis == y && s.m1 == 200)
-		let edit = plan.start_move_seg(seg, ds)
-		edit.move(0, dy, ds)
+		let edit = plan.start_move_seg(seg)
+		edit.move(0, dy)
 		edit.stop()
 		let connector = plan.segs.find(s => s.is_v && s.axis == 200
 			&& s.m1 == Math.min(y, y+dy) && s.m2 == Math.max(y, y+dy))

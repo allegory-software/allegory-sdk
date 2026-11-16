@@ -148,11 +148,11 @@ for (let name in shapes) {
 				let y0 = line.p[1] + fr * (line.q[1] - line.p[1])
 				let [a, b, c] = line.face1.plane
 				let z = a * x0 + b * y0 + c
-				if (!f.can_move_line(line.face1, line.face2, z))
+				if (!f.can_move_faces([line.face1, line.face2], z))
 					continue
 				for (let dy = -300; dy <= 300; dy += step) {
 					for (let dx = -300; dx <= 300; dx += step) {
-						let m = f.start_move_line(line.face1, line.face2, z)
+						let m = f.start_move_faces([line.face1, line.face2], z)
 						if (!m.move(x0 + dx, y0 + dy)) {
 							m.cancel()
 							continue

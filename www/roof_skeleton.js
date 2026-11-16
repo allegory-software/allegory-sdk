@@ -611,10 +611,14 @@ function roof_skeleton(rings, pitches, eave_zs, shared_edges) {
 	}
 	if (shared) {
 		for (let i = 0; i < shared.length; i += 4) {
-			let face1 = shared[i+2].face
-			let face2 = shared[i+3].face
+			let node1 = shared[i+0]
+			let node2 = shared[i+1]
+			let plane1 = shared[i+2]
+			let plane2 = shared[i+3]
+			let face1 = plane1.face
+			let face2 = plane2.face
 			if (face1 && face2)
-				shared_edges.push({p: shared[i].point, q: shared[i+1].point,
+				shared_edges.push({p: node1.point, q: node2.point,
 					face1: face1, face2: face2})
 		}
 	}

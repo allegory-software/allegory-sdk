@@ -134,7 +134,7 @@ for (let y = -50; y <= 450; y += step) {
 			row += '*'
 			continue
 		}
-		let m = f.start_move_line(face1, face2, z)
+		let m = f.start_move_faces([face1, face2], z)
 		let ch
 		if (!m.move(x, y)) {
 			ch = 'x'

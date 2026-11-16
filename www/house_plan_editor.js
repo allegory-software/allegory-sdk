@@ -12,7 +12,8 @@
 const G = window
 
 const {
-	ceil, round, snap, mod, abs, sign, min, clamp, PI, sin, cos, rad, atan2,
+	ceil, round, snap, mod, abs, sign, min, max, clamp, PI, sin, cos, rad,
+	atan2, hypot,
 	array_set, empty_array, memoize, format_kcount, point_around, distance,
 	json_arg, try_json_arg, json, copy_to_clipboard, S,
 } = glue
@@ -25,9 +26,9 @@ let out = []
 
 let floor_names = [
 	'GROUND FLOOR',
-	'1ˢᵗ FLOOR',
-	'2ⁿᵈ FLOOR',
-	'3ʳᵈ FLOOR',
+	'1\u02e2\u1d57 FLOOR',
+	'2\u207f\u1d48 FLOOR',
+	'3\u02b3\u1d48 FLOOR',
 ]
 
 let format_length = d => format_kcount(d / 1e2, 2)+'m'
@@ -267,7 +268,8 @@ function last_perp_edge_point(c, i, n, dir, v) {
 	}
 }
 
-function draw_length(cx, sg, x1, y1, x2, y2) {
+// s: the label, default: the length.
+function draw_length(cx, sg, x1, y1, x2, y2, s) {
 
 	let d = distance(x1, y1, x2, y2)
 	if (sg.d(d) < 20)
@@ -275,7 +277,7 @@ function draw_length(cx, sg, x1, y1, x2, y2) {
 
 	;[x1, y1, x2, y2] = line2.offset(-10, x1, y1, x2, y2)
 
-	let s = format_length(d)
+	s ??= format_length(d)
 
 	x1 = sg.x(x1)
 	y1 = sg.y(y1)
@@ -351,6 +353,98 @@ function draw_length(cx, sg, x1, y1, x2, y2) {
 	cx.restore()
 }
 
+// the text s centered on the plan point (x, y), upright in a rotated view.
+function draw_text(cx, sg, x, y, s) {
+	cx.save()
+	cx.translate(sg.x(x), sg.y(y))
+	if (sg.rotation)
+		cx.rotate(-sg.rotation)
+	cx.textAlign = 'center'
+	cx.fillStyle = ui.color_css('text')
+	cx.fillText(s, 0, 5)
+	cx.restore()
+}
+
+// a height relative to the wall top, signed.
+function format_height(h) {
+	return 'h ' + (h < 0 ? '-' : '') + format_length(abs(h))
+}
+
+// the overhang width, the length and, on a sloped side, the eave height
+// over the wall top of an eave side from make_roof_faces().
+function draw_eave_dims(cx, sg, side, wall_z) {
+	let scale = prism_union.grid_scale
+	let {nx, ny} = side
+	let c      = side.c      / scale
+	let wall_c = side.wall_c / scale
+	let e1     = side.e1     / scale
+	let e2     = side.e2     / scale
+	// draw_length() puts the dimension line on the right of its direction:
+	// outward.
+	let b1 = nx == 1 || ny == -1 ? e1 : e2
+	let b2 = e1 + e2 - b1
+	let b = e1 + (e2 - e1) / 4 // along the side: the width's position
+	if (nx) {
+		draw_length(cx, sg, c, b1, c, b2)
+		draw_length(cx, sg, wall_c, b, c, b)
+	} else {
+		draw_length(cx, sg, b1, c, b2, c)
+		draw_length(cx, sg, b, wall_c, b, c)
+	}
+	if (side.pitch == 90)
+		return
+	// outside the length's dimension line.
+	let a = c + (nx + ny) * sg.plan_d(30)
+	let m = (e1 + e2) / 2
+	draw_text(cx, sg, nx ? a : m, nx ? m : a,
+		format_height(side.eave_z - wall_z))
+}
+
+// a line between two roof faces: a ridge (level): its length, and its
+// height over the wall top on the other side; a hip or valley: its length
+// along the slope.
+function draw_roof_line_dims(cx, sg, line, wall_z) {
+	let [x1, y1, z1] = line.p
+	let [x2, y2, z2] = line.q
+	let d = distance(x1, y1, x2, y2)
+	if (abs(z2 - z1) > 1e-6) {
+		draw_length(cx, sg, x1, y1, x2, y2, format_length(hypot(d, z2 - z1)))
+		return
+	}
+	draw_length(cx, sg, x1, y1, x2, y2)
+	if (sg.d(d) < 20)
+		return
+	let [x3, y3, x4, y4] = line2.offset(sg.plan_d(14), x1, y1, x2, y2)
+	draw_text(cx, sg, (x3 + x4) / 2, (y3 + y4) / 2, format_height(z1 - wall_z))
+}
+
+// roof labels --------------------------------------------------------------
+
+// the plan point of the pitch label of a roof face: across from the middle
+// of its longest eave side, half the face's depth inward.
+function roof_label_point(face) {
+	let scale = prism_union.grid_scale
+	let side
+	for (let side1 of face.sides)
+		if (!side || side1.e2 - side1.e1 > side.e2 - side.e1)
+			side = side1
+	let {nx, ny} = side
+	let c = side.c / scale
+	let depth = 0 // inward from the eave line
+	for (let ring of face.rings)
+		for (let p of ring)
+			depth = max(depth, (c - (nx ? p[0] : p[1])) * (nx + ny))
+	let a = c - (nx + ny) * depth / 2 // across the side
+	let b = (side.e1 + side.e2) / 2 / scale // along the side
+	return nx ? [a, b] : [b, a]
+}
+
+function format_pitch(pitch) {
+	return round(pitch * 10) / 10 + '\u00b0'
+}
+
+// roof hit testing ---------------------------------------------------------
+
 // the eave side of the edited roof at the plan point (mx, my): on its eave
 // line, 8 pixels around.
 function hit_roof_side(hs, draw_state, sg, mx, my) {
@@ -401,13 +495,69 @@ function hit_roof_line(hs, draw_state, sg, mx, my) {
 		return false
 	let {face1, face2} = found_line
 	let [a, b, c] = face1.plane
-	hs.roof_face1 = face1
-	hs.roof_face2 = face2
+	hs.roof_faces = [face1, face2]
 	hs.roof_x = found_x // grabbed point, on the line.
 	hs.roof_y = found_y
 	hs.roof_z = a * found_x + b * found_y + c
-	hs.action = 'move_line'
+	hs.action = 'move_faces'
 	return true
+}
+
+// the point where three or more faces of the edited roof meet (a ridge end,
+// a peak) at the plan point (mx, my), 8 pixels around: the nearest end of a
+// shared segment.
+function hit_roof_point(hs, draw_state, sg, mx, my) {
+	let min_d = sg.plan_d(8)
+	let found_p
+	for (let line of draw_state.roof_lines)
+		for (let i = 0; i < 2; i++) {
+			let p = i ? line.q : line.p
+			let d = distance(mx, my, p[0], p[1])
+			if (d >= min_d)
+				continue
+			min_d = d
+			found_p = p
+		}
+	if (!found_p)
+		return false
+	let [x, y, z] = found_p
+	let faces = [] // faces of the segments that end at found_p
+	for (let line of draw_state.roof_lines) {
+		let {p, q, face1, face2} = line
+		let is_end = distance(x, y, p[0], p[1]) < 1e-3
+			|| distance(x, y, q[0], q[1]) < 1e-3
+		if (!is_end)
+			continue
+		if (!faces.includes(face1)) faces.push(face1)
+		if (!faces.includes(face2)) faces.push(face2)
+	}
+	if (faces.length < 3)
+		return false
+	hs.roof_faces = faces
+	hs.roof_x = x // grabbed point.
+	hs.roof_y = y
+	hs.roof_z = z
+	hs.action = 'move_faces'
+	return true
+}
+
+// the pitch label of a face of the edited roof at the screen point
+// (ui.mx, ui.my).
+function hit_roof_label(hs, draw_state, sg) {
+	let axes_swapped = round((sg.rotation ?? 0) / (90*rad)) % 2 != 0
+	let w = axes_swapped ? 10 : 20 // half sizes of the label's box
+	let h = axes_swapped ? 20 : 10
+	for (let face of draw_state.roof_faces) {
+		let [x, y] = roof_label_point(face)
+		x = sg.x(x)
+		y = sg.y(y)
+		if (!ui.hit_bbox(x - w, y - h, x + w, y + h))
+			continue
+		hs.roof_face = face
+		hs.action = 'move_pitch'
+		return true
+	}
+	return false
 }
 
 // the face of this frame's roof in the plane of the side from an earlier
@@ -421,6 +571,8 @@ function find_roof_face(faces, side0) {
 			)
 				return face
 }
+
+// floor editor updates ------------------------------------------------------
 
 function floor_editor_update(id, s) {
 	s.interaction_value = undefined
@@ -511,7 +663,7 @@ function floor_editor_update(id, s) {
 			let seg    = cs.seg
 
 			if (action == 'move_seg') { // move seg
-				cs.edit = plan.start_move_seg(seg, draw_state)
+				cs.edit = plan.start_move_seg(seg)
 			} else if (action == 'pan') {
 				sg.pan_x0 = sg.x0
 				sg.pan_y0 = sg.y0
@@ -524,8 +676,12 @@ function floor_editor_update(id, s) {
 			cs.edit?.cancel()
 		} else {
 			let nosnap = ui.keypressed('ctrl')
+			// past the drag threshold, or with ctrl at the first movement: a
+			// press without movement starts no edit, so a double-click can.
+			let is_moved = cs.moved || nosnap && !!(cs.dx || cs.dy)
+			let is_resize_drag = abs(dx) >= 10 || abs(dy) >= 10
 
-			if (!readonly && !s.is_roof_level && !action && (abs(dx) >= 10 || abs(dy) >= 10)) { // dragged far enough to assume intent to drag.
+			if (!readonly && !s.is_roof_level && !action && is_resize_drag) { // dragged far enough to assume intent to drag.
 
 				// establish direction of drag on x and y axis.
 				let sdx = abs(dx) > 1.5 * abs(dy) ? sign(dx) : 0 // straight enough
@@ -536,47 +692,81 @@ function floor_editor_update(id, s) {
 					let p   = cs.p
 					let mx0 = cs.x
 					let my0 = cs.y
-					cs.edit = plan.start_resize_seg(p, mx0, my0, dx, dy, sdx, sdy, draw_state)
+					cs.edit = plan.start_resize_seg(p, mx0, my0, dx, dy, sdx, sdy)
 				}
 
 			}
 
 			if (action == 'move_seg')
-				cs.edit.move(dx, dy, draw_state, nosnap ? 2 : 20)
+				cs.edit.move(dx, dy, nosnap ? 2 : 20)
 
 			if (action == 'resize_seg')
-				[cs.x, cs.y] = cs.edit.resize(dx, dy, draw_state,
-					nosnap ? 2 : 30)
+				[cs.x, cs.y] = cs.edit.resize(dx, dy, nosnap ? 2 : 30)
+
+			if (action == 'move_seg' || action == 'resize_seg') {
+				let {snap_a, snap_v} = cs.edit
+				if (snap_a !== undefined) {
+					draw_state.snap_lines.length = 0
+					if (snap_a != null)
+						draw_state.snap_lines.push(snap_a, snap_v)
+				}
+			}
 
 			// a room point moves only past the drag threshold or with ctrl: a
 			// click toggles its room instead.
 			if (action == 'move_room_point') {
-				if (cs.moved || ui.keypressed('ctrl'))
+				if (is_moved)
 					cs.edit ??= plan.start_move_room_point(cs.room_point)
 				cs.edit?.move(dx, dy)
 			}
 
 			// an eave moves only past the drag threshold or with ctrl: a click
-			// toggles its gable instead. shift: only that eave.
+			// toggles its gable instead. shift: all eaves of its kind.
 			if (action == 'move_eave') {
-				if (cs.moved || ui.keypressed('ctrl'))
-					cs.edit ??= draw_state.roof_floor.start_move_eave(
-						cs.roof_side, cs.roof_x, cs.roof_y)
+				let roof_floor = draw_state.roof_floor
+				if (is_moved && !cs.edit) {
+					// the across positions of the eave corners, where hips and
+					// valleys meet eave lines, to line the eave up with: the
+					// lines of the parallel eave sides and the ends of the
+					// others.
+					let snap_cs = [] // [c, ...] in plan units
+					let scale = prism_union.grid_scale
+					for (let side of draw_state.roof_sides)
+						if (!side.nx == !cs.roof_side.nx)
+							snap_cs.push(side.c / scale)
+						else
+							snap_cs.push(side.e1 / scale, side.e2 / scale)
+					cs.edit = roof_floor.start_move_eave(cs.roof_side,
+						cs.roof_x, cs.roof_y, snap_cs)
+				}
 				if (cs.edit)
 					cs.can_move_eave = cs.edit.move(dx, dy,
-						ui.keypressed('shift'))
+						!ui.keypressed('shift'), nosnap ? 0 : 20)
 			}
 
-			// the line between two roof faces follows the pointer at the
-			// grabbed height, past the drag threshold or with ctrl.
-			if (action == 'move_line') {
+			// the line or point where roof faces meet follows the pointer at
+			// the grabbed height, past the drag threshold or with ctrl.
+			if (action == 'move_faces') {
 				let roof_floor = draw_state.roof_floor
-				if (cs.moved || ui.keypressed('ctrl'))
-					cs.edit ??= roof_floor.start_move_line(
-						cs.roof_face1, cs.roof_face2, cs.roof_z)
+				if (is_moved)
+					cs.edit ??= roof_floor.start_move_faces(
+						cs.roof_faces, cs.roof_z)
 				if (cs.edit)
-					cs.can_move_line = cs.edit.move(
+					cs.can_move_faces = cs.edit.move(
 						cs.roof_x + dx, cs.roof_y + dy)
+			}
+
+			// a pitch label moves at the first movement: up is steeper, 4
+			// pixels per degree, in whole degrees (ctrl: tenths). shift: all
+			// sloped faces.
+			if (action == 'move_pitch') {
+				let d_pitch = snap(-cs.dy / 4, nosnap ? .1 : 1)
+				if (cs.dx || cs.dy)
+					cs.edit ??= draw_state.roof_floor.start_move_pitch(
+						cs.roof_face)
+				if (cs.edit)
+					cs.can_move_pitch = cs.edit.move(d_pitch,
+						!ui.keypressed('shift'))
 			}
 
 			if (action == 'pan') {
@@ -603,23 +793,30 @@ function floor_editor_update(id, s) {
 	if (is_resetting_eave)
 		draw_state.roof_floor.remove_edge_point(hs.roof_side.edge_point)
 
-	// double-clicked a line between two roof faces: both faces back to the
-	// roof's pitch.
-	let is_resetting_line = !readonly
-		&& hs?.action == 'move_line' && ui.dblclick
-	if (is_resetting_line)
-		draw_state.roof_floor.reset_line(hs.roof_face1, hs.roof_face2)
+	// double-clicked a line or point where roof faces meet: the faces back
+	// to the roof's pitch.
+	let is_resetting_faces = !readonly
+		&& hs?.action == 'move_faces' && ui.dblclick
+	if (is_resetting_faces)
+		draw_state.roof_floor.reset_faces(hs.roof_faces)
 
-	// clicked inside a room without dragging: open or close the room.
+	// double-clicked a pitch label: the face back to the roof's pitch.
+	let is_resetting_pitch = !readonly
+		&& hs?.action == 'move_pitch' && ui.dblclick
+	if (is_resetting_pitch)
+		draw_state.roof_floor.reset_faces([hs.roof_face])
+
+	// clicked inside a room without dragging: open or close the room. ctrl:
+	// a move, not a click.
 	let is_toggling_room = !readonly && cs?.drop && !cs.cancel && !cs.moved
-		&& !cs.edit && (!cs.action || cs.action == 'move_room_point') && cs.cycle
+		&& !cs.edit && !ui.keypressed('ctrl') && (!cs.action || cs.action == 'move_room_point') && cs.cycle
 	if (is_toggling_room)
 		plan.toggle_room(cs.cycle, cs.room_x, cs.room_y)
 
 	// clicked an eave side without dragging: switch it between gable and
-	// the roof's pitch.
+	// the roof's pitch. ctrl: a move, not a click.
 	let is_toggling_gable = !readonly && cs?.drop && !cs.cancel && !cs.moved
-		&& !cs.edit && cs.action == 'move_eave'
+		&& !cs.edit && !ui.keypressed('ctrl') && cs.action == 'move_eave'
 	if (is_toggling_gable)
 		draw_state.roof_floor.toggle_gable(cs.roof_side, cs.roof_x, cs.roof_y)
 
@@ -629,7 +826,8 @@ function floor_editor_update(id, s) {
 		plan.remove_room_point(hs.room_point)
 
 	if (cs?.drop || cs?.cancel || is_deleting_seg || is_removing_room_point
-		|| is_resetting_eave || is_resetting_line || is_restored
+		|| is_resetting_eave || is_resetting_faces || is_resetting_pitch
+		|| is_restored
 	) {
 		draw_state.snap_lines.length = 0
 	}
@@ -656,6 +854,8 @@ ui.floor_editor_is_value_changed = function(id) {
 	let s = ui.state_of(id)
 	return !!s?.house && s.house.edit_no != s.value_edit_no
 }
+
+// floor editor widget -------------------------------------------------------
 
 let FLOOR_EDITOR_ID         = ui.BOX_ARGS+0
 let FLOOR_EDITOR_PLAN       = ui.BOX_ARGS+1
@@ -730,7 +930,7 @@ ui.box_widget('floor_editor', {
 								? 'active' : null)
 							ui.bold()
 							ui.text(id+'.floor'+floor.i, floor_names[floor.i]
-								?? S(floor.i+'_floor', '{0}ᵗʰ FLOOR', floor.i))
+								?? S(floor.i+'_floor', '{0}\u1d57\u02b0 FLOOR', floor.i))
 						}
 						if (!s.readonly) {
 							ui.mt(ui.em(1))
@@ -927,8 +1127,8 @@ ui.box_widget('floor_editor', {
 		let hit_cycle   = hs?.cycle
 		let hit_room_point = hs?.room_point
 		let hit_roof_side = hs?.roof_side
-		let hit_roof_face1 = hs?.roof_face1
-		let hit_roof_face2 = hs?.roof_face2
+		let hit_roof_faces = hs?.roof_faces
+		let hit_roof_face  = hs?.roof_face
 		let hit_x      = hs?.x
 		let hit_y       = hs?.y
 		let drag_action = cs?.action
@@ -979,7 +1179,8 @@ ui.box_widget('floor_editor', {
 		let m = ui.em()
 		cx.fillStyle = ui.color_css('label')
 		// the keys that apply to what is under the pointer.
-		let s = hit_roof_side ? 'CTRL=No Snap  SHIFT=This Eave Only'
+		let s = hit_roof_side ? 'CTRL=No Snap  SHIFT=All Eaves'
+			: hit_roof_face ? 'CTRL=Fine  SHIFT=All Faces'
 			: 'CTRL=No Snap  SHIFT=Pan'
 		cx.fillText(s, m, h - m)
 		}
@@ -1077,10 +1278,11 @@ ui.box_widget('floor_editor', {
 				draw_edges(cx, sg, ring)
 			cx.stroke()
 		}
-		// dragged: hit_roof_side is from the drag start; the same side of
-		// this frame's roof has the moved eave line.
+		// hovered or dragged: hit_roof_side is from an earlier frame's roof
+		// (hovered: the hit phase; dragged: the drag start); the same side of
+		// this frame's roof has the eave line.
 		let roof_side = hit_roof_side
-		if (roof_side && drag_action == 'move_eave') {
+		if (roof_side) {
 			let {nx, ny, wall_c, m1, m2} = roof_side
 			roof_side = null
 			for (let side of draw_state.roof_sides)
@@ -1091,44 +1293,54 @@ ui.box_widget('floor_editor', {
 					break
 				}
 		}
-		if (roof_side) {
+		// the eave sides that move with it: only it; dragged with shift: all
+		// of its kind (sloped or gable).
+		let is_one = !(drag_action == 'move_eave' && ui.keypressed('shift'))
+		let moved_sides = [] // [side, ...] of this frame's roof
+		if (roof_side)
+			for (let side of draw_state.roof_sides)
+				if (is_one ? side == roof_side
+					: (side.pitch == 90) == (roof_side.pitch == 90))
+					moved_sides.push(side)
+		if (moved_sides.length) {
 			let scale = prism_union.grid_scale
-			let c  = roof_side.c  / scale
-			let e1 = roof_side.e1 / scale
-			let e2 = roof_side.e2 / scale
 			cx.beginPath()
-			if (roof_side.nx) {
-				cx.moveTo(sg.x(c), sg.y(e1))
-				cx.lineTo(sg.x(c), sg.y(e2))
-			} else {
-				cx.moveTo(sg.x(e1), sg.y(c))
-				cx.lineTo(sg.x(e2), sg.y(c))
+			for (let side of moved_sides) {
+				let c  = side.c  / scale
+				let e1 = side.e1 / scale
+				let e2 = side.e2 / scale
+				if (side.nx) {
+					cx.moveTo(sg.x(c), sg.y(e1))
+					cx.lineTo(sg.x(c), sg.y(e2))
+				} else {
+					cx.moveTo(sg.x(e1), sg.y(c))
+					cx.lineTo(sg.x(e2), sg.y(c))
+				}
 			}
 			cx.strokeStyle = ui.color_css('link')
 			cx.lineWidth = 3
 			cx.stroke()
 			cx.lineWidth = 1
 		}
-		// hovered or dragged line between two faces: their shared segments.
-		// hit_roof_face1 and hit_roof_face2 are from an earlier frame's roof
-		// (hovered: the hit phase; dragged: the drag start); the faces of
-		// this frame's roof in the same planes have the line.
-		let roof_face1 = hit_roof_face1
-		let roof_face2 = hit_roof_face2
-		if (roof_face1) {
-			roof_face1 = find_roof_face(draw_state.roof_faces,
-				roof_face1.sides[0])
-			roof_face2 = find_roof_face(draw_state.roof_faces,
-				roof_face2.sides[0])
-		}
-		if (roof_face1 && roof_face2) {
+		// hovered or dragged line or point where faces meet: the shared
+		// segments between any two of the faces. hit_roof_faces are from an
+		// earlier frame's roof (hovered: the hit phase; dragged: the drag
+		// start); the faces of this frame's roof in the same planes have the
+		// segments.
+		let hit_lines = [] // [line, ...] of this frame's roof
+		if (hit_roof_faces) {
+			let roof_faces = [] // [face, ...] of this frame's roof
+			for (let face of hit_roof_faces)
+				roof_faces.push(
+					find_roof_face(draw_state.roof_faces, face.sides[0]))
 			cx.beginPath()
 			for (let line of draw_state.roof_lines) {
 				let {p, q, face1, face2} = line
-				let is_same = face1 == roof_face1 && face2 == roof_face2
-					|| face1 == roof_face2 && face2 == roof_face1
-				if (!is_same)
+				let is_shared = roof_faces.includes(face1)
+					&& roof_faces.includes(face2)
+				if (!is_shared)
 					continue
+				hit_lines.push(line)
 				cx.moveTo(sg.x(p[0]), sg.y(p[1]))
 				cx.lineTo(sg.x(q[0]), sg.y(q[1]))
 			}
@@ -1136,6 +1348,42 @@ ui.box_widget('floor_editor', {
 			cx.lineWidth = 3
 			cx.stroke()
 			cx.lineWidth = 1
+		}
+
+		// roof measurements: of the dragged eave sides and lines; all of
+		// them while all dimensions are shown.
+		let roof_floor = draw_state.roof_floor
+		if (roof_floor) {
+			let wall_z = roof_floor.z + roof_floor.h
+			let sides = sg.show_dims ? draw_state.roof_sides
+				: drag_action == 'move_eave' ? moved_sides : empty_array
+			for (let side of sides)
+				draw_eave_dims(cx, sg, side, wall_z)
+			let lines = sg.show_dims ? draw_state.roof_lines
+				: drag_action == 'move_faces' ? hit_lines : empty_array
+			for (let line of lines)
+				draw_roof_line_dims(cx, sg, line, wall_z)
+		}
+
+		// pitch labels of the roof's faces. hit_roof_face is from an earlier
+		// frame's roof, like the line's faces above. highlighted: the hit
+		// face's label; dragged with shift: the labels of all sloped faces.
+		let label_face = hit_roof_face
+			&& find_roof_face(draw_state.roof_faces, hit_roof_face.sides[0])
+		let is_all_faces = drag_action == 'move_pitch'
+			&& ui.keypressed('shift')
+		for (let face of draw_state.roof_faces) {
+			let is_lit = face == label_face
+				|| is_all_faces && face.sides[0].pitch != 90
+			let [x, y] = roof_label_point(face)
+			cx.save()
+			cx.translate(sg.x(x), sg.y(y))
+			if (sg.rotation)
+				cx.rotate(-sg.rotation)
+			cx.textAlign = 'center'
+			cx.fillStyle = ui.color_css(is_lit ? 'link' : 'label')
+			cx.fillText(format_pitch(face.sides[0].pitch), 0, 5)
+			cx.restore()
 		}
 
 		// cycles area
@@ -1245,19 +1493,24 @@ ui.box_widget('floor_editor', {
 				ui.set_cursor(seg.is_v != axes_swapped ? 'ew-resize' : 'ns-resize')
 			}
 		} else if (hit_roof_side) {
-			// shift on an eave side with 2+ edge points: no own overhang.
+			// no shift on an eave side with 2+ edge points: no own overhang.
 			// pressed without a move started: a click that cannot toggle the
 			// gable.
 			let is_blocked = cs?.can_move_eave === false || cs && !cs.edit
 				&& !draw_state.roof_floor.can_toggle_gable(hit_roof_side)
 			ui.set_cursor(is_blocked ? 'not-allowed'
 				: !!hit_roof_side.nx != axes_swapped ? 'ew-resize' : 'ns-resize')
-		} else if (hit_roof_face1) {
+		} else if (hit_roof_face) {
+			// no shift on a face with a side with 2+ edge points: no own
+			// pitch.
+			ui.set_cursor(cs?.can_move_pitch === false ? 'not-allowed'
+				: 'ns-resize')
+		} else if (hit_roof_faces) {
 			// grabbed at or below the wall top, a side with 2+ edge points,
-			// or moved onto or past both faces' wall lines: blocked.
-			let is_blocked = cs?.edit ? cs.can_move_line === false
-				: !draw_state.roof_floor.can_move_line(
-					hit_roof_face1, hit_roof_face2, hs.roof_z)
+			// or moved onto or past all faces' wall lines: blocked.
+			let is_blocked = cs?.edit ? cs.can_move_faces === false
+				: !draw_state.roof_floor.can_move_faces(
+					hit_roof_faces, hs.roof_z)
 			ui.set_cursor(is_blocked ? 'not-allowed' : 'move')
 		} else if (hit_p)
 			ui.set_cursor('copy')
@@ -1337,9 +1590,10 @@ ui.box_widget('floor_editor', {
 		action=move_room_point     hit room point
 		roof_side, roof_x, roof_y,
 		action=move_eave           hit eave side
-		roof_face1, roof_face2,
+		roof_faces,
 		roof_x, roof_y, roof_z,
-		action=move_line           hit line between two roof faces
+		action=move_faces          hit line or point where roof faces meet
+		roof_face, action=move_pitch  hit pitch label of a roof face
 	*/
 	hit: function(a, i) {
 
@@ -1490,9 +1744,12 @@ ui.box_widget('floor_editor', {
 
 			}
 
-		// hit eave side, else line between two roof faces
+		// hit pitch label, else eave side, else point where three or more roof
+		// faces meet, else line between two roof faces
 		let hit_roof = !hit_p && !hit_seg && !hit_room_point
-			&& (hit_roof_side(hs, draw_state, sg, mx, my)
+			&& (hit_roof_label(hs, draw_state, sg)
+				|| hit_roof_side(hs, draw_state, sg, mx, my)
+				|| hit_roof_point(hs, draw_state, sg, mx, my)
 				|| hit_roof_line(hs, draw_state, sg, mx, my))
 
 		// the roof level has no walls to draw or rooms to open.
