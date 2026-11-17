@@ -26,7 +26,8 @@ ctx.localStorage = {}
 ctx.addEventListener = () => {}
 vm.createContext(ctx)
 let files = ['glue.js', 'earcut.js', '3d.js', 'plane_graph.js',
-	'roof_skeleton.js', 'clipper2.js', 'prism_union.js', 'house_plan.js']
+	'roof_skeleton.js', 'clipper2.js', 'prism_union.js',
+	'house_plan_objects.js', 'house_plan.js']
 for (let name of files) {
 	// env SDK=dir loads dir/www/roof_skeleton.js instead (a changed copy).
 	let file = path.join(name == 'roof_skeleton.js' && process.env.SDK || sdk,

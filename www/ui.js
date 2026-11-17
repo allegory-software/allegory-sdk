@@ -3145,6 +3145,7 @@ function redraw_all() {
 		dispatch_actions()
 		ui.begin_toolboxes('toolboxes')
 		ui.main()
+		debug_window()
 		ui.end_toolboxes()
 		reset_spacings()
 		ui.end()
@@ -3228,6 +3229,7 @@ function redraw_all() {
 			frame_graph_push('frame_draw_time', t1 - t0)
 
 			ui._frame_drawn = true
+			debug_pack_frame()
 			ui.frame_changed()
 		}
 
@@ -7848,14 +7850,21 @@ function dispatch_actions() {
 			}
 		}
 	}
-	if (requested_action || !ui.focused_id)
-		return
-	let ev = ui.key_events[0] // key event, if any
-	let action = ev && ev[0] == 'down' && shortcut_actions[ev[1]]
-	if (action) {
-		requested_action = action
-		requested_target_id = ui.focused_id
-		ui.capture_keys()
+	if (!requested_action) {
+		let ev = ui.key_events[0] // key event, if any
+		let action = ev && ev[0] == 'down' && shortcut_actions[ev[1]]
+		if (action && (action.global || ui.focused_id)) {
+			requested_action = action
+			requested_target_id = action.global ? null : ui.focused_id
+			ui.capture_keys()
+		}
+	}
+	if (requested_action?.global) {
+		let action = requested_action
+		requested_action = null
+		requested_target_id = null
+		if (ui.action_enabled(action, null))
+			action.on_execute(null)
 	}
 }
 
@@ -13660,21 +13669,66 @@ ui.widget('resizer', {
 
 }
 
-//// DEBUG PANE --------------------------------------------------------------
+//// DEBUG -------------------------------------------------------------------
 
-ui.debug_pane = function(full) {
+ui.DEBUG ??= false
+let debug_packing = false
+let debug_toggle_field
 
-	ui.min_w(200 * dpr)
-	ui.v(0)
-		ui.border('l', 'intense')
+ui.action_list({
+	debug_window: {
+		label: 'Debug',
+		shortcut: 'shift f12',
+		global: true,
+		on_execute: function() {
+			ui.DEBUG = !ui.DEBUG
+		},
+	},
+})
 
+function debug_pack_frame() {
+	if (debug_packing)
+		return ui.pack_frame().then(ui.unpack_frame)
+}
+
+function debug_window() {
+	if (!ui.DEBUG)
+		return
+	if (!debug_toggle_field) {
+		debug_toggle_field = ui.create_field({type: 'bool', not_null: true})
+		ui.saved_value_def('btn_animate', false, debug_toggle_field)
+		ui.saved_value_def('btn_pack', false, debug_toggle_field)
+		ui.saved_value_def('btn_graphs', true, debug_toggle_field)
+	}
+	ui.toolbox('debug_window', 'Debug', ']', 't', ui.sp(), ui.sp())
+		ui.min_w(200 * dpr)
+		ui.v()
+			ui.mv(ui.sp05())
+			ui.h(0, ui.sp05())
+				if (ui.toggle_button('btn_animate', null, 'animate',
+					debug_toggle_field))
+					ui.animate()
+				debug_packing = ui.toggle_button('btn_pack', null, 'pack',
+					debug_toggle_field)
+				let graphs = ui.toggle_button('btn_graphs', null, 'graphs',
+					debug_toggle_field)
+			ui.end_h()
+			debug_profile(graphs)
+		ui.end_v()
+	ui.end_toolbox()
+}
+
+function debug_profile(graphs) {
+	ui.v()
 		ui.stack('', 0)
 			ui.bb('bg2')
 			ui.p(ui.sp())
 			ui.text('', 'PROFILE', 0, 'l')
 		ui.end_stack()
-		if (full)
+		if (graphs) {
+			ui.min_h(ui.em(10))
 			ui.frame_graph_overlapped(.5)
+		}
 		ui.p(ui.sp(), ui.sp05())
 		ui.h(0, ui.sp())
 			ui.color('label')
@@ -13733,106 +13787,6 @@ ui.debug_pane = function(full) {
 			ui.text_w(0)
 			ui.text('', state_key_count+'', 1, 'l', 'c', 1/0)
 		ui.end_h()
-		ui.box()
-
-		if (full) {
-
-			ui.stack('', 0)
-				ui.bb('bg2')
-				ui.p(ui.sp())
-				ui.text('', 'ID STATES', 0, 'l')
-			ui.end_stack()
-			ui.scrollbox('demo_id_states_sb', 1)
-				ui.v(0, 0, 's', '[')
-					for (let [id, s] of state_map) {
-						ui.p(ui.sp(), ui.sp05())
-						ui.color('link')
-						ui.text('', id, 0, 'l')
-						for (let [k, v] of entries(s)) {
-							if (v === undefined)
-								continue
-							if (k == 'build_no')
-								continue
-							ui.ml(ui.sp2())
-							ui.h(0, ui.sp())
-								let s = isobject(v) || isfunc(v) ? '<'+(typeof v)+'>' : str(v)
-								ui.text_w(0)
-								ui.text('', k, 1, 'l', 'c', 1/0)
-								if (isobject(v) || isfunc(v))
-									ui.color('label')
-								ui.text_w(0)
-								ui.text('', s, 1, 'l', 'c', 1/0)
-							ui.end_h()
-						}
-					}
-				ui.end_v()
-			ui.end_scrollbox()
-
-			ui.border(1, 'light')
-			ui.stack('', 0)
-				ui.bb('bg2')
-				ui.p(ui.sp())
-				ui.text('', 'HIT STATES', 0, 'l')
-			ui.end_stack()
-			ui.scrollbox('demo_hit_states_sb', .5)
-				ui.v(0, 0, 's', '[')
-					for (let [id, s] of hit_state_map) {
-						if (!s)
-							continue
-						ui.p(ui.sp(), ui.sp05())
-						ui.color('link')
-						ui.text('', isstr(id) ? id : typeof id, 0, 'l')
-						for (let [k, v] of entries(s)) {
-							ui.ml(ui.sp2())
-							ui.h(0, ui.sp())
-								let s = isobject(v) || isfunc(v) ? '<'+(typeof v)+'>' : str(v)
-								ui.text_w(0)
-								ui.text('', k, 1, 'l', 'c', 1/0)
-								if (isobject(v) || isfunc(v))
-									ui.color('label')
-								ui.text_w(0)
-								ui.text('', s, 1, 'l', 'c', 1/0)
-							ui.end_h()
-						}
-					}
-				ui.end_v()
-			ui.end_scrollbox()
-
-			ui.stack('', 0)
-				ui.bb('bg2')
-				ui.color(ui.captured_id ? 'text' : 'label')
-				ui.p(ui.sp())
-				ui.text_w(0)
-				ui.text('', ui.captured_id ? 'CAP '+ui.captured_id : 'CAPTURED', 0, 'l', 'c', 1/0)
-			ui.end_stack()
-			ui.scrollbox('demo_captured_state_sb', .5)
-				ui.v(0, 0, 's', '[')
-					if (ui.captured_id)
-						for (let [k, v] of entries(captured(ui.captured_id))) {
-							ui.ml(ui.sp2())
-							ui.h(1, ui.sp())
-								let s = isobject(v) || isfunc(v) ? '<'+(typeof v)+'>' : str(v)
-								ui.text_w(0)
-								ui.text('', k, 1, 'l', 'c', 1/0)
-								if (isobject(v) || isfunc(v))
-									ui.color('label')
-								ui.text_w(0)
-								ui.text('', s, 1, 'l', 'c', 1/0)
-							ui.end_h()
-						}
-				ui.end_v()
-			ui.end_scrollbox()
-
-			ui.stack('', 0)
-				ui.bb('bg2')
-				ui.color(ui.captured_id ? 'text' : 'label')
-				ui.p(ui.sp())
-				ui.text_w(0)
-				ui.text('', ui.focused_id ? 'FOCUSED '+ui.focused_id : 'FOCUSED', 0, 'l', 'c', 1/0)
-			ui.end_stack()
-
-		}
-
 	ui.end_v()
 }
 

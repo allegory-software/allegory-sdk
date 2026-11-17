@@ -23,6 +23,7 @@ const page_html = `<!DOCTYPE html>
 <script src=roof_skeleton.js></script>
 <script src=clipper2.js></script>
 <script src=prism_union.js></script>
+<script src=house_plan_objects.js></script>
 <script src=house_plan.js></script>
 <script src=model3.js></script>
 <script src=ui.js></script>
@@ -103,6 +104,7 @@ const server = http.createServer(async function(req, res) {
 <script src=roof_skeleton.js></script>
 <script src=clipper2.js></script>
 <script src=prism_union.js></script>
+<script src=house_plan_objects.js></script>
 <script src=house_plan.js></script>
 ${test_plans}
 <script src=model3_editor.js></script>

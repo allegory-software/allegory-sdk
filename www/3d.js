@@ -2865,28 +2865,8 @@ triangle3.is_front_facing = function triangle3_is_front_facing(a, b, c, directio
 
 // polygon offseting algorithm -----------------------------------------------
 
-// TODO: remove this
-function set_seg_offset(p1, p2, d) {
-	for (let seg of p1.segs) {
-		if (seg[0] == p2) { // (p2,p1) right side offset
-			seg[-2] = d
-			return
-		} else if (seg[1] == p2) { // (p1,p2) right side offset
-			seg[-1] = d
-			return
-		}
-	}
-	// TODO: see why this breaks
-	///assert(false, '#'+p1.segs.length)
-}
-
 // TODO: implement fast path for axis-aligned segments.
 function offset_corner(p0, p1, p2, d) {
-	set_seg_offset(p0, p1, d)
-	set_seg_offset(p1, p2, d)
-	p0.max_offset = max(p0.max_offset, abs(d))
-	p1.max_offset = max(p1.max_offset, abs(d))
-	p2.max_offset = max(p2.max_offset, abs(d))
 	let [x1, y1, x2, y2] = line2.offset( d, p0[0], p0[1], p1[0], p1[1])
 	let [x3, y3, x4, y4] = line2.offset(-d, p2[0], p2[1], p1[0], p1[1])
 	let [t1, t2] = line2.intersect_line(x1, y1, x2, y2, x3, y3, x4, y4)

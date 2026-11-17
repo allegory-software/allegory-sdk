@@ -90,7 +90,9 @@ function house_plan(t) {
 
 	let house = {}
 	let edit0
+	let edit0_ground_objects // house.ground_objects at the start of the edit
 	house.edit_no = 0 // increments on each committed edit, undo and redo
+	house.roof_geometry_no = 0 // includes changes during drag previews
 
 	function snap_length(x) {
 		return x == null ? x : round(x)
@@ -126,6 +128,42 @@ function house_plan(t) {
 		return a
 	}
 
+	function copy_objects(objects) {
+		let a = []
+		for (let object of objects) {
+			let object_type = assert(house_object_types[object.type],
+				'unknown object type: ', object.type)
+			let object1 = {
+				type: object.type,
+				x: snap_length(object.x),
+				y: snap_length(object.y),
+				rot: object.rot,
+				w: snap_length(object.w ?? object_type.w),
+			}
+			for (let name in object_type.fields)
+				object1[name] = object[name] ?? object_type.fields[name]
+			a.push(object1)
+		}
+		return a
+	}
+
+	// one object of each type in a row, in the top third of the initial view
+	// of an empty plan.
+	function make_default_objects() {
+		let a = []
+		let x = -750
+		for (let type in house_object_types) {
+			a.push({type: type, x: x, y: -2000, rot: 0})
+			x += 1500
+		}
+		return copy_objects(a) // adds the type's width and fields.
+	}
+
+	// the saved state of an object, for copying it.
+	house.save_object = function(object) {
+		return copy_objects([object])[0]
+	}
+
 	house.save_state = function() {
 		let floors = []
 		for (let floor of house.floors) {
@@ -133,22 +171,36 @@ function house_plan(t) {
 			state.h = floor.fixed_h
 			floors.push(state)
 		}
-		return {version: STATE_VERSION, floor_h: house.floor_h,
+		return {
+			version: STATE_VERSION,
+			floor_h: house.floor_h,
 			int_wall_thickness: house.int_wall_thickness,
 			ext_wall_thickness: house.ext_wall_thickness,
 			slab_thickness: house.slab_thickness,
-			roof_thickness: house.roof_thickness, floors: floors}
+			roof_thickness: house.roof_thickness,
+			ground_objects: copy_objects(house.ground_objects),
+			floors: floors,
+		}
 	}
 
 	function begin_edit(floor) {
 		assert(!edit0)
 		edit0 = floor.save_state()
+		edit0_ground_objects = copy_objects(house.ground_objects)
 	}
 
 	function commit_edit(floor) {
 		assert(edit0)
-		if (json(floor.save_state()) != json(edit0)) {
-			undo_stack.push({op: 'edit', floor: floor, state: edit0})
+		if (json(floor.save_state()) != json(edit0)
+			|| json(copy_objects(house.ground_objects))
+				!= json(edit0_ground_objects)
+		) {
+			undo_stack.push({
+				op: 'edit',
+				floor: floor,
+				state: edit0,
+				ground_objects: edit0_ground_objects,
+			})
 			redo_stack.length = 0
 			house.edit_no++
 		}
@@ -225,10 +277,57 @@ function house_plan(t) {
 		floor.room_point_by_cycle = map() // {cycle -> room_point|null if 2+}
 		// [{x:, y:, kind: 'roof'|'terrace'}, ...]
 		floor.area_points = copy_area_points(t.area_points ?? [])
+		// [{type:, x:, y:, rot:, w:, seg:}, ...] objects on this floor's walls
+		floor.objects = copy_objects(t.objects ?? [])
 
 		floor._after_fix = function() {
 			create_edges()
 			fix_snap_lines()
+			fix_objects()
+		}
+
+		// the segs changed: place each object again where it is, in order, so
+		// it fits around the ones placed before it. no wall: to the ground.
+		function fix_objects() {
+			let objects = floor.objects
+			for (let object of objects)
+				object.seg = null
+			let i = 0
+			while (i < objects.length) {
+				let object = objects[i]
+				house_object_types[object.type].place(floor, object,
+					object.x, object.y, 0)
+				if (object.seg) {
+					i++
+				} else {
+					objects.splice(i, 1)
+					house.ground_objects.push(object)
+				}
+			}
+		}
+
+		// the faces of the walls along cycle c, offset by d: on each seg, the
+		// across coordinate of the face on the side that c walks: seg.wall_a1
+		// (the lower one) or seg.wall_a2; on each point, the largest offset
+		// around it.
+		function set_cycle_offsets(c, d) {
+			let n = c.length
+			for (let i = 0; i < n; i++) {
+				let p0 = c[i]
+				let p1 = c[(i+1) % n]
+				p0.max_offset = max(p0.max_offset, abs(d))
+				for (let seg of p0.segs) {
+					if (seg[0] != p1 && seg[1] != p1)
+						continue
+					// walking up or right: the lower face.
+					let is_a1 = seg.is_v ? p1[1] < p0[1] : p1[0] > p0[0]
+					if (is_a1)
+						seg.wall_a1 = seg.axis + d
+					else
+						seg.wall_a2 = seg.axis - d
+					break
+				}
+			}
 		}
 
 		function create_edges() {
@@ -246,7 +345,9 @@ function house_plan(t) {
 					c.invalidate()
 					let edges = poly2()
 					edges.get_point = poly_get_point
-					c.edges = c.offset(c.outer ? (c.comp.inside ? -o_int : -o_ext) : -o_int, edges)
+					let d = c.outer ? (c.comp.inside ? -o_int : -o_ext) : -o_int
+					c.edges = c.offset(d, edges)
+					set_cycle_offsets(c, d)
 				}
 			}
 
@@ -259,6 +360,7 @@ function house_plan(t) {
 			house.bb = house_bb()
 
 			fix_open_rooms()
+			house.roof_geometry_no++
 
 		}
 
@@ -665,12 +767,14 @@ function house_plan(t) {
 				edge_point.pitch = 90
 				floor.roof.edge_points.push(edge_point)
 			}
+			house.roof_geometry_no++
 			commit_edit(floor)
 		}
 
 		floor.remove_edge_point = function(edge_point) {
 			begin_edit(floor)
 			remove_value(floor.roof.edge_points, edge_point)
+			house.roof_geometry_no++
 			commit_edit(floor)
 		}
 
@@ -683,6 +787,7 @@ function house_plan(t) {
 				for (let side of face.sides)
 					if (side.edge_point)
 						side.edge_point.pitch = null
+			house.roof_geometry_no++
 			commit_edit(floor)
 		}
 
@@ -708,6 +813,7 @@ function house_plan(t) {
 				// each move starts from the roof as it was at the start.
 				let roof = copy_roof(roof0)
 				floor.roof = roof
+				house.roof_geometry_no++
 				if (is_one && side.edge_point === null)
 					return false
 				let dd = dx * side.nx + dy * side.ny
@@ -839,6 +945,7 @@ function house_plan(t) {
 				// each move starts from the roof as it was at the start.
 				let roof = copy_roof(roof0)
 				floor.roof = roof
+				house.roof_geometry_no++
 				let pitches = [] // [pitch, ...] per face
 				let is_vertical = true // all faces
 				for (let face of faces) {
@@ -893,6 +1000,7 @@ function house_plan(t) {
 				// each move starts from the roof as it was at the start.
 				let roof = copy_roof(roof0)
 				floor.roof = roof
+				house.roof_geometry_no++
 
 				if (is_one) {
 					for (let side of face.sides)
@@ -950,10 +1058,15 @@ function house_plan(t) {
 			for (let seg of floor.segs)
 				lines.push(seg.id, point_indices.get(seg[0]),
 					point_indices.get(seg[1]))
-			return {h: floor.fixed_h, points: points, lines: [lines],
+			return {
+				h: floor.fixed_h,
+				points: points,
+				lines: [lines],
 				room_points: copy_room_points(floor.room_points),
 				area_points: copy_area_points(floor.area_points),
-				roof: copy_roof(floor.roof)}
+				objects: copy_objects(floor.objects),
+				roof: copy_roof(floor.roof),
+			}
 		}
 
 		function snap_points() {
@@ -971,6 +1084,7 @@ function house_plan(t) {
 			snap_points()
 			floor.room_points = copy_room_points(state.room_points)
 			floor.area_points = copy_area_points(state.area_points)
+			floor.objects = copy_objects(state.objects)
 			floor.roof = copy_roof(state.roof)
 			floor.fix()
 		}
@@ -1031,6 +1145,7 @@ function house_plan(t) {
 						let p0 = roof0.edge_points[i]
 						roof.edge_points[i].pitch = scale_pitch(p0.pitch)
 					}
+					house.roof_geometry_no++
 					return true
 				}
 			} else {
@@ -1054,8 +1169,68 @@ function house_plan(t) {
 		function cancel_edit() {
 			assert(edit0)
 			let state = edit0
+			let ground_objects = edit0_ground_objects
 			edit0 = null
 			floor.load_state(state)
+			house.ground_objects = ground_objects
+		}
+
+		// objects -------------------------------------------------------------
+
+		// let the object's type place it at (x, y) or on a wall near it, then
+		// put it in its list: on a wall: the floor's, else the ground's.
+		function move_object(object, x, y, snap_d) {
+			let objects0 = object.seg ? floor.objects : house.ground_objects
+			house_object_types[object.type].place(floor, object,
+				snap_length(x), snap_length(y), snap_d)
+			let objects = object.seg ? floor.objects : house.ground_objects
+			if (objects != objects0) {
+				remove_value(objects0, object)
+				objects.push(object)
+			}
+		}
+
+		// start moving an object, which is on this floor or on the ground.
+		// s.move(x, y, snap_d) places it at (x, y) or on a wall within snap_d.
+		// s.stop() commits the move as one edit.
+		floor.start_move_object = function(object) {
+			begin_edit(floor)
+			let s = {}
+			s.move = function(x, y, snap_d) {
+				move_object(object, x, y, snap_d)
+			}
+			s.stop = function() {
+				commit_edit(floor)
+			}
+			s.cancel = cancel_edit
+			return s
+		}
+
+		// remove an object, which is on this floor or on the ground.
+		floor.remove_object = function(object) {
+			begin_edit(floor)
+			let objects = object.seg ? floor.objects : house.ground_objects
+			remove_value(objects, object)
+			commit_edit(floor)
+		}
+
+		// change an object with fn(object), which is on this floor or on the
+		// ground: one undoable edit, if fn changed anything.
+		floor.update_object = function(object, fn) {
+			begin_edit(floor)
+			fn(object)
+			commit_edit(floor)
+		}
+
+		// add an object from a save_object() state, placed at (x, y) or on a
+		// wall within snap_d as by a move: one undoable edit. a state of an
+		// unknown type throws.
+		floor.add_object = function(state, x, y, snap_d) {
+			let object = copy_objects([state])[0]
+			begin_edit(floor)
+			house.ground_objects.push(object)
+			move_object(object, x, y, snap_d)
+			commit_edit(floor)
 		}
 
 		// segment deletion ----------------------------------------------------
@@ -1238,6 +1413,12 @@ function house_plan(t) {
 			let v = seg0.is_v
 			let m_snap_lines = move_freely && snap_lines_for(!seg.is_v, seg)
 
+			// the objects on the seg move with it.
+			let riders = [] // [{object:, x:, y:}, ...] x, y: at the start
+			for (let object of floor.objects)
+				if (object.seg == seg)
+					riders.push({object: object, x: object.x, y: object.y})
+
 			let s = {
 				snap_a: undefined, // coordinate|null: unsnapped|undefined: free
 				snap_v: snap_lines.v,
@@ -1286,6 +1467,13 @@ function house_plan(t) {
 					seg.axis = a
 					create_edges()
 
+				}
+
+				let seg_dx = seg[0][0] - seg0[0][0]
+				let seg_dy = seg[0][1] - seg0[0][1]
+				for (let rider of riders) {
+					rider.object.x = rider.x + seg_dx
+					rider.object.y = rider.y + seg_dy
 				}
 
 			}
@@ -1505,6 +1693,64 @@ function house_plan(t) {
 		let {intersect, difference, FillRule} = clipper2
 		let EO = FillRule.EvenOdd
 
+		// the holes that the floor's objects cut in its walls, grouped by
+		// height: [{sill, head, paths}, ...] with the grid paths of the holes.
+		function make_hole_groups(floor) {
+			let groups = map() // {'sill head' -> group}
+			for (let object of floor.objects) {
+				let hole = house_object_types[object.type].hole(floor, object)
+				let key = hole.sill + ' ' + hole.head
+				let group = groups.get(key)
+				if (!group) {
+					group = {sill: hole.sill, head: hole.head, paths: []}
+					groups.set(key, group)
+				}
+				let [x1, y1, x2, y2] = hole.rect
+				add_ring_path(group.paths,
+					[[x1, y1], [x2, y1], [x2, y2], [x1, y2]])
+			}
+			return Array.from(groups.values())
+		}
+
+		// add the wall prisms of a floor over `paths`, up to z `top_z`: the
+		// walls around the floor's holes (hole_groups), and the walls above
+		// and below them.
+		function add_wall_prisms(floor, hole_groups, paths, top_z) {
+			let bottom_z = floor.z + slab_t
+			if (hole_groups.length) {
+				let cut_paths = []
+				for (let group of hole_groups)
+					for (let path of group.paths)
+						cut_paths.push(path)
+				for (let {sill, head, paths: hole_paths} of hole_groups) {
+					let wall_paths = intersect(paths, hole_paths, EO)
+					if (!wall_paths.length)
+						continue
+					if (sill > 0)
+						prisms.push({
+							paths: wall_paths,
+							bottom: [0, 0, bottom_z],
+							top: [0, 0, min(bottom_z + sill, top_z)],
+							tag: 'walls',
+						})
+					if (bottom_z + head < top_z)
+						prisms.push({
+							paths: wall_paths,
+							bottom: [0, 0, bottom_z + head],
+							top: [0, 0, top_z],
+							tag: 'walls',
+						})
+				}
+				paths = difference(paths, cut_paths, EO)
+			}
+			prisms.push({
+				paths: paths,
+				bottom: [0, 0, bottom_z],
+				top: [0, 0, top_z],
+				tag: 'walls',
+			})
+		}
+
 		// areas: the roof areas of each floor; the terraces of top_floor.
 		let roof_paths_by_floor = [] // [[path, ...], ...] grid paths
 		let roof_faces_by_floor = [] // [faces, ...]
@@ -1540,8 +1786,8 @@ function house_plan(t) {
 			let floor = floors[floor_i]
 			let skin_paths = add_skin_paths(floor, [])
 			let roof_paths = roof_paths_by_floor[floor_i]
-			let bottom = [0, 0, floor.z + slab_t]
-			let top = [0, 0, floor.z + floor.h]
+			let hole_groups = make_hole_groups(floor)
+			let top_z = floor.z + floor.h
 			if (roof_paths.length) {
 				let roof_z = -1/0
 				for (let face of roof_faces_by_floor[floor_i]) {
@@ -1550,25 +1796,12 @@ function house_plan(t) {
 						for (let [x, y] of ring)
 							roof_z = max(roof_z, a * x + b * y + c)
 				}
-				prisms.push({
-					paths: intersect(skin_paths, roof_paths, EO),
-					bottom: bottom,
-					top: [0, 0, roof_z],
-					tag: 'walls',
-				})
-				prisms.push({
-					paths: difference(skin_paths, roof_paths, EO),
-					bottom: bottom,
-					top: top,
-					tag: 'walls',
-				})
+				add_wall_prisms(floor, hole_groups,
+					intersect(skin_paths, roof_paths, EO), roof_z)
+				add_wall_prisms(floor, hole_groups,
+					difference(skin_paths, roof_paths, EO), top_z)
 			} else {
-				prisms.push({
-					paths: skin_paths,
-					bottom: bottom,
-					top: top,
-					tag: 'walls',
-				})
+				add_wall_prisms(floor, hole_groups, skin_paths, top_z)
 			}
 		}
 
@@ -1676,6 +1909,7 @@ function house_plan(t) {
 			z += floor.h
 		}
 		house.h = z
+		house.roof_geometry_no++
 	}
 
 	// add a copy of the top floor's walls and height on top of it.
@@ -1772,6 +2006,8 @@ function house_plan(t) {
 		let t0 = clock()
 		push_log_if(DEBUG_PLAN_LOAD, 'LOADING PLAN')
 
+		house.ground_objects = copy_objects(t.ground_objects
+			?? make_default_objects()) // objects on no floor, seen on all
 		house.floors = []
 
 		for (let n = t.floors?.length ?? 0, i = n-1; i >= 0; i--) {
@@ -1801,7 +2037,10 @@ function house_plan(t) {
 	// the live settings and floors of the house, for the load undo entry.
 	// the entry keeps the floor objects so that older entries stay valid.
 	function take_state() {
-		let state = {floors: house.floors}
+		let state = {
+			floors: house.floors,
+			ground_objects: house.ground_objects,
+		}
 		for (let k in defaults)
 			state[k] = house[k]
 		return state
@@ -1836,8 +2075,15 @@ function house_plan(t) {
 		let {op, floor} = entry
 		if (op == 'edit') {
 			let state = floor.save_state()
+			let ground_objects = copy_objects(house.ground_objects)
 			floor.load_state(entry.state)
-			return {op: 'edit', floor: floor, state: state}
+			house.ground_objects = copy_objects(entry.ground_objects)
+			return {
+				op: 'edit',
+				floor: floor,
+				state: state,
+				ground_objects: ground_objects,
+			}
 		} else if (op == 'add_floor') {
 			pop_floor()
 			return {op: 'remove_floor', floor: floor}

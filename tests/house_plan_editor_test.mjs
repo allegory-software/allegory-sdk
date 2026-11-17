@@ -20,6 +20,7 @@ const page_html = `<!DOCTYPE html>
 <script src=roof_skeleton.js></script>
 <script src=clipper2.js></script>
 <script src=prism_union.js></script>
+<script src=house_plan_objects.js></script>
 <script src=house_plan.js></script>
 ${test_plans}
 <script src=ui.js></script>
@@ -65,6 +66,7 @@ const server = http.createServer(async function(req, res) {
 <script src=roof_skeleton.js></script>
 <script src=clipper2.js></script>
 <script src=prism_union.js></script>
+<script src=house_plan_objects.js></script>
 <script src=house_plan.js></script>
 ${test_plans}
 <script src=house_plan_editor.js></script>
@@ -1054,6 +1056,123 @@ check('room area label excludes the island',
 	area_labels.includes('22.04 m\u00b2'), JSON.stringify(area_labels))
 check('island room area label shows its interior',
 	area_labels.includes('0.85 m\u00b2'), JSON.stringify(area_labels))
+
+// objects --------------------------------------------------------------------
+
+await pg.reload()
+await pg.waitForTimeout(200)
+await reset_empty_floor()
+await pg.evaluate(function() { // the view of an empty plan, whatever was saved.
+	let s = ui._state_map.get('fe')
+	s.scale = .1
+	s.cx = 0
+	s.cy = 0
+	s.zoomed = true
+	ui.animate()
+})
+await pg.waitForTimeout(100)
+view = await read_view()
+// the default window is at (-750, -2000) on the ground.
+let object_sx = Math.round(view.x0 + Math.round(-750 * view.scale))
+let object_sy = Math.round(view.y0 + Math.round(-2000 * view.scale))
+await pg.mouse.move(object_sx, object_sy)
+await pg.waitForTimeout(100)
+check('hovering a ground object hits it', await pg.evaluate(() =>
+	ui.hovers('fe')?.action == 'move_object'
+		&& ui.hovers('fe').object.type == 'window'))
+await pg.mouse.click(object_sx, object_sy)
+await pg.waitForTimeout(100)
+for (let [modifier, key] of [['Control', 's'], ['Control', 'a'], ['Alt', 'd']]) {
+	await pg.keyboard.down(modifier)
+	await pg.waitForTimeout(100)
+	await pg.keyboard.down(key)
+	await pg.waitForTimeout(100)
+	check(modifier+'+'+key+' does not move the hovered object',
+		await pg.evaluate(function() {
+			let o = house.ground_objects[0]
+			return o.x == -750 && o.y == -2000 && house.edit_no == 0
+		}))
+	await pg.keyboard.up(key)
+	await pg.waitForTimeout(100)
+	await pg.keyboard.up(modifier)
+	await pg.waitForTimeout(100)
+}
+await pg.mouse.down()
+await pg.waitForTimeout(50)
+await pg.mouse.move(object_sx + 40, object_sy + 20, {steps: 10})
+await pg.waitForTimeout(50)
+await pg.mouse.up()
+await pg.waitForTimeout(100)
+check('dragging a ground object moves it', await pg.evaluate(function() {
+	let o = house.ground_objects[0]
+	return o.x > -750 && o.y > -2000 && house.edit_no == 1
+}))
+await pg.keyboard.press('Control+z')
+await pg.waitForTimeout(100)
+check('keyboard undo restores the object', await pg.evaluate(function() {
+	let o = house.ground_objects[0]
+	return o.x == -750 && o.y == -2000
+}))
+await pg.mouse.move(object_sx, object_sy)
+await pg.waitForTimeout(100)
+await pg.keyboard.press('Delete')
+await pg.waitForTimeout(100)
+check('Delete removes the hovered object', await pg.evaluate(() =>
+	house.ground_objects.length == 1
+		&& house.ground_objects[0].type == 'door'))
+await pg.keyboard.press('Control+z')
+await pg.waitForTimeout(100)
+check('keyboard undo restores the removed object', await pg.evaluate(() =>
+	house.ground_objects.length == 2))
+await pg.keyboard.down('s')
+await pg.waitForTimeout(100)
+check('plain s moves the hovered object down 10 mm',
+	await pg.evaluate(function() {
+		let o = house.ground_objects[0]
+		return o.x == -750 && o.y == -1990
+	}))
+await pg.keyboard.up('s')
+await pg.waitForTimeout(100)
+check('no page errors after object edits', errors.length == 0,
+	errors.join('\n'))
+
+// roof geometry reuse -------------------------------------------------------
+
+async function draw_frame() {
+	await pg.evaluate(() => new Promise(resolve => {
+		ui.frame_changed = resolve
+		ui.animate()
+	}))
+}
+
+await pg.evaluate(function() {
+	ui.save_state('fe', 'is_roof_level', true)
+	window.plan_json = json(house_test_plans.gable1)
+	ui.animate()
+})
+await draw_frame()
+await pg.evaluate(function() {
+	window.roof_build_n = 0
+	let floor = ui.state_of('fe', 'draw_state').roof_floor
+	let make_areas = floor.make_areas
+	let make_roof_faces = floor.make_roof_faces
+	floor.make_areas = function(...args) {
+		window.roof_build_n++
+		return make_areas(...args)
+	}
+	floor.make_roof_faces = function(...args) {
+		window.roof_build_n++
+		return make_roof_faces(...args)
+	}
+})
+for (let i = 0; i < 20; i++) {
+	await pg.mouse.move(200 + i * 5, 200)
+	await draw_frame()
+}
+check('roof pointer movement does not rebuild geometry',
+	await pg.evaluate(() => roof_build_n == 0))
+check('no page errors after roof pointer movement', errors.length == 0,
+	errors.join('\n'))
 
 // the pages that host the demos load without errors and build the widget.
 let base_url = `http://127.0.0.1:${server.address().port}`

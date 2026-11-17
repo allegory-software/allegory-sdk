@@ -14,6 +14,7 @@
 <script src=roof_skeleton.js></script>
 <script src=clipper2.js></script>
 <script src=prism_union.js></script>
+<script src=house_plan_objects.js></script>
 <script src=house_plan.js></script>
 <script id=house_test_plans>
 // sample plans for house_plan(), used by the demos. lengths are in mm.
@@ -128,14 +129,9 @@ ui.save_unsaved_state = function(saved_state) {
 let demo_toggle_field = ui.create_field({type: 'bool', not_null: true})
 ui.saved_value_def('btn_light'  , ui.screen_theme() == 'light',
 	demo_toggle_field)
-ui.saved_value_def('btn_debug'  , false, demo_toggle_field)
 ui.saved_value_def('btn_tui'    , false, demo_toggle_field)
-ui.saved_value_def('btn_animate', false, demo_toggle_field)
-ui.saved_value_def('btn_pack'   , false, demo_toggle_field)
-ui.saved_value_def('btn_panes'  , true , demo_toggle_field)
 ui.set_screen_theme(ui.saved_value('btn_light') ? 'light' : 'dark')
 
-ui.DEBUG      = ui.saved_value('btn_debug')
 ui.TUI        = ui.saved_value('btn_tui')
 ui.saved_value_def('demos_list', 'grid', ui.create_field())
 let url_demo = location.search.match('demo=([^&]+)')?.[1]
@@ -2230,12 +2226,9 @@ let remote_offer_con, remote_answer_con
 
 ui.frame_changed = async function() {
 	let con = remote_offer_con ?? offer_con
-	if (!con && !is_packing) return
+	if (!con) return
 	let cb = await ui.pack_frame()
-	if (con)
-		con.send(cb)
-	if (is_packing)
-		await ui.unpack_frame(cb)
+	con.send(cb)
 }
 
 listen('rtc', function(c) {
@@ -2487,11 +2480,9 @@ assign(demos, t)
 demos_array = keys(demos)
 }
 
-let is_packing = false
 ui.main = function() {
 
 	ui.GRID_FAST_PATH = ui.saved_value('grid_config_fast_path')
-	ui.DEBUG = ui.saved_value('btn_debug')
 	ui.set_tui(ui.saved_value('btn_tui'))
 	let lights = ui.saved_value('btn_light')
 	if (lights != (ui.screen_theme() == 'light'))
@@ -2505,7 +2496,8 @@ ui.main = function() {
 				ui.border('b', 'light')
 
 				ui.toggle_button('btn_light', null, 'lights', demo_toggle_field)
-				ui.toggle_button('btn_debug', null, 'DEBUG', demo_toggle_field)
+				ui.DEBUG = ui.toggle_button('btn_debug', ui.DEBUG, 'DEBUG',
+					demo_toggle_field)
 				ui.toggle_button('btn_tui', null, 'TUI', demo_toggle_field)
 
 				if (ui.button('btn_reset', '', 'reset')) {
@@ -2549,22 +2541,6 @@ ui.main = function() {
 					ui.end_stack()
 				ui.end_h()
 			ui.end_hsplit()
-
-			if (ui.DEBUG) {
-				ui.v(0)
-					ui.mv(ui.sp05())
-					ui.h(0, ui.sp05())
-						if (ui.toggle_button('btn_animate', null, 'animate',
-							demo_toggle_field))
-							ui.animate()
-						is_packing = ui.toggle_button('btn_pack', null, 'pack',
-							demo_toggle_field)
-						ui.toggle_button('btn_panes', null, 'panes',
-							demo_toggle_field)
-					ui.end_h()
-					ui.debug_pane(ui.saved_value('btn_panes'))
-				ui.end_v()
-			}
 
 		ui.end_h()
 

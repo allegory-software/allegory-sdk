@@ -102,6 +102,7 @@ let ui = {
 	color_css: () => '#000',
 	color_obj: () => '#000',
 	alpha_adjust: c => c,
+	hsl_adjust: c => c,
 	hsl: () => '#000',
 	measure_text: () => ({width: 40, fontBoundingBoxAscent: 10,
 		fontBoundingBoxDescent: 2}),
@@ -128,7 +129,7 @@ ctx.addEventListener = () => {}
 vm.createContext(ctx)
 for (let name of ['glue.js', 'earcut.js', '3d.js', 'plane_graph.js',
 	'roof_skeleton.js', 'clipper2.js', 'prism_union.js',
-	'house_plan.js', 'house_plan_editor.js']) {
+	'house_plan_objects.js', 'house_plan.js', 'house_plan_editor.js']) {
 	let file = path.join(sdk, 'www', name)
 	vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, {filename: file})
 }
@@ -541,6 +542,181 @@ check('floor and roof selection survive editor recreation', () => {
 	n = save_n
 	frame()
 	assert.equal(save_n, n)
+})
+
+// roof geometry reuse ------------------------------------------------------
+
+function roof_rings() {
+	let rings = []
+	for (let face of state.draw_state.roof_faces)
+		rings.push(face.rings)
+	return JSON.stringify(rings)
+}
+
+check('roof hover, pan, zoom and rotation reuse geometry', () => {
+	plan_json = ctx.json({
+		version: 1,
+		floors: [{
+			lines: [['connect', [0, 0], [6000, 0], [6000, 4000],
+				[0, 4000], [0, 0]]],
+			roof: {pitch: 30},
+		}],
+	})
+	ui.saved_state.fe = {floor: 0, is_roof_level: true}
+	state = {}
+	frame()
+	let faces = state.draw_state.roof_faces
+	assert(faces.length > 0)
+	let make_areas = plan.make_areas
+	let make_roof_faces = plan.make_roof_faces
+	let area_n = 0
+	let roof_n = 0
+	plan.make_areas = function(...args) {
+		area_n++
+		return make_areas(...args)
+	}
+	plan.make_roof_faces = function(...args) {
+		roof_n++
+		return make_roof_faces(...args)
+	}
+	for (let i = 0; i < 20; i++) {
+		hover = {mx: i, my: i}
+		frame()
+	}
+	hover = null
+	state.pan_to(state.cx + 100, state.cy + 100)
+	frame()
+	state.zoom_at(1, 0, 0)
+	frame()
+	frame(true)
+	assert.equal(area_n, 0)
+	assert.equal(roof_n, 0)
+	assert.equal(state.draw_state.roof_faces, faces)
+	plan.make_areas = make_areas
+	plan.make_roof_faces = make_roof_faces
+})
+
+check('roof height preview, cancel, undo and redo refresh geometry', () => {
+	let h = state.house
+	let rings0 = roof_rings()
+	let edit_no = h.edit_no
+	let move = plan.start_move_height(true)
+	assert(move.move(500))
+	assert.equal(h.edit_no, edit_no)
+	frame()
+	assert.notEqual(roof_rings(), rings0)
+	move.cancel()
+	frame()
+	assert.equal(roof_rings(), rings0)
+	move = plan.start_move_height(true)
+	move.move(500)
+	move.stop()
+	frame()
+	let rings1 = roof_rings()
+	assert.notEqual(rings1, rings0)
+	assert(h.undo())
+	frame()
+	assert.equal(roof_rings(), rings0)
+	assert(h.redo())
+	frame()
+	assert.equal(roof_rings(), rings1)
+})
+
+check('wall and floor-height previews refresh roof geometry', () => {
+	let rings = roof_rings()
+	let seg = plan.segs.find(seg => !seg.is_v && seg.axis == 0)
+	let move = plan.start_move_seg(seg)
+	move.move(0, 200, 0)
+	frame()
+	assert.notEqual(roof_rings(), rings)
+	move.cancel()
+	frame()
+	assert.equal(roof_rings(), rings)
+	move = plan.start_move_height()
+	move.move(500)
+	frame()
+	assert.notEqual(roof_rings(), rings)
+	move.cancel()
+	frame()
+	assert.equal(roof_rings(), rings)
+})
+
+check('roof selection and an upper wall preview refresh the lower roof', () => {
+	state.house.add_floor()
+	frame()
+	assert(state.draw_state.roof_faces.length > 0)
+	clicked_id = 'fe.floor1'
+	frame()
+	assert.equal(state.draw_state.roof_floor, plan)
+	assert.equal(state.draw_state.roof_faces.length, 0)
+	let upper = state.house.floors[1]
+	let seg = upper.segs.find(seg => seg.is_v && seg.axis == 6000)
+	let move = upper.start_move_seg(seg)
+	move.move(-500, 0, 0)
+	frame()
+	assert(state.draw_state.roof_faces.length > 0)
+	move.cancel()
+	frame()
+	assert.equal(state.draw_state.roof_faces.length, 0)
+	clicked_id = 'fe.roof'
+	frame()
+	assert(state.draw_state.roof_faces.length > 0)
+	clicked_id = 'fe.floor0'
+	frame()
+	assert.equal(state.draw_state.roof_faces.length, 0)
+	assert.equal(state.draw_state.roof_sides.length, 0)
+	assert.equal(state.draw_state.roof_lines.length, 0)
+})
+
+check('roof edits and resets refresh the drawing geometry', () => {
+	clicked_id = 'fe.roof'
+	frame()
+	let floor = state.floor
+	let rings = roof_rings()
+	let side = state.draw_state.roof_sides.find(side => side.is_eave)
+	let scale = ctx.prism_union.grid_scale
+	let m = (side.m1 + side.m2) / 2 / scale
+	let x = side.nx ? side.wall_c / scale : m
+	let y = side.nx ? m : side.wall_c / scale
+	floor.toggle_gable(side, x, y)
+	frame()
+	assert.notEqual(roof_rings(), rings)
+	floor.remove_edge_point(floor.roof.edge_points[0])
+	frame()
+	assert.equal(roof_rings(), rings)
+	let move = floor.start_move_eave(side, x, y, [])
+	move.move(side.nx * 100, side.ny * 100, false, 0)
+	frame()
+	assert.notEqual(roof_rings(), rings)
+	move.cancel()
+	frame()
+	assert.equal(roof_rings(), rings)
+	let face = state.draw_state.roof_faces[0]
+	move = floor.start_move_pitch(face)
+	move.move(5, true)
+	move.stop()
+	frame()
+	assert.notEqual(roof_rings(), rings)
+	floor.reset_faces(state.draw_state.roof_faces)
+	frame()
+	assert.equal(roof_rings(), rings)
+	face = state.draw_state.roof_faces[0]
+	x = 0
+	y = 0
+	let ring = face.rings[0]
+	for (let p of ring) {
+		x += p[0] / ring.length
+		y += p[1] / ring.length
+	}
+	let [a, b, c] = face.plane
+	move = floor.start_move_faces([face], a*x + b*y + c)
+	assert(move)
+	assert(move.move(x + 100, y + 100))
+	frame()
+	assert.notEqual(roof_rings(), rings)
+	move.cancel()
+	frame()
+	assert.equal(roof_rings(), rings)
 })
 
 console.log(n_checks + ' house plan view checks passed')

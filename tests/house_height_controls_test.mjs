@@ -10,7 +10,8 @@ const www = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 	'..', 'www')
 const scripts = ['glue.js', 'earcut.js', '3d.js', 'suncalc.js', 'gl.js',
 	'gl_renderer.js', 'model3.js', 'plane_graph.js', 'roof_skeleton.js',
-	'clipper2.js', 'prism_union.js', 'house_plan.js', 'ui.js',
+	'clipper2.js', 'prism_union.js', 'house_plan_objects.js', 'house_plan.js',
+	'ui.js',
 	'ui_icon_defs.js', 'ui_field.js', 'model3_editor.js',
 	'house_model_editor.js']
 const html = `<!DOCTYPE html><link rel=icon href=data:,>

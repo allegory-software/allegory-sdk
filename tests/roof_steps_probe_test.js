@@ -23,7 +23,8 @@ ctx.localStorage = {}
 ctx.addEventListener = () => {}
 vm.createContext(ctx)
 for (let name of ['glue.js', 'earcut.js', '3d.js', 'plane_graph.js',
-	'roof_skeleton.js', 'clipper2.js', 'prism_union.js', 'house_plan.js']) {
+	'roof_skeleton.js', 'clipper2.js', 'prism_union.js',
+	'house_plan_objects.js', 'house_plan.js']) {
 	let file = path.join(sdk, 'www', name)
 	vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, {filename: file})
 }

@@ -1,0 +1,59 @@
+PRISM UNION: HOLE PRISMS (idea, not started)
+
+Started 2026-11-17, during the house objects API redesign (js/HOUSE-OBJECTS.txt).
+Nothing is implemented. Go back to it in a later session.
+
+## The problem
+
+make_faces() in www/house_plan.js builds a floor's walls as one prism: the plan
+shape of the wall bodies, from the slab top to the floor top (or to the roof
+under roof areas: a second wall prism there). A window or door needs a hole in
+the side of that prism, but a prism has one bottom and one top. So the opening
+code in the uncommitted objects diff splits the wall:
+
+1. the wall shape minus the opening rects (clipper difference), full height.
+2. under each opening: the wall shape inside the rects (clipper intersect),
+   slab top to sill. doors: none (sill 0).
+3. over each opening: the same shape, head to wall top.
+
+Grouped by sill and head, so one intersect per group, plus one difference.
+
+Cutter prisms don't help: a cutter removes everything above its bottom inside
+its region (prism_union.js: the cut prism's top becomes the cutter's bottom; the
+cutter's top is not read), and the cutter itself stays in the solid (roof
+bodies are cutters).
+
+## The idea
+
+A new kind of prism in prism_union(): a hole prism. It removes the other prisms'
+material between its own bottom and top inside its plan region, and adds
+nothing to the solid.
+
+make_faces() would keep the wall prisms as they are and push one hole prism per
+opening: its rect (the wall's faces across, the opening's width along), from
+slab top + sill to slab top + head. No clipper calls for openings: no
+difference, no intersect, no sill or head prisms, and nothing extra for the
+split between the walls under the roof and the rest (the hole prism cuts
+whichever wall prism it overlaps).
+
+## What prism_union already has (from reading the code, not tested)
+
+- The overlay cuts the plan into cells, each covered by the same prisms
+  everywhere. A hole prism's region would become cells like any other prism's.
+- Per cell, the code collects z ranges of the prisms, sorts them, and merges
+  touching ranges of the same tag into solid ranges. A hole would subtract its
+  z range from the solid ranges of its cell, which can split one range in two.
+
+## Open questions (unchecked)
+
+- Where in the per-cell range code the subtraction goes, and how it interacts
+  with cutters (a roof cutter lowering a wall top inside a hole's cell).
+- Hole planes: horizontal only for openings. Sloped hole planes are not needed
+  yet; decide whether to allow them.
+- The faces inside the hole (sill, head, jambs): prism_union makes up/down faces
+  from the range ends and side faces from the cell edges; check that a split
+  range gets its faces without new code.
+- Whether a hole that reaches the slab top (doors, sill 0) needs anything
+  special where the wall range and the slab range touch.
+- Cost compared with the clipper splits: more cells in the overlay vs. fewer
+  clipper ops in make_faces.

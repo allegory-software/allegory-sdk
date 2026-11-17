@@ -19,7 +19,8 @@ ctx.localStorage = {}
 ctx.addEventListener = () => {}
 vm.createContext(ctx)
 let files = ['glue.js', 'earcut.js', '3d.js', 'plane_graph.js',
-	'roof_skeleton.js', 'clipper2.js', 'prism_union.js', 'house_plan.js']
+	'roof_skeleton.js', 'clipper2.js', 'prism_union.js',
+	'house_plan_objects.js', 'house_plan.js']
 for (let name of files) {
 	// env SDK=dir loads dir/www/roof_skeleton.js instead (a changed copy).
 	let file = path.join(name == 'roof_skeleton.js' && process.env.SDK || sdk,
@@ -2539,6 +2540,357 @@ check('a setting set back to its start value makes no undo step', () => {
 	s.stop()
 	assert.equal(h.edit_no, edit_no)
 	assert.equal(h.undo(), false)
+})
+
+// objects ------------------------------------------------------------------
+
+function opening_house(objects) {
+	return house({floors: [{lines: [rect_lines(0, 0, 6000, 4000)],
+		objects: objects}]})
+}
+
+// the faces of the north wall's outer side, as polys in (x, z).
+function north_outer_polys(h) {
+	return wall_polys_at(h, false, -140, -1)
+}
+
+check('a new house has one default object of each type on the ground', () => {
+	let h = house({floors: [{lines: [rect_lines(0, 0, 6000, 4000)]}]})
+	assert.deepEqual(Array.from(h.ground_objects, o => o.type),
+		['window', 'door'])
+	assert.equal(h.floors[0].objects.length, 0)
+})
+
+check('objects are saved, loaded and undone with their floor', () => {
+	let object = {type: 'window', x: 3000, y: 0, rot: 0, w: 1200}
+	let h = opening_house([object])
+	let state = h.save_state()
+	assert.equal(JSON.stringify(state.floors[0].objects),
+		JSON.stringify([object]))
+	assert.equal(state.ground_objects.length, 2)
+	let h2 = house(state)
+	assert.equal(JSON.stringify(h2.save_state()), JSON.stringify(state))
+})
+
+check('a window cuts a hole in the wall', () => {
+	let h = opening_house([{type: 'window', x: 3000, y: 0, rot: 0, w: 1200}])
+	let polys = north_outer_polys(h)
+	let holed = polys.filter(p => p.holes.length)
+	assert.equal(holed.length, 1)
+	let hole = holed[0].slice(holed[0].holes[0])
+	let xs = hole.map(p => p[0])
+	let zs = hole.map(p => p[1])
+	assert.equal(Math.min(...xs), 2400)
+	assert.equal(Math.max(...xs), 3600)
+	assert.equal(Math.min(...zs), 1100)
+	assert.equal(Math.max(...zs), 2300)
+})
+
+check('a window does not raise a wall below its sill', () => {
+	for (let height of [600, 1000, 1100]) {
+		let h = house({
+			floor_h: height,
+			floors: [{
+				lines: [rect_lines(0, 0, 6000, 4000)],
+				objects: [{type: 'window', x: 3000, y: 0, rot: 0}],
+			}],
+		})
+		let polys = north_outer_polys(h)
+		assert.equal(polys.length, 1)
+		assert.equal(polys[0].holes.length, 0)
+		let top_z = -Infinity
+		for (let p of polys[0])
+			top_z = Math.max(top_z, p[1])
+		assert.equal(top_z, height)
+	}
+})
+
+check('a door cuts a hole from the slab top up', () => {
+	let h = opening_house([{type: 'door', x: 3000, y: 0, rot: 0, w: 900}])
+	let polys = north_outer_polys(h)
+	assert.equal(polys.length, 1)
+	assert.equal(polys[0].holes.length, 1)
+	let hole = polys[0].slice(polys[0].holes[0])
+	let points = Array.from(hole, p => p.join())
+	for (let p of ['2550,200', '3450,200', '2550,2300', '3450,2300'])
+		assert(points.includes(p), p)
+	assert.equal(points.length, 4)
+})
+
+check('an object that is not on a wall goes to the ground', () => {
+	let h = opening_house([{type: 'window', x: 3000, y: 500, rot: 0, w: 1200}])
+	assert.equal(h.floors[0].objects.length, 0)
+	assert.equal(h.ground_objects.length, 3)
+	let h0 = opening_house([])
+	assert.equal(h.make_faces(h.floors[0], true).length,
+		h0.make_faces(h0.floors[0], true).length)
+})
+
+check('moving a wall moves its objects along', () => {
+	let h = opening_house([
+		{type: 'window', x: 3000, y: 0, rot: 0, w: 1200},
+		{type: 'door', x: 6000, y: 2000, rot: 90, w: 900},
+	])
+	let f = h.floors[0]
+	let seg = f.objects[0].seg
+	let s = f.start_move_seg(seg)
+	s.move(0, 500, 0)
+	assert.equal(f.objects[0].y, 500)
+	assert.equal(f.objects[0].x, 3000)
+	assert.equal(f.objects[1].x, 6000)
+	assert.equal(f.objects[1].y, 2000)
+	s.stop()
+	assert.equal(f.objects.length, 2)
+	assert.equal(f.objects[0].seg, seg)
+	assert(h.undo())
+	assert.equal(f.objects[0].y, 0)
+})
+
+check('moving a free wall moves its objects along both axes', () => {
+	let h = house({floors: [{lines: [[null, [0, 0], [6000, 0]]],
+		objects: [{type: 'window', x: 3000, y: 0, rot: 0, w: 1200}]}]})
+	let f = h.floors[0]
+	let s = f.start_move_seg(f.segs[0])
+	s.move(1000, 500, 0)
+	assert.equal(f.objects[0].x, 4000)
+	assert.equal(f.objects[0].y, 500)
+	s.stop()
+	assert.equal(f.objects.length, 1)
+	assert.equal(h.ground_objects.length, 2)
+})
+
+check('dragging an object onto a wall snaps it to the floor, undo back', () => {
+	let h = opening_house([])
+	let f = h.floors[0]
+	let object = h.ground_objects[0] // a window
+	let s = f.start_move_object(object)
+	s.move(3000, 3000, 200)
+	assert.equal(f.objects.length, 0)
+	assert.equal(object.y, 3000)
+	s.move(3000, 120, 200)
+	assert.equal(f.objects.length, 1)
+	assert.equal(h.ground_objects.length, 1)
+	assert.equal(object.y, 0)
+	assert.equal(object.x, 3000)
+	assert.equal(object.rot, 0)
+	s.move(6100, 2000, 200)
+	assert.equal(object.x, 6000)
+	assert.equal(object.y, 2000)
+	assert.equal(object.rot, 90)
+	s.stop()
+	assert.equal(f.objects.length, 1)
+	assert(h.undo())
+	assert.equal(f.objects.length, 0)
+	assert.equal(h.ground_objects.length, 2)
+})
+
+check('a dragged object stops at its neighbor on the wall', () => {
+	let h = opening_house([
+		{type: 'window', x: 2000, y: 0, rot: 0, w: 1200},
+		{type: 'window', x: 4000, y: 0, rot: 0, w: 1200},
+	])
+	let f = h.floors[0]
+	let object = f.objects[1]
+	let s = f.start_move_object(object)
+	s.move(1500, 0, 200)
+	assert.equal(object.x, 800)
+	s.move(5990, 0, 200)
+	assert.equal(object.x, 5400)
+	s.move(100, 0, 200)
+	assert.equal(object.x, 600)
+	s.stop()
+	assert.equal(f.objects.length, 2)
+})
+
+check('neighbors listed out of order still stop a dragged object', () => {
+	let h = opening_house([
+		{type: 'window', x: 5000, y: 0, rot: 0, w: 1200},
+		{type: 'window', x: 2800, y: 0, rot: 0, w: 1200},
+		{type: 'door', x: 6000, y: 3000, rot: 90, w: 900},
+		{type: 'door', x: 6000, y: 1000, rot: 90, w: 900},
+	])
+	let f = h.floors[0]
+	let s = f.start_move_object(f.objects[0]) // the window at 5000.
+	s.move(2500, 0, 200) // into the window at 2800: the gap before it.
+	assert.equal(f.objects[0].x, 1600)
+	s.cancel()
+	s = f.start_move_object(f.objects[2]) // the door at y 3000.
+	s.move(6000, 1200, 200) // into the door at y 1000: the gap after it.
+	assert.equal(f.objects[2].y, 1900)
+	s.cancel()
+})
+
+check('a cancelled object move restores both lists', () => {
+	let h = opening_house([])
+	let f = h.floors[0]
+	let s = f.start_move_object(h.ground_objects[0])
+	s.move(3000, 0, 200)
+	assert.equal(f.objects.length, 1)
+	s.cancel()
+	assert.equal(f.objects.length, 0)
+	assert.equal(h.ground_objects.length, 2)
+})
+
+check('objects are removed and added as one undoable edit each', () => {
+	let h = opening_house([{type: 'window', x: 3000, y: 0, rot: 0, w: 1200}])
+	let f = h.floors[0]
+	f.remove_object(f.objects[0])
+	assert.equal(f.objects.length, 0)
+	f.remove_object(h.ground_objects[0])
+	assert.equal(h.ground_objects.length, 1)
+	f.add_object({type: 'door', x: 0, y: 0, rot: 0, w: 800}, 100.4, -2000,
+		200)
+	assert.equal(h.ground_objects.length, 2)
+	assert.equal(JSON.stringify(h.save_object(h.ground_objects[1])),
+		JSON.stringify({type: 'door', x: 100, y: -2000, rot: 0, w: 800,
+			mirror: false}))
+	assert(h.undo())
+	assert.equal(h.ground_objects.length, 1)
+	assert(h.undo())
+	assert.equal(h.ground_objects.length, 2)
+	assert(h.undo())
+	assert.equal(f.objects.length, 1)
+})
+
+check('space cycles the four orientations of a door, one edit each', () => {
+	let h = opening_house([{type: 'door', x: 3000, y: 0, rot: 0, w: 900}])
+	let f = h.floors[0]
+	let door = f.objects[0]
+	let update = ctx.house_object_types.door.update
+	let key = ' '
+	ctx.ui = {keydown: k => k == key} // the keys pressed this frame.
+	let edit_no = h.edit_no
+	let orientations = []
+	for (let i = 0; i < 4; i++) {
+		update(f, door)
+		orientations.push([door.rot, door.mirror])
+	}
+	assert.deepEqual(orientations,
+		[[0, true], [180, false], [180, true], [0, false]])
+	assert.equal(h.edit_no, edit_no + 4)
+	key = 'a'
+	update(f, door)
+	assert.equal(h.edit_no, edit_no + 4) // another key changes nothing.
+	assert.equal(f.objects[0], door)
+	assert(h.undo())
+	assert.deepEqual([f.objects[0].rot, f.objects[0].mirror], [180, true])
+	assert.equal(ctx.house_object_types.window.update, undefined)
+	delete ctx.ui
+})
+
+check('mirror is saved and loaded, a window has none', () => {
+	let h = opening_house([
+		{type: 'door', x: 3000, y: 0, rot: 180, w: 900, mirror: true},
+		{type: 'window', x: 1000, y: 0, rot: 0, w: 1200},
+	])
+	let state = h.save_state()
+	assert.equal(state.floors[0].objects[0].mirror, true)
+	assert(!('mirror' in state.floors[0].objects[1]))
+	assert.equal(JSON.stringify(house(state).save_state()),
+		JSON.stringify(state))
+	assert.equal(h.ground_objects[1].mirror, false) // the default door.
+})
+
+check('a moved door keeps its facing on a wall of the same direction', () => {
+	let h = opening_house([{type: 'door', x: 3000, y: 0, rot: 180, w: 900,
+		mirror: true}])
+	let f = h.floors[0]
+	let door = f.objects[0]
+	let s = f.start_move_object(door)
+	s.move(1500, 0, 200)
+	assert.equal(door.rot, 180)
+	s.move(6000, 2000, 200) // the east wall: runs along y.
+	assert.equal(door.rot, 90)
+	s.move(3000, 4000, 200) // the south wall again.
+	assert.equal(door.rot, 0)
+	assert.equal(door.mirror, true)
+	s.cancel()
+})
+
+check('deleting a wall moves its objects to the ground, undo back', () => {
+	let h = opening_house([{type: 'window', x: 3000, y: 0, rot: 0, w: 1200}])
+	let f = h.floors[0]
+	f.delete_seg(f.objects[0].seg)
+	assert.equal(f.objects.length, 0)
+	assert.equal(h.ground_objects.length, 3)
+	assert(h.undo())
+	assert.equal(f.objects.length, 1)
+	assert.equal(h.ground_objects.length, 2)
+	assert(h.redo())
+	assert.equal(f.objects.length, 0)
+	assert.equal(h.ground_objects.length, 3)
+})
+
+// a free wall from (0, 0) to (6000, 0) with a window centered at x, its
+// right end dragged to x2.
+function shorten_window_wall(x, x2) {
+	let h = house({floors: [{lines: [[null, [0, 0], [6000, 0]]],
+		objects: [{type: 'window', x: x, y: 0, rot: 0, w: 1200}]}]})
+	let f = h.floors[0]
+	let p = f.ps.find(p => p[0] == 6000)
+	let r = f.start_resize_seg(p, 6000, 0, x2 - 6000, 0, 1, 0)
+	r.resize(x2 - 6000, 0, 20)
+	r.stop()
+	return h
+}
+
+check('a shortened wall pushes its objects along', () => {
+	let h = shorten_window_wall(5000, 5200)
+	let f = h.floors[0]
+	assert.equal(f.segs[0].m2, 5200)
+	assert.equal(f.objects.length, 1)
+	assert.equal(f.objects[0].x, 4600)
+	assert.equal(f.objects[0].seg, f.segs[0])
+})
+
+check('an object past the end of a shortened wall goes to the ground', () => {
+	let h = shorten_window_wall(5000, 4900)
+	assert.equal(h.floors[0].objects.length, 0)
+	assert.equal(h.ground_objects.length, 3)
+	assert.equal(h.ground_objects[2].x, 5000)
+})
+
+check('a pasted object goes where a dropped one would', () => {
+	let h = opening_house([])
+	let f = h.floors[0]
+	let state = h.save_object(h.ground_objects[1]) // the door.
+	f.add_object(state, 3000, 120, 200)
+	assert.equal(f.objects.length, 1)
+	assert.equal(f.objects[0].y, 0)
+	assert.equal(f.objects[0].x, 3000)
+	assert.equal(h.ground_objects.length, 2)
+	assert.throws(() => f.add_object({type: 'chair'}, 0, 0, 200))
+	assert(h.undo())
+	assert.equal(f.objects.length, 0)
+})
+
+check('a seg has the faces of its wall, lower first', () => {
+	let h = opening_house([
+		{type: 'window', x: 3000, y: 0, rot: 0, w: 1200},
+		{type: 'door', x: 6000, y: 2000, rot: 90, w: 900},
+		{type: 'window', x: 3000, y: 4000, rot: 0, w: 1200},
+		{type: 'window', x: 0, y: 2000, rot: 90, w: 1200},
+	])
+	let f = h.floors[0]
+	let ranges = []
+	for (let object of f.objects)
+		ranges.push([object.seg.wall_a1, object.seg.wall_a2])
+	assert.equal(JSON.stringify(ranges),
+		JSON.stringify([[-140, 40], [5960, 6140], [3960, 4140], [-140, 40]]))
+})
+
+check('the saved state of an object has no seg', () => {
+	let h = opening_house([{type: 'window', x: 3000, y: 0, rot: 0, w: 1200}])
+	let f = h.floors[0]
+	assert(f.objects[0].seg)
+	assert(!('seg' in h.save_object(f.objects[0])))
+	let edit_no = h.edit_no
+	let object = h.ground_objects[0]
+	let s = f.start_move_object(object) // moved where it is: no edit.
+	s.move(object.x, object.y, 0)
+	assert('seg' in object)
+	s.stop()
+	assert.equal(h.edit_no, edit_no)
 })
 
 console.log(n_checks + ' house plan checks passed')
