@@ -760,13 +760,9 @@ function floor_editor_update(id, s) {
 			let nosnap = ui.keypressed('ctrl')
 			// past the drag threshold, or with ctrl at the first movement: a
 			// press without movement starts no edit, so a double-click can.
-			let drag_threshold = 0
-			let is_moved = abs(dx) > drag_threshold || abs(dy) > drag_threshold
-				|| nosnap && !!(cs.dx || cs.dy)
-			let is_resize_drag = abs(dx) >= drag_threshold
-				|| abs(dy) >= drag_threshold
+			let is_moved = !!cs.moved || nosnap && !!(cs.dx || cs.dy)
 
-			if (!readonly && !s.is_roof_level && !action && is_resize_drag) { // dragged far enough to assume intent to drag.
+			if (!readonly && !s.is_roof_level && !action && is_moved) { // dragged far enough to assume intent to drag.
 
 				// establish direction of drag on x and y axis.
 				let sdx = abs(dx) > 1.5 * abs(dy) ? sign(dx) : 0 // straight enough
@@ -798,13 +794,6 @@ function floor_editor_update(id, s) {
 				}
 			}
 
-			// a room point moves only past the drag threshold or with ctrl: a
-			// click toggles its room instead.
-			if (action == 'move_room_point') {
-				if (is_moved)
-					cs.edit ??= plan.start_move_room_point(cs.room_point)
-				cs.edit?.move(dx, dy)
-			}
 
 			// an object moves only past the drag threshold or with ctrl.
 			if (action == 'move_object') {
@@ -909,14 +898,6 @@ function floor_editor_update(id, s) {
 	if (is_resetting_pitch)
 		draw_state.roof_floor.reset_faces([hs.roof_face])
 
-	// clicked inside a room without dragging: open or close the room. ctrl:
-	// a move, not a click.
-	let is_toggling_room = !readonly && cs?.drop && !cs.cancel && !cs.moved
-		&& !cs.edit && !ui.keypressed('ctrl')
-		&& (!cs.action || cs.action == 'move_room_point') && cs.cycle
-	if (is_toggling_room)
-		plan.toggle_room(cs.cycle, cs.room_x, cs.room_y)
-
 	// clicked an eave side without dragging: switch it between gable and
 	// the roof's pitch. ctrl: a move, not a click.
 	let is_toggling_gable = !readonly && cs?.drop && !cs.cancel && !cs.moved
@@ -961,12 +942,7 @@ function floor_editor_update(id, s) {
 			update(plan, hs.object)
 	}
 
-	let is_removing_room_point = !readonly && !cs && hs?.room_point
-		&& ui.focus_inside(id) && ui.keydown('delete')
-	if (is_removing_room_point)
-		plan.remove_room_point(hs.room_point)
-
-	if (cs?.drop || cs?.cancel || is_deleting_seg || is_removing_room_point
+	if (cs?.drop || cs?.cancel || is_deleting_seg
 		|| is_resetting_eave || is_resetting_faces || is_resetting_pitch
 		|| is_restored
 	) {
@@ -1306,8 +1282,7 @@ ui.box_widget('floor_editor', {
 		draw_state.segs = is_roof_level ? empty_array : plan.segs // TODO: remove this from draw stream
 		draw_state.ps = is_roof_level ? empty_array : plan.ps // TODO: remove this from draw stream
 		draw_state.plan_snap_lines = plan.house.snap_lines
-		draw_state.room_points = is_roof_level ? empty_array : plan.room_points
-		draw_state.room_point_by_cycle = plan.room_point_by_cycle
+		draw_state.open_rooms = plan.open_rooms
 		draw_state.objects = is_roof_level ? empty_array : plan.objects
 		draw_state.ground_objects = is_roof_level ? empty_array
 			: plan.house.ground_objects
@@ -1379,7 +1354,6 @@ ui.box_widget('floor_editor', {
 		let hit_seg     = hs?.seg
 		let hit_p       = hs?.p
 		let hit_cycle   = hs?.cycle
-		let hit_room_point = hs?.room_point
 		let hit_object = hs?.object
 		let hit_roof_side = hs?.roof_side
 		let hit_roof_faces = hs?.roof_faces
@@ -1479,10 +1453,8 @@ ui.box_widget('floor_editor', {
 					continue
 				if (!c.edges)
 					continue
-				let room_point = draw_state.room_point_by_cycle.get(c)
-
 				// open room: background only on the slab, outside the rooms below.
-				let is_open = room_point?.is_open
+				let is_open = draw_state.open_rooms.has(c)
 				if (is_open) {
 					cx.save()
 					cx.beginPath()
@@ -1502,11 +1474,8 @@ ui.box_widget('floor_editor', {
 				for (let icomp of c.islands)
 					draw_edges(cx, sg, icomp.outer_cycle.edges)
 
-				if (room_point === null) // two or more room points.
-					cx.fillStyle = ui.alpha_adjust(ui.color_obj('error'), .5)
-				else
-					cx.fillStyle = ui.alpha_adjust(ui.color_obj('bg1',
-						hit_cycle == c ? 'hover' : null), .5)
+				cx.fillStyle = ui.alpha_adjust(ui.color_obj('bg1',
+					hit_cycle == c ? 'hover' : null), .5)
 				cx.fill()
 
 				if (is_open)
@@ -1664,21 +1633,6 @@ ui.box_widget('floor_editor', {
 					cx.restore()
 				}
 			}
-
-		// room points: filled if open.
-		for (let room_point of draw_state.room_points) {
-			let r = room_point == hit_room_point ? 8 : 6
-			cx.beginPath()
-			cx.arc(sg.x(room_point.x), sg.y(room_point.y), r, 0, 2*PI)
-			if (room_point.is_open) {
-				cx.fillStyle = ui.color_css('text')
-				cx.fill()
-			}
-			cx.strokeStyle = ui.color_css('text')
-			cx.lineWidth = 2
-			cx.stroke()
-			cx.lineWidth = 1
-		}
 
 		// objects: the ground's under the floor's.
 		draw_objects(cx, sg, plan, draw_state.ground_objects, hit_object, true)
@@ -1873,9 +1827,7 @@ ui.box_widget('floor_editor', {
 		seg, action=move_seg       hit segment
 		seg, x or y                hit around segment along its length
 		x and/or y                 hit vert and/or horiz snap line
-		cycle, room_x, room_y      inside inner cycle
-		room_point,
-		action=move_room_point     hit room point
+		cycle                      inside inner cycle
 		object, object_x, object_y,
 		action=move_object         hit object
 		object, object_side, object_axis,
@@ -1965,7 +1917,7 @@ ui.box_widget('floor_editor', {
 
 		let snap_margin = 15
 
-		let hit_p, hit_seg, hit_action, hit_cycle, hit_room_point
+		let hit_p, hit_seg, hit_action, hit_cycle
 
 		for (let p of draw_state.ps) {
 			let dx = ui.mx - sg.x(p[0])
@@ -1981,18 +1933,7 @@ ui.box_widget('floor_editor', {
 			}
 		}
 
-		for (let room_point of draw_state.room_points) {
-			let dx = ui.mx - sg.x(room_point.x)
-			let dy = ui.my - sg.y(room_point.y)
-			if (abs(dx) <= 8 && abs(dy) <= 8) {
-				hit_room_point = room_point
-				hs.room_point = room_point
-				hs.action = 'move_room_point'
-				break
-			}
-		}
-
-		if (!hit_p && !hit_room_point)
+		if (!hit_p)
 			for (let seg of draw_state.segs) {
 
 				let x1 = seg[0][0]
@@ -2050,17 +1991,17 @@ ui.box_widget('floor_editor', {
 
 		// hit pitch label, else eave side, else point where three or more roof
 		// faces meet, else line between two roof faces
-		let hit_roof = !hit_p && !hit_seg && !hit_room_point
+		let hit_roof = !hit_p && !hit_seg
 			&& (hit_roof_label(hs, draw_state, sg)
 				|| hit_roof_side(hs, draw_state, sg, mx, my)
 				|| hit_roof_point(hs, draw_state, sg, mx, my)
 				|| hit_roof_line(hs, draw_state, sg, mx, my))
 
-		// the roof level has no walls to draw or rooms to open.
+		// the roof level has no walls to draw or rooms to hover.
 		let is_roof_level = draw_state.is_roof_level
 
 		// hit snapping point
-		if (!hit_p && !hit_seg && !hit_room_point && !hit_roof && !is_roof_level) {
+		if (!hit_p && !hit_seg && !hit_roof && !is_roof_level) {
 			let sx = snap_lines[0].snap(mx, snap_d)
 			let sy = snap_lines[1].snap(my, snap_d)
 			hs.x = sx ?? mx
@@ -2072,11 +2013,8 @@ ui.box_widget('floor_editor', {
 		// hit inner cycle
 		if (!hit_p && !hit_seg && !hit_roof && !is_roof_level) {
 			hit_cycle = plan.hit_cycle_edges(mx, my)
-			if (hit_cycle) {
+			if (hit_cycle)
 				hs.cycle = hit_cycle
-				hs.room_x = mx // unsnapped, for placing a room point.
-				hs.room_y = my
-			}
 		}
 
 		cx.restore()

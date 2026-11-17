@@ -1,6 +1,6 @@
 /*
 
-	House plan object types: windows, doors and some furniture.
+	House plan object types: windows, doors, some furniture and tags.
 	Written by Cosmin Apreutesei. Public Domain.
 
 	house_object_types -> {type -> object_type}
@@ -17,13 +17,17 @@
 		     side's coordinate across it and m1, m2 its ends along it, in the
 		     order that the room's free space is on the left. not saved.
 		on_floor: the object is in the floor's list, not the ground's: it is
-		          in a wall or inside a room. set by place, not saved.
+		          in a wall or inside a room, or a tag on what it tags.
+		          set by place, not saved.
 
 	object_type:
 		w                    default width
 		fields               {name -> default} saved fields besides
 		                     type, x, y, rot, w
 		in_wall              optional: the object cuts a hole in its wall.
+		opens_room           optional: a tag that opens the room it is in.
+		marks_terrace        optional: a tag that makes the floor below's
+		                     uncovered area that it is on a terrace.
 		snap_faces           optional: [i, ...] the sides of a furniture
 		                     piece that can rest against a wall: 0 top,
 		                     1 right, 2 bottom, 3 left. no snap_faces: the
@@ -649,6 +653,78 @@ function sketch_wc(object) {
 		+ `a${bowl_x} ${bowl_y} 0 0 0 ${2 * bowl_x} 0V${-y + l * .3}z`
 }
 
+// tags ----------------------------------------------------------------------
+
+// on the floor when its point is inside a room.
+function place_open_room(plan, object, x, y) {
+	object.x = x
+	object.y = y
+	object.seg = null
+	object.on_floor = !!plan.hit_cycle_edges(x, y)
+}
+
+// on the floor when its point is on the part of the floor below that the
+// floor's outlines leave uncovered, where the floor below's roof shows.
+function place_terrace(plan, object, x, y) {
+	let plan0 = plan.house.floors[plan.i-1]
+	object.x = x
+	object.y = y
+	object.seg = null
+	object.on_floor = !!plan0 && plan0.is_rect_touching_house(x, y, x, y)
+		&& !plan.is_rect_touching_house(x, y, x, y)
+}
+
+function tag_box(plan, object, out) {
+	out[0] = object.x
+	out[1] = object.y
+	out[2] = object.x
+	out[3] = object.y
+	return out
+}
+
+// the icon centered on the point, the text under it, upright on the screen.
+let TAG_ICON_SIZE = 20 // px
+let TAG_TEXT_FONT = 'bold 12px sans-serif'
+let TAG_TEXT_Y = 18 // px, the text's middle under the point
+let TAG_HIT_X = 28 // px, half the hit width
+let TAG_HIT_Y1 = -12 // px, the hit box's top from the point
+let TAG_HIT_Y2 = 26 // px, the hit box's bottom from the point
+
+let tag_icon_fonts = new Map() // {font name -> css font}
+
+// the pointer is over the tag's icon or text.
+function hit_tag(sg, plan, object) {
+	let r = sg.rotation ?? 0
+	let dx = ui.mx - sg.x(object.x)
+	let dy = ui.my - sg.y(object.y)
+	let tx = dx * cos(r) - dy * sin(r) // on the screen, from the point.
+	let ty = dx * sin(r) + dy * cos(r)
+	return tx >= -TAG_HIT_X && tx < TAG_HIT_X
+		&& ty >= TAG_HIT_Y1 && ty < TAG_HIT_Y2
+}
+
+// the icon and the text filled with the current stroke style.
+function draw_tag(cx, sg, object, icon_name, text) {
+	let [font, glyph] = ui.get_icon(icon_name)
+	let icon_font = tag_icon_fonts.get(font)
+	if (!icon_font) {
+		icon_font = TAG_ICON_SIZE + 'px ' + font
+		tag_icon_fonts.set(font, icon_font)
+	}
+	cx.save()
+	cx.translate(sg.x(object.x), sg.y(object.y))
+	if (sg.rotation)
+		cx.rotate(-sg.rotation)
+	cx.fillStyle = cx.strokeStyle
+	cx.textAlign = 'center'
+	cx.textBaseline = 'middle'
+	cx.font = icon_font
+	cx.fillText(glyph, 0, 0)
+	cx.font = TAG_TEXT_FONT
+	cx.fillText(text, 0, TAG_TEXT_Y)
+	cx.restore()
+}
+
 // object types --------------------------------------------------------------
 
 let house_object_types = {
@@ -822,6 +898,26 @@ let house_object_types = {
 		hit: hit_furniture,
 		draw_wall_dims: draw_furniture_wall_dims,
 		draw: draw_furniture,
+	},
+
+	open_room: {
+		opens_room: true,
+		place: place_open_room,
+		box: tag_box,
+		hit: hit_tag,
+		draw: function(cx, sg, plan, object) {
+			draw_tag(cx, sg, object, 'stairs', 'Open')
+		},
+	},
+
+	terrace: {
+		marks_terrace: true,
+		place: place_terrace,
+		box: tag_box,
+		hit: hit_tag,
+		draw: function(cx, sg, plan, object) {
+			draw_tag(cx, sg, object, 'sun', 'Terrace')
+		},
 	},
 
 }

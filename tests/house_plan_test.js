@@ -727,6 +727,11 @@ function rect_lines(x, y, w, h) {
 	return ['draw', x, y, w, h, -w, -h]
 }
 
+// the saved state of a tag object: 'open_room' or 'terrace'.
+function tag_state(type, x, y) {
+	return {type: type, x: x, y: y, rot: 0}
+}
+
 // convert a face of make_faces() to a poly2 of 2D points with holes, ccw
 // outline: wall polys in (m, z) with is_v, axis, normal; horizontal polys in
 // plan (x, y) with z, normal.
@@ -871,9 +876,9 @@ check('room skins of floors with a slab between them stay separate', () => {
 // a terrace on the lower floor, cut at the top floor: without roofs.
 check('a smaller upper floor makes a stepped polygon', () => {
 	let h = house({floors: [
-		{lines: [rect_lines(0, 0, 6000, 4000)],
-			area_points: [{x: 4500, y: 2000, kind: 'terrace'}]},
-		{lines: [rect_lines(0, 0, 3000, 4000)]},
+		{lines: [rect_lines(0, 0, 6000, 4000)]},
+		{lines: [rect_lines(0, 0, 3000, 4000)],
+			objects: [tag_state('terrace', 4500, 2000)]},
 	]})
 	let [poly, ...rest] = wall_polys_at(h, false, -140, -1, h.floors[1])
 	assert.equal(rest.length, 0)
@@ -887,9 +892,9 @@ check('a smaller upper floor makes a stepped polygon', () => {
 
 check('a gap between two floors makes a hole', () => {
 	let h = house({floors: [
-		{lines: [rect_lines(0, 0, 6000, 4000)],
-			area_points: [{x: 3000, y: 2000, kind: 'terrace'}]},
-		{lines: [rect_lines(0, 0, 2000, 4000), rect_lines(4000, 0, 2000, 4000)]},
+		{lines: [rect_lines(0, 0, 6000, 4000)]},
+		{lines: [rect_lines(0, 0, 2000, 4000), rect_lines(4000, 0, 2000, 4000)],
+			objects: [tag_state('terrace', 3000, 2000)]},
 		{lines: [rect_lines(0, 0, 6000, 4000)]},
 	]})
 	let [poly, ...rest] = wall_polys_at(h, false, -140, -1)
@@ -912,25 +917,26 @@ check('floor height comes from the plan', () => {
 // open rooms ----------------------------------------------------------------
 
 function open_room_count(floor) {
-	let n = 0
-	for (let room_point of floor.room_point_by_cycle.values())
-		if (room_point?.is_open)
-			n++
-	return n
+	return floor.open_rooms.size
 }
 
-function open_room_house(upper_room_points, island_lines) {
+function open_room_house(upper_tags, island_lines) {
 	let lines = [rect_lines(0, 0, 6000, 4000)]
 	if (island_lines)
 		lines.push(island_lines)
 	return house({floors: [
 		{lines: lines},
-		{lines: lines, room_points: upper_room_points},
+		{lines: lines, objects: upper_tags},
 	]})
 }
 
+function is_on_ground(h, type, x, y) {
+	return h.ground_objects.some(object =>
+		object.type == type && object.x == x && object.y == y)
+}
+
 check('an open room merges its skins with the room below', () => {
-	let h = open_room_house([{x: 1000, y: 2000, is_open: true}])
+	let h = open_room_house([tag_state('open_room', 1000, 2000)])
 	assert.equal(open_room_count(h.floors[1]), 1)
 	let [poly, ...rest] = wall_polys_at(h, true, 40, 1)
 	assert.equal(rest.length, 0)
@@ -938,28 +944,31 @@ check('an open room merges its skins with the room below', () => {
 		[[40, 200], [3960, 200], [3960, 5000], [40, 5000]])
 })
 
-check('a closed room point keeps the slab', () => {
-	let h = open_room_house([{x: 1000, y: 2000, is_open: false}])
+check('a room without an open-room tag keeps the slab', () => {
+	let h = open_room_house([])
 	assert.equal(open_room_count(h.floors[1]), 0)
 	assert.equal(wall_polys_at(h, true, 40, 1).length, 2)
 })
 
-check('a room with two points stays closed', () => {
+check('a room with two open-room tags is open', () => {
 	let h = open_room_house([
-		{x: 1000, y: 2000, is_open: true},
-		{x: 5000, y: 2000, is_open: true},
+		tag_state('open_room', 1000, 2000),
+		tag_state('open_room', 5000, 2000),
 	])
-	assert.equal(open_room_count(h.floors[1]), 0)
-	assert.equal(wall_polys_at(h, true, 40, 1).length, 2)
+	assert.equal(open_room_count(h.floors[1]), 1)
+	assert.equal(h.floors[1].objects.length, 2)
+	assert.equal(wall_polys_at(h, true, 40, 1).length, 1)
 })
 
-check('a room point in a wall body opens no room', () => {
-	let h = open_room_house([{x: 0, y: 2000, is_open: true}])
+check('an open-room tag in a wall body goes to the ground', () => {
+	let h = open_room_house([tag_state('open_room', 0, 2000)])
 	assert.equal(open_room_count(h.floors[1]), 0)
+	assert.equal(h.floors[1].objects.length, 0)
+	assert(is_on_ground(h, 'open_room', 0, 2000))
 })
 
 check('an island in an open room keeps a slab piece under it', () => {
-	let h = open_room_house([{x: 1000, y: 2000, is_open: true}],
+	let h = open_room_house([tag_state('open_room', 1000, 2000)],
 		rect_lines(2000, 1000, 1000, 1000))
 	let [poly, ...rest] = wall_polys_at(h, true, 1960, -1)
 	assert.equal(rest.length, 0)
@@ -967,42 +976,44 @@ check('an island in an open room keeps a slab piece under it', () => {
 		[[960, 200], [2040, 200], [2040, 5000], [960, 5000]])
 })
 
-check('room points are saved and loaded', () => {
-	let h = open_room_house([{x: 1000, y: 2000, is_open: true}])
+check('open-room tags are saved and loaded', () => {
+	let h = open_room_house([tag_state('open_room', 1000, 2000)])
 	let floor = h.floors[1]
 	let state = floor.save_state()
-	assert.equal(JSON.stringify(state.room_points),
-		JSON.stringify([{x: 1000, y: 2000, is_open: true}]))
-	assert.notEqual(state.room_points[0], floor.room_points[0])
-	floor.load_state({...state, room_points: []})
+	assert.equal(JSON.stringify(state.objects),
+		JSON.stringify([tag_state('open_room', 1000, 2000)]))
+	assert.notEqual(state.objects[0], floor.objects[0])
+	floor.load_state({...state, objects: []})
 	assert.equal(open_room_count(floor), 0)
 	assert.equal(wall_polys_at(h, true, 40, 1).length, 2)
 	floor.load_state(state)
 	assert.equal(open_room_count(floor), 1)
 	assert.equal(wall_polys_at(h, true, 40, 1).length, 1)
-	assert.equal(JSON.stringify(h.save_state().floors[1].room_points),
-		JSON.stringify(state.room_points))
+	assert.equal(JSON.stringify(h.save_state().floors[1].objects),
+		JSON.stringify(state.objects))
 })
 
 check('an edit undo restores the open rooms', () => {
-	let h = open_room_house([{x: 1000, y: 2000, is_open: true}])
+	let h = open_room_house([tag_state('open_room', 1000, 2000)])
 	let floor = h.floors[1]
 	let seg = floor.segs.find(seg => seg.is_v && seg.axis == 0)
 	let mover = floor.start_move_seg(seg)
 	mover.move(1500, 0)
 	mover.stop()
-	assert.equal(open_room_count(floor), 0) // the point is outside now.
+	assert.equal(open_room_count(floor), 0) // the tag is outside now.
+	assert(is_on_ground(h, 'open_room', 1000, 2000))
 	assert(h.undo())
 	assert.equal(open_room_count(floor), 1)
+	assert(!is_on_ground(h, 'open_room', 1000, 2000))
 	assert.equal(wall_polys_at(h, true, 40, 1).length, 1)
 })
 
-check('adding a floor copies the room points', () => {
-	let h = open_room_house([{x: 1000, y: 2000, is_open: true}])
+check('adding a floor copies the open-room tags', () => {
+	let h = open_room_house([tag_state('open_room', 1000, 2000)])
 	let floor = h.add_floor()
-	assert.equal(JSON.stringify(floor.room_points),
-		JSON.stringify(h.floors[1].room_points))
-	assert.notEqual(floor.room_points[0], h.floors[1].room_points[0])
+	assert.equal(JSON.stringify(h.save_state().floors[2].objects),
+		JSON.stringify(h.save_state().floors[1].objects))
+	assert.notEqual(floor.objects[0], h.floors[1].objects[0])
 	assert.equal(open_room_count(floor), 1)
 	let [poly, ...rest] = wall_polys_at(h, true, 40, 1)
 	assert.equal(rest.length, 0)
@@ -1010,79 +1021,49 @@ check('adding a floor copies the room points', () => {
 		[[40, 200], [3960, 200], [3960, 7500], [40, 7500]])
 })
 
-check('toggling a room with no point adds an open point', () => {
+check('moving an open-room tag from the ground into a room opens it', () => {
 	let h = open_room_house([])
 	let floor = h.floors[1]
+	let tag = h.ground_objects.find(object => object.type == 'open_room')
 	let edit_no = h.edit_no
-	floor.toggle_room(floor.hit_cycle_edges(1000, 2000), 1000, 2000)
-	assert.equal(JSON.stringify(floor.room_points),
-		JSON.stringify([{x: 1000, y: 2000, is_open: true}]))
+	let mover = floor.start_move_object(tag)
+	mover.move(1000, 2000, 0)
 	assert.equal(open_room_count(floor), 1)
+	assert.equal(floor.objects[0], tag)
+	mover.stop()
 	assert.equal(wall_polys_at(h, true, 40, 1).length, 1)
 	assert.equal(h.edit_no, edit_no + 1)
 	assert(h.undo())
-	assert.equal(floor.room_points.length, 0)
+	assert.equal(floor.objects.length, 0)
 	assert.equal(open_room_count(floor), 0)
 	assert.equal(wall_polys_at(h, true, 40, 1).length, 2)
 	assert(h.redo())
 	assert.equal(open_room_count(floor), 1)
 })
 
-check('toggling a room with one point flips the point', () => {
-	let h = open_room_house([{x: 1000, y: 2000, is_open: true}])
+check('removing an open-room tag closes its room', () => {
+	let h = open_room_house([tag_state('open_room', 1000, 2000)])
 	let floor = h.floors[1]
-	floor.toggle_room(floor.hit_cycle_edges(3000, 1000), 3000, 1000)
-	assert.equal(JSON.stringify(floor.room_points),
-		JSON.stringify([{x: 1000, y: 2000, is_open: false}]))
+	floor.remove_object(floor.objects[0])
+	assert.equal(floor.objects.length, 0)
 	assert.equal(open_room_count(floor), 0)
-	assert.equal(wall_polys_at(h, true, 40, 1).length, 2)
 	assert(h.undo())
-	assert.equal(floor.room_points[0].is_open, true)
+	assert.equal(floor.objects.length, 1)
 	assert.equal(open_room_count(floor), 1)
 })
 
-check('toggling a room with two points does nothing', () => {
-	let h = open_room_house([
-		{x: 1000, y: 2000, is_open: true},
-		{x: 5000, y: 2000, is_open: true},
-	])
+check('moving an open-room tag into a wall sends it to the ground', () => {
+	let h = open_room_house([tag_state('open_room', 1000, 2000)])
 	let floor = h.floors[1]
-	let c = floor.hit_cycle_edges(1000, 2000)
-	assert.equal(floor.room_point_by_cycle.get(c), null)
-	let edit_no = h.edit_no
-	floor.toggle_room(c, 3000, 1000)
-	assert.equal(h.edit_no, edit_no)
-	assert.equal(h.undo(), false)
-	assert.equal(floor.room_points[0].is_open, true)
-	assert.equal(floor.room_points[1].is_open, true)
-})
-
-check('removing a room point closes its room', () => {
-	let h = open_room_house([
-		{x: 1000, y: 2000, is_open: true},
-		{x: 5000, y: 2000, is_open: true},
-	])
-	let floor = h.floors[1]
-	floor.remove_room_point(floor.room_points[1])
-	assert.equal(JSON.stringify(floor.room_points),
-		JSON.stringify([{x: 1000, y: 2000, is_open: true}]))
-	assert.equal(open_room_count(floor), 1) // no conflict anymore.
-	assert(h.undo())
-	assert.equal(floor.room_points.length, 2)
-	assert.equal(open_room_count(floor), 0)
-})
-
-check('moving a room point into a wall closes its room', () => {
-	let h = open_room_house([{x: 1000, y: 2000, is_open: true}])
-	let floor = h.floors[1]
-	let mover = floor.start_move_room_point(floor.room_points[0])
-	mover.move(-1000, 0)
+	let tag = floor.objects[0]
+	let mover = floor.start_move_object(tag)
+	mover.move(0, 2000, 0)
 	assert.equal(open_room_count(floor), 0)
 	mover.stop()
-	assert.equal(floor.room_points[0].x, 0)
-	assert.equal(open_room_count(floor), 0)
+	assert.equal(floor.objects.length, 0)
+	assert(is_on_ground(h, 'open_room', 0, 2000))
 	assert(h.undo())
-	assert.equal(floor.room_points[0].x, 1000)
+	assert.equal(floor.objects[0].x, 1000)
 	assert.equal(open_room_count(floor), 1)
 })
 
@@ -1091,7 +1072,7 @@ check('wall movement updates room centers and open rooms during preview',
 	let h = house({floors: [{
 		lines: [rect_lines(0, 0, 6000, 4000),
 			[null, [2000, 0], [2000, 4000]]],
-		room_points: [{x: 2500, y: 2000, is_open: true}],
+		objects: [tag_state('open_room', 2500, 2000)],
 	}]})
 	let floor = h.floors[0]
 	let left = floor.hit_cycle_edges(1000, 2000)
@@ -1103,8 +1084,8 @@ check('wall movement updates room centers and open rooms during preview',
 	mover.move(1000, 0)
 	assert.deepEqual(Array.from(left.center()), [1500, 2000])
 	assert.deepEqual(Array.from(right.center()), [4500, 2000])
-	assert.equal(floor.room_point_by_cycle.get(left), floor.room_points[0])
-	assert.equal(floor.room_point_by_cycle.has(right), false)
+	assert(floor.open_rooms.has(left))
+	assert(!floor.open_rooms.has(right))
 	mover.cancel()
 	assert.equal(open_room_count(floor), 1)
 	assert.equal(h.undo(), false)
@@ -1114,59 +1095,60 @@ check('wall resize keeps open rooms assigned to the preview cycles', () => {
 	let h = house({floors: [{
 		lines: [rect_lines(0, 0, 6000, 4000),
 			[null, [2000, 0], [2000, 4000]]],
-		room_points: [{x: 2500, y: 2000, is_open: true}],
+		objects: [tag_state('open_room', 2500, 2000)],
 	}]})
 	let floor = h.floors[0]
 	let p = floor.ps.find(p => p[0] == 6000 && p[1] == 4000)
 	let resize = floor.start_resize_seg(p, 6000, 4000, 0, 500, 0, 1)
 	let room = floor.hit_cycle_edges(2500, 2000)
 	assert(room)
-	assert.equal(floor.room_point_by_cycle.get(room), floor.room_points[0])
+	assert(floor.open_rooms.has(room))
 	resize.resize(0, 500)
 	room = floor.hit_cycle_edges(2500, 2000)
 	assert(room)
-	assert.equal(floor.room_point_by_cycle.get(room), floor.room_points[0])
+	assert(floor.open_rooms.has(room))
 	resize.cancel()
 	assert.equal(open_room_count(floor), 1)
 	assert.equal(h.undo(), false)
 })
 
-check('moving a room point updates conflicts during preview', () => {
+check('moving an open-room tag updates the open rooms during preview', () => {
 	let h = house({floors: [{
 		lines: [rect_lines(0, 0, 6000, 4000),
 			[null, [2000, 0], [2000, 4000]]],
-		room_points: [{x: 1000, y: 2000, is_open: true},
-			{x: 2500, y: 2000, is_open: true}],
+		objects: [tag_state('open_room', 1000, 2000),
+			tag_state('open_room', 2500, 2000)],
 	}]})
 	let floor = h.floors[0]
 	let left = floor.hit_cycle_edges(1000, 2000)
 	let right = floor.hit_cycle_edges(4000, 2000)
 	assert.equal(open_room_count(floor), 2)
-	let mover = floor.start_move_room_point(floor.room_points[1])
-	mover.move(-1000, 0)
-	assert.equal(floor.room_point_by_cycle.get(left), null)
-	assert.equal(floor.room_point_by_cycle.has(right), false)
-	assert.equal(open_room_count(floor), 0)
-	mover.move(0, 0)
+	let mover = floor.start_move_object(floor.objects[1])
+	mover.move(1500, 2000, 0)
+	assert(floor.open_rooms.has(left))
+	assert(!floor.open_rooms.has(right))
+	assert.equal(open_room_count(floor), 1)
+	mover.move(2500, 2000, 0)
 	assert.equal(open_room_count(floor), 2)
 	mover.cancel()
 	assert.equal(open_room_count(floor), 2)
 	assert.equal(h.undo(), false)
 })
 
-check('cancelling a room point move restores it', () => {
-	let h = open_room_house([{x: 1000, y: 2000, is_open: true}])
+check('cancelling an open-room tag move restores it', () => {
+	let h = open_room_house([tag_state('open_room', 1000, 2000)])
 	let floor = h.floors[1]
-	let mover = floor.start_move_room_point(floor.room_points[0])
-	mover.move(-1000, 0)
+	let mover = floor.start_move_object(floor.objects[0])
+	mover.move(0, 2000, 0)
 	mover.cancel()
-	assert.equal(floor.room_points[0].x, 1000)
+	assert.equal(floor.objects[0].x, 1000)
+	assert(!is_on_ground(h, 'open_room', 0, 2000))
 	assert.equal(open_room_count(floor), 1)
 	assert.equal(h.undo(), false)
 })
 
-check('a room point in an island wall body opens no room', () => {
-	let h = open_room_house([{x: 2000, y: 1500, is_open: true}],
+check('an open-room tag in an island wall body opens no room', () => {
+	let h = open_room_house([tag_state('open_room', 2000, 1500)],
 		rect_lines(2000, 1000, 1000, 1000))
 	assert.equal(open_room_count(h.floors[1]), 0)
 })
@@ -1200,7 +1182,7 @@ check('one floor has slab bottom, floor and wall tops', () => {
 })
 
 check('an open room has no floor and no ceiling below it', () => {
-	let h = open_room_house([{x: 1000, y: 2000, is_open: true}])
+	let h = open_room_house([tag_state('open_room', 1000, 2000)])
 	assert.equal(horizontal_polys_at(h, 2500, -1).length, 0)
 	assert.equal(horizontal_polys_at(h, 2500,  1).length, 0)
 	assert.equal(horizontal_polys_at(h, 2700,  1).length, 0)
@@ -1211,7 +1193,7 @@ check('a wall under an open room gets a slab', () => {
 	let h = house({floors: [
 		{lines: [rect_lines(0, 0, 6000, 4000), ['draw', 3000, 0, 0, 4000]]},
 		{lines: [rect_lines(0, 0, 6000, 4000)],
-			room_points: [{x: 1000, y: 2000, is_open: true}]},
+			objects: [tag_state('open_room', 1000, 2000)]},
 	]})
 	assert.equal(open_room_count(h.floors[1]), 1)
 	let [poly, ...rest] = horizontal_polys_at(h, 2700, 1)
@@ -1226,7 +1208,7 @@ check('an open room keeps a slab where it overflows the floor below', () => {
 	let h = house({floors: [
 		{lines: [rect_lines(0, 0, 3000, 4000)]},
 		{lines: [rect_lines(0, 0, 6000, 4000)],
-			room_points: [{x: 1000, y: 2000, is_open: true}]},
+			objects: [tag_state('open_room', 1000, 2000)]},
 	]})
 	assert.equal(open_room_count(h.floors[1]), 1)
 	let [poly, ...rest] = horizontal_polys_at(h, 2700, 1)
@@ -1238,7 +1220,7 @@ check('an open room keeps a slab where it overflows the floor below', () => {
 check('an open room on the ground floor keeps its slab', () => {
 	let h = house({floors: [
 		{lines: [rect_lines(0, 0, 6000, 4000)],
-			room_points: [{x: 1000, y: 2000, is_open: true}]},
+			objects: [tag_state('open_room', 1000, 2000)]},
 	]})
 	assert.equal(open_room_count(h.floors[0]), 1)
 	let [poly, ...rest] = horizontal_polys_at(h, 200, 1)
@@ -1249,9 +1231,9 @@ check('an open room on the ground floor keeps its slab', () => {
 
 check('a smaller upper floor leaves a terrace and a ceiling', () => {
 	let h = house({floors: [
-		{lines: [rect_lines(0, 0, 6000, 4000)],
-			area_points: [{x: 4500, y: 2000, kind: 'terrace'}]},
-		{lines: [rect_lines(0, 0, 3000, 4000)]},
+		{lines: [rect_lines(0, 0, 6000, 4000)]},
+		{lines: [rect_lines(0, 0, 3000, 4000)],
+			objects: [tag_state('terrace', 4500, 2000)]},
 	]})
 	// slab 1 top: the upper room floor and the terrace.
 	let [terrace, room, ...rest] = horizontal_polys_at(h, 2700, 1)
@@ -1270,15 +1252,81 @@ check('a smaller upper floor leaves a terrace and a ceiling', () => {
 
 check('a terrace slab side merges with the walls below it', () => {
 	let h = house({floors: [
-		{lines: [rect_lines(0, 0, 6000, 4000)],
-			area_points: [{x: 4500, y: 2000, kind: 'terrace'}]},
-		{lines: [rect_lines(0, 0, 3000, 4000)]},
+		{lines: [rect_lines(0, 0, 6000, 4000)]},
+		{lines: [rect_lines(0, 0, 3000, 4000)],
+			objects: [tag_state('terrace', 4500, 2000)]},
 	]})
 	let [poly, ...rest] = wall_polys_at(h, true, 6140, 1)
 	assert.equal(rest.length, 0)
 	assert.deepEqual(outline_points(poly),
 		[[-140, 0], [4140, 0], [4140, 2700], [-140, 2700]])
 	assert.deepEqual([...poly.holes], [])
+})
+
+// terrace tags ----------------------------------------------------------------
+
+function terrace_house(upper_tags) {
+	return house({floors: [
+		{lines: [rect_lines(0, 0, 6000, 4000)]},
+		{lines: [rect_lines(0, 0, 3000, 4000)], objects: upper_tags},
+	]})
+}
+
+check('a terrace tag is on the floor above the area that it tags', () => {
+	let h = terrace_house([
+		tag_state('terrace', 4500, 2000), // over floor 0's roof: kept.
+		tag_state('terrace', 1000, 2000), // inside floor 1: ground.
+		tag_state('terrace', 8000, 2000), // outside the house: ground.
+	])
+	assert.equal(h.floors[1].objects.length, 1)
+	assert.equal(h.floors[1].objects[0].x, 4500)
+	assert(is_on_ground(h, 'terrace', 1000, 2000))
+	assert(is_on_ground(h, 'terrace', 8000, 2000))
+	assert.equal(h.floors[0].make_areas()[0].kind, 'terrace')
+})
+
+check('a terrace tag on the ground floor goes to the ground', () => {
+	let h = house({floors: [{lines: [rect_lines(0, 0, 6000, 4000)],
+		objects: [tag_state('terrace', 1000, 2000)]}]})
+	assert.equal(h.floors[0].objects.length, 0)
+	assert(is_on_ground(h, 'terrace', 1000, 2000))
+	assert.equal(h.floors[0].make_areas()[0].kind, 'roof')
+})
+
+check('moving a terrace tag onto the lower roof makes it a terrace', () => {
+	let h = terrace_house([])
+	let [f0, f1] = h.floors
+	let tag = h.ground_objects.find(object => object.type == 'terrace')
+	let roof_geometry_no = h.roof_geometry_no
+	let mover = f1.start_move_object(tag)
+	mover.move(4500, 2000, 0)
+	mover.stop()
+	assert.equal(f1.objects[0], tag)
+	assert.equal(f0.make_areas()[0].kind, 'terrace')
+	assert.notEqual(h.roof_geometry_no, roof_geometry_no)
+	assert(h.undo())
+	assert.equal(f1.objects.length, 0)
+	assert.equal(f0.make_areas()[0].kind, 'roof')
+})
+
+check('shrinking the lower floor sends the terrace tag to the ground; undo',
+() => {
+	let h = terrace_house([tag_state('terrace', 4500, 2000)])
+	let [f0, f1] = h.floors
+	let seg = f0.segs.find(seg => seg.is_v && seg.axis == 6000)
+	let mover = f0.start_move_seg(seg)
+	mover.move(-2000, 0)
+	mover.stop()
+	assert.equal(f1.objects.length, 0)
+	assert(is_on_ground(h, 'terrace', 4500, 2000))
+	assert(h.undo())
+	assert.equal(f1.objects.length, 1)
+	assert.equal(f1.objects[0].x, 4500)
+	assert(!is_on_ground(h, 'terrace', 4500, 2000))
+	assert.equal(f0.make_areas()[0].kind, 'terrace')
+	assert(h.redo())
+	assert.equal(f1.objects.length, 0)
+	assert(is_on_ground(h, 'terrace', 4500, 2000))
 })
 
 // cutting the house at a floor ----------------------------------------------
@@ -1492,11 +1540,11 @@ let eave_e3 = grid(3140 + roof60_d)
 let eave_s = grid(4140 + roof60_d)
 
 // floor 0: x 0..6000; floor 1: x 0..3000 on top of it.
-function lean_to_house(area_points) {
+function lean_to_house(upper_tags) {
 	return house({floors: [
-		{lines: [rect_lines(0, 0, 6000, 4000)], area_points: area_points,
+		{lines: [rect_lines(0, 0, 6000, 4000)], roof: roof60()},
+		{lines: [rect_lines(0, 0, 3000, 4000)], objects: upper_tags,
 			roof: roof60()},
-		{lines: [rect_lines(0, 0, 3000, 4000)], roof: roof60()},
 	]})
 }
 
@@ -1530,7 +1578,7 @@ check('a lower floor sticking out: a roof against the upper wall', () => {
 })
 
 check('a lower floor sticking out: a terrace', () => {
-	let h = lean_to_house([{x: 4500, y: 2000, kind: 'terrace'}])
+	let h = lean_to_house([tag_state('terrace', 4500, 2000)])
 	let [f0, f1] = h.floors
 	let areas = f0.make_areas()
 	assert.equal(areas.length, 1)
@@ -2070,9 +2118,9 @@ for (let blocked_by of ['height', 'edge_points']) {
 		if (blocked_by == 'edge_points')
 			f.roof.edge_points.push({x: 6140, y: 1000}, {x: 6140, y: 3000})
 		let state0 = JSON.stringify(h.save_state())
-		f.toggle_room(f.hit_cycle_edges(3000, 2000), 3000, 2000)
+		f.add_object(tag_state('open_room', 0, 0), 3000, 2000, 0)
 		let state1 = JSON.stringify(h.save_state())
-		f.toggle_room(f.hit_cycle_edges(3000, 2000), 3000, 2000)
+		f.remove_object(f.objects[0])
 		let state2 = JSON.stringify(h.save_state())
 		assert(h.undo())
 		let edit_no = h.edit_no
@@ -2215,8 +2263,7 @@ check('load snaps stored geometry to mm without changing the input plan', () => 
 			lines: [['connect', [-1000.6, 0.4], [1000.6, 0.4],
 				[1000.6, 2000.6], [-1000.6, 2000.6], [-1000.6, 0.4]],
 				['connect', [0.4, -1000.6], [0.4, 3000.6]]],
-			room_points: [{x: 300.6, y: 400.4, is_open: true}],
-			area_points: [{x: 500.6, y: 600.4, kind: 'terrace'}],
+			objects: [tag_state('open_room', 300.6, 400.4)],
 			roof: {pitch: 23.456789, overhang: 600.6, eave_h: -220.6,
 				max_overhang: 1500.6, edge_points: [{x: 1000.6,
 					y: 300.4, pitch: null, overhang: null, eave_h: -120.6}]},
@@ -2237,10 +2284,8 @@ check('load snaps stored geometry to mm without changing the input plan', () => 
 		assert.equal(p[1], Math.round(p[1]))
 	}
 	assert(f.ps.find(p => p[0] == 0 && p[1] == 0 && p.segs.length == 4))
-	assert_near(f.room_points[0].x, 301)
-	assert_near(f.room_points[0].y, 400)
-	assert_near(f.area_points[0].x, 501)
-	assert_near(f.area_points[0].y, 600)
+	assert_near(f.objects[0].x, 301)
+	assert_near(f.objects[0].y, 400)
 	assert.equal(f.roof.pitch, plan.floors[0].roof.pitch)
 	assert_near(f.roof.overhang, 601)
 	assert_near(f.roof.eave_h, -221)
@@ -2292,22 +2337,22 @@ check('free and connected wall move previews snap coordinates', () => {
 	m.stop()
 })
 
-check('room creation and room move previews snap their coordinates', () => {
+check('tag move previews snap their coordinates', () => {
 	let h = house({floors: [{lines: [rect_lines(0, 0, 6000, 4000)]}]})
 	let f = h.floors[0]
-	f.toggle_room(f.comps[0].cycles[0], 1000.6, 2000.6)
-	let p = f.room_points[0]
-	assert_near(p.x, 1001)
-	assert_near(p.y, 2001)
-	let m = f.start_move_room_point(p)
-	m.move(106.6, -206.6)
-	assert_near(p.x, 1108)
-	assert_near(p.y, 1794)
+	let tag = h.ground_objects.find(object => object.type == 'open_room')
+	let m = f.start_move_object(tag)
+	m.move(1000.6, 2000.6, 0)
+	assert_near(tag.x, 1001)
+	assert_near(tag.y, 2001)
+	m.move(1107.2, 1794.0, 0)
+	assert_near(tag.x, 1107)
+	assert_near(tag.y, 1794)
 	m.stop()
 	assert(h.undo())
-	assert_near(f.room_points[0].x, 1001)
+	assert.equal(f.objects.length, 0)
 	assert(h.redo())
-	assert_near(f.room_points[0].x, 1108)
+	assert_near(f.objects[0].x, 1107)
 })
 
 check('roof points and eave previews snap lengths and keep pitches', () => {
@@ -2442,8 +2487,6 @@ check('a state without a version is in cm and loads scaled to mm', () => {
 			h: 300,
 			points: [[0, 0, 'a'], [600, 0, 'b'], [600, 400, 'c']],
 			lines: [[1, 0, 1, 2, 1, 2]],
-			room_points: [{x: 100, y: 50, is_open: true}],
-			area_points: [{x: 200, y: 60, kind: 'terrace'}],
 			roof: {pitch: 30, overhang: 60, eave_h: -22, max_overhang: 150,
 				edge_points: [{x: 10, y: 20, pitch: 90, overhang: 5,
 					eave_h: -3}]},
@@ -2459,8 +2502,6 @@ check('a state without a version is in cm and loads scaled to mm', () => {
 	assert.equal(f.h, 3000)
 	assert.deepEqual(Array.from(f.ps, p => [p[0], p[1], p.id]),
 		[[0, 0, 'a'], [6000, 0, 'b'], [6000, 4000, 'c']])
-	assert.deepEqual({...f.room_points[0]}, {x: 1000, y: 500, is_open: true})
-	assert.deepEqual({...f.area_points[0]}, {x: 2000, y: 600, kind: 'terrace'})
 	assert.equal(f.roof.pitch, 30)
 	assert.equal(f.roof.overhang, 600)
 	assert.equal(f.roof.eave_h, -220)
@@ -2559,7 +2600,7 @@ let default_n = Object.keys(ctx.house_object_types).length // default objects.
 check('a new house has one default object of each type on the ground', () => {
 	let h = house({floors: [{lines: [rect_lines(0, 0, 6000, 4000)]}]})
 	assert.deepEqual(Array.from(h.ground_objects, o => o.type),
-		['window', 'door', 'bed', 'chair', 'wc'])
+		['window', 'door', 'bed', 'chair', 'wc', 'open_room', 'terrace'])
 	assert.equal(h.floors[0].objects.length, 0)
 })
 
@@ -2567,10 +2608,10 @@ check('loading adds the types missing from the ground, in their places', () => {
 	let h = house({floors: [{lines: [rect_lines(0, 0, 6000, 4000)]}],
 		ground_objects: [{type: 'door', x: 100, y: 200, rot: 90}]})
 	assert.deepEqual(Array.from(h.ground_objects, o => o.type),
-		['door', 'window', 'bed', 'chair', 'wc'])
+		['door', 'window', 'bed', 'chair', 'wc', 'open_room', 'terrace'])
 	assert.deepEqual(Array.from(h.ground_objects, o => [o.x, o.y]),
 		[[100, 200], [-750, -2000], [2250, -2000], [3750, -2000],
-			[5250, -2000]])
+			[5250, -2000], [6750, -2000], [8250, -2000]])
 	assert.equal(h.ground_objects[0].rot, 90)
 	let h2 = house(h.save_state())
 	assert.equal(h2.ground_objects.length, default_n)

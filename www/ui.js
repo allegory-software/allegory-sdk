@@ -7150,6 +7150,7 @@ hittest[CMD_TEXT] = function(a, i) {
 /*
 
 	ui.icon_def (name, font, text)  define an icon
+	ui.get_icon (name) -> [font, text]  an icon's definition
 
 	ui.icon     (id, name, fr=1, align='l', valign='c', max_w=-1)
 
@@ -7161,6 +7162,10 @@ let icons = obj() // {name -> [font, text]}
 
 ui.icon_def = function(name, font, text) {
 	icons[name] = [font, text]
+}
+
+ui.get_icon = function(name) {
+	return assert(icons[name], 'unknown icon ', name)
 }
 
 ui.icon = function(id, name, fr, align, valign, max_w) {

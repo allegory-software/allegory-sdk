@@ -6,7 +6,7 @@ const {
 	round, mod, abs, sign, min, max, clamp, sqrt, tan, atan, sin, cos, rad,
 	assert, log, push_log, pop_log, push_log_if,
 	insert, remove_value, uniq_sorted, map, assign, clock, json,
-	profile_time,
+	profile_time, empty_array,
 } = glue
 
 const {bbox2, poly2} = Math3D
@@ -50,18 +50,6 @@ function scale_cm_state(t) {
 			for (let [x, y, id] of floor.points)
 				floor1.points.push([cm_to_mm(x), cm_to_mm(y), id])
 		}
-		if (floor.room_points) {
-			floor1.room_points = []
-			for (let room_point of floor.room_points)
-				floor1.room_points.push({...room_point,
-					x: cm_to_mm(room_point.x), y: cm_to_mm(room_point.y)})
-		}
-		if (floor.area_points) {
-			floor1.area_points = []
-			for (let area_point of floor.area_points)
-				floor1.area_points.push({...area_point,
-					x: cm_to_mm(area_point.x), y: cm_to_mm(area_point.y)})
-		}
 		if (floor.roof) {
 			let roof = floor.roof
 			floor1.roof = {...roof, overhang: cm_to_mm(roof.overhang),
@@ -94,6 +82,7 @@ function house_plan(t) {
 	let house = {}
 	let edit0
 	let edit0_ground_objects // house.ground_objects at the start of the edit
+	let edit0_floor1_objects // the floor above's objects at the start, if any
 	house.edit_no = 0 // increments on each committed edit, undo and redo
 	house.roof_geometry_no = 0 // includes changes during drag previews
 
@@ -113,22 +102,6 @@ function house_plan(t) {
 			eave_h: snap_length(roof.eave_h ?? -220),
 			max_overhang: snap_length(roof.max_overhang ?? 1500),
 			edge_points: edge_points}
-	}
-
-	function copy_room_points(room_points) {
-		let a = []
-		for (let room_point of room_points)
-			a.push({x: snap_length(room_point.x), y: snap_length(room_point.y),
-				is_open: room_point.is_open})
-		return a
-	}
-
-	function copy_area_points(area_points) {
-		let a = []
-		for (let area_point of area_points)
-			a.push({x: snap_length(area_point.x), y: snap_length(area_point.y),
-				kind: area_point.kind})
-		return a
 	}
 
 	function copy_objects(objects) {
@@ -216,22 +189,32 @@ function house_plan(t) {
 		assert(!edit0)
 		edit0 = floor.save_state()
 		edit0_ground_objects = copy_objects(house.ground_objects)
+		let floor1 = house.floors[floor.i+1]
+		edit0_floor1_objects = floor1 && copy_objects(floor1.objects)
 	}
 
+	// the floor above's objects depend on this floor (terraces): placed
+	// again, and part of the edit.
 	function commit_edit(floor) {
 		assert(edit0)
+		let floor1 = house.floors[floor.i+1]
+		floor1?.fix_objects()
 		if (json(floor.save_state()) != json(edit0)
 			|| json(copy_objects(house.ground_objects))
 				!= json(edit0_ground_objects)
+			|| floor1 && json(copy_objects(floor1.objects))
+				!= json(edit0_floor1_objects)
 		) {
 			undo_stack.push({
 				op: 'edit',
 				floor: floor,
 				state: edit0,
 				ground_objects: edit0_ground_objects,
+				floor1_objects: edit0_floor1_objects,
 			})
 			redo_stack.length = 0
 			house.edit_no++
+			house.roof_geometry_no++ // terrace tags moved: other roof areas.
 		}
 		edit0 = null
 	}
@@ -301,11 +284,7 @@ function house_plan(t) {
 		floor.h = snap_length(t.h ?? house.floor_h)
 		floor.fixed_h = snap_length(t.h)
 		floor.bb = bbox2()
-		// [{x:, y:, is_open:}, ...]
-		floor.room_points = copy_room_points(t.room_points ?? [])
-		floor.room_point_by_cycle = map() // {cycle -> room_point|null if 2+}
-		// [{x:, y:, kind: 'roof'|'terrace'}, ...]
-		floor.area_points = copy_area_points(t.area_points ?? [])
+		floor.open_rooms = new Set() // {cycle} rooms with an open_room tag
 		// [{type:, x:, y:, rot:, w:, seg:}, ...] objects on this floor's walls
 		floor.objects = copy_objects(t.objects ?? [])
 		let wall_geometry
@@ -337,6 +316,7 @@ function house_plan(t) {
 				}
 			}
 		}
+		floor.fix_objects = fix_objects
 
 		// the faces of the walls along cycle c, offset by d: on each seg, the
 		// across coordinate of the face on the side that c walks: seg.wall_a1
@@ -445,67 +425,26 @@ function house_plan(t) {
 
 		// rooms ---------------------------------------------------------------
 
-		// a room is open if it holds exactly one room point and that point
-		// is open. two points in one room: closed.
+		// a room is open if it holds an open-room tag.
 		function fix_open_rooms() {
-			let room_point_by_cycle = floor.room_point_by_cycle
-			room_point_by_cycle.clear()
-			for (let room_point of floor.room_points) {
-				let c = floor.hit_cycle_edges(room_point.x, room_point.y)
+			floor.open_rooms.clear()
+			for (let object of floor.objects) {
+				if (!house_object_types[object.type].opens_room)
+					continue
+				let c = floor.hit_cycle_edges(object.x, object.y)
 				if (!c) // in a wall body or outside: no room.
 					continue
-				room_point_by_cycle.set(c,
-					room_point_by_cycle.has(c) ? null : room_point)
+				floor.open_rooms.add(c)
 			}
-		}
-
-		// no point in room c: add an open one at (x, y). one point: flip it.
-		// two or more points: nothing.
-		floor.toggle_room = function(c, x, y) {
-			let room_point = floor.room_point_by_cycle.get(c)
-			if (room_point === null)
-				return
-			begin_edit(floor)
-			if (room_point)
-				room_point.is_open = !room_point.is_open
-			else
-				floor.room_points.push({x: snap_length(x), y: snap_length(y),
-					is_open: true})
-			floor.fix()
-			commit_edit(floor)
-		}
-
-		floor.start_move_room_point = function(room_point) {
-			begin_edit(floor)
-			let x0 = room_point.x
-			let y0 = room_point.y
-			let s = {}
-			s.move = function(dx, dy) {
-				room_point.x = snap_length(x0 + dx)
-				room_point.y = snap_length(y0 + dy)
-				fix_open_rooms()
-			}
-			s.stop = function() {
-				floor.fix()
-				commit_edit(floor)
-			}
-			s.cancel = cancel_edit
-			return s
-		}
-
-		floor.remove_room_point = function(room_point) {
-			begin_edit(floor)
-			remove_value(floor.room_points, room_point)
-			floor.fix()
-			commit_edit(floor)
 		}
 
 		// roof areas ----------------------------------------------------------
 
 		// the parts of the floor's outlines that the floor above leaves
 		// uncovered, one per connected part: [{paths, kind}, ...]. paths: on
-		// prism_union()'s grid, the outline first, then its holes. kind: the
-		// kind of the one area point inside the area, else 'roof'.
+		// prism_union()'s grid, the outline first, then its holes. kind:
+		// 'terrace' if a terrace tag of the floor above is inside the area,
+		// else 'roof'.
 		floor.make_areas = function() {
 			let t0 = profile_time()
 			let {Clipper64, PolyTree64, ClipType, FillRule, pointInPolygon,
@@ -545,12 +484,13 @@ function house_plan(t) {
 			let areas = []
 			let {IsInside, IsOutside} = PointInPolygonResult
 			for (let group of add_path_groups(tree, [])) {
-				let area_point_n = 0
-				let found_area_point
-				for (let area_point of floor.area_points) {
+				let is_terrace = false
+				for (let object of floor1?.objects ?? empty_array) {
+					if (!house_object_types[object.type].marks_terrace)
+						continue
 					let p = {
-						x: round(area_point.x * scale),
-						y: round(area_point.y * scale),
+						x: round(object.x * scale),
+						y: round(object.y * scale),
 					}
 					if (pointInPolygon(p, group[0]) != IsInside)
 						continue
@@ -560,12 +500,11 @@ function house_plan(t) {
 							in_hole = true
 					if (in_hole)
 						continue
-					area_point_n++
-					found_area_point = area_point
+					is_terrace = true
 				}
 				areas.push({
 					paths: group,
-					kind: area_point_n == 1 ? found_area_point.kind : 'roof',
+					kind: is_terrace ? 'terrace' : 'roof',
 				})
 			}
 			profile_time('roof.areas', t0)
@@ -1145,8 +1084,6 @@ function house_plan(t) {
 				h: floor.fixed_h,
 				points: points,
 				lines: [lines],
-				room_points: copy_room_points(floor.room_points),
-				area_points: copy_area_points(floor.area_points),
 				objects: copy_objects(floor.objects),
 				roof: copy_roof(floor.roof),
 			}
@@ -1165,8 +1102,6 @@ function house_plan(t) {
 			fix_floor_heights()
 			floor.load(state.points, state.lines)
 			snap_points()
-			floor.room_points = copy_room_points(state.room_points)
-			floor.area_points = copy_area_points(state.area_points)
 			floor.objects = copy_objects(state.objects)
 			floor.roof = copy_roof(state.roof)
 			floor.fix()
@@ -1273,6 +1208,8 @@ function house_plan(t) {
 				remove_value(objects0, object)
 				objects.push(object)
 			}
+			if (house_object_types[object.type].opens_room)
+				fix_open_rooms()
 		}
 
 		// the closed rect x1, y1, x2, y2 shares a point with the area that one
@@ -1370,6 +1307,8 @@ function house_plan(t) {
 			remove_value(objects, object)
 			if (house_object_types[object.type].in_wall)
 				wall_geometry = null
+			if (house_object_types[object.type].opens_room)
+				fix_open_rooms()
 			commit_edit(floor)
 		}
 
@@ -1813,9 +1752,7 @@ function house_plan(t) {
 	}
 
 	function add_open_room_paths(floor, paths) {
-		for (let [c, room_point] of floor.room_point_by_cycle) {
-			if (!room_point?.is_open)
-				continue
+		for (let c of floor.open_rooms) {
 			add_ring_path(paths, c.edges)
 			for (let comp of c.islands)
 				add_ring_path(paths, comp.outer_cycle.edges)
@@ -2239,15 +2176,22 @@ function house_plan(t) {
 	function revert_entry(entry) {
 		let {op, floor} = entry
 		if (op == 'edit') {
+			let floor1 = house.floors[floor.i+1]
 			let state = floor.save_state()
 			let ground_objects = copy_objects(house.ground_objects)
+			let floor1_objects = floor1 && copy_objects(floor1.objects)
 			floor.load_state(entry.state)
 			house.ground_objects = copy_objects(entry.ground_objects)
+			if (floor1) {
+				floor1.objects = copy_objects(entry.floor1_objects)
+				floor1.fix_objects()
+			}
 			return {
 				op: 'edit',
 				floor: floor,
 				state: state,
 				ground_objects: ground_objects,
+				floor1_objects: floor1_objects,
 			}
 		} else if (op == 'add_floor') {
 			pop_floor()

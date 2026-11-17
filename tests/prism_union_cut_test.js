@@ -565,9 +565,9 @@ check('roofs on lower floors', () => {
 		// lean-to against the upper wall.
 		[{lines: [rect(0, 0, 6000, 4000)]}, {lines: [rect(0, 0, 3000, 4000)]}],
 		// lean-to as a terrace.
-		[{lines: [rect(0, 0, 6000, 4000)],
-			area_points: [{x: 4500, y: 2000, kind: 'terrace'}]},
-			{lines: [rect(0, 0, 3000, 4000)]}],
+		[{lines: [rect(0, 0, 6000, 4000)]},
+			{lines: [rect(0, 0, 3000, 4000)],
+				objects: [{type: 'terrace', x: 4500, y: 2000, rot: 0}]}],
 		// an eave side runs on into the upper floor's wall.
 		[{lines: [rect(0, 0, 6000, 4000)]},
 			{lines: [rect(3000, 2000, 3000, 4000)]}],

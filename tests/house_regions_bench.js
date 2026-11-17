@@ -55,7 +55,7 @@ for (let [cols, rows, floor_n] of [[3, 2, 2], [6, 4, 3], [10, 6, 3]]) {
 	let floors = []
 	for (let i = 0; i < floor_n; i++)
 		floors.push({lines: grid_lines(cols - i, rows),
-			room_points: [{x: 1500, y: 1500, is_open: true}]})
+			objects: [{type: 'open_room', x: 1500, y: 1500, rot: 0}]})
 	let house = ctx.house_plan({version: 1, floors: floors})
 	let floor = house.floors[0]
 	let n = 50

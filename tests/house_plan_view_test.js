@@ -109,6 +109,7 @@ let ui = {
 	hsl: () => '#000',
 	measure_text: () => ({width: 40, fontBoundingBoxAscent: 10,
 		fontBoundingBoxDescent: 2}),
+	get_icon: () => ['tabler', ''],
 }
 for (let name of ['animate', 'box_position', 'box_translate', 'focus_group',
 	'focusable', 'end_focus_group', 'stack', 'end_stack', 'm', 'mt', 'v', 'h',
@@ -730,6 +731,23 @@ check('roof edits and resets refresh the drawing geometry', () => {
 	move.cancel()
 	frame()
 	assert.equal(roof_rings(), rings)
+})
+
+// the tag's text is under its point on the screen in every view rotation.
+check('a tag is hit over its text in a rotated view', () => {
+	let hit = ctx.house_object_types.open_room.hit
+	let object = {type: 'open_room', x: 0, y: 0}
+	for (let quarter = 0; quarter < 4; quarter++) {
+		let r = quarter * Math.PI / 2
+		let sg = {rotation: r, x: x => x, y: y => y}
+		// the screen point 20 px under the tag, in the rotated view.
+		ui.mx = 20 * Math.sin(r)
+		ui.my = 20 * Math.cos(r)
+		assert(hit(sg, null, object), 'under, quarter ' + quarter)
+		ui.mx = -20 * Math.sin(r)
+		ui.my = -20 * Math.cos(r)
+		assert(!hit(sg, null, object), 'above, quarter ' + quarter)
+	}
 })
 
 console.log(n_checks + ' house plan view checks passed')

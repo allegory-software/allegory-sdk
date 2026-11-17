@@ -177,18 +177,23 @@ houses.push(['grid 3x2x2', {version: 1, floors: [
 	{lines: grid_lines(3, 2)},
 	{lines: grid_lines(3, 2)},
 ]}])
+// the old code reads room points, the new code open-room tags.
 houses.push(['open rooms over a grid', {version: 1, floors: [
 	{lines: grid_lines(3, 2)},
 	{lines: grid_lines(3, 2), room_points: [
 		{x: 1000, y: 1000, is_open: true},
 		{x: 4000, y: 4000, is_open: true},
+	], objects: [
+		{type: 'open_room', x: 1000, y: 1000, rot: 0},
+		{type: 'open_room', x: 4000, y: 4000, rot: 0},
 	]},
 	{lines: [rect_lines(0, 0, 6000, 6000)]},
 ]}])
 houses.push(['island in an open room', {version: 1, floors: [
 	{lines: [rect_lines(0, 0, 6000, 4000)]},
 	{lines: [rect_lines(0, 0, 6000, 4000), rect_lines(2000, 1000, 1000, 1000)],
-		room_points: [{x: 1000, y: 2000, is_open: true}]},
+		room_points: [{x: 1000, y: 2000, is_open: true}],
+		objects: [{type: 'open_room', x: 1000, y: 2000, rot: 0}]},
 ]}])
 houses.push(['overflow and underflow', {version: 1, floors: [
 	{lines: [rect_lines(0, 0, 6000, 4000)]},

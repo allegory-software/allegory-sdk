@@ -575,8 +575,8 @@ await pg.waitForTimeout(100)
 check('readonly input does not publish edits', await pg.evaluate(value =>
 	window.input_value == value, readonly_json))
 
-// room and roof edit completion, cancellation and clicks.
-for (let action of ['room_point', 'eave', 'line', 'blocked_line']) {
+// tag and roof edit completion, cancellation and clicks.
+for (let action of ['open_room', 'eave', 'line', 'blocked_line']) {
 	for (let finish of ['drop', 'cancel', 'click', 'cancel_click']) {
 		await pg.reload()
 		await pg.waitForTimeout(200)
@@ -593,7 +593,7 @@ for (let action of ['room_point', 'eave', 'line', 'blocked_line']) {
 			try {
 				window.plan_json = json({version: 1, floors: [{
 					lines: [['draw', 0, 0, 6000, 4000, -6000, -4000]],
-					room_points: [{x: 1000, y: 2000, is_open: true}],
+					objects: [{type: 'open_room', x: 1000, y: 2000, rot: 0}],
 					roof: {pitch: 20, overhang: 200,
 						eave_h: -200 * Math.tan(20 * Math.PI / 180),
 						edge_points: blocked ? [
@@ -609,12 +609,12 @@ for (let action of ['room_point', 'eave', 'line', 'blocked_line']) {
 				ui.cx.fillText = fill_text
 			}
 		}, action == 'blocked_line')
-		if (action != 'room_point') {
+		if (action != 'open_room') {
 			await pg.mouse.click(roof_click.x, roof_click.y)
 			await pg.waitForTimeout(100)
 		}
 		view = await read_view()
-		sx = view.x0 + Math.round((action == 'room_point' ? 1000
+		sx = view.x0 + Math.round((action == 'open_room' ? 1000
 			: action == 'eave' ? 6340 : 3000) * view.scale)
 		sy = view.y0 + Math.round(2000 * view.scale)
 		let before = await pg.evaluate(() => JSON.stringify(house.save_state()))
@@ -623,7 +623,8 @@ for (let action of ['room_point', 'eave', 'line', 'blocked_line']) {
 		await pg.mouse.down()
 		await pg.waitForTimeout(50)
 		let expected_action = action == 'line' || action == 'blocked_line'
-			? 'move_faces' : 'move_' + action
+			? 'move_faces' : action == 'open_room' ? 'move_object'
+			: 'move_' + action
 		check(action+' '+finish+': capture starts without a model edit',
 			await pg.evaluate(action => {
 				let cs = ui.captured('fe')
@@ -631,9 +632,9 @@ for (let action of ['room_point', 'eave', 'line', 'blocked_line']) {
 			}, expected_action))
 		let moved = finish == 'drop' || finish == 'cancel'
 		if (moved) {
-			await pg.mouse.move(sx + (action == 'room_point' ? 40
+			await pg.mouse.move(sx + (action == 'open_room' ? 40
 				: action == 'eave' ? 40 : 0),
-				sy + (action == 'eave' || action == 'room_point' ? 0 : 40))
+				sy + (action == 'eave' || action == 'open_room' ? 0 : 40))
 			await pg.waitForTimeout(100)
 			check(action+' '+finish+': model edit starts only when allowed',
 				await pg.evaluate(blocked =>
@@ -653,7 +654,7 @@ for (let action of ['room_point', 'eave', 'line', 'blocked_line']) {
 				return ui.captured_id == null && !ds.snap_lines.length
 			}))
 		let commits = finish == 'drop' && action != 'blocked_line'
-			|| finish == 'click' && (action == 'room_point' || action == 'eave')
+			|| finish == 'click' && action == 'eave'
 		check(action+' '+finish+': history matches the completed action',
 			await pg.evaluate(({before, commits}) => {
 				if (!commits)
