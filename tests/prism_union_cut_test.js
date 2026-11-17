@@ -382,8 +382,9 @@ function house_report(h) {
 	// unit over the faces on planes.
 	r.volume_error = Math.abs(r.volume - v) / (r.plan_area * .5 / S)
 	// make_faces() builds the same prisms, with the parts of the lower floors
-	// that stick out as terraces: house_prisms() has the top floor's roof
-	// only, and reference_volume() takes cutters that don't overlap.
+	// that stick out as terraces without half-walls: house_prisms() has the
+	// top floor's roof only, and reference_volume() takes cutters that don't
+	// overlap.
 	let top_floor = h.floors[h.floors.length-1]
 	for (let floor of h.floors) {
 		if (floor == top_floor)
@@ -395,6 +396,7 @@ function house_report(h) {
 				area.kind = 'terrace'
 			return areas
 		}
+		floor.make_half_wall_paths = () => []
 	}
 	let r1 = union_report_of_faces(h.make_faces(top_floor, false))
 	r.make_faces_error = Math.abs(r1.volume - r.volume) / r.volume

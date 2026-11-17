@@ -606,6 +606,8 @@ let settings = [
 		label: () => S('roof_thickness', 'Roof thickness (cm)')},
 	{name: 'floor_h', field: setting_field(150, 600),
 		label: () => S('floor_height', 'Floor height (cm)')},
+	{name: 'half_wall_h', field: setting_field(30, 200),
+		label: () => S('half_wall_height', 'Half-wall height (cm)')},
 ]
 
 // floor editor updates ------------------------------------------------------
@@ -1119,6 +1121,7 @@ ui.box_widget('floor_editor', {
 			roof_faces: [], // roof_floor's make_roof_faces()
 			roof_sides: [], // roof_floor's eave sides from make_roof_faces()
 			roof_lines: [], // [{p, q, face1, face2}, ...] shared roof segments
+			half_wall_paths: [], // grid paths of the half-walls on this floor
 		}
 		let draw_state = s.draw_state
 		let plan = s.floor
@@ -1287,7 +1290,8 @@ ui.box_widget('floor_editor', {
 		draw_state.ground_objects = is_roof_level ? empty_array
 			: plan.house.ground_objects
 
-		// the roof of roof_floor: its faces and its eave sides.
+		// the roof of roof_floor: its faces and its eave sides, and the
+		// half-walls around its terraces.
 		let roof_floor = draw_state.roof_floor
 		let roof_geometry_no = plan.house.roof_geometry_no
 		if (draw_state.roof_floor0 != roof_floor
@@ -1296,14 +1300,21 @@ ui.box_widget('floor_editor', {
 			draw_state.roof_sides.length = 0
 			draw_state.roof_lines.length = 0
 			draw_state.roof_faces = []
+			draw_state.half_wall_paths = []
 			if (roof_floor) {
 				let roof_areas = []
+				let terrace_areas = []
 				for (let area of roof_floor.make_areas())
 					if (area.kind == 'roof')
 						roof_areas.push(area)
+					else
+						terrace_areas.push(area)
 				if (roof_areas.length)
 					draw_state.roof_faces = roof_floor.make_roof_faces(roof_areas,
 						draw_state.roof_sides, draw_state.roof_lines)
+				if (terrace_areas.length)
+					draw_state.half_wall_paths =
+						roof_floor.make_half_wall_paths(terrace_areas)
 			}
 			draw_state.roof_floor0 = roof_floor
 			draw_state.roof_geometry_no = roof_geometry_no
@@ -1485,6 +1496,7 @@ ui.box_widget('floor_editor', {
 
 		// walls of this floor
 		draw_walls(cx, sg, draw_state.wall_paths, draw_state.segs)
+		draw_walls(cx, sg, draw_state.half_wall_paths, empty_array)
 
 		// walls of above floor
 		cx.globalAlpha = .1

@@ -882,12 +882,15 @@ check('a smaller upper floor makes a stepped polygon', () => {
 	]})
 	let [poly, ...rest] = wall_polys_at(h, false, -140, -1, h.floors[1])
 	assert.equal(rest.length, 0)
+	// the terrace's half-wall (1000) continues the lower wall.
 	assert.deepEqual(outline_points(poly), [
-		[-140, 0], [6140, 0], [6140, 2700], [3140, 2700], [3140, 5000],
+		[-140, 0], [6140, 0], [6140, 3700], [3140, 3700], [3140, 5000],
 		[-140, 5000]])
+	// the half-wall meets the upper wall across the lower wall's thickness.
 	let [side] = wall_polys_at(h, true, 3140, 1, h.floors[1])
 	assert.deepEqual(outline_points(side),
-		[[-140, 2700], [4140, 2700], [4140, 5000], [-140, 5000]])
+		[[40, 2700], [3960, 2700], [3960, 3700], [4140, 3700], [4140, 5000],
+			[-140, 5000], [-140, 3700], [40, 3700]])
 })
 
 check('a gap between two floors makes a hole', () => {
@@ -903,7 +906,8 @@ check('a gap between two floors makes a hole', () => {
 		[[-140, 0], [6140, 0], [6140, 7500], [-140, 7500]])
 	assert.equal(poly.hole_count(), 1)
 	assert.deepEqual(loop_points(poly, poly.hole_i1(0), poly.hole_i2(0)),
-		[[2140, 2700], [2140, 5000], [3860, 5000], [3860, 2700]])
+		[[2140, 3700], [2140, 5000], [3860, 5000], [3860, 3700]]) // half-wall
+
 })
 
 check('floor height comes from the plan', () => {
@@ -1240,7 +1244,7 @@ check('a smaller upper floor leaves a terrace and a ceiling', () => {
 		.sort((poly1, poly2) => poly2[0][0] - poly1[0][0])
 	assert.equal(rest.length, 0)
 	assert.deepEqual(outline_points(terrace),
-		[[3140, -140], [6140, -140], [6140, 4140], [3140, 4140]])
+		[[3140, 40], [5960, 40], [5960, 3960], [3140, 3960]]) // in half-walls
 	assert.deepEqual(outline_points(room),
 		[[40, 40], [2960, 40], [2960, 3960], [40, 3960]])
 	// slab 1 bottom: the ground floor ceiling.
@@ -1250,7 +1254,7 @@ check('a smaller upper floor leaves a terrace and a ceiling', () => {
 		[[40, 40], [5960, 40], [5960, 3960], [40, 3960]])
 })
 
-check('a terrace slab side merges with the walls below it', () => {
+check('a terrace slab side and half-wall merge with the walls below', () => {
 	let h = house({floors: [
 		{lines: [rect_lines(0, 0, 6000, 4000)]},
 		{lines: [rect_lines(0, 0, 3000, 4000)],
@@ -1259,8 +1263,37 @@ check('a terrace slab side merges with the walls below it', () => {
 	let [poly, ...rest] = wall_polys_at(h, true, 6140, 1)
 	assert.equal(rest.length, 0)
 	assert.deepEqual(outline_points(poly),
-		[[-140, 0], [4140, 0], [4140, 2700], [-140, 2700]])
+		[[-140, 0], [4140, 0], [4140, 3700], [-140, 3700]])
 	assert.deepEqual([...poly.holes], [])
+	// the half-wall's inner face: from the terrace slab to its top, above
+	// the room face of the wall below.
+	let inner_ps = wall_polys_at(h, true, 5960, -1).map(outline_points)
+	assert.equal(inner_ps.length, 2)
+	assert.deepEqual(inner_ps.find(ps => ps[0][1] == 2700),
+		[[40, 2700], [3960, 2700], [3960, 3700], [40, 3700]])
+})
+
+check('the half-wall height is a house setting', () => {
+	let h = house({half_wall_h: 1200, floors: [
+		{lines: [rect_lines(0, 0, 6000, 4000)]},
+		{lines: [rect_lines(0, 0, 3000, 4000)],
+			objects: [tag_state('terrace', 4500, 2000)]},
+	]})
+	assert.equal(h.save_state().half_wall_h, 1200)
+	let [poly] = wall_polys_at(h, true, 6140, 1)
+	assert.equal(Math.max(...outline_points(poly).map(p => p[1])), 3900)
+})
+
+check('a roof area gets no half-wall', () => {
+	let h = house({floors: [
+		{lines: [rect_lines(0, 0, 6000, 4000)]},
+		{lines: [rect_lines(0, 0, 3000, 4000)]},
+	]})
+	let f0 = h.floors[0]
+	assert.equal(f0.make_areas()[0].kind, 'roof')
+	// only the room face of the wall below, under the roof.
+	for (let poly of wall_polys_at(h, true, 5960, -1))
+		assert(Math.max(...outline_points(poly).map(p => p[1])) < 2700)
 })
 
 // terrace tags ----------------------------------------------------------------
@@ -1587,10 +1620,10 @@ check('a lower floor sticking out: a terrace', () => {
 	// the roof is the upper floor's only.
 	assert.deepEqual(faces_bbox(faces.filter(face => face.tag == 'roof')),
 		[eave_w, eave_w, eave_e3, eave_s])
-	// slab 1 top: the upper room floor and the terrace.
+	// slab 1 top: the upper room floor and the terrace inside its half-walls.
 	let slab_tops = up_faces_at(faces, f1.z + h.slab_thickness)
 	assert.deepEqual([...slab_tops].map(face => [...faces_bbox([face])]).sort(),
-		[[3140, -140, 6140, 4140], [40, 40, 2960, 3960]])
+		[[3140, 40, 5960, 3960], [40, 40, 2960, 3960]])
 })
 
 check('the upper roof overhangs the lower roof', () => {

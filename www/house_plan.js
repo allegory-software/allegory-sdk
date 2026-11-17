@@ -23,6 +23,7 @@ let defaults = {
 	ext_wall_thickness: 180,
 	slab_thickness: 200,
 	roof_thickness: 200, // at right angles to the roof
+	half_wall_h: 1000, // of the half-walls around terraces, above the slab
 }
 
 // the state version: states without a version are in cm.
@@ -180,6 +181,7 @@ function house_plan(t) {
 			ext_wall_thickness: house.ext_wall_thickness,
 			slab_thickness: house.slab_thickness,
 			roof_thickness: house.roof_thickness,
+			half_wall_h: house.half_wall_h,
 			ground_objects: copy_objects(house.ground_objects),
 			floors: floors,
 		}
@@ -509,6 +511,28 @@ function house_plan(t) {
 			}
 			profile_time('roof.areas', t0)
 			return areas
+		}
+
+		// the half-walls that stand on the floor above around the floor's
+		// terraces: the floor's exterior walls inside terrace_areas (areas from
+		// make_areas() of kind 'terrace'), as grid paths.
+		floor.make_half_wall_paths = function(terrace_areas) {
+			let {intersect, FillRule} = clipper2
+			let EO = FillRule.EvenOdd
+			let o_int = house.int_wall_thickness / 2
+			let wall_paths = [] // each outline's outer face and inner face
+			for (let comp of floor) { // root comps: islands are inside them.
+				let c = comp.outer_cycle
+				let inner_edges = poly2()
+				inner_edges.get_point = poly_get_point
+				add_ring_path(wall_paths, c.edges)
+				add_ring_path(wall_paths, c.offset(o_int, inner_edges))
+			}
+			let terrace_paths = []
+			for (let area of terrace_areas)
+				for (let path of area.paths)
+					terrace_paths.push(path)
+			return intersect(wall_paths, terrace_paths, EO)
 		}
 
 		// roof faces ----------------------------------------------------------
@@ -1863,6 +1887,7 @@ function house_plan(t) {
 			let floor = floors[floor_i]
 			let roof_areas = []
 			let roof_paths = []
+			let terrace_areas = [] // below top_floor: for the half-walls
 			if (!(floor == top_floor && no_roof)) {
 				for (let area of floor.make_areas()) {
 					if (area.kind == 'roof') {
@@ -1872,8 +1897,20 @@ function house_plan(t) {
 					} else if (floor == top_floor) {
 						for (let path of area.paths)
 							terrace_paths.push(path)
+					} else {
+						terrace_areas.push(area)
 					}
 				}
+			}
+			// half-walls around the terraces: on the slab of the floor above.
+			if (terrace_areas.length) {
+				let z = floors[floor_i+1].z + slab_t
+				prisms.push({
+					paths: floor.make_half_wall_paths(terrace_areas),
+					bottom: [0, 0, z],
+					top: [0, 0, z + house.half_wall_h],
+					tag: 'walls',
+				})
 			}
 			roof_paths_by_floor.push(roof_paths)
 			let eave_sides = []
@@ -2103,6 +2140,7 @@ function house_plan(t) {
 		house.ext_wall_thickness = snap_length(house.ext_wall_thickness)
 		house.slab_thickness = snap_length(house.slab_thickness)
 		house.roof_thickness = snap_length(house.roof_thickness)
+		house.half_wall_h = snap_length(house.half_wall_h)
 
 		let t0 = clock()
 		push_log_if(DEBUG_PLAN_LOAD, 'LOADING PLAN')

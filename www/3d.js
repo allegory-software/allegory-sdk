@@ -2887,8 +2887,9 @@ function offset_corner(p0, p1, p2, d) {
 		out[3] = null
 		if (x1 == x2 && y3 == y4 || y1 == y2 && x3 == x4) { // axis-aligned and _|_ to each other
 			let t1s = -sign(t1-1) // branchless version of t1 < 1 ? 1 : -1
-			out[0] = x2 + d * sign(x2 - x1) * t1s
-			out[1] = y2 + d * sign(y2 - y1) * t1s
+			// toward the intersection: back when t1 < 1, for both signs of d.
+			out[0] = x2 - abs(d) * sign(x2 - x1) * t1s
+			out[1] = y2 - abs(d) * sign(y2 - y1) * t1s
 		} else {
 			line2.at(t1, x1, y1, x2, y2, out)
 		}

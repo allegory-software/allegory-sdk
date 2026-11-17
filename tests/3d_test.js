@@ -294,6 +294,17 @@ for (let n of [1, 2, 3])
 		})
 check('poly2.offset empty cycle stays empty', () =>
 	poly2().offset(2, poly2()).length == 0)
+// square corners move toward the inside for d > 0 and the outside for d < 0
+// on a counter-clockwise (in y-down) rectangle.
+for (let d of [1, -1])
+	check('poly2.offset axis-aligned rectangle, d = ' + d, () => {
+		let p = poly2()
+		p.push([0, 4], [0, 0], [6, 0], [6, 4])
+		let edges = p.offset(d, poly2())
+		let k = d > 0 ? 1 : -1
+		return edges.length == 4 && veq(edges.bbox(),
+			[0 + k, 0 + k, 6 - k, 4 - k])
+	})
 
 check('poly2.hit', () => square2().hit(1, 1) && !square2().hit(5, 1))
 check('poly2.contains_point', () => square2().contains_point(v2(1, 1)))
