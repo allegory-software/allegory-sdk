@@ -228,7 +228,7 @@ const {
 	empty, empty_set, set_equals,
 	assign, entries, insert, remove_value,
 	noop, return_true, do_after, do_before,
-	runafter, timer,
+	runafter, timer, clock_ms,
 	copy_to_clipboard,
 	freelist,
 	hsl_to_rgb_out,
@@ -247,7 +247,7 @@ const {
 	get,
 } = glue
 
-let clock_ms = () => ui.DEBUG ? performance.now() : 0
+ui.clock_ms = clock_ms
 
 let array_freelist = () => freelist(array)
 
@@ -3164,7 +3164,7 @@ function redraw_all() {
 		viewport_y2 = screen_h
 		layout_rec(a, 0, 0, screen_w, screen_h)
 
-		if (ui.DEBUG) {
+		if (window.DEBUG) {
 			ui.recs_length = 0
 			for (let k = 0; k < recs.length; k++)
 				ui.recs_length += recs[k].n
@@ -11693,11 +11693,20 @@ ui.end_master_toggle_bar = function(in_dock) {
 //// NAV_EDITOR: a widget that owns and edits a one-row detail nav -----------
 
 function is_nav_editor_changed(s) {
-	return s.nav.modified_n > 0 || s.def.is_value_changed(s.input_id)
+	return s.nav.modified_n > 0 || !!s.def.is_value_changed?.(s.input_id)
 }
 
 function nav_editor_update(id, s) {
 	let nav = s.nav
+
+	// ctrl+r: drop the edits and reload the nav. ui_grid.js captures it from
+	// the browser.
+	if (nav.ready && ui.focus_inside(id) && ui.keydown('ctrl r')) {
+		nav.revert_changes()
+		nav.reload()
+		return
+	}
+
 	let ri = nav.focused_ri
 	if (ri == null)
 		return
@@ -11707,7 +11716,7 @@ function nav_editor_update(id, s) {
 	let save = nav.ready && !s.readonly
 		&& ui.focus_inside(id) && ui.keydown('ctrl s')
 	if (save)
-		def.update_value(input_id)
+		def.update_value?.(input_id)
 	let value = ui.interaction_value(input_id)
 	if (value !== undefined)
 		nav.set_cell_val(ri, nav.all_fields_map[def.value_col].fi, value,
@@ -13671,7 +13680,7 @@ ui.widget('resizer', {
 
 //// DEBUG -------------------------------------------------------------------
 
-ui.DEBUG ??= false
+ui.DEBUG_WINDOW ??= true
 let debug_packing = false
 let debug_toggle_field
 
@@ -13681,7 +13690,7 @@ ui.action_list({
 		shortcut: 'shift f12',
 		global: true,
 		on_execute: function() {
-			ui.DEBUG = !ui.DEBUG
+			window.DEBUG = !window.DEBUG
 		},
 	},
 })
@@ -13692,7 +13701,7 @@ function debug_pack_frame() {
 }
 
 function debug_window() {
-	if (!ui.DEBUG)
+	if (!window.DEBUG || !ui.DEBUG_WINDOW)
 		return
 	if (!debug_toggle_field) {
 		debug_toggle_field = ui.create_field({type: 'bool', not_null: true})

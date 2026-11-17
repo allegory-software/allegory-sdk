@@ -16,6 +16,7 @@ const {
 	atan2, hypot,
 	array_set, empty_array, format_kcount, point_around, distance,
 	json_arg, try_json_arg, json, copy_to_clipboard, S,
+	profile_time,
 } = glue
 
 const {bbox2, line2} = Math3D
@@ -40,6 +41,12 @@ function seg_center(seg) {
 }
 
 // floor view ----------------------------------------------------------------
+
+// the snap distance in plan units: d mm, but at most 12 screen pixels, so that
+// zooming in makes snapping finer.
+function snap_distance(sg, d) {
+	return min(d, 12 / sg.scale)
+}
 
 function draw_grid(cx, sg, x0, y0, w, h, step, alpha) {
 	if (!sg.show_grid)
@@ -99,7 +106,7 @@ function draw_edges(cx, sg, eps) {
 	cx.closePath()
 }
 
-function draw_walls(cx, sg, comps, segs) {
+function draw_walls(cx, sg, paths, segs) {
 	if (sg.scale <= 0.02) { // to small to even show edges
 		for (let seg of segs) {
 			let x1 = sg.x(seg[0][0]) + .5
@@ -115,44 +122,48 @@ function draw_walls(cx, sg, comps, segs) {
 		return
 	}
 
-	for (let comp of comps) {
-
-		cx.beginPath()
-
-		for (let c of comp.cycles) {
-			if (!c.edges)
-				continue
-			draw_edges(cx, sg, c.edges)
+	cx.beginPath()
+	let scale = prism_union.grid_scale
+	for (let path of paths) {
+		for (let i = 0; i < path.length; i++) {
+			let p = path[i]
+			let x = sg.x(p.x / scale)
+			let y = sg.y(p.y / scale)
+			if (i == 0)
+				cx.moveTo(x, y)
+			else
+				cx.lineTo(x, y)
 		}
+		cx.closePath()
+	}
 
-		if (!cx.wall_pattern) {
-			let w = 100
-			let c = new OffscreenCanvas(w, w)
-			let x = c.getContext('2d')
-			let g = x.createLinearGradient(0, 0, w, 2*w)
-			for (let i = 0, n = 2*w; i <= n; i += 4) {
-				g.addColorStop(clamp((i - 1) / n, 0, 1), 'white')
-				g.addColorStop(clamp((i + 0) / n, 0, 1), 'gray')
-				g.addColorStop(clamp((i + 1) / n, 0, 1), 'white')
-			}
-			x.rect(0, 0, w, w)
-			x.fillStyle = g
-			x.fill()
-			cx.wall_pattern = cx.createPattern(c, 'repeat')
+	if (!cx.wall_pattern) {
+		let w = 100
+		let c = new OffscreenCanvas(w, w)
+		let x = c.getContext('2d')
+		let g = x.createLinearGradient(0, 0, w, 2*w)
+		for (let i = 0, n = 2*w; i <= n; i += 4) {
+			g.addColorStop(clamp((i - 1) / n, 0, 1), 'white')
+			g.addColorStop(clamp((i + 0) / n, 0, 1), 'gray')
+			g.addColorStop(clamp((i + 1) / n, 0, 1), 'white')
 		}
-		if (sg.scale > 0.04) {
-			cx.fillStyle = DEBUG_PLAN ? '#333' : cx.wall_pattern
-			cx.fill('nonzero')
-			cx.lineWidth = DEBUG_PLAN ? 2 : sg.line_width
-			cx.strokeStyle = 'black' //ui.color_css('text')
-			cx.lineJoin = 'round'
-			cx.stroke()
-			cx.lineJoin = 'miter'
-			cx.lineWidth = 1
-		} else { // too small to stroke
-			cx.fillStyle = ui.color_css('text')
-			cx.fill()
-		}
+		x.rect(0, 0, w, w)
+		x.fillStyle = g
+		x.fill()
+		cx.wall_pattern = cx.createPattern(c, 'repeat')
+	}
+	if (sg.scale > 0.04) {
+		cx.fillStyle = DEBUG_PLAN ? '#333' : cx.wall_pattern
+		cx.fill('evenodd')
+		cx.lineWidth = DEBUG_PLAN ? 2 : sg.line_width
+		cx.strokeStyle = 'black' //ui.color_css('text')
+		cx.lineJoin = 'round'
+		cx.stroke()
+		cx.lineJoin = 'miter'
+		cx.lineWidth = 1
+	} else { // too small to stroke
+		cx.fillStyle = ui.color_css('text')
+		cx.fill('evenodd')
 	}
 }
 
@@ -466,31 +477,101 @@ function hit_roof_label(hs, draw_state, sg) {
 
 // objects -------------------------------------------------------------------
 
-// the topmost of `objects` at the screen point (ui.mx, ui.my).
+let object_box = [0, 0, 0, 0] // [x1, y1, x2, y2] of the object hit or drawn
+
+// the end of a resizable object's width axis (its length axis if is_l, where
+// only the bottom end resizes) that the pointer (hs.mouse_x, hs.mouse_y) is
+// at, 1 or -1, or 0: within the object's depth, from a little inside the end
+// to a little outside it.
+function find_resize_side(object, object_type, plan, hs, sg, is_l) {
+	object_type.box(plan, object, object_box)
+	let is_x = object.rot % 180 == 0 // the width runs along x.
+	let r = object.rot * rad
+	let dx = hs.mouse_x - (object_box[0] + object_box[2]) / 2
+	let dy = hs.mouse_y - (object_box[1] + object_box[3]) / 2
+	let u = dx * cos(r) + dy * sin(r) // along the width.
+	let v = -dx * sin(r) + dy * cos(r) // across it.
+	let along = is_l ? v : u // along the axis.
+	let across = is_l ? u : v
+	let size = is_l ? object.l : object.w
+	let half_depth = is_l ? object.w / 2 : (is_x ? object_box[3] - object_box[1]
+		: object_box[2] - object_box[0]) / 2
+	let half_size = size / 2
+	if (abs(across) > half_depth
+		|| abs(along) < half_size - min(sg.plan_d(6), size / 4)
+		|| abs(along) > half_size + sg.plan_d(8)
+		|| is_l && along < 0
+	)
+		return 0
+	return sign(along)
+}
+
+// the topmost of `objects` at the screen point (ui.mx, ui.my): over the
+// object or at an end that resizes it.
 function hit_object_in(objects, plan, hs, sg) {
 	for (let i = objects.length-1; i >= 0; i--) {
 		let object = objects[i]
-		if (!house_object_types[object.type].hit(sg, plan, object))
+		let object_type = house_object_types[object.type]
+		let hit = object_type.hit(sg, plan, object) // true|'move'|false
+		let side = 0
+		let is_l = false
+		if (hit !== 'move') {
+			if (object_type.w_list || object_type.w_range)
+				side = find_resize_side(object, object_type, plan, hs, sg,
+					false)
+			if (!side && object_type.l_list) {
+				side = find_resize_side(object, object_type, plan, hs, sg,
+					true)
+				is_l = true
+			}
+		}
+		if (!hit && !side)
 			continue
 		hs.object = object
 		hs.object_x = object.x // where the drag starts from
 		hs.object_y = object.y
 		hs.action = 'move_object'
+		if (side) {
+			hs.object_side = side
+			hs.object_axis = is_l ? 'l' : 'w'
+			hs.action = 'resize_object'
+		}
 		return true
 	}
 	return false
 }
 
 // the hovered object in the link color, objects on the ground in the readonly
-// text color.
+// text color, or in the error color if they touch the house.
 function draw_objects(cx, sg, plan, objects, hit_object, is_ground) {
 	cx.lineWidth = 2
 	for (let object of objects) {
-		cx.strokeStyle = object == hit_object ? ui.color_css('link')
+		let object_type = house_object_types[object.type]
+		let is_touching = false
+		if (is_ground) {
+			object_type.box(plan, object, object_box)
+			is_touching = plan.is_rect_touching_house(object_box[0],
+				object_box[1], object_box[2], object_box[3])
+		}
+		cx.strokeStyle = is_touching ? ui.color_css('error')
+			: object == hit_object ? ui.color_css('link')
 			: ui.color_css('text', is_ground ? 'readonly' : null)
-		house_object_types[object.type].draw(cx, sg, plan, object)
+		object_type.draw(cx, sg, plan, object)
 	}
 	cx.lineWidth = 1
+}
+
+// the dimensions of the hovered object, or of all objects when
+// sg.show_dims is on, and while the object is moving, its distances to the
+// ends of the wall or room side that it rests against.
+function draw_object_dims(cx, sg, plan, objects, hit_object, is_moving) {
+	for (let object of objects) {
+		let object_type = house_object_types[object.type]
+		if (object_type.draw_sizes && (object == hit_object || sg.show_dims))
+			object_type.draw_sizes(cx, sg, plan, object, draw_length)
+		if (object_type.draw_wall_dims && is_moving && object == hit_object)
+			object_type.draw_wall_dims(cx, sg, plan, object, draw_length)
+	}
 }
 
 // the face of this frame's roof in the plane of the side from an earlier
@@ -697,10 +778,11 @@ function floor_editor_update(id, s) {
 			}
 
 			if (action == 'move_seg')
-				cs.edit.move(dx, dy, nosnap ? 20 : 200)
+				cs.edit.move(dx, dy, snap_distance(sg, nosnap ? 20 : 200))
 
 			if (action == 'resize_seg')
-				[cs.x, cs.y] = cs.edit.resize(dx, dy, nosnap ? 20 : 300)
+				[cs.x, cs.y] = cs.edit.resize(dx, dy,
+					snap_distance(sg, nosnap ? 20 : 300))
 
 			if (action == 'move_seg' || action == 'resize_seg') {
 				let {snap_a, snap_v} = cs.edit
@@ -724,7 +806,16 @@ function floor_editor_update(id, s) {
 				if (is_moved)
 					cs.edit ??= plan.start_move_object(cs.object)
 				cs.edit?.move(cs.object_x + dx, cs.object_y + dy,
-					nosnap ? 20 : 200)
+					snap_distance(sg, nosnap ? 20 : 200))
+			}
+
+			// an object end resizes only past the drag threshold or with
+			// ctrl.
+			if (action == 'resize_object') {
+				if (is_moved)
+					cs.edit ??= plan.start_resize_object(cs.object,
+						cs.object_side, cs.object_axis)
+				cs.edit?.resize(dx, dy)
 			}
 
 			// an eave moves only past the drag threshold or with ctrl: a click
@@ -748,7 +839,8 @@ function floor_editor_update(id, s) {
 				}
 				if (cs.edit)
 					cs.can_move_eave = cs.edit.move(dx, dy,
-						!ui.keypressed('shift'), nosnap ? 0 : 200)
+						!ui.keypressed('shift'),
+						nosnap ? 0 : snap_distance(sg, 200))
 			}
 
 			// the line or point where roof faces meet follows the pointer at
@@ -884,19 +976,13 @@ function floor_editor_update(id, s) {
 	if (is_changed)
 		ui.rebuild('floor_editor_changed')
 
-}
-
-ui.floor_editor_update_value = function(id) {
-	let s = ui.state_of(id)
-	if (s?.house && !s.readonly) {
+	// publish the house after each committed edit, undo and redo: its owner
+	// takes the value.
+	if (!readonly && s.house.edit_no != s.value_edit_no) {
 		ui.set_interaction_value(id, s, json(s.house.save_state()))
 		s.value_edit_no = s.house.edit_no
 	}
-}
 
-ui.floor_editor_is_value_changed = function(id) {
-	let s = ui.state_of(id)
-	return !!s?.house && s.house.edit_no != s.value_edit_no
 }
 
 // floor editor widget -------------------------------------------------------
@@ -952,6 +1038,7 @@ ui.box_widget('floor_editor', {
 			s.view_dirty = false
 			let line_width = 2 // thickness of wall line stroke in pixels at 1:1 scale
 			s.d = d => round(d * s.scale * devicePixelRatio)
+			s.d_exact = d => d * s.scale * devicePixelRatio // not rounded.
 			s.x = x => round(x * s.scale * devicePixelRatio)
 			s.y = y => round(y * s.scale * devicePixelRatio)
 			s.plan_x = x => x / (s.scale * devicePixelRatio)
@@ -1207,6 +1294,8 @@ ui.box_widget('floor_editor', {
 		// the roof level: the top floor's walls are drawn like a floor below
 		// and not edited.
 		let is_roof_level = draw_state.is_roof_level
+		draw_state.wall_paths = is_roof_level ? empty_array
+			: plan.make_wall_geometry().cut_wall_paths
 		draw_state.comps = is_roof_level ? empty_array : plan.comps
 		draw_state.segs = is_roof_level ? empty_array : plan.segs // TODO: remove this from draw stream
 		draw_state.ps = is_roof_level ? empty_array : plan.ps // TODO: remove this from draw stream
@@ -1244,7 +1333,10 @@ ui.box_widget('floor_editor', {
 		for (let plan1 of plan.house.floors) {
 			if (plan1 == plan && !is_roof_level)
 				continue
-			let t = {comps: plan1.comps, segs: plan1.segs}
+			let t = {
+				wall_paths: plan1.make_wall_geometry().uncut_wall_paths,
+				segs: plan1.segs,
+			}
 			let a = plan1.i > plan.i ? draw_state.above_floors : draw_state.below_floors
 			a.push(t)
 		}
@@ -1263,6 +1355,8 @@ ui.box_widget('floor_editor', {
 	},
 
 	draw: function(a, i) {
+
+		let t0 = profile_time()
 
 		let x00   = a[i+0]
 		let y00   = a[i+1]
@@ -1344,7 +1438,7 @@ ui.box_widget('floor_editor', {
 		// below floors
 		cx.globalAlpha = .1
 		for (let plan1 of draw_state.below_floors)
-			draw_walls(cx, sg, plan1.comps, plan1.segs)
+			draw_walls(cx, sg, plan1.wall_paths, plan1.segs)
 		cx.globalAlpha = 1
 
 		// snap lines
@@ -1415,12 +1509,12 @@ ui.box_widget('floor_editor', {
 		}
 
 		// walls of this floor
-		draw_walls(cx, sg, draw_state.comps, draw_state.segs)
+		draw_walls(cx, sg, draw_state.wall_paths, draw_state.segs)
 
 		// walls of above floor
 		cx.globalAlpha = .1
 		for (let plan1 of draw_state.above_floors)
-			draw_walls(cx, sg, plan1.comps, plan1.segs)
+			draw_walls(cx, sg, plan1.wall_paths, plan1.segs)
 		cx.globalAlpha = 1
 
 		// roof of roof_floor: the outlines of its faces. hovered or dragged
@@ -1583,6 +1677,11 @@ ui.box_widget('floor_editor', {
 		// objects: the ground's under the floor's.
 		draw_objects(cx, sg, plan, draw_state.ground_objects, hit_object, true)
 		draw_objects(cx, sg, plan, draw_state.objects, hit_object, false)
+		let is_moving_object = drag_action == 'move_object' && cs.edit
+		draw_object_dims(cx, sg, plan, draw_state.ground_objects, hit_object,
+			is_moving_object)
+		draw_object_dims(cx, sg, plan, draw_state.objects, hit_object,
+			is_moving_object)
 
 		// find all affected _|_ edges so we can show their lengths as we move
 		// the seg
@@ -1689,6 +1788,9 @@ ui.box_widget('floor_editor', {
 				: !draw_state.roof_floor.can_move_faces(
 					hit_roof_faces, hs.roof_z)
 			ui.set_cursor(is_blocked ? 'not-allowed' : 'move')
+		} else if (hit_action == 'resize_object') {
+			let is_v = (hs.object.rot % 180 == 90) != (hs.object_axis == 'l')
+			ui.set_cursor(is_v != axes_swapped ? 'ns-resize' : 'ew-resize')
 		} else if (hit_object) {
 			ui.set_cursor(cs ? 'grabbing' : 'grab')
 		} else if (hit_p)
@@ -1756,6 +1858,7 @@ ui.box_widget('floor_editor', {
 		}
 
 		cx.restore()
+		profile_time('plan.draw', t0)
 	},
 
 	/*	sets in hovers(id):
@@ -1769,6 +1872,8 @@ ui.box_widget('floor_editor', {
 		action=move_room_point     hit room point
 		object, object_x, object_y,
 		action=move_object         hit object
+		object, object_side, object_axis,
+		action=resize_object       hit an end of a resizable object
 		mouse_x, mouse_y           the pointer, in plan units
 		roof_side, roof_x, roof_y,
 		action=move_eave           hit eave side
@@ -1804,7 +1909,7 @@ ui.box_widget('floor_editor', {
 
 		let pan    = ui.keypressed('shift')
 		let nosnap = ui.keypressed('ctrl')
-		let snap_d = nosnap ? 20 : 200
+		let snap_d = snap_distance(sg, nosnap ? 20 : 200)
 		let snap_lines = draw_state.plan_snap_lines
 
 		// pointer position from the viewport center, along the plan's axes,

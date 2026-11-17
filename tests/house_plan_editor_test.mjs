@@ -30,10 +30,6 @@ ${test_plans}
 <script>
 window.plan_json = json(house_test_plans.simple)
 ui.main = function() {
-	if (window.publish_plan) {
-		ui.floor_editor_update_value('fe')
-		window.publish_plan = false
-	}
 	window.plan_json = ui.floor_editor('fe', window.plan_json,
 		null, null, window.editor_readonly)
 	window.input_value = ui.value('fe')
@@ -170,6 +166,7 @@ check('hovering a wall hits it', hs?.action == 'move_seg' && hs.has_seg,
 
 // dragging the wall moves it.
 let input_json = await pg.evaluate(function() {
+	window.house0 = house
 	let save_state = house.save_state
 	window.snapshot_n = 0
 	house.save_state = function() {
@@ -185,15 +182,7 @@ await pg.mouse.up()
 await pg.waitForTimeout(300)
 let segs1 = await read_segs()
 check('dragging a wall moves it', segs0 != segs1, segs0 + ' ' + segs1)
-check('editing keeps JSON serialization deferred', await pg.evaluate(value =>
-	window.input_value == value && window.snapshot_n == 0, input_json))
-await pg.evaluate(function() {
-	window.house0 = house
-	window.publish_plan = true
-	ui.animate()
-})
-await pg.waitForTimeout(100)
-check('publishing builds JSON once and preserves the live house',
+check('a committed edit builds JSON once and preserves the live house',
 	await pg.evaluate(value => window.input_value != value
 		&& window.snapshot_n == 1 && house == window.house0, input_json))
 
@@ -430,11 +419,6 @@ check('no page errors after history and cancellation',
 // empty-floor drawing and view state.
 async function reset_empty_floor() {
 	await pg.evaluate(function() {
-		window.publish_plan = true
-		ui.animate()
-	})
-	await pg.waitForTimeout(100)
-	await pg.evaluate(function() {
 		window.plan_json = json({version: 1, floors: [{lines: []}]})
 		ui.animate()
 	})
@@ -585,7 +569,6 @@ await pg.evaluate(function() {
 await pg.waitForTimeout(100)
 let readonly_json = await pg.evaluate(() => window.input_value)
 await pg.evaluate(function() {
-	window.publish_plan = true
 	ui.animate()
 })
 await pg.waitForTimeout(100)
@@ -1118,12 +1101,12 @@ await pg.waitForTimeout(100)
 await pg.keyboard.press('Delete')
 await pg.waitForTimeout(100)
 check('Delete removes the hovered object', await pg.evaluate(() =>
-	house.ground_objects.length == 1
+	house.ground_objects.length == Object.keys(house_object_types).length - 1
 		&& house.ground_objects[0].type == 'door'))
 await pg.keyboard.press('Control+z')
 await pg.waitForTimeout(100)
 check('keyboard undo restores the removed object', await pg.evaluate(() =>
-	house.ground_objects.length == 2))
+	house.ground_objects.length == Object.keys(house_object_types).length))
 await pg.keyboard.down('s')
 await pg.waitForTimeout(100)
 check('plain s moves the hovered object down 10 mm',

@@ -1,6 +1,20 @@
 HOUSE PLAN EDITOR: OBJECTS (windows, doors, later furniture)
 
-Objects for the house plan (www/house_plan.js, www/house_plan_editor.js). Started 2026-11-17. Follows js/HOUSE-WALLS.txt and js/HOUSE-ROOFS.txt. ALL UNCOMMITTED on branch dev (as of the end of session 1). Ask before committing.
+Objects for the house plan (www/house_plan.js, www/house_plan_editor.js).
+Started 2026-11-17. Follows js/HOUSE-WALLS.txt and js/HOUSE-ROOFS.txt.
+ALL UNCOMMITTED on branch dev (as of the end of session 1). Ask before committing.
+
+## Cosmin's nitpicks (all four BUILT 2026-11-17, see "Nitpicks round 3" at the end)
+
+- can't resize bed length while snapped
+- corner snap is jittery, i think because bbox changes. measurements should not change,
+only drawing.
+- update draw_length to remove the arrows when text and arrows don't fit together
+and only when text alone doesn't fit show nothing
+- walls have 3 ways of drawing depending on level of detail. at level 2 objects should
+show with 1px outlines. at level 3 windows should show with one 1px faint line
+- shadow walls from other floors should show the plan before it is cut by openings.
+
 
 ## Cosmin's request (2026-11-17)
 
@@ -149,3 +163,49 @@ fixed 200 snap (ctrl is held for ctrl+v).
 
 Later: hole prisms in prism_union would remove the clipper splits in
 make_faces; see js/PRISM-HOLES.txt.
+
+## Session 4 (2026-11-17): furniture, resize, tags. Decisions (Cosmin), NOT built
+
+- Furniture is a sketch: outline paths (cached Path2D per type, size, fields). Tags draw a tabler icon glyph (ui_icon_defs.js).
+- Types with holes are tagged in_wall; not fully in a wall -> ground. Other objects: on a floor when fully inside an area of the house (a room, or a terrace area), snapped or not; else ground.
+- Resize is generic: a type with a size list or range on an axis is resizable on it. Door w 600..1100 step 100; window free. Rug 100 steps; bed sizes from a list.
+- Snapping faces: an object pushed against a wall on a non-snapping face rotates to a snapping face (deterministic rule, Cosmin does not care which). It stays rotated after it leaves the wall; maybe replaces a rotation control (to be tried).
+- Tags replace area_points and room_points (terrace marker, open-room marker), dragged like objects.
+- Countertop: starts as a rectangle that snaps and resizes normally; on each side a width-long part of the contour is a handle that pulls out an L (4 handles on the rectangle, 2 at each end of the snake).
+- Stages: 1 generic resize (windows, doors); 2 ownership + in_wall + snapping faces + first furniture; 3 tags; 4 countertop.
+- Stage 1 proposal (waiting for "go"): optional type fields w_range {min, max, step} / w_list; opening types get limit_w(plan, object, side) (new method, awaits approval); window min 300 is an assumption.
+
+Stage 1 BUILT (2026-11-17, uncommitted, browser not tried): type fields w_range / w_list and limit_w (window w_range {min 300, step 1}, door {600, 1100, 100}; limit_w = limit_opening_w); plan floor.start_resize_object(object, side) with s.resize(x, y) / stop / cancel; snap_object_w in house_plan.js; editor hs.action 'resize_object' + hs.object_side, press within min(6 px, w/4) of an end along the width axis, cursor ew / ns-resize. Tests: house_plan_test.js 173 pass (4 new); view 53, cut 10, faces 14 pass; house_plan_editor_test.mjs NOT run.
+Known: an odd width change moves the fixed end 0.5 mm (centers are whole mm); the range min anchors the steps, so a door whose saved w is off the 100 grid snaps to the grid on its first resize; no type uses w_list yet.
+
+Decision (Cosmin, 2026-11-17): an object on floor k's terrace belongs to floor k+1 (all furniture is at one level, indoor and outdoor). The terrace tag also goes on floor k+1, where the roof outline of floor k would show. Consequences not designed yet: floor k+1's objects depend on floor k's areas (re-place when floor k changes); the top floor's terrace has no floor k+1 (the roof level hides objects).
+Decided (Cosmin): (1) after floor k's fix(), floor k+1's objects are placed again. (2) A terrace on the top floor needs a floor: the top of the house becomes a floor with zero walls (the deferred design in HOUSE-WALLS.txt), not an object list on the roof level. Not designed or built.
+
+Stage 2 BUILT (2026-11-17, uncommitted, browser not tried; rooms only, terraces come with tags): object.on_floor (set by place; list choice in house_plan.js move_object / remove_object / fix_objects); floor.room_rings (c.edges of inner cycles and island outer cycles, set in create_edges; free space on the left of the walk, wall on the right, probed); type fields in_wall (window, door; make_hole_groups skips others), snap_faces, sketch; house_plan_objects.js place_furniture (find_wall_side, is_rect_in_rooms, wall_side_center), Path2D cache per type / w / l, draw_furniture. Types bed (w_list 900 1400 1600 1800, l 2000), chair 450 x 450, wc 400 x 700, all snap_faces [0]; sizes and sketches are Cosmin-unreviewed guesses. Default objects: 5 on the ground now (row x = -750 + 1500 i). Tests: house_plan_test 181, view 53, cut 10, faces 14, roof 6 pass; view test stubs Path2D and cx.scale.
+Known: resizing a bed does not re-place it (it can end in a wall until the next fix(), then goes to the ground); fix() re-places with snap_d 0, so a non-snapping face touching a wall turns; no l-axis resize yet (bed lengths); no terraces; house_plan_editor_test.mjs not run.
+
+Nitpicks round (2026-11-17, uncommitted, browser not tried; tests: house_plan_test 185, view 53, cut 10, faces 14, roof 6 pass):
+- fuzzy outlines: dropped by Cosmin (scaled Path2D cannot be crisp; snapping each pixel would make lines dance).
+- seg.wall_m1 / wall_m2 (create_edges): the along range of a wall that no perpendicular wall at its ends covers; fit_opening and limit_opening_w use it instead of seg.m1 / m2.
+- type hit() returns true (all purposes), 'move' (moving only) or false; the door returns 'move' over the square that its leaf sweeps, true over its box. The editor starts a resize only for true.
+- editor snap_distance(sg, mm) = min(mm, 12 px in plan units) at the move_seg, resize_seg, move_object, eave and snap-line sites; arrow-key moves keep their fixed 20.
+- chair: trapezoid with rounded corners (round_polygon). view.d_exact(d) (not rounded) replaces view.d(10000) / 10000.
+- bed limit_w = limit_furniture_w: the resize stops at the room sides; the place-after-resize call was NOT added: place with snap_d 0 counts touching as snapped, so a bed resized sideways against a wall would turn its head to that wall.
+- every type has box(plan, object, out); floor.is_rect_touching_house(x1, y1, x2, y2); a ground object that touches an outline is drawn in the 'error' color (wins over hover). The color name 'error' is the editor's existing one (line ~1439), not a 'text' state.
+
+Nitpicks round 2 (2026-11-17, uncommitted, browser not tried; tests: house_plan_test 185, view 53, cut 10, faces 14, roof 6 pass):
+- resize end zone: from min(6 px, w / 4) inside to 8 px outside each end of the width axis, across the object's box depth (editor find_resize_side). Objects already hit before walls. A neighbor's outside zone can overlap an adjacent object's body: the topmost in the list wins.
+- s.resize(dx, dy) of start_resize_object now takes the pointer displacement since the press (was the absolute pointer), so a grab outside the end does not jump.
+- windows are drawn 1 px thinner on each side across the wall (draw_opening_box inset); hit and holes unchanged.
+- ctrl+r in a nav editor: ui.js nav_editor_update calls nav.reload() when the editor has focus; ui_grid.js already captures the browser's ctrl+r.
+
+Reload (2026-11-17, uncommitted, browser not tried by Cosmin; house_plan_editor_test.mjs 148 checks pass): the first design (nav.load_no) was dropped as a hack. Now the floor editor publishes json(house.save_state()) as its interaction value after every committed edit, undo and redo (end of floor_editor_update, when house.edit_no != s.value_edit_no), so the nav's cell holds the unsaved plan as a pending edit and the nav alone decides modified (nav.modified_n; undoing back to the stored string clears it, but only when the stored string is in the editor's own output form). ui.floor_editor_update_value / is_value_changed are gone; nav_editor's update_value and is_value_changed hooks are optional (the code editor keeps its). Ctrl+R in a nav editor: nav.revert_changes() + nav.reload(); the cell returns to the server value and the editor rebuilds through its ordinary value-changed check (drops unsaved edits and undo, Cosmin: ok, a public unlocked plan is at its users' mercy). Cost: one whole-house json per committed edit, on top of commit_edit's two per-floor jsons. The browser test's 'JSON serialization deferred' checks became 'a committed edit builds JSON once'; its manual publish hook is gone.
+Decided (Cosmin): sizes inside resizable objects show on hover and always when "show measurements" (show_dims) is on. Waiting for "go": snapped sides recorded on the object by place (object.side_x / side_y = [dir, c, m1, m2]) used by the snap dimensions (3) and the diagonal chair (6); open question for 6: drawn diagonal at the same size (pokes past its rect) or shrunk.
+
+Nitpicks round 3 (2026-11-17, uncommitted, browser not tried; tests: house_plan_test 191, view 53 pass; house_plan_editor_test.mjs NOT run):
+- Decided (Cosmin): sizes of resizable objects are drawn with draw_length outside the object's edge (not inside); bed lengths 190 and 200 cm; chair stays at 45 after leaving the corner.
+- object.side_x / side_y = [dir, c, m1, m2] (m1 -> m2 in the room ring's walking order), written by place_furniture (null when not snapped), not saved. get_wall_side() snapshots wall_side (which now also has m1, m2). Cost: two 4-number arrays per pointer move while snapped.
+- place_chair = place_furniture, then in a corner (both sides end at the corner point) rot 45 / 135 / 225 / 315, back to the corner, bbox half (w + l) / 2 * cos 45 on both walls, rounded into the room. put_furniture(plan, object, x, y) is the shared tail (x, y, seg, on_floor). furniture_half returns the rotated rect's bbox half when rot % 90 != 0. The rect's full width touches the walls, so the trapezoid back's corners stay about 4 cm off them (450 mm chair). Hit test, on_floor and the ground-touch check use the bbox of the turned rect.
+- type l_list (bed [1900, 2000]) + limit_l: the bottom end (+y of the sketch) resizes, the top end stays. limit_furniture_size is the shared body of limit_furniture_w / _l. floor.start_resize_object(object, side, axis = 'w'); snap_object_w became snap_object_size(sizes, size, max_size). Editor: find_resize_side(..., is_l), hs.object_axis, cursor swaps for 'l'.
+- type draw_sizes(cx, view, plan, object, draw_length) and draw_wall_dims(...): the editor passes its draw_length. draw_sizes on hover or show_dims; draw_wall_dims while an object is being moved. Openings: on the top face (right face if vertical) of the wall box; the wall dims chain on the same face from seg.wall_m1 / wall_m2. Bed: width on the bottom edge, length on the right edge. Furniture wall dims: on the room side, from its ends to the object's box, inside the room (left of the walking direction).
+- Known: with show_dims on, an opening's size is drawn on the same face line as the wall's own face dimension (can overlap); the bed's right edge may be against a wall; a chair at 45 is hit by its bbox; fix() re-places with snap_d 0, a corner chair keeps its rot but side_x / side_y become null.

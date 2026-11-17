@@ -22,6 +22,7 @@ const {
 	noop, pr, assert, log, property,
 	extend, array_set, array_equals, insert, remove_value, array_move,
 	assign, freelist, time, timer,
+	profile_time,
 } = glue
 
 const {NEAR, FAR, v2, v3, v4, mat4, plane, plane3, line3, camera3} = Math3D
@@ -285,6 +286,7 @@ function model3_editor(e) {
 		h = floor(h)
 		if (w < 1 || h < 1) // a zero-size canvas can't be drawn with drawImage().
 			return
+		let t0 = profile_time()
 		resize(w, h)
 		if (e.shadows && update_shadow_bounds())
 			renderer.update()
@@ -298,6 +300,7 @@ function model3_editor(e) {
 		cx.translate(x, y)
 		draw_helper_points()
 		cx.restore()
+		profile_time('model.draw', t0)
 	}
 
 	function update_renderer() {
@@ -632,9 +635,11 @@ function model3_editor(e) {
 	}
 
 	function update_all() {
+		let t0 = profile_time()
 		update_instances()
 		for (let comp of comps)
 			update_comp(comp)
+		profile_time('model.update', t0)
 	}
 
 	function draw_model(prog) {

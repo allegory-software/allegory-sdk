@@ -5,6 +5,7 @@ const G = window
 const {
 	assert, push_log, pop_log,
 	map, max, PI, format_kcount,
+	profile_time,
 } = glue
 
 const {v3, mat4, line2, line3} = Math3D
@@ -90,7 +91,9 @@ function init_house_model_editor(e, house, cut_floor) {
 	let faces = cut_floor
 		? house.make_faces(cut_floor, true)
 		: house.make_faces(floors[floors.length-1], false)
+	let t0 = profile_time()
 	create_plan(faces)
+	profile_time('model.create', t0)
 	e.update_all()
 }
 

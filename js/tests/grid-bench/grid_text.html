@@ -38,7 +38,7 @@
 "use strict"
 
 ui.load_font('fas', 'icons/fa-solid-900.woff2')
-ui.DEBUG = false
+window.DEBUG = false
 
 const params = new URLSearchParams(location.search)
 const variants = (params.get('sequence') || 'baseline').split(',')

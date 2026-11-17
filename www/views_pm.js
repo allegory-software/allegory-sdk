@@ -13,8 +13,6 @@ const unit_plan_editor_def = {
 	build: function(input_id, value, field, readonly) {
 		ui.floor_editor(input_id, value, field, null, readonly)
 	},
-	update_value: ui.floor_editor_update_value,
-	is_value_changed: ui.floor_editor_is_value_changed,
 }
 
 ui.unit_plan_editor = function(id, opt) {

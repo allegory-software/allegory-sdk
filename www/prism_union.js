@@ -45,7 +45,8 @@
 "use strict"
 const G = window
 
-const {round, abs, min, max, hypot, inf, assert, map, uniq_sorted} = glue
+const {round, abs, min, max, hypot, inf, assert, map, uniq_sorted,
+	profile_time} = glue
 const {Clipper64, PolyTree64, ClipType, FillRule} = clipper2
 
 let SCALE = 100 // grid units per plan unit (mm): a grid unit is 10 um
@@ -312,6 +313,9 @@ function half_plane_paths(a, b, c, x1, y1, x2, y2) {
 
 function prism_union(prisms) {
 
+	let t0 = profile_time()
+	let start_t = t0
+
 	// cuts: where a cutter's bottom crosses the bottom or the top plane of
 	// another prism inside the cutter's region, the code adds a cut region:
 	// the cut side of the crossing line, inside the cutter's bbox. the code
@@ -453,6 +457,8 @@ function prism_union(prisms) {
 	// the code snaps the cut regions with the prisms and overlays each one
 	// only on the cells of its cutter. same for the split regions, on the
 	// cells of both their cutters.
+	t0 = profile_time('prism.cuts', t0)
+
 	let snapped_paths = snap_paths([...prisms, ...cut_regions,
 		...split_regions])
 	let prism_paths = snapped_paths.slice(0, prisms.length)
@@ -461,6 +467,8 @@ function prism_union(prisms) {
 	for (let i = 0; i < split_regions.length; i++)
 		split_regions[i].paths =
 			snapped_paths[prisms.length + cut_regions.length + i]
+	t0 = profile_time('prism.snap', t0)
+
 	let cells = [] // [{paths, prisms, cut_regions, split_regions, ranges},
 		// ...]
 	for (let prism_i = 0; prism_i < prisms.length; prism_i++) {
@@ -530,6 +538,8 @@ function prism_union(prisms) {
 		}
 		cells = cells1
 	}
+
+	t0 = profile_time('prism.cells', t0)
 
 	// faces on planes: the code merges the z ranges of each cell's prisms,
 	// cut by the cell's cutters, into solid ranges per tag and adds an up face
@@ -653,6 +663,8 @@ function prism_union(prisms) {
 				add_plane_paths(range.bottom, -1, range.tag, cell.paths)
 		}
 	}
+
+	t0 = profile_time('prism.surfaces', t0)
 
 	// side faces: the code groups the edges of all cells by plan line. each
 	// cell is on the left of its edges, so on the left of the line where an
@@ -871,6 +883,8 @@ function prism_union(prisms) {
 		}
 	}
 
+	t0 = profile_time('prism.sides', t0)
+
 	// merging: the code unites the faces of each plane and facing into
 	// polygons and lifts them back to 3D.
 	let faces = []
@@ -894,6 +908,8 @@ function prism_union(prisms) {
 			return [x, y, p.y / SCALE]
 		}, normal < 0, tag, faces)
 	}
+	profile_time('prism.merge', t0)
+	profile_time('prism.union', start_t)
 	return faces
 }
 

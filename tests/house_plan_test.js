@@ -2554,11 +2554,26 @@ function north_outer_polys(h) {
 	return wall_polys_at(h, false, -140, -1)
 }
 
+let default_n = Object.keys(ctx.house_object_types).length // default objects.
+
 check('a new house has one default object of each type on the ground', () => {
 	let h = house({floors: [{lines: [rect_lines(0, 0, 6000, 4000)]}]})
 	assert.deepEqual(Array.from(h.ground_objects, o => o.type),
-		['window', 'door'])
+		['window', 'door', 'bed', 'chair', 'wc'])
 	assert.equal(h.floors[0].objects.length, 0)
+})
+
+check('loading adds the types missing from the ground, in their places', () => {
+	let h = house({floors: [{lines: [rect_lines(0, 0, 6000, 4000)]}],
+		ground_objects: [{type: 'door', x: 100, y: 200, rot: 90}]})
+	assert.deepEqual(Array.from(h.ground_objects, o => o.type),
+		['door', 'window', 'bed', 'chair', 'wc'])
+	assert.deepEqual(Array.from(h.ground_objects, o => [o.x, o.y]),
+		[[100, 200], [-750, -2000], [2250, -2000], [3750, -2000],
+			[5250, -2000]])
+	assert.equal(h.ground_objects[0].rot, 90)
+	let h2 = house(h.save_state())
+	assert.equal(h2.ground_objects.length, default_n)
 })
 
 check('objects are saved, loaded and undone with their floor', () => {
@@ -2567,9 +2582,93 @@ check('objects are saved, loaded and undone with their floor', () => {
 	let state = h.save_state()
 	assert.equal(JSON.stringify(state.floors[0].objects),
 		JSON.stringify([object]))
-	assert.equal(state.ground_objects.length, 2)
+	assert.equal(state.ground_objects.length, default_n)
 	let h2 = house(state)
 	assert.equal(JSON.stringify(h2.save_state()), JSON.stringify(state))
+})
+
+function cut_wall_area(f) {
+	let area = 0
+	for (let path of f.make_wall_geometry().cut_wall_paths) {
+		for (let i = 0; i < path.length; i++) {
+			let p = path[i]
+			let q = path[(i + 1) % path.length]
+			area += p.x * q.y - q.x * p.y
+		}
+	}
+	return Math.abs(area) / (2 * ctx.prism_union.grid_scale ** 2)
+}
+
+check('cut wall paths exclude doors and windows and are reused', () => {
+	let f0 = opening_house([]).floors[0]
+	let f = opening_house([
+		{type: 'window', x: 1500, y: 0, rot: 0, w: 1200},
+		{type: 'door', x: 4000, y: 0, rot: 0, w: 900},
+	]).floors[0]
+	assert.equal(cut_wall_area(f0) - cut_wall_area(f), (1200 + 900) * 180)
+	let geometry = f.make_wall_geometry()
+	assert.equal(f.make_wall_geometry(), geometry)
+	f.house.make_faces(f, true)
+	assert.equal(f.make_wall_geometry(), geometry)
+})
+
+check('cut walls update during opening moves and resizing without fix', () => {
+	let h = opening_house([
+		{type: 'window', x: 3000, y: 0, rot: 0, w: 1200},
+	])
+	let f = h.floors[0]
+	let area = cut_wall_area(f)
+	let fix = f.fix
+	f.fix = () => { throw Error('unexpected fix during preview') }
+	let move = f.start_move_object(f.objects[0])
+	move.move(3000, -2000, 0)
+	assert.equal(cut_wall_area(f), area + 1200 * 180)
+	move.move(2000, 0, 0)
+	assert.equal(cut_wall_area(f), area)
+	f.fix = fix
+	move.cancel()
+	assert.equal(cut_wall_area(f), area)
+	let resize = f.start_resize_object(f.objects[0], 1)
+	f.fix = () => { throw Error('unexpected fix during preview') }
+	resize.resize(300, 0)
+	assert.equal(cut_wall_area(f), area - 300 * 180)
+	f.fix = fix
+	resize.stop()
+	assert(h.undo())
+	assert.equal(cut_wall_area(f), area)
+	assert(h.redo())
+	assert.equal(cut_wall_area(f), area - 300 * 180)
+	f.remove_object(f.objects[0])
+	assert.equal(cut_wall_area(f), area + 1200 * 180)
+	assert(h.undo())
+	assert.equal(cut_wall_area(f), area - 300 * 180)
+})
+
+check('cut wall paths follow a wall and its opening during preview', () => {
+	let h = house({floors: [{lines: [[null, [0, 0], [6000, 0]]],
+		objects: [{type: 'window', x: 3000, y: 0, rot: 0, w: 1200}]}]})
+	let f = h.floors[0]
+	let geometry = f.make_wall_geometry()
+	let paths = JSON.parse(JSON.stringify(geometry.cut_wall_paths))
+	let area = cut_wall_area(f)
+	let fix = f.fix
+	f.fix = () => { throw Error('unexpected fix during preview') }
+	let move = f.start_move_seg(f.segs[0])
+	move.move(1000, 500, 0)
+	let geometry1 = f.make_wall_geometry()
+	assert.notEqual(geometry1, geometry)
+	assert.equal(cut_wall_area(f), area)
+	let scale = ctx.prism_union.grid_scale
+	for (let path of paths)
+		for (let p of path) {
+			p.x += 1000 * scale
+			p.y += 500 * scale
+		}
+	assert.equal(JSON.stringify(geometry1.cut_wall_paths), JSON.stringify(paths))
+	f.fix = fix
+	move.cancel()
+	assert.equal(JSON.stringify(f.make_wall_geometry().cut_wall_paths),
+		JSON.stringify(geometry.cut_wall_paths))
 })
 
 check('a window cuts a hole in the wall', () => {
@@ -2620,7 +2719,7 @@ check('a door cuts a hole from the slab top up', () => {
 check('an object that is not on a wall goes to the ground', () => {
 	let h = opening_house([{type: 'window', x: 3000, y: 500, rot: 0, w: 1200}])
 	assert.equal(h.floors[0].objects.length, 0)
-	assert.equal(h.ground_objects.length, 3)
+	assert.equal(h.ground_objects.length, default_n + 1)
 	let h0 = opening_house([])
 	assert.equal(h.make_faces(h.floors[0], true).length,
 		h0.make_faces(h0.floors[0], true).length)
@@ -2656,7 +2755,7 @@ check('moving a free wall moves its objects along both axes', () => {
 	assert.equal(f.objects[0].y, 500)
 	s.stop()
 	assert.equal(f.objects.length, 1)
-	assert.equal(h.ground_objects.length, 2)
+	assert.equal(h.ground_objects.length, default_n)
 })
 
 check('dragging an object onto a wall snaps it to the floor, undo back', () => {
@@ -2669,7 +2768,7 @@ check('dragging an object onto a wall snaps it to the floor, undo back', () => {
 	assert.equal(object.y, 3000)
 	s.move(3000, 120, 200)
 	assert.equal(f.objects.length, 1)
-	assert.equal(h.ground_objects.length, 1)
+	assert.equal(h.ground_objects.length, default_n - 1)
 	assert.equal(object.y, 0)
 	assert.equal(object.x, 3000)
 	assert.equal(object.rot, 0)
@@ -2681,7 +2780,7 @@ check('dragging an object onto a wall snaps it to the floor, undo back', () => {
 	assert.equal(f.objects.length, 1)
 	assert(h.undo())
 	assert.equal(f.objects.length, 0)
-	assert.equal(h.ground_objects.length, 2)
+	assert.equal(h.ground_objects.length, default_n)
 })
 
 check('a dragged object stops at its neighbor on the wall', () => {
@@ -2695,9 +2794,9 @@ check('a dragged object stops at its neighbor on the wall', () => {
 	s.move(1500, 0, 200)
 	assert.equal(object.x, 800)
 	s.move(5990, 0, 200)
-	assert.equal(object.x, 5400)
+	assert.equal(object.x, 5360) // the east wall's face is at 5960.
 	s.move(100, 0, 200)
-	assert.equal(object.x, 600)
+	assert.equal(object.x, 640) // the west wall's face is at 40.
 	s.stop()
 	assert.equal(f.objects.length, 2)
 })
@@ -2728,7 +2827,7 @@ check('a cancelled object move restores both lists', () => {
 	assert.equal(f.objects.length, 1)
 	s.cancel()
 	assert.equal(f.objects.length, 0)
-	assert.equal(h.ground_objects.length, 2)
+	assert.equal(h.ground_objects.length, default_n)
 })
 
 check('objects are removed and added as one undoable edit each', () => {
@@ -2737,17 +2836,17 @@ check('objects are removed and added as one undoable edit each', () => {
 	f.remove_object(f.objects[0])
 	assert.equal(f.objects.length, 0)
 	f.remove_object(h.ground_objects[0])
-	assert.equal(h.ground_objects.length, 1)
+	assert.equal(h.ground_objects.length, default_n - 1)
 	f.add_object({type: 'door', x: 0, y: 0, rot: 0, w: 800}, 100.4, -2000,
 		200)
-	assert.equal(h.ground_objects.length, 2)
-	assert.equal(JSON.stringify(h.save_object(h.ground_objects[1])),
+	assert.equal(h.ground_objects.length, default_n)
+	assert.equal(JSON.stringify(h.save_object(h.ground_objects.at(-1))),
 		JSON.stringify({type: 'door', x: 100, y: -2000, rot: 0, w: 800,
 			mirror: false}))
 	assert(h.undo())
-	assert.equal(h.ground_objects.length, 1)
+	assert.equal(h.ground_objects.length, default_n - 1)
 	assert(h.undo())
-	assert.equal(h.ground_objects.length, 2)
+	assert.equal(h.ground_objects.length, default_n)
 	assert(h.undo())
 	assert.equal(f.objects.length, 1)
 })
@@ -2812,13 +2911,13 @@ check('deleting a wall moves its objects to the ground, undo back', () => {
 	let f = h.floors[0]
 	f.delete_seg(f.objects[0].seg)
 	assert.equal(f.objects.length, 0)
-	assert.equal(h.ground_objects.length, 3)
+	assert.equal(h.ground_objects.length, default_n + 1)
 	assert(h.undo())
 	assert.equal(f.objects.length, 1)
-	assert.equal(h.ground_objects.length, 2)
+	assert.equal(h.ground_objects.length, default_n)
 	assert(h.redo())
 	assert.equal(f.objects.length, 0)
-	assert.equal(h.ground_objects.length, 3)
+	assert.equal(h.ground_objects.length, default_n + 1)
 })
 
 // a free wall from (0, 0) to (6000, 0) with a window centered at x, its
@@ -2846,8 +2945,8 @@ check('a shortened wall pushes its objects along', () => {
 check('an object past the end of a shortened wall goes to the ground', () => {
 	let h = shorten_window_wall(5000, 4900)
 	assert.equal(h.floors[0].objects.length, 0)
-	assert.equal(h.ground_objects.length, 3)
-	assert.equal(h.ground_objects[2].x, 5000)
+	assert.equal(h.ground_objects.length, default_n + 1)
+	assert.equal(h.ground_objects.at(-1).x, 5000)
 })
 
 check('a pasted object goes where a dropped one would', () => {
@@ -2858,8 +2957,8 @@ check('a pasted object goes where a dropped one would', () => {
 	assert.equal(f.objects.length, 1)
 	assert.equal(f.objects[0].y, 0)
 	assert.equal(f.objects[0].x, 3000)
-	assert.equal(h.ground_objects.length, 2)
-	assert.throws(() => f.add_object({type: 'chair'}, 0, 0, 200))
+	assert.equal(h.ground_objects.length, default_n)
+	assert.throws(() => f.add_object({type: 'sofa'}, 0, 0, 200))
 	assert(h.undo())
 	assert.equal(f.objects.length, 0)
 })
@@ -2891,6 +2990,330 @@ check('the saved state of an object has no seg', () => {
 	assert('seg' in object)
 	s.stop()
 	assert.equal(h.edit_no, edit_no)
+})
+
+check('a window resizes from either end, the other end stays', () => {
+	let h = opening_house([{type: 'window', x: 3000, y: 0, rot: 0, w: 1200}])
+	let f = h.floors[0]
+	let object = f.objects[0]
+	let s = f.start_resize_object(object, 1)
+	s.resize(400, 0) // the right end at 3600 moves to 4000.
+	assert.equal(object.w, 1600)
+	assert.equal(object.x, 3200) // the left end stays at 2400.
+	s.resize(-200, 0) // the move is from the press, not from the last move.
+	assert.equal(object.w, 1000)
+	assert.equal(object.x, 2900)
+	s.stop()
+	assert(h.undo())
+	object = f.objects[0] // undo rebuilds the objects.
+	assert.equal(object.w, 1200)
+	assert.equal(object.x, 3000)
+	s = f.start_resize_object(object, -1)
+	s.resize(-400, 0) // the left end at 2400 moves to 2000.
+	assert.equal(object.w, 1600) // the right end stays at 3600.
+	assert.equal(object.x, 2800)
+	s.cancel()
+	assert.equal(f.objects[0].w, 1200)
+})
+
+check('a window resize stops at its neighbor and at the wall end', () => {
+	let h = opening_house([
+		{type: 'window', x: 3000, y: 0, rot: 0, w: 1200},
+		{type: 'window', x: 5000, y: 0, rot: 0, w: 1200},
+	])
+	let f = h.floors[0]
+	let object = f.objects[0]
+	let s = f.start_resize_object(object, 1)
+	s.resize(5400, 0)
+	assert.equal(object.w, 2000) // up to the neighbor's edge at 4400.
+	assert.equal(object.x, 3400)
+	s.cancel()
+	object = f.objects[0] // cancel rebuilds the objects.
+	s = f.start_resize_object(object, -1)
+	s.resize(-3400, 0)
+	assert.equal(object.w, 3560) // up to the west wall's face at 40.
+	assert.equal(object.x, 1820)
+	s.cancel()
+})
+
+check('an opening stays off the face of a wall that meets its wall', () => {
+	let h = house({floors: [{lines: [rect_lines(0, 0, 6000, 4000),
+		rect_lines(3000, 0, 0, 4000)]}]})
+	let f = h.floors[0]
+	f.add_object({type: 'window', x: 0, y: 0, rot: 0}, 3050, 0, 200)
+	assert.equal(f.objects.length, 1)
+	assert.equal(f.objects[0].x, 3640) // the partition's face is at 3040.
+	f.add_object({type: 'window', x: 0, y: 0, rot: 0}, 2950, 0, 200)
+	assert.equal(f.objects.at(-1).x, 2360) // its other face is at 2960.
+})
+
+check('a door resizes in 10 cm steps between 60 and 110 cm', () => {
+	let h = opening_house([{type: 'door', x: 6000, y: 2000, rot: 90, w: 900}])
+	let f = h.floors[0]
+	let object = f.objects[0]
+	let s = f.start_resize_object(object, 1)
+	s.resize(0, 250)
+	assert.equal(object.w, 1100)
+	s.resize(0, -200)
+	assert.equal(object.w, 700)
+	assert.equal(object.y, 1900) // the end at 1550 stays.
+	assert.equal(object.x, 6000)
+	s.resize(0, -1450)
+	assert.equal(object.w, 600)
+	s.stop()
+	s = f.start_resize_object(object, -1) // rot 90: the end at larger y stays.
+	s.resize(0, -550)
+	assert.equal(object.w, 1100)
+	assert.equal(object.y, 1600) // the end at 2150 stays.
+	s.cancel()
+})
+
+check('an object off the wall resizes with no limit', () => {
+	let h = opening_house([])
+	let f = h.floors[0]
+	let object = h.ground_objects[0] // a window
+	let s = f.start_resize_object(object, 1)
+	s.resize(4400, 0)
+	assert.equal(object.w, 5600)
+	s.stop()
+	assert(h.undo())
+	assert.equal(h.ground_objects[0].w, 1200)
+})
+
+// furniture: the room of opening_house has its faces at 40 and 5960 (x), 40
+// and 3960 (y).
+function add_furniture(f, type, rot, x, y, snap_d) {
+	f.add_object({type: type, x: 0, y: 0, rot: rot}, x, y, snap_d)
+	return f.objects.at(-1)
+}
+
+check('furniture rests its snapping face against the wall it is near', () => {
+	let h = opening_house([])
+	let f = h.floors[0]
+	let object = add_furniture(f, 'bed', 0, 3000, 1100, 200)
+	assert.equal(f.objects.length, 1)
+	assert.equal(object.rot, 0)
+	assert.equal(object.y, 1040) // the head against the north face at 40.
+	assert.equal(object.x, 3000)
+	assert(object.on_floor)
+	assert(!object.seg)
+})
+
+check('furniture turns to a snapping face when pushed against a wall', () => {
+	let h = opening_house([])
+	let f = h.floors[0]
+	let object = add_furniture(f, 'bed', 0, 5200, 2000, 200)
+	assert.equal(object.rot, 90) // the head is at the east wall.
+	assert.equal(object.x, 4960)
+	assert.equal(object.y, 2000)
+	let s = f.start_move_object(object)
+	s.move(3000, 2000, 200)
+	assert.equal(object.rot, 90) // it stays turned off the wall.
+	assert.equal(object.x, 3000)
+	assert.equal(f.objects.length, 1)
+	s.cancel()
+})
+
+check('furniture snaps to two walls in a corner', () => {
+	let h = opening_house([])
+	let f = h.floors[0]
+	let object = add_furniture(f, 'bed', 90, 5000, 780, 200)
+	assert.equal(object.x, 4960)
+	assert.equal(object.y, 740)
+	assert(object.on_floor)
+})
+
+check('furniture not fully inside a room goes to the ground', () => {
+	let h = opening_house([])
+	let f = h.floors[0]
+	add_furniture(f, 'bed', 0, 3000, -2000, 200)
+	assert.equal(f.objects.length, 0)
+	assert.equal(h.ground_objects.length, default_n + 1)
+	let object = h.ground_objects.at(-1)
+	assert(!object.on_floor)
+	let s = f.start_move_object(object)
+	s.move(3000, 100, 0) // its head is in the north wall.
+	assert.equal(f.objects.length, 0)
+	s.move(3000, 2000, 0)
+	assert.equal(f.objects.length, 1)
+	s.stop()
+})
+
+check('furniture across a partition is on the ground', () => {
+	let h = house({floors: [{lines: [rect_lines(0, 0, 6000, 4000),
+		rect_lines(3000, 0, 0, 4000)]}]})
+	let f = h.floors[0]
+	let chair = add_furniture(f, 'chair', 0, 1500, 2000, 0)
+	assert.equal(f.objects.length, 1)
+	assert(chair.on_floor)
+	let s = f.start_move_object(chair)
+	s.move(3000, 2000, 0)
+	assert.equal(f.objects.length, 0)
+	s.move(4500, 2000, 0)
+	assert.equal(f.objects.length, 1)
+	s.cancel()
+})
+
+check('furniture goes to the ground with its room, undo back', () => {
+	let h = opening_house([])
+	let f = h.floors[0]
+	add_furniture(f, 'chair', 0, 3000, 2000, 0)
+	assert.equal(f.objects.length, 1)
+	f.delete_seg(f.segs[0])
+	assert.equal(f.objects.length, 0)
+	assert.equal(h.ground_objects.length, default_n + 1)
+	assert(h.undo())
+	assert.equal(f.objects.length, 1)
+	assert.equal(h.ground_objects.length, default_n)
+})
+
+check('furniture is saved with its depth and loaded back in the room', () => {
+	let h = opening_house([])
+	let f = h.floors[0]
+	let object = add_furniture(f, 'bed', 0, 3000, 2000, 0)
+	assert.equal(JSON.stringify(h.save_object(object)),
+		JSON.stringify({type: 'bed', x: 3000, y: 2000, rot: 0, w: 1400,
+			l: 2000}))
+	let h2 = house(h.save_state())
+	assert.equal(h2.floors[0].objects.length, 1)
+	assert(h2.floors[0].objects[0].on_floor)
+	let h0 = opening_house([]) // a bed in a room cuts no hole in a wall.
+	assert.equal(h.make_faces(f, true).length,
+		h0.make_faces(h0.floors[0], true).length)
+})
+
+check('a bed resizes through its width list', () => {
+	let h = opening_house([])
+	let f = h.floors[0]
+	let object = add_furniture(f, 'bed', 0, 3000, 2000, 0)
+	let s = f.start_resize_object(object, 1)
+	s.resize(200, 0)
+	assert.equal(object.w, 1600)
+	assert.equal(object.x, 3100)
+	s.resize(5300, 0)
+	assert.equal(object.w, 1800)
+	s.resize(-3700, 0)
+	assert.equal(object.w, 900)
+	s.cancel()
+})
+
+check('a rect touches the house when it meets an outline or is inside', () => {
+	let f = opening_house([]).floors[0] // the outer faces are at -140 and 6140.
+	assert(!f.is_rect_touching_house(2000, -2500, 3000, -1500))
+	assert(!f.is_rect_touching_house(2000, -300, 3000, -141))
+	assert(f.is_rect_touching_house(2000, -300, 3000, -140)) // touching.
+	assert(f.is_rect_touching_house(2000, -300, 3000, -100)) // across a wall.
+	assert(f.is_rect_touching_house(2000, 1000, 3000, 2000)) // inside.
+	assert(f.is_rect_touching_house(-1000, -1000, 7000, 5000)) // around it.
+})
+
+check('a bed resize stops at the walls of its room', () => {
+	let h = house({floors: [{lines: [rect_lines(0, 0, 2500, 4000)]}]})
+	let f = h.floors[0]
+	let object = add_furniture(f, 'bed', 0, 1500, 2000, 0)
+	let s = f.start_resize_object(object, 1) // the left end stays at 800.
+	s.resize(6800, 0)
+	assert.equal(object.w, 1600) // 1800 would reach 2600, past the face at 2460.
+	assert(object.on_floor)
+	s.stop()
+	object = add_furniture(f, 'bed', 0, 1500, 2000, 0)
+	s = f.start_resize_object(object, -1) // the right end stays at 2200.
+	s.resize(-9800, 0)
+	assert.equal(object.w, 1800)
+	assert.equal(object.x, 1300) // the left end is at 400: 1800 fits.
+	s.cancel()
+})
+
+check('a bed resizes along its length from the foot only', () => {
+	let h = opening_house([])
+	let f = h.floors[0]
+	let object = add_furniture(f, 'bed', 0, 3000, 2000, 0) // head at y 1000.
+	let s = f.start_resize_object(object, 1, 'l')
+	s.resize(0, -100)
+	assert.equal(object.l, 1900)
+	assert.equal(object.y, 1950) // the head stays at 1000.
+	s.resize(0, 500)
+	assert.equal(object.l, 2000)
+	assert.equal(object.y, 2000)
+	s.cancel()
+})
+
+check('a bed length resize stops at the wall of its room', () => {
+	let h = house({floors: [{lines: [rect_lines(0, 0, 6000, 1990)]}]})
+	let f = h.floors[0] // the faces are at 40 and 1950 (y).
+	f.add_object({type: 'bed', x: 0, y: 0, rot: 0, l: 1900}, 3000, 980, 200)
+	let object = f.objects.at(-1)
+	assert(object.on_floor)
+	assert.equal(object.y, 990) // the head against the north face.
+	let s = f.start_resize_object(object, 1, 'l')
+	s.resize(0, 500)
+	assert.equal(object.l, 1900) // 2000 would reach 2040.
+	s.cancel()
+})
+
+check('a chair in a corner turns by 45 degrees and rests on both walls', () => {
+	let h = opening_house([])
+	let f = h.floors[0]
+	let chair = add_furniture(f, 'chair', 0, 300, 300, 200)
+	assert.equal(chair.rot, 315) // its back to the north-west corner.
+	assert.equal(chair.x, 359) // 40 + (450 + 450) / 2 * cos 45, rounded in.
+	assert.equal(chair.y, 359)
+	assert(chair.on_floor)
+	assert.equal(chair.side_x[1], 40)
+	assert.equal(chair.side_y[1], 40)
+	chair = add_furniture(f, 'chair', 0, 5700, 3700, 200)
+	assert.equal(chair.rot, 135) // south-east.
+	assert.equal(chair.x, 5641)
+	assert.equal(chair.y, 3641)
+	chair = add_furniture(f, 'chair', 0, 5700, 300, 200)
+	assert.equal(chair.rot, 45) // north-east.
+	chair = add_furniture(f, 'chair', 0, 300, 3700, 200)
+	assert.equal(chair.rot, 225) // south-west.
+})
+
+check('a diagonal chair turns back to a wall and stays turned off it', () => {
+	let h = opening_house([])
+	let f = h.floors[0]
+	let chair = add_furniture(f, 'chair', 0, 300, 300, 200)
+	let s = f.start_move_object(chair)
+	s.move(3000, 2000, 0)
+	assert.equal(chair.rot, 315) // stays turned.
+	assert(chair.on_floor)
+	s.move(3000, 300, 200)
+	assert.equal(chair.rot, 0) // the back at the north wall.
+	assert.equal(chair.y, 265)
+	assert(!chair.side_x)
+	assert.equal(chair.side_y[0], 0)
+	s.cancel()
+})
+
+check('furniture records the room sides it rests against', () => {
+	let f = opening_house([]).floors[0]
+	let bed = add_furniture(f, 'bed', 0, 3000, 1100, 200)
+	assert(!bed.side_x)
+	assert.deepEqual(Array.from(bed.side_y), [0, 40, 5960, 40])
+	let calls = []
+	let draw_length = (cx, view, x1, y1, x2, y2) => calls.push([x1, y1, x2, y2])
+	ctx.house_object_types.bed.draw_wall_dims(null, null, f, bed, draw_length)
+	assert.deepEqual(calls, [[5960, 40, 3700, 40], [2300, 40, 40, 40]])
+	calls.length = 0
+	ctx.house_object_types.bed.draw_sizes(null, null, f, bed, draw_length)
+	assert.deepEqual(calls, [[3700, 2040, 2300, 2040], [3700, 40, 3700, 2040]])
+})
+
+check('a window shows its width and its distances to the wall ends', () => {
+	let h = opening_house([{type: 'window', x: 3000, y: 0, rot: 0}])
+	let f = h.floors[0]
+	let window = f.objects[0]
+	let calls = []
+	let draw_length = (cx, view, x1, y1, x2, y2) => calls.push([x1, y1, x2, y2])
+	let type = ctx.house_object_types.window
+	type.draw_sizes(null, null, f, window, draw_length)
+	assert.deepEqual(calls, [[2400, -140, 3600, -140]])
+	calls.length = 0
+	type.draw_wall_dims(null, null, f, window, draw_length)
+	assert.deepEqual(calls,
+		[[40, -140, 2400, -140], [3600, -140, 5960, -140]])
 })
 
 console.log(n_checks + ' house plan checks passed')

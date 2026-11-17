@@ -20,7 +20,9 @@ function transform_point(x, y) {
 }
 
 let cx = {wall_pattern: true}
-for (let name of ['rect', 'clip', 'closePath', 'fill', 'setLineDash', 'arc'])
+let canvas_methods = ['rect', 'clip', 'closePath', 'fill', 'setLineDash',
+	'arc', 'scale']
+for (let name of canvas_methods)
 	cx[name] = () => {}
 cx.save = () => stack.push([...matrix])
 cx.restore = () => { matrix = stack.pop() }
@@ -38,7 +40,7 @@ cx.rotate = function(angle) {
 }
 cx.beginPath = () => { points = [] }
 cx.moveTo = cx.lineTo = (x, y) => points.push(transform_point(x, y))
-cx.stroke = () => strokes.push(points.slice())
+cx.stroke = path => { if (!path) strokes.push(points.slice()) } // not a Path2D.
 cx.fillText = function(text, x, y) {
 	texts.push({text, point: transform_point(x, y), axes: matrix.slice(0, 4)})
 }
@@ -57,6 +59,7 @@ let ui = {
 		s.validation = {failed: false}
 		return value
 	},
+	set_interaction_value(id, s, value) { s.interaction_value = value },
 	value: () => state.input_value,
 	clicked: id => id == clicked_id,
 	hit: () => hover,
@@ -119,6 +122,7 @@ const ctx = {
 	setTimeout, clearTimeout, TextEncoder, TextDecoder, URL,
 	URLSearchParams, performance, Intl, atob, btoa, queueMicrotask, ui,
 	devicePixelRatio: 1,
+	Path2D: class {},
 }
 ctx.window = ctx
 ctx.document = {currentScript: {hasAttribute: k => k == 'global'}}
@@ -304,20 +308,22 @@ for (let [y, dy, expected] of [
 }
 
 check('all dimensions replace drag measurements', () => {
+	// 14 wall dimensions + 4 sizes of the default ground objects (window,
+	// door, bed width and length).
 	dims_click = true
 	frame()
-	assert.equal(dimensions.length, 14)
+	assert.equal(dimensions.length, 18)
 	let seg = plan.segs.find(s => s.is_v && s.axis == 2000)
 	capture = {action: 'move_seg', seg, drag: true, dx: 0, dy: 0}
 	frame()
-	assert.equal(dimensions.length, 14)
+	assert.equal(dimensions.length, 18)
 	capture.drag = false
 	let sg = state
 	let angle = sg.rotation
 	capture.dx = 400 * sg.scale * Math.cos(angle)
 	capture.dy = 400 * sg.scale * Math.sin(angle)
 	frame()
-	assert.equal(dimensions.length, 14)
+	assert.equal(dimensions.length, 18)
 	capture.cancel = true
 	frame()
 	capture = null

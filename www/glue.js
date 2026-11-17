@@ -279,6 +279,7 @@ AJAX REQUESTS
 (function () {
 "use strict"
 
+window.DEBUG ??= false
 window.DEBUG_AJAX = 0
 
 // browser detection ---------------------------------------------------------
@@ -1671,6 +1672,22 @@ function runevery(t, f) { return setInterval(f, t * 1000) }
 function runagainevery(t, f) { f(); return runevery(t, f) }
 function clock() { return performance.now() / 1000 }
 
+function clock_ms() { return DEBUG ? performance.now() : 0 }
+
+let profile_times = obj() // {stage -> {ms, calls}}
+
+function profile_time(stage, t0) {
+	if (!DEBUG)
+		return 0
+	let t = clock_ms()
+	if (stage != null) {
+		let times = profile_times[stage] ??= {ms: 0, calls: 0}
+		times.ms += t - t0
+		times.calls++
+	}
+	return t
+}
+
 function timer(f) {
 	let timer_id, t0
 	function wrapper() {
@@ -2169,7 +2186,8 @@ hsl_to_rgb_out, hsl_to_rgb_hex, hsl_to_rgba_int, hsl_to_rgb_int, hex_to_hsl,
 point_around,
 transform_point_x, transform_point_y,
 hypot, distance,
-runafter, runevery, runagainevery, clock, timer,
+runafter, runevery, runagainevery, clock, clock_ms, timer,
+profile_time, profile_times,
 json_arg, try_json_arg, json,
 copy_to_clipboard,
 save, load,
