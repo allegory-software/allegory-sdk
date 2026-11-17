@@ -47,7 +47,7 @@ const G = window
 
 const {round, abs, min, max, hypot, inf, assert, map, uniq_sorted,
 	profile_time} = glue
-const {Clipper64, PolyTree64, ClipType, FillRule} = clipper2
+const {Clipper64, PolyTree64, ClipType, FillRule, getBoundsPaths} = clipper2
 
 let SCALE = 100 // grid units per plan unit (mm): a grid unit is 10 um
 
@@ -63,6 +63,15 @@ function clip(clip_type, subject, clip_paths, out, no_collinear) {
 		clipper.addClip(clip_paths)
 	clipper.execute(clip_type, FillRule.EvenOdd, out)
 	return out
+}
+
+function split_paths(subject, clip_paths, in_paths, out_paths) {
+	let clipper = new Clipper64()
+	clipper.preserveCollinear = true
+	clipper.addSubject(subject)
+	clipper.addClip(clip_paths)
+	clipper.execute(ClipType.Intersection, FillRule.EvenOdd, in_paths)
+	clipper.execute(ClipType.Difference, FillRule.EvenOdd, out_paths)
 }
 
 // planes --------------------------------------------------------------------
@@ -469,19 +478,27 @@ function prism_union(prisms) {
 			snapped_paths[prisms.length + cut_regions.length + i]
 	t0 = profile_time('prism.snap', t0)
 
-	let cells = [] // [{paths, prisms, cut_regions, split_regions, ranges},
+	let cells = [] // [{paths, bounds, prisms, cut_regions, split_regions, ranges},
 		// ...]
 	for (let prism_i = 0; prism_i < prisms.length; prism_i++) {
 		let prism = prisms[prism_i]
 		let paths = prism_paths[prism_i]
+		let bounds = getBoundsPaths(paths)
 		// the part of the prism outside all cells. clipper output is clean:
 		// ccw outlines, cw holes. no cells: no clipping below, so clean the
 		// input paths here.
 		let rest = cells.length ? paths : clip(ClipType.Union, paths, null, [])
 		let cells1 = []
 		for (let cell of cells) {
-			let in_paths  = clip(ClipType.Intersection, cell.paths, paths, [])
-			let out_paths = clip(ClipType.Difference  , cell.paths, paths, [])
+			let cb = cell.bounds ??= getBoundsPaths(cell.paths)
+			if (cb.right < bounds.left || cb.left > bounds.right
+				|| cb.bottom < bounds.top || cb.top > bounds.bottom
+			) {
+				cells1.push(cell)
+				continue
+			}
+			let in_paths = [], out_paths = []
+			split_paths(cell.paths, paths, in_paths, out_paths)
 			if (in_paths.length)
 				cells1.push({paths: in_paths, prisms: [...cell.prisms, prism],
 					cut_regions: [], split_regions: []})
@@ -504,8 +521,8 @@ function prism_union(prisms) {
 				continue
 			}
 			let paths = cut_region.paths
-			let in_paths  = clip(ClipType.Intersection, cell.paths, paths, [])
-			let out_paths = clip(ClipType.Difference  , cell.paths, paths, [])
+			let in_paths = [], out_paths = []
+			split_paths(cell.paths, paths, in_paths, out_paths)
 			if (in_paths.length)
 				cells1.push({paths: in_paths, prisms: cell.prisms,
 					cut_regions: [...cell.cut_regions, cut_region],
@@ -526,8 +543,8 @@ function prism_union(prisms) {
 				continue
 			}
 			let paths = split_region.paths
-			let in_paths  = clip(ClipType.Intersection, cell.paths, paths, [])
-			let out_paths = clip(ClipType.Difference  , cell.paths, paths, [])
+			let in_paths = [], out_paths = []
+			split_paths(cell.paths, paths, in_paths, out_paths)
 			let split_regions1 = [...cell.split_regions, split_region]
 			if (in_paths.length)
 				cells1.push({paths: in_paths, prisms: cell.prisms,
