@@ -106,6 +106,23 @@ function draw_edges(cx, sg, eps) {
 	cx.closePath()
 }
 
+// add clipper paths on prism_union()'s grid to the current path.
+function add_grid_paths(cx, sg, paths) {
+	let scale = prism_union.grid_scale
+	for (let path of paths) {
+		for (let i = 0; i < path.length; i++) {
+			let p = path[i]
+			let x = sg.x(p.x / scale)
+			let y = sg.y(p.y / scale)
+			if (i == 0)
+				cx.moveTo(x, y)
+			else
+				cx.lineTo(x, y)
+		}
+		cx.closePath()
+	}
+}
+
 function draw_walls(cx, sg, paths, segs) {
 	if (sg.scale <= 0.02) { // too small to even show edges
 		for (let seg of segs) {
@@ -123,19 +140,7 @@ function draw_walls(cx, sg, paths, segs) {
 	}
 
 	cx.beginPath()
-	let scale = prism_union.grid_scale
-	for (let path of paths) {
-		for (let i = 0; i < path.length; i++) {
-			let p = path[i]
-			let x = sg.x(p.x / scale)
-			let y = sg.y(p.y / scale)
-			if (i == 0)
-				cx.moveTo(x, y)
-			else
-				cx.lineTo(x, y)
-		}
-		cx.closePath()
-	}
+	add_grid_paths(cx, sg, paths)
 
 	if (!cx.wall_pattern) {
 		let w = 100
@@ -1122,6 +1127,7 @@ ui.box_widget('floor_editor', {
 			roof_sides: [], // roof_floor's eave sides from make_roof_faces()
 			roof_lines: [], // [{p, q, face1, face2}, ...] shared roof segments
 			half_wall_paths: [], // grid paths of the half-walls on this floor
+			terrace_paths: [], // grid paths of the terraces under this floor
 		}
 		let draw_state = s.draw_state
 		let plan = s.floor
@@ -1301,14 +1307,19 @@ ui.box_widget('floor_editor', {
 			draw_state.roof_lines.length = 0
 			draw_state.roof_faces = []
 			draw_state.half_wall_paths = []
+			draw_state.terrace_paths.length = 0
 			if (roof_floor) {
 				let roof_areas = []
 				let terrace_areas = []
-				for (let area of roof_floor.make_areas())
-					if (area.kind == 'roof')
+				for (let area of roof_floor.make_areas()) {
+					if (area.kind == 'roof') {
 						roof_areas.push(area)
-					else
+					} else {
 						terrace_areas.push(area)
+						for (let path of area.paths)
+							draw_state.terrace_paths.push(path)
+					}
+				}
 				if (roof_areas.length)
 					draw_state.roof_faces = roof_floor.make_roof_faces(roof_areas,
 						draw_state.roof_sides, draw_state.roof_lines)
@@ -1494,9 +1505,21 @@ ui.box_widget('floor_editor', {
 			}
 		}
 
+		// terrace floors: the half-walls cover their edges.
+		if (draw_state.terrace_paths.length) {
+			cx.beginPath()
+			add_grid_paths(cx, sg, draw_state.terrace_paths)
+			cx.fillStyle = ui.alpha_adjust(ui.color_obj('bg1'), .5)
+			cx.fill('evenodd')
+		}
+
 		// walls of this floor
 		draw_walls(cx, sg, draw_state.wall_paths, draw_state.segs)
+
+		// half-walls around the terraces
+		cx.globalAlpha = .5
 		draw_walls(cx, sg, draw_state.half_wall_paths, empty_array)
+		cx.globalAlpha = 1
 
 		// walls of above floor
 		cx.globalAlpha = .1
