@@ -49,23 +49,23 @@
 		                     end at +y in its sketch. its top end stays.
 		limit_l(plan, object) -> l
 		                     optional: the longest the object can be.
-		draw_sizes(cx, view, plan, object, draw_length)
+		draw_sizes(cx, sg, plan, object, draw_length)
 		                     optional: draw the dimensions of the axes that
 		                     the object can be resized on, with the editor's
-		                     draw_length(cx, view, x1, y1, x2, y2), which
+		                     draw_length(cx, sg, x1, y1, x2, y2), which
 		                     puts the dimension on the left of the line.
-		draw_wall_dims(cx, view, plan, object, draw_length)
+		draw_wall_dims(cx, sg, plan, object, draw_length)
 		                     optional: draw the distances from the object
 		                     to the ends of the wall or room side that it
 		                     rests against.
 		box(plan, object, out) -> out
 		                     fill out with the object's plan rect
 		                     [x1, y1, x2, y2].
-		hit(view, plan, object) -> true|'move'|false
+		hit(sg, plan, object) -> true|'move'|false
 		                     the pointer is over the object: true for all
 		                     purposes, 'move' for moving it only, as over
 		                     the area that a door sweeps.
-		draw(cx, view, plan, object)
+		draw(cx, sg, plan, object)
 		                     draw the object, stroked with the current
 		                     stroke style and line width.
 		update(plan, object)
@@ -73,7 +73,7 @@
 		                     while the object is hovered.
 
 	plan: a floor of house_plan().
-	view: the floor editor's view: x(x), y(y), d(d) plan to screen.
+	sg: the floor editor's view: x(x), y(y), d(d) plan to screen.
 
 */
 
@@ -100,19 +100,19 @@ function compare_seg_objects(object1, object2) {
 // between the seg's ends and the other openings on the seg, or undefined if
 // it fits nowhere.
 function fit_opening(plan, seg, object, m) {
-	let others = []
+	let seg_objects = []
 	for (let object1 of plan.objects)
 		if (object1 != object && object1.seg == seg)
-			others.push(object1)
-	others.sort(compare_seg_objects)
+			seg_objects.push(object1)
+	seg_objects.sort(compare_seg_objects)
 	let is_v = seg.is_v
 	let fit_m
 	let lo = seg.wall_m1
-	for (let i = 0; i <= others.length; i++) {
-		let other = others[i]
+	for (let i = 0; i <= seg_objects.length; i++) {
+		let object1 = seg_objects[i]
 		let hi = seg.wall_m2
-		if (other)
-			hi = (is_v ? other.y : other.x) - other.w / 2
+		if (object1)
+			hi = (is_v ? object1.y : object1.x) - object1.w / 2
 		let m1 = ceil(lo + object.w / 2)
 		let m2 = floor(hi - object.w / 2)
 		if (m1 <= m2) {
@@ -120,8 +120,8 @@ function fit_opening(plan, seg, object, m) {
 			if (fit_m == null || abs(m_gap - m) < abs(fit_m - m))
 				fit_m = m_gap
 		}
-		if (other)
-			lo = (is_v ? other.y : other.x) + other.w / 2
+		if (object1)
+			lo = (is_v ? object1.y : object1.x) + object1.w / 2
 	}
 	return fit_m
 }
@@ -210,22 +210,22 @@ function opening_box(plan, object, out) {
 let box = [0, 0, 0, 0] // [x1, y1, x2, y2] of the opening hit or drawn
 
 function make_opening_hole(plan, object) {
-	let type = house_object_types[object.type]
+	let object_type = house_object_types[object.type]
 	return {
 		rect: opening_box(plan, object, []),
-		sill: type.sill,
-		head: type.head,
+		sill: object_type.sill,
+		head: object_type.head,
 	}
 }
 
-function hit_opening(view, plan, object) {
+function hit_opening(sg, plan, object) {
 	opening_box(plan, object, box)
-	return ui.hit_bbox(view.x(box[0]), view.y(box[1]),
-		view.x(box[2]), view.y(box[3]))
+	return ui.hit_bbox(sg.x(box[0]), sg.y(box[1]),
+		sg.x(box[2]), sg.y(box[3]))
 }
 
 // the pointer is over the square that the door's leaf sweeps.
-function is_over_door_swing(view, plan, object) {
+function is_over_door_swing(sg, plan, object) {
 	opening_box(plan, object, box)
 	let r = object.rot * rad
 	let x = (box[0] + box[2]) / 2
@@ -235,61 +235,42 @@ function is_over_door_swing(view, plan, object) {
 	let y1 = y - w / 2 * sin(r)
 	let x2 = x + w / 2 * cos(r) + w * sin(r)
 	let y2 = y + w / 2 * sin(r) - w * cos(r)
-	return ui.hit_bbox(view.x(min(x1, x2)), view.y(min(y1, y2)),
-		view.x(max(x1, x2)), view.y(max(y1, y2)))
+	return ui.hit_bbox(sg.x(min(x1, x2)), sg.y(min(y1, y2)),
+		sg.x(max(x1, x2)), sg.y(max(y1, y2)))
 }
 
 // the door's box, or only for moving it: the square that its leaf sweeps.
-function hit_door(view, plan, object) {
-	if (hit_opening(view, plan, object))
+function hit_door(sg, plan, object) {
+	if (hit_opening(sg, plan, object))
 		return true
-	if (is_over_door_swing(view, plan, object))
+	if (is_over_door_swing(sg, plan, object))
 		return 'move'
 	return false
 }
 
-// fill the box on the ground and stroke it, leaving it in `box`.
-// draw it `inset` pixels thinner on each side across the wall.
-function draw_opening_box(cx, view, plan, object, inset = 0, no_fg) {
-	opening_box(plan, object, box)
-	let is_v = opening_is_v(object)
-	let sx1 = view.x(box[0]) + (is_v ? inset : 0)
-	let sy1 = view.y(box[1]) + (is_v ? 0 : inset)
-	let sx2 = view.x(box[2]) - (is_v ? inset : 0)
-	let sy2 = view.y(box[3]) - (is_v ? 0 : inset)
-	cx.beginPath()
-	cx.rect(sx1, sy1, sx2 - sx1, sy2 - sy1)
-	if (!object.seg) {
-		cx.fillStyle = ui.color_css('bg')
-		cx.fill()
-	}
-	if (!no_fg)
-		cx.stroke()
-}
-
 // the opening's width, on the top face of its wall box or on the right face
 // when it runs along y: draw_length puts the dimension outside the face.
-function draw_opening_size(cx, view, plan, object, draw_length) {
+function draw_opening_size(cx, sg, plan, object, draw_length) {
 	opening_box(plan, object, box)
 	if (opening_is_v(object))
-		draw_length(cx, view, box[2], box[1], box[2], box[3])
+		draw_length(cx, sg, box[2], box[1], box[2], box[3])
 	else
-		draw_length(cx, view, box[0], box[1], box[2], box[1])
+		draw_length(cx, sg, box[0], box[1], box[2], box[1])
 }
 
 // the distances from the opening to the ends of its wall, on the face of
 // draw_opening_size.
-function draw_opening_wall_dims(cx, view, plan, object, draw_length) {
+function draw_opening_wall_dims(cx, sg, plan, object, draw_length) {
 	let seg = object.seg
 	if (!seg)
 		return
 	opening_box(plan, object, box)
 	if (seg.is_v) {
-		draw_length(cx, view, box[2], seg.wall_m1, box[2], box[1])
-		draw_length(cx, view, box[2], box[3], box[2], seg.wall_m2)
+		draw_length(cx, sg, box[2], seg.wall_m1, box[2], box[1])
+		draw_length(cx, sg, box[2], box[3], box[2], seg.wall_m2)
 	} else {
-		draw_length(cx, view, seg.wall_m1, box[1], box[0], box[1])
-		draw_length(cx, view, box[2], box[1], seg.wall_m2, box[1])
+		draw_length(cx, sg, seg.wall_m1, box[1], box[0], box[1])
+		draw_length(cx, sg, box[2], box[1], seg.wall_m2, box[1])
 	}
 }
 
@@ -297,37 +278,20 @@ function draw_opening_wall_dims(cx, view, plan, object, draw_length) {
 
 // half the object's extent in the plan along x (want_x) or y: its width and
 // depth swap when it is turned by a quarter.
-// a piece turned by 45 degrees: the half extent of its bounding box.
 function furniture_half(object, want_x) {
-	if (object.rot % 90) {
-		let r = object.rot * rad
-		return (object.w * abs(want_x ? cos(r) : sin(r))
-			+ object.l * abs(want_x ? sin(r) : cos(r))) / 2
-	}
 	let is_turned = object.rot % 180 == 90
 	return (is_turned == want_x ? object.l : object.w) / 2
 }
 
-let wall_side = {
-	gap: 0, // from the rect's face to the side: negative when the rect is in it
-	dir: 0, // direction to the wall: 0 north, 1 east, 2 south, 3 west
-	c: 0, // across coordinate of the side
-	m1: 0, // the side's ends along it, in the walking direction
-	m2: 0,
-}
-
-// the found `wall_side` as [dir, c, m1, m2].
-function get_wall_side() {
-	return [wall_side.dir, wall_side.c, wall_side.m1, wall_side.m2]
-}
-
 // the room side nearest to the rect of half sizes (hx, hy) around (x, y),
 // among the vertical sides (want_v) or the horizontal sides (want_h) that
-// the rect overlaps along: left in `wall_side`. true if it is within snap_d.
+// the rect overlaps along: [dir, c, m1, m2] if it is within snap_d.
+// reuse out when supplied; otherwise allocate only for a found side.
 // a room's free space is on the left of the walking direction of its sides,
 // so the wall is on the right.
-function find_wall_side(plan, x, y, hx, hy, snap_d, want_v, want_h) {
-	wall_side.gap = Infinity
+function find_wall_side(plan, x, y, hx, hy, snap_d, want_v, want_h, out) {
+	let min_gap = Infinity
+	let found_dir, found_c, found_m1, found_m2
 	for (let ring of plan.room_rings) {
 		for (let i = 0, n = ring.length; i < n; i++) {
 			let p1 = ring[i]
@@ -349,25 +313,31 @@ function find_wall_side(plan, x, y, hx, hy, snap_d, want_v, want_h) {
 			let h_across = is_v ? hx : hy
 			let gap = dir == 1 || dir == 2
 				? c - (across + h_across) : (across - h_across) - c
-			if (abs(gap) < abs(wall_side.gap)) {
-				wall_side.gap = gap
-				wall_side.dir = dir
-				wall_side.c = c
-				wall_side.m1 = m1
-				wall_side.m2 = m2
+			if (abs(gap) < min_gap) {
+				min_gap = abs(gap)
+				found_dir = dir
+				found_c = c
+				found_m1 = m1
+				found_m2 = m2
 			}
 		}
 	}
-	return abs(wall_side.gap) <= snap_d
+	if (min_gap <= snap_d) {
+		out ??= []
+		out[0] = found_dir
+		out[1] = found_c
+		out[2] = found_m1
+		out[3] = found_m2
+		return out
+	}
 }
 
-// the center coordinate across `wall_side` of a rect of half sizes (hx, hy)
+// the center coordinate across side of a rect of half sizes (hx, hy)
 // resting against it, in whole mm on the room's side.
-function wall_side_center(hx, hy) {
-	let dir = wall_side.dir
+function wall_side_center(side, hx, hy) {
+	let [dir, c] = side
 	let h = dir % 2 ? hx : hy
-	return dir == 1 || dir == 2 ? floor(wall_side.c - h)
-		: ceil(wall_side.c + h)
+	return dir == 1 || dir == 2 ? floor(c - h) : ceil(c + h)
 }
 
 // the rect of half sizes (hx, hy) around (x, y) is inside the plan's rooms,
@@ -411,30 +381,33 @@ function place_furniture(plan, object, x, y, snap_d) {
 	if (faces) {
 		let hx = furniture_half(object, true)
 		let hy = furniture_half(object, false)
-		if (find_wall_side(plan, x, y, hx, hy, snap_d, true, true)) {
-			let face = (wall_side.dir - object.rot / 90 + 4) % 4 // facing it.
+		let side = find_wall_side(plan, x, y, hx, hy, snap_d, true, true)
+		if (side) {
+			let dir = side[0]
+			let face = (dir - object.rot / 90 + 4) % 4 // facing it.
 			if (!faces.includes(face)) {
-				object.rot = (wall_side.dir - faces[0] + 4) % 4 * 90
+				object.rot = (dir - faces[0] + 4) % 4 * 90
 				hx = furniture_half(object, true)
 				hy = furniture_half(object, false)
 			}
 
 			// the side it rests on, then the nearest side across it.
-			let is_x = wall_side.dir % 2 == 1
+			let is_x = dir % 2 == 1
 			if (is_x) {
-				object.side_x = get_wall_side()
-				x = wall_side_center(hx, hy)
+				object.side_x = side
+				x = wall_side_center(side, hx, hy)
 			} else {
-				object.side_y = get_wall_side()
-				y = wall_side_center(hx, hy)
+				object.side_y = side
+				y = wall_side_center(side, hx, hy)
 			}
-			if (find_wall_side(plan, x, y, hx, hy, snap_d, !is_x, is_x)) {
+			side = find_wall_side(plan, x, y, hx, hy, snap_d, !is_x, is_x)
+			if (side) {
 				if (is_x) {
-					object.side_y = get_wall_side()
-					y = wall_side_center(hx, hy)
+					object.side_y = side
+					y = wall_side_center(side, hx, hy)
 				} else {
-					object.side_x = get_wall_side()
-					x = wall_side_center(hx, hy)
+					object.side_x = side
+					x = wall_side_center(side, hx, hy)
 				}
 			}
 		}
@@ -452,7 +425,7 @@ function put_furniture(plan, object, x, y) {
 }
 
 // place_furniture, then in a corner of a room: turned by 45 degrees with its
-// back to the corner and the back corners of its rect on both walls.
+// back to the corner. Only the sketch turns; the measured box stays square.
 function place_chair(plan, object, x, y, snap_d) {
 	place_furniture(plan, object, x, y, snap_d)
 	let {side_x, side_y} = object
@@ -461,18 +434,12 @@ function place_chair(plan, object, x, y, snap_d) {
 	let [dir_x, wall_x, y1, y2] = side_x
 	let [dir_y, wall_y, x1, x2] = side_y
 	// both sides end at the corner point (side_x[1], side_y[1]).
-	if (!(y1 == wall_y || y2 == wall_y)
-		|| !(x1 == wall_x || x2 == wall_x)
+	if (
+		!(y1 == wall_y || y2 == wall_y) ||
+		!(x1 == wall_x || x2 == wall_x)
 	)
 		return
-	let is_east = dir_x == 1
-	let is_south = dir_y == 2
-	object.rot = is_south ? (is_east ? 135 : 225) : (is_east ? 45 : 315)
-	let hx = furniture_half(object, true)
-	let hy = furniture_half(object, false)
-	put_furniture(plan, object,
-		is_east ? floor(wall_x - hx) : ceil(wall_x + hx),
-		is_south ? floor(wall_y - hy) : ceil(wall_y + hy))
+	object.rot = dir_x * 90 + (dir_x == dir_y + 1 ? -45 : 45)
 }
 
 // the widest the furniture piece can be when its end opposite to `side` (1 or
@@ -514,7 +481,7 @@ function limit_furniture_size(plan, object, is_x, dir, size) {
 			if (along + h_along <= min(m1, m2) || along - h_along >= max(m1, m2))
 				continue
 			let c = is_x ? p1[0] : p1[1]
-			if (dir * (c - end) >= 0 && dir * (c - limit_c) < 0)
+			if (dir * (c - end) > 0 && dir * (c - limit_c) < 0)
 				limit_c = c
 		}
 	}
@@ -532,11 +499,11 @@ function furniture_box(plan, object, out) {
 	return out
 }
 
-function hit_furniture(view, plan, object) {
+function hit_furniture(sg, plan, object) {
 	let hx = furniture_half(object, true)
 	let hy = furniture_half(object, false)
-	return ui.hit_bbox(view.x(object.x - hx), view.y(object.y - hy),
-		view.x(object.x + hx), view.y(object.y + hy))
+	return ui.hit_bbox(sg.x(object.x - hx), sg.y(object.y - hy),
+		sg.x(object.x + hx), sg.y(object.y + hy))
 }
 
 let sketch_paths = new Map() // {type -> {w -> {l -> Path2D}}}
@@ -562,11 +529,18 @@ function get_sketch_path(object) {
 	return path
 }
 
-function draw_furniture(cx, view, plan, object) {
+function draw_furniture(cx, sg, plan, object) {
 	let path = get_sketch_path(object)
-	let scale = view.d_exact(1)
+	let scale = sg.d_exact(1)
+	let x = object.x
+	let y = object.y
+	if (object.type == 'chair' && object.rot % 90) {
+		let r = object.rot * rad
+		x -= sign(sin(r)) * object.w / 4
+		y += sign(cos(r)) * object.l / 4
+	}
 	cx.save()
-	cx.translate(view.x(object.x), view.y(object.y))
+	cx.translate(sg.x(x), sg.y(y))
 	cx.rotate(object.rot * rad)
 	cx.scale(scale, scale)
 	cx.lineWidth /= scale
@@ -578,7 +552,7 @@ function draw_furniture(cx, view, plan, object) {
 
 // the width on the bottom edge and the length on the right edge of the
 // piece, the edges of its sketch: draw_length puts each outside its edge.
-function draw_furniture_sizes(cx, view, plan, object, draw_length) {
+function draw_furniture_sizes(cx, sg, plan, object, draw_length) {
 	let r = object.rot * rad
 	let ux = round(cos(r)) // the sketch's x axis in the plan.
 	let uy = round(sin(r))
@@ -590,37 +564,37 @@ function draw_furniture_sizes(cx, view, plan, object, draw_length) {
 	let y2 = object.y - uy * hw + ux * hl
 	let x3 = object.x + ux * hw + uy * hl // top right corner.
 	let y3 = object.y + uy * hw - ux * hl
-	draw_length(cx, view, x1, y1, x2, y2)
-	draw_length(cx, view, x3, y3, x1, y1)
+	draw_length(cx, sg, x1, y1, x2, y2)
+	draw_length(cx, sg, x3, y3, x1, y1)
 }
 
 // the distances from an object that spans lo to hi along a room side to the
 // side's ends, drawn on the side: its free space is on the left of the walking
 // direction, where draw_length puts the dimension.
-function draw_side_dims(cx, view, side, is_v, lo, hi, draw_length) {
+function draw_side_dims(cx, sg, side, is_v, lo, hi, draw_length) {
 	let c = side[1]
 	let m1 = side[2]
 	let m2 = side[3]
 	let a1 = m2 > m1 ? lo : hi // the object's end met first from m1.
 	let a2 = m2 > m1 ? hi : lo
 	if (is_v) {
-		draw_length(cx, view, c, m1, c, a1)
-		draw_length(cx, view, c, a2, c, m2)
+		draw_length(cx, sg, c, m1, c, a1)
+		draw_length(cx, sg, c, a2, c, m2)
 	} else {
-		draw_length(cx, view, m1, c, a1, c)
-		draw_length(cx, view, a2, c, m2, c)
+		draw_length(cx, sg, m1, c, a1, c)
+		draw_length(cx, sg, a2, c, m2, c)
 	}
 }
 
 // the distances from the piece's box to the ends of the room sides that it
 // rests against.
-function draw_furniture_wall_dims(cx, view, plan, object, draw_length) {
+function draw_furniture_wall_dims(cx, sg, plan, object, draw_length) {
 	furniture_box(plan, object, box)
 	if (object.side_x)
-		draw_side_dims(cx, view, object.side_x, true, box[1], box[3],
+		draw_side_dims(cx, sg, object.side_x, true, box[1], box[3],
 			draw_length)
 	if (object.side_y)
-		draw_side_dims(cx, view, object.side_y, false, box[0], box[2],
+		draw_side_dims(cx, sg, object.side_y, false, box[0], box[2],
 			draw_length)
 }
 
@@ -693,33 +667,51 @@ let house_object_types = {
 		draw_sizes: draw_opening_size,
 		draw_wall_dims: draw_opening_wall_dims,
 		// a line along the middle of the box, 2 px thinner than the wall.
-		draw: function(cx, view, plan, object) {
-			opening_box(plan, object, box)
-
-			let sx1 = view.x(box[0])
-			let sy1 = view.y(box[1])
-			let sx2 = view.x(box[2])
-			let sy2 = view.y(box[3])
-
-			if (!object.seg) {
+		draw: function(cx, sg, plan, object) {
+			let scale = sg.d_exact(1)
+			let is_v = opening_is_v(object)
+			let a = is_v ? object.x : object.y
+			let d = plan.house.ext_wall_thickness / 2
+			let y1 = object.seg ? object.seg.wall_a1 - a : -d
+			let y2 = object.seg ? object.seg.wall_a2 - a : d
+			// fit the window cut without touching wall borders
+			let inset = 1 / scale
+			let w = object.w - 2 * inset
+			let h = y2 - y1
+			cx.save()
+			cx.translate(sg.x(object.x), sg.y(object.y))
+			cx.scale(scale, scale)
+			if (is_v)
+				cx.transform(0, 1, 1, 0, 0, 0)
+			cx.translate(-object.w / 2 + inset, y1)
+			cx.lineWidth /= scale
+			if (sg.scale > 0.02) {
 				cx.beginPath()
-				cx.rect(sx1 - 1, sy1 - 1, sx2 - sx1 + 2, sy2 - sy1 + 2)
-				cx.fillStyle = ui.color_css('bg')
+				cx.rect(0, 0, w, h)
+				cx.fillStyle = ui.alpha_adjust(ui.color_obj('bg1'), .5)
 				cx.fill()
+				if (!object.seg) { // not encased: draw casing
+					cx.stroke()
+				} else { // encased: skip lateral casing, draw only wall edge faintly
+					cx.beginPath()
+					cx.moveTo(0, 0)
+					cx.lineTo(w, 0)
+					cx.moveTo(0, h)
+					cx.lineTo(w, h)
+					let ss = cx.strokeStyle
+					cx.strokeStyle = ui.theme().is_dark
+						? ui.color_css('bg2')
+						: ui.alpha_adjust(ui.color_obj('text'), .2)
+					cx.stroke()
+					cx.strokeStyle = ss
+				}
 			}
 
-			let x = (sx1 + sx2) / 2
-			let y = (sy1 + sy2) / 2
-			let w = view.d(object.w)
-			cx.save()
-			cx.translate(x, y)
-			cx.rotate(object.rot * rad)
-
 			cx.beginPath()
-			cx.moveTo(-w / 2, 0)
-			cx.lineTo(w / 2, 0)
-			cx.restore()
+			cx.moveTo(0, h / 2)
+			cx.lineTo(w, h / 2)
 			cx.stroke()
+			cx.restore()
 		},
 	},
 
@@ -738,26 +730,42 @@ let house_object_types = {
 		draw_sizes: draw_opening_size,
 		draw_wall_dims: draw_opening_wall_dims,
 		// the leaf, open at right angles, and its swing.
-		draw: function(cx, view, plan, object) {
-			draw_opening_box(cx, view, plan, object)
-			let x = (view.x(box[0]) + view.x(box[2])) / 2
-			let y = (view.y(box[1]) + view.y(box[3])) / 2
-			let w = view.d(object.w)
-			cx.save()
-			cx.translate(x, y)
-			cx.rotate(object.rot * rad)
+		draw: function(cx, sg, plan, object) {
+			let scale = sg.d_exact(1)
+			let is_v = opening_is_v(object)
+			let w = object.w
+			// the hole's corners rounded like the wall paths.
+			opening_box(plan, object, box)
+			let sx1 = sg.x(box[0])
+			let sy1 = sg.y(box[1])
+			let sx2 = sg.x(box[2])
+			let sy2 = sg.y(box[3])
+			// walls stroked: the width of their strokes, else 0.
+			let line_width = sg.scale > 0.04 ? sg.line_width : 0
+			// fill clear of the wall strokes: a 1px stroke on a pixel edge
+			// half-covers the pixels on both sides.
+			let inset = ceil(line_width / 2)
 			cx.beginPath()
-			if (object.mirror) {
-				cx.moveTo(w / 2, 0)
-				cx.lineTo(w / 2, -w)
-				cx.arc(w / 2, 0, w, -PI / 2, -PI, true)
-			} else {
-				cx.moveTo(-w / 2, 0)
-				cx.lineTo(-w / 2, -w)
-				cx.arc(-w / 2, 0, w, -PI / 2, 0)
-			}
-			cx.restore()
+			cx.rect(sx1 + inset, sy1 + inset,
+				sx2 - sx1 - 2 * inset, sy2 - sy1 - 2 * inset)
+			cx.fillStyle = ui.alpha_adjust(ui.color_obj('bg1'), .5)
+			cx.fill()
+			if (!object.seg)
+				cx.stroke()
+			cx.save()
+			cx.translate(sg.x(object.x), sg.y(object.y))
+			cx.scale(scale, scale)
+			cx.lineWidth /= scale
+			cx.rotate(object.rot * rad)
+			if (object.mirror)
+				cx.scale(-1, 1)
+			cx.translate(-w / 2, 0)
+			cx.beginPath()
+			cx.moveTo(0, 0)
+			cx.lineTo(0, -w)
+			cx.arc(0, 0, w, -PI / 2, 0)
 			cx.stroke()
+			cx.restore()
 		},
 		// space: the next of the four orientations: hinge on the other side,
 		// then the swing on the other side of the wall.

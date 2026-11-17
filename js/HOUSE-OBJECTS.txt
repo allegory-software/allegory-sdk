@@ -6,14 +6,19 @@ ALL UNCOMMITTED on branch dev (as of the end of session 1). Ask before committin
 
 ## Cosmin's nitpicks (all four BUILT 2026-11-17, see "Nitpicks round 3" at the end)
 
+- set drag threshold to 0.
 - can't resize bed length while snapped
 - corner snap is jittery, i think because bbox changes. measurements should not change,
 only drawing.
 - update draw_length to remove the arrows when text and arrows don't fit together
-and only when text alone doesn't fit show nothing
-- walls have 3 ways of drawing depending on level of detail. at level 2 objects should
-show with 1px outlines. at level 3 windows should show with one 1px faint line
-- shadow walls from other floors should show the plan before it is cut by openings.
+and when even text alone doesn't fit show nothing (no more "...").
+- windows should draw an outline on the window when not encased.
+- walls have 3 ways of drawing depending on level of detail.
+	- at level 1 draw normally.
+	- at level 2 objects should show with 1px outlines instead of 2px
+	- at level 3 windows should show one 1px faint center line.
+- dimensions on snapping wall should show as soon as the object is clicked
+not only after drag treshold.
 
 
 ## Cosmin's request (2026-11-17)

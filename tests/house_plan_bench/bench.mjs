@@ -122,7 +122,9 @@ function report(name, samples) {
 let browser
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
 try {
-	browser = await chromium.launch({channel: 'chrome', headless: true})
+	browser = await chromium.launch({
+		channel: 'chrome', headless: true, args: ['--enable-gpu'],
+	})
 	const page = await browser.newPage({viewport: {width: 1600, height: 900}})
 	page.setDefaultTimeout(120000)
 	let errors = []

@@ -107,7 +107,7 @@ function draw_edges(cx, sg, eps) {
 }
 
 function draw_walls(cx, sg, paths, segs) {
-	if (sg.scale <= 0.02) { // to small to even show edges
+	if (sg.scale <= 0.02) { // too small to even show edges
 		for (let seg of segs) {
 			let x1 = sg.x(seg[0][0]) + .5
 			let y1 = sg.y(seg[0][1]) + .5
@@ -187,7 +187,7 @@ function last_perp_edge_point(c, i, n, dir, v) {
 function draw_length(cx, sg, x1, y1, x2, y2, s) {
 
 	let d = distance(x1, y1, x2, y2)
-	if (sg.d(d) < 20)
+	if (!d)
 		return
 
 	;[x1, y1, x2, y2] = line2.offset(-100, x1, y1, x2, y2)
@@ -218,40 +218,42 @@ function draw_length(cx, sg, x1, y1, x2, y2, s) {
 	let t1 = clamp((sg.d(d) - (w + 10)) / 2 / sg.d(d), 0, 1)
 	let t2 = clamp((sg.d(d) + (w + 10)) / 2 / sg.d(d), 0, 1)
 
-	if (!(t1 > 0 && t2 < 1)) {
-		s = '...'
-		w = 10
+	if (sg.d(d) < w) {
+		cx.restore()
+		return
 	}
 
 	cx.translate(.5, .5)
 
 	cx.beginPath()
 
-	// left arrow
-	let [x1a1, y1a1] = point_around(x1, y1, 8, a + 45*rad)
-	let [x1a2, y1a2] = point_around(x1, y1, 8, a - 45*rad)
-	let [x1e, y1e] = line2.at(t1, x1, y1, x2, y2, out)
+	if (sg.d(d) >= w + 10 + 2 * 8 * cos(45*rad)) {
+		// left arrow
+		let [x1a1, y1a1] = point_around(x1, y1, 8, a + 45*rad)
+		let [x1a2, y1a2] = point_around(x1, y1, 8, a - 45*rad)
+		let [x1e, y1e] = line2.at(t1, x1, y1, x2, y2, out)
 
-	cx.moveTo(x1  , y1)
-	cx.lineTo(x1a1, y1a1)
-	cx.moveTo(x1  , y1)
-	cx.lineTo(x1a2, y1a2)
-	cx.moveTo(x1  , y1)
-	cx.lineTo(x1e , y1e)
+		cx.moveTo(x1  , y1)
+		cx.lineTo(x1a1, y1a1)
+		cx.moveTo(x1  , y1)
+		cx.lineTo(x1a2, y1a2)
+		cx.moveTo(x1  , y1)
+		cx.lineTo(x1e , y1e)
 
-	// right arrow
-	let [x2a1, y2a1] = point_around(x2, y2, 8, a + (90+45)*rad)
-	let [x2a2, y2a2] = point_around(x2, y2, 8, a - (90+45)*rad)
-	let [x2e, y2e] = line2.at(t2, x1, y1, x2, y2, out)
-	cx.moveTo(x2  , y2)
-	cx.lineTo(x2a1, y2a1)
-	cx.moveTo(x2  , y2)
-	cx.lineTo(x2a2, y2a2)
-	cx.moveTo(x2  , y2)
-	cx.lineTo(x2e , y2e)
+		// right arrow
+		let [x2a1, y2a1] = point_around(x2, y2, 8, a + (90+45)*rad)
+		let [x2a2, y2a2] = point_around(x2, y2, 8, a - (90+45)*rad)
+		let [x2e, y2e] = line2.at(t2, x1, y1, x2, y2, out)
+		cx.moveTo(x2  , y2)
+		cx.lineTo(x2a1, y2a1)
+		cx.moveTo(x2  , y2)
+		cx.lineTo(x2a2, y2a2)
+		cx.moveTo(x2  , y2)
+		cx.lineTo(x2e , y2e)
 
-	cx.strokeStyle = ui.color_css('text')
-	cx.stroke()
+		cx.strokeStyle = ui.color_css('text')
+		cx.stroke()
+	}
 
 	let [xc, yc] = line2.at(.5, x1, y1, x2, y2, out)
 	cx.translate(xc, yc)
@@ -544,7 +546,7 @@ function hit_object_in(objects, plan, hs, sg) {
 // the hovered object in the link color, objects on the ground in the readonly
 // text color, or in the error color if they touch the house.
 function draw_objects(cx, sg, plan, objects, hit_object, is_ground) {
-	cx.lineWidth = 2
+	cx.lineWidth = sg.scale > 0.04 ? 2 : 1
 	for (let object of objects) {
 		let object_type = house_object_types[object.type]
 		let is_touching = false
@@ -758,8 +760,11 @@ function floor_editor_update(id, s) {
 			let nosnap = ui.keypressed('ctrl')
 			// past the drag threshold, or with ctrl at the first movement: a
 			// press without movement starts no edit, so a double-click can.
-			let is_moved = cs.moved || nosnap && !!(cs.dx || cs.dy)
-			let is_resize_drag = abs(dx) >= 100 || abs(dy) >= 100
+			let drag_threshold = 0
+			let is_moved = abs(dx) > drag_threshold || abs(dy) > drag_threshold
+				|| nosnap && !!(cs.dx || cs.dy)
+			let is_resize_drag = abs(dx) >= drag_threshold
+				|| abs(dy) >= drag_threshold
 
 			if (!readonly && !s.is_roof_level && !action && is_resize_drag) { // dragged far enough to assume intent to drag.
 
@@ -809,8 +814,7 @@ function floor_editor_update(id, s) {
 					snap_distance(sg, nosnap ? 20 : 200))
 			}
 
-			// an object end resizes only past the drag threshold or with
-			// ctrl.
+			// an object end resizes only past the drag threshold or with ctrl.
 			if (action == 'resize_object') {
 				if (is_moved)
 					cs.edit ??= plan.start_resize_object(cs.object,
@@ -908,7 +912,8 @@ function floor_editor_update(id, s) {
 	// clicked inside a room without dragging: open or close the room. ctrl:
 	// a move, not a click.
 	let is_toggling_room = !readonly && cs?.drop && !cs.cancel && !cs.moved
-		&& !cs.edit && !ui.keypressed('ctrl') && (!cs.action || cs.action == 'move_room_point') && cs.cycle
+		&& !cs.edit && !ui.keypressed('ctrl')
+		&& (!cs.action || cs.action == 'move_room_point') && cs.cycle
 	if (is_toggling_room)
 		plan.toggle_room(cs.cycle, cs.room_x, cs.room_y)
 
@@ -1056,8 +1061,9 @@ ui.box_widget('floor_editor', {
 			}
 			function set_scale(sc) {
 				s.scale = sc
-				// snap line width to an even number for sharpness
-				s.line_width = snap(line_width * sc * devicePixelRatio, 2)
+				// snap line width to an even number for sharpness, at least 1:
+				// canvas ignores a 0 line width.
+				s.line_width = max(1, snap(line_width * sc * devicePixelRatio, 2))
 			}
 			let bb = bbox2()
 			// set the scale and the origin (x0, y0, in pixels from widget's origin)
@@ -1677,7 +1683,7 @@ ui.box_widget('floor_editor', {
 		// objects: the ground's under the floor's.
 		draw_objects(cx, sg, plan, draw_state.ground_objects, hit_object, true)
 		draw_objects(cx, sg, plan, draw_state.objects, hit_object, false)
-		let is_moving_object = drag_action == 'move_object' && cs.edit
+		let is_moving_object = drag_action == 'move_object'
 		draw_object_dims(cx, sg, plan, draw_state.ground_objects, hit_object,
 			is_moving_object)
 		draw_object_dims(cx, sg, plan, draw_state.objects, hit_object,

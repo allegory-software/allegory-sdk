@@ -297,7 +297,14 @@ for (let [y, dy, expected] of [
 		capture.dy = 400 * sg.scale * Math.sin(angle)
 		frame()
 		assert.deepEqual(dimensions, expected)
-		assert(strokes.filter(s => s.length == 12).length >= expected.length)
+		let arrow_n = 0
+		for (let [x1, y1, x2, y2] of expected) {
+			let pixels = sg.d(Math.hypot(x2 - x1, y2 - y1))
+			if (pixels >= 40 + 10 + 16 * Math.cos(Math.PI / 4))
+				arrow_n++
+		}
+		assert.equal(strokes.filter(s => s.length == 12).length, arrow_n)
+		assert(!texts.some(t => t.text == '...'))
 		capture.cancel = true
 		frame()
 		capture = null

@@ -3251,20 +3251,44 @@ check('a bed length resize stops at the wall of its room', () => {
 	s.cancel()
 })
 
-check('a chair in a corner turns by 45 degrees and rests on both walls', () => {
+check('a snapped bed can change length while its head stays at the wall', () => {
+	let h = opening_house([])
+	let f = h.floors[0]
+	f.add_object({type: 'bed', rot: 0, l: 1900}, 3000, 980, 200)
+	let object = f.objects.at(-1)
+	let s = f.start_resize_object(object, 1, 'l')
+	s.resize(0, 100)
+	assert.equal(object.l, 2000)
+	assert.equal(object.y - object.l / 2, 40)
+	s.resize(0, 0)
+	assert.equal(object.l, 1900)
+	assert.equal(object.y - object.l / 2, 40)
+	s.cancel()
+})
+
+check('a chair in a corner turns by 45 degrees and keeps its measured box', () => {
 	let h = opening_house([])
 	let f = h.floors[0]
 	let chair = add_furniture(f, 'chair', 0, 300, 300, 200)
 	assert.equal(chair.rot, 315) // its back to the north-west corner.
-	assert.equal(chair.x, 359) // 40 + (450 + 450) / 2 * cos 45, rounded in.
-	assert.equal(chair.y, 359)
+	assert.equal(chair.x, 265) // the measured square stays against both walls.
+	assert.equal(chair.y, 265)
 	assert(chair.on_floor)
 	assert.equal(chair.side_x[1], 40)
 	assert.equal(chair.side_y[1], 40)
+	let s = f.start_move_object(chair)
+	for (let i = 0; i < 8; i++) {
+		s.move(300, 300, 200)
+		assert.equal(chair.x, 265)
+		assert.equal(chair.y, 265)
+		assert.equal(chair.rot, 315)
+		assert(chair.side_x && chair.side_y)
+	}
+	s.stop()
 	chair = add_furniture(f, 'chair', 0, 5700, 3700, 200)
 	assert.equal(chair.rot, 135) // south-east.
-	assert.equal(chair.x, 5641)
-	assert.equal(chair.y, 3641)
+	assert.equal(chair.x, 5735)
+	assert.equal(chair.y, 3735)
 	chair = add_furniture(f, 'chair', 0, 5700, 300, 200)
 	assert.equal(chair.rot, 45) // north-east.
 	chair = add_furniture(f, 'chair', 0, 300, 3700, 200)
