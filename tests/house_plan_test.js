@@ -2633,7 +2633,8 @@ let default_n = Object.keys(ctx.house_object_types).length // default objects.
 check('a new house has one default object of each type on the ground', () => {
 	let h = house({floors: [{lines: [rect_lines(0, 0, 6000, 4000)]}]})
 	assert.deepEqual(Array.from(h.ground_objects, o => o.type),
-		['window', 'door', 'bed', 'chair', 'wc', 'open_room', 'terrace'])
+		['window', 'door', 'bed', 'chair', 'wc', 'countertop',
+			'open_room', 'terrace'])
 	assert.equal(h.floors[0].objects.length, 0)
 })
 
@@ -2641,10 +2642,11 @@ check('loading adds the types missing from the ground, in their places', () => {
 	let h = house({floors: [{lines: [rect_lines(0, 0, 6000, 4000)]}],
 		ground_objects: [{type: 'door', x: 100, y: 200, rot: 90}]})
 	assert.deepEqual(Array.from(h.ground_objects, o => o.type),
-		['door', 'window', 'bed', 'chair', 'wc', 'open_room', 'terrace'])
+		['door', 'window', 'bed', 'chair', 'wc', 'countertop',
+			'open_room', 'terrace'])
 	assert.deepEqual(Array.from(h.ground_objects, o => [o.x, o.y]),
 		[[100, 200], [-750, -2000], [2250, -2000], [3750, -2000],
-			[5250, -2000], [6750, -2000], [8250, -2000]])
+			[5250, -2000], [6750, -2000], [8250, -2000], [9750, -2000]])
 	assert.equal(h.ground_objects[0].rot, 90)
 	let h2 = house(h.save_state())
 	assert.equal(h2.ground_objects.length, default_n)
@@ -3173,10 +3175,67 @@ check('furniture rests its snapping face against the wall it is near', () => {
 	assert(!object.seg)
 })
 
+check('furniture placement stays unchanged with identical drag input', () => {
+	let f = opening_house([]).floors[0]
+	let bed = add_furniture(f, 'bed', 0, 3000, 2000, 0)
+	let s = f.start_move_object(bed)
+	for (let x of [500, 940]) {
+		s.move(x, x, 200, 30)
+		let state = JSON.stringify(bed)
+		for (let i = 0; i < 4; i++) {
+			s.move(x, x, 200, 30)
+			assert.equal(JSON.stringify(bed), state)
+		}
+	}
+	assert(bed.side_x && bed.side_y)
+	assert(bed.on_floor)
+	s.cancel()
+})
+
+check('furniture switches walls only beyond the translation margin', () => {
+	let f = opening_house([]).floors[0]
+	let bed = add_furniture(f, 'bed', 0, 3000, 1100, 200)
+	let s = f.start_move_object(bed)
+	s.move(1130, 1140, 200, 30)
+	assert.equal(bed.snap_side[0], 0)
+	assert.equal(bed.rot, 0)
+	s.move(1110, 1140, 200, 30)
+	assert.equal(bed.snap_side[0], 0) // exactly the switching margin.
+	s.move(1100, 1140, 200, 30)
+	assert.equal(bed.snap_side[0], 3)
+	assert.equal(bed.rot, 270)
+	s.cancel()
+})
+
+check('furniture releases a wall outside snapping range', () => {
+	let f = opening_house([]).floors[0]
+	let bed = add_furniture(f, 'bed', 0, 3000, 1100, 200)
+	let s = f.start_move_object(bed)
+	s.move(3000, 2000, 200, 3000)
+	assert.equal(bed.snap_side, null)
+	assert.equal(bed.side_x, null)
+	assert.equal(bed.side_y, null)
+	assert.equal(bed.rot, 0)
+	assert.equal(bed.x, 3000)
+	assert.equal(bed.y, 2000)
+	s.cancel()
+})
+
+check('furniture keeps the current wall on a tie with zero margin', () => {
+	let f = opening_house([]).floors[0]
+	let bed = add_furniture(f, 'bed', 0, 3000, 1100, 200)
+	let s = f.start_move_object(bed)
+	s.move(1140, 1140, 200)
+	assert.equal(bed.snap_side[0], 0)
+	s.move(1130, 1140, 200)
+	assert.equal(bed.snap_side[0], 3)
+	s.cancel()
+})
+
 check('furniture turns to a snapping face when pushed against a wall', () => {
 	let h = opening_house([])
 	let f = h.floors[0]
-	let object = add_furniture(f, 'bed', 0, 5200, 2000, 200)
+	let object = add_furniture(f, 'bed', 0, 5160, 2000, 200)
 	assert.equal(object.rot, 90) // the head is at the east wall.
 	assert.equal(object.x, 4960)
 	assert.equal(object.y, 2000)
@@ -3412,6 +3471,261 @@ check('a window shows its width and its distances to the wall ends', () => {
 	type.draw_wall_dims(null, null, f, window, draw_length)
 	assert.deepEqual(calls,
 		[[40, -140, 2400, -140], [3600, -140, 5960, -140]])
+})
+
+// countertop ---------------------------------------------------------------
+
+function countertop_floor(legs, rot = 0) {
+	let h = house({floors: [{lines: [rect_lines(0, 0, 8000, 8000)]}]})
+	let f = h.floors[0]
+	f.add_object({type: 'countertop', rot: rot, legs: legs}, 3000, 3000, 0)
+	return f
+}
+
+function countertop_handle(f, object, x, y) {
+	let hs = {mouse_x: x, mouse_y: y}
+	let sg = {plan_d: d => d * 10}
+	assert(ctx.house_object_types.countertop.hit_resize(sg, f, object, hs))
+	return hs.object_side
+}
+
+check('countertop handles extend and retract from all four free corners', () => {
+	for (let start of [false, true]) {
+		for (let side of [-1, 1]) {
+			let f = countertop_floor()
+			let object = f.objects.at(-1)
+			let x = start ? 3200 : 4600, y = 3000 + side * 300
+			let handle = countertop_handle(f, object, x, y)
+			let s = f.start_resize_object(object, handle)
+			s.resize(0, side * 800)
+			assert.equal(object.legs.length, 6)
+			assert.equal(object.legs[4], 1400)
+			assert.equal(object.legs[5], 600)
+			s.stop()
+			let end_x = start ? 3300 : 4500
+			let end_y = 3000 + side * 1100
+			handle = countertop_handle(f, object, end_x, end_y)
+			s = f.start_resize_object(object, handle)
+			s.resize(0, -side * 900)
+			assert.equal(object.legs.length, 3)
+			s.stop()
+			let bounds = []
+			ctx.house_object_types.countertop.box(f, object, bounds)
+			assert.deepEqual(bounds, [3000, 2700, 4800, 3300])
+		}
+	}
+})
+
+check('countertop depths use 50 mm steps and affect only the selected leg', () => {
+	let f = countertop_floor([0, 1800, 600, 1, 2000, 600])
+	let object = f.objects.at(-1)
+	let handle = countertop_handle(f, object, 4800, 4000)
+	let s = f.start_resize_object(object, handle)
+	s.resize(177, 0)
+	assert.deepEqual(Array.from(object.legs), [0, 1800, 600, 1, 2000, 800])
+	s.resize(2000, 0)
+	assert.equal(object.legs[5], 1200)
+	s.resize(-2000, 0)
+	assert.equal(object.legs[5], 350)
+	s.cancel()
+	assert.deepEqual(Array.from(f.objects.at(-1).legs),
+		[0, 1800, 600, 1, 2000, 600])
+})
+
+check('countertop copies, saved states and undo own independent leg arrays', () => {
+	let f = countertop_floor()
+	let object = f.objects.at(-1)
+	let state = f.house.save_state()
+	let copy = f.house.save_object(object)
+	assert.notEqual(copy.legs, object.legs)
+	let handle = countertop_handle(f, object, 4600, 3300)
+	let s = f.start_resize_object(object, handle)
+	s.resize(0, 1000)
+	s.stop()
+	assert.equal(copy.legs.length, 3)
+	assert.equal(state.floors[0].objects[0].legs.length, 3)
+	f.house.undo()
+	assert.equal(f.objects.at(-1).legs.length, 3)
+	f.house.redo()
+	assert.equal(f.objects.at(-1).legs.length, 6)
+	let h1 = house(f.house.save_state())
+	assert.deepEqual(Array.from(h1.floors[0].objects.at(-1).legs),
+		Array.from(f.objects.at(-1).legs))
+	f.add_object(copy, 1000, 1000, 0)
+	assert.notEqual(f.objects.at(-1).legs, copy.legs)
+})
+
+check('countertop snapping and rotated extension use the leg geometry', () => {
+	let f = countertop_floor(undefined, 90)
+	let object = f.objects.at(-1)
+	let handle = countertop_handle(f, object, 2700, 4600)
+	let s = f.start_resize_object(object, handle)
+	s.resize(-800, 0)
+	s.stop()
+	let bounds = []
+	ctx.house_object_types.countertop.box(f, object, bounds)
+	assert.deepEqual(bounds, [1900, 3000, 3300, 4800])
+	s = f.start_move_object(object)
+	s.move(1100, 1000, 100)
+	s.stop()
+	assert.equal(object.x, 1140)
+	assert(object.on_floor)
+})
+
+check('short countertop end zones select the nearest free end', () => {
+	let f = countertop_floor([0, 800, 600])
+	let object = f.objects.at(-1)
+	assert(countertop_handle(f, object, 3300, 3300) < 0)
+	assert(countertop_handle(f, object, 3500, 3300) > 0)
+})
+
+check('countertop legs fit an L room and do not hit its empty corner', () => {
+	let lines = [[null, [0, 0], [6000, 0]], [null, [6000, 0], [6000, 6000]],
+		[null, [6000, 6000], [4000, 6000]],
+		[null, [4000, 6000], [4000, 2000]],
+		[null, [4000, 2000], [0, 2000]], [null, [0, 2000], [0, 0]]]
+	let h = house({floors: [{lines: lines}]})
+	let f = h.floors[0]
+	f.add_object({type: 'countertop', rot: 0,
+		legs: [0, 1800, 600, 1, 3000, 600]}, 3000, 1000, 0)
+	let object = f.objects.at(-1)
+	assert(object.on_floor)
+	let type = ctx.house_object_types.countertop
+	let sg = {x: x => x, y: y => y, plan_d: d => d * 10}
+	let mx = 3500, my = 3000
+	ctx.ui = {hit_bbox: (x1, y1, x2, y2) =>
+		mx >= x1 && mx <= x2 && my >= y1 && my <= y2}
+	assert.equal(type.hit(sg, f, object), false)
+	mx = 4500
+	assert.equal(type.hit(sg, f, object), true)
+	delete ctx.ui
+	let hs = {mouse_x: 4500, mouse_y: 1300}
+	assert.equal(type.hit_resize(sg, f, object, hs), false)
+})
+
+check('countertop ends can turn repeatedly and retract one leg at a time', () => {
+	let f = countertop_floor([0, 1800, 600, 1, 2000, 600])
+	let object = f.objects.at(-1)
+	let handle = countertop_handle(f, object, 4800, 4500)
+	let s = f.start_resize_object(object, handle)
+	s.resize(1000, 0)
+	s.stop()
+	assert.deepEqual(Array.from(object.legs),
+		[0, 1800, 600, 1, 2000, 600, 0, 1600, 600])
+	handle = countertop_handle(f, object, 5800, 4400)
+	s = f.start_resize_object(object, handle)
+	s.resize(-1100, 0)
+	s.stop()
+	assert.deepEqual(Array.from(object.legs), [0, 1800, 600, 1, 2000, 600])
+})
+
+check('countertop geometry follows edits to saved leg fields', () => {
+	let f = countertop_floor()
+	let object = f.objects.at(-1)
+	let type = ctx.house_object_types.countertop
+	let bounds = []
+	type.box(f, object, bounds)
+	f.update_object(object, o => { o.legs[1] = 2000 })
+	type.box(f, object, bounds)
+	assert.deepEqual(bounds, [3000, 2700, 5000, 3300])
+	f.house.undo()
+	type.box(f, f.objects.at(-1), bounds)
+	assert.deepEqual(bounds, [3000, 2700, 4800, 3300])
+})
+
+check('countertop length resize snaps its end without moving its start', () => {
+	for (let start of [false, true]) {
+		let f = countertop_floor()
+		let object = f.objects.at(-1)
+		let x = start ? 3000 : 4800
+		let handle = countertop_handle(f, object, x, 3000)
+		let s = f.start_resize_object(object, handle)
+		s.resize(start ? -2900 : 3100, 0, 100)
+		let bounds = []
+		ctx.house_object_types.countertop.box(f, object, bounds)
+		assert.deepEqual(bounds,
+			start ? [40, 2700, 4800, 3300] : [3000, 2700, 7960, 3300])
+		s.resize(start ? -2900 : 3100, 0, 20)
+		ctx.house_object_types.countertop.box(f, object, bounds)
+		assert.deepEqual(bounds,
+			start ? [100, 2700, 4800, 3300] : [3000, 2700, 7900, 3300])
+		s.cancel()
+	}
+})
+
+check('countertop extensions snap from either free end and after rotation', () => {
+	for (let start of [false, true]) {
+		let f = countertop_floor()
+		let object = f.objects.at(-1)
+		let handle = countertop_handle(f, object, start ? 3200 : 4600, 3300)
+		let s = f.start_resize_object(object, handle)
+		s.resize(0, 4600, 100)
+		let bounds = []
+		ctx.house_object_types.countertop.box(f, object, bounds)
+		assert.equal(bounds[3], 7960)
+		assert.equal(object.legs[5], 600)
+		s.cancel()
+	}
+	let f = countertop_floor(undefined, 90)
+	let object = f.objects.at(-1)
+	let handle = countertop_handle(f, object, 2700, 4600)
+	let s = f.start_resize_object(object, handle)
+	s.resize(-2600, 0, 100)
+	let bounds = []
+	ctx.house_object_types.countertop.box(f, object, bounds)
+	assert.equal(bounds[0], 40)
+	s.cancel()
+})
+
+check('countertop depth remains in 50 mm steps near a wall', () => {
+	let f = countertop_floor()
+	let object = f.objects.at(-1)
+	let move = f.start_move_object(object)
+	move.move(3000, 7500, 0)
+	move.stop()
+	let handle = countertop_handle(f, object, 3900, 7800)
+	let s = f.start_resize_object(object, handle)
+	s.resize(0, 100, 200)
+	assert.equal(object.legs[2], 700)
+	let bounds = []
+	ctx.house_object_types.countertop.box(f, object, bounds)
+	assert.equal(bounds[3], 7900)
+	s.cancel()
+})
+
+check('countertop measurements offset towards the inside of each leg', () => {
+	let f = countertop_floor([0, 1800, 600, 1, 2000, 600])
+	let object = f.objects.at(-1)
+	let lines = []
+	ctx.house_object_types.countertop.draw_sizes(null, null, f, object,
+		(cx, sg, x1, y1, x2, y2) => {
+			lines.push(Array.from(ctx.Math3D.line2.offset(-100, x1, y1, x2, y2)))
+		})
+	assert.deepEqual(lines, [[4800, 2800, 3000, 2800],
+		[4700, 3300, 4700, 2700], [4800, 2800, 4200, 2800],
+		[4700, 4700, 4700, 2700]])
+})
+
+check('countertop resize highlights only the hovered handle segment', () => {
+	let f = countertop_floor()
+	let object = f.objects.at(-1)
+	let lines = [], line
+	let cx = {save() {}, restore() {}, translate() {}, rotate() {}, scale() {},
+		lineWidth: 1, beginPath() {}, stroke() {},
+		moveTo(x, y) { line = [x, y] },
+		lineTo(x, y) { lines.push([...line, x, y]) }}
+	let sg = {d_exact: d => d, x: x => x, y: y => y}
+	for (let [x, y, expected] of [
+		[3200, 3300, [0, 300, 600, 300]],
+		[3900, 3300, [600, 300, 1200, 300]],
+		[4600, 3300, [1200, 300, 1800, 300]],
+		[4800, 3000, [1800, -300, 1800, 300]],
+	]) {
+		lines.length = 0
+		let handle = countertop_handle(f, object, x, y)
+		ctx.house_object_types.countertop.draw_resize(cx, sg, f, object, handle)
+		assert.deepEqual(lines, [expected])
+	}
 })
 
 console.log(n_checks + ' house plan checks passed')

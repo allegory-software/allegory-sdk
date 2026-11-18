@@ -522,6 +522,14 @@ function hit_object_in(objects, plan, hs, sg) {
 		let hit = object_type.hit(sg, plan, object) // true|'move'|false
 		let side = 0
 		let is_l = false
+		if (object_type.hit_resize
+			&& object_type.hit_resize(sg, plan, object, hs)) {
+			hs.object = object
+			hs.object_x = object.x
+			hs.object_y = object.y
+			hs.action = 'resize_object'
+			return true
+		}
 		if (hit !== 'move') {
 			if (object_type.w_list || object_type.w_range)
 				side = find_resize_side(object, object_type, plan, hs, sg,
@@ -550,7 +558,8 @@ function hit_object_in(objects, plan, hs, sg) {
 
 // the hovered object in the link color, objects on the ground in the readonly
 // text color, or in the error color if they touch the house.
-function draw_objects(cx, sg, plan, objects, hit_object, is_ground) {
+function draw_objects(cx, sg, plan, objects, hit_object, is_ground,
+	resize_side) {
 	cx.lineWidth = sg.scale > 0.04 ? 2 : 1
 	for (let object of objects) {
 		let object_type = house_object_types[object.type]
@@ -560,10 +569,16 @@ function draw_objects(cx, sg, plan, objects, hit_object, is_ground) {
 			is_touching = plan.is_rect_touching_house(object_box[0],
 				object_box[1], object_box[2], object_box[3])
 		}
+		let draw_resize = object == hit_object && resize_side
+			&& object_type.draw_resize
 		cx.strokeStyle = is_touching ? ui.color_css('error')
-			: object == hit_object ? ui.color_css('link')
+			: object == hit_object && !draw_resize ? ui.color_css('link')
 			: ui.color_css('text', is_ground ? 'readonly' : null)
 		object_type.draw(cx, sg, plan, object)
+		if (draw_resize) {
+			cx.strokeStyle = ui.color_css('link')
+			draw_resize(cx, sg, plan, object, resize_side)
+		}
 	}
 	cx.lineWidth = 1
 }
@@ -807,7 +822,7 @@ function floor_editor_update(id, s) {
 				if (is_moved)
 					cs.edit ??= plan.start_move_object(cs.object)
 				cs.edit?.move(cs.object_x + dx, cs.object_y + dy,
-					snap_distance(sg, nosnap ? 20 : 200))
+					snap_distance(sg, nosnap ? 20 : 200), 3 / sg.scale)
 			}
 
 			// an object end resizes only past the drag threshold or with ctrl.
@@ -815,7 +830,7 @@ function floor_editor_update(id, s) {
 				if (is_moved)
 					cs.edit ??= plan.start_resize_object(cs.object,
 						cs.object_side, cs.object_axis)
-				cs.edit?.resize(dx, dy)
+				cs.edit?.resize(dx, dy, snap_distance(sg, nosnap ? 20 : 200))
 			}
 
 			// an eave moves only past the drag threshold or with ctrl: a click
@@ -1670,8 +1685,12 @@ ui.box_widget('floor_editor', {
 			}
 
 		// objects: the ground's under the floor's.
-		draw_objects(cx, sg, plan, draw_state.ground_objects, hit_object, true)
-		draw_objects(cx, sg, plan, draw_state.objects, hit_object, false)
+		let resize_side = hit_action == 'resize_object' && !cs?.edit
+			? hs.object_side : null
+		draw_objects(cx, sg, plan, draw_state.ground_objects, hit_object, true,
+			resize_side)
+		draw_objects(cx, sg, plan, draw_state.objects, hit_object, false,
+			resize_side)
 		let is_moving_object = drag_action == 'move_object'
 		draw_object_dims(cx, sg, plan, draw_state.ground_objects, hit_object,
 			is_moving_object)

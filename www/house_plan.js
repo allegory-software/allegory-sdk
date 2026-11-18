@@ -117,8 +117,10 @@ function house_plan(t) {
 				rot: object.rot,
 				w: snap_length(object.w ?? object_type.w),
 			}
-			for (let name in object_type.fields)
-				object1[name] = object[name] ?? object_type.fields[name]
+			for (let name in object_type.fields) {
+				let value = object[name] ?? object_type.fields[name]
+				object1[name] = Array.isArray(value) ? value.slice() : value
+			}
 			a.push(object1)
 		}
 		return a
@@ -264,8 +266,10 @@ function house_plan(t) {
 	house.snap_lines = [] // [x lines, y lines] of all the floors
 
 	function fix_snap_lines() {
+		let t0 = profile_time()
 		house.snap_lines[0] = snap_lines_for(1)
 		house.snap_lines[1] = snap_lines_for(0)
+		profile_time('plan.snap_lines', t0)
 	}
 
 	function create_floor(t, floor_i) {
@@ -302,6 +306,7 @@ function house_plan(t) {
 		// the segs changed: place each object again where it is, in order, so
 		// it fits around the ones placed before it. no wall: to the ground.
 		function fix_objects() {
+			let t0 = profile_time()
 			let objects = floor.objects
 			for (let object of objects)
 				object.seg = null
@@ -317,6 +322,7 @@ function house_plan(t) {
 					house.ground_objects.push(object)
 				}
 			}
+			profile_time('plan.objects', t0)
 		}
 		floor.fix_objects = fix_objects
 
@@ -346,6 +352,7 @@ function house_plan(t) {
 
 		function create_edges() {
 
+			let t0 = profile_time()
 			wall_geometry = null
 
 			for (let p of floor.ps)
@@ -393,6 +400,7 @@ function house_plan(t) {
 
 			// recompute house plan bbox.
 			house.bb = house_bb()
+			profile_time('plan.offsets', t0)
 
 			fix_open_rooms()
 			house.roof_geometry_no++
@@ -429,6 +437,7 @@ function house_plan(t) {
 
 		// a room is open if it holds an open-room tag.
 		function fix_open_rooms() {
+			let t0 = profile_time()
 			floor.open_rooms.clear()
 			for (let object of floor.objects) {
 				if (!house_object_types[object.type].opens_room)
@@ -438,6 +447,7 @@ function house_plan(t) {
 					continue
 				floor.open_rooms.add(c)
 			}
+			profile_time('plan.rooms', t0)
 		}
 
 		// roof areas ----------------------------------------------------------
@@ -1221,12 +1231,12 @@ function house_plan(t) {
 
 		// let the object's type place it at (x, y) or on a wall near it, then
 		// put it in its list: on the floor: the floor's, else the ground's.
-		function move_object(object, x, y, snap_d) {
+		function move_object(object, x, y, snap_d, snap_margin) {
 			if (house_object_types[object.type].in_wall)
 				wall_geometry = null
 			let objects0 = object.on_floor ? floor.objects : house.ground_objects
 			house_object_types[object.type].place(floor, object,
-				snap_length(x), snap_length(y), snap_d)
+				snap_length(x), snap_length(y), snap_d, snap_margin)
 			let objects = object.on_floor ? floor.objects : house.ground_objects
 			if (objects != objects0) {
 				remove_value(objects0, object)
@@ -1266,13 +1276,13 @@ function house_plan(t) {
 		}
 
 		// start moving an object, which is on this floor or on the ground.
-		// s.move(x, y, snap_d) places it at (x, y) or on a wall within snap_d.
+		// s.move(x, y, snap_d, snap_margin = 0) places it near (x, y).
 		// s.stop() commits the move as one edit.
 		floor.start_move_object = function(object) {
 			begin_edit(floor)
 			let s = {}
-			s.move = function(x, y, snap_d) {
-				move_object(object, x, y, snap_d)
+			s.move = function(x, y, snap_d, snap_margin = 0) {
+				move_object(object, x, y, snap_d, snap_margin)
 			}
 			s.stop = function() {
 				commit_edit(floor)
@@ -1293,6 +1303,17 @@ function house_plan(t) {
 		floor.start_resize_object = function(object, side, axis = 'w') {
 			begin_edit(floor)
 			let object_type = house_object_types[object.type]
+			if (object_type.start_resize) {
+				let s = object_type.start_resize(floor, object, side)
+				let resize = s.resize
+				s.resize = function(dx, dy, snap_d) {
+					resize(dx, dy, snap_d)
+					move_object(object, object.x, object.y, 0)
+				}
+				s.stop = function() { commit_edit(floor) }
+				s.cancel = cancel_edit
+				return s
+			}
 			let is_l = axis == 'l'
 			let sizes = is_l ? object_type.l_list
 				: object_type.w_list ?? object_type.w_range

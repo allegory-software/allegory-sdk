@@ -16,6 +16,7 @@
 		     direction to the wall (0 north, 1 east, 2 south, 3 west), c the
 		     side's coordinate across it and m1, m2 its ends along it, in the
 		     order that the room's free space is on the left. not saved.
+		snap_side: furniture's primary snapped side, or null. not saved.
 		on_floor: the object is in the floor's list, not the ground's: it is
 		          in a wall or inside a room, or a tag on what it tags.
 		          set by place, not saved.
@@ -34,10 +35,12 @@
 		                     piece never snaps.
 		sketch(object)       optional: the SVG path string of the object's
 		                     outline in mm around its center.
-		place(plan, object, x, y, snap_d)
+		place(plan, object, x, y, snap_d, snap_margin = 0)
 		                     put the object at (x, y), or on a wall of
 		                     the plan within snap_d of it: sets x, y, rot,
 		                     seg (null when not on a wall) and on_floor.
+		                     Furniture switches walls when the translation
+		                     improves by more than snap_margin (plan units).
 		hole(plan, object) -> {rect: [x1, y1, x2, y2], sill:, head:}
 		                     the cut in the object's wall: sill and head
 		                     are heights above the floor's slab.
@@ -53,6 +56,14 @@
 		                     end at +y in its sketch. its top end stays.
 		limit_l(plan, object) -> l
 		                     optional: the longest the object can be.
+		hit_resize(sg, plan, object, hs) -> boolean
+		                     optional: hit a custom resize handle, writing
+		                     hs.object_side and hs.object_axis ('w' or 'l').
+		start_resize(plan, object, side) -> {resize(dx, dy, snap_d)}
+		                     optional: resize from the press displacement.
+		                     The plan owns stop, cancel and list membership.
+		draw_resize(cx, sg, plan, object, side)
+		                     optional: stroke the hovered resize segment.
 		draw_sizes(cx, sg, plan, object, draw_length)
 		                     optional: draw the dimensions of the axes that
 		                     the object can be resized on, with the editor's
@@ -85,7 +96,8 @@
 "use strict"
 const G = window
 
-const {abs, min, max, clamp, floor, ceil, round, sin, cos, rad, PI} = glue
+const {abs, min, max, clamp, floor, ceil, round, sin, cos, rad, PI,
+	array_set} = glue
 
 // openings ------------------------------------------------------------------
 
@@ -282,9 +294,30 @@ function draw_opening_wall_dims(cx, sg, plan, object, draw_length) {
 
 // half the object's extent in the plan along x (want_x) or y: its width and
 // depth swap when it is turned by a quarter.
-function furniture_half(object, want_x) {
-	let is_turned = object.rot % 180 == 90
+function furniture_half(object, want_x, rot = object.rot) {
+	let is_turned = rot % 180 == 90
 	return (is_turned == want_x ? object.l : object.w) / 2
+}
+
+let wall_side = [] // [dir, c, m1, m2] of the room side being checked
+
+function read_wall_side(p1, p2, out) {
+	let is_v = p1[0] == p2[0]
+	let m1 = is_v ? p1[1] : p1[0]
+	let m2 = is_v ? p2[1] : p2[0]
+	out[0] = is_v ? (m2 > m1 ? 3 : 1) : (m2 > m1 ? 2 : 0)
+	out[1] = is_v ? p1[0] : p1[1]
+	out[2] = m1
+	out[3] = m2
+	return out
+}
+
+function wall_side_overlaps(side, x, y, hx, hy) {
+	let is_v = side[0] % 2 == 1
+	let along = is_v ? y : x
+	let h_along = is_v ? hy : hx
+	return along + h_along > min(side[2], side[3])
+		&& along - h_along < max(side[2], side[3])
 }
 
 // the room side nearest to the rect of half sizes (hx, hy) around (x, y),
@@ -295,45 +328,27 @@ function furniture_half(object, want_x) {
 // so the wall is on the right.
 function find_wall_side(plan, x, y, hx, hy, snap_d, want_v, want_h, out) {
 	let min_gap = Infinity
-	let found_dir, found_c, found_m1, found_m2
+	let found_side
 	for (let ring of plan.room_rings) {
 		for (let i = 0, n = ring.length; i < n; i++) {
-			let p1 = ring[i]
-			let p2 = ring[(i+1) % n]
-			let is_v = p1[0] == p2[0]
+			let side = read_wall_side(ring[i], ring[(i+1) % n], wall_side)
+			let [dir, c] = side
+			let is_v = dir % 2 == 1
 			if (is_v ? !want_v : !want_h)
 				continue
-			let m1 = is_v ? p1[1] : p1[0]
-			let m2 = is_v ? p2[1] : p2[0]
-			let along = is_v ? y : x
-			let h_along = is_v ? hy : hx
-			if (along + h_along <= min(m1, m2)
-				|| along - h_along >= max(m1, m2)
-			)
+			if (!wall_side_overlaps(side, x, y, hx, hy))
 				continue
-			let dir = is_v ? (m2 > m1 ? 3 : 1) : (m2 > m1 ? 2 : 0)
-			let c = is_v ? p1[0] : p1[1]
 			let across = is_v ? x : y
 			let h_across = is_v ? hx : hy
 			let gap = dir == 1 || dir == 2
 				? c - (across + h_across) : (across - h_across) - c
-			if (abs(gap) < min_gap) {
+			if (abs(gap) <= snap_d && abs(gap) < min_gap) {
 				min_gap = abs(gap)
-				found_dir = dir
-				found_c = c
-				found_m1 = m1
-				found_m2 = m2
+				found_side = array_set(found_side ?? out ?? [], side)
 			}
 		}
 	}
-	if (min_gap <= snap_d) {
-		out ??= []
-		out[0] = found_dir
-		out[1] = found_c
-		out[2] = found_m1
-		out[3] = found_m2
-		return out
-	}
+	return found_side
 }
 
 // the center coordinate across side of a rect of half sizes (hx, hy)
@@ -351,20 +366,15 @@ function is_rect_in_rooms(plan, x, y, hx, hy) {
 	let is_odd = false
 	for (let ring of plan.room_rings) {
 		for (let i = 0, n = ring.length; i < n; i++) {
-			let p1 = ring[i]
-			let p2 = ring[(i+1) % n]
-			let is_v = p1[0] == p2[0]
-			let m1 = is_v ? p1[1] : p1[0]
-			let m2 = is_v ? p2[1] : p2[0]
+			let side = read_wall_side(ring[i], ring[(i+1) % n], wall_side)
+			let [dir, c, m1, m2] = side
+			let is_v = dir % 2 == 1
 			let m_lo = min(m1, m2)
 			let m_hi = max(m1, m2)
-			let c = is_v ? p1[0] : p1[1]
 			let across = is_v ? x : y
 			let h_across = is_v ? hx : hy
-			let along = is_v ? y : x
-			let h_along = is_v ? hy : hx
 			if (c > across - h_across && c < across + h_across
-				&& m_lo < along + h_along && m_hi > along - h_along
+				&& wall_side_overlaps(side, x, y, hx, hy)
 			)
 				return false
 			if (is_v && c > x && m_lo <= y && y < m_hi)
@@ -378,22 +388,52 @@ function is_rect_in_rooms(plan, x, y, hx, hy) {
 // object turns so that the first of its snap_faces faces a side that it is
 // within snap_d of, unless one of them already does. it stays turned when it
 // leaves the side. on the floor when the rect is inside a room.
-function place_furniture(plan, object, x, y, snap_d) {
+function place_furniture(plan, object, x, y, snap_d, snap_margin = 0) {
 	let faces = house_object_types[object.type].snap_faces
+	let side0 = object.snap_side
+	object.snap_side = null
 	object.side_x = null
 	object.side_y = null
 	if (faces) {
-		let hx = furniture_half(object, true)
-		let hy = furniture_half(object, false)
-		let side = find_wall_side(plan, x, y, hx, hy, snap_d, true, true)
-		if (side) {
-			let dir = side[0]
-			let face = (dir - object.rot / 90 + 4) % 4 // facing it.
-			if (!faces.includes(face)) {
-				object.rot = (dir - faces[0] + 4) % 4 * 90
-				hx = furniture_half(object, true)
-				hy = furniture_half(object, false)
+		let min_gap = Infinity
+		let found_side, found_rot
+		let found_old = false
+		for (let ring of plan.room_rings) {
+			for (let i = 0, n = ring.length; i < n; i++) {
+				let side = read_wall_side(ring[i], ring[(i+1) % n], wall_side)
+				let [dir, c, m1, m2] = side
+				let is_v = dir % 2 == 1
+				let face = (dir - object.rot / 90 + 4) % 4
+				let rot = faces.includes(face) ? object.rot
+					: (dir - faces[0] + 4) % 4 * 90
+				let hx = furniture_half(object, true, rot)
+				let hy = furniture_half(object, false, rot)
+				if (!wall_side_overlaps(side, x, y, hx, hy))
+					continue
+				let across = is_v ? x : y
+				let center = wall_side_center(side, hx, hy)
+				let gap = abs(center - across)
+				if (gap > snap_d)
+					continue
+				let is_old = side0 && side0[0] == dir && side0[1] == c
+					&& side0[2] == m1 && side0[3] == m2
+				if (is_old)
+					gap -= snap_margin
+				if (gap < min_gap || gap == min_gap && is_old && !found_old) {
+					min_gap = gap
+					found_side = array_set(found_side ?? [], side)
+					found_rot = rot
+					found_old = is_old
+				}
 			}
+		}
+		if (found_side) {
+			object.rot = found_rot
+			let hx = furniture_half(object, true)
+			let hy = furniture_half(object, false)
+			let side = found_side
+			object.snap_side = side
+			let dir = side[0]
 
 			// the side it rests on, then the nearest side across it.
 			let is_x = dir % 2 == 1
@@ -430,8 +470,8 @@ function put_furniture(plan, object, x, y) {
 
 // place_furniture, then in a corner of a room: turned by 45 degrees with its
 // back to the corner. Only the sketch turns; the measured box stays square.
-function place_chair(plan, object, x, y, snap_d) {
-	place_furniture(plan, object, x, y, snap_d)
+function place_chair(plan, object, x, y, snap_d, snap_margin = 0) {
+	place_furniture(plan, object, x, y, snap_d, snap_margin)
 	let {side_x, side_y} = object
 	if (!(side_x && side_y))
 		return
@@ -471,20 +511,17 @@ function limit_furniture_size(plan, object, is_x, dir, size) {
 	if (!object.on_floor)
 		return Infinity
 	let end = (is_x ? object.x : object.y) - dir * size / 2 // fixed end.
-	let along = is_x ? object.y : object.x
-	let h_along = furniture_half(object, !is_x)
+	let hx = furniture_half(object, true)
+	let hy = furniture_half(object, false)
 	let limit_c = dir * Infinity
 	for (let ring of plan.room_rings) {
 		for (let i = 0, n = ring.length; i < n; i++) {
-			let p1 = ring[i]
-			let p2 = ring[(i+1) % n]
-			if ((p1[0] == p2[0]) != is_x) // only the sides across the width.
+			let side = read_wall_side(ring[i], ring[(i+1) % n], wall_side)
+			if ((side[0] % 2 == 1) != is_x) // only the sides across the width.
 				continue
-			let m1 = is_x ? p1[1] : p1[0]
-			let m2 = is_x ? p2[1] : p2[0]
-			if (along + h_along <= min(m1, m2) || along - h_along >= max(m1, m2))
+			if (!wall_side_overlaps(side, object.x, object.y, hx, hy))
 				continue
-			let c = is_x ? p1[0] : p1[1]
+			let c = side[1]
 			if (dir * (c - end) > 0 && dir * (c - limit_c) < 0)
 				limit_c = c
 		}
@@ -504,10 +541,9 @@ function furniture_box(plan, object, out) {
 }
 
 function hit_furniture(sg, plan, object) {
-	let hx = furniture_half(object, true)
-	let hy = furniture_half(object, false)
-	return ui.hit_bbox(sg.x(object.x - hx), sg.y(object.y - hy),
-		sg.x(object.x + hx), sg.y(object.y + hy))
+	furniture_box(plan, object, box)
+	return ui.hit_bbox(sg.x(box[0]), sg.y(box[1]),
+		sg.x(box[2]), sg.y(box[3]))
 }
 
 let sketch_paths = new Map() // {type -> {w -> {l -> Path2D}}}
@@ -535,7 +571,6 @@ function get_sketch_path(object) {
 
 function draw_furniture(cx, sg, plan, object) {
 	let path = get_sketch_path(object)
-	let scale = sg.d_exact(1)
 	let x = object.x
 	let y = object.y
 	if (object.type == 'chair' && object.rot % 90) {
@@ -543,6 +578,12 @@ function draw_furniture(cx, sg, plan, object) {
 		x -= sign(sin(r)) * object.w / 4
 		y += sign(cos(r)) * object.l / 4
 	}
+	draw_object_path(cx, sg, object, path, x, y)
+}
+
+function draw_object_path(cx, sg, object, path,
+	x = object.x, y = object.y) {
+	let scale = sg.d_exact(1)
 	cx.save()
 	cx.translate(sg.x(x), sg.y(y))
 	cx.rotate(object.rot * rad)
@@ -651,6 +692,412 @@ function sketch_wc(object) {
 	return `M${-x} ${-y}h${w}v${l * .3}h${-w}z `
 		+ `M${-bowl_x} ${-y + l * .3}V${y - bowl_y}`
 		+ `a${bowl_x} ${bowl_y} 0 0 0 ${2 * bowl_x} 0V${-y + l * .3}z`
+}
+
+// countertop ----------------------------------------------------------------
+
+const LEG_DIR = 0, LEG_LENGTH = 1, LEG_DEPTH = 2, LEG_SIZE = 3
+const LEG_DX = [1, 0, -1, 0], LEG_DY = [0, 1, 0, -1]
+const LEG_END = 0, LEG_LEFT = 1, LEG_RIGHT = 2
+const LEG_DEPTH_LEFT = 3, LEG_DEPTH_RIGHT = 4
+const LEG_HANDLES = 5
+
+let countertop_shapes = new WeakMap() // {legs -> {rects, paths, path}}
+
+function countertop_shape(object) {
+	let legs = object.legs
+	let shape = countertop_shapes.get(legs)
+	if (shape) {
+		let is_same = shape.rects.length * LEG_SIZE == legs.length
+		for (let i = 0; is_same && i < shape.rects.length; i++) {
+			let rect = shape.rects[i]
+			let j = i * LEG_SIZE
+			is_same = rect.dir == legs[j + LEG_DIR]
+				&& rect.length == legs[j + LEG_LENGTH]
+				&& rect.depth == legs[j + LEG_DEPTH]
+		}
+		if (is_same)
+			return shape
+	}
+	let rects = [], paths = []
+	let x = 0, y = 0
+	for (let i = 0; i < legs.length; i += LEG_SIZE) {
+		let dir = legs[i + LEG_DIR]
+		let length = legs[i + LEG_LENGTH]
+		let depth = legs[i + LEG_DEPTH]
+		let ux = LEG_DX[dir], uy = LEG_DY[dir]
+		if (i) {
+			let dir0 = legs[i - LEG_SIZE + LEG_DIR]
+			let depth0 = legs[i - LEG_SIZE + LEG_DEPTH]
+			x -= LEG_DX[dir0] * depth / 2 + ux * depth0 / 2
+			y -= LEG_DY[dir0] * depth / 2 + uy * depth0 / 2
+		}
+		let ex = x + ux * length, ey = y + uy * length
+		let hx = abs(uy) * depth / 2, hy = abs(ux) * depth / 2
+		let x1 = min(x, ex) - hx, y1 = min(y, ey) - hy
+		let x2 = max(x, ex) + hx, y2 = max(y, ey) + hy
+		rects.push({x, y, ex, ey, x1, y1, x2, y2, dir, length, depth})
+		paths.push([
+			{x: x1 * 2, y: y1 * 2}, {x: x2 * 2, y: y1 * 2},
+			{x: x2 * 2, y: y2 * 2}, {x: x1 * 2, y: y2 * 2},
+		])
+		x = ex
+		y = ey
+	}
+	paths = clipper2.union(paths, [], clipper2.FillRule.NonZero)
+	shape = {rects: rects, paths: paths, path: null}
+	countertop_shapes.set(legs, shape)
+	return shape
+}
+
+function countertop_rect(object, rect, out) {
+	let r = object.rot * rad
+	let ux = round(cos(r)), uy = round(sin(r))
+	let cx = (rect.x1 + rect.x2) / 2
+	let cy = (rect.y1 + rect.y2) / 2
+	let x = object.x + ux * cx - uy * cy
+	let y = object.y + uy * cx + ux * cy
+	let hx = (rect.x2 - rect.x1) / 2
+	let hy = (rect.y2 - rect.y1) / 2
+	let wx = abs(ux) * hx + abs(uy) * hy
+	let wy = abs(uy) * hx + abs(ux) * hy
+	out[0] = x - wx
+	out[1] = y - wy
+	out[2] = x + wx
+	out[3] = y + wy
+	return out
+}
+
+function countertop_box(plan, object, out) {
+	let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity
+	for (let rect of countertop_shape(object).rects) {
+		countertop_rect(object, rect, box)
+		x1 = min(x1, box[0]); y1 = min(y1, box[1])
+		x2 = max(x2, box[2]); y2 = max(y2, box[3])
+	}
+	out[0] = x1; out[1] = y1; out[2] = x2; out[3] = y2
+	return out
+}
+
+let countertop_side = [] // [dir, c, m1, m2]
+
+function place_countertop(plan, object, x, y, snap_d) {
+	object.x = x
+	object.y = y
+	object.seg = null
+	object.side_x = null
+	object.side_y = null
+	let rects = countertop_shape(object).rects
+	for (let axis = 0; axis < 2; axis++) {
+		let min_gap = Infinity, side1
+		for (let rect of rects) {
+			countertop_rect(object, rect, box)
+			let cx = (box[0] + box[2]) / 2
+			let cy = (box[1] + box[3]) / 2
+			let hx = (box[2] - box[0]) / 2
+			let hy = (box[3] - box[1]) / 2
+			let side = find_wall_side(plan, cx, cy, hx, hy, snap_d,
+				axis == 0, axis == 1, countertop_side)
+			if (!side)
+				continue
+			let shift = wall_side_center(side, hx, hy) - (axis ? cy : cx)
+			if (abs(shift) < min_gap) {
+				min_gap = abs(shift)
+				side1 = side.slice()
+				if (axis) y = object.y + shift
+				else x = object.x + shift
+			}
+		}
+		if (axis) {
+			object.y = y
+			object.side_y = side1 ?? null
+		} else {
+			object.x = x
+			object.side_x = side1 ?? null
+		}
+	}
+	object.on_floor = true
+	for (let rect of rects) {
+		countertop_rect(object, rect, box)
+		if (!is_rect_in_rooms(plan, (box[0] + box[2]) / 2,
+			(box[1] + box[3]) / 2, (box[2] - box[0]) / 2,
+			(box[3] - box[1]) / 2)) {
+			object.on_floor = false
+			break
+		}
+	}
+}
+
+function hit_countertop(sg, plan, object) {
+	for (let rect of countertop_shape(object).rects) {
+		countertop_rect(object, rect, box)
+		if (ui.hit_bbox(sg.x(box[0]), sg.y(box[1]),
+			sg.x(box[2]), sg.y(box[3])))
+			return true
+	}
+	return false
+}
+
+function hit_countertop_resize(sg, plan, object, hs) {
+	let r = object.rot * rad
+	let dx = hs.mouse_x - object.x, dy = hs.mouse_y - object.y
+	let x = dx * cos(r) + dy * sin(r)
+	let y = -dx * sin(r) + dy * cos(r)
+	let inside = sg.plan_d(6), outside = sg.plan_d(8)
+	let rects = countertop_shape(object).rects
+	for (let i = rects.length - 1; i >= 0; i--) {
+		let rect = rects[i]
+		let ux = LEG_DX[rect.dir], uy = LEG_DY[rect.dir]
+		let along = (x - rect.x) * ux + (y - rect.y) * uy
+		let across = -(x - rect.x) * uy + (y - rect.y) * ux
+		let half = rect.depth / 2
+		let at_start = i == 0 && along < rect.length / 2
+		let at_end = i == rects.length - 1 && !at_start
+		let side, dir = rect.dir
+		if (abs(across) <= half
+			&& (at_start && along >= -outside && along <= inside
+				|| at_end && along >= rect.length - inside
+					&& along <= rect.length + outside)) {
+			side = LEG_END
+		} else if (along >= 0 && along <= rect.length
+			&& abs(across) >= half - min(inside, rect.depth / 4)
+			&& abs(across) <= half + outside) {
+			let is_left = across < 0
+			let is_free = at_start && along <= 600
+				|| at_end && rect.length - along <= 600
+			side = is_free ? (is_left ? LEG_LEFT : LEG_RIGHT)
+				: (is_left ? LEG_DEPTH_LEFT : LEG_DEPTH_RIGHT)
+			dir = (dir + 1) % 4
+		} else {
+			continue
+		}
+		let edge_along = side == LEG_END
+			? (at_start ? 0 : rect.length) : along
+		let edge_across = side == LEG_END ? across
+			: (across < 0 ? -half : half)
+		let nx = side == LEG_END ? ux * (at_start ? -1 : 1)
+			: -uy * (across < 0 ? -1 : 1)
+		let ny = side == LEG_END ? uy * (at_start ? -1 : 1)
+			: ux * (across < 0 ? -1 : 1)
+		let px = rect.x + ux * edge_along - uy * edge_across
+		let py = rect.y + uy * edge_along + ux * edge_across
+		let is_covered = false
+		for (let rect1 of rects) {
+			if (rect1 == rect)
+				continue
+			if (px >= rect1.x1 && px <= rect1.x2
+				&& py >= rect1.y1 && py <= rect1.y2
+				&& !(px == rect1.x1 && nx <= 0)
+				&& !(px == rect1.x2 && nx >= 0)
+				&& !(py == rect1.y1 && ny <= 0)
+				&& !(py == rect1.y2 && ny >= 0)) {
+				is_covered = true
+				break
+			}
+		}
+		if (is_covered)
+			continue
+		// Negative handles address the free start; positive ones the end.
+		let handle = i * LEG_HANDLES + side + 1
+		hs.object_side = at_start && side <= LEG_RIGHT ? -handle : handle
+		hs.object_axis = dir % 2 ? 'l' : 'w'
+		return true
+	}
+	return false
+}
+
+function snap_countertop_length(plan, object, snap_d) {
+	let rects = countertop_shape(object).rects
+	let rect = rects[rects.length - 1]
+	let dir = (rect.dir + object.rot / 90) % 4
+	let is_x = dir % 2 == 0
+	let sign = LEG_DX[dir] || LEG_DY[dir]
+	let r = object.rot * rad
+	let ux = round(cos(r)), uy = round(sin(r))
+	let x = object.x + ux * rect.ex - uy * rect.ey
+	let y = object.y + uy * rect.ex + ux * rect.ey
+	let across = is_x ? x : y
+	let hx = is_x ? 0 : rect.depth / 2
+	let hy = is_x ? rect.depth / 2 : 0
+	let min_gap = snap_d, shift = 0
+	let min_length = rects.length > 1 ? rects[rects.length - 2].depth : 1
+	for (let ring of plan.room_rings) {
+		for (let i = 0; i < ring.length; i++) {
+			let side = read_wall_side(ring[i],
+				ring[(i + 1) % ring.length], wall_side)
+			if ((side[0] % 2 == 1) != is_x)
+				continue
+			if (!wall_side_overlaps(side, x, y, hx, hy))
+				continue
+			let gap = side[1] - across
+			if (rect.length + sign * gap < min_length)
+				continue
+			if (abs(gap) <= min_gap) {
+				min_gap = abs(gap)
+				shift = sign * gap
+			}
+		}
+	}
+	object.legs[object.legs.length - LEG_SIZE + LEG_LENGTH] += shift
+	if (rects.length > 1 && rect.length + shift <= min_length)
+		object.legs.length -= LEG_SIZE
+}
+
+function start_resize_countertop(plan, object, handle) {
+	let legs0 = object.legs
+	let legs = legs0.slice()
+	let x0 = object.x, y0 = object.y
+	let r = object.rot * rad
+	let ux = round(cos(r)), uy = round(sin(r))
+	let code = abs(handle) - 1
+	let i = floor(code / LEG_HANDLES) * LEG_SIZE
+	let side = code % LEG_HANDLES
+	if (handle < 0) {
+		let rects = countertop_shape(object).rects
+		let end = rects[rects.length - 1]
+		x0 += ux * end.ex - uy * end.ey
+		y0 += uy * end.ex + ux * end.ey
+		legs = []
+		for (let j = legs0.length - LEG_SIZE; j >= 0; j -= LEG_SIZE)
+			legs.push((legs0[j + LEG_DIR] + 2) % 4,
+				legs0[j + LEG_LENGTH], legs0[j + LEG_DEPTH])
+		i = legs.length - LEG_SIZE
+		if (side == LEG_LEFT) side = LEG_RIGHT
+		else if (side == LEG_RIGHT) side = LEG_LEFT
+	}
+	let dir = legs[i + LEG_DIR]
+	let ax = LEG_DX[dir], ay = LEG_DY[dir]
+	return {resize: function(dx, dy, snap_d = 0) {
+		let x = dx * ux + dy * uy, y = -dx * uy + dy * ux
+		let along = x * ax + y * ay
+		let across = -x * ay + y * ax
+		let legs1 = object.legs
+		legs1.length = legs.length
+		for (let j = 0; j < legs.length; j++)
+			legs1[j] = legs[j]
+		if (side == LEG_END) {
+			let length = round(legs[i + LEG_LENGTH] + along)
+			let min_length = i ? legs[i - LEG_SIZE + LEG_DEPTH] : 1
+			if (i && length <= min_length)
+				legs1.length -= LEG_SIZE
+			else
+				legs1[i + LEG_LENGTH] = max(min_length, length)
+		} else if (side == LEG_LEFT || side == LEG_RIGHT) {
+			let length = max(0, round(across * (side == LEG_LEFT ? -1 : 1)))
+			if (length)
+				legs1.push((dir + (side == LEG_LEFT ? 3 : 1)) % 4,
+					legs[i + LEG_DEPTH] + length, 600)
+		} else {
+			let depth = legs[i + LEG_DEPTH]
+			depth += across * (side == LEG_DEPTH_LEFT ? -1 : 1)
+			depth = clamp(350 + round((depth - 350) / 50) * 50, 350, 1200)
+			legs1[i + LEG_DEPTH] = depth
+			let shift = (depth - legs[i + LEG_DEPTH]) / 2
+			if (side == LEG_DEPTH_LEFT) shift = -shift
+			// Keep the opposite side of the first leg in place.
+			if (!i) {
+				object.x = x0 - (ux * ay + uy * ax) * shift
+				object.y = y0 + (ux * ax - uy * ay) * shift
+			}
+		}
+		if (i || side <= LEG_RIGHT) {
+			object.x = x0
+			object.y = y0
+		}
+		let is_length = side == LEG_END && legs1.length == legs.length
+			|| (side == LEG_LEFT || side == LEG_RIGHT)
+				&& legs1.length > legs.length
+		if (is_length && snap_d > 0)
+			snap_countertop_length(plan, object, snap_d)
+	}}
+}
+
+function draw_countertop(cx, sg, plan, object) {
+	let shape = countertop_shape(object)
+	if (!shape.path) {
+		let s = ''
+		for (let path of shape.paths) {
+			for (let i = 0; i < path.length; i++)
+				s += (i ? 'L' : 'M') + path[i].x / 2 + ' ' + path[i].y / 2
+			s += 'z'
+		}
+		shape.path = new Path2D(s)
+	}
+	draw_object_path(cx, sg, object, shape.path)
+}
+
+function draw_countertop_sizes(cx, sg, plan, object, draw_length) {
+	let r = object.rot * rad
+	let ux = round(cos(r)), uy = round(sin(r))
+	for (let rect of countertop_shape(object).rects) {
+		let x1 = object.x + ux * rect.x1 - uy * rect.y1
+		let y1 = object.y + uy * rect.x1 + ux * rect.y1
+		let x2 = object.x + ux * rect.x2 - uy * rect.y1
+		let y2 = object.y + uy * rect.x2 + ux * rect.y1
+		let x3 = object.x + ux * rect.x2 - uy * rect.y2
+		let y3 = object.y + uy * rect.x2 + ux * rect.y2
+		draw_length(cx, sg, x2, y2, x1, y1)
+		draw_length(cx, sg, x3, y3, x2, y2)
+	}
+}
+
+function draw_countertop_resize(cx, sg, plan, object, handle) {
+	let code = abs(handle) - 1
+	let i = floor(code / LEG_HANDLES), side = code % LEG_HANDLES
+	let shape = countertop_shape(object)
+	let rect = shape.rects[i]
+	let ux = LEG_DX[rect.dir], uy = LEG_DY[rect.dir]
+	let start_zone = i == 0 ? min(600, rect.length / 2) : 0
+	let end_zone = i == shape.rects.length - 1
+		? min(600, i == 0 ? rect.length / 2 : rect.length) : 0
+	let a1, a2, b1, b2
+	if (side == LEG_END) {
+		a1 = a2 = handle < 0 ? 0 : rect.length
+		b1 = -rect.depth / 2
+		b2 = rect.depth / 2
+	} else {
+		b1 = b2 = (side == LEG_LEFT || side == LEG_DEPTH_LEFT ? -1 : 1)
+			* rect.depth / 2
+		if (side == LEG_LEFT || side == LEG_RIGHT) {
+			a1 = handle < 0 ? 0 : rect.length - end_zone
+			a2 = handle < 0 ? start_zone : rect.length
+		} else {
+			a1 = start_zone
+			a2 = rect.length - end_zone
+		}
+	}
+	let x1 = rect.x + ux * a1 - uy * b1
+	let y1 = rect.y + uy * a1 + ux * b1
+	let x2 = rect.x + ux * a2 - uy * b2
+	let y2 = rect.y + uy * a2 + ux * b2
+	let is_v = x1 == x2
+	let c = is_v ? x1 : y1
+	let lo = min(is_v ? y1 : x1, is_v ? y2 : x2)
+	let hi = max(is_v ? y1 : x1, is_v ? y2 : x2)
+	let scale = sg.d_exact(1)
+	cx.save()
+	cx.translate(sg.x(object.x), sg.y(object.y))
+	cx.rotate(object.rot * rad)
+	cx.scale(scale, scale)
+	cx.lineWidth /= scale
+	cx.beginPath()
+	for (let path of shape.paths) {
+		for (let j = 0; j < path.length; j++) {
+			let p = path[j], q = path[(j + 1) % path.length]
+			if (is_v ? p.x != c * 2 || q.x != c * 2
+				: p.y != c * 2 || q.y != c * 2)
+				continue
+			let m1 = (is_v ? p.y : p.x) / 2
+			let m2 = (is_v ? q.y : q.x) / 2
+			let l = max(lo, min(m1, m2)), h = min(hi, max(m1, m2))
+			if (l >= h)
+				continue
+			cx.moveTo(is_v ? c : l, is_v ? l : c)
+			cx.lineTo(is_v ? c : h, is_v ? h : c)
+		}
+	}
+	cx.stroke()
+	cx.restore()
 }
 
 // tags ----------------------------------------------------------------------
@@ -898,6 +1345,18 @@ let house_object_types = {
 		hit: hit_furniture,
 		draw_wall_dims: draw_furniture_wall_dims,
 		draw: draw_furniture,
+	},
+
+	countertop: {
+		fields: {legs: [0, 1800, 600]}, // [dir, length, depth, ...], dir 0 east
+		place: place_countertop,
+		box: countertop_box,
+		hit: hit_countertop,
+		hit_resize: hit_countertop_resize,
+		start_resize: start_resize_countertop,
+		draw_resize: draw_countertop_resize,
+		draw: draw_countertop,
+		draw_sizes: draw_countertop_sizes,
 	},
 
 	open_room: {

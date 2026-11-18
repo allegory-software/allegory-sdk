@@ -16,6 +16,38 @@ function add_time(stage, ms) {
 	sample.calls[stage] = (sample.calls[stage] ?? 0) + 1
 }
 
+function reset_profile_times() {
+	for (let stage in glue.profile_times) {
+		let times = glue.profile_times[stage]
+		times.ms = 0
+		times.calls = 0
+	}
+}
+
+function copy_profile_times(result, prefix = '') {
+	for (let stage in glue.profile_times) {
+		let times = glue.profile_times[stage]
+		if (times.calls) {
+			result.times[prefix + stage] = times.ms
+			result.calls[prefix + stage] = times.calls
+		}
+	}
+}
+
+function floor_counts(floor) {
+	let cycles = 0, rooms = 0, offset_points = 0
+	for (let comp of floor.comps) {
+		for (let c of comp.cycles) {
+			cycles++
+			if (!c.outer)
+				rooms++
+			offset_points += c.edges.length
+		}
+	}
+	return {points: floor.ps.length, walls: floor.segs.length,
+		components: floor.comps.length, cycles, rooms, offset_points}
+}
+
 window.DEBUG = true
 ui.DEBUG_WINDOW = false
 
@@ -99,17 +131,14 @@ function frame() {
 window.house_plan_bench = {
 	async load(text) {
 		plan_text = text
+		DEBUG_LOG = false
 		DEBUG_PLAN_LOAD = 0
 		DEBUG_MODEL3 = 0
 		// Wait for the initial empty frame before starting the first sample.
 		await frame()
 	},
 	async run(reload) {
-		for (let stage in glue.profile_times) {
-			let times = glue.profile_times[stage]
-			times.ms = 0
-			times.calls = 0
-		}
+		reset_profile_times()
 		let result = {
 			times: {},
 			calls: {},
@@ -138,17 +167,82 @@ window.house_plan_bench = {
 			gl.finish()
 			add_time('gpu.wait', performance.now() - gpu_t)
 			add_time('total.wall', performance.now() - t)
-			for (let stage in glue.profile_times) {
-				let times = glue.profile_times[stage]
-				if (times.calls) {
-					result.times[stage] = times.ms
-					result.calls[stage] = times.calls
-				}
-			}
+			copy_profile_times(result)
 			return result
 		} finally {
 			sample = null
 			ui.frame_changed = glue.noop
+		}
+	},
+	run_wall() {
+		let house = house_plan(JSON.parse(plan_text))
+		let floor = house.floors[0]
+		let seg
+		for (let s of floor.segs)
+			if (!seg || s.m2 - s.m1 > seg.m2 - seg.m1)
+				seg = s
+		if (!seg)
+			throw Error('Wall-update samples need a wall on floor zero')
+		let is_v = seg.is_v
+		let axis0 = seg.axis
+		let result = {
+			times: {}, calls: {},
+			wall: {floor: floor.i, id: seg.id,
+				from: [seg[0][0], seg[0][1]], to: [seg[1][0], seg[1][1]]},
+			before: floor_counts(floor),
+		}
+		let edit = floor.start_move_seg(seg)
+		reset_profile_times()
+		sample = result
+		try {
+			let t = performance.now()
+			edit.move(is_v ? 10 : 0, is_v ? 0 : 10, 0)
+			add_time('wall.drag', performance.now() - t)
+			copy_profile_times(result, 'drag.')
+			result.wall.displacement = seg.axis - axis0
+			if (!result.wall.displacement)
+				throw Error('The longest wall did not move')
+			result.after_drag = floor_counts(floor)
+
+			reset_profile_times()
+			t = performance.now()
+			floor.fix()
+			add_time('wall.refresh', performance.now() - t)
+			copy_profile_times(result, 'refresh.')
+			result.after_refresh = floor_counts(floor)
+
+			reset_profile_times()
+			t = performance.now()
+			let area_sum = 0, rooms = 0
+			for (let f of house.floors) {
+				for (let comp of f.comps) {
+					for (let c of comp.cycles) {
+						if (c.outer)
+							continue
+						c.center()
+						area_sum += c.edges.area()
+						for (let island of c.islands)
+							area_sum += island.outer_cycle.edges.area()
+						rooms++
+					}
+				}
+			}
+			add_time('wall.room_areas', performance.now() - t)
+			result.room_count = rooms
+			result.room_area_sum = area_sum
+			t = performance.now()
+			let areas = 0
+			for (let f of house.floors)
+				areas += f.make_areas().length
+			add_time('wall.roof_areas', performance.now() - t)
+			copy_profile_times(result, 'areas.')
+			result.area_count = areas
+			add_time('wall.total', result.times['wall.drag']
+				+ result.times['wall.refresh'] + result.times['wall.room_areas']
+				+ result.times['wall.roof_areas'])
+			return result
+		} finally {
+			sample = null
 		}
 	},
 	info() {

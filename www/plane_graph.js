@@ -77,6 +77,7 @@ const {
 	remove_value, replace_value, remove_values,
 	words, map, set, set_toarray,
 	freelist,
+	profile_time,
 } = glue
 
 const {
@@ -1047,13 +1048,18 @@ let plane_graph_class = class plane_graph extends Array {
 	_after_fix() {} // stub
 
 	rebuild() {
+		let t0 = profile_time()
 		this._find_comps()
+		t0 = profile_time('graph.components', t0)
 		this._extract_cycles()
+		t0 = profile_time('graph.cycles', t0)
 		this._find_inside_comps()
+		profile_time('graph.nesting', t0)
 		return this
 	}
 
 	fix() {
+		let t0 = profile_time()
 		push_log('fixing plane_graph', this.id)
 		this._split_intersecting_segs()
 		this._break_overlapping_segs()
@@ -1062,9 +1068,11 @@ let plane_graph_class = class plane_graph extends Array {
 		this._rebuild_adj_refs()
 		this._merge_colinear_segs()
 		this._remove_isolated_points()
+		profile_time('graph.cleanup', t0)
 		this.rebuild()
 		this._after_fix()
 		pop_log()
+		profile_time('graph.fix', t0)
 		return this
 	}
 

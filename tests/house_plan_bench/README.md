@@ -36,11 +36,20 @@ The report separates:
   and rebuilds the model in the existing 3D editor and WebGL context.
 - Unchanged frames, each sampled after a reload. The bench fails if those
   frames reload the plan or rebuild cut walls or model faces.
+- Wall updates, measured separately without running an editor frame. Each
+  sample creates a fresh model, chooses the longest wall on floor zero,
+  starts its move, and requests a 10 mm move across its axis with snapping
+  disabled. The report includes the endpoints, actual displacement and
+  graph counts before the move, after the move and after a full fix.
 
-The bench reports median, p95 and maximum milliseconds. With 20 samples, p95
-is the nineteenth sorted sample. First-load results are one observation.
+The bench reports median, p95 and maximum milliseconds, plus median call
+counts for each stage. With 20 samples, p95 is the nineteenth sorted sample.
+First-load results are one observation.
 Warmup applies to the browser execution and retained editor/context, not to
-the derived geometry: each full reload starts with a new house model.
+the derived geometry: each full reload and wall-update sample starts with
+a new house model. Wall updates have their own warmup samples, using the
+same requested warmup count. Diagnostic logging is disabled in the bench
+page; timing collection remains enabled.
 
 ## Timings
 
@@ -51,6 +60,15 @@ All durations are inclusive. Do not sum parent rows with their nested rows.
 | Wall time | JSON parsing, wait for the requested frame, frame execution, and final GPU completion wait. Excludes Playwright communication and file/server startup. |
 | Frame CPU | The UI animation callback, including hit testing, widget building, layout/preparation and drawing. Excludes JSON parsing and the final GPU wait. |
 | Plan loading | Model initialization: wall graph, offsets, room state and object placement. Input JSON parsing has its own row. |
+| Graph fix | Graph cleanup, component discovery, cycle extraction, component nesting and the floor's after-fix work. Inclusive; sums all calls in the sample. |
+| Split, deduplicate and merge walls | Intersection splitting, overlap resolution, removal of null segments, point deduplication, adjacency rebuild, collinear merging and isolated-point removal. |
+| Find connected components | Component discovery, including releasing previous components and cycles. |
+| Extract cycles and initial area positions | Outer and inner cycle extraction, adjacency rebuilds, and the initial cycle centers calculated by `_init_cycle()`. Offset room areas are measured separately in wall-update samples. |
+| Find component nesting and islands | Containment between components and assignment of islands to cycles. |
+| Wall offsets and bounds | Offset polygons, wall-face coordinates and usable lengths, room-ring references, floor bounds and house bounds. Excludes open-room tag classification. |
+| Classify open-room tags | Finding the room containing each open-room tag. |
+| Rebuild house snap lines | Snap-line generation across the house's floors. |
+| Place floor objects | Replacing floor objects against the current geometry, including moving objects to the ground when needed. |
 | Wall outlines and opening cuts | Grid paths, opening grouping, and clipping on a cache miss. Reused polygons do not generate a timing event. |
 | Roof areas / roof faces | Calls from both 2D preparation and 3D prism construction. Each row sums all calls in the sampled frame. |
 | Prism construction | All wall, slab and roof prisms, including any roof geometry and opening clipping computed inside this stage. Excludes prism union. |
@@ -70,6 +88,36 @@ The runner uses Chrome's normal GPU selection and prints Chrome's version,
 WebGL renderer/vendor, plan counts and viewport. Chrome can choose software
 rendering in headless mode. Read the renderer before comparing GPU timings;
 SwiftShader results measure software rendering on that machine.
+
+## Wall-update comparison
+
+The wall-update report measures these operations in sequence:
+
+| Row | Work |
+| --- | --- |
+| Current wall-drag step | One call to the current move operation, preserving cycles and updating offsets, room tags and objects riding on the wall. |
+| Additional full floor fix | One `floor.fix()` after that move: cleanup, components, cycles, nesting, offsets, room tags, snap lines and object placement. The nested rows separate these stages. |
+| Room centers and areas, all floors | The room-center and offset-area queries used by the editor's room labels, including island areas. Uses the caches in their state after model setup and the selected floor's fix; it does not invalidate the other floors. |
+| Roof/terrace areas, all floors | One `make_areas()` call per floor. Excludes roof faces, slab regions and terrace half-wall construction. |
+| Total drag + full fix + room and roof areas | Sum of the four measured operations in that sample. Percentiles are calculated from these totals, not by adding the stage percentiles. |
+
+Model loading, wall selection and drag start are outside these timings.
+The samples do not include an editor frame, wall-path clipping, roof faces,
+3D rebuilding or GPU work. They measure one ordinary wall displacement,
+not a collision or a collapsed-wall case. If floor zero has no wall or the
+chosen wall cannot move, the bench reports an error.
+
+The full fix is additional work after the existing drag update, so the
+combined total includes offsets twice. It measures the cost of adding a full
+fix to the current path, not a replacement path that avoids duplicate work.
+After the fix, the bench does not continue using the captured move operation:
+cleanup can replace its segment. Each subsequent sample starts afresh.
+
+The runner checks that the drag updates offsets without extracting cycles,
+that the fix runs each graph stage and offsets once, and that area calculation
+visits all floors. The output includes graph counts so that changes caused
+by cleanup remain visible. The comparison does not establish correctness
+of changing the production drag path.
 
 ## Published probes
 
@@ -100,7 +148,9 @@ When `DEBUG` is false, both helpers return zero without reading the clock
 or allocating anything per call. The shared totals table is created once
 when loading `glue`.
 
-The production probes record `plan.load`, `wall.openings`, `roof.areas`,
+The production probes record `plan.load`, `graph.fix`, `graph.cleanup`,
+`graph.components`, `graph.cycles`, `graph.nesting`, `plan.offsets`,
+`plan.rooms`, `plan.snap_lines`, `plan.objects`, `wall.openings`, `roof.areas`,
 `roof.faces`, `prism.build`, `prism.union`, `prism.cuts`, `prism.snap`,
 `prism.cells`, `prism.surfaces`, `prism.sides`, `prism.merge`, `model.create`,
 `model.update`, `plan.draw` and `model.draw`. The bench collects unrounded UI
@@ -108,6 +158,9 @@ frame timings through `ui.frame_graphs` and measures WebGL calls only inside
 its own page.
 
 In the bench page, `window.house_plan_bench` exposes `load(text)`,
-`run(reload)` and `info()`. A run returns stage totals and call counts plus
-upload/allocation byte counts. The command-line runner checks that full
+`run(reload)`, `run_wall()` and `info()`. A frame run returns stage totals and
+call counts plus upload/allocation byte counts. A wall run returns model
+timings, graph counts, the selected wall and area counts. Production probe
+keys in wall runs have `drag.`, `refresh.` or `areas.` prefixes to distinguish
+the three phases. The command-line runner checks that full
 reloads rebuild the plan and model and that unchanged frames reuse them.

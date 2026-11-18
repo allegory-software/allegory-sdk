@@ -316,22 +316,22 @@ for (let [y, dy, expected] of [
 }
 
 check('all dimensions replace drag measurements', () => {
-	// 14 wall dimensions + 4 sizes of the default ground objects (window,
-	// door, bed width and length).
+	// 14 wall dimensions + 6 sizes of the default ground objects (window,
+	// door, bed width and length, countertop length and depth).
 	dims_click = true
 	frame()
-	assert.equal(dimensions.length, 18)
+	assert.equal(dimensions.length, 20)
 	let seg = plan.segs.find(s => s.is_v && s.axis == 2000)
 	capture = {action: 'move_seg', seg, drag: true, dx: 0, dy: 0}
 	frame()
-	assert.equal(dimensions.length, 18)
+	assert.equal(dimensions.length, 20)
 	capture.drag = false
 	let sg = state
 	let angle = sg.rotation
 	capture.dx = 400 * sg.scale * Math.cos(angle)
 	capture.dy = 400 * sg.scale * Math.sin(angle)
 	frame()
-	assert.equal(dimensions.length, 18)
+	assert.equal(dimensions.length, 20)
 	capture.cancel = true
 	frame()
 	capture = null
@@ -748,6 +748,45 @@ check('a tag is hit over its text in a rotated view', () => {
 		ui.my = -20 * Math.cos(r)
 		assert(!hit(sg, null, object), 'above, quarter ' + quarter)
 	}
+})
+
+check('the editor starts and commits the countertop custom resize gesture', () => {
+	state.is_roof_level = false
+	frame()
+	let object = state.house.ground_objects.find(o => o.type == 'countertop')
+	let hs
+	let mouse_x = object.x + 1600, mouse_y = object.y + 300
+	ui.hit_box = () => true
+	ui.set_hit = () => (hs = {})
+	ui.update_mouse = () => {
+		ui.mx = state.x(mouse_x)
+		ui.my = state.y(mouse_y)
+	}
+	ui.hit_bbox = (x1, y1, x2, y2) =>
+		ui.mx >= x1 && ui.mx <= x2 && ui.my >= y1 && ui.my <= y2
+	assert(widget.hit(record, 0))
+	assert.equal(hs.object, object)
+	assert.equal(hs.action, 'resize_object')
+	assert.equal(hs.object_axis, 'l')
+	let angle = state.rotation ?? 0
+	capture = {...hs, drag: true, moved: true,
+		dx: -800 * state.scale * Math.sin(angle),
+		dy: 800 * state.scale * Math.cos(angle)}
+	frame()
+	assert.equal(object.legs.length, 6)
+	assert.equal(object.legs[4], 1400)
+	capture.drag = false
+	capture.drop = true
+	frame()
+	capture = null
+	assert(state.house.undo())
+	frame()
+	assert.equal(state.house.ground_objects.find(o => o.type == 'countertop')
+		.legs.length, 3)
+	delete ui.hit_box
+	delete ui.set_hit
+	delete ui.update_mouse
+	delete ui.hit_bbox
 })
 
 console.log(n_checks + ' house plan view checks passed')

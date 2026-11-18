@@ -4,6 +4,21 @@ Objects for the house plan (www/house_plan.js, www/house_plan_editor.js).
 Started 2026-11-17. Follows js/HOUSE-WALLS.txt and js/HOUSE-ROOFS.txt.
 ALL UNCOMMITTED on branch dev (as of the end of session 1). Ask before committing.
 
+# Cosmin's nitpicks
+
+- add shortcuts: ~, 1, 2, 3 ... to switch floor (~ for ground floor)
+
+- refactor objct snapping: positive snapping distance (so before touching the wall)
+means snapping; negative snapping distance (so inside the wall) means rotation.
+while in a rotation area, snapping is disabled. a rotated object doesn't snap
+again on drop. multiple snappings apply together but only one rotation applies.
+object's snap side flag (bed headrest side) only serves to flip a snapped
+opposite side.
+
+- in show-all-dimensions mode, align all the exterior dimensions to the same line
+which is an offset from bbox side. add a dimension for the side total too.
+
+
 
 ## Cosmin's request (2026-11-17)
 
@@ -63,12 +78,8 @@ ALL UNCOMMITTED on branch dev (as of the end of session 1). Ask before committin
 ## Known gaps, not fixed
 
 - Resize of a wall does not move its objects.
-- 3D updates only on drop, not during a wall or object drag.
 - A pasted object's w is not validated; paste needs the pointer over the plan.
 - Tie at a corner picks the later seg.
-- seg[-1] / seg[-2] dependence above (a seg offset API at the natural owner would remove the hit-test and opening_rect duplication).
-- find_opening_seg needs the exact cross coordinate; any code that writes object positions must write seg.axis itself.
-- Used `sed` once on tests/house_plan_editor_test.mjs (four number substitutions). Cosmin's rule is Edit tool only.
 
 ## Session 2 tweaks (done, UNTESTED in the browser; the playwright editor test was not re-run)
 
