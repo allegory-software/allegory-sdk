@@ -18,6 +18,13 @@ opposite side.
 - in show-all-dimensions mode, align all the exterior dimensions to the same line
 which is an offset from bbox side. add a dimension for the side total too.
 
+- stair sides must snap to walls too
+- stair doesn't attach to areas that don't have a wall in this floor
+- stair inside-house test must be done on the union between the opening
+  and the lower floor room where it lands, or something like that, I'm not sure.
+- double-clicking the resizeable handles should reset the length / width
+- rise and depth should be shown as additional measurements inside first step
+- stair flips when it finds a wall
 
 
 ## Cosmin's request (2026-11-17)
@@ -38,6 +45,8 @@ which is an offset from bbox side. add a dimension for the side total too.
 - Openings never overlap. The editor stops a dragged opening at its neighbor, so the model has no overlap handling (I removed it).
 - Start layout: one of each type in a row in the top third of the initial empty view: y = -2000, x = -750, 750 (window, door). (First -3000, which was off screen in a 600 px viewport.)
 - Each floor, including new ones: floor.objects starts empty. add_floor copies the top floor's objects with its walls (comes free with save_state). Ground objects are house level and shared.
+- (2026-11-18) Objects are never positioned by their center: a center puts the ends of an odd size on a half mm, so nothing can sit flush in whole mm. x, y: furniture and stairs: the min corner of the plan box; openings: the min end along the wall, on the wall's center line (the anchor does not matter, simplest chosen); countertop: its first leg's start (kept until the countertop rewrite); tags: the point. Saves from before this break.
+- (2026-11-18) Later: interior wall thickness rounded to even mm on load, with a validator in the settings input (odd thickness puts room faces on a half mm). Countertop: rewrite from scratch, probably without clipper.
 
 ## State
 
@@ -278,3 +287,13 @@ Implementation:
 - Checks passed: house_plan_test 230, house_plan_view_test 56,
   house_model_editor_test 32 (headless browser), house_faces_compare_test 14.
   Visual review by Cosmin remains pending.
+
+## Tests slimmed (2026-11-18)
+
+- house_plan_test.js keeps 48 checks. tests/house_demo_smoke_test.mjs
+  (headless browser) loads the cui_app and ui-demo pages of both editors:
+  no page errors, editor built.
+- Deleted: house_plan_view_test.js, house_plan_editor_test.mjs,
+  house_model_editor_test.mjs, house_height_controls_test.mjs,
+  house_dim_label_test.mjs, house_faces_compare_test.js,
+  roof_eave_overlap_cases_test.js and the roof_*_probe_test.js scripts. Older entries that name them are history.

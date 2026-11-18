@@ -485,34 +485,7 @@ function hit_roof_label(hs, draw_state, sg) {
 // objects -------------------------------------------------------------------
 
 let object_box = [0, 0, 0, 0] // [x1, y1, x2, y2] of the object hit or drawn
-let object_draw_origin = v2()
-
-// the end of a resizable object's width axis (its length axis if is_l, where
-// only the bottom end resizes) that the pointer (hs.mouse_x, hs.mouse_y) is
-// at, 1 or -1, or 0: within the object's depth, from a little inside the end
-// to a little outside it.
-function find_resize_side(object, object_type, plan, hs, sg, is_l) {
-	object_type.box(plan, object, object_box)
-	let is_x = object.rot % 180 == 0 // the width runs along x.
-	let r = object.rot * rad
-	let dx = hs.mouse_x - (object_box[0] + object_box[2]) / 2
-	let dy = hs.mouse_y - (object_box[1] + object_box[3]) / 2
-	let u = dx * cos(r) + dy * sin(r) // along the width.
-	let v = -dx * sin(r) + dy * cos(r) // across it.
-	let along = is_l ? v : u // along the axis.
-	let across = is_l ? u : v
-	let size = is_l ? object.l : object.w
-	let half_depth = is_l ? object.w / 2 : (is_x ? object_box[3] - object_box[1]
-		: object_box[2] - object_box[0]) / 2
-	let half_size = size / 2
-	if (abs(across) > half_depth
-		|| abs(along) < half_size - min(sg.plan_d(6), size / 4)
-		|| abs(along) > half_size + sg.plan_d(8)
-		|| is_l && along < 0
-	)
-		return 0
-	return sign(along)
-}
+let object_origin = v2() // [x, y] of the origin of the object hit or drawn
 
 // the topmost of `objects` at the screen point (ui.mx, ui.my): over the
 // object or at an end that resizes it.
@@ -523,39 +496,15 @@ function hit_object_in(objects, plan, hs, sg, from_below) {
 		if (from_below && !object_type.connects_below)
 			continue
 		let hit = object_type.hit(sg, plan, object) // true|'move'|false
-		let side = 0
-		let is_l = false
-		if (object_type.hit_resize
-			&& object_type.hit_resize(sg, plan, object, hs)) {
-			hs.object = object
-			hs.object_plan = plan
-			hs.object_x = object.x
-			hs.object_y = object.y
-			hs.action = 'resize_object'
-			return true
-		}
-		if (hit !== 'move') {
-			if (object_type.w_list || object_type.w_range)
-				side = find_resize_side(object, object_type, plan, hs, sg,
-					false)
-			if (!side && object_type.l_list) {
-				side = find_resize_side(object, object_type, plan, hs, sg,
-					true)
-				is_l = true
-			}
-		}
-		if (!hit && !side)
+		let is_resize = object_type.hit_resize?.(sg, plan, object, hs)
+		if (!hit && !is_resize)
 			continue
 		hs.object = object
 		hs.object_plan = plan
-		hs.object_x = object.x // where the drag starts from
-		hs.object_y = object.y
-		hs.action = 'move_object'
-		if (side) {
-			hs.object_side = side
-			hs.object_axis = is_l ? 'l' : 'w'
-			hs.action = 'resize_object'
-		}
+		get_object_origin(plan, object, object_origin)
+		hs.object_x = object_origin[0] // where the drag starts from
+		hs.object_y = object_origin[1]
+		hs.action = is_resize ? 'resize_object' : 'move_object'
 		return true
 	}
 	return false
@@ -572,7 +521,7 @@ function draw_objects(cx, sg, plan, objects, hit_object, is_ground,
 			continue
 		let is_touching = false
 		if (is_ground) {
-			object_type.box(plan, object, object_box)
+			get_object_box(plan, object, object_box)
 			is_touching = plan.is_rect_touching_house(object_box[0],
 				object_box[1], object_box[2], object_box[3])
 		}
@@ -583,16 +532,11 @@ function draw_objects(cx, sg, plan, objects, hit_object, is_ground,
 			: ui.color_css('text', is_ground ? 'readonly' : null)
 		cx.save()
 		if (object_type.draw_mask) {
-			object_type.box(plan, object, object_box)
+			get_object_box(plan, object, object_box)
 			object_type.draw_mask(cx, plan, object, object_box, sg)
 		}
 		if (object_type.draw) {
-			let x = object.x, y = object.y
-			if (object_type.draw_origin) {
-				object_type.draw_origin(object, object_draw_origin)
-				x = object_draw_origin[0]
-				y = object_draw_origin[1]
-			}
+			let [x, y] = get_object_origin(plan, object, object_origin)
 			cx.translate(sg.x(x), sg.y(y))
 			if (object_type.draw_space == 'screen') {
 				cx.rotate(-(sg.rotation ?? 0))
@@ -984,7 +928,9 @@ function floor_editor_update(id, s) {
 			let dy = round(-kx * sin(r) + ky * cos(r)) * 10
 			if (hs.object) {
 				let edit = hs.object_plan.start_move_object(hs.object)
-				edit.move(hs.object.x + dx, hs.object.y + dy, 20)
+				let [x, y] = get_object_origin(hs.object_plan, hs.object,
+					object_origin)
+				edit.move(x + dx, y + dy, 20)
 				edit.stop()
 			} else {
 				let edit = plan.start_move_seg(hs.seg)

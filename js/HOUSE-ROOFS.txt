@@ -248,4 +248,5 @@ Where roofs are edited (Cosmin: "perfect"): floor k's roof in floor k+1's view (
 ## Open bug: flaky ctrl+drag eave check (found 2026-11-16, not investigated further per Cosmin)
 
 - tests/house_plan_editor_test.mjs 'ctrl+drag below the threshold moves only the eave' fails about 1 run in 3: after a ctrl+press and a 4 px move (2 steps) on the east eave, the edit exists ('starts its move at the first movement' passes), yet after the release edit_no is still 2 and the roof has no edge point. From start_move_eave (is_one, snap_d 0), any 2-4 px move should add an edge point with eave_h -8. Cause unproven; maybe the 50 ms waits between pointer events.
+- 2026-11-18: the check moved to tests/house_eave_ctrl_drag_test.mjs (runs the sequence N times, default 6).
 - Same session: fixed the other stale editor test checks (ui_field.js missing from the model editor test pages; default roof; 1 cm snapping from bbde91db in wall lengths, eave_h, ridge-end pitch tolerance).

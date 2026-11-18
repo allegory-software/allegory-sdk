@@ -8,7 +8,7 @@ const {
 	profile_time,
 } = glue
 
-const {v3, mat4, line2, line3} = Math3D
+const {v3, v2, mat4, line2, line3} = Math3D
 
 // fill the editor with the house model up to cut_floor, or with all of it.
 function init_house_model_editor(e, house, cut_floor) {
@@ -102,7 +102,8 @@ function init_house_model_editor(e, house, cut_floor) {
 				continue
 			let c = object_type.create_model(e, floor, object)
 			let z = floor.z + house.slab_thickness
-			let transform = mat4().translate(object.x, z, object.y)
+			let [x, y] = get_object_origin(floor, object, v2())
+			let transform = mat4().translate(x, z, y)
 				.rotate(v3.y_axis, -object.rot * PI / 180)
 			e.root.comp.add_child(c, transform)
 		}
