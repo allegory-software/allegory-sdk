@@ -363,6 +363,49 @@ check('returning to a plan restores its camera and cut setting',
 check('no page errors after switching plans', errors.length == 0,
 	errors.join('\n'))
 
+// stair groups use the upper-floor slab as their local origin.
+await pg.evaluate(() => {
+	let rect = ['draw', 0, 0, 8000, 8000, -8000, -8000]
+	window.stair_house = house_plan({version: 1, floor_h: 2800, floors: [
+		{lines: [rect]},
+		{lines: [rect, ['connect', [2000, 0], [2000, 8000]]], objects: [
+			{type: 'stair', x: 2040, y: 4000, rot: 270},
+			{type: 'open_room', x: 4000, y: 4000, rot: 0},
+		]},
+	]})
+	ui.main = function() {
+		ui.house_model_editor('stair_model', window.stair_house,
+			window.stair_cut ? window.stair_house.floors[0] : null)
+	}
+	ui.animate()
+	return new Promise(resolve => { ui.frame_changed = resolve })
+})
+check('a stair is a separate placed group with its own faces',
+	await pg.evaluate(() => {
+		let e = ui._state_map.get('stair_model')?.e
+		let node = e?.root.comp.children.find(c => c.comp.name == 'stair')
+		if (!node || node.comp.faces.length != 34)
+			return false
+		let p = Math3D.v3(0, 0, 0).transform(node)
+		if (p[0] != 2040 || p[1] != 3000 || p[2] != 4000)
+			return false
+		p.set(0, -2800, 4200).transform(node)
+		return Math.abs(p[0] - 6240) < 1e-8 && p[1] == 200
+			&& Math.abs(p[2] - 4000) < 1e-8
+	}))
+await pg.evaluate(() => {
+	window.stair_cut = true
+	ui.animate()
+	return new Promise(resolve => { ui.frame_changed = resolve })
+})
+check('cutting below the stair owner omits its group',
+	await pg.evaluate(() => {
+		let e = ui._state_map.get('stair_model')?.e
+		return !e.root.comp.children.some(c => c.comp.name == 'stair')
+	}))
+check('no page errors after creating the stair group', errors.length == 0,
+	errors.join('\n'))
+
 // the pages that host the demos load without errors and build the widget.
 let base_url = `http://127.0.0.1:${server.address().port}`
 for (let url of ['/cui_app', '/ui-demo.html?demo=house_model_editor']) {

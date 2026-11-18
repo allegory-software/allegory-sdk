@@ -3,16 +3,50 @@
 const G = window
 
 const {
-	round, mod, abs, sign, min, max, clamp, sqrt, tan, atan, sin, cos, rad,
+	round, mod, abs, sign, min, max, clamp, floor, ceil, sqrt, tan, atan,
+	sin, cos, rad,
 	assert, log, push_log, pop_log, push_log_if,
 	insert, remove_value, uniq_sorted, map, assign, clock, json,
-	profile_time, empty_array,
+	profile_time, empty_array, array_set,
 } = glue
 
 const {bbox2, poly2} = Math3D
 
 G.DEBUG_PLAN = 0
 G.DEBUG_PLAN_LOAD = 1
+
+// room sides ---------------------------------------------------------------
+
+let wall_side = [] // [dir, c, m1, m2] of the room side being checked
+
+// describe a room edge as a directed wall side for rectangle queries.
+function read_wall_side(p1, p2, out) {
+	let is_v = p1[0] == p2[0]
+	let m1 = is_v ? p1[1] : p1[0]
+	let m2 = is_v ? p2[1] : p2[0]
+	out[0] = is_v ? (m2 > m1 ? 3 : 1) : (m2 > m1 ? 2 : 0)
+	out[1] = is_v ? p1[0] : p1[1]
+	out[2] = m1
+	out[3] = m2
+	return out
+}
+
+// test overlap along a wall side when finding snaps and resize limits.
+function wall_side_overlaps(side, x, y, hx, hy) {
+	let is_v = side[0] % 2 == 1
+	let along = is_v ? y : x
+	let h_along = is_v ? hy : hx
+	return along + h_along > min(side[2], side[3])
+		&& along - h_along < max(side[2], side[3])
+}
+
+// the center coordinate across side of a rect of half sizes (hx, hy)
+// resting against it, in whole mm on the room's side.
+function wall_side_center(side, hx, hy) {
+	let [dir, c] = side
+	let h = dir % 2 ? hx : hy
+	return dir == 1 || dir == 2 ? floor(c - h) : ceil(c + h)
+}
 
 // house model ---------------------------------------------------------------
 
@@ -126,28 +160,6 @@ function house_plan(t) {
 		return a
 	}
 
-	// the size nearest to `size` in `sizes`, a type's w_list or l_list or its
-	// w_range, that is at most max_size, or null if none is.
-	function snap_object_size(sizes, size, max_size) {
-		if (Array.isArray(sizes)) {
-			let size1 = null
-			for (let size2 of sizes)
-				if (size2 <= max_size
-					&& (size1 == null || abs(size2 - size) < abs(size1 - size))
-				)
-					size1 = size2
-			return size1
-		}
-		let range = sizes
-		size = clamp(size, range.min, range.max ?? Infinity)
-		let size1 = range.min
-			+ round((size - range.min) / range.step) * range.step
-		if (size1 > max_size)
-			size1 = range.min
-				+ Math.floor((max_size - range.min) / range.step) * range.step
-		return size1 < range.min ? null : size1
-	}
-
 	// add one object to the ground for each type that has none there. each
 	// goes in its type's place in a row, in the top third of the initial view
 	// of an empty plan. copy_objects adds the type's width and fields.
@@ -201,6 +213,7 @@ function house_plan(t) {
 	// again, and part of the edit.
 	function commit_edit(floor) {
 		assert(edit0)
+		floor.fix_objects(true)
 		let floor1 = house.floors[floor.i+1]
 		floor1?.fix_objects()
 		if (json(floor.save_state()) != json(edit0)
@@ -303,17 +316,24 @@ function house_plan(t) {
 			fix_objects()
 		}
 
-		// the segs changed: place each object again where it is, in order, so
-		// it fits around the ones placed before it. no wall: to the ground.
-		function fix_objects() {
+		// place the objects again in order, or only those connecting below.
+		// move invalid objects to the ground.
+		function fix_objects(connects_below_only = false) {
 			let t0 = profile_time()
 			let objects = floor.objects
 			for (let object of objects)
-				object.seg = null
+				if (!connects_below_only
+					|| house_object_types[object.type].connects_below)
+					object.seg = null
 			let i = 0
 			while (i < objects.length) {
 				let object = objects[i]
-				house_object_types[object.type].place(floor, object,
+				let object_type = house_object_types[object.type]
+				if (connects_below_only && !object_type.connects_below) {
+					i++
+					continue
+				}
+				object_type.place(floor, object,
 					object.x, object.y, 0)
 				if (object.on_floor) {
 					i++
@@ -325,6 +345,234 @@ function house_plan(t) {
 			profile_time('plan.objects', t0)
 		}
 		floor.fix_objects = fix_objects
+
+		// geometry queries ----------------------------------------------------
+
+		floor.wall_side_center = wall_side_center
+
+		// the room side nearest to the rect of half sizes (hx, hy) around (x, y),
+		// among the vertical sides (want_v) or the horizontal sides (want_h) that
+		// the rect overlaps along: [dir, c, m1, m2] if it is within snap_d.
+		// reuse out when supplied; otherwise allocate only for a found side.
+		// a room's free space is on the left of the walking direction of its
+		// sides, so the wall is on the right.
+		floor.find_wall_side = function(x, y, hx, hy, snap_d,
+			want_v, want_h, out) {
+			let min_gap = Infinity
+			let found_side
+			for (let ring of floor.room_rings) {
+				for (let i = 0, n = ring.length; i < n; i++) {
+					let side = read_wall_side(ring[i], ring[(i+1) % n], wall_side)
+					let [dir, c] = side
+					let is_v = dir % 2 == 1
+					if (is_v ? !want_v : !want_h)
+						continue
+					if (!wall_side_overlaps(side, x, y, hx, hy))
+						continue
+					let across = is_v ? x : y
+					let h_across = is_v ? hx : hy
+					let gap = dir == 1 || dir == 2
+						? c - (across + h_across) : (across - h_across) - c
+					if (abs(gap) <= snap_d && abs(gap) < min_gap) {
+						min_gap = abs(gap)
+						found_side = array_set(found_side ?? out ?? [], side)
+					}
+				}
+			}
+			return found_side
+		}
+
+		// the rect of half sizes (hx, hy) around (x, y) is inside the plan's
+		// rooms, touching their sides: no side crosses it and its center is
+		// inside an odd number of room rings.
+		floor.is_rect_in_rooms = function(x, y, hx, hy) {
+			let is_odd = false
+			for (let ring of floor.room_rings) {
+				for (let i = 0, n = ring.length; i < n; i++) {
+					let side = read_wall_side(ring[i], ring[(i+1) % n], wall_side)
+					let [dir, c, m1, m2] = side
+					let is_v = dir % 2 == 1
+					let m_lo = min(m1, m2)
+					let m_hi = max(m1, m2)
+					let across = is_v ? x : y
+					let h_across = is_v ? hx : hy
+					if (c > across - h_across && c < across + h_across
+						&& wall_side_overlaps(side, x, y, hx, hy)
+					)
+						return false
+					if (is_v && c > x && m_lo <= y && y < m_hi)
+						is_odd = !is_odd
+				}
+			}
+			return is_odd
+		}
+
+		// find a side and rotation for the allowed rectangle faces;
+		// prefer the previous side within the switching margin.
+		floor.find_room_side = function(x, y, w, l, rot0, faces,
+			snap_d, snap_margin, side0) {
+			let min_gap = Infinity
+			let found_side, found_rot
+			let found_old = false
+			for (let ring of floor.room_rings) {
+				for (let i = 0, n = ring.length; i < n; i++) {
+					let side = read_wall_side(ring[i], ring[(i+1) % n], wall_side)
+					let [dir, c, m1, m2] = side
+					let is_v = dir % 2 == 1
+					let face = (dir - rot0 / 90 + 4) % 4
+					let rot = faces.includes(face) ? rot0
+						: (dir - faces[0] + 4) % 4 * 90
+					let is_turned = rot % 180 == 90
+					let hx = (is_turned ? l : w) / 2
+					let hy = (is_turned ? w : l) / 2
+					if (!wall_side_overlaps(side, x, y, hx, hy))
+						continue
+					let across = is_v ? x : y
+					let center = wall_side_center(side, hx, hy)
+					let gap = abs(center - across)
+					if (gap > snap_d)
+						continue
+					let is_old = side0 && side0[0] == dir && side0[1] == c
+						&& side0[2] == m1 && side0[3] == m2
+					if (is_old)
+						gap -= snap_margin
+					let is_old_tie = gap == min_gap && is_old && !found_old
+					if (gap < min_gap || is_old_tie) {
+						min_gap = gap
+						found_side = array_set(found_side ?? [], side)
+						found_rot = rot
+						found_old = is_old
+					}
+				}
+			}
+			if (found_side)
+				return {side: found_side, rot: found_rot}
+		}
+
+		// find the nearest room boundary along the resize axis
+		// to limit growth from the fixed edge.
+		floor.limit_room_rect = function(x, y, hx, hy, is_x, dir, end) {
+			let limit_c = dir * Infinity
+			for (let ring of floor.room_rings) {
+				for (let i = 0, n = ring.length; i < n; i++) {
+					let side = read_wall_side(ring[i], ring[(i+1) % n], wall_side)
+					// only the sides across the width.
+					if ((side[0] % 2 == 1) != is_x)
+						continue
+					if (!wall_side_overlaps(side, x, y, hx, hy))
+						continue
+					let c = side[1]
+					if (dir * (c - end) > 0 && dir * (c - limit_c) < 0)
+						limit_c = c
+				}
+			}
+			return dir * (limit_c - end)
+		}
+
+		// find a room-side snap for a rectangle end without shrinking it
+		// below its minimum size.
+		floor.snap_room_edge = function(x, y, hx, hy, is_x, dir,
+			size, min_size, snap_d) {
+			let across = is_x ? x : y
+			let min_gap = snap_d, shift = 0
+			for (let ring of floor.room_rings) {
+				for (let i = 0; i < ring.length; i++) {
+					let side = read_wall_side(ring[i],
+						ring[(i + 1) % ring.length], wall_side)
+					if ((side[0] % 2 == 1) != is_x)
+						continue
+					if (!wall_side_overlaps(side, x, y, hx, hy))
+						continue
+					let gap = side[1] - across
+					if (size + dir * gap < min_size)
+						continue
+					if (abs(gap) <= min_gap) {
+						min_gap = abs(gap)
+						shift = dir * gap
+					}
+				}
+			}
+			return shift
+		}
+
+		// find a length snap to a wall face spanning the full rectangle width.
+		floor.snap_wall_end = function(x, y, w, rot, l, snap_d) {
+			let r = rot * rad
+			let ux = round(cos(r)), uy = round(sin(r))
+			let length1 = l
+			let min_gap = snap_d
+			for (let seg of floor.segs) {
+				if (seg.is_v != !!uy)
+					continue
+				let along = seg.is_v ? y : x
+				if (along - w / 2 < seg.wall_m1
+					|| along + w / 2 > seg.wall_m2)
+					continue
+				let c = seg.is_v ? x : y
+				let sign = seg.is_v ? -uy : ux
+				for (let face of [seg.wall_a1, seg.wall_a2]) {
+					let length = (face - c) * sign
+					let gap = abs(length - l)
+					if (length > 0 && gap <= min_gap) {
+						min_gap = gap
+						length1 = length
+					}
+				}
+			}
+			return length1
+		}
+
+		// find a wall connection with room for the rectangle in the opening
+		// and slab across the whole landing edge beyond the wall.
+		floor.find_slab_connection = function(x, y, w, l, rot0, snap_d) {
+			let floor0 = house.floors[floor.i-1]
+			if (!floor0)
+				return
+			let openings = make_opening_paths(floor0, floor)
+			if (!openings.length)
+				return
+			let roof_paths0 = []
+			for (let area of floor0.make_areas())
+				if (area.kind == 'roof')
+					for (let path of area.paths)
+						roof_paths0.push(path)
+			let slab = slab_paths(floor0, floor, roof_paths0, openings)
+			let min_gap = Infinity, found_x, found_y, found_rot
+			for (let seg of floor.segs) {
+				let is_v = seg.is_v
+				let along = is_v ? y : x
+				let m1 = along - w / 2, m2 = along + w / 2
+				if (m1 < seg.wall_m1 || m2 > seg.wall_m2)
+					continue
+				for (let side = 0; side < 2; side++) {
+					let c = side ? seg.wall_a2 : seg.wall_a1
+					let rot = is_v ? (side ? 270 : 90) : (side ? 0 : 180)
+					if (!snap_d && rot != rot0)
+						continue
+					let gap = abs(c - (is_v ? x : y))
+					if (gap > snap_d)
+						continue
+					if (gap >= min_gap)
+						continue
+					let end = c + (side ? l : -l)
+					let lo = min(c, end), hi = max(c, end)
+					if (!is_rect_in_paths(openings,
+						is_v ? lo : m1, is_v ? m1 : lo,
+						is_v ? hi : m2, is_v ? m2 : hi))
+						continue
+					let beyond = side ? seg.wall_a1 : seg.wall_a2
+					if (!is_slab_side_covered(slab, is_v, beyond, m1, m2,
+						side ? -1 : 1))
+						continue
+					min_gap = gap
+					found_x = is_v ? c : x
+					found_y = is_v ? y : c
+					found_rot = rot
+				}
+			}
+			if (found_rot != null)
+				return {x: found_x, y: found_y, rot: found_rot}
+		}
 
 		// the faces of the walls along cycle c, offset by d: on each seg, the
 		// across coordinate of the face on the side that c walks: seg.wall_a1
@@ -1303,39 +1551,15 @@ function house_plan(t) {
 		floor.start_resize_object = function(object, side, axis = 'w') {
 			begin_edit(floor)
 			let object_type = house_object_types[object.type]
-			if (object_type.start_resize) {
-				let s = object_type.start_resize(floor, object, side)
-				let resize = s.resize
-				s.resize = function(dx, dy, snap_d) {
-					resize(dx, dy, snap_d)
+			let start_resize = object_type.start_resize ?? start_resize_rect
+			let s = start_resize(floor, object, side, axis)
+			let resize = s.resize
+			// update placement or walls after resizing within the floor edit.
+			s.resize = function(dx, dy, snap_d) {
+				let is_resized = resize(dx, dy, snap_d)
+				if (object_type.start_resize)
 					move_object(object, object.x, object.y, 0)
-				}
-				s.stop = function() { commit_edit(floor) }
-				s.cancel = cancel_edit
-				return s
-			}
-			let is_l = axis == 'l'
-			let sizes = is_l ? object_type.l_list
-				: object_type.w_list ?? object_type.w_range
-			let limit = is_l ? object_type.limit_l : object_type.limit_w
-			let x0 = object.x
-			let y0 = object.y
-			let size0 = object[axis]
-			let max_size = limit ? limit(floor, object, side) : Infinity
-			let s = {}
-			s.resize = function(dx, dy) {
-				let r = object.rot * rad
-				let ax = is_l ? -sin(r) : cos(r) // the axis in the plan.
-				let ay = is_l ? cos(r) : sin(r)
-				let u = dx * ax + dy * ay
-				let size = snap_object_size(sizes, size0 + side * u, max_size)
-				if (size == null)
-					return
-				let shift = side * (size - size0) / 2
-				object[axis] = size
-				object.x = snap_length(x0 + shift * ax)
-				object.y = snap_length(y0 + shift * ay)
-				if (object_type.in_wall)
+				else if (object_type.in_wall && is_resized)
 					wall_geometry = null
 			}
 			s.stop = function() {
@@ -1805,6 +2029,15 @@ function house_plan(t) {
 		return paths
 	}
 
+	// intersect upper open rooms with lower rooms to locate slab openings.
+	function make_opening_paths(floor0, floor1, outline0) {
+		let {intersect, difference, FillRule} = clipper2
+		let EO = FillRule.EvenOdd
+		outline0 ??= add_outline_paths(floor0, [])
+		let rooms0 = difference(outline0, add_skin_paths(floor0, []), EO)
+		return intersect(add_open_room_paths(floor1, []), rooms0, EO)
+	}
+
 	// the holes that the floor's objects cut in its walls, grouped by
 	// height: [{sill, head, paths}, ...] with the grid paths of the holes.
 	function make_hole_groups(floor) {
@@ -1827,10 +2060,60 @@ function house_plan(t) {
 		return Array.from(groups.values())
 	}
 
+	// test full rectangle coverage on the slab grid, including any holes.
+	function is_rect_in_paths(paths, x1, y1, x2, y2) {
+		let scale = prism_union.grid_scale
+		let rect = [[
+			{x: round(x1 * scale), y: round(y1 * scale)},
+			{x: round(x2 * scale), y: round(y1 * scale)},
+			{x: round(x2 * scale), y: round(y2 * scale)},
+			{x: round(x1 * scale), y: round(y2 * scale)},
+		]]
+		return !clipper2.difference(rect, paths, clipper2.FillRule.EvenOdd).length
+	}
+
+	let slab_crossings = []
+
+	// test slab coverage along the whole edge on the requested side;
+	// include boundary crossings from that side without a sampling strip.
+	function is_slab_side_covered(paths, is_v, c, m1, m2, dir) {
+		let scale = prism_union.grid_scale
+		c = round(c * scale)
+		m1 = round(m1 * scale)
+		m2 = round(m2 * scale)
+		let crossings = slab_crossings
+		crossings.length = 0
+		for (let path of paths) {
+			for (let i = 0; i < path.length; i++) {
+				let p = path[i], q = path[(i + 1) % path.length]
+				let a1 = is_v ? p.x : p.y
+				let a2 = is_v ? q.x : q.y
+				let lo = min(a1, a2), hi = max(a1, a2)
+				let is_crossing = dir > 0 ? lo <= c && c < hi
+					: lo < c && c <= hi
+				if (is_crossing)
+					crossings.push(is_v ? p.y : p.x)
+			}
+		}
+		crossings.sort((a, b) => a - b)
+		let end = m1
+		for (let i = 0; i < crossings.length; i += 2) {
+			let lo = crossings[i], hi = crossings[i + 1]
+			if (hi <= end)
+				continue
+			if (lo > end)
+				return false
+			end = hi
+			if (end >= m2)
+				return true
+		}
+		return false
+	}
+
 	// grid paths of the slab between floor0 below, which can be null, and
 	// floor1 above. roof_paths0: the grid paths of floor0's roof areas.
-	function slab_paths(floor0, floor1, roof_paths0) {
-		let {union, intersect, difference, FillRule} = clipper2
+	function slab_paths(floor0, floor1, roof_paths0, open_rooms) {
+		let {union, difference, FillRule} = clipper2
 		let EO = FillRule.EvenOdd
 		let paths
 		if (!floor0) {
@@ -1838,9 +2121,7 @@ function house_plan(t) {
 		} else {
 			let outline0 = add_outline_paths(floor0, [])
 			let outline1 = add_outline_paths(floor1, [])
-			let rooms0 = difference(outline0, add_skin_paths(floor0, []), EO)
-			let open_rooms = intersect(add_open_room_paths(floor1, []), rooms0,
-				EO)
+			open_rooms ??= make_opening_paths(floor0, floor1, outline0)
 			paths = difference(union(outline0, outline1, EO),
 				[...open_rooms, ...roof_paths0], EO)
 		}

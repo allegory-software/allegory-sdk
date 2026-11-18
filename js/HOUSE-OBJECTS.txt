@@ -230,3 +230,51 @@ Nitpicks round 3 (2026-11-17, uncommitted, browser not tried; tests: house_plan_
 - Fixed in 3d.js offset_corner: square corners went the wrong way for d > 0 (no caller used d > 0 before). 3d_test has a rectangle check for both signs.
 - Known: a dangling exterior wall on a terrace edge offsets inward into a self-crossing ring (0-degree caps); not tried. Half-walls look exactly like walls in the plan.
 - Tests: house_plan_test 199 (facade, slab-top and hole expectations now include the half-wall; height setting; roof area without half-wall), 3d_test 164, view 54, cut 10 and faces compare 14 (both stub make_half_wall_paths to [] since their references have no half-walls).
+
+## Stairs (2026-11-18)
+
+Decided (Cosmin):
+- One straight run, no landings. Defaults: 900 mm width, 175 mm target
+  riser height, 280 mm target tread depth; no parameter UI yet.
+- Store once on the upper floor; show and edit from both connected floors.
+- Valid only when the entire footprint fits in the upper floor's slab
+  opening and the full top edge rests against a wall with slab beyond it.
+  An opening is a room marked Open, over rooms of the floor below.
+- Search integer riser counts within 150..190 mm. Divide the floor-to-floor
+  height by each count and round the regular riser height to 5 mm. Put the
+  accumulated rounding difference in the bottom riser. Keep both regular
+  and bottom heights within the range. Choose the smallest bottom-riser
+  difference; break ties by closeness to the configured target height.
+- Then use one fewer tread than risers. The configured tread depth gives
+  the default length. Resizing fixes the exact length: divide by the tread
+  count, round regular depth to 5 mm, and put the accumulated difference
+  in the bottom tread. Keep the top edge fixed during length resize.
+- Build a separate 3D group and place it; do not add stair prisms to the
+  wall/slab union.
+
+Implementation:
+- Stair x, y is the middle of the top edge. Local +y goes down the run;
+  rot uses the existing quarter turns. Width resizes at either side and
+  length at the bottom, including snapping to wall faces.
+- Saved fields: riser_height, tread_depth, l. Null l means default length;
+  numeric l means fixed length. object.stair caches computed dimensions
+  and is not saved. Invalid stairs go to the existing ground list.
+- Type connects_below enables the lower-plan view. The editor keeps the
+  upper objects in draw_state.objects_above, filters by connects_below,
+  and uses hit.object_plan for editing the owning floor.
+- floor.make_opening_paths() and make_slab_paths() expose the existing
+  slab geometry on the prism_union grid for placement checks.
+- fix_objects(connects_below_only = false) can revalidate only connecting
+  objects. At commit, revalidate those on the edited floor before placing
+  the floor above's objects again. Undo keeps the existing floor, ground,
+  and upper-floor object snapshots.
+- Type create_model(editor, floor, object) constructs the component in
+  local coordinates at the owning floor's slab top. The model editor
+  adds it to the root with translation and rotation. A cut below the
+  owning floor omits the group.
+- Costs: polygon clipping during placement/revalidation, faces proportional
+  to the tread count on model rebuild. No allocations in steady plan
+  drawing or hit testing. No workarounds.
+- Checks passed: house_plan_test 230, house_plan_view_test 56,
+  house_model_editor_test 32 (headless browser), house_faces_compare_test 14.
+  Visual review by Cosmin remains pending.

@@ -21,11 +21,11 @@ function transform_point(x, y) {
 
 let cx = {wall_pattern: true}
 let canvas_methods = ['rect', 'clip', 'closePath', 'fill', 'setLineDash',
-	'arc', 'scale']
+	'arc']
 for (let name of canvas_methods)
 	cx[name] = () => {}
-cx.save = () => stack.push([...matrix])
-cx.restore = () => { matrix = stack.pop() }
+cx.save = () => stack.push([matrix.slice(), cx.lineWidth])
+cx.restore = () => { [matrix, cx.lineWidth] = stack.pop() }
 cx.translate = function(x, y) {
 	matrix[4] += matrix[0]*x + matrix[2]*y
 	matrix[5] += matrix[1]*x + matrix[3]*y
@@ -37,6 +37,10 @@ cx.rotate = function(angle) {
 	matrix[1] = b*cs + d*sn
 	matrix[2] = -a*sn + c*cs
 	matrix[3] = -b*sn + d*cs
+}
+cx.scale = function(x, y) {
+	matrix[0] *= x; matrix[1] *= x
+	matrix[2] *= y; matrix[3] *= y
 }
 cx.beginPath = () => { points = [] }
 cx.moveTo = cx.lineTo = (x, y) => points.push(transform_point(x, y))
@@ -316,22 +320,22 @@ for (let [y, dy, expected] of [
 }
 
 check('all dimensions replace drag measurements', () => {
-	// 14 wall dimensions + 6 sizes of the default ground objects (window,
-	// door, bed width and length, countertop length and depth).
+	// 14 wall dimensions + 8 sizes of the default ground objects (window,
+	// door, bed width and length, countertop and stair length and width).
 	dims_click = true
 	frame()
-	assert.equal(dimensions.length, 20)
+	assert.equal(dimensions.length, 22)
 	let seg = plan.segs.find(s => s.is_v && s.axis == 2000)
 	capture = {action: 'move_seg', seg, drag: true, dx: 0, dy: 0}
 	frame()
-	assert.equal(dimensions.length, 20)
+	assert.equal(dimensions.length, 22)
 	capture.drag = false
 	let sg = state
 	let angle = sg.rotation
 	capture.dx = 400 * sg.scale * Math.cos(angle)
 	capture.dy = 400 * sg.scale * Math.sin(angle)
 	frame()
-	assert.equal(dimensions.length, 20)
+	assert.equal(dimensions.length, 22)
 	capture.cancel = true
 	frame()
 	capture = null
@@ -787,6 +791,165 @@ check('the editor starts and commits the countertop custom resize gesture', () =
 	delete ui.set_hit
 	delete ui.update_mouse
 	delete ui.hit_bbox
+})
+
+check('a lower plan draws and edits its upper-floor stair', () => {
+	let rect = ['draw', 0, 0, 8000, 8000, -8000, -8000]
+	plan_json = JSON.stringify({version: 1, floor_h: 2800, floors: [
+		{lines: [rect]},
+		{lines: [rect, ['connect', [0, 2000], [8000, 2000]]], objects: [
+			{type: 'stair', x: 4000, y: 2040, rot: 0},
+			{type: 'open_room', x: 4000, y: 4000, rot: 0},
+		]},
+	]})
+	frame()
+	state.floor = state.house.floors[0]
+	state.is_roof_level = false
+	frame()
+	let upper = state.house.floors[1]
+	let stair = upper.objects.find(o => o.type == 'stair')
+	assert(stair?.on_floor)
+	assert.equal(state.draw_state.objects_above, upper.objects)
+	let mouse_x = 4000, mouse_y = 6240
+	let hs
+	ui.hit_box = () => true
+	ui.set_hit = () => (hs = {})
+	ui.update_mouse = () => {
+		ui.mx = state.x(mouse_x)
+		ui.my = state.y(mouse_y)
+	}
+	ui.hit_bbox = (x1, y1, x2, y2) =>
+		ui.mx >= x1 && ui.mx <= x2 && ui.my >= y1 && ui.my <= y2
+	assert(widget.hit(record, 0))
+	assert.equal(hs.object, stair)
+	assert.equal(hs.object_plan, upper)
+	assert.equal(hs.action, 'resize_object')
+	let angle = state.rotation ?? 0
+	capture = {...hs, drag: true, moved: true,
+		dx: 200 * state.scale * Math.sin(angle),
+		dy: -200 * state.scale * Math.cos(angle)}
+	frame()
+	assert.equal(stair.l, 4000)
+	assert.equal(stair.y, 2040)
+	capture.drag = false
+	capture.drop = true
+	frame()
+	capture = null
+	assert(state.house.undo())
+	frame()
+	assert.equal(state.house.floors[1].objects.find(o => o.type == 'stair').l,
+		null)
+	delete ui.hit_box
+	delete ui.set_hit
+	delete ui.update_mouse
+	delete ui.hit_bbox
+})
+
+check('shared object drawing preserves poses, corner chairs and screen labels',
+	() => {
+	let originals = {}, drawings = []
+	for (let name in ctx.house_object_types) {
+		let type = ctx.house_object_types[name]
+		if (!type.draw)
+			continue
+		let draw = type.draw
+		originals[name] = draw
+		type.draw = function(cx, plan, object) {
+			drawings.push({object, axes: matrix.slice(0, 4),
+				origin: transform_point(0, 0), line_width: cx.lineWidth})
+			draw(cx, plan, object)
+		}
+	}
+	try {
+		for (let dpr of [1, 2]) {
+			ctx.devicePixelRatio = dpr
+			for (let turn = 0; turn < 4; turn++) {
+				state.rotation = turn * Math.PI / 2
+				state.scale = .137
+				state.zoomed = true
+				for (let object of state.house.ground_objects) {
+					object.rot = turn * 90 + (object.type == 'chair' ? 45 : 0)
+					if (object.type == 'door')
+						object.mirror = turn % 2 != 0
+				}
+				drawings.length = 0
+				frame()
+				assert(drawings.length >= Object.keys(originals).length)
+				for (let drawing of drawings) {
+					let {object, axes, origin, line_width} = drawing
+					let type = ctx.house_object_types[object.type]
+					let x = object.x, y = object.y
+					let r = object.rot * Math.PI / 180
+					if (object.type == 'chair' && object.rot % 90) {
+						x -= Math.sign(Math.sin(r)) * object.w / 4
+						y += Math.sign(Math.cos(r)) * object.l / 4
+					}
+					let dx = state.x(x) + state.x0 - record[2] / 2
+					let dy = state.y(y) + state.y0 - record[3] / 2
+					let c = Math.cos(state.rotation), s = Math.sin(state.rotation)
+					close(origin[0], record[2] / 2 + c * dx - s * dy)
+					close(origin[1], record[3] / 2 + s * dx + c * dy)
+					if (type.draw_space == 'screen') {
+						equal_axes(axes, [1, 0, 0, 1])
+						close(line_width, 2)
+					} else {
+						let angle = state.rotation + r
+						let sc = state.scale * dpr
+						let mirror = object.mirror ? -1 : 1
+						let c = Math.cos(angle) * sc, s = Math.sin(angle) * sc
+						equal_axes(axes, [c * mirror, s * mirror, -s, c])
+						close(line_width * sc, 2)
+					}
+				}
+			}
+		}
+	} finally {
+		for (let name in originals)
+			ctx.house_object_types[name].draw = originals[name]
+		ctx.devicePixelRatio = 1
+	}
+})
+
+check('opening masks preserve fractional-scale rounding and wall-edge strokes',
+	() => {
+	let sg = {scale: .137, line_width: 2, d_exact: d => d * .274,
+		x: x => Math.round(x * .274), y: y => Math.round(y * .274)}
+	for (let [rot, window_rect, door_rect, edges, middle] of [
+		[0, [152.563, 511.64, 397.437, 560.96], [152, 513, 397, 560],
+			[152.563, 511.64, 397.437, 511.64,
+				152.563, 560.96, 397.437, 560.96],
+			[152.563, 536.3, 397.437, 536.3]],
+		[90, [236.64, 427.563, 285.96, 672.437], [237, 427, 285, 672],
+			[236.64, 427.563, 236.64, 672.437,
+				285.96, 427.563, 285.96, 672.437],
+			[261.3, 427.563, 261.3, 672.437]],
+	]) {
+		for (let name of ['window', 'door']) {
+			let rect, strokes = [], points = []
+			let cx = {
+				beginPath() { points = [] }, fill() {},
+				rect(x, y, w, h) { rect = [x, y, x + w, y + h] },
+				moveTo(x, y) { points.push(x, y) },
+				lineTo(x, y) { points.push(x, y) },
+				stroke() { strokes.push(points.slice()) },
+			}
+			let object = {x: 1003, y: 2007, w: 901, rot,
+				seg: {wall_a1: rot ? 863 : 1867, wall_a2: rot ? 1043 : 2047}}
+			let type = ctx.house_object_types[name], bounds = []
+			type.box(null, object, bounds)
+			type.draw_mask(cx, null, object, bounds, sg)
+			let expected = name == 'window' ? window_rect : door_rect
+			for (let i = 0; i < rect.length; i++)
+				close(rect[i], expected[i])
+			if (name == 'window') {
+				assert.equal(strokes.length, 2)
+				for (let i = 0; i < edges.length; i++)
+					close(strokes[0][i], edges[i])
+				for (let i = 0; i < middle.length; i++)
+					close(strokes[1][i], middle[i])
+			}
+		}
+	}
 })
 
 console.log(n_checks + ' house plan view checks passed')

@@ -2634,7 +2634,7 @@ check('a new house has one default object of each type on the ground', () => {
 	let h = house({floors: [{lines: [rect_lines(0, 0, 6000, 4000)]}]})
 	assert.deepEqual(Array.from(h.ground_objects, o => o.type),
 		['window', 'door', 'bed', 'chair', 'wc', 'countertop',
-			'open_room', 'terrace'])
+			'open_room', 'terrace', 'stair'])
 	assert.equal(h.floors[0].objects.length, 0)
 })
 
@@ -2643,10 +2643,11 @@ check('loading adds the types missing from the ground, in their places', () => {
 		ground_objects: [{type: 'door', x: 100, y: 200, rot: 90}]})
 	assert.deepEqual(Array.from(h.ground_objects, o => o.type),
 		['door', 'window', 'bed', 'chair', 'wc', 'countertop',
-			'open_room', 'terrace'])
+			'open_room', 'terrace', 'stair'])
 	assert.deepEqual(Array.from(h.ground_objects, o => [o.x, o.y]),
 		[[100, 200], [-750, -2000], [2250, -2000], [3750, -2000],
-			[5250, -2000], [6750, -2000], [8250, -2000], [9750, -2000]])
+			[5250, -2000], [6750, -2000], [8250, -2000], [9750, -2000],
+			[11250, -2000]])
 	assert.equal(h.ground_objects[0].rot, 90)
 	let h2 = house(h.save_state())
 	assert.equal(h2.ground_objects.length, default_n)
@@ -3710,11 +3711,9 @@ check('countertop resize highlights only the hovered handle segment', () => {
 	let f = countertop_floor()
 	let object = f.objects.at(-1)
 	let lines = [], line
-	let cx = {save() {}, restore() {}, translate() {}, rotate() {}, scale() {},
-		lineWidth: 1, beginPath() {}, stroke() {},
+	let cx = {beginPath() {}, stroke() {},
 		moveTo(x, y) { line = [x, y] },
 		lineTo(x, y) { lines.push([...line, x, y]) }}
-	let sg = {d_exact: d => d, x: x => x, y: y => y}
 	for (let [x, y, expected] of [
 		[3200, 3300, [0, 300, 600, 300]],
 		[3900, 3300, [600, 300, 1200, 300]],
@@ -3723,9 +3722,441 @@ check('countertop resize highlights only the hovered handle segment', () => {
 	]) {
 		lines.length = 0
 		let handle = countertop_handle(f, object, x, y)
-		ctx.house_object_types.countertop.draw_resize(cx, sg, f, object, handle)
+		ctx.house_object_types.countertop.draw_resize(cx, f, object, handle)
 		assert.deepEqual(lines, [expected])
 	}
+})
+
+// stairs -------------------------------------------------------------------
+
+function stair_house(height = 2800, objects, lower_lines) {
+	return house({floors: [
+		{h: height, lines: lower_lines ?? [rect_lines(0, 0, 8000, 8000)]},
+		{lines: [rect_lines(0, 0, 8000, 8000),
+			['connect', [0, 2000], [8000, 2000]]],
+			objects: objects ?? [
+				{type: 'stair', x: 4000, y: 2040, rot: 0},
+				tag_state('open_room', 4000, 4000),
+			]},
+	]})
+}
+
+function stair_of(h) {
+	return h.floors[1].objects.find(o => o.type == 'stair')
+}
+
+check('a stair belongs to its upper floor and fits its actual slab opening',
+	() => {
+	let h = stair_house()
+	let stair = stair_of(h)
+	assert(stair?.on_floor)
+	assert.equal(h.floors[0].objects.length, 0)
+	assert.equal(stair.stair.n, 16)
+	assert.equal(stair.stair.rise, 175)
+	assert.equal(stair.stair.bottom_rise, 175)
+	assert.equal(stair.stair.l, 4200)
+	assert.equal(stair.l, null)
+	assert.equal(stair.stair.depth, 280)
+})
+
+check('stair riser count minimizes the rounded bottom difference', () => {
+	let h = stair_house(2813)
+	let s = stair_of(h).stair
+	assert.equal(s.n, 17)
+	assert.equal(s.rise, 165)
+	assert.equal(s.bottom_rise, 173)
+	assert.equal((s.n - 1) * s.rise + s.bottom_rise, 2813)
+})
+
+check('stair target height breaks ties between exact divisions', () => {
+	let h = stair_house(2700)
+	assert.equal(stair_of(h).stair.n, 15)
+	assert.equal(stair_of(h).stair.rise, 180)
+	let saved = h.save_state()
+	saved.floors[1].objects[0].riser_height = 150
+	h = house(saved)
+	assert.equal(stair_of(h).stair.n, 18)
+	assert.equal(stair_of(h).stair.rise, 150)
+})
+
+check('a stair needs an upper opening, a top wall, and slab beyond it', () => {
+	for (let objects of [
+		[{type: 'stair', x: 4000, y: 2040, rot: 0}],
+		[{type: 'stair', x: 4000, y: 2200, rot: 0},
+			tag_state('open_room', 4000, 4000)],
+		[{type: 'stair', x: 4000, y: 140, rot: 0},
+			tag_state('open_room', 4000, 4000),
+			tag_state('open_room', 4000, 1000)],
+		[{type: 'stair', x: 4000, y: 2040, rot: 0, l: 7000},
+			tag_state('open_room', 4000, 4000)],
+	]) {
+		let h = stair_house(2800, objects)
+		assert(!stair_of(h))
+		assert(h.ground_objects.some(o => o.type == 'stair' && !o.on_floor))
+	}
+	let h = stair_house(2800, [
+		{type: 'stair', x: 4000, y: 2040, rot: 0},
+		tag_state('open_room', 4000, 4000),
+		tag_state('open_room', 4000, 1000),
+	])
+	assert(!stair_of(h))
+})
+
+check('stair containment checks the opening over lower rooms', () => {
+	let h = stair_house(2800, null, [rect_lines(0, 0, 8000, 4500)])
+	assert(!stair_of(h))
+})
+
+check('slab connections cover full landing edges in all four directions',
+	() => {
+	let h = house({floors: [
+		{lines: [rect_lines(0, 0, 8000, 8000)]},
+		{lines: [rect_lines(0, 0, 8000, 8000),
+			rect_lines(2000, 2000, 4000, 4000)],
+			objects: [tag_state('open_room', 4000, 4000)]},
+	]})
+	let f = h.floors[1]
+	let connections = [
+		[4000, 2040, 0], [5960, 4000, 90],
+		[4000, 5960, 180], [2040, 4000, 270],
+	]
+	for (let [x, y, rot] of connections) {
+		for (let w of [900, 3920]) {
+			let found = f.find_slab_connection(x, y, w, 2000, rot, 0)
+			assert(found)
+			assert.deepEqual({...found}, {x, y, rot})
+		}
+		assert.equal(f.find_slab_connection(x, y, 3921, 2000, rot, 0),
+			undefined)
+	}
+})
+
+check('a narrow opening behind the landing rejects an otherwise covered edge',
+	() => {
+	let h = house({floors: [
+		{lines: [rect_lines(0, 0, 8000, 8000)]},
+		{lines: [rect_lines(0, 0, 8000, 8000),
+			['connect', [0, 2000], [8000, 2000]],
+			['connect', [3900, 0], [3900, 2000]],
+			['connect', [3982, 0], [3982, 2000]]],
+			objects: [tag_state('open_room', 4000, 4000),
+				tag_state('open_room', 3941, 1000)]},
+	]})
+	let f = h.floors[1]
+	assert.equal(f.open_rooms.size, 2)
+	assert(f.find_slab_connection(2500, 2040, 900, 4200, 0, 0))
+	assert.equal(f.find_slab_connection(4000, 2040, 900, 4200, 0, 0),
+		undefined)
+	assert(f.find_slab_connection(4500, 2040, 900, 4200, 0, 0))
+})
+
+check('an exterior landing needs slab in the lower terrace beyond the wall',
+	() => {
+	for (let terrace of [false, true]) {
+		let objects = [tag_state('open_room', 4000, 4000)]
+		if (terrace)
+			objects.push(tag_state('terrace', 4000, -500))
+		let h = house({floors: [
+			{lines: [rect_lines(-2000, -2000, 12000, 12000)]},
+			{lines: [rect_lines(0, 0, 8000, 8000)], objects},
+		]})
+		let found = h.floors[1].find_slab_connection(
+			4000, 40, 900, 4200, 0, 0)
+		assert.equal(!!found, terrace)
+	}
+})
+
+check('a slab query computes its opening once and leaves objects unchanged',
+	() => {
+	let h = stair_house()
+	let f = h.floors[1], f0 = h.floors[0]
+	let before = JSON.stringify(f.objects)
+	let counts = {difference: 0, intersect: 0, union: 0}
+	let originals = {}
+	let make_areas = f0.make_areas, area_count = 0
+	for (let name in counts) {
+		let fn = ctx.clipper2[name]
+		originals[name] = fn
+		ctx.clipper2[name] = function(...args) {
+			counts[name]++
+			return fn(...args)
+		}
+	}
+	f0.make_areas = function() {
+		area_count++
+		return make_areas()
+	}
+	try {
+		let found = f.find_slab_connection(4000, 2040, 900, 4200, 0, 0)
+		assert.deepEqual({...found}, {x: 4000, y: 2040, rot: 0})
+		assert.deepEqual(counts, {difference: 3, intersect: 1, union: 1})
+		assert.equal(area_count, 1)
+		assert.equal(JSON.stringify(f.objects), before)
+	} finally {
+		for (let name in originals)
+			ctx.clipper2[name] = originals[name]
+		f0.make_areas = make_areas
+	}
+})
+
+check('a stair snaps its top edge to the wall and keeps it during resize',
+	() => {
+	let h = stair_house()
+	let f = h.floors[1]
+	let stair = stair_of(h)
+	let move = f.start_move_object(stair)
+	move.move(4000, 2100, 100)
+	assert.equal(stair.y, 2040)
+	assert(stair.on_floor)
+	move.stop()
+	let resize = f.start_resize_object(stair, 2, 'l')
+	resize.resize(0, -197)
+	assert.equal(stair.l, 4003)
+	assert.equal(stair.y, 2040)
+	assert.equal(stair.stair.depth, 265)
+	assert.equal(stair.stair.bottom_depth, 293)
+	assert.equal(14 * stair.stair.depth + stair.stair.bottom_depth, 4003)
+	resize.stop()
+	assert(h.undo())
+	assert.equal(stair_of(h).l, null)
+	assert(h.redo())
+	assert.equal(stair_of(h).l, 4003)
+})
+
+check('stair length snaps to the bottom wall without rounding the length',
+	() => {
+	let h = stair_house()
+	let f = h.floors[1]
+	let stair = stair_of(h)
+	let resize = f.start_resize_object(stair, 2, 'l')
+	resize.resize(0, 1700, 30)
+	assert.equal(stair.l, 5920)
+	assert.equal(stair.y, 2040)
+	assert(stair.on_floor)
+	resize.cancel()
+	assert.equal(stair_of(h).l, null)
+})
+
+check('stair width resize keeps its opposite edge and default length', () => {
+	let h = stair_house()
+	let f = h.floors[1]
+	let stair = stair_of(h)
+	let resize = f.start_resize_object(stair, 1)
+	resize.resize(200, 0)
+	assert.equal(stair.w, 1100)
+	assert.equal(stair.x - stair.w / 2, 3550)
+	assert.equal(stair.y, 2040)
+	assert.equal(stair.l, null)
+	assert(stair.on_floor)
+	resize.cancel()
+	assert.equal(stair_of(h).w, 900)
+})
+
+check('stair saved state keeps parameters and excludes calculated sizes', () => {
+	let h = stair_house()
+	let f = h.floors[1]
+	let stair = stair_of(h)
+	f.update_object(stair, o => { o.tread_depth = 275; o.l = 4003 })
+	let saved = h.save_object(stair)
+	assert.equal(saved.tread_depth, 275)
+	assert.equal(saved.l, 4003)
+	assert(!('stair' in saved))
+	let h1 = stair_house(2800, [saved, tag_state('open_room', 4000, 4000)])
+	assert(stair_of(h1)?.on_floor)
+	assert.equal(stair_of(h1).stair.l, 4003)
+})
+
+check('a lower-floor height edit recalculates the upper stair and undoes it',
+	() => {
+	let h = stair_house()
+	let edit = h.floors[0].start_move_height(false)
+	edit.move(13)
+	edit.stop()
+	assert.equal(stair_of(h).stair.height, 2813)
+	assert.equal(stair_of(h).stair.n, 17)
+	assert(h.undo())
+	assert.equal(stair_of(h).stair.height, 2800)
+	assert.equal(stair_of(h).stair.n, 16)
+})
+
+check('removing an opening tag revalidates its stair and undo restores it',
+	() => {
+	let h = stair_house()
+	let f = h.floors[1]
+	f.remove_object(f.objects.find(o => o.type == 'open_room'))
+	assert(!stair_of(h))
+	assert(h.undo())
+	assert(stair_of(h)?.on_floor)
+	assert(h.redo())
+	assert(!stair_of(h))
+})
+
+check('stair parameter edits revalidate placement on their own floor', () => {
+	let h = stair_house()
+	let f = h.floors[1]
+	f.update_object(stair_of(h), o => { o.l = 7000 })
+	assert(!stair_of(h))
+	assert(h.undo())
+	assert.equal(stair_of(h).l, null)
+})
+
+check('stairs retain their top connection in all four orientations', () => {
+	let saved = stair_house().save_state()
+	for (let turn = 0; turn < 4; turn++) {
+		let h = house(saved)
+		let stair = stair_of(h)
+		assert(stair?.on_floor, 'turn ' + turn)
+		let f = h.floors[1]
+		let resize = f.start_resize_object(stair, 2, 'l')
+		let angle = stair.rot * Math.PI / 180
+		let x = stair.x, y = stair.y
+		resize.resize(197 * Math.sin(angle), -197 * Math.cos(angle))
+		assert.equal(stair.l, 4003)
+		assert.equal(stair.x, x)
+		assert.equal(stair.y, y)
+		assert(stair.on_floor)
+		resize.cancel()
+		for (let floor of saved.floors) {
+			for (let p of floor.points) {
+				let x = p[0]
+				p[0] = 8000 - p[1]
+				p[1] = x
+			}
+			for (let object of floor.objects) {
+				let x = object.x
+				object.x = 8000 - object.y
+				object.y = x
+				object.rot = (object.rot + 90) % 360
+			}
+		}
+	}
+})
+
+// object coordinates --------------------------------------------------------
+
+check('local bounds retain each type anchor in all four orientations', () => {
+	let f = stair_house().floors[1]
+	let fixtures = [
+		['bed', {w: 1400, l: 2000}, [-700, -1000, 700, 1000], [
+			[-700, -1000, 700, 1000], [-1000, -700, 1000, 700],
+			[-700, -1000, 700, 1000], [-1000, -700, 1000, 700],
+		]],
+		['countertop', {legs: [0, 1800, 600]}, [0, -300, 1800, 300], [
+			[0, -300, 1800, 300], [-300, 0, 300, 1800],
+			[-1800, -300, 0, 300], [-300, -1800, 300, 0],
+		]],
+		['stair', {w: 900, l: null, riser_height: 175, tread_depth: 280},
+			[-450, 0, 450, 4200], [
+				[-450, 0, 450, 4200], [-4200, -450, 0, 450],
+				[-450, -4200, 450, 0], [0, -450, 4200, 450],
+			]],
+	]
+	for (let [name, fields, local, bounds] of fixtures) {
+		let type = ctx.house_object_types[name]
+		for (let turn = 0; turn < 4; turn++) {
+			let object = {type: name, x: 10000, y: 20000,
+				rot: turn * 90, ...fields}
+			let out = []
+			assert.equal(type.local_box(f, object, out), out)
+			assert.deepEqual(out, local)
+			assert.equal(type.box(f, object, out), out)
+			let b = bounds[turn]
+			assert.deepEqual(out,
+				[b[0] + 10000, b[1] + 20000, b[2] + 10000, b[3] + 20000])
+		}
+	}
+})
+
+check('local dimensions retain endpoint order after rotation and translation',
+	() => {
+	let f = stair_house().floors[1]
+	let fixtures = [
+		['bed', {w: 1400, l: 2000}, [
+			[700, 1000, -700, 1000, 700, -1000, 700, 1000],
+			[-1000, 700, -1000, -700, 1000, 700, -1000, 700],
+			[-700, -1000, 700, -1000, -700, 1000, -700, -1000],
+			[1000, -700, 1000, 700, -1000, -700, 1000, -700],
+		]],
+		['countertop', {legs: [0, 1800, 600]}, [
+			[1800, -300, 0, -300, 1800, 300, 1800, -300],
+			[300, 1800, 300, 0, -300, 1800, 300, 1800],
+			[-1800, 300, 0, 300, -1800, -300, -1800, 300],
+			[-300, -1800, -300, 0, 300, -1800, -300, -1800],
+		]],
+		['stair', {w: 900, l: null, riser_height: 175, tread_depth: 280}, [
+			[450, 4200, -450, 4200, 450, 0, 450, 4200],
+			[-4200, 450, -4200, -450, 0, 450, -4200, 450],
+			[-450, -4200, 450, -4200, -450, 0, -450, -4200],
+			[4200, -450, 4200, 450, 0, -450, 4200, -450],
+		]],
+	]
+	for (let [name, fields, endpoints] of fixtures) {
+		for (let turn = 0; turn < 4; turn++) {
+			let object = {type: name, x: 10000, y: 20000,
+				rot: turn * 90, ...fields}
+			let lines = []
+			ctx.house_object_types[name].draw_sizes(null, null, f, object,
+				(cx, sg, ...points) => { lines.push(...points) })
+			let expected = endpoints[turn].slice()
+			for (let i = 0; i < expected.length; i++)
+				expected[i] += i % 2 ? 20000 : 10000
+			assert.deepEqual(lines, expected)
+		}
+	}
+})
+
+check('corner chairs retain square measured bounds', () => {
+	let type = ctx.house_object_types.chair
+	for (let rot of [45, 135, 225, 315]) {
+		let object = {type: 'chair', x: 1000, y: 2000, w: 450, l: 450, rot}
+		let out = []
+		type.box(null, object, out)
+		assert.deepEqual(out, [775, 1775, 1225, 2225])
+	}
+})
+
+check('the stair group is closed with outward faces and exact tread heights',
+	() => {
+	let h = stair_house(2813)
+	let stair = stair_of(h)
+	let points = [], faces = []
+	let group = {
+		add_point_xyz(x, y, z) {
+			points.push([x, y, z])
+			return points.length - 1
+		},
+		add_face(pis) { faces.push(Array.from(pis)) },
+	}
+	let editor = {create_component: () => group}
+	assert.equal(ctx.house_object_types.stair.create_model(editor,
+		h.floors[1], stair), group)
+	let edges = new Map(), tread_heights = []
+	let volume = 0
+	for (let face of faces) {
+		for (let i = 0; i < face.length; i++) {
+			let a = face[i], b = face[(i + 1) % face.length]
+			let reverse = b + ',' + a
+			if (edges.has(reverse)) edges.delete(reverse)
+			else edges.set(a + ',' + b, true)
+		}
+		let p = ctx.Math3D.poly3(...face)
+		p.points = points.flat()
+		let normal = p.plane().normal
+		if (normal[1] > 0)
+			tread_heights.push(points[face[0]][1])
+		for (let i = 1; i < face.length - 1; i++) {
+			let a = points[face[0]], b = points[face[i]]
+			let c = points[face[i + 1]]
+			volume += a[0] * (b[1] * c[2] - b[2] * c[1])
+				+ a[1] * (b[2] * c[0] - b[0] * c[2])
+				+ a[2] * (b[0] * c[1] - b[1] * c[0])
+		}
+	}
+	assert.equal(edges.size, 0)
+	assert(volume > 0)
+	assert.equal(tread_heights.length, stair.stair.n - 1)
+	assert.equal(Math.min(...tread_heights), -2813 + 173)
+	assert.equal(Math.max(...tread_heights), -165)
 })
 
 console.log(n_checks + ' house plan checks passed')

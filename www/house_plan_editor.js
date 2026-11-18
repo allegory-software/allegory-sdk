@@ -19,7 +19,7 @@ const {
 	profile_time,
 } = glue
 
-const {bbox2, line2} = Math3D
+const {bbox2, line2, v2} = Math3D
 
 // view utils ----------------------------------------------------------------
 
@@ -485,6 +485,7 @@ function hit_roof_label(hs, draw_state, sg) {
 // objects -------------------------------------------------------------------
 
 let object_box = [0, 0, 0, 0] // [x1, y1, x2, y2] of the object hit or drawn
+let object_draw_origin = v2()
 
 // the end of a resizable object's width axis (its length axis if is_l, where
 // only the bottom end resizes) that the pointer (hs.mouse_x, hs.mouse_y) is
@@ -515,16 +516,19 @@ function find_resize_side(object, object_type, plan, hs, sg, is_l) {
 
 // the topmost of `objects` at the screen point (ui.mx, ui.my): over the
 // object or at an end that resizes it.
-function hit_object_in(objects, plan, hs, sg) {
+function hit_object_in(objects, plan, hs, sg, from_below) {
 	for (let i = objects.length-1; i >= 0; i--) {
 		let object = objects[i]
 		let object_type = house_object_types[object.type]
+		if (from_below && !object_type.connects_below)
+			continue
 		let hit = object_type.hit(sg, plan, object) // true|'move'|false
 		let side = 0
 		let is_l = false
 		if (object_type.hit_resize
 			&& object_type.hit_resize(sg, plan, object, hs)) {
 			hs.object = object
+			hs.object_plan = plan
 			hs.object_x = object.x
 			hs.object_y = object.y
 			hs.action = 'resize_object'
@@ -543,6 +547,7 @@ function hit_object_in(objects, plan, hs, sg) {
 		if (!hit && !side)
 			continue
 		hs.object = object
+		hs.object_plan = plan
 		hs.object_x = object.x // where the drag starts from
 		hs.object_y = object.y
 		hs.action = 'move_object'
@@ -559,10 +564,12 @@ function hit_object_in(objects, plan, hs, sg) {
 // the hovered object in the link color, objects on the ground in the readonly
 // text color, or in the error color if they touch the house.
 function draw_objects(cx, sg, plan, objects, hit_object, is_ground,
-	resize_side) {
+	resize_side, from_below) {
 	cx.lineWidth = sg.scale > 0.04 ? 2 : 1
 	for (let object of objects) {
 		let object_type = house_object_types[object.type]
+		if (from_below && !object_type.connects_below)
+			continue
 		let is_touching = false
 		if (is_ground) {
 			object_type.box(plan, object, object_box)
@@ -574,11 +581,34 @@ function draw_objects(cx, sg, plan, objects, hit_object, is_ground,
 		cx.strokeStyle = is_touching ? ui.color_css('error')
 			: object == hit_object && !draw_resize ? ui.color_css('link')
 			: ui.color_css('text', is_ground ? 'readonly' : null)
-		object_type.draw(cx, sg, plan, object)
-		if (draw_resize) {
-			cx.strokeStyle = ui.color_css('link')
-			draw_resize(cx, sg, plan, object, resize_side)
+		cx.save()
+		if (object_type.draw_mask) {
+			object_type.box(plan, object, object_box)
+			object_type.draw_mask(cx, plan, object, object_box, sg)
 		}
+		if (object_type.draw) {
+			let x = object.x, y = object.y
+			if (object_type.draw_origin) {
+				object_type.draw_origin(object, object_draw_origin)
+				x = object_draw_origin[0]
+				y = object_draw_origin[1]
+			}
+			cx.translate(sg.x(x), sg.y(y))
+			if (object_type.draw_space == 'screen') {
+				cx.rotate(-(sg.rotation ?? 0))
+			} else {
+				let scale = sg.d_exact(1)
+				cx.rotate(object.rot * rad)
+				cx.scale(object.mirror ? -scale : scale, scale)
+				cx.lineWidth /= scale
+			}
+			object_type.draw(cx, plan, object)
+			if (draw_resize) {
+				cx.strokeStyle = ui.color_css('link')
+				draw_resize(cx, plan, object, resize_side)
+			}
+		}
+		cx.restore()
 	}
 	cx.lineWidth = 1
 }
@@ -586,9 +616,12 @@ function draw_objects(cx, sg, plan, objects, hit_object, is_ground,
 // the dimensions of the hovered object, or of all objects when
 // sg.show_dims is on, and while the object is moving, its distances to the
 // ends of the wall or room side that it rests against.
-function draw_object_dims(cx, sg, plan, objects, hit_object, is_moving) {
+function draw_object_dims(cx, sg, plan, objects, hit_object, is_moving,
+	from_below) {
 	for (let object of objects) {
 		let object_type = house_object_types[object.type]
+		if (from_below && !object_type.connects_below)
+			continue
 		if (object_type.draw_sizes && (object == hit_object || sg.show_dims))
 			object_type.draw_sizes(cx, sg, plan, object, draw_length)
 		if (object_type.draw_wall_dims && is_moving && object == hit_object)
@@ -820,7 +853,7 @@ function floor_editor_update(id, s) {
 			// an object moves only past the drag threshold or with ctrl.
 			if (action == 'move_object') {
 				if (is_moved)
-					cs.edit ??= plan.start_move_object(cs.object)
+					cs.edit ??= cs.object_plan.start_move_object(cs.object)
 				cs.edit?.move(cs.object_x + dx, cs.object_y + dy,
 					snap_distance(sg, nosnap ? 20 : 200), 3 / sg.scale)
 			}
@@ -828,7 +861,7 @@ function floor_editor_update(id, s) {
 			// an object end resizes only past the drag threshold or with ctrl.
 			if (action == 'resize_object') {
 				if (is_moved)
-					cs.edit ??= plan.start_resize_object(cs.object,
+					cs.edit ??= cs.object_plan.start_resize_object(cs.object,
 						cs.object_side, cs.object_axis)
 				cs.edit?.resize(dx, dy, snap_distance(sg, nosnap ? 20 : 200))
 			}
@@ -930,7 +963,7 @@ function floor_editor_update(id, s) {
 	let is_removing_object = !readonly && !cs && hs?.object
 		&& ui.focus_inside(id) && ui.keydown('delete')
 	if (is_removing_object)
-		plan.remove_object(hs.object)
+		hs.object_plan.remove_object(hs.object)
 
 	// keys on the hovered wall or object: a/s/d/w and the arrow keys move it
 	// 1 cm on the screen, an object's type uses its own keys.
@@ -950,7 +983,7 @@ function floor_editor_update(id, s) {
 			let dx = round(kx * cos(r) + ky * sin(r)) * 10
 			let dy = round(-kx * sin(r) + ky * cos(r)) * 10
 			if (hs.object) {
-				let edit = plan.start_move_object(hs.object)
+				let edit = hs.object_plan.start_move_object(hs.object)
 				edit.move(hs.object.x + dx, hs.object.y + dy, 20)
 				edit.stop()
 			} else {
@@ -961,7 +994,7 @@ function floor_editor_update(id, s) {
 		}
 		let update = hs.object && house_object_types[hs.object.type].update
 		if (update)
-			update(plan, hs.object)
+			update(hs.object_plan, hs.object)
 	}
 
 	if (cs?.drop || cs?.cancel || is_deleting_seg
@@ -1308,6 +1341,8 @@ ui.box_widget('floor_editor', {
 		draw_state.plan_snap_lines = plan.house.snap_lines
 		draw_state.open_rooms = plan.open_rooms
 		draw_state.objects = is_roof_level ? empty_array : plan.objects
+		draw_state.objects_above = is_roof_level ? empty_array
+			: plan.house.floors[plan.i+1]?.objects ?? empty_array
 		draw_state.ground_objects = is_roof_level ? empty_array
 			: plan.house.ground_objects
 
@@ -1691,11 +1726,16 @@ ui.box_widget('floor_editor', {
 			resize_side)
 		draw_objects(cx, sg, plan, draw_state.objects, hit_object, false,
 			resize_side)
+		let plan_above = plan.house.floors[plan.i+1]
+		draw_objects(cx, sg, plan_above, draw_state.objects_above,
+			hit_object, false, resize_side, true)
 		let is_moving_object = drag_action == 'move_object'
 		draw_object_dims(cx, sg, plan, draw_state.ground_objects, hit_object,
 			is_moving_object)
 		draw_object_dims(cx, sg, plan, draw_state.objects, hit_object,
 			is_moving_object)
+		draw_object_dims(cx, sg, plan_above, draw_state.objects_above,
+			hit_object, is_moving_object, true)
 
 		// find all affected _|_ edges so we can show their lengths as we move
 		// the seg
@@ -1882,9 +1922,9 @@ ui.box_widget('floor_editor', {
 		seg, x or y                hit around segment along its length
 		x and/or y                 hit vert and/or horiz snap line
 		cycle                      inside inner cycle
-		object, object_x, object_y,
+		object, object_plan, object_x, object_y,
 		action=move_object         hit object
-		object, object_side, object_axis,
+		object, object_plan, object_side, object_axis,
 		action=resize_object       hit an end of a resizable object
 		mouse_x, mouse_y           the pointer, in plan units
 		roof_side, roof_x, roof_y,
@@ -1961,7 +2001,9 @@ ui.box_widget('floor_editor', {
 		}
 
 		// an object is on top of everything else.
-		if (hit_object_in(draw_state.objects, plan, hs, sg)
+		if (hit_object_in(draw_state.objects_above,
+				plan.house.floors[plan.i+1], hs, sg, true)
+			|| hit_object_in(draw_state.objects, plan, hs, sg)
 			|| hit_object_in(draw_state.ground_objects, plan, hs, sg)
 		) {
 			cx.restore()

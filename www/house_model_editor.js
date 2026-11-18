@@ -93,6 +93,20 @@ function init_house_model_editor(e, house, cut_floor) {
 		: house.make_faces(floors[floors.length-1], false)
 	let t0 = profile_time()
 	create_plan(faces)
+	for (let floor of floors) {
+		if (cut_floor && floor.i > cut_floor.i)
+			break
+		for (let object of floor.objects) {
+			let object_type = house_object_types[object.type]
+			if (!object_type.create_model)
+				continue
+			let c = object_type.create_model(e, floor, object)
+			let z = floor.z + house.slab_thickness
+			let transform = mat4().translate(object.x, z, object.y)
+				.rotate(v3.y_axis, -object.rot * PI / 180)
+			e.root.comp.add_child(c, transform)
+		}
+	}
 	profile_time('model.create', t0)
 	e.update_all()
 }
