@@ -501,27 +501,24 @@ let countertop_edge = [0, 0, 0, 0]
 // draw the mattress, pillows and cover edge, with the head at the top.
 function sketch_bed(object) {
 	let {w, l} = object
-	let x = w / 2
-	let y = l / 2
-	let s = `M${-x} ${-y}h${w}v${l}h${-w}z`
+	let s = `M0 0h${w}v${l}h${-w}z`
 	let pillow_n = w < 1200 ? 1 : 2
 	for (let i = 0; i < pillow_n; i++) {
-		let px = pillow_n == 1 ? 0 : i ? w / 4 : -w / 4
-		s += `M${px - 250} ${-y + 100}h500v350h-500z`
+		let px = pillow_n == 1 ? w / 2 : i ? w * 3 / 4 : w / 4
+		s += `M${px - 250} 100h500v350h-500z`
 	}
-	return s + `M${-x} ${-y + l * .4}h${w}`
+	return s + `M0 ${l * .4}h${w}`
 }
 
 // draw the chair with its narrower back at the top.
 function sketch_chair(object) {
 	let {w, l} = object
-	let x = w / 2
-	let y = l / 2
-	let back_x = x * .75
+	let back_x1 = w / 8 // the back is 3/4 of the seat's width
+	let back_x2 = w - back_x1
 
 	// the seat's outline. Round each corner using points r millimetres away
 	// along each adjacent edge.
-	let points = [[-back_x, -y], [back_x, -y], [x, y], [-x, y]]
+	let points = [[back_x1, 0], [back_x2, 0], [w, l], [0, l]]
 	let r = 60
 	let s = ''
 	for (let i = 0, n = points.length; i < n; i++) {
@@ -537,19 +534,17 @@ function sketch_chair(object) {
 	}
 
 	// the outline and the back rest's line.
-	return s + 'z' + `M${-back_x * .8} ${-y + 90}h${back_x * 1.6}`
+	return s + 'z' + `M${w * .2} 90h${w * .6}`
 }
 
 // draw the toilet with its tank at the top.
 function sketch_wc(object) {
 	let {w, l} = object
-	let x = w / 2
-	let y = l / 2
 	let bowl_x = w * .45
 	let bowl_y = l * .35
-	return `M${-x} ${-y}h${w}v${l * .3}h${-w}z `
-		+ `M${-bowl_x} ${-y + l * .3}V${y - bowl_y}`
-		+ `a${bowl_x} ${bowl_y} 0 0 0 ${2 * bowl_x} 0V${-y + l * .3}z`
+	return `M0 0h${w}v${l * .3}h${-w}z `
+		+ `M${w / 2 - bowl_x} ${l * .3}V${l - bowl_y}`
+		+ `a${bowl_x} ${bowl_y} 0 0 0 ${2 * bowl_x} 0V${l * .3}z`
 }
 
 function draw_countertop(cx, plan, object) {
@@ -850,7 +845,7 @@ function create_floor_editor(id) {
 				if (action == 'move_object') {
 					if (is_moved)
 						cs.edit ??= cs.object_plan.start_move_object(cs.object)
-					cs.edit?.move(cs.object_x + dx, cs.object_y + dy,
+					cs.edit?.move(dx, dy,
 						snap_distance(sg, nosnap ? 20 : 200), 3 / sg.scale)
 				}
 
@@ -980,9 +975,7 @@ function create_floor_editor(id) {
 				let dy = round(-kx * sin(r) + ky * cos(r)) * 10
 				if (hs.object) {
 					let edit = hs.object_plan.start_move_object(hs.object)
-					let [x, y] = s.house.get_object_origin(hs.object_plan,
-						hs.object, object_origin)
-					edit.move(x + dx, y + dy, 20)
+					edit.move(dx, dy, 20)
 					edit.stop()
 				} else {
 					let edit = plan.start_move_seg(hs.seg)
@@ -1145,11 +1138,11 @@ function create_floor_editor(id) {
 		let object_type = s.house.object_types[object.type]
 		let [bx1, by1, bx2, by2] = s.house.get_object_box(plan, object, box)
 		let is_turned = object.rot % 180 >= 90
-		let hw = (is_turned ? by2 - by1 : bx2 - bx1) / 2 // half the width
-		let hl = (is_turned ? bx2 - bx1 : by2 - by1) / 2 // half the length
-		let x1 = -hw, y1 = -hl, x2 = hw, y2 = hl
-		s.house.plan_vector_to_object(object, hs.mouse_x - (bx1 + bx2) / 2,
-			hs.mouse_y - (by1 + by2) / 2, object_point1)
+		let x1 = 0, y1 = 0
+		let x2 = is_turned ? by2 - by1 : bx2 - bx1 // the width
+		let y2 = is_turned ? bx2 - bx1 : by2 - by1 // the length
+		s.house.plan_to_object(plan, object, hs.mouse_x, hs.mouse_y,
+			object_point1)
 		let x = object_point1[0], y = object_point1[1]
 		let inside = sg.plan_d(6), outside = sg.plan_d(8)
 		let side = 0, axis = 'w'
@@ -1179,13 +1172,12 @@ function create_floor_editor(id) {
 		if (hit_box(plan, object))
 			return true
 		// test the square containing the door's swing area.
-		s.house.get_object_box(plan, object, box)
-		let x = (box[0] + box[2]) / 2, y = (box[1] + box[3]) / 2
 		let w = object.w
-		s.house.object_vector_to_plan(object, -w / 2, 0, object_point1)
-		let x1 = x + object_point1[0], y1 = y + object_point1[1]
-		s.house.object_vector_to_plan(object, w / 2, -w, object_point1)
-		let x2 = x + object_point1[0], y2 = y + object_point1[1]
+		let y = s.house.ext_wall_thickness / 2 // the wall centre line
+		s.house.object_to_plan(plan, object, 0, y, object_point1)
+		let x1 = object_point1[0], y1 = object_point1[1]
+		s.house.object_to_plan(plan, object, w, y - w, object_point1)
+		let x2 = object_point1[0], y2 = object_point1[1]
 		if (ui.hit_bbox(sg.x(min(x1, x2)), sg.y(min(y1, y2)),
 			sg.x(max(x1, x2)), sg.y(max(y1, y2))))
 			return 'move'
@@ -1221,7 +1213,7 @@ function create_floor_editor(id) {
 	function draw_furniture(cx, plan, object) {
 
 		// cache the sketch's Path2D on the object. Rebuild it when w or l
-		// changes. The sketch uses millimetres relative to the object's centre.
+		// changes. The sketch uses millimetres from (0, 0) to (w, l).
 		let sketch = object.sketch
 		if (!(sketch && sketch.w == object.w && sketch.l == object.l)) {
 			sketch = {
@@ -1253,9 +1245,9 @@ function create_floor_editor(id) {
 
 	// draw width below the sketch and length to its right, outside both edges.
 	function draw_furniture_sizes(cx, plan, object) {
-		let hw = object.w / 2, hl = object.l / 2
-		draw_object_length(cx, plan, object, hw, hl, -hw, hl)
-		draw_object_length(cx, plan, object, hw, -hl, hw, hl)
+		let w = object.w, l = object.l
+		draw_object_length(cx, plan, object, w, l, 0, l)
+		draw_object_length(cx, plan, object, w, 0, w, l)
 	}
 
 	// draw distances from the object's ends (lo and hi) to the room side's
@@ -1323,24 +1315,13 @@ function create_floor_editor(id) {
 		let a = object.contour
 		let edge1, edge2, axis
 		if (cs?.object == object && cs.action == 'resize_object' && cs.edit) {
-			let a0 = cs.edit.contour0
-			let p = floor((cs.object_side-1) / 3)*2
-			let zone = (cs.object_side-1) % 3
-			if (zone && a.length == a0.length)
+			let p = cs.edit.edge_i
+			if (p == null)
 				return
-			if (a.length > a0.length) {
-				if (zone == 1)
-					p = p == 2 ? 0 : p
-				else
-					p = p == a0.length-2 ? 0 : p+4
-			} else if (a.length < a0.length) {
-				p = p == 0 ? 0 : a.length/2
-			}
 			edge1 = (p+a.length-2) % a.length
 			edge2 = (p+2) % a.length
 			axis = cs.object_axis == 'w' ? 0 : 1
 		}
-		let [ox, oy] = s.house.countertop_origin(plan, object, object_point1)
 		for (let i = 0; i < a.length; i += 2) {
 			let j = (i+2) % a.length
 			if (edge1 != null) {
@@ -1354,11 +1335,7 @@ function create_floor_editor(id) {
 					&& max(a[i+axis], a[j+axis]) == max(a[k+axis], a[l+axis]))
 					continue
 			}
-			s.house.object_vector_to_plan(object, a[j], a[j+1], object_point1)
-			let x = ox + object_point1[0], y = oy + object_point1[1]
-			s.house.object_vector_to_plan(object, a[i], a[i+1], object_point1)
-			draw_length(cx, sg, x, y, ox + object_point1[0],
-				oy + object_point1[1])
+			draw_object_length(cx, plan, object, a[j], a[j+1], a[i], a[i+1])
 		}
 	}
 
@@ -1373,28 +1350,29 @@ function create_floor_editor(id) {
 	// draw the steps and an arrow pointing up the stairs.
 	function draw_stair(cx, plan, object) {
 		let shape = s.house.stair_shape(plan, object)
+		let w = object.w
 		cx.beginPath()
-		cx.rect(-object.w / 2, 0, object.w, shape.l)
+		cx.rect(0, 0, w, shape.l)
 		for (let i = 1; i < shape.n - 1; i++) {
 			let y = i * shape.depth
-			cx.moveTo(-object.w / 2, y)
-			cx.lineTo(object.w / 2, y)
+			cx.moveTo(0, y)
+			cx.lineTo(w, y)
 		}
-		let arrow = min(object.w / 5, shape.l / 5)
-		cx.moveTo(0, shape.l - arrow)
-		cx.lineTo(0, arrow)
-		cx.lineTo(-arrow / 2, arrow * 1.5)
-		cx.moveTo(0, arrow)
-		cx.lineTo(arrow / 2, arrow * 1.5)
+		let arrow = min(w / 5, shape.l / 5)
+		let x = w / 2
+		cx.moveTo(x, shape.l - arrow)
+		cx.lineTo(x, arrow)
+		cx.lineTo(x - arrow / 2, arrow * 1.5)
+		cx.moveTo(x, arrow)
+		cx.lineTo(x + arrow / 2, arrow * 1.5)
 		cx.stroke()
 	}
 
-	// draw the stair width and length relative to the midpoint of the top edge.
+	// draw the stair width below its bottom edge and its length to the right.
 	function draw_stair_sizes(cx, plan, object) {
-		let l = s.house.stair_shape(plan, object).l
-		let hw = object.w / 2
-		draw_object_length(cx, plan, object, hw, l, -hw, l)
-		draw_object_length(cx, plan, object, hw, 0, hw, l)
+		let w = object.w, l = s.house.stair_shape(plan, object).l
+		draw_object_length(cx, plan, object, w, l, 0, l)
+		draw_object_length(cx, plan, object, w, 0, w, l)
 	}
 
 	// test whether the pointer is over the tag's icon or text.
@@ -1416,17 +1394,14 @@ function create_floor_editor(id) {
 			draw_sizes: draw_opening_size,
 			draw_wall_dims: draw_opening_wall_dims,
 			// draw the window cut and a line along its centre.
-			draw_mask: function(cx, plan, object, [x1, y1, x2, y2]) {
-				let scale = sg.d_exact(1)
+			draw_mask: function(cx, plan, object) {
+				let [x1, y1, x2, y2] = s.house.get_opening_hole(plan, object, box)
 				let is_v = s.house.opening_is_v(object)
-				let [ox, oy] = s.house.opening_origin(plan, object,
-					object_point1)
-				let x = sg.x(ox), y = sg.y(oy)
 				// leave space between the window cut and the wall outline.
-				x1 = x + (x1 - ox) * scale + (is_v ? 0 : 1)
-				y1 = y + (y1 - oy) * scale + (is_v ? 1 : 0)
-				x2 = x + (x2 - ox) * scale - (is_v ? 0 : 1)
-				y2 = y + (y2 - oy) * scale - (is_v ? 1 : 0)
+				x1 = sg.x(x1) + (is_v ? 0 : 1)
+				y1 = sg.y(y1) + (is_v ? 1 : 0)
+				x2 = sg.x(x2) - (is_v ? 0 : 1)
+				y2 = sg.y(y2) - (is_v ? 1 : 0)
 				if (sg.scale > 0.02) {
 					cx.beginPath()
 					cx.rect(x1, y1, x2 - x1, y2 - y1)
@@ -1471,7 +1446,8 @@ function create_floor_editor(id) {
 			draw_wall_dims: draw_opening_wall_dims,
 			// fill the wall cut before drawing the door panel in local
 			// coordinates.
-			draw_mask: function(cx, plan, object, [x1, y1, x2, y2]) {
+			draw_mask: function(cx, plan, object) {
+				let [x1, y1, x2, y2] = s.house.get_opening_hole(plan, object, box)
 				// round the cut's pixel coordinates in the same way as the wall
 				// paths.
 				let sx1 = sg.x(x1), sy1 = sg.y(y1)
@@ -1489,13 +1465,20 @@ function create_floor_editor(id) {
 				if (!object.seg)
 					cx.stroke()
 			},
-			// draw the door panel open at 90 degrees, and draw its swing arc.
+			// draw the door panel open at 90 degrees from its hinge on the wall
+			// centre line, and draw its swing arc. mirror: hinge at the other
+			// end.
 			draw: function(cx, plan, object) {
-				let w = object.w, x = -w / 2
+				let w = object.w
+				let x = object.mirror ? w : 0
+				let y = s.house.ext_wall_thickness / 2 // the wall centre line
 				cx.beginPath()
-				cx.moveTo(x, 0)
-				cx.lineTo(x, -w)
-				cx.arc(x, 0, w, -PI / 2, 0)
+				cx.moveTo(x, y)
+				cx.lineTo(x, y - w)
+				if (object.mirror)
+					cx.arc(x, y, w, -PI / 2, -PI, true)
+				else
+					cx.arc(x, y, w, -PI / 2, 0)
 				cx.stroke()
 			},
 			// press Space to cycle through four door orientations: switch the
@@ -1586,9 +1569,6 @@ function create_floor_editor(id) {
 				continue
 			hs.object = object
 			hs.object_plan = plan
-			s.house.get_object_origin(plan, object, object_origin)
-			hs.object_x = object_origin[0] // where the drag starts from
-			hs.object_y = object_origin[1]
 			hs.action = is_resize ? 'resize_object' : 'move_object'
 			return true
 		}
@@ -1617,10 +1597,8 @@ function create_floor_editor(id) {
 				: object == hit_object && !draw_resize ? ui.color_css('link')
 				: ui.color_css('text', is_ground ? 'readonly' : null)
 			cx.save()
-			if (object_view.draw_mask) {
-				s.house.get_object_box(plan, object, object_box)
-				object_view.draw_mask(cx, plan, object, object_box)
-			}
+			if (object_view.draw_mask)
+				object_view.draw_mask(cx, plan, object)
 			if (object_view.draw) {
 				let [x, y] = s.house.get_object_origin(plan, object,
 					object_origin)
@@ -1630,7 +1608,7 @@ function create_floor_editor(id) {
 				} else {
 					let scale = sg.d_exact(1)
 					cx.rotate(object.rot * rad)
-					cx.scale(object.mirror ? -scale : scale, scale)
+					cx.scale(scale, scale)
 					cx.lineWidth /= scale
 				}
 				object_view.draw(cx, plan, object)
@@ -2359,7 +2337,7 @@ function create_floor_editor(id) {
 		seg, x or y                hit around segment along its length
 		x and/or y                 hit vert and/or horiz snap line
 		cycle                      inside inner cycle
-		object, object_plan, object_x, object_y,
+		object, object_plan,
 		action=move_object         hit object
 		object, object_plan, object_side, object_axis,
 		action=resize_object       hit an end of a resizable object

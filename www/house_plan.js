@@ -1257,13 +1257,15 @@ function house_plan(t) {
 				house.roof_geometry_no++
 		}
 
-		let object_origin = v2() // [x, y] of the moved object's origin
+		let move_box = [0, 0, 0, 0] // [x1, y1, x2, y2] of the moved object
 
-		// place the object with its origin near the pointer at (x, y).
+		// place the object with its plan box centre near the pointer at (x, y).
+		// The centre is the drag reference: an object that placement turns
+		// stays under the pointer.
 		function move_object(object, x, y, snap_d, snap_margin) {
-			let [ox, oy] = get_object_origin(floor, object, object_origin)
-			object.x = snap_length(object.x + x - ox)
-			object.y = snap_length(object.y + y - oy)
+			let [x1, y1, x2, y2] = get_object_box(floor, object, move_box)
+			object.x = snap_length(object.x + x - (x1 + x2) / 2)
+			object.y = snap_length(object.y + y - (y1 + y2) / 2)
 			place_object(object, snap_d, snap_margin)
 		}
 
@@ -1323,12 +1325,15 @@ function house_plan(t) {
 		}
 
 		// start moving an object, which is on this floor or on the ground.
-		// s.move(x, y, snap_d, snap_margin = 0) places its origin near (x, y).
+		// s.move(dx, dy, snap_d, snap_margin = 0) places its box centre near
+		// the box centre at the start moved by (dx, dy).
 		// s.stop() commits the move as one edit.
 		floor.start_move_object = function(object) {
 			let s = start_edit()
-			s.move = function(x, y, snap_d, snap_margin = 0) {
-				move_object(object, x, y, snap_d, snap_margin)
+			let [x1, y1, x2, y2] = get_object_box(floor, object, move_box)
+			let x0 = (x1 + x2) / 2, y0 = (y1 + y2) / 2
+			s.move = function(dx, dy, snap_d, snap_margin = 0) {
+				move_object(object, x0 + dx, y0 + dy, snap_d, snap_margin)
 			}
 			return s
 		}
@@ -1373,9 +1378,9 @@ function house_plan(t) {
 			commit_edit(floor)
 		}
 
-		// add an object from a save_object() state, its origin at (x, y) or on a
-		// wall within snap_d as by a move: one undoable edit. a state of an
-		// unknown type throws.
+		// add an object from a save_object() state, its box centre at (x, y)
+		// or on a wall within snap_d as by a move: one undoable edit. a state
+		// of an unknown type throws.
 		floor.add_object = function(state, x, y, snap_d) {
 			let object = copy_objects([state])[0]
 			// the state's position: none or elsewhere; the move goes from here.
@@ -1837,7 +1842,7 @@ function max_face_z(faces, z) {
 				group = {sill: sill, head: head, paths: []}
 				groups.set(key, group)
 			}
-			let [x1, y1, x2, y2] = get_object_box(floor, object, box)
+			let [x1, y1, x2, y2] = get_opening_hole(floor, object, box)
 			add_ring_path(group.paths,
 				[[x1, y1], [x2, y1], [x2, y2], [x1, y2]])
 		}
@@ -2172,15 +2177,16 @@ function max_face_z(faces, z) {
 			out)
 	}
 
-	// return the object's plan bounding box [x1, y1, x2, y2].
+	// return the object's plan bounding box [x1, y1, x2, y2]: the type's own
+	// box, or its local box with its min corner at object.x, object.y. Swap
+	// width and length for quarter turns. For diagonal chairs, use the same
+	// box as before the additional 45-degree turn.
 	function get_object_box(plan, object, out) {
-		return house_object_types[object.type].box(plan, object, out)
-	}
-
-	// calculate the plan bounding box from object.x, object.y, w and l.
-	// Swap width and length for quarter turns. For diagonal chairs, use the
-	// same box as before the additional 45-degree turn.
-	function rect_box(object, w, l, out) {
+		let object_type = house_object_types[object.type]
+		if (object_type.box)
+			return object_type.box(plan, object, out)
+		let [x1, y1, x2, y2] = object_type.local_box(plan, object, out)
+		let w = x2 - x1, l = y2 - y1
 		let is_turned = object.rot % 180 >= 90
 		out[0] = object.x
 		out[1] = object.y
@@ -2189,15 +2195,25 @@ function max_face_z(faces, z) {
 		return out
 	}
 
-	let origin_box = [0, 0, 0, 0] // temporary box for the origin
+	let origin_box = [0, 0, 0, 0] // temporary plan box for the origin
+	let origin_local_box = [0, 0, 0, 0] // temporary local box for the origin
 
-	// return the type's local origin in plan coordinates, or the box centre.
+	// return the plan point of the object's local (0, 0). The type's local box
+	// turns by rot around the centre of the plan box, so for quarter turns
+	// (0, 0) is a corner of the plan box.
 	function get_object_origin(plan, object, out) {
-		let origin = house_object_types[object.type].origin
-		if (origin)
-			return origin(plan, object, out)
 		let [x1, y1, x2, y2] = get_object_box(plan, object, origin_box)
-		return out.set((x1 + x2) / 2, (y1 + y2) / 2)
+		let [lx1, ly1, lx2, ly2] = house_object_types[object.type]
+			.local_box(plan, object, origin_local_box)
+		object_vector_to_plan(object, (lx1 + lx2) / 2, (ly1 + ly2) / 2, out)
+		return out.set((x1 + x2) / 2 - out[0], (y1 + y2) / 2 - out[1])
+	}
+
+	// local box of a w by l rectangle.
+	function rect_local_box(plan, object, out) {
+		out[0] = 0; out[1] = 0
+		out[2] = object.w; out[3] = object.l
+		return out
 	}
 
 	let origin_point = v2() // temporary origin for coordinate conversions
@@ -2272,7 +2288,7 @@ function max_face_z(faces, z) {
 		let x0 = object.x, y0 = object.y
 		let sizes = object_type.sizes[axis]
 		let limit = object_type.limit_size
-		let max_size = limit ? limit(plan, object, side, axis) : Infinity
+		let max_size = limit ? limit(plan, object, ux, uy) : Infinity
 		let snap = is_l ? object_type.snap_l : null
 		return {resize: function(dx, dy, snap_d = 0) {
 			let size = snap_object_size(sizes, size0 + dx * ux + dy * uy,
@@ -2301,12 +2317,25 @@ function max_face_z(faces, z) {
 		return object1.x - object2.x || object1.y - object2.y
 	}
 
-	// return the opening's midpoint on the wall centre line as its local
-	// origin.
-	function opening_origin(plan, object, out) {
+	// calculate the opening's plan bounding box from its start along the wall
+	// on the wall centre line: its width along the wall, the exterior wall
+	// thickness across it, centred on the centre line on any wall.
+	function opening_box(plan, object, out) {
 		let is_v = opening_is_v(object)
-		return out.set(object.x + (is_v ? 0 : object.w / 2),
-			object.y + (is_v ? object.w / 2 : 0))
+		let half_t = house.ext_wall_thickness / 2
+		out[0] = is_v ? object.x - half_t : object.x
+		out[1] = is_v ? object.y : object.y - half_t
+		out[2] = is_v ? object.x + half_t : object.x + object.w
+		out[3] = is_v ? object.y + object.w : object.y + half_t
+		return out
+	}
+
+	// local box: the width along the wall, the exterior wall thickness across
+	// it.
+	function opening_local_box(plan, object, out) {
+		out[0] = 0; out[1] = 0
+		out[2] = object.w; out[3] = house.ext_wall_thickness
+		return out
 	}
 
 	// snap the opening to the nearest wall segment within snap_d that has
@@ -2315,19 +2344,31 @@ function max_face_z(faces, z) {
 	function place_opening(plan, object, snap_d) {
 
 		// the nearest wall segment with space for the opening, within snap_d.
-		let [x, y] = opening_origin(plan, object, object_point1)
+		// The opening's centre line runs from m0 to m0 + w at c0.
+		let is_v0 = opening_is_v(object)
+		let c0 = is_v0 ? object.x : object.y
+		let m0 = is_v0 ? object.y : object.x
+		let w = object.w
 		let seg1, m1
 		let min_d = snap_d
 		for (let seg of plan.segs) {
 
-			// seg farther than the nearest one found: skip it.
-			let is_v = seg.is_v
-			let across = is_v ? x : y
-			let along = is_v ? y : x
-			let d = Math.hypot(across - seg.axis,
-				max(seg.m1 - along, 0, along - seg.m2))
+			// seg farther than the nearest one found: skip it. m: the start
+			// along seg; on a crossing seg the turned opening is centred where
+			// the centre lines cross.
+			let d, m
+			if (seg.is_v == is_v0) {
+				d = Math.hypot(c0 - seg.axis,
+					max(seg.m1 - (m0 + w), 0, m0 - seg.m2))
+				m = m0
+			} else {
+				d = Math.hypot(max(seg.axis - (m0 + w), 0, m0 - seg.axis),
+					max(seg.m1 - c0, 0, c0 - seg.m2))
+				m = round(c0 - w / 2)
+			}
 			if (d > min_d)
 				continue
+			let is_v = seg.is_v
 
 			// the other openings on seg, in order along it.
 			let seg_objects = []
@@ -2338,7 +2379,6 @@ function max_face_z(faces, z) {
 
 			// the starting coordinate nearest to m where this opening fits on
 			// seg, clear of the other openings: none if there is no space.
-			let m = round(along - object.w / 2)
 			let fit_m
 			let lo = seg.wall_m1
 			for (let i = 0; i <= seg_objects.length; i++) {
@@ -2378,13 +2418,12 @@ function max_face_z(faces, z) {
 	// return the maximum width while keeping the opposite end fixed.
 	// Stop at the next opening or wall endpoint in the resize direction.
 	// Return Infinity if the opening is not on a wall.
-	function limit_opening_w(plan, object, side) {
+	function limit_opening_w(plan, object, ux, uy) {
 		let seg = object.seg
 		if (!seg)
 			return Infinity
 		let is_v = seg.is_v
-		object_vector_to_plan(object, side, 0, object_point1)
-		let dir = is_v ? object_point1[1] : object_point1[0] // wall direction
+		let dir = is_v ? uy : ux // wall direction
 		let m = is_v ? object.y : object.x
 		let end_m = dir > 0 ? m : m + object.w // fixed endpoint
 		let limit_m = dir > 0 ? seg.wall_m2 : seg.wall_m1
@@ -2399,32 +2438,20 @@ function max_face_z(faces, z) {
 		return dir * (limit_m - end_m)
 	}
 
-	// calculate the opening's plan bounding box using its width and wall
-	// thickness. For an opening off the wall, use the exterior wall thickness.
-	function opening_box(plan, object, out) {
-		let is_v = opening_is_v(object)
-		let a = is_v ? object.x : object.y
-		let m = is_v ? object.y : object.x
-		let a1, a2
-		if (object.seg) {
-			a1 = object.seg.wall_a1
-			a2 = object.seg.wall_a2
-		} else {
-			a1 = a - house.ext_wall_thickness / 2
-			a2 = a + house.ext_wall_thickness / 2
+	// return the hole that the opening cuts in its wall [x1, y1, x2, y2]: its
+	// box along the wall, the wall's faces across it. Off the wall: its box.
+	function get_opening_hole(plan, object, out) {
+		get_object_box(plan, object, out)
+		let seg = object.seg
+		if (seg) {
+			let is_v = opening_is_v(object)
+			out[is_v ? 0 : 1] = seg.wall_a1
+			out[is_v ? 2 : 3] = seg.wall_a2
 		}
-		out[0] = is_v ? a1 : m
-		out[1] = is_v ? m : a1
-		out[2] = is_v ? a2 : m + object.w
-		out[3] = is_v ? m + object.w : a2
 		return out
 	}
 
 	// furniture --------------------------------------------------------------
-
-	function furniture_box(plan, object, out) {
-		return rect_box(object, object.w, object.l, out)
-	}
 
 	// snap allowed furniture faces to room walls within snap_d. Rotate around
 	// the centre if needed, and keep that rotation after leaving the wall.
@@ -2534,16 +2561,13 @@ function max_face_z(faces, z) {
 	// return the maximum width or length while keeping the opposite end fixed.
 	// Stop at the nearest room wall in the resize direction.
 	// Return Infinity if the furniture is not on the floor.
-	function limit_furniture_size(plan, object, side, axis) {
+	function limit_furniture_size(plan, object, ux, uy) {
 		if (!object.on_floor)
 			return Infinity
 
 		// the resize direction along the plan axes and the fixed end.
-		let is_l = axis == 'l'
-		let is_x = (object.rot % 180 == 0) != is_l // resize along plan x
-		object_vector_to_plan(object, is_l ? 0 : side, is_l ? side : 0,
-			object_point1)
-		let dir = is_x ? object_point1[0] : object_point1[1]
+		let is_x = !!ux // resize along plan x
+		let dir = ux || uy
 		let [x1, y1, x2, y2] = get_object_box(plan, object, box)
 		let end = dir > 0 ? (is_x ? x1 : y1) : (is_x ? x2 : y2) // fixed endpoint
 
@@ -2567,35 +2591,22 @@ function max_face_z(faces, z) {
 
 	// contour contains clockwise local coordinates [x, y, ...]. The two free
 	// ends start at coordinate offsets 0 and contour.length / 2.
-	function countertop_bounds(object, out) {
+	function countertop_local_box(plan, object, out) {
 		let a = object.contour
 		let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity
 		for (let i = 0; i < a.length; i += 2) {
 			x1 = min(x1, a[i]); y1 = min(y1, a[i+1])
 			x2 = max(x2, a[i]); y2 = max(y2, a[i+1])
 		}
-		local_box[0] = x1; local_box[1] = y1
-		local_box[2] = x2; local_box[3] = y2
-		return rotated_box(0, 0, local_box, object.rot, out)
-	}
-
-	function countertop_box(plan, object, out) {
-		countertop_bounds(object, out)
-		out[2] = object.x + out[2] - out[0]
-		out[3] = object.y + out[3] - out[1]
-		out[0] = object.x; out[1] = object.y
+		out[0] = x1; out[1] = y1
+		out[2] = x2; out[3] = y2
 		return out
-	}
-
-	function countertop_origin(plan, object, out) {
-		countertop_bounds(object, box)
-		return out.set(object.x - box[0], object.y - box[1])
 	}
 
 	function place_countertop(plan, object, snap_d) {
 		let a = object.contour, n = a.length
 		let points = [], ys = [], xs = []
-		let [ox, oy] = countertop_origin(plan, object, object_point1)
+		let [ox, oy] = get_object_origin(plan, object, object_point1)
 		for (let i = 0; i < n; i += 2) {
 			object_vector_to_plan(object, a[i], a[i+1], object_point1)
 			points.push(ox + object_point1[0], oy + object_point1[1])
@@ -2688,7 +2699,7 @@ function max_face_z(faces, z) {
 		let nx = sign(a[j+1]-a[i+1]), ny = -sign(a[j]-a[i])
 		get_countertop_edge(object, handle, countertop_edge)
 		let [x1, y1, x2, y2] = countertop_edge
-		let [ox, oy] = countertop_origin(plan, object, object_point1)
+		let [ox, oy] = get_object_origin(plan, object, object_point1)
 
 		// how far the edge can move before it passes its neighbours' ends,
 		// and the countertop's depth across it.
@@ -2701,7 +2712,7 @@ function max_face_z(faces, z) {
 		let is_depth = !zone && i != 0 && i != n/2
 		let opposite = (n-i) % n
 		let depth = (a[i]-a[opposite])*nx + (a[i+1]-a[opposite+1])*ny
-		let s = {contour0: a}
+		let s = {edge_i: null} // moved edge offset in contour; null: unchanged
 		s.resize = function(dx, dy, snap_d = 0, nosnap = false) {
 
 			// the pointer's displacement across the edge.
@@ -2762,24 +2773,31 @@ function max_face_z(faces, z) {
 						x2+nx*d, y2+ny*d)
 				if (zone == 1 ? i == 2 : j == 0)
 					b.push(...b.splice(0, 2))
+				s.edge_i = zone == 1 ? (i == 2 ? 0 : i) : (i == n-2 ? 0 : i+4)
 			} else if (!zone) {
 				b[i] += nx*d; b[i+1] += ny*d
 				b[j] += nx*d; b[j+1] += ny*d
+				s.edge_i = i
 				if (n > 8 && (i == 0 || i == n/2)) {
 					if (l1 > 0 && d <= -l1) {
 						b[j] = a[j]-nx*l1; b[j+1] = a[j+1]-ny*l1
 						if (i == 0) { b.splice(n-2, 2); b.splice(0, 2) }
 						else b.splice(prev, 4)
+						s.edge_i = i == 0 ? 0 : b.length/2
 					} else if (l2 > 0 && d <= -l2) {
 						b[i] = a[i]-nx*l2; b[i+1] = a[i+1]-ny*l2
 						b.splice(j, 4)
 						if (i == 0) b.unshift(...b.splice(b.length-2, 2))
+						s.edge_i = i == 0 ? 0 : b.length/2
 					}
 				}
+			} else {
+				s.edge_i = null
 			}
 
 			// keep the origin in place: move the box corner with the contour.
-			countertop_bounds(object, box)
+			countertop_local_box(plan, object, local_box)
+			rotated_box(0, 0, local_box, object.rot, box)
 			object.x = ox + box[0]; object.y = oy + box[1]
 		}
 		return s
@@ -2828,16 +2846,11 @@ function max_face_z(faces, z) {
 		return s
 	}
 
-	function stair_box(plan, object, out) {
-		return rect_box(object, object.w, stair_shape(plan, object).l, out)
-	}
-
-	// use the midpoint of the top edge as the origin for the stair sketch and
-	// model. Local +y points down the stairs.
-	function stair_origin(plan, object, out) {
-		let [x1, y1, x2, y2] = stair_box(plan, object, origin_box)
-		object_vector_to_plan(object, 0, -stair_shape(plan, object).l / 2, out)
-		return out.set((x1 + x2) / 2 + out[0], (y1 + y2) / 2 + out[1])
+	// local box with the top edge at y = 0. Local +y points down the stairs.
+	function stair_local_box(plan, object, out) {
+		out[0] = 0; out[1] = 0
+		out[2] = object.w; out[3] = stair_shape(plan, object).l
+		return out
 	}
 
 	// place the stairs at a valid slab opening on their owning upper floor.
@@ -2856,14 +2869,15 @@ function max_face_z(faces, z) {
 		let slab = slab_paths(floor0, plan, roof_paths0, openings)
 
 		// find a wall connection with room for the stairs in the opening and
-		// slab across the whole landing edge beyond the wall.
-		let [x, y] = stair_origin(plan, object, object_point1)
+		// slab across the whole landing edge beyond the wall. (x, y): the
+		// landing edge's midpoint, which stays when the stairs turn.
 		let w = object.w, l = s.l
+		let [x, y] = object_to_plan(plan, object, w / 2, 0, object_point1)
 		let min_gap = Infinity, found_x, found_y, found_rot
 		for (let seg of plan.segs) {
 			let is_v = seg.is_v
 			let along = is_v ? y : x
-			let m1 = along - w / 2, m2 = along + w / 2
+			let m1 = round(along - w / 2), m2 = m1 + w
 			if (m1 < seg.wall_m1 || m2 > seg.wall_m2)
 				continue
 			for (let side = 0; side < 2; side++) {
@@ -2887,22 +2901,16 @@ function max_face_z(faces, z) {
 					side ? -1 : 1))
 					continue
 				min_gap = gap
-				found_x = is_v ? c : x
-				found_y = is_v ? y : c
+				found_x = is_v ? lo : m1
+				found_y = is_v ? m1 : lo
 				found_rot = rot
 			}
 		}
 		if (found_rot == null)
 			return
 
-		// put the top edge's midpoint at the found point.
-		local_box[0] = -w / 2
-		local_box[1] = 0
-		local_box[2] = w / 2
-		local_box[3] = l
-		rotated_box(found_x, found_y, local_box, found_rot, box)
-		object.x = box[0]
-		object.y = box[1]
+		object.x = found_x
+		object.y = found_y
 		object.rot = found_rot
 		object.on_floor = true
 	}
@@ -2910,8 +2918,8 @@ function max_face_z(faces, z) {
 	// snap the bottom of the stairs to a wall face that spans the stairs'
 	// width, near the requested length.
 	function snap_stair_l(plan, object, l, snap_d) {
-		let [x, y] = stair_origin(plan, object, object_point1)
 		let w = object.w
+		let [x, y] = object_to_plan(plan, object, w / 2, 0, object_point1)
 		let r = object.rot * rad
 		let ux = round(cos(r)), uy = round(sin(r))
 		let length1 = l
@@ -2953,9 +2961,10 @@ function max_face_z(faces, z) {
 			&& !plan.is_rect_touching_house(x, y, x, y)
 	}
 
-	// use a zero-size bounding box at the tag point.
-	function tag_box(plan, object, out) {
-		return rect_box(object, 0, 0, out)
+	// use a zero-size box at the tag point.
+	function tag_local_box(plan, object, out) {
+		out[0] = 0; out[1] = 0; out[2] = 0; out[3] = 0
+		return out
 	}
 
 	// object types -----------------------------------------------------------
@@ -2971,7 +2980,7 @@ function max_face_z(faces, z) {
 			place: place_opening,
 			limit_size: limit_opening_w,
 			box: opening_box,
-			origin: opening_origin,
+			local_box: opening_local_box,
 			start_resize: start_resize_rect,
 		},
 
@@ -2985,7 +2994,7 @@ function max_face_z(faces, z) {
 			place: place_opening,
 			limit_size: limit_opening_w,
 			box: opening_box,
-			origin: opening_origin,
+			local_box: opening_local_box,
 			start_resize: start_resize_rect,
 		},
 
@@ -2996,7 +3005,7 @@ function max_face_z(faces, z) {
 			snap_faces: [0], // snap the head of the bed to walls
 			place: place_furniture,
 			limit_size: limit_furniture_size,
-			box: furniture_box,
+			local_box: rect_local_box,
 			start_resize: start_resize_rect,
 		},
 
@@ -3005,7 +3014,7 @@ function max_face_z(faces, z) {
 			fields: {l: 450},
 			snap_faces: [0], // snap the back of the chair to walls
 			place: place_chair,
-			box: furniture_box,
+			local_box: rect_local_box,
 		},
 
 		wc: {
@@ -3013,27 +3022,26 @@ function max_face_z(faces, z) {
 			fields: {l: 700},
 			snap_faces: [0], // snap the toilet tank to walls
 			place: place_furniture,
-			box: furniture_box,
+			local_box: rect_local_box,
 		},
 
 		countertop: {
 			fields: {contour: [0, 600, 0, 0, 1800, 0, 1800, 600]},
 			place: place_countertop,
-			box: countertop_box,
-			origin: countertop_origin,
+			local_box: countertop_local_box,
 			start_resize: start_resize_countertop,
 		},
 
 		open_room: {
 			opens_room: true,
 			place: place_open_room,
-			box: tag_box,
+			local_box: tag_local_box,
 		},
 
 		terrace: {
 			marks_terrace: true,
 			place: place_terrace,
-			box: tag_box,
+			local_box: tag_local_box,
 		},
 
 		stair: {
@@ -3043,8 +3051,7 @@ function max_face_z(faces, z) {
 			sizes: {w: {min: 1, step: 1}, l: {min: 1, step: 1}},
 			snap_l: snap_stair_l,
 			place: place_stair,
-			box: stair_box,
-			origin: stair_origin,
+			local_box: stair_local_box,
 			start_resize: start_resize_rect,
 		},
 
@@ -3058,8 +3065,7 @@ function max_face_z(faces, z) {
 	house.object_vector_to_plan = object_vector_to_plan
 	house.plan_vector_to_object = plan_vector_to_object
 	house.opening_is_v = opening_is_v
-	house.opening_origin = opening_origin
-	house.countertop_origin = countertop_origin
+	house.get_opening_hole = get_opening_hole
 	house.get_countertop_edge = get_countertop_edge
 	house.stair_shape = stair_shape
 

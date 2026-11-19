@@ -405,13 +405,20 @@ check('an island in an open room keeps a slab piece under it', () => {
 		[[960, 200], [2040, 200], [2040, 5000], [960, 5000]])
 })
 
+// the object's plan box centre: the reference that a move displaces.
+function box_centre(h, floor, object) {
+	let [x1, y1, x2, y2] = h.get_object_box(floor, object, [0, 0, 0, 0])
+	return [(x1 + x2) / 2, (y1 + y2) / 2]
+}
+
 check('moving an open-room tag from the ground into a room opens it', () => {
 	let h = open_room_house([])
 	let floor = h.floors[1]
 	let tag = h.ground_objects.find(object => object.type == 'open_room')
 	let edit_no = h.edit_no
+	let [x0, y0] = box_centre(h, floor, tag)
 	let mover = floor.start_move_object(tag)
-	mover.move(1000, 2000, 0)
+	mover.move(1000 - x0, 2000 - y0, 0)
 	assert.equal(open_room_count(floor), 1)
 	assert.equal(floor.objects[0], tag)
 	mover.stop()
@@ -1038,17 +1045,18 @@ check('dragging an object onto a wall snaps it to the floor, undo back', () => {
 	let h = opening_house([])
 	let f = h.floors[0]
 	let object = h.ground_objects[0] // a window
+	let [x0, y0] = box_centre(h, f, object)
 	let s = f.start_move_object(object)
-	s.move(3000, 3000, 200)
+	s.move(3000 - x0, 3000 - y0, 200)
 	assert.equal(f.objects.length, 0)
 	assert.equal(object.y, 3000)
-	s.move(3000, 120, 200)
+	s.move(3000 - x0, 120 - y0, 200)
 	assert.equal(f.objects.length, 1)
 	assert.equal(h.ground_objects.length, default_n - 1)
 	assert.equal(object.y, 0)
 	assert.equal(object.x, 2400) // its min end: the window is 1200 wide.
 	assert.equal(object.rot, 0)
-	s.move(6100, 2000, 200)
+	s.move(6100 - x0, 2000 - y0, 200)
 	assert.equal(object.x, 6000)
 	assert.equal(object.y, 1400)
 	assert.equal(object.rot, 90)
@@ -1100,10 +1108,11 @@ check('furniture not fully inside a room goes to the ground', () => {
 	assert.equal(h.ground_objects.length, default_n + 1)
 	let object = h.ground_objects.at(-1)
 	assert(!object.on_floor)
+	let [x0, y0] = box_centre(h, f, object)
 	let s = f.start_move_object(object)
-	s.move(3000, 100, 0) // its head is in the north wall.
+	s.move(3000 - x0, 100 - y0, 0) // its head is in the north wall.
 	assert.equal(f.objects.length, 0)
-	s.move(3000, 2000, 0)
+	s.move(3000 - x0, 2000 - y0, 0)
 	assert.equal(f.objects.length, 1)
 	s.stop()
 })
@@ -1116,7 +1125,8 @@ check('furniture not fully inside a room goes to the ground', () => {
 function countertop_floor() {
 	let h = house({floors: [{lines: [rect_lines(0, 0, 8000, 8000)]}]})
 	let f = h.floors[0]
-	f.add_object({type: 'countertop', rot: 0}, 3000, 3000, 0)
+	// the box centre of the default 1800 x 600 contour at (3000, 3000).
+	f.add_object({type: 'countertop', rot: 0}, 3900, 3300, 0)
 	return f
 }
 

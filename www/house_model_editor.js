@@ -16,7 +16,7 @@ const {v3, v2, mat4, line2, line3} = Math3D
 function create_stair_model(editor, plan, object) {
 	let s = plan.house.stair_shape(plan, object)
 	let c = editor.create_component({name: 'stair'})
-	let hw = object.w / 2
+	let w = object.w
 	let profile = [[0, 0], [s.l, 0], [s.l, s.bottom_rise]]
 	for (let i = s.n - 2; i >= 0; i--) {
 		let z = i * s.depth
@@ -27,8 +27,8 @@ function create_stair_model(editor, plan, object) {
 	}
 	let left = [], right = []
 	for (let [z, h] of profile) {
-		left.push(c.add_point_xyz(-hw, h - s.height, z))
-		right.push(c.add_point_xyz(hw, h - s.height, z))
+		left.push(c.add_point_xyz(0, h - s.height, z))
+		right.push(c.add_point_xyz(w, h - s.height, z))
 	}
 	c.add_face(left)
 	c.add_face(right.slice().reverse())
