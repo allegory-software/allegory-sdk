@@ -3482,15 +3482,22 @@ function house_plan(t) {
 		house.roof_geometry_no++
 	}
 
-	// add a copy of the top floor's walls and height on top of it.
-	house.add_floor = function() {
+	function number_floors() {
+		for (let i = 0; i < house.floors.length; i++) {
+			let floor = house.floors[i]
+			floor.i = i
+			floor.id = 'floor'+i
+		}
+	}
+
+	// add a copy of floor0's walls, objects and height directly above it.
+	house.add_floor = function(floor0) {
 		assert(!edit0)
-		let floors = house.floors
-		let top_floor = floors[floors.length-1]
-		let state = top_floor.save_state()
-		state.h = top_floor.fixed_h
-		let floor = create_floor(state, floors.length)
-		floors.push(floor)
+		let state = floor0.save_state()
+		state.h = floor0.fixed_h
+		let floor = create_floor(state, floor0.i+1)
+		insert(house.floors, floor.i, floor)
+		number_floors()
 		fix_floor_heights()
 		floor.fix()
 		undo_stack.push({op: 'add_floor', floor: floor})
@@ -3499,31 +3506,53 @@ function house_plan(t) {
 		return floor
 	}
 
-	// remove the top floor. the undo entry keeps the floor so that undo can
-	// put it back, and the older entries that load into it stay valid.
-	house.remove_top_floor = function() {
+	// remove the floor. the undo entry keeps the floor so that undo can put it
+	// back, and the older entries that load into it stay valid.
+	house.remove_floor = function(floor) {
 		assert(!edit0)
 		assert(house.floors.length > 1)
-		let floor = pop_floor()
-		undo_stack.push({op: 'remove_floor', floor: floor})
+		undo_stack.push(pop_floor(floor))
 		redo_stack.length = 0
 		house.edit_no++
 	}
 
-	// put a fixed floor back on top: its own state is unchanged.
-	function push_floor(floor) {
-		house.floors.push(floor)
+	// put a fixed floor back at its index from pop_floor()'s entry: its own
+	// state is unchanged; the floor above and the ground get their objects
+	// back. return the entry that removes it again.
+	function push_floor(entry) {
+		let floor = entry.floor
+		insert(house.floors, floor.i, floor)
+		number_floors()
 		fix_floor_heights()
 		house.bb = house_bb()
 		fix_snap_lines()
+		let floor1 = house.floors[floor.i+1]
+		house.ground_objects = copy_objects(entry.ground_objects)
+		if (floor1) {
+			floor1.objects = copy_objects(entry.floor1_objects)
+			floor1.fix_objects()
+		}
+		return {op: 'add_floor', floor: floor}
 	}
 
-	function pop_floor() {
-		let floor = house.floors.pop()
+	// take the floor out; it keeps its index for push_floor(). the floor
+	// above now stands on the floor below: place its objects again. return
+	// the entry that puts it all back.
+	function pop_floor(floor) {
+		let floor1 = house.floors[floor.i+1]
+		let entry = {
+			op: 'remove_floor',
+			floor: floor,
+			ground_objects: copy_objects(house.ground_objects),
+			floor1_objects: floor1 && copy_objects(floor1.objects),
+		}
+		remove_value(house.floors, floor)
+		number_floors()
 		fix_floor_heights()
 		house.bb = house_bb()
 		fix_snap_lines()
-		return floor
+		floor1?.fix_objects()
+		return entry
 	}
 
 	//// SETTINGS -------------------------------------------------------------
@@ -3687,11 +3716,9 @@ function house_plan(t) {
 				floor1_objects: floor1_objects,
 			}
 		} else if (op == 'add_floor') {
-			pop_floor()
-			return {op: 'remove_floor', floor: floor}
+			return pop_floor(floor)
 		} else if (op == 'remove_floor') {
-			push_floor(floor)
-			return {op: 'add_floor', floor: floor}
+			return push_floor(entry)
 		} else if (op == 'load') {
 			let state = take_state()
 			put_state(entry.state)
@@ -3709,22 +3736,26 @@ function house_plan(t) {
 		}
 	}
 
+	// undo and redo return the entry of the operation that they performed,
+	// {op:, floor:, ...}, or null with nothing to undo or redo.
 	house.undo = function() {
 		assert(!edit0)
 		if (!undo_stack.length)
-			return false
-		redo_stack.push(revert_entry(undo_stack.pop()))
+			return null
+		let entry = revert_entry(undo_stack.pop())
+		redo_stack.push(entry)
 		house.edit_no++
-		return true
+		return entry
 	}
 
 	house.redo = function() {
 		assert(!edit0)
 		if (!redo_stack.length)
-			return false
-		undo_stack.push(revert_entry(redo_stack.pop()))
+			return null
+		let entry = revert_entry(redo_stack.pop())
+		undo_stack.push(entry)
 		house.edit_no++
-		return true
+		return entry
 	}
 
 	profile_time('plan.load', t0)

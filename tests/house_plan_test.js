@@ -124,10 +124,10 @@ check('a whole drag is one undo step with stable IDs', () => {
 	assert.notEqual(after, before)
 	assert(f.house.undo())
 	assert.equal(geometry(f), before)
-	assert.equal(f.house.undo(), false)
+	assert.equal(f.house.undo(), null)
 	assert(f.house.redo())
 	assert.equal(geometry(f), after)
-	assert.equal(f.house.redo(), false)
+	assert.equal(f.house.redo(), null)
 	assert.equal(f.ps_ids.get('cl').id, 'cl')
 })
 
@@ -154,7 +154,7 @@ check('cancelled wall movement restores temporary topology', () => {
 	assert.equal(geometry(f), before)
 	assert.equal(f.comps[0].ps.length, f.ps.length)
 	assert.equal(f.comps[0].segs.length, f.segs.length)
-	assert.equal(f.house.undo(), false)
+	assert.equal(f.house.undo(), null)
 })
 
 check('new edits discard redo history', () => {
@@ -167,7 +167,7 @@ check('new edits discard redo history', () => {
 	r = f.start_move_seg(f.segs[0])
 	r.move(0, 800)
 	r.stop()
-	assert.equal(f.house.redo(), false)
+	assert.equal(f.house.redo(), null)
 	assert(f.house.undo())
 	assert.equal(geometry(f), before)
 })
@@ -199,7 +199,7 @@ check('house undo follows edits across floors and discards redo', () => {
 	assert.equal(JSON.stringify(h.save_state()), second)
 	assert(h.undo())
 	h.floors[2].delete_seg(h.floors[2].segs[0])
-	assert.equal(h.redo(), false)
+	assert.equal(h.redo(), null)
 	assert(h.undo())
 	assert.equal(JSON.stringify(h.save_state()), first)
 	assert(h.redo())
@@ -568,7 +568,7 @@ check('a cut keeps the floors below and their slabs', () => {
 check('adding a floor copies the top floor and raises the walls', () => {
 	let h = house(ctx.house_test_plans.simple)
 	let edit_no = h.edit_no
-	let floor = h.add_floor()
+	let floor = h.add_floor(h.floors[0])
 	assert.equal(h.floors.length, 2)
 	assert.equal(h.floors[1], floor)
 	assert.equal(h.edit_no, edit_no + 1)
@@ -582,10 +582,10 @@ check('adding a floor copies the top floor and raises the walls', () => {
 
 check('adding and removing floors is undoable', () => {
 	let h = house(ctx.house_test_plans.simple)
-	let floor = h.add_floor()
+	let floor = h.add_floor(h.floors[0])
 	floor.delete_seg(floor.segs[0])
 	let state1 = JSON.stringify(floor.save_state())
-	h.remove_top_floor()
+	h.remove_floor(floor)
 	assert(h.undo()) // remove
 	assert.equal(h.floors[1], floor)
 	assert.equal(h.h, 5000)
@@ -594,13 +594,56 @@ check('adding and removing floors is undoable', () => {
 	assert(h.undo()) // add
 	assert.equal(h.floors.length, 1)
 	assert.equal(h.h, 2500)
-	assert.equal(h.undo(), false)
+	assert.equal(h.undo(), null)
 	assert(h.redo()) // add
 	assert(h.redo()) // the floor's edit
 	assert.equal(JSON.stringify(floor.save_state()), state1)
 	assert(h.redo()) // remove
 	assert.equal(h.floors.length, 1)
-	assert.equal(h.redo(), false)
+	assert.equal(h.redo(), null)
+})
+
+check('adding a floor in the middle inserts it above, undo and redo', () => {
+	let h = house(ctx.house_test_plans.simple)
+	let floor0 = h.floors[0]
+	let top = h.add_floor(floor0)
+	let middle = h.add_floor(floor0)
+	assert.deepEqual(Array.from(h.floors, floor => floor.i), [0, 1, 2])
+	assert.equal(h.floors[1], middle)
+	assert.equal(h.floors[2], top)
+	assert.equal(top.id, 'floor2')
+	assert.equal(top.z, 5000)
+	let entry = h.undo()
+	assert.equal(entry.op, 'remove_floor')
+	assert.equal(h.floors[1], top)
+	assert.equal(top.i, 1)
+	entry = h.redo()
+	assert.equal(entry.op, 'add_floor')
+	assert.equal(entry.floor, middle)
+	assert.equal(h.floors[1], middle)
+	assert.equal(top.i, 2)
+	h.remove_floor(top)
+	entry = h.undo()
+	assert.equal(entry.op, 'add_floor')
+	assert.equal(entry.floor, top)
+	assert.equal(h.floors[2], top)
+})
+
+check('removing a middle floor places the floor above again; undo', () => {
+	let h = stair_house()
+	let state0 = JSON.stringify(h.save_state())
+	let middle = h.add_floor(h.floors[0])
+	let top = h.floors[2]
+	let state1 = JSON.stringify(h.save_state())
+	h.remove_floor(middle)
+	assert.equal(h.floors[1], top)
+	assert.equal(top.i, 1)
+	assert.equal(JSON.stringify(h.save_state()), state0)
+	assert.equal(h.undo().floor, middle)
+	assert.equal(h.floors[1], middle)
+	assert.equal(top.i, 2)
+	assert.equal(JSON.stringify(h.save_state()), state1)
+	assert(top.objects.every(object => object.is_valid))
 })
 
 check('load_state with a bad state restores the house and adds no edit', () => {
@@ -612,7 +655,7 @@ check('load_state with a bad state restores the house and adds no edit', () => {
 	assert.equal(JSON.stringify(h.save_state()), before)
 	assert.equal(h.floors, floors)
 	assert.equal(h.edit_no, edit_no)
-	assert.equal(h.undo(), false)
+	assert.equal(h.undo(), null)
 })
 
 // roofs --------------------------------------------------------------------
@@ -963,7 +1006,7 @@ check('a wall thickness setting rebuilds the walls and is one undo step', () => 
 	assert(h.undo())
 	assert.equal(h.ext_wall_thickness, 180)
 	assert.deepEqual([...h.bb], bb0)
-	assert.equal(h.undo(), false)
+	assert.equal(h.undo(), null)
 	assert(h.redo())
 	assert.equal(h.ext_wall_thickness, 400)
 	assert.deepEqual([...h.bb], bb1)

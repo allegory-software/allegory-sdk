@@ -8151,7 +8151,6 @@ ui.popup_button = function(id, icon, text, align, valign, side, popup_align) {
 				ui.end_focus_group()
 				ui.p(ui.sp4())
 				ui.v(0, ui.sp4())
-				ui.h2('Settings')
 	return true
 }
 
@@ -8162,6 +8161,43 @@ ui.end_popup_button = function(id) {
 		ui.end_popup()
 	ui.end_stack()
 	ui.end_focus_group()
+}
+
+//// HELP LINES --------------------------------------------------------------
+
+/*
+
+	ui.help_lines(['Section', '', 'Key: Description', ...])
+
+	- a line without ':' is a section title; '' is an empty line.
+
+*/
+
+ui.help_lines = function(lines) {
+	ui.v_aligned(0)
+		for (let line of lines) {
+			let ci = line.indexOf(':')
+			let t = ci == -1 ? line : null
+			let key = !t ? line.slice(0, ci).trim() : ''
+			let desc = !t ? line.slice(ci+2).trim() : ''
+			if (t) {
+					ui.bold()
+					ui.color('text')
+					ui.font_size(1.25)
+					ui.text('', t, 0, 'l', 'c')
+			} else {
+				ui.pv(ui.sp025())
+				ui.h(0, ui.sp4())
+					ui.bold()
+					ui.color('text', 'active')
+					ui.text('', key, 0, 'l', 'c')
+					ui.nobold()
+					ui.color('text')
+					ui.text('', desc, 0, 'l', 'c')
+				ui.end_h()
+			}
+		}
+	ui.end_v_aligned()
 }
 
 //// HIT EDGE ----------------------------------------------------------------

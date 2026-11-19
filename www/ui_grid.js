@@ -217,30 +217,7 @@ function build_help(id, target_i, help_lines) {
 	ui.popup(id+'.help', 'overlay', target_i, 'b', '[',
 		'change_side constrain')
 		ui.bb_tooltip('bg2', null, 'light', null, ui.sp05())
-		ui.v_aligned(0)
-			for (let line of help_lines) {
-				let ci = line.indexOf(':')
-				let t = ci == -1 ? line : null
-				let key = !t ? line.slice(0, ci).trim() : ''
-				let desc = !t ? line.slice(ci+2).trim() : ''
-				if (t) {
-						ui.bold()
-						ui.color('text')
-						ui.font_size(1.25)
-						ui.text('', t, 0, 'l', 'c')
-				} else {
-					ui.pv(ui.sp025())
-					ui.h(0, ui.sp4())
-						ui.bold()
-						ui.color('text', 'active')
-						ui.text('', key, 0, 'l', 'c')
-						ui.nobold()
-						ui.color('text')
-						ui.text('', desc, 0, 'l', 'c')
-					ui.end_h()
-				}
-			}
-		ui.end_v_aligned()
+		ui.help_lines(help_lines)
 	ui.end_popup()
 }
 

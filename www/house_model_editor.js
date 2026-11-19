@@ -225,7 +225,7 @@ function create_height_controls(id) {
 			let redo = ui.keydown('ctrl shift z') || ui.keydown('ctrl y')
 			let undo = ui.keydown('ctrl z')
 			if (redo || undo) {
-				changed = redo ? house.redo() : house.undo()
+				changed = (redo ? house.redo() : house.undo()) != null
 				ui.capture_keys()
 			}
 		}

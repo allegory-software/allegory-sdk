@@ -24,10 +24,63 @@ let floor_names = [
 	'3\u02b3\u1d48 FLOOR',
 ]
 
+// the key that selects the floor at index i, the roof at the index after the
+// top floor: ` for the ground floor, then 1 to 9; none above.
+function floor_key(i) {
+	return i == 0 ? '`' : i < 10 ? String(i) : null
+}
+
+// a floor or roof label in link colors; hovered: its key in the tooltip.
+function floor_label(label_id, text, is_current, key) {
+	let is_hovered = !!ui.hit(label_id)
+	ui.color(is_current ? 'link' : 'text', is_hovered ? 'hover' : null)
+	ui.bold()
+	ui.text(label_id, text)
+	if (is_hovered && key)
+		ui.set_tooltip(S('press_key', 'Press {0} key', key))
+}
+
 // plan units are mm.
 // ctrl held: mm precision, to show sizes that ctrl leaves unsnapped.
 let format_length = d => format_kcount(d / 1e3, ui.keypressed('ctrl') ? 3 : 2)+'m'
 let format_area = a => format_kcount(abs(a) / 1e6, 2)+' m\u00b2'
+
+//// HELP --------------------------------------------------------------------
+
+let help_lines = [
+	'Floors',
+	'',
+	'`: Ground floor',
+	'1 to 9: Floors 1 to 9 and Roof',
+	'',
+	'Edit',
+	'',
+	'Ctrl+Z: Undo',
+	'Ctrl+Y, Ctrl+Shift+Z: Redo',
+	'Ctrl+C: Copy the hovered object, or the house',
+	'Ctrl+V: Paste at the pointer',
+	'Delete: Remove the hovered object',
+	'',
+	'Hovered Wall or Object',
+	'',
+	'W A S D, ←↑→↓: Move 1 cm',
+	'Space: Turn the door or the couch',
+	'',
+	'Mouse',
+	'',
+	'Drag near a wall: Add wall',
+	'Drag across a wall: Split wall',
+	'Double-click a wall: Delete it',
+	'Wheel: Zoom',
+	'Shift+Drag: Pan',
+	'Click an eave: Toggle gable',
+	'Double-click roof line: Reset it',
+	'',
+	'While Dragging',
+	'',
+	'Ctrl: No snapping, sizes and lengths in mm',
+	'Shift on an eave or pitch: Move all of its kind',
+]
 
 //// SETTINGS ----------------------------------------------------------------
 
@@ -142,17 +195,28 @@ function create_floor_editor(id) {
 		let is_roof_level0 = is_roof_level
 		let edit_no0 = s.house.edit_no
 		let floors = s.house.floors
-		for (let floor of floors)
-			if (ui.clicked(id+'.floor'+floor.i))
+		// floor label clicked: focus the editor; the label isn't focusable, so
+		// the click cleared the focus.
+		for (let floor of floors) {
+			if (ui.clicked(id+'.floor'+floor.i)) {
 				select_floor(floor, false)
-		if (ui.clicked(id+'.roof'))
+				ui.focus(id)
+			}
+		}
+		if (ui.clicked(id+'.roof')) {
 			select_floor(floors[floors.length-1], true)
+			ui.focus(id)
+		}
 		if (ui.state_of(id+'.add_floor_button', 'state') == 'click') {
-			select_floor(s.house.add_floor(), false)
+			select_floor(s.house.add_floor(s.floor), false)
 		} else if (floors.length > 1
 			&& ui.state_of(id+'.remove_floor_button', 'state') == 'click'
 		) {
-			s.house.remove_top_floor()
+			// the floor above takes the removed floor's place: select it.
+			let floor1 = floors[s.floor.i+1]
+			s.house.remove_floor(s.floor)
+			if (floor1)
+				select_floor(floor1, false)
 		}
 
 		let cs = ui.drag(id)
@@ -162,13 +226,21 @@ function create_floor_editor(id) {
 			for (let i = 1; i < min(floors.length, 10); i++)
 				if (ui.keydown(String(i)))
 					select_floor(floors[i], false)
+			let roof_key = floor_key(floors.length)
+			if (roof_key && ui.keydown(roof_key))
+				select_floor(floors[floors.length-1], true)
 		}
 		let is_restored = false
 		if (!readonly && !cs && ui.focus_inside(id)) {
+			let entry // the operation that the undo or redo performed
 			if (ui.keydown('ctrl shift z') || ui.keydown('ctrl y'))
-				is_restored = s.house.redo()
+				entry = s.house.redo()
 			else if (ui.keydown('ctrl z'))
-				is_restored = s.house.undo()
+				entry = s.house.undo()
+			is_restored = entry != null
+			// a floor added back: select it.
+			if (entry?.op == 'add_floor')
+				select_floor(entry.floor, false)
 		}
 
 		// copy and paste the whole house as json text, or the hovered object. a
@@ -2124,16 +2196,14 @@ function create_floor_editor(id) {
 
 					ui.v(0, ui.sp05(), '[')
 						let floors = s.house.floors
-						ui.color('text', is_roof_level ? 'active' : null)
-						ui.bold()
-						ui.text(id+'.roof', S('roof', 'ROOF'))
+						floor_label(id+'.roof', S('roof', 'ROOF'), is_roof_level,
+							floor_key(floors.length))
 						for (let i = floors.length-1; i >= 0; i--) {
 							let floor = floors[i]
-							ui.color('text', floor == plan && !is_roof_level
-								? 'active' : null)
-							ui.bold()
-							ui.text(id+'.floor'+floor.i, floor_names[floor.i]
-								?? S(floor.i+'_floor', '{0}\u1d57\u02b0 FLOOR', floor.i))
+							let name = floor_names[floor.i] ?? S(floor.i+'_floor',
+								'{0}\u1d57\u02b0 FLOOR', floor.i)
+							floor_label(id+'.floor'+floor.i, name,
+								floor == plan && !is_roof_level, floor_key(floor.i))
 						}
 						if (!s.readonly) {
 							ui.mt(ui.em(1))
@@ -2143,7 +2213,7 @@ function create_floor_editor(id) {
 									S('add_floor', 'Add floor'))
 								ui.button(id+'.remove_floor_button', 'building-minus',
 									'', 0, null, null, null, floors.length < 2,
-									S('remove_top_floor', 'Remove top floor'))
+									S('remove_floor', 'Remove floor'))
 							ui.end_h()
 						}
 					ui.end_v()
@@ -2189,6 +2259,7 @@ function create_floor_editor(id) {
 					if (ui.popup_button(id+'.settings', 'settings', null,
 						'c', 't', 'b', ']')
 					) {
+						ui.h2(S('settings', 'Settings'))
 						ui.min_w(ui.em(24))
 						ui.v_aligned(0, ui.sp(), 's', 't')
 							for (let setting of settings) {
@@ -2204,13 +2275,22 @@ function create_floor_editor(id) {
 						ui.end_popup_button(id+'.settings')
 					}
 
+					if (ui.popup_button(id+'.help', 'help', null,
+						'c', 't', 'b', ']')
+					) {
+						ui.h2(S('keyboard_and_mouse', 'Keyboard and mouse'))
+						ui.help_lines(help_lines)
+						ui.end_popup_button(id+'.help')
+					}
+
 				ui.end_h()
 
 				ui.v(1, ui.sp(), ']')
 
 					ui.v(0, ui.sp(), 'c', 'c')
-						ui.button(id+'.c1', 'pointer', '', 0)
-						ui.button(id+'.c2', 'arrows-move', '', 0)
+						// TODO: add tools here
+						// ui.button(id+'.c1', 'pointer', '', 0)
+						// ui.button(id+'.c2', 'arrows-move', '', 0)
 					ui.end_v()
 
 				ui.end_v()
