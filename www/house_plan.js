@@ -15,38 +15,7 @@ const {bbox2, poly2, v2, mat3} = Math3D
 G.DEBUG_PLAN = 0
 G.DEBUG_PLAN_LOAD = 1
 
-// room sides ---------------------------------------------------------------
-
-// describe a room edge as a directed wall side for rectangle queries.
-function read_wall_side(p1, p2, out) {
-	let is_v = p1[0] == p2[0]
-	let m1 = is_v ? p1[1] : p1[0]
-	let m2 = is_v ? p2[1] : p2[0]
-	out[0] = is_v ? (m2 > m1 ? 3 : 1) : (m2 > m1 ? 2 : 0)
-	out[1] = is_v ? p1[0] : p1[1]
-	out[2] = m1
-	out[3] = m2
-	return out
-}
-
-// test overlap along a wall side when finding snaps and resize limits.
-function wall_side_overlaps(side, x, y, hx, hy) {
-	let is_v = side[0] % 2 == 1
-	let along = is_v ? y : x
-	let h_along = is_v ? hy : hx
-	return along + h_along > min(side[2], side[3])
-		&& along - h_along < max(side[2], side[3])
-}
-
-// the min coordinate across side of a rect of size (w, h) resting against it
-// on the room's side.
-function wall_side_min(side, w, h) {
-	let [dir, c] = side
-	let size = dir % 2 ? w : h
-	return dir == 1 || dir == 2 ? c - size : c
-}
-
-// house model ---------------------------------------------------------------
+//// HOUSE MODEL -------------------------------------------------------------
 
 // everything is in mm!
 let defaults = {
@@ -68,14 +37,33 @@ function poly_get_point(i, out) {
 
 function house_plan(t) {
 
-	let t0 = profile_time()
+	//// STATE ----------------------------------------------------------------
 
-	let house = {}
-	let edit0
-	let edit0_ground_objects // house.ground_objects at the start of the edit
-	let edit0_floor1_objects // the floor above's objects at the start, if any
+	// house
+	let t0 = profile_time() // start of loading, for profile_time()
+	let house = {} // the house: settings, floors, ground objects, operations
 	house.edit_no = 0 // increments on each committed edit, undo and redo
 	house.roof_geometry_no = 0 // includes changes during drag previews
+	let object_types = {} // {type name -> object type}, set per type
+
+	// edit history
+	let edit0 // the floor's saved state at the start of the edit
+	let edit0_ground_objects // house.ground_objects at the start of the edit
+	let edit0_floor1_objects // the floor above's objects at the start, if any
+	let undo_stack = [] // [{op:, ...}, ...]
+	let redo_stack = [] // [{op:, ...}, ...]
+
+	// scratch
+	let slab_crossings = [] // temporary crossings in is_slab_side_covered()
+	let object_matrix = mat3() // temporary rotation matrix
+	let object_point = v2() // temporary point
+	let object_point1 = v2() // temporary point
+	let local_box = [0, 0, 0, 0] // temporary local box
+	let origin_box = [0, 0, 0, 0] // temporary plan box for the origin
+	let origin_local_box = [0, 0, 0, 0] // temporary local box for the origin
+	let origin_point = v2() // temporary origin for coordinate conversions
+	let box = [0, 0, 0, 0] // temporary bounding box for placing and resizing
+	let countertop_edge = [0, 0, 0, 0] // temporary [x1, y1, x2, y2] of an edge
 
 	function snap_length(x) {
 		return x == null ? x : round(x)
@@ -98,7 +86,7 @@ function house_plan(t) {
 	function copy_objects(objects) {
 		let a = []
 		for (let object of objects) {
-			let object_type = assert(house_object_types[object.type],
+			let object_type = assert(object_types[object.type],
 				'unknown object type: ', object.type)
 			let object1 = {
 				type: object.type,
@@ -124,7 +112,7 @@ function house_plan(t) {
 		for (let object of house.ground_objects)
 			ground_types.add(object.type)
 		let x = -750
-		for (let type in house_object_types) {
+		for (let type in object_types) {
 			if (!ground_types.has(type))
 				house.ground_objects.push(copy_objects(
 					[{type: type, x: x, y: -2000, rot: 0}])[0])
@@ -237,6 +225,8 @@ function house_plan(t) {
 
 	function create_floor(t, floor_i) {
 
+		//// STATE -------------------------------------------------------------
+
 		let floor = plane_graph()
 
 		floor.orthogonal = true
@@ -282,13 +272,19 @@ function house_plan(t) {
 			on_floor: true if the object belongs to floor.objects; false if it
 			     belongs to house.ground_objects. The type's place() function
 			     checks whether the object fits on the floor. Not saved.
+			cached_path: the Path2D that the type's draw function built, or
+			     null. The code that changes what the path draws sets it to
+			     null. Not saved.
 		*/
 		floor.objects = copy_objects(t.objects ?? [])
 		let wall_geometry
 		let roof_geometry // floor.make_roof_geometry()'s result
 		let roof_geometry_no // house.roof_geometry_no of roof_geometry
+		let move_box = [0, 0, 0, 0] // [x1, y1, x2, y2] of the moved object
 
 		floor.room_sides = [] // [[dir, c, m1, m2], ...] free space on the left
+
+		//// FIX ---------------------------------------------------------------
 
 		floor._after_fix = function() {
 			create_edges()
@@ -303,12 +299,12 @@ function house_plan(t) {
 			let objects = floor.objects
 			for (let object of objects)
 				if (!connects_below_only
-					|| house_object_types[object.type].connects_below)
+					|| object_types[object.type].connects_below)
 					object.seg = null
 			let i = 0
 			while (i < objects.length) {
 				let object = objects[i]
-				let object_type = house_object_types[object.type]
+				let object_type = object_types[object.type]
 				if (connects_below_only && !object_type.connects_below) {
 					i++
 					continue
@@ -326,6 +322,8 @@ function house_plan(t) {
 			profile_time('plan.objects', t0)
 		}
 		floor.fix_objects = fix_objects
+
+		//// WALLS AND EDGES ---------------------------------------------------
 
 		// the faces of the walls along cycle c, offset by d: on each seg, the
 		// across coordinate of the face on the side that c walks: seg.wall_a1
@@ -440,14 +438,14 @@ function house_plan(t) {
 			return wall_geometry
 		}
 
-		// rooms ---------------------------------------------------------------
+		//// ROOMS -------------------------------------------------------------
 
 		// a room is open if it holds an open-room tag.
 		function fix_open_rooms() {
 			let t0 = profile_time()
 			floor.open_rooms.clear()
 			for (let object of floor.objects) {
-				if (!house_object_types[object.type].opens_room)
+				if (!object_types[object.type].opens_room)
 					continue
 				let c = floor.hit_cycle_edges(object.x, object.y)
 				if (!c) // in a wall body or outside: no room.
@@ -457,7 +455,7 @@ function house_plan(t) {
 			profile_time('plan.rooms', t0)
 		}
 
-		// roof areas ----------------------------------------------------------
+		//// ROOF AREAS --------------------------------------------------------
 
 		// the parts of the floor's outlines that the floor above leaves
 		// uncovered, one per connected part: [{paths, kind}, ...]. paths: on
@@ -505,7 +503,7 @@ function house_plan(t) {
 			for (let group of add_path_groups(tree, [])) {
 				let is_terrace = false
 				for (let object of floor1?.objects ?? empty_array) {
-					if (!house_object_types[object.type].marks_terrace)
+					if (!object_types[object.type].marks_terrace)
 						continue
 					let p = {
 						x: round(object.x * scale),
@@ -552,7 +550,7 @@ function house_plan(t) {
 			return intersect(wall_paths, terrace_paths, EO)
 		}
 
-		// roof faces ----------------------------------------------------------
+		//// ROOF FACES --------------------------------------------------------
 
 		// the faces of the roof over the floor's roof areas, as returned by
 		// roof_skeleton(). roof_areas: areas from make_areas(). an area's
@@ -845,7 +843,7 @@ function house_plan(t) {
 			return roof_geometry
 		}
 
-		// roof editing --------------------------------------------------------
+		//// ROOF EDITING ------------------------------------------------------
 
 		// the point on the wall line of an eave side from make_roof_faces()
 		// across from the plan point (x, y): an edge point there maps back to
@@ -1131,7 +1129,7 @@ function house_plan(t) {
 			return s
 		}
 
-		// model state ---------------------------------------------------------
+		//// MODEL STATE -------------------------------------------------------
 
 		floor.save_state = function() {
 			let points = []
@@ -1171,7 +1169,7 @@ function house_plan(t) {
 			floor.fix()
 		}
 
-		// heights -------------------------------------------------------------
+		//// HEIGHTS -----------------------------------------------------------
 
 		floor.roof_height = function() {
 			let wall_z = floor.z + floor.h
@@ -1232,7 +1230,7 @@ function house_plan(t) {
 			return s
 		}
 
-		// edit history --------------------------------------------------------
+		//// EDIT HISTORY ------------------------------------------------------
 
 		function cancel_edit() {
 			assert(edit0)
@@ -1243,12 +1241,12 @@ function house_plan(t) {
 			house.ground_objects = ground_objects
 		}
 
-		// objects -------------------------------------------------------------
+		//// OBJECTS -----------------------------------------------------------
 
 		// the object changed: its wall's holes, the open rooms and the
 		// terraces of the floor below.
 		function fix_walls_and_rooms(object) {
-			let object_type = house_object_types[object.type]
+			let object_type = object_types[object.type]
 			if (object_type.in_wall)
 				wall_geometry = null
 			if (object_type.opens_room)
@@ -1256,8 +1254,6 @@ function house_plan(t) {
 			if (object_type.marks_terrace)
 				house.roof_geometry_no++
 		}
-
-		let move_box = [0, 0, 0, 0] // [x1, y1, x2, y2] of the moved object
 
 		// place the object with its plan box centre near the pointer at (x, y).
 		// The centre is the drag reference: an object that placement turns
@@ -1274,7 +1270,7 @@ function house_plan(t) {
 		function place_object(object, snap_d, snap_margin) {
 			let objects0 = object.on_floor ? floor.objects : house.ground_objects
 			object.seg = null
-			house_object_types[object.type].place(floor, object,
+			object_types[object.type].place(floor, object,
 				snap_d, snap_margin)
 			let objects = object.on_floor ? floor.objects : house.ground_objects
 			if (objects != objects0) {
@@ -1348,7 +1344,7 @@ function house_plan(t) {
 		// resize as one edit.
 		floor.start_resize_object = function(object, side, axis = 'w') {
 			begin_edit(floor)
-			let s = house_object_types[object.type]
+			let s = object_types[object.type]
 				.start_resize(floor, object, side, axis)
 			let resize = s.resize
 			s.resize = function(dx, dy, snap_d, nosnap) {
@@ -1392,7 +1388,7 @@ function house_plan(t) {
 			commit_edit(floor)
 		}
 
-		// segment deletion ----------------------------------------------------
+		//// SEGMENT DELETION --------------------------------------------------
 
 		floor.delete_seg = function(seg) {
 			begin_edit(floor)
@@ -1401,7 +1397,7 @@ function house_plan(t) {
 			commit_edit(floor)
 		}
 
-		// plan view UI ops ----------------------------------------------------
+		//// PLAN VIEW UI OPS --------------------------------------------------
 
 		// Find and fix the the cycles that contain the sequence (p0,p1,p2) or (p2,p1,p0).
 		// If (p0,p1,p2) is found then the cycle is to the left of the sequence if it's an inner cycle.
@@ -1734,7 +1730,7 @@ function house_plan(t) {
 		}
 		floor.start_resize_seg = start_resize_seg
 
-		// init ----------------------------------------------------------------
+		//// INIT --------------------------------------------------------------
 
 		push_log('LOADING LEVEL', floor.i)
 		floor.load(t.points, t.lines)
@@ -1744,7 +1740,7 @@ function house_plan(t) {
 		return floor
 	}
 
-	// walls and slabs --------------------------------------------------------
+	//// WALLS AND SLABS ------------------------------------------------------
 
 	// The code builds the walls and slabs of the house as prisms and fuses
 	// them into faces with prism_union(). A floor's walls stand on its slab;
@@ -1770,17 +1766,17 @@ function house_plan(t) {
 	}
 
 	// the highest point of roof faces from make_roof_faces(), at least z.
-function max_face_z(faces, z) {
-	for (let face of faces) {
-		let [a, b, c] = face.plane
-		for (let ring of face.rings)
-			for (let [x, y] of ring)
-				z = max(z, a*x + b*y + c)
+	function max_face_z(faces, z) {
+		for (let face of faces) {
+			let [a, b, c] = face.plane
+			for (let ring of face.rings)
+				for (let [x, y] of ring)
+					z = max(z, a*x + b*y + c)
+		}
+		return z
 	}
-	return z
-}
 
-// add the polygons of a clipper PolyTree64 to `groups` as
+	// add the polygons of a clipper PolyTree64 to `groups` as
 	// [outline, hole, ...], islands as groups of their own.
 	function add_path_groups(node, groups) {
 		for (let i = 0; i < node.count; i++) {
@@ -1833,7 +1829,7 @@ function max_face_z(faces, z) {
 		let groups = map() // {'sill head' -> group}
 		let box = [0, 0, 0, 0] // [x1, y1, x2, y2] of the hole
 		for (let object of floor.objects) {
-			let {in_wall, sill, head} = house_object_types[object.type]
+			let {in_wall, sill, head} = object_types[object.type]
 			if (!in_wall)
 				continue
 			let key = sill + ' ' + head
@@ -1860,8 +1856,6 @@ function max_face_z(faces, z) {
 		]]
 		return !clipper2.difference(rect, paths, clipper2.FillRule.EvenOdd).length
 	}
-
-	let slab_crossings = []
 
 	// test slab coverage along the whole edge on the requested side;
 	// include boundary crossings from that side without a sampling strip.
@@ -2098,7 +2092,40 @@ function max_face_z(faces, z) {
 		return prism_union(prisms)
 	}
 
-	// geometry queries -------------------------------------------------------
+	//// ROOM SIDES -----------------------------------------------------------
+
+	// describe a room edge as a directed wall side for rectangle queries.
+	function read_wall_side(p1, p2, out) {
+		let is_v = p1[0] == p2[0]
+		let m1 = is_v ? p1[1] : p1[0]
+		let m2 = is_v ? p2[1] : p2[0]
+		out[0] = is_v ? (m2 > m1 ? 3 : 1) : (m2 > m1 ? 2 : 0)
+		out[1] = is_v ? p1[0] : p1[1]
+		out[2] = m1
+		out[3] = m2
+		return out
+	}
+
+	// test overlap along a wall side when finding snaps and resize limits.
+	function wall_side_overlaps(side, x, y, hx, hy) {
+		let is_v = side[0] % 2 == 1
+		let along = is_v ? y : x
+		let h_along = is_v ? hy : hx
+		return along + h_along > min(side[2], side[3])
+			&& along - h_along < max(side[2], side[3])
+	}
+
+	// the min coordinate across side of a rect of size (w, h) resting against
+	// it on the room's side.
+	function wall_side_min(side, w, h) {
+		let [dir, c] = side
+		let size = dir % 2 ? w : h
+		return dir == 1 || dir == 2 ? c - size : c
+	}
+
+	//// OBJECTS --------------------------------------------------------------
+
+	/// geometry queries ------------------------------------------------------
 
 	// the room side nearest to the rect of half sizes (hx, hy) around (x, y),
 	// among the vertical sides (want_v) or the horizontal sides (want_h) that
@@ -2148,12 +2175,7 @@ function max_face_z(faces, z) {
 		return is_odd
 	}
 
-	// object coordinates -----------------------------------------------------
-
-	let object_matrix = mat3()
-	let object_point = v2()
-	let object_point1 = v2()
-	let local_box = [0, 0, 0, 0]
+	/// object coordinates ----------------------------------------------------
 
 	// reuse one rotation matrix. Round quarter turns to keep wall alignment
 	// exact.
@@ -2182,7 +2204,7 @@ function max_face_z(faces, z) {
 	// width and length for quarter turns. For diagonal chairs, use the same
 	// box as before the additional 45-degree turn.
 	function get_object_box(plan, object, out) {
-		let object_type = house_object_types[object.type]
+		let object_type = object_types[object.type]
 		if (object_type.box)
 			return object_type.box(plan, object, out)
 		let [x1, y1, x2, y2] = object_type.local_box(plan, object, out)
@@ -2195,15 +2217,12 @@ function max_face_z(faces, z) {
 		return out
 	}
 
-	let origin_box = [0, 0, 0, 0] // temporary plan box for the origin
-	let origin_local_box = [0, 0, 0, 0] // temporary local box for the origin
-
 	// return the plan point of the object's local (0, 0). The type's local box
 	// turns by rot around the centre of the plan box, so for quarter turns
 	// (0, 0) is a corner of the plan box.
 	function get_object_origin(plan, object, out) {
 		let [x1, y1, x2, y2] = get_object_box(plan, object, origin_box)
-		let [lx1, ly1, lx2, ly2] = house_object_types[object.type]
+		let [lx1, ly1, lx2, ly2] = object_types[object.type]
 			.local_box(plan, object, origin_local_box)
 		object_vector_to_plan(object, (lx1 + lx2) / 2, (ly1 + ly2) / 2, out)
 		return out.set((x1 + x2) / 2 - out[0], (y1 + y2) / 2 - out[1])
@@ -2215,8 +2234,6 @@ function max_face_z(faces, z) {
 		out[2] = object.w; out[3] = object.l
 		return out
 	}
-
-	let origin_point = v2() // temporary origin for coordinate conversions
 
 	// convert a point from object coordinates to plan coordinates.
 	function object_to_plan(plan, object, x, y, out) {
@@ -2248,9 +2265,7 @@ function max_face_z(faces, z) {
 		return out
 	}
 
-	let box = [0, 0, 0, 0] // temporary bounding box for placing and resizing
-
-	// rectangle resizing -----------------------------------------------------
+	/// rectangle resizing ----------------------------------------------------
 
 	// return the allowed size nearest to size without exceeding max_size.
 	// Accept a list or range of sizes. Return null if no allowed size fits.
@@ -2277,7 +2292,7 @@ function max_face_z(faces, z) {
 	// resize the rectangular object while keeping the opposite end fixed.
 	// When dragging the end with the smaller plan coordinate, update x or y too.
 	function start_resize_rect(plan, object, side, axis = 'w') {
-		let object_type = house_object_types[object.type]
+		let object_type = object_types[object.type]
 		let is_l = axis == 'l'
 		// convert the direction of the dragged end to plan coordinates.
 		object_vector_to_plan(object, is_l ? 0 : side, is_l ? side : 0,
@@ -2303,7 +2318,7 @@ function max_face_z(faces, z) {
 		}}
 	}
 
-	// openings ---------------------------------------------------------------
+	/// window and door -------------------------------------------------------
 
 	// test whether the opening runs along the plan y axis.
 	function opening_is_v(object) {
@@ -2451,7 +2466,34 @@ function max_face_z(faces, z) {
 		return out
 	}
 
-	// furniture --------------------------------------------------------------
+	object_types.window = {
+		w: 1200,
+		sill: 900, // height above the top of the slab, in mm
+		head: 2100,
+		in_wall: true,
+		sizes: {w: {min: 300, step: 1}},
+		place: place_opening,
+		limit_size: limit_opening_w,
+		box: opening_box,
+		local_box: opening_local_box,
+		start_resize: start_resize_rect,
+	}
+
+	object_types.door = {
+		w: 900,
+		sill: 0, // height above the top of the slab, in mm
+		head: 2100,
+		fields: {mirror: false}, // false: use the unmirrored door drawing
+		in_wall: true,
+		sizes: {w: {min: 600, max: 1100, step: 100}},
+		place: place_opening,
+		limit_size: limit_opening_w,
+		box: opening_box,
+		local_box: opening_local_box,
+		start_resize: start_resize_rect,
+	}
+
+	/// furniture -------------------------------------------------------------
 
 	// snap allowed furniture faces to room walls within snap_d. Rotate around
 	// the centre if needed, and keep that rotation after leaving the wall.
@@ -2459,7 +2501,8 @@ function max_face_z(faces, z) {
 	function place_furniture(plan, object, snap_d, snap_margin = 0) {
 
 		// forget the previous snaps.
-		let faces = house_object_types[object.type].snap_faces
+		let object_type = object_types[object.type]
+		let faces = object_type.snap_faces
 		let side0 = object.snap_side
 		object.snap_side = null
 		object.side_x = null
@@ -2471,6 +2514,8 @@ function max_face_z(faces, z) {
 			// box centre; prefer the previous side within the switching margin.
 			let [x1, y1, x2, y2] = get_object_box(plan, object, box)
 			let cx = (x1 + x2) / 2, cy = (y1 + y2) / 2
+			let [lx1, ly1, lx2, ly2] = object_type.local_box(plan, object, box)
+			let w = lx2 - lx1, h = ly2 - ly1
 			let min_gap = Infinity
 			let found_side, found_rot
 			let found_old = false
@@ -2481,8 +2526,8 @@ function max_face_z(faces, z) {
 				let rot = faces.includes(face) ? object.rot
 					: (dir - faces[0] + 4) % 4 * 90
 				let is_turned = rot % 180 == 90
-				let hx = (is_turned ? object.l : object.w) / 2
-				let hy = (is_turned ? object.w : object.l) / 2
+				let hx = (is_turned ? h : w) / 2
+				let hy = (is_turned ? w : h) / 2
 				if (!wall_side_overlaps(side, cx, cy, hx, hy))
 					continue
 				let gap = abs(wall_side_min(side, 2 * hx, 2 * hy)
@@ -2540,24 +2585,6 @@ function max_face_z(faces, z) {
 		}
 	}
 
-	// call place_furniture(), then turn the chair diagonally if it is in a
-	// corner. Point its back towards the corner. Keep its plan box square.
-	function place_chair(plan, object, snap_d, snap_margin = 0) {
-		place_furniture(plan, object, snap_d, snap_margin)
-		let {side_x, side_y} = object
-		if (!(side_x && side_y))
-			return
-		let [dir_x, wall_x, y1, y2] = side_x
-		let [dir_y, wall_y, x1, x2] = side_y
-		// check that both wall faces end at their shared corner.
-		if (
-			!(y1 == wall_y || y2 == wall_y) ||
-			!(x1 == wall_x || x2 == wall_x)
-		)
-			return
-		object.rot = dir_x * 90 + (dir_x == dir_y + 1 ? -45 : 45)
-	}
-
 	// return the maximum width or length while keeping the opposite end fixed.
 	// Stop at the nearest room wall in the resize direction.
 	// Return Infinity if the furniture is not on the floor.
@@ -2587,7 +2614,101 @@ function max_face_z(faces, z) {
 		return dir * (limit_c - end)
 	}
 
-	// countertop -------------------------------------------------------------
+	/// bed -------------------------------------------------------------------
+
+	object_types.bed = {
+		w: 1400,
+		fields: {l: 2000},
+		sizes: {w: [900, 1400, 1600, 1800], l: [1900, 2000]},
+		snap_faces: [0], // snap the head of the bed to walls
+		place: place_furniture,
+		limit_size: limit_furniture_size,
+		local_box: rect_local_box,
+		start_resize: start_resize_rect,
+	}
+
+	/// chair -----------------------------------------------------------------
+
+	object_types.chair = {
+		w: 450,
+		fields: {l: 450},
+		snap_faces: [0], // snap the back of the chair to walls
+		place: place_chair,
+		local_box: rect_local_box,
+	}
+
+	// call place_furniture(), then turn the chair diagonally if it is in a
+	// corner. Point its back towards the corner. Keep its plan box square.
+	function place_chair(plan, object, snap_d, snap_margin = 0) {
+		place_furniture(plan, object, snap_d, snap_margin)
+		let {side_x, side_y} = object
+		if (!(side_x && side_y))
+			return
+		let [dir_x, wall_x, y1, y2] = side_x
+		let [dir_y, wall_y, x1, x2] = side_y
+		// check that both wall faces end at their shared corner.
+		if (
+			!(y1 == wall_y || y2 == wall_y) ||
+			!(x1 == wall_x || x2 == wall_x)
+		)
+			return
+		object.rot = dir_x * 90 + (dir_x == dir_y + 1 ? -45 : 45)
+	}
+
+	/// wc --------------------------------------------------------------------
+
+	object_types.wc = {
+		w: 400,
+		fields: {l: 700},
+		snap_faces: [0], // snap the toilet tank to walls
+		place: place_furniture,
+		local_box: rect_local_box,
+	}
+
+	/// round table -----------------------------------------------------------
+
+	object_types.round_table = {
+		w: 1200,
+		sizes: {w: {min: 800, max: 2000, step: 50}},
+		snap_faces: [0, 1, 2, 3],
+		place: place_furniture,
+		local_box: round_table_local_box,
+		start_resize: start_resize_round_table,
+	}
+
+	function round_table_local_box(plan, object, out) {
+		out[0] = 0
+		out[1] = 0
+		out[2] = object.w + 750
+		out[3] = object.w + 750
+		return out
+	}
+
+	function start_resize_round_table(plan, object, side, axis = 'w') {
+		let w0 = object.w, x0 = object.x, y0 = object.y
+		let is_l = axis == 'l'
+		object_vector_to_plan(object, is_l ? 0 : side, is_l ? side : 0,
+			object_point1)
+		let ux = object_point1[0], uy = object_point1[1]
+		let sizes = object_types.round_table.sizes.w
+		return {resize: function(dx, dy) {
+			let w = snap_object_size(sizes, w0 + 2 * (dx * ux + dy * uy),
+				Infinity)
+			object.w = w
+			object.cached_path = null
+			object.x = x0 - (w - w0) / 2
+			object.y = y0 - (w - w0) / 2
+		}}
+	}
+
+	/// countertop ------------------------------------------------------------
+
+	object_types.countertop = {
+		fields: {contour: [0, 600, 0, 0, 1800, 0, 1800, 600]},
+		place: place_countertop,
+		local_box: countertop_local_box,
+		start_resize: start_resize_countertop,
+	}
 
 	// contour contains clockwise local coordinates [x, y, ...]. The two free
 	// ends start at coordinate offsets 0 and contour.length / 2.
@@ -2662,8 +2783,6 @@ function max_face_z(faces, z) {
 			}
 		}
 	}
-
-	let countertop_edge = [0, 0, 0, 0]
 
 	// encode a handle as edge_index * 3 + zone + 1.
 	// zone is 0 for the middle, 1 for the start and 2 for the end of the edge.
@@ -2803,7 +2922,18 @@ function max_face_z(faces, z) {
 		return s
 	}
 
-	// stairs -----------------------------------------------------------------
+	/// stair -----------------------------------------------------------------
+
+	object_types.stair = {
+		w: 900,
+		fields: {riser_height: 175, tread_depth: 280, l: null},
+		connects_below: true,
+		sizes: {w: {min: 1, step: 1}, l: {min: 1, step: 1}},
+		snap_l: snap_stair_l,
+		place: place_stair,
+		local_box: stair_local_box,
+		start_resize: start_resize_rect,
+	}
 
 	// calculate step heights and depths for the distance between floors.
 	// Cache the results for placement, drawing and editing.
@@ -2945,7 +3075,19 @@ function max_face_z(faces, z) {
 		return length1
 	}
 
-	// tags -------------------------------------------------------------------
+	/// tags ------------------------------------------------------------------
+
+	object_types.open_room = {
+		opens_room: true,
+		place: place_open_room,
+		local_box: tag_local_box,
+	}
+
+	object_types.terrace = {
+		marks_terrace: true,
+		place: place_terrace,
+		local_box: tag_local_box,
+	}
 
 	// assign the tag to this floor if its point is inside a room.
 	function place_open_room(plan, object) {
@@ -2967,97 +3109,9 @@ function max_face_z(faces, z) {
 		return out
 	}
 
-	// object types -----------------------------------------------------------
+	/// exports ---------------------------------------------------------------
 
-	let house_object_types = {
-
-		window: {
-			w: 1200,
-			sill: 900, // height above the top of the slab, in mm
-			head: 2100,
-			in_wall: true,
-			sizes: {w: {min: 300, step: 1}},
-			place: place_opening,
-			limit_size: limit_opening_w,
-			box: opening_box,
-			local_box: opening_local_box,
-			start_resize: start_resize_rect,
-		},
-
-		door: {
-			w: 900,
-			sill: 0, // height above the top of the slab, in mm
-			head: 2100,
-			fields: {mirror: false}, // false: use the unmirrored door sketch
-			in_wall: true,
-			sizes: {w: {min: 600, max: 1100, step: 100}},
-			place: place_opening,
-			limit_size: limit_opening_w,
-			box: opening_box,
-			local_box: opening_local_box,
-			start_resize: start_resize_rect,
-		},
-
-		bed: {
-			w: 1400,
-			fields: {l: 2000},
-			sizes: {w: [900, 1400, 1600, 1800], l: [1900, 2000]},
-			snap_faces: [0], // snap the head of the bed to walls
-			place: place_furniture,
-			limit_size: limit_furniture_size,
-			local_box: rect_local_box,
-			start_resize: start_resize_rect,
-		},
-
-		chair: {
-			w: 450,
-			fields: {l: 450},
-			snap_faces: [0], // snap the back of the chair to walls
-			place: place_chair,
-			local_box: rect_local_box,
-		},
-
-		wc: {
-			w: 400,
-			fields: {l: 700},
-			snap_faces: [0], // snap the toilet tank to walls
-			place: place_furniture,
-			local_box: rect_local_box,
-		},
-
-		countertop: {
-			fields: {contour: [0, 600, 0, 0, 1800, 0, 1800, 600]},
-			place: place_countertop,
-			local_box: countertop_local_box,
-			start_resize: start_resize_countertop,
-		},
-
-		open_room: {
-			opens_room: true,
-			place: place_open_room,
-			local_box: tag_local_box,
-		},
-
-		terrace: {
-			marks_terrace: true,
-			place: place_terrace,
-			local_box: tag_local_box,
-		},
-
-		stair: {
-			w: 900,
-			fields: {riser_height: 175, tread_depth: 280, l: null},
-			connects_below: true,
-			sizes: {w: {min: 1, step: 1}, l: {min: 1, step: 1}},
-			snap_l: snap_stair_l,
-			place: place_stair,
-			local_box: stair_local_box,
-			start_resize: start_resize_rect,
-		},
-
-	}
-
-	house.object_types = house_object_types
+	house.object_types = object_types
 	house.get_object_box = get_object_box
 	house.get_object_origin = get_object_origin
 	house.object_to_plan = object_to_plan
@@ -3069,7 +3123,7 @@ function max_face_z(faces, z) {
 	house.get_countertop_edge = get_countertop_edge
 	house.stair_shape = stair_shape
 
-	// adding and removing floors ----------------------------------------------
+	//// FLOORS ---------------------------------------------------------------
 
 	function fix_floor_heights() {
 		let z = 0
@@ -3125,7 +3179,7 @@ function max_face_z(faces, z) {
 		return floor
 	}
 
-	// settings ---------------------------------------------------------------
+	//// SETTINGS -------------------------------------------------------------
 
 	// set the house setting `name` (a key of defaults) and rebuild what it
 	// changes: the floors' heights and wall edges.
@@ -3159,7 +3213,7 @@ function max_face_z(faces, z) {
 		return s
 	}
 
-	// init -------------------------------------------------------------------
+	//// INIT -----------------------------------------------------------------
 
 	function init(t) {
 
@@ -3194,10 +3248,7 @@ function max_face_z(faces, z) {
 	}
 	init(t)
 
-	// history ---------------------------------------------------------------
-
-	let undo_stack = []
-	let redo_stack = []
+	//// HISTORY --------------------------------------------------------------
 
 	// the live settings and floors of the house, for the load undo entry.
 	// the entry keeps the floor objects so that older entries stay valid.

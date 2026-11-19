@@ -1323,4 +1323,193 @@ check('the stair group is closed with outward faces and exact tread heights',
 	assert.equal(Math.max(...tread_heights), -165)
 })
 
+// round dining table -------------------------------------------------------
+
+check('round table resize keeps its centre, limits and undo state', () => {
+	let h = house({floors: [{lines: [rect_lines(0, 0, 6000, 6000)],
+		objects: [{type: 'round_table', x: 1800, y: 1800, rot: 90}]}]})
+	let f = h.floors[0], t = f.objects[0]
+	assert.equal(t.w, 1200)
+	assert.deepEqual(Array.from(h.get_object_box(f, t, [])),
+		[1800, 1800, 3750, 3750])
+	let r = f.start_resize_object(t, 1)
+	r.resize(0, 36)
+	assert.equal(t.w, 1250)
+	assert.equal(t.x, 1775)
+	assert.equal(t.y, 1775)
+	r.resize(0, 10000)
+	assert.equal(t.w, 2000)
+	r.resize(0, -10000)
+	assert.equal(t.w, 800)
+	r.stop()
+	assert(h.undo())
+	assert.equal(f.objects[0].w, 1200)
+	assert(h.redo())
+	assert.equal(f.objects[0].w, 800)
+	let state = h.save_object(f.objects[0])
+	assert.equal(state.w, 800)
+	assert.equal(state.l, undefined)
+})
+
+check('round table can resize into and out of invalid placement', () => {
+	let h = house({floors: [{lines: [rect_lines(0, 0, 4000, 4000)],
+		objects: [{type: 'round_table', x: 150, y: 850, rot: 0}]}]})
+	let f = h.floors[0], t = f.objects[0]
+	assert(t.on_floor)
+	let r = f.start_resize_object(t, 1)
+	r.resize(1000, 0)
+	assert.equal(t.w, 2000)
+	assert.equal(t.x, -250)
+	assert.equal(t.on_floor, false)
+	assert(h.ground_objects.includes(t))
+	r.resize(0, 0)
+	assert.equal(t.w, 1200)
+	assert(t.on_floor)
+	r.cancel()
+	t = f.objects[0]
+	let m = f.start_move_object(t)
+	m.move(-200, 0, 0)
+	assert.equal(t.on_floor, false)
+	assert(h.ground_objects.includes(t))
+	m.cancel()
+})
+
+check('round table square chairs stay half tucked and inside its box', () => {
+	let source = fs.readFileSync(path.join(sdk,
+		'www/house_plan_editor.js'), 'utf8')
+	let draw_source = source.slice(
+		source.indexOf('\tobject_views.round_table = {'),
+		source.indexOf('\t/// countertop'))
+	class Path {
+		constructor() { this.points = [] }
+		moveTo(x, y) { this.points.push([x, y]) }
+		lineTo(x, y) { this.points.push([x, y]) }
+		closePath() {}
+	}
+	let h = house({floors: []})
+	let object_views = {}
+	vm.runInNewContext(draw_source, {
+		Path2D: Path, PI: Math.PI, floor: Math.floor,
+		cos: Math.cos, sin: Math.sin, s: {house: h}, box: [], id: 'test',
+		ui: {color_css: () => '', captured: () => null, hovers: () => null},
+		object_views, hit_box() {}, hit_resize_rect() {},
+	})
+	let draw = object_views.round_table.draw
+	let cx = {
+		beginPath() {}, fill() {}, stroke() {}, arc() {},
+	}
+	for (let w = 800; w <= 2000; w += 50) {
+		let object = {type: 'round_table', w}
+		let box = h.object_types.round_table.local_box(null, object, [])
+		let [x1, y1, x2, y2] = box
+		let cx0 = (x1 + x2) / 2, cy = (y1 + y2) / 2
+		draw(cx, null, object)
+		assert(object.cached_path)
+		let points = object.cached_path.points
+		let n = points.length / 6
+		assert.equal(n, Math.floor(Math.PI * w / 600))
+		for (let i = 0; i < points.length; i += 6) {
+			let x = 0, y = 0
+			for (let j = 0; j < 4; j++) {
+				let [px, py] = points[i+j]
+				assert(px >= x1 && py >= y1 && px <= x2 && py <= y2)
+				x += px / 4
+				y += py / 4
+				let [qx, qy] = points[i + (j+1) % 4]
+				let side = Math.hypot(qx - px, qy - py)
+				assert(Math.abs(side - 450) < 1e-9)
+			}
+			let r = Math.hypot(x - cx0, y - cy)
+			assert(Math.abs(r - w / 2) < 1e-9)
+			if (n == 4 && i == 0) {
+				assert(x > cx0 && y > cy)
+				assert(Math.abs(x - y) < 1e-9)
+			}
+		}
+	}
+})
+
+check('round table drawing and diameter use its actual local box', () => {
+	let source = fs.readFileSync(path.join(sdk,
+		'www/house_plan_editor.js'), 'utf8')
+	let draw_source = source.slice(
+		source.indexOf('\tobject_views.round_table = {'),
+		source.indexOf('\t/// countertop'))
+	let object_views = {}
+	let h = house({floors: []})
+	let object = {type: 'round_table', w: 1200}
+	let hs = {object}, arc, rect, diameter
+	let context = {
+		s: {house: h}, box: [], PI: Math.PI, id: 'test',
+		floor: Math.floor, cos: Math.cos, sin: Math.sin,
+		Path2D: class { moveTo() {} lineTo() {} closePath() {} },
+		to_pixels_exact: () => 1, round_table_dash: [0, 0], solid_line: [],
+		ui: {color_css: () => '', captured: () => hs, hovers: () => null},
+		draw_object_length(cx, plan, object, ...args) { diameter = args },
+		object_views, hit_box() {}, hit_resize_rect() {},
+	}
+	vm.runInNewContext(draw_source, context)
+	let draw = object_views.round_table.draw
+	let sizes = object_views.round_table.draw_sizes
+	let cx = {
+		beginPath() {}, fill() {}, stroke() {}, setLineDash() {},
+		arc(...args) { arc = args },
+		strokeRect(...args) { rect = args },
+	}
+	let [x1, y1, x2, y2] = h.object_types.round_table
+		.local_box(null, object, [])
+	let x = (x1 + x2) / 2, y = (y1 + y2) / 2
+	draw(cx, null, object)
+	sizes(cx, null, object)
+	assert.deepEqual(arc, [x, y, object.w / 2, 0, 2 * Math.PI])
+	assert.deepEqual(rect, [x1, y1, x2 - x1, y2 - y1])
+	assert.deepEqual(diameter,
+		[x - object.w / 2, y, x + object.w / 2, y, 0])
+	hs = null
+	rect = null
+	draw(cx, null, object)
+	assert.equal(rect, null)
+})
+
+check('round table resizes from all four edges at every quarter turn', () => {
+	let source = fs.readFileSync(path.join(sdk,
+		'www/house_plan_editor.js'), 'utf8')
+	let helper = source.slice(source.indexOf('\tfunction hit_resize_rect('),
+		source.indexOf('\t/// window and door'))
+	for (let rot = 0; rot < 360; rot += 90) {
+		let h = house({floors: [{lines: [rect_lines(0, 0, 6000, 6000)],
+			objects: [{type: 'round_table', x: 1800, y: 1800, rot}]}]})
+		let f = h.floors[0], t = f.objects[0]
+		let hit = vm.runInNewContext(helper + '\nhit_resize_rect', {
+			s: {house: h}, to_plan: d => d, box: [],
+			object_point1: ctx.Math3D.v2(), min: Math.min,
+		})
+		for (let axis of ['w', 'l']) {
+			for (let side of [-1, 1]) {
+				let [x1, y1, x2, y2] = h.object_types.round_table
+					.local_box(f, t, [])
+				let is_l = axis == 'l'
+				let x = is_l ? (x1 + x2) / 2 : side == -1 ? x1 : x2
+				let y = is_l ? (side == -1 ? y1 : y2) : (y1 + y2) / 2
+				let point = h.object_to_plan(f, t,
+					x, y, ctx.Math3D.v2())
+				let hs = {mouse_x: point[0], mouse_y: point[1]}
+				assert(hit(f, t, hs, true))
+				assert.equal(hs.object_axis, axis)
+				assert.equal(hs.object_side, side)
+				let [dx, dy] = h.object_vector_to_plan(t,
+					is_l ? 0 : 25 * side,
+					is_l ? 25 * side : 0, ctx.Math3D.v2())
+				let r = f.start_resize_object(t, hs.object_side, hs.object_axis)
+				r.resize(dx, dy)
+				assert.equal(t.w, 1250)
+				assert.equal(t.x, 1775)
+				assert.equal(t.y, 1775)
+				r.cancel()
+				t = f.objects[0]
+			}
+		}
+	}
+})
+
 console.log(n_checks + ' house plan checks passed')

@@ -15,9 +15,7 @@ const {
 
 const {bbox2, line2, mat3, v2} = Math3D
 
-// view utils ----------------------------------------------------------------
-
-let out = []
+/// utils --------------------------------------------------------------------
 
 let floor_names = [
 	'GROUND FLOOR',
@@ -30,574 +28,7 @@ let floor_names = [
 let format_length = d => format_kcount(d / 1e3, 2)+'m'
 let format_area = a => format_kcount(abs(a) / 1e6, 2)+' m\u00b2'
 
-function seg_center(seg) {
-	return line2.at(.5, seg[0][0], seg[0][1], seg[1][0], seg[1][1], out)
-}
-
-// floor view ----------------------------------------------------------------
-
-// the snap distance in plan units: d mm, but at most 12 screen pixels, so that
-// zooming in makes snapping finer.
-function snap_distance(sg, d) {
-	return min(d, 12 / sg.scale)
-}
-
-function draw_grid(cx, sg, x0, y0, w, h, step, alpha) {
-	if (!sg.show_grid)
-		return
-	if (sg.d(step) < 7)
-		return
-	cx.strokeStyle = ui.hsl_adjust(ui.color_obj('bg2'), 1, 1, 1, alpha)
-	for (let i = mod(sg.plan_x(x0), step), n = sg.plan_d(w); i < n; i += step) {
-		cx.beginPath()
-		cx.moveTo(sg.x(i), 0)
-		cx.lineTo(sg.y(i), h-1)
-		cx.stroke()
-	}
-	for (let i = mod(sg.plan_y(y0), step), n = sg.plan_d(h); i < n; i += step) {
-		cx.beginPath()
-		cx.moveTo(0, sg.x(i))
-		cx.lineTo(w-1, sg.y(i))
-		cx.stroke()
-	}
-	return true
-}
-
-function draw_grids(cx, sg, w, h) {
-	let x0 = sg.x0
-	let y0 = sg.y0
-	if (sg.rotation) {
-		let xc = round(w / 2)
-		let yc = round(h / 2)
-		let c = cos(sg.rotation)
-		let s = sin(sg.rotation)
-		let dx = x0 - xc
-		let dy = y0 - yc
-		x0 = xc + dx * c - dy * s
-		y0 = yc + dx * s + dy * c
-	}
-	// grid
-	cx.save()
-	cx.translate(.5, .5)
-	let step = 1000
-	while (sg.d(step / 10) < 7)
-		step *= 10
-	draw_grid(cx, sg, x0, y0, w, h, step / 10, .2)
-	draw_grid(cx, sg, x0, y0, w, h, step /  2, .3)
-	draw_grid(cx, sg, x0, y0, w, h, step     ,  1)
-	cx.restore()
-}
-
-function draw_edges(cx, sg, eps) {
-	for (let ep of eps) {
-		let x = sg.x(ep[0])
-		let y = sg.y(ep[1])
-		if (ep == eps[0])
-			cx.moveTo(x, y)
-		else
-			cx.lineTo(x, y)
-	}
-	cx.closePath()
-}
-
-// add clipper paths on prism_union()'s grid to the current path.
-function add_grid_paths(cx, sg, paths) {
-	let scale = prism_union.grid_scale
-	for (let path of paths) {
-		for (let i = 0; i < path.length; i++) {
-			let p = path[i]
-			let x = sg.x(p.x / scale)
-			let y = sg.y(p.y / scale)
-			if (i == 0)
-				cx.moveTo(x, y)
-			else
-				cx.lineTo(x, y)
-		}
-		cx.closePath()
-	}
-}
-
-function draw_walls(cx, sg, paths, segs) {
-	if (sg.scale <= 0.02) { // too small to even show edges
-		for (let seg of segs) {
-			let x1 = sg.x(seg[0][0]) + .5
-			let y1 = sg.y(seg[0][1]) + .5
-			let x2 = sg.x(seg[1][0]) + .5
-			let y2 = sg.y(seg[1][1]) + .5
-			cx.beginPath()
-			cx.moveTo(x1, y1)
-			cx.lineTo(x2, y2)
-			cx.strokeStyle = ui.color_css('text')
-			cx.stroke()
-		}
-		return
-	}
-
-	cx.beginPath()
-	add_grid_paths(cx, sg, paths)
-
-	if (!cx.wall_pattern) {
-		let w = 100
-		let c = new OffscreenCanvas(w, w)
-		let x = c.getContext('2d')
-		let g = x.createLinearGradient(0, 0, w, 2*w)
-		for (let i = 0, n = 2*w; i <= n; i += 4) {
-			g.addColorStop(clamp((i - 1) / n, 0, 1), 'white')
-			g.addColorStop(clamp((i + 0) / n, 0, 1), 'gray')
-			g.addColorStop(clamp((i + 1) / n, 0, 1), 'white')
-		}
-		x.rect(0, 0, w, w)
-		x.fillStyle = g
-		x.fill()
-		cx.wall_pattern = cx.createPattern(c, 'repeat')
-	}
-	if (sg.scale > 0.04) {
-		cx.fillStyle = DEBUG_PLAN ? '#333' : cx.wall_pattern
-		cx.fill('evenodd')
-		cx.lineWidth = DEBUG_PLAN ? 2 : sg.line_width
-		cx.strokeStyle = 'black' //ui.color_css('text')
-		cx.lineJoin = 'round'
-		cx.stroke()
-		cx.lineJoin = 'miter'
-		cx.lineWidth = 1
-	} else { // too small to stroke
-		cx.fillStyle = ui.color_css('text')
-		cx.fill('evenodd')
-	}
-}
-
-// find the farthest edge point from `c.edges[i0]` going in `dir` direction
-// in the array, which has the same spatial direction `v` with the previous
-// point.
-function last_perp_edge_point(c, i, n, dir, v) {
-	let ep0 = c.edges[mod(i, n)]
-	while (1) {
-		let ep1 = c.edges[mod(i, n)]
-		let ep2 = c.edges[mod(i+dir, n)]
-		if (ep2.p == ep0.p) // end-cap, don't measure
-			return
-		if ((ep1[0] == ep2[0]) != v) // changed direction, return last edge point
-			return ep1
-		i += dir
-	}
-}
-
-// s: the label, default: the length.
-function draw_length(cx, sg, x1, y1, x2, y2, s) {
-
-	let d = distance(x1, y1, x2, y2)
-	if (!d)
-		return
-
-	;[x1, y1, x2, y2] = line2.offset(-100, x1, y1, x2, y2)
-
-	s ??= format_length(d)
-
-	x1 = sg.x(x1)
-	y1 = sg.y(y1)
-	x2 = sg.x(x2)
-	y2 = sg.y(y2)
-
-	if (x1 > x2) {
-		let x3 = x1
-		let y3 = y1
-		x1 = x2
-		y1 = y2
-		x2 = x3
-		y2 = y3
-	}
-	let a = -atan2(y2 - y1, x2 - x1)
-
-	cx.save()
-
-	cx.font = 'bold 14px sans-serif'
-	let m = ui.measure_text(s)
-	let w = m.width
-
-	let t1 = clamp((sg.d(d) - (w + 10)) / 2 / sg.d(d), 0, 1)
-	let t2 = clamp((sg.d(d) + (w + 10)) / 2 / sg.d(d), 0, 1)
-
-	if (sg.d(d) < w) {
-		cx.restore()
-		return
-	}
-
-	cx.translate(.5, .5)
-
-	cx.beginPath()
-
-	if (sg.d(d) >= w + 10 + 2 * 8 * cos(45*rad)) {
-		// left arrow
-		let [x1a1, y1a1] = point_around(x1, y1, 8, a + 45*rad)
-		let [x1a2, y1a2] = point_around(x1, y1, 8, a - 45*rad)
-		let [x1e, y1e] = line2.at(t1, x1, y1, x2, y2, out)
-
-		cx.moveTo(x1  , y1)
-		cx.lineTo(x1a1, y1a1)
-		cx.moveTo(x1  , y1)
-		cx.lineTo(x1a2, y1a2)
-		cx.moveTo(x1  , y1)
-		cx.lineTo(x1e , y1e)
-
-		// right arrow
-		let [x2a1, y2a1] = point_around(x2, y2, 8, a + (90+45)*rad)
-		let [x2a2, y2a2] = point_around(x2, y2, 8, a - (90+45)*rad)
-		let [x2e, y2e] = line2.at(t2, x1, y1, x2, y2, out)
-		cx.moveTo(x2  , y2)
-		cx.lineTo(x2a1, y2a1)
-		cx.moveTo(x2  , y2)
-		cx.lineTo(x2a2, y2a2)
-		cx.moveTo(x2  , y2)
-		cx.lineTo(x2e , y2e)
-
-		cx.strokeStyle = ui.color_css('text')
-		cx.stroke()
-	}
-
-	let [xc, yc] = line2.at(.5, x1, y1, x2, y2, out)
-	cx.translate(xc, yc)
-	let rotation = sg.rotation ?? 0
-	let text_angle = mod(rotation - a + PI/2, PI) - PI/2
-	cx.rotate(text_angle - rotation)
-	let tx = round(-w / 2)
-	let ty = round((m.fontBoundingBoxAscent - m.fontBoundingBoxDescent) / 2)
-	cx.translate(tx, ty)
-	cx.fillStyle = ui.color_css('text')
-	cx.textAlign = 'left'
-	cx.fillText(s, 0, 0)
-
-	cx.restore()
-}
-
-// the text s centered on the plan point (x, y), upright in a rotated view.
-function draw_text(cx, sg, x, y, s) {
-	cx.save()
-	cx.translate(sg.x(x), sg.y(y))
-	if (sg.rotation)
-		cx.rotate(-sg.rotation)
-	cx.textAlign = 'center'
-	cx.fillStyle = ui.color_css('text')
-	cx.fillText(s, 0, 5)
-	cx.restore()
-}
-
-// a height relative to the wall top, signed.
-function format_height(h) {
-	return 'h ' + (h < 0 ? '-' : '') + format_length(abs(h))
-}
-
-// the overhang width, the length and, on a sloped side, the eave height
-// over the wall top of an eave side from make_roof_faces().
-function draw_eave_dims(cx, sg, side, wall_z) {
-	let scale = prism_union.grid_scale
-	let {nx, ny} = side
-	let c      = side.c      / scale
-	let wall_c = side.wall_c / scale
-	let e1     = side.e1     / scale
-	let e2     = side.e2     / scale
-	// draw_length() puts the dimension line on the right of its direction:
-	// outward.
-	let b1 = nx == 1 || ny == -1 ? e1 : e2
-	let b2 = e1 + e2 - b1
-	let b = e1 + (e2 - e1) / 4 // along the side: the width's position
-	if (nx) {
-		draw_length(cx, sg, c, b1, c, b2)
-		draw_length(cx, sg, wall_c, b, c, b)
-	} else {
-		draw_length(cx, sg, b1, c, b2, c)
-		draw_length(cx, sg, b, wall_c, b, c)
-	}
-	if (side.pitch == 90)
-		return
-	// outside the length's dimension line.
-	let a = c + (nx + ny) * sg.plan_d(30)
-	let m = (e1 + e2) / 2
-	draw_text(cx, sg, nx ? a : m, nx ? m : a,
-		format_height(side.eave_z - wall_z))
-}
-
-// a line between two roof faces: a ridge (level): its length, and its
-// height over the wall top on the other side; a hip or valley: its length
-// along the slope.
-function draw_roof_line_dims(cx, sg, line, wall_z) {
-	let [x1, y1, z1] = line.p
-	let [x2, y2, z2] = line.q
-	let d = distance(x1, y1, x2, y2)
-	if (abs(z2 - z1) > 1e-5) {
-		draw_length(cx, sg, x1, y1, x2, y2, format_length(hypot(d, z2 - z1)))
-		return
-	}
-	draw_length(cx, sg, x1, y1, x2, y2)
-	if (sg.d(d) < 20)
-		return
-	let [x3, y3, x4, y4] = line2.offset(sg.plan_d(14), x1, y1, x2, y2)
-	draw_text(cx, sg, (x3 + x4) / 2, (y3 + y4) / 2, format_height(z1 - wall_z))
-}
-
-// roof labels --------------------------------------------------------------
-
-// the plan point of the pitch label of a roof face: across from the middle
-// of its longest eave side, half the face's depth inward.
-function roof_label_point(face) {
-	let scale = prism_union.grid_scale
-	let side
-	for (let side1 of face.sides)
-		if (!side || side1.e2 - side1.e1 > side.e2 - side.e1)
-			side = side1
-	let {nx, ny} = side
-	let c = side.c / scale
-	let depth = 0 // inward from the eave line
-	for (let ring of face.rings)
-		for (let p of ring)
-			depth = max(depth, (c - (nx ? p[0] : p[1])) * (nx + ny))
-	let a = c - (nx + ny) * depth / 2 // across the side
-	let b = (side.e1 + side.e2) / 2 / scale // along the side
-	return nx ? [a, b] : [b, a]
-}
-
-function format_pitch(pitch) {
-	return round(pitch * 10) / 10 + '\u00b0'
-}
-
-// roof hit testing ---------------------------------------------------------
-
-// the roof while the bottom floor is edited: it has no floor below.
-let no_roof_geometry = {
-	roof_faces: empty_array,
-	eave_sides: empty_array,
-	shared_edges: empty_array,
-	half_wall_paths: empty_array,
-	terrace_paths: empty_array,
-}
-
-// the eave side of the edited roof at the plan point (mx, my): on its eave
-// line, 8 pixels around.
-function hit_roof_side(hs, roof_sides, sg, mx, my) {
-	let scale = prism_union.grid_scale
-	let x = mx * scale
-	let y = my * scale
-	let m = sg.plan_d(8) * scale
-	for (let side of roof_sides) {
-		let {nx, c, e1, e2} = side
-		let a = nx ? x : y // across the side
-		let b = nx ? y : x // along the side
-		if (b < e1 || b > e2)
-			continue
-		if (abs(a - c) > m)
-			continue
-		hs.roof_side = side
-		hs.roof_x = mx // unsnapped, for placing an edge point.
-		hs.roof_y = my
-		hs.action = 'move_eave'
-		return true
-	}
-	return false
-}
-
-// the line between two faces of the edited roof at the plan point (mx, my),
-// 8 pixels around: the nearest shared segment.
-function hit_roof_line(hs, roof_lines, sg, mx, my) {
-	let min_d = sg.plan_d(8)
-	let found_line, found_x, found_y
-	for (let line of roof_lines) {
-		let {p, q} = line
-		let [px, py] = p
-		let dx = q[0] - px
-		let dy = q[1] - py
-		let t = clamp(((mx - px) * dx + (my - py) * dy)
-			/ (dx * dx + dy * dy), 0, 1)
-		let x = px + t * dx // the point of p-q nearest to (mx, my)
-		let y = py + t * dy
-		let d = distance(mx, my, x, y)
-		if (d >= min_d)
-			continue
-		min_d = d
-		found_line = line
-		found_x = x
-		found_y = y
-	}
-	if (!found_line)
-		return false
-	let {face1, face2} = found_line
-	let [a, b, c] = face1.plane
-	hs.roof_faces = [face1, face2]
-	hs.roof_x = found_x // grabbed point, on the line.
-	hs.roof_y = found_y
-	hs.roof_z = a * found_x + b * found_y + c
-	hs.action = 'move_faces'
-	return true
-}
-
-// the point where three or more faces of the edited roof meet (a ridge end,
-// a peak) at the plan point (mx, my), 8 pixels around: the nearest end of a
-// shared segment.
-function hit_roof_point(hs, roof_lines, sg, mx, my) {
-	let min_d = sg.plan_d(8)
-	let found_p
-	for (let line of roof_lines)
-		for (let i = 0; i < 2; i++) {
-			let p = i ? line.q : line.p
-			let d = distance(mx, my, p[0], p[1])
-			if (d >= min_d)
-				continue
-			min_d = d
-			found_p = p
-		}
-	if (!found_p)
-		return false
-	let [x, y, z] = found_p
-	let faces = [] // faces of the segments that end at found_p
-	for (let line of roof_lines) {
-		let {p, q, face1, face2} = line
-		let is_end = distance(x, y, p[0], p[1]) < 1e-2
-			|| distance(x, y, q[0], q[1]) < 1e-2
-		if (!is_end)
-			continue
-		if (!faces.includes(face1)) faces.push(face1)
-		if (!faces.includes(face2)) faces.push(face2)
-	}
-	if (faces.length < 3)
-		return false
-	hs.roof_faces = faces
-	hs.roof_x = x // grabbed point.
-	hs.roof_y = y
-	hs.roof_z = z
-	hs.action = 'move_faces'
-	return true
-}
-
-// the pitch label of a face of the edited roof at the screen point
-// (ui.mx, ui.my).
-function hit_roof_label(hs, roof_faces, sg) {
-	let axes_swapped = round((sg.rotation ?? 0) / (90*rad)) % 2 != 0
-	let w = axes_swapped ? 10 : 20 // half sizes of the label's box
-	let h = axes_swapped ? 20 : 10
-	for (let face of roof_faces) {
-		let [x, y] = roof_label_point(face)
-		x = sg.x(x)
-		y = sg.y(y)
-		if (!ui.hit_bbox(x - w, y - h, x + w, y + h))
-			continue
-		hs.roof_face = face
-		hs.action = 'move_pitch'
-		return true
-	}
-	return false
-}
-
-// objects -------------------------------------------------------------------
-
-let object_box = [0, 0, 0, 0] // [x1, y1, x2, y2] of the object hit or drawn
-let object_origin = v2() // [x, y] of the origin of the object hit or drawn
-
-let object_matrix = mat3()
-let object_point = v2()
-let object_point1 = v2()
-
-let box = [0, 0, 0, 0] // temporary bounding box for hit testing and drawing
-
-let countertop_edge = [0, 0, 0, 0]
-
-// draw the mattress, pillows and cover edge, with the head at the top.
-function sketch_bed(object) {
-	let {w, l} = object
-	let s = `M0 0h${w}v${l}h${-w}z`
-	let pillow_n = w < 1200 ? 1 : 2
-	for (let i = 0; i < pillow_n; i++) {
-		let px = pillow_n == 1 ? w / 2 : i ? w * 3 / 4 : w / 4
-		s += `M${px - 250} 100h500v350h-500z`
-	}
-	return s + `M0 ${l * .4}h${w}`
-}
-
-// draw the chair with its narrower back at the top.
-function sketch_chair(object) {
-	let {w, l} = object
-	let back_x1 = w / 8 // the back is 3/4 of the seat's width
-	let back_x2 = w - back_x1
-
-	// the seat's outline. Round each corner using points r millimetres away
-	// along each adjacent edge.
-	let points = [[back_x1, 0], [back_x2, 0], [w, l], [0, l]]
-	let r = 60
-	let s = ''
-	for (let i = 0, n = points.length; i < n; i++) {
-		let [px, py] = points[i]
-		let [x0, y0] = points[(i+n-1) % n]
-		let [x1, y1] = points[(i+1) % n]
-		let d0 = Math.hypot(x0 - px, y0 - py)
-		let d1 = Math.hypot(x1 - px, y1 - py)
-		s += `${i ? 'L' : 'M'}${px + (x0 - px) * r / d0} `
-			+ `${py + (y0 - py) * r / d0}`
-			+ `Q${px} ${py} ${px + (x1 - px) * r / d1} `
-			+ `${py + (y1 - py) * r / d1}`
-	}
-
-	// the outline and the back rest's line.
-	return s + 'z' + `M${w * .2} 90h${w * .6}`
-}
-
-// draw the toilet with its tank at the top.
-function sketch_wc(object) {
-	let {w, l} = object
-	let bowl_x = w * .45
-	let bowl_y = l * .35
-	return `M0 0h${w}v${l * .3}h${-w}z `
-		+ `M${w / 2 - bowl_x} ${l * .3}V${l - bowl_y}`
-		+ `a${bowl_x} ${bowl_y} 0 0 0 ${2 * bowl_x} 0V${l * .3}z`
-}
-
-function draw_countertop(cx, plan, object) {
-	let a = object.contour
-	cx.beginPath()
-	cx.moveTo(a[0], a[1])
-	for (let i = 2; i < a.length; i += 2) cx.lineTo(a[i], a[i+1])
-	cx.closePath()
-	cx.fillStyle = ui.color_css('bg')
-	cx.fill('evenodd')
-	cx.stroke()
-}
-
-// draw the icon at the tag point, with text below it. Keep both upright.
-let TAG_ICON_SIZE = 20 // px
-let TAG_TEXT_FONT = 'bold 12px sans-serif'
-let TAG_TEXT_Y = 18 // pixels from the tag point to the text centre
-let TAG_HIT_X = 28 // half the hit box width in pixels
-let TAG_HIT_Y1 = -12 // top of the hit box relative to the tag point, in pixels
-let TAG_HIT_Y2 = 26 // hit box bottom relative to the tag point, in pixels
-
-let tag_icon_fonts = new Map() // cached CSS fonts, indexed by icon font name
-
-// draw the icon and text using the current stroke colour.
-function draw_tag(cx, icon_name, text) {
-	let [font, glyph] = ui.get_icon(icon_name)
-	let icon_font = tag_icon_fonts.get(font)
-	if (!icon_font) {
-		icon_font = TAG_ICON_SIZE + 'px ' + font
-		tag_icon_fonts.set(font, icon_font)
-	}
-	cx.fillStyle = cx.strokeStyle
-	cx.textAlign = 'center'
-	cx.textBaseline = 'middle'
-	cx.font = icon_font
-	cx.fillText(glyph, 0, 0)
-	cx.font = TAG_TEXT_FONT
-	cx.fillText(text, 0, TAG_TEXT_Y)
-}
-
-// the face of this frame's roof in the plane of the side from an earlier
-// frame's roof: the same side has the same wall line and extent.
-function find_roof_face(faces, side0) {
-	let {nx, ny, wall_c, m1, m2} = side0
-	for (let face of faces)
-		for (let side of face.sides)
-			if (side.nx == nx && side.ny == ny && side.wall_c == wall_c
-				&& side.m1 == m1 && side.m2 == m2
-			)
-				return face
-}
-
-// settings ------------------------------------------------------------------
+//// SETTINGS ----------------------------------------------------------------
 
 function setting_field(min, max) {
 	return ui.create_field({type: 'number', min: min, max: max, decimals: 1})
@@ -619,9 +50,7 @@ let settings = [
 		label: () => S('half_wall_height', 'Half-wall height (cm)')},
 ]
 
-// floor editor widget -------------------------------------------------------
-
-const saved_view_fields = ['rotation', 'scale', 'cx', 'cy']
+//// FLOOR EDITOR ------------------------------------------------------------
 
 let FLOOR_EDITOR_ID = ui.BOX_ARGS+0
 let FLOOR_EDITOR_E  = ui.BOX_ARGS+1 // the editor from create_floor_editor()
@@ -648,6 +77,9 @@ function create_floor_editor(id) {
 
 	let e = {}
 
+	//// STATE ----------------------------------------------------------------
+
+	// widget value
 	let s // ui.state(id): house, floor, readonly and the input value
 	let is_roof_level // the roof level: the top floor's roof is edited
 	let value_edit_no // house.edit_no of the value loaded or published
@@ -655,7 +87,42 @@ function create_floor_editor(id) {
 	// the floor whose roof is edited: the floor below; the roof level: the
 	// top floor.
 	let roof_floor
+
+	// pointer interaction
 	let shown_snap_lines = [] // [a, is_v, ...] snap lines of the hit or drag
+
+	// view
+	let ss = ui.saved_state[id] // the saved view
+	let show_grid = ui.saved_state.floor_editor?.show_grid // draw the grid
+	let show_dims = ui.saved_state.floor_editor?.show_dims // draw all dimensions
+	let view_rotation = ss?.rotation ?? 0 // view rotation in radians
+	let view_scale = ss?.scale // css pixels per plan mm
+	let view_cx = ss?.cx // plan point at the center of the viewport
+	let view_cy = ss?.cy
+	let view_zoomed = view_scale != null // fixed view or fit to the plan
+	let view_dirty = false // the view changed since it was saved
+	let view_x0 // pixels from the widget's origin to the plan's origin
+	let view_y0
+	let view_line_width // thickness of the wall line stroke in pixels
+	let line_width = 2 // thickness of wall line stroke in pixels at 1:1 scale
+	let pan_cx0, pan_cy0 // view_cx, view_cy at the start of a pan
+	let bb = bbox2() // rotated plan bounding box in layout_view()
+
+	// scratch
+	let out = [] // temporary [x, y] for line2.at()
+	let box = [0, 0, 0, 0] // temporary bounding box for hit testing and drawing
+
+	// objects
+	let object_views = {} // {type name -> view functions}, set per type below
+	let object_box = [0, 0, 0, 0] // [x1, y1, x2, y2] of the object hit or drawn
+	let object_origin = v2() // [x, y] of the origin of the object hit or drawn
+	let object_matrix = mat3() // temporary matrix
+	let object_point = v2() // temporary point
+	let object_point1 = v2() // temporary point
+	let round_table_dash = [0, 0] // [dash, gap] of the hovered table's box
+	let solid_line = [] // empty line dash: solid lines
+	let countertop_edge = [0, 0, 0, 0] // [x1, y1, x2, y2] of a resize handle
+	let tag_icon_fonts = new Map() // cached CSS fonts, indexed by icon font name
 
 	function select_floor(floor, is_roof_level1) {
 		s.floor = floor
@@ -739,12 +206,12 @@ function create_floor_editor(id) {
 		if (is_rotated) {
 			let bb = s.house.bb
 			let is_empty = bb[0] > bb[2]
-			sg.rotate_90(is_empty ? sg.cx : (bb[0] + bb[2]) / 2,
-				is_empty ? sg.cy : (bb[1] + bb[3]) / 2)
+			rotate_view_90(is_empty ? view_cx : (bb[0] + bb[2]) / 2,
+				is_empty ? view_cy : (bb[1] + bb[3]) / 2)
 			save_floor_view()
 		}
 		if (ui.state_of(id+'.zoom_button', 'state') == 'click')
-			sg.reset_zoom()
+			reset_view_zoom()
 
 		// the settings: one house edit per run of frames with user input.
 		let edited_name, edited_value // the setting the user is changing, in cm
@@ -767,17 +234,17 @@ function create_floor_editor(id) {
 
 		let hs = ui.hit(id)
 		if (hs && ui.wheel_dy) {
-			sg.zoom_at(ui.wheel_dy / ui.em(7), hs.mx, hs.my)
+			zoom_view_at(ui.wheel_dy / ui.em(7), hs.mx, hs.my)
 			save_floor_view()
 		}
 
 		if (cs) {
 
-			let dx = sg.plan_d(cs.dx)
-			let dy = sg.plan_d(cs.dy)
-			if (sg.rotation) {
-				let c = cos(sg.rotation)
-				let s = sin(sg.rotation)
+			let dx = to_plan(cs.dx)
+			let dy = to_plan(cs.dy)
+			if (view_rotation) {
+				let c = cos(view_rotation)
+				let s = sin(view_rotation)
 				let dx0 = dx
 				dx = dx0 * c + dy * s
 				dy = -dx0 * s + dy * c
@@ -791,8 +258,8 @@ function create_floor_editor(id) {
 				if (action == 'move_seg') { // move seg
 					cs.edit = plan.start_move_seg(seg)
 				} else if (action == 'pan') {
-					sg.pan_cx0 = sg.cx
-					sg.pan_cy0 = sg.cy
+					pan_cx0 = view_cx
+					pan_cy0 = view_cy
 				}
 			}
 
@@ -825,11 +292,11 @@ function create_floor_editor(id) {
 				}
 
 				if (action == 'move_seg')
-					cs.edit.move(dx, dy, snap_distance(sg, nosnap ? 20 : 200))
+					cs.edit.move(dx, dy, snap_distance(nosnap ? 20 : 200))
 
 				if (action == 'resize_seg')
 					[cs.x, cs.y] = cs.edit.resize(dx, dy,
-						snap_distance(sg, nosnap ? 20 : 300))
+						snap_distance(nosnap ? 20 : 300))
 
 				if (action == 'move_seg' || action == 'resize_seg') {
 					let {snap_a, snap_v} = cs.edit
@@ -846,7 +313,7 @@ function create_floor_editor(id) {
 					if (is_moved)
 						cs.edit ??= cs.object_plan.start_move_object(cs.object)
 					cs.edit?.move(dx, dy,
-						snap_distance(sg, nosnap ? 20 : 200), 3 / sg.scale)
+						snap_distance(nosnap ? 20 : 200), 3 / view_scale)
 				}
 
 				// an object end resizes only past the drag threshold or with ctrl.
@@ -854,7 +321,7 @@ function create_floor_editor(id) {
 					if (is_moved)
 						cs.edit ??= cs.object_plan.start_resize_object(cs.object,
 							cs.object_side, cs.object_axis)
-					cs.edit?.resize(dx, dy, snap_distance(sg, nosnap ? 20 : 200),
+					cs.edit?.resize(dx, dy, snap_distance(nosnap ? 20 : 200),
 						nosnap)
 				}
 
@@ -880,7 +347,7 @@ function create_floor_editor(id) {
 					if (cs.edit)
 						cs.can_move_eave = cs.edit.move(dx, dy,
 							!ui.keypressed('shift'),
-							nosnap ? 0 : snap_distance(sg, 200))
+							nosnap ? 0 : snap_distance(200))
 				}
 
 				// the line or point where roof faces meet follows the pointer at
@@ -908,7 +375,7 @@ function create_floor_editor(id) {
 				}
 
 				if (action == 'pan')
-					sg.pan_to(sg.pan_cx0 - dx, sg.pan_cy0 - dy)
+					pan_view_to(pan_cx0 - dx, pan_cy0 - dy)
 
 				if (cs.drop)
 					cs.edit?.stop()
@@ -970,7 +437,7 @@ function create_floor_editor(id) {
 				if (ui.keydown('s') || ui.keydown('arrowdown')) ky++
 			}
 			if (kx || ky) {
-				let r = sg.rotation ?? 0
+				let r = view_rotation ?? 0
 				let dx = round(kx * cos(r) + ky * sin(r)) * 10
 				let dy = round(-kx * sin(r) + ky * cos(r)) * 10
 				if (hs.object) {
@@ -1012,129 +479,612 @@ function create_floor_editor(id) {
 
 	}
 
+	//// VIEW -----------------------------------------------------------------
+
+	/// view ------------------------------------------------------------------
+
 	function save_floor_view() {
-		if (!sg.view_dirty)
+		if (!view_dirty)
 			return
-		for (let k of saved_view_fields)
-			ui.save_state(id, k, sg[k])
-		sg.view_dirty = false
+		ui.save_state(id, 'rotation', view_rotation)
+		ui.save_state(id, 'scale', view_scale)
+		ui.save_state(id, 'cx', view_cx)
+		ui.save_state(id, 'cy', view_cy)
+		view_dirty = false
 	}
 
-	let sg = {} // the view: zoom, pan, rotation, plan-to-pixel conversions
-	sg.show_grid = ui.saved_state.floor_editor?.show_grid
-	sg.show_dims = ui.saved_state.floor_editor?.show_dims
-	let ss = ui.saved_state[id]
-	sg.rotation = ss?.rotation ?? 0
-	sg.scale = ss?.scale
-	sg.cx = ss?.cx // plan point at the center of the viewport
-	sg.cy = ss?.cy
-	sg.zoomed = sg.scale != null // fixed view or fit to the plan
-	sg.view_dirty = false
-	let line_width = 2 // thickness of wall line stroke in pixels at 1:1 scale
-	sg.d = d => round(d * sg.scale * devicePixelRatio)
-	sg.d_exact = d => d * sg.scale * devicePixelRatio // not rounded.
-	sg.x = x => round(x * sg.scale * devicePixelRatio)
-	sg.y = y => round(y * sg.scale * devicePixelRatio)
-	sg.plan_x = x => x / (sg.scale * devicePixelRatio)
-	sg.plan_y = y => y / (sg.scale * devicePixelRatio)
-	sg.plan_d = d => d / (sg.scale * devicePixelRatio)
-	sg.transform = function(cx, w, h) {
-		if (sg.rotation) {
+	function to_pixels(d) {
+		return round(d * view_scale * devicePixelRatio)
+	}
+
+	function to_pixels_exact(d) { // not rounded.
+		return d * view_scale * devicePixelRatio
+	}
+
+	function to_plan(d) {
+		return d / (view_scale * devicePixelRatio)
+	}
+
+	// the snap distance in plan units: d mm, but at most 12 screen pixels, so
+	// that zooming in makes snapping finer.
+	function snap_distance(d) {
+		return min(d, 12 / view_scale)
+	}
+
+	function transform_view(cx, w, h) {
+		if (view_rotation) {
 			let xc = round(w / 2)
 			let yc = round(h / 2)
 			cx.translate(xc, yc)
-			cx.rotate(sg.rotation)
+			cx.rotate(view_rotation)
 			cx.translate(-xc, -yc)
 		}
-		cx.translate(sg.x0, sg.y0)
+		cx.translate(view_x0, view_y0)
 	}
+
 	function set_scale(sc) {
-		sg.scale = sc
+		view_scale = sc
 		// snap line width to an even number for sharpness, at least 1:
 		// canvas ignores a 0 line width.
-		sg.line_width = max(1, snap(line_width * sc * devicePixelRatio, 2))
+		view_line_width = max(1, snap(line_width * sc * devicePixelRatio, 2))
 	}
-	let bb = bbox2()
-	// set the scale and the origin (x0, y0, in pixels from widget's origin)
-	// of a viewport of w x h pixels: fitted to the plan bounding box bb1, or
-	// from the saved view. returns true if fitted to a non-empty plan.
-	sg.layout = function(bb1, w, h) {
-		let is_fitted = !sg.zoomed && bb1[0] <= bb1[2]
+
+	// set the scale and the origin (view_x0, view_y0, in pixels from widget's
+	// origin) of a viewport of w x h pixels: fitted to the plan bounding box
+	// bb1, or from the saved view. returns true if fitted to a non-empty plan.
+	function layout_view(bb1, w, h) {
+		let is_fitted = !view_zoomed && bb1[0] <= bb1[2]
 		if (is_fitted) {
-			sg.view_dirty = true
+			view_dirty = true
 			let margin = ceil(ui.em(2) + line_width)
 			array_set(bb, bb1)
-			bb.rotate(sg.rotation)
+			bb.rotate(view_rotation)
 			let [x1, y1, x2, y2] = bb
-			sg.scale = min(
+			view_scale = min(
 				(w - 2 * margin) / (x2 - x1),
 				(h - 2 * margin) / (y2 - y1)
 			) / devicePixelRatio
-			sg.cx = (bb1[0] + bb1[2]) / 2
-			sg.cy = (bb1[1] + bb1[3]) / 2
-		} else if (!sg.zoomed) { // empty plan.
-			sg.scale = .1
-			sg.cx = 0
-			sg.cy = 0
+			view_cx = (bb1[0] + bb1[2]) / 2
+			view_cy = (bb1[1] + bb1[3]) / 2
+		} else if (!view_zoomed) { // empty plan.
+			view_scale = .1
+			view_cx = 0
+			view_cy = 0
 		}
-		set_scale(sg.scale)
-		sg.x0 = round(w / 2) - sg.x(sg.cx)
-		sg.y0 = round(h / 2) - sg.y(sg.cy)
+		set_scale(view_scale)
+		view_x0 = round(w / 2) - to_pixels(view_cx)
+		view_y0 = round(h / 2) - to_pixels(view_cy)
 		return is_fitted
 	}
+
 	// zoom around the point (mx, my) in pixels from the center of the
 	// viewport, along the plan's axes.
-	sg.zoom_at = function(d, mx, my) {
+	function zoom_view_at(d, mx, my) {
 		if (!d) return
-		let plan_x = sg.cx + sg.plan_x(mx)
-		let plan_y = sg.cy + sg.plan_y(my)
-		let scale1 = clamp(sg.scale * 1.2 ** -d, 0.01, 1)
-		sg.cx = plan_x - mx / (scale1 * devicePixelRatio)
-		sg.cy = plan_y - my / (scale1 * devicePixelRatio)
+		let plan_x = view_cx + to_plan(mx)
+		let plan_y = view_cy + to_plan(my)
+		let scale1 = clamp(view_scale * 1.2 ** -d, 0.01, 1)
+		view_cx = plan_x - mx / (scale1 * devicePixelRatio)
+		view_cy = plan_y - my / (scale1 * devicePixelRatio)
 		set_scale(scale1)
-		sg.zoomed = true
-		sg.view_dirty = true
-	}
-	sg.pan_to = function(cx, cy) {
-		sg.cx = cx
-		sg.cy = cy
-		sg.zoomed = true
-		sg.view_dirty = true
-	}
-	// rotate the view by 90 degrees around the plan point (bx, by): it stays
-	// where it is on screen.
-	sg.rotate_90 = function(bx, by) {
-		let dx = bx - sg.cx
-		let dy = by - sg.cy
-		sg.cx = bx - dy
-		sg.cy = by + dx
-		sg.rotation = (sg.rotation + 90*rad) % (360*rad)
-		sg.view_dirty = true
-	}
-	sg.reset_zoom = function() {
-		sg.zoomed = false
+		view_zoomed = true
+		view_dirty = true
 	}
 
-	// objects ----------------------------------------------------------------
+	function pan_view_to(cx, cy) {
+		view_cx = cx
+		view_cy = cy
+		view_zoomed = true
+		view_dirty = true
+	}
+
+	// rotate the view by 90 degrees around the plan point (bx, by): it stays
+	// where it is on screen.
+	function rotate_view_90(bx, by) {
+		let dx = bx - view_cx
+		let dy = by - view_cy
+		view_cx = bx - dy
+		view_cy = by + dx
+		view_rotation = (view_rotation + 90*rad) % (360*rad)
+		view_dirty = true
+	}
+
+	function reset_view_zoom() {
+		view_zoomed = false
+	}
+
+	/// grid ------------------------------------------------------------------
+
+	function draw_grid(cx, x0, y0, w, h, step, alpha) {
+		if (!show_grid)
+			return
+		if (to_pixels(step) < 7)
+			return
+		cx.strokeStyle = ui.hsl_adjust(ui.color_obj('bg2'), 1, 1, 1, alpha)
+		for (let i = mod(to_plan(x0), step), n = to_plan(w); i < n; i += step) {
+			cx.beginPath()
+			cx.moveTo(to_pixels(i), 0)
+			cx.lineTo(to_pixels(i), h-1)
+			cx.stroke()
+		}
+		for (let i = mod(to_plan(y0), step), n = to_plan(h); i < n; i += step) {
+			cx.beginPath()
+			cx.moveTo(0, to_pixels(i))
+			cx.lineTo(w-1, to_pixels(i))
+			cx.stroke()
+		}
+		return true
+	}
+
+	function draw_grids(cx, w, h) {
+		let x0 = view_x0
+		let y0 = view_y0
+		if (view_rotation) {
+			let xc = round(w / 2)
+			let yc = round(h / 2)
+			let c = cos(view_rotation)
+			let s = sin(view_rotation)
+			let dx = x0 - xc
+			let dy = y0 - yc
+			x0 = xc + dx * c - dy * s
+			y0 = yc + dx * s + dy * c
+		}
+		// grid
+		cx.save()
+		cx.translate(.5, .5)
+		let step = 1000
+		while (to_pixels(step / 10) < 7)
+			step *= 10
+		draw_grid(cx, x0, y0, w, h, step / 10, .2)
+		draw_grid(cx, x0, y0, w, h, step /  2, .3)
+		draw_grid(cx, x0, y0, w, h, step     ,  1)
+		cx.restore()
+	}
+
+	/// walls -----------------------------------------------------------------
+
+	function draw_edges(cx, eps) {
+		for (let ep of eps) {
+			let x = to_pixels(ep[0])
+			let y = to_pixels(ep[1])
+			if (ep == eps[0])
+				cx.moveTo(x, y)
+			else
+				cx.lineTo(x, y)
+		}
+		cx.closePath()
+	}
+
+	// add clipper paths on prism_union()'s grid to the current path.
+	function add_grid_paths(cx, paths) {
+		let scale = prism_union.grid_scale
+		for (let path of paths) {
+			for (let i = 0; i < path.length; i++) {
+				let p = path[i]
+				let x = to_pixels(p.x / scale)
+				let y = to_pixels(p.y / scale)
+				if (i == 0)
+					cx.moveTo(x, y)
+				else
+					cx.lineTo(x, y)
+			}
+			cx.closePath()
+		}
+	}
+
+	function draw_walls(cx, paths, segs) {
+		if (view_scale <= 0.02) { // too small to even show edges
+			for (let seg of segs) {
+				let x1 = to_pixels(seg[0][0]) + .5
+				let y1 = to_pixels(seg[0][1]) + .5
+				let x2 = to_pixels(seg[1][0]) + .5
+				let y2 = to_pixels(seg[1][1]) + .5
+				cx.beginPath()
+				cx.moveTo(x1, y1)
+				cx.lineTo(x2, y2)
+				cx.strokeStyle = ui.color_css('text')
+				cx.stroke()
+			}
+			return
+		}
+
+		cx.beginPath()
+		add_grid_paths(cx, paths)
+
+		if (!cx.wall_pattern) {
+			let w = 100
+			let c = new OffscreenCanvas(w, w)
+			let x = c.getContext('2d')
+			let g = x.createLinearGradient(0, 0, w, 2*w)
+			for (let i = 0, n = 2*w; i <= n; i += 4) {
+				g.addColorStop(clamp((i - 1) / n, 0, 1), 'white')
+				g.addColorStop(clamp((i + 0) / n, 0, 1), 'gray')
+				g.addColorStop(clamp((i + 1) / n, 0, 1), 'white')
+			}
+			x.rect(0, 0, w, w)
+			x.fillStyle = g
+			x.fill()
+			cx.wall_pattern = cx.createPattern(c, 'repeat')
+		}
+		if (view_scale > 0.04) {
+			cx.fillStyle = DEBUG_PLAN ? '#333' : cx.wall_pattern
+			cx.fill('evenodd')
+			cx.lineWidth = DEBUG_PLAN ? 2 : view_line_width
+			cx.strokeStyle = 'black' //ui.color_css('text')
+			cx.lineJoin = 'round'
+			cx.stroke()
+			cx.lineJoin = 'miter'
+			cx.lineWidth = 1
+		} else { // too small to stroke
+			cx.fillStyle = ui.color_css('text')
+			cx.fill('evenodd')
+		}
+	}
+
+	function seg_center(seg) {
+		return line2.at(.5, seg[0][0], seg[0][1], seg[1][0], seg[1][1], out)
+	}
+
+	// find the farthest edge point from `c.edges[i0]` going in `dir`
+	// direction in the array, which has the same spatial direction `v` with
+	// the previous point.
+	function last_perp_edge_point(c, i, n, dir, v) {
+		let ep0 = c.edges[mod(i, n)]
+		while (1) {
+			let ep1 = c.edges[mod(i, n)]
+			let ep2 = c.edges[mod(i+dir, n)]
+			if (ep2.p == ep0.p) // end-cap, don't measure
+				return
+			// changed direction, return last edge point
+			if ((ep1[0] == ep2[0]) != v)
+				return ep1
+			i += dir
+		}
+	}
+
+	/// dimensions ------------------------------------------------------------
+
+	// a height relative to the wall top, signed.
+	function format_height(h) {
+		return 'h ' + (h < 0 ? '-' : '') + format_length(abs(h))
+	}
+
+	// s: the label, default: the length.
+	function draw_length(cx, x1, y1, x2, y2, s, offset = -100) {
+
+		let d = distance(x1, y1, x2, y2)
+		if (!d)
+			return
+
+		;[x1, y1, x2, y2] = line2.offset(offset, x1, y1, x2, y2)
+
+		s ??= format_length(d)
+
+		x1 = to_pixels(x1)
+		y1 = to_pixels(y1)
+		x2 = to_pixels(x2)
+		y2 = to_pixels(y2)
+
+		if (x1 > x2) {
+			let x3 = x1
+			let y3 = y1
+			x1 = x2
+			y1 = y2
+			x2 = x3
+			y2 = y3
+		}
+		let a = -atan2(y2 - y1, x2 - x1)
+
+		cx.save()
+
+		cx.font = 'bold 14px sans-serif'
+		let m = ui.measure_text(s)
+		let w = m.width
+
+		let t1 = clamp((to_pixels(d) - (w + 10)) / 2 / to_pixels(d), 0, 1)
+		let t2 = clamp((to_pixels(d) + (w + 10)) / 2 / to_pixels(d), 0, 1)
+
+		if (to_pixels(d) < w) {
+			cx.restore()
+			return
+		}
+
+		cx.translate(.5, .5)
+
+		cx.beginPath()
+
+		if (to_pixels(d) >= w + 10 + 2 * 8 * cos(45*rad)) {
+			// left arrow
+			let [x1a1, y1a1] = point_around(x1, y1, 8, a + 45*rad)
+			let [x1a2, y1a2] = point_around(x1, y1, 8, a - 45*rad)
+			let [x1e, y1e] = line2.at(t1, x1, y1, x2, y2, out)
+
+			cx.moveTo(x1  , y1)
+			cx.lineTo(x1a1, y1a1)
+			cx.moveTo(x1  , y1)
+			cx.lineTo(x1a2, y1a2)
+			cx.moveTo(x1  , y1)
+			cx.lineTo(x1e , y1e)
+
+			// right arrow
+			let [x2a1, y2a1] = point_around(x2, y2, 8, a + (90+45)*rad)
+			let [x2a2, y2a2] = point_around(x2, y2, 8, a - (90+45)*rad)
+			let [x2e, y2e] = line2.at(t2, x1, y1, x2, y2, out)
+			cx.moveTo(x2  , y2)
+			cx.lineTo(x2a1, y2a1)
+			cx.moveTo(x2  , y2)
+			cx.lineTo(x2a2, y2a2)
+			cx.moveTo(x2  , y2)
+			cx.lineTo(x2e , y2e)
+
+			cx.strokeStyle = ui.color_css('text')
+			cx.stroke()
+		}
+
+		let [xc, yc] = line2.at(.5, x1, y1, x2, y2, out)
+		cx.translate(xc, yc)
+		let rotation = view_rotation ?? 0
+		let text_angle = mod(rotation - a + PI/2, PI) - PI/2
+		cx.rotate(text_angle - rotation)
+		let tx = round(-w / 2)
+		let ty = round((m.fontBoundingBoxAscent - m.fontBoundingBoxDescent) / 2)
+		cx.translate(tx, ty)
+		cx.fillStyle = ui.color_css('text')
+		cx.textAlign = 'left'
+		cx.fillText(s, 0, 0)
+
+		cx.restore()
+	}
+
+	// the text s centered on the plan point (x, y), upright in a rotated view.
+	function draw_text(cx, x, y, s) {
+		cx.save()
+		cx.translate(to_pixels(x), to_pixels(y))
+		if (view_rotation)
+			cx.rotate(-view_rotation)
+		cx.textAlign = 'center'
+		cx.fillStyle = ui.color_css('text')
+		cx.fillText(s, 0, 5)
+		cx.restore()
+	}
+
+	// the overhang width, the length and, on a sloped side, the eave height
+	// over the wall top of an eave side from make_roof_faces().
+	function draw_eave_dims(cx, side, wall_z) {
+		let scale = prism_union.grid_scale
+		let {nx, ny} = side
+		let c      = side.c      / scale
+		let wall_c = side.wall_c / scale
+		let e1     = side.e1     / scale
+		let e2     = side.e2     / scale
+		// draw_length() puts the dimension line on the right of its direction:
+		// outward.
+		let b1 = nx == 1 || ny == -1 ? e1 : e2
+		let b2 = e1 + e2 - b1
+		let b = e1 + (e2 - e1) / 4 // along the side: the width's position
+		if (nx) {
+			draw_length(cx, c, b1, c, b2)
+			draw_length(cx, wall_c, b, c, b)
+		} else {
+			draw_length(cx, b1, c, b2, c)
+			draw_length(cx, b, wall_c, b, c)
+		}
+		if (side.pitch == 90)
+			return
+		// outside the length's dimension line.
+		let a = c + (nx + ny) * to_plan(30)
+		let m = (e1 + e2) / 2
+		draw_text(cx, nx ? a : m, nx ? m : a,
+			format_height(side.eave_z - wall_z))
+	}
+
+	// a line between two roof faces: a ridge (level): its length, and its
+	// height over the wall top on the other side; a hip or valley: its length
+	// along the slope.
+	function draw_roof_line_dims(cx, line, wall_z) {
+		let [x1, y1, z1] = line.p
+		let [x2, y2, z2] = line.q
+		let d = distance(x1, y1, x2, y2)
+		if (abs(z2 - z1) > 1e-5) {
+			draw_length(cx, x1, y1, x2, y2, format_length(hypot(d, z2 - z1)))
+			return
+		}
+		draw_length(cx, x1, y1, x2, y2)
+		if (to_pixels(d) < 20)
+			return
+		let [x3, y3, x4, y4] = line2.offset(to_plan(14), x1, y1, x2, y2)
+		draw_text(cx, (x3 + x4) / 2, (y3 + y4) / 2, format_height(z1 - wall_z))
+	}
+
+	//// ROOF -----------------------------------------------------------------
+
+	/// roof labels -----------------------------------------------------------
+
+	// the plan point of the pitch label of a roof face: across from the middle
+	// of its longest eave side, half the face's depth inward.
+	function roof_label_point(face) {
+		let scale = prism_union.grid_scale
+		let side
+		for (let side1 of face.sides)
+			if (!side || side1.e2 - side1.e1 > side.e2 - side.e1)
+				side = side1
+		let {nx, ny} = side
+		let c = side.c / scale
+		let depth = 0 // inward from the eave line
+		for (let ring of face.rings)
+			for (let p of ring)
+				depth = max(depth, (c - (nx ? p[0] : p[1])) * (nx + ny))
+		let a = c - (nx + ny) * depth / 2 // across the side
+		let b = (side.e1 + side.e2) / 2 / scale // along the side
+		return nx ? [a, b] : [b, a]
+	}
+
+	function format_pitch(pitch) {
+		return round(pitch * 10) / 10 + '°'
+	}
+
+	/// roof hit testing ------------------------------------------------------
+
+	// the roof while the bottom floor is edited: it has no floor below.
+	let no_roof_geometry = {
+		roof_faces: empty_array,
+		eave_sides: empty_array,
+		shared_edges: empty_array,
+		half_wall_paths: empty_array,
+		terrace_paths: empty_array,
+	}
+
+	// the face of this frame's roof in the plane of the side from an earlier
+	// frame's roof: the same side has the same wall line and extent.
+	function find_roof_face(faces, side0) {
+		let {nx, ny, wall_c, m1, m2} = side0
+		for (let face of faces)
+			for (let side of face.sides)
+				if (side.nx == nx && side.ny == ny && side.wall_c == wall_c
+					&& side.m1 == m1 && side.m2 == m2
+				)
+					return face
+	}
+
+	// the eave side of the edited roof at the plan point (mx, my): on its eave
+	// line, 8 pixels around.
+	function hit_roof_side(hs, roof_sides, mx, my) {
+		let scale = prism_union.grid_scale
+		let x = mx * scale
+		let y = my * scale
+		let m = to_plan(8) * scale
+		for (let side of roof_sides) {
+			let {nx, c, e1, e2} = side
+			let a = nx ? x : y // across the side
+			let b = nx ? y : x // along the side
+			if (b < e1 || b > e2)
+				continue
+			if (abs(a - c) > m)
+				continue
+			hs.roof_side = side
+			hs.roof_x = mx // unsnapped, for placing an edge point.
+			hs.roof_y = my
+			hs.action = 'move_eave'
+			return true
+		}
+		return false
+	}
+
+	// the line between two faces of the edited roof at the plan point (mx, my),
+	// 8 pixels around: the nearest shared segment.
+	function hit_roof_line(hs, roof_lines, mx, my) {
+		let min_d = to_plan(8)
+		let found_line, found_x, found_y
+		for (let line of roof_lines) {
+			let {p, q} = line
+			let [px, py] = p
+			let dx = q[0] - px
+			let dy = q[1] - py
+			let t = clamp(((mx - px) * dx + (my - py) * dy)
+				/ (dx * dx + dy * dy), 0, 1)
+			let x = px + t * dx // the point of p-q nearest to (mx, my)
+			let y = py + t * dy
+			let d = distance(mx, my, x, y)
+			if (d >= min_d)
+				continue
+			min_d = d
+			found_line = line
+			found_x = x
+			found_y = y
+		}
+		if (!found_line)
+			return false
+		let {face1, face2} = found_line
+		let [a, b, c] = face1.plane
+		hs.roof_faces = [face1, face2]
+		hs.roof_x = found_x // grabbed point, on the line.
+		hs.roof_y = found_y
+		hs.roof_z = a * found_x + b * found_y + c
+		hs.action = 'move_faces'
+		return true
+	}
+
+	// the point where three or more faces of the edited roof meet (a ridge end,
+	// a peak) at the plan point (mx, my), 8 pixels around: the nearest end of a
+	// shared segment.
+	function hit_roof_point(hs, roof_lines, mx, my) {
+		let min_d = to_plan(8)
+		let found_p
+		for (let line of roof_lines)
+			for (let i = 0; i < 2; i++) {
+				let p = i ? line.q : line.p
+				let d = distance(mx, my, p[0], p[1])
+				if (d >= min_d)
+					continue
+				min_d = d
+				found_p = p
+			}
+		if (!found_p)
+			return false
+		let [x, y, z] = found_p
+		let faces = [] // faces of the segments that end at found_p
+		for (let line of roof_lines) {
+			let {p, q, face1, face2} = line
+			let is_end = distance(x, y, p[0], p[1]) < 1e-2
+				|| distance(x, y, q[0], q[1]) < 1e-2
+			if (!is_end)
+				continue
+			if (!faces.includes(face1)) faces.push(face1)
+			if (!faces.includes(face2)) faces.push(face2)
+		}
+		if (faces.length < 3)
+			return false
+		hs.roof_faces = faces
+		hs.roof_x = x // grabbed point.
+		hs.roof_y = y
+		hs.roof_z = z
+		hs.action = 'move_faces'
+		return true
+	}
+
+	// the pitch label of a face of the edited roof at the screen point
+	// (ui.mx, ui.my).
+	function hit_roof_label(hs, roof_faces) {
+		let axes_swapped = round((view_rotation ?? 0) / (90*rad)) % 2 != 0
+		let w = axes_swapped ? 10 : 20 // half sizes of the label's box
+		let h = axes_swapped ? 20 : 10
+		for (let face of roof_faces) {
+			let [x, y] = roof_label_point(face)
+			x = to_pixels(x)
+			y = to_pixels(y)
+			if (!ui.hit_bbox(x - w, y - h, x + w, y + h))
+				continue
+			hs.roof_face = face
+			hs.action = 'move_pitch'
+			return true
+		}
+		return false
+	}
+
+	//// OBJECTS --------------------------------------------------------------
+
+	/// shared ----------------------------------------------------------------
 
 	// test whether the pointer is inside the object's plan bounding box.
 	function hit_box(plan, object) {
 		s.house.get_object_box(plan, object, box)
-		return ui.hit_bbox(sg.x(box[0]), sg.y(box[1]),
-			sg.x(box[2]), sg.y(box[3]))
+		return ui.hit_bbox(to_pixels(box[0]), to_pixels(box[1]),
+			to_pixels(box[2]), to_pixels(box[3]))
 	}
 
 	// convert local endpoints to plan coordinates, then call draw_length().
-	function draw_object_length(cx, plan, object, x1, y1, x2, y2) {
+	function draw_object_length(cx, plan, object, x1, y1, x2, y2, offset) {
 		s.house.object_to_plan(plan, object, x1, y1, object_point1)
 		let px1 = object_point1[0], py1 = object_point1[1]
 		s.house.object_to_plan(plan, object, x2, y2, object_point1)
-		draw_length(cx, sg, px1, py1, object_point1[0], object_point1[1])
+		draw_length(cx,px1, py1, object_point1[0], object_point1[1],
+			null, offset)
 	}
 
 	// test resize handles at both width ends and the bottom length end.
-	// Include a narrow strip inside and outside each edge.
-	function hit_resize_rect(plan, object, hs) {
+	// With all_sides, include both length ends too. Include a narrow strip
+	// inside and outside each edge.
+	function hit_resize_rect(plan, object, hs, all_sides = false) {
 		let object_type = s.house.object_types[object.type]
 		let [bx1, by1, bx2, by2] = s.house.get_object_box(plan, object, box)
 		let is_turned = object.rot % 180 >= 90
@@ -1144,7 +1094,7 @@ function create_floor_editor(id) {
 		s.house.plan_to_object(plan, object, hs.mouse_x, hs.mouse_y,
 			object_point1)
 		let x = object_point1[0], y = object_point1[1]
-		let inside = sg.plan_d(6), outside = sg.plan_d(8)
+		let inside = to_plan(6), outside = to_plan(8)
 		let side = 0, axis = 'w'
 		if (object_type.sizes.w && y >= y1 && y <= y2) {
 			let d = min(inside, (x2 - x1) / 4)
@@ -1153,10 +1103,15 @@ function create_floor_editor(id) {
 			else if (x >= x1 - outside && x <= x1 + d)
 				side = -1
 		}
-		if (!side && object_type.sizes.l && x >= x1 && x <= x2) {
+		if (!side && (all_sides || object_type.sizes.l)
+			&& x >= x1 && x <= x2
+		) {
 			let d = min(inside, (y2 - y1) / 4)
 			if (y >= y2 - d && y <= y2 + outside) {
 				side = 1
+				axis = 'l'
+			} else if (all_sides && y >= y1 - outside && y <= y1 + d) {
+				side = -1
 				axis = 'l'
 			}
 		}
@@ -1167,83 +1122,7 @@ function create_floor_editor(id) {
 		return true
 	}
 
-	// test the door box for a body hit and the swing area for a move-only hit.
-	function hit_door(plan, object) {
-		if (hit_box(plan, object))
-			return true
-		// test the square containing the door's swing area.
-		let w = object.w
-		let y = s.house.ext_wall_thickness / 2 // the wall centre line
-		s.house.object_to_plan(plan, object, 0, y, object_point1)
-		let x1 = object_point1[0], y1 = object_point1[1]
-		s.house.object_to_plan(plan, object, w, y - w, object_point1)
-		let x2 = object_point1[0], y2 = object_point1[1]
-		if (ui.hit_bbox(sg.x(min(x1, x2)), sg.y(min(y1, y2)),
-			sg.x(max(x1, x2)), sg.y(max(y1, y2))))
-			return 'move'
-		return false
-	}
-
-	// draw the opening's width outside the top edge of its plan box,
-	// or outside the right edge for a vertical opening.
-	function draw_opening_size(cx, plan, object) {
-		s.house.get_object_box(plan, object, box)
-		if (s.house.opening_is_v(object))
-			draw_length(cx, sg, box[2], box[1], box[2], box[3])
-		else
-			draw_length(cx, sg, box[0], box[1], box[2], box[1])
-	}
-
-	// draw distances to both wall endpoints, on the same side of the wall
-	// as the width dimension drawn by draw_opening_size().
-	function draw_opening_wall_dims(cx, plan, object) {
-		let seg = object.seg
-		if (!seg)
-			return
-		s.house.get_object_box(plan, object, box)
-		if (seg.is_v) {
-			draw_length(cx, sg, box[2], seg.wall_m1, box[2], box[1])
-			draw_length(cx, sg, box[2], box[3], box[2], seg.wall_m2)
-		} else {
-			draw_length(cx, sg, seg.wall_m1, box[1], box[0], box[1])
-			draw_length(cx, sg, box[2], box[1], seg.wall_m2, box[1])
-		}
-	}
-
-	function draw_furniture(cx, plan, object) {
-
-		// cache the sketch's Path2D on the object. Rebuild it when w or l
-		// changes. The sketch uses millimetres from (0, 0) to (w, l).
-		let sketch = object.sketch
-		if (!(sketch && sketch.w == object.w && sketch.l == object.l)) {
-			sketch = {
-				w: object.w,
-				l: object.l,
-				path: new Path2D(object_views[object.type].sketch(object)),
-			}
-			object.sketch = sketch
-		}
-
-		// fill the sketch with the background and stroke its lines.
-		cx.fillStyle = ui.color_css('bg')
-		cx.fill(sketch.path)
-		cx.stroke(sketch.path)
-	}
-
-	// for a diagonal chair, move the sketch away from the corner by a quarter
-	// of its width and length along the plan axes. Keep the plan box unchanged.
-	function draw_chair(cx, plan, object) {
-		if (object.rot % 90) {
-			s.house.object_vector_to_plan(object, 0, 1, object_point1)
-			s.house.plan_vector_to_object(object,
-				sign(object_point1[0]) * object.w / 4,
-				sign(object_point1[1]) * object.l / 4, object_point1)
-			cx.translate(object_point1[0], object_point1[1])
-		}
-		draw_furniture(cx, plan, object)
-	}
-
-	// draw width below the sketch and length to its right, outside both edges.
+	// draw width below the object and length to its right, outside both edges.
 	function draw_furniture_sizes(cx, plan, object) {
 		let w = object.w, l = object.l
 		draw_object_length(cx, plan, object, w, l, 0, l)
@@ -1259,11 +1138,11 @@ function create_floor_editor(id) {
 		let a1 = m2 > m1 ? lo : hi // object endpoint nearest to m1
 		let a2 = m2 > m1 ? hi : lo
 		if (is_v) {
-			draw_length(cx, sg, c, m1, c, a1)
-			draw_length(cx, sg, c, a2, c, m2)
+			draw_length(cx,c, m1, c, a1)
+			draw_length(cx,c, a2, c, m2)
 		} else {
-			draw_length(cx, sg, m1, c, a1, c)
-			draw_length(cx, sg, a2, c, m2, c)
+			draw_length(cx,m1, c, a1, c)
+			draw_length(cx,a2, c, m2, c)
 		}
 	}
 
@@ -1276,9 +1155,355 @@ function create_floor_editor(id) {
 			draw_side_dims(cx, object.side_y, false, box[0], box[2])
 	}
 
-	function hit_countertop(plan, object) {
-		s.house.plan_to_object(plan, object, sg.plan_x(ui.mx),
-			sg.plan_y(ui.my), object_point1)
+	/// window and door -------------------------------------------------------
+
+	// draw the opening's width outside the top edge of its plan box,
+	// or outside the right edge for a vertical opening.
+	function draw_opening_size(cx, plan, object) {
+		s.house.get_object_box(plan, object, box)
+		if (s.house.opening_is_v(object))
+			draw_length(cx,box[2], box[1], box[2], box[3])
+		else
+			draw_length(cx,box[0], box[1], box[2], box[1])
+	}
+
+	// draw distances to both wall endpoints, on the same side of the wall
+	// as the width dimension drawn by draw_opening_size().
+	function draw_opening_wall_dims(cx, plan, object) {
+		let seg = object.seg
+		if (!seg)
+			return
+		s.house.get_object_box(plan, object, box)
+		if (seg.is_v) {
+			draw_length(cx,box[2], seg.wall_m1, box[2], box[1])
+			draw_length(cx,box[2], box[3], box[2], seg.wall_m2)
+		} else {
+			draw_length(cx,seg.wall_m1, box[1], box[0], box[1])
+			draw_length(cx,box[2], box[1], seg.wall_m2, box[1])
+		}
+	}
+
+	object_views.window = {
+		hit: hit_box,
+		hit_resize: hit_resize_rect,
+		draw_sizes: draw_opening_size,
+		draw_wall_dims: draw_opening_wall_dims,
+	}
+
+	// draw the window cut and a line along its centre.
+	object_views.window.draw_mask = function(cx, plan, object) {
+		let [x1, y1, x2, y2] = s.house.get_opening_hole(plan, object, box)
+		let is_v = s.house.opening_is_v(object)
+		// leave space between the window cut and the wall outline.
+		x1 = to_pixels(x1) + (is_v ? 0 : 1)
+		y1 = to_pixels(y1) + (is_v ? 1 : 0)
+		x2 = to_pixels(x2) - (is_v ? 0 : 1)
+		y2 = to_pixels(y2) - (is_v ? 1 : 0)
+		if (view_scale > 0.02) {
+			cx.beginPath()
+			cx.rect(x1, y1, x2 - x1, y2 - y1)
+			cx.fillStyle = ui.alpha_adjust(ui.color_obj('bg1'), .5)
+			cx.fill()
+			if (!object.seg) { // off the wall: draw the full outline.
+				cx.stroke()
+			} else { // on the wall: draw faint lines along the wall faces.
+				cx.beginPath()
+				if (is_v) {
+					cx.moveTo(x1, y1); cx.lineTo(x1, y2)
+					cx.moveTo(x2, y1); cx.lineTo(x2, y2)
+				} else {
+					cx.moveTo(x1, y1); cx.lineTo(x2, y1)
+					cx.moveTo(x1, y2); cx.lineTo(x2, y2)
+				}
+				let ss = cx.strokeStyle
+				cx.strokeStyle = ui.theme().is_dark
+					? ui.color_css('bg2')
+					: ui.alpha_adjust(ui.color_obj('text'), .2)
+				cx.stroke()
+				cx.strokeStyle = ss
+			}
+		}
+
+		cx.beginPath()
+		if (is_v) {
+			let x = (x1 + x2) / 2
+			cx.moveTo(x, y1); cx.lineTo(x, y2)
+		} else {
+			let y = (y1 + y2) / 2
+			cx.moveTo(x1, y); cx.lineTo(x2, y)
+		}
+		cx.stroke()
+	}
+
+	object_views.door = {
+		hit_resize: hit_resize_rect,
+		draw_sizes: draw_opening_size,
+		draw_wall_dims: draw_opening_wall_dims,
+	}
+
+	// test the door box for a body hit and the swing area for a move-only hit.
+	object_views.door.hit = function(plan, object) {
+		if (hit_box(plan, object))
+			return true
+		// test the square containing the door's swing area.
+		let w = object.w
+		let y = s.house.ext_wall_thickness / 2 // the wall centre line
+		s.house.object_to_plan(plan, object, 0, y, object_point1)
+		let x1 = object_point1[0], y1 = object_point1[1]
+		s.house.object_to_plan(plan, object, w, y - w, object_point1)
+		let x2 = object_point1[0], y2 = object_point1[1]
+		if (ui.hit_bbox(to_pixels(min(x1, x2)), to_pixels(min(y1, y2)),
+			to_pixels(max(x1, x2)), to_pixels(max(y1, y2))))
+			return 'move'
+		return false
+	}
+
+	// fill the wall cut before drawing the door panel in local
+	// coordinates.
+	object_views.door.draw_mask = function(cx, plan, object) {
+		let [x1, y1, x2, y2] = s.house.get_opening_hole(plan, object, box)
+		// round the cut's pixel coordinates in the same way as the wall
+		// paths.
+		let sx1 = to_pixels(x1), sy1 = to_pixels(y1)
+		let sx2 = to_pixels(x2), sy2 = to_pixels(y2)
+		// use the wall outline width, or zero when outlines are not drawn.
+		let line_width = view_scale > 0.04 ? view_line_width : 0
+		// keep the fill clear of the wall outline. A one-pixel stroke on a
+		// pixel boundary covers half a pixel on each side.
+		let inset = ceil(line_width / 2)
+		cx.beginPath()
+		cx.rect(sx1 + inset, sy1 + inset,
+			sx2 - sx1 - 2 * inset, sy2 - sy1 - 2 * inset)
+		cx.fillStyle = ui.alpha_adjust(ui.color_obj('bg1'), .5)
+		cx.fill()
+		if (!object.seg)
+			cx.stroke()
+	}
+
+	// draw the door panel open at 90 degrees from its hinge on the wall
+	// centre line, and draw its swing arc. mirror: hinge at the other
+	// end.
+	object_views.door.draw = function(cx, plan, object) {
+		let w = object.w
+		let x = object.mirror ? w : 0
+		let y = s.house.ext_wall_thickness / 2 // the wall centre line
+		cx.beginPath()
+		cx.moveTo(x, y)
+		cx.lineTo(x, y - w)
+		if (object.mirror)
+			cx.arc(x, y, w, -PI / 2, -PI, true)
+		else
+			cx.arc(x, y, w, -PI / 2, 0)
+		cx.stroke()
+	}
+
+	// press Space to cycle through four door orientations: switch the
+	// hinge side, then switch the side of the wall that the door opens
+	// towards.
+	object_views.door.update = function(plan, object) {
+		if (!ui.keydown(' '))
+			return
+		plan.update_object(object, function(door) {
+			if (door.mirror) {
+				door.mirror = false
+				door.rot = (door.rot + 180) % 360
+			} else {
+				door.mirror = true
+			}
+		})
+	}
+
+	/// bed -------------------------------------------------------------------
+
+	object_views.bed = {
+		hit: hit_box,
+		hit_resize: hit_resize_rect,
+		draw_sizes: draw_furniture_sizes,
+		draw_wall_dims: draw_furniture_wall_dims,
+	}
+
+	// draw the mattress, pillows and cover edge, with the head at the top.
+	object_views.bed.draw = function(cx, plan, object) {
+		let {w, l} = object
+		cx.beginPath()
+		cx.rect(0, 0, w, l)
+		let pillow_n = w < 1200 ? 1 : 2
+		for (let i = 0; i < pillow_n; i++) {
+			let px = pillow_n == 1 ? w / 2 : i ? w * 3 / 4 : w / 4
+			cx.rect(px - 250, 100, 500, 350)
+		}
+		cx.moveTo(0, l * .4)
+		cx.lineTo(w, l * .4)
+		cx.fillStyle = ui.color_css('bg')
+		cx.fill()
+		cx.stroke()
+	}
+
+	/// chair -----------------------------------------------------------------
+
+	object_views.chair = {
+		hit: hit_box,
+		draw_wall_dims: draw_furniture_wall_dims,
+	}
+
+	// draw the chair with its narrower back at the top. For a diagonal
+	// chair, move the drawing away from the corner by a quarter of its width
+	// and length along the plan axes. Keep the plan box unchanged.
+	object_views.chair.draw = function(cx, plan, object) {
+		if (object.rot % 90) {
+			s.house.object_vector_to_plan(object, 0, 1, object_point1)
+			s.house.plan_vector_to_object(object,
+				sign(object_point1[0]) * object.w / 4,
+				sign(object_point1[1]) * object.l / 4, object_point1)
+			cx.translate(object_point1[0], object_point1[1])
+		}
+		let {w, l} = object
+		let back_x1 = w / 8 // the back is 3/4 of the seat's width
+		let back_x2 = w - back_x1
+
+		// the seat's outline. Round each corner using points r millimetres away
+		// along each adjacent edge.
+		let points = [[back_x1, 0], [back_x2, 0], [w, l], [0, l]]
+		let r = 60
+		cx.beginPath()
+		for (let i = 0, n = points.length; i < n; i++) {
+			let [px, py] = points[i]
+			let [x0, y0] = points[(i+n-1) % n]
+			let [x1, y1] = points[(i+1) % n]
+			let d0 = Math.hypot(x0 - px, y0 - py)
+			let d1 = Math.hypot(x1 - px, y1 - py)
+			let sx = px + (x0 - px) * r / d0
+			let sy = py + (y0 - py) * r / d0
+			if (i)
+				cx.lineTo(sx, sy)
+			else
+				cx.moveTo(sx, sy)
+			cx.quadraticCurveTo(px, py, px + (x1 - px) * r / d1,
+				py + (y1 - py) * r / d1)
+		}
+		cx.closePath()
+
+		// the back rest's line.
+		cx.moveTo(w * .2, 90)
+		cx.lineTo(w * .8, 90)
+		cx.fillStyle = ui.color_css('bg')
+		cx.fill()
+		cx.stroke()
+	}
+
+	/// wc --------------------------------------------------------------------
+
+	object_views.wc = {
+		hit: hit_box,
+		draw_wall_dims: draw_furniture_wall_dims,
+	}
+
+	// draw the toilet with its tank at the top.
+	object_views.wc.draw = function(cx, plan, object) {
+		let {w, l} = object
+		let bowl_x = w * .45
+		let bowl_y = l * .35
+		cx.beginPath()
+		cx.rect(0, 0, w, l * .3)
+		cx.moveTo(w / 2 - bowl_x, l * .3)
+		cx.lineTo(w / 2 - bowl_x, l - bowl_y)
+		cx.ellipse(w / 2, l - bowl_y, bowl_x, bowl_y, 0, PI, 0, true)
+		cx.lineTo(w / 2 + bowl_x, l * .3)
+		cx.closePath()
+		cx.fillStyle = ui.color_css('bg')
+		cx.fill()
+		cx.stroke()
+	}
+
+	/// round table -----------------------------------------------------------
+
+	object_views.round_table = {
+		hit: hit_box,
+	}
+
+	object_views.round_table.hit_resize = function(plan, object, hs) {
+		return hit_resize_rect(plan, object, hs, true)
+	}
+
+	object_views.round_table.draw_sizes = function(cx, plan, object) {
+		let [x1, y1, x2, y2] = s.house.object_types[object.type]
+			.local_box(plan, object, box)
+		let x = (x1 + x2) / 2, y = (y1 + y2) / 2
+		let r = object.w / 2
+		draw_object_length(cx, plan, object, x - r, y, x + r, y, 0)
+	}
+
+	object_views.round_table.draw = function(cx, plan, object) {
+		let [x1, y1, x2, y2] = s.house.object_types[object.type]
+			.local_box(plan, object, box)
+
+		// the chairs: a square with its back line, round the table.
+		if (!object.cached_path) {
+			let chair_size = 450
+			let chair_spacing = 600
+			let back_inset = 75
+			let half_chair = chair_size / 2
+			let back = half_chair - back_inset
+			let r = object.w / 2
+			let mx = (x1 + x2) / 2, my = (y1 + y2) / 2
+			let n = floor(2 * PI * r / chair_spacing)
+			let path = new Path2D()
+			for (let i = 0; i < n; i++) {
+				let a = i * 2 * PI / n + (n == 4 ? PI / 4 : -PI / 2)
+				let ux = cos(a), uy = sin(a)
+				let x = mx + r * ux, y = my + r * uy
+				let hx = half_chair * ux, hy = half_chair * uy
+				path.moveTo(x - hx + hy, y - hy - hx)
+				path.lineTo(x + hx + hy, y + hy - hx)
+				path.lineTo(x + hx - hy, y + hy + hx)
+				path.lineTo(x - hx - hy, y - hy + hx)
+				path.closePath()
+
+				let bx = x + back * ux, by = y + back * uy
+				path.moveTo(bx + hy, by - hx)
+				path.lineTo(bx - hy, by + hx)
+			}
+			object.cached_path = path
+		}
+		cx.fillStyle = ui.color_css('bg')
+		cx.fill(object.cached_path)
+		cx.stroke(object.cached_path)
+
+		cx.beginPath()
+		cx.arc((x1 + x2) / 2, (y1 + y2) / 2, object.w / 2, 0, 2 * PI)
+		cx.fill()
+		cx.stroke()
+
+		let hs = ui.captured(id) ?? ui.hovers(id)
+		if (hs?.object != object)
+			return
+		let scale = to_pixels_exact(1)
+		let dash = 5 / scale
+		round_table_dash[0] = dash
+		round_table_dash[1] = dash
+		cx.setLineDash(round_table_dash)
+		cx.strokeRect(x1, y1, x2 - x1, y2 - y1)
+		cx.setLineDash(solid_line)
+	}
+
+	/// countertop ------------------------------------------------------------
+
+	object_views.countertop = {}
+
+	object_views.countertop.draw = function(cx, plan, object) {
+		let a = object.contour
+		cx.beginPath()
+		cx.moveTo(a[0], a[1])
+		for (let i = 2; i < a.length; i += 2) cx.lineTo(a[i], a[i+1])
+		cx.closePath()
+		cx.fillStyle = ui.color_css('bg')
+		cx.fill('evenodd')
+		cx.stroke()
+	}
+
+	object_views.countertop.hit = function(plan, object) {
+		s.house.plan_to_object(plan, object, to_plan(ui.mx),
+			to_plan(ui.my), object_point1)
 		let x = object_point1[0], y = object_point1[1]
 		let a = object.contour, inside = false
 		for (let i = 0, j = a.length-2; i < a.length; j = i, i += 2) {
@@ -1288,10 +1513,10 @@ function create_floor_editor(id) {
 		return inside
 	}
 
-	function hit_countertop_resize(plan, object, hs) {
+	object_views.countertop.hit_resize = function(plan, object, hs) {
 		s.house.plan_to_object(plan, object, hs.mouse_x, hs.mouse_y,
 			object_point1)
-		let x = object_point1[0], y = object_point1[1], d = sg.plan_d(8)
+		let x = object_point1[0], y = object_point1[1], d = to_plan(8)
 		for (let h = 1; h <= object.contour.length / 2 * 3; h++) {
 			if (!s.house.get_countertop_edge(object, h, countertop_edge))
 				continue
@@ -1310,7 +1535,7 @@ function create_floor_editor(id) {
 		return false
 	}
 
-	function draw_countertop_sizes(cx, plan, object) {
+	object_views.countertop.draw_sizes = function(cx, plan, object) {
 		let cs = ui.captured(id)
 		let a = object.contour
 		let edge1, edge2, axis
@@ -1339,7 +1564,7 @@ function create_floor_editor(id) {
 		}
 	}
 
-	function draw_countertop_resize(cx, plan, object, handle) {
+	object_views.countertop.draw_resize = function(cx, plan, object, handle) {
 		s.house.get_countertop_edge(object, handle, countertop_edge)
 		let [x1, y1, x2, y2] = countertop_edge
 		cx.beginPath()
@@ -1347,8 +1572,15 @@ function create_floor_editor(id) {
 		cx.stroke()
 	}
 
+	/// stair -----------------------------------------------------------------
+
+	object_views.stair = {
+		hit: hit_box,
+		hit_resize: hit_resize_rect,
+	}
+
 	// draw the steps and an arrow pointing up the stairs.
-	function draw_stair(cx, plan, object) {
+	object_views.stair.draw = function(cx, plan, object) {
 		let shape = s.house.stair_shape(plan, object)
 		let w = object.w
 		cx.beginPath()
@@ -1369,190 +1601,67 @@ function create_floor_editor(id) {
 	}
 
 	// draw the stair width below its bottom edge and its length to the right.
-	function draw_stair_sizes(cx, plan, object) {
+	object_views.stair.draw_sizes = function(cx, plan, object) {
 		let w = object.w, l = s.house.stair_shape(plan, object).l
 		draw_object_length(cx, plan, object, w, l, 0, l)
 		draw_object_length(cx, plan, object, w, 0, w, l)
 	}
 
+	/// tags ------------------------------------------------------------------
+
+	// draw the icon at the tag point, with text below it. Keep both upright.
+	let TAG_ICON_SIZE = 20 // px
+	let TAG_TEXT_FONT = 'bold 12px sans-serif'
+	let TAG_TEXT_Y = 18 // pixels from the tag point to the text centre
+	let TAG_HIT_X = 28 // half the hit box width in pixels
+	let TAG_HIT_Y1 = -12 // top of the hit box relative to the tag point, in px
+	let TAG_HIT_Y2 = 26 // hit box bottom relative to the tag point, in pixels
+
+	// draw the icon and text using the current stroke colour.
+	function draw_tag(cx, icon_name, text) {
+		let [font, glyph] = ui.get_icon(icon_name)
+		let icon_font = tag_icon_fonts.get(font)
+		if (!icon_font) {
+			icon_font = TAG_ICON_SIZE + 'px ' + font
+			tag_icon_fonts.set(font, icon_font)
+		}
+		cx.fillStyle = cx.strokeStyle
+		cx.textAlign = 'center'
+		cx.textBaseline = 'middle'
+		cx.font = icon_font
+		cx.fillText(glyph, 0, 0)
+		cx.font = TAG_TEXT_FONT
+		cx.fillText(text, 0, TAG_TEXT_Y)
+	}
+
 	// test whether the pointer is over the tag's icon or text.
 	function hit_tag(plan, object) {
-		let dx = ui.mx - sg.x(object.x)
-		let dy = ui.my - sg.y(object.y)
+		let dx = ui.mx - to_pixels(object.x)
+		let dy = ui.my - to_pixels(object.y)
 		object_point.set(dx, dy).transform(
-			object_matrix.reset().rotate(-(sg.rotation ?? 0)), object_point1)
+			object_matrix.reset().rotate(-(view_rotation ?? 0)), object_point1)
 		let [tx, ty] = object_point1 // pixel offset from the upright tag
 		return tx >= -TAG_HIT_X && tx < TAG_HIT_X
 			&& ty >= TAG_HIT_Y1 && ty < TAG_HIT_Y2
 	}
 
-	let object_views = {
-
-		window: {
-			hit: hit_box,
-			hit_resize: hit_resize_rect,
-			draw_sizes: draw_opening_size,
-			draw_wall_dims: draw_opening_wall_dims,
-			// draw the window cut and a line along its centre.
-			draw_mask: function(cx, plan, object) {
-				let [x1, y1, x2, y2] = s.house.get_opening_hole(plan, object, box)
-				let is_v = s.house.opening_is_v(object)
-				// leave space between the window cut and the wall outline.
-				x1 = sg.x(x1) + (is_v ? 0 : 1)
-				y1 = sg.y(y1) + (is_v ? 1 : 0)
-				x2 = sg.x(x2) - (is_v ? 0 : 1)
-				y2 = sg.y(y2) - (is_v ? 1 : 0)
-				if (sg.scale > 0.02) {
-					cx.beginPath()
-					cx.rect(x1, y1, x2 - x1, y2 - y1)
-					cx.fillStyle = ui.alpha_adjust(ui.color_obj('bg1'), .5)
-					cx.fill()
-					if (!object.seg) { // off the wall: draw the full outline.
-						cx.stroke()
-					} else { // on the wall: draw faint lines along the wall faces.
-						cx.beginPath()
-						if (is_v) {
-							cx.moveTo(x1, y1); cx.lineTo(x1, y2)
-							cx.moveTo(x2, y1); cx.lineTo(x2, y2)
-						} else {
-							cx.moveTo(x1, y1); cx.lineTo(x2, y1)
-							cx.moveTo(x1, y2); cx.lineTo(x2, y2)
-						}
-						let ss = cx.strokeStyle
-						cx.strokeStyle = ui.theme().is_dark
-							? ui.color_css('bg2')
-							: ui.alpha_adjust(ui.color_obj('text'), .2)
-						cx.stroke()
-						cx.strokeStyle = ss
-					}
-				}
-
-				cx.beginPath()
-				if (is_v) {
-					let x = (x1 + x2) / 2
-					cx.moveTo(x, y1); cx.lineTo(x, y2)
-				} else {
-					let y = (y1 + y2) / 2
-					cx.moveTo(x1, y); cx.lineTo(x2, y)
-				}
-				cx.stroke()
-			},
-		},
-
-		door: {
-			hit: hit_door,
-			hit_resize: hit_resize_rect,
-			draw_sizes: draw_opening_size,
-			draw_wall_dims: draw_opening_wall_dims,
-			// fill the wall cut before drawing the door panel in local
-			// coordinates.
-			draw_mask: function(cx, plan, object) {
-				let [x1, y1, x2, y2] = s.house.get_opening_hole(plan, object, box)
-				// round the cut's pixel coordinates in the same way as the wall
-				// paths.
-				let sx1 = sg.x(x1), sy1 = sg.y(y1)
-				let sx2 = sg.x(x2), sy2 = sg.y(y2)
-				// use the wall outline width, or zero when outlines are not drawn.
-				let line_width = sg.scale > 0.04 ? sg.line_width : 0
-				// keep the fill clear of the wall outline. A one-pixel stroke on a
-				// pixel boundary covers half a pixel on each side.
-				let inset = ceil(line_width / 2)
-				cx.beginPath()
-				cx.rect(sx1 + inset, sy1 + inset,
-					sx2 - sx1 - 2 * inset, sy2 - sy1 - 2 * inset)
-				cx.fillStyle = ui.alpha_adjust(ui.color_obj('bg1'), .5)
-				cx.fill()
-				if (!object.seg)
-					cx.stroke()
-			},
-			// draw the door panel open at 90 degrees from its hinge on the wall
-			// centre line, and draw its swing arc. mirror: hinge at the other
-			// end.
-			draw: function(cx, plan, object) {
-				let w = object.w
-				let x = object.mirror ? w : 0
-				let y = s.house.ext_wall_thickness / 2 // the wall centre line
-				cx.beginPath()
-				cx.moveTo(x, y)
-				cx.lineTo(x, y - w)
-				if (object.mirror)
-					cx.arc(x, y, w, -PI / 2, -PI, true)
-				else
-					cx.arc(x, y, w, -PI / 2, 0)
-				cx.stroke()
-			},
-			// press Space to cycle through four door orientations: switch the
-			// hinge side, then switch the side of the wall that the door opens
-			// towards.
-			update: function(plan, object) {
-				if (!ui.keydown(' '))
-					return
-				plan.update_object(object, function(door) {
-					if (door.mirror) {
-						door.mirror = false
-						door.rot = (door.rot + 180) % 360
-					} else {
-						door.mirror = true
-					}
-				})
-			},
-		},
-
-		bed: {
-			sketch: sketch_bed,
-			hit: hit_box,
-			hit_resize: hit_resize_rect,
-			draw_sizes: draw_furniture_sizes,
-			draw_wall_dims: draw_furniture_wall_dims,
-			draw: draw_furniture,
-		},
-
-		chair: {
-			sketch: sketch_chair,
-			hit: hit_box,
-			draw_wall_dims: draw_furniture_wall_dims,
-			draw: draw_chair,
-		},
-
-		wc: {
-			sketch: sketch_wc,
-			hit: hit_box,
-			draw_wall_dims: draw_furniture_wall_dims,
-			draw: draw_furniture,
-		},
-
-		countertop: {
-			hit: hit_countertop,
-			hit_resize: hit_countertop_resize,
-			draw_resize: draw_countertop_resize,
-			draw: draw_countertop,
-			draw_sizes: draw_countertop_sizes,
-		},
-
-		open_room: {
-			hit: hit_tag,
-			draw_space: 'screen',
-			draw: function(cx, plan, object) {
-				draw_tag(cx, 'stairs', 'Open')
-			},
-		},
-
-		terrace: {
-			hit: hit_tag,
-			draw_space: 'screen',
-			draw: function(cx, plan, object) {
-				draw_tag(cx, 'sun', 'Terrace')
-			},
-		},
-
-		stair: {
-			hit: hit_box,
-			hit_resize: hit_resize_rect,
-			draw: draw_stair,
-			draw_sizes: draw_stair_sizes,
-		},
-
+	object_views.open_room = {
+		hit: hit_tag,
+		draw_space: 'screen',
 	}
+	object_views.open_room.draw = function(cx, plan, object) {
+		draw_tag(cx, 'stairs', 'Open')
+	}
+
+	object_views.terrace = {
+		hit: hit_tag,
+		draw_space: 'screen',
+	}
+	object_views.terrace.draw = function(cx, plan, object) {
+		draw_tag(cx, 'sun', 'Terrace')
+	}
+
+	/// object loops ----------------------------------------------------------
 
 	// the topmost of `objects` at the screen point (ui.mx, ui.my): over the
 	// object or at an end that resizes it.
@@ -1579,7 +1688,7 @@ function create_floor_editor(id) {
 	// readonly text color, or in the error color if they touch the house.
 	function draw_objects(cx, plan, objects, hit_object, is_ground,
 		resize_side, from_below) {
-		cx.lineWidth = sg.scale > 0.04 ? 2 : 1
+		cx.lineWidth = view_scale > 0.04 ? 2 : 1
 		for (let object of objects) {
 			let object_type = s.house.object_types[object.type]
 			let object_view = object_views[object.type]
@@ -1602,11 +1711,11 @@ function create_floor_editor(id) {
 			if (object_view.draw) {
 				let [x, y] = s.house.get_object_origin(plan, object,
 					object_origin)
-				cx.translate(sg.x(x), sg.y(y))
+				cx.translate(to_pixels(x), to_pixels(y))
 				if (object_view.draw_space == 'screen') {
-					cx.rotate(-(sg.rotation ?? 0))
+					cx.rotate(-(view_rotation ?? 0))
 				} else {
-					let scale = sg.d_exact(1)
+					let scale = to_pixels_exact(1)
 					cx.rotate(object.rot * rad)
 					cx.scale(scale, scale)
 					cx.lineWidth /= scale
@@ -1623,7 +1732,7 @@ function create_floor_editor(id) {
 	}
 
 	// the dimensions of the hovered object, or of all objects when
-	// sg.show_dims is on, and while the object is moving, its distances to the
+	// show_dims is on, and while the object is moving, its distances to the
 	// ends of the wall or room side that it rests against.
 	function draw_object_dims(cx, plan, objects, hit_object, is_moving,
 		from_below) {
@@ -1632,12 +1741,14 @@ function create_floor_editor(id) {
 			let object_view = object_views[object.type]
 			if (from_below && !object_type.connects_below)
 				continue
-			if (object_view.draw_sizes && (object == hit_object || sg.show_dims))
+			if (object_view.draw_sizes && (object == hit_object || show_dims))
 				object_view.draw_sizes(cx, plan, object)
 			if (object_view.draw_wall_dims && is_moving && object == hit_object)
 				object_view.draw_wall_dims(cx, plan, object)
 		}
 	}
+
+	//// WIDGET ---------------------------------------------------------------
 
 	e.build = function(id, value, field, opt, readonly) {
 
@@ -1718,9 +1829,9 @@ function create_floor_editor(id) {
 						}
 					ui.end_v()
 
-					if (sg.zoomed)
+					if (view_zoomed)
 						ui.button(id+'.zoom_button',
-							sg.scale > .1 ? 'zoom-in' : 'zoom-out', '',
+							view_scale > .1 ? 'zoom-in' : 'zoom-out', '',
 							0, 'c', 't', null, null,
 							S('fit_to_view', 'Fit to view'))
 
@@ -1732,16 +1843,16 @@ function create_floor_editor(id) {
 							0, 'c', 't', null, null,
 							S('show_grid', 'Show grid'))
 					) {
-						sg.show_grid = !sg.show_grid
-						ui.save_state('floor_editor', 'show_grid', sg.show_grid)
+						show_grid = !show_grid
+						ui.save_state('floor_editor', 'show_grid', show_grid)
 					}
 
 					if (ui.button(id+'.dims_button', 'ruler-measure', '',
 							0, 'c', 't', null, null,
 							S('show_all_dimensions', 'Show all dimensions'))
 					) {
-						sg.show_dims = !sg.show_dims
-						ui.save_state('floor_editor', 'show_dims', sg.show_dims)
+						show_dims = !show_dims
+						ui.save_state('floor_editor', 'show_dims', show_dims)
 					}
 
 					if (ui.popup_button(id+'.settings', 'settings', null,
@@ -1788,10 +1899,10 @@ function create_floor_editor(id) {
 		let w  = a[i+2]
 		let h  = a[i+3]
 		let plan = s.floor
-		let is_fitted = sg.layout(s.house.bb, w, h)
+		let is_fitted = layout_view(s.house.bb, w, h)
 		// lock the fitted view, like a manual zoom.
 		if (is_fitted) {
-			sg.zoomed = true
+			view_zoomed = true
 			save_floor_view()
 		}
 	}
@@ -1841,7 +1952,7 @@ function create_floor_editor(id) {
 		cx.font = 'bold 14px sans-serif'
 
 		// grid
-		draw_grids(cx, sg, w, h)
+		draw_grids(cx,w, h)
 
 		cx.textAlign = 'left'
 
@@ -1849,10 +1960,10 @@ function create_floor_editor(id) {
 		{
 		let m = ui.em()
 		let mm = 1000
-		let d = sg.d(mm)
+		let d = to_pixels(mm)
 		while (d > w - 2*m) {
 			mm /= 5
-			d = sg.d(mm)
+			d = to_pixels(mm)
 		}
 		cx.beginPath()
 		let t = 4
@@ -1878,7 +1989,7 @@ function create_floor_editor(id) {
 		cx.fillText(s, m, h - m)
 		}
 
-		sg.transform(cx, w, h)
+		transform_view(cx, w, h)
 
 		// below floors. the roof level: the top floor's walls are drawn like
 		// a floor below and not edited.
@@ -1886,7 +1997,7 @@ function create_floor_editor(id) {
 		for (let plan1 of s.house.floors) {
 			if (plan1.i > plan.i || plan1 == plan && !is_roof_level)
 				continue
-			draw_walls(cx, sg, plan1.make_wall_geometry().uncut_wall_paths,
+			draw_walls(cx,plan1.make_wall_geometry().uncut_wall_paths,
 				plan1.segs)
 		}
 		cx.globalAlpha = 1
@@ -1899,15 +2010,15 @@ function create_floor_editor(id) {
 			let is_v = sl[i+1]
 			let x1, y1, x2, y2
 			if (is_v) {
-				x1 = sg.x(sa)
-				x2 = sg.x(sa)
-				y1 = -sg.y0
-				y2 = -sg.y0 + h
+				x1 = to_pixels(sa)
+				x2 = to_pixels(sa)
+				y1 = -view_y0
+				y2 = -view_y0 + h
 			} else {
-				y1 = sg.y(sa)
-				y2 = sg.y(sa)
-				x1 = -sg.x0
-				x2 = -sg.x0 + w
+				y1 = to_pixels(sa)
+				y2 = to_pixels(sa)
+				x1 = -view_x0
+				x2 = -view_x0 + w
 			}
 			cx.beginPath()
 			cx.moveTo(x1+.5, y1+.5)
@@ -1930,8 +2041,8 @@ function create_floor_editor(id) {
 					cx.save()
 					cx.beginPath()
 					let [x1, y1, x2, y2] = c.edges.bbox()
-					cx.rect(sg.x(x1), sg.y(y1),
-						sg.x(x2) - sg.x(x1), sg.y(y2) - sg.y(y1))
+					cx.rect(to_pixels(x1), to_pixels(y1),
+						to_pixels(x2) - to_pixels(x1), to_pixels(y2) - to_pixels(y1))
 					// the cycles of the floor below: rooms, islands and island
 					// rooms, but not the root outlines.
 					let below_plan = s.house.floors[plan.i-1]
@@ -1940,18 +2051,18 @@ function create_floor_editor(id) {
 							for (let below_c of below_co.cycles) {
 								if (below_c.outer && !below_co.inside)
 									continue
-								draw_edges(cx, sg, below_c.edges)
+								draw_edges(cx,below_c.edges)
 							}
 					cx.clip('evenodd')
 				}
 
 				cx.beginPath()
 
-				draw_edges(cx, sg, c.edges)
+				draw_edges(cx,c.edges)
 
 				// island outer cycles are clockwise so they draw as holes.
 				for (let icomp of c.islands)
-					draw_edges(cx, sg, icomp.outer_cycle.edges)
+					draw_edges(cx,icomp.outer_cycle.edges)
 
 				cx.fillStyle = ui.alpha_adjust(ui.color_obj('bg1',
 					hit_cycle == c ? 'hover' : null), .5)
@@ -1965,19 +2076,19 @@ function create_floor_editor(id) {
 		// terrace floors: the half-walls cover their edges.
 		if (terrace_paths.length) {
 			cx.beginPath()
-			add_grid_paths(cx, sg, terrace_paths)
+			add_grid_paths(cx,terrace_paths)
 			cx.fillStyle = ui.alpha_adjust(ui.color_obj('bg1'), .5)
 			cx.fill('evenodd')
 		}
 
 		// walls of this floor
 		if (!is_roof_level)
-			draw_walls(cx, sg, plan.make_wall_geometry().cut_wall_paths,
+			draw_walls(cx,plan.make_wall_geometry().cut_wall_paths,
 				plan.segs)
 
 		// half-walls around the terraces
 		cx.globalAlpha = .5
-		draw_walls(cx, sg, half_wall_paths, empty_array)
+		draw_walls(cx,half_wall_paths, empty_array)
 		cx.globalAlpha = 1
 
 		// walls of above floor
@@ -1985,7 +2096,7 @@ function create_floor_editor(id) {
 		for (let plan1 of s.house.floors) {
 			if (plan1.i <= plan.i)
 				continue
-			draw_walls(cx, sg, plan1.make_wall_geometry().uncut_wall_paths,
+			draw_walls(cx,plan1.make_wall_geometry().uncut_wall_paths,
 				plan1.segs)
 		}
 		cx.globalAlpha = 1
@@ -1996,7 +2107,7 @@ function create_floor_editor(id) {
 		for (let face of roof_faces) {
 			cx.beginPath()
 			for (let ring of face.rings)
-				draw_edges(cx, sg, ring)
+				draw_edges(cx,ring)
 			cx.stroke()
 		}
 		// hovered or dragged: hit_roof_side is from an earlier frame's roof
@@ -2031,11 +2142,11 @@ function create_floor_editor(id) {
 				let e1 = side.e1 / scale
 				let e2 = side.e2 / scale
 				if (side.nx) {
-					cx.moveTo(sg.x(c), sg.y(e1))
-					cx.lineTo(sg.x(c), sg.y(e2))
+					cx.moveTo(to_pixels(c), to_pixels(e1))
+					cx.lineTo(to_pixels(c), to_pixels(e2))
 				} else {
-					cx.moveTo(sg.x(e1), sg.y(c))
-					cx.lineTo(sg.x(e2), sg.y(c))
+					cx.moveTo(to_pixels(e1), to_pixels(c))
+					cx.lineTo(to_pixels(e2), to_pixels(c))
 				}
 			}
 			cx.strokeStyle = ui.color_css('link')
@@ -2061,8 +2172,8 @@ function create_floor_editor(id) {
 				if (!is_shared)
 					continue
 				hit_lines.push(line)
-				cx.moveTo(sg.x(p[0]), sg.y(p[1]))
-				cx.lineTo(sg.x(q[0]), sg.y(q[1]))
+				cx.moveTo(to_pixels(p[0]), to_pixels(p[1]))
+				cx.lineTo(to_pixels(q[0]), to_pixels(q[1]))
 			}
 			cx.strokeStyle = ui.color_css('link')
 			cx.lineWidth = 3
@@ -2074,14 +2185,14 @@ function create_floor_editor(id) {
 		// them while all dimensions are shown.
 		if (roof_floor) {
 			let wall_z = roof_floor.z + roof_floor.h
-			let sides = sg.show_dims ? roof_sides
+			let sides = show_dims ? roof_sides
 				: drag_action == 'move_eave' ? moved_sides : empty_array
 			for (let side of sides)
-				draw_eave_dims(cx, sg, side, wall_z)
-			let lines = sg.show_dims ? roof_lines
+				draw_eave_dims(cx,side, wall_z)
+			let lines = show_dims ? roof_lines
 				: drag_action == 'move_faces' ? hit_lines : empty_array
 			for (let line of lines)
-				draw_roof_line_dims(cx, sg, line, wall_z)
+				draw_roof_line_dims(cx,line, wall_z)
 		}
 
 		// pitch labels of the roof's faces. hit_roof_face is from an earlier
@@ -2096,9 +2207,9 @@ function create_floor_editor(id) {
 				|| is_all_faces && face.sides[0].pitch != 90
 			let [x, y] = roof_label_point(face)
 			cx.save()
-			cx.translate(sg.x(x), sg.y(y))
-			if (sg.rotation)
-				cx.rotate(-sg.rotation)
+			cx.translate(to_pixels(x), to_pixels(y))
+			if (view_rotation)
+				cx.rotate(-view_rotation)
 			cx.textAlign = 'center'
 			cx.fillStyle = ui.color_css(is_lit ? 'link' : 'label')
 			cx.fillText(format_pitch(face.sides[0].pitch), 0, 5)
@@ -2106,14 +2217,14 @@ function create_floor_editor(id) {
 		}
 
 		// cycles area
-		if (sg.scale > 0.04 && !is_roof_level)
+		if (view_scale > 0.04 && !is_roof_level)
 			for (let co of plan.comps) {
 				for (let c of co.cycles) {
 					if (c.outer)
 						continue
 					let [x, y] = c.center()
-					x = sg.x(x)
-					y = sg.y(y)
+					x = to_pixels(x)
+					y = to_pixels(y)
 					cx.fillStyle = ui.color_css('label')
 					let area = c.edges.area()
 					for (let icomp of c.islands)
@@ -2122,8 +2233,8 @@ function create_floor_editor(id) {
 					if (DEBUG_PLAN) s = co.id + '/' + c.id + ' ' + s
 					cx.save()
 					cx.translate(x, y)
-					if (sg.rotation)
-						cx.rotate(-sg.rotation)
+					if (view_rotation)
+						cx.rotate(-view_rotation)
 					cx.textAlign = 'center'
 					cx.fillText(s, 0, 5)
 					cx.restore()
@@ -2154,7 +2265,7 @@ function create_floor_editor(id) {
 
 		// find all affected _|_ edges so we can show their lengths as we move
 		// the seg
-		if (drag_action == 'move_seg' && !sg.show_dims) {
+		if (drag_action == 'move_seg' && !show_dims) {
 			let sp1 = drag_seg[0]
 			let sp2 = drag_seg[1]
 			let v = drag_seg.is_v
@@ -2171,16 +2282,16 @@ function create_floor_editor(id) {
 						if (!(ep0 || ep3))
 							continue
 						if (ep0)
-							draw_length(cx, sg, ep0[0], ep0[1], ep1[0], ep1[1])
+							draw_length(cx,ep0[0], ep0[1], ep1[0], ep1[1])
 						if (ep3)
-							draw_length(cx, sg, ep2[0], ep2[1], ep3[0], ep3[1])
+							draw_length(cx,ep2[0], ep2[1], ep3[0], ep3[1])
 					}
 				}
 			}
 		}
 
 		// drawing a wall: its length on each side.
-		if (drag_action == 'resize_seg' && !sg.show_dims) {
+		if (drag_action == 'resize_seg' && !show_dims) {
 			let sp1 = cs.edit.seg[0]
 			let sp2 = cs.edit.seg[1]
 			for (let co of plan.comps) {
@@ -2192,7 +2303,7 @@ function create_floor_editor(id) {
 						let ep2 = c.edges[(i+1) % n]
 						if (ep1.p == sp1 && ep2.p == sp2
 							|| ep1.p == sp2 && ep2.p == sp1)
-							draw_length(cx, sg, ep1[0], ep1[1], ep2[0], ep2[1])
+							draw_length(cx,ep1[0], ep1[1], ep2[0], ep2[1])
 					}
 				}
 			}
@@ -2200,7 +2311,7 @@ function create_floor_editor(id) {
 
 		// show all dimensions: interior (room cycles) and exterior (outer cycles),
 		// shown always while the mode is on, drags included.
-		if (sg.show_dims && !is_roof_level) {
+		if (show_dims && !is_roof_level) {
 			for (let co of plan.comps) {
 				for (let c of co.cycles) {
 					if (!c.edges)
@@ -2208,7 +2319,7 @@ function create_floor_editor(id) {
 					for (let ei = 0, n = c.edges.length; ei < n; ei++) {
 						let ep1 = c.edges[ei]
 						let ep2 = c.edges[(ei + 1) % n]
-						draw_length(cx, sg, ep1[0], ep1[1], ep2[0], ep2[1])
+						draw_length(cx,ep1[0], ep1[1], ep2[0], ep2[1])
 					}
 				}
 			}
@@ -2216,8 +2327,8 @@ function create_floor_editor(id) {
 
 		// hit point
 		if (hit_x != null && hit_y != null) {
-			let x = sg.x(hit_x)
-			let y = sg.y(hit_y)
+			let x = to_pixels(hit_x)
+			let y = to_pixels(hit_y)
 			cx.beginPath()
 			cx.arc(x, y, 3, 0, 2*PI)
 			cx.strokeStyle = 'black'
@@ -2230,7 +2341,7 @@ function create_floor_editor(id) {
 
 		// cursor
 		let seg = drag_action == 'move_seg' && drag_seg || (hit_action == 'move_seg' && hit_seg)
-		let axes_swapped = round((sg.rotation ?? 0) / (90*rad)) % 2 != 0
+		let axes_swapped = round((view_rotation ?? 0) / (90*rad)) % 2 != 0
 		if (seg) {
 			if (seg[0].segs.length == 1 && seg[1].segs.length == 1)
 				ui.set_cursor('move')
@@ -2283,18 +2394,18 @@ function create_floor_editor(id) {
 			let p1 = seg[0]
 			let p2 = seg[1]
 			cx.beginPath()
-			let x1 = sg.x(p1[0])
-			let y1 = sg.y(p1[1])
-			let x2 = sg.x(p2[0])
-			let y2 = sg.y(p2[1])
+			let x1 = to_pixels(p1[0])
+			let y1 = to_pixels(p1[1])
+			let x2 = to_pixels(p2[0])
+			let y2 = to_pixels(p2[1])
 			cx.moveTo(x1, y1)
 			cx.lineTo(x2, y2)
 			cx.strokeStyle = hit_seg == seg ? 'white' : '#666'
 			cx.stroke()
 
 			let [x0, y0] = seg_center(seg)
-			let x = sg.x(x0) - 5
-			let y = sg.y(y0) + 5
+			let x = to_pixels(x0) - 5
+			let y = to_pixels(y0) + 5
 			cx.fillStyle = '#f66'
 			cx.textAlign = 'left'
 			cx.fillText(seg.id, x, y)
@@ -2304,8 +2415,8 @@ function create_floor_editor(id) {
 		if (DEBUG_PLAN && !is_roof_level)
 		for (let p of plan.ps) {
 			let [x0, y0] = p
-			let x = sg.x(x0) - 5
-			let y = sg.y(y0) + 5
+			let x = to_pixels(x0) - 5
+			let y = to_pixels(y0) + 5
 			cx.fillStyle = 'white'
 			cx.textAlign = 'left'
 			cx.fillText(p.id, x, y)
@@ -2317,8 +2428,8 @@ function create_floor_editor(id) {
 			let co = c // no var shadowing because langauge designers are dumb
 			for (let c of co.cycles) {
 				for (let ep of c.edges) {
-					let x = sg.x(ep[0]) - 5
-					let y = sg.y(ep[1]) + 15
+					let x = to_pixels(ep[0]) - 5
+					let y = to_pixels(ep[1]) + 15
 					cx.fillStyle = '#0f0'
 					cx.textAlign = 'left'
 					cx.fillText(c.i+'/'+ep.ci, x, y)
@@ -2379,16 +2490,16 @@ function create_floor_editor(id) {
 
 		let pan    = ui.keypressed('shift')
 		let nosnap = ui.keypressed('ctrl')
-		let snap_d = snap_distance(sg, nosnap ? 20 : 200)
+		let snap_d = snap_distance(nosnap ? 20 : 200)
 		let snap_lines = s.house.snap_lines
 
 		// pointer position from the viewport center, along the plan's axes,
 		// for zooming.
 		hs.mx = ui.mx - x00 - w / 2
 		hs.my = ui.my - y00 - h / 2
-		if (sg.rotation) {
-			let c = cos(sg.rotation)
-			let s = sin(sg.rotation)
+		if (view_rotation) {
+			let c = cos(view_rotation)
+			let s = sin(view_rotation)
 			let dx = hs.mx
 			let dy = hs.my
 			hs.mx = dx * c + dy * s
@@ -2403,11 +2514,11 @@ function create_floor_editor(id) {
 
 		cx.save()
 		cx.translate(x00, y00)
-		sg.transform(cx, w, h)
+		transform_view(cx, w, h)
 		ui.update_mouse()
 
-		let mx = sg.plan_x(ui.mx)
-		let my = sg.plan_y(ui.my)
+		let mx = to_plan(ui.mx)
+		let my = to_plan(ui.my)
 		hs.mouse_x = mx // for placing a pasted object.
 		hs.mouse_y = my
 
@@ -2437,9 +2548,10 @@ function create_floor_editor(id) {
 
 		if (!is_roof_level)
 		for (let p of plan.ps) {
-			let dx = ui.mx - sg.x(p[0])
-			let dy = ui.my - sg.y(p[1])
-			let snap_d = nosnap ? 2 : sg.d(p.max_offset) + sg.line_width + snap_margin
+			let dx = ui.mx - to_pixels(p[0])
+			let dy = ui.my - to_pixels(p[1])
+			let snap_d = nosnap ? 2
+				: to_pixels(p.max_offset) + view_line_width + snap_margin
 			if (abs(dx) <= snap_d && abs(dy) <= snap_d) {
 				hit_p = p
 				hs.p = p // point to start new seg from
@@ -2462,17 +2574,17 @@ function create_floor_editor(id) {
 				let sx1, sy1, sx2, sy2 // screen hit box
 
 				// test over the seg's area between its offset edges.
-				let m = sg.line_width
+				let m = view_line_width
 				if (v) {
-					sx1 = sg.x(seg.wall_a1) - m
-					sx2 = sg.x(seg.wall_a2) + m
-					sy1 = sg.y(seg.y1)
-					sy2 = sg.y(seg.y2)
+					sx1 = to_pixels(seg.wall_a1) - m
+					sx2 = to_pixels(seg.wall_a2) + m
+					sy1 = to_pixels(seg.y1)
+					sy2 = to_pixels(seg.y2)
 				} else if (y1 == y2) {
-					sy1 = sg.y(seg.wall_a1) - m
-					sy2 = sg.y(seg.wall_a2) + m
-					sx1 = sg.x(seg.x1)
-					sx2 = sg.x(seg.x2)
+					sy1 = to_pixels(seg.wall_a1) - m
+					sy2 = to_pixels(seg.wall_a2) + m
+					sx1 = to_pixels(seg.x1)
+					sx2 = to_pixels(seg.x2)
 				} else {
 					continue
 				}
@@ -2509,10 +2621,10 @@ function create_floor_editor(id) {
 		// hit pitch label, else eave side, else point where three or more roof
 		// faces meet, else line between two roof faces
 		let hit_roof = !hit_p && !hit_seg
-			&& (hit_roof_label(hs, roof_faces, sg)
-				|| hit_roof_side(hs, roof_sides, sg, mx, my)
-				|| hit_roof_point(hs, roof_lines, sg, mx, my)
-				|| hit_roof_line(hs, roof_lines, sg, mx, my))
+			&& (hit_roof_label(hs, roof_faces)
+				|| hit_roof_side(hs, roof_sides, mx, my)
+				|| hit_roof_point(hs, roof_lines, mx, my)
+				|| hit_roof_line(hs, roof_lines, mx, my))
 
 		// the roof level has no walls to draw or rooms to hover.
 
