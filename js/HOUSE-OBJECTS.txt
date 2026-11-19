@@ -302,3 +302,16 @@ Implementation:
   house_model_editor_test.mjs, house_height_controls_test.mjs,
   house_dim_label_test.mjs, house_faces_compare_test.js,
   roof_eave_overlap_cases_test.js and the roof_*_probe_test.js scripts. Older entries that name them are history.
+
+## Sink and stovetop (2026-11-19). BUILT (uncommitted, browser not tried)
+
+Decided (Cosmin): sink inset a little from the front edge (50 mm); no link
+to the countertop (fix_objects places them again); type z_index with sorted
+insertion (push_object) so countertops are placed and drawn first; free end
+edges are not front edges; placed_on type slot skips the editor's move
+overlap test between a sink/stovetop and countertops.
+
+Found, not fixed: place_countertop snaps any horizontal or vertical contour
+edge to the nearest room side within snap_d, including the far edge from
+outside the room. A countertop moved past a wall face then rests outside
+the room against that face (invalid, drawn in the error color).

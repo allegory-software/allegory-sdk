@@ -1185,6 +1185,52 @@ check('countertop copies, saved states and undo own their contours', () => {
 	assert.notEqual(f.objects.at(-1).contour, copy.contour)
 })
 
+check('sinks and stovetops sit on countertop front edges, after them', () => {
+	let f = countertop_floor()
+	let bounds = []
+	// the nearer front edge: the bottom one, 50 mm in.
+	f.add_object({type: 'sink', rot: 0}, 3900, 3500, 0)
+	let sink = f.objects.at(-1)
+	assert(sink.is_valid)
+	assert.equal(sink.rot, 0)
+	assert.deepEqual(f.house.get_object_box(f, sink, bounds),
+		[3600, 3100, 4200, 3550])
+	// the top edge, facing up.
+	f.add_object({type: 'sink', rot: 0}, 4500, 3100, 0)
+	assert.equal(f.objects.at(-1).rot, 180)
+	assert.deepEqual(f.house.get_object_box(f, f.objects.at(-1), bounds),
+		[4200, 3050, 4800, 3500])
+	// centred across, clamped along.
+	f.add_object({type: 'stovetop', rot: 0}, 3100, 3200, 0)
+	let stovetop = f.objects.at(-1)
+	assert(stovetop.is_valid)
+	assert.equal(stovetop.rot, 0)
+	assert.deepEqual(f.house.get_object_box(f, stovetop, bounds),
+		[3000, 3040, 3600, 3560])
+	// resizing snaps to the size step; with nosnap (ctrl), to whole mm.
+	let s = f.start_resize_object(stovetop, 1, 'w')
+	s.resize(37, 0, 0)
+	assert.equal(stovetop.w, 650)
+	s.resize(37, 0, 0, true)
+	assert.equal(stovetop.w, 637)
+	s.stop()
+	// off the countertop: invalid.
+	f.add_object({type: 'sink', rot: 0}, 1000, 1000, 0)
+	assert(!f.objects.at(-1).is_valid)
+	// a new countertop goes before the sinks and stovetops.
+	f.add_object({type: 'countertop', rot: 0}, 3900, 6000, 0)
+	assert.deepEqual(Array.from(f.objects, object => object.type), ['countertop',
+		'countertop', 'sink', 'sink', 'stovetop', 'sink'])
+	// a countertop against a wall: only the other long edge is a front edge.
+	s = f.start_move_object(f.objects[1])
+	s.move(0, -5600, 500)
+	s.stop()
+	let [x1, y1, x2, y2] = f.house.get_object_box(f, f.objects[1], bounds)
+	f.add_object({type: 'stovetop', rot: 180}, (x1 + x2) / 2, y1 + 300, 0)
+	assert.equal(f.objects.at(-1).rot, 0)
+	assert.equal(f.objects.at(-1).y, y1 + 40)
+})
+
 // stairs -------------------------------------------------------------------
 
 function stair_house(height = 2800, objects, lower_lines) {

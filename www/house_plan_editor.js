@@ -25,7 +25,8 @@ let floor_names = [
 ]
 
 // plan units are mm.
-let format_length = d => format_kcount(d / 1e3, 2)+'m'
+// ctrl held: mm precision, to show sizes that ctrl leaves unsnapped.
+let format_length = d => format_kcount(d / 1e3, ui.keypressed('ctrl') ? 3 : 2)+'m'
 let format_area = a => format_kcount(abs(a) / 1e6, 2)+' m\u00b2'
 
 //// SETTINGS ----------------------------------------------------------------
@@ -801,7 +802,7 @@ function create_floor_editor(id) {
 
 		cx.save()
 
-		cx.font = 'bold 14px sans-serif'
+		cx.font = 'bold 15px sans-serif'
 		let m = ui.measure_text(s)
 		let w = m.width
 
@@ -1186,11 +1187,15 @@ function create_floor_editor(id) {
 		for (let dir = 0; dir < 4; dir++)
 			object_dims[dir*5] = Infinity
 		let rects = s.house.get_object_rects(plan, object, object_rects)
+		let object_type = s.house.object_types[object.type]
 		let is_overlapping = false
 		for (let other of plan.objects) {
 			let other_type = s.house.object_types[other.type]
 			if (other == object || other_type.opens_room
 				|| other_type.marks_terrace)
+				continue
+			if (object_type.placed_on == other.type
+				|| other_type.placed_on == object.type)
 				continue
 			if (other_type.in_wall)
 				s.house.get_opening_hole(plan, other, other_rects).length = 4
@@ -1836,6 +1841,58 @@ function create_floor_editor(id) {
 		cx.stroke()
 	}
 
+	/// sink ------------------------------------------------------------------
+
+	object_views.sink = {
+		hit: hit_box,
+		hit_resize: hit_resize_rect,
+		draw_sizes: draw_furniture_sizes,
+	}
+
+	// draw the rim, the basin with its drain and the tap at the top.
+	object_views.sink.draw = function(cx, plan, object) {
+		let {w, l} = object
+		cx.beginPath()
+		cx.rect(0, 0, w, l)
+		cx.roundRect(40, 100, w - 80, l - 140, 40)
+		cx.moveTo(w / 2 + 25, 100 + (l - 140) / 2)
+		cx.arc(w / 2, 100 + (l - 140) / 2, 25, 0, 2 * PI)
+		cx.moveTo(w / 2 + 20, 50)
+		cx.arc(w / 2, 50, 20, 0, 2 * PI)
+		cx.fillStyle = ui.color_css('bg')
+		cx.fill('evenodd')
+		cx.stroke()
+	}
+
+	/// stovetop --------------------------------------------------------------
+
+	object_views.stovetop = {
+		hit: hit_box,
+		hit_resize: hit_resize_rect,
+		draw_sizes: draw_furniture_sizes,
+	}
+
+	// draw the glass and the burners, about one per 300 mm each way.
+	object_views.stovetop.draw = function(cx, plan, object) {
+		let {w, l} = object
+		let col_n = max(1, round(w / 300))
+		let row_n = max(1, round(l / 300))
+		let cell_w = w / col_n, cell_h = l / row_n
+		let r = min(cell_w, cell_h) * .35
+		cx.beginPath()
+		cx.rect(0, 0, w, l)
+		for (let i = 0; i < col_n; i++) {
+			for (let j = 0; j < row_n; j++) {
+				let x = (i + .5) * cell_w, y = (j + .5) * cell_h
+				cx.moveTo(x + r, y)
+				cx.arc(x, y, r, 0, 2 * PI)
+			}
+		}
+		cx.fillStyle = ui.color_css('bg')
+		cx.fill('evenodd')
+		cx.stroke()
+	}
+
 	/// stair -----------------------------------------------------------------
 
 	object_views.stair = {
@@ -2223,7 +2280,7 @@ function create_floor_editor(id) {
 		cx.clip()
 
 		cx.translate(x00, y00)
-		cx.font = 'bold 14px sans-serif'
+		cx.font = 'bold 15px sans-serif'
 
 		// grid
 		draw_grids(cx,w, h)
@@ -2258,7 +2315,7 @@ function create_floor_editor(id) {
 		// the keys that apply to what is under the pointer.
 		let s = hit_roof_side ? 'CTRL=No Snap  SHIFT=All Eaves'
 			: hit_roof_face ? 'CTRL=Fine  SHIFT=All Faces'
-			: hit_object ? 'CTRL=No Snap  DEL=Remove  CTRL+C=Copy'
+			: hit_object ? 'CTRL=No Snap  SHIFT=Pan  DEL=Remove  CTRL+C=Copy'
 			: 'CTRL=No Snap  SHIFT=Pan'
 		cx.fillText(s, m, h - m)
 		}

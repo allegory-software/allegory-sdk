@@ -66,7 +66,6 @@ function house_plan(t) {
 	let origin_local_box = [0, 0, 0, 0] // temporary local box for the origin
 	let origin_point = v2() // temporary origin for coordinate conversions
 	let box = [0, 0, 0, 0] // temporary bounding box for placing and resizing
-	let countertop_edge = [0, 0, 0, 0] // temporary [x1, y1, x2, y2] of an edge
 
 	function snap_length(x) {
 		return x == null ? x : round(x)
@@ -107,9 +106,20 @@ function house_plan(t) {
 				let value = object[name] ?? object_type.fields[name]
 				object1[name] = isarray(value) ? value.slice() : value
 			}
-			a.push(object1)
+			push_object(a, object1)
 		}
 		return a
+	}
+
+	// insert the object after the last object with the same or a lower
+	// z_index, so that objects with a higher z_index are placed after it and
+	// drawn over it.
+	function push_object(objects, object) {
+		let z_index = object_types[object.type].z_index ?? 0
+		let i = objects.length
+		while (i > 0 && (object_types[objects[i-1].type].z_index ?? 0) > z_index)
+			i--
+		insert(objects, i, object)
 	}
 
 	// add one object to the ground for each type that has none there. each
@@ -122,7 +132,7 @@ function house_plan(t) {
 		let x = -750
 		for (let type in object_types) {
 			if (!ground_types.has(type))
-				house.ground_objects.push(copy_objects(
+				push_object(house.ground_objects, copy_objects(
 					[{type: type, x: x, y: -2000, rot: 0}])[0])
 			x += 1500
 		}
@@ -338,7 +348,7 @@ function house_plan(t) {
 					i++
 				} else {
 					objects.splice(i, 1)
-					house.ground_objects.push(object)
+					push_object(house.ground_objects, object)
 					if (object_type.marks_terrace) // the floor below's terraces.
 						house.roof_geometry_no++
 				}
@@ -1309,7 +1319,7 @@ function house_plan(t) {
 			let objects = object.on_floor ? floor.objects : house.ground_objects
 			if (objects != objects0) {
 				remove_value(objects0, object)
-				objects.push(object)
+				push_object(objects, object)
 			}
 			fix_walls_and_rooms(object)
 		}
@@ -1419,7 +1429,7 @@ function house_plan(t) {
 			object.x = x
 			object.y = y
 			begin_edit(floor)
-			house.ground_objects.push(object)
+			push_object(house.ground_objects, object)
 			move_object(object, x, y, snap_d)
 			commit_edit(floor)
 		}
@@ -2323,7 +2333,14 @@ function house_plan(t) {
 
 	// return the allowed size nearest to size without exceeding max_size.
 	// Accept a list or range of sizes. Return null if no allowed size fits.
-	function snap_object_size(sizes, size, max_size) {
+	// With nosnap, allow any whole size between the smallest and the largest.
+	function snap_object_size(sizes, size, max_size, nosnap) {
+		if (nosnap) {
+			let lo = isarray(sizes) ? min(...sizes) : sizes.min
+			let hi = isarray(sizes) ? max(...sizes) : sizes.max ?? Infinity
+			let size1 = min(round(clamp(size, lo, hi)), Math.floor(max_size))
+			return size1 < lo ? null : size1
+		}
 		if (isarray(sizes)) {
 			let size1 = null
 			for (let size2 of sizes)
@@ -2358,9 +2375,9 @@ function house_plan(t) {
 		let limit = object_type.limit_size
 		let max_size = limit ? limit(plan, object, ux, uy) : Infinity
 		let snap = is_l ? object_type.snap_l : null
-		return {resize: function(dx, dy, snap_d = 0) {
+		return {resize: function(dx, dy, snap_d = 0, nosnap = false) {
 			let size = snap_object_size(sizes, size0 + dx * ux + dy * uy,
-				max_size)
+				max_size, nosnap)
 			if (size == null)
 				return
 			if (snap)
@@ -2716,9 +2733,9 @@ function house_plan(t) {
 		if (axis == 'l')
 			max_size -= is_futon ? object.l : object.futon_length
 		let sizes = object_types.couch.sizes[field]
-		return {resize: function(dx, dy) {
+		return {resize: function(dx, dy, snap_d, nosnap = false) {
 			let size = snap_object_size(sizes, size0 + dx * ux + dy * uy,
-				max_size)
+				max_size, nosnap)
 			if (size == null)
 				return
 			object[field] = size
@@ -2792,9 +2809,9 @@ function house_plan(t) {
 		let [ux, uy] = object_vector_to_plan(object,
 			is_l ? 0 : side, is_l ? side : 0, object_point1)
 		let sizes = object_types.round_table.sizes.w
-		return {resize: function(dx, dy) {
+		return {resize: function(dx, dy, snap_d, nosnap = false) {
 			let w = snap_object_size(sizes, w0 + 2 * (dx * ux + dy * uy),
-				Infinity)
+				Infinity, nosnap)
 			object.w = w
 			object.x = x0 - (w - w0) / 2
 			object.y = y0 - (w - w0) / 2
@@ -3015,8 +3032,7 @@ function house_plan(t) {
 		let i = floor((handle-1) / 3)*2, j = (i+2) % n
 		let zone = (handle-1) % 3
 		let nx = sign(a[j+1]-a[i+1]), ny = -sign(a[j]-a[i])
-		let [x1, y1, x2, y2] = get_countertop_edge(object, handle,
-			countertop_edge)
+		let [x1, y1, x2, y2] = get_countertop_edge(object, handle, [])
 		let [ox, oy] = get_object_origin(plan, object, object_point1)
 
 		// how far the edge can move before it passes its neighbours' ends,
@@ -3121,6 +3137,135 @@ function house_plan(t) {
 			object.x = ox + bx1; object.y = oy + by1
 		}
 		return s
+	}
+
+	/// sink and stovetop -----------------------------------------------------
+
+	object_types.sink = {
+		w: 600,
+		fields: {l: 450},
+		sizes: {
+			w: {min: 300, max: 1200, step: 50},
+			l: {min: 300, max: 600, step: 10},
+		},
+		z_index: 1, // placed and drawn after countertops
+		placed_on: 'countertop', // overlapping countertops is allowed
+		countertop_inset: 50, // from the front edge
+		place: place_on_countertop,
+		limit_size: limit_countertop_object_size,
+		local_box: rect_local_box,
+		start_resize: start_resize_rect,
+	}
+
+	object_types.stovetop = {
+		w: 600,
+		fields: {l: 520},
+		sizes: {
+			w: {min: 300, max: 900, step: 50},
+			l: {min: 300, max: 600, step: 10},
+		},
+		z_index: 1, // placed and drawn after countertops
+		placed_on: 'countertop', // overlapping countertops is allowed
+		place: place_on_countertop,
+		limit_size: limit_countertop_object_size,
+		local_box: rect_local_box,
+		start_resize: start_resize_rect,
+	}
+
+	// find the countertop slab that has room for the object, nearest to its
+	// box centre within snap_d. A slab lies between a front edge (not a free
+	// end, not against a wall) and the opposite edge, along both. Return
+	// [x, y, rot, lo, hi, depth]: the object's box corner and its rotation
+	// facing the front edge, the slab's span along the edge and its depth.
+	// Inset the object from the front edge by the type's countertop_inset,
+	// or centre it across the slab without one. Return null if none is found.
+	function find_countertop_slab(plan, object, snap_d) {
+		let inset = object_types[object.type].countertop_inset
+		let w = object.w, l = object.l
+		let [x1, y1, x2, y2] = get_object_box(plan, object, box)
+		let cx = (x1 + x2) / 2, cy = (y1 + y2) / 2
+		let min_d = Infinity, min_gap = Infinity
+		let found = null
+		for (let countertop of plan.objects) {
+			if (countertop.type != 'countertop')
+				continue
+			let a = get_countertop_points(plan, countertop, [])
+			let n = a.length
+			for (let i = 2; i < n; i += 2) {
+				if (i == n/2) // free end
+					continue
+
+				// the edge i..j and the opposite edge k..k2: their coordinates
+				// across (c, c2) and the span that they share along (lo..hi).
+				let j = (i+2) % n, k = n-i, k2 = (k+2) % n
+				let is_v = a[i] == a[j]
+				let m = is_v ? 1 : 0 // offset of the coordinate along
+				let c = a[i+1-m], c2 = a[k+1-m]
+				let lo = max(min(a[i+m], a[j+m]), min(a[k+m], a[k2+m]))
+				let hi = min(max(a[i+m], a[j+m]), max(a[k+m], a[k2+m]))
+				let depth = abs(c - c2)
+				if (w > hi - lo || l + (inset ?? 0) > depth)
+					continue
+
+				// the distance from the box centre to the slab.
+				let mc = is_v ? cy : cx, ac = is_v ? cx : cy
+				let d = Math.hypot(max(lo - mc, 0, mc - hi),
+					max(min(c, c2) - ac, 0, ac - max(c, c2)))
+				if (d > snap_d || d > min_d)
+					continue
+
+				// edge against a wall: not a front edge.
+				let hx = abs(a[i] - a[j]) / 2, hy = abs(a[i+1] - a[j+1]) / 2
+				if (find_wall_side(plan, (a[i] + a[j]) / 2, (a[i+1] + a[j+1]) / 2,
+						hx, hy, 0, is_v, !is_v))
+					continue
+
+				// the box corner across (am) and along (mm), and the rotation
+				// that turns the object's local bottom towards the front edge.
+				// Same distance: prefer the nearer front edge, then the current
+				// rotation.
+				let dir = sign(c - c2) // from the opposite edge to the edge
+				let rot = is_v ? (dir > 0 ? 270 : 90) : (dir > 0 ? 0 : 180)
+				let am = inset == null ? round((c + c2 - l) / 2)
+					: dir > 0 ? c - inset - l : c + inset
+				let mm = clamp(round(mc - w / 2), lo, hi - w)
+				let gap = abs(am + l / 2 - ac)
+				if (d == min_d
+					&& !(gap < min_gap || gap == min_gap && rot == object.rot))
+					continue
+				min_d = d
+				min_gap = gap
+				found ??= []
+				found[0] = is_v ? am : mm; found[1] = is_v ? mm : am
+				found[2] = rot; found[3] = lo; found[4] = hi; found[5] = depth
+			}
+		}
+		return found
+	}
+
+	// put the object on the slab that find_countertop_slab() finds. Without
+	// one, leave it in place and not on the floor.
+	function place_on_countertop(plan, object, snap_d) {
+		let slab = find_countertop_slab(plan, object, snap_d)
+		object.on_floor = !!slab
+		if (slab) {
+			let [x, y, rot] = slab
+			object.x = x; object.y = y; object.rot = rot
+		}
+	}
+
+	// return the maximum width or length on the object's slab while keeping
+	// the opposite end fixed. Return Infinity if the object is off a slab.
+	function limit_countertop_object_size(plan, object, ux, uy) {
+		let slab = find_countertop_slab(plan, object, 0)
+		if (!slab)
+			return Infinity
+		let [, , rot, lo, hi, depth] = slab
+		let is_v = rot % 180 == 90 // the front edge runs along plan y
+		if (is_v ? ux : uy) // across the slab
+			return depth - (object_types[object.type].countertop_inset ?? 0)
+		let [x1, y1, x2, y2] = get_object_box(plan, object, box)
+		return (ux || uy) > 0 ? hi - (is_v ? y1 : x1) : (is_v ? y2 : x2) - lo
 	}
 
 	/// stair -----------------------------------------------------------------
