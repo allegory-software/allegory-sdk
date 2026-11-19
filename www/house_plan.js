@@ -10,7 +10,7 @@ const {
 	profile_time, empty_array, array_set,
 } = glue
 
-const {bbox2, poly2, v2} = Math3D
+const {bbox2, poly2, v2, mat3} = Math3D
 
 G.DEBUG_PLAN = 0
 G.DEBUG_PLAN_LOAD = 1
@@ -182,7 +182,6 @@ function house_plan(t) {
 			})
 			redo_stack.length = 0
 			house.edit_no++
-			house.roof_geometry_no++ // terrace tags moved: other roof areas.
 		}
 		edit0 = null
 	}
@@ -255,9 +254,39 @@ function house_plan(t) {
 		floor.fixed_h = snap_length(t.h)
 		floor.bb = bbox2()
 		floor.open_rooms = new Set() // {cycle} rooms with an open_room tag
-		// [{type:, x:, y:, rot:, w:, seg:}, ...] objects on this floor's walls
+		/* objects on this floor: [object, ...]. object fields:
+			type: the name of an object type in house.object_types.
+			x, y: the object's position in whole millimetres. For furniture,
+			     stairs and countertops, this is the corner of the plan bounding
+			     box with the smallest x and y. For an opening, this is the end
+			     with the smaller coordinate along the wall, on its centre
+			     line. For a tag, this is the tag's point.
+			rot: rotation in degrees, from 0 up to but not including 360.
+			     Use multiples of 90, or an additional 45 for a corner chair.
+			w: width in millimetres, for types that have a width.
+			seg: the wall segment containing the opening, or null. Not saved.
+			side_x: the vertical room side that the object snapped to, or null.
+			side_y: the horizontal room side that the object snapped to, or
+			     null. The placement functions set these fields. Neither is
+			     saved. A room side is [dir, c, m1, m2]:
+			       dir: direction towards the wall: 0 north, 1 east, 2 south,
+			            3 west.
+			       c: the wall face's x coordinate for a vertical side, or its
+			          y coordinate for a horizontal side.
+			       m1, m2: the endpoints' y coordinates for a vertical side, or
+			               their x coordinates for a horizontal side. From m1
+			               towards m2, the room interior is on the left.
+			snap_side: the first room side that the furniture snapped to,
+			     before snapping to a perpendicular side. Null if absent.
+			     Not saved.
+			on_floor: true if the object belongs to floor.objects; false if it
+			     belongs to house.ground_objects. The type's place() function
+			     checks whether the object fits on the floor. Not saved.
+		*/
 		floor.objects = copy_objects(t.objects ?? [])
 		let wall_geometry
+		let roof_geometry // floor.make_roof_geometry()'s result
+		let roof_geometry_no // house.roof_geometry_no of roof_geometry
 
 		floor.room_sides = [] // [[dir, c, m1, m2], ...] free space on the left
 
@@ -290,219 +319,13 @@ function house_plan(t) {
 				} else {
 					objects.splice(i, 1)
 					house.ground_objects.push(object)
+					if (object_type.marks_terrace) // the floor below's terraces.
+						house.roof_geometry_no++
 				}
 			}
 			profile_time('plan.objects', t0)
 		}
 		floor.fix_objects = fix_objects
-
-		// geometry queries ----------------------------------------------------
-
-		floor.wall_side_min = wall_side_min
-
-		// the room side nearest to the rect of half sizes (hx, hy) around (x, y),
-		// among the vertical sides (want_v) or the horizontal sides (want_h) that
-		// the rect overlaps along: [dir, c, m1, m2] if it is within snap_d.
-		// reuse out when supplied; otherwise allocate only for a found side.
-		// a room's free space is on the left of the walking direction of its
-		// sides, so the wall is on the right.
-		floor.find_wall_side = function(x, y, hx, hy, snap_d,
-			want_v, want_h, out) {
-			let min_gap = Infinity
-			let found_side
-			for (let side of floor.room_sides) {
-				let is_v = side[0] % 2 == 1
-				if (is_v ? !want_v : !want_h)
-					continue
-				if (!wall_side_overlaps(side, x, y, hx, hy))
-					continue
-				let gap = abs(wall_side_min(side, 2 * hx, 2 * hy)
-					- (is_v ? x - hx : y - hy))
-				if (gap <= snap_d && gap < min_gap) {
-					min_gap = gap
-					found_side = array_set(found_side ?? out ?? [], side)
-				}
-			}
-			return found_side
-		}
-
-		// the rect of half sizes (hx, hy) around (x, y) is inside the plan's
-		// rooms, touching their sides: no side crosses it and its center is
-		// inside an odd number of room rings.
-		floor.is_rect_in_rooms = function(x, y, hx, hy) {
-			let is_odd = false
-			for (let side of floor.room_sides) {
-				let [dir, c, m1, m2] = side
-				let is_v = dir % 2 == 1
-				let m_lo = min(m1, m2)
-				let m_hi = max(m1, m2)
-				let across = is_v ? x : y
-				let h_across = is_v ? hx : hy
-				if (c > across - h_across && c < across + h_across
-					&& wall_side_overlaps(side, x, y, hx, hy)
-				)
-					return false
-				if (is_v && c > x && m_lo <= y && y < m_hi)
-					is_odd = !is_odd
-			}
-			return is_odd
-		}
-
-		// find a side and rotation for the allowed rectangle faces;
-		// prefer the previous side within the switching margin.
-		floor.find_room_side = function(x, y, w, l, rot0, faces,
-			snap_d, snap_margin, side0) {
-			let min_gap = Infinity
-			let found_side, found_rot
-			let found_old = false
-			for (let side of floor.room_sides) {
-				let [dir, c, m1, m2] = side
-				let is_v = dir % 2 == 1
-				let face = (dir - rot0 / 90 + 4) % 4
-				let rot = faces.includes(face) ? rot0
-					: (dir - faces[0] + 4) % 4 * 90
-				let is_turned = rot % 180 == 90
-				let hx = (is_turned ? l : w) / 2
-				let hy = (is_turned ? w : l) / 2
-				if (!wall_side_overlaps(side, x, y, hx, hy))
-					continue
-				let gap = abs(wall_side_min(side, 2 * hx, 2 * hy)
-					- (is_v ? x - hx : y - hy))
-				if (gap > snap_d)
-					continue
-				let is_old = side0 && side0[0] == dir && side0[1] == c
-					&& side0[2] == m1 && side0[3] == m2
-				if (is_old)
-					gap -= snap_margin
-				let is_old_tie = gap == min_gap && is_old && !found_old
-				if (gap < min_gap || is_old_tie) {
-					min_gap = gap
-					found_side = array_set(found_side ?? [], side)
-					found_rot = rot
-					found_old = is_old
-				}
-			}
-			if (found_side)
-				return {side: found_side, rot: found_rot}
-		}
-
-		// find the nearest room boundary along the resize axis
-		// to limit growth from the fixed edge.
-		floor.limit_room_rect = function(x, y, hx, hy, is_x, dir, end) {
-			let limit_c = dir * Infinity
-			for (let side of floor.room_sides) {
-				// only the sides across the width.
-				if ((side[0] % 2 == 1) != is_x)
-					continue
-				if (!wall_side_overlaps(side, x, y, hx, hy))
-					continue
-				let c = side[1]
-				if (dir * (c - end) > 0 && dir * (c - limit_c) < 0)
-					limit_c = c
-			}
-			return dir * (limit_c - end)
-		}
-
-		// find a room-side snap for a rectangle end without shrinking it
-		// below its minimum size.
-		floor.snap_room_edge = function(x, y, hx, hy, is_x, dir,
-			size, min_size, snap_d) {
-			let across = is_x ? x : y
-			let min_gap = snap_d, shift = 0
-			for (let side of floor.room_sides) {
-				if ((side[0] % 2 == 1) != is_x)
-					continue
-				if (!wall_side_overlaps(side, x, y, hx, hy))
-					continue
-				let gap = side[1] - across
-				if (size + dir * gap < min_size)
-					continue
-				if (abs(gap) <= min_gap) {
-					min_gap = abs(gap)
-					shift = dir * gap
-				}
-			}
-			return shift
-		}
-
-		// find a length snap to a wall face spanning the full rectangle width.
-		floor.snap_wall_end = function(x, y, w, rot, l, snap_d) {
-			let r = rot * rad
-			let ux = round(cos(r)), uy = round(sin(r))
-			let length1 = l
-			let min_gap = snap_d
-			for (let seg of floor.segs) {
-				if (seg.is_v != !!uy)
-					continue
-				let along = seg.is_v ? y : x
-				if (along - w / 2 < seg.wall_m1
-					|| along + w / 2 > seg.wall_m2)
-					continue
-				let c = seg.is_v ? x : y
-				let sign = seg.is_v ? -uy : ux
-				for (let face of [seg.wall_a1, seg.wall_a2]) {
-					let length = (face - c) * sign
-					let gap = abs(length - l)
-					if (length > 0 && gap <= min_gap) {
-						min_gap = gap
-						length1 = length
-					}
-				}
-			}
-			return length1
-		}
-
-		// find a wall connection with room for the rectangle in the opening
-		// and slab across the whole landing edge beyond the wall.
-		floor.find_slab_connection = function(x, y, w, l, rot0, snap_d) {
-			let floor0 = house.floors[floor.i-1]
-			if (!floor0)
-				return
-			let openings = make_opening_paths(floor0, floor)
-			if (!openings.length)
-				return
-			let roof_paths0 = []
-			for (let area of floor0.make_areas())
-				if (area.kind == 'roof')
-					for (let path of area.paths)
-						roof_paths0.push(path)
-			let slab = slab_paths(floor0, floor, roof_paths0, openings)
-			let min_gap = Infinity, found_x, found_y, found_rot
-			for (let seg of floor.segs) {
-				let is_v = seg.is_v
-				let along = is_v ? y : x
-				let m1 = along - w / 2, m2 = along + w / 2
-				if (m1 < seg.wall_m1 || m2 > seg.wall_m2)
-					continue
-				for (let side = 0; side < 2; side++) {
-					let c = side ? seg.wall_a2 : seg.wall_a1
-					let rot = is_v ? (side ? 270 : 90) : (side ? 0 : 180)
-					if (!snap_d && rot != rot0)
-						continue
-					let gap = abs(c - (is_v ? x : y))
-					if (gap > snap_d)
-						continue
-					if (gap >= min_gap)
-						continue
-					let end = c + (side ? l : -l)
-					let lo = min(c, end), hi = max(c, end)
-					if (!is_rect_in_paths(openings,
-						is_v ? lo : m1, is_v ? m1 : lo,
-						is_v ? hi : m2, is_v ? m2 : hi))
-						continue
-					let beyond = side ? seg.wall_a1 : seg.wall_a2
-					if (!is_slab_side_covered(slab, is_v, beyond, m1, m2,
-						side ? -1 : 1))
-						continue
-					min_gap = gap
-					found_x = is_v ? c : x
-					found_y = is_v ? y : c
-					found_rot = rot
-				}
-			}
-			if (found_rot != null)
-				return {x: found_x, y: found_y, rot: found_rot}
-		}
 
 		// the faces of the walls along cycle c, offset by d: on each seg, the
 		// across coordinate of the face on the side that c walks: seg.wall_a1
@@ -976,6 +799,52 @@ function house_plan(t) {
 			return faces
 		}
 
+		// the roof over the floor's roof areas and the half-walls around its
+		// terraces, made again when house.roof_geometry_no changes:
+		// {roof_paths, terrace_paths, roof_faces, eave_sides, shared_edges,
+		// half_wall_paths}. roof_paths, terrace_paths: the grid paths of the
+		// roof areas and of the terrace areas. eave_sides, shared_edges: as
+		// in make_roof_faces().
+		floor.make_roof_geometry = function() {
+			if (roof_geometry_no == house.roof_geometry_no)
+				return roof_geometry
+
+			// split the areas into roof areas and terrace areas.
+			let roof_areas = []
+			let terrace_areas = []
+			let roof_paths = []
+			let terrace_paths = []
+			for (let area of floor.make_areas()) {
+				if (area.kind == 'roof') {
+					roof_areas.push(area)
+					for (let path of area.paths)
+						roof_paths.push(path)
+				} else {
+					terrace_areas.push(area)
+					for (let path of area.paths)
+						terrace_paths.push(path)
+				}
+			}
+
+			// the roof over the roof areas and the half-walls around the
+			// terraces.
+			let eave_sides = []
+			let shared_edges = []
+			roof_geometry = {
+				roof_paths: roof_paths,
+				terrace_paths: terrace_paths,
+				roof_faces: roof_areas.length
+					? floor.make_roof_faces(roof_areas, eave_sides, shared_edges)
+					: [],
+				eave_sides: eave_sides,
+				shared_edges: shared_edges,
+				half_wall_paths: terrace_areas.length
+					? floor.make_half_wall_paths(terrace_areas) : [],
+			}
+			roof_geometry_no = house.roof_geometry_no
+			return roof_geometry
+		}
+
 		// roof editing --------------------------------------------------------
 
 		// the point on the wall line of an eave side from make_roof_faces()
@@ -1305,14 +1174,8 @@ function house_plan(t) {
 		// heights -------------------------------------------------------------
 
 		floor.roof_height = function() {
-			let areas = []
-			for (let area of floor.make_areas())
-				if (area.kind == 'roof')
-					areas.push(area)
 			let wall_z = floor.z + floor.h
-			let z = wall_z
-			if (areas.length)
-				z = max_face_z(floor.make_roof_faces(areas), z)
+			let z = max_face_z(floor.make_roof_geometry().roof_faces, wall_z)
 			return z - wall_z
 		}
 
@@ -1382,13 +1245,16 @@ function house_plan(t) {
 
 		// objects -------------------------------------------------------------
 
-		// the object changed: its wall's holes and the open rooms.
+		// the object changed: its wall's holes, the open rooms and the
+		// terraces of the floor below.
 		function fix_walls_and_rooms(object) {
 			let object_type = house_object_types[object.type]
 			if (object_type.in_wall)
 				wall_geometry = null
 			if (object_type.opens_room)
 				fix_open_rooms()
+			if (object_type.marks_terrace)
+				house.roof_geometry_no++
 		}
 
 		let object_origin = v2() // [x, y] of the moved object's origin
@@ -1476,13 +1342,16 @@ function house_plan(t) {
 		// to the nearest size in the type's sizes. s.stop() commits the
 		// resize as one edit.
 		floor.start_resize_object = function(object, side, axis = 'w') {
-			let s = start_edit()
-			let resize = house_object_types[object.type]
-				.start_resize(floor, object, side, axis).resize
-			s.resize = function(dx, dy, snap_d) {
-				resize(dx, dy, snap_d)
+			begin_edit(floor)
+			let s = house_object_types[object.type]
+				.start_resize(floor, object, side, axis)
+			let resize = s.resize
+			s.resize = function(dx, dy, snap_d, nosnap) {
+				resize(dx, dy, snap_d, nosnap)
 				place_object(object, 0)
 			}
+			s.stop = stop_edit
+			s.cancel = cancel_edit
 			return s
 		}
 
@@ -2109,37 +1978,33 @@ function max_face_z(faces, z) {
 		let roof_paths_by_floor = [] // [[path, ...], ...] grid paths
 		let roof_faces_by_floor = [] // [faces, ...]
 		let eave_sides_by_floor = [] // [[side, ...], ...] from make_roof_faces()
-		let terrace_paths = [] // grid paths of top_floor's terraces
+		let terrace_paths = empty_array // grid paths of top_floor's terraces
 		for (let floor_i = 0; floor_i < floor_n; floor_i++) {
 			let floor = floors[floor_i]
-			let roof_areas = []
-			let roof_paths = []
-			let terrace_areas = [] // below top_floor: for the half-walls
-			if (!(floor == top_floor && no_roof)) {
-				for (let area of floor.make_areas()) {
-					if (area.kind == 'roof') {
-						roof_areas.push(area)
-						for (let path of area.paths)
-							roof_paths.push(path)
-					} else if (floor == top_floor) {
-						for (let path of area.paths)
-							terrace_paths.push(path)
-					} else {
-						terrace_areas.push(area)
-					}
-				}
+
+			// top_floor without its roofs: no roof areas and no terraces.
+			if (floor == top_floor && no_roof) {
+				roof_paths_by_floor.push(empty_array)
+				eave_sides_by_floor.push(empty_array)
+				roof_faces_by_floor.push(empty_array)
+				continue
 			}
-			// half-walls around the terraces: on the slab of the floor above.
-			if (terrace_areas.length) {
+
+			let roof_geometry = floor.make_roof_geometry()
+
+			// terraces of top_floor: for the slab on top of it. terraces of
+			// the other floors: half-walls around them on the slab above.
+			if (floor == top_floor) {
+				terrace_paths = roof_geometry.terrace_paths
+			} else if (roof_geometry.half_wall_paths.length) {
 				let z = floors[floor_i+1].z + slab_t
-				add_level_prism(floor.make_half_wall_paths(terrace_areas),
+				add_level_prism(roof_geometry.half_wall_paths,
 					z, z + house.half_wall_h)
 			}
-			roof_paths_by_floor.push(roof_paths)
-			let eave_sides = []
-			eave_sides_by_floor.push(eave_sides)
-			roof_faces_by_floor.push(roof_areas.length
-				? floor.make_roof_faces(roof_areas, eave_sides) : [])
+
+			roof_paths_by_floor.push(roof_geometry.roof_paths)
+			eave_sides_by_floor.push(roof_geometry.eave_sides)
+			roof_faces_by_floor.push(roof_geometry.roof_faces)
 		}
 
 		// walls: from the top of the floor's slab to the top of the floor.
@@ -2227,6 +2092,976 @@ function max_face_z(faces, z) {
 		profile_time('prism.build', t0)
 		return prism_union(prisms)
 	}
+
+	// geometry queries -------------------------------------------------------
+
+	// the room side nearest to the rect of half sizes (hx, hy) around (x, y),
+	// among the vertical sides (want_v) or the horizontal sides (want_h) that
+	// the rect overlaps along: [dir, c, m1, m2] if it is within snap_d.
+	// reuse out when supplied; otherwise allocate only for a found side.
+	// a room's free space is on the left of the walking direction of its
+	// sides, so the wall is on the right.
+	function find_wall_side(floor, x, y, hx, hy, snap_d,
+		want_v, want_h, out) {
+		let min_gap = Infinity
+		let found_side
+		for (let side of floor.room_sides) {
+			let is_v = side[0] % 2 == 1
+			if (is_v ? !want_v : !want_h)
+				continue
+			if (!wall_side_overlaps(side, x, y, hx, hy))
+				continue
+			let gap = abs(wall_side_min(side, 2 * hx, 2 * hy)
+				- (is_v ? x - hx : y - hy))
+			if (gap <= snap_d && gap < min_gap) {
+				min_gap = gap
+				found_side = array_set(found_side ?? out ?? [], side)
+			}
+		}
+		return found_side
+	}
+
+	// the rect of half sizes (hx, hy) around (x, y) is inside the plan's
+	// rooms, touching their sides: no side crosses it and its center is
+	// inside an odd number of room rings.
+	function is_rect_in_rooms(floor, x, y, hx, hy) {
+		let is_odd = false
+		for (let side of floor.room_sides) {
+			let [dir, c, m1, m2] = side
+			let is_v = dir % 2 == 1
+			let m_lo = min(m1, m2)
+			let m_hi = max(m1, m2)
+			let across = is_v ? x : y
+			let h_across = is_v ? hx : hy
+			if (c > across - h_across && c < across + h_across
+				&& wall_side_overlaps(side, x, y, hx, hy)
+			)
+				return false
+			if (is_v && c > x && m_lo <= y && y < m_hi)
+				is_odd = !is_odd
+		}
+		return is_odd
+	}
+
+	// object coordinates -----------------------------------------------------
+
+	let object_matrix = mat3()
+	let object_point = v2()
+	let object_point1 = v2()
+	let local_box = [0, 0, 0, 0]
+
+	// reuse one rotation matrix. Round quarter turns to keep wall alignment
+	// exact.
+	function object_rotation(rot) {
+		let m = object_matrix.reset().rotate(-rot * rad)
+		if (rot % 90 == 0) {
+			m[0] = round(m[0]); m[1] = round(m[1])
+			m[3] = round(m[3]); m[4] = round(m[4])
+		}
+		return m
+	}
+
+	// convert a displacement from object coordinates to plan coordinates.
+	function object_vector_to_plan(object, x, y, out) {
+		return object_point.set(x, y).transform(object_rotation(object.rot), out)
+	}
+
+	// convert a displacement from plan coordinates to object coordinates.
+	function plan_vector_to_object(object, x, y, out) {
+		return object_point.set(x, y).transform(object_rotation(-object.rot),
+			out)
+	}
+
+	// return the object's plan bounding box [x1, y1, x2, y2].
+	function get_object_box(plan, object, out) {
+		return house_object_types[object.type].box(plan, object, out)
+	}
+
+	// calculate the plan bounding box from object.x, object.y, w and l.
+	// Swap width and length for quarter turns. For diagonal chairs, use the
+	// same box as before the additional 45-degree turn.
+	function rect_box(object, w, l, out) {
+		let is_turned = object.rot % 180 >= 90
+		out[0] = object.x
+		out[1] = object.y
+		out[2] = object.x + (is_turned ? l : w)
+		out[3] = object.y + (is_turned ? w : l)
+		return out
+	}
+
+	let origin_box = [0, 0, 0, 0] // temporary box for the origin
+
+	// return the type's local origin in plan coordinates, or the box centre.
+	function get_object_origin(plan, object, out) {
+		let origin = house_object_types[object.type].origin
+		if (origin)
+			return origin(plan, object, out)
+		let [x1, y1, x2, y2] = get_object_box(plan, object, origin_box)
+		return out.set((x1 + x2) / 2, (y1 + y2) / 2)
+	}
+
+	let origin_point = v2() // temporary origin for coordinate conversions
+
+	// convert a point from object coordinates to plan coordinates.
+	function object_to_plan(plan, object, x, y, out) {
+		let [ox, oy] = get_object_origin(plan, object, origin_point)
+		let m = object_rotation(object.rot).translate(ox, oy)
+		return object_point.set(x, y).transform(m, out)
+	}
+
+	// convert a point from plan coordinates to object coordinates.
+	function plan_to_object(plan, object, x, y, out) {
+		let [ox, oy] = get_object_origin(plan, object, origin_point)
+		return plan_vector_to_object(object, x - ox, y - oy, out)
+	}
+
+	// calculate a plan bounding box after rotating local bounds by rot degrees
+	// and translating their origin to plan coordinates (x, y).
+	function rotated_box(x, y, bounds, rot, out) {
+		let m = object_rotation(rot).translate(x, y)
+		let [x1, y1, x2, y2] = bounds
+		let hx = (x2 - x1) / 2
+		let hy = (y2 - y1) / 2
+		object_point.set((x1 + x2) / 2, (y1 + y2) / 2).transform(m)
+		let wx = abs(m[0]) * hx + abs(m[3]) * hy
+		let wy = abs(m[1]) * hx + abs(m[4]) * hy
+		out[0] = object_point[0] - wx
+		out[1] = object_point[1] - wy
+		out[2] = object_point[0] + wx
+		out[3] = object_point[1] + wy
+		return out
+	}
+
+	let box = [0, 0, 0, 0] // temporary bounding box for placing and resizing
+
+	// rectangle resizing -----------------------------------------------------
+
+	// return the allowed size nearest to size without exceeding max_size.
+	// Accept a list or range of sizes. Return null if no allowed size fits.
+	function snap_object_size(sizes, size, max_size) {
+		if (Array.isArray(sizes)) {
+			let size1 = null
+			for (let size2 of sizes)
+				if (size2 <= max_size
+					&& (size1 == null || abs(size2 - size) < abs(size1 - size))
+				)
+					size1 = size2
+			return size1
+		}
+		let range = sizes
+		size = clamp(size, range.min, range.max ?? Infinity)
+		let size1 = range.min
+			+ round((size - range.min) / range.step) * range.step
+		if (size1 > max_size)
+			size1 = range.min
+				+ Math.floor((max_size - range.min) / range.step) * range.step
+		return size1 < range.min ? null : size1
+	}
+
+	// resize the rectangular object while keeping the opposite end fixed.
+	// When dragging the end with the smaller plan coordinate, update x or y too.
+	function start_resize_rect(plan, object, side, axis = 'w') {
+		let object_type = house_object_types[object.type]
+		let is_l = axis == 'l'
+		// convert the direction of the dragged end to plan coordinates.
+		object_vector_to_plan(object, is_l ? 0 : side, is_l ? side : 0,
+			object_point1)
+		let ux = object_point1[0], uy = object_point1[1]
+		let [x1, y1, x2, y2] = get_object_box(plan, object, box)
+		let size0 = ux ? x2 - x1 : y2 - y1
+		let x0 = object.x, y0 = object.y
+		let sizes = object_type.sizes[axis]
+		let limit = object_type.limit_size
+		let max_size = limit ? limit(plan, object, side, axis) : Infinity
+		let snap = is_l ? object_type.snap_l : null
+		return {resize: function(dx, dy, snap_d = 0) {
+			let size = snap_object_size(sizes, size0 + dx * ux + dy * uy,
+				max_size)
+			if (size == null)
+				return
+			if (snap)
+				size = snap(plan, object, size, snap_d)
+			object[axis] = size
+			object.x = x0 + min(ux, 0) * (size - size0)
+			object.y = y0 + min(uy, 0) * (size - size0)
+		}}
+	}
+
+	// openings ---------------------------------------------------------------
+
+	// test whether the opening runs along the plan y axis.
+	function opening_is_v(object) {
+		return object.rot % 180 == 90
+	}
+
+	// compare positions of openings on the same wall segment. Their x
+	// coordinates match on a vertical wall; their y coordinates match
+	// otherwise.
+	function compare_seg_objects(object1, object2) {
+		return object1.x - object2.x || object1.y - object2.y
+	}
+
+	// return the opening's midpoint on the wall centre line as its local
+	// origin.
+	function opening_origin(plan, object, out) {
+		let is_v = opening_is_v(object)
+		return out.set(object.x + (is_v ? 0 : object.w / 2),
+			object.y + (is_v ? object.w / 2 : 0))
+	}
+
+	// snap the opening to the nearest wall segment within snap_d that has
+	// space. Rotate it if the wall runs along the other axis. Otherwise leave
+	// it in place.
+	function place_opening(plan, object, snap_d) {
+
+		// the nearest wall segment with space for the opening, within snap_d.
+		let [x, y] = opening_origin(plan, object, object_point1)
+		let seg1, m1
+		let min_d = snap_d
+		for (let seg of plan.segs) {
+
+			// seg farther than the nearest one found: skip it.
+			let is_v = seg.is_v
+			let across = is_v ? x : y
+			let along = is_v ? y : x
+			let d = Math.hypot(across - seg.axis,
+				max(seg.m1 - along, 0, along - seg.m2))
+			if (d > min_d)
+				continue
+
+			// the other openings on seg, in order along it.
+			let seg_objects = []
+			for (let object1 of plan.objects)
+				if (object1 != object && object1.seg == seg)
+					seg_objects.push(object1)
+			seg_objects.sort(compare_seg_objects)
+
+			// the starting coordinate nearest to m where this opening fits on
+			// seg, clear of the other openings: none if there is no space.
+			let m = round(along - object.w / 2)
+			let fit_m
+			let lo = seg.wall_m1
+			for (let i = 0; i <= seg_objects.length; i++) {
+				let object1 = seg_objects[i]
+				let hi = seg.wall_m2
+				if (object1)
+					hi = is_v ? object1.y : object1.x
+				let m2 = hi - object.w
+				if (lo <= m2) {
+					let m_gap = clamp(m, lo, m2)
+					if (fit_m == null || abs(m_gap - m) < abs(fit_m - m))
+						fit_m = m_gap
+				}
+				if (object1)
+					lo = (is_v ? object1.y : object1.x) + object1.w
+			}
+			if (fit_m == null)
+				continue
+
+			// the nearest segment with space so far.
+			min_d = d
+			seg1 = seg
+			m1 = fit_m
+		}
+
+		// on a wall: on the floor, along the wall, at the found coordinate.
+		object.on_floor = seg1 != null
+		if (seg1) {
+			object.seg = seg1
+			if (opening_is_v(object) != seg1.is_v) // keep facing on the same axis.
+				object.rot = seg1.is_v ? 90 : 0
+			object.x = seg1.is_v ? seg1.axis : m1
+			object.y = seg1.is_v ? m1 : seg1.axis
+		}
+	}
+
+	// return the maximum width while keeping the opposite end fixed.
+	// Stop at the next opening or wall endpoint in the resize direction.
+	// Return Infinity if the opening is not on a wall.
+	function limit_opening_w(plan, object, side) {
+		let seg = object.seg
+		if (!seg)
+			return Infinity
+		let is_v = seg.is_v
+		object_vector_to_plan(object, side, 0, object_point1)
+		let dir = is_v ? object_point1[1] : object_point1[0] // wall direction
+		let m = is_v ? object.y : object.x
+		let end_m = dir > 0 ? m : m + object.w // fixed endpoint
+		let limit_m = dir > 0 ? seg.wall_m2 : seg.wall_m1
+		for (let object1 of plan.objects) {
+			if (object1 == object || object1.seg != seg)
+				continue
+			let m1 = is_v ? object1.y : object1.x
+			let edge_m = dir > 0 ? m1 : m1 + object1.w // other opening endpoint
+			if (dir * (edge_m - end_m) >= 0 && dir * (edge_m - limit_m) < 0)
+				limit_m = edge_m
+		}
+		return dir * (limit_m - end_m)
+	}
+
+	// calculate the opening's plan bounding box using its width and wall
+	// thickness. For an opening off the wall, use the exterior wall thickness.
+	function opening_box(plan, object, out) {
+		let is_v = opening_is_v(object)
+		let a = is_v ? object.x : object.y
+		let m = is_v ? object.y : object.x
+		let a1, a2
+		if (object.seg) {
+			a1 = object.seg.wall_a1
+			a2 = object.seg.wall_a2
+		} else {
+			a1 = a - house.ext_wall_thickness / 2
+			a2 = a + house.ext_wall_thickness / 2
+		}
+		out[0] = is_v ? a1 : m
+		out[1] = is_v ? m : a1
+		out[2] = is_v ? a2 : m + object.w
+		out[3] = is_v ? m + object.w : a2
+		return out
+	}
+
+	// furniture --------------------------------------------------------------
+
+	function furniture_box(plan, object, out) {
+		return rect_box(object, object.w, object.l, out)
+	}
+
+	// snap allowed furniture faces to room walls within snap_d. Rotate around
+	// the centre if needed, and keep that rotation after leaving the wall.
+	// Set on_floor according to whether the whole box fits inside the rooms.
+	function place_furniture(plan, object, snap_d, snap_margin = 0) {
+
+		// forget the previous snaps.
+		let faces = house_object_types[object.type].snap_faces
+		let side0 = object.snap_side
+		object.snap_side = null
+		object.side_x = null
+		object.side_y = null
+
+		if (faces) {
+
+			// find a room side and rotation for the allowed faces around the
+			// box centre; prefer the previous side within the switching margin.
+			let [x1, y1, x2, y2] = get_object_box(plan, object, box)
+			let cx = (x1 + x2) / 2, cy = (y1 + y2) / 2
+			let min_gap = Infinity
+			let found_side, found_rot
+			let found_old = false
+			for (let side of plan.room_sides) {
+				let [dir, c, m1, m2] = side
+				let is_v = dir % 2 == 1
+				let face = (dir - object.rot / 90 + 4) % 4
+				let rot = faces.includes(face) ? object.rot
+					: (dir - faces[0] + 4) % 4 * 90
+				let is_turned = rot % 180 == 90
+				let hx = (is_turned ? object.l : object.w) / 2
+				let hy = (is_turned ? object.w : object.l) / 2
+				if (!wall_side_overlaps(side, cx, cy, hx, hy))
+					continue
+				let gap = abs(wall_side_min(side, 2 * hx, 2 * hy)
+					- (is_v ? cx - hx : cy - hy))
+				if (gap > snap_d)
+					continue
+				let is_old = side0 && side0[0] == dir && side0[1] == c
+					&& side0[2] == m1 && side0[3] == m2
+				if (is_old)
+					gap -= snap_margin
+				let is_old_tie = gap == min_gap && is_old && !found_old
+				if (gap < min_gap || is_old_tie) {
+					min_gap = gap
+					found_side = array_set(found_side ?? [], side)
+					found_rot = rot
+					found_old = is_old
+				}
+			}
+
+			if (found_side) {
+
+				// turn the box around its centre.
+				object.rot = found_rot
+				let [bx1, by1, bx2, by2] = get_object_box(plan, object, box)
+				let w = bx2 - bx1, h = by2 - by1
+				object.x = round(cx - w / 2)
+				object.y = round(cy - h / 2)
+				object.snap_side = found_side
+
+				// snap to the chosen wall, then to the nearest perpendicular wall.
+				rest_on_side(plan, object, found_side, w, h)
+				let is_x = found_side[0] % 2 == 1
+				let side = find_wall_side(plan, object.x + w / 2,
+					object.y + h / 2, w / 2, h / 2, snap_d, !is_x, is_x)
+				if (side)
+					rest_on_side(plan, object, side, w, h)
+			}
+		}
+
+		// on the floor: the whole box is inside the rooms.
+		let [x1, y1, x2, y2] = get_object_box(plan, object, box)
+		object.on_floor = is_rect_in_rooms(plan, (x1 + x2) / 2, (y1 + y2) / 2,
+			(x2 - x1) / 2, (y2 - y1) / 2)
+	}
+
+	// move the object against the room side and record it in side_x or
+	// side_y. w and h are the object's width and height along the plan axes.
+	function rest_on_side(plan, object, side, w, h) {
+		if (side[0] % 2) {
+			object.side_x = side
+			object.x = wall_side_min(side, w, h)
+		} else {
+			object.side_y = side
+			object.y = wall_side_min(side, w, h)
+		}
+	}
+
+	// call place_furniture(), then turn the chair diagonally if it is in a
+	// corner. Point its back towards the corner. Keep its plan box square.
+	function place_chair(plan, object, snap_d, snap_margin = 0) {
+		place_furniture(plan, object, snap_d, snap_margin)
+		let {side_x, side_y} = object
+		if (!(side_x && side_y))
+			return
+		let [dir_x, wall_x, y1, y2] = side_x
+		let [dir_y, wall_y, x1, x2] = side_y
+		// check that both wall faces end at their shared corner.
+		if (
+			!(y1 == wall_y || y2 == wall_y) ||
+			!(x1 == wall_x || x2 == wall_x)
+		)
+			return
+		object.rot = dir_x * 90 + (dir_x == dir_y + 1 ? -45 : 45)
+	}
+
+	// return the maximum width or length while keeping the opposite end fixed.
+	// Stop at the nearest room wall in the resize direction.
+	// Return Infinity if the furniture is not on the floor.
+	function limit_furniture_size(plan, object, side, axis) {
+		if (!object.on_floor)
+			return Infinity
+
+		// the resize direction along the plan axes and the fixed end.
+		let is_l = axis == 'l'
+		let is_x = (object.rot % 180 == 0) != is_l // resize along plan x
+		object_vector_to_plan(object, is_l ? 0 : side, is_l ? side : 0,
+			object_point1)
+		let dir = is_x ? object_point1[0] : object_point1[1]
+		let [x1, y1, x2, y2] = get_object_box(plan, object, box)
+		let end = dir > 0 ? (is_x ? x1 : y1) : (is_x ? x2 : y2) // fixed endpoint
+
+		// the nearest room side across the resize axis, beyond the fixed end.
+		let x = (x1 + x2) / 2, y = (y1 + y2) / 2
+		let hx = (x2 - x1) / 2, hy = (y2 - y1) / 2
+		let limit_c = dir * Infinity
+		for (let room_side of plan.room_sides) {
+			if ((room_side[0] % 2 == 1) != is_x)
+				continue
+			if (!wall_side_overlaps(room_side, x, y, hx, hy))
+				continue
+			let c = room_side[1]
+			if (dir * (c - end) > 0 && dir * (c - limit_c) < 0)
+				limit_c = c
+		}
+		return dir * (limit_c - end)
+	}
+
+	// countertop -------------------------------------------------------------
+
+	// contour contains clockwise local coordinates [x, y, ...]. The two free
+	// ends start at coordinate offsets 0 and contour.length / 2.
+	function countertop_bounds(object, out) {
+		let a = object.contour
+		let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity
+		for (let i = 0; i < a.length; i += 2) {
+			x1 = min(x1, a[i]); y1 = min(y1, a[i+1])
+			x2 = max(x2, a[i]); y2 = max(y2, a[i+1])
+		}
+		local_box[0] = x1; local_box[1] = y1
+		local_box[2] = x2; local_box[3] = y2
+		return rotated_box(0, 0, local_box, object.rot, out)
+	}
+
+	function countertop_box(plan, object, out) {
+		countertop_bounds(object, out)
+		out[2] = object.x + out[2] - out[0]
+		out[3] = object.y + out[3] - out[1]
+		out[0] = object.x; out[1] = object.y
+		return out
+	}
+
+	function countertop_origin(plan, object, out) {
+		countertop_bounds(object, box)
+		return out.set(object.x - box[0], object.y - box[1])
+	}
+
+	function place_countertop(plan, object, snap_d) {
+		let a = object.contour, n = a.length
+		let points = [], ys = [], xs = []
+		let [ox, oy] = countertop_origin(plan, object, object_point1)
+		for (let i = 0; i < n; i += 2) {
+			object_vector_to_plan(object, a[i], a[i+1], object_point1)
+			points.push(ox + object_point1[0], oy + object_point1[1])
+			ys.push(oy + object_point1[1])
+		}
+		object.side_x = null; object.side_y = null
+		for (let axis = 0; axis < 2; axis++) {
+			let shift = 0, gap = snap_d, found
+			for (let i = 0; i < n; i += 2) {
+				let j = (i+2) % n
+				let x = (points[i] + points[j]) / 2
+				let y = (points[i+1] + points[j+1]) / 2
+				let hx = abs(points[i] - points[j]) / 2
+				let hy = abs(points[i+1] - points[j+1]) / 2
+				if (axis ? hy != 0 : hx != 0)
+					continue
+				let side = find_wall_side(plan, x, y, hx, hy, gap,
+					!axis, !!axis)
+				if (side) {
+					shift = side[1] - (axis ? y : x)
+					gap = abs(shift)
+					found = side
+				}
+			}
+			if (axis) { object.y += shift; object.side_y = found ?? null }
+			else { object.x += shift; object.side_x = found ?? null }
+			for (let i = axis; i < n; i += 2)
+				points[i] += shift
+			if (axis)
+				for (let i = 0; i < ys.length; i++) ys[i] += shift
+		}
+		ys.sort((a, b) => a - b)
+		object.on_floor = true
+		for (let k = 1; k < ys.length; k++) {
+			let y1 = ys[k-1], y2 = ys[k], y = (y1 + y2) / 2
+			if (y1 == y2)
+				continue
+			xs.length = 0
+			for (let i = 0; i < n; i += 2) {
+				let j = (i+2) % n
+				if ((points[i+1] > y) != (points[j+1] > y))
+					xs.push(points[i])
+			}
+			xs.sort((a, b) => a - b)
+			for (let i = 0; i < xs.length; i += 2) {
+				if (xs[i] == xs[i+1])
+					continue
+				if (!is_rect_in_rooms(plan, (xs[i] + xs[i+1]) / 2, y,
+					(xs[i+1] - xs[i]) / 2, (y2 - y1) / 2)) {
+					object.on_floor = false
+					return
+				}
+			}
+		}
+	}
+
+	let countertop_edge = [0, 0, 0, 0]
+
+	// encode a handle as edge_index * 3 + zone + 1.
+	// zone is 0 for the middle, 1 for the start and 2 for the end of the edge.
+	function get_countertop_edge(object, handle, out) {
+		let a = object.contour, n = a.length / 2
+		let i = floor((handle-1) / 3), zone = (handle-1) % 3
+		let p = i*2, q = (p+2) % a.length
+		let ux = sign(a[q] - a[p]), uy = sign(a[q+1] - a[p+1])
+		let length = abs(a[q] - a[p]) + abs(a[q+1] - a[p+1])
+		let start = i == 1 || i == n/2+1
+		let end = i == n-1 || i == n/2-1
+		let prev = (p+a.length-2) % a.length, next = (q+2) % a.length
+		let w1 = start ? abs(a[p]-a[prev]) + abs(a[p+1]-a[prev+1]) : 0
+		let w2 = end ? abs(a[q]-a[next]) + abs(a[q+1]-a[next+1]) : 0
+		w1 = min(w1, end ? floor(length/2) : length)
+		w2 = min(w2, start ? floor(length/2) : length)
+		let lo = zone == 1 ? 0 : zone == 2 ? length-w2 : w1
+		let hi = zone == 1 ? w1 : zone == 2 ? length : length-w2
+		out[0] = a[p] + ux*lo; out[1] = a[p+1] + uy*lo
+		out[2] = a[p] + ux*hi; out[3] = a[p+1] + uy*hi
+		return hi > lo
+	}
+
+	const countertop_depth_range = {min: 400, max: 1200, step: 50}
+
+	function start_resize_countertop(plan, object, handle) {
+
+		// the contour at the press, the dragged edge i..j, its handle segment
+		// and its outward normal.
+		let a = object.contour.slice(), n = a.length
+		let i = floor((handle-1) / 3)*2, j = (i+2) % n
+		let zone = (handle-1) % 3
+		let nx = sign(a[j+1]-a[i+1]), ny = -sign(a[j]-a[i])
+		get_countertop_edge(object, handle, countertop_edge)
+		let [x1, y1, x2, y2] = countertop_edge
+		let [ox, oy] = countertop_origin(plan, object, object_point1)
+
+		// how far the edge can move before it passes its neighbours' ends,
+		// and the countertop's depth across it.
+		let prev = (i+n-2) % n, next = (j+2) % n
+		let l1 = (a[i]-a[prev])*nx + (a[i+1]-a[prev+1])*ny
+		let l2 = (a[j]-a[next])*nx + (a[j+1]-a[next+1])*ny
+		let min_d = max(l1 >= 0 ? -l1 : -Infinity,
+			l2 >= 0 ? -l2 : -Infinity)
+		let max_d = min(l1 < 0 ? -l1 : Infinity, l2 < 0 ? -l2 : Infinity)
+		let is_depth = !zone && i != 0 && i != n/2
+		let opposite = (n-i) % n
+		let depth = (a[i]-a[opposite])*nx + (a[i+1]-a[opposite+1])*ny
+		let s = {contour0: a}
+		s.resize = function(dx, dy, snap_d = 0, nosnap = false) {
+
+			// the pointer's displacement across the edge.
+			plan_vector_to_object(object, dx, dy, object_point1)
+			let d = round(object_point1[0]*nx + object_point1[1]*ny)
+
+			// snap the moved edge to the nearest room side across it.
+			if (snap_d > 0 && !(is_depth && !nosnap)) {
+				object_vector_to_plan(object, nx, ny, object_point1)
+				let ux = object_point1[0], uy = object_point1[1]
+				object_vector_to_plan(object, (x1+x2)/2, (y1+y2)/2,
+					object_point1)
+				let hx = abs(x2-x1)/2, hy = abs(y2-y1)/2
+				if (object.rot % 180) { let h = hx; hx = hy; hy = h }
+				let x = ox+object_point1[0]+ux*d
+				let y = oy+object_point1[1]+uy*d
+				let is_x = !!ux
+				let across = is_x ? x : y
+				let min_gap = snap_d, shift = 0
+				for (let side of plan.room_sides) {
+					if ((side[0] % 2 == 1) != is_x)
+						continue
+					if (!wall_side_overlaps(side, x, y, hx, hy))
+						continue
+					let gap = side[1] - across
+					if (abs(gap) <= min_gap) {
+						min_gap = abs(gap)
+						shift = (ux || uy) * gap
+					}
+				}
+				d += shift
+			}
+
+			// clamp the edge between its neighbours; snap the depth.
+			if (!zone) {
+				d = clamp(d, min_d, max_d)
+				if (is_depth && !nosnap) {
+					let size = snap_object_size(countertop_depth_range, depth+d,
+						depth+max_d)
+					if (size == null || size-depth < min_d)
+						return
+					d = size-depth
+				}
+			}
+
+			// rebuild the contour from the one at the press. corner zone
+			// moved out: add a leg. middle of an edge: move the edge. free
+			// end moved past a neighbour's end: remove that leg.
+			let b = object.contour
+			b.length = n
+			for (let k = 0; k < n; k++) b[k] = a[k]
+			if (zone && d > 0) {
+				if (zone == 1)
+					b.splice(i, 2, x1+nx*d, y1+ny*d, x2+nx*d, y2+ny*d,
+						x2, y2)
+				else
+					b.splice(j, 2, x1, y1, x1+nx*d, y1+ny*d,
+						x2+nx*d, y2+ny*d)
+				if (zone == 1 ? i == 2 : j == 0)
+					b.push(...b.splice(0, 2))
+			} else if (!zone) {
+				b[i] += nx*d; b[i+1] += ny*d
+				b[j] += nx*d; b[j+1] += ny*d
+				if (n > 8 && (i == 0 || i == n/2)) {
+					if (l1 > 0 && d <= -l1) {
+						b[j] = a[j]-nx*l1; b[j+1] = a[j+1]-ny*l1
+						if (i == 0) { b.splice(n-2, 2); b.splice(0, 2) }
+						else b.splice(prev, 4)
+					} else if (l2 > 0 && d <= -l2) {
+						b[i] = a[i]-nx*l2; b[i+1] = a[i+1]-ny*l2
+						b.splice(j, 4)
+						if (i == 0) b.unshift(...b.splice(b.length-2, 2))
+					}
+				}
+			}
+
+			// keep the origin in place: move the box corner with the contour.
+			countertop_bounds(object, box)
+			object.x = ox + box[0]; object.y = oy + box[1]
+		}
+		return s
+	}
+
+	// stairs -----------------------------------------------------------------
+
+	// calculate step heights and depths for the distance between floors.
+	// Cache the results for placement, drawing and editing.
+	function stair_shape(plan, object) {
+		let height = house.floors[plan.i-1]?.h ?? house.floor_h
+		let s = object.stair ??= {}
+		if (s.height == height && s.riser_height == object.riser_height
+			&& s.tread_depth == object.tread_depth && s.fixed_l == object.l)
+			return s
+		s.height = height
+		s.riser_height = object.riser_height
+		s.tread_depth = object.tread_depth
+		s.fixed_l = object.l
+		s.n = 0
+		let min_difference = Infinity, min_distance = Infinity
+		let n = max(2, ceil(height / 190))
+		let max_n = floor(height / 150)
+		for (; n <= max_n; n++) {
+			let rise = round(height / n / 5) * 5
+			let bottom_rise = height - (n - 1) * rise
+			if (rise < 150 || rise > 190 || bottom_rise < 150
+				|| bottom_rise > 190)
+				continue
+			let difference = abs(bottom_rise - rise)
+			let distance = abs(rise - object.riser_height)
+			if (difference > min_difference
+				|| difference == min_difference && distance >= min_distance)
+				continue
+			min_difference = difference
+			min_distance = distance
+			s.n = n
+			s.rise = rise
+			s.bottom_rise = bottom_rise
+		}
+		let tread_n = max(1, s.n - 1)
+		s.depth = round((object.l == null ? object.tread_depth
+			: object.l / tread_n) / 5) * 5
+		s.l = object.l ?? tread_n * s.depth
+		s.bottom_depth = s.l - (tread_n - 1) * s.depth
+		return s
+	}
+
+	function stair_box(plan, object, out) {
+		return rect_box(object, object.w, stair_shape(plan, object).l, out)
+	}
+
+	// use the midpoint of the top edge as the origin for the stair sketch and
+	// model. Local +y points down the stairs.
+	function stair_origin(plan, object, out) {
+		let [x1, y1, x2, y2] = stair_box(plan, object, origin_box)
+		object_vector_to_plan(object, 0, -stair_shape(plan, object).l / 2, out)
+		return out.set((x1 + x2) / 2 + out[0], (y1 + y2) / 2 + out[1])
+	}
+
+	// place the stairs at a valid slab opening on their owning upper floor.
+	function place_stair(plan, object, snap_d) {
+		let s = stair_shape(plan, object)
+		object.on_floor = false
+		if (!plan.i || !s.n || s.depth <= 0 || s.bottom_depth <= 0)
+			return
+
+		// the openings in the slab under the floor, and the slab.
+		let floor0 = house.floors[plan.i-1]
+		let openings = make_opening_paths(floor0, plan)
+		if (!openings.length)
+			return
+		let roof_paths0 = floor0.make_roof_geometry().roof_paths
+		let slab = slab_paths(floor0, plan, roof_paths0, openings)
+
+		// find a wall connection with room for the stairs in the opening and
+		// slab across the whole landing edge beyond the wall.
+		let [x, y] = stair_origin(plan, object, object_point1)
+		let w = object.w, l = s.l
+		let min_gap = Infinity, found_x, found_y, found_rot
+		for (let seg of plan.segs) {
+			let is_v = seg.is_v
+			let along = is_v ? y : x
+			let m1 = along - w / 2, m2 = along + w / 2
+			if (m1 < seg.wall_m1 || m2 > seg.wall_m2)
+				continue
+			for (let side = 0; side < 2; side++) {
+				let c = side ? seg.wall_a2 : seg.wall_a1
+				let rot = is_v ? (side ? 270 : 90) : (side ? 0 : 180)
+				if (!snap_d && rot != object.rot)
+					continue
+				let gap = abs(c - (is_v ? x : y))
+				if (gap > snap_d)
+					continue
+				if (gap >= min_gap)
+					continue
+				let end = c + (side ? l : -l)
+				let lo = min(c, end), hi = max(c, end)
+				if (!is_rect_in_paths(openings,
+					is_v ? lo : m1, is_v ? m1 : lo,
+					is_v ? hi : m2, is_v ? m2 : hi))
+					continue
+				let beyond = side ? seg.wall_a1 : seg.wall_a2
+				if (!is_slab_side_covered(slab, is_v, beyond, m1, m2,
+					side ? -1 : 1))
+					continue
+				min_gap = gap
+				found_x = is_v ? c : x
+				found_y = is_v ? y : c
+				found_rot = rot
+			}
+		}
+		if (found_rot == null)
+			return
+
+		// put the top edge's midpoint at the found point.
+		local_box[0] = -w / 2
+		local_box[1] = 0
+		local_box[2] = w / 2
+		local_box[3] = l
+		rotated_box(found_x, found_y, local_box, found_rot, box)
+		object.x = box[0]
+		object.y = box[1]
+		object.rot = found_rot
+		object.on_floor = true
+	}
+
+	// snap the bottom of the stairs to a wall face that spans the stairs'
+	// width, near the requested length.
+	function snap_stair_l(plan, object, l, snap_d) {
+		let [x, y] = stair_origin(plan, object, object_point1)
+		let w = object.w
+		let r = object.rot * rad
+		let ux = round(cos(r)), uy = round(sin(r))
+		let length1 = l
+		let min_gap = snap_d
+		for (let seg of plan.segs) {
+			if (seg.is_v != !!uy)
+				continue
+			let along = seg.is_v ? y : x
+			if (along - w / 2 < seg.wall_m1
+				|| along + w / 2 > seg.wall_m2)
+				continue
+			let c = seg.is_v ? x : y
+			let sign = seg.is_v ? -uy : ux
+			for (let face of [seg.wall_a1, seg.wall_a2]) {
+				let length = (face - c) * sign
+				let gap = abs(length - l)
+				if (length > 0 && gap <= min_gap) {
+					min_gap = gap
+					length1 = length
+				}
+			}
+		}
+		return length1
+	}
+
+	// tags -------------------------------------------------------------------
+
+	// assign the tag to this floor if its point is inside a room.
+	function place_open_room(plan, object) {
+		object.on_floor = !!plan.hit_cycle_edges(object.x, object.y)
+	}
+
+	// assign the terrace tag to this floor if its point is over the floor
+	// below and outside this floor's outline.
+	function place_terrace(plan, object) {
+		let plan0 = house.floors[plan.i-1]
+		let x = object.x, y = object.y
+		object.on_floor = !!plan0 && plan0.is_rect_touching_house(x, y, x, y)
+			&& !plan.is_rect_touching_house(x, y, x, y)
+	}
+
+	// use a zero-size bounding box at the tag point.
+	function tag_box(plan, object, out) {
+		return rect_box(object, 0, 0, out)
+	}
+
+	// object types -----------------------------------------------------------
+
+	let house_object_types = {
+
+		window: {
+			w: 1200,
+			sill: 900, // height above the top of the slab, in mm
+			head: 2100,
+			in_wall: true,
+			sizes: {w: {min: 300, step: 1}},
+			place: place_opening,
+			limit_size: limit_opening_w,
+			box: opening_box,
+			origin: opening_origin,
+			start_resize: start_resize_rect,
+		},
+
+		door: {
+			w: 900,
+			sill: 0, // height above the top of the slab, in mm
+			head: 2100,
+			fields: {mirror: false}, // false: use the unmirrored door sketch
+			in_wall: true,
+			sizes: {w: {min: 600, max: 1100, step: 100}},
+			place: place_opening,
+			limit_size: limit_opening_w,
+			box: opening_box,
+			origin: opening_origin,
+			start_resize: start_resize_rect,
+		},
+
+		bed: {
+			w: 1400,
+			fields: {l: 2000},
+			sizes: {w: [900, 1400, 1600, 1800], l: [1900, 2000]},
+			snap_faces: [0], // snap the head of the bed to walls
+			place: place_furniture,
+			limit_size: limit_furniture_size,
+			box: furniture_box,
+			start_resize: start_resize_rect,
+		},
+
+		chair: {
+			w: 450,
+			fields: {l: 450},
+			snap_faces: [0], // snap the back of the chair to walls
+			place: place_chair,
+			box: furniture_box,
+		},
+
+		wc: {
+			w: 400,
+			fields: {l: 700},
+			snap_faces: [0], // snap the toilet tank to walls
+			place: place_furniture,
+			box: furniture_box,
+		},
+
+		countertop: {
+			fields: {contour: [0, 600, 0, 0, 1800, 0, 1800, 600]},
+			place: place_countertop,
+			box: countertop_box,
+			origin: countertop_origin,
+			start_resize: start_resize_countertop,
+		},
+
+		open_room: {
+			opens_room: true,
+			place: place_open_room,
+			box: tag_box,
+		},
+
+		terrace: {
+			marks_terrace: true,
+			place: place_terrace,
+			box: tag_box,
+		},
+
+		stair: {
+			w: 900,
+			fields: {riser_height: 175, tread_depth: 280, l: null},
+			connects_below: true,
+			sizes: {w: {min: 1, step: 1}, l: {min: 1, step: 1}},
+			snap_l: snap_stair_l,
+			place: place_stair,
+			box: stair_box,
+			origin: stair_origin,
+			start_resize: start_resize_rect,
+		},
+
+	}
+
+	house.object_types = house_object_types
+	house.get_object_box = get_object_box
+	house.get_object_origin = get_object_origin
+	house.object_to_plan = object_to_plan
+	house.plan_to_object = plan_to_object
+	house.object_vector_to_plan = object_vector_to_plan
+	house.plan_vector_to_object = plan_vector_to_object
+	house.opening_is_v = opening_is_v
+	house.opening_origin = opening_origin
+	house.countertop_origin = countertop_origin
+	house.get_countertop_edge = get_countertop_edge
+	house.stair_shape = stair_shape
 
 	// adding and removing floors ----------------------------------------------
 

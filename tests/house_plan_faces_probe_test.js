@@ -21,7 +21,7 @@ ctx.addEventListener = () => {}
 vm.createContext(ctx)
 let files = ['glue.js', 'earcut.js', '3d.js', 'plane_graph.js',
 	'roof_skeleton.js', 'clipper2.js', 'prism_union.js',
-	'house_plan_objects.js', 'house_plan.js']
+	'house_plan.js']
 for (let name of files) {
 	let file = path.join(sdk, 'www', name)
 	vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, {filename: file})

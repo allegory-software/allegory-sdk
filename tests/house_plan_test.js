@@ -20,7 +20,7 @@ ctx.addEventListener = () => {}
 vm.createContext(ctx)
 let files = ['glue.js', 'earcut.js', '3d.js', 'plane_graph.js',
 	'roof_skeleton.js', 'clipper2.js', 'prism_union.js',
-	'house_plan_objects.js', 'house_plan.js']
+	'house_plan.js']
 for (let name of files) {
 	// env SDK=dir loads dir/www/roof_skeleton.js instead (a changed copy).
 	let file = path.join(name == 'roof_skeleton.js' && process.env.SDK || sdk,
@@ -975,7 +975,7 @@ function north_outer_polys(h) {
 	return wall_polys_at(h, false, -140, -1)
 }
 
-let default_n = Object.keys(ctx.house_object_types).length // default objects.
+let default_n = Object.keys(house({}).object_types).length // default objects.
 
 check('objects are saved, loaded and undone with their floor', () => {
 	let object = {type: 'window', x: 3000, y: 0, rot: 0, w: 1200}
@@ -1110,68 +1110,62 @@ check('furniture not fully inside a room goes to the ground', () => {
 
 // countertop ---------------------------------------------------------------
 
-function countertop_floor(legs, rot = 0) {
+// the default contour is [0, 600, 0, 0, 1800, 0, 1800, 600]: free ends on
+// edges 0 and 2. a handle is edge_index * 3 + zone + 1; zone 1 is the start
+// and zone 2 the end of the edge.
+function countertop_floor() {
 	let h = house({floors: [{lines: [rect_lines(0, 0, 8000, 8000)]}]})
 	let f = h.floors[0]
-	f.add_object({type: 'countertop', rot: rot, legs: legs}, 3000, 3000, 0)
+	f.add_object({type: 'countertop', rot: 0}, 3000, 3000, 0)
 	return f
 }
 
-function countertop_handle(f, object, x, y) {
-	let hs = {mouse_x: x, mouse_y: y}
-	let sg = {plan_d: d => d * 10}
-	assert(ctx.house_object_types.countertop.hit_resize(sg, f, object, hs))
-	return hs.object_side
-}
-
 check('countertop handles extend and retract from all four free corners', () => {
-	for (let start of [false, true]) {
-		for (let side of [-1, 1]) {
-			let f = countertop_floor()
-			let object = f.objects.at(-1)
-			let x = start ? 3200 : 4600, y = 3000 + side * 300
-			let handle = countertop_handle(f, object, x, y)
-			let s = f.start_resize_object(object, handle)
-			s.resize(0, side * 800)
-			assert.equal(object.legs.length, 6)
-			assert.equal(object.legs[4], 1400)
-			assert.equal(object.legs[5], 600)
-			s.stop()
-			let end_x = start ? 3300 : 4500
-			let end_y = 3000 + side * 1100
-			handle = countertop_handle(f, object, end_x, end_y)
-			s = f.start_resize_object(object, handle)
-			s.resize(0, -side * 900)
-			assert.equal(object.legs.length, 3)
-			s.stop()
-			let bounds = []
-			ctx.get_object_box(f, object, bounds)
-			assert.deepEqual(bounds, [3000, 2700, 4800, 3300])
-		}
+	// [corner handle, outward dy, handle of the new leg's free end, box]
+	for (let [handle, dy, end_handle, extended_box] of [
+		[5, -800, 1, [3000, 2200, 4800, 3600]],
+		[6, -800, 10, [3000, 2200, 4800, 3600]],
+		[11, 800, 10, [3000, 3000, 4800, 4400]],
+		[12, 800, 1, [3000, 3000, 4800, 4400]],
+	]) {
+		let f = countertop_floor()
+		let object = f.objects.at(-1)
+		let bounds = []
+		let s = f.start_resize_object(object, handle)
+		s.resize(0, dy)
+		s.stop()
+		assert.equal(object.contour.length, 12)
+		assert.deepEqual(f.house.get_object_box(f, object, bounds), extended_box)
+		s = f.start_resize_object(object, end_handle)
+		s.resize(0, -dy)
+		s.stop()
+		assert.deepEqual(Array.from(object.contour),
+			[0, 600, 0, 0, 1800, 0, 1800, 600])
+		assert.deepEqual(f.house.get_object_box(f, object, bounds),
+			[3000, 3000, 4800, 3600])
 	}
 })
 
-check('countertop copies, saved states and undo own independent leg arrays', () => {
+check('countertop copies, saved states and undo own their contours', () => {
 	let f = countertop_floor()
 	let object = f.objects.at(-1)
 	let state = f.house.save_state()
 	let copy = f.house.save_object(object)
-	assert.notEqual(copy.legs, object.legs)
-	let handle = countertop_handle(f, object, 4600, 3300)
-	let s = f.start_resize_object(object, handle)
+	assert.notEqual(copy.contour, object.contour)
+	let s = f.start_resize_object(object, 11)
 	s.resize(0, 1000)
 	s.stop()
-	assert.equal(copy.legs.length, 3)
-	assert.equal(state.floors[0].objects[0].legs.length, 3)
+	assert.equal(copy.contour.length, 8)
+	assert.equal(state.floors[0].objects[0].contour.length, 8)
 	f.house.undo()
-	assert.equal(f.objects.at(-1).legs.length, 3)
+	assert.equal(f.objects.at(-1).contour.length, 8)
 	f.house.redo()
-	assert.equal(f.objects.at(-1).legs.length, 6)
+	assert.equal(f.objects.at(-1).contour.length, 12)
 	let h1 = house(f.house.save_state())
-	assert.deepEqual(Array.from(h1.floors[0].objects.at(-1).legs),
-		Array.from(f.objects.at(-1).legs))
+	assert.deepEqual(Array.from(h1.floors[0].objects.at(-1).contour),
+		Array.from(f.objects.at(-1).contour))
 	f.add_object(copy, 1000, 1000, 0)
-	assert.notEqual(f.objects.at(-1).legs, copy.legs)
+	assert.notEqual(f.objects.at(-1).contour, copy.contour)
 })
 
 // stairs -------------------------------------------------------------------
@@ -1245,6 +1239,30 @@ check('stair saved state keeps parameters and excludes calculated sizes', () => 
 
 // object coordinates --------------------------------------------------------
 
+// fill a stub model editor with the house through ui.house_model_editor,
+// with a stub ui: any ui function does nothing, except stateful_widget,
+// which returns a widget that does nothing, and model3_editor, which runs
+// the editor's init. create_component(name) returns the component for
+// that name.
+function fill_model_editor(h, create_component) {
+	if (!ctx.ui) {
+		let stub_ui = {stateful_widget: () => () => {}}
+		ctx.ui = new Proxy(stub_ui, {get: (t, k) => t[k] ?? (() => {})})
+		ctx.S = (name, text) => text
+		let file = path.join(sdk, 'www/house_model_editor.js')
+		vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, {filename: file})
+	}
+	let editor = {
+		create_component: t => create_component(t.name),
+		root: {comp: {add_child() {}}},
+		update_all() {},
+		set_camera_pos() {},
+		set_camera_dir() {},
+	}
+	ctx.ui.model3_editor = (id, opt, init) => init(editor)
+	ctx.ui.house_model_editor('house_model', h)
+}
+
 check('the stair group is closed with outward faces and exact tread heights',
 	() => {
 	let h = stair_house(2813)
@@ -1257,9 +1275,15 @@ check('the stair group is closed with outward faces and exact tread heights',
 		},
 		add_face(pis) { faces.push(Array.from(pis)) },
 	}
-	let editor = {create_component: () => group}
-	assert.equal(ctx.house_object_types.stair.create_model(editor,
-		h.floors[1], stair), group)
+	let other_group = {add_point_xyz() { return 0 }, add_face() {}}
+	let n_stairs = 0
+	fill_model_editor(h, name => {
+		if (name != 'stair')
+			return other_group
+		n_stairs++
+		return group
+	})
+	assert.equal(n_stairs, 1)
 	let edges = new Map(), tread_heights = []
 	let volume = 0
 	for (let face of faces) {

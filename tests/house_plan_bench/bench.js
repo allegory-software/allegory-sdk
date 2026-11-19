@@ -252,7 +252,7 @@ window.house_plan_bench = {
 		for (let floor of house.floors) {
 			walls += floor.segs.length
 			for (let object of floor.objects)
-				if (house_object_types[object.type].in_wall)
+				if (house.object_types[object.type].in_wall)
 					openings++
 		}
 		return {

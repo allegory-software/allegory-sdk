@@ -10,6 +10,41 @@ const {
 
 const {v3, v2, mat4, line2, line3} = Math3D
 
+// object models -------------------------------------------------------------
+
+// build a closed stair mesh below the top landing, with outward-facing faces.
+function create_stair_model(editor, plan, object) {
+	let s = plan.house.stair_shape(plan, object)
+	let c = editor.create_component({name: 'stair'})
+	let hw = object.w / 2
+	let profile = [[0, 0], [s.l, 0], [s.l, s.bottom_rise]]
+	for (let i = s.n - 2; i >= 0; i--) {
+		let z = i * s.depth
+		let h = s.height - (i + 1) * s.rise
+		profile.push([z, h])
+		if (i)
+			profile.push([z, h + s.rise])
+	}
+	let left = [], right = []
+	for (let [z, h] of profile) {
+		left.push(c.add_point_xyz(-hw, h - s.height, z))
+		right.push(c.add_point_xyz(hw, h - s.height, z))
+	}
+	c.add_face(left)
+	c.add_face(right.slice().reverse())
+	for (let i = 0; i < profile.length; i++) {
+		let j = (i + 1) % profile.length
+		c.add_face([left[i], right[i], right[j], left[j]])
+	}
+	return c
+}
+
+let object_models = { // {type -> create_model(editor, plan, object)}
+	stair: create_stair_model,
+}
+
+// house model ---------------------------------------------------------------
+
 // fill the editor with the house model up to cut_floor, or with all of it.
 function init_house_model_editor(e, house, cut_floor) {
 
@@ -97,12 +132,12 @@ function init_house_model_editor(e, house, cut_floor) {
 		if (cut_floor && floor.i > cut_floor.i)
 			break
 		for (let object of floor.objects) {
-			let object_type = house_object_types[object.type]
-			if (!object_type.create_model)
+			let create_model = object_models[object.type]
+			if (!create_model)
 				continue
-			let c = object_type.create_model(e, floor, object)
+			let c = create_model(e, floor, object)
 			let z = floor.z + house.slab_thickness
-			let [x, y] = get_object_origin(floor, object, v2())
+			let [x, y] = house.get_object_origin(floor, object, v2())
 			let transform = mat4().translate(x, z, y)
 				.rotate(v3.y_axis, -object.rot * PI / 180)
 			e.root.comp.add_child(c, transform)

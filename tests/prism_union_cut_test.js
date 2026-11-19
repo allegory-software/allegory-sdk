@@ -27,7 +27,7 @@ ctx.addEventListener = () => {}
 vm.createContext(ctx)
 let files = ['www/glue.js', 'www/earcut.js', 'www/3d.js', 'www/plane_graph.js',
 	'www/roof_skeleton.js', 'www/clipper2.js', 'www/prism_union.js',
-	'www/house_plan_objects.js', 'www/house_plan.js']
+	'www/house_plan.js']
 for (let name of files) {
 	// env SDK=dir loads dir/www/roof_skeleton.js instead (a changed copy).
 	let file = path.join(name == 'www/roof_skeleton.js' && process.env.SDK
