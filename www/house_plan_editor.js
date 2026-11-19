@@ -155,6 +155,13 @@ function create_floor_editor(id) {
 		}
 
 		let cs = ui.drag(id)
+		if (!cs && ui.focused_id == id) {
+			if (ui.keydown('`'))
+				select_floor(floors[0], false)
+			for (let i = 1; i < min(floors.length, 10); i++)
+				if (ui.keydown(String(i)))
+					select_floor(floors[i], false)
+		}
 		let is_restored = false
 		if (!readonly && !cs && ui.focus_inside(id)) {
 			if (ui.keydown('ctrl shift z') || ui.keydown('ctrl y'))
@@ -767,13 +774,11 @@ function create_floor_editor(id) {
 	}
 
 	// s: the label, default: the length.
-	function draw_length(cx, x1, y1, x2, y2, s, offset = -100) {
+	function draw_length(cx, x1, y1, x2, y2, s, offset = -10, bg) {
 
 		let d = distance(x1, y1, x2, y2)
 		if (!d)
 			return
-
-		;[x1, y1, x2, y2] = line2.offset(offset, x1, y1, x2, y2)
 
 		s ??= format_length(d)
 
@@ -781,6 +786,8 @@ function create_floor_editor(id) {
 		y1 = to_pixels(y1)
 		x2 = to_pixels(x2)
 		y2 = to_pixels(y2)
+
+		;[x1, y1, x2, y2] = line2.offset(offset, x1, y1, x2, y2)
 
 		if (x1 > x2) {
 			let x3 = x1
@@ -846,6 +853,11 @@ function create_floor_editor(id) {
 		let tx = round(-w / 2)
 		let ty = round((m.fontBoundingBoxAscent - m.fontBoundingBoxDescent) / 2)
 		cx.translate(tx, ty)
+		if (bg) {
+			cx.fillStyle = ui.color_css('bg')
+			cx.fillRect(-2, -m.fontBoundingBoxAscent - 2, w + 4,
+				m.fontBoundingBoxAscent + m.fontBoundingBoxDescent + 4)
+		}
 		cx.fillStyle = ui.color_css('text')
 		cx.textAlign = 'left'
 		cx.fillText(s, 0, 0)
@@ -1062,6 +1074,8 @@ function create_floor_editor(id) {
 	// the pitch label of a face of the edited roof at the screen point
 	// (ui.mx, ui.my).
 	function hit_roof_label(hs, roof_faces) {
+		if (view_scale <= 0.04)
+			return false
 		let axes_swapped = round((view_rotation ?? 0) / (90*rad)) % 2 != 0
 		let w = axes_swapped ? 10 : 20 // half sizes of the label's box
 		let h = axes_swapped ? 20 : 10
@@ -1224,14 +1238,36 @@ function create_floor_editor(id) {
 
 	/// window and door -------------------------------------------------------
 
-	// draw the opening's width outside the top edge of its plan box,
-	// or outside the right edge for a vertical opening.
+	function draw_opening_clearances(cx, plan, object) {
+		let seg = object.seg
+		if (!seg)
+			return
+		let is_v = seg.is_v
+		let c = (seg.wall_a1 + seg.wall_a2) / 2
+		let m = is_v ? object.y : object.x
+		let object_type = s.house.object_types[object.type]
+		for (let dir = -1; dir <= 1; dir += 2) {
+			let gap = object_type.limit_size(plan, object,
+				is_v ? 0 : dir, is_v ? dir : 0) - object.w
+			let m1 = dir > 0 ? m + object.w : m
+			let m2 = m1 + dir * gap
+			if (is_v)
+				draw_length(cx,c, m1, c, m2, null, 0, true)
+			else
+				draw_length(cx,m1, c, m2, c, null, 0, true)
+		}
+	}
+
+	// draw the opening's width along the centre of its wall cut.
 	function draw_opening_size(cx, plan, object) {
-		let [x1, y1, x2, y2] = s.house.get_object_box(plan, object, box)
-		if (s.house.opening_is_v(object))
-			draw_length(cx,x2, y1, x2, y2)
-		else
-			draw_length(cx,x1, y1, x2, y1)
+		let [x1, y1, x2, y2] = s.house.get_opening_hole(plan, object, box)
+		if (s.house.opening_is_v(object)) {
+			let x = (x1 + x2) / 2
+			draw_length(cx,x, y1, x, y2, null, 0)
+		} else {
+			let y = (y1 + y2) / 2
+			draw_length(cx,x1, y, x2, y, null, 0)
+		}
 	}
 
 	object_views.window = {
@@ -1240,8 +1276,8 @@ function create_floor_editor(id) {
 		draw_sizes: draw_opening_size,
 	}
 
-	// draw the window cut and a line along its centre.
-	object_views.window.draw_mask = function(cx, plan, object) {
+	// draw the window cut and its centre line when dimensions are hidden.
+	object_views.window.draw_mask = function(cx, plan, object, show_size) {
 		let [x1, y1, x2, y2] = s.house.get_opening_hole(plan, object, box)
 		let is_v = s.house.opening_is_v(object)
 		// leave space between the window cut and the wall outline.
@@ -1274,15 +1310,17 @@ function create_floor_editor(id) {
 			}
 		}
 
-		cx.beginPath()
-		if (is_v) {
-			let x = (x1 + x2) / 2
-			cx.moveTo(x, y1); cx.lineTo(x, y2)
-		} else {
-			let y = (y1 + y2) / 2
-			cx.moveTo(x1, y); cx.lineTo(x2, y)
+		if (!show_size) {
+			cx.beginPath()
+			if (is_v) {
+				let x = (x1 + x2) / 2
+				cx.moveTo(x, y1); cx.lineTo(x, y2)
+			} else {
+				let y = (y1 + y2) / 2
+				cx.moveTo(x1, y); cx.lineTo(x2, y)
+			}
+			cx.stroke()
 		}
-		cx.stroke()
 	}
 
 	object_views.door = {
@@ -1384,6 +1422,107 @@ function create_floor_editor(id) {
 		cx.lineTo(w, l * .4)
 		cx.fillStyle = ui.color_css('bg')
 		cx.fill()
+		cx.stroke()
+	}
+
+	/// couch -----------------------------------------------------------------
+
+	function couch_seats(object) {
+		return clamp(round((object.w - 200) / 600), 1, 4)
+	}
+
+	object_views.couch = {}
+
+	object_views.couch.update = function(plan, object) {
+		if (!ui.keydown(' '))
+			return
+		plan.update_object(object, function(couch) {
+			couch.rot = (couch.rot + 45) % 360
+		})
+	}
+
+	object_views.couch.hit = function(plan, object) {
+		let [x, y] = s.house.plan_to_object(plan, object,
+			to_plan(ui.mx), to_plan(ui.my), object_point1)
+		let seat_w = (object.w - 200) / couch_seats(object)
+		let in_futon = object.futon_side < 0 ? x <= 100 + seat_w
+			: x >= object.w - 100 - seat_w
+		return x >= 0 && x <= object.w && y >= 0
+			&& (y <= object.l || in_futon
+				&& y <= object.l + object.futon_length)
+	}
+
+	object_views.couch.hit_resize = function(plan, object, hs) {
+		let [x, y] = s.house.plan_to_object(plan, object,
+			hs.mouse_x, hs.mouse_y, object_point1)
+		let {w, l, futon_side, futon_length} = object
+		let n = couch_seats(object), seat_w = (w - 200) / n
+		let d = to_plan(8)
+		let side = x < w / 2 ? -1 : 1
+		let front_side = n == 1 && futon_length ? futon_side : side
+		let in_end_seat = side < 0 ? x <= 100 + seat_w
+			: x >= w - 100 - seat_w
+		let front = l + (in_end_seat && front_side == futon_side
+			? futon_length : 0)
+		let axis = 'l'
+		if (x >= 100 && x <= w - 100 && abs(y-front) <= d) {
+			side = in_end_seat ? front_side * 2 : 1
+		} else if (y >= 0 && y <= l
+			&& (abs(x) <= d || abs(x-w) <= d)) {
+			axis = 'w'
+		} else if (x >= 0 && x <= w && (x < 100 || x > w - 100)
+			&& abs(y-l) <= d) {
+			side = 1
+		} else {
+			return false
+		}
+		hs.object_side = side
+		hs.object_axis = axis
+		return true
+	}
+
+	object_views.couch.draw_sizes = function(cx, plan, object) {
+		draw_furniture_sizes(cx, plan, object)
+		if (object.futon_length) {
+			let x = object.futon_side < 0 ? 0 : object.w
+			draw_object_length(cx, plan, object,
+				x, object.l, x, object.l + object.futon_length)
+		}
+	}
+
+	object_views.couch.draw = function(cx, plan, object) {
+		let {w, l, futon_side, futon_length} = object
+		let n = couch_seats(object), seat_w = (w - 200) / n
+		let fx1 = futon_side < 0 ? 0 : w - 100 - seat_w
+		let fx2 = futon_side < 0 ? 100 + seat_w : w
+		cx.beginPath()
+		cx.moveTo(0, 0)
+		cx.lineTo(w, 0)
+		cx.lineTo(w, l)
+		cx.lineTo(fx2, l)
+		cx.lineTo(fx2, l + futon_length)
+		cx.lineTo(fx1, l + futon_length)
+		cx.lineTo(fx1, l)
+		cx.lineTo(0, l)
+		cx.closePath()
+		cx.fillStyle = ui.color_css('bg')
+		cx.fill()
+		cx.stroke()
+		cx.beginPath()
+		cx.rect(100, 0, w - 200, 150)
+		for (let side = -1; side <= 1; side += 2) {
+			let x = side < 0 ? 100 : w - 100
+			let arm_l = l - (futon_length && futon_side == side ? 150 : 0)
+			cx.moveTo(x, 150)
+			cx.lineTo(x, arm_l)
+			if (arm_l < l)
+				cx.lineTo(side < 0 ? 0 : w, arm_l)
+		}
+		for (let i = 1; i < n; i++) {
+			let x = 100 + i * seat_w
+			cx.moveTo(x, 150)
+			cx.lineTo(x, l)
+		}
 		cx.stroke()
 	}
 
@@ -1682,8 +1821,8 @@ function create_floor_editor(id) {
 				min(a[k+axis], a[j+axis]))
 			let hi = min(max(a[i+axis], a[i+2+axis]),
 				max(a[k+axis], a[j+axis]))
-			let x = is_v ? a[k] : (lo+hi)/2
-			let y = is_v ? (lo+hi)/2 : a[k+1]
+			let x = is_v ? a[k] : lo + (hi-lo)*2/3
+			let y = is_v ? lo + (hi-lo)*2/3 : a[k+1]
 			draw_object_length(cx, plan, object,
 				is_v ? a[i] : x, is_v ? y : a[i+1], x, y, 0)
 		}
@@ -1828,14 +1967,16 @@ function create_floor_editor(id) {
 			}
 			let draw_resize = object == hit_object && resize_side
 				&& object_view.draw_resize
-			let is_invalid = (is_ground ? is_touching : !object.is_valid)
+			let is_invalid = (object_type.in_wall ? !object.seg
+				: is_ground ? is_touching : !object.is_valid)
 				|| object == hit_object && is_overlapping
 			cx.strokeStyle = is_invalid ? ui.color_css('error')
 				: object == hit_object && !draw_resize ? ui.color_css('link')
 				: ui.color_css('text', is_ground ? 'readonly' : null)
 			cx.save()
 			if (object_view.draw_mask)
-				object_view.draw_mask(cx, plan, object)
+				object_view.draw_mask(cx, plan, object,
+					object == hit_object || show_dims)
 			if (object_view.draw) {
 				let [x, y] = s.house.get_object_origin(plan, object,
 					object_origin)
@@ -1860,9 +2001,9 @@ function create_floor_editor(id) {
 	}
 
 	// the dimensions of the hovered object, or of all objects when
-	// show_dims is on, and while the object is moving, its distances to the
-	// closest objects or walls.
-	function draw_object_dims(cx, plan, objects, hit_object, is_moving,
+	// show_dims is on, and while moving or resizing an opening, its distances
+	// to nearby openings or wall ends. Other objects show clearances on move.
+	function draw_object_dims(cx, plan, objects, hit_object, show_clearances,
 		from_below, object_dims, resize_side) {
 		for (let object of objects) {
 			let object_type = s.house.object_types[object.type]
@@ -1872,8 +2013,12 @@ function create_floor_editor(id) {
 			if (object_view.draw_sizes && (object == hit_object || show_dims))
 				object_view.draw_sizes(cx, plan, object,
 					object == hit_object ? resize_side : null)
-			if (is_moving && object == hit_object)
-				draw_object_clearances(cx, object_dims)
+			if (show_clearances && object == hit_object && object.on_floor) {
+				if (object_type.in_wall)
+					draw_opening_clearances(cx, plan, object)
+				else
+					draw_object_clearances(cx, object_dims)
+			}
 		}
 	}
 
@@ -2331,19 +2476,20 @@ function create_floor_editor(id) {
 			&& find_roof_face(roof_faces, hit_roof_face.sides[0])
 		let is_all_faces = drag_action == 'move_pitch'
 			&& ui.keypressed('shift')
-		for (let face of roof_faces) {
-			let is_lit = face == label_face
-				|| is_all_faces && face.sides[0].pitch != 90
-			let [x, y] = roof_label_point(face)
-			cx.save()
-			cx.translate(to_pixels(x), to_pixels(y))
-			if (view_rotation)
-				cx.rotate(-view_rotation)
-			cx.textAlign = 'center'
-			cx.fillStyle = ui.color_css(is_lit ? 'link' : 'label')
-			cx.fillText(format_pitch(face.sides[0].pitch), 0, 5)
-			cx.restore()
-		}
+		if (view_scale > 0.04)
+			for (let face of roof_faces) {
+				let is_lit = face == label_face
+					|| is_all_faces && face.sides[0].pitch != 90
+				let [x, y] = roof_label_point(face)
+				cx.save()
+				cx.translate(to_pixels(x), to_pixels(y))
+				if (view_rotation)
+					cx.rotate(-view_rotation)
+				cx.textAlign = 'center'
+				cx.fillStyle = ui.color_css(is_lit ? 'link' : 'label')
+				cx.fillText(format_pitch(face.sides[0].pitch), 0, 5)
+				cx.restore()
+			}
 
 		// cycles area
 		if (view_scale > 0.04 && !is_roof_level)
@@ -2379,6 +2525,8 @@ function create_floor_editor(id) {
 				&& !object_type.opens_room && !object_type.marks_terrace
 			let is_overlapping = is_moving_object
 				&& measure_object_dims(hs.object_plan ?? plan, hit_object, cs)
+			let show_clearances = is_moving_object
+				|| drag_action == 'resize_object' && cs.edit && object_type.in_wall
 			let ground_objects = s.house.ground_objects
 			draw_objects(cx, plan, ground_objects, hit_object, true,
 				resize_side, false, is_overlapping)
@@ -2389,11 +2537,11 @@ function create_floor_editor(id) {
 			draw_objects(cx, plan_above, objects_above,
 				hit_object, false, resize_side, true, is_overlapping)
 			draw_object_dims(cx, plan, ground_objects, hit_object,
-				is_moving_object, false, cs?.object_dims, resize_side)
+				show_clearances, false, cs?.object_dims, resize_side)
 			draw_object_dims(cx, plan, plan.objects, hit_object,
-				is_moving_object, false, cs?.object_dims, resize_side)
+				show_clearances, false, cs?.object_dims, resize_side)
 			draw_object_dims(cx, plan_above, objects_above,
-				hit_object, is_moving_object, true, cs?.object_dims, resize_side)
+				hit_object, show_clearances, true, cs?.object_dims, resize_side)
 		}
 
 		// find all affected _|_ edges so we can show their lengths as we move

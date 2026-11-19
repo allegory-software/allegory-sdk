@@ -2680,6 +2680,55 @@ function house_plan(t) {
 		start_resize: start_resize_rect,
 	}
 
+	/// couch -----------------------------------------------------------------
+
+	object_types.couch = {
+		w: 2000,
+		fields: {l: 900, futon_side: 0, futon_length: 0},
+		sizes: {
+			w: {min: 800, max: 3200, step: 50},
+			l: {min: 750, max: 1200, step: 50},
+			futon_length: {min: 0, max: 1000, step: 50},
+		},
+		snap_faces: [0],
+		place: place_furniture,
+		local_box: couch_local_box,
+		start_resize: start_resize_couch,
+	}
+
+	function couch_local_box(plan, object, out) {
+		rect_local_box(plan, object, out)
+		out[3] += object.futon_length
+		return out
+	}
+
+	function start_resize_couch(plan, object, side, axis) {
+		let is_futon = abs(side) == 2
+		let field = is_futon ? 'futon_length' : axis
+		let size0 = object[field], x0 = object.x, y0 = object.y
+		let extent0 = size0
+		if (is_futon && sign(side) != object.futon_side)
+			size0 = 0
+		let [ux, uy] = object_vector_to_plan(object,
+			axis == 'w' ? side : 0, axis == 'l' ? 1 : 0,
+			object_point1)
+		let max_size = limit_furniture_size(plan, object, ux, uy)
+		if (axis == 'l')
+			max_size -= is_futon ? object.l : object.futon_length
+		let sizes = object_types.couch.sizes[field]
+		return {resize: function(dx, dy) {
+			let size = snap_object_size(sizes, size0 + dx * ux + dy * uy,
+				max_size)
+			if (size == null)
+				return
+			object[field] = size
+			if (is_futon)
+				object.futon_side = size ? sign(side) : 0
+			object.x = x0 + min(ux, 0) * (size - extent0)
+			object.y = y0 + min(uy, 0) * (size - extent0)
+		}}
+	}
+
 	/// chair -----------------------------------------------------------------
 
 	object_types.chair = {
@@ -2865,6 +2914,28 @@ function house_plan(t) {
 		if (object.type == 'countertop') {
 			let points = get_countertop_points(plan, object, [])
 			return split_countertop_rects(points, out)
+		} else if (object.type == 'couch') {
+			let rot = Math.floor(object.rot / 90) * 90
+			let [bx1, by1, bx2, by2] = get_object_box(plan, object, box)
+			let ox = rot == 90 || rot == 180 ? bx2 : bx1
+			let oy = rot == 180 || rot == 270 ? by2 : by1
+			rect_local_box(plan, object, local_box)
+			rotated_box(ox, oy, local_box, rot, out)
+			out.length = 4
+			if (object.futon_length) {
+				let n = clamp(round((object.w - 200) / 600), 1, 4)
+				let seat_w = (object.w - 200) / n
+				local_box[0] = object.futon_side < 0
+					? 0 : object.w - 100 - seat_w
+				local_box[1] = object.l
+				local_box[2] = object.futon_side < 0
+					? 100 + seat_w : object.w
+				local_box[3] = object.l + object.futon_length
+				let [x1, y1, x2, y2] = rotated_box(ox, oy,
+					local_box, rot, box)
+				out.push(x1, y1, x2, y2)
+			}
+			return out
 		} else {
 			get_object_box(plan, object, out)
 			out.length = 4

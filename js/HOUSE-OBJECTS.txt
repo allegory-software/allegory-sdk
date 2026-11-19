@@ -6,11 +6,6 @@ ALL UNCOMMITTED on branch dev (as of the end of session 1). Ask before committin
 
 # Cosmin's nitpicks
 
-- add shortcuts: ~, 1, 2, 3 ... to switch floor (~ for ground floor)
-
-- in show-all-dimensions mode, align all the exterior dimensions to the same line
-which is an offset from bbox side. add a dimension for the side total too.
-
 - stair sides must snap to walls too
 - stair doesn't attach to areas that don't have a wall in this floor
 - stair inside-house test must be done on the union between the opening
@@ -22,26 +17,18 @@ which is an offset from bbox side. add a dimension for the side total too.
 - architects expect accurate measurements for objects even in 2D, incl. details
 like door panel thickness, etc.
 
-- snap windows to where the wall segments around them are equal.
-
-- doors and windows floating on a terrace are shown as valid, they should not.
+- window snap points:
+	- snap windows to where the wall segments around them are equal.
+	- snap doors and windows on exterior walls to door and windows on all other
+	floors found on the same wall axis.
 
 - window drag point moves when snapped out of the wall on exterior walls.
-
-- doors and windows should snap to door and windows on all other floors
-found on the same wall axis.
-
-- don't show clearance dimensions while object is outside the plan.
 
 - fascia options:
 	- soffit
 	- angled vs streight
 	- custom profile
 	- limited eave extension over the butt wall
-
-- don't show roof angle at low zoom levels
-- don't show dimensions at low zoom levels
-
 
 
 ## Cosmin's request (2026-11-17)
