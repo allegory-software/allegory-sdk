@@ -260,6 +260,10 @@ function create_floor_editor(id) {
 				} else if (action == 'pan') {
 					pan_cx0 = view_cx
 					pan_cy0 = view_cy
+				} else if (action == 'move_object') {
+					cs.object_dims = [] // [gap, x1, y1, x2, y2, ...] N, E, S, W
+					cs.object_rects = [] // rectangles of the moving object
+					cs.other_rects = [] // rectangles of the object being checked
 				}
 			}
 
@@ -291,12 +295,25 @@ function create_floor_editor(id) {
 
 				}
 
+				if (action == 'move_grid_origin') {
+					if (is_moved)
+						cs.edit ??= s.house.start_move_grid_origin()
+					if (cs.edit) {
+						let snapped = cs.edit.move(dx, dy,
+							snap_distance(200))
+						shown_snap_lines.length = 0
+						if (snapped & 1)
+							shown_snap_lines.push(s.house.grid_x, 1)
+						if (snapped & 2)
+							shown_snap_lines.push(s.house.grid_y, 0)
+					}
+				}
+
 				if (action == 'move_seg')
-					cs.edit.move(dx, dy, snap_distance(nosnap ? 20 : 200))
+					cs.edit.move(dx, dy, snap_distance(200), snap_step())
 
 				if (action == 'resize_seg')
-					[cs.x, cs.y] = cs.edit.resize(dx, dy,
-						snap_distance(nosnap ? 20 : 300))
+					[cs.x, cs.y] = cs.edit.resize(dx, dy, snap_distance(300), snap_step())
 
 				if (action == 'move_seg' || action == 'resize_seg') {
 					let {snap_a, snap_v} = cs.edit
@@ -312,8 +329,7 @@ function create_floor_editor(id) {
 				if (action == 'move_object') {
 					if (is_moved)
 						cs.edit ??= cs.object_plan.start_move_object(cs.object)
-					cs.edit?.move(dx, dy,
-						snap_distance(nosnap ? 20 : 200), 3 / view_scale)
+					cs.edit?.move(dx, dy, snap_distance(200), 3 / view_scale, snap_step())
 				}
 
 				// an object end resizes only past the drag threshold or with ctrl.
@@ -321,8 +337,7 @@ function create_floor_editor(id) {
 					if (is_moved)
 						cs.edit ??= cs.object_plan.start_resize_object(cs.object,
 							cs.object_side, cs.object_axis)
-					cs.edit?.resize(dx, dy, snap_distance(nosnap ? 20 : 200),
-						nosnap)
+					cs.edit?.resize(dx, dy, snap_distance(200), nosnap)
 				}
 
 				// an eave moves only past the drag threshold or with ctrl: a click
@@ -347,7 +362,7 @@ function create_floor_editor(id) {
 					if (cs.edit)
 						cs.can_move_eave = cs.edit.move(dx, dy,
 							!ui.keypressed('shift'),
-							nosnap ? 0 : snap_distance(200))
+							snap_distance(200, 0))
 				}
 
 				// the line or point where roof faces meet follows the pointer at
@@ -507,8 +522,12 @@ function create_floor_editor(id) {
 
 	// the snap distance in plan units: d mm, but at most 12 screen pixels, so
 	// that zooming in makes snapping finer.
-	function snap_distance(d) {
-		return min(d, 12 / view_scale)
+	function snap_distance(d, ctrl_d = 20) {
+		return min(ui.keypressed('ctrl') ? ctrl_d : d, 12 / view_scale)
+	}
+
+	function snap_step() {
+		return ui.keypressed('ctrl') ? 0 : 100
 	}
 
 	function transform_view(cx, w, h) {
@@ -615,8 +634,8 @@ function create_floor_editor(id) {
 	}
 
 	function draw_grids(cx, w, h) {
-		let x0 = view_x0
-		let y0 = view_y0
+		let x0 = view_x0 + to_pixels(s.house.grid_x)
+		let y0 = view_y0 + to_pixels(s.house.grid_y)
 		if (view_rotation) {
 			let xc = round(w / 2)
 			let yc = round(h / 2)
@@ -1127,30 +1146,80 @@ function create_floor_editor(id) {
 		draw_object_length(cx, plan, object, w, 0, w, l)
 	}
 
-	// draw distances from the object's ends (lo and hi) to the room side's
-	// endpoints. Draw inside the room, to the left when going from m1 to m2.
-	function draw_side_dims(cx, side, is_v, lo, hi) {
-		let c = side[1]
-		let m1 = side[2]
-		let m2 = side[3]
-		let a1 = m2 > m1 ? lo : hi // object endpoint nearest to m1
-		let a2 = m2 > m1 ? hi : lo
-		if (is_v) {
-			draw_length(cx,c, m1, c, a1)
-			draw_length(cx,c, a2, c, m2)
-		} else {
-			draw_length(cx,m1, c, a1, c)
-			draw_length(cx,a2, c, m2, c)
+	// keep the closest facing side with an overlapping perpendicular span.
+	function add_object_dim(object_dims, dir, c, m1, m2, x1, y1, x2, y2) {
+		let is_v = dir % 2 == 1
+		let lo = max(min(m1, m2), is_v ? y1 : x1)
+		let hi = min(max(m1, m2), is_v ? y2 : x2)
+		if (lo >= hi)
+			return
+		let end = dir == 0 ? y1 : dir == 1 ? x2 : dir == 2 ? y2 : x1
+		let gap = dir == 1 || dir == 2 ? c - end : end - c
+		let i = dir*5
+		if (gap >= 0 && gap < object_dims[i]) {
+			let along = (lo + hi) / 2
+			object_dims[i] = gap
+			object_dims[i+1] = is_v ? end : along
+			object_dims[i+2] = is_v ? along : end
+			object_dims[i+3] = is_v ? c : along
+			object_dims[i+4] = is_v ? along : c
 		}
 	}
 
-	// draw distances from the furniture box to the snapped walls' endpoints.
-	function draw_furniture_wall_dims(cx, plan, object) {
-		let [x1, y1, x2, y2] = s.house.get_object_box(plan, object, box)
-		if (object.side_x)
-			draw_side_dims(cx, object.side_x, true, y1, y2)
-		if (object.side_y)
-			draw_side_dims(cx, object.side_y, false, x1, x2)
+	// measure the moving rectangles and test overlap in one floor scan.
+	function measure_object_dims(plan, object, cs) {
+		let {object_dims, object_rects, other_rects} = cs
+		for (let dir = 0; dir < 4; dir++)
+			object_dims[dir*5] = Infinity
+		let rects = s.house.get_object_rects(plan, object, object_rects)
+		let is_overlapping = false
+		for (let other of plan.objects) {
+			let other_type = s.house.object_types[other.type]
+			if (other == object || other_type.opens_room
+				|| other_type.marks_terrace)
+				continue
+			if (other_type.in_wall)
+				s.house.get_opening_hole(plan, other, other_rects).length = 4
+			else
+				s.house.get_object_rects(plan, other, other_rects)
+			for (let i = 0; i < rects.length; i += 4) {
+				let x1 = rects[i], y1 = rects[i+1]
+				let x2 = rects[i+2], y2 = rects[i+3]
+				for (let j = 0; j < other_rects.length; j += 4) {
+					let ox1 = other_rects[j], oy1 = other_rects[j+1]
+					let ox2 = other_rects[j+2], oy2 = other_rects[j+3]
+					if (x1 < ox2 && x2 > ox1 && y1 < oy2 && y2 > oy1)
+						is_overlapping = true
+					add_object_dim(object_dims, 0, oy2, ox1, ox2,
+						x1, y1, x2, y2)
+					add_object_dim(object_dims, 1, ox1, oy1, oy2,
+						x1, y1, x2, y2)
+					add_object_dim(object_dims, 2, oy1, ox1, ox2,
+						x1, y1, x2, y2)
+					add_object_dim(object_dims, 3, ox2, oy1, oy2,
+						x1, y1, x2, y2)
+				}
+			}
+		}
+		for (let i = 0; i < rects.length; i += 4) {
+			let x1 = rects[i], y1 = rects[i+1]
+			let x2 = rects[i+2], y2 = rects[i+3]
+			for (let side of plan.room_sides) {
+				let [dir, c, m1, m2] = side
+				add_object_dim(object_dims, dir, c, m1, m2, x1, y1, x2, y2)
+			}
+		}
+		return is_overlapping
+	}
+
+	function draw_object_clearances(cx, object_dims) {
+		for (let dir = 0; dir < 4; dir++) {
+			let i = dir*5
+			if (object_dims[i] == Infinity)
+				continue
+			draw_length(cx, object_dims[i+1], object_dims[i+2],
+				object_dims[i+3], object_dims[i+4], null, 0)
+		}
 	}
 
 	/// window and door -------------------------------------------------------
@@ -1165,27 +1234,10 @@ function create_floor_editor(id) {
 			draw_length(cx,x1, y1, x2, y1)
 	}
 
-	// draw distances to both wall endpoints, on the same side of the wall
-	// as the width dimension drawn by draw_opening_size().
-	function draw_opening_wall_dims(cx, plan, object) {
-		let seg = object.seg
-		if (!seg)
-			return
-		let [x1, y1, x2, y2] = s.house.get_object_box(plan, object, box)
-		if (seg.is_v) {
-			draw_length(cx,x2, seg.wall_m1, x2, y1)
-			draw_length(cx,x2, y2, x2, seg.wall_m2)
-		} else {
-			draw_length(cx,seg.wall_m1, y1, x1, y1)
-			draw_length(cx,x2, y1, seg.wall_m2, y1)
-		}
-	}
-
 	object_views.window = {
 		hit: hit_box,
 		hit_resize: hit_resize_rect,
 		draw_sizes: draw_opening_size,
-		draw_wall_dims: draw_opening_wall_dims,
 	}
 
 	// draw the window cut and a line along its centre.
@@ -1236,7 +1288,6 @@ function create_floor_editor(id) {
 	object_views.door = {
 		hit_resize: hit_resize_rect,
 		draw_sizes: draw_opening_size,
-		draw_wall_dims: draw_opening_wall_dims,
 	}
 
 	// test the door box for a body hit and the swing area for a move-only hit.
@@ -1317,7 +1368,6 @@ function create_floor_editor(id) {
 		hit: hit_box,
 		hit_resize: hit_resize_rect,
 		draw_sizes: draw_furniture_sizes,
-		draw_wall_dims: draw_furniture_wall_dims,
 	}
 
 	// draw the mattress, pillows and cover edge, with the head at the top.
@@ -1341,7 +1391,6 @@ function create_floor_editor(id) {
 
 	object_views.chair = {
 		hit: hit_box,
-		draw_wall_dims: draw_furniture_wall_dims,
 	}
 
 	// draw the chair with its narrower back at the top. For a diagonal
@@ -1393,7 +1442,6 @@ function create_floor_editor(id) {
 
 	object_views.wc = {
 		hit: hit_box,
-		draw_wall_dims: draw_furniture_wall_dims,
 	}
 
 	// draw the toilet with its tank at the top.
@@ -1593,17 +1641,21 @@ function create_floor_editor(id) {
 		return false
 	}
 
-	object_views.countertop.draw_sizes = function(cx, plan, object) {
+	object_views.countertop.draw_sizes = function(cx, plan, object, handle) {
 		let cs = ui.captured(id)
 		let a = object.contour
-		let edge1, edge2, axis
+		let p, edge1, edge2, axis
 		if (cs?.object == object && cs.action == 'resize_object' && cs.edit) {
-			let p = cs.edit.edge_i
+			p = cs.edit.edge_i
 			if (p == null)
 				return
+		} else if (handle) {
+			p = floor((handle-1) / 3)*2
+		}
+		if (p != null) {
 			edge1 = (p+a.length-2) % a.length
 			edge2 = (p+2) % a.length
-			axis = cs.object_axis == 'w' ? 0 : 1
+			axis = a[p] == a[(p+2) % a.length] ? 0 : 1
 		}
 		for (let i = 0; i < a.length; i += 2) {
 			let j = (i+2) % a.length
@@ -1619,6 +1671,21 @@ function create_floor_editor(id) {
 					continue
 			}
 			draw_object_length(cx, plan, object, a[j], a[j+1], a[i], a[i+1])
+		}
+		for (let i = 4; i < a.length/2-2; i += 2) {
+			let k = a.length-i, j = (k+2) % a.length
+			if (p != null && p != i && p != k)
+				continue
+			let is_v = a[i] == a[i+2]
+			let axis = is_v ? 1 : 0
+			let lo = max(min(a[i+axis], a[i+2+axis]),
+				min(a[k+axis], a[j+axis]))
+			let hi = min(max(a[i+axis], a[i+2+axis]),
+				max(a[k+axis], a[j+axis]))
+			let x = is_v ? a[k] : (lo+hi)/2
+			let y = is_v ? (lo+hi)/2 : a[k+1]
+			draw_object_length(cx, plan, object,
+				is_v ? a[i] : x, is_v ? y : a[i+1], x, y, 0)
 		}
 	}
 
@@ -1746,7 +1813,7 @@ function create_floor_editor(id) {
 	// error color; other ground objects in the readonly text color.
 	// the hovered object in the link color unless it is in the error color.
 	function draw_objects(cx, plan, objects, hit_object, is_ground,
-		resize_side, from_below) {
+		resize_side, from_below, is_overlapping) {
 		cx.lineWidth = view_scale > 0.04 ? 2 : 1
 		for (let object of objects) {
 			let object_type = s.house.object_types[object.type]
@@ -1761,7 +1828,8 @@ function create_floor_editor(id) {
 			}
 			let draw_resize = object == hit_object && resize_side
 				&& object_view.draw_resize
-			let is_invalid = is_ground ? is_touching : !object.is_valid
+			let is_invalid = (is_ground ? is_touching : !object.is_valid)
+				|| object == hit_object && is_overlapping
 			cx.strokeStyle = is_invalid ? ui.color_css('error')
 				: object == hit_object && !draw_resize ? ui.color_css('link')
 				: ui.color_css('text', is_ground ? 'readonly' : null)
@@ -1793,18 +1861,19 @@ function create_floor_editor(id) {
 
 	// the dimensions of the hovered object, or of all objects when
 	// show_dims is on, and while the object is moving, its distances to the
-	// ends of the wall or room side that it rests against.
+	// closest objects or walls.
 	function draw_object_dims(cx, plan, objects, hit_object, is_moving,
-		from_below) {
+		from_below, object_dims, resize_side) {
 		for (let object of objects) {
 			let object_type = s.house.object_types[object.type]
 			let object_view = object_views[object.type]
 			if (from_below && !object_type.connects_below)
 				continue
 			if (object_view.draw_sizes && (object == hit_object || show_dims))
-				object_view.draw_sizes(cx, plan, object)
-			if (object_view.draw_wall_dims && is_moving && object == hit_object)
-				object_view.draw_wall_dims(cx, plan, object)
+				object_view.draw_sizes(cx, plan, object,
+					object == hit_object ? resize_side : null)
+			if (is_moving && object == hit_object)
+				draw_object_clearances(cx, object_dims)
 		}
 	}
 
@@ -2305,22 +2374,26 @@ function create_floor_editor(id) {
 		if (!is_roof_level) {
 			let resize_side = hit_action == 'resize_object' && !cs?.edit
 				? hs.object_side : null
+			let object_type = hit_object && s.house.object_types[hit_object.type]
+			let is_moving_object = drag_action == 'move_object'
+				&& !object_type.opens_room && !object_type.marks_terrace
+			let is_overlapping = is_moving_object
+				&& measure_object_dims(hs.object_plan ?? plan, hit_object, cs)
 			let ground_objects = s.house.ground_objects
 			draw_objects(cx, plan, ground_objects, hit_object, true,
-				resize_side)
+				resize_side, false, is_overlapping)
 			draw_objects(cx, plan, plan.objects, hit_object, false,
-				resize_side)
+				resize_side, false, is_overlapping)
 			let plan_above = s.house.floors[plan.i+1]
 			let objects_above = plan_above?.objects ?? empty_array
 			draw_objects(cx, plan_above, objects_above,
-				hit_object, false, resize_side, true)
-			let is_moving_object = drag_action == 'move_object'
+				hit_object, false, resize_side, true, is_overlapping)
 			draw_object_dims(cx, plan, ground_objects, hit_object,
-				is_moving_object, false)
+				is_moving_object, false, cs?.object_dims, resize_side)
 			draw_object_dims(cx, plan, plan.objects, hit_object,
-				is_moving_object, false)
+				is_moving_object, false, cs?.object_dims, resize_side)
 			draw_object_dims(cx, plan_above, objects_above,
-				hit_object, is_moving_object, true)
+				hit_object, is_moving_object, true, cs?.object_dims, resize_side)
 		}
 
 		// find all affected _|_ edges so we can show their lengths as we move
@@ -2399,6 +2472,27 @@ function create_floor_editor(id) {
 			cx.fill()
 		}
 
+		// grid origin
+		if (show_grid) {
+			let x = to_pixels(s.house.grid_x)
+			let y = to_pixels(s.house.grid_y)
+			let r = to_pixels(100)
+			let d = to_pixels(150)
+			cx.lineWidth = 1.5 * devicePixelRatio
+			cx.strokeStyle = ui.color_css('link')
+			cx.fillStyle = ui.color_css('bg')
+			cx.beginPath()
+			cx.arc(x, y, r, 0, 2 * PI)
+			cx.moveTo(x + r / 2, y)
+			cx.arc(x, y, r / 2, 0, 2 * PI)
+			cx.fill('evenodd')
+			cx.moveTo(x - d, y)
+			cx.lineTo(x + d, y)
+			cx.moveTo(x, y - d)
+			cx.lineTo(x, y + d)
+			cx.stroke()
+		}
+
 		// cursor
 		let seg = drag_action == 'move_seg' && drag_seg || (hit_action == 'move_seg' && hit_seg)
 		let axes_swapped = round((view_rotation ?? 0) / (90*rad)) % 2 != 0
@@ -2431,7 +2525,7 @@ function create_floor_editor(id) {
 		} else if (hit_action == 'resize_object') {
 			let is_v = (hs.object.rot % 180 == 90) != (hs.object_axis == 'l')
 			ui.set_cursor(is_v != axes_swapped ? 'ns-resize' : 'ew-resize')
-		} else if (hit_object) {
+		} else if (hit_action == 'move_grid_origin' || hit_object) {
 			ui.set_cursor(cs ? 'grabbing' : 'grab')
 		} else if (hit_p)
 			ui.set_cursor('copy')
@@ -2502,6 +2596,7 @@ function create_floor_editor(id) {
 	}
 
 	/*	sets in hovers(id):
+		action=move_grid_origin    hit grid origin
 		action=pan                 shift pressed, pan, don't hit anything
 		p                          hit joint
 		seg, action=move_seg       hit segment
@@ -2550,7 +2645,7 @@ function create_floor_editor(id) {
 
 		let pan    = ui.keypressed('shift')
 		let nosnap = ui.keypressed('ctrl')
-		let snap_d = snap_distance(nosnap ? 20 : 200)
+		let snap_d = snap_distance(200)
 		let snap_lines = s.house.snap_lines
 
 		// pointer position from the viewport center, along the plan's axes,
@@ -2587,6 +2682,19 @@ function create_floor_editor(id) {
 			cx.restore()
 			ui.update_mouse()
 			return true
+		}
+
+		// grid origin
+		if (show_grid) {
+			let dx = ui.mx - to_pixels(s.house.grid_x)
+			let dy = ui.my - to_pixels(s.house.grid_y)
+			let r = max(to_pixels(100), 13 * devicePixelRatio)
+			if (dx * dx + dy * dy <= r * r) {
+				hs.action = 'move_grid_origin'
+				cx.restore()
+				ui.update_mouse()
+				return true
+			}
 		}
 
 		// an object is on top of everything else.
@@ -2667,8 +2775,8 @@ function create_floor_editor(id) {
 				if (ui.hit_bbox(sx1, sy1, sx2, sy2)) {
 					hit_seg = seg
 					hs.seg = seg
-					let sx = !v ? snap_lines[0].snap(mx, snap_d) ?? mx : null
-					let sy = v  ? snap_lines[1].snap(my, snap_d) ?? my : null
+					let sx = !v ? snap_lines[0].snap(mx, snap_d, snap_step()) ?? mx : null
+					let sy =  v ? snap_lines[1].snap(my, snap_d, snap_step()) ?? my : null
 					hs.x = sx ?? x1
 					hs.y = sy ?? y1
 					if (sx != null) sl.push(sx, 1)
@@ -2690,8 +2798,8 @@ function create_floor_editor(id) {
 
 		// hit snapping point
 		if (!hit_p && !hit_seg && !hit_roof && !is_roof_level) {
-			let sx = snap_lines[0].snap(mx, snap_d)
-			let sy = snap_lines[1].snap(my, snap_d)
+			let sx = snap_lines[0].snap(mx, snap_d, snap_step())
+			let sy = snap_lines[1].snap(my, snap_d, snap_step())
 			hs.x = sx ?? mx
 			hs.y = sy ?? my
 			if (sx != null) sl.push(sx, 1)

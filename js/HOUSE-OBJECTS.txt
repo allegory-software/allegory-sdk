@@ -19,9 +19,6 @@ which is an offset from bbox side. add a dimension for the side total too.
 - rise and depth should be shown as additional measurements inside first step
 - stair flips when it finds a wall
 
-- moving objects should measure from closest object in all direction, not from walls.
-- overlapping objects should be drawn in red (but not move to ground).
-
 - architects expect accurate measurements for objects even in 2D, incl. details
 like door panel thickness, etc.
 
@@ -34,7 +31,18 @@ like door panel thickness, etc.
 - doors and windows should snap to door and windows on all other floors
 found on the same wall axis.
 
--
+- don't show clearance dimensions while object is outside the plan.
+
+- fascia options:
+	- soffit
+	- angled vs streight
+	- custom profile
+	- limited eave extension over the butt wall
+
+- don't show roof angle at low zoom levels
+- don't show dimensions at low zoom levels
+
+
 
 ## Cosmin's request (2026-11-17)
 

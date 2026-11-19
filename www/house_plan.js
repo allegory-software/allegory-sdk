@@ -26,6 +26,8 @@ let defaults = {
 	slab_thickness: 200,
 	roof_thickness: 200, // at right angles to the roof
 	half_wall_h: 1000, // of the half-walls around terraces, above the slab
+	grid_x: 0, // checker grid origin
+	grid_y: 0,
 }
 
 const STATE_VERSION = 1
@@ -68,6 +70,11 @@ function house_plan(t) {
 
 	function snap_length(x) {
 		return x == null ? x : round(x)
+	}
+
+	function snap_grid(x, v, step) {
+		let origin = v ? house.grid_x : house.grid_y
+		return step ? origin + round((x - origin) / step) * step : x
 	}
 
 	function copy_roof(roof) {
@@ -183,21 +190,32 @@ function house_plan(t) {
 		return bb
 	}
 
-	function snap_lines_for(v, exclude_seg) {
+	function snap_lines_for(v, exclude_seg, for_grid) {
 		let mi = v ? 0 : 1
 		let ms = []
 		for (let floor of house.floors) {
-			for (let p of floor.ps) {
-				if (exclude_seg && (exclude_seg[0] == p || exclude_seg[1] == p))
-					continue
-				let m = p[mi]
-				ms.push(m)
+			if (for_grid) {
+				for (let comp of floor.comps)
+					for (let c of comp.cycles)
+						for (let p of c.edges)
+							ms.push(p[mi])
+				for (let object of floor.objects) {
+					get_object_box(floor, object, box)
+					ms.push(box[mi], box[mi+2])
+				}
+			} else {
+				for (let p of floor.ps) {
+					if (exclude_seg && (exclude_seg[0] == p || exclude_seg[1] == p))
+						continue
+					let m = p[mi]
+					ms.push(m)
+				}
 			}
 		}
 		ms.sort((m1, m2) => m1 - m2)
 		uniq_sorted(ms)
 
-		ms.snap = function(m, snap_d) {
+		ms.snap = function(m, snap_d, grid_step = 0) {
 			let min_d = 1/0
 			let min_m
 			for (let m1 of ms) {
@@ -207,6 +225,8 @@ function house_plan(t) {
 					min_m = m1
 				}
 			}
+			if (min_m == null && grid_step)
+				return snap_grid(m, v, grid_step)
 			return min_m
 		}
 
@@ -1342,8 +1362,10 @@ function house_plan(t) {
 			let s = start_edit()
 			let [x1, y1, x2, y2] = get_object_box(floor, object, move_box)
 			let x0 = (x1 + x2) / 2, y0 = (y1 + y2) / 2
-			s.move = function(dx, dy, snap_d, snap_margin = 0) {
-				move_object(object, x0 + dx, y0 + dy, snap_d, snap_margin)
+			s.move = function(dx, dy, snap_d, snap_margin = 0, grid_step = 0) {
+				let x = snap_grid(x0 + dx, 1, grid_step)
+				let y = snap_grid(y0 + dy, 0, grid_step)
+				move_object(object, x, y, snap_d, snap_margin)
 			}
 			return s
 		}
@@ -1548,9 +1570,14 @@ function house_plan(t) {
 			}
 			return min_a1
 		}
-		function snap_seg(a, min_a, max_a, snap_lines, s, snap_d) {
+		function snap_seg(a, min_a, max_a, snap_lines, s, snap_d, grid_step) {
 			a = clamp(a, min_a, max_a)
 			let sa = snap_lines.snap(a, snap_d)
+			if (sa == null && grid_step) {
+				let ga = snap_grid(a, snap_lines.v, grid_step)
+				if (ga >= min_a && ga <= max_a)
+					sa = ga
+			}
 			s.snap_a = sa ?? null
 			return snap_length(sa ?? a)
 		}
@@ -1593,7 +1620,7 @@ function house_plan(t) {
 				snap_v: snap_lines.v,
 			}
 
-			s.move = function(dx, dy, snap_d = 200) {
+			s.move = function(dx, dy, snap_d = 200, grid_step = 0) {
 
 				let dm = v ? dy : dx
 				let da = v ? dx : dy
@@ -1601,13 +1628,17 @@ function house_plan(t) {
 				if (move_freely) {
 
 					let a = seg0.axis + da
-					a = snap_lines.snap(a, snap_d) ?? a
+					a = snap_lines.snap(a, snap_d, grid_step) ?? a
 
 					// snap both end-points on main-axis.
 					let m1 = seg0.m1 + dm
 					let m2 = seg0.m2 + dm
 					let m1s = m_snap_lines.snap(m1, snap_d)
 					let m2s = m_snap_lines.snap(m2, snap_d)
+					if (m1s == null && m2s == null && grid_step) {
+						m1s = snap_grid(m1, !v, grid_step)
+						m2s = snap_grid(m2, !v, grid_step)
+					}
 					if (m1s != null && m2s != null) // both ends snapped
 						if (abs(m1s - m1) <= abs(m2s - m2)) // pick the one closer to snap line
 							m2s = null
@@ -1629,7 +1660,7 @@ function house_plan(t) {
 				} else { // move on cross axis
 
 					let a = seg0.axis + (v ? dx : dy)
-					seg.axis = snap_seg(a, min_a, max_a, snap_lines, s, snap_d)
+					seg.axis = snap_seg(a, min_a, max_a, snap_lines, s, snap_d, grid_step)
 					create_edges()
 
 				}
@@ -1716,12 +1747,12 @@ function house_plan(t) {
 				snap_v: snap_lines.v,
 			}
 
-			s.resize = function(dx, dy, snap_d = 300) {
+			s.resize = function(dx, dy, snap_d = 300, grid_step = 0) {
 				let x1 = snap_length(p0[0] + dx * abs(sdx))
 				let y1 = snap_length(p0[1] + dy * abs(sdy))
 
 				let a = sdx ? x1 : y1
-				a = snap_seg(a, min_a, max_a, snap_lines, s, snap_d)
+				a = snap_seg(a, min_a, max_a, snap_lines, s, snap_d, grid_step)
 				if (sdx)
 					x1 = a
 				else
@@ -2793,16 +2824,57 @@ function house_plan(t) {
 		return out
 	}
 
-	function place_countertop(plan, object, snap_d) {
-		let a = object.contour, n = a.length
-		let points = [], ys = [], xs = []
+	function get_countertop_points(plan, object, out) {
+		let a = object.contour
 		let [ox, oy] = get_object_origin(plan, object, object_point1)
-		for (let i = 0; i < n; i += 2) {
+		out.length = a.length
+		for (let i = 0; i < a.length; i += 2) {
 			let [dx, dy] = object_vector_to_plan(object,
 				a[i], a[i+1], object_point1)
-			points.push(ox + dx, oy + dy)
-			ys.push(oy + dy)
+			out[i] = ox + dx; out[i+1] = oy + dy
 		}
+		return out
+	}
+
+	function split_countertop_rects(points, out) {
+		let n = points.length
+		let ys = [], xs = []
+		out.length = 0
+		for (let i = 1; i < n; i += 2)
+			ys.push(points[i])
+		ys.sort((a, b) => a - b)
+		for (let k = 1; k < ys.length; k++) {
+			let y1 = ys[k-1], y2 = ys[k], y = (y1 + y2) / 2
+			if (y1 == y2)
+				continue
+			xs.length = 0
+			for (let i = 0; i < n; i += 2) {
+				let j = (i+2) % n
+				if ((points[i+1] > y) != (points[j+1] > y))
+					xs.push(points[i])
+			}
+			xs.sort((a, b) => a - b)
+			for (let i = 0; i < xs.length; i += 2)
+				if (xs[i] != xs[i+1])
+					out.push(xs[i], y1, xs[i+1], y2)
+		}
+		return out
+	}
+
+	function get_object_rects(plan, object, out) {
+		if (object.type == 'countertop') {
+			let points = get_countertop_points(plan, object, [])
+			return split_countertop_rects(points, out)
+		} else {
+			get_object_box(plan, object, out)
+			out.length = 4
+			return out
+		}
+	}
+
+	function place_countertop(plan, object, snap_d) {
+		let points = get_countertop_points(plan, object, [])
+		let n = points.length
 		object.side_x = null; object.side_y = null
 		for (let axis = 0; axis < 2; axis++) {
 			let shift = 0, gap = snap_d, found
@@ -2826,30 +2898,16 @@ function house_plan(t) {
 			else { object.x += shift; object.side_x = found ?? null }
 			for (let i = axis; i < n; i += 2)
 				points[i] += shift
-			if (axis)
-				for (let i = 0; i < ys.length; i++) ys[i] += shift
 		}
-		ys.sort((a, b) => a - b)
+		let rects = split_countertop_rects(points, [])
 		object.on_floor = true
-		for (let k = 1; k < ys.length; k++) {
-			let y1 = ys[k-1], y2 = ys[k], y = (y1 + y2) / 2
-			if (y1 == y2)
-				continue
-			xs.length = 0
-			for (let i = 0; i < n; i += 2) {
-				let j = (i+2) % n
-				if ((points[i+1] > y) != (points[j+1] > y))
-					xs.push(points[i])
-			}
-			xs.sort((a, b) => a - b)
-			for (let i = 0; i < xs.length; i += 2) {
-				if (xs[i] == xs[i+1])
-					continue
-				if (!is_rect_in_rooms(plan, (xs[i] + xs[i+1]) / 2, y,
-					(xs[i+1] - xs[i]) / 2, (y2 - y1) / 2)) {
-					object.on_floor = false
-					return
-				}
+		for (let i = 0; i < rects.length; i += 4) {
+			let x1 = rects[i], y1 = rects[i+1]
+			let x2 = rects[i+2], y2 = rects[i+3]
+			if (!is_rect_in_rooms(plan, (x1 + x2) / 2, (y1 + y2) / 2,
+				(x2 - x1) / 2, (y2 - y1) / 2)) {
+				object.on_floor = false
+				return
 			}
 		}
 	}
@@ -2921,6 +2979,8 @@ function house_plan(t) {
 				let is_x = !!ux
 				let across = is_x ? x : y
 				let min_gap = snap_d, shift = 0
+				if (!nosnap)
+					shift = (ux || uy) * (snap_grid(across, is_x, 100) - across)
 				for (let side of plan.room_sides) {
 					if ((side[0] % 2 == 1) != is_x)
 						continue
@@ -3183,6 +3243,7 @@ function house_plan(t) {
 
 	house.object_types = object_types
 	house.get_object_box = get_object_box
+	house.get_object_rects = get_object_rects
 	house.get_object_origin = get_object_origin
 	house.object_to_plan = object_to_plan
 	house.plan_to_object = plan_to_object
@@ -3277,6 +3338,38 @@ function house_plan(t) {
 			if (house[name] == value0)
 				return
 			undo_stack.push({op: 'setting', name: name, value: value0})
+			redo_stack.length = 0
+			house.edit_no++
+		}
+		return s
+	}
+
+	//// GRID ORIGIN ----------------------------------------------------------
+
+	house.start_move_grid_origin = function() {
+		assert(!edit0)
+		let x0 = house.grid_x
+		let y0 = house.grid_y
+		let x_lines = snap_lines_for(1, null, true)
+		let y_lines = snap_lines_for(0, null, true)
+		let s = {}
+		s.move = function(dx, dy, snap_d) {
+			let x = x0 + dx
+			let y = y0 + dy
+			let sx = x_lines.snap(x, snap_d)
+			let sy = y_lines.snap(y, snap_d)
+			house.grid_x = snap_length(sx ?? x)
+			house.grid_y = snap_length(sy ?? y)
+			return (sx != null ? 1 : 0) | (sy != null ? 2 : 0)
+		}
+		s.cancel = function() {
+			house.grid_x = x0
+			house.grid_y = y0
+		}
+		s.stop = function() {
+			if (house.grid_x == x0 && house.grid_y == y0)
+				return
+			undo_stack.push({op: 'grid_origin', x: x0, y: y0})
 			redo_stack.length = 0
 			house.edit_no++
 		}
@@ -3387,6 +3480,12 @@ function house_plan(t) {
 			let state = take_state()
 			put_state(entry.state)
 			return {op: 'load', state: state}
+		} else if (op == 'grid_origin') {
+			let x = house.grid_x
+			let y = house.grid_y
+			house.grid_x = entry.x
+			house.grid_y = entry.y
+			return {op: 'grid_origin', x: x, y: y}
 		} else if (op == 'setting') {
 			let value = house[entry.name]
 			apply_setting(entry.name, entry.value)
