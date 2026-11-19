@@ -3,6 +3,7 @@
 const G = window
 
 const {
+	isarray,
 	round, mod, abs, sign, min, max, clamp, floor, ceil, sqrt, tan, atan,
 	sin, cos, rad,
 	assert, log, push_log, pop_log, push_log_if,
@@ -97,7 +98,7 @@ function house_plan(t) {
 			}
 			for (let name in object_type.fields) {
 				let value = object[name] ?? object_type.fields[name]
-				object1[name] = Array.isArray(value) ? value.slice() : value
+				object1[name] = isarray(value) ? value.slice() : value
 			}
 			a.push(object1)
 		}
@@ -270,11 +271,14 @@ function house_plan(t) {
 			     before snapping to a perpendicular side. Null if absent.
 			     Not saved.
 			on_floor: true if the object belongs to floor.objects; false if it
-			     belongs to house.ground_objects. The type's place() function
-			     checks whether the object fits on the floor. Not saved.
-			cached_path: the Path2D that the type's draw function built, or
-			     null. The code that changes what the path draws sets it to
-			     null. Not saved.
+			     belongs to house.ground_objects. Invalid objects stay on the
+			     floor while their bounding box touches the house. Not saved.
+			is_valid: true if the type's place() function accepted the
+			     placement, before the floor membership check. Not saved.
+			blocked_sides: for a rect_table, a bit mask of its local sides
+			     (bit 0 top, 1 right, 2 bottom, 3 left, clockwise) with no room
+			     for chairs beyond them. Absent: none. The type's place()
+			     function sets it. Not saved.
 		*/
 		floor.objects = copy_objects(t.objects ?? [])
 		let wall_geometry
@@ -293,7 +297,7 @@ function house_plan(t) {
 		}
 
 		// place the objects again in order, or only those connecting below.
-		// move invalid objects to the ground.
+		// move invalid objects clear of the house to the ground.
 		function fix_objects(connects_below_only = false) {
 			let t0 = profile_time()
 			let objects = floor.objects
@@ -309,7 +313,7 @@ function house_plan(t) {
 					i++
 					continue
 				}
-				object_type.place(floor, object, 0)
+				place_object_on_floor(object, 0)
 				if (object.on_floor) {
 					i++
 				} else {
@@ -376,9 +380,11 @@ function house_plan(t) {
 					// the faces of an inner cycle or of an island face a room.
 					if (!c.outer || c.comp.inside) {
 						let ring = c.edges
-						for (let i = 0, n = ring.length; i < n; i++)
-							read_wall_side(ring[i], ring[(i+1) % n],
-								room_sides[side_n++] ??= [])
+						for (let i = 0, n = ring.length; i < n; i++) {
+							room_sides[side_n] = read_wall_side(ring[i],
+								ring[(i+1) % n], room_sides[side_n] ?? [])
+							side_n++
+						}
 					}
 				}
 			}
@@ -1265,13 +1271,21 @@ function house_plan(t) {
 			place_object(object, snap_d, snap_margin)
 		}
 
+		function place_object_on_floor(object, snap_d, snap_margin) {
+			object_types[object.type].place(floor, object, snap_d, snap_margin)
+			object.is_valid = object.on_floor
+			if (!object.on_floor) {
+				let [x1, y1, x2, y2] = get_object_box(floor, object, move_box)
+				object.on_floor = floor.is_rect_touching_house(x1, y1, x2, y2)
+			}
+		}
+
 		// let the object's type place it where it is or on a wall near it, then
 		// put it in its list: on the floor: the floor's, else the ground's.
 		function place_object(object, snap_d, snap_margin) {
 			let objects0 = object.on_floor ? floor.objects : house.ground_objects
 			object.seg = null
-			object_types[object.type].place(floor, object,
-				snap_d, snap_margin)
+			place_object_on_floor(object, snap_d, snap_margin)
 			let objects = object.on_floor ? floor.objects : house.ground_objects
 			if (objects != objects0) {
 				remove_value(objects0, object)
@@ -1830,7 +1844,7 @@ function house_plan(t) {
 		let box = [0, 0, 0, 0] // [x1, y1, x2, y2] of the hole
 		for (let object of floor.objects) {
 			let {in_wall, sill, head} = object_types[object.type]
-			if (!in_wall)
+			if (!in_wall || !object.seg)
 				continue
 			let key = sill + ' ' + head
 			let group = groups.get(key)
@@ -2224,14 +2238,20 @@ function house_plan(t) {
 		let [x1, y1, x2, y2] = get_object_box(plan, object, origin_box)
 		let [lx1, ly1, lx2, ly2] = object_types[object.type]
 			.local_box(plan, object, origin_local_box)
-		object_vector_to_plan(object, (lx1 + lx2) / 2, (ly1 + ly2) / 2, out)
-		return out.set((x1 + x2) / 2 - out[0], (y1 + y2) / 2 - out[1])
+		object_vector_to_plan(object,
+			(lx1 + lx2) / 2,
+			(ly1 + ly2) / 2, out)
+		return out.set(
+			(x1 + x2) / 2 - out[0],
+			(y1 + y2) / 2 - out[1])
 	}
 
 	// local box of a w by l rectangle.
 	function rect_local_box(plan, object, out) {
-		out[0] = 0; out[1] = 0
-		out[2] = object.w; out[3] = object.l
+		out[0] = 0
+		out[1] = 0
+		out[2] = object.w
+		out[3] = object.l
 		return out
 	}
 
@@ -2255,7 +2275,10 @@ function house_plan(t) {
 		let [x1, y1, x2, y2] = bounds
 		let hx = (x2 - x1) / 2
 		let hy = (y2 - y1) / 2
-		object_point.set((x1 + x2) / 2, (y1 + y2) / 2).transform(m)
+		object_point.set(
+			(x1 + x2) / 2,
+			(y1 + y2) / 2
+		).transform(m)
 		let wx = abs(m[0]) * hx + abs(m[3]) * hy
 		let wy = abs(m[1]) * hx + abs(m[4]) * hy
 		out[0] = object_point[0] - wx
@@ -2270,7 +2293,7 @@ function house_plan(t) {
 	// return the allowed size nearest to size without exceeding max_size.
 	// Accept a list or range of sizes. Return null if no allowed size fits.
 	function snap_object_size(sizes, size, max_size) {
-		if (Array.isArray(sizes)) {
+		if (isarray(sizes)) {
 			let size1 = null
 			for (let size2 of sizes)
 				if (size2 <= max_size
@@ -2295,9 +2318,8 @@ function house_plan(t) {
 		let object_type = object_types[object.type]
 		let is_l = axis == 'l'
 		// convert the direction of the dragged end to plan coordinates.
-		object_vector_to_plan(object, is_l ? 0 : side, is_l ? side : 0,
-			object_point1)
-		let ux = object_point1[0], uy = object_point1[1]
+		let [ux, uy] = object_vector_to_plan(object,
+			is_l ? 0 : side, is_l ? side : 0, object_point1)
 		let [x1, y1, x2, y2] = get_object_box(plan, object, box)
 		let size0 = ux ? x2 - x1 : y2 - y1
 		let x0 = object.x, y0 = object.y
@@ -2456,7 +2478,7 @@ function house_plan(t) {
 	// return the hole that the opening cuts in its wall [x1, y1, x2, y2]: its
 	// box along the wall, the wall's faces across it. Off the wall: its box.
 	function get_opening_hole(plan, object, out) {
-		get_object_box(plan, object, out)
+		out = get_object_box(plan, object, out)
 		let seg = object.seg
 		if (seg) {
 			let is_v = opening_is_v(object)
@@ -2687,18 +2709,65 @@ function house_plan(t) {
 	function start_resize_round_table(plan, object, side, axis = 'w') {
 		let w0 = object.w, x0 = object.x, y0 = object.y
 		let is_l = axis == 'l'
-		object_vector_to_plan(object, is_l ? 0 : side, is_l ? side : 0,
-			object_point1)
-		let ux = object_point1[0], uy = object_point1[1]
+		let [ux, uy] = object_vector_to_plan(object,
+			is_l ? 0 : side, is_l ? side : 0, object_point1)
 		let sizes = object_types.round_table.sizes.w
 		return {resize: function(dx, dy) {
 			let w = snap_object_size(sizes, w0 + 2 * (dx * ux + dy * uy),
 				Infinity)
 			object.w = w
-			object.cached_path = null
 			object.x = x0 - (w - w0) / 2
 			object.y = y0 - (w - w0) / 2
 		}}
+	}
+
+	/// rectangular table -----------------------------------------------------
+
+	object_types.rect_table = {
+		w: 1600,
+		fields: {l: 900},
+		sizes: {
+			w: {min: 500, max: 3000, step: 50},
+			l: {min: 500, max: 1500, step: 50},
+		},
+		snap_faces: [0, 1, 2, 3],
+		place: place_rect_table,
+		local_box: rect_local_box,
+		start_resize: start_resize_rect,
+	}
+
+	function place_rect_table(plan, object, snap_d, snap_margin = 0) {
+		place_furniture(plan, object, snap_d, snap_margin)
+		// find blocked_sides which hides chairs on sides too close to walls.
+		// blocked_sides is table-local 0 top, 1 right, 2 bottom, 3 left.
+		let chair_depth = 500
+		let blocked_sides = 0
+		if (object.on_floor) {
+			let [ox, oy] = get_object_origin(plan, object, origin_point)
+			for (let k = 0; k < 4; k++) {
+				let bounds = rect_local_box(plan, object, local_box)
+				if (k == 0) {
+					bounds[3] = 0
+					bounds[1] = -chair_depth
+				} else if (k == 1) {
+					bounds[0] = object.w
+					bounds[2] = object.w + chair_depth
+				} else if (k == 2) {
+					bounds[1] = object.l
+					bounds[3] = object.l + chair_depth
+				} else {
+					bounds[2] = 0
+					bounds[0] = -chair_depth
+				}
+				let [x1, y1, x2, y2] = rotated_box(ox, oy, bounds,
+					object.rot, box)
+				if (!is_rect_in_rooms(plan,
+						(x1 + x2) / 2, (y1 + y2) / 2,
+						(x2 - x1) / 2, (y2 - y1) / 2))
+					blocked_sides |= 1 << k
+			}
+		}
+		object.blocked_sides = blocked_sides
 	}
 
 	/// countertop ------------------------------------------------------------
@@ -2729,9 +2798,10 @@ function house_plan(t) {
 		let points = [], ys = [], xs = []
 		let [ox, oy] = get_object_origin(plan, object, object_point1)
 		for (let i = 0; i < n; i += 2) {
-			object_vector_to_plan(object, a[i], a[i+1], object_point1)
-			points.push(ox + object_point1[0], oy + object_point1[1])
-			ys.push(oy + object_point1[1])
+			let [dx, dy] = object_vector_to_plan(object,
+				a[i], a[i+1], object_point1)
+			points.push(ox + dx, oy + dy)
+			ys.push(oy + dy)
 		}
 		object.side_x = null; object.side_y = null
 		for (let axis = 0; axis < 2; axis++) {
@@ -2803,7 +2873,7 @@ function house_plan(t) {
 		let hi = zone == 1 ? w1 : zone == 2 ? length : length-w2
 		out[0] = a[p] + ux*lo; out[1] = a[p+1] + uy*lo
 		out[2] = a[p] + ux*hi; out[3] = a[p+1] + uy*hi
-		return hi > lo
+		return hi > lo ? out : null
 	}
 
 	const countertop_depth_range = {min: 400, max: 1200, step: 50}
@@ -2816,8 +2886,8 @@ function house_plan(t) {
 		let i = floor((handle-1) / 3)*2, j = (i+2) % n
 		let zone = (handle-1) % 3
 		let nx = sign(a[j+1]-a[i+1]), ny = -sign(a[j]-a[i])
-		get_countertop_edge(object, handle, countertop_edge)
-		let [x1, y1, x2, y2] = countertop_edge
+		let [x1, y1, x2, y2] = get_countertop_edge(object, handle,
+			countertop_edge)
 		let [ox, oy] = get_object_origin(plan, object, object_point1)
 
 		// how far the edge can move before it passes its neighbours' ends,
@@ -2835,19 +2905,19 @@ function house_plan(t) {
 		s.resize = function(dx, dy, snap_d = 0, nosnap = false) {
 
 			// the pointer's displacement across the edge.
-			plan_vector_to_object(object, dx, dy, object_point1)
-			let d = round(object_point1[0]*nx + object_point1[1]*ny)
+			let [local_dx, local_dy] = plan_vector_to_object(object,
+				dx, dy, object_point1)
+			let d = round(local_dx*nx + local_dy*ny)
 
 			// snap the moved edge to the nearest room side across it.
 			if (snap_d > 0 && !(is_depth && !nosnap)) {
-				object_vector_to_plan(object, nx, ny, object_point1)
-				let ux = object_point1[0], uy = object_point1[1]
-				object_vector_to_plan(object, (x1+x2)/2, (y1+y2)/2,
-					object_point1)
+				let [ux, uy] = object_vector_to_plan(object, nx, ny, object_point1)
+				let [mx, my] = object_vector_to_plan(object,
+					(x1+x2)/2, (y1+y2)/2, object_point1)
 				let hx = abs(x2-x1)/2, hy = abs(y2-y1)/2
 				if (object.rot % 180) { let h = hx; hx = hy; hy = h }
-				let x = ox+object_point1[0]+ux*d
-				let y = oy+object_point1[1]+uy*d
+				let x = ox+mx+ux*d
+				let y = oy+my+uy*d
 				let is_x = !!ux
 				let across = is_x ? x : y
 				let min_gap = snap_d, shift = 0
@@ -2915,9 +2985,9 @@ function house_plan(t) {
 			}
 
 			// keep the origin in place: move the box corner with the contour.
-			countertop_local_box(plan, object, local_box)
-			rotated_box(0, 0, local_box, object.rot, box)
-			object.x = ox + box[0]; object.y = oy + box[1]
+			let bounds = countertop_local_box(plan, object, local_box)
+			let [bx1, by1] = rotated_box(0, 0, bounds, object.rot, box)
+			object.x = ox + bx1; object.y = oy + by1
 		}
 		return s
 	}

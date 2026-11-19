@@ -119,7 +119,7 @@ function create_floor_editor(id) {
 	let object_matrix = mat3() // temporary matrix
 	let object_point = v2() // temporary point
 	let object_point1 = v2() // temporary point
-	let round_table_dash = [0, 0] // [dash, gap] of the hovered table's box
+	let table_dash = [0, 0] // [dash, gap] of the hovered table's box
 	let solid_line = [] // empty line dash: solid lines
 	let countertop_edge = [0, 0, 0, 0] // [x1, y1, x2, y2] of a resize handle
 	let tag_icon_fonts = new Map() // cached CSS fonts, indexed by icon font name
@@ -537,9 +537,7 @@ function create_floor_editor(id) {
 		if (is_fitted) {
 			view_dirty = true
 			let margin = ceil(ui.em(2) + line_width)
-			array_set(bb, bb1)
-			bb.rotate(view_rotation)
-			let [x1, y1, x2, y2] = bb
+			let [x1, y1, x2, y2] = array_set(bb, bb1).rotate(view_rotation)
 			view_scale = min(
 				(w - 2 * margin) / (x2 - x1),
 				(h - 2 * margin) / (y2 - y1)
@@ -1067,17 +1065,18 @@ function create_floor_editor(id) {
 
 	// test whether the pointer is inside the object's plan bounding box.
 	function hit_box(plan, object) {
-		s.house.get_object_box(plan, object, box)
-		return ui.hit_bbox(to_pixels(box[0]), to_pixels(box[1]),
-			to_pixels(box[2]), to_pixels(box[3]))
+		let [x1, y1, x2, y2] = s.house.get_object_box(plan, object, box)
+		return ui.hit_bbox(to_pixels(x1), to_pixels(y1),
+			to_pixels(x2), to_pixels(y2))
 	}
 
 	// convert local endpoints to plan coordinates, then call draw_length().
 	function draw_object_length(cx, plan, object, x1, y1, x2, y2, offset) {
-		s.house.object_to_plan(plan, object, x1, y1, object_point1)
-		let px1 = object_point1[0], py1 = object_point1[1]
-		s.house.object_to_plan(plan, object, x2, y2, object_point1)
-		draw_length(cx,px1, py1, object_point1[0], object_point1[1],
+		let [px1, py1] = s.house.object_to_plan(plan, object,
+			x1, y1, object_point1)
+		let [px2, py2] = s.house.object_to_plan(plan, object,
+			x2, y2, object_point1)
+		draw_length(cx,px1, py1, px2, py2,
 			null, offset)
 	}
 
@@ -1091,9 +1090,8 @@ function create_floor_editor(id) {
 		let x1 = 0, y1 = 0
 		let x2 = is_turned ? by2 - by1 : bx2 - bx1 // the width
 		let y2 = is_turned ? bx2 - bx1 : by2 - by1 // the length
-		s.house.plan_to_object(plan, object, hs.mouse_x, hs.mouse_y,
-			object_point1)
-		let x = object_point1[0], y = object_point1[1]
+		let [x, y] = s.house.plan_to_object(plan, object,
+			hs.mouse_x, hs.mouse_y, object_point1)
 		let inside = to_plan(6), outside = to_plan(8)
 		let side = 0, axis = 'w'
 		if (object_type.sizes.w && y >= y1 && y <= y2) {
@@ -1148,11 +1146,11 @@ function create_floor_editor(id) {
 
 	// draw distances from the furniture box to the snapped walls' endpoints.
 	function draw_furniture_wall_dims(cx, plan, object) {
-		s.house.get_object_box(plan, object, box)
+		let [x1, y1, x2, y2] = s.house.get_object_box(plan, object, box)
 		if (object.side_x)
-			draw_side_dims(cx, object.side_x, true, box[1], box[3])
+			draw_side_dims(cx, object.side_x, true, y1, y2)
 		if (object.side_y)
-			draw_side_dims(cx, object.side_y, false, box[0], box[2])
+			draw_side_dims(cx, object.side_y, false, x1, x2)
 	}
 
 	/// window and door -------------------------------------------------------
@@ -1160,11 +1158,11 @@ function create_floor_editor(id) {
 	// draw the opening's width outside the top edge of its plan box,
 	// or outside the right edge for a vertical opening.
 	function draw_opening_size(cx, plan, object) {
-		s.house.get_object_box(plan, object, box)
+		let [x1, y1, x2, y2] = s.house.get_object_box(plan, object, box)
 		if (s.house.opening_is_v(object))
-			draw_length(cx,box[2], box[1], box[2], box[3])
+			draw_length(cx,x2, y1, x2, y2)
 		else
-			draw_length(cx,box[0], box[1], box[2], box[1])
+			draw_length(cx,x1, y1, x2, y1)
 	}
 
 	// draw distances to both wall endpoints, on the same side of the wall
@@ -1173,13 +1171,13 @@ function create_floor_editor(id) {
 		let seg = object.seg
 		if (!seg)
 			return
-		s.house.get_object_box(plan, object, box)
+		let [x1, y1, x2, y2] = s.house.get_object_box(plan, object, box)
 		if (seg.is_v) {
-			draw_length(cx,box[2], seg.wall_m1, box[2], box[1])
-			draw_length(cx,box[2], box[3], box[2], seg.wall_m2)
+			draw_length(cx,x2, seg.wall_m1, x2, y1)
+			draw_length(cx,x2, y2, x2, seg.wall_m2)
 		} else {
-			draw_length(cx,seg.wall_m1, box[1], box[0], box[1])
-			draw_length(cx,box[2], box[1], seg.wall_m2, box[1])
+			draw_length(cx,seg.wall_m1, y1, x1, y1)
+			draw_length(cx,x2, y1, seg.wall_m2, y1)
 		}
 	}
 
@@ -1248,10 +1246,10 @@ function create_floor_editor(id) {
 		// test the square containing the door's swing area.
 		let w = object.w
 		let y = s.house.ext_wall_thickness / 2 // the wall centre line
-		s.house.object_to_plan(plan, object, 0, y, object_point1)
-		let x1 = object_point1[0], y1 = object_point1[1]
-		s.house.object_to_plan(plan, object, w, y - w, object_point1)
-		let x2 = object_point1[0], y2 = object_point1[1]
+		let [x1, y1] = s.house.object_to_plan(plan, object,
+			0, y, object_point1)
+		let [x2, y2] = s.house.object_to_plan(plan, object,
+			w, y - w, object_point1)
 		if (ui.hit_bbox(to_pixels(min(x1, x2)), to_pixels(min(y1, y2)),
 			to_pixels(max(x1, x2)), to_pixels(max(y1, y2))))
 			return 'move'
@@ -1351,11 +1349,11 @@ function create_floor_editor(id) {
 	// and length along the plan axes. Keep the plan box unchanged.
 	object_views.chair.draw = function(cx, plan, object) {
 		if (object.rot % 90) {
-			s.house.object_vector_to_plan(object, 0, 1, object_point1)
-			s.house.plan_vector_to_object(object,
-				sign(object_point1[0]) * object.w / 4,
-				sign(object_point1[1]) * object.l / 4, object_point1)
-			cx.translate(object_point1[0], object_point1[1])
+			let [ux, uy] = s.house.object_vector_to_plan(object,
+				0, 1, object_point1)
+			let [dx, dy] = s.house.plan_vector_to_object(object,
+				sign(ux) * object.w / 4, sign(uy) * object.l / 4, object_point1)
+			cx.translate(dx, dy)
 		}
 		let {w, l} = object
 		let back_x1 = w / 8 // the back is 3/4 of the seat's width
@@ -1415,6 +1413,44 @@ function create_floor_editor(id) {
 		cx.stroke()
 	}
 
+	/// table chairs ----------------------------------------------------------
+
+	let CHAIR_SPACING = 600 // mm between chair centres along a table edge
+
+	// the chair is centred on the table edge point (x, y); its back is on the
+	// side of the unit vector (ux, uy), which points away from the table.
+	function add_chair(cx, x, y, ux, uy) {
+		let chair_size = 450
+		let back_inset = 75
+		let half_chair = chair_size / 2
+		let back = half_chair - back_inset
+		let hx = half_chair * ux, hy = half_chair * uy
+		cx.moveTo(x - hx + hy, y - hy - hx)
+		cx.lineTo(x + hx + hy, y + hy - hx)
+		cx.lineTo(x + hx - hy, y + hy + hx)
+		cx.lineTo(x - hx - hy, y - hy + hx)
+		cx.closePath()
+
+		let bx = x + back * ux, by = y + back * uy
+		cx.moveTo(bx + hy, by - hx)
+		cx.lineTo(bx - hy, by + hx)
+	}
+
+	/// hovered box -----------------------------------------------------------
+
+	function draw_hovered_box(cx, object, x1, y1, x2, y2) {
+		let hs = ui.captured(id) ?? ui.hovers(id)
+		if (hs?.object != object)
+			return
+		let scale = to_pixels_exact(1)
+		let dash = 5 / scale
+		table_dash[0] = dash
+		table_dash[1] = dash
+		cx.setLineDash(table_dash)
+		cx.strokeRect(x1, y1, x2 - x1, y2 - y1)
+		cx.setLineDash(solid_line)
+	}
+
 	/// round table -----------------------------------------------------------
 
 	object_views.round_table = {
@@ -1438,52 +1474,74 @@ function create_floor_editor(id) {
 			.local_box(plan, object, box)
 
 		// the chairs: a square with its back line, round the table.
-		if (!object.cached_path) {
-			let chair_size = 450
-			let chair_spacing = 600
-			let back_inset = 75
-			let half_chair = chair_size / 2
-			let back = half_chair - back_inset
-			let r = object.w / 2
-			let mx = (x1 + x2) / 2, my = (y1 + y2) / 2
-			let n = floor(2 * PI * r / chair_spacing)
-			let path = new Path2D()
-			for (let i = 0; i < n; i++) {
-				let a = i * 2 * PI / n + (n == 4 ? PI / 4 : -PI / 2)
-				let ux = cos(a), uy = sin(a)
-				let x = mx + r * ux, y = my + r * uy
-				let hx = half_chair * ux, hy = half_chair * uy
-				path.moveTo(x - hx + hy, y - hy - hx)
-				path.lineTo(x + hx + hy, y + hy - hx)
-				path.lineTo(x + hx - hy, y + hy + hx)
-				path.lineTo(x - hx - hy, y - hy + hx)
-				path.closePath()
-
-				let bx = x + back * ux, by = y + back * uy
-				path.moveTo(bx + hy, by - hx)
-				path.lineTo(bx - hy, by + hx)
-			}
-			object.cached_path = path
+		let r = object.w / 2
+		let mx = (x1 + x2) / 2, my = (y1 + y2) / 2
+		let n = floor(2 * PI * r / CHAIR_SPACING)
+		cx.beginPath()
+		for (let i = 0; i < n; i++) {
+			let a = i * 2 * PI / n + (n == 4 ? PI / 4 : -PI / 2)
+			let ux = cos(a), uy = sin(a)
+			add_chair(cx, mx + r * ux, my + r * uy, ux, uy)
 		}
 		cx.fillStyle = ui.color_css('bg')
-		cx.fill(object.cached_path)
-		cx.stroke(object.cached_path)
+		cx.fill()
+		cx.stroke()
 
 		cx.beginPath()
 		cx.arc((x1 + x2) / 2, (y1 + y2) / 2, object.w / 2, 0, 2 * PI)
 		cx.fill()
 		cx.stroke()
 
-		let hs = ui.captured(id) ?? ui.hovers(id)
-		if (hs?.object != object)
-			return
-		let scale = to_pixels_exact(1)
-		let dash = 5 / scale
-		round_table_dash[0] = dash
-		round_table_dash[1] = dash
-		cx.setLineDash(round_table_dash)
-		cx.strokeRect(x1, y1, x2 - x1, y2 - y1)
-		cx.setLineDash(solid_line)
+		draw_hovered_box(cx, object, x1, y1, x2, y2)
+	}
+
+	/// rectangular table -----------------------------------------------------
+
+	object_views.rect_table = {
+		hit: hit_box,
+		hit_resize: object_views.round_table.hit_resize,
+	}
+
+	// draw the width and length inside the table, along its bottom and right
+	// edges.
+	object_views.rect_table.draw_sizes = function(cx, plan, object) {
+		let w = object.w, l = object.l
+		draw_object_length(cx, plan, object, 0, l, w, l)
+		draw_object_length(cx, plan, object, w, l, w, 0)
+	}
+
+	object_views.rect_table.draw = function(cx, plan, object) {
+		let w = object.w, l = object.l
+
+		// the chairs: evenly spaced along each side k (0 top, 1 right, 2
+		// bottom, 3 left), going clockwise.
+		cx.beginPath()
+		for (let k = 0; k < 4; k++) {
+			if (object.blocked_sides & (1 << k))
+				continue
+			let is_v = k % 2 == 1
+			let dir = k < 2 ? 1 : -1
+			let side_len = is_v ? l : w
+			let x = k == 1 || k == 2 ? w : 0 // the start corner of the side
+			let y = k >= 2 ? l : 0
+			let ax = is_v ? 0 : dir // along the side
+			let ay = is_v ? dir : 0
+			let n = floor(side_len / CHAIR_SPACING)
+			for (let i = 0; i < n; i++) {
+				let d = (i + .5) * side_len / n
+				add_chair(cx, x + ax * d, y + ay * d, ay, -ax)
+			}
+		}
+		cx.fillStyle = ui.color_css('bg')
+		cx.fill()
+		cx.stroke()
+
+		cx.beginPath()
+		cx.rect(0, 0, w, l)
+		cx.fill()
+		cx.stroke()
+
+		draw_hovered_box(cx, object, 0, 0, w, l)
 	}
 
 	/// countertop ------------------------------------------------------------
@@ -1502,9 +1560,8 @@ function create_floor_editor(id) {
 	}
 
 	object_views.countertop.hit = function(plan, object) {
-		s.house.plan_to_object(plan, object, to_plan(ui.mx),
-			to_plan(ui.my), object_point1)
-		let x = object_point1[0], y = object_point1[1]
+		let [x, y] = s.house.plan_to_object(plan, object,
+			to_plan(ui.mx), to_plan(ui.my), object_point1)
 		let a = object.contour, inside = false
 		for (let i = 0, j = a.length-2; i < a.length; j = i, i += 2) {
 			if ((a[i+1] > y) != (a[j+1] > y) && x < a[i])
@@ -1514,13 +1571,14 @@ function create_floor_editor(id) {
 	}
 
 	object_views.countertop.hit_resize = function(plan, object, hs) {
-		s.house.plan_to_object(plan, object, hs.mouse_x, hs.mouse_y,
-			object_point1)
-		let x = object_point1[0], y = object_point1[1], d = to_plan(8)
+		let [x, y] = s.house.plan_to_object(plan, object,
+			hs.mouse_x, hs.mouse_y, object_point1)
+		let d = to_plan(8)
 		for (let h = 1; h <= object.contour.length / 2 * 3; h++) {
-			if (!s.house.get_countertop_edge(object, h, countertop_edge))
+			let edge = s.house.get_countertop_edge(object, h, countertop_edge)
+			if (!edge)
 				continue
-			let [x1, y1, x2, y2] = countertop_edge
+			let [x1, y1, x2, y2] = edge
 			let is_v = x1 == x2
 			let across = is_v ? abs(x-x1) : abs(y-y1)
 			let along = is_v ? y : x
@@ -1565,8 +1623,8 @@ function create_floor_editor(id) {
 	}
 
 	object_views.countertop.draw_resize = function(cx, plan, object, handle) {
-		s.house.get_countertop_edge(object, handle, countertop_edge)
-		let [x1, y1, x2, y2] = countertop_edge
+		let [x1, y1, x2, y2] = s.house.get_countertop_edge(object, handle,
+			countertop_edge)
 		cx.beginPath()
 		cx.moveTo(x1, y1); cx.lineTo(x2, y2)
 		cx.stroke()
@@ -1638,9 +1696,9 @@ function create_floor_editor(id) {
 	function hit_tag(plan, object) {
 		let dx = ui.mx - to_pixels(object.x)
 		let dy = ui.my - to_pixels(object.y)
-		object_point.set(dx, dy).transform(
-			object_matrix.reset().rotate(-(view_rotation ?? 0)), object_point1)
-		let [tx, ty] = object_point1 // pixel offset from the upright tag
+		let [tx, ty] = object_point.set(dx, dy).transform(
+			object_matrix.reset().rotate(-(view_rotation ?? 0)),
+			object_point1) // pixel offset from the upright tag
 		return tx >= -TAG_HIT_X && tx < TAG_HIT_X
 			&& ty >= TAG_HIT_Y1 && ty < TAG_HIT_Y2
 	}
@@ -1684,8 +1742,9 @@ function create_floor_editor(id) {
 		return false
 	}
 
-	// the hovered object in the link color, objects on the ground in the
-	// readonly text color, or in the error color if they touch the house.
+	// invalid floor objects and ground objects touching the house in the
+	// error color; other ground objects in the readonly text color.
+	// the hovered object in the link color unless it is in the error color.
 	function draw_objects(cx, plan, objects, hit_object, is_ground,
 		resize_side, from_below) {
 		cx.lineWidth = view_scale > 0.04 ? 2 : 1
@@ -1696,13 +1755,14 @@ function create_floor_editor(id) {
 				continue
 			let is_touching = false
 			if (is_ground) {
-				s.house.get_object_box(plan, object, object_box)
-				is_touching = plan.is_rect_touching_house(object_box[0],
-					object_box[1], object_box[2], object_box[3])
+				let [x1, y1, x2, y2] = s.house.get_object_box(plan, object,
+					object_box)
+				is_touching = plan.is_rect_touching_house(x1, y1, x2, y2)
 			}
 			let draw_resize = object == hit_object && resize_side
 				&& object_view.draw_resize
-			cx.strokeStyle = is_touching ? ui.color_css('error')
+			let is_invalid = is_ground ? is_touching : !object.is_valid
+			cx.strokeStyle = is_invalid ? ui.color_css('error')
 				: object == hit_object && !draw_resize ? ui.color_css('link')
 				: ui.color_css('text', is_ground ? 'readonly' : null)
 			cx.save()

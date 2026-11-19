@@ -134,7 +134,8 @@ type owns its interaction and rendering. The plan owns geometry queries, the
 lists, undo, serialization and the generic edits.
 
 Decisions (Cosmin):
-- Each type owns its interaction and rendering. No kind objects, no generic
+- Each type owns its interaction and rendering, and all the state it wants
+  on the object (draw caches included). No kind objects, no generic
   orientation op; window and door reuse plain opening functions.
 - Serialization is the plan's job: house.save_object(object) for ctrl+c;
   floor.add_object(state, x, y) parses through copy_objects.

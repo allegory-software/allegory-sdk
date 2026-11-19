@@ -508,12 +508,13 @@ function terrace_house(upper_tags) {
 check('a terrace tag is on the floor above the area that it tags', () => {
 	let h = terrace_house([
 		tag_state('terrace', 4500, 2000), // over floor 0's roof: kept.
-		tag_state('terrace', 1000, 2000), // inside floor 1: ground.
+		tag_state('terrace', 1000, 2000), // inside floor 1: invalid, kept.
 		tag_state('terrace', 8000, 2000), // outside the house: ground.
 	])
-	assert.equal(h.floors[1].objects.length, 1)
+	assert.equal(h.floors[1].objects.length, 2)
 	assert.equal(h.floors[1].objects[0].x, 4500)
-	assert(is_on_ground(h, 'terrace', 1000, 2000))
+	assert.equal(h.floors[1].objects[1].x, 1000)
+	assert(!is_on_ground(h, 'terrace', 1000, 2000))
 	assert(is_on_ground(h, 'terrace', 8000, 2000))
 	assert.equal(h.floors[0].make_areas()[0].kind, 'terrace')
 })
@@ -1047,8 +1048,12 @@ check('dragging an object onto a wall snaps it to the floor, undo back', () => {
 	let object = h.ground_objects[0] // a window
 	let [x0, y0] = box_centre(h, f, object)
 	let s = f.start_move_object(object)
-	s.move(3000 - x0, 3000 - y0, 200)
+	s.move(3000 - x0, 5000 - y0, 200) // clear of the house.
 	assert.equal(f.objects.length, 0)
+	assert.equal(object.y, 5000)
+	s.move(3000 - x0, 3000 - y0, 200) // in the room, off the walls.
+	assert.equal(f.objects.length, 1)
+	assert(!object.seg)
 	assert.equal(object.y, 3000)
 	s.move(3000 - x0, 120 - y0, 200)
 	assert.equal(f.objects.length, 1)
@@ -1100,7 +1105,7 @@ check('furniture rests its snapping face against the wall it is near', () => {
 	assert(!object.seg)
 })
 
-check('furniture not fully inside a room goes to the ground', () => {
+check('furniture goes to the ground only when clear of the house', () => {
 	let h = opening_house([])
 	let f = h.floors[0]
 	add_furniture(f, 'bed', 0, 3000, -2000, 200)
@@ -1111,6 +1116,8 @@ check('furniture not fully inside a room goes to the ground', () => {
 	let [x0, y0] = box_centre(h, f, object)
 	let s = f.start_move_object(object)
 	s.move(3000 - x0, 100 - y0, 0) // its head is in the north wall.
+	assert.equal(f.objects.length, 1)
+	s.move(3000 - x0, -2000 - y0, 0)
 	assert.equal(f.objects.length, 0)
 	s.move(3000 - x0, 2000 - y0, 0)
 	assert.equal(f.objects.length, 1)
@@ -1220,17 +1227,20 @@ check('a stair needs an upper opening, a top wall, and slab beyond it', () => {
 			tag_state('open_room', 4000, 1000)],
 		[{type: 'stair', x: 4000, y: 2040, rot: 0, l: 7000},
 			tag_state('open_room', 4000, 4000)],
+		[{type: 'stair', x: 4000, y: 2040, rot: 0},
+			tag_state('open_room', 4000, 4000),
+			tag_state('open_room', 4000, 1000)],
 	]) {
 		let h = stair_house(2800, objects)
-		assert(!stair_of(h))
-		assert(h.ground_objects.some(o => o.type == 'stair' && !o.on_floor))
+		let stair = stair_of(h)
+		assert(stair) // touching the house: it stays on the floor.
+		h.object_types.stair.place(h.floors[1], stair, 0)
+		assert(!stair.on_floor)
 	}
-	let h = stair_house(2800, [
-		{type: 'stair', x: 4000, y: 2040, rot: 0},
-		tag_state('open_room', 4000, 4000),
-		tag_state('open_room', 4000, 1000),
-	])
-	assert(!stair_of(h))
+	let h = stair_house()
+	let stair = stair_of(h)
+	h.object_types.stair.place(h.floors[1], stair, 0)
+	assert(stair.on_floor)
 })
 
 check('stair saved state keeps parameters and excludes calculated sizes', () => {
@@ -1360,17 +1370,19 @@ check('round table can resize into and out of invalid placement', () => {
 	r.resize(1000, 0)
 	assert.equal(t.w, 2000)
 	assert.equal(t.x, -250)
-	assert.equal(t.on_floor, false)
-	assert(h.ground_objects.includes(t))
+	assert(t.on_floor) // across the wall, still touching the house.
+	assert(!h.ground_objects.includes(t))
 	r.resize(0, 0)
 	assert.equal(t.w, 1200)
 	assert(t.on_floor)
 	r.cancel()
 	t = f.objects[0]
 	let m = f.start_move_object(t)
-	m.move(-200, 0, 0)
-	assert.equal(t.on_floor, false)
+	m.move(-3000, 0, 0)
+	assert.equal(t.on_floor, false) // clear of the house.
 	assert(h.ground_objects.includes(t))
+	m.move(0, 0, 0)
+	assert(t.on_floor)
 	m.cancel()
 })
 
@@ -1378,34 +1390,32 @@ check('round table square chairs stay half tucked and inside its box', () => {
 	let source = fs.readFileSync(path.join(sdk,
 		'www/house_plan_editor.js'), 'utf8')
 	let draw_source = source.slice(
-		source.indexOf('\tobject_views.round_table = {'),
+		source.indexOf('\t/// table chairs'),
 		source.indexOf('\t/// countertop'))
-	class Path {
-		constructor() { this.points = [] }
-		moveTo(x, y) { this.points.push([x, y]) }
-		lineTo(x, y) { this.points.push([x, y]) }
-		closePath() {}
-	}
 	let h = house({floors: []})
 	let object_views = {}
 	vm.runInNewContext(draw_source, {
-		Path2D: Path, PI: Math.PI, floor: Math.floor,
+		PI: Math.PI, floor: Math.floor,
 		cos: Math.cos, sin: Math.sin, s: {house: h}, box: [], id: 'test',
 		ui: {color_css: () => '', captured: () => null, hovers: () => null},
 		object_views, hit_box() {}, hit_resize_rect() {},
 	})
 	let draw = object_views.round_table.draw
+	let paths = [], points // the points of each stroked path
 	let cx = {
-		beginPath() {}, fill() {}, stroke() {}, arc() {},
+		beginPath() { points = [] },
+		moveTo(x, y) { points.push([x, y]) },
+		lineTo(x, y) { points.push([x, y]) },
+		closePath() {}, fill() {}, stroke() { paths.push(points) }, arc() {},
 	}
 	for (let w = 800; w <= 2000; w += 50) {
 		let object = {type: 'round_table', w}
 		let box = h.object_types.round_table.local_box(null, object, [])
 		let [x1, y1, x2, y2] = box
 		let cx0 = (x1 + x2) / 2, cy = (y1 + y2) / 2
+		paths.length = 0
 		draw(cx, null, object)
-		assert(object.cached_path)
-		let points = object.cached_path.points
+		let points = paths[0] // the chairs
 		let n = points.length / 6
 		assert.equal(n, Math.floor(Math.PI * w / 600))
 		for (let i = 0; i < points.length; i += 6) {
@@ -1433,7 +1443,7 @@ check('round table drawing and diameter use its actual local box', () => {
 	let source = fs.readFileSync(path.join(sdk,
 		'www/house_plan_editor.js'), 'utf8')
 	let draw_source = source.slice(
-		source.indexOf('\tobject_views.round_table = {'),
+		source.indexOf('\t/// table chairs'),
 		source.indexOf('\t/// countertop'))
 	let object_views = {}
 	let h = house({floors: []})
@@ -1442,8 +1452,7 @@ check('round table drawing and diameter use its actual local box', () => {
 	let context = {
 		s: {house: h}, box: [], PI: Math.PI, id: 'test',
 		floor: Math.floor, cos: Math.cos, sin: Math.sin,
-		Path2D: class { moveTo() {} lineTo() {} closePath() {} },
-		to_pixels_exact: () => 1, round_table_dash: [0, 0], solid_line: [],
+		to_pixels_exact: () => 1, table_dash: [0, 0], solid_line: [],
 		ui: {color_css: () => '', captured: () => hs, hovers: () => null},
 		draw_object_length(cx, plan, object, ...args) { diameter = args },
 		object_views, hit_box() {}, hit_resize_rect() {},
@@ -1452,7 +1461,8 @@ check('round table drawing and diameter use its actual local box', () => {
 	let draw = object_views.round_table.draw
 	let sizes = object_views.round_table.draw_sizes
 	let cx = {
-		beginPath() {}, fill() {}, stroke() {}, setLineDash() {},
+		beginPath() {}, moveTo() {}, lineTo() {}, closePath() {},
+		fill() {}, stroke() {}, setLineDash() {},
 		arc(...args) { arc = args },
 		strokeRect(...args) { rect = args },
 	}
@@ -1510,6 +1520,82 @@ check('round table resizes from all four edges at every quarter turn', () => {
 			}
 		}
 	}
+})
+
+// rectangular dining table -------------------------------------------------
+
+check('rect table chairs skip short and blocked sides', () => {
+	let source = fs.readFileSync(path.join(sdk,
+		'www/house_plan_editor.js'), 'utf8')
+	let draw_source = source.slice(
+		source.indexOf('\t/// table chairs'),
+		source.indexOf('\t/// countertop'))
+	let h = house({floors: []})
+	let object_views = {}
+	vm.runInNewContext(draw_source, {
+		PI: Math.PI, floor: Math.floor, abs: Math.abs,
+		sign: Math.sign, cos: Math.cos, sin: Math.sin, s: {house: h},
+		box: [], id: 'test', object_views, hit_box() {}, hit_resize_rect() {},
+		ui: {color_css: () => '', captured: () => null, hovers: () => null},
+	})
+	let paths = [], points // the points of each stroked path
+	let cx = {
+		beginPath() { points = [] },
+		moveTo(x, y) { points.push([x, y]) },
+		lineTo(x, y) { points.push([x, y]) },
+		closePath() {}, fill() {}, stroke() { paths.push(points) }, rect() {},
+	}
+	// the chairs on each side, classified by the side that each chair's centre
+	// is on: [top, right, bottom, left].
+	function count_chairs(w, l, blocked_sides) {
+		paths.length = 0
+		object_views.rect_table.draw(cx, null,
+			{type: 'rect_table', w, l, blocked_sides})
+		let sides = [0, 0, 0, 0]
+		for (let i = 0; i < paths[0].length; i += 6) {
+			let x = 0, y = 0
+			for (let j = 0; j < 4; j++) {
+				x += paths[0][i+j][0] / 4
+				y += paths[0][i+j][1] / 4
+			}
+			if (Math.abs(y) < 1e-9) sides[0]++
+			else if (Math.abs(x - w) < 1e-9) sides[1]++
+			else if (Math.abs(y - l) < 1e-9) sides[2]++
+			else sides[3]++
+		}
+		return sides
+	}
+	let [top, right, bottom, left] = count_chairs(3000, 1500, 0)
+	assert(right > 0 && top > right)
+	assert.equal(top, bottom)
+	assert.equal(right, left)
+	assert.deepEqual(count_chairs(1500, 3000, 0), [right, top, right, top])
+	assert.deepEqual(count_chairs(300, 300, 0), [0, 0, 0, 0])
+	assert.deepEqual(count_chairs(3000, 1500, 0b0010), [top, 0, bottom, left])
+})
+
+check('rect table blocks the sides that rest against a wall', () => {
+	let h = house({floors: [{lines: [rect_lines(0, 0, 6000, 6000)],
+		objects: [{type: 'rect_table', x: 2000, y: 2000, rot: 0}]}]})
+	let f = h.floors[0], t = f.objects[0]
+	assert.equal(t.blocked_sides, 0)
+	let m = f.start_move_object(t)
+	m.move(-2000, 0, 300)
+	assert.equal(t.x, t.side_x[1])
+	assert.equal(t.blocked_sides, 0b1000) // the left side
+	m.move(0, 0, 0)
+	assert.equal(t.blocked_sides, 0)
+	m.cancel()
+	// turned a quarter, the local top faces the right wall.
+	h = house({floors: [{lines: [rect_lines(0, 0, 6000, 6000)],
+		objects: [{type: 'rect_table', x: 2000, y: 2000, rot: 90}]}]})
+	f = h.floors[0]
+	t = f.objects[0]
+	m = f.start_move_object(t)
+	m.move(3000, 0, 300)
+	assert.equal(h.get_object_box(f, t, [])[2], t.side_x[1])
+	assert.equal(t.blocked_sides, 0b0001) // the local top
+	m.cancel()
 })
 
 console.log(n_checks + ' house plan checks passed')
