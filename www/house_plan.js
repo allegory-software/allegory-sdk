@@ -2540,37 +2540,36 @@ function house_plan(t) {
 		return out
 	}
 
-	// snap the opening to the nearest wall segment within snap_d that has
-	// space. Rotate it if the wall runs along the other axis. Otherwise leave
-	// it in place. Return the fixed axes: both on a wall.
-	function place_opening(plan, object, snap_d) {
+	// snap the opening to the nearest wall segment that its box touches and
+	// that has space, the box laid along the wall around the same centre.
+	// Rotate it if the wall runs along the other axis. Otherwise leave it in
+	// place. Return the fixed axes: both on a wall.
+	function place_opening(plan, object) {
 
-		// the nearest wall segment with space for the opening, within snap_d.
-		// The opening's centre line runs from m0 to m0 + w at c0.
-		let is_v0 = opening_is_v(object)
-		let c0 = is_v0 ? object.x : object.y
-		let m0 = is_v0 ? object.y : object.x
+		// the nearest wall segment with space for the opening that its box
+		// touches. The box centre is at (cx, cy).
+		let [x1, y1, x2, y2] = get_object_box(plan, object, box)
+		let cx = (x1 + x2) / 2
+		let cy = (y1 + y2) / 2
 		let w = object.w
+		let half_t = house.ext_wall_thickness / 2
 		let seg1, m1
-		let min_d = snap_d
+		let min_d = 1/0
 		for (let seg of plan.segs) {
 
-			// seg farther than the nearest one found: skip it. m: the start
-			// along seg; on a crossing seg the turned opening is centred where
-			// the centre lines cross.
-			let d, m
-			if (seg.is_v == is_v0) {
-				d = Math.hypot(c0 - seg.axis,
-					max(seg.m1 - (m0 + w), 0, m0 - seg.m2))
-				m = m0
-			} else {
-				d = Math.hypot(max(seg.axis - (m0 + w), 0, m0 - seg.axis),
-					max(seg.m1 - c0, 0, c0 - seg.m2))
-				m = round(c0 - w / 2)
-			}
+			// box clear of the wall or seg farther than the nearest one found:
+			// skip it. m: the start along seg, centred on the box centre.
+			let is_v = seg.is_v
+			let ca = is_v ? cx : cy
+			let cm = is_v ? cy : cx
+			let gap_a = max(seg.wall_a1 - ca, 0, ca - seg.wall_a2)
+			let gap_m = max(seg.wall_m1 - cm, 0, cm - seg.wall_m2)
+			if (gap_a > half_t || gap_m > w / 2)
+				continue
+			let d = Math.hypot(gap_a, gap_m)
 			if (d > min_d)
 				continue
-			let is_v = seg.is_v
+			let m = round(cm - w / 2)
 
 			// the other openings on seg, in order along it.
 			let seg_objects = []

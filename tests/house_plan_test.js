@@ -1240,6 +1240,22 @@ check('dragging an object onto a wall snaps it to the floor, undo back', () => {
 	assert.equal(h.ground_objects.length, default_n)
 })
 
+check('an opening turned onto a crossing wall stays on it', () => {
+	let h = opening_house([])
+	let f = h.floors[0]
+	let object = h.ground_objects.find(object => object.type == 'window')
+	let [x0, y0] = box_centre(h, f, object)
+	let s = f.start_move_object(object)
+	s.move(6200 - x0, 2000 - y0, 200) // touching the outer face at 6140.
+	assert.equal(object.rot, 90)
+	assert.equal(object.x, 6000)
+	s.move(6210 - x0, 2000 - y0, 200)
+	assert.equal(object.rot, 90)
+	assert.equal(object.x, 6000)
+	assert.equal(object.y, 1400)
+	s.cancel()
+})
+
 check('deleting a wall moves its objects to the ground, undo back', () => {
 	let h = opening_house([{type: 'window', x: 3000, y: 0, rot: 0, w: 1200}])
 	let f = h.floors[0]
@@ -1706,7 +1722,7 @@ check('round table resizes from all four edges at every quarter turn', () => {
 			objects: [{type: 'round_table', x: 1800, y: 1800, rot}]}]})
 		let f = h.floors[0], t = f.objects[0]
 		let hit = vm.runInNewContext(helper + '\nhit_resize_rect', {
-			s: {house: h}, to_plan: d => d, box: [],
+			s: {house: h}, to_plan: d => d, css_to_plan: d => d, box: [],
 			object_point1: ctx.Math3D.v2(), min: Math.min,
 		})
 		for (let axis of ['w', 'l']) {
