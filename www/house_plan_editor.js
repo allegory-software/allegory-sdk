@@ -346,6 +346,8 @@ function create_floor_editor(id) {
 		s.interaction_value = undefined
 		if (!s.house)
 			return
+		if (ui.hit_enter(id))
+			ui.focus(id)
 		let plan = s.floor
 		let readonly = s.readonly
 		let floor0 = s.floor

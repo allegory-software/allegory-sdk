@@ -30,10 +30,13 @@ function poly_get_point(i, out) {
 // everything is in mm!
 let defaults = {
 	floor_h: 2500,
-	int_wall_thickness: 80,
-	ext_wall_thickness: 180,
-	slab_thickness: 200,
-	roof_thickness: 200, // at right angles to the roof
+	int_wall_thickness: 150, // brick + plaster (120 + 2x 15 mm)
+		// alt: 100: metal studs + drywall (75 + 2x 12.5 mm)
+	ext_wall_thickness: 400, // brick + insulation + plaster (250 + 100 + 2x 25 mm)
+	slab_thickness: 280, // slab + screed + finish + susp.ceiling (150 + 50 + 20 + 60 mm)
+	roof_thickness: 380,
+		// drywall + vapor + CD60 + rafters + sheathing + membrane + c.battens + battens + tiles
+		// (12.5 + 1 + 50 + 200 + 25 + 1 + 30 + 30 + 30 mm)
 	half_wall_h: 1000, // of the half-walls around terraces, above the slab
 	grid_x: 0, // checker grid origin
 	grid_y: 0,
@@ -1633,6 +1636,21 @@ function house_plan(t) {
 				if (object.seg == seg)
 					riders.push({object: object, x: object.x, y: object.y})
 
+			let grid_x0 = house.grid_x // origin to restore
+			let grid_y0 = house.grid_y
+
+			// moving across: the grid origin at the seg's start position, so
+			// that the move distance takes whole grid steps.
+			if (!move_freely) {
+				house.grid_x = seg0[0][0]
+				house.grid_y = seg0[0][1]
+			}
+
+			function restore_grid_origin() {
+				house.grid_x = grid_x0
+				house.grid_y = grid_y0
+			}
+
 			let s = {
 				snap_a: undefined, // coordinate|null: unsnapped|undefined: free
 				snap_v: snap_lines.v,
@@ -1694,13 +1712,17 @@ function house_plan(t) {
 
 			s.stop = function(remove_seg) {
 				push_log('STOP MOVE SEG:', seg.id)
+				restore_grid_origin()
 				if (remove_seg)
 					floor.rem_seg(seg)
 				floor.fix()
 				commit_edit(floor)
 				pop_log()
 			}
-			s.cancel = cancel_edit
+			s.cancel = function() {
+				restore_grid_origin()
+				cancel_edit()
+			}
 
 			return s
 		}
@@ -1759,6 +1781,32 @@ function house_plan(t) {
 			let other_p = seg[1 - seg.pi(p)]
 			snap_lines.push(other_p[snap_lines.v ? 0 : 1])
 
+			// the grid origin along the seg while resizing: the shortest face's
+			// start at the other end, or at a free other end the face of an
+			// interior wall joined there later, plus half an interior wall
+			// toward p, so that the faces measure whole grid steps once
+			// walls join both ends.
+			let v = snap_lines.v // the seg is horizontal: x along it
+			let o_int = house.int_wall_thickness / 2
+			let fixed_m = other_p[v ? 0 : 1] // the other end along the seg
+			let fixed_wall_m = seg.pi(other_p) == seg.i1
+				? seg.wall_m1 : seg.wall_m2 // the wall's start at the other end
+			let face_d = other_p.segs.length == 1
+				? o_int : abs(fixed_wall_m - fixed_m) // other end to face start
+			let grid_x0 = house.grid_x // origin to restore
+			let grid_y0 = house.grid_y
+
+			// across the seg: the origin on the seg's line.
+			if (v)
+				house.grid_y = seg.axis
+			else
+				house.grid_x = seg.axis
+
+			function restore_grid_origin() {
+				house.grid_x = grid_x0
+				house.grid_y = grid_y0
+			}
+
 			let s = {
 				seg: seg,
 				snap_a: undefined, // coordinate|null: unsnapped
@@ -1770,6 +1818,12 @@ function house_plan(t) {
 				let y1 = snap_length(p0[1] + dy * abs(sdy))
 
 				let a = sdx ? x1 : y1
+				// p past a free other end: offset the origin to that side.
+				let grid_m = fixed_m + (a < fixed_m ? -1 : 1) * (face_d + o_int)
+				if (v)
+					house.grid_x = grid_m
+				else
+					house.grid_y = grid_m
 				a = snap_seg(a, min_a, max_a, snap_lines, s, snap_d, grid_step)
 				if (sdx)
 					x1 = a
@@ -1783,11 +1837,15 @@ function house_plan(t) {
 
 			s.stop = function() {
 				push_log('STOP RESIZE SEG:', seg.id)
+				restore_grid_origin()
 				floor.fix()
 				commit_edit(floor)
 				pop_log()
 			}
-			s.cancel = cancel_edit
+			s.cancel = function() {
+				restore_grid_origin()
+				cancel_edit()
+			}
 
 			return s
 		}

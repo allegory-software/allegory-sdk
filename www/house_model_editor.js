@@ -220,6 +220,8 @@ function create_height_controls(id) {
 			cancel_edit()
 			return
 		}
+		if (ui.hit_enter(id))
+			ui.focus(id)
 		let cs = ui.drag(id)
 		if (!cs && (ui.focused(id) || ui.focused(editor_id))) {
 			let redo = ui.keydown('ctrl shift z') || ui.keydown('ctrl y')
