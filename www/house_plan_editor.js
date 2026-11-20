@@ -10,7 +10,7 @@ const {
 	atan2, hypot,
 	array_set, empty_array, format_kcount, point_around, distance,
 	json_arg, try_json_arg, json, copy_to_clipboard, S,
-	profile_time,
+	profile_time, timer,
 } = glue
 
 const {bbox2, line2, mat3, v2} = Math3D
@@ -182,9 +182,9 @@ let floor_names = [
 ]
 
 // the key that selects the floor at index i, the roof at the index after the
-// top floor: ` for the ground floor, then 1 to 9; none above.
+// top floor: 1 to 9 from the ground floor; none above.
 function floor_key(i) {
-	return i == 0 ? '`' : i < 10 ? String(i) : null
+	return i < 9 ? String(i + 1) : null
 }
 
 // a floor or roof label in link colors; hovered: its key in the tooltip.
@@ -198,8 +198,9 @@ function floor_label(label_id, text, is_current, key) {
 }
 
 // plan units are mm.
-// ctrl held: mm precision, to show sizes that ctrl leaves unsnapped.
-let format_length = d => format_kcount(d / 1e3, ui.keypressed('ctrl') ? 3 : 2)+'m'
+// ctrl held or a length with mm: mm precision, else cm.
+let format_length = d => format_kcount(d / 1e3,
+	ui.keypressed('ctrl') || round(d) % 10 ? 3 : 2)+'m'
 let format_area = a => format_kcount(abs(a) / 1e6, 2)+' m\u00b2'
 
 //// HELP --------------------------------------------------------------------
@@ -207,8 +208,8 @@ let format_area = a => format_kcount(abs(a) / 1e6, 2)+' m\u00b2'
 let help_lines = [
 	'Floors',
 	'',
-	'`: Ground floor',
-	'1 to 9: Floors 1 to 9 and Roof',
+	'1 to 9: Ground floor, floors and roof',
+	'`: Show all dimensions',
 	'',
 	'Edit',
 	'',
@@ -220,7 +221,8 @@ let help_lines = [
 	'',
 	'Hovered Wall or Object',
 	'',
-	'W A S D, ←↑→↓: Move 1 cm',
+	'←↑→↓: Move 1 cm',
+	'Ctrl+←↑→↓: Move 1 mm',
 	'Space: Rotate or vary object',
 	'',
 	'Mouse',
@@ -301,6 +303,12 @@ function create_floor_editor(id) {
 
 	// pointer interaction
 	let shown_snap_lines = [] // [a, is_v, ...] snap lines of the hit or drag
+	let show_key_dims = false // a key moved the hovered wall or object
+	let key_dims_target // the object or seg whose dimensions are shown
+	let hide_key_dims = timer(function() { // hide_key_dims(t): after t seconds
+		show_key_dims = false
+		ui.animate()
+	})
 
 	// view
 	let ss = ui.saved_state[id] // the saved view
@@ -322,6 +330,9 @@ function create_floor_editor(id) {
 	// scratch
 	let out = [] // temporary [x, y] for line2.at()
 	let box = [0, 0, 0, 0] // temporary bounding box for hit testing and drawing
+	let object_dims = [] // [gap, x1, y1, x2, y2, ...] N, E, S, W
+	let object_rects = [] // rectangles of the moving object
+	let other_rects = [] // rectangles of the object being checked
 
 	// objects
 	let object_views = {} // {type name -> view functions}, set per type below
@@ -380,11 +391,11 @@ function create_floor_editor(id) {
 
 		let cs = ui.drag(id)
 		if (!cs && ui.focused_id == id) {
-			if (ui.keydown('`'))
-				select_floor(floors[0], false)
-			for (let i = 1; i < min(floors.length, 10); i++)
-				if (ui.keydown(String(i)))
+			for (let i = 0; i < min(floors.length, 9); i++)
+				if (ui.keydown(floor_key(i)))
 					select_floor(floors[i], false)
+			if (ui.keydown('`'))
+				toggle_show_dims()
 			let roof_key = floor_key(floors.length)
 			if (roof_key && ui.keydown(roof_key))
 				select_floor(floors[floors.length-1], true)
@@ -499,10 +510,6 @@ function create_floor_editor(id) {
 				} else if (action == 'pan') {
 					pan_cx0 = view_cx
 					pan_cy0 = view_cy
-				} else if (action == 'move_object') {
-					cs.object_dims = [] // [gap, x1, y1, x2, y2, ...] N, E, S, W
-					cs.object_rects = [] // rectangles of the moving object
-					cs.other_rects = [] // rectangles of the object being checked
 				}
 			}
 
@@ -677,36 +684,50 @@ function create_floor_editor(id) {
 		if (is_removing_object)
 			hs.object_plan.remove_object(hs.object)
 
-		// keys on the hovered wall or object: a/s/d/w and the arrow keys move it
-		// 1 cm on the screen, an object's type uses its own keys.
+		// keys on the hovered wall or object: the arrow keys move it 1 cm on
+		// the screen, with ctrl 1 mm unsnapped, and show its dimensions for 5s;
+		// an object's type uses its own keys.
 		let is_keyed = !readonly && !cs && ui.focused_id == id
 			&& (hs?.object || hs?.action == 'move_seg')
 		if (is_keyed) {
 			let kx = 0
 			let ky = 0
-			if (!ui.keypressed('ctrl') && !ui.keypressed('alt')) {
-				if (ui.keydown('a') || ui.keydown('arrowleft')) kx--
-				if (ui.keydown('d') || ui.keydown('arrowright')) kx++
-				if (ui.keydown('w') || ui.keydown('arrowup')) ky--
-				if (ui.keydown('s') || ui.keydown('arrowdown')) ky++
+			if (!ui.keypressed('alt')) {
+				if (ui.keydown('arrowleft')) kx--
+				if (ui.keydown('arrowright')) kx++
+				if (ui.keydown('arrowup')) ky--
+				if (ui.keydown('arrowdown')) ky++
 			}
 			if (kx || ky) {
+				let nosnap = ui.keypressed('ctrl')
+				let step = nosnap ? 1 : 10
 				let r = view_rotation ?? 0
-				let dx = round(kx * cos(r) + ky * sin(r)) * 10
-				let dy = round(-kx * sin(r) + ky * cos(r)) * 10
+				let dx = round(kx * cos(r) + ky * sin(r)) * step
+				let dy = round(-kx * sin(r) + ky * cos(r)) * step
 				if (hs.object) {
 					let edit = hs.object_plan.start_move_object(hs.object)
-					edit.move(dx, dy, 20)
+					edit.move(dx, dy, nosnap ? 0 : 20)
 					edit.stop()
 				} else {
 					let edit = plan.start_move_seg(hs.seg)
 					edit.move(dx, dy, 0)
 					edit.stop()
 				}
+				show_key_dims = true
+				key_dims_target = hs.object ?? hs.seg
+				hide_key_dims(5)
 			}
 			let update = hs.object && object_views[hs.object.type].update
 			if (update)
 				update(hs.object_plan, hs.object)
+		}
+
+		// hovering another wall or object: show its dimensions for 5s more.
+		let hit_target = !cs && (hs?.object
+			?? (hs?.action == 'move_seg' ? hs.seg : null))
+		if (show_key_dims && hit_target && hit_target != key_dims_target) {
+			key_dims_target = hit_target
+			hide_key_dims(5)
 		}
 
 		if (cs?.drop || cs?.cancel || is_deleting_seg
@@ -767,6 +788,13 @@ function create_floor_editor(id) {
 
 	function snap_step() {
 		return ui.keypressed('ctrl') ? 0 : 100
+	}
+
+	function toggle_show_dims() {
+		show_dims = !show_dims
+		ui.save_state('floor_editor', 'show_dims', show_dims)
+		show_key_dims = false
+		hide_key_dims()
 	}
 
 	function transform_view(cx, w, h) {
@@ -1413,8 +1441,7 @@ function create_floor_editor(id) {
 	}
 
 	// measure the moving rectangles and test overlap in one floor scan.
-	function measure_object_dims(plan, object, cs) {
-		let {object_dims, object_rects, other_rects} = cs
+	function measure_object_dims(plan, object) {
 		for (let dir = 0; dir < 4; dir++)
 			object_dims[dir*5] = Infinity
 		let rects = s.house.get_object_rects(plan, object, object_rects)
@@ -2573,8 +2600,7 @@ function create_floor_editor(id) {
 							0, 'c', 't', null, null,
 							S('show_all_dimensions', 'Show all dimensions'))
 					) {
-						show_dims = !show_dims
-						ui.save_state('floor_editor', 'show_dims', show_dims)
+						toggle_show_dims()
 					}
 
 					if (ui.popup_button(id+'.settings', 'settings', null,
@@ -2979,10 +3005,11 @@ function create_floor_editor(id) {
 			let resize_side = hit_action == 'resize_object' && !cs?.edit
 				? hs.object_side : null
 			let object_type = hit_object && s.house.object_types[hit_object.type]
-			let is_moving_object = drag_action == 'move_object'
+			let is_key_moved = show_key_dims && !cs && hit_object
+			let is_moving_object = (drag_action == 'move_object' || is_key_moved)
 				&& !object_type.opens_room && !object_type.marks_terrace
 			let is_overlapping = is_moving_object
-				&& measure_object_dims(hs.object_plan ?? plan, hit_object, cs)
+				&& measure_object_dims(hs.object_plan ?? plan, hit_object)
 			let show_clearances = is_moving_object
 				|| drag_action == 'resize_object' && cs.edit && object_type.in_wall
 			let ground_objects = s.house.ground_objects
@@ -2995,19 +3022,21 @@ function create_floor_editor(id) {
 			draw_objects(cx, plan_above, objects_above,
 				hit_object, false, resize_side, true, is_overlapping)
 			draw_object_dims(cx, plan, ground_objects, hit_object,
-				show_clearances, false, cs?.object_dims, resize_side)
+				show_clearances, false, object_dims, resize_side)
 			draw_object_dims(cx, plan, plan.objects, hit_object,
-				show_clearances, false, cs?.object_dims, resize_side)
+				show_clearances, false, object_dims, resize_side)
 			draw_object_dims(cx, plan_above, objects_above,
-				hit_object, show_clearances, true, cs?.object_dims, resize_side)
+				hit_object, show_clearances, true, object_dims, resize_side)
 		}
 
 		// find all affected _|_ edges so we can show their lengths as we move
-		// the seg
-		if (drag_action == 'move_seg' && !show_dims) {
-			let sp1 = drag_seg[0]
-			let sp2 = drag_seg[1]
-			let v = drag_seg.is_v
+		// the seg, by dragging it or with the keys.
+		let moved_seg = drag_action == 'move_seg' ? drag_seg
+			: show_key_dims && !cs && hit_action == 'move_seg' ? hit_seg : null
+		if (moved_seg && !show_dims) {
+			let sp1 = moved_seg[0]
+			let sp2 = moved_seg[1]
+			let v = moved_seg.is_v
 			for (let co of plan.comps) {
 				for (let c of co.cycles) {
 					for (let i = 0, n = c.edges.length; i <= n; i++) {

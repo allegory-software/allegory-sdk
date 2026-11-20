@@ -1301,17 +1301,31 @@ function house_plan(t) {
 		// place the object with its plan box centre near the pointer at (x, y).
 		// The centre is the drag reference: an object that placement turns
 		// stays under the pointer.
-		function move_object(object, x, y, snap_d, snap_margin) {
+		function move_object(object, x, y, snap_d, snap_margin, grid_step) {
 			let [x1, y1, x2, y2] = get_object_box(floor, object, move_box)
 			object.x = snap_length(object.x + x - (x1 + x2) / 2)
 			object.y = snap_length(object.y + y - (y1 + y2) / 2)
-			place_object(object, snap_d, snap_margin)
+			place_object(object, snap_d, snap_margin, grid_step)
 		}
 
-		function place_object_on_floor(object, snap_d, snap_margin) {
+		function place_object_on_floor(object, snap_d, snap_margin, grid_step) {
 			let object_type = object_types[object.type]
 			let allow = object_type.allow ?? INDOOR
-			object_type.place(floor, object, snap_d, snap_margin)
+			// snap to geometry, then the axes that it leaves free to the grid.
+			let fixed_axes = object_type.place?.(floor, object, snap_d,
+				snap_margin) ?? 0 // bits: 1: x, 2: y
+			if (grid_step) {
+				let [x1, y1, x2, y2] = get_object_box(floor, object, move_box)
+				let cx = (x1 + x2) / 2
+				let cy = (y1 + y2) / 2
+				if (!(fixed_axes & 1))
+					object.x = snap_length(object.x
+						+ snap_grid(cx, 1, grid_step) - cx)
+				if (!(fixed_axes & 2))
+					object.y = snap_length(object.y
+						+ snap_grid(cy, 0, grid_step) - cy)
+			}
+			object_type.fix_placed?.(floor, object)
 			object.is_valid = object.on_floor && !!(allow & INDOOR)
 			if (!object.on_floor) {
 				let [x1, y1, x2, y2] = get_object_box(floor, object, move_box)
@@ -1322,10 +1336,10 @@ function house_plan(t) {
 
 		// let the object's type place it where it is or on a wall near it, then
 		// put it in its list: on the floor: the floor's, else the ground's.
-		function place_object(object, snap_d, snap_margin) {
+		function place_object(object, snap_d, snap_margin, grid_step) {
 			let objects0 = object.on_floor ? floor.objects : house.ground_objects
 			object.seg = null
-			place_object_on_floor(object, snap_d, snap_margin)
+			place_object_on_floor(object, snap_d, snap_margin, grid_step)
 			let objects = object.on_floor ? floor.objects : house.ground_objects
 			if (objects != objects0) {
 				remove_value(objects0, object)
@@ -1383,9 +1397,7 @@ function house_plan(t) {
 			let [x1, y1, x2, y2] = get_object_box(floor, object, move_box)
 			let x0 = (x1 + x2) / 2, y0 = (y1 + y2) / 2
 			s.move = function(dx, dy, snap_d, snap_margin = 0, grid_step = 0) {
-				let x = snap_grid(x0 + dx, 1, grid_step)
-				let y = snap_grid(y0 + dy, 0, grid_step)
-				move_object(object, x, y, snap_d, snap_margin)
+				move_object(object, x0 + dx, y0 + dy, snap_d, snap_margin, grid_step)
 			}
 			return s
 		}
@@ -2514,7 +2526,7 @@ function house_plan(t) {
 
 	// snap the opening to the nearest wall segment within snap_d that has
 	// space. Rotate it if the wall runs along the other axis. Otherwise leave
-	// it in place.
+	// it in place. Return the fixed axes: both on a wall.
 	function place_opening(plan, object, snap_d) {
 
 		// the nearest wall segment with space for the opening, within snap_d.
@@ -2587,6 +2599,7 @@ function house_plan(t) {
 			object.x = seg1.is_v ? seg1.axis : m1
 			object.y = seg1.is_v ? m1 : seg1.axis
 		}
+		return seg1 ? 3 : 0
 	}
 
 	// return the maximum width while keeping the opposite end fixed.
@@ -2656,7 +2669,7 @@ function house_plan(t) {
 
 	// snap allowed furniture faces to room walls within snap_d. Rotate around
 	// the centre if needed, and keep that rotation after leaving the wall.
-	// Set on_floor according to whether the whole box fits inside the rooms.
+	// Return the fixed axes: those of side_x and side_y.
 	function place_furniture(plan, object, snap_d, snap_margin = 0) {
 
 		// forget the previous snaps.
@@ -2726,6 +2739,11 @@ function house_plan(t) {
 			}
 		}
 
+		return (object.side_x ? 1 : 0) | (object.side_y ? 2 : 0)
+	}
+
+	// set on_floor according to whether the whole box fits inside the rooms.
+	function fix_placed_furniture(plan, object) {
 		// on the floor: the whole box is inside the rooms.
 		let [x1, y1, x2, y2] = get_object_box(plan, object, box)
 		object.on_floor = is_rect_in_rooms(plan, (x1 + x2) / 2, (y1 + y2) / 2,
@@ -2781,6 +2799,7 @@ function house_plan(t) {
 		sizes: {w: [900, 1400, 1600, 1800], l: [1900, 2000]},
 		snap_faces: [0], // snap the head of the bed to walls
 		place: place_furniture,
+		fix_placed: fix_placed_furniture,
 		limit_size: limit_furniture_size,
 		local_box: rect_local_box,
 		start_resize: start_resize_rect,
@@ -2797,6 +2816,7 @@ function house_plan(t) {
 		},
 		snap_faces: [0, 1, 2, 3],
 		place: place_furniture,
+		fix_placed: fix_placed_furniture,
 		limit_size: limit_furniture_size,
 		local_box: rect_local_box,
 		start_resize: start_resize_rect,
@@ -2813,6 +2833,7 @@ function house_plan(t) {
 		},
 		snap_faces: [0],
 		place: place_furniture,
+		fix_placed: fix_placed_furniture,
 		limit_size: limit_furniture_size,
 		local_box: rect_local_box,
 		start_resize: start_resize_rect,
@@ -2829,6 +2850,7 @@ function house_plan(t) {
 		},
 		snap_faces: [0],
 		place: place_furniture,
+		fix_placed: fix_placed_furniture,
 		limit_size: limit_furniture_size,
 		local_box: rect_local_box,
 		start_resize: start_resize_rect,
@@ -2846,6 +2868,7 @@ function house_plan(t) {
 		z_index: -1,
 		snap_faces: [0, 1, 2, 3],
 		place: place_furniture,
+		fix_placed: fix_placed_furniture,
 		limit_size: limit_furniture_size,
 		local_box: rect_local_box,
 		start_resize: start_resize_rect,
@@ -2860,6 +2883,7 @@ function house_plan(t) {
 		sizes: {w: {min: 200, max: 2000, step: 50}},
 		snap_faces: [0, 1, 2, 3],
 		place: place_furniture,
+		fix_placed: fix_placed_furniture,
 		local_box: square_local_box,
 		start_resize: start_resize_square,
 	}
@@ -2875,6 +2899,7 @@ function house_plan(t) {
 		},
 		snap_faces: [0],
 		place: place_furniture,
+		fix_placed: fix_placed_furniture,
 		limit_size: limit_furniture_size,
 		local_box: rect_local_box,
 		start_resize: start_resize_rect,
@@ -2892,6 +2917,7 @@ function house_plan(t) {
 		},
 		snap_faces: [0],
 		place: place_furniture,
+		fix_placed: fix_placed_furniture,
 		local_box: couch_local_box,
 		start_resize: start_resize_couch,
 	}
@@ -2936,16 +2962,17 @@ function house_plan(t) {
 		fields: {l: 450},
 		snap_faces: [0], // snap the back of the chair to walls
 		place: place_chair,
+		fix_placed: fix_placed_furniture,
 		local_box: rect_local_box,
 	}
 
 	// call place_furniture(), then turn the chair diagonally if it is in a
 	// corner. Point its back towards the corner. Keep its plan box square.
 	function place_chair(plan, object, snap_d, snap_margin = 0) {
-		place_furniture(plan, object, snap_d, snap_margin)
+		let fixed_axes = place_furniture(plan, object, snap_d, snap_margin)
 		let {side_x, side_y} = object
 		if (!(side_x && side_y))
-			return
+			return fixed_axes
 		let [dir_x, wall_x, y1, y2] = side_x
 		let [dir_y, wall_y, x1, x2] = side_y
 		// check that both wall faces end at their shared corner.
@@ -2953,8 +2980,9 @@ function house_plan(t) {
 			!(y1 == wall_y || y2 == wall_y) ||
 			!(x1 == wall_x || x2 == wall_x)
 		)
-			return
+			return fixed_axes
 		object.rot = dir_x * 90 + (dir_x == dir_y + 1 ? -45 : 45)
+		return fixed_axes
 	}
 
 	/// wc --------------------------------------------------------------------
@@ -2964,6 +2992,7 @@ function house_plan(t) {
 		fields: {l: 700},
 		snap_faces: [0], // snap the toilet tank to walls
 		place: place_furniture,
+		fix_placed: fix_placed_furniture,
 		local_box: rect_local_box,
 	}
 
@@ -2982,6 +3011,7 @@ function house_plan(t) {
 		sizes: {w: {min: 800, max: 2000, step: 50}},
 		snap_faces: [0, 1, 2, 3],
 		place: place_furniture,
+		fix_placed: fix_placed_furniture,
 		local_box: round_table_local_box,
 		start_resize: start_resize_square,
 	}
@@ -2996,13 +3026,14 @@ function house_plan(t) {
 			l: {min: 500, max: 1500, step: 50},
 		},
 		snap_faces: [0, 1, 2, 3],
-		place: place_rect_table,
+		place: place_furniture,
+		fix_placed: fix_placed_rect_table,
 		local_box: rect_local_box,
 		start_resize: start_resize_rect,
 	}
 
-	function place_rect_table(plan, object, snap_d, snap_margin = 0) {
-		place_furniture(plan, object, snap_d, snap_margin)
+	function fix_placed_rect_table(plan, object) {
+		fix_placed_furniture(plan, object)
 		// find blocked_sides which hides chairs on sides too close to walls.
 		// blocked_sides is table-local 0 top, 1 right, 2 bottom, 3 left.
 		let chair_depth = 500
@@ -3040,6 +3071,7 @@ function house_plan(t) {
 	object_types.countertop = {
 		fields: {contour: [0, 600, 0, 0, 1800, 0, 1800, 600]},
 		place: place_countertop,
+		fix_placed: fix_placed_countertop,
 		local_box: countertop_local_box,
 		start_resize: start_resize_countertop,
 	}
@@ -3162,6 +3194,11 @@ function house_plan(t) {
 			for (let i = axis; i < n; i += 2)
 				points[i] += shift
 		}
+		return (object.side_x ? 1 : 0) | (object.side_y ? 2 : 0)
+	}
+
+	function fix_placed_countertop(plan, object) {
+		let points = get_countertop_points(plan, object, [])
 		let rects = split_countertop_rects(points, [])
 		object.on_floor = true
 		for (let i = 0; i < rects.length; i += 4) {
@@ -3430,6 +3467,7 @@ function house_plan(t) {
 			let [x, y, rot] = slab
 			object.x = x; object.y = y; object.rot = rot
 		}
+		return slab ? 3 : 0
 	}
 
 	// return the maximum width or length on the object's slab while keeping
@@ -3512,13 +3550,13 @@ function house_plan(t) {
 		let s = stair_shape(plan, object)
 		object.on_floor = false
 		if (!plan.i || !s.n || s.depth <= 0 || s.bottom_depth <= 0)
-			return
+			return 0
 
 		// the openings in the slab under the floor, and the slab.
 		let floor0 = house.floors[plan.i-1]
 		let openings = make_opening_paths(floor0, plan)
 		if (!openings.length)
-			return
+			return 0
 		let roof_paths0 = floor0.make_roof_geometry().roof_paths
 		let slab = slab_paths(floor0, plan, roof_paths0, openings)
 
@@ -3561,12 +3599,13 @@ function house_plan(t) {
 			}
 		}
 		if (found_rot == null)
-			return
+			return 0
 
 		object.x = found_x
 		object.y = found_y
 		object.rot = found_rot
 		object.on_floor = true
+		return 3
 	}
 
 	// snap the bottom of the stairs to a wall face that spans the stairs'
@@ -3603,24 +3642,24 @@ function house_plan(t) {
 
 	object_types.open_room = {
 		opens_room: true,
-		place: place_open_room,
+		fix_placed: fix_placed_open_room,
 		local_box: tag_local_box,
 	}
 
 	object_types.terrace = {
 		marks_terrace: true,
-		place: place_terrace,
+		fix_placed: fix_placed_terrace,
 		local_box: tag_local_box,
 	}
 
 	// assign the tag to this floor if its point is inside a room.
-	function place_open_room(plan, object) {
+	function fix_placed_open_room(plan, object) {
 		object.on_floor = !!plan.hit_cycle_edges(object.x, object.y)
 	}
 
 	// assign the terrace tag to this floor if its point is over the floor
 	// below and outside this floor's outline.
-	function place_terrace(plan, object) {
+	function fix_placed_terrace(plan, object) {
 		let plan0 = house.floors[plan.i-1]
 		let x = object.x, y = object.y
 		object.on_floor = !!plan0 && plan0.is_rect_touching_house(x, y, x, y)
