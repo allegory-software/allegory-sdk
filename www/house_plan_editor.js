@@ -360,7 +360,7 @@ function create_floor_editor(id) {
 		s.interaction_value = undefined
 		if (!s.house)
 			return
-		if (ui.hit_enter(id))
+		if (ui.hit_enter(id) && !ui.focus_inside(id))
 			ui.focus(id)
 		let plan = s.floor
 		let readonly = s.readonly
@@ -990,6 +990,8 @@ function create_floor_editor(id) {
 	}
 
 	function draw_walls(cx, paths, segs) {
+		let focused = ui.window_focused() && ui.focus_inside(id)
+		let color = ui.color_css('text', focused ? 'active' : 'readonly')
 		if (view_scale <= 0.02) { // too small to even show edges
 			for (let seg of segs) {
 				let x1 = to_pixels(seg[0][0]) + .5
@@ -999,7 +1001,7 @@ function create_floor_editor(id) {
 				cx.beginPath()
 				cx.moveTo(x1, y1)
 				cx.lineTo(x2, y2)
-				cx.strokeStyle = ui.color_css('text')
+				cx.strokeStyle = color
 				cx.stroke()
 			}
 			return
@@ -1027,13 +1029,13 @@ function create_floor_editor(id) {
 			cx.fillStyle = DEBUG_PLAN ? '#333' : cx.wall_pattern
 			cx.fill('evenodd')
 			cx.lineWidth = DEBUG_PLAN ? 2 : view_line_width
-			cx.strokeStyle = 'black' //ui.color_css('text')
+			cx.strokeStyle = color
 			cx.lineJoin = 'round'
 			cx.stroke()
 			cx.lineJoin = 'miter'
 			cx.lineWidth = 1
 		} else { // too small to stroke
-			cx.fillStyle = ui.color_css('text')
+			cx.fillStyle = color
 			cx.fill('evenodd')
 		}
 	}

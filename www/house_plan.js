@@ -2061,9 +2061,10 @@ function house_plan(t) {
 	}
 
 	// make the faces of the walls, slabs and roofs of floors 0..top_floor,
-	// tagged 'walls' (walls and slabs) and 'roof'.
+	// tagged 'walls' (walls and slabs), 'roof', or 'wall_footprints'.
 	// no_roof: leave out top_floor's roofs and terraces.
-	house.make_faces = function(top_floor, no_roof) {
+	// no_external_walls: replace top_floor's exterior walls with footprints.
+	house.make_faces = function(top_floor, no_roof, no_external_walls) {
 		let t0 = profile_time()
 		let prisms = []
 		let slab_t = house.slab_thickness
@@ -2072,6 +2073,18 @@ function house_plan(t) {
 		let floor_n = top_floor.i + 1
 		let {intersect, difference, FillRule} = clipper2
 		let EO = FillRule.EvenOdd
+		let footprint_paths
+		if (no_external_walls) {
+			let inner_paths = []
+			for (let comp of top_floor) {
+				let edges = poly2()
+				edges.get_point = poly_get_point
+				add_ring_path(inner_paths,
+					comp.outer_cycle.offset(house.int_wall_thickness / 2, edges))
+			}
+			footprint_paths = difference(add_outline_paths(top_floor, []),
+				inner_paths, EO)
+		}
 
 		// add a level prism of grid paths from z1 to z2.
 		function add_level_prism(paths, z1, z2) {
@@ -2102,6 +2115,8 @@ function house_plan(t) {
 			under_roof
 		) {
 			let {cut_wall_paths, hole_groups} = geometry
+			if (no_external_walls && floor == top_floor)
+				cut_wall_paths = difference(cut_wall_paths, footprint_paths, EO)
 			let clip = under_roof ? intersect : difference
 			if (roof_paths.length)
 				cut_wall_paths = clip(cut_wall_paths, roof_paths, EO)
@@ -2110,6 +2125,8 @@ function house_plan(t) {
 				for (let {sill, head, paths: hole_paths} of hole_groups) {
 					let wall_paths = roof_paths.length
 						? clip(hole_paths, roof_paths, EO) : hole_paths
+					if (no_external_walls && floor == top_floor)
+						wall_paths = difference(wall_paths, footprint_paths, EO)
 					if (!wall_paths.length)
 						continue
 					if (sill > 0)
@@ -2238,7 +2255,52 @@ function house_plan(t) {
 		}
 
 		profile_time('prism.build', t0)
-		return prism_union(prisms)
+		let faces = prism_union(prisms)
+		if (!no_external_walls)
+			return faces
+
+		// split the exposed slab top into floor and exterior wall footprints.
+		let z = top_floor.z + slab_t
+		let scale = prism_union.grid_scale
+		let split_faces = []
+		for (let face of faces) {
+			let on_slab = face.tag == 'walls'
+			for (let ring of face.rings)
+				for (let p of ring)
+					if (p[2] != z)
+						on_slab = false
+			let paths = []
+			if (on_slab) {
+				for (let ring of face.rings)
+					add_ring_path(paths, ring)
+				on_slab = clipper2.area(paths[0]) > 0
+			}
+			if (!on_slab) {
+				split_faces.push(face)
+				continue
+			}
+			for (let is_footprint of [false, true]) {
+				let clipper = new clipper2.Clipper64()
+				clipper.addSubject(paths)
+				clipper.addClip(footprint_paths)
+				let tree = new clipper2.PolyTree64()
+				let op = is_footprint ? clipper2.ClipType.Intersection
+					: clipper2.ClipType.Difference
+				clipper.execute(op, EO, tree)
+				for (let group of add_path_groups(tree, [])) {
+					let rings = []
+					for (let path of group) {
+						let ring = []
+						for (let p of path)
+							ring.push([p.x / scale, p.y / scale, z])
+						rings.push(ring)
+					}
+					split_faces.push({rings: rings,
+						tag: is_footprint ? 'wall_footprints' : face.tag})
+				}
+			}
+		}
+		return split_faces
 	}
 
 	//// ROOM SIDES -----------------------------------------------------------

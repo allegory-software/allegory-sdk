@@ -30,7 +30,6 @@ like door panel thickness, etc.
 	- custom profile
 	- limited eave extension over the butt wall
 
-- another focusing bug (this never ends, something must be wrong with our focusing api or architecture): if i click on a popup_button's popup area (not a focusable child), esc to close doesn't work anymore
 
 ## Cosmin's request (2026-11-17)
 

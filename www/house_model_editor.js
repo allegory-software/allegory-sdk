@@ -45,12 +45,18 @@ let object_models = { // {type -> create_model(editor, plan, object)}
 
 // house model ---------------------------------------------------------------
 
+let wall_footprint_material = {
+	name: 'Wall footprints', diffuse_color: 0x666666,
+	uv: v2(1, 1), opacity: 1,
+}
+
 // fill the editor with the house model up to cut_floor, or with all of it.
-function init_house_model_editor(e, house, cut_floor) {
+function init_house_model_editor(e, house, cut_floor, no_external_walls) {
 
 	e.house = assert(house)
 	e.house_edit_no = house.edit_no
 	e.cut_floor = cut_floor // floor the model is cut at, or null
+	e.no_external_walls = no_external_walls
 
 	let project_wall_to_roof_face
 	{
@@ -94,7 +100,7 @@ function init_house_model_editor(e, house, cut_floor) {
 
 	function create_plan(faces) {
 
-		// one component per face tag ('walls', 'roof'), named after it.
+		// one component per face tag, named after it.
 		push_log('creating faces')
 		let comp_by_tag = map() // {tag -> component}
 		for (let face of faces) {
@@ -116,7 +122,9 @@ function init_house_model_editor(e, house, cut_floor) {
 					pis.push(c.add_point_xyz(x, z, y))
 				}
 			}
-			c.add_face(pis, null, null, holes)
+			let material = face.tag == 'wall_footprints'
+				? wall_footprint_material : null
+			c.add_face(pis, null, material, holes)
 		}
 		pop_log()
 
@@ -124,7 +132,7 @@ function init_house_model_editor(e, house, cut_floor) {
 
 	let floors = house.floors
 	let faces = cut_floor
-		? house.make_faces(cut_floor, true)
+		? house.make_faces(cut_floor, true, no_external_walls)
 		: house.make_faces(floors[floors.length-1], false)
 	let t0 = profile_time()
 	create_plan(faces)
@@ -155,6 +163,17 @@ ui.saved_value_def('house_model_fov', 60, ui.create_field({
 }))
 
 let model_editor_opt = {}
+
+let model_mode_field = ui.create_field({
+	type: 'enum',
+	enum_values: ['full', 'cut', 'no_external_walls'],
+	enum_labels: {
+		full: S('house_model_full', 'Full'),
+		cut: S('house_model_cut', 'Up to current floor'),
+		no_external_walls: S('house_model_no_external_walls',
+			'No external walls'),
+	},
+})
 
 // height controls ----------------------------------------------------------
 
@@ -365,20 +384,21 @@ let height_controls = ui.stateful_widget(create_height_controls)
 ui.house_model_editor = function(id, house, floor, fr, align, valign,
 	readonly
 ) {
-	let cut_id = id+'.cut_button'
+	let mode_id = id+'.model_mode'
 	// read before the toggle builds: its update gives this frame's click.
-	let is_cut = ui.value(cut_id)
-		?? ui.saved_state[id]?.is_cut ?? true // option: cut the model at floor
-	if (ui.interaction_value(cut_id) !== undefined)
-		ui.save_state(id, 'is_cut', is_cut)
-	let cut_floor = floor && is_cut ? floor : null
+	let model_mode = ui.value(mode_id)
+		?? ui.saved_state[id]?.model_mode ?? 'cut'
+	if (ui.interaction_value(mode_id) !== undefined)
+		ui.save_state(id, 'model_mode', model_mode)
+	let cut_floor = floor && model_mode != 'full' ? floor : null
+	let no_external_walls = !!cut_floor && model_mode == 'no_external_walls'
 	let controls_id = id+'.heights'
 	ui.state_of(controls_id)
 	let e = ui.state_of(id, 'e')
 	let init = null
 	if (!e) {
 		init = function(e1) {
-			init_house_model_editor(e1, house, cut_floor)
+			init_house_model_editor(e1, house, cut_floor, no_external_walls)
 			// the house is in mm, the editor's default camera is for 1-unit models.
 			e1.set_camera_pos(v3(-3000, 6000, 9000))
 			e1.set_camera_dir(v3(-6, 4.4, 7))
@@ -390,15 +410,15 @@ ui.house_model_editor = function(id, house, floor, fr, align, valign,
 		let is_changed = height_controls(controls_id, house, id, cut_floor,
 			readonly)
 		if (e && (e.house != house || e.house_edit_no != house.edit_no
-			|| is_changed || e.cut_floor != cut_floor)) {
+			|| is_changed || e.cut_floor != cut_floor
+			|| e.no_external_walls != no_external_walls)) {
 			e.clear_model()
-			init_house_model_editor(e, house, cut_floor)
+			init_house_model_editor(e, house, cut_floor, no_external_walls)
 		}
 		ui.p(ui.sp())
 		ui.stack()
 			if (floor)
-				ui.toggle_button(cut_id, is_cut,
-					S('house_model_cut', 'Up to current floor'), null, 0, 'l', 't')
+				ui.enum_toggle(mode_id, model_mode, model_mode_field, 0, 'l', 't')
 			ui.h(0, ui.sp(), 'r', 't')
 				ui.text('', S('house_model_fov', 'FOV'))
 				let fov_i = ui.stack('', 0)
