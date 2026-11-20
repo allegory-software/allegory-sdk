@@ -14,8 +14,165 @@ const {
 } = glue
 
 const {bbox2, line2, mat3, v2} = Math3D
+const {INDOOR, OUTDOOR} = house_plan
 
-/// utils --------------------------------------------------------------------
+// Plant layers: [fill, path, stroke_width_ratio?].
+const plant_paths = {}
+plant_paths.rosette = [
+	[false, 'M138 108 A50 50 0 1 1 38 108 A50 50 0 1 1 138 108 Z'],
+	[false, 'M128 108 A40 40 0 1 1 48 108 A40 40 0 1 1 128 108 Z'],
+	[true, 'M80 100 C84.3 96.2 74.9 80.1 62.8 66.6'
+		+' C44.9 46.8 25.8 35.6 16 29 C21.5 39.4 30.7 59.6 48.6 79.4'
+		+' C60.7 92.9 75.7 103.8 80 100Z'],
+	[true, 'M84 110 C86.7 105.7 73.5 93.4 58.5 83.9'
+		+' C36.4 69.9 15.8 63.9 5 60 C13.1 68.1 27.4 84.2 49.5 98.1'
+		+' C64.5 107.6 81.3 114.3 84 110Z'],
+	[true, 'M90 100 C96.5 99.1 98.2 79.7 95.6 60.8'
+		+' C91.7 33.2 80.9 12.4 76 1 C74.4 13.3 69.9 36.3 73.8 63.9'
+		+' C76.5 82.7 83.5 100.9 90 100Z'],
+	[true, 'M94 100 C98.9 102.6 110.4 88.7 118.5 73.1'
+		+' C130.5 50.3 134.3 29.1 137 18'
+		+' C129.4 26.6 114.1 41.7 102.1 64.5 C94 80.1 89.1 97.4 94 100Z'],
+	[true, 'M86 104 C91.6 102.2 91 87 86.6 72.9'
+		+' C81.1 55.4 70.3 44.2 65 37 C64.7 45.9 62.3 61.3 67.8 78.8'
+		+' C72.2 92.9 80.4 105.8 86 104Z'],
+	[true, 'M92 110 C96.3 113.5 106.8 106.3 114.3 96.9'
+		+' C123.7 85.1 125.8 72.1 128 65 C121.5 68.7 109.3 73.6 99.9 85.3'
+		+' C92.4 94.8 87.7 106.5 92 110Z'],
+	[true, 'M92 114 C88.8 110.3 76.8 116.1 67 124.5'
+		+' C52.5 136.8 44.7 150.8 40 158 C47.8 154.6 63 149.2 77.5 137'
+		+' C87.4 128.6 95.2 117.7 92 114Z'],
+	[true, 'M90 112 C86.3 115 93.4 128.6 102.9 140.2'
+		+' C116.9 157.2 132.2 167.2 140 173'
+		+' C135.8 164.2 129.1 147.2 115.1 130.2 C105.6 118.6 93.7 109 90 112Z'],
+	[true, 'M92 112 C91.7 107.5 72.6 105.8 53.7 107.1'
+		+' C32.9 108.6 17.9 115 8 118 C18.2 119.5 33.9 123.7 54.7 122.3'
+		+' C73.6 120.9 92.3 116.5 92 112Z'],
+	[true, 'M92 112 C91.9 116.6 109.4 120 126.9 120.2'
+		+' C142.6 120.4 153.6 115.2 162 113'
+		+' C153.6 110.6 142.9 105 127.1 104.8 C109.6 104.6 92.1 107.4 92 112Z'],
+	[true, 'M88 108 C94.5 106.3 97.4 99.9 96 94.6'
+		+' C93.7 85.8 84.2 80.7 80 78 C77.7 82.5 72.1 91.6 74.4 100.4'
+		+' C75.8 105.6 81.5 109.7 88 108Z'],
+	[true, 'M96 112 C96 107.2 88.6 104.1 81.2 104.1'
+		+' C73 104.1 67 109.6 63 112 C67 114.4 73 119.9 81.2 119.9'
+		+' C88.6 119.9 96 116.8 96 112Z'],
+]
+plant_paths.monstera = [
+	[true, 'M133 98 A40 40 0 1 1 53 98 A40 40 0 1 1 133 98 Z'],
+	[true, 'M127 98 A34 34 0 1 1 59 98 A34 34 0 1 1 127 98 Z'],
+	[false, 'M93 98 Q74 65 57 46 M93 98 Q117 64 132 39'
+		+' M93 98 Q62 106 40 133 M93 98 Q116 103 137 115'
+		+' M93 98 Q87 126 66 147'],
+	[true, 'M104 74 C96 64 99 51 105 44'
+		+' C106 50 110 57 115 55 C119 53 109 39 110 33'
+		+' C111 23 116 18 123 16 C118 27 118 40 122 40'
+		+' C126 40 123 20 128 13 C131 9 136 9 140 10'
+		+' C134 18 132 33 136 34 C141 35 139 18 145 13'
+		+' C150 9 157 13 163 13 C162 22 165 31 160 37'
+		+' C155 42 141 41 142 46 C143 50 158 47 164 44'
+		+' C164 50 158 56 151 58 C145 60 134 56 133 60'
+		+' C132 65 146 66 153 65 C149 74 141 78 134 77'
+		+' C126 76 120 69 117 73 C119 78 124 80 130 82'
+		+' C119 86 110 83 104 74 Z'],
+	[true, 'M72 73 C77 64 80 54 76 46'
+		+' C72 39 66 35 58 36 C66 43 70 52 66 54'
+		+' C62 56 59 44 53 39 C49 36 45 36 42 38'
+		+' C49 44 54 56 50 58 C46 60 41 45 34 44'
+		+' C29 43 23 47 21 51 C32 53 39 61 36 65'
+		+' C33 69 23 59 17 60 C11 62 6 68 6 74'
+		+' C12 76 13 86 19 87 C25 89 33 78 36 81'
+		+' C40 85 27 95 21 95 C25 101 31 102 37 99'
+		+' C44 96 48 84 52 86 C57 89 44 104 39 106'
+		+' C46 111 55 107 60 102 C65 97 61 91 66 90'
+		+' C71 91 66 99 66 103 C77 97 79 86 72 73 Z'],
+	[true, 'M107 112 C109 101 119 94 133 94'
+		+' C141 94 146 98 148 104 C139 100 129 102 129 106'
+		+' C129 110 145 106 149 111 L149 120'
+		+' C143 117 129 114 128 118 C126 122 140 124 145 130'
+		+' C140 135 133 134 128 131 C123 128 120 122 117 124'
+		+' C115 127 122 134 124 138 C117 139 113 134 111 130'
+		+' C109 126 112 120 108 119 C105 119 105 125 105 129'
+		+' C99 124 101 117 107 112 Z'],
+	[true, 'M69 125 C59 119 47 121 41 128'
+		+' C47 125 57 126 57 130 C57 134 40 131 36 137'
+		+' L33 146 C39 142 52 140 53 144'
+		+' C54 148 37 150 35 157 L37 169'
+		+' C46 170 50 166 53 159 C55 154 59 153 60 157'
+		+' C60 163 56 168 55 172 C62 173 68 168 69 162'
+		+' C69 156 65 150 69 149 C73 148 74 160 73 165'
+		+' C81 163 84 155 82 149 C80 143 73 141 75 137'
+		+' C78 134 85 141 87 145 C90 136 81 126 69 125 Z'],
+]
+plant_paths.broad_leaf = [
+	[true, 'M142 105 A47 47 0 1 1 48 105 A47 47 0 1 1 142 105 Z'],
+	[true, 'M134 105 A39 39 0 1 1 56 105 A39 39 0 1 1 134 105 Z'],
+	[false, 'M94 104 L69 52 M94 104 L139 55'
+		+' M94 104 L49 93 M94 104 L146 118 M94 104 L49 156'
+		+' M94 104 L114 164'],
+	[true, 'M90 72 C100.3 64.4 99 48.6 87.3 36.9'
+		+' C75.6 25.2 56.8 24.2 45 27 C42.2 38.8 43.2 57.6 54.9 69.3'
+		+' C66.6 81 82.4 82.3 90 72Z'],
+	[false, 'M88.2 70.2 L50.4 32.4 M81.9 63.9 Q86.3 54.1 82.6 44.4'
+		+' M78.3 60.3 Q68.5 64.7 58.8 61 M72 54 Q75.5 45.1 72.7 37'
+		+' M68.4 50.4 Q59.6 53.8 51.9 51 M63 45 Q64.8 37.8 63.5 32.8'
+		+' M60.3 42.3 Q53.6 43.6 49.3 42.7', .8],
+	[true, 'M100 76 C102.3 89.1 118.8 94.6 136.5 88.4'
+		+' C154.2 82.1 164.8 64.5 168 52 C157.6 44.3 138.3 37.2 120.6 43.5'
+		+' C103 49.7 93.6 64.4 100 76Z'],
+	[false, 'M102.7 75 L159.8 54.9 M112.2 71.7 Q119.8 80.1 131.3 80.7'
+		+' M117.7 69.8 Q118.3 58.4 126.9 50.8'
+		+' M127.2 66.4 Q134.3 73.6 143.9 74.3'
+		+' M132.6 64.5 Q133.8 54.6 140.5 48.3'
+		+' M140.8 61.6 Q147.1 66.3 152.7 67.2'
+		+' M144.9 60.2 Q147 53.2 150.1 49.5', .8],
+	[true, 'M78 82 C73.8 68.3 56.8 63.5 40.4 71.3'
+		+' C24.1 79.1 16.3 98.5 15 112 C26.3 119.5 46.3 125.7 62.6 117.9'
+		+' C79 110.1 86 93.9 78 82Z'],
+	[false, 'M75.5 83.2 L22.6 108.4 M66.7 87.4 Q58 78.9 46.6 79.1'
+		+' M61.6 89.8 Q62.7 101.9 55.4 110.6 M52.8 94 Q44.7 86.8 35.3 86.7'
+		+' M47.8 96.4 Q48.1 106.9 42.5 114.1 M40.2 100 Q33.4 95.4 27.7 94.8'
+		+' M36.4 101.8 Q35.4 109.4 32.9 113.5', .8],
+	[true, 'M72 116 C65.1 105.6 49.5 106.2 37.6 117.1'
+		+' C25.6 128 23.8 146.3 26 158 C37.4 161.3 55.8 161.1 67.8 150.2'
+		+' C79.8 139.3 81.7 123.8 72 116Z'],
+	[false, 'M70.2 117.7 L31.5 153 M63.7 123.6 Q54.3 118.8 44.7 122'
+		+' M60 126.9 Q63.9 136.7 59.9 146 M53.6 132.8 Q45 128.9 37 131.4'
+		+' M49.9 136.2 Q52.8 144.9 49.8 152.4'
+		+' M44.4 141.2 Q37.5 139.2 32.5 140.2'
+		+' M41.6 143.7 Q42.6 150.3 41.6 154.4', .8],
+	[true, 'M114 97 C104.3 108 109.2 125.4 124.8 135.6'
+		+' C140.4 145.7 161.5 142.1 174 136'
+		+' C174.5 122.1 169.2 101.3 153.6 91.2 C138 81 120.1 83.6 114 97Z'],
+	[false, 'M116.4 98.6 L166.8 131.3 M124.8 104 Q122.1 116.1 128.3 126'
+		+' M129.6 107.1 Q139.5 99.7 151.1 101.4'
+		+' M138 112.6 Q136 123.5 141 131.8'
+		+' M142.8 115.7 Q151.8 109.8 161.1 110.8'
+		+' M150 120.4 Q149.6 128.8 152.2 134.1'
+		+' M153.6 122.7 Q160.8 119.6 165.7 119.5', .8],
+	[true, 'M108 118 C95.3 118.9 87.9 133 91.6 149.1'
+		+' C95.2 165.2 110.6 176.1 122 180 C130.6 171.5 139.8 155.1 136.2 139'
+		+' C132.6 122.9 119.9 113.4 108 118Z'],
+	[false, 'M108.6 120.5 L120.3 172.6 M110.5 129.2 Q101.5 135.1 99.5 145.2'
+		+' M111.6 134.1 Q122.3 135.6 128.5 143.9'
+		+' M113.6 142.8 Q105.8 148.5 104 156.8'
+		+' M114.7 147.8 Q123.9 149.6 129 156'
+		+' M116.4 155.2 Q111.1 160.3 109.5 165.2'
+		+' M117.2 158.9 Q123.6 161.4 126.7 164.4', .8],
+	[true, 'M90 78 C78.5 75.6 68.4 86.9 67.7 103'
+		+' C66.9 119.1 77.8 133.3 87 140 C96.8 134.3 109 121.2 109.8 105.1'
+		+' C110.6 88.9 101.7 76.7 90 78Z'],
+	[false, 'M89.9 80.5 L87.4 132.6 M89.5 89.2 Q80 92.4 75.7 101.4'
+		+' M89.2 94.1 Q98.3 98.3 101.7 107.7 M88.8 102.8 Q80.5 106.1 76.7 113.5'
+		+' M88.6 107.8 Q96.3 111.9 99.2 119.3 M88.2 115.2 Q82.2 118.6 79.6 122.9'
+		+' M88 118.9 Q93.1 122.9 95.1 126.5', .8],
+]
+for (let name in plant_paths)
+	for (let layer of plant_paths[name])
+		layer[1] = new Path2D(layer[1])
+const plant_names = Object.keys(plant_paths)
+
+//// UTILS -------------------------------------------------------------------
 
 let floor_names = [
 	'GROUND FLOOR',
@@ -57,14 +214,14 @@ let help_lines = [
 	'',
 	'Ctrl+Z: Undo',
 	'Ctrl+Y, Ctrl+Shift+Z: Redo',
-	'Ctrl+C: Copy the hovered object, or the house',
+	'Ctrl+C: Copy object, or the house',
 	'Ctrl+V: Paste at the pointer',
-	'Delete: Remove the hovered object',
+	'Delete: Remove object',
 	'',
 	'Hovered Wall or Object',
 	'',
 	'W A S D, ←↑→↓: Move 1 cm',
-	'Space: Turn the door or the couch',
+	'Space: Rotate or vary object',
 	'',
 	'Mouse',
 	'',
@@ -1267,7 +1424,8 @@ function create_floor_editor(id) {
 				|| other_type.marks_terrace)
 				continue
 			if (object_type.placed_on == other.type
-				|| other_type.placed_on == object.type)
+				|| other_type.placed_on == object.type
+				|| object.type == 'rug' || other.type == 'rug')
 				continue
 			if (other_type.in_wall)
 				s.house.get_opening_hole(plan, other, other_rects).length = 4
@@ -1281,14 +1439,10 @@ function create_floor_editor(id) {
 					let ox2 = other_rects[j+2], oy2 = other_rects[j+3]
 					if (x1 < ox2 && x2 > ox1 && y1 < oy2 && y2 > oy1)
 						is_overlapping = true
-					add_object_dim(object_dims, 0, oy2, ox1, ox2,
-						x1, y1, x2, y2)
-					add_object_dim(object_dims, 1, ox1, oy1, oy2,
-						x1, y1, x2, y2)
-					add_object_dim(object_dims, 2, oy1, ox1, ox2,
-						x1, y1, x2, y2)
-					add_object_dim(object_dims, 3, ox2, oy1, oy2,
-						x1, y1, x2, y2)
+					add_object_dim(object_dims, 0, oy2, ox1, ox2, x1, y1, x2, y2)
+					add_object_dim(object_dims, 1, ox1, oy1, oy2, x1, y1, x2, y2)
+					add_object_dim(object_dims, 2, oy1, ox1, ox2, x1, y1, x2, y2)
+					add_object_dim(object_dims, 3, ox2, oy1, oy2, x1, y1, x2, y2)
 				}
 			}
 		}
@@ -1499,6 +1653,170 @@ function create_floor_editor(id) {
 		cx.lineTo(w, l * .4)
 		cx.fillStyle = ui.color_css('bg')
 		cx.fill()
+		cx.stroke()
+	}
+
+	/// bathtub ---------------------------------------------------------------
+
+	object_views.bathtub = {
+		hit: hit_box,
+		hit_resize: hit_resize_rect,
+		draw_sizes: draw_furniture_sizes,
+	}
+
+	object_views.bathtub.draw = function(cx, plan, object) {
+		let {w, l} = object
+		cx.beginPath()
+		cx.roundRect(0, 0, w, l, 80)
+		cx.roundRect(60, 100, w - 120, l - 160, 150)
+		cx.moveTo(w / 2 + 25, 180)
+		cx.arc(w / 2, 180, 25, 0, 2 * PI)
+		cx.moveTo(w / 2 - 60, 50)
+		cx.lineTo(w / 2 + 60, 50)
+		cx.moveTo(w / 2, 50)
+		cx.lineTo(w / 2, 130)
+		cx.fillStyle = ui.color_css('bg')
+		cx.fill('evenodd')
+		cx.stroke()
+	}
+
+	/// wardrobe --------------------------------------------------------------
+
+	object_views.wardrobe = {
+		hit: hit_box,
+		hit_resize: hit_resize_rect,
+		draw_sizes: draw_furniture_sizes,
+	}
+
+	object_views.wardrobe.draw = function(cx, plan, object) {
+		let {w, l} = object
+		cx.beginPath()
+		cx.rect(0, 0, w, l)
+		cx.fillStyle = ui.color_css('bg')
+		cx.fill()
+		cx.moveTo(40, l / 2)
+		cx.lineTo(w - 40, l / 2)
+		let hanger_n = max(1, floor((w - 80) / 100))
+		for (let i = 0; i < hanger_n; i++) {
+			let x = 40 + (i + .5) * (w - 80) / hanger_n
+			let dx = (i * 7 % 11 - 5) * .04 * min(l, 400)
+			cx.moveTo(x - dx / 2, l * .2)
+			cx.lineTo(x + dx / 2, l * .8)
+		}
+		cx.stroke()
+	}
+
+	/// fridge ----------------------------------------------------------------
+
+	object_views.fridge = {
+		hit: hit_box,
+		hit_resize: hit_resize_rect,
+		draw_sizes: draw_furniture_sizes,
+	}
+
+	object_views.fridge.draw = function(cx, plan, object) {
+		let {w, l} = object
+		let front = min(50, l * .08)
+		cx.beginPath()
+		cx.moveTo(0, l - front)
+		cx.lineTo(0, 0)
+		cx.lineTo(w, 0)
+		cx.lineTo(w, l - front)
+		cx.quadraticCurveTo(w / 2, l + front, 0, l - front)
+		cx.closePath()
+		cx.fillStyle = ui.color_css('bg')
+		cx.fill()
+		cx.stroke()
+	}
+
+	/// rug -------------------------------------------------------------------
+
+	object_views.rug = {
+		hit: hit_box,
+		hit_resize: hit_resize_rect,
+		draw_sizes: draw_furniture_sizes,
+	}
+
+	object_views.rug.draw = function(cx, plan, object) {
+		let {w, l} = object
+		let inset = min(w, l) * .08
+		cx.beginPath()
+		cx.rect(0, 0, w, l)
+		cx.rect(inset, inset, w - inset * 2, l - inset * 2)
+		cx.moveTo(w / 2, inset * 2)
+		cx.lineTo(w - inset * 2, l / 2)
+		cx.lineTo(w / 2, l - inset * 2)
+		cx.lineTo(inset * 2, l / 2)
+		cx.closePath()
+		cx.fillStyle = ui.color_css('bg')
+		cx.fill('evenodd')
+		cx.stroke()
+	}
+
+	/// potted plant ----------------------------------------------------------
+
+	object_views.potted_plant = {
+		hit: hit_box,
+		hit_resize: function(plan, object, hs) {
+			return hit_resize_rect(plan, object, hs, true)
+		},
+		draw_sizes: function(cx, plan, object) {
+			let w = object.w
+			draw_object_length(cx, plan, object, 0, w, w, w)
+		},
+	}
+
+	object_views.potted_plant.update = function(plan, object) {
+		if (!ui.keydown(' '))
+			return
+		plan.update_object(object, function(plant) {
+			let i = plant_names.indexOf(plant.plant_name)
+			plant.plant_name = plant_names[(i + 1) % plant_names.length]
+		})
+	}
+
+	object_views.potted_plant.draw = function(cx, plan, object) {
+		let w = object.w
+		draw_hovered_box(cx, object, 0, 0, w, w)
+		cx.fillStyle = ui.color_css('bg')
+		cx.lineCap = 'round'
+		cx.lineJoin = 'round'
+		cx.scale(w / 190, w / 190)
+		cx.lineWidth /= w / 150
+		let line_width = cx.lineWidth
+		let layers = plant_paths[object.plant_name]
+		for (let [fill, path, stroke_width_ratio = 1] of layers) {
+			if (fill)
+				cx.fill(path)
+			cx.lineWidth = line_width * stroke_width_ratio
+			cx.stroke(path)
+		}
+		cx.lineWidth = line_width
+	}
+
+	/// bathroom sink ---------------------------------------------------------
+
+	object_views.bathroom_sink = {
+		hit: hit_box,
+		hit_resize: hit_resize_rect,
+		draw_sizes: draw_furniture_sizes,
+	}
+
+	object_views.bathroom_sink.draw = function(cx, plan, object) {
+		let {w, l} = object
+		cx.beginPath()
+		cx.moveTo(0, 0)
+		cx.lineTo(w, 0)
+		cx.ellipse(w / 2, 0, w / 2, l, 0, 0, PI)
+		cx.closePath()
+		cx.moveTo(w * .85, l * .5)
+		cx.ellipse(w / 2, l * .5, w * .35, l * .3, 0, 0, 2 * PI)
+		cx.moveTo(w / 2 + 20, l * .5)
+		cx.arc(w / 2, l * .5, 20, 0, 2 * PI)
+		cx.moveTo(w / 2 + 20, l * .1)
+		cx.arc(w / 2, l * .1, 20, 0, 2 * PI)
+		cx.fillStyle = ui.color_css('bg')
+		cx.fill('evenodd')
 		cx.stroke()
 	}
 
@@ -1913,16 +2231,16 @@ function create_floor_editor(id) {
 		cx.stroke()
 	}
 
-	/// sink ------------------------------------------------------------------
+	/// kitchen sink ----------------------------------------------------------
 
-	object_views.sink = {
+	object_views.kitchen_sink = {
 		hit: hit_box,
 		hit_resize: hit_resize_rect,
 		draw_sizes: draw_furniture_sizes,
 	}
 
 	// draw the rim, the basin with its drain and the tap at the top.
-	object_views.sink.draw = function(cx, plan, object) {
+	object_views.kitchen_sink.draw = function(cx, plan, object) {
 		let {w, l} = object
 		cx.beginPath()
 		cx.rect(0, 0, w, l)
@@ -2078,7 +2396,7 @@ function create_floor_editor(id) {
 	}
 
 	// invalid floor objects and ground objects touching the house in the
-	// error color; other ground objects in the readonly text color.
+	// error color; indoor-only ground objects in the readonly text color.
 	// the hovered object in the link color unless it is in the error color.
 	function draw_objects(cx, plan, objects, hit_object, is_ground,
 		resize_side, from_below, is_overlapping) {
@@ -2096,12 +2414,13 @@ function create_floor_editor(id) {
 			}
 			let draw_resize = object == hit_object && resize_side
 				&& object_view.draw_resize
+			let is_outdoor = is_ground && ((object_type.allow ?? INDOOR) & OUTDOOR)
 			let is_invalid = (object_type.in_wall ? !object.seg
 				: is_ground ? is_touching : !object.is_valid)
 				|| object == hit_object && is_overlapping
 			cx.strokeStyle = is_invalid ? ui.color_css('error')
 				: object == hit_object && !draw_resize ? ui.color_css('link')
-				: ui.color_css('text', is_ground ? 'readonly' : null)
+				: ui.color_css('text', is_ground && !is_outdoor ? 'readonly' : null)
 			cx.save()
 			if (object_view.draw_mask)
 				object_view.draw_mask(cx, plan, object,

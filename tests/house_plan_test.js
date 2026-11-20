@@ -5,9 +5,10 @@ const path = require('node:path')
 const vm = require('node:vm')
 
 const sdk = path.resolve(__dirname, '..')
+const warnings = []
 const ctx = {
 	console: {...console, log() {}, group() {}, groupCollapsed() {},
-		groupEnd() {}},
+		groupEnd() {}, warn(...args) { warnings.push(args) }},
 	setTimeout, clearTimeout, TextEncoder, TextDecoder, URL,
 	URLSearchParams, performance, Intl, atob, btoa, queueMicrotask,
 }
@@ -1028,6 +1029,136 @@ function north_outer_polys(h) {
 
 let default_n = Object.keys(house({}).object_types).length // default objects.
 
+check('unknown object types warn and are skipped on load and paste', () => {
+	let warning_n = warnings.length
+	let h = house({
+		ground_objects: [{type: 'unknown_ground_object'}],
+		floors: [{lines: [rect_lines(0, 0, 6000, 4000)], objects: [
+			{type: 'sink'},
+			{type: 'bed', x: 1000, y: 1000, rot: 0},
+		]}],
+	})
+	let f = h.floors[0]
+	assert.equal(warnings.length, warning_n + 2)
+	assert(warnings.slice(warning_n).some(args => args.includes('sink')))
+	assert.equal(f.objects.length, 1)
+	assert.equal(f.objects[0].type, 'bed')
+	assert.equal(h.ground_objects.length, default_n)
+	let state = JSON.stringify(h.save_state())
+	let edit_no = h.edit_no
+	f.add_object({type: 'unknown_pasted_object'}, 2000, 2000, 0)
+	assert.equal(warnings.length, warning_n + 3)
+	assert.equal(JSON.stringify(h.save_state()), state)
+	assert.equal(h.edit_no, edit_no)
+})
+
+check('Space cycles saved plant names with undo and redo', () => {
+	let source = fs.readFileSync(path.join(sdk,
+		'www/house_plan_editor.js'), 'utf8')
+	let plant_names = Array.from(source.matchAll(/plant_paths\.(\w+) =/g),
+		match => match[1])
+	assert.deepEqual(plant_names, ['rosette', 'monstera', 'broad_leaf'])
+	let update_source = source.slice(
+		source.indexOf('\tobject_views.potted_plant.update ='),
+		source.indexOf('\tobject_views.potted_plant.draw ='))
+	let object_views = {potted_plant: {}}
+	let space = false
+	vm.runInNewContext(update_source, {
+		object_views, plant_names, ui: {keydown: key => space && key == ' '},
+	})
+	let h = opening_house([
+		{type: 'potted_plant', x: 2000, y: 2000, rot: 0},
+	])
+	let f = h.floors[0], object = f.objects[0]
+	assert.equal(object.plant_name, plant_names[0])
+	let edit_no = h.edit_no
+	object_views.potted_plant.update(f, object)
+	assert.equal(h.edit_no, edit_no)
+	space = true
+	for (let i = 1; i <= plant_names.length; i++) {
+		object_views.potted_plant.update(f, object)
+		let name = plant_names[i % plant_names.length]
+		assert.equal(object.plant_name, name)
+		assert.deepEqual([object.x, object.y, object.w], [2000, 2000, 600])
+		assert.equal(object.l, undefined)
+		assert.equal(house(h.save_state()).floors[0].objects[0].plant_name,
+			name)
+	}
+	assert(h.undo())
+	assert.equal(f.objects[0].plant_name, plant_names.at(-1))
+	assert(h.redo())
+	assert.equal(f.objects[0].plant_name, plant_names[0])
+})
+
+check('old saved plant names load and save with their new names', () => {
+	for (let [name0, name1] of [
+		['spiky', 'rosette'],
+		['curved', 'monstera'],
+		['round', 'broad_leaf'],
+	]) {
+		let h = opening_house([{type: 'potted_plant', plant_name: name0,
+			x: 2000, y: 2000, rot: 0}])
+		let object = h.floors[0].objects[0]
+		assert.equal(object.plant_name, name1)
+		assert.equal(h.save_object(object).plant_name, name1)
+		assert.equal(h.save_state().floors[0].objects[0].plant_name, name1)
+	}
+})
+
+check('plants resize as centred squares from every edge and quarter turn', () => {
+	for (let rot of [0, 90, 180, 270]) {
+		for (let axis of ['w', 'l']) {
+			for (let side of [-1, 1]) {
+				let h = opening_house([{type: 'potted_plant',
+					x: 2000, y: 2000, rot, w: 600, l: 900}])
+				let f = h.floors[0], object = f.objects[0]
+				assert.deepEqual(Array.from(h.get_object_box(f, object, [])),
+					[2000, 2000, 2600, 2600])
+				let [dx, dy] = h.object_vector_to_plan(object,
+					axis == 'w' ? side * 25 : 0,
+					axis == 'l' ? side * 25 : 0, ctx.Math3D.v2())
+				let resize = f.start_resize_object(object, side, axis)
+				resize.resize(dx, dy)
+				assert.equal(object.w, 650)
+				assert.deepEqual(Array.from(h.get_object_box(f, object, [])),
+					[1975, 1975, 2625, 2625])
+				resize.stop()
+				assert(h.undo())
+				assert.equal(f.objects[0].w, 600)
+				assert(h.redo())
+				let saved = h.save_state()
+				assert.equal(saved.floors[0].objects[0].l, undefined)
+				assert.equal(house(saved).floors[0].objects[0].w, 650)
+			}
+		}
+	}
+})
+
+check('object allow defaults to indoor and accepts either location bit', () => {
+	let {INDOOR, OUTDOOR} = ctx.house_plan
+	for (let allow of [undefined, INDOOR, OUTDOOR, INDOOR | OUTDOOR]) {
+		let h = opening_house([{type: 'potted_plant',
+			x: 2000, y: 2000, rot: 0}])
+		assert.equal(h.object_types.potted_plant.allow, INDOOR | OUTDOOR)
+		assert.equal(h.object_types.bed.allow, undefined)
+		h.object_types.potted_plant.allow = allow
+		let f = h.floors[0], object = f.objects[0]
+		let [x0, y0] = box_centre(h, f, object)
+		let move = f.start_move_object(object)
+		move.move(0, 0, 0)
+		assert.equal(object.is_valid, !!((allow ?? INDOOR) & INDOOR))
+		move.move(-1000 - x0, 2000 - y0, 0)
+		assert.equal(object.is_valid, !!((allow ?? INDOOR) & OUTDOOR))
+		assert.equal(object.on_floor, false)
+		assert(h.ground_objects.includes(object))
+		move.move(-x0, 2000 - y0, 0)
+		assert.equal(object.is_valid, false)
+		assert.equal(object.on_floor, true)
+		assert(f.objects.includes(object))
+		move.cancel()
+	}
+})
+
 check('objects are saved, loaded and undone with their floor', () => {
 	let object = {type: 'window', x: 3000, y: 0, rot: 0, w: 1200}
 	let h = opening_house([object])
@@ -1088,7 +1219,7 @@ check('moving a wall moves its objects along', () => {
 check('dragging an object onto a wall snaps it to the floor, undo back', () => {
 	let h = opening_house([])
 	let f = h.floors[0]
-	let object = h.ground_objects[0] // a window
+	let object = h.ground_objects.find(object => object.type == 'window')
 	let [x0, y0] = box_centre(h, f, object)
 	let s = f.start_move_object(object)
 	s.move(3000 - x0, 5000 - y0, 200) // clear of the house.
@@ -1232,14 +1363,14 @@ check('sinks and stovetops sit on countertop front edges, after them', () => {
 	let f = countertop_floor()
 	let bounds = []
 	// the nearer front edge: the bottom one, 50 mm in.
-	f.add_object({type: 'sink', rot: 0}, 3900, 3500, 0)
+	f.add_object({type: 'kitchen_sink', rot: 0}, 3900, 3500, 0)
 	let sink = f.objects.at(-1)
 	assert(sink.is_valid)
 	assert.equal(sink.rot, 0)
 	assert.deepEqual(f.house.get_object_box(f, sink, bounds),
 		[3600, 3100, 4200, 3550])
 	// the top edge, facing up.
-	f.add_object({type: 'sink', rot: 0}, 4500, 3100, 0)
+	f.add_object({type: 'kitchen_sink', rot: 0}, 4500, 3100, 0)
 	assert.equal(f.objects.at(-1).rot, 180)
 	assert.deepEqual(f.house.get_object_box(f, f.objects.at(-1), bounds),
 		[4200, 3050, 4800, 3500])
@@ -1258,12 +1389,13 @@ check('sinks and stovetops sit on countertop front edges, after them', () => {
 	assert.equal(stovetop.w, 637)
 	s.stop()
 	// off the countertop: invalid.
-	f.add_object({type: 'sink', rot: 0}, 1000, 1000, 0)
+	f.add_object({type: 'kitchen_sink', rot: 0}, 1000, 1000, 0)
 	assert(!f.objects.at(-1).is_valid)
 	// a new countertop goes before the sinks and stovetops.
 	f.add_object({type: 'countertop', rot: 0}, 3900, 6000, 0)
 	assert.deepEqual(Array.from(f.objects, object => object.type), ['countertop',
-		'countertop', 'sink', 'sink', 'stovetop', 'sink'])
+		'countertop', 'kitchen_sink', 'kitchen_sink', 'stovetop',
+		'kitchen_sink'])
 	// a countertop against a wall: only the other long edge is a front edge.
 	s = f.start_move_object(f.objects[1])
 	s.move(0, -5600, 500)

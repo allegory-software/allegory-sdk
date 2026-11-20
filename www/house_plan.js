@@ -6,7 +6,7 @@ const {
 	isarray,
 	round, mod, abs, sign, min, max, clamp, floor, ceil, sqrt, tan, atan,
 	sin, cos, rad,
-	assert, log, push_log, pop_log, push_log_if,
+	assert, warn_once, log, push_log, pop_log, push_log_if,
 	insert, remove_value, uniq_sorted, map, assign, clock, json,
 	profile_time, empty_array, array_set,
 } = glue
@@ -14,9 +14,18 @@ const {
 const {bbox2, poly2, v2, mat3} = Math3D
 
 G.DEBUG_PLAN = 0
-G.DEBUG_PLAN_LOAD = 1
+G.DEBUG_PLAN_LOAD = 0
 
-//// HOUSE MODEL -------------------------------------------------------------
+const PLAN_VERSION = 1
+
+const INDOOR  = 1
+const OUTDOOR = 2
+
+function poly_get_point(i, out) {
+	out[0] = this[i][0]
+	out[1] = this[i][1]
+	return out
+}
 
 // everything is in mm!
 let defaults = {
@@ -28,14 +37,6 @@ let defaults = {
 	half_wall_h: 1000, // of the half-walls around terraces, above the slab
 	grid_x: 0, // checker grid origin
 	grid_y: 0,
-}
-
-const STATE_VERSION = 1
-
-function poly_get_point(i, out) {
-	out[0] = this[i][0]
-	out[1] = this[i][1]
-	return out
 }
 
 function house_plan(t) {
@@ -93,8 +94,11 @@ function house_plan(t) {
 	function copy_objects(objects) {
 		let a = []
 		for (let object of objects) {
-			let object_type = assert(object_types[object.type],
-				'unknown object type: ', object.type)
+			let object_type = object_types[object.type]
+			if (!object_type) {
+				warn_once('unknown object type:', object.type)
+				continue
+			}
 			let object1 = {
 				type: object.type,
 				x: snap_length(object.x),
@@ -150,7 +154,7 @@ function house_plan(t) {
 			state.h = floor.fixed_h
 			floors.push(state)
 		}
-		let state = {version: STATE_VERSION}
+		let state = {version: PLAN_VERSION}
 		for (let k in defaults)
 			state[k] = house[k]
 		state.ground_objects = copy_objects(house.ground_objects)
@@ -1302,11 +1306,14 @@ function house_plan(t) {
 		}
 
 		function place_object_on_floor(object, snap_d, snap_margin) {
-			object_types[object.type].place(floor, object, snap_d, snap_margin)
-			object.is_valid = object.on_floor
+			let object_type = object_types[object.type]
+			let allow = object_type.allow ?? INDOOR
+			object_type.place(floor, object, snap_d, snap_margin)
+			object.is_valid = object.on_floor && !!(allow & INDOOR)
 			if (!object.on_floor) {
 				let [x1, y1, x2, y2] = get_object_box(floor, object, move_box)
 				object.on_floor = floor.is_rect_touching_house(x1, y1, x2, y2)
+				object.is_valid = !object.on_floor && !!(allow & OUTDOOR)
 			}
 		}
 
@@ -1421,10 +1428,11 @@ function house_plan(t) {
 		}
 
 		// add an object from a save_object() state, its box centre at (x, y)
-		// or on a wall within snap_d as by a move: one undoable edit. a state
-		// of an unknown type throws.
+		// or on a wall within snap_d as by a move: one undoable edit.
 		floor.add_object = function(state, x, y, snap_d) {
 			let object = copy_objects([state])[0]
+			if (!object)
+				return
 			// the state's position: none or elsewhere; the move goes from here.
 			object.x = x
 			object.y = y
@@ -2296,6 +2304,14 @@ function house_plan(t) {
 		return out
 	}
 
+	function square_local_box(plan, object, out) {
+		out[0] = 0
+		out[1] = 0
+		out[2] = object.w
+		out[3] = object.w
+		return out
+	}
+
 	// convert a point from object coordinates to plan coordinates.
 	function object_to_plan(plan, object, x, y, out) {
 		let [ox, oy] = get_object_origin(plan, object, origin_point)
@@ -2385,6 +2401,21 @@ function house_plan(t) {
 			object[axis] = size
 			object.x = x0 + min(ux, 0) * (size - size0)
 			object.y = y0 + min(uy, 0) * (size - size0)
+		}}
+	}
+
+	function start_resize_square(plan, object, side, axis = 'w') {
+		let w0 = object.w, x0 = object.x, y0 = object.y
+		let is_l = axis == 'l'
+		let [ux, uy] = object_vector_to_plan(object,
+			is_l ? 0 : side, is_l ? side : 0, object_point1)
+		let sizes = object_types[object.type].sizes.w
+		return {resize: function(dx, dy, snap_d, nosnap = false) {
+			let w = snap_object_size(sizes, w0 + 2 * (dx * ux + dy * uy),
+				Infinity, nosnap)
+			object.w = w
+			object.x = x0 - (w - w0) / 2
+			object.y = y0 - (w - w0) / 2
 		}}
 	}
 
@@ -2697,14 +2728,108 @@ function house_plan(t) {
 		start_resize: start_resize_rect,
 	}
 
+	/// bathtub ---------------------------------------------------------------
+
+	object_types.bathtub = {
+		w: 750,
+		fields: {l: 1700},
+		sizes: {
+			w: {min:  600, max: 1200, step: 50},
+			l: {min: 1200, max: 2200, step: 50},
+		},
+		snap_faces: [0, 1, 2, 3],
+		place: place_furniture,
+		limit_size: limit_furniture_size,
+		local_box: rect_local_box,
+		start_resize: start_resize_rect,
+	}
+
+	/// wardrobe --------------------------------------------------------------
+
+	object_types.wardrobe = {
+		w: 1800,
+		fields: {l: 600},
+		sizes: {
+			w: {min:  400, max: 4000, step: 50},
+			l: {min:  400, max: 1000, step: 50},
+		},
+		snap_faces: [0],
+		place: place_furniture,
+		limit_size: limit_furniture_size,
+		local_box: rect_local_box,
+		start_resize: start_resize_rect,
+	}
+
+	/// fridge ----------------------------------------------------------------
+
+	object_types.fridge = {
+		w: 600,
+		fields: {l: 650},
+		sizes: {
+			w: {min:  450, max: 1200, step: 50},
+			l: {min:  450, max:  900, step: 50},
+		},
+		snap_faces: [0],
+		place: place_furniture,
+		limit_size: limit_furniture_size,
+		local_box: rect_local_box,
+		start_resize: start_resize_rect,
+	}
+
+	/// rug -------------------------------------------------------------------
+
+	object_types.rug = {
+		w: 2000,
+		fields: {l: 3000},
+		sizes: {
+			w: {min:  400, max: 6000, step: 50},
+			l: {min:  400, max: 6000, step: 50},
+		},
+		z_index: -1,
+		snap_faces: [0, 1, 2, 3],
+		place: place_furniture,
+		limit_size: limit_furniture_size,
+		local_box: rect_local_box,
+		start_resize: start_resize_rect,
+	}
+
+	/// potted plant ----------------------------------------------------------
+
+	object_types.potted_plant = {
+		w: 600,
+		allow: INDOOR | OUTDOOR,
+		fields: {plant_name: 'rosette'},
+		sizes: {w: {min: 200, max: 2000, step: 50}},
+		snap_faces: [0, 1, 2, 3],
+		place: place_furniture,
+		local_box: square_local_box,
+		start_resize: start_resize_square,
+	}
+
+	/// bathroom sink ---------------------------------------------------------
+
+	object_types.bathroom_sink = {
+		w: 600,
+		fields: {l: 450},
+		sizes: {
+			w: {min:  350, max: 1200, step: 50},
+			l: {min:  300, max:  700, step: 10},
+		},
+		snap_faces: [0],
+		place: place_furniture,
+		limit_size: limit_furniture_size,
+		local_box: rect_local_box,
+		start_resize: start_resize_rect,
+	}
+
 	/// couch -----------------------------------------------------------------
 
 	object_types.couch = {
 		w: 2000,
 		fields: {l: 900, futon_side: 0, futon_length: 0},
 		sizes: {
-			w: {min: 800, max: 3200, step: 50},
-			l: {min: 750, max: 1200, step: 50},
+			w: {min:  800, max: 3200, step: 50},
+			l: {min:  750, max: 1200, step: 50},
 			futon_length: {min: 0, max: 1000, step: 50},
 		},
 		snap_faces: [0],
@@ -2786,15 +2911,6 @@ function house_plan(t) {
 
 	/// round table -----------------------------------------------------------
 
-	object_types.round_table = {
-		w: 1200,
-		sizes: {w: {min: 800, max: 2000, step: 50}},
-		snap_faces: [0, 1, 2, 3],
-		place: place_furniture,
-		local_box: round_table_local_box,
-		start_resize: start_resize_round_table,
-	}
-
 	function round_table_local_box(plan, object, out) {
 		out[0] = 0
 		out[1] = 0
@@ -2803,19 +2919,13 @@ function house_plan(t) {
 		return out
 	}
 
-	function start_resize_round_table(plan, object, side, axis = 'w') {
-		let w0 = object.w, x0 = object.x, y0 = object.y
-		let is_l = axis == 'l'
-		let [ux, uy] = object_vector_to_plan(object,
-			is_l ? 0 : side, is_l ? side : 0, object_point1)
-		let sizes = object_types.round_table.sizes.w
-		return {resize: function(dx, dy, snap_d, nosnap = false) {
-			let w = snap_object_size(sizes, w0 + 2 * (dx * ux + dy * uy),
-				Infinity, nosnap)
-			object.w = w
-			object.x = x0 - (w - w0) / 2
-			object.y = y0 - (w - w0) / 2
-		}}
+	object_types.round_table = {
+		w: 1200,
+		sizes: {w: {min: 800, max: 2000, step: 50}},
+		snap_faces: [0, 1, 2, 3],
+		place: place_furniture,
+		local_box: round_table_local_box,
+		start_resize: start_resize_square,
 	}
 
 	/// rectangular table -----------------------------------------------------
@@ -2880,13 +2990,18 @@ function house_plan(t) {
 	// ends start at coordinate offsets 0 and contour.length / 2.
 	function countertop_local_box(plan, object, out) {
 		let a = object.contour
-		let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity
+		let x1 =  Infinity
+		let y1 =  Infinity
+		let x2 = -Infinity
+		let y2 = -Infinity
 		for (let i = 0; i < a.length; i += 2) {
 			x1 = min(x1, a[i]); y1 = min(y1, a[i+1])
 			x2 = max(x2, a[i]); y2 = max(y2, a[i+1])
 		}
-		out[0] = x1; out[1] = y1
-		out[2] = x2; out[3] = y2
+		out[0] = x1
+		out[1] = y1
+		out[2] = x2
+		out[3] = y2
 		return out
 	}
 
@@ -2895,9 +3010,9 @@ function house_plan(t) {
 		let [ox, oy] = get_object_origin(plan, object, object_point1)
 		out.length = a.length
 		for (let i = 0; i < a.length; i += 2) {
-			let [dx, dy] = object_vector_to_plan(object,
-				a[i], a[i+1], object_point1)
-			out[i] = ox + dx; out[i+1] = oy + dy
+			let [dx, dy] = object_vector_to_plan(object, a[i], a[i+1], object_point1)
+			out[i  ] = ox + dx
+			out[i+1] = oy + dy
 		}
 		return out
 	}
@@ -2910,7 +3025,9 @@ function house_plan(t) {
 			ys.push(points[i])
 		ys.sort((a, b) => a - b)
 		for (let k = 1; k < ys.length; k++) {
-			let y1 = ys[k-1], y2 = ys[k], y = (y1 + y2) / 2
+			let y1 = ys[k-1]
+			let y2 = ys[k]
+			let y = (y1 + y2) / 2
 			if (y1 == y2)
 				continue
 			xs.length = 0
@@ -2934,7 +3051,7 @@ function house_plan(t) {
 		} else if (object.type == 'couch') {
 			let rot = Math.floor(object.rot / 90) * 90
 			let [bx1, by1, bx2, by2] = get_object_box(plan, object, box)
-			let ox = rot == 90 || rot == 180 ? bx2 : bx1
+			let ox = rot ==  90 || rot == 180 ? bx2 : bx1
 			let oy = rot == 180 || rot == 270 ? by2 : by1
 			rect_local_box(plan, object, local_box)
 			rotated_box(ox, oy, local_box, rot, out)
@@ -3139,9 +3256,9 @@ function house_plan(t) {
 		return s
 	}
 
-	/// sink and stovetop -----------------------------------------------------
+	/// kitchen sink and stovetop ---------------------------------------------
 
-	object_types.sink = {
+	object_types.kitchen_sink = {
 		w: 600,
 		fields: {l: 450},
 		sizes: {
@@ -3215,8 +3332,11 @@ function house_plan(t) {
 					continue
 
 				// edge against a wall: not a front edge.
-				let hx = abs(a[i] - a[j]) / 2, hy = abs(a[i+1] - a[j+1]) / 2
-				if (find_wall_side(plan, (a[i] + a[j]) / 2, (a[i+1] + a[j+1]) / 2,
+				let hx = abs(a[i+0] - a[j+0]) / 2
+				let hy = abs(a[i+1] - a[j+1]) / 2
+				if (find_wall_side(plan,
+						(a[i+0] + a[j+0]) / 2,
+						(a[i+1] + a[j+1]) / 2,
 						hx, hy, 0, is_v, !is_v))
 					continue
 
@@ -3763,5 +3883,7 @@ function house_plan(t) {
 }
 
 G.house_plan = house_plan
+house_plan.INDOOR  = INDOOR
+house_plan.OUTDOOR = OUTDOOR
 
 }()) // module scope.
