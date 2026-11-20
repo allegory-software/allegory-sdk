@@ -320,11 +320,14 @@ function create_floor_editor(id) {
 	let view_cy = ss?.cy
 	let view_zoomed = view_scale != null // fixed view or fit to the plan
 	let view_dirty = false // the view changed since it was saved
-	let view_x0 // pixels from the widget's origin to the plan's origin
+	let view_x0 // pixels from the viewport's origin to the plan's origin
 	let view_y0
+	let view_matrix = mat3() // view pixels -> viewport pixels: rotation, origin
+	let view_matrix_inv = mat3() // viewport pixels -> view pixels
+	let viewport_x // the viewport's origin, in the space of ui.mx and ui.my
+	let viewport_y
 	let view_line_width // thickness of the wall line stroke in pixels
 	let line_width = 2 // thickness of wall line stroke in pixels at 1:1 scale
-	let pan_cx0, pan_cy0 // view_cx, view_cy at the start of a pan
 	let bb = bbox2() // rotated plan bounding box in layout_view()
 
 	// scratch
@@ -425,6 +428,8 @@ function create_floor_editor(id) {
 				select_floor(entry.floor, false)
 		}
 
+		let [mx_plan, my_plan] = get_pointer_plan(object_point1)
+
 		// copy and paste the whole house as json text, or the hovered object. a
 		// pasted object goes where it would go if dropped at the pointer.
 		if (!cs && ui.focus_inside(id) && ui.keydown('ctrl c')) {
@@ -444,7 +449,7 @@ function create_floor_editor(id) {
 				}
 			} else if (hs0 && state) {
 				try {
-					plan.add_object(state, hs0.mouse_x, hs0.mouse_y, 200)
+					plan.add_object(state, mx_plan, my_plan, 200)
 				} catch {
 					// not an object: add_object added nothing, ignore the paste.
 				}
@@ -495,22 +500,16 @@ function create_floor_editor(id) {
 		}
 
 		let hs = ui.hit(id)
-		if (hs && ui.wheel_dy) {
-			zoom_view_at(ui.wheel_dy / ui.em(7), hs.mx, hs.my)
+		if ((hs || cs) && ui.wheel_dy) {
+			zoom_view_at(ui.wheel_dy / ui.em(7), mx_plan, my_plan)
 			save_floor_view()
 		}
 
 		if (cs) {
 
-			let dx = to_plan(cs.dx)
-			let dy = to_plan(cs.dy)
-			if (view_rotation) {
-				let c = cos(view_rotation)
-				let s = sin(view_rotation)
-				let dx0 = dx
-				dx = dx0 * c + dy * s
-				dy = -dx0 * s + dy * c
-			}
+			// the drag moves the pointer's plan point from where it was pressed.
+			let dx = mx_plan - cs.mx_plan
+			let dy = my_plan - cs.my_plan
 
 			if (cs.drag) {
 
@@ -519,9 +518,6 @@ function create_floor_editor(id) {
 
 				if (action == 'move_seg') { // move seg
 					cs.edit = plan.start_move_seg(seg)
-				} else if (action == 'pan') {
-					pan_cx0 = view_cx
-					pan_cy0 = view_cy
 				}
 			}
 
@@ -648,7 +644,7 @@ function create_floor_editor(id) {
 				}
 
 				if (action == 'pan')
-					pan_view_to(pan_cx0 - dx, pan_cy0 - dy)
+					pan_view_to(view_cx - dx, view_cy - dy)
 
 				if (cs.drop)
 					cs.edit?.stop()
@@ -692,7 +688,7 @@ function create_floor_editor(id) {
 			roof_floor.toggle_gable(cs.roof_side, cs.roof_x, cs.roof_y)
 
 		let is_removing_object = !readonly && !cs && hs?.object
-			&& ui.focus_inside(id) && ui.keydown('delete')
+			&& ui.focus_inside(id) && (ui.keydown('delete') || ui.keydown('d'))
 		if (is_removing_object)
 			hs.object_plan.remove_object(hs.object)
 
@@ -713,9 +709,9 @@ function create_floor_editor(id) {
 			if (kx || ky) {
 				let nosnap = ui.keypressed('ctrl')
 				let step = nosnap ? 1 : 10
-				let r = view_rotation ?? 0
-				let dx = round(kx * cos(r) + ky * sin(r)) * step
-				let dy = round(-kx * sin(r) + ky * cos(r)) * step
+				let [ux, uy] = get_plan_vector(kx, ky, object_point1)
+				let dx = round(ux) * step
+				let dy = round(uy) * step
 				if (hs.object) {
 					let edit = hs.object_plan.start_move_object(hs.object)
 					edit.move(dx, dy, nosnap ? 0 : 20)
@@ -792,6 +788,12 @@ function create_floor_editor(id) {
 		return d / (view_scale * devicePixelRatio)
 	}
 
+	// css pixels in plan units, for hit and snap tolerances: they keep the
+	// same size on the screen at any devicePixelRatio.
+	function css_to_plan(d) {
+		return d / view_scale
+	}
+
 	// the snap distance in plan units: d mm, but at most 12 screen pixels, so
 	// that zooming in makes snapping finer.
 	function snap_distance(d, ctrl_d = 20) {
@@ -809,15 +811,9 @@ function create_floor_editor(id) {
 		hide_key_dims()
 	}
 
-	function transform_view(cx, w, h) {
-		if (view_rotation) {
-			let xc = round(w / 2)
-			let yc = round(h / 2)
-			cx.translate(xc, yc)
-			cx.rotate(view_rotation)
-			cx.translate(-xc, -yc)
-		}
-		cx.translate(view_x0, view_y0)
+	function transform_view(cx) {
+		let m = view_matrix
+		cx.transform(m[0], m[1], m[3], m[4], m[6], m[7])
 	}
 
 	function set_scale(sc) {
@@ -827,9 +823,10 @@ function create_floor_editor(id) {
 		view_line_width = max(1, snap(line_width * sc * devicePixelRatio, 2))
 	}
 
-	// set the scale and the origin (view_x0, view_y0, in pixels from widget's
-	// origin) of a viewport of w x h pixels: fitted to the plan bounding box
-	// bb1, or from the saved view. returns true if fitted to a non-empty plan.
+	// set the scale and the origin (view_x0, view_y0, in pixels from the
+	// viewport's origin) of a viewport of w x h pixels: fitted to the plan
+	// bounding box bb1, or from the saved view. returns true if fitted to a
+	// non-empty plan.
 	function layout_view(bb1, w, h) {
 		let is_fitted = !view_zoomed && bb1[0] <= bb1[2]
 		if (is_fitted) {
@@ -850,26 +847,31 @@ function create_floor_editor(id) {
 		set_scale(view_scale)
 		view_x0 = round(w / 2) - to_pixels(view_cx)
 		view_y0 = round(h / 2) - to_pixels(view_cy)
+		// rotation about the viewport centre, then the origin. mat3 calls compose
+		// in the reverse order of the canvas calls.
+		view_matrix.reset()
+			.translate(view_x0, view_y0)
+			.translate(-round(w / 2), -round(h / 2))
+			.rotate(-view_rotation)
+			.translate(round(w / 2), round(h / 2))
+		view_matrix_inv.set(view_matrix).invert()
 		return is_fitted
 	}
 
-	// zoom around the point (mx, my) in pixels from the center of the
-	// viewport, along the plan's axes.
-	function zoom_view_at(d, mx, my) {
+	// zoom around the plan point (x, y): it stays where it is in the viewport.
+	function zoom_view_at(d, x, y) {
 		if (!d) return
-		let plan_x = view_cx + to_plan(mx)
-		let plan_y = view_cy + to_plan(my)
 		let scale1 = clamp(view_scale * 1.2 ** -d, 0.01, 1)
-		view_cx = plan_x - mx / (scale1 * devicePixelRatio)
-		view_cy = plan_y - my / (scale1 * devicePixelRatio)
+		view_cx = x - (x - view_cx) * view_scale / scale1
+		view_cy = y - (y - view_cy) * view_scale / scale1
 		set_scale(scale1)
 		view_zoomed = true
 		view_dirty = true
 	}
 
-	function pan_view_to(cx, cy) {
-		view_cx = cx
-		view_cy = cy
+	function pan_view_to(x, y) {
+		view_cx = x
+		view_cy = y
 		view_zoomed = true
 		view_dirty = true
 	}
@@ -887,6 +889,35 @@ function create_floor_editor(id) {
 
 	function reset_view_zoom() {
 		view_zoomed = false
+	}
+
+	// test whether the pointer is inside the plan box.
+	function hit_plan_box(hs, x1, y1, x2, y2) {
+		return hs.mx_plan >= x1 && hs.mx_plan < x2
+			&& hs.my_plan >= y1 && hs.my_plan < y2
+	}
+
+	// the offset of the pointer from the plan point (x, y), in pixels along
+	// the viewport axes.
+	function get_pointer_offset(hs, x, y, out) {
+		return object_point.set(to_pixels_exact(hs.mx_plan - x),
+			to_pixels_exact(hs.my_plan - y))
+			.transform(object_matrix.reset().rotate(-view_rotation), out)
+	}
+
+	// the vector (x, y) in viewport axes, in plan axes.
+	function get_plan_vector(x, y, out) {
+		return object_point.set(x, y)
+			.transform(object_matrix.reset().rotate(view_rotation), out)
+	}
+
+	// the pointer in plan units: viewport pixels, view pixels, plan.
+	function get_pointer_plan(out) {
+		object_point.set(ui.mx - viewport_x, ui.my - viewport_y)
+			.transform(view_matrix_inv, out)
+		out[0] = to_plan(out[0])
+		out[1] = to_plan(out[1])
+		return out
 	}
 
 	/// grid ------------------------------------------------------------------
@@ -913,18 +944,8 @@ function create_floor_editor(id) {
 	}
 
 	function draw_grids(cx, w, h) {
-		let x0 = view_x0 + to_pixels(s.house.grid_x)
-		let y0 = view_y0 + to_pixels(s.house.grid_y)
-		if (view_rotation) {
-			let xc = round(w / 2)
-			let yc = round(h / 2)
-			let c = cos(view_rotation)
-			let s = sin(view_rotation)
-			let dx = x0 - xc
-			let dy = y0 - yc
-			x0 = xc + dx * c - dy * s
-			y0 = yc + dx * s + dy * c
-		}
+		let [x0, y0] = object_point.set(to_pixels(s.house.grid_x),
+			to_pixels(s.house.grid_y)).transform(view_matrix, object_point1)
 		// grid
 		cx.save()
 		cx.translate(.5, .5)
@@ -1119,9 +1140,8 @@ function create_floor_editor(id) {
 
 		let [xc, yc] = line2.at(.5, x1, y1, x2, y2, out)
 		cx.translate(xc, yc)
-		let rotation = view_rotation ?? 0
-		let text_angle = mod(rotation - a + PI/2, PI) - PI/2
-		cx.rotate(text_angle - rotation)
+		let text_angle = mod(view_rotation - a + PI/2, PI) - PI/2
+		cx.rotate(text_angle - view_rotation)
 		let tx = round(-w / 2)
 		let ty = round((m.fontBoundingBoxAscent - m.fontBoundingBoxDescent) / 2)
 		cx.translate(tx, ty)
@@ -1138,13 +1158,13 @@ function create_floor_editor(id) {
 	}
 
 	// the text s centered on the plan point (x, y), upright in a rotated view.
-	function draw_text(cx, x, y, s) {
+	function draw_text(cx, x, y, s, color_name = 'text') {
 		cx.save()
 		cx.translate(to_pixels(x), to_pixels(y))
 		if (view_rotation)
 			cx.rotate(-view_rotation)
 		cx.textAlign = 'center'
-		cx.fillStyle = ui.color_css('text')
+		cx.fillStyle = ui.color_css(color_name)
 		cx.fillText(s, 0, 5)
 		cx.restore()
 	}
@@ -1253,7 +1273,7 @@ function create_floor_editor(id) {
 		let scale = prism_union.grid_scale
 		let x = mx * scale
 		let y = my * scale
-		let m = to_plan(8) * scale
+		let m = css_to_plan(8) * scale
 		for (let side of roof_sides) {
 			let {nx, c, e1, e2} = side
 			let a = nx ? x : y // across the side
@@ -1274,7 +1294,7 @@ function create_floor_editor(id) {
 	// the line between two faces of the edited roof at the plan point (mx, my),
 	// 8 pixels around: the nearest shared segment.
 	function hit_roof_line(hs, roof_lines, mx, my) {
-		let min_d = to_plan(8)
+		let min_d = css_to_plan(8)
 		let found_line, found_x, found_y
 		for (let line of roof_lines) {
 			let {p, q} = line
@@ -1309,7 +1329,7 @@ function create_floor_editor(id) {
 	// a peak) at the plan point (mx, my), 8 pixels around: the nearest end of a
 	// shared segment.
 	function hit_roof_point(hs, roof_lines, mx, my) {
-		let min_d = to_plan(8)
+		let min_d = css_to_plan(8)
 		let found_p
 		for (let line of roof_lines)
 			for (let i = 0; i < 2; i++) {
@@ -1343,19 +1363,16 @@ function create_floor_editor(id) {
 		return true
 	}
 
-	// the pitch label of a face of the edited roof at the screen point
-	// (ui.mx, ui.my).
+	// the pitch label of a face of the edited roof at the pointer.
 	function hit_roof_label(hs, roof_faces) {
 		if (view_scale <= 0.04)
 			return false
-		let axes_swapped = round((view_rotation ?? 0) / (90*rad)) % 2 != 0
-		let w = axes_swapped ? 10 : 20 // half sizes of the label's box
-		let h = axes_swapped ? 20 : 10
+		let w = 20 // half sizes of the label's box, upright in the viewport
+		let h = 10
 		for (let face of roof_faces) {
 			let [x, y] = roof_label_point(face)
-			x = to_pixels(x)
-			y = to_pixels(y)
-			if (!ui.hit_bbox(x - w, y - h, x + w, y + h))
+			let [dx, dy] = get_pointer_offset(hs, x, y, object_point1)
+			if (dx < -w || dx >= w || dy < -h || dy >= h)
 				continue
 			hs.roof_face = face
 			hs.action = 'move_pitch'
@@ -1369,10 +1386,9 @@ function create_floor_editor(id) {
 	/// shared ----------------------------------------------------------------
 
 	// test whether the pointer is inside the object's plan bounding box.
-	function hit_box(plan, object) {
+	function hit_box(plan, object, hs) {
 		let [x1, y1, x2, y2] = s.house.get_object_box(plan, object, box)
-		return ui.hit_bbox(to_pixels(x1), to_pixels(y1),
-			to_pixels(x2), to_pixels(y2))
+		return hit_plan_box(hs, x1, y1, x2, y2)
 	}
 
 	// convert local endpoints to plan coordinates, then call draw_length().
@@ -1396,8 +1412,8 @@ function create_floor_editor(id) {
 		let x2 = is_turned ? by2 - by1 : bx2 - bx1 // the width
 		let y2 = is_turned ? bx2 - bx1 : by2 - by1 // the length
 		let [x, y] = s.house.plan_to_object(plan, object,
-			hs.mouse_x, hs.mouse_y, object_point1)
-		let inside = to_plan(6), outside = to_plan(8)
+			hs.mx_plan, hs.my_plan, object_point1)
+		let inside = css_to_plan(6), outside = css_to_plan(8)
 		let side = 0, axis = 'w'
 		if (object_type.sizes.w && y >= y1 && y <= y2) {
 			let d = min(inside, (x2 - x1) / 4)
@@ -1601,8 +1617,8 @@ function create_floor_editor(id) {
 	}
 
 	// test the door box for a body hit and the swing area for a move-only hit.
-	object_views.door.hit = function(plan, object) {
-		if (hit_box(plan, object))
+	object_views.door.hit = function(plan, object, hs) {
+		if (hit_box(plan, object, hs))
 			return true
 		// test the square containing the door's swing area.
 		let w = object.w
@@ -1611,8 +1627,7 @@ function create_floor_editor(id) {
 			0, y, object_point1)
 		let [x2, y2] = s.house.object_to_plan(plan, object,
 			w, y - w, object_point1)
-		if (ui.hit_bbox(to_pixels(min(x1, x2)), to_pixels(min(y1, y2)),
-			to_pixels(max(x1, x2)), to_pixels(max(y1, y2))))
+		if (hit_plan_box(hs, min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)))
 			return 'move'
 		return false
 	}
@@ -1877,9 +1892,9 @@ function create_floor_editor(id) {
 		})
 	}
 
-	object_views.couch.hit = function(plan, object) {
+	object_views.couch.hit = function(plan, object, hs) {
 		let [x, y] = s.house.plan_to_object(plan, object,
-			to_plan(ui.mx), to_plan(ui.my), object_point1)
+			hs.mx_plan, hs.my_plan, object_point1)
 		let seat_w = (object.w - 200) / couch_seats(object)
 		let in_futon = object.futon_side < 0 ? x <= 100 + seat_w
 			: x >= object.w - 100 - seat_w
@@ -1890,10 +1905,10 @@ function create_floor_editor(id) {
 
 	object_views.couch.hit_resize = function(plan, object, hs) {
 		let [x, y] = s.house.plan_to_object(plan, object,
-			hs.mouse_x, hs.mouse_y, object_point1)
+			hs.mx_plan, hs.my_plan, object_point1)
 		let {w, l, futon_side, futon_length} = object
 		let n = couch_seats(object), seat_w = (w - 200) / n
-		let d = to_plan(8)
+		let d = css_to_plan(8)
 		let side = x < w / 2 ? -1 : 1
 		let front_side = n == 1 && futon_length ? futon_side : side
 		let in_end_seat = side < 0 ? x <= 100 + seat_w
@@ -2182,9 +2197,9 @@ function create_floor_editor(id) {
 		cx.stroke()
 	}
 
-	object_views.countertop.hit = function(plan, object) {
+	object_views.countertop.hit = function(plan, object, hs) {
 		let [x, y] = s.house.plan_to_object(plan, object,
-			to_plan(ui.mx), to_plan(ui.my), object_point1)
+			hs.mx_plan, hs.my_plan, object_point1)
 		let a = object.contour, inside = false
 		for (let i = 0, j = a.length-2; i < a.length; j = i, i += 2) {
 			if ((a[i+1] > y) != (a[j+1] > y) && x < a[i])
@@ -2195,8 +2210,8 @@ function create_floor_editor(id) {
 
 	object_views.countertop.hit_resize = function(plan, object, hs) {
 		let [x, y] = s.house.plan_to_object(plan, object,
-			hs.mouse_x, hs.mouse_y, object_point1)
-		let d = to_plan(8)
+			hs.mx_plan, hs.my_plan, object_point1)
+		let d = css_to_plan(8)
 		for (let h = 1; h <= object.contour.length / 2 * 3; h++) {
 			let edge = s.house.get_countertop_edge(object, h, countertop_edge)
 			if (!edge)
@@ -2387,12 +2402,8 @@ function create_floor_editor(id) {
 	}
 
 	// test whether the pointer is over the tag's icon or text.
-	function hit_tag(plan, object) {
-		let dx = ui.mx - to_pixels(object.x)
-		let dy = ui.my - to_pixels(object.y)
-		let [tx, ty] = object_point.set(dx, dy).transform(
-			object_matrix.reset().rotate(-(view_rotation ?? 0)),
-			object_point1) // pixel offset from the upright tag
+	function hit_tag(plan, object, hs) {
+		let [tx, ty] = get_pointer_offset(hs, object.x, object.y, object_point1)
 		return tx >= -TAG_HIT_X && tx < TAG_HIT_X
 			&& ty >= TAG_HIT_Y1 && ty < TAG_HIT_Y2
 	}
@@ -2415,8 +2426,8 @@ function create_floor_editor(id) {
 
 	/// object loops ----------------------------------------------------------
 
-	// the topmost of `objects` at the screen point (ui.mx, ui.my): over the
-	// object or at an end that resizes it.
+	// the topmost of `objects` at the pointer: over the object or at an end
+	// that resizes it.
 	function hit_object_in(objects, plan, hs, from_below) {
 		for (let i = objects.length-1; i >= 0; i--) {
 			let object = objects[i]
@@ -2424,7 +2435,7 @@ function create_floor_editor(id) {
 			let object_view = object_views[object.type]
 			if (from_below && !object_type.connects_below)
 				continue
-			let hit = object_view.hit(plan, object) // true|'move'|false
+			let hit = object_view.hit(plan, object, hs) // true|'move'|false
 			let is_resize = object_view.hit_resize?.(plan, object, hs)
 			if (!hit && !is_resize)
 				continue
@@ -2471,7 +2482,7 @@ function create_floor_editor(id) {
 					object_origin)
 				cx.translate(to_pixels(x), to_pixels(y))
 				if (object_view.draw_space == 'screen') {
-					cx.rotate(-(view_rotation ?? 0))
+					cx.rotate(-view_rotation)
 				} else {
 					let scale = to_pixels_exact(1)
 					cx.rotate(object.rot * rad)
@@ -2687,6 +2698,10 @@ function create_floor_editor(id) {
 		let h     = a[i+3]
 		let plan  = s.floor
 
+		// the box after scrolling and popup positioning, for get_pointer_plan().
+		viewport_x = x00
+		viewport_y = y00
+
 		// the roof of roof_floor and the half-walls around its terraces.
 		let {
 			roof_faces,
@@ -2759,7 +2774,7 @@ function create_floor_editor(id) {
 		cx.fillText(s, m, h - m)
 		}
 
-		transform_view(cx, w, h)
+		transform_view(cx)
 
 		// below floors. the roof level: the top floor's walls are drawn like
 		// a floor below and not edited.
@@ -2977,14 +2992,8 @@ function create_floor_editor(id) {
 				let is_lit = face == label_face
 					|| is_all_faces && face.sides[0].pitch != 90
 				let [x, y] = roof_label_point(face)
-				cx.save()
-				cx.translate(to_pixels(x), to_pixels(y))
-				if (view_rotation)
-					cx.rotate(-view_rotation)
-				cx.textAlign = 'center'
-				cx.fillStyle = ui.color_css(is_lit ? 'link' : 'label')
-				cx.fillText(format_pitch(face.sides[0].pitch), 0, 5)
-				cx.restore()
+				draw_text(cx, x, y, format_pitch(face.sides[0].pitch),
+					is_lit ? 'link' : 'label')
 			}
 
 		// cycles area
@@ -2994,21 +3003,12 @@ function create_floor_editor(id) {
 					if (c.outer)
 						continue
 					let [x, y] = c.center()
-					x = to_pixels(x)
-					y = to_pixels(y)
-					cx.fillStyle = ui.color_css('label')
 					let area = c.edges.area()
 					for (let icomp of c.islands)
 						area += icomp.outer_cycle.edges.area()
 					let s = format_area(area)
 					if (DEBUG_PLAN) s = co.id + '/' + c.id + ' ' + s
-					cx.save()
-					cx.translate(x, y)
-					if (view_rotation)
-						cx.rotate(-view_rotation)
-					cx.textAlign = 'center'
-					cx.fillText(s, 0, 5)
-					cx.restore()
+					draw_text(cx, x, y, s, 'label')
 				}
 			}
 
@@ -3142,7 +3142,7 @@ function create_floor_editor(id) {
 
 		// cursor
 		let seg = drag_action == 'move_seg' && drag_seg || (hit_action == 'move_seg' && hit_seg)
-		let axes_swapped = round((view_rotation ?? 0) / (90*rad)) % 2 != 0
+		let axes_swapped = round(view_rotation / (90*rad)) % 2 != 0
 		if (seg) {
 			if (seg[0].segs.length == 1 && seg[1].segs.length == 1)
 				ui.set_cursor('move')
@@ -3254,7 +3254,7 @@ function create_floor_editor(id) {
 		action=move_object         hit object
 		object, object_plan, object_side, object_axis,
 		action=resize_object       hit an end of a resizable object
-		mouse_x, mouse_y           the pointer, in plan units
+		mx_plan, my_plan           the pointer, in plan units
 		roof_side, roof_x, roof_y,
 		action=move_eave           hit eave side
 		roof_faces,
@@ -3264,18 +3264,10 @@ function create_floor_editor(id) {
 	*/
 	e.hit = function(a, i) {
 
-		let x00 = a[i+0]
-		let y00 = a[i+1]
-		let w   = a[i+2]
-		let h   = a[i+3]
 		let plan = s.floor
 
-		// the roof of roof_floor.
-		let {
-			roof_faces,
-			eave_sides: roof_sides,
-			shared_edges: roof_lines,
-		} = roof_floor ? roof_floor.make_roof_geometry() : no_roof_geometry
+		let roof_geometry = roof_floor ? roof_floor.make_roof_geometry()
+			: no_roof_geometry
 
 		if (ui.captured_id != null && !ui.clickup)
 			return
@@ -3285,62 +3277,49 @@ function create_floor_editor(id) {
 
 		let hs = ui.set_hit(id)
 
+		shown_snap_lines.length = 0
+
+		let pan = ui.keypressed('shift')
+
+		let [mx_plan, my_plan] = get_pointer_plan(object_point1)
+		hs.mx_plan = mx_plan
+		hs.my_plan = my_plan
+
+		if (pan)
+			hs.action = 'pan'
+		else if (!s.readonly)
+			hit_plan(hs, plan, roof_geometry)
+
+		return true
+
+	}
+
+	// the hits at the pointer, in plan units; pixel tolerances go through
+	// to_plan().
+	function hit_plan(hs, plan, roof_geometry) {
+
+		// the roof of roof_floor.
+		let {
+			roof_faces,
+			eave_sides: roof_sides,
+			shared_edges: roof_lines,
+		} = roof_geometry
+
 		let sl = shown_snap_lines
-		sl.length = 0
-
-		let cx = ui.cx
-
-		let pan    = ui.keypressed('shift')
 		let nosnap = ui.keypressed('ctrl')
 		let snap_d = snap_distance(200)
 		let snap_lines = s.house.snap_lines
-
-		// pointer position from the viewport center, along the plan's axes,
-		// for zooming.
-		hs.mx = ui.mx - x00 - w / 2
-		hs.my = ui.my - y00 - h / 2
-		if (view_rotation) {
-			let c = cos(view_rotation)
-			let s = sin(view_rotation)
-			let dx = hs.mx
-			let dy = hs.my
-			hs.mx = dx * c + dy * s
-			hs.my = -dx * s + dy * c
-		}
-
-		if (s.readonly) {
-			if (pan)
-				hs.action = 'pan'
-			return true
-		}
-
-		cx.save()
-		cx.translate(x00, y00)
-		transform_view(cx, w, h)
-		ui.update_mouse()
-
-		let mx = to_plan(ui.mx)
-		let my = to_plan(ui.my)
-		hs.mouse_x = mx // for placing a pasted object.
-		hs.mouse_y = my
-
-		if (pan) {
-			hs.action = 'pan'
-			cx.restore()
-			ui.update_mouse()
-			return true
-		}
+		let mx = hs.mx_plan
+		let my = hs.my_plan
 
 		// grid origin
 		if (show_grid) {
-			let dx = ui.mx - to_pixels(s.house.grid_x)
-			let dy = ui.my - to_pixels(s.house.grid_y)
-			let r = max(to_pixels(100), 13 * devicePixelRatio)
+			let dx = mx - s.house.grid_x
+			let dy = my - s.house.grid_y
+			let r = max(100, css_to_plan(13))
 			if (dx * dx + dy * dy <= r * r) {
 				hs.action = 'move_grid_origin'
-				cx.restore()
-				ui.update_mouse()
-				return true
+				return
 			}
 		}
 
@@ -3351,11 +3330,8 @@ function create_floor_editor(id) {
 				true)
 			|| hit_object_in(plan.objects, plan, hs)
 			|| hit_object_in(s.house.ground_objects, plan, hs)
-		)) {
-			cx.restore()
-			ui.update_mouse()
-			return true
-		}
+		))
+			return
 
 		let snap_margin = 15
 
@@ -3363,11 +3339,11 @@ function create_floor_editor(id) {
 
 		if (!is_roof_level)
 		for (let p of plan.ps) {
-			let dx = ui.mx - to_pixels(p[0])
-			let dy = ui.my - to_pixels(p[1])
-			let snap_d = nosnap ? 2
-				: to_pixels(p.max_offset) + view_line_width + snap_margin
-			if (abs(dx) <= snap_d && abs(dy) <= snap_d) {
+			let dx = mx - p[0]
+			let dy = my - p[1]
+			let hit_d = nosnap ? css_to_plan(2)
+				: p.max_offset + to_plan(view_line_width) + css_to_plan(snap_margin)
+			if (abs(dx) <= hit_d && abs(dy) <= hit_d) {
 				hit_p = p
 				hs.p = p // point to start new seg from
 				hs.x = p[0]
@@ -3386,24 +3362,24 @@ function create_floor_editor(id) {
 				let y2 = seg[1][1]
 				let v = seg.is_v
 
-				let sx1, sy1, sx2, sy2 // screen hit box
+				let bx1, by1, bx2, by2 // plan hit box
 
 				// test over the seg's area between its offset edges.
-				let m = view_line_width
+				let m = to_plan(view_line_width)
 				if (v) {
-					sx1 = to_pixels(seg.wall_a1) - m
-					sx2 = to_pixels(seg.wall_a2) + m
-					sy1 = to_pixels(seg.y1)
-					sy2 = to_pixels(seg.y2)
+					bx1 = seg.wall_a1 - m
+					bx2 = seg.wall_a2 + m
+					by1 = seg.y1
+					by2 = seg.y2
 				} else if (y1 == y2) {
-					sy1 = to_pixels(seg.wall_a1) - m
-					sy2 = to_pixels(seg.wall_a2) + m
-					sx1 = to_pixels(seg.x1)
-					sx2 = to_pixels(seg.x2)
+					by1 = seg.wall_a1 - m
+					by2 = seg.wall_a2 + m
+					bx1 = seg.x1
+					bx2 = seg.x2
 				} else {
 					continue
 				}
-				if (ui.hit_bbox(sx1, sy1, sx2, sy2)) {
+				if (hit_plan_box(hs, bx1, by1, bx2, by2)) {
 					hit_seg = seg
 					hit_action = 'move_seg'
 					hs.seg = seg
@@ -3413,13 +3389,13 @@ function create_floor_editor(id) {
 
 				// try a wider area and compute the point of the mouse projected on the seg.
 				if (v) {
-					sx1 -= snap_margin
-					sx2 += snap_margin
+					bx1 -= css_to_plan(snap_margin)
+					bx2 += css_to_plan(snap_margin)
 				} else {
-					sy1 -= snap_margin
-					sy2 += snap_margin
+					by1 -= css_to_plan(snap_margin)
+					by2 += css_to_plan(snap_margin)
 				}
-				if (ui.hit_bbox(sx1, sy1, sx2, sy2)) {
+				if (hit_plan_box(hs, bx1, by1, bx2, by2)) {
 					hit_seg = seg
 					hs.seg = seg
 					let sx = !v ? snap_lines[0].snap(mx, snap_d, snap_step()) ?? mx : null
@@ -3459,11 +3435,6 @@ function create_floor_editor(id) {
 			if (hit_cycle)
 				hs.cycle = hit_cycle
 		}
-
-		cx.restore()
-		ui.update_mouse()
-
-		return true
 
 	}
 

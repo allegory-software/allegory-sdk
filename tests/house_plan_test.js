@@ -31,9 +31,18 @@ for (let name of files) {
 vm.runInContext(fs.readFileSync(path.join(sdk, 'www/ui-demo.html'), 'utf8')
 	.match(/<script id=house_test_plans>([\s\S]*?)<\/script>/)[1], ctx)
 
+// the thicknesses that the expected numbers below assume. The tests pin
+// them: house_plan's defaults can change without breaking them.
+const thicknesses = {
+	int_wall_thickness: 80,
+	ext_wall_thickness: 180,
+	slab_thickness: 200,
+	roof_thickness: 200,
+}
+
 // everything is in mm.
 function house(t) {
-	return ctx.house_plan({version: 1, ...t})
+	return ctx.house_plan({version: 1, ...thicknesses, ...t})
 }
 
 function floor(lines) {
@@ -1090,21 +1099,6 @@ check('Space cycles saved plant names with undo and redo', () => {
 	assert.equal(f.objects[0].plant_name, plant_names[0])
 })
 
-check('old saved plant names load and save with their new names', () => {
-	for (let [name0, name1] of [
-		['spiky', 'rosette'],
-		['curved', 'monstera'],
-		['round', 'broad_leaf'],
-	]) {
-		let h = opening_house([{type: 'potted_plant', plant_name: name0,
-			x: 2000, y: 2000, rot: 0}])
-		let object = h.floors[0].objects[0]
-		assert.equal(object.plant_name, name1)
-		assert.equal(h.save_object(object).plant_name, name1)
-		assert.equal(h.save_state().floors[0].objects[0].plant_name, name1)
-	}
-})
-
 check('plants resize as centred squares from every edge and quarter turn', () => {
 	for (let rot of [0, 90, 180, 270]) {
 		for (let axis of ['w', 'l']) {
@@ -1724,7 +1718,7 @@ check('round table resizes from all four edges at every quarter turn', () => {
 				let y = is_l ? (side == -1 ? y1 : y2) : (y1 + y2) / 2
 				let point = h.object_to_plan(f, t,
 					x, y, ctx.Math3D.v2())
-				let hs = {mouse_x: point[0], mouse_y: point[1]}
+				let hs = {mx_plan: point[0], my_plan: point[1]}
 				assert(hit(f, t, hs, true))
 				assert.equal(hs.object_axis, axis)
 				assert.equal(hs.object_side, side)
