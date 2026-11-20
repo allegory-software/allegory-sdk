@@ -1002,6 +1002,8 @@ MOUSE HIT STATE
 
 	ui.captured_id     id of the widget that mouse is down on
 	ui.captured        (id) -> cs | null  get captured state if mouse is captured
+	ui.capture         (id)  capture the mouse without a press, if id is hit;
+	                         the next click release drops it, Escape cancels it
 	ui.hit             (id, k=) -> hs|v|null  hit state if id is directly hit or dragging
 	ui.clicked         (id) -> hs|null    hit state if id was clicked this frame
 	ui.clicked_outside (id) -> ?          left click outside the container and its popups
@@ -1217,6 +1219,8 @@ function capture(id) {
 	ui.mx0 = ui.mx
 	ui.my0 = ui.my
 }
+
+ui.capture = capture
 
 function captured(id) {
 	return id && ui.captured_id == id && capture_state || null

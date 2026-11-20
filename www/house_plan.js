@@ -1348,8 +1348,7 @@ function house_plan(t) {
 			fix_walls_and_rooms(object)
 		}
 
-		// begin an edit of the floor: s.stop() commits it, s.cancel() reverts
-		// it.
+		// begin an edit of the floor: s.stop() commits it, s.cancel() reverts it.
 		function start_edit() {
 			begin_edit(floor)
 			return {stop: stop_edit, cancel: cancel_edit}
@@ -1394,11 +1393,28 @@ function house_plan(t) {
 		// s.stop() commits the move as one edit.
 		floor.start_move_object = function(object) {
 			let s = start_edit()
+			s.move = make_move_object_fn(object)
+			return s
+		}
+
+		// the move function of an edit that moves the object from where it is.
+		function make_move_object_fn(object) {
 			let [x1, y1, x2, y2] = get_object_box(floor, object, move_box)
 			let x0 = (x1 + x2) / 2, y0 = (y1 + y2) / 2
-			s.move = function(dx, dy, snap_d, snap_margin = 0, grid_step = 0) {
+			return function(dx, dy, snap_d, snap_margin = 0, grid_step = 0) {
 				move_object(object, x0 + dx, y0 + dy, snap_d, snap_margin, grid_step)
 			}
+		}
+
+		// start moving a copy of an object, which is on this floor or on the
+		// ground. Like start_move_object, with the copy in s.object.
+		// s.cancel() removes the copy.
+		floor.start_copy_object = function(object) {
+			let s = start_edit()
+			let copy = copy_objects([object])[0]
+			push_object(house.ground_objects, copy)
+			s.object = copy
+			s.move = make_move_object_fn(copy)
 			return s
 		}
 

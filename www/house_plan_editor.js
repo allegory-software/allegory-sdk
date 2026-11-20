@@ -389,7 +389,19 @@ function create_floor_editor(id) {
 				select_floor(floor1, false)
 		}
 
+		// c on the hovered object: capture the pointer and drag a copy of it.
+		// the next click release drops the copy, Escape removes it.
+		let is_copying = !readonly && ui.captured_id == null
+			&& ui.focused_id == id && ui.keydown('c') && !ui.keypressed('ctrl')
+			&& !!ui.hit(id)?.object
+		if (is_copying)
+			ui.capture(id)
 		let cs = ui.drag(id)
+		if (is_copying) {
+			cs.action = 'move_object'
+			cs.edit = cs.object_plan.start_copy_object(cs.object)
+			cs.object = cs.edit.object
+		}
 		if (!cs && ui.focused_id == id) {
 			for (let i = 0; i < min(floors.length, 9); i++)
 				if (ui.keydown(floor_key(i)))
