@@ -21,7 +21,7 @@
 "use strict"
 
 const {
-	mod, abs, clamp, return_true, assert, log, push_log, pop_log,
+	abs, clamp, return_true, assert, log, push_log, pop_log,
 	callable_constructor, inherit_properties,
 	extend, insert, remove, remove_value, map, set, assign, attr, json,
 } = glue
@@ -535,6 +535,12 @@ window.model3_component = function(opt, editor) {
 		if (LOG) log('insert_edge', face.i, '@', ei, 'pi', pi, '@', line_ei, 'li', li, 'before_pi', face[ei])
 		insert(face, ei, pi)
 		insert(face.lis, line_ei, li)
+		// holes starting at `ei` move too: the point goes to the end of the
+		// contour before them.
+		if (face.holes)
+			for (let k = 0; k < face.holes.length; k++)
+				if (face.holes[k] >= ei)
+					face.holes[k]++
 		if (face.mesh)
 			face.mesh.normals_valid = false
 		face.invalidate()
@@ -547,6 +553,10 @@ window.model3_component = function(opt, editor) {
 		let line_ei = ei - (line_before_point ? 1 : 0)
 		let pi = remove(face, ei)
 		let li = remove(face.lis, line_ei)
+		if (face.holes)
+			for (let k = 0; k < face.holes.length; k++)
+				if (face.holes[k] > ei)
+					face.holes[k]--
 		if (face.mesh)
 			face.mesh.normals_valid = false
 		face.invalidate()
@@ -1227,7 +1237,7 @@ window.model3_component = function(opt, editor) {
 								// and we don't know which one, we need to find out.
 								for (let i = 0; i <= 1; i++) {
 
-									let side_ei = mod(face_ei - 1 + i * 2, face.length)
+									let side_ei = i ? face.next_i(face_ei) : face.prev_i(face_ei)
 									face.get_edge(side_ei, side_edge)
 
 									let is_side_edge_pp = abs(side_edge.delta(_v0).dot(normal)) < NEAR
@@ -1236,7 +1246,7 @@ window.model3_component = function(opt, editor) {
 									let is_first  = side_edge[0].i == pull_edge[0].i || side_edge[1].i == pull_edge[0].i
 									let is_second = side_edge[0].i == pull_edge[1].i || side_edge[1].i == pull_edge[1].i
 									assert(is_first || is_second)
-									let endpoint_ei = (pull_ei + ((is_first) ? 0 : 1)) % en
+									let endpoint_ei = is_first ? pull_ei : pull.face.next_i(pull_ei)
 
 									if (is_side_edge_pp) {
 										moving_lis.add(side_edge.i)
@@ -1274,7 +1284,7 @@ window.model3_component = function(opt, editor) {
 				if (!pp_faces_found) { // no pp faces found: create one along with its two edges.
 					new_pp_face.set(pull_ei, true)
 					new_pp_edge.set(pull_ei, true)
-					new_pp_edge.set((pull_ei+1) % en, true)
+					new_pp_edge.set(pull.face.next_i(pull_ei), true)
 				}
 
 			}
@@ -1307,7 +1317,7 @@ window.model3_component = function(opt, editor) {
 
 				// update the endpoint of pulled face edges that are connected to this point.
 				let next_ei = ei
-				let prev_ei = mod(ei - 1, en)
+				let prev_ei = pull.face.prev_i(ei)
 				let next_li = pull.face.lis[next_ei]
 				let prev_li = pull.face.lis[prev_ei]
 				if (!new_pp_face.get(next_ei)) replace_line_endpoint(next_li, new_pi, old_pi)
@@ -1316,7 +1326,7 @@ window.model3_component = function(opt, editor) {
 
 			// create pp side faces using newly created pp side edges.
 			for (let e1i of new_pp_face.keys()) {
-				let e2i = (e1i + 1) % en
+				let e2i = pull.face.next_i(e1i)
 				let p1i = pull.face[e1i]
 				let p2i = pull.face[e2i]
 				let side1_li = new_pp_edge.get(e1i)

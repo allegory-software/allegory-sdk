@@ -103,7 +103,7 @@ API
 	poly[2] [pi1, ..., hole1_pi1, hole1_pi2, ..., points: [p1,...], holes: [hole1_pi1, hole2_pi1, ...]]
 		set assign to clone s
 		% point_count get_point get_normal
-		point_count_without_holes hole_count hole_i1 hole_i2
+		point_count_without_holes hole_count hole_i1 hole_i2 next_i prev_i
 		is_convex is_convex_quad is_cw triangle_count triangles triangle2
 		center bbox area invalidate
 		hit contains_point offset
@@ -2977,6 +2977,14 @@ function zcross2(x0, y0, x1, y1, x2, y2) {
 
 let tri_out = []
 
+// index of the hole that contains point `i`, or -1 for the outer contour.
+function poly_hole_of(poly, i) {
+	let k = -1
+	while (k + 1 < poly.hole_count() && poly.holes[k + 1] <= i)
+		k++
+	return k
+}
+
 let poly2_class = class poly2 extends Array {
 
 	is_poly = true
@@ -3024,6 +3032,18 @@ let poly2_class = class poly2 extends Array {
 	hole_count() { return this.holes?.length ?? 0 }
 	hole_i1(i) { return this.holes[i] }
 	hole_i2(i) { return this.holes[i+1] ?? this.length }
+
+	// index of the next/previous point in the same contour, wrapping around.
+	next_i(i) {
+		let k = poly_hole_of(this, i)
+		let i2 = this.holes?.[k + 1] ?? this.length
+		return i + 1 < i2 ? i + 1 : (k < 0 ? 0 : this.holes[k])
+	}
+	prev_i(i) {
+		let k = poly_hole_of(this, i)
+		let i1 = k < 0 ? 0 : this.holes[k]
+		return i > i1 ? i - 1 : (this.holes?.[k + 1] ?? this.length) - 1
+	}
 
 	s() {
 		let a = []

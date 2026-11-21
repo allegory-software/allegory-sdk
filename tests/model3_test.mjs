@@ -384,7 +384,7 @@ const results = await page.evaluate(() => {
 				let li = f.lis[ei]
 				let l = c.get_line(li, line3())
 				let a = f[ei]
-				let b = f[(ei+1) % f.length]
+				let b = f[f.next_i(ei)]
 				if (!(l[0].i == a && l[1].i == b || l[0].i == b && l[1].i == a))
 					errs.push(`face ${f.i} edge ${ei}: line ${li} doesn't join ${a}-${b}`)
 				lrc.set(li, (lrc.get(li) ?? 0) + 1)
@@ -484,6 +484,36 @@ const results = await page.evaluate(() => {
 		let F = [[1,0,3,2], [4,5,6,7], [7,6,2,3], [4,0,1,5], [0,4,7,3],
 			[5,1,2,6]].map(f => c.add_face(f.map(i => P[i])))
 		return check_pull_undo(c, F[0], 1)
+	})
+
+	check('poly next_i/prev_i wrap within each contour', () => {
+		let p = poly3(0, 1, 2, 3, 4, 5, 6)
+		p.holes = [4]
+		let next = [0, 1, 2, 3, 4, 5, 6].map(i => p.next_i(i)).join()
+		let prev = [0, 1, 2, 3, 4, 5, 6].map(i => p.prev_i(i)).join()
+		return next == '1,2,3,0,5,6,4' && prev == '3,0,1,2,6,4,5' ||
+			`next ${next}, prev ${prev}`
+	})
+
+	check('pull a square with a hole: rcs, undo, redo', () => {
+		let c = make_comp()
+		let pis = [[0,0,0], [3,0,0], [3,3,0], [0,3,0], [1,1,0], [1,2,0], [2,2,0],
+			[2,1,0]].map(p => c.add_point_xyz(...p))
+		return check_pull_undo(c, c.add_face(pis, null, null, [4]), 1)
+	})
+
+	// the triangle at the top corner makes the pull insert an edge into the
+	// side face that has a hole.
+	check('pull next to a side face with a hole: rcs, undo, redo', () => {
+		let c = make_comp()
+		let P = [[0,0,0], [2,0,0], [2,2,0], [0,2,0], [0,0,2], [2,0,2], [2,2,2],
+			[0,2,2], [.5,0,.5], [1.5,0,.5], [1.5,0,1.5], [.5,0,1.5], [-1,-1,3],
+			[-1,0,3]].map(p => c.add_point_xyz(...p))
+		let F = [[1,0,3,2], [4,5,6,7], [7,6,2,3], [0,4,7,3],
+			[5,1,2,6]].map(f => c.add_face(f.map(i => P[i])))
+		c.add_face([4,0,1,5, 8,11,10,9].map(i => P[i]), null, null, [4])
+		c.add_face([4, 12, 13].map(i => P[i]))
+		return check_pull_undo(c, F[1], 1)
 	})
 
 	check('draw_line crossing a line: rcs, undo, redo', () => {
