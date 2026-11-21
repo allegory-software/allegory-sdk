@@ -105,6 +105,15 @@ const results = await page.evaluate(() => {
 			undo_groups = groups
 			undo_stack = stack
 		}
+		ed.redo = () => {
+			let start = redo_groups.pop()
+			undo_groups.push(undo_stack.length)
+			while (redo_stack.length > start) {
+				let f = redo_stack.pop()
+				let argc = redo_stack.pop()
+				f(...redo_stack.splice(-argc))
+			}
+		}
 		return ed
 	}
 	let next_id = 0
@@ -151,7 +160,7 @@ const results = await page.evaluate(() => {
 		return n == 1
 	})
 
-	known_bug('undo of add_face leaves no live face', () => {
+	check('undo of add_face leaves no live face', () => {
 		let c = make_comp()
 		c.editor.start_group()
 		add_square(c, 0, 0, 1)
@@ -265,7 +274,7 @@ const results = await page.evaluate(() => {
 		return n == 2 || 'lines: ' + n + ' (want 2: the new line is not split)'
 	})
 
-	known_bug('undo of add_line frees the line and its points', () => {
+	check('undo of add_line frees the line and its points', () => {
 		let c = make_comp()
 		let a = c.add_point_xyz(0, 0, 0), b = c.add_point_xyz(1, 0, 0)
 		c.editor.start_group()
@@ -362,6 +371,122 @@ const results = await page.evaluate(() => {
 		let zs = Array.from(f).map(pi => c.get_point(pi, v3())[2])
 		return n == 5 && zs.every(z => near(z, 2)) ||
 			`live faces ${n} (want 5), top z ${zs}`
+	})
+
+	// ref count errors: a face edge must join its points, a line's rc is
+	// 1 + the faces using it, a point's rc is the faces and lines using it.
+	function check_rcs(c) {
+		let errs = []
+		let lrc = new Map() // {li -> faces using it}
+		let prc = new Map() // {pi -> faces and lines using it}
+		for (let f of live_faces(c)) {
+			for (let ei = 0; ei < f.length; ei++) {
+				let li = f.lis[ei]
+				let l = c.get_line(li, line3())
+				let a = f[ei]
+				let b = f[(ei+1) % f.length]
+				if (!(l[0].i == a && l[1].i == b || l[0].i == b && l[1].i == a))
+					errs.push(`face ${f.i} edge ${ei}: line ${li} doesn't join ${a}-${b}`)
+				lrc.set(li, (lrc.get(li) ?? 0) + 1)
+			}
+			for (let pi of f)
+				prc.set(pi, (prc.get(pi) ?? 0) + 1)
+		}
+		for (let li = 0; li < c.line_count(); li++) {
+			if (!c.line_rc(li))
+				continue
+			if (c.line_rc(li) != (lrc.get(li) ?? 0) + 1)
+				errs.push(`line ${li}: rc ${c.line_rc(li)}, faces ${lrc.get(li) ?? 0}`)
+			let l = c.get_line(li, line3())
+			prc.set(l[0].i, (prc.get(l[0].i) ?? 0) + 1)
+			prc.set(l[1].i, (prc.get(l[1].i) ?? 0) + 1)
+		}
+		for (let pi = 0; pi < c.point_count(); pi++)
+			if (c.point_rc(pi) != (prc.get(pi) ?? 0))
+				errs.push(`point ${pi}: rc ${c.point_rc(pi)}, users ${prc.get(pi) ?? 0}`)
+		return errs.slice(0, 4).join('; ')
+	}
+
+	// the used points, lines and faces, for comparing before/after undo.
+	function model_state(c) {
+		let pts = []
+		let ls = []
+		let fs = []
+		for (let pi = 0; pi < c.point_count(); pi++)
+			if (c.point_rc(pi))
+				pts.push(pi, c.point_rc(pi), ...c.get_point(pi, v3()))
+		for (let li = 0; li < c.line_count(); li++)
+			if (c.line_rc(li)) {
+				let l = c.get_line(li, line3())
+				ls.push(li, c.line_rc(li), l[0].i, l[1].i,
+					c.line_smoothness(li), c.line_opacity(li))
+			}
+		for (let f of live_faces(c))
+			fs.push(f.i, Array.from(f).join(), f.lis.join(), (f.holes ?? []).join())
+		return JSON.stringify([pts, ls, fs])
+	}
+
+	// pull `face` with a few live moves, then check rcs, undo and redo.
+	function check_pull_undo(c, face, distance) {
+		let state0 = model_state(c)
+		c.editor.start_group()
+		let p = face.center(v3())
+		p.face = face
+		let pull = c.start_pull(p)
+		pull.pull(distance / 2)
+		pull.pull(distance)
+		pull.stop()
+		let errs = check_rcs(c)
+		if (errs)
+			return 'after pull: ' + errs
+		let state1 = model_state(c)
+		c.editor.undo()
+		if (model_state(c) != state0)
+			return 'undo did not restore the model'
+		c.editor.redo()
+		if (model_state(c) != state1)
+			return 'redo did not restore the pull'
+		return true
+	}
+
+	check('pull a lone square: rcs, undo, redo', () => {
+		let c = make_comp()
+		return check_pull_undo(c, add_square(c, 0, 0, 1), 2)
+	})
+
+	check('pull a box top: rcs, undo, redo', () => {
+		let c = make_comp()
+		let P = [[0,0,0], [2,0,0], [2,2,0], [0,2,0], [0,0,2], [2,0,2], [2,2,2],
+			[0,2,2]].map(p => c.add_point_xyz(...p))
+		let F = [[1,0,3,2], [4,5,6,7], [7,6,2,3], [4,0,1,5], [0,4,7,3],
+			[5,1,2,6]].map(f => c.add_face(f.map(i => P[i])))
+		return check_pull_undo(c, F[1], 1)
+	})
+
+	check('pull a sloped face: rcs, undo, redo', () => {
+		let c = make_comp()
+		let P = [[0,0,-1], [2,0,-1], [2,2,0], [0,2,0], [0,0,2], [2,0,2], [2,2,2],
+			[0,2,2]].map(p => c.add_point_xyz(...p))
+		let F = [[1,0,3,2], [4,5,6,7], [7,6,2,3], [4,0,1,5], [0,4,7,3],
+			[5,1,2,6]].map(f => c.add_face(f.map(i => P[i])))
+		return check_pull_undo(c, F[0], 1)
+	})
+
+	check('draw_line crossing a line: rcs, undo, redo', () => {
+		let c = make_comp()
+		c.add_line(c.add_point_xyz(1, -1, 0), c.add_point_xyz(1, 1, 0))
+		let state0 = model_state(c)
+		c.editor.start_group()
+		c.draw_line(line3(v3(0, 0, 0), v3(2, 0, 0)))
+		let errs = check_rcs(c)
+		if (errs)
+			return errs
+		let state1 = model_state(c)
+		c.editor.undo()
+		if (model_state(c) != state0)
+			return 'undo did not restore the model'
+		c.editor.redo()
+		return model_state(c) == state1 || 'redo did not restore the line'
 	})
 
 	return [n_checks, results, known]

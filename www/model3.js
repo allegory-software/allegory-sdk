@@ -23,7 +23,7 @@
 const {
 	mod, abs, clamp, return_true, assert, log, push_log, pop_log,
 	callable_constructor, inherit_properties,
-	extend, insert, remove_value, map, set, assign, attr, json,
+	extend, insert, remove, remove_value, map, set, assign, attr, json,
 } = glue
 
 const {NEAR, v3, mat4, line3, box3, poly3} = Math3D
@@ -112,6 +112,9 @@ window.model3_component = function(opt, editor) {
 		assert(rc0 > 0)
 		assert(expect_rc == null || expect_rc == rc0)
 
+		push_undo(ref_point, pi, rc0 - 1)
+
+		// last ref: free the point. undo re-adds it before re-reffing it.
 		if (rc0 == 1) {
 
 			free_pis.push(pi)
@@ -121,8 +124,6 @@ window.model3_component = function(opt, editor) {
 			push_undo(add_point_xyz, p[0], p[1], p[2], pi)
 
 		}
-
-		push_undo(ref_point, pi, rc0 - 1)
 
 		// if (LOG) log('unref_point', pi, prc[pi])
 	}
@@ -187,27 +188,31 @@ window.model3_component = function(opt, editor) {
 				f(get_line(li))
 	}
 
-	function add_line(p1i, p2i, expect_li) {
+	// undo runs only the primitives below, which record their exact opposite
+	// and call no other recording function. composed ops record nothing.
+
+	// primitive: create a line with rc 1, without reffing its points.
+	function create_line(p1i, p2i, expect_li, sm, op) {
+
+		sm ??= 0
+		op ??= 1
 
 		let li = free_lis.pop()
 		if (li == null) {
-			li = lines.push(p1i, p2i, 1, 0, 1)
+			li = lines.push(p1i, p2i, 1, sm, op)
 			li = (lines.length / 5) - 1
 		} else {
 			lines[5*li+0] = p1i
 			lines[5*li+1] = p2i
-			lines[5*li+2] = 1 // ref. count
-			lines[5*li+3] = 0 // smoothness
-			lines[5*li+4] = 1 // opacity
+			lines[5*li+2] = 1  // ref. count
+			lines[5*li+3] = sm // smoothness
+			lines[5*li+4] = op // opacity
 		}
 		assert(expect_li == null || expect_li == li)
 
 		nonedge_line_count++
 		used_lines_changed = true
 		bbox_changed = true
-
-		ref_point(p1i)
-		ref_point(p2i)
 
 		push_undo(unref_line, li, 1)
 
@@ -216,6 +221,13 @@ window.model3_component = function(opt, editor) {
 		return li
 	}
 
+	function add_line(p1i, p2i) {
+		ref_point(p1i)
+		ref_point(p2i)
+		return create_line(p1i, p2i)
+	}
+
+	// primitive: the last unref frees the line, without unreffing its points.
 	function unref_line(li, expect_rc) {
 
 		let rc = --lines[5*li+2]
@@ -228,15 +240,14 @@ window.model3_component = function(opt, editor) {
 			used_lines_changed = true
 			bbox_changed = true
 
-			let p1i = lines[5*li+0]
-			let p2i = lines[5*li+1]
-
-			unref_point(p1i)
-			unref_point(p2i)
-
 			free_lis.push(li)
 
-			push_undo(add_line, p1i, p2i, li)
+			push_undo(create_line,
+				lines[5*li+0],
+				lines[5*li+1],
+				li,
+				lines[5*li+3],
+				lines[5*li+4])
 
 			if (LOG) log('-line', li)
 
@@ -276,26 +287,25 @@ window.model3_component = function(opt, editor) {
 		// if (LOG) log('ref_line', li, rc0 + 1)
 	}
 
-	function merge_lines(li1, li2, expect_rc) {
-
-		let pi1 = lines[5*li2+0] // pi1
-		let pi2 = lines[5*li2+1] // pi2
-
-		if (LOG) log('merge_lines', li1, li2)
-
-		assert(expect_rc == null || line_rc(li2) == expect_rc)
-
-		while (line_rc(li2))
-			unref_line(li2)
-
-		lines[5*li1+1] = pi2 // pi2
-
-		used_lines_changed = true
-
-		push_undo(cut_line, li1, pi1, li2)
+	// unref the line and, if that freed it, its points.
+	function release_line(li) {
+		unref_line(li)
+		if (!line_rc(li)) {
+			unref_point(lines[5*li+0])
+			unref_point(lines[5*li+1])
+		}
 	}
 
-	function cut_line(li1, pi, expect_li) {
+	// primitive: set endpoint `i` (0 or 1), without reffing or unreffing.
+	function set_line_endpoint(li, i, pi) {
+		let pi0 = lines[5*li+i]
+		lines[5*li+i] = pi
+		used_lines_changed = true
+		bbox_changed = true
+		push_undo(set_line_endpoint, li, i, pi0)
+	}
+
+	function cut_line(li1, pi) {
 		let pi2 = lines[5*li1+1] // pi2
 		let rc1 = lines[5*li1+2] // rc
 		let sm1 = lines[5*li1+3] // smoothness
@@ -304,17 +314,11 @@ window.model3_component = function(opt, editor) {
 		if (LOG) log('cut_line', li1, pi)
 
 		let li2 = add_line(pi, pi2)
-		lines[5*li1+1] = pi // pi2
+		replace_line_endpoint(li1, pi, pi2)
 		while (line_rc(li2) < rc1)
 			ref_line(li2)
 		set_line_smoothness (li2, sm1)
 		set_line_opacity    (li2, op1)
-
-		used_lines_changed = true
-
-		assert(expect_li == null || li2 == expect_li)
-
-		push_undo(merge_lines, li1, li2, rc1)
 	}
 
 	function replace_line_endpoint(li, new_pi, old_pi) {
@@ -324,16 +328,11 @@ window.model3_component = function(opt, editor) {
 
 		let i = (old_pi == pi0) ? 0 : ((old_pi == pi1) ? 1 : assert(false))
 
-		lines[5*li+i] = new_pi
-
-		used_lines_changed = true
-
 		ref_point(new_pi)
+		set_line_endpoint(li, i, new_pi)
 		unref_point(old_pi)
 
 		if (LOG) log('replace_line_endpoint', li, '@', i, old_pi, '->', new_pi)
-
-		push_undo(replace_line_endpoint, old_pi, new_pi)
 	}
 
 	let face3 = callable_constructor(class face3 extends poly3.class {
@@ -389,7 +388,8 @@ window.model3_component = function(opt, editor) {
 		return mat_insts
 	}
 
-	function add_face(pis, lis, material, holes) {
+	// primitive: create a face, without reffing its points and lines.
+	function create_face(pis, lis, material, holes, expect_fi) {
 		let face
 		let fi = free_fis.pop()
 		if (fi == null) {
@@ -401,45 +401,66 @@ window.model3_component = function(opt, editor) {
 		} else {
 			face = faces[fi]
 		}
-		if (pis) {
+		assert(expect_fi == null || expect_fi == fi)
+		if (pis)
 			extend(face, pis)
-			for (let pi of pis)
-				ref_point(pi)
-		}
 		if (holes) { // [hole1_i1, hole2_i1, ...]
 			if (!face.holes)
 				face.holes = []
 			extend(face.holes, holes)
 		}
-		if (lis) {
+		if (lis)
 			extend(face.lis, lis)
-			for (let li of lis)
-				ref_line(li)
-		} else
-			update_face_lis(face)
 		material = material || editor.default_material
 		face.mat_inst = material_instance(material)
 		face.mat_inst.push(face)
+		face.invalidate() // reused slot: drop the previous face's caches.
 		faces_changed = true
-		if (LOG) log('+face', face.i, 'pis', ...face, 'lis', ...face.lis,
-			'mat', material.name)
+		push_undo(free_face, face)
 		return face
 	}
 
-	function remove_face(face) {
+	// primitive: free a face, without unreffing its points and lines.
+	function free_face(face) {
+		push_undo(create_face,
+			Array.from(face),
+			face.lis.slice(),
+			face.mat_inst.material,
+			face.holes && face.holes.length ? face.holes.slice() : null,
+			face.i)
 		face_set_selected(face, false)
 		faces_changed = true
 		free_fis.push(face.i)
-		for (let li of face.lis)
-			unref_line(li)
-		for (let pi of face)
-			unref_point(pi)
 		face.length = 0
 		if (face.holes)
 			face.holes.length = 0
 		face.lis.length = 0
 		remove_value(face.mat_inst, face)
 		face.mat_inst = null
+	}
+
+	function add_face(pis, lis, material, holes) {
+		if (pis)
+			for (let pi of pis)
+				ref_point(pi)
+		if (lis)
+			for (let li of lis)
+				ref_line(li)
+		let face = create_face(pis, lis, material, holes)
+		// free_face() records the lis, so undo and redo restore them.
+		if (!lis)
+			update_face_lis(face)
+		if (LOG) log('+face', face.i, 'pis', ...face, 'lis', ...face.lis,
+			'mat', face.mat_inst.material.name)
+		return face
+	}
+
+	function remove_face(face) {
+		for (let li of face.lis)
+			unref_line(li)
+		for (let pi of face)
+			unref_point(pi)
+		free_face(face)
 		if (LOG) log('-face', face.i)
 	}
 
@@ -509,6 +530,19 @@ window.model3_component = function(opt, editor) {
 			face.mesh.normals_valid = false
 		face.invalidate()
 		faces_changed = true
+		push_undo(remove_edge, face, ei, line_before_point)
+	}
+
+	// primitive: the opposite of insert_edge(), without unreffing.
+	function remove_edge(face, ei, line_before_point) {
+		let line_ei = ei - (line_before_point ? 1 : 0)
+		let pi = remove(face, ei)
+		let li = remove(face.lis, line_ei)
+		if (face.mesh)
+			face.mesh.normals_valid = false
+		face.invalidate()
+		faces_changed = true
+		push_undo(insert_edge, face, ei, pi, line_before_point, li)
 	}
 
 	function replace_edge(face, ei, li, expect_li) {
@@ -677,7 +711,6 @@ window.model3_component = function(opt, editor) {
 	e.get_line        = get_line
 	e.each_line       = each_line
 	e.add_line        = add_line
-	e.unref_line      = unref_line
 	e.set_line_smoothness = set_line_smoothness
 	e.set_line_opacity = set_line_opacity
 
@@ -1010,7 +1043,7 @@ window.model3_component = function(opt, editor) {
 		// remove all selected lines.
 		for (let li of sel_lines)
 			while (line_rc(li))
-				unref_line(li)
+				release_line(li)
 
 		// TODO: merge faces.
 
@@ -1256,7 +1289,9 @@ window.model3_component = function(opt, editor) {
 
 				// replace point in pulled face.
 				old_points[ei] = old_pi
+				ref_point(new_pi)
 				replace_face_point(pull.face, ei, new_pi)
+				unref_point(old_pi)
 				pull.face.invalidate()
 
 				// update the endpoint of pulled face edges that are connected to this point.
@@ -1288,7 +1323,9 @@ window.model3_component = function(opt, editor) {
 				moving_faces.add(face)
 
 				// replace edge in pulled face.
+				ref_line(pull_li)
 				replace_edge(pull.face, e1i, pull_li, old_pull_li)
+				unref_line(old_pull_li)
 			}
 
 			// extend pp side faces with newly created pp side edges.
@@ -1298,6 +1335,8 @@ window.model3_component = function(opt, editor) {
 					let pull_pi = pull.face[pull_ei]
 					let pp_li = new_pp_edge.get(pull_ei)
 					if (pp_li != null) {
+						ref_point(pull_pi)
+						ref_line(pp_li)
 						insert_edge(pp_face, pp_ei + insert_offset, pull_pi, line_before_point, pp_li)
 						insert_offset++
 					}
