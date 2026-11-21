@@ -177,6 +177,58 @@ let build_no1 = await pg.evaluate(() => ui._build_no())
 check('frames stop after a pointer move', build_no0 == build_no1,
 	build_no0 + ' ' + build_no1)
 
+// push/pull: 'p' picks the tool, dragging a square face lifts it off
+// z = 0 and Ctrl+Z puts it back. keys go in separate frames.
+await pg.keyboard.press('p')
+await pg.waitForTimeout(100)
+check('key p selects the pull tool',
+	await pg.evaluate(() => window.test_editor.tool) == 'pull')
+let face_p = await pg.evaluate(function() {
+	let e = window.test_editor
+	let c = e.root.comp
+	c.add_face([
+		c.add_point_xyz(.5, .5, 0),
+		c.add_point_xyz(1.5, .5, 0),
+		c.add_point_xyz(1.5, 1.5, 0),
+		c.add_point_xyz(.5, 1.5, 0),
+	])
+	e.update_all()
+	ui.animate()
+	let p = e.world_to_screen(Math3D.v3(1, 1, 0), Math3D.v2())
+	return [p[0], p[1]]
+})
+await pg.waitForTimeout(100)
+function read_square() {
+	return pg.evaluate(function() {
+		let c = window.test_editor.root.comp
+		let faces = c.faces.filter(f => f.length)
+		let zs = []
+		for (let pi of faces[0] ?? [])
+			zs.push(c.get_point(pi, Math3D.v3())[2])
+		return {n_faces: faces.length, zs: zs}
+	})
+}
+let sq0 = await read_square()
+await pg.mouse.move(rect.x + face_p[0], rect.y + face_p[1])
+await pg.waitForTimeout(100)
+await pg.mouse.down()
+await pg.mouse.move(rect.x + face_p[0], rect.y + face_p[1] - 120, {steps: 8})
+await pg.mouse.up()
+await pg.waitForTimeout(200)
+let sq1 = await read_square()
+check('pull lifted the square into a box',
+	sq1.n_faces == 5 && sq1.zs.length && sq1.zs.every(z => z != 0),
+	JSON.stringify([sq0, sq1]))
+await pg.keyboard.down('Control')
+await pg.waitForTimeout(50)
+await pg.keyboard.press('z')
+await pg.waitForTimeout(50)
+await pg.keyboard.up('Control')
+await pg.waitForTimeout(200)
+let sq2 = await read_square()
+check('Ctrl+Z undid the pull', JSON.stringify(sq0) == JSON.stringify(sq2),
+	JSON.stringify([sq0, sq2]))
+
 check('no page errors after input', errors.length == 0, errors.join('\n'))
 
 // the pages that host the demos load without errors and build the widget.

@@ -365,6 +365,19 @@ function model3_editor(e) {
 		undo_from(redo_stack, redo_groups.pop())
 	}
 
+	// undo the entries above `start`, discarding what they record.
+	// they record above the stack's initial top, so walk down from there.
+	function rewind_undo(start) {
+		let i = undo_stack.length
+		while (i > start) {
+			let f = undo_stack[i-1]
+			let argc = undo_stack[i-2]
+			i -= argc + 2
+			f(...undo_stack.slice(i, i + argc))
+		}
+		undo_stack.length = start
+	}
+
 	// materials --------------------------------------------------------------
 
 	let materials = [] // [{diffuse_color:, diffuse_map:, uv: , opacity: , faces: [face1,...]},...]
@@ -1776,6 +1789,7 @@ function model3_editor(e) {
 	{
 		let hit_p // point on the plane hit for pulling.
 		let pull  // pull state for live pulling.
+		let pull_undo_start // undo_stack length after start_pull's setup.
 
 		tools.pull.bind = function(on) {
 			if (!on)
@@ -1802,10 +1816,12 @@ function model3_editor(e) {
 			}
 		}
 
+		let move
 		{
 		let _line0 = line3()
 		let _v0 = v3()
-		function move() {
+		let _v1 = v3()
+		move = function() {
 			if (!pull) {
 				if (!mouse.dragging)
 					return
@@ -1823,10 +1839,10 @@ function model3_editor(e) {
 			if (!p)
 				return
 
-			let delta_line = p.sub(pull.origin)
+			let delta_line = p.to(_v1).sub(pull.origin)
 			let delta = sign(delta_line.dot(pull.face.plane().normal)) * delta_line.len()
 
-			ref_line.set(origin, p)
+			ref_line.set(pull.origin, p)
 			ref_line.visible = hit_model
 			ref_line.update()
 
@@ -1837,6 +1853,8 @@ function model3_editor(e) {
 
 			e.tooltip = snap_tooltips[p.snap || p.line_snap] || p.tooltip
 
+			// replace the last step's moves.
+			rewind_undo(pull_undo_start)
 			pull.pull(delta)
 			update()
 		}}
@@ -1844,6 +1862,7 @@ function model3_editor(e) {
 		function start() {
 			start_undo()
 			pull = cur_comp.start_pull(hit_p)
+			pull_undo_start = undo_stack.length
 			update()
 		}
 
