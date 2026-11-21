@@ -250,26 +250,32 @@ let help_lines = [
 //// SETTINGS ----------------------------------------------------------------
 
 let int_wall_thickness_field = ui.create_field({
+	label: S('int_wall_thickness', 'Interior wall thickness (cm)'),
 	type: 'number', min: 50, max: 300, scale: 10, decimals: 1,
 	keep_valid: true, not_null: true,
 })
 let ext_wall_thickness_field = ui.create_field({
+	label: S('ext_wall_thickness', 'Exterior wall thickness (cm)'),
 	type: 'number', min: 150, max: 600, scale: 10, decimals: 1,
 	keep_valid: true, not_null: true,
 })
 let slab_thickness_field = ui.create_field({
+	label: S('slab_thickness', 'Slab thickness (cm)'),
 	type: 'number', min: 100, max: 500, scale: 10, decimals: 1,
 	keep_valid: true, not_null: true,
 })
 let roof_thickness_field = ui.create_field({
+	label: S('roof_thickness', 'Roof thickness (cm)'),
 	type: 'number', min: 100, max: 600, scale: 10, decimals: 1,
 	keep_valid: true, not_null: true,
 })
 let floor_h_field = ui.create_field({
+	label: S('floor_height', 'Floor height (cm)'),
 	type: 'number', min: 2200, max: 4000, scale: 10, decimals: 1,
 	keep_valid: true, not_null: true,
 })
 let half_wall_h_field = ui.create_field({
+	label: S('half_wall_height', 'Half-wall height (cm)'),
 	type: 'number', min: 500, max: 1500, scale: 10, decimals: 1,
 	keep_valid: true, not_null: true,
 })
@@ -2659,59 +2665,31 @@ function create_floor_editor(id) {
 					if (ui.popup_button(id+'.settings', 'settings', null,
 						'c', 't', 'b', ']')
 					) {
-						ui.h2(S('settings', 'Settings'))
+						ui.h2(S('plan_settings', 'Plan Settings'))
 						ui.min_w(ui.em(24))
 						ui.v_aligned(0, ui.sp(), 's', 't')
-							let setting_id = id+'.setting.int_wall_thickness'
-							ui.h(0, ui.sp1(), 's', 'c')
-								ui.label(setting_id,
-									S('int_wall_thickness',
-										'Interior wall thickness (cm)'), 0)
-								ui.num_slider(setting_id,
-									s.house.int_wall_thickness,
-									int_wall_thickness_field, 1, null, null, s.readonly)
-							ui.end_h()
-							setting_id = id+'.setting.ext_wall_thickness'
-							ui.h(0, ui.sp1(), 's', 'c')
-								ui.label(setting_id,
-									S('ext_wall_thickness',
-										'Exterior wall thickness (cm)'), 0)
-								ui.num_slider(setting_id,
-									s.house.ext_wall_thickness,
-									ext_wall_thickness_field, 1, null, null, s.readonly)
-							ui.end_h()
-							setting_id = id+'.setting.slab_thickness'
-							ui.h(0, ui.sp1(), 's', 'c')
-								ui.label(setting_id,
-									S('slab_thickness', 'Slab thickness (cm)'), 0)
-								ui.num_slider(setting_id,
-									s.house.slab_thickness, slab_thickness_field,
-									1, null, null, s.readonly)
-							ui.end_h()
-							setting_id = id+'.setting.roof_thickness'
-							ui.h(0, ui.sp1(), 's', 'c')
-								ui.label(setting_id,
-									S('roof_thickness', 'Roof thickness (cm)'), 0)
-								ui.num_slider(setting_id,
-									s.house.roof_thickness, roof_thickness_field,
-									1, null, null, s.readonly)
-							ui.end_h()
-							setting_id = id+'.setting.floor_h'
-							ui.h(0, ui.sp1(), 's', 'c')
-								ui.label(setting_id,
-									S('floor_height', 'Floor height (cm)'), 0)
-								ui.num_slider(setting_id,
-									s.house.floor_h, floor_h_field,
-									1, null, null, s.readonly)
-							ui.end_h()
-							setting_id = id+'.setting.half_wall_h'
-							ui.h(0, ui.sp1(), 's', 'c')
-								ui.label(setting_id,
-									S('half_wall_height', 'Half-wall height (cm)'), 0)
-								ui.num_slider(setting_id,
-									s.house.half_wall_h, half_wall_h_field,
-									1, null, null, s.readonly)
-							ui.end_h()
+							let opt = {
+								control: 'num_slider', label_pos: 'l',
+								readonly: s.readonly,
+								field: int_wall_thickness_field,
+							}
+							ui.field_input(id+'.setting.int_wall_thickness',
+								s.house.int_wall_thickness, opt, 0)
+							opt.field = ext_wall_thickness_field
+							ui.field_input(id+'.setting.ext_wall_thickness',
+								s.house.ext_wall_thickness, opt, 0)
+							opt.field = slab_thickness_field
+							ui.field_input(id+'.setting.slab_thickness',
+								s.house.slab_thickness, opt, 0)
+							opt.field = roof_thickness_field
+							ui.field_input(id+'.setting.roof_thickness',
+								s.house.roof_thickness, opt, 0)
+							opt.field = floor_h_field
+							ui.field_input(id+'.setting.floor_h',
+								s.house.floor_h, opt, 0)
+							opt.field = half_wall_h_field
+							ui.field_input(id+'.setting.half_wall_h',
+								s.house.half_wall_h, opt, 0)
 						ui.end_v_aligned()
 						ui.end_popup_button(id+'.settings')
 					}

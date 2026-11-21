@@ -11521,6 +11521,7 @@ is no row.
 opt:
 
 	field      : field_input: the field to edit.
+	readonly   : field_input: whether the control is readonly (field.readonly).
 	nav, col   : nav_input: the nav and the column to edit.
 	ri         : nav_input: the row to edit (nav.focused_ri), null for none.
 	control    : the control to build: field.control, or 'lookup_input'.
@@ -11667,7 +11668,8 @@ function build_input_row(id, value, opt, is_bound, fr, align, valign) {
 			value = ui.input(id, null, readonly_text_field)
 		} else {
 			let readonly = ri != null
-				? !nav.can_change_val(ri, field.fi) : field.readonly
+				? !nav.can_change_val(ri, field.fi)
+				: opt.readonly ?? field.readonly
 			value = field.build_input(id, value, opt, control, readonly)
 		}
 		if (ri != null) {
