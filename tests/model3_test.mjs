@@ -593,11 +593,25 @@ const results = await page.evaluate(() => {
 		return true
 	})
 
-	known_bug('draw_line across a face edge adds the cut point to the face', () => {
+	// the two squares use the cut edge in opposite directions.
+	check('draw_line across a shared face edge: rcs, undo, redo', () => {
 		let c = make_comp()
-		add_square(c, 0, 0, 2)
-		c.draw_line(line3(v3(1, -1, 0), v3(1, 1, 0)))
-		return check_rcs(c) || true
+		let f1 = add_square(c, 0, 0, 2)
+		let f2 = add_square(c, 2, 0, 2)
+		let state0 = model_state(c)
+		c.editor.start_group()
+		c.draw_line(line3(v3(1, 1, 0), v3(3, 1, 0)))
+		let errs = check_rcs(c)
+		if (errs)
+			return errs
+		if (f1.length != 5 || f2.length != 5)
+			return `face lengths ${f1.length} ${f2.length} (want 5 5)`
+		let state1 = model_state(c)
+		c.editor.undo()
+		if (model_state(c) != state0)
+			return 'undo did not restore the model'
+		c.editor.redo()
+		return model_state(c) == state1 || 'redo did not restore the line'
 	})
 
 	known_bug('draw_line starting on a line makes no zero-length line', () => {

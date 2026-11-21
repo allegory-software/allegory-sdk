@@ -316,7 +316,6 @@ window.model3_component = function(opt, editor) {
 
 	function cut_line(li1, pi) {
 		let pi2 = lines[5*li1+1] // pi2
-		let rc1 = lines[5*li1+2] // rc
 		let sm1 = lines[5*li1+3] // smoothness
 		let op1 = lines[5*li1+4] // opacity
 
@@ -324,8 +323,14 @@ window.model3_component = function(opt, editor) {
 
 		let li2 = add_line(pi, pi2)
 		replace_line_endpoint(li1, pi, pi2)
-		while (line_rc(li2) < rc1)
+		// faces using the line: insert the cut point and the second half,
+		// in the direction of the face's edge.
+		each_line_face(li1, function(face) {
+			let ei = face.lis.indexOf(li1)
+			ref_point(pi)
 			ref_line(li2)
+			insert_edge(face, ei + 1, pi, face[ei] == pi2, li2)
+		})
 		set_line_smoothness (li2, sm1)
 		set_line_opacity    (li2, op1)
 	}
