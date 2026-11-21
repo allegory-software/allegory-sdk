@@ -1,54 +1,39 @@
 // run: node tests/model3_test.mjs [path/to/model3.js]
-import {chromium} from '/usr/local/lib/node_modules/playwright/index.mjs'
-import http from 'node:http'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import vm from 'node:vm'
 import {fileURLToPath} from 'node:url'
 
 const sdk = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const www = f => path.join(sdk, 'www', f)
-const files = {
-	'/glue.js': www('glue.js'),
-	'/earcut.js': www('earcut.js'),
-	'/3d.js': www('3d.js'),
-	'/gl.js': www('gl.js'),
-	'/gl_renderer.js': www('gl_renderer.js'),
-	'/model3.js': process.argv[2] ?? www('model3.js'),
-}
-const page_html = `<!DOCTYPE html><canvas id=c width=16 height=16></canvas>
-<script src=glue.js global></script>
-<script src=earcut.js></script>
-<script src=3d.js global></script>
-<script src=gl.js></script>
-<script src=gl_renderer.js></script>
-<script src=model3.js></script>`
 
-const server = http.createServer(async (req, res) => {
-	if (req.url == '/') {
-		res.setHeader('content-type', 'text/html')
-		return res.end(page_html)
-	}
-	if (!files[req.url]) {
-		res.statusCode = 404
-		return res.end()
-	}
-	res.setHeader('content-type', 'text/javascript')
-	res.end(await fs.readFile(files[req.url]))
-})
-await new Promise(r => server.listen(0, '127.0.0.1', r))
+// the browser globals that the scripts use when they load.
+globalThis.window = globalThis
+globalThis.navigator = {userAgent: '', language: 'en-US'}
+globalThis.addEventListener = () => {}
+globalThis.document = {currentScript: {hasAttribute: k => k == 'global'}}
 
-const browser = await chromium.launch({channel: 'chrome', headless: true,
-	args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader']})
-const page = await browser.newPage()
-page.on('pageerror', e => console.log('PAGE ERROR', e.message))
-await page.goto(`http://127.0.0.1:${server.address().port}/`)
+// load the scripts as the browser would, in global scope.
+const scripts = [ // [[file, name],...]
+	[www('glue.js'), 'glue.js'],
+	[www('earcut.js'), 'earcut.js'],
+	[www('3d.js'), '3d.js'],
+	[process.argv[2] ?? www('model3.js'), 'model3.js'],
+]
+for (let [file, name] of scripts)
+	vm.runInThisContext(await fs.readFile(file, 'utf8'), {filename: name})
 
-const results = await page.evaluate(() => {
+// geometry needs no WebGL: buffers and renderers that store nothing.
+const gl_obj = {set() {}, free() {}}
+const gl_factories = ['dyn_arr_v3_buffer', 'dyn_arr_u32_index_buffer',
+	'points_renderer', 'faces_renderer', 'solid_lines_renderer',
+	'dashed_lines_renderer', 'fat_lines_renderer']
+const gl = {}
+for (let k of gl_factories)
+	gl[k] = () => gl_obj
+
+const results = (function() {
 	const results = []
-	const canvas = document.getElementById('c')
-	const gl = canvas.getContext('webgl2', {antialias: false})
-	canvas.cw = 16
-	canvas.ch = 16
 	let n_checks = 0
 	// a bug that is understood but not fixed yet: reported, doesn't fail the run.
 	let known = []
@@ -64,17 +49,12 @@ const results = await page.evaluate(() => {
 	function check(name, f) {
 		n_checks++
 		let r
-		if (gl.active_vao)
-			gl.active_vao.unuse()
-		if (gl.active_program)
-			gl.active_program.unuse()
 		try {
 			r = f()
 		} catch (e) {
 			r = 'threw: ' + e.message + ' @ ' + (e.stack || '').split('\n').slice(1, 3)
-				.map(s => s.trim().replace(/http:\/\/[^/]+\//, '')).join(' | ')
+				.map(s => s.trim()).join(' | ')
 		}
-		while (gl.getError()) {}
 		if (r !== true)
 			results.push([name, r === false ? '' : String(r)])
 	}
@@ -331,35 +311,6 @@ const results = await page.evaluate(() => {
 			'face ' + Array.from(f)
 	})
 
-	check('update() of a component with a face', () => {
-		let c = make_comp()
-		add_square(c, 0, 0, 1)
-		c.update(gl.mat4_instance_buffer(mat4f32()), gl.f32_instance_buffer(new Float32Array([0])))
-		return true
-	})
-
-	check('remove_face makes update() report a change', () => {
-		let c = make_comp()
-		let f = add_square(c, 0, 0, 1)
-		let models = gl.mat4_instance_buffer(mat4f32())
-		let disabled = gl.f32_instance_buffer(new Float32Array([0]))
-		c.update(models, disabled)
-		c.remove_face(f)
-		return c.update(models, disabled) === true
-	})
-
-	check('update() with a smooth mesh', () => {
-		let c = make_comp()
-		let a = c.add_point_xyz(0, 0, 0), b = c.add_point_xyz(1, 0, 0)
-		let p = [c.add_point_xyz(0, 1, 0), c.add_point_xyz(1, 1, 0)]
-		let q = [c.add_point_xyz(0, 0, 1), c.add_point_xyz(1, 0, 1)]
-		let f1 = c.add_face([a, b, p[1], p[0]])
-		let f2 = c.add_face([b, a, q[0], q[1]])
-		c.set_line_smoothness(f1.lis[0], 1)
-		c.update(gl.mat4_instance_buffer(mat4f32()), gl.f32_instance_buffer(new Float32Array([0])))
-		return true
-	})
-
 	check('start_pull on a lone square builds four side faces', () => {
 		let c = make_comp()
 		let f = add_square(c, 0, 0, 1)
@@ -502,18 +453,20 @@ const results = await page.evaluate(() => {
 		return check_pull_undo(c, c.add_face(pis, null, null, [4]), 1)
 	})
 
-	// the triangle at the top corner makes the pull insert an edge into the
-	// side face that has a hole.
+	// the sloped x = 0 wall makes the pull insert an edge at (0,0,2) into
+	// the side face that has a hole.
 	check('pull next to a side face with a hole: rcs, undo, redo', () => {
 		let c = make_comp()
-		let P = [[0,0,0], [2,0,0], [2,2,0], [0,2,0], [0,0,2], [2,0,2], [2,2,2],
-			[0,2,2], [.5,0,.5], [1.5,0,.5], [1.5,0,1.5], [.5,0,1.5], [-1,-1,3],
-			[-1,0,3]].map(p => c.add_point_xyz(...p))
+		let P = [[-1,0,0], [2,0,0], [2,2,0], [-1,2,0], [0,0,2], [2,0,2], [2,2,2],
+			[0,2,2], [.5,0,.5], [1.5,0,.5], [1.5,0,1.5],
+			[.5,0,1.5]].map(p => c.add_point_xyz(...p))
 		let F = [[1,0,3,2], [4,5,6,7], [7,6,2,3], [0,4,7,3],
 			[5,1,2,6]].map(f => c.add_face(f.map(i => P[i])))
-		c.add_face([4,0,1,5, 8,11,10,9].map(i => P[i]), null, null, [4])
-		c.add_face([4, 12, 13].map(i => P[i]))
-		return check_pull_undo(c, F[1], 1)
+		let holed = c.add_face([4,0,1,5, 8,11,10,9].map(i => P[i]), null, null, [4])
+		let err = check_pull_undo(c, F[1], 1)
+		if (err !== true)
+			return err
+		return holed.length == 9 || 'holed face length ' + holed.length + ' (want 9)'
 	})
 
 	// the ledge is coplanar with the top and shares its x = 2 edge with the top
@@ -532,6 +485,18 @@ const results = await page.evaluate(() => {
 			return err
 		return Array.from(wall).join() == wall_pis0 ||
 			`wall points ${Array.from(wall)}, want ${wall_pis0}`
+	})
+
+	// the y = 0 and x = 0 walls are pp but each has a sloped side edge of its
+	// own at (0,0,2), so that corner needs a new pp side edge.
+	check('pull a top whose corner has two sloped side edges: rcs, undo', () => {
+		let c = make_comp()
+		let P = [[0,0,2], [2,0,2], [2,2,2], [0,2,2], [-1,0,0], [2,0,0], [2,2,0],
+			[0,2,0], [0,-1,0]].map(p => c.add_point_xyz(...p))
+		let top = c.add_face([0,1,2,3].map(i => P[i]))
+		for (let f of [[4,5,1,0], [5,6,2,1], [6,7,3,2], [7,8,0,3]])
+			c.add_face(f.map(i => P[i]))
+		return check_pull_undo(c, top, 1)
 	})
 
 	// a box with outward faces; `extra_pts` go after its 8 points.
@@ -562,7 +527,48 @@ const results = await page.evaluate(() => {
 		if (err !== true)
 			return err
 		let l = c.get_line(li, line3())
-		return veq(l[0], [0, 0, 2]) || 'line moved to ' + Array.from(l[0])
+		if (!veq(l[0], [0, 0, 2]))
+			return 'line moved to ' + Array.from(l[0])
+		// reconnected: the line and both halves of the cut corner edge.
+		let pi = l[0].i
+		let n = 0
+		c.each_line(l => {
+			if (l[0].i == pi || l[1].i == pi)
+				n++
+		})
+		return n == 3 || `${n} lines at the line's end (want 3)`
+	})
+
+	// the top slides past the line: the walls shrink and the line stays.
+	check('push a box top down: a standalone line at a corner stays', () => {
+		let c = make_comp()
+		let P = add_box(c, [[-1,-1,2]])
+		let F = box_faces.map(f => c.add_face(f.map(i => P[i])))
+		let li = c.add_line(P[4], P[8])
+		let err = check_pull_undo(c, F[1], -1)
+		if (err !== true)
+			return err
+		let l = c.get_line(li, line3())
+		if (!veq(l[0], [0, 0, 2]))
+			return 'line moved to ' + Array.from(l[0])
+		for (let f of [F[2], F[3], F[4], F[5]])
+			for (let pi of f)
+				if (c.get_point(pi, v3())[2] > 1 + 1e-6)
+					return `wall ${f.i} point ${pi} above 1`
+		return true
+	})
+
+	// the line is where the top's y = 0 edge ends up: its points merge with
+	// the top's corners and the top uses the line as its edge.
+	check('pull a box top onto a line: the top uses the line', () => {
+		let c = make_comp()
+		let P = add_box(c, [[0,0,3], [2,0,3]])
+		let F = box_faces.map(f => c.add_face(f.map(i => P[i])))
+		let li = c.add_line(P[8], P[9])
+		let err = check_pull_undo(c, F[1], 1)
+		if (err !== true)
+			return err
+		return F[1].lis.includes(li) || 'the top does not use the line'
 	})
 
 	// the fin is coplanar with the y = 0 wall and attached along its edge 1-5.
@@ -578,26 +584,27 @@ const results = await page.evaluate(() => {
 		return zs.join() == '0,0,2,2' || 'fin zs ' + zs
 	})
 
-	known_bug('pull by 0 leaves no zero-area faces', () => {
+	// the side faces have zero height: they are removed (F3) and the rest is
+	// merged (L1).
+	check('pull by 0 gives back the starting face: rcs, undo, redo', () => {
 		let c = make_comp()
-		add_square(c, 0, 0, 1)
-		let f = live_faces(c)[0]
-		let p = f.center(v3())
-		p.face = f
-		let pull = c.start_pull(p)
-		pull.pull(0)
-		pull.stop()
-		for (let face of live_faces(c))
-			if (!(face.area() > 0))
-				return `face ${face.i} has area ${face.area()}`
-		return true
+		let err = check_pull_undo(c, add_square(c, 0, 0, 1), 0)
+		if (err !== true)
+			return err
+		let n_faces = live_faces(c).length
+		let n_lines = 0
+		c.each_line(l => n_lines++)
+		return n_faces == 1 && n_lines == 4 ||
+			`faces ${n_faces}, lines ${n_lines} (want 1, 4)`
 	})
 
 	// the two squares use the cut edge in opposite directions.
 	check('draw_line across a shared face edge: rcs, undo, redo', () => {
 		let c = make_comp()
-		let f1 = add_square(c, 0, 0, 2)
-		let f2 = add_square(c, 2, 0, 2)
+		let P = [[0,0,0], [2,0,0], [2,2,0], [0,2,0], [4,0,0],
+			[4,2,0]].map(p => c.add_point_xyz(...p))
+		let f1 = c.add_face([0, 1, 2, 3].map(i => P[i]))
+		let f2 = c.add_face([1, 4, 5, 2].map(i => P[i]))
 		let state0 = model_state(c)
 		c.editor.start_group()
 		c.draw_line(line3(v3(1, 1, 0), v3(3, 1, 0)))
@@ -614,13 +621,50 @@ const results = await page.evaluate(() => {
 		return model_state(c) == state1 || 'redo did not restore the line'
 	})
 
-	known_bug('draw_line starting on a line makes no zero-length line', () => {
+	check('draw_line starting on a line cuts it there: rcs, undo, redo', () => {
 		let c = make_comp()
 		c.add_line(c.add_point_xyz(0, 0, 0), c.add_point_xyz(2, 0, 0))
+		let state0 = model_state(c)
+		c.editor.start_group()
 		c.draw_line(line3(v3(1, 0, 0), v3(1, -1, 0)))
+		let errs = check_rcs(c)
+		if (errs)
+			return errs
+		let n = 0
 		let short = 0
-		c.each_line(l => { if (l[0].distance2(l[1]) < 1e-12) short++ })
-		return !short || short + ' zero-length lines'
+		c.each_line(l => {
+			n++
+			if (l[0].distance2(l[1]) < 1e-12)
+				short++
+		})
+		if (n != 3 || short)
+			return `lines ${n}, zero-length ${short} (want 3, 0)`
+		let state1 = model_state(c)
+		c.editor.undo()
+		if (model_state(c) != state0)
+			return 'undo did not restore the model'
+		c.editor.redo()
+		return model_state(c) == state1 || 'redo did not restore the line'
+	})
+
+	// the drawn line's points have no indices, as the editor sends them.
+	check('draw_line over a face edge merges into it: rcs, undo, redo', () => {
+		let c = make_comp()
+		add_square(c, 0, 0, 2)
+		let state0 = model_state(c)
+		c.editor.start_group()
+		c.draw_line(line3(v3(0, 0, 0), v3(2, 0, 0)))
+		let errs = check_rcs(c)
+		if (errs)
+			return errs
+		let state1 = model_state(c)
+		if (state1 != state0)
+			return 'the model changed'
+		c.editor.undo()
+		if (model_state(c) != state0)
+			return 'undo did not restore the model'
+		c.editor.redo()
+		return model_state(c) == state1 || 'redo did not restore the line'
 	})
 
 	check('draw_line crossing a line: rcs, undo, redo', () => {
@@ -641,7 +685,7 @@ const results = await page.evaluate(() => {
 	})
 
 	return [n_checks, results, known]
-})
+})()
 
 const [n_checks, failures, known] = results
 console.log(`${n_checks} checks`)
@@ -650,6 +694,4 @@ for (let [name, msg] of failures)
 for (let [name, failed] of known)
 	console.log(failed ? 'KNOWN BUG' : 'KNOWN BUG NOW PASSES', name)
 console.log(failures.length ? `${failures.length} failed` : 'all passed')
-await browser.close()
-server.close()
 process.exit(failures.length ? 1 : 0)

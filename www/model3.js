@@ -52,6 +52,10 @@ window.model3_component = function(opt, editor) {
 
 	let children  = [] // [mat1,...]
 
+	// geometry to check on the next repair().
+	let touched_pis = set() // {pi}; moved points.
+	let touched_lis = set() // {li}; created lines and lines with a new endpoint.
+
 	// model-to-view info (as in MVC).
 	let used_points_changed     // time to reload the used_pis buffer.
 	let used_lines_changed      // time to reload the *_edge_lis buffers.
@@ -160,6 +164,7 @@ window.model3_component = function(opt, editor) {
 		}
 		p.to_v3_array(points, pi)
 		update_point(pi, p)
+		touched_pis.add(pi)
 		// NOTE: pulling a 4-point face in a component with 10,000 quads
 		// does 2 × 4 × 40,000 = 320,000 comparisons per mouse move.
 		// That’s roughly a millisecond in JS.
@@ -222,6 +227,7 @@ window.model3_component = function(opt, editor) {
 		nonedge_line_count++
 		used_lines_changed = true
 		bbox_changed = true
+		touched_lis.add(li)
 
 		push_undo(unref_line, li, 1)
 
@@ -311,6 +317,7 @@ window.model3_component = function(opt, editor) {
 		lines[5*li+i] = pi
 		used_lines_changed = true
 		bbox_changed = true
+		touched_lis.add(li)
 		push_undo(set_line_endpoint, li, i, pi0)
 	}
 
@@ -811,39 +818,6 @@ window.model3_component = function(opt, editor) {
 
 	// hit testing & snapping -------------------------------------------------
 
-	// return the line from target line to its closest point
-	// with the point index in line[1].i.
-	function line_hit_points(target_line, max_d, p2p_distance2, f) {
-		let min_ds = 1/0
-		let int_line = line3()
-		let min_int_line
-		let p1 = int_line[0]
-		let p2 = int_line[1]
-		let i1 = target_line[0].i
-		let i2 = target_line[1].i
-		for (let i = 0, n = point_count(); i < n; i++) {
-			if (i == i1 || i == i2) // don't hit target line's endpoints
-				continue
-			if (!prc[i]) // unused point.
-				continue
-			get_point(i, p2)
-			target_line.project_point(p2, true, p1)
-			let ds = p2p_distance2(p1, p2)
-			if (ds <= max_d ** 2) {
-				if (f && f(int_line) === false)
-					continue
-				if (ds < min_ds) {
-					min_ds = ds
-					min_int_line = min_int_line || line3()
-					min_int_line[0].set(p1)
-					min_int_line[1].set(p2)
-					min_int_line[1].i = i
-				}
-			}
-		}
-		return min_int_line
-	}
-
 	// return the point on closest line from target point.
 	function point_hit_lines(p, max_d, p2p_distance2, f, each_line_f) {
 		let min_ds = 1/0
@@ -1081,9 +1055,205 @@ window.model3_component = function(opt, editor) {
 	e.selected_line_count = () => sel_lines.size
 	e.selected_child_count = () => sel_child_count
 
-	// draw line --------------------------------------------------------------
+	// repair -----------------------------------------------------------------
 
-	let real_p2p_distance2 = (p1, p2) => p1.distance2(p2)
+	// repair() makes the touched geometry follow the model rules again (see
+	// js/MODEL3-BUGS.txt). L1: lines that touch or cross are split there and
+	// share the point; points at the same place merge; lines with the same
+	// two points become one line.
+
+	// replace `pi` with `into_pi` in every line and face that uses it.
+	function merge_point(pi, into_pi) {
+		// lines ending at `pi`: move that end.
+		for (let li = 0, n = line_count(); li < n; li++)
+			if (line_rc(li) && (lines[5*li+0] == pi || lines[5*li+1] == pi))
+				replace_line_endpoint(li, into_pi, pi)
+		// faces using `pi`: replace the point.
+		for (let face of faces) {
+			let ei = face.indexOf(pi)
+			if (ei == -1)
+				continue
+			ref_point(into_pi)
+			replace_face_point(face, ei, into_pi)
+			unref_point(pi)
+		}
+	}
+
+	// move the faces using `li` to `into_li`, then free `li`.
+	function merge_line(li, into_li) {
+		each_line_face(li, function(face) {
+			let ei = face.lis.indexOf(li)
+			ref_line(into_li)
+			replace_edge(face, ei, into_li, li)
+			unref_line(li)
+		})
+		release_line(li)
+	}
+
+	// make one fix to line `li`; return true if it changed anything.
+	let repair_line
+	{
+	let _l0 = line3()
+	let _l1 = line3()
+	let _l2 = line3()
+	let _v0 = v3()
+	let _v1 = v3()
+	repair_line = function(li) {
+		let p1i = lines[5*li+0]
+		let p2i = lines[5*li+1]
+
+		// zero length: remove it, and its edge and repeated point from the
+		// faces that use it. a face left with fewer than 3 points has no
+		// area: remove it too (F3).
+		if (p1i == p2i) {
+			each_line_face(li, function(face) {
+				remove_edge(face, face.lis.indexOf(li), false)
+				unref_line(li)
+				unref_point(p1i)
+				if (face.point_count_without_holes() < 3)
+					remove_face(face)
+			})
+			release_line(li)
+			return true
+		}
+
+		let line = get_line(li, _l0)
+
+		// both points at one place: merge the second into the first. the
+		// point scan below skips our own points, so they aren't merged there.
+		if (line[0].distance2(line[1]) <= NEAR ** 2) {
+			merge_point(p2i, p1i)
+			return true
+		}
+
+		// the line's bounding box grown by NEAR: points and lines outside it
+		// are skipped before any distance math.
+		let x1 = min(line[0][0], line[1][0]) - NEAR
+		let y1 = min(line[0][1], line[1][1]) - NEAR
+		let z1 = min(line[0][2], line[1][2]) - NEAR
+		let x2 = max(line[0][0], line[1][0]) + NEAR
+		let y2 = max(line[0][1], line[1][1]) + NEAR
+		let z2 = max(line[0][2], line[1][2]) + NEAR
+
+		// points first, so that the line checks below never add a point
+		// where one already is: find the closest point on the line.
+		let hit_pi
+		let hit_ds = 1/0
+		for (let pi = 0, n = point_count(); pi < n; pi++) {
+			// unused point or one of our ends: skip.
+			if (pi == p1i || pi == p2i || !prc[pi])
+				continue
+			// outside the box: skip.
+			let x = points[3*pi+0]
+			let y = points[3*pi+1]
+			let z = points[3*pi+2]
+			if (x < x1 || x > x2 || y < y1 || y > y2 || z < z1 || z > z2)
+				continue
+			// on the line and closest so far: keep.
+			let p = get_point(pi, _v1)
+			line.project_point(p, true, _v0)
+			let ds = _v0.distance2(p)
+			if (ds <= NEAR ** 2 && ds < hit_ds) {
+				hit_pi = pi
+				hit_ds = ds
+			}
+		}
+
+		// point at one of our ends: merge the end into it. else: cut there.
+		if (hit_pi != null) {
+			let p = get_point(hit_pi, _v1)
+			if (p.distance2(line[0]) <= NEAR ** 2)
+				merge_point(p1i, hit_pi)
+			else if (p.distance2(line[1]) <= NEAR ** 2)
+				merge_point(p2i, hit_pi)
+			else
+				cut_line(li, hit_pi)
+			return true
+		}
+
+		// lines: fix the first one found.
+		for (let li2 = 0, n = line_count(); li2 < n; li2++) {
+			// freed line or this line: skip.
+			if (li2 == li || !line_rc(li2))
+				continue
+
+			// same two points: merge ours into it.
+			let q1i = lines[5*li2+0]
+			let q2i = lines[5*li2+1]
+			if (q1i == p1i && q2i == p2i || q1i == p2i && q2i == p1i) {
+				merge_line(li, li2)
+				return true
+			}
+
+			// outside the box: skip.
+			let a = 3*q1i
+			let b = 3*q2i
+			if (min(points[a+0], points[b+0]) > x2) continue
+			if (max(points[a+0], points[b+0]) < x1) continue
+			if (min(points[a+1], points[b+1]) > y2) continue
+			if (max(points[a+1], points[b+1]) < y1) continue
+			if (min(points[a+2], points[b+2]) > z2) continue
+			if (max(points[a+2], points[b+2]) < z1) continue
+
+			// one of our ends inside it: cut it there.
+			let line2 = get_line(li2, _l1)
+			for (let i = 0; i < 2; i++) {
+				let p = line[i]
+				if (q1i == p.i || q2i == p.i)
+					continue
+				line2.project_point(p, true, _v0)
+				if (_v0.distance2(p) <= NEAR ** 2) {
+					cut_line(li2, p.i)
+					return true
+				}
+			}
+
+			// shares an end with ours: they meet only there.
+			if (q1i == p1i || q1i == p2i || q2i == p1i || q2i == p2i)
+				continue
+
+			// crossing inside both: cut both at a new point.
+			let int_line = line.intersect_line(line2, _l2, 'clamp')
+			if (int_line && int_line[0].distance2(int_line[1]) <= NEAR ** 2) {
+				let pi = add_point(int_line[1])
+				cut_line(li, pi)
+				cut_line(li2, pi)
+				return true
+			}
+		}
+
+		return false
+	}}
+
+	// called when an operation starts: the model follows the rules then, so
+	// anything recorded before (undo, add_face(), loading) needs no check.
+	function clear_touched() {
+		touched_pis.clear()
+		touched_lis.clear()
+	}
+
+	function repair() {
+		let lis = []
+		while (touched_lis.size || touched_pis.size) {
+			// take the touched lines and the lines using touched points.
+			for (let li of touched_lis)
+				lis.push(li)
+			if (touched_pis.size)
+				for (let li = 0, n = line_count(); li < n; li++)
+					if (line_rc(li) && (touched_pis.has(lines[5*li+0])
+							|| touched_pis.has(lines[5*li+1])))
+						lis.push(li)
+			touched_lis.clear()
+			touched_pis.clear()
+			// fix each line until it needs no fix. the fixes record what they
+			// touch, which is checked in the next round.
+			for (let li of lis)
+				while (line_rc(li) && repair_line(li)) {}
+			lis.length = 0
+		}
+	}
+
+	// draw line --------------------------------------------------------------
 
 	e.draw_line = function(line) {
 
@@ -1099,78 +1269,20 @@ window.model3_component = function(opt, editor) {
 			return
 		}
 
-		let line_ps = [p1, p2] // line's points as an open polygon.
-
-		// cut the line into segments at intersections with existing points.
-		line_hit_points(line, NEAR, real_p2p_distance2, function(int_line) {
-			let p = int_line[1] // the existing point, with its index in .i.
-			let i = p.i
-			if (i !== p1.i && i !== p2.i) { // exclude end points.
-				p = p.clone()
-				p.i = i
-				line_ps.push(p)
-			}
-		})
-
-		// sort intersection points by their distance relative to p1
-		// so that adjacent points form line segments.
-		function sort_line_ps() {
-			if (line_ps.length)
-				line_ps.sort(function(sp1, sp2) {
-					let ds1 = p1.distance2(sp1)
-					let ds2 = p1.distance2(sp2)
-					return ds1 - ds2
-				})
-		}
-
-		sort_line_ps()
-
-		// check if any of the line segments intersect any existing lines.
-		// the ones that do must be broken down further, and so must the
-		// existing lines that are cut by them.
-		let line_ps_len = line_ps.length
-
-		let seg = line3()
-		for (let i = 0; i < line_ps_len-1; i++) {
-			seg[0] = line_ps[i+0]
-			seg[1] = line_ps[i+1]
-			line_hit_lines(null, seg, NEAR, real_p2p_distance2, 'clamp', null,
-				function(int_p) {
-					let p = int_p.clone()
-					p.cut_li = int_p.line.i
-					line_ps.push(p)
-					return true
-				})
-		}
-
-		// sort the points again if new points were added.
-		if (line_ps.length > line_ps_len)
-			sort_line_ps()
-
-		// create missing points.
-		for (let p of line_ps)
-			if (p.i == null) {
-				p.i = add_point(p)
-			}
-
-		// create line segments.
-		for (let i = 0, n = line_ps.length; i < n-1; i++) {
-			let p1i = line_ps[i+0].i
-			let p2i = line_ps[i+1].i
-			add_line(p1i, p2i)
-		}
-
-		// cut intersecting lines in two.
-		for (let p of line_ps) {
-			if (p.cut_li != null)
-				cut_line(p.cut_li, p.i)
-		}
+		// add the line as given: repair() splits it and what it touches.
+		clear_touched()
+		let p1i = p1.i ?? add_point(p1)
+		let p2i = p2.i ?? add_point(p2)
+		add_line(p1i, p2i)
+		repair()
 
 	}
 
 	// push/pull --------------------------------------------------------------
 
 	e.start_pull = function(p) {
+
+		clear_touched()
 
 		let pull = {}
 
@@ -1280,6 +1392,10 @@ window.model3_component = function(opt, editor) {
 							if (is_side_edge_pp) {
 								moving_lis.add(side_edge.i)
 								pp_lis.add(side_edge.i)
+							} else if (!pull.face.lis.includes(side_edge.i)) {
+								// non-pp side edge: new pp side edge at that corner.
+								// the other half of a split pulled edge moves along.
+								new_pp_edge.set(endpoint_ei, true)
 							}
 
 							moving_faces.add(face)
@@ -1303,28 +1419,65 @@ window.model3_component = function(opt, editor) {
 
 			}
 
-			// a corner moves in place only if every face and line using it moves
-			// with the pull: anything else using it needs a new pp side edge.
-			let corner_eis = map() // {pi->pull_ei}
+			// P1: a corner that moves in place slides past the lines and faces
+			// that use it but don't move: they get their own point at the
+			// corner. repair() on stop reconnects whatever touches.
+			let in_place_pis = map() // {pi->new_pi}; corners that move in place.
 			for (let ei = 0; ei < en; ei++)
-				corner_eis.set(pull.face[ei], ei)
-			for (let face of faces)
-				if (!moving_faces.has(face))
-					for (let pi of face) {
-						let ei = corner_eis.get(pi)
-						if (ei != null)
-							new_pp_edge.set(ei, true)
+				if (!new_pp_edge.has(ei)) // no new pp side edge: moves in place.
+					in_place_pis.set(pull.face[ei], null)
+
+			// the corner's new point, added on first use.
+			function disconnected_pi(pi) {
+				let new_pi = in_place_pis.get(pi)
+				if (new_pi == null) {
+					new_pi = add_point(get_point(pi, _v0))
+					in_place_pis.set(pi, new_pi)
+				}
+				return new_pi
+			}
+
+			// pp side edges and the pulled face's edges.
+			let is_moving_li = li =>
+				moving_lis.has(li) || pull.face.lis.includes(li)
+
+			// lines that don't move: move their ends off in-place corners.
+			for (let li = 0, n = line_count(); li < n; li++) {
+				if (!line_rc(li) || is_moving_li(li))
+					continue
+				for (let i = 0; i < 2; i++) {
+					let pi = lines[5*li+i]
+					if (in_place_pis.has(pi))
+						replace_line_endpoint(li, disconnected_pi(pi), pi)
+				}
+			}
+
+			// faces that don't move: replace in-place corners with the new point.
+			for (let face of faces) {
+				if (moving_faces.has(face))
+					continue
+				for (let ei = 0, n = face.length; ei < n; ei++) {
+					let pi = face[ei]
+					if (!in_place_pis.has(pi))
+						continue
+					let new_pi = disconnected_pi(pi)
+					ref_point(new_pi)
+					replace_face_point(face, ei, new_pi)
+					unref_point(pi)
+					// a moving edge at the corner (a fin on a pp side edge):
+					// the face gets its own copy of it.
+					for (let edge_ei of [ei, face.prev_i(ei)]) {
+						let li = face.lis[edge_ei]
+						if (!is_moving_li(li))
+							continue
+						let q1i = lines[5*li+0]
+						let other_pi = q1i == pi ? lines[5*li+1] : q1i
+						let new_li = ref_or_add_line(new_pi, other_pi)
+						replace_edge(face, edge_ei, new_li, li)
+						unref_line(li)
 					}
-			each_line(function(line) {
-				let ei1 = corner_eis.get(line[0].i)
-				let ei2 = corner_eis.get(line[1].i)
-				if (ei1 == null && ei2 == null)
-					return
-				if (moving_lis.has(line.i) || pull.face.lis.includes(line.i))
-					return
-				if (ei1 != null) new_pp_edge.set(ei1, true)
-				if (ei2 != null) new_pp_edge.set(ei2, true)
-			})
+				}
+			}
 
 			if (LOG)
 				log('pull.start', pull.face.i,
@@ -1440,6 +1593,7 @@ window.model3_component = function(opt, editor) {
 		pull.stop = function() {
 			// TODO: make hole, etc.
 			if (LOG) log('pull.stop')
+			repair()
 		}
 
 		return pull
