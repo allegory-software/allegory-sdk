@@ -206,62 +206,73 @@ let format_area = a => format_kcount(abs(a) / 1e6, 2)+' m\u00b2'
 //// HELP --------------------------------------------------------------------
 
 let help_lines = [
-	'Floors',
+	'View',
 	'',
-	'1 to 9: Ground floor, floors and roof',
+	'Keys 1 to 9: Switch floors',
+	'Mouse wheel: Zoom',
+	'Shift+Drag: Pan',
 	'`: Show all dimensions',
 	'',
-	'Edit',
+	'Edit Walls',
+	'',
+	'Drag near a wall, away from it: Add connected wall',
+	'Drag a wall: Move it',
+	'Drag across a wall: Split it',
+	'Double-click a wall: Delete it',
+	'←↑→↓ while over a wall: Move 1 cm',
+	'Ctrl+←↑→↓ while over a wall: Move 1 mm',
+	'Ctrl while dragging: No snapping',
+	'',
+	'Place Objects',
+	'',
+	'c over object and drop: Copy and place object',
+	'x over object and drop: Move object',
+	'd or Delete over object: Remove object',
+	'Space over object: Rotate or vary object',
+	'Ctrl+C: Copy object, or the house',
+	'Ctrl+V: Paste at the mouse',
+	'',
+	'Adjust Roofs',
+	'',
+	'Click an eave: Toggle gable / hip',
+	'Drag on an eave: adjust eave width',
+	'Drag on a ridge: adjust pitch ratio',
+	'Drag on a pitch label: adjust pitch',
+	'Double-click roof line: Reset it',
+	'Shift while dragging: Change all at once',
+	'',
+	'Undo/Redo',
 	'',
 	'Ctrl+Z: Undo',
 	'Ctrl+Y, Ctrl+Shift+Z: Redo',
-	'Ctrl+C: Copy object, or the house',
-	'Ctrl+V: Paste at the pointer',
-	'Delete: Remove object',
-	'',
-	'Hovered Wall or Object',
-	'',
-	'←↑→↓: Move 1 cm',
-	'Ctrl+←↑→↓: Move 1 mm',
-	'Space: Rotate or vary object',
-	'',
-	'Mouse',
-	'',
-	'Drag near a wall: Add wall',
-	'Drag across a wall: Split wall',
-	'Double-click a wall: Delete it',
-	'Wheel: Zoom',
-	'Shift+Drag: Pan',
-	'Click an eave: Toggle gable',
-	'Double-click roof line: Reset it',
-	'',
-	'While Dragging',
-	'',
-	'Ctrl: No snapping, sizes and lengths in mm',
-	'Shift on an eave or pitch: Move all of its kind',
 ]
 
 //// SETTINGS ----------------------------------------------------------------
 
-function setting_field(min, max) {
-	return ui.create_field({type: 'number', min: min, max: max, decimals: 1})
-}
-
-// the house settings that the editor changes. their sliders are in cm.
-let settings = [
-	{name: 'int_wall_thickness', field: setting_field(2, 50),
-		label: () => S('int_wall_thickness', 'Interior wall thickness (cm)')},
-	{name: 'ext_wall_thickness', field: setting_field(2, 80),
-		label: () => S('ext_wall_thickness', 'Exterior wall thickness (cm)')},
-	{name: 'slab_thickness', field: setting_field(5, 100),
-		label: () => S('slab_thickness', 'Slab thickness (cm)')},
-	{name: 'roof_thickness', field: setting_field(5, 100),
-		label: () => S('roof_thickness', 'Roof thickness (cm)')},
-	{name: 'floor_h', field: setting_field(150, 600),
-		label: () => S('floor_height', 'Floor height (cm)')},
-	{name: 'half_wall_h', field: setting_field(30, 200),
-		label: () => S('half_wall_height', 'Half-wall height (cm)')},
-]
+let int_wall_thickness_field = ui.create_field({
+	type: 'number', min: 50, max: 300, scale: 10, decimals: 1,
+	keep_valid: true, not_null: true,
+})
+let ext_wall_thickness_field = ui.create_field({
+	type: 'number', min: 150, max: 600, scale: 10, decimals: 1,
+	keep_valid: true, not_null: true,
+})
+let slab_thickness_field = ui.create_field({
+	type: 'number', min: 100, max: 500, scale: 10, decimals: 1,
+	keep_valid: true, not_null: true,
+})
+let roof_thickness_field = ui.create_field({
+	type: 'number', min: 100, max: 600, scale: 10, decimals: 1,
+	keep_valid: true, not_null: true,
+})
+let floor_h_field = ui.create_field({
+	type: 'number', min: 2200, max: 4000, scale: 10, decimals: 1,
+	keep_valid: true, not_null: true,
+})
+let half_wall_h_field = ui.create_field({
+	type: 'number', min: 500, max: 1500, scale: 10, decimals: 1,
+	keep_valid: true, not_null: true,
+})
 
 //// FLOOR EDITOR ------------------------------------------------------------
 
@@ -296,7 +307,7 @@ function create_floor_editor(id) {
 	let s // ui.state(id): house, floor, readonly and the input value
 	let is_roof_level // the roof level: the top floor's roof is edited
 	let value_edit_no // house.edit_no of the value loaded or published
-	let setting_edit, setting_name // the running settings edit and its setting
+	let settings0 // {setting name -> value}: before opening Settings
 	// the floor whose roof is edited: the floor below; the roof level: the
 	// top floor.
 	let roof_floor
@@ -368,6 +379,42 @@ function create_floor_editor(id) {
 		let is_roof_level0 = is_roof_level
 		let edit_no0 = s.house.edit_no
 		let floors = s.house.floors
+
+		// the settings: one house edit per visit to the popup.
+		if (ui.dropdown_open(id+'.settings')) {
+			if (!settings0) {
+				settings0 = {
+					int_wall_thickness: s.house.int_wall_thickness,
+					ext_wall_thickness: s.house.ext_wall_thickness,
+					slab_thickness: s.house.slab_thickness,
+					roof_thickness: s.house.roof_thickness,
+					floor_h: s.house.floor_h,
+					half_wall_h: s.house.half_wall_h,
+				}
+			}
+			let value = ui.value(id+'.setting.int_wall_thickness')
+			if (value != null)
+				s.house.set_setting('int_wall_thickness', value)
+			value = ui.value(id+'.setting.ext_wall_thickness')
+			if (value != null)
+				s.house.set_setting('ext_wall_thickness', value)
+			value = ui.value(id+'.setting.slab_thickness')
+			if (value != null)
+				s.house.set_setting('slab_thickness', value)
+			value = ui.value(id+'.setting.roof_thickness')
+			if (value != null)
+				s.house.set_setting('roof_thickness', value)
+			value = ui.value(id+'.setting.floor_h')
+			if (value != null)
+				s.house.set_setting('floor_h', value)
+			value = ui.value(id+'.setting.half_wall_h')
+			if (value != null)
+				s.house.set_setting('half_wall_h', value)
+		} else if (settings0) {
+			s.house.record_settings_edit(settings0)
+			settings0 = null
+		}
+
 		// floor label clicked: focus the editor; the label isn't focusable, so
 		// the click cleared the focus.
 		for (let floor of floors) {
@@ -416,7 +463,7 @@ function create_floor_editor(id) {
 				select_floor(floors[floors.length-1], true)
 		}
 		let is_restored = false
-		if (!readonly && !cs && ui.focus_inside(id)) {
+		if (!readonly && !cs && !settings0 && ui.focus_inside(id)) {
 			let entry // the operation that the undo or redo performed
 			if (ui.keydown('ctrl shift z') || ui.keydown('ctrl y'))
 				entry = s.house.redo()
@@ -479,25 +526,6 @@ function create_floor_editor(id) {
 		}
 		if (ui.state_of(id+'.zoom_button', 'state') == 'click')
 			reset_view_zoom()
-
-		// the settings: one house edit per run of frames with user input.
-		let edited_name, edited_value // the setting the user is changing, in cm
-		for (let setting of settings) {
-			let value = ui.interaction_value(id+'.setting.'+setting.name)
-			if (value != null) { // a cleared input has no value to set.
-				edited_name = setting.name
-				edited_value = value
-			}
-		}
-		if (setting_edit && setting_name != edited_name) {
-			setting_edit.stop()
-			setting_edit = null
-		}
-		if (edited_name) {
-			setting_name = edited_name
-			setting_edit ??= s.house.start_edit_setting(edited_name)
-			setting_edit.move(edited_value * 10)
-		}
 
 		let hs = ui.hit(id)
 		if ((hs || cs) && ui.wheel_dy) {
@@ -2544,7 +2572,7 @@ function create_floor_editor(id) {
 			s.floor = floors?.[is_roof_level ? floors.length-1
 				: min(ss?.floor ?? 0, floors.length-1)]
 			value_edit_no = 0 // house.edit_no of the value loaded or published
-			setting_edit = null // the edit of the replaced house
+			settings0 = null // the settings of the replaced house
 		}
 		s.readonly = readonly ?? field.readonly
 		if (!s.house) {
@@ -2634,15 +2662,56 @@ function create_floor_editor(id) {
 						ui.h2(S('settings', 'Settings'))
 						ui.min_w(ui.em(24))
 						ui.v_aligned(0, ui.sp(), 's', 't')
-							for (let setting of settings) {
-								let setting_id = id+'.setting.'+setting.name
-								ui.h(0, ui.sp1(), 's', 'c')
-									ui.label(setting_id, setting.label(), 0)
-									ui.num_slider(setting_id,
-										s.house[setting.name] / 10, setting.field,
-										1, null, null, s.readonly)
-								ui.end_h()
-							}
+							let setting_id = id+'.setting.int_wall_thickness'
+							ui.h(0, ui.sp1(), 's', 'c')
+								ui.label(setting_id,
+									S('int_wall_thickness',
+										'Interior wall thickness (cm)'), 0)
+								ui.num_slider(setting_id,
+									s.house.int_wall_thickness,
+									int_wall_thickness_field, 1, null, null, s.readonly)
+							ui.end_h()
+							setting_id = id+'.setting.ext_wall_thickness'
+							ui.h(0, ui.sp1(), 's', 'c')
+								ui.label(setting_id,
+									S('ext_wall_thickness',
+										'Exterior wall thickness (cm)'), 0)
+								ui.num_slider(setting_id,
+									s.house.ext_wall_thickness,
+									ext_wall_thickness_field, 1, null, null, s.readonly)
+							ui.end_h()
+							setting_id = id+'.setting.slab_thickness'
+							ui.h(0, ui.sp1(), 's', 'c')
+								ui.label(setting_id,
+									S('slab_thickness', 'Slab thickness (cm)'), 0)
+								ui.num_slider(setting_id,
+									s.house.slab_thickness, slab_thickness_field,
+									1, null, null, s.readonly)
+							ui.end_h()
+							setting_id = id+'.setting.roof_thickness'
+							ui.h(0, ui.sp1(), 's', 'c')
+								ui.label(setting_id,
+									S('roof_thickness', 'Roof thickness (cm)'), 0)
+								ui.num_slider(setting_id,
+									s.house.roof_thickness, roof_thickness_field,
+									1, null, null, s.readonly)
+							ui.end_h()
+							setting_id = id+'.setting.floor_h'
+							ui.h(0, ui.sp1(), 's', 'c')
+								ui.label(setting_id,
+									S('floor_height', 'Floor height (cm)'), 0)
+								ui.num_slider(setting_id,
+									s.house.floor_h, floor_h_field,
+									1, null, null, s.readonly)
+							ui.end_h()
+							setting_id = id+'.setting.half_wall_h'
+							ui.h(0, ui.sp1(), 's', 'c')
+								ui.label(setting_id,
+									S('half_wall_height', 'Half-wall height (cm)'), 0)
+								ui.num_slider(setting_id,
+									s.house.half_wall_h, half_wall_h_field,
+									1, null, null, s.readonly)
+							ui.end_h()
 						ui.end_v_aligned()
 						ui.end_popup_button(id+'.settings')
 					}

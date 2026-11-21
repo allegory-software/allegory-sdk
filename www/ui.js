@@ -5917,7 +5917,7 @@ function reset_text_font() {
 
 USER API
 
-	ui.value             (id) -> v | undefined  what the input holds, if valid
+	ui.value             (id) -> v | undefined  valid value or keep_valid fallback
 	ui.input_value       (id) -> v | undefined   current value, valid or not
 	ui.interaction_value (id) -> v | undefined   user input this pass
 
@@ -5942,7 +5942,8 @@ INVARIANTS
 	- current interaction: returned over the caller value, validated on change.
 	- past interaction: kept in input, returned when caller value is undefined.
 	- default: from saved_value_def, or null.
-- ui.value() returns only valid values (undefined when invalid).
+- ui.value() returns undefined when invalid, or the last valid value when
+  field.keep_valid is true.
 - ui.interaction_value() gives the value from current interaction, valid or not,
   or undefined when not interacted in this build pass, so it's an edge event.
 - reading the value runs the input's update callback. this gives updated
@@ -5967,7 +5968,9 @@ ui.input_value = function(id, s = ui.state_of(id)) {
 
 ui.value = function(id) {
 	let s = ui.state_of(id)
-	return s?.validation?.failed ? undefined : ui.input_value(id, s)
+	return s?.validation?.failed
+		? s.field.keep_valid ? s.last_valid_value : undefined
+		: ui.input_value(id, s)
 }
 
 ui.interaction_value = function(id) {
@@ -5980,6 +5983,8 @@ function set_interaction_value(id, s, value) {
 	if (value !== undefined && s.field) {
 		if (value !== s.input_value)
 			s.field.validator.validate(value, s.validation)
+		if (s.field.keep_valid && !s.validation.failed)
+			s.last_valid_value = value
 		if (saved_values.has(id))
 			ui.set_saved_value(id, value)
 	}
@@ -6001,7 +6006,9 @@ function set_value(id, s, value, field) {
 		if (saved_value) {
 			value = s.validation?.failed && value0 !== undefined
 				? value0 : saved_value.value
-		} else if (value === undefined) {
+		} else if (value === undefined || field?.keep_valid
+				&& field == s.field && s.validation.failed
+				&& value === s.last_valid_value) {
 			value = value0 ?? null
 		}
 		if (value !== value0)
@@ -6011,10 +6018,14 @@ function set_value(id, s, value, field) {
 	let field0 = s.field
 	s.field = field // input's field, or nothing
 	if (field) {
-		if (field != field0) // field changed: remake validator's output object.
+		if (field != field0) { // field changed: remake validator's output object.
 			s.validation = field.validator.create_output()
+			s.last_valid_value = undefined
+		}
 		if (field != field0 || !is_input && value !== value0)
 			field.validator.validate(value, s.validation)
+		if (field.keep_valid && !s.validation.failed)
+			s.last_valid_value = value
 	}
 	return value
 }
@@ -6744,6 +6755,8 @@ function set_text_input_value(id, s, text) {
 	let out = s.validation
 	s.field.validator.validate(input_value, out)
 	s.interaction_value = out.parse_failed ? input_value : out.value
+	if (s.field.keep_valid && !out.failed)
+		s.last_valid_value = s.interaction_value
 	if (saved_values.has(id))
 		ui.set_saved_value(id, input_value)
 }
@@ -11653,7 +11666,8 @@ function build_input_row(id, value, opt, is_bound, fr, align, valign) {
 				ui.min_h(opt.min_h)
 			value = ui.input(id, null, readonly_text_field)
 		} else {
-			let readonly = ri != null && !nav.can_change_val(ri, field.fi)
+			let readonly = ri != null
+				? !nav.can_change_val(ri, field.fi) : field.readonly
 			value = field.build_input(id, value, opt, control, readonly)
 		}
 		if (ri != null) {
@@ -11704,7 +11718,7 @@ function build_input_row(id, value, opt, is_bound, fr, align, valign) {
 		ui.end_h()
 	}
 
-	return has_error ? undefined : value
+	return is_bound && has_error ? undefined : value
 }
 
 ui.field_input = function(id, value, opt, fr, align, valign) {

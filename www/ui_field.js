@@ -22,6 +22,7 @@ Field attributes (* = client-only):
 		readonly       : prevent modifying on new rows or existing rows.
 	*	immutable      : prevent modifying on existing rows.
 		not_null       : don't allow null (false).
+	*	keep_valid     : return the last valid value during invalid edits.
 	*	to_input       : f(v) -> s   value as editable text.
 	*	from_input     : f(s) -> v   editable text back to value (or undefined)
 	*	input_type     : input element type.
@@ -710,6 +711,7 @@ let field_config_checks = {
 	readonly: optional_bool,
 	nosave: optional_bool,
 	not_null: optional_bool,
+	keep_valid: optional_bool,
 	has_server_default: optional_bool,
 	auto_increment: optional_bool,
 	sortable: optional_bool,

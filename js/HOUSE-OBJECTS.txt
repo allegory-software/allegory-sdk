@@ -30,6 +30,9 @@ like door panel thickness, etc.
 	- custom profile
 	- limited eave extension over the butt wall
 
+- x and ctrl+x
+- r rotate object? rotate view?
+
 
 ## Cosmin's request (2026-11-17)
 

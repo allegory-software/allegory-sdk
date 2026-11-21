@@ -203,8 +203,11 @@ An input ignores the caller's value on any frame in which the user
 interacted with it, and takes the caller's value on every other frame; an
 input bound to a saved-value model takes its accepted value, except while
 preserving an invalid edit (see WIDGET STATE).
-It returns what it holds while that is valid and undefined while it is not,
-on every call, and ui.value(id) answers the same.
+With field.keep_valid, an input also preserves an invalid edit when the caller
+passes its last valid value back. A different caller value replaces the edit.
+It returns what it holds while valid. While invalid, it returns undefined, or
+its last valid value with field.keep_valid. With no previous valid value, it
+returns undefined. ui.value(id) answers the same on every call.
 
 The user interacted when the widget itself read an input event addressed to
 it -- a click, a drag, a key -- or when the browser wrote into it between
@@ -248,9 +251,10 @@ index unchanged until the user picks a row.
 An input accepts and displays a value it cannot interpret, and keeps it: text
 that does not parse stays in the box as the user typed it, and
 ui.interaction_value(id) gives it on the frame the user typed it. The input
-returns undefined for it, and so does ui.value(id). Nothing discards what the
-user is in the middle of writing and nothing corrects it. A nav stores invalid
-cell edits. A saved-value model accepts only valid writes.
+returns undefined for it, or its last valid value with field.keep_valid, and
+ui.value(id) answers the same. Nothing discards what the user is in the middle
+of writing and nothing corrects it. A nav stores invalid cell edits. A
+saved-value model accepts only valid writes.
 
 Reading an input before it builds gives what the user has done to it so far.
 That is the answer a reader wants, and the only one that does not change

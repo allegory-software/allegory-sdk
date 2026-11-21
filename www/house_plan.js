@@ -3851,10 +3851,8 @@ function house_plan(t) {
 
 	//// SETTINGS -------------------------------------------------------------
 
-	// set the house setting `name` (a key of defaults) and rebuild what it
-	// changes: the floors' heights and wall edges.
-	function apply_setting(name, value) {
-		house[name] = value
+	// rebuild the floors' heights and wall edges after changing settings.
+	function fix_settings() {
 		for (let floor of house.floors)
 			floor.h = floor.fixed_h ?? house.floor_h
 		fix_floor_heights()
@@ -3862,25 +3860,25 @@ function house_plan(t) {
 			floor.fix()
 	}
 
-	// start changing the setting `name`: s.move(value) sets it, s.stop()
-	// commits the changes as one edit.
-	house.start_edit_setting = function(name) {
+	house.set_setting = function(name, value) {
 		assert(!edit0)
-		let value0 = house[name]
-		let s = {}
-		s.move = function(value) {
-			value = snap_length(value)
-			if (house[name] != value)
-				apply_setting(name, value)
+		value = snap_length(value)
+		if (house[name] != value) {
+			house[name] = value
+			fix_settings()
 		}
-		s.stop = function() {
-			if (house[name] == value0)
-				return
-			undo_stack.push({op: 'setting', name: name, value: value0})
-			redo_stack.length = 0
-			house.edit_no++
+	}
+
+	house.record_settings_edit = function(settings0) {
+		assert(!edit0)
+		for (let name in settings0) {
+			if (house[name] != settings0[name]) {
+				undo_stack.push({op: 'settings', settings: settings0})
+				redo_stack.length = 0
+				house.edit_no++
+				break
+			}
 		}
-		return s
 	}
 
 	//// GRID ORIGIN ----------------------------------------------------------
@@ -4023,10 +4021,14 @@ function house_plan(t) {
 			house.grid_x = entry.x
 			house.grid_y = entry.y
 			return {op: 'grid_origin', x: x, y: y}
-		} else if (op == 'setting') {
-			let value = house[entry.name]
-			apply_setting(entry.name, entry.value)
-			return {op: 'setting', name: entry.name, value: value}
+		} else if (op == 'settings') {
+			let settings0 = {}
+			for (let name in entry.settings) {
+				settings0[name] = house[name]
+				house[name] = entry.settings[name]
+			}
+			fix_settings()
+			return {op: 'settings', settings: settings0}
 		}
 	}
 

@@ -1000,28 +1000,54 @@ check('moving a floor height moves upper floors and saves one undo', () => {
 
 // settings -----------------------------------------------------------------
 
-check('a wall thickness setting rebuilds the walls and is one undo step', () => {
+check('settings preview live and undo together after recording', () => {
 	let h = house(ctx.house_test_plans.simple)
 	let bb0 = [...h.bb]
 	let edit_no = h.edit_no
-	let s = h.start_edit_setting('ext_wall_thickness')
-	s.move(300.4)
-	s.move(400)
+	let settings0 = {
+		ext_wall_thickness: h.ext_wall_thickness,
+		floor_h: h.floor_h,
+	}
+	h.set_setting('ext_wall_thickness', 300.4)
+	assert.equal(h.ext_wall_thickness, 300)
+	h.set_setting('ext_wall_thickness', 400)
+	h.set_setting('floor_h', 3000)
 	assert.equal(h.ext_wall_thickness, 400)
+	assert.equal(h.floors[0].h, 3000)
 	assert(h.bb[0] < bb0[0])
 	assert.equal(h.edit_no, edit_no)
-	s.stop()
+	h.record_settings_edit(settings0)
 	assert.equal(h.edit_no, edit_no + 1)
 	let bb1 = [...h.bb]
 	assert(h.undo())
 	assert.equal(h.ext_wall_thickness, 180)
+	assert.equal(h.floor_h, settings0.floor_h)
+	assert.equal(h.floors[0].h, settings0.floor_h)
 	assert.deepEqual([...h.bb], bb0)
 	assert.equal(h.undo(), null)
 	assert(h.redo())
 	assert.equal(h.ext_wall_thickness, 400)
+	assert.equal(h.floors[0].h, 3000)
 	assert.deepEqual([...h.bb], bb1)
 	assert.equal(JSON.stringify(h.save_state()).includes('"ext_wall_thickness":400'),
 		true)
+})
+
+check('unchanged settings add no undo entry and preserve redo', () => {
+	let h = house(ctx.house_test_plans.simple)
+	let settings0 = {ext_wall_thickness: h.ext_wall_thickness}
+	h.set_setting('ext_wall_thickness', 400)
+	h.record_settings_edit(settings0)
+	h.undo()
+	let edit_no = h.edit_no
+	h.record_settings_edit(settings0)
+	h.set_setting('ext_wall_thickness', 300)
+	h.set_setting('ext_wall_thickness', settings0.ext_wall_thickness)
+	h.record_settings_edit(settings0)
+	assert.equal(h.edit_no, edit_no)
+	assert.equal(h.undo(), null)
+	assert(h.redo())
+	assert.equal(h.ext_wall_thickness, 400)
 })
 
 // objects ------------------------------------------------------------------
