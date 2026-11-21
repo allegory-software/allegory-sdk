@@ -516,6 +516,99 @@ const results = await page.evaluate(() => {
 		return check_pull_undo(c, F[1], 1)
 	})
 
+	// the ledge is coplanar with the top and shares its x = 2 edge with the top
+	// and the wall below: the wall stays and the pull adds a face above it.
+	check('pull a box top that shares an edge with a ledge: rcs, undo, redo', () => {
+		let c = make_comp()
+		let P = [[0,0,0], [2,0,0], [2,2,0], [0,2,0], [0,0,2], [2,0,2], [2,2,2],
+			[0,2,2], [3,0,2], [3,2,2]].map(p => c.add_point_xyz(...p))
+		let F = [[1,0,3,2], [4,5,6,7], [7,6,2,3], [4,0,1,5], [0,4,7,3],
+			[5,1,2,6]].map(f => c.add_face(f.map(i => P[i])))
+		c.add_face([5, 8, 9, 6].map(i => P[i]))
+		let wall = F[5]
+		let wall_pis0 = Array.from(wall).join()
+		let err = check_pull_undo(c, F[1], 1)
+		if (err !== true)
+			return err
+		return Array.from(wall).join() == wall_pis0 ||
+			`wall points ${Array.from(wall)}, want ${wall_pis0}`
+	})
+
+	// a box with outward faces; `extra_pts` go after its 8 points.
+	function add_box(c, extra_pts) {
+		let P = [[0,0,0], [2,0,0], [2,2,0], [0,2,0], [0,0,2], [2,0,2], [2,2,2],
+			[0,2,2], ...(extra_pts ?? [])].map(p => c.add_point_xyz(...p))
+		return P
+	}
+	const box_faces = [[1,0,3,2], [4,5,6,7], [7,6,2,3], [4,0,1,5], [0,4,7,3],
+		[5,1,2,6]]
+
+	// the top's x = 2 edge is split at (2,1,2), and so is the wall's.
+	known_bug('pull a box top whose edge is split: the wall gets the split point once', () => {
+		let c = make_comp()
+		let P = add_box(c, [[2,1,2]])
+		let faces = [[1,0,3,2], [4,5,8,6,7], [7,6,2,3], [4,0,1,5], [0,4,7,3],
+			[5,1,2,6,8]]
+		let F = faces.map(f => c.add_face(f.map(i => P[i])))
+		return check_pull_undo(c, F[1], 1)
+	})
+
+	known_bug('pull a box top: a standalone line at a corner stays', () => {
+		let c = make_comp()
+		let P = add_box(c, [[-1,-1,2]])
+		let F = box_faces.map(f => c.add_face(f.map(i => P[i])))
+		let li = c.add_line(P[4], P[8])
+		let err = check_pull_undo(c, F[1], 1)
+		if (err !== true)
+			return err
+		let l = c.get_line(li, line3())
+		return veq(l[0], [0, 0, 2]) || 'line moved to ' + Array.from(l[0])
+	})
+
+	// the fin is coplanar with the y = 0 wall and attached along its edge 1-5.
+	known_bug('pull a box top: a fin at a corner stays', () => {
+		let c = make_comp()
+		let P = add_box(c, [[3,0,0], [3,0,2]])
+		let F = box_faces.map(f => c.add_face(f.map(i => P[i])))
+		let fin = c.add_face([1, 8, 9, 5].map(i => P[i]))
+		let err = check_pull_undo(c, F[1], 1)
+		if (err !== true)
+			return err
+		let zs = Array.from(fin).map(pi => c.get_point(pi, v3())[2])
+		return zs.join() == '0,0,2,2' || 'fin zs ' + zs
+	})
+
+	known_bug('pull by 0 leaves no zero-area faces', () => {
+		let c = make_comp()
+		add_square(c, 0, 0, 1)
+		let f = live_faces(c)[0]
+		let p = f.center(v3())
+		p.face = f
+		let pull = c.start_pull(p)
+		pull.pull(0)
+		pull.stop()
+		for (let face of live_faces(c))
+			if (!(face.area() > 0))
+				return `face ${face.i} has area ${face.area()}`
+		return true
+	})
+
+	known_bug('draw_line across a face edge adds the cut point to the face', () => {
+		let c = make_comp()
+		add_square(c, 0, 0, 2)
+		c.draw_line(line3(v3(1, -1, 0), v3(1, 1, 0)))
+		return check_rcs(c) || true
+	})
+
+	known_bug('draw_line starting on a line makes no zero-length line', () => {
+		let c = make_comp()
+		c.add_line(c.add_point_xyz(0, 0, 0), c.add_point_xyz(2, 0, 0))
+		c.draw_line(line3(v3(1, 0, 0), v3(1, -1, 0)))
+		let short = 0
+		c.each_line(l => { if (l[0].distance2(l[1]) < 1e-12) short++ })
+		return !short || short + ' zero-length lines'
+	})
+
 	check('draw_line crossing a line: rcs, undo, redo', () => {
 		let c = make_comp()
 		c.add_line(c.add_point_xyz(1, -1, 0), c.add_point_xyz(1, 1, 0))

@@ -1209,6 +1209,8 @@ window.model3_component = function(opt, editor) {
 
 			let en = pull.face.length
 
+			let pp_side_faces = [] // [face1, face1_ei, ...]; pp faces containing the pulled edge.
+
 			// for each edge of the pulled face, find all faces that also
 			// contain that edge and are pp to the pulled face. there should be
 			// at most two such faces per edge, one on each side of the pulled face.
@@ -1217,6 +1219,9 @@ window.model3_component = function(opt, editor) {
 
 				let pp_faces_found = 0
 				pull.face.get_edge(pull_ei, pull_edge)
+				let pull_li = pull.face.lis[pull_ei]
+				let non_pp_face_has_edge = false
+				pp_side_faces.length = 0
 
 				for (let face of faces) {
 
@@ -1224,47 +1229,9 @@ window.model3_component = function(opt, editor) {
 
 						if (abs(face.plane().normal.dot(pull.face.plane().normal)) < NEAR) { // face is pp.
 
-							let pull_li = pull.face.lis[pull_ei]
 							let face_ei = face.lis.indexOf(pull_li)
-							if (face_ei != -1) { // face contains our pulled edge, so it's a pp side face.
-
-								pp_faces_found++
-
-								pull_edge.delta(normal).normalize()
-
-								// iterate exactly twice: for prev pp edge and for next pp edge,
-								// each of which connects to one of the endpoints of our pulled edge,
-								// and we don't know which one, we need to find out.
-								for (let i = 0; i <= 1; i++) {
-
-									let side_ei = i ? face.next_i(face_ei) : face.prev_i(face_ei)
-									face.get_edge(side_ei, side_edge)
-
-									let is_side_edge_pp = abs(side_edge.delta(_v0).dot(normal)) < NEAR
-
-									// figure out which endpoint of the pulled edge this side edge connects to.
-									let is_first  = side_edge[0].i == pull_edge[0].i || side_edge[1].i == pull_edge[0].i
-									let is_second = side_edge[0].i == pull_edge[1].i || side_edge[1].i == pull_edge[1].i
-									assert(is_first || is_second)
-									let endpoint_ei = is_first ? pull_ei : pull.face.next_i(pull_ei)
-
-									if (is_side_edge_pp) {
-										moving_lis.add(side_edge.i)
-										pp_lis.add(side_edge.i)
-									} else {
-										new_pp_edge.set(endpoint_ei, true)
-									}
-
-									moving_faces.add(face)
-
-									// add a command to extend this face with a pp edge if it turns out
-									// that the point at `endpoint_ei` will have a pp edge.
-									// NOTE: can't call insert_edge() with ei=0. luckily, we don't have to.
-									attr(ins_edge, face, Array).push([face_ei + 1, i == 0, endpoint_ei])
-
-								}
-
-							}
+							if (face_ei != -1) // face contains our pulled edge, so it's a pp side face.
+								pp_side_faces.push(face, face_ei)
 
 						} else { // face is not pp, check if it connects to the pulled face at all.
 
@@ -1275,10 +1242,61 @@ window.model3_component = function(opt, editor) {
 								new_pp_edge.set(pull_ei, true)
 							}
 
+							if (face.lis.includes(pull_li))
+								non_pp_face_has_edge = true
+
 						}
 
 					}
 
+				}
+
+				// a non-pp face keeps the pulled edge in place, so the pp side faces
+				// can't stretch along with it: make a new pp face on the edge instead.
+				if (!non_pp_face_has_edge) {
+					let j = 0
+					while (j < pp_side_faces.length) {
+						let face    = pp_side_faces[j+0]
+						let face_ei = pp_side_faces[j+1]
+
+						pp_faces_found++
+
+						pull_edge.delta(normal).normalize()
+
+						// iterate exactly twice: for prev pp edge and for next pp edge,
+						// each of which connects to one of the endpoints of our pulled edge,
+						// and we don't know which one, we need to find out.
+						for (let i = 0; i <= 1; i++) {
+
+							let side_ei = i ? face.next_i(face_ei) : face.prev_i(face_ei)
+							face.get_edge(side_ei, side_edge)
+
+							let is_side_edge_pp = abs(side_edge.delta(_v0).dot(normal)) < NEAR
+
+							// figure out which endpoint of the pulled edge this side edge connects to.
+							let is_first  = side_edge[0].i == pull_edge[0].i || side_edge[1].i == pull_edge[0].i
+							let is_second = side_edge[0].i == pull_edge[1].i || side_edge[1].i == pull_edge[1].i
+							assert(is_first || is_second)
+							let endpoint_ei = is_first ? pull_ei : pull.face.next_i(pull_ei)
+
+							if (is_side_edge_pp) {
+								moving_lis.add(side_edge.i)
+								pp_lis.add(side_edge.i)
+							} else {
+								new_pp_edge.set(endpoint_ei, true)
+							}
+
+							moving_faces.add(face)
+
+							// add a command to extend this face with a pp edge if it turns out
+							// that the point at `endpoint_ei` will have a pp edge.
+							// NOTE: can't call insert_edge() with ei=0. luckily, we don't have to.
+							attr(ins_edge, face, Array).push([face_ei + 1, i == 0, endpoint_ei])
+
+						}
+
+						j += 2
+					}
 				}
 
 				if (!pp_faces_found) { // no pp faces found: create one along with its two edges.
