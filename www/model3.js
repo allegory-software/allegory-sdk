@@ -26,7 +26,7 @@ const {
 	extend, insert, remove, remove_value, map, set, assign, attr, json,
 } = glue
 
-const {NEAR, v3, mat4, line3, box3, poly3} = Math3D
+const {NEAR, v3, mat4, line3, box3, poly3, pseudo_angle, angle_sweep} = Math3D
 
 window.DEBUG_MODEL3 ??= 0
 
@@ -1090,6 +1090,28 @@ window.model3_component = function(opt, editor) {
 		release_line(li)
 	}
 
+	// L2: join `li2` into `li` at `pi`, the point that only they use; `li`
+	// then ends at `other_pi`, the other end of `li2`.
+	function join_line(li, pi, li2, other_pi) {
+		set_line_smoothness (li, max(line_smoothness(li), line_smoothness(li2)))
+		set_line_opacity    (li, max(line_opacity(li), line_opacity(li2)))
+		// each face at `pi`: put `li` on the edge before `pi`, then remove
+		// `pi` and the edge after it.
+		for (let face of faces) {
+			let ei = face.indexOf(pi)
+			if (ei == -1)
+				continue
+			let prev_ei = face.prev_i(ei)
+			if (face.lis[prev_ei] == li2)
+				replace_edge(face, prev_ei, li, li2)
+			remove_edge(face, ei, false)
+			unref_line(li2)
+			unref_point(pi)
+		}
+		replace_line_endpoint(li, other_pi, pi)
+		release_line(li2)
+	}
+
 	// make one fix to line `li`; return true if it changed anything.
 	let repair_line
 	{
@@ -1172,6 +1194,8 @@ window.model3_component = function(opt, editor) {
 		}
 
 		// lines: fix the first one found.
+		let p1_li2 // the only other line at our first end; -1: more than one.
+		let p2_li2 // the only other line at our second end; -1: more than one.
 		for (let li2 = 0, n = line_count(); li2 < n; li2++) {
 			// freed line or this line: skip.
 			if (li2 == li || !line_rc(li2))
@@ -1208,9 +1232,16 @@ window.model3_component = function(opt, editor) {
 				}
 			}
 
-			// shares an end with ours: they meet only there.
-			if (q1i == p1i || q1i == p2i || q2i == p1i || q2i == p2i)
+			// shares an end with ours, so they meet only there; remember it
+			// for L2.
+			if (q1i == p1i || q2i == p1i) {
+				p1_li2 = p1_li2 == null ? li2 : -1
 				continue
+			}
+			if (q1i == p2i || q2i == p2i) {
+				p2_li2 = p2_li2 == null ? li2 : -1
+				continue
+			}
 
 			// crossing inside both: cut both at a new point.
 			let int_line = line.intersect_line(line2, _l2, 'clamp')
@@ -1218,6 +1249,25 @@ window.model3_component = function(opt, editor) {
 				let pi = add_point(int_line[1])
 				cut_line(li, pi)
 				cut_line(li2, pi)
+				return true
+			}
+		}
+
+		// L2: when only one other line uses an end, and it continues ours in
+		// a straight line, join it into ours.
+		for (let i = 0; i < 2; i++) {
+			let li2 = i ? p2_li2 : p1_li2
+			if (li2 == null || li2 == -1)
+				continue
+			let pi = line[i].i
+			let q1i = lines[5*li2+0]
+			let other_pi = q1i == pi ? lines[5*li2+1] : q1i
+			let joined_line = _l1
+			get_point(line[1-i].i, joined_line[0])
+			get_point(other_pi, joined_line[1])
+			joined_line.project_point(line[i], true, _v0)
+			if (_v0.distance2(line[i]) <= NEAR ** 2) {
+				join_line(li, pi, li2, other_pi)
 				return true
 			}
 		}
@@ -1253,6 +1303,261 @@ window.model3_component = function(opt, editor) {
 		}
 	}
 
+	// F1: faces from cycles of lines -----------------------------------------
+
+	// walk the cycle on the left of line `li` going from `p1i` to `p2i`, in
+	// the plane through `p1i` with `normal`: take the sharpest left turn at
+	// each point and walk back out of filaments. fill `pis` and `lis`; return
+	// false when the cycle doesn't have `li` once, or turns clockwise in
+	// total (an outer cycle).
+	let walk_cycle
+	{
+	let _v0 = v3()
+	let _v1 = v3()
+	let _v2 = v3()
+	let _v3 = v3()
+	let _v4 = v3()
+	walk_cycle = function(li, p1i, p2i, normal, pis, lis) {
+		let p1 = get_point(p1i, _v0)
+		let x_axis = get_point(p2i, _v1).sub(p1).normalize()
+		let y_axis = _v2.set(normal).cross(x_axis)
+		let plane_const = -normal.dot(p1)
+		pis.length = 0
+		lis.length = 0
+		pis.push(p1i, p2i)
+		lis.push(li)
+		let from_pi = p1i
+		let cur_pi = p2i
+		let turn_angle = 0 // pseudo-angles: 4 for a cycle, -4 for an outer one.
+		while (1) {
+			let cur_p = get_point(cur_pi, _v3)
+			let back_dir = get_point(from_pi, _v4).sub(cur_p)
+			let back_angle =
+				pseudo_angle(back_dir.dot(x_axis), back_dir.dot(y_axis))
+			// take the line with the smallest clockwise angle from the way
+			// back. the way back has the largest angle, so it's taken only at
+			// the end of a filament.
+			let next_li
+			let next_pi
+			let min_cw_angle = 1/0
+			for (let li2 = 0, n = line_count(); li2 < n; li2++) {
+				if (!line_rc(li2))
+					continue
+				let q1i = lines[5*li2+0]
+				let q2i = lines[5*li2+1]
+				let other_pi = q1i == cur_pi ? q2i : (q2i == cur_pi ? q1i : null)
+				if (other_pi == null)
+					continue
+				let other_p = get_point(other_pi, _v4)
+				// other end out of the plane: skip.
+				if (abs(normal.dot(other_p) + plane_const) > NEAR)
+					continue
+				let dir = other_p.sub(cur_p)
+				let angle = pseudo_angle(dir.dot(x_axis), dir.dot(y_axis))
+				let cw_angle = angle_sweep(angle, back_angle, true) || 4
+				if (cw_angle < min_cw_angle) {
+					min_cw_angle = cw_angle
+					next_li = li2
+					next_pi = other_pi
+				}
+			}
+			turn_angle += 2 - min_cw_angle
+			// at the start line again: the cycle is closed.
+			if (cur_pi == p1i && next_li == li)
+				break
+			// walking back the line we came on: drop it.
+			let n = pis.length
+			if (n >= 2 && pis[n-2] == next_pi && lis[n-2] == next_li) {
+				pis.pop()
+				lis.pop()
+			} else {
+				pis.push(next_pi)
+				lis.push(next_li)
+			}
+			from_pi = cur_pi
+			cur_pi = next_pi
+		}
+		pis.pop() // `p1i` again.
+		return lis[0] == li && lis.indexOf(li, 1) == -1 && turn_angle > 0
+	}}
+
+	// add a face for the cycle `pis`, `lis`, which goes counter-clockwise
+	// around `normal`. splitting `split_face`: keep its side and material,
+	// and take its holes that are inside the cycle. else: skip a cycle that
+	// has a face, and use shared edges the opposite way to the face across.
+	let add_cycle_face
+	{
+	let _cycle_face = face3() // the cycle, for hit-testing.
+	let _v0 = v3()
+	let _v1 = v3()
+	add_cycle_face = function(pis, lis, normal, split_face) {
+		let want_reverse
+		if (split_face) {
+			want_reverse = split_face.plane().normal.dot(normal) < 0
+		} else {
+			for (let face of faces) {
+				let i = 0
+				while (i < lis.length && !face.lis.includes(lis[i]))
+					i++
+				if (i == lis.length)
+					continue
+				// the cycle is this face's outline, so it already has a face.
+				let n = face.point_count_without_holes()
+				let j = 0
+				while (j < n && pis.includes(face[j]))
+					j++
+				if (j == n && n == pis.length)
+					return
+				want_reverse ??= face[face.lis.indexOf(lis[i])] == pis[i]
+			}
+		}
+		if (want_reverse) {
+			pis.reverse()
+			pis.unshift(pis.pop())
+			lis.reverse()
+		}
+		let holes
+		if (split_face?.holes?.length) {
+			_cycle_face.length = 0
+			extend(_cycle_face, pis)
+			_cycle_face.invalidate()
+			for (let h = 0; h < split_face.holes.length; h++) {
+				let i1 = split_face.hole_i1(h)
+				let i2 = split_face.hole_i2(h)
+				let hole_p = get_point(split_face[i1], _v0)
+				let hole_xy = _cycle_face.plane().transform32(hole_p, _v1)
+				if (!_cycle_face.hit(hole_xy[0], hole_xy[1]))
+					continue
+				holes ??= []
+				holes.push(pis.length)
+				for (let i = i1; i < i2; i++) {
+					pis.push(split_face[i])
+					lis.push(split_face.lis[i])
+				}
+			}
+		}
+		add_face(pis, lis, split_face?.mat_inst.material, holes)
+	}}
+
+	// F1 for line `li`: walk the cycles on both sides of `li` in each plane
+	// of `li` and a line at its ends. a face that `li` crosses is split into
+	// the two cycles; else a face is added for each cycle.
+	let make_line_faces
+	{
+	let _v0 = v3()
+	let _v1 = v3()
+	let _v2 = v3()
+	let _v3 = v3()
+	let left_pis  = [] // the points of the cycle on the left of `li`.
+	let left_lis  = [] // its lines.
+	let right_pis = [] // the points of the cycle on the right of `li`.
+	let right_lis = [] // its lines.
+	make_line_faces = function(li) {
+		let p1i = lines[5*li+0]
+		let p2i = lines[5*li+1]
+		let p1 = get_point(p1i, _v0)
+		let p2 = get_point(p2i, _v1)
+		let line_len = p1.distance(p2)
+
+		// one plane for each line at our ends that isn't along our line.
+		let normals = []
+		for (let li2 = 0, n = line_count(); li2 < n; li2++) {
+			if (li2 == li || !line_rc(li2))
+				continue
+			let q1i = lines[5*li2+0]
+			let q2i = lines[5*li2+1]
+			let other_pi = (q1i == p1i || q1i == p2i) ? q2i
+				: ((q2i == p1i || q2i == p2i) ? q1i : null)
+			if (other_pi == null)
+				continue
+			let other_dir = get_point(other_pi, _v3).sub(p1)
+			let normal = _v2.set(p2).sub(p1).cross(other_dir)
+			// a line along ours makes no plane.
+			if (normal.len() <= NEAR * line_len)
+				continue
+			normal.normalize()
+			let i = 0
+			while (i < normals.length && abs(normals[i].dot(normal)) < 1 - NEAR)
+				i++
+			if (i == normals.length)
+				normals.push(normal.clone())
+		}
+
+		let mid = _v2.set(p1).add(p2).muls(.5)
+		for (let normal of normals) {
+
+			let has_left_cycle =
+				walk_cycle(li, p1i, p2i, normal, left_pis, left_lis)
+			let has_right_cycle =
+				walk_cycle(li, p2i, p1i, normal, right_pis, right_lis)
+
+			// the face that `li` crosses: in the plane, not using `li`, and
+			// containing its middle.
+			let split_face
+			for (let face of faces) {
+				if (!face.length || face.lis.includes(li))
+					continue
+				let plane = face.plane()
+				if (abs(plane.normal.dot(normal)) < 1 - NEAR)
+					continue
+				if (abs(plane.distance_to_point(mid)) > NEAR)
+					continue
+				let mid_xy = plane.transform32(mid, _v3)
+				if (face.hit(mid_xy[0], mid_xy[1])) {
+					split_face = face
+					break
+				}
+			}
+
+			if (split_face) {
+				if (has_left_cycle && has_right_cycle) {
+					add_cycle_face(left_pis, left_lis, normal, split_face)
+					add_cycle_face(right_pis, right_lis, normal, split_face)
+					remove_face(split_face)
+				}
+			} else {
+				if (has_left_cycle)
+					add_cycle_face(left_pis, left_lis, normal)
+				if (has_right_cycle)
+					add_cycle_face(right_pis, right_lis, normal)
+			}
+
+		}
+	}}
+
+	// F1 for the drawn `line`: the lines on it are its pieces and the lines
+	// that it was drawn over.
+	let make_cycle_faces
+	{
+	let _v0 = v3()
+	let _v1 = v3()
+	make_cycle_faces = function(line) {
+		let line_len = line[0].distance(line[1])
+		let dir = _v0.set(line[1]).sub(line[0]).muls(1 / line_len)
+		// make_line_faces() changes only faces, so it can be called during
+		// the scan.
+		for (let li = 0, n = line_count(); li < n; li++) {
+			if (!line_rc(li))
+				continue
+			// skip lines with an end off the drawn line; t1 and t2 are the
+			// ends' distances along it.
+			let dp1 = get_point(lines[5*li+0], _v1).sub(line[0])
+			let t1 = dp1.dot(dir)
+			if (dp1.len2() - t1 * t1 > NEAR ** 2)
+				continue
+			let dp2 = get_point(lines[5*li+1], _v1).sub(line[0])
+			let t2 = dp2.dot(dir)
+			if (dp2.len2() - t2 * t2 > NEAR ** 2)
+				continue
+			// make faces for the lines that overlap the drawn line by more
+			// than a point.
+			let t_min = max(min(t1, t2), 0)
+			let t_max = min(max(t1, t2), line_len)
+			if (t_max - t_min > NEAR)
+				make_line_faces(li)
+		}
+	}}
+
 	// draw line --------------------------------------------------------------
 
 	e.draw_line = function(line) {
@@ -1275,6 +1580,7 @@ window.model3_component = function(opt, editor) {
 		let p2i = p2.i ?? add_point(p2)
 		add_line(p1i, p2i)
 		repair()
+		make_cycle_faces(line)
 
 	}
 

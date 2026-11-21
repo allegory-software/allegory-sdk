@@ -518,6 +518,23 @@ const results = (function() {
 		return check_pull_undo(c, F[1], 1)
 	})
 
+	// M13: the line is disconnected from the split point (P1); after the
+	// pull only the two halves use the split point, so they are joined (L2).
+	check('pull a box top split at a line: the halves are joined', () => {
+		let c = make_comp()
+		let P = add_box(c, [[2,1,2], [3,1,2]])
+		let faces = [[1,0,3,2], [4,5,8,6,7], [7,6,2,3], [4,0,1,5], [0,4,7,3],
+			[5,1,2,6,8]]
+		let F = faces.map(f => c.add_face(f.map(i => P[i])))
+		c.add_line(P[8], P[9])
+		let err = check_pull_undo(c, F[1], 1)
+		if (err !== true)
+			return err
+		if (F[1].includes(P[8]) || F[5].includes(P[8]))
+			return 'a face still uses the split point'
+		return c.point_rc(P[8]) == 0 || 'the split point is still used'
+	})
+
 	check('pull a box top: a standalone line at a corner stays', () => {
 		let c = make_comp()
 		let P = add_box(c, [[-1,-1,2]])
@@ -598,6 +615,24 @@ const results = (function() {
 			`faces ${n_faces}, lines ${n_lines} (want 1, 4)`
 	})
 
+	// draw `lines` ([[p1, p2],...]) in one undo group, then check rcs, undo
+	// and redo. the points have no indices, as the editor sends them.
+	function check_draw_undo(c, lines) {
+		let state0 = model_state(c)
+		c.editor.start_group()
+		for (let [p1, p2] of lines)
+			c.draw_line(line3(v3(...p1), v3(...p2)))
+		let errs = check_rcs(c)
+		if (errs)
+			return errs
+		let state1 = model_state(c)
+		c.editor.undo()
+		if (model_state(c) != state0)
+			return 'undo did not restore the model'
+		c.editor.redo()
+		return model_state(c) == state1 || 'redo did not restore the lines'
+	}
+
 	// the two squares use the cut edge in opposite directions.
 	check('draw_line across a shared face edge: rcs, undo, redo', () => {
 		let c = make_comp()
@@ -605,31 +640,19 @@ const results = (function() {
 			[4,2,0]].map(p => c.add_point_xyz(...p))
 		let f1 = c.add_face([0, 1, 2, 3].map(i => P[i]))
 		let f2 = c.add_face([1, 4, 5, 2].map(i => P[i]))
-		let state0 = model_state(c)
-		c.editor.start_group()
-		c.draw_line(line3(v3(1, 1, 0), v3(3, 1, 0)))
-		let errs = check_rcs(c)
-		if (errs)
-			return errs
-		if (f1.length != 5 || f2.length != 5)
-			return `face lengths ${f1.length} ${f2.length} (want 5 5)`
-		let state1 = model_state(c)
-		c.editor.undo()
-		if (model_state(c) != state0)
-			return 'undo did not restore the model'
-		c.editor.redo()
-		return model_state(c) == state1 || 'redo did not restore the line'
+		let err = check_draw_undo(c, [[[1,1,0], [3,1,0]]])
+		if (err !== true)
+			return err
+		return f1.length == 5 && f2.length == 5 ||
+			`face lengths ${f1.length} ${f2.length} (want 5 5)`
 	})
 
 	check('draw_line starting on a line cuts it there: rcs, undo, redo', () => {
 		let c = make_comp()
 		c.add_line(c.add_point_xyz(0, 0, 0), c.add_point_xyz(2, 0, 0))
-		let state0 = model_state(c)
-		c.editor.start_group()
-		c.draw_line(line3(v3(1, 0, 0), v3(1, -1, 0)))
-		let errs = check_rcs(c)
-		if (errs)
-			return errs
+		let err = check_draw_undo(c, [[[1,0,0], [1,-1,0]]])
+		if (err !== true)
+			return err
 		let n = 0
 		let short = 0
 		c.each_line(l => {
@@ -637,51 +660,78 @@ const results = (function() {
 			if (l[0].distance2(l[1]) < 1e-12)
 				short++
 		})
-		if (n != 3 || short)
-			return `lines ${n}, zero-length ${short} (want 3, 0)`
-		let state1 = model_state(c)
-		c.editor.undo()
-		if (model_state(c) != state0)
-			return 'undo did not restore the model'
-		c.editor.redo()
-		return model_state(c) == state1 || 'redo did not restore the line'
+		return n == 3 && !short || `lines ${n}, zero-length ${short} (want 3, 0)`
 	})
 
-	// the drawn line's points have no indices, as the editor sends them.
 	check('draw_line over a face edge merges into it: rcs, undo, redo', () => {
 		let c = make_comp()
 		add_square(c, 0, 0, 2)
 		let state0 = model_state(c)
-		c.editor.start_group()
-		c.draw_line(line3(v3(0, 0, 0), v3(2, 0, 0)))
-		let errs = check_rcs(c)
-		if (errs)
-			return errs
-		let state1 = model_state(c)
-		if (state1 != state0)
-			return 'the model changed'
-		c.editor.undo()
-		if (model_state(c) != state0)
-			return 'undo did not restore the model'
-		c.editor.redo()
-		return model_state(c) == state1 || 'redo did not restore the line'
+		let err = check_draw_undo(c, [[[0,0,0], [2,0,0]]])
+		if (err !== true)
+			return err
+		return model_state(c) == state0 || 'the model changed'
 	})
 
 	check('draw_line crossing a line: rcs, undo, redo', () => {
 		let c = make_comp()
 		c.add_line(c.add_point_xyz(1, -1, 0), c.add_point_xyz(1, 1, 0))
-		let state0 = model_state(c)
-		c.editor.start_group()
-		c.draw_line(line3(v3(0, 0, 0), v3(2, 0, 0)))
-		let errs = check_rcs(c)
-		if (errs)
-			return errs
-		let state1 = model_state(c)
-		c.editor.undo()
-		if (model_state(c) != state0)
-			return 'undo did not restore the model'
-		c.editor.redo()
-		return model_state(c) == state1 || 'redo did not restore the line'
+		return check_draw_undo(c, [[[0,0,0], [2,0,0]]])
+	})
+
+	// M10, F1.
+	check('draw a cycle of lines: a face: rcs, undo, redo', () => {
+		let c = make_comp()
+		let err = check_draw_undo(c, [[[0,0,0], [1,0,0]], [[1,0,0], [1,1,0]],
+			[[1,1,0], [0,1,0]], [[0,1,0], [0,0,0]]])
+		if (err !== true)
+			return err
+		let F = live_faces(c)
+		return F.length == 1 && F[0].length == 4 ||
+			`faces ${F.length}, points ${F[0]?.length} (want 1, 4)`
+	})
+
+	// F1: the line goes from edge to edge below the hole.
+	check('draw a line across a face with a hole: rcs, undo, redo', () => {
+		let c = make_comp()
+		let pis = [[0,0,0], [3,0,0], [3,3,0], [0,3,0], [1,1,0], [1,2,0], [2,2,0],
+			[2,1,0]].map(p => c.add_point_xyz(...p))
+		let mat = {name: 'mat2', uv: v2(1, 1), diffuse_color: 0xff0000}
+		c.add_face(pis, null, mat, [4])
+		let err = check_draw_undo(c, [[[0,.5,0], [3,.5,0]]])
+		if (err !== true)
+			return err
+		let F = live_faces(c)
+		if (F.length != 2)
+			return `faces ${F.length} (want 2)`
+		let n_holes = 0
+		for (let f of F) {
+			if (f.mat_inst.material != mat)
+				return `face ${f.i} lost the material`
+			if (!veq(f.plane().normal, [0, 0, 1]))
+				return `face ${f.i} normal ${Array.from(f.plane().normal)}`
+			n_holes += f.holes?.length ?? 0
+		}
+		return n_holes == 1 || `holes ${n_holes} (want 1)`
+	})
+
+	// F1: drawn over an edge of an open box: the top is added back, facing
+	// out like the walls.
+	check('draw over an edge of an open box: the top: rcs, undo, redo', () => {
+		let c = make_comp()
+		let P = add_box(c)
+		for (let f of box_faces)
+			if (f != box_faces[1])
+				c.add_face(f.map(i => P[i]))
+		let err = check_draw_undo(c, [[[0,0,2], [2,0,2]]])
+		if (err !== true)
+			return err
+		let F = live_faces(c)
+		if (F.length != 6)
+			return `faces ${F.length} (want 6)`
+		let top = F[F.length-1]
+		return veq(top.plane().normal, [0, 0, 1]) ||
+			`top normal ${Array.from(top.plane().normal)}`
 	})
 
 	return [n_checks, results, known]

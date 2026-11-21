@@ -86,6 +86,8 @@ const {
 	poly,
 	bbox2,
 	near_angle,
+	pseudo_angle,
+	angle_sweep,
 } = Math3D
 
 const v2_near = v2.near
@@ -206,28 +208,6 @@ function left_bottom_point(ps) {
 		if (y1 > y0) return p1
 		return p0
 	})
-}
-
-// return a number from the range [0..4) which is monotonically increasing
-// with the clockwise angle that the input vector makes against the x axis.
-// Useful when the actual angle is not needed eg. when comparing angles
-// or for finding the quadrant of an angle.
-// NOTE: One branch miss (20cy) + one division (4cy) is still faster than atan2 (100cy).
-// Then again, one cache miss is 100cy so this does not have a big impact.
-function pseudo_angle(dx, dy) {
-	let p = dx / (abs(dx) + abs(dy))  // -1..0 (x <= 0) or 0..1 (x >= 0)
-	return dy < 0 ? 3 + p : 1 - p     //  2..4 (y <= 0) or 0..2 (y >= 0)
-}
-
-// return the angle sweep from angle a1 to a2 in cw (+) or ccw (-) dir.
-function angle_sweep(a1, a2, clockwise, circle_sweep) {
-	circle_sweep ??= 4
-	let d = a2 - a1
-	if (d < 0 && clockwise)
-		d += circle_sweep
-	else if (d > 0 && !clockwise)
-		d -= circle_sweep
-	return d
 }
 
 function points_colinear(p0, p1, p2) {
