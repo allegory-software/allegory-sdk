@@ -160,6 +160,15 @@ window.model3_component = function(opt, editor) {
 		}
 		p.to_v3_array(points, pi)
 		update_point(pi, p)
+		// NOTE: pulling a 4-point face in a component with 10,000 quads
+		// does 2 × 4 × 40,000 = 320,000 comparisons per mouse move.
+		// That’s roughly a millisecond in JS.
+		for (let face of faces)
+			if (face.includes(pi)) {
+				if (face.mesh)
+					face.mesh.normals_valid = false
+				face.invalidate()
+			}
 		push_undo(move_point_xyz, pi, x0, y0, z0, p[0], p[1], p[2])
 	}
 
@@ -558,6 +567,9 @@ window.model3_component = function(opt, editor) {
 	function replace_face_point(face, ei, pi) {
 		let pi0 = face[ei]
 		face[ei] = pi
+		if (face.mesh)
+			face.mesh.normals_valid = false
+		face.invalidate()
 
 		if (LOG) log('replace_face_point', face.i, '@', ei, pi0, '->', pi)
 
@@ -1292,7 +1304,6 @@ window.model3_component = function(opt, editor) {
 				ref_point(new_pi)
 				replace_face_point(pull.face, ei, new_pi)
 				unref_point(old_pi)
-				pull.face.invalidate()
 
 				// update the endpoint of pulled face edges that are connected to this point.
 				let next_ei = ei
@@ -1376,9 +1387,6 @@ window.model3_component = function(opt, editor) {
 				let p = initial_ps[i++].to(_v1).add(delta)
 				move_point(pi, p)
 			}
-
-			for (let face of moving_faces)
-				face.invalidate()
 
 		}}
 

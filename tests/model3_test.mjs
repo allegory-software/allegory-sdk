@@ -426,6 +426,14 @@ const results = await page.evaluate(() => {
 		return JSON.stringify([pts, ls, fs])
 	}
 
+	// a face's cached plane must follow its points.
+	function check_planes(c) {
+		for (let f of live_faces(c))
+			for (let pi of f)
+				if (!near(f.plane().distance_to_point(c.get_point(pi, v3())), 0))
+					return `face ${f.i} plane misses point ${pi}`
+	}
+
 	// pull `face` with a few live moves, then check rcs, undo and redo.
 	function check_pull_undo(c, face, distance) {
 		let state0 = model_state(c)
@@ -440,9 +448,15 @@ const results = await page.evaluate(() => {
 		if (errs)
 			return 'after pull: ' + errs
 		let state1 = model_state(c)
+		errs = check_planes(c) // caches the planes, as drawing does.
+		if (errs)
+			return 'after pull: ' + errs
 		c.editor.undo()
 		if (model_state(c) != state0)
 			return 'undo did not restore the model'
+		errs = check_planes(c)
+		if (errs)
+			return 'after undo: ' + errs
 		c.editor.redo()
 		if (model_state(c) != state1)
 			return 'redo did not restore the pull'
