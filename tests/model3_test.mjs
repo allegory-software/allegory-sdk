@@ -544,7 +544,7 @@ const results = await page.evaluate(() => {
 		[5,1,2,6]]
 
 	// the top's x = 2 edge is split at (2,1,2), and so is the wall's.
-	known_bug('pull a box top whose edge is split: the wall gets the split point once', () => {
+	check('pull a box top whose edge is split: the wall gets the split point once', () => {
 		let c = make_comp()
 		let P = add_box(c, [[2,1,2]])
 		let faces = [[1,0,3,2], [4,5,8,6,7], [7,6,2,3], [4,0,1,5], [0,4,7,3],
@@ -553,7 +553,7 @@ const results = await page.evaluate(() => {
 		return check_pull_undo(c, F[1], 1)
 	})
 
-	known_bug('pull a box top: a standalone line at a corner stays', () => {
+	check('pull a box top: a standalone line at a corner stays', () => {
 		let c = make_comp()
 		let P = add_box(c, [[-1,-1,2]])
 		let F = box_faces.map(f => c.add_face(f.map(i => P[i])))
@@ -566,7 +566,7 @@ const results = await page.evaluate(() => {
 	})
 
 	// the fin is coplanar with the y = 0 wall and attached along its edge 1-5.
-	known_bug('pull a box top: a fin at a corner stays', () => {
+	check('pull a box top: a fin at a corner stays', () => {
 		let c = make_comp()
 		let P = add_box(c, [[3,0,0], [3,0,2]])
 		let F = box_faces.map(f => c.add_face(f.map(i => P[i])))

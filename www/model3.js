@@ -1233,14 +1233,7 @@ window.model3_component = function(opt, editor) {
 							if (face_ei != -1) // face contains our pulled edge, so it's a pp side face.
 								pp_side_faces.push(face, face_ei)
 
-						} else { // face is not pp, check if it connects to the pulled face at all.
-
-							// check if this face connects to pulled face's point at `ei`
-							// and mark the point as needing a pp edge if it does.
-							let face_ei = face.indexOf(pull.face[pull_ei])
-							if (face_ei != -1) {
-								new_pp_edge.set(pull_ei, true)
-							}
+						} else { // face is not pp, check if it contains our pulled edge.
 
 							if (face.lis.includes(pull_li))
 								non_pp_face_has_edge = true
@@ -1282,8 +1275,6 @@ window.model3_component = function(opt, editor) {
 							if (is_side_edge_pp) {
 								moving_lis.add(side_edge.i)
 								pp_lis.add(side_edge.i)
-							} else {
-								new_pp_edge.set(endpoint_ei, true)
 							}
 
 							moving_faces.add(face)
@@ -1306,6 +1297,29 @@ window.model3_component = function(opt, editor) {
 				}
 
 			}
+
+			// a corner moves in place only if every face and line using it moves
+			// with the pull: anything else using it needs a new pp side edge.
+			let corner_eis = map() // {pi->pull_ei}
+			for (let ei = 0; ei < en; ei++)
+				corner_eis.set(pull.face[ei], ei)
+			for (let face of faces)
+				if (!moving_faces.has(face))
+					for (let pi of face) {
+						let ei = corner_eis.get(pi)
+						if (ei != null)
+							new_pp_edge.set(ei, true)
+					}
+			each_line(function(line) {
+				let ei1 = corner_eis.get(line[0].i)
+				let ei2 = corner_eis.get(line[1].i)
+				if (ei1 == null && ei2 == null)
+					return
+				if (moving_lis.has(line.i) || pull.face.lis.includes(line.i))
+					return
+				if (ei1 != null) new_pp_edge.set(ei1, true)
+				if (ei2 != null) new_pp_edge.set(ei2, true)
+			})
 
 			if (LOG)
 				log('pull.start', pull.face.i,
