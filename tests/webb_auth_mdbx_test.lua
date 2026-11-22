@@ -27,6 +27,11 @@ local store = auth_store()
 
 store.with_lock('w', function()
 
+local txn = test_db.txn
+store.with_lock('r', function()
+	assert(test_db.txn == txn)
+end)
+
 local function tenants_by_host()
 	local t = {}
 	for _,tenant in ipairs(store.tenants()) do

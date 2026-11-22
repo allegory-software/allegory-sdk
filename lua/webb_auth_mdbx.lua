@@ -112,7 +112,7 @@ local function check_user(uid)
 end
 
 function store.with_lock(lock_type, fn, ...)
-	return db():atomic(lock_type, fn, ...)
+	return db():atomic(lock_type == 'r' and 'any' or lock_type, fn, ...)
 end
 
 --hosts and tenants ----------------------------------------------------------
