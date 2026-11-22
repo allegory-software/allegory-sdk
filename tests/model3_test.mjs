@@ -773,7 +773,7 @@ const results = (function() {
 	})
 
 	// F1 islands: a cycle drawn around a face gets a hole there.
-	known_bug('draw a cycle around a face: a hole: rcs, undo, redo', () => {
+	check('draw a cycle around a face: a hole: rcs, undo, redo', () => {
 		let c = make_comp()
 		add_square(c, 1, 1, 1)
 		let err = check_draw_undo(c, [[[0,0,0], [3,0,0]], [[3,0,0], [3,3,0]],
@@ -786,6 +786,41 @@ const results = (function() {
 		let outer = F.find(f => f.holes?.length)
 		return outer?.length == 8 ||
 			`face lengths ${F.map(f => f.length)} (want 8 4)`
+	})
+
+	// F1: two faces with a shared line inside the new cycle: one hole.
+	check('draw a cycle around two faces: one hole: rcs, undo, redo', () => {
+		let c = make_comp()
+		let P = [[1,1,0], [2,1,0], [3,1,0], [3,2,0], [2,2,0], [1,2,0]]
+			.map(p => c.add_point_xyz(...p))
+		c.add_face([0, 1, 4, 5].map(i => P[i]))
+		c.add_face([1, 2, 3, 4].map(i => P[i]))
+		let err = check_draw_undo(c, [[[0,0,0], [4,0,0]], [[4,0,0], [4,3,0]],
+			[[4,3,0], [0,3,0]], [[0,3,0], [0,0,0]]])
+		if (err !== true)
+			return err
+		let F = live_faces(c)
+		if (F.length != 3)
+			return `faces ${F.length} (want 3)`
+		let outer = F.find(f => f.holes?.length)
+		return outer?.holes.length == 1 && outer.length == 10 ||
+			`face lengths ${F.map(f => f.length)} (want 10 4 4, one hole)`
+	})
+
+	// F1: a cycle of lines without a face inside the new cycle stays loose.
+	check('draw a cycle around loose lines: no hole: rcs, undo, redo', () => {
+		let c = make_comp()
+		let P = [[1,1,0], [2,1,0], [2,2,0], [1,2,0]]
+			.map(p => c.add_point_xyz(...p))
+		for (let i = 0; i < 4; i++)
+			c.add_line(P[i], P[(i+1) % 4])
+		let err = check_draw_undo(c, [[[0,0,0], [3,0,0]], [[3,0,0], [3,3,0]],
+			[[3,3,0], [0,3,0]], [[0,3,0], [0,0,0]]])
+		if (err !== true)
+			return err
+		let F = live_faces(c)
+		return F.length == 1 && F[0].length == 4 ||
+			`faces ${F.length}, points ${F[0]?.length} (want 1, 4)`
 	})
 
 	return [n_checks, results, known]

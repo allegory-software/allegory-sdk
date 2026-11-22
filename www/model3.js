@@ -1381,26 +1381,168 @@ window.model3_component = function(opt, editor) {
 		return lis[0] == li && lis.indexOf(li, 1) == -1 && turn_angle > 0
 	}}
 
+	// append to `pis`, `lis` the outer outlines of the groups of faces in
+	// `face_list` as holes, going clockwise around `normal`, or
+	// counter-clockwise with `want_reverse`. an outline is made of the edges
+	// that only one of the faces uses. a counter-clockwise one is a hole; a
+	// clockwise one goes around an empty area, and the holes inside empty
+	// areas are dropped. return the holes: [hole1_i1, hole2_i1, ...], or
+	// undefined.
+	let push_group_holes
+	{
+	let _v0 = v3()
+	let _v1 = v3()
+	let _v2 = v3()
+	let inner_face  = face3() // a clockwise outline, for hit-testing.
+	let edge_counts = new Map() // {li -> number of uses by the faces}
+	let first_eis   = new Map() // {p1i -> first edge from p1i}
+	let from_pis    = [] // the outline edges: their first points,
+	let to_pis      = [] // their second points,
+	let edge_lis    = [] // their lines,
+	let next_eis    = [] // the next edge from the same point,
+	let is_used     = [] // and whether an outline took them.
+	let outline_pis = [] // the outlines, one after another: their points,
+	let outline_lis = [] // their lines,
+	let outline_i1s = [] // where each one starts,
+	let outline_kinds = [] // and what each is: 'hole', 'empty' or 'dropped'.
+	push_group_holes = function(face_list, normal, want_reverse, pis, lis) {
+
+		edge_counts.clear()
+		for (let face of face_list)
+			for (let li of face.lis)
+				edge_counts.set(li, (edge_counts.get(li) ?? 0) + 1)
+
+		// the edges that only one face uses, with the face on their left.
+		first_eis.clear()
+		from_pis.length = 0
+		to_pis.length = 0
+		edge_lis.length = 0
+		next_eis.length = 0
+		is_used.length = 0
+		for (let face of face_list) {
+			let is_reversed = face.plane().normal.dot(normal) < 0
+			for (let i = 0; i < face.length; i++) {
+				let li = face.lis[i]
+				if (edge_counts.get(li) != 1)
+					continue
+				let p1i = face[is_reversed ? face.next_i(i) : i]
+				let p2i = face[is_reversed ? i : face.next_i(i)]
+				next_eis.push(first_eis.get(p1i))
+				first_eis.set(p1i, from_pis.length)
+				from_pis.push(p1i)
+				to_pis.push(p2i)
+				edge_lis.push(li)
+				is_used.push(false)
+			}
+		}
+
+		// chain the edges into outlines.
+		outline_pis.length = 0
+		outline_lis.length = 0
+		outline_i1s.length = 0
+		outline_kinds.length = 0
+		for (let ei = 0; ei < from_pis.length; ei++) {
+			if (is_used[ei])
+				continue
+			outline_i1s.push(outline_pis.length)
+			let area = 0 // twice the area around `normal`.
+			let cur_ei = ei
+			while (cur_ei != null) {
+				is_used[cur_ei] = true
+				outline_pis.push(from_pis[cur_ei])
+				outline_lis.push(edge_lis[cur_ei])
+				let p1 = get_point(from_pis[cur_ei], _v0)
+				let p2 = get_point(to_pis[cur_ei], _v1)
+				area += _v2.set(p1).cross(p2).dot(normal)
+				let next_ei = first_eis.get(to_pis[cur_ei])
+				while (next_ei != null && is_used[next_ei])
+					next_ei = next_eis[next_ei]
+				cur_ei = next_ei
+			}
+			outline_kinds.push(area > 0 ? 'hole' : 'empty')
+		}
+
+		// drop the holes inside an empty area.
+		let n = outline_i1s.length
+		for (let k = 0; k < n; k++) {
+			if (outline_kinds[k] != 'empty')
+				continue
+			let i1 = outline_i1s[k]
+			let i2 = outline_i1s[k+1] ?? outline_pis.length
+			inner_face.length = 0
+			for (let i = i1; i < i2; i++)
+				inner_face.push(outline_pis[i])
+			inner_face.invalidate()
+			let plane = inner_face.plane()
+			for (let k2 = 0; k2 < n; k2++) {
+				if (outline_kinds[k2] != 'hole')
+					continue
+				let p = get_point(outline_pis[outline_i1s[k2]], _v0)
+				let xy = plane.transform32(p, _v1)
+				if (inner_face.hit(xy[0], xy[1]))
+					outline_kinds[k2] = 'dropped'
+			}
+		}
+
+		let holes
+		for (let k = 0; k < n; k++) {
+			if (outline_kinds[k] != 'hole')
+				continue
+			let i1 = outline_i1s[k]
+			let i2 = outline_i1s[k+1] ?? outline_pis.length
+			holes ??= []
+			holes.push(pis.length)
+			if (want_reverse) {
+				for (let i = i1; i < i2; i++) {
+					pis.push(outline_pis[i])
+					lis.push(outline_lis[i])
+				}
+			} else {
+				pis.push(outline_pis[i1])
+				for (let i = i2-1; i > i1; i--)
+					pis.push(outline_pis[i])
+				for (let i = i2-1; i >= i1; i--)
+					lis.push(outline_lis[i])
+			}
+		}
+		return holes
+	}}
+
 	// add a face for the cycle `pis`, `lis`, which goes counter-clockwise
 	// around `normal`. splitting `split_face`: keep its side and material,
 	// and take its holes that are inside the cycle. else: skip a cycle that
 	// has a face, and use shared edges the opposite way to the face across.
 	let add_cycle_face
 	{
-	let _cycle_face = face3() // the cycle, for hit-testing.
+	let cycle_face = face3() // the cycle, for hit-testing.
 	let _v0 = v3()
 	let _v1 = v3()
+	let enclosed_faces = [] // the faces in the plane inside the cycle.
 	add_cycle_face = function(pis, lis, normal, split_face) {
+		cycle_face.length = 0
+		extend(cycle_face, pis)
+		cycle_face.invalidate()
+		enclosed_faces.length = 0
 		let want_reverse
 		if (split_face) {
 			want_reverse = split_face.plane().normal.dot(normal) < 0
 		} else {
+			let plane = cycle_face.plane()
 			for (let face of faces) {
 				let i = 0
 				while (i < lis.length && !face.lis.includes(lis[i]))
 					i++
-				if (i == lis.length)
+				if (i == lis.length) {
+					// a face in the plane inside the cycle makes a hole.
+					let p = face.length ? get_point(face[0], _v0) : null
+					if (p && abs(face.plane().normal.dot(normal)) >= 1 - NEAR
+							&& abs(plane.distance_to_point(p)) <= NEAR) {
+						let xy = plane.transform32(p, _v1)
+						if (cycle_face.hit(xy[0], xy[1]))
+							enclosed_faces.push(face)
+					}
 					continue
+				}
 				// the cycle is this face's outline, so it already has a face.
 				let n = face.point_count_without_holes()
 				let j = 0
@@ -1417,16 +1559,16 @@ window.model3_component = function(opt, editor) {
 			lis.reverse()
 		}
 		let holes
+		if (enclosed_faces.length)
+			holes = push_group_holes(enclosed_faces, normal, want_reverse,
+				pis, lis)
 		if (split_face?.holes?.length) {
-			_cycle_face.length = 0
-			extend(_cycle_face, pis)
-			_cycle_face.invalidate()
 			for (let h = 0; h < split_face.holes.length; h++) {
 				let i1 = split_face.hole_i1(h)
 				let i2 = split_face.hole_i2(h)
 				let hole_p = get_point(split_face[i1], _v0)
-				let hole_xy = _cycle_face.plane().transform32(hole_p, _v1)
-				if (!_cycle_face.hit(hole_xy[0], hole_xy[1]))
+				let hole_xy = cycle_face.plane().transform32(hole_p, _v1)
+				if (!cycle_face.hit(hole_xy[0], hole_xy[1]))
 					continue
 				holes ??= []
 				holes.push(pis.length)
@@ -1436,48 +1578,38 @@ window.model3_component = function(opt, editor) {
 				}
 			}
 		}
-		add_face(pis, lis, split_face?.mat_inst.material, holes)
+		return add_face(pis, lis, split_face?.mat_inst.material, holes)
 	}}
 
 	// add a face for the cycle `pis`, `lis`, an island inside `face`, and
 	// replace `face` with a copy that has `outer_pis`, `outer_lis` as a hole
-	// instead of its holes on or inside it. the outer walk goes clockwise
-	// around `normal`, around the island and the lines connected to it, so
-	// an island next to a hole gives one hole around both.
+	// instead of its holes on it or taken by the island. the outer walk goes
+	// clockwise around `normal`, around the island and the lines connected
+	// to it, so an island next to a hole gives one hole around both.
 	let add_island
 	{
-	let _outer_face = face3() // the outer walk, for hit-testing.
-	let _v0 = v3()
-	let _v1 = v3()
-	let _pis   = [] // the points of the copy of `face`.
-	let _lis   = [] // its lines.
-	let _holes = [] // its holes: [hole1_i1, hole2_i1, ...]
+	let face_pis   = [] // the points of the copy of `face`.
+	let face_lis   = [] // its lines.
+	let face_holes = [] // its holes: [hole1_i1, hole2_i1, ...]
 	add_island = function(pis, lis, outer_pis, outer_lis, normal, face) {
-		add_cycle_face(pis, lis, normal, face)
-		_outer_face.length = 0
-		extend(_outer_face, outer_pis)
-		_outer_face.invalidate()
-		_pis.length = 0
-		_lis.length = 0
-		_holes.length = 0
+		let island_face = add_cycle_face(pis, lis, normal, face)
+		face_pis.length = 0
+		face_lis.length = 0
+		face_holes.length = 0
 		let n = face.point_count_without_holes()
 		for (let i = 0; i < n; i++) {
-			_pis.push(face[i])
-			_lis.push(face.lis[i])
+			face_pis.push(face[i])
+			face_lis.push(face.lis[i])
 		}
 		for (let h = 0; h < face.hole_count(); h++) {
 			let i1 = face.hole_i1(h)
 			let i2 = face.hole_i2(h)
-			if (outer_pis.includes(face[i1]))
+			if (outer_pis.includes(face[i1]) || island_face.includes(face[i1]))
 				continue
-			let hole_p = get_point(face[i1], _v0)
-			let hole_xy = _outer_face.plane().transform32(hole_p, _v1)
-			if (_outer_face.hit(hole_xy[0], hole_xy[1]))
-				continue
-			_holes.push(_pis.length)
+			face_holes.push(face_pis.length)
 			for (let i = i1; i < i2; i++) {
-				_pis.push(face[i])
-				_lis.push(face.lis[i])
+				face_pis.push(face[i])
+				face_lis.push(face.lis[i])
 			}
 		}
 		// a hole goes the opposite way to the outline.
@@ -1486,10 +1618,10 @@ window.model3_component = function(opt, editor) {
 			outer_pis.unshift(outer_pis.pop())
 			outer_lis.reverse()
 		}
-		_holes.push(_pis.length)
-		extend(_pis, outer_pis)
-		extend(_lis, outer_lis)
-		add_face(_pis, _lis, face.mat_inst.material, _holes)
+		face_holes.push(face_pis.length)
+		extend(face_pis, outer_pis)
+		extend(face_lis, outer_lis)
+		add_face(face_pis, face_lis, face.mat_inst.material, face_holes)
 		remove_face(face)
 	}}
 
