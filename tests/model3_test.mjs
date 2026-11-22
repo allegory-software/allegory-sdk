@@ -643,6 +643,89 @@ const results = (function() {
 			`faces ${n_faces}, lines ${n_lines} (want 1, 4)`
 	})
 
+	// the live faces with all points at height `z`.
+	function faces_at_z(c, z) {
+		return live_faces(c).filter(f =>
+			Array.from(f).every(pi => near(c.get_point(pi, v3())[2], z)))
+	}
+
+	// M4, P3: the walls are removed (F3), then the top and the bottom (F2),
+	// then the outline lines; the bottom's island stays.
+	check('push a box top onto its bottom: only the island stays', () => {
+		let c = make_comp()
+		let P = add_box(c, [[.5,.5,0], [1.5,.5,0], [1.5,1.5,0], [.5,1.5,0]])
+		let F = box_faces.map((f, fi) => fi ? c.add_face(f.map(i => P[i]))
+			: c.add_face([1,0,3,2,8,9,10,11].map(i => P[i]), null, null, [4]))
+		c.add_face([9,8,11,10].map(i => P[i]))
+		let err = check_pull_undo(c, F[1], -2)
+		if (err !== true)
+			return err
+		let n_faces = live_faces(c).length
+		let n_lines = 0
+		c.each_line(l => n_lines++)
+		return n_faces == 1 && n_lines == 4 ||
+			`faces ${n_faces}, lines ${n_lines} (want 1, 4)`
+	})
+
+	// P3: the top lands on the bottom of the box above: both are removed and
+	// the walls of both boxes keep the outline.
+	check('pull a box top onto an equal box: no wall between', () => {
+		let c = make_comp()
+		let P = add_box(c)
+		let Q = [[0,0,3], [2,0,3], [2,2,3], [0,2,3], [0,0,5], [2,0,5], [2,2,5],
+			[0,2,5]].map(p => c.add_point_xyz(...p))
+		let F = box_faces.map(f => c.add_face(f.map(i => P[i])))
+		for (let f of box_faces)
+			c.add_face(f.map(i => Q[i]))
+		let err = check_pull_undo(c, F[1], 1)
+		if (err !== true)
+			return err
+		let n_faces = live_faces(c).length
+		let n_lines = 0
+		c.each_line(l => n_lines++)
+		let n_mid = faces_at_z(c, 3).length
+		return n_faces == 10 && n_lines == 20 && n_mid == 0 ||
+			`faces ${n_faces}, lines ${n_lines}, faces at z = 3: ${n_mid}`
+			+ ' (want 10, 20, 0)'
+	})
+
+	// P3: the island lands inside the bottom, which is split around it (F1);
+	// the pair is removed (F2), so the bottom gets a hole.
+	check('push an island of a box top to the bottom: a hole', () => {
+		let c = make_comp()
+		let P = add_box(c, [[.5,.5,2], [1.5,.5,2], [1.5,1.5,2], [.5,1.5,2]])
+		let F = box_faces.map((f, fi) => fi != 1 ? c.add_face(f.map(i => P[i]))
+			: c.add_face([4,5,6,7,8,11,10,9].map(i => P[i]), null, null, [4]))
+		let island = c.add_face([8,9,10,11].map(i => P[i]))
+		let err = check_pull_undo(c, island, -2)
+		if (err !== true)
+			return err
+		let n_faces = live_faces(c).length
+		let bottoms = faces_at_z(c, 0)
+		let n_holes = bottoms[0]?.holes?.length ?? 0
+		return n_faces == 10 && bottoms.length == 1 && n_holes == 1 ||
+			`faces ${n_faces}, bottoms ${bottoms.length}, holes ${n_holes}`
+			+ ' (want 10, 1, 1)'
+	})
+
+	// P3: the pulled square ends up across the edge of a square above it; the
+	// overlap is split off both (F1) and removed (F2).
+	check('pull a square partly onto a square: the overlap is removed', () => {
+		let c = make_comp()
+		let f = add_square(c, 0, 0, 2)
+		let pis = [[1,.5,1], [3,.5,1], [3,1.5,1], [1,1.5,1]]
+			.map(p => c.add_point_xyz(...p))
+		c.add_face(pis)
+		let err = check_pull_undo(c, f, 1)
+		if (err !== true)
+			return err
+		let n_faces = live_faces(c).length
+		let tops = faces_at_z(c, 1)
+		let n_points = tops.map(f => f.length).sort().join()
+		return n_faces == 6 && n_points == '4,8' ||
+			`faces ${n_faces}, top points ${n_points} (want 6, 4,8)`
+	})
+
 	// draw `lines` ([[p1, p2],...]) in one undo group, then check rcs, undo
 	// and redo. the points have no indices, as the editor sends them.
 	function check_draw_undo(c, lines) {

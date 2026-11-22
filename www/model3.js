@@ -52,7 +52,8 @@ window.model3_component = function(opt, editor) {
 
 	let children  = [] // [mat1,...]
 
-	// geometry to check on the next repair().
+	// the points and lines changed by the current operation. the rest of the
+	// model is already clean, so repair() checks only these.
 	let touched_pis = set() // {pi}; moved points.
 	let touched_lis = set() // {li}; created lines and lines with a new endpoint.
 
@@ -1057,12 +1058,15 @@ window.model3_component = function(opt, editor) {
 
 	// repair -----------------------------------------------------------------
 
-	// repair() makes the touched geometry follow the model rules again (see
-	// js/MODEL3-BUGS.txt). L1: lines that touch or cross are split there and
-	// share the point; points at the same place merge; lines with the same
-	// two points become one line.
+	// at the end of each operation, repair() fixes the lines changed by it,
+	// so that the next operation starts from a clean model: touching or
+	// crossing lines are cut at that point and share it, points at the same
+	// place are merged, a line with the same two points as another is merged
+	// into it, and two straight lines with a point used by no other line are
+	// joined into one.
 
-	// replace `pi` with `into_pi` in every line and face that uses it.
+	// merge `pi` into `into_pi`, a point at the same place: `pi` is replaced
+	// with `into_pi` in every line and face using it.
 	function merge_point(pi, into_pi) {
 		// lines ending at `pi`: move that end.
 		for (let li = 0, n = line_count(); li < n; li++)
@@ -1079,7 +1083,8 @@ window.model3_component = function(opt, editor) {
 		}
 	}
 
-	// move the faces using `li` to `into_li`, then free `li`.
+	// merge `li` into `into_li`, a line with the same two points: the faces
+	// using `li` are moved to `into_li`, and `li` is freed.
 	function merge_line(li, into_li) {
 		each_line_face(li, function(face) {
 			let ei = face.lis.indexOf(li)
@@ -1088,10 +1093,16 @@ window.model3_component = function(opt, editor) {
 			unref_line(li)
 		})
 		release_line(li)
+		// marked as touched because it is the only line left when a line is
+		// drawn exactly over it, and faces are made for a traced line
+		// (make_cycle_faces()).
+		touched_lis.add(into_li)
 	}
 
-	// L2: join `li2` into `li` at `pi`, the point that only they use; `li`
-	// then ends at `other_pi`, the other end of `li2`.
+	// join `li2` into `li` at `pi`, the point used only by the two lines,
+	// which lie on one straight line. `li` then ends at `other_pi`, the other
+	// end of `li2`. so a line is not left split at a point with nothing else
+	// there.
 	function join_line(li, pi, li2, other_pi) {
 		set_line_smoothness (li, max(line_smoothness(li), line_smoothness(li2)))
 		set_line_opacity    (li, max(line_opacity(li), line_opacity(li2)))
@@ -1112,7 +1123,9 @@ window.model3_component = function(opt, editor) {
 		release_line(li2)
 	}
 
-	// make one fix to line `li`; return true if it changed anything.
+	// make one fix to line `li`: merge, cut or join it at the points and lines
+	// on it. return true if anything was changed, so that repair() calls it
+	// again until the line needs no fix.
 	let repair_line
 	{
 	let _l0 = line3()
@@ -1126,7 +1139,7 @@ window.model3_component = function(opt, editor) {
 
 		// zero length: remove it, and its edge and repeated point from the
 		// faces that use it. a face left with fewer than 3 points has no
-		// area: remove it too (F3).
+		// area: remove it too.
 		if (p1i == p2i) {
 			each_line_face(li, function(face) {
 				remove_edge(face, face.lis.indexOf(li), false)
@@ -1232,8 +1245,8 @@ window.model3_component = function(opt, editor) {
 				}
 			}
 
-			// shares an end with ours, so they meet only there; remember it
-			// for L2.
+			// shares an end with ours, so they meet only there; remember it,
+			// to join the two lines if no other line uses that end.
 			if (q1i == p1i || q2i == p1i) {
 				p1_li2 = p1_li2 == null ? li2 : -1
 				continue
@@ -1253,8 +1266,8 @@ window.model3_component = function(opt, editor) {
 			}
 		}
 
-		// L2: when only one other line uses an end, and it continues ours in
-		// a straight line, join it into ours.
+		// when only one other line uses an end, and it continues ours in a
+		// straight line, join it into ours.
 		for (let i = 0; i < 2; i++) {
 			let li2 = i ? p2_li2 : p1_li2
 			if (li2 == null || li2 == -1)
@@ -1282,7 +1295,10 @@ window.model3_component = function(opt, editor) {
 		touched_lis.clear()
 	}
 
+	// fix the touched lines until none is left. return the lines checked in
+	// all rounds: faces are made and merged for them afterwards.
 	function repair() {
+		let checked_lis = set() // {li}; checked in all rounds; some freed.
 		let lis = []
 		while (touched_lis.size || touched_pis.size) {
 			// take the touched lines and the lines using touched points.
@@ -1297,19 +1313,23 @@ window.model3_component = function(opt, editor) {
 			touched_pis.clear()
 			// fix each line until it needs no fix. the fixes record what they
 			// touch, which is checked in the next round.
-			for (let li of lis)
+			for (let li of lis) {
+				checked_lis.add(li)
 				while (line_rc(li) && repair_line(li)) {}
+			}
 			lis.length = 0
 		}
+		return checked_lis
 	}
 
-	// F1: faces from cycles of lines -----------------------------------------
+	// faces from cycles of lines ---------------------------------------------
 
-	// walk the cycle on the left of line `li` going from `p1i` to `p2i`, in
-	// the plane through `p1i` with `normal`: take the sharpest left turn at
-	// each point and walk back out of filaments. fill `pis` and `lis`; return
-	// false when the cycle doesn't have `li` once, or turns clockwise in
-	// total (an outer cycle).
+	// find the smallest cycle on the left of line `li` going from `p1i` to
+	// `p2i`, in the plane through `p1i` with `normal`, to make a face for it:
+	// take the sharpest left turn at each point and walk back out of
+	// filaments. fill `pis` and `lis`; return false when there is no area on
+	// that side: the cycle doesn't have `li` once (`li` is a filament), or is
+	// clockwise in total (it goes around the outside).
 	let walk_cycle
 	{
 	let _v0 = v3()
@@ -1381,13 +1401,14 @@ window.model3_component = function(opt, editor) {
 		return lis[0] == li && lis.indexOf(li, 1) == -1 && turn_angle > 0
 	}}
 
-	// append to `pis`, `lis` the outer outlines of the groups of faces in
-	// `face_list` as holes, going clockwise around `normal`, or
-	// counter-clockwise with `want_reverse`. an outline is made of the edges
-	// that only one of the faces uses. a counter-clockwise one is a hole; a
-	// clockwise one goes around an empty area, and the holes inside empty
-	// areas are dropped. return the holes: [hole1_i1, hole2_i1, ...], or
-	// undefined.
+	// a new face drawn around faces in its plane gets a hole around each group
+	// of them, so that no area is covered by two faces. append to `pis`, `lis`
+	// the outer outlines of the groups of faces in `face_list` as holes,
+	// going clockwise around `normal`, or counter-clockwise with
+	// `want_reverse`. an outline is made of the edges that only one of the
+	// faces uses. a counter-clockwise one is a hole; a clockwise one goes
+	// around an empty area, and the holes inside empty areas are dropped.
+	// return the holes: [hole1_i1, hole2_i1, ...], or undefined.
 	let push_group_holes
 	{
 	let _v0 = v3()
@@ -1508,10 +1529,25 @@ window.model3_component = function(opt, editor) {
 		return holes
 	}}
 
+	// whether the outline of `face` has the same points as the first `n` of
+	// `pis`: used to find a cycle that already has a face, and two faces
+	// covering the same area.
+	function has_outline(face, pis, n) {
+		if (face.point_count_without_holes() != n)
+			return false
+		for (let j = 0; j < n; j++) {
+			let i = pis.indexOf(face[j])
+			if (i == -1 || i >= n)
+				return false
+		}
+		return true
+	}
+
 	// add a face for the cycle `pis`, `lis`, which goes counter-clockwise
 	// around `normal`. splitting `split_face`: keep its side and material,
 	// and take its holes that are inside the cycle. else: skip a cycle that
-	// has a face, and use shared edges the opposite way to the face across.
+	// has a face, and use shared edges the opposite way to the face across,
+	// so that the new face has the same front side as its neighbours.
 	let add_cycle_face
 	{
 	let cycle_face = face3() // the cycle, for hit-testing.
@@ -1544,11 +1580,7 @@ window.model3_component = function(opt, editor) {
 					continue
 				}
 				// the cycle is this face's outline, so it already has a face.
-				let n = face.point_count_without_holes()
-				let j = 0
-				while (j < n && pis.includes(face[j]))
-					j++
-				if (j == n && n == pis.length)
+				if (has_outline(face, pis, pis.length))
 					return
 				want_reverse ??= face[face.lis.indexOf(lis[i])] == pis[i]
 			}
@@ -1581,8 +1613,11 @@ window.model3_component = function(opt, editor) {
 		return add_face(pis, lis, split_face?.mat_inst.material, holes)
 	}}
 
-	// add a face for the cycle `pis`, `lis`, an island inside `face`, and
-	// replace `face` with a copy that has `outer_pis`, `outer_lis` as a hole
+	// a cycle drawn inside a face becomes a filled island: the island gets its
+	// own face and the face gets a hole around it, so that no area is covered
+	// by two faces. add a face for the cycle `pis`, `lis`, an island inside
+	// `face`, and replace `face` with a copy that has `outer_pis`, `outer_lis`
+	// as a hole
 	// instead of its holes on it or taken by the island. the outer walk goes
 	// clockwise around `normal`, around the island and the lines connected
 	// to it, so an island next to a hole gives one hole around both.
@@ -1625,9 +1660,10 @@ window.model3_component = function(opt, editor) {
 		remove_face(face)
 	}}
 
-	// F1 for line `li`: walk the cycles on both sides of `li` in each plane
-	// of `li` and a line at its ends. a face that `li` crosses is split into
-	// the two cycles; else a face is added for each cycle.
+	// make faces where a region is cut in two by line `li`: walk the cycles
+	// on both sides of `li` in each plane of `li` and a line at its ends. a
+	// face crossed by `li` is split into the two cycles; else a face is added
+	// for each cycle without one.
 	let make_line_faces
 	{
 	let _v0 = v3()
@@ -1717,18 +1753,24 @@ window.model3_component = function(opt, editor) {
 		}
 	}}
 
-	// F1 for the drawn `line`: the lines on it are its pieces and the lines
-	// that it was drawn over.
+	// make faces for the drawn `line`. faces are made only where a region is
+	// cut in two by an added line, so make_line_faces() is called only for
+	// the lines on `line`: its pieces and the lines it was drawn over. no
+	// region is cut by a line drawn over an existing one, but faces are made
+	// for its cycles: that is how the user makes a face for an existing
+	// cycle. the lines on `line` are among `lis`, the lines that repair()
+	// checked; the halves of an edge cut by `line` are skipped, so an erased
+	// face on that edge is not brought back.
 	let make_cycle_faces
 	{
 	let _v0 = v3()
 	let _v1 = v3()
-	make_cycle_faces = function(line) {
+	make_cycle_faces = function(line, lis) {
 		let line_len = line[0].distance(line[1])
 		let dir = _v0.set(line[1]).sub(line[0]).muls(1 / line_len)
 		// make_line_faces() changes only faces, so it can be called during
 		// the scan.
-		for (let li = 0, n = line_count(); li < n; li++) {
+		for (let li of lis) {
 			if (!line_rc(li))
 				continue
 			// skip lines with an end off the drawn line; t1 and t2 are the
@@ -1749,6 +1791,91 @@ window.model3_component = function(opt, editor) {
 				make_line_faces(li)
 		}
 	}}
+
+	// make faces after a pull. no lines are added by a pull, so no region is
+	// cut; but when a face is moved onto part of another face, or across its
+	// edge, the two faces are left overlapping. both are split along each
+	// other's lines, so that the overlap is a face of each, with the same
+	// outline, for merge_faces(). `lis` are the lines that repair() checked;
+	// make_line_faces() is called only for a line inside a face in its plane
+	// that doesn't use it, so cycles are walked only where faces overlap.
+	let make_overlap_faces
+	{
+	let _v0 = v3()
+	let _v1 = v3()
+	let _v2 = v3()
+	let _v3 = v3()
+	make_overlap_faces = function(lis) {
+		for (let li of lis) {
+			if (!line_rc(li))
+				continue
+			let p1 = get_point(lines[5*li+0], _v0)
+			let p2 = get_point(lines[5*li+1], _v1)
+			let mid = _v2.set(p1).add(p2).muls(.5)
+			// a face in the line's plane, not using it, and containing its
+			// middle.
+			for (let face of faces) {
+				if (!face.length || face.lis.includes(li))
+					continue
+				let plane = face.plane()
+				if (abs(plane.distance_to_point(p1)) > NEAR)
+					continue
+				if (abs(plane.distance_to_point(p2)) > NEAR)
+					continue
+				let mid_xy = plane.transform32(mid, _v3)
+				if (face.hit(mid_xy[0], mid_xy[1])) {
+					make_line_faces(li)
+					break
+				}
+			}
+		}
+	}}
+
+	// faces with the same outline --------------------------------------------
+
+	// two faces with the same outline cover the same area, so one of them is
+	// removed: the second one found, among the faces on `lis`, the lines that
+	// repair() checked. with `want_remove_both` (after a pull), both are
+	// removed: they are the wall between two volumes, so the volumes are
+	// joined, or a hole is made. their outline lines left without a face
+	// (rc 1) are released, so a box pushed onto its own bottom is removed
+	// completely. the faces and lines inside the holes of the two faces are
+	// kept.
+	function merge_faces(lis, want_remove_both) {
+		let line_faces = [] // the faces using a line.
+		for (let li of lis) {
+			if (!line_rc(li))
+				continue
+			line_faces.length = 0
+			each_line_face(li, function(face) {
+				line_faces.push(face)
+			})
+			for (let i = 0; i < line_faces.length; i++) {
+				let face1 = line_faces[i]
+				// removed as a copy of an earlier face: skip.
+				if (!face1.length)
+					continue
+				let n = face1.point_count_without_holes()
+				for (let j = i + 1; j < line_faces.length; j++) {
+					let face2 = line_faces[j]
+					// removed, or another outline: skip.
+					if (!face2.length || !has_outline(face2, face1, n))
+						continue
+					if (want_remove_both) {
+						let outline_lis = face1.lis.slice(0, n)
+						remove_face(face1)
+						remove_face(face2)
+						for (let li2 of outline_lis)
+							if (line_rc(li2) == 1)
+								release_line(li2)
+						break
+					} else {
+						remove_face(face2)
+					}
+				}
+			}
+		}
+	}
 
 	// draw line --------------------------------------------------------------
 
@@ -1771,8 +1898,7 @@ window.model3_component = function(opt, editor) {
 		let p1i = p1.i ?? add_point(p1)
 		let p2i = p2.i ?? add_point(p2)
 		add_line(p1i, p2i)
-		repair()
-		make_cycle_faces(line)
+		make_cycle_faces(line, repair())
 
 	}
 
@@ -1918,9 +2044,10 @@ window.model3_component = function(opt, editor) {
 
 			}
 
-			// P1: a corner that moves in place slides past the lines and faces
-			// that use it but don't move: they get their own point at the
-			// corner. repair() on stop reconnects whatever touches.
+			// the lines and faces using a corner that moves in place, but not
+			// moving with the pull, would be dragged along: they are given
+			// their own point at the corner instead. when the pull stops,
+			// repair() reconnects them to the geometry still at their points.
 			let in_place_pis = map() // {pi->new_pi}; corners that move in place.
 			for (let ei = 0; ei < en; ei++)
 				if (!new_pp_edge.has(ei)) // no new pp side edge: moves in place.
@@ -2057,8 +2184,10 @@ window.model3_component = function(opt, editor) {
 			for (let li of pull.face.lis)
 				moving_lis.add(li)
 
-			// P2: the pull stops where a pp side edge reaches zero length. new
-			// pp side edges start at zero length and set no limit.
+			// limit the pull distance to where a pp side edge is shrunk to zero
+			// length, so that the geometry is never turned inside out by a push.
+			// no limit is set for new pp side edges: their length is zero at
+			// the start.
 			let pull_dir = pull.line.delta(normal) // unit length.
 			for (let li of pp_lis) {
 				let p1i = lines[5*li+0]
@@ -2104,9 +2233,12 @@ window.model3_component = function(opt, editor) {
 		}}
 
 		pull.stop = function() {
-			// TODO: make hole, etc.
 			if (LOG) log('pull.stop')
-			repair()
+			let lis = repair()
+			make_overlap_faces(lis)
+			// after a pull, two faces with the same outline are both removed:
+			// the volumes on both sides are joined, or a hole is made.
+			merge_faces(lis, true)
 		}
 
 		return pull
