@@ -161,6 +161,7 @@ function model3_editor(e) {
 		update_sunlight_pos()
 		update_renderer()
 
+		camera.raycast(mouse.x, mouse.y, mouse.ray)
 		mouse.valid = false
 		fire_pointermove()
 	}
@@ -2219,7 +2220,7 @@ function model3_editor(e) {
 			fire_pointermove()
 		mouse.prevent_validate = false
 		let hit_point = mouse_hit_model({mode: 'camera'})
-		camera.dolly(hit_point, 1 + 0.4 * dy)
+		camera.dolly(hit_point, 1.4 ** dy)
 		camera_dirty = true
 		update_camera()
 		save_camera()
