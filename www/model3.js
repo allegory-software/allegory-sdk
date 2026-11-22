@@ -22,7 +22,7 @@
 
 const {
 	abs, clamp, lerp, return_true, assert, log, push_log, pop_log,
-	callable_constructor, inherit_properties,
+	isindex, callable_constructor, inherit_properties,
 	extend, insert, remove, remove_value, map, set, assign, attr, json,
 } = glue
 
@@ -818,6 +818,77 @@ window.model3_component = function(opt, editor) {
 					add_line(t.lines[i], t.lines[i+1])
 
 		}
+	}
+
+	// geometry save and load -------------------------------------------------
+
+	e.save_geometry = function(material_index) {
+		let saved_points = []
+		let saved_lines = []
+		let saved_faces = []
+
+		let point_indices = []
+		for (let pi = 0, n = point_count(); pi < n; pi++) {
+			if (!prc[pi])
+				continue
+			point_indices[pi] = saved_points.length / 3
+			let i = 3*pi
+			saved_points.push(points[i], points[i+1], points[i+2])
+		}
+
+		let line_indices = []
+		for (let li = 0, n = line_count(); li < n; li++) {
+			if (!line_rc(li))
+				continue
+			line_indices[li] = saved_lines.length
+			let i = 5*li
+			saved_lines.push([
+				point_indices[lines[i]], point_indices[lines[i+1]],
+				line_smoothness(li), line_opacity(li),
+			])
+		}
+
+		for (let face of faces) {
+			if (!face.length)
+				continue
+			let pis = []
+			let lis = []
+			for (let pi of face)
+				pis.push(point_indices[pi])
+			for (let li of face.lis)
+				lis.push(line_indices[li])
+			let material = material_index(face.mat_inst.material)
+			saved_faces.push({
+				pis, lis, material, holes: face.holes?.slice() ?? [],
+			})
+		}
+
+		return {points: saved_points, lines: saved_lines, faces: saved_faces}
+	}
+
+	e.load_geometry = function(data, materials) {
+		assert(!point_count() && !line_count() && !faces.length)
+		let {points: saved_points, lines: saved_lines, faces: saved_faces} = data
+		assert(saved_points.length % 3 == 0, 'Invalid Model3 points')
+		for (let i = 0; i < saved_points.length; i += 3)
+			add_point_xyz(saved_points[i], saved_points[i+1], saved_points[i+2])
+
+		let n = point_count()
+		for (let [p1i, p2i, , opacity] of saved_lines) {
+			assert(isindex(p1i, n))
+			assert(isindex(p2i, n))
+			let li = add_line(p1i, p2i)
+			set_line_opacity(li, opacity)
+		}
+
+		for (let {pis, lis, material, holes} of saved_faces) {
+			for (let pi of pis)
+				assert(isindex(pi, n))
+			add_face(pis, lis, assert(materials[material]), holes)
+		}
+
+		for (let li = 0; li < saved_lines.length; li++)
+			set_line_smoothness(li, saved_lines[li][2])
 	}
 
 	// hit testing & snapping -------------------------------------------------
@@ -1912,30 +1983,51 @@ window.model3_component = function(opt, editor) {
 		}
 	}
 
-	// draw line --------------------------------------------------------------
+	// draw polyline ----------------------------------------------------------
 
-	e.draw_line = function(line) {
+	// draw a line between each two points in a row of `points`, and from the
+	// last point to the first if `closed`, as one operation: the lines share
+	// their points, and the model is repaired once.
+	{
+	let point_pis = [] // [i -> pi]: the point added for points[i], once used.
+	let drawn_i1s = [] // [i1, ...]: the first point of each added line.
+	let _l0 = line3()
+	e.draw_polyline = function(points, closed) {
 
-		let p1 = line[0]
-		let p2 = line[1]
+		clear_touched()
+		point_pis.length = 0
+		drawn_i1s.length = 0
+		let n = points.length
+		let n_lines = closed ? n : n - 1
 
-		// check for min. line length for lines with new endpoints.
-		if (p1.i == null || p2.i == null) {
-			if (p1.distance2(p2) <= NEAR ** 2)
-				return
-		} else if (p1.i == p2.i) {
-			// check if end point was snapped to start end point.
-			return
+		for (let i1 = 0; i1 < n_lines; i1++) {
+			let i2 = (i1 + 1) % n
+			let p1 = points[i1]
+			let p2 = points[i2]
+
+			// check for min. line length for lines with new endpoints.
+			if (p1.i == null || p2.i == null) {
+				if (p1.distance2(p2) <= NEAR ** 2)
+					continue
+			} else if (p1.i == p2.i) {
+				// check if end point was snapped to start end point.
+				continue
+			}
+
+			// add the line as given: repair() splits it and what it touches.
+			point_pis[i1] ??= p1.i ?? add_point(p1)
+			point_pis[i2] ??= p2.i ?? add_point(p2)
+			add_line(point_pis[i1], point_pis[i2])
+			drawn_i1s.push(i1)
 		}
 
-		// add the line as given: repair() splits it and what it touches.
-		clear_touched()
-		let p1i = p1.i ?? add_point(p1)
-		let p2i = p2.i ?? add_point(p2)
-		add_line(p1i, p2i)
-		make_cycle_faces(line, repair())
+		let lis = repair()
+		for (let i1 of drawn_i1s) {
+			_l0.set(points[i1], points[(i1 + 1) % n])
+			make_cycle_faces(_l0, lis)
+		}
 
-	}
+	}}
 
 	// push/pull --------------------------------------------------------------
 

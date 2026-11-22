@@ -497,13 +497,20 @@ function model3_editor(e) {
 
 	function create_component(opt) {
 		opt ??= {}
+		let comp = new_component(opt, comps.length, default_material,
+			default_layer)
+		comps.push(comp)
+		return comp
+	}
+
+	function new_component(opt, id, material, layer) {
 		let comp = model3_component(assign(opt, {
 			name             : opt.name ?? 'component '+ (next_comp_num++),
 		}), {
 			gl               : gl,
 			push_undo        : push_undo,
-			default_material : default_material,
-			default_layer    : default_layer,
+			default_material : material,
+			default_layer    : layer,
 			child_added      : child_added,
 			child_removed    : child_removed,
 			layer_changed    : layer_changed,
@@ -511,8 +518,6 @@ function model3_editor(e) {
 
 		// comp id must be dynamic because of shader-based hit-testing
 		// which limits the id range to 0..32K-1.
-		let id = comps.length
-		comps[id] = comp
 		comp.id = id
 
 		return comp
@@ -605,19 +610,23 @@ function model3_editor(e) {
 		e.root.comp = create_component({name: '<root>'})
 	}
 
-	function free_model() {
-		for (let comp of comps) {
+	function free_components(components) {
+		for (let comp of components) {
 			if (comp.davib) {
 				comp.davib.free()
 				comp.davib = null
 			}
 			comp.free()
 		}
-		comps.length = 0
+		components.length = 0
+	}
+
+	function free_model() {
+		free_components(comps)
 		e.root = null
 	}
 
-	e.clear_model = function() {
+	function replace_model(init) {
 		if (tool.bind)
 			tool.bind(false)
 		captured_move = null
@@ -631,11 +640,15 @@ function model3_editor(e) {
 		undo_stack.length = 0
 		redo_groups.length = 0
 		redo_stack.length = 0
-		init_root()
+		init()
 		enter_edit([e.root])
 		update_all()
 		if (tool.bind)
 			tool.bind(true)
+	}
+
+	e.clear_model = function() {
+		replace_model(init_root)
 	}
 
 	e.free = function() {
@@ -643,6 +656,125 @@ function model3_editor(e) {
 		canvas.remove()
 		canvas = null
 		gl = null
+	}
+
+	// model save and load ----------------------------------------------------
+
+	function save_index(values, indices, value) {
+		let i = indices.get(value)
+		if (i == null) {
+			i = values.length
+			values.push(value)
+			indices.set(value, i)
+		}
+		return i
+	}
+
+	e.save_model = function() {
+		let model_materials = []
+		let model_layers = []
+		let material_indices = new Map()
+		let layer_indices = new Map()
+		let components = []
+
+		function material_index(material) {
+			return save_index(model_materials, material_indices, material)
+		}
+
+		for (let material of materials)
+			material_index(material)
+		for (let layer of layers)
+			save_index(model_layers, layer_indices, layer)
+
+		for (let comp of comps) {
+			let data = {
+				name: comp.name,
+				...comp.save_geometry(material_index),
+				children: [],
+			}
+			for (let child of comp.children) {
+				let layer = save_index(model_layers, layer_indices, child.layer)
+				data.children.push({
+					component: child.comp.id, transform: Array.from(child), layer,
+				})
+			}
+			components.push(data)
+		}
+
+		let saved_materials = []
+		for (let material of model_materials) {
+			assert(!material.diffuse_map, 'Cannot save a Model3 texture')
+			let {name, diffuse_color, uv, opacity,
+				specular_strength, shininess} = material
+			saved_materials.push({
+				name, diffuse_color, uv: uv && Array.from(uv), opacity,
+				specular_strength, shininess,
+			})
+		}
+
+		let saved_layers = []
+		for (let layer of model_layers) {
+			let {name, visible, can_hide} = layer
+			saved_layers.push({name, visible, can_hide})
+		}
+
+		return JSON.stringify({
+			version: 1,
+			root: {component: e.root.comp.id, transform: Array.from(e.root)},
+			default_layer: layer_indices.get(default_layer),
+			materials: saved_materials,
+			layers: saved_layers,
+			components,
+		})
+	}
+
+	e.load_model = function(text) {
+		let data = JSON.parse(text)
+		assert(data.version == 1, 'Unsupported Model3 version')
+
+		let model_materials = data.materials
+		let model_layers = data.layers
+		let material = assert(model_materials[0])
+		let layer = assert(model_layers[data.default_layer])
+		let components = []
+		let root = mat4().from_array(data.root.transform, 0)
+
+		for (let mat of model_materials)
+			if (mat.uv)
+				mat.uv = v2().from_array(mat.uv, 0)
+
+		let undo_len = undo_stack.length
+		try {
+			for (let saved of data.components) {
+				let comp = new_component({name: saved.name}, components.length,
+					material, layer)
+				components.push(comp)
+				comp.load_geometry(saved, model_materials)
+			}
+			root.comp = assert(components[data.root.component])
+			for (let ci = 0; ci < components.length; ci++) {
+				let comp = components[ci]
+				for (let child of data.components[ci].children)
+					comp.add_child(assert(components[child.component]),
+						mat4().from_array(child.transform, 0),
+						assert(model_layers[child.layer]))
+			}
+		} catch (err) {
+			free_components(components)
+			throw err
+		} finally {
+			undo_stack.length = undo_len
+		}
+
+		replace_model(function() {
+			array_set(materials, model_materials)
+			array_set(layers, model_layers)
+			default_material = material
+			default_layer = layer
+			e.default_material = material
+			array_set(comps, components)
+			e.root = root
+		})
 	}
 
 	// drawing
@@ -1760,7 +1892,7 @@ function model3_editor(e) {
 		if (cur_line.visible) {
 
 			start_undo()
-			cur_comp.draw_line(rel_cur_line)
+			cur_comp.draw_polyline(rel_cur_line)
 			update()
 
 			ref_point.visible = false

@@ -22,6 +22,7 @@ TYPE CHECKING
 	isnum(n)
 	isbool(b)
 	isfunc(f)
+	isindex(i, n) -> true if i is an integer in [0, n)
 
 LOGIC
 
@@ -310,6 +311,7 @@ let isstr = s => typeof s == 'string'
 let isnum = n => typeof n == 'number'
 let isbool = b => typeof b == 'boolean'
 let isfunc = f => typeof f == 'function'
+let isindex = (i, n) => Number.isInteger(i) && i >= 0 && i < n
 
 // logic ---------------------------------------------------------------------
 
@@ -2144,7 +2146,7 @@ let href = return_arg
 
 let glue = {
 Firefox, Chrome, Safari, Safari_maj, Safari_min,
-isobject, isarray, isobj, isstr, isnum, isbool, isfunc,
+isobject, isarray, isobj, isstr, isnum, isbool, isfunc, isindex,
 repl,
 num, str,
 inf,

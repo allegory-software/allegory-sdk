@@ -22,7 +22,7 @@ const page_html = `<!DOCTYPE html>
 <script src=ui.js></script>
 <script src=model3_editor.js></script>
 <script>
-const {v3, line3} = Math3D
+const {v3} = Math3D
 ui.main = function() {
 	ui.v()
 		ui.h(0)
@@ -32,9 +32,8 @@ ui.main = function() {
 		ui.model3_editor('m', {}, function(e) {
 			window.test_editor = e
 			let c = e.root.comp
-			let p = [v3(0, 0, 0), v3(2, 0, 0), v3(2, 2, 0), v3(0, 2, 0)]
-			for (let i = 0; i < 4; i++)
-				c.draw_line(line3(p[i], p[(i+1) % 4]))
+			c.draw_polyline([v3(0, 0, 0), v3(2, 0, 0), v3(2, 2, 0), v3(0, 2, 0)],
+				true)
 			e.update_all()
 		})
 	ui.end_v()

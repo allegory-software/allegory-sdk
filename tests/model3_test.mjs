@@ -227,12 +227,12 @@ const results = (function() {
 		return !!p && near(p[1], 0)
 	})
 
-	check('draw_line splits at an existing point', () => {
+	check('draw_polyline splits at an existing point', () => {
 		let c = make_comp()
 		let m = c.add_point_xyz(1, 0, 0)
 		let q = c.add_point_xyz(1, 1, 0)
 		c.add_line(m, q)
-		c.draw_line(line3(v3(0, 0, 0), v3(2, 0, 0)))
+		c.draw_polyline([v3(0, 0, 0), v3(2, 0, 0)])
 		let n = 0
 		c.each_line(l => n++)
 		let used = 0
@@ -249,7 +249,7 @@ const results = (function() {
 		let a = c.add_point_xyz(0, 0, 0), b = c.add_point_xyz(2, 0, 0)
 		c.add_line(a, b)
 		let n = 0
-		c.draw_line(line3(v3(0, 1, 0), v3(2, 1, 0)))
+		c.draw_polyline([v3(0, 1, 0), v3(2, 1, 0)])
 		c.each_line(l => n++)
 		return n == 2 || 'lines: ' + n + ' (want 2: the new line is not split)'
 	})
@@ -264,11 +264,11 @@ const results = (function() {
 			`line rc ${c.line_rc(li)}, point rcs ${c.point_rc(a)} ${c.point_rc(b)}`
 	})
 
-	check('draw_line crossing an existing line cuts both', () => {
+	check('draw_polyline crossing an existing line cuts both', () => {
 		let c = make_comp()
 		let a = c.add_point_xyz(1, -1, 0), b = c.add_point_xyz(1, 1, 0)
 		c.add_line(a, b)
-		c.draw_line(line3(v3(0, 0, 0), v3(2, 0, 0)))
+		c.draw_polyline([v3(0, 0, 0), v3(2, 0, 0)])
 		let n = 0
 		c.each_line(l => n++)
 		return n == 4 || 'lines: ' + n + ' (want 4)'
@@ -832,12 +832,17 @@ const results = (function() {
 	})
 
 	// draw `lines` ([[p1, p2],...]) in one undo group, then check rcs, undo
-	// and redo. the points have no indices, as the editor sends them.
-	function check_draw_undo(c, lines) {
+	// and redo. the points have no indices, as the editor sends them. a line
+	// with more points is a polyline; `closed` closes each one.
+	function check_draw_undo(c, lines, closed) {
 		let state0 = model_state(c)
 		c.editor.start_group()
-		for (let [p1, p2] of lines)
-			c.draw_line(line3(v3(...p1), v3(...p2)))
+		for (let line of lines) {
+			let points = []
+			for (let p of line)
+				points.push(v3(...p))
+			c.draw_polyline(points, closed)
+		}
 		let errs = check_rcs(c)
 		if (errs)
 			return errs
@@ -850,7 +855,7 @@ const results = (function() {
 	}
 
 	// the two squares use the cut edge in opposite directions.
-	check('draw_line across a shared face edge: rcs, undo, redo', () => {
+	check('draw_polyline across a shared face edge: rcs, undo, redo', () => {
 		let c = make_comp()
 		let P = [[0,0,0], [2,0,0], [2,2,0], [0,2,0], [4,0,0],
 			[4,2,0]].map(p => c.add_point_xyz(...p))
@@ -863,7 +868,7 @@ const results = (function() {
 			`face lengths ${f1.length} ${f2.length} (want 5 5)`
 	})
 
-	check('draw_line starting on a line cuts it there: rcs, undo, redo', () => {
+	check('draw_polyline starting on a line cuts it there: rcs, undo, redo', () => {
 		let c = make_comp()
 		c.add_line(c.add_point_xyz(0, 0, 0), c.add_point_xyz(2, 0, 0))
 		let err = check_draw_undo(c, [[[1,0,0], [1,-1,0]]])
@@ -879,7 +884,7 @@ const results = (function() {
 		return n == 3 && !short || `lines ${n}, zero-length ${short} (want 3, 0)`
 	})
 
-	check('draw_line over a face edge merges into it: rcs, undo, redo', () => {
+	check('draw_polyline over a face edge merges into it: rcs, undo, redo', () => {
 		let c = make_comp()
 		add_square(c, 0, 0, 2)
 		let state0 = model_state(c)
@@ -889,7 +894,7 @@ const results = (function() {
 		return model_state(c) == state0 || 'the model changed'
 	})
 
-	check('draw_line crossing a line: rcs, undo, redo', () => {
+	check('draw_polyline crossing a line: rcs, undo, redo', () => {
 		let c = make_comp()
 		c.add_line(c.add_point_xyz(1, -1, 0), c.add_point_xyz(1, 1, 0))
 		return check_draw_undo(c, [[[0,0,0], [2,0,0]]])
@@ -905,6 +910,39 @@ const results = (function() {
 		let F = live_faces(c)
 		return F.length == 1 && F[0].length == 4 ||
 			`faces ${F.length}, points ${F[0]?.length} (want 1, 4)`
+	})
+
+	// F1: the lines of a closed polyline share their points: no point is
+	// added twice and merged.
+	check('draw a closed polyline: a face: rcs, undo, redo', () => {
+		let c = make_comp()
+		let err = check_draw_undo(c, [[[0,0,0], [1,0,0], [1,1,0], [0,1,0]]],
+			true)
+		if (err !== true)
+			return err
+		let F = live_faces(c)
+		return F.length == 1 && F[0].length == 4 && c.point_count() == 4 ||
+			`faces ${F.length}, face points ${F[0]?.length}, ` +
+			`point slots ${c.point_count()} (want 1, 4, 4)`
+	})
+
+	// F1 islands: all lines of the polyline are in place before the faces are
+	// made.
+	check('draw a closed polyline inside a face: an island: rcs, undo, redo',
+			() => {
+		let c = make_comp()
+		add_square(c, 0, 0, 3)
+		let err = check_draw_undo(c, [[[1,1,0], [2,1,0], [2,2,0], [1,2,0]]],
+			true)
+		if (err !== true)
+			return err
+		let F = live_faces(c)
+		if (F.length != 2)
+			return `faces ${F.length} (want 2)`
+		let outer = F.find(f => f.holes?.length)
+		let inner = F.find(f => !f.holes?.length)
+		return outer && inner && outer.length == 8 && inner.length == 4 ||
+			`face lengths ${F.map(f => f.length)} (want 8 4)`
 	})
 
 	// F1: the line goes from edge to edge below the hole.
@@ -972,10 +1010,10 @@ const results = (function() {
 	check('draw an island next to an island: one hole: rcs, undo, redo', () => {
 		let c = make_comp()
 		add_square(c, 0, 0, 4)
-		c.draw_line(line3(v3(1,1,0), v3(2,1,0)))
-		c.draw_line(line3(v3(2,1,0), v3(2,2,0)))
-		c.draw_line(line3(v3(2,2,0), v3(1,2,0)))
-		c.draw_line(line3(v3(1,2,0), v3(1,1,0)))
+		c.draw_polyline([v3(1,1,0), v3(2,1,0)])
+		c.draw_polyline([v3(2,1,0), v3(2,2,0)])
+		c.draw_polyline([v3(2,2,0), v3(1,2,0)])
+		c.draw_polyline([v3(1,2,0), v3(1,1,0)])
 		let err = check_draw_undo(c, [[[2,1,0], [3,1,0]], [[3,1,0], [3,2,0]],
 			[[3,2,0], [2,2,0]]])
 		if (err !== true)
