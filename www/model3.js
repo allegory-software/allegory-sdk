@@ -1967,7 +1967,7 @@ window.model3_component = function(opt, editor) {
 
 				for (let face of faces) {
 
-					if (face != pull.face) { // not the pulled face.
+					if (face.length && face != pull.face) { // not freed or pulled.
 
 						if (abs(face.plane().normal.dot(pull.face.plane().normal)) < NEAR) { // face is pp.
 

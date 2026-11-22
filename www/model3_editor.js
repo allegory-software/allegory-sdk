@@ -329,8 +329,11 @@ function model3_editor(e) {
 	let redo_groups = [] // same
 	let redo_stack  = [] // same
 
+	// open a group for a new edit: what was undone can't be redone after it.
 	function start_undo() {
 		undo_groups.push(undo_stack.length)
+		redo_groups.length = 0
+		redo_stack.length = 0
 	}
 
 	function push_undo(f, ...args) {
@@ -340,7 +343,7 @@ function model3_editor(e) {
 	function undo_from(stack, start) {
 		if (start == null)
 			return
-		start_undo()
+		undo_groups.push(undo_stack.length)
 		while (stack.length > start) {
 			let f = stack.pop()
 			let argc = stack.pop()
@@ -352,6 +355,9 @@ function model3_editor(e) {
 		let stack  = undo_stack
 		let groups = undo_groups
 		let start  = groups.pop()
+		// skip empty groups: nothing was changed after they were opened.
+		while (start != null && start == stack.length)
+			start = groups.pop()
 		if (start == null)
 			return
 		undo_groups = redo_groups
@@ -1746,6 +1752,7 @@ function model3_editor(e) {
 		let closing = cur_line.visible && (cur_line[1].i != null || cur_line[1].li != null)
 		if (cur_line.visible) {
 
+			start_undo()
 			cur_comp.draw_line(rel_cur_line)
 			update()
 
@@ -1828,10 +1835,11 @@ function model3_editor(e) {
 				start()
 			}
 			mouse.prevent_validate = true
-			let p = mouse_hit_model({mode: 'draw', distance: 'snap'})
-			let hit_model = p && pull.can_hit(p)
+			let model_p = mouse_hit_model({mode: 'draw', distance: 'snap'})
+			let hit_model = model_p && pull.can_hit(model_p)
+			let p
 			if (hit_model) {
-				p = pull.line.project_point(p, false, _v0)
+				p = pull.line.project_point(model_p, false, _v0)
 			} else {
 				let int_line = mouse.ray.intersect_line(pull.line, _line0)
 				p = int_line && int_line[1].to(_v0)
@@ -1847,11 +1855,14 @@ function model3_editor(e) {
 			ref_line.update()
 
 			ref_point.set(p)
-			ref_point.snap = p.snap
+			ref_point.snap = hit_model ? model_p.snap : null
 			ref_point.visible = hit_model
 			ref_point.update()
 
-			e.tooltip = snap_tooltips[p.snap || p.line_snap] || p.tooltip
+			e.tooltip = hit_model
+				? snap_tooltips[model_p.snap || model_p.line_snap]
+					|| model_p.tooltip
+				: ''
 
 			// replace the last step's moves.
 			rewind_undo(pull_undo_start)
@@ -1874,8 +1885,12 @@ function model3_editor(e) {
 		function cancel() {
 			if (!pull)
 				return
-			undo()
+			rewind_undo(undo_groups.pop())
 			select_all(false)
+			// end the drag that started the pull, else the pull is started
+			// again on the next move.
+			e.capture_pointer(null, null)
+			mouse.dragging = false
 			finish()
 		}
 
@@ -1923,6 +1938,7 @@ function model3_editor(e) {
 		let p = mouse_hit_faces()
 		if (!p || p.snap != 'face')
 			return
+		start_undo()
 		if (p.comp == cur_comp) {
 
 			cur_comp.set_material(p.face, material)
@@ -2084,7 +2100,8 @@ function model3_editor(e) {
 		mouse.prevent_validate = false
 		update_keys()
 		if (key == 'delete') {
-			remove_selection()
+			start_undo()
+			cur_comp.remove_selection()
 			update()
 			return false
 		}
