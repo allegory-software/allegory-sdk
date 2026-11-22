@@ -216,7 +216,7 @@ await pg.mouse.up()
 await pg.waitForTimeout(200)
 let sq1 = await read_square()
 check('pull lifted the square into a box',
-	sq1.n_faces == sq0.n_faces + 4 && sq1.zs.length && sq1.zs.every(z => z != 0),
+	sq1.n_faces == sq0.n_faces + 5 && sq1.zs.length && sq1.zs.every(z => z != 0),
 	JSON.stringify([sq0, sq1]))
 await pg.keyboard.down('Control')
 await pg.waitForTimeout(50)

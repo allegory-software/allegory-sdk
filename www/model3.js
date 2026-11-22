@@ -2078,6 +2078,7 @@ window.model3_component = function(opt, editor) {
 			let en = pull.face.length
 
 			let pp_side_faces = [] // [face1, face1_ei, ...]; pp faces containing the pulled edge.
+			let is_lone = true // no other face uses an edge of the pulled face.
 
 			// for each edge of the pulled face, find all faces that also
 			// contain that edge and are pp to the pulled face. there should be
@@ -2111,6 +2112,9 @@ window.model3_component = function(opt, editor) {
 					}
 
 				}
+
+				if (pp_side_faces.length || non_pp_face_has_edge)
+					is_lone = false
 
 				// a non-pp face keeps the pulled edge in place, so the pp side faces
 				// can't stretch along with it: make a new pp face on the edge instead.
@@ -2237,6 +2241,26 @@ window.model3_component = function(opt, editor) {
 					'faces:', ...new_pp_face.keys(),
 					'insert:', json(ins_edge).replaceAll('"', '')
 				)
+
+			// a lone face is copied at the start, so a closed volume is made.
+			// the copy's contours are reversed, for a normal pointing out of
+			// the volume.
+			if (is_lone) {
+				let pis = []
+				let lis = []
+				for (let k = -1; k < pull.face.hole_count(); k++) {
+					let i1 = k < 0 ? 0 : pull.face.hole_i1(k)
+					let i2 = k < 0
+						? pull.face.point_count_without_holes()
+						: pull.face.hole_i2(k)
+					pis.push(pull.face[i1])
+					for (let i = i2-1; i > i1; i--)
+						pis.push(pull.face[i])
+					for (let i = i2-1; i >= i1; i--)
+						lis.push(pull.face.lis[i])
+				}
+				add_face(pis, lis, pull.face.mat_inst.material, pull.face.holes)
+			}
 
 			// create pp side edges and adjust pulled face points & edge endpoints.
 			let old_points = {} // {ei: pi}

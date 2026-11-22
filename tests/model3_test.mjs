@@ -311,7 +311,7 @@ const results = (function() {
 			'face ' + Array.from(f)
 	})
 
-	check('start_pull on a lone square builds four side faces', () => {
+	check('start_pull on a lone square builds four walls and a bottom', () => {
 		let c = make_comp()
 		let f = add_square(c, 0, 0, 1)
 		let p = v3(.5, .5, 0)
@@ -320,8 +320,12 @@ const results = (function() {
 		pull.pull(2)
 		let n = live_faces(c).length
 		let zs = Array.from(f).map(pi => c.get_point(pi, v3())[2])
-		return n == 5 && zs.every(z => near(z, 2)) ||
-			`live faces ${n} (want 5), top z ${zs}`
+		let bottoms = live_faces(c).filter(f1 => f1 != f &&
+			Array.from(f1).every(pi => near(c.get_point(pi, v3())[2], 0)))
+		let bottom_nz = bottoms.length == 1 && bottoms[0].plane().normal[2]
+		return n == 6 && zs.every(z => near(z, 2)) && near(bottom_nz, -1) ||
+			`live faces ${n} (want 6), top z ${zs}, bottoms ${bottoms.length}` +
+			` (want 1), bottom normal z ${bottom_nz} (want -1)`
 	})
 
 	// ref count errors: a face edge must join its points, a line's rc is
@@ -736,7 +740,7 @@ const results = (function() {
 
 	// the side faces have zero height: they are removed (F3) and the rest is
 	// merged (L1).
-	check('pull by 0 gives back the starting face: rcs, undo, redo', () => {
+	check('pull a lone square by 0: nothing is left: rcs, undo, redo', () => {
 		let c = make_comp()
 		let err = check_pull_undo(c, add_square(c, 0, 0, 1), 0)
 		if (err !== true)
@@ -744,8 +748,8 @@ const results = (function() {
 		let n_faces = live_faces(c).length
 		let n_lines = 0
 		c.each_line(l => n_lines++)
-		return n_faces == 1 && n_lines == 4 ||
-			`faces ${n_faces}, lines ${n_lines} (want 1, 4)`
+		return n_faces == 0 && n_lines == 0 ||
+			`faces ${n_faces}, lines ${n_lines} (want 0, 0)`
 	})
 
 	// the live faces with all points at height `z`.
@@ -827,8 +831,10 @@ const results = (function() {
 		let n_faces = live_faces(c).length
 		let tops = faces_at_z(c, 1)
 		let n_points = tops.map(f => f.length).sort().join()
-		return n_faces == 6 && n_points == '4,8' ||
-			`faces ${n_faces}, top points ${n_points} (want 6, 4,8)`
+		let n_bottoms = faces_at_z(c, 0).length
+		return n_faces == 7 && n_points == '4,8' && n_bottoms == 1 ||
+			`faces ${n_faces}, top points ${n_points}, bottoms ${n_bottoms}` +
+			` (want 7, 4,8, 1)`
 	})
 
 	// draw `lines` ([[p1, p2],...]) in one undo group, then check rcs, undo
