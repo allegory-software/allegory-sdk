@@ -601,6 +601,34 @@ const results = (function() {
 		return zs.join() == '0,0,2,2' || 'fin zs ' + zs
 	})
 
+	// M5, P2: the walls' side edges reach zero length at the bottom.
+	check('push an open box top past its bottom: the push stops there', () => {
+		let c = make_comp()
+		let P = add_box(c)
+		let F = box_faces.slice(1).map(f => c.add_face(f.map(i => P[i])))
+		let err = check_pull_undo(c, F[0], -3)
+		if (err !== true)
+			return err
+		let zs = Array.from(F[0]).map(pi => c.get_point(pi, v3())[2])
+		return zs.join() == '0,0,0,0' || 'top zs ' + zs
+	})
+
+	// P2: the fin is attached along the lower half of the edge 1-5, so both
+	// walls have that edge split at (2,0,1) and the push stops there.
+	check('push a box top past a fin partway down: the push stops at the fin', () => {
+		let c = make_comp()
+		let P = add_box(c, [[2,0,1], [3,-1,1], [3,-1,0]])
+		let faces = [[1,0,3,2], [4,5,6,7], [7,6,2,3], [4,0,1,8,5], [0,4,7,3],
+			[5,8,1,2,6]]
+		let F = faces.map(f => c.add_face(f.map(i => P[i])))
+		c.add_face([1, 10, 9, 8].map(i => P[i]))
+		let err = check_pull_undo(c, F[1], -3)
+		if (err !== true)
+			return err
+		let zs = Array.from(F[1]).map(pi => c.get_point(pi, v3())[2])
+		return zs.join() == '1,1,1,1' || 'top zs ' + zs
+	})
+
 	// the side faces have zero height: they are removed (F3) and the rest is
 	// merged (L1).
 	check('pull by 0 gives back the starting face: rcs, undo, redo', () => {

@@ -1821,6 +1821,7 @@ window.model3_component = function(opt, editor) {
 			let side_edge = line3()
 			let normal = v3()
 			let _v0 = v3()
+			let _v1 = v3()
 
 			let en = pull.face.length
 
@@ -2056,9 +2057,23 @@ window.model3_component = function(opt, editor) {
 			for (let li of pull.face.lis)
 				moving_lis.add(li)
 
-			// TODO: set min-max distance limits.
+			// P2: the pull stops where a pp side edge reaches zero length. new
+			// pp side edges start at zero length and set no limit.
+			let pull_dir = pull.line.delta(normal) // unit length.
 			for (let li of pp_lis) {
-				let line = get_line(li)
+				let p1i = lines[5*li+0]
+				let p2i = lines[5*li+1]
+				let p1_moves = pull.face.includes(p1i)
+				let p2_moves = pull.face.includes(p2i)
+				if (p1_moves == p2_moves) // the edge doesn't move.
+					continue
+				let moving_p = get_point(p1_moves ? p1i : p2i, _v0)
+				let fixed_p  = get_point(p1_moves ? p2i : p1i, _v1)
+				let d = fixed_p.sub(moving_p).dot(pull_dir)
+				if (d < -NEAR)
+					min_distance = max(min_distance, d)
+				else if (d > NEAR)
+					max_distance = min(max_distance, d)
 			}
 
 		}
