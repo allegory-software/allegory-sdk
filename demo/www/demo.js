@@ -162,13 +162,6 @@ views.call = {
 	},
 }
 
-views.model3_editor = {
-	label: 'Model editor', icon: 'cube', category: 'Editors',
-	build: function(id) {
-		model3_editor(id+'.widget', {}, model3_editor_test_objects)
-	},
-}
-
 function cmp_label(a, b) {
 	return a.label < b.label ? -1 : a.label > b.label ? 1 : 0
 }

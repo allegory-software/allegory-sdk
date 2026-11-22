@@ -11764,6 +11764,13 @@ function nav_editor_update(id, s) {
 	// the browser.
 	if (nav.ready && ui.focus_inside(id) && ui.keydown('ctrl r')) {
 		nav.revert_changes()
+		let ri = nav.focused_ri
+		if (ri != null) {
+			let def = s.def
+			let key = nav.cell_input_val(ri, nav.all_fields_map[def.key_col].fi)
+			let value = nav.cell_input_val(ri, nav.all_fields_map[def.value_col].fi)
+			def.revert_value?.(id+'.editor.'+key, value)
+		}
 		nav.reload()
 		return
 	}

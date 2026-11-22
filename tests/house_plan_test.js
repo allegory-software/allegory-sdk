@@ -1536,7 +1536,7 @@ function fill_model_editor(h, create_component) {
 		set_camera_pos() {},
 		set_camera_dir() {},
 	}
-	ctx.ui.model3_editor = (id, opt, init) => init(editor)
+	ctx.ui.model3_editor = (id, value, field, opt, init) => init(editor)
 	ctx.ui.house_model_editor('house_model', h)
 }
 

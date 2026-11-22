@@ -406,7 +406,7 @@ ui.house_model_editor = function(id, house, floor, fr, align, valign,
 	}
 	model_editor_opt.fov = ui.saved_value('house_model_fov') ?? undefined
 	ui.stack('', fr, align, valign)
-		ui.model3_editor(id, model_editor_opt, init)
+		ui.model3_editor(id, null, null, model_editor_opt, init)
 		let is_changed = height_controls(controls_id, house, id, cut_floor,
 			readonly)
 		if (e && (e.house != house || e.house_edit_no != house.edit_no

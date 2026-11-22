@@ -100,6 +100,7 @@ const file_editor_def = {
 	},
 	update_value: ui.code_edit_update_value,
 	is_value_changed: ui.code_edit_is_value_changed,
+	revert_value: ui.code_edit_revert_value,
 }
 
 ui.file_editor = function(id, opt) {

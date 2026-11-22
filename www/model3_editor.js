@@ -3,13 +3,15 @@
 	3D model editor widget.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	ui.model3_editor (id, opt, init=, fr=1, align='s', valign='s')
+	ui.model3_editor (id, value, field, opt, init=, fr=1, align='s', valign='s')
+	ui.model3_editor_update_value (id)
+	ui.model3_editor_is_value_changed (id) -> t|f
 
 	opt is {prop -> value} for the config props declared with e.prop():
 	projection, fov, shadows, sunlight, time, north, latitude, longitude,
-	skybox (read at creation only), background_color. The camera and the
-	tool are the widget's own state. init(e) runs once, after creation,
-	to fill the model.
+	skybox (read at creation only), background_color, readonly. The camera
+	and the tool are the widget's own state. init(e) runs once, after
+	creation, to fill the model.
 
 */
 
@@ -328,6 +330,8 @@ function model3_editor(e) {
 	let undo_stack  = [] // [args1...,argc1,f1, ...]
 	let redo_groups = [] // same
 	let redo_stack  = [] // same
+	let edit_no = 0 // count of recorded model changes, undo and redo included
+	let value_edit_no = 0 // edit_no of the value loaded or published
 
 	// open a group for a new edit: what was undone can't be redone after it.
 	function start_undo() {
@@ -337,6 +341,7 @@ function model3_editor(e) {
 	}
 
 	function push_undo(f, ...args) {
+		edit_no++
 		undo_stack.push(...args, args.length, f)
 	}
 
@@ -1456,10 +1461,14 @@ function model3_editor(e) {
 
 	let tools = {}
 
+	e.prop('readonly', {default: false})
+
 	let tool // current tool
 	{
 		let toolname
 		property(e, 'tool', () => toolname, function(name) {
+			if (e.readonly && tools[name]?.edits_model)
+				return
 			e.tooltip = ''
 			if (tool && tool.bind)
 				tool.bind(false)
@@ -1728,7 +1737,7 @@ function model3_editor(e) {
 
 	// line tool --------------------------------------------------------------
 
-	tools.line = {}
+	tools.line = {edits_model: true}
 
 	let cur_point = helper_point(v3(), {visible: false})
 	let ref_point = helper_point(v3(), {visible: false, snap: 'ref_point'})
@@ -1930,7 +1939,7 @@ function model3_editor(e) {
 
 	// push/pull tool ---------------------------------------------------------
 
-	tools.pull = {}
+	tools.pull = {edits_model: true}
 
 	{
 		let hit_p // point on the plane hit for pulling.
@@ -2062,7 +2071,7 @@ function model3_editor(e) {
 
 	// paint tool -------------------------------------------------------------
 
-	tools.paint = {}
+	tools.paint = {edits_model: true}
 
 	function paint_node(node, material) {
 		for (let face of node.comp.faces)
@@ -2238,7 +2247,7 @@ function model3_editor(e) {
 	e.keydown = function(key) {
 		mouse.prevent_validate = false
 		update_keys()
-		if (key == 'delete') {
+		if (key == 'delete' && !e.readonly) {
 			start_undo()
 			cur_comp.remove_selection()
 			update()
@@ -2272,7 +2281,7 @@ function model3_editor(e) {
 			ungroup_selection()
 			return false
 		}
-		if (ctrl && key == 'z') {
+		if (ctrl && key == 'z' && !e.readonly) {
 			if (shift)
 				redo()
 			else
@@ -2282,7 +2291,7 @@ function model3_editor(e) {
 			ui.animate()
 			return false
 		}
-		if (ctrl && key == 'y') {
+		if (ctrl && key == 'y' && !e.readonly) {
 			redo()
 			update_all()
 			ui.animate()
@@ -2639,6 +2648,7 @@ function model3_editor(e) {
 	e.update = function() {
 		let id = e.id
 		let s = ui.state(id)
+		s.interaction_value = undefined
 		cx = s.x
 		cy = s.y
 		update_keys()
@@ -2695,7 +2705,47 @@ function model3_editor(e) {
 		}
 	}
 
-	e.build = function(id, opt, init, fr, align, valign) {
+	e.update_value = function() {
+		if (edit_no == value_edit_no)
+			return
+		ui.set_interaction_value(e.id, ui.state(e.id), e.save_model())
+		value_edit_no = edit_no
+	}
+
+	e.is_value_changed = function() {
+		return edit_no != value_edit_no
+	}
+
+	e.revert_value = function(value) {
+		if (edit_no == value_edit_no)
+			return
+		if (value != null)
+			e.load_model(value)
+		else
+			e.clear_model()
+		value_edit_no = edit_no
+	}
+
+	e.build = function(id, value, field, opt, init, fr, align, valign) {
+		let s = ui.state(id)
+		field ??= ui.input_field(id) ?? s.field
+			?? ui.create_field({type: 'json'})
+		let value0 = s.input_value
+		let field0 = s.field
+		value = ui.set_value(id, s, value, field)
+		let has_interaction_value = s.interaction_value !== undefined
+		let is_input_changed = value !== value0 || field != field0
+		if (!has_interaction_value && is_input_changed) {
+			if (value != null && !s.validation.failed)
+				e.load_model(value)
+			else if (value0 != null)
+				e.clear_model()
+			value_edit_no = edit_no
+		}
+		if (s.validation.failed) {
+			ui.text('', value, 1, 's', 's', null, 'line')
+			return ui.value(id)
+		}
 		apply_options(opt)
 		ui.focusable(id)
 		if (ui.captured_or_hit(id))
@@ -2713,6 +2763,7 @@ function model3_editor(e) {
 	update_all()
 
 	e.tool = 'orbit'
+	value_edit_no = edit_no
 
 	return e
 }
@@ -2794,7 +2845,7 @@ function create_test_objects(e) {
 
 window.model3_editor = model3_editor
 
-function create_model3_editor(id, opt, init) {
+function create_model3_editor(id, value, field, opt, init) {
 	let e = model3_editor(assign({id: id}, opt))
 	ui.on_free(id, function() { e.free() }) // init() can wrap e.free.
 	if (init)
@@ -2807,6 +2858,18 @@ function create_model3_editor(id, opt, init) {
 }
 
 ui.model3_editor = ui.stateful_widget(create_model3_editor)
+
+ui.model3_editor_update_value = function(id) {
+	ui.state_of(id, 'e')?.update_value()
+}
+
+ui.model3_editor_is_value_changed = function(id) {
+	return !!ui.state_of(id, 'e')?.is_value_changed()
+}
+
+ui.model3_editor_revert_value = function(id, value) {
+	ui.state_of(id, 'e')?.revert_value(value)
+}
 
 ui.model3_editor_test_objects = create_test_objects // init(e) for the demos
 

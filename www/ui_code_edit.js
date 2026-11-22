@@ -1718,6 +1718,11 @@ function code_edit_view(id, opt, s) {
 	e.is_value_changed = function() {
 		return value_changed
 	}
+	e.revert_value = function(value) {
+		if (!value_changed)
+			return
+		reset_editor(value == null ? '' : s.field.to_input(value))
+	}
 
 	return e
 }
@@ -1733,6 +1738,10 @@ ui.code_edit_update_value = function(id) {
 
 ui.code_edit_is_value_changed = function(id) {
 	return !!ui.state_of(id, 'view')?.is_value_changed()
+}
+
+ui.code_edit_revert_value = function(id, value) {
+	ui.state_of(id, 'view')?.revert_value(value)
 }
 
 ui.code_edit = function(id, value, field, opt, readonly) {
