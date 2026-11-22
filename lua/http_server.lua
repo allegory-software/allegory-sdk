@@ -546,6 +546,7 @@ function http_server(...)
 						update(req.response_headers, err.headers)
 					end
 					if err.content then
+						while req:read_body_chunk() do end
 						req.response_headers['content-length'] = tostring(#err.content)
 						req:send_headers():send_body_chunk(err.content)
 					end
