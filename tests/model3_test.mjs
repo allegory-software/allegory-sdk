@@ -535,6 +535,18 @@ const results = (function() {
 		return c.point_rc(P[8]) == 0 || 'the split point is still used'
 	})
 
+	// M14: the bottom is wider in y, so both ends of the top's split x = 2
+	// edge get a new pp side edge, and the wall gets two inserts.
+	check('pull a box top split between sloped walls: rcs, undo, redo', () => {
+		let c = make_comp()
+		let P = [[0,-1,0], [2,-1,0], [2,3,0], [0,3,0], [0,0,2], [2,0,2], [2,2,2],
+			[0,2,2], [2,1,2]].map(p => c.add_point_xyz(...p))
+		let faces = [[1,0,3,2], [4,5,8,6,7], [7,6,2,3], [4,0,1,5], [0,4,7,3],
+			[5,1,2,6,8]]
+		let F = faces.map(f => c.add_face(f.map(i => P[i])))
+		return check_pull_undo(c, F[1], 1)
+	})
+
 	check('pull a box top: a standalone line at a corner stays', () => {
 		let c = make_comp()
 		let P = add_box(c, [[-1,-1,2]])

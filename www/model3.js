@@ -1940,7 +1940,7 @@ window.model3_component = function(opt, editor) {
 		{
 			let new_pp_edge = map() // {pull_ei->true}
 			let new_pp_face = map() // {pull_ei->true}
-			let ins_edge = map() // {pp_face->[[pp_ei, line_before_point, pull_ei],...]}
+			let ins_edge = map() // {pp_face->[[pull_li, line_before_point, pull_ei],...]}
 			let pp_lis = set() // {pi}
 
 			let pull_edge = line3()
@@ -2028,7 +2028,7 @@ window.model3_component = function(opt, editor) {
 							// add a command to extend this face with a pp edge if it turns out
 							// that the point at `endpoint_ei` will have a pp edge.
 							// NOTE: can't call insert_edge() with ei=0. luckily, we don't have to.
-							attr(ins_edge, face, Array).push([face_ei + 1, i == 0, endpoint_ei])
+							attr(ins_edge, face, Array).push([pull_li, i == 0, endpoint_ei])
 
 						}
 
@@ -2166,16 +2166,17 @@ window.model3_component = function(opt, editor) {
 			}
 
 			// extend pp side faces with newly created pp side edges.
+			// the edge's index is looked up at each insert: earlier inserts
+			// move it, and a face's edges aren't recorded in its own order.
 			for (let [pp_face, t] of ins_edge) {
-				let insert_offset = 0
-				for (let [pp_ei, line_before_point, pull_ei] of t) {
+				for (let [pull_li, line_before_point, pull_ei] of t) {
 					let pull_pi = pull.face[pull_ei]
 					let pp_li = new_pp_edge.get(pull_ei)
 					if (pp_li != null) {
 						ref_point(pull_pi)
 						ref_line(pp_li)
-						insert_edge(pp_face, pp_ei + insert_offset, pull_pi, line_before_point, pp_li)
-						insert_offset++
+						let pp_ei = pp_face.lis.indexOf(pull_li) + 1
+						insert_edge(pp_face, pp_ei, pull_pi, line_before_point, pp_li)
 					}
 				}
 			}
