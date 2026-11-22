@@ -83,9 +83,8 @@ local
 
 local Db = mdbx_db
 
---scratch space for building one key and reading one field; written and read
---within a single call, never handed to another file.
-local pp = new'u8*[1]'
+--scratch space for reading one field; written and read within a single call,
+--never handed to another file.
 local pout = new'const u8*[1]'
 local key_decode_buffer = u8a(MDBX_MAX_KEY_SIZE)
 
@@ -248,8 +247,9 @@ local function direct_read_rec(db, schema, params)
 	return 'reencode', first_rec, first_key_schema
 end
 
---key_add_param() -> f(out) that writes one field at pp[0] and advances
---pp; returns false when op rejects null or when a scan source is absent.
+--key_add_param() -> f(out, sz) that writes one field at out + sz and returns
+--the size after it; returns false when op rejects null or when a scan source
+--is absent.
 local function key_add_param(db, param, output_schema, slot, scan, op)
 	local output_field = output_schema.key_fields[slot]
 	local out_st = output_schema._st
@@ -257,7 +257,7 @@ local function key_add_param(db, param, output_schema, slot, scan, op)
 	local i = slot - 1
 	if not param.scan then
 		local get, arg, value = param.get, param.arg, param.value
-		return function(out)
+		return function(out, sz)
 			local v = value
 			if get then
 				v = get()
@@ -273,10 +273,9 @@ local function key_add_param(db, param, output_schema, slot, scan, op)
 				if op ~= 'is' or output_field.not_null then return false end
 				len = -1
 			else
-				len = output_field.encode(db, 'scan', pp[0], v)
+				len = output_field.encode(db, 'scan', out + sz, v)
 			end
-			C.schema_key_add(out_st, i, out, cap, len, pp)
-			return true
+			return C.schema_key_add(out_st, i, out, cap, len, sz)
 		end
 	else
 		local field, rec, param_schema, base_schema =
@@ -301,29 +300,30 @@ local function key_add_param(db, param, output_schema, slot, scan, op)
 			assertf(decode, 'incompatible: %s.%s -> %s.%s',
 				param.scan.table, param.col,
 				output_schema.name, output_field.col)
-			write = function(out)
+			write = function(out, sz)
 				if not found() then return false end
 				local len = is_key_read
 					and C.schema_get_key_rec(st, field_i, rec,
 						key_decode_buffer, MDBX_MAX_KEY_SIZE, pout, nil)
 					or C.schema_get_val_rec(st, field_i, rec, pout)
 				if len < 0 then return false end
-				local elen = output_field.encode(db, 'scan', pp[0],
+				local elen = output_field.encode(db, 'scan', out + sz,
 					decode(pout[0], len))
-				C.schema_key_add(out_st, i, out, cap, elen, pp)
-				return true
+				return C.schema_key_add(out_st, i, out, cap, elen, sz)
 			end
 		elseif is_key_read then
-			write = function(out)
+			write = function(out, sz)
 				if not found() then return false end
-				return C.schema_key_add_key_rec(out_st, i, out, cap, pp,
-					st, field_i, rec) ~= 0
+				sz = C.schema_key_add_key_rec(out_st, i, out, cap, sz,
+					st, field_i, rec)
+				return sz >= 0 and sz
 			end
 		else
-			write = function(out)
+			write = function(out, sz)
 				if not found() then return false end
-				return C.schema_key_add_val_rec(out_st, i, out, cap, pp,
-					st, field_i, rec) ~= 0
+				sz = C.schema_key_add_val_rec(out_st, i, out, cap, sz,
+					st, field_i, rec)
+				return sz >= 0 and sz
 			end
 		end
 		return write
@@ -340,11 +340,12 @@ local function key_write(db, output_schema, params, path, scan, i0, n)
 			scan, path[param_i][2])
 	end
 	return function(out)
-		pp[0] = out
+		local sz = 0
 		for k = 1, n do
-			if not key_add[k](out) then return end
+			sz = key_add[k](out, sz)
+			if not sz then return end
 		end
-		return out, C.schema_key_size(out, pp)
+		return out, sz
 	end
 end
 
@@ -356,19 +357,16 @@ local function bound_write(db, param, output_schema, slot, scan, op, partial)
 	local key_add = key_add_param(db, param, output_schema, slot, scan, op)
 	local trim = partial and output_schema.key_fields[slot].elem_size
 	return function(out, prefix_sz)
-		C.schema_key_add_start(out, prefix_sz, pp)
-		if not key_add(out) then return end
-		local sz = C.schema_key_size(out, pp)
+		local sz = key_add(out, prefix_sz)
+		if not sz then return end
 		if trim then sz = sz - trim end
 		return out, sz
 	end
 end
 
 local function write_null_bound(output_schema, slot, out, prefix_sz)
-	C.schema_key_add_start(out, prefix_sz, pp)
-	C.schema_key_add(output_schema._st, slot - 1, out,
-		output_schema.key_fields.max_rec_size, -1, pp)
-	return out, C.schema_key_size(out, pp)
+	return out, C.schema_key_add(output_schema._st, slot - 1, out,
+		output_schema.key_fields.max_rec_size, -1, prefix_sz)
 end
 
 local Scan = {}

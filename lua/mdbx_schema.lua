@@ -353,7 +353,20 @@ end
 local key_rec_buffer = u8a(MDBX_MAX_KEY_SIZE)
 local key_decode_buffer = u8a(MDBX_MAX_KEY_SIZE)
 local val_rec_buffer = buffer()
-local fk_key_buffer = u8a(MDBX_MAX_KEY_SIZE)
+
+--an op that calls user code while holding a record takes its buffers from
+--here, because user code can run nested ops. an op that raises leaves its
+--buffers to the gc.
+local free_key_rec_buffers = {} --{u8a(MDBX_MAX_KEY_SIZE), ...}
+local free_val_rec_buffers = {} --{buffer(), ...}
+
+local function take_key_rec_buffer()
+	return pop(free_key_rec_buffers) or u8a(MDBX_MAX_KEY_SIZE)
+end
+
+local function take_val_rec_buffer()
+	return pop(free_val_rec_buffers) or buffer()
+end
 
 --ROW ENCODING & DECODING ----------------------------------------------------
 
@@ -430,22 +443,20 @@ int schema_get_val_rec(schema_table* tbl, int col_i,
 	const u8** pout
 );
 
-void schema_key_add(schema_table* tbl, int col_i,
+int schema_key_add(schema_table* tbl, int col_i,
 	void* rec, int rec_buf_size, int val_len,
-	u8** pp
+	int offset
 );
 
-int schema_key_size(const void* rec, u8** pp);
-void schema_key_add_start(void* rec, int offset, u8** pp);
 void schema_key_pad(const void* data, int size, void* out, int out_size);
 
 int schema_key_add_key_rec(schema_table* tbl, int col_i,
-	void* rec, int rec_buf_size, u8** pp,
+	void* rec, int rec_buf_size, int offset,
 	schema_table* src_tbl, int src_col_i, const MDBX_val* src_rec
 );
 
 int schema_key_add_val_rec(schema_table* tbl, int col_i,
-	void* rec, int rec_buf_size, u8** pp,
+	void* rec, int rec_buf_size, int offset,
 	schema_table* src_tbl, int src_col_i, const MDBX_val* src_rec
 );
 
@@ -461,14 +472,12 @@ int schema_key_reencode_rec(
 	void* out_data, int out_size
 );
 
-void schema_val_add_start(schema_table* tbl,
-	void* rec, int rec_buf_size,
-	u8** pp
+int schema_val_add_start(schema_table* tbl,
+	void* rec, int rec_buf_size
 );
 
-void schema_val_add(schema_table* tbl, int col_i,
-	void* rec, int rec_buf_size, int val_len,
-	u8** pp
+int schema_val_add(schema_table* tbl, int col_i,
+	void* rec, int rec_buf_size, int val_len
 );
 
 void schema_sort_u32_be(void* buf, void* tmp, size_t n);
@@ -591,8 +600,6 @@ local function resolve_row_defaults(schema, row)
 	end
 end
 
-local pp = new'u8*[1]'
-
 --`defaults` fills in the defaults for missing key cols.
 local function encode_key(
 	self, schema, event, autoinc_f, defaults,
@@ -601,7 +608,7 @@ local function encode_key(
 	if #schema.key_fields == 0 then return 0 end
 	local autoinc_v
 	local null_col --a key col encoded as null; only index keys can have one
-	pp[0] = rec
+	local sz = 0
 	for ki,f in ipairs(schema.key_fields) do
 		local val = select_col(cols, as, f.col, ...)
 		if val == nil then
@@ -616,7 +623,7 @@ local function encode_key(
 		if val == nil then
 			if not f.not_null then
 				null_col = f.col
-				C.schema_key_add(schema._st, ki-1, rec, rec_buf_sz, -1, pp)
+				sz = C.schema_key_add(schema._st, ki-1, rec, rec_buf_sz, -1, sz)
 			else
 				self:check_col(event, schema.name, f.col, false, 'null_key')
 			end
@@ -625,11 +632,11 @@ local function encode_key(
 				self:check_col(event, schema.name, f.col, false,
 					field_check_error(f))
 			end
-			local len = f.encode(self, event, pp[0], val)
-			C.schema_key_add(schema._st, ki-1, rec, rec_buf_sz, len, pp)
+			local len = f.encode(self, event, rec + sz, val)
+			sz = C.schema_key_add(schema._st, ki-1, rec, rec_buf_sz, len, sz)
 		end
 	end
-	return pp[0] - rec, autoinc_v, null_col
+	return sz, autoinc_v, null_col
 end
 mdbx_encode_key = encode_key
 
@@ -643,7 +650,7 @@ local function encode_key_prefix(
 	self, schema, event,
 	rec, rec_buf_sz, n, partial, ...
 )
-	pp[0] = rec
+	local sz = 0
 	for ki = 1, n do
 		local f = schema.key_fields[ki]
 		local val = select(ki, ...)
@@ -651,25 +658,25 @@ local function encode_key_prefix(
 		if val == nil then
 			assert(not (partial and ki == n), 'partial key prefix is null')
 			if not f.not_null then
-				C.schema_key_add(schema._st, ki-1, rec, rec_buf_sz, -1, pp)
+				sz = C.schema_key_add(schema._st, ki-1, rec, rec_buf_sz, -1, sz)
 			else
 				self:check_col(event, schema.name, f.col, false, 'null_key')
 			end
 		else
-			local len = f.encode(self, event, pp[0], val)
-			C.schema_key_add(schema._st, ki-1, rec, rec_buf_sz, len, pp)
+			local len = f.encode(self, event, rec + sz, val)
+			sz = C.schema_key_add(schema._st, ki-1, rec, rec_buf_sz, len, sz)
 		end
 	end
 	if partial then --last key val was a prefix so remove its \0 terminator.
-		pp[0] = pp[0] - schema.key_fields[n].elem_size
+		sz = sz - schema.key_fields[n].elem_size
 	end
-	return pp[0] - rec
+	return sz
 end
 mdbx_encode_key_prefix = encode_key_prefix
 
 local function encode_val(self, schema, event, rec, rec_buf_sz, cols, as, ...)
 	if #schema.val_fields == 0 then return 0 end
-	C.schema_val_add_start(schema._st, rec, rec_buf_sz, pp)
+	local sz = C.schema_val_add_start(schema._st, rec, rec_buf_sz)
 	for vi,f in ipairs(schema.val_fields) do
 		local val = select_col(cols, as, f.col, ...)
 		if val == nil then
@@ -684,10 +691,10 @@ local function encode_val(self, schema, event, rec, rec_buf_sz, cols, as, ...)
 			self:check_col(event, schema.name, f.col, false,
 				field_check_error(f))
 		end
-		local len = val ~= nil and f.encode(self, event, pp[0], val) or -1
-		C.schema_val_add(schema._st, vi-1, rec, rec_buf_sz, len, pp)
+		local len = val ~= nil and f.encode(self, event, rec + sz, val) or -1
+		sz = C.schema_val_add(schema._st, vi-1, rec, rec_buf_sz, len)
 	end
-	return pp[0] - rec
+	return sz
 end
 
 --advance the sequence to a key value that a write supplied itself, so that
@@ -967,28 +974,29 @@ function Db:key_encoder(
 	end
 
 	return function()
-		pp[0] = out
+		local key_sz = 0
 		local i = 1
 		for ki = 1, #cols do
 			local st, field_index, rec, elem_size = unpack(col_reads, i, i + 3)
 			i = i + 4
+			local p = out + key_sz
 			local len
 			if rec then
 				len = C.schema_get_key(st, field_index, rec.data, rec.size,
-					pp[0], MDBX_MAX_KEY_SIZE - (pp[0] - out),
+					p, MDBX_MAX_KEY_SIZE - key_sz,
 					pout, nil)
 			else
 				local data, sz = get_base_val()
 				len = C.schema_get_val(st, field_index, data, sz, pout)
 			end
 			if len < 0 then return false end
-			if pout[0] ~= pp[0] then
-				copy(pp[0], pout[0], len * elem_size)
+			if pout[0] ~= p then
+				copy(p, pout[0], len * elem_size)
 			end
-			C.schema_key_add(key_schema._st, ki - 1, out,
-				MDBX_MAX_KEY_SIZE, len, pp)
+			key_sz = C.schema_key_add(key_schema._st, ki - 1, out,
+				MDBX_MAX_KEY_SIZE, len, key_sz)
 		end
-		return true, out, pp[0] - out
+		return true, out, key_sz
 	end
 end
 
@@ -2185,8 +2193,6 @@ local function val_reencode_needed(old_schema, new_schema)
 	return false
 end
 
-local alter_key_rec_buffer = u8a(MDBX_MAX_KEY_SIZE)
-
 --a scaled col stores the value times its scale, so changing the scale has to
 --change the stored numbers too: decoding and re-encoding alone would keep the
 --same number, which now stands for a different amount.
@@ -2235,17 +2241,21 @@ local function alter_values_in_place(self, dbi, old_schema, new_schema, event)
 	local ok, k, k_sz, v, v_sz = cur:first_raw()
 	local row = {}
 	local rescale = rescaled_cols(old_schema, new_schema)
+	local kk = take_key_rec_buffer()
+	local val_buf = take_val_rec_buffer()
 	while ok do
-		local kk = alter_key_rec_buffer; copy(kk, k, k_sz)
+		copy(kk, k, k_sz)
 		rebuild_row(self, old_schema, new_schema, event, rescale, row,
 			k, k_sz, v, v_sz)
-		local nv, nv_buf_sz = val_rec_buffer(new_schema.val_fields.max_rec_size)
+		local nv, nv_buf_sz = val_buf(new_schema.val_fields.max_rec_size)
 		local nv_sz = encode_val(
 			self, new_schema, event, nv, nv_buf_sz,
 			new_schema.val_cols, '{}', row)
 		assert(cur:try_put_raw(kk, k_sz, nv, nv_sz, C.MDBX_CURRENT))
 		ok, k, k_sz, v, v_sz = cur:next_raw()
 	end
+	add(free_key_rec_buffers, kk)
+	add(free_val_rec_buffers, val_buf)
 	cur:close()
 end
 
@@ -2261,11 +2271,12 @@ local function alter_via_temp_table(self, dbi, old_schema, new_schema, event)
 	--reencode every key and value into the replacement table.
 	local row = {}
 	local rescale = rescaled_cols(old_schema, new_schema)
+	local nk, nk_buf_sz = take_key_rec_buffer(), MDBX_MAX_KEY_SIZE
+	local val_buf = take_val_rec_buffer()
 	for _, k, k_sz, v, v_sz in self:each_raw(dbi) do
 		rebuild_row(self, old_schema, new_schema, event, rescale, row,
 			k, k_sz, v, v_sz)
-		local nk, nk_buf_sz = alter_key_rec_buffer, MDBX_MAX_KEY_SIZE
-		local nv, nv_buf_sz = val_rec_buffer(new_schema.val_fields.max_rec_size)
+		local nv, nv_buf_sz = val_buf(new_schema.val_fields.max_rec_size)
 		local nk_sz = encode_key(self, new_schema, event, nil, true,
 			nk, nk_buf_sz, new_schema.cols, '{}', row)
 		local nv_sz = encode_val(
@@ -2274,6 +2285,8 @@ local function alter_via_temp_table(self, dbi, old_schema, new_schema, event)
 		local ok, err = self:try_insert_raw(temp_dbi, nk, nk_sz, nv, nv_sz)
 		self:check_schema('t_alter', old_schema.name, nil, ok, err)
 	end
+	add(free_key_rec_buffers, nk)
+	add(free_val_rec_buffers, val_buf)
 
 	--restore table state and replace the old DBI.
 	if sequence > 0 then
@@ -2915,10 +2928,12 @@ local function check_existing_fk(self, event, schema, fk_name, fk)
 			vals[i] = v
 		end
 		if not skip then
-			local pk, pk_buf_sz = fk_key_buffer, MDBX_MAX_KEY_SIZE
+			local pk, pk_buf_sz = take_key_rec_buffer(), MDBX_MAX_KEY_SIZE
 			local pk_sz = encode_key(self, ref_schema, event, nil, false,
 				pk, pk_buf_sz, ref_schema.key_cols, nil, unpack(vals, 1, n))
-			if not self:find_raw(ref_dbi, pk, pk_sz) then
+			local found = self:find_raw(ref_dbi, pk, pk_sz)
+			add(free_key_rec_buffers, pk)
+			if not found then
 				cur:close()
 				return false, fmt('fk %s: existing row references missing %s',
 					fk_name, fk.ref_table)
@@ -3532,10 +3547,12 @@ local function check_fks(self, event, schema, cols, as, full, ...)
 		if not skip then
 			local ref_dbi, ref_schema = self:dbi_schema(fk.ref_table)
 			assertf(ref_dbi, 'fk %s: ref table missing: %s', fk_name, fk.ref_table)
-			local pk, pk_buf_sz = fk_key_buffer, MDBX_MAX_KEY_SIZE
+			local pk, pk_buf_sz = take_key_rec_buffer(), MDBX_MAX_KEY_SIZE
 			local pk_sz = encode_key(self, ref_schema, 'get', nil, false,
 				pk, pk_buf_sz, ref_schema.key_cols, nil, unpack(vals, 1, n))
-			if not self:find_raw(ref_dbi, pk, pk_sz) then
+			local found = self:find_raw(ref_dbi, pk, pk_sz)
+			add(free_key_rec_buffers, pk)
+			if not found then
 				self:check_row(event, schema.name, false,
 					fmt('fk %s: no parent row in %s', fk_name, fk.ref_table))
 			end
@@ -3618,11 +3635,11 @@ given cols merged over it, then on-update cols, before-triggers, gen_fns and
 the row check applied.
 	-> v, v_sz, row, [old_row]
 `k` must still address the row and `v0` its stored value; `v0` is read before
-any trigger runs, `k` also after. the caller writes the record and maintains
-the indexes.
+any trigger runs, `k` also after. `v` points into `val_buf`. the caller writes
+the record and maintains the indexes.
 ]]
 local function update_val_rec(
-	db, schema, event, k, k_sz, v0, v0_sz, cols, as, ...
+	db, schema, event, val_buf, k, k_sz, v0, v0_sz, cols, as, ...
 )
 	local val_cols = schema.val_cols
 	local t = {}
@@ -3659,7 +3676,7 @@ local function update_val_rec(
 		apply_col_gen_fns(db, event, schema, t)
 	end
 	check_row_constraint(db, event, schema, t)
-	local v, v_buf_sz = val_rec_buffer(schema.val_fields.max_rec_size)
+	local v, v_buf_sz = val_buf(schema.val_fields.max_rec_size)
 	local v_sz = encode_val(db, schema, event, v, v_buf_sz, val_cols, '{}', t)
 	if schema.fks then
 		check_fks(db, event, schema, schema.cols, '{}', false, t)
@@ -3672,9 +3689,11 @@ defaults filled in, then before-triggers, gen_fns and the row check.
 	-> v, v_sz, [row]
 the row is only built for triggers, gen_fns and the row check; otherwise
 the record is encoded straight from the given values. `k` must already hold
-the row's key. the caller writes the record.
+the row's key. `v` points into `val_buf`. the caller writes the record.
 ]]
-local function insert_val_rec(db, schema, event, k, k_sz, cols, as, ...)
+local function insert_val_rec(
+	db, schema, event, val_buf, k, k_sz, cols, as, ...
+)
 	local row
 	if schema.triggers or schema.has_gen_fn or schema.row_check_fn then
 		row = new_row(schema, nil, k, k_sz, cols, as, ...)
@@ -3689,7 +3708,7 @@ local function insert_val_rec(db, schema, event, k, k_sz, cols, as, ...)
 		end
 		check_row_constraint(db, event, schema, row)
 	end
-	local v, v_buf_sz = val_rec_buffer(schema.val_fields.max_rec_size)
+	local v, v_buf_sz = val_buf(schema.val_fields.max_rec_size)
 	local v_sz
 	if schema.triggers or schema.has_gen_fn then
 		v_sz = encode_val(db, schema, event,
@@ -3735,14 +3754,16 @@ local function cur_update(self, ix_cur, val_cols, ...)
 		v0c = u8a(v0_sz); copy(v0c, v0, v0_sz)
 	end
 	local db = self.db
+	local val_buf = take_val_rec_buffer()
 	--update_val_rec reads the key after the triggers, so it gets the copy.
 	local v, v_sz, t, old_t = update_val_rec(db, schema, 'c_update',
-		kk, k_sz, v0, v0_sz, cols, as, ...)
+		val_buf, kk, k_sz, v0, v0_sz, cols, as, ...)
 	assert(self:try_put_raw(kk, k_sz, v, v_sz, C.MDBX_CURRENT))
 	db:_row_changed(schema, kk, k_sz)
 	if schema.indexes then
 		update_indexes(db, 'c_update', schema, kk, k_sz, v, v_sz, v0c, v0_sz, ix_cur)
 	end
+	add(free_val_rec_buffers, val_buf)
 	if schema.triggers then
 		fire_triggers(schema, 'after_update', db, old_t, t)
 	end
@@ -3759,15 +3780,8 @@ local function put(self, op, tab, cols, ...)
 	local cols, as = cols_list(cols)
 	check_cols(schema, cols, as == '{}' and (...))
 	cols = cols or schema.cols
-	local k, k_buf_sz
-	if schema.triggers or schema.has_gen_fn then
-		--a trigger or a gen_fn can write, which re-enters the encoder and
-		--reuses the shared key buffer.
-		k_buf_sz = schema.key_fields.max_rec_size
-		k = u8a(k_buf_sz)
-	else
-		k, k_buf_sz = key_rec_buffer, MDBX_MAX_KEY_SIZE
-	end
+	local k, k_buf_sz = take_key_rec_buffer(), MDBX_MAX_KEY_SIZE
+	local val_buf = take_val_rec_buffer()
 	--an update must name the row it updates; insert and upsert may complete
 	--the key from defaults, but only insert mints an auto-increment value.
 	local makes_row = op ~= 'update'
@@ -3800,14 +3814,14 @@ local function put(self, op, tab, cols, ...)
 				copy(v0, v0_unstable, v0_sz)
 			end
 			v, v_sz, new_t, old_t = update_val_rec(self, schema, op,
-				k, k_sz, v0, v0_sz, cols, as, ...)
+				val_buf, k, k_sz, v0, v0_sz, cols, as, ...)
 			assert(cur:try_put_raw(k, k_sz, v, v_sz, C.MDBX_CURRENT))
 		elseif op == 'update' then --update but existing row not found
 			self:check_row(op, schema.name, false, v0)
 		else --insert or upsert new record
 			v0, v0_sz = nil --no previous value (v0 currently holds the find_raw err)
 			v, v_sz, new_t = insert_val_rec(self, schema, op,
-				k, k_sz, cols, as, ...)
+				val_buf, k, k_sz, cols, as, ...)
 			--the lookup found no row, so a row at this key now came from a
 			--trigger or a gen_fn and its index entries would be left behind.
 			local ret, err = cur:try_put_raw(k, k_sz, v, v_sz,
@@ -3827,12 +3841,15 @@ local function put(self, op, tab, cols, ...)
 			end
 		end
 	else --insert with no indexes to update or fks to check.
-		local v, v_sz = insert_val_rec(self, schema, op, k, k_sz, cols, as, ...)
+		local v, v_sz = insert_val_rec(self, schema, op,
+			val_buf, k, k_sz, cols, as, ...)
 		local ret, err = self:try_put_raw(dbi, k, k_sz, v, v_sz,
 			C.MDBX_NOOVERWRITE)
 		check_key(self, op, schema, schema, ret, err)
 		self:_row_changed(schema, k, k_sz)
 	end
+	add(free_key_rec_buffers, k)
+	add(free_val_rec_buffers, val_buf)
 	local logged_cols -- comma-separated column names with a value
 	if op == 'update' and logging.verbose then
 		for i, col in ipairs(cols) do -- selected column index and name
@@ -3905,7 +3922,7 @@ function Db:del(tab, ...)
 	local dbi, schema = self:dbi_schema(tab)
 	assertf(not (schema.is_index and not schema.is_unique),
 		'cannot delete through non-unique index: %s', schema.name)
-	local k, k_buf_sz = key_rec_buffer, MDBX_MAX_KEY_SIZE
+	local k, k_buf_sz = take_key_rec_buffer(), MDBX_MAX_KEY_SIZE
 	local k_sz, _, null_col = encode_key(self, schema, 'del', nil, false,
 		k, k_buf_sz, schema.key_cols, nil, ...)
 	--a null index key can match many rows, so it names no row to delete.
@@ -3913,6 +3930,7 @@ function Db:del(tab, ...)
 		schema.name, null_col)
 	local cur = self:cursor(dbi)
 	local ok, err = cur:move_raw(C.MDBX_SET_KEY, k, k_sz)
+	add(free_key_rec_buffers, k)
 	if not ok then
 		assert(err == 'not_found') --the only error
 		cur:close()
@@ -3944,8 +3962,9 @@ function Db:put_records(tab, cols, rows)
 	assertf(as, 'put_records: cols must be `[...]` or `{...}`')
 	check_cols(schema, cols)
 	cols = cols or schema.cols
-	local k, k_buf_sz = key_rec_buffer, MDBX_MAX_KEY_SIZE
-	local v, v_buf_sz = val_rec_buffer(schema.val_fields.max_rec_size)
+	local k, k_buf_sz = take_key_rec_buffer(), MDBX_MAX_KEY_SIZE
+	local val_buf = take_val_rec_buffer()
+	local v, v_buf_sz = val_buf(schema.val_fields.max_rec_size)
 	local seq_f = schema.autoinc_field
 	local max_seq_val --largest key value written; claimed after the loop
 	for _,row in ipairs(rows) do
@@ -3966,6 +3985,8 @@ function Db:put_records(tab, cols, rows)
 		self:check_row('put_rec', schema.name, ok, err)
 		self:_row_changed(schema, k, k_sz)
 	end
+	add(free_key_rec_buffers, k)
+	add(free_val_rec_buffers, val_buf)
 	claim_seq(self, schema, max_seq_val)
 	return true
 end
@@ -4041,18 +4062,21 @@ end
 --DML / LOOKUP ---------------------------------------------------------------
 
 local function find_raw_by_pk(self, dbi, schema, ...)
-	local k, k_buf_sz = key_rec_buffer, MDBX_MAX_KEY_SIZE
+	local k, k_buf_sz = take_key_rec_buffer(), MDBX_MAX_KEY_SIZE
 	local k_sz = encode_key(self, schema, 'get', nil, false,
 		k, k_buf_sz, schema.key_cols, nil, ...)
-	return self:find_raw(dbi, k, k_sz)
+	local ok, v, v_sz = self:find_raw(dbi, k, k_sz)
+	add(free_key_rec_buffers, k)
+	return ok, v, v_sz
 end
 
 function Cur:try_find(val_cols, ...)
 	local schema = assert(self.schema)
-	local k, k_buf_sz = key_rec_buffer, MDBX_MAX_KEY_SIZE
+	local k, k_buf_sz = take_key_rec_buffer(), MDBX_MAX_KEY_SIZE
 	local k_sz = encode_key(self.db, schema, 'c_get', nil, false,
 		k, k_buf_sz, schema.key_cols, nil, ...)
 	local ok, v, v_sz = self:move_raw_v(C.MDBX_SET_KEY, k, k_sz)
+	add(free_key_rec_buffers, k)
 	if not ok then return false, v end
 	return true, decode_kv(self.db, schema, nil, nil, v, v_sz, val_cols)
 end

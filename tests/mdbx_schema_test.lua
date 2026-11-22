@@ -8351,6 +8351,162 @@ db:close()
 		end)
 end
 
+-- callbacks before encoding --------------------------------------------------
+
+local function callback_table(db, spec)
+	local sc = mdbx_schema()
+	sc.tables.t = spec
+	sc.tables.lookup = {
+		name = 'lookup',
+		fields = {
+			{col = 'id', mdbx_type = 'u32', not_null = true},
+			{col = 'v', mdbx_type = 'u32'},
+			{col = 'data', mdbx_type = 'utf8', maxlen = 8192},
+		},
+		pk = {'id'},
+		rows = {{1, 1, 'seed'}},
+	}
+	db.schema = sc
+	db:sync_schema()
+end
+
+function test.key_defaults_and_column_checks_read_db()
+	with_db('key_defaults_and_column_checks_read_db', function(db)
+		local defaults = 0
+		local function check(v)
+			assert(db:find('lookup', 'v', 1) == 1)
+			return v > 0
+		end
+		callback_table(db, {
+			name = 't',
+			fields = {
+				{col = 'a', mdbx_type = 'u32', not_null = true, check_fn = check},
+				{col = 'b', mdbx_type = 'u32', not_null = true,
+					check_fn = check, default_fn = function()
+						defaults = defaults + 1
+						return db:find('lookup', 'v', 1)
+					end},
+				{col = 'v', mdbx_type = 'u32', check_fn = check},
+				{col = 'w', mdbx_type = 'u32', check_fn = check},
+			},
+			pk = {'a', 'b'},
+		})
+		db:begin'w'
+		db:insert('t', '{}', {a = 6, v = 20, w = 30})
+		local v, w = db:find('t', 'v w', 6, 1)
+		assert(v == 20 and w == 30 and defaults == 1)
+		db:upsert('t', '{}', {a = 6, v = 40})
+		v, w = db:find('t', 'v w', 6, 1)
+		assert(v == 40 and w == 30 and defaults == 2)
+		assert(db:del('t', 6, 1))
+		assert(defaults == 2)
+		db:commit()
+	end)
+end
+
+function test.row_check_and_on_update_read_db()
+	with_db('row_check_and_on_update_read_db', function(db)
+		callback_table(db, {
+			name = 't',
+			fields = {
+				{col = 'id', mdbx_type = 'u32', not_null = true},
+				{col = 'v', mdbx_type = 'u32', on_update_fn = function()
+					return db:find('lookup', 'v', 1) + 10
+				end},
+			},
+			pk = {'id'},
+			row_check_fn = function(row)
+				assert(db:exists('lookup', 1))
+				return row.v > 0
+			end,
+		})
+		db:begin'w'
+		db:insert('t', '{}', {id = 6, v = 60})
+		db:update('t', '{}', {id = 6})
+		assert(db:find('t', 'v', 6) == 11)
+		local cur = db:cursor't'
+		assert(cur:try_find(nil, 6))
+		cur:update('v', 20)
+		cur:close()
+		assert(db:find('t', 'v', 6) == 11)
+		assert(not db:exists('t', 1))
+		db:commit()
+	end)
+end
+
+function test.row_callbacks_keep_encoded_key_values()
+	with_db('row_callbacks_keep_encoded_key_values', function(db)
+		callback_table(db, {
+			name = 't',
+			fields = {
+				{col = 'id', mdbx_type = 'u32', not_null = true},
+				{col = 'part', mdbx_type = 'u32', not_null = true,
+					maxlen = 2, fixed = true},
+				{col = 'v', mdbx_type = 'u32'},
+			},
+			pk = {'id', 'part'},
+			triggers = {
+				before_insert = {function(db, row)
+					assert(row.id == 6)
+					row.part[1] = 99
+				end},
+				before_update = {function(db, old, row)
+					assert(old.id == 6 and row.id == 6)
+					old.part[1] = 88
+					row.part[1] = 99
+				end},
+			},
+			row_check_fn = function(row)
+				return row.id == 6 and row.part[1] == 1
+			end,
+		})
+		db:begin'w'
+		local part = {1, 2}
+		db:insert('t', '{}', {id = 6.75, part = part, v = 10})
+		assert(part[1] == 1)
+		assert(db:find('t', 'v', 6, part) == 10)
+		db:update('t', '{}', {id = 6.75, part = part, v = 20})
+		assert(part[1] == 1)
+		assert(db:find('t', 'v', 6, part) == 20)
+		db:commit()
+	end)
+end
+
+function test.put_records_callbacks_read_and_write_db()
+	with_db('put_records_callbacks_read_and_write_db', function(db)
+		local calls = 0
+		local data = ('x'):rep(4096)
+		callback_table(db, {
+			name = 't',
+			fields = {
+				{col = 'id', mdbx_type = 'u32', not_null = true},
+				{col = 'v', mdbx_type = 'u32', default_fn = function()
+					calls = calls + 1
+					db:upsert('lookup', '{}', {id = 1, v = 1, data = data})
+					return 99
+				end, check_fn = function(v)
+					assert(db:find('lookup', 'v', 1) == 1)
+					return v > 0
+				end},
+				{col = 'w', mdbx_type = 'u32'},
+			},
+			pk = {'id'},
+		})
+		db:begin'w'
+		local rows = {{id = 6, w = 60}, {id = 7}, {id = 8, v = null}}
+		db:put_records('t', '{}', rows)
+		assert(calls == 2 and rows[1].v == nil and rows[2].v == nil)
+		assert(db:find('t', 'v', 6) == 99)
+		assert(db:find('t', 'w', 6) == 60)
+		assert(db:find('t', 'v', 7) == 99)
+		assert(db:is_null('t', 'w', 7))
+		assert(db:is_null('t', 'v', 8))
+		assert(not db:exists('t', 1))
+		assert(db:find('lookup', 'data', 1) == data)
+		db:commit()
+	end)
+end
+
 local name = ...
 if name == 'mdbx_schema_test' then name = nil end
 local tests = name and {name} or test

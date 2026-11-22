@@ -141,19 +141,17 @@ int schema_get_val_rec(schema_table* tbl, int col_i,
 	const MDBX_val* rec,
 	u8** pout
 );
-void schema_key_add(schema_table* tbl, int col_i,
+int schema_key_add(schema_table* tbl, int col_i,
 	void* rec, int rec_buf_size, int val_len,
-	u8** pp
+	int offset
 );
-int schema_key_size(const void* rec, u8** pp);
-void schema_key_add_start(void* rec, int offset, u8** pp);
 void schema_key_pad(const void* data, int size, void* out, int out_size);
 int schema_key_add_key_rec(schema_table* tbl, int col_i,
-	void* rec, int rec_buf_size, u8** pp,
+	void* rec, int rec_buf_size, int offset,
 	schema_table* src_tbl, int src_col_i, const MDBX_val* src_rec
 );
 int schema_key_add_val_rec(schema_table* tbl, int col_i,
-	void* rec, int rec_buf_size, u8** pp,
+	void* rec, int rec_buf_size, int offset,
 	schema_table* src_tbl, int src_col_i, const MDBX_val* src_rec
 );
 int schema_key_reencode(
@@ -166,13 +164,11 @@ int schema_key_reencode_rec(
 	const MDBX_val* fk_key, MDBX_val* out,
 	void* out_data, int out_size
 );
-void schema_val_add_start(schema_table* tbl,
-	void* rec, int rec_buf_size,
-	u8** pp
+int schema_val_add_start(schema_table* tbl,
+	void* rec, int rec_buf_size
 );
-void schema_val_add(schema_table* tbl, int col_i,
-	void* rec, int rec_buf_size, int val_len,
-	u8** pp
+int schema_val_add(schema_table* tbl, int col_i,
+	void* rec, int rec_buf_size, int val_len
 );
 
 // implementation ------------------------------------------------------------
@@ -552,24 +548,24 @@ INLINE void set_next_dyn_offset(schema_table* tbl, int col_i,
 	set_dyn_offset(tbl, next_col, p + mem_size - rec, rec, rec_size);
 }
 
-void schema_key_add(schema_table* tbl, int col_i,
+// returns the offset after the added value.
+int schema_key_add(schema_table* tbl, int col_i,
 	void* rec, int rec_buf_size, int val_len,
-	u8** pp
+	int offset
 ) {
 	schema_col* col = get_key_col(tbl, col_i);
 	int ss = col->elem_size_shift;
-	void* p = *pp;
+	void* p = rec + offset;
 	void* data = p + col->nullable;
 
 	if (val_len == -1) { // null key
 		assert(col->nullable);
 		int mem_size = col->fixed_size ? ((col->len << ss) + col->nullable) : col->nullable;
-		assert(p + mem_size <= rec + rec_buf_size);
+		assert(offset + mem_size <= rec_buf_size);
 		memset(p, 0, mem_size);
 		if (col->descending)
 			invert_bits(p, p, mem_size);
-		*pp = p + mem_size;
-		return;
+		return offset + mem_size;
 	}
 
 	// check val_len and the nozero invariant for varsize keys.
@@ -581,7 +577,7 @@ void schema_key_add(schema_table* tbl, int col_i,
 	// figure out mem_size (size of this value in memory) and check it.
 	int payload_mem_size = col->fixed_size ? col->len << ss : val_size + (1 << ss);
 	int mem_size = payload_mem_size + col->nullable;
-	assert(p + mem_size <= rec + rec_buf_size);
+	assert(offset + mem_size <= rec_buf_size);
 
 	if (col->nullable) {
 		memmove(data, p, val_size);
@@ -600,16 +596,7 @@ void schema_key_add(schema_table* tbl, int col_i,
 	if (col->descending)
 		invert_bits(p, p, mem_size);
 
-	// advance data pointer.
-	*pp = p + mem_size;
-}
-
-int schema_key_size(const void* rec, u8** pp) {
-	return *pp - (const u8*)rec;
-}
-
-void schema_key_add_start(void* rec, int offset, u8** pp) {
-	*pp = (u8*)rec + offset;
+	return offset + mem_size;
 }
 
 void schema_key_pad(const void* data, int size, void* out, int out_size) {
@@ -618,37 +605,37 @@ void schema_key_pad(const void* data, int size, void* out, int out_size) {
 	memset((u8*)out + size, 0, out_size - size);
 }
 
+// returns the offset after the added value, or -1 if the source is null.
 int schema_key_add_key_rec(schema_table* tbl, int col_i,
-	void* rec, int rec_buf_size, u8** pp,
+	void* rec, int rec_buf_size, int offset,
 	schema_table* src_tbl, int src_col_i, const MDBX_val* src_rec
 ) {
-	u8* p = *pp;
+	u8* p = (u8*)rec + offset;
 	u8* data;
 	int len = schema_get_key_rec(src_tbl, src_col_i, src_rec,
-		p, rec_buf_size - (p - (u8*)rec), &data, 0);
+		p, rec_buf_size - offset, &data, 0);
 	if (len < 0)
-		return 0;
+		return -1;
 	int size = len << get_key_col(src_tbl, src_col_i)->elem_size_shift;
 	if (data != p)
 		memmove(p, data, size);
-	schema_key_add(tbl, col_i, rec, rec_buf_size, len, pp);
-	return 1;
+	return schema_key_add(tbl, col_i, rec, rec_buf_size, len, offset);
 }
 
+// returns the offset after the added value, or -1 if the source is null.
 int schema_key_add_val_rec(schema_table* tbl, int col_i,
-	void* rec, int rec_buf_size, u8** pp,
+	void* rec, int rec_buf_size, int offset,
 	schema_table* src_tbl, int src_col_i, const MDBX_val* src_rec
 ) {
-	u8* p = *pp;
+	u8* p = (u8*)rec + offset;
 	u8* data;
 	int len = schema_get_val_rec(src_tbl, src_col_i, src_rec, &data);
 	if (len < 0)
-		return 0;
+		return -1;
 	int size = len << get_val_col(src_tbl, src_col_i)->elem_size_shift;
 	if (data != p)
 		memmove(p, data, size);
-	schema_key_add(tbl, col_i, rec, rec_buf_size, len, pp);
-	return 1;
+	return schema_key_add(tbl, col_i, rec, rec_buf_size, len, offset);
 }
 
 /*
@@ -665,20 +652,21 @@ int schema_key_reencode(
 	int n = fk_ix->n_key_cols < parent->n_key_cols
 		? fk_ix->n_key_cols : parent->n_key_cols;
 	u8* pp_in = fk_key;
-	u8* pp_out = out;
+	int out_offset = 0;
 	for (int i = 0; i < n; i++) {
+		u8* p_out = (u8*)out + out_offset;
 		u8* pout;
 		int len = schema_get_key(fk_ix, i, fk_key, fk_key_size,
-			pp_out, out_size - (pp_out - (u8*)out), &pout, &pp_in);
+			p_out, out_size - out_offset, &pout, &pp_in);
 		if (len == -1)
 			return -1; // null FK component: no parent reference
 		schema_col* col = get_key_col(fk_ix, i);
 		int val_size = len << col->elem_size_shift;
-		if (pout != pp_out) // schema_get_key didn't write into out
-			memmove(pp_out, pout, val_size);
-		schema_key_add(parent, i, out, out_size, len, &pp_out);
+		if (pout != p_out) // schema_get_key didn't write into out
+			memmove(p_out, pout, val_size);
+		out_offset = schema_key_add(parent, i, out, out_size, len, out_offset);
 	}
-	return pp_out - (u8*)out;
+	return out_offset;
 }
 
 int schema_key_reencode_rec(
@@ -695,18 +683,18 @@ int schema_key_reencode_rec(
 	return 1;
 }
 
-void schema_val_add_start(schema_table* tbl,
-	void* rec, int rec_buf_size,
-	u8** pp
+// returns the offset of the first value.
+int schema_val_add_start(schema_table* tbl,
+	void* rec, int rec_buf_size
 ) {
 	schema_col* col = get_val_col(tbl, 0);
 	assert(col->fixed_offset);
-	*pp = rec + col->offset;
+	return col->offset;
 }
 
-void schema_val_add(schema_table* tbl, int col_i,
-	void* rec, int rec_buf_size, int val_len,
-	u8** pp
+// returns the offset after the added value.
+int schema_val_add(schema_table* tbl, int col_i,
+	void* rec, int rec_buf_size, int val_len
 ) {
 	schema_col* col = get_val_col(tbl, col_i);
 	int ss = col->elem_size_shift;
@@ -734,8 +722,7 @@ void schema_val_add(schema_table* tbl, int col_i,
 		set_next_dyn_offset(tbl, col_i, p, mem_size, rec, rec_buf_size);
 	}
 
-	// advance data pointer.
-	*pp = p + mem_size;
+	return (u8*)p + mem_size - (u8*)rec;
 }
 
 /*
