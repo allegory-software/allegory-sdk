@@ -15,7 +15,6 @@
 
 (function () {
 "use strict"
-const G = window
 
 const {
 	floor, abs, sign, min, clamp, sqrt, PI, rad, format_base,
@@ -27,7 +26,7 @@ const {
 
 const {NEAR, FAR, v2, v3, v4, mat4, plane, plane3, line3, camera3} = Math3D
 
-G.DEBUG_PLAN ??= 0
+window.DEBUG_PLAN ??= 0
 
 let TRACE_GL = 0 // trace gl calls
 
@@ -258,6 +257,7 @@ function model3_editor(e) {
 			enable_shadows: e.shadows,
 			camera: camera,
 			background_color: bg_color(),
+			show_back_faces: true,
 		})
 	}
 
@@ -678,24 +678,25 @@ function model3_editor(e) {
 	// instance path finding for hit testing
 
 	let instance_path; {
-	let path = []
-	function instance_path_for(target_comp, target_inst_id, node) {
+	function instance_path_for(target_comp, target_inst_id, node, path) {
 		path.push(node)
 		if (target_comp == node.comp && target_inst_id == target_comp._inst_id)
 			return true
 		node.comp._inst_id++
 		for (let child of node.comp.children) {
-			if (instance_path_for(target_comp, target_inst_id, child))
+			if (instance_path_for(target_comp, target_inst_id, child, path))
 				return true
 		}
 		path.pop(node)
 	}
-	instance_path = function(comp, inst_id) {
+	// each hit function passes its own `out`: a hit's path is kept until
+	// the next hit of the same function, like the hit point.
+	instance_path = function(comp, inst_id, out) {
 		for (let comp of comps)
 			comp._inst_id = 0
-		path.length = 0
-		instance_path_for(comp, inst_id, e.root)
-		return path
+		out.length = 0
+		instance_path_for(comp, inst_id, e.root, out)
+		return out
 	}}
 
 	// instance-space <-> world-space transforms
@@ -714,6 +715,7 @@ function model3_editor(e) {
 
 	let line_hit_lines; {
 	let _m0 = mat4()
+	let _path0 = [] // [node,...]
 	line_hit_lines = function(target_line, max_d, p2p_distance2, int_mode, is_line_valid, is_int_line_valid) {
 		if (!max_d)
 			return
@@ -724,7 +726,7 @@ function model3_editor(e) {
 				if (int_p) {
 					int_p.model = model
 					int_p.comp = comp
-					int_p.path = instance_path(int_p.comp, i)
+					int_p.path = instance_path(int_p.comp, i, _path0)
 					int_p.snap = 'line'
 					return int_p
 				}
@@ -874,10 +876,11 @@ function model3_editor(e) {
 	}}
 
 	// given `p` on `line`, get the axis-intersects-line point that is closest to `p`.
+	let axes_hit_line
 	{
 	let int_p = v3()
 	let ret = v3()
-	function axes_hit_line(model, p, line, max_hit_distance) {
+	axes_hit_line = function(model, p, line, max_hit_distance) {
 		let min_ds = 1/0
 		let min_int_p
 		for (let plane of ref_planes) {
@@ -914,6 +917,7 @@ function model3_editor(e) {
 	let _l0 = line3()
 	let _m0 = mat4()
 	let _pl0 = plane()
+	let _path0 = [] // [node,...]
 	mouse_hit_faces = function() {
 
 		if (!(mouse.valid || mouse.prevent_validate)) {
@@ -938,12 +942,15 @@ function model3_editor(e) {
 		if (!int_p)
 			return
 
+		if (plane.distance_to_point(camera.pos) < 0)
+			plane.negate()
+
 		int_p.comp = comp
 		int_p.model = model
 		int_p.plane = plane
 		int_p.face = face
 		int_p.snap = 'face'
-		int_p.path = instance_path(comp, inst_id)
+		int_p.path = instance_path(comp, inst_id, _path0)
 
 		return int_p
 
@@ -2138,10 +2145,15 @@ function model3_editor(e) {
 				redo()
 			else
 				undo()
+			// any component can be changed: a painted child's, for one.
+			update_all()
+			ui.animate()
 			return false
 		}
 		if (ctrl && key == 'y') {
 			redo()
+			update_all()
+			ui.animate()
 			return false
 		}
 		if (shift || ctrl)
@@ -2648,7 +2660,7 @@ function create_test_objects(e) {
 
 }
 
-G.model3_editor = model3_editor
+window.model3_editor = model3_editor
 
 function create_model3_editor(id, opt, init) {
 	let e = model3_editor(assign({id: id}, opt))

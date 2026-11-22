@@ -547,6 +547,97 @@ const results = (function() {
 		return check_pull_undo(c, F[1], 1)
 	})
 
+	// M29: the editor demo's box: the front face slopes, the top is narrower
+	// than the bottom. pushing the top to the bottom leaves a wedge.
+	// the editor demo's box, y up: the front face slopes, the top (y = 2,
+	// z = 0..2) is narrower than the bottom (y = 0, z = -1..2). the walls are
+	// at x = 0 and x = 2. return the faces: front, back, top, bottom, walls.
+	const demo_faces = [[1,0,3,2], [4,5,6,7], [7,6,2,3], [4,0,1,5], [0,4,7,3],
+		[5,1,2,6]]
+	function add_demo_box(c, with_walls) {
+		let P = [[0,0,-1], [2,0,-1], [2,2,0], [0,2,0], [0,0,2], [2,0,2],
+			[2,2,2], [0,2,2]].map(p => c.add_point_xyz(...p))
+		let n = with_walls ? 6 : 4
+		return demo_faces.slice(0, n).map(f => c.add_face(f.map(i => P[i])))
+	}
+	const face_ys = (c, f) => Array.from(f).map(pi => c.get_point(pi, v3())[1])
+
+	// M29: the top pushed to the bottom leaves a wedge: the front face, the
+	// bottom's front part, the new face at z = 0 and the two walls.
+	check('push the demo top to its bottom: no edge goes out and back', () => {
+		let c = make_comp()
+		let F = add_demo_box(c, true)
+		c.add_line(c.add_point_xyz(0, 0, 0), c.add_point_xyz(-1, 1, 0))
+		let err = check_pull_undo(c, F[2], -2)
+		if (err !== true)
+			return err
+		for (let f of live_faces(c))
+			for (let ei = 0; ei < f.length; ei++)
+				if (f.lis[ei] == f.lis[f.next_i(ei)])
+					return `face ${f.i} uses line ${f.lis[ei]} out and back`
+		let n = 0
+		c.each_line(l => { if (c.line_rc(l.i) == 1) n++ })
+		if (n != 1)
+			return `${n} lines without a face (want 1)`
+		let n_faces = live_faces(c).length
+		return n_faces == 5 || `${n_faces} faces (want 5)`
+	})
+
+	// M31: pushing the demo box's bottom up, the x = 0 wall's sloped edge
+	// from (0,2,0) to (0,0,-1) crosses the moving bottom edge at once (P2).
+	check("push the demo bottom up: the push can't start", () => {
+		let c = make_comp()
+		let F = add_demo_box(c, true)
+		let err = check_pull_undo(c, F[3], -1)
+		if (err !== true)
+			return err
+		let ys = face_ys(c, F[3])
+		return ys.join() == '0,0,0,0' || 'bottom ys ' + ys
+	})
+
+	// the walls' sloped edges lean away from the top's moving edges.
+	check('push the demo top down: the push goes', () => {
+		let c = make_comp()
+		let F = add_demo_box(c, true)
+		let err = check_pull_undo(c, F[2], -1)
+		if (err !== true)
+			return err
+		let ys = face_ys(c, F[2])
+		return ys.every(y => y == 1) || 'top ys ' + ys
+	})
+
+	// M33: without the walls, the back face is stretched along its own
+	// vertical edges (P4) instead of getting the new side faces' edges on
+	// top of them, so no side face crosses itself either way (P2).
+	check('push the demo top down and bottom up without walls: rcs, undo, redo', () => {
+		for (let [fi, y] of [[2, 1], [3, 1]]) {
+			let c = make_comp()
+			let F = add_demo_box(c, false)
+			let err = check_pull_undo(c, F[fi], -1)
+			if (err !== true)
+				return `face ${fi}: ` + err
+			let ys = face_ys(c, F[fi])
+			if (!ys.every(y1 => y1 == y))
+				return `face ${fi} ys ` + ys
+			if (F[1].length != 4)
+				return `face ${fi}: back face has ${F[1].length} points (want 4)`
+		}
+		return true
+	})
+
+	// M34: the undo frees the pull's points and lines, and the second pull
+	// reuses the points: ref_or_add_line() must not find the freed lines.
+	check('pull the demo bottom without walls, undo, pull again: rcs', () => {
+		let c = make_comp()
+		let F = add_demo_box(c, false)
+		let err = check_pull_undo(c, F[3], 1)
+		if (err !== true)
+			return err
+		c.editor.undo()
+		err = check_pull_undo(c, F[3], 1)
+		return err === true || 'second pull: ' + err
+	})
+
 	check('pull a box top: a standalone line at a corner stays', () => {
 		let c = make_comp()
 		let P = add_box(c, [[-1,-1,2]])
@@ -614,7 +705,9 @@ const results = (function() {
 	})
 
 	// M5, P2: the walls' side edges reach zero length at the bottom.
-	check('push an open box top past its bottom: the push stops there', () => {
+	// P2: the walls' fixed points are all on the bottom plane, so the walls
+	// only flip and the push goes past the bottom.
+	check('push an open box top past its bottom: the walls flip', () => {
 		let c = make_comp()
 		let P = add_box(c)
 		let F = box_faces.slice(1).map(f => c.add_face(f.map(i => P[i])))
@@ -622,7 +715,7 @@ const results = (function() {
 		if (err !== true)
 			return err
 		let zs = Array.from(F[0]).map(pi => c.get_point(pi, v3())[2])
-		return zs.join() == '0,0,0,0' || 'top zs ' + zs
+		return zs.join() == '-1,-1,-1,-1' || 'top zs ' + zs
 	})
 
 	// P2: the fin is attached along the lower half of the edge 1-5, so both

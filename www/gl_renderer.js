@@ -120,11 +120,9 @@ gl.module('phong.fs', `
 
 	float shadow = 0.0;
 
-	void do_phong() {
+	void do_phong(vec3 normal) {
 
 		float ambient = ambient_strength;
-
-		vec3 normal = normalize(v_normal);
 
 		vec3 light_dir = normalize(sunlight_pos - v_pos);
 		float diffuse = max(dot(normal, light_dir), 0.0);
@@ -398,6 +396,7 @@ gl.hit_test_renderer = function(r) {
 		fbo.clear_color(0, 0xffff, 0xffff, 0xffff, 0xffff)
 		gl.clear_all()
 
+		gl.cull(false)
 		draw(face_prog)
 
 		fbo.unbind()
@@ -474,7 +473,8 @@ gl.faces_renderer = function() {
 
 		void main() {
 
-			do_phong();
+			vec3 normal = normalize(v_normal);
+			do_phong(gl_FrontFacing ? normal : -normal);
 
 			if (v_selected == 1) {
 				float x = mod(gl_FragCoord.x, 4.0);
@@ -1419,7 +1419,7 @@ gl.ground_plane_renderer = function(opt) {
 		#include phong.fs
 
 		void main() {
-			do_phong();
+			do_phong(normalize(v_normal));
 			if (shadow <= 0.0)
 				discard;
 			frag_color = vec4(0.0, 0.0, 0.0, shadow * (1.0 - ambient_strength));

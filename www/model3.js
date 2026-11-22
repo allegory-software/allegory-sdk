@@ -21,7 +21,7 @@
 "use strict"
 
 const {
-	abs, clamp, return_true, assert, log, push_log, pop_log,
+	abs, clamp, lerp, return_true, assert, log, push_log, pop_log,
 	callable_constructor, inherit_properties,
 	extend, insert, remove, remove_value, map, set, assign, attr, json,
 } = glue
@@ -506,6 +506,9 @@ window.model3_component = function(opt, editor) {
 	function ref_or_add_line(p1i, p2i) {
 		let found_li
 		for (let li = 0, n = line_count(); li < n; li++) {
+			// freed: skip. it keeps its points, which can be reused.
+			if (!line_rc(li))
+				continue
 			let _p1i = lines[5*li+0]
 			let _p2i = lines[5*li+1]
 			if ((_p1i == p1i && _p2i == p2i) || (_p1i == p2i && _p2i == p1i)) {
@@ -1083,6 +1086,36 @@ window.model3_component = function(opt, editor) {
 		}
 	}
 
+	// remove each filament of `face`: two edges in a row on one line, going
+	// out to a point and back. they enclose no area (F3), so both edges and
+	// the point between them are removed.
+	function remove_filaments(face) {
+		let ei = 0
+		while (ei < face.length) {
+			let next_ei = face.next_i(ei)
+			let li = face.lis[ei]
+			// a contour of one point: its edge is next to itself.
+			if (next_ei == ei || face.lis[next_ei] != li) {
+				ei++
+				continue
+			}
+			let pi = face[ei]
+			let far_pi = face[next_ei]
+			// the far point and the edge back.
+			remove_edge(face, next_ei, false)
+			unref_line(li)
+			unref_point(far_pi)
+			// the point left twice in a row, and the edge out, now between
+			// those two. removing the far point moved it down if that came
+			// first (the edge back closed the contour).
+			remove_edge(face, next_ei < ei ? ei - 1 : ei, false)
+			unref_line(li)
+			unref_point(pi)
+			// the edges at the point left can be a filament now.
+			ei = 0
+		}
+	}
+
 	// merge `li` into `into_li`, a line with the same two points: the faces
 	// using `li` are moved to `into_li`, and `li` is freed.
 	function merge_line(li, into_li) {
@@ -1138,13 +1171,15 @@ window.model3_component = function(opt, editor) {
 		let p2i = lines[5*li+1]
 
 		// zero length: remove it, and its edge and repeated point from the
-		// faces that use it. a face left with fewer than 3 points has no
-		// area: remove it too.
+		// faces that use it. the edges on each side of it can go out and back
+		// on one line: remove that filament. a face left with fewer than 3
+		// points has no area: remove it too.
 		if (p1i == p2i) {
 			each_line_face(li, function(face) {
 				remove_edge(face, face.lis.indexOf(li), false)
 				unref_line(li)
 				unref_point(p1i)
+				remove_filaments(face)
 				if (face.point_count_without_holes() < 3)
 					remove_face(face)
 			})
@@ -1940,8 +1975,7 @@ window.model3_component = function(opt, editor) {
 		{
 			let new_pp_edge = map() // {pull_ei->true}
 			let new_pp_face = map() // {pull_ei->true}
-			let ins_edge = map() // {pp_face->[[pull_li, line_before_point, pull_ei],...]}
-			let pp_lis = set() // {pi}
+			let ins_edge = map() // {pp_face->[[pull_li, line_before_point, pull_ei, pp_side_li|null],...]}
 
 			let pull_edge = line3()
 			let side_edge = line3()
@@ -2016,7 +2050,6 @@ window.model3_component = function(opt, editor) {
 
 							if (is_side_edge_pp) {
 								moving_lis.add(side_edge.i)
-								pp_lis.add(side_edge.i)
 							} else if (!pull.face.lis.includes(side_edge.i)) {
 								// non-pp side edge: new pp side edge at that corner.
 								// the other half of a split pulled edge moves along.
@@ -2028,7 +2061,8 @@ window.model3_component = function(opt, editor) {
 							// add a command to extend this face with a pp edge if it turns out
 							// that the point at `endpoint_ei` will have a pp edge.
 							// NOTE: can't call insert_edge() with ei=0. luckily, we don't have to.
-							attr(ins_edge, face, Array).push([pull_li, i == 0, endpoint_ei])
+							attr(ins_edge, face, Array).push([pull_li, i == 0, endpoint_ei,
+								is_side_edge_pp ? side_edge.i : null])
 
 						}
 
@@ -2123,7 +2157,6 @@ window.model3_component = function(opt, editor) {
 				let li = add_line(old_pi, new_pi)
 				new_pp_edge.set(ei, li)
 				moving_lis.add(li)
-				pp_lis.add(li)
 
 				// replace point in pulled face.
 				old_points[ei] = old_pi
@@ -2168,11 +2201,28 @@ window.model3_component = function(opt, editor) {
 			// extend pp side faces with newly created pp side edges.
 			// the edge's index is looked up at each insert: earlier inserts
 			// move it, and a face's edges aren't recorded in its own order.
+			// a face whose own side edge at the corner is pp is stretched there
+			// instead (P4): it takes the moving point, and a line from it along
+			// its side edge. the old side line is left to the faces keeping the
+			// old point.
 			for (let [pp_face, t] of ins_edge) {
-				for (let [pull_li, line_before_point, pull_ei] of t) {
+				for (let [pull_li, line_before_point, pull_ei, pp_side_li] of t) {
 					let pull_pi = pull.face[pull_ei]
 					let pp_li = new_pp_edge.get(pull_ei)
-					if (pp_li != null) {
+					if (pp_li == null)
+						continue
+					if (pp_side_li != null) {
+						let old_pi = old_points[pull_ei]
+						ref_point(pull_pi)
+						replace_face_point(pp_face, pp_face.indexOf(old_pi), pull_pi)
+						unref_point(old_pi)
+						let q1i = lines[5*pp_side_li+0]
+						let other_pi = q1i == old_pi ? lines[5*pp_side_li+1] : q1i
+						let new_li = ref_or_add_line(pull_pi, other_pi)
+						replace_edge(pp_face, pp_face.lis.indexOf(pp_side_li), new_li, pp_side_li)
+						unref_line(pp_side_li)
+						moving_lis.add(new_li)
+					} else {
 						ref_point(pull_pi)
 						ref_line(pp_li)
 						let pp_ei = pp_face.lis.indexOf(pull_li) + 1
@@ -2185,25 +2235,78 @@ window.model3_component = function(opt, editor) {
 			for (let li of pull.face.lis)
 				moving_lis.add(li)
 
-			// limit the pull distance to where a pp side edge is shrunk to zero
-			// length, so that the geometry is never turned inside out by a push.
-			// no limit is set for new pp side edges: their length is zero at
-			// the start.
+			// limit the pull distance to where a side face would cross itself
+			// (P2). check each moving edge against the part of each fixed edge
+			// within its span. a side face with all its fixed points at one
+			// height along the pull only flips: no limit.
 			let pull_dir = pull.line.delta(normal) // unit length.
-			for (let li of pp_lis) {
-				let p1i = lines[5*li+0]
-				let p2i = lines[5*li+1]
-				let p1_moves = pull.face.includes(p1i)
-				let p2_moves = pull.face.includes(p2i)
-				if (p1_moves == p2_moves) // the edge doesn't move.
+			let moving_h = get_point(pull.face[0], _v0).dot(pull_dir)
+			let u_dir = _v1
+			// an end within NEAR of the u range's end is on it: a fin's edge
+			// there is met, a sloped edge leaving the corner is not.
+			function snap_u(u, u_min, u_max) {
+				if (abs(u - u_min) <= NEAR)
+					return u_min
+				if (abs(u - u_max) <= NEAR)
+					return u_max
+				return u
+			}
+			for (let face of moving_faces) {
+				if (face == pull.face)
 					continue
-				let moving_p = get_point(p1_moves ? p1i : p2i, _v0)
-				let fixed_p  = get_point(p1_moves ? p2i : p1i, _v1)
-				let d = fixed_p.sub(moving_p).dot(pull_dir)
-				if (d < -NEAR)
-					min_distance = max(min_distance, d)
-				else if (d > NEAR)
-					max_distance = min(max_distance, d)
+
+				let fixed_h0 // h of the first fixed point.
+				let is_flipping = true
+				for (let pi of face) {
+					if (pull.face.includes(pi))
+						continue
+					let h = get_point(pi, _v0).dot(pull_dir)
+					fixed_h0 ??= h
+					if (abs(h - fixed_h0) > NEAR) {
+						is_flipping = false
+						break
+					}
+				}
+				if (is_flipping)
+					continue
+
+				for (let mei = 0; mei < face.length; mei++) {
+					if (!pull.face.includes(face[mei]))
+						continue
+					if (!pull.face.includes(face[face.next_i(mei)]))
+						continue
+					face.get_edge(mei, pull_edge).delta(u_dir).normalize()
+					let u_min = pull_edge[0].dot(u_dir)
+					let u_max = pull_edge[1].dot(u_dir)
+
+					for (let ei = 0; ei < face.length; ei++) {
+						if (pull.face.includes(face[ei]))
+							continue
+						if (pull.face.includes(face[face.next_i(ei)]))
+							continue
+						face.get_edge(ei, side_edge)
+						let u1 = snap_u(side_edge[0].dot(u_dir), u_min, u_max)
+						let u2 = snap_u(side_edge[1].dot(u_dir), u_min, u_max)
+						if (max(u1, u2) < u_min || min(u1, u2) > u_max)
+							continue
+
+						let t1 = side_edge[0].dot(pull_dir) - moving_h
+						let t2 = side_edge[1].dot(pull_dir) - moving_h
+						let ua = clamp(u1, u_min, u_max)
+						let ub = clamp(u2, u_min, u_max)
+						let ta = ua == u1 ? t1 : lerp(ua, u1, u2, t1, t2)
+						let tb = ub == u2 ? t2 : lerp(ub, u1, u2, t1, t2)
+						let t_min = min(ta, tb)
+						let t_max = max(ta, tb)
+
+						// met on a side of 0: the pull can go that way up to the
+						// first meeting, and not at all if that is at 0.
+						if (t_max > NEAR)
+							max_distance = min(max_distance, max(t_min, 0))
+						if (t_min < -NEAR)
+							min_distance = max(min_distance, min(t_max, 0))
+					}
+				}
 			}
 
 		}
