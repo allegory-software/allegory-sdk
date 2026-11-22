@@ -1439,6 +1439,60 @@ window.model3_component = function(opt, editor) {
 		add_face(pis, lis, split_face?.mat_inst.material, holes)
 	}}
 
+	// add a face for the cycle `pis`, `lis`, an island inside `face`, and
+	// replace `face` with a copy that has `outer_pis`, `outer_lis` as a hole
+	// instead of its holes on or inside it. the outer walk goes clockwise
+	// around `normal`, around the island and the lines connected to it, so
+	// an island next to a hole gives one hole around both.
+	let add_island
+	{
+	let _outer_face = face3() // the outer walk, for hit-testing.
+	let _v0 = v3()
+	let _v1 = v3()
+	let _pis   = [] // the points of the copy of `face`.
+	let _lis   = [] // its lines.
+	let _holes = [] // its holes: [hole1_i1, hole2_i1, ...]
+	add_island = function(pis, lis, outer_pis, outer_lis, normal, face) {
+		add_cycle_face(pis, lis, normal, face)
+		_outer_face.length = 0
+		extend(_outer_face, outer_pis)
+		_outer_face.invalidate()
+		_pis.length = 0
+		_lis.length = 0
+		_holes.length = 0
+		let n = face.point_count_without_holes()
+		for (let i = 0; i < n; i++) {
+			_pis.push(face[i])
+			_lis.push(face.lis[i])
+		}
+		for (let h = 0; h < face.hole_count(); h++) {
+			let i1 = face.hole_i1(h)
+			let i2 = face.hole_i2(h)
+			if (outer_pis.includes(face[i1]))
+				continue
+			let hole_p = get_point(face[i1], _v0)
+			let hole_xy = _outer_face.plane().transform32(hole_p, _v1)
+			if (_outer_face.hit(hole_xy[0], hole_xy[1]))
+				continue
+			_holes.push(_pis.length)
+			for (let i = i1; i < i2; i++) {
+				_pis.push(face[i])
+				_lis.push(face.lis[i])
+			}
+		}
+		// a hole goes the opposite way to the outline.
+		if (face.plane().normal.dot(normal) < 0) {
+			outer_pis.reverse()
+			outer_pis.unshift(outer_pis.pop())
+			outer_lis.reverse()
+		}
+		_holes.push(_pis.length)
+		extend(_pis, outer_pis)
+		extend(_lis, outer_lis)
+		add_face(_pis, _lis, face.mat_inst.material, _holes)
+		remove_face(face)
+	}}
+
 	// F1 for line `li`: walk the cycles on both sides of `li` in each plane
 	// of `li` and a line at its ends. a face that `li` crosses is split into
 	// the two cycles; else a face is added for each cycle.
@@ -1514,6 +1568,12 @@ window.model3_component = function(opt, editor) {
 					add_cycle_face(left_pis, left_lis, normal, split_face)
 					add_cycle_face(right_pis, right_lis, normal, split_face)
 					remove_face(split_face)
+				} else if (has_left_cycle) {
+					add_island(left_pis, left_lis, right_pis, right_lis, normal,
+						split_face)
+				} else if (has_right_cycle) {
+					add_island(right_pis, right_lis, left_pis, left_lis, normal,
+						split_face)
 				}
 			} else {
 				if (has_left_cycle)

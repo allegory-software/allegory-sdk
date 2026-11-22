@@ -734,6 +734,60 @@ const results = (function() {
 			`top normal ${Array.from(top.plane().normal)}`
 	})
 
+	// F1 islands: a cycle drawn inside a face is a filled island: a face,
+	// and a hole in the face around it.
+	check('draw a cycle inside a face: an island: rcs, undo, redo', () => {
+		let c = make_comp()
+		add_square(c, 0, 0, 3)
+		let err = check_draw_undo(c, [[[1,1,0], [2,1,0]], [[2,1,0], [2,2,0]],
+			[[2,2,0], [1,2,0]], [[1,2,0], [1,1,0]]])
+		if (err !== true)
+			return err
+		let F = live_faces(c)
+		if (F.length != 2)
+			return `faces ${F.length} (want 2)`
+		let outer = F.find(f => f.holes?.length)
+		let inner = F.find(f => !f.holes?.length)
+		return outer && inner && outer.length == 8 && inner.length == 4 ||
+			`face lengths ${F.map(f => f.length)} (want 8 4)`
+	})
+
+	// F1 islands: an island next to an island: one hole around both.
+	check('draw an island next to an island: one hole: rcs, undo, redo', () => {
+		let c = make_comp()
+		add_square(c, 0, 0, 4)
+		c.draw_line(line3(v3(1,1,0), v3(2,1,0)))
+		c.draw_line(line3(v3(2,1,0), v3(2,2,0)))
+		c.draw_line(line3(v3(2,2,0), v3(1,2,0)))
+		c.draw_line(line3(v3(1,2,0), v3(1,1,0)))
+		let err = check_draw_undo(c, [[[2,1,0], [3,1,0]], [[3,1,0], [3,2,0]],
+			[[3,2,0], [2,2,0]]])
+		if (err !== true)
+			return err
+		let F = live_faces(c)
+		if (F.length != 3)
+			return `faces ${F.length} (want 3)`
+		let outer = F.find(f => f.holes?.length)
+		return outer?.holes.length == 1 && outer.length == 10 ||
+			`face lengths ${F.map(f => f.length)} (want 10 4 4, one hole)`
+	})
+
+	// F1 islands: a cycle drawn around a face gets a hole there.
+	known_bug('draw a cycle around a face: a hole: rcs, undo, redo', () => {
+		let c = make_comp()
+		add_square(c, 1, 1, 1)
+		let err = check_draw_undo(c, [[[0,0,0], [3,0,0]], [[3,0,0], [3,3,0]],
+			[[3,3,0], [0,3,0]], [[0,3,0], [0,0,0]]])
+		if (err !== true)
+			return err
+		let F = live_faces(c)
+		if (F.length != 2)
+			return `faces ${F.length} (want 2)`
+		let outer = F.find(f => f.holes?.length)
+		return outer?.length == 8 ||
+			`face lengths ${F.map(f => f.length)} (want 8 4)`
+	})
+
 	return [n_checks, results, known]
 })()
 
