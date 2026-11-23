@@ -115,6 +115,7 @@ gl.module('phong.fs', `
 	uniform float specular_strength;
 
 	uniform sampler2D shadow_map;
+	uniform mat4 sdm_view_proj;
 
 	in vec4 v_pos_sdm_view_proj;
 
@@ -136,14 +137,20 @@ gl.module('phong.fs', `
 			vec3 p = v_pos_sdm_view_proj.xyz / v_pos_sdm_view_proj.w;
 			p = p * 0.5 + 0.5;
 			float current_depth = p.z;
-			float bias = max(0.05 * (1.0 - dot(normal, light_dir)), 0.000001);
+			vec2 texel_size = 1.0 / vec2(textureSize(shadow_map, 0));
+			vec3 shadow_normal = mat3(sdm_view_proj) * normal;
+			float bias = 0.000001;
+			if (shadow_normal.z != 0.0) {
+				// one texel for PCF, half a texel for nearest sampling.
+				bias = max(bias, 1.5 * dot(abs(shadow_normal.xy), texel_size)
+					/ abs(shadow_normal.z));
+			}
 
 			// outside the shadow map: not in shadow.
 			bool in_map = all(greaterThanEqual(p, vec3(0.0)))
 				&& all(lessThanEqual(p, vec3(1.0)));
 
 			// PCF: soften the shadow.
-			vec2 texel_size = 1.0 / vec2(textureSize(shadow_map, 0));
 			for (int x = -1; x <= 1 && in_map; ++x) {
 				 for (int y = -1; y <= 1; ++y) {
 					  float pcf_depth = texture(shadow_map, p.xy + vec2(x, y) * texel_size).r;
@@ -1142,7 +1149,9 @@ gl.skybox = function(opt) {
 		if (prog1)
 			return // no shadows or hit-testing
 		vao.use()
+		gl.depthMask(false)
 		gl.draw_triangles()
+		gl.depthMask(true)
 	}
 
 	e.free = function() {
@@ -1442,8 +1451,21 @@ gl.ground_plane_renderer = function(opt) {
 		faces: [poly],
 	}
 
-	rr.model = gl.mat4_instance_buffer(mat4f32().scale(e.size))
+	let model = mat4f32().scale(e.size)
+	rr.model = gl.mat4_instance_buffer(model)
 	rr.update(0, new Map([[poly.material, [poly]]]))
+
+	e.set_bounds = function(x1, z1, x2, z2) {
+		let x = Math.fround((x1 + x2) / 2)
+		let z = Math.fround((z1 + z2) / 2)
+		let sx = Math.fround((x2 - x1) / 2)
+		let sz = Math.fround((z2 - z1) / 2)
+		if (model[0] == sx && model[10] == sz
+			&& model[12] == x && model[14] == z)
+			return
+		model.reset().set_position(x, 0, z).scale(sx, 1, sz)
+		rr.model.upload(model)
+	}
 
 	e.draw = function(prog1) {
 		if (prog1)

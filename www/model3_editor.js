@@ -27,7 +27,7 @@ const {
 	profile_time,
 } = glue
 
-const {NEAR, FAR, v2, v3, v4, mat4, plane, plane3, line3, camera3} = Math3D
+const {NEAR, FAR, v2, v3, v4, mat4, box3, plane, plane3, line3, camera3} = Math3D
 
 window.DEBUG_PLAN ??= 0
 
@@ -196,7 +196,7 @@ function model3_editor(e) {
 
 	e.set_shadows = function(v) { renderer.enable_shadows = v; update_renderer() }
 
-	e.prop('shadows', {store: 'var', type: 'boolean', default: false})
+	e.prop('shadows', {store: 'var', type: 'boolean', default: true})
 
 	// sun position -----------------------------------------------------------
 
@@ -206,7 +206,7 @@ function model3_editor(e) {
 	e.set_latitude  = function(v) { update_sun_pos(); update_renderer() }
 	e.set_longitude = function(v) { update_sun_pos(); update_renderer() }
 
-	e.prop('sunlight'   , {store: 'var', type: 'boolean', default: false})
+	e.prop('sunlight'   , {store: 'var', type: 'boolean', default: true})
 	e.prop('time'       , {store: 'var', type: 'datetime', default: 1596272400})
 	e.prop('north'      , {store: 'var', type: 'number', default: 0})
 	e.prop('latitude'   , {store: 'var', type: 'number', default: 44.42314, decimals: null})
@@ -231,7 +231,7 @@ function model3_editor(e) {
 
 	// rendering --------------------------------------------------------------
 
-	e.prop('skybox', {store: 'var', type: 'bool', default: false, attr: true})
+	e.prop('skybox', {store: 'var', type: 'bool', default: true, attr: true})
 	e.prop('background_color', {store: 'var', type: 'color', default: '#ffffff00', attr: true})
 
 	let bg_color = () => v4().from_rgba(e.background_color)
@@ -265,17 +265,33 @@ function model3_editor(e) {
 		})
 	}
 
-	// the shadow cube is the bounding sphere of the model. returns true if it moved.
+	// include the model and its ground shadow. returns true if the cube moved.
 	let update_shadow_bounds
 	{
+	let _bb0 = box3()
 	let _v0 = v3()
 	let _v1 = v3()
 	update_shadow_bounds = function() {
 		let bb = e.root.comp.bbox()
 		if (bb.is_empty())
 			return
-		let center = bb.center(_v0)
-		let radius = bb.delta(_v1).len() / 2
+		let bounds = _bb0.set(bb)
+		bounds.add(_v0.set(bb[0][0], 0, bb[0][2]))
+		bounds.add(_v0.set(bb[1][0], 0, bb[1][2]))
+		let dir = renderer.sunlight_dir
+		if (dir[1] != 0) {
+			for (let i = 0; i < 2; i++) {
+				let t = bb[i][1] / dir[1]
+				let dx = dir[0] * t
+				let dz = dir[2] * t
+				bounds.add(_v0.set(bb[0][0] - dx, 0, bb[0][2] - dz))
+				bounds.add(_v0.set(bb[1][0] - dx, 0, bb[1][2] - dz))
+			}
+		}
+		ground_rr.set_bounds(bounds[0][0], bounds[0][2],
+			bounds[1][0], bounds[1][2])
+		let center = bounds.center(_v0)
+		let radius = bounds.delta(_v1).len() / 2
 		if (!(radius > 0))
 			return
 		if (renderer.shadow_center.equals(center) && renderer.shadow_radius == radius)
