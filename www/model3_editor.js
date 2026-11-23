@@ -9,9 +9,10 @@
 
 	opt is {prop -> value} for the config props declared with e.prop():
 	projection, fov, shadows, sunlight, time, north, latitude, longitude,
-	skybox (read at creation only), background_color, readonly. The camera
-	and the tool are the widget's own state. init(e) runs once, after
-	creation, to fill the model.
+	skybox (read at creation only), background_color, readonly, model_name
+	(copied with the model to the clipboard). The camera and the tool are
+	the widget's own state. init(e) runs once, after creation, to fill the
+	model.
 
 */
 
@@ -22,7 +23,7 @@ const {
 	floor, abs, sign, min, clamp, sqrt, PI, rad, format_base,
 	noop, pr, assert, log, property,
 	extend, array_set, array_equals, insert, remove_value, array_move,
-	assign, freelist, time, timer,
+	assign, freelist, time, timer, copy_to_clipboard,
 	profile_time,
 } = glue
 
@@ -337,6 +338,19 @@ function model3_editor(e) {
 	// open a group for a new edit: what was undone can't be redone after it.
 	function start_undo() {
 		undo_groups.push(undo_stack.length)
+		clear_redo()
+	}
+
+	// components removed by undo are owned by their redo entries.
+	function clear_redo() {
+		let i = redo_stack.length
+		while (i > 0) {
+			let f = redo_stack[i-1]
+			let argc = redo_stack[i-2]
+			i -= argc + 2
+			if (f == add_component)
+				redo_stack[i].free()
+		}
 		redo_groups.length = 0
 		redo_stack.length = 0
 	}
@@ -405,6 +419,16 @@ function model3_editor(e) {
 		mat.opacity = clamp(mat.opacity, 0, 1)
 		materials.push(mat)
 		return mat
+	}
+
+	function insert_material(mat) {
+		materials.push(mat)
+		push_undo(remove_material, mat)
+	}
+
+	function remove_material(mat) {
+		assert(materials.pop() == mat)
+		push_undo(insert_material, mat)
 	}
 
 	let default_material = add_material({name: 'white', diffuse_color: 0xffffff})
@@ -529,6 +553,24 @@ function model3_editor(e) {
 		return comp
 	}
 
+	function add_component(comp) {
+		assert(comp.id == comps.length)
+		comps.push(comp)
+		instances_valid = false
+		push_undo(remove_component, comp)
+	}
+
+	// undo removes components in reverse order, so ids stay indices in comps.
+	function remove_component(comp) {
+		assert(comps.pop() == comp)
+		if (comp.davib) {
+			comp.davib.free()
+			comp.davib = null
+		}
+		instances_valid = false
+		push_undo(add_component, comp)
+	}
+
 	function update_comp(comp) {
 		if (
 			comp.update(
@@ -550,6 +592,9 @@ function model3_editor(e) {
 
 	function child_removed(parent_comp, node) {
 		instances_valid = false
+		let i = cur_path.indexOf(node)
+		if (i != -1)
+			enter_edit(cur_path.slice(0, i))
 	}
 
 	function child_changed(node) {
@@ -629,6 +674,7 @@ function model3_editor(e) {
 
 	function free_model() {
 		free_components(comps)
+		clear_redo()
 		e.root = null
 	}
 
@@ -676,7 +722,7 @@ function model3_editor(e) {
 		return i
 	}
 
-	e.save_model = function() {
+	e.save_model = function(name) {
 		let model_materials = []
 		let model_layers = []
 		let material_indices = new Map()
@@ -726,6 +772,7 @@ function model3_editor(e) {
 
 		return JSON.stringify({
 			version: 1,
+			name,
 			root: {component: e.root.comp.id, transform: Array.from(e.root)},
 			default_layer: layer_indices.get(default_layer),
 			materials: saved_materials,
@@ -734,26 +781,16 @@ function model3_editor(e) {
 		})
 	}
 
-	e.load_model = function(text) {
-		let data = JSON.parse(text)
-		assert(data.version == 1, 'Unsupported Model3 version')
-
-		let model_materials = data.materials
-		let model_layers = data.layers
-		let material = assert(model_materials[0])
-		let layer = assert(model_layers[data.default_layer])
-		let components = []
+	// model_materials and model_layers are indexed by their saved index.
+	function load_components(data, components, first_id,
+		model_materials, model_layers, material, layer
+	) {
 		let root = mat4().from_array(data.root.transform, 0)
-
-		for (let mat of model_materials)
-			if (mat.uv)
-				mat.uv = v2().from_array(mat.uv, 0)
-
 		let undo_len = undo_stack.length
 		try {
 			for (let saved of data.components) {
-				let comp = new_component({name: saved.name}, components.length,
-					material, layer)
+				let comp = new_component({name: saved.name},
+					first_id + components.length, material, layer)
 				components.push(comp)
 				comp.load_geometry(saved, model_materials)
 			}
@@ -771,6 +808,25 @@ function model3_editor(e) {
 		} finally {
 			undo_stack.length = undo_len
 		}
+		return root
+	}
+
+	e.load_model = function(text) {
+		let data = JSON.parse(text)
+		assert(data.version == 1, 'Unsupported Model3 version')
+
+		let model_materials = data.materials
+		let model_layers = data.layers
+		let material = assert(model_materials[0])
+		let layer = assert(model_layers[data.default_layer])
+		let components = []
+
+		for (let mat of model_materials)
+			if (mat.uv)
+				mat.uv = v2().from_array(mat.uv, 0)
+
+		let root = load_components(data, components, 0,
+			model_materials, model_layers, material, layer)
 
 		replace_model(function() {
 			array_set(materials, model_materials)
@@ -781,6 +837,59 @@ function model3_editor(e) {
 			array_set(comps, components)
 			e.root = root
 		})
+	}
+
+	function find_by_name(values, name) {
+		for (let value of values)
+			if (value.name == name)
+				return value
+	}
+
+	e.import_model = function(text) {
+		let data = JSON.parse(text)
+		assert(data.version == 1, 'Unsupported Model3 version')
+
+		let model_materials = []
+		let model_layers = []
+		let new_materials = []
+		let new_layers = []
+
+		for (let saved_material of data.materials) {
+			let material = find_by_name(materials, saved_material.name)
+			if (!material) {
+				material = saved_material
+				if (material.uv)
+					material.uv = v2().from_array(material.uv, 0)
+				new_materials.push(material)
+			}
+			model_materials.push(material)
+		}
+
+		for (let saved_layer of data.layers) {
+			let layer = find_by_name(layers, saved_layer.name)
+			if (!layer) {
+				layer = saved_layer
+				new_layers.push(saved_layer)
+			}
+			model_layers.push(layer)
+		}
+
+		start_undo()
+		let components = []
+		let root = load_components(data, components, comps.length,
+			model_materials, model_layers, default_material, default_layer)
+
+		for (let material of new_materials)
+			insert_material(material)
+		for (let layer of new_layers)
+			add_layer(null, {layer: layer})
+		if (data.name != null)
+			root.comp.name = data.name
+		for (let comp of components)
+			add_component(comp)
+		cur_comp.add_child(root.comp, root, default_layer)
+
+		update_all()
 	}
 
 	// drawing
@@ -1463,6 +1572,7 @@ function model3_editor(e) {
 	let tools = {}
 
 	e.prop('readonly', {default: false})
+	e.prop('model_name', {default: null})
 
 	let tool // current tool
 	{
@@ -2289,6 +2399,21 @@ function model3_editor(e) {
 				undo()
 			// any component can be changed: a painted child's, for one.
 			update_all()
+			ui.animate()
+			return false
+		}
+		if (ctrl && key == 'c') {
+			let sel_count =
+				cur_comp.selected_face_count() +
+				cur_comp.selected_line_count() +
+				cur_comp.selected_child_count()
+			if (!sel_count) {
+				copy_to_clipboard(e.save_model(e.model_name))
+				return false
+			}
+		}
+		if (key == 'paste' && !e.readonly) {
+			e.import_model(ui.clipboard_text)
 			ui.animate()
 			return false
 		}

@@ -63,7 +63,10 @@ ui.views.plan_model_editor = {
 
 // 3D model editor -----------------------------------------------------------
 
-const model_editor_opt = {readonly: false} // read during the call
+const model_editor_opt = { // read during the call
+	readonly: false,
+	model_name: null,
+}
 
 const model_editor_def = {
 	rowset_name: 'model_data',
@@ -72,8 +75,10 @@ const model_editor_def = {
 	master_rowset_name: 'models',
 	label: 'Model',
 	empty_text: 'Select a model',
-	build: function(input_id, value, field, readonly) {
+	build: function(input_id, value, field, readonly, key, nav, ri) {
 		model_editor_opt.readonly = readonly
+		model_editor_opt.model_name =
+			nav.cell_input_val(ri, nav.all_fields_map.name.fi)
 		ui.model3_editor(input_id, value, field, model_editor_opt)
 	},
 	update_value: ui.model3_editor_update_value,

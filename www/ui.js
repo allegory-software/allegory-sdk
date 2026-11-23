@@ -11845,7 +11845,7 @@ ui.nav_editor = function(id, opt, def) {
 			let field = nav.all_fields_map[def.value_col]
 			ui.focus_group(null, null, input_id+'.focus_group')
 				def.build(input_id, nav.cell_input_val(ri, field.fi), field,
-					!nav.can_change_val(ri, field.fi), key)
+					!nav.can_change_val(ri, field.fi), key, nav, ri)
 			ui.end_focus_group()
 			s.input_id = input_id
 		} else {

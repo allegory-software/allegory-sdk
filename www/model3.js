@@ -718,13 +718,16 @@ window.model3_component = function(opt, editor) {
 		bbox_changed = true
 		editor.child_added(e, mat)
 		if (LOG) log('+child', comp.name, 'layer', mat.layer.name)
+		push_undo(remove_child, mat)
 		return mat
 	}
 
 	function remove_child(mat) {
+		e.select_child(mat, 'remove')
 		assert(remove_value(children, mat) >= 0)
 		bbox_changed = true
 		editor.child_removed(e, mat)
+		push_undo(add_child, mat.comp, mat, mat.layer)
 	}
 
 	function set_child_layer(node, layer) {
