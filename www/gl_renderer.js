@@ -37,9 +37,12 @@ gl.module('globals', `
 
 		vec3 sunlight_pos;
 		vec3 sunlight_color;
+		vec3 sky_light_color;
+		vec3 ground_light_color;
 		float ambient_strength;
 
 		uniform bool enable_shadows;
+		uniform bool enable_ao;
 	};
 
 `)
@@ -116,6 +119,7 @@ gl.module('phong.fs', `
 
 	uniform sampler2D shadow_map;
 	uniform mat4 sdm_view_proj;
+	uniform sampler2D ao_map;
 
 	in vec4 v_pos_sdm_view_proj;
 
@@ -123,7 +127,10 @@ gl.module('phong.fs', `
 
 	void do_phong(vec3 normal) {
 
-		float ambient = ambient_strength;
+		vec3 ambient = ambient_strength * mix(ground_light_color,
+			sky_light_color, normal.y * 0.5 + 0.5);
+		if (enable_ao)
+			ambient *= texelFetch(ao_map, ivec2(gl_FragCoord.xy), 0).r;
 
 		vec3 light_dir = normalize(sunlight_pos - v_pos);
 		float diffuse = max(dot(normal, light_dir), 0.0);
@@ -160,15 +167,38 @@ gl.module('phong.fs', `
 			shadow /= 9.0;
 		}
 
-		float light = (ambient + (1.0 - shadow) * (diffuse + specular));
+		vec3 light = ambient
+			+ (1.0 - shadow) * (diffuse + specular) * sunlight_color;
 
 		vec4 b_color = vec4(diffuse_color, 1.0);
 		vec4 t_color = texture(diffuse_map, v_uv);
 		vec4 color = mix(b_color + t_color, vec4(1.0, 1.0, 1.0, 1.0), v_disabled);
 		vec4 disabled_color = vec4(0.7, 0.7, 0.7, 1.0);
 
-		frag_color = mix(vec4(light * sunlight_color, 1.0) * color, disabled_color, 0.7 * v_disabled);
+		frag_color = mix(vec4(light, 1.0) * color,
+			disabled_color, 0.7 * v_disabled);
 
+	}
+
+`)
+
+gl.module('ao.fs', `
+
+	#version 300 es
+	precision highp float;
+	precision highp int;
+
+	uniform sampler2D ao_depth;
+	uniform sampler2D ao_normal;
+	uniform mat4 inv_proj;
+	uniform float ao_radius;
+
+	in vec2 v_uv;
+	out vec4 frag_color;
+
+	vec3 view_position(vec2 uv, float depth) {
+		vec4 p = inv_proj * vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+		return p.xyz / p.w;
 	}
 
 `)
@@ -181,8 +211,11 @@ gl.scene_renderer = function(r) {
 
 	r.background_color = r.background_color ?? v4(1, 1, 1, 1)
 	r.sunlight_dir     = r.sunlight_dir     ?? v3(0, 1, 0)
-	r.sunlight_color   = r.sunlight_color   ?? v3(1, 1, 1)
+	r.sunlight_color   = r.sunlight_color   ?? v3(1, 0.95, 0.85)
+	r.sky_light_color  = r.sky_light_color  ?? v3(0.7, 0.82, 1)
+	r.ground_light_color = r.ground_light_color ?? v3(0.45, 0.4, 0.32)
 	r.ambient_strength = r.ambient_strength ?? 0.3
+	r.ao_radius        = r.ao_radius        ?? 0
 
 	r.show_back_faces  = r.show_back_faces ?? false
 
@@ -231,6 +264,197 @@ gl.scene_renderer = function(r) {
 
 	let sdm_res
 
+	// ambient occlusion ------------------------------------------------------
+
+	let ao_depth_tex, ao_normal_tex, ao_tex, ao_blur_tex
+	let ao_geometry_fbo, ao_fbo, ao_blur_fbo
+	let ao_geometry_prog, ao_prog, ao_blur_prog
+	let ao_vao, ao_blur_vao
+	let ao_w, ao_h
+
+	function init_ao() {
+		if (gl.active_vao)
+			gl.active_vao.unuse()
+		else if (gl.active_program)
+			gl.active_program.unuse()
+
+		ao_geometry_prog = gl.program('ao_geometry', `
+			#include mesh.vs
+			void main() {
+				v_normal = mat3(view) * inverse(transpose(mat3(model))) * normal;
+				gl_Position = mvp(pos);
+			}
+		`, `
+			#version 300 es
+			precision highp float;
+			in vec3 v_normal;
+			out vec4 frag_color;
+			void main() {
+				vec3 normal = normalize(v_normal);
+				if (!gl_FrontFacing)
+					normal = -normal;
+				frag_color = vec4(normal * 0.5 + 0.5, 1.0);
+			}
+		`)
+
+		let quad_vs = `
+			#version 300 es
+			out vec2 v_uv;
+			void main() {
+				vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+				v_uv = p;
+				gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+			}
+		`
+
+		ao_prog = gl.program('ao', quad_vs, `
+			#include ao.fs
+			uniform mat4 proj;
+			void main() {
+				vec4 encoded_normal = texture(ao_normal, v_uv);
+				if (encoded_normal.a == 0.0) {
+					frag_color = vec4(1.0);
+					return;
+				}
+				vec3 normal = normalize(encoded_normal.xyz * 2.0 - 1.0);
+				vec3 pos = view_position(v_uv, texture(ao_depth, v_uv).r);
+				vec3 axis = abs(normal.z) < abs(normal.x)
+					? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+				vec3 tangent = normalize(cross(normal, axis));
+				vec3 bitangent = cross(normal, tangent);
+				float rotation = fract(sin(dot(gl_FragCoord.xy,
+					vec2(12.9898, 78.233))) * 43758.5453) * 6.2831853;
+				float occlusion = 0.0;
+				for (int i = 0; i < 16; i++) {
+					float z = (float(i) + 0.5) / 16.0;
+					float angle = float(i) * 2.3999632 + rotation;
+					float xy = sqrt(1.0 - z * z);
+					vec3 dir = tangent * (cos(angle) * xy)
+						+ bitangent * (sin(angle) * xy) + normal * z;
+					vec3 sample_pos = pos + dir * ao_radius * (0.1 + 0.9 * z * z);
+					vec4 clip = proj * vec4(sample_pos, 1.0);
+					if (clip.w <= 0.0)
+						continue;
+					vec2 uv = clip.xy / clip.w * 0.5 + 0.5;
+					if (any(lessThan(uv, vec2(0.0)))
+						|| any(greaterThanEqual(uv, vec2(1.0))))
+						continue;
+					ivec2 size = textureSize(ao_depth, 0);
+					ivec2 pixel = ivec2(uv * vec2(size));
+					float depth = texelFetch(ao_depth, pixel, 0).r;
+					if (depth == 1.0)
+						continue;
+					vec2 sample_uv = (vec2(pixel) + 0.5) / vec2(size);
+					vec3 surface_pos = view_position(sample_uv, depth);
+					vec3 delta = surface_pos - pos;
+					float distance = length(delta);
+					if (dot(normal, delta) > ao_radius * 0.02
+						&& surface_pos.z > sample_pos.z + ao_radius * 0.02)
+						occlusion += 1.0 - smoothstep(0.0, ao_radius, distance);
+				}
+				frag_color = vec4(vec3(1.0 - occlusion / 16.0), 1.0);
+			}
+		`)
+
+		ao_blur_prog = gl.program('ao_blur', quad_vs, `
+			#include ao.fs
+			uniform sampler2D ao_input;
+			void main() {
+				vec4 encoded_normal = texture(ao_normal, v_uv);
+				if (encoded_normal.a == 0.0) {
+					frag_color = vec4(1.0);
+					return;
+				}
+				vec3 normal = normalize(encoded_normal.xyz * 2.0 - 1.0);
+				vec3 pos = view_position(v_uv, texture(ao_depth, v_uv).r);
+				vec2 texel_size = 1.0 / vec2(textureSize(ao_depth, 0));
+				float sum = 0.0;
+				float weights = 0.0;
+				for (int y = -1; y <= 1; y++) {
+					for (int x = -1; x <= 1; x++) {
+						vec2 uv = v_uv + vec2(x, y) * texel_size;
+						vec4 encoded = texture(ao_normal, uv);
+						if (encoded.a == 0.0)
+							continue;
+						vec3 n = normalize(encoded.xyz * 2.0 - 1.0);
+						vec3 p = view_position(uv, texture(ao_depth, uv).r);
+						float weight = pow(max(dot(normal, n), 0.0), 8.0)
+							* exp(-length(p - pos) / ao_radius);
+						sum += texture(ao_input, uv).r * weight;
+						weights += weight;
+					}
+				}
+				frag_color = vec4(vec3(sum / weights), 1.0);
+			}
+		`)
+
+		ao_vao = ao_prog.vao()
+		ao_blur_vao = ao_blur_prog.vao()
+		ao_depth_tex = gl.texture().set_wrap('clamp')
+		ao_normal_tex = gl.texture().set_wrap('clamp')
+		ao_tex = gl.texture().set_wrap('clamp')
+		ao_blur_tex = gl.texture().set_wrap('clamp')
+		ao_normal_tex.set_filter('nearest', 'nearest')
+		ao_tex.set_filter('nearest', 'nearest')
+		ao_blur_tex.set_filter('nearest', 'nearest')
+		ao_geometry_fbo = gl.fbo()
+		ao_fbo = gl.fbo()
+		ao_blur_fbo = gl.fbo()
+	}
+
+	function render_ao(draw, w, h) {
+		if (!ao_prog)
+			init_ao()
+		if (w != ao_w || h != ao_h) {
+			ao_w = w
+			ao_h = h
+			ao_depth_tex.set_depth(w, h, true)
+			ao_normal_tex.set_rgba(w, h, null)
+			ao_tex.set_rgba(w, h, null)
+			ao_blur_tex.set_rgba(w, h, null)
+			ao_geometry_fbo.bind()
+			ao_geometry_fbo.attach(ao_depth_tex, 'depth')
+			ao_geometry_fbo.attach(ao_normal_tex, 'color')
+			ao_geometry_fbo.unbind()
+			ao_fbo.bind()
+			ao_fbo.attach(ao_tex, 'color')
+			ao_fbo.unbind()
+			ao_blur_fbo.bind()
+			ao_blur_fbo.attach(ao_blur_tex, 'color')
+			ao_blur_fbo.unbind()
+		}
+
+		gl.viewport(0, 0, w, h)
+		ao_geometry_fbo.bind()
+		gl.clear_all(0, 0, 0, 0)
+		gl.disable(gl.POLYGON_OFFSET_FILL)
+		gl.cull(r.show_back_faces ? false : 'back')
+		draw(ao_geometry_prog)
+		ao_geometry_fbo.unbind()
+
+		gl.disable(gl.DEPTH_TEST)
+		gl.cull(false)
+		ao_fbo.bind()
+		ao_vao.use()
+		ao_prog.set_uni('ao_depth', ao_depth_tex)
+		ao_prog.set_uni('ao_normal', ao_normal_tex)
+		ao_prog.set_uni('inv_proj', r.camera.inv_proj)
+		ao_prog.set_uni('proj', r.camera.proj)
+		ao_prog.set_uni('ao_radius', r.ao_radius)
+		gl.draw_triangles(0, 3)
+		ao_fbo.unbind()
+
+		ao_blur_fbo.bind()
+		ao_blur_vao.use()
+		ao_blur_prog.set_uni('ao_depth', ao_depth_tex)
+		ao_blur_prog.set_uni('ao_normal', ao_normal_tex)
+		ao_blur_prog.set_uni('ao_input', ao_tex)
+		ao_blur_prog.set_uni('inv_proj', r.camera.inv_proj)
+		ao_blur_prog.set_uni('ao_radius', r.ao_radius)
+		gl.draw_triangles(0, 3)
+		ao_blur_fbo.unbind()
+	}
+
 	r.update = function() {
 
 		sunlight_pos.set(r.sunlight_dir).set_len(FAR)
@@ -244,9 +468,12 @@ gl.scene_renderer = function(r) {
 
 		globals_ubo.set('sunlight_pos'     , sunlight_pos)
 		globals_ubo.set('sunlight_color'   , r.sunlight_color)
+		globals_ubo.set('sky_light_color'  , r.sky_light_color)
+		globals_ubo.set('ground_light_color', r.ground_light_color)
 		globals_ubo.set('ambient_strength' , r.ambient_strength)
 
 		globals_ubo.set('enable_shadows'   , r.enable_shadows)
+		globals_ubo.set('enable_ao'        , r.ao_radius > 0)
 
 		globals_ubo.upload()
 
@@ -298,6 +525,9 @@ gl.scene_renderer = function(r) {
 		// 2. render scene as normal with shadow mapping (using depth map).
 		let cw = gl.canvas.cw
 		let ch = gl.canvas.ch
+		if (r.ao_radius > 0)
+			render_ao(draw, cw, ch)
+		gl.set_uni('ao_map', r.ao_radius > 0 ? ao_blur_tex : null)
 		gl.viewport(0, 0, cw, ch)
 		gl.clear_all(...r.background_color)
 		gl.cull(r.show_back_faces ? false : 'back')
@@ -308,6 +538,17 @@ gl.scene_renderer = function(r) {
 		globals_ubo.free()
 		sdm_fbo.free()
 		sdm_tex.free()
+		if (ao_prog) {
+			ao_vao.free()
+			ao_blur_vao.free()
+			ao_geometry_fbo.free()
+			ao_fbo.free()
+			ao_blur_fbo.free()
+			ao_depth_tex.free()
+			ao_normal_tex.free()
+			ao_tex.free()
+			ao_blur_tex.free()
+		}
 	}
 
 	gl.polygonOffset(1, 0) // make face edges show propertly.

@@ -209,6 +209,117 @@ const results = await page.evaluate(() => {
 			`shadowed ground ${in_shadow}, lit ground ${lit}`
 	})
 
+	check('ambient occlusion: contacts, isolated surfaces, disable, resize', () => {
+		let cam = camera3({pos: v3(3, 3, 5), dir: v3(3, 3, 5), near: 0.1,
+			far: 100})
+		cam.view_size.set(64, 64)
+		cam.perspective()
+		cam.update()
+		let r = gl.scene_renderer({camera: cam, ao_radius: 0.8,
+			sunlight_color: v3(0, 0, 0), ambient_strength: 1,
+			sky_light_color: v3(0.5, 0.5, 0.5),
+			ground_light_color: v3(0.5, 0.5, 0.5)})
+		let rr = gl.faces_renderer()
+		rr.model = gl.mat4_instance_buffer(mat4f32())
+		let floor = poly3(0, 1, 2, 3)
+		floor.points = [0,0,-3, 0,0,3, 3,0,3, 3,0,-3]
+		floor.i = 1
+		let wall = poly3(0, 1, 2, 3)
+		wall.points = [0,0,-3, 0,3,-3, 0,3,3, 0,0,3]
+		wall.i = 2
+		let mat = {diffuse_color: 0xffffff, uv: v2(1, 1), specular_strength: 0}
+		function draw(prog) { rr.draw(prog) }
+		function update(faces) { rr.update(0, new Map([[mat, faces]])) }
+		function sample(x) {
+			let p = cam.world_to_clip(v3(x, 0, 0), v4())
+			let px1 = Math.floor((p[0] / p[3] * 0.5 + 0.5) * canvas.cw)
+			let py1 = Math.floor((p[1] / p[3] * 0.5 + 0.5) * canvas.ch)
+			let sum = 0
+			for (let dy = -1; dy <= 1; dy++) {
+				for (let dx = -1; dx <= 1; dx++)
+					sum += px(px1 + dx, py1 + dy)[0]
+			}
+			return sum / 9
+		}
+		update([floor, wall])
+		r.render(draw)
+		let contact = sample(0.15)
+		let open = sample(1.5)
+		r.ao_radius = 0
+		r.update()
+		let passes = 0
+		r.render(function(prog) { passes++; draw(prog) })
+		let disabled = sample(0.15)
+		let disabled_open = sample(1.5)
+		r.ao_radius = 0.8
+		r.update()
+		update([floor])
+		r.render(draw)
+		let isolated = sample(0.6)
+		let isolated_open = sample(1.5)
+		canvas.width = canvas.cw = 96
+		canvas.height = canvas.ch = 80
+		cam.view_size.set(96, 80)
+		cam.perspective()
+		cam.update()
+		r.update()
+		update([floor, wall])
+		r.render(draw)
+		let resized_contact = sample(0.15)
+		let resized_open = sample(1.5)
+		r.sunlight_color.set(0.25, 0.25, 0.25)
+		r.update()
+		r.render(draw)
+		let sun_contact = sample(0.15)
+		r.ao_radius = 0
+		r.update()
+		r.render(draw)
+		let sun_disabled = sample(0.15)
+		let sun_loss = sun_disabled - sun_contact
+		let ambient_loss = disabled - resized_contact
+		rr.model.upload(mat4f32().scale(1000))
+		cam.pos.muls(1000)
+		cam.near = 1
+		cam.far = 1e7
+		cam.perspective()
+		cam.update()
+		r.sunlight_color.set(0, 0, 0)
+		r.ao_radius = 800
+		r.update()
+		r.render(draw)
+		let scaled_contact = sample(150)
+		let scaled_open = sample(1500)
+		update([floor])
+		r.ao_radius = 200
+		r.update()
+		r.render(draw)
+		let scaled_isolated = sample(1500)
+		cam.ortho(-2500, 2500, -2000, 2000, -100000, 100000)
+		cam.update()
+		r.update()
+		r.render(draw)
+		let ortho_isolated = sample(1500)
+		rr.free()
+		r.free()
+		let next = gl.scene_renderer({camera: cam, ao_radius: 200})
+		next.render(function() {})
+		next.free()
+		canvas.width = canvas.cw = 64
+		canvas.height = canvas.ch = 64
+		return contact < open - 5 && Math.abs(disabled - disabled_open) < 2
+			&& passes == 1 && Math.abs(isolated - disabled_open) < 2
+			&& Math.abs(isolated_open - disabled_open) < 2
+			&& resized_contact < resized_open - 5
+			&& Math.abs(sun_loss - ambient_loss) < 2
+			&& scaled_contact < scaled_open - 5
+			&& Math.abs(scaled_isolated - disabled_open) < 2
+			&& Math.abs(ortho_isolated - disabled_open) < 2 ||
+			JSON.stringify({contact, open, disabled, disabled_open, passes,
+				isolated, isolated_open, resized_contact, resized_open,
+				sun_loss, ambient_loss, scaled_contact, scaled_open,
+				scaled_isolated, ortho_isolated})
+	})
+
 	check('hit_test_renderer', () => {
 		let cam = make_camera()
 		let h = gl.hit_test_renderer()

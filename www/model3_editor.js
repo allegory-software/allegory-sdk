@@ -8,11 +8,11 @@
 	ui.model3_editor_is_value_changed (id) -> t|f
 
 	opt is {prop -> value} for the config props declared with e.prop():
-	projection, fov, shadows, sunlight, time, north, latitude, longitude,
-	skybox (read at creation only), background_color, readonly, model_name
-	(copied with the model to the clipboard). The camera and the tool are
-	the widget's own state. init(e) runs once, after creation, to fill the
-	model.
+	projection, fov, near, shadows, ao_radius, sunlight, time, north,
+	latitude, longitude, skybox (read at creation only), background_color,
+	readonly, model_name (copied with the model to the clipboard).
+	The camera and the tool are the widget's own state. init(e) runs once,
+	after creation, to fill the model.
 
 */
 
@@ -126,7 +126,7 @@ function model3_editor(e) {
 			camera.ortho(-10, 10, -10, 10, -1e2, 1e2)
 		} else {
 			camera.fov  = e.fov
-			camera.near = min_distance * 100
+			camera.near = e.near
 			camera.far  = max_distance * 100
 			camera.perspective()
 		}
@@ -135,12 +135,14 @@ function model3_editor(e) {
 
 	e.set_projection = function(v) { update_camera_proj() }
 	e.set_fov   = function(v) { update_camera_proj() }
+	e.set_near  = function(v) { update_camera_proj() }
 	e.set_camera_pos = function(v) { camera.pos.set(v); update_camera() }
 	e.set_camera_dir = function(v) { camera.dir.set(v); update_camera() }
 	e.set_camera_up  = function(v) { camera .up.set(v); update_camera() }
 
 	e.prop('projection' , {store: 'var', type: 'enum'  , enum_values: ['perspective', 'ortho'], default: 'perspective'})
 	e.prop('fov'        , {store: 'var', type: 'number', default: 60})
+	e.prop('near'       , {store: 'var', type: 'number', default: min_distance * 100})
 	e.prop('camera_pos' , {store: 'var', type: 'v3', default: camera.pos})
 	e.prop('camera_dir' , {store: 'var', type: 'v3', default: camera.dir})
 	e.prop('camera_up'  , {store: 'var', type: 'v3', default: camera.up })
@@ -197,6 +199,10 @@ function model3_editor(e) {
 	e.set_shadows = function(v) { renderer.enable_shadows = v; update_renderer() }
 
 	e.prop('shadows', {store: 'var', type: 'boolean', default: true})
+
+	e.set_ao_radius = function(v) { renderer.ao_radius = v; update_renderer() }
+
+	e.prop('ao_radius', {store: 'var', type: 'number', default: 0.2})
 
 	// sun position -----------------------------------------------------------
 
@@ -259,6 +265,7 @@ function model3_editor(e) {
 	function init_renderer() {
 		renderer = gl.scene_renderer({
 			enable_shadows: e.shadows,
+			ao_radius: e.ao_radius,
 			camera: camera,
 			background_color: bg_color(),
 			show_back_faces: true,

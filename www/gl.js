@@ -1540,7 +1540,24 @@ tex.unbind = function() {
 
 tex.free = function() {
 	let gl = this.gl
-	this.gl.deleteTexture(this)
+	gl.deleteTexture(this)
+	for (let name in gl.programs) {
+		for (let u of gl.programs[name].tex_uniforms) {
+			if (u.value == this)
+				u.value = null
+		}
+	}
+	for (let name in gl.global_unis) {
+		let g = gl.global_unis[name]
+		if (g.x == this)
+			g.x = null
+	}
+	let units = gl.tex_units?.[this.type]
+	for (let unit in units) {
+		if (units[unit] == this)
+			units[unit] = null
+	}
+	this.unit = null
 }
 
 tex.set_depth = function(w, h, f32) {

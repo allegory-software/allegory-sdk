@@ -162,7 +162,7 @@ ui.saved_value_def('house_model_fov', 60, ui.create_field({
 	decimals: 0,
 }))
 
-let model_editor_opt = {}
+let model_editor_opt = {ao_radius: 200, near: 100}
 
 let model_mode_field = ui.create_field({
 	type: 'enum',
