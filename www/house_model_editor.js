@@ -155,13 +155,6 @@ function init_house_model_editor(e, house, cut_floor, no_external_walls) {
 	e.update_all()
 }
 
-ui.saved_value_def('house_model_fov', 60, ui.create_field({
-	type: 'number',
-	min: 20,
-	max: 120,
-	decimals: 0,
-}))
-
 let model_editor_opt = {ao_radius: 200, near: 100}
 
 let model_mode_field = ui.create_field({
@@ -404,7 +397,6 @@ ui.house_model_editor = function(id, house, floor, fr, align, valign,
 			e1.set_camera_dir(v3(-6, 4.4, 7))
 		}
 	}
-	model_editor_opt.fov = ui.saved_value('house_model_fov') ?? undefined
 	ui.stack('', fr, align, valign)
 		ui.model3_editor(id, null, null, model_editor_opt, init)
 		let is_changed = height_controls(controls_id, house, id, cut_floor,
@@ -419,12 +411,6 @@ ui.house_model_editor = function(id, house, floor, fr, align, valign,
 		ui.stack()
 			if (floor)
 				ui.enum_toggle(mode_id, model_mode, model_mode_field, 0, 'l', 't')
-			ui.h(0, ui.sp(), 'r', 't')
-				ui.text('', S('house_model_fov', 'FOV'))
-				let fov_i = ui.stack('', 0)
-					ui.num_slider('house_model_fov')
-				ui.end_stack()
-			ui.end_h()
 		ui.end_stack()
 	ui.end_stack()
 }

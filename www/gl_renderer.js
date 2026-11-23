@@ -209,11 +209,12 @@ gl.scene_renderer = function(r) {
 
 	r ??= {}
 
-	r.background_color = r.background_color ?? v4(1, 1, 1, 1)
-	r.sunlight_dir     = r.sunlight_dir     ?? v3(0, 1, 0)
-	r.sunlight_color   = r.sunlight_color   ?? v3(1, 0.95, 0.85)
-	r.sky_light_color  = r.sky_light_color  ?? v3(0.7, 0.82, 1)
-	r.ground_light_color = r.ground_light_color ?? v3(0.45, 0.4, 0.32)
+	r.background_color   = r.background_color   ?? v4(1, 1, 1, 1)
+	r.sunlight_dir       = r.sunlight_dir       ?? v3(0, 1, 0)
+	r.sunlight_color     = r.sunlight_color     ?? v3(1, 1, 1)
+	r.sky_light_color    = r.sky_light_color    ?? v3(1, 1, 1)
+	r.ground_light_color = r.ground_light_color ?? v3(1, 1, 1)
+
 	r.ambient_strength = r.ambient_strength ?? 0.3
 	r.ao_radius        = r.ao_radius        ?? 0
 
@@ -1352,7 +1353,7 @@ gl.skybox = function(opt) {
 
 	e.update = function() {
 
-		prog.use()
+		vao.use()
 		prog.set_uni('sky_color'     , e.sky_color || 0xccddff)
 		prog.set_uni('horizon_color' , e.horizon_color || 0xffffff)
 		prog.set_uni('ground_color'  , e.ground_color || 0xe0dddd)
@@ -1382,7 +1383,7 @@ gl.skybox = function(opt) {
 				}
 			}
 		}
-		prog.unuse()
+		vao.unuse()
 
 	}
 

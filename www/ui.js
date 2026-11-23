@@ -20,7 +20,7 @@ not all APIs can be used in app code (i.e. in the build phase). Some APIs
 are only useful for creating widgets and some only work in certain rendering
 phases. The docs should be clear about that. API index below for quick jump.
 
-IMGUI FRAME     ui.main  ui.animate  ui.rebuild
+IMGUI FRAME     ui.main  ui.animate  ui.invalidate  ui.rebuild
 
 CONTAINERS
   STACK         ui.stack  ui.aspect_box
@@ -1016,14 +1016,16 @@ MOUSE HIT STATE
 	ui.hit_leave       (id) -> ?          pointer left the widget
 	ui.hovers          (id) -> hs|null    hit state if mouse hovers or dragging over id
 	ui.set_hit         (id) -> hs         mark id as hovered (in hit phase only)
-	ui.drag            (id, axis=) -> cs|null  drag state if id is captured
+	ui.drag            (id, axis=, threshold=) -> cs|null
+	                   drag state if id is captured
 	  axis             'x'|'y'|'xy' (default)|'none'
+	  threshold        px to move before cs.moved; default ui.drag_threshold
 	  cs.drag          first frame of the drag
 	  cs.dragging      every frame from drag to drop
 	  cs.drop          last frame of the drag
 	  cs.cancel        Escape canceled the drag; last frame of the drag
 	  cs.dx,dy         how far the mouse moved since the press
-	  cs.moved         'l'|'r'|'t'|'b': drag-move direction, if past ui.drag_threshold
+	  cs.moved         'l'|'r'|'t'|'b': drag-move direction, if past the threshold
 	ui.captured_or_hit (id) -> cs|hs|null   ui.captured(id) || ui.hit(id)
 
 HIT CONTROL
@@ -1245,7 +1247,7 @@ function cancel_capture() {
 
 ui.drag_threshold = 10
 
-ui.drag = function(id, axis) {
+ui.drag = function(id, axis, threshold) {
 	let cs = captured(id)
 	if (!cs)
 		return null
@@ -1254,7 +1256,7 @@ ui.drag = function(id, axis) {
 	cs.dx = move_x ? ui.mx - ui.mx0 : 0
 	cs.dy = move_y ? ui.my - ui.my0 : 0
 	if (!cs.moved) {
-		let threshold = ui.drag_threshold * dpr // in device px
+		threshold = (threshold ?? ui.drag_threshold) * dpr // in device px
 		let adx = abs(cs.dx) // distance moved on x
 		let ady = abs(cs.dy) // distance moved on y
 		if (adx > threshold || ady > threshold)
@@ -2973,6 +2975,8 @@ translate[NOHIT] = function(a, i) {
 /*
 
 	ui.animate ()        request another animation frame
+	ui.invalidate ()     request a frame to show a change, unless a build pass
+	                     is running: that frame's draw shows it
 	ui.rebuild (label=)  request another build/layout pass in this frame
 
 */
@@ -3295,6 +3299,11 @@ function animate() {
 }
 ui.animate = animate
 
+ui.invalidate = function() {
+	if (!is_building)
+		animate()
+}
+
 //// WIDGETS -----------------------------------------------------------------
 
 /*
@@ -3445,6 +3454,16 @@ function parse_align(s) {
 	if (s == 'left'   ) return ALIGN_START
 	if (s == 'right'  ) return ALIGN_END
 	assert(false, 'invalid align ', s)
+}
+
+function parse_text_align(s, stretch) {
+	if (s == 'sr' || s == 'stretch-right') return 'sr'
+	if (s == 'sc' || s == 'stretch-center') return 'sc'
+	let align = parse_align(s)
+	if (stretch)
+		return align == ALIGN_END ? 'sr'
+			: align == ALIGN_CENTER ? 'sc' : 's'
+	return align
 }
 
 function parse_valign(s) {
@@ -6202,16 +6221,15 @@ ui.text = function(
 		ui.state(id)
 		text = word_wrapper(id, text)
 	}
-	let box_align = align ?? 'l'
+	let box_align = parse_text_align(align ?? 'l')
 	let text_align = 0
-	if (box_align == 'sr' || box_align == 'stretch-right') {
+	if (box_align == 'sr') {
 		box_align = 's'
 		text_align = TEXT_ALIGN_RIGHT
-	} else if (box_align == 'sc' || box_align == 'stretch-center') {
+	} else if (box_align == 'sc') {
 		box_align = 's'
 		text_align = TEXT_ALIGN_CENTER
 	} else {
-		box_align = parse_align(box_align)
 		if (box_align == ALIGN_END)
 			text_align = TEXT_ALIGN_RIGHT
 		else if (box_align == ALIGN_CENTER)
@@ -9816,6 +9834,11 @@ toggle.draw = function(a, i) {
 	cx.fillStyle = color_css('toggle', state)
 	cx.fill()
 
+	// little border because unchecked box it's hard to see
+	cx.strokeStyle = color_css('intense')
+	cx.stroke()
+
+
 	// thumb
 	cx.beginPath()
 	let cx1 = on ? x + w - h / 2 : x + h / 2
@@ -9880,18 +9903,20 @@ checkbox.draw = function(a, i) {
 		cx.stroke()
 	}
 
+	cx.save()
+	cx.translate(x, y)
+
 	// check box
 	cx.beginPath()
-	cx.roundRect(x, y, w, h, 2.5 * dpr)
+	cx.roundRect(0, 0, w, h, 2.5 * dpr)
 	cx.fillStyle = color_css('toggle', state)
 	cx.fill()
+
+	cx.translate(0.5, 0.5)
 
 	// check mark or question mark
 	if (on || is_null) {
 		cx.beginPath()
-		cx.save()
-		cx.translate(x, y)
-		cx.translate(0.5, 0.5)
 		cx.scale(dpr, dpr)
 		if (on) { // draw a check shape
 			cx.moveTo( 3,  8)
@@ -9917,8 +9942,15 @@ checkbox.draw = function(a, i) {
 			cx.arc(7, 11, 1, 0, 2 * PI)
 			cx.fill()
 		}
-		cx.restore()
+	} else {
+		// little border because unchecked box it's hard to see
+		cx.beginPath()
+		cx.roundRect(0, 0, w-1, h-1, 2.5 * dpr)
+		cx.strokeStyle = color_css('intense', state)
+		cx.stroke()
 	}
+
+	cx.restore()
 
 }
 
@@ -10829,9 +10861,7 @@ ui.date_input = function(
 	if (opened)
 		s.revert_value = s.input_value
 
-	let input_align = parse_align(text_align ?? 'r')
-	input_align = input_align == ALIGN_END ? 'sr'
-		: input_align == ALIGN_CENTER ? 'sc' : 's'
+	let input_align = parse_text_align(text_align ?? 'r', true)
 
 		ui.stack(input_id)
 			ui.h(0, ui.sp05())
@@ -11514,7 +11544,7 @@ for a validation error, a check mark for a modified cell. nav_input builds
 the control for a cell of a nav, and an empty readonly text box when there
 is no row.
 
-	ui.field_input (id, v=, opt, fr=1, align='s', valign='c') -> v  edit a field with label and status
+	ui.field_input (id, v=, opt=, fr=1, align='s', valign='c') -> v  edit a field with label and status
 	ui.nav_input   (id, opt, fr=1, align='s', valign='c') -> v      edit a nav cell with label and status
 	ui.build_input (id, value=, opt, control, readonly=) -> value
 
@@ -11525,7 +11555,7 @@ opt:
 	nav, col   : nav_input: the nav and the column to edit.
 	ri         : nav_input: the row to edit (nav.focused_ri), null for none.
 	control    : the control to build: field.control, or 'lookup_input'.
-	label_pos  : 't|top | l|left | lr|left-right-align | hide', null.
+	label_pos  : 't|top | l|left | lr|left-right-align | hide', field.label_pos.
 	errors     : 'tooltip' (default): show errors in a tooltip while focused.
 	error_mode : 'first_error', 'all_errors' (default), 'all_checked', 'all'.
 	text_align : input, password_input, date_input, enum_input, list_dropdown.
@@ -11548,8 +11578,8 @@ ui.build_input = function(id, value, opt, control, readonly) {
 	if (opt.min_h != null)
 		ui.min_h(opt.min_h)
 	if (control == 'input') {
-		value = ui.input(id, value, this, null, null, null, opt.text_align,
-			opt.no_box, readonly)
+		value = ui.input(id, value, this, null, null, null,
+			opt.text_align ?? this.align, opt.no_box, readonly)
 	} else if (control == 'password_input') {
 		value = ui.password_input(id, value, this, null, null, null, opt.text_align,
 			opt.no_box, readonly)
@@ -11598,6 +11628,7 @@ ui.build_input = function(id, value, opt, control, readonly) {
 let readonly_text_field
 
 function build_input_row(id, value, opt, is_bound, fr, align, valign) {
+	opt ??= empty
 	fr ??= 1
 	align ??= 's'
 	valign ??= 'c'
@@ -11626,7 +11657,7 @@ function build_input_row(id, value, opt, is_bound, fr, align, valign) {
 	let is_bool_control = control == 'checkbox' || control == 'toggle'
 		|| control == 'toggle_button'
 
-	let label_pos = opt.label_pos
+	let label_pos = opt.label_pos ?? field?.label_pos
 	let is_label_top = label_pos == 't' || label_pos == 'top'
 	let is_label_r_aligned = label_pos == 'lr'
 		|| label_pos == 'left-right-align'
@@ -11639,10 +11670,17 @@ function build_input_row(id, value, opt, is_bound, fr, align, valign) {
 	if (has_outer_ct) {
 		let hv = is_label_left ? 'h' : 'v'
 		let label_gap = is_label_left ? ui.sp2() : ui.sp05()
+		if (control == 'toggle')
+			ui.default_min_h(ui.em(ui.input_h_em))
 		ui.hv(hv, fr, label_gap, align, valign)
 		if (is_bool_control) {
-			if (is_label_left)
-				ui.box()
+			if (is_label_left) {
+				if (control == 'toggle')
+					ui.label(id, field.label, 0,
+						is_label_r_aligned ? 'r' : 'l', 'c')
+				else
+					ui.box()
+			}
 		} else {
 			ui.label(id, field?.label, 0, is_label_r_aligned ? 'r' : 'l', 'c')
 		}
@@ -11650,7 +11688,7 @@ function build_input_row(id, value, opt, is_bound, fr, align, valign) {
 	} else {
 		ui.h(fr, gap, align, valign)
 	}
-	if (control == 'toggle')
+	if (control == 'toggle' && !is_label_left)
 		ui.label(id, field.label, 1, 'l', 'c')
 	let box_i = ui.stack('', is_bool_control ? 0 : 1, 's', 's')
 

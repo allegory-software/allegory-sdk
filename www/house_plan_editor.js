@@ -2667,6 +2667,7 @@ function create_floor_editor(id) {
 					) {
 						ui.h2(S('plan_settings', 'Plan Settings'))
 						ui.min_w(ui.em(24))
+						ui.mb(ui.sp4())
 						ui.v_aligned(0, ui.sp(), 's', 't')
 							let opt = {
 								control: 'num_slider', label_pos: 'l',

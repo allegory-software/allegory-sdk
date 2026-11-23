@@ -228,6 +228,7 @@ TIMERS
 	runagainevery(t, f) -> tid
 	clock()
 	timer(f) -> tm; tm(t) to rearm; tm() to cancel; tm(true) to rearm to last duration.
+	  tm('?') -> t|f   armed and not yet fired
 
 SERIALIZATION
 
@@ -1697,6 +1698,8 @@ function timer(f) {
 		f()
 	}
 	return function(t) {
+		if (t == '?')
+			return timer_id != null
 		if (timer_id != null) {
 			clearTimeout(timer_id)
 			timer_id = null

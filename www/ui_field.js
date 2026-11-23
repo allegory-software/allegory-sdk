@@ -981,6 +981,8 @@ let td = {
 	w: 4,
 	icon: 'clock',
 	is_timeofday: true,
+	min: 0, max: 24 * 3600 - 60,
+	scale: 60, decimals: 0,
 	from_input: function(s) { return parse_timeofday(s, true, this.precision) },
 	col_storage: f64_storage,
 }

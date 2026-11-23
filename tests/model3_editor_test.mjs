@@ -20,6 +20,8 @@ const page_html = `<!DOCTYPE html>
 <script src=gl_renderer.js></script>
 <script src=model3.js></script>
 <script src=ui.js></script>
+<script src=ui_icon_defs.js></script>
+<script src=ui_field.js></script>
 <script src=model3_editor.js></script>
 <script>
 const {v3} = Math3D
@@ -29,7 +31,7 @@ ui.main = function() {
 			ui.text('', 'toolbar', 0)
 		ui.end_h()
 		ui.min_wh(400, 300)
-		ui.model3_editor('m', {}, function(e) {
+		ui.model3_editor('m', null, null, {}, function(e) {
 			window.test_editor = e
 			let c = e.root.comp
 			c.draw_polyline([v3(0, 0, 0), v3(2, 0, 0), v3(2, 2, 0), v3(0, 2, 0)],
@@ -56,6 +58,8 @@ const server = http.createServer(async function(req, res) {
 <link rel="icon" href="data:,">
 <script src=glue.js global></script>
 <script src=ui.js global></script>
+<script src=ui_icon_defs.js></script>
+<script src=ui_field.js></script>
 <script src=earcut.js></script>
 <script src=3d.js></script>
 <script src=suncalc.js></script>
@@ -65,7 +69,7 @@ const server = http.createServer(async function(req, res) {
 <script src=model3_editor.js></script>
 <script>
 ui.main = function() {
-	ui.model3_editor('m', {}, ui.model3_editor_test_objects)
+	ui.model3_editor('m', null, null, {}, ui.model3_editor_test_objects)
 }
 </script>
 <body></body>
@@ -278,8 +282,8 @@ let sq10 = await read_square()
 check('a pull after a cancelled pull started',
 	JSON.stringify(sq1) != JSON.stringify(sq10), JSON.stringify([sq1, sq10]))
 
-// switching tools during the pull drag cancels the pull and ends the drag:
-// moving and releasing the mouse change nothing.
+// a tool key during the pull drag is ignored: the drag goes on and the
+// release finishes the pull. Ctrl+Z undoes it.
 await pg.keyboard.press('l')
 await pg.waitForTimeout(100)
 await pg.mouse.move(rect.x + top_p[0], rect.y + top_p[1] - 30, {steps: 3})
@@ -288,9 +292,13 @@ await pg.mouse.up()
 await pg.waitForTimeout(100)
 let sq11 = await read_square()
 let tool11 = await pg.evaluate(() => window.test_editor.tool)
-check('a tool switch cancelled the pull drag',
-	tool11 == 'line' && JSON.stringify(sq1) == JSON.stringify(sq11),
+check('a tool key during the pull drag was ignored',
+	tool11 == 'pull' && JSON.stringify(sq1) != JSON.stringify(sq11),
 	JSON.stringify([tool11, sq1, sq11]))
+await press_ctrl('z')
+let sq12 = await read_square()
+check('Ctrl+Z undid the pull after the tool key',
+	JSON.stringify(sq1) == JSON.stringify(sq12), JSON.stringify([sq1, sq12]))
 
 // a line drawn after a pull is its own undo step: Ctrl+Z removes the line
 // and leaves the pulled box.
@@ -378,6 +386,112 @@ await press_ctrl('z')
 let n_lines5 = await read_line_count()
 check('Ctrl+Z skipped the empty group', n_lines5 == n_lines0,
 	n_lines0 + ' ' + n_lines5)
+
+// rectangle tool, on an empty model.
+await pg.evaluate(() => window.test_editor.clear_model())
+await pg.keyboard.press('r')
+await pg.waitForTimeout(100)
+check('key r selects the rectangle tool',
+	await pg.evaluate(() => window.test_editor.tool) == 'rect')
+// screen positions in the widget of world points [[x, y, z], ...].
+function to_screen(ps) {
+	return pg.evaluate(function(ps) {
+		let e = window.test_editor
+		let screen_ps = []
+		for (let p of ps) {
+			let q = e.world_to_screen(Math3D.v3(...p), Math3D.v2())
+			screen_ps.push([q[0], q[1]])
+		}
+		return screen_ps
+	}, ps)
+}
+// the live faces: [{ps: [[x, y, z], ...], n_holes}, ...].
+function read_faces() {
+	return pg.evaluate(function() {
+		let c = window.test_editor.root.comp
+		let faces = []
+		for (let face of c.faces) {
+			if (!face.length)
+				continue
+			let ps = []
+			for (let pi of face)
+				ps.push(Array.from(c.get_point(pi, Math3D.v3())))
+			faces.push({ps, n_holes: face.holes?.length ?? 0})
+		}
+		return faces
+	})
+}
+// whether the bounding box of `face` is `box` ([x1, y1, z1, x2, y2, z2]),
+// within the error of clicking on whole pixels.
+function face_box_near(face, box) {
+	for (let k = 0; k < 3; k++) {
+		let min = 1/0
+		let max = -1/0
+		for (let p of face.ps) {
+			min = Math.min(min, p[k])
+			max = Math.max(max, p[k])
+		}
+		if (Math.abs(min - box[k]) > .1 || Math.abs(max - box[k+3]) > .1)
+			return false
+	}
+	return true
+}
+
+// a drag on the ground draws a horizontal rectangle along the x and z axes,
+// in one undo step.
+// run `input`, then wait until the frame that reads it is built: a corner is
+// taken at the pointer position in that frame, which can be built more than
+// 100 ms after the input.
+async function input_frame(input) {
+	let build_no0 = await pg.evaluate(() => ui._build_no())
+	await input()
+	while (await pg.evaluate(() => ui._build_no()) == build_no0) {}
+}
+let [g1, g2] = await to_screen([[0, 0, 0], [1, 0, 1]])
+await pg.mouse.move(rect.x + g1[0], rect.y + g1[1])
+await pg.waitForTimeout(100)
+await input_frame(() => pg.mouse.down())
+await pg.mouse.move(rect.x + g2[0], rect.y + g2[1], {steps: 6})
+await input_frame(() => pg.mouse.up())
+let faces1 = await read_faces()
+check('a drag drew a rectangle on the ground',
+	faces1.length == 1 && faces1[0].ps.length == 4
+		&& face_box_near(faces1[0], [0, 0, 0, 1, 0, 1]),
+	JSON.stringify(faces1))
+await press_ctrl('z')
+let faces2 = await read_faces()
+let n_lines6 = await read_line_count()
+check('Ctrl+Z undid the rectangle', faces2.length == 0 && n_lines6 == 0,
+	JSON.stringify([faces2, n_lines6]))
+
+// click, move, click inside a vertical face draws an island on its plane.
+await pg.evaluate(function() {
+	let c = window.test_editor.root.comp
+	c.add_face([
+		c.add_point_xyz(-4, 0, -1),
+		c.add_point_xyz(6, 0, -1),
+		c.add_point_xyz(6, 6, -1),
+		c.add_point_xyz(-4, 6, -1),
+	])
+	window.test_editor.update_all()
+	ui.animate()
+})
+await pg.waitForTimeout(100)
+let [w1, w2] = await to_screen([[0, 2, -1], [2, 4, -1]])
+await pg.mouse.move(rect.x + w1[0], rect.y + w1[1], {steps: 4})
+await pg.waitForTimeout(100)
+await input_frame(() => pg.mouse.down())
+await input_frame(() => pg.mouse.up())
+await pg.mouse.move(rect.x + w2[0], rect.y + w2[1], {steps: 6})
+await pg.waitForTimeout(100)
+await input_frame(() => pg.mouse.down())
+await input_frame(() => pg.mouse.up())
+let faces3 = await read_faces()
+let island = faces3.find(f => f.ps.length == 4 && !f.n_holes)
+check('click, move, click drew an island on a vertical face',
+	faces3.length == 2 && faces3.some(f => f.n_holes == 1) && island
+		&& face_box_near(island, [0, 2, -1, 2, 4, -1]),
+	JSON.stringify(faces3))
 
 check('no page errors after input', errors.length == 0, errors.join('\n'))
 

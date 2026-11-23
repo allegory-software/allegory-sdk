@@ -1508,6 +1508,7 @@ gl.bind_texture = function(type, tex1, unit) {
 		unit = gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS) + unit
 	let units = attr(attr(gl, 'tex_units'), type, Array)
 	let tex0 = units[unit]
+	gl.activeTexture(gl.TEXTURE0 + unit)
 	if (tex1 == tex0)
 		return this
 
@@ -1517,7 +1518,6 @@ gl.bind_texture = function(type, tex1, unit) {
 	if (tex0)
 		tex0.unit = null
 
-	gl.activeTexture(gl.TEXTURE0 + unit)
 	gl.bindTexture(tex_gl_target(type), tex1)
 
 	units[unit] = tex1

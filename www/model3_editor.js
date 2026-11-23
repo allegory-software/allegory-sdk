@@ -24,7 +24,7 @@ const {
 	noop, pr, assert, log, property,
 	extend, array_set, array_equals, insert, remove_value, array_move,
 	assign, freelist, time, timer, copy_to_clipboard,
-	profile_time,
+	profile_time, day, format_date, isnum,
 } = glue
 
 const {NEAR, FAR, v2, v3, v4, mat4, box3, plane, plane3, line3, camera3} = Math3D
@@ -32,6 +32,58 @@ const {NEAR, FAR, v2, v3, v4, mat4, box3, plane, plane3, line3, camera3} = Math3
 window.DEBUG_PLAN ??= 0
 
 let TRACE_GL = 0 // trace gl calls
+
+ui.saved_value_def('model3_fov', 60, ui.create_field({
+	type: 'number',
+	label: S('fov', 'Field of View'),
+	control: 'num_slider', label_pos: 'l',
+	min: 20,
+	max: 120,
+	decimals: 0,
+}))
+
+ui.saved_value_def('model3_shadows', false, ui.create_field({
+	type: 'bool', not_null: true,
+	label: S('sun_and_shadows', 'Sun & Shadows'),
+	control: 'toggle', label_pos: 'l',
+}))
+ui.saved_value_def('model3_ambient_occlusion', false, ui.create_field({
+	type: 'bool', not_null: true,
+	label: S('ambient_occlusion', 'Ambient occlusion'),
+	control: 'toggle', label_pos: 'l',
+}))
+
+let sun_year = time(2020)
+
+ui.saved_value_def('model3_date', 213, ui.create_field({
+	type: 'number', not_null: true,
+	label: S('date', 'Date'),
+	min: 0, max: 365, decimals: 0,
+	control: 'slider', label_pos: 'l',
+	slider_markers: false,
+	to_text: function(v) {
+		return isnum(v) ? format_date(day(sun_year, v), null, 'd') : v
+	},
+}))
+
+ui.saved_value_def('model3_time', 9 * 3600, ui.create_field({
+	type: 'timeofday', not_null: true,
+	label: S('time_utc', 'Time (UTC)'),
+	control: 'slider', label_pos: 'l',
+	slider_markers: false,
+}))
+
+ui.saved_value_def('model3_latitude', 40.75811, ui.create_field({
+	type: 'number', not_null: true,
+	label: S('latitude', 'Latitude'), label_pos: 'l',
+	min: -90, max: 90, decimals: 5,
+}))
+
+ui.saved_value_def('model3_longitude', -73.98561, ui.create_field({
+	type: 'number', not_null: true,
+	label: S('longitude', 'Longitude'), label_pos: 'l',
+	min: -180, max: 180, decimals: 5,
+}))
 
 // stack with freelist.
 function freelist_stack(create) {
@@ -166,7 +218,6 @@ function model3_editor(e) {
 
 		camera.raycast(mouse.x, mouse.y, mouse.ray)
 		mouse.valid = false
-		fire_pointermove()
 	}
 
 	e.world_to_screen = function(p, out) {
@@ -215,12 +266,14 @@ function model3_editor(e) {
 	e.prop('sunlight'   , {store: 'var', type: 'boolean', default: true})
 	e.prop('time'       , {store: 'var', type: 'datetime', default: 1596272400})
 	e.prop('north'      , {store: 'var', type: 'number', default: 0})
-	e.prop('latitude'   , {store: 'var', type: 'number', default: 44.42314, decimals: null})
-	e.prop('longitude'  , {store: 'var', type: 'number', default: 26.35673, decimals: null})
+	e.prop('latitude'   , {store: 'var', type: 'number', default:  40.75811, decimals: null})
+	e.prop('longitude'  , {store: 'var', type: 'number', default: -73.98561, decimals: null})
 
 	let sun_dir = v3()
+	let sun_altitude = 0
 	function update_sun_pos() {
 		let {azimuth, altitude} = suncalc.sun_position(e.time, e.latitude, e.longitude)
+		sun_altitude = altitude
 		sun_dir.set(v3.z_axis)
 			.rotate(v3.x_axis, -altitude)
 			.rotate(v3.y_axis, -azimuth + rad * e.north)
@@ -232,6 +285,34 @@ function model3_editor(e) {
 			renderer.sunlight_dir.set(sun_dir)
 		} else {
 			renderer.sunlight_dir.set(camera.dir)
+		}
+		let use_sun = e.sunlight || e.shadows
+		let daylight = use_sun
+			? clamp((sun_altitude / rad + 12) / 12, 0, 1) : 1
+		let sunlight = use_sun ? clamp(sun_altitude / (6 * rad), 0, 1) : 1
+		renderer.sunlight_color.set(sunlight, sunlight, sunlight)
+		renderer.sky_light_color.set(
+			0.40 + 0.60 * daylight,
+			0.50 + 0.50 * daylight,
+			0.70 + 0.30 * daylight)
+		renderer.ground_light_color.set(
+			0.25 + 0.75 * daylight,
+			0.30 + 0.70 * daylight,
+			0.40 + 0.60 * daylight)
+		if (skybox) {
+			skybox.sky_color.set(
+				0.02 + (0xcc / 255 - 0.02) * daylight,
+				0.03 + (0xdd / 255 - 0.03) * daylight,
+				0.08 + 0.92 * daylight)
+			skybox.horizon_color.set(
+				0.04 + 0.96 * daylight,
+				0.05 + 0.95 * daylight,
+				0.10 + 0.90 * daylight)
+			skybox.ground_color.set(
+				0.02 + (0xe0 / 255 - 0.02) * daylight,
+				0.03 + (0xdd / 255 - 0.03) * daylight,
+				0.05 + (0xdd / 255 - 0.05) * daylight)
+			skybox.update()
 		}
 	}
 
@@ -251,7 +332,7 @@ function model3_editor(e) {
 		if (TRACE_GL)
 			gl.start_trace()
 		let t0 = time()
-		if (skybox)
+		if (skybox && e.shadows)
 		 	skybox.draw(prog)
 		ground_rr.draw(prog)
 		draw_model(prog)
@@ -332,7 +413,7 @@ function model3_editor(e) {
 
 	function update_renderer() {
 		renderer.update()
-		ui.animate()
+		ui.invalidate()
 	}
 
 	let cx, cy // widget position on the UI canvas (device px), set by update
@@ -704,9 +785,6 @@ function model3_editor(e) {
 	function replace_model(init) {
 		if (tool.bind)
 			tool.bind(false)
-		captured_move = null
-		captured_up = null
-		mouse.dragging = false
 		mouse.prevent_validate = false
 		free_model()
 		cur_path.length = 0
@@ -920,7 +998,7 @@ function model3_editor(e) {
 	function update() {
 		update_instances()
 		update_comp(cur_comp)
-		ui.animate()
+		ui.invalidate()
 	}
 
 	function update_all() {
@@ -1034,6 +1112,7 @@ function model3_editor(e) {
 				angle = abs(angle - PI)
 			p.angle = angle
 			p.tooltip = plane_hit_tooltip
+			p.plane = _pl0
 			return p
 		}}
 
@@ -1415,6 +1494,9 @@ function model3_editor(e) {
 	let skybox
 	if (e.skybox) {
 		skybox = gl.skybox({
+			sky_color: v3().from_rgb(0xccddff),
+			horizon_color: v3().from_rgb(0xffffff),
+			ground_color: v3().from_rgb(0xe0dddd),
 			images: {
 				posx: e.skybox_dir+'/skybox_posx.jpg',
 				negx: e.skybox_dir+'/skybox_negx.jpg',
@@ -1441,6 +1523,7 @@ function model3_editor(e) {
 	}
 	let offsets = {
 		line          : [0, 25],
+		rect          : [0, 25],
 		pull          : [12, 0],
 		pullno        : [12, 0],
 		select        : [5, 12],
@@ -1459,8 +1542,8 @@ function model3_editor(e) {
 		if (cursor == name)
 			return
 		cursor = name
-		let x = offsets[name] && offsets[name][0] || 0
-		let y = offsets[name] && offsets[name][1] || 0
+		let x = (offsets[name] && offsets[name][0] || 0) * devicePixelRatio
+		let y = (offsets[name] && offsets[name][1] || 0) * devicePixelRatio
 		e.cursor_url = builtin_cursors[name] ? name : 'url('+e.cursors_dir+'/cursor_'+name+'.'+(cursor_ext[name] ?? 'png')+') '+x+' '+y+', auto'
 	})
 	}
@@ -1492,7 +1575,7 @@ function model3_editor(e) {
 	let helper_points = []
 
 	function helper_point_update() {
-		ui.animate()
+		ui.invalidate()
 	}
 
 	function helper_point(p, opt) {
@@ -1611,7 +1694,7 @@ function model3_editor(e) {
 			e.cursor = tool.cursor || name
 			if (tool.bind)
 				tool.bind(true)
-			fire_pointermove()
+			ui.invalidate()
 		})
 	}
 
@@ -1636,37 +1719,42 @@ function model3_editor(e) {
 		return out.set(dir).muls(depth).add(camera.pos)
 	}
 
-	tools.orbit.pointerdown = function(capture) {
-		let cam0 = camera.clone()
-		let mx0 = mouse.x
-		let my0 = mouse.y
-		let hit_point = mouse_hit_model({mode: 'camera'})
-		let orbit_point = v3()
-		let panning = shift
-		mouse.prevent_validate = true
-		return capture(function() {
-			let mx = mouse.x
-			let my = mouse.y
-			if (shift == !panning) {
-				cam0.set(camera)
-				mx0 = mx
-				my0 = my
-				panning = shift
-				orbit_update_cursor()
-			} else {
-				camera.set(cam0)
-			}
-			if (panning) {
-				camera.pan(hit_point, mx0, my0, mx, my)
-			} else {
-				let dx = (mx - mx0) / 400
-				let dy = (my - my0) / 400
-				center_orbit_point(hit_point, orbit_point)
-				camera.orbit(orbit_point, dy, dx, 0)
-			}
-			camera_dirty = true
-			update_camera()
-		}, save_camera)
+	tools.orbit.update = function(cs) {
+		if (!cs)
+			return
+		if (cs.drag) {
+			cs.cam0 = camera.clone()
+			cs.mx0 = mouse.x
+			cs.my0 = mouse.y
+			cs.hit_point = mouse_hit_model({mode: 'camera'})
+			cs.orbit_point = v3()
+			cs.panning = shift
+			mouse.prevent_validate = true
+			return
+		}
+		let mx = mouse.x
+		let my = mouse.y
+		if (shift == !cs.panning) {
+			cs.cam0.set(camera)
+			cs.mx0 = mx
+			cs.my0 = my
+			cs.panning = shift
+			orbit_update_cursor()
+		} else {
+			camera.set(cs.cam0)
+		}
+		if (cs.panning) {
+			camera.pan(cs.hit_point, cs.mx0, cs.my0, mx, my)
+		} else {
+			let dx = (mx - cs.mx0) / 400
+			let dy = (my - cs.my0) / 400
+			center_orbit_point(cs.hit_point, cs.orbit_point)
+			camera.orbit(cs.orbit_point, dy, dx, 0)
+		}
+		camera_dirty = true
+		update_camera()
+		if (cs.drop)
+			save_camera()
 	}
 
 	{
@@ -1706,7 +1794,7 @@ function model3_editor(e) {
 		orbit_update_cursor()
 		if (key != 'shift' && key != 'ctrl' && key != 'alt')
 			hit_point = null
-		if (!captured_up)
+		if (!ui.captured(e.id))
 			save_camera()
 	}
 
@@ -1744,7 +1832,13 @@ function model3_editor(e) {
 		update_select_mode()
 	}
 
-	tools.select.click = function(nclicks) {
+	tools.select.update = function(cs) {
+		let nclicks = ui.tripleclick ? 3 : ui.dblclick ? 2 : cs?.drop ? 1 : 0
+		if (nclicks && ui.hit(e.id))
+			select_at_pointer(nclicks)
+	}
+
+	function select_at_pointer(nclicks) {
 		if (nclicks > 3)
 			return
 		let p = mouse_hit_model({mode: 'select', distance: 'select'})
@@ -1845,11 +1939,7 @@ function model3_editor(e) {
 
 	tools.move = {}
 
-	tools.move.pointermove = function() {
-
-	}
-
-	tools.move.pointerdown = function() {
+	tools.move.update = function(cs) {
 
 		/*
 		let no_one_face_selected = !(
@@ -1930,7 +2020,7 @@ function model3_editor(e) {
 
 	})
 
-	tools.line.pointermove = function() {
+	tools.line.update = function(cs) {
 
 		let p1 = cur_line[0]
 		let p2 = cur_line[1]
@@ -1944,22 +2034,26 @@ function model3_editor(e) {
 		ref_line.snap = null
 		ref_line.visible = false
 
-		ref_point_update_after(false)
-
 		let p = mouse_hit_model({mode: 'draw', distance: 'snap',
 				axes_model: cur_line.visible ? last_point_model : null})
 
 		let hit_d = max_hit_distances.snap
 
-		if (p) {
-
-			// change the ref point.
-			if ((p.snap == 'point' || p.snap == 'line_middle')
-				&& (p.i == null || !cur_line.visible || p.i != cur_line[0].i)
-			) {
+		// show the ref point after the user rests the pointer on a point for
+		// .5s. tools.line.update() runs on every frame, so the timer is armed
+		// only when the pointer is on another point.
+		let is_ref_p = p && (p.snap == 'point' || p.snap == 'line_middle')
+			&& (p.i == null || !cur_line.visible || p.i != cur_line[0].i)
+		let is_pending = ref_point_update_after('?')
+		if (!(is_ref_p && is_pending && p.equals(future_ref_point))) {
+			ref_point_update_after(false)
+			if (is_ref_p && !(ref_point.visible && p.equals(ref_point))) {
 				future_ref_point.assign(p)
 				ref_point_update_after(.5)
 			}
+		}
+
+		if (p) {
 
 			if (!cur_line.visible) { // moving the start point
 
@@ -2026,9 +2120,12 @@ function model3_editor(e) {
 		ref_line.update()
 
 		update()
+
+		if (cs?.drag)
+			place_line_point()
 	}
 
-	tools.line.pointerdown = function() {
+	function place_line_point() {
 		e.tooltip = ''
 		let rel_cur_line = cur_line.clone().transform(cur_inv_model)
 		let closing = cur_line.visible && (cur_line[1].i != null || cur_line[1].li != null)
@@ -2065,10 +2162,135 @@ function model3_editor(e) {
 
 	// rectangle tool ---------------------------------------------------------
 
-	tools.rect = {}
+	tools.rect = {edits_model: true}
 
-	tools.rect.pointerdown = function() {
+	{
+		let rect_p1 = null // first corner in cur_comp space; null: not drawing.
+		let rect_plane = plane3() // the plane drawn on, in cur_comp space.
+		let rect_u = v3() // direction of the first side, on rect_plane.
+		let rect_v = v3() // direction of the second side, on rect_plane.
+		let rect_ps = [v3(), v3(), v3(), v3()] // corners in world space.
+		let rect_lines = [] // [line3, ...]: the preview, one line per side.
+		for (let i = 0; i < 4; i++)
+			rect_lines.push(helper_line(line3(rect_ps[i], rect_ps[(i+1) % 4]),
+				{visible: false}))
 
+		tools.rect.bind = function(on) {
+			if (!on)
+				cancel()
+		}
+
+		tools.rect.update = function(cs) {
+			if (rect_p1) {
+				move()
+				// after a drag, the rectangle is drawn on release; after a
+				// click, on the next press.
+				if (cs?.drag || cs?.drop && cs.moved)
+					draw_rect()
+				return
+			}
+			let p = mouse_hit_model({mode: 'draw', distance: 'snap'})
+			if (cs?.drag && p) {
+				start(p)
+				move()
+				return
+			}
+			cur_point.visible = !!(p && p.snap)
+			if (p) {
+				cur_point.set(p)
+				cur_point.snap = p.snap
+			}
+			e.tooltip = p ? snap_tooltips[p.snap || p.line_snap] || p.tooltip : ''
+			cur_point.update()
+		}
+
+		function start(p) {
+			rect_p1 = p.clone().transform(cur_inv_model)
+			for (let rect_p of rect_ps)
+				rect_p.set(p)
+			// the plane of the hit face or ref plane, else of the face under the
+			// mouse if the corner is on it, else the horizontal plane through
+			// the corner.
+			let plane = p.plane
+			if (!plane) {
+				let face_p = mouse_hit_faces()
+				if (face_p && abs(face_p.plane.distance_to_point(p)) <= NEAR)
+					plane = face_p.plane
+			}
+			if (plane)
+				rect_plane.set(plane).transform(cur_inv_model)
+			else
+				rect_plane.set_from_normal_and_coplanar_point(v3.y_axis, rect_p1)
+			// the sides go along the model axis most perpendicular to the
+			// plane's normal, projected onto the plane, and across it.
+			let n = rect_plane.normal
+			let axis = v3.x_axis
+			if (abs(v3.y_axis.dot(n)) < abs(axis.dot(n)))
+				axis = v3.y_axis
+			if (abs(v3.z_axis.dot(n)) < abs(axis.dot(n)))
+				axis = v3.z_axis
+			rect_u.set(n).muls(-axis.dot(n)).add(axis).normalize()
+			rect_v.set(n).cross(rect_u)
+			e.tooltip = ''
+			cur_point.visible = false
+			cur_point.update()
+		}
+
+		let move
+		{
+		let _l0 = line3()
+		let _v0 = v3()
+		move = function() {
+			let ray = mouse.ray.transform(cur_inv_model, _l0)
+			let p2 = rect_plane.intersect_line(ray, _v0)
+			if (!p2 || p2.t < 0)
+				return
+			let d = p2.sub(rect_p1)
+			let du = d.dot(rect_u)
+			let dv = d.dot(rect_v)
+			rect_ps[0].set(rect_p1)
+			rect_ps[1].set(rect_u).muls(du).add(rect_p1)
+			rect_ps[2].set(rect_v).muls(dv).add(rect_ps[1])
+			rect_ps[3].set(rect_v).muls(dv).add(rect_p1)
+			for (let rect_p of rect_ps)
+				rect_p.transform(cur_model)
+			for (let line of rect_lines) {
+				line.visible = true
+				line.update()
+			}
+		}}
+
+		function draw_rect() {
+			let points = []
+			for (let rect_p of rect_ps)
+				points.push(rect_p.clone().transform(cur_inv_model))
+			// the rectangle is drawn only when both sides are longer than NEAR.
+			if (points[0].distance(points[1]) <= NEAR
+					|| points[0].distance(points[3]) <= NEAR)
+				return
+			start_undo()
+			cur_comp.draw_polyline(points, true)
+			finish()
+		}
+
+		function finish() {
+			rect_p1 = null
+			for (let line of rect_lines) {
+				line.visible = false
+				line.update()
+			}
+			update()
+		}
+
+		function cancel() {
+			if (rect_p1)
+				finish()
+			e.tooltip = ''
+			cur_point.visible = false
+			cur_point.update()
+		}
+
+		tools.rect.cancel = cancel
 	}
 
 	// push/pull tool ---------------------------------------------------------
@@ -2079,16 +2301,27 @@ function model3_editor(e) {
 		let hit_p // point on the plane hit for pulling.
 		let pull  // pull state for live pulling.
 		let pull_undo_start // undo_stack length after start_pull's setup.
+		let is_face_pressed // the press began on a face.
 
 		tools.pull.bind = function(on) {
 			if (!on)
 				cancel()
 		}
 
-		tools.pull.pointermove = function() {
+		tools.pull.update = function(cs) {
+			if (cs?.drag) {
+				if (pull)
+					stop()
+				else
+					is_face_pressed = hit_p != null
+			}
 			if (pull) {
 				move()
-				return true
+			} else if (cs) {
+				if (is_face_pressed && cs.moved) {
+					start()
+					move()
+				}
 			} else {
 				let p = mouse_hit_faces()
 				let invalid_target = p && p.comp && p.comp != cur_comp
@@ -2103,6 +2336,13 @@ function model3_editor(e) {
 				hit_p = p && (hit_p || v3()).assign(p)
 				update()
 			}
+			if (cs?.drop && is_face_pressed) {
+				is_face_pressed = false
+				if (pull)
+					stop()
+				else
+					start()
+			}
 		}
 
 		let move
@@ -2111,11 +2351,6 @@ function model3_editor(e) {
 		let _v0 = v3()
 		let _v1 = v3()
 		move = function() {
-			if (!pull) {
-				if (!mouse.dragging)
-					return
-				start()
-			}
 			mouse.prevent_validate = true
 			let model_p = mouse_hit_model({mode: 'draw', distance: 'snap'})
 			let hit_model = model_p && pull.can_hit(model_p)
@@ -2165,14 +2400,11 @@ function model3_editor(e) {
 		}
 
 		function cancel() {
+			is_face_pressed = false
 			if (!pull)
 				return
 			rewind_undo(undo_groups.pop())
 			select_all(false)
-			// end the drag that started the pull, else the pull is started
-			// again on the next move.
-			e.capture_pointer(null, null)
-			mouse.dragging = false
 			finish()
 		}
 
@@ -2184,19 +2416,6 @@ function model3_editor(e) {
 			ref_line.visible = false
 			ref_line.update()
 			update()
-		}
-
-		tools.pull.pointerdown = function(capture) {
-			if (pull) {
-				stop()
-			} else if (hit_p != null) {
-				return capture(move, function() {
-					if (pull)
-						stop()
-					else
-						start()
-				})
-			}
 		}
 
 		tools.pull.cancel = cancel
@@ -2214,7 +2433,9 @@ function model3_editor(e) {
 		update_comp(node.comp)
 	}
 
-	tools.paint.pointerdown = function() {
+	tools.paint.update = function(cs) {
+		if (!cs?.drag)
+			return
 		let row = materials_list && materials_list.focused_row
 		let material = row && row.material || default_material
 		let p = mouse_hit_faces()
@@ -2250,107 +2471,18 @@ function model3_editor(e) {
 	mouse.ray = line3()
 
 	function update_mouse() {
-		let mx = ui.mx - cx
-		let my = ui.my - cy
-		let pos_changed = mx != mouse.x || my != mouse.y
-		mouse.x = mx
-		mouse.y = my
-		if (pos_changed)
-			camera.raycast(mx, my, mouse.ray)
-		return pos_changed
-	}
-
-	function fire_pointermove() {
-		if (mouse.x != mouse.x) // mouse not yet moved.
-			return
-		if (tool.pointermove)
-			tool.pointermove()
-	}
-
-	let captured_move, captured_up
-	e.capture_pointer = function(on_move, on_up) {
-		captured_move = on_move
-		captured_up   = on_up
-	}
-
-	e.pointermove = function() {
-		if (!update_mouse())
-			return
-		fire_pointermove()
-		if (captured_move)
-			captured_move()
-	}
-
-	e.pointerdown = function() {
-		mouse.prevent_validate = false
-		if (update_mouse())
-			fire_pointermove()
-		if (tool.pointerdown) {
-			let captured, captured_move
-			function capture(move, up) {
-				let mouse0 = v3()
-				let _v0 = v3()
-				let movewrap = move && function() {
-					update_mouse()
-					if (!mouse.dragging)
-						mouse.dragging = mouse0.to(_v0).sub(mouse).len() > max_hit_distances.drag_pull
-					move()
-				}
-				let upwrap = function() {
-					update_mouse()
-					if (up)
-						up()
-					mouse.dragging = false
-				}
-				mouse0.set(mouse)
-				captured = e.capture_pointer(movewrap, upwrap)
-				captured_move = move
-			}
-			tool.pointerdown(capture)
-			// guarantee a mouse move after each mouse down.
-			if (!captured)
-				fire_pointermove()
-			else if (captured_move)
-				captured_move()
-			return captured
-		}
-	}
-
-	e.pointerup = function() {
-		mouse.prevent_validate = false
-		if (update_mouse())
-			fire_pointermove()
-		if (captured_up) {
-			captured_up()
-			captured_move = null
-			captured_up = null
-		} else if (tool.pointerup) {
-			tool.pointerup()
-			// guarantee a mouse move after each mouse up.
-			fire_pointermove()
-		}
+		mouse.x = ui.mx - cx
+		mouse.y = ui.my - cy
+		camera.raycast(mouse.x, mouse.y, mouse.ray)
 	}
 
 	e.pointerleave = function() {
 		e.tooltip = ''
 	}
 
-	e.click = function(nclicks) {
-		mouse.prevent_validate = false
-		if (update_mouse())
-			fire_pointermove()
-		if (tool.click) {
-			tool.click(nclicks)
-			// guarantee a mouse move after each click.
-			fire_pointermove()
-		}
-	}
-
 	e.wheel = function() {
 		let dy = ui.wheel_dy / ui.em(7)
 		close_context_menu()
-		if (update_mouse())
-			fire_pointermove()
 		mouse.prevent_validate = false
 		let hit_point = mouse_hit_model({mode: 'camera'})
 		camera.dolly(hit_point, 1.4 ** dy)
@@ -2381,6 +2513,19 @@ function model3_editor(e) {
 	e.keydown = function(key) {
 		mouse.prevent_validate = false
 		update_keys()
+		if (tool.keydown) {
+			if (tool.keydown(key) === false) {
+				return false
+			}
+		}
+		if (key == 'escape') {
+			if (tool.cancel)
+				tool.cancel()
+			return false
+		}
+		// while dragging, the current tool owns the keys.
+		if (ui.captured(e.id))
+			return
 		if (key == 'delete' && !e.readonly) {
 			start_undo()
 			cur_comp.remove_selection()
@@ -2390,17 +2535,6 @@ function model3_editor(e) {
 		if (key == 'h') {
 			cur_comp.toggle_invisible_lines()
 			update()
-			return false
-		}
-		if (tool.keydown) {
-			if (tool.keydown(key) === false) {
-				return false
-			}
-		}
-		if (key == 'escape') {
-			if (tool.cancel)
-				tool.cancel()
-			fire_pointermove()
 			return false
 		}
 		if (key == 'f2') {
@@ -2493,9 +2627,6 @@ function model3_editor(e) {
 	e.contextmenu = function() {
 
 		close_context_menu()
-
-		if (update_mouse(ev))
-			fire_pointermove()
 
 		let items = []
 
@@ -2801,7 +2932,7 @@ function model3_editor(e) {
 		cx = s.x
 		cy = s.y
 		update_keys()
-		let cs = ui.captured(id)
+		let cs = ui.drag(id, null, max_hit_distances.drag_pull)
 		let hs = ui.hit(id)
 
 		if (ui.focused(id)) {
@@ -2818,27 +2949,22 @@ function model3_editor(e) {
 		}
 
 		// Escape canceled the capture: ui consumed the key, so cancel here.
+		// no drag state is passed to the tool after it.
 		if (cs?.cancel) {
-			captured_move = null
-			captured_up = null
 			e.keydown('escape')
 			save_camera()
+			cs = null
 		}
 
 		if (ui.mx != null && (cs || hs)) {
-			e.pointermove()
-			if (ui.clicked(id))
-				e.pointerdown()
-			if (ui.clickup && cs)
-				e.pointerup()
-			let nclicks = ui.tripleclick ? 3 : ui.dblclick ? 2
-				: ui.clickup && cs ? 1 : 0
-			if (nclicks && hs)
-				e.click(nclicks)
+			update_mouse()
+			if (ui.click || ui.clickup)
+				mouse.prevent_validate = false
+			if (ui.wheel_dy && hs)
+				e.wheel()
+			if (tool.update)
+				tool.update(cs)
 		}
-
-		if (ui.wheel_dy && hs)
-			e.wheel()
 
 		if (ui.hit_leave(id))
 			e.pointerleave()
@@ -2847,6 +2973,20 @@ function model3_editor(e) {
 	function apply_options(opt) {
 		for (let k in prop_setter_names) {
 			let v = opt[k]
+			if (k == 'fov')
+				v = ui.saved_value('model3_fov') ?? v
+			else if (k == 'shadows' || k == 'sunlight')
+				v = ui.saved_value('model3_shadows')
+			else if (k == 'ao_radius')
+				v = ui.saved_value('model3_ambient_occlusion')
+					? (v ?? 0.2) : 0
+			else if (k == 'time')
+				v = day(sun_year, ui.saved_value('model3_date'))
+					+ ui.saved_value('model3_time')
+			else if (k == 'latitude')
+				v = ui.saved_value('model3_latitude')
+			else if (k == 'longitude')
+				v = ui.saved_value('model3_longitude')
 			if (v === undefined || v == e[k])
 				continue
 			e[k] = v
@@ -2899,7 +3039,28 @@ function model3_editor(e) {
 		ui.focusable(id)
 		if (ui.captured_or_hit(id))
 			ui.set_cursor(e.cursor_url)
-		ui.cmd_box(CMD_MODEL3_EDITOR, fr, align, valign, id)
+		ui.stack('', fr, align, valign)
+			ui.cmd_box(CMD_MODEL3_EDITOR, 1, 's', 's', id)
+			ui.p(ui.sp())
+			ui.stack()
+				if (ui.popup_button(id+'.settings', 'settings', null,
+					'r', 't', 'b', ']')
+				) {
+					ui.h2(S('model_settings', 'View Settings'))
+					ui.mb(ui.sp4())
+					ui.v_aligned(0, ui.sp(), 's', 't')
+						ui.field_input('model3_fov')
+						ui.field_input('model3_shadows')
+						ui.field_input('model3_ambient_occlusion')
+						ui.field_input('model3_date')
+						ui.field_input('model3_time')
+						ui.field_input('model3_latitude')
+						ui.field_input('model3_longitude')
+					ui.end_v_aligned()
+					ui.end_popup_button(id+'.settings')
+				}
+			ui.end_stack()
+		ui.end_stack()
 	}
 
 	// init -------------------------------------------------------------------

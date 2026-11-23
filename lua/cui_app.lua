@@ -245,7 +245,7 @@ function action.en()
 	<script>
 {{{fonts}}}
 user = {{{user}}}
-ui.saved_state = {{{ui_state}}}
+ui.load_saved_state({{{ui_state}}})
 ui.save_unsaved_state = function(saved_state) {
 	post('/ui_state.json', {uid: user.id, ui_state: json(saved_state)})
 }
