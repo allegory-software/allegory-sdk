@@ -33,6 +33,9 @@ window.DEBUG_PLAN ??= 0
 
 let TRACE_GL = 0 // trace gl calls
 
+ui.capture_keydown('ctrl g')
+ui.capture_keydown('ctrl e')
+
 ui.saved_value_def('model3_fov', 60, ui.create_field({
 	type: 'number',
 	label: S('fov', 'Field of View'),
@@ -842,6 +845,7 @@ function model3_editor(e) {
 		for (let comp of comps) {
 			let data = {
 				name: comp.name,
+				is_group: comp.is_group,
 				...comp.save_geometry(material_index),
 				children: [],
 			}
@@ -890,7 +894,9 @@ function model3_editor(e) {
 		let undo_len = undo_stack.length
 		try {
 			for (let saved of data.components) {
-				let comp = new_component({name: saved.name},
+				let comp = new_component({
+					name: saved.name, is_group: saved.is_group,
+				},
 					first_id + components.length, material, layer)
 				components.push(comp)
 				comp.load_geometry(saved, model_materials)
@@ -1845,9 +1851,7 @@ function model3_editor(e) {
 		let cur_mode = update_select_mode()
 		if (!p && nclicks == 1 && !cur_mode) {
 			select_all(false)
-		} else if (p && nclicks == 3) {
-			select_all(true, false)
-		} else if (p && nclicks <= 2) {
+		} else if (p && nclicks <= 3) {
 			let mode = cur_mode
 			if (!mode) {
 				select_all(false)
@@ -1857,7 +1861,9 @@ function model3_editor(e) {
 				p.path, cur_path, 0, cur_path.length
 			)) {
 				if (p.path.length == cur_path.length) { // we've hit current component's geometry.
-					if (p.line != null) {
+					if (nclicks == 3) {
+						p.comp.select_connected(p.face, p.line?.i, mode)
+					} else if (p.line != null) {
 						p.comp.select_line(p.line.i, mode, nclicks == 2)
 					} else if (p.face != null) {
 						p.comp.select_face(p.face, mode, nclicks == 2)
@@ -1922,8 +1928,13 @@ function model3_editor(e) {
 		let no_children_selected = !cur_comp.selected_child_count()
 
 		return [
-			{text: 'Group selection'   , action: group_selection   , key: 'Ctrl+G', disabled: nothing_selected},
-			{text: 'Ungroup selection' , action: ungroup_selection , key: 'Ctrl+U', disabled: nothing_selected, separator: true},
+			{text: 'Make component', action: prompt_component_name,
+				key: 'G', disabled: nothing_selected || e.readonly},
+			{text: 'Group selection', action: () => group_selection(),
+				key: 'Ctrl+G', disabled: nothing_selected || e.readonly},
+			{text: 'Explode selection', action: ungroup_selection,
+				key: 'Ctrl+E', disabled: no_children_selected || e.readonly,
+				separator: true},
 			{text: 'Move to layer'     , items: layer_items, disabled: no_children_selected, separator: true},
 		]
 
@@ -2542,10 +2553,13 @@ function model3_editor(e) {
 			return false
 		}
 		if (key == 'g') {
-			group_selection()
+			if (ctrl)
+				group_selection()
+			else
+				prompt_component_name()
 			return false
 		}
-		if (key == 'u') {
+		if (ctrl && key == 'e') {
 			ungroup_selection()
 			return false
 		}
@@ -2880,12 +2894,37 @@ function model3_editor(e) {
 
 	}
 
-	function group_selection() {
-		// TODO:
+	function prompt_component_name() {
+		if (e.readonly || !has_selection())
+			return
+		ui.set_modal_open(e.id+'.component', true)
+	}
+
+	function has_selection() {
+		return cur_comp.selected_face_count()
+			+ cur_comp.selected_line_count() + cur_comp.selected_child_count()
+	}
+
+	function group_selection(name) {
+		if (e.readonly || !has_selection())
+			return
+		start_undo()
+		let comp = new_component({
+			name: name ?? 'Group', is_group: name == null,
+		}, comps.length, default_material, default_layer)
+		add_component(comp)
+		cur_comp.move_selection_to(comp)
+		let child = cur_comp.add_child(comp, mat4(), default_layer)
+		cur_comp.select_child(child, 'add')
+		update_all()
 	}
 
 	function ungroup_selection() {
-		// TODO:
+		if (e.readonly || !cur_comp.selected_child_count())
+			return
+		start_undo()
+		cur_comp.explode_selection()
+		update_all()
 	}
 
 	// toolboxes --------------------------------------------------------------
@@ -3061,6 +3100,30 @@ function model3_editor(e) {
 				}
 			ui.end_stack()
 		ui.end_stack()
+		let modal_id = id+'.component'
+		if (ui.modal(modal_id, 'Make component')) {
+			ui.m(ui.sp2())
+			ui.min_w(ui.em(24))
+			ui.v(0, ui.sp())
+				ui.label(modal_id+'.name', 'Name')
+				let name = ui.input(modal_id+'.name')
+				ui.h(0, ui.sp(), 'r')
+					ui.default_button(modal_id+'.create')
+					let create = ui.primary_button(modal_id+'.create',
+						'check', 'Create', 0, 'l', 'c', !name?.trim())
+					let cancel = ui.button(modal_id+'.close', 'x', 'Cancel')
+				ui.end_h()
+			ui.end_v()
+			ui.end_modal()
+			if (create) {
+				group_selection(name)
+				ui.set_modal_open(modal_id, false)
+			} else if (cancel) {
+				ui.set_modal_open(modal_id, false, true)
+			}
+		}
+		if (ui.state_of(modal_id, 'closed'))
+			ui.focus(id)
 	}
 
 	// init -------------------------------------------------------------------

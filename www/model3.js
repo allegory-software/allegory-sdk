@@ -35,7 +35,7 @@ let LOG = DEBUG_MODEL3
 window.model3_component = function(opt, editor) {
 
 	assert(editor)
-	let e = {name: opt.name}
+	let e = {name: opt.name, is_group: !!opt.is_group}
 	let push_undo = editor.push_undo
 
 	// model (as in MVC and as in 3D model) -----------------------------------
@@ -1083,6 +1083,40 @@ window.model3_component = function(opt, editor) {
 		return sel_lines.has(li)
 	}
 
+	e.select_connected = function(face, li, mode) {
+		let roots = []
+
+		function root(pi) {
+			while (roots[pi] != pi) {
+				roots[pi] = roots[roots[pi]]
+				pi = roots[pi]
+			}
+			return pi
+		}
+
+		for (let pi = 0; pi < point_count(); pi++)
+			roots[pi] = pi
+		for (let li = 0; li < line_count(); li++) {
+			if (!line_rc(li))
+				continue
+			roots[root(lines[5*li+1])] = root(lines[5*li])
+		}
+		for (let face of faces) {
+			if (!face.length)
+				continue
+			for (let pi of face)
+				roots[root(pi)] = root(face[0])
+		}
+
+		let selected_root = root(li != null ? lines[5*li] : face[0])
+		for (let li = 0; li < line_count(); li++)
+			if (line_rc(li) && root(lines[5*li]) == selected_root)
+				e.select_line(li, mode)
+		for (let face of faces)
+			if (face.length && root(face[0]) == selected_root)
+				e.select_face(face, mode)
+	}
+
 	e.selected_child = null
 
 	e.select_child = function(child, mode) {
@@ -1132,6 +1166,97 @@ window.model3_component = function(opt, editor) {
 	e.selected_face_count = () => sel_face_count
 	e.selected_line_count = () => sel_lines.size
 	e.selected_child_count = () => sel_child_count
+
+	// grouping and exploding -------------------------------------------------
+
+	function copy_geometry(source, target, transform, selected_only) {
+		let copied_lis = set()
+		let copied_faces = []
+		for (let face of source.faces) {
+			if (!face.length || (selected_only && !face.selected))
+				continue
+			copied_faces.push(face)
+			for (let li of face.lis)
+				copied_lis.add(li)
+		}
+		for (let li = 0, n = source.line_count(); li < n; li++) {
+			if (!source.line_rc(li))
+				continue
+			if (!selected_only || source.is_line_selected(li))
+				copied_lis.add(li)
+		}
+		let point_indices = []
+		let line_indices = []
+		let p = v3()
+		function copy_point(pi) {
+			if (point_indices[pi] == null) {
+				p = source.get_point(pi, p)
+				if (transform)
+					p.transform(transform)
+				point_indices[pi] = target.add_point(p)
+			}
+			return point_indices[pi]
+		}
+		for (let li of copied_lis) {
+			let line = source.get_line(li)
+			let p1i = copy_point(line[0].i)
+			let p2i = copy_point(line[1].i)
+			let target_li = target.add_line(p1i, p2i)
+			line_indices[li] = target_li
+			target.set_line_opacity(target_li, source.line_opacity(li))
+		}
+		for (let face of copied_faces) {
+			let pis = []
+			let lis = []
+			for (let pi of face)
+				pis.push(point_indices[pi])
+			for (let li of face.lis)
+				lis.push(line_indices[li])
+			target.add_face(pis, lis, face.mat_inst.material, face.holes)
+		}
+		for (let li of copied_lis)
+			target.set_line_smoothness(line_indices[li],
+				source.line_smoothness(li))
+		for (let child of source.children) {
+			if (selected_only && !child.selected)
+				continue
+			let m = mat4()
+			if (transform)
+				mat4.mul(transform, child, m)
+			else
+				m.set(child)
+			target.add_child(child.comp, m, child.layer)
+		}
+		return copied_lis
+	}
+
+	e.move_selection_to = function(target) {
+		assert(target != e)
+		let copied_lis = copy_geometry(e, target, null, true)
+		for (let face of faces)
+			if (face.length && face.selected)
+				remove_face(face)
+		for (let li of copied_lis)
+			if (line_rc(li) == 1)
+				release_line(li)
+		for (let child of children.slice())
+			if (child.selected)
+				remove_child(child)
+		e.select_all(false)
+	}
+
+	e.explode_selection = function() {
+		clear_touched()
+		let selected_children = []
+		for (let child of children)
+			if (child.selected)
+				selected_children.push(child)
+		for (let child of selected_children) {
+			copy_geometry(child.comp, e, child, false)
+			remove_child(child)
+		}
+		repair()
+	}
 
 	// repair -----------------------------------------------------------------
 
