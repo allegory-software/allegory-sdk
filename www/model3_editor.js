@@ -1917,8 +1917,11 @@ function model3_editor(e) {
 					child.comp.set_child_layer(child, item.layer)
 		}
 		let layer_items = []
-		for (let layer of layers)
-			layer_items.push({text: layer.name, layer: layer, action: move_to_layer})
+		for (let i = 0; i < layers.length; i++) {
+			let layer = layers[i]
+			layer_items.push({id: 'layer_'+i, label: layer.name, layer: layer,
+				on_pick: move_to_layer})
+		}
 
 		let nothing_selected = !(
 				cur_comp.selected_face_count() +
@@ -1929,14 +1932,18 @@ function model3_editor(e) {
 		let no_children_selected = !cur_comp.selected_child_count()
 
 		return [
-			{text: 'Make component', action: prompt_component_name,
-				key: 'G', disabled: nothing_selected || e.readonly},
-			{text: 'Group selection', action: () => group_selection(),
-				key: 'Ctrl+G', disabled: nothing_selected || e.readonly},
-			{text: 'Explode selection', action: ungroup_selection,
-				key: 'Ctrl+E', disabled: no_children_selected || e.readonly,
-				separator: true},
-			{text: 'Move to layer'     , items: layer_items, disabled: no_children_selected, separator: true},
+			{id: 'make_component', label: 'Make component',
+				on_pick: prompt_component_name,
+				shortcut: 'G', disabled: nothing_selected || e.readonly},
+			{id: 'group_selection', label: 'Group selection',
+				on_pick: () => group_selection(),
+				shortcut: 'Ctrl+G', disabled: nothing_selected || e.readonly},
+			{id: 'explode_selection', label: 'Explode selection',
+				on_pick: ungroup_selection,
+				shortcut: 'Ctrl+E', disabled: no_children_selected || e.readonly},
+			null,
+			{id: 'move_to_layer', label: 'Move to layer', items: layer_items,
+				disabled: no_children_selected},
 		]
 
 	}
@@ -2681,7 +2688,7 @@ function model3_editor(e) {
 
 	e.wheel = function() {
 		let dy = ui.wheel_dy / ui.em(7)
-		close_context_menu()
+		ui.set_menu_open(e.id+'.menu', false)
 		mouse.prevent_validate = false
 		let hit_point = mouse_hit_model({mode: 'camera'})
 		camera.dolly(hit_point, 1.4 ** dy)
@@ -2815,34 +2822,8 @@ function model3_editor(e) {
 
 	// context menu -----------------------------------------------------------
 
-	let cmenu
-
-	function close_context_menu() {
-		if (cmenu) {
-			cmenu.close()
-			cmenu = null
-		}
-	}
-
-	e.rightpointerdown = close_context_menu
-
-	e.contextmenu = function() {
-
-		close_context_menu()
-
-		let items = []
-
-		if (tool.context_menu)
-			extend(items, tool.context_menu())
-
-		cmenu = menu({
-			items: items,
-		})
-
-		cmenu.popup(e, 'inner-top', null, null, null, null, null, mouse.x, mouse.y)
-
-		return false
-	}
+	let menu_items // items of the open context menu
+	let want_menu // right-click on the editor this pass
 
 	// materials list ---------------------------------------------------------
 
@@ -3193,6 +3174,10 @@ function model3_editor(e) {
 				tool.update(cs)
 		}
 
+		want_menu = ui.rightclicked(id) && !!tool.context_menu
+		if (want_menu)
+			menu_items = tool.context_menu()
+
 		if (ui.hit_leave(id))
 			e.pointerleave()
 	}
@@ -3288,6 +3273,13 @@ function model3_editor(e) {
 				}
 			ui.end_stack()
 		ui.end_stack()
+		let menu_id = id+'.menu'
+		ui.menu(menu_id, menu_items, want_menu)
+		let picked_item = ui.state_of(menu_id, 'picked_item')
+		if (picked_item)
+			picked_item.on_pick(picked_item)
+		if (!ui.state_of(menu_id, 'open') && ui.focus_inside(menu_id))
+			ui.focus(id)
 		let modal_id = id+'.component'
 		if (ui.modal(modal_id, 'Make component')) {
 			ui.m(ui.sp2())
