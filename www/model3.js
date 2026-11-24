@@ -52,10 +52,11 @@ window.model3_component = function(opt, editor) {
 
 	let children  = [] // [mat1,...]
 
-	// the points and lines changed by the current operation. the rest of the
-	// model is already clean, so repair() checks only these.
+	// the points, lines and faces changed by the current operation. the rest
+	// of the model is already clean, so repair() checks only these.
 	let touched_pis = set() // {pi}; moved points.
 	let touched_lis = set() // {li}; created lines and lines with a new endpoint.
+	let touched_faces = set() // {face}; faces given a point they already use.
 
 	// model-to-view info (as in MVC).
 	let used_points_changed     // time to reload the used_pis buffer.
@@ -335,6 +336,8 @@ window.model3_component = function(opt, editor) {
 		// in the direction of the face's edge.
 		each_line_face(li1, function(face) {
 			let ei = face.lis.indexOf(li1)
+			if (face.includes(pi))
+				touched_faces.add(face)
 			ref_point(pi)
 			ref_line(li2)
 			insert_edge(face, ei + 1, pi, face[ei] == pi2, li2)
@@ -735,6 +738,20 @@ window.model3_component = function(opt, editor) {
 		node.layer = layer
 		editor.layer_changed(e, node)
 		return node
+	}
+
+	// primitive: set the position of `child` in this component.
+	function set_child_position(child, x, y, z) {
+		let x0 = child[12]
+		let y0 = child[13]
+		let z0 = child[14]
+		child.set_position(x, y, z)
+		bbox_changed = true
+		// the selection box lines hold the child's position: rebuild them.
+		if (child.selected)
+			sel_lines_changed = true
+		editor.child_changed(child)
+		push_undo(set_child_position, child, x0, y0, z0)
 	}
 
 	// public API
@@ -1274,14 +1291,18 @@ window.model3_component = function(opt, editor) {
 		for (let li = 0, n = line_count(); li < n; li++)
 			if (line_rc(li) && (lines[5*li+0] == pi || lines[5*li+1] == pi))
 				replace_line_endpoint(li, into_pi, pi)
-		// faces using `pi`: replace the point.
+		// faces using `pi`: replace each use of the point. a face can use a
+		// point twice: where a hole touches the outline.
 		for (let face of faces) {
 			let ei = face.indexOf(pi)
-			if (ei == -1)
-				continue
-			ref_point(into_pi)
-			replace_face_point(face, ei, into_pi)
-			unref_point(pi)
+			while (ei != -1) {
+				if (face.includes(into_pi))
+					touched_faces.add(face)
+				ref_point(into_pi)
+				replace_face_point(face, ei, into_pi)
+				unref_point(pi)
+				ei = face.indexOf(pi, ei + 1)
+			}
 		}
 	}
 
@@ -1323,6 +1344,12 @@ window.model3_component = function(opt, editor) {
 			ref_line(into_li)
 			replace_edge(face, ei, into_li, li)
 			unref_line(li)
+			// a face with both lines as edges in a row now goes out and back
+			// along `into_li` (a corner of the face moved onto its side):
+			// remove that filament, and the face if no area is left (F3).
+			remove_filaments(face)
+			if (face.point_count_without_holes() < 3)
+				remove_face(face)
 		})
 		release_line(li)
 		// marked as touched because it is the only line left when a line is
@@ -1522,11 +1549,151 @@ window.model3_component = function(opt, editor) {
 		return false
 	}}
 
+	// split the contours of `face` at each point that one of them passes
+	// twice, so that each face covers one area (F1): a point moved onto a far
+	// side of its own face leaves the outline going around two areas. a loop
+	// that goes counter-clockwise around the face's normal is the outline of
+	// a face; a clockwise one is a hole of the smallest outline around it.
+	let split_contours
+	{
+	let normal     = v3()
+	let stack_pis  = [] // the contour walked so far, without the loops taken
+	let stack_lis  = [] // out of it: its points and the lines from them.
+	let loop_pis   = [] // the loops, one after another: their points,
+	let loop_lis   = [] // their lines,
+	let loop_i1s   = [] // where each one starts,
+	let loop_areas = [] // twice their area around `normal`,
+	let outer_ks   = [] // and for a hole, the outline it is in; -1: none.
+	let loop_face  = face3() // an outline, for hit-testing.
+	let face_pis   = [] // the points of a new face,
+	let face_lis   = [] // its lines,
+	let face_holes = [] // and its holes: [hole1_i1, hole2_i1, ...]
+	let _v0 = v3()
+	let _v1 = v3()
+
+	// move the stack from `s` on to the loops.
+	function take_loop(s) {
+		loop_i1s.push(loop_pis.length)
+		for (let i = s; i < stack_pis.length; i++) {
+			loop_pis.push(stack_pis[i])
+			loop_lis.push(stack_lis[i])
+		}
+		stack_pis.length = s
+		stack_lis.length = s
+	}
+
+	function push_loop(k) {
+		let i2 = loop_i1s[k+1] ?? loop_pis.length
+		for (let i = loop_i1s[k]; i < i2; i++) {
+			face_pis.push(loop_pis[i])
+			face_lis.push(loop_lis[i])
+		}
+	}
+
+	split_contours = function(face) {
+
+		// walk each contour, and take a loop out when the walk comes back to
+		// a point that it passed.
+		loop_pis.length = 0
+		loop_lis.length = 0
+		loop_i1s.length = 0
+		let has_twice = false
+		for (let k = -1; k < face.hole_count(); k++) {
+			let i1 = k < 0 ? 0 : face.hole_i1(k)
+			let i2 = k < 0 ? face.point_count_without_holes() : face.hole_i2(k)
+			stack_pis.length = 0
+			stack_lis.length = 0
+			for (let i = i1; i < i2; i++) {
+				let s = stack_pis.indexOf(face[i])
+				if (s != -1) {
+					has_twice = true
+					take_loop(s)
+				}
+				stack_pis.push(face[i])
+				stack_lis.push(face.lis[i])
+			}
+			take_loop(0)
+		}
+		if (!has_twice)
+			return
+
+		// a loop of two points (out and back) has no area: it is dropped.
+		normal.set(face.plane().normal)
+		let n = loop_i1s.length
+		loop_areas.length = 0
+		for (let k = 0; k < n; k++) {
+			let i1 = loop_i1s[k]
+			let i2 = loop_i1s[k+1] ?? loop_pis.length
+			let area = 0
+			for (let i = i1; i < i2; i++) {
+				let p1 = get_point(loop_pis[i], _v0)
+				let p2 = get_point(loop_pis[i+1 < i2 ? i+1 : i1], _v1)
+				area += p1.cross(p2).dot(normal)
+			}
+			loop_areas.push(area)
+		}
+
+		// each hole goes in the smallest outline around a point of the hole
+		// that the outline doesn't use.
+		outer_ks.length = 0
+		for (let k = 0; k < n; k++)
+			outer_ks.push(-1)
+		for (let k = 0; k < n; k++) {
+			if (!(loop_areas[k] > 0))
+				continue
+			let i1 = loop_i1s[k]
+			let i2 = loop_i1s[k+1] ?? loop_pis.length
+			loop_face.length = 0
+			for (let i = i1; i < i2; i++)
+				loop_face.push(loop_pis[i])
+			loop_face.invalidate()
+			let plane = loop_face.plane()
+			for (let h = 0; h < n; h++) {
+				if (!(loop_areas[h] < 0))
+					continue
+				let outer_k = outer_ks[h]
+				if (outer_k != -1 && loop_areas[outer_k] <= loop_areas[k])
+					continue
+				let h2 = loop_i1s[h+1] ?? loop_pis.length
+				let i = loop_i1s[h]
+				while (i < h2 && loop_face.includes(loop_pis[i]))
+					i++
+				if (i == h2)
+					continue
+				let xy = plane.transform32(get_point(loop_pis[i], _v0), _v1)
+				if (loop_face.hit(xy[0], xy[1]))
+					outer_ks[h] = k
+			}
+		}
+
+		// a face for each outline, with its holes. the face is removed after,
+		// so that its points and lines stay used.
+		let material = face.mat_inst.material
+		for (let k = 0; k < n; k++) {
+			if (!(loop_areas[k] > 0))
+				continue
+			face_pis.length = 0
+			face_lis.length = 0
+			face_holes.length = 0
+			push_loop(k)
+			for (let h = 0; h < n; h++) {
+				if (outer_ks[h] != k)
+					continue
+				face_holes.push(face_pis.length)
+				push_loop(h)
+			}
+			add_face(face_pis, face_lis, material,
+				face_holes.length ? face_holes : null)
+		}
+		remove_face(face)
+	}}
+
 	// called when an operation starts: the model follows the rules then, so
 	// anything recorded before (undo, add_face(), loading) needs no check.
 	function clear_touched() {
 		touched_pis.clear()
 		touched_lis.clear()
+		touched_faces.clear()
 	}
 
 	// fix the touched lines until none is left. return the lines checked in
@@ -1553,6 +1720,10 @@ window.model3_component = function(opt, editor) {
 			}
 			lis.length = 0
 		}
+		for (let face of touched_faces)
+			if (face.length)
+				split_contours(face)
+		touched_faces.clear()
 		return checked_lis
 	}
 
@@ -1832,6 +2003,10 @@ window.model3_component = function(opt, editor) {
 			for (let h = 0; h < split_face.holes.length; h++) {
 				let i1 = split_face.hole_i1(h)
 				let i2 = split_face.hole_i2(h)
+				// a hole touching the cycle is walked around by walk_cycle(),
+				// so the cycle already has its lines: skip it.
+				if (lis.includes(split_face.lis[i1]))
+					continue
 				let hole_p = get_point(split_face[i1], _v0)
 				let hole_xy = cycle_face.plane().transform32(hole_p, _v1)
 				if (!cycle_face.hit(hole_xy[0], hole_xy[1]))
@@ -2555,12 +2730,8 @@ window.model3_component = function(opt, editor) {
 
 		}
 
-		pull.can_hit = function(p) {
-			if (!p.comp)
-				return false
-			if (p.comp != e)
-				return true
-			return (!(moving_faces.has(p.face) || moving_lis.has(p.li)))
+		pull.can_hit = function(face, li) {
+			return (!(moving_faces.has(face) || moving_lis.has(li)))
 		}
 
 		{
@@ -2590,6 +2761,213 @@ window.model3_component = function(opt, editor) {
 		}
 
 		return pull
+	}
+
+	// move -------------------------------------------------------------------
+
+	// start moving the selection, or only point `pi`. a face with moved and
+	// fixed points stays flat only if the move is in its plane, or if its
+	// fixed points are on one line and its moved points on a parallel one
+	// (a single point is on any line): then it tilts around that line. the
+	// first face that needs the move in its plane keeps the move there; one
+	// in another plane keeps it on the line where the two planes meet; one
+	// more not along that line allows no move: return null then.
+	e.start_move = function(pi) {
+
+		clear_touched()
+
+		let moved_ps = map() // {pi -> p}; the moved points, at the start.
+		let moved_children = [] // [child, ...]
+		if (pi != null) {
+			moved_ps.set(pi, null)
+		} else {
+			for (let face of faces)
+				if (face.length && face.selected)
+					for (let face_pi of face)
+						moved_ps.set(face_pi, null)
+			for (let li of sel_lines) {
+				moved_ps.set(lines[5*li+0], null)
+				moved_ps.set(lines[5*li+1], null)
+			}
+			for (let child of children)
+				if (child.selected)
+					moved_children.push(child)
+		}
+		for (let moved_pi of moved_ps.keys())
+			moved_ps.set(moved_pi, get_point(moved_pi, v3()))
+
+		let move = {
+			normal : null, // the move stays in the plane with this normal.
+			dir    : null, // the move stays on a line along this direction.
+			children : moved_children, // the moved children.
+		}
+
+		let moving_faces = set() // {face}; faces with a moved point.
+		let limit_faces = [] // [face, ...]; faces moved in their plane.
+		let tilt_faces = [] // [face, ...]; faces that can tilt,
+		let tilt_normals = [] // [normal, ...]; and their normals at the start.
+		let moved_p0 = v3() // the first moved point of a face.
+		let fixed_p0 = v3() // the first fixed point of a face.
+		let line_dir = v3() // the direction of a tilting face's lines.
+		let _v0 = v3()
+		for (let face of faces) {
+			if (!face.length)
+				continue
+			let has_moved = false
+			let has_fixed = false
+			let has_line_dir = false
+			let can_tilt = true
+			for (let face_pi of face) {
+				let is_moved = moved_ps.has(face_pi)
+				let p0 = is_moved ? moved_p0 : fixed_p0
+				// the first point of its kind: the others are compared to it.
+				if (is_moved ? !has_moved : !has_fixed) {
+					get_point(face_pi, p0)
+					if (is_moved)
+						has_moved = true
+					else
+						has_fixed = true
+					continue
+				}
+				if (!can_tilt)
+					continue
+				// on the line through the first point, along the same
+				// direction as the other kind's line.
+				let dp = get_point(face_pi, _v0).sub(p0)
+				let len = dp.len()
+				if (len <= NEAR)
+					continue
+				dp.muls(1 / len)
+				if (!has_line_dir) {
+					line_dir.set(dp)
+					has_line_dir = true
+				} else if (v3.cross(line_dir, dp, dp).len() > NEAR) {
+					can_tilt = false
+				}
+			}
+			if (!has_moved)
+				continue
+			moving_faces.add(face)
+			if (!has_fixed)
+				continue
+			if (can_tilt) {
+				tilt_faces.push(face)
+				tilt_normals.push(face.plane().normal.clone())
+				continue
+			}
+			limit_faces.push(face)
+			let normal = face.plane().normal
+			if (!move.normal) {
+				move.normal = normal.clone()
+			} else if (!move.dir) {
+				if (abs(move.normal.dot(normal)) < 1 - NEAR)
+					move.dir = move.normal.clone().cross(normal).normalize()
+			} else if (abs(move.dir.dot(normal)) > NEAR) {
+				return null
+			}
+		}
+
+		// faces and lines that the hit-testing skips while moving.
+		let moving_lis = set() // {li}; lines with a moved end.
+		for (let li = 0, n = line_count(); li < n; li++)
+			if (line_rc(li) && (moved_ps.has(lines[5*li+0])
+					|| moved_ps.has(lines[5*li+1])))
+				moving_lis.add(li)
+
+		move.can_hit = function(face, li) {
+			return !(moving_faces.has(face) || moving_lis.has(li))
+		}
+
+		let child_ps = [] // [p, ...]; the positions of moved_children, at the start.
+		for (let child of moved_children)
+			child_ps.push(v3(child[12], child[13], child[14]))
+
+		// the part of `delta` that the move can go before a point of a limit
+		// face touches an edge of the face that doesn't use the point: past
+		// that, the face would cross itself or turn over. the edge's ends and
+		// the point each move by `delta` or stay, so the time of the touch is
+		// linear. a face that can tilt turns over in its plane the same way
+		// when the move is in its plane; out of it, the face tilts.
+		let limit_t
+		{
+		let _v1 = v3()
+		let _v2 = v3()
+		let _v3 = v3()
+		let _v4 = v3()
+		let _v5 = v3()
+		let _v6 = v3()
+		function limit_face_t(face, normal, delta, t_max) {
+			for (let ei = 0; ei < face.length; ei++) {
+				let a_pi = face[ei]
+				let b_pi = face[face.next_i(ei)]
+				let a_m = moved_ps.has(a_pi) ? 1 : 0
+				let b_m = moved_ps.has(b_pi) ? 1 : 0
+				let a = moved_ps.get(a_pi) ?? get_point(a_pi, _v1)
+				let b = moved_ps.get(b_pi) ?? get_point(b_pi, _v2)
+				let edge = _v3.set(b).sub(a)
+				for (let vi = 0; vi < face.length; vi++) {
+					let v_pi = face[vi]
+					if (v_pi == a_pi || v_pi == b_pi)
+						continue
+					let v_m = moved_ps.has(v_pi) ? 1 : 0
+					// all three moved, or all three fixed: no touch.
+					if (v_m == a_m && v_m == b_m)
+						continue
+					let v = moved_ps.get(v_pi) ?? get_point(v_pi, _v4)
+					let av = _v5.set(v).sub(a)
+					// the point is on the edge's line when the cross product
+					// of edge and av is zero: c0 + c1 * t.
+					let c0 = normal.dot(v3.cross(edge, av, _v6))
+					let c1 =
+						(v_m - a_m) * normal.dot(v3.cross(edge, delta, _v6)) +
+						(b_m - a_m) * normal.dot(v3.cross(delta, av, _v6))
+					let t = -c0 / c1
+					if (!(t >= 0 && t < t_max))
+						continue
+					// on the edge's line at `t`: inside the edge?
+					let edge_t = _v6.set(delta).muls(t * (b_m - a_m)).add(edge)
+					let av_t = _v4.set(delta).muls(t * (v_m - a_m)).add(av)
+					let s = av_t.dot(edge_t) / edge_t.len2()
+					if (s >= 0 && s <= 1)
+						t_max = t
+				}
+			}
+			return t_max
+		}
+		limit_t = function(delta) {
+			let t_max = 1
+			for (let face of limit_faces)
+				t_max = limit_face_t(face, face.plane().normal, delta, t_max)
+			for (let i = 0; i < tilt_faces.length; i++) {
+				let normal = tilt_normals[i]
+				if (abs(normal.dot(delta)) <= NEAR)
+					t_max = limit_face_t(tilt_faces[i], normal, delta, t_max)
+			}
+			return t_max
+		}}
+
+		{
+		let _v1 = v3()
+		let _v2 = v3()
+		move.move = function(delta) {
+			let d = _v1.set(delta).muls(limit_t(delta))
+			for (let moved_pi of moved_ps.keys())
+				move_point(moved_pi, _v2.set(moved_ps.get(moved_pi)).add(d))
+			for (let i = 0; i < moved_children.length; i++) {
+				let p0 = child_ps[i]
+				set_child_position(moved_children[i],
+					p0[0] + d[0], p0[1] + d[1], p0[2] + d[2])
+			}
+		}}
+
+		move.stop = function() {
+			let lis = repair()
+			make_overlap_faces(lis)
+			// after a move, one face of two with the same outline is kept.
+			merge_faces(lis)
+		}
+
+		return move
 	}
 
 	// rendering --------------------------------------------------------------

@@ -68,7 +68,8 @@ const results = (function() {
 		let ed = {gl}
 		ed.default_material = {name: 'mat', uv: v2(1, 1), diffuse_color: 0xffffff}
 		ed.default_layer = {name: 'layer'}
-		ed.child_added = ed.child_removed = ed.layer_changed = () => {}
+		ed.child_added = ed.child_removed = ed.child_changed =
+			ed.layer_changed = () => {}
 		ed.push_undo = (f, ...args) => undo_stack.push(...args, args.length, f)
 		ed.start_group = () => undo_groups.push(undo_stack.length)
 		ed.undo = () => {
@@ -1081,6 +1082,220 @@ const results = (function() {
 		let F = live_faces(c)
 		return F.length == 1 && F[0].length == 4 ||
 			`faces ${F.length}, points ${F[0]?.length} (want 1, 4)`
+	})
+
+	check('start_move: the directions that keep the faces flat', () => {
+		let errs = []
+		// a box corner: three faces in three planes.
+		let c = make_comp()
+		let P = add_box(c)
+		let F = box_faces.map(f => c.add_face(f.map(i => P[i])))
+		if (c.start_move(P[6]) !== null)
+			errs.push('box corner: want no move')
+		// a box top: the walls tilt.
+		c.select_face(F[1], 'add')
+		let move = c.start_move()
+		if (!move || move.normal || move.dir)
+			errs.push('box top: want a free move')
+		// a corner of a lone square: in its plane.
+		c = make_comp()
+		let f = add_square(c, 0, 0, 1)
+		move = c.start_move(f[0])
+		if (!move || !move.normal || !near(Math.abs(move.normal[2]), 1)
+				|| move.dir)
+			errs.push('square corner: want a move in the square\'s plane')
+		// the apex of a pyramid: only triangles tilt.
+		c = make_comp()
+		let B = [[0,0,0], [2,0,0], [2,2,0], [0,2,0]]
+			.map(p => c.add_point_xyz(...p))
+		let apex = c.add_point_xyz(1, 1, 2)
+		c.add_face([B[1], B[0], B[3], B[2]])
+		for (let i = 0; i < 4; i++)
+			c.add_face([B[i], B[(i+1) % 4], apex])
+		move = c.start_move(apex)
+		if (!move || move.normal || move.dir)
+			errs.push('pyramid apex: want a free move')
+		// a point where a line meets a box edge: along the edge.
+		c = make_comp()
+		P = add_box(c)
+		for (let f of box_faces)
+			c.add_face(f.map(i => P[i]))
+		c.draw_polyline([v3(1, 0, 0), v3(1, 0, 2)])
+		let mid_pi
+		for (let pi = 0; pi < c.point_count(); pi++)
+			if (c.point_rc(pi) && veq(c.get_point(pi, v3()), [1, 0, 0]))
+				mid_pi = pi
+		move = c.start_move(mid_pi)
+		if (!move || !move.dir || !near(Math.abs(move.dir[0]), 1))
+			errs.push('point on a box edge: want a move along the edge')
+		return errs.join('; ') || true
+	})
+
+	// the corner moves in the square's plane, onto the far side x = 2: the
+	// side is cut there, and the part of the square between the corner and
+	// the side's end has no area left: a triangle and a loose line stay.
+	check('move a square corner onto a far side: the move stops there: rcs, undo, redo', () => {
+		let c = make_comp()
+		let f = add_square(c, 0, 0, 2)
+		let V = f[3]
+		let state0 = model_state(c)
+		c.editor.start_group()
+		let move = c.start_move(V)
+		move.move(v3(4, -1, 0))
+		let p = c.get_point(V, v3())
+		if (!veq(p, [2, 1.5, 0]))
+			return `corner at ${Array.from(p)} (want 2,1.5,0)`
+		move.stop()
+		let errs = check_rcs(c)
+		if (errs)
+			return 'after move: ' + errs
+		let F = live_faces(c)
+		let n_lines = 0
+		for (let li = 0; li < c.line_count(); li++)
+			if (c.line_rc(li))
+				n_lines++
+		if (F.length != 1 || F[0].length != 3 || n_lines != 4)
+			return `faces ${F.length}, points ${F[0]?.length}, lines ${n_lines}` +
+				' (want 1, 3, 4)'
+		let state1 = model_state(c)
+		c.editor.undo()
+		if (model_state(c) != state0)
+			return 'undo did not restore the model'
+		c.editor.redo()
+		if (model_state(c) != state1)
+			return 'redo did not restore the move'
+		return true
+	})
+
+	// the top's middle point moved down onto the bottom: the outline goes
+	// around two areas, which become two faces. a line drawn across one of
+	// them leaves the other.
+	check('move a point onto a far side: two faces: rcs, undo, redo', () => {
+		let c = make_comp()
+		let P = [[0,0,0], [4,0,0], [4,4,0], [2,4,0], [0,4,0]]
+			.map(p => c.add_point_xyz(...p))
+		c.add_face(P)
+		let state0 = model_state(c)
+		c.editor.start_group()
+		let move = c.start_move(P[3])
+		move.move(v3(0, -5, 0))
+		move.stop()
+		let errs = check_rcs(c)
+		if (errs)
+			return 'after move: ' + errs
+		let F = live_faces(c)
+		if (F.length != 2 || F[0].length != 3 || F[1].length != 3)
+			return `faces ${F.map(f => f.length)} (want 3,3)`
+		let state1 = model_state(c)
+		c.editor.undo()
+		if (model_state(c) != state0)
+			return 'undo did not restore the model'
+		c.editor.redo()
+		if (model_state(c) != state1)
+			return 'redo did not restore the move'
+		c.draw_polyline([v3(3, 0, 0), v3(4, 1, 0)])
+		F = live_faces(c)
+		return F.length == 3 || `faces after drawing ${F.length} (want 3)`
+	})
+
+	// V is on the square's left side and is the first point of a hole too.
+	// V is moved onto W, the end of a loose line: V is merged into W in both
+	// places where the face uses it.
+	check('merge a point that a face uses twice: rcs, undo, redo', () => {
+		let c = make_comp()
+		let P = [[0,0,0], [6,0,0], [6,6,0], [0,6,0], [0,2,0], [2,4,0], [2,2,0]]
+			.map(p => c.add_point_xyz(...p))
+		let V = P[4]
+		c.add_face([P[0], P[1], P[2], P[3], V, V, P[5], P[6]], null, null, [5])
+		let W = c.add_point_xyz(0, 1, 0)
+		c.add_line(W, c.add_point_xyz(-1, 1, 0))
+		let state0 = model_state(c)
+		c.editor.start_group()
+		let move = c.start_move(V)
+		move.move(v3(0, -1, 0))
+		move.stop()
+		let errs = check_rcs(c)
+		if (errs)
+			return 'after move: ' + errs
+		let F = live_faces(c)
+		if (F.some(f => f.includes(V)))
+			return 'a face still uses the merged point'
+		let state1 = model_state(c)
+		c.editor.undo()
+		if (model_state(c) != state0)
+			return 'undo did not restore the model'
+		c.editor.redo()
+		if (model_state(c) != state1)
+			return 'redo did not restore the move'
+		return true
+	})
+
+	// the U's left arm tip is moved onto the right arm: the face gets a hole
+	// touching its outline there. the walk of a line drawn across goes around
+	// that hole, so the hole must not be added to the new face again.
+	check('draw across a face with a hole touching its outline: the hole is used once', () => {
+		let c = make_comp()
+		let P = [[0,0,0], [6,0,0], [6,4,0], [4,4,0], [4,1,0], [2,1,0], [2,4,0],
+			[0,4,0]].map(p => c.add_point_xyz(...p))
+		c.add_face(P)
+		let move = c.start_move(P[6])
+		move.move(v3(3, -1, 0))
+		move.stop()
+		c.draw_polyline([v3(5, 0, 0), v3(5, 4, 0)])
+		for (let f of live_faces(c))
+			if (new Set(f.lis).size != f.lis.length)
+				return `face ${f.i} uses a line twice: ${f.lis.join(' ')}`
+		return true
+	})
+
+	// four triangles around the middle of a square. moved in their plane,
+	// the middle stops on the right side, so that the right triangle doesn't
+	// turn over onto the others; it is left with no area and removed. moved
+	// up, the triangles tilt and nothing stops the move.
+	check('move the middle of a flat triangle fan: it stops at a side', () => {
+		let c = make_comp()
+		let P = [[0,0,0], [4,0,0], [4,4,0], [0,4,0], [2,2,0]]
+			.map(p => c.add_point_xyz(...p))
+		let M = P[4]
+		for (let i = 0; i < 4; i++)
+			c.add_face([P[i], P[(i+1) % 4], M])
+		let move = c.start_move(M)
+		move.move(v3(0, 0, 1))
+		if (!veq(c.get_point(M, v3()), [2, 2, 1]))
+			return 'moved up to ' + Array.from(c.get_point(M, v3()))
+		move.move(v3(3, 0, 0))
+		if (!veq(c.get_point(M, v3()), [4, 2, 0]))
+			return 'moved right to ' + Array.from(c.get_point(M, v3()))
+		move.stop()
+		let errs = check_rcs(c)
+		if (errs)
+			return 'after move: ' + errs
+		let F = live_faces(c)
+		if (F.length != 3)
+			return `faces ${F.length} (want 3)`
+		for (let f of F)
+			if (!near(f.plane().normal[2], 1))
+				return `face ${f.i} turned over`
+		return true
+	})
+
+	check('move a selected child: undo and redo its position', () => {
+		let c = make_comp()
+		let child = c.add_child(make_comp(), mat4())
+		c.select_child(child, 'add')
+		c.editor.start_group()
+		let move = c.start_move()
+		move.move(v3(1, 2, 3))
+		move.move(v3(2, 0, 0))
+		move.stop()
+		if (!veq([child[12], child[13], child[14]], [2, 0, 0]))
+			return `child at ${child[12]},${child[13]},${child[14]} (want 2,0,0)`
+		c.editor.undo()
+		if (!veq([child[12], child[13], child[14]], [0, 0, 0]))
+			return 'undo did not restore the child'
+		c.editor.redo()
+		return veq([child[12], child[13], child[14]], [2, 0, 0])
+			|| 'redo did not restore the child'
 	})
 
 	return [n_checks, results, known]

@@ -650,6 +650,7 @@ function model3_editor(e) {
 			default_layer    : layer,
 			child_added      : child_added,
 			child_removed    : child_removed,
+			child_changed    : child_changed,
 			layer_changed    : layer_changed,
 		})
 
@@ -1944,26 +1945,221 @@ function model3_editor(e) {
 
 	tools.eraser = {}
 
-	// move tool --------------------------------------------------------------
+	// drag helpers -----------------------------------------------------------
 
+	// the snapped hit `hit_p` projected onto `line`, or without a hit, the
+	// point of `line` closest to `ray`.
+	let point_on_line
 	{
+	let _l0 = line3()
+	point_on_line = function(line, hit_p, ray, out) {
+		if (hit_p)
+			return line.project_point(hit_p, false, out)
+		let int_line = ray.intersect_line(line, _l0)
+		return int_line && out.set(int_line[1])
+	}}
 
-	tools.move = {}
+	// show the line from `p1` to `p2` and the point at `p2` when the drag is
+	// snapped to `hit_p`, and the snap's tooltip.
+	function show_drag_helpers(p1, p2, hit_p) {
+		ref_line.set(p1, p2)
+		ref_line.visible = !!hit_p
+		ref_line.update()
 
-	tools.move.update = function(cs) {
+		ref_point.set(p2)
+		ref_point.snap = hit_p ? hit_p.snap : null
+		ref_point.visible = !!hit_p
+		ref_point.update()
 
-		/*
-		let no_one_face_selected = !(
-			p && p.comp == cur_comp
-			&& p.face && p.face.selected
-			&& cur_comp.selected_face_count() == 1
-			&& cur_comp.selected_line_count() == 0
-			&& cur_comp.selected_child_count() == 0
-		)
-		*/
-
+		e.tooltip = hit_p
+			? snap_tooltips[hit_p.snap || hit_p.line_snap] || hit_p.tooltip
+			: ''
 	}
 
+	function hide_drag_helpers() {
+		e.tooltip = ''
+		ref_point.visible = false
+		ref_point.update()
+		ref_line.visible = false
+		ref_line.update()
+		update()
+	}
+
+	// move tool --------------------------------------------------------------
+
+	tools.move = {edits_model: true}
+
+	{
+		let move // the move started by start_move(); null: not moving.
+		let move_undo_start // undo_stack length after start_move().
+		let moved_pi // the point to move alone; null: the selection.
+		let is_pressed // the press began on something to move.
+		let start_p = v3() // where the move started, in cur_comp space.
+		let start_model = mat4() // cur_model moved to start_p: axes from it.
+		let move_line = line3() // the line of a move along move.dir.
+		let move_plane = plane3() // the plane of a move in move.normal's plane.
+
+		tools.move.bind = function(on) {
+			if (!on)
+				cancel()
+		}
+
+		tools.move.update = function(cs) {
+			if (cs?.drag) {
+				if (move)
+					stop()
+				else
+					is_pressed = press()
+			}
+			if (move) {
+				drag()
+			} else if (cs) {
+				if (is_pressed && cs.moved) {
+					start()
+					if (move)
+						drag()
+				}
+			} else {
+				show_cur_point(mouse_hit_model({mode: 'draw', distance: 'snap'}))
+			}
+			if (cs?.drop && is_pressed) {
+				is_pressed = false
+				if (move)
+					stop()
+				else
+					start()
+			}
+		}
+
+		// with a selection, the press is where the move starts. without one,
+		// the point, line, face or child under the pointer is moved. return
+		// false when there is nothing to move.
+		function press() {
+			let p = mouse_hit_model({mode: 'draw', distance: 'snap'})
+			if (!p)
+				return false
+			moved_pi = null
+			let sel_count =
+				cur_comp.selected_face_count() +
+				cur_comp.selected_line_count() +
+				cur_comp.selected_child_count()
+			if (!sel_count) {
+				if (!(p.path && array_equals(
+					p.path, cur_path, 0, cur_path.length
+				)))
+					return false
+				if (p.path.length > cur_path.length) // a child instance.
+					cur_comp.select_child(p.path[cur_path.length], 'add')
+				else if (p.snap == 'point')
+					moved_pi = p.i
+				else if (p.line)
+					cur_comp.select_line(p.line.i, 'add')
+				else if (p.face)
+					cur_comp.select_face(p.face, 'add')
+				else
+					return false
+			}
+			start_p.set(p).transform(cur_inv_model)
+			return true
+		}
+
+		function start() {
+			move = cur_comp.start_move(moved_pi)
+			if (!move) {
+				is_pressed = false
+				e.tooltip = 'can\'t move without bending a face'
+				return
+			}
+			start_undo()
+			move_undo_start = undo_stack.length
+			mat4.mul(cur_model, start_model.reset().translate(start_p), start_model)
+			if (move.dir) {
+				move_line[0].set(start_p)
+				move_line[1].set(start_p).add(move.dir)
+			} else if (move.normal) {
+				move_plane.set_from_normal_and_coplanar_point(move.normal, start_p)
+			}
+			cur_point.visible = false
+			cur_point.update()
+			update()
+		}
+
+		function hits_moved_child(p) {
+			for (let node of p.path)
+				if (move.children.includes(node))
+					return true
+			return false
+		}
+
+		let drag
+		{
+		let _l0 = line3()
+		let _v0 = v3()
+		let _v1 = v3()
+		let _v2 = v3()
+		drag = function() {
+			mouse.prevent_validate = true
+			let model_p = mouse_hit_model({mode: 'draw', distance: 'snap',
+				axes_model: start_model})
+			let hit_model = model_p && model_p.comp
+				&& (model_p.comp != cur_comp
+					|| move.can_hit(model_p.face, model_p.li))
+				&& !hits_moved_child(model_p)
+			let ray = mouse.ray.transform(cur_inv_model, _l0)
+			let p // where the move goes, in cur_comp space.
+			if (move.dir) {
+				p = point_on_line(move_line, hit_model
+					? model_p.to(_v0).transform(cur_inv_model) : null, ray, _v1)
+			} else if (move.normal) {
+				if (hit_model) {
+					p = move_plane.project_point(
+						model_p.to(_v0).transform(cur_inv_model), _v1)
+				} else {
+					p = move_plane.intersect_line(ray, _v1)
+					if (p && p.t < 0)
+						p = null
+				}
+			} else {
+				if (!hit_model)
+					model_p = mouse_hit_axes(start_model, max_hit_distances.snap)
+						|| hit_ref_planes(start_model)
+				p = model_p && model_p.to(_v1).transform(cur_inv_model)
+			}
+			if (!p)
+				return
+
+			show_drag_helpers(
+				_v0.set(start_p).transform(cur_model),
+				_v2.set(p).transform(cur_model),
+				hit_model ? model_p : null)
+
+			// replace the last step's moves.
+			rewind_undo(move_undo_start)
+			move.move(p.sub(start_p))
+			update()
+		}}
+
+		function stop() {
+			move.stop()
+			finish()
+		}
+
+		function cancel() {
+			is_pressed = false
+			cur_point.visible = false
+			cur_point.update()
+			if (!move)
+				return
+			rewind_undo(undo_groups.pop())
+			finish()
+		}
+
+		function finish() {
+			move = null
+			hide_drag_helpers()
+		}
+
+		tools.move.cancel = cancel
 	}
 
 	// rotate tool ------------------------------------------------------------
@@ -2171,6 +2367,17 @@ function model3_editor(e) {
 		update()
 	}
 
+	// show the snapped point `p` under the pointer, and its tooltip.
+	function show_cur_point(p) {
+		cur_point.visible = !!(p && p.snap)
+		if (p) {
+			cur_point.set(p)
+			cur_point.snap = p.snap
+		}
+		e.tooltip = p ? snap_tooltips[p.snap || p.line_snap] || p.tooltip : ''
+		cur_point.update()
+	}
+
 	// rectangle tool ---------------------------------------------------------
 
 	tools.rect = {edits_model: true}
@@ -2206,13 +2413,7 @@ function model3_editor(e) {
 				move()
 				return
 			}
-			cur_point.visible = !!(p && p.snap)
-			if (p) {
-				cur_point.set(p)
-				cur_point.snap = p.snap
-			}
-			e.tooltip = p ? snap_tooltips[p.snap || p.line_snap] || p.tooltip : ''
-			cur_point.update()
+			show_cur_point(p)
 		}
 
 		function start(p) {
@@ -2358,39 +2559,29 @@ function model3_editor(e) {
 
 		let move
 		{
-		let _line0 = line3()
+		let _l0 = line3()
 		let _v0 = v3()
 		let _v1 = v3()
+		let _v2 = v3()
 		move = function() {
 			mouse.prevent_validate = true
 			let model_p = mouse_hit_model({mode: 'draw', distance: 'snap'})
-			let hit_model = model_p && pull.can_hit(model_p)
-			let p
-			if (hit_model) {
-				p = pull.line.project_point(model_p, false, _v0)
-			} else {
-				let int_line = mouse.ray.intersect_line(pull.line, _line0)
-				p = int_line && int_line[1].to(_v0)
-			}
+			let hit_model = model_p && model_p.comp
+				&& (model_p.comp != cur_comp
+					|| pull.can_hit(model_p.face, model_p.li))
+			let ray = mouse.ray.transform(cur_inv_model, _l0)
+			let p = point_on_line(pull.line, hit_model
+				? model_p.to(_v2).transform(cur_inv_model) : null, ray, _v0)
 			if (!p)
 				return
 
 			let delta_line = p.to(_v1).sub(pull.origin)
 			let delta = sign(delta_line.dot(pull.face.plane().normal)) * delta_line.len()
 
-			ref_line.set(pull.origin, p)
-			ref_line.visible = hit_model
-			ref_line.update()
-
-			ref_point.set(p)
-			ref_point.snap = hit_model ? model_p.snap : null
-			ref_point.visible = hit_model
-			ref_point.update()
-
-			e.tooltip = hit_model
-				? snap_tooltips[model_p.snap || model_p.line_snap]
-					|| model_p.tooltip
-				: ''
+			show_drag_helpers(
+				_v1.set(pull.origin).transform(cur_model),
+				_v2.set(p).transform(cur_model),
+				hit_model ? model_p : null)
 
 			// replace the last step's moves.
 			rewind_undo(pull_undo_start)
@@ -2400,7 +2591,9 @@ function model3_editor(e) {
 
 		function start() {
 			start_undo()
-			pull = cur_comp.start_pull(hit_p)
+			let p = hit_p.clone().transform(cur_inv_model)
+			p.face = hit_p.face
+			pull = cur_comp.start_pull(p)
 			pull_undo_start = undo_stack.length
 			update()
 		}
@@ -2421,12 +2614,7 @@ function model3_editor(e) {
 
 		function finish() {
 			pull = null
-			e.tooltip = ''
-			ref_point.visible = false
-			ref_point.update()
-			ref_line.visible = false
-			ref_line.update()
-			update()
+			hide_drag_helpers()
 		}
 
 		tools.pull.cancel = cancel
